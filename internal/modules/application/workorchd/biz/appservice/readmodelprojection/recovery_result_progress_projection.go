@@ -124,8 +124,8 @@ func workspaceProgressItems(snapshot readmodelcore.WorkspaceSnapshotState, label
 
 // source: run_outcome.go
 
-func mapRunOutcome(snapshot readmodelcore.RunSnapshotState) projectioncontract.RunOutcome {
-	ret := projectioncontract.RunOutcome{
+func mapRunOutcome(snapshot readmodelcore.RunSnapshotState) projectioncontract.RunDisplayOutcome {
+	ret := projectioncontract.RunDisplayOutcome{
 		RunID:    snapshot.Run.ID,
 		State:    snapshot.Run.State,
 		RawState: snapshot.Run.State,
@@ -167,7 +167,7 @@ func latestTerminalRunSnapshotResult(snapshot readmodelcore.RunSnapshotState) *p
 
 // source: run_outcome_state.go
 
-func applyRunOutcomeTerminalRunState(ret *projectioncontract.RunOutcome, snapshot readmodelcore.RunSnapshotState) {
+func applyRunOutcomeTerminalRunState(ret *projectioncontract.RunDisplayOutcome, snapshot readmodelcore.RunSnapshotState) {
 	switch common.RunState(snapshot.Run.State) {
 	case common.RunStateCompleted:
 		ret.State = "failed"

@@ -2,8 +2,11 @@ package runtime
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/json"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/muidea/workorch/internal/modules/kernel/orchestrator/biz/internal/governancecheck"
 	"github.com/muidea/workorch/internal/pkg/common"
@@ -74,11 +77,89 @@ func (c *authorityComponent) bindGovernanceRequest(ctx context.Context, workspac
 }
 
 func (c *authorityComponent) commitGovernanceResolution(ctx context.Context, resolution runtimecontract.RuntimeGovernanceResolution) (EvidenceCommitResult, error) {
+	resolution = resolution.Normalized()
+	var lease *runtimecontract.RuntimeDriveLease
+	if resolution.Outcome == runtimecontract.RuntimeGovernanceResolutionOutcomeContinue || resolution.Outcome == runtimecontract.RuntimeGovernanceResolutionOutcomeFail {
+		signature, err := RuntimeGovernanceResolutionDriveLeaseSignature(resolution)
+		if err != nil {
+			return EvidenceCommitResult{}, err
+		}
+		lease = &runtimecontract.RuntimeDriveLease{
+			WorkspaceID:      resolution.WorkspaceID,
+			RunID:            resolution.RunID,
+			Reason:           runtimecontract.RuntimeDriveLeaseReasonDeliveryRetry,
+			FailureSignature: signature,
+			DueAt:            time.Now().UTC().Add(time.Second).Format(time.RFC3339Nano),
+		}
+	}
+	return c.commitGovernanceResolutionWithContinuationLease(ctx, resolution, lease)
+}
+
+// RuntimeGovernanceResolutionDriveLeaseSignature binds the atomic SM-4
+// successor to the exact persisted governance resolution. Continue uses the
+// Run lifecycle handoff identity; Fail uses a terminal-delivery identity and
+// never authorizes a Run continuation.
+func RuntimeGovernanceResolutionDriveLeaseSignature(resolution runtimecontract.RuntimeGovernanceResolution) (string, error) {
+	resolution = resolution.Normalized()
+	if err := resolution.Validate(); err != nil {
+		return "", err
+	}
+	if resolution.Outcome == runtimecontract.RuntimeGovernanceResolutionOutcomeFail {
+		return fmt.Sprintf(
+			"terminal-delivery/governance-resolution/%s/%s/%s/%s/%s",
+			resolution.AuthoritySnapshotID,
+			resolution.DispatchID,
+			resolution.TicketID,
+			resolution.ApprovalID,
+			resolution.ResolutionID,
+		), nil
+	}
+	return RuntimeGovernanceContinuationDriveLeaseSignature(resolution)
+}
+
+// RuntimeGovernanceContinuationDriveLeaseSignature is the canonical opaque
+// SM-4 identity for the durable successor sealed with a governance
+// continuation. It intentionally excludes mutable aggregate counters while
+// retaining the exact resolution and governance fence.
+func RuntimeGovernanceContinuationDriveLeaseSignature(resolution runtimecontract.RuntimeGovernanceResolution) (string, error) {
+	resolution = resolution.Normalized()
+	if err := resolution.Validate(); err != nil {
+		return "", err
+	}
+	if resolution.Outcome != runtimecontract.RuntimeGovernanceResolutionOutcomeContinue {
+		return "", fmt.Errorf("%w: governance rejection cannot authorize a continuation drive lease", common.ErrInvalidArgument)
+	}
+	kind := "decision_continuation"
+	if resolution.ApprovalID != "" {
+		kind = "approval_continuation"
+	}
+	fenceID := "runtime-governance/" + resolution.AuthoritySnapshotID + "/" + resolution.DispatchID
+	return fmt.Sprintf(
+		"lifecycle-owner-delivery/%s/%s/%s/%s/%s/%s/%s",
+		kind,
+		resolution.AuthoritySnapshotID,
+		resolution.DispatchID,
+		resolution.TicketID,
+		resolution.ApprovalID,
+		resolution.ResolutionID,
+		fenceID,
+	), nil
+}
+
+func (c *authorityComponent) commitGovernanceResolutionWithContinuationLease(
+	ctx context.Context,
+	resolution runtimecontract.RuntimeGovernanceResolution,
+	continuationLease *runtimecontract.RuntimeDriveLease,
+) (EvidenceCommitResult, error) {
 	if c == nil || c.repository == nil {
 		return EvidenceCommitResult{}, common.ErrInvalidArgument
 	}
 	resolution = resolution.Normalized()
 	if err := resolution.Validate(); err != nil {
+		return EvidenceCommitResult{}, err
+	}
+	leaseTemplate, err := validateGovernanceContinuationDriveLeaseTemplate(resolution, continuationLease)
+	if err != nil {
 		return EvidenceCommitResult{}, err
 	}
 	aggregate, err := c.repository.Load(ctx, resolution.WorkspaceID, resolution.RunID)
@@ -90,7 +171,16 @@ func (c *authorityComponent) commitGovernanceResolution(ctx context.Context, res
 	}
 	eventID := resolution.EventID()
 	if containsString(aggregate.ProcessedEventIDs, eventID) {
-		return EvidenceCommitResult{Disposition: CommitDispositionDuplicate, Aggregate: aggregate}, nil
+		switch persistedRuntimeGovernanceResolutionDisposition(aggregate, resolution) {
+		case CommitDispositionDuplicate:
+			return EvidenceCommitResult{Disposition: CommitDispositionDuplicate, Aggregate: aggregate}, nil
+		case CommitDispositionStale:
+			// A replay of an already-persisted stale diagnostic remains stale and
+			// never enters lifecycle continuation delivery.
+			return EvidenceCommitResult{Disposition: CommitDispositionStale, Aggregate: aggregate}, nil
+		default:
+			return EvidenceCommitResult{Aggregate: aggregate}, fmt.Errorf("%w: processed governance resolution payload does not match persisted history", common.ErrConflict)
+		}
 	}
 	expectedRevision := aggregate.StateRevision
 	if resolution.AuthoritySnapshotID != aggregate.Decision.AuthoritySnapshot.ID {
@@ -98,9 +188,19 @@ func (c *authorityComponent) commitGovernanceResolution(ctx context.Context, res
 		aggregate.Diagnostics = append(aggregate.Diagnostics, runtimecontract.RuntimeDiagnosticRecord{
 			EventID: eventID, AuthoritySnapshotID: resolution.AuthoritySnapshotID,
 			CurrentSnapshotID: aggregate.Decision.AuthoritySnapshot.ID, DispatchID: resolution.DispatchID,
-			Reason: "governance resolution belongs to a stale authority snapshot",
+			Reason: runtimeGovernanceStaleDiagnosticReason(resolution),
 		})
 		aggregate.StateRevision++
+		if aggregate.DriveLease != nil && aggregate.DriveLease.State == runtimecontract.RuntimeDriveLeaseScheduled {
+			// A stale external resolution is diagnostic-only and must not strand an
+			// already-authoritative continuation successor. Reissue the same stable
+			// identity at the new aggregate revision; an older mounted timer may only
+			// adopt this newer generation, never claim through its stale fence.
+			lease := aggregate.DriveLease.Clone()
+			lease.AggregateRevision = aggregate.StateRevision
+			lease.RecoveryGeneration++
+			aggregate.DriveLease = &lease
+		}
 		if err := c.transitions.Commit(ctx, aggregate, expectedRevision); err != nil {
 			return EvidenceCommitResult{}, err
 		}
@@ -122,13 +222,7 @@ func (c *authorityComponent) commitGovernanceResolution(ctx context.Context, res
 	if !governancecheck.DependencyMatches(dependency.Kind, dependency.SubjectRef, resolution.DependencyKind, resolution.SubjectRef) {
 		return EvidenceCommitResult{}, fmt.Errorf("%w: governance resolution dependency does not match the sealed candidate", common.ErrConflict)
 	}
-	bound := false
-	for _, request := range aggregate.GovernanceRequests {
-		if governancecheck.RequestBindsResolution(request, resolution) {
-			bound = true
-			break
-		}
-	}
+	bound := runtimeGovernanceRequestBindsResolution(aggregate.GovernanceRequests, resolution)
 	if !bound {
 		return EvidenceCommitResult{}, fmt.Errorf("%w: governance resolution is not bound to the governed ticket", common.ErrConflict)
 	}
@@ -222,7 +316,18 @@ func (c *authorityComponent) commitGovernanceResolution(ctx context.Context, res
 		}
 		aggregate.ActiveDispatch = &resume
 	}
+	nextGeneration := uint64(1)
+	if aggregate.DriveLease != nil {
+		nextGeneration = aggregate.DriveLease.RecoveryGeneration + 1
+	}
 	aggregate.StateRevision++
+	if leaseTemplate != nil {
+		lease := leaseTemplate.Clone()
+		lease.AggregateRevision = aggregate.StateRevision
+		lease.RecoveryGeneration = nextGeneration
+		lease.State = runtimecontract.RuntimeDriveLeaseScheduled
+		aggregate.DriveLease = &lease
+	}
 	if err := aggregate.Validate(); err != nil {
 		return EvidenceCommitResult{}, err
 	}
@@ -230,6 +335,98 @@ func (c *authorityComponent) commitGovernanceResolution(ctx context.Context, res
 		return EvidenceCommitResult{}, err
 	}
 	return EvidenceCommitResult{Disposition: CommitDispositionCommitted, DispatchCompleted: true, Aggregate: aggregate}, nil
+}
+
+func persistedRuntimeGovernanceResolutionDisposition(aggregate RuntimeAggregate, resolution runtimecontract.RuntimeGovernanceResolution) CommitDisposition {
+	resolution = resolution.Normalized()
+	if aggregate.Facts.WorkspaceID != resolution.WorkspaceID || aggregate.Facts.RunID != resolution.RunID {
+		return ""
+	}
+	matchedRequest := runtimeGovernanceRequestBindsResolution(aggregate.GovernanceRequests, resolution)
+	matchedRecord := false
+	for _, record := range aggregate.GovernanceResolutions {
+		if record.ResolutionID == resolution.ResolutionID && record.TicketID == resolution.TicketID && record.ApprovalID == resolution.ApprovalID &&
+			strings.TrimSpace(record.AuthoritySnapshotID) == resolution.AuthoritySnapshotID && strings.TrimSpace(record.DispatchID) == resolution.DispatchID &&
+			record.Outcome == resolution.Outcome {
+			matchedRecord = true
+			break
+		}
+	}
+	if matchedRequest && matchedRecord && persistedRuntimeGovernanceResolutionEvidenceMatches(aggregate, resolution) {
+		return CommitDispositionDuplicate
+	}
+	for _, diagnostic := range aggregate.Diagnostics {
+		if diagnostic.EventID == resolution.EventID() && strings.TrimSpace(diagnostic.AuthoritySnapshotID) == resolution.AuthoritySnapshotID &&
+			strings.TrimSpace(diagnostic.DispatchID) == resolution.DispatchID && diagnostic.Reason == runtimeGovernanceStaleDiagnosticReason(resolution) {
+			return CommitDispositionStale
+		}
+	}
+	return ""
+}
+
+func runtimeGovernanceRequestBindsResolution(values []runtimecontract.RuntimeGovernanceRequestRecord, resolution runtimecontract.RuntimeGovernanceResolution) bool {
+	for _, request := range values {
+		if governancecheck.RequestBindsResolution(request, resolution) {
+			return true
+		}
+	}
+	return false
+}
+
+func persistedRuntimeGovernanceResolutionEvidenceMatches(aggregate RuntimeAggregate, resolution runtimecontract.RuntimeGovernanceResolution) bool {
+	values := aggregate.Facts.Evidence.Accepted
+	wantFailureClass := runtimecontract.FailureClass("")
+	wantFailureMessage := ""
+	if resolution.Outcome == runtimecontract.RuntimeGovernanceResolutionOutcomeFail {
+		values = aggregate.Facts.Evidence.Rejected
+		wantFailureClass = runtimecontract.FailureClassGovernanceRejected
+		wantFailureMessage = resolution.Summary
+	}
+	wantID := common.EvidenceRecordID(resolution.EventID())
+	wantSource := "governance-resolution/" + string(resolution.ResolutionID)
+	for _, fact := range values {
+		if fact.ID == wantID && fact.Kind == runtimecontract.EvidenceKindGovernance && fact.SubjectRef == resolution.SubjectRef &&
+			fact.SourceRef == wantSource && fact.AuthoritySnapshotID == resolution.AuthoritySnapshotID && fact.DispatchID == resolution.DispatchID &&
+			fact.Summary == resolution.Summary && fact.FailureClass == wantFailureClass && fact.FailureMessage == wantFailureMessage &&
+			sameRuntimeStrings(fact.EvidenceRefs, resolution.EvidenceRefs) {
+			return true
+		}
+	}
+	return false
+}
+
+func runtimeGovernanceStaleDiagnosticReason(resolution runtimecontract.RuntimeGovernanceResolution) string {
+	resolution = resolution.Normalized()
+	payload, _ := json.Marshal(resolution)
+	hash := sha256.Sum256(payload)
+	return fmt.Sprintf("governance resolution belongs to a stale authority snapshot; payload-sha256=%x", hash[:])
+}
+
+func validateGovernanceContinuationDriveLeaseTemplate(
+	resolution runtimecontract.RuntimeGovernanceResolution,
+	requested *runtimecontract.RuntimeDriveLease,
+) (*runtimecontract.RuntimeDriveLease, error) {
+	if requested == nil {
+		return nil, fmt.Errorf("%w: governance resolution requires an atomic drive lease", common.ErrInvalidArgument)
+	}
+	wantSignature, err := RuntimeGovernanceResolutionDriveLeaseSignature(resolution)
+	if err != nil {
+		return nil, err
+	}
+	lease := requested.Normalized()
+	if lease.WorkspaceID != resolution.WorkspaceID || lease.RunID != resolution.RunID ||
+		lease.Reason != runtimecontract.RuntimeDriveLeaseReasonDeliveryRetry || lease.FailureSignature != wantSignature ||
+		lease.DueAt == "" || lease.AggregateRevision != 0 || lease.RecoveryGeneration != 0 || lease.State != "" {
+		return nil, fmt.Errorf("%w: governance continuation drive lease template is not exact", common.ErrInvalidArgument)
+	}
+	probe := lease.Clone()
+	probe.AggregateRevision = 1
+	probe.RecoveryGeneration = 1
+	probe.State = runtimecontract.RuntimeDriveLeaseScheduled
+	if err := probe.Validate(); err != nil {
+		return nil, err
+	}
+	return &lease, nil
 }
 
 func buildGovernanceResumeDispatch(aggregate RuntimeAggregate, binding runtimecontract.RuntimeOperationGovernanceBinding) (SealedDispatch, error) {

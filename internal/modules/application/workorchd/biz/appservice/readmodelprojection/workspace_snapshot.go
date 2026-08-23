@@ -23,12 +23,14 @@ func workspaceSnapshotFromModels(input WorkspaceSnapshotModelInput) readmodelcor
 	ret.LLMUsageTraces = mapLLMUsageTracesFromEventRecords(mapEventRecords(input.LLMUsageEventRecords), "")
 	ret.LLMContextBudgetSummary = summarizeLLMContextBudgets(ret.LLMContextBudgets)
 	ret.LLMUsageSummary = summarizeLLMUsage(ret.LLMUsageTraces)
-	ret.Acceptance = mapWorkspaceAcceptanceProjection(ret)
+	ret.Acceptance = mapAcceptanceProjection(input.ProjectionRun)
 	ret.TaskProgress = mapLocalizedWorkspaceTaskProgress(ret)
-	ret.Outcome = mapWorkspaceOutcome(ret)
-	ret.Result = workspaceSnapshotResultByID(ret.Results, ret.Outcome.ResultID)
+	applyRuntimeProgress(&ret.TaskProgress, input.ProjectionRun)
+	ret.DisplayOutcome = mapWorkspaceOutcome(ret)
+	ret.Result = workspaceSnapshotResultByID(ret.Results, ret.DisplayOutcome.ResultID)
 	ret.RunHeartbeat = mapRunHeartbeat(ret)
 	ret.ConvergenceStatus = mapWorkspaceConvergenceStatus(ret)
+	ret = normalizeWorkspaceGovernanceProjection(ret)
 	ret = workspaceSnapshotWithContextBundle(ret)
 	return ret
 }

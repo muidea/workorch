@@ -1127,7 +1127,7 @@ func TestAcceptedReceiptResourceChangeRetiresPrerequisitesButKeepsRemainingDispa
 		len(committed.Aggregate.ActiveDispatch.CompletedOperationIDs) != 1 || committed.Aggregate.ActiveDispatch.CompletedOperationIDs[0] != "write-1" ||
 		len(committed.Aggregate.Facts.Evidence.Accepted) != 1 || len(committed.Aggregate.Facts.Evidence.Rejected) != 0 ||
 		committed.Aggregate.Facts.Repair.RepairAttempts != 0 || committed.Aggregate.Facts.Recovery.PrerequisiteRefreshes != 0 ||
-		committed.Aggregate.Decision.State != runtimecontract.ConvergenceStateNeedStateChange || len(committed.Aggregate.Facts.FreshnessReacquireCoverage) != 0 {
+		committed.Aggregate.Decision.State != runtimecontract.ConvergenceStateNeedStateChange {
 		t.Fatalf("accepted resource change did not preserve sealed dispatch: %+v", committed.Aggregate)
 	}
 	if len(committed.Aggregate.Facts.Prerequisites.Pending) != 1 || len(committed.Aggregate.Facts.Resources.OperationAdmissibilities) != 0 ||

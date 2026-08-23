@@ -15,7 +15,7 @@ func (c *RuntimeController) scheduleDriveLease(ctx context.Context, workspaceID 
 	if c == nil || c.driveDelivery == nil {
 		return RuntimeAggregate{}, runtimecontract.RuntimeDriveLease{}, false, common.ErrInvalidArgument
 	}
-	return c.driveDelivery.scheduleDriveLease(ctx, workspaceID, runID, requested)
+	return c.driveDelivery.scheduleDriveLease(ctx, workspaceID, runID, requested, 0)
 }
 
 func (c *RuntimeController) claimDriveLease(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, requested runtimecontract.RuntimeDriveLease, now string) (RuntimeAggregate, runtimecontract.RuntimeDriveLease, bool, error) {

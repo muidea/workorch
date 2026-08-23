@@ -6,6 +6,6 @@ import (
 )
 
 // RunSnapshotState is the application-private instantiation of the canonical
-// snapshot layout. appmodelcore.Run may retain private RuntimeState and must be
-// projected before crossing a protocol boundary.
+// snapshot layout. Runtime aggregate input is projected before this bounded
+// application read model is constructed and is never retained here.
 type RunSnapshotState projectioncontract.RunSnapshotOf[appmodelcore.Workspace, appmodelcore.Run]

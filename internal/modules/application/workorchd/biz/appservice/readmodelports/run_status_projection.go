@@ -34,7 +34,7 @@ func projectRunStatus(item *runmodel.Run, related runStatusRelatedModels) projec
 		ret.CurrentStepState = string(currentStep.State)
 	}
 	runView := runtimecore.MapRun(item)
-	ret.Acceptance = readmodelprojection.RunProjection().Acceptance(runView)
+	ret.Acceptance = readmodelprojection.RunProjection().Acceptance(item)
 	ret.ConvergenceStatus = readmodelprojection.RunProjection().Convergence(readmodelcore.RunSnapshotState{
 		Run:        runView,
 		Steps:      readmodelprojection.RunProjection().Steps(related.steps),

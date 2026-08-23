@@ -2,6 +2,7 @@ package orchestrator
 
 import (
 	"context"
+	"time"
 
 	runtime "github.com/muidea/workorch/internal/modules/kernel/orchestrator/biz/runtime"
 	"github.com/muidea/workorch/internal/pkg/common"
@@ -110,11 +111,30 @@ func runtimeTestControllerSealGovernanceDispatch(controller *runtime.RuntimeCont
 }
 
 func runtimeTestControllerCommitGovernanceResolution(controller *runtime.RuntimeController, ctx context.Context, resolution runtimecontract.RuntimeGovernanceResolution) (runtime.EvidenceCommitResult, error) {
-	result, err := controller.ApplyInternalEvent(ctx, runtime.RuntimeInternalEvent{Kind: runtime.RuntimeInternalEventGovernanceResolutionObserved, Scope: runtime.RuntimeInternalEventScope{WorkspaceID: resolution.WorkspaceID, RunID: resolution.RunID}, Transaction: &runtime.RuntimeInternalTransactionPayload{GovernanceResolution: &resolution}})
+	result, err := controller.ApplyInternalEvent(ctx, runtime.RuntimeInternalEvent{Kind: runtime.RuntimeInternalEventGovernanceResolutionObserved, Scope: runtime.RuntimeInternalEventScope{WorkspaceID: resolution.WorkspaceID, RunID: resolution.RunID}, Transaction: runtimeGovernanceResolutionTransactionForTest(resolution)})
 	if result.Evidence == nil {
 		return runtime.EvidenceCommitResult{Aggregate: result.Aggregate}, err
 	}
 	return *result.Evidence, err
+}
+
+func runtimeGovernanceResolutionTransactionForTest(resolution runtimecontract.RuntimeGovernanceResolution) *runtime.RuntimeInternalTransactionPayload {
+	transaction := &runtime.RuntimeInternalTransactionPayload{GovernanceResolution: &resolution}
+	if resolution.Outcome != runtimecontract.RuntimeGovernanceResolutionOutcomeContinue && resolution.Outcome != runtimecontract.RuntimeGovernanceResolutionOutcomeFail {
+		return transaction
+	}
+	signature, err := runtime.RuntimeGovernanceResolutionDriveLeaseSignature(resolution)
+	if err != nil {
+		return transaction
+	}
+	transaction.GovernanceContinuationDriveLease = &runtimecontract.RuntimeDriveLease{
+		WorkspaceID:      resolution.WorkspaceID,
+		RunID:            resolution.RunID,
+		Reason:           runtimecontract.RuntimeDriveLeaseReasonDeliveryRetry,
+		FailureSignature: signature,
+		DueAt:            time.Now().UTC().Add(time.Second).Format(time.RFC3339Nano),
+	}
+	return transaction
 }
 
 func runtimeTestControllerCommitOperationReceipt(controller *runtime.RuntimeController, ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, dispatchID string, fence uint64, receipt runtimecontract.RuntimeOperationReceipt) (runtime.RuntimeAggregate, runtimecontract.RuntimeOperationReceipt, error) {

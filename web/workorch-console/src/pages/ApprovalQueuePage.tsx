@@ -5,8 +5,16 @@ import type { ProColumns } from '../components/proCompat';
 import { workorchApi } from '../api';
 import { modelLabels } from '../utils/constants';
 import { useSSE } from '../hooks';
-import { errorMessage, mergeById, compactJSON, stateTag } from '../utils';
-import type { Approval, ApprovalPage, Decision } from '../types';
+import { errorMessage, compactJSON, stateTag } from '../utils';
+import {
+  governanceResourceKey,
+  governanceContinuationGuidance,
+  isCanonicalApprovalMutationTarget,
+  mergeGovernanceResources,
+  readGovernanceSnapshots,
+  requireCanonicalApprovalMutationTargets
+} from '../governanceMutationTarget';
+import type { Approval, ApprovalPage, Decision, WorkspaceSnapshot } from '../types';
 
 const governancePageLimit = 20;
 
@@ -27,12 +35,13 @@ export function ApprovalQueuePage() {
   const [approvalCursorAfterId, setApprovalCursorAfterId] = useState<string | undefined>(undefined);
   const [approvalHasMore, setApprovalHasMore] = useState(false);
   const [approvalLoading, setApprovalLoading] = useState(false);
+  const [approvalSnapshots, setApprovalSnapshots] = useState<Map<string, WorkspaceSnapshot>>(new Map());
   const [approvalForm] = Form.useForm<{ operator?: string; comment?: string }>();
   const actionLabel = (action: 'approve' | 'reject') => action === 'approve' ? '已批准' : '已拒绝';
 
   function applyApprovalPage(page: ApprovalPage, append: boolean) {
     const items = (page.approvals ?? []).sort((left, right) => Number(left.state !== 'pending') - Number(right.state !== 'pending'));
-    setApprovalRecords((current) => mergeById(current, items, append));
+    setApprovalRecords((current) => mergeGovernanceResources(current, items, append));
     setApprovalCursorAfterId(page.nextCursorAfterId || items.at(-1)?.id);
     setApprovalHasMore(Boolean(page.hasMore));
   }
@@ -42,6 +51,8 @@ export function ApprovalQueuePage() {
     try {
       const page = await workorchApi.listApprovalPage({ cursorAfterId, limit: governancePageLimit });
       applyApprovalPage(page, Boolean(cursorAfterId));
+      const snapshots = await readGovernanceSnapshots(page.approvals ?? [], workorchApi.readWorkspaceSnapshot);
+      setApprovalSnapshots((current) => Boolean(cursorAfterId) ? new Map([...current, ...snapshots]) : snapshots);
     } finally {
       setApprovalLoading(false);
     }
@@ -67,6 +78,7 @@ export function ApprovalQueuePage() {
     approvalForm.resetFields();
     approvalForm.setFieldsValue({ operator: 'console' });
     try {
+      await requireCanonicalApprovalMutationTargets([item], workorchApi.readWorkspaceSnapshot);
       const [approvalDetail, decisions] = await Promise.all([
         workorchApi.readApproval(item.workspaceId, item.id),
         workorchApi.listDecisionPage({ workspaceId: item.workspaceId, runId: item.runId, limit: governancePageLimit })
@@ -88,6 +100,7 @@ export function ApprovalQueuePage() {
     setApprovalSubmitting(true);
     try {
       await approvalForm.validateFields();
+      await requireCanonicalApprovalMutationTargets([approvalTarget.item], workorchApi.readWorkspaceSnapshot);
       if (approvalTarget.action === 'approve') {
         await workorchApi.approveApproval(approvalTarget.item.workspaceId, approvalTarget.item.id);
       } else {
@@ -96,7 +109,7 @@ export function ApprovalQueuePage() {
       const target = approvalTarget;
       setApprovalTarget(undefined);
       approvalForm.resetFields();
-      message.success(`审批${actionLabel(target.action)}。如关联运行仍处于可恢复阻塞状态，请使用“恢复运行”。`);
+      message.success(`审批${actionLabel(target.action)}。${governanceContinuationGuidance}`);
       void loadApprovalPage().catch((error: unknown) => message.error(errorMessage(error)));
     } catch (error) {
       message.error(errorMessage(error));
@@ -106,33 +119,29 @@ export function ApprovalQueuePage() {
   };
 
   const batchResolve = async (action: 'approve' | 'reject') => {
-    const approvalIds = selectedApprovalKeys.map(String);
-    if (approvalIds.length === 0) {
+    if (selectedApprovalKeys.length === 0) {
       message.warning('请先选择待审批项');
       return;
     }
     try {
-      const selected = approvalRecords.filter((item) => approvalIds.includes(item.id));
-      const byWorkspace = new Map<string, string[]>();
-      for (const item of selected) {
-        const workspaceId = item.workspaceId;
-        if (!workspaceId) {
-          continue;
-        }
-        const items = byWorkspace.get(workspaceId) ?? [];
-        items.push(item.id);
-        byWorkspace.set(workspaceId, items);
+      const selectedKeys = new Set(selectedApprovalKeys.map(String));
+      const selected = approvalRecords.filter((item) => selectedKeys.has(governanceResourceKey(item)));
+      if (selected.length !== selectedKeys.size) {
+        throw new Error('所选审批已不在当前列表中；未提交任何变更，请刷新后重试');
       }
-      for (const [workspaceId, ids] of byWorkspace) {
-        await workorchApi.batchResolveApprovals(workspaceId, ids, action);
-      }
-      message.success(`${approvalIds.length} 个审批项${actionLabel(action)}。如关联运行仍处于可恢复阻塞状态，请使用“恢复运行”。`);
+      await requireCanonicalApprovalMutationTargets(selected, workorchApi.readWorkspaceSnapshot);
+      const workspaceIds = [...new Set(selected.map((item) => item.workspaceId))];
+      const approvalIds = selected.map((item) => item.id);
+      await workorchApi.batchResolveApprovals(workspaceIds.length === 1 ? workspaceIds[0] : undefined, approvalIds, action);
+      message.success(`${approvalIds.length} 个审批项${actionLabel(action)}。${governanceContinuationGuidance}`);
       setSelectedApprovalKeys([]);
       void loadApprovalPage().catch((error: unknown) => message.error(errorMessage(error)));
     } catch (error) {
       message.error(errorMessage(error));
     }
   };
+
+  const approvalIsMutable = (item: Approval) => isCanonicalApprovalMutationTarget(approvalSnapshots.get(item.workspaceId), item);
 
   const columns: ProColumns<Approval>[] = [
     { title: '审批 ID', dataIndex: 'id', copyable: true },
@@ -145,19 +154,21 @@ export function ApprovalQueuePage() {
     {
       title: '操作',
       valueType: 'option',
-      render: (_, item) => item.state === 'pending' ? (
+      render: (_, item) => approvalIsMutable(item) ? (
         <Space wrap>
           <Button size="small" type="primary" onClick={() => void openApprovalResolution(item, 'approve')}>审批确认</Button>
           <Button size="small" danger onClick={() => void openApprovalResolution(item, 'reject')}>拒绝确认</Button>
         </Space>
-      ) : stateTag(item.state)
+      ) : item.state === 'pending'
+        ? <Typography.Text type="secondary">非活动运行阻塞项（只读）</Typography.Text>
+        : stateTag(item.state)
     }
   ];
 
   return (
     <PageContainer
       title="审批队列"
-      subTitle={`处理${modelLabels.approval}事实；Runtime 的唯一用户继续命令为“恢复运行”，审批本身不直接驱动运行。`}
+      subTitle={`处理${modelLabels.approval}事实；${governanceContinuationGuidance}`}
       extra={(
         <Space wrap>
           <Button disabled={selectedApprovalKeys.length === 0} onClick={() => void batchResolve('approve')}>批量批准</Button>
@@ -166,13 +177,13 @@ export function ApprovalQueuePage() {
       )}
     >
       <ProTable<Approval>
-        rowKey="id"
+        rowKey={governanceResourceKey}
         search={false}
         options={false}
         rowSelection={{
           selectedRowKeys: selectedApprovalKeys,
           onChange: setSelectedApprovalKeys,
-          getCheckboxProps: (record) => ({ disabled: record.state !== 'pending' })
+          getCheckboxProps: (record) => ({ disabled: !approvalIsMutable(record) })
         }}
         columns={columns}
         loading={approvalLoading}

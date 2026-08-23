@@ -7,6 +7,7 @@ import { modelLabels, progressKindLabels, recoveryActionLabels, recoveryModeLabe
 import { stateLabel as canonicalStateLabel } from './utils/format';
 import { stateTag as canonicalStateTag } from './utils/ui';
 import { presentWorkspaceRunCommand } from './workspaceRunCommand';
+import { canonicalActiveRunIsGovernanceBlocked, canonicalDefinitionClarification, workspaceBoardExecutionIntentAllowed, workspaceDefinitionClarification } from './governanceMutationTarget';
 
 export { progressKindLabels, recoveryActionLabels, recoveryModeLabels, repairLoopStateLabels, soulBindingStageLabels, stateLabels } from './utils/constants';
 
@@ -121,7 +122,7 @@ export function workspaceProjectionRun(snapshot?: WorkspaceSnapshot) {
   if (activeRun) {
     return activeRun;
   }
-  const outcomeRun = snapshot.runs?.find((item) => item.id === snapshot.outcome?.runId);
+  const outcomeRun = snapshot.runs?.find((item) => item.id === snapshot.displayOutcome?.runId);
   if (outcomeRun) {
     return outcomeRun;
   }
@@ -261,6 +262,9 @@ export function workspaceExecutionPrimaryIntent(snapshot?: WorkspaceSnapshot): W
     return 'restart';
   }
   const activeRun = snapshot?.runs?.find((item) => item.id === activeRunID);
+  if (canonicalDefinitionClarification(snapshot)) {
+    return 'restart';
+  }
   if (isTerminalRunState(activeRun?.state) || activeRun?.runtimeActivation?.disposition === 'fresh_activation_required') {
     return 'restart';
   }
@@ -2020,15 +2024,15 @@ export function primaryAcceptedResult(snapshot?: RunSnapshot) {
 
 export function goalOutcomeSummary(snapshot?: RunSnapshot) {
 	const result = primaryAcceptedResult(snapshot) ?? primaryResult(snapshot);
-	const summary = snapshot?.outcome?.summary || result?.summaryDetail?.goalOutcome || result?.doDAssessment?.summary || result?.summary || snapshot?.run.failureReason;
+	const summary = snapshot?.displayOutcome?.summary || result?.summaryDetail?.goalOutcome || result?.doDAssessment?.summary || result?.summary || snapshot?.run.failureReason;
 	return summary ? String(summary) : '尚未形成可确认的目标成果';
 }
 
 export function goalOutcomeState(snapshot?: RunSnapshot) {
-	if (snapshot?.outcome?.accepted || snapshot?.outcome?.state === 'accepted') {
+	if (snapshot?.displayOutcome?.accepted || snapshot?.displayOutcome?.state === 'accepted') {
 		return <Tag color="green">结果已接受</Tag>;
 	}
-	if (snapshot?.outcome?.state === 'failed') {
+	if (snapshot?.displayOutcome?.state === 'failed') {
 		return <Tag color="red">验收未通过</Tag>;
 	}
 	const result = primaryResult(snapshot);
@@ -2049,11 +2053,11 @@ export function goalOutcomeState(snapshot?: RunSnapshot) {
 }
 
 export function runOutcomeState(snapshot?: RunSnapshot, observability?: RunObservability) {
-  return observability?.outcome?.state || snapshot?.outcome?.state || snapshot?.run.state || 'unknown';
+  return observability?.displayOutcome?.state || snapshot?.displayOutcome?.state || snapshot?.run.state || 'unknown';
 }
 
 export function runRawState(snapshot?: RunSnapshot, observability?: RunObservability) {
-  return observability?.outcome?.rawState || snapshot?.outcome?.rawState || snapshot?.run.state || 'unknown';
+  return observability?.displayOutcome?.rawState || snapshot?.displayOutcome?.rawState || snapshot?.run.state || 'unknown';
 }
 
 export function boundedParagraph(value?: React.ReactNode, options?: { rows?: number; copyText?: string; className?: string }) {
@@ -3128,7 +3132,8 @@ export function workspaceBoardActivationRequest(item: WorkspaceBoardItem): Works
   const goals = item.snapshot.goals ?? [];
   const availableDoDs = readyDoDs(item.snapshot.dods ?? []);
   if (goals.length > 0 && availableDoDs.length > 0) {
-    return { intent: workspaceExecutionPrimaryIntent(item.snapshot) };
+    const intent = workspaceExecutionPrimaryIntent(item.snapshot);
+    return workspaceBoardExecutionIntentAllowed(item.snapshot, intent) ? { intent } : undefined;
   }
 
   return undefined;
@@ -3142,6 +3147,12 @@ export function workspaceBoardActivationHint(item: WorkspaceBoardItem) {
   }
   if (availableDoDs.length === 0) {
     return `当前工作空间尚无可用验收标准，请进入工作空间补齐${modelLabels.dod}后再提交执行`;
+  }
+  if (workspaceDefinitionClarification(item.snapshot)) {
+    return '当前正在等待 Definition 澄清；Board 不提交 Resume/Restart，请进入工作空间修订 Goal/DoD，并从详情页显式 Restart 交由 Workspace owner 判定';
+  }
+  if (canonicalActiveRunIsGovernanceBlocked(item.snapshot)) {
+    return '当前运行正在等待 Decision/Approval owner 收口；请处理治理阻塞并等待 continuation 自动收敛，不要提交 Resume';
   }
   return '当前工作空间无法形成有效执行定义，请进入工作空间核对后再提交执行';
 }

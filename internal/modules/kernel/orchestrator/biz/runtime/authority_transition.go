@@ -290,7 +290,7 @@ func (c *authorityComponent) commitPrerequisite(ctx context.Context, workspaceID
 	// catalog identity, the existing exact binding remains current and ordinary
 	// focus advancement is still valid.
 	facts = aggregate.Facts
-	if !semanticGenerationRetired && len(facts.Prerequisites.Pending) == 0 && len(facts.FreshnessReacquireCoverage) == 0 {
+	if !semanticGenerationRetired && len(facts.Prerequisites.Pending) == 0 {
 		advanced, advanceErr := advanceRuntimeCWIFocus(facts, aggregate.CoverageProofLineage)
 		if advanceErr != nil {
 			return RuntimeAggregate{}, advanceErr

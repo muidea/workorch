@@ -60,8 +60,8 @@ func TestWorkspaceSnapshotFromModelsProjectsBaseWorkspaceView(t *testing.T) {
 	if got.TaskProgress.WorkspaceID != string(workspaceID) || got.TaskProgress.RunID != string(activeRunID) {
 		t.Fatalf("TaskProgress = %+v, want workspace and active run ids", got.TaskProgress)
 	}
-	if got.Outcome.State == "" {
-		t.Fatalf("Outcome = %+v, want populated outcome", got.Outcome)
+	if got.DisplayOutcome.State == "" {
+		t.Fatalf("DisplayOutcome = %+v, want populated display outcome", got.DisplayOutcome)
 	}
 	if got.Acceptance.Summary.AcceptedSlices != 0 || got.Acceptance.Summary.ActiveSlices != 0 || got.Acceptance.CurrentFocus != nil {
 		t.Fatalf("Acceptance = %+v, want empty projection for run without slices", got.Acceptance)

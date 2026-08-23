@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { App as AntApp, Button, Checkbox, Descriptions, Dropdown, Empty, FloatButton, Form, Input, List, Modal, Select, Space, Steps, Tabs, Tag, Typography } from 'antd';
+import { Alert, App as AntApp, Button, Checkbox, Descriptions, Dropdown, Empty, FloatButton, Form, Input, List, Modal, Select, Space, Steps, Tabs, Tag, Typography } from 'antd';
 import { CardGrid, PageContainer, ProCard, ProTable } from '../components/proCompat';
 import type { ProColumns } from '../components/proCompat';
 import { DownOutlined } from '@ant-design/icons';
@@ -8,6 +8,7 @@ import { workorchApi } from '../api';
 import { useSSE } from '../hooks';
 import { modelLabels } from '../utils/constants';
 import * as helpers from '../helpers';
+import { canonicalActiveRunIsGovernanceBlocked, canonicalDefinitionClarification, workspaceDefinitionClarification, workspaceExecutionIntentAllowed } from '../governanceMutationTarget';
 
 type ControlPlaneProps = helpers.ControlPlaneProps;
 type WorkspaceDeleteFormValues = helpers.WorkspaceDeleteFormValues;
@@ -808,6 +809,14 @@ export function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlanePr
     }
     const commandIntent = request.intent || activationIntent;
     const targetWorkspaceId = workspaceId;
+    if (!workspaceExecutionIntentAllowed(snapshot, commandIntent)) {
+      message.warning(workspaceDefinitionClarification(snapshot)
+        ? commandIntent === 'resume'
+          ? 'Definition clarification 不能通过 Resume 绕过；请修订 Goal/DoD，然后由用户显式 Restart 交给 owner 判定'
+          : 'pre-seal Definition clarification 尚未形成可替换的 Run；请先修订 Goal/DoD，Restart 未提交'
+        : '当前活动 Run 正在等待 Decision/Approval owner 收口：请处理治理阻塞并等待 continuation 自动收敛；Resume 未提交');
+      return;
+    }
     let prepareOwnerState: Promise<unknown> = Promise.resolve();
     if (commandIntent === 'restart') {
       const selectedModelId = request.llmTarget?.modelId?.trim() || activationReadyTarget?.modelId;
@@ -898,6 +907,14 @@ export function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlanePr
   };
 
   const requestWorkspaceActivation = (intent: 'resume' | 'restart' = 'resume') => {
+    if (!workspaceExecutionIntentAllowed(snapshot, intent)) {
+      message.warning(workspaceDefinitionClarification(snapshot)
+        ? intent === 'resume'
+          ? 'Definition clarification 不能通过 Resume 绕过；请修订 Goal/DoD，然后由用户显式 Restart 交给 owner 判定'
+          : 'pre-seal Definition clarification 尚未形成可替换的 Run；请先修订 Goal/DoD，Restart 未提交'
+        : '当前活动 Run 正在等待 Decision/Approval owner 收口：请处理治理阻塞并等待 continuation 自动收敛；Resume 未提交');
+      return;
+    }
     setActivationIntent(intent);
     activationForm.resetFields();
     if (intent === 'restart') {
@@ -933,6 +950,20 @@ export function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlanePr
     setEditingDoD(dod);
     dodForm.setFieldsValue({ items: dod?.items?.join('\n') || '' });
     setDoDDefinitionOpen(true);
+  };
+
+  const openDefinitionRevision = () => {
+    const goal = goals[0];
+    if (goal) {
+      openGoalDefinition(goal);
+      return;
+    }
+    const dod = readyDoDs[0] ?? dods[0];
+    if (dod) {
+      openDoDDefinition(dod);
+      return;
+    }
+    openGoalDefinition();
   };
 
   const openGoalDoDQualityCheck = async (goal?: Goal, dod?: DoD) => {
@@ -988,6 +1019,10 @@ export function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlanePr
   const activeRun = snapshot?.workspace.activeRunId
     ? snapshot.runs?.find((item) => item.id === snapshot.workspace.activeRunId)
     : undefined;
+  const definitionClarificationDecision = workspaceDefinitionClarification(snapshot);
+  const definitionClarification = definitionClarificationDecision?.definitionClarification;
+  const runtimeDefinitionReplacementAvailable = Boolean(canonicalDefinitionClarification(snapshot));
+  const activeRunGovernanceBlocked = canonicalActiveRunIsGovernanceBlocked(snapshot);
   const primaryExecutionIntent = helpers.workspaceExecutionPrimaryIntent(snapshot);
   const activeRunRequiresFreshActivation = activeRun?.runtimeActivation?.disposition === 'fresh_activation_required';
   const activeRunSchemaTransition = activeRunRequiresFreshActivation && activeRun.runtimeActivation?.reason === 'schema_unsupported'
@@ -1048,12 +1083,22 @@ export function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlanePr
             {activationTracking ? <Tag color="processing">后台跟踪中</Tag> : null}
           </div>
           <div className="workspace-header-actions-main">
-            <Button type="primary" disabled={!workspaceId} onClick={() => requestWorkspaceActivation(primaryExecutionIntent)}>
-              {primaryExecutionIntent === 'restart'
-                ? `创建新执行${activeRunSchemaTransition ? `（${activeRunSchemaTransition}）` : ''}`
-                : '恢复当前执行'}
+            <Button
+              type="primary"
+              disabled={!workspaceId || (activeRunGovernanceBlocked && !definitionClarification)}
+              onClick={() => definitionClarification && !runtimeDefinitionReplacementAvailable
+                ? openDefinitionRevision()
+                : requestWorkspaceActivation(definitionClarification ? 'restart' : primaryExecutionIntent)}
+            >
+              {definitionClarification
+                ? runtimeDefinitionReplacementAvailable ? '显式 Restart（由 owner 校验）' : '修订 Definition'
+                : activeRunGovernanceBlocked
+                  ? '等待治理 Owner 收口'
+                  : primaryExecutionIntent === 'restart'
+                    ? `创建新执行${activeRunSchemaTransition ? `（${activeRunSchemaTransition}）` : ''}`
+                    : '恢复当前执行'}
             </Button>
-            {primaryExecutionIntent === 'resume' ? (
+            {primaryExecutionIntent === 'resume' && !definitionClarification ? (
               <Button disabled={!workspaceId} onClick={() => requestWorkspaceActivation('restart')}>创建新执行</Button>
             ) : null}
             <Dropdown
@@ -1096,6 +1141,43 @@ export function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlanePr
     >
       {snapshot ? (
         <>
+          {definitionClarification ? (
+            <Alert
+              className="workorch-section"
+              type="warning"
+              showIcon
+              message={`Definition clarification · ${definitionClarification.violationOrGapCode}`}
+              description={(
+                <Space direction="vertical" size="small" style={{ width: '100%' }}>
+                  <Descriptions
+                    size="small"
+                    column={{ xs: 1, md: 2 }}
+                    items={[
+                      { key: 'class', label: 'Class', children: stateTag(definitionClarification.class) },
+                      { key: 'bindingState', label: 'Binding state', children: stateTag(definitionClarification.bindingState) },
+                      { key: 'requiredAction', label: 'Required action', children: stateTag(definitionClarification.requiredAction) },
+                      { key: 'gap', label: 'Gap / violation', children: definitionClarification.violationOrGapCode },
+                      { key: 'offendingRefs', label: 'Offending refs', children: compactTags(definitionClarification.offendingRefs ?? [], 8) },
+                      { key: 'definitionRevision', label: 'Blocked definition revision', children: definitionClarification.definitionRevision || '-' },
+                      { key: 'authoritySnapshotId', label: 'Authority snapshot', children: definitionClarification.authoritySnapshotId || '-' },
+                      { key: 'clarificationDispatchId', label: 'Clarification dispatch', children: definitionClarification.clarificationDispatchId || '-' },
+                      { key: 'focusRef', label: 'Focus', children: definitionClarification.focusRef || '-' }
+                    ]}
+                  />
+                  <Typography.Text type="secondary">
+                    {runtimeDefinitionReplacementAvailable
+                      ? '可先修订 Goal/DoD，再由用户显式 Restart；最终 admission 只由 Workspace owner 判定，读模型 freshness 不参与命令许可。此工单不能被解释为通用 answer 或 Resume。'
+                      : '这是 pre-seal Definition clarification；请修订 Goal/DoD。没有 Run 时不能解释为通用 answer、Resume 或 Restart。'}
+                  </Typography.Text>
+                  <Space wrap>
+                    <Button type="primary" onClick={() => openGoalDefinition(goals[0])}>修订 Goal</Button>
+                    <Button onClick={() => openDoDDefinition(readyDoDs[0] ?? dods[0])}>修订 DoD</Button>
+                    {runtimeDefinitionReplacementAvailable ? <Button onClick={() => requestWorkspaceActivation('restart')}>显式 Restart（由 owner 校验）</Button> : null}
+                  </Space>
+                </Space>
+              )}
+            />
+          ) : null}
           <ProCard loading={loading} title={snapshot.workspace.title || snapshot.workspace.id} extra={stateTag(snapshot.workspace.state)}>
             <Descriptions
               column={2}
@@ -1109,7 +1191,10 @@ export function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlanePr
                   label: '运行恢复状态',
                   children: activeRunFreshActivationDetail
                 }] : []),
-                { key: 'outcome', label: '业务结果', children: snapshot.outcome?.runId ? `${snapshot.outcome.runId} / ${stateLabel(snapshot.outcome.state)}` : '-' },
+                { key: 'displayOutcome', label: '展示结果（非 Owner 状态）', children: snapshot.displayOutcome?.runId ? `${snapshot.displayOutcome.runId} / ${stateLabel(snapshot.displayOutcome.state)}` : '-' },
+                { key: 'canonicalRunState', label: 'Run Owner 状态', children: activeRun ? `${activeRun.id} / ${stateLabel(activeRun.state)}` : '-' },
+                { key: 'governanceDisplay', label: '治理等待（只读）', children: snapshot.governanceDisplay?.decisionId || snapshot.governanceDisplay?.approvalId || '-' },
+                ...(snapshot.consistencyDiagnostic?.code ? [{ key: 'consistencyDiagnostic', label: 'Owner 一致性诊断', children: `${snapshot.consistencyDiagnostic.code}: ${snapshot.consistencyDiagnostic.summary || '-'}` }] : []),
                 { key: 'projection', label: '投影摘要', children: projectionStatusSummary(workspaceProjection) },
                 { key: 'description', label: '描述', children: boundedParagraph(snapshot.workspace.description, { rows: 2 }) },
                 { key: 'deliverableDirectory', label: '工作目录', children: boundedParagraph(snapshot.workspace.deliverableDirectory, { rows: 1, copyText: snapshot.workspace.deliverableDirectory }) },
@@ -1174,7 +1259,7 @@ export function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlanePr
                 size="small"
                 items={[
                   { key: 'latestRun', label: '当前运行', children: workspaceProjectionRunLabel(snapshot) },
-                  { key: 'outcome', label: '业务结果', children: snapshot.outcome?.runId ? `${snapshot.outcome.runId} / ${stateLabel(snapshot.outcome.state)}` : '-' }
+                  { key: 'displayOutcome', label: '展示结果（非 Owner 状态）', children: snapshot.displayOutcome?.runId ? `${snapshot.displayOutcome.runId} / ${stateLabel(snapshot.displayOutcome.state)}` : '-' }
                 ]}
               />
               <Descriptions

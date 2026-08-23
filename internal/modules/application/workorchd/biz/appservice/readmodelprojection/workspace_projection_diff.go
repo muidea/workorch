@@ -4,6 +4,7 @@ import (
 	"strings"
 
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
+	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
 )
 
 type workspaceProjectionSections []string
@@ -73,11 +74,11 @@ func appendInitialWorkspaceProjectionSections(sections *workspaceProjectionSecti
 		sections.add("evidence")
 	}
 	if len(candidate.Decisions) > 0 || len(candidate.Approvals) > 0 ||
-		strings.TrimSpace(candidate.Workspace.BlockingTicketID) != "" ||
-		strings.TrimSpace(candidate.Workspace.BlockingApprovalID) != "" {
+		strings.TrimSpace(candidate.GovernanceDisplay.DecisionID) != "" ||
+		strings.TrimSpace(candidate.GovernanceDisplay.ApprovalID) != "" {
 		sections.add("governance")
 	}
-	if strings.TrimSpace(candidate.Outcome.State) != "" || len(candidate.Results) > 0 {
+	if strings.TrimSpace(candidate.DisplayOutcome.State) != "" || len(candidate.Results) > 0 {
 		sections.add("result")
 	}
 	if len(candidate.Artifacts) > 0 || len(candidate.Patches) > 0 {
@@ -95,9 +96,7 @@ func appendInitialWorkspaceProjectionSections(sections *workspaceProjectionSecti
 func appendWorkspaceOverviewDiff(sections *workspaceProjectionSections, previous, candidate readmodelcore.WorkspaceSnapshotState) {
 	if previous.Workspace.Title != candidate.Workspace.Title ||
 		previous.Workspace.State != candidate.Workspace.State ||
-		previous.Workspace.ActiveRunID != candidate.Workspace.ActiveRunID ||
-		previous.Workspace.BlockingTicketID != candidate.Workspace.BlockingTicketID ||
-		previous.Workspace.BlockingApprovalID != candidate.Workspace.BlockingApprovalID {
+		previous.Workspace.ActiveRunID != candidate.Workspace.ActiveRunID {
 		sections.add("overview")
 	}
 }
@@ -137,8 +136,8 @@ func appendWorkspaceActivityDiff(sections *workspaceProjectionSections, previous
 }
 
 func appendWorkspaceGovernanceDiff(sections *workspaceProjectionSections, previous, candidate readmodelcore.WorkspaceSnapshotState) {
-	if previous.Workspace.BlockingTicketID == candidate.Workspace.BlockingTicketID &&
-		previous.Workspace.BlockingApprovalID == candidate.Workspace.BlockingApprovalID &&
+	if governanceDisplayEqual(previous.GovernanceDisplay, candidate.GovernanceDisplay) &&
+		consistencyDiagnosticEqual(previous.ConsistencyDiagnostic, candidate.ConsistencyDiagnostic) &&
 		decisionIdentitiesEqual(previous.Decisions, candidate.Decisions) &&
 		approvalIdentitiesEqual(previous.Approvals, candidate.Approvals) {
 		return
@@ -147,10 +146,22 @@ func appendWorkspaceGovernanceDiff(sections *workspaceProjectionSections, previo
 	sections.add("activity")
 }
 
+func governanceDisplayEqual(left, right projectioncontract.GovernanceDisplay) bool {
+	return left.PromptMode == right.PromptMode && left.RunID == right.RunID &&
+		left.DecisionID == right.DecisionID && left.ApprovalID == right.ApprovalID
+}
+
+func consistencyDiagnosticEqual(left, right *projectioncontract.ConsistencyDiagnostic) bool {
+	if left == nil || right == nil {
+		return left == right
+	}
+	return *left == *right
+}
+
 func appendWorkspaceResultDiff(sections *workspaceProjectionSections, previous, candidate readmodelcore.WorkspaceSnapshotState) {
-	if previous.Outcome.State == candidate.Outcome.State &&
-		previous.Outcome.Summary == candidate.Outcome.Summary &&
-		previous.Outcome.RunID == candidate.Outcome.RunID &&
+	if previous.DisplayOutcome.State == candidate.DisplayOutcome.State &&
+		previous.DisplayOutcome.Summary == candidate.DisplayOutcome.Summary &&
+		previous.DisplayOutcome.RunID == candidate.DisplayOutcome.RunID &&
 		resultIdentitiesEqual(previous.Results, candidate.Results) {
 		return
 	}

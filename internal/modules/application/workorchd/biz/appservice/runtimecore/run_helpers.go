@@ -83,10 +83,6 @@ func MapRun(item *runmodel.Run) appmodelcore.Run {
 		StartedAt:          item.StartedAt,
 		EndedAt:            item.EndedAt,
 	}
-	if item.RuntimeState != nil {
-		state := item.RuntimeState.Clone()
-		ret.RuntimeState = &state
-	}
 	if item.RuntimeBootstrap != nil {
 		selection := item.RuntimeBootstrap.Activation.ProviderSelection.Normalized()
 		if selection.Validate() == nil {

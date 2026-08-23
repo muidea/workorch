@@ -9447,10 +9447,9 @@ func TestDriveRuntimeCompleteSchemaFailureStopsAfterSameContractRetry(t *testing
 	module := newRuntimeDriveTestModule(t, hub)
 	facts := runtimeAggregate(t, 1).Facts
 	facts.Capabilities.GovernanceKinds = []string{runtimecontract.RuntimeBlockKindDecisionRequest}
-	// Live-equivalent shape: an accepted durable operation invalidated mutable
-	// prerequisite observations, so freshness reacquisition debt remains while a
-	// later candidate contract consumes its bounded attempt 0/1 budget.
-	facts.FreshnessReacquireCoverage = append([]common.CoverageWorkItemID(nil), facts.Focus.CoverageWorkItemIDs...)
+	// A later candidate contract consumes its bounded attempt 0/1 budget. Any
+	// resource freshness work is represented by canonical persisted prerequisite
+	// invalidation/observation facts, never by a caller-injected action override.
 	initialized, err := module.InitializeRuntime(ctx, facts, bootstrap.Definition, nil)
 	if err != nil {
 		t.Fatal(err)

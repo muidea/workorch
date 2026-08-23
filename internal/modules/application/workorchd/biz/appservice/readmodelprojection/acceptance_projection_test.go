@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/appmodelcore"
+	runmodel "github.com/muidea/workorch/internal/modules/blocks/run/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
@@ -97,7 +97,7 @@ func TestMapAcceptanceProjectionReadsPersistedRuntimeFacts(t *testing.T) {
 		ExecutionKey: "exec-2", Fence: 1, OperationID: "write-1", Outcome: runtimecontract.RuntimeOperationOutcomeRejected,
 		ObservedEffectScope: runtimecontract.RuntimeEffectWorkspaceDurable, Feedback: &receiptFeedback,
 	})
-	projection := mapAcceptanceProjection(appmodelcore.Run{ID: "run-1", RuntimeState: &state})
+	projection := mapAcceptanceProjection(&runmodel.Run{ID: "run-1", RuntimeState: &state})
 	if projection.ActiveSliceID != "slice-1" || projection.CurrentFocus == nil || projection.CurrentFocus.ID != "focus-1" || projection.Budget == nil || projection.Budget.RepairAttempts != 2 {
 		t.Fatalf("acceptance projection = %+v", projection)
 	}
@@ -189,7 +189,7 @@ func TestMapAcceptanceProjectionDoesNotPresentTerminalFocusAsActive(t *testing.T
 		},
 	}
 
-	projection := mapAcceptanceProjection(appmodelcore.Run{ID: "run-terminal", RuntimeState: &state})
+	projection := mapAcceptanceProjection(&runmodel.Run{ID: "run-terminal", RuntimeState: &state})
 	if projection.ActiveSliceID != "" || len(projection.Slices) != 1 || projection.Slices[0].State == "active" {
 		t.Fatalf("terminal acceptance projection = %+v, want historical focus without active slice", projection)
 	}

@@ -177,6 +177,37 @@ func TestWorkspaceDeletedDuringModelUpdateExitsSelection(t *testing.T) {
 	}
 }
 
+func TestModelSelectionGovernanceGuidanceWaitsForOwnerContinuation(t *testing.T) {
+	for _, promptMode := range []string{workspacePromptModeDecision, workspacePromptModeApproval} {
+		t.Run(promptMode, func(t *testing.T) {
+			m := NewAppModel(newFake(t), "ws-governance-model", "")
+			projectWorkspace(&m, projectioncontract.Workspace{
+				ID: "ws-governance-model", State: string(common.WorkspaceStateActive), ActiveRunID: "run-governance-model",
+			})
+			entry := m.ensureWorkspaceRuntimeState("ws-governance-model")
+			entry.PromptMode = promptMode
+			entry.PromptModeRevision = 2
+			m.modelSelectMode = true
+			m.modelSelectWorkspaceID = "ws-governance-model"
+			m.modelSelectRequestSeq = 3
+
+			next, _ := m.applyWorkspaceLLMSelectionUpdated(WorkspaceLLMSelectionUpdatedMsg{
+				RequestSeq: 3, WorkspaceID: "ws-governance-model",
+				Selection: &runtimecontract.ProviderInferenceSelection{Target: runtimecontract.ProviderModelTarget{ProviderID: "provider", ModelID: "model"}},
+			})
+			got := appModelFromTea(t, next).result
+			for _, want := range []string{"owner continuation converges automatically", "wait for projection refresh", "resolution delivery diagnostic"} {
+				if !strings.Contains(got, want) {
+					t.Fatalf("governance model guidance = %q, missing %q", got, want)
+				}
+			}
+			if strings.Contains(got, "/run resume") {
+				t.Fatalf("governance model guidance schedules a second continuation: %q", got)
+			}
+		})
+	}
+}
+
 func TestModelCommandSelectsAndPersistsProviderModelPair(t *testing.T) {
 	be := &modelSelectionBackend{
 		fakeBE:    newFake(t),

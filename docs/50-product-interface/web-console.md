@@ -73,12 +73,19 @@ all-of admission/promotion 且 activation admission eligible 后才能启用执�
 
 若current Run投影为runtime-definition clarification，详情页必须显示typed gap、offending refs和
 `revise_definition_and_restart`动作，禁用普通Decision answer与Resume。用户先通过Goal/DoD表单提交新的all-of candidate；
-新revision eligible后只能显式提交Restart。页面不直接关闭ticket、不把新Definition写入predecessor，也不构造
-replacement-resolution payload。
+详情页保留独立、显式Restart入口，但不得根据Goal/DoD revision、SSE、display字段或前端比较猜测admission eligibility；
+每次Restart均交由Workspace/Run owner判定并原样显示typed rejection。页面不直接关闭ticket、不把新Definition写入
+predecessor，也不构造replacement-resolution payload。Board遇到exact canonical Definition blocker时始终只导航到该
+Workspace的Definition修订入口，绝不直接发送Resume或Restart。
 
 `steps`、`runtime-checkpoints`、`nextAction`-named fields、`taskProgress`、`taskDecompositions` 和
 `artifactContinuations` 若仍出现在 projection/type 中，只是历史/诊断兼容数据。它们不能驱动按钮可用性、恢复
 Runtime authority 或替代 formal Result/evidence。
+
+详情页明确把 Workspace/Run owner `state`、Workspace `activeRunId` 与 Run blocker refs 标为 canonical；Workspace 没有
+blocker 字段。`governanceDisplay` 是只读 lifecycle handoff，`consistencyDiagnostic` 是只读偏差，`displayOutcome` 是非 owner
+展示摘要；formal output 只读独立 `result/results`。上述 display 字段不得选择 execution intent、生成 governance mutation，
+也不得触发自动 Resume/Restart/Drive。
 
 recoverable runtime wait显示为非治理、非终态状态：页面可以展示safe reason、condition、next eligible drive/deadline和
 budget guard，但不提供“继续等待”“强制重试”“清零预算”或自动Resume按钮。coverage/assessment/evidence必须逐项分栏，
@@ -93,10 +100,28 @@ Decision 和 Approval 页面分别使用分页 list，显式打开单项 detail�
 
 页面可以帮助组织 resolution payload，但不得推导 Run 下一状态，也不得在 resolve 成功后自行发送 Resume。通用
 Decision UI 中的历史 `replan` 选择会由服务端合同规范化；它不授权 application 创建 successor。
+Decision/Approval owner受理resolution后，persisted continuation自动收敛；成功提示只要求等待projection refresh。若
+canonical Run持续阻塞，界面将其标记为resolution delivery diagnostic，不得提示用户额外发送Resume或把Resume当作第二条
+scheduler路径。
+
+单项按钮、checkbox与批量提交只在Workspace snapshot中的canonical `activeRunId`、matching blocked Run exact blocker ref与
+真实open Decision/pending Approval完全相交时启用；`governanceDisplay`不参与选择。提交前重新读取所有涉及Workspace并整体
+preflight，任一extra/stale/conflicting target都不发送batch。跨Workspace同名resource保留composite row identity；公共batch
+DTO无法消歧的重复bare ID必须fail-closed。
 
 Run-scoped runtime-definition clarification不进入通用answer/batch-resolution可选集合；治理队列只显示其binding状态并链接到
 Workspace Definition修订入口。pre-seal clarification同样不提供one-of确认，只有corrected candidate的专用admission
 resolution/ack链可以关闭原ticket。
+
+Decision Queue与Workspace Detail必须直接读取typed `definitionClarification`并展示`class/bindingState`、
+`requiredAction`、gap/violation、offending refs及至少`definitionRevision/authoritySnapshotId/clarificationDispatchId/focusRef`
+四项runtime identity；不得从`context`、`reason`、`decisionKind`或UI文案重建这些字段。legacy文本分类最多用于关闭
+generic mutation，不能形成typed blocker或启用任何操作。
+
+Workspace Detail与Board同样只从canonical Workspace/Run exact blocker和concrete definition Decision识别该状态；即使
+`governanceDisplay`声称存在clarification也不能改变intent。exact runtime-definition blocker存在时主操作只能是Definition
+修订或详情页的显式Restart，任何已打开的stale Resume表单在提交时也必须fail-closed。普通
+`blocked_on_decision|blocked_on_approval` Run同样不能由Board/Detail生成Resume；治理owner的persisted continuation自行收敛。
 
 ### Runtime Control
 

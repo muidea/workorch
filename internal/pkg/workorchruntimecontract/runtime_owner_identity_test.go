@@ -28,6 +28,24 @@ func TestRuntimeOwnerIdentitiesNormalizeValidateAndHash(t *testing.T) {
 	if err := fence.Validate(); err != nil {
 		t.Fatal(err)
 	}
+	continuationFence := fence
+	continuationFence.TerminalFenceID = ""
+	continuationFence.GovernanceFenceID = " governance-1 "
+	continuationFence.GovernanceResolutionID = " resolution-1 "
+	continuationFence = continuationFence.Normalized()
+	if err := continuationFence.Validate(); err != nil || continuationFence.GovernanceResolutionID != "resolution-1" {
+		t.Fatalf("continuation fence=%+v err=%v", continuationFence, err)
+	}
+	invalidResolutionFence := fence
+	invalidResolutionFence.GovernanceResolutionID = "resolution-without-governance"
+	if err := invalidResolutionFence.Validate(); err == nil {
+		t.Fatal("opaque resolution without governance fence was accepted")
+	}
+	dualModeFence := continuationFence
+	dualModeFence.TerminalFenceID = "terminal-duplicate-mode"
+	if err := dualModeFence.Validate(); err == nil {
+		t.Fatal("governance and terminal lifecycle identities were accepted together")
+	}
 }
 
 func TestNonCurrentRuntimeSchemaRequiresDataReset(t *testing.T) {

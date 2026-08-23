@@ -66,6 +66,16 @@ func deliveryAcknowledged(aggregate runtime.RuntimeAggregate, deliveryID string,
 	return false
 }
 
+func runtimeTerminalDeliveryFullyAcknowledged(aggregate runtime.RuntimeAggregate) bool {
+	request, err := terminalDeliveryRequest(aggregate)
+	if err != nil {
+		return false
+	}
+	return deliveryAcknowledged(aggregate, request.TerminalDeliveryID, runtimecontract.RuntimeDeliveryOwnerResult) &&
+		deliveryAcknowledged(aggregate, request.TerminalDeliveryID, runtimecontract.RuntimeDeliveryOwnerWorkspace) &&
+		deliveryAcknowledged(aggregate, request.TerminalDeliveryID, runtimecontract.RuntimeDeliveryOwnerRun)
+}
+
 func (m *Biz) persistedDeliveryAcknowledged(ctx context.Context, aggregate runtime.RuntimeAggregate, deliveryID string, owner runtimecontract.RuntimeDeliveryOwner) bool {
 	if m == nil || m.runtimeController == nil {
 		return false

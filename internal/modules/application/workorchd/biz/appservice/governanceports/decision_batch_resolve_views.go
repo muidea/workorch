@@ -43,6 +43,9 @@ func BatchResolveDecisionViews(ctx context.Context, hub magicevent.Hub, traces g
 		if r.err != nil {
 			return nil, r.err
 		}
+		if err := admitDecisionMutation(ctx, hub, r.item, scope); err != nil {
+			return nil, err
+		}
 		if decisionResolutionMissingRequiredInfo(semantic, cmd.ResolutionPayload) {
 			return nil, common.ErrInvalidArgument
 		}

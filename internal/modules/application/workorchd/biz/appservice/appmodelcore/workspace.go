@@ -14,8 +14,6 @@ type Workspace struct {
 	InternalDirectory    string                                      `json:"-"`
 	State                string                                      `json:"state"`
 	ActiveRunID          string                                      `json:"activeRunId,omitempty"`
-	BlockingTicketID     string                                      `json:"blockingTicketId,omitempty"`
-	BlockingApprovalID   string                                      `json:"blockingApprovalId,omitempty"`
 	TemplateID           string                                      `json:"templateId,omitempty"`
 	ProfileID            string                                      `json:"profileId,omitempty"`
 	DefaultLLMSelection  *runtimecontract.ProviderInferenceSelection `json:"defaultLLMSelection,omitempty"`

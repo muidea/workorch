@@ -5,26 +5,12 @@ import (
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/workspacecore"
 	runmodel "github.com/muidea/workorch/internal/modules/blocks/run/pkg/models"
 	workspacemodel "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/models"
-	"github.com/muidea/workorch/internal/pkg/common"
 )
 
 func mapWorkspaceWithRunProjection(workspace *workspacemodel.Workspace, run *runmodel.Run) appmodelcore.Workspace {
-	ret := workspacecore.MapWorkspace(workspace)
-	if run == nil {
-		return ret
-	}
-	if run.State == common.RunStatePending {
-		return ret
-	}
-	ret.State = string(workspaceProjectionState(run.State))
-	if isTerminalProjectionRunState(run.State) {
-		ret.ActiveRunID = ""
-		ret.BlockingTicketID = ""
-		ret.BlockingApprovalID = ""
-	} else {
-		ret.ActiveRunID = string(run.ID)
-		ret.BlockingTicketID = string(run.BlockingTicketID)
-		ret.BlockingApprovalID = string(run.BlockingApprovalID)
-	}
-	return ret
+	// Run is accepted only to keep the existing pure projector signature. The
+	// Workspace owner model is the sole source of Workspace state/activeRun.
+	// Governance correlation belongs to GovernanceDisplay and never rewrites it.
+	_ = run
+	return workspacecore.MapWorkspace(workspace)
 }

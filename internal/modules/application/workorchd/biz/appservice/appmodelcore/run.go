@@ -28,7 +28,4 @@ type Run struct {
 	CreatedAt          string                                      `json:"createdAt,omitempty"`
 	StartedAt          string                                      `json:"startedAt,omitempty"`
 	EndedAt            string                                      `json:"endedAt,omitempty"`
-	// RuntimeState is projection input only. It must never be serialized as an
-	// application DTO or become a second authority.
-	RuntimeState *runtimecontract.RuntimeStateRecord `json:"-"`
 }

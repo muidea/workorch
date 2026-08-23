@@ -121,7 +121,7 @@ func (s *serverState) RecordEventRecordAppended(_ context.Context, data eventstr
 // payload: Eventstream is audit/display infrastructure and may replay
 // independently.
 func (s *serverState) RecordRunStateChanged(_ context.Context, data runevents.RunStateChangedData) {
-	if s == nil {
+	if s == nil || data.Validate() != nil {
 		return
 	}
 	s.metrics.observeRunState(

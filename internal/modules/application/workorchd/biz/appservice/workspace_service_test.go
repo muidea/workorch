@@ -384,15 +384,15 @@ func TestReadAndListWorkspacesProjectActiveRunState(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ReadWorkspaceWithBackend: %v", err)
 	}
-	if readBack.State != string(common.WorkspaceStateActive) || readBack.ActiveRunID != string(run.ID) || readBack.BlockingTicketID != "ticket-project-workspace" {
-		t.Fatalf("read workspace = %+v, want active projection with decision ticket", readBack)
+	if readBack.State != string(common.WorkspaceStateActive) || readBack.ActiveRunID != string(run.ID) {
+		t.Fatalf("read workspace = %+v, want canonical active owner projection", readBack)
 	}
 	items, err := ListWorkspacesWithBackend(ctx, "file", dataRoot)
 	if err != nil {
 		t.Fatalf("ListWorkspacesWithBackend: %v", err)
 	}
-	if len(items) != 1 || items[0].State != string(common.WorkspaceStateActive) || items[0].ActiveRunID != string(run.ID) || items[0].BlockingTicketID != "ticket-project-workspace" {
-		t.Fatalf("listed workspaces = %+v, want active projection with decision ticket", items)
+	if len(items) != 1 || items[0].State != string(common.WorkspaceStateActive) || items[0].ActiveRunID != string(run.ID) {
+		t.Fatalf("listed workspaces = %+v, want canonical active owner projection", items)
 	}
 }
 

@@ -25,7 +25,7 @@ func selectDisplayRunID(snapshot readmodelcore.WorkspaceSnapshotState) string {
 	if id := blockerRunID(snapshot); id != "" {
 		return id
 	}
-	if id := strings.TrimSpace(snapshot.Outcome.RunID); id != "" {
+	if id := strings.TrimSpace(snapshot.DisplayOutcome.RunID); id != "" {
 		return id
 	}
 	if id := strings.TrimSpace(snapshot.TaskProgress.RunID); id != "" {
@@ -41,7 +41,7 @@ func selectDisplayRunID(snapshot readmodelcore.WorkspaceSnapshotState) string {
 
 func blockerRunID(snapshot readmodelcore.WorkspaceSnapshotState) string {
 	activeRunID := strings.TrimSpace(snapshot.Workspace.ActiveRunID)
-	ticketID := strings.TrimSpace(snapshot.Workspace.BlockingTicketID)
+	ticketID := strings.TrimSpace(snapshot.GovernanceDisplay.DecisionID)
 	if ticketID == "" && snapshot.Run != nil {
 		ticketID = strings.TrimSpace(snapshot.Run.BlockingTicketID)
 	}
@@ -50,7 +50,7 @@ func blockerRunID(snapshot readmodelcore.WorkspaceSnapshotState) string {
 			return id
 		}
 	}
-	approvalID := strings.TrimSpace(snapshot.Workspace.BlockingApprovalID)
+	approvalID := strings.TrimSpace(snapshot.GovernanceDisplay.ApprovalID)
 	if approvalID == "" && snapshot.Run != nil {
 		approvalID = strings.TrimSpace(snapshot.Run.BlockingApprovalID)
 	}

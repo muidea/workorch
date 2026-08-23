@@ -443,9 +443,9 @@ func TestStoreListSnapshotOmitsDetailHeavyPayloads(t *testing.T) {
 
 func TestStoreUpsertWorkspaceSynchronizesDetailWorkspaceState(t *testing.T) {
 	store := NewStore()
-	store.ReplaceAll([]appmodelcore.Workspace{{ID: "ws-a", State: "waiting_decision", ActiveRunID: "run-a", BlockingTicketID: "ticket-a"}}, map[string]readmodelcore.WorkspaceSnapshotState{
+	store.ReplaceAll([]appmodelcore.Workspace{{ID: "ws-a", State: "waiting_decision", ActiveRunID: "run-a"}}, map[string]readmodelcore.WorkspaceSnapshotState{
 		"ws-a": {
-			Workspace: appmodelcore.Workspace{ID: "ws-a", State: "waiting_decision", ActiveRunID: "run-a", BlockingTicketID: "ticket-a"},
+			Workspace: appmodelcore.Workspace{ID: "ws-a", State: "waiting_decision", ActiveRunID: "run-a"},
 			RunCommand: &projectioncontract.RunCommandStatus{
 				WorkspaceID: "ws-a",
 				RunID:       "run-a",
@@ -467,14 +467,14 @@ func TestStoreUpsertWorkspaceSynchronizesDetailWorkspaceState(t *testing.T) {
 	if err != nil {
 		t.Fatalf("list workspaces: %v", err)
 	}
-	if len(items) != 1 || items[0].State != string(common.WorkspaceStateActive) || items[0].BlockingTicketID != "" {
+	if len(items) != 1 || items[0].State != string(common.WorkspaceStateActive) {
 		t.Fatalf("list workspace = %+v, want active without blocker", items)
 	}
 	snapshot, _, err := store.GetSnapshot("ws-a")
 	if err != nil {
 		t.Fatalf("get snapshot: %v", err)
 	}
-	if snapshot.Workspace.State != string(common.WorkspaceStateActive) || snapshot.Workspace.BlockingTicketID != "" {
+	if snapshot.Workspace.State != string(common.WorkspaceStateActive) {
 		t.Fatalf("snapshot workspace = %+v, want synchronized active state", snapshot.Workspace)
 	}
 	if snapshot.RunCommand == nil || snapshot.RunCommand.RequestID != "request-a" {
@@ -487,9 +487,9 @@ func TestStoreUpsertWorkspaceSynchronizesDetailWorkspaceState(t *testing.T) {
 
 func TestStoreReplaceWorkspaceListSynchronizesDetailWorkspaceState(t *testing.T) {
 	store := NewStore()
-	store.ReplaceAll([]appmodelcore.Workspace{{ID: "ws-a", State: "waiting_decision", ActiveRunID: "run-a", BlockingTicketID: "ticket-a"}}, map[string]readmodelcore.WorkspaceSnapshotState{
+	store.ReplaceAll([]appmodelcore.Workspace{{ID: "ws-a", State: "waiting_decision", ActiveRunID: "run-a"}}, map[string]readmodelcore.WorkspaceSnapshotState{
 		"ws-a": {
-			Workspace:  appmodelcore.Workspace{ID: "ws-a", State: "waiting_decision", ActiveRunID: "run-a", BlockingTicketID: "ticket-a"},
+			Workspace:  appmodelcore.Workspace{ID: "ws-a", State: "waiting_decision", ActiveRunID: "run-a"},
 			RunCommand: &projectioncontract.RunCommandStatus{WorkspaceID: "ws-a", RunID: "run-a", Intent: "resume", RequestID: "request-a", Revision: 9},
 			GapBaseline: &projectioncontract.GapBaseline{
 				WorkspaceID:      "ws-a",
@@ -505,7 +505,7 @@ func TestStoreReplaceWorkspaceListSynchronizesDetailWorkspaceState(t *testing.T)
 	if err != nil {
 		t.Fatalf("get snapshot: %v", err)
 	}
-	if snapshot.Workspace.State != "active" || snapshot.Workspace.ActiveRunID != "" || snapshot.Workspace.BlockingTicketID != "" {
+	if snapshot.Workspace.State != "active" || snapshot.Workspace.ActiveRunID != "" {
 		t.Fatalf("snapshot workspace = %+v, want synchronized active state", snapshot.Workspace)
 	}
 	if snapshot.RunCommand == nil || snapshot.RunCommand.RequestID != "request-a" {
@@ -516,11 +516,11 @@ func TestStoreReplaceWorkspaceListSynchronizesDetailWorkspaceState(t *testing.T)
 	}
 }
 
-func TestStoreReplaceWorkspaceListPreservesSnapshotGovernanceAuthority(t *testing.T) {
+func TestStoreReplaceWorkspaceListPreservesGovernanceDisplayWithoutOverwritingWorkspaceOwner(t *testing.T) {
 	store := NewStore()
-	store.ReplaceAll([]appmodelcore.Workspace{{ID: "ws-a", State: "waiting_decision", ActiveRunID: "run-a", BlockingTicketID: "ticket-a"}}, map[string]readmodelcore.WorkspaceSnapshotState{
+	store.ReplaceAll([]appmodelcore.Workspace{{ID: "ws-a", State: "waiting_decision", ActiveRunID: "run-a"}}, map[string]readmodelcore.WorkspaceSnapshotState{
 		"ws-a": {
-			Workspace: appmodelcore.Workspace{ID: "ws-a", State: "waiting_decision", ActiveRunID: "run-a", BlockingTicketID: "ticket-a"},
+			Workspace: appmodelcore.Workspace{ID: "ws-a", State: "waiting_decision", ActiveRunID: "run-a"},
 			Run:       &appmodelcore.Run{ID: "run-a", WorkspaceID: "ws-a", State: string(common.RunStateBlockedOnDecision), BlockingTicketID: "ticket-a"},
 			Decisions: []projectioncontract.Decision{{
 				ID:          "ticket-a",
@@ -539,18 +539,17 @@ func TestStoreReplaceWorkspaceListPreservesSnapshotGovernanceAuthority(t *testin
 	}
 	if len(items) != 1 ||
 		items[0].State != string(common.WorkspaceStateActive) ||
-		items[0].BlockingTicketID != "ticket-a" ||
 		items[0].ViewModel.PromptMode != "decision" {
-		t.Fatalf("list workspace = %+v, want decision projection from snapshot governance", items)
+		t.Fatalf("list workspace = %+v, want canonical owner plus decision display prompt", items)
 	}
 	snapshot, _, err := store.GetSnapshot("ws-a")
 	if err != nil {
 		t.Fatalf("get snapshot: %v", err)
 	}
 	if snapshot.Workspace.State != string(common.WorkspaceStateActive) ||
-		snapshot.Workspace.BlockingTicketID != "ticket-a" ||
+		snapshot.GovernanceDisplay.DecisionID != "ticket-a" ||
 		snapshot.ViewModel.PromptMode != "decision" {
-		t.Fatalf("snapshot workspace = %+v viewModel = %+v, want decision projection", snapshot.Workspace, snapshot.ViewModel)
+		t.Fatalf("snapshot workspace = %+v display = %+v viewModel = %+v, want separated decision display", snapshot.Workspace, snapshot.GovernanceDisplay, snapshot.ViewModel)
 	}
 }
 
@@ -575,7 +574,6 @@ func TestStoreProjectionDerivesDecisionPromptFromBlockedRun(t *testing.T) {
 	}
 	if len(items) != 1 ||
 		items[0].State != string(common.WorkspaceStateActive) ||
-		items[0].BlockingTicketID != "ticket-a" ||
 		items[0].ViewModel.PromptMode != "decision" ||
 		items[0].Title != "Workspace A" {
 		t.Fatalf("list workspace = %+v, want decision prompt from blocked run with preserved workspace fields", items)
@@ -586,7 +584,7 @@ func TestStoreProjectionDerivesDecisionPromptFromBlockedRun(t *testing.T) {
 		t.Fatalf("get detail snapshot: %v", err)
 	}
 	if detail.Workspace.State != string(common.WorkspaceStateActive) ||
-		detail.Workspace.BlockingTicketID != "ticket-a" ||
+		detail.GovernanceDisplay.DecisionID != "ticket-a" ||
 		detail.ViewModel.PromptMode != "decision" {
 		t.Fatalf("detail snapshot workspace = %+v viewModel = %+v, want decision prompt", detail.Workspace, detail.ViewModel)
 	}
@@ -596,7 +594,7 @@ func TestStoreProjectionDerivesDecisionPromptFromBlockedRun(t *testing.T) {
 		t.Fatalf("get summary snapshot: %v", err)
 	}
 	if summary.Workspace.State != string(common.WorkspaceStateActive) ||
-		summary.Workspace.BlockingTicketID != "ticket-a" ||
+		summary.GovernanceDisplay.DecisionID != "ticket-a" ||
 		summary.ViewModel.PromptMode != "decision" {
 		t.Fatalf("summary snapshot workspace = %+v viewModel = %+v, want decision prompt", summary.Workspace, summary.ViewModel)
 	}
@@ -604,9 +602,9 @@ func TestStoreProjectionDerivesDecisionPromptFromBlockedRun(t *testing.T) {
 
 func TestStoreProjectionRequiresSameScopeOpenDecisionForPrompt(t *testing.T) {
 	store := NewStore()
-	store.ReplaceAll([]appmodelcore.Workspace{{ID: "ws-a", State: string(common.WorkspaceStateActive), ActiveRunID: "run-a", BlockingTicketID: "ticket-a"}}, map[string]readmodelcore.WorkspaceSnapshotState{
+	store.ReplaceAll([]appmodelcore.Workspace{{ID: "ws-a", State: string(common.WorkspaceStateActive), ActiveRunID: "run-a"}}, map[string]readmodelcore.WorkspaceSnapshotState{
 		"ws-a": {
-			Workspace: appmodelcore.Workspace{ID: "ws-a", State: string(common.WorkspaceStateActive), ActiveRunID: "run-a", BlockingTicketID: "ticket-a"},
+			Workspace: appmodelcore.Workspace{ID: "ws-a", State: string(common.WorkspaceStateActive), ActiveRunID: "run-a"},
 			Run:       &appmodelcore.Run{ID: "run-a", WorkspaceID: "ws-a", State: string(common.RunStateBlockedOnDecision), BlockingTicketID: "ticket-a"},
 			Decisions: []projectioncontract.Decision{{
 				ID:          "ticket-a",
@@ -623,7 +621,6 @@ func TestStoreProjectionRequiresSameScopeOpenDecisionForPrompt(t *testing.T) {
 	}
 	if len(items) != 1 ||
 		items[0].State != string(common.WorkspaceStateActive) ||
-		items[0].BlockingTicketID != "" ||
 		items[0].ViewModel.PromptMode == "decision" {
 		t.Fatalf("list workspace = %+v, want no decision prompt without same-scope open ticket", items)
 	}
@@ -632,7 +629,6 @@ func TestStoreProjectionRequiresSameScopeOpenDecisionForPrompt(t *testing.T) {
 		t.Fatalf("get snapshot: %v", err)
 	}
 	if snapshot.Workspace.State != string(common.WorkspaceStateActive) ||
-		snapshot.Workspace.BlockingTicketID != "" ||
 		snapshot.ViewModel.PromptMode == "decision" {
 		t.Fatalf("snapshot workspace = %+v viewModel = %+v, want no decision prompt without same-scope open ticket", snapshot.Workspace, snapshot.ViewModel)
 	}
@@ -676,13 +672,12 @@ func TestStoreMarksStaleWithSourceEventRevision(t *testing.T) {
 
 func TestStoreStaleSnapshotKeepsLastReadyViewModel(t *testing.T) {
 	store := NewStore()
-	store.ReplaceAll([]appmodelcore.Workspace{{ID: "ws-a", State: "waiting_decision", ActiveRunID: "run-a", BlockingTicketID: "ticket-a"}}, map[string]readmodelcore.WorkspaceSnapshotState{
+	store.ReplaceAll([]appmodelcore.Workspace{{ID: "ws-a", State: "waiting_decision", ActiveRunID: "run-a"}}, map[string]readmodelcore.WorkspaceSnapshotState{
 		"ws-a": {
 			Workspace: appmodelcore.Workspace{
-				ID:               "ws-a",
-				State:            "waiting_decision",
-				ActiveRunID:      "run-a",
-				BlockingTicketID: "ticket-a",
+				ID:          "ws-a",
+				State:       "waiting_decision",
+				ActiveRunID: "run-a",
 			},
 			Decisions: []projectioncontract.Decision{{
 				ID:          "ticket-a",
@@ -711,7 +706,7 @@ func TestStoreStaleSnapshotKeepsLastReadyViewModel(t *testing.T) {
 		t.Fatalf("stale status = %+v, want source_event stale state", staleStatus)
 	}
 	if staleSnapshot.Workspace.State != readySnapshot.Workspace.State ||
-		staleSnapshot.Workspace.BlockingTicketID != readySnapshot.Workspace.BlockingTicketID {
+		staleSnapshot.Workspace.ActiveRunID != readySnapshot.Workspace.ActiveRunID {
 		t.Fatalf("stale workspace = %+v, ready = %+v, want last ready workspace state", staleSnapshot.Workspace, readySnapshot.Workspace)
 	}
 	if staleSnapshot.ViewModel.PromptMode != "decision" {
@@ -730,17 +725,15 @@ func TestStoreStaleSnapshotKeepsLastReadyViewModel(t *testing.T) {
 func TestStoreDoesNotUseResolvedDecisionForPromptMode(t *testing.T) {
 	store := NewStore()
 	store.ReplaceAll([]appmodelcore.Workspace{{
-		ID:               "ws-resolved",
-		State:            "waiting_decision",
-		ActiveRunID:      "run-resolved",
-		BlockingTicketID: "ticket-resolved",
+		ID:          "ws-resolved",
+		State:       "waiting_decision",
+		ActiveRunID: "run-resolved",
 	}}, map[string]readmodelcore.WorkspaceSnapshotState{
 		"ws-resolved": {
 			Workspace: appmodelcore.Workspace{
-				ID:               "ws-resolved",
-				State:            "waiting_decision",
-				ActiveRunID:      "run-resolved",
-				BlockingTicketID: "ticket-resolved",
+				ID:          "ws-resolved",
+				State:       "waiting_decision",
+				ActiveRunID: "run-resolved",
 			},
 			Decisions: []projectioncontract.Decision{{
 				ID:          "ticket-resolved",
@@ -758,14 +751,14 @@ func TestStoreDoesNotUseResolvedDecisionForPromptMode(t *testing.T) {
 	if len(items) != 1 {
 		t.Fatalf("workspaces = %d, want 1", len(items))
 	}
-	if items[0].ViewModel.PromptMode == "decision" || items[0].BlockingTicketID != "" {
+	if items[0].ViewModel.PromptMode == "decision" {
 		t.Fatalf("list workspace = %+v, want no decision prompt for resolved ticket", items[0])
 	}
 	snapshot, _, err := store.GetSnapshot("ws-resolved")
 	if err != nil {
 		t.Fatalf("get snapshot: %v", err)
 	}
-	if snapshot.ViewModel.PromptMode == "decision" || snapshot.Workspace.BlockingTicketID != "" {
+	if snapshot.ViewModel.PromptMode == "decision" || snapshot.GovernanceDisplay.DecisionID != "" {
 		t.Fatalf("snapshot workspace = %+v viewModel = %+v, want no decision prompt for resolved ticket", snapshot.Workspace, snapshot.ViewModel)
 	}
 }
@@ -874,7 +867,7 @@ func TestStoreRunHeartbeatMetricsCountsActiveProblemSignals(t *testing.T) {
 			},
 		},
 		"ws-decision": {
-			Workspace: appmodelcore.Workspace{ID: "ws-decision", State: "waiting_decision", ActiveRunID: "run-decision", BlockingTicketID: "ticket-decision"},
+			Workspace: appmodelcore.Workspace{ID: "ws-decision", State: "waiting_decision", ActiveRunID: "run-decision"},
 			RunHeartbeat: projectioncontract.RunHeartbeat{
 				WorkspaceID:               "ws-decision",
 				RunID:                     "run-decision",

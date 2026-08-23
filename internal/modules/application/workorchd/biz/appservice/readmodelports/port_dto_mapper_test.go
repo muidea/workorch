@@ -24,11 +24,11 @@ func mustPortEventPayload(t *testing.T, input map[string]any) workorcheventpaylo
 func TestWorkspaceSnapshotProjectionPreservesTypedProjectionFields(t *testing.T) {
 	snapshot := readmodelcore.WorkspaceSnapshotState{
 		Workspace: appmodelcore.Workspace{
-			ID:               "ws-map",
-			State:            string(common.WorkspaceStateActive),
-			ActiveRunID:      "run-map",
-			BlockingTicketID: "ticket-map",
+			ID:          "ws-map",
+			State:       string(common.WorkspaceStateActive),
+			ActiveRunID: "run-map",
 		},
+		GovernanceDisplay: projectioncontract.GovernanceDisplay{PromptMode: "decision", RunID: "run-map", DecisionID: "ticket-map"},
 		ViewModel: projectioncontract.WorkspaceViewModel{
 			WorkspaceID: "ws-map",
 			State:       "running",

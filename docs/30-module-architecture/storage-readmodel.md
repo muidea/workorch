@@ -4,7 +4,7 @@ Status: normative
 
 Type: module-architecture
 
-Last Verified: 2026-08-21
+Last Verified: 2026-08-23
 
 ## Purpose
 
@@ -55,6 +55,10 @@ owner fact / owner read
 
 - projection can cache、rebuild、paginate and wait on typed notification；
 - projection cache is process-local/derived and may be discarded；
+- opaque `RuntimeStateRecord` 仅为单次 mapper 的瞬时输入，不进入 Store、HTTP cache 或 public DTO；
+- Workspace/Run owner fields 原样投影；Workspace DTO 无 blocker refs，Run blocker refs 只来自 Run owner；
+- `governanceDisplay`、`consistencyDiagnostic` 与 `displayOutcome` 是 bounded read-only DTO，不能反向形成 mutation intent；
+- formal outcome 只认独立 Result owner projection，`displayOutcome` 不替代或重判 Result；
 - each lookup resolves Workspace/Run/resource scope before owner query；
 - duplicate IDs across workspaces cannot leak；local-only identity crossing boundary must carry enough scope；
 - terminal/status display is derived from owner facts and cannot submit reverse repair、Resume or state setter；

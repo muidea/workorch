@@ -149,6 +149,24 @@ Cross-owner regression必须证明 concrete receiving-owner Command/Result、wor
 - 只有 repository expected/observed revision 不一致产生 typed concurrent-state conflict 并消费 CAS reload；
 - semantic reject、stale identity、candidate session conflict、duplicate/no-op 不得借 `common.ErrConflict` 进入 CAS；
 - provider transport、operation outcome recovery、delivery retry 使用独立 persisted ledger；
+- governance wait/continuation lifecycle handoff 与 terminal delivery 必须分流：前者以 exact persisted governance fence 和
+  SM-4 drive lease等待 Run-owner acknowledgement，后者才可消费 terminal-delivery ledger；Definition clarification 必须与
+  普通 Decision/Approval 一样覆盖 bind-CAS、duplicate、stale、response-loss 和 fresh reload；
+- lifecycle exactness 必须覆盖 wait fence 无 resolution、continuation fence/Run-private reducer/ack 的 exact `ResolutionID`、
+  active duplicate、旧/错 resolution 零写入，以及 successor 已消费、Runtime 已进入第二 blocker 后旧 exact resolution 的
+  historical no-op（零 Run mutation/CAS/timer）；还必须覆盖 resolution 在旧 drive 成功退出前封存 lease 的交错，证明 timer
+  不绕过 gate、gate owner 退出时挂载 exact persisted generation、duplicate/stale/Stop/fresh restart 均不遗失 successor且
+  `TerminalDeliveryAttempts` 保持为零；
+- governance resolution exactness 还必须覆盖 `continue|fail` CAS 原子替换旧 lease、Fail 首次/partial
+  Result→Workspace→Run acknowledgement、同 resolution response-loss duplicate、Stop/fresh restart，以及旧 timer 对
+  same-signature newer generation/different-signature successor 的 gate-exit handoff。renewal schedule CAS 与 fallback
+  recovery CAS 同时失败时必须证明 running lease 未被 release、本地 gate 未丢失、普通 ingress 零第二 drive，fresh startup
+  只恢复一个 successor；timer-vs-Stop 必须在 race 下分别阻塞 claim-return 与持 lifecycle read lock 但尚未 mount 的 handler，
+  以及阻塞 bounded BackgroundRoutine submission 后再执行 already-due queued callback，证明 cancel 点后零 observe/claim、旧
+  epoch defer不挂 zombie successor、不清理新 epoch gate、Stop及时清空本地 map/context且不删除 persisted lease；
+- governance ingress 必须覆盖 Decision/Approval wrong-source在 authority load 前拒绝；same ResolutionID+snapshot 的 Summary、
+  EvidenceRefs、outcome、ticket/approval、dispatch、dependency、subject任一漂移均 conflict/零 CAS。首次 stale diagnostic 与其
+  exact replay必须持续返回 stale且不触发 Run/timer，stale payload漂移同样 fail-closed；
 - recoverable runtime wait只有在typed owner recovery/reconciliation合同、condition、trigger/deadline和budget完整时合法；
   matching trigger幂等re-drive，stale/duplicate trigger零迁移，deadline/budget/guard耗尽typed terminal；
 - wait不新增SM-1 state，不创建Decision/Approval，不由Web/TUI/projection/普通Resume驱动，且不存在
@@ -187,6 +205,12 @@ Cross-owner regression必须证明 concrete receiving-owner Command/Result、wor
 - component instance、Service、global/cache/background task 不保存未经 workspace scope 约束的“current workspace”；
 - 至少两个 workspace 并发 candidate、receipt、recovery、delivery 时不串 identity、diagnostic 或 singleflight；
 - CAS 前/后 crash、owner commit 前/后 crash、response 丢失、duplicate/stale/乱序均零重复副作用；
+- bound governance request 已持久化、Run wait fact 尚未送达这一 cut point 重启后必须自动收敛到 exact blocked Run；不得
+  依赖人工 Resume，且整个非终态 handoff 的 `TerminalDeliveryAttempts` 保持不变；
+- governance resolution CAS 已成功但 continuation fact 尚未提交时，fresh startup 必须识别
+  `blocked + persisted resolution` 并重投 exact continuation；continuation owner commit 后响应丢失必须作为 duplicate 收敛。
+  同一 lifecycle lease 连续失败必须证明 running generation 原子续排为新 scheduled generation、`dueAt` 退避、旧 release
+  无法删除后继、fresh controller可重载，且 terminal-delivery budget 始终为零消费；
 - Run inventory 只返回 SM-1 state + opaque record presence/revision/ref；Orchestrator load 后 owner-local 分类
   `active_no_dispatch`、`active_sealed_dispatch`、`blocked_governance`、`recoverable_runtime_wait`、
   `terminal_delivery_pending` 并自动恢复；

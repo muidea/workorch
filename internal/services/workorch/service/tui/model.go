@@ -108,13 +108,18 @@ type AppModel struct {
 	running                bool
 	workspaceRuntimeStates map[string]*workspaceRuntimeState
 
-	blockingDecision          *projectioncontract.Decision
-	blockingApproval          *projectioncontract.Approval
-	helpOpen                  bool
-	mainViewport              *viewport.Model
-	mainViewportUserScrolled  bool
-	mainViewportPendingUpdate bool
-	mainViewportUnreadCount   int
+	// canonicalBlocking*ID are read-only selectors copied from the canonical
+	// active Run projection (directly or through RuntimeView). A concrete owner
+	// resource must match one of these refs before it can become a mutation target.
+	canonicalBlockingTicketID   string
+	canonicalBlockingApprovalID string
+	blockingDecision            *projectioncontract.Decision
+	blockingApproval            *projectioncontract.Approval
+	helpOpen                    bool
+	mainViewport                *viewport.Model
+	mainViewportUserScrolled    bool
+	mainViewportPendingUpdate   bool
+	mainViewportUnreadCount     int
 
 	workspaceListRefreshInFlight bool
 	workspaceListRefreshPending  bool
@@ -568,6 +573,7 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.Run != nil {
 			m.running = true
 			m.activeRunID = string(msg.Run.ID)
+			m.applyCanonicalRunBlockers(msg.Run)
 			m.applyRunStarted(msg.Run)
 			return m, m.fetchActiveBlockerDetails()
 		}
@@ -605,6 +611,7 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if errors.Is(msg.Error, common.ErrBlocked) {
 				if msg.Run != nil {
 					m.activeRunID = string(msg.Run.ID)
+					m.applyCanonicalRunBlockers(msg.Run)
 					m.applyRunControlState(msg.Run, msg.Message)
 				} else {
 					m.running = false
@@ -621,6 +628,7 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.applyRunCommandAdmission(msg.Admission, msg.Message)
 		} else if msg.Run != nil {
 			m.activeRunID = string(msg.Run.ID)
+			m.applyCanonicalRunBlockers(msg.Run)
 			m.applyRunControlState(msg.Run, msg.Message)
 		} else if msg.Message != "" {
 			m.running = false
@@ -651,6 +659,7 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.markDecisionResolved(common.TicketID(msg.Decision.ID), common.WorkspaceID(refreshWorkspaceID), common.RunID(msg.Decision.RunID))
 		}
 		if string(refreshWorkspaceID) == m.activeWorkspaceID {
+			m.canonicalBlockingTicketID = ""
 			m.blockingDecision = nil
 			m.clearInput()
 			m.progress = progressSubmitting
@@ -678,6 +687,7 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.markApprovalResolved(common.ApprovalID(msg.Approval.ID), refreshWorkspaceID, common.RunID(msg.Approval.RunID))
 		}
 		if string(refreshWorkspaceID) == m.activeWorkspaceID {
+			m.canonicalBlockingApprovalID = ""
 			m.blockingApproval = nil
 			m.clearInput()
 			m.progress = progressSubmitting
@@ -855,6 +865,13 @@ func (m *AppModel) submitInput() (tea.Model, tea.Cmd) {
 	}
 	m.addInputHistory(text)
 	m.ensureActiveBlockingDecisionFromOverview()
+	if definition := m.activeDefinitionClarificationDecision(); definition != nil {
+		m.running = false
+		m.progress = progressWaitingDecision
+		m.progressText = definitionClarificationInstruction(definition)
+		m.lastError = fmt.Errorf("definition clarification cannot use generic input or Resume; revise Goal/DoD and use /run restart")
+		return m, nil
+	}
 	if decision := m.activeBlockingDecision(); decision != nil {
 		ticketID := string(decision.ID)
 		m.clearInput()
@@ -1029,6 +1046,13 @@ func (m *AppModel) handleSlashCommand(text string) (tea.Model, tea.Cmd, bool) {
 		case "resume":
 			m.clearInput()
 			m.cancelWorkspaceSelection()
+			if definition := m.activeDefinitionClarificationDecision(); definition != nil {
+				m.running = false
+				m.progress = progressWaitingDecision
+				m.progressText = definitionClarificationInstruction(definition)
+				m.lastError = fmt.Errorf("definition clarification cannot be resumed; revise Goal/DoD and use /run restart")
+				return m, nil, true
+			}
 			if cmd := m.blockActiveWorkspaceResume(""); cmd != nil {
 				m.lastError = nil
 				return m, cmd, true
@@ -1078,7 +1102,18 @@ func (m *AppModel) handleSlashCommand(text string) (tea.Model, tea.Cmd, bool) {
 			m.lastError = nil
 			return m, FetchDecisions(m.be, m.activeWorkspaceID), true
 		case "answer", "resolve":
-			if !m.ensureActiveBlockingDecisionFromOverview() {
+			if definition := m.activeDefinitionClarificationDecision(); definition != nil {
+				m.progress = progressWaitingDecision
+				m.progressText = definitionClarificationInstruction(definition)
+				m.lastError = fmt.Errorf("definition clarification cannot use /decision answer; revise Goal/DoD and use /run restart")
+				return m, nil, true
+			}
+			decision := m.activeBlockingDecision()
+			if decision == nil {
+				if m.ensureActiveBlockingDecisionFromOverview() {
+					m.lastError = fmt.Errorf("blocking decision owner projection is not loaded")
+					return m, FetchDecisions(m.be, m.activeWorkspaceID), true
+				}
 				m.lastError = fmt.Errorf("no blocking decision")
 				return m, nil, true
 			}
@@ -1086,18 +1121,29 @@ func (m *AppModel) handleSlashCommand(text string) (tea.Model, tea.Cmd, bool) {
 				m.lastError = fmt.Errorf("decision answer requires text")
 				return m, nil, true
 			}
-			ticketID := string(m.blockingDecision.ID)
+			ticketID := string(decision.ID)
 			m.clearInput()
 			m.lastError = nil
 			m.appendTranscript("Decision", rest)
 			return m, ResolveDecision(m.be, m.activeWorkspaceID, ticketID, rest), true
 		case "terminate", "reject":
-			if !m.ensureActiveBlockingDecisionFromOverview() {
+			if definition := m.activeDefinitionClarificationDecision(); definition != nil {
+				m.progress = progressWaitingDecision
+				m.progressText = definitionClarificationInstruction(definition)
+				m.lastError = fmt.Errorf("definition clarification cannot use /decision terminate; revise Goal/DoD and use /run restart")
+				return m, nil, true
+			}
+			decision := m.activeBlockingDecision()
+			if decision == nil {
+				if m.ensureActiveBlockingDecisionFromOverview() {
+					m.lastError = fmt.Errorf("blocking decision owner projection is not loaded")
+					return m, FetchDecisions(m.be, m.activeWorkspaceID), true
+				}
 				m.lastError = fmt.Errorf("no blocking decision")
 				return m, nil, true
 			}
 			answer := nonEmpty(rest, "terminate current path")
-			ticketID := string(m.blockingDecision.ID)
+			ticketID := string(decision.ID)
 			m.clearInput()
 			m.lastError = nil
 			m.appendTranscript("Decision", answer)
@@ -1126,21 +1172,31 @@ func (m *AppModel) handleSlashCommand(text string) (tea.Model, tea.Cmd, bool) {
 			m.lastError = nil
 			return m, FetchApprovals(m.be, m.activeWorkspaceID), true
 		case "approve", "yes":
-			if !m.ensureActiveBlockingApprovalFromOverview() {
+			approval := m.activeBlockingApproval()
+			if approval == nil {
+				if m.ensureActiveBlockingApprovalFromOverview() {
+					m.lastError = fmt.Errorf("blocking approval owner projection is not loaded")
+					return m, FetchApprovals(m.be, m.activeWorkspaceID), true
+				}
 				m.lastError = fmt.Errorf("no blocking approval")
 				return m, nil, true
 			}
-			approvalID := string(m.blockingApproval.ID)
+			approvalID := string(approval.ID)
 			m.clearInput()
 			m.lastError = nil
 			m.appendTranscript("Approval", "approve")
 			return m, ResolveApproval(m.be, m.activeWorkspaceID, approvalID, true, approvalResolutionPayload("approve")), true
 		case "reject", "no":
-			if !m.ensureActiveBlockingApprovalFromOverview() {
+			approval := m.activeBlockingApproval()
+			if approval == nil {
+				if m.ensureActiveBlockingApprovalFromOverview() {
+					m.lastError = fmt.Errorf("blocking approval owner projection is not loaded")
+					return m, FetchApprovals(m.be, m.activeWorkspaceID), true
+				}
 				m.lastError = fmt.Errorf("no blocking approval")
 				return m, nil, true
 			}
-			approvalID := string(m.blockingApproval.ID)
+			approvalID := string(approval.ID)
 			m.clearInput()
 			m.lastError = nil
 			m.appendTranscript("Approval", "reject")
@@ -1765,43 +1821,6 @@ func isTransientContextError(err error) bool {
 	return errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded)
 }
 
-func (m *AppModel) setBlockingDecision(id common.TicketID, workspaceID common.WorkspaceID, runID common.RunID, reason string, question string) {
-	if id == "" {
-		return
-	}
-	item := projectioncontract.Decision{
-		ID:          string(id),
-		WorkspaceID: string(workspaceID),
-		RunID:       string(runID),
-		Reason:      reason,
-		Question:    question,
-		State:       "open",
-	}
-	m.blockingDecision = &item
-	m.upsertDecision(item)
-}
-
-func (m *AppModel) setBlockingApproval(id common.ApprovalID, workspaceID common.WorkspaceID, runID common.RunID, reason string, action string, context map[string]any) {
-	if id == "" {
-		return
-	}
-	typedContext, err := workorcheventpayload.FromMap(context)
-	if err != nil {
-		return
-	}
-	item := projectioncontract.Approval{
-		ID:          string(id),
-		WorkspaceID: string(workspaceID),
-		RunID:       string(runID),
-		Reason:      reason,
-		Action:      action,
-		Context:     typedContext,
-		State:       "pending",
-	}
-	m.blockingApproval = &item
-	m.upsertApproval(item)
-}
-
 func (m *AppModel) fetchActiveBlockerDetails() tea.Cmd {
 	var cmds []tea.Cmd
 	if decision := m.activeBlockingDecision(); decision != nil && decision.ID != "" {
@@ -1843,93 +1862,43 @@ func (m *AppModel) upsertApproval(item projectioncontract.Approval) {
 }
 
 func (m *AppModel) syncBlockingDecisionFromList() {
-	if m.blockingDecision != nil {
-		matched := false
-		for _, item := range m.decisions {
-			if item.ID == m.blockingDecision.ID {
-				matched = true
-				merged := mergeDecisionInfo(*m.blockingDecision, item)
-				if merged.State != "open" {
-					m.blockingDecision = nil
-					m.clearWaitingProgressIfUnblocked()
-					return
-				}
-				if !m.decisionMatchesActiveScope(merged) {
-					m.blockingDecision = nil
-					if !m.ensureActiveBlockingDecisionFromOverview() {
-						m.clearWaitingProgressIfUnblocked()
-					}
-					return
-				}
-				m.blockingDecision = &merged
-				if m.progress == progressWaitingDecision {
-					m.progressText = blockingDecisionLabel(m.blockingDecision)
-				}
-				return
-			}
+	selected := m.canonicalBlockingDecisionFromList()
+	if selected == nil {
+		m.blockingDecision = nil
+		if !m.ensureActiveBlockingDecisionFromOverview() {
+			m.clearWaitingProgressIfUnblocked()
 		}
-		if !matched {
-			m.blockingDecision = nil
-			if !m.ensureActiveBlockingDecisionFromOverview() {
-				m.clearWaitingProgressIfUnblocked()
-			}
-		}
+		return
 	}
-	for _, item := range filterOpenDecisions(m.decisions) {
-		if m.decisionMatchesActiveScope(item) {
-			m.blockingDecision = &item
-			if m.progress == progressWaitingDecision {
-				m.progressText = blockingDecisionLabel(m.blockingDecision)
-			}
-			return
-		}
+	if m.blockingDecision != nil && sameDecisionIdentity(*m.blockingDecision, *selected) {
+		merged := mergeDecisionInfo(*m.blockingDecision, *selected)
+		m.blockingDecision = &merged
+	} else {
+		m.blockingDecision = selected
 	}
-	m.ensureActiveBlockingDecisionFromOverview()
+	if m.progress == progressWaitingDecision {
+		m.progressText = blockingDecisionLabel(m.blockingDecision)
+	}
 }
 
 func (m *AppModel) syncBlockingApprovalFromList() {
-	if m.blockingApproval != nil {
-		matched := false
-		for _, item := range m.approvals {
-			if item.ID == m.blockingApproval.ID {
-				matched = true
-				merged := mergeApprovalInfo(*m.blockingApproval, item)
-				if merged.State != "pending" {
-					m.blockingApproval = nil
-					m.clearWaitingProgressIfUnblocked()
-					return
-				}
-				if !m.approvalMatchesActiveScope(merged) {
-					m.blockingApproval = nil
-					if !m.ensureActiveBlockingApprovalFromOverview() {
-						m.clearWaitingProgressIfUnblocked()
-					}
-					return
-				}
-				m.blockingApproval = &merged
-				if m.progress == progressWaitingApproval {
-					m.progressText = blockingApprovalLabel(m.blockingApproval)
-				}
-				return
-			}
+	selected := m.canonicalBlockingApprovalFromList()
+	if selected == nil {
+		m.blockingApproval = nil
+		if !m.ensureActiveBlockingApprovalFromOverview() {
+			m.clearWaitingProgressIfUnblocked()
 		}
-		if !matched {
-			m.blockingApproval = nil
-			if !m.ensureActiveBlockingApprovalFromOverview() {
-				m.clearWaitingProgressIfUnblocked()
-			}
-		}
+		return
 	}
-	for _, item := range filterPendingApprovals(m.approvals) {
-		if m.approvalMatchesActiveScope(item) {
-			m.blockingApproval = &item
-			if m.progress == progressWaitingApproval {
-				m.progressText = blockingApprovalLabel(m.blockingApproval)
-			}
-			return
-		}
+	if m.blockingApproval != nil && sameApprovalIdentity(*m.blockingApproval, *selected) {
+		merged := mergeApprovalInfo(*m.blockingApproval, *selected)
+		m.blockingApproval = &merged
+	} else {
+		m.blockingApproval = selected
 	}
-	m.ensureActiveBlockingApprovalFromOverview()
+	if m.progress == progressWaitingApproval {
+		m.progressText = blockingApprovalLabel(m.blockingApproval)
+	}
 }
 
 func (m *AppModel) clearWaitingProgressIfUnblocked() {
@@ -1951,87 +1920,292 @@ func (m *AppModel) followBlockerTailUnlessUserScrolled() {
 }
 
 func (m *AppModel) activeBlockingDecision() *projectioncontract.Decision {
-	ws := m.activeWorkspaceOverview()
-	if ws != nil {
-		if ws.State == string(common.WorkspaceStateActive) {
-			if ws.BlockingTicketID == "" || !workspaceOverviewHasProjectionAuthority(ws) {
-				return nil
-			}
-			if m.blockingDecision != nil && m.blockingDecision.ID == string(ws.BlockingTicketID) && m.decisionMatchesActiveScope(*m.blockingDecision) {
-				return m.blockingDecision
-			}
-			item := projectioncontract.Decision{
-				ID:          string(ws.BlockingTicketID),
-				WorkspaceID: string(ws.ID),
-				RunID:       string(ws.ActiveRunID),
-				State:       "open",
-			}
-			return &item
+	if strings.TrimSpace(m.canonicalBlockingTicketID) != "" &&
+		m.blockingDecision != nil && strings.TrimSpace(m.blockingDecision.ID) == strings.TrimSpace(m.canonicalBlockingTicketID) &&
+		!decisionRequiresDedicatedDefinitionFlow(*m.blockingDecision) &&
+		m.decisionMatchesActiveScope(*m.blockingDecision) &&
+		containsOpenDecisionIdentity(m.decisions, *m.blockingDecision) {
+		return m.blockingDecision
+	}
+	return nil
+}
+
+func (m *AppModel) activeDefinitionClarificationDecision() *projectioncontract.Decision {
+	workspaceID, runID, ok := m.canonicalGovernanceMutationScope()
+	ticketID := strings.TrimSpace(m.canonicalBlockingTicketID)
+	if !ok || ticketID == "" {
+		return nil
+	}
+	for idx := range m.decisions {
+		item := m.decisions[idx]
+		if strings.TrimSpace(item.ID) == ticketID && strings.TrimSpace(item.WorkspaceID) == workspaceID &&
+			strings.TrimSpace(item.RunID) == runID && common.DecisionTicketState(strings.TrimSpace(item.State)) == common.DecisionTicketStateOpen &&
+			decisionHasTypedDefinitionClarification(item) {
+			ret := item
+			return &ret
+		}
+	}
+	// RuntimeView carries the concrete resource selected from the canonical Run
+	// blocker reference. Accept it directly during the list-refresh window so a
+	// definition ticket can never transiently fall through to generic input or
+	// Resume merely because the owner list has not arrived yet.
+	if entry := m.workspaceRuntimeState(workspaceID); entry != nil && entry.HasRuntimeView {
+		view := entry.RuntimeView
+		item := view.BlockingDecision
+		if common.RunState(strings.TrimSpace(view.RunState)) == common.RunStateBlockedOnDecision &&
+			strings.TrimSpace(view.WorkspaceID) == workspaceID && strings.TrimSpace(view.ActiveRunID) == runID &&
+			item != nil && strings.TrimSpace(item.ID) == ticketID && strings.TrimSpace(item.WorkspaceID) == workspaceID &&
+			strings.TrimSpace(item.RunID) == runID && common.DecisionTicketState(strings.TrimSpace(item.State)) == common.DecisionTicketStateOpen &&
+			decisionHasTypedDefinitionClarification(*item) {
+			return cloneDecisionPtr(item)
 		}
 	}
 	return nil
+}
+
+func decisionRequiresDedicatedDefinitionFlow(item projectioncontract.Decision) bool {
+	if decisionHasTypedDefinitionClarification(item) {
+		return true
+	}
+	kind := strings.ToLower(strings.TrimSpace(item.DecisionKind))
+	failureClass := strings.ToLower(strings.TrimSpace(item.FailureClass))
+	return strings.Contains(kind, "definition_clarification") || kind == "definition_admission" || failureClass == "definition_admission"
+}
+
+func decisionHasTypedDefinitionClarification(item projectioncontract.Decision) bool {
+	return item.DefinitionClarification != nil
+}
+
+func definitionClarificationInstruction(item *projectioncontract.Decision) string {
+	if item == nil || item.DefinitionClarification == nil {
+		return "Definition clarification typed detail is unavailable; refresh the owner projection before revising Goal/DoD."
+	}
+	binding := item.DefinitionClarification
+	offendingRefs := strings.Join(binding.OffendingRefs, ",")
+	if offendingRefs == "" {
+		offendingRefs = "none"
+	}
+	return fmt.Sprintf(
+		"Definition clarification %s: class=%s binding=%s gap=%s offending=%s required=%s; revise Goal/DoD and use /run restart; generic decision answers and /run resume are disabled.",
+		shortID(item.ID), binding.Class, binding.BindingState, binding.ViolationOrGapCode, offendingRefs, binding.RequiredAction,
+	)
 }
 
 func (m *AppModel) activeBlockingApproval() *projectioncontract.Approval {
-	ws := m.activeWorkspaceOverview()
-	if ws != nil {
-		if ws.State == string(common.WorkspaceStateBlockedOnApproval) {
-			if ws.BlockingApprovalID == "" || !workspaceOverviewHasProjectionAuthority(ws) {
-				return nil
-			}
-			if m.blockingApproval != nil && m.blockingApproval.ID == string(ws.BlockingApprovalID) && m.approvalMatchesActiveScope(*m.blockingApproval) {
-				return m.blockingApproval
-			}
-			item := projectioncontract.Approval{
-				ID:          string(ws.BlockingApprovalID),
-				WorkspaceID: string(ws.ID),
-				RunID:       string(ws.ActiveRunID),
-				State:       "pending",
-			}
-			return &item
+	if strings.TrimSpace(m.canonicalBlockingApprovalID) != "" &&
+		m.blockingApproval != nil && strings.TrimSpace(m.blockingApproval.ID) == strings.TrimSpace(m.canonicalBlockingApprovalID) &&
+		m.approvalMatchesActiveScope(*m.blockingApproval) &&
+		containsPendingApprovalIdentity(m.approvals, *m.blockingApproval) {
+		return m.blockingApproval
+	}
+	return nil
+}
+
+func selectCanonicalRunBlockingDecision(run *projectioncontract.Run, items []projectioncontract.Decision) *projectioncontract.Decision {
+	if run == nil || common.RunState(strings.TrimSpace(run.State)) != common.RunStateBlockedOnDecision {
+		return nil
+	}
+	workspaceID := strings.TrimSpace(run.WorkspaceID)
+	runID := strings.TrimSpace(run.ID)
+	ticketID := strings.TrimSpace(run.BlockingTicketID)
+	if workspaceID == "" || runID == "" || ticketID == "" {
+		return nil
+	}
+	for idx := range items {
+		item := items[idx]
+		if strings.TrimSpace(item.ID) == ticketID &&
+			strings.TrimSpace(item.WorkspaceID) == workspaceID &&
+			strings.TrimSpace(item.RunID) == runID &&
+			common.DecisionTicketState(strings.TrimSpace(item.State)) == common.DecisionTicketStateOpen &&
+			!decisionRequiresDedicatedDefinitionFlow(item) {
+			ret := item
+			return &ret
 		}
 	}
 	return nil
 }
 
+func selectCanonicalRunBlockingApproval(run *projectioncontract.Run, items []projectioncontract.Approval) *projectioncontract.Approval {
+	if run == nil || common.RunState(strings.TrimSpace(run.State)) != common.RunStateBlockedOnApproval {
+		return nil
+	}
+	workspaceID := strings.TrimSpace(run.WorkspaceID)
+	runID := strings.TrimSpace(run.ID)
+	approvalID := strings.TrimSpace(run.BlockingApprovalID)
+	if workspaceID == "" || runID == "" || approvalID == "" {
+		return nil
+	}
+	for idx := range items {
+		item := items[idx]
+		if strings.TrimSpace(item.ID) == approvalID &&
+			strings.TrimSpace(item.WorkspaceID) == workspaceID &&
+			strings.TrimSpace(item.RunID) == runID &&
+			common.ApprovalState(strings.TrimSpace(item.State)) == common.ApprovalStatePending {
+			ret := item
+			return &ret
+		}
+	}
+	return nil
+}
+
+func (m *AppModel) applyCanonicalRunBlockers(run *projectioncontract.Run) {
+	m.canonicalBlockingTicketID = ""
+	m.canonicalBlockingApprovalID = ""
+	m.blockingDecision = nil
+	m.blockingApproval = nil
+	if run == nil || strings.TrimSpace(run.WorkspaceID) != strings.TrimSpace(m.activeWorkspaceID) ||
+		strings.TrimSpace(run.ID) != strings.TrimSpace(m.activeRunID) {
+		return
+	}
+	switch common.RunState(strings.TrimSpace(run.State)) {
+	case common.RunStateBlockedOnDecision:
+		m.canonicalBlockingTicketID = strings.TrimSpace(run.BlockingTicketID)
+		m.blockingDecision = selectCanonicalRunBlockingDecision(run, m.decisions)
+	case common.RunStateBlockedOnApproval:
+		m.canonicalBlockingApprovalID = strings.TrimSpace(run.BlockingApprovalID)
+		m.blockingApproval = selectCanonicalRunBlockingApproval(run, m.approvals)
+	}
+}
+
+func (m *AppModel) applyCanonicalRuntimeViewBlockers(view projectioncontract.WorkspaceRuntimeView) {
+	m.canonicalBlockingTicketID = ""
+	m.canonicalBlockingApprovalID = ""
+	m.blockingDecision = nil
+	m.blockingApproval = nil
+	workspaceID, runID, ok := m.canonicalGovernanceMutationScope()
+	if !ok || strings.TrimSpace(view.WorkspaceID) != workspaceID || strings.TrimSpace(view.ActiveRunID) != runID {
+		return
+	}
+	switch common.RunState(strings.TrimSpace(view.RunState)) {
+	case common.RunStateBlockedOnDecision:
+		if view.BlockingDecision != nil && strings.TrimSpace(view.BlockingDecision.WorkspaceID) == workspaceID &&
+			strings.TrimSpace(view.BlockingDecision.RunID) == runID &&
+			common.DecisionTicketState(strings.TrimSpace(view.BlockingDecision.State)) == common.DecisionTicketStateOpen {
+			m.canonicalBlockingTicketID = strings.TrimSpace(view.BlockingDecision.ID)
+			if !decisionRequiresDedicatedDefinitionFlow(*view.BlockingDecision) {
+				m.blockingDecision = cloneDecisionPtr(view.BlockingDecision)
+			}
+		}
+	case common.RunStateBlockedOnApproval:
+		if view.BlockingApproval != nil && strings.TrimSpace(view.BlockingApproval.WorkspaceID) == workspaceID &&
+			strings.TrimSpace(view.BlockingApproval.RunID) == runID &&
+			common.ApprovalState(strings.TrimSpace(view.BlockingApproval.State)) == common.ApprovalStatePending {
+			m.canonicalBlockingApprovalID = strings.TrimSpace(view.BlockingApproval.ID)
+			m.blockingApproval = cloneApprovalPtr(view.BlockingApproval)
+		}
+	}
+}
+
+func (m *AppModel) clearCanonicalBlockingTargets() {
+	m.canonicalBlockingTicketID = ""
+	m.canonicalBlockingApprovalID = ""
+	m.blockingDecision = nil
+	m.blockingApproval = nil
+}
+
+func (m *AppModel) canonicalBlockingDecisionFromList() *projectioncontract.Decision {
+	workspaceID, runID, ok := m.canonicalGovernanceMutationScope()
+	ticketID := strings.TrimSpace(m.canonicalBlockingTicketID)
+	if !ok || ticketID == "" {
+		return nil
+	}
+	for idx := range m.decisions {
+		item := m.decisions[idx]
+		if strings.TrimSpace(item.ID) == ticketID && strings.TrimSpace(item.WorkspaceID) == workspaceID &&
+			strings.TrimSpace(item.RunID) == runID && common.DecisionTicketState(strings.TrimSpace(item.State)) == common.DecisionTicketStateOpen &&
+			!decisionRequiresDedicatedDefinitionFlow(item) {
+			ret := item
+			return &ret
+		}
+	}
+	return nil
+}
+
+func (m *AppModel) canonicalBlockingApprovalFromList() *projectioncontract.Approval {
+	workspaceID, runID, ok := m.canonicalGovernanceMutationScope()
+	approvalID := strings.TrimSpace(m.canonicalBlockingApprovalID)
+	if !ok || approvalID == "" {
+		return nil
+	}
+	for idx := range m.approvals {
+		item := m.approvals[idx]
+		if strings.TrimSpace(item.ID) == approvalID && strings.TrimSpace(item.WorkspaceID) == workspaceID &&
+			strings.TrimSpace(item.RunID) == runID && common.ApprovalState(strings.TrimSpace(item.State)) == common.ApprovalStatePending {
+			ret := item
+			return &ret
+		}
+	}
+	return nil
+}
+
+func containsOpenDecisionIdentity(items []projectioncontract.Decision, target projectioncontract.Decision) bool {
+	if decisionRequiresDedicatedDefinitionFlow(target) {
+		return false
+	}
+	for _, item := range items {
+		if strings.TrimSpace(item.State) == "open" && strings.TrimSpace(item.ID) == strings.TrimSpace(target.ID) &&
+			strings.TrimSpace(item.WorkspaceID) == strings.TrimSpace(target.WorkspaceID) &&
+			strings.TrimSpace(item.RunID) == strings.TrimSpace(target.RunID) && !decisionRequiresDedicatedDefinitionFlow(item) {
+			return true
+		}
+	}
+	return false
+}
+
+func sameDecisionIdentity(a, b projectioncontract.Decision) bool {
+	return strings.TrimSpace(a.ID) == strings.TrimSpace(b.ID) &&
+		strings.TrimSpace(a.WorkspaceID) == strings.TrimSpace(b.WorkspaceID) &&
+		strings.TrimSpace(a.RunID) == strings.TrimSpace(b.RunID)
+}
+
+func containsPendingApprovalIdentity(items []projectioncontract.Approval, target projectioncontract.Approval) bool {
+	for _, item := range items {
+		if strings.TrimSpace(item.State) == "pending" && strings.TrimSpace(item.ID) == strings.TrimSpace(target.ID) &&
+			strings.TrimSpace(item.WorkspaceID) == strings.TrimSpace(target.WorkspaceID) &&
+			strings.TrimSpace(item.RunID) == strings.TrimSpace(target.RunID) {
+			return true
+		}
+	}
+	return false
+}
+
+func sameApprovalIdentity(a, b projectioncontract.Approval) bool {
+	return strings.TrimSpace(a.ID) == strings.TrimSpace(b.ID) &&
+		strings.TrimSpace(a.WorkspaceID) == strings.TrimSpace(b.WorkspaceID) &&
+		strings.TrimSpace(a.RunID) == strings.TrimSpace(b.RunID)
+}
+
 func (m *AppModel) decisionMatchesActiveScope(item projectioncontract.Decision) bool {
-	if m.activeWorkspaceID != "" && item.WorkspaceID != "" && item.WorkspaceID != m.activeWorkspaceID {
-		return false
-	}
-	if m.activeRunID != "" {
-		return item.RunID == m.activeRunID
-	}
-	ws := m.activeWorkspaceOverview()
-	if ws == nil || ws.State != string(common.WorkspaceStateActive) || ws.BlockingTicketID == "" || !workspaceOverviewHasProjectionAuthority(ws) {
-		return false
-	}
-	if item.ID != string(ws.BlockingTicketID) {
-		return false
-	}
-	if ws.ActiveRunID != "" {
-		return item.RunID == string(ws.ActiveRunID)
-	}
-	return true
+	workspaceID, runID, ok := m.canonicalGovernanceMutationScope()
+	return ok && strings.TrimSpace(item.ID) != "" && strings.TrimSpace(item.State) == "open" &&
+		strings.TrimSpace(item.WorkspaceID) == workspaceID && strings.TrimSpace(item.RunID) == runID
 }
 
 func (m *AppModel) approvalMatchesActiveScope(item projectioncontract.Approval) bool {
-	if m.activeWorkspaceID != "" && item.WorkspaceID != "" && item.WorkspaceID != m.activeWorkspaceID {
-		return false
+	workspaceID, runID, ok := m.canonicalGovernanceMutationScope()
+	return ok && strings.TrimSpace(item.ID) != "" && strings.TrimSpace(item.State) == "pending" &&
+		strings.TrimSpace(item.WorkspaceID) == workspaceID && strings.TrimSpace(item.RunID) == runID
+}
+
+// canonicalGovernanceMutationScope is the only scope source for Decision and
+// Approval mutation targets. GovernanceDisplay may announce a lifecycle
+// handoff, but its IDs and RunID are never accepted as mutation coordinates.
+func (m *AppModel) canonicalGovernanceMutationScope() (string, string, bool) {
+	workspaceID := strings.TrimSpace(m.activeWorkspaceID)
+	workspace := m.activeWorkspaceOverview()
+	if workspaceID == "" || workspace == nil || strings.TrimSpace(workspace.ID) != workspaceID {
+		return "", "", false
 	}
-	if m.activeRunID != "" {
-		return item.RunID == m.activeRunID
+	runID := strings.TrimSpace(workspace.ActiveRunID)
+	if runID == "" {
+		return "", "", false
 	}
-	ws := m.activeWorkspaceOverview()
-	if ws == nil || ws.State != string(common.WorkspaceStateBlockedOnApproval) || ws.BlockingApprovalID == "" || !workspaceOverviewHasProjectionAuthority(ws) {
-		return false
+	switch common.WorkspaceState(workspace.State) {
+	case common.WorkspaceStateActive, common.WorkspaceStateBlockedOnApproval:
+		return workspaceID, runID, true
+	default:
+		return "", "", false
 	}
-	if item.ID != string(ws.BlockingApprovalID) {
-		return false
-	}
-	if ws.ActiveRunID != "" {
-		return item.RunID == string(ws.ActiveRunID)
-	}
-	return true
 }
 
 func (m AppModel) activeScopeDecisions() []projectioncontract.Decision {
@@ -2301,41 +2475,33 @@ func (m *AppModel) applyRunState(state common.RunState, payload map[string]any) 
 	switch state {
 	case common.RunStateCompleted:
 		m.running = false
-		m.blockingDecision = nil
-		m.blockingApproval = nil
+		m.clearCanonicalBlockingTargets()
 		m.progress = progressCompleted
 		m.progressText = "Completed"
 	case common.RunStateFailed:
 		m.running = false
-		m.blockingDecision = nil
-		m.blockingApproval = nil
+		m.clearCanonicalBlockingTargets()
 		m.progress = progressFailed
 		m.failureReason = nonEmpty(failureMessageFromPayload(payload), m.failureHint)
 		m.progressText = nonEmpty(m.failureReason, "Run failed")
 	case common.RunStatePending:
 		m.running = false
+		m.clearCanonicalBlockingTargets()
 		m.progress = progressIdle
 		m.progressText = "Run created"
 	case common.RunStateCancelled, common.RunStateSuperseded:
 		m.running = false
-		m.blockingDecision = nil
-		m.blockingApproval = nil
+		m.clearCanonicalBlockingTargets()
 		m.progress = progressInterrupted
 		m.progressText = string(state)
 	case common.RunStateBlockedOnDecision:
 		m.running = false
 		m.progress = progressWaitingDecision
-		if ticketID := common.TicketID(firstPayloadString(payload, "ticketId", "ID", "id", backend.PayloadKeyBlockingTicketID)); ticketID != "" {
-			m.setBlockingDecision(ticketID, common.WorkspaceID(m.activeWorkspaceID), common.RunID(m.activeRunID), "", "")
-		}
-		m.progressText = nonEmpty(blockingDecisionLabel(m.blockingDecision), "Waiting for decision")
+		m.progressText = nonEmpty(blockingDecisionLabel(m.activeBlockingDecision()), "Waiting for decision; refreshing owner resource")
 	case common.RunStateBlockedOnApproval:
 		m.running = false
 		m.progress = progressWaitingApproval
-		if approvalID := common.ApprovalID(firstPayloadString(payload, "approvalId", "ID", "id", backend.PayloadKeyBlockingApprovalID)); approvalID != "" {
-			m.setBlockingApproval(approvalID, common.WorkspaceID(m.activeWorkspaceID), common.RunID(m.activeRunID), "", "", nil)
-		}
-		m.progressText = nonEmpty(blockingApprovalLabel(m.blockingApproval), "Waiting for approval")
+		m.progressText = nonEmpty(blockingApprovalLabel(m.activeBlockingApproval()), "Waiting for approval; refreshing owner resource")
 	default:
 		if state != "" {
 			if runStateIsLive(state) {
@@ -2363,6 +2529,7 @@ func (m *AppModel) applyRunControlState(run *projectioncontract.Run, message str
 	}
 	if runRequiresFreshActivation(run) {
 		m.running = false
+		m.clearCanonicalBlockingTargets()
 		m.progress = progressIdle
 		m.progressText = "Run requires a fresh activation"
 		m.result = freshActivationInstruction(run)
@@ -2375,41 +2542,33 @@ func (m *AppModel) applyRunControlState(run *projectioncontract.Run, message str
 	switch common.RunState(run.State) {
 	case common.RunStateCompleted:
 		m.running = false
-		m.blockingDecision = nil
-		m.blockingApproval = nil
+		m.clearCanonicalBlockingTargets()
 		m.progress = progressCompleted
 		m.progressText = nonEmpty(message, "Completed")
 	case common.RunStateFailed:
 		m.running = false
-		m.blockingDecision = nil
-		m.blockingApproval = nil
+		m.clearCanonicalBlockingTargets()
 		m.progress = progressFailed
 		m.failureReason = run.FailureReason
 		m.progressText = nonEmpty(message, m.failureReason, "Run failed")
 	case common.RunStatePending:
 		m.running = false
+		m.clearCanonicalBlockingTargets()
 		m.progress = progressIdle
 		m.progressText = nonEmpty(message, "Run created")
 	case common.RunStateCancelled, common.RunStateSuperseded:
 		m.running = false
-		m.blockingDecision = nil
-		m.blockingApproval = nil
+		m.clearCanonicalBlockingTargets()
 		m.progress = progressInterrupted
 		m.progressText = nonEmpty(message, string(run.State))
 	case common.RunStateBlockedOnDecision:
 		m.running = false
 		m.progress = progressWaitingDecision
-		if run.BlockingTicketID != "" {
-			m.setBlockingDecision(common.TicketID(run.BlockingTicketID), common.WorkspaceID(run.WorkspaceID), common.RunID(run.ID), "", "")
-		}
-		m.progressText = nonEmpty(message, blockingDecisionLabel(m.blockingDecision), "Waiting for decision")
+		m.progressText = nonEmpty(message, blockingDecisionLabel(m.activeBlockingDecision()), "Waiting for decision; refreshing owner resource")
 	case common.RunStateBlockedOnApproval:
 		m.running = false
 		m.progress = progressWaitingApproval
-		if run.BlockingApprovalID != "" {
-			m.setBlockingApproval(common.ApprovalID(run.BlockingApprovalID), common.WorkspaceID(run.WorkspaceID), common.RunID(run.ID), "", "", nil)
-		}
-		m.progressText = nonEmpty(message, blockingApprovalLabel(m.blockingApproval), "Waiting for approval")
+		m.progressText = nonEmpty(message, blockingApprovalLabel(m.activeBlockingApproval()), "Waiting for approval; refreshing owner resource")
 	default:
 		m.running = true
 		m.progress = progressRunning
@@ -2501,8 +2660,7 @@ func (m *AppModel) clearRunDisplayState() {
 	m.repairLoop = ""
 	m.failureReason = ""
 	m.failureHint = ""
-	m.blockingDecision = nil
-	m.blockingApproval = nil
+	m.clearCanonicalBlockingTargets()
 	m.decisions = nil
 	m.approvals = nil
 	m.syncMainViewportToCurrentContent()
@@ -2901,8 +3059,8 @@ func snapshotResultSummary(snapshot *projectioncontract.WorkspaceSnapshot, runID
 	if snapshot == nil {
 		return ""
 	}
-	if snapshot.Outcome.Summary != "" && (runID == "" || snapshot.Outcome.RunID == "" || snapshot.Outcome.RunID == string(runID)) {
-		return snapshot.Outcome.Summary
+	if snapshot.DisplayOutcome.Summary != "" && (runID == "" || snapshot.DisplayOutcome.RunID == "" || snapshot.DisplayOutcome.RunID == string(runID)) {
+		return snapshot.DisplayOutcome.Summary
 	}
 	for i := len(snapshot.Results) - 1; i >= 0; i-- {
 		item := snapshot.Results[i]
@@ -3152,7 +3310,7 @@ func snapshotArtifactLabels(snapshot *projectioncontract.WorkspaceSnapshot, runI
 	if snapshot == nil {
 		return nil
 	}
-	out := make([]string, 0, len(snapshot.Artifacts)+len(snapshot.Outcome.ArtifactRefs))
+	out := make([]string, 0, len(snapshot.Artifacts)+len(snapshot.DisplayOutcome.ArtifactRefs))
 	seen := map[string]struct{}{}
 	add := func(value string) {
 		value = strings.TrimSpace(value)
@@ -3171,7 +3329,7 @@ func snapshotArtifactLabels(snapshot *projectioncontract.WorkspaceSnapshot, runI
 		}
 		add(nonEmpty(string(item.ID), item.Name, item.URI, item.Summary))
 	}
-	for _, ref := range snapshot.Outcome.ArtifactRefs {
+	for _, ref := range snapshot.DisplayOutcome.ArtifactRefs {
 		add(ref)
 	}
 	for _, result := range snapshot.Results {
@@ -3453,11 +3611,29 @@ func mergeDecisionInfo(existing projectioncontract.Decision, next projectioncont
 	if next.RunID != "" {
 		existing.RunID = next.RunID
 	}
+	if next.StepID != "" {
+		existing.StepID = next.StepID
+	}
 	if next.Reason != "" {
 		existing.Reason = next.Reason
 	}
 	if next.Question != "" {
 		existing.Question = next.Question
+	}
+	if next.DecisionKind != "" {
+		existing.DecisionKind = next.DecisionKind
+	}
+	if next.FailureClass != "" {
+		existing.FailureClass = next.FailureClass
+	}
+	if next.FailureSignature != "" {
+		existing.FailureSignature = next.FailureSignature
+	}
+	if len(next.AllowedRecoveryActions) > 0 {
+		existing.AllowedRecoveryActions = append([]string(nil), next.AllowedRecoveryActions...)
+	}
+	if next.DefinitionClarification != nil {
+		existing.DefinitionClarification = projectioncontract.CloneDefinitionClarification(next.DefinitionClarification)
 	}
 	if len(next.Context.Fields) > 0 {
 		existing.Context = next.Context.Clone()

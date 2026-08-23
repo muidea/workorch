@@ -85,6 +85,27 @@ func shouldSkipWorkspaceListPath(path string) bool {
 	}
 }
 
+// runtimeFileDeliverableTargetEligible applies the same owner-private scope
+// rule used by the workspace manifest to one canonical workspace-relative
+// target. It does not inspect file names semantically: it only prevents a
+// prospective Runtime target from being admitted below a tree that the File
+// owner deliberately excludes from its deliverable manifest.
+func runtimeFileDeliverableTargetEligible(targetRef string) bool {
+	targetRef = strings.TrimSpace(targetRef)
+	if targetRef == "" || targetRef == "." || strings.Contains(targetRef, "\\") {
+		return false
+	}
+	if canonical := filepath.ToSlash(filepath.Clean(filepath.FromSlash(targetRef))); canonical != targetRef {
+		return false
+	}
+	for _, part := range strings.Split(targetRef, "/") {
+		if part == "" || part == "." || part == ".." || shouldSkipWorkspaceListPath(part) {
+			return false
+		}
+	}
+	return true
+}
+
 func fileKind(info os.FileInfo) string {
 	if info.Mode()&os.ModeSymlink != 0 {
 		return "symlink"
@@ -93,14 +114,6 @@ func fileKind(info os.FileInfo) string {
 		return "directory"
 	}
 	return "file"
-}
-
-func fileHashAndBinary(path string, _ int) (string, bool) {
-	hash, binary, err := streamFileHashAndBinary(path)
-	if err != nil {
-		return "", false
-	}
-	return hash, binary
 }
 
 func looksBinary(data []byte) bool {

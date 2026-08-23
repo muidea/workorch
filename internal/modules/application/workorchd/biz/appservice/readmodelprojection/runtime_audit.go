@@ -3,7 +3,6 @@ package readmodelprojection
 import (
 	"sort"
 
-	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/appmodelcore"
 	"github.com/muidea/workorch/internal/pkg/common"
 	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
@@ -12,11 +11,11 @@ import (
 // mapRuntimeAudit projects persisted Runtime metadata for observation. It
 // intentionally never returns raw snapshot content, candidate parameters or
 // owner-private tool payloads, and it does not infer transitions from history.
-func mapRuntimeAudit(run appmodelcore.Run) *projectioncontract.RuntimeAudit {
-	if run.RuntimeState == nil {
+func mapRuntimeAudit(runtimeState *runtimecontract.RuntimeStateRecord) *projectioncontract.RuntimeAudit {
+	if runtimeState == nil {
 		return nil
 	}
-	state := run.RuntimeState.Clone()
+	state := runtimeState.Clone()
 	facts := state.Facts.Normalized()
 	ret := &projectioncontract.RuntimeAudit{
 		WorkspaceID: string(facts.WorkspaceID), RunID: string(facts.RunID), SchemaVersion: state.SchemaVersion,

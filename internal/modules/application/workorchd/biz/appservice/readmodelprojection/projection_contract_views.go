@@ -264,26 +264,27 @@ func resultRefsFromTaskProgress(progress projectioncontract.TaskProgress) []stri
 
 func projectDecisionView(item projectioncontract.Decision) projectioncontract.Decision {
 	return projectioncontract.Decision{
-		ID:                     item.ID,
-		WorkspaceID:            item.WorkspaceID,
-		RunID:                  item.RunID,
-		StepID:                 item.StepID,
-		Reason:                 item.Reason,
-		DecisionKind:           item.DecisionKind,
-		Question:               item.Question,
-		Context:                projectDecisionContextView(item.Context),
-		FailureClass:           item.FailureClass,
-		FailureSignature:       item.FailureSignature,
-		AllowedRecoveryActions: append([]string(nil), item.AllowedRecoveryActions...),
-		State:                  item.State,
-		ResolutionID:           item.ResolutionID,
-		ResolutionType:         item.ResolutionType,
-		ResolutionPayload:      projectDecisionPayloadView(item.ResolutionPayload),
-		AutoGovernance:         item.AutoGovernance,
-		ResolvedAt:             item.ResolvedAt,
-		ResolvedBy:             item.ResolvedBy,
-		CreatedAt:              item.CreatedAt,
-		UpdatedAt:              item.UpdatedAt,
+		ID:                      item.ID,
+		WorkspaceID:             item.WorkspaceID,
+		RunID:                   item.RunID,
+		StepID:                  item.StepID,
+		Reason:                  item.Reason,
+		DecisionKind:            item.DecisionKind,
+		Question:                item.Question,
+		Context:                 projectDecisionContextView(item.Context),
+		FailureClass:            item.FailureClass,
+		FailureSignature:        item.FailureSignature,
+		AllowedRecoveryActions:  append([]string(nil), item.AllowedRecoveryActions...),
+		DefinitionClarification: projectioncontract.CloneDefinitionClarification(item.DefinitionClarification),
+		State:                   item.State,
+		ResolutionID:            item.ResolutionID,
+		ResolutionType:          item.ResolutionType,
+		ResolutionPayload:       projectDecisionPayloadView(item.ResolutionPayload),
+		AutoGovernance:          item.AutoGovernance,
+		ResolvedAt:              item.ResolvedAt,
+		ResolvedBy:              item.ResolvedBy,
+		CreatedAt:               item.CreatedAt,
+		UpdatedAt:               item.UpdatedAt,
 	}
 }
 
@@ -892,7 +893,7 @@ func mergeWorkspaceSnapshotPatches(existing []projectioncontract.Patch, latest [
 
 // source: workspace_outcome_apply.go
 
-func applyWorkspaceRunOutcome(ret *projectioncontract.WorkspaceOutcome, outcome projectioncontract.RunOutcome) {
+func applyWorkspaceRunOutcome(ret *projectioncontract.WorkspaceDisplayOutcome, outcome projectioncontract.RunDisplayOutcome) {
 	if ret == nil {
 		return
 	}

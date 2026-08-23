@@ -4,20 +4,23 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/appmodelcore"
-	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
+	runmodel "github.com/muidea/workorch/internal/modules/blocks/run/pkg/models"
 	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
-func mapAcceptanceProjection(run appmodelcore.Run) projectioncontract.AcceptanceProjection {
-	if run.RuntimeState == nil {
+// mapAcceptanceProjection consumes the Run owner's aggregate only while the
+// owner read is in scope. Its result is a bounded immutable public projection;
+// neither the aggregate nor a clone is retained by workorchd.
+func mapAcceptanceProjection(run *runmodel.Run) projectioncontract.AcceptanceProjection {
+	if run == nil || run.RuntimeState == nil {
 		return emptyAcceptanceProjection()
 	}
-	facts := run.RuntimeState.Facts.Normalized()
-	decisionTerminal := run.RuntimeState.Decision.Terminal != nil ||
-		run.RuntimeState.Decision.State == runtimecontract.ConvergenceStateComplete ||
-		run.RuntimeState.Decision.State == runtimecontract.ConvergenceStateFailed
+	state := run.RuntimeState
+	facts := state.Facts.Normalized()
+	decisionTerminal := state.Decision.Terminal != nil ||
+		state.Decision.State == runtimecontract.ConvergenceStateComplete ||
+		state.Decision.State == runtimecontract.ConvergenceStateFailed
 	projection := projectioncontract.AcceptanceProjection{}
 	byID := map[string]string{}
 	for _, item := range facts.Coverage {
@@ -53,7 +56,7 @@ func mapAcceptanceProjection(run appmodelcore.Run) projectioncontract.Acceptance
 	projection.CurrentFocus = &projectioncontract.CoverageFocus{
 		ID: facts.Focus.ID, SliceID: facts.Focus.SliceID,
 		RequiredEvidenceKinds: append([]string(nil), facts.Focus.RequiredEvidenceKinds...),
-		TargetRefs:            append([]string(nil), facts.Focus.TargetRefs...), State: string(run.RuntimeState.Decision.State),
+		TargetRefs:            append([]string(nil), facts.Focus.TargetRefs...), State: string(state.Decision.State),
 		Attempt: facts.Repair.RepairAttempts,
 	}
 	for _, id := range facts.Focus.CoverageWorkItemIDs {
@@ -64,7 +67,7 @@ func mapAcceptanceProjection(run appmodelcore.Run) projectioncontract.Acceptance
 		projection.CurrentFocus.FailureSignature = facts.Repair.ActiveGap.FailureSignature
 	}
 	projection.Budget = &projectioncontract.ConvergenceBudget{
-		FocusID: facts.Focus.ID, SliceID: facts.Focus.SliceID, State: string(run.RuntimeState.Decision.State), Decision: string(run.RuntimeState.Decision.State),
+		FocusID: facts.Focus.ID, SliceID: facts.Focus.SliceID, State: string(state.Decision.State), Decision: string(state.Decision.State),
 		MaxRepairAttemptsPerFocus: facts.ConvergencePolicy.MaxRepairAttemptsPerFocus,
 		MaxValidationOnlyRetries:  facts.ConvergencePolicy.MaxValidationOnlyRetriesPerFocus,
 		RepairAttempts:            facts.Repair.RepairAttempts, ValidationOnlyRetries: facts.Repair.ValidationOnlyRetries,
@@ -79,30 +82,30 @@ func mapAcceptanceProjection(run appmodelcore.Run) projectioncontract.Acceptance
 		MaxPrerequisiteRefreshes:    facts.RecoveryPolicy.MaxPrerequisiteRefreshes,
 		PrerequisiteRefreshes:       facts.Recovery.Used(runtimecontract.RuntimeRecoveryBudgetPrerequisiteRefresh),
 	}
-	if run.RuntimeState.ExecutionBudget.Policy.PolicyRevision != "" {
+	if state.ExecutionBudget.Policy.PolicyRevision != "" {
 		activeWaitID := ""
-		if wait, found := activeRuntimeRecoverableWait(run.RuntimeState.RecoverableWaits); found {
+		if wait, found := activeRuntimeRecoverableWait(state.RecoverableWaits); found {
 			activeWaitID = wait.WaitID
-			if view, viewErr := runtimecontract.RuntimeRecoverableWaitProjection(wait, run.RuntimeState.StateRevision); viewErr == nil {
+			if view, viewErr := runtimecontract.RuntimeRecoverableWaitProjection(wait, state.StateRevision); viewErr == nil {
 				projection.RecoverableWait = &view
 			}
 		}
 		terminalCode := ""
-		if run.RuntimeState.Decision.Terminal != nil {
-			terminalCode = strings.TrimSpace(run.RuntimeState.Decision.Terminal.Code)
+		if state.Decision.Terminal != nil {
+			terminalCode = strings.TrimSpace(state.Decision.Terminal.Code)
 		}
-		if view, err := runtimecontract.BuildRuntimeExecutionBudgetView(facts.WorkspaceID, facts.RunID, run.RuntimeState.StateRevision, run.RuntimeState.ExecutionBudget, activeWaitID, terminalCode, runtimecontract.RuntimeExecutionBudgetSourceUsageFromFacts(facts)); err == nil {
+		if view, err := runtimecontract.BuildRuntimeExecutionBudgetView(facts.WorkspaceID, facts.RunID, state.StateRevision, state.ExecutionBudget, activeWaitID, terminalCode, runtimecontract.RuntimeExecutionBudgetSourceUsageFromFacts(facts)); err == nil {
 			projection.ExecutionBudget = &view
 		}
 	}
 	if facts.RepairDirective != nil {
 		projection.RepairDirective = runtimeRepairDirectiveProjection(facts.RepairDirective)
 	}
-	projection.Operations = runtimeOperationStatuses(*run.RuntimeState)
-	projection.SemanticPlanning = runtimeSemanticPlanningProjection(*run.RuntimeState)
+	projection.Operations = runtimeOperationStatuses(*state)
+	projection.SemanticPlanning = runtimeSemanticPlanningProjection(*state)
 	projection.CapabilityStates = runtimeCapabilityStateStatuses(facts)
-	projection.Governance = runtimeGovernanceStatuses(*run.RuntimeState)
-	projection.Audit = mapRuntimeAudit(run)
+	projection.Governance = runtimeGovernanceStatuses(*state)
+	projection.Audit = mapRuntimeAudit(state)
 	projection.Summary = summarizeAcceptanceSlices(projection.Slices)
 	return projection
 }
@@ -237,37 +240,6 @@ func runtimeGovernanceStatuses(state runtimecontract.RuntimeStateRecord) []proje
 		return ret[left].AuthoritySnapshotID < ret[right].AuthoritySnapshotID
 	})
 	return ret
-}
-
-func mapWorkspaceAcceptanceProjection(snapshot readmodelcore.WorkspaceSnapshotState) projectioncontract.AcceptanceProjection {
-	if snapshot.Run != nil {
-		return mapAcceptanceProjection(*snapshot.Run)
-	}
-	if run := selectWorkspaceAcceptanceRun(snapshot); run != nil {
-		return mapAcceptanceProjection(*run)
-	}
-	return emptyAcceptanceProjection()
-}
-
-func selectWorkspaceAcceptanceRun(snapshot readmodelcore.WorkspaceSnapshotState) *appmodelcore.Run {
-	for _, runID := range []string{
-		strings.TrimSpace(snapshot.Workspace.ActiveRunID),
-		strings.TrimSpace(snapshot.TaskProgress.RunID),
-		strings.TrimSpace(snapshot.Outcome.RunID),
-	} {
-		if runID == "" {
-			continue
-		}
-		for idx := range snapshot.Runs {
-			if snapshot.Runs[idx].ID == runID {
-				return &snapshot.Runs[idx]
-			}
-		}
-	}
-	if len(snapshot.Runs) == 0 {
-		return nil
-	}
-	return &snapshot.Runs[len(snapshot.Runs)-1]
 }
 
 func emptyAcceptanceProjection() projectioncontract.AcceptanceProjection {

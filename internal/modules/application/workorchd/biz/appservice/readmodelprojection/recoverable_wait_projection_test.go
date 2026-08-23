@@ -4,7 +4,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/appmodelcore"
+	runmodel "github.com/muidea/workorch/internal/modules/blocks/run/pkg/models"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
@@ -18,7 +18,7 @@ func TestRuntimeReadModelsProjectRecoverableWaitDistinctFromGovernanceAndTermina
 	}
 	assertProjectedRuntimeBudgetDimension(t, progress.ExecutionBudget, runtimecontract.RuntimeBudgetDimensionOperationRecovery, 1)
 	assertProjectedRuntimeBudgetDimension(t, progress.ExecutionBudget, runtimecontract.RuntimeBudgetDimensionSameFocusRepair, 2)
-	acceptance := mapAcceptanceProjection(appmodelcore.Run{ID: "run-wait", RuntimeState: &state})
+	acceptance := mapAcceptanceProjection(&runmodel.Run{ID: "run-wait", RuntimeState: &state})
 	if acceptance.RecoverableWait == nil || acceptance.RecoverableWait.WaitID != state.RecoverableWaits[0].WaitID ||
 		acceptance.ExecutionBudget == nil || acceptance.ExecutionBudget.ActiveWaitID != state.RecoverableWaits[0].WaitID ||
 		len(acceptance.Governance) != 0 {

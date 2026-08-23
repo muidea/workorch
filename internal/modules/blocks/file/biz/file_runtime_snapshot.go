@@ -45,17 +45,32 @@ func (a *RuntimeAdapter) AcquireTargetSnapshot(ctx context.Context, workspaceDir
 	return snapshot, nil
 }
 
+type workspaceManifestObservation struct {
+	manifest   runtimemodel.WorkspaceManifest
+	entryCount int
+}
+
 func (a *RuntimeAdapter) AcquireWorkspaceManifest(workspaceDirectory string) (runtimemodel.WorkspaceManifest, error) {
+	observation, err := a.acquireWorkspaceManifestObservation(workspaceDirectory)
+	return observation.manifest, err
+}
+
+// acquireWorkspaceManifestObservation keeps the File owner's bounded list
+// cardinality alongside the file-only manifest. Directories consume the same
+// ListFiles bound as files, but are intentionally absent from TargetRefs; a
+// prospective create must therefore reserve capacity against entryCount, not
+// only the deliverable file count.
+func (a *RuntimeAdapter) acquireWorkspaceManifestObservation(workspaceDirectory string) (workspaceManifestObservation, error) {
 	result, err := a.ListFiles(FileListRequest{
 		WorkspaceDirectory: workspaceDirectory,
 		Path:               ".",
 		Recursive:          true,
 	})
 	if err != nil {
-		return runtimemodel.WorkspaceManifest{}, err
+		return workspaceManifestObservation{}, err
 	}
 	if result.Truncated {
-		return runtimemodel.WorkspaceManifest{}, fmt.Errorf("%w: workspace manifest exceeds bounded file listing", common.ErrInvalidArgument)
+		return workspaceManifestObservation{}, fmt.Errorf("%w: workspace manifest exceeds bounded file listing", common.ErrInvalidArgument)
 	}
 	targetRefs := make([]string, 0, len(result.Entries))
 	h := sha256.New()
@@ -70,8 +85,11 @@ func (a *RuntimeAdapter) AcquireWorkspaceManifest(workspaceDirectory string) (ru
 		targetRefs = append(targetRefs, ref)
 		_, _ = fmt.Fprintf(h, "%d:%s|%s|%d|%s;", len(ref), ref, entry.ContentHash, entry.Size, entry.ModifiedAt)
 	}
-	return runtimemodel.WorkspaceManifest{
-		Revision:   hex.EncodeToString(h.Sum(nil)),
-		TargetRefs: targetRefs,
+	return workspaceManifestObservation{
+		manifest: runtimemodel.WorkspaceManifest{
+			Revision:   hex.EncodeToString(h.Sum(nil)),
+			TargetRefs: targetRefs,
+		},
+		entryCount: len(result.Entries),
 	}, nil
 }

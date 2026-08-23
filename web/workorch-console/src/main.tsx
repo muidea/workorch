@@ -42,7 +42,10 @@ function ConsoleApp() {
           setView('workspaceDetail');
         }} />;
       case 'governance':
-        return <GovernanceQueuePage />;
+        return <GovernanceQueuePage onOpenWorkspace={(workspaceId) => {
+          setSelectedWorkspaceId(workspaceId);
+          setView('workspaceDetail');
+        }} />;
       case 'workspaceDetail':
         return <WorkspaceDetailPage selectedWorkspaceId={selectedWorkspaceId} />;
       case 'runtimeControl':

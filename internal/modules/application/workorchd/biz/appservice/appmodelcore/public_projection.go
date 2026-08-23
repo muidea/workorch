@@ -13,8 +13,6 @@ func ProjectWorkspace(item Workspace) projectioncontract.Workspace {
 		DeliverableDirectory: item.DeliverableDirectory,
 		State:                item.State,
 		ActiveRunID:          item.ActiveRunID,
-		BlockingTicketID:     item.BlockingTicketID,
-		BlockingApprovalID:   item.BlockingApprovalID,
 		TemplateID:           item.TemplateID,
 		ProfileID:            item.ProfileID,
 		DefaultLLMSelection:  item.DefaultLLMSelection,

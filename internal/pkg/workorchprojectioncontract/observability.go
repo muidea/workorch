@@ -7,7 +7,9 @@ type RunObservability RunObservabilityOf[Run]
 // private run view; protocol output uses the canonical Run projection.
 type RunObservabilityOf[R any] struct {
 	Run                     R                       `json:"run"`
-	Outcome                 RunOutcome              `json:"outcome"`
+	DisplayOutcome          RunDisplayOutcome       `json:"displayOutcome"`
+	GovernanceDisplay       GovernanceDisplay       `json:"governanceDisplay,omitempty"`
+	ConsistencyDiagnostic   *ConsistencyDiagnostic  `json:"consistencyDiagnostic,omitempty"`
 	Progress                RunProgress             `json:"progress"`
 	TaskProgress            TaskProgress            `json:"taskProgress"`
 	RepairLoop              RepairLoop              `json:"repairLoop"`

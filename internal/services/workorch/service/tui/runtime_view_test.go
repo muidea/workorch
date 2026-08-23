@@ -897,6 +897,75 @@ func TestEqualRevisionEqualContentReadbackIsNoOp(t *testing.T) {
 	}
 }
 
+func TestEqualRevisionDefinitionClassificationRevokesGenericMutationTarget(t *testing.T) {
+	m := NewAppModel(newFake(t), "ws-definition", "")
+	projectWorkspace(&m, projectioncontract.Workspace{
+		ID: "ws-definition", State: string(common.WorkspaceStateActive), ActiveRunID: "run-definition",
+	})
+	base := projectioncontract.WorkspaceRuntimeView{
+		WorkspaceID: "ws-definition", ActiveRunID: "run-definition", RunState: string(common.RunStateBlockedOnDecision),
+		Revision: projectioncontract.WorkspaceRefreshRevision{WorkspaceRevision: 4, RuntimeStateRevision: 9},
+		BlockingDecision: &projectioncontract.Decision{
+			ID: "ticket-definition", WorkspaceID: "ws-definition", RunID: "run-definition", State: "open",
+		},
+	}
+	m.decisions = []projectioncontract.Decision{*base.BlockingDecision}
+	m.applyWorkspaceRuntimeView(base, false)
+	if m.activeBlockingDecision() == nil {
+		t.Fatal("generic canonical blocker was not admitted before classification arrived")
+	}
+
+	classified := base
+	classified.BlockingDecision = cloneDecisionPtr(base.BlockingDecision)
+	classified.BlockingDecision.DecisionKind = "runtime_definition_clarification"
+	classified.BlockingDecision.FailureClass = "runtime_definition_gap"
+	classified.BlockingDecision.DefinitionClarification = &projectioncontract.DefinitionClarification{
+		Class: "runtime_definition", BindingState: "open", RequiredAction: "revise_definition_and_restart",
+		ViolationOrGapCode: "implicit_one_of", OffendingRefs: []string{"dod:item-1"},
+	}
+	m.applyWorkspaceRuntimeView(classified, false)
+	if m.activeBlockingDecision() != nil || m.activeDefinitionClarificationDecision() == nil {
+		t.Fatalf("equal-revision classification did not revoke generic target: generic=%+v definition=%+v", m.activeBlockingDecision(), m.activeDefinitionClarificationDecision())
+	}
+}
+
+func TestGovernanceResourceEqualityCoversScopeAndDecisionClassification(t *testing.T) {
+	decision := &projectioncontract.Decision{ID: "ticket", WorkspaceID: "ws", RunID: "run", State: "open", DecisionKind: "repair"}
+	for name, mutate := range map[string]func(*projectioncontract.Decision){
+		"workspace":    func(item *projectioncontract.Decision) { item.WorkspaceID = "ws-other" },
+		"run":          func(item *projectioncontract.Decision) { item.RunID = "run-other" },
+		"kind":         func(item *projectioncontract.Decision) { item.DecisionKind = "runtime_definition_clarification" },
+		"failureClass": func(item *projectioncontract.Decision) { item.FailureClass = "runtime_definition_gap" },
+		"definition": func(item *projectioncontract.Decision) {
+			item.DefinitionClarification = &projectioncontract.DefinitionClarification{
+				Class: "runtime_definition", BindingState: "open", RequiredAction: "revise_definition_and_restart",
+				ViolationOrGapCode: "implicit_one_of", OffendingRefs: []string{"dod:item-1"},
+			}
+		},
+	} {
+		t.Run("decision_"+name, func(t *testing.T) {
+			changed := cloneDecisionPtr(decision)
+			mutate(changed)
+			if decisionInfoEqual(decision, changed) {
+				t.Fatalf("%s mutation was treated as equal", name)
+			}
+		})
+	}
+	approval := &projectioncontract.Approval{ID: "approval", WorkspaceID: "ws", RunID: "run", State: "pending"}
+	for name, mutate := range map[string]func(*projectioncontract.Approval){
+		"workspace": func(item *projectioncontract.Approval) { item.WorkspaceID = "ws-other" },
+		"run":       func(item *projectioncontract.Approval) { item.RunID = "run-other" },
+	} {
+		t.Run("approval_"+name, func(t *testing.T) {
+			changed := cloneApprovalPtr(approval)
+			mutate(changed)
+			if approvalInfoEqual(approval, changed) {
+				t.Fatalf("%s mutation was treated as equal", name)
+			}
+		})
+	}
+}
+
 // FR02: equal revision but mutated applied fields must not be treated as no-op.
 func TestEqualRevisionFieldMutationsAreNotNoOp(t *testing.T) {
 	m := NewAppModel(newFake(t), "ws-fr02", "")
@@ -916,7 +985,7 @@ func TestEqualRevisionFieldMutationsAreNotNoOp(t *testing.T) {
 			WorkspaceID: "ws-fr02", DisplayRunID: "run-1", ActivityRevision: 3,
 			Items: []projectioncontract.WorkspaceActivityItem{{ID: "a1", Summary: "s1"}},
 		},
-		Outcome: projectioncontract.WorkspaceOutcome{State: "running", Summary: "ok", Reason: "none"},
+		DisplayOutcome: projectioncontract.WorkspaceDisplayOutcome{State: "running", Summary: "ok", Reason: "none"},
 		RunHeartbeat: projectioncontract.RunHeartbeat{
 			WorkspaceID: "ws-fr02", RunID: "run-1", State: "running", Summary: "hb-old",
 		},
@@ -939,14 +1008,14 @@ func TestEqualRevisionFieldMutationsAreNotNoOp(t *testing.T) {
 
 	// Mutate Outcome.Reason only — previously not compared.
 	changed := base
-	changed.Outcome.Reason = "new-reason"
+	changed.DisplayOutcome.Reason = "new-reason"
 	m.applyWorkspaceRuntimeView(changed, false)
 	if m.mainViewportUnreadCount != unreadBefore+1 {
 		t.Fatalf("Outcome.Reason-only mutation unread = %d, want %d", m.mainViewportUnreadCount, unreadBefore+1)
 	}
 	entry := m.workspaceRuntimeState("ws-fr02")
-	if entry == nil || entry.RuntimeView.Outcome.Reason != "new-reason" {
-		t.Fatalf("Outcome.Reason not applied: %+v", entry.RuntimeView.Outcome)
+	if entry == nil || entry.RuntimeView.DisplayOutcome.Reason != "new-reason" {
+		t.Fatalf("Outcome.Reason not applied: %+v", entry.RuntimeView.DisplayOutcome)
 	}
 
 	// Reset applied view then mutate Acceptance.

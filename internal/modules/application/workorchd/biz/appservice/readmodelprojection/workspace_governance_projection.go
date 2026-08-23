@@ -10,95 +10,122 @@ import (
 )
 
 func normalizeWorkspaceGovernanceProjection(snapshot readmodelcore.WorkspaceSnapshotState) readmodelcore.WorkspaceSnapshotState {
-	snapshot.Workspace.State = string(common.CanonicalWorkspaceOwnerState(common.WorkspaceState(snapshot.Workspace.State)))
-	activeRunID := strings.TrimSpace(snapshot.Workspace.ActiveRunID)
-	if activeRunID == "" && snapshot.Run != nil {
-		activeRunID = strings.TrimSpace(snapshot.Run.ID)
-	}
-	if activeRunID == "" {
-		snapshot.Workspace.BlockingTicketID = ""
-		snapshot.Workspace.BlockingApprovalID = ""
-		snapshot.TaskProgress.BlockingTicketID = ""
-		snapshot.TaskProgress.BlockingApprovalID = ""
-		snapshot.TaskProgress.Recovery.BlockingTicketID = ""
-		snapshot.TaskProgress.Recovery.BlockingApprovalID = ""
-		return snapshot
-	}
-
-	openDecisionID := openDecisionBlockerID(snapshot.Decisions, snapshot.Workspace.ID, activeRunID, snapshot.Workspace.BlockingTicketID)
-	if openDecisionID == "" && snapshot.Run != nil {
-		openDecisionID = openDecisionBlockerID(snapshot.Decisions, snapshot.Workspace.ID, activeRunID, snapshot.Run.BlockingTicketID)
-	}
-	openApprovalID := openApprovalBlockerID(snapshot.Approvals, snapshot.Workspace.ID, activeRunID, snapshot.Workspace.BlockingApprovalID)
-	if openApprovalID == "" && snapshot.Run != nil {
-		openApprovalID = openApprovalBlockerID(snapshot.Approvals, snapshot.Workspace.ID, activeRunID, snapshot.Run.BlockingApprovalID)
-	}
-
-	snapshot.Workspace.BlockingTicketID = openDecisionID
-	snapshot.Workspace.BlockingApprovalID = openApprovalID
-	snapshot.TaskProgress.BlockingTicketID = openDecisionID
-	snapshot.TaskProgress.BlockingApprovalID = openApprovalID
-	snapshot.TaskProgress.Recovery.BlockingTicketID = openDecisionID
-	snapshot.TaskProgress.Recovery.BlockingApprovalID = openApprovalID
-	switch {
-	case openDecisionID != "":
-		snapshot.TaskProgress.Recovery.Mode = "wait_decision"
-		snapshot.TaskProgress.Recovery.NextAction = "resolve_decision_ticket"
-	case openApprovalID != "":
-		snapshot.TaskProgress.Recovery.Mode = "wait_approval"
-		snapshot.TaskProgress.Recovery.NextAction = "resolve_approval"
-	case snapshot.TaskProgress.Recovery.Mode == "wait_decision" || snapshot.TaskProgress.Recovery.Mode == "wait_approval":
-		snapshot.TaskProgress.Recovery.Mode = "resume"
-		snapshot.TaskProgress.Recovery.NextAction = "inspect_active_run"
-	}
-	switch common.RunState(snapshot.TaskProgress.State) {
-	case common.RunStateBlockedOnDecision:
-		if openDecisionID == "" {
-			snapshot.TaskProgress.State = string(common.RunStateActive)
-		}
-	case common.RunStateBlockedOnApproval:
-		if openApprovalID == "" {
-			snapshot.TaskProgress.State = string(common.RunStateActive)
-		}
-	}
-
-	switch common.WorkspaceState(snapshot.Workspace.State) {
-	case common.WorkspaceStateBlockedOnApproval:
-		if openApprovalID == "" {
-			snapshot.Workspace.State = string(common.WorkspaceStateActive)
-		}
-	}
-	if openDecisionID != "" {
-		snapshot.Workspace.State = string(common.WorkspaceStateActive)
-	} else if openApprovalID != "" {
-		snapshot.Workspace.State = string(common.WorkspaceStateBlockedOnApproval)
-	}
+	// Keep every Workspace/Run/TaskProgress owner field byte-for-byte intact.
+	// Governance correlation is a separate display-only value and mismatches are
+	// surfaced explicitly instead of being repaired by this projection.
+	snapshot.GovernanceDisplay = governanceDisplay(snapshot)
+	snapshot.ConsistencyDiagnostic = governanceConsistencyDiagnostic(snapshot, snapshot.GovernanceDisplay)
 	return snapshot
 }
 
 func workspacePromptMode(snapshot readmodelcore.WorkspaceSnapshotState) string {
-	workspace := snapshot.Workspace
-	activeRunID := strings.TrimSpace(workspace.ActiveRunID)
-	if activeRunID == "" && snapshot.Run != nil {
-		activeRunID = strings.TrimSpace(snapshot.Run.ID)
+	if mode := strings.TrimSpace(snapshot.GovernanceDisplay.PromptMode); mode != "" {
+		return mode
 	}
-	if ticketID := openDecisionBlockerID(snapshot.Decisions, workspace.ID, activeRunID, firstNonEmptyProjectionString(workspace.BlockingTicketID, runBlockingTicketID(snapshot.Run))); ticketID != "" {
-		return "decision"
+	return governanceDisplay(snapshot).PromptMode
+}
+
+func governanceDisplay(snapshot readmodelcore.WorkspaceSnapshotState) projectioncontract.GovernanceDisplay {
+	workspaceID := strings.TrimSpace(snapshot.Workspace.ID)
+	activeRunID := strings.TrimSpace(snapshot.Workspace.ActiveRunID)
+	run := canonicalActiveRun(snapshot, activeRunID)
+	preferredDecisionID := ""
+	preferredApprovalID := ""
+	if run != nil {
+		preferredDecisionID = strings.TrimSpace(run.BlockingTicketID)
+		preferredApprovalID = strings.TrimSpace(run.BlockingApprovalID)
 	}
-	if approvalID := openApprovalBlockerID(snapshot.Approvals, workspace.ID, activeRunID, firstNonEmptyProjectionString(workspace.BlockingApprovalID, runBlockingApprovalID(snapshot.Run))); approvalID != "" {
-		return "approval"
+	ret := projectioncontract.GovernanceDisplay{RunID: activeRunID, PromptMode: "workspace"}
+	if activeRunID == "" {
+		return ret
 	}
-	switch common.WorkspaceState(workspace.State) {
-	case common.WorkspaceStateBlockedOnApproval:
-		if hasOpenApprovalBlocker(snapshot.Approvals, workspace.ID, activeRunID, workspace.BlockingApprovalID) {
-			return "approval"
+	ret.DecisionID = openDecisionBlockerID(snapshot.Decisions, workspaceID, activeRunID, preferredDecisionID)
+	ret.ApprovalID = openApprovalBlockerID(snapshot.Approvals, workspaceID, activeRunID, preferredApprovalID)
+	switch {
+	case ret.DecisionID != "":
+		ret.PromptMode = "decision"
+	case ret.ApprovalID != "":
+		ret.PromptMode = "approval"
+	case run != nil && common.RunState(run.State) == common.RunStateActive:
+		ret.PromptMode = "running"
+	}
+	return ret
+}
+
+func governanceConsistencyDiagnostic(snapshot readmodelcore.WorkspaceSnapshotState, display projectioncontract.GovernanceDisplay) *projectioncontract.ConsistencyDiagnostic {
+	activeRunID := strings.TrimSpace(snapshot.Workspace.ActiveRunID)
+	run := canonicalActiveRun(snapshot, activeRunID)
+	diagnostic := &projectioncontract.ConsistencyDiagnostic{
+		CanonicalWorkspaceState: strings.TrimSpace(snapshot.Workspace.State),
+		CanonicalWorkspaceRunID: activeRunID,
+		ObservedDecisionID:      strings.TrimSpace(display.DecisionID),
+		ObservedApprovalID:      strings.TrimSpace(display.ApprovalID),
+	}
+	if snapshot.TaskProgress.Runtime != nil {
+		diagnostic.RuntimeConvergenceState = strings.TrimSpace(snapshot.TaskProgress.Runtime.ConvergenceState)
+	}
+	if run != nil {
+		diagnostic.CanonicalRunState = strings.TrimSpace(run.State)
+		diagnostic.CanonicalRunDecisionID = strings.TrimSpace(run.BlockingTicketID)
+		diagnostic.CanonicalRunApprovalID = strings.TrimSpace(run.BlockingApprovalID)
+	}
+	switch {
+	case activeRunID != "" && run == nil:
+		diagnostic.Code = "canonical_active_run_missing"
+		diagnostic.Summary = "Workspace owner active run is absent from the bounded projection"
+	case display.DecisionID != "" && (run == nil || run.State != string(common.RunStateBlockedOnDecision) || strings.TrimSpace(run.BlockingTicketID) != display.DecisionID):
+		diagnostic.Code = "lifecycle_handoff_pending"
+		diagnostic.Summary = "Decision is open while canonical Run owner state has not acknowledged the matching decision fence"
+	case display.ApprovalID != "" && (run == nil || run.State != string(common.RunStateBlockedOnApproval) || strings.TrimSpace(run.BlockingApprovalID) != display.ApprovalID):
+		diagnostic.Code = "lifecycle_handoff_pending"
+		diagnostic.Summary = "Approval is pending while canonical Run owner state has not acknowledged the matching approval fence"
+	case run != nil && strings.TrimSpace(run.BlockingTicketID) != "" && display.DecisionID == "":
+		diagnostic.Code = "owner_governance_reference_unresolved"
+		diagnostic.Summary = "Canonical Run decision reference has no matching open Decision projection"
+	case run != nil && strings.TrimSpace(run.BlockingApprovalID) != "" && display.ApprovalID == "":
+		diagnostic.Code = "owner_governance_reference_unresolved"
+		diagnostic.Summary = "Canonical Run approval reference has no matching pending Approval projection"
+	case diagnostic.RuntimeConvergenceState == "need_governance" && display.DecisionID == "" && display.ApprovalID == "":
+		diagnostic.Code = "runtime_governance_unbound"
+		diagnostic.Summary = "Runtime reports governance wait without a matching open governance resource projection"
+	default:
+		return nil
+	}
+	return diagnostic
+}
+
+func canonicalActiveRun(snapshot readmodelcore.WorkspaceSnapshotState, activeRunID string) *appmodelcore.Run {
+	activeRunID = strings.TrimSpace(activeRunID)
+	if activeRunID == "" {
+		return nil
+	}
+	if snapshot.Run != nil && strings.TrimSpace(snapshot.Run.ID) == activeRunID {
+		return snapshot.Run
+	}
+	for idx := range snapshot.Runs {
+		if strings.TrimSpace(snapshot.Runs[idx].ID) == activeRunID {
+			return &snapshot.Runs[idx]
 		}
-	case common.WorkspaceStateActive:
-		if snapshot.Run != nil && common.RunState(snapshot.Run.State) == common.RunStateActive {
-			return "running"
-		}
 	}
-	return "workspace"
+	return nil
+}
+
+func applyRunSnapshotGovernanceProjection(snapshot *readmodelcore.RunSnapshotState) {
+	if snapshot == nil {
+		return
+	}
+	run := snapshot.Run
+	workspace := readmodelcore.WorkspaceSnapshotState{
+		Workspace:    snapshot.Workspace,
+		Run:          &run,
+		Runs:         []appmodelcore.Run{run},
+		TaskProgress: snapshot.TaskProgress,
+		Decisions:    snapshot.Decisions,
+		Approvals:    snapshot.Approvals,
+	}
+	workspace = normalizeWorkspaceGovernanceProjection(workspace)
+	snapshot.GovernanceDisplay = workspace.GovernanceDisplay
+	snapshot.ConsistencyDiagnostic = workspace.ConsistencyDiagnostic
 }
 
 func runBlockingTicketID(run *appmodelcore.Run) string {

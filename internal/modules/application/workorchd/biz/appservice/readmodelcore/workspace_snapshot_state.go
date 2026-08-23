@@ -6,8 +6,8 @@ import (
 )
 
 // WorkspaceSnapshotState is the application-private instantiation of the
-// canonical workspace snapshot layout. Private Workspace/Run fields remain
-// inside workorchd and are projected before protocol delivery.
+// canonical workspace snapshot layout. Owner models and Runtime aggregates are
+// projected into bounded immutable values before this cacheable state is built.
 type WorkspaceSnapshotState projectioncontract.WorkspaceSnapshotOf[appmodelcore.Workspace, appmodelcore.Run]
 
 type WorkspaceExecutionActivationState struct {

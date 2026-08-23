@@ -24,7 +24,7 @@ type workspaceProjector struct {
 	SnapshotTaskProgress            func(readmodelcore.WorkspaceSnapshotState) projectioncontract.TaskProgress
 	SnapshotWithRunSnapshot         func(readmodelcore.WorkspaceSnapshotState, *readmodelcore.RunSnapshotState) readmodelcore.WorkspaceSnapshotState
 	TaskDecompositionsFromSnapshots func(readmodelcore.WorkspaceSnapshotState, *readmodelcore.RunSnapshotState) []projectioncontract.TaskDecomposition
-	Outcome                         func(readmodelcore.WorkspaceSnapshotState) projectioncontract.WorkspaceOutcome
+	DisplayOutcome                  func(readmodelcore.WorkspaceSnapshotState) projectioncontract.WorkspaceDisplayOutcome
 	PublicSnapshot                  func(readmodelcore.WorkspaceSnapshotState) projectioncontract.WorkspaceSnapshot
 	PublicExecutionActivation       func(readmodelcore.WorkspaceExecutionActivationState) projectioncontract.WorkspaceExecutionActivation
 	DiffSections                    func(readmodelcore.WorkspaceSnapshotState, readmodelcore.WorkspaceSnapshotState, string) []string
@@ -46,7 +46,7 @@ func WorkspaceProjection() workspaceProjector {
 		SnapshotTaskProgress:            workspaceSnapshotTaskProgress,
 		SnapshotWithRunSnapshot:         workspaceSnapshotWithRunSnapshot,
 		TaskDecompositionsFromSnapshots: workspaceTaskDecompositionsFromSnapshots,
-		Outcome:                         mapWorkspaceOutcome,
+		DisplayOutcome:                  mapWorkspaceOutcome,
 		PublicSnapshot:                  publicWorkspaceSnapshot,
 		PublicExecutionActivation:       publicWorkspaceExecutionActivation,
 		DiffSections:                    diffWorkspaceProjectionSections,

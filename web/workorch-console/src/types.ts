@@ -377,7 +377,7 @@ export type RunCommandStatus = RunCommandStatusBase & (
   | { state: 'rejected'; acceptedAt?: never; rejectedAt: string }
 );
 
-export type RunOutcome = {
+export type RunDisplayOutcome = {
   runId?: string;
   state: string;
   rawState?: string;
@@ -390,7 +390,7 @@ export type RunOutcome = {
   artifactRefs?: string[];
 };
 
-export type WorkspaceOutcome = {
+export type WorkspaceDisplayOutcome = {
   workspaceId?: string;
   state: string;
   rawWorkspaceState?: string;
@@ -1880,9 +1880,31 @@ export type WorkorchEventStateSummary = {
   revision?: number;
 };
 
+export type GovernanceDisplay = {
+  promptMode?: string;
+  runId?: string;
+  decisionId?: string;
+  approvalId?: string;
+};
+
+export type ConsistencyDiagnostic = {
+  code?: string;
+  summary?: string;
+  canonicalWorkspaceState?: string;
+  canonicalWorkspaceRunId?: string;
+  canonicalRunState?: string;
+  canonicalRunDecisionId?: string;
+  canonicalRunApprovalId?: string;
+  runtimeConvergenceState?: string;
+  observedDecisionId?: string;
+  observedApprovalId?: string;
+};
+
 export type RunObservability = {
   run: Run;
-  outcome?: RunOutcome;
+  displayOutcome?: RunDisplayOutcome;
+  governanceDisplay?: GovernanceDisplay;
+  consistencyDiagnostic?: ConsistencyDiagnostic;
   progress: RunProgress;
   taskProgress: TaskProgress;
   repairLoop: RepairLoop;
@@ -1906,7 +1928,9 @@ export type RunObservability = {
 export type RunSnapshot = {
   workspace: Workspace;
   run: Run;
-  outcome?: RunOutcome;
+  displayOutcome?: RunDisplayOutcome;
+  governanceDisplay?: GovernanceDisplay;
+  consistencyDiagnostic?: ConsistencyDiagnostic;
   taskProgress: TaskProgress;
   runHeartbeat?: RunHeartbeat;
   repairLoop: RepairLoop;
@@ -1939,7 +1963,9 @@ export type RunSnapshot = {
 
 export type WorkspaceSnapshot = {
   workspace: Workspace;
-  outcome?: WorkspaceOutcome;
+  displayOutcome?: WorkspaceDisplayOutcome;
+  governanceDisplay?: GovernanceDisplay;
+  consistencyDiagnostic?: ConsistencyDiagnostic;
   taskProgress: TaskProgress;
   runHeartbeat?: RunHeartbeat;
   convergenceStatus?: ConvergenceStatus;
@@ -1986,9 +2012,12 @@ export type Decision = {
   stepId?: string;
   reason: string;
   decisionKind?: string;
+  failureClass?: string;
+  failureSignature?: string;
   question?: string;
   context?: Record<string, unknown>;
   allowedRecoveryActions?: string[];
+  definitionClarification?: DefinitionClarification;
   state: string;
   resolutionId?: string;
   resolutionType?: string;
@@ -1997,6 +2026,34 @@ export type Decision = {
   resumeRunId?: string;
   successorRunId?: string;
   autoGovernance?: AutoGovernanceSummary;
+};
+
+export type DefinitionClarification = {
+  class: 'workspace_definition_pre_seal' | 'runtime_definition' | string;
+  bindingState: 'open' | 'admission_bound' | 'replacement_intent_bound' | 'resolved' | string;
+  openBindingHash?: string;
+  requiredAction: string;
+  candidateId?: string;
+  candidateRevision?: number;
+  candidateHash?: string;
+  violationOrGapCode: string;
+  canonicalSignatureVersion?: string;
+  canonicalSignature?: string;
+  canonicalSignatureHash?: string;
+  offendingRefs?: string[];
+  definitionRevision?: string;
+  startupInputHash?: string;
+  authoritySnapshotId?: string;
+  clarificationDispatchId?: string;
+  focusRef?: string;
+  logicalRequestId?: string;
+  semanticDocumentHash?: string;
+  resolutionId?: string;
+  resolutionBindingHash?: string;
+  replacementIntentId?: string;
+  replacementIntentHash?: string;
+  successorDefinitionRevision?: string;
+  successorStartupInputHash?: string;
 };
 
 export type DecisionPage = {

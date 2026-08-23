@@ -9,7 +9,7 @@ import (
 
 // source: run_outcome_result.go
 
-func applyRunOutcomeTerminalResult(ret *projectioncontract.RunOutcome, result projectioncontract.Result) {
+func applyRunOutcomeTerminalResult(ret *projectioncontract.RunDisplayOutcome, result projectioncontract.Result) {
 	if result.State == string(common.ResultStateAccepted) {
 		ret.State = "accepted"
 		ret.Accepted = true

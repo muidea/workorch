@@ -43,6 +43,8 @@ type workspaceDisplayState struct {
 	Running               bool
 	BlockingDecision      *projectioncontract.Decision
 	BlockingApproval      *projectioncontract.Approval
+	GovernanceDisplay     projectioncontract.GovernanceDisplay
+	ConsistencyDiagnostic *projectioncontract.ConsistencyDiagnostic
 	Decisions             []projectioncontract.Decision
 	Approvals             []projectioncontract.Approval
 	LastError             error
@@ -79,10 +81,11 @@ type workspaceRuntimeState struct {
 }
 
 const (
-	workspacePromptModeWorkspace = "workspace"
-	workspacePromptModeRunning   = "running"
-	workspacePromptModeDecision  = "decision"
-	workspacePromptModeApproval  = "approval"
+	workspacePromptModeWorkspace  = "workspace"
+	workspacePromptModeRunning    = "running"
+	workspacePromptModeDecision   = "decision"
+	workspacePromptModeApproval   = "approval"
+	workspacePromptModeDefinition = "definition_clarification"
 )
 
 func (m *AppModel) ensureWorkspaceRuntimeState(workspaceID string) *workspaceRuntimeState {
@@ -213,18 +216,13 @@ func promptModeFromWorkspaceOverview(ws *projectioncontract.Workspace) string {
 	if ws == nil {
 		return workspacePromptModeWorkspace
 	}
-	switch ws.State {
-	case string(common.WorkspaceStateActive):
-		if ws.BlockingTicketID != "" && workspaceOverviewHasProjectionAuthority(ws) {
-			return workspacePromptModeDecision
+	if workspaceOverviewHasProjectionAuthority(ws) {
+		if mode := normalizePromptMode(ws.ViewModel.PromptMode); mode != workspacePromptModeWorkspace {
+			return mode
 		}
-		if ws.ActiveRunID != "" {
-			return workspacePromptModeRunning
-		}
-	case string(common.WorkspaceStateBlockedOnApproval):
-		if ws.BlockingApprovalID != "" && workspaceOverviewHasProjectionAuthority(ws) {
-			return workspacePromptModeApproval
-		}
+	}
+	if ws.State == string(common.WorkspaceStateActive) && ws.ActiveRunID != "" {
+		return workspacePromptModeRunning
 	}
 	return workspacePromptModeWorkspace
 }
@@ -265,6 +263,9 @@ func (m *AppModel) applyWorkspaceViewModel(viewModel projectioncontract.Workspac
 }
 
 func (m *AppModel) activeWorkspacePromptMode() string {
+	if m.activeDefinitionClarificationDecision() != nil {
+		return workspacePromptModeDefinition
+	}
 	entry := m.workspaceRuntimeState(m.activeWorkspaceID)
 	if entry != nil && entry.PromptMode != "" && entry.PromptModeRevision > 0 {
 		return normalizePromptMode(entry.PromptMode)
@@ -337,13 +338,8 @@ func (m *AppModel) mergeWorkspaceOverview(ws projectioncontract.Workspace) proje
 }
 
 func (entry *workspaceRuntimeState) normalizeWorkspaceOverview(ws projectioncontract.Workspace) projectioncontract.Workspace {
-	if entry == nil {
-		return ws
-	}
-	if workspaceStateIsLive(common.WorkspaceState(ws.State)) {
-		ws.BlockingTicketID = ""
-		ws.BlockingApprovalID = ""
-	}
+	// Owner fields are copied exactly. Governance/lifecycle handoff lives in the
+	// typed display projection and is never normalized back into Workspace.
 	return ws
 }
 
@@ -518,32 +514,51 @@ func (m *AppModel) activeWorkspaceStateIsLive() bool {
 	if ws == nil {
 		return false
 	}
-	return ws.State == string(common.WorkspaceStateActive) && ws.ActiveRunID != "" && ws.BlockingTicketID == "" && ws.BlockingApprovalID == ""
+	return ws.State == string(common.WorkspaceStateActive) && ws.ActiveRunID != ""
+}
+
+func (m *AppModel) activeGovernanceDisplay() projectioncontract.GovernanceDisplay {
+	entry := m.workspaceRuntimeState(m.activeWorkspaceID)
+	if entry == nil {
+		return projectioncontract.GovernanceDisplay{}
+	}
+	if entry.HasRuntimeView {
+		return entry.RuntimeView.GovernanceDisplay
+	}
+	return entry.Display.GovernanceDisplay
+}
+
+func (m *AppModel) activeGovernancePromptMode() string {
+	if mode := normalizePromptMode(m.activeGovernanceDisplay().PromptMode); mode != workspacePromptModeWorkspace {
+		return mode
+	}
+	if entry := m.workspaceRuntimeState(m.activeWorkspaceID); entry != nil {
+		if mode := normalizePromptMode(entry.PromptMode); mode != workspacePromptModeWorkspace {
+			return mode
+		}
+	}
+	return promptModeFromWorkspaceOverview(m.activeWorkspaceOverview())
 }
 
 func (m *AppModel) activeWorkspaceBlockerProgress() (progressState, bool) {
 	if m.activeBlockingDecision() != nil {
 		return progressWaitingDecision, true
 	}
+	if m.activeDefinitionClarificationDecision() != nil {
+		return progressWaitingDecision, true
+	}
 	if m.activeBlockingApproval() != nil {
 		return progressWaitingApproval, true
 	}
-	ws := findWorkspace(m.workspaces, m.activeWorkspaceID)
-	if overview := m.activeWorkspaceOverview(); overview != nil {
-		ws = overview
-	}
-	if ws == nil {
-		return "", false
-	}
-	switch ws.State {
-	case string(common.WorkspaceStateActive):
-		if ws.BlockingTicketID != "" && workspaceOverviewHasProjectionAuthority(ws) {
-			return progressWaitingDecision, true
-		}
-	case string(common.WorkspaceStateBlockedOnApproval):
-		if ws.BlockingApprovalID != "" && workspaceOverviewHasProjectionAuthority(ws) {
-			return progressWaitingApproval, true
-		}
+	// Workspace is the sole owner of this lifecycle state. During the bounded
+	// handoff window the Workspace projection can already be blocked while the
+	// exact Approval resource has not reached the TUI read model yet. Treat that
+	// owner fact as a refresh-only barrier: it must never fall through to Goal,
+	// DoD, Restart, or Resume mutation selection.
+	if workspace := m.activeWorkspaceOverview(); workspace != nil &&
+		common.WorkspaceState(strings.TrimSpace(workspace.State)) == common.WorkspaceStateBlockedOnApproval &&
+		strings.TrimSpace(workspace.ActiveRunID) != "" {
+		return progressWaitingApproval, true
 	}
 	return "", false
 }
@@ -557,53 +572,33 @@ func (m *AppModel) activeWorkspaceHasApprovalBlocker() bool {
 }
 
 func (m *AppModel) ensureActiveBlockingDecisionFromOverview() bool {
-	ws := m.activeWorkspaceOverview()
-	if ws != nil && ws.State == string(common.WorkspaceStateActive) {
-		if ws.BlockingTicketID == "" || !workspaceOverviewHasProjectionAuthority(ws) {
-			return false
-		}
-		runID := ws.ActiveRunID
-		if runID == "" {
-			runID = m.activeRunID
-		}
-		if m.blockingDecision == nil ||
-			m.blockingDecision.ID != string(ws.BlockingTicketID) ||
-			m.blockingDecision.WorkspaceID != string(ws.ID) ||
-			(runID != "" && m.blockingDecision.RunID != string(runID)) {
-			m.setBlockingDecision(common.TicketID(ws.BlockingTicketID), common.WorkspaceID(ws.ID), common.RunID(runID), "", "")
-		}
-		m.activeRunID = string(runID)
-		m.running = false
-		m.progress = progressWaitingDecision
-		m.progressText = nonEmpty(blockingDecisionLabel(m.blockingDecision), "Waiting for decision")
-		return true
+	if m.activeGovernancePromptMode() != workspacePromptModeDecision {
+		return false
 	}
-	return false
+	m.running = false
+	m.progress = progressWaitingDecision
+	if definition := m.activeDefinitionClarificationDecision(); definition != nil {
+		m.progressText = definitionClarificationInstruction(definition)
+	} else if decision := m.activeBlockingDecision(); decision != nil {
+		m.progressText = nonEmpty(blockingDecisionLabel(decision), "Waiting for decision")
+	} else {
+		m.progressText = "Decision lifecycle handoff pending; refreshing owner projections"
+	}
+	return true
 }
 
 func (m *AppModel) ensureActiveBlockingApprovalFromOverview() bool {
-	ws := m.activeWorkspaceOverview()
-	if ws != nil && ws.State == string(common.WorkspaceStateBlockedOnApproval) {
-		if ws.BlockingApprovalID == "" || !workspaceOverviewHasProjectionAuthority(ws) {
-			return false
-		}
-		runID := ws.ActiveRunID
-		if runID == "" {
-			runID = m.activeRunID
-		}
-		if m.blockingApproval == nil ||
-			m.blockingApproval.ID != string(ws.BlockingApprovalID) ||
-			m.blockingApproval.WorkspaceID != string(ws.ID) ||
-			(runID != "" && m.blockingApproval.RunID != string(runID)) {
-			m.setBlockingApproval(common.ApprovalID(ws.BlockingApprovalID), common.WorkspaceID(ws.ID), common.RunID(runID), "", "", nil)
-		}
-		m.activeRunID = string(runID)
-		m.running = false
-		m.progress = progressWaitingApproval
-		m.progressText = nonEmpty(blockingApprovalLabel(m.blockingApproval), "Waiting for approval")
-		return true
+	if m.activeGovernancePromptMode() != workspacePromptModeApproval {
+		return false
 	}
-	return false
+	m.running = false
+	m.progress = progressWaitingApproval
+	if approval := m.activeBlockingApproval(); approval != nil {
+		m.progressText = nonEmpty(blockingApprovalLabel(approval), "Waiting for approval")
+	} else {
+		m.progressText = "Approval lifecycle handoff pending; refreshing owner projections"
+	}
+	return true
 }
 
 func (m *AppModel) syncActiveWorkspaceBlockerOverview() tea.Cmd {
@@ -645,7 +640,11 @@ func (m *AppModel) blockActiveWorkspaceResume(reason string) tea.Cmd {
 	case progressWaitingApproval:
 		m.progressText = nonEmpty(reason, blockingApprovalLabel(m.activeBlockingApproval()), "Waiting for approval; refreshing blocker details")
 	default:
-		m.progressText = nonEmpty(reason, blockingDecisionLabel(m.activeBlockingDecision()), "Waiting for decision; refreshing blocker details")
+		if definition := m.activeDefinitionClarificationDecision(); definition != nil {
+			m.progressText = nonEmpty(reason, definitionClarificationInstruction(definition))
+		} else {
+			m.progressText = nonEmpty(reason, blockingDecisionLabel(m.activeBlockingDecision()), "Waiting for decision; refreshing blocker details")
+		}
 	}
 	return m.fetchActiveBlockerDetails()
 }
@@ -733,6 +732,10 @@ func (m *AppModel) applyWorkspaceContext(msg WorkspaceContextMsg) {
 		m.restoreDefinitionsWhenPartialContext(msg, previousTask, previousTranscript, previousDoDItems)
 		m.applyWorkspaceProgress(common.WorkspaceState(msg.Workspace.State))
 		if msg.Snapshot != nil {
+			if entry := m.ensureWorkspaceRuntimeState(workspaceID); entry != nil {
+				entry.Display.GovernanceDisplay = msg.Snapshot.GovernanceDisplay
+				entry.Display.ConsistencyDiagnostic = projectioncontract.CloneConsistencyDiagnostic(msg.Snapshot.ConsistencyDiagnostic)
+			}
 			m.applyRunHeartbeat(msg.Snapshot.RunHeartbeat)
 			m.applyConvergenceStatus(msg.Snapshot.ConvergenceStatus)
 			m.applyRunCommandStatus(msg.Snapshot.RunCommand)
@@ -771,6 +774,10 @@ func (m *AppModel) applyWorkspaceContext(msg WorkspaceContextMsg) {
 	}
 	m.restoreDefinitionsWhenPartialContext(msg, previousTask, previousTranscript, previousDoDItems)
 	if msg.Snapshot != nil {
+		if entry := m.ensureWorkspaceRuntimeState(workspaceID); entry != nil {
+			entry.Display.GovernanceDisplay = msg.Snapshot.GovernanceDisplay
+			entry.Display.ConsistencyDiagnostic = projectioncontract.CloneConsistencyDiagnostic(msg.Snapshot.ConsistencyDiagnostic)
+		}
 		if runStateIsTerminal(common.RunState(run.State)) {
 			m.result = snapshotDisplayResult(msg.Snapshot, common.RunID(run.ID))
 		} else {
@@ -806,7 +813,7 @@ func (m *AppModel) applyWorkspaceContext(msg WorkspaceContextMsg) {
 		payload[backend.PayloadKeyBlockingApprovalID] = string(msg.Status.BlockingApprovalID)
 	}
 	if msg.Snapshot != nil && payload[backend.PayloadKeyFailureReason] == "" {
-		payload[backend.PayloadKeyFailureReason] = msg.Snapshot.Outcome.Reason
+		payload[backend.PayloadKeyFailureReason] = msg.Snapshot.DisplayOutcome.Reason
 	}
 	if freshActivationRequired {
 		m.running = false
@@ -827,6 +834,7 @@ func (m *AppModel) applyWorkspaceContext(msg WorkspaceContextMsg) {
 	if msg.Snapshot != nil && strings.TrimSpace(msg.Snapshot.TaskProgress.Summary) != "" && m.progress == progressRunning {
 		m.progressText = strings.TrimSpace(msg.Snapshot.TaskProgress.Summary)
 	}
+	m.applyCanonicalRunBlockers(activeRun)
 	m.syncBlockingDecisionFromList()
 	m.syncBlockingApprovalFromList()
 	if msg.RuntimeView != nil {
@@ -887,6 +895,8 @@ func (m *AppModel) applyWorkspaceRuntimeView(view projectioncontract.WorkspaceRu
 		entry.Display.ConvergenceStatus = cloneConvergenceStatusInfoPtr(view.ConvergenceStatus)
 		entry.Display.BlockingDecision = cloneDecisionPtr(view.BlockingDecision)
 		entry.Display.BlockingApproval = cloneApprovalPtr(view.BlockingApproval)
+		entry.Display.GovernanceDisplay = view.GovernanceDisplay
+		entry.Display.ConsistencyDiagnostic = projectioncontract.CloneConsistencyDiagnostic(view.ConsistencyDiagnostic)
 		entry.Display.ActiveRunID = string(view.ActiveRunID)
 		entry.Display.DisplayRunID = string(view.DisplayRunID)
 		entry.HasDisplay = true
@@ -900,12 +910,10 @@ func (m *AppModel) applyWorkspaceRuntimeView(view projectioncontract.WorkspaceRu
 	m.runHeartbeat = view.RunHeartbeat
 	m.convergenceStatus = cloneConvergenceStatusInfoPtr(view.ConvergenceStatus)
 	m.runCommand = cloneRunCommandPtr(view.RunCommand)
-	if view.BlockingDecision != nil {
-		m.blockingDecision = cloneDecisionPtr(view.BlockingDecision)
-	}
-	if view.BlockingApproval != nil {
-		m.blockingApproval = cloneApprovalPtr(view.BlockingApproval)
-	}
+	// RuntimeView blocker resources are emitted only from the canonical active
+	// Run's exact blocker reference. Always apply nil as well, so a newer owner
+	// projection can revoke a stale local mutation target.
+	m.applyCanonicalRuntimeViewBlockers(view)
 	if string(view.ActiveRunID) != "" {
 		m.activeRunID = string(view.ActiveRunID)
 		m.running = !runStateIsTerminal(common.RunState(view.RunState))
@@ -915,11 +923,11 @@ func (m *AppModel) applyWorkspaceRuntimeView(view projectioncontract.WorkspaceRu
 			m.progressText = summary
 		}
 	}
-	if view.Outcome.Terminal && strings.TrimSpace(view.Outcome.Summary) != "" {
-		m.result = strings.TrimSpace(view.Outcome.Summary)
+	if view.DisplayOutcome.Terminal && strings.TrimSpace(view.DisplayOutcome.Summary) != "" {
+		m.result = strings.TrimSpace(view.DisplayOutcome.Summary)
 	}
-	if view.Outcome.Terminal && !view.Outcome.Accepted {
-		m.failureReason = nonEmpty(view.Outcome.Reason, view.Outcome.Summary)
+	if view.DisplayOutcome.Terminal && !view.DisplayOutcome.Accepted {
+		m.failureReason = nonEmpty(view.DisplayOutcome.Reason, view.DisplayOutcome.Summary)
 	}
 	m.repairLoop = repairLoopSummary(view.TaskProgress)
 
@@ -930,6 +938,8 @@ func (m *AppModel) applyWorkspaceRuntimeView(view projectioncontract.WorkspaceRu
 	entry.Display.ConvergenceStatus = cloneConvergenceStatusInfoPtr(view.ConvergenceStatus)
 	entry.Display.BlockingDecision = cloneDecisionPtr(view.BlockingDecision)
 	entry.Display.BlockingApproval = cloneApprovalPtr(view.BlockingApproval)
+	entry.Display.GovernanceDisplay = view.GovernanceDisplay
+	entry.Display.ConsistencyDiagnostic = projectioncontract.CloneConsistencyDiagnostic(view.ConsistencyDiagnostic)
 	entry.Display.ActiveRunID = string(view.ActiveRunID)
 	entry.Display.DisplayRunID = string(view.DisplayRunID)
 	entry.Display.ProgressText = m.progressText
@@ -1000,7 +1010,11 @@ func runtimeViewDisplayContentEqual(a, b projectioncontract.WorkspaceRuntimeView
 		!projectionInfoDisplayEqual(a.Projection, b.Projection) {
 		return false
 	}
-	if !workspaceOutcomeEqual(a.Outcome, b.Outcome) {
+	if !workspaceOutcomeEqual(a.DisplayOutcome, b.DisplayOutcome) {
+		return false
+	}
+	if a.GovernanceDisplay != b.GovernanceDisplay ||
+		!reflect.DeepEqual(a.ConsistencyDiagnostic, b.ConsistencyDiagnostic) {
 		return false
 	}
 	if !runtimeProgressEqual(a.TaskProgress.Runtime, b.TaskProgress.Runtime) {
@@ -1046,7 +1060,7 @@ func projectionInfoDisplayEqual(a, b projectioncontract.ProjectionStatus) bool {
 		strings.TrimSpace(a.Error) == strings.TrimSpace(b.Error)
 }
 
-func workspaceOutcomeEqual(a, b projectioncontract.WorkspaceOutcome) bool {
+func workspaceOutcomeEqual(a, b projectioncontract.WorkspaceDisplayOutcome) bool {
 	if strings.TrimSpace(string(a.WorkspaceID)) != strings.TrimSpace(string(b.WorkspaceID)) ||
 		strings.TrimSpace(a.State) != strings.TrimSpace(b.State) ||
 		strings.TrimSpace(string(a.RunID)) != strings.TrimSpace(string(b.RunID)) ||
@@ -1506,29 +1520,11 @@ func activityFeedDisplayEqual(a, b projectioncontract.WorkspaceActivityFeed) boo
 }
 
 func decisionInfoEqual(a, b *projectioncontract.Decision) bool {
-	if a == nil && b == nil {
-		return true
-	}
-	if a == nil || b == nil {
-		return false
-	}
-	return strings.TrimSpace(string(a.ID)) == strings.TrimSpace(string(b.ID)) &&
-		strings.TrimSpace(string(a.State)) == strings.TrimSpace(string(b.State)) &&
-		strings.TrimSpace(a.Question) == strings.TrimSpace(b.Question) &&
-		strings.TrimSpace(a.Reason) == strings.TrimSpace(b.Reason)
+	return reflect.DeepEqual(a, b)
 }
 
 func approvalInfoEqual(a, b *projectioncontract.Approval) bool {
-	if a == nil && b == nil {
-		return true
-	}
-	if a == nil || b == nil {
-		return false
-	}
-	return strings.TrimSpace(string(a.ID)) == strings.TrimSpace(string(b.ID)) &&
-		strings.TrimSpace(string(a.State)) == strings.TrimSpace(string(b.State)) &&
-		strings.TrimSpace(a.Reason) == strings.TrimSpace(b.Reason) &&
-		strings.TrimSpace(a.Action) == strings.TrimSpace(b.Action)
+	return reflect.DeepEqual(a, b)
 }
 
 func runtimeViewRevisionAcceptable(current, incoming projectioncontract.WorkspaceRefreshRevision) bool {
@@ -1633,8 +1629,7 @@ func (m *AppModel) clearRunProjectionState() {
 	m.repairLoop = ""
 	m.failureReason = ""
 	m.failureHint = ""
-	m.blockingDecision = nil
-	m.blockingApproval = nil
+	m.clearCanonicalBlockingTargets()
 }
 
 func (m *AppModel) restoreDefinitionsWhenPartialContext(msg WorkspaceContextMsg, previousTask string, previousTranscript []transcriptItem, previousDoDItems []string) {
@@ -1707,8 +1702,7 @@ func (m *AppModel) resetWorkspaceView() {
 	m.repairLoop = ""
 	m.failureReason = ""
 	m.failureHint = ""
-	m.blockingDecision = nil
-	m.blockingApproval = nil
+	m.clearCanonicalBlockingTargets()
 	m.decisions = nil
 	m.approvals = nil
 	m.running = false
@@ -1758,6 +1752,8 @@ func (m *AppModel) saveActiveWorkspaceDisplayState() {
 		Running:               m.running,
 		BlockingDecision:      cloneDecisionPtr(m.blockingDecision),
 		BlockingApproval:      cloneApprovalPtr(m.blockingApproval),
+		GovernanceDisplay:     entry.Display.GovernanceDisplay,
+		ConsistencyDiagnostic: projectioncontract.CloneConsistencyDiagnostic(entry.Display.ConsistencyDiagnostic),
 		Decisions:             append([]projectioncontract.Decision(nil), m.decisions...),
 		Approvals:             append([]projectioncontract.Approval(nil), m.approvals...),
 		LastError:             m.lastError,
@@ -1803,8 +1799,7 @@ func (m *AppModel) restoreWorkspaceDisplayState(workspaceID string) bool {
 	m.running = false
 	m.progress = progressIdle
 	m.progressText = ""
-	m.blockingDecision = nil
-	m.blockingApproval = nil
+	m.clearCanonicalBlockingTargets()
 	m.decisions = nil
 	m.approvals = nil
 	m.lastError = nil
@@ -1831,8 +1826,7 @@ func cloneDecisionPtr(input *projectioncontract.Decision) *projectioncontract.De
 	if input == nil {
 		return nil
 	}
-	ret := *input
-	ret.Context = input.Context.Clone()
+	ret := projectioncontract.CloneDecision(*input)
 	return &ret
 }
 
@@ -1840,8 +1834,7 @@ func cloneApprovalPtr(input *projectioncontract.Approval) *projectioncontract.Ap
 	if input == nil {
 		return nil
 	}
-	ret := *input
-	ret.Context = input.Context.Clone()
+	ret := projectioncontract.CloneApproval(*input)
 	return &ret
 }
 
@@ -1986,8 +1979,7 @@ func runCommandProjectionSettled(status projectioncontract.RunCommandStatus) boo
 }
 
 func (m *AppModel) clearBlockingInputState() {
-	m.blockingDecision = nil
-	m.blockingApproval = nil
+	m.clearCanonicalBlockingTargets()
 	if m.progress == progressWaitingDecision || m.progress == progressWaitingApproval {
 		m.progress = progressIdle
 		m.progressText = ""
@@ -2005,37 +1997,23 @@ func (m *AppModel) syncActiveWorkspaceOverview() tea.Cmd {
 		m.activeRunID = ""
 	}
 	m.applyWorkspaceProgress(common.WorkspaceState(ws.State))
-	switch ws.State {
-	case string(common.WorkspaceStateActive):
-		if ws.BlockingTicketID == "" || !workspaceOverviewHasProjectionAuthority(ws) {
-			m.clearBlockingInputState()
-			if ws.ActiveRunID != "" {
-				m.running = true
-				m.progress = progressRunning
-				m.progressText = "Running"
-			}
-			return nil
-		}
-		m.running = false
-		m.progress = progressWaitingDecision
-		m.setBlockingDecision(common.TicketID(ws.BlockingTicketID), common.WorkspaceID(ws.ID), common.RunID(ws.ActiveRunID), "", "")
-		m.progressText = nonEmpty(blockingDecisionLabel(m.blockingDecision), "Waiting for decision")
+	switch m.activeGovernancePromptMode() {
+	case workspacePromptModeDecision:
+		m.ensureActiveBlockingDecisionFromOverview()
 		m.followBlockerTailUnlessUserScrolled()
-		return m.fetchActiveBlockerDetails()
-	case string(common.WorkspaceStateBlockedOnApproval):
-		if ws.BlockingApprovalID == "" || !workspaceOverviewHasProjectionAuthority(ws) {
-			m.clearBlockingInputState()
-			return nil
-		}
-		m.running = false
-		m.progress = progressWaitingApproval
-		m.setBlockingApproval(common.ApprovalID(ws.BlockingApprovalID), common.WorkspaceID(ws.ID), common.RunID(ws.ActiveRunID), "", "", nil)
-		m.progressText = nonEmpty(blockingApprovalLabel(m.blockingApproval), "Waiting for approval")
+		return m.requestWorkspaceContextRefresh(false)
+	case workspacePromptModeApproval:
+		m.ensureActiveBlockingApprovalFromOverview()
 		m.followBlockerTailUnlessUserScrolled()
-		return m.fetchActiveBlockerDetails()
-	default:
-		m.blockingDecision = nil
-		m.blockingApproval = nil
+		return m.requestWorkspaceContextRefresh(false)
+	}
+	if ws.State == string(common.WorkspaceStateActive) && ws.ActiveRunID != "" {
+		m.clearBlockingInputState()
+		m.running = true
+		m.progress = progressRunning
+		m.progressText = "Running"
+	} else if !workspaceStateIsLive(common.WorkspaceState(ws.State)) {
+		m.clearCanonicalBlockingTargets()
 	}
 	return nil
 }

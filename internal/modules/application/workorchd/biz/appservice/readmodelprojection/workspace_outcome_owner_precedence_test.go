@@ -20,17 +20,17 @@ func TestWorkspaceOutcomeAndActivityPreferCurrentTerminalRunOverDefinitionHint(t
 			DefinitionRevision: definitionRevision, State: string(common.RunStateFailed), FailureReason: "semantic contract rejected",
 		}},
 	}
-	snapshot.Outcome = mapWorkspaceOutcome(snapshot)
-	if snapshot.Outcome.RunID != "run-current" || snapshot.Outcome.State != string(common.RunStateFailed) || !snapshot.Outcome.Terminal || snapshot.Outcome.Reason != "semantic contract rejected" {
-		t.Fatalf("workspace outcome = %+v", snapshot.Outcome)
+	snapshot.DisplayOutcome = mapWorkspaceOutcome(snapshot)
+	if snapshot.DisplayOutcome.RunID != "run-current" || snapshot.DisplayOutcome.State != string(common.RunStateFailed) || !snapshot.DisplayOutcome.Terminal || snapshot.DisplayOutcome.Reason != "semantic contract rejected" {
+		t.Fatalf("workspace outcome = %+v", snapshot.DisplayOutcome)
 	}
 	feed := buildWorkspaceActivityFeedContent(snapshot)
 	found := false
 	for _, item := range feed.Items {
 		if item.Title == "outcome" {
 			found = true
-			if item.RunID != snapshot.Outcome.RunID || item.State != snapshot.Outcome.State || item.Summary != snapshot.Outcome.Reason {
-				t.Fatalf("activity outcome = %+v, canonical = %+v", item, snapshot.Outcome)
+			if item.RunID != snapshot.DisplayOutcome.RunID || item.State != snapshot.DisplayOutcome.State || item.Summary != snapshot.DisplayOutcome.Reason {
+				t.Fatalf("activity outcome = %+v, canonical = %+v", item, snapshot.DisplayOutcome)
 			}
 		}
 	}

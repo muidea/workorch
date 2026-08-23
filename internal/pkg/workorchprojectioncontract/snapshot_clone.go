@@ -8,7 +8,8 @@ func CloneWorkspaceSnapshot(item WorkspaceSnapshot) WorkspaceSnapshot {
 	item.Run = cloneRunProjectionPointer(item.Run)
 	item.Step = CloneStepView(item.Step)
 	item.Result = cloneResultProjectionPointer(item.Result)
-	item.Outcome = CloneWorkspaceOutcome(item.Outcome)
+	item.DisplayOutcome = CloneWorkspaceDisplayOutcome(item.DisplayOutcome)
+	item.ConsistencyDiagnostic = CloneConsistencyDiagnostic(item.ConsistencyDiagnostic)
 	item.TaskProgress = CloneTaskProgress(item.TaskProgress)
 	item.ConvergenceStatus = CloneConvergenceStatus(item.ConvergenceStatus)
 	item.RunCommand = CloneRunCommandStatus(item.RunCommand)
@@ -41,7 +42,8 @@ func CloneWorkspaceSnapshot(item WorkspaceSnapshot) WorkspaceSnapshot {
 func CloneRunSnapshot(item RunSnapshot) RunSnapshot {
 	item.Workspace = CloneWorkspace(item.Workspace)
 	item.Run = CloneRun(item.Run)
-	item.Outcome = cloneRunOutcome(item.Outcome)
+	item.DisplayOutcome = cloneRunDisplayOutcome(item.DisplayOutcome)
+	item.ConsistencyDiagnostic = CloneConsistencyDiagnostic(item.ConsistencyDiagnostic)
 	item.TaskProgress = CloneTaskProgress(item.TaskProgress)
 	item.RepairLoop = CloneRepairLoop(item.RepairLoop)
 	item.TaskDecompositions = CloneTaskDecompositions(item.TaskDecompositions)
@@ -82,7 +84,8 @@ func CloneRunSnapshot(item RunSnapshot) RunSnapshot {
 
 func CloneRunObservability(item RunObservability) RunObservability {
 	item.Run = CloneRun(item.Run)
-	item.Outcome = cloneRunOutcome(item.Outcome)
+	item.DisplayOutcome = cloneRunDisplayOutcome(item.DisplayOutcome)
+	item.ConsistencyDiagnostic = CloneConsistencyDiagnostic(item.ConsistencyDiagnostic)
 	item.TaskProgress = CloneTaskProgress(item.TaskProgress)
 	item.RepairLoop = CloneRepairLoop(item.RepairLoop)
 	item.Acceptance = CloneAcceptanceProjection(item.Acceptance)
@@ -121,7 +124,7 @@ func cloneResultProjectionPointer(item *Result) *Result {
 	return &ret
 }
 
-func cloneRunOutcome(item RunOutcome) RunOutcome {
+func cloneRunDisplayOutcome(item RunDisplayOutcome) RunDisplayOutcome {
 	item.EvidenceRefs = append([]string(nil), item.EvidenceRefs...)
 	item.ArtifactRefs = append([]string(nil), item.ArtifactRefs...)
 	return item

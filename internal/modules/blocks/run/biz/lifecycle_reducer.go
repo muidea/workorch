@@ -96,7 +96,11 @@ func reduceGovernanceWait(current *runmodel.Run, cmd runevents.RuntimeGovernance
 	if err := validateRuntimeFactIdentity(current, cmd.AuthoritySnapshotID, cmd.DefinitionRevision, cmd.EvidenceRevision, cmd.DispatchID); err != nil {
 		return lifecycleTransition{}, err
 	}
-	if current.RuntimeLifecycleFence == nil || current.RuntimeLifecycleFence.GovernanceFenceID != runtimeGovernanceFenceID(cmd.AuthoritySnapshotID, cmd.DispatchID) {
+	if current.RuntimeLifecycleFence == nil {
+		return lifecycleTransition{}, fmt.Errorf("%w: governance wait does not match persisted governance binding", common.ErrConflict)
+	}
+	fence := current.RuntimeLifecycleFence.Normalized()
+	if fence.GovernanceFenceID != runtimeGovernanceFenceID(cmd.AuthoritySnapshotID, cmd.DispatchID) || fence.GovernanceResolutionID != "" || fence.TerminalFenceID != "" {
 		return lifecycleTransition{}, fmt.Errorf("%w: governance wait does not match persisted governance binding", common.ErrConflict)
 	}
 	target := common.RunStateBlockedOnDecision
@@ -142,7 +146,11 @@ func reduceContinuationEligible(current *runmodel.Run, cmd runevents.RuntimeCont
 	if err := validateRuntimeFactIdentity(current, cmd.AuthoritySnapshotID, cmd.DefinitionRevision, cmd.EvidenceRevision, cmd.DispatchID); err != nil {
 		return lifecycleTransition{}, err
 	}
-	if current.RuntimeLifecycleFence == nil || current.RuntimeLifecycleFence.GovernanceFenceID != runtimeGovernanceFenceID(cmd.AuthoritySnapshotID, cmd.DispatchID) {
+	if current.RuntimeLifecycleFence == nil {
+		return lifecycleTransition{}, fmt.Errorf("%w: continuation eligible does not match persisted governance resolution", common.ErrConflict)
+	}
+	fence := current.RuntimeLifecycleFence.Normalized()
+	if fence.GovernanceFenceID != runtimeGovernanceFenceID(cmd.AuthoritySnapshotID, cmd.DispatchID) || fence.GovernanceResolutionID != cmd.ResolutionID || fence.TerminalFenceID != "" {
 		return lifecycleTransition{}, fmt.Errorf("%w: continuation eligible does not match persisted governance resolution", common.ErrConflict)
 	}
 	if current.State == common.RunStateActive {

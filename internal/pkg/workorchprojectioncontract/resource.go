@@ -12,8 +12,6 @@ type Workspace struct {
 	DeliverableDirectory string                                      `json:"deliverableDirectory,omitempty"`
 	State                string                                      `json:"state"`
 	ActiveRunID          string                                      `json:"activeRunId,omitempty"`
-	BlockingTicketID     string                                      `json:"blockingTicketId,omitempty"`
-	BlockingApprovalID   string                                      `json:"blockingApprovalId,omitempty"`
 	TemplateID           string                                      `json:"templateId,omitempty"`
 	ProfileID            string                                      `json:"profileId,omitempty"`
 	DefaultLLMSelection  *runtimecontract.ProviderInferenceSelection `json:"defaultLLMSelection,omitempty"`
@@ -84,8 +82,8 @@ func ProjectionStatusFromWorkspaceViewModel(item WorkspaceViewModel) ProjectionS
 	}
 }
 
-// Run is the public, owner-neutral run projection. RuntimeState remains an
-// application-private reducer input and is intentionally absent here.
+// Run is the public, owner-neutral run projection. The opaque Runtime aggregate
+// is intentionally absent from both this DTO and application projection caches.
 type Run struct {
 	ID                 string                                      `json:"id"`
 	WorkspaceID        string                                      `json:"workspaceId"`

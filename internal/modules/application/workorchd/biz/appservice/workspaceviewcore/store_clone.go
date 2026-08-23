@@ -34,6 +34,7 @@ func cloneWorkspace(item appmodelcore.Workspace) appmodelcore.Workspace {
 
 func cloneWorkspaceSnapshot(item readmodelcore.WorkspaceSnapshotState) readmodelcore.WorkspaceSnapshotState {
 	item.Workspace = cloneWorkspace(item.Workspace)
+	item.ConsistencyDiagnostic = projectioncontract.CloneConsistencyDiagnostic(item.ConsistencyDiagnostic)
 	item.ViewModel.Sections = cloneWorkspaceViewModelSections(item.ViewModel.Sections)
 	item.Goals = append([]workorchmanagementcontract.Goal(nil), item.Goals...)
 	item.DoDs = append([]workorchmanagementcontract.DoD(nil), item.DoDs...)
@@ -46,8 +47,8 @@ func cloneWorkspaceSnapshot(item readmodelcore.WorkspaceSnapshotState) readmodel
 	item.LLMContextBudgets = append([]projectioncontract.LLMContextBudgetTrace(nil), item.LLMContextBudgets...)
 	item.LLMUsageTraces = append([]projectioncontract.LLMUsageTrace(nil), item.LLMUsageTraces...)
 	item.EventRecords = append([]projectioncontract.EventRecord(nil), item.EventRecords...)
-	item.Decisions = append([]projectioncontract.Decision(nil), item.Decisions...)
-	item.Approvals = append([]projectioncontract.Approval(nil), item.Approvals...)
+	item.Decisions = projectioncontract.CloneDecisions(item.Decisions)
+	item.Approvals = projectioncontract.CloneApprovals(item.Approvals)
 	item.TaskDecompositions = append([]projectioncontract.TaskDecomposition(nil), item.TaskDecompositions...)
 	item.ExecutionSections = append([]projectioncontract.ExecutionSection(nil), item.ExecutionSections...)
 	item.MemoryRecallTraces = append([]projectioncontract.MemoryRecallTrace(nil), item.MemoryRecallTraces...)

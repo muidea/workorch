@@ -81,11 +81,137 @@ func TestRuntimeControllerCommitsGovernanceContinueAndResumesReducer(t *testing.
 	if len(result.Aggregate.Facts.Evidence.Accepted) != 1 || result.Aggregate.Facts.Evidence.Accepted[0].Kind != runtimecontract.EvidenceKindGovernance || len(result.Aggregate.GovernanceResolutions) != 1 {
 		t.Fatalf("governance evidence = %+v records=%+v", result.Aggregate.Facts.Evidence, result.Aggregate.GovernanceResolutions)
 	}
+	if result.Aggregate.DriveLease == nil || result.Aggregate.DriveLease.State != runtimecontract.RuntimeDriveLeaseScheduled ||
+		result.Aggregate.DriveLease.Reason != runtimecontract.RuntimeDriveLeaseReasonDeliveryRetry ||
+		result.Aggregate.DriveLease.AggregateRevision != result.Aggregate.StateRevision || result.Aggregate.DriveLease.RecoveryGeneration != 1 {
+		t.Fatalf("governance continuation did not atomically seal successor lease: %+v", result.Aggregate.DriveLease)
+	}
+	wantSignature, err := RuntimeGovernanceContinuationDriveLeaseSignature(resolution)
+	if err != nil || result.Aggregate.DriveLease.FailureSignature != wantSignature {
+		t.Fatalf("governance continuation successor signature=%q want=%q err=%v", result.Aggregate.DriveLease.FailureSignature, wantSignature, err)
+	}
+	committedLease := result.Aggregate.DriveLease.Clone()
 
 	restarted, _ := NewRuntimeController(repository)
 	duplicate, err := restarted.commitGovernanceResolution(context.Background(), resolution)
-	if err != nil || duplicate.Disposition != CommitDispositionDuplicate || duplicate.Aggregate.StateRevision != result.Aggregate.StateRevision {
+	if err != nil || duplicate.Disposition != CommitDispositionDuplicate || duplicate.Aggregate.StateRevision != result.Aggregate.StateRevision ||
+		duplicate.Aggregate.DriveLease == nil || !runtimecontract.SameRuntimeDriveLeaseIdentity(*duplicate.Aggregate.DriveLease, committedLease) {
 		t.Fatalf("duplicate governance resolution = %+v err=%v", duplicate, err)
+	}
+}
+
+func TestRuntimeControllerRejectsProcessedGovernanceResolutionPayloadDrift(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		mutate func(*runtimecontract.RuntimeGovernanceResolution)
+	}{
+		{name: "summary", mutate: func(value *runtimecontract.RuntimeGovernanceResolution) { value.Summary = "different summary" }},
+		{name: "evidence refs", mutate: func(value *runtimecontract.RuntimeGovernanceResolution) {
+			value.EvidenceRefs = []string{"decision://different"}
+		}},
+		{name: "outcome", mutate: func(value *runtimecontract.RuntimeGovernanceResolution) {
+			value.Outcome = runtimecontract.RuntimeGovernanceResolutionOutcomeFail
+		}},
+		{name: "ticket", mutate: func(value *runtimecontract.RuntimeGovernanceResolution) { value.TicketID = "ticket-different" }},
+		{name: "dispatch", mutate: func(value *runtimecontract.RuntimeGovernanceResolution) { value.DispatchID = "dispatch-different" }},
+		{name: "dependency", mutate: func(value *runtimecontract.RuntimeGovernanceResolution) {
+			value.DependencyKind = "dependency-different"
+		}},
+		{name: "subject", mutate: func(value *runtimecontract.RuntimeGovernanceResolution) { value.SubjectRef = "subject-different" }},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			repository := &controllerRepository{}
+			controller, _ := NewRuntimeController(repository)
+			sealed := sealGovernanceDispatch(t, controller)
+			resolution := governanceResolution(sealed, runtimecontract.RuntimeGovernanceResolutionOutcomeContinue)
+			committed, err := controller.commitGovernanceResolution(context.Background(), resolution)
+			if err != nil || committed.Disposition != CommitDispositionCommitted {
+				t.Fatalf("commit exact governance resolution=%+v err=%v", committed, err)
+			}
+			saves := repository.saves
+			revision := repository.aggregate.StateRevision
+			drifted := resolution
+			tc.mutate(&drifted)
+			result, err := controller.commitGovernanceResolution(context.Background(), drifted)
+			if !errors.Is(err, common.ErrConflict) || repository.saves != saves || repository.aggregate.StateRevision != revision ||
+				result.Disposition != "" || len(repository.aggregate.GovernanceResolutions) != 1 {
+				t.Fatalf("processed payload drift result=%+v saves=%d/%d revision=%d/%d err=%v", result, saves, repository.saves, revision, repository.aggregate.StateRevision, err)
+			}
+		})
+	}
+}
+
+func TestRuntimeControllerReplaysExactStaleGovernanceResolutionAsDiagnosticOnly(t *testing.T) {
+	repository := &controllerRepository{}
+	controller, _ := NewRuntimeController(repository)
+	sealed := sealGovernanceDispatch(t, controller)
+	stale := governanceResolution(sealed, runtimecontract.RuntimeGovernanceResolutionOutcomeContinue)
+	stale.AuthoritySnapshotID = "authority-stale-replay"
+	first, err := controller.commitGovernanceResolution(context.Background(), stale)
+	if err != nil || first.Disposition != CommitDispositionStale || len(first.Aggregate.Diagnostics) != 1 ||
+		len(first.Aggregate.GovernanceResolutions) != 0 || first.Aggregate.ActiveDispatch == nil || first.Aggregate.DriveLease != nil {
+		t.Fatalf("first stale governance diagnostic=%+v err=%v", first, err)
+	}
+	saves := repository.saves
+	revision := first.Aggregate.StateRevision
+	replayed, err := controller.commitGovernanceResolution(context.Background(), stale)
+	if err != nil || replayed.Disposition != CommitDispositionStale || replayed.Aggregate.StateRevision != revision ||
+		repository.saves != saves || len(replayed.Aggregate.Diagnostics) != 1 || len(replayed.Aggregate.GovernanceResolutions) != 0 ||
+		replayed.Aggregate.ActiveDispatch == nil || replayed.Aggregate.DriveLease != nil {
+		t.Fatalf("exact stale replay=%+v saves=%d/%d err=%v", replayed, saves, repository.saves, err)
+	}
+	drifted := stale
+	drifted.Summary = "drifted stale summary"
+	driftResult, err := controller.commitGovernanceResolution(context.Background(), drifted)
+	if !errors.Is(err, common.ErrConflict) || driftResult.Disposition != "" || repository.saves != saves ||
+		repository.aggregate.StateRevision != revision || len(repository.aggregate.Diagnostics) != 1 {
+		t.Fatalf("stale payload drift result=%+v saves=%d/%d revision=%d/%d err=%v", driftResult, saves, repository.saves, revision, repository.aggregate.StateRevision, err)
+	}
+}
+
+func TestRuntimeInternalGovernanceContinueRequiresExactAtomicSuccessorLease(t *testing.T) {
+	repository := &controllerRepository{}
+	controller, _ := NewRuntimeController(repository)
+	sealed := sealGovernanceDispatch(t, controller)
+	resolution := governanceResolution(sealed, runtimecontract.RuntimeGovernanceResolutionOutcomeContinue)
+	saves := repository.saves
+
+	result, err := controller.ApplyInternalEvent(context.Background(), RuntimeInternalEvent{
+		Kind:        RuntimeInternalEventGovernanceResolutionObserved,
+		Scope:       RuntimeInternalEventScope{WorkspaceID: resolution.WorkspaceID, RunID: resolution.RunID},
+		Transaction: &RuntimeInternalTransactionPayload{GovernanceResolution: &resolution},
+	})
+	if !errors.Is(err, common.ErrInvalidArgument) || result.Aggregate.Facts.WorkspaceID != "" || repository.saves != saves {
+		t.Fatalf("bare governance continuation event result=%+v saves=%d want=%d err=%v", result, repository.saves, saves, err)
+	}
+	rejection := governanceResolution(sealed, runtimecontract.RuntimeGovernanceResolutionOutcomeFail)
+	result, err = controller.ApplyInternalEvent(context.Background(), RuntimeInternalEvent{
+		Kind:        RuntimeInternalEventGovernanceResolutionObserved,
+		Scope:       RuntimeInternalEventScope{WorkspaceID: rejection.WorkspaceID, RunID: rejection.RunID},
+		Transaction: &RuntimeInternalTransactionPayload{GovernanceResolution: &rejection},
+	})
+	if !errors.Is(err, common.ErrInvalidArgument) || result.Aggregate.Facts.WorkspaceID != "" || repository.saves != saves {
+		t.Fatalf("bare governance rejection event result=%+v saves=%d want=%d err=%v", result, repository.saves, saves, err)
+	}
+
+	signature, err := RuntimeGovernanceContinuationDriveLeaseSignature(resolution)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wrong := runtimecontract.RuntimeDriveLease{
+		WorkspaceID: resolution.WorkspaceID, RunID: resolution.RunID,
+		Reason: runtimecontract.RuntimeDriveLeaseReasonDeliveryRetry, FailureSignature: signature + "/wrong",
+		DueAt: "2026-08-23T00:00:00Z",
+	}
+	result, err = controller.ApplyInternalEvent(context.Background(), RuntimeInternalEvent{
+		Kind:  RuntimeInternalEventGovernanceResolutionObserved,
+		Scope: RuntimeInternalEventScope{WorkspaceID: resolution.WorkspaceID, RunID: resolution.RunID},
+		Transaction: &RuntimeInternalTransactionPayload{
+			GovernanceResolution: &resolution, GovernanceContinuationDriveLease: &wrong,
+		},
+	})
+	if !errors.Is(err, common.ErrInvalidArgument) || result.Aggregate.Facts.WorkspaceID != "" || repository.saves != saves {
+		t.Fatalf("wrong governance successor event result=%+v saves=%d want=%d err=%v", result, repository.saves, saves, err)
 	}
 }
 
@@ -103,6 +229,14 @@ func TestRuntimeControllerCommitsGovernanceFailureAsTerminal(t *testing.T) {
 	if len(result.Aggregate.Facts.Evidence.Rejected) != 1 || result.Aggregate.Facts.Evidence.Rejected[0].FailureClass != runtimecontract.FailureClassGovernanceRejected {
 		t.Fatalf("governance rejection evidence = %+v", result.Aggregate.Facts.Evidence.Rejected)
 	}
+	if result.Aggregate.DriveLease == nil || result.Aggregate.DriveLease.State != runtimecontract.RuntimeDriveLeaseScheduled ||
+		result.Aggregate.DriveLease.AggregateRevision != result.Aggregate.StateRevision || result.Aggregate.DriveLease.Reason != runtimecontract.RuntimeDriveLeaseReasonDeliveryRetry {
+		t.Fatalf("governance rejection did not atomically seal terminal successor: %+v", result.Aggregate.DriveLease)
+	}
+	wantSignature, err := RuntimeGovernanceResolutionDriveLeaseSignature(governanceResolution(sealed, runtimecontract.RuntimeGovernanceResolutionOutcomeFail))
+	if err != nil || result.Aggregate.DriveLease.FailureSignature != wantSignature {
+		t.Fatalf("governance rejection successor signature=%q want=%q err=%v", result.Aggregate.DriveLease.FailureSignature, wantSignature, err)
+	}
 }
 
 func TestRuntimeControllerKeepsStaleGovernanceResolutionDiagnosticOnly(t *testing.T) {
@@ -117,6 +251,29 @@ func TestRuntimeControllerKeepsStaleGovernanceResolutionDiagnosticOnly(t *testin
 	}
 	if result.Disposition != CommitDispositionStale || len(result.Aggregate.Diagnostics) != 1 || result.Aggregate.ActiveDispatch == nil || len(result.Aggregate.GovernanceResolutions) != 0 {
 		t.Fatalf("stale governance resolution changed authority: %+v", result.Aggregate)
+	}
+}
+
+func TestRuntimeControllerStaleGovernanceDiagnosticReissuesCurrentContinuationSuccessor(t *testing.T) {
+	repository := &controllerRepository{}
+	controller, _ := NewRuntimeController(repository)
+	sealed := sealGovernanceDispatch(t, controller)
+	resolution := governanceResolution(sealed, runtimecontract.RuntimeGovernanceResolutionOutcomeContinue)
+	committed, err := controller.commitGovernanceResolution(context.Background(), resolution)
+	if err != nil || committed.Aggregate.DriveLease == nil {
+		t.Fatalf("commit exact continuation=%+v err=%v", committed, err)
+	}
+	firstLease := committed.Aggregate.DriveLease.Clone()
+	stale := resolution
+	stale.ResolutionID = "resolution-stale-after-continuation"
+	staleResult, err := controller.commitGovernanceResolution(context.Background(), stale)
+	if err != nil || staleResult.Disposition != CommitDispositionStale || staleResult.Aggregate.DriveLease == nil {
+		t.Fatalf("stale continuation diagnostic=%+v err=%v", staleResult, err)
+	}
+	reissued := staleResult.Aggregate.DriveLease
+	if reissued.FailureSignature != firstLease.FailureSignature || reissued.RecoveryGeneration != firstLease.RecoveryGeneration+1 ||
+		reissued.AggregateRevision != staleResult.Aggregate.StateRevision || reissued.State != runtimecontract.RuntimeDriveLeaseScheduled {
+		t.Fatalf("stale diagnostic lost current successor: before=%+v after=%+v", firstLease, reissued)
 	}
 }
 

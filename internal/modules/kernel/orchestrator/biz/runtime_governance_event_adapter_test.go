@@ -18,6 +18,7 @@ import (
 	decisionevents "github.com/muidea/workorch/internal/modules/blocks/decision/pkg/events"
 	runmodule "github.com/muidea/workorch/internal/modules/blocks/run"
 	workspacemodel "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/models"
+	runtime "github.com/muidea/workorch/internal/modules/kernel/orchestrator/biz/runtime"
 	orchestratorevents "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/common"
 	filerepository "github.com/muidea/workorch/internal/pkg/repository/file"
@@ -26,6 +27,21 @@ import (
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
+type rejectingGovernanceIngressRepository struct {
+	loads int
+	saves int
+}
+
+func (r *rejectingGovernanceIngressRepository) Load(context.Context, common.WorkspaceID, common.RunID) (runtime.RuntimeAggregate, error) {
+	r.loads++
+	return runtime.RuntimeAggregate{}, common.ErrNotFound
+}
+
+func (r *rejectingGovernanceIngressRepository) Save(context.Context, runtime.RuntimeAggregate, uint64) error {
+	r.saves++
+	return common.ErrConflict
+}
+
 func mustRuntimeGovernancePayload(t *testing.T, input map[string]any) []workorcheventpayload.Field {
 	t.Helper()
 	payload, err := workorcheventpayload.FromMap(input)
@@ -33,6 +49,55 @@ func mustRuntimeGovernancePayload(t *testing.T, input map[string]any) []workorch
 		t.Fatalf("DecisionFieldsFromMap: %v", err)
 	}
 	return payload.Fields
+}
+
+func TestRuntimeGovernanceResolutionIngressRejectsNonOwnerSourcesBeforeAuthorityLoad(t *testing.T) {
+	repository := &rejectingGovernanceIngressRepository{}
+	owner := newRuntimeTestOwner()
+	if err := owner.ConfigureRuntimeRepository(repository); err != nil {
+		t.Fatal(err)
+	}
+	hub := magicevent.NewHub(4)
+	t.Cleanup(func() { hub.Terminate(context.Background()) })
+	module := newTestBiz(owner, hub, nil)
+	resolution := runtimecontract.RuntimeGovernanceResolution{
+		ResolutionID: "resolution-wrong-source", TicketID: "ticket-wrong-source",
+		WorkspaceID: "ws-wrong-source", RunID: "run-wrong-source",
+		AuthoritySnapshotID: "authority-wrong-source", DispatchID: "dispatch-wrong-source",
+		DependencyKind: "decision/resolution", SubjectRef: "subject-wrong-source",
+		Outcome: runtimecontract.RuntimeGovernanceResolutionOutcomeContinue, Summary: "must be rejected before authority load",
+	}
+	for _, tc := range []struct {
+		name   string
+		topic  string
+		data   any
+		handle func(magicevent.Event, magicevent.Result)
+	}{
+		{
+			name: "generic resolution topic", topic: orchestratorevents.TopicOrchestratorCommitRuntimeGovernanceResolution,
+			data: orchestratorevents.CommitRuntimeGovernanceResolutionCommand{Resolution: resolution}, handle: module.handleRuntimeGovernanceResolution,
+		},
+		{
+			name: "decision ticket topic", topic: orchestratorevents.TopicOrchestratorCommitRuntimeGovernanceTicket,
+			data: orchestratorevents.CommitRuntimeGovernanceTicketResolutionCommand{
+				ResolutionID: resolution.ResolutionID, TicketID: resolution.TicketID, WorkspaceID: resolution.WorkspaceID, RunID: resolution.RunID,
+				Outcome: resolution.Outcome, Summary: resolution.Summary,
+			},
+			handle: module.handleRuntimeGovernanceTicketResolution,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			event := magicevent.NewEventWithContext(tc.topic, "blocks/untrusted", ModuleID, magicevent.NewHeader(), context.Background(), tc.data)
+			result := magicevent.NewResult(event.ID(), event.Source(), event.Destination())
+			tc.handle(event, result)
+			if _, err := result.Get(); err == nil {
+				t.Fatal("non-owner governance source was accepted")
+			}
+		})
+	}
+	if repository.loads != 0 || repository.saves != 0 {
+		t.Fatalf("non-owner governance source reached authority repository: loads=%d saves=%d", repository.loads, repository.saves)
+	}
 }
 
 func TestRuntimeGovernanceResolutionCommitsThroughTypedEventHubCommand(t *testing.T) {
@@ -146,7 +211,7 @@ func TestRuntimeGovernanceResolutionCommitsThroughTypedEventHubCommand(t *testin
 	}
 	duplicateResult := hub.Send(magicevent.NewEventWithContext(
 		orchestratorevents.TopicOrchestratorCommitRuntimeGovernanceTicket,
-		"runtime-governance-test",
+		decisioncommon.ModuleID,
 		orchestratorevents.CommandDestination,
 		magicevent.NewHeader(),
 		ctx,
@@ -164,8 +229,8 @@ func TestRuntimeGovernanceResolutionCommitsThroughTypedEventHubCommand(t *testin
 	if duplicateErr != nil || !duplicateOK || duplicateResponse.Disposition != orchestratorevents.RuntimeGovernanceResolutionDispositionDuplicate {
 		t.Fatalf("duplicate governance continuation = %+v err=%v", duplicateData, duplicateErr)
 	}
-	if background.asyncFunctionCalls != 0 {
-		t.Fatalf("governance continuation must wait for RunStateChanged(active), calls=%d", background.asyncFunctionCalls)
+	if background.asyncFunctionCalls != 1 || loaded.DriveLease == nil || loaded.DriveLease.State != runtimecontract.RuntimeDriveLeaseScheduled {
+		t.Fatalf("governance continuation did not retain one atomic successor: calls=%d lease=%+v", background.asyncFunctionCalls, loaded.DriveLease)
 	}
 }
 
@@ -262,8 +327,8 @@ func TestRuntimeGovernanceResolutionFileBackedRestartReplaysExactlyOnce(t *testi
 	if err != nil || len(committed.GovernanceResolutions) != 1 || len(committed.Facts.Evidence.Accepted) != 1 || len(committed.CandidateAttempts) != 0 || committed.ActiveDispatch != nil || candidateCalls != 0 {
 		t.Fatalf("initial persisted governance aggregate=%+v candidateCalls=%d err=%v", committed, candidateCalls, err)
 	}
-	if background.asyncFunctionCalls != 0 {
-		t.Fatalf("initial continuation must wait for RunStateChanged(active), calls=%d", background.asyncFunctionCalls)
+	if background.asyncFunctionCalls != 1 {
+		t.Fatalf("initial continuation did not mount its one atomic successor timer, calls=%d", background.asyncFunctionCalls)
 	}
 	if err := decisionOwner.Stop(ctx); err != nil {
 		t.Fatal(err)
@@ -339,7 +404,7 @@ func TestRuntimeGovernanceResolutionFileBackedRestartReplaysExactlyOnce(t *testi
 		len(reloaded.CandidateAttempts) != len(committed.CandidateAttempts) || len(reloaded.OperationReceipts) != 0 {
 		t.Fatalf("duplicate replay changed persisted authority: before=%+v after=%+v", committed, reloaded)
 	}
-	if candidateCalls != 0 || restartedBackground.asyncFunctionCalls != 0 {
+	if candidateCalls != 0 || restartedBackground.asyncFunctionCalls != 1 {
 		t.Fatalf("restart replay candidateCalls=%d continuationCalls=%d", candidateCalls, restartedBackground.asyncFunctionCalls)
 	}
 	if reloaded.Facts.Recovery.ProviderTransportAttempts != committed.Facts.Recovery.ProviderTransportAttempts ||

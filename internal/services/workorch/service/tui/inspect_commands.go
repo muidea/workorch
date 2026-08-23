@@ -25,6 +25,36 @@ func (m AppModel) renderInspectStatus() string {
 		b.WriteString(m.activeRunID)
 		b.WriteString("\n")
 	}
+	if overview := m.activeWorkspaceOverview(); overview != nil {
+		b.WriteString("- workspace owner state: ")
+		b.WriteString(nonEmpty(overview.State, "-"))
+		b.WriteString("\n")
+	}
+	if entry := m.workspaceRuntimeState(m.activeWorkspaceID); entry != nil {
+		if state := strings.TrimSpace(entry.RuntimeView.RunState); state != "" {
+			b.WriteString("- run owner state: ")
+			b.WriteString(state)
+			b.WriteString("\n")
+		}
+		governance := entry.Display.GovernanceDisplay
+		if entry.HasRuntimeView {
+			governance = entry.RuntimeView.GovernanceDisplay
+		}
+		if governance.DecisionID != "" || governance.ApprovalID != "" || governance.PromptMode == workspacePromptModeDecision || governance.PromptMode == workspacePromptModeApproval {
+			b.WriteString("- governance display (read-only): ")
+			b.WriteString(strings.TrimSpace(strings.Join(compactStrings([]string{governance.PromptMode, governance.RunID, governance.DecisionID, governance.ApprovalID}), " | ")))
+			b.WriteString("\n")
+		}
+		diagnostic := entry.Display.ConsistencyDiagnostic
+		if entry.HasRuntimeView {
+			diagnostic = entry.RuntimeView.ConsistencyDiagnostic
+		}
+		if diagnostic != nil && strings.TrimSpace(diagnostic.Code) != "" {
+			b.WriteString("- owner consistency: ")
+			b.WriteString(strings.TrimSpace(strings.Join(compactStrings([]string{diagnostic.Code, diagnostic.Summary}), " | ")))
+			b.WriteString("\n")
+		}
+	}
 	if runtimeState := m.workspaceRuntimeState(m.activeWorkspaceID); runtimeState != nil && (runtimeState.LastRevision > 0 || runtimeState.RevisionGapCount > 0) {
 		b.WriteString("- stream revision: ")
 		b.WriteString(fmt.Sprintf("last %d, gaps %d", runtimeState.LastRevision, runtimeState.RevisionGapCount))

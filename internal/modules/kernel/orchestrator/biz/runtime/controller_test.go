@@ -1203,7 +1203,7 @@ func TestRuntimeControllerCandidateRetryIsPersistedAndLimitedToTwoAttempts(t *te
 	}
 }
 
-func TestRuntimeControllerCandidateRetryExhaustionClosesAtomicallyWithFreshnessDebt(t *testing.T) {
+func TestRuntimeControllerCandidateRetryExhaustionClosesAtomically(t *testing.T) {
 	repository := &controllerRepository{}
 	controller, err := NewRuntimeController(repository)
 	if err != nil {
@@ -1223,7 +1223,6 @@ func TestRuntimeControllerCandidateRetryExhaustionClosesAtomicallyWithFreshnessD
 	if _, err := controller.BeginCandidateAttemptForTest(context.Background(), "ws-v2", "run-v2", 1, "stable-prefix"); err != nil {
 		t.Fatal(err)
 	}
-	repository.aggregate.Facts.FreshnessReacquireCoverage = append([]common.CoverageWorkItemID(nil), repository.aggregate.Facts.Focus.CoverageWorkItemIDs...)
 	savesBeforeFailure := repository.saves
 
 	terminal, err := controller.failCandidateAttempt(context.Background(), "ws-v2", "run-v2", 1, runtimecontract.RuntimeCandidateFailure{
@@ -1244,7 +1243,7 @@ func TestRuntimeControllerCandidateRetryExhaustionClosesAtomicallyWithFreshnessD
 	}
 }
 
-func TestRuntimeControllerTerminalDriveFailureClosesPendingCandidateWithFreshnessDebt(t *testing.T) {
+func TestRuntimeControllerTerminalDriveFailureClosesPendingCandidate(t *testing.T) {
 	repository := &controllerRepository{}
 	controller, err := NewRuntimeController(repository)
 	if err != nil {
@@ -1256,7 +1255,6 @@ func TestRuntimeControllerTerminalDriveFailureClosesPendingCandidateWithFreshnes
 	if _, err := controller.BeginCandidateAttemptForTest(context.Background(), "ws-v2", "run-v2", 0, "stable-prefix"); err != nil {
 		t.Fatal(err)
 	}
-	repository.aggregate.Facts.FreshnessReacquireCoverage = append([]common.CoverageWorkItemID(nil), repository.aggregate.Facts.Focus.CoverageWorkItemIDs...)
 	savesBeforeFailure := repository.saves
 
 	terminal, err := controller.recordFailureFact(context.Background(), "ws-v2", "run-v2", runtimecontract.FailureFact{

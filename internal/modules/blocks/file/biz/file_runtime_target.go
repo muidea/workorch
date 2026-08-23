@@ -34,21 +34,39 @@ func (a *RuntimeAdapter) AcquireRuntimeTargetSelection(workspaceDirectory, prere
 	if !runtimeFileTargetSelectorSupported(request.selectorRef) {
 		return unsupportedRuntimeTargetSelection(request)
 	}
-	manifest, err := a.AcquireWorkspaceManifest(request.workspaceDirectory)
+	observation, err := a.acquireWorkspaceManifestObservation(request.workspaceDirectory)
 	if err != nil {
 		return runtimemodel.RuntimeTargetSelection{}, err
 	}
+	manifest := observation.manifest
+	request.manifestEntryCount = observation.entryCount
 	switch request.selectorRef {
 	case runtimeFileSelectorWorkspaceRelativeNewTarget:
 		return acquireProspectiveRuntimeTargetSelection(request, manifest)
+	case runtimeFileTargetSelectorUniqueWorkspaceEntry:
+		return acquireUniqueWorkspaceEntryRuntimeTargetSelection(request, manifest)
 	case runtimeFileTargetSelectorProfileCandidates:
 		return acquireProfileDeclaredTargetSelection(
 			request.workspaceDirectory, request.prerequisiteID, request.targetRole, request.selectorRef,
-			request.prospectiveTargetRef, request.maxItems, manifest, request.binding,
+			request.prospectiveTargetRef, request.maxItems, observation.entryCount, manifest, request.binding,
 		)
 	default:
 		return acquireManifestRuntimeTargetSelection(request, manifest)
 	}
+}
+
+// acquireUniqueWorkspaceEntryRuntimeTargetSelection keeps the unique selector
+// strictly observational. Unlike the explicit prospective selectors, it never
+// authorizes a caller-declared path: combining the two concepts is a typed
+// unsupported admission even when the current manifest happens to contain
+// zero or one matching entry.
+func acquireUniqueWorkspaceEntryRuntimeTargetSelection(request runtimeTargetSelectionRequest, manifest runtimemodel.WorkspaceManifest) (runtimemodel.RuntimeTargetSelection, error) {
+	if request.prospectiveTargetRef != "" {
+		selection := runtimeTargetSelectionForManifest(request, manifest)
+		selection.Disposition = runtimemodel.RuntimeTargetSelectionUnsupported
+		return sealRuntimeTargetSelection(selection)
+	}
+	return acquireManifestRuntimeTargetSelection(request, manifest)
 }
 
 type runtimeTargetSelectionRequest struct {
@@ -58,6 +76,7 @@ type runtimeTargetSelectionRequest struct {
 	selectorRef          string
 	prospectiveTargetRef string
 	maxItems             int
+	manifestEntryCount   int
 	binding              runtimeTargetSelectionBinding
 }
 
@@ -121,6 +140,14 @@ func acquireProspectiveRuntimeTargetSelection(request runtimeTargetSelectionRequ
 		selection.Disposition = runtimemodel.RuntimeTargetSelectionUnsupported
 		return sealRuntimeTargetSelection(selection)
 	}
+	if !runtimeFileDeliverableTargetEligible(request.prospectiveTargetRef) {
+		selection.Disposition = runtimemodel.RuntimeTargetSelectionUnsupported
+		return sealRuntimeTargetSelection(selection)
+	}
+	if runtimeFileProspectiveTargetWouldOverflowManifest(request.workspaceDirectory, manifest, request.manifestEntryCount, request.prospectiveTargetRef) {
+		selection.Disposition = runtimemodel.RuntimeTargetSelectionUnsupported
+		return sealRuntimeTargetSelection(selection)
+	}
 	if _, statErr := os.Lstat(target); statErr == nil {
 		selection.Disposition = runtimemodel.RuntimeTargetSelectionUnsupported
 	} else if !os.IsNotExist(statErr) {
@@ -134,6 +161,32 @@ func acquireProspectiveRuntimeTargetSelection(request runtimeTargetSelectionRequ
 func acquireManifestRuntimeTargetSelection(request runtimeTargetSelectionRequest, manifest runtimemodel.WorkspaceManifest) (runtimemodel.RuntimeTargetSelection, error) {
 	candidates := boundedAdmissibilityTargetRefs(nil, manifest.TargetRefs, request.maxItems)
 	selection := runtimeTargetSelectionForManifest(request, manifest)
+	var prospectiveTarget string
+	if request.prospectiveTargetRef != "" {
+		if strings.Contains(request.prospectiveTargetRef, "\\") {
+			return runtimemodel.RuntimeTargetSelection{}, fmt.Errorf("%w: prospective target must use canonical workspace-relative separators", common.ErrInvalidArgument)
+		}
+		_, target, relative, err := guardedWorkspacePath(request.workspaceDirectory, request.prospectiveTargetRef, false)
+		if err != nil {
+			return runtimemodel.RuntimeTargetSelection{}, err
+		}
+		if canonical := filepath.ToSlash(relative); canonical != request.prospectiveTargetRef {
+			return runtimemodel.RuntimeTargetSelection{}, fmt.Errorf("%w: prospective target %q is not canonical (want %q)", common.ErrInvalidArgument, request.prospectiveTargetRef, canonical)
+		}
+		if !runtimeFileDeliverableTargetEligible(request.prospectiveTargetRef) {
+			selection.Disposition = runtimemodel.RuntimeTargetSelectionUnsupported
+			return sealRuntimeTargetSelection(selection)
+		}
+		if runtimeFileProspectiveTargetWouldOverflowManifest(request.workspaceDirectory, manifest, request.manifestEntryCount, request.prospectiveTargetRef) {
+			selection.Disposition = runtimemodel.RuntimeTargetSelectionUnsupported
+			return sealRuntimeTargetSelection(selection)
+		}
+		prospectiveTarget = target
+		// workspace_deliverable is the complete bounded File-owner scope.  An
+		// eligible absent prospective path remains an explicit part of that scope
+		// admission even when other deliverables already exist; it is not inferred
+		// from, or silently replaced by, one of the current manifest entries.
+	}
 	selection.CandidateTargetRefs = candidates
 	selection.CandidateCount = len(manifest.TargetRefs)
 	switch selection.CandidateCount {
@@ -150,23 +203,12 @@ func acquireManifestRuntimeTargetSelection(request runtimeTargetSelectionRequest
 			}
 			break
 		}
-		if strings.Contains(request.prospectiveTargetRef, "\\") {
-			return runtimemodel.RuntimeTargetSelection{}, fmt.Errorf("%w: prospective target must use canonical workspace-relative separators", common.ErrInvalidArgument)
-		}
-		_, target, relative, err := guardedWorkspacePath(request.workspaceDirectory, request.prospectiveTargetRef, false)
-		if err != nil {
-			return runtimemodel.RuntimeTargetSelection{}, err
-		}
-		if canonical := filepath.ToSlash(relative); canonical != request.prospectiveTargetRef {
-			return runtimemodel.RuntimeTargetSelection{}, fmt.Errorf("%w: prospective target %q is not canonical (want %q)", common.ErrInvalidArgument, request.prospectiveTargetRef, canonical)
-		}
-		if _, err := os.Lstat(target); err == nil {
-			return runtimemodel.RuntimeTargetSelection{}, fmt.Errorf("%w: prospective target %q already exists", common.ErrInvalidArgument, filepath.ToSlash(relative))
+		if _, err := os.Lstat(prospectiveTarget); err == nil {
+			return runtimemodel.RuntimeTargetSelection{}, fmt.Errorf("%w: prospective target %q already exists", common.ErrInvalidArgument, request.prospectiveTargetRef)
 		} else if !os.IsNotExist(err) {
 			return runtimemodel.RuntimeTargetSelection{}, err
 		}
 		selection.Disposition = runtimemodel.RuntimeTargetSelectionCreate
-		selection.ProspectiveTargetRef = filepath.ToSlash(relative)
 	case 1:
 		selection.Disposition = runtimemodel.RuntimeTargetSelectionSelected
 		selection.TargetRefs = append([]string(nil), candidates...)
@@ -202,7 +244,7 @@ func sealRuntimeTargetSelection(selection runtimemodel.RuntimeTargetSelection) (
 // acquireProfileDeclaredTargetSelection only intersects the profile-provided,
 // bounded candidate set with the File manifest. The profile binding supplies
 // all semantics; File does not inspect a name, suffix, content or role.
-func acquireProfileDeclaredTargetSelection(workspaceDirectory, prerequisiteID, targetRole, selectorRef, prospectiveTargetRef string, maxItems int, manifest runtimemodel.WorkspaceManifest, binding runtimeTargetSelectionBinding) (runtimemodel.RuntimeTargetSelection, error) {
+func acquireProfileDeclaredTargetSelection(workspaceDirectory, prerequisiteID, targetRole, selectorRef, prospectiveTargetRef string, maxItems int, manifestEntryCount int, manifest runtimemodel.WorkspaceManifest, binding runtimeTargetSelectionBinding) (runtimemodel.RuntimeTargetSelection, error) {
 	if binding.ownerRef == "" || binding.subjectRef == "" || len(binding.candidateRefs) == 0 || len(binding.candidateRefs) > maxItems {
 		return runtimemodel.RuntimeTargetSelection{}, common.ErrInvalidArgument
 	}
@@ -225,18 +267,13 @@ func acquireProfileDeclaredTargetSelection(workspaceDirectory, prerequisiteID, t
 			matched = append(matched, target)
 		}
 	}
-	matched = boundedAdmissibilityTargetRefs(nil, matched, maxItems)
 	selection := runtimemodel.RuntimeTargetSelection{
 		PrerequisiteID: prerequisiteID, OwnerModuleID: runtimemodel.RuntimeModuleFile, TargetRole: targetRole, SelectorRef: selectorRef,
 		SelectorOwnerRef: binding.ownerRef, SelectorSubjectRef: binding.subjectRef, SelectorCandidateRefs: binding.candidateRefs,
-		CandidateTargetRefs: matched, ProspectiveTargetRef: prospectiveTargetRef, CandidateCount: len(matched), ObservedRevision: manifest.Revision,
+		ProspectiveTargetRef: prospectiveTargetRef, ObservedRevision: manifest.Revision,
 	}
-	switch selection.CandidateCount {
-	case 0:
-		if prospectiveTargetRef == "" {
-			selection.Disposition = runtimemodel.RuntimeTargetSelectionAbsent
-			break
-		}
+	var prospectiveTarget string
+	if prospectiveTargetRef != "" {
 		if _, ok := declared[prospectiveTargetRef]; !ok || strings.Contains(prospectiveTargetRef, "\\") {
 			return runtimemodel.RuntimeTargetSelection{}, common.ErrInvalidArgument
 		}
@@ -244,7 +281,33 @@ func acquireProfileDeclaredTargetSelection(workspaceDirectory, prerequisiteID, t
 		if err != nil || filepath.ToSlash(relative) != prospectiveTargetRef {
 			return runtimemodel.RuntimeTargetSelection{}, common.ErrInvalidArgument
 		}
-		if _, err := os.Lstat(target); err == nil || !os.IsNotExist(err) {
+		if !runtimeFileDeliverableTargetEligible(prospectiveTargetRef) {
+			selection.Disposition = runtimemodel.RuntimeTargetSelectionUnsupported
+			return sealRuntimeTargetSelection(selection)
+		}
+		if runtimeFileProspectiveTargetWouldOverflowManifest(workspaceDirectory, manifest, manifestEntryCount, prospectiveTargetRef) {
+			selection.Disposition = runtimemodel.RuntimeTargetSelectionUnsupported
+			return sealRuntimeTargetSelection(selection)
+		}
+		prospectiveTarget = target
+		// The profile-declared prospective target must participate in the exact
+		// current candidate set. A different current match cannot make an absent
+		// declaration admissible by cardinality alone.
+		if len(matched) != 0 && !containsString(matched, prospectiveTargetRef) {
+			selection.Disposition = runtimemodel.RuntimeTargetSelectionUnsupported
+			return sealRuntimeTargetSelection(selection)
+		}
+	}
+	matched = boundedAdmissibilityTargetRefs(nil, matched, maxItems)
+	selection.CandidateTargetRefs = matched
+	selection.CandidateCount = len(matched)
+	switch selection.CandidateCount {
+	case 0:
+		if prospectiveTargetRef == "" {
+			selection.Disposition = runtimemodel.RuntimeTargetSelectionAbsent
+			break
+		}
+		if _, err := os.Lstat(prospectiveTarget); err == nil || !os.IsNotExist(err) {
 			return runtimemodel.RuntimeTargetSelection{}, common.ErrInvalidArgument
 		}
 		selection.Disposition = runtimemodel.RuntimeTargetSelectionCreate
@@ -259,6 +322,42 @@ func acquireProfileDeclaredTargetSelection(workspaceDirectory, prerequisiteID, t
 		return runtimemodel.RuntimeTargetSelection{}, err
 	}
 	return selection, nil
+}
+
+// runtimeFileProspectiveTargetWouldOverflowManifest prevents an admitted
+// create from making the next owner observation structurally impossible. The
+// full File manifest is bounded independently from the smaller candidate
+// context projection, so capacity is checked against the complete inventory.
+func runtimeFileProspectiveTargetWouldOverflowManifest(workspaceDirectory string, manifest runtimemodel.WorkspaceManifest, entryCount int, prospectiveTargetRef string) bool {
+	if containsString(manifest.TargetRefs, prospectiveTargetRef) {
+		return false
+	}
+	additional, err := runtimeFileProspectiveTargetAdditionalEntries(workspaceDirectory, prospectiveTargetRef)
+	return err != nil || additional < 1 || entryCount+additional > defaultMaxEntries
+}
+
+// runtimeFileProspectiveTargetAdditionalEntries counts the exact File-list
+// entries a create may add: the target plus every currently missing parent
+// directory below the workspace root. This is owner-local capacity evidence;
+// it does not authorize the operation or choose a Runtime transition.
+func runtimeFileProspectiveTargetAdditionalEntries(workspaceDirectory, prospectiveTargetRef string) (int, error) {
+	root, target, _, err := guardedWorkspacePath(workspaceDirectory, prospectiveTargetRef, false)
+	if err != nil {
+		return 0, err
+	}
+	additional := 0
+	for current := target; current != root; current = filepath.Dir(current) {
+		_, statErr := os.Lstat(current)
+		switch {
+		case statErr == nil:
+			return additional, nil
+		case os.IsNotExist(statErr):
+			additional++
+		default:
+			return 0, statErr
+		}
+	}
+	return additional, nil
 }
 
 func normalizeRuntimeFileTargetRefs(values []string) []string {

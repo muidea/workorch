@@ -2,7 +2,6 @@ package tui
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -101,8 +100,8 @@ func fetchWorkspaceContext(be backend.Backend, workspaceID string, resetMainView
 				activeRun = selectWorkspaceRun(liveRunID, snapshot.Runs)
 			}
 			displayRun := activeRun
-			if displayRun == nil && snapshot.Outcome.RunID != "" {
-				displayRun = selectWorkspaceRun(snapshot.Outcome.RunID, snapshot.Runs)
+			if displayRun == nil && snapshot.DisplayOutcome.RunID != "" {
+				displayRun = selectWorkspaceRun(snapshot.DisplayOutcome.RunID, snapshot.Runs)
 			}
 			var runtimeView *projectioncontract.WorkspaceRuntimeView
 			if view, viewErr := be.Workspace().RuntimeView(ctx, workorchquerycontract.WorkspaceRuntimeViewQuery{WorkspaceID: wsID, ActivityLimit: 50}); viewErr == nil {
@@ -239,18 +238,9 @@ func runStatusFromWorkspaceSnapshot(snapshot *projectioncontract.WorkspaceSnapsh
 		Acceptance:         projectioncontract.CloneAcceptanceProjection(snapshot.Acceptance),
 	}
 	if snapshot.TaskProgress.RunID == "" || snapshot.TaskProgress.RunID == string(run.ID) {
-		if snapshot.TaskProgress.State != "" {
-			status.State = snapshot.TaskProgress.State
-		}
 		status.CurrentStepID = snapshot.TaskProgress.Recovery.StepID
 		status.CurrentActionLabel = snapshot.TaskProgress.CurrentActionLabel
 		status.DiagnosticLineage = snapshot.TaskProgress.DiagnosticLineage
-		if status.BlockingTicketID == "" {
-			status.BlockingTicketID = snapshot.TaskProgress.Recovery.BlockingTicketID
-		}
-		if status.BlockingApprovalID == "" {
-			status.BlockingApprovalID = snapshot.TaskProgress.Recovery.BlockingApprovalID
-		}
 		if status.FailureReason == "" {
 			status.FailureReason = snapshot.TaskProgress.Recovery.Reason
 		}
@@ -287,8 +277,8 @@ func selectSnapshotDisplayRun(snapshot *projectioncontract.WorkspaceSnapshot) *p
 	if snapshot.Workspace.ActiveRunID != "" {
 		return selectWorkspaceRun(snapshot.Workspace.ActiveRunID, snapshot.Runs)
 	}
-	if snapshot.Outcome.RunID != "" {
-		return selectWorkspaceRun(snapshot.Outcome.RunID, snapshot.Runs)
+	if snapshot.DisplayOutcome.RunID != "" {
+		return selectWorkspaceRun(snapshot.DisplayOutcome.RunID, snapshot.Runs)
 	}
 	return nil
 }
@@ -564,20 +554,10 @@ func ResolveApproval(be backend.Backend, workspaceID string, approvalID string, 
 		} else {
 			approval, err = be.Approval().Reject(ctx, wsID, common.ApprovalID(approvalID), payload...)
 		}
-		if err != nil && errors.Is(err, common.ErrConflict) && wsID != "" {
-			current, getErr := be.Approval().Get(ctx, wsID, common.ApprovalID(approvalID))
-			if getErr == nil && current != nil {
-				if current.WorkspaceID == "" {
-					current.WorkspaceID = string(wsID)
-				}
-				switch {
-				case approve && current.State == string(common.ApprovalStateApproved):
-					approval, err = current, nil
-				case !approve && current.State == string(common.ApprovalStateRejected):
-					approval, err = current, nil
-				}
-			}
-		}
+		// Approval is the sole owner of payload, principal, resolution identity,
+		// and duplicate equivalence. A conflict cannot be reclassified from a
+		// terminal read projection; exact response-loss duplicates are returned as
+		// success by the owner-facing backend itself.
 		return ApprovalResolvedMsg{WorkspaceID: wsID, Approval: approval, Error: err}
 	}
 }

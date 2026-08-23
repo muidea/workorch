@@ -2538,15 +2538,14 @@ func TestWorkspaceGetEndpointOverlaysProjectedViewModel(t *testing.T) {
 	}
 }
 
-func TestWorkspaceGetEndpointDerivesPromptFromOwnerStateWhenProjectionIsStale(t *testing.T) {
+func TestWorkspaceGetEndpointDoesNotSynthesizeGovernanceIntoWorkspaceOwner(t *testing.T) {
 	workspaceID := common.WorkspaceID("ws-get-prompt-owner-state")
 	state := newTestServerState(t, normalizeConfig(Config{Backend: "memory"}))
 	state.readWorkspace = func(context.Context, string, string, string) (appmodelcore.Workspace, error) {
 		return appmodelcore.Workspace{
-			ID:               string(workspaceID),
-			State:            string(common.WorkspaceStateActive),
-			ActiveRunID:      "run-get-prompt-owner-state",
-			BlockingTicketID: "ticket-get-prompt-owner-state",
+			ID:          string(workspaceID),
+			State:       string(common.WorkspaceStateActive),
+			ActiveRunID: "run-get-prompt-owner-state",
 		}, nil
 	}
 	handler := newMuxWithState(state)
@@ -2585,9 +2584,11 @@ func TestWorkspaceGetEndpointDerivesPromptFromOwnerStateWhenProjectionIsStale(t 
 		t.Fatalf("unmarshal workspace get: %v", err)
 	}
 	if body.Workspace.State != string(common.WorkspaceStateActive) ||
-		body.Workspace.BlockingTicketID != "ticket-get-prompt-owner-state" ||
-		body.Workspace.ViewModel.PromptMode != "decision" {
-		t.Fatalf("workspace = %+v, want decision prompt derived from owner state", body.Workspace)
+		body.Workspace.ActiveRunID != "run-get-prompt-owner-state" {
+		t.Fatalf("workspace = %+v, want canonical owner fields without synthesized governance", body.Workspace)
+	}
+	if body.Workspace.ViewModel.PromptMode != "decision" {
+		t.Fatalf("view model prompt = %q, want separate read-only decision display", body.Workspace.ViewModel.PromptMode)
 	}
 }
 
@@ -3143,6 +3144,7 @@ func TestRunStatusEndpointInvalidatesCachedTerminalSnapshotOnTypedOwnerRunStateN
 		WorkspaceID: "ws-status-owner-event",
 		RunID:       "run-status-owner-event",
 		State:       common.RunStateActive,
+		CausationID: "run-state/status-owner-event",
 	})
 
 	rec = httptest.NewRecorder()
@@ -3596,8 +3598,11 @@ func TestWorkspaceSnapshotEndpointReturnsRelatedRunsAndBlockingItems(t *testing.
 	if body.Snapshot.Workspace.ID != workspace.ID {
 		t.Fatalf("workspace = %+v, want %s", body.Snapshot.Workspace, workspace.ID)
 	}
-	if body.Snapshot.Workspace.State != string(common.WorkspaceStateBlockedOnApproval) || body.Snapshot.Workspace.ActiveRunID != approvalRun.ID {
-		t.Fatalf("workspace projection = %+v, want blocked_on_approval active run %s", body.Snapshot.Workspace, approvalRun.ID)
+	if body.Snapshot.Workspace.State != string(common.WorkspaceStateActive) || body.Snapshot.Workspace.ActiveRunID != approvalRun.ID {
+		t.Fatalf("workspace projection = %+v, want canonical active owner state and active run %s", body.Snapshot.Workspace, approvalRun.ID)
+	}
+	if body.Snapshot.GovernanceDisplay.ApprovalID != approvalRun.BlockingApprovalID || body.Snapshot.GovernanceDisplay.PromptMode != "approval" {
+		t.Fatalf("governance display = %+v, want approval handoff %s", body.Snapshot.GovernanceDisplay, approvalRun.BlockingApprovalID)
 	}
 	if len(body.Snapshot.Runs) != 3 {
 		t.Fatalf("runs = %+v, want 3 runs", body.Snapshot.Runs)
@@ -3862,10 +3867,9 @@ func TestWorkspaceSnapshotEndpointDoesNotOverlayStalePromptMode(t *testing.T) {
 	state.readWorkspaceDetailSnapshot = func(context.Context, string, string, string) (readmodelcore.WorkspaceSnapshotState, error) {
 		return readmodelcore.WorkspaceSnapshotState{
 			Workspace: appmodelcore.Workspace{
-				ID:               string(workspaceID),
-				State:            string(common.WorkspaceStateActive),
-				ActiveRunID:      "run-detail-prompt-same-source",
-				BlockingTicketID: "ticket-detail-prompt-same-source",
+				ID:          string(workspaceID),
+				State:       string(common.WorkspaceStateActive),
+				ActiveRunID: "run-detail-prompt-same-source",
 			},
 			Run: &appmodelcore.Run{
 				ID:               "run-detail-prompt-same-source",
@@ -3893,9 +3897,11 @@ func TestWorkspaceSnapshotEndpointDoesNotOverlayStalePromptMode(t *testing.T) {
 		t.Fatalf("unmarshal workspace snapshot: %v", err)
 	}
 	if body.Snapshot.Workspace.State != string(common.WorkspaceStateActive) ||
-		body.Snapshot.Workspace.BlockingTicketID != "ticket-detail-prompt-same-source" ||
+		body.Snapshot.Workspace.ActiveRunID != "run-detail-prompt-same-source" ||
 		body.Snapshot.Run == nil ||
-		body.Snapshot.Run.State != string(common.RunStateBlockedOnDecision) {
+		body.Snapshot.Run.State != string(common.RunStateBlockedOnDecision) ||
+		body.Snapshot.Run.BlockingTicketID != "ticket-detail-prompt-same-source" ||
+		body.Snapshot.GovernanceDisplay.DecisionID != "ticket-detail-prompt-same-source" {
 		t.Fatalf("snapshot workspace/run = %+v/%+v, want blocked decision owner state", body.Snapshot.Workspace, body.Snapshot.Run)
 	}
 	if body.Snapshot.ViewModel.PromptMode != "decision" ||
@@ -4053,6 +4059,64 @@ func TestDecisionListAndGetEndpointsReturnPersistedTickets(t *testing.T) {
 	}
 }
 
+func TestDecisionReadEndpointsProjectTypedRuntimeDefinitionClarification(t *testing.T) {
+	dataRoot := t.TempDir()
+	handler := newTestMux(t, Config{Backend: "file", DataRoot: dataRoot})
+	workspace, started := seedBlockedDecisionRunForHTTP(t, dataRoot, "typed definition clarification read", "run-definition-read")
+	repos := workorchrepo.NewWorkspaceScopedFileRepositorySet(dataRoot)
+	ctx := common.ContextWithRuntimeWorkspaceID(context.Background(), common.WorkspaceID(workspace.ID))
+	ticket, err := repos.Tickets.Get(ctx, common.TicketID(started.BlockingTicketID))
+	if err != nil {
+		t.Fatalf("get definition ticket: %v", err)
+	}
+	ticket.DecisionKind = "runtime_definition_clarification"
+	ticket.FailureClass = "runtime_definition_gap"
+	ticket.DefinitionClarification = &decisionmodel.DefinitionClarificationBinding{
+		Class: decisionmodel.DefinitionClarificationRuntime, OpenBindingHash: "open-binding", RequiredActionKind: decisionevents.DefinitionClarificationActionReviseAndRestart,
+		ViolationOrGapCode: string(decisionevents.RuntimeDefinitionGapImplicitOneOf), CanonicalSignatureVersion: "runtime-gap-v1",
+		CanonicalSignature: "safe-gap-signature", CanonicalSignatureHash: "signature-hash", OffendingRefs: []string{"dod:item-1", "goal:goal-1"},
+		DefinitionRevision: "definition-old", StartupInputHash: "startup-old", AuthoritySnapshotID: "authority-1",
+		ClarificationDispatchID: "clarification-dispatch-1", FocusRef: "focus-1", LogicalRequestID: "logical-1", SemanticDocumentHash: "document-1",
+	}
+	if err := repos.Tickets.Update(ctx, ticket); err != nil {
+		t.Fatalf("update definition ticket: %v", err)
+	}
+
+	for _, path := range []string{
+		"/api/v1/workorch/decisions?workspaceId=" + url.QueryEscape(workspace.ID),
+		"/api/v1/workorch/decisions/" + url.PathEscape(started.BlockingTicketID) + "?workspaceId=" + url.QueryEscape(workspace.ID),
+	} {
+		req := httptest.NewRequest(http.MethodGet, path, nil)
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, req)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("GET %s status = %d, want 200, body=%s", path, rec.Code, rec.Body.String())
+		}
+		var projected projectioncontract.Decision
+		if strings.Contains(path, "?") && !strings.Contains(path, "/"+url.PathEscape(started.BlockingTicketID)) {
+			var response decisionsResponse
+			if err := json.Unmarshal(rec.Body.Bytes(), &response); err != nil || len(response.Decisions) != 1 {
+				t.Fatalf("unmarshal definition list: err=%v decisions=%+v", err, response.Decisions)
+			}
+			projected = response.Decisions[0]
+		} else {
+			var response decisionResponse
+			if err := json.Unmarshal(rec.Body.Bytes(), &response); err != nil {
+				t.Fatalf("unmarshal definition detail: %v", err)
+			}
+			projected = response.Decision
+		}
+		binding := projected.DefinitionClarification
+		if binding == nil || binding.Class != string(decisionmodel.DefinitionClarificationRuntime) || binding.BindingState != "open" ||
+			binding.RequiredAction != decisionevents.DefinitionClarificationActionReviseAndRestart ||
+			binding.ViolationOrGapCode != string(decisionevents.RuntimeDefinitionGapImplicitOneOf) || len(binding.OffendingRefs) != 2 ||
+			binding.DefinitionRevision != "definition-old" || binding.AuthoritySnapshotID != "authority-1" ||
+			binding.ClarificationDispatchID != "clarification-dispatch-1" || binding.FocusRef != "focus-1" {
+			t.Fatalf("GET %s definition clarification = %+v", path, binding)
+		}
+	}
+}
+
 func TestDecisionResolveEndpointResolvesTicketWithoutLegacyRunResume(t *testing.T) {
 	dataRoot := t.TempDir()
 	handler := newFileMuxWithCleanup(t, dataRoot)
@@ -4077,6 +4141,32 @@ func TestDecisionResolveEndpointResolvesTicketWithoutLegacyRunResume(t *testing.
 	blocked := waitRunStateForHTTP(t, dataRoot, runID, string(common.RunStateBlockedOnDecision))
 	if blocked.BlockingTicketID != started.BlockingTicketID {
 		t.Fatalf("run = %+v, want legacy decision blocker unchanged", blocked)
+	}
+}
+
+func TestDecisionResolveEndpointReturnsExactOwnerReadbackAfterResponseLoss(t *testing.T) {
+	dataRoot := t.TempDir()
+	handler := newFileMuxWithCleanup(t, dataRoot)
+	_, started := seedBlockedDecisionRunForHTTP(t, dataRoot, "decision response loss http workspace", "run-decision-response-loss-http")
+	body := `{"resolutionType":"provide_missing_info","resolutionPayload":{"operator":"http-idempotent","answer":"same answer"}}`
+	resolve := func() decisionResponse {
+		req := httptest.NewRequest(http.MethodPost, "/api/v1/workorch/decisions/"+started.BlockingTicketID+"/resolve", strings.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, req)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("decision response-loss status = %d, want 200, body=%s", rec.Code, rec.Body.String())
+		}
+		var response decisionResponse
+		if err := json.Unmarshal(rec.Body.Bytes(), &response); err != nil {
+			t.Fatalf("unmarshal decision response-loss response: %v", err)
+		}
+		return response
+	}
+	first := resolve()
+	second := resolve()
+	if first.Decision.ResolutionID == "" || second.Decision.ResolutionID != first.Decision.ResolutionID {
+		t.Fatalf("response-loss readbacks = %+v / %+v, want same owner resolution", first.Decision, second.Decision)
 	}
 }
 
@@ -4238,6 +4328,133 @@ func TestDecisionBatchResolveEndpointResolvesOpenTickets(t *testing.T) {
 	}
 	waitRunStateForHTTP(t, dataRoot, firstRunID, string(common.RunStateBlockedOnDecision))
 	waitRunStateForHTTP(t, dataRoot, secondRunID, string(common.RunStateBlockedOnDecision))
+}
+
+func TestDecisionMutationEndpointsRejectNonCanonicalOpenTicketWithoutMutation(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		batch bool
+	}{
+		{name: "single"},
+		{name: "batch", batch: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dataRoot := t.TempDir()
+			handler := newFileMuxWithCleanup(t, dataRoot)
+			workspace, started := seedBlockedDecisionRunForHTTP(t, dataRoot, "non-canonical decision mutation", "run-decision-noncanonical-"+tc.name)
+			extraID := common.TicketID("ticket-decision-extra-" + tc.name)
+			repos := workorchrepo.NewWorkspaceScopedFileRepositorySet(dataRoot)
+			ctx := common.ContextWithRuntimeWorkspaceID(context.Background(), common.WorkspaceID(workspace.ID))
+			if err := repos.Tickets.Create(ctx, &decisionmodel.Ticket{
+				ID: extraID, WorkspaceID: common.WorkspaceID(workspace.ID), RunID: common.RunID(started.ID),
+				StepID: common.StepID(started.ID + "/extra-decision"), State: common.DecisionTicketStateOpen,
+			}); err != nil {
+				t.Fatalf("create extra Decision: %v", err)
+			}
+
+			var req *http.Request
+			if tc.batch {
+				body := strings.NewReader(`{"ticketIds":["` + started.BlockingTicketID + `","` + string(extraID) + `"],"resolutionType":"replan"}`)
+				req = httptest.NewRequest(http.MethodPost, "/api/v1/workorch/decisions/resolve-batch?workspaceId="+url.QueryEscape(workspace.ID), body)
+			} else {
+				req = httptest.NewRequest(http.MethodPost, "/api/v1/workorch/decisions/"+string(extraID)+"/resolve?workspaceId="+url.QueryEscape(workspace.ID), nil)
+			}
+			rec := httptest.NewRecorder()
+			handler.ServeHTTP(rec, req)
+			if rec.Code != http.StatusConflict {
+				t.Fatalf("Decision %s status = %d, want 409, body=%s", tc.name, rec.Code, rec.Body.String())
+			}
+			for _, id := range []common.TicketID{common.TicketID(started.BlockingTicketID), extraID} {
+				item, err := repos.Tickets.Get(ctx, id)
+				if err != nil {
+					t.Fatalf("get Decision %s: %v", id, err)
+				}
+				if item.State != common.DecisionTicketStateOpen {
+					t.Fatalf("Decision %s state = %s, want open after zero-mutation conflict", id, item.State)
+				}
+			}
+		})
+	}
+}
+
+func TestDecisionMutationEndpointsRejectDefinitionTicketsWithoutMutation(t *testing.T) {
+	for _, tc := range []struct {
+		name         string
+		decisionKind string
+		failureClass string
+	}{
+		{name: "definition admission", failureClass: "definition_admission"},
+		{name: "runtime definition clarification", decisionKind: "runtime_definition_clarification", failureClass: "runtime_definition_gap"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dataRoot := t.TempDir()
+			handler := newFileMuxWithCleanup(t, dataRoot)
+			workspace, started := seedBlockedDecisionRunForHTTP(t, dataRoot, tc.name, "run-definition-generic-"+strings.ReplaceAll(tc.name, " ", "-"))
+			repos := workorchrepo.NewWorkspaceScopedFileRepositorySet(dataRoot)
+			ctx := common.ContextWithRuntimeWorkspaceID(context.Background(), common.WorkspaceID(workspace.ID))
+			ticket, err := repos.Tickets.Get(ctx, common.TicketID(started.BlockingTicketID))
+			if err != nil {
+				t.Fatalf("get definition ticket: %v", err)
+			}
+			ticket.DecisionKind = tc.decisionKind
+			ticket.FailureClass = tc.failureClass
+			if err := repos.Tickets.Update(ctx, ticket); err != nil {
+				t.Fatalf("update definition ticket: %v", err)
+			}
+
+			req := httptest.NewRequest(http.MethodPost, "/api/v1/workorch/decisions/"+started.BlockingTicketID+"/resolve?workspaceId="+url.QueryEscape(workspace.ID), nil)
+			rec := httptest.NewRecorder()
+			handler.ServeHTTP(rec, req)
+			if rec.Code != http.StatusConflict {
+				t.Fatalf("generic definition resolve status = %d, want 409, body=%s", rec.Code, rec.Body.String())
+			}
+			persisted, err := repos.Tickets.Get(ctx, ticket.ID)
+			if err != nil {
+				t.Fatalf("read definition ticket after conflict: %v", err)
+			}
+			if persisted.State != common.DecisionTicketStateOpen {
+				t.Fatalf("definition ticket state = %s, want open for dedicated admission", persisted.State)
+			}
+		})
+	}
+}
+
+func TestDecisionBatchResolveEndpointRejectsDefinitionTicketBeforeAnyMutation(t *testing.T) {
+	dataRoot := t.TempDir()
+	handler := newFileMuxWithCleanup(t, dataRoot)
+	validWorkspace, valid := seedBlockedDecisionRunForHTTP(t, dataRoot, "valid decision batch target", "run-definition-batch-valid")
+	definitionWorkspace, definition := seedBlockedDecisionRunForHTTP(t, dataRoot, "definition decision batch target", "run-definition-batch-dedicated")
+	repos := workorchrepo.NewWorkspaceScopedFileRepositorySet(dataRoot)
+	definitionCtx := common.ContextWithRuntimeWorkspaceID(context.Background(), common.WorkspaceID(definitionWorkspace.ID))
+	ticket, err := repos.Tickets.Get(definitionCtx, common.TicketID(definition.BlockingTicketID))
+	if err != nil {
+		t.Fatalf("get definition ticket: %v", err)
+	}
+	ticket.DecisionKind = "runtime_definition_clarification"
+	if err := repos.Tickets.Update(definitionCtx, ticket); err != nil {
+		t.Fatalf("update definition ticket: %v", err)
+	}
+
+	body := strings.NewReader(`{"ticketIds":["` + valid.BlockingTicketID + `","` + definition.BlockingTicketID + `"],"resolutionType":"replan"}`)
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/workorch/decisions/resolve-batch", body)
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusConflict {
+		t.Fatalf("definition batch status = %d, want 409, body=%s", rec.Code, rec.Body.String())
+	}
+	for _, target := range []struct {
+		workspace appmodelcore.Workspace
+		run       appmodelcore.Run
+	}{{validWorkspace, valid}, {definitionWorkspace, definition}} {
+		ctx := common.ContextWithRuntimeWorkspaceID(context.Background(), common.WorkspaceID(target.workspace.ID))
+		persisted, err := repos.Tickets.Get(ctx, common.TicketID(target.run.BlockingTicketID))
+		if err != nil {
+			t.Fatalf("read Decision %s after batch conflict: %v", target.run.BlockingTicketID, err)
+		}
+		if persisted.State != common.DecisionTicketStateOpen {
+			t.Fatalf("Decision %s state = %s, want open after zero-mutation batch conflict", persisted.ID, persisted.State)
+		}
+	}
 }
 
 func TestDecisionResolveEndpointScopesDuplicateTicketIDsByWorkspace(t *testing.T) {
@@ -4675,6 +4892,53 @@ func TestApprovalBatchResolveEndpointApprovesPendingApprovals(t *testing.T) {
 	waitRunStateForHTTP(t, dataRoot, secondRunID, string(common.RunStateBlockedOnApproval))
 }
 
+func TestApprovalMutationEndpointsRejectNonCanonicalPendingResourceWithoutMutation(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		batch bool
+	}{
+		{name: "single"},
+		{name: "batch", batch: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dataRoot := t.TempDir()
+			handler := newFileMuxWithCleanup(t, dataRoot)
+			workspace, started := seedBlockedApprovalRunForHTTP(t, dataRoot, "non-canonical approval mutation", "run-approval-noncanonical-"+tc.name)
+			extraID := common.ApprovalID("approval-extra-" + tc.name)
+			repos := workorchrepo.NewWorkspaceScopedFileRepositorySet(dataRoot)
+			ctx := common.ContextWithRuntimeWorkspaceID(context.Background(), common.WorkspaceID(workspace.ID))
+			if err := repos.Approvals.Create(ctx, &approvalmodel.Approval{
+				ID: extraID, WorkspaceID: common.WorkspaceID(workspace.ID), RunID: common.RunID(started.ID),
+				StepID: common.StepID(started.ID + "/extra-approval"), State: common.ApprovalStatePending,
+			}); err != nil {
+				t.Fatalf("create extra Approval: %v", err)
+			}
+
+			var req *http.Request
+			if tc.batch {
+				body := strings.NewReader(`{"approvalIds":["` + started.BlockingApprovalID + `","` + string(extraID) + `"],"action":"approve"}`)
+				req = httptest.NewRequest(http.MethodPost, "/api/v1/workorch/approvals/resolve-batch?workspaceId="+url.QueryEscape(workspace.ID), body)
+			} else {
+				req = httptest.NewRequest(http.MethodPost, "/api/v1/workorch/approvals/"+string(extraID)+"/approve?workspaceId="+url.QueryEscape(workspace.ID), nil)
+			}
+			rec := httptest.NewRecorder()
+			handler.ServeHTTP(rec, req)
+			if rec.Code != http.StatusConflict {
+				t.Fatalf("Approval %s status = %d, want 409, body=%s", tc.name, rec.Code, rec.Body.String())
+			}
+			for _, id := range []common.ApprovalID{common.ApprovalID(started.BlockingApprovalID), extraID} {
+				item, err := repos.Approvals.Get(ctx, id)
+				if err != nil {
+					t.Fatalf("get Approval %s: %v", id, err)
+				}
+				if item.State != common.ApprovalStatePending {
+					t.Fatalf("Approval %s state = %s, want pending after zero-mutation conflict", id, item.State)
+				}
+			}
+		})
+	}
+}
+
 func TestApprovalBatchResolveEndpointScopesDuplicateApprovalIDsByWorkspace(t *testing.T) {
 	dataRoot := t.TempDir()
 	handler := newFileMuxWithCleanup(t, dataRoot)
@@ -4811,6 +5075,32 @@ func TestApprovalApproveEndpointApprovesApprovalWithoutLegacyRunResume(t *testin
 	blocked := waitRunStateForHTTP(t, dataRoot, runID, string(common.RunStateBlockedOnApproval))
 	if blocked.BlockingApprovalID != started.BlockingApprovalID {
 		t.Fatalf("run = %+v, want legacy approval blocker unchanged", blocked)
+	}
+}
+
+func TestApprovalApproveEndpointReturnsExactOwnerReadbackAfterResponseLoss(t *testing.T) {
+	dataRoot := t.TempDir()
+	handler := newFileMuxWithCleanup(t, dataRoot)
+	_, started := seedBlockedApprovalRunForHTTP(t, dataRoot, "approval response loss http workspace", "run-approval-response-loss-http")
+	body := `{"payload":{"rawInput":"approve","source":"web"}}`
+	approve := func() approvalResponse {
+		req := httptest.NewRequest(http.MethodPost, "/api/v1/workorch/approvals/"+started.BlockingApprovalID+"/approve", strings.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, req)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("approval response-loss status = %d, want 200, body=%s", rec.Code, rec.Body.String())
+		}
+		var response approvalResponse
+		if err := json.Unmarshal(rec.Body.Bytes(), &response); err != nil {
+			t.Fatalf("unmarshal approval response-loss response: %v", err)
+		}
+		return response
+	}
+	first := approve()
+	second := approve()
+	if first.Approval.ResolutionID == "" || second.Approval.ResolutionID != first.Approval.ResolutionID {
+		t.Fatalf("response-loss readbacks = %+v / %+v, want same owner resolution", first.Approval, second.Approval)
 	}
 }
 
@@ -5228,6 +5518,7 @@ func seedBlockedRunForHTTP(t *testing.T, dataRoot string, title string, runID st
 		Title:                title,
 		DeliverableDirectory: "workspaces/" + runID,
 		State:                common.WorkspaceStateActive,
+		ActiveRunID:          common.RunID(runID),
 	}
 	runScopedRepos := workorchrepo.NewWorkspaceScopedFileRepositorySet(dataRoot)
 	if err := runScopedRepos.Workspaces.Create(ctx, workspace); err != nil {

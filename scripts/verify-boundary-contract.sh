@@ -1683,6 +1683,79 @@ for owner in file git mcp shell; do
   fi
 done
 
+# File prospective-target admission is a pre-effect create gate. Post-effect
+# reconciliation must use a separate File-private observer; reusing admission
+# turns the successfully created target into unsupported/unverifiable and can
+# make SM-2 reopen the CWI for a second effect. The observer remains factual
+# and must not acquire Orchestrator-private retain/reopen vocabulary.
+file_reconciliation_observer="internal/modules/blocks/file/biz/file_runtime_reconciliation.go"
+file_reconciliation_handler="$(sed -n '/^func (m \*Biz) handleRuntimeCWIReconciliationQuery(/,/^}/p' internal/modules/blocks/file/biz/owner.go)"
+if [[ ! -f "$file_reconciliation_observer" ]] ||
+   ! grep -q -F -- 'observeRuntimeReconciliationTargets' "$file_reconciliation_observer" ||
+   ! grep -q -F -- 'observeRuntimeReconciliationTargets' <<<"$file_reconciliation_handler" ||
+   grep -q -F -- 'AcquireRuntimeTargetSelection' <<<"$file_reconciliation_handler"; then
+  echo "boundary contract violation: File post-effect reconciliation reuses prospective-target admission" >&2
+  exit 1
+fi
+if source_matches 'RuntimeCWIReconciliationDisposition|"(retain|reopen)"' "$file_reconciliation_observer" | grep -q .; then
+  echo "boundary contract violation: File reconciliation observer selects an Orchestrator-owned CWI disposition" >&2
+  exit 1
+fi
+
+# The pre-effect unique selector is current-inventory cardinality only. A
+# prospective path must be rejected before the generic manifest branch can
+# preserve it as an absent/selected/ambiguous admission; otherwise post-effect
+# reconciliation will correctly fail closed and SM-2 can be sent into a
+# needless reopen loop.
+file_target_admission="internal/modules/blocks/file/biz/file_runtime_target.go"
+unique_target_admission="$(sed -n '/^func acquireUniqueWorkspaceEntryRuntimeTargetSelection(/,/^}/p' "$file_target_admission")"
+if ! grep -q -F -- 'case runtimeFileTargetSelectorUniqueWorkspaceEntry:' "$file_target_admission" ||
+   ! grep -q -F -- 'return acquireUniqueWorkspaceEntryRuntimeTargetSelection(request, manifest)' "$file_target_admission" ||
+   ! grep -q -F -- 'request.prospectiveTargetRef != ""' <<<"$unique_target_admission" ||
+   ! grep -q -F -- 'RuntimeTargetSelectionUnsupported' <<<"$unique_target_admission"; then
+  echo "boundary contract violation: File unique-workspace selector can retain an unauthorized prospective target" >&2
+  exit 1
+fi
+
+# A prospective File target must remain observable through the same bounded
+# deliverable manifest after its effect. Admission may share the owner-private
+# path eligibility predicate with reconciliation, but must not reuse the
+# reconciliation decision path itself.
+file_path_guard="internal/modules/blocks/file/biz/file_path_guard.go"
+prospective_target_admission="$(sed -n '/^func acquireProspectiveRuntimeTargetSelection(/,/^}/p' "$file_target_admission")"
+workspace_target_admission="$(sed -n '/^func acquireManifestRuntimeTargetSelection(/,/^}/p' "$file_target_admission")"
+profile_target_admission="$(sed -n '/^func acquireProfileDeclaredTargetSelection(/,/^}/p' "$file_target_admission")"
+if ! grep -q -F -- 'func runtimeFileDeliverableTargetEligible(' "$file_path_guard" ||
+   ! grep -q -F -- 'runtimeFileDeliverableTargetEligible' <<<"$prospective_target_admission" ||
+   ! grep -q -F -- 'runtimeFileDeliverableTargetEligible' <<<"$workspace_target_admission" ||
+   ! grep -q -F -- 'runtimeFileDeliverableTargetEligible' <<<"$profile_target_admission" ||
+   ! grep -q -F -- 'runtimeFileDeliverableTargetEligible' "$file_reconciliation_observer"; then
+  echo "boundary contract violation: File prospective target can escape the deliverable manifest eligibility shared by factual reconciliation" >&2
+  exit 1
+fi
+file_manifest_observation="$(sed -n '/^func (a \*RuntimeAdapter) acquireWorkspaceManifestObservation(/,/^}/p' internal/modules/blocks/file/biz/file_runtime_snapshot.go)"
+file_capacity_guard="$(sed -n '/^func runtimeFileProspectiveTargetWouldOverflowManifest(/,/^}/p; /^func runtimeFileProspectiveTargetAdditionalEntries(/,/^}/p' "$file_target_admission")"
+file_effect_capacity_guard="$(sed -n '/^func (a \*RuntimeAdapter) validateProspectivePatchManifestCapacity(/,/^}/p' internal/modules/blocks/file/biz/file_runtime_typed.go)"
+if ! grep -q -F -- 'entryCount: len(result.Entries)' <<<"$file_manifest_observation" ||
+	! grep -q -F -- 'runtimeFileProspectiveTargetAdditionalEntries' <<<"$file_capacity_guard" ||
+	! grep -q -F -- 'entryCount+additional > defaultMaxEntries' <<<"$file_capacity_guard" ||
+	! grep -q -F -- 'observation.entryCount+additional > defaultMaxEntries' <<<"$file_effect_capacity_guard"; then
+	echo "boundary contract violation: File prospective capacity ignores directories or missing parent entries" >&2
+	exit 1
+fi
+if ! grep -q -F -- 'TestRuntimeAdapterProspectiveAdmissionRejectsManifestExcludedTargetsWithoutMutation' internal/modules/blocks/file/biz/file_runtime_adapter_test.go ||
+	! grep -q -F -- 'TestRuntimeAdapterProspectiveAdmissionDoesNotIgnoreNonParticipatingTarget' internal/modules/blocks/file/biz/file_runtime_adapter_test.go ||
+	! grep -q -F -- 'TestRuntimeAdapterProspectiveAdmissionReservesManifestCapacity' internal/modules/blocks/file/biz/file_runtime_adapter_test.go ||
+	! grep -q -F -- 'TestRuntimeAdapterCreateEffectRechecksAndSerializesManifestCapacity' internal/modules/blocks/file/biz/file_runtime_adapter_test.go ||
+   ! grep -q -F -- 'TestRuntimeAdapterProfileProspectiveMustBelongToDeclaredCandidatesAcrossCardinality' internal/modules/blocks/file/biz/file_runtime_adapter_test.go ||
+   ! grep -q -F -- 'TestRuntimeAdapterExistingProspectiveMustMatchCurrentInventory' internal/modules/blocks/file/biz/file_runtime_adapter_test.go ||
+   ! grep -q -F -- 'TestRuntimeAdapterManifestFailsClosedOnIncompleteInventoryObservation' internal/modules/blocks/file/biz/file_runtime_adapter_test.go ||
+   ! grep -q -F -- 'TestFileOwnerReconciliationKeepsManifestExcludedProspectiveTargetsUnverifiable' internal/modules/blocks/file/biz/owner_reconciliation_test.go ||
+   ! grep -q -F -- 'TestRuntimeAdapterListAndManifestDistinguishExactBoundFromOverflow' internal/modules/blocks/file/biz/file_runtime_adapter_test.go; then
+  echo "boundary contract violation: File deliverable eligibility or exact-bound regression coverage is missing" >&2
+  exit 1
+fi
+
 reconciliation_batch_shape="$(sed -n '/^type RuntimeCWIReconciliationBatch struct {/,/^}/p' internal/pkg/workorchruntimecontract/runtime_cwi_reconciliation.go)"
 if grep -q -E -- 'OwnerReceiptRefs|ReceiptRefs' <<<"$reconciliation_batch_shape"; then
   echo "boundary contract violation: CWI reconciliation batch must derive lineage refs from canonical observations" >&2
@@ -3263,6 +3336,280 @@ if [[ -n "$llm_streaming_ui_matches" ]]; then
 fi
 if grep -q -E -- 'expected_streaming|item\.get\("streaming"\)' scripts/verify-llm-workspace-execution.sh; then
 	echo "boundary contract violation: deployed LLM verifier reads the compatibility streaming boolean" >&2
+	exit 1
+fi
+
+# Workorchd projection may decode the opaque Runtime aggregate only as one
+# mapper invocation's transient input. Long-lived application/store/transport
+# values must remain bounded immutable DTOs and cannot become a second Runtime
+# recovery source.
+workorchd_runtime_shadow_matches="$({
+	source_matches 'RuntimeStateRecord' \
+		internal/modules/application/workorchd/biz/appservice/appmodelcore \
+		internal/modules/application/workorchd/biz/appservice/readmodelcore \
+		internal/modules/application/workorchd/biz/appservice/workspaceviewcore \
+		internal/modules/application/workorchd/service/server
+} | sed '/^[[:space:]]*$/d')"
+if [[ -n "$workorchd_runtime_shadow_matches" ]]; then
+	echo "boundary contract violation: Workorchd Store/HTTP cache retains RuntimeStateRecord" >&2
+	echo "$workorchd_runtime_shadow_matches" >&2
+	exit 1
+fi
+if grep -R -n -E --include='*.go' -- 'func[[:space:]]+workspaceProjectionState|RunStateBlockedOnApproval.*WorkspaceStateBlockedOnApproval' \
+	internal/modules/application/workorchd; then
+	echo "boundary contract violation: Workorchd regained a Run-to-Workspace owner state shadow mapping" >&2
+	exit 1
+fi
+
+# Workspace has no governance blocker fields. Canonical blocker references are
+# Run-owner facts; public/application/CLI/Web Workspace DTOs cannot retain an
+# empty compatibility copy that can later become shadow authority.
+application_workspace_shape="$(struct_body internal/modules/application/workorchd/biz/appservice/appmodelcore/workspace.go Workspace)"
+public_workspace_shape="$(struct_body internal/pkg/workorchprojectioncontract/resource.go Workspace)"
+cli_workspace_shape="$(struct_body internal/modules/application/workorchd/pkg/events/cli_workspace_dto.go CLIWorkspaceInfo)"
+web_workspace_shape="$(sed -n '/^export type Workspace = {/,/^};/p' web/workorch-console/src/types.ts)"
+if grep -q -E -- 'Blocking(Ticket|Approval)ID|blocking(Ticket|Approval)Id' <<<"$application_workspace_shape
+$public_workspace_shape
+$cli_workspace_shape
+$web_workspace_shape"; then
+	echo "boundary contract violation: Workspace DTO regained Run/governance blocker shadow fields" >&2
+	exit 1
+fi
+
+# Snapshot/runtime-view outcome is explicitly a display-only value, with
+# formal Result projected separately. Do not restore the old ambiguous outcome
+# field/type alongside displayOutcome.
+display_snapshot_files=(
+	internal/pkg/workorchprojectioncontract/snapshot.go
+	internal/pkg/workorchprojectioncontract/observability.go
+	internal/pkg/workorchprojectioncontract/workspace_snapshot.go
+	internal/pkg/workorchprojectioncontract/workspace_view.go
+)
+display_snapshot_shapes="$({
+	sed -n '/^type RunSnapshotOf\[/,/^}/p' internal/pkg/workorchprojectioncontract/snapshot.go
+	sed -n '/^type RunObservabilityOf\[/,/^}/p' internal/pkg/workorchprojectioncontract/observability.go
+	sed -n '/^type WorkspaceSnapshotOf\[/,/^}/p' internal/pkg/workorchprojectioncontract/workspace_snapshot.go
+	sed -n '/^type WorkspaceRuntimeView struct {/,/^}/p' internal/pkg/workorchprojectioncontract/workspace_view.go
+	sed -n '/^export type RunObservability = {/,/^};/p; /^export type RunSnapshot = {/,/^};/p; /^export type WorkspaceSnapshot = {/,/^};/p' web/workorch-console/src/types.ts
+})"
+if grep -q -E -- 'json:"outcome(,|\")|(^|[^A-Za-z])(RunOutcome|WorkspaceOutcome)([^A-Za-z]|$)|^[[:space:]]*outcome\??:' <<<"$display_snapshot_shapes" ||
+	grep -n -E -- '(^|[^A-Za-z])(RunOutcome|WorkspaceOutcome)([^A-Za-z]|$)' "${display_snapshot_files[@]}" web/workorch-console/src/types.ts; then
+	echo "boundary contract violation: snapshot/runtime-view regained ambiguous outcome beside displayOutcome" >&2
+	exit 1
+fi
+if ! grep -q -F 'DisplayOutcome' internal/pkg/workorchprojectioncontract/snapshot.go ||
+	! grep -q -F 'DisplayOutcome' internal/pkg/workorchprojectioncontract/observability.go ||
+	! grep -q -F 'DisplayOutcome' internal/pkg/workorchprojectioncontract/workspace_snapshot.go ||
+	! grep -q -F 'DisplayOutcome' internal/pkg/workorchprojectioncontract/workspace_view.go; then
+	echo "boundary contract violation: snapshot/runtime-view lost explicit displayOutcome contract" >&2
+	exit 1
+fi
+
+# Display outcome/governance/consistency values may affect rendering only. The
+# application execution use case and the Web/TUI intent constructors cannot use
+# them to select or build Drive/Resume/Restart mutation intent.
+display_mutation_matches="$({
+	source_matches 'DisplayOutcome|GovernanceDisplay|ConsistencyDiagnostic' \
+		internal/modules/application/workorchd/biz/execution
+	sed -n '/^func ResumeRun(/,/^}/p; /^func RestartRun(/,/^}/p' \
+		internal/services/workorch/service/tui/commands.go |
+		grep -n -E -- 'DisplayOutcome|GovernanceDisplay|ConsistencyDiagnostic' || true
+	sed -n '/^export function workspaceExecutionPrimaryIntent(/,/^}/p' \
+		web/workorch-console/src/helpers.tsx |
+		grep -n -E -- 'displayOutcome|governanceDisplay|consistencyDiagnostic' || true
+} | sed '/^[[:space:]]*$/d')"
+if [[ -n "$display_mutation_matches" ]]; then
+	echo "boundary contract violation: display-only projection participates in execution mutation intent" >&2
+	echo "$display_mutation_matches" >&2
+	exit 1
+fi
+
+# RuntimeView may expose a concrete governance resource only through the
+# canonical active Run's matching blocked state and exact blocker reference.
+# GovernanceDisplay and a first-open resource from the same Run are not target
+# authority.
+workorchd_governance_resource_selection="$({
+	sed -n '/^func selectBlockingDecision(/,/^}/p' internal/modules/application/workorchd/biz/appservice/readmodelprojection/workspace_runtime_view.go
+	sed -n '/^func selectBlockingApproval(/,/^}/p' internal/modules/application/workorchd/biz/appservice/readmodelprojection/workspace_runtime_view.go
+})"
+if grep -q -E -- 'GovernanceDisplay|isOpenGovernanceState' <<<"$workorchd_governance_resource_selection" ||
+	! grep -q -F 'canonicalActiveRun(snapshot, activeRunID)' <<<"$workorchd_governance_resource_selection" ||
+	! grep -q -F 'run.BlockingTicketID' <<<"$workorchd_governance_resource_selection" ||
+	! grep -q -F 'run.BlockingApprovalID' <<<"$workorchd_governance_resource_selection" ||
+	! grep -q -F 'RunStateBlockedOnDecision' <<<"$workorchd_governance_resource_selection" ||
+	! grep -q -F 'RunStateBlockedOnApproval' <<<"$workorchd_governance_resource_selection" ||
+	! grep -q -F 'DecisionTicketStateOpen' <<<"$workorchd_governance_resource_selection" ||
+	! grep -q -F 'ApprovalStatePending' <<<"$workorchd_governance_resource_selection"; then
+	echo "boundary contract violation: Workorchd RuntimeView governance resource is not selected from the canonical Run blocker reference" >&2
+	exit 1
+fi
+
+# Workorchd is an admission adapter, not another governance state owner. New
+# open/pending transitions must intersect the concrete resource with typed
+# Workspace/Run owner reads and the exact canonical blocker before any owner
+# write. Dedicated Definition tickets never enter generic mutation routes;
+# terminal response-loss retries remain owner-adjudicated.
+workorchd_governance_mutation_admission="$(cat internal/modules/application/workorchd/biz/appservice/governanceports/mutation_admission.go)"
+if ! grep -q -F 'ReadWorkspaceByOwnerCommand' <<<"$workorchd_governance_mutation_admission" ||
+	! grep -q -F 'ReadRunByWorkspaceOwnerCommand' <<<"$workorchd_governance_mutation_admission" ||
+	! grep -q -F 'RunStateBlockedOnDecision' <<<"$workorchd_governance_mutation_admission" ||
+	! grep -q -F 'run.BlockingTicketID != ticket.ID' <<<"$workorchd_governance_mutation_admission" ||
+	! grep -q -F 'RunStateBlockedOnApproval' <<<"$workorchd_governance_mutation_admission" ||
+	! grep -q -F 'run.BlockingApprovalID != item.ID' <<<"$workorchd_governance_mutation_admission" ||
+	! grep -q -F 'definitionDecisionUsesDedicatedAdmission' <<<"$workorchd_governance_mutation_admission" ||
+	! grep -q -F 'response-loss retry' <<<"$workorchd_governance_mutation_admission"; then
+	echo "boundary contract violation: Workorchd governance mutation admission lost canonical owner intersection, dedicated Definition exclusion, or owner idempotency" >&2
+	exit 1
+fi
+for governance_file in \
+	internal/modules/application/workorchd/biz/appservice/governanceports/decision_resolve_views.go \
+	internal/modules/application/workorchd/biz/appservice/governanceports/decision_batch_resolve_views.go; do
+	if ! grep -q -F 'admitDecisionMutation' "$governance_file"; then
+		echo "boundary contract violation: Decision mutation bypasses canonical admission: $governance_file" >&2
+		exit 1
+	fi
+done
+for governance_file in \
+	internal/modules/application/workorchd/biz/appservice/governanceports/approval_resolve_views.go \
+	internal/modules/application/workorchd/biz/appservice/governanceports/approval_batch_resolve_views.go; do
+	if ! grep -q -F 'admitApprovalMutation' "$governance_file"; then
+		echo "boundary contract violation: Approval mutation bypasses canonical admission: $governance_file" >&2
+		exit 1
+	fi
+done
+if ! grep -q -F 'requireCanonicalDecisionMutationTargets' web/workorch-console/src/pages/DecisionQueuePage.tsx ||
+	! grep -q -F 'requireCanonicalApprovalMutationTargets' web/workorch-console/src/pages/ApprovalQueuePage.tsx ||
+	! grep -q -F 'canonicalDefinitionClarification(snapshot)' web/workorch-console/src/helpers.tsx ||
+	grep -q -F 'governanceDisplay' < <(sed -n '/^export function canonicalDefinitionClarification(/,/^}/p' web/workorch-console/src/governanceMutationTarget.ts); then
+	echo "boundary contract violation: Web governance/definition mutation target is not canonical or regained display authority" >&2
+	exit 1
+fi
+
+# Definition clarification crosses Workorchd only as a bounded typed owner
+# projection. Mutable refs must detach, and UI command admission must not be
+# reconstructed from legacy text, display hints, or derived Goal/DoD freshness.
+definition_projection_contract="$(sed -n '/^type DefinitionClarification struct {/,/^}/p' internal/pkg/workorchprojectioncontract/governance.go)"
+definition_projection_clone="$(sed -n '/^func CloneDefinitionClarification(/,/^}/p' internal/pkg/workorchprojectioncontract/governance.go)"
+definition_projection_mapper="$(sed -n '/^func mapDefinitionClarification(/,/^}/p' internal/modules/application/workorchd/biz/appservice/readmodelprojection/decision_projection.go)"
+if ! grep -q -F 'DefinitionClarification *DefinitionClarification' internal/pkg/workorchprojectioncontract/governance.go ||
+	! grep -q -F 'OffendingRefs' <<<"$definition_projection_contract" ||
+	! grep -q -F 'AuthoritySnapshotID' <<<"$definition_projection_contract" ||
+	! grep -q -F 'ClarificationDispatchID' <<<"$definition_projection_contract" ||
+	! grep -q -F 'ret.OffendingRefs = append([]string(nil), item.OffendingRefs...)' <<<"$definition_projection_clone" ||
+	! grep -q -F 'OffendingRefs:' <<<"$definition_projection_mapper" ||
+	! grep -q -F 'mapDefinitionClarification(item.DefinitionClarification)' internal/modules/application/workorchd/biz/appservice/readmodelprojection/decision_projection.go ||
+	! grep -q -F 'item.Decisions = projectioncontract.CloneDecisions(item.Decisions)' internal/modules/application/workorchd/biz/appservice/workspaceviewcore/store_clone.go ||
+	! grep -q -F 'snapshot.Decisions = projectioncontract.CloneDecisions(source.Decisions)' internal/modules/application/workorchd/biz/appservice/workspaceviewcore/store_query.go ||
+	! grep -q -F 'TestMapDecisionProjectsRuntimeDefinitionClarificationWithoutLoss' internal/modules/application/workorchd/biz/appservice/readmodelprojection/decision_projection_test.go ||
+	! grep -q -F 'TestStoreDefinitionClarificationReadsDetachBindingAndOffendingRefs' internal/modules/application/workorchd/biz/appservice/workspaceviewcore/store_clone_test.go ||
+	! grep -q -F 'TestDecisionReadEndpointsProjectTypedRuntimeDefinitionClarification' internal/modules/application/workorchd/service/server/http_test.go; then
+	echo "boundary contract violation: Definition clarification lost its bounded typed/deep-cloned Workorchd read projection" >&2
+	exit 1
+fi
+web_definition_selector="$(sed -n '/^export function canonicalDefinitionClarification(/,/^}/p' web/workorch-console/src/governanceMutationTarget.ts)"
+web_definition_intent_gate="$(sed -n '/^export function workspaceExecutionIntentAllowed(/,/^}/p' web/workorch-console/src/governanceMutationTarget.ts)"
+if grep -q -E -- 'governanceDisplay|decisionKind|failureClass|\.context' <<<"$web_definition_selector" ||
+	grep -q -E -- 'currentDefinitionRevision|\.goals|\.dods|governanceDisplay' <<<"$web_definition_intent_gate" ||
+	! grep -q -F "return intent === 'restart'" <<<"$web_definition_intent_gate" ||
+	! grep -q -F 'workspaceBoardExecutionIntentAllowed' web/workorch-console/src/helpers.tsx ||
+	! grep -q -F 'onOpenWorkspace(workspace.id)' web/workorch-console/src/pages/WorkspaceBoardPage.tsx ||
+	! grep -q -F "requestWorkspaceActivation('restart')" web/workorch-console/src/pages/WorkspaceDetailPage.tsx ||
+	! grep -q -F 'Board always navigates for Definition clarification' web/workorch-console/tests/governanceMutationTarget.test.ts ||
+	! grep -q -F 'display changes do not enable or disable explicit Restart' web/workorch-console/tests/governanceMutationTarget.test.ts; then
+	echo "boundary contract violation: Web Definition navigation/explicit Restart boundary depends on display freshness or regained Board execution" >&2
+	exit 1
+fi
+tui_definition_instruction="$(sed -n '/^func definitionClarificationInstruction(/,/^}/p' internal/services/workorch/service/tui/model.go)"
+if ! grep -q -F 'item.DefinitionClarification' <<<"$tui_definition_instruction" ||
+	! grep -q -F 'binding.ViolationOrGapCode' <<<"$tui_definition_instruction" ||
+	! grep -q -F 'binding.OffendingRefs' <<<"$tui_definition_instruction" ||
+	! grep -q -F 'binding.RequiredAction' <<<"$tui_definition_instruction" ||
+	grep -q -E -- 'item\.(Context|DecisionKind|FailureClass|Reason|Question)' <<<"$tui_definition_instruction"; then
+	echo "boundary contract violation: TUI Definition instruction is not rendered exclusively from the typed binding" >&2
+	exit 1
+fi
+
+# Governance resolution already enters the owners' persisted continuation
+# lane. UI success/help copy must wait for projection refresh and surface a
+# delivery diagnostic instead of teaching users to submit a second Resume.
+approval_queue_copy="$(cat web/workorch-console/src/pages/ApprovalQueuePage.tsx)"
+model_selection_governance_copy="$(sed -n '/switch m.activeWorkspacePromptMode()/,/^\t}/p' internal/services/workorch/service/tui/model_selection.go)"
+if grep -q -E -- '如关联运行.*恢复运行|唯一用户继续命令为.*恢复运行' <<<"$approval_queue_copy" ||
+	grep -q -F -- 'then use /run resume' <<<"$model_selection_governance_copy" ||
+	! grep -q -F 'governanceContinuationGuidance' <<<"$approval_queue_copy" ||
+	! grep -q -F 'resolution delivery diagnostic' <<<"$model_selection_governance_copy" ||
+	! grep -q -F 'TestModelSelectionGovernanceGuidanceWaitsForOwnerContinuation' internal/services/workorch/service/tui/model_selection_test.go ||
+	! grep -q -F 'governance success guidance waits for owner continuation instead of scheduling Resume' web/workorch-console/tests/governanceMutationTarget.test.ts; then
+	echo "boundary contract violation: governance UI copy regained a client-scheduled Resume continuation" >&2
+	exit 1
+fi
+
+# A governance display handoff cannot select a concrete Decision/Approval
+# mutation target. TUI resolution requires the exact RuntimeView-selected
+# resource to remain present in the owner list and canonical Workspace
+# activeRunId scope; it cannot fall back to the first same-Run resource.
+tui_governance_target_selection="$({
+	sed -n '/^func (m \*AppModel) activeBlockingDecision(/,/^}/p' internal/services/workorch/service/tui/model.go
+	sed -n '/^func (m \*AppModel) activeBlockingApproval(/,/^}/p' internal/services/workorch/service/tui/model.go
+	sed -n '/^func (m \*AppModel) decisionMatchesActiveScope(/,/^}/p' internal/services/workorch/service/tui/model.go
+	sed -n '/^func (m \*AppModel) approvalMatchesActiveScope(/,/^}/p' internal/services/workorch/service/tui/model.go
+})"
+tui_governance_scope_source="$(sed -n '/^func (m \*AppModel) canonicalGovernanceMutationScope(/,/^}/p' internal/services/workorch/service/tui/model.go)"
+if grep -q -E -- 'activeGovernanceDisplay|GovernanceDisplay|\.DecisionID|\.ApprovalID' <<<"$tui_governance_target_selection" ||
+	grep -q -E -- 'filterOpenDecisions\(m\.decisions\)|filterPendingApprovals\(m\.approvals\)' <<<"$tui_governance_target_selection" ||
+	! grep -q -F 'canonicalBlockingTicketID' <<<"$tui_governance_target_selection" ||
+	! grep -q -F 'canonicalBlockingApprovalID' <<<"$tui_governance_target_selection" ||
+	! grep -q -F 'containsOpenDecisionIdentity(m.decisions, *m.blockingDecision)' <<<"$tui_governance_target_selection" ||
+	! grep -q -F 'containsPendingApprovalIdentity(m.approvals, *m.blockingApproval)' <<<"$tui_governance_target_selection" ||
+	! grep -q -F 'canonicalGovernanceMutationScope()' <<<"$tui_governance_target_selection" ||
+	! grep -q -F 'activeWorkspaceOverview()' <<<"$tui_governance_scope_source" ||
+	! grep -q -F 'workspace.ActiveRunID' <<<"$tui_governance_scope_source"; then
+	echo "boundary contract violation: TUI governance mutation target is not canonical owner scoped" >&2
+	exit 1
+fi
+if source_matches 'func \(m \*AppModel\) setBlocking(Decision|Approval)\(' internal/services/workorch/service/tui | grep -q .; then
+	echo "boundary contract violation: TUI synthesizes a concrete governance resource from a Run/display reference" >&2
+	exit 1
+fi
+workorchd_tui_resume_gate="$({
+	sed -n '/^func (m \*AppModel) activeWorkspaceBlockerProgress(/,/^}/p' internal/services/workorch/service/tui/workspace_state.go
+	sed -n '/^func (m \*AppModel) blockActiveWorkspaceResume(/,/^}/p' internal/services/workorch/service/tui/workspace_state.go
+})"
+if grep -q -E -- 'activeGovernance|GovernanceDisplay|PromptMode|promptMode' <<<"$workorchd_tui_resume_gate" ||
+	! grep -q -F 'activeBlockingDecision()' <<<"$workorchd_tui_resume_gate" ||
+	! grep -q -F 'activeDefinitionClarificationDecision()' <<<"$workorchd_tui_resume_gate" ||
+	! grep -q -F 'activeBlockingApproval()' <<<"$workorchd_tui_resume_gate"; then
+	echo "boundary contract violation: display-only governance projection can suppress TUI Resume" >&2
+	exit 1
+fi
+if ! grep -q -F 'TestModelGovernanceDisplayCannotSelectDecisionMutationTarget' internal/services/workorch/service/tui/model_test.go ||
+	! grep -q -F 'TestModelGovernanceDisplayCannotSelectApprovalMutationTarget' internal/services/workorch/service/tui/model_test.go ||
+	! grep -q -F 'TestModelGovernanceDisplayCannotBlockResumeWithoutCanonicalBlocker' internal/services/workorch/service/tui/model_test.go ||
+	! grep -q -F 'TestModelDefinitionClarificationDisablesGenericMutationAndResume' internal/services/workorch/service/tui/model_test.go ||
+	! grep -q -F 'TestEqualRevisionDefinitionClassificationRevokesGenericMutationTarget' internal/services/workorch/service/tui/runtime_view_test.go ||
+	! grep -q -F 'TestDecisionMutationEndpointsRejectDefinitionTicketsWithoutMutation' internal/modules/application/workorchd/service/server/http_test.go ||
+	! grep -q -F 'TestBatchResolveApprovalsWithBackendAcceptsExactResponseLossDuplicate' internal/modules/application/workorchd/biz/appservice/approval_service_test.go ||
+	! grep -q -F 'TestWorkspaceRuntimeViewBlockersRequireCanonicalRunReference' internal/modules/application/workorchd/biz/appservice/readmodelprojection/workspace_runtime_view_test.go; then
+	echo "boundary contract violation: TUI display-forgery governance mutation regressions are missing" >&2
+	exit 1
+fi
+resolve_approval_tui="$(sed -n '/^func ResolveApproval(/,/^}/p' internal/services/workorch/service/tui/commands.go)"
+if grep -q -F 'Approval().Get' <<<"$resolve_approval_tui" ||
+	! grep -q -F 'TestResolveApprovalDoesNotReclassifyOwnerConflictFromTerminalReadback' internal/services/workorch/service/tui/model_test.go ||
+	! grep -q -F 'TestModelProjectedApprovalHandoffWithoutResourceBlocksMutation' internal/services/workorch/service/tui/model_test.go; then
+	echo "boundary contract violation: TUI re-adjudicates Approval conflict or bypasses the Workspace-owned approval handoff" >&2
+	exit 1
+fi
+
+# Run state metrics/cache invalidation accepts only the concrete Run owner's
+# validated notification. Eventstream replay and forged sources remain audit
+# or display input only.
+run_state_handler="$(sed -n '/^func (b \*Biz) handleRunStateChanged(/,/^}/p' internal/modules/application/workorchd/biz/owner.go)"
+run_state_recorder="$(sed -n '/^func (s \*serverState) RecordRunStateChanged(/,/^}/p' internal/modules/application/workorchd/service/server/event_subscriptions.go)"
+if ! grep -q -F 'event.Source() == "blocks/run"' <<<"$run_state_handler" ||
+	! grep -q -F 'data.Validate() == nil' <<<"$run_state_handler" ||
+	! grep -q -F 'data.Validate() != nil' <<<"$run_state_recorder"; then
+	echo "boundary contract violation: RunStateChanged cache/metrics ingress lost source or typed validation gate" >&2
 	exit 1
 fi
 

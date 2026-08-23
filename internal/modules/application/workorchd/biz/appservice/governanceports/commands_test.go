@@ -7,9 +7,12 @@ import (
 	magicevent "github.com/muidea/magicCommon/event"
 	approvalevents "github.com/muidea/workorch/internal/modules/blocks/approval/pkg/events"
 	decisionevents "github.com/muidea/workorch/internal/modules/blocks/decision/pkg/events"
+	runevents "github.com/muidea/workorch/internal/modules/blocks/run/pkg/events"
+	workspaceevents "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/events"
 
 	approvalmodel "github.com/muidea/workorch/internal/modules/blocks/approval/pkg/models"
 	decisionmodel "github.com/muidea/workorch/internal/modules/blocks/decision/pkg/models"
+	runmodel "github.com/muidea/workorch/internal/modules/blocks/run/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
 )
@@ -270,9 +273,20 @@ func TestResolveApprovalItemPublishesScopedContractCommand(t *testing.T) {
 }
 
 type governanceMagicTestHub struct {
-	rawHub           magicevent.Hub
-	decisionObserver magicevent.SimpleObserver
-	approvalObserver magicevent.SimpleObserver
+	t                 *testing.T
+	rawHub            magicevent.Hub
+	decisionObserver  magicevent.SimpleObserver
+	approvalObserver  magicevent.SimpleObserver
+	workspaceObserver magicevent.SimpleObserver
+	runObserver       magicevent.SimpleObserver
+}
+
+type governanceCanonicalFixture struct {
+	WorkspaceID        common.WorkspaceID
+	RunID              common.RunID
+	RunState           common.RunState
+	BlockingTicketID   common.TicketID
+	BlockingApprovalID common.ApprovalID
 }
 
 // approvalTestCommandResult is intentionally test-local. Production Approval
@@ -287,14 +301,57 @@ func newGovernanceMagicTestHub(t *testing.T) *governanceMagicTestHub {
 	t.Helper()
 	rawHub := magicevent.NewHub(16)
 	ret := &governanceMagicTestHub{
-		rawHub:           rawHub,
-		decisionObserver: magicevent.NewSimpleObserver(decisionevents.CommandDestination, rawHub),
-		approvalObserver: magicevent.NewSimpleObserver(approvalevents.CommandDestination, rawHub),
+		t:                 t,
+		rawHub:            rawHub,
+		decisionObserver:  magicevent.NewSimpleObserver(decisionevents.CommandDestination, rawHub),
+		approvalObserver:  magicevent.NewSimpleObserver(approvalevents.CommandDestination, rawHub),
+		workspaceObserver: magicevent.NewSimpleObserver(workspaceevents.CommandDestination, rawHub),
+		runObserver:       magicevent.NewSimpleObserver(runevents.CommandDestination, rawHub),
 	}
 	t.Cleanup(func() {
 		rawHub.Terminate(context.Background())
 	})
 	return ret
+}
+
+func (h *governanceMagicTestHub) subscribeCanonicalGovernance(fixtures ...governanceCanonicalFixture) {
+	byWorkspace := make(map[common.WorkspaceID]governanceCanonicalFixture, len(fixtures))
+	byRun := make(map[common.RunID]governanceCanonicalFixture, len(fixtures))
+	for _, fixture := range fixtures {
+		byWorkspace[fixture.WorkspaceID] = fixture
+		byRun[fixture.RunID] = fixture
+	}
+	h.workspaceObserver.Subscribe(workspaceevents.TopicWorkspaceCommandGet, func(ev magicevent.Event, result magicevent.Result) {
+		cmd, ok := ev.Data().(workspaceevents.GetWorkspaceCommand)
+		if !ok {
+			h.t.Fatalf("workspace command payload type = %T, want GetWorkspaceCommand", ev.Data())
+		}
+		fixture, ok := byWorkspace[cmd.WorkspaceID]
+		if !ok {
+			h.t.Fatalf("unexpected workspace governance admission read: %q", cmd.WorkspaceID)
+		}
+		result.Set(workspaceevents.WorkspaceCommandResult{Workspace: &workspaceevents.Workspace{
+			ID:          fixture.WorkspaceID,
+			ActiveRunID: fixture.RunID,
+		}}, nil)
+	})
+	h.runObserver.Subscribe(runevents.TopicRunCommandGet, func(ev magicevent.Event, result magicevent.Result) {
+		cmd, ok := ev.Data().(runevents.GetRunCommand)
+		if !ok {
+			h.t.Fatalf("run command payload type = %T, want GetRunCommand", ev.Data())
+		}
+		fixture, ok := byRun[cmd.RunID]
+		if !ok || cmd.WorkspaceID != fixture.WorkspaceID {
+			h.t.Fatalf("unexpected run governance admission read: workspace=%q run=%q", cmd.WorkspaceID, cmd.RunID)
+		}
+		result.Set(runevents.GetRunResult{Run: &runmodel.Run{
+			ID:                 fixture.RunID,
+			WorkspaceID:        fixture.WorkspaceID,
+			State:              fixture.RunState,
+			BlockingTicketID:   fixture.BlockingTicketID,
+			BlockingApprovalID: fixture.BlockingApprovalID,
+		}}, nil)
+	})
 }
 
 func (h *governanceMagicTestHub) subscribeDecision(topic string, handler func(any) any) {

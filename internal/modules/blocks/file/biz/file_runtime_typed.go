@@ -164,10 +164,12 @@ func (a *RuntimeAdapter) ListFiles(request FileListRequest) (FileListResult, err
 		maxEntries = defaultMaxEntries
 	}
 	entries := make([]FileListEntry, 0)
+	truncated := false
+	streamHashAndType := a.streamHashAndType
+	if streamHashAndType == nil {
+		streamHashAndType = streamFileHashAndBinary
+	}
 	addEntry := func(path string, entry fs.DirEntry) error {
-		if len(entries) >= maxEntries {
-			return filepath.SkipAll
-		}
 		if shouldSkipWorkspaceListPath(path) {
 			if entry.IsDir() {
 				return filepath.SkipDir
@@ -176,33 +178,63 @@ func (a *RuntimeAdapter) ListFiles(request FileListRequest) (FileListResult, err
 		}
 		relInput, relErr := filepath.Rel(root, path)
 		if relErr != nil {
-			return nil
+			return relErr
 		}
 		_, resolved, relEntry, pathErr := guardedWorkspacePath(root, relInput, true)
 		if pathErr != nil {
-			if entry.IsDir() {
-				return filepath.SkipDir
+			// WalkDir never follows symlinks. An unsafe or broken symlink is
+			// therefore an explicit non-deliverable entry and may be skipped;
+			// failures for ordinary files/directories make the inventory
+			// incomplete and must fail closed.
+			if entry.Type()&os.ModeSymlink != 0 {
+				return nil
 			}
-			return nil
+			return pathErr
 		}
 		entryInfo, infoErr := entry.Info()
 		if infoErr != nil {
-			return nil
+			return infoErr
+		}
+		// Reaching the configured bound is not itself truncation. Only an
+		// additional entry that would otherwise be returned proves overflow.
+		// Skipped or uninspectable paths therefore do not consume the bound.
+		if len(entries) >= maxEntries {
+			truncated = true
+			return filepath.SkipAll
 		}
 		item := FileListEntry{
 			Path: filepath.ToSlash(relEntry), Kind: fileKind(entryInfo), Size: entryInfo.Size(),
 			ModifiedAt: entryInfo.ModTime().UTC().Format("2006-01-02T15:04:05Z07:00"),
 		}
 		if !entryInfo.IsDir() && entryInfo.Mode()&os.ModeSymlink == 0 {
-			item.ContentHash, item.Binary = fileHashAndBinary(resolved, 8192)
+			item.ContentHash, item.Binary, infoErr = streamHashAndType(resolved)
+			if infoErr != nil {
+				return infoErr
+			}
 		}
 		entries = append(entries, item)
 		return nil
 	}
 	if request.Recursive {
-		err = filepath.WalkDir(target, func(path string, entry fs.DirEntry, walkErr error) error {
-			if walkErr != nil || path == target {
-				return nil
+		walkDir := a.walkDir
+		if walkDir == nil {
+			walkDir = filepath.WalkDir
+		}
+		err = walkDir(target, func(path string, entry fs.DirEntry, walkErr error) error {
+			if path == target {
+				return walkErr
+			}
+			if walkErr != nil {
+				if entry != nil && shouldSkipWorkspaceListPath(path) {
+					if entry.IsDir() {
+						return filepath.SkipDir
+					}
+					return nil
+				}
+				return walkErr
+			}
+			if entry == nil {
+				return fmt.Errorf("file/list walker returned a nil entry without an error for %q", path)
 			}
 			return addEntry(path, entry)
 		})
@@ -231,7 +263,7 @@ func (a *RuntimeAdapter) ListFiles(request FileListRequest) (FileListResult, err
 	sort.Slice(entries, func(i, j int) bool { return entries[i].Path < entries[j].Path })
 	ret := FileListResult{
 		Status: "completed", Stage: "file_list", Path: filepath.ToSlash(rel), Entries: entries,
-		Truncated: len(entries) >= maxEntries, MaxEntries: int64(maxEntries),
+		Truncated: truncated, MaxEntries: int64(maxEntries),
 		Evidence: runtimecontract.RuntimeOperationEvidence{Summary: "completed file/list"},
 	}
 	for _, entry := range entries {
@@ -364,6 +396,8 @@ func (a *RuntimeAdapter) ApplyPatch(request PatchApplyRequest) (RuntimeFileOpera
 	if a == nil || strings.TrimSpace(request.WorkspaceDirectory) == "" || strings.TrimSpace(request.TargetRef) == "" || strings.TrimSpace(request.PatchType) == "" || request.Occurrence < 0 {
 		return runtimeFileFailure("patch_invalid_input", common.ErrInvalidArgument, request.TargetRef), common.ErrInvalidArgument
 	}
+	unlock := a.lockWorkspaceEffect(request.WorkspaceDirectory)
+	defer unlock()
 	patchRequest := patchExecutionRequest{
 		Operation: "apply", PatchType: request.PatchType, TargetRef: request.TargetRef, Summary: request.Summary,
 		Content: request.Content, Diff: request.Diff, OldText: request.OldText, NewText: request.NewText,
@@ -419,8 +453,37 @@ func (a *RuntimeAdapter) ApplyPatch(request PatchApplyRequest) (RuntimeFileOpera
 		ret.FailureMessage = err.Error()
 		return ret, err
 	}
+	if previewErr == nil {
+		if capacityErr := a.validateProspectivePatchManifestCapacity(request); capacityErr != nil {
+			return runtimeFileFailure("workspace_manifest_capacity_exhausted", capacityErr, request.TargetRef), capacityErr
+		}
+	}
 	result, err := a.executePatchRequest(request.WorkspaceDirectory, patchRequest, true)
 	return runtimeFileOperationResultFromExecution(result, request.TargetRef, err), err
+}
+
+func (a *RuntimeAdapter) validateProspectivePatchManifestCapacity(request PatchApplyRequest) error {
+	_, target, _, err := guardedWorkspacePath(request.WorkspaceDirectory, request.TargetRef, false)
+	if err != nil {
+		return err
+	}
+	if _, err = os.Lstat(target); err == nil {
+		return nil
+	} else if !os.IsNotExist(err) {
+		return err
+	}
+	observation, err := a.acquireWorkspaceManifestObservation(request.WorkspaceDirectory)
+	if err != nil {
+		return err
+	}
+	additional, err := runtimeFileProspectiveTargetAdditionalEntries(request.WorkspaceDirectory, request.TargetRef)
+	if err != nil {
+		return err
+	}
+	if additional < 1 || observation.entryCount+additional > defaultMaxEntries {
+		return fmt.Errorf("%w: File manifest capacity %d is exhausted before creating %q", common.ErrConflict, defaultMaxEntries, request.TargetRef)
+	}
+	return nil
 }
 
 // confirmPatchReplayProof verifies only the owner-observed postcondition that

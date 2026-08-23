@@ -59,6 +59,9 @@ corresponding owner resolution and refresh projection; they do not emit Resume�
 Runtime-discovered Definition clarification不走普通Decision handler：workorchd只投影`revise_definition_and_restart`并接收
 用户提交的新candidate与显式Restart intent。只有Run owner可以在matching `ReplacementIntent`已持久化后调用Decision owner的
 dedicated replacement-resolution contract；application不关闭ticket、不代发该command，也不把修正后的Definition注入predecessor。
+Decision read projection将owner binding复制为bounded typed `definitionClarification`并deep-clone `offendingRefs`；该DTO只供
+展示与Workspace-scoped修订导航。workorchd不从Goal/DoD或display projection派生Restart freshness/eligibility，也不让Board
+代发Definition Restart；详情页的用户显式Restart仍通过统一execution ingress交给Workspace/Run owner裁决。
 
 ## Runtime, Projection And Lifecycle Boundary
 
@@ -68,6 +71,15 @@ records is bounded read-side behavior, not Orchestrator Runtime or an authority 
 
 Projection consumes immutable Eventstream/Orchestrator/owner/execution observations。Its cache/store can rebuild, but derived
 writes and deletion remain application-owned and cannot mutate owner aggregates。
+
+`RuntimeStateRecord` 只在一次 projection mapping 调用期间作为瞬时输入；projection Store、application read model 与 HTTP
+cache 不保存完整 aggregate。公开 Workspace/Run 的 canonical `state`、Workspace `activeRunId` 和 Run blocker refs 必须与 owner
+snapshot 原样一致，不能由 Decision/Approval、TaskProgress 或 terminal display 合成覆盖。Workspace DTO 本身没有 blocker refs。
+跨 owner 治理关联只写入 read-only `governanceDisplay`，偏差写入 `consistencyDiagnostic`；`displayOutcome` 只描述展示结果，
+formal output 仍由独立 `result/results` 原样投影。这些字段不得进入或决定 Drive、Resume、Restart 或任何 owner mutation。
+
+Run lifecycle cache invalidation/metrics 只消费 `source=blocks/run` 且通过 `RunStateChangedData.Validate` 的 typed notification；
+Eventstream replay 与 source-forged/invalid notification 只能被忽略。
 
 Execution admission has no independent lifecycle or queue. HTTP returns `202` only for synchronous Workspace-owner
 `reconciliation_requested|replacement_pending`; the other five canonical results return typed `409` with the same identity、

@@ -12,7 +12,9 @@ func publicRunSnapshot(state readmodelcore.RunSnapshotState) projectioncontract.
 	return projectioncontract.CloneRunSnapshot(projectioncontract.RunSnapshot{
 		Workspace:               appmodelcore.ProjectWorkspace(state.Workspace),
 		Run:                     appmodelcore.ProjectRun(state.Run),
-		Outcome:                 state.Outcome,
+		DisplayOutcome:          state.DisplayOutcome,
+		GovernanceDisplay:       state.GovernanceDisplay,
+		ConsistencyDiagnostic:   state.ConsistencyDiagnostic,
 		TaskProgress:            state.TaskProgress,
 		RepairLoop:              state.RepairLoop,
 		TaskDecompositions:      state.TaskDecompositions,
@@ -60,7 +62,9 @@ func publicWorkspaceSnapshot(state readmodelcore.WorkspaceSnapshotState) project
 		ViewModel:               state.ViewModel,
 		Step:                    state.Step,
 		Result:                  state.Result,
-		Outcome:                 state.Outcome,
+		DisplayOutcome:          state.DisplayOutcome,
+		GovernanceDisplay:       state.GovernanceDisplay,
+		ConsistencyDiagnostic:   state.ConsistencyDiagnostic,
 		TaskProgress:            state.TaskProgress,
 		RunHeartbeat:            state.RunHeartbeat,
 		ConvergenceStatus:       state.ConvergenceStatus,
@@ -100,7 +104,9 @@ func publicWorkspaceSnapshot(state readmodelcore.WorkspaceSnapshotState) project
 func publicRunObservability(state readmodelcore.RunObservabilityState) projectioncontract.RunObservability {
 	return projectioncontract.CloneRunObservability(projectioncontract.RunObservability{
 		Run:                     appmodelcore.ProjectRun(state.Run),
-		Outcome:                 state.Outcome,
+		DisplayOutcome:          state.DisplayOutcome,
+		GovernanceDisplay:       state.GovernanceDisplay,
+		ConsistencyDiagnostic:   state.ConsistencyDiagnostic,
 		Progress:                state.Progress,
 		TaskProgress:            state.TaskProgress,
 		RepairLoop:              state.RepairLoop,

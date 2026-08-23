@@ -184,6 +184,44 @@ sealed authority + preflight ready
   `RuntimeState.StateRevision` 上重载并 rebase 无关模型写入；只有 aggregate revision 漂移才返回给
   Orchestrator 作为语义 CAS conflict。CAS recovery ledger 耗尽不改变业务 Run 为 terminal，也不得留下
   `active + nonterminal + no scheduled drive`：SM-4 必须保留 owner-local、退避的 reload/re-drive 后继。
+- governance wait、governance continuation 与 terminal 的 lifecycle handoff identity 必须穷举地从同一份 persisted
+  aggregate 派生。普通 Decision/Approval request、Definition clarification request、matching resolution 与 terminal seal
+  分别生成唯一 opaque fence；fence 必须与 aggregate 在同一次 Run-owner opaque-record CAS 中持久化，随后发送给 Run 的
+  immutable typed fact 必须逐字段使用同一 identity。opaque fence 必须在 governance 与 terminal 两种 mode 中恰选其一，
+  terminal seal 不得继续携带历史 governance fence/resolution。Run 仍只把该 fact 映射为自己的 private internal event并独占 SM-1
+  transition；Orchestrator 不得直接写 Run state。wait fence 的 resolution identity 必须为空；continuation fence 与
+  owner acknowledgement 必须持久化并逐字段匹配 exact `ResolutionID`，已经 active 的 duplicate 也不得跳过该比较，旧/错
+  resolution 必须零状态变化 fail-closed。若 exact successor 已消费且 Runtime 已通过该 fence 推进到更晚 authority/新 blocker，
+  旧 resolution replay 只能以 persisted request/resolution/evidence history 与 Run 当前 exact aggregate owner proof 收敛为历史
+  no-op；不得用当前 aggregate 重建旧 handoff、重投 Run fact或挂载 timer。
+- 非终态 governance lifecycle fact 投递不是 projection，也不是 terminal delivery。owner acknowledgement 缺失或响应丢失时，
+  SM-4 必须以 exact handoff identity 持久化 `RuntimeDriveLease` 并只重投同一事实；不得增加
+  `TerminalDeliveryAttempts`，不得因 terminal-delivery budget耗尽静默遗留 `active + need_governance`。fresh-process inventory
+  发现 persisted `need_governance` aggregate 但 Run 仍为 pending/active 时，必须重新驱动该 lifecycle handoff；已经匹配
+  blocked 且 aggregate 仍为 `need_governance` 的 Run 保持真实治理等待。若 resolution 已 CAS 持久化而 Run 仍 blocked，startup
+  必须把它分类为 continuation delivery cut point，从 persisted resolution 重投 exact continuation，不能先推进 execution。
+- governance `continue|fail` resolution 的 owner-private CAS 必须同时替换任意旧 lease并封存 exact `scheduled`
+  successor；新 private event 不接受 nil/wrong lease template。`continue` 的 successor 先围住 run gate 和 exact
+  Run-owner resolution acknowledgement，再由同一 claimed generation 继续；`fail` 的 successor 只授权既有
+  Result → Workspace → Run terminal lane，resolution command 本身不得裸投 terminal。partial owner ack 后续排为 canonical
+  `terminal-delivery` lease；同一 Fail resolution 的 duplicate 必须验证并加入 current terminal successor，不得要求原始
+  resolution signature 永久存在，也不得重写 aggregate或创建第二 timer。resolution ingress 只接受匹配 blocker 类型的
+  Decision/Approval owner source；ProcessedEventID 只负责定位，duplicate 还必须逐字段匹配 persisted request、resolution 与
+  governance evidence。exact stale diagnostic replay继续返回 stale且零 CAS/Run/timer，payload漂移一律 conflict。
+- 已 claim 为 `running` 的 lifecycle delivery lease 再次失败时，只有持有 exact generation 的 worker 可以在一次 owner-private
+  CAS 中把它续排为更晚 `dueAt` 的新 `scheduled` generation。普通 duplicate/stale scheduler 不得续期 running lease；旧 worker
+  的 finish/release 也不得移除新 generation。该路径同样不消费 terminal-delivery budget，并由 fresh startup恢复 persisted
+  scheduled/running successor。若 lifecycle resolution 在另一个 worker 持有 run-scoped drive gate 时封存 scheduled lease，
+  它不得直接启动 timer；当前 gate owner 的唯一退出路径必须原子保留 gate 并挂载 exact persisted generation，或先释放 gate
+  让提交者接管。gate owner 退出后不得留下既无 mount latch、也无 timer/gate successor 的 scheduled lease；不得以
+  watchdog/queue/timer 并发 drive 补洞。旧 timer 的所有失败/not-claimed 退出必须原子消费 authoritative newer generation
+  或不同 signature 的 persisted mount；adopt newer generation 时必须清理不晚于它的 latch。running renewal CAS 失败时旧
+  generation 不得 release；fallback recovery 仍失败则保留本地 gate并等待 Stop/fresh startup，普通 Start/Resume 即使到达也
+  不得以 generation zero 绕过 persisted running authority。Stop cancel 点必须与 `closing + lifecycle epoch` 原子发布；其后
+  尚持 lifecycle read lock 的 handler、已捕获旧 context 的 timer defer 都不得创建新 context/background timer、挂载 zombie
+  successor或删除新 epoch gate。BackgroundRoutine submission不得持 `driveMu` 或另一 Stop fence；queued/already-due callback
+  在 observe与claim前必须重验 captured cancellation和exact epoch。write fence 内必须二次 cancel并清空全部本地 hint，
+  persisted lease保持不变。
 - startup 的 Run owner typed inventory 只返回其拥有的 SM-1 state、RuntimeStateRecord 是否存在及 opaque
   revision/ref；不得读取 dispatch/governance/delivery ledger 分类 SM-2/3/4。Run 必须在 Setup 同时提供 scoped opaque
   record query；Orchestrator 通过该 query load 后在 owner-local SM-4 中分类 `active_no_dispatch`、

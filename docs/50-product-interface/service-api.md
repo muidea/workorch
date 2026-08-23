@@ -15,6 +15,10 @@ owner 状态机仍由 owner component contract 定义。
 所有业务路径以 `/api/v1/workorch` 为前缀。HTTP payload 必须先转换为接收 owner `pkg/events` 的 concrete typed
 command/result；handler 不得把 JSON DTO、display text 或 projection 当作 Runtime authority。
 
+Read-side `displayOutcome`、`governanceDisplay` 与 `consistencyDiagnostic` 永远不是 command input。HTTP/Web/TUI 不能用它们
+选择或构造 Drive/Resume/Restart，也不能从治理 display ID 伪造 resolution target；mutation 必须来自用户显式 intent 与
+对应 owner resource/canonical state，最终 admission 仍由 owner 裁决。
+
 ## Workspace Execution Mutation
 
 唯一 workspace execution 写入口是：
@@ -114,6 +118,12 @@ promotion和execution activation仍分别经过各自owner合同，任何一步�
 Resolution只提交对应 owner fact并刷新 projection。Application 不发送 Resume；ordinary Runtime governance 经
 Orchestrator typed resolution收口。通用Decision resolve route必须拒绝pre-seal与runtime两类Definition clarification ticket；
 前者只由corrected admission专用合同收口，后者只由Run owner发起的dedicated replacement-resolution contract收口。
+
+对新的状态转换，单条与批量route在任何owner write之前都必须用typed EventHub owner read完成同一admission：concrete
+Decision=open或Approval=pending、Workspace owner的`activeRunId`、Run owner的matching blocked state与exact blocker ref必须
+完全相交；同Run额外资源、stale scope、缺失resource或冲突blocker返回typed `409`，批量请求完整preflight且零部分写入。
+这不是第二套状态机：已terminal的exact response-loss retry仍转交Decision/Approval owner，由owner按完整resolution
+type/payload或action/principal/context做幂等readback；Workorchd不得重判或吞掉该重试。
 
 ### Resource Registries
 

@@ -5,9 +5,18 @@ import type { ProColumns } from '../components/proCompat';
 import { workorchApi } from '../api';
 import { modelLabels } from '../utils/constants';
 import { useSSE } from '../hooks';
-import { errorMessage, mergeById, compactJSON, boundedParagraph, stateTag } from '../utils';
+import { errorMessage, compactJSON, boundedParagraph, stateTag } from '../utils';
 import { decisionInitialPayload, normalizeDecisionResolutionPayload, decisionPayloadFields, parseDecisionExtraPayload } from '../helpers';
-import type { Decision, DecisionPage } from '../types';
+import {
+  governanceResourceKey,
+  canonicalDefinitionClarification,
+  isCanonicalDecisionMutationTarget,
+  isDedicatedDefinitionDecision,
+  mergeGovernanceResources,
+  readGovernanceSnapshots,
+  requireCanonicalDecisionMutationTargets
+} from '../governanceMutationTarget';
+import type { ControlPlaneProps, Decision, DecisionPage, WorkspaceSnapshot } from '../types';
 
 const governancePageLimit = 20;
 
@@ -19,7 +28,7 @@ function isGovernanceRefreshEvent(event: { topic: string; payload?: Record<strin
     || event.topic.includes('run.');
 }
 
-export function DecisionQueuePage() {
+export function DecisionQueuePage({ onOpenWorkspace }: Pick<ControlPlaneProps, 'onOpenWorkspace'>) {
   const { message } = AntApp.useApp();
   const [selectedDecisionKeys, setSelectedDecisionKeys] = useState<React.Key[]>([]);
   const [decisionTarget, setDecisionTarget] = useState<{ item: Decision; resolutionType: string } | undefined>(undefined);
@@ -28,11 +37,12 @@ export function DecisionQueuePage() {
   const [decisionCursorAfterId, setDecisionCursorAfterId] = useState<string | undefined>(undefined);
   const [decisionHasMore, setDecisionHasMore] = useState(false);
   const [decisionLoading, setDecisionLoading] = useState(false);
+  const [decisionSnapshots, setDecisionSnapshots] = useState<Map<string, WorkspaceSnapshot>>(new Map());
   const [decisionForm] = Form.useForm();
 
   function applyDecisionPage(page: DecisionPage, append: boolean) {
     const items = (page.decisions ?? []).sort((left, right) => Number(left.state !== 'open') - Number(right.state !== 'open'));
-    setDecisionRecords((current) => mergeById(current, items, append));
+    setDecisionRecords((current) => mergeGovernanceResources(current, items, append));
     setDecisionCursorAfterId(page.nextCursorAfterId || items.at(-1)?.id);
     setDecisionHasMore(Boolean(page.hasMore));
   }
@@ -42,6 +52,8 @@ export function DecisionQueuePage() {
     try {
       const page = await workorchApi.listDecisionPage({ cursorAfterId, limit: governancePageLimit });
       applyDecisionPage(page, Boolean(cursorAfterId));
+      const snapshots = await readGovernanceSnapshots(page.decisions ?? [], workorchApi.readWorkspaceSnapshot);
+      setDecisionSnapshots((current) => Boolean(cursorAfterId) ? new Map([...current, ...snapshots]) : snapshots);
     } finally {
       setDecisionLoading(false);
     }
@@ -65,6 +77,7 @@ export function DecisionQueuePage() {
 
   const resolve = async (item: Decision, resolutionType: string, payload?: Record<string, unknown>) => {
     try {
+      await requireCanonicalDecisionMutationTargets([item], workorchApi.readWorkspaceSnapshot);
       const decision = await workorchApi.resolveDecision(item.workspaceId, item.id, resolutionType, payload);
       const recoveryAction = typeof decision.resolutionPayload?.recoveryAction === 'string'
         ? decision.resolutionPayload.recoveryAction
@@ -83,7 +96,8 @@ export function DecisionQueuePage() {
 
   const openDecisionResolution = (item: Decision, resolutionType: string) => {
     decisionForm.resetFields();
-    void workorchApi.readDecision(item.workspaceId, item.id)
+    void requireCanonicalDecisionMutationTargets([item], workorchApi.readWorkspaceSnapshot)
+      .then(() => workorchApi.readDecision(item.workspaceId, item.id))
       .then((detail) => {
         if (resolutionType === 'provide_missing_info') {
           decisionForm.setFieldsValue(decisionInitialPayload(detail));
@@ -104,6 +118,7 @@ export function DecisionQueuePage() {
       const values = await decisionForm.validateFields();
       const payload = normalizeDecisionResolutionPayload(values);
       const target = decisionTarget;
+      await requireCanonicalDecisionMutationTargets([target.item], workorchApi.readWorkspaceSnapshot);
       await workorchApi.resolveDecision(target.item.workspaceId, target.item.id, target.resolutionType, payload);
       setDecisionTarget(undefined);
       decisionForm.resetFields();
@@ -117,27 +132,20 @@ export function DecisionQueuePage() {
   };
 
   const batchResolve = async (resolutionType: string) => {
-    const ticketIds = selectedDecisionKeys.map(String);
-    if (ticketIds.length === 0) {
+    if (selectedDecisionKeys.length === 0) {
       message.warning('请先选择待处理决策工单');
       return;
     }
     try {
-      const resolved: Decision[] = [];
-      const selected = decisionRecords.filter((item) => ticketIds.includes(item.id));
-      const byWorkspace = new Map<string, string[]>();
-      for (const item of selected) {
-        const workspaceId = item.workspaceId;
-        if (!workspaceId) {
-          continue;
-        }
-        const items = byWorkspace.get(workspaceId) ?? [];
-        items.push(item.id);
-        byWorkspace.set(workspaceId, items);
+      const selectedKeys = new Set(selectedDecisionKeys.map(String));
+      const selected = decisionRecords.filter((item) => selectedKeys.has(governanceResourceKey(item)));
+      if (selected.length !== selectedKeys.size) {
+        throw new Error('所选决策已不在当前列表中；未提交任何变更，请刷新后重试');
       }
-      for (const [workspaceId, ids] of byWorkspace) {
-        resolved.push(...await workorchApi.batchResolveDecisions(workspaceId, ids, resolutionType, { operator: 'console', mode: 'batch' }));
-      }
+      await requireCanonicalDecisionMutationTargets(selected, workorchApi.readWorkspaceSnapshot);
+      const workspaceIds = [...new Set(selected.map((item) => item.workspaceId))];
+      const ticketIds = selected.map((item) => item.id);
+      const resolved = await workorchApi.batchResolveDecisions(workspaceIds.length === 1 ? workspaceIds[0] : undefined, ticketIds, resolutionType, { operator: 'console', mode: 'batch' });
       const retried = resolved.filter((item) => resolutionType === 'replan'
         && item.resolutionType === 'provide_missing_info'
         && item.resolutionPayload?.recoveryAction === 'retry_same_step').length;
@@ -153,6 +161,9 @@ export function DecisionQueuePage() {
     }
   };
 
+  const decisionIsMutable = (item: Decision) => isCanonicalDecisionMutationTarget(decisionSnapshots.get(item.workspaceId), item);
+  const decisionIsCanonicalDefinitionBlocker = (item: Decision) => canonicalDefinitionClarification(decisionSnapshots.get(item.workspaceId))?.id === item.id;
+
   const columns: ProColumns<Decision>[] = [
     { title: '工单 ID', dataIndex: 'id', copyable: true },
     { title: '工作空间', dataIndex: 'workspaceId', copyable: true },
@@ -160,13 +171,23 @@ export function DecisionQueuePage() {
     { title: '类型', dataIndex: 'decisionKind' },
     { title: '问题', dataIndex: 'question', ellipsis: true, render: (_, item) => boundedParagraph(item.question, { rows: 2 }) },
     { title: '原因', dataIndex: 'reason', ellipsis: true },
+    {
+      title: 'Definition blocker',
+      render: (_, item) => item.definitionClarification
+        ? <Space direction="vertical" size={0}>
+            <Space>{stateTag(item.definitionClarification.class)}{stateTag(item.definitionClarification.bindingState)}</Space>
+            <Typography.Text type="secondary">{item.definitionClarification.violationOrGapCode}</Typography.Text>
+            {decisionIsCanonicalDefinitionBlocker(item) ? <Typography.Text type="warning">活动 Run 的 canonical blocker</Typography.Text> : null}
+          </Space>
+        : '-'
+    },
     { title: '自动治理', dataIndex: 'autoGovernance', render: (_, item) => item.autoGovernance ? stateTag(`${item.autoGovernance.status}:${item.autoGovernance.action}`) : '-' },
     { title: '解决方式', dataIndex: 'resolutionType', width: 140, render: (_, item) => item.resolutionType ? stateTag(item.resolutionType) : '-' },
     { title: '状态', dataIndex: 'state', render: (_, item) => stateTag(item.state) },
     {
       title: '操作',
       valueType: 'option',
-      render: (_, item) => item.state === 'open' ? (
+      render: (_, item) => decisionIsMutable(item) ? (
         <Space wrap>
           <Button size="small" type="primary" onClick={() => openDecisionResolution(item, 'provide_missing_info')}>补充信息</Button>
           <Button size="small" onClick={() => void resolve(item, 'replan', { operator: 'console' })}>
@@ -176,7 +197,13 @@ export function DecisionQueuePage() {
           </Button>
           <Button size="small" danger onClick={() => void resolve(item, 'reject_current_path', { operator: 'console' })}>拒绝路径并继续</Button>
         </Space>
-      ) : stateTag(item.resolutionType)
+      ) : item.state === 'open' && item.definitionClarification
+        ? <Button size="small" type="primary" onClick={() => onOpenWorkspace(item.workspaceId)}>修订 Definition</Button>
+        : item.state === 'open' && isDedicatedDefinitionDecision(item)
+          ? <Typography.Text type="secondary">专用定义澄清流程（typed binding 未就绪）</Typography.Text>
+        : item.state === 'open'
+          ? <Typography.Text type="secondary">非活动运行阻塞项（只读）</Typography.Text>
+          : stateTag(item.resolutionType)
     }
   ];
 
@@ -192,13 +219,13 @@ export function DecisionQueuePage() {
       )}
     >
       <ProTable<Decision>
-        rowKey="id"
+        rowKey={governanceResourceKey}
         search={false}
         options={false}
         rowSelection={{
           selectedRowKeys: selectedDecisionKeys,
           onChange: setSelectedDecisionKeys,
-          getCheckboxProps: (record) => ({ disabled: record.state !== 'open' })
+          getCheckboxProps: (record) => ({ disabled: !decisionIsMutable(record) })
         }}
         columns={columns}
         loading={decisionLoading}
@@ -206,6 +233,25 @@ export function DecisionQueuePage() {
         expandable={{
           expandedRowRender: (item) => (
             <CardGrid>
+              {item.definitionClarification ? (
+                <ProCard title="Definition clarification（owner typed projection）" colSpan={{ xs: 24, lg: 24 }}>
+                  <Descriptions
+                    size="small"
+                    column={{ xs: 1, md: 2 }}
+                    items={[
+                      { key: 'class', label: 'Class', children: stateTag(item.definitionClarification.class) },
+                      { key: 'bindingState', label: 'Binding state', children: stateTag(item.definitionClarification.bindingState) },
+                      { key: 'requiredAction', label: 'Required action', children: item.definitionClarification.requiredAction },
+                      { key: 'gap', label: 'Gap / violation', children: item.definitionClarification.violationOrGapCode },
+                      { key: 'offendingRefs', label: 'Offending refs', children: item.definitionClarification.offendingRefs?.join(', ') || '-' },
+                      { key: 'definitionRevision', label: 'Definition revision', children: item.definitionClarification.definitionRevision || '-' },
+                      { key: 'authoritySnapshotId', label: 'Authority snapshot', children: item.definitionClarification.authoritySnapshotId || '-' },
+                      { key: 'clarificationDispatchId', label: 'Clarification dispatch', children: item.definitionClarification.clarificationDispatchId || '-' },
+                      { key: 'focusRef', label: 'Focus', children: item.definitionClarification.focusRef || '-' }
+                    ]}
+                  />
+                </ProCard>
+              ) : null}
               <ProCard title="决策上下文" colSpan={{ xs: 24, lg: 12 }}>
                 <pre className="json-panel json-panel-large">{item.context ? compactJSON(item.context) : '列表投影未加载上下文，请进入处理弹窗查看完整详情'}</pre>
               </ProCard>

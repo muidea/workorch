@@ -104,22 +104,28 @@ type RunCommandStatus struct {
 }
 
 type WorkspaceRuntimeView struct {
-	WorkspaceID       string                   `json:"workspaceId"`
-	ActiveRunID       string                   `json:"activeRunId,omitempty"`
-	DisplayRunID      string                   `json:"displayRunId,omitempty"`
-	Projection        ProjectionStatus         `json:"projection"`
-	Revision          WorkspaceRefreshRevision `json:"revision"`
-	PromptMode        string                   `json:"promptMode,omitempty"`
-	RunState          string                   `json:"runState,omitempty"`
-	TaskProgress      TaskProgress             `json:"taskProgress"`
-	RunHeartbeat      RunHeartbeat             `json:"runHeartbeat"`
-	ConvergenceStatus *ConvergenceStatus       `json:"convergenceStatus,omitempty"`
-	Acceptance        AcceptanceProjection     `json:"acceptance"`
-	RunCommand        *RunCommandStatus        `json:"runCommand,omitempty"`
-	BlockingDecision  *Decision                `json:"blockingDecision,omitempty"`
-	BlockingApproval  *Approval                `json:"blockingApproval,omitempty"`
-	Outcome           WorkspaceOutcome         `json:"outcome"`
-	Activity          WorkspaceActivityFeed    `json:"activity"`
+	WorkspaceID           string                   `json:"workspaceId"`
+	ActiveRunID           string                   `json:"activeRunId,omitempty"`
+	DisplayRunID          string                   `json:"displayRunId,omitempty"`
+	Projection            ProjectionStatus         `json:"projection"`
+	Revision              WorkspaceRefreshRevision `json:"revision"`
+	PromptMode            string                   `json:"promptMode,omitempty"`
+	RunState              string                   `json:"runState,omitempty"`
+	GovernanceDisplay     GovernanceDisplay        `json:"governanceDisplay,omitempty"`
+	ConsistencyDiagnostic *ConsistencyDiagnostic   `json:"consistencyDiagnostic,omitempty"`
+	TaskProgress          TaskProgress             `json:"taskProgress"`
+	RunHeartbeat          RunHeartbeat             `json:"runHeartbeat"`
+	ConvergenceStatus     *ConvergenceStatus       `json:"convergenceStatus,omitempty"`
+	Acceptance            AcceptanceProjection     `json:"acceptance"`
+	RunCommand            *RunCommandStatus        `json:"runCommand,omitempty"`
+	// BlockingDecision and BlockingApproval are read-only concrete resources.
+	// A projector may populate them only when the canonical active Run is in the
+	// matching blocked state and its exact blocker reference resolves to that
+	// owner resource. GovernanceDisplay is never a selector for these fields.
+	BlockingDecision *Decision               `json:"blockingDecision,omitempty"`
+	BlockingApproval *Approval               `json:"blockingApproval,omitempty"`
+	DisplayOutcome   WorkspaceDisplayOutcome `json:"displayOutcome"`
+	Activity         WorkspaceActivityFeed   `json:"activity"`
 }
 
 func CloneWorkspaceRuntimeView(item WorkspaceRuntimeView) WorkspaceRuntimeView {
@@ -130,7 +136,8 @@ func CloneWorkspaceRuntimeView(item WorkspaceRuntimeView) WorkspaceRuntimeView {
 	item.RunCommand = CloneRunCommandStatus(item.RunCommand)
 	item.BlockingDecision = cloneDecisionProjectionPointer(item.BlockingDecision)
 	item.BlockingApproval = cloneApprovalProjectionPointer(item.BlockingApproval)
-	item.Outcome = CloneWorkspaceOutcome(item.Outcome)
+	item.ConsistencyDiagnostic = CloneConsistencyDiagnostic(item.ConsistencyDiagnostic)
+	item.DisplayOutcome = CloneWorkspaceDisplayOutcome(item.DisplayOutcome)
 	item.Activity = CloneWorkspaceActivityFeed(item.Activity)
 	return item
 }

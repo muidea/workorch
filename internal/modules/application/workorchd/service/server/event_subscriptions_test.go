@@ -160,10 +160,21 @@ func TestServerRunMetricsConsumeTypedRunNotificationNotEventstreamPayload(t *tes
 	}
 	state.RecordRunStateChanged(context.Background(), runevents.RunStateChangedData{
 		WorkspaceID: "ws-metrics", RunID: "run-metrics", State: common.RunStateFailed,
-		RuntimeStateRevision: 9, RuntimeStateRef: "runtime-state/ws-metrics/run-metrics/9",
+		RuntimeStateRevision: 9, RuntimeStateRef: "runtime-state/ws-metrics/run-metrics/9", CausationID: "run-state/9",
 	})
 	if got := state.metrics.runFailed.Load(); got != 1 {
 		t.Fatalf("typed run notification terminal metric = %d, want 1", got)
+	}
+}
+
+func TestServerRunMetricsRejectInvalidTypedRunNotification(t *testing.T) {
+	state := &serverState{metrics: &serverMetrics{}}
+	state.RecordRunStateChanged(context.Background(), runevents.RunStateChangedData{
+		WorkspaceID: "ws-invalid", RunID: "run-invalid", State: common.RunStateFailed,
+		// Missing CausationID makes this an invalid owner notification.
+	})
+	if got := state.metrics.runFailed.Load(); got != 0 {
+		t.Fatalf("invalid notification changed terminal metric to %d, want 0", got)
 	}
 }
 

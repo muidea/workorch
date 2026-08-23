@@ -143,6 +143,17 @@ func RequestBindsResolution(request runtimecontract.RuntimeGovernanceRequestReco
 		DependencyMatches(request.DependencyKind, request.SubjectRef, resolution.DependencyKind, resolution.SubjectRef)
 }
 
+// RequestsBindResolution keeps protocol adapters from reimplementing the
+// persisted owner-binding scan when they verify an idempotent resolution.
+func RequestsBindResolution(values []runtimecontract.RuntimeGovernanceRequestRecord, resolution runtimecontract.RuntimeGovernanceResolution) bool {
+	for _, request := range values {
+		if RequestBindsResolution(request, resolution) {
+			return true
+		}
+	}
+	return false
+}
+
 // SuspendedBindingMatchesRequest identifies the only operation binding that a
 // newly observed ticket may promote. The promotion itself remains in Runtime.
 func SuspendedBindingMatchesRequest(binding runtimecontract.RuntimeOperationGovernanceBinding, request runtimecontract.RuntimeGovernanceRequestRecord) bool {

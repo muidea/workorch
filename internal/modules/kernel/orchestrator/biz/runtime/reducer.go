@@ -161,9 +161,6 @@ func reduce(facts runtimecontract.RuntimeFacts, proofLineage []runtimecontract.R
 		}
 		return base, nil
 	}
-	if len(facts.FreshnessReacquireCoverage) > 0 {
-		return stateChangeDecision(base, facts)
-	}
 	// A validation failure remains a validation gap unless a capability owner
 	// has persisted a current, exact repair surface.  Policy text, a command
 	// entry, and an infeasible candidate are not implementation authority.

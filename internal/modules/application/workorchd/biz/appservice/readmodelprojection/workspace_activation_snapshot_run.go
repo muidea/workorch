@@ -16,14 +16,14 @@ func activationSnapshotWithRun(projectedWorkspace appmodelcore.Workspace, run *r
 	}
 	runSnapshot.TaskProgress = mapLocalizedTaskProgress(runSnapshot)
 	applyRuntimeProgress(&runSnapshot.TaskProgress, run)
-	runSnapshot.Outcome = mapRunOutcome(runSnapshot)
+	runSnapshot.DisplayOutcome = mapRunOutcome(runSnapshot)
 
 	ret := readmodelcore.WorkspaceSnapshotState{
-		Workspace:    projectedWorkspace,
-		Run:          &runView,
-		Outcome:      mapWorkspaceOutcome(readmodelcore.WorkspaceSnapshotState{Workspace: projectedWorkspace, Runs: []appmodelcore.Run{runView}, TaskProgress: runSnapshot.TaskProgress}),
-		TaskProgress: runSnapshot.TaskProgress,
-		Runs:         []appmodelcore.Run{runView},
+		Workspace:      projectedWorkspace,
+		Run:            &runView,
+		DisplayOutcome: mapWorkspaceOutcome(readmodelcore.WorkspaceSnapshotState{Workspace: projectedWorkspace, Runs: []appmodelcore.Run{runView}, TaskProgress: runSnapshot.TaskProgress}),
+		TaskProgress:   runSnapshot.TaskProgress,
+		Runs:           []appmodelcore.Run{runView},
 	}
 	applyActivationDefinitions(&ret, goal, dod)
 	return ret

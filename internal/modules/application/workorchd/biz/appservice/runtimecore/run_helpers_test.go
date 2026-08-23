@@ -1,6 +1,7 @@
 package runtimecore
 
 import (
+	"reflect"
 	"testing"
 
 	runmodel "github.com/muidea/workorch/internal/modules/blocks/run/pkg/models"
@@ -81,8 +82,8 @@ func TestMapRunProjectsFreshActivationStatusWithoutRuntimeState(t *testing.T) {
 		got.RuntimeActivation.SupportedSchemaVersion != 4 {
 		t.Fatalf("runtime activation = %+v, want bounded fresh-activation projection", got.RuntimeActivation)
 	}
-	if got.RuntimeState != nil {
-		t.Fatalf("runtime state = %+v, want opaque state excluded from read model", got.RuntimeState)
+	if _, ok := reflect.TypeOf(got).FieldByName("RuntimeState"); ok {
+		t.Fatal("application run read model must not retain RuntimeState")
 	}
 }
 
@@ -110,7 +111,7 @@ func TestMapRunProjectsCWILedgerFreshActivationReasonWithoutRuntimeState(t *test
 		got.RuntimeActivation.SupportedSchemaVersion != runtimecontract.RuntimeStateSchemaVersionCurrent {
 		t.Fatalf("runtime activation = %+v, want CWI ledger fresh-activation projection", got.RuntimeActivation)
 	}
-	if got.RuntimeState != nil {
-		t.Fatalf("runtime state = %+v, want opaque state excluded from read model", got.RuntimeState)
+	if _, ok := reflect.TypeOf(got).FieldByName("RuntimeState"); ok {
+		t.Fatal("application run read model must not retain RuntimeState")
 	}
 }

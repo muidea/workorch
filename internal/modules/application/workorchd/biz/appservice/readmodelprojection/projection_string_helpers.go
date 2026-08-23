@@ -1,6 +1,9 @@
 package readmodelprojection
 
-import "github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
+import (
+	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
+	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
+)
 
 // WD5 mechanical consolidation; source files are listed to preserve review traceability.
 
@@ -220,7 +223,9 @@ func mapRunObservability(snapshot readmodelcore.RunSnapshotState) readmodelcore.
 	timeline := runtimeTimeline(snapshot)
 	return readmodelcore.RunObservabilityState{
 		Run:                     snapshot.Run,
-		Outcome:                 snapshot.Outcome,
+		DisplayOutcome:          snapshot.DisplayOutcome,
+		GovernanceDisplay:       snapshot.GovernanceDisplay,
+		ConsistencyDiagnostic:   projectioncontract.CloneConsistencyDiagnostic(snapshot.ConsistencyDiagnostic),
 		Progress:                mapRunProgress(snapshot),
 		TaskProgress:            snapshot.TaskProgress,
 		RepairLoop:              snapshot.RepairLoop,
@@ -258,6 +263,7 @@ func runRecoverySnapshotFromModels(input RunSnapshotModelInput) readmodelcore.Ru
 	ret.TaskPlans = mapTaskPlansFromSnapshot(ret)
 	ret.DoDEvidence = mapDoDEvidence(ret)
 	ret.ResultQuality = mapResultQuality(ret)
+	applyRunSnapshotGovernanceProjection(&ret)
 	return ret
 }
 

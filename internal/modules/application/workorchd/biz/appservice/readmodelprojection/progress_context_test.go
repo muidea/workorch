@@ -152,10 +152,9 @@ func TestWorkspaceGovernanceProjectionClearsResolvedDecisionBlocker(t *testing.T
 
 	got := projectWorkspaceSnapshotDetail(readmodelcore.WorkspaceSnapshotState{
 		Workspace: appmodelcore.Workspace{
-			ID:               "ws-resolved-blocker",
-			State:            string(common.WorkspaceStateActive),
-			ActiveRunID:      "run-current",
-			BlockingTicketID: "ticket-resolved",
+			ID:          "ws-resolved-blocker",
+			State:       string(common.WorkspaceStateActive),
+			ActiveRunID: "run-current",
 		},
 		Run: &appmodelcore.Run{
 			ID:               "run-current",
@@ -182,12 +181,11 @@ func TestWorkspaceGovernanceProjectionClearsResolvedDecisionBlocker(t *testing.T
 		}},
 	})
 
-	if got.Workspace.State != string(common.WorkspaceStateActive) ||
-		got.Workspace.BlockingTicketID != "" ||
-		got.TaskProgress.BlockingTicketID != "" ||
-		got.TaskProgress.Recovery.BlockingTicketID != "" ||
-		got.TaskProgress.Recovery.Mode == "wait_decision" {
-		t.Fatalf("snapshot = %+v progress = %+v, want resolved decision not projected as normal blocker", got.Workspace, got.TaskProgress)
+	if got.Workspace.State != string(common.WorkspaceStateActive) || got.Workspace.ActiveRunID != "run-current" ||
+		got.Run == nil || got.Run.BlockingTicketID != "ticket-resolved" ||
+		got.TaskProgress.BlockingTicketID != "ticket-resolved" || got.TaskProgress.Recovery.BlockingTicketID != "ticket-resolved" ||
+		got.GovernanceDisplay.DecisionID != "" || got.ConsistencyDiagnostic == nil || got.ConsistencyDiagnostic.Code != "owner_governance_reference_unresolved" {
+		t.Fatalf("snapshot = %+v progress = %+v display=%+v diagnostic=%+v, want owner fields unchanged with a read-side mismatch", got.Workspace, got.TaskProgress, got.GovernanceDisplay, got.ConsistencyDiagnostic)
 	}
 }
 
@@ -196,10 +194,9 @@ func TestWorkspaceGovernanceProjectionKeepsOpenDecisionBlocker(t *testing.T) {
 
 	got := projectWorkspaceSnapshotDetail(readmodelcore.WorkspaceSnapshotState{
 		Workspace: appmodelcore.Workspace{
-			ID:               "ws-open-blocker",
-			State:            string(common.WorkspaceStateActive),
-			ActiveRunID:      "run-current",
-			BlockingTicketID: "ticket-open",
+			ID:          "ws-open-blocker",
+			State:       string(common.WorkspaceStateActive),
+			ActiveRunID: "run-current",
 		},
 		Run: &appmodelcore.Run{
 			ID:               "run-current",
@@ -220,11 +217,11 @@ func TestWorkspaceGovernanceProjectionKeepsOpenDecisionBlocker(t *testing.T) {
 		}},
 	})
 
-	if got.Workspace.State != string(common.WorkspaceStateActive) ||
-		got.Workspace.BlockingTicketID != "ticket-open" ||
-		got.TaskProgress.BlockingTicketID != "ticket-open" ||
-		got.TaskProgress.Recovery.Mode != "wait_decision" {
-		t.Fatalf("snapshot = %+v progress = %+v, want open decision blocker retained", got.Workspace, got.TaskProgress)
+	if got.Workspace.State != string(common.WorkspaceStateActive) || got.Workspace.ActiveRunID != "run-current" ||
+		got.Run == nil || got.Run.BlockingTicketID != "ticket-open" ||
+		got.GovernanceDisplay.DecisionID != "ticket-open" || got.GovernanceDisplay.PromptMode != "decision" ||
+		got.TaskProgress.BlockingTicketID != "" || got.TaskProgress.Recovery.Mode != "" || got.ConsistencyDiagnostic != nil {
+		t.Fatalf("snapshot = %+v progress = %+v display=%+v diagnostic=%+v, want canonical owner state plus separate decision display", got.Workspace, got.TaskProgress, got.GovernanceDisplay, got.ConsistencyDiagnostic)
 	}
 }
 

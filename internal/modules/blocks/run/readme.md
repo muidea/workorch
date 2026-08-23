@@ -84,7 +84,10 @@ terminal seal 均由 Orchestrator 负责；Run 不承担跨组件编排。
   fact，也不触发 drive。开发基线不兼容时必须清理旧数据，再由用户提交显式 fresh activation；
   不能用对不兼容 predecessor 的 restart 做 schema 迁移。
 - governed blocker 与 continuation 必须各自恰好携带一个 DecisionTicket 或 Approval identity，并匹配已持久化的
-  opaque governance fence；approval-only 路径与 ticket-only 路径同等合法。
+  opaque governance fence；wait fence 的 resolution slot 必须为空，continuation 的 typed fact、Run-private reducer 与同步
+  acknowledgement 必须匹配 fence 中 exact `ResolutionID`，即使 Run 已经 active 也要先完成该比较；opaque fence 的
+  governance/terminal mode 必须恰选其一，terminal 不得夹带历史 governance identity。旧/错 resolution 零写入
+  fail-closed；approval-only 路径与 ticket-only 路径同等合法。
 - Run 创建及状态变化使用 `RunStateChangedData` typed notification；通知只包含 SM-1 state、causation 与 opaque
   RuntimeState revision/ref，不镜像 Orchestrator action/focus/repair。current development baseline 的 Runtime record 同时持久化 Orchestrator-authored
   opaque lifecycle fence；Run 仅比较 scope/schema/revision/ref/hash/bootstrap/fence，禁止解码 Decision、semantic、candidate、

@@ -5,7 +5,6 @@ import (
 	"encoding/hex"
 	"encoding/json"
 
-	"github.com/muidea/workorch/internal/pkg/common"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
@@ -17,38 +16,36 @@ func RuntimeConvergenceProgressSignature(aggregate RuntimeAggregate) string {
 	facts := aggregate.Facts.Normalized()
 	decision := aggregate.Decision
 	progress := struct {
-		Focus                      runtimecontract.CoverageFocus
-		RemainingFocuses           []runtimecontract.CoverageFocus
-		CompletedFocuses           []runtimecontract.CoverageFocus
-		EvidenceRevision           string
-		Failure                    *runtimecontract.FailureFact
-		Prerequisites              runtimecontract.PrerequisiteState
-		Repair                     runtimecontract.RuntimeRepairLedger
-		RepairDirective            *runtimecontract.RuntimeRepairDirective
-		FreshnessReacquireCoverage []common.CoverageWorkItemID
-		PrerequisiteObservations   []runtimecontract.RuntimePrerequisiteObservation
-		PrerequisiteInvalidations  []runtimecontract.RuntimePrerequisiteInvalidationRecord
-		CoverageProofLineage       []runtimecontract.RuntimeCoverageProofLineage
-		Coverage                   []runtimecontract.RuntimeCoverageItemFact
-		Feasibility                *runtimecontract.RuntimeFeasibilityFact
-		State                      runtimecontract.ConvergenceState
-		RequiredOutput             runtimecontract.RequiredOutputContract
-		Terminal                   *runtimecontract.RuntimeTerminalDecision
-		SemanticPlanning           runtimecontract.RuntimeSemanticPlanningLedger
-		CandidateAdmissions        []runtimeConvergenceCandidateAdmission
-		ActiveDispatch             *runtimeConvergenceDispatchProgress
-		CompletedDispatches        []runtimeConvergenceDispatchProgress
-		GovernanceRequests         []runtimecontract.RuntimeGovernanceRequestRecord
-		GovernanceResolutions      []runtimecontract.RuntimeGovernanceResolutionRecord
+		Focus                     runtimecontract.CoverageFocus
+		RemainingFocuses          []runtimecontract.CoverageFocus
+		CompletedFocuses          []runtimecontract.CoverageFocus
+		EvidenceRevision          string
+		Failure                   *runtimecontract.FailureFact
+		Prerequisites             runtimecontract.PrerequisiteState
+		Repair                    runtimecontract.RuntimeRepairLedger
+		RepairDirective           *runtimecontract.RuntimeRepairDirective
+		PrerequisiteObservations  []runtimecontract.RuntimePrerequisiteObservation
+		PrerequisiteInvalidations []runtimecontract.RuntimePrerequisiteInvalidationRecord
+		CoverageProofLineage      []runtimecontract.RuntimeCoverageProofLineage
+		Coverage                  []runtimecontract.RuntimeCoverageItemFact
+		Feasibility               *runtimecontract.RuntimeFeasibilityFact
+		State                     runtimecontract.ConvergenceState
+		RequiredOutput            runtimecontract.RequiredOutputContract
+		Terminal                  *runtimecontract.RuntimeTerminalDecision
+		SemanticPlanning          runtimecontract.RuntimeSemanticPlanningLedger
+		CandidateAdmissions       []runtimeConvergenceCandidateAdmission
+		ActiveDispatch            *runtimeConvergenceDispatchProgress
+		CompletedDispatches       []runtimeConvergenceDispatchProgress
+		GovernanceRequests        []runtimecontract.RuntimeGovernanceRequestRecord
+		GovernanceResolutions     []runtimecontract.RuntimeGovernanceResolutionRecord
 	}{
 		Focus: facts.Focus, RemainingFocuses: facts.RemainingFocuses, CompletedFocuses: facts.CompletedFocuses,
 		EvidenceRevision: facts.EvidenceRevision, Failure: facts.Failure,
 		Prerequisites: facts.Prerequisites, Repair: facts.Repair, RepairDirective: facts.RepairDirective,
-		FreshnessReacquireCoverage: facts.FreshnessReacquireCoverage,
-		PrerequisiteObservations:   facts.Resources.PrerequisiteObservations,
-		PrerequisiteInvalidations:  append([]runtimecontract.RuntimePrerequisiteInvalidationRecord(nil), aggregate.PrerequisiteInvalidations...),
-		CoverageProofLineage:       runtimecontract.NormalizeRuntimeCoverageProofLineage(aggregate.CoverageProofLineage),
-		Coverage:                   facts.Coverage, Feasibility: facts.Feasibility,
+		PrerequisiteObservations:  facts.Resources.PrerequisiteObservations,
+		PrerequisiteInvalidations: append([]runtimecontract.RuntimePrerequisiteInvalidationRecord(nil), aggregate.PrerequisiteInvalidations...),
+		CoverageProofLineage:      runtimecontract.NormalizeRuntimeCoverageProofLineage(aggregate.CoverageProofLineage),
+		Coverage:                  facts.Coverage, Feasibility: facts.Feasibility,
 		State:          decision.State,
 		RequiredOutput: decision.RequiredOutput.Normalized(), Terminal: decision.Terminal,
 		SemanticPlanning:      aggregate.SemanticPlanning.Clone(),

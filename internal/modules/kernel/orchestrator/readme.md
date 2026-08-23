@@ -138,6 +138,33 @@ contradiction 只通过 `semantic_binding_contradiction_observed` 私有事件�
   dispatch 的 preflight、claim/recovery、owner call 与 receipt projection 仍按原顺序运行，并共享唯一 CAS 与 recovery
   budget handoff。
 - 所有跨状态机推进都使用 persisted aggregate + typed EventHub command/result。
+- SM-4 使用单一 persisted lifecycle-handoff 派生器穷举普通 Decision/Approval wait、Definition clarification wait、
+  governance continuation 与 terminal。该派生器同时生成 Run opaque-record CAS 中的 `GovernanceFenceID` 和后续 Run-owner
+  typed fact identity；pre-seal observation/dispatch 尚未绑定 owner request 时不授权 lifecycle transition。Run owner返回的
+  concrete lifecycle result必须逐字段确认相同 state revision、fence、blocker/resolution 和最终 owner state。wait 的 opaque
+  resolution slot 固定为空；continuation 在 opaque fence、owner-private reducer 与 acknowledgement 中都必须匹配 exact
+  `ResolutionID`，active duplicate 也不能仅凭 `GovernanceFenceID` 成功。successor 已消费且 aggregate 已越过该 continuation
+  fence 时，旧 resolution duplicate 只以 exact persisted request/resolution/evidence history 加 Run 对当前更晚 aggregate 的
+  owner proof 作为历史 no-op，绝不把旧 fact 重投给新 blocker。opaque fence 的 governance/terminal mode 必须恰选其一；
+  terminal seal 只发布 terminal identity，不沿用历史 governance resolution。
+- governance wait fact 的 owner delivery failure 与 terminal delivery严格分流：前者保存 exact handoff signature 到现有
+  SM-4 `RuntimeDriveLease`，不消费 `TerminalDeliveryAttempts`；响应丢失后的 duplicate只读取 Run owner 已提交状态，fresh
+  process inventory发现 `need_governance + pending|active` 时重新投递同一 wait handoff；发现
+  `blocked + persisted resolution` 时先重投 exact continuation，再允许 execution drive。continuation command失败也进入同一
+  lifecycle lease ledger。后者才进入 Result → Workspace → Run terminal delivery ledger。两条路径都不得由 projection、
+  watchdog或人工 Resume充当后继。
+- `GovernanceResolutionObserved` 的 `continue|fail` private event 必须携带 exact lease template；resolution evidence、
+  governed-dispatch completion、terminal/continuation authority 与替换旧 lease 的新 `scheduled` generation 在同一次 CAS
+  封存。`continue` 先以该 lease 保留 run gate、提交 exact `ResolutionID` 的 Run-owner acknowledgement，再由同一
+  generation claim 后继续；`fail` 不得同步裸投 terminal，而只能由该 lease claim 后进入唯一 Result → Workspace → Run
+  lane。partial terminal acknowledgement 将 successor 原子续排为 canonical `terminal-delivery` identity；同一 resolution
+  的 response-loss duplicate 必须验证并加入该 current successor，零写入且不创建第二个 timer。新写入禁止
+  `continue|fail + nil lease`，仅 fresh-load recovery 可兼容历史裸 persisted state。
+- lifecycle resolution 在旧 drive 持有 singleflight gate 时只先 CAS 持久化 scheduled lease，并把 exact generation 交给当前
+  gate owner 的退出边界；退出边界在同一 process-local 临界区选择“保留 gate 挂载 persisted timer”或“释放 gate 由提交者
+  接管”。timer 永不绕过 gate 并发 drive；该 generation hint 不是 queue、watchdog 或第二份 retry authority，claim 仍以完整
+  persisted lease 为唯一依据。duplicate/stale generation 不替换 current scheduled lease，Stop 仅清理本地 hint/timer，fresh
+  startup 继续从 persisted scheduled/running lease 恢复，且整个路径保持 terminal-delivery budget 为零。
 - projection failure 不得覆盖 reducer terminal；重启不得重复 prerequisite/candidate/side effect。
 - 任何修改 reducer/controller/drive/operation projection 前，必须说明影响的 SM 编号并补合法/禁止迁移、幂等、restart、stale/duplicate、budget/guard 测试。
 - 本模块不得恢复 禁止的 mainline、application continuation queue、通用 RuntimeAdapter registry、projection authority 或自动 successor。
@@ -502,7 +529,12 @@ deployed run ID 只属于 archive regression evidence，不定义当前候选、
   focus、semantic request/document与dispatch必须逐字段一致；existing Run不接收文本patch或普通governance continuation。
   解决只能由Run owner先持久化successor `ReplacementIntent`，再用Decision专用replacement resolution回绑；重复/重启复用
   同一identity，stale或另一replacement fail-closed。
-- governance candidate 作为 sealed dispatch 持久化；治理结果通过 `CommitRuntimeGovernanceResolutionCommand/Result` typed owner command 提交，同一 resolution ID 与 authority snapshot 最多消费一次。Result 强制绑定 workspace/run/resolution scope，并保留正交的 `committed | stale_diagnostic | duplicate` CAS 提交事实；它不携带自由文本 diagnostic/reason/failure，也不得由 convergence state 猜测提交事实。
+- governance candidate 作为 sealed dispatch 持久化；治理结果只能由 Decision/Approval 各自的 owner-specific source command
+  提交，生产路径不订阅可由任意 sender 调用的 generic resolution topic。同一 resolution ID 与 authority snapshot 最多消费
+  一次；processed replay 必须逐字段匹配 normalized ticket/approval、dispatch、outcome、dependency、subject、summary 与
+  evidence refs，漂移一律 conflict/零写。Result 强制绑定 workspace/run/resolution scope，并保留正交的
+  `committed | stale_diagnostic | duplicate` CAS 提交事实；exact stale replay仍返回 `stale_diagnostic` 且不进入 lifecycle
+  continuation，不能被 ProcessedEventID 重判成 committed duplicate。
 - Decision owner 通过 `CommitRuntimeGovernanceTicketResolutionCommand` 只提交 ticket resolution；Approval owner
   通过 `CommitRuntimeGovernanceApprovalResolutionCommand` 只提交 approval resolution。Orchestrator 从 persisted
   binding 补齐 authority snapshot、dispatch 与 dependency 后进入同一 resolution commit。
@@ -512,7 +544,7 @@ deployed run ID 只属于 archive regression evidence，不定义当前候选、
   随 Runtime aggregate 持久化。
 - `DriveRuntimeCommand/Result` 是 Runtime 唯一同步推进合同；Orchestrator 在有界循环内依次处理 prerequisite、candidate、sealed dispatch、typed operation、evidence/reducer。Result 不保存第二个 disposition：`need_governance` 必须携带且只携带 `BlockingTicketID` 或 `BlockingApprovalID`，`complete|failed + Terminal` 表示 typed terminal，其它组合均是合同缺陷。重复调用和进程重启必须从 Run owner aggregate 幂等恢复。
 - drive 同时校验 persisted `StateRevision` 与 `RuntimeConvergenceProgressSignature`；signature 覆盖 semantic seed/request/attempt/document/owner batch/sealed binding、focus/evidence/canonical state/requiredOutput/repair/prerequisite/dispatch/governance/terminal，不包含派生 action、operation-candidate retry、snapshot attempt、SM-4 lease 或 revision bookkeeping。只增加 bookkeeping 的 transition 必须 fail-fast。
-- SM-4 delayed recovery 只由 aggregate 中的 `RuntimeDriveLease` 授权。lease 绑定 workspace/run、aggregate revision、recovery generation、stable reason/signature、due time 与 `scheduled|running`；timer 只能 claim exact due lease，不能自行决定 retry。进程内 workspace/run singleflight 与 timer map 仅合并该 persisted identity；重复 Start/Resume/governance continuation、startup recovery 和旧 timer 均不得建立第二条链。crash 后遗留 `running` lease 由 startup 重新封存为新 generation 的 scheduled lease。
+- SM-4 delayed recovery 只由 aggregate 中的 `RuntimeDriveLease` 授权。lease 绑定 workspace/run、aggregate revision、recovery generation、stable reason/signature、due time 与 `scheduled|running`；timer 只能 claim exact due lease，不能自行决定 retry。进程内 workspace/run singleflight 与 timer map 仅合并该 persisted identity；重复 Start/Resume/governance continuation、startup recovery 和旧 timer 均不得建立第二条链。crash 后遗留 `running` lease 由 startup 重新封存为新 generation 的 scheduled lease；live worker 再次失败时也只能凭其 exact claimed generation 以单次 CAS 续排更晚 dueAt 的新 scheduled generation，旧 generation finish/release 不得删除该后继。旧 timer 的 parse/claim/not-claimed/adopt/schedule 任一退出都必须在同一 gate 临界区选择 authoritative newer lease 或 mount latch 并转交 timer，否则释放 gate；同/异 signature 的 resolution overwrite 均不得遗留 latch 或泄漏 gate。renewal CAS 失败后禁止 release running generation；owner-private recovery 也失败时保留 persisted running authority 与本地 gate，普通 ingress 不得建立 generation-zero drive。Stop 的首次 cancel 必须原子发布 lifecycle closing/epoch；BackgroundRoutine submission 外部调用期间不得持有 `driveMu` 或另一 Stop fence，已排队/已到期 callback 必须在 observe、claim 前重复核对 captured context 与 exact lifecycle epoch。cancel 点之后 handler 与旧 timer defer 均不得创建 context、提交 background timer或清理新 epoch gate，write fence 内再 cancel/clear 本地状态，fresh startup 只恢复唯一 generation。
 - 真实 `RuntimeCASConflictError` 是唯一进入 CAS reload ledger 的事实；semantic persistence rejection 不创建 CAS/retry lease。CAS ledger 耗尽停止计数增长但仍保留带退避的 persisted owner-local successor，避免 active aggregate CPU 空转或无后继静止。
 - reducer/aggregate 已进入 governed wait 或 terminal 后，后续 owner projection 失败只能记录 projection error 并等待幂等重试，不得把已确定的 complete/fail authority 改写成 `runtime_drive_failed`。
 - 普通 drive、governance resolution 与 drive-failure terminal 共用唯一 terminal delivery lane：先校验 persisted sealed aggregate，
@@ -655,6 +687,8 @@ deployed run ID 只属于 archive regression evidence，不定义当前候选、
 - [x] provider-ceiling bounded recoverable wait的open/due claim/transient defer/exact satisfaction/expire/exhaust/retire、
   stale lease、fresh-process recovery与projection隔离。
 - [x] runtime Definition clarification gap/dispatch/Decision ticket与Run replacement resolution的exact binding、duplicate和stale gate。
+- [x] Definition clarification/Decision/Approval wait与continuation的统一 lifecycle fence、Run-owner exact acknowledgement、
+  bind-CAS前后、response-loss、fresh reload，以及非终态 delivery零 terminal-budget消费。
 - [x] startup inventory 多页成功、任意 cursor cycle、页数/条目上限、nil/wrong result、不兼容 schema，以及
   commands-ready 首次/重复 handoff。
 - [x] forbidden production surface、generic effect/prerequisite compiler 的 capability-neutrality，以及 Run/Workspace

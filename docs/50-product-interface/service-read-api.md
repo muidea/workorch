@@ -40,6 +40,15 @@ detached projection；读取、等待、缓存或 replay 不能修改 owner stat
 It never exposes `ExecutionContext`。Step/checkpoint/nextAction-named compatibility fields are display-only and cannot
 drive scheduling or recovery。
 
+Workspace list/detail 的 `state` 与 `activeRunId` 是 Workspace owner canonical fact；Workspace JSON 不含
+`blockingTicketId|blockingApprovalId`。Run 的 `state` 和 blocker refs 只来自 Run owner，TaskProgress、Decision/Approval 或
+terminal presentation 都不得覆盖它们。`snapshot`、Run snapshot/observability 与 `runtime-view` 只使用
+`displayOutcome`（没有并行 `outcome` 字段）表示非权威展示摘要，并保留独立 `result/results` 作为 formal Result projection。
+`governanceDisplay` 只关联 open Decision/Approval 与 canonical Run scope；`consistencyDiagnostic` 只报告 owner/projection
+handoff 偏差。三者均不能生成、阻断或选择 Resume、Restart、Drive、resolution target 或任何 mutation。
+`runtime-view.blockingDecision|blockingApproval` 只在 canonical active Run 的 matching blocked state 与 exact blocker ref
+命中同 scope 的真实 open/pending owner resource 时返回；同 Run 的另一个未决资源与 `governanceDisplay` ID 均不能替代该 ref。
+
 Workspace `snapshot.runCommand` 只保存最新 immutable Workspace-owner admission observation：request/workspace/run/intent
 identity、separate caller `requestReason`、`source`、exact `outcome`、`admissionReason`、derived `diagnostic` 与
 `accepted|rejected`。accepted 只携带 `acceptedAt`，rejected 只携带 `rejectedAt`；字段集合固定为
@@ -91,9 +100,13 @@ Unscoped unique-ID Memory detail remains compatibility read access only；scope 
 content and owner-private fields are omitted or exposed only through validated refs。
 
 Decision projection必须区分ordinary governance、pre-seal Definition clarification与Run-scoped runtime-definition
-clarification，并安全展示scope、typed violation/gap、required action和binding state。runtime-definition clarification的
-`RequiredActionKind`固定为`revise_definition_and_restart`；read DTO不得把它投影为`continue`、通用answer或Resume可用状态，
-也不得暴露raw provider diagnostic、replacement hash内部字节或owner-private authority。
+clarification。`Decision.definitionClarification`是从Decision owner binding无损复制的bounded typed DTO：它包含
+`class/bindingState/requiredAction/violationOrGapCode/offendingRefs`，并保留candidate、canonical signature、runtime
+`definitionRevision/authoritySnapshotId/clarificationDispatchId/focusRef`及resolution/replacement lineage identity。
+所有slice（特别是`offendingRefs`）必须deep-clone。runtime-definition clarification的`requiredAction`固定为
+`revise_definition_and_restart`；read DTO不得把它投影为`continue`、通用answer、Resume可用状态或admission eligibility，
+也不得暴露raw provider diagnostic、raw LLM text或owner-private authority aggregate。binding中的bounded ID/hash仅供审计，
+不能决定Resume/Restart。
 
 ## Event, SSE And Raw Content
 
@@ -125,7 +138,8 @@ resources) and detach mutable slices/maps before crossing owner/application boun
 or unsafe raw ref=`400`；missing=`404`；bounded wait cancellation=`408`；owner conflict/stale=`409`；unexpected dependency=`500`。
 
 Read handlers may cache/rebuild projection and coalesce waiters, but cache invalidation only consumes typed owner notification。
-Projection failure cannot rewrite sealed terminal or active owner state。
+Projection failure cannot rewrite sealed terminal or active owner state。Run state invalidation只接受`source=blocks/run`且
+通过`RunStateChangedData.Validate`的通知；Eventstream replay或source-forged/invalid通知不更新该cache。
 
 ## Related Contracts
 

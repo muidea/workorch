@@ -28,6 +28,9 @@ func ResolveDecisionView(ctx context.Context, hub magicevent.Hub, traces governa
 	if err != nil {
 		return workorchprojectioncontract.Decision{}, err
 	}
+	if err := admitDecisionMutation(ctx, hub, ticket, scope); err != nil {
+		return workorchprojectioncontract.Decision{}, err
+	}
 	if decisionResolutionMissingRequiredInfo(semantic, cmd.ResolutionPayload) {
 		return workorchprojectioncontract.Decision{}, common.ErrInvalidArgument
 	}
@@ -142,13 +145,9 @@ func prepareDecisionResolution(ticket *decisionmodel.Ticket, resolutionType stri
 	if err := governancecore.EnsureDecisionTicketWorkspaceScope(scope, ticket); err != nil {
 		return workorcheventpayload.Payload{}, "", err
 	}
-	// State-check is delegated to the kernel: kernel.EnsureResolvedTicketAndReturn
-	// performs an orphan-resolution recovery (accepts matching payload on an
-	// already-resolved ticket idempotently) and returns ErrConflict for state
-	// mismatches. Re-checking state here would block the idempotent path before
-	// the kernel can do its orphan check. The batch path's pre-validation loop
-	// no longer short-circuits on state=resolved, so the per-ticket kernel call
-	// is the single source of truth for conflict detection.
+	// Canonical active-Run scope and open state were admitted immediately after
+	// the owner read. This helper validates only ticket-specific payload/action
+	// semantics and cannot broaden the admitted mutation target.
 	normalizedPayload, normalizedType := governancecore.NormalizeDecisionResolutionPayloadForTicket(ticket, payload, resolutionType)
 	if err := governancecore.ValidateDecisionResolutionTypeForTicket(ticket, normalizedType); err != nil {
 		return workorcheventpayload.Payload{}, "", err

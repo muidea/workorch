@@ -29,8 +29,8 @@ func baseRunSnapshotFromModels(input RunSnapshotModelInput, stepViews []projecti
 	applyRunSnapshotCurrentStepToRun(&ret, currentStep)
 	ret.LLMContextBudgetSummary = summarizeLLMContextBudgets(ret.LLMContextBudgets)
 	ret.LLMUsageSummary = summarizeLLMUsage(ret.LLMUsageTraces)
-	ret.Acceptance = mapAcceptanceProjection(ret.Run)
-	ret.Outcome = mapRunOutcome(ret)
+	ret.Acceptance = mapAcceptanceProjection(input.Run)
+	ret.DisplayOutcome = mapRunOutcome(ret)
 	return ret
 }
 

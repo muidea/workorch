@@ -649,9 +649,10 @@ func (m *Biz) handleAcquireWorkspaceManifest(event magicevent.Event, result magi
 	result.Set(fileevents.AcquireWorkspaceManifestResult{WorkspaceID: command.WorkspaceID, RunID: command.RunID, AuthoritySnapshotID: command.AuthoritySnapshotID, Manifest: manifest, Observation: observation}, nil)
 }
 
-// handleRuntimeCWIReconciliationQuery is a read-only File-owner observation.
-// It verifies only the activation-sealed target surface and current tree
-// revision. It never writes Runtime coverage or interprets Goal/DoD text.
+// handleRuntimeCWIReconciliationQuery is a read-only, post-effect File-owner
+// observation. It verifies only the sealed target surface and current tree
+// revision. It never reuses prospective-target admission, writes Runtime
+// coverage, or interprets Goal/DoD text.
 func (m *Biz) handleRuntimeCWIReconciliationQuery(event magicevent.Event, result magicevent.Result) {
 	if result == nil {
 		return
@@ -661,87 +662,18 @@ func (m *Biz) handleRuntimeCWIReconciliationQuery(event magicevent.Event, result
 		setPrerequisiteError(result, common.ErrInvalidArgument)
 		return
 	}
-	manifest, err := m.runtimeAdapter.AcquireWorkspaceManifest(command.WorkspaceDeliverableDirectory)
+	fact, err := m.runtimeAdapter.observeRuntimeReconciliationTargets(command.WorkspaceDeliverableDirectory, command.Binding)
 	if err != nil {
 		observation := fileReconciliationObservation(command, runtimecontract.RuntimeCWIReconciliationObservationUnverifiable, command.WorkspaceBaselineRevision, nil,
 			"workspace manifest unavailable", "workspace_manifest_unavailable")
 		result.Set(fileevents.QueryRuntimeCWIReconciliationResult{Observation: observation}, nil)
 		return
 	}
-	known := make(map[string]struct{}, len(manifest.TargetRefs))
-	for _, target := range manifest.TargetRefs {
-		known[target] = struct{}{}
+	observation := fileReconciliationObservation(command, fact.status, fact.observedRevision, fact.targetRefs, fact.diagnosticMessage, fact.diagnosticCode)
+	if err := observation.Validate(); err != nil {
+		setPrerequisiteError(result, err)
+		return
 	}
-	status := runtimecontract.RuntimeCWIReconciliationObservationSatisfied
-	missing := make([]string, 0)
-	targetRefs := append([]string(nil), command.Binding.TargetRefs...)
-	artifactOnly := len(targetRefs) == 0 && len(command.Binding.ArtifactRefs) != 0
-	observedRevision := manifest.Revision
-	if len(targetRefs) == 0 && len(command.Binding.ArtifactRefs) != 0 {
-		// Artifact refs are only admissible when File can resolve them directly
-		// against its own manifest.  URI/semantic references are not guessed.
-		targetRefs = append([]string(nil), command.Binding.ArtifactRefs...)
-	}
-	if len(targetRefs) == 0 && command.Binding.TargetSelectorRef != "" {
-		selection, selectionErr := m.runtimeAdapter.AcquireRuntimeTargetSelection(
-			command.WorkspaceDeliverableDirectory,
-			"reconciliation/"+command.RequestID+"/"+command.Binding.BindingID,
-			"reconciliation",
-			command.Binding.TargetSelectorRef,
-			command.Binding.ProspectiveTargetRef,
-			runtimecontract.RuntimeOwnerInventoryItemsMaxCount,
-			runtimeTargetSelectionBinding{
-				ownerRef: command.Binding.TargetSelectorOwnerRef, subjectRef: command.Binding.TargetSelectorSubjectRef,
-				candidateRefs: command.Binding.TargetSelectorCandidateRefs,
-			},
-		)
-		if selectionErr == nil {
-			selection = selection.Normalized()
-			observedRevision = selection.ObservedRevision
-			targetRefs = append(targetRefs, selection.TargetRefs...)
-			switch selection.Disposition {
-			case runtimecontract.RuntimeTargetSelectionSelected, runtimecontract.RuntimeTargetSelectionScope:
-				if len(selection.TargetRefs) == 0 {
-					status = runtimecontract.RuntimeCWIReconciliationObservationUnverifiable
-				}
-			case runtimecontract.RuntimeTargetSelectionCreate, runtimecontract.RuntimeTargetSelectionAbsent:
-				status = runtimecontract.RuntimeCWIReconciliationObservationUnsatisfied
-			default:
-				status = runtimecontract.RuntimeCWIReconciliationObservationUnverifiable
-			}
-		} else {
-			status = runtimecontract.RuntimeCWIReconciliationObservationUnverifiable
-		}
-	}
-	if len(targetRefs) == 0 && status == runtimecontract.RuntimeCWIReconciliationObservationSatisfied {
-		status = runtimecontract.RuntimeCWIReconciliationObservationUnverifiable
-	} else {
-		for _, target := range targetRefs {
-			if _, found := known[target]; !found {
-				missing = append(missing, target)
-			}
-		}
-		if len(missing) != 0 {
-			status = runtimecontract.RuntimeCWIReconciliationObservationUnsatisfied
-		}
-	}
-	message := ""
-	code := ""
-	if len(missing) != 0 && artifactOnly {
-		status = runtimecontract.RuntimeCWIReconciliationObservationUnverifiable
-		message = "binding artifact reference is not a directly verifiable File target"
-		code = "artifact_scope_unverifiable"
-	} else if len(missing) != 0 {
-		message = "sealed file target is absent from the current workspace"
-		code = "target_missing"
-	} else if status == runtimecontract.RuntimeCWIReconciliationObservationUnverifiable {
-		message = "binding target selector or artifact cannot be independently verified by File owner"
-		code = "target_scope_unverifiable"
-	} else if status == runtimecontract.RuntimeCWIReconciliationObservationUnsatisfied {
-		message = "sealed File target selection is absent from the current workspace"
-		code = "target_selection_unsatisfied"
-	}
-	observation := fileReconciliationObservation(command, status, observedRevision, targetRefs, message, code)
 	result.Set(fileevents.QueryRuntimeCWIReconciliationResult{Observation: observation}, nil)
 }
 

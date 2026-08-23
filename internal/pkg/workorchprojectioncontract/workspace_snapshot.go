@@ -15,7 +15,9 @@ type WorkspaceSnapshotOf[W, R any] struct {
 	Run                     *R                                `json:"run,omitempty"`
 	Step                    *StepView                         `json:"step,omitempty"`
 	Result                  *Result                           `json:"result,omitempty"`
-	Outcome                 WorkspaceOutcome                  `json:"outcome"`
+	DisplayOutcome          WorkspaceDisplayOutcome           `json:"displayOutcome"`
+	GovernanceDisplay       GovernanceDisplay                 `json:"governanceDisplay,omitempty"`
+	ConsistencyDiagnostic   *ConsistencyDiagnostic            `json:"consistencyDiagnostic,omitempty"`
 	TaskProgress            TaskProgress                      `json:"taskProgress"`
 	RunHeartbeat            RunHeartbeat                      `json:"runHeartbeat,omitempty"`
 	ConvergenceStatus       *ConvergenceStatus                `json:"convergenceStatus,omitempty"`

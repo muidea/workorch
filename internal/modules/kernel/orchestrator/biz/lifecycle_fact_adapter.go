@@ -32,19 +32,10 @@ func (m *Biz) applyRunGovernanceWait(
 	if m == nil || m.EventHub() == nil || workspaceID == "" || runID == "" {
 		return common.ErrInvalidArgument
 	}
-	cmd := runevents.RuntimeGovernanceWaitFact{
-		WorkspaceID:         workspaceID,
-		RunID:               runID,
-		SourceOwner:         orchestratorLifecycleSource,
-		CausationID:         runtimeGovernanceWaitCausationID(authoritySnapshotID, dispatchID, ticketID, approvalID),
-		AuthoritySnapshotID: authoritySnapshotID,
-		DefinitionRevision:  definitionRevision,
-		EvidenceRevision:    evidenceRevision,
-		DispatchID:          dispatchID,
-		BlockingTicketID:    ticketID,
-		BlockingApprovalID:  approvalID,
-	}.Normalized()
-	if err := cmd.Validate(); err != nil {
+	cmd, err := runGovernanceWaitFact(
+		workspaceID, runID, authoritySnapshotID, definitionRevision, evidenceRevision, dispatchID, ticketID, approvalID,
+	)
+	if err != nil {
 		return err
 	}
 	event := magicevent.NewEventWithContext(
@@ -60,8 +51,35 @@ func (m *Biz) applyRunGovernanceWait(
 	if err != nil {
 		return err
 	}
-	_ = response
-	return nil
+	return validateRunGovernanceWaitAcknowledgement(response, cmd, stateRevision)
+}
+
+func runGovernanceWaitFact(
+	workspaceID common.WorkspaceID,
+	runID common.RunID,
+	authoritySnapshotID string,
+	definitionRevision string,
+	evidenceRevision string,
+	dispatchID string,
+	ticketID common.TicketID,
+	approvalID common.ApprovalID,
+) (runevents.RuntimeGovernanceWaitFact, error) {
+	cmd := runevents.RuntimeGovernanceWaitFact{
+		WorkspaceID:         workspaceID,
+		RunID:               runID,
+		SourceOwner:         orchestratorLifecycleSource,
+		CausationID:         runtimeGovernanceWaitCausationID(authoritySnapshotID, dispatchID, ticketID, approvalID),
+		AuthoritySnapshotID: authoritySnapshotID,
+		DefinitionRevision:  definitionRevision,
+		EvidenceRevision:    evidenceRevision,
+		DispatchID:          dispatchID,
+		BlockingTicketID:    ticketID,
+		BlockingApprovalID:  approvalID,
+	}.Normalized()
+	if err := cmd.Validate(); err != nil {
+		return runevents.RuntimeGovernanceWaitFact{}, err
+	}
+	return cmd, nil
 }
 
 func (m *Biz) applyRunContinuationEligible(
@@ -80,20 +98,10 @@ func (m *Biz) applyRunContinuationEligible(
 	if m == nil || m.EventHub() == nil || workspaceID == "" || runID == "" {
 		return common.ErrInvalidArgument
 	}
-	cmd := runevents.RuntimeContinuationEligibleFact{
-		WorkspaceID:         workspaceID,
-		RunID:               runID,
-		SourceOwner:         orchestratorLifecycleSource,
-		CausationID:         runtimeContinuationCausationID(authoritySnapshotID, dispatchID, resolutionID),
-		AuthoritySnapshotID: authoritySnapshotID,
-		DefinitionRevision:  definitionRevision,
-		EvidenceRevision:    evidenceRevision,
-		DispatchID:          dispatchID,
-		ResolutionID:        resolutionID,
-		TicketID:            ticketID,
-		ApprovalID:          approvalID,
-	}.Normalized()
-	if err := cmd.Validate(); err != nil {
+	cmd, err := runContinuationEligibleFact(
+		workspaceID, runID, authoritySnapshotID, definitionRevision, evidenceRevision, dispatchID, resolutionID, ticketID, approvalID,
+	)
+	if err != nil {
 		return err
 	}
 	event := magicevent.NewEventWithContext(
@@ -109,7 +117,69 @@ func (m *Biz) applyRunContinuationEligible(
 	if err != nil {
 		return err
 	}
-	_ = response
+	return validateRunContinuationAcknowledgement(response, cmd, stateRevision)
+}
+
+func runContinuationEligibleFact(
+	workspaceID common.WorkspaceID,
+	runID common.RunID,
+	authoritySnapshotID string,
+	definitionRevision string,
+	evidenceRevision string,
+	dispatchID string,
+	resolutionID common.ResolutionID,
+	ticketID common.TicketID,
+	approvalID common.ApprovalID,
+) (runevents.RuntimeContinuationEligibleFact, error) {
+	cmd := runevents.RuntimeContinuationEligibleFact{
+		WorkspaceID:         workspaceID,
+		RunID:               runID,
+		SourceOwner:         orchestratorLifecycleSource,
+		CausationID:         runtimeContinuationCausationID(authoritySnapshotID, dispatchID, resolutionID),
+		AuthoritySnapshotID: authoritySnapshotID,
+		DefinitionRevision:  definitionRevision,
+		EvidenceRevision:    evidenceRevision,
+		DispatchID:          dispatchID,
+		ResolutionID:        resolutionID,
+		TicketID:            ticketID,
+		ApprovalID:          approvalID,
+	}.Normalized()
+	if err := cmd.Validate(); err != nil {
+		return runevents.RuntimeContinuationEligibleFact{}, err
+	}
+	return cmd, nil
+}
+
+func validateRunGovernanceWaitAcknowledgement(response runevents.RunLifecycleCommandResult, fact runevents.RuntimeGovernanceWaitFact, stateRevision uint64) error {
+	run := response.Run
+	if run == nil || run.WorkspaceID != fact.WorkspaceID || run.ID != fact.RunID || run.RuntimeState == nil || run.RuntimeLifecycleFence == nil ||
+		run.RuntimeState.StateRevision != stateRevision || run.RuntimeLifecycleFence.RuntimeStateRevision != stateRevision ||
+		run.RuntimeLifecycleFence.GovernanceFenceID != runtimeGovernanceLifecycleFenceID(fact.AuthoritySnapshotID, fact.DispatchID) ||
+		run.RuntimeLifecycleFence.GovernanceResolutionID != "" || run.RuntimeLifecycleFence.TerminalFenceID != "" {
+		return fmt.Errorf("run owner returned governance wait acknowledgement for a different persisted lifecycle handoff")
+	}
+	if fact.BlockingApprovalID != "" {
+		if run.State != common.RunStateBlockedOnApproval || run.BlockingApprovalID != fact.BlockingApprovalID || run.BlockingTicketID != "" {
+			return fmt.Errorf("run owner did not acknowledge the exact approval governance wait")
+		}
+		return nil
+	}
+	if run.State != common.RunStateBlockedOnDecision || run.BlockingTicketID != fact.BlockingTicketID || run.BlockingApprovalID != "" {
+		return fmt.Errorf("run owner did not acknowledge the exact decision governance wait")
+	}
+	return nil
+}
+
+func validateRunContinuationAcknowledgement(response runevents.RunLifecycleCommandResult, fact runevents.RuntimeContinuationEligibleFact, stateRevision uint64) error {
+	run := response.Run
+	if run == nil || run.WorkspaceID != fact.WorkspaceID || run.ID != fact.RunID || run.RuntimeState == nil || run.RuntimeLifecycleFence == nil ||
+		run.RuntimeState.StateRevision != stateRevision || run.RuntimeLifecycleFence.RuntimeStateRevision != stateRevision ||
+		run.RuntimeLifecycleFence.GovernanceFenceID != runtimeGovernanceLifecycleFenceID(fact.AuthoritySnapshotID, fact.DispatchID) ||
+		run.RuntimeLifecycleFence.GovernanceResolutionID != fact.ResolutionID ||
+		run.RuntimeLifecycleFence.TerminalFenceID != "" ||
+		run.State != common.RunStateActive || run.BlockingTicketID != "" || run.BlockingApprovalID != "" {
+		return fmt.Errorf("run owner did not acknowledge the exact governance continuation")
+	}
 	return nil
 }
 
@@ -216,10 +286,21 @@ func continuationFromGovernanceCommit(
 	resolution runtimecontract.RuntimeGovernanceResolution,
 	response orchestratorevents.CommitRuntimeGovernanceResolutionResult,
 	aggregate runtime.RuntimeAggregate,
-) (authoritySnapshotID, definitionRevision, evidenceRevision, dispatchID string, resolutionID common.ResolutionID, ticketID common.TicketID, approvalID common.ApprovalID, stateRevision uint64) {
+) (runtimeGovernanceLifecycleHandoff, uint64, error) {
 	// The continuation is bound to the authority/dispatch that opened the
 	// governance request. Commit may already have sealed a successor authority,
 	// so using aggregate.Decision.AuthoritySnapshot here would lose the binding
 	// that Run must verify against GovernanceResolutions.
-	return resolution.AuthoritySnapshotID, aggregate.Facts.DefinitionRevision, aggregate.Facts.EvidenceRevision, resolution.DispatchID, resolution.ResolutionID, resolution.TicketID, resolution.ApprovalID, aggregate.StateRevision
+	record := runtimeStateRecordFromAggregate(aggregate)
+	handoff, governed, err := runtimeGovernanceLifecycleHandoffFromState(&record)
+	if err != nil {
+		return runtimeGovernanceLifecycleHandoff{}, 0, err
+	}
+	if !governed || (handoff.Kind != runtimeGovernanceLifecycleContinuationDecision && handoff.Kind != runtimeGovernanceLifecycleContinuationApproval) ||
+		handoff.AuthoritySnapshotID != resolution.AuthoritySnapshotID || handoff.DispatchID != resolution.DispatchID ||
+		handoff.ResolutionID != resolution.ResolutionID || handoff.TicketID != resolution.TicketID || handoff.ApprovalID != resolution.ApprovalID ||
+		response.StateRevision != aggregate.StateRevision {
+		return runtimeGovernanceLifecycleHandoff{}, 0, fmt.Errorf("runtime governance continuation does not match persisted lifecycle handoff")
+	}
+	return handoff, aggregate.StateRevision, nil
 }

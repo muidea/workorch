@@ -329,9 +329,9 @@ func (m *AppModel) applyWorkspaceLLMSelectionUpdated(msg WorkspaceLLMSelectionUp
 	m.result = "Workspace model updated\n- next-run workspace default: " + label + "\n- current-run sealed target: " + sealed
 	switch m.activeWorkspacePromptMode() {
 	case workspacePromptModeDecision:
-		m.result += "\n- next: resolve the current decision, then use /run resume"
+		m.result += "\n- next: resolve the current decision once; owner continuation converges automatically, then wait for projection refresh; persistent blocking is a resolution delivery diagnostic"
 	case workspacePromptModeApproval:
-		m.result += "\n- next: resolve the current approval, then use /run resume"
+		m.result += "\n- next: resolve the current approval once; owner continuation converges automatically, then wait for projection refresh; persistent blocking is a resolution delivery diagnostic"
 	default:
 		m.result += "\n- continue with: /run resume"
 	}

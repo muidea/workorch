@@ -8,7 +8,9 @@ type RunSnapshot RunSnapshotOf[Workspace, Run]
 type RunSnapshotOf[W, R any] struct {
 	Workspace               W                       `json:"workspace"`
 	Run                     R                       `json:"run"`
-	Outcome                 RunOutcome              `json:"outcome"`
+	DisplayOutcome          RunDisplayOutcome       `json:"displayOutcome"`
+	GovernanceDisplay       GovernanceDisplay       `json:"governanceDisplay,omitempty"`
+	ConsistencyDiagnostic   *ConsistencyDiagnostic  `json:"consistencyDiagnostic,omitempty"`
 	TaskProgress            TaskProgress            `json:"taskProgress"`
 	RepairLoop              RepairLoop              `json:"repairLoop"`
 	TaskDecompositions      []TaskDecomposition     `json:"taskDecompositions,omitempty"`

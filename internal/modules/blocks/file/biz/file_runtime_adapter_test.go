@@ -5,9 +5,12 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
+	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 
@@ -18,6 +21,15 @@ import (
 	"github.com/muidea/workorch/internal/pkg/common"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
+
+type runtimeAdapterFailingInfoEntry struct {
+	fs.DirEntry
+	err error
+}
+
+func (e runtimeAdapterFailingInfoEntry) Info() (fs.FileInfo, error) {
+	return nil, e.err
+}
 
 func TestRuntimeAdapterProbeRejectsDirectoryPatchTargetWithoutMutation(t *testing.T) {
 	workspace := t.TempDir()
@@ -220,6 +232,302 @@ func TestRuntimeAdapterAcquireRuntimeTargetSelectionIsCardinalityBounded(t *test
 		}
 		if selection.Disposition != runtimecontract.RuntimeTargetSelectionUnsupported || selection.ObservedRevision != "unsupported-selector:profile/free_form_selector" || selection.SnapshotID == "" {
 			t.Fatalf("unknown File selector observation = %+v", selection)
+		}
+	})
+}
+
+func TestRuntimeAdapterUniqueWorkspaceEntryProspectiveAdmissionMatrix(t *testing.T) {
+	type matrixCase struct {
+		name               string
+		currentTargets     []string
+		prospective        string
+		wantDisposition    runtimecontract.RuntimeTargetSelectionDisposition
+		wantTargetRefs     []string
+		wantCandidateRefs  []string
+		wantCandidateCount int
+	}
+	cases := []matrixCase{
+		{name: "zero/no prospective", wantDisposition: runtimecontract.RuntimeTargetSelectionAbsent},
+		{name: "one/no prospective", currentTargets: []string{"one.txt"}, wantDisposition: runtimecontract.RuntimeTargetSelectionSelected, wantTargetRefs: []string{"one.txt"}, wantCandidateRefs: []string{"one.txt"}, wantCandidateCount: 1},
+		{name: "many/no prospective", currentTargets: []string{"one.txt", "two.txt"}, wantDisposition: runtimecontract.RuntimeTargetSelectionAmbiguous, wantCandidateRefs: []string{"one.txt", "two.txt"}, wantCandidateCount: 2},
+		{name: "zero/prospective", prospective: "prospective.txt", wantDisposition: runtimecontract.RuntimeTargetSelectionUnsupported},
+		{name: "one/prospective", currentTargets: []string{"one.txt"}, prospective: "prospective.txt", wantDisposition: runtimecontract.RuntimeTargetSelectionUnsupported},
+		{name: "many/prospective", currentTargets: []string{"one.txt", "two.txt"}, prospective: "prospective.txt", wantDisposition: runtimecontract.RuntimeTargetSelectionUnsupported},
+		{name: "noncanonical prospective", prospective: "../escape.txt", wantDisposition: runtimecontract.RuntimeTargetSelectionUnsupported},
+	}
+
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			workspace := t.TempDir()
+			for _, targetRef := range testCase.currentTargets {
+				if err := os.WriteFile(filepath.Join(workspace, targetRef), []byte(targetRef+"\n"), 0o644); err != nil {
+					t.Fatal(err)
+				}
+			}
+			before, err := NewRuntimeAdapter().AcquireWorkspaceManifest(workspace)
+			if err != nil {
+				t.Fatal(err)
+			}
+			acquire := func(adapter *RuntimeAdapter) runtimecontract.RuntimeTargetSelection {
+				selection, err := adapter.AcquireRuntimeTargetSelection(
+					workspace, "target-selection-unique-prospective-matrix", "deliverable",
+					runtimeFileTargetSelectorUniqueWorkspaceEntry, testCase.prospective, 4,
+				)
+				if err != nil {
+					t.Fatal(err)
+				}
+				return selection
+			}
+			first := acquire(NewRuntimeAdapter())
+			duplicate := acquire(NewRuntimeAdapter())
+			if first.Disposition != testCase.wantDisposition ||
+				!slices.Equal(first.TargetRefs, testCase.wantTargetRefs) ||
+				!slices.Equal(first.CandidateTargetRefs, testCase.wantCandidateRefs) ||
+				first.CandidateCount != testCase.wantCandidateCount ||
+				first.ProspectiveTargetRef != testCase.prospective ||
+				first.ObservedRevision != before.Revision || first.SnapshotID == "" {
+				t.Fatalf("unique selector admission = %+v, want disposition=%q targets=%v candidates=%v count=%d prospective=%q revision=%q", first, testCase.wantDisposition, testCase.wantTargetRefs, testCase.wantCandidateRefs, testCase.wantCandidateCount, testCase.prospective, before.Revision)
+			}
+			if !reflect.DeepEqual(first, duplicate) {
+				t.Fatalf("duplicate/fresh-adapter admission drifted: first=%+v duplicate=%+v", first, duplicate)
+			}
+			after, err := NewRuntimeAdapter().AcquireWorkspaceManifest(workspace)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !reflect.DeepEqual(before, after) {
+				t.Fatalf("unique selector admission mutated workspace: before=%+v after=%+v", before, after)
+			}
+		})
+	}
+}
+
+func TestRuntimeAdapterProspectiveAdmissionRejectsManifestExcludedTargetsWithoutMutation(t *testing.T) {
+	type selectorCase struct {
+		name              string
+		selector          string
+		inventoryVariants [][]string
+	}
+	selectors := []selectorCase{
+		{name: "workspace-relative-new", selector: runtimeFileSelectorWorkspaceRelativeNewTarget, inventoryVariants: [][]string{nil}},
+		{name: "workspace-deliverable", selector: runtimeFileTargetSelectorWorkspaceDeliverable, inventoryVariants: [][]string{nil, {"current.txt"}, {"current-a.txt", "current-b.txt"}}},
+		{name: "profile-declared", selector: runtimeFileTargetSelectorProfileCandidates, inventoryVariants: [][]string{nil, {"current.txt"}, {"current-a.txt", "current-b.txt"}}},
+	}
+	excludedSegments := []string{".git", "node_modules", "vendor", "dist", "build", ".workorch-data"}
+	for _, selector := range selectors {
+		for _, currentTargets := range selector.inventoryVariants {
+			for _, excluded := range excludedSegments {
+				for _, targetRef := range []string{excluded + "/artifact.txt", "nested/" + excluded + "/artifact.txt"} {
+					name := fmt.Sprintf("%s/inventory-%d/%s", selector.name, len(currentTargets), strings.ReplaceAll(targetRef, "/", "-"))
+					t.Run(name, func(t *testing.T) {
+						workspace := t.TempDir()
+						adapter := NewRuntimeAdapter()
+						for _, currentTarget := range currentTargets {
+							if err := os.WriteFile(filepath.Join(workspace, currentTarget), []byte(currentTarget+"\n"), 0o644); err != nil {
+								t.Fatal(err)
+							}
+						}
+						before, err := adapter.AcquireWorkspaceManifest(workspace)
+						if err != nil {
+							t.Fatal(err)
+						}
+						binding := runtimeTargetSelectionBinding{}
+						if selector.selector == runtimeFileTargetSelectorProfileCandidates {
+							candidateRefs := append([]string{targetRef}, currentTargets...)
+							binding = runtimeTargetSelectionBinding{ownerRef: "profile-audit", subjectRef: "deliverable", candidateRefs: candidateRefs}
+						}
+						acquire := func() runtimecontract.RuntimeTargetSelection {
+							selection, acquireErr := NewRuntimeAdapter().AcquireRuntimeTargetSelection(
+								workspace, "target-selection-excluded-prospective", "deliverable", selector.selector, targetRef, 4, binding,
+							)
+							if acquireErr != nil {
+								t.Fatal(acquireErr)
+							}
+							return selection
+						}
+						first, duplicate := acquire(), acquire()
+						if first.Disposition != runtimecontract.RuntimeTargetSelectionUnsupported || first.ProspectiveTargetRef != targetRef ||
+							first.CandidateCount != 0 || len(first.TargetRefs) != 0 || len(first.CandidateTargetRefs) != 0 ||
+							first.ObservedRevision != before.Revision || first.SnapshotID == "" {
+							t.Fatalf("excluded prospective admission = %+v", first)
+						}
+						if !reflect.DeepEqual(first, duplicate) {
+							t.Fatalf("duplicate excluded prospective admission drifted: first=%+v duplicate=%+v", first, duplicate)
+						}
+						if _, statErr := os.Lstat(filepath.Join(workspace, filepath.FromSlash(targetRef))); !os.IsNotExist(statErr) {
+							t.Fatalf("excluded prospective admission changed target %q: %v", targetRef, statErr)
+						}
+						after, err := adapter.AcquireWorkspaceManifest(workspace)
+						if err != nil {
+							t.Fatal(err)
+						}
+						if !reflect.DeepEqual(before, after) {
+							t.Fatalf("excluded prospective admission mutated manifest: before=%+v after=%+v", before, after)
+						}
+					})
+				}
+			}
+		}
+	}
+}
+
+func TestRuntimeAdapterProspectiveAdmissionDoesNotIgnoreNonParticipatingTarget(t *testing.T) {
+	for _, currentTargets := range [][]string{{"current.txt"}, {"current-a.txt", "current-b.txt"}} {
+		t.Run(fmt.Sprintf("workspace-deliverable/inventory-%d", len(currentTargets)), func(t *testing.T) {
+			workspace := t.TempDir()
+			for _, currentTarget := range currentTargets {
+				if err := os.WriteFile(filepath.Join(workspace, currentTarget), []byte(currentTarget+"\n"), 0o644); err != nil {
+					t.Fatal(err)
+				}
+			}
+			before, err := NewRuntimeAdapter().AcquireWorkspaceManifest(workspace)
+			if err != nil {
+				t.Fatal(err)
+			}
+			const prospectiveTarget = "future.txt"
+			acquire := func() runtimecontract.RuntimeTargetSelection {
+				selection, acquireErr := NewRuntimeAdapter().AcquireRuntimeTargetSelection(
+					workspace, "target-selection-nonparticipating-prospective", "deliverable", runtimeFileTargetSelectorWorkspaceDeliverable, prospectiveTarget, 4,
+				)
+				if acquireErr != nil {
+					t.Fatal(acquireErr)
+				}
+				return selection
+			}
+			first, duplicate := acquire(), acquire()
+			wantDisposition := runtimecontract.RuntimeTargetSelectionSelected
+			if len(currentTargets) > 1 {
+				wantDisposition = runtimecontract.RuntimeTargetSelectionScope
+			}
+			if first.Disposition != wantDisposition || first.ProspectiveTargetRef != prospectiveTarget ||
+				first.CandidateCount != len(currentTargets) || !slices.Equal(first.TargetRefs, currentTargets) ||
+				!reflect.DeepEqual(first, duplicate) {
+				t.Fatalf("workspace prospective admission first=%+v duplicate=%+v", first, duplicate)
+			}
+			if _, statErr := os.Lstat(filepath.Join(workspace, prospectiveTarget)); !os.IsNotExist(statErr) {
+				t.Fatalf("prospective admission changed target: %v", statErr)
+			}
+			after, err := NewRuntimeAdapter().AcquireWorkspaceManifest(workspace)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !reflect.DeepEqual(before, after) {
+				t.Fatalf("workspace prospective admission mutated manifest: before=%+v after=%+v", before, after)
+			}
+		})
+
+		t.Run(fmt.Sprintf("profile-declared/inventory-%d", len(currentTargets)), func(t *testing.T) {
+			workspace := t.TempDir()
+			for _, currentTarget := range currentTargets {
+				if err := os.WriteFile(filepath.Join(workspace, currentTarget), []byte(currentTarget+"\n"), 0o644); err != nil {
+					t.Fatal(err)
+				}
+			}
+			before, err := NewRuntimeAdapter().AcquireWorkspaceManifest(workspace)
+			if err != nil {
+				t.Fatal(err)
+			}
+			const prospectiveTarget = "future.txt"
+			candidateRefs := append([]string{prospectiveTarget}, currentTargets...)
+			binding := runtimeTargetSelectionBinding{ownerRef: "profile-audit", subjectRef: "deliverable", candidateRefs: candidateRefs}
+			acquire := func() runtimecontract.RuntimeTargetSelection {
+				selection, acquireErr := NewRuntimeAdapter().AcquireRuntimeTargetSelection(
+					workspace, "target-selection-nonparticipating-prospective", "deliverable", runtimeFileTargetSelectorProfileCandidates, prospectiveTarget, 4, binding,
+				)
+				if acquireErr != nil {
+					t.Fatal(acquireErr)
+				}
+				return selection
+			}
+			first, duplicate := acquire(), acquire()
+			if first.Disposition != runtimecontract.RuntimeTargetSelectionUnsupported || first.ProspectiveTargetRef != prospectiveTarget ||
+				first.CandidateCount != 0 || len(first.TargetRefs) != 0 || len(first.CandidateTargetRefs) != 0 || first.SnapshotID == "" {
+				t.Fatalf("nonparticipating prospective admission = %+v", first)
+			}
+			if !reflect.DeepEqual(first, duplicate) {
+				t.Fatalf("duplicate nonparticipating prospective admission drifted: first=%+v duplicate=%+v", first, duplicate)
+			}
+			after, err := NewRuntimeAdapter().AcquireWorkspaceManifest(workspace)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !reflect.DeepEqual(before, after) {
+				t.Fatalf("nonparticipating prospective admission mutated manifest: before=%+v after=%+v", before, after)
+			}
+		})
+	}
+}
+
+func TestRuntimeAdapterProfileProspectiveMustBelongToDeclaredCandidatesAcrossCardinality(t *testing.T) {
+	for _, currentTargets := range [][]string{nil, {"current.txt"}, {"current-a.txt", "current-b.txt"}} {
+		t.Run(fmt.Sprintf("inventory-%d", len(currentTargets)), func(t *testing.T) {
+			workspace := t.TempDir()
+			for _, currentTarget := range currentTargets {
+				if err := os.WriteFile(filepath.Join(workspace, currentTarget), []byte(currentTarget+"\n"), 0o644); err != nil {
+					t.Fatal(err)
+				}
+			}
+			before, err := NewRuntimeAdapter().AcquireWorkspaceManifest(workspace)
+			if err != nil {
+				t.Fatal(err)
+			}
+			candidateRefs := append([]string{"declared-future.txt"}, currentTargets...)
+			binding := runtimeTargetSelectionBinding{ownerRef: "profile-audit", subjectRef: "deliverable", candidateRefs: candidateRefs}
+			for attempt := 0; attempt < 2; attempt++ {
+				_, acquireErr := NewRuntimeAdapter().AcquireRuntimeTargetSelection(
+					workspace, "target-selection-outside-profile", "deliverable", runtimeFileTargetSelectorProfileCandidates, "outside-profile.txt", 4, binding,
+				)
+				if !errors.Is(acquireErr, common.ErrInvalidArgument) {
+					t.Fatalf("outside-profile prospective error = %v, want invalid argument", acquireErr)
+				}
+			}
+			after, err := NewRuntimeAdapter().AcquireWorkspaceManifest(workspace)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !reflect.DeepEqual(before, after) {
+				t.Fatalf("outside-profile prospective admission mutated manifest: before=%+v after=%+v", before, after)
+			}
+		})
+	}
+}
+
+func TestRuntimeAdapterExistingProspectiveMustMatchCurrentInventory(t *testing.T) {
+	t.Run("workspace deliverable complete scope", func(t *testing.T) {
+		workspace := t.TempDir()
+		for _, targetRef := range []string{"current-a.txt", "current-b.txt"} {
+			if err := os.WriteFile(filepath.Join(workspace, targetRef), []byte(targetRef+"\n"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+		}
+		selection, err := NewRuntimeAdapter().AcquireRuntimeTargetSelection(
+			workspace, "target-selection-existing-scope", "deliverable", runtimeFileTargetSelectorWorkspaceDeliverable, "current-a.txt", 4,
+		)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if selection.Disposition != runtimecontract.RuntimeTargetSelectionScope || selection.ProspectiveTargetRef != "current-a.txt" ||
+			selection.CandidateCount != 2 || !slices.Equal(selection.TargetRefs, []string{"current-a.txt", "current-b.txt"}) {
+			t.Fatalf("existing workspace prospective selection = %+v", selection)
+		}
+	})
+	t.Run("profile declared exact current target", func(t *testing.T) {
+		workspace := t.TempDir()
+		for _, targetRef := range []string{"current-a.txt", "current-b.txt"} {
+			if err := os.WriteFile(filepath.Join(workspace, targetRef), []byte(targetRef+"\n"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+		}
+		selection, err := NewRuntimeAdapter().AcquireRuntimeTargetSelection(
+			workspace, "target-selection-profile-existing", "deliverable", runtimeFileTargetSelectorProfileCandidates, "current-a.txt", 4,
+			runtimeTargetSelectionBinding{ownerRef: "profile-audit", subjectRef: "deliverable", candidateRefs: []string{"current-a.txt", "current-b.txt"}},
+		)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if selection.Disposition != runtimecontract.RuntimeTargetSelectionAmbiguous || selection.ProspectiveTargetRef != "current-a.txt" ||
+			selection.CandidateCount != 2 || !slices.Equal(selection.CandidateTargetRefs, []string{"current-a.txt", "current-b.txt"}) {
+			t.Fatalf("existing profile prospective selection = %+v", selection)
 		}
 	})
 }
@@ -971,6 +1279,372 @@ func TestRuntimeAdapterListNonRecursiveSkipsIgnoredDirectoriesWithoutFailing(t *
 	}
 	if len(result.Entries) != 1 || result.Entries[0].Path != "main.go" {
 		t.Fatalf("entries = %+v, want only main.go", result.Entries)
+	}
+}
+
+func TestRuntimeAdapterListAndManifestDistinguishExactBoundFromOverflow(t *testing.T) {
+	workspace := t.TempDir()
+	for _, excluded := range []string{".git", "node_modules", "vendor", "dist", "build", ".workorch-data"} {
+		path := filepath.Join(workspace, excluded)
+		if err := os.MkdirAll(path, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(path, "ignored.txt"), []byte("ignored\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for index := range defaultMaxEntries {
+		name := fmt.Sprintf("file-%03d.txt", index)
+		if err := os.WriteFile(filepath.Join(workspace, name), []byte(name+"\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	adapter := NewRuntimeAdapter()
+	exact, err := adapter.ListFiles(FileListRequest{WorkspaceDirectory: workspace, Path: ".", Recursive: true, MaxEntries: defaultMaxEntries})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if exact.Truncated || len(exact.Entries) != defaultMaxEntries {
+		t.Fatalf("exact-bound list entries=%d truncated=%t, want %d/false", len(exact.Entries), exact.Truncated, defaultMaxEntries)
+	}
+	manifest, err := adapter.AcquireWorkspaceManifest(workspace)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(manifest.TargetRefs) != defaultMaxEntries || manifest.Revision == "" {
+		t.Fatalf("exact-bound manifest targets=%d revision=%q", len(manifest.TargetRefs), manifest.Revision)
+	}
+
+	if err := os.WriteFile(filepath.Join(workspace, "overflow.txt"), []byte("overflow\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	overflow, err := adapter.ListFiles(FileListRequest{WorkspaceDirectory: workspace, Path: ".", Recursive: true, MaxEntries: defaultMaxEntries})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !overflow.Truncated || len(overflow.Entries) != defaultMaxEntries {
+		t.Fatalf("overflow list entries=%d truncated=%t, want %d/true", len(overflow.Entries), overflow.Truncated, defaultMaxEntries)
+	}
+	if _, err := adapter.AcquireWorkspaceManifest(workspace); !errors.Is(err, common.ErrInvalidArgument) {
+		t.Fatalf("overflow manifest error = %v, want invalid argument", err)
+	}
+}
+
+func TestRuntimeAdapterProspectiveAdmissionReservesManifestCapacity(t *testing.T) {
+	writeEntries := func(t *testing.T, workspace string, count int) {
+		t.Helper()
+		for index := range count {
+			name := fmt.Sprintf("file-%03d.txt", index)
+			if err := os.WriteFile(filepath.Join(workspace, name), []byte(name+"\n"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	writeMixedEntries := func(t *testing.T, workspace string, count int) {
+		t.Helper()
+		if count < 1 {
+			t.Fatal("mixed inventory requires at least one entry")
+		}
+		directory := filepath.Join(workspace, "existing-dir")
+		if err := os.Mkdir(directory, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		writeEntries(t, directory, count-1)
+	}
+	selectors := []struct {
+		name     string
+		selector string
+		binding  runtimeTargetSelectionBinding
+	}{
+		{name: "workspace-relative-new", selector: runtimeFileSelectorWorkspaceRelativeNewTarget},
+		{name: "workspace-deliverable", selector: runtimeFileTargetSelectorWorkspaceDeliverable},
+		{name: "profile-declared", selector: runtimeFileTargetSelectorProfileCandidates, binding: runtimeTargetSelectionBinding{
+			ownerRef: "profile-capacity", subjectRef: "deliverable", candidateRefs: []string{"future.txt"},
+		}},
+	}
+	for _, selector := range selectors {
+		t.Run(selector.name+"/exact-bound", func(t *testing.T) {
+			workspace := t.TempDir()
+			writeEntries(t, workspace, defaultMaxEntries)
+			before, err := NewRuntimeAdapter().AcquireWorkspaceManifest(workspace)
+			if err != nil {
+				t.Fatal(err)
+			}
+			selection, err := NewRuntimeAdapter().AcquireRuntimeTargetSelection(
+				workspace, "capacity-bound", "deliverable", selector.selector, "future.txt",
+				runtimecontract.RuntimeOwnerInventoryItemsMaxCount, selector.binding,
+			)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if selection.Disposition != runtimecontract.RuntimeTargetSelectionUnsupported || selection.CandidateCount != 0 ||
+				len(selection.TargetRefs) != 0 || len(selection.CandidateTargetRefs) != 0 {
+				t.Fatalf("exact-bound prospective selection = %+v", selection)
+			}
+			if _, statErr := os.Lstat(filepath.Join(workspace, "future.txt")); !os.IsNotExist(statErr) {
+				t.Fatalf("capacity admission changed prospective target: %v", statErr)
+			}
+			after, err := NewRuntimeAdapter().AcquireWorkspaceManifest(workspace)
+			if err != nil || !reflect.DeepEqual(before, after) {
+				t.Fatalf("capacity admission mutated manifest: before=%+v after=%+v err=%v", before, after, err)
+			}
+		})
+	}
+
+	t.Run("workspace-relative-new/one-slot", func(t *testing.T) {
+		workspace := t.TempDir()
+		writeEntries(t, workspace, defaultMaxEntries-1)
+		selection, err := NewRuntimeAdapter().AcquireRuntimeTargetSelection(
+			workspace, "capacity-one-slot", "deliverable", runtimeFileSelectorWorkspaceRelativeNewTarget, "future.txt",
+			runtimecontract.RuntimeOwnerInventoryItemsMaxCount,
+		)
+		if err != nil || selection.Disposition != runtimecontract.RuntimeTargetSelectionCreate {
+			t.Fatalf("one-slot prospective selection = %+v err=%v", selection, err)
+		}
+		if err := os.WriteFile(filepath.Join(workspace, "future.txt"), []byte("future\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		manifest, err := NewRuntimeAdapter().AcquireWorkspaceManifest(workspace)
+		if err != nil || len(manifest.TargetRefs) != defaultMaxEntries {
+			t.Fatalf("one-slot realized manifest targets=%d err=%v", len(manifest.TargetRefs), err)
+		}
+	})
+
+	t.Run("workspace-relative-new/mixed-entry-bound", func(t *testing.T) {
+		workspace := t.TempDir()
+		writeMixedEntries(t, workspace, defaultMaxEntries)
+		manifest, err := NewRuntimeAdapter().AcquireWorkspaceManifest(workspace)
+		if err != nil || len(manifest.TargetRefs) != defaultMaxEntries-1 {
+			t.Fatalf("mixed exact-bound manifest targets=%d err=%v", len(manifest.TargetRefs), err)
+		}
+		selection, err := NewRuntimeAdapter().AcquireRuntimeTargetSelection(
+			workspace, "capacity-mixed-bound", "deliverable", runtimeFileSelectorWorkspaceRelativeNewTarget, "future.txt",
+			runtimecontract.RuntimeOwnerInventoryItemsMaxCount,
+		)
+		if err != nil || selection.Disposition != runtimecontract.RuntimeTargetSelectionUnsupported {
+			t.Fatalf("mixed exact-bound prospective selection = %+v err=%v", selection, err)
+		}
+		if _, statErr := os.Lstat(filepath.Join(workspace, "future.txt")); !os.IsNotExist(statErr) {
+			t.Fatalf("mixed capacity admission changed prospective target: %v", statErr)
+		}
+	})
+
+	t.Run("workspace-relative-new/nested-create-reserves-all-entries", func(t *testing.T) {
+		for _, testCase := range []struct {
+			name            string
+			initialEntries  int
+			wantDisposition runtimecontract.RuntimeTargetSelectionDisposition
+		}{
+			{name: "three-slots", initialEntries: defaultMaxEntries - 3, wantDisposition: runtimecontract.RuntimeTargetSelectionCreate},
+			{name: "two-slots", initialEntries: defaultMaxEntries - 2, wantDisposition: runtimecontract.RuntimeTargetSelectionUnsupported},
+		} {
+			t.Run(testCase.name, func(t *testing.T) {
+				workspace := t.TempDir()
+				writeMixedEntries(t, workspace, testCase.initialEntries)
+				selection, err := NewRuntimeAdapter().AcquireRuntimeTargetSelection(
+					workspace, "capacity-nested", "deliverable", runtimeFileSelectorWorkspaceRelativeNewTarget, "new-a/new-b/future.txt",
+					runtimecontract.RuntimeOwnerInventoryItemsMaxCount,
+				)
+				if err != nil || selection.Disposition != testCase.wantDisposition {
+					t.Fatalf("nested prospective selection = %+v err=%v", selection, err)
+				}
+				if _, statErr := os.Lstat(filepath.Join(workspace, "new-a")); !os.IsNotExist(statErr) {
+					t.Fatalf("nested capacity admission created a parent directory: %v", statErr)
+				}
+			})
+		}
+	})
+}
+
+func TestRuntimeAdapterCreateEffectRechecksAndSerializesManifestCapacity(t *testing.T) {
+	writeEntries := func(t *testing.T, workspace string, count int) {
+		t.Helper()
+		for index := range count {
+			name := fmt.Sprintf("file-%03d.txt", index)
+			if err := os.WriteFile(filepath.Join(workspace, name), []byte(name+"\n"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+
+	t.Run("stale 499 admission cannot create item 501", func(t *testing.T) {
+		workspace := t.TempDir()
+		writeEntries(t, workspace, defaultMaxEntries-1)
+		adapter := NewRuntimeAdapter()
+		selection, err := adapter.AcquireRuntimeTargetSelection(
+			workspace, "capacity-toctou", "deliverable", runtimeFileSelectorWorkspaceRelativeNewTarget, "future.txt",
+			runtimecontract.RuntimeOwnerInventoryItemsMaxCount,
+		)
+		if err != nil || selection.Disposition != runtimecontract.RuntimeTargetSelectionCreate {
+			t.Fatalf("initial selection = %+v err=%v", selection, err)
+		}
+		if err := os.WriteFile(filepath.Join(workspace, "concurrent.txt"), []byte("concurrent\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		result, err := adapter.ApplyPatch(PatchApplyRequest{
+			WorkspaceDirectory: workspace, TargetRef: "future.txt", PatchType: patchTypeFileWrite,
+			Content: "future\n", ContentPresent: true, CreateOnly: true,
+		})
+		if !errors.Is(err, common.ErrConflict) || result.FailureCode != "workspace_manifest_capacity_exhausted" {
+			t.Fatalf("stale-capacity effect result=%+v err=%v", result, err)
+		}
+		if _, statErr := os.Lstat(filepath.Join(workspace, "future.txt")); !os.IsNotExist(statErr) {
+			t.Fatalf("stale-capacity effect wrote future target: %v", statErr)
+		}
+	})
+
+	t.Run("stale nested admission counts a concurrent directory", func(t *testing.T) {
+		workspace := t.TempDir()
+		writeEntries(t, workspace, defaultMaxEntries-3)
+		adapter := NewRuntimeAdapter()
+		selection, err := adapter.AcquireRuntimeTargetSelection(
+			workspace, "capacity-nested-toctou", "deliverable", runtimeFileSelectorWorkspaceRelativeNewTarget, "new-a/new-b/future.txt",
+			runtimecontract.RuntimeOwnerInventoryItemsMaxCount,
+		)
+		if err != nil || selection.Disposition != runtimecontract.RuntimeTargetSelectionCreate {
+			t.Fatalf("initial nested selection = %+v err=%v", selection, err)
+		}
+		if err := os.Mkdir(filepath.Join(workspace, "concurrent-dir"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		result, err := adapter.ApplyPatch(PatchApplyRequest{
+			WorkspaceDirectory: workspace, TargetRef: "new-a/new-b/future.txt", PatchType: patchTypeFileWrite,
+			Content: "future\n", ContentPresent: true, CreateOnly: true,
+		})
+		if !errors.Is(err, common.ErrConflict) || result.FailureCode != "workspace_manifest_capacity_exhausted" {
+			t.Fatalf("stale nested capacity effect result=%+v err=%v", result, err)
+		}
+		if _, statErr := os.Lstat(filepath.Join(workspace, "new-a")); !os.IsNotExist(statErr) {
+			t.Fatalf("stale nested capacity effect created a parent directory: %v", statErr)
+		}
+	})
+
+	t.Run("concurrent creates retain one final slot", func(t *testing.T) {
+		workspace := t.TempDir()
+		writeEntries(t, workspace, defaultMaxEntries-1)
+		adapter := NewRuntimeAdapter()
+		start := make(chan struct{})
+		type outcome struct {
+			result RuntimeFileOperationResult
+			err    error
+		}
+		outcomes := make(chan outcome, 2)
+		for _, targetRef := range []string{"future-a.txt", "future-b.txt"} {
+			targetRef := targetRef
+			go func() {
+				<-start
+				result, err := adapter.ApplyPatch(PatchApplyRequest{
+					WorkspaceDirectory: workspace, TargetRef: targetRef, PatchType: patchTypeFileWrite,
+					Content: targetRef + "\n", ContentPresent: true, CreateOnly: true,
+				})
+				outcomes <- outcome{result: result, err: err}
+			}()
+		}
+		close(start)
+		succeeded, capacityRejected := 0, 0
+		for range 2 {
+			value := <-outcomes
+			switch {
+			case value.err == nil:
+				succeeded++
+			case errors.Is(value.err, common.ErrConflict) && value.result.FailureCode == "workspace_manifest_capacity_exhausted":
+				capacityRejected++
+			default:
+				t.Fatalf("unexpected concurrent create outcome=%+v err=%v", value.result, value.err)
+			}
+		}
+		manifest, err := adapter.AcquireWorkspaceManifest(workspace)
+		if err != nil || succeeded != 1 || capacityRejected != 1 || len(manifest.TargetRefs) != defaultMaxEntries {
+			t.Fatalf("concurrent capacity success/rejected/targets=%d/%d/%d err=%v", succeeded, capacityRejected, len(manifest.TargetRefs), err)
+		}
+	})
+}
+
+func TestRuntimeAdapterManifestFailsClosedOnIncompleteInventoryObservation(t *testing.T) {
+	injectedErr := errors.New("injected manifest observation failure")
+	type failureCase struct {
+		name      string
+		configure func(*RuntimeAdapter)
+	}
+	cases := []failureCase{
+		{
+			name: "walk error",
+			configure: func(adapter *RuntimeAdapter) {
+				adapter.walkDir = func(root string, walkFn fs.WalkDirFunc) error {
+					return filepath.WalkDir(root, func(path string, entry fs.DirEntry, walkErr error) error {
+						if filepath.Base(path) == "z-fault.txt" {
+							return walkFn(path, entry, injectedErr)
+						}
+						return walkFn(path, entry, walkErr)
+					})
+				}
+			},
+		},
+		{
+			name: "entry info error",
+			configure: func(adapter *RuntimeAdapter) {
+				adapter.walkDir = func(root string, walkFn fs.WalkDirFunc) error {
+					return filepath.WalkDir(root, func(path string, entry fs.DirEntry, walkErr error) error {
+						if walkErr == nil && filepath.Base(path) == "z-fault.txt" {
+							entry = runtimeAdapterFailingInfoEntry{DirEntry: entry, err: injectedErr}
+						}
+						return walkFn(path, entry, walkErr)
+					})
+				}
+			},
+		},
+		{
+			name: "content hash error",
+			configure: func(adapter *RuntimeAdapter) {
+				adapter.streamHashAndType = func(path string) (string, bool, error) {
+					if filepath.Base(path) == "z-fault.txt" {
+						return "", false, injectedErr
+					}
+					return streamFileHashAndBinary(path)
+				}
+			},
+		},
+	}
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			workspace := t.TempDir()
+			seed := map[string]string{"a-kept.txt": "kept\n", "z-fault.txt": "fault\n"}
+			for targetRef, content := range seed {
+				if err := os.WriteFile(filepath.Join(workspace, targetRef), []byte(content), 0o644); err != nil {
+					t.Fatal(err)
+				}
+			}
+			adapter := NewRuntimeAdapter()
+			testCase.configure(adapter)
+
+			listed, err := adapter.ListFiles(FileListRequest{WorkspaceDirectory: workspace, Path: ".", Recursive: true})
+			if err == nil || listed.FailureCode != "file_list_failed" {
+				t.Fatalf("incomplete list = %+v err=%v, want file_list_failed", listed, err)
+			}
+			if _, err := adapter.AcquireWorkspaceManifest(workspace); err == nil {
+				t.Fatal("incomplete observation produced a workspace manifest")
+			}
+			if _, err := adapter.AcquireRuntimeTargetSelection(
+				workspace, "target-selection-incomplete-unique", "deliverable", runtimeFileTargetSelectorUniqueWorkspaceEntry, "", 4,
+			); err == nil {
+				t.Fatal("incomplete observation degraded to a unique target selection")
+			}
+			if _, err := adapter.AcquireRuntimeTargetSelection(
+				workspace, "target-selection-incomplete-create", "deliverable", runtimeFileTargetSelectorWorkspaceDeliverable, "future.txt", 4,
+			); err == nil {
+				t.Fatal("incomplete observation admitted a prospective target")
+			}
+
+			for targetRef, want := range seed {
+				got, err := os.ReadFile(filepath.Join(workspace, targetRef))
+				if err != nil || string(got) != want {
+					t.Fatalf("incomplete observation mutated %s: content=%q err=%v", targetRef, got, err)
+				}
+			}
+			if _, err := os.Lstat(filepath.Join(workspace, "future.txt")); !os.IsNotExist(err) {
+				t.Fatalf("incomplete observation created future target: %v", err)
+			}
+		})
 	}
 }
 

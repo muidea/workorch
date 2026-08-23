@@ -255,9 +255,21 @@ func (c *RuntimeController) applyGovernanceResolutionTransactionInternalEvent(ct
 	if event.Kind != RuntimeInternalEventGovernanceResolutionObserved || event.Transaction.GovernanceResolution == nil {
 		return RuntimeInternalEventResult{}, common.ErrInvalidArgument
 	}
-	commit, err := c.authority.commitGovernanceResolution(ctx, *event.Transaction.GovernanceResolution)
-	return RuntimeInternalEventResult{
+	commit, err := c.authority.commitGovernanceResolutionWithContinuationLease(
+		ctx,
+		*event.Transaction.GovernanceResolution,
+		event.Transaction.GovernanceContinuationDriveLease,
+	)
+	result := RuntimeInternalEventResult{
 		Aggregate: commit.Aggregate,
 		Evidence:  &commit,
-	}, err
+	}
+	if requested := event.Transaction.GovernanceContinuationDriveLease; requested != nil && commit.Aggregate.DriveLease != nil &&
+		commit.Aggregate.DriveLease.WorkspaceID == requested.WorkspaceID && commit.Aggregate.DriveLease.RunID == requested.RunID &&
+		commit.Aggregate.DriveLease.Reason == requested.Reason && commit.Aggregate.DriveLease.FailureSignature == requested.FailureSignature {
+		lease := commit.Aggregate.DriveLease.Clone()
+		result.DriveLease = &lease
+		result.LeaseChanged = commit.Disposition == CommitDispositionCommitted
+	}
+	return result, err
 }

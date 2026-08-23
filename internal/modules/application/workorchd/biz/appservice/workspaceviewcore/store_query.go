@@ -17,93 +17,7 @@ func workspaceWithSnapshotGovernance(workspace appmodelcore.Workspace, snapshot 
 	if strings.TrimSpace(next.ID) == "" {
 		next.ID = snapshot.Workspace.ID
 	}
-	activeRunID := strings.TrimSpace(next.ActiveRunID)
-	if activeRunID == "" && snapshot.Run != nil {
-		activeRunID = strings.TrimSpace(snapshot.Run.ID)
-	}
-	blockerRunID := activeRunID
-	if blockerRunID == "" {
-		blockerRunID = strings.TrimSpace(snapshot.Workspace.ActiveRunID)
-	}
-	if ticketID, ok := snapshotDecisionBlocker(snapshot, blockerRunID); ok {
-		next.State = string(common.WorkspaceStateActive)
-		if blockerRunID != "" {
-			next.ActiveRunID = blockerRunID
-		}
-		next.BlockingTicketID = ticketID
-		next.BlockingApprovalID = ""
-		return next
-	}
-	if approvalID, ok := snapshotApprovalBlocker(snapshot, blockerRunID); ok {
-		next.State = string(common.WorkspaceStateBlockedOnApproval)
-		if blockerRunID != "" {
-			next.ActiveRunID = blockerRunID
-		}
-		next.BlockingApprovalID = approvalID
-		next.BlockingTicketID = ""
-		return next
-	}
-	if activeRunID != "" {
-		next.ActiveRunID = activeRunID
-	}
 	return next
-}
-
-func snapshotDecisionBlocker(snapshot readmodelcore.WorkspaceSnapshotState, activeRunID string) (string, bool) {
-	workspaceID := strings.TrimSpace(snapshot.Workspace.ID)
-	activeRunID = strings.TrimSpace(activeRunID)
-	if activeRunID == "" && snapshot.Run != nil {
-		activeRunID = strings.TrimSpace(snapshot.Run.ID)
-	}
-	preferredID := firstNonEmptyViewString(snapshot.Workspace.BlockingTicketID)
-	if snapshot.Run != nil {
-		preferredID = firstNonEmptyViewString(preferredID, snapshot.Run.BlockingTicketID)
-	}
-	if readmodelprojection.GovernanceProjection().HasOpenDecisionBlocker(snapshot.Decisions, workspaceID, activeRunID, preferredID) {
-		return preferredID, true
-	}
-	for _, item := range snapshot.Decisions {
-		if strings.TrimSpace(item.WorkspaceID) == workspaceID &&
-			strings.TrimSpace(item.RunID) == activeRunID &&
-			strings.TrimSpace(item.State) == string(common.DecisionTicketStateOpen) &&
-			strings.TrimSpace(item.ID) != "" {
-			return strings.TrimSpace(item.ID), true
-		}
-	}
-	return "", false
-}
-
-func snapshotApprovalBlocker(snapshot readmodelcore.WorkspaceSnapshotState, activeRunID string) (string, bool) {
-	workspaceID := strings.TrimSpace(snapshot.Workspace.ID)
-	activeRunID = strings.TrimSpace(activeRunID)
-	if activeRunID == "" && snapshot.Run != nil {
-		activeRunID = strings.TrimSpace(snapshot.Run.ID)
-	}
-	preferredID := firstNonEmptyViewString(snapshot.Workspace.BlockingApprovalID)
-	if snapshot.Run != nil {
-		preferredID = firstNonEmptyViewString(preferredID, snapshot.Run.BlockingApprovalID)
-	}
-	if readmodelprojection.GovernanceProjection().HasOpenApprovalBlocker(snapshot.Approvals, workspaceID, activeRunID, preferredID) {
-		return preferredID, true
-	}
-	for _, item := range snapshot.Approvals {
-		if strings.TrimSpace(item.WorkspaceID) == workspaceID &&
-			strings.TrimSpace(item.RunID) == activeRunID &&
-			strings.TrimSpace(item.State) == string(common.ApprovalStatePending) &&
-			strings.TrimSpace(item.ID) != "" {
-			return strings.TrimSpace(item.ID), true
-		}
-	}
-	return "", false
-}
-
-func firstNonEmptyViewString(values ...string) string {
-	for _, value := range values {
-		if value = strings.TrimSpace(value); value != "" {
-			return value
-		}
-	}
-	return ""
 }
 
 func (s *Store) WorkspaceIDs() []string {
@@ -155,11 +69,9 @@ func (s *Store) List() ([]appmodelcore.Workspace, projectioncontract.ProjectionS
 			item := cloneWorkspace(entry.Workspace)
 			if entry.HasSnapshot {
 				snapshot := normalizedEntryListSnapshot(entry)
-				item = cloneWorkspace(snapshot.Workspace)
+				// The list keeps the canonical Workspace owner projection from
+				// entry.Workspace. Snapshot governance remains display-only.
 				item = compactWorkspaceListOverview(item)
-				item.State = snapshot.Workspace.State
-				item.BlockingTicketID = snapshot.Workspace.BlockingTicketID
-				item.BlockingApprovalID = snapshot.Workspace.BlockingApprovalID
 				item.ViewModel = appWorkspaceViewModelFromSnapshot(snapshot, s.statusForWorkspaceLocked(id))
 			} else {
 				item = compactWorkspaceListOverview(item)
@@ -240,8 +152,8 @@ func normalizedEntryListSnapshot(entry *workspaceProjectionEntry) readmodelcore.
 	snapshot.Run = source.Run
 	snapshot.RunHeartbeat = source.RunHeartbeat
 	snapshot.TaskProgress = source.TaskProgress
-	snapshot.Decisions = append([]projectioncontract.Decision(nil), source.Decisions...)
-	snapshot.Approvals = append([]projectioncontract.Approval(nil), source.Approvals...)
+	snapshot.Decisions = projectioncontract.CloneDecisions(source.Decisions)
+	snapshot.Approvals = projectioncontract.CloneApprovals(source.Approvals)
 	if entry.HasWorkspace {
 		snapshot.Workspace = workspaceWithSnapshotGovernance(entry.Workspace, snapshot)
 	}
@@ -254,7 +166,9 @@ func normalizedEntrySummarySnapshot(entry *workspaceProjectionEntry) readmodelco
 		return readmodelprojection.WorkspaceProjection().Summary(snapshot)
 	}
 	source := entry.Snapshot
-	snapshot.Outcome = source.Outcome
+	snapshot.DisplayOutcome = source.DisplayOutcome
+	snapshot.GovernanceDisplay = source.GovernanceDisplay
+	snapshot.ConsistencyDiagnostic = projectioncontract.CloneConsistencyDiagnostic(source.ConsistencyDiagnostic)
 	snapshot.CoverageSummary = cloneStringAnyMap(source.CoverageSummary)
 	snapshot.ConvergenceStatus = source.ConvergenceStatus
 	if source.RunCommand != nil {

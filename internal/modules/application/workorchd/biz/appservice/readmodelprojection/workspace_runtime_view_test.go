@@ -16,8 +16,8 @@ func TestSelectDisplayRunIDPriority(t *testing.T) {
 	t.Parallel()
 
 	snapshot := readmodelcore.WorkspaceSnapshotState{
-		Workspace: appmodelcore.Workspace{ID: "ws-1", ActiveRunID: "run-active"},
-		Outcome:   projectioncontract.WorkspaceOutcome{RunID: "run-outcome"},
+		Workspace:      appmodelcore.Workspace{ID: "ws-1", ActiveRunID: "run-active"},
+		DisplayOutcome: projectioncontract.WorkspaceDisplayOutcome{RunID: "run-outcome"},
 		TaskProgress: projectioncontract.TaskProgress{
 			RunID: "run-progress",
 		},
@@ -31,7 +31,7 @@ func TestSelectDisplayRunIDPriority(t *testing.T) {
 	}
 
 	snapshot.Workspace.ActiveRunID = ""
-	snapshot.Workspace.BlockingTicketID = "ticket-1"
+	snapshot.GovernanceDisplay = projectioncontract.GovernanceDisplay{PromptMode: "decision", RunID: "run-blocker", DecisionID: "ticket-1"}
 	snapshot.Decisions = []projectioncontract.Decision{{
 		ID:    "ticket-1",
 		RunID: "run-blocker",
@@ -41,13 +41,13 @@ func TestSelectDisplayRunIDPriority(t *testing.T) {
 		t.Fatalf("blocker display run = %q, want run-blocker", got)
 	}
 
-	snapshot.Workspace.BlockingTicketID = ""
+	snapshot.GovernanceDisplay = projectioncontract.GovernanceDisplay{}
 	snapshot.Decisions = nil
 	if got := selectDisplayRunID(snapshot); got != "run-outcome" {
 		t.Fatalf("outcome display run = %q, want run-outcome", got)
 	}
 
-	snapshot.Outcome.RunID = ""
+	snapshot.DisplayOutcome.RunID = ""
 	if got := selectDisplayRunID(snapshot); got != "run-progress" {
 		t.Fatalf("progress display run = %q, want run-progress", got)
 	}
@@ -215,7 +215,7 @@ func TestProjectWorkspaceRuntimeViewUsesRuntimeSummaryAndDisplayRun(t *testing.T
 			ID:    "run-runtime",
 			State: "running",
 		}},
-		Outcome: projectioncontract.WorkspaceOutcome{
+		DisplayOutcome: projectioncontract.WorkspaceDisplayOutcome{
 			WorkspaceID: "ws-runtime",
 			State:       "running",
 			RunID:       "run-runtime",
@@ -239,6 +239,78 @@ func TestProjectWorkspaceRuntimeViewUsesRuntimeSummaryAndDisplayRun(t *testing.T
 	if view.PromptMode != "running" {
 		t.Fatalf("prompt mode = %q", view.PromptMode)
 	}
+}
+
+func TestWorkspaceRuntimeViewBlockersRequireCanonicalRunReference(t *testing.T) {
+	t.Parallel()
+
+	t.Run("decision", func(t *testing.T) {
+		snapshot := readmodelcore.WorkspaceSnapshotState{
+			Workspace: appmodelcore.Workspace{ID: "ws-owner", State: "active", ActiveRunID: "run-owner"},
+			Run: &appmodelcore.Run{
+				ID:               "run-owner",
+				WorkspaceID:      "ws-owner",
+				State:            "blocked_on_decision",
+				BlockingTicketID: "ticket-owner",
+			},
+			GovernanceDisplay: projectioncontract.GovernanceDisplay{
+				PromptMode: "decision", RunID: "run-owner", DecisionID: "ticket-display",
+			},
+			Decisions: []projectioncontract.Decision{
+				{ID: "ticket-display", WorkspaceID: "ws-owner", RunID: "run-owner", State: "open"},
+				{ID: "ticket-owner", WorkspaceID: "ws-owner", RunID: "run-owner", State: "open"},
+			},
+		}
+
+		view := projectWorkspaceRuntimeView(snapshot, 10, "")
+		if view.BlockingDecision == nil || view.BlockingDecision.ID != "ticket-owner" {
+			t.Fatalf("blocking decision = %+v, want exact canonical Run blocker ticket-owner", view.BlockingDecision)
+		}
+
+		snapshot.Run.BlockingTicketID = ""
+		if got := projectWorkspaceRuntimeView(snapshot, 10, "").BlockingDecision; got != nil {
+			t.Fatalf("display-only decision selected mutation resource: %+v", got)
+		}
+		snapshot.Run.BlockingTicketID = "ticket-owner"
+		snapshot.Run.State = "active"
+		if got := projectWorkspaceRuntimeView(snapshot, 10, "").BlockingDecision; got != nil {
+			t.Fatalf("non-blocked canonical Run selected decision resource: %+v", got)
+		}
+	})
+
+	t.Run("approval", func(t *testing.T) {
+		snapshot := readmodelcore.WorkspaceSnapshotState{
+			Workspace: appmodelcore.Workspace{ID: "ws-owner", State: "blocked_on_approval", ActiveRunID: "run-owner"},
+			Run: &appmodelcore.Run{
+				ID:                 "run-owner",
+				WorkspaceID:        "ws-owner",
+				State:              "blocked_on_approval",
+				BlockingApprovalID: "approval-owner",
+			},
+			GovernanceDisplay: projectioncontract.GovernanceDisplay{
+				PromptMode: "approval", RunID: "run-owner", ApprovalID: "approval-display",
+			},
+			Approvals: []projectioncontract.Approval{
+				{ID: "approval-display", WorkspaceID: "ws-owner", RunID: "run-owner", State: "pending"},
+				{ID: "approval-owner", WorkspaceID: "ws-owner", RunID: "run-owner", State: "pending"},
+			},
+		}
+
+		view := projectWorkspaceRuntimeView(snapshot, 10, "")
+		if view.BlockingApproval == nil || view.BlockingApproval.ID != "approval-owner" {
+			t.Fatalf("blocking approval = %+v, want exact canonical Run blocker approval-owner", view.BlockingApproval)
+		}
+
+		snapshot.Run.BlockingApprovalID = ""
+		if got := projectWorkspaceRuntimeView(snapshot, 10, "").BlockingApproval; got != nil {
+			t.Fatalf("display-only approval selected mutation resource: %+v", got)
+		}
+		snapshot.Run.BlockingApprovalID = "approval-owner"
+		snapshot.Run.State = "active"
+		if got := projectWorkspaceRuntimeView(snapshot, 10, "").BlockingApproval; got != nil {
+			t.Fatalf("non-blocked canonical Run selected approval resource: %+v", got)
+		}
+	})
 }
 
 func TestProjectWorkspaceRuntimeViewKeepsOnlyDisplayRunSemanticPlanningAtRuntimeRevision(t *testing.T) {
@@ -292,10 +364,8 @@ func TestDeriveChangedSectionsForDetail(t *testing.T) {
 	t.Parallel()
 
 	snapshot := readmodelcore.WorkspaceSnapshotState{
-		Workspace: appmodelcore.Workspace{
-			ID:               "ws-sections",
-			BlockingTicketID: "ticket-1",
-		},
+		Workspace:         appmodelcore.Workspace{ID: "ws-sections"},
+		GovernanceDisplay: projectioncontract.GovernanceDisplay{PromptMode: "decision", DecisionID: "ticket-1"},
 		TaskProgress: projectioncontract.TaskProgress{
 			Runtime: &projectioncontract.RuntimeProgress{StateRevision: 1},
 		},
@@ -346,13 +416,12 @@ func TestRuntimeProgressSummaryChangesWithRevision(t *testing.T) {
 func TestDiffWorkspaceProjectionSectionsDetectsSameLengthContentMutation(t *testing.T) {
 	previous := readmodelcore.WorkspaceSnapshotState{
 		Workspace: appmodelcore.Workspace{
-			ID:                 "ws-diff",
-			Title:              "diff",
-			State:              "active",
-			ActiveRunID:        "run-1",
-			BlockingTicketID:   "ticket-1",
-			BlockingApprovalID: "",
+			ID:          "ws-diff",
+			Title:       "diff",
+			State:       "active",
+			ActiveRunID: "run-1",
 		},
+		GovernanceDisplay: projectioncontract.GovernanceDisplay{PromptMode: "decision", RunID: "run-1", DecisionID: "ticket-1"},
 		Decisions: []projectioncontract.Decision{{
 			ID: "ticket-1", WorkspaceID: "ws-diff", RunID: "run-1", State: "open", Question: "choose path?",
 		}},
@@ -434,8 +503,9 @@ func TestDiffWorkspaceProjectionSectionsDetectsFullDisplayFieldMutations(t *test
 	}
 	previous := readmodelcore.WorkspaceSnapshotState{
 		Workspace: appmodelcore.Workspace{
-			ID: "ws-diff-full", Title: "diff", State: "active", ActiveRunID: "run-1", BlockingTicketID: "ticket-1",
+			ID: "ws-diff-full", Title: "diff", State: "active", ActiveRunID: "run-1",
 		},
+		GovernanceDisplay: projectioncontract.GovernanceDisplay{PromptMode: "decision", RunID: "run-1", DecisionID: "ticket-1"},
 		Decisions: []projectioncontract.Decision{{
 			ID: "ticket-1", WorkspaceID: "ws-diff-full", RunID: "run-1", State: "open",
 			Question: "choose path?", Reason: "need choice",
@@ -558,11 +628,11 @@ func DeriveChangedSections(changeKind string, snapshot readmodelcore.WorkspaceSn
 			add("evidence")
 		}
 		if len(snapshot.Decisions) > 0 || len(snapshot.Approvals) > 0 ||
-			strings.TrimSpace(snapshot.Workspace.BlockingTicketID) != "" ||
-			strings.TrimSpace(snapshot.Workspace.BlockingApprovalID) != "" {
+			strings.TrimSpace(snapshot.GovernanceDisplay.DecisionID) != "" ||
+			strings.TrimSpace(snapshot.GovernanceDisplay.ApprovalID) != "" {
 			add("governance")
 		}
-		if strings.TrimSpace(snapshot.Outcome.State) != "" || len(snapshot.Results) > 0 {
+		if strings.TrimSpace(snapshot.DisplayOutcome.State) != "" || len(snapshot.Results) > 0 {
 			add("result")
 		}
 		if len(snapshot.Artifacts) > 0 || len(snapshot.Patches) > 0 {

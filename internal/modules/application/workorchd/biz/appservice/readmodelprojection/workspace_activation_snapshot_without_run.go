@@ -11,7 +11,7 @@ func activationSnapshotWithoutRun(projectedWorkspace appmodelcore.Workspace, goa
 		Workspace: projectedWorkspace,
 	}
 	applyActivationDefinitions(&ret, goal, dod)
-	ret.Outcome = mapWorkspaceOutcome(ret)
+	ret.DisplayOutcome = mapWorkspaceOutcome(ret)
 	return ret
 }
 

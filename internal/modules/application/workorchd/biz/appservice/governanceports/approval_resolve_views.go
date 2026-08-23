@@ -28,6 +28,9 @@ func ResolveApprovalViewWithCommand(ctx context.Context, hub magicevent.Hub, tra
 	if err != nil {
 		return workorchprojectioncontract.Approval{}, err
 	}
+	if err := admitApprovalMutation(ctx, hub, existing, action, scope); err != nil {
+		return workorchprojectioncontract.Approval{}, err
+	}
 	resolutionContext := governancecore.WithApprovalSemanticPayload(cmd.Payload, semantic, approvalSemanticSource(cmd.Payload))
 	item, err := ResolveApprovalItemWithContext(ctx, hub, existing, action, resolutionContext)
 	if err != nil {

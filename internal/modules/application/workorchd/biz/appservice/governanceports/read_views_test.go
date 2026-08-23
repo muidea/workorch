@@ -102,6 +102,9 @@ func TestResolveDecisionViewResolvesOpenTicket(t *testing.T) {
 	testHub := newGovernanceMagicTestHub(t)
 	hub := testHub.rawHub
 	workspaceID := common.WorkspaceID("ws-governance-read")
+	testHub.subscribeCanonicalGovernance(governanceCanonicalFixture{
+		WorkspaceID: workspaceID, RunID: "run-001", RunState: common.RunStateBlockedOnDecision, BlockingTicketID: "ticket-001",
+	})
 	testHub.subscribeDecision(decisionevents.TopicDecisionCommandGetTicket, func(data any) any {
 		cmd, ok := data.(decisionevents.GetTicketCommand)
 		if !ok {
@@ -162,6 +165,9 @@ func TestResolveDecisionViewNormalizesRuntimeReplanToAllowedContinuation(t *test
 	testHub := newGovernanceMagicTestHub(t)
 	hub := testHub.rawHub
 	workspaceID := common.WorkspaceID("ws-governance-runtime-replan")
+	testHub.subscribeCanonicalGovernance(governanceCanonicalFixture{
+		WorkspaceID: workspaceID, RunID: "run-runtime-replan", RunState: common.RunStateBlockedOnDecision, BlockingTicketID: "ticket-runtime-replan",
+	})
 	testHub.subscribeDecision(decisionevents.TopicDecisionCommandGetTicket, func(data any) any {
 		cmd, ok := data.(decisionevents.GetTicketCommand)
 		if !ok || cmd.WorkspaceID != workspaceID || cmd.TicketID != "ticket-runtime-replan" {
@@ -213,6 +219,9 @@ func TestResolveDecisionViewReturnsActionableConflictForUnsupportedRuntimeReplan
 	ctx := context.Background()
 	testHub := newGovernanceMagicTestHub(t)
 	hub := testHub.rawHub
+	testHub.subscribeCanonicalGovernance(governanceCanonicalFixture{
+		WorkspaceID: "ws-governance-runtime-replan-conflict", RunID: "run-runtime-replan-conflict", RunState: common.RunStateBlockedOnDecision, BlockingTicketID: "ticket-runtime-replan-conflict",
+	})
 	testHub.subscribeDecision(decisionevents.TopicDecisionCommandGetTicket, func(data any) any {
 		return decisionevents.GetTicketResult{Ticket: &decisionmodel.Ticket{
 			ID:                     "ticket-runtime-replan-conflict",
@@ -259,6 +268,9 @@ func TestResolveDecisionViewRejectsNonSemanticMissingInfoPayload(t *testing.T) {
 			testHub := newGovernanceMagicTestHub(t)
 			hub := testHub.rawHub
 			workspaceID := common.WorkspaceID("ws-governance-invalid-missing-info")
+			testHub.subscribeCanonicalGovernance(governanceCanonicalFixture{
+				WorkspaceID: workspaceID, RunID: "run-invalid-missing-info", RunState: common.RunStateBlockedOnDecision, BlockingTicketID: "ticket-invalid-missing-info",
+			})
 			testHub.subscribeDecision(decisionevents.TopicDecisionCommandGetTicket, func(data any) any {
 				cmd, ok := data.(decisionevents.GetTicketCommand)
 				if !ok {
@@ -332,6 +344,9 @@ func TestResolveDecisionViewWithoutScopeUsesDirectOwnerLookup(t *testing.T) {
 	ctx := context.Background()
 	testHub := newGovernanceMagicTestHub(t)
 	hub := testHub.rawHub
+	testHub.subscribeCanonicalGovernance(governanceCanonicalFixture{
+		WorkspaceID: "ws-current", RunID: "run-002", RunState: common.RunStateBlockedOnDecision, BlockingTicketID: "ticket-unique",
+	})
 	testHub.subscribeDecision(decisionevents.TopicDecisionCommandGetTicket, func(data any) any {
 		cmd, ok := data.(decisionevents.GetTicketCommand)
 		if !ok {
@@ -372,25 +387,33 @@ func TestResolveDecisionViewWithoutScopeUsesDirectOwnerLookup(t *testing.T) {
 	}
 }
 
-func TestBatchResolveDecisionViewsReadsTicketsWithExplicitScope(t *testing.T) {
+func TestBatchResolveDecisionViewsUsesCanonicalTargetsAcrossWorkspaces(t *testing.T) {
 	ctx := context.Background()
 	testHub := newGovernanceMagicTestHub(t)
 	hub := testHub.rawHub
-	workspaceID := common.WorkspaceID("ws-governance-scope")
 	ticketIDs := []string{"ticket-scope-001", "ticket-scope-002"}
+	fixtures := map[common.TicketID]governanceCanonicalFixture{
+		"ticket-scope-001": {WorkspaceID: "ws-governance-scope-a", RunID: "run-scope-a", RunState: common.RunStateBlockedOnDecision, BlockingTicketID: "ticket-scope-001"},
+		"ticket-scope-002": {WorkspaceID: "ws-governance-scope-b", RunID: "run-scope-b", RunState: common.RunStateBlockedOnDecision, BlockingTicketID: "ticket-scope-002"},
+	}
+	testHub.subscribeCanonicalGovernance(fixtures["ticket-scope-001"], fixtures["ticket-scope-002"])
 	testHub.subscribeDecision(decisionevents.TopicDecisionCommandGetTicket, func(data any) any {
 		cmd, ok := data.(decisionevents.GetTicketCommand)
 		if !ok {
 			t.Fatalf("command payload type = %T, want GetTicketCommand", data)
 		}
-		if cmd.WorkspaceID != workspaceID {
-			t.Fatalf("get ticket command workspace = %q, want %s", cmd.WorkspaceID, workspaceID)
+		if cmd.WorkspaceID != "" {
+			t.Fatalf("get ticket command workspace = %q, want unscoped batch read", cmd.WorkspaceID)
+		}
+		fixture, ok := fixtures[cmd.TicketID]
+		if !ok {
+			t.Fatalf("unexpected ticket ID %q", cmd.TicketID)
 		}
 		return decisionevents.GetTicketResult{
 			Ticket: &decisionmodel.Ticket{
 				ID:          cmd.TicketID,
-				WorkspaceID: workspaceID,
-				RunID:       "run-001",
+				WorkspaceID: fixture.WorkspaceID,
+				RunID:       fixture.RunID,
 				State:       common.DecisionTicketStateOpen,
 			},
 		}
@@ -402,8 +425,9 @@ func TestBatchResolveDecisionViewsReadsTicketsWithExplicitScope(t *testing.T) {
 		if !ok {
 			t.Fatalf("command payload type = %T, want EnsureResolvedCommand", data)
 		}
-		if cmd.WorkspaceID != workspaceID || cmd.RunID != "run-001" {
-			t.Fatalf("decision command scope = workspace:%q run:%q, want %s/run-001", cmd.WorkspaceID, cmd.RunID, workspaceID)
+		fixture := fixtures[cmd.TicketID]
+		if cmd.WorkspaceID != fixture.WorkspaceID || cmd.RunID != fixture.RunID {
+			t.Fatalf("decision command scope = workspace:%q run:%q, want %s/%s", cmd.WorkspaceID, cmd.RunID, fixture.WorkspaceID, fixture.RunID)
 		}
 		ticket := &decisionmodel.Ticket{ID: cmd.TicketID, WorkspaceID: cmd.WorkspaceID, RunID: cmd.RunID, State: common.DecisionTicketStateResolved}
 		resolution := &decisionmodel.Resolution{ID: cmd.ResolutionID, TicketID: cmd.TicketID, Type: cmd.Type, Payload: workorcheventpayload.New(cmd.Payload...)}
@@ -413,7 +437,7 @@ func TestBatchResolveDecisionViewsReadsTicketsWithExplicitScope(t *testing.T) {
 		TicketIDs:         ticketIDs,
 		ResolutionType:    "provide_missing_info",
 		ResolutionPayload: mustGovernancePayload(t, map[string]any{"answer": "resume"}),
-	}, workspaceID)
+	}, "")
 	if err != nil {
 		t.Fatalf("BatchResolveDecisionViews err = %v", err)
 	}
@@ -424,7 +448,7 @@ func TestBatchResolveDecisionViewsReadsTicketsWithExplicitScope(t *testing.T) {
 		t.Fatalf("resolved count = %d, want 2", resolvedCount)
 	}
 	for idx, item := range items {
-		if item.ID != ticketIDs[idx] || item.WorkspaceID != string(workspaceID) || item.State != string(common.DecisionTicketStateResolved) {
+		if item.ID != ticketIDs[idx] || item.WorkspaceID != string(fixtures[common.TicketID(ticketIDs[idx])].WorkspaceID) || item.State != string(common.DecisionTicketStateResolved) {
 			t.Fatalf("item[%d] = %+v, want resolved %s", idx, item, ticketIDs[idx])
 		}
 	}
@@ -434,15 +458,20 @@ func TestBatchResolveDecisionViewsRejectsMixedAllowedActionsBeforeWrites(t *test
 	ctx := context.Background()
 	testHub := newGovernanceMagicTestHub(t)
 	hub := testHub.rawHub
-	workspaceID := common.WorkspaceID("ws-governance-actions")
+	fixtures := map[common.TicketID]governanceCanonicalFixture{
+		"ticket-action-a": {WorkspaceID: "ws-governance-actions-a", RunID: "run-actions-a", RunState: common.RunStateBlockedOnDecision, BlockingTicketID: "ticket-action-a"},
+		"ticket-action-b": {WorkspaceID: "ws-governance-actions-b", RunID: "run-actions-b", RunState: common.RunStateBlockedOnDecision, BlockingTicketID: "ticket-action-b"},
+	}
+	testHub.subscribeCanonicalGovernance(fixtures["ticket-action-a"], fixtures["ticket-action-b"])
 	testHub.subscribeDecision(decisionevents.TopicDecisionCommandGetTicket, func(data any) any {
 		cmd := data.(decisionevents.GetTicketCommand)
+		fixture := fixtures[cmd.TicketID]
 		actions := []string{"provide_missing_info"}
 		if cmd.TicketID == "ticket-action-b" {
 			actions = []string{"replan"}
 		}
 		return decisionevents.GetTicketResult{Ticket: &decisionmodel.Ticket{
-			ID: cmd.TicketID, WorkspaceID: workspaceID, RunID: "run-actions", State: common.DecisionTicketStateOpen,
+			ID: cmd.TicketID, WorkspaceID: fixture.WorkspaceID, RunID: fixture.RunID, State: common.DecisionTicketStateOpen,
 			AllowedRecoveryActions: actions,
 		}}
 	})
@@ -454,7 +483,7 @@ func TestBatchResolveDecisionViewsRejectsMixedAllowedActionsBeforeWrites(t *test
 	_, err := BatchResolveDecisionViews(ctx, hub, nil, appmodelcore.BatchResolveDecisionCommand{
 		TicketIDs: []string{"ticket-action-a", "ticket-action-b"}, ResolutionType: "provide_missing_info",
 		ResolutionPayload: mustGovernancePayload(t, map[string]any{"answer": "continue"}),
-	}, workspaceID)
+	}, "")
 	if !errors.Is(err, common.ErrConflict) {
 		t.Fatalf("mixed allowed action batch err = %v, want ticket action conflict", err)
 	}
@@ -558,6 +587,9 @@ func TestResolveApprovalViewReadsApprovalWithExplicitScope(t *testing.T) {
 	testHub := newGovernanceMagicTestHub(t)
 	hub := testHub.rawHub
 	workspaceID := common.WorkspaceID("ws-governance-scope")
+	testHub.subscribeCanonicalGovernance(governanceCanonicalFixture{
+		WorkspaceID: workspaceID, RunID: "run-001", RunState: common.RunStateBlockedOnApproval, BlockingApprovalID: "approval-scope-001",
+	})
 	testHub.subscribeApproval(approvalevents.TopicApprovalCommandListByWorkspace, func(data any) approvalTestCommandResult {
 		cmd, ok := data.(approvalevents.ListApprovalsByWorkspaceCommand)
 		if !ok {
@@ -607,6 +639,9 @@ func TestResolveApprovalViewWithCommandPublishesGovernanceSemanticContext(t *tes
 	testHub := newGovernanceMagicTestHub(t)
 	hub := testHub.rawHub
 	workspaceID := common.WorkspaceID("ws-approval-semantic")
+	testHub.subscribeCanonicalGovernance(governanceCanonicalFixture{
+		WorkspaceID: workspaceID, RunID: "run-approval-semantic", RunState: common.RunStateBlockedOnApproval, BlockingApprovalID: "approval-semantic-001",
+	})
 	testHub.subscribeApproval(approvalevents.TopicApprovalCommandListByWorkspace, func(data any) approvalTestCommandResult {
 		_, ok := data.(approvalevents.ListApprovalsByWorkspaceCommand)
 		if !ok {
@@ -670,6 +705,9 @@ func TestResolveApprovalViewWithoutScopeResolvesUniquePendingApproval(t *testing
 	testHub := newGovernanceMagicTestHub(t)
 	hub := testHub.rawHub
 	workspaceID := common.WorkspaceID("ws-approval-unique")
+	testHub.subscribeCanonicalGovernance(governanceCanonicalFixture{
+		WorkspaceID: workspaceID, RunID: "run-approval-unique", RunState: common.RunStateBlockedOnApproval, BlockingApprovalID: "approval-unique",
+	})
 	testHub.subscribeApproval(approvalevents.TopicApprovalCommandList, func(data any) approvalTestCommandResult {
 		if _, ok := data.(approvalevents.ListAllApprovalsCommand); !ok {
 			t.Fatalf("command payload type = %T, want ListAllApprovalsCommand", data)
@@ -748,24 +786,28 @@ func TestResolveApprovalViewWithoutScopeConflictsOnDuplicatePendingApprovals(t *
 	}
 }
 
-func TestBatchResolveApprovalViewsApprovesPendingItems(t *testing.T) {
+func TestBatchResolveApprovalViewsApprovesCanonicalTargetsAcrossWorkspaces(t *testing.T) {
 	ctx := context.Background()
 	testHub := newGovernanceMagicTestHub(t)
 	hub := testHub.rawHub
-	workspaceID := common.WorkspaceID("ws-governance-read")
 	approvalIDs := []string{"approval-001", "approval-002"}
-	testHub.subscribeApproval(approvalevents.TopicApprovalCommandListByWorkspace, func(data any) approvalTestCommandResult {
-		cmd, ok := data.(approvalevents.ListApprovalsByWorkspaceCommand)
+	fixtures := map[common.ApprovalID]governanceCanonicalFixture{
+		"approval-001": {WorkspaceID: "ws-governance-approval-a", RunID: "run-approval-a", RunState: common.RunStateBlockedOnApproval, BlockingApprovalID: "approval-001"},
+		"approval-002": {WorkspaceID: "ws-governance-approval-b", RunID: "run-approval-b", RunState: common.RunStateBlockedOnApproval, BlockingApprovalID: "approval-002"},
+	}
+	testHub.subscribeCanonicalGovernance(fixtures["approval-001"], fixtures["approval-002"])
+	testHub.subscribeApproval(approvalevents.TopicApprovalCommandList, func(data any) approvalTestCommandResult {
+		cmd, ok := data.(approvalevents.ListAllApprovalsCommand)
 		if !ok {
-			t.Fatalf("command payload type = %T, want ListApprovalsByWorkspaceCommand", data)
+			t.Fatalf("command payload type = %T, want ListAllApprovalsCommand", data)
 		}
-		if cmd.WorkspaceID != workspaceID {
-			t.Fatalf("get approval command workspace = %q, want %s", cmd.WorkspaceID, workspaceID)
+		if cmd.Scope != approvalevents.ApprovalListScopeAll {
+			t.Fatalf("approval list scope = %q, want all", cmd.Scope)
 		}
 		return approvalTestCommandResult{
 			Approvals: []*approvalmodel.Approval{
-				{ID: common.ApprovalID(approvalIDs[0]), WorkspaceID: workspaceID, RunID: "run-001", State: common.ApprovalStatePending},
-				{ID: common.ApprovalID(approvalIDs[1]), WorkspaceID: workspaceID, RunID: "run-001", State: common.ApprovalStatePending},
+				{ID: common.ApprovalID(approvalIDs[0]), WorkspaceID: fixtures["approval-001"].WorkspaceID, RunID: fixtures["approval-001"].RunID, State: common.ApprovalStatePending},
+				{ID: common.ApprovalID(approvalIDs[1]), WorkspaceID: fixtures["approval-002"].WorkspaceID, RunID: fixtures["approval-002"].RunID, State: common.ApprovalStatePending},
 			},
 		}
 	})
@@ -777,14 +819,15 @@ func TestBatchResolveApprovalViewsApprovesPendingItems(t *testing.T) {
 			t.Fatalf("command payload type = %T, want EnsureApprovedCommand", data)
 		}
 		approvalID := cmd.ApprovalID
-		if cmd.WorkspaceID != workspaceID || cmd.RunID != "run-001" {
-			t.Fatalf("approval command scope = workspace:%q run:%q, want %s/run-001", cmd.WorkspaceID, cmd.RunID, workspaceID)
+		fixture := fixtures[approvalID]
+		if cmd.WorkspaceID != fixture.WorkspaceID || cmd.RunID != fixture.RunID {
+			t.Fatalf("approval command scope = workspace:%q run:%q, want %s/%s", cmd.WorkspaceID, cmd.RunID, fixture.WorkspaceID, fixture.RunID)
 		}
 		return approvalTestCommandResult{
 			Approval: &approvalmodel.Approval{
 				ID:          approvalID,
-				WorkspaceID: workspaceID,
-				RunID:       "run-001",
+				WorkspaceID: fixture.WorkspaceID,
+				RunID:       fixture.RunID,
 				State:       common.ApprovalStateApproved,
 			},
 		}
@@ -793,7 +836,7 @@ func TestBatchResolveApprovalViewsApprovesPendingItems(t *testing.T) {
 	items, err := BatchResolveApprovalViews(ctx, hub, nil, appmodelcore.BatchResolveApprovalCommand{
 		ApprovalIDs: approvalIDs,
 		Action:      "approve",
-	}, workspaceID)
+	}, "")
 	if err != nil {
 		t.Fatalf("BatchResolveApprovalViews err = %v", err)
 	}

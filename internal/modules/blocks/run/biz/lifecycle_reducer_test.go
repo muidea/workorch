@@ -267,7 +267,7 @@ func TestReduceContinuationEligibleRequiresMatchingTicket(t *testing.T) {
 
 		RuntimeBootstrap:      &runtimecontract.RuntimeBootstrap{},
 		RuntimeState:          &runtimecontract.RuntimeStateRecord{StateRevision: 3},
-		RuntimeLifecycleFence: &runtimecontract.RuntimeOpaqueLifecycleFence{WorkspaceID: "ws-1", RunID: "run-1", RuntimeStateRevision: 3, GovernanceFenceID: "runtime-governance/auth-1/dispatch-1"},
+		RuntimeLifecycleFence: &runtimecontract.RuntimeOpaqueLifecycleFence{WorkspaceID: "ws-1", RunID: "run-1", RuntimeStateRevision: 3, GovernanceFenceID: "runtime-governance/auth-1/dispatch-1", GovernanceResolutionID: "res-1"},
 	}
 	_, err := reduceContinuationEligible(current, runevents.RuntimeContinuationEligibleFact{
 		WorkspaceID: "ws-1", RunID: "run-1", SourceOwner: "kernel/orchestrator",
@@ -282,6 +282,56 @@ func TestReduceContinuationEligibleRequiresMatchingTicket(t *testing.T) {
 	})
 	if err != nil || tr.Target != common.RunStateActive {
 		t.Fatalf("transition=%+v err=%v", tr, err)
+	}
+}
+
+func TestReduceContinuationEligibleRequiresExactPersistedResolutionBeforeActiveNoop(t *testing.T) {
+	current := &runmodel.Run{
+		ID: "run-1", WorkspaceID: "ws-1", State: common.RunStateActive,
+		RuntimeBootstrap: &runtimecontract.RuntimeBootstrap{},
+		RuntimeState:     &runtimecontract.RuntimeStateRecord{StateRevision: 3},
+		RuntimeLifecycleFence: &runtimecontract.RuntimeOpaqueLifecycleFence{
+			WorkspaceID: "ws-1", RunID: "run-1", RuntimeStateRevision: 3,
+			GovernanceFenceID: "runtime-governance/auth-1/dispatch-1", GovernanceResolutionID: "resolution-current",
+		},
+	}
+	fact := runevents.RuntimeContinuationEligibleFact{
+		WorkspaceID: "ws-1", RunID: "run-1", SourceOwner: "kernel/orchestrator",
+		CausationID: "cause-current", AuthoritySnapshotID: "auth-1", DefinitionRevision: "def-1", EvidenceRevision: "evidence-1",
+		DispatchID: "dispatch-1", ResolutionID: "resolution-stale", TicketID: "ticket-1",
+	}
+	if transition, err := reduceContinuationEligible(current, fact); !errors.Is(err, common.ErrConflict) || transition.Noop {
+		t.Fatalf("stale resolution transition=%+v err=%v", transition, err)
+	}
+	fact.ResolutionID = "resolution-current"
+	fact.CausationID = "cause-current-exact"
+	current.RuntimeLifecycleFence.TerminalFenceID = "terminal-conflict"
+	if transition, err := reduceContinuationEligible(current, fact); !errors.Is(err, common.ErrConflict) || transition.Noop {
+		t.Fatalf("dual-mode fence transition=%+v err=%v", transition, err)
+	}
+	current.RuntimeLifecycleFence.TerminalFenceID = ""
+	transition, err := reduceContinuationEligible(current, fact)
+	if err != nil || !transition.Noop {
+		t.Fatalf("exact active duplicate transition=%+v err=%v", transition, err)
+	}
+}
+
+func TestReduceGovernanceWaitRejectsFenceWithResolution(t *testing.T) {
+	current := &runmodel.Run{
+		ID: "run-1", WorkspaceID: "ws-1", State: common.RunStateActive,
+		RuntimeBootstrap: &runtimecontract.RuntimeBootstrap{},
+		RuntimeState:     &runtimecontract.RuntimeStateRecord{StateRevision: 3},
+		RuntimeLifecycleFence: &runtimecontract.RuntimeOpaqueLifecycleFence{
+			WorkspaceID: "ws-1", RunID: "run-1", RuntimeStateRevision: 3,
+			GovernanceFenceID: "runtime-governance/auth-1/dispatch-1", GovernanceResolutionID: "resolution-old",
+		},
+	}
+	fact := runevents.RuntimeGovernanceWaitFact{
+		WorkspaceID: "ws-1", RunID: "run-1", SourceOwner: "kernel/orchestrator", CausationID: "cause-wait",
+		AuthoritySnapshotID: "auth-1", DefinitionRevision: "def-1", EvidenceRevision: "evidence-1", DispatchID: "dispatch-1", BlockingTicketID: "ticket-1",
+	}
+	if transition, err := reduceGovernanceWait(current, fact); !errors.Is(err, common.ErrConflict) || transition.Noop {
+		t.Fatalf("resolved fence accepted as wait transition=%+v err=%v", transition, err)
 	}
 }
 
@@ -301,6 +351,9 @@ func TestReduceApprovalGovernanceWaitAndContinuation(t *testing.T) {
 		t.Fatalf("approval wait transition=%+v err=%v", blocked, err)
 	}
 	current = applyLifecycleTransition(current, blocked)
+	// The Orchestrator persists its resolution aggregate and exact opaque
+	// lifecycle fence before delivering the continuation fact.
+	current.RuntimeLifecycleFence.GovernanceResolutionID = "resolution-1"
 	continued, err := reduceContinuationEligible(current, runevents.RuntimeContinuationEligibleFact{
 		WorkspaceID: "ws-1", RunID: "run-1", SourceOwner: "kernel/orchestrator",
 		CausationID: "cause-resolution", AuthoritySnapshotID: "auth-1", DefinitionRevision: "def-1", EvidenceRevision: "evidence-1", DispatchID: "dispatch-1", ResolutionID: "resolution-1", ApprovalID: "approval-1",

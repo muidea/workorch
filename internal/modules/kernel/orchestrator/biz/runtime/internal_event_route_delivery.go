@@ -42,7 +42,7 @@ func (c *RuntimeController) applyDeliveryInternalEvent(ctx context.Context, even
 		if event.Delivery.DriveLease == nil {
 			return result, common.ErrInvalidArgument
 		}
-		aggregate, lease, changed, err := c.driveDelivery.scheduleDriveLease(ctx, event.Scope.WorkspaceID, event.Scope.RunID, *event.Delivery.DriveLease)
+		aggregate, lease, changed, err := c.driveDelivery.scheduleDriveLease(ctx, event.Scope.WorkspaceID, event.Scope.RunID, *event.Delivery.DriveLease, event.Delivery.LeaseGeneration)
 		result.Aggregate, result.LeaseChanged = aggregate, changed
 		if lease.WorkspaceID != "" {
 			result.DriveLease = &lease

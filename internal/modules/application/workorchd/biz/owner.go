@@ -178,7 +178,7 @@ func (b *Biz) handleWorkspaceProjectionChanged(event magicevent.Event, _ magicev
 // must not become the metric fact source.
 func (b *Biz) handleRunStateChanged(event magicevent.Event, _ magicevent.Result) {
 	data, ok := event.Data().(runevents.RunStateChangedData)
-	if ok && b != nil && b.service != nil {
+	if ok && event.Source() == "blocks/run" && data.Validate() == nil && b != nil && b.service != nil {
 		b.service.RecordRunStateChanged(event.Context(), data)
 	}
 }

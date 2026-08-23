@@ -36,8 +36,8 @@ func BatchResolveApprovalViews(ctx context.Context, hub magicevent.Hub, traces g
 		if err := governancecore.EnsureApprovalWorkspaceScope(scope, r.item); err != nil {
 			return nil, err
 		}
-		if r.item.State != common.ApprovalStatePending {
-			return nil, common.ErrConflict
+		if err := admitApprovalMutation(ctx, hub, r.item, action, scope); err != nil {
+			return nil, err
 		}
 	}
 

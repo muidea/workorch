@@ -972,8 +972,9 @@ func workspaceTaskDecompositionsFromSnapshots(snapshot readmodelcore.WorkspaceSn
 func workspaceSnapshotWithRunSnapshot(snapshot readmodelcore.WorkspaceSnapshotState, runSnapshot *readmodelcore.RunSnapshotState) readmodelcore.WorkspaceSnapshotState {
 	ret := snapshot
 	if runSnapshot == nil {
-		ret.Outcome = mapWorkspaceOutcome(ret)
+		ret.DisplayOutcome = mapWorkspaceOutcome(ret)
 		ret.RunHeartbeat = mapRunHeartbeat(ret)
+		ret = normalizeWorkspaceGovernanceProjection(ret)
 		return workspaceSnapshotWithContextBundle(ret)
 	}
 
@@ -1004,12 +1005,13 @@ func workspaceSnapshotWithRunSnapshot(snapshot readmodelcore.WorkspaceSnapshotSt
 	ret.LLMContextBudgetSummary = runSnapshot.LLMContextBudgetSummary
 	ret.LLMUsageTraces = mergeWorkspaceLLMUsageTraces(ret.LLMUsageTraces, runSnapshot.LLMUsageTraces)
 	ret.LLMUsageSummary = summarizeLLMUsage(ret.LLMUsageTraces)
-	ret.Outcome = mapWorkspaceOutcome(ret)
+	ret.DisplayOutcome = mapWorkspaceOutcome(ret)
 	if runSnapshot.TaskProgress.WorkspaceID != "" {
 		ret.TaskProgress = runSnapshot.TaskProgress
 	}
 	ret.RunHeartbeat = mapRunHeartbeat(ret)
 	ret.ConvergenceStatus = mapWorkspaceConvergenceStatus(ret)
+	ret = normalizeWorkspaceGovernanceProjection(ret)
 	bundle := mapRunContextBundle(*runSnapshot)
 	ret.ContextBundle = &bundle
 	return ret

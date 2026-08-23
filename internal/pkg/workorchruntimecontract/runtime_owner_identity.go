@@ -136,7 +136,11 @@ type RuntimeOpaqueLifecycleFence struct {
 	RuntimeStateHash     string
 	BootstrapHash        string
 	GovernanceFenceID    string
-	TerminalFenceID      string
+	// GovernanceResolutionID is empty for an unresolved governance wait and
+	// carries the exact persisted resolution for a continuation handoff. Run
+	// treats it as an opaque equality fence; it never decodes Runtime authority.
+	GovernanceResolutionID common.ResolutionID
+	TerminalFenceID        string
 }
 
 func (v RuntimeOpaqueLifecycleFence) Normalized() RuntimeOpaqueLifecycleFence {
@@ -144,6 +148,7 @@ func (v RuntimeOpaqueLifecycleFence) Normalized() RuntimeOpaqueLifecycleFence {
 	v.RuntimeStateHash = strings.TrimSpace(v.RuntimeStateHash)
 	v.BootstrapHash = strings.TrimSpace(v.BootstrapHash)
 	v.GovernanceFenceID = strings.TrimSpace(v.GovernanceFenceID)
+	v.GovernanceResolutionID = common.ResolutionID(strings.TrimSpace(string(v.GovernanceResolutionID)))
 	v.TerminalFenceID = strings.TrimSpace(v.TerminalFenceID)
 	return v
 }
@@ -153,8 +158,11 @@ func (v RuntimeOpaqueLifecycleFence) Validate() error {
 	if v.WorkspaceID == "" || v.RunID == "" || v.RuntimeStateRevision == 0 || v.RuntimeStateRef == "" || v.RuntimeStateHash == "" || v.BootstrapHash == "" {
 		return fmt.Errorf("runtime opaque lifecycle fence requires scope, state and bootstrap identity")
 	}
-	if v.GovernanceFenceID == "" && v.TerminalFenceID == "" {
-		return fmt.Errorf("runtime opaque lifecycle fence requires governance or terminal identity")
+	if (v.GovernanceFenceID == "") == (v.TerminalFenceID == "") {
+		return fmt.Errorf("runtime opaque lifecycle fence requires exactly one governance or terminal identity")
+	}
+	if v.GovernanceResolutionID != "" && v.GovernanceFenceID == "" {
+		return fmt.Errorf("runtime opaque lifecycle fence resolution requires governance identity")
 	}
 	return nil
 }

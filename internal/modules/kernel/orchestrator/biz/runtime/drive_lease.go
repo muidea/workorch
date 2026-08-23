@@ -13,7 +13,13 @@ import (
 // scheduleDriveLease records the only durable authority that may later cause
 // an SM-4 recovery drive. A duplicate for the same aggregate revision and
 // failure signature is a pure read: it must not create another timer chain.
-func (c *driveDeliveryComponent) scheduleDriveLease(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, requested runtimecontract.RuntimeDriveLease) (RuntimeAggregate, runtimecontract.RuntimeDriveLease, bool, error) {
+//
+// expectedRunningGeneration is non-zero only when the worker holding that
+// exact running lease is atomically rescheduling itself after another failed
+// attempt. This generation fence prevents a stale worker (or an unrelated
+// duplicate scheduler) from replacing a newer lease while still allowing the
+// same retry identity to advance running -> scheduled without a release gap.
+func (c *driveDeliveryComponent) scheduleDriveLease(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, requested runtimecontract.RuntimeDriveLease, expectedRunningGeneration uint64) (RuntimeAggregate, runtimecontract.RuntimeDriveLease, bool, error) {
 	if c == nil || c.repository == nil || workspaceID == "" || runID == "" {
 		return RuntimeAggregate{}, runtimecontract.RuntimeDriveLease{}, false, common.ErrInvalidArgument
 	}
@@ -25,12 +31,28 @@ func (c *driveDeliveryComponent) scheduleDriveLease(ctx context.Context, workspa
 	if err != nil {
 		return RuntimeAggregate{}, runtimecontract.RuntimeDriveLease{}, false, err
 	}
-	if current := aggregate.DriveLease; current != nil &&
-		current.AggregateRevision == aggregate.StateRevision &&
-		current.Reason == requested.Reason &&
-		current.FailureSignature == requested.FailureSignature &&
-		(current.State == runtimecontract.RuntimeDriveLeaseScheduled || current.State == runtimecontract.RuntimeDriveLeaseRunning) {
-		return aggregate, current.Clone(), false, nil
+	if current := aggregate.DriveLease; current != nil {
+		if current.State == runtimecontract.RuntimeDriveLeaseRunning {
+			if expectedRunningGeneration != current.RecoveryGeneration {
+				return aggregate, current.Clone(), false, nil
+			}
+			// The exact running worker may renew with the same identity (the
+			// lifecycle-delivery case) or replace it with the newly classified
+			// retry identity. Both are a single owner-local CAS below.
+		} else {
+			if expectedRunningGeneration != 0 {
+				return aggregate, current.Clone(), false, nil
+			}
+			// One current scheduled generation already owns the successor. A
+			// duplicate reads it back, while a stale/different scheduler cannot
+			// replace its exact handoff identity. Only the worker that later claims
+			// that generation may atomically renew from running above.
+			if current.AggregateRevision == aggregate.StateRevision && current.State == runtimecontract.RuntimeDriveLeaseScheduled {
+				return aggregate, current.Clone(), false, nil
+			}
+		}
+	} else if expectedRunningGeneration != 0 {
+		return aggregate, runtimecontract.RuntimeDriveLease{}, false, nil
 	}
 	expectedRevision := aggregate.StateRevision
 	generation := uint64(1)
@@ -71,7 +93,19 @@ func (c *driveDeliveryComponent) claimDriveLease(ctx context.Context, workspaceI
 		return RuntimeAggregate{}, runtimecontract.RuntimeDriveLease{}, false, err
 	}
 	current := aggregate.DriveLease
-	if current == nil || current.State != runtimecontract.RuntimeDriveLeaseScheduled || !runtimecontract.SameRuntimeDriveLeaseIdentity(*current, requested) {
+	if current == nil || current.State != runtimecontract.RuntimeDriveLeaseScheduled {
+		return aggregate, runtimecontract.RuntimeDriveLease{}, false, nil
+	}
+	if !runtimecontract.SameRuntimeDriveLeaseIdentity(*current, requested) {
+		// A diagnostic owner transition may atomically reissue the same stable
+		// successor at a newer generation. The older timer cannot claim it, but it
+		// may hand the authoritative current generation back to the sole gate owner
+		// for re-mounting. Unrelated or future timer identities remain inert.
+		if requested.RecoveryGeneration < current.RecoveryGeneration &&
+			requested.WorkspaceID == current.WorkspaceID && requested.RunID == current.RunID &&
+			requested.Reason == current.Reason && requested.FailureSignature == current.FailureSignature {
+			return aggregate, current.Clone(), false, nil
+		}
 		return aggregate, runtimecontract.RuntimeDriveLease{}, false, nil
 	}
 	if aggregate.StateRevision != current.AggregateRevision {

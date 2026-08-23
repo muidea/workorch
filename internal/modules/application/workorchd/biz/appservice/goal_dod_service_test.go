@@ -178,8 +178,8 @@ func TestDefineGoalWithBackendReopensCompletedWorkspaceAndInvalidatesOldOutcome(
 	if snapshot.Workspace.State != string(common.WorkspaceStateActive) || snapshot.Workspace.ActiveRunID != "" {
 		t.Fatalf("workspace = %+v, want active without active run after new goal", snapshot.Workspace)
 	}
-	if snapshot.Outcome.Accepted || snapshot.Outcome.Terminal || snapshot.Outcome.ResultID != "" {
-		t.Fatalf("outcome = %+v, want old accepted result invalidated by definition change", snapshot.Outcome)
+	if snapshot.DisplayOutcome.Accepted || snapshot.DisplayOutcome.Terminal || snapshot.DisplayOutcome.ResultID != "" {
+		t.Fatalf("outcome = %+v, want old accepted result invalidated by definition change", snapshot.DisplayOutcome)
 	}
 }
 

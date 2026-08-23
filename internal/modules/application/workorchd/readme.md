@@ -22,6 +22,13 @@ Last Verified: 2026-08-23
   state；重复 request 必须每次交给 Workspace/Run owner 持久化幂等合同裁决，projection Store 只保证同 request identity
   的 immutable observation 不被重复或矛盾回执改写。
 - `biz/projection.Component` 构造并拥有唯一 `workspaceviewcore.Manager`/Store 的 Start、Close 和后台任务生命周期。它只消费 Eventstream 的 `EventRecordAppendedData`、Orchestrator 的 immutable drive observation、owner snapshot 和 execution observation；server 只通过无生命周期的 `WorkspaceProjection` reader 与 derived-write port 输出 HTTP/SSE/metrics 或显式 rebuild 请求。生产 execution observation 的派生 accepted/rejected/rebuild/delete 全部由 Biz-owned projection component 写入，不存在 `queued` observation 或 `queuedAt`；server 仅接收独立的 monotonic transport metrics；`WorkspaceProjectionChangedData` 仍由 Biz 发布。
+- opaque `RuntimeStateRecord` 只允许作为一次 projector 调用的瞬时输入；`workspaceviewcore` Store、application read model 与 HTTP cache 只能保存 bounded immutable public DTO，不能保存 aggregate、其指针或可用于 re-drive 的 authority-shaped 副本。
+- Workspace/Run projection 原样保留各 owner 的 canonical `state`、Workspace `activeRunId` 与 Run `blockingTicketId|blockingApprovalId`。Workspace DTO 不暴露 blocker 字段；Decision/Approval 的跨 owner 关联只进入 `governanceDisplay`，不一致只进入 `consistencyDiagnostic`。`displayOutcome` 是非权威展示摘要，formal output 始终是独立 `result/results`；三类 display/diagnostic 字段均不能生成、阻断或选择 `Drive/Resume/Restart` mutation intent，也不能伪造、隐藏或选择治理 resolution target。`WorkspaceRuntimeView.blockingDecision|blockingApproval` 只有在 canonical active Run 已进入匹配 blocked state、其 exact blocker ref 命中同 Workspace/Run scope 的真实 open/pending owner resource 时才可出现；同 Run 的其他未决资源和 `governanceDisplay` ID 均不能替代该引用。
+- Decision owner 的`DefinitionClarification`只经bounded typed `Decision.definitionClarification`投影，完整保留class、binding、
+  required action、gap/offending refs与candidate/runtime/resolution lineage identity，并deep-clone `offendingRefs`。该DTO仅供
+  Queue/Workspace Detail/TUI展示和workspace-scoped Definition修订导航；Workorchd不从Goal/DoD、SSE或display字段推导
+  Restart freshness/admission，不把它送入generic resolve。Board零Definition execution command；详情页显式Restart只进入
+  统一Workspace owner admission并原样保留typed rejection。
 - `snapshot.runCommand` 只有 `ApplyWorkspaceExecutionAdmission(command metadata, exact RuntimeExecutionIntentAdmission)` 一个
   projection mutation。该入口先执行 owner admission `Validate`，再调用共享 `PresentAdmission` 纯派生 `state`、
   `diagnostic` 与 `acceptedAt|rejectedAt`；caller 无法选择 state 或 revision，Store 在同一个加锁事务中把
@@ -34,6 +41,7 @@ Last Verified: 2026-08-23
   任何 owner authority。
 - Runtime audit 的 sealed-operation 视图只投影 operation identity、binding、`ExecutionKey` 与 `Fence` 等只读关联字段，使 governance continuation 后的 accepted receipt 仍按聚合中保存的原始 logical execution identity 精确核对；它不投影 operation 参数，不生成 dispatch，也不得作为 reducer/capability 可执行 authority。
 - HTTP、SSE 和 remote adapter 使用应用层 DTO；组件间 EventHub 传输不得复用 HTTP DTO。
+- `RunStateChanged` 的 process-local metrics/cache invalidation 入口只接受 `source=blocks/run` 且通过 typed `Validate` 的通知；Eventstream replay、伪造 source 或 invalid data 均不能成为 Run owner fact。
 - MCP 管理列表通过 owner 的 cursor/limit concrete result 分页，并要求所有页面保持同一 `RegistryRevision`；fresh activation
   用一次 `ReadSelectionSnapshotCommand` 同时取得并验证 selected Server/Capability。管理 DTO 只公开 `environmentRefs`，不接受、缓存或投影 credential 明文。
 - `biz/runtimeComponent` 是 Workorchd 内唯一长生命周期 runtime session owner；`runtimeApplicationPorts` 只保存借用函数，不复制 Session 指针，并通过 `ApplicationPorts` 向 Biz/use case 提供短生命周期借用，`service/server` 不接触 `runtimecore.Session`。`ManagedRuntime` 的 Eventstream 订阅、有限缓存与释放仍由 `biz/appservice/runtimecore` 实现，但其构造和关闭只由该组件持有；`pkg/observed` 仅保存快照 DTO 与纯映射，不提供 owner action、snapshot facade 或跨 owner service adapter；生产 bootstrap 不暴露 owner repository。
@@ -58,7 +66,7 @@ Last Verified: 2026-08-23
   aggregate纯派生`RuntimeExecutionBudgetView`与active `RuntimeRecoverableWaitView`，明确区分recoverable wait、
   governance blocker和terminal；Application、HTTP、SSE、Web/TUI不提供retry-now、clear wait、top-up或预算回写入口。
 - Biz 启动 workspace projection 后再启动 HTTP；execution admission 是无状态同步 use case，没有独立 lifecycle。Stop 先封闭统一 admission barrier、停止 CLI 并 drain HTTP，再等待全部 ingress 的 in-flight admission 完成；只有在 Workorchd topic、use case 与 projection 不再被占用后才解除订阅、清理 port、关闭 projection 并等待其后台任务，最后关闭 runtime session。不再运行禁止的 inactive-running workspace recovery，也不注册 stale-Step watchdog timer。只有经过校验的 Workspace owner result 才形成 immutable `snapshot.runCommand.state=accepted|rejected` 观测；context、transport、bootstrap 或 result-contract failure 只同步返回错误并累加无请求身份的 monotonic failure counter，绝不伪装成 owner rejection。该投影没有 running/completed/no-action 迁移、readback recovery 或 owner command 能力。
-- Decision/Approval HTTP resolve 只提交对应 owner command 并刷新投影，不发布 Run Resume；Runtime Decision resolution 由 Decision owner 通过 typed EventHub command 直接提交 Orchestrator。
+- Decision/Approval HTTP resolve 只提交对应 owner command 并刷新投影，不发布 Run Resume；Runtime Decision resolution 由 Decision owner 通过 typed EventHub command 直接提交 Orchestrator。新的open/pending transition在owner write前通过typed Workspace/Run read与canonical active Run exact blocker做application admission；single/batch的extra或stale resource typed conflict且batch零部分写入。pre-seal/runtime Definition clarification永久拒绝generic resolve。已terminal的exact response-loss duplicate仍交给Decision/Approval owner按完整payload/action/context判定幂等，application不重判owner终态。
 - 生产路径不存在 run-scoped Start/Resume mutation 或直达 Run owner 的 application-local execution command；唯一 execution ingress 是
   workspace-scoped `resume`/`restart`，由 `workspaceCommandGateway` 提交 Workspace owner。`RunPorts` 只提供 Run、snapshot、
   status 和关联资源读取；Application 不维护 run pending/started queue，也不执行 Run 状态机或 runtime drive。

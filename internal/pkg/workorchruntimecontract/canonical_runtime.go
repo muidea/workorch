@@ -567,14 +567,9 @@ type RuntimeFacts struct {
 	// focus. When set it overrides raw MissingRequiredEvidenceKinds for candidate
 	// action selection (INV-05).
 	RepairDirective *RuntimeRepairDirective
-	// FreshnessReacquireCoverage records focus coverage whose accepted evidence
-	// is retained as lineage but whose partial sealed dispatch was invalidated.
-	// It is not repair debt: after prerequisite acquisition reducer must issue a
-	// fresh state-change candidate before this coverage can close.
-	FreshnessReacquireCoverage []common.CoverageWorkItemID
-	Coverage                   []RuntimeCoverageItemFact
-	Feasibility                *RuntimeFeasibilityFact
-	Slices                     []RuntimeAcceptanceSlice
+	Coverage        []RuntimeCoverageItemFact
+	Feasibility     *RuntimeFeasibilityFact
+	Slices          []RuntimeAcceptanceSlice
 }
 
 // RuntimeFeasibilityFact is the persisted result of the pre-candidate
@@ -1512,7 +1507,6 @@ func (f RuntimeFacts) Normalized() RuntimeFacts {
 	}
 	f.Recovery = f.Recovery.Normalized()
 	f.Repair = f.Repair.Normalized()
-	f.FreshnessReacquireCoverage = normalizeCoverageWorkItemIDs(f.FreshnessReacquireCoverage)
 	f.Coverage = NormalizeRuntimeCoverageFacts(f.Coverage)
 	f.Slices = NormalizeRuntimeAcceptanceSlices(f.Slices)
 	if f.Feasibility != nil {

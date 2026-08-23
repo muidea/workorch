@@ -368,7 +368,7 @@ func taskRetryPlanFromStep(snapshot readmodelcore.RunSnapshotState, step project
 
 // source: workspace_outcome_definitions.go
 
-func applyWorkspaceDefinitionsChangedOutcome(ret *projectioncontract.WorkspaceOutcome, snapshot readmodelcore.WorkspaceSnapshotState) bool {
+func applyWorkspaceDefinitionsChangedOutcome(ret *projectioncontract.WorkspaceDisplayOutcome, snapshot readmodelcore.WorkspaceSnapshotState) bool {
 	if ret == nil {
 		return false
 	}

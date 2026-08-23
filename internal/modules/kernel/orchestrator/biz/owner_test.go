@@ -16,6 +16,7 @@ import (
 
 	magicevent "github.com/muidea/magicCommon/event"
 	magictask "github.com/muidea/magicCommon/task"
+	decisioncommon "github.com/muidea/workorch/internal/modules/blocks/decision/pkg/common"
 	decisionevents "github.com/muidea/workorch/internal/modules/blocks/decision/pkg/events"
 	runmodule "github.com/muidea/workorch/internal/modules/blocks/run"
 	runevents "github.com/muidea/workorch/internal/modules/blocks/run/pkg/events"
@@ -930,7 +931,7 @@ func TestStopWaitsForQueuedDecisionEvidenceHandlerBeforeClearingDependencies(t *
 	module.evidenceRecords = blocking
 	event := magicevent.NewEventWithContext(
 		decisionevents.TopicDecisionCommandRecordEvidence,
-		"test",
+		decisioncommon.ModuleID,
 		ModuleID,
 		magicevent.NewHeader(),
 		context.Background(),
@@ -1019,7 +1020,7 @@ func TestStopWaitsForQueuedRuntimeGovernanceResolutionHandlerBeforeClearingDepen
 	module := newTestBiz(owner, nil, nil)
 	event := magicevent.NewEventWithContext(
 		orchestratorevents.TopicOrchestratorCommitRuntimeGovernanceResolution,
-		"test",
+		decisioncommon.ModuleID,
 		ModuleID,
 		magicevent.NewHeader(),
 		context.Background(),

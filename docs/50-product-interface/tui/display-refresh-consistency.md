@@ -4,7 +4,7 @@ Status: normative
 
 Type: product-interface
 
-Last Verified: 2026-08-18
+Last Verified: 2026-08-23
 
 ## Display Source
 
@@ -12,6 +12,16 @@ TUI renders shared projection contracts: Workspace list/overview, selected Works
 coverage/progress, Result/artifacts and inspection pages. It does not join owner repositories or infer state from raw events.
 
 Terminal or superseded historical Runs can appear in history but cannot drive the active status bar or prompt.
+
+Workspace/Run canonical owner state 与 lifecycle handoff 必须分栏：Workspace `state/activeRunId`、Run `state/blocker refs`
+原样显示；Workspace 无 blocker 字段。`GovernanceDisplay` 只提示跨 owner handoff，`ConsistencyDiagnostic` 只提示偏差，
+`DisplayOutcome` 只展示非权威结果且不能替代 formal Result。TUI 不得从这些 display 字段构造/选择 Resume、Restart、Drive
+或治理 resolution target，也不能因 display-only handoff 抑制 Resume；`GovernanceDisplay.DecisionID|ApprovalID|RunID` 即使与
+owner resource 冲突也不能过滤、隐藏或改写 target。治理 mutation 只使用 canonical Workspace `activeRunId` 对应 Run 的
+matching blocked state + exact blocker ref 与已加载 concrete open Decision / pending Approval 的交集；同 Run 的其他未决资源
+不能作为 first-open fallback。Workspace owner 已投影 `blocked_on_approval + activeRunId`、但 Approval resource 尚未到达时，
+TUI 只能刷新 owner read model；不得把普通输入或 Resume 送入另一条 mutation 路径，也不得把 Approval conflict 从终态读回
+重判为成功。
 
 ## Refresh Flow
 

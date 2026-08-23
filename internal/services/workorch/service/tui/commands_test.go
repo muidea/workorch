@@ -68,3 +68,29 @@ func TestSnapshotGovernanceWithoutActiveOrOutcomeRunIgnoresHistoricalItems(t *te
 		t.Fatalf("approvals = %+v, want historical approvals ignored", approvals)
 	}
 }
+
+func TestRunStatusFromWorkspaceSnapshotPreservesRunOwnerStateAndBlockers(t *testing.T) {
+	snapshot := &projectioncontract.WorkspaceSnapshot{
+		TaskProgress: projectioncontract.TaskProgress{
+			RunID: "run-owner",
+			State: "completed",
+			Recovery: projectioncontract.RecoveryPlan{
+				BlockingTicketID:   "ticket-display",
+				BlockingApprovalID: "approval-display",
+			},
+		},
+	}
+	run := &projectioncontract.Run{
+		ID:                 "run-owner",
+		WorkspaceID:        "ws-owner",
+		State:              string(common.RunStateBlockedOnDecision),
+		BlockingTicketID:   "ticket-owner",
+		BlockingApprovalID: "approval-owner",
+	}
+
+	got := runStatusFromWorkspaceSnapshot(snapshot, run)
+	if got == nil || got.State != string(common.RunStateBlockedOnDecision) ||
+		got.BlockingTicketID != "ticket-owner" || got.BlockingApprovalID != "approval-owner" {
+		t.Fatalf("status = %+v, want canonical Run owner state and blockers", got)
+	}
+}

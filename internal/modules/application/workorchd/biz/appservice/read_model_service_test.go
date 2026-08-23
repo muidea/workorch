@@ -2431,8 +2431,8 @@ func TestReadRunTaskProgressWithBackendReturnsFormalResultProgress(t *testing.T)
 	if err != nil {
 		t.Fatalf("ReadRunSnapshotWithBackend: %v", err)
 	}
-	if snapshot.Outcome.State != "accepted" || !snapshot.Outcome.Accepted || snapshot.Outcome.ResultID != string(resultID) {
-		t.Fatalf("outcome = %+v, want accepted result outcome", snapshot.Outcome)
+	if snapshot.DisplayOutcome.State != "accepted" || !snapshot.DisplayOutcome.Accepted || snapshot.DisplayOutcome.ResultID != string(resultID) {
+		t.Fatalf("outcome = %+v, want accepted result outcome", snapshot.DisplayOutcome)
 	}
 	if !progressContainsMilestone(progress, "formal_result", "completed") {
 		t.Fatalf("milestones = %+v, want completed formal result", progress.Milestones)
@@ -2739,11 +2739,11 @@ func TestReadRunSnapshotWithBackendProjectsCompletedRunWithoutResultAsFailedOutc
 	if err != nil {
 		t.Fatalf("ReadRunSnapshotWithBackend: %v", err)
 	}
-	if snapshot.Outcome.State != "failed" || snapshot.Outcome.Accepted || !snapshot.Outcome.Terminal {
-		t.Fatalf("outcome = %+v, want failed terminal outcome without accepted result", snapshot.Outcome)
+	if snapshot.DisplayOutcome.State != "failed" || snapshot.DisplayOutcome.Accepted || !snapshot.DisplayOutcome.Terminal {
+		t.Fatalf("outcome = %+v, want failed terminal outcome without accepted result", snapshot.DisplayOutcome)
 	}
-	if snapshot.Outcome.Reason != "run completed without accepted result" {
-		t.Fatalf("outcome reason = %q, want missing accepted result reason", snapshot.Outcome.Reason)
+	if snapshot.DisplayOutcome.Reason != "run completed without accepted result" {
+		t.Fatalf("outcome reason = %q, want missing accepted result reason", snapshot.DisplayOutcome.Reason)
 	}
 	if !progressContainsMilestone(snapshot.TaskProgress, "formal_result", "failed") {
 		t.Fatalf("milestones = %+v, want failed formal result milestone", snapshot.TaskProgress.Milestones)
@@ -3612,8 +3612,11 @@ func TestReadWorkspaceSnapshotWithBackendReturnsRelatedRunsAndBlockingItems(t *t
 	if item.Workspace.ID != workspaceID {
 		t.Fatalf("workspace = %+v, want %s", item.Workspace, workspaceID)
 	}
-	if item.Workspace.State != string(common.WorkspaceStateBlockedOnApproval) || item.Workspace.ActiveRunID != approvalRunID {
-		t.Fatalf("workspace projection = %+v, want blocked_on_approval active run %s", item.Workspace, approvalRunID)
+	if item.Workspace.State != string(common.WorkspaceStateActive) || item.Workspace.ActiveRunID != approvalRunID {
+		t.Fatalf("workspace projection = %+v, want canonical active owner state and active run %s", item.Workspace, approvalRunID)
+	}
+	if item.GovernanceDisplay.ApprovalID != approvalRun.BlockingApprovalID || item.GovernanceDisplay.PromptMode != "approval" {
+		t.Fatalf("governance display = %+v, want approval handoff %s", item.GovernanceDisplay, approvalRun.BlockingApprovalID)
 	}
 	if len(item.Runs) != 3 {
 		t.Fatalf("runs = %+v, want 3 runs", item.Runs)
@@ -3710,7 +3713,7 @@ func TestReadWorkspaceSnapshotWithBackendSummarizesRunScopedLLMUsageRecords(t *t
 	}
 }
 
-func TestReadWorkspaceSnapshotProjectsWorkspaceStateFromRun(t *testing.T) {
+func TestReadWorkspaceSnapshotPreservesWorkspaceOwnerStateAcrossRunStates(t *testing.T) {
 	dataRoot := t.TempDir()
 	session, ctx := newTestRuntimeSession(t, "file", dataRoot)
 	exports := testRuntimeExports(session.Bootstrap)
@@ -3735,22 +3738,18 @@ func TestReadWorkspaceSnapshotProjectsWorkspaceStateFromRun(t *testing.T) {
 		t.Fatalf("create run: %v", err)
 	}
 
-	tests := []struct {
-		runState       common.RunState
-		workspaceState string
-	}{
-		{runState: common.RunStateActive, workspaceState: string(common.WorkspaceStateActive)},
-		{runState: common.RunStateBlockedOnDecision, workspaceState: string(common.WorkspaceStateActive)},
-		{runState: common.RunStateBlockedOnApproval, workspaceState: string(common.WorkspaceStateBlockedOnApproval)},
-		{runState: common.RunStateActive, workspaceState: string(common.WorkspaceStateActive)},
-		{runState: common.RunStateCompleted, workspaceState: string(common.WorkspaceStateActive)},
-		{runState: common.RunStateFailed, workspaceState: string(common.WorkspaceStateActive)},
-		{runState: common.RunStateCancelled, workspaceState: string(common.WorkspaceStateActive)},
-		{runState: common.RunStateSuperseded, workspaceState: string(common.WorkspaceStateSuperseded)},
+	tests := []common.RunState{
+		common.RunStateActive,
+		common.RunStateBlockedOnDecision,
+		common.RunStateBlockedOnApproval,
+		common.RunStateCompleted,
+		common.RunStateFailed,
+		common.RunStateCancelled,
+		common.RunStateSuperseded,
 	}
-	for _, tc := range tests {
-		t.Run(string(tc.runState), func(t *testing.T) {
-			run.State = tc.runState
+	for _, runState := range tests {
+		t.Run(string(runState), func(t *testing.T) {
+			run.State = runState
 			if err := exports.Repositories.Runs.Update(ctx, run); err != nil {
 				t.Fatalf("update run: %v", err)
 			}
@@ -3758,18 +3757,11 @@ func TestReadWorkspaceSnapshotProjectsWorkspaceStateFromRun(t *testing.T) {
 			if err != nil {
 				t.Fatalf("ReadWorkspaceSnapshotWithBackend: %v", err)
 			}
-			if snapshot.Workspace.State != tc.workspaceState {
-				t.Fatalf("workspace state = %q, want %q", snapshot.Workspace.State, tc.workspaceState)
+			if snapshot.Workspace.State != string(common.WorkspaceStateActive) {
+				t.Fatalf("workspace state = %q, want canonical owner state %q", snapshot.Workspace.State, common.WorkspaceStateActive)
 			}
-			expectedActiveRunID := string(runID)
-			if tc.runState == common.RunStateCompleted ||
-				tc.runState == common.RunStateFailed ||
-				tc.runState == common.RunStateCancelled ||
-				tc.runState == common.RunStateSuperseded {
-				expectedActiveRunID = ""
-			}
-			if snapshot.Workspace.ActiveRunID != expectedActiveRunID {
-				t.Fatalf("activeRunId = %q, want %q", snapshot.Workspace.ActiveRunID, expectedActiveRunID)
+			if snapshot.Workspace.ActiveRunID != string(runID) {
+				t.Fatalf("activeRunId = %q, want canonical owner reference %q", snapshot.Workspace.ActiveRunID, runID)
 			}
 		})
 	}
@@ -4297,11 +4289,11 @@ func TestReadWorkspaceSnapshotProjectsAcceptedResultOverStaleTerminalActiveRun(t
 	if snapshot.Workspace.State != string(common.WorkspaceStateActive) {
 		t.Fatalf("workspace state = %q, want active", snapshot.Workspace.State)
 	}
-	if snapshot.Outcome.State != "accepted" || !snapshot.Outcome.Accepted || snapshot.Outcome.RunID != string(completedRunID) {
-		t.Fatalf("workspace outcome = %+v, want accepted completed run", snapshot.Outcome)
+	if snapshot.DisplayOutcome.State != "accepted" || !snapshot.DisplayOutcome.Accepted || snapshot.DisplayOutcome.RunID != string(completedRunID) {
+		t.Fatalf("workspace outcome = %+v, want accepted completed run", snapshot.DisplayOutcome)
 	}
-	if snapshot.Workspace.ActiveRunID != "" {
-		t.Fatalf("activeRunId = %q, want empty for terminal projection", snapshot.Workspace.ActiveRunID)
+	if snapshot.Workspace.ActiveRunID != string(staleRunID) {
+		t.Fatalf("activeRunId = %q, want unchanged canonical owner reference %q", snapshot.Workspace.ActiveRunID, staleRunID)
 	}
 	if len(snapshot.Results) != 1 || snapshot.Results[0].RunID != string(completedRunID) || snapshot.Results[0].Summary != "formal result" {
 		t.Fatalf("results = %+v, want accepted formal result for completed run", snapshot.Results)
@@ -4385,8 +4377,8 @@ func TestReadWorkspaceSnapshotProjectsLatestRunFailureOverHistoricalAcceptedResu
 	if snapshot.TaskProgress.RunID != string(failedRunID) || snapshot.TaskProgress.State != string(common.RunStateFailed) {
 		t.Fatalf("task progress = %+v, want latest failed run", snapshot.TaskProgress)
 	}
-	if snapshot.Outcome.State != "failed" || snapshot.Outcome.RunID != string(failedRunID) || snapshot.Outcome.Accepted {
-		t.Fatalf("workspace outcome = %+v, want failed latest run outcome", snapshot.Outcome)
+	if snapshot.DisplayOutcome.State != "failed" || snapshot.DisplayOutcome.RunID != string(failedRunID) || snapshot.DisplayOutcome.Accepted {
+		t.Fatalf("workspace outcome = %+v, want failed latest run outcome", snapshot.DisplayOutcome)
 	}
 	if !progressContainsMilestone(snapshot.TaskProgress, "formal_result", "failed") {
 		t.Fatalf("milestones = %+v, want formal_result failed for latest run without result", snapshot.TaskProgress.Milestones)
@@ -4469,8 +4461,8 @@ func TestReadWorkspaceSnapshotTaskProgressUsesLatestTerminalRejectedResult(t *te
 	if err != nil {
 		t.Fatalf("ReadWorkspaceSnapshotWithBackend: %v", err)
 	}
-	if snapshot.Outcome.RunID != string(currentRunID) || snapshot.Outcome.ResultID != string(currentRunID)+"/result/dod-assessment" {
-		t.Fatalf("outcome = %+v, want current rejected result", snapshot.Outcome)
+	if snapshot.DisplayOutcome.RunID != string(currentRunID) || snapshot.DisplayOutcome.ResultID != string(currentRunID)+"/result/dod-assessment" {
+		t.Fatalf("outcome = %+v, want current rejected result", snapshot.DisplayOutcome)
 	}
 	if snapshot.TaskProgress.RunID != string(currentRunID) || snapshot.TaskProgress.State != string(common.RunStateFailed) {
 		t.Fatalf("task progress = %+v, want same current rejected run as outcome", snapshot.TaskProgress)
@@ -4537,7 +4529,7 @@ func TestMapWorkspaceOutcomePrefersLatestTerminalRunOverStaleTaskProgress(t *tes
 		},
 	}
 
-	outcome := readmodelprojection.WorkspaceProjection().Outcome(snapshot)
+	outcome := readmodelprojection.WorkspaceProjection().DisplayOutcome(snapshot)
 	if outcome.State != "accepted" || !outcome.Accepted || outcome.RunID != latestRunID || outcome.Summary != "latest accepted result" {
 		t.Fatalf("outcome = %+v, want latest accepted run despite stale task progress", outcome)
 	}
@@ -4580,7 +4572,7 @@ func TestMapWorkspaceOutcomePrefersActiveEffectiveRunOverHistoricalTerminalOutco
 		},
 	}
 
-	outcome := readmodelprojection.WorkspaceProjection().Outcome(snapshot)
+	outcome := readmodelprojection.WorkspaceProjection().DisplayOutcome(snapshot)
 	if outcome.RunID != "run-active" || outcome.State != string(common.RunStateActive) || outcome.Terminal || outcome.Accepted {
 		t.Fatalf("outcome = %+v, want active effective run instead of historical terminal outcome", outcome)
 	}
@@ -4620,7 +4612,7 @@ func TestMapWorkspaceOutcomeDoesNotReuseAcceptedResultAfterDefinitionsReopenWork
 		},
 	}
 
-	outcome := readmodelprojection.WorkspaceProjection().Outcome(snapshot)
+	outcome := readmodelprojection.WorkspaceProjection().DisplayOutcome(snapshot)
 	if outcome.Accepted || outcome.Terminal || outcome.ResultID != "" || outcome.RunID != "" {
 		t.Fatalf("outcome = %+v, want no accepted terminal outcome after definition change", outcome)
 	}
@@ -4665,7 +4657,7 @@ func TestMapWorkspaceOutcomeIgnoresAcceptedSliceForRunningRun(t *testing.T) {
 		CoverageSummary: map[string]any{"open": 1, "failed": 1},
 	}
 
-	outcome := readmodelprojection.WorkspaceProjection().Outcome(snapshot)
+	outcome := readmodelprojection.WorkspaceProjection().DisplayOutcome(snapshot)
 	if outcome.Accepted || outcome.Terminal || outcome.ResultID != "" {
 		t.Fatalf("outcome = %+v, want running non-terminal outcome without accepted slice promotion", outcome)
 	}
@@ -4700,7 +4692,7 @@ func TestMapRunOutcomeIgnoresAcceptedSliceForRunningRun(t *testing.T) {
 		},
 	}
 
-	outcome := readmodelprojection.RunProjection().Outcome(snapshot)
+	outcome := readmodelprojection.RunProjection().DisplayOutcome(snapshot)
 	if outcome.Accepted || outcome.Terminal || outcome.ResultID != "" {
 		t.Fatalf("outcome = %+v, want running non-terminal run outcome without accepted slice promotion", outcome)
 	}
@@ -4764,7 +4756,7 @@ func TestFinalAcceptedResultStillProducesTerminalOutcome(t *testing.T) {
 		},
 	}
 
-	outcome := readmodelprojection.WorkspaceProjection().Outcome(snapshot)
+	outcome := readmodelprojection.WorkspaceProjection().DisplayOutcome(snapshot)
 	if !outcome.Accepted || !outcome.Terminal || outcome.State != "accepted" || outcome.ResultID != "run-final-accepted/result/dod-assessment" {
 		t.Fatalf("outcome = %+v, want final accepted terminal outcome", outcome)
 	}
@@ -4793,7 +4785,7 @@ func TestTerminalRejectedResultStillProducesFailedOutcome(t *testing.T) {
 		},
 	}
 
-	outcome := readmodelprojection.WorkspaceProjection().Outcome(snapshot)
+	outcome := readmodelprojection.WorkspaceProjection().DisplayOutcome(snapshot)
 	if outcome.Accepted || !outcome.Terminal || outcome.State != "failed" || outcome.ResultID != "run-final-rejected/result/dod-assessment" {
 		t.Fatalf("outcome = %+v, want final rejected terminal outcome", outcome)
 	}
@@ -4856,7 +4848,7 @@ func TestMapWorkspaceOutcomeUsesLatestTerminalResult(t *testing.T) {
 		},
 	}
 
-	outcome := readmodelprojection.WorkspaceProjection().Outcome(snapshot)
+	outcome := readmodelprojection.WorkspaceProjection().DisplayOutcome(snapshot)
 	if outcome.RunID != "run-new" {
 		t.Fatalf("outcome runId = %q, want latest terminal result run", outcome.RunID)
 	}
@@ -4888,7 +4880,7 @@ func TestMapRunOutcomeKeepsSupersededRunFromStaleRejectedResult(t *testing.T) {
 		},
 	}
 
-	outcome := readmodelprojection.RunProjection().Outcome(snapshot)
+	outcome := readmodelprojection.RunProjection().DisplayOutcome(snapshot)
 	if outcome.State != string(common.RunStateSuperseded) || outcome.Accepted || outcome.ResultID != "" {
 		t.Fatalf("outcome = %+v, want superseded without stale rejected result", outcome)
 	}
@@ -4942,7 +4934,7 @@ func TestMapWorkspaceOutcomeUsesLatestRunEventOverHistoricalAcceptedResult(t *te
 		},
 	}
 
-	outcome := readmodelprojection.WorkspaceProjection().Outcome(snapshot)
+	outcome := readmodelprojection.WorkspaceProjection().DisplayOutcome(snapshot)
 	if outcome.RunID != "run-latest-failed" || outcome.State != "failed" || outcome.Accepted {
 		t.Fatalf("outcome = %+v, want latest failed run event over historical accepted result", outcome)
 	}
@@ -4990,7 +4982,7 @@ func TestMapWorkspaceOutcomeIgnoresSupersededEventWhenReplacementRunFailed(t *te
 		},
 	}
 
-	outcome := readmodelprojection.WorkspaceProjection().Outcome(snapshot)
+	outcome := readmodelprojection.WorkspaceProjection().DisplayOutcome(snapshot)
 	if outcome.RunID != "run-001-replan-001" || outcome.State != "failed" || outcome.Reason != "stuck running run recovered" {
 		t.Fatalf("outcome = %+v, want failed replacement run over newer superseded marker", outcome)
 	}
@@ -5027,7 +5019,7 @@ func TestMapWorkspaceOutcomeFallsBackToReplacementRunWhenEventsOnlyContainSupers
 		},
 	}
 
-	outcome := readmodelprojection.WorkspaceProjection().Outcome(snapshot)
+	outcome := readmodelprojection.WorkspaceProjection().DisplayOutcome(snapshot)
 	if outcome.RunID != "run-001-replan-001" || outcome.State != "failed" || outcome.Reason != "replacement failed" {
 		t.Fatalf("outcome = %+v, want replacement failed run when event page only has superseded run", outcome)
 	}
@@ -5084,7 +5076,7 @@ func TestMapWorkspaceOutcomeUsesNewerTerminalResultOverStaleRunEvents(t *testing
 		},
 	}
 
-	outcome := readmodelprojection.WorkspaceProjection().Outcome(snapshot)
+	outcome := readmodelprojection.WorkspaceProjection().DisplayOutcome(snapshot)
 	if outcome.RunID != "run-current-failed" || outcome.ResultID != "run-current-failed/result/dod-assessment" {
 		t.Fatalf("outcome = %+v, want newer terminal result over stale run event", outcome)
 	}

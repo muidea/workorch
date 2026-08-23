@@ -51,8 +51,11 @@ func TestGovernanceRequestResolutionAndBindingFactsRemainExact(t *testing.T) {
 	if !RequestBindsResolution(request, resolution) {
 		t.Fatal("persisted request did not bind exact resolution")
 	}
+	if !RequestsBindResolution([]runtimecontract.RuntimeGovernanceRequestRecord{request}, resolution) {
+		t.Fatal("persisted request set did not bind exact resolution")
+	}
 	resolution.AuthoritySnapshotID = "authority-stale"
-	if RequestBindsResolution(request, resolution) {
+	if RequestBindsResolution(request, resolution) || RequestsBindResolution([]runtimecontract.RuntimeGovernanceRequestRecord{request}, resolution) {
 		t.Fatal("stale authority resolution matched persisted request")
 	}
 	resolution.AuthoritySnapshotID = "authority-1"

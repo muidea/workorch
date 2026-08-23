@@ -24,5 +24,6 @@ func runSnapshotFromModels(input RunSnapshotModelInput) readmodelcore.RunSnapsho
 	)
 	ret := baseRunSnapshotFromModels(input, stepViews, currentStep)
 	applyRunSnapshotDerivedReadModels(&ret, input, stepViews, observedItems)
+	applyRunSnapshotGovernanceProjection(&ret)
 	return ret
 }

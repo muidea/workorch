@@ -219,7 +219,7 @@ func collectWorkspaceActivityItems(snapshot readmodelcore.WorkspaceSnapshotState
 	items = append(items, patchActivityItems(snapshot, displayRunID)...)
 	items = append(items, memoryActivityItems(snapshot, displayRunID)...)
 	items = append(items, eventRecordActivityItems(snapshot, displayRunID)...)
-	if outcome := snapshot.Outcome; strings.TrimSpace(outcome.State) != "" || strings.TrimSpace(outcome.Summary) != "" {
+	if outcome := snapshot.DisplayOutcome; strings.TrimSpace(outcome.State) != "" || strings.TrimSpace(outcome.Summary) != "" {
 		items = append(items, outcomeActivityItem(workspaceID, displayRunID, outcome))
 	}
 	return items
@@ -234,7 +234,7 @@ func runtimeProgressActivityItems(workspaceID, displayRunID string, runtime proj
 			WorkspaceID:          workspaceID,
 			RunID:                displayRunID,
 			Kind:                 projectioncontract.WorkspaceActivityRuntimeTransition,
-			State:                firstNonEmptyTimelineString(snapshot.TaskProgress.State, snapshot.Outcome.State),
+			State:                firstNonEmptyTimelineString(snapshot.TaskProgress.State, snapshot.DisplayOutcome.State),
 			Title:                "runtime focus",
 			Summary:              fmt.Sprintf("runtime focus %s activated", focusID),
 			OccurredAt:           occurredAt,
@@ -477,7 +477,7 @@ func eventRecordActivityItems(snapshot readmodelcore.WorkspaceSnapshotState, dis
 	return items
 }
 
-func outcomeActivityItem(workspaceID, displayRunID string, outcome projectioncontract.WorkspaceOutcome) projectioncontract.WorkspaceActivityItem {
+func outcomeActivityItem(workspaceID, displayRunID string, outcome projectioncontract.WorkspaceDisplayOutcome) projectioncontract.WorkspaceActivityItem {
 	kind := projectioncontract.WorkspaceActivityResult
 	if !outcome.Accepted && outcome.Terminal {
 		kind = projectioncontract.WorkspaceActivityFailure

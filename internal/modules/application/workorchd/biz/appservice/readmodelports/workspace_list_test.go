@@ -2,6 +2,7 @@ package readmodelports
 
 import (
 	"context"
+	"reflect"
 	"testing"
 
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
@@ -94,7 +95,7 @@ func TestListProjectedWorkspacesUsesLatestRunProjection(t *testing.T) {
 	if items[0].ActiveRunID != "run-002" {
 		t.Fatalf("expected active run projection, got %q", items[0].ActiveRunID)
 	}
-	if items[0].BlockingTicketID != "ticket-001" {
-		t.Fatalf("expected blocking ticket projection, got %q", items[0].BlockingTicketID)
+	if _, ok := reflect.TypeOf(items[0]).FieldByName("BlockingTicketID"); ok {
+		t.Fatal("workspace list projection must not expose a Run-owned blocker")
 	}
 }

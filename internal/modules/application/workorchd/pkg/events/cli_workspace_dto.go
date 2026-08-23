@@ -38,8 +38,6 @@ type CLIWorkspaceInfo struct {
 	DeliverableDirectory string
 	State                common.WorkspaceState
 	ActiveRunID          common.RunID
-	BlockingTicketID     common.TicketID
-	BlockingApprovalID   common.ApprovalID
 	TemplateID           string
 	ProfileID            string
 	DefaultLLMSelection  *runtimecontract.ProviderInferenceSelection
@@ -58,7 +56,9 @@ type CLIWorkspaceSnapshotInfo struct {
 	Run                     *projectioncontract.Run
 	Step                    *CLIStepViewInfo
 	Result                  *projectioncontract.Result
-	Outcome                 projectioncontract.WorkspaceOutcome
+	DisplayOutcome          projectioncontract.WorkspaceDisplayOutcome
+	GovernanceDisplay       projectioncontract.GovernanceDisplay
+	ConsistencyDiagnostic   *projectioncontract.ConsistencyDiagnostic
 	TaskProgress            CLITaskProgressInfo
 	RunHeartbeat            projectioncontract.RunHeartbeat
 	ConvergenceStatus       *projectioncontract.ConvergenceStatus
@@ -90,22 +90,24 @@ type CLIWorkspaceSnapshotInfo struct {
 }
 
 type CLIWorkspaceRuntimeViewInfo struct {
-	WorkspaceID       common.WorkspaceID
-	ActiveRunID       common.RunID
-	DisplayRunID      common.RunID
-	Projection        projectioncontract.ProjectionStatus
-	Revision          projectioncontract.WorkspaceRefreshRevision
-	PromptMode        string
-	RunState          common.RunState
-	TaskProgress      CLITaskProgressInfo
-	RunHeartbeat      projectioncontract.RunHeartbeat
-	ConvergenceStatus *projectioncontract.ConvergenceStatus
-	Acceptance        projectioncontract.AcceptanceProjection
-	RunCommand        *projectioncontract.RunCommandStatus
-	BlockingDecision  *projectioncontract.Decision
-	BlockingApproval  *projectioncontract.Approval
-	Outcome           projectioncontract.WorkspaceOutcome
-	Activity          projectioncontract.WorkspaceActivityFeed
+	WorkspaceID           common.WorkspaceID
+	ActiveRunID           common.RunID
+	DisplayRunID          common.RunID
+	Projection            projectioncontract.ProjectionStatus
+	Revision              projectioncontract.WorkspaceRefreshRevision
+	PromptMode            string
+	RunState              common.RunState
+	TaskProgress          CLITaskProgressInfo
+	RunHeartbeat          projectioncontract.RunHeartbeat
+	ConvergenceStatus     *projectioncontract.ConvergenceStatus
+	Acceptance            projectioncontract.AcceptanceProjection
+	RunCommand            *projectioncontract.RunCommandStatus
+	BlockingDecision      *projectioncontract.Decision
+	BlockingApproval      *projectioncontract.Approval
+	DisplayOutcome        projectioncontract.WorkspaceDisplayOutcome
+	GovernanceDisplay     projectioncontract.GovernanceDisplay
+	ConsistencyDiagnostic *projectioncontract.ConsistencyDiagnostic
+	Activity              projectioncontract.WorkspaceActivityFeed
 }
 
 // CLIMemoryRecallTraceInfo is the map-free EventHub representation of the

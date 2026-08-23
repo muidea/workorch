@@ -21,6 +21,11 @@ run_go_test ./internal/modules/blocks/file/biz \
   -run '^(TestRuntimeAdapterPatchApplyFileWriteWritesOnce|TestRuntimeAdapterPatchApplyFileWriteRejectsExistingTargetWithoutBaseHash|TestRuntimeAdapterPatchApplyFileWriteConfirmsSealedReplayAfterReceiptLoss|TestRuntimeAdapterPatchApplyReplayProofCoversAllDurableVariants|TestRuntimeAdapterPatchApplyRejectsBaseHashMismatch|TestRuntimeAdapterPatchApplyUnifiedDiffSuccess|TestRuntimeAdapterPatchApplyUnifiedDiffRejectsStaleContext)$' \
   -count=1
 
+echo "-> File Owner: pre-effect admission and post-effect reconciliation remain separate"
+run_go_test ./internal/modules/blocks/file/biz \
+  -run '^(TestRuntimeAdapterUniqueWorkspaceEntryProspectiveAdmissionMatrix|TestFileOwnerReconciliationObservesRealizedProspectiveTargetWithoutReopeningCreateAdmission|TestFileOwnerReconciliationReportsMissingTargetWithoutInferringGoalSemantics|TestFileOwnerReconciliationClassifiesAmbiguousAndOutOfWorkspaceTargetsAsUnverifiable|TestFileOwnerReconciliationReloadsCurrentFactAfterOwnerRestartAndResourceDeletion|TestFileOwnerReconciliationSelectorCardinalityAndProspectiveMatrix)$' \
+  -count=1
+
 echo "-> SM-3/SM-4: sealed patch variants and restart/replay convergence"
 run_go_test ./internal/modules/kernel/orchestrator/biz \
   -run '^(TestRuntimeFileBackedPatchVariantMatrix|TestRuntimeFileBackedPatchReplayProofRestartsAfterOwnerReceiptCASFailure|TestRuntimeFileBackedPatchVariantRestartAfterOwnerReceipt)$' \

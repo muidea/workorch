@@ -395,6 +395,14 @@ func baseSlashCommandSuggestions() []slashCommandSuggestion {
 
 func (m AppModel) contextualSlashCommandSuggestions() []slashCommandSuggestion {
 	switch m.activeWorkspacePromptMode() {
+	case workspacePromptModeDefinition:
+		return []slashCommandSuggestion{
+			{Command: "/goal", Insert: "/goal ", Description: "revise Goal definition", Contextual: true},
+			{Command: "/dod", Insert: "/dod ", Description: "revise DoD definition", Contextual: true},
+			{Command: "/run restart", Description: "start a fresh activation after revision", Contextual: true},
+			{Command: "/decision show", Description: "show definition clarification", Contextual: true},
+			{Command: "/decision list", Description: "list decision tickets", Contextual: true},
+		}
 	case workspacePromptModeDecision:
 		return []slashCommandSuggestion{
 			{Command: "/decision answer", Insert: "/decision answer ", Description: "answer current ticket", Contextual: true},

@@ -93,13 +93,20 @@ typed violation 与 `BlockingTicketID`；TUI 不提供 one-of branch selection �
 ## Governance
 
 - blocker prompt derives from the active Run projection and typed Ticket/Approval detail;
-- resolution is sent once to the appropriate owner API/backend;
-- successful resolution clears the prompt and waits for owner continuation facts;
+- lifecycle handoff may be displayed before the concrete Ticket/Approval resource arrives, but it must not fabricate a blocker ID or enable mutation; canonical Workspace `blocked_on_approval + activeRunId` 在 Approval detail 到达前是 refresh-only barrier，裸输入与 `/run resume` 均不得退化为 Goal/DoD/Run mutation；
+- `GovernanceDisplay` 的 Decision/Approval/Run ID 只触发提示与刷新，不能阻断 Resume、隐藏或筛选 resolution target；只有 canonical Workspace `activeRunId` 对应 Run 的 matching blocked state + exact blocker ref 与已加载 open Decision / pending Approval 的交集可以提交，同 Run 其他未决资源不能作为 fallback；
+- RuntimeView已给出canonical exact definition resource但owner list仍在刷新时，也必须立即进入dedicated definition mode并零
+  generic command；相同revision下scope、typed `definitionClarification`或Approval scope变化必须撤销旧target，detail merge不得
+  丢失typed binding或复用其`offendingRefs` slice；
+- resolution is sent once to the appropriate owner API/backend；TUI 必须原样保留 Approval owner conflict，不能用 terminal state readback 重判 payload/principal/resolution identity 的 duplicate equivalence；
+- successful resolution clears the prompt and waits for owner continuation facts；owner persisted continuation自动收敛，若
+  canonical Run持续阻塞则显示resolution delivery diagnostic，不提示或要求用户额外`/run resume`；
 - the TUI does not submit an extra Resume after resolution.
 
-Run-scoped runtime-definition clarification是专用例外：prompt显示gap、offending refs与`revise_definition_and_restart`，不把裸文本、
+Run-scoped runtime-definition clarification是专用例外：prompt只从typed `Decision.definitionClarification`显示class、binding state、
+gap、offending refs与`revise_definition_and_restart`，不得从Context、reason、DecisionKind、failureClass或提示文案猜测；不把裸文本、
 `/decision answer`、batch resolution或`/run resume`解释为合法resolution。用户必须用`/goal`、`/dod`形成新的all-of candidate，
-待admission eligible后显式`/run restart`；TUI不关闭ticket、不构造replacement binding，也不预创建successor。pre-seal
+然后显式`/run restart`并由Workspace/Run owner判定admission；TUI不关闭ticket、不构造replacement binding，也不预创建successor。pre-seal
 clarification同样只能通过修正candidate收口，不能“确认one-of”。
 
 ## Model Selection

@@ -3,13 +3,12 @@ package readmodelprojection
 import (
 	"testing"
 
-	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/appmodelcore"
 	"github.com/muidea/workorch/internal/pkg/common"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
 func TestMapRuntimeAuditSeparatesActiveAndRetiredPrerequisiteLifecycle(t *testing.T) {
-	run := appmodelcore.Run{RuntimeState: &runtimecontract.RuntimeStateRecord{Facts: runtimecontract.RuntimeFacts{
+	state := runtimecontract.RuntimeStateRecord{Facts: runtimecontract.RuntimeFacts{
 		WorkspaceID: "ws-audit", RunID: "run-audit", DefinitionRevision: "definition-audit", EvidenceRevision: "evidence-audit",
 		Focus: runtimecontract.CoverageFocus{ID: "focus-current"},
 		Prerequisites: runtimecontract.PrerequisiteState{
@@ -22,9 +21,9 @@ func TestMapRuntimeAuditSeparatesActiveAndRetiredPrerequisiteLifecycle(t *testin
 				Scope: runtimecontract.RuntimePrerequisiteScopeFocus, FocusID: "focus-prior", OwnerModuleID: runtimecontract.RuntimeModuleFile,
 			}},
 		},
-	}}}
+	}}
 
-	audit := mapRuntimeAudit(run)
+	audit := mapRuntimeAudit(&state)
 	if audit == nil || len(audit.Grounding.ActivePrerequisites) != 1 || len(audit.Grounding.RetiredPrerequisites) != 1 {
 		t.Fatalf("prerequisite lifecycle audit = %+v", audit)
 	}
@@ -37,7 +36,7 @@ func TestMapRuntimeAuditSeparatesActiveAndRetiredPrerequisiteLifecycle(t *testin
 }
 
 func TestMapRuntimeAuditPreservesFailureOriginalDiagnosticWithoutAction(t *testing.T) {
-	run := appmodelcore.Run{RuntimeState: &runtimecontract.RuntimeStateRecord{Facts: runtimecontract.RuntimeFacts{
+	state := runtimecontract.RuntimeStateRecord{Facts: runtimecontract.RuntimeFacts{
 		WorkspaceID: "ws-audit", RunID: "run-audit", DefinitionRevision: "definition-audit", EvidenceRevision: "evidence-audit",
 		Focus: runtimecontract.CoverageFocus{ID: "focus-current"},
 		Failure: &runtimecontract.FailureFact{
@@ -49,9 +48,9 @@ func TestMapRuntimeAuditPreservesFailureOriginalDiagnosticWithoutAction(t *testi
 				Signature: "runtime-state-update/ws-audit/run-audit/4/4/semantic_rejection", ExpectedRevision: "4", ObservedRevision: "4",
 			},
 		},
-	}}}
+	}}
 
-	audit := mapRuntimeAudit(run)
+	audit := mapRuntimeAudit(&state)
 	if audit == nil || audit.Failure == nil || audit.Failure.Code != "definition_mismatch" ||
 		audit.Failure.OriginalDiagnostic == nil || audit.Failure.OriginalDiagnostic.OwnerModuleID != "blocks/run" ||
 		audit.Failure.OriginalDiagnostic.ObservedRevision != "4" {
@@ -73,13 +72,13 @@ func TestMapRuntimeAuditPreservesValidationSurfaceReadinessWithoutExecutableInpu
 		ObservedRevision: "mcp-revision-v1",
 	}
 	catalog.SnapshotID = runtimecontract.StableRuntimeOperationAdmissibilitySnapshotID(catalog)
-	run := appmodelcore.Run{RuntimeState: &runtimecontract.RuntimeStateRecord{Facts: runtimecontract.RuntimeFacts{
+	state := runtimecontract.RuntimeStateRecord{Facts: runtimecontract.RuntimeFacts{
 		WorkspaceID: "ws-audit", RunID: "run-audit", DefinitionRevision: "definition-audit", EvidenceRevision: "evidence-audit",
 		Focus:     runtimecontract.CoverageFocus{ID: "focus-current"},
 		Resources: runtimecontract.RuntimeResourceFacts{OperationAdmissibilities: []runtimecontract.RuntimeOperationAdmissibility{catalog}},
-	}}}
+	}}
 
-	audit := mapRuntimeAudit(run)
+	audit := mapRuntimeAudit(&state)
 	if audit == nil || len(audit.Grounding.OperationAdmissibilities) != 1 || len(audit.Grounding.OperationAdmissibilities[0].ValidationSurfaces) != 1 {
 		t.Fatalf("validation readiness audit missing: %+v", audit)
 	}
@@ -109,7 +108,7 @@ func TestMapRuntimeAuditProjectsBindingReceiptAndDerivedCreditSeparately(t *test
 	completedBinding.TargetRefs = []string{"prior.go"}
 	completedBinding.Hash = runtimecontract.StableCoverageEvidenceBindingHash(completedBinding)
 	observation := &runtimecontract.RuntimeValidationObservation{RecipeID: "recipe/audit", ExecutedChecks: []string{"check/audit"}, PassedChecks: []string{"check/audit"}}
-	run := appmodelcore.Run{RuntimeState: &runtimecontract.RuntimeStateRecord{Facts: runtimecontract.RuntimeFacts{
+	state := runtimecontract.RuntimeStateRecord{Facts: runtimecontract.RuntimeFacts{
 		WorkspaceID: "ws-audit", RunID: "run-audit", DefinitionRevision: "definition-audit", EvidenceRevision: "evidence-audit",
 		Focus: runtimecontract.CoverageFocus{ID: "focus-current", CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-audit"}, CoverageEvidenceBindings: []runtimecontract.CoverageEvidenceBinding{binding}},
 		CompletedFocuses: []runtimecontract.CoverageFocus{{
@@ -132,9 +131,9 @@ func TestMapRuntimeAuditProjectsBindingReceiptAndDerivedCreditSeparately(t *test
 		ExecutionKey: "exec/ws-audit/run-audit/original-dispatch/validate-audit", Fence: 2, OperationID: "validate-audit",
 		Outcome: runtimecontract.RuntimeOperationOutcomeAccepted, ObservedEffectScope: runtimecontract.RuntimeEffectNone, TargetRefs: []string{"main.go"},
 		Evidence: runtimecontract.RuntimeOperationEvidence{EvidenceRefs: []string{"artifact/audit"}, EvidenceTags: []string{"metric/audit"}, Validation: observation},
-	}}}}
+	}}}
 
-	audit := mapRuntimeAudit(run)
+	audit := mapRuntimeAudit(&state)
 	if audit == nil || len(audit.Focus.CoverageBindings) != 1 || len(audit.CoverageBindings) != 2 || len(audit.Dispatches) != 1 || len(audit.AcceptedEvidence) != 1 || len(audit.OperationReceipts) != 1 {
 		t.Fatalf("binding audit missing chain: %+v", audit)
 	}

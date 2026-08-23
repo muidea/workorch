@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
+	"github.com/muidea/workorch/internal/pkg/common"
 	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
 )
 
@@ -49,22 +50,24 @@ func projectWorkspaceRuntimeViewWithActivity(snapshot readmodelcore.WorkspaceSna
 	}
 
 	return projectioncontract.WorkspaceRuntimeView{
-		WorkspaceID:       strings.TrimSpace(snapshot.Workspace.ID),
-		ActiveRunID:       activeRunID,
-		DisplayRunID:      displayRunID,
-		Projection:        projectioncontract.ProjectionStatusFromWorkspaceViewModel(snapshot.ViewModel),
-		Revision:          revision,
-		PromptMode:        firstNonEmptyTimelineString(snapshot.ViewModel.PromptMode, workspacePromptMode(snapshot)),
-		RunState:          runState,
-		TaskProgress:      progress,
-		RunHeartbeat:      snapshot.RunHeartbeat,
-		ConvergenceStatus: snapshot.ConvergenceStatus,
-		Acceptance:        acceptance,
-		RunCommand:        snapshot.RunCommand,
-		BlockingDecision:  blockingDecision,
-		BlockingApproval:  blockingApproval,
-		Outcome:           snapshot.Outcome,
-		Activity:          activity,
+		WorkspaceID:           strings.TrimSpace(snapshot.Workspace.ID),
+		ActiveRunID:           activeRunID,
+		DisplayRunID:          displayRunID,
+		Projection:            projectioncontract.ProjectionStatusFromWorkspaceViewModel(snapshot.ViewModel),
+		Revision:              revision,
+		PromptMode:            firstNonEmptyTimelineString(snapshot.ViewModel.PromptMode, workspacePromptMode(snapshot)),
+		RunState:              runState,
+		GovernanceDisplay:     snapshot.GovernanceDisplay,
+		ConsistencyDiagnostic: projectioncontract.CloneConsistencyDiagnostic(snapshot.ConsistencyDiagnostic),
+		TaskProgress:          progress,
+		RunHeartbeat:          snapshot.RunHeartbeat,
+		ConvergenceStatus:     snapshot.ConvergenceStatus,
+		Acceptance:            acceptance,
+		RunCommand:            snapshot.RunCommand,
+		BlockingDecision:      blockingDecision,
+		BlockingApproval:      blockingApproval,
+		DisplayOutcome:        snapshot.DisplayOutcome,
+		Activity:              activity,
 	}
 }
 
@@ -155,51 +158,51 @@ func workspaceRefreshRevisionFromSnapshot(snapshot readmodelcore.WorkspaceSnapsh
 }
 
 func selectBlockingDecision(snapshot readmodelcore.WorkspaceSnapshotState, activeRunID string) *projectioncontract.Decision {
-	ticketID := strings.TrimSpace(snapshot.Workspace.BlockingTicketID)
-	if ticketID == "" && snapshot.Run != nil {
-		ticketID = strings.TrimSpace(snapshot.Run.BlockingTicketID)
+	activeRunID = strings.TrimSpace(activeRunID)
+	workspaceID := strings.TrimSpace(snapshot.Workspace.ID)
+	run := canonicalActiveRun(snapshot, activeRunID)
+	if workspaceID == "" || activeRunID == "" || run == nil ||
+		common.RunState(strings.TrimSpace(run.State)) != common.RunStateBlockedOnDecision {
+		return nil
 	}
+	ticketID := strings.TrimSpace(run.BlockingTicketID)
 	if ticketID == "" {
 		return nil
 	}
 	for idx := range snapshot.Decisions {
 		item := snapshot.Decisions[idx]
-		if strings.TrimSpace(item.ID) != ticketID {
-			continue
+		if strings.TrimSpace(item.ID) == ticketID &&
+			strings.TrimSpace(item.WorkspaceID) == workspaceID &&
+			strings.TrimSpace(item.RunID) == activeRunID &&
+			common.DecisionTicketState(strings.TrimSpace(item.State)) == common.DecisionTicketStateOpen {
+			ret := item
+			return &ret
 		}
-		if activeRunID != "" && strings.TrimSpace(item.RunID) != "" && strings.TrimSpace(item.RunID) != activeRunID {
-			continue
-		}
-		if !isOpenGovernanceState(item.State) {
-			return nil
-		}
-		ret := item
-		return &ret
 	}
 	return nil
 }
 
 func selectBlockingApproval(snapshot readmodelcore.WorkspaceSnapshotState, activeRunID string) *projectioncontract.Approval {
-	approvalID := strings.TrimSpace(snapshot.Workspace.BlockingApprovalID)
-	if approvalID == "" && snapshot.Run != nil {
-		approvalID = strings.TrimSpace(snapshot.Run.BlockingApprovalID)
+	activeRunID = strings.TrimSpace(activeRunID)
+	workspaceID := strings.TrimSpace(snapshot.Workspace.ID)
+	run := canonicalActiveRun(snapshot, activeRunID)
+	if workspaceID == "" || activeRunID == "" || run == nil ||
+		common.RunState(strings.TrimSpace(run.State)) != common.RunStateBlockedOnApproval {
+		return nil
 	}
+	approvalID := strings.TrimSpace(run.BlockingApprovalID)
 	if approvalID == "" {
 		return nil
 	}
 	for idx := range snapshot.Approvals {
 		item := snapshot.Approvals[idx]
-		if strings.TrimSpace(item.ID) != approvalID {
-			continue
+		if strings.TrimSpace(item.ID) == approvalID &&
+			strings.TrimSpace(item.WorkspaceID) == workspaceID &&
+			strings.TrimSpace(item.RunID) == activeRunID &&
+			common.ApprovalState(strings.TrimSpace(item.State)) == common.ApprovalStatePending {
+			ret := item
+			return &ret
 		}
-		if activeRunID != "" && strings.TrimSpace(item.RunID) != "" && strings.TrimSpace(item.RunID) != activeRunID {
-			continue
-		}
-		if !isOpenGovernanceState(item.State) {
-			return nil
-		}
-		ret := item
-		return &ret
 	}
 	return nil
 }

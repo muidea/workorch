@@ -6,6 +6,7 @@ import { modelLabels } from '../utils/constants';
 import { useSSE } from '../hooks';
 import { errorMessage, shortId, stateTag, stateLabel, boundedParagraph, metricGrid } from '../utils';
 import { projectionStatusSummary, workspaceBoardActivationRequest, workspaceBoardActivationHint } from '../helpers';
+import { workspaceDefinitionClarification } from '../governanceMutationTarget';
 import type { ControlPlaneProps, ProjectionStatus, Workspace, WorkspaceExecutionIntentRequest } from '../types';
 import { WorkspaceSetupModal } from './components/WorkspaceSetupModal';
 
@@ -82,6 +83,9 @@ export function WorkspaceBoardPage({ onOpenWorkspace }: ControlPlaneProps) {
     const request = workspaceBoardActivationRequest(item);
     if (!request) {
       message.warning(workspaceBoardActivationHint(item));
+      if (workspaceDefinitionClarification(detail.snapshot)) {
+        onOpenWorkspace(workspace.id);
+      }
       return;
     }
     message.info('正在提交工作空间执行意图');

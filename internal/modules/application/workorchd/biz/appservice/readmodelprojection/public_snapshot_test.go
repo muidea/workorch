@@ -8,7 +8,6 @@ import (
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
 	"github.com/muidea/workorch/internal/pkg/workorchmanagementcontract"
 	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
-	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
 func TestPublicSnapshotsExcludePrivateStateAndDetachCollections(t *testing.T) {
@@ -19,9 +18,8 @@ func TestPublicSnapshotsExcludePrivateStateAndDetachCollections(t *testing.T) {
 			SoulBindings:      map[string]string{"execution": "soul-1"},
 		},
 		Run: appmodelcore.Run{
-			ID:           "run-1",
-			WorkspaceID:  "workspace-1",
-			RuntimeState: &runtimecontract.RuntimeStateRecord{},
+			ID:          "run-1",
+			WorkspaceID: "workspace-1",
 		},
 		CoverageWorkItems:       []map[string]any{{"id": "cwi-1"}},
 		CoverageWorkItemContext: map[string]any{"scope": "selected"},
@@ -61,7 +59,7 @@ func TestPublicWorkspaceSnapshotAndObservabilityPreserveNilAndRunCollections(t *
 		Workspace: appmodelcore.Workspace{ID: "workspace-1"},
 		DoDs:      []workorchmanagementcontract.DoD{{ID: "dod-1", Items: []string{"item-1"}}},
 		Runs: []appmodelcore.Run{
-			{ID: "run-1", WorkspaceID: "workspace-1", RuntimeState: &runtimecontract.RuntimeStateRecord{}},
+			{ID: "run-1", WorkspaceID: "workspace-1"},
 		},
 	}
 	workspace := publicWorkspaceSnapshot(workspaceState)
@@ -80,7 +78,7 @@ func TestPublicWorkspaceSnapshotAndObservabilityPreserveNilAndRunCollections(t *
 	}
 
 	observabilityState := readmodelcore.RunObservabilityState{
-		Run:      appmodelcore.Run{ID: "run-1", WorkspaceID: "workspace-1", RuntimeState: &runtimecontract.RuntimeStateRecord{}},
+		Run:      appmodelcore.Run{ID: "run-1", WorkspaceID: "workspace-1"},
 		Timeline: []projectioncontract.RuntimeTimelineItem{{ID: "timeline-1", Data: map[string]any{"target": "one"}}},
 	}
 	observability := publicRunObservability(observabilityState)

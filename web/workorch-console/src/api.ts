@@ -567,7 +567,7 @@ export const workorchApi = {
     });
     return body.decision;
   },
-  batchResolveDecisions: async (workspaceId: string, ticketIds: string[], resolutionType = 'provide_missing_info', resolutionPayload?: Record<string, unknown>) => {
+  batchResolveDecisions: async (workspaceId: string | undefined, ticketIds: string[], resolutionType = 'provide_missing_info', resolutionPayload?: Record<string, unknown>) => {
     const suffix = querySuffix({ workspaceId });
     const body = await request<{ decisions: Decision[] }>(`${apiBase}/decisions/resolve-batch${suffix}`, {
       method: 'POST',
@@ -588,7 +588,7 @@ export const workorchApi = {
     const body = await request<{ approval: Approval }>(`${apiBase}/approvals/${encodeURIComponent(approvalId)}/reject${suffix}`, { method: 'POST' });
     return body.approval;
   },
-  batchResolveApprovals: async (workspaceId: string, approvalIds: string[], action: 'approve' | 'reject') => {
+  batchResolveApprovals: async (workspaceId: string | undefined, approvalIds: string[], action: 'approve' | 'reject') => {
     const suffix = querySuffix({ workspaceId });
     const body = await request<{ approvals: Approval[] }>(`${apiBase}/approvals/resolve-batch${suffix}`, {
       method: 'POST',

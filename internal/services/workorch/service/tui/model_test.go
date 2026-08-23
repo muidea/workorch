@@ -206,20 +206,36 @@ func projectWorkspace(m *AppModel, ws projectioncontract.Workspace) {
 
 func projectDecisionBlocker(m *AppModel, workspaceID, runID, ticketID string) {
 	projectWorkspace(m, projectioncontract.Workspace{
-		ID:               workspaceID,
-		State:            string(common.WorkspaceStateActive),
-		ActiveRunID:      runID,
-		BlockingTicketID: ticketID,
+		ID:          workspaceID,
+		State:       string(common.WorkspaceStateActive),
+		ActiveRunID: runID,
+		ViewModel: projectioncontract.WorkspaceViewModel{
+			WorkspaceID: workspaceID, PromptMode: workspacePromptModeDecision, WorkspaceRevision: 1,
+		},
 	})
+	entry := m.ensureWorkspaceRuntimeState(workspaceID)
+	entry.Display.GovernanceDisplay = projectioncontract.GovernanceDisplay{PromptMode: workspacePromptModeDecision, RunID: runID, DecisionID: ticketID}
+	item := projectioncontract.Decision{ID: ticketID, WorkspaceID: workspaceID, RunID: runID, State: "open"}
+	m.decisions = append(m.decisions, item)
+	m.canonicalBlockingTicketID = ticketID
+	m.blockingDecision = &item
 }
 
 func projectApprovalBlocker(m *AppModel, workspaceID, runID, approvalID string) {
 	projectWorkspace(m, projectioncontract.Workspace{
-		ID:                 workspaceID,
-		State:              string(common.WorkspaceStateBlockedOnApproval),
-		ActiveRunID:        runID,
-		BlockingApprovalID: approvalID,
+		ID:          workspaceID,
+		State:       string(common.WorkspaceStateBlockedOnApproval),
+		ActiveRunID: runID,
+		ViewModel: projectioncontract.WorkspaceViewModel{
+			WorkspaceID: workspaceID, PromptMode: workspacePromptModeApproval, WorkspaceRevision: 1,
+		},
 	})
+	entry := m.ensureWorkspaceRuntimeState(workspaceID)
+	entry.Display.GovernanceDisplay = projectioncontract.GovernanceDisplay{PromptMode: workspacePromptModeApproval, RunID: runID, ApprovalID: approvalID}
+	item := projectioncontract.Approval{ID: approvalID, WorkspaceID: workspaceID, RunID: runID, State: "pending"}
+	m.approvals = append(m.approvals, item)
+	m.canonicalBlockingApprovalID = approvalID
+	m.blockingApproval = &item
 }
 
 func projectRunningWorkspace(m *AppModel, workspaceID, runID string) {
@@ -741,7 +757,7 @@ func TestModelRunResumeWithoutLiveRunDoesNotPredeclareContinuation(t *testing.T)
 	be := newRecordingBE(t, common.RunStateFailed)
 	be.snapshot = &projectioncontract.WorkspaceSnapshot{
 		Workspace: projectioncontract.Workspace{ID: "ws-1", Title: "failed", State: string(common.WorkspaceStateActive)},
-		Outcome: projectioncontract.WorkspaceOutcome{
+		DisplayOutcome: projectioncontract.WorkspaceDisplayOutcome{
 			WorkspaceID: "ws-1",
 			State:       string(common.RunStateFailed),
 			RunID:       "run-failed",
@@ -980,13 +996,7 @@ func TestModelBlockedWorkspaceInputRefreshesBlockerInsteadOfContinuing(t *testin
 	be := newRecordingBE(t, common.RunStateActive)
 	m := NewAppModel(be, "ws-1", "")
 	m.activeWorkspaceID = "ws-1"
-	m.workspaces = []projectioncontract.Workspace{{
-		ID:               "ws-1",
-		State:            string(common.WorkspaceStateActive),
-		ActiveRunID:      "run-1",
-		BlockingTicketID: "ticket-1",
-		Projection:       projectioncontract.ProjectionStatus{WorkspaceRevision: 7},
-	}}
+	projectDecisionBlocker(&m, "ws-1", "run-1", "ticket-1")
 	m.activeRunID = "run-1"
 	m.input = "resume"
 
@@ -1007,13 +1017,7 @@ func TestModelRunResumeDoesNotBypassBlockingDecision(t *testing.T) {
 	be := newRecordingBE(t, common.RunStateActive)
 	m := NewAppModel(be, "ws-1", "")
 	m.activeWorkspaceID = "ws-1"
-	m.workspaces = []projectioncontract.Workspace{{
-		ID:               "ws-1",
-		State:            string(common.WorkspaceStateActive),
-		ActiveRunID:      "run-1",
-		BlockingTicketID: "ticket-1",
-		Projection:       projectioncontract.ProjectionStatus{WorkspaceRevision: 7},
-	}}
+	projectDecisionBlocker(&m, "ws-1", "run-1", "ticket-1")
 	m.activeRunID = "run-1"
 	m.blockingDecision = &projectioncontract.Decision{ID: "ticket-1", WorkspaceID: "ws-1", RunID: "run-1", State: "open"}
 	m.input = "/run resume"
@@ -1025,6 +1029,151 @@ func TestModelRunResumeDoesNotBypassBlockingDecision(t *testing.T) {
 	}
 	if m.blockingDecision == nil || m.blockingDecision.ID != "ticket-1" || m.progress != progressWaitingDecision {
 		t.Fatalf("blocking decision/progress = %+v/%s", m.blockingDecision, m.progress)
+	}
+}
+
+func TestModelGovernanceDisplayCannotBlockResumeWithoutCanonicalBlocker(t *testing.T) {
+	for _, input := range []string{"/run resume", "继续处理"} {
+		t.Run(input, func(t *testing.T) {
+			be := newRecordingBE(t, common.RunStateActive)
+			m := NewAppModel(be, "ws-1", "")
+			projectWorkspace(&m, projectioncontract.Workspace{
+				ID: "ws-1", State: string(common.WorkspaceStateActive), ActiveRunID: "run-1",
+			})
+			entry := m.ensureWorkspaceRuntimeState("ws-1")
+			entry.Display.GovernanceDisplay = projectioncontract.GovernanceDisplay{
+				PromptMode: workspacePromptModeDecision, RunID: "run-1", DecisionID: "ticket-display-only",
+			}
+			m.setInput(input)
+
+			_, cmd := m.submitInput()
+			if cmd == nil {
+				t.Fatal("display-only governance handoff suppressed Resume")
+			}
+			msg := cmd()
+			if _, ok := msg.(RunControlMsg); !ok {
+				t.Fatalf("command message = %T, want RunControlMsg", msg)
+			}
+			if len(be.runCommands) != 1 || be.runCommands[0].Intent != backend.RunCommandIntentResume {
+				t.Fatalf("run commands = %+v, want exactly one owner-adjudicated Resume", be.runCommands)
+			}
+		})
+	}
+}
+
+func TestModelDefinitionClarificationDisablesGenericMutationAndResume(t *testing.T) {
+	inputs := []string{
+		"clarification answer",
+		"/decision answer clarification answer",
+		"/decision reject",
+		"/run resume",
+	}
+	for _, input := range inputs {
+		t.Run(input, func(t *testing.T) {
+			be := newRecordingBE(t, common.RunStateBlockedOnDecision)
+			m := NewAppModel(be, "ws-definition", "")
+			projectWorkspace(&m, projectioncontract.Workspace{
+				ID: "ws-definition", State: string(common.WorkspaceStateActive), ActiveRunID: "run-definition",
+			})
+			m.applyWorkspaceRuntimeView(projectioncontract.WorkspaceRuntimeView{
+				WorkspaceID: "ws-definition", ActiveRunID: "run-definition",
+				RunState: string(common.RunStateBlockedOnDecision), PromptMode: workspacePromptModeDecision,
+				Revision: projectioncontract.WorkspaceRefreshRevision{WorkspaceRevision: 2, RuntimeStateRevision: 3},
+				BlockingDecision: &projectioncontract.Decision{
+					ID: "ticket-definition", WorkspaceID: "ws-definition", RunID: "run-definition", State: "open",
+					DecisionKind: "runtime_definition_clarification", FailureClass: "runtime_definition_gap",
+					DefinitionClarification: &projectioncontract.DefinitionClarification{
+						Class: "runtime_definition", BindingState: "open", RequiredAction: "revise_definition_and_restart",
+						ViolationOrGapCode: "implicit_one_of", OffendingRefs: []string{"dod:item-1"},
+					},
+				},
+			}, false)
+			// Exercise the RuntimeView-only window before the Decision list arrives.
+			if len(m.decisions) != 0 || m.activeDefinitionClarificationDecision() == nil {
+				t.Fatalf("definition blocker was not retained from canonical RuntimeView: decisions=%+v blocker=%+v", m.decisions, m.activeDefinitionClarificationDecision())
+			}
+			m.setInput(input)
+
+			_, cmd := m.submitInput()
+			if cmd != nil {
+				t.Fatal("definition clarification emitted a generic mutation/Resume command")
+			}
+			if len(be.runCommands) != 0 {
+				t.Fatalf("run commands = %+v, want zero", be.runCommands)
+			}
+			if m.lastError == nil || !strings.Contains(m.lastError.Error(), "revise Goal/DoD") ||
+				!strings.Contains(m.progressText, "/run restart") || !strings.Contains(m.progressText, "gap=implicit_one_of") ||
+				!strings.Contains(m.progressText, "offending=dod:item-1") || !strings.Contains(m.progressText, "required=revise_definition_and_restart") {
+				t.Fatalf("dedicated guidance = error:%v progress:%q", m.lastError, m.progressText)
+			}
+		})
+	}
+}
+
+func TestModelDefinitionClarificationOffersOnlyRevisionAndRestartActions(t *testing.T) {
+	be := newRecordingBE(t, common.RunStateBlockedOnDecision)
+	m := NewAppModel(be, "ws-definition", "")
+	projectWorkspace(&m, projectioncontract.Workspace{
+		ID: "ws-definition", State: string(common.WorkspaceStateActive), ActiveRunID: "run-definition",
+	})
+	m.applyWorkspaceRuntimeView(projectioncontract.WorkspaceRuntimeView{
+		WorkspaceID: "ws-definition", ActiveRunID: "run-definition",
+		RunState: string(common.RunStateBlockedOnDecision), PromptMode: workspacePromptModeDecision,
+		Revision: projectioncontract.WorkspaceRefreshRevision{WorkspaceRevision: 2, RuntimeStateRevision: 3},
+		BlockingDecision: &projectioncontract.Decision{
+			ID: "ticket-definition", WorkspaceID: "ws-definition", RunID: "run-definition", State: "open",
+			DecisionKind: "runtime_definition_clarification", FailureClass: "runtime_definition_gap",
+			DefinitionClarification: &projectioncontract.DefinitionClarification{
+				Class: "runtime_definition", BindingState: "open", RequiredAction: "revise_definition_and_restart",
+				ViolationOrGapCode: "semantic_ambiguity", OffendingRefs: []string{"goal:goal-1"},
+			},
+		},
+	}, false)
+	m.setInput("/")
+	input := stripANSI(m.renderInput(160))
+	for _, want := range []string{"definition >", "/goal", "/dod", "/run restart"} {
+		if !strings.Contains(input, want) {
+			t.Fatalf("definition prompt = %q, want %q", input, want)
+		}
+	}
+	for _, forbidden := range []string{"/decision answer", "/decision terminate", "/run resume"} {
+		if strings.Contains(input, forbidden) {
+			t.Fatalf("definition prompt = %q, must not offer %q", input, forbidden)
+		}
+	}
+
+	m.setInput("/run restart")
+	_, cmd := m.submitInput()
+	if cmd == nil {
+		t.Fatal("explicit definition restart did not emit owner command")
+	}
+	_ = cmd()
+	if len(be.runCommands) != 1 || be.runCommands[0].Intent != backend.RunCommandIntentRestart {
+		t.Fatalf("run commands = %+v, want one explicit restart", be.runCommands)
+	}
+}
+
+func TestMergeDecisionInfoPropagatesDefinitionClassification(t *testing.T) {
+	incoming := projectioncontract.Decision{
+		ID: "ticket-definition", DecisionKind: "runtime_definition_clarification", FailureClass: "runtime_definition_gap",
+		FailureSignature: "definition-signature", AllowedRecoveryActions: []string{"revise_definition"},
+		DefinitionClarification: &projectioncontract.DefinitionClarification{
+			Class: "runtime_definition", BindingState: "open", RequiredAction: "revise_definition_and_restart",
+			ViolationOrGapCode: "implicit_one_of", OffendingRefs: []string{"dod:item-1"},
+		},
+	}
+	merged := mergeDecisionInfo(
+		projectioncontract.Decision{ID: "ticket-definition", WorkspaceID: "ws-definition", RunID: "run-definition", State: "open"},
+		incoming,
+	)
+	if !decisionRequiresDedicatedDefinitionFlow(merged) || merged.FailureSignature != "definition-signature" ||
+		!reflect.DeepEqual(merged.AllowedRecoveryActions, []string{"revise_definition"}) ||
+		merged.DefinitionClarification == nil || !reflect.DeepEqual(merged.DefinitionClarification.OffendingRefs, []string{"dod:item-1"}) {
+		t.Fatalf("merged decision classification = %+v", merged)
+	}
+	merged.DefinitionClarification.OffendingRefs[0] = "mutated"
+	if incoming.DefinitionClarification.OffendingRefs[0] != "dod:item-1" {
+		t.Fatal("merged definition clarification aliases the incoming owner projection")
 	}
 }
 
@@ -1554,12 +1703,12 @@ func TestModelDecisionAnswerNormalizesReplanIntent(t *testing.T) {
 	}
 }
 
-func TestModelDecisionReplanAfterWorkspaceSwitchUsesOverviewBlocker(t *testing.T) {
+func TestModelDecisionAnswerAfterWorkspaceSwitchDoesNotUseDisplayPromptAsMutationTarget(t *testing.T) {
 	be := &decisionRecordingBE{fakeBE: newFake(t)}
 	m := NewAppModel(be, "ws-a", "")
 	next, _ := m.Update(WorkspaceListMsg{Workspaces: []projectioncontract.Workspace{
-		{ID: "ws-a", Title: "A", State: string(common.WorkspaceStateActive), ActiveRunID: "run-a", BlockingTicketID: "ticket-a", Projection: projectioncontract.ProjectionStatus{WorkspaceRevision: 11}},
-		{ID: "ws-b", Title: "B", State: string(common.WorkspaceStateActive), ActiveRunID: "run-b", BlockingTicketID: "ticket-b", Projection: projectioncontract.ProjectionStatus{WorkspaceRevision: 12}},
+		{ID: "ws-a", Title: "A", State: string(common.WorkspaceStateActive), ActiveRunID: "run-a", Projection: projectioncontract.ProjectionStatus{WorkspaceRevision: 11}, ViewModel: projectioncontract.WorkspaceViewModel{WorkspaceID: "ws-a", PromptMode: workspacePromptModeDecision, WorkspaceRevision: 11}},
+		{ID: "ws-b", Title: "B", State: string(common.WorkspaceStateActive), ActiveRunID: "run-b", Projection: projectioncontract.ProjectionStatus{WorkspaceRevision: 12}, ViewModel: projectioncontract.WorkspaceViewModel{WorkspaceID: "ws-b", PromptMode: workspacePromptModeDecision, WorkspaceRevision: 12}},
 	}})
 	m = asModel(next)
 	m.blockingDecision = &projectioncontract.Decision{ID: "ticket-a", WorkspaceID: "ws-a", RunID: "run-a", State: "open"}
@@ -1574,30 +1723,228 @@ func TestModelDecisionReplanAfterWorkspaceSwitchUsesOverviewBlocker(t *testing.T
 
 	next, cmd := m.submitInput()
 	if cmd == nil {
-		t.Fatal("expected decision resolve command for switched workspace")
+		t.Fatal("display-only decision handoff should refresh owner resources")
 	}
-	msg := cmd()
-	next, _ = next.(*AppModel).Update(msg)
 	m = asModel(next)
 
-	if len(be.decisions) != 1 {
-		t.Fatalf("resolved decisions = %d, want one", len(be.decisions))
+	if len(be.decisions) != 0 {
+		t.Fatalf("resolved decisions = %d, want no mutation from display-only prompt", len(be.decisions))
 	}
-	req := be.decisions[0]
-	if req.WorkspaceID != "ws-b" || req.TicketID != "ticket-b" || req.ResolutionType != backend.DecisionResolutionTypeReplan {
-		t.Fatalf("decision request = %+v, want ws-b ticket-b replan", req)
+	if m.lastError == nil || !strings.Contains(m.lastError.Error(), "owner projection is not loaded") {
+		t.Fatalf("lastError = %v, want explicit owner projection handoff", m.lastError)
 	}
-	if m.lastError != nil {
-		t.Fatalf("lastError = %v, want nil", m.lastError)
+}
+
+func TestModelGovernanceDisplayCannotSelectDecisionMutationTarget(t *testing.T) {
+	t.Run("forged display run and resource scope produce zero mutation", func(t *testing.T) {
+		decision := &recordingTUIDecisionBackend{}
+		be := tuiResolutionBackend{fakeBE: newFake(t), decision: decision, approval: &recordingTUIApprovalBackend{}}
+		m := NewAppModel(be, "ws-owner", "")
+		projectWorkspace(&m, projectioncontract.Workspace{
+			ID: "ws-owner", State: string(common.WorkspaceStateActive), ActiveRunID: "run-owner",
+		})
+		entry := m.ensureWorkspaceRuntimeState("ws-owner")
+		entry.Display.GovernanceDisplay = projectioncontract.GovernanceDisplay{
+			PromptMode: workspacePromptModeDecision, RunID: "run-forged", DecisionID: "ticket-forged",
+		}
+		forged := projectioncontract.Decision{
+			ID: "ticket-forged", WorkspaceID: "ws-owner", RunID: "run-forged", State: "open",
+		}
+		m.decisions = []projectioncontract.Decision{forged}
+		m.blockingDecision = &forged
+		m.setInput("/decision answer forged")
+
+		next, cmd := m.submitInput()
+		m = asModel(next)
+		if cmd == nil {
+			t.Fatal("forged display handoff should refresh concrete owner resources")
+		}
+		_ = cmd()
+		if len(decision.requests) != 0 {
+			t.Fatalf("decision requests = %+v, want zero mutation for forged display scope", decision.requests)
+		}
+		if m.lastError == nil || !strings.Contains(m.lastError.Error(), "owner projection is not loaded") {
+			t.Fatalf("lastError = %v, want missing canonical owner resource", m.lastError)
+		}
+	})
+
+	for _, tc := range []struct {
+		name       string
+		promptMode string
+	}{
+		{name: "conflicting display prompt", promptMode: workspacePromptModeApproval},
+		{name: "blank display prompt", promptMode: ""},
+	} {
+		t.Run(tc.name+" does not hide canonical owner resource", func(t *testing.T) {
+			decision := &recordingTUIDecisionBackend{}
+			be := tuiResolutionBackend{fakeBE: newFake(t), decision: decision, approval: &recordingTUIApprovalBackend{}}
+			m := NewAppModel(be, "ws-owner", "")
+			projectWorkspace(&m, projectioncontract.Workspace{
+				ID: "ws-owner", State: string(common.WorkspaceStateActive), ActiveRunID: "run-owner",
+			})
+			ownerResource := projectioncontract.Decision{
+				ID: "ticket-owner", WorkspaceID: "ws-owner", RunID: "run-owner", State: "open",
+			}
+			m.decisions = []projectioncontract.Decision{ownerResource}
+			m.applyWorkspaceRuntimeView(projectioncontract.WorkspaceRuntimeView{
+				WorkspaceID: "ws-owner", ActiveRunID: "run-owner", RunState: string(common.RunStateBlockedOnDecision),
+				GovernanceDisplay: projectioncontract.GovernanceDisplay{
+					PromptMode: tc.promptMode, RunID: "run-forged", DecisionID: "ticket-forged",
+				},
+				BlockingDecision: &ownerResource,
+			}, false)
+			m.setInput("/decision answer canonical")
+
+			_, cmd := m.submitInput()
+			if cmd == nil {
+				t.Fatal("canonical concrete decision should produce a resolution command")
+			}
+			_ = cmd()
+			if len(decision.requests) != 1 || decision.requests[0].TicketID != "ticket-owner" || decision.requests[0].WorkspaceID != "ws-owner" {
+				t.Fatalf("decision requests = %+v, want canonical owner resource only", decision.requests)
+			}
+		})
 	}
+
+	t.Run("same-run display resource cannot override runtime-view canonical resource", func(t *testing.T) {
+		decision := &recordingTUIDecisionBackend{}
+		be := tuiResolutionBackend{fakeBE: newFake(t), decision: decision, approval: &recordingTUIApprovalBackend{}}
+		m := NewAppModel(be, "ws-owner", "")
+		projectWorkspace(&m, projectioncontract.Workspace{
+			ID: "ws-owner", State: string(common.WorkspaceStateActive), ActiveRunID: "run-owner",
+		})
+		m.decisions = []projectioncontract.Decision{
+			{ID: "ticket-display", WorkspaceID: "ws-owner", RunID: "run-owner", State: "open"},
+			{ID: "ticket-owner", WorkspaceID: "ws-owner", RunID: "run-owner", State: "open"},
+		}
+		m.applyWorkspaceRuntimeView(projectioncontract.WorkspaceRuntimeView{
+			WorkspaceID: "ws-owner", ActiveRunID: "run-owner", RunState: string(common.RunStateBlockedOnDecision),
+			GovernanceDisplay: projectioncontract.GovernanceDisplay{
+				PromptMode: workspacePromptModeDecision, RunID: "run-owner", DecisionID: "ticket-display",
+			},
+			BlockingDecision: &m.decisions[1],
+		}, false)
+		m.setInput("/decision answer canonical")
+
+		_, cmd := m.submitInput()
+		if cmd == nil {
+			t.Fatal("canonical RuntimeView decision should produce a resolution command")
+		}
+		_ = cmd()
+		if len(decision.requests) != 1 || decision.requests[0].TicketID != "ticket-owner" {
+			t.Fatalf("decision requests = %+v, want canonical RuntimeView resource ticket-owner", decision.requests)
+		}
+	})
+}
+
+func TestModelGovernanceDisplayCannotSelectApprovalMutationTarget(t *testing.T) {
+	t.Run("forged display run and resource scope produce zero mutation", func(t *testing.T) {
+		approval := &recordingTUIApprovalBackend{}
+		be := tuiResolutionBackend{fakeBE: newFake(t), decision: &recordingTUIDecisionBackend{}, approval: approval}
+		m := NewAppModel(be, "ws-owner", "")
+		projectWorkspace(&m, projectioncontract.Workspace{
+			ID: "ws-owner", State: string(common.WorkspaceStateBlockedOnApproval), ActiveRunID: "run-owner",
+		})
+		entry := m.ensureWorkspaceRuntimeState("ws-owner")
+		entry.Display.GovernanceDisplay = projectioncontract.GovernanceDisplay{
+			PromptMode: workspacePromptModeApproval, RunID: "run-forged", ApprovalID: "approval-forged",
+		}
+		forged := projectioncontract.Approval{
+			ID: "approval-forged", WorkspaceID: "ws-owner", RunID: "run-forged", State: "pending",
+		}
+		m.approvals = []projectioncontract.Approval{forged}
+		m.blockingApproval = &forged
+		m.setInput("/approval approve")
+
+		next, cmd := m.submitInput()
+		m = asModel(next)
+		if cmd == nil {
+			t.Fatal("forged display handoff should refresh concrete owner resources")
+		}
+		_ = cmd()
+		if len(approval.approvals) != 0 || len(approval.rejections) != 0 {
+			t.Fatalf("approval calls = %+v/%+v, want zero mutation for forged display scope", approval.approvals, approval.rejections)
+		}
+		if m.lastError == nil || !strings.Contains(m.lastError.Error(), "owner projection is not loaded") {
+			t.Fatalf("lastError = %v, want missing canonical owner resource", m.lastError)
+		}
+	})
+
+	for _, tc := range []struct {
+		name       string
+		promptMode string
+	}{
+		{name: "conflicting display prompt", promptMode: workspacePromptModeDecision},
+		{name: "blank display prompt", promptMode: ""},
+	} {
+		t.Run(tc.name+" does not hide canonical owner resource", func(t *testing.T) {
+			approval := &recordingTUIApprovalBackend{}
+			be := tuiResolutionBackend{fakeBE: newFake(t), decision: &recordingTUIDecisionBackend{}, approval: approval}
+			m := NewAppModel(be, "ws-owner", "")
+			projectWorkspace(&m, projectioncontract.Workspace{
+				ID: "ws-owner", State: string(common.WorkspaceStateBlockedOnApproval), ActiveRunID: "run-owner",
+			})
+			ownerResource := projectioncontract.Approval{
+				ID: "approval-owner", WorkspaceID: "ws-owner", RunID: "run-owner", State: "pending",
+			}
+			m.approvals = []projectioncontract.Approval{ownerResource}
+			m.applyWorkspaceRuntimeView(projectioncontract.WorkspaceRuntimeView{
+				WorkspaceID: "ws-owner", ActiveRunID: "run-owner", RunState: string(common.RunStateBlockedOnApproval),
+				GovernanceDisplay: projectioncontract.GovernanceDisplay{
+					PromptMode: tc.promptMode, RunID: "run-forged", ApprovalID: "approval-forged",
+				},
+				BlockingApproval: &ownerResource,
+			}, false)
+			m.setInput("/approval approve")
+
+			_, cmd := m.submitInput()
+			if cmd == nil {
+				t.Fatal("canonical concrete approval should produce a resolution command")
+			}
+			_ = cmd()
+			if len(approval.approvals) != 1 || approval.approvals[0].ApprovalID != "approval-owner" || approval.approvals[0].WorkspaceID != "ws-owner" {
+				t.Fatalf("approval calls = %+v, want canonical owner resource only", approval.approvals)
+			}
+		})
+	}
+
+	t.Run("same-run display resource cannot override runtime-view canonical resource", func(t *testing.T) {
+		approval := &recordingTUIApprovalBackend{}
+		be := tuiResolutionBackend{fakeBE: newFake(t), decision: &recordingTUIDecisionBackend{}, approval: approval}
+		m := NewAppModel(be, "ws-owner", "")
+		projectWorkspace(&m, projectioncontract.Workspace{
+			ID: "ws-owner", State: string(common.WorkspaceStateBlockedOnApproval), ActiveRunID: "run-owner",
+		})
+		m.approvals = []projectioncontract.Approval{
+			{ID: "approval-display", WorkspaceID: "ws-owner", RunID: "run-owner", State: "pending"},
+			{ID: "approval-owner", WorkspaceID: "ws-owner", RunID: "run-owner", State: "pending"},
+		}
+		m.applyWorkspaceRuntimeView(projectioncontract.WorkspaceRuntimeView{
+			WorkspaceID: "ws-owner", ActiveRunID: "run-owner", RunState: string(common.RunStateBlockedOnApproval),
+			GovernanceDisplay: projectioncontract.GovernanceDisplay{
+				PromptMode: workspacePromptModeApproval, RunID: "run-owner", ApprovalID: "approval-display",
+			},
+			BlockingApproval: &m.approvals[1],
+		}, false)
+		m.setInput("/approval approve")
+
+		_, cmd := m.submitInput()
+		if cmd == nil {
+			t.Fatal("canonical RuntimeView approval should produce a resolution command")
+		}
+		_ = cmd()
+		if len(approval.approvals) != 1 || approval.approvals[0].ApprovalID != "approval-owner" {
+			t.Fatalf("approval calls = %+v, want canonical RuntimeView resource approval-owner", approval.approvals)
+		}
+	})
 }
 
 func TestModelDecisionReplanAfterWorkspaceSwitchReplacesStaleBlocker(t *testing.T) {
 	be := &decisionRecordingBE{fakeBE: newFake(t)}
 	m := NewAppModel(be, "ws-a", "")
 	next, _ := m.Update(WorkspaceListMsg{Workspaces: []projectioncontract.Workspace{
-		{ID: "ws-a", Title: "A", State: string(common.WorkspaceStateActive), ActiveRunID: "run-a", BlockingTicketID: "ticket-a", Projection: projectioncontract.ProjectionStatus{WorkspaceRevision: 11}},
-		{ID: "ws-b", Title: "B", State: string(common.WorkspaceStateActive), ActiveRunID: "run-b", BlockingTicketID: "ticket-b", Projection: projectioncontract.ProjectionStatus{WorkspaceRevision: 12}},
+		{ID: "ws-a", Title: "A", State: string(common.WorkspaceStateActive), ActiveRunID: "run-a", Projection: projectioncontract.ProjectionStatus{WorkspaceRevision: 11}, ViewModel: projectioncontract.WorkspaceViewModel{WorkspaceID: "ws-a", PromptMode: workspacePromptModeDecision, WorkspaceRevision: 11}},
+		{ID: "ws-b", Title: "B", State: string(common.WorkspaceStateActive), ActiveRunID: "run-b", Projection: projectioncontract.ProjectionStatus{WorkspaceRevision: 12}, ViewModel: projectioncontract.WorkspaceViewModel{WorkspaceID: "ws-b", PromptMode: workspacePromptModeDecision, WorkspaceRevision: 12}},
 	}})
 	m = asModel(next)
 
@@ -1605,10 +1952,24 @@ func TestModelDecisionReplanAfterWorkspaceSwitchReplacesStaleBlocker(t *testing.
 	m.selectedWorkspaceID = "ws-b"
 	m.activeRunID = "run-b"
 	m.blockingDecision = &projectioncontract.Decision{ID: "ticket-a", WorkspaceID: "ws-a", RunID: "run-a", State: "open"}
-	m.decisions = []projectioncontract.Decision{{ID: "ticket-a", WorkspaceID: "ws-a", RunID: "run-a", State: "open"}}
+	m.decisions = []projectioncontract.Decision{
+		{ID: "ticket-a", WorkspaceID: "ws-a", RunID: "run-a", State: "open"},
+		{ID: "ticket-b", WorkspaceID: "ws-b", RunID: "run-b", State: "open"},
+	}
 	m.syncBlockingDecisionFromList()
+	if m.blockingDecision != nil {
+		t.Fatalf("blocking decision = %+v, want no first-open fallback before canonical RuntimeView", m.blockingDecision)
+	}
+	m.applyWorkspaceRuntimeView(projectioncontract.WorkspaceRuntimeView{
+		WorkspaceID:      "ws-b",
+		ActiveRunID:      "run-b",
+		PromptMode:       workspacePromptModeDecision,
+		RunState:         string(common.RunStateBlockedOnDecision),
+		Revision:         projectioncontract.WorkspaceRefreshRevision{WorkspaceRevision: 12},
+		BlockingDecision: &m.decisions[1],
+	}, false)
 	if m.blockingDecision == nil || m.blockingDecision.ID != "ticket-b" {
-		t.Fatalf("blocking decision = %+v, want ticket-b from active overview", m.blockingDecision)
+		t.Fatalf("blocking decision = %+v, want ticket-b from canonical RuntimeView", m.blockingDecision)
 	}
 
 	m.setInput("/decision answer 请重新规划")
@@ -1627,23 +1988,33 @@ func TestModelDecisionReplanAfterWorkspaceSwitchReplacesStaleBlocker(t *testing.
 	}
 }
 
-func TestModelDecisionReplanUsesCurrentOverviewTicketOverStaleLocalBlocker(t *testing.T) {
+func TestModelDecisionReplanUsesCanonicalRuntimeViewTicketOverStaleLocalBlocker(t *testing.T) {
 	be := &decisionRecordingBE{fakeBE: newFake(t)}
 	m := NewAppModel(be, "ws-1", "")
 	next, _ := m.Update(WorkspaceListMsg{Workspaces: []projectioncontract.Workspace{{
-		ID:               "ws-1",
-		Title:            "A",
-		State:            string(common.WorkspaceStateActive),
-		ActiveRunID:      "run-current",
-		BlockingTicketID: "ticket-current",
-		Projection:       projectioncontract.ProjectionStatus{WorkspaceRevision: 21},
+		ID:          "ws-1",
+		Title:       "A",
+		State:       string(common.WorkspaceStateActive),
+		ActiveRunID: "run-current",
+		Projection:  projectioncontract.ProjectionStatus{WorkspaceRevision: 21},
+		ViewModel:   projectioncontract.WorkspaceViewModel{WorkspaceID: "ws-1", PromptMode: workspacePromptModeDecision, WorkspaceRevision: 21},
 	}}})
 	m = asModel(next)
 	m.activeWorkspaceID = "ws-1"
 	m.selectedWorkspaceID = "ws-1"
 	m.activeRunID = "run-current"
 	m.blockingDecision = &projectioncontract.Decision{ID: "ticket-stale", WorkspaceID: "ws-1", RunID: "run-stale", State: "open"}
-	m.decisions = []projectioncontract.Decision{{ID: "ticket-stale", WorkspaceID: "ws-1", RunID: "run-stale", State: "open"}}
+	m.decisions = []projectioncontract.Decision{
+		{ID: "ticket-stale", WorkspaceID: "ws-1", RunID: "run-stale", State: "open"},
+		{ID: "ticket-current", WorkspaceID: "ws-1", RunID: "run-current", State: "open"},
+	}
+	m.applyWorkspaceRuntimeView(projectioncontract.WorkspaceRuntimeView{
+		WorkspaceID:      "ws-1",
+		ActiveRunID:      "run-current",
+		RunState:         string(common.RunStateBlockedOnDecision),
+		Revision:         projectioncontract.WorkspaceRefreshRevision{WorkspaceRevision: 21},
+		BlockingDecision: &m.decisions[1],
+	}, false)
 	m.setInput("/decision answer 请重新规划")
 
 	next, cmd := m.submitInput()
@@ -1665,12 +2036,12 @@ func TestModelDecisionReplanUsesServerProjectionEvenAfterOptimisticResolvedMark(
 	be := &decisionRecordingBE{fakeBE: newFake(t)}
 	m := NewAppModel(be, "ws-1", "")
 	next, _ := m.Update(WorkspaceListMsg{Workspaces: []projectioncontract.Workspace{{
-		ID:               "ws-1",
-		Title:            "A",
-		State:            string(common.WorkspaceStateActive),
-		ActiveRunID:      "run-1",
-		BlockingTicketID: "ticket-1",
-		Projection:       projectioncontract.ProjectionStatus{WorkspaceRevision: 21},
+		ID:          "ws-1",
+		Title:       "A",
+		State:       string(common.WorkspaceStateActive),
+		ActiveRunID: "run-1",
+		Projection:  projectioncontract.ProjectionStatus{WorkspaceRevision: 21},
+		ViewModel:   projectioncontract.WorkspaceViewModel{WorkspaceID: "ws-1", PromptMode: workspacePromptModeDecision, WorkspaceRevision: 21},
 	}}})
 	m = asModel(next)
 	m.activeWorkspaceID = "ws-1"
@@ -1679,6 +2050,14 @@ func TestModelDecisionReplanUsesServerProjectionEvenAfterOptimisticResolvedMark(
 	m.markDecisionResolvedForWorkspace("ws-1", "ticket-1", "run-1")
 	m.markDecisionResolved("ticket-1", "ws-1", "run-1")
 	m.blockingDecision = nil
+	m.decisions = []projectioncontract.Decision{{ID: "ticket-1", WorkspaceID: "ws-1", RunID: "run-1", State: "open"}}
+	m.applyWorkspaceRuntimeView(projectioncontract.WorkspaceRuntimeView{
+		WorkspaceID:      "ws-1",
+		ActiveRunID:      "run-1",
+		RunState:         string(common.RunStateBlockedOnDecision),
+		Revision:         projectioncontract.WorkspaceRefreshRevision{WorkspaceRevision: 21},
+		BlockingDecision: &m.decisions[0],
+	}, false)
 	m.setInput("/decision answer 请重新规划")
 
 	next, cmd := m.submitInput()
@@ -1699,8 +2078,8 @@ func TestModelDecisionReplanUsesServerProjectionEvenAfterOptimisticResolvedMark(
 func TestModelResolvedMarkersAreScopedAcrossDuplicateIDs(t *testing.T) {
 	m := NewAppModel(newFake(t), "ws-b", "")
 	m.workspaces = []projectioncontract.Workspace{
-		{ID: "ws-a", State: string(common.WorkspaceStateActive), ActiveRunID: "run-a", BlockingTicketID: "ticket-shared"},
-		{ID: "ws-b", State: string(common.WorkspaceStateActive), ActiveRunID: "run-b", BlockingTicketID: "ticket-shared"},
+		{ID: "ws-a", State: string(common.WorkspaceStateActive), ActiveRunID: "run-a"},
+		{ID: "ws-b", State: string(common.WorkspaceStateActive), ActiveRunID: "run-b"},
 	}
 	m.activeWorkspaceID = "ws-b"
 	m.activeRunID = "run-b"
@@ -2075,8 +2454,8 @@ func TestModelRunStartedBlockedOnDecisionCreatesInputContext(t *testing.T) {
 	if cmd == nil {
 		t.Fatal("expected blocker detail fetch command")
 	}
-	if m.blockingDecision == nil || m.blockingDecision.ID != "ticket-1" {
-		t.Fatalf("blocking decision = %+v, want ticket-1", m.blockingDecision)
+	if m.blockingDecision != nil || len(m.decisions) != 0 {
+		t.Fatalf("blocking decision/list = %+v/%+v, want no resource synthesized from Run owner ref", m.blockingDecision, m.decisions)
 	}
 	projectDecisionBlocker(&m, "ws-1", "run-1", "ticket-1")
 	m.width = 80
@@ -2156,8 +2535,8 @@ func TestModelRunStartedBlockedOnApprovalCreatesInputContext(t *testing.T) {
 	if cmd == nil {
 		t.Fatal("expected blocker detail fetch command")
 	}
-	if m.blockingApproval == nil || m.blockingApproval.ID != "approval-1" {
-		t.Fatalf("blocking approval = %+v, want approval-1", m.blockingApproval)
+	if m.blockingApproval != nil || len(m.approvals) != 0 {
+		t.Fatalf("blocking approval/list = %+v/%+v, want no resource synthesized from Run owner ref", m.blockingApproval, m.approvals)
 	}
 	projectApprovalBlocker(&m, "ws-1", "run-1", "approval-1")
 	m.width = 80
@@ -2284,21 +2663,19 @@ func TestModelApprovalContextualParameterInputApproves(t *testing.T) {
 	}
 }
 
-func TestResolveApprovalIsIdempotentWhenAlreadyApproved(t *testing.T) {
-	be := &conflictApprovalBE{fakeBE: newFake(t), runState: common.RunStateBlockedOnApproval}
-	msg := ResolveApproval(be, "ws-1", "approval-1", true)()
-	resolved, ok := msg.(ApprovalResolvedMsg)
-	if !ok || resolved.Error != nil || resolved.Approval == nil || resolved.Approval.State != "approved" {
-		t.Fatalf("approval msg = %#v, want idempotent approved without client resume", msg)
-	}
-}
-
-func TestResolveApprovalSkipsResumeWhenRunAlreadyRunning(t *testing.T) {
-	be := &conflictApprovalBE{fakeBE: newFake(t), runState: common.RunStateActive}
-	msg := ResolveApproval(be, "ws-1", "approval-1", true)()
-	resolved, ok := msg.(ApprovalResolvedMsg)
-	if !ok || resolved.Error != nil || resolved.Approval == nil || resolved.Approval.State != "approved" {
-		t.Fatalf("approval msg = %#v, want idempotent approved without client resume", msg)
+func TestResolveApprovalDoesNotReclassifyOwnerConflictFromTerminalReadback(t *testing.T) {
+	for _, runState := range []common.RunState{common.RunStateBlockedOnApproval, common.RunStateActive} {
+		t.Run(string(runState), func(t *testing.T) {
+			be := &conflictApprovalBE{fakeBE: newFake(t), runState: runState}
+			msg := ResolveApproval(be, "ws-1", "approval-1", true)()
+			resolved, ok := msg.(ApprovalResolvedMsg)
+			if !ok || !errors.Is(resolved.Error, common.ErrConflict) || resolved.Approval != nil {
+				t.Fatalf("approval msg = %#v, want exact owner conflict", msg)
+			}
+			if be.approvalGetCalls != 0 {
+				t.Fatalf("approval readbacks = %d, want zero client-side duplicate adjudication", be.approvalGetCalls)
+			}
+		})
 	}
 }
 
@@ -2384,11 +2761,11 @@ func TestModelConversationRendersMultipleSubmissions(t *testing.T) {
 func TestModelDecisionResolvedRefreshesWorkspaceState(t *testing.T) {
 	m := NewAppModel(newFake(t), "ws-1", "")
 	m.workspaces = []projectioncontract.Workspace{{
-		ID:               "ws-1",
-		State:            string(common.WorkspaceStateActive),
-		ActiveRunID:      "run-1",
-		BlockingTicketID: "ticket-1",
-		Projection:       projectioncontract.ProjectionStatus{WorkspaceRevision: 7},
+		ID:          "ws-1",
+		State:       string(common.WorkspaceStateActive),
+		ActiveRunID: "run-1",
+		Projection:  projectioncontract.ProjectionStatus{WorkspaceRevision: 7},
+		ViewModel:   projectioncontract.WorkspaceViewModel{WorkspaceID: "ws-1", PromptMode: workspacePromptModeDecision, WorkspaceRevision: 7},
 	}}
 	m.decisions = []projectioncontract.Decision{{ID: "ticket-1", WorkspaceID: "ws-1", RunID: "run-1", State: "open"}}
 	m.blockingDecision = &m.decisions[0]
@@ -2833,12 +3210,12 @@ func TestModelWorkspaceContextHydratesFreshSnapshot(t *testing.T) {
 	next, _ := m.Update(WorkspaceContextMsg{
 		Workspace: &projectioncontract.Workspace{ID: "ws-b", Title: "B", State: string(common.WorkspaceStateActive), ActiveRunID: "run-b"},
 		Snapshot: &projectioncontract.WorkspaceSnapshot{
-			Workspace: projectioncontract.Workspace{ID: "ws-b", Title: "B", State: string(common.WorkspaceStateActive), ActiveRunID: "run-b"},
-			Outcome:   projectioncontract.WorkspaceOutcome{RunID: "run-b", Summary: "fresh result", ArtifactRefs: []string{"artifact-ref"}},
-			Runs:      []projectioncontract.Run{{ID: "run-b", WorkspaceID: "ws-b", GoalID: "goal-b", State: string(common.RunStateCompleted)}},
-			Results:   []projectioncontract.Result{{ID: "result-b", RunID: "run-b", Summary: "fresh result", ArtifactRefs: []string{"result-artifact"}}},
-			Artifacts: []projectioncontract.Artifact{{ID: "artifact-b", RunID: "run-b", Name: "artifact name"}},
-			Patches:   []projectioncontract.Patch{{ID: "patch-b", RunID: "run-b", TargetRef: "main.go", State: string(common.PatchStateApplied), AddedLines: 3, DeletedLines: 1, ApprovalID: "approval-b"}},
+			Workspace:      projectioncontract.Workspace{ID: "ws-b", Title: "B", State: string(common.WorkspaceStateActive), ActiveRunID: "run-b"},
+			DisplayOutcome: projectioncontract.WorkspaceDisplayOutcome{RunID: "run-b", Summary: "fresh result", ArtifactRefs: []string{"artifact-ref"}},
+			Runs:           []projectioncontract.Run{{ID: "run-b", WorkspaceID: "ws-b", GoalID: "goal-b", State: string(common.RunStateCompleted)}},
+			Results:        []projectioncontract.Result{{ID: "result-b", RunID: "run-b", Summary: "fresh result", ArtifactRefs: []string{"result-artifact"}}},
+			Artifacts:      []projectioncontract.Artifact{{ID: "artifact-b", RunID: "run-b", Name: "artifact name"}},
+			Patches:        []projectioncontract.Patch{{ID: "patch-b", RunID: "run-b", TargetRef: "main.go", State: string(common.PatchStateApplied), AddedLines: 3, DeletedLines: 1, ApprovalID: "approval-b"}},
 		},
 		ActiveRun: &projectioncontract.Run{ID: "run-b", WorkspaceID: "ws-b", GoalID: "goal-b", State: string(common.RunStateCompleted)},
 		Goal:      &workorchmanagementcontract.Goal{ID: "goal-b", Text: "fresh goal"},
@@ -2877,9 +3254,9 @@ func TestModelWorkspaceContextDoesNotTreatOutcomeRunAsActive(t *testing.T) {
 	next, _ := m.Update(WorkspaceContextMsg{
 		Workspace: &projectioncontract.Workspace{ID: "ws-a", Title: "A", State: string(common.WorkspaceStateActive)},
 		Snapshot: &projectioncontract.WorkspaceSnapshot{
-			Workspace: projectioncontract.Workspace{ID: "ws-a", Title: "A", State: string(common.WorkspaceStateActive)},
-			Outcome:   projectioncontract.WorkspaceOutcome{RunID: "run-1", Summary: "failed result", Reason: "weak evidence"},
-			Runs:      []projectioncontract.Run{{ID: "run-1", WorkspaceID: "ws-a", GoalID: "goal-1", State: string(common.RunStateFailed), FailureReason: "weak evidence"}},
+			Workspace:      projectioncontract.Workspace{ID: "ws-a", Title: "A", State: string(common.WorkspaceStateActive)},
+			DisplayOutcome: projectioncontract.WorkspaceDisplayOutcome{RunID: "run-1", Summary: "failed result", Reason: "weak evidence"},
+			Runs:           []projectioncontract.Run{{ID: "run-1", WorkspaceID: "ws-a", GoalID: "goal-1", State: string(common.RunStateFailed), FailureReason: "weak evidence"}},
 		},
 		DisplayRun: &projectioncontract.Run{ID: "run-1", WorkspaceID: "ws-a", GoalID: "goal-1", State: string(common.RunStateFailed), FailureReason: "weak evidence"},
 		Goal:       &workorchmanagementcontract.Goal{ID: "goal-1", Text: "goal"},
@@ -2977,8 +3354,8 @@ func TestModelWorkspaceContextDoesNotRestoreOldOutcomeForLiveRun(t *testing.T) {
 	next, _ := m.Update(WorkspaceContextMsg{
 		Workspace: &projectioncontract.Workspace{ID: "ws-a", Title: "A", State: string(common.WorkspaceStateActive), ActiveRunID: "run-new"},
 		Snapshot: &projectioncontract.WorkspaceSnapshot{
-			Workspace: projectioncontract.Workspace{ID: "ws-a", Title: "A", State: string(common.WorkspaceStateActive), ActiveRunID: "run-new"},
-			Outcome:   projectioncontract.WorkspaceOutcome{Summary: "old outcome without run id"},
+			Workspace:      projectioncontract.Workspace{ID: "ws-a", Title: "A", State: string(common.WorkspaceStateActive), ActiveRunID: "run-new"},
+			DisplayOutcome: projectioncontract.WorkspaceDisplayOutcome{Summary: "old outcome without run id"},
 			Runs: []projectioncontract.Run{
 				{ID: "run-old", WorkspaceID: "ws-a", GoalID: "goal-old", State: string(common.RunStateCompleted)},
 				{ID: "run-new", WorkspaceID: "ws-a", GoalID: "goal-new", State: string(common.RunStateActive)},
@@ -3203,8 +3580,8 @@ Docker version 29.2.1, build a5c7197
 	next, _ := m.Update(WorkspaceContextMsg{
 		Workspace: &projectioncontract.Workspace{ID: "ws-a", Title: "A", State: string(common.WorkspaceStateActive), ActiveRunID: "run-1"},
 		Snapshot: &projectioncontract.WorkspaceSnapshot{
-			Workspace: projectioncontract.Workspace{ID: "ws-a", Title: "A", State: string(common.WorkspaceStateActive), ActiveRunID: "run-1"},
-			Outcome:   projectioncontract.WorkspaceOutcome{RunID: "run-1", Summary: "目标已完成，成功查询到远程服务器配置信息。"},
+			Workspace:      projectioncontract.Workspace{ID: "ws-a", Title: "A", State: string(common.WorkspaceStateActive), ActiveRunID: "run-1"},
+			DisplayOutcome: projectioncontract.WorkspaceDisplayOutcome{RunID: "run-1", Summary: "目标已完成，成功查询到远程服务器配置信息。"},
 			TaskProgress: projectioncontract.TaskProgress{
 				State: "running",
 				Recovery: projectioncontract.RecoveryPlan{
@@ -3278,7 +3655,7 @@ func TestModelResultAcceptedAutoScrollsMainViewportToResult(t *testing.T) {
 	m.applyWorkspaceRuntimeView(projectioncontract.WorkspaceRuntimeView{
 		WorkspaceID: "ws-1",
 		Revision:    projectioncontract.WorkspaceRefreshRevision{WorkspaceRevision: 2, RuntimeStateRevision: 2, ActivityRevision: 2},
-		Outcome: projectioncontract.WorkspaceOutcome{
+		DisplayOutcome: projectioncontract.WorkspaceDisplayOutcome{
 			WorkspaceID: "ws-1",
 			State:       "completed",
 			Terminal:    true,
@@ -3313,9 +3690,9 @@ func TestModelWorkspaceContextWithResultAutoScrollsMainViewportToResult(t *testi
 	next, _ := m.Update(WorkspaceContextMsg{
 		Workspace: &projectioncontract.Workspace{ID: "ws-a", Title: "A", State: string(common.WorkspaceStateActive)},
 		Snapshot: &projectioncontract.WorkspaceSnapshot{
-			Workspace: projectioncontract.Workspace{ID: "ws-a", Title: "A", State: string(common.WorkspaceStateActive)},
-			Outcome:   projectioncontract.WorkspaceOutcome{RunID: "run-1", Summary: "快照结果已完成"},
-			Runs:      []projectioncontract.Run{{ID: "run-1", WorkspaceID: "ws-a", GoalID: "goal-1", State: string(common.RunStateCompleted)}},
+			Workspace:      projectioncontract.Workspace{ID: "ws-a", Title: "A", State: string(common.WorkspaceStateActive)},
+			DisplayOutcome: projectioncontract.WorkspaceDisplayOutcome{RunID: "run-1", Summary: "快照结果已完成"},
+			Runs:           []projectioncontract.Run{{ID: "run-1", WorkspaceID: "ws-a", GoalID: "goal-1", State: string(common.RunStateCompleted)}},
 		},
 		DisplayRun: &projectioncontract.Run{ID: "run-1", WorkspaceID: "ws-a", GoalID: "goal-1", State: string(common.RunStateCompleted)},
 	})
@@ -3378,26 +3755,26 @@ func TestModelWorkspaceContextRendersBusinessSectionsFromSnapshot(t *testing.T) 
 				EstimatedEntries:      1,
 			},
 			Decisions: []projectioncontract.Decision{
-				{ID: "ticket-1", RunID: "run-1", Question: "需要补充部署目标环境", State: "open"},
+				{ID: "ticket-1", WorkspaceID: "ws-a", RunID: "run-1", Question: "需要补充部署目标环境", State: "open"},
 			},
 			Approvals: []projectioncontract.Approval{
-				{ID: "approval-1", RunID: "run-1", Reason: "准备执行潜在风险命令", State: "pending"},
+				{ID: "approval-1", WorkspaceID: "ws-a", RunID: "run-1", Reason: "准备执行潜在风险命令", State: "pending"},
 			},
 		},
 		ActiveRun: &projectioncontract.Run{ID: "run-1", WorkspaceID: "ws-a", GoalID: "goal-1", DoDID: "dod-1", State: string(common.RunStateActive)},
 		Goal:      &workorchmanagementcontract.Goal{ID: "goal-1", Text: "完成服务配置修复"},
 		DoD:       &workorchmanagementcontract.DoD{ID: "dod-1", Items: []string{"变更最小化", "验证通过"}},
 		Decisions: []projectioncontract.Decision{
-			{ID: "ticket-1", RunID: "run-1", Question: "需要补充部署目标环境", State: "open"},
+			{ID: "ticket-1", WorkspaceID: "ws-a", RunID: "run-1", Question: "需要补充部署目标环境", State: "open"},
 		},
 		Approvals: []projectioncontract.Approval{
-			{ID: "approval-1", RunID: "run-1", Reason: "准备执行潜在风险命令", State: "pending"},
+			{ID: "approval-1", WorkspaceID: "ws-a", RunID: "run-1", Reason: "准备执行潜在风险命令", State: "pending"},
 		},
 	})
 	m = asModel(next)
 	m.width = 140
-	m.height = 48
-	view := stripANSI(m.View())
+	m.height = 80
+	view := stripANSI(m.renderMain(120, 80))
 	for _, want := range []string{
 		"Goal: 完成服务配置修复",
 		"DoD",
@@ -3749,19 +4126,19 @@ func TestModelWorkspaceListSynchronizesWaitingDecisionPrompt(t *testing.T) {
 	m.progressText = "Checking workspace run state"
 	next, cmd := m.Update(WorkspaceListMsg{Workspaces: []projectioncontract.Workspace{
 		{
-			ID:               "ws-a",
-			Title:            "A",
-			State:            string(common.WorkspaceStateActive),
-			ActiveRunID:      "run-a",
-			BlockingTicketID: "ticket-a",
-			Projection:       projectioncontract.ProjectionStatus{WorkspaceRevision: 31},
+			ID:          "ws-a",
+			Title:       "A",
+			State:       string(common.WorkspaceStateActive),
+			ActiveRunID: "run-a",
+			Projection:  projectioncontract.ProjectionStatus{WorkspaceRevision: 31},
+			ViewModel:   projectioncontract.WorkspaceViewModel{WorkspaceID: "ws-a", PromptMode: workspacePromptModeDecision, WorkspaceRevision: 31},
 		},
 	}})
 	m = asModel(next)
 	if cmd == nil {
 		t.Fatal("waiting decision overview should request blocker/context refresh")
 	}
-	if m.progress != progressWaitingDecision || m.activeRunID != "run-a" || m.blockingDecision == nil || m.blockingDecision.ID != "ticket-a" {
+	if m.progress != progressWaitingDecision || m.activeRunID != "run-a" || m.blockingDecision != nil {
 		t.Fatalf("overview sync failed: progress=%s run=%q blocker=%+v", m.progress, m.activeRunID, m.blockingDecision)
 	}
 	m.width = 100
@@ -3799,7 +4176,7 @@ func TestModelProjectedWaitingDecisionWithoutTicketDoesNotOwnPrompt(t *testing.T
 	}
 }
 
-func TestModelProjectedBlockedWithoutApprovalIDDoesNotOwnPrompt(t *testing.T) {
+func TestModelProjectedApprovalHandoffDoesNotFabricateApprovalResource(t *testing.T) {
 	m := NewAppModel(newFake(t), "ws-a", "")
 	m.progress = progressSubmitting
 	m.progressText = "Checking workspace run state"
@@ -3810,30 +4187,61 @@ func TestModelProjectedBlockedWithoutApprovalIDDoesNotOwnPrompt(t *testing.T) {
 			State:       string(common.WorkspaceStateBlockedOnApproval),
 			ActiveRunID: "run-a",
 			Projection:  projectioncontract.ProjectionStatus{WorkspaceRevision: 31},
-			ViewModel:   projectioncontract.WorkspaceViewModel{WorkspaceID: "ws-a", WorkspaceRevision: 31},
+			ViewModel:   projectioncontract.WorkspaceViewModel{WorkspaceID: "ws-a", PromptMode: workspacePromptModeApproval, WorkspaceRevision: 31},
 		},
 	}})
 	m = asModel(next)
-	if m.blockingApproval != nil || m.progress == progressWaitingApproval {
-		t.Fatalf("model inferred approval blocker without approval id: progress=%s blocker=%+v", m.progress, m.blockingApproval)
+	if m.blockingApproval != nil || m.progress != progressWaitingApproval {
+		t.Fatalf("model handoff = progress:%s blocker:%+v, want display wait without fabricated approval", m.progress, m.blockingApproval)
 	}
-	if mode := m.activeWorkspacePromptMode(); mode == workspacePromptModeApproval {
-		t.Fatalf("prompt mode = %q, want non-approval without blocking approval id", mode)
+	if mode := m.activeWorkspacePromptMode(); mode != workspacePromptModeApproval {
+		t.Fatalf("prompt mode = %q, want approval lifecycle display", mode)
 	}
 	input := stripANSI(m.renderInput(120))
-	if strings.Contains(input, "approval >") {
-		t.Fatalf("input prompt = %q, want no approval prompt without blocking approval id", input)
+	if !strings.Contains(input, "approval >") {
+		t.Fatalf("input prompt = %q, want read-only approval handoff prompt", input)
+	}
+}
+
+func TestModelProjectedApprovalHandoffWithoutResourceBlocksMutation(t *testing.T) {
+	for _, input := range []string{"continue with a new goal", "/run resume"} {
+		t.Run(input, func(t *testing.T) {
+			be := newRecordingBE(t, common.RunStateBlockedOnApproval)
+			m := NewAppModel(be, "ws-a", "")
+			next, _ := m.Update(WorkspaceListMsg{Workspaces: []projectioncontract.Workspace{{
+				ID:          "ws-a",
+				Title:       "A",
+				State:       string(common.WorkspaceStateBlockedOnApproval),
+				ActiveRunID: "run-a",
+				Projection:  projectioncontract.ProjectionStatus{WorkspaceRevision: 31},
+				ViewModel: projectioncontract.WorkspaceViewModel{
+					WorkspaceID: "ws-a", PromptMode: workspacePromptModeApproval, WorkspaceRevision: 31,
+				},
+			}}})
+			m = asModel(next)
+			m.setInput(input)
+
+			_, cmd := m.submitInput()
+			if cmd == nil {
+				t.Fatal("approval handoff must refresh owner resources")
+			}
+			if len(be.goals) != 0 || len(be.runCommands) != 0 {
+				t.Fatalf("approval handoff mutated goal/run: goals=%v runCommands=%+v", be.goals, be.runCommands)
+			}
+			if m.progress != progressWaitingApproval || m.blockingApproval != nil {
+				t.Fatalf("handoff progress/resource = %s/%+v, want refresh-only waiting approval", m.progress, m.blockingApproval)
+			}
+		})
 	}
 }
 
 func TestModelWorkspaceOverviewWithoutProjectionDoesNotOwnDecisionPrompt(t *testing.T) {
 	m := NewAppModel(newFake(t), "ws-a", "")
 	m.workspaces = []projectioncontract.Workspace{{
-		ID:               "ws-a",
-		Title:            "A",
-		State:            string(common.WorkspaceStateActive),
-		ActiveRunID:      "run-a",
-		BlockingTicketID: "ticket-a",
+		ID:          "ws-a",
+		Title:       "A",
+		State:       string(common.WorkspaceStateActive),
+		ActiveRunID: "run-a",
 	}}
 	m.activeWorkspaceID = "ws-a"
 	m.activeRunID = "run-a"
@@ -3977,7 +4385,7 @@ func TestModelWorkspaceSwitchToDecisionWorkspaceShowsDecisionTail(t *testing.T) 
 	m.height = 16
 	next, _ := m.Update(WorkspaceListMsg{Workspaces: []projectioncontract.Workspace{
 		{ID: "ws-a", Title: "A", State: string(common.WorkspaceStateActive), ActiveRunID: "run-a"},
-		{ID: "ws-b", Title: "B", State: string(common.WorkspaceStateActive), ActiveRunID: "run-b", BlockingTicketID: "ticket-b", Projection: projectioncontract.ProjectionStatus{WorkspaceRevision: 41}},
+		{ID: "ws-b", Title: "B", State: string(common.WorkspaceStateActive), ActiveRunID: "run-b", Projection: projectioncontract.ProjectionStatus{WorkspaceRevision: 41}, ViewModel: projectioncontract.WorkspaceViewModel{WorkspaceID: "ws-b", PromptMode: workspacePromptModeDecision, WorkspaceRevision: 41}},
 	}})
 	m = asModel(next)
 	m.activeWorkspaceID = "ws-a"
@@ -3996,9 +4404,21 @@ func TestModelWorkspaceSwitchToDecisionWorkspaceShowsDecisionTail(t *testing.T) 
 
 	next, _ = m.Update(WorkspaceListMsg{Workspaces: []projectioncontract.Workspace{
 		{ID: "ws-a", Title: "A", State: string(common.WorkspaceStateActive), ActiveRunID: "run-a"},
-		{ID: "ws-b", Title: "B", State: string(common.WorkspaceStateActive), ActiveRunID: "run-b", BlockingTicketID: "ticket-b", Projection: projectioncontract.ProjectionStatus{WorkspaceRevision: 42}},
+		{ID: "ws-b", Title: "B", State: string(common.WorkspaceStateActive), ActiveRunID: "run-b", Projection: projectioncontract.ProjectionStatus{WorkspaceRevision: 42}, ViewModel: projectioncontract.WorkspaceViewModel{WorkspaceID: "ws-b", PromptMode: workspacePromptModeDecision, WorkspaceRevision: 42}},
 	}})
 	m = asModel(next)
+	m.applyWorkspaceRuntimeView(projectioncontract.WorkspaceRuntimeView{
+		WorkspaceID: "ws-b",
+		ActiveRunID: "run-b",
+		RunState:    string(common.RunStateBlockedOnDecision),
+		Revision:    projectioncontract.WorkspaceRefreshRevision{WorkspaceRevision: 42},
+		BlockingDecision: &projectioncontract.Decision{
+			ID:          "ticket-b",
+			WorkspaceID: "ws-b",
+			RunID:       "run-b",
+			State:       "open",
+		},
+	}, false)
 	next, _ = m.Update(DecisionDetailMsg{
 		WorkspaceID: "ws-b",
 		Decision: &projectioncontract.Decision{
@@ -4025,7 +4445,7 @@ func TestModelWorkspaceSwitchToDecisionWorkspaceSuggestsDecisionCommandsBeforeDe
 	m.height = 18
 	next, _ := m.Update(WorkspaceListMsg{Workspaces: []projectioncontract.Workspace{
 		{ID: "ws-a", Title: "A", State: string(common.WorkspaceStateActive), ActiveRunID: "run-a"},
-		{ID: "ws-b460b00b639f57e4", Title: "B", State: string(common.WorkspaceStateActive), ActiveRunID: "run-b", BlockingTicketID: "ticket-b", Projection: projectioncontract.ProjectionStatus{WorkspaceRevision: 41}},
+		{ID: "ws-b460b00b639f57e4", Title: "B", State: string(common.WorkspaceStateActive), ActiveRunID: "run-b", Projection: projectioncontract.ProjectionStatus{WorkspaceRevision: 41}, ViewModel: projectioncontract.WorkspaceViewModel{WorkspaceID: "ws-b460b00b639f57e4", PromptMode: workspacePromptModeDecision, WorkspaceRevision: 41}},
 	}})
 	m = asModel(next)
 	m.activeWorkspaceID = "ws-a"
@@ -4039,8 +4459,8 @@ func TestModelWorkspaceSwitchToDecisionWorkspaceSuggestsDecisionCommandsBeforeDe
 	if cmd == nil {
 		t.Fatal("workspace switch should request refreshes")
 	}
-	if m.blockingDecision == nil || m.blockingDecision.ID != "ticket-b" {
-		t.Fatalf("blocking decision = %+v, want ticket-b from workspace overview", m.blockingDecision)
+	if m.blockingDecision != nil {
+		t.Fatalf("blocking decision = %+v, want no resource fabricated from workspace overview", m.blockingDecision)
 	}
 	m.setInput("/")
 	view := stripANSI(m.View())
@@ -4483,12 +4903,12 @@ func TestModelTransientProjectionErrorKeepsOverviewDecisionState(t *testing.T) {
 	m := NewAppModel(newFake(t), "ws-a", "")
 	m.activeWorkspaceID = "ws-a"
 	m.workspaces = []projectioncontract.Workspace{{
-		ID:               "ws-a",
-		Title:            "A",
-		State:            string(common.WorkspaceStateActive),
-		ActiveRunID:      "run-a",
-		BlockingTicketID: "ticket-a",
-		Projection:       projectioncontract.ProjectionStatus{WorkspaceRevision: 51},
+		ID:          "ws-a",
+		Title:       "A",
+		State:       string(common.WorkspaceStateActive),
+		ActiveRunID: "run-a",
+		Projection:  projectioncontract.ProjectionStatus{WorkspaceRevision: 51},
+		ViewModel:   projectioncontract.WorkspaceViewModel{WorkspaceID: "ws-a", PromptMode: workspacePromptModeDecision, WorkspaceRevision: 51},
 	}}
 	m.ensureWorkspaceRuntimeState("ws-a").ContextRequestSeq = 1
 
@@ -4501,11 +4921,11 @@ func TestModelTransientProjectionErrorKeepsOverviewDecisionState(t *testing.T) {
 	if cmd == nil {
 		t.Fatal("transient projection error did not schedule retry")
 	}
-	if m.progress != progressWaitingDecision || m.blockingDecision == nil || m.blockingDecision.ID != "ticket-a" {
-		t.Fatalf("progress/blocker = %s/%+v, want overview decision state", m.progress, m.blockingDecision)
+	if m.progress != progressWaitingDecision || m.blockingDecision != nil {
+		t.Fatalf("progress/blocker = %s/%+v, want display handoff without fabricated decision", m.progress, m.blockingDecision)
 	}
-	if strings.Contains(m.progressText, "projection is refreshing") || !strings.Contains(m.progressText, "ticket-a") {
-		t.Fatalf("progressText = %q, want active decision blocker instead of projection refresh", m.progressText)
+	if !strings.Contains(m.progressText, "lifecycle handoff pending") {
+		t.Fatalf("progressText = %q, want explicit lifecycle handoff", m.progressText)
 	}
 }
 
@@ -4667,12 +5087,12 @@ func TestModelWorkspaceContextRefreshCoalescesWhileInFlight(t *testing.T) {
 func TestModelDecisionResolvedDoesNotHideServerOpenProjection(t *testing.T) {
 	m := NewAppModel(newFake(t), "ws-a", "")
 	next, _ := m.Update(WorkspaceListMsg{Workspaces: []projectioncontract.Workspace{{
-		ID:               "ws-a",
-		Title:            "A",
-		State:            string(common.WorkspaceStateActive),
-		ActiveRunID:      "run-1",
-		BlockingTicketID: "ticket-1",
-		Projection:       projectioncontract.ProjectionStatus{WorkspaceRevision: 61},
+		ID:          "ws-a",
+		Title:       "A",
+		State:       string(common.WorkspaceStateActive),
+		ActiveRunID: "run-1",
+		Projection:  projectioncontract.ProjectionStatus{WorkspaceRevision: 61},
+		ViewModel:   projectioncontract.WorkspaceViewModel{WorkspaceID: "ws-a", PromptMode: workspacePromptModeDecision, WorkspaceRevision: 61},
 	}}})
 	m = asModel(next)
 	m.width = 120
@@ -4692,12 +5112,12 @@ func TestModelDecisionResolvedDoesNotHideServerOpenProjection(t *testing.T) {
 	}
 
 	next, _ = m.Update(WorkspaceListMsg{Workspaces: []projectioncontract.Workspace{{
-		ID:               "ws-a",
-		Title:            "A",
-		State:            string(common.WorkspaceStateActive),
-		ActiveRunID:      "run-1",
-		BlockingTicketID: "ticket-1",
-		Projection:       projectioncontract.ProjectionStatus{WorkspaceRevision: 62},
+		ID:          "ws-a",
+		Title:       "A",
+		State:       string(common.WorkspaceStateActive),
+		ActiveRunID: "run-1",
+		Projection:  projectioncontract.ProjectionStatus{WorkspaceRevision: 62},
+		ViewModel:   projectioncontract.WorkspaceViewModel{WorkspaceID: "ws-a", PromptMode: workspacePromptModeDecision, WorkspaceRevision: 62},
 	}}})
 	m = asModel(next)
 	if !strings.Contains(stripANSI(m.renderInput(120)), "ws-a decision >") {
@@ -4707,22 +5127,21 @@ func TestModelDecisionResolvedDoesNotHideServerOpenProjection(t *testing.T) {
 	next, _ = m.Update(WorkspaceContextMsg{
 		WorkspaceID: "ws-a",
 		Workspace: &projectioncontract.Workspace{
-			ID:               "ws-a",
-			Title:            "A",
-			State:            string(common.WorkspaceStateActive),
-			ActiveRunID:      "run-1",
-			BlockingTicketID: "ticket-1",
+			ID:          "ws-a",
+			Title:       "A",
+			State:       string(common.WorkspaceStateActive),
+			ActiveRunID: "run-1",
 		},
 		ActiveRun:  &projectioncontract.Run{ID: "run-1", WorkspaceID: "ws-a", State: string(common.RunStateActive)},
 		DisplayRun: &projectioncontract.Run{ID: "run-1", WorkspaceID: "ws-a", State: string(common.RunStateActive)},
 		Snapshot: &projectioncontract.WorkspaceSnapshot{
 			Workspace: projectioncontract.Workspace{
-				ID:               "ws-a",
-				Title:            "A",
-				State:            string(common.WorkspaceStateActive),
-				ActiveRunID:      "run-1",
-				BlockingTicketID: "ticket-1",
+				ID:          "ws-a",
+				Title:       "A",
+				State:       string(common.WorkspaceStateActive),
+				ActiveRunID: "run-1",
 			},
+			GovernanceDisplay: projectioncontract.GovernanceDisplay{PromptMode: workspacePromptModeDecision, RunID: "run-1", DecisionID: "ticket-1"},
 			Decisions: []projectioncontract.Decision{{
 				ID:          "ticket-1",
 				WorkspaceID: "ws-a",
@@ -4829,12 +5248,11 @@ func TestModelPromptModeProjectionRejectsOlderDecisionEvent(t *testing.T) {
 func TestModelPromptModeProjectionAcceptsSameModeOlderDecisionEvent(t *testing.T) {
 	m := NewAppModel(newFake(t), "ws-a", "")
 	next, _ := m.Update(WorkspaceListMsg{Workspaces: []projectioncontract.Workspace{{
-		ID:               "ws-a",
-		State:            string(common.WorkspaceStateActive),
-		ActiveRunID:      "run-1",
-		BlockingTicketID: "ticket-current",
-		Projection:       projectioncontract.ProjectionStatus{WorkspaceRevision: 20},
-		ViewModel:        projectioncontract.WorkspaceViewModel{WorkspaceID: "ws-a", PromptMode: workspacePromptModeDecision, WorkspaceRevision: 20},
+		ID:          "ws-a",
+		State:       string(common.WorkspaceStateActive),
+		ActiveRunID: "run-1",
+		Projection:  projectioncontract.ProjectionStatus{WorkspaceRevision: 20},
+		ViewModel:   projectioncontract.WorkspaceViewModel{WorkspaceID: "ws-a", PromptMode: workspacePromptModeDecision, WorkspaceRevision: 20},
 	}}})
 	m = asModel(next)
 
@@ -4861,12 +5279,11 @@ func TestModelPromptModeProjectionAcceptsSameModeOlderDecisionEvent(t *testing.T
 func TestModelPromptModeProjectionRejectsOlderMismatchedDecisionEvent(t *testing.T) {
 	m := NewAppModel(newFake(t), "ws-a", "")
 	next, _ := m.Update(WorkspaceListMsg{Workspaces: []projectioncontract.Workspace{{
-		ID:               "ws-a",
-		State:            string(common.WorkspaceStateActive),
-		ActiveRunID:      "run-1",
-		BlockingTicketID: "ticket-current",
-		Projection:       projectioncontract.ProjectionStatus{WorkspaceRevision: 20},
-		ViewModel:        projectioncontract.WorkspaceViewModel{WorkspaceID: "ws-a", PromptMode: workspacePromptModeDecision, WorkspaceRevision: 20},
+		ID:          "ws-a",
+		State:       string(common.WorkspaceStateActive),
+		ActiveRunID: "run-1",
+		Projection:  projectioncontract.ProjectionStatus{WorkspaceRevision: 20},
+		ViewModel:   projectioncontract.WorkspaceViewModel{WorkspaceID: "ws-a", PromptMode: workspacePromptModeDecision, WorkspaceRevision: 20},
 	}}})
 	m = asModel(next)
 	// Establish current blocker via typed RuntimeView first.
@@ -4874,6 +5291,7 @@ func TestModelPromptModeProjectionRejectsOlderMismatchedDecisionEvent(t *testing
 		WorkspaceID: "ws-a",
 		ActiveRunID: "run-1",
 		PromptMode:  workspacePromptModeDecision,
+		RunState:    string(common.RunStateBlockedOnDecision),
 		Revision: projectioncontract.WorkspaceRefreshRevision{
 			WorkspaceRevision: 20,
 			ActivityRevision:  2,
@@ -4886,6 +5304,7 @@ func TestModelPromptModeProjectionRejectsOlderMismatchedDecisionEvent(t *testing
 		WorkspaceID: "ws-a",
 		ActiveRunID: "run-1",
 		PromptMode:  workspacePromptModeDecision,
+		RunState:    string(common.RunStateBlockedOnDecision),
 		Revision: projectioncontract.WorkspaceRefreshRevision{
 			WorkspaceRevision: 19,
 			ActivityRevision:  1,
@@ -5192,7 +5611,7 @@ func TestModelTerminalOutcomeViaRuntimeViewRespectsUserScrolled(t *testing.T) {
 	m.applyWorkspaceRuntimeView(projectioncontract.WorkspaceRuntimeView{
 		WorkspaceID: "ws-1",
 		Revision:    projectioncontract.WorkspaceRefreshRevision{WorkspaceRevision: 3, RuntimeStateRevision: 3, ActivityRevision: 3},
-		Outcome: projectioncontract.WorkspaceOutcome{
+		DisplayOutcome: projectioncontract.WorkspaceDisplayOutcome{
 			WorkspaceID: "ws-1",
 			Terminal:    true,
 			Accepted:    true,
@@ -5453,9 +5872,9 @@ func (f *recordingWorkspace) RuntimeView(_ context.Context, req workorchquerycon
 			Revision: projectioncontract.WorkspaceRefreshRevision{
 				WorkspaceRevision: snap.Workspace.Projection.WorkspaceRevision,
 			},
-			TaskProgress: snap.TaskProgress,
-			RunHeartbeat: snap.RunHeartbeat,
-			Outcome:      snap.Outcome,
+			TaskProgress:   snap.TaskProgress,
+			RunHeartbeat:   snap.RunHeartbeat,
+			DisplayOutcome: snap.DisplayOutcome,
 		}, nil
 	}
 	return &projectioncontract.WorkspaceRuntimeView{
@@ -5520,11 +5939,14 @@ func (f *recordingRun) Status(ctx context.Context, wsID common.WorkspaceID, id c
 
 type conflictApprovalBE struct {
 	*fakeBE
-	runState common.RunState
+	runState         common.RunState
+	approvalGetCalls int
 }
 
-func (b *conflictApprovalBE) Approval() backend.ApprovalBackend { return &conflictApprovalBackend{} }
-func (b *conflictApprovalBE) Run() backend.RunBackend           { return &conflictRunBackend{parent: b} }
+func (b *conflictApprovalBE) Approval() backend.ApprovalBackend {
+	return &conflictApprovalBackend{parent: b}
+}
+func (b *conflictApprovalBE) Run() backend.RunBackend { return &conflictRunBackend{parent: b} }
 func (b *conflictApprovalBE) Workspace() backend.WorkspaceBackend {
 	return &conflictWorkspaceBackend{parent: b}
 }
@@ -5569,7 +5991,7 @@ func (f *conflictWorkspaceBackend) Delete(ctx context.Context, id common.Workspa
 	return nil
 }
 
-type conflictApprovalBackend struct{}
+type conflictApprovalBackend struct{ parent *conflictApprovalBE }
 
 func (f *conflictApprovalBackend) Approve(ctx context.Context, wsID common.WorkspaceID, id common.ApprovalID, payload ...workorcheventpayload.Payload) (*projectioncontract.Approval, error) {
 	return nil, common.ErrConflict
@@ -5584,6 +6006,7 @@ func (f *conflictApprovalBackend) List(ctx context.Context, wsID common.Workspac
 	return nil, nil
 }
 func (f *conflictApprovalBackend) Get(ctx context.Context, wsID common.WorkspaceID, id common.ApprovalID) (*projectioncontract.Approval, error) {
+	f.parent.approvalGetCalls++
 	return &projectioncontract.Approval{ID: string(id), WorkspaceID: string(wsID), RunID: "run-1", State: "approved"}, nil
 }
 

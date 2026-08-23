@@ -119,7 +119,7 @@ func (o *Biz) AdmitAndSealRuntimeCandidateAttempt(ctx context.Context, workspace
 }
 
 func (o *Biz) CommitRuntimeGovernanceResolution(ctx context.Context, resolution runtimecontract.RuntimeGovernanceResolution) (runtime.EvidenceCommitResult, error) {
-	result, err := o.submitRuntimeInternalEvent(ctx, runtime.RuntimeInternalEvent{Kind: runtime.RuntimeInternalEventGovernanceResolutionObserved, Scope: runtime.RuntimeInternalEventScope{WorkspaceID: resolution.WorkspaceID, RunID: resolution.RunID}, Transaction: &runtime.RuntimeInternalTransactionPayload{GovernanceResolution: &resolution}})
+	result, err := o.submitRuntimeInternalEvent(ctx, runtime.RuntimeInternalEvent{Kind: runtime.RuntimeInternalEventGovernanceResolutionObserved, Scope: runtime.RuntimeInternalEventScope{WorkspaceID: resolution.WorkspaceID, RunID: resolution.RunID}, Transaction: runtimeGovernanceResolutionTransactionForTest(resolution)})
 	if result.Evidence == nil {
 		return runtime.EvidenceCommitResult{Aggregate: result.Aggregate}, err
 	}

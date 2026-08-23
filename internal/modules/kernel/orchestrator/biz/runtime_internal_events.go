@@ -158,9 +158,9 @@ func (m *Biz) runtimeConsumeRecoveryBudget(ctx context.Context, aggregate runtim
 // The following helpers keep SM-4 retry mutations behind the one owner-local
 // internal-event dispatcher. The persisted lease is the retry authority;
 // callers receive only its immutable identity, never repository/CAS access.
-func (m *Biz) runtimeScheduleDriveLease(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, lease runtimecontract.RuntimeDriveLease) (runtimecontract.RuntimeDriveLease, bool, error) {
+func (m *Biz) runtimeScheduleDriveLease(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, lease runtimecontract.RuntimeDriveLease, expectedRunningGeneration uint64) (runtimecontract.RuntimeDriveLease, bool, error) {
 	result, err := m.submitRuntimeInternalEvent(ctx, runtime.RuntimeInternalEvent{
-		Kind: runtime.RuntimeInternalEventDriveLeaseScheduled, Scope: runtime.RuntimeInternalEventScope{WorkspaceID: workspaceID, RunID: runID}, Delivery: &runtime.RuntimeInternalDeliveryPayload{DriveLease: &lease},
+		Kind: runtime.RuntimeInternalEventDriveLeaseScheduled, Scope: runtime.RuntimeInternalEventScope{WorkspaceID: workspaceID, RunID: runID}, Delivery: &runtime.RuntimeInternalDeliveryPayload{DriveLease: &lease, LeaseGeneration: expectedRunningGeneration},
 	})
 	if result.DriveLease == nil {
 		return runtimecontract.RuntimeDriveLease{}, result.LeaseChanged, err

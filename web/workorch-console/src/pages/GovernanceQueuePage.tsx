@@ -3,8 +3,9 @@ import { Tabs } from 'antd';
 import { modelLabels } from '../utils/constants';
 import { DecisionQueuePage } from './DecisionQueuePage';
 import { ApprovalQueuePage } from './ApprovalQueuePage';
+import type { ControlPlaneProps } from '../types';
 
-export function GovernanceQueuePage() {
+export function GovernanceQueuePage({ onOpenWorkspace }: Pick<ControlPlaneProps, 'onOpenWorkspace'>) {
   return (
     <PageContainer
       title="治理队列"
@@ -15,7 +16,7 @@ export function GovernanceQueuePage() {
           {
             key: 'decisions',
             label: '决策工单',
-            children: <DecisionQueuePage />
+            children: <DecisionQueuePage onOpenWorkspace={onOpenWorkspace} />
           },
           {
             key: 'approvals',

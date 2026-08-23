@@ -54,10 +54,15 @@ type RuntimeInternalTransactionPayload struct {
 	// Recovery authorization is produced only after the independent SM-4
 	// RecoveryBudgetConsumed event commits.  The attempt is an exact persisted
 	// counter fence, not a request to mutate the budget from the SM-3 handler.
-	RecoveryOperationID            string
-	RecoveryBudgetAttempt          int
-	GovernanceResolution           *runtimecontract.RuntimeGovernanceResolution
-	DefinitionClarificationRequest *runtimecontract.RuntimeDefinitionClarificationRequestRecord
+	RecoveryOperationID   string
+	RecoveryBudgetAttempt int
+	GovernanceResolution  *runtimecontract.RuntimeGovernanceResolution
+	// GovernanceContinuationDriveLease is an SM-4 successor template sealed in
+	// the same owner-private CAS as a successful governance continuation. The
+	// reducer owns revision/generation/state; the caller supplies only the exact
+	// scope/signature/due time. It never crosses EventHub.
+	GovernanceContinuationDriveLease *runtimecontract.RuntimeDriveLease
+	DefinitionClarificationRequest   *runtimecontract.RuntimeDefinitionClarificationRequestRecord
 }
 
 // SM-3 facts advance the provider/candidate/sealed-dispatch transaction. They

@@ -3,6 +3,7 @@ package appservice
 import (
 	"context"
 	"errors"
+	"fmt"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -15,6 +16,7 @@ import (
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/bootstrap"
 	approvalmodule "github.com/muidea/workorch/internal/modules/blocks/approval"
 	approvalmodel "github.com/muidea/workorch/internal/modules/blocks/approval/pkg/models"
+	runmodel "github.com/muidea/workorch/internal/modules/blocks/run/pkg/models"
 	governancemodel "github.com/muidea/workorch/internal/modules/kernel/governance/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/repository/memory"
@@ -252,6 +254,22 @@ func TestApproveApprovalWithBackendReturnsApprovedApproval(t *testing.T) {
 	}
 }
 
+func TestApproveApprovalWithBackendReturnsExactOwnerReadbackAfterResponseLoss(t *testing.T) {
+	dataRoot := t.TempDir()
+	started := prepareApprovalRun(t, dataRoot, "ws-approval-response-loss", "run-approval-response-loss")
+	first, err := ApproveApprovalWithBackend(context.Background(), "file", dataRoot, started.BlockingApprovalID)
+	if err != nil {
+		t.Fatalf("first ApproveApprovalWithBackend: %v", err)
+	}
+	second, err := ApproveApprovalWithBackend(context.Background(), "file", dataRoot, started.BlockingApprovalID)
+	if err != nil {
+		t.Fatalf("response-loss retry ApproveApprovalWithBackend: %v", err)
+	}
+	if second.State != string(common.ApprovalStateApproved) || second.ResolutionID == "" || second.ResolutionID != first.ResolutionID {
+		t.Fatalf("response-loss readback = %+v, want exact approval resolution %q", second, first.ResolutionID)
+	}
+}
+
 func TestResolveApprovalWithBackendPersistsGovernanceSemanticPayload(t *testing.T) {
 	dataRoot := t.TempDir()
 	started := prepareApprovalRun(t, dataRoot, "ws-approval-semantic", "run-approval-semantic")
@@ -336,12 +354,14 @@ func TestBatchResolveApprovalsWithSessionReusesReturnedApprovals(t *testing.T) {
 	repo := newAppserviceCountingApprovalRepository()
 	firstID := common.ApprovalID("approval-appservice-batch-a")
 	secondID := common.ApprovalID("approval-appservice-batch-b")
-	for _, id := range []common.ApprovalID{firstID, secondID} {
+	for idx, id := range []common.ApprovalID{firstID, secondID} {
+		workspaceID := common.WorkspaceID(fmt.Sprintf("ws-appservice-approval-%d", idx))
+		runID := common.RunID(fmt.Sprintf("run-appservice-approval-%d", idx))
 		if err := repo.Create(ctx, &approvalmodel.Approval{
 			ID:          id,
-			WorkspaceID: common.WorkspaceID("ws-appservice-approval"),
-			RunID:       common.RunID("run-appservice-approval"),
-			StepID:      common.StepID("run-appservice-approval/approval"),
+			WorkspaceID: workspaceID,
+			RunID:       runID,
+			StepID:      common.StepID(string(runID) + "/approval"),
 			Reason:      "need human approval",
 			State:       common.ApprovalStatePending,
 		}); err != nil {
@@ -445,6 +465,28 @@ func TestBatchResolveApprovalsWithBackendRejectsAlreadyResolvedBeforeMutation(t 
 	}
 }
 
+func TestBatchResolveApprovalsWithBackendAcceptsExactResponseLossDuplicate(t *testing.T) {
+	dataRoot := t.TempDir()
+	first := prepareApprovalRun(t, dataRoot, "ws-approval-batch-idempotent-a", "run-approval-batch-idempotent-a")
+	second := prepareApprovalRun(t, dataRoot, "ws-approval-batch-idempotent-b", "run-approval-batch-idempotent-b")
+	seeded, err := ApproveApprovalWithBackend(context.Background(), "file", dataRoot, second.BlockingApprovalID)
+	if err != nil {
+		t.Fatalf("seed approved response-loss candidate: %v", err)
+	}
+
+	items, err := BatchResolveApprovalsWithBackend(context.Background(), "file", dataRoot, appmodelcore.BatchResolveApprovalCommand{
+		ApprovalIDs: []string{first.BlockingApprovalID, second.BlockingApprovalID},
+		Action:      "approve",
+	})
+	if err != nil {
+		t.Fatalf("BatchResolveApprovalsWithBackend: %v", err)
+	}
+	if len(items) != 2 || items[0].ID != first.BlockingApprovalID || items[1].ID != second.BlockingApprovalID ||
+		items[1].ResolutionID != seeded.ResolutionID {
+		t.Fatalf("items = %+v, want pending transition then exact owner readback %q", items, seeded.ResolutionID)
+	}
+}
+
 func TestBatchResolveApprovalsWithBackendNormalizesSemanticAction(t *testing.T) {
 	dataRoot := t.TempDir()
 	first := prepareApprovalRun(t, dataRoot, "ws-approval-batch-semantic", "run-approval-batch-semantic")
@@ -517,6 +559,20 @@ func newApprovalOnlySession(t *testing.T, repo *appserviceCountingApprovalReposi
 
 	rawHub := magicevent.NewHub(16)
 	subscribeGovernanceEvidenceAcks(t, rawHub)
+	subscribeTestCanonicalGovernanceOwnerReads(t, rawHub, func(ctx context.Context, workspaceID common.WorkspaceID) (*runmodel.Run, error) {
+		items, err := repo.ListByWorkspaceID(ctx, workspaceID)
+		if err != nil {
+			return nil, err
+		}
+		for _, item := range items {
+			if item != nil && item.State == common.ApprovalStatePending {
+				return &runmodel.Run{
+					ID: item.RunID, WorkspaceID: workspaceID, State: common.RunStateBlockedOnApproval, BlockingApprovalID: item.ID,
+				}, nil
+			}
+		}
+		return nil, common.ErrNotFound
+	})
 	approvalModule := approvalmodule.New()
 	if err := approvalModule.Configure(approvalbiz.Dependencies{Approvals: repo, EventHub: rawHub}); err != nil {
 		t.Fatalf("setup approval module: %v", err)

@@ -234,7 +234,12 @@ func renderExecutionStreamStatus(running bool, progress progressState, message, 
 
 func (m AppModel) renderMainTail(width int, height int, usedLines int) string {
 	var b strings.Builder
-	if decision := m.activeBlockingDecision(); decision != nil {
+	if definition := m.activeDefinitionClarificationDecision(); definition != nil {
+		b.WriteString(Warning.Render("Definition clarification required"))
+		b.WriteString("\n")
+		b.WriteString(truncateDisplay(definitionClarificationInstruction(definition), width-2))
+		b.WriteString("\n\n")
+	} else if decision := m.activeBlockingDecision(); decision != nil {
 		b.WriteString(Warning.Render("Decision required"))
 		b.WriteString("\n")
 		b.WriteString(truncateDisplay(blockingDecisionLabel(decision), width-2))
@@ -988,6 +993,8 @@ func (m AppModel) renderRuntimeStatusBar(width int) string {
 	}
 	if decision := m.activeBlockingDecision(); decision != nil && decision.ID != "" {
 		parts = append(parts, "decision "+shortID(string(decision.ID)))
+	} else if definition := m.activeDefinitionClarificationDecision(); definition != nil && definition.ID != "" {
+		parts = append(parts, "definition "+shortID(string(definition.ID)))
 	}
 	if approval := m.activeBlockingApproval(); approval != nil && approval.ID != "" {
 		parts = append(parts, "approval "+shortID(string(approval.ID)))
@@ -1110,6 +1117,8 @@ func (m AppModel) renderInput(width int) string {
 		prompt = "workspace"
 	}
 	switch m.activeWorkspacePromptMode() {
+	case workspacePromptModeDefinition:
+		prompt += " definition"
 	case workspacePromptModeDecision:
 		prompt += " decision"
 	case workspacePromptModeApproval:

@@ -1,7 +1,6 @@
 package readmodelprojection
 
 import (
-	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/appmodelcore"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
 	approvalmodel "github.com/muidea/workorch/internal/modules/blocks/approval/pkg/models"
 	decisionmodel "github.com/muidea/workorch/internal/modules/blocks/decision/pkg/models"
@@ -19,14 +18,14 @@ type runProjector struct {
 	TaskDecompositions  func(readmodelcore.RunSnapshotState) []projectioncontract.TaskDecomposition
 	Observability       func(readmodelcore.RunSnapshotState) readmodelcore.RunObservabilityState
 	Status              func(readmodelcore.RunSnapshotState) projectioncontract.RunStatus
-	Acceptance          func(appmodelcore.Run) projectioncontract.AcceptanceProjection
+	Acceptance          func(*runmodel.Run) projectioncontract.AcceptanceProjection
 	Convergence         func(readmodelcore.RunSnapshotState) *projectioncontract.ConvergenceStatus
 	CurrentStatusStep   func(*runmodel.Run, []*runmodel.Step, []*runmodel.RuntimeCheckpoint, []*decisionmodel.Ticket, []*approvalmodel.Approval) *runmodel.Step
 	Steps               func([]*runmodel.Step) []projectioncontract.StepView
 	CanonicalStepKind   func(string) string
 	StepOutput          func(string, map[string]any) map[string]any
 	ResultQuality       func(readmodelcore.RunSnapshotState) []projectioncontract.ResultQualityTrace
-	Outcome             func(readmodelcore.RunSnapshotState) projectioncontract.RunOutcome
+	DisplayOutcome      func(readmodelcore.RunSnapshotState) projectioncontract.RunDisplayOutcome
 	ResultProgressState func(readmodelcore.RunSnapshotState) string
 	HasAcceptedResult   func(readmodelcore.RunSnapshotState) bool
 	PublicSnapshot      func(readmodelcore.RunSnapshotState) projectioncontract.RunSnapshot
@@ -52,7 +51,7 @@ func RunProjection() runProjector {
 		CanonicalStepKind:   canonicalStepKind,
 		StepOutput:          projectStepOutput,
 		ResultQuality:       mapResultQuality,
-		Outcome:             mapRunOutcome,
+		DisplayOutcome:      mapRunOutcome,
 		ResultProgressState: resultProgressState,
 		HasAcceptedResult:   hasAcceptedRunResult,
 		PublicSnapshot:      publicRunSnapshot,

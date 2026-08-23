@@ -1008,13 +1008,12 @@ func TestReduceRuntimeStateRejectedValidationWithoutOwnerTargetRemainsValidation
 	}
 }
 
-func TestReduceRuntimeStatePrerequisiteRefreshExhaustionOverridesPendingReacquisition(t *testing.T) {
+func TestReduceRuntimeStatePrerequisiteRefreshExhaustionOverridesPendingPrerequisite(t *testing.T) {
 	facts := validationFacts()
 	facts.Prerequisites.Pending = []runtimecontract.RuntimePrerequisite{{
 		ID: "manifest:blocks/file", Kind: runtimecontract.PrerequisiteKindManifest,
 		OwnerModuleID: runtimecontract.RuntimeModuleFile, Reason: "fresh manifest required",
 	}}
-	facts.FreshnessReacquireCoverage = []common.CoverageWorkItemID{"cwi-1"}
 	facts.Failure = &runtimecontract.FailureFact{
 		Class: runtimecontract.FailureClassPrerequisiteRefreshExhausted,
 		Code:  "prerequisite_refresh_exhausted", Signature: "refresh-budget:receipt-1",
@@ -1030,7 +1029,7 @@ func TestReduceRuntimeStatePrerequisiteRefreshExhaustionOverridesPendingReacquis
 	}
 }
 
-func TestReduceRuntimeStateDeterminedTerminalFailureOverridesFreshnessReacquisition(t *testing.T) {
+func TestReduceRuntimeStateDeterminedTerminalFailureOverridesPendingPrerequisite(t *testing.T) {
 	for _, tt := range []struct {
 		name         string
 		failureClass runtimecontract.FailureClass
@@ -1046,7 +1045,6 @@ func TestReduceRuntimeStateDeterminedTerminalFailureOverridesFreshnessReacquisit
 				ID: "manifest:blocks/file", Kind: runtimecontract.PrerequisiteKindManifest,
 				OwnerModuleID: runtimecontract.RuntimeModuleFile, Reason: "fresh manifest required",
 			}}
-			facts.FreshnessReacquireCoverage = []common.CoverageWorkItemID{"cwi-1"}
 			facts.Failure = &runtimecontract.FailureFact{
 				Class: tt.failureClass, Code: tt.terminalCode, Signature: tt.terminalCode,
 				Message: "determined failure must close the current authority",
