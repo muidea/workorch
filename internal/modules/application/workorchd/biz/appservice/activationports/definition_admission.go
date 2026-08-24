@@ -33,6 +33,9 @@ func EnsureWorkspaceDefinitionAdmission(ctx context.Context, hub magicevent.Hub,
 	if definitionRevision == "" {
 		return nil, fmt.Errorf("%w: current Goal/DoD revision is incomplete", common.ErrConflict)
 	}
+	if err := validateCurrentWorkspaceDefinitionAdmission(workspace); err != nil {
+		return nil, invalidCurrentWorkspaceStartupInput(err)
+	}
 	if workspaceDefinitionAdmissionEligible(workspace, goal, dod, definitionRevision) {
 		return workspace, nil
 	}
@@ -43,6 +46,9 @@ func EnsureWorkspaceDefinitionAdmission(ctx context.Context, hub magicevent.Hub,
 		updated, err := workspaceports.ReadWorkspaceRecord(ctx, hub, workspace.ID)
 		if err != nil {
 			return nil, err
+		}
+		if err := validateCurrentWorkspaceDefinitionAdmission(updated); err != nil {
+			return nil, invalidCurrentWorkspaceStartupInput(err)
 		}
 		if workspaceDefinitionAdmissionEligible(updated, goal, dod, definitionRevision) {
 			return updated, nil
@@ -120,6 +126,9 @@ func EnsureWorkspaceDefinitionAdmission(ctx context.Context, hub magicevent.Hub,
 	updated, err := workspaceports.ReadWorkspaceRecord(ctx, hub, workspace.ID)
 	if err != nil {
 		return nil, err
+	}
+	if err := validateCurrentWorkspaceDefinitionAdmission(updated); err != nil {
+		return nil, invalidCurrentWorkspaceStartupInput(err)
 	}
 	if !workspaceDefinitionAdmissionEligible(updated, goal, dod, definitionRevision) {
 		return nil, common.ErrConflict
@@ -298,6 +307,28 @@ func workspaceDefinitionAdmissionEligible(workspace *workspacemodel.Workspace, g
 		return false
 	}
 	return true
+}
+
+func validateCurrentWorkspaceDefinitionAdmission(workspace *workspacemodel.Workspace) error {
+	candidate, present, err := workspace.ValidateActivationAdmissionPersistence()
+	if err != nil {
+		return err
+	}
+	if !present {
+		return nil
+	}
+	result, err := definitionadmissioncore.Compile(candidate)
+	if err != nil {
+		return err
+	}
+	if result.Disposition != workspacemodel.DefinitionAdmissionAdmittedAllOf {
+		return fmt.Errorf("activation admission candidate is not admitted_all_of")
+	}
+	return nil
+}
+
+func invalidCurrentWorkspaceStartupInput(cause error) error {
+	return fmt.Errorf("%w: current Workspace startup input does not match the only supported shape; recreate the Workspace from the current Template: %v", common.ErrConflict, cause)
 }
 
 func workspaceTemplateSnapshotHash(template *workspacemodel.WorkspaceTemplate) string {

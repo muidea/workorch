@@ -1602,6 +1602,33 @@ if grep -q -E -- 'LineageState[[:space:]]*==[[:space:]]*""' internal/modules/blo
 	exit 1
 fi
 
+# Definition admission has one current immutable candidate shape. Neither the
+# pure compiler nor the Workspace owner may reseal caller/persisted bytes, and
+# Restart must reject that shape before materializing managed files or sending
+# an owner execution intent.
+definition_candidate_hash_shape="$(sed -n '/^func (c DefinitionAdmissionCandidate) computeHash()/,/^}/p' internal/modules/blocks/workspace/pkg/models/definition_admission.go)"
+for required_field in AcquisitionOperationVariantID AcquisitionTargetPolicy AcquisitionTargetSelectorRef; do
+	if ! grep -q -F -- "$required_field" <<<"$definition_candidate_hash_shape"; then
+		echo "boundary contract violation: Definition candidate hash omits $required_field" >&2
+		exit 1
+	fi
+done
+if grep -q -F -- 'candidate = candidate.WithHash()' internal/modules/application/workorchd/biz/appservice/definitionadmissioncore/compiler.go ||
+	grep -q -F -- 'command.Candidate = command.Candidate.WithHash()' internal/modules/blocks/workspace/biz/definition_admission_internal_event.go ||
+	! grep -q -F -- 'TestCompileRejectsCandidateHashDriftInsteadOfResealingCallerInput' internal/modules/application/workorchd/biz/appservice/definitionadmissioncore/compiler_test.go ||
+	! grep -q -F -- 'TestDefinitionAdmissionOwnerDoesNotResealCallerCandidate' internal/modules/blocks/workspace/biz/definition_admission_test.go ||
+	! grep -q -F -- 'TestWorkspaceExecutionRestartRequiresCurrentAdmissionCandidateBeforeRunOwner' internal/modules/blocks/workspace/biz/execution_intent_test.go; then
+	echo "boundary contract violation: Definition admission regained candidate resealing or lost strict Restart regressions" >&2
+	exit 1
+fi
+restart_compiler_file="internal/modules/application/workorchd/biz/appservice/activationports/workspace_execution_intent.go"
+restart_admission_line="$(grep -n -m1 -F -- 'EnsureWorkspaceDefinitionAdmission(' "$restart_compiler_file" | cut -d: -f1)"
+restart_managed_config_line="$(grep -n -m1 -F -- 'workspacecore.EnsureManagedConfigs(' "$restart_compiler_file" | cut -d: -f1)"
+if [[ -z "$restart_admission_line" || -z "$restart_managed_config_line" || "$restart_admission_line" -ge "$restart_managed_config_line" ]]; then
+	echo "boundary contract violation: Restart must validate Definition admission before managed-config materialization" >&2
+	exit 1
+fi
+
 # All file-backed owner data uses one current layout and strict JSON shape.
 # A missing file may mean "not created"; an existing old/empty/unknown shape
 # must fail instead of entering an import, timestamp synthesis or projection

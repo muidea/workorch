@@ -4,7 +4,7 @@ Status: active
 
 Type: application-module-contract
 
-Last Verified: 2026-08-23
+Last Verified: 2026-08-24
 
 ## 功能范围与边界
 
@@ -69,6 +69,10 @@ Last Verified: 2026-08-23
 - RuntimeBootstrap 的 typed definition context 保存 definition change impact，包括累积 Goal/DoD identity、原位修订记录、pre-execution assessment 要求与中立 strategy requirements；该快照直接进入 LLM C1。
 - Runtime definition context 同时保存 Workspace owner 签发的 `StartupInputHash`。Restart 必须与 current eligible admission
   精确匹配；Resume 不读取最新 Goal/DoD，也不把后续 candidate/promotion 注入既有 Run。
+- Restart bootstrap compiler 在 managed-config materialization 与 Workspace intent 之前，先验证 admission 精确绑定的
+  current-shape candidate，并用 pure compiler重验其 `admitted_all_of` 结果。candidate hash 不匹配、旧 schema/compiler、
+  acquisition selector/policy/variant 缠绕不完整时同步返回 conflict；不生成 execution-admission outcome、不补写 candidate、
+  不发送 Workspace/Run command。当前阶段没有 migration/backfill；运维恢复是用 current Template 重新创建 Workspace。
 - activation同时封存与repair/recovery source policy一致的`RuntimeExecutionBudgetPolicy`。read-model从opaque Runtime
   aggregate纯派生`RuntimeExecutionBudgetView`与active `RuntimeRecoverableWaitView`，明确区分recoverable wait、
   governance blocker和terminal；Application、HTTP、SSE、Web/TUI不提供retry-now、clear wait、top-up或预算回写入口。

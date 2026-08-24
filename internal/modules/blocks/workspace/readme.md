@@ -14,7 +14,8 @@ Workspace 还独占 immutable pre-seal `DefinitionAdmissionCandidate`、promoted
 `WorkspaceActivationAdmission`。candidate 可以保存尚未获准的 relation input；正式 startup input 只允许 pure compiler
 确认的完整 `all_of`，并以 `StartupInputHash` 封存 Definition、Template/Profile contract hash、目录和 candidate-item mapping。
 candidate 还封存 required owner-fact binding 与唯一 acquisition/reobserve closure；Workspace 只持久化/校验该事实，
-不读取 capability catalog 或选择运行期动作。
+不读取 capability catalog 或选择运行期动作。`CandidateHash` 覆盖 acquisition operation variant、operation target policy、
+operation selector 与 Definition target-selection scope；owner ingress 不替 caller 重新计算 hash。
 
 ## 组件交互及合同
 
@@ -77,6 +78,9 @@ candidate 还封存 required owner-fact binding 与唯一 acquisition/reobserve 
 - `fresh_activation_required` 只表示可读 current Run 缺少 sealed bootstrap；普通 Run notification 不释放 Workspace slot。
   无法按当前结构读取的持久化数据在 execution admission 前失败，Workspace 不创建 successor、不读取或修补该数据，
   也不通过旁路 fact 清除 active slot。
+- Start/Restart 在任何 Run-owner command 前必须从 `WorkspaceActivationAdmission` 精确定位唯一 immutable candidate，并验证
+  `candidate -> startup input -> admission` 的完整 current-shape 绑定。缺 candidate、重复 identity、hash 漂移、旧 schema/compiler
+  或不再满足 `admitted_all_of` 的 closure 都直接 conflict；不得重封存、补字段、创建替代 candidate 或生成兼容 admission outcome。
 - Start/Restart 必须逐字段匹配 promoted `RuntimeProfileContractsHash`；required owner fact 缺少 preexisting 声明或 exact
   one-shot acquisition/reobserve closure 时，pure admission 在 promotion 前返回 `declared_prerequisite_unresolved`。
   Workspace 不得用 live owner 事实、LLM 文本或默认动作修补 candidate。
@@ -99,6 +103,8 @@ candidate 还封存 required owner-fact binding 与唯一 acquisition/reobserve 
   多 workspace 默认目录隔离。
 - [x] execution intent 的缺失 Goal/DoD、context scope mismatch、duplicate replay 与 active Run result fence。
 - [x] 无效持久化数据不会生成 execution admission outcome，也不会修改 Workspace 元数据。
+- [x] Restart 对 admission-bound candidate 的缺失/重复/旧 schema/hash 与 acquisition selector 漂移严格拒绝，零 Run command；
+  current exact candidate 可正常进入 Run owner。
 - [x] 普通/治理/冲突 Run notification 与 `fresh_activation_required` 均不能释放 active slot；只有 matching terminal delivery 可释放。
 - [x] Template command、repository DTO、EventHub DTO 与 list mapping 对 slice/map/nested payload 的完整深拷贝。
 - [x] `ContextHints:null`、非对象 payload、未知/退役字段与空文件严格拒绝。

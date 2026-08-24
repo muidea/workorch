@@ -59,7 +59,7 @@ func normalizeDefinitionAdmissionInternalEvent(event definitionAdmissionInternal
 			return definitionAdmissionInternalEvent{}, common.ErrInvalidArgument
 		}
 		command := *event.CandidateSubmission
-		command.Candidate = command.Candidate.WithHash()
+		command.Candidate = command.Candidate.Normalized()
 		if err := command.Candidate.Validate(); err != nil || command.Candidate.WorkspaceID != event.WorkspaceID {
 			if err != nil {
 				return definitionAdmissionInternalEvent{}, fmt.Errorf("%w: %v", common.ErrInvalidArgument, err)
@@ -174,7 +174,7 @@ func reduceDefinitionAdmissionCandidatePromotion(current *workspacemodel.Workspa
 		admission.State = workspacemodel.WorkspaceActivationPendingClarificationResolution
 		admission.BlockingTicketID = command.BlockingTicketID
 	}
-	if err := admission.Validate(startup); err != nil {
+	if err := admission.ValidateCandidate(startup, *candidate); err != nil {
 		return definitionAdmissionTransition{}, fmt.Errorf("%w: %v", common.ErrInvalidArgument, err)
 	}
 	next := *current
@@ -209,7 +209,11 @@ func reduceDefinitionClarificationResolution(current *workspacemodel.Workspace, 
 	admission.State = workspacemodel.WorkspaceActivationEligible
 	admission.ClarificationResolutionID = command.ResolutionID
 	admission.ClarificationResolutionBindingHash = command.ResolutionBindingHash
-	if err := admission.Validate(*current.StartupInput); err != nil {
+	candidate, isCurrent := currentDefinitionAdmissionCandidate(current.DefinitionAdmissionCandidates, admission.CandidateID)
+	if candidate == nil || !isCurrent || candidate.CandidateRevision != admission.CandidateRevision || candidate.CandidateHash != admission.CandidateHash {
+		return definitionAdmissionTransition{}, common.ErrConflict
+	}
+	if err := admission.ValidateCandidate(*current.StartupInput, *candidate); err != nil {
 		return definitionAdmissionTransition{}, common.ErrConflict
 	}
 	next := *current

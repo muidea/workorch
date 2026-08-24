@@ -24,6 +24,18 @@ func TestDefinitionAdmissionInternalEventRequiresExactlyOneFact(t *testing.T) {
 	}
 }
 
+func TestDefinitionAdmissionOwnerDoesNotResealCallerCandidate(t *testing.T) {
+	candidate := testAdmissionCandidate()
+	candidate.ResolvedProjectWorkspaceDirectory = "/tmp/tampered"
+	command := workspaceevents.SubmitDefinitionAdmissionCandidateCommand{Candidate: candidate}
+	_, err := normalizeDefinitionAdmissionInternalEvent(definitionAdmissionInternalEvent{
+		Kind: definitionAdmissionInternalEventCandidateSubmitted, WorkspaceID: candidate.WorkspaceID, CandidateSubmission: &command,
+	})
+	if !errors.Is(err, common.ErrInvalidArgument) {
+		t.Fatalf("tampered immutable candidate err=%v, want invalid argument", err)
+	}
+}
+
 func testAdmissionCandidate() workspacemodel.DefinitionAdmissionCandidate {
 	return (workspacemodel.DefinitionAdmissionCandidate{
 		SchemaVersion: workspacemodel.DefinitionAdmissionCandidateSchemaVersionCurrent, WorkspaceID: "workspace-1", CandidateID: "candidate-1", CandidateRevision: 1,

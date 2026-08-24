@@ -11,9 +11,9 @@ import (
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
-const DefinitionAdmissionCandidateSchemaVersionCurrent uint32 = 2
+const DefinitionAdmissionCandidateSchemaVersionCurrent uint32 = 3
 
-const DefinitionAdmissionCompilerVersionCurrent = "workorch-definition-admission-v2"
+const DefinitionAdmissionCompilerVersionCurrent = "workorch-definition-admission-v3"
 
 type DefinitionAdmissionDisposition string
 
@@ -188,8 +188,11 @@ func (c DefinitionAdmissionCandidate) Validate() error {
 		}
 		seen[item.CandidateItemRef] = struct{}{}
 	}
-	if c.WorkspaceTemplateSnapshot.TemplateRef == "" || c.WorkspaceTemplateSnapshot.Revision == "" || c.WorkspaceTemplateSnapshot.SnapshotHash == "" || c.RuntimeProfileContractsHash == "" || c.AdmissionCompilerVersion == "" || c.ResolvedProjectWorkspaceDirectory == "" {
-		return fmt.Errorf("definition admission candidate requires template snapshot, compiler and resolved directory")
+	if c.WorkspaceTemplateSnapshot.TemplateRef == "" || c.WorkspaceTemplateSnapshot.Revision == "" || c.WorkspaceTemplateSnapshot.SnapshotHash == "" || c.RuntimeProfileContractsHash == "" || c.ResolvedProjectWorkspaceDirectory == "" {
+		return fmt.Errorf("definition admission candidate requires template/profile snapshot and resolved directory")
+	}
+	if c.AdmissionCompilerVersion != DefinitionAdmissionCompilerVersionCurrent {
+		return fmt.Errorf("definition admission candidate requires current compiler %q", DefinitionAdmissionCompilerVersionCurrent)
 	}
 	policyRefs := map[string]struct{}{}
 	for _, binding := range c.AdmissionPolicyBindings {
@@ -276,6 +279,7 @@ func (c DefinitionAdmissionCandidate) computeHash() string {
 		value := binding.Convergence
 		writeDefinitionHash(h, binding.SourceRef, value.Requirement.OwnerModuleID, string(value.Requirement.FactKind), value.Requirement.OperationKind,
 			fmt.Sprintf("%t", value.RequirePreexisting), value.MissingTrigger, value.AcquisitionOwnerModuleID, value.AcquisitionOperationKind,
+			value.AcquisitionOperationVariantID, string(value.AcquisitionTargetPolicy), value.AcquisitionTargetSelectorRef,
 			value.TargetSelectorRef, value.TargetSelectorOwnerRef, value.TargetSelectorSubjectRef, value.ReobserveOwnerModuleID,
 			string(value.ReobserveFactKind), fmt.Sprintf("%d", value.MaxAcquisitionAttempts))
 		writeDefinitionHash(h, value.DependsOnRequirementRefs...)
@@ -375,6 +379,74 @@ func (s WorkspaceStartupInputContract) Validate() error {
 	return nil
 }
 
+// ValidateCandidate proves that the promoted startup input still binds the
+// exact immutable Definition admission candidate. It validates only persisted
+// Workspace-owner facts; it does not read a live Template/Profile or select a
+// Runtime transition.
+func (s WorkspaceStartupInputContract) ValidateCandidate(candidate DefinitionAdmissionCandidate) error {
+	s = s.Normalized()
+	candidate = candidate.Normalized()
+	if err := s.Validate(); err != nil {
+		return err
+	}
+	if err := candidate.Validate(); err != nil {
+		return err
+	}
+	if s.WorkspaceID != candidate.WorkspaceID ||
+		s.GoalTextHash != StableDefinitionTextHash(candidate.GoalInput.Text) ||
+		s.WorkspaceTemplateRef != candidate.WorkspaceTemplateSnapshot.TemplateRef ||
+		s.TemplateRevision != candidate.WorkspaceTemplateSnapshot.Revision ||
+		s.TemplateSnapshotHash != candidate.WorkspaceTemplateSnapshot.SnapshotHash ||
+		s.RuntimeProfileContractsHash != candidate.RuntimeProfileContractsHash ||
+		s.ResolvedProjectWorkspaceDirectory != candidate.ResolvedProjectWorkspaceDirectory {
+		return fmt.Errorf("workspace startup input does not bind the exact admission candidate")
+	}
+	dodTexts := make([]string, 0, len(candidate.DoDInputs))
+	dodSourceIdentity := ""
+	for _, item := range candidate.DoDInputs {
+		dodTexts = append(dodTexts, item.Text)
+		if dodSourceIdentity == "" {
+			dodSourceIdentity = item.SourceIdentity
+		} else if dodSourceIdentity != item.SourceIdentity {
+			return fmt.Errorf("definition admission candidate DoD inputs do not share one source identity")
+		}
+	}
+	if s.DefinitionRevision != candidate.GoalInput.SourceIdentity+"|"+dodSourceIdentity ||
+		s.DoDItemSetHash != StableDefinitionStringSetHash(dodTexts) {
+		return fmt.Errorf("workspace startup input does not bind the candidate Definition revision")
+	}
+	mappings := make(map[string]string, len(s.CandidateItemToItemRefMappings))
+	itemRefs := make(map[string]struct{}, len(s.CandidateItemToItemRefMappings))
+	for _, mapping := range s.CandidateItemToItemRefMappings {
+		if mapping.CandidateItemRef == "" || mapping.ItemRef == "" {
+			return fmt.Errorf("workspace startup input contains an incomplete candidate-item mapping")
+		}
+		if _, duplicate := mappings[mapping.CandidateItemRef]; duplicate {
+			return fmt.Errorf("workspace startup input candidate-item mapping %q is duplicated", mapping.CandidateItemRef)
+		}
+		if _, duplicate := itemRefs[mapping.ItemRef]; duplicate {
+			return fmt.Errorf("workspace startup input item ref %q is duplicated", mapping.ItemRef)
+		}
+		mappings[mapping.CandidateItemRef] = mapping.ItemRef
+		itemRefs[mapping.ItemRef] = struct{}{}
+	}
+	if len(mappings) != 1+len(candidate.DoDInputs) || mappings[candidate.GoalInput.CandidateItemRef] != s.GoalDefinitionRef {
+		return fmt.Errorf("workspace startup input candidate-item mappings do not bind the candidate Goal")
+	}
+	dodRefs := make([]string, 0, len(candidate.DoDInputs))
+	for _, item := range candidate.DoDInputs {
+		ref := mappings[item.CandidateItemRef]
+		if ref == "" {
+			return fmt.Errorf("workspace startup input does not map candidate item %q", item.CandidateItemRef)
+		}
+		dodRefs = append(dodRefs, ref)
+	}
+	if !equalDefinitionStrings(dodRefs, s.DoDDefinitionRefs) {
+		return fmt.Errorf("workspace startup input candidate-item mappings do not bind the candidate DoD")
+	}
+	return nil
+}
+
 func (s WorkspaceStartupInputContract) WithHash() WorkspaceStartupInputContract {
 	s = s.Normalized()
 	s.CandidateItemToItemRefMappingHash = stableItemMappingHash(s.CandidateItemToItemRefMappings)
@@ -427,6 +499,59 @@ func (a WorkspaceActivationAdmission) Validate(startup WorkspaceStartupInputCont
 		return fmt.Errorf("unsupported workspace activation admission state %q", a.State)
 	}
 	return nil
+}
+
+// ValidateCandidate proves that activation eligibility names the same
+// immutable candidate that produced the sealed startup input.
+func (a WorkspaceActivationAdmission) ValidateCandidate(startup WorkspaceStartupInputContract, candidate DefinitionAdmissionCandidate) error {
+	a = a.Normalized()
+	candidate = candidate.Normalized()
+	if err := a.Validate(startup); err != nil {
+		return err
+	}
+	if err := startup.ValidateCandidate(candidate); err != nil {
+		return err
+	}
+	if a.WorkspaceID != candidate.WorkspaceID || a.CandidateID != candidate.CandidateID ||
+		a.CandidateRevision != candidate.CandidateRevision || a.CandidateHash != candidate.CandidateHash {
+		return fmt.Errorf("workspace activation admission does not bind the exact candidate")
+	}
+	return nil
+}
+
+// ValidateActivationAdmissionPersistence returns the exact candidate bound by
+// the current Workspace startup admission. The boolean is false only when the
+// Workspace has not persisted either fact yet. Partial, duplicated, stale-shape
+// or mismatched persistence fails closed.
+func (w *Workspace) ValidateActivationAdmissionPersistence() (DefinitionAdmissionCandidate, bool, error) {
+	if w == nil {
+		return DefinitionAdmissionCandidate{}, false, common.ErrInvalidArgument
+	}
+	if w.StartupInput == nil && w.ActivationAdmission == nil {
+		return DefinitionAdmissionCandidate{}, false, nil
+	}
+	if w.StartupInput == nil || w.ActivationAdmission == nil {
+		return DefinitionAdmissionCandidate{}, false, fmt.Errorf("startup input and activation admission must be persisted together")
+	}
+	admission := w.ActivationAdmission.Normalized()
+	var matched *DefinitionAdmissionCandidate
+	for idx := range w.DefinitionAdmissionCandidates {
+		candidate := w.DefinitionAdmissionCandidates[idx].Clone()
+		if candidate.CandidateID != admission.CandidateID || candidate.CandidateRevision != admission.CandidateRevision || candidate.CandidateHash != admission.CandidateHash {
+			continue
+		}
+		if matched != nil {
+			return DefinitionAdmissionCandidate{}, false, fmt.Errorf("activation admission candidate identity is duplicated")
+		}
+		matched = &candidate
+	}
+	if matched == nil {
+		return DefinitionAdmissionCandidate{}, false, fmt.Errorf("activation admission candidate is missing")
+	}
+	if err := admission.ValidateCandidate(w.StartupInput.Normalized(), *matched); err != nil {
+		return DefinitionAdmissionCandidate{}, false, err
+	}
+	return matched.Clone(), true, nil
 }
 
 func normalizeCandidateItem(item DefinitionCandidateItem) DefinitionCandidateItem {
@@ -518,6 +643,20 @@ func normalizeDefinitionStrings(values []string) []string {
 	}
 	sort.Strings(ret)
 	return ret
+}
+
+func equalDefinitionStrings(left, right []string) bool {
+	left = normalizeDefinitionStrings(left)
+	right = normalizeDefinitionStrings(right)
+	if len(left) != len(right) {
+		return false
+	}
+	for idx := range left {
+		if left[idx] != right[idx] {
+			return false
+		}
+	}
+	return true
 }
 
 func normalizeItemMappings(values []CandidateItemToItemRefMapping) []CandidateItemToItemRefMapping {

@@ -29,16 +29,16 @@ func CompileWorkspaceExecutionRestartBootstrap(ctx context.Context, request Acti
 	if err != nil {
 		return nil, err
 	}
-	toolHints := WorkspaceToolContextHintsFor(ctx, request.Hub, workspace)
-	if err := workspacecore.EnsureManagedConfigs(workspace.InternalDirectory, toolHints.Template, toolHints.Workspace); err != nil {
-		return nil, err
-	}
 	goal, dod, err := selectWorkspaceExecutionDefinitions(ctx, request.Hub, workspace.ID)
 	if err != nil {
 		return nil, err
 	}
 	workspace, err = EnsureWorkspaceDefinitionAdmission(ctx, request.Hub, workspace, goal, dod)
 	if err != nil {
+		return nil, err
+	}
+	toolHints := WorkspaceToolContextHintsFor(ctx, request.Hub, workspace)
+	if err := workspacecore.EnsureManagedConfigs(workspace.InternalDirectory, toolHints.Template, toolHints.Workspace); err != nil {
 		return nil, err
 	}
 	activationBuild, err := workspaceRuntimeActivation(ctx, request, workspace, goal, dod)

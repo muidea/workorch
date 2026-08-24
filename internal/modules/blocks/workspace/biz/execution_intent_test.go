@@ -72,21 +72,32 @@ func (f *workspaceExecutionIntentFixture) seedWorkspace(t *testing.T, workspaceI
 	goal := &workspacemodel.Goal{ID: "goal-1", WorkspaceID: workspaceID, Text: "goal", DefinitionRevision: "goal:00000000000000000001:hash", LineageState: "active"}
 	dod := &workspacemodel.DoD{ID: "dod-1", WorkspaceID: workspaceID, Items: []string{"done"}, State: common.DoDStateReady, DefinitionRevision: "dod:00000000000000000001:hash", LineageState: "active"}
 	definitionRevision := workspacecontracts.ExecutionDefinitionRevision(string(goal.ID), goal.DefinitionRevision, string(dod.ID), dod.DefinitionRevision)
+	candidate := (workspacemodel.DefinitionAdmissionCandidate{
+		SchemaVersion: workspacemodel.DefinitionAdmissionCandidateSchemaVersionCurrent, WorkspaceID: workspaceID,
+		CandidateID: "candidate-1", CandidateRevision: 1,
+		GoalInput:                   workspacemodel.DefinitionCandidateItem{CandidateItemRef: "goal", Text: goal.Text, SourceIdentity: "goal:" + string(goal.ID) + "@" + goal.DefinitionRevision},
+		DoDInputs:                   []workspacemodel.DefinitionCandidateItem{{CandidateItemRef: "dod", Text: dod.Items[0], SourceIdentity: "dod:" + string(dod.ID) + "@" + dod.DefinitionRevision}},
+		WorkspaceTemplateSnapshot:   workspacemodel.DefinitionTemplateSnapshot{TemplateRef: "template-1", Revision: "template-r1", SnapshotHash: "template-hash"},
+		RuntimeProfileContractsHash: runtimecontract.StableRuntimeProfileContractsHash(nil), AdmissionCompilerVersion: workspacemodel.DefinitionAdmissionCompilerVersionCurrent,
+		ResolvedProjectWorkspaceDirectory: "/workspace/" + string(workspaceID),
+		ProposedRelationInputs:            []workspacemodel.DefinitionProposedRelationInput{{RelationRef: "terminal-all-of", RelationKind: "all_of", SourceItemRefs: []string{"dod"}, TargetItemRefs: []string{"goal"}}},
+	}).WithHash()
 	startup := (workspacemodel.WorkspaceStartupInputContract{
 		WorkspaceID: workspaceID, DefinitionRevision: definitionRevision,
-		GoalDefinitionRef: string(goal.ID), GoalTextHash: "goal-hash", DoDDefinitionRefs: []string{string(dod.ID)}, DoDItemSetHash: "dod-hash",
+		GoalDefinitionRef: string(goal.ID), GoalTextHash: workspacemodel.StableDefinitionTextHash(goal.Text), DoDDefinitionRefs: []string{string(dod.ID)}, DoDItemSetHash: workspacemodel.StableDefinitionStringSetHash(dod.Items),
 		WorkspaceTemplateRef: "template-1", TemplateRevision: "template-r1", TemplateSnapshotHash: "template-hash",
 		RuntimeProfileContractsHash:       runtimecontract.StableRuntimeProfileContractsHash(nil),
 		ResolvedProjectWorkspaceDirectory: "/workspace/" + string(workspaceID),
 		CandidateItemToItemRefMappings:    []workspacemodel.CandidateItemToItemRefMapping{{CandidateItemRef: "goal", ItemRef: string(goal.ID)}, {CandidateItemRef: "dod", ItemRef: string(dod.ID)}},
 	}).WithHash()
 	admission := workspacemodel.WorkspaceActivationAdmission{
-		WorkspaceID: workspaceID, CandidateID: "candidate-1", CandidateRevision: 1, CandidateHash: "candidate-hash",
+		WorkspaceID: workspaceID, CandidateID: candidate.CandidateID, CandidateRevision: candidate.CandidateRevision, CandidateHash: candidate.CandidateHash,
 		DefinitionRevision: definitionRevision, StartupInputHash: startup.StartupInputHash, State: workspacemodel.WorkspaceActivationEligible,
 	}
 	workspace := &workspacemodel.Workspace{
 		ID: workspaceID, State: common.WorkspaceStateActive, ActiveRunID: activeRunID,
 		DeliverableDirectory: startup.ResolvedProjectWorkspaceDirectory, StartupInput: &startup, ActivationAdmission: &admission,
+		DefinitionAdmissionCandidates: []workspacemodel.DefinitionAdmissionCandidate{candidate},
 	}
 	if err := f.workspaces.Create(context.Background(), workspace); err != nil {
 		t.Fatal(err)
@@ -156,6 +167,53 @@ func TestWorkspaceExecutionIntentRejectsMissingDefinitionAndCrossScope(t *testin
 		_, err := fixture.execute(ctx, workspaceevents.WorkspaceExecutionIntentCommand{WorkspaceID: "workspace-1", RequestID: "restart-1", Kind: runtimecontract.RuntimeExecutionIntentRestart, Bootstrap: &bootstrap})
 		if !errors.Is(err, common.ErrConflict) || fixture.received != 0 {
 			t.Fatalf("cross-scope err=%v received=%d", err, fixture.received)
+		}
+	})
+}
+
+func TestWorkspaceExecutionRestartRequiresCurrentAdmissionCandidateBeforeRunOwner(t *testing.T) {
+	response := func(command runevents.WorkspaceExecutionIntentCommand) runevents.WorkspaceExecutionIntentResult {
+		return runevents.WorkspaceExecutionIntentResult{RuntimeExecutionIntentAdmission: runtimecontract.RuntimeExecutionIntentAdmission{
+			WorkspaceID: command.WorkspaceID, RunID: "run-new", RequestID: command.RequestID, Kind: command.Kind,
+			Outcome: runtimecontract.RuntimeExecutionIntentReconciliationRequested, Reason: runtimecontract.RuntimeExecutionIntentReasonNewRunActivated,
+		}}
+	}
+
+	t.Run("current exact candidate reaches Run owner", func(t *testing.T) {
+		fixture := newWorkspaceExecutionIntentFixture(t, response)
+		bootstrap := fixture.seedWorkspace(t, "workspace-current", "", true)
+		result, err := fixture.execute(context.Background(), workspaceevents.WorkspaceExecutionIntentCommand{
+			WorkspaceID: "workspace-current", RequestID: "restart-current", Kind: runtimecontract.RuntimeExecutionIntentRestart, Bootstrap: &bootstrap,
+		})
+		if err != nil || result.RunID != "run-new" || fixture.received != 1 {
+			t.Fatalf("current restart result=%+v err=%v received=%d", result, err, fixture.received)
+		}
+	})
+
+	t.Run("non-current persisted candidate is rejected without owner mutation", func(t *testing.T) {
+		fixture := newWorkspaceExecutionIntentFixture(t, response)
+		bootstrap := fixture.seedWorkspace(t, "workspace-invalid", "", true)
+		workspace, err := fixture.workspaces.Get(context.Background(), "workspace-invalid")
+		if err != nil {
+			t.Fatal(err)
+		}
+		workspace.DefinitionAdmissionCandidates[0].SchemaVersion--
+		if err := fixture.workspaces.Update(context.Background(), workspace); err != nil {
+			t.Fatal(err)
+		}
+		before, err := fixture.workspaces.Get(context.Background(), "workspace-invalid")
+		if err != nil {
+			t.Fatal(err)
+		}
+		_, err = fixture.execute(context.Background(), workspaceevents.WorkspaceExecutionIntentCommand{
+			WorkspaceID: "workspace-invalid", RequestID: "restart-invalid", Kind: runtimecontract.RuntimeExecutionIntentRestart, Bootstrap: &bootstrap,
+		})
+		after, readErr := fixture.workspaces.Get(context.Background(), "workspace-invalid")
+		if readErr != nil {
+			t.Fatal(readErr)
+		}
+		if !errors.Is(err, common.ErrConflict) || fixture.received != 0 || after.Revision != before.Revision {
+			t.Fatalf("invalid restart err=%v received=%d revision=%d want=%d", err, fixture.received, after.Revision, before.Revision)
 		}
 	})
 }

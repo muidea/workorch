@@ -4,7 +4,7 @@ Status: normative
 
 Type: verification-contract
 
-Last Verified: 2026-08-21
+Last Verified: 2026-08-24
 
 ## Purpose
 
@@ -22,6 +22,7 @@ Last Verified: 2026-08-21
 | clarify same semantic item | 保留 ItemRef、创建新 Definition revision；既有 Run 不漂移 |
 | materially replace/delete item | old ItemRef retired且不复用；fresh activation使用新 mapping |
 | pre-seal candidate | exact proposed Goal/DoD、Template snapshot、transitively sealed Profile/policy bindings、required owner-fact/convergence bindings、Profile contract hash、compiler version、resolved directory 与 admission-only relation input 产生稳定 versioned `CandidateHash`；仍无 Definition revision/startup-input/Run |
+| current candidate seal | `CandidateHash` 同时覆盖 acquisition operation variant、operation target policy 与 operation selector；caller/Workspace owner/pure compiler均不能重算 hash 后接受发生漂移的 immutable candidate |
 | candidate lineage/revision | exact normalized duplicate 返回原 CandidateID/revision/hash；materially changed input 只以 next revision CAS 新增；stale expected revision 零覆盖/零 promotion |
 | invalid candidate | 只持久化 candidate/violation/ticket lineage；零 canonical item/relation、`StartupInputHash`、Runtime/provider/capability work |
 | admitted candidate promotion | exact-current candidate + `admitted_all_of` result 由 Workspace owner 一次 CAS 产生正式 Definition revision/startup input 与 activation-admission fact；无 static ticket 时直接 eligible，corrected ticket lineage 必须 pending；duplicate 返回同一 identity，stale/mismatch 零部分写 |
@@ -42,6 +43,7 @@ Last Verified: 2026-08-21
 | stale/mismatched clarification outcome | workspace/candidate/violation/admission/promotion identity不匹配时拒绝关闭current ticket；不影响新candidate |
 | Decision ticket persistence/resolution/Workspace ack unavailable | activation admission 保持 pending；所有 Start/Restart ingress 返回 typed pending，零 Run/provider/dispatch/effect；恢复只补齐同 identity resolution/ack |
 | fresh Start/Restart ingress while static clarification pending | Workspace owner 即使已有 promoted sealed input 也拒绝选择 pending revision；Application、HTTP、TUI 或重复请求均不能绕过 activation-admission fact |
+| Restart with invalid persisted admission candidate | admission 必须精确定位唯一 candidate，并验证 current schema/compiler、candidate/startup/admission binding 与 `admitted_all_of`；缺失/重复/旧 shape/hash/selector closure 漂移同步 conflict，managed-config mutation、execution-intent/admission outcome、Workspace/Run/provider/effect写入均为零；不迁移或补写旧数据 |
 | existing-Run Resume while a newer candidate is pending | Resume reuses the Run's original eligible startup identity; it neither absorbs nor promotes the newer candidate |
 | semantic duplicates | commutative、合并或 typed ambiguity；绝不按 ID兜底 |
 | fan-in/fan-out | 使用 all-of gate，graph size接近 `O(N+E+G)` |

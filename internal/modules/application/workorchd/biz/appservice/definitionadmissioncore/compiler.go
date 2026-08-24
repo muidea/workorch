@@ -24,7 +24,7 @@ var unsupportedAlternativeKinds = map[string]struct{}{
 // Compile performs only checks derivable from the immutable candidate. It
 // does not inspect free text, call an LLM or probe runtime owners.
 func Compile(candidate workspacemodel.DefinitionAdmissionCandidate) (workspacemodel.DefinitionAdmissionResult, error) {
-	candidate = candidate.WithHash()
+	candidate = candidate.Normalized()
 	if err := candidate.Validate(); err != nil {
 		return workspacemodel.DefinitionAdmissionResult{}, err
 	}

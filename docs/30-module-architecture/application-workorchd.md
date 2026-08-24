@@ -4,7 +4,7 @@ Status: normative
 
 Type: module-architecture
 
-Last Verified: 2026-08-23
+Last Verified: 2026-08-24
 
 ## Purpose
 
@@ -55,6 +55,12 @@ bootstrap or capability execution.
 Application、Workspace and Orchestrator never pre-create or link the successor。Persisted data that does not match the one current
 shape fails before execution admission and produces no application-local compatibility outcome。Decision/Approval handlers submit
 only the corresponding owner resolution and refresh projection; they do not emit Resume。
+
+Restart 对既有 eligible startup input 也不能只校验表面 hash：application 必须精确读取 admission-bound immutable candidate，
+验证 current schema/compiler、完整 candidate hash（含 acquisition variant/target policy/operation selector）并重新执行 pure
+`all_of` admission。该检查位于 managed-config materialization 和 Workspace intent 之前；失败同步返回 conflict，零 candidate
+修补、零 owner admission observation、零 Workspace/Run command。系统不迁移旧 candidate；使用 current Template 重建
+Workspace 是当前唯一运维恢复方式。
 
 Runtime-discovered Definition clarification不走普通Decision handler：workorchd只投影`revise_definition_and_restart`并接收
 用户提交的新candidate与显式Restart intent。只有Run owner可以在matching `ReplacementIntent`已持久化后调用Decision owner的

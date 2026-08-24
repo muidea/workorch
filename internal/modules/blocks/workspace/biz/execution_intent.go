@@ -107,12 +107,20 @@ func (m *Biz) prepareWorkspaceExecutionIntent(ev magicevent.Event) (preparedWork
 	if definitionRevision == "" {
 		return preparedWorkspaceExecutionIntent{}, fmt.Errorf("%w: Workspace Goal/DoD content revision is incomplete", common.ErrConflict)
 	}
+	if err := validateWorkspaceExecutionAdmissionPersistence(workspace); err != nil {
+		return preparedWorkspaceExecutionIntent{}, fmt.Errorf("%w: Workspace activation admission persistence is invalid: %v", common.ErrConflict, err)
+	}
 	if err := validateRestartExecutionDefinition(cmd, goal, dod, definitionRevision); err != nil {
 		return preparedWorkspaceExecutionIntent{}, err
 	}
 	return preparedWorkspaceExecutionIntent{
 		ctx: ctx, command: cmd, workspace: workspace, goal: goal, dod: dod, definitionRevision: definitionRevision,
 	}, nil
+}
+
+func validateWorkspaceExecutionAdmissionPersistence(workspace *workspacemodel.Workspace) error {
+	_, _, err := workspace.ValidateActivationAdmissionPersistence()
+	return err
 }
 
 func validateRestartExecutionDefinition(cmd workspaceevents.WorkspaceExecutionIntentCommand, goal *workspacemodel.Goal, dod *workspacemodel.DoD, definitionRevision string) error {

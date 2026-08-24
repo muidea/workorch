@@ -50,6 +50,14 @@ func TestCompileAdmitsAllOfDeterministically(t *testing.T) {
 	}
 }
 
+func TestCompileRejectsCandidateHashDriftInsteadOfResealingCallerInput(t *testing.T) {
+	candidate := candidateWithRelation("all_of")
+	candidate.ResolvedProjectWorkspaceDirectory = "/tmp/tampered"
+	if _, err := Compile(candidate); err == nil {
+		t.Fatal("compiler silently resealed a mutated immutable candidate")
+	}
+}
+
 func TestCompileRequiresExactStaticOwnerFactConvergenceBeforeAdmission(t *testing.T) {
 	requirement := runtimecontract.RuntimeOwnerFactRequirement{
 		OwnerModuleID: runtimecontract.RuntimeModuleShell, FactKind: runtimecontract.RuntimeOwnerFactSelectableValidationSurface,
