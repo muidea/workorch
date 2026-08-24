@@ -862,6 +862,35 @@ func TestModelRunRestartRequestsWorkspaceScopedFreshActivation(t *testing.T) {
 	}
 }
 
+func TestModelRunRestartErrorSurvivesProjectionRefresh(t *testing.T) {
+	m := NewAppModel(newFake(t), "ws-1", "")
+	m.activeWorkspaceID = "ws-1"
+	restartErr := errors.New("runtime bootstrap definition focus owner-fact acquisition selector does not match its declaration")
+
+	next, cmd := m.Update(RunControlMsg{WorkspaceID: "ws-1", Error: restartErr})
+	m = asModel(next)
+	if cmd == nil || !errors.Is(m.lastError, restartErr) {
+		t.Fatalf("restart failure = %v command=%v, want visible error plus owner-state refresh", m.lastError, cmd != nil)
+	}
+
+	next, _ = m.Update(WorkspaceRuntimeViewMsg{
+		WorkspaceID: "ws-1",
+		View: &projectioncontract.WorkspaceRuntimeView{
+			WorkspaceID: "ws-1",
+			RunState:    string(common.RunStateCompleted),
+			TaskProgress: projectioncontract.TaskProgress{
+				WorkspaceID: "ws-1",
+				State:       string(common.RunStateCompleted),
+				Summary:     "previous run completed",
+			},
+		},
+	})
+	m = asModel(next)
+	if !errors.Is(m.lastError, restartErr) {
+		t.Fatalf("restart failure was erased by projection refresh: %v", m.lastError)
+	}
+}
+
 func TestModelNonCanonicalRunCommandsAreNotSupported(t *testing.T) {
 	for _, input := range []string{"/resume", "/restart", "/rerun", "/run", "/run rerun"} {
 		m := NewAppModel(newFake(t), "ws-1", "")

@@ -73,6 +73,7 @@ func TestCompileRequiresExactStaticOwnerFactConvergenceBeforeAdmission(t *testin
 	}
 	profile := runtimecontract.RuntimeProfileContract{ID: "software-dev", EvidenceRequirements: []runtimecontract.RuntimeProfileEvidenceRequirement{{
 		ID: "validation", Scope: "dodItem", AcceptedStepKinds: []string{runtimecontract.StepKindFileWrite, runtimecontract.RuntimeBlockKindManagedValidationSession},
+		TargetSelectorRef: "file/workspace_deliverable", TargetSelectorOwnerRef: "software-dev", TargetSelectorSubjectRef: "validation-preparation",
 		RequiredOwnerFacts: []runtimecontract.RuntimeOwnerFactRequirement{requirement}, OwnerFactConvergences: []runtimecontract.RuntimeOwnerFactConvergence{convergence},
 	}}}
 	candidate := candidateWithRelation("all_of")
@@ -94,6 +95,16 @@ func TestCompileRequiresExactStaticOwnerFactConvergenceBeforeAdmission(t *testin
 	admitted, err := Compile(candidate)
 	if err != nil || admitted.Disposition != workspacemodel.DefinitionAdmissionAdmittedAllOf {
 		t.Fatalf("exact convergence admission = %+v err=%v", admitted, err)
+	}
+
+	selectorDrift := candidate.Clone()
+	selectorDrift.RuntimeProfileContracts[0].EvidenceRequirements[0].OwnerFactConvergences[0].TargetSelectorSubjectRef = "different-definition-subject"
+	selectorDrift.RuntimeProfileContractsHash = runtimecontract.StableRuntimeProfileContractsHash(selectorDrift.RuntimeProfileContracts)
+	selectorDrift.RequiredOwnerFactBindings, selectorDrift.OwnerFactConvergenceBindings = CompileProfileOwnerFactBindings(selectorDrift.RuntimeProfileContracts)
+	selectorDrift = selectorDrift.WithHash()
+	selectorDriftResult, err := Compile(selectorDrift)
+	if err != nil || selectorDriftResult.Disposition != workspacemodel.DefinitionAdmissionClarificationRequired || selectorDriftResult.ViolationCode != workspacemodel.DefinitionAdmissionProfileContractInvalid {
+		t.Fatalf("pre-seal selector drift result = %+v err=%v", selectorDriftResult, err)
 	}
 
 	drifted := candidate.Clone()

@@ -935,6 +935,8 @@
                 "project_files"
               ],
               "targetSelectorRef": "file/workspace_deliverable",
+              "targetSelectorOwnerRef": "software-dev",
+              "targetSelectorSubjectRef": "dodItem",
               "requireTargetGrounding": true,
               "requireDirectEvidence": true,
               "requireClaimEvidence": true,
@@ -965,7 +967,7 @@
                   "acquisitionTargetSelectorRef": "workspace-relative-new-file-target",
                   "targetSelectorRef": "file/workspace_deliverable",
                   "targetSelectorOwnerRef": "software-dev",
-                  "targetSelectorSubjectRef": "validation_readiness",
+                  "targetSelectorSubjectRef": "dodItem",
                   "reobserveOwnerModuleId": "blocks/shell",
                   "reobserveFactKind": "selectable_validation_surface",
                   "maxAcquisitionAttempts": 1

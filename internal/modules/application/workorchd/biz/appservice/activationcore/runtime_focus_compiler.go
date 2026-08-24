@@ -634,14 +634,8 @@ func resolveCoverageEvidencePolicy(scope, id string, activation runtimecontract.
 			if err := validateProfileAcceptedKinds(requirement); err != nil {
 				return compiledEvidencePolicy{}, err
 			}
-			if strings.TrimSpace(requirement.TargetSelectorRef) != "" {
-				if strings.TrimSpace(requirement.TargetSelectorOwnerRef) == "" {
-					requirement.TargetSelectorOwnerRef = profile.ID
-				}
-				if strings.TrimSpace(requirement.TargetSelectorSubjectRef) == "" {
-					requirement.TargetSelectorSubjectRef = scope
-				}
-			}
+			requirement.TargetSelectorRef, requirement.TargetSelectorOwnerRef, requirement.TargetSelectorSubjectRef =
+				runtimecontract.ResolveRuntimeProfileTargetSelectorIdentity(profile.ID, requirement)
 			candidates = append(candidates, requirement)
 		}
 	}

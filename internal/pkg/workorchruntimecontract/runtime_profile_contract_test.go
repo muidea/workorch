@@ -150,6 +150,7 @@ func TestRuntimeProfileOwnerFactRequirementIsNormalizedBoundedAndCompared(t *tes
 		ID: "software-dev",
 		EvidenceRequirements: []RuntimeProfileEvidenceRequirement{{
 			ID: "validation_preparation", Scope: "deliverable",
+			TargetSelectorRef: "file/workspace_deliverable", TargetSelectorOwnerRef: "software-dev", TargetSelectorSubjectRef: "validation_preparation",
 			AcceptedStepKinds:  []string{StepKindFileWrite, RuntimeBlockKindManagedValidationSession},
 			RequiredOwnerFacts: []RuntimeOwnerFactRequirement{requirement, requirement},
 			OwnerFactConvergences: []RuntimeOwnerFactConvergence{{
@@ -163,6 +164,18 @@ func TestRuntimeProfileOwnerFactRequirementIsNormalizedBoundedAndCompared(t *tes
 	}
 	if err := ValidateRuntimeProfileContracts([]RuntimeProfileContract{valid}); err != nil {
 		t.Fatalf("valid profile owner-fact requirement rejected: %v", err)
+	}
+	selectorDrift := NormalizeRuntimeProfileContracts([]RuntimeProfileContract{valid})[0]
+	selectorDrift.EvidenceRequirements[0].OwnerFactConvergences[0].TargetSelectorSubjectRef = "different-definition-subject"
+	if err := ValidateRuntimeProfileContracts([]RuntimeProfileContract{selectorDrift}); err == nil {
+		t.Fatal("owner-fact acquisition selector drift from its Profile declaration was accepted")
+	}
+	defaultedSelector := NormalizeRuntimeProfileContracts([]RuntimeProfileContract{valid})[0]
+	defaultedSelector.EvidenceRequirements[0].TargetSelectorOwnerRef = ""
+	defaultedSelector.EvidenceRequirements[0].TargetSelectorSubjectRef = ""
+	defaultedSelector.EvidenceRequirements[0].OwnerFactConvergences[0].TargetSelectorSubjectRef = "deliverable"
+	if err := ValidateRuntimeProfileContracts([]RuntimeProfileContract{defaultedSelector}); err != nil {
+		t.Fatalf("deterministically defaulted Profile selector rejected: %v", err)
 	}
 	normalized := NormalizeRuntimeProfileContracts([]RuntimeProfileContract{valid})
 	got := normalized[0].EvidenceRequirements[0].RequiredOwnerFacts

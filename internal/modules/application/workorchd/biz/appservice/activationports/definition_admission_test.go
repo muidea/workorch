@@ -10,9 +10,47 @@ import (
 	definitionadmission "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/definitionadmission"
 	workspacemodel "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
+	"github.com/muidea/workorch/internal/pkg/workorchdefaults"
 	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
+
+func TestBuiltinSoftwareDevProfilePassesDefinitionAdmissionBeforeRun(t *testing.T) {
+	templates, err := workorchdefaults.BuiltinWorkspaceTemplateDefaults()
+	if err != nil {
+		t.Fatalf("load builtin templates: %v", err)
+	}
+	var builtin *workspacemodel.WorkspaceTemplate
+	for _, item := range templates {
+		if item.ID != "software-dev" {
+			continue
+		}
+		hints, err := workorcheventpayload.FromMap(item.ContextHints)
+		if err != nil {
+			t.Fatalf("software-dev context hints: %v", err)
+		}
+		builtin = &workspacemodel.WorkspaceTemplate{
+			ID: item.ID, Name: item.Name, Description: item.Description,
+			GoalText: item.GoalText, DoDItems: append([]string(nil), item.DoDItems...),
+			DefaultSoulID: item.DefaultSoulID, SoulBindings: item.SoulBindings, ContextHints: hints,
+		}
+		break
+	}
+	if builtin == nil {
+		t.Fatal("software-dev builtin template is missing")
+	}
+	workspace := &workspacemodel.Workspace{ID: "workspace-builtin-software-dev", DeliverableDirectory: "/workspace", TemplateID: builtin.ID}
+	goal := &workspacemodel.Goal{ID: "goal-builtin", WorkspaceID: workspace.ID, Text: "implement the requested behavior", DefinitionRevision: "goal-r1"}
+	dod := &workspacemodel.DoD{ID: "dod-builtin", WorkspaceID: workspace.ID, Items: []string{"requested behavior is validated"}, DefinitionRevision: "dod-r1"}
+	candidate, err := definitionAdmissionCandidate(workspace, goal, dod, builtin)
+	if err != nil {
+		t.Fatalf("compile builtin candidate inputs: %v", err)
+	}
+	result, err := definitionadmission.Compile(candidate)
+	if err != nil || result.Disposition != workspacemodel.DefinitionAdmissionAdmittedAllOf {
+		t.Fatalf("builtin software-dev admission = %+v err=%v", result, err)
+	}
+}
 
 func TestLatestPriorInvalidDefinitionCandidateDoesNotReopenAcknowledgedLineage(t *testing.T) {
 	workspace := &workspacemodel.Workspace{ID: "workspace-1", DeliverableDirectory: "/workspace"}
@@ -59,6 +97,7 @@ func TestDefinitionAdmissionCandidateSealsProfileOwnerFactClosureBeforeRun(t *te
 	profile := map[string]any{"profileContracts": map[string]any{"software-dev": map[string]any{
 		"evidenceRequirements": []any{map[string]any{
 			"id": "validation_preparation", "scope": "deliverable",
+			"targetSelectorRef": "file/workspace_deliverable", "targetSelectorOwnerRef": "software-dev", "targetSelectorSubjectRef": "validation_preparation",
 			"acceptedStepKinds":  []any{"file/write", "validation/managed_session"},
 			"requiredOwnerFacts": []any{map[string]any{"ownerModuleId": "blocks/shell", "factKind": "selectable_validation_surface", "operationKind": "validation/managed_session"}},
 			"ownerFactConvergences": []any{map[string]any{
@@ -116,6 +155,7 @@ func TestCurrentEligibleDefinitionAdmissionRejectsIncompleteCurrentConvergenceWi
 	profile := map[string]any{"profileContracts": map[string]any{"software-dev": map[string]any{
 		"evidenceRequirements": []any{map[string]any{
 			"id": "validation_preparation", "scope": "deliverable",
+			"targetSelectorRef": "file/workspace_deliverable", "targetSelectorOwnerRef": "software-dev", "targetSelectorSubjectRef": "validation_preparation",
 			"acceptedStepKinds":  []any{"file/write", "validation/managed_session"},
 			"requiredOwnerFacts": []any{map[string]any{"ownerModuleId": "blocks/shell", "factKind": "selectable_validation_surface", "operationKind": "validation/managed_session"}},
 			"ownerFactConvergences": []any{map[string]any{

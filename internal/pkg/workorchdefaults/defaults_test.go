@@ -471,6 +471,9 @@ func assertSoftwareDevWorkspaceDeliverableSelectors(t *testing.T, hints map[stri
 			if id == "source_change" && (item["targetSelectorOwnerRef"] != "software-dev" || item["targetSelectorSubjectRef"] != "workspace_deliverable_create_scope") {
 				t.Fatalf("%s empty-workspace scope binding = %q/%q, want software-dev/workspace_deliverable_create_scope", id, item["targetSelectorOwnerRef"], item["targetSelectorSubjectRef"])
 			}
+			if id == "*" && item["scope"] == "dodItem" && (item["targetSelectorOwnerRef"] != "software-dev" || item["targetSelectorSubjectRef"] != "dodItem") {
+				t.Fatalf("%s DoD scope binding = %q/%q, want software-dev/dodItem", id, item["targetSelectorOwnerRef"], item["targetSelectorSubjectRef"])
+			}
 			if _, present := item["prospectiveTargetRef"]; present {
 				t.Fatalf("%s/%s retains deprecated prospectiveTargetRef = %q", id, item["scope"], item["prospectiveTargetRef"])
 			}
@@ -905,6 +908,9 @@ func assertSoftwareDevAcceptanceDimensions(t *testing.T, hints map[string]any) {
 				if selector, _ := item["targetSelectorRef"].(string); selector != "file/workspace_deliverable" {
 					t.Fatalf("%s wildcard targetSelectorRef = %q, want file/workspace_deliverable", scope, selector)
 				}
+				if scope == "dodItem" && (item["targetSelectorOwnerRef"] != "software-dev" || item["targetSelectorSubjectRef"] != "dodItem") {
+					t.Fatalf("dodItem declaration selector = %q/%q/%q, want file/workspace_deliverable/software-dev/dodItem", item["targetSelectorRef"], item["targetSelectorOwnerRef"], item["targetSelectorSubjectRef"])
+				}
 				if _, present := item["prospectiveTargetRef"]; present {
 					t.Fatalf("%s wildcard retains deprecated prospectiveTargetRef = %q", scope, item["prospectiveTargetRef"])
 				}
@@ -927,7 +933,7 @@ func assertSoftwareDevAcceptanceDimensions(t *testing.T, hints map[string]any) {
 						t.Fatalf("dodItem validation readiness convergence = %+v, want one bounded acquisition", item["ownerFactConvergences"])
 					}
 					convergence, ok := convergences[0].(map[string]any)
-					if !ok || convergence["missingTrigger"] != "owner_fact_missing" || convergence["acquisitionOwnerModuleId"] != "blocks/file" || convergence["acquisitionOperationKind"] != "file/write" || convergence["acquisitionTargetPolicy"] != "prospective_owner_target" || convergence["acquisitionTargetSelectorRef"] != "workspace-relative-new-file-target" || convergence["reobserveOwnerModuleId"] != "blocks/shell" || convergence["maxAcquisitionAttempts"] != float64(1) {
+					if !ok || convergence["missingTrigger"] != "owner_fact_missing" || convergence["acquisitionOwnerModuleId"] != "blocks/file" || convergence["acquisitionOperationKind"] != "file/write" || convergence["acquisitionTargetPolicy"] != "prospective_owner_target" || convergence["acquisitionTargetSelectorRef"] != "workspace-relative-new-file-target" || convergence["targetSelectorRef"] != item["targetSelectorRef"] || convergence["targetSelectorOwnerRef"] != item["targetSelectorOwnerRef"] || convergence["targetSelectorSubjectRef"] != item["targetSelectorSubjectRef"] || convergence["reobserveOwnerModuleId"] != "blocks/shell" || convergence["maxAcquisitionAttempts"] != float64(1) {
 						t.Fatalf("dodItem validation readiness convergence = %+v, want File acquisition then Shell re-observation", convergences)
 					}
 					validationReadinessPrerequisiteFound = true

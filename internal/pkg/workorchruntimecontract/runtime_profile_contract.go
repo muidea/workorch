@@ -103,6 +103,27 @@ type RuntimeProfileCapabilityStateRequirement struct {
 	SubjectRef          string
 }
 
+// ResolveRuntimeProfileTargetSelectorIdentity returns the effective
+// Definition-owned selector identity for one Profile evidence requirement.
+// Profile ID and evidence scope are the deterministic defaults used by the
+// activation compiler; keeping that rule here lets pre-seal admission validate
+// the exact identity before any Runtime aggregate can be created.
+func ResolveRuntimeProfileTargetSelectorIdentity(profileID string, requirement RuntimeProfileEvidenceRequirement) (selectorRef, ownerRef, subjectRef string) {
+	selectorRef = strings.TrimSpace(requirement.TargetSelectorRef)
+	ownerRef = strings.TrimSpace(requirement.TargetSelectorOwnerRef)
+	subjectRef = strings.TrimSpace(requirement.TargetSelectorSubjectRef)
+	if selectorRef == "" {
+		return selectorRef, ownerRef, subjectRef
+	}
+	if ownerRef == "" {
+		ownerRef = strings.TrimSpace(profileID)
+	}
+	if subjectRef == "" {
+		subjectRef = strings.TrimSpace(requirement.Scope)
+	}
+	return selectorRef, ownerRef, subjectRef
+}
+
 // RuntimeCoverageDependency is a profile-declared relationship between two
 // compiled coverage sources. Runtime transports opaque source IDs and only
 // applies the sealed evidence-kind trigger; it never infers a dependency from
@@ -309,12 +330,19 @@ func ValidateRuntimeProfileContracts(values []RuntimeProfileContract) error {
 			if err := ValidateRuntimeOwnerFactConvergences(item.RequiredOwnerFacts, item.OwnerFactConvergences); err != nil {
 				return fmt.Errorf("runtime profile evidence requirement %q: %w", item.ID, err)
 			}
+			selectorRef, selectorOwnerRef, selectorSubjectRef := ResolveRuntimeProfileTargetSelectorIdentity(profile.ID, item)
 			for _, ownerFact := range item.RequiredOwnerFacts {
 				if !runtimeProfileContainsOperationKind(item.AcceptedStepKinds, ownerFact.OperationKind) {
 					return fmt.Errorf("runtime profile evidence requirement %q owner fact operation %q is outside accepted operation kinds", item.ID, ownerFact.OperationKind)
 				}
 			}
 			for _, convergence := range item.OwnerFactConvergences {
+				convergence = convergence.Normalized()
+				if !convergence.RequirePreexisting && (selectorRef != convergence.TargetSelectorRef ||
+					selectorOwnerRef != convergence.TargetSelectorOwnerRef ||
+					selectorSubjectRef != convergence.TargetSelectorSubjectRef) {
+					return fmt.Errorf("runtime profile evidence requirement %q owner-fact acquisition selector does not match its declaration", item.ID)
+				}
 				if !convergence.RequirePreexisting && !runtimeProfileContainsOperationKind(item.AcceptedStepKinds, convergence.AcquisitionOperationKind) {
 					return fmt.Errorf("runtime profile evidence requirement %q owner-fact acquisition %q is outside accepted operation kinds", item.ID, convergence.AcquisitionOperationKind)
 				}

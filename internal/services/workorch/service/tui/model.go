@@ -150,7 +150,8 @@ type AppModel struct {
 	width  int
 	height int
 
-	lastError error
+	lastError                                   error
+	preserveCommandErrorAcrossProjectionRefresh bool
 }
 
 // projectionSubscription owns the local projection observer shared by the
@@ -334,7 +335,7 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.workspaceListRefreshPending = false
 		if msg.Error != nil {
 			if isTransientProjectionError(msg.Error) {
-				m.lastError = nil
+				m.clearProjectionRefreshError()
 				m.progressText = "Workspace projection is refreshing; retrying workspace list"
 				return m, RetryWorkspaceList()
 			}
@@ -372,7 +373,7 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		if msg.Error != nil {
 			if isTransientProjectionError(msg.Error) {
-				m.lastError = nil
+				m.clearProjectionRefreshError()
 				if !m.restoreActiveWorkspaceBlockerFromOverview() {
 					m.progressText = "Workspace projection is refreshing; retrying state load"
 				}
@@ -382,12 +383,12 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		if m.workspaceContextOlderThanOverview(msg) {
-			m.lastError = nil
+			m.clearProjectionRefreshError()
 			m.progressText = "Workspace projection detail is older than list; refreshing state"
 			return m, RetryWorkspaceContext(msg.WorkspaceID, msg.ResetMainViewport)
 		}
 		m.applyWorkspaceContext(msg)
-		m.lastError = nil
+		m.clearProjectionRefreshError()
 		if msg.ResetMainViewport {
 			if m.activeBlockingDecision() != nil || m.activeBlockingApproval() != nil {
 				m.followMainViewportTail()
@@ -433,7 +434,7 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		if msg.Error != nil {
 			if isTransientProjectionError(msg.Error) {
-				m.lastError = nil
+				m.clearProjectionRefreshError()
 				m.progressText = "Workspace runtime view is refreshing; retrying state load"
 				return m, RetryWorkspaceContext(requestWorkspaceID, msg.ResetMainViewport)
 			}
@@ -456,7 +457,7 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 		m.applyWorkspaceRuntimeView(*msg.View, msg.ResetMainViewport)
-		m.lastError = nil
+		m.clearProjectionRefreshError()
 		cmds := []tea.Cmd{}
 		if m.workspaceMessageBelongsToActiveWorkspace(requestWorkspaceID) {
 			cmds = append(cmds, m.fetchActiveBlockerDetails())
@@ -564,7 +565,7 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if isTransientContextError(msg.Error) {
 				return m, nil
 			}
-			m.setLastError(msg.Error)
+			m.setWorkspaceCommandError(msg.Error)
 			m.running = false
 			m.progress = progressFailed
 			m.progressText = "Command failed"
@@ -621,7 +622,7 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.lastError = nil
 				return m, tea.Batch(m.refreshActiveWorkspaceState(), m.fetchActiveBlockerDetails())
 			}
-			m.setLastError(msg.Error)
+			m.setWorkspaceCommandError(msg.Error)
 			return m, m.refreshActiveWorkspaceState()
 		}
 		if msg.Admission != nil {
@@ -1815,6 +1816,23 @@ func (m *AppModel) setLastError(err error) {
 		return
 	}
 	m.lastError = err
+	m.preserveCommandErrorAcrossProjectionRefresh = false
+}
+
+func (m *AppModel) setWorkspaceCommandError(err error) {
+	if err == nil || isTransientContextError(err) {
+		return
+	}
+	m.lastError = err
+	m.preserveCommandErrorAcrossProjectionRefresh = true
+}
+
+func (m *AppModel) clearProjectionRefreshError() {
+	if m.preserveCommandErrorAcrossProjectionRefresh && m.lastError != nil {
+		return
+	}
+	m.lastError = nil
+	m.preserveCommandErrorAcrossProjectionRefresh = false
 }
 
 func isTransientContextError(err error) bool {
