@@ -82,7 +82,10 @@ func semanticBoundaryRequest(t *testing.T) llmmodels.RuntimeCandidateRequest {
 		CapabilityContract: []string{runtimecontract.StepKindFileWrite},
 	}
 	target := runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "model-1"}
-	activation := runtimecontract.RuntimeActivationContext{ProviderSelection: runtimecontract.ProviderInferenceSelection{Target: target}, ExecutionContract: runtimecontract.RuntimeExecutionContract{OperationContractRevision: runtimecontract.RuntimeOperationContractRevision()}}
+	activation := runtimecontract.RuntimeActivationContext{ProviderSelection: runtimecontract.ProviderInferenceSelection{Target: target}, ExecutionContract: runtimecontract.RuntimeExecutionContract{
+		OperationContractRevision: runtimecontract.RuntimeOperationContractRevision(),
+		StateChangePolicy:         runtimecontract.RuntimeStateChangeAllowedButNotRequired,
+	}}
 	items := []runtimecontract.RuntimeCoverageItem{{ID: "cwi-1", SliceID: "slice-1", SourceScope: "dodItem", SourceID: "dod-1", TargetText: "works", Order: 1}}
 	slices := []runtimecontract.RuntimeAcceptanceSlice{{ID: "slice-1", CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-1"}}}
 	seed, err := runtimecontract.CompileRuntimeDefinitionSeed(definition, activation, items, slices)
@@ -533,12 +536,16 @@ func candidateRequest(t *testing.T, state runtimecontract.ConvergenceState) llmm
 		Coverage: []runtimecontract.RuntimeCoverageItemFact{{ID: "cwi-1", State: runtimecontract.RuntimeCoverageItemStateOpen}},
 		Activation: runtimecontract.RuntimeActivationContext{
 			ProviderSelection: runtimecontract.ProviderInferenceSelection{Target: runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "gpt-4o"}},
+			ExecutionContract: runtimecontract.RuntimeExecutionContract{StateChangePolicy: runtimecontract.RuntimeStateChangeAllowedButNotRequired},
 			EvidencePolicies: []runtimecontract.RuntimeEvidencePolicy{{
 				ID: "test-managed-validation", AppliesTo: runtimecontract.StepKindShellCommand,
 				CommandName: "true", RecipeDeclared: true, RecipeArgs: []string{"workorch-validation"},
 			}},
 		},
 	}
+	facts.ConvergencePolicy = runtimecontract.DefaultRuntimeConvergencePolicy()
+	facts.RecoveryPolicy = runtimecontract.DefaultRuntimeRecoveryPolicy()
+	facts.ExecutionBudgetPolicy = runtimecontract.DefaultRuntimeExecutionBudgetPolicy()
 	facts.Resources.ProviderCeiling = &runtimecontract.ProviderCeiling{
 		Selection:                facts.Activation.ProviderSelection,
 		ContextWindowTokens:      128000,

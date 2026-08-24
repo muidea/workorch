@@ -3,7 +3,6 @@ package workorchruntimecontract
 import (
 	"crypto/sha256"
 	"encoding/hex"
-	"errors"
 	"fmt"
 	"strings"
 
@@ -114,9 +113,6 @@ type RuntimeCandidateAttemptRecord struct {
 
 // RuntimeStateRecord 是 Runtime 在 Run owner 中持久化的唯一正式状态。
 type RuntimeStateRecord struct {
-	// SchemaVersion is the persisted Runtime aggregate schema. Production
-	// persistence accepts only SchemaVersionCurrent.
-	SchemaVersion    uint32
 	StateRevision    uint64
 	EvidenceSequence uint64
 	Definition       RuntimeDefinitionContext
@@ -173,198 +169,7 @@ type RuntimeStateRecord struct {
 	Termination *RuntimeTerminationRecord
 }
 
-// RuntimeStateSchemaVersionCurrent is the only Runtime aggregate schema.
-// During development only the current implementation baseline is maintained;
-// incompatible development data is discarded instead of accumulating migration
-// branches. Version 2 seals the per-focus owner-fact convergence declarations;
-// a version-1 record cannot safely reconstruct that authority and must enter
-// fresh activation through the typed schema-incompatibility boundary.
-// ProviderCeiling remains the sole persisted model capability fact and
-// ExpectedDocument the sole resolved request budget.
-const RuntimeStateSchemaVersionCurrent uint32 = 2
-
-// ErrUnsupportedRuntimeStateSchema identifies a non-current aggregate schema.
-var ErrUnsupportedRuntimeStateSchema = errors.New("unsupported runtime state schema")
-
-// ErrRuntimeStateIncompatible identifies a persisted Runtime aggregate that
-// this binary must not resume. It is a classification boundary only: the
-// Run owner decides and persists its own fresh-activation disposition after
-// receiving the corresponding immutable fact.
-var ErrRuntimeStateIncompatible = errors.New("runtime state incompatible")
-
-// RuntimeStateIncompatibilityReason is the bounded factual reason a persisted
-// Runtime aggregate cannot enter DriveRuntime. It is not a retry, migration,
-// or state-transition instruction.
-type RuntimeStateIncompatibilityReason string
-
-const (
-	RuntimeStateIncompatibilityReasonSchemaUnsupported     RuntimeStateIncompatibilityReason = "schema_unsupported"
-	RuntimeStateIncompatibilityReasonCWILedgerInvalid      RuntimeStateIncompatibilityReason = "cwi_ledger_invalid"
-	RuntimeStateIncompatibilityReasonRecoveryLedgerInvalid RuntimeStateIncompatibilityReason = "recovery_ledger_invalid"
-)
-
-// RuntimeStateIncompatibility is the owner-neutral identity of one
-// non-resumable persisted Runtime record. Schema versions identify the opaque
-// record revision only; a current-schema CWI ledger defect deliberately keeps
-// both values equal rather than pretending there was a schema transition.
-type RuntimeStateIncompatibility struct {
-	Reason                 RuntimeStateIncompatibilityReason
-	ActualSchemaVersion    uint32
-	SupportedSchemaVersion uint32
-}
-
-func (v RuntimeStateIncompatibility) Normalized() RuntimeStateIncompatibility {
-	v.Reason = RuntimeStateIncompatibilityReason(strings.TrimSpace(string(v.Reason)))
-	return v
-}
-
-func (v RuntimeStateIncompatibility) Validate() error {
-	v = v.Normalized()
-	switch v.Reason {
-	case RuntimeStateIncompatibilityReasonSchemaUnsupported:
-		if v.ActualSchemaVersion == 0 || v.SupportedSchemaVersion == 0 || v.ActualSchemaVersion == v.SupportedSchemaVersion {
-			return fmt.Errorf("runtime state schema incompatibility requires distinct actual and supported versions")
-		}
-	case RuntimeStateIncompatibilityReasonCWILedgerInvalid, RuntimeStateIncompatibilityReasonRecoveryLedgerInvalid:
-		if v.ActualSchemaVersion != RuntimeStateSchemaVersionCurrent || v.SupportedSchemaVersion != RuntimeStateSchemaVersionCurrent {
-			return fmt.Errorf("runtime state current-schema incompatibility requires current schema identity")
-		}
-	default:
-		return fmt.Errorf("runtime state incompatibility has unsupported reason %q", v.Reason)
-	}
-	return nil
-}
-
-// RuntimeStateIncompatibilityError transports a validated persisted-state
-// classification without exposing or repairing aggregate authority. Cause is
-// retained for local error inspection only; callers must use Incompatibility
-// for cross-owner facts and projections.
-type RuntimeStateIncompatibilityError struct {
-	Incompatibility RuntimeStateIncompatibility
-	Cause           error
-}
-
-func (e *RuntimeStateIncompatibilityError) Error() string {
-	if e == nil {
-		return ErrRuntimeStateIncompatible.Error()
-	}
-	value := e.Incompatibility.Normalized()
-	if e.Cause == nil {
-		return fmt.Sprintf("%s: %s", ErrRuntimeStateIncompatible, value.Reason)
-	}
-	return fmt.Sprintf("%s: %s: %v", ErrRuntimeStateIncompatible, value.Reason, e.Cause)
-}
-
-func (e *RuntimeStateIncompatibilityError) Unwrap() error {
-	if e == nil {
-		return nil
-	}
-	return e.Cause
-}
-
-func (e *RuntimeStateIncompatibilityError) Is(target error) bool {
-	return target == ErrRuntimeStateIncompatible
-}
-
-// NewRuntimeStateCWILedgerIncompatibilityError converts a pure current-schema
-// CWI validation failure into a typed persisted-state boundary. It never
-// migrates, reconstructs, or normalizes stored authority.
-func NewRuntimeStateCWILedgerIncompatibilityError(cause error) *RuntimeStateIncompatibilityError {
-	return &RuntimeStateIncompatibilityError{
-		Incompatibility: RuntimeStateIncompatibility{
-			Reason:                 RuntimeStateIncompatibilityReasonCWILedgerInvalid,
-			ActualSchemaVersion:    RuntimeStateSchemaVersionCurrent,
-			SupportedSchemaVersion: RuntimeStateSchemaVersionCurrent,
-		},
-		Cause: cause,
-	}
-}
-
-// NewRuntimeStateRecoveryLedgerIncompatibilityError classifies a persisted
-// SM-4 ledger that cannot belong to the aggregate's current terminal lineage.
-// It never repairs or resets the ledger; the Run owner receives only the
-// immutable incompatibility fact and decides its own activation disposition.
-func NewRuntimeStateRecoveryLedgerIncompatibilityError(cause error) *RuntimeStateIncompatibilityError {
-	return &RuntimeStateIncompatibilityError{
-		Incompatibility: RuntimeStateIncompatibility{
-			Reason:                 RuntimeStateIncompatibilityReasonRecoveryLedgerInvalid,
-			ActualSchemaVersion:    RuntimeStateSchemaVersionCurrent,
-			SupportedSchemaVersion: RuntimeStateSchemaVersionCurrent,
-		},
-		Cause: cause,
-	}
-}
-
-// RuntimeStateSchemaVersionError retains both schema values so persistence
-// adapters can classify this as a typed contract failure rather than parse an
-// error string.
-type RuntimeStateSchemaVersionError struct {
-	Actual    uint32
-	Supported uint32
-}
-
-func (e *RuntimeStateSchemaVersionError) Error() string {
-	if e == nil {
-		return ErrUnsupportedRuntimeStateSchema.Error()
-	}
-	return fmt.Sprintf("%s version %d; supported version is %d", ErrUnsupportedRuntimeStateSchema, e.Actual, e.Supported)
-}
-
-func (e *RuntimeStateSchemaVersionError) Unwrap() error {
-	return ErrUnsupportedRuntimeStateSchema
-}
-
-// Incompatibility provides the common persisted-state identity for a
-// non-current schema while retaining RuntimeStateSchemaVersionError for
-// callers that need the established typed schema detail.
-func (e *RuntimeStateSchemaVersionError) Incompatibility() RuntimeStateIncompatibility {
-	if e == nil {
-		return RuntimeStateIncompatibility{}
-	}
-	return RuntimeStateIncompatibility{
-		Reason:                 RuntimeStateIncompatibilityReasonSchemaUnsupported,
-		ActualSchemaVersion:    e.Actual,
-		SupportedSchemaVersion: e.Supported,
-	}
-}
-
-// RuntimeStateIncompatibilityFromError extracts the bounded persisted-state
-// fact from either a schema gate or a current-schema CWI validation failure.
-// It intentionally does not classify arbitrary Runtime errors as
-// incompatibility.
-func RuntimeStateIncompatibilityFromError(err error) (RuntimeStateIncompatibility, bool) {
-	var incompatibility *RuntimeStateIncompatibilityError
-	if errors.As(err, &incompatibility) && incompatibility != nil {
-		value := incompatibility.Incompatibility.Normalized()
-		if value.Validate() == nil {
-			return value, true
-		}
-		return RuntimeStateIncompatibility{}, false
-	}
-	var schema *RuntimeStateSchemaVersionError
-	if errors.As(err, &schema) && schema != nil {
-		value := schema.Incompatibility()
-		if value.Validate() == nil {
-			return value, true
-		}
-	}
-	return RuntimeStateIncompatibility{}, false
-}
-
-// ValidateRuntimeStateSchemaVersion is the single schema gate shared by
-// bootstrap, persistence and aggregate validation. It is intentionally a pure
-// contract helper: it does not migrate, default or select any state transition.
-func ValidateRuntimeStateSchemaVersion(version uint32) error {
-	if version == RuntimeStateSchemaVersionCurrent {
-		return nil
-	}
-	return &RuntimeStateSchemaVersionError{Actual: version, Supported: RuntimeStateSchemaVersionCurrent}
-}
-
 func (r RuntimeStateRecord) Validate() error {
-	if err := ValidateRuntimeStateSchemaVersion(r.SchemaVersion); err != nil {
-		return err
-	}
 	if r.Facts.WorkspaceID == "" || r.Facts.RunID == "" {
 		return fmt.Errorf("runtime state requires workspace and run scope")
 	}
@@ -375,7 +180,7 @@ func (r RuntimeStateRecord) Validate() error {
 		return err
 	}
 	if err := ValidateRuntimeCWIBindingRetirementsAgainstExecution(r.Facts, r.ActiveDispatch, r.CompletedDispatches, r.OperationReceipts); err != nil {
-		return NewRuntimeStateCWILedgerIncompatibilityError(err)
+		return err
 	}
 	if err := r.Facts.Validate(); err != nil {
 		return err
@@ -603,7 +408,7 @@ func (r RuntimeStateRecord) Validate() error {
 		}
 	}
 	if err := ValidateRuntimeStateTerminalDeliveryLedger(r.Decision, r.Termination, r.DeliveryAcknowledgements, r.Facts.Recovery); err != nil {
-		return NewRuntimeStateRecoveryLedgerIncompatibilityError(err)
+		return err
 	}
 	if r.ActiveDispatch != nil {
 		if err := ValidateRuntimeOperationExecutionRecords(r.ActiveDispatch.OperationExecutions); err != nil {
@@ -621,7 +426,7 @@ func (r RuntimeStateRecord) Validate() error {
 // ValidateRuntimeStateTerminalDeliveryLedger binds terminal-delivery recovery
 // facts to an already sealed convergence terminal or administrative
 // termination. A non-terminal aggregate cannot carry delivery attempts or
-// acknowledgements left by an older lifecycle-handoff implementation.
+// acknowledgements because those fields have no current non-terminal meaning.
 func ValidateRuntimeStateTerminalDeliveryLedger(
 	decision RuntimeDecision,
 	termination *RuntimeTerminationRecord,

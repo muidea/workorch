@@ -23,7 +23,6 @@ const (
 	StepKindGitRead                          = "git/read"
 	StepKindGitWrite                         = "git/write"
 	StepKindLLMWorkspaceExecution            = "llm/workspace_execution"
-	StepKindLLMWorkspacePlan                 = "llm/workspace-plan"
 	StepKindMCPToolCall                      = "mcp/tool_call"
 	StepKindMCPResourceRead                  = "mcp/resource_read"
 	StepKindMCPPromptGet                     = "mcp/prompt_get"
@@ -42,16 +41,7 @@ const (
 )
 
 func CanonicalRuntimeBlockKind(kind string) string {
-	switch strings.TrimSpace(kind) {
-	case StepKindLLMWorkspaceExecution, StepKindLLMWorkspacePlan:
-		return StepKindLLMWorkspaceExecution
-	case "patchRequests", "patch/request":
-		return RuntimeBlockKindPatchApply
-	case "file/write_file":
-		return "file/write"
-	default:
-		return strings.TrimSpace(kind)
-	}
+	return strings.TrimSpace(kind)
 }
 
 // RuntimeModuleForOperationKind returns the owner module for a concrete operation kind.

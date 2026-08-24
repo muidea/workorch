@@ -1501,11 +1501,7 @@ func (f RuntimeFacts) Normalized() RuntimeFacts {
 	f.StateChange = f.StateChange.Normalized()
 	f.ConvergencePolicy = f.ConvergencePolicy.Normalized()
 	f.RecoveryPolicy = f.RecoveryPolicy.Normalized()
-	if strings.TrimSpace(f.ExecutionBudgetPolicy.PolicyRevision) == "" {
-		f.ExecutionBudgetPolicy = RuntimeExecutionBudgetPolicyForRuntimePolicies(f.ConvergencePolicy, f.RecoveryPolicy)
-	} else {
-		f.ExecutionBudgetPolicy = f.ExecutionBudgetPolicy.Normalized()
-	}
+	f.ExecutionBudgetPolicy = f.ExecutionBudgetPolicy.Normalized()
 	f.Recovery = f.Recovery.Normalized()
 	f.Repair = f.Repair.Normalized()
 	f.Coverage = NormalizeRuntimeCoverageFacts(f.Coverage)
@@ -1578,6 +1574,9 @@ func (f RuntimeFacts) Validate() error {
 	}
 	if err := f.Activation.Validate(); err != nil {
 		return err
+	}
+	if err := f.ConvergencePolicy.Validate(); err != nil {
+		return fmt.Errorf("runtime facts convergence policy: %w", err)
 	}
 	if err := f.RecoveryPolicy.Validate(); err != nil {
 		return fmt.Errorf("runtime facts recovery policy: %w", err)

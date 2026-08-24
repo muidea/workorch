@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"sync"
 	"testing"
 
@@ -136,5 +137,28 @@ func TestCapabilityStateReceiptStoreRejectsCrossWorkspaceScope(t *testing.T) {
 	}
 	if _, _, err := store.Load("../ws-a", snapshot.AcquisitionKey); !errors.Is(err, common.ErrInvalidArgument) {
 		t.Fatalf("path-like workspace Load err=%v, want invalid argument", err)
+	}
+}
+
+func TestCapabilityStateReceiptStoreRejectsUnknownPersistedFields(t *testing.T) {
+	root := t.TempDir()
+	store, err := NewCapabilityStateReceiptStore(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	workspaceID := common.WorkspaceID("ws")
+	acquisitionKey := "capability-state/ws/run/requirement/unknown"
+	path, err := store.path(workspaceID, acquisitionKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte(`{"AcquisitionKey":"capability-state/ws/run/requirement/unknown","retiredRevision":"v1"}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := store.Load(workspaceID, acquisitionKey); err == nil || !strings.Contains(err.Error(), `unknown field "retiredRevision"`) {
+		t.Fatalf("Load error = %v, want strict retired-field rejection", err)
 	}
 }

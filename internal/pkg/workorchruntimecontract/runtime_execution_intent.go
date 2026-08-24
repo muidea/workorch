@@ -28,7 +28,6 @@ const (
 	RuntimeExecutionIntentFreshActivationRequired RuntimeExecutionIntentOutcome = "fresh_activation_required"
 	RuntimeExecutionIntentDefinitionChanged       RuntimeExecutionIntentOutcome = "definition_changed_requires_restart"
 	RuntimeExecutionIntentGovernanceRequired      RuntimeExecutionIntentOutcome = "governance_required"
-	RuntimeExecutionIntentDataResetRequired       RuntimeExecutionIntentOutcome = "data_reset_required"
 )
 
 // RuntimeExecutionIntentReason preserves the exact owner-authored factual
@@ -39,7 +38,6 @@ const (
 	RuntimeExecutionIntentReasonWorkspaceActiveRunAbsent       RuntimeExecutionIntentReason = "workspace_active_run_absent"
 	RuntimeExecutionIntentReasonSelectedRunAbsent              RuntimeExecutionIntentReason = "selected_run_absent"
 	RuntimeExecutionIntentReasonSelectedRunTerminal            RuntimeExecutionIntentReason = "selected_run_terminal"
-	RuntimeExecutionIntentReasonRuntimeStateIncompatible       RuntimeExecutionIntentReason = "runtime_state_incompatible"
 	RuntimeExecutionIntentReasonDefinitionChanged              RuntimeExecutionIntentReason = "definition_changed"
 	RuntimeExecutionIntentReasonRuntimeBootstrapMissing        RuntimeExecutionIntentReason = "runtime_bootstrap_missing"
 	RuntimeExecutionIntentReasonCurrentRunContinuationAccepted RuntimeExecutionIntentReason = "current_run_continuation_accepted"
@@ -49,7 +47,6 @@ const (
 	RuntimeExecutionIntentReasonDuplicateRestart               RuntimeExecutionIntentReason = "duplicate_restart"
 	RuntimeExecutionIntentReasonNewRunActivated                RuntimeExecutionIntentReason = "new_run_activated"
 	RuntimeExecutionIntentReasonPredecessorSupersedeRequested  RuntimeExecutionIntentReason = "predecessor_supersede_requested"
-	RuntimeExecutionIntentReasonDevelopmentDataIncompatible    RuntimeExecutionIntentReason = "development_data_incompatible"
 	RuntimeExecutionIntentReasonDefinitionAdmissionMissing     RuntimeExecutionIntentReason = "definition_admission_missing"
 	RuntimeExecutionIntentReasonDefinitionAdmissionMismatch    RuntimeExecutionIntentReason = "definition_admission_mismatch"
 	RuntimeExecutionIntentReasonDefinitionClarificationPending RuntimeExecutionIntentReason = "definition_clarification_pending"
@@ -110,13 +107,11 @@ func ValidateRuntimeExecutionIntentAdmission(outcome RuntimeExecutionIntentOutco
 			valid = true
 		}
 	case RuntimeExecutionIntentFreshActivationRequired:
-		valid = reason == RuntimeExecutionIntentReasonRuntimeStateIncompatible || reason == RuntimeExecutionIntentReasonRuntimeBootstrapMissing || reason == RuntimeExecutionIntentReasonDefinitionAdmissionMissing || reason == RuntimeExecutionIntentReasonDefinitionAdmissionMismatch
+		valid = reason == RuntimeExecutionIntentReasonRuntimeBootstrapMissing || reason == RuntimeExecutionIntentReasonDefinitionAdmissionMissing || reason == RuntimeExecutionIntentReasonDefinitionAdmissionMismatch
 	case RuntimeExecutionIntentDefinitionChanged:
 		valid = reason == RuntimeExecutionIntentReasonDefinitionChanged
 	case RuntimeExecutionIntentGovernanceRequired:
 		valid = reason == RuntimeExecutionIntentReasonGovernancePending || reason == RuntimeExecutionIntentReasonDefinitionClarificationPending
-	case RuntimeExecutionIntentDataResetRequired:
-		valid = reason == RuntimeExecutionIntentReasonDevelopmentDataIncompatible
 	}
 	if !valid {
 		return fmt.Errorf("invalid runtime execution intent admission outcome %q reason %q", outcome, reason)
@@ -134,8 +129,6 @@ func RuntimeExecutionIntentReasonSummary(reason RuntimeExecutionIntentReason) st
 		return "Workspace selected Run is absent"
 	case RuntimeExecutionIntentReasonSelectedRunTerminal:
 		return "Workspace selected Run is terminal"
-	case RuntimeExecutionIntentReasonRuntimeStateIncompatible:
-		return "Runtime aggregate requires fresh activation"
 	case RuntimeExecutionIntentReasonDefinitionChanged:
 		return "Workspace Goal/DoD definition differs from sealed Run"
 	case RuntimeExecutionIntentReasonRuntimeBootstrapMissing:
@@ -154,8 +147,6 @@ func RuntimeExecutionIntentReasonSummary(reason RuntimeExecutionIntentReason) st
 		return "new Workspace Run activated"
 	case RuntimeExecutionIntentReasonPredecessorSupersedeRequested:
 		return "predecessor supersede requested"
-	case RuntimeExecutionIntentReasonDevelopmentDataIncompatible:
-		return "persisted development data is incompatible with the current Runtime baseline"
 	case RuntimeExecutionIntentReasonDefinitionAdmissionMissing:
 		return "Workspace definition has not completed pre-seal admission"
 	case RuntimeExecutionIntentReasonDefinitionAdmissionMismatch:

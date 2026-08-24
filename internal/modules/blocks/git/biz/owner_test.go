@@ -149,7 +149,7 @@ func TestGitOwnerStateChangingReceiptReplaysWithoutSecondOperationAfterOwnerRecr
 
 	workspace := newTestRepo(t)
 	writeFile(t, filepath.Join(workspace, "generated.txt"), "first\n")
-	owner := &Biz{Base: basebiz.New(ModuleID, hub, nil), runtimeAdapter: NewRuntimeAdapter(true)}
+	owner := &Biz{Base: basebiz.New(ModuleID, hub, nil), runtimeAdapter: NewRuntimeAdapter()}
 	if err := owner.Start(); err != nil {
 		t.Fatal(err)
 	}
@@ -177,7 +177,7 @@ func TestGitOwnerStateChangingReceiptReplaysWithoutSecondOperationAfterOwnerRecr
 	// persisted receipt before it can alter the repository again.
 	owner.Teardown(ctx)
 	writeFile(t, filepath.Join(workspace, "replayed.txt"), "must remain unstaged\n")
-	recreated := &Biz{Base: basebiz.New(ModuleID, hub, nil), runtimeAdapter: NewRuntimeAdapter(true)}
+	recreated := &Biz{Base: basebiz.New(ModuleID, hub, nil), runtimeAdapter: NewRuntimeAdapter()}
 	if err := recreated.Start(); err != nil {
 		t.Fatal(err)
 	}
@@ -244,7 +244,7 @@ func TestGitOwnerExecutionRejectsPostWrongSourceAndPayloadDriftBeforeEffect(t *t
 	t.Cleanup(func() { hub.Terminate(ctx) })
 	workspace := newTestRepo(t)
 	writeFile(t, filepath.Join(workspace, "generated.txt"), "content\n")
-	owner := &Biz{Base: basebiz.New(ModuleID, hub, nil), runtimeAdapter: NewRuntimeAdapter(true)}
+	owner := &Biz{Base: basebiz.New(ModuleID, hub, nil), runtimeAdapter: NewRuntimeAdapter()}
 	if err := owner.Start(); err != nil {
 		t.Fatal(err)
 	}
@@ -407,7 +407,7 @@ func TestGitOwnerCapabilityBoundAdmissibilityRejectsMismatchedProbeBindingAsStal
 	})
 	t.Cleanup(func() { fileObserver.Unsubscribe(fileevents.TopicAcquireWorkspaceManifest) })
 	workspace := newTestRepo(t)
-	owner := &Biz{Base: basebiz.New(ModuleID, hub, nil), runtimeAdapter: NewRuntimeAdapter(true), capabilityReceipts: store}
+	owner := &Biz{Base: basebiz.New(ModuleID, hub, nil), runtimeAdapter: NewRuntimeAdapter(), capabilityReceipts: store}
 	if err := owner.Start(); err != nil {
 		t.Fatal(err)
 	}
@@ -529,7 +529,7 @@ func TestGitOwnerRechecksFileWorkspaceTreeBeforeFeasibilityAndExecution(t *testi
 
 	workspace := newTestRepo(t)
 	writeFile(t, filepath.Join(workspace, "generated.txt"), "sealed content\n")
-	owner := &Biz{Base: basebiz.New(ModuleID, hub, nil), runtimeAdapter: NewRuntimeAdapter(true), capabilityReceipts: store}
+	owner := &Biz{Base: basebiz.New(ModuleID, hub, nil), runtimeAdapter: NewRuntimeAdapter(), capabilityReceipts: store}
 	if err := owner.Start(); err != nil {
 		t.Fatal(err)
 	}
@@ -643,7 +643,7 @@ func TestRuntimeOperationAdmissibilityProbeUsesCurrentRepositorySnapshot(t *test
 			t.Fatalf("git %v: %v\n%s", args, err, output)
 		}
 	}
-	module := &Biz{runtimeAdapter: NewRuntimeAdapter(true)}
+	module := &Biz{runtimeAdapter: NewRuntimeAdapter()}
 	snapshot, err := module.runtimeAdapter.CapabilityState(context.Background(), "admissibility-git", "workspace_deliverable", workspace)
 	if err != nil {
 		t.Fatalf("acquire read-only repository state: %v", err)

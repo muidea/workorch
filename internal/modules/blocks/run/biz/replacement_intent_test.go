@@ -170,7 +170,6 @@ func TestMaterializeReplacementRequiresTerminalPredecessorAndIsIdempotent(t *tes
 		State: common.RunStateActive, ReplacementIntent: &intent,
 		ReconciliationRequestID: "resume-predecessor",
 		RuntimeState: &runtimecontract.RuntimeStateRecord{
-			SchemaVersion: runtimecontract.RuntimeStateSchemaVersionCurrent,
 			StateRevision: 17,
 			// Run stores this opaque aggregate marker but must never transfer it
 			// into a fresh restart successor.
@@ -212,7 +211,7 @@ func TestMaterializeReplacementRequiresTerminalPredecessorAndIsIdempotent(t *tes
 	if err != nil || created.State != common.RunStateActive || created.Lineage.PredecessorRunID != predecessor.ID || created.ActivationRequestID != intent.RequestID {
 		t.Fatalf("created successor = %+v", created)
 	}
-	if created.RuntimeState != nil || created.RuntimeActivationStatus != nil || created.ReconciliationRequestID != "" ||
+	if created.RuntimeState != nil || created.ReconciliationRequestID != "" ||
 		created.ReconciliationScope != runtimecontract.RuntimeCWIReconciliationScopeWorkspaceFull {
 		t.Fatalf("restart successor inherited predecessor Runtime authority: %+v", created)
 	}
@@ -241,7 +240,10 @@ func restartTestBootstrap(t *testing.T, workspaceID common.WorkspaceID) runtimec
 	}
 	activation := runtimecontract.RuntimeActivationContext{
 		ProviderSelection: runtimecontract.ProviderInferenceSelection{Target: runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "model"}},
-		ExecutionContract: runtimecontract.RuntimeExecutionContract{OperationContractRevision: runtimecontract.RuntimeOperationContractRevision()},
+		ExecutionContract: runtimecontract.RuntimeExecutionContract{
+			OperationContractRevision: runtimecontract.RuntimeOperationContractRevision(),
+			StateChangePolicy:         runtimecontract.RuntimeStateChangeAllowedButNotRequired,
+		},
 	}
 	item := runtimecontract.RuntimeCoverageItem{ID: "cwi-1", SliceID: "slice-1", SourceScope: "dod", SourceID: "dod-1", TargetText: "produce evidence", Order: 1}
 	slice := runtimecontract.RuntimeAcceptanceSlice{
@@ -253,11 +255,12 @@ func restartTestBootstrap(t *testing.T, workspaceID common.WorkspaceID) runtimec
 		t.Fatalf("compile definition seed: %v", err)
 	}
 	bootstrap := runtimecontract.RuntimeBootstrap{
-		SchemaVersion: runtimecontract.RuntimeStateSchemaVersionCurrent, Definition: definition, Activation: activation, DefinitionSeed: seed,
+		Definition: definition, Activation: activation, DefinitionSeed: seed,
 		Focuses: []runtimecontract.CoverageFocus{{ID: "focus-1", SliceID: "slice-1", CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-1"}, RequiredEvidenceKinds: []string{runtimecontract.EvidenceKindStateChange}}},
 		Slices:  []runtimecontract.RuntimeAcceptanceSlice{slice}, CoverageItems: []runtimecontract.RuntimeCoverageItem{item},
 		ConvergencePolicy: runtimecontract.DefaultRuntimeConvergencePolicy(), RecoveryPolicy: runtimecontract.DefaultRuntimeRecoveryPolicy(),
 	}
+	bootstrap.ExecutionBudgetPolicy = runtimecontract.RuntimeExecutionBudgetPolicyForRuntimePolicies(bootstrap.ConvergencePolicy, bootstrap.RecoveryPolicy)
 	_ = workspaceID
 	if err := bootstrap.Validate(); err != nil {
 		t.Fatalf("restart bootstrap: %v", err)

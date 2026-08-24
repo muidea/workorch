@@ -83,7 +83,6 @@ func runFromUpdateCommand(current *runmodel.Run, cmd runevents.StoreRuntimeState
 	} else {
 		item.RuntimeLifecycleFence = nil
 	}
-	item.RuntimeActivationStatus = current.RuntimeActivationStatus.Clone()
 	return &item
 }
 
@@ -91,7 +90,7 @@ func validateRunUpdate(current *runmodel.Run, cmd runevents.StoreRuntimeStateRec
 	if current == nil || current.ID != cmd.RunID || current.WorkspaceID != cmd.WorkspaceID {
 		return common.ErrConflict
 	}
-	if current.RuntimeBootstrap == nil || cmd.RuntimeState == nil || cmd.ExpectedRuntimeStateRevision == nil || cmd.RuntimeState.SchemaVersion != runtimemodel.RuntimeStateSchemaVersionCurrent {
+	if current.RuntimeBootstrap == nil || cmd.RuntimeState == nil || cmd.ExpectedRuntimeStateRevision == nil {
 		return common.ErrConflict
 	}
 	if cmd.LifecycleFence != nil {

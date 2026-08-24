@@ -48,15 +48,13 @@ type QueryRuntimeRecoveryInventoryCommand struct {
 }
 
 type RuntimeRecoveryInventoryItem struct {
-	WorkspaceID                  common.WorkspaceID
-	RunID                        common.RunID
-	State                        common.RunState
-	HasRuntimeBootstrap          bool
-	HasRuntimeState              bool
-	RuntimeStateRef              string
-	RuntimeStateRevision         uint64
-	RuntimeStateSchemaVersion    uint32
-	RuntimeActivationDisposition runtimecontract.RuntimeActivationDisposition
+	WorkspaceID          common.WorkspaceID
+	RunID                common.RunID
+	State                common.RunState
+	HasRuntimeBootstrap  bool
+	HasRuntimeState      bool
+	RuntimeStateRef      string
+	RuntimeStateRevision uint64
 }
 
 type QueryRuntimeRecoveryInventoryResult struct {
@@ -206,14 +204,6 @@ type RunStateChangedData struct {
 	// repair, authority or dispatch semantics owned by Orchestrator.
 	RuntimeStateRevision uint64
 	RuntimeStateRef      string
-	// RuntimeActivationDisposition is a Run-owned administrative outcome. It
-	// does not expose or derive an Orchestrator action, focus, dispatch, or
-	// recovery classification.
-	RuntimeActivationDisposition runtimecontract.RuntimeActivationDisposition
-	// RuntimeStateIncompatibility is emitted only with a Run-owned
-	// fresh-activation-required fact. It identifies an opaque persisted record
-	// without exposing aggregate authority.
-	RuntimeStateIncompatibility runtimecontract.RuntimeStateIncompatibility
 	// ReconciliationRequestID is present only when this active transition was
 	// accepted for a pending Run resume. It is an immutable correlation fact,
 	// not a requested lifecycle target.
@@ -287,14 +277,7 @@ func RunStateChangedDataFromModel(run *runmodel.Run) RunStateChangedData {
 		ret.RuntimeStateRevision = run.RuntimeState.StateRevision
 		ret.RuntimeStateRef = RuntimeStateRef(run.WorkspaceID, run.ID, run.RuntimeState.StateRevision)
 	}
-	if run.RuntimeActivationStatus != nil {
-		ret.RuntimeActivationDisposition = run.RuntimeActivationStatus.Disposition
-		ret.RuntimeStateIncompatibility = run.RuntimeActivationStatus.Incompatibility.Normalized()
-	}
 	ret.CausationID = "run-state/" + string(run.ID) + "/" + fmt.Sprintf("%d", ret.RuntimeStateRevision)
-	if ret.RuntimeActivationDisposition != "" {
-		ret.CausationID += "/" + string(ret.RuntimeActivationDisposition)
-	}
 	return ret
 }
 
@@ -308,13 +291,6 @@ func RuntimeStateRef(workspaceID common.WorkspaceID, runID common.RunID, revisio
 	return fmt.Sprintf("runtime-state/%s/%s/%d", workspaceID, runID, revision)
 }
 
-// RequiresFreshActivation reports the only currently non-resumable Run-owned
-// administrative disposition. It is a pure projection helper and never
-// selects an Orchestrator drive action.
-func (d RunStateChangedData) RequiresFreshActivation() bool {
-	return d.RuntimeActivationDisposition == runtimecontract.RuntimeActivationDispositionFreshActivationRequired
-}
-
 // Validate verifies the immutable identity carried by a Run owner
 // notification. A zero RuntimeStateRevision is permitted only for the
 // pre-runtime create notification; every Runtime transition carries the
@@ -325,14 +301,6 @@ func (d RunStateChangedData) Validate() error {
 	}
 	if d.RuntimeStateRevision > 0 && strings.TrimSpace(d.RuntimeStateRef) == "" {
 		return fmt.Errorf("%w: runtime run state fact requires opaque runtime state ref", common.ErrInvalidArgument)
-	}
-	if d.RuntimeActivationDisposition != "" && d.RuntimeActivationDisposition != runtimecontract.RuntimeActivationDispositionFreshActivationRequired {
-		return fmt.Errorf("%w: unsupported runtime activation disposition", common.ErrInvalidArgument)
-	}
-	if d.RuntimeActivationDisposition == runtimecontract.RuntimeActivationDispositionFreshActivationRequired &&
-		(d.RuntimeStateRevision == 0 || strings.TrimSpace(d.RuntimeStateRef) == "" ||
-			d.RuntimeStateIncompatibility.Validate() != nil) {
-		return fmt.Errorf("%w: fresh activation run state fact requires incompatible persisted state identity", common.ErrInvalidArgument)
 	}
 	return nil
 }
@@ -420,7 +388,6 @@ func MessageContracts() []eventcontract.MessageContract {
 		eventcontract.CommandTopic[RuntimeGovernanceWaitFact, RunLifecycleCommandResult]("run", definitionPackage, eventcontract.CommandClassWrite, eventcontract.LanePolicyState, TopicRunFactGovernanceWait).MessageContract(),
 		eventcontract.CommandTopic[RuntimeContinuationEligibleFact, RunLifecycleCommandResult]("run", definitionPackage, eventcontract.CommandClassWrite, eventcontract.LanePolicyState, TopicRunFactContinuationEligible).MessageContract(),
 		eventcontract.CommandTopic[RuntimeTerminalDeliveryFact, RunLifecycleCommandResult]("run", definitionPackage, eventcontract.CommandClassWrite, eventcontract.LanePolicyState, TopicRunFactTerminalDelivery).MessageContract(),
-		eventcontract.CommandTopic[RuntimeStateIncompatibleFact, RunLifecycleCommandResult]("run", definitionPackage, eventcontract.CommandClassWrite, eventcontract.LanePolicyState, TopicRunFactRuntimeStateIncompatible).MessageContract(),
 	}
 	for _, topic := range []string{
 		TopicRunCreated,

@@ -91,9 +91,11 @@ bindings in the bootstrap.
 `InitializeRuntimeFromRun` is idempotent:
 
 - no Runtime record: validate sealed bootstrap and create initial aggregate/facts;
-- existing current-baseline record: load it without duplicating reducer transition, candidate attempt or evidence;
+- existing record: strictly decode and validate the one current shape, then load it without duplicating reducer transition,
+  candidate attempt or evidence;
 - missing/invalid bootstrap: fail closed through typed terminal handling;
-- non-current aggregate: return typed fresh-activation disposition without provider/capability work.
+- invalid/retired aggregate data: repository load fails before Runtime initialization, with no owner transition or
+  provider/capability work.
 
 Initialize does not call LLM, execute a capability, infer action from Step/checkpoint, or rebuild definition from display data.
 
@@ -122,7 +124,7 @@ Restart is a fresh activation request but not immediate application-created Run 
 6. successor independently initializes and drives.
 
 Application, Workspace, Orchestrator and projection cannot create/link the successor. Duplicate request/delivery must resolve
-to the same lineage. A non-current predecessor returns `data_reset_required` and creates none.
+to the same lineage. A predecessor that cannot be read as the current shape never enters this flow and creates no intent or successor.
 
 ## Invariants
 

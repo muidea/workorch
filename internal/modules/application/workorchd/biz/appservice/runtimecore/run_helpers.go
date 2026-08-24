@@ -89,13 +89,5 @@ func MapRun(item *runmodel.Run) appmodelcore.Run {
 			ret.SealedLLMSelection = &selection
 		}
 	}
-	if item.RuntimeActivationStatus != nil {
-		ret.RuntimeActivation = &projectioncontract.RuntimeActivationStatus{
-			Disposition:            string(item.RuntimeActivationStatus.Disposition),
-			Reason:                 string(item.RuntimeActivationStatus.Incompatibility.Reason),
-			ActualSchemaVersion:    item.RuntimeActivationStatus.Incompatibility.ActualSchemaVersion,
-			SupportedSchemaVersion: item.RuntimeActivationStatus.Incompatibility.SupportedSchemaVersion,
-		}
-	}
 	return ret
 }

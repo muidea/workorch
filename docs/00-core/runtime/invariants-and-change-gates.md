@@ -67,15 +67,19 @@ persisted ledger；duplicate、stale、CAS reload、projection refresh 和 accep
 统一 allocation、unknown-consumption、wait/exhaustion、restart 和 projection合同见
 [Execution Budget](execution-budget.md)。
 
-## Current-schema baseline and non-current data
+## Current persisted-data baseline
 
-当前开发基线只维护一套 Runtime aggregate schema，不维护历史 aggregate migration/reducer。合同发生不兼容变化时，
-代码、fixture 与测试直接更新到当前基线；旧开发数据不得通过补字段、忽略字段、版本分支或重新解释 authority 原地迁移。
+当前阶段只维护一套持久化结构，不维护历史 aggregate、resource、event 或 repository layout 的 migration/reducer。
+`RuntimeStateRecord`、`RuntimeBootstrap` 与 `Run` 没有用于选择历史解码分支的顶层版本字段；持久化 JSON 必须只包含
+当前字段且只能包含一个值。未知/退役字段、旧目录、空文件、旧 payload 表示或当前不变量缺失都在 owner/repository
+读取边界直接失败，不生成 Run fact、projection disposition、governance ticket 或 recovery lease，也不调用 provider/capability。
 
-- Resume/drive 遇到 non-current opaque aggregate 只返回 `fresh_activation_required`，零 provider/capability work；
-- Restart 遇到 non-current predecessor 只返回 `data_reset_required`，不得创建 replacement intent 或 successor；
-- 清理旧开发数据后的 fresh Run 从 current bootstrap 开始，不继承旧 request、candidate、CWI credit 或 recovery budget；
-- schema version 只用于识别 current/non-current，不授予兼容解释或绕过 owner transition 的能力。
+- `fresh_activation_required` 只表示一个可读的 current Run 缺少其 sealed `RuntimeBootstrap`，不得用于分类旧数据；
+- 数据清理是部署者删除所配置 data root/workspace data 后重新创建 Workspace/Run 的外部操作，不是 SM-1 transition；
+- fresh Run 只从 current bootstrap 开始，不继承既有 request、candidate、CWI credit、receipt 或 recovery budget；
+- convergence、recovery 与 execution-budget policy 必须由 fresh activation 显式封存；normalize/clone/read 不补零值、
+  不从其他 policy 派生缺失 policy，任一缺失都按无效 current data 失败；
+- nested schema identity 只校验当前 typed document/ledger，不授权版本协商、默认值补齐或原地升级。
 
 ## Forbidden surface
 

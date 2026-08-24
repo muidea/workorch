@@ -67,7 +67,6 @@ defaultProvider = "search"
 [webSearch.providers.search]
 provider = "http"
 searchEndpoint = "https://search.example.test/search"
-fetchEndpoint = "https://search.example.test/fetch"
 apiKey = "search-key"
 timeout = "20s"
 maxResults = 8
@@ -114,7 +113,7 @@ maxRepeatedSamePrompt = 1
 		cfg.Runtime.ShellCommandTimeout != "90s" {
 		t.Fatalf("runtime config = %+v, want configured runtime settings", cfg.Runtime)
 	}
-	if !GitRuntimeEnabled(cfg.Runtime.Git) || !GitRuntimeWriteEnabled(cfg.Runtime.Git) || cfg.Runtime.Git.DefaultTimeout != "45s" {
+	if cfg.Runtime.Git.DefaultTimeout != "45s" {
 		t.Fatalf("runtime git config = %+v, want configured git runtime settings", cfg.Runtime.Git)
 	}
 	if cfg.Runtime.LLMOutput.MaxDocumentRecoveryAttempts != 4 {
@@ -145,26 +144,34 @@ maxRepeatedSamePrompt = 1
 	}
 }
 
-func TestGitRuntimeIsCoreCapability(t *testing.T) {
-	if !GitRuntimeEnabled(GitRuntimeConfig{}) {
-		t.Fatal("git runtime should be enabled by default")
-	}
-	enabled := true
-	if !GitRuntimeEnabled(GitRuntimeConfig{Enabled: &enabled}) {
-		t.Fatal("git runtime should remain enabled for legacy explicit true")
-	}
-	disabled := false
-	if !GitRuntimeEnabled(GitRuntimeConfig{Enabled: &disabled}) {
-		t.Fatal("git runtime should ignore legacy false because it is a core capability")
-	}
-	if !GitRuntimeWriteEnabled(GitRuntimeConfig{}) {
-		t.Fatal("git runtime write should be enabled by default")
-	}
-	if !GitRuntimeWriteEnabled(GitRuntimeConfig{WriteEnabled: &enabled}) {
-		t.Fatal("git runtime write should remain enabled for legacy explicit true")
-	}
-	if !GitRuntimeWriteEnabled(GitRuntimeConfig{WriteEnabled: &disabled}) {
-		t.Fatal("git runtime write should ignore legacy false because it is a core capability")
+func TestPersistedRejectsRetiredGitCapabilityFlags(t *testing.T) {
+	for name, retiredField := range map[string]string{
+		"enabled":       "enabled = false",
+		"write enabled": "writeEnabled = false",
+	} {
+		t.Run(name, func(t *testing.T) {
+			configDir := writeApplicationConfig(t, fmt.Sprintf(`
+endpointName = "workorch"
+
+[server]
+addr = "127.0.0.1:18080"
+
+[repository]
+backend = "file"
+dataDir = ".workorch-data"
+
+[runtime.git]
+defaultTimeout = "30s"
+%s
+`, retiredField))
+			_ = Close()
+			t.Setenv(EnvConfigDir, configDir)
+			t.Cleanup(func() { _ = Close() })
+
+			if _, err := Persisted(); err == nil {
+				t.Fatalf("Persisted accepted retired runtime.git field %q", retiredField)
+			}
+		})
 	}
 }
 
@@ -191,7 +198,6 @@ func TestSaveWritesApplicationConfigAndReloadsFrameworkConfig(t *testing.T) {
 		"search": {
 			Provider:       "http",
 			SearchEndpoint: "https://search.example.test/search",
-			FetchEndpoint:  "https://search.example.test/fetch",
 			APIKey:         "search-key",
 			Timeout:        "20s",
 			MaxResults:     8,
@@ -238,7 +244,7 @@ func TestSaveWritesApplicationConfigAndReloadsFrameworkConfig(t *testing.T) {
 		t.Fatalf("next runtime llmOutput config = %+v, want saved document recovery limit", next.Runtime.LLMOutput)
 	}
 	if next.WebSearch.DefaultProvider != "search" ||
-		next.WebSearch.Providers["search"].FetchEndpoint != "https://search.example.test/fetch" {
+		next.WebSearch.Providers["search"].SearchEndpoint != "https://search.example.test/search" {
 		t.Fatalf("next web search config = %+v, want saved web search provider", next.WebSearch)
 	}
 	if next.Governance.AutoTicket.Enabled == nil || !*next.Governance.AutoTicket.Enabled ||
@@ -498,7 +504,6 @@ func TestWebSearchProviderValuesUsesFrameworkConfigFields(t *testing.T) {
 				"search": {
 					Provider:       "http",
 					SearchEndpoint: "https://search.example.test/search",
-					FetchEndpoint:  "https://search.example.test/fetch",
 					APIKey:         "secret",
 					Headers:        map[string]string{"X-Test": "true"},
 					Timeout:        "20s",
@@ -516,7 +521,6 @@ func TestWebSearchProviderValuesUsesFrameworkConfigFields(t *testing.T) {
 	values := cfg.WebSearchProviderValues()
 	if values["provider"] != "http" ||
 		values["searchEndpoint"] != "https://search.example.test/search" ||
-		values["fetchEndpoint"] != "https://search.example.test/fetch" ||
 		values["apiKey"] != "secret" ||
 		values["maxResults"] != "8" ||
 		values["maxFetchBytes"] != "262144" ||

@@ -33,4 +33,12 @@ func TestRedactedProviderConfigOmitsSecrets(t *testing.T) {
 	if redacted.ContextProfile.CapabilitySource != "ai_proxy_catalog" {
 		t.Fatalf("capability source = %q, want sealed/catalog source preserved", redacted.ContextProfile.CapabilitySource)
 	}
+
+}
+
+func TestRedactedProviderConfigDoesNotBackfillMissingCapabilities(t *testing.T) {
+	empty := llmproviderconfig.RedactedProviderConfig(llmmodels.ProviderConfig{})
+	if empty.Capabilities.Responses || empty.Capabilities.Streaming || len(empty.Capabilities.NonChatOperations) != 0 {
+		t.Fatalf("empty capabilities were backfilled: %+v", empty.Capabilities)
+	}
 }

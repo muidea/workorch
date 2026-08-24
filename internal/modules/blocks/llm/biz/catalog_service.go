@@ -29,12 +29,10 @@ type aiProxyModelsResponse struct {
 }
 
 type aiProxyModelRecord struct {
-	ID      string `json:"id"`
-	Object  string `json:"object"`
-	Created int64  `json:"created"`
-	OwnedBy string `json:"owned_by"`
-	// Operations is intentionally ignored; latest ai-proxy uses supported_endpoints.
-	Operations          []string `json:"operations"`
+	ID                  string   `json:"id"`
+	Object              string   `json:"object"`
+	Created             int64    `json:"created"`
+	OwnedBy             string   `json:"owned_by"`
 	SupportedEndpoints  []string `json:"supported_endpoints"`
 	ContextWindowTokens int      `json:"contextWindowTokens"`
 	MaxOutputTokens     int      `json:"maxOutputTokens"`

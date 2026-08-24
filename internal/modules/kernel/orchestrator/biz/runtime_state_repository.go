@@ -68,9 +68,6 @@ func (r runtimeStateRepository) loadRuntimeStateRecord(ctx context.Context, work
 		return runtime.RuntimeAggregate{}, common.ErrNotFound
 	}
 	record := response.RuntimeState.Clone()
-	if err := runtimecontract.ValidateRuntimeStateSchemaVersion(record.SchemaVersion); err != nil {
-		return runtime.RuntimeAggregate{}, fmt.Errorf("load Runtime state: %w", err)
-	}
 	if err := record.Validate(); err != nil {
 		return runtime.RuntimeAggregate{}, fmt.Errorf("load Runtime state: %w", err)
 	}
@@ -139,7 +136,6 @@ func (r runtimeStateRepository) Save(ctx context.Context, aggregate runtime.Runt
 
 func runtimeStateRecordFromAggregate(aggregate runtime.RuntimeAggregate) runtimecontract.RuntimeStateRecord {
 	ret := runtimecontract.RuntimeStateRecord{
-		SchemaVersion:               runtimecontract.RuntimeStateSchemaVersionCurrent,
 		StateRevision:               aggregate.StateRevision,
 		EvidenceSequence:            aggregate.EvidenceSequence,
 		Definition:                  aggregate.Definition,

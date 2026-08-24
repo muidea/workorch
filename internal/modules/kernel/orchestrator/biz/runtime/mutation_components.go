@@ -12,9 +12,9 @@ import (
 // plumbing needed by the private state-machine components.
 //
 // It is intentionally embedded by RuntimeController and the private
-// components.  Embedding keeps the existing package-private reducer code
-// source-compatible while making ownership explicit: no component receives a
-// second repository or coordinator instance.
+// components. Embedding keeps the package-private reducer code callable while
+// making ownership explicit: no component receives a second repository or
+// coordinator instance.
 type runtimeMutationKernel struct {
 	repository  RuntimeStateRepository
 	transitions *RuntimeTransitionCoordinator

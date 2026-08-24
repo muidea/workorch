@@ -163,7 +163,7 @@ func TestResultRepositoryContract_Memory(t *testing.T) {
 
 func TestResultRepositoryContract_File(t *testing.T) {
 	testResultRepositoryContract(t, func() repository.ResultRepository {
-		return file.NewResultRepository(filepath.Join(t.TempDir(), "result.json"))
+		return file.NewResultRepository(filepath.Join(t.TempDir(), "results"))
 	})
 }
 
@@ -175,7 +175,7 @@ func TestArtifactRepositoryContract_Memory(t *testing.T) {
 
 func TestArtifactRepositoryContract_File(t *testing.T) {
 	testArtifactRepositoryContract(t, func() repository.ArtifactRepository {
-		return file.NewArtifactRepository(filepath.Join(t.TempDir(), "artifact.json"))
+		return file.NewArtifactRepository(filepath.Join(t.TempDir(), "artifacts"))
 	})
 }
 
@@ -187,7 +187,7 @@ func TestEventRecordRepositoryContract_Memory(t *testing.T) {
 
 func TestEventRecordRepositoryContract_File(t *testing.T) {
 	testEventRecordRepositoryContract(t, func() repository.EventRecordRepository {
-		return file.NewEventRecordRepository(filepath.Join(t.TempDir(), "event_record.json"))
+		return file.NewEventRecordRepository(filepath.Join(t.TempDir(), "event-records"))
 	})
 }
 
@@ -241,7 +241,7 @@ func TestStepRepositoryContract_Memory(t *testing.T) {
 
 func TestStepRepositoryContract_File(t *testing.T) {
 	testStepRepositoryContract(t, func() repository.StepRepository {
-		return file.NewStepRepository(filepath.Join(t.TempDir(), "step.json"))
+		return file.NewStepRepository(filepath.Join(t.TempDir(), "steps"))
 	})
 }
 
@@ -253,7 +253,7 @@ func TestToolCallRepositoryContract_Memory(t *testing.T) {
 
 func TestToolCallRepositoryContract_File(t *testing.T) {
 	testToolCallRepositoryContract(t, func() repository.ToolCallRepository {
-		return file.NewToolCallRepository(filepath.Join(t.TempDir(), "tool_call.json"))
+		return file.NewToolCallRepository(filepath.Join(t.TempDir(), "tool-calls"))
 	})
 }
 
@@ -265,7 +265,7 @@ func TestPatchRepositoryContract_Memory(t *testing.T) {
 
 func TestPatchRepositoryContract_File(t *testing.T) {
 	testPatchRepositoryContract(t, func() repository.PatchRepository {
-		return file.NewPatchRepository(filepath.Join(t.TempDir(), "patch.json"))
+		return file.NewPatchRepository(filepath.Join(t.TempDir(), "patches"))
 	})
 }
 
@@ -277,7 +277,7 @@ func TestValidationResultRepositoryContract_Memory(t *testing.T) {
 
 func TestValidationResultRepositoryContract_File(t *testing.T) {
 	testValidationResultRepositoryContract(t, func() repository.ValidationResultRepository {
-		return file.NewValidationResultRepository(filepath.Join(t.TempDir(), "validation_result.json"))
+		return file.NewValidationResultRepository(filepath.Join(t.TempDir(), "validations"))
 	})
 }
 
@@ -289,7 +289,7 @@ func TestRuntimeCheckpointRepositoryContract_Memory(t *testing.T) {
 
 func TestRuntimeCheckpointRepositoryContract_File(t *testing.T) {
 	testRuntimeCheckpointRepositoryContract(t, func() repository.RuntimeCheckpointRepository {
-		return file.NewRuntimeCheckpointRepository(filepath.Join(t.TempDir(), "runtime_checkpoint.json"))
+		return file.NewRuntimeCheckpointRepository(filepath.Join(t.TempDir(), "checkpoints"))
 	})
 }
 
@@ -337,7 +337,7 @@ func TestDecisionTicketRepositoryContract_Memory(t *testing.T) {
 
 func TestDecisionTicketRepositoryContract_File(t *testing.T) {
 	testDecisionTicketRepositoryContract(t, func() repository.DecisionTicketRepository {
-		return file.NewDecisionTicketRepository(filepath.Join(t.TempDir(), "ticket.json"))
+		return file.NewDecisionTicketRepository(filepath.Join(t.TempDir(), "decisions", "tickets"))
 	})
 }
 
@@ -349,7 +349,7 @@ func TestDecisionResolutionRepositoryContract_Memory(t *testing.T) {
 
 func TestDecisionResolutionRepositoryContract_File(t *testing.T) {
 	testDecisionResolutionRepositoryContract(t, func() repository.DecisionResolutionRepository {
-		return file.NewDecisionResolutionRepository(filepath.Join(t.TempDir(), "resolution.json"))
+		return file.NewDecisionResolutionRepository(filepath.Join(t.TempDir(), "decisions", "resolutions"))
 	})
 }
 
@@ -361,7 +361,7 @@ func TestApprovalRepositoryContract_Memory(t *testing.T) {
 
 func TestApprovalRepositoryContract_File(t *testing.T) {
 	testApprovalRepositoryContract(t, func() repository.ApprovalRepository {
-		return file.NewApprovalRepository(filepath.Join(t.TempDir(), "approval.json"))
+		return file.NewApprovalRepository(filepath.Join(t.TempDir(), "approvals"))
 	})
 }
 
@@ -407,24 +407,24 @@ func TestRepositoryBundleContract_File(t *testing.T) {
 			skills:                file.NewSkillRepository(filepath.Join(dir, "skill.json")),
 			mcpServers:            file.NewMCPServerRepository(filepath.Join(dir, "mcp_server.json")),
 			mcpCapabilities:       file.NewMCPCapabilityRepository(filepath.Join(dir, "mcp_capability.json")),
-			results:               file.NewResultRepository(filepath.Join(dir, "result.json")),
-			artifacts:             file.NewArtifactRepository(filepath.Join(dir, "artifact.json")),
-			eventRecords:          file.NewEventRecordRepository(filepath.Join(dir, "event_record.json")),
+			results:               file.NewResultRepository(filepath.Join(dir, "results")),
+			artifacts:             file.NewArtifactRepository(filepath.Join(dir, "artifacts")),
+			eventRecords:          file.NewEventRecordRepository(filepath.Join(dir, "event-records")),
 			workspaces:            file.NewWorkspaceRepository(filepath.Join(dir, "workspace.json")),
 			goals:                 file.NewGoalRepository(filepath.Join(dir, "goal.json")),
 			dods:                  file.NewDoDRepository(filepath.Join(dir, "dod.json")),
 			runs:                  file.NewRunRepository(filepath.Join(dir, "run.json")),
-			steps:                 file.NewStepRepository(filepath.Join(dir, "step.json")),
-			toolCalls:             file.NewToolCallRepository(filepath.Join(dir, "tool_call.json")),
-			patches:               file.NewPatchRepository(filepath.Join(dir, "patch.json")),
-			validationResults:     file.NewValidationResultRepository(filepath.Join(dir, "validation_result.json")),
-			runtimeCheckpoints:    file.NewRuntimeCheckpointRepository(filepath.Join(dir, "runtime_checkpoint.json")),
+			steps:                 file.NewStepRepository(filepath.Join(dir, "steps")),
+			toolCalls:             file.NewToolCallRepository(filepath.Join(dir, "tool-calls")),
+			patches:               file.NewPatchRepository(filepath.Join(dir, "patches")),
+			validationResults:     file.NewValidationResultRepository(filepath.Join(dir, "validations")),
+			runtimeCheckpoints:    file.NewRuntimeCheckpointRepository(filepath.Join(dir, "checkpoints")),
 			evidenceRecords:       file.NewEvidenceRecordRepository(filepath.Join(dir, "evidence-records")),
 			coverageWorkItems:     file.NewCoverageWorkItemRepository(filepath.Join(dir, "coverage-work-items")),
 			artifactContinuations: file.NewArtifactContinuationRepository(filepath.Join(dir, "artifact-continuations")),
-			tickets:               file.NewDecisionTicketRepository(filepath.Join(dir, "ticket.json")),
-			resolutions:           file.NewDecisionResolutionRepository(filepath.Join(dir, "resolution.json")),
-			approvals:             file.NewApprovalRepository(filepath.Join(dir, "approval.json")),
+			tickets:               file.NewDecisionTicketRepository(filepath.Join(dir, "decisions", "tickets")),
+			resolutions:           file.NewDecisionResolutionRepository(filepath.Join(dir, "decisions", "resolutions")),
+			approvals:             file.NewApprovalRepository(filepath.Join(dir, "approvals")),
 		}
 	}
 	testRepositoryBundleContract(t, build(), build)
@@ -932,6 +932,14 @@ func testEventRecordRepositoryContract(t *testing.T, factory func() repository.E
 	t.Helper()
 	ctx := context.Background()
 	repo := factory()
+	reservePosition := func() int64 {
+		t.Helper()
+		position, err := repo.ReserveEventRecordStreamPosition(ctx)
+		if err != nil {
+			t.Fatalf("reserve event stream position: %v", err)
+		}
+		return position
+	}
 
 	first := &eventstreammodel.EventRecord{
 		ID:             common.EventRecordID("event-record-1"),
@@ -943,35 +951,37 @@ func testEventRecordRepositoryContract(t *testing.T, factory func() repository.E
 		SubjectID:      "run-contract",
 		WorkspaceID:    common.WorkspaceID("ws-contract"),
 		RunID:          common.RunID("run-contract"),
+		StreamPosition: reservePosition(),
 		Payload:        mustRepositoryPayload(t, map[string]any{"state": "running"}),
 		PayloadSummary: mustRepositoryPayload(t, map[string]any{"fieldCount": 1}),
-		PayloadRef:     "payloads/event-record-1.json",
 	}
 	second := &eventstreammodel.EventRecord{
-		ID:           common.EventRecordID("event-record-2"),
-		Version:      "workorch.event",
-		Topic:        "/step/state/changed",
-		OccurredAt:   "2026-04-28T00:01:00Z",
-		SourceModule: "kernel/orchestrator",
-		SubjectType:  "step",
-		SubjectID:    "step-contract",
-		WorkspaceID:  common.WorkspaceID("ws-contract"),
-		RunID:        common.RunID("run-contract"),
-		StepID:       common.StepID("step-contract"),
-		Payload:      mustRepositoryPayload(t, map[string]any{"state": "completed"}),
+		ID:             common.EventRecordID("event-record-2"),
+		Version:        "workorch.event",
+		Topic:          "/step/state/changed",
+		OccurredAt:     "2026-04-28T00:01:00Z",
+		SourceModule:   "kernel/orchestrator",
+		SubjectType:    "step",
+		SubjectID:      "step-contract",
+		WorkspaceID:    common.WorkspaceID("ws-contract"),
+		RunID:          common.RunID("run-contract"),
+		StepID:         common.StepID("step-contract"),
+		StreamPosition: reservePosition(),
+		Payload:        mustRepositoryPayload(t, map[string]any{"state": "completed"}),
 	}
 	third := &eventstreammodel.EventRecord{
-		ID:           common.EventRecordID("event-record-3"),
-		Version:      "workorch.event",
-		Topic:        "/step/state/changed",
-		OccurredAt:   "2026-04-28T00:02:00Z",
-		SourceModule: "kernel/orchestrator",
-		SubjectType:  "step",
-		SubjectID:    "step-contract-2",
-		WorkspaceID:  common.WorkspaceID("ws-contract"),
-		RunID:        common.RunID("run-contract"),
-		StepID:       common.StepID("step-contract-2"),
-		Payload:      mustRepositoryPayload(t, map[string]any{"state": "failed"}),
+		ID:             common.EventRecordID("event-record-3"),
+		Version:        "workorch.event",
+		Topic:          "/step/state/changed",
+		OccurredAt:     "2026-04-28T00:02:00Z",
+		SourceModule:   "kernel/orchestrator",
+		SubjectType:    "step",
+		SubjectID:      "step-contract-2",
+		WorkspaceID:    common.WorkspaceID("ws-contract"),
+		RunID:          common.RunID("run-contract"),
+		StepID:         common.StepID("step-contract-2"),
+		StreamPosition: reservePosition(),
+		Payload:        mustRepositoryPayload(t, map[string]any{"state": "failed"}),
 	}
 	if err := repo.Append(ctx, first); err != nil {
 		t.Fatalf("append first event record: %v", err)
@@ -998,8 +1008,8 @@ func testEventRecordRepositoryContract(t *testing.T, factory func() repository.E
 		t.Fatalf("event record clone isolation failed: %+v", fresh)
 	}
 	fieldCount, _ := fresh.PayloadSummary.Int64("fieldCount")
-	if fieldCount != 1 || fresh.PayloadRef != "payloads/event-record-1.json" {
-		t.Fatalf("event record summary/ref = %+v/%q, want persisted summary/ref", fresh.PayloadSummary, fresh.PayloadRef)
+	if fieldCount != 1 || fresh.PayloadRef != "" {
+		t.Fatalf("event record summary/ref = %+v/%q, want inline current representation", fresh.PayloadSummary, fresh.PayloadRef)
 	}
 	byRun, err := repo.List(ctx, workorchquerycontract.EventRecordQuery{RunID: first.RunID})
 	if err != nil {
@@ -1047,12 +1057,12 @@ func testEventRecordRepositoryContract(t *testing.T, factory func() repository.E
 		{
 			ID: "event-revision-1", Topic: "/revision/test", OccurredAt: "2026-04-28T23:59:00Z",
 			SourceModule: "blocks/test", SubjectType: "revision-order", SubjectID: "revision-1",
-			WorkspaceID: "ws-revision-order", RunID: "run-revision-order", Revision: 1,
+			WorkspaceID: "ws-revision-order", RunID: "run-revision-order", StreamPosition: reservePosition(), Revision: 1,
 		},
 		{
 			ID: "event-revision-2", Topic: "/revision/test", OccurredAt: "2026-04-28T00:00:00Z",
 			SourceModule: "blocks/test", SubjectType: "revision-order", SubjectID: "revision-2",
-			WorkspaceID: "ws-revision-order", RunID: "run-revision-order", Revision: 2,
+			WorkspaceID: "ws-revision-order", RunID: "run-revision-order", StreamPosition: reservePosition(), Revision: 2,
 		},
 	} {
 		if err := repo.Append(ctx, item); err != nil {

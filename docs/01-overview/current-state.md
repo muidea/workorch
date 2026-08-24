@@ -136,5 +136,6 @@ The production contract excludes `StagePacket`, `NextAction`, `DispatchNextStep`
 RuntimeAdapter/step dispatcher, application continuation queue, automatic successor planning, checkpoint replay, target-state
 setters, map/JSON/reflect authority bridges and cross-owner service/repository calls.
 
-Read-only compatibility fields may remain in projections only when static boundary checks prove they cannot feed owner aggregate,
-provider authority or execution selection.
+Persistence and public projections expose only the one current shape. There are no read-only compatibility fields, old-layout
+imports, version classifiers or upgrade reducers. Unknown/retired data fails at its repository/owner read boundary; resetting the
+configured data root and creating a fresh Workspace/Run is an external development operation, not a Runtime transition.

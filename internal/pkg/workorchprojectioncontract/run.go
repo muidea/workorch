@@ -8,15 +8,6 @@ type RunLineage struct {
 	LineageState        string `json:"lineageState,omitempty"`
 }
 
-// RuntimeActivationStatus is the bounded projection of the Run-owned
-// administrative activation disposition. Owner diagnostics remain private.
-type RuntimeActivationStatus struct {
-	Disposition            string `json:"disposition"`
-	Reason                 string `json:"reason"`
-	ActualSchemaVersion    uint32 `json:"actualSchemaVersion"`
-	SupportedSchemaVersion uint32 `json:"supportedSchemaVersion"`
-}
-
 // RunStatus is the owner-neutral status projection assembled from already
 // persisted owner state. It cannot transition a Run or schedule Runtime work.
 type RunStatus struct {
@@ -82,12 +73,4 @@ func CloneRunStatus(item RunStatus) RunStatus {
 	item.ConvergenceStatus = CloneConvergenceStatus(item.ConvergenceStatus)
 	item.Acceptance = CloneAcceptanceProjection(item.Acceptance)
 	return item
-}
-
-func CloneRuntimeActivationStatus(item *RuntimeActivationStatus) *RuntimeActivationStatus {
-	if item == nil {
-		return nil
-	}
-	ret := *item
-	return &ret
 }

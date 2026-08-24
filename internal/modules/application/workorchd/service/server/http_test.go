@@ -1027,7 +1027,7 @@ func TestContextRegistryAPIsPersistAcrossMemoryHTTPRequests(t *testing.T) {
 	}
 }
 
-func TestWorkspaceScopedMemoryItemRoutesBindWorkspaceScope(t *testing.T) {
+func TestWorkspaceScopedMemoryItemRoutesRejectUnscopedItemPaths(t *testing.T) {
 	handler := newTestMux(t, Config{Backend: "memory"})
 	workspaceA := createWorkspaceForHTTP(t, handler, "memory scope A", "workspaces/ws-memory-scope-a")
 	workspaceB := createWorkspaceForHTTP(t, handler, "memory scope B", "workspaces/ws-memory-scope-b")
@@ -1062,8 +1062,10 @@ func TestWorkspaceScopedMemoryItemRoutesBindWorkspaceScope(t *testing.T) {
 		t.Fatalf("workspace B memory response = %s", getB)
 	}
 
-	getAndExpect(t, handler, "/api/v1/workorch/memory/"+memoryID, http.StatusBadRequest)
-	getAndExpect(t, handler, "/api/v1/workorch/memory/"+memoryID+"?workspaceId="+workspaceB.ID, http.StatusOK)
+	getAndExpect(t, handler, "/api/v1/workorch/memory/"+memoryID, http.StatusNotFound)
+	getAndExpect(t, handler, "/api/v1/workorch/memory/"+memoryID+"?workspaceId="+workspaceB.ID, http.StatusNotFound)
+	putAndExpect(t, handler, "/api/v1/workorch/memory/"+memoryID+"?workspaceId="+workspaceB.ID, `{}`, http.StatusNotFound)
+	deleteAndExpect(t, handler, "/api/v1/workorch/memory/"+memoryID+"?workspaceId="+workspaceB.ID, http.StatusNotFound)
 
 	deleteAndExpect(t, handler, "/api/v1/workorch/workspaces/"+workspaceA.ID+"/memory/"+memoryID, http.StatusOK)
 	getAndExpect(t, handler, "/api/v1/workorch/workspaces/"+workspaceA.ID+"/memory/"+memoryID, http.StatusNotFound)
@@ -1475,6 +1477,7 @@ func TestEventStreamDefaultProjectionViewPublishesOnlyProjectionEvents(t *testin
 		magicevent.NewHeader(),
 		context.Background(),
 		workorchdevents.WorkspaceProjectionChangedData{
+			StreamGeneration:     "server-default-projection",
 			WorkspaceID:          "ws-projection",
 			RunID:                "run-1",
 			GlobalRevision:       42,
@@ -1494,8 +1497,8 @@ func TestEventStreamDefaultProjectionViewPublishesOnlyProjectionEvents(t *testin
 	time.Sleep(30 * time.Millisecond)
 
 	id, dto := readProjectionSSE(t, lines, readErr)
-	if id != "projection:ws-projection:42" {
-		t.Fatalf("sse id = %q, want projection:ws-projection:42", id)
+	if id != "projection:server-default-projection:ws-projection:42" {
+		t.Fatalf("sse id = %q, want current generation-scoped projection id", id)
 	}
 	if dto.ID != id || dto.WorkspaceID != "ws-projection" || dto.RunID != "run-1" {
 		t.Fatalf("dto = %+v, want concrete projection identity", dto)
@@ -1740,6 +1743,7 @@ func TestEventStreamProjectionReplayUsesConcreteDTOFromInMemoryBuffer(t *testing
 			magicevent.NewHeader(),
 			context.Background(),
 			workorchdevents.WorkspaceProjectionChangedData{
+				StreamGeneration:     "server-projection-replay",
 				WorkspaceID:          "ws-projection-replay",
 				RunID:                "run-replay",
 				GlobalRevision:       rev,
@@ -1759,7 +1763,7 @@ func TestEventStreamProjectionReplayUsesConcreteDTOFromInMemoryBuffer(t *testing
 
 	publishProjection(20, 7)
 	firstID, first := readProjectionSSE(t, lines, readErr)
-	if firstID != "projection:ws-projection-replay:20" || first.StreamRevision != 20 {
+	if firstID != "projection:server-projection-replay:ws-projection-replay:20" || first.StreamRevision != 20 {
 		t.Fatalf("first = %q %+v, want rev 20", firstID, first)
 	}
 
@@ -1783,7 +1787,7 @@ func TestEventStreamProjectionReplayUsesConcreteDTOFromInMemoryBuffer(t *testing
 	waitSSEConnected(t, replayLines, replayErr)
 
 	id, dto := readProjectionSSE(t, replayLines, replayErr)
-	if id != "projection:ws-projection-replay:21" || dto.ID != id {
+	if id != "projection:server-projection-replay:ws-projection-replay:21" || dto.ID != id {
 		t.Fatalf("replayed id=%q dto=%+v, want concrete projection id rev 21", id, dto)
 	}
 	if dto.WorkspaceID != "ws-projection-replay" || dto.RunID != "run-replay" {
@@ -4379,12 +4383,11 @@ func TestDecisionMutationEndpointsRejectNonCanonicalOpenTicketWithoutMutation(t 
 
 func TestDecisionMutationEndpointsRejectDefinitionTicketsWithoutMutation(t *testing.T) {
 	for _, tc := range []struct {
-		name         string
-		decisionKind string
-		failureClass string
+		name  string
+		class decisionmodel.DefinitionClarificationClass
 	}{
-		{name: "definition admission", failureClass: "definition_admission"},
-		{name: "runtime definition clarification", decisionKind: "runtime_definition_clarification", failureClass: "runtime_definition_gap"},
+		{name: "workspace definition", class: decisionmodel.DefinitionClarificationWorkspacePreSeal},
+		{name: "runtime definition", class: decisionmodel.DefinitionClarificationRuntime},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			dataRoot := t.TempDir()
@@ -4396,8 +4399,7 @@ func TestDecisionMutationEndpointsRejectDefinitionTicketsWithoutMutation(t *test
 			if err != nil {
 				t.Fatalf("get definition ticket: %v", err)
 			}
-			ticket.DecisionKind = tc.decisionKind
-			ticket.FailureClass = tc.failureClass
+			ticket.DefinitionClarification = &decisionmodel.DefinitionClarificationBinding{Class: tc.class}
 			if err := repos.Tickets.Update(ctx, ticket); err != nil {
 				t.Fatalf("update definition ticket: %v", err)
 			}
@@ -4430,7 +4432,7 @@ func TestDecisionBatchResolveEndpointRejectsDefinitionTicketBeforeAnyMutation(t 
 	if err != nil {
 		t.Fatalf("get definition ticket: %v", err)
 	}
-	ticket.DecisionKind = "runtime_definition_clarification"
+	ticket.DefinitionClarification = &decisionmodel.DefinitionClarificationBinding{Class: decisionmodel.DefinitionClarificationRuntime}
 	if err := repos.Tickets.Update(definitionCtx, ticket); err != nil {
 		t.Fatalf("update definition ticket: %v", err)
 	}

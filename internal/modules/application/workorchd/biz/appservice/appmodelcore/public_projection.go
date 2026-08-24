@@ -53,7 +53,6 @@ func ProjectRun(item Run) projectioncontract.Run {
 		BlockingApprovalID: item.BlockingApprovalID,
 		FailureReason:      item.FailureReason,
 		SealedLLMSelection: item.SealedLLMSelection,
-		RuntimeActivation:  item.RuntimeActivation,
 		CreatedAt:          item.CreatedAt,
 		StartedAt:          item.StartedAt,
 		EndedAt:            item.EndedAt,

@@ -44,7 +44,6 @@ func TestUpdateRuntimeConfigurationPersistsRepairBudgetAndPreservesOmittedFields
 	}
 	if readBack.Runtime.MaxRuntimeRepairAttempts != 3 ||
 		readBack.Runtime.LLMOutput.MaxDocumentRecoveryAttempts != 4 ||
-		!workorchconfig.GitRuntimeWriteEnabled(readBack.Runtime.Git) ||
 		readBack.Runtime.Git.DefaultTimeout != "35s" {
 		t.Fatalf("persisted runtime config = %+v, want updated repair and document recovery budgets", readBack.Runtime)
 	}

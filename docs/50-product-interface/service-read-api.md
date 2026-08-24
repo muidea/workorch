@@ -32,12 +32,12 @@ detached projection；读取、等待、缓存或 replay 不能修改 owner stat
 | `GET` | `/runs?workspaceId=...`; `/workspaces/:workspaceId/runs` | Run summaries |
 | `GET` | `/workspaces/:workspaceId/runs/:runId` | Run detail |
 | `GET` | `/workspaces/:workspaceId/runs/:runId/{snapshot,status,observability}` | detailed/status/observability views |
-| `GET` | `/workspaces/:workspaceId/runs/:runId/{steps,runtime-checkpoints,task-decompositions}` | legacy diagnostic projections only |
+| `GET` | `/workspaces/:workspaceId/runs/:runId/{steps,runtime-checkpoints,task-decompositions}` | bounded diagnostic projections only |
 | `GET` | `/workspaces/:workspaceId/runs/:runId/{tool-calls,patches,validation-results,artifacts,results}` | evidence/outcome projections |
 | `GET` | `/workspaces/:workspaceId/runs/:runId/{memory-recalls,task-progress,context-bundle}` | recall/progress/context projections |
 
 `Run` exposes scope、lineage、Definition revision、lifecycle、blocker、timestamps and sealed activation/LLM status。
-It never exposes `ExecutionContext`。Step/checkpoint are diagnostic only；Runtime read DTOs no longer expose a compatibility
+It never exposes `ExecutionContext`。Step/checkpoint are diagnostic only；Runtime read DTOs do not expose a command-like
 `nextAction` authority。
 
 Workspace list/detail 的 `state` 与 `activeRunId` 是 Workspace owner canonical fact；Workspace JSON 不含
@@ -55,7 +55,7 @@ resource、workspace/run scope、state 及 owner 原样提供的 `requiredAction
 Acceptance 的 `budget` 只包含 SM-2 convergence/repair 与 prerequisite refresh；SM-4 provider transport、operation recovery、
 CAS reload 和 terminal delivery 计数只在独立 `recoveryBudget`。`RuntimeAuditRepair` 不得包含
 `terminalDeliveryAttempts`；该计数仅在 sealed terminal audit 中出现。nonterminal aggregate 携带 terminal delivery 计数属于
-owner schema incompatibility，不由 projection 清零或隐藏。
+当前 owner shape 违规，owner load 必须失败，不由 projection 清零、隐藏或转换成兼容状态。
 
 Workspace `snapshot.runCommand` 只保存最新 immutable Workspace-owner admission observation：request/workspace/run/intent
 identity、separate caller `requestReason`、`source`、exact `outcome`、`admissionReason`、derived `diagnostic` 与
@@ -67,13 +67,10 @@ caller priority，也不从 HTTP status 或 caller reason 反推 owner outcome/s
 runCommand observation 在同一事务中分配，transport/caller 不提供该值。
 
 `llmUsageTraces` 原样暴露 optional `logicalRequestId`/`physicalCallId`，并以
-`physicalResponseMode=streaming|non_streaming` 和 `providerSubmitted` 作为物理调用审计主事实。新 Runtime usage 的
-两级身份必须同时存在，且 `physicalCallId` 等于兼容 correlation `requestId`；generic usage 与引入双层身份前的历史记录
-可以两者都没有。只出现一级、空白或 correlation 不一致的记录不得进入 projection。
-
-当前记录缺少任一 physical fact 或携带非法 mode 时不得静默投影为 `false`；`streaming` 仅为由 canonical mode 计算的
-兼容字段。历史记录只有在显式携带旧 `streaming` 与 `providerSubmitted` 时才允许确定性回填 mode，Web/TUI 不得从
-provider、response bytes、usage、请求大小或 streaming 推断身份、提交或响应模式。
+`physicalResponseMode=streaming|non_streaming` 和 `providerSubmitted` 作为物理调用审计主事实。Runtime usage 的
+两级身份必须同时存在，且 `physicalCallId=requestId`；generic、非 Runtime usage 可以两者都没有。只出现一级、空白、
+correlation 不一致、缺少 physical fact 或非法 mode 的记录不得进入 projection。公共 DTO 不再包含 `streaming` 布尔字段；
+Web/TUI 也不得从 provider、response bytes、usage 或 request bytes 推断身份、提交或响应模式。
 
 `snapshot` / `runtime-view` / `status`必须能够只读投影：
 
@@ -102,10 +99,10 @@ set的通用mutation。三轴内容必须一一对应
 | Skill | `GET /skills`; `GET /skills/:skillId` |
 | MCP server | `GET /mcp/servers`; detail/tools/resources/prompts below one server |
 | MCP capability | `GET /mcp/capabilities`; `GET /mcp/capabilities/:capabilityId` |
-| Memory | `GET /memory?workspaceId=...`; `GET /memory/:memoryId`; scoped `GET /workspaces/:workspaceId/memory/:memoryId`; Workspace recall query |
+| Memory | `GET /memory?workspaceId=...`; `GET /workspaces/:workspaceId/memory/:memoryId`; Workspace recall query |
 
-Unscoped unique-ID Memory detail remains compatibility read access only；scope collision must fail closed。Secrets、large
-content and owner-private fields are omitted or exposed only through validated refs。
+Memory item detail/update/delete always carries the Workspace scope in the path；there is no unscoped item route or query-parameter
+scope adapter。Secrets、large content and owner-private fields are omitted or exposed only through validated refs。
 
 Decision projection必须区分ordinary governance、pre-seal Definition clarification与Run-scoped runtime-definition
 clarification。`Decision.definitionClarification`是从Decision owner binding无损复制的bounded typed DTO：它包含

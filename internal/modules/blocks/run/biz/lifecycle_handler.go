@@ -27,7 +27,6 @@ func (m *Biz) lifecycleTopics() []string {
 		runevents.TopicRunFactGovernanceWait,
 		runevents.TopicRunFactContinuationEligible,
 		runevents.TopicRunFactTerminalDelivery,
-		runevents.TopicRunFactRuntimeStateIncompatible,
 	}
 }
 
@@ -106,19 +105,6 @@ func (m *Biz) executeLifecycleCommand(ev magicevent.Event) (runevents.RunLifecyc
 		workspaceID, runID = cmd.WorkspaceID, cmd.RunID
 		cmdCopy := cmd
 		internal = lifecycleInternalEvent{Kind: lifecycleInternalEventTerminalDeliveryObserved, WorkspaceID: workspaceID, RunID: runID, TerminalDelivery: &cmdCopy}
-	case runevents.TopicRunFactRuntimeStateIncompatible:
-		cmd, ok := data.(runevents.RuntimeStateIncompatibleFact)
-		if !ok || ev.Source() != runtimeLifecycleFactSource {
-			return runevents.RunLifecycleCommandResult{}, common.ErrInvalidArgument
-		}
-		var err error
-		boundCtx, err = common.BindRuntimeWorkspaceContext(ctx, cmd.WorkspaceID)
-		if err != nil {
-			return runevents.RunLifecycleCommandResult{}, err
-		}
-		workspaceID, runID = cmd.WorkspaceID, cmd.RunID
-		cmdCopy := cmd
-		internal = lifecycleInternalEvent{Kind: lifecycleInternalEventStateIncompatibleObserved, WorkspaceID: workspaceID, RunID: runID, StateIncompatible: &cmdCopy}
 	default:
 		return runevents.RunLifecycleCommandResult{}, common.ErrInvalidArgument
 	}
@@ -164,10 +150,9 @@ func (m *Biz) applyLifecycleLocked(
 		}
 		if transition.Noop {
 			result := runevents.RunLifecycleCommandResult{
-				Run:                          current,
-				Transitioned:                 false,
-				PreviousState:                previous,
-				RuntimeActivationDisposition: runtimeActivationDispositionForRun(current),
+				Run:           current,
+				Transitioned:  false,
+				PreviousState: previous,
 			}
 			if deliveryCmd != nil && runStateIsTerminal(current.State) {
 				result.DeliveryAck = runTerminalDeliveryAck(current, *deliveryCmd, runtimecontract.RuntimeDeliveryAcknowledgedNoop)
@@ -183,10 +168,9 @@ func (m *Biz) applyLifecycleLocked(
 		}
 		m.publishLifecycleTransition(ctx, next)
 		result := runevents.RunLifecycleCommandResult{
-			Run:                          next,
-			Transitioned:                 true,
-			PreviousState:                previous,
-			RuntimeActivationDisposition: runtimeActivationDispositionForRun(next),
+			Run:           next,
+			Transitioned:  true,
+			PreviousState: previous,
 		}
 		if deliveryCmd != nil {
 			result.DeliveryAck = runTerminalDeliveryAck(next, *deliveryCmd, runtimecontract.RuntimeDeliveryAcknowledgedRunTerminal)
@@ -194,13 +178,6 @@ func (m *Biz) applyLifecycleLocked(
 		return result, nil
 	}
 	return runevents.RunLifecycleCommandResult{}, common.ErrConflict
-}
-
-func runtimeActivationDispositionForRun(run *runmodel.Run) runtimecontract.RuntimeActivationDisposition {
-	if run == nil || run.RuntimeActivationStatus == nil {
-		return ""
-	}
-	return run.RuntimeActivationStatus.Disposition
 }
 
 func runTerminalDeliveryAck(

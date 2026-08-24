@@ -133,8 +133,8 @@ typed observation/receipt：
 
 Semantic planning 与 reconciliation 都不是第五个状态机：request/attempt/feasibility/seal/batch/history/lineage
 均属于 Orchestrator SM-2/SM-3/SM-4 aggregate；Workspace、
-Run、Result 只能通过各自 owner-local internal event 迁移自己的状态。旧 aggregate/schema 缺少该合同时不得推断或
-旧状态推导，必须返回 `fresh_activation_required`，等待用户显式 restart。
+Run、Result 只能通过各自 owner-local internal event 迁移自己的状态。持久化 aggregate 缺少当前合同时必须在严格
+decode/validate 边界失败；不得补声明、推导旧状态、生成 compatibility disposition 或进入 Runtime drive。
 
 ### Definition declaration and owner-policy boundaries
 

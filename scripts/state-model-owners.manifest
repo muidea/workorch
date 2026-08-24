@@ -44,7 +44,6 @@ internal/pkg/workorchruntimecontract/canonical_runtime.go|RuntimeCapabilityState
 internal/pkg/workorchruntimecontract/canonical_runtime.go|SnapshotContentState|immutable_outcome|-|-
 internal/pkg/workorchruntimecontract/canonical_runtime.go|RuntimeTargetSelectionDisposition|pure_disposition|internal/modules/kernel/orchestrator|-
 internal/pkg/workorchruntimecontract/runtime_acceptance_slice.go|RuntimeCoverageItemState|owner_private_state|internal/modules/kernel/orchestrator|sm_2
-internal/pkg/workorchruntimecontract/runtime_activation_disposition.go|RuntimeActivationDisposition|pure_disposition|internal/modules/kernel/orchestrator|-
 internal/pkg/workorchruntimecontract/runtime_assessment.go|AssessmentDisposition|pure_disposition|internal/modules/kernel/orchestrator|-
 internal/pkg/workorchruntimecontract/runtime_candidate_evaluator.go|RuntimeCandidateCorrectionDisposition|pure_disposition|internal/modules/kernel/orchestrator|-
 internal/pkg/workorchruntimecontract/runtime_candidate_payload.go|RuntimeCandidateDocumentDisposition|pure_disposition|internal/modules/blocks/llm|-

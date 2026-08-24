@@ -180,7 +180,7 @@ func startOwnerModules(exports Exports, rawHub magicevent.Hub, dataRoot string) 
 		return nil, err
 	}
 	if err := configure(gitModule, gitModule.Configure(gitbiz.Dependencies{
-		EventHub: rawHub, RuntimeAdapter: gitbiz.NewRuntimeAdapter(true), CapabilityStateReceipts: gitReceipts,
+		EventHub: rawHub, RuntimeAdapter: gitbiz.NewRuntimeAdapter(), CapabilityStateReceipts: gitReceipts,
 	})); err != nil {
 		return nil, err
 	}

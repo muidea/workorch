@@ -163,7 +163,6 @@ const (
 	PayloadKeyResponseBytes           = "responseBytes"
 	PayloadKeyPhysicalResponseMode    = "physicalResponseMode"
 	PayloadKeyProviderSubmitted       = "providerSubmitted"
-	PayloadKeyStreaming               = "streaming"
 	PayloadKeyContextBudget           = "contextBudget"
 	PayloadKeyCacheUsage              = "cacheUsage"
 	PayloadKeyCacheMarkersSent        = "cacheMarkersSent"

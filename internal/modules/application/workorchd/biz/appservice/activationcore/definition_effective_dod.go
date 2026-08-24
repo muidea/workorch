@@ -21,7 +21,10 @@ func EffectiveWorkspaceDoD(
 	if err != nil {
 		return nil, nil, err
 	}
-	items = OrderedWorkspaceDoDs(items)
+	items, err = OrderedWorkspaceDoDs(items)
+	if err != nil {
+		return nil, nil, err
+	}
 	contexts := make([]map[string]any, 0, len(items))
 	mergedItems := make([]string, 0)
 	seen := map[string]struct{}{}

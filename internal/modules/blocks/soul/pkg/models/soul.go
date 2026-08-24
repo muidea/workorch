@@ -11,12 +11,11 @@ import (
 const (
 	SoulSourceUserManaged = "user_managed"
 	SoulSourceBuiltinSeed = "builtin_seed"
-	SoulSourceLegacyOwned = "legacy_owner_upgrade"
 )
 
 func ValidSoulSourceProvenance(value string) bool {
 	switch value {
-	case SoulSourceUserManaged, SoulSourceBuiltinSeed, SoulSourceLegacyOwned:
+	case SoulSourceUserManaged, SoulSourceBuiltinSeed:
 		return true
 	default:
 		return false

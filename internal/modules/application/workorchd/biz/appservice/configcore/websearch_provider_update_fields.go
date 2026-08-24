@@ -13,9 +13,6 @@ func applyWebSearchProviderUpdateFields(next *workorchconfig.WebSearchProviderCo
 	if update.SearchEndpoint != nil {
 		next.SearchEndpoint = strings.TrimSpace(*update.SearchEndpoint)
 	}
-	if update.FetchEndpoint != nil {
-		next.FetchEndpoint = strings.TrimSpace(*update.FetchEndpoint)
-	}
 	if update.APIKey != nil {
 		if apiKey := strings.TrimSpace(*update.APIKey); apiKey != "" {
 			next.APIKey = apiKey

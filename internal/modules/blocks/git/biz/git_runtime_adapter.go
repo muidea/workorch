@@ -61,8 +61,7 @@ type repoContext struct {
 	UnbornHead           bool
 }
 
-func NewRuntimeAdapter(writeEnabled bool) *RuntimeAdapter {
-	_ = writeEnabled
+func NewRuntimeAdapter() *RuntimeAdapter {
 	return &RuntimeAdapter{
 		timeout: DefaultCommandTimeout,
 		envAllowlist: map[string]struct{}{
@@ -74,14 +73,14 @@ func NewRuntimeAdapter(writeEnabled bool) *RuntimeAdapter {
 	}
 }
 
-func NewRuntimeAdapterWithTimeout(writeEnabled bool, timeout time.Duration) *RuntimeAdapter {
-	adapter := NewRuntimeAdapter(writeEnabled)
+func NewRuntimeAdapterWithTimeout(timeout time.Duration) *RuntimeAdapter {
+	adapter := NewRuntimeAdapter()
 	adapter.timeout = timeout
 	return adapter
 }
 
-func NewRuntimeAdapterFromTimeoutString(writeEnabled bool, timeoutValue string) (*RuntimeAdapter, error) {
-	adapter := NewRuntimeAdapter(writeEnabled)
+func NewRuntimeAdapterFromTimeoutString(timeoutValue string) (*RuntimeAdapter, error) {
+	adapter := NewRuntimeAdapter()
 	timeoutValue = strings.TrimSpace(timeoutValue)
 	if timeoutValue == "" {
 		return adapter, nil

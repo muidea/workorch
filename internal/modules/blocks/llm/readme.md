@@ -111,6 +111,8 @@ application、Web 与 orchestrator 不直接访问 ai-proxy。
     notification 继续显式透传 `LogicalRequestID + PhysicalCallID`，其中 `RequestID == PhysicalCallID`；generic
     completion/embedding 可不携带两级 identity，但禁止只携带其中一级。notification 自身在发布前重复执行同一
     submitted/mode/bytes/tokens/context 一致性校验，缺失 audit 必须同步 fail-closed，Eventstream 只持久化 owner 已校验事实。
+    provider failure code/signature 只接受 adapter 的 typed `RuntimeProviderFailureIdentity`；任意 generic error 文本不得
+    被解析成 timeout、idle、empty-response 或其他 owner fact，只能形成稳定的 `provider_request_failed`。
 18. `AcquireProviderCeilingCommand` 的timeout/temporary error只是一项owner factual failure；LLM不自行retry或创建wait。
     Orchestrator若封存bounded recoverable wait，后续probe仍必须使用相同workspace/run/authority、selection、minimum bytes与
     canonical request hash。matching result返回detached ceiling fact；stale selection/revision或非typed diagnostic不能解除wait。

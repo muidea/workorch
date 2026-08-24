@@ -18,7 +18,7 @@ func TestRuntimeAdapterReadStatus(t *testing.T) {
 	repo := newTestRepo(t)
 	writeFile(t, filepath.Join(repo, "README.md"), "hello\n")
 
-	adapter := NewRuntimeAdapter(false)
+	adapter := NewRuntimeAdapter()
 	result, err := adapter.ExecuteOperation(context.Background(), RuntimeOperationRequest{
 		Kind:                          gitcommon.StepKindRead,
 		WorkspaceDeliverableDirectory: repo,
@@ -43,7 +43,7 @@ func TestRuntimeAdapterReadStatusInEmptyRepository(t *testing.T) {
 	repo := t.TempDir()
 	runGitForTest(t, repo, "init", "-q")
 
-	adapter := NewRuntimeAdapter(false)
+	adapter := NewRuntimeAdapter()
 	result, err := adapter.ExecuteOperation(context.Background(), RuntimeOperationRequest{
 		Kind:                          gitcommon.StepKindRead,
 		WorkspaceDeliverableDirectory: repo,
@@ -70,7 +70,7 @@ func TestRuntimeAdapterReadLogAndShowInEmptyRepository(t *testing.T) {
 	repo := t.TempDir()
 	runGitForTest(t, repo, "init", "-q")
 
-	adapter := NewRuntimeAdapter(false)
+	adapter := NewRuntimeAdapter()
 	for _, operation := range []string{gitcommon.OperationLog, gitcommon.OperationShow} {
 		result, err := adapter.ExecuteOperation(context.Background(), RuntimeOperationRequest{
 			Kind:                          gitcommon.StepKindRead,
@@ -95,7 +95,7 @@ func TestRuntimeAdapterReadLogAndShowInEmptyRepository(t *testing.T) {
 func TestRuntimeAdapterReadPathspecDotMeansRepositoryRoot(t *testing.T) {
 	repo := newTestRepo(t)
 
-	adapter := NewRuntimeAdapter(false)
+	adapter := NewRuntimeAdapter()
 	result, err := adapter.ExecuteOperation(context.Background(), RuntimeOperationRequest{
 		Kind:                          gitcommon.StepKindRead,
 		WorkspaceDeliverableDirectory: repo,
@@ -116,7 +116,7 @@ func TestRuntimeAdapterReadPathspecDotMeansRepositoryRoot(t *testing.T) {
 
 func TestRuntimeAdapterReadRejectsOptionShapedRevisionBeforeGit(t *testing.T) {
 	repo := newTestRepo(t)
-	adapter := NewRuntimeAdapter(false)
+	adapter := NewRuntimeAdapter()
 	for _, test := range []struct {
 		name      string
 		operation string
@@ -150,7 +150,7 @@ func TestRuntimeAdapterReadRejectsOptionShapedRevisionBeforeGit(t *testing.T) {
 
 func TestRuntimeAdapterRejectsUndeclaredRemoteAndHistoryRewriteOperations(t *testing.T) {
 	repo := newTestRepo(t)
-	adapter := NewRuntimeAdapter(true)
+	adapter := NewRuntimeAdapter()
 	head := gitOutputForTest(t, repo, "rev-parse", "HEAD")
 	for _, operation := range []string{"push", "pull", "fetch", "remote", "rebase", "reset", "checkout", "merge", "cherry-pick", "revert", "clean", "rm", "tag"} {
 		for _, kind := range []string{runtimecontract.StepKindGitRead, runtimecontract.StepKindGitWrite} {
@@ -175,7 +175,7 @@ func TestRuntimeAdapterWriteInitInitializesWorkspaceRepository(t *testing.T) {
 	}
 	repo := t.TempDir()
 
-	adapter := NewRuntimeAdapter(true)
+	adapter := NewRuntimeAdapter()
 	result, err := adapter.ExecuteOperation(context.Background(), RuntimeOperationRequest{
 		Kind:                          gitcommon.StepKindWrite,
 		WorkspaceDeliverableDirectory: repo,
@@ -204,7 +204,7 @@ func TestRuntimeAdapterWriteInitInitializesWorkspaceRepository(t *testing.T) {
 func TestRuntimeAdapterWriteInitIsIdempotentForExistingRepository(t *testing.T) {
 	repo := newTestRepo(t)
 
-	adapter := NewRuntimeAdapter(true)
+	adapter := NewRuntimeAdapter()
 	result, err := adapter.ExecuteOperation(context.Background(), RuntimeOperationRequest{
 		Kind:                          gitcommon.StepKindWrite,
 		WorkspaceDeliverableDirectory: repo,
@@ -226,7 +226,7 @@ func TestRuntimeAdapterWriteInitIsIdempotentForExistingRepository(t *testing.T) 
 
 func TestRuntimeAdapterReadInitRejected(t *testing.T) {
 	dir := t.TempDir()
-	adapter := NewRuntimeAdapter(true)
+	adapter := NewRuntimeAdapter()
 
 	result, err := adapter.ExecuteOperation(context.Background(), RuntimeOperationRequest{
 		Kind:                          gitcommon.StepKindRead,
@@ -241,32 +241,9 @@ func TestRuntimeAdapterReadInitRejected(t *testing.T) {
 	}
 }
 
-func TestRuntimeAdapterWriteInitIgnoresLegacyDisabledFlag(t *testing.T) {
-	if _, err := exec.LookPath("git"); err != nil {
-		t.Skip("git binary not available")
-	}
-	dir := t.TempDir()
-	adapter := NewRuntimeAdapter(false)
-
-	result, err := adapter.ExecuteOperation(context.Background(), RuntimeOperationRequest{
-		Kind:                          gitcommon.StepKindWrite,
-		WorkspaceDeliverableDirectory: dir,
-		Operation:                     gitcommon.OperationInit,
-	})
-	if err != nil {
-		t.Fatalf("execute init with legacy disabled flag: %v\noutput=%+v", err, result)
-	}
-	if result.Status != "completed" || result.Operation != gitcommon.OperationInit {
-		t.Fatalf("output = %+v, want init completed despite legacy disabled flag", result)
-	}
-	if _, err := os.Stat(filepath.Join(dir, ".git")); err != nil {
-		t.Fatalf(".git stat: %v, want repository initialized", err)
-	}
-}
-
 func TestRuntimeAdapterRejectsUnsafePathspec(t *testing.T) {
 	repo := newTestRepo(t)
-	adapter := NewRuntimeAdapter(true)
+	adapter := NewRuntimeAdapter()
 
 	result, err := adapter.ExecuteOperation(context.Background(), RuntimeOperationRequest{
 		Kind:                          gitcommon.StepKindWrite,
@@ -284,7 +261,7 @@ func TestRuntimeAdapterRejectsUnsafePathspec(t *testing.T) {
 
 func TestRuntimeAdapterWritePathspecDotStillRejected(t *testing.T) {
 	repo := newTestRepo(t)
-	adapter := NewRuntimeAdapter(true)
+	adapter := NewRuntimeAdapter()
 
 	result, err := adapter.ExecuteOperation(context.Background(), RuntimeOperationRequest{
 		Kind:                          gitcommon.StepKindWrite,
@@ -300,10 +277,10 @@ func TestRuntimeAdapterWritePathspecDotStillRejected(t *testing.T) {
 	}
 }
 
-func TestRuntimeAdapterAddIgnoresLegacyDisabledFlag(t *testing.T) {
+func TestRuntimeAdapterAddStagesDeclaredPath(t *testing.T) {
 	repo := newTestRepo(t)
 	writeFile(t, filepath.Join(repo, "README.md"), "hello\n")
-	adapter := NewRuntimeAdapter(false)
+	adapter := NewRuntimeAdapter()
 
 	result, err := adapter.ExecuteOperation(context.Background(), RuntimeOperationRequest{
 		Kind:                          gitcommon.StepKindWrite,
@@ -312,17 +289,17 @@ func TestRuntimeAdapterAddIgnoresLegacyDisabledFlag(t *testing.T) {
 		Pathspecs:                     []string{"README.md"},
 	})
 	if err != nil {
-		t.Fatalf("execute add with legacy disabled flag: %v\noutput=%+v", err, result)
+		t.Fatalf("execute add: %v\noutput=%+v", err, result)
 	}
 	if result.Status != "completed" || result.Operation != gitcommon.OperationAdd {
-		t.Fatalf("output = %+v, want add completed despite legacy disabled flag", result)
+		t.Fatalf("output = %+v, want add completed", result)
 	}
 }
 
 func TestRuntimeAdapterAddReportsOnlyCurrentIndexDelta(t *testing.T) {
 	repo := newTestRepo(t)
 	writeFile(t, filepath.Join(repo, "already-staged.txt"), "content\n")
-	adapter := NewRuntimeAdapter(true)
+	adapter := NewRuntimeAdapter()
 	request := RuntimeOperationRequest{
 		Kind: runtimecontract.StepKindGitWrite, WorkspaceDeliverableDirectory: repo,
 		Operation: gitcommon.OperationAdd, Pathspecs: []string{"already-staged.txt"},
@@ -350,7 +327,7 @@ func TestRuntimeAdapterAddAndCommitDoesNotRunHooks(t *testing.T) {
 	if err := os.Chmod(filepath.Join(repo, ".git", "hooks", "post-commit"), 0o755); err != nil {
 		t.Fatalf("chmod hook: %v", err)
 	}
-	adapter := NewRuntimeAdapter(true)
+	adapter := NewRuntimeAdapter()
 
 	if _, err := adapter.ExecuteOperation(context.Background(), RuntimeOperationRequest{
 		Kind:                          gitcommon.StepKindWrite,
@@ -392,7 +369,7 @@ func TestRuntimeAdapterCommitAllowsUnbornBranchInitialCommit(t *testing.T) {
 	runGitForTest(t, repo, "config", "user.email", "workorch@example.test")
 	runGitForTest(t, repo, "config", "user.name", "WorkOrch Test")
 	writeFile(t, filepath.Join(repo, "README.md"), "hello\n")
-	adapter := NewRuntimeAdapter(true)
+	adapter := NewRuntimeAdapter()
 
 	status, err := adapter.ExecuteOperation(context.Background(), RuntimeOperationRequest{
 		Kind:                          gitcommon.StepKindRead,
@@ -432,7 +409,7 @@ func TestRuntimeAdapterCommitAllowsUnbornBranchInitialCommit(t *testing.T) {
 
 func TestRuntimeAdapterCommitRejectsPathspec(t *testing.T) {
 	repo := newTestRepo(t)
-	adapter := NewRuntimeAdapter(true)
+	adapter := NewRuntimeAdapter()
 
 	result, err := adapter.ExecuteOperation(context.Background(), RuntimeOperationRequest{
 		Kind:                          gitcommon.StepKindWrite,
@@ -455,7 +432,7 @@ func TestCapabilityStateReacquiresSequenceAfterStageChanges(t *testing.T) {
 	}
 	repo := newTestRepo(t)
 	writeFile(t, filepath.Join(repo, "README.md"), "changed\n")
-	adapter := NewRuntimeAdapter(true)
+	adapter := NewRuntimeAdapter()
 
 	beforeStage, err := adapter.CapabilityState(context.Background(), "git-capability", "workspace_deliverable", repo)
 	if err != nil {
@@ -490,7 +467,7 @@ func TestCapabilityStateReacquiresSequenceAfterStageChanges(t *testing.T) {
 
 func TestRuntimeAdapterFailsOutsideGitRepository(t *testing.T) {
 	dir := t.TempDir()
-	adapter := NewRuntimeAdapter(true)
+	adapter := NewRuntimeAdapter()
 
 	result, err := adapter.ExecuteOperation(context.Background(), RuntimeOperationRequest{
 		Kind:                          gitcommon.StepKindRead,
@@ -506,7 +483,7 @@ func TestRuntimeAdapterFailsOutsideGitRepository(t *testing.T) {
 }
 
 func TestRuntimeAdapterRejectsParentAndExternalGitControlRepositories(t *testing.T) {
-	adapter := NewRuntimeAdapter(true)
+	adapter := NewRuntimeAdapter()
 
 	t.Run("parent repository", func(t *testing.T) {
 		parent := newTestRepo(t)
@@ -561,7 +538,7 @@ func TestRuntimeAdapterStagesWorkspaceSymlinkIdentityWithoutFollowingTarget(t *t
 	if err := os.Symlink(external, filepath.Join(repo, "external-link")); err != nil {
 		t.Fatal(err)
 	}
-	result, err := NewRuntimeAdapter(true).ExecuteOperation(context.Background(), RuntimeOperationRequest{
+	result, err := NewRuntimeAdapter().ExecuteOperation(context.Background(), RuntimeOperationRequest{
 		Kind: runtimecontract.StepKindGitWrite, WorkspaceDeliverableDirectory: repo,
 		Operation: gitcommon.OperationAdd, Pathspecs: []string{"external-link"},
 	})
@@ -581,7 +558,7 @@ func TestRuntimeAdapterCommitRejectsDetachedHead(t *testing.T) {
 	runGitForTest(t, repo, "checkout", "--detach", "HEAD")
 	writeFile(t, filepath.Join(repo, "README.md"), "hello\n")
 	runGitForTest(t, repo, "add", "README.md")
-	adapter := NewRuntimeAdapter(true)
+	adapter := NewRuntimeAdapter()
 
 	result, err := adapter.ExecuteOperation(context.Background(), RuntimeOperationRequest{
 		Kind:                          gitcommon.StepKindWrite,
@@ -601,7 +578,7 @@ func TestRuntimeAdapterCommitFailsOnExpectedHeadMismatch(t *testing.T) {
 	repo := newTestRepo(t)
 	writeFile(t, filepath.Join(repo, "README.md"), "hello\n")
 	runGitForTest(t, repo, "add", "README.md")
-	adapter := NewRuntimeAdapter(true)
+	adapter := NewRuntimeAdapter()
 
 	result, err := adapter.ExecuteOperation(context.Background(), RuntimeOperationRequest{
 		Kind:                          gitcommon.StepKindWrite,
@@ -631,7 +608,7 @@ func TestRuntimeAdapterCommitFailsWhenIdentityMissing(t *testing.T) {
 	runGitForTest(t, repo, "config", "user.useConfigOnly", "true")
 	writeFile(t, filepath.Join(repo, "README.md"), "hello\n")
 	runGitForTest(t, repo, "add", "README.md")
-	adapter := NewRuntimeAdapter(true)
+	adapter := NewRuntimeAdapter()
 
 	result, err := adapter.ExecuteOperation(context.Background(), RuntimeOperationRequest{
 		Kind:                          gitcommon.StepKindWrite,
@@ -662,7 +639,7 @@ func TestRuntimeAdapterDiffLargeOutputIsTruncated(t *testing.T) {
 	runGitForTest(t, repo, "add", "large.txt")
 	runGitForTest(t, repo, "-c", "core.hooksPath=/dev/null", "commit", "--no-verify", "-m", "test: add large")
 	writeFile(t, filepath.Join(repo, "large.txt"), strings.Repeat("changed line\n", 20000))
-	adapter := NewRuntimeAdapter(false)
+	adapter := NewRuntimeAdapter()
 
 	result, err := adapter.ExecuteOperation(context.Background(), RuntimeOperationRequest{
 		Kind:                          gitcommon.StepKindRead,
@@ -690,7 +667,7 @@ func TestRuntimeAdapterLargeDirtyRepositoryObservationAndEvidenceAreBounded(t *t
 		}
 		writeFile(t, name, "dirty\n")
 	}
-	result, err := NewRuntimeAdapter(false).ExecuteOperation(context.Background(), RuntimeOperationRequest{
+	result, err := NewRuntimeAdapter().ExecuteOperation(context.Background(), RuntimeOperationRequest{
 		Kind: runtimecontract.StepKindGitRead, WorkspaceDeliverableDirectory: repo, Operation: gitcommon.OperationStatus,
 	})
 	if err != nil || result.Status != "completed" || !result.Truncated {

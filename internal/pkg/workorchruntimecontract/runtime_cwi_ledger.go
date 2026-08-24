@@ -252,23 +252,21 @@ func InitializeRuntimeCWILedgerForActivation(facts RuntimeFacts) (RuntimeFacts, 
 	return facts, nil
 }
 
-// ValidateRuntimeStateCWILedger classifies the persisted canonical CWI
-// authority boundary before a Runtime aggregate can be driven. It is pure:
-// no owner I/O, migration, replay, or recovery selection is permitted here.
-// A current-schema defect is deliberately typed so callers can fail closed
-// without mistaking it for a normal Runtime drive failure.
+// ValidateRuntimeStateCWILedger validates the canonical CWI authority boundary
+// before a Runtime aggregate can be driven. It is pure and does not migrate,
+// repair, replay, or classify invalid persisted data into another lifecycle.
 func ValidateRuntimeStateCWILedger(facts RuntimeFacts, ledger RuntimeCWIReconciliationLedger) error {
 	if strings.TrimSpace(facts.CWILedgerSchemaVersion) != RuntimeCWILedgerSchemaCurrent {
-		return NewRuntimeStateCWILedgerIncompatibilityError(fmt.Errorf("runtime state requires current CWI ledger schema"))
+		return fmt.Errorf("runtime state requires the canonical CWI ledger contract")
 	}
 	if err := ValidateRuntimeCWILedger(facts); err != nil {
-		return NewRuntimeStateCWILedgerIncompatibilityError(err)
+		return err
 	}
 	if err := ValidateRuntimeCWIFocusBindings(facts); err != nil {
-		return NewRuntimeStateCWILedgerIncompatibilityError(err)
+		return err
 	}
 	if err := ValidateRuntimeCWIReconciliationLedger(facts, ledger); err != nil {
-		return NewRuntimeStateCWILedgerIncompatibilityError(err)
+		return err
 	}
 	return nil
 }

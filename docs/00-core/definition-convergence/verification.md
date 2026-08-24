@@ -123,7 +123,7 @@ Last Verified: 2026-08-21
 | dynamic capability unavailable | Run后先由SM-2读取owner-defined typed recovery合同；具备exact condition、trigger/deadline和budget时持久化bounded recoverable runtime wait且provider/dispatch/effect均为零，否则typed fail-closed；duplicate/restart不创建第二wait或重复消费 |
 | all CWI settled | artifact/coverage closeout后 sealed terminal |
 | partial delivery | 仅重试缺失的 Result/Workspace/Run acknowledgement |
-| old aggregate | `fresh_activation_required`；零 provider/capability work |
+| invalid/retired persisted aggregate | strict load failure；零 owner transition、provider/capability work |
 
 ### Scale and performance
 

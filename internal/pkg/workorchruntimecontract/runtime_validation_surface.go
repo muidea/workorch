@@ -61,9 +61,6 @@ func (s RuntimeValidationSurface) Normalized() RuntimeValidationSurface {
 	s.PrerequisiteRef = strings.TrimSpace(s.PrerequisiteRef)
 	s.CheckRefs = normalizeStrings(s.CheckRefs)
 	s.ProofApplicability = RuntimeValidationProofApplicability(strings.TrimSpace(string(s.ProofApplicability)))
-	if s.ProofApplicability == "" {
-		s.ProofApplicability = RuntimeValidationProofNotDeclared
-	}
 	s.EffectScope = NormalizeRuntimeEffectScope(s.EffectScope)
 	s.IdempotencyClass = NormalizeRuntimeOperationIdempotencyClass(s.IdempotencyClass)
 	return s

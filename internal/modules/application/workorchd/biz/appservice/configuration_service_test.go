@@ -73,7 +73,6 @@ defaultProvider = "search"
 [webSearch.providers.search]
 provider = "http"
 searchEndpoint = "https://search.example.test/search"
-fetchEndpoint = "https://search.example.test/fetch"
 apiKey = "web-secret"
 timeout = "30s"
 maxResults = 7
@@ -370,7 +369,6 @@ defaultProvider = "search"
 [webSearch.providers.search]
 provider = "http"
 searchEndpoint = "https://old.example.test/search"
-fetchEndpoint = "https://old.example.test/fetch"
 apiKey = "web-secret"
 timeout = "20s"
 maxResults = 5
@@ -388,7 +386,6 @@ maxResults = 5
 			ID:             "search",
 			Provider:       stringPtr("http"),
 			SearchEndpoint: stringPtr("https://search.example.test/search"),
-			FetchEndpoint:  stringPtr("https://search.example.test/fetch"),
 			Timeout:        stringPtr("25s"),
 			MaxResults:     intPtr(9),
 			MaxFetchBytes:  int64Ptr(262144),
@@ -449,7 +446,6 @@ defaultProvider = "search"
 [webSearch.providers.search]
 provider = "http"
 searchEndpoint = "https://old.example.test/search"
-fetchEndpoint = "https://old.example.test/fetch"
 apiKey = "web-secret"
 timeout = "20s"
 maxResults = 5
@@ -482,7 +478,6 @@ X-WorkOrch-Client = "workorch"
 	provider := cfg.WebSearch.Providers[0]
 	if provider.Provider != "http" ||
 		provider.SearchEndpoint != "https://old.example.test/search" ||
-		provider.FetchEndpoint != "https://old.example.test/fetch" ||
 		provider.Headers["X-WorkOrch-Client"] != "workorch" ||
 		provider.Timeout != "25s" ||
 		provider.MaxResults != 5 ||

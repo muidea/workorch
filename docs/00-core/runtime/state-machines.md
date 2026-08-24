@@ -19,11 +19,10 @@ active -> completed | failed | cancelled | superseded
   reducer 中决定 `pending -> active` 或匹配 blocker 的 `blocked -> active`，成功后才发布 Run state fact。
 - terminal 不可变。继续未完成工作只能由产品层显式创建新的 typed activation / Run，并保存
   predecessor lineage；不允许自动 successor。
-- 对非 current-baseline、不可读的 opaque aggregate，Resume 只返回 `fresh_activation_required`，Restart 只返回
-  `data_reset_required`；二者都不得 drive 旧 aggregate、创建 `ReplacementIntent`、触发 terminal delivery 或创建 successor。
-  当前开发基线为 Runtime aggregate schema `v2`，其 DefinitionFocus 必须封存 required owner fact 的 convergence；
-  `v1` 不迁移、不补默认声明，必须先清理不兼容数据。只有 current-baseline Run 的显式 Restart 才能持久化
-  Run-owned replacement intent，经 SM-4 `Result -> Workspace -> Run` delivery 释放 Workspace 后创建唯一 successor 并保存 lineage。
+- 不可按当前持久化合同解码或校验的 Run/Runtime 数据不进入 SM-1：owner/repository load 直接失败，且不发布
+  `fresh_activation_required`、replacement、terminal 或治理 fact。部署者清理数据后重新创建的 current Run 才能进入 activation。
+  `fresh_activation_required` 仅适用于可读 current Run 缺失 sealed bootstrap。current Run 的显式 Restart 才能持久化
+  Run-owned replacement intent，经 SM-4 `Result -> Workspace -> Run` delivery 释放 Workspace 后创建唯一 successor并保存lineage。
 - blocked 回 active 必须有匹配的 persisted governance resolution。
 - complete/fail 只能来自 SM-2 sealed terminal decision；cancel/supersede 必须先持久化
   `RuntimeTerminationRecord`。
@@ -203,8 +202,9 @@ sealed authority + preflight ready
   发现 persisted `need_governance` aggregate 但 Run 仍为 pending/active 时，必须重新驱动该 lifecycle handoff；已经匹配
   blocked 且 aggregate 仍为 `need_governance` 的 Run 保持真实治理等待。若 resolution 已 CAS 持久化而 Run 仍 blocked，startup
   必须把它分类为 continuation delivery cut point，从 persisted resolution 重投 exact continuation，不能先推进 execution。
-- 非终态 aggregate 不得携带 `TerminalDeliveryAttempts` 或 terminal acknowledgement；该组合是
-  `recovery_ledger_invalid` current-schema incompatibility，必须 data reset/fresh activation，不能由 projection 归零。
+- 非终态 aggregate 不得携带 `TerminalDeliveryAttempts` 或 terminal acknowledgement；该组合不属于当前持久化结构，
+  当前 invariant 校验必须使 owner load 直接失败。不得为该旧形态生成兼容分类或升级状态；projection 不得归零或隐藏，运维侧清理数据后
+  重新创建 workspace/Run。
 - governance `continue|fail` resolution 的 owner-private CAS 必须同时替换任意旧 lease并封存 exact `scheduled`
   successor；新 private event 不接受 nil/wrong lease template。`continue` 的 successor 先围住 run gate 和 exact
   Run-owner resolution acknowledgement，再由同一 claimed generation 继续；`fail` 的 successor 只授权既有
@@ -232,7 +232,7 @@ sealed authority + preflight ready
   record query；Orchestrator 通过该 query load 后在 owner-local SM-4 中分类 `active_no_dispatch`、
   `active_sealed_dispatch`、`blocked_governance`、`recoverable_runtime_wait`、`terminal_delivery_pending`。inventory/load 失败必须 fail-fast，
   不能由 application 或 Run owner 猜测。盘点完成但 Run 常规 commands 尚未注册时，Orchestrator 只能暂存本次进程的
-  owner-local recovery handoff；仅 Run 的 commands-ready lifecycle fact 可释放 drive/lease/incompatibility action。
+  owner-local recovery handoff；仅 Run 的 commands-ready lifecycle fact 可释放当前 drive/lease action。
   readiness 不是 workspace state transition，crash 后 handoff 必须由新进程重新 inventory，且此边界不得依赖
   `Weight()` 或普通 Run Get/Update command。
 - inventory pagination必须有cursor visited-set、page/item hard limit并拒绝`A -> B -> A`循环；duplicate commands-ready只释放

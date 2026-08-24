@@ -51,6 +51,7 @@ func TestRestartSealsSoulMCPAndProfileSnapshotsAcrossOwnerRestart(t *testing.T) 
 	}
 	acceptedKinds := []any{"mcp/tool_call"}
 	executionContract := map[string]any{
+		"stateChangePolicy": "allowed_but_not_required",
 		"profileContracts": map[string]any{
 			"detached-profile": map[string]any{
 				"evidenceRequirements": []any{map[string]any{
@@ -156,11 +157,12 @@ func sealedRestartSnapshotBootstrap(t *testing.T, activation runtimecontract.Run
 		t.Fatalf("compile sealed definition seed: %v", err)
 	}
 	bootstrap := runtimecontract.RuntimeBootstrap{
-		SchemaVersion: runtimecontract.RuntimeStateSchemaVersionCurrent, Definition: definition, Activation: activation, DefinitionSeed: seed,
+		Definition: definition, Activation: activation, DefinitionSeed: seed,
 		Focuses: []runtimecontract.CoverageFocus{{ID: "focus-1", SliceID: "slice-1", CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-1"}, RequiredEvidenceKinds: []string{runtimecontract.EvidenceKindStateChange}}},
 		Slices:  []runtimecontract.RuntimeAcceptanceSlice{slice}, CoverageItems: []runtimecontract.RuntimeCoverageItem{item},
 		ConvergencePolicy: runtimecontract.DefaultRuntimeConvergencePolicy(), RecoveryPolicy: runtimecontract.DefaultRuntimeRecoveryPolicy(),
 	}
+	bootstrap.ExecutionBudgetPolicy = runtimecontract.RuntimeExecutionBudgetPolicyForRuntimePolicies(bootstrap.ConvergencePolicy, bootstrap.RecoveryPolicy)
 	if err := bootstrap.Validate(); err != nil {
 		t.Fatalf("validate sealed restart bootstrap: %v", err)
 	}

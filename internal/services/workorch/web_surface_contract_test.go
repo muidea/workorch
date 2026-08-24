@@ -87,8 +87,8 @@ func TestWebWorkspaceExecutionCommandSurfaceMatchesRunIntentContract(t *testing.
 			t.Fatalf("WorkspaceExecutionActivationRequest retains non-owner activation field %q", forbidden)
 		}
 	}
-	if !strings.Contains(typesData, "runtimeActivation?: RuntimeActivationStatus;") {
-		t.Fatal("Run projection must retain read-only RuntimeActivationStatus")
+	if strings.Contains(typesData, "RuntimeActivationStatus") || strings.Contains(typesData, "runtimeActivation?") {
+		t.Fatal("Run projection retains removed data-compatibility activation state")
 	}
 
 	apiData := string(readWebConsoleFile(t, "src/api.ts"))
@@ -190,7 +190,6 @@ func TestWebWorkspaceExecutionAdmissionRequiresExactOwnerContract(t *testing.T) 
 		"fresh_activation_required:",
 		"definition_changed_requires_restart:",
 		"governance_required:",
-		"data_reset_required:",
 		"body.workspaceId !== expectation.workspaceId",
 		"body.requestId !== expectation.requestId",
 		"body.intent !== expectation.intent",

@@ -1,7 +1,4 @@
-// Package providerconfig retains only redaction helpers used by the request audit path.
-// Legacy multi-provider LoadProviderConfig / contextProfileMode / conservative default
-// resolution was removed by the ai-proxy primary cutover; production clients are built
-// from workorchconfig.LLMConfig via ResolveProviderClient.
+// Package providerconfig contains redaction helpers used by the request audit path.
 package providerconfig
 
 import (
@@ -12,7 +9,6 @@ import (
 
 // RedactedProviderConfig returns a secret-free provider config for request audit payloads.
 func RedactedProviderConfig(cfg llmmodels.ProviderConfig) llmmodels.RedactedProviderConfig {
-	capabilities := effectiveProviderCapabilities(cfg.Capabilities)
 	return llmmodels.RedactedProviderConfig{
 		ID:               cfg.ID,
 		APISurface:       cfg.APISurface,
@@ -22,7 +18,7 @@ func RedactedProviderConfig(cfg llmmodels.ProviderConfig) llmmodels.RedactedProv
 		Disabled:         cfg.Disabled,
 		Ready:            !cfg.Unavailable,
 		Reason:           cfg.UnavailableReason,
-		Capabilities:     capabilities,
+		Capabilities:     cfg.Capabilities,
 		InferenceProfile: cfg.InferenceProfile,
 		ContextProfile:   cfg.ContextProfile,
 	}
@@ -38,11 +34,4 @@ func RedactSecret(value string) string {
 		return "********"
 	}
 	return value[:4] + "..." + value[len(value)-4:]
-}
-
-func effectiveProviderCapabilities(capabilities llmmodels.ProviderCapabilities) llmmodels.ProviderCapabilities {
-	if !capabilities.Responses && !capabilities.Streaming && len(capabilities.NonChatOperations) == 0 {
-		capabilities.Responses = true
-	}
-	return capabilities
 }

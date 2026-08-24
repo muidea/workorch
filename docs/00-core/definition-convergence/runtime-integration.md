@@ -49,8 +49,8 @@ ready projection and clarification dispatch are Orchestrator-private facts, not 
   it does not rerun the compiler, change priority or replay durable effects;
 - Restart uses Workspace owner's current eligible startup input to construct a fresh bootstrap/partition/schedule. The successor
   inherits no ready queue, binding, credit, LLM document or context expansion; prior owner effects are re-observed by reconciliation;
-- missing current-baseline scheduling/partition facts returns `fresh_activation_required`; projection/event history/default order
-  cannot synthesize them.
+- missing current scheduling/partition facts fail bootstrap/aggregate validation before drive; projection/event history/default
+  order cannot synthesize them. `fresh_activation_required` is reserved for a readable Run with no sealed bootstrap.
 
 ## Three Prerequisite Lanes
 

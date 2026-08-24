@@ -4,7 +4,7 @@ Status: active
 
 Type: capability-block-contract
 
-Last Verified: 2026-08-21
+Last Verified: 2026-08-24
 
 ## 功能范围与边界
 
@@ -54,6 +54,7 @@ Last Verified: 2026-08-21
 ## 相关约束
 
 - Git 操作只能作用于 workspace deliverable repository。
+- Git adapter 只有当前构造合同；不存在 `enabled/writeEnabled` 参数、禁用开关兼容分支或被忽略的旧配置值。
 - repository root 必须与解析后的 deliverable root 相同，Git control directory 也必须位于该 root 内；父仓库继承、外置
   `gitdir`、`.git` symlink 与 bare repository 均不得取得 workspace Git authority。workspace 内指向外部文件的 symlink
   只按 Git symlink identity 暂存，不跟随或修改外部目标。

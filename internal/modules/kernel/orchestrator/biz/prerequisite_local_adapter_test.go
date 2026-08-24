@@ -208,6 +208,8 @@ func TestRuntimePrerequisiteResolverInventoryUsesProductionRequirementSources(t 
 	policy := &runtimecontract.RuntimeAcceptanceSlicePolicy{
 		SchemaVersion: runtimecontract.RuntimeAcceptanceSlicePolicySchemaCurrent,
 		MaxWorkItems:  4, MaxFocuses: 16, MaxCandidateContextItems: 4,
+		CompletionPolicy: runtimecontract.RuntimeAcceptanceSliceCompletionAll,
+		ResultPolicy:     runtimecontract.RuntimeAcceptanceSliceResultAllowed,
 		Groups: []runtimecontract.RuntimeAcceptanceSliceGroupPolicy{{
 			ID: "slice-default", Title: "Default", Scope: "default", Priority: 1, MaxWorkItems: 1,
 			Match: runtimecontract.RuntimeAcceptanceSliceMatch{All: true},

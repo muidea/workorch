@@ -2,7 +2,6 @@ package events
 
 import (
 	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
-	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
@@ -69,5 +68,4 @@ type CLITaskPlanInfo struct {
 	OccurredAt         string
 	SourceProjection   string
 	SealedLLMSelection *runtimecontract.ProviderInferenceSelection
-	RuntimeActivation  *projectioncontract.RuntimeActivationStatus
 }

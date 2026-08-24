@@ -209,7 +209,6 @@ export function ConfigurationPage() {
           id: nextID,
           provider: values.provider,
           searchEndpoint: values.searchEndpoint,
-          fetchEndpoint: values.fetchEndpoint,
           headers: splitHeaderLines(values.headers),
           apiKey: values.apiKey,
           timeout: values.timeout,
@@ -449,9 +448,6 @@ export function ConfigurationPage() {
                         <Form.Item name="searchEndpoint" label="Search Endpoint" rules={[{ required: true }]}>
                           <Input placeholder="https://search-gateway.example/api/search" />
                         </Form.Item>
-                        <Form.Item name="fetchEndpoint" label="Legacy Fetch Endpoint（Runtime 不使用）">
-                          <Input placeholder="仅为旧配置兼容保留" />
-                        </Form.Item>
                         <Form.Item
                           name="headers"
                           label="请求头"
@@ -498,8 +494,7 @@ export function ConfigurationPage() {
                           column={1}
                           items={[
                             { key: 'apiKey', label: '已保存 API 密钥', children: selectedWebSearchProviderStatus?.apiKeyConfigured ? <Tag color="green">已配置</Tag> : <Tag>未配置</Tag> },
-                            { key: 'status', label: '已保存状态', children: selectedWebSearchProviderStatus?.ready ? <Tag color="green">就绪</Tag> : <Tag color="red">{selectedWebSearchProviderStatus?.reason || '未保存'}</Tag> },
-                            { key: 'fetch', label: '旧读取端点（未使用）', children: selectedWebSearchProviderStatus?.fetchEndpoint || '-' }
+                            { key: 'status', label: '已保存状态', children: selectedWebSearchProviderStatus?.ready ? <Tag color="green">就绪</Tag> : <Tag color="red">{selectedWebSearchProviderStatus?.reason || '未保存'}</Tag> }
                           ]}
                         />
                       </Form>

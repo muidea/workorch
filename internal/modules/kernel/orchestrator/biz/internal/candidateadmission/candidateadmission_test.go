@@ -185,8 +185,11 @@ func evaluatorFixture(t *testing.T) (runtimecontract.RuntimeFacts, runtimecontra
 		}},
 		Activation: runtimecontract.RuntimeActivationContext{ProviderSelection: runtimecontract.ProviderInferenceSelection{
 			Target: runtimecontract.ProviderModelTarget{ProviderID: "provider-1", ModelID: "model-1"},
-		}},
+		}, ExecutionContract: runtimecontract.RuntimeExecutionContract{StateChangePolicy: runtimecontract.RuntimeStateChangeAllowedButNotRequired}},
 	}
+	facts.ConvergencePolicy = runtimecontract.DefaultRuntimeConvergencePolicy()
+	facts.RecoveryPolicy = runtimecontract.DefaultRuntimeRecoveryPolicy()
+	facts.ExecutionBudgetPolicy = runtimecontract.DefaultRuntimeExecutionBudgetPolicy()
 	var err error
 	decision, err = runtimecontract.SealRuntimeDecision(facts, decision, 0)
 	if err != nil {

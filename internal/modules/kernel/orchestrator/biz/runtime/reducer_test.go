@@ -1062,10 +1062,11 @@ func TestReduceRuntimeStateDeterminedTerminalFailureOverridesPendingPrerequisite
 }
 
 func validationFacts() runtimecontract.RuntimeFacts {
-	return runtimecontract.RuntimeFacts{
+	facts := runtimecontract.RuntimeFacts{
 		Activation: runtimecontract.RuntimeActivationContext{
 			ProviderSelection: runtimecontract.ProviderInferenceSelection{Target: runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "gpt-4o"}},
 			EvidencePolicies:  []runtimecontract.RuntimeEvidencePolicy{runtimeManagedValidationEvidencePolicy()},
+			ExecutionContract: runtimecontract.RuntimeExecutionContract{StateChangePolicy: runtimecontract.RuntimeStateChangeAllowedButNotRequired},
 		},
 		WorkspaceID:        "ws-1",
 		RunID:              "run-1",
@@ -1082,6 +1083,10 @@ func validationFacts() runtimecontract.RuntimeFacts {
 			ValidationKinds:  []string{"validation/managed_session"},
 		},
 	}
+	facts.ConvergencePolicy = runtimecontract.DefaultRuntimeConvergencePolicy()
+	facts.RecoveryPolicy = runtimecontract.DefaultRuntimeRecoveryPolicy()
+	facts.ExecutionBudgetPolicy = runtimecontract.DefaultRuntimeExecutionBudgetPolicy()
+	return facts
 }
 
 func TestReduceRuntimeStateRequiresRunLevelStateChangeBeforeComplete(t *testing.T) {

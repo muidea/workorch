@@ -57,7 +57,7 @@ projection-to-owner repair, and application-to-Orchestrator service calls.
 - Resume: same Run, same sealed bootstrap/provider selection, no context patch;
 - current-baseline Restart: eligible fresh bootstrap plus Run-owned predecessor `ReplacementIntent`; a Definition-gap intent
   first requires dedicated Decision acknowledgement, and successor still appears only after terminal delivery;
-- non-current baseline: `fresh_activation_required`/`data_reset_required` fail-closed behavior, no in-place migration;
+- persisted data has one current shape and one repository layout; invalid/retired data fails at load and has no migration or projected disposition;
 - repeated notification/Drive/acknowledgment cannot duplicate attempt, side effect, evidence, Result or successor.
 
 ## Stable Decisions

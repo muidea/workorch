@@ -127,10 +127,9 @@ func providerFailureIdentity(err error) (string, string) {
 	if err == nil {
 		return "provider_request_failed", "provider-request-failed"
 	}
-	// Provider adapters may expose an audit-safe typed identity without making
-	// the Runtime boundary import an adapter implementation.  Typed identity is
-	// authoritative; error text remains a compatibility fallback for generic
-	// transports only.
+	// Provider adapters expose an audit-safe typed identity without making the
+	// Runtime boundary import an adapter implementation. Error text is never
+	// parsed into a provider identity.
 	type identityCarrier interface {
 		RuntimeProviderFailureIdentity() (code, signature string)
 	}
@@ -146,17 +145,7 @@ func providerFailureIdentity(err error) (string, string) {
 			return code, signature
 		}
 	}
-	message := strings.ToLower(strings.TrimSpace(err.Error()))
-	switch {
-	case strings.Contains(message, "body idle timeout"):
-		return "provider_body_idle_timeout", "provider-body-idle-timeout"
-	case strings.Contains(message, "provider request timeout") || strings.Contains(message, "context deadline exceeded"):
-		return "provider_transport_timeout", "provider-transport-timeout"
-	case strings.Contains(message, "empty response"):
-		return "provider_empty_response", "provider-empty-response"
-	default:
-		return "provider_request_failed", "provider-request-failed"
-	}
+	return "provider_request_failed", "provider-request-failed"
 }
 
 type CandidateRequestError struct {

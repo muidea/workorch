@@ -186,15 +186,6 @@ func (p RuntimeAcceptanceSlicePolicy) Normalized() RuntimeAcceptanceSlicePolicy 
 	p.SchemaVersion = strings.TrimSpace(p.SchemaVersion)
 	p.CompletionPolicy = strings.TrimSpace(p.CompletionPolicy)
 	p.ResultPolicy = strings.TrimSpace(p.ResultPolicy)
-	if p.CompletionPolicy == "" {
-		p.CompletionPolicy = RuntimeAcceptanceSliceCompletionAll
-	}
-	if p.ResultPolicy == "" {
-		p.ResultPolicy = RuntimeAcceptanceSliceResultAllowed
-	}
-	if p.SchemaVersion != RuntimeAcceptanceSlicePolicySchemaCurrent && p.MaxWorkItems <= 0 {
-		p.MaxWorkItems = RuntimeAcceptanceSliceDefaultMaxItems
-	}
 	groups := make([]RuntimeAcceptanceSliceGroupPolicy, 0, len(p.Groups))
 	for _, group := range p.Groups {
 		group.ID = strings.TrimSpace(group.ID)

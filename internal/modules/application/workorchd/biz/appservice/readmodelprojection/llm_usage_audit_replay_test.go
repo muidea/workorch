@@ -71,7 +71,7 @@ func TestMapLLMUsageTracesFromEventRecordsReplaysAuditIdempotentlyAndDropsUnknow
 	if _, ok := traces[0].ContextBudget.Field("prompt"); ok {
 		t.Fatalf("unknown prompt field survived read projection: %+v", traces[0].ContextBudget)
 	}
-	if traces[0].PhysicalResponseMode != llmaudit.PhysicalResponseModeNonStreaming || traces[0].Streaming || traces[0].ProviderSubmitted {
+	if traces[0].PhysicalResponseMode != llmaudit.PhysicalResponseModeNonStreaming || traces[0].ProviderSubmitted {
 		t.Fatalf("physical provider audit drifted in projection: %+v", traces[0])
 	}
 	if traces[0].LogicalRequestID != "logical-audit" || traces[0].PhysicalCallID != "physical-audit-event-1" {
@@ -89,27 +89,30 @@ func TestMapLLMUsageTracesFromEventRecordsReplaysAuditIdempotentlyAndDropsUnknow
 	}
 }
 
-func TestLLMUsageTracePhysicalResponseModeUsesBoundedEnumWithLegacyFallback(t *testing.T) {
-	legacyPayload := workorcheventpayload.New(
-		workorcheventpayload.StringField(recordpayload.PayloadKeyWorkspaceID, "ws-legacy"),
-		workorcheventpayload.StringField(recordpayload.PayloadKeyRunID, "run-legacy"),
+func TestLLMUsageTraceRequiresCurrentPhysicalResponseModeAndIdentity(t *testing.T) {
+	missingMode := workorcheventpayload.New(
+		workorcheventpayload.StringField(recordpayload.PayloadKeyWorkspaceID, "ws-current"),
+		workorcheventpayload.StringField(recordpayload.PayloadKeyRunID, "run-current"),
 		workorcheventpayload.StringField(recordpayload.PayloadKeyStatus, "completed"),
 		workorcheventpayload.BoolField(recordpayload.PayloadKeyProviderSubmitted, true),
-		workorcheventpayload.BoolField(recordpayload.PayloadKeyStreaming, true),
 	)
-	legacy, ok := llmUsageTraceFromEventRecord(projectioncontract.EventRecord{ID: "legacy", WorkspaceID: "ws-legacy", RunID: "run-legacy", Payload: legacyPayload})
-	if !ok || legacy.PhysicalResponseMode != llmaudit.PhysicalResponseModeStreaming || !legacy.Streaming || !legacy.ProviderSubmitted {
-		t.Fatalf("legacy streaming projection = %+v, ok=%v", legacy, ok)
-	}
-	if legacy.LogicalRequestID != "" || legacy.PhysicalCallID != "" {
-		t.Fatalf("legacy trace invented request identity: %+v", legacy)
+	if _, ok := llmUsageTraceFromEventRecord(projectioncontract.EventRecord{ID: "missing-mode", WorkspaceID: "ws-current", RunID: "run-current", Payload: missingMode}); ok {
+		t.Fatal("LLM usage trace accepted persistence without physicalResponseMode")
 	}
 
-	invalidPayload := legacyPayload.Merge(workorcheventpayload.New(
+	currentPayload := missingMode.Merge(workorcheventpayload.New(
+		workorcheventpayload.StringField(recordpayload.PayloadKeyPhysicalResponseMode, string(llmaudit.PhysicalResponseModeStreaming)),
+	))
+	current, ok := llmUsageTraceFromEventRecord(projectioncontract.EventRecord{ID: "current", WorkspaceID: "ws-current", RunID: "run-current", Payload: currentPayload})
+	if !ok || current.PhysicalResponseMode != llmaudit.PhysicalResponseModeStreaming || !current.ProviderSubmitted {
+		t.Fatalf("current streaming projection = %+v, ok=%v", current, ok)
+	}
+
+	invalidPayload := currentPayload.Merge(workorcheventpayload.New(
 		workorcheventpayload.StringField(recordpayload.PayloadKeyPhysicalResponseMode, "adaptive"),
 	))
-	if _, ok := llmUsageTraceFromEventRecord(projectioncontract.EventRecord{ID: "invalid", WorkspaceID: "ws-legacy", RunID: "run-legacy", Payload: invalidPayload}); ok {
-		t.Fatal("explicit invalid physical response mode fell back to legacy streaming")
+	if _, ok := llmUsageTraceFromEventRecord(projectioncontract.EventRecord{ID: "invalid", WorkspaceID: "ws-current", RunID: "run-current", Payload: invalidPayload}); ok {
+		t.Fatal("LLM usage trace accepted an invalid physical response mode")
 	}
 
 	missingSubmission := workorcheventpayload.New(
@@ -122,19 +125,19 @@ func TestLLMUsageTracePhysicalResponseModeUsesBoundedEnumWithLegacyFallback(t *t
 		t.Fatal("LLM usage trace accepted a missing provider submission fact")
 	}
 
-	partialIdentity := legacyPayload.Merge(workorcheventpayload.New(
+	partialIdentity := currentPayload.Merge(workorcheventpayload.New(
 		workorcheventpayload.StringField(recordpayload.PayloadKeyLogicalRequestID, "logical-partial"),
 	))
-	if _, ok := llmUsageTraceFromEventRecord(projectioncontract.EventRecord{ID: "partial-identity", WorkspaceID: "ws-legacy", RunID: "run-legacy", Payload: partialIdentity}); ok {
+	if _, ok := llmUsageTraceFromEventRecord(projectioncontract.EventRecord{ID: "partial-identity", WorkspaceID: "ws-current", RunID: "run-current", Payload: partialIdentity}); ok {
 		t.Fatal("LLM usage trace accepted a partial two-level request identity")
 	}
 
-	mismatchedCorrelation := legacyPayload.Merge(workorcheventpayload.New(
+	mismatchedCorrelation := currentPayload.Merge(workorcheventpayload.New(
 		workorcheventpayload.StringField(recordpayload.PayloadKeyRequestID, "physical-other"),
 		workorcheventpayload.StringField(recordpayload.PayloadKeyLogicalRequestID, "logical-current"),
 		workorcheventpayload.StringField(recordpayload.PayloadKeyPhysicalCallID, "physical-current"),
 	))
-	if _, ok := llmUsageTraceFromEventRecord(projectioncontract.EventRecord{ID: "mismatched-correlation", WorkspaceID: "ws-legacy", RunID: "run-legacy", Payload: mismatchedCorrelation}); ok {
+	if _, ok := llmUsageTraceFromEventRecord(projectioncontract.EventRecord{ID: "mismatched-correlation", WorkspaceID: "ws-current", RunID: "run-current", Payload: mismatchedCorrelation}); ok {
 		t.Fatal("LLM usage trace accepted physical call identity that differs from correlation request")
 	}
 }

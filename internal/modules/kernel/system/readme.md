@@ -35,7 +35,7 @@ Last Verified: 2026-08-21
 
 - System 不得直接取得 Soul、Workspace 或 MCP repository/service。
 - owner ensure 只对缺失的内置 ID 执行 Create。内置 ID 已存在时必须完整保留当前持久化对象；用户新增的非内置 ID 也不受影响。删除内置资源后，下次 ensure 会按当前嵌入默认值重新补建。
-- 嵌入默认值的版本变化不得借普通 ensure 覆盖已有对象；若未来需要强制迁移，必须新增显式、可版本化且可审计的 owner migration 合同。
+- 嵌入默认值变化不得借普通 ensure 覆盖已有对象。当前阶段没有默认资源 migration/upgrade 路径；需要新默认值时清理数据后重新初始化。
 - System 只承担启动协调，不负责运行期业务治理、Run 调度或状态修复。
 - 新增默认资源 owner 时必须增加具体 command/result、生命周期顺序和失败测试，不能增加 repository 直连。
 

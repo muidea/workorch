@@ -706,9 +706,10 @@ func TestRequestRuntimeCandidatePreservesSealedReadOnlyMCPMetadata(t *testing.T)
 	activation := runtimecontract.RuntimeActivationContext{
 		ProviderSelection: runtimecontract.ProviderInferenceSelection{Target: runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "gpt-4o"}},
 		MCPCapabilities: []runtimecontract.RuntimeMCPCapabilityContext{{
-			ID: "mcp-1:tool:repo.summary", ServerID: "mcp-1", Kind: "tool", Name: "repo.summary", Enabled: true,
+			ID: "mcp-1:tool:repo.summary", ServerID: "mcp-1", Kind: "tool", OperationKind: runtimecontract.StepKindMCPToolCall, Name: "repo.summary", Enabled: true,
 			EffectScope: string(runtimecontract.RuntimeEffectNone), IdempotencyClass: string(runtimecontract.RuntimeOperationIdempotencySafeToReplay),
 		}},
+		ExecutionContract: runtimecontract.RuntimeExecutionContract{StateChangePolicy: runtimecontract.RuntimeStateChangeAllowedButNotRequired},
 		OperationPolicies: []runtimecontract.RuntimeOperationPolicyFact{{
 			ID: "mcp-1:tool:repo.summary", OwnerModuleID: runtimecontract.RuntimeModuleMCP, OperationKind: runtimecontract.StepKindMCPToolCall,
 			SubjectRef: "mcp-1:tool:repo.summary",
@@ -735,6 +736,9 @@ func TestRequestRuntimeCandidatePreservesSealedReadOnlyMCPMetadata(t *testing.T)
 		},
 		Coverage: []runtimecontract.RuntimeCoverageItemFact{{ID: "cwi-1", State: runtimecontract.RuntimeCoverageItemStateOpen}},
 	}
+	facts.ConvergencePolicy = runtimecontract.DefaultRuntimeConvergencePolicy()
+	facts.RecoveryPolicy = runtimecontract.DefaultRuntimeRecoveryPolicy()
+	facts.ExecutionBudgetPolicy = runtimecontract.DefaultRuntimeExecutionBudgetPolicy()
 	decision, err := runtimecontract.SealRuntimeDecision(facts, runtimecontract.RuntimeDecision{
 		State: runtimecontract.ConvergenceStateNeedValidation, Focus: facts.Focus,
 		RequiredOutput: runtimecontract.RequiredOutputContract{
@@ -833,7 +837,10 @@ func sealedCandidateTestDecision(t *testing.T) runtimecontract.RuntimeDecision {
 		DeclarationRef: "test/runtime-candidate-event-adapter",
 	})
 	facts := runtimecontract.RuntimeFacts{
-		Activation:  runtimecontract.RuntimeActivationContext{ProviderSelection: runtimecontract.ProviderInferenceSelection{Target: runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "gpt-4o"}}},
+		Activation: runtimecontract.RuntimeActivationContext{
+			ProviderSelection: runtimecontract.ProviderInferenceSelection{Target: runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "gpt-4o"}},
+			ExecutionContract: runtimecontract.RuntimeExecutionContract{StateChangePolicy: runtimecontract.RuntimeStateChangeAllowedButNotRequired},
+		},
 		WorkspaceID: "ws-1", RunID: "run-1", DefinitionRevision: "definition-1", EvidenceRevision: "evidence-1",
 		Focus: runtimecontract.CoverageFocus{
 			ID: "focus-1", CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-1"}, RequiredEvidenceKinds: []string{runtimecontract.EvidenceKindStateChange},
@@ -841,6 +848,9 @@ func sealedCandidateTestDecision(t *testing.T) runtimecontract.RuntimeDecision {
 		},
 		Coverage: []runtimecontract.RuntimeCoverageItemFact{{ID: "cwi-1", State: runtimecontract.RuntimeCoverageItemStateOpen}},
 	}
+	facts.ConvergencePolicy = runtimecontract.DefaultRuntimeConvergencePolicy()
+	facts.RecoveryPolicy = runtimecontract.DefaultRuntimeRecoveryPolicy()
+	facts.ExecutionBudgetPolicy = runtimecontract.DefaultRuntimeExecutionBudgetPolicy()
 	decision, err := runtimecontract.SealRuntimeDecision(facts, runtimecontract.RuntimeDecision{
 		State: runtimecontract.ConvergenceStateNeedStateChange, Focus: facts.Focus,
 		RequiredOutput: runtimecontract.RequiredOutputContract{
@@ -866,8 +876,11 @@ func candidateContextForDecision(decision runtimecontract.RuntimeDecision) runti
 	context := runtimecontract.RuntimeCandidateContext{
 		WorkspaceID: decision.AuthoritySnapshot.WorkspaceID, RunID: decision.AuthoritySnapshot.RunID,
 		DefinitionRevision: decision.AuthoritySnapshot.DefinitionRevision, EvidenceRevision: decision.AuthoritySnapshot.EvidenceRevision,
-		Focus:                 decision.Focus,
-		Activation:            runtimecontract.RuntimeActivationContext{ProviderSelection: runtimecontract.ProviderInferenceSelection{Target: runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "gpt-4o"}}},
+		Focus: decision.Focus,
+		Activation: runtimecontract.RuntimeActivationContext{
+			ProviderSelection: runtimecontract.ProviderInferenceSelection{Target: runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "gpt-4o"}},
+			ExecutionContract: runtimecontract.RuntimeExecutionContract{StateChangePolicy: runtimecontract.RuntimeStateChangeAllowedButNotRequired},
+		},
 		RequiredState:         decision.State,
 		RequiredEffectScopes:  append([]runtimecontract.RuntimeEffectScope(nil), required.RequiredEffectScopes...),
 		RequiredEvidenceKinds: append([]string(nil), required.RequiredEvidenceKinds...),

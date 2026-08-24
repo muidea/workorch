@@ -156,6 +156,8 @@ func TestCompileRuntimeCoverageFocusesPrependsMatchedBootstrapArtifactsInDepende
 		ExecutionContract: runtimecontract.RuntimeExecutionContract{AcceptanceSlicePolicy: &runtimecontract.RuntimeAcceptanceSlicePolicy{
 			SchemaVersion: runtimecontract.RuntimeAcceptanceSlicePolicySchemaCurrent,
 			MaxWorkItems:  4, MaxFocuses: 16, MaxCandidateContextItems: 4,
+			CompletionPolicy: runtimecontract.RuntimeAcceptanceSliceCompletionAll,
+			ResultPolicy:     runtimecontract.RuntimeAcceptanceSliceResultAllowed,
 			Groups: []runtimecontract.RuntimeAcceptanceSliceGroupPolicy{
 				{ID: "primary", Title: "Primary", Scope: "primary", Priority: 10, MaxWorkItems: 2, Match: runtimecontract.RuntimeAcceptanceSliceMatch{EvidenceRoles: []string{"primary_state_change"}}},
 				{ID: "remaining", Title: "Remaining", Scope: "remaining", Priority: 90, MaxWorkItems: 4, Match: runtimecontract.RuntimeAcceptanceSliceMatch{All: true}},
@@ -211,6 +213,8 @@ func TestRuntimeBootstrapCompilesBroadDoDIntoSemanticPlanningSeed(t *testing.T) 
 			AcceptanceSlicePolicy: &runtimecontract.RuntimeAcceptanceSlicePolicy{
 				SchemaVersion: runtimecontract.RuntimeAcceptanceSlicePolicySchemaCurrent,
 				MaxWorkItems:  4, MaxFocuses: runtimecontract.RuntimeAcceptanceFocusMaxCount, MaxCandidateContextItems: 4,
+				CompletionPolicy: runtimecontract.RuntimeAcceptanceSliceCompletionAll,
+				ResultPolicy:     runtimecontract.RuntimeAcceptanceSliceResultAllowed,
 				Groups: []runtimecontract.RuntimeAcceptanceSliceGroupPolicy{
 					{ID: "primary", Title: "Primary state change", Scope: "primary", Priority: 10, MaxWorkItems: 2, Match: runtimecontract.RuntimeAcceptanceSliceMatch{EvidenceRoles: []string{"primary_state_change"}}},
 					{ID: "validation", Title: "Validation", Scope: "validation", Priority: 20, MaxWorkItems: 4, Match: runtimecontract.RuntimeAcceptanceSliceMatch{MissingEvidenceKinds: []string{runtimecontract.EvidenceKindValidation}}},
@@ -510,7 +514,7 @@ func TestCompileRuntimeCoverageCompilesDodWildcardIntoFocuses(t *testing.T) {
 	activation := runtimecontract.RuntimeActivationContext{
 		ProviderSelection: runtimecontract.ProviderInferenceSelection{Target: runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "gpt-4o"}},
 		ExecutionContract: runtimecontract.RuntimeExecutionContract{
-			AcceptanceSlicePolicy: &runtimecontract.RuntimeAcceptanceSlicePolicy{SchemaVersion: runtimecontract.RuntimeAcceptanceSlicePolicySchemaCurrent, MaxWorkItems: 4, MaxFocuses: 4, MaxCandidateContextItems: 4},
+			AcceptanceSlicePolicy: &runtimecontract.RuntimeAcceptanceSlicePolicy{SchemaVersion: runtimecontract.RuntimeAcceptanceSlicePolicySchemaCurrent, MaxWorkItems: 4, MaxFocuses: 4, MaxCandidateContextItems: 4, CompletionPolicy: runtimecontract.RuntimeAcceptanceSliceCompletionAll, ResultPolicy: runtimecontract.RuntimeAcceptanceSliceResultAllowed},
 			StateChangePolicy:     runtimecontract.RuntimeStateChangeMustProduce,
 			ProfileContracts: []runtimecontract.RuntimeProfileContract{{
 				ID: "software-dev",
@@ -547,7 +551,7 @@ func TestRuntimeBootstrapSealsRunLevelStateChangeRequirement(t *testing.T) {
 			// Validation proof bindings are CWI-granular; keep this fixture's
 			// independent DoD items in separate focuses while testing the run-level
 			// state-change ledger.
-			AcceptanceSlicePolicy: &runtimecontract.RuntimeAcceptanceSlicePolicy{SchemaVersion: runtimecontract.RuntimeAcceptanceSlicePolicySchemaCurrent, MaxWorkItems: 1, MaxFocuses: 4, MaxCandidateContextItems: 4},
+			AcceptanceSlicePolicy: &runtimecontract.RuntimeAcceptanceSlicePolicy{SchemaVersion: runtimecontract.RuntimeAcceptanceSlicePolicySchemaCurrent, MaxWorkItems: 1, MaxFocuses: 4, MaxCandidateContextItems: 4, CompletionPolicy: runtimecontract.RuntimeAcceptanceSliceCompletionAll, ResultPolicy: runtimecontract.RuntimeAcceptanceSliceResultAllowed},
 			StateChangePolicy:     runtimecontract.RuntimeStateChangeMustProduce,
 		},
 	}
@@ -586,7 +590,7 @@ func TestExplicitCWIStateChangeProofReplacesNeutralValidationFallback(t *testing
 	activation := runtimecontract.RuntimeActivationContext{
 		ProviderSelection: runtimecontract.ProviderInferenceSelection{Target: runtimecontract.ProviderModelTarget{ProviderID: "verify", ModelID: "verify-model"}},
 		ExecutionContract: runtimecontract.RuntimeExecutionContract{
-			AcceptanceSlicePolicy: &runtimecontract.RuntimeAcceptanceSlicePolicy{SchemaVersion: runtimecontract.RuntimeAcceptanceSlicePolicySchemaCurrent, MaxWorkItems: 1, MaxFocuses: 2, MaxCandidateContextItems: 2},
+			AcceptanceSlicePolicy: &runtimecontract.RuntimeAcceptanceSlicePolicy{SchemaVersion: runtimecontract.RuntimeAcceptanceSlicePolicySchemaCurrent, MaxWorkItems: 1, MaxFocuses: 2, MaxCandidateContextItems: 2, CompletionPolicy: runtimecontract.RuntimeAcceptanceSliceCompletionAll, ResultPolicy: runtimecontract.RuntimeAcceptanceSliceResultAllowed},
 		},
 		EvidencePolicies: []runtimecontract.RuntimeEvidencePolicy{{
 			ID: "durable-cwi", AppliesTo: runtimecontract.StepKindFileEdit,
@@ -702,6 +706,8 @@ func TestCompileRuntimeCoverageFocusesSplitsIncompatibleTargetBindingsWithinSlic
 					AcceptanceSlicePolicy: &runtimecontract.RuntimeAcceptanceSlicePolicy{
 						SchemaVersion: runtimecontract.RuntimeAcceptanceSlicePolicySchemaCurrent,
 						MaxWorkItems:  2, MaxFocuses: 4, MaxCandidateContextItems: 4,
+						CompletionPolicy: runtimecontract.RuntimeAcceptanceSliceCompletionAll,
+						ResultPolicy:     runtimecontract.RuntimeAcceptanceSliceResultAllowed,
 						Groups: []runtimecontract.RuntimeAcceptanceSliceGroupPolicy{{
 							ID: "combined", Title: "combined", Scope: "deliverable", Priority: 1, MaxWorkItems: 2,
 							Match: runtimecontract.RuntimeAcceptanceSliceMatch{All: true},
@@ -745,6 +751,8 @@ func TestCompileRuntimeCoverageFocusesPreservesTargetContractAcrossIndependentFo
 			AcceptanceSlicePolicy: &runtimecontract.RuntimeAcceptanceSlicePolicy{
 				SchemaVersion: runtimecontract.RuntimeAcceptanceSlicePolicySchemaCurrent,
 				MaxWorkItems:  2, MaxFocuses: 4, MaxCandidateContextItems: 4,
+				CompletionPolicy: runtimecontract.RuntimeAcceptanceSliceCompletionAll,
+				ResultPolicy:     runtimecontract.RuntimeAcceptanceSliceResultAllowed,
 				Groups: []runtimecontract.RuntimeAcceptanceSliceGroupPolicy{{
 					ID: "combined", Title: "combined", Scope: "deliverable", Priority: 1, MaxWorkItems: 2,
 					Match: runtimecontract.RuntimeAcceptanceSliceMatch{All: true},
@@ -784,7 +792,9 @@ func TestCompileRuntimeCoverageCompilesProfileCoverageDependencies(t *testing.T)
 		ExecutionContract: runtimecontract.RuntimeExecutionContract{
 			AcceptanceSlicePolicy: &runtimecontract.RuntimeAcceptanceSlicePolicy{
 				SchemaVersion: runtimecontract.RuntimeAcceptanceSlicePolicySchemaCurrent, MaxWorkItems: 2, MaxFocuses: 4, MaxCandidateContextItems: 4,
-				Groups: []runtimecontract.RuntimeAcceptanceSliceGroupPolicy{{ID: "deliverables", Title: "deliverables", Scope: "deliverable", Priority: 1, MaxWorkItems: 2, Match: runtimecontract.RuntimeAcceptanceSliceMatch{All: true}}},
+				CompletionPolicy: runtimecontract.RuntimeAcceptanceSliceCompletionAll,
+				ResultPolicy:     runtimecontract.RuntimeAcceptanceSliceResultAllowed,
+				Groups:           []runtimecontract.RuntimeAcceptanceSliceGroupPolicy{{ID: "deliverables", Title: "deliverables", Scope: "deliverable", Priority: 1, MaxWorkItems: 2, Match: runtimecontract.RuntimeAcceptanceSliceMatch{All: true}}},
 			},
 			ProfileContracts: []runtimecontract.RuntimeProfileContract{{
 				ID:                      "profile",
@@ -996,6 +1006,8 @@ func TestCompileRuntimeCoverageSlicesBoundLargeDoD(t *testing.T) {
 			AcceptanceSlicePolicy: &runtimecontract.RuntimeAcceptanceSlicePolicy{
 				SchemaVersion: runtimecontract.RuntimeAcceptanceSlicePolicySchemaCurrent,
 				MaxWorkItems:  4, MaxFocuses: 16, MaxCandidateContextItems: 4,
+				CompletionPolicy: runtimecontract.RuntimeAcceptanceSliceCompletionAll,
+				ResultPolicy:     runtimecontract.RuntimeAcceptanceSliceResultAllowed,
 				Groups: []runtimecontract.RuntimeAcceptanceSliceGroupPolicy{{
 					ID: "slice-remaining-acceptance", Title: "Remaining", Scope: "remaining_acceptance", Priority: 90,
 					MaxWorkItems: 4, Match: runtimecontract.RuntimeAcceptanceSliceMatch{All: true},
@@ -1041,6 +1053,8 @@ func TestCompileRuntimeCoverageRejectsInvalidSliceMax(t *testing.T) {
 			AcceptanceSlicePolicy: &runtimecontract.RuntimeAcceptanceSlicePolicy{
 				SchemaVersion: runtimecontract.RuntimeAcceptanceSlicePolicySchemaCurrent,
 				MaxWorkItems:  100, MaxFocuses: 4, MaxCandidateContextItems: 4,
+				CompletionPolicy: runtimecontract.RuntimeAcceptanceSliceCompletionAll,
+				ResultPolicy:     runtimecontract.RuntimeAcceptanceSliceResultAllowed,
 			},
 		},
 	}

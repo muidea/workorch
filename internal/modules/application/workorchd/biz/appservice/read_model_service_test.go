@@ -2623,13 +2623,13 @@ func TestMapEventRecordsPreservesWorkspacePlanStepPayload(t *testing.T) {
 		StepID:      common.StepID("run-step-alias/step-1"),
 		SubjectType: "step",
 		Payload: mustAppserviceGovernancePayload(t, map[string]any{
-			recordpayload.PayloadKeyKind:  llmcommon.StepKindWorkspacePlan,
+			recordpayload.PayloadKeyKind:  llmcommon.StepKindWorkspaceExecution,
 			recordpayload.PayloadKeyState: string(common.StepStateSucceeded),
 			recordpayload.PayloadKeyOutput: map[string]any{
 				"executionGraph": map[string]any{
 					"nodes": []any{map[string]any{
 						"id":   "plan-next",
-						"kind": llmcommon.StepKindWorkspacePlan,
+						"kind": llmcommon.StepKindWorkspaceExecution,
 					}},
 				},
 			},
@@ -2642,13 +2642,13 @@ func TestMapEventRecordsPreservesWorkspacePlanStepPayload(t *testing.T) {
 		t.Fatalf("mapped = %+v, want one event", mapped)
 	}
 	payload := mapped[0].Payload.Map()
-	if payload[recordpayload.PayloadKeyKind] != llmcommon.StepKindWorkspacePlan {
-		t.Fatalf("payload kind = %v, want %s", payload[recordpayload.PayloadKeyKind], llmcommon.StepKindWorkspacePlan)
+	if payload[recordpayload.PayloadKeyKind] != llmcommon.StepKindWorkspaceExecution {
+		t.Fatalf("payload kind = %v, want %s", payload[recordpayload.PayloadKeyKind], llmcommon.StepKindWorkspaceExecution)
 	}
 	output := readModelMapValue(payload[recordpayload.PayloadKeyOutput])
 	graph := readModelMapValue(output["executionGraph"])
 	nodes := readModelMapSliceValue(graph["nodes"])
-	if len(nodes) != 1 || nodes[0]["kind"] != llmcommon.StepKindWorkspacePlan {
+	if len(nodes) != 1 || nodes[0]["kind"] != llmcommon.StepKindWorkspaceExecution {
 		t.Fatalf("executionGraph nodes = %+v, want original workspace plan kind", nodes)
 	}
 }
@@ -3959,7 +3959,7 @@ func TestReadWorkspaceSnapshotCanonicalizesWorkspacePlanCurrentStepKind(t *testi
 	if err := exports.Repositories.Steps.Create(ctx, &runmodel.Step{
 		ID:    stepID,
 		RunID: runID,
-		Kind:  llmcommon.StepKindWorkspacePlan,
+		Kind:  llmcommon.StepKindWorkspaceExecution,
 		State: common.StepStateExecuting,
 	}); err != nil {
 		t.Fatalf("create current step: %v", err)

@@ -70,7 +70,7 @@ func publishServerTestEventRecord(ctx context.Context, hub magicevent.Hub, envel
 		StepID:         common.StepID(envelope.StepID),
 		StreamPosition: envelope.StreamPosition,
 		Revision:       envelope.Revision,
-		Payload:        mustServerEventPayloadValue(envelope.Payload),
+		Payload:        recordpayload.SanitizeAuditPayload(mustServerEventPayloadValue(envelope.Payload)),
 	})
 	if err != nil {
 		return err

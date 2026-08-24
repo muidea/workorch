@@ -60,13 +60,13 @@ Soul allowlist 只约束 activation 选择和 provider-visible stage context，�
 - create/update/default seed 写入规范化对象；get/list 对 repository 数据重新校验并 detached clone，非法存量数据
   fail-closed 为 conflict。
 - create 从 revision 1 开始并签发稳定 content hash；相同内容 update 零写/零 revision，内容变化单调递增且保留 source
-  provenance。builtin seed 标记 `builtin_seed`，用户创建标记 `user_managed`；完整 legacy record 读取时投影为
-  revision 1/`legacy_owner_upgrade`，部分缺失的 revision metadata fail-closed。
+  provenance。builtin seed 标记 `builtin_seed`，用户创建标记 `user_managed`；持久化 record 必须完整携带 current
+  identity/revision/content hash/source，缺失、未知或退役字段一律 fail-closed，不投影升级来源。
 - 本 block 只访问 Soul repository，不调度 Runtime block、不修改 Run 或 Result 状态。
 - core Runtime 不得按 Soul ID、名称或显示文本写死业务分支；Soul guidance 不得覆盖 Goal、DoD、sealed manifest、
   stage contract、Runtime policy 或 requiredOutput。
-- 默认 Soul 是可由用户编辑的首次启动种子；普通 ensure 不得覆盖内置 ID 上的当前对象。强制刷新只能通过另行定义的
-  显式迁移合同完成。
+- 默认 Soul 是可由用户编辑的首次启动种子；普通 ensure 不得覆盖内置 ID 上的当前对象。当前阶段不提供默认资源升级；
+  需要新种子时清理数据后重新初始化。
 
 ## 已覆盖测试点
 
@@ -79,7 +79,7 @@ Soul allowlist 只约束 activation 选择和 provider-visible stage context，�
 - [x] execution Soul 优先于 default Soul；MCP capability/server/category 绑定校验；planning 与
   execution/validation/decision provider C3 使用对应 stage Soul，Skill/MCP context 不跨 stage 泄漏。
 - [x] Orchestrator 不直接查询 Soul；既有 Run 只消费持久化 activation snapshot，Registry 后续变化不改写当前 Run。
-- [x] Soul revision/content hash/source provenance 的 create、same-content noop、changed-content increment、builtin seed 与 legacy projection。
+- [x] Soul revision/content hash/source provenance 的 create、same-content noop、changed-content increment、builtin seed 与无效存量拒绝。
 - [x] 接近 96 KiB aggregate 上限的 Soul normalization/get、总量越界拒绝，以及 250/450 条多页 Application 管理读取的
   顺序/cursor 正确性与 allocation/CPU benchmark。
 

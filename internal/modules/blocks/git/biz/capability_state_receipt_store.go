@@ -1,11 +1,13 @@
 package git
 
 import (
+	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -15,6 +17,21 @@ import (
 	"github.com/muidea/workorch/internal/pkg/common"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
+
+func decodeCurrentCapabilityStateReceipt(data []byte, target *runtimecontract.RuntimeCapabilityStateSnapshot) error {
+	decoder := json.NewDecoder(bytes.NewReader(data))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(target); err != nil {
+		return err
+	}
+	if err := decoder.Decode(&struct{}{}); err != io.EOF {
+		if err == nil {
+			return common.ErrInvalidArgument
+		}
+		return err
+	}
+	return nil
+}
 
 // CapabilityStateReceiptStore is Git-owner durable state for read-only
 // prerequisite acquisition. It lives in the workspace internal directory, not
@@ -132,7 +149,7 @@ func (s *CapabilityStateReceiptStore) load(workspaceID common.WorkspaceID, acqui
 		return runtimecontract.RuntimeCapabilityStateSnapshot{}, false, err
 	}
 	var snapshot runtimecontract.RuntimeCapabilityStateSnapshot
-	if err := json.Unmarshal(data, &snapshot); err != nil {
+	if err := decodeCurrentCapabilityStateReceipt(data, &snapshot); err != nil {
 		return runtimecontract.RuntimeCapabilityStateSnapshot{}, false, fmt.Errorf("decode capability-state receipt: %w", err)
 	}
 	normalized := runtimecontract.NormalizeRuntimeCapabilityStateSnapshots([]runtimecontract.RuntimeCapabilityStateSnapshot{snapshot})

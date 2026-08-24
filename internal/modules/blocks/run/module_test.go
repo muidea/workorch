@@ -26,7 +26,7 @@ func newRunModuleTestHub(t *testing.T) magicevent.Hub {
 }
 
 func TestBuildRuntimeRecoveryInventoryContainsOnlyRunOwnedOpaqueFacts(t *testing.T) {
-	bootstrapOnly := runtimecontract.RuntimeBootstrap{SchemaVersion: runtimecontract.RuntimeStateSchemaVersionCurrent}
+	bootstrapOnly := runtimecontract.RuntimeBootstrap{}
 	runs := []*runmodel.Run{
 		// A bootstrap-only activation is a valid SM-4 initialization recovery
 		// target even before the first aggregate record has been persisted.
@@ -41,12 +41,9 @@ func TestBuildRuntimeRecoveryInventoryContainsOnlyRunOwnedOpaqueFacts(t *testing
 			RuntimeState: &runtimecontract.RuntimeStateRecord{StateRevision: 3, Decision: runtimecontract.RuntimeDecision{State: runtimecontract.ConvergenceStateNeedGovernance}}},
 		{ID: "run-terminal-pending", WorkspaceID: "ws-3", State: common.RunStateActive, RuntimeBootstrap: &bootstrapOnly,
 			RuntimeState: &runtimecontract.RuntimeStateRecord{StateRevision: 4, Decision: runtimecontract.RuntimeDecision{State: runtimecontract.ConvergenceStateComplete}, Facts: runtimecontract.RuntimeFacts{Recovery: runtimecontract.RuntimeRecoveryLedger{TerminalDeliveryAttempts: 2}}}},
-		{ID: "run-fresh-activation-required", WorkspaceID: "ws-4", State: common.RunStateActive, RuntimeBootstrap: &bootstrapOnly,
-			RuntimeState:            &runtimecontract.RuntimeStateRecord{SchemaVersion: 1, StateRevision: 5},
-			RuntimeActivationStatus: &runmodel.RuntimeActivationStatus{Disposition: runtimecontract.RuntimeActivationDispositionFreshActivationRequired, RuntimeStateRef: "runtime-state/ws-4/run-fresh-activation-required/5", Incompatibility: runtimecontract.RuntimeStateIncompatibility{Reason: runtimecontract.RuntimeStateIncompatibilityReasonSchemaUnsupported, ActualSchemaVersion: 1, SupportedSchemaVersion: runtimecontract.RuntimeStateSchemaVersionCurrent}}},
 	}
 	result := runbiz.BuildRuntimeRecoveryInventory(runs, runevents.QueryRuntimeRecoveryInventoryCommand{Limit: 10})
-	if len(result.Items) != 6 {
+	if len(result.Items) != 5 {
 		t.Fatalf("recovery items = %+v", result.Items)
 	}
 	items := map[common.RunID]runevents.RuntimeRecoveryInventoryItem{}
@@ -67,10 +64,6 @@ func TestBuildRuntimeRecoveryInventoryContainsOnlyRunOwnedOpaqueFacts(t *testing
 	blocked := items["run-blocked"]
 	if blocked.State != common.RunStateBlockedOnDecision || !blocked.HasRuntimeState || blocked.RuntimeStateRevision != 3 {
 		t.Fatalf("blocked lifecycle inventory = %+v", blocked)
-	}
-	fresh := items["run-fresh-activation-required"]
-	if fresh.RuntimeActivationDisposition != runtimecontract.RuntimeActivationDispositionFreshActivationRequired || fresh.RuntimeStateSchemaVersion != 1 {
-		t.Fatalf("fresh-activation inventory = %+v", fresh)
 	}
 }
 
@@ -207,7 +200,7 @@ func TestGMMR3RuntimeStateRecordReadIsAvailableDuringSetupWithoutRegularGet(t *t
 	ctx := context.Background()
 	rawHub := newRunModuleTestHub(t)
 	runs := memory.NewRunRepository()
-	record := runtimecontract.RuntimeStateRecord{SchemaVersion: runtimecontract.RuntimeStateSchemaVersionCurrent, StateRevision: 7}
+	record := runtimecontract.RuntimeStateRecord{StateRevision: 7}
 	if err := runs.Create(ctx, &runmodel.Run{
 		ID: "run-setup-record", WorkspaceID: "ws-setup-record", State: common.RunStateActive, RuntimeState: &record,
 	}); err != nil {
@@ -290,7 +283,7 @@ func TestModuleStopWaitsForInFlightOwnerCommand(t *testing.T) {
 	rawHub := newRunModuleTestHub(t)
 	baseRuns := memory.NewRunRepository()
 	bootstrap := runtimecontract.RuntimeBootstrap{}
-	state := runtimecontract.RuntimeStateRecord{SchemaVersion: runtimecontract.RuntimeStateSchemaVersionCurrent, StateRevision: 1}
+	state := runtimecontract.RuntimeStateRecord{StateRevision: 1}
 	run := &runmodel.Run{ID: "run-stop-in-flight", WorkspaceID: "ws-stop-in-flight", State: common.RunStateActive, CreatedAt: "2026-07-16T00:00:00Z", RuntimeBootstrap: &bootstrap, RuntimeState: &state}
 	if err := baseRuns.Create(ctx, run); err != nil {
 		t.Fatal(err)
@@ -573,9 +566,8 @@ func TestRunWriteCommandsRequireWorkspaceScope(t *testing.T) {
 func TestValidateRunUpdateProtectsRuntimeIdentity(t *testing.T) {
 	definition := runtimecontract.RuntimeDefinitionContext{StartupInputHash: "startup-input-test", GoalID: "goal-v2", DoDID: "dod-v2", Revision: "definition-v2"}
 	activation := runtimecontract.RuntimeActivationContext{ProviderSelection: runtimecontract.ProviderInferenceSelection{Target: runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "model-v2"}}}
-	bootstrap := runtimecontract.RuntimeBootstrap{SchemaVersion: runtimecontract.RuntimeStateSchemaVersionCurrent, Definition: definition, Activation: activation}
+	bootstrap := runtimecontract.RuntimeBootstrap{Definition: definition, Activation: activation}
 	state := runtimecontract.RuntimeStateRecord{
-		SchemaVersion: runtimecontract.RuntimeStateSchemaVersionCurrent,
 		StateRevision: 1,
 		Definition:    definition,
 		Facts: runtimecontract.RuntimeFacts{

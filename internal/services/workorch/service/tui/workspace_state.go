@@ -711,7 +711,6 @@ func (m *AppModel) applyWorkspaceContext(msg WorkspaceContextMsg) {
 		displayRun = activeRun
 	}
 	run := displayRun
-	freshActivationRequired := runRequiresFreshActivation(run)
 	if run == nil {
 		m.activeRunID = ""
 		m.running = false
@@ -744,12 +743,7 @@ func (m *AppModel) applyWorkspaceContext(msg WorkspaceContextMsg) {
 		m.syncBlockingApprovalFromList()
 		return
 	}
-	if freshActivationRequired {
-		// The Run owner has already declared this aggregate non-resumable.
-		// Do not keep presenting active as runnable merely because an older
-		// Workspace projection has not yet observed the slot-release fact.
-		m.activeRunID = ""
-	} else if workspaceHasLive && activeRun != nil {
+	if workspaceHasLive && activeRun != nil {
 		m.activeRunID = string(activeRun.ID)
 	} else {
 		m.activeRunID = ""
@@ -815,12 +809,7 @@ func (m *AppModel) applyWorkspaceContext(msg WorkspaceContextMsg) {
 	if msg.Snapshot != nil && payload[backend.PayloadKeyFailureReason] == "" {
 		payload[backend.PayloadKeyFailureReason] = msg.Snapshot.DisplayOutcome.Reason
 	}
-	if freshActivationRequired {
-		m.running = false
-		m.progress = progressIdle
-		m.progressText = "Run requires a fresh activation"
-		m.result = freshActivationInstruction(run)
-	} else if workspaceHasLive || runStateIsTerminal(state) {
+	if workspaceHasLive || runStateIsTerminal(state) {
 		m.applyRunState(state, payload)
 	} else {
 		m.applyWorkspaceProgress(common.WorkspaceState(msg.Workspace.State))
@@ -1140,7 +1129,7 @@ func runtimeRepairDirectiveEqual(a, b *projectioncontract.RuntimeRepairDirective
 func runtimeAuditEqual(a, b *projectioncontract.RuntimeAudit) bool {
 	// The canonical audit projection intentionally carries the complete
 	// revision, grounding, authority and terminal lineage. Compare the full
-	// projection before the focused legacy checks below so newly added audit
+	// projection before the focused field checks below so newly added audit
 	// feedback can never be ignored by TUI refresh detection.
 	if !reflect.DeepEqual(a, b) {
 		return false

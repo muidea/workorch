@@ -5,14 +5,16 @@ import (
 	"testing"
 )
 
-func TestProviderFailureIdentityClassifiesIdleAndTransportTimeout(t *testing.T) {
-	code, signature := providerFailureIdentity(assertError("upstream response body idle timeout after 1m0s"))
-	if code != "provider_body_idle_timeout" || signature != "provider-body-idle-timeout" {
-		t.Fatalf("idle timeout identity = %q/%q", code, signature)
-	}
-	code, signature = providerFailureIdentity(assertError("llm provider request timeout: context deadline exceeded"))
-	if code != "provider_transport_timeout" || signature != "provider-transport-timeout" {
-		t.Fatalf("transport timeout identity = %q/%q", code, signature)
+func TestProviderFailureIdentityDoesNotClassifyErrorText(t *testing.T) {
+	for _, message := range []string{
+		"upstream response body idle timeout after 1m0s",
+		"llm provider request timeout: context deadline exceeded",
+		"empty response",
+	} {
+		code, signature := providerFailureIdentity(assertError(message))
+		if code != "provider_request_failed" || signature != "provider-request-failed" {
+			t.Fatalf("generic error %q identity = %q/%q", message, code, signature)
+		}
 	}
 }
 

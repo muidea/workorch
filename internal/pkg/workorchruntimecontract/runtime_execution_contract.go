@@ -44,9 +44,6 @@ type RuntimeCapabilityUsagePolicy struct {
 func (c RuntimeExecutionContract) Normalized() RuntimeExecutionContract {
 	c.OperationContractRevision = strings.TrimSpace(c.OperationContractRevision)
 	c.StateChangePolicy = RuntimeStateChangePolicy(strings.TrimSpace(string(c.StateChangePolicy)))
-	if c.StateChangePolicy == "" {
-		c.StateChangePolicy = RuntimeStateChangeAllowedButNotRequired
-	}
 	c.CandidateDocumentRecovery = c.CandidateDocumentRecovery.Normalized()
 	c.CapabilityUsagePolicies = normalizeRuntimeCapabilityUsagePolicies(c.CapabilityUsagePolicies)
 	c.ValidationPolicies = NormalizeRuntimeValidationPolicies(c.ValidationPolicies)

@@ -38,7 +38,6 @@ func Contracts() []eventcontract.Contract {
 		TopicRunFactGovernanceWait,
 		TopicRunFactContinuationEligible,
 		TopicRunFactTerminalDelivery,
-		TopicRunFactRuntimeStateIncompatible,
 	)...)
 	ret = eventcontract.Annotate(ret, eventcontract.RuntimeMetadata(eventcontract.CommandClassNotify, eventcontract.StateMachineSM1, eventcontract.ScopePolicyWorkspaceRun, eventcontract.IdentityPolicyRuntimeAuthority, true),
 		TopicRunCreated, TopicRunStarted, TopicRunBlockedOnDecision, TopicRunBlockedOnApproval,
@@ -53,7 +52,7 @@ func Contracts() []eventcontract.Contract {
 	ret = eventcontract.Annotate(ret, eventcontract.RuntimeMetadata(eventcontract.CommandClassWrite, eventcontract.StateMachineSM1, eventcontract.ScopePolicyWorkspaceRun, eventcontract.IdentityPolicyRuntimeAuthority, true),
 		TopicRunCommandDelete, TopicRunCommandWorkspaceExecutionIntent,
 		TopicRunFactGovernanceWait, TopicRunFactContinuationEligible,
-		TopicRunFactTerminalDelivery, TopicRunFactRuntimeStateIncompatible,
+		TopicRunFactTerminalDelivery,
 	)
 	ret = eventcontract.Annotate(ret, eventcontract.OpaquePersistenceMetadata(eventcontract.ScopePolicyWorkspaceRun, eventcontract.IdentityPolicyRuntimeAuthority), TopicRunCommandStoreRuntimeStateRecord)
 	ret = eventcontract.Annotate(ret, eventcontract.RuntimeMetadata(eventcontract.CommandClassWrite, eventcontract.StateMachineSM4, eventcontract.ScopePolicyWorkspaceRun, eventcontract.IdentityPolicyRuntimeAuthority, true), TopicRunCommandPurgeRuntimeResources)

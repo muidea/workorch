@@ -9,7 +9,6 @@ import runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimec
 type RuntimeAudit struct {
 	WorkspaceID        string                         `json:"workspaceId,omitempty"`
 	RunID              string                         `json:"runId,omitempty"`
-	SchemaVersion      uint32                         `json:"schemaVersion,omitempty"`
 	StateRevision      uint64                         `json:"stateRevision,omitempty"`
 	EvidenceSequence   uint64                         `json:"evidenceSequence,omitempty"`
 	DefinitionRevision string                         `json:"definitionRevision,omitempty"`

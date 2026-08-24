@@ -108,8 +108,8 @@ Cross-owner regression必须证明 concrete receiving-owner Command/Result、wor
   before-Do、Do error、response error、stream/non-stream/embed，并证明 request bytes 不推断 submission；DocumentOutcome、
   stale、transient/auth/config/protocol 的 submitted 矩阵与 unsubmitted 零 physical fact 必须穷尽；
 - Runtime LLM usage event/read trace 必须无损贯穿 `logicalRequestId`/`physicalCallId`，并验证
-  `physicalCallId=requestId`；generic/legacy trace 允许两者都没有，partial/mismatched identity fail-closed，且不得从
-  request bytes 或 streaming 推断；
+  `physicalCallId=requestId`；generic non-Runtime trace 允许两者都没有，partial/mismatched identity fail-closed，且不得从
+  request bytes 或 response mode 推断；
 - provider settlement 必须覆盖 confirmed/released/unknown、duplicate/stale/tamper。验证 stale/unsubmitted terminal release
   全部 reservation；submitted usage 精确 confirm；无可靠 audit 进入 unknown 且零 provider replay；
 - incomplete、transient 与 body-idle 必须覆盖同 CAS 的 physical settlement + SM-3 session + SM-4 transport budget + optional
@@ -208,7 +208,7 @@ Cross-owner regression必须证明 concrete receiving-owner Command/Result、wor
 - bound governance request 已持久化、Run wait fact 尚未送达这一 cut point 重启后必须自动收敛到 exact blocked Run；不得
   依赖人工 Resume，且整个非终态 handoff 的 `TerminalDeliveryAttempts` 保持不变；
 - 任意非终态 aggregate 携带非零 `TerminalDeliveryAttempts` 或 terminal acknowledgement 必须以
-  `recovery_ledger_invalid` fail-closed，不能继续挂 lifecycle lease、由projection归零或伪装成SM-2 repair；
+  当前 invariant 校验 fail-closed，不能继续挂 lifecycle lease、由projection归零、生成兼容分类或伪装成SM-2 repair；
 - governance resolution CAS 已成功但 continuation fact 尚未提交时，fresh startup 必须识别
   `blocked + persisted resolution` 并重投 exact continuation；continuation owner commit 后响应丢失必须作为 duplicate 收敛。
   同一 lifecycle lease 连续失败必须证明 running generation 原子续排为新 scheduled generation、`dueAt` 退避、旧 release
@@ -224,7 +224,8 @@ Cross-owner regression必须证明 concrete receiving-owner Command/Result、wor
   duplicate/stale generation不得重复Decision/Orchestrator call或successor create；
 - terminal delivery 已提交、successor 已创建但 lineage 未提交、lineage 已提交但 successor 尚未激活三个 restart cut point
   均必须在进程重启后收敛到同一 successor，重复 recovery 不得再次创建或激活；
-- non-current predecessor 返回 `data_reset_required`，不写 replacement intent、不调用 provider/capability；
+- unknown/retired field、当前路径之外的旧目录或当前不变量缺失不能进入持久化读取主线；当前路径上的 decode/validate
+  错误直接失败，不写 owner transition/replacement intent，不调用 provider/capability，也不投影替代状态；
 - 首次 `file/write` 创建成功后若同 CWI reopen，latest owner catalog 必须使 correction 选择 revision-bound
   `file/edit`/`patch/apply`；重复 create-only write 在副作用前拒绝且不能形成无限 revision/等价操作循环。
 
@@ -240,7 +241,7 @@ secondary owner 直接 state write、DoD definition 的 draft/satisfied 影子�
 scope 缺失及禁止 raw provider 内容。它还必须拒绝workorchd `biz/execution`反向依赖protocol `service/server`，并拒绝
 有效verifier把retired application scheduler/watchdog/continuation state、metric或automatic successor重新定义为正向证据；
 退休metric的显式“必须不存在”负向断言不属于该禁止范围。
-测试选择为空或只命中 projection compatibility wrapper 不能算通过。
+测试选择为空或只命中 projection-only wrapper 不能算通过。
 
 任何以 graph step、checkpoint 或 incremental artifact projection 为对象的 wrapper，只能验证非权威读侧，不能替代
 上述 Runtime typed contract 测试或重新定义通过标准。

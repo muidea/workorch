@@ -1,8 +1,10 @@
 package workorchrepo
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"io"
 	"os"
 	"path/filepath"
 	"sort"
@@ -25,6 +27,21 @@ import (
 	orchestratormodel "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
+func decodeCurrentJSON(data []byte, target any) error {
+	decoder := json.NewDecoder(bytes.NewReader(data))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(target); err != nil {
+		return err
+	}
+	if err := decoder.Decode(&struct{}{}); err != io.EOF {
+		if err == nil {
+			return common.ErrInvalidArgument
+		}
+		return err
+	}
+	return nil
+}
+
 const (
 	workspaceScopedWorkspaceFile           = "workspace.json"
 	workspaceScopedWorkspaceIndexFile      = "workspace_index.json"
@@ -35,21 +52,21 @@ const (
 	workspaceScopedMemoryItemFile          = "memory_item.json"
 	workspaceScopedMemoryRecallTraceFile   = "memory_recall_trace.json"
 	workspaceScopedRunFile                 = "run.json"
-	workspaceScopedStepFile                = "step.json"
-	workspaceScopedToolCallFile            = "tool_call.json"
-	workspaceScopedPatchFile               = "patch.json"
-	workspaceScopedValidationResultFile    = "validation_result.json"
-	workspaceScopedRuntimeCheckpointFile   = "runtime_checkpoint.json"
+	workspaceScopedStepFile                = "steps"
+	workspaceScopedToolCallFile            = "tool-calls"
+	workspaceScopedPatchFile               = "patches"
+	workspaceScopedValidationResultFile    = "validations"
+	workspaceScopedRuntimeCheckpointFile   = "checkpoints"
 	workspaceScopedEvidenceRecordDir       = "evidence-records"
 	workspaceScopedCoverageWorkItemDir     = "coverage-work-items"
 	workspaceScopedArtifactContinuationDir = "artifact-continuations"
-	workspaceScopedResultFile              = "result.json"
-	workspaceScopedArtifactFile            = "artifact.json"
+	workspaceScopedResultFile              = "results"
+	workspaceScopedArtifactFile            = "artifacts"
 	workspaceScopedEventRecordFile         = "."
 	workspaceScopedEventPositionFile       = ".eventstream-position"
-	workspaceScopedTicketFile              = "ticket.json"
-	workspaceScopedResolutionFile          = "resolution.json"
-	workspaceScopedApprovalFile            = "approval.json"
+	workspaceScopedTicketFile              = "decisions/tickets"
+	workspaceScopedResolutionFile          = "decisions/resolutions"
+	workspaceScopedApprovalFile            = "approvals"
 )
 
 type workspaceScopedFileStore struct {
@@ -543,13 +560,11 @@ func (s *workspaceScopedFileStore) loadWorkspaceIndexLocked() (workspaceIndex, e
 		}
 		return workspaceIndex{}, err
 	}
-	if len(data) == 0 {
-		s.indexCache = workspaceIndex{}
-		s.indexLoaded = true
-		return workspaceIndex{}, nil
+	if len(bytes.TrimSpace(data)) == 0 {
+		return workspaceIndex{}, common.ErrInvalidArgument
 	}
 	var idx workspaceIndex
-	if err := json.Unmarshal(data, &idx); err != nil {
+	if err := decodeCurrentJSON(data, &idx); err != nil {
 		return workspaceIndex{}, err
 	}
 	s.indexCache = cloneWorkspaceIndex(idx)
@@ -798,11 +813,11 @@ func (s *workspaceScopedFileStore) loadWorkspaceSoulBindings(workspaceID common.
 	if err != nil {
 		return workspaceSoulBindingsFile{}, err
 	}
-	if len(data) == 0 {
-		return workspaceSoulBindingsFile{}, nil
+	if len(bytes.TrimSpace(data)) == 0 {
+		return workspaceSoulBindingsFile{}, common.ErrInvalidArgument
 	}
 	var ret workspaceSoulBindingsFile
-	if err := json.Unmarshal(data, &ret); err != nil {
+	if err := decodeCurrentJSON(data, &ret); err != nil {
 		return workspaceSoulBindingsFile{}, err
 	}
 	return ret, nil

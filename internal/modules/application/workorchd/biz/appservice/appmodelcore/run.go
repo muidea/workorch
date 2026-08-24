@@ -24,7 +24,6 @@ type Run struct {
 	// read-only history for this Run; Workspace.DefaultLLMSelection is the mutable
 	// preference used only for a subsequent activation.
 	SealedLLMSelection *runtimecontract.ProviderInferenceSelection `json:"sealedLLMSelection,omitempty"`
-	RuntimeActivation  *projectioncontract.RuntimeActivationStatus `json:"runtimeActivation,omitempty"`
 	CreatedAt          string                                      `json:"createdAt,omitempty"`
 	StartedAt          string                                      `json:"startedAt,omitempty"`
 	EndedAt            string                                      `json:"endedAt,omitempty"`

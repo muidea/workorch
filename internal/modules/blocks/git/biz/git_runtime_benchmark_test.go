@@ -39,7 +39,7 @@ func BenchmarkRuntimeAdapterLargeDirtyRepositoryStatus(b *testing.B) {
 			b.Fatal(err)
 		}
 	}
-	adapter := NewRuntimeAdapter(false)
+	adapter := NewRuntimeAdapter()
 	b.ReportAllocs()
 	b.ResetTimer()
 	for range b.N {

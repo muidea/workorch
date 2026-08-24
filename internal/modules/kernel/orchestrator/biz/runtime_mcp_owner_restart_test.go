@@ -776,8 +776,9 @@ func (g runtimeFileBackedMCPServerGetter) RegistrySnapshot(context.Context) (*mc
 	capabilities := []*mcpmodel.Capability{{
 		ID: common.MCPCapabilityID(string(g.server.ID) + ":tool:lookup.references"), ServerID: g.server.ID,
 		Kind: mcpmodel.CapabilityKindTool, Name: "lookup.references", Enabled: true,
-		EffectScope:      string(runtimecontract.RuntimeEffectNone),
-		IdempotencyClass: string(runtimecontract.RuntimeOperationIdempotencySafeToReplay),
+		EffectScope:                  string(runtimecontract.RuntimeEffectNone),
+		IdempotencyClass:             string(runtimecontract.RuntimeOperationIdempotencySafeToReplay),
+		ValidationProofApplicability: mcpmodel.ValidationProofApplicabilityDirect,
 		Schema: workorcheventpayload.New(
 			workorcheventpayload.StringField("type", "object"),
 			workorcheventpayload.ObjectField("properties", workorcheventpayload.New(
@@ -861,7 +862,8 @@ func runtimeFileBackedMCPFailureAggregate(
 		ValidationKinds:  []string{runtimecontract.StepKindMCPToolCall},
 	}
 	facts.Activation.MCPCapabilities = []runtimecontract.RuntimeMCPCapabilityContext{{
-		ID: "mcp-grounding:tool:lookup.references", ServerID: "mcp-grounding", Kind: "tool", Name: "lookup.references", Enabled: true,
+		ID: "mcp-grounding:tool:lookup.references", ServerID: "mcp-grounding", Kind: "tool",
+		OperationKind: runtimecontract.StepKindMCPToolCall, Name: "lookup.references", Enabled: true,
 		EffectScope: string(runtimecontract.RuntimeEffectNone), IdempotencyClass: string(runtimecontract.RuntimeOperationIdempotencySafeToReplay),
 	}}
 	facts.Resources.OperationAdmissibilities = []runtimecontract.RuntimeOperationAdmissibility{inventory, fileInventory}

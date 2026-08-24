@@ -51,7 +51,7 @@ func runtimeRecoverableWaitProjectionState(t *testing.T) runtimecontract.Runtime
 	}
 	wait.BudgetAllocationID = allocations[0].AllocationID
 	return runtimecontract.RuntimeStateRecord{
-		SchemaVersion: runtimecontract.RuntimeStateSchemaVersionCurrent, StateRevision: 3,
+		StateRevision: 3,
 		Facts: runtimecontract.RuntimeFacts{
 			WorkspaceID: "ws-wait", RunID: "run-wait", DefinitionRevision: "definition-wait", EvidenceRevision: runtimecontract.InitialRuntimeEvidenceRevision,
 			ExecutionBudgetPolicy: ledger.Policy,

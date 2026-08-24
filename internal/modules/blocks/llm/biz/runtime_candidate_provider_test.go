@@ -530,7 +530,10 @@ func runtimeSemanticProviderTestRequest(t testing.TB) llmmodels.RuntimeCandidate
 	activation := runtimecontract.RuntimeActivationContext{
 		ProviderSelection: runtimecontract.ProviderInferenceSelection{Target: target},
 		StageSoulBindings: []runtimecontract.RuntimeStageSoulBinding{{Stage: "planning", Soul: runtimecontract.RuntimeSoulContext{ID: "soul-planning", Revision: 1, ContentHash: "soul-planning-hash", SourceProvenance: "test", Instructions: "planning-soul-guidance"}}},
-		ExecutionContract: runtimecontract.RuntimeExecutionContract{OperationContractRevision: runtimecontract.RuntimeOperationContractRevision()},
+		ExecutionContract: runtimecontract.RuntimeExecutionContract{
+			OperationContractRevision: runtimecontract.RuntimeOperationContractRevision(),
+			StateChangePolicy:         runtimecontract.RuntimeStateChangeAllowedButNotRequired,
+		},
 	}
 	items := []runtimecontract.RuntimeCoverageItem{{ID: "cwi-001", SliceID: "slice-1", SourceScope: "dodItem", SourceID: "dod-001", TargetText: "the artifact works", Order: 1}}
 	slices := []runtimecontract.RuntimeAcceptanceSlice{{ID: "slice-1", CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-001"}}}
@@ -690,6 +693,18 @@ func runtimeCandidateContextManifest(action runtimecontract.ConvergenceState, ki
 	return runtimecontract.RuntimeCandidateContractManifest{State: action, EffectPolicy: policy, Operations: operations}
 }
 
+func sealRuntimeProviderTestPolicies(facts *runtimecontract.RuntimeFacts) {
+	if facts == nil {
+		return
+	}
+	if facts.Activation.ExecutionContract.StateChangePolicy == "" {
+		facts.Activation.ExecutionContract.StateChangePolicy = runtimecontract.RuntimeStateChangeAllowedButNotRequired
+	}
+	facts.ConvergencePolicy = runtimecontract.DefaultRuntimeConvergencePolicy()
+	facts.RecoveryPolicy = runtimecontract.DefaultRuntimeRecoveryPolicy()
+	facts.ExecutionBudgetPolicy = runtimecontract.DefaultRuntimeExecutionBudgetPolicy()
+}
+
 func TestRuntimeProviderRequestPreservesStablePrefixAndTypedContext(t *testing.T) {
 	skillInstruction := "typed skill instructions"
 	runtimeSkills, skillBudget, err := runtimecontract.SealRuntimeSkillContexts([]runtimecontract.RuntimeSkillContext{{
@@ -751,6 +766,7 @@ func TestRuntimeProviderRequestPreservesStablePrefixAndTypedContext(t *testing.T
 			},
 		},
 	}
+	sealRuntimeProviderTestPolicies(&facts)
 	selection := runtimecontract.RuntimeTargetSelection{
 		PrerequisiteID: "target-selection-1", OwnerModuleID: runtimecontract.RuntimeModuleFile,
 		TargetRole: "deliverable", SelectorRef: "file/workspace_deliverable",
@@ -1883,6 +1899,7 @@ func TestRuntimeProviderRequestNarrowsFileScopeAcrossSchemaContextAndRetry(t *te
 		},
 		Activation: runtimecontract.RuntimeActivationContext{ProviderSelection: runtimecontract.ProviderInferenceSelection{Target: runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "gpt-4o"}}},
 	}
+	sealRuntimeProviderTestPolicies(&facts)
 	bindRuntimeCandidateTestSelection(&facts, selection)
 	bindRuntimeCandidateTestFocus(t, &facts, runtimecontract.ConvergenceStateNeedStateChange, []string{
 		runtimecontract.StepKindShellCommand, runtimecontract.StepKindGitWrite, runtimecontract.RuntimeBlockKindPatchApply,
@@ -2091,6 +2108,7 @@ func TestRuntimeAssessmentRequestPublishesCanonicalEvidenceRefContract(t *testin
 			CapabilityRevision: "capability-1", ConfigurationRevision: "config-1",
 		}},
 	}
+	sealRuntimeProviderTestPolicies(&facts)
 	facts = facts.Normalized()
 	decision, err := runtimecontract.SealRuntimeDecision(facts, runtimecontract.RuntimeDecision{
 		State: runtimecontract.ConvergenceStateNeedAssessment, Focus: facts.Focus,

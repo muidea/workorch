@@ -42,7 +42,7 @@ func seedRun(t *testing.T, runs *memory.RunRepository, state common.RunState) *r
 	t.Helper()
 	run := &runmodel.Run{
 		ID: "run-1", WorkspaceID: "ws-1", GoalID: "goal-1", DoDID: "dod-1",
-		DefinitionRevision: "def-1", State: state, CreatedAt: "2026-01-01T00:00:00Z",
+		DefinitionRevision: "def-1", Lineage: runmodel.RunLineage{LineageState: "active"}, State: state, CreatedAt: "2026-01-01T00:00:00Z",
 	}
 	if err := runs.Create(context.Background(), run); err != nil {
 		t.Fatalf("seed: %v", err)
@@ -58,11 +58,10 @@ func seedRuntimeTerminalRun(t *testing.T, runs *memory.RunRepository, state comm
 	}
 	run := &runmodel.Run{
 		ID: "run-1", WorkspaceID: "ws-1", GoalID: "goal-1", DoDID: "dod-1",
-		DefinitionRevision: "def-1", State: state, CreatedAt: "2026-01-01T00:00:00Z",
+		DefinitionRevision: "def-1", Lineage: runmodel.RunLineage{LineageState: "active"}, State: state, CreatedAt: "2026-01-01T00:00:00Z",
 
 		RuntimeBootstrap: &runtimecontract.RuntimeBootstrap{},
 		RuntimeState: &runtimecontract.RuntimeStateRecord{
-			SchemaVersion: runtimecontract.RuntimeStateSchemaVersionCurrent,
 			StateRevision: 3,
 			Facts: runtimecontract.RuntimeFacts{
 				WorkspaceID: "ws-1", RunID: "run-1", DefinitionRevision: "def-1", EvidenceRevision: "evidence-1",
@@ -79,9 +78,26 @@ func seedRuntimeTerminalRun(t *testing.T, runs *memory.RunRepository, state comm
 		RuntimeStateRef: runevents.RuntimeStateRef("ws-1", "run-1", 3), RuntimeStateHash: "opaque-state", BootstrapHash: "opaque-bootstrap", TerminalFenceID: "td-1",
 	}
 	if err := runs.Create(context.Background(), run); err != nil {
-		t.Fatalf("seed v2: %v", err)
+		t.Fatalf("seed current run: %v", err)
 	}
 	return run
+}
+
+func TestReduceTerminalDeliveryRejectsMissingRunLineageInsteadOfUpgrading(t *testing.T) {
+	current := seedRuntimeTerminalRun(t, memory.NewRunRepository(), common.RunStateActive, runtimecontract.ConvergenceStateFailed, "superseded", "replaced", "auth-1")
+	current.Lineage.LineageState = ""
+	identity := runtimecontract.RuntimeTerminalDeliveryIdentity{
+		WorkspaceID: "ws-1", RunID: "run-1", TerminalDeliveryID: "td-1", AuthoritySnapshotID: "auth-1",
+		DefinitionRevision: "def-1", EvidenceRevision: "evidence-1", DispatchID: "dispatch-1",
+		Outcome: runtimecontract.TerminalOutcome{Kind: runtimecontract.TerminalOutcomeKindSuperseded, Code: "superseded", Summary: "replaced"},
+	}
+	_, err := reduceTerminalDelivery(current, terminalDeliveryTestCommand(identity, "terminal-delivery/td-1"))
+	if !errors.Is(err, common.ErrConflict) {
+		t.Fatalf("reduce terminal delivery err = %v, want current-contract conflict", err)
+	}
+	if current.Lineage.LineageState != "" {
+		t.Fatalf("missing lineage was rewritten to %q", current.Lineage.LineageState)
+	}
 }
 
 func TestReduceActivateRunPendingToActive(t *testing.T) {
@@ -113,150 +129,6 @@ func TestReduceActivateRunTerminalIsNoop(t *testing.T) {
 	tr, err := reduceActivateRun(current, activateRunFact{WorkspaceID: "ws-1", RunID: "run-1"})
 	if err != nil || !tr.Noop {
 		t.Fatalf("expected terminal noop, got %+v err=%v", tr, err)
-	}
-}
-
-func schemaIncompatibleFact(workspaceID common.WorkspaceID, runID common.RunID, revision uint64, actualSchema uint32) runevents.RuntimeStateIncompatibleFact {
-	stateRef := runevents.RuntimeStateRef(workspaceID, runID, revision)
-	return runevents.RuntimeStateIncompatibleFact{
-		WorkspaceID:     workspaceID,
-		RunID:           runID,
-		SourceOwner:     "kernel/orchestrator",
-		CausationID:     "runtime-state-incompatible/" + stateRef,
-		RuntimeStateRef: stateRef,
-		Incompatibility: runtimecontract.RuntimeStateIncompatibility{
-			Reason:                 runtimecontract.RuntimeStateIncompatibilityReasonSchemaUnsupported,
-			ActualSchemaVersion:    actualSchema,
-			SupportedSchemaVersion: runtimecontract.RuntimeStateSchemaVersionCurrent,
-		},
-		Feedback: runtimecontract.RuntimeFeedback{
-			Domain:         runtimecontract.RuntimeFeedbackDomainDrive,
-			StableCategory: runtimecontract.RuntimeFeedbackCategoryStateSchemaUnsupported,
-			WorkspaceID:    workspaceID,
-			RunID:          runID,
-			OriginalDiagnostic: &runtimecontract.RuntimeOriginalDiagnostic{
-				SchemaVersion:    runtimecontract.RuntimeOriginalDiagnosticSchemaCurrent,
-				OwnerModuleID:    "kernel/orchestrator",
-				OriginalClass:    "runtime_state_schema",
-				OriginalCode:     "unsupported_runtime_state_schema",
-				OriginalMessage:  "runtime state schema is unsupported by this binary",
-				Signature:        "runtime-state-schema/fixture",
-				ObservedRevision: stateRef,
-			},
-		},
-	}
-}
-
-func cwiLedgerIncompatibleFact(workspaceID common.WorkspaceID, runID common.RunID, revision uint64) runevents.RuntimeStateIncompatibleFact {
-	stateRef := runevents.RuntimeStateRef(workspaceID, runID, revision)
-	return runevents.RuntimeStateIncompatibleFact{
-		WorkspaceID:     workspaceID,
-		RunID:           runID,
-		SourceOwner:     "kernel/orchestrator",
-		CausationID:     "runtime-state-incompatible/" + stateRef + "/cwi-ledger-invalid",
-		RuntimeStateRef: stateRef,
-		Incompatibility: runtimecontract.RuntimeStateIncompatibility{
-			Reason:                 runtimecontract.RuntimeStateIncompatibilityReasonCWILedgerInvalid,
-			ActualSchemaVersion:    runtimecontract.RuntimeStateSchemaVersionCurrent,
-			SupportedSchemaVersion: runtimecontract.RuntimeStateSchemaVersionCurrent,
-		},
-		Feedback: runtimecontract.RuntimeFeedback{
-			Domain:         runtimecontract.RuntimeFeedbackDomainDrive,
-			StableCategory: runtimecontract.RuntimeFeedbackCategoryStateCWILedgerInvalid,
-			WorkspaceID:    workspaceID,
-			RunID:          runID,
-			OriginalDiagnostic: &runtimecontract.RuntimeOriginalDiagnostic{
-				SchemaVersion:    runtimecontract.RuntimeOriginalDiagnosticSchemaCurrent,
-				OwnerModuleID:    "kernel/orchestrator",
-				OriginalClass:    "runtime_cwi_ledger",
-				OriginalCode:     "invalid_runtime_cwi_ledger",
-				OriginalMessage:  "runtime state CWI ledger is ambiguous and cannot be resumed",
-				Signature:        "runtime-cwi-ledger/fixture",
-				ObservedRevision: stateRef,
-			},
-		},
-	}
-}
-
-func TestReduceRuntimeStateIncompatiblePersistsFreshActivationRequirement(t *testing.T) {
-	current := &runmodel.Run{
-		ID: "run-1", WorkspaceID: "ws-1", State: common.RunStateActive,
-
-		RuntimeState: &runtimecontract.RuntimeStateRecord{SchemaVersion: 1, StateRevision: 7},
-	}
-	cmd := schemaIncompatibleFact("ws-1", "run-1", 7, 1)
-	transition, err := reduceRuntimeStateIncompatible(current, cmd)
-	if err != nil || transition.Noop || transition.Target != common.RunStateActive || transition.RuntimeActivationStatus == nil {
-		t.Fatalf("transition=%+v err=%v", transition, err)
-	}
-	next := applyLifecycleTransition(current, transition)
-	if next.RuntimeActivationStatus == nil || next.RuntimeActivationStatus.Disposition != runtimecontract.RuntimeActivationDispositionFreshActivationRequired ||
-		next.RuntimeActivationStatus.Incompatibility.Reason != runtimecontract.RuntimeStateIncompatibilityReasonSchemaUnsupported ||
-		next.RuntimeActivationStatus.Incompatibility.ActualSchemaVersion != 1 || next.RuntimeActivationStatus.Feedback == nil ||
-		next.RuntimeActivationStatus.Feedback.OriginalDiagnostic == nil || next.RuntimeActivationStatus.Feedback.OriginalDiagnostic.Signature != "runtime-state-schema/fixture" {
-		t.Fatalf("fresh-activation status=%+v", next.RuntimeActivationStatus)
-	}
-	duplicate, err := reduceRuntimeStateIncompatible(next, cmd)
-	if err != nil || !duplicate.Noop {
-		t.Fatalf("duplicate transition=%+v err=%v", duplicate, err)
-	}
-	wrongRef := cmd
-	wrongRef.RuntimeStateRef = "runtime-state/ws-1/run-1/8"
-	if _, err := reduceRuntimeStateIncompatible(current, wrongRef); !errors.Is(err, common.ErrConflict) {
-		t.Fatalf("mismatched ref error=%v", err)
-	}
-	wrongSchema := cmd
-	wrongSchema.Incompatibility.ActualSchemaVersion = 3
-	if _, err := reduceRuntimeStateIncompatible(current, wrongSchema); !errors.Is(err, common.ErrConflict) {
-		t.Fatalf("mismatched schema error=%v", err)
-	}
-}
-
-func TestReduceRuntimeStateIncompatiblePreservesCurrentSchemaCWILedgerReason(t *testing.T) {
-	current := &runmodel.Run{
-		ID: "run-1", WorkspaceID: "ws-1", State: common.RunStateActive,
-		RuntimeState: &runtimecontract.RuntimeStateRecord{
-			SchemaVersion: runtimecontract.RuntimeStateSchemaVersionCurrent,
-			StateRevision: 7,
-		},
-	}
-	cmd := cwiLedgerIncompatibleFact("ws-1", "run-1", 7)
-	transition, err := reduceRuntimeStateIncompatible(current, cmd)
-	if err != nil || transition.Noop || transition.Target != common.RunStateActive || transition.RuntimeActivationStatus == nil {
-		t.Fatalf("transition=%+v err=%v", transition, err)
-	}
-	next := applyLifecycleTransition(current, transition)
-	if next.RuntimeActivationStatus == nil ||
-		next.RuntimeActivationStatus.Disposition != runtimecontract.RuntimeActivationDispositionFreshActivationRequired ||
-		next.RuntimeActivationStatus.Incompatibility.Reason != runtimecontract.RuntimeStateIncompatibilityReasonCWILedgerInvalid ||
-		next.RuntimeActivationStatus.Incompatibility.ActualSchemaVersion != runtimecontract.RuntimeStateSchemaVersionCurrent ||
-		next.RuntimeActivationStatus.Incompatibility.SupportedSchemaVersion != runtimecontract.RuntimeStateSchemaVersionCurrent ||
-		next.RuntimeActivationStatus.Feedback == nil ||
-		next.RuntimeActivationStatus.Feedback.StableCategory != runtimecontract.RuntimeFeedbackCategoryStateCWILedgerInvalid ||
-		next.RuntimeActivationStatus.Feedback.OriginalDiagnostic == nil ||
-		next.RuntimeActivationStatus.Feedback.OriginalDiagnostic.Signature != "runtime-cwi-ledger/fixture" {
-		t.Fatalf("CWI ledger fresh-activation status=%+v", next.RuntimeActivationStatus)
-	}
-	duplicate, err := reduceRuntimeStateIncompatible(next, cmd)
-	if err != nil || !duplicate.Noop {
-		t.Fatalf("duplicate transition=%+v err=%v", duplicate, err)
-	}
-}
-
-func TestLifecycleIncompatibleStateMakesContinueTypedNoop(t *testing.T) {
-	biz, runs, _ := newLifecycleTestBiz(t)
-	seed := seedRun(t, runs, common.RunStateActive)
-	seed.RuntimeState = &runtimecontract.RuntimeStateRecord{SchemaVersion: 1, StateRevision: 4}
-	if err := runs.Update(context.Background(), seed); err != nil {
-		t.Fatalf("seed incompatible run: %v", err)
-	}
-	ctx := context.Background()
-	response, err := biz.executeLifecycleCommand(magicevent.NewEventWithContext(
-		runevents.TopicRunFactRuntimeStateIncompatible, "kernel/orchestrator", runevents.CommandDestination, magicevent.NewHeader(), ctx,
-		schemaIncompatibleFact("ws-1", "run-1", 4, 1),
-	))
-	if err != nil || !response.Transitioned || response.RuntimeActivationDisposition != runtimecontract.RuntimeActivationDispositionFreshActivationRequired {
-		t.Fatalf("incompatible response=%+v err=%v", response, err)
 	}
 }
 
@@ -520,7 +392,7 @@ func TestGenericRunUpdateDoesNotPublishLifecycleFactOrChangeSM1(t *testing.T) {
 	biz, runs, hub := newLifecycleTestBiz(t)
 	seed := seedRun(t, runs, common.RunStateActive)
 	bootstrap := runtimecontract.RuntimeBootstrap{}
-	state := runtimecontract.RuntimeStateRecord{SchemaVersion: runtimecontract.RuntimeStateSchemaVersionCurrent, StateRevision: 1}
+	state := runtimecontract.RuntimeStateRecord{StateRevision: 1}
 	seed.RuntimeBootstrap = &bootstrap
 	seed.RuntimeState = &state
 	if err := runs.Update(context.Background(), seed); err != nil {
@@ -571,7 +443,6 @@ func TestRuntimeAggregatePersistenceRebasesUnrelatedRunModelWrite(t *testing.T) 
 	activation := runtimecontract.RuntimeActivationContext{ProviderSelection: runtimecontract.ProviderInferenceSelection{Target: runtimecontract.ProviderModelTarget{ProviderID: "provider", ModelID: "model"}}}
 	bootstrap := runtimecontract.RuntimeBootstrap{Definition: definition, Activation: activation}
 	currentState := runtimecontract.RuntimeStateRecord{
-		SchemaVersion: runtimecontract.RuntimeStateSchemaVersionCurrent,
 		StateRevision: 7, Definition: definition,
 		Facts: runtimecontract.RuntimeFacts{WorkspaceID: "ws-v2", RunID: "run-v2", DefinitionRevision: definition.Revision, Activation: activation},
 	}
@@ -617,7 +488,6 @@ func TestRuntimeAggregatePersistenceRejectsAggregateRevisionRace(t *testing.T) {
 	activation := runtimecontract.RuntimeActivationContext{ProviderSelection: runtimecontract.ProviderInferenceSelection{Target: runtimecontract.ProviderModelTarget{ProviderID: "provider", ModelID: "model"}}}
 	bootstrap := runtimecontract.RuntimeBootstrap{Definition: definition, Activation: activation}
 	currentState := runtimecontract.RuntimeStateRecord{
-		SchemaVersion: runtimecontract.RuntimeStateSchemaVersionCurrent,
 		StateRevision: 7, Definition: definition,
 		Facts: runtimecontract.RuntimeFacts{WorkspaceID: "ws-v2", RunID: "run-v2", DefinitionRevision: definition.Revision, Activation: activation},
 	}

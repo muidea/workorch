@@ -2,13 +2,116 @@ package workorchruntimecontract
 
 import (
 	"encoding/json"
-	"errors"
+	"strings"
 	"testing"
 )
 
+func TestRuntimePersistenceRejectsRetiredAndUnknownFields(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		payload string
+		target  any
+	}{
+		{name: "state schema version", payload: `{"SchemaVersion":2}`, target: &RuntimeStateRecord{}},
+		{name: "state unknown", payload: `{"UnknownRuntimeField":true}`, target: &RuntimeStateRecord{}},
+		{name: "bootstrap schema version", payload: `{"SchemaVersion":2}`, target: &RuntimeBootstrap{}},
+		{name: "bootstrap unknown", payload: `{"UnknownBootstrapField":true}`, target: &RuntimeBootstrap{}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			err := json.Unmarshal([]byte(tc.payload), tc.target)
+			if err == nil || !strings.Contains(err.Error(), "unknown field") {
+				t.Fatalf("decode err = %v, want strict unknown-field rejection", err)
+			}
+		})
+	}
+}
+
+func TestRuntimePersistenceCurrentShapeRoundTripsWithoutVersionField(t *testing.T) {
+	for _, value := range []any{RuntimeStateRecord{}, RuntimeBootstrap{}} {
+		encoded, err := json.Marshal(value)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var topLevel map[string]json.RawMessage
+		if err := json.Unmarshal(encoded, &topLevel); err != nil {
+			t.Fatalf("decode current persistence object: %v", err)
+		}
+		if _, found := topLevel["SchemaVersion"]; found {
+			t.Fatalf("current persistence contains top-level version field: %s", encoded)
+		}
+		switch value.(type) {
+		case RuntimeStateRecord:
+			var decoded RuntimeStateRecord
+			if err := json.Unmarshal(encoded, &decoded); err != nil {
+				t.Fatalf("decode current runtime state: %v", err)
+			}
+		case RuntimeBootstrap:
+			var decoded RuntimeBootstrap
+			if err := json.Unmarshal(encoded, &decoded); err != nil {
+				t.Fatalf("decode current runtime bootstrap: %v", err)
+			}
+		}
+	}
+}
+
+func TestRuntimePolicyNormalizationDoesNotBackfillMissingPersistedFields(t *testing.T) {
+	execution := (RuntimeExecutionContract{}).Normalized()
+	if execution.StateChangePolicy != "" {
+		t.Fatalf("execution state-change policy was backfilled: %+v", execution)
+	}
+	if err := (RuntimeExecutionContract{}).Validate(); err == nil {
+		t.Fatal("missing execution state-change policy was accepted")
+	}
+
+	slice := (RuntimeAcceptanceSlicePolicy{
+		SchemaVersion: RuntimeAcceptanceSlicePolicySchemaCurrent,
+		MaxWorkItems:  1, MaxFocuses: 1, MaxCandidateContextItems: 1,
+	}).Normalized()
+	if slice.CompletionPolicy != "" || slice.ResultPolicy != "" {
+		t.Fatalf("acceptance slice policy was backfilled: %+v", slice)
+	}
+	if err := slice.Validate(); err == nil {
+		t.Fatal("acceptance slice policy with missing current fields was accepted")
+	}
+
+	capability := normalizeRuntimeMCPCapabilities([]RuntimeMCPCapabilityContext{{
+		ID: "capability-1", ServerID: "server-1", Kind: "tool", Name: "tool-1",
+	}})
+	if len(capability) != 1 || capability[0].OperationKind != "" {
+		t.Fatalf("MCP operation kind was derived from a persisted registry kind: %+v", capability)
+	}
+
+	if got := (RuntimeConvergencePolicy{}).Normalized(); got != (RuntimeConvergencePolicy{}) {
+		t.Fatalf("zero convergence policy was backfilled: %+v", got)
+	}
+	if err := (RuntimeConvergencePolicy{}).Validate(); err == nil {
+		t.Fatal("missing convergence policy was accepted")
+	}
+	if got := (RuntimeRecoveryPolicy{}).Normalized(); got != (RuntimeRecoveryPolicy{}) {
+		t.Fatalf("zero recovery policy was backfilled: %+v", got)
+	}
+	if err := (RuntimeRecoveryPolicy{}).Validate(); err == nil {
+		t.Fatal("missing recovery policy was accepted")
+	}
+
+	bootstrap := RuntimeBootstrap{
+		ConvergencePolicy: DefaultRuntimeConvergencePolicy(),
+		RecoveryPolicy:    DefaultRuntimeRecoveryPolicy(),
+	}.Normalized()
+	if bootstrap.ExecutionBudgetPolicy.PolicyRevision != "" {
+		t.Fatalf("bootstrap execution budget policy was derived during normalization: %+v", bootstrap.ExecutionBudgetPolicy)
+	}
+	facts := RuntimeFacts{
+		ConvergencePolicy: DefaultRuntimeConvergencePolicy(),
+		RecoveryPolicy:    DefaultRuntimeRecoveryPolicy(),
+	}.Normalized()
+	if facts.ExecutionBudgetPolicy.PolicyRevision != "" {
+		t.Fatalf("runtime facts execution budget policy was derived during normalization: %+v", facts.ExecutionBudgetPolicy)
+	}
+}
+
 func TestRuntimeStateSerializationContainsCanonicalDecisionOnly(t *testing.T) {
 	record := RuntimeStateRecord{
-		SchemaVersion: RuntimeStateSchemaVersionCurrent,
 		Decision: RuntimeDecision{
 			State: ConvergenceStateNeedStateChange,
 			RequiredOutput: RequiredOutputContract{
@@ -40,21 +143,6 @@ func TestRuntimeStateSerializationContainsCanonicalDecisionOnly(t *testing.T) {
 	}
 }
 
-func TestRuntimeStateJSONNonCurrentSchemaFailsWithTypedError(t *testing.T) {
-	var record RuntimeStateRecord
-	if err := json.Unmarshal([]byte(`{"SchemaVersion":8}`), &record); err != nil {
-		t.Fatalf("decode non-current runtime state: %v", err)
-	}
-	err := record.Validate()
-	if !errors.Is(err, ErrUnsupportedRuntimeStateSchema) {
-		t.Fatalf("non-current schema error = %v, want typed unsupported-schema error", err)
-	}
-	var schemaErr *RuntimeStateSchemaVersionError
-	if !errors.As(err, &schemaErr) || schemaErr.Actual != 8 || schemaErr.Supported != RuntimeStateSchemaVersionCurrent {
-		t.Fatalf("non-current schema typed detail = %+v", schemaErr)
-	}
-}
-
 func TestRuntimeStateTerminalDeliveryLedgerRejectsNonTerminalPollution(t *testing.T) {
 	decision := RuntimeDecision{State: ConvergenceStateNeedGovernance}
 	if err := ValidateRuntimeStateTerminalDeliveryLedger(decision, nil, nil, RuntimeRecoveryLedger{}); err != nil {
@@ -63,12 +151,6 @@ func TestRuntimeStateTerminalDeliveryLedgerRejectsNonTerminalPollution(t *testin
 	err := ValidateRuntimeStateTerminalDeliveryLedger(decision, nil, nil, RuntimeRecoveryLedger{TerminalDeliveryAttempts: 1})
 	if err == nil {
 		t.Fatal("non-terminal terminal-delivery consumption was accepted")
-	}
-	typed := NewRuntimeStateRecoveryLedgerIncompatibilityError(err)
-	value, ok := RuntimeStateIncompatibilityFromError(typed)
-	if !ok || value.Reason != RuntimeStateIncompatibilityReasonRecoveryLedgerInvalid ||
-		value.ActualSchemaVersion != RuntimeStateSchemaVersionCurrent || value.SupportedSchemaVersion != RuntimeStateSchemaVersionCurrent {
-		t.Fatalf("recovery-ledger incompatibility = %+v, ok=%t", value, ok)
 	}
 	ack := RuntimeDeliveryAcknowledgement{}
 	if err := ValidateRuntimeStateTerminalDeliveryLedger(decision, nil, []RuntimeDeliveryAcknowledgement{ack}, RuntimeRecoveryLedger{}); err == nil {

@@ -79,7 +79,7 @@ semantic-plan 与 operations 均要求 wire normalization 后的 canonical docum
 无 Markdown fence、解释、前后缀或重复输入；object `additionalProperties=false`，renderer、schema、strict decoder 与
 evaluator 共用同一 vocabulary、shape 和 sealed limit。
 
-provider-facing instruction 仍严格要求裸 JSON。兼容边界最多只可移除一层完整、独占响应的精确 JSON code fence；
+provider-facing instruction 仍严格要求裸 JSON。当前 wire normalization 最多只可移除一层完整、独占响应的精确 JSON code fence；
 raw bytes/hash 保留原始 identity，任何 prose、其他语言标签、缺失 closing fence、多 fence 或
 多 JSON value 都不得由该 normalization 放宽。
 
@@ -114,14 +114,14 @@ raw bytes/hash 保留原始 identity，任何 prose、其他语言标签、缺�
 
 - `LogicalRequestID`、每次 `PhysicalCallID`、recovery generation；
 - document kind、expected-document hash、response hash/bytes、document disposition、`providerSubmitted`、
-  `PhysicalResponseMode=streaming|non_streaming`；任何旧 `streaming` 布尔投影只能由该 mode 派生；
+  `PhysicalResponseMode=streaming|non_streaming`；公共 audit/projection 不保存并行 `streaming` 布尔字段；
 - `StablePrefixHash`、各 section hash、`WorkspaceDefinitionHash`、`CapabilityContractHash`；
 - current focus/required-output bundle hash、volatile-tail hash、Definition revision/change impact；
 - included、normalized、compressed、omitted、redacted sections；
 - protected fields、integrity warnings 与 bounded source refs。
 
-历史字段名 `stageBundleHash` 可以作为存储兼容名存在，但其语义只能是 current focus/required-output bundle，
-不能恢复 StagePacket/NextAction。raw request/response body、credential、endpoint 与未脱敏内容只记录允许的 hash、
+当前 canonical 字段 `stageBundleHash` 只表示 current focus/required-output bundle，不能恢复 StagePacket/NextAction。
+raw request/response body、credential、endpoint 与未脱敏内容只记录允许的 hash、
 bytes、disposition 和 redacted/omitted metadata。
 
 LLM usage Eventstream/read projection 同样必须原样保留 `logicalRequestId`/`physicalCallId`（Runtime request）、

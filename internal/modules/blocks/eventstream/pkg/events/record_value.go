@@ -40,17 +40,18 @@ func EventRecordDataFromModel(item *eventstreammodel.EventRecord) (EventRecordDa
 		return EventRecordData{}, common.ErrInvalidArgument
 	}
 	ret := EventRecordData(*item)
-	// Sanitize again at the owner read boundary so records written by an older
-	// release cannot re-introduce raw or oversized payloads through EventHub or
-	// SSE after an upgrade.
-	ret.Payload = recordpayload.SanitizeAuditPayload(item.Payload)
-	ret.PayloadSummary = recordpayload.SanitizeAuditPayload(item.PayloadSummary)
+	if !recordpayload.SanitizeAuditPayload(item.Payload).Equal(item.Payload) ||
+		!recordpayload.SanitizeAuditPayload(item.PayloadSummary).Equal(item.PayloadSummary) {
+		return EventRecordData{}, fmt.Errorf("%w: persisted event record payload is not sanitized and bounded", common.ErrInvalidArgument)
+	}
+	ret.Payload = item.Payload.Clone()
+	ret.PayloadSummary = item.PayloadSummary.Clone()
 	return ret, nil
 }
 
 func (item EventRecordData) Model() *eventstreammodel.EventRecord {
 	ret := eventstreammodel.EventRecord(item)
-	ret.Payload = recordpayload.SanitizeAuditPayload(item.Payload)
-	ret.PayloadSummary = recordpayload.SanitizeAuditPayload(item.PayloadSummary)
+	ret.Payload = item.Payload.Clone()
+	ret.PayloadSummary = item.PayloadSummary.Clone()
 	return &ret
 }

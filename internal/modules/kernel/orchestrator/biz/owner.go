@@ -88,15 +88,12 @@ type runtimeStartupRecoveryActionKind string
 const (
 	runtimeStartupRecoveryActionDrive        runtimeStartupRecoveryActionKind = "drive"
 	runtimeStartupRecoveryActionRecoverLease runtimeStartupRecoveryActionKind = "recover_lease"
-	runtimeStartupRecoveryActionIncompatible runtimeStartupRecoveryActionKind = "incompatible"
 )
 
 type runtimeStartupRecoveryAction struct {
-	Kind            runtimeStartupRecoveryActionKind
-	Item            runevents.RuntimeRecoveryInventoryItem
-	Source          string
-	Incompatibility runtimecontract.RuntimeStateIncompatibility
-	Diagnostic      error
+	Kind   runtimeStartupRecoveryActionKind
+	Item   runevents.RuntimeRecoveryInventoryItem
+	Source string
 }
 
 func New() *Biz { return &Biz{} }
@@ -246,12 +243,6 @@ func (m *Biz) recoverRuntimeStartup(ctx context.Context) error {
 	}
 	actions := make([]runtimeStartupRecoveryAction, 0)
 	for _, item := range items {
-		// A Run-owned administrative outcome is not an Orchestrator failure and
-		// must never re-enter SM-4. Only explicit fresh activation creates a new
-		// current-schema Run.
-		if item.RuntimeActivationDisposition == runtimecontract.RuntimeActivationDispositionFreshActivationRequired {
-			continue
-		}
 		if !item.HasRuntimeState {
 			if item.State == common.RunStateActive && item.HasRuntimeBootstrap {
 				actions = append(actions, runtimeStartupRecoveryAction{Kind: runtimeStartupRecoveryActionDrive, Item: item, Source: "startup_recovery:bootstrap"})
@@ -261,10 +252,6 @@ func (m *Biz) recoverRuntimeStartup(ctx context.Context) error {
 
 		aggregate, loadErr := (runtimeStateRepository{hub: m.EventHub()}).LoadRuntimeRecoveryRecord(ctx, item)
 		if loadErr != nil {
-			if incompatibility, incompatible := runtimecontract.RuntimeStateIncompatibilityFromError(loadErr); incompatible {
-				actions = append(actions, runtimeStartupRecoveryAction{Kind: runtimeStartupRecoveryActionIncompatible, Item: item, Source: "startup_recovery:state_incompatible", Incompatibility: incompatibility, Diagnostic: loadErr})
-				continue
-			}
 			return fmt.Errorf("Runtime startup recovery load workspace=%s run=%s: %w", item.WorkspaceID, item.RunID, loadErr)
 		}
 
@@ -392,10 +379,6 @@ func (m *Biz) releaseRuntimeStartupRecoveryActions(ctx context.Context, actions 
 			if m.beginRuntimeDrive(key) && !m.enqueueRuntimeDriveLeaseTimer(ctx, lease, action.Source) {
 				m.endRuntimeDrive(key)
 				return fmt.Errorf("lease timer workspace=%s run=%s was not accepted", item.WorkspaceID, item.RunID)
-			}
-		case runtimeStartupRecoveryActionIncompatible:
-			if err := m.applyRunRuntimeStateIncompatible(ctx, item.WorkspaceID, item.RunID, item.RuntimeStateRef, action.Incompatibility, action.Diagnostic); err != nil {
-				return fmt.Errorf("runtime state incompatibility workspace=%s run=%s: %w", item.WorkspaceID, item.RunID, err)
 			}
 		default:
 			return common.ErrInvalidArgument
@@ -545,7 +528,7 @@ func (m *Biz) Stop(ctx context.Context) error {
 // external owner state.
 func (m *Biz) handleRunStateChanged(ev magicevent.Event, _ magicevent.Result) {
 	data, ok := ev.Data().(runevents.RunStateChangedData)
-	if ok && ev.Source() == runevents.CommandDestination && data.Validate() == nil && data.State == common.RunStateActive && !data.RequiresFreshActivation() {
+	if ok && ev.Source() == runevents.CommandDestination && data.Validate() == nil && data.State == common.RunStateActive {
 		var scheduleErr error
 		if requestID := strings.TrimSpace(data.ReconciliationRequestID); requestID != "" {
 			scheduleErr = m.scheduleRuntimeDriveWithReconciliation(ev.Context(), data.WorkspaceID, data.RunID, "run_state_active_resume", requestID, 0)
@@ -833,12 +816,6 @@ func (m *Biz) adoptPersistedRuntimeDriveLeaseForNormalDrive(ctx context.Context,
 		if errors.Is(err, common.ErrNotFound) {
 			return false
 		}
-		if _, incompatible := runtimecontract.RuntimeStateIncompatibilityFromError(err); incompatible {
-			// The existing drive path owns delivery of the typed incompatibility
-			// fact to Run. This preflight guards leases only; it must not swallow the
-			// established fresh-activation fail-closed transition.
-			return false
-		}
 		slog.Warn("workorch Runtime normal drive preflight could not inspect persisted lease", "workspaceID", request.workspaceID, "runID", request.runID, "source", request.source, "err", err)
 		m.endRuntimeDrive(request.driveKey)
 		return true
@@ -891,10 +868,6 @@ func (m *Biz) recoverAndMountRuntimeDriveLeaseAfterRenewalFailure(ctx context.Co
 }
 
 func (m *Biz) handleScheduledRuntimeDriveFailure(ctx context.Context, request scheduledRuntimeDriveRequest, err error) (*runtimeRecoveryLeaseRequest, bool) {
-	var fresh *runtimeFreshActivationRequiredError
-	if errors.As(err, &fresh) {
-		return nil, true
-	}
 	var recoverableWait *runtimeRecoverableWaitPendingError
 	if errors.As(err, &recoverableWait) {
 		delay := time.Second

@@ -142,9 +142,9 @@ type EvidenceCommitResult struct {
 	Aggregate         RuntimeAggregate
 }
 
-// DispatchCoordinator is a narrow compatibility shell for the standalone
-// dispatch test/support constructor.  Production RuntimeController wiring
-// stores candidateDispatchComponent directly.  The shell embeds that private
+// DispatchCoordinator is a narrow harness for the standalone dispatch
+// test/support constructor. Production RuntimeController wiring stores
+// candidateDispatchComponent directly. The harness embeds that private
 // component rather than re-exporting an alias, so the canonical implementation
 // and its owner boundary remain unambiguous to the repository boundary scan.
 type DispatchCoordinator struct {

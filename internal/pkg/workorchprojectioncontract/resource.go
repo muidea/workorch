@@ -100,7 +100,6 @@ type Run struct {
 	BlockingApprovalID string                                      `json:"blockingApprovalId,omitempty"`
 	FailureReason      string                                      `json:"failureReason,omitempty"`
 	SealedLLMSelection *runtimecontract.ProviderInferenceSelection `json:"sealedLLMSelection,omitempty"`
-	RuntimeActivation  *RuntimeActivationStatus                    `json:"runtimeActivation,omitempty"`
 	CreatedAt          string                                      `json:"createdAt,omitempty"`
 	StartedAt          string                                      `json:"startedAt,omitempty"`
 	EndedAt            string                                      `json:"endedAt,omitempty"`
@@ -108,7 +107,6 @@ type Run struct {
 
 func CloneRun(item Run) Run {
 	item.SealedLLMSelection = runtimecontract.CloneProviderInferenceSelection(item.SealedLLMSelection)
-	item.RuntimeActivation = CloneRuntimeActivationStatus(item.RuntimeActivation)
 	return item
 }
 

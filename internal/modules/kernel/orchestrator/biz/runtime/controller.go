@@ -149,7 +149,7 @@ func (c *RuntimeController) Load(ctx context.Context, workspaceID common.Workspa
 }
 
 // reconcileAuthorityBeforeCandidate CAS-persists the deterministic SM-2
-// cleanup required when a loaded aggregate still contains a non-current
+// cleanup required when a loaded aggregate still contains a no-longer-current
 // focus-scoped prerequisite/resource. It is intentionally narrower than
 // candidate admission: no provider request, candidate attempt, repair budget,
 // or owner operation is involved.

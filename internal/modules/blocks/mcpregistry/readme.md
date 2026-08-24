@@ -37,12 +37,13 @@ Last Verified: 2026-08-21
 - Registry 上限为 256 个 Server、4096 个 Capability；单页默认 100、最大 200，selection 最多 64 个 Server/256 个 Capability。ID、查询、schema、字符串列表和 environment reference 均有 owner 上限。
 - `effectScope`、`idempotencyClass` 和 `direct | auxiliary | not_declared` validation proof applicability 必须是合法枚举；空值规范化为显式 `unknown`/`not_declared`，非法值不允许静默降级。Registry 不从名称、category、risk 或描述推断这些权威元数据。
 - `ready | prerequisite_required | unavailable` 仍由 `blocks/mcp` 基于同一次 detached snapshot 与 sealed input 编译；Registry 不执行 probe、不生成 input binding、不选择 Runtime action。
-- file backend 首次读取新聚合文件前可导入旧 Server/Capability 文件；旧 Capability 会取得 `legacy_import` provenance。旧 Server 若含明文 environment value，会在 owner 规范化阶段 fail-closed，必须迁移成引用后才能发布快照。
-- 默认资源是可编辑的首次启动种子。强制刷新必须另行定义显式、版本化、可审计的 owner migration 合同。
+- file backend 只读取一个 current Registry aggregate 文件；旧 Server/Capability 分文件、未知/退役字段和明文
+  environment value直接失败，不导入、不补 provenance、不改写。
+- 默认资源是可编辑的首次启动种子。当前阶段不提供强制刷新或数据升级；需要新默认值时清理数据后重新初始化。
 
 ## 测试状态
 
-- [x] memory/file 聚合 CAS、深拷贝、file reload、旧文件导入及 revision conflict。
+- [x] memory/file 聚合 CAS、深拷贝、file reload、旧文件/未知字段拒绝及 revision conflict。
 - [x] create/update/defaults 的原子提交；注入 Commit 失败后无部分 Server/Capability，重试可收敛。
 - [x] plaintext environment value、非法/重复 reference、执行期缺失 env ref 均 fail-closed；EventHub DTO 与执行期解析有回归。
 - [x] `Post` 不能修改 Registry；各 topic 使用 concrete result，一致完整/选择快照返回同一 revision。

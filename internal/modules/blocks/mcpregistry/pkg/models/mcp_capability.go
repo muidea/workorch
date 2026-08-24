@@ -17,7 +17,6 @@ const (
 	CapabilitySourceUser            = "user"
 	CapabilitySourceBuiltin         = "builtin"
 	CapabilitySourceServerAllowlist = "server_allowlist"
-	CapabilitySourceLegacyImport    = "legacy_import"
 )
 
 func ValidValidationProofApplicability(value string) bool {

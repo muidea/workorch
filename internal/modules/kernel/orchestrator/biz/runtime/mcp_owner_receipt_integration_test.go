@@ -154,7 +154,7 @@ func TestMCPOwnerObservedFailureTargetBindsThroughEventHubAndFileSnapshot(t *tes
 	}
 	aggregate.Facts.Capabilities.ValidationKinds = []string{runtimecontract.StepKindMCPToolCall}
 	aggregate.Facts.Activation.MCPCapabilities = []runtimecontract.RuntimeMCPCapabilityContext{{
-		ID: "mcp-observed-target:tool:lookup.references", ServerID: "mcp-observed-target", Kind: "tool", Name: "lookup.references", Enabled: true,
+		ID: "mcp-observed-target:tool:lookup.references", ServerID: "mcp-observed-target", Kind: "tool", OperationKind: runtimecontract.StepKindMCPToolCall, Name: "lookup.references", Enabled: true,
 		EffectScope: string(runtimecontract.RuntimeEffectNone), IdempotencyClass: string(runtimecontract.RuntimeOperationIdempotencySafeToReplay),
 	}}
 	aggregate.Facts.Focus.TargetRefs = nil

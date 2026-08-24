@@ -51,9 +51,10 @@ non-transient contract failure分别封存 typed expired/exhausted terminal，�
 
 ### Current development baseline 与 provider output contract
 
-当前 Runtime schema 只维护一个带明确版本号的开发基线；当前 `v2` 首次要求每个 required owner fact 封存完整
-convergence declaration。开发调试阶段不维护历史 schema migration 或多版本 reducer；不兼容变化必须提升 schema、更新
-当前代码/fixture baseline，并要求清理既有运行数据。不得在 load 时为旧记录补 convergence 或重建 authority。
+当前 Runtime persistence 只维护一个 current shape；每个 required owner fact 都必须封存完整 convergence declaration。
+`RuntimeStateRecord`/`RuntimeBootstrap` 不携带用于选择历史 decoder 的顶层版本。旧 layout 不再探测或导入；当前路径上的
+未知/退役字段或缺失 current invariant 在严格 load 边界失败；不得补 convergence、重建 authority、生成替代 fact 或进入
+多版本 reducer。
 activation/execution contract、config、runtime policy 与 stable-prefix hash 不携带
 semantic-plan/candidate stage token limit。LLM owner 是 model capability 的唯一解释者；Orchestrator 只消费针对当前
 workspace/run/authority、sealed selection 及 capability/configuration revision 的 detached persisted
@@ -66,7 +67,7 @@ LLM EventHub command、provider request、provider-facing `max_output_tokens` �
 不重读配置、不拼接 partial output。
 
 两个 request renderer 的 provider-facing instruction 都要求恰好一个完整 compact JSON object，无 prose、fence、
-prefix/suffix 或 authority 重复；LLM wire boundary 只可兼容移除一层完整且独占响应的精确 JSON fence，不能接受 prose、
+prefix/suffix 或 authority 重复；LLM wire normalization 只可移除一层完整且独占响应的精确 JSON fence，不能接受 prose、
 多 value 或畸形 fence。sealed manifest 同时约束 prompt、closed JSON Schema、strict decoder 与 evaluator；object 禁止
 unknown field，数组、字符串、target、binding 与 content/effect shape 均有界。LLM owner只返回 provider factual outcome，
 不能选择 retry、terminal、CandidateAttempt 或 Runtime transition。
@@ -78,9 +79,9 @@ focus/binding identity 必须同时绑定该 generation 的 `manifestHash + logi
 不得复用旧 focus/binding。`CurrentBindingRef` 不得指向 reopen/retirement lineage 中的历史 binding，reducer 在写入前与
 aggregate validator 在持久化后均 fail-closed。capability owner 只报告资源事实和当前 admissibility，不能请求 CWI/focus 状态。
 
-非当前 aggregate 不原地迁移。Resume/SM-4 load 返回 `fresh_activation_required` 且不调用 LLM/capability owner；
-针对该不兼容 predecessor 的显式 Restart 由 Run owner 返回 `data_reset_required`，不创建 replacement intent，也不要求
-Orchestrator 加载旧 aggregate。current-baseline Restart 的 predecessor/replacement/successor 则完全由 Run owner 的
+无法按 current shape 读取或校验的 aggregate 不进入 Resume/Restart/SM-4，且不调用 LLM/capability owner、不创建
+invalid-data fact 或 replacement intent。数据清理后创建的 current Run 才能进入 Runtime。`fresh_activation_required`
+只适用于可读 current Run 缺少 sealed bootstrap。current Restart 的 predecessor/replacement/successor 完全由 Run owner 的
 `ReplacementIntent` 与 owner-private reducer 管理，Orchestrator 只处理已封存的 administrative terminal delivery。
 
 当前 baseline 为每个 authority 封存不含 request/lease/CAS bookkeeping 的 `AuthorityInputID`。相同 Definition、focus/binding、
@@ -160,8 +161,8 @@ contradiction 只通过 `semantic_binding_contradiction_observed` 私有事件�
   封存。`continue` 先以该 lease 保留 run gate、提交 exact `ResolutionID` 的 Run-owner acknowledgement，再由同一
   generation claim 后继续；`fail` 不得同步裸投 terminal，而只能由该 lease claim 后进入唯一 Result → Workspace → Run
   lane。partial terminal acknowledgement 将 successor 原子续排为 canonical `terminal-delivery` identity；同一 resolution
-  的 response-loss duplicate 必须验证并加入该 current successor，零写入且不创建第二个 timer。新写入禁止
-  `continue|fail + nil lease`，仅 fresh-load recovery 可兼容历史裸 persisted state。
+  的 response-loss duplicate 必须验证并加入该 current successor，零写入且不创建第二个 timer。
+  `continue|fail + nil lease` 在 private-event/reducer 入口一律拒绝，fresh-load 也不能补 successor。
 - lifecycle resolution 在旧 drive 持有 singleflight gate 时只先 CAS 持久化 scheduled lease，并把 exact generation 交给当前
   gate owner 的退出边界；退出边界在同一 process-local 临界区选择“保留 gate 挂载 persisted timer”或“释放 gate 由提交者
   接管”。timer 永不绕过 gate 并发 drive；该 generation hint 不是 queue、watchdog 或第二份 retry authority，claim 仍以完整
@@ -391,8 +392,9 @@ deployed run ID 只属于 archive regression evidence，不定义当前候选、
 - File owner 对 `unified_diff` 在 owner feasibility probe 中执行无写入 dry-run；hunk/context 冲突必须在 dispatch seal 前以 typed infeasible result 返回，owner 不选择后续 RuntimeAction。
 - active Runtime Cancel/Supersede 必须先 `RequestTermination` CAS 持久化 `RuntimeTerminationRecord`，再投影 SM-1 terminal。
 - aggregate invariant 要求非终态 Decision 且无 administrative termination 时
-  `TerminalDeliveryAttempts=0` 且无 terminal acknowledgement。旧数据违反时返回 typed
-  `recovery_ledger_invalid`，由 Run owner形成current-schema incompatibility/data-reset；projection不得修复或隐藏。
+  `TerminalDeliveryAttempts=0` 且无 terminal acknowledgement。不满足时由当前 invariant 校验在 owner load 边界
+  直接失败；不得形成兼容分类、升级或 data-reset 状态，不得由 projection 修复、归零或隐藏。清理数据后
+  重新创建是当前阶段唯一恢复方式。
 - drive failure 经 `classifyRuntimeDriveFailure` 分类：只有携带 expected/observed revision 的 `RuntimeCASConflictError` 才进入 CAS reload；owner-transient/projection 不终态化业务 Run，语义 conflict 不得消耗 CAS budget。
 
 ## 组件交互及合同
@@ -467,7 +469,7 @@ deployed run ID 只属于 archive regression evidence，不定义当前候选、
   private reducer 中从 outcome 派生自身持久化展示原因。current-schema terminal closeout 还绑定 StartupInputHash、
   aggregate revision、逐 requirement/CWI coverage/assessment/evidence 三轴、accepted evidence union、deliverable refs、
   known limitations 与实际依赖的 owner revision set，并封存 canonical closeout hash；completed 要求每项 covered、satisfied
-  且至少一条 accepted evidence。legacy projection字段只保持既有读兼容。terminal closeout 只投影仍未满足 CWI 的 canonical
+  且至少一条 accepted evidence。public projection 只包含 current canonical closeout 字段。terminal closeout 只投影仍未满足 CWI 的 canonical
   assessment gap；已满足 CWI 的 producer claimed gap 仅留在 assessment audit，不得成为 MissingEvidence/TargetRefs
   或 top failure。失败摘要优先使用当前 `Facts.Failure`，其次为 current active/formal gap，最后才使用 terminal
   code/recovery lineage。
@@ -666,10 +668,9 @@ deployed run ID 只属于 archive regression evidence，不定义当前候选、
   `TopicRunRuntimeCommandsReady` 后才以 run-scoped singleflight 交给 `BackgroundRoutine`。该 handoff 在每次
   启动重新由持久化 inventory 构建，不是第二套 persisted recovery/state machine，也不得依赖 `Weight()` 或调用普通
   `/run/command/get`。
-- typed record load 返回 `RuntimeStateSchemaVersionError` 时，SM-4 只发送 immutable non-current-schema fact 给 Run owner；它不提交 drive
-  failure aggregate、不请求 LLM/operation、不创建 governance ticket，且 Run owner 的
-  `fresh_activation_required` notification 不再进入 drive scheduling。特别是缺少 owner-fact convergence 的 `v1`
-  record 必须在 schema gate 被归类，不能继续到 DefinitionFocus 深层校验并阻断整个进程启动。
+- typed record load 使用严格 current JSON 与 aggregate validation；任何 unknown/retired field、旧 layout 或缺失 owner-fact
+  convergence 都使 startup/load 直接失败。SM-4 不发送 schema fact、不提交 drive failure aggregate、不请求 LLM/operation、
+  不创建 governance ticket，也不让 projection 将该错误转成 Run disposition。
 - Run owner opaque aggregate update 返回 `accepted`、`aggregate_revision_mismatch`、`semantic_rejection` 或
   `owner_transient` concrete result。仅 `aggregate_revision_mismatch` 的实际 revision mismatch 可构造
   `RuntimeCASConflictError`；Orchestrator 禁止用泛化 `errors.Is(err, common.ErrConflict)` 推断 CAS retry。
@@ -698,7 +699,7 @@ deployed run ID 只属于 archive regression evidence，不定义当前候选、
 - [x] runtime Definition clarification gap/dispatch/Decision ticket与Run replacement resolution的exact binding、duplicate和stale gate。
 - [x] Definition clarification/Decision/Approval wait与continuation的统一 lifecycle fence、Run-owner exact acknowledgement、
   bind-CAS前后、response-loss、fresh reload，以及非终态 delivery零 terminal-budget消费。
-- [x] startup inventory 多页成功、任意 cursor cycle、页数/条目上限、nil/wrong result、不兼容 schema，以及
+- [x] startup inventory 多页成功、任意 cursor cycle、页数/条目上限、nil/wrong result、invalid current persistence，以及
   commands-ready 首次/重复 handoff。
 - [x] forbidden production surface、generic effect/prerequisite compiler 的 capability-neutrality，以及 Run/Workspace
   snapshot reader 只读表面的静态/反射边界。

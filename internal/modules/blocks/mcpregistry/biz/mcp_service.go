@@ -530,7 +530,7 @@ func normalizeCapability(raw *mcpmodel.Capability, server *mcpmodel.Server) (*mc
 		return nil, common.ErrInvalidArgument
 	}
 	switch capability.Source {
-	case mcpmodel.CapabilitySourceUser, mcpmodel.CapabilitySourceBuiltin, mcpmodel.CapabilitySourceServerAllowlist, mcpmodel.CapabilitySourceLegacyImport:
+	case mcpmodel.CapabilitySourceUser, mcpmodel.CapabilitySourceBuiltin, mcpmodel.CapabilitySourceServerAllowlist:
 	default:
 		return nil, common.ErrInvalidArgument
 	}

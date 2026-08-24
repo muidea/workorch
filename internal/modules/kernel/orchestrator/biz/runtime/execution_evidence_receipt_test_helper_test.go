@@ -15,6 +15,7 @@ func runtimeTestEnsureCurrentFocusBindings(t *testing.T, aggregate *RuntimeAggre
 	if aggregate == nil {
 		t.Fatal("nil Runtime aggregate fixture")
 	}
+	runtimeTestSealCurrentPolicies(&aggregate.Facts)
 	aggregate.Facts = aggregate.Facts.Normalized()
 	if aggregate.ExecutionBudget.Policy.PolicyRevision == "" {
 		ledger, err := runtimecontract.NewRuntimeExecutionBudgetLedger(aggregate.Facts.ExecutionBudgetPolicy)
@@ -142,6 +143,7 @@ func runtimeTestSynchronizeCanonicalCWILedger(t *testing.T, aggregate *RuntimeAg
 
 func runtimeTestFactsWithCanonicalCWIProjection(t *testing.T, facts runtimecontract.RuntimeFacts) runtimecontract.RuntimeFacts {
 	t.Helper()
+	runtimeTestSealCurrentPolicies(&facts)
 	aggregate := RuntimeAggregate{Facts: facts}
 	runtimeTestSynchronizeCanonicalCWILedger(t, &aggregate)
 	return aggregate.Facts
@@ -575,11 +577,64 @@ func reduceRuntimeStateFixture(t *testing.T, facts runtimecontract.RuntimeFacts,
 
 func runtimeTestFactsWithCurrentFocusBindings(t *testing.T, facts runtimecontract.RuntimeFacts, definition runtimecontract.RuntimeDefinitionContext) runtimecontract.RuntimeFacts {
 	t.Helper()
+	runtimeTestSealCurrentPolicies(&facts)
 	aggregate := RuntimeAggregate{Facts: facts, Definition: definition}
 	runtimeTestSealCurrentFocusBindings(t, &aggregate)
 	runtimeTestEnsureSemanticPlanningLedger(t, &aggregate)
 	runtimeTestSealCanonicalCWILedger(t, &aggregate)
 	return aggregate.Facts
+}
+
+// runtimeTestSealCurrentPolicies completes hand-written test fixtures through
+// the same explicit constructors used by the fresh activation path. Runtime
+// production validation never calls this helper and never fills persisted
+// policy fields.
+func runtimeTestSealCurrentPolicies(facts *runtimecontract.RuntimeFacts) {
+	if facts == nil {
+		return
+	}
+	if facts.Activation.ExecutionContract.StateChangePolicy == "" {
+		facts.Activation.ExecutionContract.StateChangePolicy = runtimecontract.RuntimeStateChangeAllowedButNotRequired
+	}
+	convergence := runtimecontract.DefaultRuntimeConvergencePolicy()
+	if facts.ConvergencePolicy.MaxRepairAttemptsPerFocus != 0 {
+		convergence.MaxRepairAttemptsPerFocus = facts.ConvergencePolicy.MaxRepairAttemptsPerFocus
+	}
+	if facts.ConvergencePolicy.MaxValidationOnlyRetriesPerFocus != 0 {
+		convergence.MaxValidationOnlyRetriesPerFocus = facts.ConvergencePolicy.MaxValidationOnlyRetriesPerFocus
+	}
+	if facts.ConvergencePolicy.MaxAcceptanceSliceWorkItems != 0 {
+		convergence.MaxAcceptanceSliceWorkItems = facts.ConvergencePolicy.MaxAcceptanceSliceWorkItems
+	}
+	if facts.ConvergencePolicy.MaxFocuses != 0 {
+		convergence.MaxFocuses = facts.ConvergencePolicy.MaxFocuses
+	}
+	if facts.ConvergencePolicy.MaxCandidateContextItems != 0 {
+		convergence.MaxCandidateContextItems = facts.ConvergencePolicy.MaxCandidateContextItems
+	}
+	facts.ConvergencePolicy = convergence
+
+	recovery := runtimecontract.DefaultRuntimeRecoveryPolicy()
+	if facts.RecoveryPolicy.MaxProviderTransportAttempts != 0 {
+		recovery.MaxProviderTransportAttempts = facts.RecoveryPolicy.MaxProviderTransportAttempts
+	}
+	if facts.RecoveryPolicy.MaxOperationRecoveryAttempts != 0 {
+		recovery.MaxOperationRecoveryAttempts = facts.RecoveryPolicy.MaxOperationRecoveryAttempts
+	}
+	if facts.RecoveryPolicy.MaxCASReloadAttempts != 0 {
+		recovery.MaxCASReloadAttempts = facts.RecoveryPolicy.MaxCASReloadAttempts
+	}
+	if facts.RecoveryPolicy.MaxTerminalDeliveryAttempts != 0 {
+		recovery.MaxTerminalDeliveryAttempts = facts.RecoveryPolicy.MaxTerminalDeliveryAttempts
+	}
+	if facts.RecoveryPolicy.MaxDriveScheduleAttempts != 0 {
+		recovery.MaxDriveScheduleAttempts = facts.RecoveryPolicy.MaxDriveScheduleAttempts
+	}
+	if facts.RecoveryPolicy.MaxPrerequisiteRefreshes != 0 {
+		recovery.MaxPrerequisiteRefreshes = facts.RecoveryPolicy.MaxPrerequisiteRefreshes
+	}
+	facts.RecoveryPolicy = recovery
+	facts.ExecutionBudgetPolicy = runtimecontract.RuntimeExecutionBudgetPolicyForRuntimePolicies(convergence, recovery)
 }
 
 func runtimeTestBindCandidateToFacts(t *testing.T, facts runtimecontract.RuntimeFacts, candidate runtimecontract.RuntimeCandidate) runtimecontract.RuntimeCandidate {

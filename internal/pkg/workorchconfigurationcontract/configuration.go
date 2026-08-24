@@ -64,7 +64,6 @@ type WebSearchProviderConfiguration struct {
 	ID               string            `json:"id"`
 	Provider         string            `json:"provider"`
 	SearchEndpoint   string            `json:"searchEndpoint,omitempty"`
-	FetchEndpoint    string            `json:"fetchEndpoint,omitempty"`
 	Headers          map[string]string `json:"headers,omitempty"`
 	Timeout          string            `json:"timeout,omitempty"`
 	MaxResults       int               `json:"maxResults,omitempty"`
@@ -90,7 +89,6 @@ type WebSearchProviderTemplate struct {
 	MaxFetchBytes  int64  `json:"maxFetchBytes,omitempty"`
 	MaxRedirects   int    `json:"maxRedirects,omitempty"`
 	SearchEndpoint string `json:"searchEndpoint,omitempty"`
-	FetchEndpoint  string `json:"fetchEndpoint,omitempty"`
 }
 
 type GovernanceConfiguration struct {

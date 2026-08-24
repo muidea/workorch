@@ -132,9 +132,6 @@ func TestLLMUsagePayloadUsesTypedAuditDTOs(t *testing.T) {
 	if mode, _ := payload.String(PayloadKeyPhysicalResponseMode); mode != string(llmaudit.PhysicalResponseModeStreaming) {
 		t.Fatalf("physicalResponseMode = %q", mode)
 	}
-	if streaming, ok := payload.Bool(PayloadKeyStreaming); !ok || !streaming {
-		t.Fatalf("streaming derivation = %v/%v", streaming, ok)
-	}
 	if submitted, ok := payload.Bool(PayloadKeyProviderSubmitted); !ok || !submitted {
 		t.Fatalf("providerSubmitted fact = %v/%v", submitted, ok)
 	}

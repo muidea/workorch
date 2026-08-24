@@ -48,7 +48,7 @@ func validateSemanticManifestIdentity(aggregate RuntimeAggregate, manifest runti
 
 // semanticCatalogInvalidationLineage binds a retired semantic generation to
 // the durable prerequisite invalidation(s) that made its owner catalog stale.
-// A missing record is possible only when a corrupted/legacy aggregate reaches
+// A missing record is possible only when an invalid aggregate reaches
 // the probe guard; the deterministic synthetic signature still preserves the
 // exact manifest/gap identity in the generation audit record.
 func semanticCatalogInvalidationLineage(aggregate RuntimeAggregate, manifest runtimecontract.RuntimeSemanticPlanManifest, gaps []RuntimeSemanticCatalogFreshnessGap) ([]string, []string) {

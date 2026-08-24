@@ -65,7 +65,6 @@ type TaskPlan struct {
 	OccurredAt         string                                      `json:"occurredAt,omitempty"`
 	SourceProjection   string                                      `json:"sourceProjection,omitempty"`
 	SealedLLMSelection *runtimecontract.ProviderInferenceSelection `json:"sealedLLMSelection,omitempty"`
-	RuntimeActivation  *RuntimeActivationStatus                    `json:"runtimeActivation,omitempty"`
 }
 
 func CloneTaskDecompositions(items []TaskDecomposition) []TaskDecomposition {
@@ -90,10 +89,6 @@ func CloneTaskPlans(items []TaskPlan) []TaskPlan {
 		item.Nodes = cloneTaskNodes(item.Nodes)
 		item.EvidenceRefs = append([]string(nil), item.EvidenceRefs...)
 		item.SealedLLMSelection = runtimecontract.CloneProviderInferenceSelection(item.SealedLLMSelection)
-		if item.RuntimeActivation != nil {
-			activation := *item.RuntimeActivation
-			item.RuntimeActivation = &activation
-		}
 		ret = append(ret, item)
 	}
 	return ret

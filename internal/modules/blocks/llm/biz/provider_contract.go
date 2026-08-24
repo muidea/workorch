@@ -79,18 +79,10 @@ func validatePhysicalResponseMode(actual, expected llmaudit.PhysicalResponseMode
 }
 
 func providerSupportsNonChatOperation(capabilities llmmodels.ProviderCapabilities, operation string) bool {
-	capabilities = effectiveProviderCapabilities(capabilities)
 	for _, item := range capabilities.NonChatOperations {
 		if strings.TrimSpace(item) == operation {
 			return true
 		}
 	}
 	return false
-}
-
-func effectiveProviderCapabilities(capabilities llmmodels.ProviderCapabilities) llmmodels.ProviderCapabilities {
-	if !capabilities.Responses && !capabilities.Streaming && len(capabilities.NonChatOperations) == 0 {
-		capabilities.Responses = true
-	}
-	return capabilities
 }

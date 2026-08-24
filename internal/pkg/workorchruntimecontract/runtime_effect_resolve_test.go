@@ -296,12 +296,12 @@ func TestSealAcceptsDurableShellUnderStateChange(t *testing.T) {
 	}
 }
 
-func TestMCPRegistryKindNormalizesToOperationKind(t *testing.T) {
+func TestMCPRegistryKindNormalizationDoesNotBackfillOperationKind(t *testing.T) {
 	caps := normalizeRuntimeMCPCapabilities([]RuntimeMCPCapabilityContext{{
 		ID: "cap-1", ServerID: "srv", Kind: "tool", Name: "list", Enabled: true, RiskLevel: "read_only",
 	}})
-	if len(caps) != 1 || caps[0].OperationKind != StepKindMCPToolCall {
-		t.Fatalf("registry tool must normalize OperationKind to mcp/tool_call, got %+v", caps)
+	if len(caps) != 1 || caps[0].OperationKind != "" {
+		t.Fatalf("normalization backfilled missing OperationKind: %+v", caps)
 	}
 }
 

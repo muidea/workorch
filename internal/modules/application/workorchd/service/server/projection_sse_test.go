@@ -329,6 +329,7 @@ func TestProjectionSSEFrameConsumedByProductionRemoteDecoder(t *testing.T) {
 		magicevent.NewHeader(),
 		context.Background(),
 		workorchdevents.WorkspaceProjectionChangedData{
+			StreamGeneration:        "server-live-cross-generation",
 			WorkspaceID:             "ws-live-cross",
 			RunID:                   "run-live-cross",
 			GlobalRevision:          7,
@@ -376,14 +377,15 @@ func TestProjectionSSEFrameConsumedByProductionRemoteDecoder(t *testing.T) {
 // post-restart sequences cannot silently collide with pre-restart Last-Event-IDs.
 func TestProjectionNotificationIDUsesRestartSafeFloor(t *testing.T) {
 	data := workorchdevents.WorkspaceProjectionChangedData{
+		StreamGeneration:  "server-id-floor-generation",
 		WorkspaceID:       "ws-id-floor",
 		GlobalRevision:    3,
 		WorkspaceRevision: 9_000_000,
 		ActivityRevision:  8_000_000,
 	}
 	id := projectionNotificationID(data)
-	if id != "projection:ws-id-floor:9000000" {
-		t.Fatalf("id = %q, want projection:ws-id-floor:9000000", id)
+	if id != "projection:server-id-floor-generation:ws-id-floor:9000000" {
+		t.Fatalf("id = %q, want current generation-scoped projection id", id)
 	}
 	dto := workspaceProjectionChangedSSEFromData(data)
 	if dto.StreamRevision != 9_000_000 || dto.Revision.StreamRevision != 9_000_000 {

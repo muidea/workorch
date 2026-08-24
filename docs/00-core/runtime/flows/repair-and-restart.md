@@ -135,7 +135,7 @@ operator
 - predecessor 的 active focus、stale snapshot、attempt/receipt/evidence 不复制为 successor authority；
 - fresh bootstrap 可以携带有界 definition-change/governance history，但其内容是显式 typed contract；
 - `Resume` 不能通过 patch 或 loaded Run 改写定义；
-- non-current predecessor 返回 `data_reset_required`，不持久化 replacement intent；
+- 无法按当前结构读取或校验的 predecessor 在 repository/owner load 边界失败，不进入 Restart admission，也不持久化 replacement intent；
 - 相同 request/intent/terminal delivery 重放只能得到同一 successor。
 
 ### 5. Restart Recovery

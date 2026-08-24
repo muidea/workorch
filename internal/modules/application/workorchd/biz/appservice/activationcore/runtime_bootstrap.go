@@ -132,7 +132,6 @@ func RuntimeBootstrap(goal *workspacemodel.Goal, dod *workspacemodel.DoD, defini
 	recoveryPolicy := runtimecontract.DefaultRuntimeRecoveryPolicy()
 	executionBudgetPolicy := runtimecontract.RuntimeExecutionBudgetPolicyForRuntimePolicies(convergencePolicy, recoveryPolicy)
 	bootstrap := runtimecontract.RuntimeBootstrap{
-		SchemaVersion:          runtimecontract.RuntimeStateSchemaVersionCurrent,
 		Activation:             activation,
 		Definition:             definition,
 		DefinitionSeed:         definitionSeed,

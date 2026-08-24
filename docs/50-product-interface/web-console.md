@@ -115,8 +115,8 @@ resolution/ack链可以关闭原ticket。
 
 Decision Queue与Workspace Detail必须直接读取typed `definitionClarification`并展示`class/bindingState`、
 `requiredAction`、gap/violation、offending refs及至少`definitionRevision/authoritySnapshotId/clarificationDispatchId/focusRef`
-四项runtime identity；不得从`context`、`reason`、`decisionKind`或UI文案重建这些字段。legacy文本分类最多用于关闭
-generic mutation，不能形成typed blocker或启用任何操作。
+四项runtime identity；不得从`context`、`reason`、`decisionKind`或UI文案重建这些字段。缺少typed binding的记录不属于
+当前数据结构，必须在owner/repository读边界失败，UI不得保留文本分类兼容分支。
 
 Workspace Detail与Board同样只从canonical Workspace/Run exact blocker和concrete definition Decision识别该状态；即使
 `governanceDisplay`声称存在clarification也不能改变intent。exact runtime-definition blocker存在时主操作只能是Definition

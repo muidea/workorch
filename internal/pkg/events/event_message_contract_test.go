@@ -45,7 +45,9 @@ func TestOwnerEventContractsAreCompleteAndUnique(t *testing.T) {
 	// clarification adds five Decision-owner commands: static open/reconcile/
 	// admission-resolution and Runtime open/replacement-resolution. These eight
 	// contracts deliberately replace implicit setup/governance mutations.
-	const expectedProductionTopicCount = 273
+	// Run's retired Runtime-activation compatibility notification is absent:
+	// current-format Runtime state is loaded directly or rejected by its owner.
+	const expectedProductionTopicCount = 272
 	if len(contracts) != expectedProductionTopicCount {
 		t.Fatalf("production EventHub topic inventory = %d, want %d; adjudicate additions/removals in the active component contract closure plan", len(contracts), expectedProductionTopicCount)
 	}

@@ -22,7 +22,8 @@ Eventstream 正式拥有两个不同的顺序身份：
 - `StreamPosition`：Eventstream owner 在追加前签发的全局单调位置，是跨 workspace 持久化回放和 cursor 的顺序 SoT。允许因失败预留产生空洞，但已签发的位置不得在重启或 purge 后复用。
 - `Revision`：workspace-local 的追加代次，用于该 workspace 的 projection high-watermark。完整 purge 后该 workspace 的 revision 回到 0，下一条记录从 1 开始；全局 `StreamPosition` 不回退。
 
-`OccurredAt` 仅是来源时间元数据，不参与 cursor 顺序。旧数据若没有 `StreamPosition`，repository 将其置于新位置记录之前并使用确定性的 legacy 顺序；所有新追加必须具有正 `StreamPosition`，workspace 记录还必须具有正 `Revision`。
+`OccurredAt` 仅是来源时间元数据，不参与 cursor 顺序。每条持久化记录必须具有正 `StreamPosition`，workspace 记录还必须
+具有正 `Revision`；缺失/零值不会被重新排序或补号，读取直接失败。
 
 ## 组件交互及具体合同
 
@@ -52,11 +53,14 @@ owner-private helper，不存在可被 sibling 直接调用的 `Service/NewServi
 - typed payload encoder 不保存 Memory 正文、Goal/DoD 原文、Decision resolution material 或 Approval context 原文；这些材料只保存 hash、bytes、count 等审计摘要。
 - LLM usage payload 无损保存 owner 提供的 `logicalRequestId`/`physicalCallId`（Runtime usage 两者必须完整且
   `physicalCallId=requestId`）、bounded `physicalResponseMode=streaming|non_streaming` 与 exact
-  `providerSubmitted`；generic usage 可以不携带双层身份，Eventstream 不补造。兼容展示所需的 `streaming` 只能由
-  mode 纯派生。Eventstream 不按 request bytes、streaming、provider/model/status 推测身份、提交或模式，也不保存 provider raw body、
+  `providerSubmitted`；generic non-Runtime usage 可以不携带双层身份，Eventstream 不补造。公共 payload 不保存并行
+  `streaming` 布尔值。Eventstream 不按 request bytes、provider/model/status 推测身份、提交或模式，也不保存 provider raw body、
   prompt、credential、Authorization 或 endpoint。
-- `SanitizeAuditPayload` 是追加前和 owner 读出前的双重 guard：递归脱敏 secret-like key，并限制 payload 为 16 KiB、最多 32 个字段/数组项、单字符串 512 bytes、最大深度 4；无法安全容纳的内容退化为确定性 hash/size 摘要。旧版本已落库的 payload 也必须经过读边界清洗后才能进入 EventHub/SSE。
-- file repository 只在持久化读取边界兼容旧版大 payload 占位格式：`Payload:null` 必须同时具有非空 `PayloadRef`，随后按该 locator 读取对象形态的外置 payload；读取过程不改写历史 JSONL。无引用的 `null`、数组或标量仍以 invalid payload fail-closed。
+- `SanitizeAuditPayload` 是追加前 guard：递归脱敏 secret-like key，并限制 payload 为 16 KiB、最多 32 个字段/数组项、
+  单字符串 512 bytes、最大深度 4；无法安全容纳的内容退化为确定性 hash/size 摘要。owner read 只验证 persisted payload
+  已满足同一合同；不再二次清洗或升级无效记录。
+- file repository 的 current external payload 表示固定为 `record.Payload={}` 加 log-line 顶层 `payloadRef`，locator 指向
+  非空对象文件。`Payload:null`、record 内嵌 `PayloadRef`、双重 inline/external material、数组、标量或空文件均 fail-closed。
 - `EventRecordData.Validate()` 要求完整 immutable identity/source、正 `StreamPosition`、workspace-local 正 revision，以及已经清洗且有界的 payload；Application 消费者还校验发布 source 必须是 `blocks/eventstream`。
 
 ## 追加、回放与失败语义
@@ -71,10 +75,10 @@ owner-private helper，不存在可被 sibling 直接调用的 `Service/NewServi
 
 - topic/data/source/identity 校验、伪造 producer 拒绝与订阅释放；
 - concrete result、默认/最大 limit、high-watermark 范围和 Post 强写拒绝；
-- payload 脱敏、深度/长度/总量边界、旧记录读边界清洗；
+- payload 脱敏、深度/长度/总量边界及无效 persisted payload 严格拒绝；
 - LLM physical response mode 在 streaming/non-streaming、失败/output-limit 与 embedding/preflight 场景下 round-trip，
-  `streaming` boolean 仅为派生值，且 raw provider request/response material 不落盘；
-- legacy `Payload:null + PayloadRef` 外置对象的只读回填与历史 JSONL 不改写；inline `null`、数组、标量继续拒绝；
+  公共 payload 不含 `streaming` boolean，且 raw provider request/response material 不落盘；
+- current inline/external payload exactly-one、`Payload:null`、嵌套/冲突 reference、数组、标量和空 payload 文件拒绝；
 - stable notification exact replay、conflicting/failed append 不发布虚假记录、瞬时失败重试；
 - workspace revision 单调、跨 workspace clock skew、全局 `StreamPosition` cursor、重启与 purge 后计数语义；
 - memory/file/workspace-scoped repository 的 scope、cursor、物理 purge、其他 owner 文件保留；

@@ -1964,12 +1964,7 @@ func (m *AppModel) activeDefinitionClarificationDecision() *projectioncontract.D
 }
 
 func decisionRequiresDedicatedDefinitionFlow(item projectioncontract.Decision) bool {
-	if decisionHasTypedDefinitionClarification(item) {
-		return true
-	}
-	kind := strings.ToLower(strings.TrimSpace(item.DecisionKind))
-	failureClass := strings.ToLower(strings.TrimSpace(item.FailureClass))
-	return strings.Contains(kind, "definition_clarification") || kind == "definition_admission" || failureClass == "definition_admission"
+	return decisionHasTypedDefinitionClarification(item)
 }
 
 func decisionHasTypedDefinitionClarification(item projectioncontract.Decision) bool {
@@ -2527,15 +2522,6 @@ func (m *AppModel) applyRunControlState(run *projectioncontract.Run, message str
 		}
 		return
 	}
-	if runRequiresFreshActivation(run) {
-		m.running = false
-		m.clearCanonicalBlockingTargets()
-		m.progress = progressIdle
-		m.progressText = "Run requires a fresh activation"
-		m.result = freshActivationInstruction(run)
-		m.syncMainViewportToCurrentContent()
-		return
-	}
 	if runStateIsLive(common.RunState(run.State)) {
 		m.clearRunDisplayState()
 	}
@@ -2597,24 +2583,6 @@ func (m *AppModel) applyRunCommandAdmission(admission *backend.RunCommandResult,
 	}
 	m.progress = progressIdle
 	m.progressText = nonEmpty(presentation.Diagnostic, string(admission.Outcome), fallback)
-}
-
-func runRequiresFreshActivation(run *projectioncontract.Run) bool {
-	return run != nil && run.RuntimeActivation != nil && run.RuntimeActivation.Disposition == "fresh_activation_required"
-}
-
-func freshActivationInstruction(run *projectioncontract.Run) string {
-	if run == nil || run.RuntimeActivation == nil {
-		return "This run cannot be resumed by this binary. Use /run restart to create a fresh activation."
-	}
-	status := run.RuntimeActivation
-	if status.Reason == string(runtimecontract.RuntimeStateIncompatibilityReasonSchemaUnsupported) && status.ActualSchemaVersion > 0 && status.SupportedSchemaVersion > 0 {
-		return fmt.Sprintf("This run uses persisted runtime schema v%d, while this development binary uses baseline v%d. It is intentionally not resumed or restarted. Stop WorkOrch and clear the configured data and workspace directories.", status.ActualSchemaVersion, status.SupportedSchemaVersion)
-	}
-	if status.Reason == string(runtimecontract.RuntimeStateIncompatibilityReasonCWILedgerInvalid) {
-		return "This run has an ambiguous persisted CWI ledger and cannot be resumed safely. Use /run restart to create a fresh activation."
-	}
-	return "This run cannot be resumed by this binary. Use /run restart to create a fresh activation."
 }
 
 func (m *AppModel) applyRunStarted(run *projectioncontract.Run) {

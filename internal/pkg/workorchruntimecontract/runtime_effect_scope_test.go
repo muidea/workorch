@@ -2,7 +2,6 @@ package workorchruntimecontract
 
 import (
 	"encoding/json"
-	"errors"
 	"strings"
 	"testing"
 
@@ -316,39 +315,5 @@ func TestRuntimeTerminationRecordAndCurrentSchema(t *testing.T) {
 		t.Fatal("termination without revision must fail")
 	}
 
-	// The current state accepts termination, the persisted recovery lease, sealed
-	// coverage evidence bindings, and an activation-sealed reconciliation contract.
-	facts := RuntimeFacts{
-		WorkspaceID: "ws-1", RunID: "run-1",
-		DefinitionRevision: "def-1", EvidenceRevision: InitialRuntimeEvidenceRevision,
-		Focus:      CoverageFocus{ID: "focus-1", CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-1"}, RequiredEvidenceKinds: []string{EvidenceKindStateChange}},
-		Activation: RuntimeActivationContext{}, // may fail validate if activation incomplete - use minimal valid path via existing tests pattern
-	}
-	if RuntimeStateSchemaVersionCurrent != 2 {
-		t.Fatalf("owner-fact convergence baseline schema must be 2, got %d", RuntimeStateSchemaVersionCurrent)
-	}
-	for _, version := range []uint32{0, 1, 3, 8, 9} {
-		if err := (RuntimeStateRecord{SchemaVersion: version}).Validate(); err == nil || !errors.Is(err, ErrUnsupportedRuntimeStateSchema) {
-			t.Fatalf("schema %d must fail fast, got %v", version, err)
-		}
-		var schemaErr *RuntimeStateSchemaVersionError
-		if !errors.As((RuntimeStateRecord{SchemaVersion: version}).Validate(), &schemaErr) || schemaErr.Actual != version || schemaErr.Supported != RuntimeStateSchemaVersionCurrent {
-			t.Fatalf("schema %d typed error = %+v", version, schemaErr)
-		}
-	}
-	// future schema fail-fast on Validate schema branch
-	future := RuntimeStateRecord{SchemaVersion: 9, Facts: facts}
-	if err := future.Validate(); err == nil || !strings.Contains(err.Error(), "unsupported runtime state schema") {
-		t.Fatalf("future schema must fail fast, got %v", err)
-	}
 	_ = term
-}
-
-func TestBootstrapSchemaRejectsEveryNonCurrentVersion(t *testing.T) {
-	for _, version := range []uint32{0, 1, 3, 8, 9} {
-		b := RuntimeBootstrap{SchemaVersion: version}
-		if err := b.Validate(); err == nil || !errors.Is(err, ErrUnsupportedRuntimeStateSchema) {
-			t.Fatalf("bootstrap schema %d must fail, got %v", version, err)
-		}
-	}
 }

@@ -16,7 +16,7 @@ func ContextWithRuntimeWorkspaceID(ctx context.Context, workspaceID WorkspaceID)
 	if workspaceID == "" {
 		return ctx
 	}
-	// The legacy constructor may establish scope for an unscoped root context,
+	// This convenience constructor may establish scope for an unscoped root context,
 	// but must not silently replace the scope of an EventHub execution lane.
 	// Workspace-scoped command boundaries use BindRuntimeWorkspaceContext so a
 	// mismatch is reported as ErrConflict.

@@ -32,7 +32,6 @@ func LoadProviderConfigs(defaultProviderID string, valuesByID map[string]map[str
 			ID:             id,
 			Provider:       strings.TrimSpace(values["provider"]),
 			SearchEndpoint: strings.TrimSpace(values["searchEndpoint"]),
-			FetchEndpoint:  strings.TrimSpace(values["fetchEndpoint"]),
 			APIKey:         strings.TrimSpace(values["apiKey"]),
 			Headers:        headersFromValues(values),
 			Timeout:        boundedDurationValue(values["timeout"], DefaultTimeout, SystemMaxTimeout),

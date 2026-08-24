@@ -10,9 +10,8 @@ import (
 const InitialRuntimeEvidenceRevision = "runtime-evidence-00000000000000000000"
 
 type RuntimeBootstrap struct {
-	SchemaVersion uint32
-	Definition    RuntimeDefinitionContext
-	Activation    RuntimeActivationContext
+	Definition RuntimeDefinitionContext
+	Activation RuntimeActivationContext
 	// DefinitionSeed is the complete activation input for semantic planning.
 	// It carries no proof binding or owner feasibility authority.
 	DefinitionSeed         RuntimeDefinitionSeed
@@ -37,19 +36,12 @@ func (b RuntimeBootstrap) Normalized() RuntimeBootstrap {
 	b.StateChangeRequirement = b.StateChangeRequirement.Normalized()
 	b.ConvergencePolicy = b.ConvergencePolicy.Normalized()
 	b.RecoveryPolicy = b.RecoveryPolicy.Normalized()
-	if strings.TrimSpace(b.ExecutionBudgetPolicy.PolicyRevision) == "" {
-		b.ExecutionBudgetPolicy = RuntimeExecutionBudgetPolicyForRuntimePolicies(b.ConvergencePolicy, b.RecoveryPolicy)
-	} else {
-		b.ExecutionBudgetPolicy = b.ExecutionBudgetPolicy.Normalized()
-	}
+	b.ExecutionBudgetPolicy = b.ExecutionBudgetPolicy.Normalized()
 	return b
 }
 
 func (b RuntimeBootstrap) Validate() error {
 	b = b.Normalized()
-	if err := ValidateRuntimeStateSchemaVersion(b.SchemaVersion); err != nil {
-		return fmt.Errorf("runtime bootstrap schema: %w", err)
-	}
 	if err := b.Definition.Validate(); err != nil {
 		return err
 	}
@@ -237,7 +229,7 @@ func (b RuntimeBootstrap) InitialFacts(workspaceID common.WorkspaceID, runID com
 func SameRuntimeBootstrap(left RuntimeBootstrap, right RuntimeBootstrap) bool {
 	left = left.Normalized()
 	right = right.Normalized()
-	if left.SchemaVersion != right.SchemaVersion || !SameRuntimeDefinitionContext(left.Definition, right.Definition) || !SameRuntimeActivationContext(left.Activation, right.Activation) ||
+	if !SameRuntimeDefinitionContext(left.Definition, right.Definition) || !SameRuntimeActivationContext(left.Activation, right.Activation) ||
 		left.DefinitionSeed.Hash != right.DefinitionSeed.Hash ||
 		len(left.Focuses) != len(right.Focuses) || len(left.Slices) != len(right.Slices) || len(left.CoverageItems) != len(right.CoverageItems) ||
 		len(left.Requirements) != len(right.Requirements) ||

@@ -15,9 +15,6 @@ func (m *Biz) initializeRuntimeFromRun(ctx context.Context, run *runmodel.Run) (
 		return runtime.RuntimeAggregate{}, common.ErrInvalidArgument
 	}
 	bootstrap := run.RuntimeBootstrap.Clone()
-	if err := runtimecontract.ValidateRuntimeStateSchemaVersion(bootstrap.SchemaVersion); err != nil {
-		return runtime.RuntimeAggregate{}, fmt.Errorf("unsupported Runtime bootstrap schema: %w", err)
-	}
 	// A first Runtime aggregate may only be created from an activation that
 	// already sealed this binary's executable operation catalog. Do not repair
 	// an old bootstrap here: persisted nonterminal state is checked by the

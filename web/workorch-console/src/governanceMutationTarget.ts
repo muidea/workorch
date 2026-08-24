@@ -20,15 +20,8 @@ export function mergeGovernanceResources<T extends GovernanceResource>(current: 
   return [...merged.values()];
 }
 
-export function isDedicatedDefinitionDecision(item?: Pick<Decision, 'decisionKind' | 'failureClass' | 'definitionClarification'>) {
-  if (item?.definitionClarification) {
-    return true;
-  }
-  const kind = item?.decisionKind?.trim().toLowerCase() ?? '';
-  const failureClass = item?.failureClass?.trim().toLowerCase() ?? '';
-  return kind.includes('definition_clarification')
-    || kind === 'definition_admission'
-    || failureClass === 'definition_admission';
+export function isDedicatedDefinitionDecision(item?: Pick<Decision, 'definitionClarification'>) {
+  return Boolean(item?.definitionClarification);
 }
 
 export function isTypedDefinitionDecision(item?: Pick<Decision, 'definitionClarification'>) {

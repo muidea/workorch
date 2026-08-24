@@ -58,9 +58,6 @@ func SealMCPCapabilityEffect(capability RuntimeMCPCapabilityContext) RuntimeMCPC
 		capability.OperationKind = normalizeMCPRegistryKindToOperationKind(capability.Kind)
 	} else {
 		capability.OperationKind = CanonicalRuntimeBlockKind(capability.OperationKind)
-		if _, ok := RuntimeOperationDescriptorForKind(capability.OperationKind); !ok {
-			capability.OperationKind = normalizeMCPRegistryKindToOperationKind(capability.Kind)
-		}
 	}
 	capability.EffectScope = string(NormalizeRuntimeEffectScope(RuntimeEffectScope(capability.EffectScope)))
 	capability.IdempotencyClass = string(NormalizeRuntimeOperationIdempotencyClass(RuntimeOperationIdempotencyClass(capability.IdempotencyClass)))

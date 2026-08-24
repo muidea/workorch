@@ -13,14 +13,12 @@ const canonicalCases = [
   ['restart_required', 'selected_run_absent', false, 'rejected', 409],
   ['restart_required', 'selected_run_terminal', false, 'rejected', 409],
   ['restart_required', 'run_not_resumable', false, 'rejected', 409],
-  ['fresh_activation_required', 'runtime_state_incompatible', false, 'rejected', 409],
   ['fresh_activation_required', 'runtime_bootstrap_missing', false, 'rejected', 409],
   ['fresh_activation_required', 'definition_admission_missing', false, 'rejected', 409],
   ['fresh_activation_required', 'definition_admission_mismatch', false, 'rejected', 409],
   ['definition_changed_requires_restart', 'definition_changed', false, 'rejected', 409],
   ['governance_required', 'governance_pending', false, 'rejected', 409],
-  ['governance_required', 'definition_clarification_pending', false, 'rejected', 409],
-  ['data_reset_required', 'development_data_incompatible', false, 'rejected', 409]
+  ['governance_required', 'definition_clarification_pending', false, 'rejected', 409]
 ] as const;
 
 function expectation(httpStatus: number) {

@@ -59,7 +59,7 @@ Acceptance must prove:
 - removed run create/start/resume and `execution-restarts` routes return `404` and create no projected command.
 
 Do not reintroduce tests for `POST .../runs`, `POST .../runs/:runId/start`, `POST .../runs/:runId/resume` or
-`ExecutionContextPatch` as successful behavior. Their rejection is the compatibility guard.
+`ExecutionContextPatch` as successful behavior. Their rejection is the retired-surface guard.
 
 ## Definition Admission And Clarification
 
@@ -155,11 +155,11 @@ Required guards:
 - no startup scan mutates inactive/running Run state through workorchd;
 - no stale Step/watchdog/checkpoint replay drives Runtime;
 - duplicate inventory/notification/re-drive is idempotent;
-- non-current baseline fails closed with typed disposition and performs no provider/capability call;
+- invalid/retired persisted data fails at load with no compatibility disposition, owner transition, or provider/capability call;
 - current-baseline Restart preserves `ReplacementIntent` and terminal delivery ordering before successor creation;
 - replacement owner-private persisted stage/generation lease survives every resolution/termination/materialization cut point；
   process-local task loss、Stop/fresh restart只恢复同一 successor；
-- nonterminal Runtime terminal-delivery ledger pollution fails closed as `recovery_ledger_invalid`，projection不得修复；
+- nonterminal Runtime terminal-delivery ledger pollution fails current invariant validation at load；不得生成兼容分类或由 projection 修复；
 - repeated restart/resume cannot create duplicate successor, attempt, evidence or terminal delivery.
 
 Exact restart/recovery target names and their environment inputs are owned by the Makefile and scripts. This contract owns the

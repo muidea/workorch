@@ -9,7 +9,6 @@ type UpdateWebSearchProviderConfiguration struct {
 	ID             string            `json:"id"`
 	Provider       *string           `json:"provider,omitempty"`
 	SearchEndpoint *string           `json:"searchEndpoint,omitempty"`
-	FetchEndpoint  *string           `json:"fetchEndpoint,omitempty"`
 	Headers        map[string]string `json:"headers,omitempty"`
 	APIKey         *string           `json:"apiKey,omitempty"`
 	Timeout        *string           `json:"timeout,omitempty"`

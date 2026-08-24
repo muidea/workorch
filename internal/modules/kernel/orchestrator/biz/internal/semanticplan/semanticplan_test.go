@@ -66,7 +66,10 @@ func TestExistingTargetContextCarriesRevisionAndOwnerAlternatives(t *testing.T) 
 
 func TestValidateManifestIdentityUsesCanonicalCompilation(t *testing.T) {
 	definition := runtimecontract.RuntimeDefinitionContext{StartupInputHash: "startup-input-test", Revision: "definition-1", GoalID: "goal-1", GoalDefinition: "goal", DoDID: "dod-1", DoDDefinition: "dod", CapabilityContract: []string{runtimecontract.StepKindFileWrite}}
-	activation := runtimecontract.RuntimeActivationContext{ProviderSelection: runtimecontract.ProviderInferenceSelection{Target: runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "model-1"}}, ExecutionContract: runtimecontract.RuntimeExecutionContract{OperationContractRevision: runtimecontract.RuntimeOperationContractRevision()}}
+	activation := runtimecontract.RuntimeActivationContext{ProviderSelection: runtimecontract.ProviderInferenceSelection{Target: runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "model-1"}}, ExecutionContract: runtimecontract.RuntimeExecutionContract{
+		OperationContractRevision: runtimecontract.RuntimeOperationContractRevision(),
+		StateChangePolicy:         runtimecontract.RuntimeStateChangeAllowedButNotRequired,
+	}}
 	// Keep the fixture independent from provider details; the contract helper
 	// validates the execution selection and catalog identity.
 	items := []runtimecontract.RuntimeCoverageItem{{ID: "cwi-1", SliceID: "slice-1", SourceScope: "dodItem", SourceID: "dod-1", TargetText: "change", Order: 1}}

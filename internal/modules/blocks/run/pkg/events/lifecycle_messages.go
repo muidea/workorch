@@ -187,53 +187,6 @@ type RuntimeTerminalDeliveryFact struct {
 	runtimecontract.RuntimeTerminalDeliveryFact
 }
 
-// RuntimeStateIncompatibleFact is an immutable SM-4 observation that an
-// existing opaque Runtime state cannot safely enter DriveRuntime. It carries
-// no requested Run state: Run owner converts it to its private SM-1 lifecycle
-// event and persists fresh_activation_required itself.
-type RuntimeStateIncompatibleFact struct {
-	WorkspaceID     common.WorkspaceID
-	RunID           common.RunID
-	SourceOwner     string
-	CausationID     string
-	RuntimeStateRef string
-	Incompatibility runtimecontract.RuntimeStateIncompatibility
-	Feedback        runtimecontract.RuntimeFeedback
-}
-
-func (c RuntimeStateIncompatibleFact) Normalized() RuntimeStateIncompatibleFact {
-	c.SourceOwner = strings.TrimSpace(c.SourceOwner)
-	c.CausationID = strings.TrimSpace(c.CausationID)
-	c.RuntimeStateRef = strings.TrimSpace(c.RuntimeStateRef)
-	c.Incompatibility = c.Incompatibility.Normalized()
-	c.Feedback = c.Feedback.CloneOriginal()
-	return c
-}
-
-func (c RuntimeStateIncompatibleFact) Validate() error {
-	c = c.Normalized()
-	if c.WorkspaceID == "" || c.RunID == "" || c.SourceOwner != runtimeLifecycleSourceOwner || c.CausationID == "" || c.RuntimeStateRef == "" {
-		return fmt.Errorf("%w: runtime state incompatibility fact requires scope, source, causation and state reference", common.ErrInvalidArgument)
-	}
-	if err := c.Incompatibility.Validate(); err != nil {
-		return fmt.Errorf("%w: runtime state incompatibility: %v", common.ErrInvalidArgument, err)
-	}
-	category := runtimecontract.RuntimeFeedbackCategoryStateSchemaUnsupported
-	if c.Incompatibility.Reason == runtimecontract.RuntimeStateIncompatibilityReasonCWILedgerInvalid {
-		category = runtimecontract.RuntimeFeedbackCategoryStateCWILedgerInvalid
-	} else if c.Incompatibility.Reason == runtimecontract.RuntimeStateIncompatibilityReasonRecoveryLedgerInvalid {
-		category = runtimecontract.RuntimeFeedbackCategoryStateRecoveryLedgerInvalid
-	}
-	if c.Feedback.Domain != runtimecontract.RuntimeFeedbackDomainDrive || c.Feedback.StableCategory != category ||
-		c.Feedback.WorkspaceID != c.WorkspaceID || c.Feedback.RunID != c.RunID || c.Feedback.OriginalDiagnostic == nil {
-		return fmt.Errorf("%w: runtime state incompatibility requires scoped persisted-state feedback", common.ErrInvalidArgument)
-	}
-	if err := c.Feedback.Validate(); err != nil {
-		return fmt.Errorf("%w: runtime state incompatibility feedback: %v", common.ErrInvalidArgument, err)
-	}
-	return nil
-}
-
 func (c RuntimeTerminalDeliveryFact) Normalized() RuntimeTerminalDeliveryFact {
 	c.RuntimeTerminalDeliveryFact = c.RuntimeTerminalDeliveryFact.Normalized()
 	return c
@@ -262,9 +215,6 @@ type RunLifecycleCommandResult struct {
 	Transitioned  bool
 	PreviousState common.RunState
 	DeliveryAck   *runtimecontract.RuntimeDeliveryAcknowledgement
-	// RuntimeActivationDisposition is a Run-owned outcome for non-resumable
-	// records. It is not an Orchestrator convergence or drive classification.
-	RuntimeActivationDisposition runtimecontract.RuntimeActivationDisposition
 }
 
 func (r RunLifecycleCommandResult) Clone() RunLifecycleCommandResult {

@@ -47,14 +47,3 @@ func TestRuntimeOwnerIdentitiesNormalizeValidateAndHash(t *testing.T) {
 		t.Fatal("governance and terminal lifecycle identities were accepted together")
 	}
 }
-
-func TestNonCurrentRuntimeSchemaRequiresDataReset(t *testing.T) {
-	err := ValidateRuntimeStateSchemaVersion(8)
-	if err == nil {
-		t.Fatal("non-current schema was accepted by the baseline writer")
-	}
-	incompatibility, ok := RuntimeStateIncompatibilityFromError(err)
-	if !ok || incompatibility.ActualSchemaVersion != 8 || incompatibility.SupportedSchemaVersion != RuntimeStateSchemaVersionCurrent || incompatibility.Reason != RuntimeStateIncompatibilityReasonSchemaUnsupported {
-		t.Fatalf("schema incompatibility = %+v ok=%v", incompatibility, ok)
-	}
-}

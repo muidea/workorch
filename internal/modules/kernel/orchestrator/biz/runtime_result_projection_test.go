@@ -1093,7 +1093,7 @@ func TestDeliverRuntimeTerminalRejectsRecoverablePrerequisiteRefresh(t *testing.
 	bootstrap := runtimeBootstrap()
 	runFixture := &runmodel.Run{
 		ID: "run-v2", WorkspaceID: "ws-v2", State: common.RunStateActive,
-		RuntimeBootstrap: &bootstrap, RuntimeState: &record,
+		RuntimeBootstrap: &bootstrap, ReconciliationScope: runtimecontract.RuntimeCWIReconciliationScopeCurrentRun, RuntimeState: &record,
 	}
 	runFixture.RuntimeLifecycleFence = mustRuntimeLifecycleFence(t, runFixture)
 	if err := runs.Create(ctx, runFixture); err != nil {
@@ -1148,7 +1148,7 @@ func TestDeliverRuntimeTerminalRestartsAfterResultPersistenceBeforeOwnerProjecti
 	workspaces := filerepository.NewWorkspaceRepository(root + "/workspaces.json")
 	record := runtimeStateRecordFromAggregate(aggregate)
 	bootstrap := runtimeBootstrap()
-	runFixture := &runmodel.Run{ID: "run-v2", WorkspaceID: "ws-v2", State: common.RunStateActive, RuntimeBootstrap: &bootstrap, RuntimeState: &record}
+	runFixture := &runmodel.Run{ID: "run-v2", WorkspaceID: "ws-v2", State: common.RunStateActive, RuntimeBootstrap: &bootstrap, ReconciliationScope: runtimecontract.RuntimeCWIReconciliationScopeCurrentRun, RuntimeState: &record}
 	runFixture.RuntimeLifecycleFence = mustRuntimeLifecycleFence(t, runFixture)
 	if err := runs.Create(ctx, runFixture); err != nil {
 		t.Fatal(err)
@@ -1345,7 +1345,7 @@ func TestDeliverRuntimePrerequisiteRefreshExhaustedRestartsAfterTerminalPersiste
 	aggregate.Decision = decision
 	record := runtimeStateRecordFromAggregate(aggregate)
 	bootstrap := runtimeBootstrap()
-	runFixture := &runmodel.Run{ID: "run-v2", WorkspaceID: "ws-v2", State: common.RunStateActive, RuntimeBootstrap: &bootstrap, RuntimeState: &record}
+	runFixture := &runmodel.Run{ID: "run-v2", WorkspaceID: "ws-v2", State: common.RunStateActive, RuntimeBootstrap: &bootstrap, ReconciliationScope: runtimecontract.RuntimeCWIReconciliationScopeCurrentRun, RuntimeState: &record}
 	runFixture.RuntimeLifecycleFence = mustRuntimeLifecycleFence(t, runFixture)
 	if err := runs.Create(ctx, runFixture); err != nil {
 		t.Fatal(err)

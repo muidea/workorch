@@ -276,10 +276,16 @@ func runtimeCompleteAdmissionFixture(t *testing.T) RuntimeCompleteAdmissionInput
 		Slices: semantic.DefinitionSeed.Slices,
 		Activation: RuntimeActivationContext{
 			ProviderSelection: ProviderInferenceSelection{Target: ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "model-test"}},
-			ExecutionContract: RuntimeExecutionContract{OperationContractRevision: RuntimeOperationContractRevision()},
+			ExecutionContract: RuntimeExecutionContract{
+				OperationContractRevision: RuntimeOperationContractRevision(),
+				StateChangePolicy:         RuntimeStateChangeAllowedButNotRequired,
+			},
 		},
 		Capabilities: RuntimeCapabilities{StateChangeKinds: []string{StepKindFileWrite}},
 	}
+	facts.ConvergencePolicy = DefaultRuntimeConvergencePolicy()
+	facts.RecoveryPolicy = DefaultRuntimeRecoveryPolicy()
+	facts.ExecutionBudgetPolicy = RuntimeExecutionBudgetPolicyForRuntimePolicies(facts.ConvergencePolicy, facts.RecoveryPolicy)
 	inventory := semantic.Manifest.OwnerCatalogs[0].Normalized()
 	prerequisite := RuntimePrerequisite{
 		ID: inventory.PrerequisiteID, Kind: PrerequisiteKindOperationAdmissibility, Scope: RuntimePrerequisiteScopeGlobal,

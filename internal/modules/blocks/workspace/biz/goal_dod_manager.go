@@ -180,6 +180,9 @@ func (m *goalDoDManager) updateGoal(ctx context.Context, cmd workspaceevents.Upd
 	if current.ID != cmd.GoalID {
 		return nil, false, fmt.Errorf("%w: goal %s is not the current canonical definition", common.ErrConflict, cmd.GoalID)
 	}
+	if strings.TrimSpace(current.LineageState) != "active" {
+		return nil, false, fmt.Errorf("%w: goal definition lineage is outside the current data contract", common.ErrConflict)
+	}
 	if definitionHashForText(current.Text) == definitionHashForText(cmd.Text) {
 		return current, false, nil
 	}
@@ -187,9 +190,6 @@ func (m *goalDoDManager) updateGoal(ctx context.Context, cmd workspaceevents.Upd
 	goal.PreviousDefinitionHash = definitionHashForText(goal.Text)
 	goal.Text = cmd.Text
 	goal.DefinitionRevision = definitionRevisionForText("goal", sequence, cmd.Text)
-	if strings.TrimSpace(goal.LineageState) == "" {
-		goal.LineageState = "active"
-	}
 	if err := m.goals.Update(ctx, goal); err != nil {
 		return nil, false, err
 	}
@@ -290,6 +290,9 @@ func (m *goalDoDManager) updateDoD(ctx context.Context, cmd workspaceevents.Upda
 	if current.ID != cmd.DoDID {
 		return nil, false, fmt.Errorf("%w: DoD %s is not the current canonical definition", common.ErrConflict, cmd.DoDID)
 	}
+	if strings.TrimSpace(current.LineageState) != "active" {
+		return nil, false, fmt.Errorf("%w: DoD definition lineage is outside the current data contract", common.ErrConflict)
+	}
 	if definitionHashForItems(current.Items) == definitionHashForItems(cmd.Items) && current.State == common.DoDStateReady {
 		return current, false, nil
 	}
@@ -298,9 +301,6 @@ func (m *goalDoDManager) updateDoD(ctx context.Context, cmd workspaceevents.Upda
 	dod.Items = append([]string(nil), cmd.Items...)
 	dod.State = common.DoDStateReady
 	dod.DefinitionRevision = definitionRevisionForItems("dod", sequence, cmd.Items)
-	if strings.TrimSpace(dod.LineageState) == "" {
-		dod.LineageState = "active"
-	}
 	if err := m.dods.Update(ctx, dod); err != nil {
 		return nil, false, err
 	}
@@ -490,15 +490,13 @@ func nextDefinitionSequence(prefix string, itemCount int, itemAt func(int) (comm
 			continue
 		}
 		count++
-		if sequence, ok := definitionRevisionSequence(prefix, revision); ok && sequence > maximum {
+		sequence, ok := definitionRevisionSequence(prefix, revision)
+		if !ok {
+			return 0, count, fmt.Errorf("%w: %s definition revision is outside the current data contract", common.ErrConflict, prefix)
+		}
+		if sequence > maximum {
 			maximum = sequence
 		}
-	}
-	// Legacy content-hash-only revisions do not carry a generation. Starting
-	// above the retained record count gives them a one-way transition into the
-	// comparable format without rewriting history.
-	if retainedCount := uint64(count); retainedCount > maximum {
-		maximum = retainedCount
 	}
 	if maximum == ^uint64(0) {
 		return 0, count, fmt.Errorf("%w: %s definition revision exhausted", common.ErrConflict, prefix)

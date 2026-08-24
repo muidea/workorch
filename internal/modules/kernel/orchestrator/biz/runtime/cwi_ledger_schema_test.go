@@ -14,21 +14,21 @@ func TestRuntimeCWITransitionsFailClosedWithoutCurrentLedger(t *testing.T) {
 	facts.CWILedgerSchemaVersion = ""
 
 	if _, err := settleRuntimeCWIsForCurrentFocus(facts); err == nil {
-		t.Fatal("legacy CWI facts were accepted by settlement")
+		t.Fatal("CWI facts without the current ledger were accepted by settlement")
 	}
 	if _, err := advanceRuntimeCWIFocus(facts); err == nil {
-		t.Fatal("legacy CWI facts were accepted by focus advance")
+		t.Fatal("CWI facts without the current ledger were accepted by focus advance")
 	}
 	if _, _, err := reopenRuntimeCWIs(facts, []runtimeCWIReopenTrigger{{CoverageWorkItemID: "cwi-v2", TriggerRef: "receipt-1", Reason: "test"}}); err == nil {
-		t.Fatal("legacy CWI facts were accepted by reopen")
+		t.Fatal("CWI facts without the current ledger were accepted by reopen")
 	}
 }
 
 func TestRuntimeAggregateRejectsMissingCurrentCWILedger(t *testing.T) {
 	aggregate := stateChangeAggregate(t)
 	aggregate.Facts.CWILedgerSchemaVersion = ""
-	if err := aggregate.Validate(); err == nil || !strings.Contains(err.Error(), "current CWI ledger schema") {
-		t.Fatalf("legacy aggregate validation error = %v", err)
+	if err := aggregate.Validate(); err == nil || !strings.Contains(err.Error(), "canonical CWI ledger contract") {
+		t.Fatalf("missing-ledger aggregate validation error = %v", err)
 	}
 }
 

@@ -44,7 +44,10 @@ func DefineOrConsolidateWorkspaceDoD(ctx context.Context, hub magicevent.Hub, wo
 	if err != nil {
 		return nil, err
 	}
-	existing = activationcore.OrderedWorkspaceDoDs(existing)
+	existing, err = activationcore.OrderedWorkspaceDoDs(existing)
+	if err != nil {
+		return nil, err
+	}
 	if len(existing) > 0 {
 		return ConsolidateWorkspaceDoD(ctx, hub, workspaceID, existing, items)
 	}
@@ -67,7 +70,10 @@ func ListConsolidatedWorkspaceDoDs(ctx context.Context, hub magicevent.Hub, work
 	if err != nil {
 		return nil, err
 	}
-	items = activationcore.OrderedWorkspaceDoDs(items)
+	items, err = activationcore.OrderedWorkspaceDoDs(items)
+	if err != nil {
+		return nil, err
+	}
 	if len(items) <= 1 {
 		return items, nil
 	}

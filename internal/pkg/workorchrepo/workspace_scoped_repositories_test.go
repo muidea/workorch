@@ -29,6 +29,29 @@ func mustWorkspaceScopedPayload(t *testing.T, input map[string]any) workorcheven
 	return payload
 }
 
+func TestWorkspaceScopedFileStoreRejectsInvalidCurrentIndex(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		data string
+	}{
+		{name: "empty", data: "  \n"},
+		{name: "unknown field", data: `{"workspaces":[],"retiredLayout":"v1"}`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			store := newWorkspaceScopedFileStore(t.TempDir())
+			if err := os.MkdirAll(filepath.Dir(store.workspaceIndexPath()), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(store.workspaceIndexPath(), []byte(tc.data), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := store.loadWorkspaceIndexLocked(); err == nil {
+				t.Fatal("invalid current workspace index was accepted")
+			}
+		})
+	}
+}
+
 func TestWorkspaceScopedGovernanceGetRequiresUniqueUnscopedID(t *testing.T) {
 	ctx := context.Background()
 	repos := NewWorkspaceScopedFileRepositorySet(t.TempDir())

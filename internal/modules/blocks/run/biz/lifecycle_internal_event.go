@@ -20,7 +20,6 @@ type lifecycleInternalEvent struct {
 	GovernanceWait       *runevents.RuntimeGovernanceWaitFact
 	ContinuationEligible *runevents.RuntimeContinuationEligibleFact
 	TerminalDelivery     *runevents.RuntimeTerminalDeliveryFact
-	StateIncompatible    *runevents.RuntimeStateIncompatibleFact
 }
 
 type lifecycleInternalEventKind string
@@ -30,7 +29,6 @@ const (
 	lifecycleInternalEventGovernanceWaitObserved       lifecycleInternalEventKind = "governance_wait_observed"
 	lifecycleInternalEventContinuationEligibleObserved lifecycleInternalEventKind = "continuation_eligible_observed"
 	lifecycleInternalEventTerminalDeliveryObserved     lifecycleInternalEventKind = "terminal_delivery_observed"
-	lifecycleInternalEventStateIncompatibleObserved    lifecycleInternalEventKind = "state_incompatible_observed"
 )
 
 func (m *Biz) submitLifecycleInternalEvent(ctx context.Context, event lifecycleInternalEvent) (runevents.RunLifecycleCommandResult, error) {
@@ -43,7 +41,6 @@ func (m *Biz) submitLifecycleInternalEvent(ctx context.Context, event lifecycleI
 		event.GovernanceWait != nil,
 		event.ContinuationEligible != nil,
 		event.TerminalDelivery != nil,
-		event.StateIncompatible != nil,
 	} {
 		if present {
 			payloadCount++
@@ -94,14 +91,6 @@ func (m *Biz) submitLifecycleInternalEvent(ctx context.Context, event lifecycleI
 		deliveryCmd = &fact
 		reduce = func(current *runmodel.Run) (lifecycleTransition, error) {
 			return reduceTerminalDelivery(current, fact)
-		}
-	case lifecycleInternalEventStateIncompatibleObserved:
-		if event.StateIncompatible == nil {
-			return runevents.RunLifecycleCommandResult{}, common.ErrInvalidArgument
-		}
-		fact := *event.StateIncompatible
-		reduce = func(current *runmodel.Run) (lifecycleTransition, error) {
-			return reduceRuntimeStateIncompatible(current, fact)
 		}
 	default:
 		return runevents.RunLifecycleCommandResult{}, common.ErrInvalidArgument

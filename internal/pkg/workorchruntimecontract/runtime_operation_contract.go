@@ -817,7 +817,7 @@ func isMCPDynamicOperationParameter(kind string, name string) bool {
 
 // runtimeOperationDynamicParameterPolicy is included in the executable
 // operation-catalog revision. It makes a change to dynamic MCP parameter
-// semantics invalidate a non-current Runtime activation instead of silently
+// semantics invalidate a contract-mismatched sealed Runtime activation instead of silently
 // applying a different contract to an already sealed Run.
 func runtimeOperationDynamicParameterPolicy(kind string) string {
 	switch CanonicalRuntimeBlockKind(kind) {

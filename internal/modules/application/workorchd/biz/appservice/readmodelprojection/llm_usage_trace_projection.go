@@ -77,23 +77,15 @@ func llmUsageTraceDurationMs(payload workorcheventpayload.Payload) int {
 // source: llm_usage_trace_runtime.go
 
 func llmUsageTracePhysicalResponseMode(payload workorcheventpayload.Payload) (llmaudit.PhysicalResponseMode, bool) {
-	if raw, present := payload.String(recordpayload.PayloadKeyPhysicalResponseMode); present {
-		mode := llmaudit.PhysicalResponseMode(raw).Normalized()
-		if mode.Validate() != nil {
-			return "", false
-		}
-		return mode, true
-	}
-	// Persistence-only compatibility for event records written before the
-	// bounded enum existed. New records always carry the canonical mode.
-	streaming, present := payload.Bool(recordpayload.PayloadKeyStreaming)
+	raw, present := payload.String(recordpayload.PayloadKeyPhysicalResponseMode)
 	if !present {
 		return "", false
 	}
-	if streaming {
-		return llmaudit.PhysicalResponseModeStreaming, true
+	mode := llmaudit.PhysicalResponseMode(raw).Normalized()
+	if mode.Validate() != nil {
+		return "", false
 	}
-	return llmaudit.PhysicalResponseModeNonStreaming, true
+	return mode, true
 }
 
 func llmUsageTraceProviderSubmitted(payload workorcheventpayload.Payload) (bool, bool) {

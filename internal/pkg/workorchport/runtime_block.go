@@ -4,7 +4,6 @@ import runtimemodel "github.com/muidea/workorch/internal/pkg/workorchruntimecont
 
 const (
 	StepKindWorkspaceExecution = runtimemodel.StepKindLLMWorkspaceExecution
-	StepKindWorkspacePlan      = runtimemodel.StepKindLLMWorkspacePlan
 )
 
 const (

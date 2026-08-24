@@ -12,9 +12,8 @@ func llmUsageTraceRequestIdentity(payload workorcheventpayload.Payload) (string,
 	logicalRequestID, logicalPresent := payload.String(recordpayload.PayloadKeyLogicalRequestID)
 	physicalCallID, physicalPresent := payload.String(recordpayload.PayloadKeyPhysicalCallID)
 	if !logicalPresent && !physicalPresent {
-		// Persistence-only compatibility for generic usage and event records
-		// written before the two-level request identity was introduced.
-		return "", "", true
+		kind := eventPayloadString(payload, recordpayload.PayloadKeyKind)
+		return "", "", kind != "runtime_candidate" && kind != "runtime_semantic_plan"
 	}
 	if !logicalPresent || !physicalPresent || logicalRequestID == "" || physicalCallID == "" ||
 		logicalRequestID != strings.TrimSpace(logicalRequestID) || physicalCallID != strings.TrimSpace(physicalCallID) {

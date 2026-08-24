@@ -235,7 +235,7 @@ func (c *RuntimeController) commitEvidence(ctx context.Context, evidence Executi
 	return c.candidateDispatch.commitEvidence(ctx, evidence)
 }
 
-// executeActiveDispatch is a compatibility seam for focused Runtime tests.
+// executeActiveDispatch is a focused Runtime test harness.
 // Production dispatch enters candidateDispatchComponent through
 // ApplyInternalEvent; an SM-4 recovery budget is submitted as a separate
 // owner-private event by Biz. The test seam mirrors that two-event sequence
@@ -259,7 +259,7 @@ func (c *RuntimeController) executeActiveDispatch(ctx context.Context, workspace
 		if operationID, required := RuntimeOperationRecoveryBudgetRequired(err); !required {
 			return aggregate, err
 		} else {
-			// Keep the compatibility seam on the same owner-private event route as
+			// Keep the test harness on the same owner-private event route as
 			// production Biz. The candidate facet only hands off; SM-4 owns the
 			// budget transition through ApplyInternalEvent.
 			budget, budgetErr := c.ApplyInternalEvent(ctx, RuntimeInternalEvent{

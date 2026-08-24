@@ -103,7 +103,7 @@ func validateRuntimeAggregateSM2Authority(a RuntimeAggregate) error {
 	}
 	completed := sealedDispatchesToRuntimeRecords(a.CompletedDispatches)
 	if err := runtimecontract.ValidateRuntimeCWIBindingRetirementsAgainstExecution(a.Facts, active, completed, a.OperationReceipts); err != nil {
-		return runtimecontract.NewRuntimeStateCWILedgerIncompatibilityError(err)
+		return err
 	}
 	if err := a.Facts.Validate(); err != nil {
 		return err
@@ -284,7 +284,7 @@ func validateRuntimeAggregateGovernanceLedgers(a RuntimeAggregate) error {
 
 func validateRuntimeAggregateSM4DeliveryAcknowledgements(a RuntimeAggregate) error {
 	if err := runtimecontract.ValidateRuntimeStateTerminalDeliveryLedger(a.Decision, a.Termination, a.DeliveryAcknowledgements, a.Facts.Recovery); err != nil {
-		return runtimecontract.NewRuntimeStateRecoveryLedgerIncompatibilityError(err)
+		return err
 	}
 	for _, acknowledgement := range a.DeliveryAcknowledgements {
 		if err := acknowledgement.Validate(); err != nil {

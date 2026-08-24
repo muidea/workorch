@@ -286,55 +286,6 @@ func TestPortAcceptanceProjectionPreservesSemanticPlanningScopeAndOriginalDiagno
 	}
 }
 
-func TestRunProjectionProjectsFreshActivationStatusWithoutAliasing(t *testing.T) {
-	activation := &projectioncontract.RuntimeActivationStatus{
-		Disposition:            "fresh_activation_required",
-		Reason:                 "schema_unsupported",
-		ActualSchemaVersion:    2,
-		SupportedSchemaVersion: 4,
-	}
-	got := appmodelcore.ProjectRun(appmodelcore.Run{
-		ID:                "run-incompatible-schema",
-		WorkspaceID:       "ws-incompatible-schema",
-		RuntimeActivation: activation,
-	})
-	if got.RuntimeActivation == nil ||
-		got.RuntimeActivation.Disposition != "fresh_activation_required" ||
-		got.RuntimeActivation.ActualSchemaVersion != 2 ||
-		got.RuntimeActivation.SupportedSchemaVersion != 4 {
-		t.Fatalf("runtime activation = %+v, want bounded fresh-activation projection", got.RuntimeActivation)
-	}
-	got.RuntimeActivation.Disposition = "mutated-port-value"
-	if activation.Disposition != "fresh_activation_required" {
-		t.Fatalf("port mapping aliases app model activation: %+v", activation)
-	}
-}
-
-func TestRunProjectionPreservesCWILedgerFreshActivationReasonWithoutAliasing(t *testing.T) {
-	activation := &projectioncontract.RuntimeActivationStatus{
-		Disposition:            string(runtimecontract.RuntimeActivationDispositionFreshActivationRequired),
-		Reason:                 string(runtimecontract.RuntimeStateIncompatibilityReasonCWILedgerInvalid),
-		ActualSchemaVersion:    runtimecontract.RuntimeStateSchemaVersionCurrent,
-		SupportedSchemaVersion: runtimecontract.RuntimeStateSchemaVersionCurrent,
-	}
-	got := appmodelcore.ProjectRun(appmodelcore.Run{
-		ID:                "run-invalid-cwi-ledger",
-		WorkspaceID:       "ws-invalid-cwi-ledger",
-		RuntimeActivation: activation,
-	})
-	if got.RuntimeActivation == nil ||
-		got.RuntimeActivation.Disposition != string(runtimecontract.RuntimeActivationDispositionFreshActivationRequired) ||
-		got.RuntimeActivation.Reason != string(runtimecontract.RuntimeStateIncompatibilityReasonCWILedgerInvalid) ||
-		got.RuntimeActivation.ActualSchemaVersion != runtimecontract.RuntimeStateSchemaVersionCurrent ||
-		got.RuntimeActivation.SupportedSchemaVersion != runtimecontract.RuntimeStateSchemaVersionCurrent {
-		t.Fatalf("runtime activation = %+v, want CWI ledger fresh-activation projection", got.RuntimeActivation)
-	}
-	got.RuntimeActivation.Reason = "mutated-port-value"
-	if activation.Reason != string(runtimecontract.RuntimeStateIncompatibilityReasonCWILedgerInvalid) {
-		t.Fatalf("port mapping aliases app model activation: %+v", activation)
-	}
-}
-
 func TestWorkspaceSnapshotProjectionPreservesTypedPayloadSummaryWithoutAuthorityFallback(t *testing.T) {
 	got := WorkspaceSnapshotProjection(readmodelcore.WorkspaceSnapshotState{
 		EventRecords: []projectioncontract.EventRecord{{

@@ -109,7 +109,10 @@ func workspaceExecutionIntentBootstrap(t *testing.T, workspaceID common.Workspac
 		StartupInputHash: startupInputHash, Revision: definitionRevision,
 		GoalID: goal.ID, GoalDefinition: goal.Text, DoDID: dod.ID, DoDDefinition: dod.Items[0], CapabilityContract: []string{"file/read"},
 	}
-	activation := runtimecontract.RuntimeActivationContext{ProviderSelection: runtimecontract.ProviderInferenceSelection{Target: runtimecontract.ProviderModelTarget{ProviderID: "provider-1", ModelID: "model-1"}}}
+	activation := runtimecontract.RuntimeActivationContext{
+		ProviderSelection: runtimecontract.ProviderInferenceSelection{Target: runtimecontract.ProviderModelTarget{ProviderID: "provider-1", ModelID: "model-1"}},
+		ExecutionContract: runtimecontract.RuntimeExecutionContract{StateChangePolicy: runtimecontract.RuntimeStateChangeAllowedButNotRequired},
+	}
 	coverageItems := []runtimecontract.RuntimeCoverageItem{{ID: "cwi-1", SliceID: "slice-1", SourceScope: "dodItem", SourceID: string(dod.ID), Order: 1}}
 	slices := []runtimecontract.RuntimeAcceptanceSlice{{ID: "slice-1", CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-1"}, CompletionPolicy: runtimecontract.RuntimeAcceptanceSliceCompletionAll, ResultPolicy: runtimecontract.RuntimeAcceptanceSliceResultAllowed}}
 	seed, err := runtimecontract.CompileRuntimeDefinitionSeed(definition, activation, coverageItems, slices)
@@ -117,11 +120,12 @@ func workspaceExecutionIntentBootstrap(t *testing.T, workspaceID common.Workspac
 		t.Fatal(err)
 	}
 	bootstrap := runtimecontract.RuntimeBootstrap{
-		SchemaVersion: runtimecontract.RuntimeStateSchemaVersionCurrent, Definition: definition, Activation: activation, DefinitionSeed: seed,
+		Definition: definition, Activation: activation, DefinitionSeed: seed,
 		Focuses: []runtimecontract.CoverageFocus{{ID: "focus-1", SliceID: "slice-1", CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-1"}, RequireAssessment: true}},
 		Slices:  slices, CoverageItems: coverageItems,
 		ConvergencePolicy: runtimecontract.DefaultRuntimeConvergencePolicy(), RecoveryPolicy: runtimecontract.DefaultRuntimeRecoveryPolicy(),
 	}
+	bootstrap.ExecutionBudgetPolicy = runtimecontract.RuntimeExecutionBudgetPolicyForRuntimePolicies(bootstrap.ConvergencePolicy, bootstrap.RecoveryPolicy)
 	if err := bootstrap.Validate(); err != nil {
 		t.Fatalf("bootstrap for %s: %v", workspaceID, err)
 	}
@@ -184,30 +188,5 @@ func TestWorkspaceExecutionIntentDuplicateReplayUsesActiveRunAndRejectsResultDri
 	_, err = drifted.execute(context.Background(), workspaceevents.WorkspaceExecutionIntentCommand{WorkspaceID: "workspace-2", RequestID: "resume-2", Kind: runtimecontract.RuntimeExecutionIntentResume})
 	if !errors.Is(err, common.ErrConflict) {
 		t.Fatalf("drifted active Run result err=%v", err)
-	}
-}
-
-func TestWorkspaceExecutionIntentDataResetDoesNotMutateSlotOrDefaults(t *testing.T) {
-	fixture := newWorkspaceExecutionIntentFixture(t, func(command runevents.WorkspaceExecutionIntentCommand) runevents.WorkspaceExecutionIntentResult {
-		return runevents.WorkspaceExecutionIntentResult{RuntimeExecutionIntentAdmission: runtimecontract.RuntimeExecutionIntentAdmission{
-			WorkspaceID: command.WorkspaceID, RunID: "run-active", RequestID: command.RequestID, Kind: command.Kind,
-			Outcome: runtimecontract.RuntimeExecutionIntentDataResetRequired, Reason: runtimecontract.RuntimeExecutionIntentReasonDevelopmentDataIncompatible,
-		}}
-	})
-	bootstrap := fixture.seedWorkspace(t, "workspace-1", "run-active", true)
-	before, err := fixture.workspaces.Get(context.Background(), "workspace-1")
-	if err != nil {
-		t.Fatal(err)
-	}
-	result, err := fixture.execute(context.Background(), workspaceevents.WorkspaceExecutionIntentCommand{WorkspaceID: "workspace-1", RequestID: "restart-1", Kind: runtimecontract.RuntimeExecutionIntentRestart, Bootstrap: &bootstrap})
-	if err != nil || result.Outcome != runtimecontract.RuntimeExecutionIntentDataResetRequired {
-		t.Fatalf("result=%+v err=%v", result, err)
-	}
-	after, err := fixture.workspaces.Get(context.Background(), "workspace-1")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if after.ActiveRunID != before.ActiveRunID || after.DefaultLLMSelection != nil || after.Revision != before.Revision {
-		t.Fatalf("data-reset admission mutated workspace before=%+v after=%+v", before, after)
 	}
 }

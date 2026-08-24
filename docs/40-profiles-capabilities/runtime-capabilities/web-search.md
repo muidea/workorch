@@ -26,8 +26,8 @@ The legacy `approvalId` operation parameter is forbidden. Governance authority i
 ## URL And Network Policy
 
 - Search sends a bounded POST only to the configured provider; redirects must remain on the exact provider origin.
-- Fetch uses an owner-controlled direct GET. The configured legacy `fetchEndpoint` remains readable for configuration
-  compatibility but is not a Runtime fetch authority and is not called.
+- Fetch uses an owner-controlled direct GET. `fetchEndpoint` is retired and rejected as an unknown configuration field;
+  it is neither persisted nor callable Runtime authority.
 - Userinfo URLs, metadata endpoints, link-local/unspecified/multicast addresses, invalid ports/zones and configured denied
   domains are rejected before access.
 - Plain HTTP, loopback and private-network access require an exact approval grant. Redirect targets are checked before follow;

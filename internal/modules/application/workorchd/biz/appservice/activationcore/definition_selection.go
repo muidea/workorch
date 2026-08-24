@@ -17,7 +17,10 @@ func SelectWorkspaceExecutionGoal(
 	if err != nil {
 		return nil, err
 	}
-	items = OrderedWorkspaceGoals(items)
+	items, err = OrderedWorkspaceGoals(items)
+	if err != nil {
+		return nil, err
+	}
 	latest := LatestWorkspaceGoal(items)
 	if requestedID != "" {
 		for _, item := range items {
@@ -46,7 +49,10 @@ func SelectWorkspaceExecutionDoD(
 	if err != nil {
 		return nil, err
 	}
-	items = OrderedWorkspaceDoDs(items)
+	items, err = OrderedWorkspaceDoDs(items)
+	if err != nil {
+		return nil, err
+	}
 	readyItems := make([]*workspacemodel.DoD, 0, len(items))
 	for _, item := range items {
 		if item != nil && item.State == common.DoDStateReady {

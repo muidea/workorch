@@ -4,7 +4,7 @@ Status: active
 
 Type: stateful-block-contract
 
-Last Verified: 2026-08-23
+Last Verified: 2026-08-24
 
 ## 组件类型
 
@@ -53,16 +53,13 @@ terminal seal 均由 Orchestrator 负责；Run 不承担跨组件编排。
   rebase。Run 不解释其中的 facts、authority、candidate、dispatch、evidence 或 governance ledger。
 - `StoreRuntimeStateRecordCommand` 不是完整 Run entity replacement；它只允许 `kernel/orchestrator` 提交 opaque
   `RuntimeStateRecord` 与 expected aggregate revision。Run owner 必须在进入 CAS 前验证 EventHub source，其他 caller
-  即使构造出合法 record 也必须被拒绝；没有 typed bootstrap 的 legacy/non-Runtime Run 也不能借该命令写入
+  即使构造出合法 record 也必须被拒绝；没有 current typed bootstrap 的 Run 也不能借该命令写入
   `RuntimeState` 或 lifecycle fence。
 - `WorkspaceExecutionIntentCommand` 的 restart 分支携带 typed `RuntimeBootstrap`，保存 effective Goal/DoD definition、
   ordered focus queue 与 prerequisite requirements，并显式绑定 Workspace owner 封存的 `StartupInputHash`。RequestID 的幂等身份绑定 workspace、Goal、DoD、definition
   revision、bootstrap hash 与固定 replacement policy；同 ID、不同 sealed payload 必须 conflict。Run 不接受或持久化没有执行消费者的队列优先级输入。
-- file-backed v1 clarification intent 的 immutable hash 曾包含现已退役的 caller `Priority` slot。Run model 只在磁盘
-  解码时验证非零 slot 与既有 `ReplacementIntentHash` 精确匹配后，把它保存在 unexported persistence-only identity
-  slot 中，以维持旧 Decision binding、后续 CAS 和 fresh-process duplicate Restart 的同一 owner identity；篡改或缺失
-  slot 必须 fail closed。该 slot 不进入 command/EventHub result/API projection/调度，新建 intent 始终使用中性 `0`
-  hash slot 且不序列化 `Priority`；只有已经验证的旧记录在持久化 round-trip 时保留原 v1 字段。
+- `ReplacementIntent` identity 只哈希当前 sealed payload；caller `Priority` 不属于模型、持久化、EventHub result、
+  API projection 或调度。带 `Priority` 或其他退役/未知字段的 Run/intent JSON 在 repository decode 时直接失败。
 - 当 bootstrap 含有 activation Memory selection 时，Run owner 在 Run record 成功持久化后向 `blocks/memory` 发送一次 typed `UpsertMemoryRecallTraceCommand`。它使用稳定的 Run CreatedAt，并透传 sealed candidate/selected/excluded、quota、score/hit 与 byte/token budget；该消息只是不可变 activation audit，Memory owner 独占 create-once RecallTrace 持久化与首次 `MemoryRecallRecorded` 通知。固定 trace ID + 完整内容比较使 exact replay 零写入、内容漂移 conflict；memory observability 失败不得回滚已成功的 Run 创建。Run 启动时会从已持久化 bootstrap 重放该 fact，补偿 Run 提交后、Memory 交接前的崩溃窗口。
 - 生产入口由 application 向 Workspace owner 提交 workspace-scoped resume/restart；Workspace 校验并选择 canonical
   definition 后，只有 `blocks/workspace` 可向 Run owner 发送 `WorkspaceExecutionIntentCommand`。Run Biz 在自身 reducer
@@ -78,23 +75,20 @@ terminal seal 均由 Orchestrator 负责；Run 不承担跨组件编排。
   仍为 typed conflict，且 bound/deliverable/completed intent 均不可替换。`ticket_already_bound` 的不同 current identity/hash
   会随 rejection 持久化为 owner invariant breach，不能从 hash 重建 bootstrap 或由 Restart 覆盖。启动恢复只重放相同
   ticket/intent/hash，Decision acknowledgement 之前零 terminal delivery。
-- Orchestrator 发现不支持的 persisted Runtime schema 时，只能发送带 scope、opaque state ref、actual/supported
-  schema 和 safe original diagnostic 的 `RuntimeStateIncompatibleFact`。Run reducer 将它持久化为
-  `fresh_activation_required`；该 Run 的 workspace resume admission 返回 typed non-resumable disposition，既不发 continuation
-  fact，也不触发 drive。开发基线不兼容时必须清理旧数据，再由用户提交显式 fresh activation；
-  不能用对不兼容 predecessor 的 restart 做 schema 迁移。当前 Runtime aggregate schema 为 `v2`；`v1` 未封存
-  owner-fact convergence，Run 必须保持其 opaque bytes 原样并只接收 Orchestrator 的 incompatibility fact。
+- Run 与 Runtime persistence 只接受一个 current shape。旧目录不再探测或导入；当前路径上的未知/退役字段、空文件或
+  当前不变量缺失使 repository/owner load 直接失败。Run 不保存 schema status、不接收 invalid-data fact，也不把无效数据
+  转换为 execution admission outcome。`fresh_activation_required` 仅表示一个可读 current Run 缺少 sealed bootstrap。
+- current Run lineage 必须显式存在；需要 supersede 的 Run 只能从 `LineageState=active` 转换。空 lineage 直接冲突且
+  不补写、不推断为 active，也不创建 replacement successor。
 - governed blocker 与 continuation 必须各自恰好携带一个 DecisionTicket 或 Approval identity，并匹配已持久化的
   opaque governance fence；wait fence 的 resolution slot 必须为空，continuation 的 typed fact、Run-private reducer 与同步
   acknowledgement 必须匹配 fence 中 exact `ResolutionID`，即使 Run 已经 active 也要先完成该比较；opaque fence 的
-  governance/terminal mode 必须恰选其一，terminal 不得夹带历史 governance identity。旧/错 resolution 零写入
+  governance/terminal mode 必须恰选其一，terminal 不得夹带历史 governance identity。stale/错 resolution 零写入
   fail-closed；approval-only 路径与 ticket-only 路径同等合法。
 - Run 创建及状态变化使用 `RunStateChangedData` typed notification；通知只包含 SM-1 state、causation 与 opaque
-  RuntimeState revision/ref，不镜像 Orchestrator action/focus/repair。current development baseline 的 Runtime record 同时持久化 Orchestrator-authored
-  opaque lifecycle fence；Run 仅比较 scope/schema/revision/ref/hash/bootstrap/fence，禁止解码 Decision、semantic、candidate、
-  governance、evidence 或 drive 内容。若为 `fresh_activation_required`，通知额外携带
-  Run-owned actual/supported schema identity；Workspace 必须保留同一 Run 的 active slot，直到用户显式 reset 后重新
-  activation，不能把该非终态 disposition 当作 terminal release。通知仍不公开 aggregate 内容或选择 recovery action。
+  RuntimeState revision/ref，不镜像 Orchestrator action/focus/repair。current Runtime record 同时持久化 Orchestrator-authored
+  opaque lifecycle fence；Run 仅比较 scope/revision/ref/hash/bootstrap/fence，禁止解码 Decision、semantic、candidate、
+  governance、evidence 或 drive 内容。通知不携带 schema-validity identity、不公开 aggregate 内容或选择 recovery action。
   Governance、Eventstream 和 application 按需订阅。
 - Governance、Eventstream 和 application 按需导入 `blocks/run/pkg/events` 订阅或发送命令。
 
@@ -121,7 +115,7 @@ terminal seal 均由 Orchestrator 负责；Run 不承担跨组件编排。
   `pending` 或 `pending_clarification_resolution`，termination claim/ack/failure、resolution acknowledgement、successor
   materialization 与 lineage/activation 全部经同一 CAS reducer 推进，禁止 generic mutate callback。
   successor create、predecessor lineage CAS 和 successor activation 是可独立重放的持久化切点；任一切点后重启都只
-  收敛到同一 successor。非当前 development baseline 返回 `data_reset_required`，且不持久化 replacement intent。
+  收敛到同一 successor。无法按当前结构读取的 predecessor 在 admission 前失败，且不持久化 replacement intent。
 - `ReplacementIntent.Recovery` 是 Run owner-private durable successor：stage 只允许 clarification resolution、administrative
   termination 与 successor materialization，state 只允许 scheduled/running/exhausted/completed，并绑定 exact intent hash、
   generation、attempt、dueAt。每次 side-effect 前先 CAS claim；失败在同一 owner reducer 中续排下一 generation。进程内
@@ -141,8 +135,8 @@ terminal seal 均由 Orchestrator 负责；Run 不承担跨组件编排。
   覆盖为更低 revision；blocker 字段必须与 SM-1 RunState 一致。Run 不检查 RuntimeStateRecord 内部 definition、
   activation 或 decision 语义。
 - Orchestrator opaque record 的 terminal-delivery counter/ack 只在 sealed terminal 或 administrative termination 合法；
-  nonterminal aggregate 携带该 ledger 时必须以 typed `recovery_ledger_invalid` 进入 current-schema incompatibility/data-reset
-  路径，Run/Workorchd 不得归零、隐藏或把它当 repair budget。
+  nonterminal aggregate 携带该 ledger 时不属于当前持久化结构，必须由当前 invariant 校验使 owner load 直接失败。
+  不再为该旧形态定义兼容分类或升级结果；Run/Workorchd 不得归零、隐藏、升级或把它当 repair budget，运维侧清理数据后重新创建。
 - candidate attempt、sealed dispatch、governance binding/resolution、focus/evidence 等均作为 opaque RuntimeStateRecord
   payload 原样 CAS 持久化；execution-budget allocation/consumption、SM-2 repair、SM-4 recovery和bounded recoverable wait
   同样只作为opaque aggregate sub-ledger保存。其合法性、去重、deadline/lease与状态迁移只由Orchestrator owner
@@ -154,7 +148,7 @@ terminal seal 均由 Orchestrator 负责；Run 不承担跨组件编排。
   传递 `map[string]any`、指定外部 owner state 或调用 Orchestrator service facade。
 - Run 不提供 Validate/Complete service command；禁止 application 或其他 module 绕过 Runtime reducer/evidence gate 直接把 active Run 标记为 validated/completed。
 - Run owner handler 直接调用本 owner `biz`；不保留跨 owner `Service()` 或 `service/` forwarding facade。跨组件只接受
-  Workspace-owner execution selection、Orchestrator governance/continuation/incompatibility/terminal fact，以及本 owner
+  Workspace-owner execution selection、Orchestrator governance/continuation/terminal fact，以及本 owner
   query/cleanup/CAS；禁止外部 Block/Fail/Complete 目标 state setter。
 - Run biz 不再持有或构造 Orchestrator adapter；已删除仅用于 禁止的 lifecycle 转发的 service DTO alias 和 test-only
   constructor。Run owner 的生产依赖只包含自身 repository、EventHub、EventHub-backed Workspace typed read port 与
@@ -166,7 +160,7 @@ terminal seal 均由 Orchestrator 负责；Run 不承担跨组件编排。
 两类 wait/continuation、terminal stale/duplicate、fresh-activation；restart RequestID sealed-payload 冲突、intent 先持久化、
 runtime clarification acknowledgement gate，以及
 terminal→successor create→lineage CAS→activation 各持久化切点的崩溃恢复与
-唯一 successor；Runtime CAS source/scope/schema/hash、aggregate revision race、物理 rebase 与 legacy bypass；Setup 阶段
+唯一 successor；Runtime CAS source/scope/hash、aggregate revision race、物理 rebase 与 retired-field rejection；Setup 阶段
 inventory/record read、commands-ready 元数据与重复 handoff、typed result clone、workspace scope；activation Memory 完整
 selection fact、missing subscriber/owner error 不回滚、Run 启动补写与 Memory owner exact replay、in-flight Stop 与重复
 Start/Stop。当前无本 README 已知可执行缺口。

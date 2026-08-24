@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"math"
 	"os"
 	"path/filepath"
@@ -98,15 +99,15 @@ type resultSummaryPersistenceWire struct {
 }
 
 func decodeResultSummaryPersistence(data json.RawMessage) (workorchresultcontract.ResultSummary, error) {
-	if payloadJSON := bytes.TrimSpace(data); len(payloadJSON) == 0 || bytes.Equal(payloadJSON, []byte("null")) {
+	if len(bytes.TrimSpace(data)) == 0 {
 		return workorchresultcontract.ResultSummary{}, nil
 	}
 	wire := resultSummaryPersistenceWire{}
-	if err := json.Unmarshal(data, &wire); err != nil {
+	if err := decodeCurrentJSON(data, &wire); err != nil {
 		return workorchresultcontract.ResultSummary{}, err
 	}
 	item := workorchresultcontract.ResultSummary(wire.resultSummaryPersistenceValue)
-	if err := decodePersistencePayloadAllowLegacyNull(wire.Diagnostics, &item.Diagnostics); err != nil {
+	if err := decodePersistencePayload(wire.Diagnostics, &item.Diagnostics); err != nil {
 		return workorchresultcontract.ResultSummary{}, err
 	}
 	return item, nil
@@ -114,7 +115,7 @@ func decodeResultSummaryPersistence(data json.RawMessage) (workorchresultcontrac
 
 func decodeResultPersistence(data []byte) (resultmodel.Result, error) {
 	wire := resultPersistenceWire{}
-	if err := json.Unmarshal(data, &wire); err != nil {
+	if err := decodeCurrentJSON(data, &wire); err != nil {
 		return resultmodel.Result{}, err
 	}
 	item := resultmodel.Result(wire.resultPersistenceValue)
@@ -164,41 +165,35 @@ type eventRecordLogLinePersistenceWire struct {
 	PayloadRef string                     `json:"payloadRef,omitempty"`
 }
 
-// UnmarshalJSON preserves the object-only event payload contract while reading
-// the bounded legacy representation used for external payloads. Older writers
-// emitted Payload:null together with PayloadRef; the repository must resolve
-// that locator before the typed payload decoder sees the external JSON object.
-// An inline null or any scalar/array payload remains invalid.
+// UnmarshalJSON enforces the current object-only event payload contract. The
+// inline and external forms have one exact representation; missing, null or
+// mismatched payload references are invalid persistence.
 func (line *eventRecordLogLine) UnmarshalJSON(data []byte) error {
 	if line == nil {
 		return fmt.Errorf("%w: nil event record log line target", workorcheventpayload.ErrInvalidPayload)
 	}
 	wire := eventRecordLogLinePersistenceWire{}
-	if err := json.Unmarshal(data, &wire); err != nil {
+	if err := decodeCurrentJSON(data, &wire); err != nil {
 		return err
 	}
 
 	record := eventstream.EventRecord(wire.Record.eventRecordPersistenceValue)
 	storagePayloadRef := strings.TrimSpace(wire.PayloadRef)
-	effectivePayloadRef := storagePayloadRef
-	if effectivePayloadRef == "" {
-		effectivePayloadRef = strings.TrimSpace(record.PayloadRef)
-	}
 	payloadJSON := bytes.TrimSpace(wire.Record.Payload)
-	legacyExternalPayload := false
-	switch {
-	case len(payloadJSON) == 0:
-		record.Payload = workorcheventpayload.Payload{}
-	case bytes.Equal(payloadJSON, []byte("null")) && effectivePayloadRef != "":
-		record.Payload = workorcheventpayload.Payload{}
-		legacyExternalPayload = true
-	default:
-		if err := json.Unmarshal(payloadJSON, &record.Payload); err != nil {
-			return err
-		}
+	if len(payloadJSON) == 0 {
+		return fmt.Errorf("%w: event record payload is missing", workorcheventpayload.ErrInvalidPayload)
 	}
-	if legacyExternalPayload && storagePayloadRef == "" {
-		storagePayloadRef = effectivePayloadRef
+	if err := json.Unmarshal(payloadJSON, &record.Payload); err != nil {
+		return err
+	}
+	if strings.TrimSpace(record.PayloadRef) != "" {
+		return fmt.Errorf("%w: event record storage reference must not be duplicated inside the record", workorcheventpayload.ErrInvalidPayload)
+	}
+	if storagePayloadRef != "" && len(record.Payload.Fields) != 0 {
+		return fmt.Errorf("%w: external event record payload must be empty inline", workorcheventpayload.ErrInvalidPayload)
+	}
+	if storagePayloadRef != "" && len(record.PayloadSummary.Fields) == 0 {
+		return fmt.Errorf("%w: external event record payload requires the current summary", workorcheventpayload.ErrInvalidPayload)
 	}
 
 	line.Record = record
@@ -217,6 +212,24 @@ type mapFileCacheEntry struct {
 }
 
 var mapFileCache sync.Map
+
+// decodeCurrentJSON accepts exactly one value in the repository's current
+// persisted shape. Retired and unknown fields fail at the read boundary;
+// repository reads never rewrite data into another shape.
+func decodeCurrentJSON(data []byte, target any) error {
+	decoder := json.NewDecoder(bytes.NewReader(data))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(target); err != nil {
+		return err
+	}
+	if err := decoder.Decode(&struct{}{}); err != io.EOF {
+		if err == nil {
+			return fmt.Errorf("%w: persisted file contains multiple JSON values", common.ErrInvalidArgument)
+		}
+		return err
+	}
+	return nil
+}
 
 func NewSoulRepository(path string) *SoulRepository {
 	return &SoulRepository{path: path}
@@ -333,11 +346,11 @@ func (r *SoulRepository) loadSoul(dir string, id common.SoulID) (*soul.Soul, err
 		return nil, err
 	}
 	var item soul.Soul
-	if err := json.Unmarshal(data, &item); err != nil {
+	if err := decodeCurrentJSON(data, &item); err != nil {
 		return nil, err
 	}
-	if item.ID == "" {
-		item.ID = id
+	if item.ID == "" || item.ID != id {
+		return nil, fmt.Errorf("%w: soul metadata identity does not match its persistence path", common.ErrInvalidArgument)
 	}
 	content, err := os.ReadFile(filepath.Join(dir, soulDefinitionFile))
 	if err != nil {
@@ -936,7 +949,7 @@ func (r *ResultRepository) Delete(_ context.Context, id common.ResultID) error {
 }
 
 func (r *ResultRepository) resultRoot() string {
-	return repositoryItemRoot(r.path, "result.json", "results")
+	return repositoryItemRoot(r.path)
 }
 
 func (r *ResultRepository) resultPath(id common.ResultID) string {
@@ -1081,7 +1094,7 @@ func (r *ArtifactRepository) Delete(ctx context.Context, id common.ArtifactID) e
 }
 
 func (r *ArtifactRepository) artifactRoot() string {
-	return repositoryItemRoot(r.path, "artifact.json", "artifacts")
+	return repositoryItemRoot(r.path)
 }
 
 func (r *ArtifactRepository) artifactPath(id common.ArtifactID) string {
@@ -1120,7 +1133,7 @@ func (r *EventRecordRepository) Append(_ context.Context, item *eventstream.Even
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
-	if item == nil || item.ID == "" {
+	if item == nil || item.ID == "" || strings.TrimSpace(item.PayloadRef) != "" {
 		return common.ErrInvalidArgument
 	}
 	if err := r.observeEventRecordStreamPosition(item.StreamPosition); err != nil {
@@ -1204,7 +1217,7 @@ func (r *EventRecordRepository) eventRecordStreamPositionState() (eventRecordStr
 	data, err := os.ReadFile(path)
 	if err == nil {
 		var state eventRecordStreamPositionState
-		if unmarshalErr := json.Unmarshal(data, &state); unmarshalErr != nil || state.Position < 0 {
+		if unmarshalErr := decodeCurrentJSON(data, &state); unmarshalErr != nil || state.Position < 0 {
 			if unmarshalErr != nil {
 				return eventRecordStreamPositionState{}, unmarshalErr
 			}
@@ -1391,6 +1404,7 @@ func (r *EventRecordRepository) PurgeWorkspace(_ context.Context, workspaceID co
 		if err := r.hydrateEventRecordPayload(item); err != nil {
 			return err
 		}
+		item.PayloadRef = ""
 		retained = append(retained, cloneEventRecord(item))
 		return nil
 	}); err != nil {
@@ -1492,9 +1506,6 @@ func (r *EventRecordRepository) eventLogRoot() string {
 	path := filepath.Clean(strings.TrimSpace(r.path))
 	if path == "" || path == "." {
 		return "event_record"
-	}
-	if strings.EqualFold(filepath.Ext(path), ".json") {
-		return strings.TrimSuffix(path, filepath.Ext(path))
 	}
 	return path
 }
@@ -1609,7 +1620,6 @@ func (r *EventRecordRepository) eventRecordLogLine(item *eventstream.EventRecord
 		return eventRecordLogLine{}, err
 	}
 	line.Record.PayloadSummary = eventPayloadSummary(record.Payload)
-	line.Record.PayloadRef = payloadRef
 	line.Record.Payload = workorcheventpayload.Payload{}
 	line.PayloadRef = payloadRef
 	return line, nil
@@ -1702,16 +1712,13 @@ func (r *EventRecordRepository) scanEventRecordSegment(path string, fn func(*eve
 			continue
 		}
 		var recordLine eventRecordLogLine
-		if err := json.Unmarshal([]byte(line), &recordLine); err != nil {
+		if err := decodeCurrentJSON([]byte(line), &recordLine); err != nil {
 			return err
 		}
 		recordsScanned++
 		item := cloneEventRecord(&recordLine.Record)
 		if recordLine.PayloadRef != "" {
 			item.PayloadRef = recordLine.PayloadRef
-			if len(item.PayloadSummary.Fields) == 0 {
-				item.PayloadSummary = eventPayloadRef(recordLine.PayloadRef)
-			}
 			item.Payload = eventPayloadRef(recordLine.PayloadRef)
 		}
 		if err := fn(item); err != nil {
@@ -1740,16 +1747,13 @@ func (r *EventRecordRepository) scanEventRecordSegmentReverse(path string, fn fu
 			continue
 		}
 		var recordLine eventRecordLogLine
-		if err := json.Unmarshal(line, &recordLine); err != nil {
+		if err := decodeCurrentJSON(line, &recordLine); err != nil {
 			return false, err
 		}
 		recordsScanned++
 		item := cloneEventRecord(&recordLine.Record)
 		if recordLine.PayloadRef != "" {
 			item.PayloadRef = recordLine.PayloadRef
-			if len(item.PayloadSummary.Fields) == 0 {
-				item.PayloadSummary = eventPayloadRef(recordLine.PayloadRef)
-			}
 			item.Payload = eventPayloadRef(recordLine.PayloadRef)
 		}
 		stop, err := fn(item)
@@ -1826,8 +1830,8 @@ func (r *EventRecordRepository) readEventPayload(ref string) (workorcheventpaylo
 	}
 	repository.RecordEventRecordPayloadHydrate(len(data))
 	payload := workorcheventpayload.Payload{}
-	if len(data) == 0 {
-		return payload, nil
+	if len(bytes.TrimSpace(data)) == 0 {
+		return workorcheventpayload.Payload{}, fmt.Errorf("%w: external event payload is empty", workorcheventpayload.ErrInvalidPayload)
 	}
 	if err := json.Unmarshal(data, &payload); err != nil {
 		return workorcheventpayload.Payload{}, err
@@ -1859,15 +1863,8 @@ func safeRepositoryItemPath(value string) string {
 	return filepath.Join(segments...)
 }
 
-func repositoryItemRoot(path string, legacyFileName string, directoryName string) string {
-	cleaned := filepath.Clean(strings.TrimSpace(path))
-	if strings.EqualFold(filepath.Base(cleaned), legacyFileName) {
-		return filepath.Join(filepath.Dir(cleaned), directoryName)
-	}
-	if strings.EqualFold(filepath.Ext(cleaned), ".json") {
-		return strings.TrimSuffix(cleaned, filepath.Ext(cleaned))
-	}
-	return cleaned
+func repositoryItemRoot(path string) string {
+	return filepath.Clean(strings.TrimSpace(path))
 }
 
 func repositoryItemPath(root string, id string) string {
@@ -1942,7 +1939,7 @@ func repositoryMetadataDirByID[T any](root string, id string, idOf func(T) strin
 			return "", err
 		}
 		var item T
-		if err := json.Unmarshal(data, &item); err != nil {
+		if err := decodeCurrentJSON(data, &item); err != nil {
 			return "", err
 		}
 		if idOf(item) == id {
@@ -1996,7 +1993,7 @@ func readJSONItemFile[T any](path string) (T, error) {
 		}
 		return item, err
 	}
-	if err := json.Unmarshal(data, &item); err != nil {
+	if err := decodeCurrentJSON(data, &item); err != nil {
 		return item, err
 	}
 	return item, nil
@@ -2027,11 +2024,11 @@ func (item *workspacePersistenceValue) UnmarshalJSON(data []byte) error {
 		return fmt.Errorf("%w: nil workspace persistence target", common.ErrInvalidArgument)
 	}
 	wire := workspacePersistenceWire{}
-	if err := json.Unmarshal(data, &wire); err != nil {
+	if err := decodeCurrentJSON(data, &wire); err != nil {
 		return err
 	}
 	decoded := workspace.Workspace(wire.workspacePersistenceAlias)
-	if err := decodePersistencePayloadAllowLegacyNull(wire.ContextHints, &decoded.ContextHints); err != nil {
+	if err := decodePersistencePayload(wire.ContextHints, &decoded.ContextHints); err != nil {
 		return err
 	}
 	*item = workspacePersistenceValue(decoded)
@@ -2933,13 +2930,11 @@ func stepRunIDFromStepID(id common.StepID) common.RunID {
 	return common.RunID(runID)
 }
 
-// decodePersistencePayloadAllowLegacyNull accepts the old zero-value encoding
-// only at file persistence boundaries that explicitly opt in. Missing or null
-// becomes an empty payload; every non-object value still flows through the
-// strict Payload decoder and remains invalid.
-func decodePersistencePayloadAllowLegacyNull(data json.RawMessage, target *workorcheventpayload.Payload) error {
+// decodePersistencePayload accepts the omitted current zero value, but never
+// accepts JSON null or a non-object payload.
+func decodePersistencePayload(data json.RawMessage, target *workorcheventpayload.Payload) error {
 	payloadJSON := bytes.TrimSpace(data)
-	if len(payloadJSON) == 0 || bytes.Equal(payloadJSON, []byte("null")) {
+	if len(payloadJSON) == 0 {
 		*target = workorcheventpayload.Payload{}
 		return nil
 	}
@@ -2956,28 +2951,21 @@ type stepPersistenceWire struct {
 
 func decodeStepMetadata(data []byte) (run.Step, error) {
 	wire := stepPersistenceWire{}
-	if err := json.Unmarshal(data, &wire); err != nil {
+	if err := decodeCurrentJSON(data, &wire); err != nil {
 		return run.Step{}, err
 	}
 	item := run.Step(wire.stepPersistenceValue)
-	if err := decodePersistencePayloadAllowLegacyNull(wire.Input, &item.Input); err != nil {
+	if err := decodePersistencePayload(wire.Input, &item.Input); err != nil {
 		return run.Step{}, err
 	}
-	if err := decodePersistencePayloadAllowLegacyNull(wire.Output, &item.Output); err != nil {
+	if err := decodePersistencePayload(wire.Output, &item.Output); err != nil {
 		return run.Step{}, err
 	}
 	return item, nil
 }
 
 func (r *StepRepository) stepRoot() string {
-	path := filepath.Clean(strings.TrimSpace(r.path))
-	if strings.EqualFold(filepath.Base(path), "step.json") {
-		return filepath.Join(filepath.Dir(path), "steps")
-	}
-	if strings.EqualFold(filepath.Ext(path), ".json") {
-		return strings.TrimSuffix(path, filepath.Ext(path))
-	}
-	return path
+	return filepath.Clean(strings.TrimSpace(r.path))
 }
 
 func (r *StepRepository) stepDir(id common.StepID) string {
@@ -3062,25 +3050,20 @@ func (r *StepRepository) loadStepFromDir(dir string) (*run.Step, error) {
 
 func (r *StepRepository) loadStepSummaryFromDir(dir string) (*run.Step, error) {
 	data, err := os.ReadFile(filepath.Join(dir, "summary.json"))
-	if err == nil {
-		var item run.Step
-		if err := json.Unmarshal(data, &item); err != nil {
-			return nil, err
-		}
-		if stepSummaryCurrent(&item) {
-			return cloneStep(&item), nil
-		}
-	}
-	if err != nil && !os.IsNotExist(err) {
-		return nil, err
-	}
-	item, err := r.loadStepFromDir(dir)
 	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, common.ErrNotFound
+		}
 		return nil, err
 	}
-	summary := compactStepSummary(item)
-	_ = writeJSONFileAtomic(filepath.Join(dir, "summary.json"), summary)
-	return summary, nil
+	var item run.Step
+	if err := decodeCurrentJSON(data, &item); err != nil {
+		return nil, err
+	}
+	if !stepSummaryCurrent(&item) {
+		return nil, fmt.Errorf("%w: step summary does not use the current shape", common.ErrInvalidArgument)
+	}
+	return cloneStep(&item), nil
 }
 
 type ToolCallRepository struct {
@@ -3098,14 +3081,14 @@ type toolCallPersistenceWire struct {
 
 func decodeToolCallMetadata(data []byte) (runtimeevidencemodel.ToolCall, error) {
 	wire := toolCallPersistenceWire{}
-	if err := json.Unmarshal(data, &wire); err != nil {
+	if err := decodeCurrentJSON(data, &wire); err != nil {
 		return runtimeevidencemodel.ToolCall{}, err
 	}
 	item := runtimeevidencemodel.ToolCall(wire.toolCallPersistenceValue)
-	if err := decodePersistencePayloadAllowLegacyNull(wire.Arguments, &item.Arguments); err != nil {
+	if err := decodePersistencePayload(wire.Arguments, &item.Arguments); err != nil {
 		return runtimeevidencemodel.ToolCall{}, err
 	}
-	if err := decodePersistencePayloadAllowLegacyNull(wire.Output, &item.Output); err != nil {
+	if err := decodePersistencePayload(wire.Output, &item.Output); err != nil {
 		return runtimeevidencemodel.ToolCall{}, err
 	}
 	return item, nil
@@ -3220,14 +3203,7 @@ func (r *ToolCallRepository) Delete(_ context.Context, id common.ToolCallID) err
 }
 
 func (r *ToolCallRepository) toolCallRoot() string {
-	path := filepath.Clean(strings.TrimSpace(r.path))
-	if strings.EqualFold(filepath.Base(path), "tool_call.json") {
-		return filepath.Join(filepath.Dir(path), "tool-calls")
-	}
-	if strings.EqualFold(filepath.Ext(path), ".json") {
-		return strings.TrimSuffix(path, filepath.Ext(path))
-	}
-	return path
+	return filepath.Clean(strings.TrimSpace(r.path))
 }
 
 func (r *ToolCallRepository) toolCallDir(id common.ToolCallID) string {
@@ -3386,7 +3362,7 @@ func (r *PatchRepository) Delete(_ context.Context, id common.PatchID) error {
 }
 
 func (r *PatchRepository) patchRoot() string {
-	return repositoryItemRoot(r.path, "patch.json", "patches")
+	return repositoryItemRoot(r.path)
 }
 
 func (r *PatchRepository) patchPath(id common.PatchID) string {
@@ -3496,7 +3472,7 @@ func (r *ValidationResultRepository) Delete(_ context.Context, id common.Validat
 }
 
 func (r *ValidationResultRepository) validationResultRoot() string {
-	return repositoryItemRoot(r.path, "validation_result.json", "validations")
+	return repositoryItemRoot(r.path)
 }
 
 func (r *ValidationResultRepository) validationResultPath(id common.ValidationResultID) string {
@@ -3617,7 +3593,7 @@ func (r *RuntimeCheckpointRepository) Delete(_ context.Context, id common.Checkp
 }
 
 func (r *RuntimeCheckpointRepository) runtimeCheckpointRoot() string {
-	return repositoryItemRoot(r.path, "runtime_checkpoint.json", "checkpoints")
+	return repositoryItemRoot(r.path)
 }
 
 func (r *RuntimeCheckpointRepository) runtimeCheckpointPath(id common.CheckpointID) string {
@@ -3688,7 +3664,9 @@ func (r *DecisionTicketRepository) Get(_ context.Context, id common.TicketID) (*
 	if err != nil {
 		return nil, err
 	}
-	applyDecisionTicketFileTimestampFallback(&item, r.ticketPath(id))
+	if err := validateDecisionTicketPersistence(&item); err != nil {
+		return nil, err
+	}
 	return cloneDecisionTicket(&item), nil
 }
 
@@ -3727,11 +3705,14 @@ func (r *DecisionTicketRepository) Update(_ context.Context, item *decision.Tick
 		return err
 	}
 	existing, err := readJSONItemFile[decision.Ticket](path)
-	if err == nil && strings.TrimSpace(item.CreatedAt) == "" {
-		item.CreatedAt = existing.CreatedAt
+	if err != nil {
+		return err
+	}
+	if err := validateDecisionTicketPersistence(&existing); err != nil {
+		return err
 	}
 	if strings.TrimSpace(item.CreatedAt) == "" {
-		applyDecisionTicketFileTimestampFallback(item, path)
+		item.CreatedAt = existing.CreatedAt
 	}
 	item.UpdatedAt = time.Now().UTC().Format(time.RFC3339Nano)
 	return writeJSONFileAtomic(path, cloneDecisionTicket(item))
@@ -3750,7 +3731,7 @@ func (r *DecisionTicketRepository) Delete(_ context.Context, id common.TicketID)
 }
 
 func (r *DecisionTicketRepository) ticketRoot() string {
-	return repositoryItemRoot(r.path, "ticket.json", filepath.Join("decisions", "tickets"))
+	return repositoryItemRoot(r.path)
 }
 
 func (r *DecisionTicketRepository) ticketPath(id common.TicketID) string {
@@ -3768,7 +3749,9 @@ func (r *DecisionTicketRepository) list(matches func(decision.Ticket) bool) ([]*
 		if err != nil {
 			return nil, err
 		}
-		applyDecisionTicketFileTimestampFallback(&item, path)
+		if err := validateDecisionTicketPersistence(&item); err != nil {
+			return nil, err
+		}
 		if matches == nil || matches(item) {
 			ret = append(ret, cloneDecisionTicket(&item))
 		}
@@ -3831,7 +3814,7 @@ func (r *DecisionResolutionRepository) DeleteByTicketID(_ context.Context, ticke
 }
 
 func (r *DecisionResolutionRepository) resolutionRoot() string {
-	return repositoryItemRoot(r.path, "resolution.json", filepath.Join("decisions", "resolutions"))
+	return repositoryItemRoot(r.path)
 }
 
 func (r *DecisionResolutionRepository) resolutionPath(id common.ResolutionID) string {
@@ -3904,7 +3887,9 @@ func (r *ApprovalRepository) Get(_ context.Context, id common.ApprovalID) (*appr
 	if err != nil {
 		return nil, err
 	}
-	applyApprovalFileTimestampFallback(&item, r.approvalPath(id))
+	if err := validateApprovalPersistence(&item); err != nil {
+		return nil, err
+	}
 	return cloneApproval(&item), nil
 }
 
@@ -3966,11 +3951,14 @@ func (r *ApprovalRepository) Update(_ context.Context, item *approval.Approval) 
 		return err
 	}
 	existing, err := readJSONItemFile[approval.Approval](path)
-	if err == nil && strings.TrimSpace(item.CreatedAt) == "" {
-		item.CreatedAt = existing.CreatedAt
+	if err != nil {
+		return err
+	}
+	if err := validateApprovalPersistence(&existing); err != nil {
+		return err
 	}
 	if strings.TrimSpace(item.CreatedAt) == "" {
-		applyApprovalFileTimestampFallback(item, path)
+		item.CreatedAt = existing.CreatedAt
 	}
 	item.UpdatedAt = time.Now().UTC().Format(time.RFC3339Nano)
 	return writeJSONFileAtomic(path, cloneApproval(item))
@@ -3996,7 +3984,7 @@ func (r *ApprovalRepository) DeleteScoped(ctx context.Context, workspaceID commo
 }
 
 func (r *ApprovalRepository) approvalRoot() string {
-	return repositoryItemRoot(r.path, "approval.json", "approvals")
+	return repositoryItemRoot(r.path)
 }
 
 func (r *ApprovalRepository) approvalPath(id common.ApprovalID) string {
@@ -4014,7 +4002,9 @@ func (r *ApprovalRepository) list(matches func(approval.Approval) bool) ([]*appr
 		if err != nil {
 			return nil, err
 		}
-		applyApprovalFileTimestampFallback(&item, path)
+		if err := validateApprovalPersistence(&item); err != nil {
+			return nil, err
+		}
 		if matches == nil || matches(item) {
 			ret = append(ret, cloneApproval(&item))
 		}
@@ -4056,13 +4046,11 @@ func loadMap[K comparable, V any](path string) (map[K]V, error) {
 		}
 		return nil, err
 	}
-	if len(data) == 0 {
-		cache.items = map[K]V{}
-		cache.loaded = true
-		return map[K]V{}, nil
+	if len(bytes.TrimSpace(data)) == 0 {
+		return nil, fmt.Errorf("%w: persisted map is empty", common.ErrInvalidArgument)
 	}
 	items := map[K]V{}
-	if err := json.Unmarshal(data, &items); err != nil {
+	if err := decodeCurrentJSON(data, &items); err != nil {
 		return nil, err
 	}
 	cache.items = cloneStoredMap(items)
@@ -4127,15 +4115,15 @@ func readOptionalMapFile(path string) (map[string]any, error) {
 		}
 		return nil, err
 	}
-	if len(data) == 0 {
-		return map[string]any{}, nil
+	if len(bytes.TrimSpace(data)) == 0 {
+		return nil, fmt.Errorf("%w: persisted payload file is empty", workorcheventpayload.ErrInvalidPayload)
 	}
 	var item map[string]any
 	if err := json.Unmarshal(data, &item); err != nil {
 		return nil, err
 	}
 	if item == nil {
-		return nil, nil
+		return nil, fmt.Errorf("%w: persisted payload file must contain an object", workorcheventpayload.ErrInvalidPayload)
 	}
 	return item, nil
 }
@@ -4398,20 +4386,11 @@ func cloneDecisionTicket(item *decision.Ticket) *decision.Ticket {
 	return &cloned
 }
 
-func applyDecisionTicketFileTimestampFallback(item *decision.Ticket, path string) {
-	if item == nil || (strings.TrimSpace(item.CreatedAt) != "" && strings.TrimSpace(item.UpdatedAt) != "") {
-		return
+func validateDecisionTicketPersistence(item *decision.Ticket) error {
+	if item == nil || item.ID == "" || strings.TrimSpace(item.CreatedAt) == "" || strings.TrimSpace(item.UpdatedAt) == "" {
+		return fmt.Errorf("%w: decision ticket does not use the current persisted shape", common.ErrInvalidArgument)
 	}
-	timestamp := fileModTimeTimestamp(path)
-	if timestamp == "" {
-		return
-	}
-	if strings.TrimSpace(item.CreatedAt) == "" {
-		item.CreatedAt = timestamp
-	}
-	if strings.TrimSpace(item.UpdatedAt) == "" {
-		item.UpdatedAt = timestamp
-	}
+	return nil
 }
 
 func cloneDecisionResolution(item *decision.Resolution) *decision.Resolution {
@@ -4424,28 +4403,11 @@ func cloneApproval(item *approval.Approval) *approval.Approval {
 	return approval.CloneApproval(item)
 }
 
-func applyApprovalFileTimestampFallback(item *approval.Approval, path string) {
-	if item == nil || (strings.TrimSpace(item.CreatedAt) != "" && strings.TrimSpace(item.UpdatedAt) != "") {
-		return
+func validateApprovalPersistence(item *approval.Approval) error {
+	if item == nil || item.ID == "" || item.WorkspaceID == "" || item.RunID == "" || strings.TrimSpace(item.CreatedAt) == "" || strings.TrimSpace(item.UpdatedAt) == "" {
+		return fmt.Errorf("%w: approval does not use the current persisted shape", common.ErrInvalidArgument)
 	}
-	timestamp := fileModTimeTimestamp(path)
-	if timestamp == "" {
-		return
-	}
-	if strings.TrimSpace(item.CreatedAt) == "" {
-		item.CreatedAt = timestamp
-	}
-	if strings.TrimSpace(item.UpdatedAt) == "" {
-		item.UpdatedAt = timestamp
-	}
-}
-
-func fileModTimeTimestamp(path string) string {
-	info, err := os.Stat(path)
-	if err != nil {
-		return ""
-	}
-	return info.ModTime().UTC().Format(time.RFC3339Nano)
+	return nil
 }
 
 func cloneSoul(item *soul.Soul) *soul.Soul {
@@ -4858,7 +4820,6 @@ var stepSummaryOutputKeys = []string{
 	"lastFailureDiagnostics",
 	"streamDiagnostics",
 	"patches",
-	"patchRequests",
 	"coverageTargets",
 	"artifactContinuationApply",
 	"llmDecision",
@@ -4980,7 +4941,6 @@ var stepSummaryNestedKeys = []string{
 	"zeroWork",
 	"evidenceQuality",
 	"coverageTargets",
-	"patchRequests",
 	"patchType",
 	"diff",
 	"matchedTerms",

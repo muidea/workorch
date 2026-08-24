@@ -40,11 +40,10 @@ const (
 	TopicRunCommandDelete                      = "/run/command/delete"
 
 	// RUNTIME-SMO owner-local lifecycle commands. External inputs never carry a
-	// target RunState; only Run Biz may migrate SM-1.
-	TopicRunFactGovernanceWait           = "/run/fact/governance-wait"
-	TopicRunFactContinuationEligible     = "/run/fact/continuation-eligible"
-	TopicRunFactTerminalDelivery         = "/run/fact/terminal-delivery"
-	TopicRunFactRuntimeStateIncompatible = "/run/fact/runtime-state-incompatible"
+	// target RunState; only Run Biz may transition SM-1.
+	TopicRunFactGovernanceWait       = "/run/fact/governance-wait"
+	TopicRunFactContinuationEligible = "/run/fact/continuation-eligible"
+	TopicRunFactTerminalDelivery     = "/run/fact/terminal-delivery"
 	// TopicRunCommandWorkspaceExecutionIntent receives a Workspace-owner
 	// selection/authorization fact. Run alone decides the resulting SM-1 work.
 	TopicRunCommandWorkspaceExecutionIntent = "/run/command/workspace-execution-intent"

@@ -23,7 +23,7 @@ func TestGitOwnerReconciliationDoesNotTreatRepositoryRevisionAsSemanticProof(t *
 	if err != nil {
 		t.Fatal(err)
 	}
-	owner, err := New(hub, nil, Dependencies{RuntimeAdapter: NewRuntimeAdapter(false), CapabilityStateReceipts: receipts})
+	owner, err := New(hub, nil, Dependencies{RuntimeAdapter: NewRuntimeAdapter(), CapabilityStateReceipts: receipts})
 	if err != nil {
 		t.Fatal(err)
 	}

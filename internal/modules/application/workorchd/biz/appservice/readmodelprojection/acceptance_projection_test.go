@@ -11,7 +11,7 @@ import (
 )
 
 func TestMapAcceptanceProjectionReadsPersistedRuntimeFacts(t *testing.T) {
-	state := runtimecontract.RuntimeStateRecord{SchemaVersion: runtimecontract.RuntimeStateSchemaVersionCurrent, StateRevision: 7, EvidenceSequence: 3, Facts: runtimecontract.RuntimeFacts{
+	state := runtimecontract.RuntimeStateRecord{StateRevision: 7, EvidenceSequence: 3, Facts: runtimecontract.RuntimeFacts{
 		WorkspaceID: "ws-1", RunID: "run-1", DefinitionRevision: "definition-1", EvidenceRevision: "evidence-3",
 		RemainingFocuses: []runtimecontract.CoverageFocus{{ID: "focus-next"}}, CompletedFocuses: []runtimecontract.CoverageFocus{{ID: "focus-done"}},
 		Focus:  runtimecontract.CoverageFocus{ID: "focus-1", SliceID: "slice-1", CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-2"}, RequiredEvidenceKinds: []string{runtimecontract.EvidenceKindValidation}},

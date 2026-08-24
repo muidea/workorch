@@ -272,8 +272,13 @@ func validDecisionForState(state ConvergenceState) RuntimeDecision {
 }
 
 func testRuntimeFacts() RuntimeFacts {
+	convergencePolicy := DefaultRuntimeConvergencePolicy()
+	recoveryPolicy := DefaultRuntimeRecoveryPolicy()
 	return RuntimeFacts{
-		Activation:         RuntimeActivationContext{ProviderSelection: ProviderInferenceSelection{Target: ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "gpt-4o"}}},
+		Activation: RuntimeActivationContext{
+			ProviderSelection: ProviderInferenceSelection{Target: ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "gpt-4o"}},
+			ExecutionContract: RuntimeExecutionContract{StateChangePolicy: RuntimeStateChangeAllowedButNotRequired},
+		},
 		WorkspaceID:        common.WorkspaceID("ws-1"),
 		RunID:              common.RunID("run-1"),
 		DefinitionRevision: "definition-1",
@@ -282,6 +287,9 @@ func testRuntimeFacts() RuntimeFacts {
 			ID:                  "focus-1",
 			CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-1"},
 		},
-		Coverage: []RuntimeCoverageItemFact{{ID: "cwi-1", State: RuntimeCoverageItemStateOpen}},
+		ConvergencePolicy:     convergencePolicy,
+		RecoveryPolicy:        recoveryPolicy,
+		ExecutionBudgetPolicy: RuntimeExecutionBudgetPolicyForRuntimePolicies(convergencePolicy, recoveryPolicy),
+		Coverage:              []RuntimeCoverageItemFact{{ID: "cwi-1", State: RuntimeCoverageItemStateOpen}},
 	}
 }

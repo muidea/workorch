@@ -45,7 +45,8 @@ func submitRunCreationInternalEvent(ctx context.Context, runs repository.RunRepo
 		return nil, common.ErrInvalidArgument
 	}
 	fact := *event.Requested
-	if fact.WorkspaceID == "" || fact.RunID == "" {
+	if fact.WorkspaceID == "" || fact.RunID == "" ||
+		(fact.ReconciliationScope != runtimecontract.RuntimeCWIReconciliationScopeCurrentRun && fact.ReconciliationScope != runtimecontract.RuntimeCWIReconciliationScopeWorkspaceFull) {
 		return nil, common.ErrInvalidArgument
 	}
 	bound, err := common.BindRuntimeWorkspaceContext(ctx, fact.WorkspaceID)

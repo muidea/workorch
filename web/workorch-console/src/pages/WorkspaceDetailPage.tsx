@@ -1024,15 +1024,6 @@ export function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlanePr
   const runtimeDefinitionReplacementAvailable = Boolean(canonicalDefinitionClarification(snapshot));
   const activeRunGovernanceBlocked = canonicalActiveRunIsGovernanceBlocked(snapshot);
   const primaryExecutionIntent = helpers.workspaceExecutionPrimaryIntent(snapshot);
-  const activeRunRequiresFreshActivation = activeRun?.runtimeActivation?.disposition === 'fresh_activation_required';
-  const activeRunSchemaTransition = activeRunRequiresFreshActivation && activeRun.runtimeActivation?.reason === 'schema_unsupported'
-    ? `Runtime schema v${activeRun.runtimeActivation?.actualSchemaVersion} → v${activeRun.runtimeActivation?.supportedSchemaVersion}`
-    : undefined;
-  const activeRunFreshActivationDetail = activeRunSchemaTransition
-    ? `当前二进制不支持已持久化的 ${activeRunSchemaTransition}；该运行不能恢复，请显式创建新执行。`
-    : activeRun?.runtimeActivation?.reason === 'cwi_ledger_invalid'
-      ? '当前运行的已持久化 CWI 台账存在歧义，不能安全恢复；请显式创建新执行。'
-      : '当前运行不能安全恢复；请显式创建新执行。';
   const runSummary = runStateSummary(snapshot?.runs);
   const outcomeRun = runSnapshot?.run;
   const outcomeGoal = goals.find((item) => item.id === outcomeRun?.goalId);
@@ -1095,7 +1086,7 @@ export function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlanePr
                 : activeRunGovernanceBlocked
                   ? '等待治理 Owner 收口'
                   : primaryExecutionIntent === 'restart'
-                    ? `创建新执行${activeRunSchemaTransition ? `（${activeRunSchemaTransition}）` : ''}`
+                    ? '创建新执行'
                     : '恢复当前执行'}
             </Button>
             {primaryExecutionIntent === 'resume' && !definitionClarification ? (
@@ -1186,11 +1177,6 @@ export function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlanePr
                 { key: 'activeRun', label: '活跃运行', children: snapshot.workspace.activeRunId || '-' },
                 { key: 'nextRunLLMTarget', label: '下次运行默认模型', children: providerModelTargetLabel(snapshot.workspace.defaultLLMSelection) },
                 { key: 'activeRunSealedLLMSelection', label: '当前运行封存模型', children: providerModelTargetLabel(activeRun?.sealedLLMSelection) },
-                ...(activeRunRequiresFreshActivation ? [{
-                  key: 'activeRunRuntimeActivation',
-                  label: '运行恢复状态',
-                  children: activeRunFreshActivationDetail
-                }] : []),
                 { key: 'displayOutcome', label: '展示结果（非 Owner 状态）', children: snapshot.displayOutcome?.runId ? `${snapshot.displayOutcome.runId} / ${stateLabel(snapshot.displayOutcome.state)}` : '-' },
                 { key: 'canonicalRunState', label: 'Run Owner 状态', children: activeRun ? `${activeRun.id} / ${stateLabel(activeRun.state)}` : '-' },
                 { key: 'governanceDisplay', label: '治理等待（只读）', children: snapshot.governanceDisplay?.decisionId || snapshot.governanceDisplay?.approvalId || '-' },

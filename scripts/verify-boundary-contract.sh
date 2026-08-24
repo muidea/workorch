@@ -1560,15 +1560,92 @@ if ! grep -q -E -- 'AuthorityInputID[[:space:]]+string' <<<"$authority_snapshot_
   exit 1
 fi
 
+# Runtime persistence has one current shape and no version negotiation,
+# migration classifier, activation-status mirror, or old-data owner handoff.
+if ! grep -q -F -- 'TestRuntimePersistenceRejectsRetiredAndUnknownFields' internal/pkg/workorchruntimecontract/runtime_state_schema_test.go ||
+	! grep -q -F -- 'TestRuntimePolicyNormalizationDoesNotBackfillMissingPersistedFields' internal/pkg/workorchruntimecontract/runtime_state_schema_test.go ||
+   ! grep -q -F -- 'TestRunPersistenceRejectsRetiredAndUnknownFields' internal/modules/blocks/run/pkg/models/replacement_intent_test.go ||
+   ! grep -q -F -- 'TestGoalDoDManagerRejectsMissingLineageInsteadOfUpgrading' internal/modules/blocks/workspace/biz/goal_dod_manager_test.go ||
+   ! grep -q -F -- 'TestReduceTerminalDeliveryRejectsMissingRunLineageInsteadOfUpgrading' internal/modules/blocks/run/biz/lifecycle_reducer_test.go ||
+   ! grep -q -F -- 'TestPersistedRejectsRetiredGitCapabilityFlags' internal/pkg/workorchconfig/config_test.go; then
+	echo "boundary contract violation: strict current Runtime/Run persistence regression is missing" >&2
+	exit 1
+fi
+runtime_policy_backfill_matches="$({
+	grep -n -E -- 'defaults[[:space:]]*:=[[:space:]]*DefaultRuntimeRecoveryPolicy|Max(ProviderTransport|OperationRecovery|CASReload|TerminalDelivery|DriveSchedule|PrerequisiteRefresh)[A-Za-z]*[[:space:]]*=[[:space:]]*defaults\.' internal/pkg/workorchruntimecontract/runtime_recovery_budget.go || true
+	grep -n -E -- 'Max(RepairAttemptsPerFocus|ValidationOnlyRetriesPerFocus)[[:space:]]*=[[:space:]]*Default' internal/pkg/workorchruntimecontract/runtime_repair_ledger.go || true
+	grep -n -F -- 'if strings.TrimSpace(b.ExecutionBudgetPolicy.PolicyRevision) == ""' internal/pkg/workorchruntimecontract/runtime_bootstrap.go || true
+	grep -n -F -- 'if strings.TrimSpace(f.ExecutionBudgetPolicy.PolicyRevision) == ""' internal/pkg/workorchruntimecontract/canonical_runtime.go || true
+	grep -n -E -- 'if c\.StateChangePolicy == ""|if p\.(CompletionPolicy|ResultPolicy) == ""|if s\.ProofApplicability == ""' internal/pkg/workorchruntimecontract/runtime_execution_contract.go internal/pkg/workorchruntimecontract/runtime_acceptance_slice.go internal/pkg/workorchruntimecontract/runtime_validation_surface.go || true
+	grep -n -A2 -F -- 'value.OperationKind = strings.TrimSpace(value.OperationKind)' internal/pkg/workorchruntimecontract/runtime_activation.go | grep -F -- 'normalizeMCPRegistryKindToOperationKind' || true
+})"
+if [[ -n "$runtime_policy_backfill_matches" ]]; then
+	echo "boundary contract violation: Runtime normalization backfills missing persisted policies" >&2
+	echo "$runtime_policy_backfill_matches" >&2
+	exit 1
+fi
+provider_capability_default_matches="$(source_matches 'func effectiveProviderCapabilities\(' internal/modules/blocks/llm)"
+if [[ -n "$provider_capability_default_matches" ]] ||
+	! grep -q -F -- 'TestRedactedProviderConfigDoesNotBackfillMissingCapabilities' internal/modules/blocks/llm/biz/provider_config_test.go; then
+	echo "boundary contract violation: LLM provider capabilities regain an implicit empty-config default" >&2
+	[[ -z "$provider_capability_default_matches" ]] || echo "$provider_capability_default_matches" >&2
+	exit 1
+fi
+runtime_persistence_compatibility_matches="$(source_matches 'RuntimeStateSchemaVersionCurrent|RuntimeStateIncompatib|RuntimeActivation(Status|Disposition)|SchemaUnsupported|DataResetRequired|EquivalentReplacementIntentHash|legacyIdentityHashSlot|StepKindLLMWorkspacePlan|patchRequests|patch/request|file/write_file|GitRuntimeEnabled|GitRuntimeWriteEnabled' internal || true)"
+if [[ -n "$runtime_persistence_compatibility_matches" ]]; then
+	echo "boundary contract violation: Runtime/Run persisted-data compatibility surface returned" >&2
+	echo "$runtime_persistence_compatibility_matches" >&2
+	exit 1
+fi
+if grep -q -E -- 'LineageState[[:space:]]*==[[:space:]]*""' internal/modules/blocks/workspace/biz/goal_dod_manager.go internal/modules/blocks/run/biz/lifecycle_reducer.go; then
+	echo "boundary contract violation: Workspace/Run owner silently upgrades a missing current lineage" >&2
+	exit 1
+fi
+
+# All file-backed owner data uses one current layout and strict JSON shape.
+# A missing file may mean "not created"; an existing old/empty/unknown shape
+# must fail instead of entering an import, timestamp synthesis or projection
+# repair path.
+if ! grep -q -F -- 'decoder.DisallowUnknownFields()' internal/pkg/repository/file/file.go ||
+   ! grep -q -F -- 'TestWorkspaceRepositoryRejectsRetiredOrUnknownFields' internal/pkg/repository/file/file_test.go ||
+   ! grep -q -F -- 'TestWorkspaceScopedFileStoreRejectsInvalidCurrentIndex' internal/pkg/workorchrepo/workspace_scoped_repositories_test.go ||
+   ! grep -q -F -- 'TestCapabilityStateReceiptStoreRejectsUnknownPersistedFields' internal/modules/blocks/git/biz/capability_state_receipt_store_test.go; then
+	echo "boundary contract violation: strict current file-persistence decoder/regression is missing" >&2
+	exit 1
+fi
+repository_compatibility_matches="$(source_matches 'NewMCPRegistryRepositoryWithLegacy|loadLegacy|CapabilitySourceLegacyImport|SoulSourceLegacyOwned|legacy_owner_upgrade|fileModTimeTimestamp|FetchEndpoint|fetchEndpoint' internal || true)"
+if [[ -n "$repository_compatibility_matches" ]]; then
+	echo "boundary contract violation: persisted repository/config compatibility surface returned" >&2
+	echo "$repository_compatibility_matches" >&2
+	exit 1
+fi
+if grep -q -F -- 'AddHandler("/api/v1/workorch/memory/:memoryId"' internal/modules/application/workorchd/service/server/http_memory.go ||
+	! grep -q -F -- 'TestWorkspaceScopedMemoryItemRoutesRejectUnscopedItemPaths' internal/modules/application/workorchd/service/server/http_test.go; then
+	echo "boundary contract violation: unscoped Memory item compatibility route returned" >&2
+	exit 1
+fi
+git_runtime_compatibility_matches="$(source_matches 'writeEnabled|NewRuntimeAdapter\((true|false)\)|NewRuntimeAdapterWithTimeout\((true|false)|NewRuntimeAdapterFromTimeoutString\((true|false)' internal/modules/blocks/git/biz internal/modules/application/workorchd internal/modules/kernel/orchestrator || true)"
+if [[ -n "$git_runtime_compatibility_matches" ]]; then
+	echo "boundary contract violation: Git Runtime adapter retained the retired enable/write-enable compatibility input" >&2
+	echo "$git_runtime_compatibility_matches" >&2
+	exit 1
+fi
+provider_failure_identity="$(sed -n '/^func providerFailureIdentity(/,/^}/p' internal/modules/blocks/llm/biz/runtime/candidate_boundary.go)"
+if grep -q -E -- 'err\.Error\(|strings\.Contains\(' <<<"$provider_failure_identity" ||
+	! grep -q -F -- 'RuntimeProviderFailureIdentity()' <<<"$provider_failure_identity" ||
+	! grep -q -F -- 'TestProviderFailureIdentityDoesNotClassifyErrorText' internal/modules/blocks/llm/biz/runtime/provider_failure_identity_test.go; then
+	echo "boundary contract violation: LLM provider failure identity regained an error-text compatibility classifier" >&2
+	exit 1
+fi
+if grep -q -F -- 'ret.Payload = recordpayload.SanitizeAuditPayload(item.Payload)' internal/modules/blocks/eventstream/pkg/events/record_value.go ||
+   ! grep -q -F -- 'TestEventRecordDataReadBoundaryRejectsUnsanitizedPayload' internal/modules/blocks/eventstream/pkg/events/record_value_test.go; then
+	echo "boundary contract violation: Eventstream read boundary upgrades persisted payload instead of rejecting it" >&2
+	exit 1
+fi
 # Run is the physical Runtime record owner, not the semantic owner. Lifecycle
 # reduction may compare only its opaque lifecycle fence and envelope revision;
 # decoding these aggregate fields would let SM-1 select transitions from
 # SM-2/SM-3/SM-4 state.
-if ! grep -q -F -- 'const RuntimeStateSchemaVersionCurrent uint32 = 2' internal/pkg/workorchruntimecontract/runtime_state.go ||
-   ! grep -q -F -- 'TestGMMR2StartupPriorOwnerFactContractSchemaMarksRunFreshActivationWithoutDrive' internal/modules/kernel/orchestrator/biz/owner_test.go; then
-  echo "boundary contract violation: owner-fact convergence schema bump/startup incompatibility regression is missing" >&2
-  exit 1
-fi
 run_runtime_decode_matches="$(source_matches 'RuntimeState\.(Facts|Decision|SemanticPlanning|Reconciliation|CandidateAttempts|ActiveDispatch|CompletedDispatches|GovernanceRequests|GovernanceResolutions|OperationReceipts|DeliveryAcknowledgements|DriveLease|Termination)' internal/modules/blocks/run/biz/lifecycle_reducer.go)"
 if [[ -n "$run_runtime_decode_matches" ]]; then
   cat >&2 <<EOF
@@ -3287,16 +3364,15 @@ if [[ -n "$runtime_provider_budget_shadow_matches" ]]; then
 fi
 
 # LLM physical transport observability carries the exact two-level request
-# identity and has one bounded enum source. The legacy streaming boolean may
-# remain in the public DTO only as a pure derivation and must not become the Web
-# display or identity source again.
+# identity and has one bounded enum source. No persisted/public streaming
+# compatibility boolean is retained.
 if ! grep -q -F 'PhysicalResponseMode llmaudit.PhysicalResponseMode `json:"physicalResponseMode"`' \
 	internal/pkg/workorchprojectioncontract/llm_observability.go ||
 	! grep -q -F 'ProviderSubmitted    bool                          `json:"providerSubmitted"`' \
 		internal/pkg/workorchprojectioncontract/llm_observability.go ||
-	! grep -q -E 'LogicalRequestID[[:space:]]+string `json:"logicalRequestId,omitempty"`' \
+	! grep -q -E 'LogicalRequestID[[:space:]]+string[[:space:]]+`json:"logicalRequestId,omitempty"`' \
 		internal/pkg/workorchprojectioncontract/llm_observability.go ||
-	! grep -q -E 'PhysicalCallID[[:space:]]+string `json:"physicalCallId,omitempty"`' \
+	! grep -q -E 'PhysicalCallID[[:space:]]+string[[:space:]]+`json:"physicalCallId,omitempty"`' \
 		internal/pkg/workorchprojectioncontract/llm_observability.go ||
 	! grep -q -F 'PayloadKeyLogicalRequestID        = "logicalRequestId"' \
 		internal/modules/blocks/eventstream/pkg/recordpayload/payload.go ||
@@ -3311,14 +3387,15 @@ if ! grep -q -F 'PhysicalResponseMode llmaudit.PhysicalResponseMode `json:"physi
 	! grep -q -F 'PhysicalCallID:       physicalCallID' \
 		internal/modules/application/workorchd/biz/appservice/readmodelprojection/projection_contract_sections.go ||
 	! grep -q -F 'PhysicalResponseMode: physicalResponseMode' \
-		internal/modules/application/workorchd/biz/appservice/readmodelprojection/projection_contract_sections.go ||
-	! grep -q -F 'Streaming:            physicalResponseMode.Streaming()' \
 		internal/modules/application/workorchd/biz/appservice/readmodelprojection/projection_contract_sections.go; then
 	echo "boundary contract violation: LLM usage projection lost canonical physical response/submission facts" >&2
 	exit 1
 fi
 if grep -q -E 'PayloadKey(RequestBytes|Streaming)' \
-	internal/modules/application/workorchd/biz/appservice/readmodelprojection/llm_usage_trace_identity.go; then
+	internal/modules/application/workorchd/biz/appservice/readmodelprojection/llm_usage_trace_identity.go ||
+	grep -R -q -E --include='*.go' --include='*.ts' --include='*.tsx' \
+		'PayloadKeyStreaming|json:"streaming|[[:space:]]Streaming[[:space:]]+bool|[[:space:]]streaming\??:[[:space:]]*boolean' \
+		internal/modules/blocks/eventstream internal/modules/application/workorchd internal/pkg/workorchprojectioncontract web/workorch-console/src; then
 	echo "boundary contract violation: LLM usage request identity is inferred from bytes or streaming" >&2
 	exit 1
 fi
@@ -3521,6 +3598,7 @@ fi
 # write. Dedicated Definition tickets never enter generic mutation routes;
 # terminal response-loss retries remain owner-adjudicated.
 workorchd_governance_mutation_admission="$(cat internal/modules/application/workorchd/biz/appservice/governanceports/mutation_admission.go)"
+workorchd_definition_classifier="$(sed -n '/^func definitionDecisionUsesDedicatedAdmission(/,/^}/p' internal/modules/application/workorchd/biz/appservice/governanceports/mutation_admission.go)"
 if ! grep -q -F 'ReadWorkspaceByOwnerCommand' <<<"$workorchd_governance_mutation_admission" ||
 	! grep -q -F 'ReadRunByWorkspaceOwnerCommand' <<<"$workorchd_governance_mutation_admission" ||
 	! grep -q -F 'RunStateBlockedOnDecision' <<<"$workorchd_governance_mutation_admission" ||
@@ -3530,6 +3608,11 @@ if ! grep -q -F 'ReadWorkspaceByOwnerCommand' <<<"$workorchd_governance_mutation
 	! grep -q -F 'definitionDecisionUsesDedicatedAdmission' <<<"$workorchd_governance_mutation_admission" ||
 	! grep -q -F 'response-loss retry' <<<"$workorchd_governance_mutation_admission"; then
 	echo "boundary contract violation: Workorchd governance mutation admission lost canonical owner intersection, dedicated Definition exclusion, or owner idempotency" >&2
+	exit 1
+fi
+if ! grep -q -F 'ticket.DefinitionClarification != nil' <<<"$workorchd_definition_classifier" ||
+	grep -q -E -- 'DecisionKind|FailureClass|Reason|Question|Context' <<<"$workorchd_definition_classifier"; then
+	echo "boundary contract violation: Workorchd rebuilt Definition authority from text instead of the current typed binding" >&2
 	exit 1
 fi
 for governance_file in \
@@ -3579,7 +3662,10 @@ if ! grep -q -F 'DefinitionClarification *DefinitionClarification' internal/pkg/
 fi
 web_definition_selector="$(sed -n '/^export function canonicalDefinitionClarification(/,/^}/p' web/workorch-console/src/governanceMutationTarget.ts)"
 web_definition_intent_gate="$(sed -n '/^export function workspaceExecutionIntentAllowed(/,/^}/p' web/workorch-console/src/governanceMutationTarget.ts)"
+web_definition_classifier="$(sed -n '/^export function isDedicatedDefinitionDecision(/,/^}/p' web/workorch-console/src/governanceMutationTarget.ts)"
 if grep -q -E -- 'governanceDisplay|decisionKind|failureClass|\.context' <<<"$web_definition_selector" ||
+	grep -q -E -- 'decisionKind|failureClass|reason|question|context' <<<"$web_definition_classifier" ||
+	! grep -q -F 'item?.definitionClarification' <<<"$web_definition_classifier" ||
 	grep -q -E -- 'currentDefinitionRevision|\.goals|\.dods|governanceDisplay' <<<"$web_definition_intent_gate" ||
 	! grep -q -F "return intent === 'restart'" <<<"$web_definition_intent_gate" ||
 	! grep -q -F 'workspaceBoardExecutionIntentAllowed' web/workorch-console/src/helpers.tsx ||
@@ -3591,12 +3677,18 @@ if grep -q -E -- 'governanceDisplay|decisionKind|failureClass|\.context' <<<"$we
 	exit 1
 fi
 tui_definition_instruction="$(sed -n '/^func definitionClarificationInstruction(/,/^}/p' internal/services/workorch/service/tui/model.go)"
+tui_definition_classifier="$(sed -n '/^func decisionRequiresDedicatedDefinitionFlow(/,/^}/p' internal/services/workorch/service/tui/model.go)"
 if ! grep -q -F 'item.DefinitionClarification' <<<"$tui_definition_instruction" ||
 	! grep -q -F 'binding.ViolationOrGapCode' <<<"$tui_definition_instruction" ||
 	! grep -q -F 'binding.OffendingRefs' <<<"$tui_definition_instruction" ||
 	! grep -q -F 'binding.RequiredAction' <<<"$tui_definition_instruction" ||
 	grep -q -E -- 'item\.(Context|DecisionKind|FailureClass|Reason|Question)' <<<"$tui_definition_instruction"; then
 	echo "boundary contract violation: TUI Definition instruction is not rendered exclusively from the typed binding" >&2
+	exit 1
+fi
+if ! grep -q -F 'decisionHasTypedDefinitionClarification(item)' <<<"$tui_definition_classifier" ||
+	grep -q -E -- 'DecisionKind|FailureClass|Reason|Question|Context' <<<"$tui_definition_classifier"; then
+	echo "boundary contract violation: TUI rebuilt Definition authority from text instead of the current typed binding" >&2
 	exit 1
 fi
 

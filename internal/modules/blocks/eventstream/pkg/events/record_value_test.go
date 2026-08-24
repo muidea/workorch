@@ -54,7 +54,7 @@ func TestEventRecordDataClonesPayload(t *testing.T) {
 	}
 }
 
-func TestEventRecordDataReadBoundarySanitizesLegacyPayload(t *testing.T) {
+func TestEventRecordDataReadBoundaryRejectsUnsanitizedPayload(t *testing.T) {
 	input := &eventstreammodel.EventRecord{
 		ID: "event-legacy-secret",
 		Payload: workorcheventpayload.New(
@@ -62,15 +62,8 @@ func TestEventRecordDataReadBoundarySanitizesLegacyPayload(t *testing.T) {
 			workorcheventpayload.StringField("summary", "safe"),
 		),
 	}
-	data, err := EventRecordDataFromModel(input)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if authorization, _ := data.Payload.String("authorization"); authorization != "[redacted]" {
-		t.Fatalf("authorization = %q, want redacted", authorization)
-	}
-	if authorization, _ := data.Model().Payload.String("authorization"); authorization != "[redacted]" {
-		t.Fatalf("round-trip authorization = %q, want redacted", authorization)
+	if _, err := EventRecordDataFromModel(input); err == nil {
+		t.Fatal("unsanitized persisted payload was accepted")
 	}
 }
 

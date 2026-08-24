@@ -510,48 +510,14 @@ func TestRuntimeStateRepositoryRoundTripsSealedValidationRecipeSnapshot(t *testi
 	}
 }
 
-func TestRuntimeStateRepositoryRejectsPreCWILedgerAggregateSchema(t *testing.T) {
-	ctx := context.Background()
-	runs := filerepository.NewRunRepository(filepath.Join(t.TempDir(), "runs.json"))
-	run := runtimeRunForTest(common.RunStateActive, runtimeDefinition())
-	record := runtimeStateRecordFromAggregate(runtimeAggregate(t, 1))
-	// Schema v3 predates the canonical CWI ledger. It must enter the
-	// fresh-activation boundary, never a best-effort migration path.
-	record.SchemaVersion = 3
-	run.RuntimeState = &record
-	if err := runs.Create(ctx, run); err != nil {
-		t.Fatal(err)
-	}
-
-	hub := magicevent.NewHub(16)
-	t.Cleanup(func() { hub.Terminate(ctx) })
-	module := runmodule.New()
-	if err := module.Configure(runbiz.Dependencies{Runs: runs, EventHub: hub}); err != nil {
-		t.Fatal(err)
-	}
-	if err := module.Start(); err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = module.Stop(ctx) })
-
-	_, err := (runtimeStateRepository{hub: hub}).Load(ctx, "ws-v2", "run-v2")
-	if !errors.Is(err, runtimecontract.ErrUnsupportedRuntimeStateSchema) {
-		t.Fatalf("historical aggregate load error = %v, want typed unsupported-schema error", err)
-	}
-	var schemaErr *runtimecontract.RuntimeStateSchemaVersionError
-	if !errors.As(err, &schemaErr) || schemaErr.Actual != 3 || schemaErr.Supported != runtimecontract.RuntimeStateSchemaVersionCurrent {
-		t.Fatalf("historical aggregate schema detail = %+v", schemaErr)
-	}
-}
-
-func TestRuntimeStateRepositoryRejectsCurrentSchemaDuplicateCWILedger(t *testing.T) {
+func TestRuntimeStateRepositoryRejectsInvalidDuplicateCWILedgerWithoutRewriting(t *testing.T) {
 	ctx := context.Background()
 	runs := filerepository.NewRunRepository(filepath.Join(t.TempDir(), "runs.json"))
 	run := runtimeRunForTest(common.RunStateActive, runtimeDefinition())
 	record := runtimeStateRecordFromAggregate(runtimeAggregate(t, 9))
-	// This record carries the current schema number but cannot be resumed: the
-	// same canonical CWI is projected in both active and completed focus queues.
-	// Loading must classify it without repairing or rewriting opaque authority.
+	// The same canonical CWI is projected in both active and completed focus
+	// queues. Loading rejects the current data shape without repairing or
+	// classifying it into another lifecycle.
 	record.Facts.CompletedFocuses = []runtimecontract.CoverageFocus{record.Facts.Focus.Normalized()}
 	run.RuntimeState = &record
 	if err := runs.Create(ctx, run); err != nil {
@@ -570,22 +536,15 @@ func TestRuntimeStateRepositoryRejectsCurrentSchemaDuplicateCWILedger(t *testing
 	t.Cleanup(func() { _ = module.Stop(ctx) })
 
 	_, err := (runtimeStateRepository{hub: hub}).Load(ctx, run.WorkspaceID, run.ID)
-	if !errors.Is(err, runtimecontract.ErrRuntimeStateIncompatible) {
-		t.Fatalf("current-schema duplicate CWI load error = %v, want typed incompatibility", err)
-	}
-	incompatibility, ok := runtimecontract.RuntimeStateIncompatibilityFromError(err)
-	if !ok || incompatibility.Reason != runtimecontract.RuntimeStateIncompatibilityReasonCWILedgerInvalid ||
-		incompatibility.ActualSchemaVersion != runtimecontract.RuntimeStateSchemaVersionCurrent ||
-		incompatibility.SupportedSchemaVersion != runtimecontract.RuntimeStateSchemaVersionCurrent {
-		t.Fatalf("current-schema duplicate CWI classification = %+v, ok=%v", incompatibility, ok)
+	if err == nil {
+		t.Fatal("duplicate CWI record was accepted")
 	}
 	stored, err := runs.GetByWorkspaceID(ctx, run.WorkspaceID, run.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if stored.RuntimeState == nil || stored.RuntimeState.SchemaVersion != runtimecontract.RuntimeStateSchemaVersionCurrent ||
-		stored.RuntimeState.StateRevision != record.StateRevision || len(stored.RuntimeState.Facts.CompletedFocuses) != 1 {
-		t.Fatalf("load rewrote opaque current-schema record: %+v", stored.RuntimeState)
+	if stored.RuntimeState == nil || stored.RuntimeState.StateRevision != record.StateRevision || len(stored.RuntimeState.Facts.CompletedFocuses) != 1 {
+		t.Fatalf("load rewrote opaque invalid record: %+v", stored.RuntimeState)
 	}
 }
 
@@ -597,7 +556,7 @@ func TestRuntimeInitializesFromPersistedRunBootstrap(t *testing.T) {
 	bootstrap := runtimeBootstrap()
 	if err := runs.Create(ctx, &runmodel.Run{
 		ID: "run-v2", WorkspaceID: "ws-v2", GoalID: "goal-v2", DoDID: "dod-v2",
-		DefinitionRevision: "definition-v2", RuntimeBootstrap: &bootstrap, State: common.RunStatePending,
+		DefinitionRevision: "definition-v2", RuntimeBootstrap: &bootstrap, ReconciliationScope: runtimecontract.RuntimeCWIReconciliationScopeCurrentRun, State: common.RunStatePending,
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -3297,7 +3256,7 @@ func TestRuntimeOperationExecutorPassesFocusTargetRoleToMCPOwner(t *testing.T) {
 		PrerequisiteID: "mcp-catalog", OwnerModuleID: runtimecontract.RuntimeModuleMCP,
 		OperationKinds: []string{runtimecontract.StepKindMCPToolCall}, ObservedRevision: "mcp-registry-v1",
 		MCPCapabilities: []runtimecontract.RuntimeMCPCapabilityContext{{
-			ID: capabilityID, ServerID: common.MCPServerID(serverID), Kind: "tool", Name: tool, Enabled: true, Status: "enabled",
+			ID: capabilityID, ServerID: common.MCPServerID(serverID), Kind: "tool", OperationKind: runtimecontract.StepKindMCPToolCall, Name: tool, Enabled: true, Status: "enabled",
 			EffectScope: string(runtimecontract.RuntimeEffectNone), IdempotencyClass: string(runtimecontract.RuntimeOperationIdempotencySafeToReplay),
 		}},
 		OperationPolicies: []runtimecontract.RuntimeOperationPolicyFact{{
@@ -4361,12 +4320,13 @@ func runtimeAggregate(t *testing.T, revision uint64) runtime.RuntimeAggregate {
 	facts := runtimecontract.RuntimeFacts{
 		Activation:  bootstrap.Activation,
 		WorkspaceID: "ws-v2", RunID: "run-v2", DefinitionRevision: "definition-v2", DefinitionSeed: bootstrap.DefinitionSeed, EvidenceRevision: "runtime-evidence-00000000000000000000",
-		DefinitionFocuses: runtimecontract.CompileRuntimeDefinitionFocuses(bootstrap.Focuses),
-		Focus:             bootstrap.Focuses[0],
-		Coverage:          []runtimecontract.RuntimeCoverageItemFact{{ID: "cwi-v2", SliceID: "slice-v2", State: runtimecontract.RuntimeCoverageItemStateOpen}},
-		Capabilities:      runtimecontract.RuntimeCapabilities{StateChangeKinds: []string{runtimecontract.StepKindFileEdit}},
-		ConvergencePolicy: runtimeTestConvergencePolicy(),
-		RecoveryPolicy:    runtimecontract.DefaultRuntimeRecoveryPolicy(),
+		DefinitionFocuses:     runtimecontract.CompileRuntimeDefinitionFocuses(bootstrap.Focuses),
+		Focus:                 bootstrap.Focuses[0],
+		Coverage:              []runtimecontract.RuntimeCoverageItemFact{{ID: "cwi-v2", SliceID: "slice-v2", State: runtimecontract.RuntimeCoverageItemStateOpen}},
+		Capabilities:          runtimecontract.RuntimeCapabilities{StateChangeKinds: []string{runtimecontract.StepKindFileEdit}},
+		ConvergencePolicy:     runtimeTestConvergencePolicy(),
+		RecoveryPolicy:        runtimecontract.DefaultRuntimeRecoveryPolicy(),
+		ExecutionBudgetPolicy: bootstrap.ExecutionBudgetPolicy,
 	}
 	facts.Resources.ProviderCeiling = &runtimecontract.ProviderCeiling{
 		Selection:                bootstrap.Activation.ProviderSelection,
@@ -4520,12 +4480,12 @@ func runtimeDefinition() runtimecontract.RuntimeDefinitionContext {
 func runtimeBootstrap() runtimecontract.RuntimeBootstrap {
 	policy := runtimeTestAcceptanceSlicePolicy()
 	bootstrap := runtimecontract.RuntimeBootstrap{
-		SchemaVersion: runtimecontract.RuntimeStateSchemaVersionCurrent,
-		Definition:    runtimeDefinition(),
+		Definition: runtimeDefinition(),
 		Activation: runtimecontract.RuntimeActivationContext{
 			ProviderSelection: runtimecontract.ProviderInferenceSelection{Target: runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "gpt-4o"}},
 			ExecutionContract: runtimecontract.RuntimeExecutionContract{
 				OperationContractRevision: runtimecontract.RuntimeOperationContractRevision(),
+				StateChangePolicy:         runtimecontract.RuntimeStateChangeAllowedButNotRequired,
 				AcceptanceSlicePolicy:     &policy,
 			},
 		},
@@ -4542,6 +4502,7 @@ func runtimeBootstrap() runtimecontract.RuntimeBootstrap {
 		ConvergencePolicy: runtimeTestConvergencePolicy(),
 		RecoveryPolicy:    runtimecontract.DefaultRuntimeRecoveryPolicy(),
 	}
+	bootstrap.ExecutionBudgetPolicy = runtimecontract.RuntimeExecutionBudgetPolicyForRuntimePolicies(bootstrap.ConvergencePolicy, bootstrap.RecoveryPolicy)
 	return runtimeTestBootstrapWithBindings(bootstrap)
 }
 
@@ -4572,7 +4533,9 @@ func runtimeTestAcceptanceSlicePolicy() runtimecontract.RuntimeAcceptanceSlicePo
 	return runtimecontract.RuntimeAcceptanceSlicePolicy{
 		SchemaVersion: runtimecontract.RuntimeAcceptanceSlicePolicySchemaCurrent,
 		MaxWorkItems:  4, MaxFocuses: 16, MaxCandidateContextItems: 4,
-		Groups: []runtimecontract.RuntimeAcceptanceSliceGroupPolicy{{ID: "test", Title: "Test", Scope: "test", Priority: 1, MaxWorkItems: 4, Match: runtimecontract.RuntimeAcceptanceSliceMatch{All: true}}},
+		CompletionPolicy: runtimecontract.RuntimeAcceptanceSliceCompletionAll,
+		ResultPolicy:     runtimecontract.RuntimeAcceptanceSliceResultAllowed,
+		Groups:           []runtimecontract.RuntimeAcceptanceSliceGroupPolicy{{ID: "test", Title: "Test", Scope: "test", Priority: 1, MaxWorkItems: 4, Match: runtimecontract.RuntimeAcceptanceSliceMatch{All: true}}},
 	}
 }
 
@@ -4593,12 +4556,14 @@ func runtimeRunForTest(state common.RunState, definition runtimecontract.Runtime
 func runtimeRunForTestBootstrap(state common.RunState, bootstrap runtimecontract.RuntimeBootstrap) *runmodel.Run {
 	definition := bootstrap.Definition
 	return &runmodel.Run{
-		ID:                 "run-v2",
-		WorkspaceID:        "ws-v2",
-		GoalID:             definition.GoalID,
-		DoDID:              definition.DoDID,
-		DefinitionRevision: definition.Revision,
-		RuntimeBootstrap:   &bootstrap,
-		State:              state,
+		ID:                  "run-v2",
+		WorkspaceID:         "ws-v2",
+		GoalID:              definition.GoalID,
+		DoDID:               definition.DoDID,
+		DefinitionRevision:  definition.Revision,
+		RuntimeBootstrap:    &bootstrap,
+		ReconciliationScope: runtimecontract.RuntimeCWIReconciliationScopeCurrentRun,
+		Lineage:             runmodel.RunLineage{LineageState: "active"},
+		State:               state,
 	}
 }

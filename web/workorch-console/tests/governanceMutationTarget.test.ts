@@ -6,6 +6,7 @@ import {
   canonicalActiveRunIsGovernanceBlocked,
   governanceContinuationGuidance,
   governanceResourceKey,
+  isDedicatedDefinitionDecision,
   isCanonicalApprovalMutationTarget,
   isCanonicalDecisionMutationTarget,
   mergeGovernanceResources,
@@ -51,12 +52,20 @@ test('admits only the exact active Run blocker and ignores forged display hints'
   assert.equal(isCanonicalApprovalMutationTarget(snapshot('approval'), { ...approval, id: 'approval-extra' }), false);
 });
 
-test('rejects stale scope, absent concrete resources, and dedicated definition decisions', () => {
+test('rejects stale scope, absent concrete resources, and typed definition decisions', () => {
   const current = snapshot('decision');
   assert.equal(isCanonicalDecisionMutationTarget(current, { ...decision, runId: 'run-stale' }), false);
   assert.equal(isCanonicalDecisionMutationTarget({ ...current, decisions: [] }, decision), false);
-  assert.equal(isCanonicalDecisionMutationTarget(current, { ...decision, decisionKind: 'runtime_definition_clarification' }), false);
-  assert.equal(isCanonicalDecisionMutationTarget(current, { ...decision, failureClass: 'definition_admission' }), false);
+  const definition = {
+    ...decision,
+    definitionClarification: {
+      class: 'runtime_definition', bindingState: 'open', requiredAction: 'revise_definition_and_restart',
+      violationOrGapCode: 'semantic_ambiguity', offendingRefs: ['goal:goal-1']
+    }
+  } satisfies Decision;
+  assert.equal(isCanonicalDecisionMutationTarget({ ...current, decisions: [definition] }, definition), false);
+  assert.equal(isDedicatedDefinitionDecision({ ...decision, decisionKind: 'runtime_definition_clarification' }), false);
+  assert.equal(isDedicatedDefinitionDecision({ ...decision, failureClass: 'definition_admission' }), false);
 });
 
 test('selects a typed definition blocker only from the exact canonical owner intersection', () => {

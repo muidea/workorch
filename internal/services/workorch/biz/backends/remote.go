@@ -881,6 +881,7 @@ func DecodeProjectionSSE(lines []string, eventID string) (projectioncontract.Wor
 }
 
 func decodeProjectionSSE(lines []string, eventID string) (projectioncontract.WorkspaceProjectionChanged, bool) {
+	_ = eventID
 	if len(lines) == 0 {
 		return projectioncontract.WorkspaceProjectionChanged{}, false
 	}
@@ -888,8 +889,10 @@ func decodeProjectionSSE(lines []string, eventID string) (projectioncontract.Wor
 	if err := json.Unmarshal([]byte(strings.Join(lines, "\n")), &dto); err != nil {
 		return projectioncontract.WorkspaceProjectionChanged{}, false
 	}
-	// Accept both top-level concrete DTO and legacy envelope topic form.
-	if strings.TrimSpace(dto.WorkspaceID) == "" {
+	if strings.TrimSpace(dto.WorkspaceID) == "" || strings.TrimSpace(dto.ID) == "" || strings.TrimSpace(dto.StreamGeneration) == "" || dto.StreamRevision <= 0 {
+		return projectioncontract.WorkspaceProjectionChanged{}, false
+	}
+	if strings.TrimSpace(dto.Revision.StreamGeneration) != strings.TrimSpace(dto.StreamGeneration) || dto.Revision.StreamRevision != dto.StreamRevision {
 		return projectioncontract.WorkspaceProjectionChanged{}, false
 	}
 	sections := make([]projectioncontract.WorkspaceProjectionSection, 0, len(dto.ChangedSections))
@@ -899,25 +902,13 @@ func decodeProjectionSSE(lines []string, eventID string) (projectioncontract.Wor
 		}
 		sections = append(sections, projectioncontract.WorkspaceProjectionSection(section))
 	}
-	streamRevision := dto.StreamRevision
-	if streamRevision == 0 {
-		streamRevision = dto.Revision.StreamRevision
-	}
-	id := strings.TrimSpace(dto.ID)
-	if id == "" {
-		id = strings.TrimSpace(eventID)
-	}
-	streamGeneration := strings.TrimSpace(dto.StreamGeneration)
-	if streamGeneration == "" {
-		streamGeneration = strings.TrimSpace(dto.Revision.StreamGeneration)
-	}
 	return projectioncontract.WorkspaceProjectionChanged{
-		ID:          id,
+		ID:          strings.TrimSpace(dto.ID),
 		WorkspaceID: dto.WorkspaceID,
 		RunID:       dto.RunID,
 		Revision: projectioncontract.WorkspaceRefreshRevision{
-			StreamGeneration:        streamGeneration,
-			StreamRevision:          streamRevision,
+			StreamGeneration:        strings.TrimSpace(dto.StreamGeneration),
+			StreamRevision:          dto.StreamRevision,
 			WorkspaceRevision:       dto.Revision.WorkspaceRevision,
 			ProjectedSourceRevision: dto.Revision.ProjectedSourceRevision,
 			RuntimeStateRevision:    dto.Revision.RuntimeStateRevision,

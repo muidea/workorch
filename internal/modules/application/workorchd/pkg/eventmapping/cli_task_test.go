@@ -15,14 +15,13 @@ func TestCLITaskProjectionRoundTripDetachesMutableFields(t *testing.T) {
 		"items":  []any{map[string]any{"value": "original"}},
 	}
 	target := &runtimecontract.ProviderModelTarget{ProviderID: "provider", ModelID: "model"}
-	activation := &projectioncontract.RuntimeActivationStatus{Disposition: "ready"}
 	plans := []projectioncontract.TaskPlan{{
 		ID: "plan-1", WorkspaceID: "workspace-1", RunID: "run-1", AnchorStepID: "step-1",
 		Nodes: []projectioncontract.TaskDecompositionNode{{
 			ID: "node-1", DependsOn: []string{"node-0"}, EvidenceRefs: []string{"evidence-1"},
 			CoverageTargets: []string{"target-1"}, Input: input,
 		}},
-		EvidenceRefs: []string{"plan-evidence-1"}, SealedLLMSelection: &runtimecontract.ProviderInferenceSelection{Target: *target}, RuntimeActivation: activation,
+		EvidenceRefs: []string{"plan-evidence-1"}, SealedLLMSelection: &runtimecontract.ProviderInferenceSelection{Target: *target},
 	}}
 
 	dto, err := taskPlanDTOs(plans)
@@ -35,7 +34,6 @@ func TestCLITaskProjectionRoundTripDetachesMutableFields(t *testing.T) {
 	input["nested"].(map[string]any)["name"] = "mutated"
 	input["items"].([]any)[0].(map[string]any)["value"] = "mutated"
 	target.ModelID = "mutated"
-	activation.Disposition = "mutated"
 
 	roundTrip := taskPlanProjections(dto)
 	want := []projectioncontract.TaskPlan{{
@@ -49,7 +47,6 @@ func TestCLITaskProjectionRoundTripDetachesMutableFields(t *testing.T) {
 		}},
 		EvidenceRefs:       []string{"plan-evidence-1"},
 		SealedLLMSelection: &runtimecontract.ProviderInferenceSelection{Target: runtimecontract.ProviderModelTarget{ProviderID: "provider", ModelID: "model"}},
-		RuntimeActivation:  &projectioncontract.RuntimeActivationStatus{Disposition: "ready"},
 	}}
 	if !reflect.DeepEqual(roundTrip, want) {
 		t.Fatalf("task plan round trip = %#v, want %#v", roundTrip, want)

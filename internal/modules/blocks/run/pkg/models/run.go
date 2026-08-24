@@ -3,9 +3,7 @@ package run
 import (
 	"crypto/sha256"
 	"encoding/hex"
-	"encoding/json"
 	"fmt"
-	"strconv"
 	"strings"
 
 	"github.com/muidea/workorch/internal/pkg/common"
@@ -87,54 +85,6 @@ type ReplacementIntent struct {
 	RuntimeStateRevision               uint64
 	SuccessorRunID                     common.RunID
 	AcknowledgedAt                     string
-	// legacyIdentityHashSlot is populated only while decoding a persisted v1
-	// clarification intent whose immutable hash included the retired caller
-	// priority slot. It is never accepted from a command, projected, or used to
-	// order execution. Custom JSON round-tripping preserves it solely so an
-	// existing Decision binding keeps the same immutable identity across reloads.
-	legacyIdentityHashSlot string
-}
-
-type replacementIntentJSON ReplacementIntent
-
-func (i *ReplacementIntent) UnmarshalJSON(data []byte) error {
-	if i == nil {
-		return fmt.Errorf("replacement intent decode target is nil")
-	}
-	var wire struct {
-		replacementIntentJSON
-		Priority *int `json:"Priority"`
-	}
-	if err := json.Unmarshal(data, &wire); err != nil {
-		return err
-	}
-	decoded := ReplacementIntent(wire.replacementIntentJSON)
-	if wire.Priority != nil && *wire.Priority != 0 && strings.TrimSpace(decoded.ReplacementIntentHash) != "" {
-		decoded.legacyIdentityHashSlot = strconv.Itoa(*wire.Priority)
-		if decoded.ReplacementIntentHash != stableReplacementIntentHashWithSlot(decoded, decoded.legacyIdentityHashSlot) {
-			return fmt.Errorf("persisted replacement intent legacy identity hash does not match its sealed payload")
-		}
-	}
-	*i = decoded
-	return nil
-}
-
-func (i ReplacementIntent) MarshalJSON() ([]byte, error) {
-	wire := struct {
-		replacementIntentJSON
-		Priority *int `json:"Priority,omitempty"`
-	}{replacementIntentJSON: replacementIntentJSON(i)}
-	if i.legacyIdentityHashSlot != "" {
-		legacyValue, err := strconv.Atoi(i.legacyIdentityHashSlot)
-		if err != nil || legacyValue == 0 {
-			return nil, fmt.Errorf("replacement intent legacy identity hash slot is invalid")
-		}
-		if strings.TrimSpace(i.ReplacementIntentHash) == "" || i.ReplacementIntentHash != stableReplacementIntentHashWithSlot(i, i.legacyIdentityHashSlot) {
-			return nil, fmt.Errorf("replacement intent legacy identity hash does not match its sealed payload")
-		}
-		wire.Priority = &legacyValue
-	}
-	return json.Marshal(wire)
 }
 
 func (i ReplacementIntent) ValidFor(predecessor *Run) bool {
@@ -227,52 +177,20 @@ func (r ReplacementRecoveryLease) validFor(intent ReplacementIntent) bool {
 // StableReplacementIntentHash seals immutable restart identity only. Delivery,
 // acknowledgement and recovery progress deliberately do not participate.
 func StableReplacementIntentHash(i ReplacementIntent) string {
-	legacySlot := "0"
-	if i.legacyIdentityHashSlot != "" {
-		legacySlot = i.legacyIdentityHashSlot
-	}
-	return stableReplacementIntentHashWithSlot(i, legacySlot)
-}
-
-func stableReplacementIntentHashWithSlot(i ReplacementIntent, legacySlot string) string {
 	if i.Bootstrap == nil {
 		return ""
 	}
 	h := sha256.New()
 	for _, value := range []string{
-		"workorch-replacement-intent-v1", i.RequestID, string(i.WorkspaceID), string(i.GoalID), string(i.DoDID),
+		"workorch-replacement-intent", i.RequestID, string(i.WorkspaceID), string(i.GoalID), string(i.DoDID),
 		strings.TrimSpace(i.DefinitionRevision), strings.TrimSpace(i.StartupInputHash), strings.TrimSpace(i.ReplacementIntentID),
 		string(i.ClarificationTicketID), strings.TrimSpace(i.PredecessorStartupInputHash), strings.TrimSpace(i.SuccessorStartupInputHash),
-		legacySlot, // persisted v1 identity slot; new intents always seal the neutral value "0"
 		string(i.ReconciliationScope), string(i.Kind), strings.TrimSpace(i.Reason),
 		runtimecontract.StableRuntimeBootstrapHash(*i.Bootstrap),
 	} {
 		_, _ = fmt.Fprintf(h, "%08x%s", len(value), value)
 	}
 	return "replacement-intent-sha256:" + hex.EncodeToString(h.Sum(nil))
-}
-
-// EquivalentReplacementIntentHash accepts an exact current hash or a
-// canonical neutral-slot hash for an already validated persisted v1 intent.
-// This keeps duplicate Restart idempotent after removing caller priority
-// without allowing that retired value to influence any new intent.
-func EquivalentReplacementIntentHash(current, requested ReplacementIntent) bool {
-	currentHash := strings.TrimSpace(current.ReplacementIntentHash)
-	requestedHash := strings.TrimSpace(requested.ReplacementIntentHash)
-	if currentHash == "" || requestedHash == "" {
-		return currentHash == requestedHash
-	}
-	if currentHash != StableReplacementIntentHash(current) || requestedHash != StableReplacementIntentHash(requested) {
-		return false
-	}
-	if currentHash == requestedHash {
-		return true
-	}
-	if current.legacyIdentityHashSlot == "" {
-		return false
-	}
-	current.legacyIdentityHashSlot = ""
-	return requestedHash == StableReplacementIntentHash(current)
 }
 
 type Run struct {
@@ -304,25 +222,21 @@ type Run struct {
 	// emitted with the pending->active state fact so Orchestrator cannot lose a
 	// resume reconciliation when the ordinary state notification races it.
 	ReconciliationRequestID string
-	// ReconciliationScope is immutable activation metadata owned by Run. Empty
-	// means current_run for legacy/in-process fixtures; restart-created Runs
-	// seal workspace_full so the first Orchestrator drive cannot inherit
-	// predecessor coverage credit.
+	// ReconciliationScope is immutable activation metadata owned by Run.
+	// Restart-created Runs seal workspace_full so their first Orchestrator drive
+	// cannot inherit predecessor coverage credit.
 	ReconciliationScope runtimecontract.RuntimeCWIReconciliationScope
 	RuntimeState        *runtimecontract.RuntimeStateRecord
 	// RuntimeLifecycleFence is Orchestrator-authored opaque identity persisted
 	// beside RuntimeState. Run compares it without decoding aggregate content.
 	RuntimeLifecycleFence *runtimecontract.RuntimeOpaqueLifecycleFence
-	// RuntimeActivationStatus is the Run owner's administrative resume status.
-	// It never contains decoded aggregate authority or a requested target state.
-	RuntimeActivationStatus *RuntimeActivationStatus
-	State                   common.RunState
-	BlockingTicketID        common.TicketID
-	BlockingApprovalID      common.ApprovalID
-	FailureReason           string
-	CreatedAt               string
-	StartedAt               string
-	EndedAt                 string
+	State                 common.RunState
+	BlockingTicketID      common.TicketID
+	BlockingApprovalID    common.ApprovalID
+	FailureReason         string
+	CreatedAt             string
+	StartedAt             string
+	EndedAt               string
 	// TerminalDelivery is the Run owner's immutable SM-1 terminal fence.
 	TerminalDelivery *runtimecontract.RuntimeTerminalDeliveryIdentity
 }
@@ -361,7 +275,6 @@ func CloneRun(item *Run) *Run {
 			cloned.RetiredReplacementIntents[idx] = CloneReplacementIntent(item.RetiredReplacementIntents[idx])
 		}
 	}
-	cloned.RuntimeActivationStatus = item.RuntimeActivationStatus.Clone()
 	if item.TerminalDelivery != nil {
 		identity := *item.TerminalDelivery
 		cloned.TerminalDelivery = &identity

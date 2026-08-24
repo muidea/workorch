@@ -192,6 +192,8 @@ func runtimeAcceptanceSlicePlan(activation runtimecontract.RuntimeActivationCont
 		SchemaVersion: runtimecontract.RuntimeAcceptanceSlicePolicySchemaCurrent,
 		MaxWorkItems:  runtimecontract.RuntimeAcceptanceSliceDefaultMaxItems, MaxFocuses: runtimecontract.RuntimeAcceptanceFocusMaxCount,
 		MaxCandidateContextItems: runtimecontract.RuntimeCandidateContextItemsMaxCount,
+		CompletionPolicy:         runtimecontract.RuntimeAcceptanceSliceCompletionAll,
+		ResultPolicy:             runtimecontract.RuntimeAcceptanceSliceResultAllowed,
 	}
 	if activation.ExecutionContract.AcceptanceSlicePolicy != nil {
 		policy = activation.ExecutionContract.AcceptanceSlicePolicy.Normalized()

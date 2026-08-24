@@ -804,11 +804,13 @@ func TestRemoteProjectionEventsHealthAndReconnectWithLastEventID(t *testing.T) {
 	var requests atomic.Int32
 	seenLastEventID := make(chan string, 4)
 	firstDTO := map[string]any{
-		"id":             "proj-evt-1",
-		"streamRevision": int64(11),
-		"workspaceId":    "ws-proj-reconnect",
-		"runId":          "run-1",
+		"id":               "proj-evt-1",
+		"streamGeneration": "generation-current",
+		"streamRevision":   int64(11),
+		"workspaceId":      "ws-proj-reconnect",
+		"runId":            "run-1",
 		"revision": map[string]any{
+			"streamGeneration":     "generation-current",
 			"streamRevision":       int64(11),
 			"workspaceRevision":    int64(5),
 			"runtimeStateRevision": uint64(42),
@@ -820,11 +822,13 @@ func TestRemoteProjectionEventsHealthAndReconnectWithLastEventID(t *testing.T) {
 		"updatedAt":       "2026-07-15T14:30:00Z",
 	}
 	secondDTO := map[string]any{
-		"id":             "proj-evt-2",
-		"streamRevision": int64(12),
-		"workspaceId":    "ws-proj-reconnect",
-		"runId":          "run-1",
+		"id":               "proj-evt-2",
+		"streamGeneration": "generation-current",
+		"streamRevision":   int64(12),
+		"workspaceId":      "ws-proj-reconnect",
+		"runId":            "run-1",
 		"revision": map[string]any{
+			"streamGeneration":     "generation-current",
 			"streamRevision":       int64(12),
 			"workspaceRevision":    int64(6),
 			"runtimeStateRevision": uint64(43),

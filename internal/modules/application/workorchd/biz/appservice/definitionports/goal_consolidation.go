@@ -49,7 +49,10 @@ func DefineOrConsolidateWorkspaceGoal(ctx context.Context, hub magicevent.Hub, w
 	if err != nil {
 		return nil, err
 	}
-	existing = activationcore.OrderedWorkspaceGoals(existing)
+	existing, err = activationcore.OrderedWorkspaceGoals(existing)
+	if err != nil {
+		return nil, err
+	}
 	if len(existing) > 0 {
 		return ConsolidateWorkspaceGoal(ctx, hub, workspaceID, existing, text)
 	}
@@ -61,7 +64,10 @@ func ListConsolidatedWorkspaceGoals(ctx context.Context, hub magicevent.Hub, wor
 	if err != nil {
 		return nil, err
 	}
-	items = activationcore.OrderedWorkspaceGoals(items)
+	items, err = activationcore.OrderedWorkspaceGoals(items)
+	if err != nil {
+		return nil, err
+	}
 	if len(items) <= 1 {
 		return items, nil
 	}

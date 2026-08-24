@@ -27,7 +27,7 @@ Last Verified: 2026-08-23
   persisted Run identity，acceptance/context/Soul 等独立业务排序也不能成为执行调度权威；
 - `RuntimeState` 和 opaque lifecycle fence；
 - `ReconciliationRequestID` 与 reconciliation scope；
-- `RuntimeActivationStatus`、SM-1 `State`、blocking ticket/approval；
+- SM-1 `State` 与 blocking ticket/approval；Run 不保存 Runtime schema-validity/activation status；
 - failure/timestamps 与 immutable `TerminalDelivery`；
 - restart predecessor 上的 active durable `ReplacementIntent` 与 immutable rejected-intent retirement history。
 

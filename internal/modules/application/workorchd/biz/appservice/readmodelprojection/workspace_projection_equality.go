@@ -272,7 +272,6 @@ func llmUsageEqual(a, b projectioncontract.LLMUsageTrace) bool {
 		a.ResponseBytes == b.ResponseBytes &&
 		a.PhysicalResponseMode == b.PhysicalResponseMode &&
 		a.ProviderSubmitted == b.ProviderSubmitted &&
-		a.Streaming == b.Streaming &&
 		a.ContextBudget.Equal(b.ContextBudget) &&
 		a.CacheUsage.Equal(b.CacheUsage) &&
 		a.CacheMarkers.Equal(b.CacheMarkers) &&

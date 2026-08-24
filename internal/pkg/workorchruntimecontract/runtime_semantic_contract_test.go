@@ -12,7 +12,10 @@ func TestRuntimeDefinitionSeedIsStableAndContainsNoProofAuthority(t *testing.T) 
 		Revision: "definition-1", GoalID: "goal-1", GoalDefinition: "deliver",
 		DoDID: "dod-1", DoDDefinition: "1. works", CapabilityContract: []string{StepKindFileEdit},
 	}
-	activation := RuntimeActivationContext{ExecutionContract: RuntimeExecutionContract{OperationContractRevision: RuntimeOperationContractRevision()}}
+	activation := RuntimeActivationContext{ExecutionContract: RuntimeExecutionContract{
+		OperationContractRevision: RuntimeOperationContractRevision(),
+		StateChangePolicy:         RuntimeStateChangeAllowedButNotRequired,
+	}}
 	items := []RuntimeCoverageItem{{ID: "cwi-001", SliceID: "slice-1", SourceScope: "dodItem", SourceID: "dod-001", TargetText: "works", Order: 1}}
 	slices := []RuntimeAcceptanceSlice{{ID: "slice-1", CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-001"}}}
 	seed, err := CompileRuntimeDefinitionSeed(definition, activation, items, slices)
@@ -70,6 +73,7 @@ func TestCompileRuntimeSemanticPlanManifestUsesOnlySealedCapabilityVocabulary(t 
 	}
 	activation := RuntimeActivationContext{ExecutionContract: RuntimeExecutionContract{
 		OperationContractRevision: RuntimeOperationContractRevision(),
+		StateChangePolicy:         RuntimeStateChangeAllowedButNotRequired,
 	}}
 	items := []RuntimeCoverageItem{{ID: "cwi-001", SliceID: "slice-1", SourceScope: "dodItem", SourceID: "dod-1", TargetText: "works", Order: 1}}
 	slices := []RuntimeAcceptanceSlice{{ID: "slice-1", CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-001"}}}
@@ -143,7 +147,10 @@ func TestCompileRuntimeSemanticPlanManifestOmitsSettledPrerequisiteFromProviderO
 		Revision: "definition-1", GoalID: "goal-1", GoalDefinition: "deliver", DoDID: "dod-1", DoDDefinition: "works",
 		CapabilityContract: []string{StepKindFileWrite},
 	}
-	execution := RuntimeExecutionContract{OperationContractRevision: RuntimeOperationContractRevision()}
+	execution := RuntimeExecutionContract{
+		OperationContractRevision: RuntimeOperationContractRevision(),
+		StateChangePolicy:         RuntimeStateChangeAllowedButNotRequired,
+	}
 	activation := RuntimeActivationContext{ExecutionContract: execution}
 	items := []RuntimeCoverageItem{
 		{ID: "cwi-source", SliceID: "slice-1", SourceScope: "deliverable", SourceID: "source", Order: 1},
@@ -708,7 +715,10 @@ func semanticSealedLedgerFixture(t *testing.T) RuntimeSemanticPlanningLedger {
 		Revision: "definition-history", GoalID: "goal-history", GoalDefinition: "deliver",
 		DoDID: "dod-history", DoDDefinition: "works", CapabilityContract: []string{StepKindFileWrite},
 	}
-	activation := RuntimeActivationContext{ExecutionContract: RuntimeExecutionContract{OperationContractRevision: RuntimeOperationContractRevision()}}
+	activation := RuntimeActivationContext{ExecutionContract: RuntimeExecutionContract{
+		OperationContractRevision: RuntimeOperationContractRevision(),
+		StateChangePolicy:         RuntimeStateChangeAllowedButNotRequired,
+	}}
 	items := []RuntimeCoverageItem{{ID: "cwi-history", SliceID: "slice-history", SourceScope: "dodItem", SourceID: "dod-history", TargetText: "works", Order: 1}}
 	slices := []RuntimeAcceptanceSlice{{ID: "slice-history", CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-history"}}}
 	seed, err := CompileRuntimeDefinitionSeed(definition, activation, items, slices)

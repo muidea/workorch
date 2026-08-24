@@ -21,7 +21,6 @@ type lifecycleTransition struct {
 	StartedAt               string
 	EndedAt                 string
 	TerminalDelivery        *runtimecontract.RuntimeTerminalDeliveryIdentity
-	RuntimeActivationStatus *runmodel.RuntimeActivationStatus
 	ReconciliationRequestID string
 	// Noop means the input was accepted without rewriting owner state
 	// (duplicate, already-terminal, or already-converged).
@@ -59,9 +58,6 @@ func reduceActivateRun(current *runmodel.Run, cmd activateRunFact) (lifecycleTra
 	}
 	if runStateIsTerminal(current.State) {
 		return lifecycleTransition{Noop: true, Diagnostic: "run already terminal"}, nil
-	}
-	if runtimeActivationDispositionForRun(current) == runtimecontract.RuntimeActivationDispositionFreshActivationRequired {
-		return lifecycleTransition{Noop: true, Diagnostic: string(runtimecontract.RuntimeActivationDispositionFreshActivationRequired)}, nil
 	}
 	if current.State == common.RunStateActive {
 		return lifecycleTransition{Noop: true, Diagnostic: "run already active"}, nil
@@ -181,52 +177,6 @@ func reduceContinuationEligible(current *runmodel.Run, cmd runevents.RuntimeCont
 	}, nil
 }
 
-// reduceRuntimeStateIncompatible converts the immutable Orchestrator
-// persisted-state observation into Run-owned administrative state. The Runtime
-// aggregate stays opaque: only its stored ref/schema identity are compared and
-// no authority, dispatch, governance, or delivery value is decoded here.
-func reduceRuntimeStateIncompatible(current *runmodel.Run, cmd runevents.RuntimeStateIncompatibleFact) (lifecycleTransition, error) {
-	if current == nil {
-		return lifecycleTransition{}, common.ErrInvalidArgument
-	}
-	if err := cmd.Validate(); err != nil {
-		return lifecycleTransition{}, err
-	}
-	if current.WorkspaceID != cmd.WorkspaceID || current.ID != cmd.RunID {
-		return lifecycleTransition{}, common.ErrConflict
-	}
-	if runStateIsTerminal(current.State) {
-		return lifecycleTransition{Noop: true, Diagnostic: "run already terminal"}, nil
-	}
-	if current.RuntimeState == nil {
-		return lifecycleTransition{}, fmt.Errorf("%w: runtime state incompatibility requires persisted runtime state", common.ErrConflict)
-	}
-	if runevents.RuntimeStateRef(current.WorkspaceID, current.ID, current.RuntimeState.StateRevision) != cmd.RuntimeStateRef ||
-		current.RuntimeState.SchemaVersion != cmd.Incompatibility.ActualSchemaVersion {
-		return lifecycleTransition{}, fmt.Errorf("%w: runtime state incompatibility identity mismatch", common.ErrConflict)
-	}
-	feedback := cmd.Feedback.CloneOriginal()
-	status := &runmodel.RuntimeActivationStatus{
-		Disposition:     runtimecontract.RuntimeActivationDispositionFreshActivationRequired,
-		RuntimeStateRef: cmd.RuntimeStateRef,
-		Incompatibility: cmd.Incompatibility.Normalized(),
-		Feedback:        &feedback,
-	}
-	if current.RuntimeActivationStatus != nil {
-		if sameRuntimeActivationStatus(current.RuntimeActivationStatus, status) {
-			return lifecycleTransition{Noop: true, Diagnostic: string(status.Disposition)}, nil
-		}
-		return lifecycleTransition{}, fmt.Errorf("%w: conflicting runtime activation status", common.ErrConflict)
-	}
-	return lifecycleTransition{
-		Target:                  current.State,
-		BlockingTicketID:        current.BlockingTicketID,
-		BlockingApproval:        current.BlockingApprovalID,
-		FailureReason:           current.FailureReason,
-		RuntimeActivationStatus: status,
-	}, nil
-}
-
 func reduceTerminalDelivery(current *runmodel.Run, cmd runevents.RuntimeTerminalDeliveryFact) (lifecycleTransition, error) {
 	if current == nil {
 		return lifecycleTransition{}, common.ErrInvalidArgument
@@ -253,6 +203,9 @@ func reduceTerminalDelivery(current *runmodel.Run, cmd runevents.RuntimeTerminal
 	}
 	if runStateIsTerminal(current.State) {
 		return lifecycleTransition{}, fmt.Errorf("%w: terminal Run lacks delivery fence", common.ErrConflict)
+	}
+	if target == common.RunStateSuperseded && strings.TrimSpace(current.Lineage.LineageState) != "active" {
+		return lifecycleTransition{}, fmt.Errorf("%w: Run lineage is outside the current data contract", common.ErrConflict)
 	}
 	if err := validateSealedTerminalIdentity(current, cmd); err != nil {
 		return lifecycleTransition{}, err
@@ -347,36 +300,17 @@ func applyLifecycleTransition(current *runmodel.Run, transition lifecycleTransit
 		identity := transition.TerminalDelivery.Normalized()
 		next.TerminalDelivery = &identity
 	}
-	if transition.RuntimeActivationStatus != nil {
-		next.RuntimeActivationStatus = transition.RuntimeActivationStatus.Clone()
-	}
 	if transition.ReconciliationRequestID != "" {
 		next.ReconciliationRequestID = strings.TrimSpace(transition.ReconciliationRequestID)
 	}
 	if transition.Target == common.RunStateSuperseded {
 		lineage := next.Lineage
-		if strings.TrimSpace(lineage.LineageState) == "" || lineage.LineageState == "active" {
+		if lineage.LineageState == "active" {
 			lineage.LineageState = "superseded"
 			next.Lineage = lineage
 		}
 	}
 	return &next
-}
-
-func sameRuntimeActivationStatus(left, right *runmodel.RuntimeActivationStatus) bool {
-	if left == nil || right == nil {
-		return left == nil && right == nil
-	}
-	leftIncompatibility := left.Incompatibility.Normalized()
-	rightIncompatibility := right.Incompatibility.Normalized()
-	if left.Disposition != right.Disposition || left.RuntimeStateRef != right.RuntimeStateRef ||
-		leftIncompatibility != rightIncompatibility {
-		return false
-	}
-	if left.Feedback == nil || right.Feedback == nil {
-		return left.Feedback == nil && right.Feedback == nil
-	}
-	return runtimecontract.StableRuntimeFeedbackHash(*left.Feedback) == runtimecontract.StableRuntimeFeedbackHash(*right.Feedback)
 }
 
 func sameRunTerminalDelivery(left, right *runtimecontract.RuntimeTerminalDeliveryIdentity) bool {

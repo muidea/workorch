@@ -18,7 +18,7 @@ func mapRuntimeAudit(runtimeState *runtimecontract.RuntimeStateRecord) *projecti
 	state := runtimeState.Clone()
 	facts := state.Facts.Normalized()
 	ret := &projectioncontract.RuntimeAudit{
-		WorkspaceID: string(facts.WorkspaceID), RunID: string(facts.RunID), SchemaVersion: state.SchemaVersion,
+		WorkspaceID: string(facts.WorkspaceID), RunID: string(facts.RunID),
 		StateRevision: state.StateRevision, EvidenceSequence: state.EvidenceSequence,
 		DefinitionRevision: facts.DefinitionRevision, EvidenceRevision: facts.EvidenceRevision,
 		Focus: runtimeAuditFocus(facts.Focus), Coverage: runtimeAuditCoverage(facts.Coverage),

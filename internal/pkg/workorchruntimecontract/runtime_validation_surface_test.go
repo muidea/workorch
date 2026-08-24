@@ -50,6 +50,11 @@ func TestRuntimeValidationSurfaceReadinessContract(t *testing.T) {
 			value.InputBindingRef = "mcp-validation-input/empty/status/schema-v1"
 			value.ProofApplicability = "claimed_by_provider"
 		}, wantErr: true},
+		{name: "missing proof applicability", mutate: func(value *RuntimeValidationSurface) {
+			value.Readiness = RuntimeValidationSurfaceReady
+			value.InputBindingRef = "mcp-validation-input/empty/status/schema-v1"
+			value.ProofApplicability = ""
+		}, wantErr: true},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {

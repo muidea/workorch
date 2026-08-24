@@ -65,8 +65,8 @@ func TestRuntimeOperationDescriptorForKindCanonicalAndUnknown(t *testing.T) {
 	}
 
 	// Canonical aliases still resolve through descriptor authority.
-	if got := RuntimeModuleForOperationKind("patch/request"); got != RuntimeModuleFile {
-		t.Fatalf("RuntimeModuleForOperationKind(patch/request) = %q, want %s", got, RuntimeModuleFile)
+	if got := RuntimeModuleForOperationKind("patch/request"); got != "" {
+		t.Fatalf("RuntimeModuleForOperationKind(patch/request) = %q, want unknown retired kind", got)
 	}
 	if _, ok := RuntimeOperationDescriptorForKind("unknown/kind"); ok {
 		t.Fatal("unknown kind must not resolve a descriptor")

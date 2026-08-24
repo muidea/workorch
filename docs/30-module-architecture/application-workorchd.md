@@ -52,9 +52,9 @@ bootstrap or capability execution.
 | `resume` | submit scope only; no bootstrap/context patch | Workspace/Run select the current recoverable Run and preserve its sealed selection |
 | `restart` | compile a fresh bootstrap from current activation-eligible owner state | Run persists predecessor `ReplacementIntent` and creates the unique successor only after terminal delivery |
 
-Application、Workspace and Orchestrator never pre-create or link the successor。For a non-current development baseline, Run owner
-returns `data_reset_required` without provider/capability work or replacement intent。Decision/Approval handlers submit only the
-corresponding owner resolution and refresh projection; they do not emit Resume。
+Application、Workspace and Orchestrator never pre-create or link the successor。Persisted data that does not match the one current
+shape fails before execution admission and produces no application-local compatibility outcome。Decision/Approval handlers submit
+only the corresponding owner resolution and refresh projection; they do not emit Resume。
 
 Runtime-discovered Definition clarification不走普通Decision handler：workorchd只投影`revise_definition_and_restart`并接收
 用户提交的新candidate与显式Restart intent。只有Run owner可以在matching `ReplacementIntent`已持久化后调用Decision owner的
@@ -106,9 +106,9 @@ Monotonic accepted/rejected/failure counters may summarize requests, but readyz�
 scheduler/admission lifecycle。Workorchd does not expose continuation state、scheduler/watchdog diagnostics、recovery
 readback or a transition from any diagnostic into an owner command。
 LLM usage read model 原样投影 Eventstream 中的 optional `logicalRequestId`/`physicalCallId`，并只消费 bounded
-`physicalResponseMode` 与 `providerSubmitted` owner audit。新 Runtime usage 的两级身份必须完整且
-`physicalCallId=requestId`；历史或 generic 记录允许两者都没有，但不得从 request bytes、streaming 或其他字段推断。
-旧 `streaming` 是 mode 的兼容派生，不是第二份状态。非法或缺失 current physical audit 被拒绝，不能默认为
+`physicalResponseMode` 与 `providerSubmitted` owner audit。Runtime usage 的两级身份必须完整且
+`physicalCallId=requestId`；generic non-Runtime 记录允许两者都没有，但不得从 request bytes 或其他字段推断。
+公共 DTO 不包含 `streaming` 布尔字段。非法或缺失 current physical audit 被拒绝，不能默认为
 non-streaming/unsubmitted。
 
 Lifecycle ordering is:

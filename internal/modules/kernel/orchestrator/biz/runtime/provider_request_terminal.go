@@ -347,7 +347,7 @@ func providerRequestTerminalApplied(aggregate RuntimeAggregate, fact RuntimeProv
 // ProviderRequestTerminalSessionApplied proves that a persisted terminal
 // request still has its coordinated SM-2 successor after reload. The session
 // intentionally carries only bounded request identity; exact producer detail
-// remains in the failure fact/semantic ledger. Legacy or torn shapes fail
+// remains in the failure fact/semantic ledger. Incomplete or torn shapes fail
 // closed because they cannot be replayed without inventing that detail.
 func ProviderRequestTerminalSessionApplied(aggregate RuntimeAggregate, session runtimecontract.RuntimeCandidateRequestSession) bool {
 	session = session.Clone()

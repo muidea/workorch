@@ -147,6 +147,5 @@ var eventPayloadRuntimeAllowedKeys = map[string]struct{}{
 	recordpayload.PayloadKeyResponseBytes:        {},
 	recordpayload.PayloadKeyPhysicalResponseMode: {},
 	recordpayload.PayloadKeyProviderSubmitted:    {},
-	recordpayload.PayloadKeyStreaming:            {},
 	recordpayload.PayloadKeyTotalTokens:          {},
 }

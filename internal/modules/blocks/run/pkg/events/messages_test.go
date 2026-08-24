@@ -56,33 +56,6 @@ func TestRunStateChangedDataFromModelIncludesOnlyOpaqueRuntimeReference(t *testi
 	}
 }
 
-func TestRunStateChangedDataCarriesOnlyRunOwnedFreshActivationDisposition(t *testing.T) {
-	run := &runmodel.Run{
-		ID: "run-1", WorkspaceID: "ws-1", State: common.RunStateActive,
-		RuntimeState: &runtimecontract.RuntimeStateRecord{StateRevision: 7},
-		RuntimeActivationStatus: &runmodel.RuntimeActivationStatus{
-			Disposition: runtimecontract.RuntimeActivationDispositionFreshActivationRequired,
-			Incompatibility: runtimecontract.RuntimeStateIncompatibility{
-				Reason:                 runtimecontract.RuntimeStateIncompatibilityReasonSchemaUnsupported,
-				ActualSchemaVersion:    1,
-				SupportedSchemaVersion: runtimecontract.RuntimeStateSchemaVersionCurrent,
-			},
-		},
-	}
-	data := RunStateChangedDataFromModel(run)
-	if !data.RequiresFreshActivation() || data.RuntimeActivationDisposition != runtimecontract.RuntimeActivationDispositionFreshActivationRequired || data.CausationID != "run-state/run-1/7/fresh_activation_required" {
-		t.Fatalf("run state fact=%+v", data)
-	}
-	if err := data.Validate(); err != nil {
-		t.Fatalf("validate run state fact: %v", err)
-	}
-	if data.RuntimeStateIncompatibility.Reason != runtimecontract.RuntimeStateIncompatibilityReasonSchemaUnsupported ||
-		data.RuntimeStateIncompatibility.ActualSchemaVersion != 1 ||
-		data.RuntimeStateIncompatibility.SupportedSchemaVersion != runtimecontract.RuntimeStateSchemaVersionCurrent {
-		t.Fatalf("fresh activation persisted-state identity=%+v", data)
-	}
-}
-
 func TestRunContinuationRequestedDataValidate(t *testing.T) {
 	if err := (RunContinuationRequestedData{WorkspaceID: "ws-1", RunID: "run-1", CausationID: "resume-1"}).Validate(); err != nil {
 		t.Fatalf("valid continuation fact: %v", err)

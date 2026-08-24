@@ -48,7 +48,6 @@ func (data LLMUsagePayloadData) EventPayload() workorcheventpayload.Payload {
 		workorcheventpayload.StringField(PayloadKeyStatus, data.Status),
 		workorcheventpayload.BoolField(PayloadKeyEstimated, data.Estimated),
 		workorcheventpayload.StringField(PayloadKeyPhysicalResponseMode, string(data.PhysicalResponseMode.Normalized())),
-		workorcheventpayload.BoolField(PayloadKeyStreaming, data.PhysicalResponseMode.Streaming()),
 		workorcheventpayload.BoolField(PayloadKeyProviderSubmitted, data.ProviderSubmitted),
 		workorcheventpayload.IntField(PayloadKeyInputTokens, int64(data.InputTokens)),
 		workorcheventpayload.IntField(PayloadKeyOutputTokens, int64(data.OutputTokens)),

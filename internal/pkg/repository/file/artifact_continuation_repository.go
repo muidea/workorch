@@ -252,7 +252,7 @@ func (r *ArtifactContinuationRepository) GetAssembled(_ context.Context, id comm
 }
 
 func (r *ArtifactContinuationRepository) root() string {
-	return repositoryItemRoot(r.path, "artifact_continuation.json", "artifact-continuations")
+	return repositoryItemRoot(r.path)
 }
 
 func (r *ArtifactContinuationRepository) continuationDir(id common.ArtifactContinuationID) (string, error) {
@@ -314,13 +314,19 @@ func (r *ArtifactContinuationRepository) assembledPaths(id common.ArtifactContin
 }
 
 func (r *ArtifactContinuationRepository) list(matches func(orchestratormodel.ArtifactContinuation) bool) ([]*orchestratormodel.ArtifactContinuation, error) {
-	dirs, err := repositoryMetadataDirs(r.root())
+	entries, err := os.ReadDir(r.root())
 	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
 		return nil, err
 	}
-	ret := make([]*orchestratormodel.ArtifactContinuation, 0, len(dirs))
-	for _, dir := range dirs {
-		item, err := readJSONItemFile[orchestratormodel.ArtifactContinuation](filepath.Join(dir, artifactContinuationMetadataFile))
+	ret := make([]*orchestratormodel.ArtifactContinuation, 0, len(entries))
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			return nil, fmt.Errorf("%w: artifact continuation root contains a non-directory entry", common.ErrInvalidArgument)
+		}
+		item, err := readJSONItemFile[orchestratormodel.ArtifactContinuation](filepath.Join(r.root(), entry.Name(), artifactContinuationMetadataFile))
 		if err != nil {
 			return nil, err
 		}

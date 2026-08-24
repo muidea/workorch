@@ -30,7 +30,6 @@ const canonicalReasons: Record<RuntimeExecutionIntentOutcome, readonly RuntimeEx
     'run_not_resumable'
   ],
   fresh_activation_required: [
-    'runtime_state_incompatible',
     'runtime_bootstrap_missing',
     'definition_admission_missing',
     'definition_admission_mismatch'
@@ -39,8 +38,7 @@ const canonicalReasons: Record<RuntimeExecutionIntentOutcome, readonly RuntimeEx
   governance_required: [
     'governance_pending',
     'definition_clarification_pending'
-  ],
-  data_reset_required: ['development_data_incompatible']
+  ]
 };
 
 function isRecord(value: unknown): value is Record<string, unknown> {

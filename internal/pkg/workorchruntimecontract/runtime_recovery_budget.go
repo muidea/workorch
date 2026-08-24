@@ -58,25 +58,6 @@ func DefaultRuntimeRecoveryPolicy() RuntimeRecoveryPolicy {
 }
 
 func (p RuntimeRecoveryPolicy) Normalized() RuntimeRecoveryPolicy {
-	defaults := DefaultRuntimeRecoveryPolicy()
-	if p.MaxProviderTransportAttempts <= 0 {
-		p.MaxProviderTransportAttempts = defaults.MaxProviderTransportAttempts
-	}
-	if p.MaxOperationRecoveryAttempts <= 0 {
-		p.MaxOperationRecoveryAttempts = defaults.MaxOperationRecoveryAttempts
-	}
-	if p.MaxCASReloadAttempts <= 0 {
-		p.MaxCASReloadAttempts = defaults.MaxCASReloadAttempts
-	}
-	if p.MaxTerminalDeliveryAttempts <= 0 {
-		p.MaxTerminalDeliveryAttempts = defaults.MaxTerminalDeliveryAttempts
-	}
-	if p.MaxDriveScheduleAttempts <= 0 {
-		p.MaxDriveScheduleAttempts = defaults.MaxDriveScheduleAttempts
-	}
-	if p.MaxPrerequisiteRefreshes <= 0 {
-		p.MaxPrerequisiteRefreshes = defaults.MaxPrerequisiteRefreshes
-	}
 	return p
 }
 

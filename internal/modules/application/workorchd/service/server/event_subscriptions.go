@@ -37,7 +37,7 @@ func isProjectionEventStreamView(view string) bool {
 // by the application Biz's typed EventHub handlers. HTTP only stores and
 // fans out already-typed notifications; it never owns an observer.
 func (s *serverState) RecordWorkspaceProjectionChanged(_ context.Context, data workorchdevents.WorkspaceProjectionChangedData) {
-	if s != nil {
+	if s != nil && strings.TrimSpace(data.StreamGeneration) != "" {
 		s.recordStreamEvent(workspaceProjectionStreamEvent(data))
 	}
 }
@@ -98,11 +98,6 @@ func projectionNotificationID(data workorchdevents.WorkspaceProjectionChangedDat
 		seq = data.ActivityRevision
 	}
 	generation := strings.TrimSpace(data.StreamGeneration)
-	if generation == "" {
-		// Keep the historical shape for explicit legacy fixtures/clients. Production
-		// projection stores always publish a non-empty generation.
-		return fmt.Sprintf("projection:%s:%d", workspaceID, seq)
-	}
 	return fmt.Sprintf("projection:%s:%s:%d", generation, workspaceID, seq)
 }
 

@@ -15,12 +15,12 @@ func TestRuntimeBootstrapCloneAndEqualityPreserveTypedContract(t *testing.T) {
 	}.Normalized()
 	binding.Hash = StableCoverageEvidenceBindingHash(binding)
 	bootstrap := RuntimeBootstrap{
-		SchemaVersion: RuntimeStateSchemaVersionCurrent,
 		Definition: RuntimeDefinitionContext{StartupInputHash: "startup-input-test",
 			Revision: "definition-1", GoalID: "goal-1", GoalDefinition: "goal", DoDID: "dod-1", DoDDefinition: "dod",
 			CapabilityContract: []string{"file/edit", "shell/command"},
 		},
 		Activation: RuntimeActivationContext{ProviderSelection: ProviderInferenceSelection{Target: ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "gpt-4o"}}, DialogLanguage: "zh-CN", Skills: skills, SkillContextBudget: skillBudget, ExecutionContract: RuntimeExecutionContract{
+			StateChangePolicy:         RuntimeStateChangeAllowedButNotRequired,
 			MaxRepairAttemptsPerFocus: 7, ValidationPolicies: []RuntimeValidationPolicy{{ID: "validation", Scope: "workspace_profile", AppliesToEvidenceKinds: []string{EvidenceKindValidation}, MaxValidationOnlyRetriesPerFocus: 2}},
 		}},
 		Focuses: []CoverageFocus{
@@ -37,6 +37,8 @@ func TestRuntimeBootstrapCloneAndEqualityPreserveTypedContract(t *testing.T) {
 		Requirements:      []RuntimeRequirement{{Kind: PrerequisiteKindCapability, OwnerModuleID: RuntimeModuleFile, CapabilityClass: RuntimeCapabilityClassStateChange, RequiredCapabilities: []string{"file/edit"}}},
 		ConvergencePolicy: RuntimeConvergencePolicy{MaxRepairAttemptsPerFocus: 7, MaxValidationOnlyRetriesPerFocus: 2, MaxAcceptanceSliceWorkItems: 4, MaxFocuses: 4, MaxCandidateContextItems: 4},
 	}
+	bootstrap.RecoveryPolicy = DefaultRuntimeRecoveryPolicy()
+	bootstrap.ExecutionBudgetPolicy = RuntimeExecutionBudgetPolicyForRuntimePolicies(bootstrap.ConvergencePolicy, bootstrap.RecoveryPolicy)
 	bootstrap.Focuses[0].CoverageEvidenceBindings = nil
 	seed, err := CompileRuntimeDefinitionSeed(bootstrap.Definition, bootstrap.Activation, bootstrap.CoverageItems, bootstrap.Slices)
 	if err != nil {
@@ -89,7 +91,6 @@ func TestRuntimeBootstrapCloneAndEqualityPreserveTypedContract(t *testing.T) {
 
 func TestRuntimeBootstrapRejectsUnknownCoverageReopenDependency(t *testing.T) {
 	bootstrap := RuntimeBootstrap{
-		SchemaVersion:     RuntimeStateSchemaVersionCurrent,
 		Definition:        RuntimeDefinitionContext{StartupInputHash: "startup-input-test", Revision: "definition-1", GoalID: "goal-1", GoalDefinition: "goal", DoDID: "dod-1", DoDDefinition: "dod", CapabilityContract: []string{"file/write"}},
 		Activation:        RuntimeActivationContext{ProviderSelection: ProviderInferenceSelection{Target: ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "gpt-4o"}}},
 		Focuses:           []CoverageFocus{{ID: "focus-1", SliceID: "slice-1", CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-1"}, RequiredEvidenceKinds: []string{EvidenceKindStateChange}}},
@@ -97,6 +98,8 @@ func TestRuntimeBootstrapRejectsUnknownCoverageReopenDependency(t *testing.T) {
 		CoverageItems:     []RuntimeCoverageItem{{ID: "cwi-1", SliceID: "slice-1", SourceScope: "deliverable", SourceID: "source", Order: 1, ReopenDependencies: []RuntimeCoverageReopenDependency{{CoverageWorkItemID: "cwi-missing", TriggerEvidenceKinds: []string{EvidenceKindStateChange}}}}},
 		ConvergencePolicy: RuntimeConvergencePolicy{MaxRepairAttemptsPerFocus: 1, MaxValidationOnlyRetriesPerFocus: 1, MaxAcceptanceSliceWorkItems: 1, MaxFocuses: 1, MaxCandidateContextItems: 1},
 	}
+	bootstrap.RecoveryPolicy = DefaultRuntimeRecoveryPolicy()
+	bootstrap.ExecutionBudgetPolicy = RuntimeExecutionBudgetPolicyForRuntimePolicies(bootstrap.ConvergencePolicy, bootstrap.RecoveryPolicy)
 	bootstrap.DefinitionSeed = RuntimeDefinitionSeed{
 		SchemaVersion: RuntimeDefinitionSeedSchemaCurrent, DefinitionRevision: bootstrap.Definition.Revision,
 		PolicyHash:    StableRuntimeCandidatePrefixHashWithExecutionContract(bootstrap.Definition, bootstrap.Activation.ExecutionContract),
@@ -122,7 +125,6 @@ func TestRuntimeBootstrapRequirementScopeIsPartOfIdentityAndEquality(t *testing.
 
 func TestRuntimeBootstrapRejectsSharedCoverageFocus(t *testing.T) {
 	bootstrap := RuntimeBootstrap{
-		SchemaVersion: RuntimeStateSchemaVersionCurrent,
 		Definition: RuntimeDefinitionContext{StartupInputHash: "startup-input-test",
 			Revision: "definition-1", GoalID: "goal-1", GoalDefinition: "goal", DoDID: "dod-1", DoDDefinition: "dod",
 		},
@@ -141,6 +143,8 @@ func TestRuntimeBootstrapRejectsSharedCoverageFocus(t *testing.T) {
 		},
 		ConvergencePolicy: RuntimeConvergencePolicy{MaxRepairAttemptsPerFocus: 1, MaxValidationOnlyRetriesPerFocus: 1, MaxAcceptanceSliceWorkItems: 2, MaxFocuses: 2, MaxCandidateContextItems: 2},
 	}
+	bootstrap.RecoveryPolicy = DefaultRuntimeRecoveryPolicy()
+	bootstrap.ExecutionBudgetPolicy = RuntimeExecutionBudgetPolicyForRuntimePolicies(bootstrap.ConvergencePolicy, bootstrap.RecoveryPolicy)
 	seed, err := CompileRuntimeDefinitionSeed(bootstrap.Definition, bootstrap.Activation, bootstrap.CoverageItems, bootstrap.Slices)
 	if err != nil {
 		t.Fatal(err)

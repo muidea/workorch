@@ -55,7 +55,7 @@ that latest catalog:
   500-entry bound, and a nested target reserves its file plus every missing parent directory. The File owner serializes create
   effects per workspace and recomputes that exact additional-entry count immediately before the write, so stale admission or
   concurrent owner creates cannot commit item 501 or leave capacity-rejected parent directories behind;
-  reconciliation of an already sealed legacy binding remains a factual `unverifiable` observation;
+  reconciliation of an already sealed noncanonical binding remains a factual `unverifiable` observation;
 - existing exact target admits only variants that declare `exact_target` / `existing_owner_scope` and revision binding;
 - `patch/apply` file-write variant rechecks `baseHash` at execution;
 - text-replace/unified-diff variants follow their owner preflight/replay contract;
@@ -110,7 +110,7 @@ applicable. Technical file success is not business completion.
   full bounded workspace scope, preserve an exact current prospective declaration, and reject prospective unique-entry,
   non-participating workspace-deliverable/profile, and outside-profile-candidate selection;
 - reject root and nested manifest-excluded prospective targets before effect for each prospective-capable selector, and
-  keep missing or realized legacy bindings `unverifiable` without mutation;
+  keep missing or realized noncanonical bindings `unverifiable` without mutation;
 - admit a manifest with exactly 500 includable file/directory entries, ignore excluded trees for that count, fail closed only
   after an actual 501st includable entry is observed, and reserve every missing parent entry before a nested create;
 - inject walk, entry-info and content-hash failures after an includable entry and reject manifest plus unique/prospective

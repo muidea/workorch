@@ -55,7 +55,8 @@ Result 同 scope 的正式子实体。该 block 负责 identity、持久化状�
   `NotificationID` 与 `TerminalMaterialHash`，不携带 Artifact 正文。
 - terminal Result 行本身是通知的 durable replay source。相同 SM-4 delivery 重放会再次发布同一通知；owner 启动时
   及运行期间每分钟还会通过 owner-private、单页 200/最多 1,000 页的 recovery inventory 有界重放正式结果。
-- file repository 的 recovery/read 边界只把旧版零值 `SummaryDetail.Diagnostics:null` 解释为空对象，且不改写历史 Result；数组、标量等非对象 diagnostics 仍 fail-closed。该兼容不改变新写入格式或 owner/EventHub payload 合同。
+- file repository 只接受 current object-shaped `SummaryDetail.Diagnostics`；`null`、数组、标量、未知/退役字段与空文件
+  均在 read/recovery 边界 fail-closed，不补值、不改写。
 - Eventstream 将 `NotificationID` 用作 EventRecord ID；重复 append 只对该 stable identity 视为幂等，其他 ID conflict
   仍 fail-visible。因此 Result 持久化与 SM-4 acknowledgement 不依赖 projection，可同时关闭“持久化后崩溃/Hub
   投递中断导致永久缺通知”的窗口。
@@ -88,7 +89,7 @@ Result 同 scope 的正式子实体。该 block 负责 identity、持久化状�
 - formal closeout identity/hash、三轴 requirement outcome、accepted-evidence union、owner revision set 与 indeterminate-success 拒绝。
 - 1,024 组 unique evidence/artifact refs 的 normalization/hash、canonical child mapping、重排稳定性、输入隔离与
   toolchain-relative allocation growth guard；同时保留 hash 与 Result mapping 的独立 allocation benchmark。
-- 旧版 `SummaryDetail.Diagnostics:null` 的只读恢复、历史 Result 文件不改写，以及非对象 diagnostics 拒绝。
+- `SummaryDetail.Diagnostics:null`、非对象 diagnostics、未知/退役字段与空文件严格拒绝。
 
 ## 当前验证结论
 

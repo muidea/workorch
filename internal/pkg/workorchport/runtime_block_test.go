@@ -8,9 +8,8 @@ func TestCanonicalRuntimeBlockKind(t *testing.T) {
 		kind string
 		want string
 	}{
-		{name: "workspace plan", kind: StepKindWorkspacePlan, want: StepKindWorkspaceExecution},
-		{name: "legacy patch request", kind: "patchRequests", want: RuntimeBlockKindPatchApply},
-		{name: "patch request", kind: "patch/request", want: RuntimeBlockKindPatchApply},
+		{name: "workspace execution", kind: StepKindWorkspaceExecution, want: StepKindWorkspaceExecution},
+		{name: "unknown kind", kind: "custom/unknown", want: "custom/unknown"},
 		{name: "trimmed custom", kind: " shell/command ", want: "shell/command"},
 	}
 	for _, tc := range cases {

@@ -11,10 +11,13 @@ func TestRuntimeControllerPersistsIndependentRecoveryBudget(t *testing.T) {
 	repository := &controllerRepository{}
 	controller, _ := NewRuntimeController(repository)
 	facts := controllerFacts()
-	facts.RecoveryPolicy = runtimecontract.RuntimeRecoveryPolicy{
-		MaxProviderTransportAttempts: 1, MaxOperationRecoveryAttempts: 2,
-		MaxCASReloadAttempts: 3, MaxTerminalDeliveryAttempts: 4,
-	}
+	recoveryPolicy := runtimecontract.DefaultRuntimeRecoveryPolicy()
+	recoveryPolicy.MaxProviderTransportAttempts = 1
+	recoveryPolicy.MaxOperationRecoveryAttempts = 2
+	recoveryPolicy.MaxCASReloadAttempts = 3
+	recoveryPolicy.MaxTerminalDeliveryAttempts = 4
+	facts.RecoveryPolicy = recoveryPolicy
+	facts.ExecutionBudgetPolicy = runtimecontract.RuntimeExecutionBudgetPolicyForRuntimePolicies(facts.ConvergencePolicy, facts.RecoveryPolicy)
 	if _, err := controller.initialize(context.Background(), facts, controllerDefinition(), nil); err != nil {
 		t.Fatal(err)
 	}
@@ -35,7 +38,10 @@ func TestRuntimeControllerPersistsIndependentRecoveryBudget(t *testing.T) {
 func TestReduceRuntimeStateRoutesExhaustedProviderTransportToTerminal(t *testing.T) {
 	facts := controllerFacts()
 	facts.Capabilities.GovernanceKinds = []string{runtimecontract.RuntimeBlockKindDecisionRequest}
-	facts.RecoveryPolicy = runtimecontract.RuntimeRecoveryPolicy{MaxProviderTransportAttempts: 2}
+	recoveryPolicy := runtimecontract.DefaultRuntimeRecoveryPolicy()
+	recoveryPolicy.MaxProviderTransportAttempts = 2
+	facts.RecoveryPolicy = recoveryPolicy
+	facts.ExecutionBudgetPolicy = runtimecontract.RuntimeExecutionBudgetPolicyForRuntimePolicies(facts.ConvergencePolicy, facts.RecoveryPolicy)
 	facts.Recovery.ProviderTransportAttempts = 2
 	facts.Failure = &runtimecontract.FailureFact{
 		Class: runtimecontract.FailureClassProviderTransient, Code: "provider_transport_exhausted",

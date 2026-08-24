@@ -208,17 +208,13 @@ func buildRepositories(backend string, dataRoot string) (repositorySet, error) {
 		dataRoot = workorchrepo.ResolveRepositoryDataRoot(backend, dataRoot)
 		workspaceScopedRepos := workorchrepo.NewWorkspaceScopedFileRepositorySet(dataRoot)
 		return repositorySet{
-			Souls:                fileRepo.NewSoulRepository(filepath.Join(dataRoot, "system", "souls")),
-			WorkspaceTemplates:   fileRepo.NewWorkspaceTemplateRepository(filepath.Join(dataRoot, "system", "workspace_templates.json")),
-			MemoryItems:          workspaceScopedRepos.MemoryItems,
-			MemoryRecallTraces:   workspaceScopedRepos.MemoryRecallTraces,
-			AutoGovernanceTraces: fileRepo.NewAutoGovernanceTraceRepository(filepath.Join(dataRoot, "system", "auto_governance_trace.json")),
-			Skills:               fileRepo.NewSkillRepository(filepath.Join(dataRoot, "system", "skill.json")),
-			MCPRegistry: fileRepo.NewMCPRegistryRepositoryWithLegacy(
-				filepath.Join(dataRoot, "system", "mcp_registry.json"),
-				filepath.Join(dataRoot, "system", "mcp_server.json"),
-				filepath.Join(dataRoot, "system", "mcp_capability.json"),
-			),
+			Souls:                 fileRepo.NewSoulRepository(filepath.Join(dataRoot, "system", "souls")),
+			WorkspaceTemplates:    fileRepo.NewWorkspaceTemplateRepository(filepath.Join(dataRoot, "system", "workspace_templates.json")),
+			MemoryItems:           workspaceScopedRepos.MemoryItems,
+			MemoryRecallTraces:    workspaceScopedRepos.MemoryRecallTraces,
+			AutoGovernanceTraces:  fileRepo.NewAutoGovernanceTraceRepository(filepath.Join(dataRoot, "system", "auto_governance_trace.json")),
+			Skills:                fileRepo.NewSkillRepository(filepath.Join(dataRoot, "system", "skill.json")),
+			MCPRegistry:           fileRepo.NewMCPRegistryRepository(filepath.Join(dataRoot, "system", "mcp_registry.json")),
 			Results:               workspaceScopedRepos.Results,
 			Artifacts:             workspaceScopedRepos.Artifacts,
 			EventRecords:          workspaceScopedRepos.EventRecords,

@@ -97,7 +97,6 @@ func taskPlanDTOs(items []projectioncontract.TaskPlan) ([]workorchdevents.CLITas
 			FailureClass: item.FailureClass, FailureSignature: item.FailureSignature, TargetScope: item.TargetScope,
 			BlockingTicketID: item.BlockingTicketID, EvidenceRefs: append([]string(nil), item.EvidenceRefs...), OccurredAt: item.OccurredAt,
 			SourceProjection: item.SourceProjection, SealedLLMSelection: runtimecontract.CloneProviderInferenceSelection(item.SealedLLMSelection),
-			RuntimeActivation: cloneRuntimeActivation(item.RuntimeActivation),
 		})
 	}
 	return ret, nil
@@ -117,16 +116,7 @@ func taskPlanProjections(items []workorchdevents.CLITaskPlanInfo) []projectionco
 			FailureClass: item.FailureClass, FailureSignature: item.FailureSignature, TargetScope: item.TargetScope,
 			BlockingTicketID: item.BlockingTicketID, EvidenceRefs: append([]string(nil), item.EvidenceRefs...), OccurredAt: item.OccurredAt,
 			SourceProjection: item.SourceProjection, SealedLLMSelection: runtimecontract.CloneProviderInferenceSelection(item.SealedLLMSelection),
-			RuntimeActivation: cloneRuntimeActivation(item.RuntimeActivation),
 		})
 	}
 	return ret
-}
-
-func cloneRuntimeActivation(item *projectioncontract.RuntimeActivationStatus) *projectioncontract.RuntimeActivationStatus {
-	if item == nil {
-		return nil
-	}
-	ret := *item
-	return &ret
 }

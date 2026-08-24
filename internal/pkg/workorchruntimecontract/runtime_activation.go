@@ -77,7 +77,7 @@ type RuntimeMCPCapabilityContext struct {
 	ID       common.MCPCapabilityID
 	ServerID common.MCPServerID
 	// Kind is the registry wire kind (e.g. "tool"). OperationKind is the Runtime
-	// operation kind (e.g. "mcp/tool_call"). Empty OperationKind is derived from Kind.
+	// operation kind (e.g. "mcp/tool_call") sealed by the fresh activation adapter.
 	Kind          string
 	OperationKind string
 	Name          string
@@ -165,8 +165,9 @@ func (c RuntimeActivationContext) Validate() error {
 		return fmt.Errorf("runtime activation default soul requires owner revision, content hash and provenance")
 	}
 	for _, capability := range c.MCPCapabilities {
-		if capability.ID == "" || capability.ServerID == "" || capability.Kind == "" || capability.Name == "" {
-			return fmt.Errorf("runtime activation MCP capability requires id, server, kind and name")
+		descriptor, found := RuntimeOperationDescriptorForKind(capability.OperationKind)
+		if capability.ID == "" || capability.ServerID == "" || capability.Kind == "" || capability.OperationKind == "" || capability.Name == "" || !found || descriptor.OwnerModuleID != RuntimeModuleMCP {
+			return fmt.Errorf("runtime activation MCP capability requires id, server, registry kind, current operation kind and name")
 		}
 	}
 	for _, memory := range c.Memories {
@@ -338,10 +339,7 @@ func normalizeRuntimeMCPCapabilities(values []RuntimeMCPCapabilityContext) []Run
 	byID := map[string]RuntimeMCPCapabilityContext{}
 	for _, value := range values {
 		value.Kind = strings.TrimSpace(value.Kind)
-		value.OperationKind = strings.TrimSpace(value.OperationKind)
-		if value.OperationKind == "" {
-			value.OperationKind = normalizeMCPRegistryKindToOperationKind(value.Kind)
-		}
+		value.OperationKind = CanonicalRuntimeBlockKind(value.OperationKind)
 		value.Name = strings.TrimSpace(value.Name)
 		value.DisplayName = strings.TrimSpace(value.DisplayName)
 		value.Description = strings.TrimSpace(value.Description)

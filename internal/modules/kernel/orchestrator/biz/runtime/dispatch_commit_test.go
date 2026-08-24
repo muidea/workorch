@@ -725,7 +725,9 @@ func TestRejectedValidationOwnerObservationRejectsMismatchedRole(t *testing.T) {
 
 func TestRejectedTextReplaceConsumesRepairBudgetAndRequiresFreshTargetSnapshot(t *testing.T) {
 	aggregate := stateChangeAggregate(t)
-	aggregate.Facts.ConvergencePolicy = runtimecontract.RuntimeConvergencePolicy{MaxRepairAttemptsPerFocus: 3}
+	convergencePolicy := runtimecontract.DefaultRuntimeConvergencePolicy()
+	convergencePolicy.MaxRepairAttemptsPerFocus = 3
+	aggregate.Facts.ConvergencePolicy = convergencePolicy
 	aggregate.Facts.ExecutionBudgetPolicy = runtimecontract.RuntimeExecutionBudgetPolicyForRuntimePolicies(aggregate.Facts.ConvergencePolicy, aggregate.Facts.RecoveryPolicy)
 	ledger, err := runtimecontract.NewRuntimeExecutionBudgetLedger(aggregate.Facts.ExecutionBudgetPolicy)
 	if err != nil {

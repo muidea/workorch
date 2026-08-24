@@ -45,7 +45,10 @@ func TestOrderedWorkspaceGoalsUsesOwnerRevisionNotInputOrAuditOrder(t *testing.T
 	first := &workspacemodel.Goal{ID: "goal-z", WorkspaceID: workspaceID, Text: "first", DefinitionRevision: "goal:00000000000000000001:first"}
 	second := &workspacemodel.Goal{ID: "goal-a", WorkspaceID: workspaceID, Text: "second", DefinitionRevision: "goal:00000000000000000002:second"}
 
-	items := OrderedWorkspaceGoals([]*workspacemodel.Goal{second, first})
+	items, err := OrderedWorkspaceGoals([]*workspacemodel.Goal{second, first})
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	if len(items) != 2 {
 		t.Fatalf("ordered goals len = %d, want 2", len(items))
@@ -55,11 +58,18 @@ func TestOrderedWorkspaceGoalsUsesOwnerRevisionNotInputOrAuditOrder(t *testing.T
 	}
 }
 
+func TestOrderedWorkspaceGoalsRejectsNonCurrentRevision(t *testing.T) {
+	items, err := OrderedWorkspaceGoals([]*workspacemodel.Goal{{ID: "goal-old", WorkspaceID: "ws-001", DefinitionRevision: "content-hash-only"}})
+	if err == nil || items != nil {
+		t.Fatalf("ordered goals = %+v, err=%v, want strict current-data rejection", items, err)
+	}
+}
+
 func TestEffectiveWorkspaceDoDMergesReadyItems(t *testing.T) {
 	ctx := context.Background()
 	workspaceID := common.WorkspaceID("ws-001")
-	first := &workspacemodel.DoD{ID: "dod-001", WorkspaceID: workspaceID, Items: []string{"one", "two"}, State: common.DoDStateReady}
-	second := &workspacemodel.DoD{ID: "dod-002", WorkspaceID: workspaceID, Items: []string{"two", "three"}, State: common.DoDStateReady}
+	first := &workspacemodel.DoD{ID: "dod-001", WorkspaceID: workspaceID, DefinitionRevision: "dod:00000000000000000001:first", Items: []string{"one", "two"}, State: common.DoDStateReady}
+	second := &workspacemodel.DoD{ID: "dod-002", WorkspaceID: workspaceID, DefinitionRevision: "dod:00000000000000000002:second", Items: []string{"two", "three"}, State: common.DoDStateReady}
 
 	effective, contexts, err := EffectiveWorkspaceDoD(ctx, func(context.Context, common.WorkspaceID) ([]*workspacemodel.DoD, error) {
 		return []*workspacemodel.DoD{first, second}, nil

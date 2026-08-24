@@ -1,7 +1,6 @@
 package workorchruntimecontract
 
 import (
-	"errors"
 	"fmt"
 	"strings"
 	"testing"
@@ -29,19 +28,13 @@ func TestValidateRuntimeCWILedgerRejectsDuplicateQueueAndRecursivePendingID(t *t
 	}
 }
 
-func TestValidateRuntimeStateCWILedgerClassifiesDuplicateCWIAsCurrentSchemaIncompatibility(t *testing.T) {
+func TestValidateRuntimeStateCWILedgerRejectsDuplicateCWI(t *testing.T) {
 	facts := runtimeCWILedgerFacts(t)
 	facts.CompletedFocuses = []CoverageFocus{facts.Focus.Normalized()}
 
 	err := ValidateRuntimeStateCWILedger(facts, RuntimeCWIReconciliationLedger{})
-	if !errors.Is(err, ErrRuntimeStateIncompatible) {
-		t.Fatalf("duplicate persisted CWI error = %v, want typed runtime incompatibility", err)
-	}
-	incompatibility, ok := RuntimeStateIncompatibilityFromError(err)
-	if !ok || incompatibility.Reason != RuntimeStateIncompatibilityReasonCWILedgerInvalid ||
-		incompatibility.ActualSchemaVersion != RuntimeStateSchemaVersionCurrent ||
-		incompatibility.SupportedSchemaVersion != RuntimeStateSchemaVersionCurrent {
-		t.Fatalf("duplicate persisted CWI incompatibility = %+v, ok=%v", incompatibility, ok)
+	if err == nil {
+		t.Fatal("duplicate persisted CWI was accepted")
 	}
 }
 

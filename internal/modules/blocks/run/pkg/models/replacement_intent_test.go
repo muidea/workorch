@@ -9,69 +9,22 @@ import (
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
-func TestReplacementIntentPreservesValidatedLegacyIdentitySlotWithoutRestoringPriority(t *testing.T) {
-	bootstrap := runtimecontract.RuntimeBootstrap{Definition: runtimecontract.RuntimeDefinitionContext{StartupInputHash: "startup-new", GoalID: "goal-1", DoDID: "dod-1", Revision: "def-2"}}
-	predecessor := &Run{ID: "run-001", WorkspaceID: "ws-1", DefinitionRevision: "def-1", State: common.RunStateBlockedOnDecision, BlockingTicketID: "runtime-definition-clarification:ticket-1"}
-	legacy := ReplacementIntent{
-		RequestID: "restart-legacy", WorkspaceID: "ws-1", GoalID: "goal-1", DoDID: "dod-1", DefinitionRevision: "def-2", StartupInputHash: "startup-new",
-		ReplacementIntentID: "runtime-definition-replacement/restart-legacy", ClarificationTicketID: "runtime-definition-clarification:ticket-1",
-		PredecessorStartupInputHash: "startup-old", SuccessorStartupInputHash: "startup-new", Bootstrap: &bootstrap,
-		ReconciliationScope: runtimecontract.RuntimeCWIReconciliationScopeWorkspaceFull,
-		Kind:                runtimecontract.RuntimeTerminationSuperseded, Reason: "restart", State: ReplacementIntentPendingClarificationResolution,
-		legacyIdentityHashSlot: "7",
-	}
-	legacy.ReplacementIntentHash = StableReplacementIntentHash(legacy)
-	legacy.Recovery = replacementRecoveryFixture(legacy, ReplacementRecoveryClarificationResolution, ReplacementRecoveryScheduled)
-	encoded, err := json.Marshal(legacy)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(string(encoded), `"Priority":7`) {
-		t.Fatalf("legacy identity slot was not preserved in persistence JSON: %s", encoded)
-	}
-
-	var decoded ReplacementIntent
-	if err := json.Unmarshal(encoded, &decoded); err != nil {
-		t.Fatal(err)
-	}
-	if !decoded.ValidFor(predecessor) || StableReplacementIntentHash(decoded) != legacy.ReplacementIntentHash {
-		t.Fatalf("decoded legacy intent lost its sealed identity: %+v", decoded)
-	}
-	canonical := CloneReplacementIntent(decoded)
-	canonical.legacyIdentityHashSlot = ""
-	canonical.ReplacementIntentHash = StableReplacementIntentHash(canonical)
-	if !EquivalentReplacementIntentHash(decoded, canonical) {
-		t.Fatal("canonical duplicate did not match validated persisted v1 identity")
-	}
-	forgedCanonical := canonical
-	forgedCanonical.ReplacementIntentHash = "replacement-intent-sha256:forged"
-	if EquivalentReplacementIntentHash(decoded, forgedCanonical) {
-		t.Fatal("forged canonical duplicate matched validated persisted v1 identity")
-	}
-	tamperedLegacy := decoded
-	tamperedLegacy.Reason = "tampered after decode"
-	if _, err := json.Marshal(tamperedLegacy); err == nil {
-		t.Fatal("tampered decoded legacy identity was persisted")
-	}
-	canonicalJSON, err := json.Marshal(canonical)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if strings.Contains(string(canonicalJSON), `"Priority"`) {
-		t.Fatalf("new canonical intent persisted retired priority: %s", canonicalJSON)
-	}
-
-	var tampered map[string]any
-	if err := json.Unmarshal(encoded, &tampered); err != nil {
-		t.Fatal(err)
-	}
-	tampered["Priority"] = float64(8)
-	tamperedJSON, err := json.Marshal(tampered)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := json.Unmarshal(tamperedJSON, &decoded); err == nil {
-		t.Fatal("tampered persisted legacy identity slot was accepted")
+func TestRunPersistenceRejectsRetiredAndUnknownFields(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		payload string
+		target  any
+	}{
+		{name: "replacement priority", payload: `{"Priority":7}`, target: &ReplacementIntent{}},
+		{name: "runtime activation", payload: `{"RuntimeActivation":{"Disposition":"current"}}`, target: &Run{}},
+		{name: "unknown run field", payload: `{"UnknownRunField":true}`, target: &Run{}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			err := json.Unmarshal([]byte(tc.payload), tc.target)
+			if err == nil || !strings.Contains(err.Error(), "unknown field") {
+				t.Fatalf("decode err = %v, want strict unknown-field rejection", err)
+			}
+		})
 	}
 }
 

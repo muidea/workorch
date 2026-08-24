@@ -127,11 +127,7 @@ func buildRepositories(backend string, dataRoot string) RepositoryExports {
 	case "file":
 		dataRoot = workorchrepo.ResolveRepositoryDataRoot(backend, dataRoot)
 		workspaceScopedRepos := workorchrepo.NewWorkspaceScopedFileRepositorySet(dataRoot)
-		registry := fileRepo.NewMCPRegistryRepositoryWithLegacy(
-			filepath.Join(dataRoot, "system", "mcp_registry.json"),
-			filepath.Join(dataRoot, "system", "mcp_server.json"),
-			filepath.Join(dataRoot, "system", "mcp_capability.json"),
-		)
+		registry := fileRepo.NewMCPRegistryRepository(filepath.Join(dataRoot, "system", "mcp_registry.json"))
 		return RepositoryExports{
 			Souls:                 fileRepo.NewSoulRepository(filepath.Join(dataRoot, "system", "souls")),
 			WorkspaceTemplates:    fileRepo.NewWorkspaceTemplateRepository(filepath.Join(dataRoot, "system", "workspace_templates.json")),

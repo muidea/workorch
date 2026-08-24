@@ -39,8 +39,7 @@ func PresentAdmission(admission runtimecontract.RuntimeExecutionIntentAdmission)
 	case runtimecontract.RuntimeExecutionIntentRestartRequired,
 		runtimecontract.RuntimeExecutionIntentFreshActivationRequired,
 		runtimecontract.RuntimeExecutionIntentDefinitionChanged,
-		runtimecontract.RuntimeExecutionIntentGovernanceRequired,
-		runtimecontract.RuntimeExecutionIntentDataResetRequired:
+		runtimecontract.RuntimeExecutionIntentGovernanceRequired:
 	default:
 		return AdmissionPresentation{}, fmt.Errorf("unsupported workspace execution admission outcome %q", admission.Outcome)
 	}

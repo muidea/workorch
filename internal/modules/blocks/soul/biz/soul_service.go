@@ -184,11 +184,6 @@ func normalizedStoredSoul(item *soulmodel.Soul) (*soulmodel.Soul, error) {
 	if err != nil {
 		return nil, fmt.Errorf("%w: stored Soul violates owner invariant", common.ErrConflict)
 	}
-	if value.Revision == 0 && value.ContentHash == "" && value.SourceProvenance == "" {
-		value.Revision = 1
-		value.SourceProvenance = soulmodel.SoulSourceLegacyOwned
-		value.ContentHash = soulmodel.StableSoulContentHash(value)
-	}
 	if value.Revision == 0 || !soulmodel.ValidSoulSourceProvenance(value.SourceProvenance) || value.ContentHash != soulmodel.StableSoulContentHash(value) {
 		return nil, fmt.Errorf("%w: stored Soul revision/content identity mismatch", common.ErrConflict)
 	}

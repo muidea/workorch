@@ -67,19 +67,18 @@ func TestResolveApprovalViewRejectsNonCanonicalPendingResourceWithoutMutation(t 
 	}
 }
 
-func TestResolveDecisionViewRejectsDefinitionAdmissionAndClarification(t *testing.T) {
+func TestResolveDecisionViewRejectsTypedDefinitionClarification(t *testing.T) {
 	tests := []struct {
-		name   string
-		ticket *decisionmodel.Ticket
+		name  string
+		class decisionmodel.DefinitionClarificationClass
 	}{
-		{name: "typed binding", ticket: &decisionmodel.Ticket{DefinitionClarification: &decisionmodel.DefinitionClarificationBinding{Class: decisionmodel.DefinitionClarificationRuntime}}},
-		{name: "workspace clarification kind", ticket: &decisionmodel.Ticket{DecisionKind: "workspace_definition_clarification"}},
-		{name: "definition admission failure class", ticket: &decisionmodel.Ticket{FailureClass: "definition_admission"}},
+		{name: "runtime", class: decisionmodel.DefinitionClarificationRuntime},
+		{name: "workspace", class: decisionmodel.DefinitionClarificationWorkspacePreSeal},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			testHub := newGovernanceMagicTestHub(t)
-			ticket := *tc.ticket
+			ticket := decisionmodel.Ticket{DefinitionClarification: &decisionmodel.DefinitionClarificationBinding{Class: tc.class}}
 			ticket.ID = "ticket-definition"
 			ticket.WorkspaceID = "ws-definition"
 			ticket.RunID = "run-definition"
@@ -104,6 +103,15 @@ func TestResolveDecisionViewRejectsDefinitionAdmissionAndClarification(t *testin
 				t.Fatalf("definition ticket produced %d generic mutations, want zero", mutationCount)
 			}
 		})
+	}
+}
+
+func TestDefinitionDecisionUsesDedicatedAdmissionRequiresCurrentTypedBinding(t *testing.T) {
+	if definitionDecisionUsesDedicatedAdmission(&decisionmodel.Ticket{DecisionKind: "runtime_definition_clarification", FailureClass: "definition_admission"}) {
+		t.Fatal("text fields recreated a retired Definition-classification compatibility path")
+	}
+	if !definitionDecisionUsesDedicatedAdmission(&decisionmodel.Ticket{DefinitionClarification: &decisionmodel.DefinitionClarificationBinding{Class: decisionmodel.DefinitionClarificationRuntime}}) {
+		t.Fatal("current typed Definition binding was not recognized")
 	}
 }
 
@@ -156,7 +164,7 @@ func TestBatchResolveDecisionViewsRejectsDefinitionTicketBeforeMutation(t *testi
 		}
 		return decisionevents.GetTicketResult{Ticket: &decisionmodel.Ticket{
 			ID: cmd.TicketID, WorkspaceID: "ws-definition-batch", RunID: "run-definition-batch", State: common.DecisionTicketStateOpen,
-			DecisionKind: "runtime_definition_clarification",
+			DecisionKind: "runtime_definition_clarification", DefinitionClarification: &decisionmodel.DefinitionClarificationBinding{Class: decisionmodel.DefinitionClarificationRuntime},
 		}}
 	})
 	mutationCount := 0

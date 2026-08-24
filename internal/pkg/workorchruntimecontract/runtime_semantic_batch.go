@@ -418,7 +418,7 @@ func runtimeSemanticPendingDependencyBarriers(items map[common.CoverageWorkItemI
 // coverage order intentionally stays in the separate persisted order document.
 //
 // The returned document deliberately retains its batch identity. Clearing it
-// would make a partial, current-focus proof indistinguishable from a legacy
+// would make a partial, current-focus proof indistinguishable from an unscoped
 // full-manifest document and would either fail validation or, worse, invite a
 // later caller to treat it as global authority. BatchID, sequence and exact
 // membership are therefore part of the sealed SM-2 lineage.

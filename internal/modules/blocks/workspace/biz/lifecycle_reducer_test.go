@@ -93,14 +93,6 @@ func TestWorkspaceRunNotificationsNeverReleaseActiveSlot(t *testing.T) {
 		{name: "ordinary duplicate", data: runevents.RunStateChangedData{WorkspaceID: "ws-1", RunID: "run-old", State: common.RunStateActive, CausationID: "run-state/run-old/7", RuntimeStateRevision: 7, RuntimeStateRef: "runtime-state/ws-1/run-old/7"}},
 		{name: "own governance projection", data: runevents.RunStateChangedData{WorkspaceID: "ws-1", RunID: "run-old", State: common.RunStateBlockedOnDecision, BlockingTicketID: "ticket-1", CausationID: "run-state/run-old/8", RuntimeStateRevision: 8, RuntimeStateRef: "runtime-state/ws-1/run-old/8"}},
 		{name: "conflicting live run", data: runevents.RunStateChangedData{WorkspaceID: "ws-1", RunID: "run-other", State: common.RunStateActive, CausationID: "run-state/run-other/1", RuntimeStateRevision: 1, RuntimeStateRef: "runtime-state/ws-1/run-other/1"}},
-		{name: "fresh activation required", data: runevents.RunStateChangedData{
-			WorkspaceID: "ws-1", RunID: "run-old", State: common.RunStateActive,
-			CausationID: "run-state/run-old/7/fresh_activation_required", RuntimeStateRevision: 7, RuntimeStateRef: "runtime-state/ws-1/run-old/7",
-			RuntimeActivationDisposition: runtimecontract.RuntimeActivationDispositionFreshActivationRequired,
-			RuntimeStateIncompatibility: runtimecontract.RuntimeStateIncompatibility{
-				Reason: runtimecontract.RuntimeStateIncompatibilityReasonSchemaUnsupported, ActualSchemaVersion: 1, SupportedSchemaVersion: runtimecontract.RuntimeStateSchemaVersionCurrent,
-			},
-		}},
 	}
 	for _, value := range values {
 		t.Run(value.name, func(t *testing.T) {

@@ -59,59 +59,11 @@ func TestMapRunProjectsSealedProviderSelectionWithoutAliasingBootstrap(t *testin
 	}
 }
 
-func TestMapRunProjectsFreshActivationStatusWithoutRuntimeState(t *testing.T) {
-	item := &runmodel.Run{
-		ID:          "run-incompatible-schema",
-		WorkspaceID: "ws-incompatible-schema",
-		State:       common.RunStateActive,
-		RuntimeActivationStatus: &runmodel.RuntimeActivationStatus{
-			Disposition:     runtimecontract.RuntimeActivationDispositionFreshActivationRequired,
-			RuntimeStateRef: "runtime-state/ws-incompatible-schema/run-incompatible-schema",
-			Incompatibility: runtimecontract.RuntimeStateIncompatibility{
-				Reason:                 runtimecontract.RuntimeStateIncompatibilityReasonSchemaUnsupported,
-				ActualSchemaVersion:    2,
-				SupportedSchemaVersion: 4,
-			},
-		},
-	}
-
-	got := MapRun(item)
-	if got.RuntimeActivation == nil ||
-		got.RuntimeActivation.Disposition != string(runtimecontract.RuntimeActivationDispositionFreshActivationRequired) ||
-		got.RuntimeActivation.ActualSchemaVersion != 2 ||
-		got.RuntimeActivation.SupportedSchemaVersion != 4 {
-		t.Fatalf("runtime activation = %+v, want bounded fresh-activation projection", got.RuntimeActivation)
-	}
-	if _, ok := reflect.TypeOf(got).FieldByName("RuntimeState"); ok {
-		t.Fatal("application run read model must not retain RuntimeState")
-	}
-}
-
-func TestMapRunProjectsCWILedgerFreshActivationReasonWithoutRuntimeState(t *testing.T) {
-	item := &runmodel.Run{
-		ID:          "run-invalid-cwi-ledger",
-		WorkspaceID: "ws-invalid-cwi-ledger",
-		State:       common.RunStateActive,
-		RuntimeActivationStatus: &runmodel.RuntimeActivationStatus{
-			Disposition:     runtimecontract.RuntimeActivationDispositionFreshActivationRequired,
-			RuntimeStateRef: "runtime-state/ws-invalid-cwi-ledger/run-invalid-cwi-ledger/4",
-			Incompatibility: runtimecontract.RuntimeStateIncompatibility{
-				Reason:                 runtimecontract.RuntimeStateIncompatibilityReasonCWILedgerInvalid,
-				ActualSchemaVersion:    runtimecontract.RuntimeStateSchemaVersionCurrent,
-				SupportedSchemaVersion: runtimecontract.RuntimeStateSchemaVersionCurrent,
-			},
-		},
-	}
-
-	got := MapRun(item)
-	if got.RuntimeActivation == nil ||
-		got.RuntimeActivation.Disposition != string(runtimecontract.RuntimeActivationDispositionFreshActivationRequired) ||
-		got.RuntimeActivation.Reason != string(runtimecontract.RuntimeStateIncompatibilityReasonCWILedgerInvalid) ||
-		got.RuntimeActivation.ActualSchemaVersion != runtimecontract.RuntimeStateSchemaVersionCurrent ||
-		got.RuntimeActivation.SupportedSchemaVersion != runtimecontract.RuntimeStateSchemaVersionCurrent {
-		t.Fatalf("runtime activation = %+v, want CWI ledger fresh-activation projection", got.RuntimeActivation)
-	}
-	if _, ok := reflect.TypeOf(got).FieldByName("RuntimeState"); ok {
-		t.Fatal("application run read model must not retain RuntimeState")
+func TestMapRunDoesNotRetainRuntimeAuthorityOrCompatibilityState(t *testing.T) {
+	got := MapRun(&runmodel.Run{ID: "run-1", WorkspaceID: "ws-1", State: common.RunStateActive})
+	for _, field := range []string{"RuntimeState", "RuntimeActivation", "RuntimeActivationStatus"} {
+		if _, ok := reflect.TypeOf(got).FieldByName(field); ok {
+			t.Fatalf("application run read model retains %s", field)
+		}
 	}
 }

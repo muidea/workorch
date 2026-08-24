@@ -17,7 +17,6 @@ func cloneWebSearchProviderConfig(source workorchconfig.WebSearchProviderConfig)
 	return workorchconfig.WebSearchProviderConfig{
 		Provider:       source.Provider,
 		SearchEndpoint: source.SearchEndpoint,
-		FetchEndpoint:  source.FetchEndpoint,
 		APIKey:         source.APIKey,
 		Headers:        cloneStringMap(source.Headers),
 		Timeout:        source.Timeout,

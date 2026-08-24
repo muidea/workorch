@@ -1666,7 +1666,10 @@ func TestFailInfeasibleValidationCommandDiagnosticDoesNotCreateImplementationRep
 
 func controllerFacts() runtimecontract.RuntimeFacts {
 	facts := runtimecontract.RuntimeFacts{
-		Activation:  runtimecontract.RuntimeActivationContext{ProviderSelection: runtimecontract.ProviderInferenceSelection{Target: runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "gpt-4o"}}},
+		Activation: runtimecontract.RuntimeActivationContext{
+			ProviderSelection: runtimecontract.ProviderInferenceSelection{Target: runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "gpt-4o"}},
+			ExecutionContract: runtimecontract.RuntimeExecutionContract{StateChangePolicy: runtimecontract.RuntimeStateChangeAllowedButNotRequired},
+		},
 		WorkspaceID: "ws-v2", RunID: "run-v2", DefinitionRevision: "definition-v2", EvidenceRevision: "runtime-evidence-00000000000000000000",
 		Focus: runtimecontract.CoverageFocus{
 			ID: "focus-v2", SliceID: "slice-v2", CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-v2"},
@@ -1676,6 +1679,9 @@ func controllerFacts() runtimecontract.RuntimeFacts {
 		Slices:       []runtimecontract.RuntimeAcceptanceSlice{{ID: "slice-v2", CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-v2"}}},
 		Capabilities: runtimecontract.RuntimeCapabilities{StateChangeKinds: []string{"file/write"}},
 	}
+	facts.ConvergencePolicy = runtimecontract.DefaultRuntimeConvergencePolicy()
+	facts.RecoveryPolicy = runtimecontract.DefaultRuntimeRecoveryPolicy()
+	facts.ExecutionBudgetPolicy = runtimecontract.DefaultRuntimeExecutionBudgetPolicy()
 	facts.DefinitionSeed = runtimecontract.RuntimeDefinitionSeed{
 		SchemaVersion: runtimecontract.RuntimeDefinitionSeedSchemaCurrent, DefinitionRevision: facts.DefinitionRevision,
 		PolicyHash: "policy-test", CoverageItems: []runtimecontract.RuntimeCoverageItem{{ID: "cwi-v2", SliceID: "slice-v2", SourceScope: "dodItem", SourceID: "dod-v2", TargetText: "deliver"}},

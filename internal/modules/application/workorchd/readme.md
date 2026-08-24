@@ -82,8 +82,8 @@ Last Verified: 2026-08-23
   sealed provider selection 保持不变。`restart` 携带按当前 Workspace definition 构造的 fresh bootstrap；
   execution intent 本身不含 RunID，Workspace owner 校验 definition/scope 后把 typed intent 交给 Run owner。
   Run owner 对普通非终态 predecessor 持久化 `ReplacementIntent`，并在既有 `Result -> Workspace -> Run` terminal
-  delivery 完成后创建 successor；Application、Workspace 与 Orchestrator 均不提前创建或链接 successor。非当前
-  development baseline 的 predecessor 由 Run owner 返回 `data_reset_required`，不创建 replacement intent。
+  delivery 完成后创建 successor；Application、Workspace 与 Orchestrator 均不提前创建或链接 successor。无法按当前
+  persisted shape 读取的 predecessor 在 admission 前失败，不生成 application compatibility outcome 或 replacement intent。
 - restart compiler 只接受 Workspace identity 与进程默认值；Goal/DoD、provider、Soul、Skill、MCP、Memory 和 capability
   selection 只从当前 owner state 编译，不暴露 rich per-run activation command、显式 definition ID 或可跨包调用的
   activation builder。
@@ -125,9 +125,9 @@ Last Verified: 2026-08-23
 - execution admission 已删除 caller-controlled Run priority：HTTP body/query/header、Workorchd command、client/backend、CLI/TUI、Web 与 public Run projection 均不再携带该字段；acceptance slice、context compaction 与 Soul routing priority 保持各自独立语义。
 - application 不保留 execution queue、pending/started、owner readback retry 或 application recovery map，也不按 intent/workspace 拼装第二份 `idempotencyKey`；owner 使用的 `requestId` 是唯一请求身份。HTTP 收到并校验具体 Workspace owner result 后，只有 `reconciliation_requested|replacement_pending` 返回 `202`，其余五类 canonical outcome 返回携带 exact identity/outcome/admissionReason 的 typed `409`。唯一 pure classifier 同时给 HTTP 与 projection 提供 accepted/rejected 分类；client、Web/TUI 只显示该分类，不重判 outcome。没有具体 owner result 的同步失败直接映射为当前 HTTP error，不写 `runCommand`。
 - LLM usage projection 原样保留 Eventstream 的 optional `logicalRequestId`/`physicalCallId` 双层身份，并以
-  `physicalResponseMode=streaming|non_streaming` 与 `providerSubmitted` 为唯一物理调用审计输入。新 Runtime usage 必须
-  同时携带两级身份且 `physicalCallId=requestId`；历史或 generic 记录可以两者都没有，但只出现一级或相关 ID 不一致
-  必须拒绝。`streaming` 只作为 mode 的兼容派生；不得从 request bytes、streaming 或其他展示事实补造身份/提交状态。
+  `physicalResponseMode=streaming|non_streaming` 与 `providerSubmitted` 为唯一物理调用审计输入。Runtime usage 必须
+  同时携带两级身份且 `physicalCallId=requestId`；generic non-Runtime 记录可以两者都没有，但只出现一级或相关 ID 不一致
+  必须拒绝。公共 DTO 不含 `streaming` 布尔字段；不得从 request bytes 或其他展示事实补造身份/提交状态。
 - setup-draft session 只保存 message 与 Draft fact，API `state` 每次从 Draft 纯派生，不持久化第二份 authoring lifecycle。acceptance projection 只从 Runtime aggregate 派生 active slice；已有 sealed terminal 或 canonical terminal state 时不得继续标记 active slice/focus。
 
 ## 测试状态

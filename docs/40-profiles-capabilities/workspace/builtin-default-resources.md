@@ -51,7 +51,7 @@ fail-fast；重启重放同一 owner command。MCP defaults 使用 MCP Registry 
 
 所有built-in都是seed-once、user-editable owner resource。Ensure只在built-in ID不存在时创建，绝不覆盖已有Soul、Template、
 MCP Server或Capability；删除built-in后，下一次startup可按当时embedded declaration重建。embedded default变更不迁移既有
-resource；未来若需强制refresh，必须先定义versioned、auditable owner migration contract。
+resource；当前阶段不提供强制 refresh 或 versioned migration，变更默认资源后通过清理数据重新初始化。
 
 ## Template And Soul Contract
 

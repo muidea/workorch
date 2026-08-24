@@ -48,10 +48,9 @@ func TestWorkspaceExecutionHTTPClassifiesAllOwnerOutcomesWithoutLosingIdentity(t
 		{runtimecontract.RuntimeExecutionIntentReconciliationRequested, runtimecontract.RuntimeExecutionIntentReasonCurrentRunContinuationAccepted, http.StatusAccepted, executioncontract.AdmissionDisplayAccepted},
 		{runtimecontract.RuntimeExecutionIntentReplacementPending, runtimecontract.RuntimeExecutionIntentReasonDuplicateRestart, http.StatusAccepted, executioncontract.AdmissionDisplayAccepted},
 		{runtimecontract.RuntimeExecutionIntentRestartRequired, runtimecontract.RuntimeExecutionIntentReasonRunNotResumable, http.StatusConflict, executioncontract.AdmissionDisplayRejected},
-		{runtimecontract.RuntimeExecutionIntentFreshActivationRequired, runtimecontract.RuntimeExecutionIntentReasonRuntimeStateIncompatible, http.StatusConflict, executioncontract.AdmissionDisplayRejected},
+		{runtimecontract.RuntimeExecutionIntentFreshActivationRequired, runtimecontract.RuntimeExecutionIntentReasonRuntimeBootstrapMissing, http.StatusConflict, executioncontract.AdmissionDisplayRejected},
 		{runtimecontract.RuntimeExecutionIntentDefinitionChanged, runtimecontract.RuntimeExecutionIntentReasonDefinitionChanged, http.StatusConflict, executioncontract.AdmissionDisplayRejected},
 		{runtimecontract.RuntimeExecutionIntentGovernanceRequired, runtimecontract.RuntimeExecutionIntentReasonGovernancePending, http.StatusConflict, executioncontract.AdmissionDisplayRejected},
-		{runtimecontract.RuntimeExecutionIntentDataResetRequired, runtimecontract.RuntimeExecutionIntentReasonDevelopmentDataIncompatible, http.StatusConflict, executioncontract.AdmissionDisplayRejected},
 	}
 	state := newTestServerState(t, normalizeConfig(Config{Backend: "memory"}))
 	admissionPort := &fixedWorkspaceExecutionAdmission{}

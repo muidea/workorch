@@ -133,12 +133,20 @@ func runtimePreflightFeedbackForTest(t *testing.T, command llmevents.PreflightRu
 
 func runtimeTestAggregateWithSemanticPlanning(t *testing.T, aggregate runtime.RuntimeAggregate) runtime.RuntimeAggregate {
 	t.Helper()
+	if aggregate.Facts.Activation.ExecutionContract.StateChangePolicy == "" {
+		aggregate.Facts.Activation.ExecutionContract.StateChangePolicy = runtimecontract.RuntimeStateChangeAllowedButNotRequired
+	}
+	if aggregate.Facts.ConvergencePolicy.MaxRepairAttemptsPerFocus == 0 {
+		aggregate.Facts.ConvergencePolicy = runtimecontract.DefaultRuntimeConvergencePolicy()
+	}
+	if aggregate.Facts.RecoveryPolicy.MaxProviderTransportAttempts == 0 {
+		aggregate.Facts.RecoveryPolicy = runtimecontract.DefaultRuntimeRecoveryPolicy()
+	}
+	if aggregate.Facts.ExecutionBudgetPolicy.PolicyRevision == "" {
+		aggregate.Facts.ExecutionBudgetPolicy = runtimecontract.RuntimeExecutionBudgetPolicyForRuntimePolicies(aggregate.Facts.ConvergencePolicy, aggregate.Facts.RecoveryPolicy)
+	}
 	if aggregate.ExecutionBudget.Policy.PolicyRevision == "" {
 		policy := aggregate.Facts.ExecutionBudgetPolicy
-		if policy.PolicyRevision == "" {
-			policy = runtimecontract.RuntimeExecutionBudgetPolicyForRuntimePolicies(aggregate.Facts.ConvergencePolicy, aggregate.Facts.RecoveryPolicy)
-			aggregate.Facts.ExecutionBudgetPolicy = policy
-		}
 		ledger, err := runtimecontract.NewRuntimeExecutionBudgetLedger(policy)
 		if err != nil {
 			t.Fatalf("initialize test Runtime execution budget: %v", err)
@@ -1336,6 +1344,9 @@ func runtimeTestNormalizeStrings(values []string) []string {
 // semantic plan may later bind. The historical name is retained for existing
 // test callers, but a fresh bootstrap intentionally carries no proof binding.
 func runtimeTestBootstrapWithBindings(bootstrap runtimecontract.RuntimeBootstrap) runtimecontract.RuntimeBootstrap {
+	if bootstrap.Activation.ExecutionContract.StateChangePolicy == "" {
+		bootstrap.Activation.ExecutionContract.StateChangePolicy = runtimecontract.RuntimeStateChangeAllowedButNotRequired
+	}
 	if bootstrap.ExecutionBudgetPolicy.PolicyRevision == "" {
 		bootstrap.ExecutionBudgetPolicy = runtimecontract.RuntimeExecutionBudgetPolicyForRuntimePolicies(bootstrap.ConvergencePolicy, bootstrap.RecoveryPolicy)
 	}
@@ -1395,6 +1406,9 @@ func runtimeTestBootstrapWithReboundBindings(bootstrap runtimecontract.RuntimeBo
 // explicit. Production never calls this helper: its binding comes only from
 // the Orchestrator semantic seal.
 func runtimeTestFactsWithReboundBindings(facts runtimecontract.RuntimeFacts, definition runtimecontract.RuntimeDefinitionContext) runtimecontract.RuntimeFacts {
+	if facts.Activation.ExecutionContract.StateChangePolicy == "" {
+		facts.Activation.ExecutionContract.StateChangePolicy = runtimecontract.RuntimeStateChangeAllowedButNotRequired
+	}
 	focus := facts.Focus.Normalized()
 	definitionRevision := definition.Normalized().Revision
 	if definitionRevision == "" {

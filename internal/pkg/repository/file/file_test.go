@@ -2,7 +2,6 @@ package file
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -55,6 +54,17 @@ func TestWorkspaceRepositoryGetReturnsErrorWhenPersistedJSONCorrupt(t *testing.T
 	}
 }
 
+func TestWorkspaceRepositoryRejectsRetiredOrUnknownFields(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "workspace.json")
+	data := []byte(`{"ws-retired":{"ID":"ws-retired","State":"active","retiredSchemaVersion":"v1"}}`)
+	if err := os.WriteFile(path, data, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := NewWorkspaceRepository(path).Get(context.Background(), "ws-retired"); err == nil || !strings.Contains(err.Error(), `unknown field "retiredSchemaVersion"`) {
+		t.Fatalf("Get error = %v, want strict retired-field rejection", err)
+	}
+}
+
 func TestWorkspaceRepositoryPersistsAndClonesDefaultLLMSelection(t *testing.T) {
 	ctx := context.Background()
 	path := filepath.Join(t.TempDir(), "workspace.json")
@@ -82,40 +92,29 @@ func TestWorkspaceRepositoryPersistsAndClonesDefaultLLMSelection(t *testing.T) {
 	}
 }
 
-func TestWorkspaceRepositoryReadsLegacyWorkspaceWithoutDefaultLLMSelection(t *testing.T) {
+func TestWorkspaceRepositoryPersistsOptionalDefaultLLMSelectionAsEmpty(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "workspace.json")
-	if err := os.WriteFile(path, []byte(`{"ws-legacy":{"ID":"ws-legacy","Title":"legacy","State":"active"}}`), 0o600); err != nil {
-		t.Fatalf("write legacy workspace: %v", err)
+	repo := NewWorkspaceRepository(path)
+	if err := repo.Create(context.Background(), &workspacemodel.Workspace{ID: "ws-current", Title: "current", State: common.WorkspaceStateActive}); err != nil {
+		t.Fatalf("create current workspace: %v", err)
 	}
-	item, err := NewWorkspaceRepository(path).Get(context.Background(), "ws-legacy")
+	item, err := repo.Get(context.Background(), "ws-current")
 	if err != nil {
-		t.Fatalf("read legacy workspace: %v", err)
+		t.Fatalf("read current workspace: %v", err)
 	}
 	if item.DefaultLLMSelection != nil {
-		t.Fatalf("legacy target = %+v, want nil", item.DefaultLLMSelection)
+		t.Fatalf("optional target = %+v, want nil", item.DefaultLLMSelection)
 	}
 }
 
-func TestWorkspaceRepositoryReadsLegacyNullContextHintsWithoutMutation(t *testing.T) {
+func TestWorkspaceRepositoryRejectsNullContextHints(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "workspace.json")
-	legacyData := []byte(`{"ws-legacy-null":{"Revision":1,"ID":"ws-legacy-null","Title":"legacy null","State":"active","ContextHints":null,"EvidencePolicies":null}}`)
-	if err := os.WriteFile(path, legacyData, 0o600); err != nil {
-		t.Fatalf("write legacy workspace: %v", err)
+	data := []byte(`{"ws-invalid-null":{"Revision":1,"ID":"ws-invalid-null","Title":"invalid null","State":"active","ContextHints":null,"EvidencePolicies":null}}`)
+	if err := os.WriteFile(path, data, 0o600); err != nil {
+		t.Fatalf("write invalid workspace: %v", err)
 	}
-
-	item, err := NewWorkspaceRepository(path).Get(context.Background(), "ws-legacy-null")
-	if err != nil {
-		t.Fatalf("read legacy workspace: %v", err)
-	}
-	if len(item.ContextHints.Fields) != 0 || item.EvidencePolicies != nil {
-		t.Fatalf("legacy workspace payloads = %+v/%+v, want empty hints and nil policies", item.ContextHints, item.EvidencePolicies)
-	}
-	after, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if string(after) != string(legacyData) {
-		t.Fatal("legacy workspace was rewritten during read")
+	if _, err := NewWorkspaceRepository(path).Get(context.Background(), "ws-invalid-null"); !errors.Is(err, workorcheventpayload.ErrInvalidPayload) {
+		t.Fatalf("Get error = %v, want invalid payload", err)
 	}
 }
 
@@ -129,37 +128,25 @@ func TestWorkspaceRepositoryRejectsNonObjectContextHints(t *testing.T) {
 	}
 }
 
-func TestResultRepositoryReadsLegacyNullSummaryDiagnosticsWithoutMutation(t *testing.T) {
-	root := filepath.Join(t.TempDir(), "result.json")
+func TestResultRepositoryRejectsNullSummaryDiagnostics(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "results")
 	repo := NewResultRepository(root)
-	resultID := common.ResultID("run-legacy/result-1")
+	resultID := common.ResultID("run-invalid/result-1")
 	path := repo.resultPath(resultID)
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	legacyData := []byte(`{"Revision":1,"ID":"run-legacy/result-1","WorkspaceID":"ws-legacy","RunID":"run-legacy","State":"accepted","SummaryDetail":{"GoalOutcome":"accepted","Diagnostics":null}}`)
-	if err := os.WriteFile(path, legacyData, 0o600); err != nil {
+	data := []byte(`{"Revision":1,"ID":"run-invalid/result-1","WorkspaceID":"ws-invalid","RunID":"run-invalid","State":"accepted","SummaryDetail":{"GoalOutcome":"accepted","Diagnostics":null}}`)
+	if err := os.WriteFile(path, data, 0o600); err != nil {
 		t.Fatal(err)
 	}
-
-	items, _, err := repo.ListForRecovery(context.Background(), "", 10)
-	if err != nil {
-		t.Fatalf("list legacy results for recovery: %v", err)
-	}
-	if len(items) != 1 || items[0].SummaryDetail.GoalOutcome != "accepted" || len(items[0].SummaryDetail.Diagnostics.Fields) != 0 {
-		t.Fatalf("legacy result = %+v, want decoded empty diagnostics", items)
-	}
-	after, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if string(after) != string(legacyData) {
-		t.Fatal("legacy result was rewritten during read")
+	if _, _, err := repo.ListForRecovery(context.Background(), "", 10); !errors.Is(err, workorcheventpayload.ErrInvalidPayload) {
+		t.Fatalf("ListForRecovery error = %v, want invalid payload", err)
 	}
 }
 
 func TestResultRepositoryRejectsNonObjectSummaryDiagnostics(t *testing.T) {
-	root := filepath.Join(t.TempDir(), "result.json")
+	root := filepath.Join(t.TempDir(), "results")
 	repo := NewResultRepository(root)
 	path := repo.resultPath("run-invalid/result-1")
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
@@ -202,33 +189,30 @@ func TestRunRepositoryCreateReturnsErrorWhenPersistedJSONCorrupt(t *testing.T) {
 	}
 }
 
-func TestWorkspaceRepositoryCreateStillSucceedsAfterEmptyPersistedFile(t *testing.T) {
+func TestWorkspaceRepositoryRejectsEmptyPersistedFileWithoutMutation(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "workspace.json")
 	if err := os.WriteFile(path, nil, 0o644); err != nil {
 		t.Fatalf("write empty workspace file: %v", err)
 	}
 
 	repo := NewWorkspaceRepository(path)
-	if err := repo.Create(context.Background(), &workspacemodel.Workspace{
+	err := repo.Create(context.Background(), &workspacemodel.Workspace{
 		ID:    common.WorkspaceID("ws-empty"),
 		Title: "empty workspace",
 		State: common.WorkspaceStateActive,
-	}); err != nil {
-		t.Fatalf("Create with empty persisted file: %v", err)
+	})
+	if err == nil {
+		t.Fatal("Create error = nil, want strict empty-file rejection")
 	}
-
-	item, err := repo.Get(context.Background(), "ws-empty")
-	if err != nil {
-		t.Fatalf("Get after create with empty persisted file: %v", err)
-	}
-	if item.ID != "ws-empty" || item.Title != "empty workspace" || item.State != common.WorkspaceStateActive {
-		t.Fatalf("workspace = %+v, want ws-empty/empty workspace/active", item)
+	data, readErr := os.ReadFile(path)
+	if readErr != nil || len(data) != 0 {
+		t.Fatalf("persisted file changed: bytes=%d err=%v", len(data), readErr)
 	}
 }
 
 func TestEventRecordRepositoryAppendsJSONLSegmentsWithoutMapRewrite(t *testing.T) {
 	ctx := context.Background()
-	root := filepath.Join(t.TempDir(), "event_record.json")
+	root := filepath.Join(t.TempDir(), "event-records")
 	repo := NewEventRecordRepository(root)
 	payload := strings.Repeat("x", eventRecordPayloadInlineThreshold+1)
 
@@ -242,13 +226,10 @@ func TestEventRecordRepositoryAppendsJSONLSegmentsWithoutMapRewrite(t *testing.T
 	}); err != nil {
 		t.Fatalf("append event: %v", err)
 	}
-	if _, err := os.Stat(root); !os.IsNotExist(err) {
-		t.Fatalf("legacy event_record.json stat err = %v, want not exist", err)
-	}
-	if _, err := os.Stat(filepath.Join(strings.TrimSuffix(root, ".json"), "events", "events-000001.jsonl")); err != nil {
+	if _, err := os.Stat(filepath.Join(root, "events", "events-000001.jsonl")); err != nil {
 		t.Fatalf("event JSONL segment stat: %v", err)
 	}
-	if _, err := os.Stat(filepath.Join(strings.TrimSuffix(root, ".json"), "payloads", filepath.FromSlash(safeEventRecordFileName("event-jsonl-1"))+".json")); err != nil {
+	if _, err := os.Stat(filepath.Join(root, "payloads", filepath.FromSlash(safeEventRecordFileName("event-jsonl-1"))+".json")); err != nil {
 		t.Fatalf("large event payload ref stat: %v", err)
 	}
 	beforeDefaultList := repository.EventRecordIOMetricsSnapshot()
@@ -289,48 +270,37 @@ func TestEventRecordRepositoryAppendsJSONLSegmentsWithoutMapRewrite(t *testing.T
 	}
 }
 
-func TestEventRecordRepositoryReadsLegacyNullExternalPayloadWithoutMutation(t *testing.T) {
-	ctx := context.Background()
-	repo := NewEventRecordRepository(filepath.Join(t.TempDir(), "event_record.json"))
+func TestEventRecordRepositoryRejectsNullExternalPayload(t *testing.T) {
+	repo := NewEventRecordRepository(filepath.Join(t.TempDir(), "event-records"))
 	if err := os.MkdirAll(repo.eventSegmentDir(), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.MkdirAll(repo.eventPayloadDir(), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	const payloadRef = "payloads/legacy-external.json"
-	segmentData := []byte(`{"record":{"ID":"event-legacy-null-external","Version":"workorch.event.v1","Topic":"/workspace/created","OccurredAt":"2026-08-22T00:00:00Z","SourceModule":"blocks/workspace","SubjectType":"workspace","SubjectID":"ws-legacy-null-external","WorkspaceID":"ws-legacy-null-external","StreamPosition":1,"Revision":1,"Payload":null,"PayloadSummary":{"fieldCount":1},"PayloadRef":"payloads/legacy-external.json"},"payloadRef":"payloads/legacy-external.json"}` + "\n")
+	segmentData := []byte(`{"record":{"ID":"event-invalid-null-external","Version":"workorch.event","Topic":"/workspace/created","OccurredAt":"2026-08-22T00:00:00Z","SourceModule":"blocks/workspace","SubjectType":"workspace","SubjectID":"ws-invalid-null-external","WorkspaceID":"ws-invalid-null-external","StreamPosition":1,"Revision":1,"Payload":null,"PayloadSummary":{"fieldCount":1}},"payloadRef":"payloads/invalid-external.json"}` + "\n")
 	segmentPath := filepath.Join(repo.eventSegmentDir(), eventRecordSegmentName(1))
 	if err := os.WriteFile(segmentPath, segmentData, 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(repo.eventLogRoot(), filepath.FromSlash(payloadRef)), []byte(`{"title":"legacy workspace"}`), 0o644); err != nil {
-		t.Fatal(err)
-	}
-
-	items, err := repo.List(ctx, workorchquerycontract.EventRecordQuery{
-		WorkspaceID:    "ws-legacy-null-external",
-		IncludePayload: true,
-	})
-	if err != nil {
-		t.Fatalf("list legacy external-payload event: %v", err)
-	}
-	if len(items) != 1 || items[0].PayloadRef != payloadRef {
-		t.Fatalf("legacy event = %+v, want one event with payload ref %q", items, payloadRef)
-	}
-	if title, ok := items[0].Payload.String("title"); !ok || title != "legacy workspace" {
-		t.Fatalf("legacy event payload = %+v, want hydrated title", items[0].Payload)
-	}
-	after, err := os.ReadFile(segmentPath)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if string(after) != string(segmentData) {
-		t.Fatalf("legacy event segment was rewritten during read")
+	if _, err := repo.List(context.Background(), workorchquerycontract.EventRecordQuery{}); !errors.Is(err, workorcheventpayload.ErrInvalidPayload) {
+		t.Fatalf("List error = %v, want invalid payload", err)
 	}
 }
 
-func TestEventRecordRepositoryRejectsNonObjectPayloadOutsideLegacyExternalRef(t *testing.T) {
+func TestEventRecordRepositoryRejectsExternalPayloadWithoutCurrentSummary(t *testing.T) {
+	repo := NewEventRecordRepository(filepath.Join(t.TempDir(), "event-records"))
+	if err := os.MkdirAll(repo.eventSegmentDir(), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	segmentData := []byte(`{"record":{"ID":"event-missing-summary","Version":"workorch.event","Topic":"/workspace/created","OccurredAt":"2026-08-22T00:00:00Z","SourceModule":"blocks/workspace","SubjectType":"workspace","SubjectID":"ws-missing-summary","WorkspaceID":"ws-missing-summary","StreamPosition":1,"Revision":1,"Payload":{},"PayloadSummary":{}},"payloadRef":"payloads/event-missing-summary.json"}` + "\n")
+	segmentPath := filepath.Join(repo.eventSegmentDir(), eventRecordSegmentName(1))
+	if err := os.WriteFile(segmentPath, segmentData, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repo.List(context.Background(), workorchquerycontract.EventRecordQuery{}); !errors.Is(err, workorcheventpayload.ErrInvalidPayload) {
+		t.Fatalf("List error = %v, want invalid current payload summary", err)
+	}
+}
+
+func TestEventRecordRepositoryRejectsNonObjectPayload(t *testing.T) {
 	tests := []struct {
 		name string
 		line string
@@ -341,16 +311,16 @@ func TestEventRecordRepositoryRejectsNonObjectPayloadOutsideLegacyExternalRef(t 
 		},
 		{
 			name: "array with external ref",
-			line: `{"record":{"ID":"event-array-ref","Topic":"/test","Payload":[],"PayloadRef":"payloads/event-array-ref.json"},"payloadRef":"payloads/event-array-ref.json"}`,
+			line: `{"record":{"ID":"event-array-ref","Topic":"/test","Payload":[]},"payloadRef":"payloads/event-array-ref.json"}`,
 		},
 		{
 			name: "scalar with external ref",
-			line: `{"record":{"ID":"event-scalar-ref","Topic":"/test","Payload":"invalid","PayloadRef":"payloads/event-scalar-ref.json"},"payloadRef":"payloads/event-scalar-ref.json"}`,
+			line: `{"record":{"ID":"event-scalar-ref","Topic":"/test","Payload":"invalid"},"payloadRef":"payloads/event-scalar-ref.json"}`,
 		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			repo := NewEventRecordRepository(filepath.Join(t.TempDir(), "event_record.json"))
+			repo := NewEventRecordRepository(filepath.Join(t.TempDir(), "event-records"))
 			if err := os.MkdirAll(repo.eventSegmentDir(), 0o755); err != nil {
 				t.Fatal(err)
 			}
@@ -502,9 +472,9 @@ func TestArtifactContinuationRepositoryStoresContentOutsideMetadata(t *testing.T
 	}
 }
 
-func TestStepRepositoryStoresItemsWithoutMapRewrite(t *testing.T) {
+func TestStepRepositoryStoresCurrentSequenceLayout(t *testing.T) {
 	ctx := context.Background()
-	root := filepath.Join(t.TempDir(), "step.json")
+	root := filepath.Join(t.TempDir(), "steps")
 	repo := NewStepRepository(root)
 	stepID := common.StepID("run-item/step-1")
 
@@ -518,10 +488,7 @@ func TestStepRepositoryStoresItemsWithoutMapRewrite(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("create step: %v", err)
 	}
-	if _, err := os.Stat(root); !os.IsNotExist(err) {
-		t.Fatalf("legacy step.json stat err = %v, want not exist", err)
-	}
-	itemDir := filepath.Join(filepath.Dir(root), "steps", "run-item", "001-step-1")
+	itemDir := filepath.Join(root, "run-item", "001-step-1")
 	for _, name := range []string{"metadata.json", "input.json", "output.json"} {
 		if _, err := os.Stat(filepath.Join(itemDir, name)); err != nil {
 			t.Fatalf("step item %s stat: %v", name, err)
@@ -538,14 +505,14 @@ func TestStepRepositoryStoresItemsWithoutMapRewrite(t *testing.T) {
 	}
 }
 
-func TestStepRepositoryReadsLegacyNullDetachedPayloadMetadataWithoutMutation(t *testing.T) {
+func TestStepRepositoryRejectsNullDetachedPayloadMetadata(t *testing.T) {
 	ctx := context.Background()
-	root := filepath.Join(t.TempDir(), "step.json")
+	root := filepath.Join(t.TempDir(), "steps")
 	repo := NewStepRepository(root)
-	stepID := common.StepID("run-legacy-null/step-1")
+	stepID := common.StepID("run-invalid-null/step-1")
 	if err := repo.Create(ctx, &runmodel.Step{
 		ID:     stepID,
-		RunID:  "run-legacy-null",
+		RunID:  "run-invalid-null",
 		Kind:   "llm",
 		State:  common.StepStateSucceeded,
 		Input:  mustFileRepositoryPayload(t, map[string]any{"prompt": "hello"}),
@@ -554,48 +521,33 @@ func TestStepRepositoryReadsLegacyNullDetachedPayloadMetadataWithoutMutation(t *
 		t.Fatalf("create step: %v", err)
 	}
 
-	metadataPath := filepath.Join(filepath.Dir(root), "steps", "run-legacy-null", "001-step-1", "metadata.json")
+	metadataPath := filepath.Join(root, "run-invalid-null", "001-step-1", "metadata.json")
 	metadata, err := os.ReadFile(metadataPath)
 	if err != nil {
 		t.Fatal(err)
 	}
-	legacyMetadata := strings.ReplaceAll(string(metadata), `"Input":{}`, `"Input":null`)
-	legacyMetadata = strings.ReplaceAll(legacyMetadata, `"Output":{}`, `"Output":null`)
-	if legacyMetadata == string(metadata) || !strings.Contains(legacyMetadata, `"Input":null`) || !strings.Contains(legacyMetadata, `"Output":null`) {
-		t.Fatalf("metadata fixture does not contain detached legacy null payloads: %s", legacyMetadata)
+	invalidMetadata := strings.ReplaceAll(string(metadata), `"Input":{}`, `"Input":null`)
+	invalidMetadata = strings.ReplaceAll(invalidMetadata, `"Output":{}`, `"Output":null`)
+	if invalidMetadata == string(metadata) || !strings.Contains(invalidMetadata, `"Input":null`) || !strings.Contains(invalidMetadata, `"Output":null`) {
+		t.Fatalf("metadata fixture does not contain null payloads: %s", invalidMetadata)
 	}
-	if err := os.WriteFile(metadataPath, []byte(legacyMetadata), 0o644); err != nil {
+	if err := os.WriteFile(metadataPath, []byte(invalidMetadata), 0o644); err != nil {
 		t.Fatal(err)
 	}
-
-	item, err := NewStepRepository(root).Get(ctx, stepID)
-	if err != nil {
-		t.Fatalf("get legacy step: %v", err)
-	}
-	if prompt, ok := item.Input.String("prompt"); !ok || prompt != "hello" {
-		t.Fatalf("legacy step input = %+v, want hydrated prompt", item.Input)
-	}
-	if answer, ok := item.Output.String("answer"); !ok || answer != "world" {
-		t.Fatalf("legacy step output = %+v, want hydrated answer", item.Output)
-	}
-	after, err := os.ReadFile(metadataPath)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if string(after) != legacyMetadata {
-		t.Fatal("legacy step metadata was rewritten during read")
+	if _, err := NewStepRepository(root).Get(ctx, stepID); !errors.Is(err, workorcheventpayload.ErrInvalidPayload) {
+		t.Fatalf("Get error = %v, want invalid payload", err)
 	}
 }
 
 func TestStepRepositoryRejectsNonObjectDetachedPayloadMetadata(t *testing.T) {
 	ctx := context.Background()
-	root := filepath.Join(t.TempDir(), "step.json")
+	root := filepath.Join(t.TempDir(), "steps")
 	repo := NewStepRepository(root)
 	stepID := common.StepID("run-invalid-step/step-1")
 	if err := repo.Create(ctx, &runmodel.Step{ID: stepID, RunID: "run-invalid-step"}); err != nil {
 		t.Fatalf("create step: %v", err)
 	}
-	metadataPath := filepath.Join(filepath.Dir(root), "steps", "run-invalid-step", "001-step-1", "metadata.json")
+	metadataPath := filepath.Join(root, "run-invalid-step", "001-step-1", "metadata.json")
 	metadata, err := os.ReadFile(metadataPath)
 	if err != nil {
 		t.Fatal(err)
@@ -614,7 +566,7 @@ func TestStepRepositoryRejectsNonObjectDetachedPayloadMetadata(t *testing.T) {
 
 func TestStepRepositoryListByRunUsesSequenceScope(t *testing.T) {
 	ctx := context.Background()
-	root := filepath.Join(t.TempDir(), "step.json")
+	root := filepath.Join(t.TempDir(), "steps")
 	repo := NewStepRepository(root)
 	for _, item := range []*runmodel.Step{
 		{
@@ -689,7 +641,7 @@ func TestStepRepositoryListByRunUsesSequenceScope(t *testing.T) {
 
 func TestStepRepositoryListByRunPreservesCreationOrderWhenStepIDSortWouldDiffer(t *testing.T) {
 	ctx := context.Background()
-	root := filepath.Join(t.TempDir(), "step.json")
+	root := filepath.Join(t.TempDir(), "steps")
 	repo := NewStepRepository(root)
 	runID := common.RunID("run-sequence-order")
 	created := []common.StepID{
@@ -725,7 +677,7 @@ func TestStepRepositoryListByRunPreservesCreationOrderWhenStepIDSortWouldDiffer(
 
 func TestStepRepositoryListByRunCacheReturnsClonesAndInvalidatesOnUpdate(t *testing.T) {
 	ctx := context.Background()
-	root := filepath.Join(t.TempDir(), "step.json")
+	root := filepath.Join(t.TempDir(), "steps")
 	repo := NewStepRepository(root)
 	step := &runmodel.Step{
 		ID:     "run-cache/step-1",
@@ -766,18 +718,18 @@ func TestStepRepositoryListByRunCacheReturnsClonesAndInvalidatesOnUpdate(t *test
 	}
 }
 
-func TestStepRepositoryListByRunSummaryRebuildsLegacySummary(t *testing.T) {
+func TestStepRepositoryListByRunSummaryRejectsInvalidCurrentSummary(t *testing.T) {
 	ctx := context.Background()
-	root := filepath.Join(t.TempDir(), "step.json")
+	root := filepath.Join(t.TempDir(), "steps")
 	repo := NewStepRepository(root)
-	stepID := common.StepID("run-legacy/step-1")
+	stepID := common.StepID("run-invalid-summary/step-1")
 	item := &runmodel.Step{
 		ID:    stepID,
-		RunID: "run-legacy",
+		RunID: "run-invalid-summary",
 		Kind:  "llm/workspace_execution",
 		State: common.StepStateSucceeded,
 		Input: mustFileRepositoryPayload(t, map[string]any{
-			"workspaceId":           "ws-legacy",
+			"workspaceId":           "ws-invalid-summary",
 			"runtimeRepairFollowUp": true,
 			"largeRuntimePayload":   strings.Repeat("x", 8192),
 		}),
@@ -791,69 +743,35 @@ func TestStepRepositoryListByRunSummaryRebuildsLegacySummary(t *testing.T) {
 		t.Fatalf("create step: %v", err)
 	}
 
-	itemDir := filepath.Join(filepath.Dir(root), "steps", "run-legacy", "001-step-1")
-	legacySummary := `{
-		"ID":"run-legacy/step-1",
-		"RunID":"run-legacy",
+	itemDir := filepath.Join(root, "run-invalid-summary", "001-step-1")
+	invalidSummary := `{
+		"ID":"run-invalid-summary/step-1",
+		"RunID":"run-invalid-summary",
 		"Kind":"llm/workspace_execution",
 		"State":"completed",
-		"Input":{"workspaceId":"ws-legacy","largeRuntimePayload":"` + strings.Repeat("z", 4096) + `"},
+		"Input":{"workspaceId":"ws-invalid-summary","largeRuntimePayload":"` + strings.Repeat("z", 4096) + `"},
 		"Output":{"status":"completed","rawResponse":"` + strings.Repeat("r", 4096) + `"}
 	}`
-	if err := os.WriteFile(filepath.Join(itemDir, "summary.json"), []byte(legacySummary), 0o644); err != nil {
-		t.Fatalf("write legacy summary: %v", err)
+	if err := os.WriteFile(filepath.Join(itemDir, "summary.json"), []byte(invalidSummary), 0o644); err != nil {
+		t.Fatalf("write invalid current summary: %v", err)
 	}
 
-	summaries, err := repo.ListByRunSummary(ctx, "run-legacy")
-	if err != nil {
-		t.Fatalf("list run legacy summaries: %v", err)
-	}
-	if len(summaries) != 1 {
-		t.Fatalf("summary count = %d, want 1", len(summaries))
-	}
-	summaryVersion, _ := summaries[0].Input.String("_summarySchemaVersion")
-	if summaryVersion != stepSummarySchemaVersion {
-		t.Fatalf("summary schema = %v, want %s", summaryVersion, stepSummarySchemaVersion)
-	}
-	summaryWorkspaceID, _ := summaries[0].Input.String("workspaceId")
-	repairFollowUp, _ := summaries[0].Input.Bool("runtimeRepairFollowUp")
-	if summaryWorkspaceID != "ws-legacy" || !repairFollowUp {
-		t.Fatalf("summary retained input = %+v, want workspace and repair flags", summaries[0].Input)
-	}
-	if _, ok := summaries[0].Input.Field("largeRuntimePayload"); ok {
-		t.Fatalf("summary retained largeRuntimePayload, want omitted")
-	}
-	failureSignature, _ := summaries[0].Output.String("failureSignature")
-	if failureSignature != "class=runtime_failed|targetRef=main.go" {
-		t.Fatalf("summary failureSignature = %v, want retained", failureSignature)
-	}
-	if _, ok := summaries[0].Output.Field("rawResponse"); ok {
-		t.Fatalf("summary retained rawResponse, want omitted")
+	if _, err := repo.ListByRunSummary(ctx, "run-invalid-summary"); !errors.Is(err, common.ErrInvalidArgument) {
+		t.Fatalf("ListByRunSummary error = %v, want invalid argument", err)
 	}
 
-	rewrittenData, err := os.ReadFile(filepath.Join(itemDir, "summary.json"))
+	after, err := os.ReadFile(filepath.Join(itemDir, "summary.json"))
 	if err != nil {
-		t.Fatalf("read rewritten summary: %v", err)
+		t.Fatalf("read invalid current summary: %v", err)
 	}
-	var rewritten runmodel.Step
-	if err := json.Unmarshal(rewrittenData, &rewritten); err != nil {
-		t.Fatalf("unmarshal rewritten summary: %v", err)
-	}
-	rewrittenVersion, _ := rewritten.Input.String("_summarySchemaVersion")
-	if rewrittenVersion != stepSummarySchemaVersion {
-		t.Fatalf("rewritten summary schema = %v, want %s", rewrittenVersion, stepSummarySchemaVersion)
-	}
-	if _, ok := rewritten.Input.Field("largeRuntimePayload"); ok {
-		t.Fatalf("rewritten summary retained largeRuntimePayload, want omitted")
-	}
-	if _, ok := rewritten.Output.Field("rawResponse"); ok {
-		t.Fatalf("rewritten summary retained rawResponse, want omitted")
+	if string(after) != invalidSummary {
+		t.Fatal("invalid current summary was rewritten during read")
 	}
 }
 
-func TestToolCallRepositoryStoresItemsWithoutMapRewrite(t *testing.T) {
+func TestToolCallRepositoryStoresCurrentSequenceLayout(t *testing.T) {
 	ctx := context.Background()
-	root := filepath.Join(t.TempDir(), "tool_call.json")
+	root := filepath.Join(t.TempDir(), "tool-calls")
 	repo := NewToolCallRepository(root)
 	toolCallID := common.ToolCallID("run-item/step-1/tool-1")
 
@@ -868,10 +786,7 @@ func TestToolCallRepositoryStoresItemsWithoutMapRewrite(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("create tool call: %v", err)
 	}
-	if _, err := os.Stat(root); !os.IsNotExist(err) {
-		t.Fatalf("legacy tool_call.json stat err = %v, want not exist", err)
-	}
-	itemDir := filepath.Join(filepath.Dir(root), "tool-calls", "run-item", "001-step-1-tool-1")
+	itemDir := filepath.Join(root, "run-item", "001-step-1-tool-1")
 	for _, name := range []string{"metadata.json", "arguments.json", "output.json"} {
 		if _, err := os.Stat(filepath.Join(itemDir, name)); err != nil {
 			t.Fatalf("tool call item %s stat: %v", name, err)
@@ -888,15 +803,15 @@ func TestToolCallRepositoryStoresItemsWithoutMapRewrite(t *testing.T) {
 	}
 }
 
-func TestToolCallRepositoryReadsLegacyNullDetachedPayloadMetadataWithoutMutation(t *testing.T) {
+func TestToolCallRepositoryRejectsNullDetachedPayloadMetadata(t *testing.T) {
 	ctx := context.Background()
-	root := filepath.Join(t.TempDir(), "tool_call.json")
+	root := filepath.Join(t.TempDir(), "tool-calls")
 	repo := NewToolCallRepository(root)
-	toolCallID := common.ToolCallID("run-legacy-null/step-1/tool-1")
+	toolCallID := common.ToolCallID("run-invalid-null/step-1/tool-1")
 	if err := repo.Create(ctx, &runtimeevidencemodel.ToolCall{
 		ID:        toolCallID,
-		RunID:     "run-legacy-null",
-		StepID:    "run-legacy-null/step-1",
+		RunID:     "run-invalid-null",
+		StepID:    "run-invalid-null/step-1",
 		ToolName:  "shell",
 		State:     common.ToolCallStateCompleted,
 		Arguments: mustFileRepositoryPayload(t, map[string]any{"command": "true"}),
@@ -905,48 +820,33 @@ func TestToolCallRepositoryReadsLegacyNullDetachedPayloadMetadataWithoutMutation
 		t.Fatalf("create tool call: %v", err)
 	}
 
-	metadataPath := filepath.Join(filepath.Dir(root), "tool-calls", "run-legacy-null", "001-step-1-tool-1", "metadata.json")
+	metadataPath := filepath.Join(root, "run-invalid-null", "001-step-1-tool-1", "metadata.json")
 	metadata, err := os.ReadFile(metadataPath)
 	if err != nil {
 		t.Fatal(err)
 	}
-	legacyMetadata := strings.ReplaceAll(string(metadata), `"Arguments":{}`, `"Arguments":null`)
-	legacyMetadata = strings.ReplaceAll(legacyMetadata, `"Output":{}`, `"Output":null`)
-	if legacyMetadata == string(metadata) || !strings.Contains(legacyMetadata, `"Arguments":null`) || !strings.Contains(legacyMetadata, `"Output":null`) {
-		t.Fatalf("metadata fixture does not contain detached legacy null payloads: %s", legacyMetadata)
+	invalidMetadata := strings.ReplaceAll(string(metadata), `"Arguments":{}`, `"Arguments":null`)
+	invalidMetadata = strings.ReplaceAll(invalidMetadata, `"Output":{}`, `"Output":null`)
+	if invalidMetadata == string(metadata) || !strings.Contains(invalidMetadata, `"Arguments":null`) || !strings.Contains(invalidMetadata, `"Output":null`) {
+		t.Fatalf("metadata fixture does not contain null payloads: %s", invalidMetadata)
 	}
-	if err := os.WriteFile(metadataPath, []byte(legacyMetadata), 0o644); err != nil {
+	if err := os.WriteFile(metadataPath, []byte(invalidMetadata), 0o644); err != nil {
 		t.Fatal(err)
 	}
-
-	item, err := NewToolCallRepository(root).Get(ctx, toolCallID)
-	if err != nil {
-		t.Fatalf("get legacy tool call: %v", err)
-	}
-	if command, ok := item.Arguments.String("command"); !ok || command != "true" {
-		t.Fatalf("legacy tool call arguments = %+v, want hydrated command", item.Arguments)
-	}
-	if exitCode, ok := item.Output.Int64("exitCode"); !ok || exitCode != 0 {
-		t.Fatalf("legacy tool call output = %+v, want hydrated exit code", item.Output)
-	}
-	after, err := os.ReadFile(metadataPath)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if string(after) != legacyMetadata {
-		t.Fatal("legacy tool call metadata was rewritten during read")
+	if _, err := NewToolCallRepository(root).Get(ctx, toolCallID); !errors.Is(err, workorcheventpayload.ErrInvalidPayload) {
+		t.Fatalf("Get error = %v, want invalid payload", err)
 	}
 }
 
 func TestToolCallRepositoryRejectsNonObjectDetachedPayloadMetadata(t *testing.T) {
 	ctx := context.Background()
-	root := filepath.Join(t.TempDir(), "tool_call.json")
+	root := filepath.Join(t.TempDir(), "tool-calls")
 	repo := NewToolCallRepository(root)
 	toolCallID := common.ToolCallID("run-invalid-tool/step-1/tool-1")
 	if err := repo.Create(ctx, &runtimeevidencemodel.ToolCall{ID: toolCallID, RunID: "run-invalid-tool", StepID: "run-invalid-tool/step-1"}); err != nil {
 		t.Fatalf("create tool call: %v", err)
 	}
-	metadataPath := filepath.Join(filepath.Dir(root), "tool-calls", "run-invalid-tool", "001-step-1-tool-1", "metadata.json")
+	metadataPath := filepath.Join(root, "run-invalid-tool", "001-step-1-tool-1", "metadata.json")
 	metadata, err := os.ReadFile(metadataPath)
 	if err != nil {
 		t.Fatal(err)
@@ -969,7 +869,7 @@ func TestRuntimeEvidenceRepositoriesUseRunScopedSequencePathsAndReuseExistingPat
 	runID := common.RunID("run-evidence")
 	stepID := common.StepID("run-evidence/graph-001/001-plan")
 
-	stepRepo := NewStepRepository(filepath.Join(root, "step.json"))
+	stepRepo := NewStepRepository(filepath.Join(root, "steps"))
 	if err := stepRepo.Create(ctx, &runmodel.Step{
 		ID:    stepID,
 		RunID: runID,
@@ -995,7 +895,7 @@ func TestRuntimeEvidenceRepositoriesUseRunScopedSequencePathsAndReuseExistingPat
 		t.Fatalf("step update should reuse sequence dir: %v", err)
 	}
 
-	validationRepo := NewValidationResultRepository(filepath.Join(root, "validation_result.json"))
+	validationRepo := NewValidationResultRepository(filepath.Join(root, "validations"))
 	validationID := common.ValidationResultID("run-evidence/graph-001/001-plan/validation/runtime-step")
 	if err := validationRepo.Create(ctx, &runtimeevidencemodel.ValidationResult{
 		ID:             validationID,
@@ -1016,13 +916,13 @@ func TestRuntimeEvidenceRepositoriesUseRunScopedSequencePathsAndReuseExistingPat
 	}
 }
 
-func TestRunEvidenceRepositoriesStoreItemsWithoutMapRewrite(t *testing.T) {
+func TestRunEvidenceRepositoriesStoreCurrentItemLayouts(t *testing.T) {
 	ctx := context.Background()
 	root := t.TempDir()
 	runID := common.RunID("run-evidence")
 	stepID := common.StepID("run-evidence/step-1")
 
-	patchPath := filepath.Join(root, "patch.json")
+	patchPath := filepath.Join(root, "patches")
 	patchRepo := NewPatchRepository(patchPath)
 	patchID := common.PatchID("run-evidence/patch-1")
 	if err := patchRepo.Create(ctx, &runtimeevidencemodel.Patch{
@@ -1035,8 +935,7 @@ func TestRunEvidenceRepositoriesStoreItemsWithoutMapRewrite(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("create patch: %v", err)
 	}
-	assertLegacyMapAbsent(t, patchPath)
-	assertItemFileExists(t, filepath.Join(root, "patches"), string(patchID))
+	assertItemFileExists(t, patchPath, string(patchID))
 	patches, err := patchRepo.ListByStep(ctx, stepID)
 	if err != nil {
 		t.Fatalf("list patches by step: %v", err)
@@ -1045,7 +944,7 @@ func TestRunEvidenceRepositoriesStoreItemsWithoutMapRewrite(t *testing.T) {
 		t.Fatalf("patches = %+v, want rehydrated item", patches)
 	}
 
-	validationPath := filepath.Join(root, "validation_result.json")
+	validationPath := filepath.Join(root, "validations")
 	validationRepo := NewValidationResultRepository(validationPath)
 	validationID := common.ValidationResultID("run-evidence/validation-1")
 	if err := validationRepo.Create(ctx, &runtimeevidencemodel.ValidationResult{
@@ -1058,12 +957,11 @@ func TestRunEvidenceRepositoriesStoreItemsWithoutMapRewrite(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("create validation result: %v", err)
 	}
-	assertLegacyMapAbsent(t, validationPath)
-	if _, err := os.Stat(filepath.Join(root, "validations", "run-evidence", "001-validation-1", "metadata.json")); err != nil {
+	if _, err := os.Stat(filepath.Join(validationPath, "run-evidence", "001-validation-1", "metadata.json")); err != nil {
 		t.Fatalf("expected sequence-scoped validation result: %v", err)
 	}
 
-	checkpointPath := filepath.Join(root, "runtime_checkpoint.json")
+	checkpointPath := filepath.Join(root, "checkpoints")
 	checkpointRepo := NewRuntimeCheckpointRepository(checkpointPath)
 	checkpointID := common.CheckpointID("run-evidence/checkpoint-1")
 	if err := checkpointRepo.Create(ctx, &runmodel.RuntimeCheckpoint{
@@ -1074,8 +972,7 @@ func TestRunEvidenceRepositoriesStoreItemsWithoutMapRewrite(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("create runtime checkpoint: %v", err)
 	}
-	assertLegacyMapAbsent(t, checkpointPath)
-	assertItemFileExists(t, filepath.Join(root, "checkpoints"), string(checkpointID))
+	assertItemFileExists(t, checkpointPath, string(checkpointID))
 	checkpoint, err := checkpointRepo.Get(ctx, checkpointID)
 	if err != nil {
 		t.Fatalf("get runtime checkpoint: %v", err)
@@ -1085,7 +982,7 @@ func TestRunEvidenceRepositoriesStoreItemsWithoutMapRewrite(t *testing.T) {
 		t.Fatalf("checkpoint data = %+v, want rehydrated data", checkpoint.Data)
 	}
 
-	resultPath := filepath.Join(root, "result.json")
+	resultPath := filepath.Join(root, "results")
 	resultRepo := NewResultRepository(resultPath)
 	resultID := common.ResultID("run-evidence/result-1")
 	if err := resultRepo.Create(ctx, &resultmodel.Result{
@@ -1097,10 +994,9 @@ func TestRunEvidenceRepositoriesStoreItemsWithoutMapRewrite(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("create result: %v", err)
 	}
-	assertLegacyMapAbsent(t, resultPath)
-	assertItemFileExists(t, filepath.Join(root, "results"), string(resultID))
+	assertItemFileExists(t, resultPath, string(resultID))
 
-	artifactPath := filepath.Join(root, "artifact.json")
+	artifactPath := filepath.Join(root, "artifacts")
 	artifactRepo := NewArtifactRepository(artifactPath)
 	artifactID := common.ArtifactID("run-evidence/artifact-1")
 	if err := artifactRepo.Create(ctx, &resultmodel.Artifact{
@@ -1113,8 +1009,7 @@ func TestRunEvidenceRepositoriesStoreItemsWithoutMapRewrite(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("create artifact: %v", err)
 	}
-	assertLegacyMapAbsent(t, artifactPath)
-	assertItemFileExists(t, filepath.Join(root, "artifacts"), string(artifactID))
+	assertItemFileExists(t, artifactPath, string(artifactID))
 	artifacts, err := artifactRepo.ListByResult(ctx, resultID)
 	if err != nil {
 		t.Fatalf("list artifacts by result: %v", err)
@@ -1132,7 +1027,7 @@ func TestGovernanceRepositoriesStoreTypedPayloads(t *testing.T) {
 	ctx := context.Background()
 	root := t.TempDir()
 
-	ticketPath := filepath.Join(root, "ticket.json")
+	ticketPath := filepath.Join(root, "decisions", "tickets")
 	ticketRepo := NewDecisionTicketRepository(ticketPath)
 	ticketID := common.TicketID("run-governance/ticket-1")
 	if err := ticketRepo.Create(ctx, &decisionmodel.Ticket{
@@ -1145,8 +1040,7 @@ func TestGovernanceRepositoriesStoreTypedPayloads(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("create ticket: %v", err)
 	}
-	assertLegacyMapAbsent(t, ticketPath)
-	assertItemFileExists(t, filepath.Join(root, "decisions", "tickets"), string(ticketID))
+	assertItemFileExists(t, ticketPath, string(ticketID))
 	tickets, err := ticketRepo.ListByRunID(ctx, common.RunID("run-governance"))
 	if err != nil {
 		t.Fatalf("list tickets by run: %v", err)
@@ -1156,7 +1050,7 @@ func TestGovernanceRepositoriesStoreTypedPayloads(t *testing.T) {
 		t.Fatalf("tickets = %+v, want rehydrated context", tickets)
 	}
 
-	resolutionPath := filepath.Join(root, "resolution.json")
+	resolutionPath := filepath.Join(root, "decisions", "resolutions")
 	resolutionRepo := NewDecisionResolutionRepository(resolutionPath)
 	resolutionID := common.ResolutionID("run-governance/resolution-1")
 	if err := resolutionRepo.Create(ctx, &decisionmodel.Resolution{
@@ -1167,8 +1061,7 @@ func TestGovernanceRepositoriesStoreTypedPayloads(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("create resolution: %v", err)
 	}
-	assertLegacyMapAbsent(t, resolutionPath)
-	assertItemFileExists(t, filepath.Join(root, "decisions", "resolutions"), string(resolutionID))
+	assertItemFileExists(t, resolutionPath, string(resolutionID))
 	resolution, err := resolutionRepo.GetByTicketID(ctx, ticketID)
 	if err != nil {
 		t.Fatalf("get resolution by ticket: %v", err)
@@ -1178,7 +1071,7 @@ func TestGovernanceRepositoriesStoreTypedPayloads(t *testing.T) {
 		t.Fatalf("resolution payload = %+v, want rehydrated payload", resolution.Payload)
 	}
 
-	approvalPath := filepath.Join(root, "approval.json")
+	approvalPath := filepath.Join(root, "approvals")
 	approvalRepo := NewApprovalRepository(approvalPath)
 	approvalID := common.ApprovalID("run-governance/approval-1")
 	if err := approvalRepo.Create(ctx, &approvalmodel.Approval{
@@ -1191,8 +1084,7 @@ func TestGovernanceRepositoriesStoreTypedPayloads(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("create approval: %v", err)
 	}
-	assertLegacyMapAbsent(t, approvalPath)
-	assertItemFileExists(t, filepath.Join(root, "approvals"), string(approvalID))
+	assertItemFileExists(t, approvalPath, string(approvalID))
 	approvals, err := approvalRepo.ListByWorkspaceID(ctx, common.WorkspaceID("ws-governance"))
 	if err != nil {
 		t.Fatalf("list approvals by workspace: %v", err)
@@ -1200,13 +1092,6 @@ func TestGovernanceRepositoriesStoreTypedPayloads(t *testing.T) {
 	risk, _ := approvals[0].Context.String("risk")
 	if len(approvals) != 1 || risk != "high" {
 		t.Fatalf("approvals = %+v, want rehydrated context", approvals)
-	}
-}
-
-func assertLegacyMapAbsent(t *testing.T, path string) {
-	t.Helper()
-	if _, err := os.Stat(path); !os.IsNotExist(err) {
-		t.Fatalf("legacy map file %s stat err = %v, want not exist", path, err)
 	}
 }
 
@@ -1220,7 +1105,7 @@ func assertItemFileExists(t *testing.T, root string, id string) {
 func TestDecisionResolutionRepositoryStoresLongReadableIDsWithSafeFileName(t *testing.T) {
 	ctx := context.Background()
 	root := t.TempDir()
-	repo := NewDecisionResolutionRepository(filepath.Join(root, "resolution.json"))
+	repo := NewDecisionResolutionRepository(filepath.Join(root, "decisions", "resolutions"))
 	ticketID := common.TicketID("run-001-" + strings.Repeat("context-gate-retry-", 12) + "context-integrity-decision")
 	resolutionID := common.ResolutionID("resolution-ws-real-run-" + string(ticketID) + "-provide_missing_info")
 
@@ -1260,7 +1145,7 @@ func TestDecisionResolutionRepositoryStoresLongReadableIDsWithSafeFileName(t *te
 func TestStepRepositoryStoresLongReadableIDsWithBoundedSequenceDirectories(t *testing.T) {
 	ctx := context.Background()
 	root := t.TempDir()
-	repo := NewStepRepository(filepath.Join(root, "step.json"))
+	repo := NewStepRepository(filepath.Join(root, "steps"))
 	runID := common.RunID("run-" + strings.Repeat("very-long-scope-", 30))
 	stepID := common.StepID(string(runID) + "/repair-" + strings.Repeat("very-long-step-", 40))
 

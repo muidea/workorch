@@ -37,24 +37,6 @@ func (e *runtimePersistedDrivePendingError) Error() string {
 	return fmt.Sprintf("Runtime has persisted pending drive work at revision %d", e.Revision)
 }
 
-// runtimeFreshActivationRequiredError marks a Run-owned, persisted
-// administrative outcome. It is intentionally private to the Orchestrator
-// scheduler: the Run owner exposes the user-facing typed resume admission,
-// while SM-4 must stop without classifying this as a drive failure or creating
-// a recovery lease.
-type runtimeFreshActivationRequiredError struct {
-	WorkspaceID     common.WorkspaceID
-	RunID           common.RunID
-	RuntimeStateRef string
-}
-
-func (e *runtimeFreshActivationRequiredError) Error() string {
-	if e == nil {
-		return "Runtime requires fresh activation"
-	}
-	return fmt.Sprintf("Runtime requires fresh activation workspace=%s run=%s", e.WorkspaceID, e.RunID)
-}
-
 type runtimeInvariantError struct {
 	Message string
 }
@@ -299,24 +281,11 @@ func (m *Biz) initializeRuntimeDrive(ctx context.Context, command orchestratorev
 	if err != nil {
 		return nil, runtime.RuntimeAggregate{}, err
 	}
-	if run.RuntimeActivationStatus != nil && run.RuntimeActivationStatus.Disposition == runtimecontract.RuntimeActivationDispositionFreshActivationRequired {
-		return nil, runtime.RuntimeAggregate{}, &runtimeFreshActivationRequiredError{
-			WorkspaceID: command.WorkspaceID, RunID: command.RunID, RuntimeStateRef: run.RuntimeActivationStatus.RuntimeStateRef,
-		}
-	}
 	aggregate, err := m.initializeRuntimeFromRun(ctx, run)
-	if err == nil {
-		return run, aggregate, nil
-	}
-	incompatibility, incompatible := runtimecontract.RuntimeStateIncompatibilityFromError(err)
-	if !incompatible || run.RuntimeState == nil {
+	if err != nil {
 		return nil, runtime.RuntimeAggregate{}, err
 	}
-	runtimeStateRef := runevents.RuntimeStateRef(run.WorkspaceID, run.ID, run.RuntimeState.StateRevision)
-	if factErr := m.applyRunRuntimeStateIncompatible(ctx, run.WorkspaceID, run.ID, runtimeStateRef, incompatibility, err); factErr != nil {
-		return nil, runtime.RuntimeAggregate{}, factErr
-	}
-	return nil, runtime.RuntimeAggregate{}, &runtimeFreshActivationRequiredError{WorkspaceID: run.WorkspaceID, RunID: run.ID, RuntimeStateRef: runtimeStateRef}
+	return run, aggregate, nil
 }
 
 func (m *Biz) driveOneRuntimeTransition(ctx context.Context, run *runmodel.Run, aggregate runtime.RuntimeAggregate, command orchestratorevents.DriveRuntimeCommand, stablePrefixHash string) (runtimeDriveTransitionOutcome, error) {
@@ -588,7 +557,7 @@ func (m *Biz) driveAndProjectRuntimeLockedWithCommand(ctx context.Context, comma
 				runevents.RunLifecycleCommandResult{Run: run}, fact, aggregate.StateRevision,
 			))
 		}
-		// RUNTIME-SMO: publish immutable governance-wait fact; Run owner migrates SM-1.
+		// RUNTIME-SMO: publish immutable governance-wait fact; Run owner transitions SM-1.
 		authID, defRev, evidRev, dispatchID, ticketID, approvalID := governanceWaitFromDriveResult(result)
 		return runtimeLifecycleOwnerDeliveryFailureForHandoff(handoff, m.applyRunGovernanceWait(ctx, command.WorkspaceID, command.RunID, authID, defRev, evidRev, dispatchID, ticketID, approvalID, result.StateRevision))
 	case result.Terminal != nil:
@@ -615,11 +584,6 @@ func (m *Biz) deliverPersistedRuntimeGovernanceContinuation(ctx context.Context,
 	aggregate, err := m.runtimeController.Load(ctx, workspaceID, runID)
 	if err != nil {
 		if errors.Is(err, common.ErrNotFound) {
-			return false, nil
-		}
-		if _, incompatible := runtimecontract.RuntimeStateIncompatibilityFromError(err); incompatible {
-			// The ordinary drive path owns the typed incompatible-state handoff to
-			// Run. Continuation preflight must not intercept that fail-closed path.
 			return false, nil
 		}
 		return false, err

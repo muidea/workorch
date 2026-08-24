@@ -44,7 +44,7 @@ POST /api/v1/workorch/workspaces/:workspaceId/execution-activations
 - Resume 只复用 existing Run 的 original sealed startup input，不吸收 newer candidate/revision；
 - Restart 使用 fresh eligible bootstrap；Run owner先 seal predecessor `ReplacementIntent`，terminal delivery 完成后才创建 successor；
 - handler 同步等待并校验 exact Workspace owner result。只有 `reconciliation_requested|replacement_pending` 返回
-  `202`；`restart_required|fresh_activation_required|definition_changed_requires_restart|governance_required|data_reset_required`
+  `202`；`restart_required|fresh_activation_required|definition_changed_requires_restart|governance_required`
   返回 typed `409`。两类响应都原样携带 `workspaceId/runId/requestId/intent/outcome/reason`，不存在
   application-local queue/queued acknowledgement；`requestReason` 与 owner-authored `reason` 分离。
 
@@ -139,7 +139,7 @@ type/payload或action/principal/context做幂等readback；Workorchd不得重判
 | Skill | `POST /skills` |
 | MCP server | `POST /mcp/servers`; `PUT /mcp/servers/:serverId` |
 | MCP capability | `POST /mcp/capabilities`; `PUT /mcp/capabilities/:capabilityId` |
-| Memory | `POST /workspaces/:workspaceId/memory`; `PUT, DELETE /workspaces/:workspaceId/memory/:memoryId`; compatibility `PUT, DELETE /memory/:memoryId` |
+| Memory | `POST /workspaces/:workspaceId/memory`; `PUT, DELETE /workspaces/:workspaceId/memory/:memoryId` |
 
 Registry DTO 只表达 declarative owner resource。MCP Registry owns metadata；MCP capability Block owns execution。
 `validationProofApplicability=direct|auxiliary|not_declared` 是 Registry declaration，technical readiness 不是 API 可写字段。

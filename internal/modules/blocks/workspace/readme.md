@@ -4,7 +4,7 @@ Status: active
 
 Type: stateful-block-contract
 
-Last Verified: 2026-08-23
+Last Verified: 2026-08-24
 
 ## 功能范围与边界
 
@@ -62,6 +62,8 @@ candidate 还封存 required owner-fact binding 与唯一 acquisition/reobserve 
   definition kind 内可按代次/字符串单调比较，`A → B → A` 仍产生新 revision。相同规范化内容的重复 update 是零
   revision。新 identity 只能连接当前唯一 canonical leaf，不得按 ID、列表顺序或 repository 顺序推断前驱；历史
   definition 不可直接更新，当前 canonical leaf 不可物理删除。激活绑定变化必须使旧定义选择可检测为 stale。
+- Goal/DoD 当前 definition 必须显式携带 `LineageState=active`。空 lineage 或其他不完整 current 字段直接冲突且零写入；
+  Workspace owner 不补默认值、不重写对象，也不产生任何 schema upgrade 结果。
 - Workspace block 不驱动 Runtime、不判定 Result、不执行治理恢复；execution-intent ingress 只校验当前
   Workspace startup input/admission、选择 active Run，并向 Run owner 发送 concrete typed intent。Restart 必须逐字段匹配
   current eligible `DefinitionRevision + StartupInputHash`；Resume 只选择现有 Run，不重新读取或附带最新 Goal/DoD。它消费 scoped sealed terminal outcome，按
@@ -72,14 +74,15 @@ candidate 还封存 required owner-fact binding 与唯一 acquisition/reobserve 
   category 与完整安全 original diagnostic。
 - 正式 DoD definition resource 只保存 `ready`。pre-seal draft 属于 `DefinitionAdmissionCandidate`；每个 Run 的
   satisfied/unsatisfied/indeterminate assessment 与 terminal closeout 属于 Orchestrator，不能回写 DoD state。
-- `fresh_activation_required` 只是 Run owner 的不可继续 disposition；普通 Run notification 不释放 Workspace slot。
-  对不兼容 development data 的 restart，Run owner返回 `data_reset_required`，Workspace 不代替 Run 创建 successor、
-  不读取旧 aggregate，也不通过旁路 fact 清除 active slot。
+- `fresh_activation_required` 只表示可读 current Run 缺少 sealed bootstrap；普通 Run notification 不释放 Workspace slot。
+  无法按当前结构读取的持久化数据在 execution admission 前失败，Workspace 不创建 successor、不读取或修补该数据，
+  也不通过旁路 fact 清除 active slot。
 - Start/Restart 必须逐字段匹配 promoted `RuntimeProfileContractsHash`；required owner fact 缺少 preexisting 声明或 exact
   one-shot acquisition/reobserve closure 时，pure admission 在 promotion 前返回 `declared_prerequisite_unresolved`。
   Workspace 不得用 live owner 事实、LLM 文本或默认动作修补 candidate。
-- 默认 WorkspaceTemplate 是可由用户编辑的首次启动种子；普通 ensure 不得覆盖内置 ID 上的当前对象。嵌入默认值变更若需迁移，必须使用独立的显式迁移合同。
-- file repository 只在 Workspace 持久化读边界把旧版零值 `ContextHints:null` 解释为空对象，且不得因此改写历史文件；数组、标量等非对象值仍 fail-closed。该兼容不放宽 EventHub、HTTP 或 Runtime payload 合同。
+- 默认 WorkspaceTemplate 是可由用户编辑的首次启动种子；普通 ensure 不得覆盖内置 ID 上的当前对象。当前阶段不提供
+  默认资源升级或数据迁移；需要新默认值时清理数据后重新初始化。
+- file repository 只接受 current object-shaped `ContextHints`；`null`、数组、标量、未知/退役字段与空持久化文件均 fail-closed。
 
 ## 已覆盖测试点
 
@@ -87,17 +90,17 @@ candidate 还封存 required owner-fact binding 与唯一 acquisition/reobserve 
 - [x] Workspace creation 经唯一 private dispatcher 选择 initial state，错误 workspace scope/非 creation event 零写入，静态门禁拒绝其他 Biz `State` literal 或 repository Create 旁路。
 - [x] Workspace CAS revision，以及 Goal/DoD create/update、`A → B → A` 的单调 revision、相同内容 noop 和 stale restart definition 拒绝。
 - [x] Goal/DoD 非递增 ID 的 canonical leaf 谱系、历史 definition 更新拒绝和 current leaf 删除拒绝。
+- [x] 缺失 current lineage 的 Goal/DoD 更新直接拒绝且不会补写 `active`。
 - [x] memory/file backend 上 Goal/DoD 局部 identity、错误 Workspace scope 的 Get/Update/Delete 与无 scope 歧义拒绝。
 - [x] sealed terminal outcome 的匹配释放、空 slot/其他 active Run/冲突 identity 拒绝和同 identity 重投递幂等。
 - [x] immutable candidate create/duplicate/stale revision、all-of promotion、pending clarification acknowledgement、
   exactly-one private-event payload、duplicate acknowledgement noop 与 startup-input hash clone/persistence。
 - [x] application-owned directory resolver 的空目录默认值、相对/绝对路径规范化、workspace ID/相对路径逃逸拒绝和
   多 workspace 默认目录隔离。
-- [x] execution intent 的缺失 Goal/DoD、context scope mismatch、duplicate replay、active Run result fence，以及
-  `data_reset_required` 零 Workspace 元数据副作用。
-- [x] 普通/治理/冲突 Run notification 与 `fresh_activation_required` 均不能释放 active slot；
-  `data_reset_required` admission 同样保持 slot，只有 matching terminal delivery 可释放。
+- [x] execution intent 的缺失 Goal/DoD、context scope mismatch、duplicate replay 与 active Run result fence。
+- [x] 无效持久化数据不会生成 execution admission outcome，也不会修改 Workspace 元数据。
+- [x] 普通/治理/冲突 Run notification 与 `fresh_activation_required` 均不能释放 active slot；只有 matching terminal delivery 可释放。
 - [x] Template command、repository DTO、EventHub DTO 与 list mapping 对 slice/map/nested payload 的完整深拷贝。
-- [x] 旧版 `ContextHints:null` 的只读兼容、历史 Workspace 文件不改写，以及非对象 context hints 拒绝。
+- [x] `ContextHints:null`、非对象 payload、未知/退役字段与空文件严格拒绝。
 
 当前没有与本合同对应的已知可执行测试缺口。

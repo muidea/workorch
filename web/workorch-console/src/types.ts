@@ -114,7 +114,6 @@ export type WebSearchProviderConfiguration = {
   id: string;
   provider: string;
   searchEndpoint?: string;
-  fetchEndpoint?: string;
   headers?: Record<string, string>;
   timeout?: string;
   maxResults?: number;
@@ -136,7 +135,6 @@ export type WebSearchProviderTemplate = {
   id: string;
   provider: string;
   searchEndpoint?: string;
-  fetchEndpoint?: string;
   timeout?: string;
   maxResults?: number;
   maxFetchBytes?: number;
@@ -152,7 +150,6 @@ export type UpdateWebSearchProviderConfiguration = {
   id: string;
   provider?: string;
   searchEndpoint?: string;
-  fetchEndpoint?: string;
   headers?: Record<string, string>;
   apiKey?: string;
   timeout?: string;
@@ -288,16 +285,6 @@ export type Run = {
   failureReason?: string;
   // Immutable Runtime activation input; never send it back on Resume.
   sealedLLMSelection?: ProviderInferenceSelection;
-  // Read-only Run-owner disposition. It is not an Orchestrator action and
-  // must never be returned as an activation input.
-  runtimeActivation?: RuntimeActivationStatus;
-};
-
-export type RuntimeActivationStatus = {
-  disposition: string;
-  reason: string;
-  actualSchemaVersion: number;
-  supportedSchemaVersion: number;
 };
 
 export type RunHeartbeat = {
@@ -411,14 +398,12 @@ export type RuntimeExecutionIntentOutcome =
   | 'restart_required'
   | 'fresh_activation_required'
   | 'definition_changed_requires_restart'
-  | 'governance_required'
-  | 'data_reset_required';
+  | 'governance_required';
 
 export type RuntimeExecutionIntentReason =
   | 'workspace_active_run_absent'
   | 'selected_run_absent'
   | 'selected_run_terminal'
-  | 'runtime_state_incompatible'
   | 'definition_changed'
   | 'runtime_bootstrap_missing'
   | 'current_run_continuation_accepted'
@@ -428,7 +413,6 @@ export type RuntimeExecutionIntentReason =
   | 'duplicate_restart'
   | 'new_run_activated'
   | 'predecessor_supersede_requested'
-  | 'development_data_incompatible'
   | 'definition_admission_missing'
   | 'definition_admission_mismatch'
   | 'definition_clarification_pending';
@@ -1017,8 +1001,6 @@ export type LLMUsageTrace = {
   responseBytes?: number;
   physicalResponseMode: 'streaming' | 'non_streaming';
   providerSubmitted: boolean;
-  /** @deprecated compatibility-only derivation of physicalResponseMode */
-  streaming: boolean;
   contextBudget?: Record<string, unknown>;
   cacheUsage?: Record<string, unknown>;
   startedAt?: string;

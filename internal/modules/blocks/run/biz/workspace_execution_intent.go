@@ -101,9 +101,6 @@ func (m *Biz) resumeWorkspaceExecutionIntent(ctx context.Context, cmd runevents.
 	if runStateIsTerminal(current.State) {
 		return runExecutionIntentResult(cmd, current.ID, runtimecontract.RuntimeExecutionIntentRestartRequired, runtimecontract.RuntimeExecutionIntentReasonSelectedRunTerminal), nil
 	}
-	if runtimeActivationDispositionForRun(current) == runtimecontract.RuntimeActivationDispositionFreshActivationRequired {
-		return runExecutionIntentResult(cmd, current.ID, runtimecontract.RuntimeExecutionIntentFreshActivationRequired, runtimecontract.RuntimeExecutionIntentReasonRuntimeStateIncompatible), nil
-	}
 	// Resume is isolated from every later Workspace candidate or promotion. The
 	// selected Run's immutable bootstrap is the only startup input authority.
 	if current.RuntimeBootstrap == nil ||
@@ -183,11 +180,6 @@ func (m *Biz) restartWorkspaceExecutionIntent(ctx context.Context, cmd runevents
 		}
 		return runExecutionIntentResult(cmd, created.ID, runtimecontract.RuntimeExecutionIntentReconciliationRequested, runtimecontract.RuntimeExecutionIntentReasonNewRunActivated), nil
 	}
-	if predecessor.RuntimeActivationStatus != nil &&
-		predecessor.RuntimeActivationStatus.Disposition == runtimecontract.RuntimeActivationDispositionFreshActivationRequired &&
-		predecessor.RuntimeActivationStatus.Incompatibility.Validate() == nil {
-		return runExecutionIntentResult(cmd, predecessor.ID, runtimecontract.RuntimeExecutionIntentDataResetRequired, runtimecontract.RuntimeExecutionIntentReasonDevelopmentDataIncompatible), nil
-	}
 	requestedIntent = replacementIntentForPredecessor(requestedIntent, predecessor)
 	if err := m.persistReplacementIntent(ctx, predecessor, requestedIntent); err != nil {
 		return runevents.WorkspaceExecutionIntentResult{}, err
@@ -238,7 +230,7 @@ func replacementIntentMatches(current *runmodel.ReplacementIntent, requested run
 		strings.TrimSpace(current.Reason) == strings.TrimSpace(requested.Reason) &&
 		current.ClarificationTicketID == requested.ClarificationTicketID &&
 		strings.TrimSpace(current.ReplacementIntentID) == strings.TrimSpace(requested.ReplacementIntentID) &&
-		runmodel.EquivalentReplacementIntentHash(*current, requested) &&
+		strings.TrimSpace(current.ReplacementIntentHash) == strings.TrimSpace(requested.ReplacementIntentHash) &&
 		strings.TrimSpace(current.PredecessorStartupInputHash) == strings.TrimSpace(requested.PredecessorStartupInputHash) &&
 		strings.TrimSpace(current.SuccessorStartupInputHash) == strings.TrimSpace(requested.SuccessorStartupInputHash) &&
 		runtimecontract.StableRuntimeBootstrapHash(*current.Bootstrap) == runtimecontract.StableRuntimeBootstrapHash(*requested.Bootstrap)

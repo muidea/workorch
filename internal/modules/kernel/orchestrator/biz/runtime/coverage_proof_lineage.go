@@ -35,7 +35,7 @@ func appendAcceptedCoverageProofLineage(aggregate *RuntimeAggregate, fact runtim
 	identity, err := runtimecontract.DeriveCoverageEvidenceProofIdentity(binding, fact.Kind)
 	if err != nil {
 		// An exact receipt may still earn direct current-binding credit for a
-		// legacy/broad binding, but ambiguous proof ownership can never be
+		// non-exact broad binding, but ambiguous proof ownership can never be
 		// transferred across a later re-seal. Do not create a source row that
 		// would turn an ambiguous proof into lineage authority.
 		return nil

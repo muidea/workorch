@@ -386,6 +386,42 @@ func TestGoalDoDManager_DefinitionLineageFields(t *testing.T) {
 	}
 }
 
+func TestGoalDoDManagerRejectsMissingLineageInsteadOfUpgrading(t *testing.T) {
+	ctx := context.Background()
+	workspaceRepo := memory.NewWorkspaceRepository()
+	goalRepo := memory.NewGoalRepository()
+	dodRepo := memory.NewDoDRepository()
+	manager := newGoalDoDManager(workspaceRepo, goalRepo, dodRepo)
+	workspaceID := common.WorkspaceID("ws-current-definition-lineage")
+	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, Title: "ws", DeliverableDirectory: "/tmp/ws", State: common.WorkspaceStateActive}); err != nil {
+		t.Fatalf("seed workspace: %v", err)
+	}
+	scoped := common.ContextWithRuntimeWorkspaceID(ctx, workspaceID)
+	goal := &workspacemodel.Goal{ID: "goal-old-shape", WorkspaceID: workspaceID, Text: "old", DefinitionRevision: "goal:00000000000000000001:old"}
+	if err := goalRepo.Create(scoped, goal); err != nil {
+		t.Fatalf("seed goal: %v", err)
+	}
+	if err := manager.UpdateGoal(scoped, workspacecontracts.UpdateGoalCommand{WorkspaceID: workspaceID, GoalID: goal.ID, Text: "new"}); !errors.Is(err, common.ErrConflict) {
+		t.Fatalf("update missing-lineage goal err = %v, want conflict", err)
+	}
+	storedGoal, err := goalRepo.Get(scoped, goal.ID)
+	if err != nil || storedGoal.Text != "old" || storedGoal.LineageState != "" {
+		t.Fatalf("missing-lineage goal mutated: goal=%+v err=%v", storedGoal, err)
+	}
+
+	dod := &workspacemodel.DoD{ID: "dod-old-shape", WorkspaceID: workspaceID, Items: []string{"old"}, State: common.DoDStateReady, DefinitionRevision: "dod:00000000000000000001:old"}
+	if err := dodRepo.Create(scoped, dod); err != nil {
+		t.Fatalf("seed DoD: %v", err)
+	}
+	if err := manager.UpdateDoD(scoped, workspacecontracts.UpdateDoDCommand{WorkspaceID: workspaceID, DoDID: dod.ID, Items: []string{"new"}}); !errors.Is(err, common.ErrConflict) {
+		t.Fatalf("update missing-lineage DoD err = %v, want conflict", err)
+	}
+	storedDoD, err := dodRepo.Get(scoped, dod.ID)
+	if err != nil || len(storedDoD.Items) != 1 || storedDoD.Items[0] != "old" || storedDoD.LineageState != "" {
+		t.Fatalf("missing-lineage DoD mutated: dod=%+v err=%v", storedDoD, err)
+	}
+}
+
 func TestGoalDoDManager_DefinitionRevisionIsMonotonicAcrossContentReversion(t *testing.T) {
 	ctx := context.Background()
 	workspaceRepo := memory.NewWorkspaceRepository()

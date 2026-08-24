@@ -59,10 +59,7 @@ func New(eventHub magicevent.Hub, backgroundRoutine task.BackgroundRoutine, deps
 		return nil, err
 	}
 	if m.runtimeAdapter == nil {
-		adapter, err := NewRuntimeAdapterFromTimeoutString(
-			true,
-			cfg.Runtime.Git.DefaultTimeout,
-		)
+		adapter, err := NewRuntimeAdapterFromTimeoutString(cfg.Runtime.Git.DefaultTimeout)
 		if err != nil {
 			return nil, err
 		}
@@ -162,13 +159,7 @@ func runtimeCWIReconciliationBindingHasGitProof(binding runtimecontract.RuntimeC
 
 func gitRevisionHasRepository(revision string) bool {
 	revision = strings.TrimSpace(revision)
-	if strings.HasPrefix(revision, gitRepositoryRevisionPrefix) {
-		return true
-	}
-	// Read-only compatibility for capability receipts written before the
-	// content-bound git-state-v2 revision was introduced.
-	parts := strings.Split(revision, "|")
-	return len(parts) >= 3 && strings.TrimSpace(parts[0]) != ""
+	return strings.HasPrefix(revision, gitRepositoryRevisionPrefix)
 }
 
 func gitReconciliationObservation(command gitevents.QueryRuntimeCWIReconciliationCommand, status runtimecontract.RuntimeCWIReconciliationObservationStatus, revision string, targetRefs []string, message, code string) runtimecontract.RuntimeCWIReconciliationObservation {

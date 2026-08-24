@@ -245,9 +245,8 @@ export function isTerminalRunState(state?: string) {
 }
 
 // The Web adapter chooses only the user's lifecycle intent. Run owner remains
-// authoritative for admission and returns a typed non-resumable outcome when
-// the projection is stale. A missing/terminal/incompatible current Run always
-// requires a fresh activation instead of a Resume patch or implicit retry.
+// authoritative for admission. A missing or terminal current Run requires a
+// fresh activation instead of a Resume patch or implicit retry.
 export function workspaceExecutionPrimaryIntent(snapshot?: WorkspaceSnapshot): WorkspaceExecutionIntent {
   const activeRunID = snapshot?.workspace.activeRunId;
   if (!activeRunID) {
@@ -257,7 +256,7 @@ export function workspaceExecutionPrimaryIntent(snapshot?: WorkspaceSnapshot): W
   if (canonicalDefinitionClarification(snapshot)) {
     return 'restart';
   }
-  if (isTerminalRunState(activeRun?.state) || activeRun?.runtimeActivation?.disposition === 'fresh_activation_required') {
+  if (isTerminalRunState(activeRun?.state)) {
     return 'restart';
   }
   return 'resume';
@@ -2726,7 +2725,6 @@ export function webSearchConfigurationFormValues(configuration: ServiceConfigura
       id: item.id,
       provider: item.provider,
       searchEndpoint: item.searchEndpoint,
-      fetchEndpoint: item.fetchEndpoint,
       headers: item.headers ?? {},
       apiKey: '',
       timeout: item.timeout,
@@ -2766,7 +2764,6 @@ export function webSearchProviderDraftFromTemplate(template: WebSearchProviderTe
     id,
     provider: template.provider,
     searchEndpoint: template.searchEndpoint ?? current?.searchEndpoint,
-    fetchEndpoint: template.fetchEndpoint ?? current?.fetchEndpoint,
     timeout: template.timeout || current?.timeout || '20s',
     maxResults: template.maxResults ?? current?.maxResults ?? 8,
     maxFetchBytes: template.maxFetchBytes ?? current?.maxFetchBytes ?? 262144,

@@ -2,14 +2,8 @@ package run
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
-	"encoding/json"
 	"errors"
-	"fmt"
-	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 	"time"
 
@@ -81,113 +75,6 @@ func TestWorkspaceExecutionRestartReplaysFromFilePersistenceAfterOwnerRestart(t 
 	conflicting.Bootstrap = &changedBootstrap
 	if _, err := secondOwner.restartWorkspaceExecutionIntent(ctx, conflicting); !errors.Is(err, common.ErrConflict) {
 		t.Fatalf("changed payload after owner restart = %v, want ErrConflict", err)
-	}
-}
-
-func TestWorkspaceExecutionClarificationLegacyPriorityIdentitySurvivesFileOwnerRestart(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "runs.json")
-	ctx := common.ContextWithRuntimeWorkspaceID(context.Background(), "ws-legacy-restart")
-	bootstrap := restartTestBootstrap(t, "ws-legacy-restart")
-	command := runevents.WorkspaceExecutionIntentCommand{
-		WorkspaceID: "ws-legacy-restart", RequestID: "restart-legacy", Kind: runtimecontract.RuntimeExecutionIntentRestart,
-		GoalID: "goal-1", DoDID: "dod-1", DefinitionRevision: "def-1", StartupInputHash: "startup-input-test",
-		Bootstrap: &bootstrap,
-	}
-	predecessor := &runmodel.Run{
-		Revision: 1, ID: "run-001", WorkspaceID: command.WorkspaceID, GoalID: "goal-old", DoDID: "dod-old",
-		DefinitionRevision: "def-old", StartupInputHash: "startup-old", State: common.RunStateBlockedOnDecision,
-		BlockingTicketID: "runtime-definition-clarification:ticket-legacy",
-	}
-	legacyIntent := replacementIntentForPredecessor(replacementIntentFromCommand(command), predecessor)
-	legacyIntent.State = runmodel.ReplacementIntentPendingClarificationResolution
-	const legacyPriority = 7
-	legacyIntent.ReplacementIntentHash = legacyReplacementIntentHashV1(legacyIntent, legacyPriority)
-	legacyIntent.Recovery = runmodel.ReplacementRecoveryLease{
-		RequestID: legacyIntent.RequestID, IntentHash: legacyIntent.ReplacementIntentHash,
-		Stage: runmodel.ReplacementRecoveryClarificationResolution, State: runmodel.ReplacementRecoveryScheduled,
-		Generation: 1, MaxAttempts: replacementRecoveryMaxAttempts, DueAt: time.Now().UTC().Format(time.RFC3339Nano),
-	}
-	predecessor.ReplacementIntent = &legacyIntent
-	writeLegacyReplacementRunFixture(t, path, predecessor, legacyPriority)
-
-	firstHub := magicevent.NewHub(32)
-	firstRuns := filerepo.NewRunRepository(path)
-	firstOwner := New()
-	if err := firstOwner.Configure(Dependencies{Runs: firstRuns, EventHub: firstHub}); err != nil {
-		t.Fatalf("configure first Run owner: %v", err)
-	}
-	resolutionCalls := 0
-	observedReplacementHash := ""
-	observer := magicevent.NewSimpleObserver(decisionevents.CommandDestination, firstHub)
-	observer.Subscribe(decisionevents.TopicResolveRuntimeDefinitionClarificationByReplacement, func(event magicevent.Event, result magicevent.Result) {
-		resolutionCalls++
-		cmd := event.Data().(decisionevents.ResolveRuntimeDefinitionClarificationByReplacementCommand)
-		observedReplacementHash = cmd.ReplacementIntentHash
-		resolutionID := decisionevents.StableDefinitionClarificationResolutionID(cmd.TicketID, cmd.ReplacementIntentHash)
-		result.Set(decisionevents.ResolveRuntimeDefinitionClarificationByReplacementResult{
-			TicketID: cmd.TicketID, WorkspaceID: cmd.WorkspaceID, PredecessorRunID: cmd.PredecessorRunID,
-			ReplacementIntentID: cmd.ReplacementIntentID, ResolutionID: resolutionID,
-			ResolutionType: decisionevents.DefinitionClarificationResolutionReplacementBound,
-			Disposition:    decisionevents.DefinitionClarificationResolved,
-			ConflictKind:   decisionevents.RuntimeDefinitionClarificationNoConflict,
-			ResolutionBindingHash: cmd.BindingHash(
-				resolutionID,
-				decisionevents.DefinitionClarificationResolved,
-				decisionevents.RuntimeDefinitionClarificationNoConflict,
-				"",
-				"",
-			),
-		}, nil)
-	})
-
-	first, err := firstOwner.restartWorkspaceExecutionIntent(ctx, command)
-	if err != nil || first.RunID != predecessor.ID || first.Outcome != runtimecontract.RuntimeExecutionIntentReplacementPending || first.Reason != runtimecontract.RuntimeExecutionIntentReasonDuplicateRestart {
-		t.Fatalf("legacy persisted duplicate admission = %+v, err=%v", first, err)
-	}
-	legacyStored, err := firstRuns.GetByWorkspaceID(ctx, predecessor.WorkspaceID, predecessor.ID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := firstOwner.driveReplacementRecoveryGeneration(predecessor.WorkspaceID, predecessor.ID, legacyStored.ReplacementIntent.Recovery.Generation); err != nil {
-		t.Fatalf("drive legacy clarification recovery: %v", err)
-	}
-	if resolutionCalls != 1 || observedReplacementHash != legacyIntent.ReplacementIntentHash {
-		t.Fatalf("legacy Decision binding calls=%d hash=%q, want one call with %q", resolutionCalls, observedReplacementHash, legacyIntent.ReplacementIntentHash)
-	}
-	bound, err := firstRuns.GetByWorkspaceID(ctx, predecessor.WorkspaceID, predecessor.ID)
-	if err != nil || bound.ReplacementIntent == nil || bound.ReplacementIntent.State != runmodel.ReplacementIntentClarificationResolutionBound || bound.ReplacementIntent.ReplacementIntentHash != legacyIntent.ReplacementIntentHash || !bound.ReplacementIntent.ValidFor(bound) {
-		t.Fatalf("legacy intent after first owner binding = %+v, err=%v", bound, err)
-	}
-	observer.Unsubscribe(decisionevents.TopicResolveRuntimeDefinitionClarificationByReplacement)
-	if err := firstOwner.Stop(context.Background()); err != nil {
-		t.Fatalf("stop first Run owner: %v", err)
-	}
-	firstHub.Terminate(context.Background())
-
-	secondHub := magicevent.NewHub(32)
-	secondRuns := filerepo.NewRunRepository(path)
-	secondOwner := New()
-	if err := secondOwner.Configure(Dependencies{Runs: secondRuns, EventHub: secondHub}); err != nil {
-		t.Fatalf("configure second Run owner: %v", err)
-	}
-	t.Cleanup(func() {
-		_ = secondOwner.Stop(context.Background())
-		secondHub.Terminate(context.Background())
-	})
-	duplicate, err := secondOwner.restartWorkspaceExecutionIntent(ctx, command)
-	if err != nil || duplicate.RunID != predecessor.ID || duplicate.Outcome != runtimecontract.RuntimeExecutionIntentReplacementPending || duplicate.Reason != runtimecontract.RuntimeExecutionIntentReasonDuplicateRestart {
-		t.Fatalf("legacy duplicate after fresh owner = %+v, err=%v", duplicate, err)
-	}
-	items, err := secondRuns.ListByWorkspaceID(ctx, predecessor.WorkspaceID)
-	if err != nil || len(items) != 1 || items[0].ReplacementIntent == nil || items[0].ReplacementIntent.ReplacementIntentHash != legacyIntent.ReplacementIntentHash || !items[0].ReplacementIntent.ValidFor(items[0]) {
-		t.Fatalf("legacy persisted owner identity after duplicate = %+v, err=%v", items, err)
-	}
-	persisted, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatalf("read legacy Run persistence: %v", err)
-	}
-	if !strings.Contains(string(persisted), `"Priority":7`) {
-		t.Fatalf("validated legacy identity slot was not retained across owner CAS: %s", persisted)
 	}
 }
 
@@ -264,59 +151,6 @@ func TestWorkspaceExecutionRestartRequestIDBindsSealedPayload(t *testing.T) {
 				t.Fatalf("reused request with changed %s err=%v, want conflict", test.name, err)
 			}
 		})
-	}
-}
-
-func legacyReplacementIntentHashV1(intent runmodel.ReplacementIntent, priority int) string {
-	if intent.Bootstrap == nil {
-		return ""
-	}
-	h := sha256.New()
-	for _, value := range []string{
-		"workorch-replacement-intent-v1", intent.RequestID, string(intent.WorkspaceID), string(intent.GoalID), string(intent.DoDID),
-		strings.TrimSpace(intent.DefinitionRevision), strings.TrimSpace(intent.StartupInputHash), strings.TrimSpace(intent.ReplacementIntentID),
-		string(intent.ClarificationTicketID), strings.TrimSpace(intent.PredecessorStartupInputHash), strings.TrimSpace(intent.SuccessorStartupInputHash),
-		fmt.Sprintf("%d", priority), string(intent.ReconciliationScope), string(intent.Kind), strings.TrimSpace(intent.Reason),
-		runtimecontract.StableRuntimeBootstrapHash(*intent.Bootstrap),
-	} {
-		_, _ = fmt.Fprintf(h, "%08x%s", len(value), value)
-	}
-	return "replacement-intent-sha256:" + hex.EncodeToString(h.Sum(nil))
-}
-
-func writeLegacyReplacementRunFixture(t *testing.T, path string, item *runmodel.Run, priority int) {
-	t.Helper()
-	runJSON, err := json.Marshal(item)
-	if err != nil {
-		t.Fatalf("marshal legacy Run base: %v", err)
-	}
-	var runFields map[string]json.RawMessage
-	if err := json.Unmarshal(runJSON, &runFields); err != nil {
-		t.Fatalf("decode legacy Run fields: %v", err)
-	}
-	var intentFields map[string]json.RawMessage
-	if err := json.Unmarshal(runFields["ReplacementIntent"], &intentFields); err != nil {
-		t.Fatalf("decode legacy replacement intent fields: %v", err)
-	}
-	priorityJSON, err := json.Marshal(priority)
-	if err != nil {
-		t.Fatalf("marshal legacy priority slot: %v", err)
-	}
-	intentFields["Priority"] = priorityJSON
-	runFields["ReplacementIntent"], err = json.Marshal(intentFields)
-	if err != nil {
-		t.Fatalf("marshal legacy replacement intent fields: %v", err)
-	}
-	runJSON, err = json.Marshal(runFields)
-	if err != nil {
-		t.Fatalf("marshal legacy Run fields: %v", err)
-	}
-	rootJSON, err := json.Marshal(map[string]json.RawMessage{string(item.ID): runJSON})
-	if err != nil {
-		t.Fatalf("marshal legacy Run repository: %v", err)
-	}
-	if err := os.WriteFile(path, rootJSON, 0o600); err != nil {
-		t.Fatalf("write legacy Run repository: %v", err)
 	}
 }
 
@@ -458,7 +292,6 @@ func TestWorkspaceExecutionResumeRetainsCurrentRunOpaqueCWILedger(t *testing.T) 
 	ctx := common.ContextWithRuntimeWorkspaceID(context.Background(), "ws-1")
 	bootstrap := restartTestBootstrap(t, "ws-1")
 	state := runtimecontract.RuntimeStateRecord{
-		SchemaVersion: runtimecontract.RuntimeStateSchemaVersionCurrent,
 		StateRevision: 17,
 		// Run treats aggregate contents as opaque. This marker represents a
 		// current-run canonical CWI ledger that only Orchestrator may interpret.
@@ -523,7 +356,7 @@ func TestWorkspaceExecutionResumeRetainsCurrentRunOpaqueCWILedger(t *testing.T) 
 		t.Fatal(err)
 	}
 	if stored.State != common.RunStateActive || stored.Revision != 1 || stored.RuntimeState == nil ||
-		stored.RuntimeState.SchemaVersion != state.SchemaVersion || stored.RuntimeState.StateRevision != state.StateRevision ||
+		stored.RuntimeState.StateRevision != state.StateRevision ||
 		len(stored.RuntimeState.ProcessedEventIDs) != 1 || stored.RuntimeState.ProcessedEventIDs[0] != state.ProcessedEventIDs[0] ||
 		stored.ActivationRequestID != "" || stored.ReconciliationScope != runtimecontract.RuntimeCWIReconciliationScopeWorkspaceFull {
 		t.Fatalf("resume mutated current Run or opaque CWI ledger: %+v", stored)
@@ -533,113 +366,4 @@ func TestWorkspaceExecutionResumeRetainsCurrentRunOpaqueCWILedger(t *testing.T) 
 		t.Fatalf("resume created a replacement Run: items=%+v err=%v", items, err)
 	}
 	_ = biz
-}
-
-func TestWorkspaceExecutionResumeRejectsFreshActivationRequirementWithoutContinuation(t *testing.T) {
-	_, runs, hub := newLifecycleTestBiz(t)
-	ctx := common.ContextWithRuntimeWorkspaceID(context.Background(), "ws-1")
-	bootstrap := restartTestBootstrap(t, "ws-1")
-	stateRevision := uint64(17)
-	stateRef := runevents.RuntimeStateRef("ws-1", "run-1", stateRevision)
-	run := &runmodel.Run{
-		ID: "run-1", WorkspaceID: "ws-1", GoalID: "goal-1", DoDID: "dod-1", DefinitionRevision: "def-1", StartupInputHash: "startup-input-test",
-		State: common.RunStateActive, RuntimeBootstrap: &bootstrap,
-		RuntimeState: &runtimecontract.RuntimeStateRecord{SchemaVersion: 3, StateRevision: stateRevision},
-		RuntimeActivationStatus: &runmodel.RuntimeActivationStatus{
-			Disposition:     runtimecontract.RuntimeActivationDispositionFreshActivationRequired,
-			RuntimeStateRef: stateRef,
-			Incompatibility: runtimecontract.RuntimeStateIncompatibility{
-				Reason:                 runtimecontract.RuntimeStateIncompatibilityReasonSchemaUnsupported,
-				ActualSchemaVersion:    3,
-				SupportedSchemaVersion: runtimecontract.RuntimeStateSchemaVersionCurrent,
-			},
-			Feedback: &runtimecontract.RuntimeFeedback{
-				Domain: runtimecontract.RuntimeFeedbackDomainDrive, StableCategory: runtimecontract.RuntimeFeedbackCategoryStateSchemaUnsupported,
-				WorkspaceID: "ws-1", RunID: "run-1",
-			},
-		},
-	}
-	if err := runs.Create(ctx, run); err != nil {
-		t.Fatal(err)
-	}
-
-	continuations := make(chan runevents.RunContinuationRequestedData, 1)
-	observer := magicevent.NewSimpleObserver(runevents.NotificationDestination, hub)
-	observer.Subscribe(runevents.TopicRunContinuationRequested, func(event magicevent.Event, result magicevent.Result) {
-		if data, ok := event.Data().(runevents.RunContinuationRequestedData); ok {
-			continuations <- data
-		}
-		if result != nil {
-			result.Set(nil, nil)
-		}
-	})
-	t.Cleanup(func() { observer.Unsubscribe(runevents.TopicRunContinuationRequested) })
-
-	command := runevents.WorkspaceExecutionIntentCommand{
-		WorkspaceID: "ws-1", RunID: "run-1", RequestID: "resume-schema-incompatible",
-		Kind: runtimecontract.RuntimeExecutionIntentResume, GoalID: "goal-1", DoDID: "dod-1", DefinitionRevision: "def-1",
-	}
-	result := hub.Send(magicevent.NewEventWithContext(
-		runevents.TopicRunCommandWorkspaceExecutionIntent,
-		workspaceExecutionIntentRunSource,
-		runevents.CommandDestination,
-		magicevent.NewHeader(),
-		ctx,
-		command,
-	))
-	data, resultErr := result.Get()
-	if resultErr != nil {
-		t.Fatal(resultErr)
-	}
-	admission, ok := data.(runevents.WorkspaceExecutionIntentResult)
-	if !ok || admission.Outcome != runtimecontract.RuntimeExecutionIntentFreshActivationRequired ||
-		admission.Reason != runtimecontract.RuntimeExecutionIntentReasonRuntimeStateIncompatible || admission.RunID != run.ID {
-		t.Fatalf("resume admission = %+v", data)
-	}
-	select {
-	case continuation := <-continuations:
-		t.Fatalf("schema-incompatible resume published continuation: %+v", continuation)
-	case <-time.After(50 * time.Millisecond):
-	}
-	stored, err := runs.GetByWorkspaceID(ctx, run.WorkspaceID, run.ID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if stored.State != common.RunStateActive || stored.RuntimeActivationStatus == nil ||
-		stored.RuntimeActivationStatus.Disposition != runtimecontract.RuntimeActivationDispositionFreshActivationRequired ||
-		stored.RuntimeState == nil || stored.RuntimeState.SchemaVersion != 3 ||
-		stored.RuntimeState.StateRevision != stateRevision {
-		t.Fatalf("fresh-activation resume rewrote Run: %+v", stored)
-	}
-
-	restart := command
-	restart.Kind = runtimecontract.RuntimeExecutionIntentRestart
-	restart.RunID = ""
-	restart.RequestID = "restart-schema-incompatible"
-	restart.Bootstrap = &bootstrap
-	restart.StartupInputHash = "startup-input-test"
-	result = hub.Send(magicevent.NewEventWithContext(
-		runevents.TopicRunCommandWorkspaceExecutionIntent,
-		workspaceExecutionIntentRunSource,
-		runevents.CommandDestination,
-		magicevent.NewHeader(),
-		ctx,
-		restart,
-	))
-	data, resultErr = result.Get()
-	if resultErr != nil {
-		t.Fatal(resultErr)
-	}
-	admission, ok = data.(runevents.WorkspaceExecutionIntentResult)
-	if !ok || admission.Outcome != runtimecontract.RuntimeExecutionIntentDataResetRequired ||
-		admission.Reason != runtimecontract.RuntimeExecutionIntentReasonDevelopmentDataIncompatible || admission.RunID != run.ID {
-		t.Fatalf("schema-incompatible restart admission = %+v", data)
-	}
-	stored, err = runs.GetByWorkspaceID(ctx, run.WorkspaceID, run.ID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if stored.ReplacementIntent != nil || stored.State != common.RunStateActive || stored.Revision != 1 {
-		t.Fatalf("schema-incompatible restart mutated Run: %+v", stored)
-	}
 }

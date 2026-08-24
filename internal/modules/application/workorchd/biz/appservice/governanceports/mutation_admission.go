@@ -116,15 +116,7 @@ type runGovernanceAdmission struct {
 }
 
 func definitionDecisionUsesDedicatedAdmission(ticket *decisionmodel.Ticket) bool {
-	if ticket == nil {
-		return false
-	}
-	if ticket.DefinitionClarification != nil {
-		return true
-	}
-	kind := strings.ToLower(strings.TrimSpace(ticket.DecisionKind))
-	failureClass := strings.ToLower(strings.TrimSpace(ticket.FailureClass))
-	return strings.Contains(kind, "definition_clarification") || kind == "definition_admission" || failureClass == "definition_admission"
+	return ticket != nil && ticket.DefinitionClarification != nil
 }
 
 func governanceOwnerReadError(resourceKind, resourceID string, err error) error {

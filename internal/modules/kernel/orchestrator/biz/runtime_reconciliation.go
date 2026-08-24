@@ -256,9 +256,6 @@ func runtimeReconciliationRequestForRun(run *runmodel.Run, aggregate runtime.Run
 // to recur.
 func runtimeReconciliationRequestBaseIdentityForRun(run *runmodel.Run, aggregate runtime.RuntimeAggregate, requestedID string) (string, runtimecontract.RuntimeCWIReconciliationScope) {
 	scope := run.ReconciliationScope
-	if scope == "" {
-		scope = runtimecontract.RuntimeCWIReconciliationScopeCurrentRun
-	}
 	requestID := strings.TrimSpace(requestedID)
 	if requestID != "" {
 		// A continuation always reconciles the already-sealed current Run.

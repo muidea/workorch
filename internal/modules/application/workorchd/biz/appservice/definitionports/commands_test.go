@@ -114,8 +114,8 @@ func TestListConsolidatedWorkspaceDoDsUpdatesCanonicalAndDeletesObsolete(t *test
 			t.Fatalf("command workspace = %q, want %s", cmd.WorkspaceID, workspaceID)
 		}
 		return workspaceevents.WorkspaceCommandResult{DoDs: []*workspacemodel.DoD{
-			{ID: "dod-001", WorkspaceID: workspaceID, Items: []string{"first"}},
-			{ID: "dod-002", WorkspaceID: workspaceID, Items: []string{"second"}},
+			{ID: "dod-001", WorkspaceID: workspaceID, DefinitionRevision: "dod:00000000000000000001:first", Items: []string{"first"}},
+			{ID: "dod-002", WorkspaceID: workspaceID, DefinitionRevision: "dod:00000000000000000002:second", Items: []string{"second"}},
 		}}
 	})
 	defHub.subscribe(workspaceevents.TopicWorkspaceCommandUpdateDoD, func(data any) workspaceevents.WorkspaceCommandResult {
@@ -132,9 +132,10 @@ func TestListConsolidatedWorkspaceDoDsUpdatesCanonicalAndDeletesObsolete(t *test
 			t.Fatalf("merged items = %#v, want first/second", items)
 		}
 		return workspaceevents.WorkspaceCommandResult{DoD: &workspacemodel.DoD{
-			ID:          dodID,
-			WorkspaceID: workspaceID,
-			Items:       items,
+			ID:                 dodID,
+			WorkspaceID:        workspaceID,
+			DefinitionRevision: "dod:00000000000000000003:merged",
+			Items:              items,
 		}}
 	})
 	defHub.subscribe(workspaceevents.TopicWorkspaceCommandDeleteDoD, func(data any) workspaceevents.WorkspaceCommandResult {

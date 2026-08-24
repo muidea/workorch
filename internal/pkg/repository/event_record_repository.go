@@ -27,33 +27,17 @@ type EventRecordStreamPositionStore interface {
 	ReserveEventRecordStreamPosition(context.Context) (int64, error)
 }
 
-// SortEventRecords applies the durable Eventstream cursor order. New records
-// use the global owner-issued StreamPosition. Legacy records without one are
-// kept before positioned records and retain their historical deterministic
-// ordering; a workspace-scoped legacy query may use its local Revision.
+// SortEventRecords applies the durable Eventstream cursor order. Every current
+// record carries the owner-issued global StreamPosition.
 func SortEventRecords(items []*eventstream.EventRecord, query workorchquerycontract.EventRecordQuery) {
+	_ = query
 	sort.SliceStable(items, func(i, j int) bool {
 		left, right := items[i], items[j]
 		if left == nil || right == nil {
 			return left == nil && right != nil
 		}
-		leftPositioned := left.StreamPosition > 0
-		rightPositioned := right.StreamPosition > 0
-		if leftPositioned != rightPositioned {
-			return !leftPositioned
-		}
-		if leftPositioned && left.StreamPosition != right.StreamPosition {
+		if left.StreamPosition != right.StreamPosition {
 			return left.StreamPosition < right.StreamPosition
-		}
-		if !leftPositioned && query.WorkspaceID != "" {
-			leftRevision := left.Revision > 0
-			rightRevision := right.Revision > 0
-			if leftRevision != rightRevision {
-				return !leftRevision
-			}
-			if leftRevision && left.Revision != right.Revision {
-				return left.Revision < right.Revision
-			}
 		}
 		if left.OccurredAt != right.OccurredAt {
 			return left.OccurredAt < right.OccurredAt

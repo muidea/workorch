@@ -52,12 +52,6 @@ type RuntimeFailureSignatureCount struct {
 }
 
 func (p RuntimeConvergencePolicy) Normalized() RuntimeConvergencePolicy {
-	if p.MaxRepairAttemptsPerFocus <= 0 {
-		p.MaxRepairAttemptsPerFocus = DefaultMaxRepairAttemptsPerFocus
-	}
-	if p.MaxValidationOnlyRetriesPerFocus < 0 {
-		p.MaxValidationOnlyRetriesPerFocus = DefaultMaxValidationOnlyRetriesPerFocus
-	}
 	return p
 }
 

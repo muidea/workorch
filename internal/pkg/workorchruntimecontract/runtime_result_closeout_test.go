@@ -4,7 +4,8 @@ import "testing"
 
 func TestRuntimeResultCloseoutBaselineValidatesOperationReceiptProjection(t *testing.T) {
 	closeout := RuntimeResultCloseout{
-		SchemaVersion: RuntimeResultCloseoutSchemaVersionCurrent,
+		SchemaVersion:  RuntimeResultCloseoutSchemaVersionCurrent,
+		RecoveryPolicy: DefaultRuntimeRecoveryPolicy(),
 		OperationOutcomes: []RuntimeOperationCloseout{{
 			DispatchID: "dispatch-1", OperationID: "write-1", ExecutionKey: "exec/ws/run/dispatch-1/write-1",
 			Fence:               1,

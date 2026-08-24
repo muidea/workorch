@@ -194,7 +194,6 @@ func llmUsageTraceFromEventRecord(item projectioncontract.EventRecord) (projecti
 		ResponseBytes:        llmUsageTraceResponseBytes(item.Payload),
 		PhysicalResponseMode: physicalResponseMode,
 		ProviderSubmitted:    providerSubmitted,
-		Streaming:            physicalResponseMode.Streaming(),
 		ContextBudget:        llmUsageTraceContextBudget(item.Payload),
 		CacheUsage:           llmUsageTraceCacheUsage(item.Payload),
 		CacheMarkers:         llmUsageTraceCacheMarkers(item.Payload),

@@ -20,7 +20,6 @@ func webSearchProviderConfigurations(cfg workorchconfig.Config) (string, []worko
 			ID:               id,
 			Provider:         providerConfig.Provider,
 			SearchEndpoint:   providerConfig.SearchEndpoint,
-			FetchEndpoint:    providerConfig.FetchEndpoint,
 			Headers:          cloneStringMap(rawProvider.Headers),
 			Timeout:          rawProvider.Timeout,
 			MaxResults:       rawProvider.MaxResults,

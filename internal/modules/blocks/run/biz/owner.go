@@ -295,11 +295,7 @@ func buildRuntimeRecoveryInventory(runs []*runmodel.Run, cmd runevents.QueryRunt
 		}
 		if run.RuntimeState != nil {
 			item.RuntimeStateRevision = run.RuntimeState.StateRevision
-			item.RuntimeStateSchemaVersion = run.RuntimeState.SchemaVersion
 			item.RuntimeStateRef = runevents.RuntimeStateRef(run.WorkspaceID, run.ID, run.RuntimeState.StateRevision)
-		}
-		if run.RuntimeActivationStatus != nil {
-			item.RuntimeActivationDisposition = run.RuntimeActivationStatus.Disposition
 		}
 		items = append(items, item)
 	}

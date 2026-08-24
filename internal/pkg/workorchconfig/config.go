@@ -53,7 +53,7 @@ func (c *ServerConfig) UnmarshalJSON(data []byte) error {
 	decoder.DisallowUnknownFields()
 	var alias serverConfigAlias
 	if err := decoder.Decode(&alias); err != nil {
-		return fmt.Errorf("%w: server configuration rejects legacy or unknown fields: %v", common.ErrInvalidArgument, err)
+		return fmt.Errorf("%w: server configuration rejects retired or unknown fields: %v", common.ErrInvalidArgument, err)
 	}
 	*c = ServerConfig(alias)
 	return nil
@@ -78,8 +78,6 @@ type RuntimeConfig struct {
 }
 
 type GitRuntimeConfig struct {
-	Enabled        *bool  `json:"enabled" toml:"enabled"`
-	WriteEnabled   *bool  `json:"writeEnabled" toml:"writeEnabled"`
 	DefaultTimeout string `json:"defaultTimeout" toml:"defaultTimeout"`
 }
 
@@ -151,7 +149,7 @@ func (c *LLMConfig) UnmarshalJSON(data []byte) error {
 	decoder.DisallowUnknownFields()
 	var alias llmConfigAlias
 	if err := decoder.Decode(&alias); err != nil {
-		return fmt.Errorf("%w: llm configuration rejects legacy or unknown fields: %v", common.ErrInvalidArgument, err)
+		return fmt.Errorf("%w: llm configuration rejects retired or unknown fields: %v", common.ErrInvalidArgument, err)
 	}
 	*c = LLMConfig(alias)
 	return nil
@@ -210,7 +208,6 @@ type WebSearchConfig struct {
 type WebSearchProviderConfig struct {
 	Provider       string            `json:"provider" toml:"provider"`
 	SearchEndpoint string            `json:"searchEndpoint" toml:"searchEndpoint"`
-	FetchEndpoint  string            `json:"fetchEndpoint" toml:"fetchEndpoint"`
 	APIKey         string            `json:"apiKey" toml:"apiKey"`
 	Headers        map[string]string `json:"headers" toml:"headers"`
 	Timeout        string            `json:"timeout" toml:"timeout"`
@@ -337,7 +334,7 @@ func Persisted() (Config, error) {
 					unknownFields = append(unknownFields, strings.Join(key, "."))
 				}
 			}
-			return Config{}, fmt.Errorf("%w: application configuration rejects legacy or unknown fields: %s", common.ErrInvalidArgument, strings.Join(unknownFields, ", "))
+			return Config{}, fmt.Errorf("%w: application configuration rejects retired or unknown fields: %s", common.ErrInvalidArgument, strings.Join(unknownFields, ", "))
 		}
 		return Config{}, fmt.Errorf("%w: invalid application configuration: %v", common.ErrInvalidArgument, err)
 	}
@@ -755,7 +752,6 @@ func webSearchProviderValues(provider WebSearchProviderConfig) map[string]string
 	values := map[string]string{}
 	set(values, "provider", provider.Provider)
 	set(values, "searchEndpoint", provider.SearchEndpoint)
-	set(values, "fetchEndpoint", provider.FetchEndpoint)
 	set(values, "apiKey", provider.APIKey)
 	set(values, "timeout", provider.Timeout)
 	if provider.MaxResults > 0 {
@@ -816,16 +812,6 @@ func boolString(value bool) string {
 		return "true"
 	}
 	return "false"
-}
-
-func GitRuntimeEnabled(cfg GitRuntimeConfig) bool {
-	_ = cfg
-	return true
-}
-
-func GitRuntimeWriteEnabled(cfg GitRuntimeConfig) bool {
-	_ = cfg
-	return true
 }
 
 func intString(value int) string {

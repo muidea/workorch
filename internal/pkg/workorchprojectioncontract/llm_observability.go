@@ -106,29 +106,26 @@ type LLMContextBudgetSummary struct {
 }
 
 type LLMUsageTrace struct {
-	ID               string `json:"id"`
-	LogicalRequestID string `json:"logicalRequestId,omitempty"`
-	PhysicalCallID   string `json:"physicalCallId,omitempty"`
-	WorkspaceID      string `json:"workspaceId"`
-	RunID            string `json:"runId"`
-	StepID           string `json:"stepId,omitempty"`
-	ProviderID       string `json:"providerId,omitempty"`
-	Provider         string `json:"provider,omitempty"`
-	APISurface       string `json:"apiSurface,omitempty"`
-	Model            string `json:"model,omitempty"`
-	Operation        string `json:"operation,omitempty"`
-	InputTokens      int    `json:"inputTokens,omitempty"`
-	OutputTokens     int    `json:"outputTokens,omitempty"`
-	TotalTokens      int    `json:"totalTokens,omitempty"`
-	Estimated        bool   `json:"estimated"`
-	UsageSource      string `json:"usageSource,omitempty"`
-	RequestBytes     int    `json:"requestBytes,omitempty"`
-	ResponseBytes    int    `json:"responseBytes,omitempty"`
-	// PhysicalResponseMode is the canonical bounded transport fact. Streaming
-	// is retained only as a backward-compatible pure derivation of this value.
+	ID                   string                        `json:"id"`
+	LogicalRequestID     string                        `json:"logicalRequestId,omitempty"`
+	PhysicalCallID       string                        `json:"physicalCallId,omitempty"`
+	WorkspaceID          string                        `json:"workspaceId"`
+	RunID                string                        `json:"runId"`
+	StepID               string                        `json:"stepId,omitempty"`
+	ProviderID           string                        `json:"providerId,omitempty"`
+	Provider             string                        `json:"provider,omitempty"`
+	APISurface           string                        `json:"apiSurface,omitempty"`
+	Model                string                        `json:"model,omitempty"`
+	Operation            string                        `json:"operation,omitempty"`
+	InputTokens          int                           `json:"inputTokens,omitempty"`
+	OutputTokens         int                           `json:"outputTokens,omitempty"`
+	TotalTokens          int                           `json:"totalTokens,omitempty"`
+	Estimated            bool                          `json:"estimated"`
+	UsageSource          string                        `json:"usageSource,omitempty"`
+	RequestBytes         int                           `json:"requestBytes,omitempty"`
+	ResponseBytes        int                           `json:"responseBytes,omitempty"`
 	PhysicalResponseMode llmaudit.PhysicalResponseMode `json:"physicalResponseMode"`
 	ProviderSubmitted    bool                          `json:"providerSubmitted"`
-	Streaming            bool                          `json:"streaming"`
 	ContextBudget        workorcheventpayload.Payload  `json:"contextBudget,omitempty"`
 	CacheUsage           workorcheventpayload.Payload  `json:"cacheUsage,omitempty"`
 	CacheMarkers         workorcheventpayload.Payload  `json:"cacheMarkersSent,omitempty"`
