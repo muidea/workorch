@@ -204,7 +204,7 @@ deployed run ID 只属于 archive regression evidence，不定义当前候选、
 - renderer、wire schema、strict decoder、candidate evaluator、owner feasibility command 与 fixture 只消费该
   manifest 及其 hash，不得从 profile、focus、raw reason 或临时 inventory 重建第二份允许集。
 - complete document 只调用一个纯 `CandidateEvaluator`，并按 manifest identity → wire/field →
-  kind/variant/parameter → target → binding → effect/dependency → replay 的固定顺序返回 `accepted` 或完整
+  kind/variant/parameter → target → binding → effect/dependency → replay → durable owner-target overlap 的固定顺序返回 `accepted` 或完整
   `CandidateRejection`。owner feasibility 是 capability owner 的独立 typed factual observation，不得伪装为
   candidate rejection。
 - 完整 candidate request bytes 的 `ArtifactContinuation` 只是 Orchestrator-owned audit carrier，不是 SM-3 authority。
@@ -265,6 +265,9 @@ deployed run ID 只属于 archive regression evidence，不定义当前候选、
   必须在 owner 边界清空并以 `omittedReason=raw_validation_output + redacted` 留痕，任何直接携带 raw output 的 feedback
   都必须校验失败。Result/audit、TUI/Web 和 typed client/port 只携带一份嵌套 canonical original diagnostic，禁止再把
   owner/code/message/revision/details 等字段平铺成第二组投影权威。
+- live owner response 与 fresh-load persisted receipt 复用唯一 outcome-first judgment。`rejected` 必须先还原并保留 owner
+  exact diagnostic，不得因其 `ObservedEffectScope=unknown` 被重写为 effect mismatch；只有 `accepted | no_op` 才执行
+  sealed effect compatibility 与 evidence-quality gate，未知 outcome fail-closed。
 - LLM owner 的 `RequestRuntimeCandidateResult` 只返回 provider-request domain 的 `RuntimeFeedback`，稳定类别仅允许
   authentication/configuration/transient/protocol；它不得跨 EventHub 返回 `RuntimeCandidateFailure` 或完整文档的
   schema/contract 裁决。Orchestrator adapter 必须先穷举校验 scope、authority、owner、category/class 与
@@ -358,7 +361,11 @@ deployed run ID 只属于 archive regression evidence，不定义当前候选、
   candidate 自报 `CoverageWorkItemIDs`、非空 `PassedChecks` 或 exit code 0 都不构成 coverage authority。
 - multi-operation dispatch 中，同一 dispatch receipt 造成的 prerequisite/resource revision 变化属于内生变化；可以
   退休后续 SM-2 observation，但不能仅因此清除 `ActiveDispatch`。SM-3 必须继续尚未完成且 dependency 已满足的
-  sealed operation，直到全部成功或任一 operation rejected/stale 后再 settle/reduce。
+  sealed operation，直到全部成功或任一 operation rejected/stale 后再 settle/reduce。该规则只适用于不同 canonical
+  owner-target resource：
+  candidate evaluator 在 seal 前拒绝重复 durable `(OwnerModuleID, TargetRef)`，普通 `DependsOn` 不能授权第二次同目标写入；
+  provider 必须合并为一个 operation/receipt。唯一例外是 owner fact 封存的 exact `RequiredOperationSequence`，其每项必须
+  绑定不同 requirement ref/variant，并按声明依赖执行。
 - state-changing Shell receipt 必须使用 owner 实际观察到的 changed refs/resource changes；任意 `shell/command` 只允许
   workspace-durable、at-most-once shape，真实变化越出 sealed `TargetRefs` 时以 `undeclared_workspace_effect` 拒绝，
   不能通过额外 touch 一个声明目标取得 durable evidence。Shell managed validation 使用 owner 临时 workspace 副本，
@@ -370,7 +377,8 @@ deployed run ID 只属于 archive regression evidence，不定义当前候选、
   quality、focus policy、owner-grounded repair surface 与 freshness 分类，并在同一 owner-local transition 中写入唯一
   `Facts.RepairDirective.RequiredState`。不得从 observation 的自由文本或其 claimed missing kind 直接进入
   `need_validation`、`need_state_change`、governance、retry 或 terminal。
-- validation entry 不是 state-change repair target；只有 focus exact target、仍新鲜的 owner-grounded failure target 或
+- validation entry 不是 state-change repair target；Shell 只可从 owner 支持的结构化工具诊断提取 fresh File-manifest
+  scope 内的 actual candidate target，无位置或越界时不发布 observation，不能回显 operation/input target。只有 focus exact target、仍新鲜的 owner-grounded failure target 或
   sealed owner selector/prospective constraint可以形成 repair authority。validation/evidence-quality gap保持
   `need_validation`，不得在 validation-only 重试后退化为无关 `need_state_change`；耗尽封存 validation
   recipe/budget 时必须形成 typed terminal。
@@ -453,6 +461,11 @@ deployed run ID 只属于 archive regression evidence，不定义当前候选、
 - Runtime controller 统一负责 initialize、prerequisite commit、candidate seal 和 evidence commit；服务重启只加载既有 aggregate，不得因重复 Start/Resume 再次执行 reducer 或增加 attempt。
 - initialize/restart identity 只比较不可变 workspace/run、definition revision/content 与 activation；`Facts.Focus` 是 SM-2 persisted cursor，合法 focus advance 后不得被拿来与 bootstrap 首 focus 比较并误判 definition drift。
 - prerequisite mainline 按 typed requirement 的 canonical owner module 调用 EventHub，并在每个结果提交后原子执行 reducer；profile capability-state owner 必须与 accepted operation descriptor owner 相同，不能使用 EventHub destination 别名；多个 capability owner 的结果必须合并，不能互相覆盖。
+- `need_validation` candidate 前，validation policy 声明的
+  `workspace_manifest | project_files | declared_commands | available_capabilities` 必须由 fresh resource 与 matching
+  prerequisite observation 同时证明。缺失 discovery 是 SM-2 typed prerequisite debt，不是
+  capability-unavailable feasibility；局部 target/failure/provider freshness preflight 只能保留现有 pending graph 后追加，
+  不得覆盖其他 owner debt 或把 satisfied prerequisite 重编译为新 identity。
 - capability prerequisite 的 owner/class/kind 不匹配或没有 responder 必须以 owner-neutral typed `RuntimeCapabilityUnsupportedError` 返回，并由 SM-4 分类为 `runtime_capability_unsupported` terminal contract defect；它不得退化成默认 capability、candidate rejection、泛化 decision/approval ticket 或 retry loop。各 capability owner 的支持 kind 只在其 `pkg/common.RuntimeCapabilityKinds()` 声明，handler 只消费该纯 inventory；具体 EventHub result 由接收 owner 定义，owner-neutral catalog observation 仅由 `workorchruntimecontract` 的纯 helper 构造。
 - operation admissibility inventory 由 canonical owner 提供完整 bounded scope 或封闭 selector，SM-2 将其编译为三种 `TargetPolicy` 之一。既有资源与 prospective target 都必须在 seal 前由同一 owner 做只读 feasibility probe；Orchestrator 不扩展 selector，也不把 inventory/context 截断当成完整授权。
 - semantic manifest、provider JSON schema 与纯 evaluator 必须消费同一条 owner-published
@@ -476,6 +489,8 @@ deployed run ID 只属于 archive regression evidence，不定义当前候选、
   输出只以 owner-private bounded hash/raw ref 进入 receipt；durable effect 必须有真实 changed/no-op revision observation，
   不能从 capability 声明回显 `Changed=true`。
 - 多 operation dispatch 按 dependency graph 确定性执行；每个 operation 独立提交 evidence，全部成功或任一失败后才结束 dispatch 并再次 reducer。
+- 同一 dispatch 的 durable operation 必须具有唯一 `(OwnerModuleID, TargetRef)`；同一目标的多段修改必须在候选中合并，
+  owner-sealed exact `RequiredOperationSequence` 除外；capability owner 的 replay-proof/CAS guard 继续作为 effect 前最后防线。
 - RuntimeFacts 持久化当前 focus 与有序 remaining focus queue；只有当前 focus 每个 required CWI 都获得 exact binding-matched evidence 后，evidence commit 才能原子切换到下一 focus，再调用同一 reducer。
 - 显式声明 `RequireAssessment` 的 focus 在执行证据齐备后进入 typed `need_assessment` authority；LLM 只能返回绑定当前 focus/coverage 的 `AssessmentCandidate`，Orchestrator 校验其 evidence refs 来自当前 Run 的 accepted evidence 后写入 assessment ledger。
 - SM-2 在 assessment commit 前执行 item-level evidence gate：weak evidence 永不关闭 coverage；任何 executable/claim evidence 必须逐项匹配 sealed `CoverageEvidenceBinding` 与 owner receipt 的 exact proof。`PassedChecks` 非空和中立 claim signal 不能单独通过门禁。门禁失败写入 `assessment_evidence_quality_gap` repairable assessment，并由 reducer 在封存预算内继续同 focus repair。
@@ -708,6 +723,7 @@ deployed run ID 只属于 archive regression evidence，不定义当前候选、
 
 - [x] create-only 目标重开与 revision-bound existing-target replacement；已有目标不能重复走 `file/write` create。
 - [x] effect/receipt/evidence CAS、owner response loss 与 Result → Workspace → Run 三段 delivery ack 前后崩溃恢复。
+- [x] live/recovery outcome-first receipt judgment、rejected owner diagnostic 保真、accepted/no-op effect/quality gate。
 - [x] provider transport、operation recovery、CAS reload、governance wait 与 terminal delivery 的独立预算/guard。
 - [x] execution-budget allocation-before-effect、provider/operation consumption、unknown reconciliation，以及SM-2 repair/
   SM-4 operation-recovery source-ledger的只读统一投影和duplicate/restart不重复消费。
@@ -731,6 +747,8 @@ deployed run ID 只属于 archive regression evidence，不定义当前候选、
   Definition `Order` 重排；proof-batch provider projection 只携带相关 coverage，C0～C5 stable prefix/context 分层保持不变。
 - [x] owner fact 的 missing、stale、duplicate、out-of-order、rollback/reappearance（ABA）、新 generation 与无关
   prerequisite 组合矩阵；semantic manifest hash 回滚重现仍由新 logical request 隔离。
+- [x] validation discovery 回到 typed prerequisite 且局部 preflight 保留完整 pending graph；同 owner-target durable
+  overlap 在 seal 前拒绝，Shell validation entry 不被提升为 failure target 且 Go diagnostic 只落入 manifest scope。
 - [x] `BenchmarkRuntimeAggregateInvariantValidation64CWI`、`BenchmarkRuntimeLongFocusQueueProjection64CWI`、
   `BenchmarkRuntimeSemanticManifestRendering64CWI` 与 `BenchmarkRuntimeDriveLoopReduction64CWI` 均报告 allocation/CPU。
 

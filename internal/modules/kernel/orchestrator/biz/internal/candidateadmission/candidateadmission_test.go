@@ -122,6 +122,63 @@ func TestEvaluateRepairClosurePrecedesReplay(t *testing.T) {
 	}
 }
 
+func TestEvaluateRejectsDependentDurableOperationsForSameOwnerTarget(t *testing.T) {
+	facts, decision, manifest, candidate := evaluatorFixture(t)
+	second := candidate.StateChange.Operations[0].Operation
+	second.ID = "patch-2"
+	second.DependsOn = []string{"patch-1"}
+	candidate.StateChange.Operations = append(candidate.StateChange.Operations, runtimecontract.StateChangingOperation{Operation: second})
+
+	failure := Evaluate(EvaluationInput{Manifest: manifest, Decision: decision, Facts: facts, Candidate: candidate})
+	if failure == nil || failure.Code != CodeOwnerTargetEffectOverlap || failure.Diagnostic == nil ||
+		failure.Diagnostic.OperationID != "patch-2" || failure.Diagnostic.Actual != runtimecontract.RuntimeModuleFile+"|main.go" ||
+		!reflect.DeepEqual(failure.Diagnostic.Objectives, []runtimecontract.RuntimeCandidateCorrectionObjective{runtimecontract.RuntimeCandidateCorrectionChangeReplayedShape}) {
+		t.Fatalf("same owner/target durable overlap = %+v", failure)
+	}
+}
+
+func TestOwnerTargetEffectOverlapAllowsDistinctTargetsAndNonDurableOperations(t *testing.T) {
+	facts, _, _, candidate := evaluatorFixture(t)
+	first := candidate.StateChange.Operations[0].Operation
+	second := first
+	second.ID = "patch-2"
+	second.TargetRefs = []string{"other.go"}
+	candidate.StateChange.Operations = append(candidate.StateChange.Operations, runtimecontract.StateChangingOperation{Operation: second})
+	if failure := OwnerTargetEffectOverlapFailure(facts, runtimecontract.RuntimeDecision{}, candidate); failure != nil {
+		t.Fatalf("distinct durable targets rejected: %+v", failure)
+	}
+
+	validation := runtimecontract.RuntimeOperation{ID: "validate-1", Kind: runtimecontract.RuntimeBlockKindManagedValidationSession, TargetRefs: []string{"main.go"}}
+	candidate.StateChange.Operations = append(candidate.StateChange.Operations, runtimecontract.StateChangingOperation{Operation: validation})
+	if failure := OwnerTargetEffectOverlapFailure(facts, runtimecontract.RuntimeDecision{}, candidate); failure != nil {
+		t.Fatalf("non-durable operation collided with durable target: %+v", failure)
+	}
+}
+
+func TestOwnerTargetEffectOverlapAllowsExactOwnerRequiredSequence(t *testing.T) {
+	facts, decision, _, candidate := evaluatorFixture(t)
+	first := candidate.StateChange.Operations[0].Operation
+	first.RequiredOperationRef = "prepare"
+	second := first
+	second.ID = "patch-2"
+	second.RequiredOperationRef = "finalize"
+	second.DependsOn = []string{first.ID}
+	candidate.StateChange.Operations = []runtimecontract.StateChangingOperation{{Operation: first}, {Operation: second}}
+	decision.RequiredOutput.RequiredOperationSequence = []runtimecontract.RuntimeRequiredOperationVariant{
+		{RequirementID: "prepare", Kind: first.Kind, VariantID: "text_replace"},
+		{RequirementID: "finalize", Kind: second.Kind, VariantID: "text_replace", DependsOnRequirementIDs: []string{"prepare"}},
+	}
+	if failure := OwnerTargetEffectOverlapFailure(facts, decision, candidate); failure != nil {
+		t.Fatalf("owner-required same-target sequence rejected: %+v", failure)
+	}
+
+	second.RequiredOperationRef = ""
+	candidate.StateChange.Operations[1].Operation = second
+	if failure := OwnerTargetEffectOverlapFailure(facts, decision, candidate); failure == nil || failure.Code != CodeOwnerTargetEffectOverlap {
+		t.Fatalf("optional same-target operation escaped overlap gate: %+v", failure)
+	}
+}
+
 func TestMissingValidationFailureUsesDetachedProofProjection(t *testing.T) {
 	facts, decision, _, candidate := evaluatorFixture(t)
 	failure := MissingValidationFailure(facts, decision, candidate, ValidationGapFacts{

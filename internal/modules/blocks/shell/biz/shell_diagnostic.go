@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"os/exec"
 	"path/filepath"
+	"regexp"
+	"sort"
 	"strings"
 
 	"github.com/muidea/workorch/internal/pkg/common"
@@ -46,7 +48,7 @@ func attachShellValidationFailureDiagnostic(output *RuntimeCommandResult, reques
 		CommandKind:                   strings.TrimSpace(filepath.Base(execCommand)),
 		ExitCode:                      exitCode, TimedOut: timedOut, CommandPolicyViolation: policyViolation,
 		UnavailableCommand: output.UnavailableCommand,
-		TargetRefs:         shellValidationDiagnosticTargetRefs(*output, request.ValidationEvidence),
+		TargetRefs:         shellValidationDiagnosticTargetRefs(*output, request, execCommand),
 		ObservationType:    firstNonEmptyShellString(request.ValidationEvidence.ObservationType, request.ValidationEvidence.Observation),
 		EvidenceMode:       request.ValidationEvidence.Mode,
 		StdoutPreview:      shellPreview(output.Stdout, 2048),
@@ -134,27 +136,73 @@ func defaultShellValidationDiagnosticTargetType(class string) string {
 	}
 }
 
-func shellValidationDiagnosticTargetRefs(output RuntimeCommandResult, validationEvidence runtimemodel.RuntimeValidationEvidence) []string {
-	seen := map[string]bool{}
-	ret := []string{}
-	add := func(value string) {
-		value = strings.TrimSpace(value)
-		if value == "" || seen[value] {
-			return
+var shellGoDiagnosticTargetPattern = regexp.MustCompile(`(?:^|[[:space:]])((?:\./)?[[:alnum:]_./-]+\.go):[0-9]+(?::[0-9]+)?:`)
+
+// shellValidationDiagnosticTargetRefs is an owner-private diagnostic adapter.
+// It recognizes only bounded Go compiler/test locations from a managed Go
+// recipe and intersects them with the fresh File-owner manifest scope carried
+// on the typed command. Command targets and validation-entry hints are never
+// promoted: when output has no supported location, the result is deliberately
+// empty and no repair-surface observation is emitted.
+func shellValidationDiagnosticTargetRefs(output RuntimeCommandResult, request RuntimeCommandRequest, execCommand string) []string {
+	if !shellInputHasManagedValidation(request) || strings.TrimSpace(filepath.Base(execCommand)) != "go" || len(request.ValidationScopeTargetRefs) == 0 {
+		return nil
+	}
+	scope := make(map[string]struct{}, len(request.ValidationScopeTargetRefs))
+	for _, value := range request.ValidationScopeTargetRefs {
+		if normalized, ok := normalizeShellDiagnosticTargetRef(value, output.WorkingDirectory); ok {
+			scope[normalized] = struct{}{}
 		}
-		seen[value] = true
+	}
+	if len(scope) == 0 {
+		return nil
+	}
+	seen := make(map[string]struct{})
+	for _, match := range shellGoDiagnosticTargetPattern.FindAllStringSubmatch(output.Stdout+"\n"+output.Stderr, -1) {
+		if len(match) != 2 {
+			continue
+		}
+		value, ok := normalizeShellDiagnosticTargetRef(match[1], output.WorkingDirectory)
+		if !ok {
+			continue
+		}
+		if _, allowed := scope[value]; !allowed {
+			continue
+		}
+		seen[value] = struct{}{}
+		if len(seen) > shellFailureTargetObservationMaxRefs {
+			return nil
+		}
+	}
+	ret := make([]string, 0, len(seen))
+	for value := range seen {
 		ret = append(ret, value)
 	}
-	for _, value := range output.TargetRefs {
-		add(value)
-	}
-	for _, value := range validationEvidence.TargetRefs {
-		add(value)
-	}
-	for _, value := range validationEvidence.CoverageTargets {
-		add(value)
-	}
+	sort.Strings(ret)
 	return ret
+}
+
+func normalizeShellDiagnosticTargetRef(value, workingDirectory string) (string, bool) {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return "", false
+	}
+	if filepath.IsAbs(value) {
+		root, err := filepath.Abs(strings.TrimSpace(workingDirectory))
+		if err != nil || root == "" {
+			return "", false
+		}
+		relative, err := filepath.Rel(root, value)
+		if err != nil {
+			return "", false
+		}
+		value = relative
+	}
+	value = filepath.Clean(strings.TrimPrefix(value, "./"))
+	if value == "." || value == "" || filepath.IsAbs(value) || value == ".." || strings.HasPrefix(value, ".."+string(filepath.Separator)) {
+		return "", false
+	}
+	return filepath.ToSlash(value), true
 }
 
 func normalizeShellStrings(values []string) []string {

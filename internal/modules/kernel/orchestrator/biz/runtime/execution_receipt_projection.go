@@ -26,7 +26,9 @@ func (x *activeDispatchExecution) projectOperationReceipt(operation runtimecontr
 		x.aggregate = governed
 		return activeDispatchExecutionStop, nil
 	}
-	adjudicateRuntimeOperationResult(x.aggregate.Decision, execution, operation, &result)
+	if err := adjudicateRuntimeOperationResult(x.aggregate.Decision, execution, operation, &result); err != nil {
+		return 0, err
+	}
 	if err := validateRuntimeOperationExecutionResult(x.aggregate.Decision, operation, result); err != nil {
 		return 0, err
 	}
@@ -42,14 +44,17 @@ func (x *activeDispatchExecution) projectOperationReceipt(operation runtimecontr
 	return activeDispatchExecutionReady, nil
 }
 
-func adjudicateRuntimeOperationResult(decision runtimecontract.RuntimeDecision, execution runtimecontract.RuntimeOperationExecutionRecord, operation runtimecontract.RuntimeOperation, result *RuntimeOperationExecutionResult) {
-	if failure := runtimeOperationEffectMismatchFailure(decision, execution, operation, result.Receipt); failure != nil {
-		result.Status = ExecutionEvidenceStatusRejected
-		result.Failure = failure
-	} else if failure := runtimeOperationEvidenceQualityFailure(operation, result.Receipt.Evidence); failure != nil {
-		result.Status = ExecutionEvidenceStatusRejected
-		result.Failure = failure
+func adjudicateRuntimeOperationResult(decision runtimecontract.RuntimeDecision, execution runtimecontract.RuntimeOperationExecutionRecord, operation runtimecontract.RuntimeOperation, result *RuntimeOperationExecutionResult) error {
+	if result == nil {
+		return common.ErrInvalidArgument
 	}
+	status, failure, err := runtimeOperationReceiptEvidenceJudgment(decision, execution, operation, result.Receipt)
+	if err != nil {
+		return err
+	}
+	result.Status = status
+	result.Failure = failure
+	return nil
 }
 
 func executionEvidenceFromOperationResult(workspaceID common.WorkspaceID, runID common.RunID, dispatch SealedDispatch, operation runtimecontract.RuntimeOperation, result RuntimeOperationExecutionResult) ExecutionEvidence {

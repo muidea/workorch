@@ -284,8 +284,9 @@ func (m *Biz) handleShellOperation(event magicevent.Event, result magicevent.Res
 		ValidationRecipeID:            command.Data.ValidationRecipeID,
 		Command:                       command.Data.Command, Args: command.Data.Args, TimeoutMillis: command.Data.TimeoutMillis,
 		StateChanging: command.Data.StateChanging, TargetRef: command.Data.TargetRef, TargetRefs: command.Data.TargetRefs,
-		VerificationScope: command.Data.VerificationScope,
-		BoundedReason:     command.Data.BoundedReason, ValidationScratchDirectory: command.Data.ValidationScratchDirectory,
+		ValidationScopeTargetRefs: command.ValidationScopeTargetRefs,
+		VerificationScope:         command.Data.VerificationScope,
+		BoundedReason:             command.Data.BoundedReason, ValidationScratchDirectory: command.Data.ValidationScratchDirectory,
 		ValidationScratchAutoCleanup:    command.Data.ValidationScratchAutoCleanup,
 		ValidationScratchAutoCleanupSet: command.Data.ValidationScratchAutoCleanupSet,
 		ValidationEvidence:              command.Data.ValidationEvidence, ManagedValidation: command.Data.ManagedValidation,
@@ -380,6 +381,9 @@ func validateRuntimeShellOperationData(command shellevents.ExecuteOperationComma
 		}
 		return nil
 	}
+	if len(command.ValidationScopeTargetRefs) != 0 {
+		return fmt.Errorf("runtime shell/command must not carry managed-validation target scope")
+	}
 	if !command.Data.StateChanging || strings.TrimSpace(command.Data.ValidationRecipeID) != "" ||
 		strings.TrimSpace(command.Data.Command) == "" || len(command.TargetRefs) == 0 ||
 		strings.TrimSpace(command.Data.ValidationScratchDirectory) != "" || command.Data.ValidationScratchAutoCleanupSet ||
@@ -468,21 +472,39 @@ func validationRecipeUnavailableResult(request RuntimeCommandRequest, err error)
 // carry a Runtime action; the File owner must independently confirm it.
 func shellValidationFailureObservation(command shellevents.ExecuteOperationCommand, diagnostic runtimecontract.ValidationFailureDiagnostic) *runtimecontract.RuntimeValidationFailureObservation {
 	diagnostic = diagnostic.Normalized()
-	if !shellValidationDiagnosticMayIdentifyImplementationEffect(diagnostic.Class) || command.WorkspaceID == "" || command.RunID == "" || command.Transaction.AuthoritySnapshotID == "" || strings.TrimSpace(command.DispatchID) == "" || strings.TrimSpace(command.OperationID) == "" || strings.TrimSpace(command.TargetRole) == "" || strings.TrimSpace(diagnostic.Class) == "" || len(diagnostic.TargetRefs) == 0 || len(command.TargetRefs) == 0 {
+	if !shellValidationDiagnosticMayIdentifyImplementationEffect(diagnostic.Class) || command.WorkspaceID == "" || command.RunID == "" || command.Transaction.AuthoritySnapshotID == "" || strings.TrimSpace(command.DispatchID) == "" || strings.TrimSpace(command.OperationID) == "" || strings.TrimSpace(command.TargetRole) == "" || strings.TrimSpace(diagnostic.Class) == "" || len(diagnostic.TargetRefs) == 0 || len(command.ValidationScopeTargetRefs) == 0 {
+		return nil
+	}
+	if !shellTargetRefsSubset(diagnostic.TargetRefs, command.ValidationScopeTargetRefs) {
 		return nil
 	}
 	// The deterministic bounded digest permits File/Orchestrator causation
 	// checks without passing raw stdout/stderr across owner boundaries.
-	hash := sha256.Sum256([]byte(strings.Join([]string{diagnostic.Class, diagnostic.Stage, diagnostic.Operation, strings.Join(diagnostic.TargetRefs, ","), strings.Join(command.TargetRefs, ",")}, "\x00")))
+	hash := sha256.Sum256([]byte(strings.Join([]string{diagnostic.Class, diagnostic.Stage, diagnostic.Operation, strings.Join(diagnostic.TargetRefs, ","), strings.Join(command.ValidationScopeTargetRefs, ",")}, "\x00")))
 	value := runtimecontract.RuntimeValidationFailureObservation{
 		WorkspaceID: command.WorkspaceID, RunID: command.RunID, AuthoritySnapshotID: command.Transaction.AuthoritySnapshotID,
 		DispatchID: command.DispatchID, OperationID: command.OperationID, TargetRole: command.TargetRole,
-		DiagnosticClass: diagnostic.Class, CandidateTargetRefs: diagnostic.TargetRefs, ValidationScopeTargetRefs: command.TargetRefs,
+		DiagnosticClass: diagnostic.Class, CandidateTargetRefs: diagnostic.TargetRefs, ValidationScopeTargetRefs: command.ValidationScopeTargetRefs,
 		DiagnosticHash: hex.EncodeToString(hash[:]),
 	}.Normalized()
 	// The failure signature is added by RuntimeOperationFailure below; do not
 	// validate this transient value before the caller binds that causation key.
 	return &value
+}
+
+func shellTargetRefsSubset(values, scope []string) bool {
+	allowed := make(map[string]struct{}, len(scope))
+	for _, value := range scope {
+		if value = strings.TrimSpace(value); value != "" {
+			allowed[value] = struct{}{}
+		}
+	}
+	for _, value := range values {
+		if _, found := allowed[strings.TrimSpace(value)]; !found {
+			return false
+		}
+	}
+	return len(values) != 0
 }
 
 func shellValidationDiagnosticMayIdentifyImplementationEffect(class string) bool {

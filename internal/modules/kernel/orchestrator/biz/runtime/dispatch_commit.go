@@ -403,7 +403,7 @@ func requireFreshTargetSnapshots(facts runtimecontract.RuntimeFacts, targetRefs 
 			SubjectRef: ref, Reason: "fresh target snapshot required after state-change conflict",
 		})
 	}
-	return PreflightRuntimeFacts(facts, requirements)
+	return preflightRuntimeFactsPreservingPending(facts, requirements)
 }
 
 // coverageEvidenceCreditForReceipt is the SM-2 proof bridge. The operation's

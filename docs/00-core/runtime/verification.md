@@ -123,6 +123,9 @@ Cross-owner regression必须证明 concrete receiving-owner Command/Result、wor
   零 provider replay；允许恢复的 incomplete/transient 分支仍以新 `PhysicalCallID` 请求同一完整 document；
 - complete document 只进入一个 evaluator，first-failure 顺序稳定；
 - evaluator 只返回 accepted 或完整 typed rejection，不返回 correction/retry/terminal disposition；
+- evaluator 拒绝同一 candidate 内重复的 durable `(OwnerModuleID, TargetRef)`；普通依赖边不能豁免，只有 owner-sealed
+  exact `RequiredOperationSequence` 可按 requirement ref/variant 执行，同时证明不同 target、non-durable operation 与该
+  owner-required sequence 不被误伤；
 - SM-3 持久化 rejection 后才可形成 typed terminal 或唯一 `correctable_once` internal result；
 - attempt 1 复用 transaction、manifest、C0～C3 与 stable prefix；第二次 complete rejection terminal，零第三次请求；
 - owner feasibility 不进入 candidate correction 或 attempt ledger。
@@ -142,6 +145,8 @@ Cross-owner regression必须证明 concrete receiving-owner Command/Result、wor
   `infeasible`/`unverifiable`），不得把它伪装成 revision stale、退休有效 catalog 或消耗 refresh budget；只有
   携带并精确匹配 expected/observed revision fence 的 `stale` 才能进入有界 catalog refresh。
 - operation 以 `RuntimeOperationReceipt.Outcome` 为唯一结果，不存在跨 EventHub `Status + Outcome` 双权威；
+- live response 与 restart receipt recovery 使用同一 outcome-first judgment；rejected receipt 的 owner diagnostic 不得被
+  `ObservedEffectScope=unknown` 覆盖为 effect mismatch，accepted/no-op 仍必须通过 effect 与 quality gate；
 - durable no-op 使用 `Outcome=no_op`，删除重复 `NoOp bool`；read-only/validation 的正常零 durable effect 仍为
   accepted，`Changed` 只作 observed effect metadata；
 - accepted receipt 不携带 failure，rejected/unknown outcome 保留完整 safe original diagnostic；
@@ -151,6 +156,8 @@ Cross-owner regression必须证明 concrete receiving-owner Command/Result、wor
 - MCP owner failure-target + File repair 的 receipt 矩阵至少覆盖 `file_write|text_replace|unified_diff` × CAS-before/
   CAS-after-response-loss；重启复用 exact owner receipt，MCP remote call 与 File durable effect 均不重复；
 - stale/resource revision 独立于 failure/candidate budget；accepted resource change 不消耗 recovery budget。
+- `need_validation` 前的 validation discovery 缺失必须恢复为 matching typed prerequisite，而不是 capability-unavailable feasibility；局部 target、
+  failure-surface 或 provider preflight 必须保留全部既有 pending owner debt，且不得把 satisfied catalog 重编译成新 ID。
 
 ### Failure, Recovery And Governance
 
@@ -236,6 +243,8 @@ Cross-owner regression必须证明 concrete receiving-owner Command/Result、wor
   错误直接失败，不写 owner transition/replacement intent，不调用 provider/capability，也不投影替代状态；
 - 首次 `file/write` 创建成功后若同 CWI reopen，latest owner catalog 必须使 correction 选择 revision-bound
   `file/edit`/`patch/apply`；重复 create-only write 在副作用前拒绝且不能形成无限 revision/等价操作循环。
+- profile verifier 必须证明 validation entry 只保留 recipe/receipt lineage：无 owner-supported 结构化位置时零 failure-target
+  candidate；支持的工具诊断只能报告 fresh manifest scope 内的 actual target，越界目标丢弃且仍需 File owner confirmation。
 
 ## Verification Entry
 

@@ -60,7 +60,7 @@ func ReduceRuntimeStateWithDirective(facts runtimecontract.RuntimeFacts, previou
 	// hint. Restrict this to the boundary between acquisition batches so an
 	// existing persisted owner acquisition can never be erased.
 	if len(facts.Prerequisites.Pending) == 0 {
-		facts = PreflightRuntimeFacts(facts, runtimeTargetGroundingRequirements(facts))
+		facts = preflightRuntimeFactsPreservingPending(facts, runtimeTargetGroundingRequirements(facts))
 	}
 	decision, err := ReduceRuntimeState(facts, previous, proofLineages...)
 	if err != nil {

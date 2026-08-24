@@ -16,12 +16,14 @@ const (
 	CodeTargetOutsideGrounding     = "candidate_target_outside_grounding"
 	CodeRepairClosureMismatch      = "candidate_repair_closure_mismatch"
 	CodeCreationScopeMissingTarget = "candidate_creation_scope_missing_file_target"
+	CodeOwnerTargetEffectOverlap   = "candidate_owner_target_effect_overlap"
 
 	SignatureInvalid                = "candidate-contract-invalid"
 	SignatureActionEvidenceMismatch = "candidate-action-evidence-mismatch"
 	SignatureTargetOutsideGrounding = "candidate-target-outside-grounding"
 	SignatureRepairClosureMismatch  = "candidate-repair-closure-mismatch"
 	SignatureCreationScopeTarget    = "candidate-creation-scope-missing-file-target"
+	SignatureOwnerTargetOverlap     = "candidate-owner-target-effect-overlap"
 )
 
 // ValidationGapFacts is the detached SM-2 proof projection needed by the
@@ -84,6 +86,72 @@ func Evaluate(input EvaluationInput) *runtimecontract.RuntimeCandidateFailure {
 	}
 	if finding, found := NoProgressReplay(input.Candidate, input.NoProgressOperationShapes); found {
 		return completeCandidateFailure(input.Manifest, input.Candidate, failureFromFinding(finding))
+	}
+	if failure := OwnerTargetEffectOverlapFailure(input.Facts, input.Decision, input.Candidate); failure != nil {
+		return completeCandidateFailure(input.Manifest, input.Candidate, failure)
+	}
+	return nil
+}
+
+// OwnerTargetEffectOverlapFailure enforces one durable operation transaction
+// per canonical owner/target in a dispatch. Every replay proof is sealed before
+// any effect executes, so an ordinary DependsOn edge cannot make a second
+// operation against the same resource safe. The sole exception is an exact
+// owner-published RequiredOperationSequence: those operations are already
+// bound to distinct required refs/variants and must remain executable as the
+// capability owner's atomic protocol (for example, repository init/add/commit).
+func OwnerTargetEffectOverlapFailure(facts runtimecontract.RuntimeFacts, decision runtimecontract.RuntimeDecision, candidate runtimecontract.RuntimeCandidate) *runtimecontract.RuntimeCandidateFailure {
+	operationPolicies := runtimecontract.RuntimeActivationForFacts(facts.Normalized()).OperationPolicies
+	requiredSequenceRefs := make(map[string]struct{}, len(decision.RequiredOutput.RequiredOperationSequence))
+	for _, requirement := range decision.RequiredOutput.Normalized().RequiredOperationSequence {
+		if requirement.RequirementID != "" {
+			requiredSequenceRefs[requirement.RequirementID] = struct{}{}
+		}
+	}
+	type ownerTarget struct {
+		owner  string
+		target string
+	}
+	type seenOperation struct {
+		id               string
+		requiredSequence bool
+	}
+	seen := make(map[ownerTarget]seenOperation)
+	for _, operation := range Operations(candidate) {
+		operation = operation.Normalized()
+		if !runtimecontract.RuntimeEffectIsDurable(runtimecontract.ResolveExpectedEffectScope(operation, operationPolicies)) {
+			continue
+		}
+		descriptor, known := runtimecontract.RuntimeOperationDescriptorForKind(operation.Kind)
+		if !known {
+			continue
+		}
+		_, requiredSequence := requiredSequenceRefs[operation.RequiredOperationRef]
+		for _, target := range operation.TargetRefs {
+			key := ownerTarget{owner: strings.TrimSpace(descriptor.OwnerModuleID), target: strings.TrimSpace(target)}
+			if key.owner == "" || key.target == "" {
+				continue
+			}
+			if previous, found := seen[key]; found && previous.id != operation.ID {
+				if previous.requiredSequence && requiredSequence {
+					continue
+				}
+				failure := contractFailure(
+					CodeOwnerTargetEffectOverlap,
+					SignatureOwnerTargetOverlap,
+					fmt.Sprintf("durable operations %q and %q target the same owner resource %s|%s outside an owner-required operation sequence; consolidate them into one operation", previous.id, operation.ID, key.owner, key.target),
+				)
+				failure.Diagnostic = &runtimecontract.RuntimeCandidateFailureDiagnostic{
+					OperationID: operation.ID,
+					Path:        "$.operations",
+					Actual:      key.owner + "|" + key.target,
+					Required:    []string{"one_durable_operation_per_owner_target"},
+					Objectives:  []runtimecontract.RuntimeCandidateCorrectionObjective{runtimecontract.RuntimeCandidateCorrectionChangeReplayedShape},
+				}
+				return failure
+			}
+			seen[key] = seenOperation{id: operation.ID, requiredSequence: requiredSequence}
+		}
 	}
 	return nil
 }

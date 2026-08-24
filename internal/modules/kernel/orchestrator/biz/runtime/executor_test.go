@@ -13,6 +13,62 @@ type failIfExecutedOperationExecutor struct {
 	called bool
 }
 
+func TestRuntimeOperationReceiptJudgmentPreservesRejectedOwnerDiagnostic(t *testing.T) {
+	operation := runtimecontract.RuntimeOperation{ID: "patch-2", Kind: runtimecontract.RuntimeBlockKindPatchApply, TargetRefs: []string{"main.go"}}
+	execution := runtimecontract.RuntimeOperationExecutionRecord{OperationID: operation.ID, ExpectedEffectScope: runtimecontract.RuntimeEffectWorkspaceDurable}
+	originalFailure := runtimecontract.FailureFact{
+		Class: runtimecontract.FailureClassExecutionFailure, Code: "patch_replay_proof_mismatch",
+		Signature: "patch-replay-proof-mismatch/patch-2", Message: "sealed before hash no longer matches", TargetRefs: []string{"main.go"},
+	}
+	diagnostic := runtimecontract.RuntimeOriginalDiagnosticFromFailureFact(runtimecontract.RuntimeModuleFile, originalFailure)
+	diagnostic.OperationID = operation.ID
+	receipt := runtimecontract.RuntimeOperationReceipt{
+		OperationID: operation.ID, Outcome: runtimecontract.RuntimeOperationOutcomeRejected,
+		ObservedEffectScope: runtimecontract.RuntimeEffectUnknown,
+		Feedback: &runtimecontract.RuntimeFeedback{
+			Domain: runtimecontract.RuntimeFeedbackDomainOperation, StableCategory: runtimecontract.RuntimeFeedbackCategory(runtimecontract.RuntimeOperationOutcomeRejected),
+			OriginalDiagnostic: diagnostic,
+		},
+	}
+	result := RuntimeOperationExecutionResult{Status: ExecutionEvidenceStatusAccepted, Receipt: receipt}
+	if err := adjudicateRuntimeOperationResult(runtimecontract.RuntimeDecision{State: runtimecontract.ConvergenceStateNeedStateChange}, execution, operation, &result); err != nil {
+		t.Fatal(err)
+	}
+	if result.Status != ExecutionEvidenceStatusRejected || result.Failure == nil ||
+		result.Failure.Class != runtimecontract.FailureClassExecutionFailure || result.Failure.Code != "patch_replay_proof_mismatch" ||
+		result.Failure.OriginalDiagnostic == nil || result.Failure.OriginalDiagnostic.OriginalCode != "patch_replay_proof_mismatch" {
+		t.Fatalf("rejected owner diagnostic was rewritten: %+v", result)
+	}
+}
+
+func TestRuntimeOperationReceiptJudgmentStillRejectsAcceptedEffectMismatch(t *testing.T) {
+	operation := runtimecontract.RuntimeOperation{ID: "patch-1", Kind: runtimecontract.RuntimeBlockKindPatchApply, TargetRefs: []string{"main.go"}}
+	execution := runtimecontract.RuntimeOperationExecutionRecord{OperationID: operation.ID, ExpectedEffectScope: runtimecontract.RuntimeEffectWorkspaceDurable}
+	status, failure, err := runtimeOperationReceiptEvidenceJudgment(
+		runtimecontract.RuntimeDecision{State: runtimecontract.ConvergenceStateNeedStateChange},
+		execution,
+		operation,
+		runtimecontract.RuntimeOperationReceipt{OperationID: operation.ID, Outcome: runtimecontract.RuntimeOperationOutcomeAccepted, ObservedEffectScope: runtimecontract.RuntimeEffectNone},
+	)
+	if err != nil || status != ExecutionEvidenceStatusRejected || failure == nil || failure.Class != runtimecontract.FailureClassEffectMismatch || failure.Code != "operation_effect_mismatch" {
+		t.Fatalf("accepted effect mismatch judgment = status=%s failure=%+v err=%v", status, failure, err)
+	}
+}
+
+func TestRuntimeValidationScopeTargetsOnlyCrossShellManagedValidationBoundary(t *testing.T) {
+	facts := runtimecontract.RuntimeFacts{Resources: runtimecontract.RuntimeResourceFacts{Manifest: &runtimecontract.WorkspaceManifest{
+		Revision: "tree-r1", TargetRefs: []string{"cmd/lsp-bridge/main.go", "internal/lspbridge/validation_surface_test.go"},
+	}}}
+	managed := runtimecontract.RuntimeOperation{ID: "validate", Kind: runtimecontract.RuntimeBlockKindManagedValidationSession}
+	if got := runtimeValidationScopeTargetRefs(facts, managed); len(got) != 2 || got[0] != "cmd/lsp-bridge/main.go" || got[1] != "internal/lspbridge/validation_surface_test.go" {
+		t.Fatalf("managed validation target scope = %v", got)
+	}
+	got := runtimeValidationScopeTargetRefs(facts, runtimecontract.RuntimeOperation{ID: "mutate", Kind: runtimecontract.StepKindShellCommand})
+	if len(got) != 0 {
+		t.Fatalf("durable Shell command received validation target scope: %v", got)
+	}
+}
+
 func (e *failIfExecutedOperationExecutor) ExecuteRuntimeOperation(context.Context, RuntimeOperationExecutionRequest) (RuntimeOperationExecutionResult, error) {
 	e.called = true
 	return RuntimeOperationExecutionResult{}, errors.New("operation must not be replayed")

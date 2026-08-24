@@ -336,9 +336,10 @@ func (e runtimeObservedShellExecutor) ExecuteRuntimeOperation(ctx context.Contex
 				TargetRefs: append([]string(nil), request.Operation.TargetRefs...), EvidenceKind: request.EvidenceKind,
 				EvidencePolicies: append([]runtimecontract.RuntimeEvidencePolicy(nil), request.EvidencePolicies...), WorkspaceDeliverableDirectory: e.deliverableDirectory,
 			},
-			TargetRole:        request.TargetRole,
-			ValidationRecipes: append([]runtimecontract.RuntimeValidationRecipe(nil), request.ValidationRecipes...),
-			Data:              data,
+			TargetRole:                request.TargetRole,
+			ValidationRecipes:         append([]runtimecontract.RuntimeValidationRecipe(nil), request.ValidationRecipes...),
+			ValidationScopeTargetRefs: append([]string(nil), request.ValidationScopeTargetRefs...),
+			Data:                      data,
 		},
 	))
 	if result == nil {

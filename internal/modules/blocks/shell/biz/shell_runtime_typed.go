@@ -18,6 +18,7 @@ type RuntimeCommandRequest struct {
 	StateChanging                   bool
 	TargetRef                       string
 	TargetRefs                      []string
+	ValidationScopeTargetRefs       []string
 	VerificationScope               string
 	BoundedReason                   string
 	ValidationScratchDirectory      string

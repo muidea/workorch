@@ -17,7 +17,11 @@ func (c *authorityComponent) reconcileAuthorityBeforeCandidate(ctx context.Conte
 	if err != nil {
 		return RuntimeAggregate{}, err
 	}
-	if aggregate.ActiveDispatch != nil || isTerminalConvergenceState(aggregate.Decision.State) || len(InspectRuntimeAuthorityInvariants(aggregate).Violations) == 0 {
+	if aggregate.ActiveDispatch != nil || isTerminalConvergenceState(aggregate.Decision.State) {
+		return aggregate, nil
+	}
+	missingValidationDiscovery := aggregate.Decision.State == runtimecontract.ConvergenceStateNeedValidation && len(MissingRuntimeValidationDiscoverySources(aggregate.Facts)) != 0
+	if len(InspectRuntimeAuthorityInvariants(aggregate).Violations) == 0 && !missingValidationDiscovery {
 		return aggregate, nil
 	}
 	expectedRevision := aggregate.StateRevision
@@ -28,8 +32,14 @@ func (c *authorityComponent) reconcileAuthorityBeforeCandidate(ctx context.Conte
 	// synthesize a new/default requirement here; activation is the sole producer
 	// of the sealed provider contract.
 	facts := aggregate.Facts
+	if aggregate.Decision.State == runtimecontract.ConvergenceStateNeedValidation {
+		facts, err = reconcileRuntimeValidationDiscoveryPrerequisites(facts)
+		if err != nil {
+			return RuntimeAggregate{}, err
+		}
+	}
 	if requirements := activeProviderCeilingRequirements(facts); len(requirements) != 0 {
-		facts = PreflightRuntimeFacts(facts, requirements)
+		facts = preflightRuntimeFactsPreservingPending(facts, requirements)
 	}
 	facts, decision, err := ReduceRuntimeStateWithDirective(facts, &aggregate.Decision.AuthoritySnapshot, aggregate.CoverageProofLineage)
 	if err != nil {
@@ -166,7 +176,7 @@ func applyFailureFactToAggregate(aggregate RuntimeAggregate, fact runtimecontrac
 	// implicit repair surface until a later drive happens to preflight it.
 	facts := aggregate.Facts
 	if requirements := activeFailureTargetRequirements(facts); len(requirements) != 0 {
-		facts = PreflightRuntimeFacts(facts, requirements)
+		facts = preflightRuntimeFactsPreservingPending(facts, requirements)
 	}
 	facts, decision, err := ReduceRuntimeStateWithDirective(facts, &aggregate.Decision.AuthoritySnapshot, aggregate.CoverageProofLineage)
 	if err != nil {

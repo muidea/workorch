@@ -93,6 +93,21 @@ func PreflightRuntimeFacts(facts runtimecontract.RuntimeFacts, requirements []ru
 	return facts.Normalized()
 }
 
+// preflightRuntimeFactsPreservingPending is the only additive SM-2
+// prerequisite compiler. PreflightRuntimeFacts intentionally treats its input
+// as the complete desired set and replaces Pending; local freshness/grounding
+// callers must therefore preserve the current pending graph before adding one
+// requirement family. Satisfied prerequisites remain committed authority and
+// must not be recompiled: doing so can manufacture a second canonical ID for
+// an already accepted owner fact. This prevents a target-snapshot refresh from
+// silently dropping unrelated manifest, capability, admissibility, or provider
+// debt without reopening settled acquisitions.
+func preflightRuntimeFactsPreservingPending(facts runtimecontract.RuntimeFacts, additions []runtimecontract.RuntimeRequirement) runtimecontract.RuntimeFacts {
+	requirements := runtimePrerequisiteRequirements(facts.Prerequisites.Pending)
+	requirements = append(requirements, additions...)
+	return PreflightRuntimeFacts(facts, requirements)
+}
+
 // reactivateReopenedPendingFocusPrerequisites handles the one bounded case in
 // which a retired prerequisite identity can become current again. A reopened
 // CWI deliberately returns to the stable semantic-pending/<cwi> focus identity;
@@ -342,13 +357,17 @@ func CommitPrerequisiteResult(facts runtimecontract.RuntimeFacts, result Prerequ
 		// their sealed catalog is acquired. Recompile the still-active
 		// prerequisite graph immediately so a dependent owner inventory cannot
 		// run ahead of the newly published fact in the same SM-2 drive.
-		facts = PreflightRuntimeFacts(facts, runtimeActivePrerequisiteRequirements(facts))
+		facts = preflightRuntimeFactsPreservingPending(facts, nil)
 	}
 	return facts, nil
 }
 
 func runtimeActivePrerequisiteRequirements(facts runtimecontract.RuntimeFacts) []runtimecontract.RuntimeRequirement {
 	values := append(append([]runtimecontract.RuntimePrerequisite(nil), facts.Prerequisites.Pending...), facts.Prerequisites.Satisfied...)
+	return runtimePrerequisiteRequirements(values)
+}
+
+func runtimePrerequisiteRequirements(values []runtimecontract.RuntimePrerequisite) []runtimecontract.RuntimeRequirement {
 	requirements := make([]runtimecontract.RuntimeRequirement, 0, len(values))
 	for _, prerequisite := range values {
 		requirements = append(requirements, runtimecontract.RuntimeRequirement{

@@ -4,7 +4,7 @@ Status: active
 
 Type: capability-block-contract
 
-Last Verified: 2026-08-21
+Last Verified: 2026-08-24
 
 ## 功能范围与边界
 
@@ -34,6 +34,10 @@ raw diagnostic 留在 Shell-private adapter；receipt 只携带有界、脱敏�
 - workspace-sensitive Shell catalog 的 observation 必须依赖该 File manifest 的 exact workspace-tree revision；后续
   File receipt 改变该 revision 时，SM-2 仅按依赖交集退休并重获 catalog。该 freshness lineage 不允许 Shell 修改
   Manifest、CWI 或 Runtime 状态。
+- managed-validation execute command 还携带 fresh File manifest 的 bounded target scope。Shell 只在 owner-private
+  adapter 中解析明确支持的结构化工具位置；当前 Go recipe 仅接受 `*.go:line[:column]:` 位置，归一后必须属于该 manifest
+  scope 且最多八项。validation entry、operation input target、coverage hint 和无结构化 stderr/stdout 都不能自动成为
+  failure target；Shell 只发布 candidate observation，File confirmation 与 Orchestrator SM-2 才能封存 repair surface。
 - Shell 发布的 `ready + direct` validation surface 同时声明 `ephemeral_session + at_most_once`，并包含由 recipe identity
   确定性派生、与 recipe ID 不同的 aggregate proof check。tool-native check 继续作为 audit fact；只有 recipe 真实执行了
   至少一个无冲突 pass，aggregate proof check 才进入 receipt。该 surface 只是当前 Owner fact；它不关闭 profile 的
@@ -98,5 +102,7 @@ raw diagnostic 留在 Shell-private adapter；receipt 只携带有界、脱敏�
 - 已覆盖 durable Shell 的零变化、未声明 effect、多目标合法 effect、receipt exact replay 与 claimed/no-receipt
   at-most-once recovery。
 - 已覆盖输出截断、脱敏 diagnostic、timeout、非法/危险命令和 managed resource cleanup。
+- 已覆盖 validation entry 不晋升 failure target、无结构化输出零 candidate，以及 managed Go diagnostic 仅报告实际
+  manifest-scoped source target 并拒绝越界位置。
 
 非阻断增强项：增加大型 workspace copy/observation benchmark，以及在更多 Unix 平台运行进程组清理兼容性矩阵。

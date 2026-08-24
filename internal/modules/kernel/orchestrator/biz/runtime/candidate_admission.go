@@ -28,6 +28,7 @@ const (
 	candidateAdmissionCodeTargetOutsideGrounding     = candidateadmission.CodeTargetOutsideGrounding
 	candidateAdmissionCodeRepairClosureMismatch      = candidateadmission.CodeRepairClosureMismatch
 	candidateAdmissionCodeCreationScopeMissingTarget = candidateadmission.CodeCreationScopeMissingTarget
+	candidateAdmissionCodeOwnerTargetEffectOverlap   = candidateadmission.CodeOwnerTargetEffectOverlap
 )
 
 // CandidateAdmissionResult is a typed, expected candidate outcome. Error is

@@ -488,7 +488,8 @@ func (m *Biz) driveRuntimeDecision(ctx context.Context, aggregate runtime.Runtim
 		// focus-scoped prerequisite is SM-2 authority debt, not a malformed
 		// provider candidate; persist the deterministic cleanup and let the
 		// outer drive acquire the current owner fact on the next transition.
-		if report := runtime.InspectRuntimeAuthorityInvariants(aggregate); len(report.Violations) != 0 {
+		missingValidationDiscovery := aggregate.Decision.State == runtimecontract.ConvergenceStateNeedValidation && len(runtime.MissingRuntimeValidationDiscoverySources(aggregate.Facts)) != 0
+		if report := runtime.InspectRuntimeAuthorityInvariants(aggregate); len(report.Violations) != 0 || missingValidationDiscovery {
 			updated, err := m.submitRuntimeInternalEvent(ctx, runtime.RuntimeInternalEvent{
 				Kind: runtime.RuntimeInternalEventReconcileAuthority, Scope: runtime.RuntimeInternalEventScope{WorkspaceID: aggregate.Facts.WorkspaceID, RunID: aggregate.Facts.RunID}, Authority: &runtime.RuntimeInternalAuthorityPayload{},
 			})

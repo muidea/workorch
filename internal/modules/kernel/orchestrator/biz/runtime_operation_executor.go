@@ -194,6 +194,7 @@ func (e eventRuntimeOperationExecutor) executeShell(ctx context.Context, request
 		RuntimeOperationExecutionContext: runtimeOperationExecutionContext(request, deliverableDirectory, internalDirectory),
 		TargetRole:                       request.TargetRole,
 		ValidationRecipes:                append([]runtimecontract.RuntimeValidationRecipe(nil), request.ValidationRecipes...),
+		ValidationScopeTargetRefs:        append([]string(nil), request.ValidationScopeTargetRefs...),
 		Data:                             data,
 	}
 	result := e.hub.Send(magicevent.NewEventWithContext(shellevents.TopicExecuteOperation, ModuleID, runtimecontract.RuntimeModuleShell, magicevent.NewHeader(), ctx, command))

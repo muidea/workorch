@@ -4,7 +4,7 @@ Status: normative
 
 Type: core-contract-part
 
-Last Verified: 2026-08-23
+Last Verified: 2026-08-24
 
 ## 规范化候选合同
 
@@ -35,6 +35,12 @@ fixture 都只能消费这份封存合同，不能再次解释原始 profile、�
 
 `TargetPolicy` 是 owner-neutral 的纯合同词汇。File、Git、Shell、MCP 或业务 profile 的具体语义仍由对应
 owner/profile 提供；Orchestrator 只编译和验证 typed receipt，不按文件名、命令或领域文本推断策略。
+
+同一 candidate/dispatch 内，每个 durable operation 必须独占 canonical
+`(OwnerModuleID, TargetRef)`。两个普通 operation 即使存在 `DependsOn`，也不能先后修改同一 owner resource，因为它们的
+target snapshot/replay proof 都在第一个 effect 前封存；provider 必须把同一目标的完整变化合并为一个 operation 和一个
+receipt。唯一例外是 owner fact 明确封存的 exact `RequiredOperationSequence`：其中每项必须绑定不同 requirement ref/variant
+并按依赖执行。不同 owner/target 的 operation 仍可按 dependency graph 确定性执行，non-durable operation 不参与该约束。
 
 owner inventory 与 provider context 是两个不同合同：
 
@@ -148,6 +154,10 @@ sealed execute adapter必须把完整operation payload、catalog/policy revision
 ExecutionKey/Fence和适用governance grant绑定到receiving-owner concrete command。owner在任何call/effect前重新验证producer、
 current claimed receipt authority、current resource/schema/policy以及exact grant；独立mutable data copy、missing catalog、
 stale revision或grant drift均保持零外部动作。
+
+普通响应与 fresh-load receipt recovery 必须调用同一 outcome-first judgment。`Outcome=rejected` 先保留 owner 的 exact
+original diagnostic，禁止再以 rejected receipt 的 `ObservedEffectScope=unknown` 覆盖成 Orchestrator effect mismatch；只有
+`accepted | no_op` 才继续执行 sealed effect compatibility 与 evidence-quality gate。未知 outcome 直接 fail-closed。
 
 claimed operation没有receipt时，只有sealed replay class为`safe_to_replay | owner_managed`或owner给出exact replay proof，
 才可进入SM-4 recovery-budget handoff；`at_most_once | unknown`直接持久化`outcome_unknown`，零owner重放且不消费replay

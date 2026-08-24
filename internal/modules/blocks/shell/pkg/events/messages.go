@@ -32,7 +32,11 @@ type ExecuteOperationCommand struct {
 	// ValidationRecipes is the exact Shell-owner-confirmed recipe set from the
 	// sealed admissibility snapshot.
 	ValidationRecipes []runtimecontract.RuntimeValidationRecipe
-	Data              OperationData
+	// ValidationScopeTargetRefs is the fresh File-owner manifest scope carried
+	// by Orchestrator. Shell may only report diagnostic target candidates within
+	// this set; it does not become File state authority.
+	ValidationScopeTargetRefs []string
+	Data                      OperationData
 }
 
 type ExecuteOperationResult struct {

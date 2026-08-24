@@ -3652,8 +3652,11 @@ for marker in RuntimeSemanticProofObligation AcquisitionTargetSelectorRef Compil
 		exit 1
 	fi
 done
-if rg -n 'CompileRuntimeSemanticBindingsWithSourceFocuses|ValidateRuntimeSemanticPlanSourceDeclarations(WithOwnerFacts)?' \
-	internal/pkg/workorchruntimecontract --glob '*.go' --glob '!**/*_test.go' >/dev/null; then
+if grep -R -n -E \
+	--include='*.go' \
+	--exclude='*_test.go' \
+	-- 'CompileRuntimeSemanticBindingsWithSourceFocuses|ValidateRuntimeSemanticPlanSourceDeclarations(WithOwnerFacts)?' \
+	internal/pkg/workorchruntimecontract >/dev/null; then
 	echo "boundary contract violation: semantic binding restored a post-manifest DefinitionFocus compatibility path" >&2
 	exit 1
 fi
@@ -3663,7 +3666,7 @@ for regression in \
 	'TestRuntimeSemanticProviderProjectsDefinitionLineageAndExactAcquisitionSelector' \
 	'TestRuntimeCandidatePrefixChangesWithOwnerFactAcquisitionAuthorization' \
 	'TestCompileRequiresExactStaticOwnerFactConvergenceBeforeAdmission'; do
-	if ! rg -q -F "$regression" internal; then
+	if ! grep -R -q -F --include='*_test.go' -- "$regression" internal; then
 		echo "boundary contract violation: semantic selector separation regression is missing ($regression)" >&2
 		exit 1
 	fi

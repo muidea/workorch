@@ -4,7 +4,7 @@ Status: normative
 
 Type: runtime-flow
 
-Last Verified: 2026-08-18
+Last Verified: 2026-08-24
 
 ## Purpose
 
@@ -49,6 +49,9 @@ sealed operation / assessment / governance resolution
 同步 typed operation result 是提交 execution evidence 的**唯一**执行回执。
 Eventstream 通知可作审计，**不**驱动 Runtime 状态推进。
 
+实时 owner response 与重启后读取到的已持久化 receipt 使用同一裁决入口，并先判断 receipt outcome：rejected 保留 owner
+original diagnostic，不再用 unknown observed effect 覆盖；accepted/no-op 才继续执行 effect compatibility 与 quality gate。
+
 ## Commit Invariants
 
 evidence commit 必须同时满足：
@@ -63,6 +66,8 @@ evidence commit 必须同时满足：
 6. **Definition 一致**：definition context revision 与 facts / transaction 一致，漂移 → conflict
 7. **Owner revision set 一致**：evidence只绑定binding/operation实际依赖的owner revision/snapshot/fence；其set/hash必须与
    current observation逐项匹配，无关owner变化不得扩大stale范围
+8. **Outcome-first 一致**：live/recovery 不得形成两套 receipt 判断；rejected owner diagnostic 不得被后续 effect/quality
+   检查改写，accepted/no-op 则不能绕过这些检查
 
 Orchestrator 判定 evidence quality、coverage binding 与 next action；block 输出不能自封 accepted。
 

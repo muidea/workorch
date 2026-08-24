@@ -4,7 +4,7 @@ Status: normative
 
 Type: profile-capability
 
-Last Verified: 2026-08-21
+Last Verified: 2026-08-24
 
 ## Purpose
 
@@ -16,6 +16,9 @@ evidence requirements and allowed capability classes; it does not add a code-spe
 - inspect the current Workspace and relevant contract shape before editing;
 - make the smallest coherent production change tied to an active coverage work item;
 - use create-only file operations only for absent targets and revision-bound replacement for existing targets;
+- consolidate all durable changes to the same owner/canonical target into one operation; dependency order does not authorize a
+  second same-target patch because both replay proofs were sealed before execution; follow an exact owner-required operation
+  sequence when the manifest explicitly seals one;
 - run bounded build/test/lint or direct entrypoint checks relevant to the DoD;
 - preserve user changes and avoid unrelated rewrites;
 - when meaningful output changed, use supported Git add/commit operations if a version-control snapshot is required;

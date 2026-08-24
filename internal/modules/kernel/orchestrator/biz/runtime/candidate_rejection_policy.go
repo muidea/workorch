@@ -20,7 +20,8 @@ func CandidateRejectionCodeDisposition(code string) (runtimecontract.RuntimeCand
 		"candidate_replays_no_progress_shape",
 		"candidate_action_evidence_mismatch",
 		"candidate_target_outside_grounding",
-		"candidate_creation_scope_missing_file_target":
+		"candidate_creation_scope_missing_file_target",
+		"candidate_owner_target_effect_overlap":
 		return runtimecontract.RuntimeCandidateCorrectionCorrectableOnce, true
 	case "candidate_replays_rejected_candidate_shape",
 		"candidate_retry_exhausted",
@@ -113,6 +114,8 @@ func CandidateCorrectionObjectivesForFailure(failure *runtimecontract.RuntimeCan
 		}
 	case "candidate_action_evidence_mismatch":
 		objectives = append(objectives, runtimecontract.RuntimeCandidateCorrectionSatisfyCoverage)
+	case "candidate_owner_target_effect_overlap":
+		objectives = append(objectives, runtimecontract.RuntimeCandidateCorrectionChangeReplayedShape)
 	}
 	return (&runtimecontract.RuntimeCandidateFailureDiagnostic{Objectives: objectives}).Normalized().Objectives
 }

@@ -9,7 +9,7 @@ import (
 
 func TestRuntimeValidationDiscoveryRequiresFreshOwnerFacts(t *testing.T) {
 	facts := runtimeValidationDiscoveryFacts(t)
-	if missing := runtimeMissingValidationDiscoverySources(facts); len(missing) != 0 {
+	if missing := runtime.MissingRuntimeValidationDiscoverySources(facts); len(missing) != 0 {
 		t.Fatalf("fresh validation discovery missing = %v", missing)
 	}
 	observations := facts.Resources.PrerequisiteObservations[:0]
@@ -19,7 +19,7 @@ func TestRuntimeValidationDiscoveryRequiresFreshOwnerFacts(t *testing.T) {
 		}
 	}
 	facts.Resources.PrerequisiteObservations = observations
-	missing := runtimeMissingValidationDiscoverySources(facts)
+	missing := runtime.MissingRuntimeValidationDiscoverySources(facts)
 	if len(missing) != 1 || missing[0] != runtimecontract.RuntimeValidationDiscoverySourceAvailableCapabilities {
 		t.Fatalf("missing discovery sources = %v, want available capabilities", missing)
 	}
@@ -49,14 +49,11 @@ func runtimeAggregateForValidationDiscovery(t *testing.T) runtime.RuntimeAggrega
 	}
 }
 
-func TestRuntimeValidationDiscoveryGatePreventsProviderCandidate(t *testing.T) {
+func TestRuntimeValidationDiscoveryGapDoesNotBecomeCapabilityFeasibility(t *testing.T) {
 	aggregate := runtimeAggregateForValidationDiscovery(t)
 	fact, err := runtimeFeasibilityFact(aggregate)
-	if err != nil || fact == nil {
-		t.Fatalf("discovery feasibility = %+v, err=%v", fact, err)
-	}
-	if fact.State != runtimecontract.ConvergenceStateNeedValidation || fact.Reason == "" {
-		t.Fatalf("discovery feasibility fact = %+v", fact)
+	if err != nil || fact != nil {
+		t.Fatalf("missing discovery became capability feasibility = %+v, err=%v", fact, err)
 	}
 }
 
@@ -77,6 +74,7 @@ func runtimeValidationDiscoveryFacts(t *testing.T) runtimecontract.RuntimeFacts 
 			OperationAdmissibilities: []runtimecontract.RuntimeOperationAdmissibility{{
 				PrerequisiteID: "commands", SnapshotID: "commands-snapshot", OwnerModuleID: runtimecontract.RuntimeModuleShell,
 				OperationKinds: []string{runtimecontract.RuntimeBlockKindManagedValidationSession}, ObservedRevision: "commands-r1",
+				ValidationRecipes: []runtimecontract.RuntimeValidationRecipe{{ID: "validation-recipe", Command: "go", Args: []string{"test", "./..."}}},
 			}},
 			PrerequisiteObservations: observations,
 		},

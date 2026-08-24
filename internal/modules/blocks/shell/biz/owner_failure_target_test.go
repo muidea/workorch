@@ -67,8 +67,9 @@ func TestShellOwnerDoesNotInferFailureTargetFromValidationCommand(t *testing.T) 
 			OperationID: "validate-entry", EvidenceKind: runtimecontract.EvidenceKindValidation,
 			WorkspaceDeliverableDirectory: workspace, TargetRefs: []string{"validation-entry.go"},
 		},
-		TargetRole:        "implementation",
-		ValidationRecipes: []runtimecontract.RuntimeValidationRecipe{recipe},
+		TargetRole:                "implementation",
+		ValidationRecipes:         []runtimecontract.RuntimeValidationRecipe{recipe},
+		ValidationScopeTargetRefs: []string{"validation-entry.go"},
 		Data: shellevents.OperationData{ValidationRecipeID: recipe.ID, TargetRefs: []string{"validation-entry.go"}, ManagedValidation: runtimecontract.RuntimeManagedValidation{
 			RuntimeManaged: true, Kind: runtimecontract.RuntimeBlockKindManagedValidationSession,
 		}},
@@ -93,8 +94,8 @@ func TestShellOwnerDoesNotInferFailureTargetFromValidationCommand(t *testing.T) 
 	if diagnostic.ValidationDiagnostic == nil || diagnostic.ValidationDiagnostic.Class != runtimecontract.ValidationDiagnosticBuildFailed {
 		t.Fatalf("shell owner failure lost validation diagnostic: %+v", diagnostic)
 	}
-	if observation := diagnostic.ValidationFailureObservation; observation == nil || observation.FailureSignature != diagnostic.Signature || !reflect.DeepEqual(observation.CandidateTargetRefs, []string{"validation-entry.go"}) || !reflect.DeepEqual(observation.ValidationScopeTargetRefs, []string{"validation-entry.go"}) {
-		t.Fatalf("shell owner did not emit a bounded validation-failure fact: %+v", diagnostic)
+	if diagnostic.ValidationFailureObservation != nil {
+		t.Fatalf("shell owner promoted the validation entry into a failure candidate: %+v", diagnostic)
 	}
 	if !reflect.DeepEqual(response.Receipt.TargetRefs, []string{"validation-entry.go"}) || response.Receipt.Feedback == nil ||
 		len(diagnostic.TargetRefs) != 0 || diagnostic.TargetObservation != nil {
@@ -103,8 +104,8 @@ func TestShellOwnerDoesNotInferFailureTargetFromValidationCommand(t *testing.T) 
 	if diagnostic.ValidationDiagnostic == nil || diagnostic.ValidationDiagnostic.Class != runtimecontract.ValidationDiagnosticBuildFailed {
 		t.Fatalf("shell owner receipt lost validation diagnostic: %+v", diagnostic)
 	}
-	if diagnostic.ValidationFailureObservation == nil || diagnostic.ValidationFailureObservation.FailureSignature != diagnostic.Signature {
-		t.Fatalf("shell owner receipt lost validation-failure fact: %+v", diagnostic)
+	if diagnostic.ValidationFailureObservation != nil {
+		t.Fatalf("shell owner receipt promoted unstructured output: %+v", diagnostic)
 	}
 	if response.Receipt.Feedback == nil || response.Receipt.Feedback.Domain != runtimecontract.RuntimeFeedbackDomainOperation ||
 		response.Receipt.Feedback.WorkspaceID != command.WorkspaceID || response.Receipt.Feedback.RunID != command.RunID ||
@@ -146,6 +147,40 @@ func TestShellValidationFailureObservationOnlyExportsImplementationEffectCategor
 		shellValidationDiagnosticMayIdentifyImplementationEffect(runtimecontract.ValidationDiagnosticEnvironmentMissing) ||
 		shellValidationDiagnosticMayIdentifyImplementationEffect(runtimecontract.ValidationDiagnosticCommandInvalid) {
 		t.Fatal("Shell validation category classification permits non-implementation failures to create repair candidates")
+	}
+}
+
+func TestShellManagedGoDiagnosticReportsActualManifestScopedFailureTarget(t *testing.T) {
+	request := RuntimeCommandRequest{
+		ManagedValidation:         runtimecontract.RuntimeManagedValidation{RuntimeManaged: true, Kind: runtimecontract.RuntimeBlockKindManagedValidationSession},
+		ValidationScopeTargetRefs: []string{"cmd/lsp-bridge/main.go", "internal/lspbridge/validation_surface_test.go"},
+		TargetRefs:                []string{"internal/lspbridge/validation_surface_test.go"},
+	}
+	output := RuntimeCommandResult{
+		WorkingDirectory: "/tmp/workorch-shell-validation/workspace",
+		Stderr:           "cmd/lsp-bridge/main.go:178:23: undefined: context\ncmd/lsp-bridge/main.go:952:5: undefined: appendVal\n",
+	}
+	targets := shellValidationDiagnosticTargetRefs(output, request, "go")
+	if !reflect.DeepEqual(targets, []string{"cmd/lsp-bridge/main.go"}) {
+		t.Fatalf("managed Go failure targets = %v", targets)
+	}
+	command := shellevents.ExecuteOperationCommand{
+		RuntimeOperationExecutionContext: runtimecontract.RuntimeOperationExecutionContext{
+			WorkspaceID: "ws-shell", RunID: "run-shell", DispatchID: "dispatch-shell",
+			Transaction: runtimecontract.AuthorityTransaction{AuthoritySnapshotID: "authority-shell"}, OperationID: "validate-entry",
+		},
+		TargetRole: "implementation", ValidationScopeTargetRefs: request.ValidationScopeTargetRefs,
+	}
+	diagnostic := runtimecontract.ValidationFailureDiagnostic{
+		Class: runtimecontract.ValidationDiagnosticBuildFailed, Stage: "shell_command_failed", Operation: "shell/command", TargetRefs: targets,
+	}
+	observation := shellValidationFailureObservation(command, diagnostic)
+	if observation == nil || !reflect.DeepEqual(observation.CandidateTargetRefs, []string{"cmd/lsp-bridge/main.go"}) ||
+		!reflect.DeepEqual(observation.ValidationScopeTargetRefs, request.ValidationScopeTargetRefs) {
+		t.Fatalf("managed Go validation observation = %+v", observation)
+	}
+	if reflect.DeepEqual(observation.CandidateTargetRefs, request.TargetRefs) {
+		t.Fatalf("validation entry became failure target: %+v", observation)
 	}
 }
 

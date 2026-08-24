@@ -413,7 +413,7 @@ func TestRuntimeAdapter_ExecuteOperationReturnsOutputForNonZeroExit(t *testing.T
 	}
 }
 
-func TestRuntimeAdapter_ExecuteOperationAddsValidationFailureDiagnostic(t *testing.T) {
+func TestRuntimeAdapter_ExecuteOperationDoesNotPromoteValidationInputTargets(t *testing.T) {
 	adapter := NewRuntimeAdapter()
 	deliverableDirectory := t.TempDir()
 	if err := os.WriteFile(filepath.Join(deliverableDirectory, "feature_test.go"), []byte("package fixture\n"), 0o644); err != nil {
@@ -441,8 +441,8 @@ func TestRuntimeAdapter_ExecuteOperationAddsValidationFailureDiagnostic(t *testi
 		diagnostic.RecommendedEvidenceTargetType != runtimemodel.ValidationEvidenceTargetBehaviorEvidence {
 		t.Fatalf("validationFailureDiagnostic = %+v, want test failure behavior diagnostic", diagnostic)
 	}
-	if got, want := diagnostic.TargetRefs, []string{"feature_test.go", "feature-contract"}; !reflect.DeepEqual(got, want) {
-		t.Fatalf("targetRefs = %#v, want %#v", got, want)
+	if len(diagnostic.TargetRefs) != 0 {
+		t.Fatalf("validation input targets became diagnostic failure targets: %#v", diagnostic.TargetRefs)
 	}
 	if result.RuntimeDiagnostics.ValidationFailureDiagnostic == nil {
 		t.Fatalf("runtimeDiagnostics = %+v, want nested validation diagnostic", result.RuntimeDiagnostics)

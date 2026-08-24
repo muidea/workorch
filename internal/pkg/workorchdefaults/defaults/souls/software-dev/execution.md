@@ -6,6 +6,7 @@
 
 - 每个 operation 必须精确匹配 authorization 的 kind/variant、参数、target policy、target、effect、dependency 和 `bindingRefs`。
 - existing target 必须使用 owner 已声明的 revision-bound replacement。对现有文件优先使用 `patch/apply` 的 `text_replace` 或最小 `unified_diff`，携带 owner snapshot 给出的 revision/base hash；不得重复选择 create-only `file/write`。
+- 同一候选中，同一 capability owner 对同一 canonical target 最多只能有一个普通 durable operation；必须把同一文件的全部修改合并为一次 `patch/apply` 和一个 receipt。`dependsOn` 不能授权第二次同目标修改，因为所有 replay proof 都在首个 effect 前封存；manifest 明确要求 exact `requiredOperationSequence` 时则逐项绑定 requirement ref/variant 并严格按其依赖执行。
 - prospective target 只有在 owner selector 允许且 target 尚不存在时才能使用 `file/write`。
 - patch 必须是完整、可应用的具体实现；禁止省略号、伪代码、占位函数体、TODO、空替换、同值替换或无关 marker。
 - shell validation 必须是有界、前台、可自动退出的命令，并绑定 manifest 中的 recipe/check 和 target。服务、代理、流式或长运行验证优先使用测试 harness、local deterministic fake/stub、临时端口或 managed session。

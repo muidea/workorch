@@ -21,6 +21,7 @@ func (x *activeDispatchExecution) callOperationOwner(operation runtimecontract.R
 		TargetRole:                         x.aggregate.Facts.Focus.TargetRole,
 		EvidencePolicies:                   x.aggregate.Facts.Activation.EvidencePolicies,
 		ValidationRecipes:                  runtimecontract.NormalizeRuntimeValidationRecipes(x.dispatch.ValidationRecipes),
+		ValidationScopeTargetRefs:          runtimeValidationScopeTargetRefs(x.aggregate.Facts, operation),
 		CapabilityStates:                   append([]runtimecontract.RuntimeCapabilityStateSnapshot(nil), x.aggregate.Facts.Resources.CapabilityStates...),
 		WorkspaceTreeObservation:           runtimeWorkspaceManifestObservation(x.aggregate),
 		CompletedRequiredOperationReceipts: completedRequiredOperationReceiptBindings(*x.aggregate.ActiveDispatch, x.aggregate.OperationReceipts, x.completed),
@@ -48,6 +49,17 @@ func (x *activeDispatchExecution) callOperationOwner(operation runtimecontract.R
 	}
 	_, _ = x.component.markOperationExecutionOutcomeUnknown(x.ctx, x.workspaceID, x.runID, operation.ID)
 	return activeDispatchOwnerCall{}, err
+}
+
+func runtimeValidationScopeTargetRefs(facts runtimecontract.RuntimeFacts, operation runtimecontract.RuntimeOperation) []string {
+	if runtimecontract.CanonicalRuntimeBlockKind(operation.Kind) != runtimecontract.RuntimeBlockKindManagedValidationSession {
+		return nil
+	}
+	facts = facts.Normalized()
+	if facts.Resources.Manifest == nil {
+		return nil
+	}
+	return append([]string(nil), facts.Resources.Manifest.TargetRefs...)
 }
 
 func runtimeOwnerCatalogForOperation(values []runtimecontract.RuntimeOperationAdmissibility, operation runtimecontract.RuntimeOperation) *runtimecontract.RuntimeOperationAdmissibility {

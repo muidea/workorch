@@ -4,7 +4,7 @@ Status: active
 
 Type: capability-block-contract
 
-Last Verified: 2026-08-23
+Last Verified: 2026-08-24
 
 ## 功能范围与边界
 
@@ -39,6 +39,10 @@ Last Verified: 2026-08-23
   `exact_target | existing_owner_scope` 的 `file/edit` 或 `patch/apply` variant。实际 replacement 仍须绑定 owner
   观测到的目标 revision；其中 `patch/apply file_write` 必须携带在执行时再次核对的 `baseHash`，
   `text_replace | unified_diff` 也必须通过对应的 owner preflight/replay 合同。
+- SM-3 在 seal 前要求同一 dispatch 的普通 durable `(OwnerModuleID, TargetRef)` 唯一；owner-sealed exact
+  `RequiredOperationSequence` 除外，而 File 当前不发布同目标 mutation sequence。同一文件的多段修改必须合并为一个
+  operation。File 仍在每次 effect 前独立核对 sealed revision/base hash：即使上游合同被绕过，前一 operation 已改变目标后，
+  后一 stale replay proof 也必须以原始 owner diagnostic rejected，不能被解释为成功、no-op 或 Orchestrator effect mismatch。
 
 ## 交互合同完整性
 
@@ -84,6 +88,7 @@ Last Verified: 2026-08-23
 ## 已覆盖的关键回归
 
 - [x] `file/write` create-only、已有目标拒绝、exact revision/baseHash replacement 与各 patch variant replay proof。
+- [x] 同目标 stale second patch 的 effect-before guard，以及 rejected replay-proof diagnostic 在 live/restart receipt 路径保真。
 - [x] 路径逃逸、symlink、binary、redacted、truncated 与不完整 snapshot 的 fail-closed 行为。
 - [x] 敏感 `file/edit`/patch governance-before-effect、grant target/action/authorization 精确匹配，以及普通 workspace-local 大变更无需额外授权。
 - [x] effect 已发生但 receipt commit 丢失后的 owner proof 重放，以及已有 receipt 的零副作用 duplicate。

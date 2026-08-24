@@ -47,6 +47,11 @@ load facts
   semantic-plan document；sealed semantic contract、operation manifest、selection、snapshot、failure target、capability、
   validation scratch、provider ceiling 等未完成前不得请求 operation candidate。全部 prerequisite 必须通过 typed
   acquisition 获得并持久化。
+- `need_validation` candidate 前，profile 声明的 validation discovery source 必须由 fresh owner resource 与 matching prerequisite observation 同时证明。
+  缺失 `workspace_manifest | project_files | declared_commands | available_capabilities` 是 SM-2 prerequisite debt，不是
+  capability unavailable feasibility：SM-2 必须用既有 typed requirement 返回 `need_prerequisite` 并重获 owner fact。
+  任一局部 freshness/grounding preflight 只能在完整保留当前 pending graph 后追加 requirement，不得因取得 target snapshot
+  而覆盖 manifest、capability、operation-admissibility 或 provider debt；已经 satisfied 的 owner fact 不得被重新编译为新 ID。
 - `RequiredOutputContract` 必须是 current focus、owner-confirmed capability、evidence policy 和
   side-effect compatibility 的中立交集。operation 可行动性不足必须在 operation provider 前确定失败；semantic-plan
   LLM 只能在封存 catalog/selector/recipe family 内提出 proposal，不能自由猜测 owner capability。
@@ -79,8 +84,9 @@ load facts
   owner-grounded implementation/effect repair surface 时才可进入 state change；accepted repair state change 必须按同一
   closure 固定进入 validation。repair surface 缺失/陈旧只能进入 prerequisite；无合法 target 或 validation recipe 时形成
   typed terminal。validation command entry 不得自动晋升为 repair target，且 validation-only budget 只能在 SM-2 已
-  canonical 分类为 validation repair 后扣减。原始 observation 必须完整保留，但不得反向选择 action、retry、ticket 或
-  terminal。
+  canonical 分类为 validation repair 后扣减。Shell 只能从 owner 支持的结构化工具诊断提取 manifest-bounded candidate
+  target；无结构化位置时不得回填 command/input target，随后仍由 File owner confirmation 与 SM-2 freshness gate 封存
+  failure target。原始 observation 必须完整保留，但不得反向选择 action、retry、ticket 或 terminal。
 - assessment evidence gate 只验证 current-run/focus、binding-matched owner receipt、effect、quality 与封存的
   focus evidence policy；它不得把 assessment observation、claim signal 或 `PassedChecks` 非空解释为 CWI credit，
   也不得改写 observation 的 disposition、items、gap 或 refs。profile 的 observable validation recipe 只能约束候选
@@ -152,6 +158,10 @@ sealed authority + preflight ready
 - renderer、wire DTO、strict decoder、admission、owner feasibility 与 fixture 对同一
   `CandidateContractManifest` 给出一致解释；候选只能选择 manifest 已封存的 `bindingRefs`。未知字段、参数、
   target、effect、dependency、operation kind、未知 binding 或裸 `coverageWorkItemIds` 不得由第二解析路径静默放宽。
+- 单一 evaluator 必须在 seal 前拒绝同一 candidate 中重复的 durable `(OwnerModuleID, TargetRef)`，并要求 provider 将同目标
+  变更合并为一个 operation/receipt；普通 `DependsOn` 不能放宽，因为所有 replay proof 均在首个 effect 前封存。只有
+  owner fact 明确封存、逐项绑定 exact requirement ref/variant 的 `RequiredOperationSequence` 可在同一 owner-target 上执行；
+  不同目标与 non-durable operation 不受该唯一性约束。
 - accepted candidate 必须在执行前持久化 `SealedDispatch`。operation 依 sealed dependency order 执行，
   每项使用稳定的 `ExecutionKey + Fence`；owner receipt 是 evidence 的唯一副作用回执。
 - claimed operation 在没有 receipt 时，只能由 SM-3 返回一个只读的 recovery-budget handoff；SM-3 不得直接修改
@@ -167,6 +177,8 @@ sealed authority + preflight ready
   联合裁决。receipt 只有同时匹配 `dispatch + operation + BindingRef + target/selector + effect + recipe/check`
   才能获得该 CWI credit；`none`、`ephemeral_session`、`unknown`、zero-work、unrelated target 或泛化 test success
   不能满足 durable state change 或 behavior coverage。
+- live owner response 与 fresh-load receipt recovery 必须复用同一 outcome-first judgment：`rejected` 保留 owner exact
+  diagnostic 且不再运行 effect/quality 改写；`accepted | no_op` 才进入 effect compatibility 与 evidence-quality gate。
 - exact `ExecutionKey + Fence` receipt 重放只复用既有 receipt；no-op 的 current-run provenance 与普通无
   provenance no-op 必须分流。后者只留下 rejected/no-progress lineage，不能被重放、target 变化或文本修改伪装成
   新的 durable evidence。

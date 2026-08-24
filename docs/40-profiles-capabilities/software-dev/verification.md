@@ -4,7 +4,7 @@ Status: normative
 
 Type: verification-contract
 
-Last Verified: 2026-08-18
+Last Verified: 2026-08-24
 
 ## Purpose
 
@@ -23,7 +23,12 @@ and converges through the same neutral Runtime owner model. It must not make leg
 ### Operations And Evidence
 
 - absent-target creation and existing-target revision-bound replacement are distinct;
+- one candidate contains at most one ordinary durable operation for each capability owner/canonical target; same-file edits are
+  merged even when dependency order is declared, while an owner-sealed exact required operation sequence and distinct targets
+  remain executable in one dispatch;
 - build/test/lint and direct entrypoint checks produce matching validation receipts;
+- a validation entry is recipe lineage, not an implementation repair target; unstructured output yields no target candidate,
+  while managed Go diagnostics may report only actual `*.go:line[:column]` locations inside the fresh File manifest scope;
 - Git snapshot requirements use `git/write:add` + `git/write:commit`, not shell/read evidence;
 - optional LSP MCP evidence remains auxiliary;
 - assessment cites current-Run accepted evidence and partial closure leaves remaining items active.

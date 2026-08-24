@@ -85,7 +85,7 @@ func (c *authorityComponent) recordRepairSurfaceConfirmation(ctx context.Context
 		aggregate.Facts.Resources.FailureTarget = nil
 		aggregate.Facts.Resources.TargetSelection = nil
 		aggregate.Facts.Resources.TargetSnapshots = nil
-		aggregate.Facts = PreflightRuntimeFacts(aggregate.Facts, runtimeTargetGroundingRequirements(aggregate.Facts))
+		aggregate.Facts = preflightRuntimeFactsPreservingPending(aggregate.Facts, runtimeTargetGroundingRequirements(aggregate.Facts))
 	} else {
 		updatedFailure := failure.Clone()
 		updatedFailure.TargetRefs = append([]string(nil), confirmation.ConfirmedTargetRefs...)
@@ -94,7 +94,7 @@ func (c *authorityComponent) recordRepairSurfaceConfirmation(ctx context.Context
 		aggregate.Facts.Resources.FailureTarget = &runtimecontract.FailureTarget{Signature: updatedFailure.Signature, TargetRefs: append([]string(nil), confirmation.ConfirmedTargetRefs...), TargetObservation: updatedFailure.TargetObservation}
 		// A newly confirmed File surface replaces stale focus snapshots before
 		// issuing the state-change authority.
-		aggregate.Facts = PreflightRuntimeFacts(aggregate.Facts, runtimeTargetGroundingRequirements(aggregate.Facts))
+		aggregate.Facts = preflightRuntimeFactsPreservingPending(aggregate.Facts, runtimeTargetGroundingRequirements(aggregate.Facts))
 	}
 	facts, decision, err := ReduceRuntimeStateWithDirective(aggregate.Facts, &aggregate.Decision.AuthoritySnapshot, aggregate.CoverageProofLineage)
 	if err != nil {

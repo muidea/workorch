@@ -23,6 +23,7 @@ type RuntimeOperationExecutionRequest struct {
 	TargetRole                         string
 	EvidencePolicies                   []runtimecontract.RuntimeEvidencePolicy
 	ValidationRecipes                  []runtimecontract.RuntimeValidationRecipe
+	ValidationScopeTargetRefs          []string
 	CapabilityStates                   []runtimecontract.RuntimeCapabilityStateSnapshot
 	WorkspaceTreeObservation           *runtimecontract.RuntimePrerequisiteObservation
 	CompletedRequiredOperationReceipts []runtimecontract.RuntimeRequiredOperationReceiptBinding
@@ -216,25 +217,13 @@ func operationExecutionRecord(values []runtimecontract.RuntimeOperationExecution
 }
 
 func (c *candidateDispatchComponent) commitPersistedOperationReceiptEvidence(ctx context.Context, aggregate RuntimeAggregate, dispatch SealedDispatch, operation runtimecontract.RuntimeOperation, receipt runtimecontract.RuntimeOperationReceipt) (EvidenceCommitResult, error) {
-	status := ExecutionEvidenceStatusAccepted
-	failure := failureFactFromOperationReceiptFeedback(receipt)
-	switch receipt.Outcome {
-	case runtimecontract.RuntimeOperationOutcomeRejected:
-		status = ExecutionEvidenceStatusRejected
-	case runtimecontract.RuntimeOperationOutcomeAccepted, runtimecontract.RuntimeOperationOutcomeNoOp:
-		execution, found := operationExecutionRecord(dispatch.OperationExecutions, operation.ID)
-		if !found {
-			return EvidenceCommitResult{}, fmt.Errorf("operation %q has no sealed execution record", operation.ID)
-		}
-		if effectFailure := runtimeOperationEffectMismatchFailure(aggregate.Decision, execution, operation, receipt); effectFailure != nil {
-			status = ExecutionEvidenceStatusRejected
-			failure = effectFailure
-		} else if qualityFailure := runtimeOperationEvidenceQualityFailure(operation, receipt.Evidence); qualityFailure != nil {
-			status = ExecutionEvidenceStatusRejected
-			failure = qualityFailure
-		}
-	default:
-		return EvidenceCommitResult{}, fmt.Errorf("operation receipt outcome %q cannot commit ordinary evidence", receipt.Outcome)
+	execution, found := operationExecutionRecord(dispatch.OperationExecutions, operation.ID)
+	if !found {
+		return EvidenceCommitResult{}, fmt.Errorf("operation %q has no sealed execution record", operation.ID)
+	}
+	status, failure, err := runtimeOperationReceiptEvidenceJudgment(aggregate.Decision, execution, operation, receipt)
+	if err != nil {
+		return EvidenceCommitResult{}, err
 	}
 	hash := runtimecontract.StableRuntimeOperationReceiptHash(receipt)
 	return c.commitEvidence(ctx, ExecutionEvidence{
@@ -244,6 +233,34 @@ func (c *candidateDispatchComponent) commitPersistedOperationReceiptEvidence(ctx
 		Failure: failure, Evidence: receipt.Evidence, ObservedEffectScope: receipt.ObservedEffectScope, NoOp: receipt.Outcome == runtimecontract.RuntimeOperationOutcomeNoOp,
 		OwnerReceiptRef: "runtime-receipt/" + receipt.ExecutionKey, OwnerReceiptHash: hash, Receipt: &receipt,
 	})
+}
+
+// runtimeOperationReceiptEvidenceJudgment is the only ordinary receipt-to-
+// evidence judgment used by both the live owner-response path and fresh-load
+// receipt recovery. Receipt outcome is authoritative and is evaluated before
+// Orchestrator-owned effect/quality checks: a rejected owner receipt therefore
+// retains its exact diagnostic and can never be rewritten as an effect
+// mismatch merely because rejected receipts conservatively observe unknown.
+func runtimeOperationReceiptEvidenceJudgment(decision runtimecontract.RuntimeDecision, execution runtimecontract.RuntimeOperationExecutionRecord, operation runtimecontract.RuntimeOperation, receipt runtimecontract.RuntimeOperationReceipt) (runtimecontract.RuntimeOperationExecutionStatus, *runtimecontract.FailureFact, error) {
+	receipt = receipt.Normalized()
+	switch receipt.Outcome {
+	case runtimecontract.RuntimeOperationOutcomeRejected:
+		failure := failureFactFromOperationReceiptFeedback(receipt)
+		if failure == nil {
+			return "", nil, fmt.Errorf("rejected operation receipt %q is missing owner diagnostic feedback", receipt.OperationID)
+		}
+		return ExecutionEvidenceStatusRejected, failure, nil
+	case runtimecontract.RuntimeOperationOutcomeAccepted, runtimecontract.RuntimeOperationOutcomeNoOp:
+		if failure := runtimeOperationEffectMismatchFailure(decision, execution, operation, receipt); failure != nil {
+			return ExecutionEvidenceStatusRejected, failure, nil
+		}
+		if failure := runtimeOperationEvidenceQualityFailure(operation, receipt.Evidence); failure != nil {
+			return ExecutionEvidenceStatusRejected, failure, nil
+		}
+		return ExecutionEvidenceStatusAccepted, nil, nil
+	default:
+		return "", nil, fmt.Errorf("operation receipt outcome %q cannot commit ordinary evidence", receipt.Outcome)
+	}
 }
 
 func runtimeOperationEvidenceQualityFailure(operation runtimecontract.RuntimeOperation, evidence runtimecontract.RuntimeOperationEvidence) *runtimecontract.FailureFact {

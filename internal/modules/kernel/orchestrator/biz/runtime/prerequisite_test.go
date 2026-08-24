@@ -904,3 +904,65 @@ func TestApplyCapabilityPrerequisiteMergesOwners(t *testing.T) {
 		t.Fatalf("merged capabilities = %+v", facts.Capabilities)
 	}
 }
+
+func TestFreshTargetSnapshotPreflightPreservesOtherPendingOwnerFacts(t *testing.T) {
+	manifestRequirement := runtimecontract.RuntimeRequirement{
+		Kind: runtimecontract.PrerequisiteKindManifest, OwnerModuleID: runtimecontract.RuntimeModuleFile,
+	}
+	admissibilityRequirement := runtimecontract.RuntimeRequirement{
+		Kind: runtimecontract.PrerequisiteKindOperationAdmissibility, OwnerModuleID: runtimecontract.RuntimeModuleShell,
+		RequiredCapabilities: []string{runtimecontract.RuntimeBlockKindManagedValidationSession},
+	}
+	facts := runtimecontract.RuntimeFacts{
+		Prerequisites: runtimecontract.PrerequisiteState{Pending: []runtimecontract.RuntimePrerequisite{
+			{ID: runtimePrerequisiteID(manifestRequirement), Kind: manifestRequirement.Kind, OwnerModuleID: manifestRequirement.OwnerModuleID},
+			{ID: runtimePrerequisiteID(admissibilityRequirement), Kind: admissibilityRequirement.Kind, OwnerModuleID: admissibilityRequirement.OwnerModuleID, RequiredCapabilities: admissibilityRequirement.RequiredCapabilities},
+		}},
+		Resources: runtimecontract.RuntimeResourceFacts{TargetSnapshots: []runtimecontract.TargetSnapshot{{TargetRef: "main.go", ContentHash: "target-r1", ContentState: runtimecontract.SnapshotContentStateComplete}}},
+	}
+
+	updated := requireFreshTargetSnapshots(facts, []string{"main.go"})
+	if len(updated.Prerequisites.Pending) != 3 {
+		t.Fatalf("target refresh replaced active prerequisite graph: %+v", updated.Prerequisites.Pending)
+	}
+	for _, expected := range []runtimecontract.PrerequisiteKind{
+		runtimecontract.PrerequisiteKindManifest,
+		runtimecontract.PrerequisiteKindOperationAdmissibility,
+		runtimecontract.PrerequisiteKindTargetSnapshot,
+	} {
+		found := false
+		for _, prerequisite := range updated.Prerequisites.Pending {
+			if prerequisite.Kind == expected {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Fatalf("target refresh dropped %s: %+v", expected, updated.Prerequisites.Pending)
+		}
+	}
+}
+
+func TestValidationDiscoveryReconciliationReturnsMissingManifestToPending(t *testing.T) {
+	requirement := runtimecontract.RuntimeRequirement{
+		Kind: runtimecontract.PrerequisiteKindManifest, OwnerModuleID: runtimecontract.RuntimeModuleFile,
+	}
+	prerequisite := runtimePrerequisiteFromRequirement(requirement)
+	facts := runtimecontract.RuntimeFacts{
+		Prerequisites: runtimecontract.PrerequisiteState{Satisfied: []runtimecontract.RuntimePrerequisite{prerequisite}},
+		Resources:     runtimecontract.RuntimeResourceFacts{Manifest: &runtimecontract.WorkspaceManifest{Revision: "tree-r1", TargetRefs: []string{"main.go"}}},
+		Activation: runtimecontract.RuntimeActivationContext{ExecutionContract: runtimecontract.RuntimeExecutionContract{ValidationPolicies: []runtimecontract.RuntimeValidationPolicy{{
+			ID: "discovery", Scope: "test", AppliesToEvidenceKinds: []string{runtimecontract.EvidenceKindValidation}, DiscoveryRequired: true,
+			DiscoverySources: []string{runtimecontract.RuntimeValidationDiscoverySourceWorkspaceManifest, runtimecontract.RuntimeValidationDiscoverySourceProjectFiles},
+		}}}},
+	}
+
+	updated, err := reconcileRuntimeValidationDiscoveryPrerequisites(facts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(updated.Prerequisites.Pending) != 1 || updated.Prerequisites.Pending[0].ID != prerequisite.ID ||
+		len(updated.Prerequisites.Satisfied) != 0 || updated.Feasibility != nil {
+		t.Fatalf("missing manifest freshness did not return to typed acquisition: %+v", updated)
+	}
+}
