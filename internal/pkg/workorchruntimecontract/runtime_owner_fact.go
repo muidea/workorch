@@ -42,13 +42,21 @@ type RuntimeOwnerFactConvergence struct {
 	MissingTrigger           string
 	AcquisitionOwnerModuleID string
 	AcquisitionOperationKind string
-	TargetSelectorRef        string
-	TargetSelectorOwnerRef   string
-	TargetSelectorSubjectRef string
-	ReobserveOwnerModuleID   string
-	ReobserveFactKind        RuntimeOwnerFactKind
-	MaxAcquisitionAttempts   int
-	DependsOnRequirementRefs []string
+	// AcquisitionOperationVariantID and AcquisitionTarget* identify the
+	// concrete operation-admissibility fact that authorizes the one allowed
+	// acquisition. TargetSelectorRef below remains the Definition-owned target
+	// selection scope. The two selector namespaces are intentionally distinct
+	// and must never be compared or normalized as aliases.
+	AcquisitionOperationVariantID string
+	AcquisitionTargetPolicy       RuntimeOperationTargetPolicy
+	AcquisitionTargetSelectorRef  string
+	TargetSelectorRef             string
+	TargetSelectorOwnerRef        string
+	TargetSelectorSubjectRef      string
+	ReobserveOwnerModuleID        string
+	ReobserveFactKind             RuntimeOwnerFactKind
+	MaxAcquisitionAttempts        int
+	DependsOnRequirementRefs      []string
 }
 
 func (c RuntimeOwnerFactConvergence) Normalized() RuntimeOwnerFactConvergence {
@@ -56,6 +64,9 @@ func (c RuntimeOwnerFactConvergence) Normalized() RuntimeOwnerFactConvergence {
 	c.MissingTrigger = strings.TrimSpace(c.MissingTrigger)
 	c.AcquisitionOwnerModuleID = strings.TrimSpace(c.AcquisitionOwnerModuleID)
 	c.AcquisitionOperationKind = CanonicalRuntimeBlockKind(c.AcquisitionOperationKind)
+	c.AcquisitionOperationVariantID = strings.TrimSpace(c.AcquisitionOperationVariantID)
+	c.AcquisitionTargetPolicy = RuntimeOperationTargetPolicy(strings.TrimSpace(string(c.AcquisitionTargetPolicy)))
+	c.AcquisitionTargetSelectorRef = strings.TrimSpace(c.AcquisitionTargetSelectorRef)
 	c.TargetSelectorRef = strings.TrimSpace(c.TargetSelectorRef)
 	c.TargetSelectorOwnerRef = strings.TrimSpace(c.TargetSelectorOwnerRef)
 	c.TargetSelectorSubjectRef = strings.TrimSpace(c.TargetSelectorSubjectRef)
@@ -72,6 +83,7 @@ func (c RuntimeOwnerFactConvergence) Validate() error {
 	}
 	if c.RequirePreexisting {
 		if c.MissingTrigger != "" || c.AcquisitionOwnerModuleID != "" || c.AcquisitionOperationKind != "" ||
+			c.AcquisitionOperationVariantID != "" || c.AcquisitionTargetPolicy != "" || c.AcquisitionTargetSelectorRef != "" ||
 			c.TargetSelectorRef != "" || c.TargetSelectorOwnerRef != "" || c.TargetSelectorSubjectRef != "" ||
 			c.ReobserveOwnerModuleID != "" || c.ReobserveFactKind != "" || c.MaxAcquisitionAttempts != 0 || len(c.DependsOnRequirementRefs) != 0 {
 			return fmt.Errorf("preexisting owner-fact convergence cannot declare acquisition or re-observation")
@@ -79,6 +91,7 @@ func (c RuntimeOwnerFactConvergence) Validate() error {
 		return nil
 	}
 	if c.MissingTrigger != RuntimeOwnerFactMissingTrigger || c.AcquisitionOwnerModuleID == "" || c.AcquisitionOperationKind == "" ||
+		c.AcquisitionTargetPolicy == "" || c.AcquisitionTargetSelectorRef == "" ||
 		c.TargetSelectorRef == "" || c.TargetSelectorOwnerRef == "" || c.TargetSelectorSubjectRef == "" ||
 		c.ReobserveOwnerModuleID != c.Requirement.OwnerModuleID || c.ReobserveFactKind != c.Requirement.FactKind || c.MaxAcquisitionAttempts != 1 {
 		return fmt.Errorf("owner-fact acquisition requires exact missing trigger, owner operation, selector, re-observation and one attempt")
@@ -86,6 +99,28 @@ func (c RuntimeOwnerFactConvergence) Validate() error {
 	descriptor, found := RuntimeOperationDescriptorForKind(c.AcquisitionOperationKind)
 	if !found || descriptor.OwnerModuleID != c.AcquisitionOwnerModuleID {
 		return fmt.Errorf("owner-fact acquisition operation %q does not belong to owner %q", c.AcquisitionOperationKind, c.AcquisitionOwnerModuleID)
+	}
+	if contract, found := RuntimeOperationContractForKind(c.AcquisitionOperationKind); found {
+		if len(contract.Variants) == 0 && c.AcquisitionOperationVariantID != "" {
+			return fmt.Errorf("owner-fact acquisition operation %q does not declare a static variant", c.AcquisitionOperationKind)
+		}
+		if len(contract.Variants) != 0 {
+			matched := false
+			for _, variant := range contract.Variants {
+				if variant.ID == c.AcquisitionOperationVariantID {
+					matched = true
+					break
+				}
+			}
+			if !matched {
+				return fmt.Errorf("owner-fact acquisition operation %q requires one exact static variant", c.AcquisitionOperationKind)
+			}
+		}
+	}
+	switch c.AcquisitionTargetPolicy {
+	case RuntimeOperationTargetPolicyExistingOwnerScope, RuntimeOperationTargetPolicyProspectiveOwnerTarget:
+	default:
+		return fmt.Errorf("owner-fact acquisition requires a selector-backed target policy, got %q", c.AcquisitionTargetPolicy)
 	}
 	return nil
 }
@@ -163,7 +198,9 @@ func SameRuntimeOwnerFactConvergences(left, right []RuntimeOwnerFactConvergence)
 	for idx := range left {
 		if left[idx].Requirement != right[idx].Requirement || left[idx].RequirePreexisting != right[idx].RequirePreexisting ||
 			left[idx].MissingTrigger != right[idx].MissingTrigger || left[idx].AcquisitionOwnerModuleID != right[idx].AcquisitionOwnerModuleID ||
-			left[idx].AcquisitionOperationKind != right[idx].AcquisitionOperationKind || left[idx].TargetSelectorRef != right[idx].TargetSelectorRef ||
+			left[idx].AcquisitionOperationKind != right[idx].AcquisitionOperationKind || left[idx].AcquisitionOperationVariantID != right[idx].AcquisitionOperationVariantID ||
+			left[idx].AcquisitionTargetPolicy != right[idx].AcquisitionTargetPolicy || left[idx].AcquisitionTargetSelectorRef != right[idx].AcquisitionTargetSelectorRef ||
+			left[idx].TargetSelectorRef != right[idx].TargetSelectorRef ||
 			left[idx].TargetSelectorOwnerRef != right[idx].TargetSelectorOwnerRef || left[idx].TargetSelectorSubjectRef != right[idx].TargetSelectorSubjectRef ||
 			left[idx].ReobserveOwnerModuleID != right[idx].ReobserveOwnerModuleID || left[idx].ReobserveFactKind != right[idx].ReobserveFactKind ||
 			left[idx].MaxAcquisitionAttempts != right[idx].MaxAcquisitionAttempts || !sameStrings(left[idx].DependsOnRequirementRefs, right[idx].DependsOnRequirementRefs) {

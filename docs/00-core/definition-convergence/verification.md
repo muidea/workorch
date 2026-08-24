@@ -87,6 +87,8 @@ Last Verified: 2026-08-21
 | LLM proposes rewritten Goal/DoD/Template/directory | schema/integrity fail-closed；零 Workspace/bootstrap/graph/startup-input mutation |
 | LLM exposes implicit one-of | 只封存 bounded diagnostic；SM-2/SM-3 建 current Run scoped governed ticket，affected focus 零 candidate/dispatch/effect |
 | LLM exposes undeclared prerequisite/semantic ambiguity | 不自动补 relation 或扩图；绑定 current authority 的 `revise_definition_and_restart` ticket |
+| required owner fact closure omits operation selector/variant/policy | pre-seal `declared_prerequisite_unresolved`；零 Run/provider/capability work |
+| Definition selector differs from capability operation selector | manifest 同时封存两份 identity；provider schema只允许 operation selector，返回 Definition selector时 attempt-0 typed correction、零 dispatch |
 | assisted draft returns one-of | raw draft 只形成不可采用 diagnostic，UI/schema 不把它显示为合法 relation；只有用户另行显式提交的 admission candidate 才可保留 token 并进入 candidate-scoped ticket |
 | malformed/timeout context request | whole-document recovery或typed terminal；不扩 dependency/priority |
 

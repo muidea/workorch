@@ -53,7 +53,7 @@ func TestCompileRuntimeSemanticPlanBatchUsesProviderOrderWithoutResorting(t *tes
 		{ID: "cwi-b", SliceID: "slice-1", SourceScope: "test", SourceID: "b"},
 		{ID: "cwi-a", SliceID: "slice-1", SourceScope: "test", SourceID: "a"},
 	}
-	manifest.Hash = StableRuntimeSemanticPlanManifestHash(manifest)
+	manifest = sealSemanticTestManifest(t, manifest)
 	order := RuntimeSemanticPlanDocument{SchemaVersion: RuntimeSemanticPlanDocumentSchemaCurrent, ManifestHash: manifest.Hash, DefinitionSeedHash: manifest.DefinitionSeedHash, PlanStep: RuntimeSemanticPlanStepCoverageOrder, CoverageOrder: []common.CoverageWorkItemID{"cwi-b", "cwi-a"}}
 	batch, err := CompileRuntimeSemanticPlanBatch(manifest, order, 0, "request-1", 1)
 	if err != nil {
@@ -71,7 +71,7 @@ func TestCompileRuntimeSemanticPlanBatchAdvancesThroughProviderOrder(t *testing.
 		{ID: "cwi-a", SliceID: "slice-1", SourceScope: "test", SourceID: "a"},
 		{ID: "cwi-c", SliceID: "slice-1", SourceScope: "test", SourceID: "c"},
 	}
-	manifest.Hash = StableRuntimeSemanticPlanManifestHash(manifest)
+	manifest = sealSemanticTestManifest(t, manifest)
 	order := RuntimeSemanticPlanDocument{SchemaVersion: RuntimeSemanticPlanDocumentSchemaCurrent, ManifestHash: manifest.Hash, DefinitionSeedHash: manifest.DefinitionSeedHash, PlanStep: RuntimeSemanticPlanStepCoverageOrder, CoverageOrder: []common.CoverageWorkItemID{"cwi-b", "cwi-a", "cwi-c"}}
 	batch, err := CompileRuntimeSemanticPlanBatchFromOffset(manifest, order, 1, 2, "request-2", 1)
 	if err != nil {
@@ -89,7 +89,7 @@ func TestCompileRuntimeSemanticPlanFocusBatchDoesNotTreatReopenAsPrerequisite(t 
 		{ID: "cwi-046", SliceID: "slice-1", SourceScope: "dodItem", SourceID: "dod-046"},
 		{ID: "cwi-001", SliceID: "slice-1", SourceScope: "dodItem", SourceID: "dod-001"},
 	}
-	manifest.Hash = StableRuntimeSemanticPlanManifestHash(manifest)
+	manifest = sealSemanticTestManifest(t, manifest)
 	order := RuntimeSemanticPlanDocument{
 		SchemaVersion: RuntimeSemanticPlanDocumentSchemaCurrent, ManifestHash: manifest.Hash,
 		DefinitionSeedHash: manifest.DefinitionSeedHash, PlanStep: RuntimeSemanticPlanStepCoverageOrder,
@@ -116,7 +116,7 @@ func TestCompileRuntimeSemanticPlanFocusBatchIncludesOnlyPrerequisiteClosure(t *
 		{ID: "cwi-043", SliceID: "slice-1", SourceScope: "dodItem", SourceID: "dod-043", PrerequisiteCoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-046"}},
 		{ID: "cwi-001", SliceID: "slice-1", SourceScope: "dodItem", SourceID: "dod-001"},
 	}
-	manifest.Hash = StableRuntimeSemanticPlanManifestHash(manifest)
+	manifest = sealSemanticTestManifest(t, manifest)
 	order := RuntimeSemanticPlanDocument{
 		SchemaVersion: RuntimeSemanticPlanDocumentSchemaCurrent, ManifestHash: manifest.Hash,
 		DefinitionSeedHash: manifest.DefinitionSeedHash, PlanStep: RuntimeSemanticPlanStepCoverageOrder,
@@ -168,7 +168,7 @@ func TestCompileRuntimeSemanticPlanFocusBatchScalesWithoutIDOrDefinitionOrderBia
 	for index := len(itemsInProviderOrder) - 1; index >= 0; index-- {
 		manifest.CoverageItems = append(manifest.CoverageItems, itemsInProviderOrder[index])
 	}
-	manifest.Hash = StableRuntimeSemanticPlanManifestHash(manifest)
+	manifest = sealSemanticTestManifest(t, manifest)
 	order := RuntimeSemanticPlanDocument{
 		SchemaVersion: RuntimeSemanticPlanDocumentSchemaCurrent, ManifestHash: manifest.Hash,
 		DefinitionSeedHash: manifest.DefinitionSeedHash, PlanStep: RuntimeSemanticPlanStepCoverageOrder,
@@ -219,7 +219,7 @@ func TestAdvanceRuntimeSemanticPlanBatchRejectsLifecycleSkip(t *testing.T) {
 func TestMergeRuntimeSemanticPlanBatchDocumentsRejectsDuplicateCoverage(t *testing.T) {
 	manifest := semanticContractTestManifest(t)
 	manifest.CoverageItems = append(manifest.CoverageItems, RuntimeCoverageItem{ID: "cwi-002", SliceID: "slice-1", SourceScope: "test", SourceID: "two"})
-	manifest.Hash = StableRuntimeSemanticPlanManifestHash(manifest)
+	manifest = sealSemanticTestManifest(t, manifest)
 	order := RuntimeSemanticPlanDocument{SchemaVersion: RuntimeSemanticPlanDocumentSchemaCurrent, ManifestHash: manifest.Hash, DefinitionSeedHash: manifest.DefinitionSeedHash, PlanStep: RuntimeSemanticPlanStepCoverageOrder, CoverageOrder: []common.CoverageWorkItemID{"cwi-001", "cwi-002"}}
 	proposal := semanticContractTestProposal("cwi-001")
 	first := RuntimeSemanticPlanDocument{SchemaVersion: RuntimeSemanticPlanDocumentSchemaCurrent, ManifestHash: manifest.Hash, DefinitionSeedHash: manifest.DefinitionSeedHash, PlanStep: RuntimeSemanticPlanStepProofBatch, BatchID: "batch-0", BatchSequence: 0, BatchCoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-001"}, Proposals: []RuntimeSemanticProofProposal{proposal}}
@@ -271,7 +271,7 @@ func TestMergeRuntimeSemanticPlanBatchFeasibilityResultsRejectsIncompleteBatch(t
 func TestMergeRuntimeSemanticPlanBatchFeasibilityResultsRequiresExactBatchDocuments(t *testing.T) {
 	manifest := semanticContractTestManifest(t)
 	manifest.CoverageItems = append(manifest.CoverageItems, RuntimeCoverageItem{ID: "cwi-002", SliceID: "slice-1", SourceScope: "dodItem", SourceID: "dod-002", TargetText: "second", Order: 2})
-	manifest.Hash = StableRuntimeSemanticPlanManifestHash(manifest)
+	manifest = sealSemanticTestManifest(t, manifest)
 	order := RuntimeSemanticPlanDocument{
 		SchemaVersion: RuntimeSemanticPlanDocumentSchemaCurrent, ManifestHash: manifest.Hash,
 		DefinitionSeedHash: manifest.DefinitionSeedHash, PlanStep: RuntimeSemanticPlanStepCoverageOrder,

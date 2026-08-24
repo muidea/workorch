@@ -69,7 +69,8 @@ func (m *Biz) driveRuntimeSemanticRequired(ctx context.Context, aggregate runtim
 	manifest, err := semanticplan.CompileManifest(semanticplan.ManifestIdentity{
 		WorkspaceID: aggregate.Facts.WorkspaceID, RunID: aggregate.Facts.RunID,
 		Definition: aggregate.Definition, DefinitionSeed: aggregate.Facts.DefinitionSeed,
-		Execution: aggregate.Facts.Activation.ExecutionContract, Admissibilities: aggregate.Facts.Resources.OperationAdmissibilities,
+		DefinitionFocuses: aggregate.Facts.DefinitionFocuses,
+		Execution:         aggregate.Facts.Activation.ExecutionContract, Admissibilities: aggregate.Facts.Resources.OperationAdmissibilities,
 		EligibleCoverage: eligibleCoverage,
 	})
 	if err != nil {

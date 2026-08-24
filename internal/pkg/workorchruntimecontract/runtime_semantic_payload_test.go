@@ -79,6 +79,41 @@ func TestRuntimeSemanticPlanRequestSchemaNarrowsOrderAndProofBatch(t *testing.T)
 	}
 }
 
+func TestRuntimeSemanticOwnerFactAcquisitionSchemaUsesOperationSelectorNotDefinitionSelector(t *testing.T) {
+	manifest, document, _ := semanticMissingOwnerFactAcquisitionFixture(t)
+	schema, err := RuntimeSemanticPlanJSONSchemaForRequest(
+		manifest,
+		RuntimeSemanticPlanStepProofBatch,
+		document.BatchID,
+		document.BatchSequence,
+		document.BatchCoverageWorkItemIDs,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(schema, `"const":"file/workspace-relative-create"`) {
+		t.Fatalf("owner-fact acquisition schema lost exact operation selector: %s", schema)
+	}
+	if strings.Contains(schema, `"const":"file/workspace-deliverable"`) {
+		t.Fatalf("Definition selector was treated as an operation selector: %s", schema)
+	}
+	wrong := document.Clone()
+	wrong.Proposals[0].Target.OwnerSelectorRefs = []string{"file/workspace-deliverable"}
+	var violation *RuntimeSemanticProposalViolationError
+	if err := wrong.ValidateAgainstManifest(manifest); !errors.As(err, &violation) || violation.Violation().Path != "$.proposals[0].target.ownerSelectorRefs" {
+		t.Fatalf("Definition selector mismatch was not a typed semantic violation: %+v err=%v", violation, err)
+	}
+}
+
+func TestRuntimeSemanticManifestRejectsAcquisitionSelectorDriftFromSealedCatalog(t *testing.T) {
+	manifest, _, _ := semanticMissingOwnerFactAcquisitionFixture(t)
+	manifest.ProofObligations[0].OwnerFactAcquisition.AcquisitionTargetSelectorRef = "file/workspace-deliverable"
+	manifest.Hash = StableRuntimeSemanticPlanManifestHash(manifest)
+	if err := manifest.Validate(); err == nil || !strings.Contains(err.Error(), "does not match sealed owner facts") {
+		t.Fatalf("drifted acquisition selector was not rejected by manifest validation: %v", err)
+	}
+}
+
 func TestRuntimeSemanticPlanRejectsDynamicOperationVariant(t *testing.T) {
 	proposal := RuntimeSemanticProofProposal{
 		CoverageWorkItemID: "cwi-001", OwnerModuleID: RuntimeModuleMCP, OperationKind: StepKindMCPToolCall,

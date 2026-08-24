@@ -122,6 +122,9 @@ func TestSSHSemanticProofProbeReturnsTypedStaleWithoutNetworkOperation(t *testin
 		CoverageItems:             []runtimecontract.RuntimeCoverageItem{{ID: "cwi-1", SliceID: "slice-1", SourceScope: "dodItem", SourceID: "dod-1", TargetText: "remote state", Order: 1}},
 		AllowedOwnerModuleIDs:     []string{ModuleID}, AllowedOperationKinds: []string{StepKindCommand},
 		AllowedTargetPolicies: []runtimecontract.RuntimeOperationTargetPolicy{runtimecontract.RuntimeOperationTargetPolicyExactTarget},
+		ProofObligations: []runtimecontract.RuntimeSemanticProofObligation{{
+			CoverageWorkItemID: "cwi-1", RequiredEvidenceKinds: []string{runtimecontract.EvidenceKindStateChange},
+		}},
 	}
 	proposal := runtimecontract.RuntimeSemanticProofProposal{
 		CoverageWorkItemID: "cwi-1", OwnerModuleID: ModuleID, OperationKind: StepKindCommand,

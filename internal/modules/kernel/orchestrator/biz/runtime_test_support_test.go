@@ -264,6 +264,9 @@ func runtimeTestAggregateWithSemanticPlanning(t *testing.T, aggregate runtime.Ru
 		if queue[index].SliceID == "" && len(queue[index].CoverageWorkItemIDs) == 1 {
 			queue[index].SliceID = items[queue[index].CoverageWorkItemIDs[0]].SliceID
 		}
+		if queue[index].TargetSelectorRef != "" && queue[index].TargetSelectorOwnerRef != "" && queue[index].TargetSelectorSubjectRef == "" && len(queue[index].CoverageWorkItemIDs) == 1 {
+			queue[index].TargetSelectorSubjectRef = string(queue[index].CoverageWorkItemIDs[0])
+		}
 	}
 	aggregate.Facts.DefinitionFocuses = runtimecontract.CompileRuntimeDefinitionFocuses(queue)
 	if aggregate.Facts.CWILedgerSchemaVersion == "" {
@@ -320,8 +323,7 @@ func runtimeTestProjectSealedSemanticFacts(t *testing.T, facts runtimecontract.R
 	if facts.CWILedgerSchemaVersion != runtimecontract.RuntimeCWILedgerSchemaCurrent || ledger.Manifest == nil || ledger.Document == nil {
 		t.Fatalf("test semantic projection requires initialized ledger and complete document")
 	}
-	sourceFocuses := facts.DefinitionFocuses
-	focuses, contract, err := runtimecontract.CompileRuntimeSemanticBindingsWithSourceFocuses(*ledger.Manifest, ledger.LogicalRequestID, *ledger.Document, ledger.Feasibilities, sourceFocuses)
+	focuses, contract, err := runtimecontract.CompileRuntimeSemanticBindings(*ledger.Manifest, ledger.LogicalRequestID, *ledger.Document, ledger.Feasibilities)
 	if err != nil {
 		t.Fatalf("compile test semantic bindings for canonical projection: %v", err)
 	}
@@ -639,6 +641,7 @@ func runtimeTestSealedSemanticPlanning(t *testing.T, aggregate runtime.RuntimeAg
 		AllowedOwnerModuleIDs:     runtimeTestNormalizeStrings(allowedOwners),
 		AllowedOperationKinds:     runtimeTestNormalizeStrings(allowedKinds),
 		AllowedTargetPolicies:     runtimeTestNormalizeTargetPolicies(allowedPolicies),
+		ProofObligations:          runtimeTestSemanticProofObligations(t, aggregate.Facts, coverageItems, catalogs, fixtureSpecs),
 		OwnerCatalogs:             catalogs,
 	}
 	manifest.Hash = runtimecontract.StableRuntimeSemanticPlanManifestHash(manifest)
@@ -728,9 +731,7 @@ func runtimeTestSealedSemanticPlanning(t *testing.T, aggregate runtime.RuntimeAg
 		}
 	}
 	merged := document.Clone()
-	sourceFocuses := append([]runtimecontract.CoverageFocus{aggregate.Facts.Focus}, aggregate.Facts.RemainingFocuses...)
-	sourceFocuses = append(sourceFocuses, aggregate.Facts.CompletedFocuses...)
-	_, reconciliation, err := runtimecontract.CompileRuntimeSemanticBindingsWithSourceFocuses(manifest, "test-semantic-request", document, feasibilities, sourceFocuses)
+	_, reconciliation, err := runtimecontract.CompileRuntimeSemanticBindings(manifest, "test-semantic-request", document, feasibilities)
 	if err != nil {
 		t.Fatalf("compile test semantic bindings: %v proposals=%+v", err, document.Proposals)
 	}
@@ -757,6 +758,94 @@ func runtimeTestSealedSemanticPlanning(t *testing.T, aggregate runtime.RuntimeAg
 		t.Fatalf("build sealed semantic planning fixture: %v", err)
 	}
 	return ledger.Normalized()
+}
+
+// runtimeTestSemanticProofObligations adapts hand-written post-semantic test
+// fixtures to the same immutable per-CWI contract now sealed by production.
+// It is deliberately test-only: production obligations are compiled exactly
+// once from Runtime DefinitionFocuses by the contract package.
+func runtimeTestSemanticProofObligations(t *testing.T, facts runtimecontract.RuntimeFacts, coverageItems []runtimecontract.RuntimeCoverageItem, catalogs []runtimecontract.RuntimeOperationAdmissibility, specs []runtimeTestSemanticFixtureSpec) []runtimecontract.RuntimeSemanticProofObligation {
+	t.Helper()
+	sources := make(map[common.CoverageWorkItemID]runtimecontract.CoverageFocus, len(facts.DefinitionFocuses))
+	for _, source := range facts.DefinitionFocuses {
+		source = source.Normalized()
+		for _, coverageID := range source.CoverageWorkItemIDs {
+			sources[coverageID] = source
+		}
+	}
+	catalogsByOwner := make(map[string]runtimecontract.RuntimeOperationAdmissibility, len(catalogs))
+	for _, catalog := range catalogs {
+		catalogsByOwner[catalog.OwnerModuleID] = catalog.Normalized()
+	}
+	ret := make([]runtimecontract.RuntimeSemanticProofObligation, 0, len(coverageItems))
+	for _, item := range coverageItems {
+		source := sources[item.ID].Normalized()
+		evidenceKinds := append([]string(nil), source.RequiredEvidenceKinds...)
+		if len(evidenceKinds) == 0 {
+			for _, spec := range specs {
+				if spec.proposal.CoverageWorkItemID == item.ID {
+					evidenceKinds = append(evidenceKinds, spec.proposal.RequiredEvidenceKinds...)
+				}
+			}
+		}
+		obligation := runtimecontract.RuntimeSemanticProofObligation{
+			CoverageWorkItemID: item.ID, RequiredEvidenceKinds: runtimeTestNormalizeStrings(evidenceKinds),
+			DeclarationTargetRole: source.TargetRole, DeclarationTargetDiscoverySources: append([]string(nil), source.TargetDiscoverySources...),
+			RequireTargetGrounding: source.RequireTargetGrounding, RequireAssessment: source.RequireAssessment,
+			RequiredOwnerFacts:    append([]runtimecontract.RuntimeOwnerFactRequirement(nil), source.RequiredOwnerFacts...),
+			OwnerFactConvergences: runtimecontract.CloneRuntimeOwnerFactConvergences(source.OwnerFactConvergences),
+			MetricConstraints:     append([]string(nil), source.MetricConstraints...), ArtifactRefs: append([]string(nil), source.ArtifactRefs...),
+		}
+		if source.TargetSelectorRef != "" && source.TargetSelectorOwnerRef != "" && source.TargetSelectorSubjectRef != "" {
+			obligation.DeclarationTargetSelectorRef = source.TargetSelectorRef
+			obligation.DeclarationTargetSelectorOwnerRef = source.TargetSelectorOwnerRef
+			obligation.DeclarationTargetSelectorSubjectRef = source.TargetSelectorSubjectRef
+			obligation.DeclarationTargetSelectorCandidateRefs = append([]string(nil), source.TargetSelectorCandidateRefs...)
+		}
+		if len(runtimecontract.RuntimeMissingOwnerFactRequirements(source.RequiredOwnerFacts, catalogs)) != 0 {
+			convergence, required := runtimecontract.ResolveRuntimeOwnerFactAcquisition(source.RequiredOwnerFacts, source.OwnerFactConvergences, catalogs)
+			if !required {
+				t.Fatalf("test semantic obligation %q lacks required owner-fact acquisition", item.ID)
+			}
+			catalog, found := catalogsByOwner[convergence.AcquisitionOwnerModuleID]
+			if !found {
+				t.Fatalf("test semantic obligation %q lacks acquisition owner catalog %q", item.ID, convergence.AcquisitionOwnerModuleID)
+			}
+			variantIDs := []string(nil)
+			if convergence.AcquisitionOperationVariantID != "" {
+				variantIDs = []string{convergence.AcquisitionOperationVariantID}
+			}
+			allowed, selectors, constraints, found, err := runtimecontract.RuntimeOperationAdmissibilityAllowsTargetPolicyForVariants(catalog, convergence.AcquisitionOperationKind, variantIDs, convergence.AcquisitionTargetPolicy)
+			if err != nil || !found || !allowed || !runtimeTestStringContains(selectors, convergence.AcquisitionTargetSelectorRef) {
+				t.Fatalf("test semantic obligation %q has invalid acquisition catalog: found=%t allowed=%t selectors=%v err=%v", item.ID, found, allowed, selectors, err)
+			}
+			if convergence.AcquisitionTargetPolicy != runtimecontract.RuntimeOperationTargetPolicyProspectiveOwnerTarget {
+				constraints = nil
+			}
+			obligation.OwnerFactAcquisition = &runtimecontract.RuntimeSemanticOwnerFactAcquisition{
+				Requirement:                  convergence.Requirement,
+				DeclarationTargetSelectorRef: convergence.TargetSelectorRef, DeclarationTargetSelectorOwnerRef: convergence.TargetSelectorOwnerRef, DeclarationTargetSelectorSubjectRef: convergence.TargetSelectorSubjectRef,
+				AcquisitionOwnerModuleID: convergence.AcquisitionOwnerModuleID, AcquisitionOperationKind: convergence.AcquisitionOperationKind, AcquisitionOperationVariantID: convergence.AcquisitionOperationVariantID,
+				AcquisitionTargetPolicy: convergence.AcquisitionTargetPolicy, AcquisitionTargetSelectorRef: convergence.AcquisitionTargetSelectorRef, AcquisitionConstraintRefs: constraints,
+				OwnerCatalogSnapshotID: catalog.SnapshotID, OwnerCatalogObservedRevision: catalog.ObservedRevision,
+				ReobserveOwnerModuleID: convergence.ReobserveOwnerModuleID, ReobserveFactKind: convergence.ReobserveFactKind, MaxAcquisitionAttempts: convergence.MaxAcquisitionAttempts,
+			}
+		}
+		if err := obligation.Validate(); err != nil {
+			t.Fatalf("validate test semantic obligation %q: %v", item.ID, err)
+		}
+		ret = append(ret, obligation)
+	}
+	return ret
+}
+
+func runtimeTestStringContains(values []string, want string) bool {
+	for _, value := range values {
+		if value == want {
+			return true
+		}
+	}
+	return false
 }
 
 func runtimeTestSemanticFixtureSpecs(t *testing.T, aggregate runtime.RuntimeAggregate, eligible []common.CoverageWorkItemID) []runtimeTestSemanticFixtureSpec {

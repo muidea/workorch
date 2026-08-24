@@ -830,6 +830,7 @@ func TestOwnerBindingContradictionRetiresExactBindingWithoutEffectAndIsRestartId
 		retired.Facts.RunID,
 		retired.Definition,
 		retired.Facts.DefinitionSeed,
+		retired.Facts.DefinitionFocuses,
 		retired.Facts.Activation.ExecutionContract,
 		[]runtimecontract.RuntimeOperationAdmissibility{replacementInventory},
 		eligible,

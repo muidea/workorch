@@ -161,6 +161,11 @@ type RuntimeSemanticPlanManifest struct {
 	AllowedOwnerModuleIDs     []string
 	AllowedOperationKinds     []string
 	AllowedTargetPolicies     []RuntimeOperationTargetPolicy
+	// ProofObligations are the sole per-CWI Definition/owner-fact authority
+	// consumed by schema generation, document admission and final binding.
+	// Later aggregate reads must not reintroduce DefinitionFocuses as a second
+	// semantic authority.
+	ProofObligations []RuntimeSemanticProofObligation
 	// OwnerCatalogs are the bounded owner-authored vocabulary observed before
 	// provider I/O. They prevent the semantic planner from guessing targets,
 	// selectors, constraints, recipes, or catalog revisions and then learning
@@ -172,13 +177,13 @@ type RuntimeSemanticPlanManifest struct {
 // vocabulary exclusively from activation-sealed definition capabilities. It
 // is deliberately pure: owner resource availability is established later by
 // typed feasibility observations and is never inferred here.
-func CompileRuntimeSemanticPlanManifest(workspaceID common.WorkspaceID, runID common.RunID, definition RuntimeDefinitionContext, seed RuntimeDefinitionSeed, execution RuntimeExecutionContract, admissibilities []RuntimeOperationAdmissibility) (RuntimeSemanticPlanManifest, error) {
+func CompileRuntimeSemanticPlanManifest(workspaceID common.WorkspaceID, runID common.RunID, definition RuntimeDefinitionContext, seed RuntimeDefinitionSeed, definitionFocuses []CoverageFocus, execution RuntimeExecutionContract, admissibilities []RuntimeOperationAdmissibility) (RuntimeSemanticPlanManifest, error) {
 	seed = seed.Clone()
 	coverageIDs := make([]common.CoverageWorkItemID, 0, len(seed.CoverageItems))
 	for _, item := range seed.CoverageItems {
 		coverageIDs = append(coverageIDs, item.ID)
 	}
-	return CompileRuntimeSemanticPlanManifestForCoverage(workspaceID, runID, definition, seed, execution, admissibilities, coverageIDs)
+	return CompileRuntimeSemanticPlanManifestForCoverage(workspaceID, runID, definition, seed, definitionFocuses, execution, admissibilities, coverageIDs)
 }
 
 // CompileRuntimeSemanticPlanManifestForCoverage compiles a manifest for the
@@ -186,7 +191,7 @@ func CompileRuntimeSemanticPlanManifest(workspaceID common.WorkspaceID, runID co
 // Definition seed hash stays whole-run identity; only provider-visible work
 // items are narrowed. This is not a compatibility path and never recreates a
 // settled CWI from historical focus state.
-func CompileRuntimeSemanticPlanManifestForCoverage(workspaceID common.WorkspaceID, runID common.RunID, definition RuntimeDefinitionContext, seed RuntimeDefinitionSeed, execution RuntimeExecutionContract, admissibilities []RuntimeOperationAdmissibility, coverageIDs []common.CoverageWorkItemID) (RuntimeSemanticPlanManifest, error) {
+func CompileRuntimeSemanticPlanManifestForCoverage(workspaceID common.WorkspaceID, runID common.RunID, definition RuntimeDefinitionContext, seed RuntimeDefinitionSeed, definitionFocuses []CoverageFocus, execution RuntimeExecutionContract, admissibilities []RuntimeOperationAdmissibility, coverageIDs []common.CoverageWorkItemID) (RuntimeSemanticPlanManifest, error) {
 	definition = definition.Normalized()
 	seed = seed.Clone()
 	execution = execution.Normalized()
@@ -197,6 +202,10 @@ func CompileRuntimeSemanticPlanManifestForCoverage(workspaceID common.WorkspaceI
 		return RuntimeSemanticPlanManifest{}, err
 	}
 	if err := seed.Validate(); err != nil {
+		return RuntimeSemanticPlanManifest{}, err
+	}
+	definitionFocuses = CompileRuntimeDefinitionFocuses(definitionFocuses)
+	if err := ValidateRuntimeDefinitionFocuses(seed, definitionFocuses); err != nil {
 		return RuntimeSemanticPlanManifest{}, err
 	}
 	if err := execution.Validate(); err != nil {
@@ -378,6 +387,10 @@ func CompileRuntimeSemanticPlanManifestForCoverage(workspaceID common.WorkspaceI
 	if allowsProspectiveTarget {
 		policies = append(policies, RuntimeOperationTargetPolicyProspectiveOwnerTarget)
 	}
+	proofObligations, err := compileRuntimeSemanticProofObligations(definitionFocuses, coverageItems, sealedCatalogs)
+	if err != nil {
+		return RuntimeSemanticPlanManifest{}, err
+	}
 	manifest := RuntimeSemanticPlanManifest{
 		SchemaVersion: RuntimeSemanticPlanManifestSchemaCurrent,
 		WorkspaceID:   workspaceID, RunID: runID,
@@ -385,7 +398,7 @@ func CompileRuntimeSemanticPlanManifestForCoverage(workspaceID common.WorkspaceI
 		OperationContractRevision: execution.OperationContractRevision,
 		CoverageItems:             coverageItems,
 		AllowedOwnerModuleIDs:     owners, AllowedOperationKinds: kinds,
-		AllowedTargetPolicies: policies, OwnerCatalogs: sealedCatalogs,
+		AllowedTargetPolicies: policies, ProofObligations: proofObligations, OwnerCatalogs: sealedCatalogs,
 	}
 	manifest.Hash = StableRuntimeSemanticPlanManifestHash(manifest)
 	if err := manifest.Validate(); err != nil {
@@ -511,6 +524,7 @@ func (m RuntimeSemanticPlanManifest) Normalized() RuntimeSemanticPlanManifest {
 	m.AllowedOperationKinds = canonicalizeOperationKinds(m.AllowedOperationKinds)
 	m.AllowedOwnerModuleIDs = normalizeStrings(m.AllowedOwnerModuleIDs)
 	m.AllowedTargetPolicies = normalizeRuntimeSemanticTargetPolicies(m.AllowedTargetPolicies)
+	m.ProofObligations = normalizeRuntimeSemanticProofObligations(m.ProofObligations)
 	m.OwnerCatalogs = NormalizeRuntimeOperationAdmissibilities(m.OwnerCatalogs)
 	return m
 }
@@ -521,6 +535,7 @@ func (m RuntimeSemanticPlanManifest) Clone() RuntimeSemanticPlanManifest {
 	m.AllowedOwnerModuleIDs = append([]string(nil), m.AllowedOwnerModuleIDs...)
 	m.AllowedOperationKinds = append([]string(nil), m.AllowedOperationKinds...)
 	m.AllowedTargetPolicies = append([]RuntimeOperationTargetPolicy(nil), m.AllowedTargetPolicies...)
+	m.ProofObligations = cloneRuntimeSemanticProofObligations(m.ProofObligations)
 	m.OwnerCatalogs = append([]RuntimeOperationAdmissibility(nil), m.OwnerCatalogs...)
 	for idx := range m.OwnerCatalogs {
 		m.OwnerCatalogs[idx].OperationKinds = append([]string(nil), m.OwnerCatalogs[idx].OperationKinds...)
@@ -549,8 +564,41 @@ func (m RuntimeSemanticPlanManifest) Validate() error {
 	if m.SchemaVersion != RuntimeSemanticPlanManifestSchemaCurrent || m.WorkspaceID == "" || m.RunID == "" || m.DefinitionRevision == "" || m.DefinitionSeedHash == "" || m.OperationContractRevision == "" || len(m.CoverageItems) == 0 {
 		return fmt.Errorf("runtime semantic manifest requires current schema, scope, definition, seed, operation contract and coverage")
 	}
-	if len(m.AllowedOwnerModuleIDs) == 0 || len(m.AllowedOperationKinds) == 0 || len(m.AllowedTargetPolicies) == 0 || len(m.OwnerCatalogs) == 0 {
-		return fmt.Errorf("runtime semantic manifest requires bounded owners, operations and target policies")
+	if len(m.AllowedOwnerModuleIDs) == 0 || len(m.AllowedOperationKinds) == 0 || len(m.AllowedTargetPolicies) == 0 || len(m.ProofObligations) == 0 || len(m.OwnerCatalogs) == 0 {
+		return fmt.Errorf("runtime semantic manifest requires bounded owners, operations, target policies, proof obligations and owner catalogs")
+	}
+	coverage := make(map[common.CoverageWorkItemID]struct{}, len(m.CoverageItems))
+	coverageItems := make(map[common.CoverageWorkItemID]RuntimeCoverageItem, len(m.CoverageItems))
+	for _, item := range m.CoverageItems {
+		coverage[item.ID] = struct{}{}
+		coverageItems[item.ID] = item
+	}
+	obligationCoverage := make(map[common.CoverageWorkItemID]struct{}, len(m.ProofObligations))
+	for _, obligation := range m.ProofObligations {
+		if err := obligation.Validate(); err != nil {
+			return err
+		}
+		if _, found := coverage[obligation.CoverageWorkItemID]; !found {
+			return fmt.Errorf("runtime semantic manifest obligation coverage %q is outside manifest", obligation.CoverageWorkItemID)
+		}
+		if _, duplicate := obligationCoverage[obligation.CoverageWorkItemID]; duplicate {
+			return fmt.Errorf("runtime semantic manifest duplicates obligation coverage %q", obligation.CoverageWorkItemID)
+		}
+		recompiled, err := compileRuntimeSemanticProofObligations(
+			[]CoverageFocus{runtimeSemanticProofObligationSourceFocus(obligation)},
+			[]RuntimeCoverageItem{coverageItems[obligation.CoverageWorkItemID]},
+			m.OwnerCatalogs,
+		)
+		if err != nil {
+			return fmt.Errorf("runtime semantic manifest obligation coverage %q is not reproducible from sealed owner facts: %w", obligation.CoverageWorkItemID, err)
+		}
+		if !sameRuntimeSemanticProofObligations([]RuntimeSemanticProofObligation{obligation}, recompiled) {
+			return fmt.Errorf("runtime semantic manifest obligation coverage %q does not match sealed owner facts", obligation.CoverageWorkItemID)
+		}
+		obligationCoverage[obligation.CoverageWorkItemID] = struct{}{}
+	}
+	if len(obligationCoverage) != len(coverage) {
+		return fmt.Errorf("runtime semantic manifest does not seal every coverage proof obligation")
 	}
 	owners := make(map[string]struct{}, len(m.AllowedOwnerModuleIDs))
 	for _, owner := range m.AllowedOwnerModuleIDs {
@@ -602,6 +650,7 @@ func StableRuntimeSemanticPlanManifestHash(manifest RuntimeSemanticPlanManifest)
 	for _, policy := range manifest.AllowedTargetPolicies {
 		writeHashString(h, string(policy))
 	}
+	writeRuntimeSemanticProofObligationsHash(h, manifest.ProofObligations)
 	for _, catalog := range manifest.OwnerCatalogs {
 		writeHashString(h, catalog.SnapshotID)
 	}
@@ -961,6 +1010,11 @@ func (d RuntimeSemanticPlanDocument) ValidateAgainstManifest(manifest RuntimeSem
 	} else if d.BatchID == "" {
 		if len(seenCoverage) != len(items) {
 			return fmt.Errorf("runtime semantic document does not cover every required CWI")
+		}
+	}
+	if d.PlanStep == RuntimeSemanticPlanStepProofBatch {
+		if err := validateRuntimeSemanticPlanProofObligations(d, manifest); err != nil {
+			return err
 		}
 	}
 	return nil

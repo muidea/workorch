@@ -375,7 +375,11 @@ deployed run ID 只属于 archive regression evidence，不定义当前候选、
   在 sealed binding 的其余 proof 全部成立后，才检查指定 owner/operation 是否存在匹配的 `ready + direct` selectable
   validation surface。assessment claim、成功 operation、旧 catalog 或历史 recipe 均不能替代该 current owner fact。
 - semantic proof admission 发现 current owner fact 缺失时，只允许 pre-seal Profile contract 中当前 all-of dependency
-  已就绪的 exact acquisition owner/kind/selector；proof batch 必须恰含这一项，不能让 LLM、Shell 或 File另选动作。
+  已就绪的 exact acquisition owner/kind/variant/target-policy/operation-selector。Definition target selector 仅保留声明
+  lineage，不是 capability authorization。Orchestrator 在 manifest seal 时为每个 CWI 编译唯一
+  `RuntimeSemanticProofObligation`；provider schema、typed correction 与 binding compiler 只消费该 immutable obligation，
+  不得随后重读 aggregate `DefinitionFocuses` 或将两套 selector 归一为同一值。proof batch 必须恰含这一项，不能让
+  LLM、Shell 或 File 另选动作。
   若历史/旧 generation 先执行了非 acquisition proof，assessment commit 可在同一 Orchestrator CAS 中提交 audit、把
   current bound CWI 转为 `reopened`、清除 current binding、更新 reconciliation，并以
   `assessment_owner_fact_postcondition_unmet` lineage 退休该 generation；SM-4 只从 aggregate 幂等 re-drive。真正的

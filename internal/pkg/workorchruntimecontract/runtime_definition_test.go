@@ -94,6 +94,34 @@ func TestRuntimeCandidatePrefixChangesWithProfileContract(t *testing.T) {
 	}
 }
 
+func TestRuntimeCandidatePrefixChangesWithOwnerFactAcquisitionAuthorization(t *testing.T) {
+	definition := RuntimeDefinitionContext{StartupInputHash: "startup-input-test",
+		Revision: "definition-1", GoalID: "goal-1", GoalDefinition: "goal", DoDID: "dod-1", DoDDefinition: "dod", CapabilityContract: []string{"file/write", RuntimeBlockKindManagedValidationSession},
+	}
+	requirement := RuntimeOwnerFactRequirement{
+		OwnerModuleID: RuntimeModuleShell, FactKind: RuntimeOwnerFactSelectableValidationSurface,
+		OperationKind: RuntimeBlockKindManagedValidationSession,
+	}
+	base := RuntimeExecutionContract{ProfileContracts: []RuntimeProfileContract{{
+		ID: "software-dev", EvidenceRequirements: []RuntimeProfileEvidenceRequirement{{
+			ID: "validation_preparation", Scope: "deliverable", AcceptedStepKinds: []string{StepKindFileWrite, RuntimeBlockKindManagedValidationSession},
+			RequiredOwnerFacts: []RuntimeOwnerFactRequirement{requirement},
+			OwnerFactConvergences: []RuntimeOwnerFactConvergence{{
+				Requirement: requirement, MissingTrigger: RuntimeOwnerFactMissingTrigger,
+				AcquisitionOwnerModuleID: RuntimeModuleFile, AcquisitionOperationKind: StepKindFileWrite,
+				AcquisitionTargetPolicy: RuntimeOperationTargetPolicyProspectiveOwnerTarget, AcquisitionTargetSelectorRef: "workspace-relative-new-file-target",
+				TargetSelectorRef: "file/workspace_deliverable", TargetSelectorOwnerRef: "software-dev", TargetSelectorSubjectRef: "validation_preparation",
+				ReobserveOwnerModuleID: RuntimeModuleShell, ReobserveFactKind: RuntimeOwnerFactSelectableValidationSurface, MaxAcquisitionAttempts: 1,
+			}},
+		}},
+	}}}
+	changed := base.Normalized()
+	changed.ProfileContracts[0].EvidenceRequirements[0].OwnerFactConvergences[0].AcquisitionTargetSelectorRef = "profile-declared-candidate-target"
+	if StableRuntimeCandidatePrefixHashWithExecutionContract(definition, base) == StableRuntimeCandidatePrefixHashWithExecutionContract(definition, changed) {
+		t.Fatal("candidate prefix did not change with owner-fact acquisition operation selector")
+	}
+}
+
 func TestRuntimeCandidatePrefixChangesWithProfileTargetSelectorAndProspectiveTarget(t *testing.T) {
 	definition := RuntimeDefinitionContext{StartupInputHash: "startup-input-test", Revision: "definition-1", GoalID: "goal-1", GoalDefinition: "goal", DoDID: "dod-1", DoDDefinition: "dod", CapabilityContract: []string{"file/write"}}
 	base := RuntimeExecutionContract{ProfileContracts: []RuntimeProfileContract{{

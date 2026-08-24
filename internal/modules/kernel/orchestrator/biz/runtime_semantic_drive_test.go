@@ -574,6 +574,7 @@ func TestRuntimeSemanticDriveFailsOnlyAfterPersistedCatalogRefreshBudgetIsExhaus
 	}
 	manifest, err := runtimecontract.CompileRuntimeSemanticPlanManifest(
 		aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, aggregate.Definition, aggregate.Facts.DefinitionSeed,
+		aggregate.Facts.DefinitionFocuses,
 		aggregate.Facts.Activation.ExecutionContract, aggregate.Facts.Resources.OperationAdmissibilities,
 	)
 	if err != nil {

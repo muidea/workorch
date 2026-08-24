@@ -91,7 +91,10 @@ load facts
   bound CWI 记为 `reopened`、清除 current binding、更新 reconciliation contract，并以 typed reopen lineage 退休当前
   semantic generation。旧 binding/receipt/evidence/assessment 只保留 audit；SM-4 随后从同一 aggregate 幂等驱动新
   semantic generation。普通 evidence gap 不得伪装为 owner-fact gap；新 semantic proof admission 只能接受 pre-seal
-  closure 中 current all-of dependency 已就绪的 exact acquisition owner/kind/selector，且 batch 恰含一项。预算按实际
+  closure 中 current all-of dependency 已就绪的 exact acquisition owner/kind/variant/target-policy/operation-selector。
+  Definition target selector 只保留声明 lineage，不能替代 capability operation selector。SM-2/SM-3 必须先把二者
+  编译为 manifest 内唯一的 per-CWI `RuntimeSemanticProofObligation`，provider schema、typed correction 与 binding seal
+  全部消费该 obligation；batch 必须恰含一项，不能让 LLM、Shell、File 或后续 aggregate read 另选动作。预算按实际
   accepted acquisition operation 记账而不是按 provider replan 次数记账；当前 `MaxAcquisitionAttempts=1`，reobserve 后仍
   缺失即以 `owner_fact_convergence_exhausted` fail-closed。duplicate/restart 不重复
   reopen、request、effect 或预算扣减。重开 CWI 固定返回 `semantic-pending/<cwi>`；当新的 current-focus acquisition 与

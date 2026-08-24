@@ -70,6 +70,7 @@ func TestCompileRequiresExactStaticOwnerFactConvergenceBeforeAdmission(t *testin
 	convergence := runtimecontract.RuntimeOwnerFactConvergence{
 		Requirement: requirement, MissingTrigger: runtimecontract.RuntimeOwnerFactMissingTrigger,
 		AcquisitionOwnerModuleID: runtimecontract.RuntimeModuleFile, AcquisitionOperationKind: runtimecontract.StepKindFileWrite,
+		AcquisitionTargetPolicy: runtimecontract.RuntimeOperationTargetPolicyProspectiveOwnerTarget, AcquisitionTargetSelectorRef: "workspace-relative-new-file-target",
 		TargetSelectorRef: "file/workspace_deliverable", TargetSelectorOwnerRef: "software-dev", TargetSelectorSubjectRef: "validation-preparation",
 		ReobserveOwnerModuleID: runtimecontract.RuntimeModuleShell, ReobserveFactKind: runtimecontract.RuntimeOwnerFactSelectableValidationSurface,
 		MaxAcquisitionAttempts: 1,
@@ -79,6 +80,14 @@ func TestCompileRequiresExactStaticOwnerFactConvergenceBeforeAdmission(t *testin
 	admitted, err := Compile(candidate)
 	if err != nil || admitted.Disposition != workspacemodel.DefinitionAdmissionAdmittedAllOf {
 		t.Fatalf("exact convergence admission = %+v err=%v", admitted, err)
+	}
+
+	incomplete := candidate.Clone()
+	incomplete.OwnerFactConvergenceBindings[0].Convergence.AcquisitionTargetSelectorRef = ""
+	incomplete = incomplete.WithHash()
+	blocked, err := Compile(incomplete)
+	if err != nil || blocked.Disposition != workspacemodel.DefinitionAdmissionClarificationRequired || blocked.ViolationCode != workspacemodel.DefinitionAdmissionPrerequisiteUnresolved {
+		t.Fatalf("incomplete acquisition operation selector result = %+v err=%v", blocked, err)
 	}
 
 	candidate.OwnerFactConvergenceBindings = append(candidate.OwnerFactConvergenceBindings, candidate.OwnerFactConvergenceBindings[0])

@@ -14,6 +14,10 @@ Last Verified: 2026-08-23
 
 - `kernel/orchestrator` 通过 File owner 在 `blocks/file/pkg/events` 定义的具体 command/result 同步投递文件操作；本组件直接订阅 EventHub，不启动通用 runtime executor，也不发布第二套执行通知。
 - Runtime target snapshot、workspace manifest 与 capability preflight 均使用 File owner 定义的 typed EventHub command/result；结果只表达 owner 观测，manifest revision 对文件路径和内容变化敏感。
+- Definition selector（例如 `file/workspace_deliverable`）描述声明侧 subject/scope；File operation selector（例如
+  `workspace-relative-new-file-target`）描述具体 capability admission。两者由 File owner 各自解释但不是 alias：File
+  只对请求中的 exact selector 返回 factual selection/feasibility/receipt，不把声明 selector 改写成 operation selector，
+  也不决定 CWI、重试、reopen 或 Runtime 状态。
 - prospective target 的创建前 admission 与创建后 reconciliation 是两条 File-private 只读语义：admission 对已存在
   路径继续返回 `unsupported`，防止 create-only `file/write` 重放；reconciliation 只核验 sealed owner/path 的当前
   manifest 事实，精确存在返回 `satisfied + concrete target/current revision`，缺失返回 `unsatisfied`，歧义、非规范

@@ -71,9 +71,10 @@ DefinitionAdmissionCandidate
 - `WorkspaceTemplateSnapshot` 必须传递性封存其选择的 exact Profile/policy snapshot；若 Profile 是独立资源，则使用
   `AdmissionPolicyBindings` 显式携带 ref/revision/hash。不得根据 candidate 提交后的 live Profile 重新解释同一 candidate；
 - 每个 required owner fact 必须在 candidate 中恰好绑定一次。它要么声明为 activation 前必须已存在，要么封存唯一
-  `owner_fact_missing` acquisition：接收 owner、operation kind、selector identity、reobserve owner/fact 与
+  `owner_fact_missing` acquisition：接收 owner、operation kind/variant、target policy、capability operation selector、
+  独立的 Definition target selector identity、reobserve owner/fact 与
   `MaxAcquisitionAttempts=1`。缺失、重复、多 provider、依赖悬空或依赖环统一返回
-  `declared_prerequisite_unresolved`；compiler 不读取 live catalog，也不猜测 File/Shell 领域动作；
+  `declared_prerequisite_unresolved`；两套 selector 不得缺省、互相复制或作为 alias。compiler 不读取 live catalog，也不猜测 File/Shell 领域动作；
 - `RuntimeProfileContractsHash` 同时进入 candidate 与 promoted startup input。Start/Restart 编译出的 normalized
   Profile contract hash 必须与 Workspace owner 封存值精确一致；Profile 后续漂移不能改变已封存 candidate/Run；
 - 同一 candidate 内容 permutation 后必须得到同一 `CandidateHash`；candidate identity/hash 的 schema version、compiler version、

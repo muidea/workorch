@@ -434,7 +434,11 @@ func semanticProbeCommandFromSnapshot(t *testing.T, snapshot runtimeMCPAdmissibi
 		WorkspaceID:   "ws-mcp-semantic-probe", RunID: "run-mcp-semantic-probe", DefinitionRevision: "definition-mcp-semantic-probe", DefinitionSeedHash: "seed-mcp-semantic-probe",
 		OperationContractRevision: runtimecontract.RuntimeOperationContractRevision(),
 		CoverageItems:             []runtimecontract.RuntimeCoverageItem{{ID: "cwi-mcp-semantic-probe", SliceID: "slice-mcp-semantic-probe", SourceScope: "dodItem", SourceID: "dod-mcp-semantic-probe", TargetText: "probe", Order: 1}},
-		AllowedOwnerModuleIDs:     []string{ModuleID}, AllowedOperationKinds: []string{runtimecontract.StepKindMCPToolCall}, AllowedTargetPolicies: []runtimecontract.RuntimeOperationTargetPolicy{runtimecontract.RuntimeOperationTargetPolicyExistingOwnerScope}, OwnerCatalogs: []runtimecontract.RuntimeOperationAdmissibility{catalog},
+		AllowedOwnerModuleIDs:     []string{ModuleID}, AllowedOperationKinds: []string{runtimecontract.StepKindMCPToolCall}, AllowedTargetPolicies: []runtimecontract.RuntimeOperationTargetPolicy{runtimecontract.RuntimeOperationTargetPolicyExistingOwnerScope},
+		ProofObligations: []runtimecontract.RuntimeSemanticProofObligation{{
+			CoverageWorkItemID: "cwi-mcp-semantic-probe", RequiredEvidenceKinds: []string{evidenceKind},
+		}},
+		OwnerCatalogs: []runtimecontract.RuntimeOperationAdmissibility{catalog},
 	}
 	manifest.Hash = runtimecontract.StableRuntimeSemanticPlanManifestHash(manifest)
 	proposal := runtimecontract.RuntimeSemanticProofProposal{

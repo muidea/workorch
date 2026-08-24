@@ -159,7 +159,10 @@ func eventSemanticCandidateCommand(t *testing.T) llmevents.RequestRuntimeCandida
 		DefinitionRevision: definition.Revision, DefinitionSeedHash: seed.Hash, OperationContractRevision: runtimecontract.RuntimeOperationContractRevision(),
 		CoverageItems: items, AllowedOwnerModuleIDs: []string{runtimecontract.RuntimeModuleFile}, AllowedOperationKinds: []string{runtimecontract.StepKindFileWrite},
 		AllowedTargetPolicies: []runtimecontract.RuntimeOperationTargetPolicy{runtimecontract.RuntimeOperationTargetPolicyProspectiveOwnerTarget},
-		OwnerCatalogs:         []runtimecontract.RuntimeOperationAdmissibility{catalog},
+		ProofObligations: []runtimecontract.RuntimeSemanticProofObligation{{
+			CoverageWorkItemID: "cwi-1", RequiredEvidenceKinds: []string{runtimecontract.EvidenceKindStateChange},
+		}},
+		OwnerCatalogs: []runtimecontract.RuntimeOperationAdmissibility{catalog},
 	}
 	manifest.Hash = runtimecontract.StableRuntimeSemanticPlanManifestHash(manifest)
 	context := runtimecontract.RuntimeSemanticPlanRequestContext{

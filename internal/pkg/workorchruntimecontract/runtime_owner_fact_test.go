@@ -100,6 +100,7 @@ func TestResolveRuntimeOwnerFactAcquisitionUsesOnlySealedMissingFactClosure(t *t
 	convergence := RuntimeOwnerFactConvergence{
 		Requirement: requirement, MissingTrigger: RuntimeOwnerFactMissingTrigger,
 		AcquisitionOwnerModuleID: RuntimeModuleFile, AcquisitionOperationKind: StepKindFileWrite,
+		AcquisitionTargetPolicy: RuntimeOperationTargetPolicyProspectiveOwnerTarget, AcquisitionTargetSelectorRef: "workspace-relative-new-file-target",
 		TargetSelectorRef: "file/workspace_deliverable", TargetSelectorOwnerRef: "profile/test", TargetSelectorSubjectRef: "validation_preparation",
 		ReobserveOwnerModuleID: RuntimeModuleShell, ReobserveFactKind: RuntimeOwnerFactSelectableValidationSurface,
 		MaxAcquisitionAttempts: 1,
@@ -129,5 +130,21 @@ func TestResolveRuntimeOwnerFactAcquisitionUsesOnlySealedMissingFactClosure(t *t
 	readyCatalog.SnapshotID = StableRuntimeOperationAdmissibilitySnapshotID(readyCatalog)
 	if _, found := ResolveRuntimeOwnerFactAcquisition([]RuntimeOwnerFactRequirement{requirement}, []RuntimeOwnerFactConvergence{convergence}, []RuntimeOperationAdmissibility{readyCatalog}); found {
 		t.Fatal("already satisfied owner fact retained acquisition authority")
+	}
+
+	variantMissing := convergence
+	variantMissing.AcquisitionOperationKind = RuntimeBlockKindPatchApply
+	if err := variantMissing.Validate(); err == nil {
+		t.Fatal("variant-bearing owner-fact acquisition omitted its exact static variant")
+	}
+	variantMissing.AcquisitionOperationVariantID = "file_write"
+	if err := variantMissing.Validate(); err != nil {
+		t.Fatalf("exact static acquisition variant was rejected: %v", err)
+	}
+
+	spuriousVariant := convergence
+	spuriousVariant.AcquisitionOperationVariantID = "file_write"
+	if err := spuriousVariant.Validate(); err == nil {
+		t.Fatal("variant-free owner-fact acquisition accepted a fabricated static variant")
 	}
 }

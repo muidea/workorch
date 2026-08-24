@@ -114,7 +114,11 @@ func TestFileModuleSemanticAndOperationFeasibilityShareExistingTargetPolicy(t *t
 		OperationContractRevision: runtimecontract.RuntimeOperationContractRevision(),
 		CoverageItems:             []runtimecontract.RuntimeCoverageItem{{ID: "cwi-1", SliceID: "slice-1", SourceScope: "dodItem", SourceID: "dod-1", TargetText: "deliver", Order: 1}},
 		AllowedOwnerModuleIDs:     []string{runtimecontract.RuntimeModuleFile}, AllowedOperationKinds: []string{runtimecontract.StepKindFileWrite},
-		AllowedTargetPolicies: []runtimecontract.RuntimeOperationTargetPolicy{runtimecontract.RuntimeOperationTargetPolicyProspectiveOwnerTarget}, OwnerCatalogs: []runtimecontract.RuntimeOperationAdmissibility{catalog},
+		AllowedTargetPolicies: []runtimecontract.RuntimeOperationTargetPolicy{runtimecontract.RuntimeOperationTargetPolicyProspectiveOwnerTarget},
+		ProofObligations: []runtimecontract.RuntimeSemanticProofObligation{{
+			CoverageWorkItemID: "cwi-1", RequiredEvidenceKinds: []string{runtimecontract.EvidenceKindStateChange},
+		}},
+		OwnerCatalogs: []runtimecontract.RuntimeOperationAdmissibility{catalog},
 	}
 	semanticManifest.Hash = runtimecontract.StableRuntimeSemanticPlanManifestHash(semanticManifest)
 	semanticResult := hub.Send(magicevent.NewEventWithContext(

@@ -46,6 +46,9 @@ func TestRuntimeSemanticExistingTargetCorrectionSelectsOwnerReplacementKind(t *t
 			runtimecontract.RuntimeOperationTargetPolicyExistingOwnerScope,
 			runtimecontract.RuntimeOperationTargetPolicyProspectiveOwnerTarget,
 		},
+		ProofObligations: []runtimecontract.RuntimeSemanticProofObligation{{
+			CoverageWorkItemID: "cwi-existing", RequiredEvidenceKinds: []string{runtimecontract.EvidenceKindStateChange},
+		}},
 		OwnerCatalogs: []runtimecontract.RuntimeOperationAdmissibility{catalog},
 	}
 	manifest.Hash = runtimecontract.StableRuntimeSemanticPlanManifestHash(manifest)
@@ -155,7 +158,10 @@ func TestRuntimeSemanticProofFeasibilityRejectsForgedSealedOwnerFacts(t *testing
 		AllowedOwnerModuleIDs:     []string{runtimecontract.RuntimeModuleShell},
 		AllowedOperationKinds:     []string{runtimecontract.RuntimeBlockKindManagedValidationSession},
 		AllowedTargetPolicies:     []runtimecontract.RuntimeOperationTargetPolicy{runtimecontract.RuntimeOperationTargetPolicyExistingOwnerScope},
-		OwnerCatalogs:             []runtimecontract.RuntimeOperationAdmissibility{catalog},
+		ProofObligations: []runtimecontract.RuntimeSemanticProofObligation{{
+			CoverageWorkItemID: "cwi-1", RequiredEvidenceKinds: []string{runtimecontract.EvidenceKindValidation},
+		}},
+		OwnerCatalogs: []runtimecontract.RuntimeOperationAdmissibility{catalog},
 	}
 	manifest.Hash = runtimecontract.StableRuntimeSemanticPlanManifestHash(manifest)
 	proposal := runtimecontract.RuntimeSemanticProofProposal{
@@ -200,6 +206,9 @@ func semanticFeasibilityCommandFixture(t *testing.T) runtimecontract.RuntimeSema
 		CoverageItems:             []runtimecontract.RuntimeCoverageItem{{ID: "cwi-1", SliceID: "slice-1", SourceScope: "dodItem", SourceID: "dod-1", TargetText: "works", Order: 1}},
 		AllowedOwnerModuleIDs:     []string{runtimecontract.RuntimeModuleFile}, AllowedOperationKinds: []string{runtimecontract.StepKindFileWrite},
 		AllowedTargetPolicies: []runtimecontract.RuntimeOperationTargetPolicy{runtimecontract.RuntimeOperationTargetPolicyProspectiveOwnerTarget},
+		ProofObligations: []runtimecontract.RuntimeSemanticProofObligation{{
+			CoverageWorkItemID: "cwi-1", RequiredEvidenceKinds: []string{runtimecontract.EvidenceKindStateChange},
+		}},
 	}
 	proposal := runtimecontract.RuntimeSemanticProofProposal{
 		CoverageWorkItemID: "cwi-1", OwnerModuleID: runtimecontract.RuntimeModuleFile, OperationKind: runtimecontract.StepKindFileWrite,

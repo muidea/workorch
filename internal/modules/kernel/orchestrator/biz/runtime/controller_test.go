@@ -1688,6 +1688,10 @@ func controllerFacts() runtimecontract.RuntimeFacts {
 		Slices: facts.Slices,
 	}
 	facts.DefinitionSeed.Hash = runtimecontract.StableRuntimeDefinitionSeedHash(facts.DefinitionSeed)
+	facts.DefinitionFocuses = []runtimecontract.CoverageFocus{{
+		ID: "definition-focus-v2", SliceID: "slice-v2", CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-v2"},
+		RequiredEvidenceKinds: []string{runtimecontract.EvidenceKindStateChange},
+	}}
 	catalog := runtimecontract.RuntimeOperationAdmissibility{
 		PrerequisiteID: "test-semantic-file", OwnerModuleID: runtimecontract.RuntimeModuleFile,
 		OperationKinds: []string{runtimecontract.StepKindFileWrite}, TargetRefs: []string{"target.txt"}, ObservedRevision: "test-semantic-revision",

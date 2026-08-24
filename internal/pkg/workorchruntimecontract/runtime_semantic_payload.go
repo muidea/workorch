@@ -606,12 +606,72 @@ func RuntimeSemanticPlanJSONSchemaForRequest(manifest RuntimeSemanticPlanManifes
 			return "", fmt.Errorf("runtime semantic proof-batch schema proposal properties are missing")
 		}
 		itemProperties["coverageWorkItemId"] = map[string]any{"type": "string", "enum": coverageIDs}
+		if err := attachRuntimeSemanticProofObligationSchema(items, manifest, batchCoverageIDs); err != nil {
+			return "", err
+		}
 		attachRuntimeDefinitionGapSchemaForRequest(schema, normalRequired, []string{"batchId", "batchSequence", "batchCoverageWorkItemIds"})
 	default:
 		return "", fmt.Errorf("runtime semantic plan has invalid request step %q", step)
 	}
 	encoded, err := json.Marshal(schema)
 	return string(encoded), err
+}
+
+// attachRuntimeSemanticProofObligationSchema narrows each CWI to the exact
+// missing-owner-fact acquisition sealed by the manifest. The Definition
+// selector remains visible as lineage in the manifest projection, while only
+// the capability owner's operation selector is valid in a provider proposal.
+func attachRuntimeSemanticProofObligationSchema(items map[string]any, manifest RuntimeSemanticPlanManifest, coverageIDs []common.CoverageWorkItemID) error {
+	allOf, ok := items["allOf"].([]any)
+	if !ok {
+		return fmt.Errorf("runtime semantic proposal conditional schema is missing")
+	}
+	obligations := make(map[common.CoverageWorkItemID]RuntimeSemanticProofObligation, len(manifest.ProofObligations))
+	for _, raw := range manifest.ProofObligations {
+		value := raw.Normalized()
+		obligations[value.CoverageWorkItemID] = value
+	}
+	for _, coverageID := range normalizeOrderedCoverageWorkItemIDs(coverageIDs) {
+		obligation, found := obligations[coverageID]
+		if !found {
+			return fmt.Errorf("runtime semantic proof-batch coverage %q has no sealed proof obligation", coverageID)
+		}
+		if obligation.OwnerFactAcquisition == nil {
+			continue
+		}
+		acquisition := obligation.OwnerFactAcquisition.Normalized()
+		targetRequired := []string{"policy", "ownerSelectorRefs"}
+		targetProperties := map[string]any{
+			"policy":            map[string]any{"const": string(acquisition.AcquisitionTargetPolicy)},
+			"ownerSelectorRefs": exactStringArraySchema([]string{acquisition.AcquisitionTargetSelectorRef}),
+		}
+		if acquisition.AcquisitionTargetPolicy == RuntimeOperationTargetPolicyProspectiveOwnerTarget {
+			targetRequired = append(targetRequired, "prospectiveConstraintRefs", "prospectiveTargetRef")
+			targetProperties["prospectiveConstraintRefs"] = exactStringArraySchema(acquisition.AcquisitionConstraintRefs)
+		}
+		proposalProperties := map[string]any{
+			"ownerModuleId":         map[string]any{"const": acquisition.AcquisitionOwnerModuleID},
+			"operationKind":         map[string]any{"const": acquisition.AcquisitionOperationKind},
+			"requiredEvidenceKinds": exactStringArraySchema([]string{EvidenceKindStateChange}),
+			"target": map[string]any{
+				"required":   targetRequired,
+				"properties": targetProperties,
+			},
+		}
+		then := map[string]any{"properties": proposalProperties}
+		if acquisition.AcquisitionOperationVariantID != "" {
+			then["required"] = []string{"operationVariantId"}
+			proposalProperties["operationVariantId"] = map[string]any{"const": acquisition.AcquisitionOperationVariantID}
+		} else {
+			then["not"] = map[string]any{"required": []string{"operationVariantId"}}
+		}
+		allOf = append(allOf, map[string]any{
+			"if":   map[string]any{"properties": map[string]any{"coverageWorkItemId": map[string]any{"const": string(coverageID)}}},
+			"then": then,
+		})
+	}
+	items["allOf"] = allOf
+	return nil
 }
 
 func attachRuntimeDefinitionGapSchemaForRequest(schema map[string]any, normalRequired, gapBatchRequired []string) {
@@ -669,6 +729,21 @@ func stringEnumArraySchemaWithMinimum(values []string, minimum int) map[string]a
 	schema["maxItems"] = minimum
 	schema["uniqueItems"] = true
 	return schema
+}
+
+func exactStringArraySchema(values []string) map[string]any {
+	values = normalizeStrings(values)
+	if values == nil {
+		values = []string{}
+	}
+	item := map[string]any{"type": "string", "maxLength": 65536, "enum": values}
+	if len(values) == 1 {
+		item = map[string]any{"const": values[0]}
+	}
+	return map[string]any{
+		"type": "array", "minItems": len(values), "maxItems": len(values), "uniqueItems": true,
+		"items": item,
+	}
 }
 
 func stringEnumArraySchemaWithMaximum(values []string, maximum, minimum int) map[string]any {

@@ -10,7 +10,7 @@ func TestRuntimeSemanticCorrectionDirectiveIsManifestBoundAndDetached(t *testing
 	manifest := semanticContractTestManifest(t)
 	manifest.CoverageItems[0].PrerequisiteCoverageWorkItemIDs = []common.CoverageWorkItemID{"cwi-000"}
 	manifest.CoverageItems = append(manifest.CoverageItems, RuntimeCoverageItem{ID: "cwi-000", SliceID: "slice-1", SourceScope: "dodItem", SourceID: "dod-000", TargetText: "prerequisite"})
-	manifest.Hash = StableRuntimeSemanticPlanManifestHash(manifest)
+	manifest = sealSemanticTestManifest(t, manifest)
 	violation := RuntimeSemanticContractViolation{
 		Kind: RuntimeSemanticContractViolationDependencyOrder, Path: "$.coverageOrder",
 		RequiredBeforeID: "cwi-000", RequiredAfterID: "cwi-001", ActualBeforePosition: 1, ActualAfterPosition: 0,

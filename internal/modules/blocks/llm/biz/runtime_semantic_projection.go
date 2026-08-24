@@ -43,7 +43,34 @@ type runtimeSemanticManifestProjection struct {
 	AllowedOwnerModuleIDs     []string                                       `json:"allowedOwnerModuleIds,omitempty"`
 	AllowedOperationKinds     []string                                       `json:"allowedOperationKinds,omitempty"`
 	AllowedTargetPolicies     []runtimecontract.RuntimeOperationTargetPolicy `json:"allowedTargetPolicies,omitempty"`
+	ProofObligations          []runtimeSemanticProofObligationProjection     `json:"proofObligations,omitempty"`
 	OwnerCatalogs             []runtimeSemanticOwnerCatalogProjection        `json:"ownerCatalogs,omitempty"`
+}
+
+type runtimeSemanticProofObligationProjection struct {
+	CoverageWorkItemID                  common.CoverageWorkItemID                      `json:"coverageWorkItemId"`
+	RequiredEvidenceKinds               []string                                       `json:"requiredEvidenceKinds"`
+	DeclarationTargetSelectorRef        string                                         `json:"declarationTargetSelectorRef,omitempty"`
+	DeclarationTargetSelectorOwnerRef   string                                         `json:"declarationTargetSelectorOwnerRef,omitempty"`
+	DeclarationTargetSelectorSubjectRef string                                         `json:"declarationTargetSelectorSubjectRef,omitempty"`
+	OwnerFactAcquisition                *runtimeSemanticOwnerFactAcquisitionProjection `json:"ownerFactAcquisition,omitempty"`
+}
+
+type runtimeSemanticOwnerFactAcquisitionProjection struct {
+	RequiredOwnerModuleID         string                                       `json:"requiredOwnerModuleId"`
+	RequiredFactKind              runtimecontract.RuntimeOwnerFactKind         `json:"requiredFactKind"`
+	RequiredOperationKind         string                                       `json:"requiredOperationKind"`
+	AcquisitionOwnerModuleID      string                                       `json:"acquisitionOwnerModuleId"`
+	AcquisitionOperationKind      string                                       `json:"acquisitionOperationKind"`
+	AcquisitionOperationVariantID string                                       `json:"acquisitionOperationVariantId,omitempty"`
+	AcquisitionTargetPolicy       runtimecontract.RuntimeOperationTargetPolicy `json:"acquisitionTargetPolicy"`
+	AcquisitionTargetSelectorRef  string                                       `json:"acquisitionTargetSelectorRef"`
+	AcquisitionConstraintRefs     []string                                     `json:"acquisitionConstraintRefs,omitempty"`
+	OwnerCatalogSnapshotID        string                                       `json:"ownerCatalogSnapshotId"`
+	OwnerCatalogObservedRevision  string                                       `json:"ownerCatalogObservedRevision"`
+	ReobserveOwnerModuleID        string                                       `json:"reobserveOwnerModuleId"`
+	ReobserveFactKind             runtimecontract.RuntimeOwnerFactKind         `json:"reobserveFactKind"`
+	MaxAcquisitionAttempts        int                                          `json:"maxAcquisitionAttempts"`
 }
 
 // runtimeSemanticOwnerCatalogProjection is the provider-safe vocabulary from
@@ -106,9 +133,55 @@ func runtimeSemanticManifestForProvider(manifest runtimecontract.RuntimeSemantic
 		projection.AllowedOwnerModuleIDs = append([]string(nil), manifest.AllowedOwnerModuleIDs...)
 		projection.AllowedOperationKinds = append([]string(nil), manifest.AllowedOperationKinds...)
 		projection.AllowedTargetPolicies = append([]runtimecontract.RuntimeOperationTargetPolicy(nil), manifest.AllowedTargetPolicies...)
+		projection.ProofObligations = runtimeSemanticProofObligationsForProvider(manifest.ProofObligations, batchCoverageIDs)
 		projection.OwnerCatalogs = runtimeSemanticOwnerCatalogsForProvider(manifest.OwnerCatalogs)
 	}
 	return projection
+}
+
+func runtimeSemanticProofObligationsForProvider(values []runtimecontract.RuntimeSemanticProofObligation, visibleCoverageIDs []common.CoverageWorkItemID) []runtimeSemanticProofObligationProjection {
+	selected := make(map[common.CoverageWorkItemID]struct{}, len(visibleCoverageIDs))
+	for _, id := range visibleCoverageIDs {
+		selected[id] = struct{}{}
+	}
+	ret := make([]runtimeSemanticProofObligationProjection, 0, len(visibleCoverageIDs))
+	for _, raw := range values {
+		value := raw.Normalized()
+		if _, found := selected[value.CoverageWorkItemID]; !found {
+			continue
+		}
+		projection := runtimeSemanticProofObligationProjection{
+			CoverageWorkItemID:                  value.CoverageWorkItemID,
+			RequiredEvidenceKinds:               append([]string(nil), value.RequiredEvidenceKinds...),
+			DeclarationTargetSelectorRef:        value.DeclarationTargetSelectorRef,
+			DeclarationTargetSelectorOwnerRef:   value.DeclarationTargetSelectorOwnerRef,
+			DeclarationTargetSelectorSubjectRef: value.DeclarationTargetSelectorSubjectRef,
+		}
+		if value.OwnerFactAcquisition != nil {
+			acquisition := value.OwnerFactAcquisition.Normalized()
+			projection.OwnerFactAcquisition = &runtimeSemanticOwnerFactAcquisitionProjection{
+				RequiredOwnerModuleID:         acquisition.Requirement.OwnerModuleID,
+				RequiredFactKind:              acquisition.Requirement.FactKind,
+				RequiredOperationKind:         acquisition.Requirement.OperationKind,
+				AcquisitionOwnerModuleID:      acquisition.AcquisitionOwnerModuleID,
+				AcquisitionOperationKind:      acquisition.AcquisitionOperationKind,
+				AcquisitionOperationVariantID: acquisition.AcquisitionOperationVariantID,
+				AcquisitionTargetPolicy:       acquisition.AcquisitionTargetPolicy,
+				AcquisitionTargetSelectorRef:  acquisition.AcquisitionTargetSelectorRef,
+				AcquisitionConstraintRefs:     append([]string(nil), acquisition.AcquisitionConstraintRefs...),
+				OwnerCatalogSnapshotID:        acquisition.OwnerCatalogSnapshotID,
+				OwnerCatalogObservedRevision:  acquisition.OwnerCatalogObservedRevision,
+				ReobserveOwnerModuleID:        acquisition.ReobserveOwnerModuleID,
+				ReobserveFactKind:             acquisition.ReobserveFactKind,
+				MaxAcquisitionAttempts:        acquisition.MaxAcquisitionAttempts,
+			}
+		}
+		ret = append(ret, projection)
+	}
+	if len(ret) == 0 {
+		return nil
+	}
+	return ret
 }
 
 func runtimeSemanticOwnerCatalogsForProvider(values []runtimecontract.RuntimeOperationAdmissibility) []runtimeSemanticOwnerCatalogProjection {

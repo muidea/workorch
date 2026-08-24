@@ -184,6 +184,7 @@ func TestEligibleFocusProjectionSelectsLaterEligibleCWIAndIsIdempotent(t *testin
 	facts.Slices[0].CoverageWorkItemIDs = []common.CoverageWorkItemID{"cwi-v2", "cwi-later", "cwi-gate"}
 	facts.DefinitionSeed.Slices = facts.Slices
 	facts.DefinitionSeed.Hash = runtimecontract.StableRuntimeDefinitionSeedHash(facts.DefinitionSeed)
+	facts.DefinitionFocuses = runtimeTestDefinitionFocuses(facts)
 	definition := runtimecontract.RuntimeDefinitionContext{StartupInputHash: "startup-input-test",
 		Revision: facts.DefinitionRevision, GoalID: "goal-neutral", GoalDefinition: "complete the neutral goal",
 		DoDID: "dod-neutral", DoDDefinition: "all neutral coverage is satisfied", CapabilityContract: []string{"neutral-capability"},

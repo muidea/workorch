@@ -12,15 +12,6 @@ import (
 // bindings and a reconciliation contract. It does not mutate an aggregate or
 // choose a Runtime action; only the SM-2 reducer may persist its output.
 func CompileRuntimeSemanticBindings(manifest RuntimeSemanticPlanManifest, logicalRequestID string, document RuntimeSemanticPlanDocument, feasibilities []RuntimeSemanticProofFeasibility) ([]CoverageFocus, RuntimeCWIReconciliationContract, error) {
-	return CompileRuntimeSemanticBindingsWithSourceFocuses(manifest, logicalRequestID, document, feasibilities, nil)
-}
-
-// CompileRuntimeSemanticBindingsWithSourceFocuses compiles one complete
-// semantic document with immutable fresh-activation declarations for its
-// eligible CWI rows. Semantic proposals choose only within the sealed
-// manifest; a previous generation's focus/binding must never be supplied as a
-// source declaration.
-func CompileRuntimeSemanticBindingsWithSourceFocuses(manifest RuntimeSemanticPlanManifest, logicalRequestID string, document RuntimeSemanticPlanDocument, feasibilities []RuntimeSemanticProofFeasibility, sourceFocuses []CoverageFocus) ([]CoverageFocus, RuntimeCWIReconciliationContract, error) {
 	manifest = manifest.Normalized()
 	document = document.Normalized()
 	generationID := StableRuntimeSemanticGenerationID(manifest.Hash, logicalRequestID)
@@ -33,9 +24,9 @@ func CompileRuntimeSemanticBindingsWithSourceFocuses(manifest RuntimeSemanticPla
 	if err := validateRuntimeSemanticFeasibilitySet(manifest, document, feasibilities, true); err != nil {
 		return nil, RuntimeCWIReconciliationContract{}, err
 	}
-	sourceByCoverage, err := runtimeSemanticBindingSourceFocuses(sourceFocuses)
-	if err != nil {
-		return nil, RuntimeCWIReconciliationContract{}, err
+	sourceByCoverage := make(map[common.CoverageWorkItemID]CoverageFocus, len(manifest.ProofObligations))
+	for _, obligation := range manifest.ProofObligations {
+		sourceByCoverage[obligation.CoverageWorkItemID] = runtimeSemanticProofObligationSourceFocus(obligation)
 	}
 	items := make(map[string]RuntimeCoverageItem, len(manifest.CoverageItems))
 	for _, item := range manifest.CoverageItems {
@@ -53,7 +44,7 @@ func CompileRuntimeSemanticBindingsWithSourceFocuses(manifest RuntimeSemanticPla
 	if err != nil {
 		return nil, RuntimeCWIReconciliationContract{}, err
 	}
-	if err := ValidateRuntimeSemanticPlanSourceDeclarationsWithOwnerFacts(document, sourceFocuses, manifest.OwnerCatalogs); err != nil {
+	if err := validateRuntimeSemanticPlanProofObligations(document, manifest); err != nil {
 		return nil, RuntimeCWIReconciliationContract{}, err
 	}
 	focuses := make([]CoverageFocus, 0, len(proofSets))
@@ -95,72 +86,78 @@ func CompileRuntimeSemanticBindingsWithSourceFocuses(manifest RuntimeSemanticPla
 	return focuses, contract, nil
 }
 
-// ValidateRuntimeSemanticPlanSourceDeclarations rejects a provider proposal
-// that weakens the activation/profile declaration before any owner feasibility
-// request is issued. It is the same pure source check used by final binding
-// compilation and owns no correction or state transition.
-func ValidateRuntimeSemanticPlanSourceDeclarations(document RuntimeSemanticPlanDocument, sourceFocuses []CoverageFocus) error {
-	return ValidateRuntimeSemanticPlanSourceDeclarationsWithOwnerFacts(document, sourceFocuses, nil)
-}
-
-// ValidateRuntimeSemanticPlanSourceDeclarationsWithOwnerFacts additionally
-// constrains a proof batch to the exact one-shot acquisition sealed for the
-// first missing all-of owner fact. Capability catalogs remain immutable input;
-// this pure check cannot perform the acquisition or advance Runtime.
-func ValidateRuntimeSemanticPlanSourceDeclarationsWithOwnerFacts(document RuntimeSemanticPlanDocument, sourceFocuses []CoverageFocus, catalogs []RuntimeOperationAdmissibility) error {
+// validateRuntimeSemanticPlanProofObligations constrains each provider proof
+// to the exact per-CWI obligation already sealed in the manifest. It performs
+// no aggregate read and therefore cannot create a second Definition authority.
+func validateRuntimeSemanticPlanProofObligations(document RuntimeSemanticPlanDocument, manifest RuntimeSemanticPlanManifest) error {
 	document = document.Normalized()
-	sourceByCoverage, err := runtimeSemanticBindingSourceFocuses(sourceFocuses)
-	if err != nil {
-		return err
+	manifest = manifest.Normalized()
+	obligations := make(map[common.CoverageWorkItemID]RuntimeSemanticProofObligation, len(manifest.ProofObligations))
+	for _, obligation := range manifest.ProofObligations {
+		obligations[obligation.CoverageWorkItemID] = obligation
 	}
 	proofSets, err := OrderedRuntimeSemanticCWIProofSets(document)
 	if err != nil {
 		return err
 	}
 	for _, proofSet := range proofSets {
-		var source *CoverageFocus
-		if value, found := sourceByCoverage[proofSet.CoverageWorkItemID]; found {
-			value := value
-			source = &value
+		obligation, found := obligations[proofSet.CoverageWorkItemID]
+		if !found {
+			return fmt.Errorf("runtime semantic proof for coverage %q has no sealed obligation", proofSet.CoverageWorkItemID)
 		}
+		sourceValue := runtimeSemanticProofObligationSourceFocus(obligation)
+		source := &sourceValue
 		if err := validateRuntimeSemanticProofSetSource(proofSet, source); err != nil {
 			return err
 		}
-		if err := validateRuntimeSemanticOwnerFactAcquisition(proofSet, source, catalogs); err != nil {
+		proposalIndex := -1
+		for index, proposal := range document.Proposals {
+			if proposal.CoverageWorkItemID == proofSet.CoverageWorkItemID {
+				proposalIndex = index
+				break
+			}
+		}
+		if err := validateRuntimeSemanticOwnerFactAcquisition(proofSet, obligation.OwnerFactAcquisition, proposalIndex); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-func validateRuntimeSemanticOwnerFactAcquisition(proofSet RuntimeSemanticCWIProofSet, source *CoverageFocus, catalogs []RuntimeOperationAdmissibility) error {
-	if source == nil || catalogs == nil {
+func validateRuntimeSemanticOwnerFactAcquisition(proofSet RuntimeSemanticCWIProofSet, acquisition *RuntimeSemanticOwnerFactAcquisition, proposalIndex int) error {
+	if acquisition == nil {
 		return nil
 	}
-	declaration := source.Normalized()
-	missing := RuntimeMissingOwnerFactRequirements(declaration.RequiredOwnerFacts, catalogs)
-	if len(missing) == 0 {
-		return nil
-	}
-	acquisition, required := ResolveRuntimeOwnerFactAcquisition(declaration.RequiredOwnerFacts, declaration.OwnerFactConvergences, catalogs)
-	if !required {
-		return fmt.Errorf("runtime semantic proof for coverage %q has a missing owner fact without ready acquisition authority", proofSet.CoverageWorkItemID)
-	}
+	sealed := acquisition.Normalized()
 	if len(proofSet.Proposals) != 1 {
-		return fmt.Errorf("runtime semantic proof for coverage %q must contain exactly one sealed owner-fact acquisition", proofSet.CoverageWorkItemID)
+		return &RuntimeSemanticProposalViolationError{ViolationFact: RuntimeSemanticContractViolation{
+			Kind: RuntimeSemanticContractViolationProposalConstraint, Path: "$.proposals",
+			CoverageWorkItemID: proofSet.CoverageWorkItemID, ProposalIndex: proposalIndex,
+			Rule: RuntimeSemanticConstraintRelational, Actual: fmt.Sprintf("%d proposals", len(proofSet.Proposals)),
+			Required: []string{"exactly one sealed owner-fact acquisition"},
+		}, Cause: fmt.Errorf("runtime semantic proof for coverage %q must contain exactly one sealed owner-fact acquisition", proofSet.CoverageWorkItemID)}
 	}
 	proposal := proofSet.Proposals[0].Normalized()
-	if proposal.OwnerModuleID != acquisition.AcquisitionOwnerModuleID || proposal.OperationKind != acquisition.AcquisitionOperationKind {
-		return fmt.Errorf("runtime semantic proof for coverage %q does not match sealed owner-fact acquisition owner/kind", proofSet.CoverageWorkItemID)
+	if proposal.OwnerModuleID != sealed.AcquisitionOwnerModuleID {
+		return runtimeSemanticProposalViolation(proposal, proposalIndex, "ownerModuleId", RuntimeSemanticConstraintAllowedValue, proposal.OwnerModuleID, nil, []string{sealed.AcquisitionOwnerModuleID}, fmt.Errorf("runtime semantic proof for coverage %q does not match sealed owner-fact acquisition owner", proofSet.CoverageWorkItemID))
+	}
+	if proposal.OperationKind != sealed.AcquisitionOperationKind {
+		return runtimeSemanticProposalViolation(proposal, proposalIndex, "operationKind", RuntimeSemanticConstraintAllowedValue, proposal.OperationKind, nil, []string{sealed.AcquisitionOperationKind}, fmt.Errorf("runtime semantic proof for coverage %q does not match sealed owner-fact acquisition operation", proofSet.CoverageWorkItemID))
+	}
+	if proposal.OperationVariantID != sealed.AcquisitionOperationVariantID {
+		return runtimeSemanticProposalViolation(proposal, proposalIndex, "operationVariantId", RuntimeSemanticConstraintAllowedValue, proposal.OperationVariantID, nil, []string{sealed.AcquisitionOperationVariantID}, fmt.Errorf("runtime semantic proof for coverage %q does not match sealed owner-fact acquisition variant", proofSet.CoverageWorkItemID))
 	}
 	if len(proposal.RequiredEvidenceKinds) != 1 || proposal.RequiredEvidenceKinds[0] != EvidenceKindStateChange {
-		return fmt.Errorf("runtime semantic proof for coverage %q owner-fact acquisition must produce state-change evidence", proofSet.CoverageWorkItemID)
+		return runtimeSemanticProposalViolation(proposal, proposalIndex, "requiredEvidenceKinds", RuntimeSemanticConstraintAllowedValue, strings.Join(proposal.RequiredEvidenceKinds, ","), nil, []string{EvidenceKindStateChange}, fmt.Errorf("runtime semantic proof for coverage %q owner-fact acquisition must produce state-change evidence", proofSet.CoverageWorkItemID))
 	}
-	if len(proposal.Target.OwnerSelectorRefs) != 1 || proposal.Target.OwnerSelectorRefs[0] != acquisition.TargetSelectorRef {
-		return fmt.Errorf("runtime semantic proof for coverage %q does not match sealed owner-fact acquisition selector", proofSet.CoverageWorkItemID)
+	if proposal.Target.Policy != sealed.AcquisitionTargetPolicy {
+		return runtimeSemanticProposalViolation(proposal, proposalIndex, "target.policy", RuntimeSemanticConstraintAllowedValue, string(proposal.Target.Policy), nil, []string{string(sealed.AcquisitionTargetPolicy)}, fmt.Errorf("runtime semantic proof for coverage %q does not match sealed owner-fact acquisition policy", proofSet.CoverageWorkItemID))
 	}
-	if declaration.TargetSelectorRef != acquisition.TargetSelectorRef || declaration.TargetSelectorOwnerRef != acquisition.TargetSelectorOwnerRef || declaration.TargetSelectorSubjectRef != acquisition.TargetSelectorSubjectRef {
-		return fmt.Errorf("runtime semantic source for coverage %q does not match sealed owner-fact acquisition target binding", proofSet.CoverageWorkItemID)
+	if len(proposal.Target.OwnerSelectorRefs) != 1 || proposal.Target.OwnerSelectorRefs[0] != sealed.AcquisitionTargetSelectorRef {
+		return runtimeSemanticProposalViolation(proposal, proposalIndex, "target.ownerSelectorRefs", RuntimeSemanticConstraintAllowedValue, strings.Join(proposal.Target.OwnerSelectorRefs, ","), nil, []string{sealed.AcquisitionTargetSelectorRef}, fmt.Errorf("runtime semantic proof for coverage %q does not match sealed owner-fact acquisition selector", proofSet.CoverageWorkItemID))
+	}
+	if !sameStrings(proposal.Target.ProspectiveConstraintRefs, sealed.AcquisitionConstraintRefs) {
+		return runtimeSemanticProposalViolation(proposal, proposalIndex, "target.prospectiveConstraintRefs", RuntimeSemanticConstraintAllowedValue, strings.Join(proposal.Target.ProspectiveConstraintRefs, ","), nil, sealed.AcquisitionConstraintRefs, fmt.Errorf("runtime semantic proof for coverage %q does not match sealed owner-fact acquisition constraints", proofSet.CoverageWorkItemID))
 	}
 	return nil
 }

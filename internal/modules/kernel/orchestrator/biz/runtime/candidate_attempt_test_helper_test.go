@@ -142,9 +142,7 @@ func (c *RuntimeController) EnsureSemanticContractSealedForOperationTest(ctx con
 		}
 		return aggregate, nil
 	}
-	sourceFocuses := append([]runtimecontract.CoverageFocus{aggregate.Facts.Focus}, aggregate.Facts.RemainingFocuses...)
-	sourceFocuses = append(sourceFocuses, aggregate.Facts.CompletedFocuses...)
-	focuses, _, err := runtimecontract.CompileRuntimeSemanticBindingsWithSourceFocuses(*ledger.Manifest, ledger.LogicalRequestID, *ledger.Document, ledger.Feasibilities, sourceFocuses)
+	focuses, _, err := runtimecontract.CompileRuntimeSemanticBindings(*ledger.Manifest, ledger.LogicalRequestID, *ledger.Document, ledger.Feasibilities)
 	if err != nil {
 		return RuntimeAggregate{}, err
 	}

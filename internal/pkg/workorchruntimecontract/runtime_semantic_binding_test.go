@@ -10,8 +10,8 @@ import (
 const runtimeSemanticBindingTestRequestID = "semantic-binding-test-request"
 
 func TestCompileRuntimeSemanticBindingsCombinesIndependentProofsForOneCWI(t *testing.T) {
-	manifest, document, facts, source := semanticIndependentProofSetFixture(t)
-	focuses, contract, err := CompileRuntimeSemanticBindingsWithSourceFocuses(manifest, runtimeSemanticBindingTestRequestID, document, facts, []CoverageFocus{source})
+	manifest, document, facts, _ := semanticIndependentProofSetFixture(t)
+	focuses, contract, err := CompileRuntimeSemanticBindings(manifest, runtimeSemanticBindingTestRequestID, document, facts)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -29,8 +29,8 @@ func TestCompileRuntimeSemanticBindingsCombinesIndependentProofsForOneCWI(t *tes
 }
 
 func TestCompileRuntimeSemanticBindingsDoesNotPromoteTargetToArtifact(t *testing.T) {
-	manifest, document, facts, source := semanticIndependentProofSetFixture(t)
-	focuses, _, err := CompileRuntimeSemanticBindingsWithSourceFocuses(manifest, runtimeSemanticBindingTestRequestID, document, facts, []CoverageFocus{source})
+	manifest, document, facts, _ := semanticIndependentProofSetFixture(t)
+	focuses, _, err := CompileRuntimeSemanticBindings(manifest, runtimeSemanticBindingTestRequestID, document, facts)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -60,7 +60,12 @@ func TestCompileRuntimeSemanticBindingsSealsSourceProofRequirementsOnUniqueValid
 	source.OwnerFactConvergences = []RuntimeOwnerFactConvergence{{Requirement: source.RequiredOwnerFacts[0], RequirePreexisting: true}}
 	source.MetricConstraints = []string{"metric/latency"}
 	source.ArtifactRefs = []string{"workorch://artifact/validation-report"}
-	focuses, _, err := CompileRuntimeSemanticBindingsWithSourceFocuses(manifest, runtimeSemanticBindingTestRequestID, document, facts, []CoverageFocus{source})
+	manifest = sealSemanticTestManifestWithSource(t, manifest, source)
+	document.ManifestHash = manifest.Hash
+	for index := range facts {
+		facts[index] = semanticFeasibilityForTest(t, manifest, document.Proposals[index], facts[index].TargetRefs, facts[index].ValidationRecipeID, facts[index].RequiredCheckRefs)
+	}
+	focuses, _, err := CompileRuntimeSemanticBindings(manifest, runtimeSemanticBindingTestRequestID, document, facts)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -85,16 +90,35 @@ func TestCompileRuntimeSemanticBindingsSealsSourceProofRequirementsOnUniqueValid
 }
 
 func TestSemanticBindingMissingOwnerFactRequiresExactSealedAcquisition(t *testing.T) {
+	manifest, document, proposal := semanticMissingOwnerFactAcquisitionFixture(t)
+	fact := semanticFeasibilityForTest(t, manifest, proposal, []string{"validation-readiness.sh"}, "", nil)
+	if _, _, err := CompileRuntimeSemanticBindings(manifest, runtimeSemanticBindingTestRequestID, document, []RuntimeSemanticProofFeasibility{fact}); err != nil {
+		t.Fatalf("exact sealed owner-fact acquisition was rejected: %v", err)
+	}
+
+	parallel := document.Clone()
+	second := proposal.Clone()
+	second.Target.ProspectiveTargetRef = "other.go"
+	parallel.Proposals = append(parallel.Proposals, second)
+	if err := parallel.ValidateAgainstManifest(manifest); err == nil {
+		t.Fatalf("parallel/unsealed owner-fact acquisition was accepted: %v", err)
+	}
+}
+
+func semanticMissingOwnerFactAcquisitionFixture(t *testing.T) (RuntimeSemanticPlanManifest, RuntimeSemanticPlanDocument, RuntimeSemanticProofProposal) {
+	t.Helper()
 	manifest, document, _, source := semanticIndependentProofSetFixture(t)
 	requirement := RuntimeOwnerFactRequirement{
 		OwnerModuleID: RuntimeModuleShell, FactKind: RuntimeOwnerFactSelectableValidationSurface,
 		OperationKind: RuntimeBlockKindManagedValidationSession,
 	}
-	const selector = "file/workspace-relative-create"
+	const declarationSelector = "file/workspace-deliverable"
+	const operationSelector = "file/workspace-relative-create"
 	convergence := RuntimeOwnerFactConvergence{
 		Requirement: requirement, MissingTrigger: RuntimeOwnerFactMissingTrigger,
 		AcquisitionOwnerModuleID: RuntimeModuleFile, AcquisitionOperationKind: StepKindFileWrite,
-		TargetSelectorRef: selector, TargetSelectorOwnerRef: "profile/test", TargetSelectorSubjectRef: "validation_preparation",
+		AcquisitionTargetPolicy: RuntimeOperationTargetPolicyProspectiveOwnerTarget, AcquisitionTargetSelectorRef: operationSelector,
+		TargetSelectorRef: declarationSelector, TargetSelectorOwnerRef: "profile/test", TargetSelectorSubjectRef: "validation_preparation",
 		ReobserveOwnerModuleID: RuntimeModuleShell, ReobserveFactKind: RuntimeOwnerFactSelectableValidationSurface,
 		MaxAcquisitionAttempts: 1,
 	}
@@ -102,7 +126,7 @@ func TestSemanticBindingMissingOwnerFactRequiresExactSealedAcquisition(t *testin
 	source.AcceptedStepKinds = []string{StepKindFileWrite, RuntimeBlockKindManagedValidationSession}
 	source.RequiredOwnerFacts = []RuntimeOwnerFactRequirement{requirement}
 	source.OwnerFactConvergences = []RuntimeOwnerFactConvergence{convergence}
-	source.TargetSelectorRef = selector
+	source.TargetSelectorRef = declarationSelector
 	source.TargetSelectorOwnerRef = convergence.TargetSelectorOwnerRef
 	source.TargetSelectorSubjectRef = convergence.TargetSelectorSubjectRef
 
@@ -120,25 +144,15 @@ func TestSemanticBindingMissingOwnerFactRequiresExactSealedAcquisition(t *testin
 		}
 		manifest.OwnerCatalogs[index].SnapshotID = StableRuntimeOperationAdmissibilitySnapshotID(manifest.OwnerCatalogs[index])
 	}
-	manifest = sealSemanticTestManifest(t, manifest)
+	manifest = sealSemanticTestManifestWithSource(t, manifest, source)
 	proposal := document.Proposals[0].Clone()
 	proposal.Target = RuntimeOperationTargetAuthorization{
-		Policy: RuntimeOperationTargetPolicyExistingOwnerScope, OwnerScopeTargetRefs: []string{"main.go"}, OwnerSelectorRefs: []string{selector},
+		Policy: RuntimeOperationTargetPolicyProspectiveOwnerTarget, OwnerSelectorRefs: []string{operationSelector},
+		ProspectiveConstraintRefs: []string{"workspace-relative-path"}, ProspectiveTargetRef: "validation-readiness.sh",
 	}
 	document.ManifestHash = manifest.Hash
 	document.Proposals = []RuntimeSemanticProofProposal{proposal}
-	fact := semanticFeasibilityForTest(t, manifest, proposal, []string{"main.go"}, "", nil)
-	if _, _, err := CompileRuntimeSemanticBindingsWithSourceFocuses(manifest, runtimeSemanticBindingTestRequestID, document, []RuntimeSemanticProofFeasibility{fact}, []CoverageFocus{source}); err != nil {
-		t.Fatalf("exact sealed owner-fact acquisition was rejected: %v", err)
-	}
-
-	parallel := document.Clone()
-	second := proposal.Clone()
-	second.Target.OwnerScopeTargetRefs = []string{"other.go"}
-	parallel.Proposals = append(parallel.Proposals, second)
-	if err := ValidateRuntimeSemanticPlanSourceDeclarationsWithOwnerFacts(parallel, []CoverageFocus{source}, manifest.OwnerCatalogs); err == nil || !strings.Contains(err.Error(), "exactly one sealed owner-fact acquisition") {
-		t.Fatalf("parallel/unsealed owner-fact acquisition was accepted: %v", err)
-	}
+	return manifest, document, proposal
 }
 
 func TestCompileRuntimeSemanticBindingsRejectsAmbiguousSourceProofRequirementOwner(t *testing.T) {
@@ -176,7 +190,11 @@ func TestCompileRuntimeSemanticBindingsCombinesProspectiveCreationAndExactValida
 	facts[0] = semanticFeasibilityForTest(t, manifest, document.Proposals[0], []string{"new-file.go"}, "", nil)
 	facts[1] = semanticFeasibilityForTest(t, manifest, document.Proposals[1], []string{"new-file.go"}, "recipe/validate", []string{"check/validate"})
 
-	focuses, _, err := CompileRuntimeSemanticBindingsWithSourceFocuses(manifest, runtimeSemanticBindingTestRequestID, document, facts, []CoverageFocus{source})
+	manifest = sealSemanticTestManifestWithSource(t, manifest, source)
+	document.ManifestHash = manifest.Hash
+	facts[0] = semanticFeasibilityForTest(t, manifest, document.Proposals[0], []string{"new-file.go"}, "", nil)
+	facts[1] = semanticFeasibilityForTest(t, manifest, document.Proposals[1], []string{"new-file.go"}, "recipe/validate", []string{"check/validate"})
+	focuses, _, err := CompileRuntimeSemanticBindings(manifest, runtimeSemanticBindingTestRequestID, document, facts)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -189,7 +207,7 @@ func TestCompileRuntimeSemanticBindingsCombinesProspectiveCreationAndExactValida
 		Policy: RuntimeOperationTargetPolicyExactTarget, ExactTargetRefs: []string{"other.go"},
 	}
 	mismatchedFact := semanticFeasibilityForTest(t, manifest, mismatched.Proposals[1], []string{"other.go"}, "recipe/validate", []string{"check/validate"})
-	if _, _, err := CompileRuntimeSemanticBindingsWithSourceFocuses(manifest, runtimeSemanticBindingTestRequestID, mismatched, []RuntimeSemanticProofFeasibility{facts[0], mismatchedFact}, []CoverageFocus{source}); err == nil {
+	if _, _, err := CompileRuntimeSemanticBindings(manifest, runtimeSemanticBindingTestRequestID, mismatched, []RuntimeSemanticProofFeasibility{facts[0], mismatchedFact}); err == nil {
 		t.Fatalf("mismatched creation and validation targets were accepted: %v", err)
 	}
 }
@@ -218,7 +236,17 @@ func TestCompileRuntimeSemanticBindingsUsesDeclaredSelectorOwnerAcrossProofOwner
 	}
 	source.TargetSelectorRef = selector
 	source.TargetSelectorOwnerRef = RuntimeModuleFile
-	bindings, _, err := CompileRuntimeSemanticBindingsWithSourceFocuses(manifest, runtimeSemanticBindingTestRequestID, document, facts, []CoverageFocus{source})
+	source.TargetSelectorSubjectRef = "deliverable"
+	manifest = sealSemanticTestManifestWithSource(t, manifest, source)
+	document.ManifestHash = manifest.Hash
+	for index := range facts {
+		checks := document.Proposals[index].RequiredCheckRefs
+		if document.Proposals[index].ValidationRecipeID != "" && len(checks) == 0 {
+			checks = []string{"check/validate"}
+		}
+		facts[index] = semanticFeasibilityForTest(t, manifest, document.Proposals[index], nil, document.Proposals[index].ValidationRecipeID, checks)
+	}
+	bindings, _, err := CompileRuntimeSemanticBindings(manifest, runtimeSemanticBindingTestRequestID, document, facts)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -231,7 +259,9 @@ func TestCompileRuntimeSemanticBindingsRejectsMissingSourceRequiredValidationPro
 	manifest, document, facts, source := semanticIndependentProofSetFixture(t)
 	document.Proposals = document.Proposals[:1]
 	facts = facts[:1]
-	if _, _, err := CompileRuntimeSemanticBindingsWithSourceFocuses(manifest, runtimeSemanticBindingTestRequestID, document, facts, []CoverageFocus{source}); err == nil ||
+	manifest = sealSemanticTestManifestWithSource(t, manifest, source)
+	document.ManifestHash = manifest.Hash
+	if _, _, err := CompileRuntimeSemanticBindings(manifest, runtimeSemanticBindingTestRequestID, document, facts); err == nil ||
 		!strings.Contains(err.Error(), "does not cover source required evidence kinds") {
 		t.Fatalf("semantic plan without source-required validation proof was accepted: %v", err)
 	}
@@ -245,18 +275,6 @@ func TestCompileRuntimeSemanticBindingsRejectsProposalVariantOutsideSourceDeclar
 	}}}
 	if err := validateRuntimeSemanticProofSetSource(proofSet, &source); err == nil || !strings.Contains(err.Error(), "operation variant \"add\" is outside source declaration") {
 		t.Fatalf("source variant mismatch error = %v", err)
-	}
-}
-
-func TestValidateRuntimeSemanticPlanSourceDeclarationsRejectsVariantBeforeFeasibility(t *testing.T) {
-	_, document, _, source := semanticIndependentProofSetFixture(t)
-	document.Proposals[0].OperationKind = StepKindGitWrite
-	document.Proposals[0].OwnerModuleID = RuntimeModuleGit
-	document.Proposals[0].OperationVariantID = "add"
-	source.AcceptedStepKinds = []string{StepKindGitWrite, RuntimeBlockKindManagedValidationSession}
-	source.AcceptedOperationVariants = []RuntimeOperationVariantRef{{Kind: StepKindGitWrite, VariantID: "commit"}}
-	if err := ValidateRuntimeSemanticPlanSourceDeclarations(document, []CoverageFocus{source}); err == nil || !strings.Contains(err.Error(), "operation variant \"add\" is outside source declaration") {
-		t.Fatalf("pre-feasibility source variant mismatch error = %v", err)
 	}
 }
 
@@ -340,11 +358,15 @@ func TestCompileRuntimeSemanticBindingsRetainsSourceSelectorCandidates(t *testin
 	}
 	source := CoverageFocus{
 		ID: "source-selector", CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-001"},
-		TargetRole: "deliverable", TargetDiscoverySources: []string{RuntimeValidationDiscoverySourceWorkspaceManifest},
+		RequiredEvidenceKinds: []string{EvidenceKindStateChange},
+		TargetRole:            "deliverable", TargetDiscoverySources: []string{RuntimeValidationDiscoverySourceWorkspaceManifest},
 		TargetSelectorRef: "file/workspace-relative-create", TargetSelectorOwnerRef: "profile-test", TargetSelectorSubjectRef: "deliverable",
 		TargetSelectorCandidateRefs: []string{"main.go"}, RequireTargetGrounding: true,
 	}
-	focuses, contract, err := CompileRuntimeSemanticBindingsWithSourceFocuses(manifest, runtimeSemanticBindingTestRequestID, document, []RuntimeSemanticProofFeasibility{fact}, []CoverageFocus{source})
+	manifest = sealSemanticTestManifestWithSource(t, manifest, source)
+	document.ManifestHash = manifest.Hash
+	fact = semanticFeasibilityForTest(t, manifest, proposal, []string{proposal.Target.ProspectiveTargetRef}, "", nil)
+	focuses, contract, err := CompileRuntimeSemanticBindings(manifest, runtimeSemanticBindingTestRequestID, document, []RuntimeSemanticProofFeasibility{fact})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -484,7 +506,11 @@ func semanticIndependentProofSetFixture(t *testing.T) (RuntimeSemanticPlanManife
 		RuntimeOperationTargetPolicyExistingOwnerScope,
 	)
 	manifest.OwnerCatalogs = append(manifest.OwnerCatalogs, shellCatalog)
-	manifest = sealSemanticTestManifest(t, manifest)
+	source := CoverageFocus{
+		ID: "source-independent-proofs", CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-001"},
+		RequiredEvidenceKinds: []string{EvidenceKindStateChange, EvidenceKindValidation}, ValidationRecipeID: "recipe/validate",
+	}
+	manifest = sealSemanticTestManifestWithSource(t, manifest, source)
 
 	stateChange := semanticContractTestProposal("cwi-001")
 	stateChange.Target = RuntimeOperationTargetAuthorization{
@@ -506,10 +532,6 @@ func semanticIndependentProofSetFixture(t *testing.T) (RuntimeSemanticPlanManife
 	facts := []RuntimeSemanticProofFeasibility{
 		semanticFeasibilityForTest(t, manifest, stateChange, []string{"main.go"}, "", nil),
 		semanticFeasibilityForTest(t, manifest, validation, []string{"main.go"}, "recipe/validate", []string{"check/validate"}),
-	}
-	source := CoverageFocus{
-		ID: "source-independent-proofs", CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-001"},
-		RequiredEvidenceKinds: []string{EvidenceKindStateChange, EvidenceKindValidation}, ValidationRecipeID: "recipe/validate",
 	}
 	return manifest, document, facts, source
 }

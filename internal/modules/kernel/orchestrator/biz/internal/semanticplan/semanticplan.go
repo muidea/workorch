@@ -15,13 +15,14 @@ import (
 // semantic manifest with the current owner facts.  Keeping this value type
 // here prevents the pure comparison from depending on RuntimeAggregate.
 type ManifestIdentity struct {
-	WorkspaceID      common.WorkspaceID
-	RunID            common.RunID
-	Definition       runtimecontract.RuntimeDefinitionContext
-	DefinitionSeed   runtimecontract.RuntimeDefinitionSeed
-	Execution        runtimecontract.RuntimeExecutionContract
-	Admissibilities  []runtimecontract.RuntimeOperationAdmissibility
-	EligibleCoverage []common.CoverageWorkItemID
+	WorkspaceID       common.WorkspaceID
+	RunID             common.RunID
+	Definition        runtimecontract.RuntimeDefinitionContext
+	DefinitionSeed    runtimecontract.RuntimeDefinitionSeed
+	DefinitionFocuses []runtimecontract.CoverageFocus
+	Execution         runtimecontract.RuntimeExecutionContract
+	Admissibilities   []runtimecontract.RuntimeOperationAdmissibility
+	EligibleCoverage  []common.CoverageWorkItemID
 }
 
 // CompileManifest is the single focused-package entry for compiling a
@@ -34,6 +35,7 @@ func CompileManifest(identity ManifestIdentity) (runtimecontract.RuntimeSemantic
 		identity.RunID,
 		identity.Definition,
 		identity.DefinitionSeed,
+		identity.DefinitionFocuses,
 		identity.Execution,
 		identity.Admissibilities,
 		identity.EligibleCoverage,

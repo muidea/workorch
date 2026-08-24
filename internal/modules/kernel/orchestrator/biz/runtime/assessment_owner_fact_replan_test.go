@@ -203,6 +203,9 @@ func prepareOwnerFactAssessment(t *testing.T, ownerFactReady bool, operationKind
 	convergence := runtimeTestSelectableValidationOwnerFactConvergence()
 	if len(operationKinds) > 0 {
 		convergence.AcquisitionOperationKind = runtimecontract.CanonicalRuntimeBlockKind(operationKinds[0])
+		if convergence.AcquisitionOperationKind == runtimecontract.RuntimeBlockKindPatchApply {
+			convergence.AcquisitionOperationVariantID = "file_write"
+		}
 	}
 	facts.Focus.OwnerFactConvergences = []runtimecontract.RuntimeOwnerFactConvergence{convergence}
 	if ownerFactReady {
@@ -264,6 +267,7 @@ func runtimeTestSelectableValidationOwnerFactConvergence() runtimecontract.Runti
 	return runtimecontract.RuntimeOwnerFactConvergence{
 		Requirement: runtimeTestSelectableValidationOwnerFact(), MissingTrigger: runtimecontract.RuntimeOwnerFactMissingTrigger,
 		AcquisitionOwnerModuleID: runtimecontract.RuntimeModuleFile, AcquisitionOperationKind: runtimecontract.StepKindFileWrite,
+		AcquisitionTargetPolicy: runtimecontract.RuntimeOperationTargetPolicyProspectiveOwnerTarget, AcquisitionTargetSelectorRef: "workspace-relative-new-file-target",
 		TargetSelectorRef: "file/workspace_deliverable", TargetSelectorOwnerRef: "test-profile", TargetSelectorSubjectRef: "validation_preparation",
 		ReobserveOwnerModuleID: runtimecontract.RuntimeModuleShell, ReobserveFactKind: runtimecontract.RuntimeOwnerFactSelectableValidationSurface,
 		MaxAcquisitionAttempts: 1,

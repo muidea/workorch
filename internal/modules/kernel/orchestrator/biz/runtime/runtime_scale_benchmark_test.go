@@ -52,9 +52,10 @@ func BenchmarkRuntimeSemanticManifestRendering64CWI(b *testing.B) {
 	identity := semanticplan.ManifestIdentity{
 		WorkspaceID: aggregate.Facts.WorkspaceID, RunID: aggregate.Facts.RunID,
 		Definition: aggregate.Definition, DefinitionSeed: aggregate.Facts.DefinitionSeed,
-		Execution:        aggregate.Facts.Activation.ExecutionContract,
-		Admissibilities:  aggregate.Facts.Resources.OperationAdmissibilities,
-		EligibleCoverage: runtimecontract.RuntimeCWIsEligibleForPlanning(aggregate.Facts),
+		DefinitionFocuses: aggregate.Facts.DefinitionFocuses,
+		Execution:         aggregate.Facts.Activation.ExecutionContract,
+		Admissibilities:   aggregate.Facts.Resources.OperationAdmissibilities,
+		EligibleCoverage:  runtimecontract.RuntimeCWIsEligibleForPlanning(aggregate.Facts),
 	}
 	b.ReportAllocs()
 	b.ResetTimer()

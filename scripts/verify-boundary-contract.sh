@@ -3543,7 +3543,7 @@ definition_owner_fact_contract="$(cat \
 	internal/modules/blocks/workspace/pkg/models/definition_admission.go \
 	internal/modules/application/workorchd/biz/appservice/definitionadmissioncore/compiler.go \
 	internal/pkg/workorchruntimecontract/runtime_owner_fact.go)"
-for marker in RequiredOwnerFactBindings OwnerFactConvergenceBindings RuntimeProfileContractsHash RuntimeOwnerFactMissingTrigger MaxAcquisitionAttempts; do
+for marker in RequiredOwnerFactBindings OwnerFactConvergenceBindings RuntimeProfileContractsHash RuntimeOwnerFactMissingTrigger AcquisitionOperationVariantID AcquisitionTargetPolicy AcquisitionTargetSelectorRef MaxAcquisitionAttempts; do
 	if ! grep -q -F "$marker" <<<"$definition_owner_fact_contract"; then
 		echo "boundary contract violation: Definition owner-fact closure lost $marker" >&2
 		exit 1
@@ -3554,12 +3554,30 @@ if ! grep -q -F 'declared_prerequisite_unresolved' <<<"$definition_owner_fact_co
 	exit 1
 fi
 runtime_owner_fact_consumption="$(cat \
+	internal/pkg/workorchruntimecontract/runtime_semantic_obligation.go \
 	internal/pkg/workorchruntimecontract/runtime_semantic_binding.go \
+	internal/pkg/workorchruntimecontract/runtime_semantic_payload.go \
 	internal/modules/kernel/orchestrator/biz/runtime/semantic_planning.go \
 	internal/modules/kernel/orchestrator/biz/runtime/assessment_owner_fact_replan.go)"
-for marker in ResolveRuntimeOwnerFactAcquisition ValidateRuntimeSemanticPlanSourceDeclarationsWithOwnerFacts runtimeOwnerFactAcquisitionFailureSignature; do
+for marker in RuntimeSemanticProofObligation AcquisitionTargetSelectorRef CompileRuntimeSemanticBindings runtimeOwnerFactAcquisitionFailureSignature; do
 	if ! grep -q -F "$marker" <<<"$runtime_owner_fact_consumption"; then
 		echo "boundary contract violation: SM-2 owner-fact acquisition lost exact sealed selection or one-shot accounting ($marker)" >&2
+		exit 1
+	fi
+done
+if rg -n 'CompileRuntimeSemanticBindingsWithSourceFocuses|ValidateRuntimeSemanticPlanSourceDeclarations(WithOwnerFacts)?' \
+	internal/pkg/workorchruntimecontract --glob '*.go' --glob '!**/*_test.go' >/dev/null; then
+	echo "boundary contract violation: semantic binding restored a post-manifest DefinitionFocus compatibility path" >&2
+	exit 1
+fi
+for regression in \
+	'TestRuntimeSemanticOwnerFactAcquisitionSchemaUsesOperationSelectorNotDefinitionSelector' \
+	'TestRuntimeSemanticManifestRejectsAcquisitionSelectorDriftFromSealedCatalog' \
+	'TestRuntimeSemanticProviderProjectsDefinitionLineageAndExactAcquisitionSelector' \
+	'TestRuntimeCandidatePrefixChangesWithOwnerFactAcquisitionAuthorization' \
+	'TestCompileRequiresExactStaticOwnerFactConvergenceBeforeAdmission'; do
+	if ! rg -q -F "$regression" internal; then
+		echo "boundary contract violation: semantic selector separation regression is missing ($regression)" >&2
 		exit 1
 	fi
 done

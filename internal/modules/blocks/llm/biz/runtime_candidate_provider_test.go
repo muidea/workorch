@@ -154,6 +154,9 @@ func TestRuntimeSemanticPlanProviderUsesSingleCachePipelineAndSafeCorrection(t *
 	base.SemanticManifest.CoverageItems[0].PrerequisiteCoverageWorkItemIDs = []common.CoverageWorkItemID{"cwi-000"}
 	prerequisite := runtimecontract.RuntimeCoverageItem{ID: "cwi-000", SliceID: "slice-1", SourceScope: "dodItem", SourceID: "dod-000", TargetText: "prerequisite"}
 	base.SemanticManifest.CoverageItems = append(base.SemanticManifest.CoverageItems, prerequisite)
+	base.SemanticManifest.ProofObligations = append(base.SemanticManifest.ProofObligations, runtimecontract.RuntimeSemanticProofObligation{
+		CoverageWorkItemID: "cwi-000", RequiredEvidenceKinds: []string{runtimecontract.EvidenceKindStateChange},
+	})
 	base.SemanticContext.DefinitionSeed.CoverageItems = append(base.SemanticContext.DefinitionSeed.CoverageItems, prerequisite)
 	base.SemanticContext.DefinitionSeed.Slices[0].CoverageWorkItemIDs = append(base.SemanticContext.DefinitionSeed.Slices[0].CoverageWorkItemIDs, "cwi-000")
 	base.SemanticContext.DefinitionSeed.Hash = runtimecontract.StableRuntimeDefinitionSeedHash(base.SemanticContext.DefinitionSeed)
@@ -399,6 +402,9 @@ func TestRuntimeSemanticProofBatchProviderProjectionOmitsUnrelatedCoverage(t *te
 	request.SemanticContext.BatchSequence = 0
 	request.SemanticContext.BatchCoverageWorkItemIDs = []common.CoverageWorkItemID{"cwi-001"}
 	request.SemanticManifest.CoverageItems = items
+	request.SemanticManifest.ProofObligations = append(request.SemanticManifest.ProofObligations, runtimecontract.RuntimeSemanticProofObligation{
+		CoverageWorkItemID: "cwi-002", RequiredEvidenceKinds: []string{runtimecontract.EvidenceKindStateChange},
+	})
 	request.SemanticManifest.DefinitionSeedHash = seed.Hash
 	request.SemanticManifest.Hash = runtimecontract.StableRuntimeSemanticPlanManifestHash(request.SemanticManifest)
 	providerRequest, err := runtimeProviderRequest(request)
@@ -471,6 +477,61 @@ func TestRuntimeSemanticProviderProjectionOmitsNonReadyValidationAndOwnerPrivate
 		if strings.Contains(providerContext, forbidden) {
 			t.Fatalf("provider catalog leaked owner-private/non-ready fact %q: %s", forbidden, providerContext)
 		}
+	}
+}
+
+func TestRuntimeSemanticProviderProjectsDefinitionLineageAndExactAcquisitionSelector(t *testing.T) {
+	request := runtimeSemanticProviderTestRequest(t)
+	catalog := request.SemanticManifest.OwnerCatalogs[0].Normalized()
+	catalog.OperationVariants = []runtimecontract.RuntimeOperationAdmissibilityVariant{{
+		Kind:                  runtimecontract.StepKindFileWrite,
+		AllowedTargetPolicies: []runtimecontract.RuntimeOperationTargetPolicy{runtimecontract.RuntimeOperationTargetPolicyProspectiveOwnerTarget},
+		SelectorRefs:          []string{"workspace-relative-new-file-target"}, ConstraintRefs: []string{"workspace-relative-path"},
+	}}
+	catalog.SnapshotID = runtimecontract.StableRuntimeOperationAdmissibilitySnapshotID(catalog)
+	requirement := runtimecontract.RuntimeOwnerFactRequirement{
+		OwnerModuleID: runtimecontract.RuntimeModuleShell,
+		FactKind:      runtimecontract.RuntimeOwnerFactSelectableValidationSurface,
+		OperationKind: runtimecontract.RuntimeBlockKindManagedValidationSession,
+	}
+	convergence := runtimecontract.RuntimeOwnerFactConvergence{
+		Requirement: requirement, MissingTrigger: runtimecontract.RuntimeOwnerFactMissingTrigger,
+		AcquisitionOwnerModuleID: runtimecontract.RuntimeModuleFile, AcquisitionOperationKind: runtimecontract.StepKindFileWrite,
+		AcquisitionTargetPolicy:      runtimecontract.RuntimeOperationTargetPolicyProspectiveOwnerTarget,
+		AcquisitionTargetSelectorRef: "workspace-relative-new-file-target",
+		TargetSelectorRef:            "file/workspace_deliverable", TargetSelectorOwnerRef: "software-dev", TargetSelectorSubjectRef: "validation_preparation",
+		ReobserveOwnerModuleID: runtimecontract.RuntimeModuleShell, ReobserveFactKind: runtimecontract.RuntimeOwnerFactSelectableValidationSurface,
+		MaxAcquisitionAttempts: 1,
+	}
+	request.SemanticManifest.OwnerCatalogs[0] = catalog
+	request.SemanticManifest.ProofObligations = []runtimecontract.RuntimeSemanticProofObligation{{
+		CoverageWorkItemID: "cwi-001", RequiredEvidenceKinds: []string{runtimecontract.EvidenceKindStateChange},
+		DeclarationTargetSelectorRef: "file/workspace_deliverable", DeclarationTargetSelectorOwnerRef: "software-dev", DeclarationTargetSelectorSubjectRef: "validation_preparation",
+		RequiredOwnerFacts: []runtimecontract.RuntimeOwnerFactRequirement{requirement}, OwnerFactConvergences: []runtimecontract.RuntimeOwnerFactConvergence{convergence},
+		OwnerFactAcquisition: &runtimecontract.RuntimeSemanticOwnerFactAcquisition{
+			Requirement:                  requirement,
+			DeclarationTargetSelectorRef: "file/workspace_deliverable", DeclarationTargetSelectorOwnerRef: "software-dev", DeclarationTargetSelectorSubjectRef: "validation_preparation",
+			AcquisitionOwnerModuleID: runtimecontract.RuntimeModuleFile, AcquisitionOperationKind: runtimecontract.StepKindFileWrite,
+			AcquisitionTargetPolicy:      runtimecontract.RuntimeOperationTargetPolicyProspectiveOwnerTarget,
+			AcquisitionTargetSelectorRef: "workspace-relative-new-file-target", AcquisitionConstraintRefs: []string{"workspace-relative-path"},
+			OwnerCatalogSnapshotID: catalog.SnapshotID, OwnerCatalogObservedRevision: catalog.ObservedRevision,
+			ReobserveOwnerModuleID: runtimecontract.RuntimeModuleShell, ReobserveFactKind: runtimecontract.RuntimeOwnerFactSelectableValidationSurface,
+			MaxAcquisitionAttempts: 1,
+		},
+	}}
+	request.SemanticManifest.Hash = runtimecontract.StableRuntimeSemanticPlanManifestHash(request.SemanticManifest)
+	providerRequest, err := runtimeProviderRequest(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	authority := providerRequest.PromptContext.Sections[3].Content
+	if !strings.Contains(authority, `"declarationTargetSelectorRef":"file/workspace_deliverable"`) ||
+		!strings.Contains(authority, `"acquisitionTargetSelectorRef":"workspace-relative-new-file-target"`) {
+		t.Fatalf("provider projection conflated Definition lineage and operation selector: %s", authority)
+	}
+	if !strings.Contains(providerRequest.Schema, `"const":"workspace-relative-new-file-target"`) ||
+		strings.Contains(providerRequest.Schema, `"const":"file/workspace_deliverable"`) {
+		t.Fatalf("provider schema did not constrain the exact operation selector: %s", providerRequest.Schema)
 	}
 }
 
@@ -549,7 +610,10 @@ func runtimeSemanticProviderTestRequest(t testing.TB) llmmodels.RuntimeCandidate
 		OperationContractRevision: runtimecontract.RuntimeOperationContractRevision(), CoverageItems: items,
 		AllowedOwnerModuleIDs: []string{runtimecontract.RuntimeModuleFile}, AllowedOperationKinds: []string{runtimecontract.StepKindFileWrite},
 		AllowedTargetPolicies: []runtimecontract.RuntimeOperationTargetPolicy{runtimecontract.RuntimeOperationTargetPolicyProspectiveOwnerTarget},
-		OwnerCatalogs:         []runtimecontract.RuntimeOperationAdmissibility{catalog},
+		ProofObligations: []runtimecontract.RuntimeSemanticProofObligation{{
+			CoverageWorkItemID: "cwi-001", RequiredEvidenceKinds: []string{runtimecontract.EvidenceKindStateChange},
+		}},
+		OwnerCatalogs: []runtimecontract.RuntimeOperationAdmissibility{catalog},
 	}
 	manifest.Hash = runtimecontract.StableRuntimeSemanticPlanManifestHash(manifest)
 	ceiling := &runtimecontract.ProviderCeiling{

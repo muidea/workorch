@@ -659,6 +659,7 @@ func TestRuntimeSemanticStaleFactPrecedesBoundedCatalogRefreshAndSurvivesReload(
 	facts.Resources.OperationAdmissibilities = []runtimecontract.RuntimeOperationAdmissibility{catalog}
 	facts.Resources.PrerequisiteObservations = []runtimecontract.RuntimePrerequisiteObservation{observation}
 	facts.Prerequisites.Satisfied = []runtimecontract.RuntimePrerequisite{prerequisite}
+	facts.DefinitionFocuses = runtimeTestDefinitionFocuses(facts)
 	aggregate, err := controller.initialize(ctx, facts, controllerDefinition(), nil)
 	if err != nil {
 		t.Fatal(err)
@@ -886,6 +887,7 @@ func TestRuntimeSemanticPrerequisiteRequiredFailsClosedWithoutRetiringCatalog(t 
 	facts.Resources.OperationAdmissibilities = []runtimecontract.RuntimeOperationAdmissibility{catalog}
 	facts.Resources.PrerequisiteObservations = []runtimecontract.RuntimePrerequisiteObservation{observation}
 	facts.Prerequisites.Satisfied = []runtimecontract.RuntimePrerequisite{prerequisite}
+	facts.DefinitionFocuses = runtimeTestDefinitionFocuses(facts)
 	aggregate, err := controller.initialize(ctx, facts, controllerDefinition(), nil)
 	if err != nil {
 		t.Fatal(err)
@@ -1521,6 +1523,7 @@ func TestRuntimeSemanticCrossOwnerPartialBatchIsOrderIndependentAndRecoversAfter
 	}
 	gitCatalog.SnapshotID = runtimecontract.StableRuntimeOperationAdmissibilitySnapshotID(gitCatalog)
 	facts.Resources.OperationAdmissibilities = []runtimecontract.RuntimeOperationAdmissibility{fileCatalog, gitCatalog}
+	facts.DefinitionFocuses = runtimeTestDefinitionFocuses(facts)
 	aggregate, err := controller.initialize(ctx, facts, definition, nil)
 	if err != nil {
 		t.Fatal(err)
@@ -1530,6 +1533,7 @@ func TestRuntimeSemanticCrossOwnerPartialBatchIsOrderIndependentAndRecoversAfter
 		aggregate.Facts.RunID,
 		aggregate.Definition,
 		aggregate.Facts.DefinitionSeed,
+		aggregate.Facts.DefinitionFocuses,
 		aggregate.Facts.Activation.ExecutionContract,
 		aggregate.Facts.Resources.OperationAdmissibilities,
 		runtimecontract.RuntimeCWIsEligibleForPlanning(aggregate.Facts),
@@ -1847,6 +1851,7 @@ func TestRuntimeSemanticCatalogInvalidationDoesNotReplanSettledCWI(t *testing.T)
 	}
 	freshManifest, err := runtimecontract.CompileRuntimeSemanticPlanManifestForCoverage(
 		aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, aggregate.Definition, aggregate.Facts.DefinitionSeed,
+		aggregate.Facts.DefinitionFocuses,
 		aggregate.Facts.Activation.ExecutionContract, aggregate.Facts.Resources.OperationAdmissibilities, eligible,
 	)
 	if err != nil {
@@ -1886,6 +1891,7 @@ func TestRuntimeSemanticSettlementRetiresGenerationWhenDependencyBecomesEligible
 	facts.Resources.OperationAdmissibilities = []runtimecontract.RuntimeOperationAdmissibility{catalog}
 	facts.Resources.PrerequisiteObservations = []runtimecontract.RuntimePrerequisiteObservation{observation}
 	facts.Prerequisites.Satisfied = []runtimecontract.RuntimePrerequisite{prerequisite}
+	facts.DefinitionFocuses = runtimeTestDefinitionFocuses(facts)
 	aggregate, err := controller.initialize(ctx, facts, controllerDefinition(), nil)
 	if err != nil {
 		t.Fatal(err)
@@ -2037,6 +2043,7 @@ func newTwoItemSemanticBatchFixture(t *testing.T) (*RuntimeController, *controll
 	facts.Resources.OperationAdmissibilities = []runtimecontract.RuntimeOperationAdmissibility{catalog}
 	facts.Resources.PrerequisiteObservations = []runtimecontract.RuntimePrerequisiteObservation{observation}
 	facts.Prerequisites.Satisfied = []runtimecontract.RuntimePrerequisite{prerequisite}
+	facts.DefinitionFocuses = runtimeTestDefinitionFocuses(facts)
 	aggregate, err := controller.initialize(context.Background(), facts, controllerDefinition(), nil)
 	if err != nil {
 		t.Fatal(err)
@@ -2046,6 +2053,7 @@ func newTwoItemSemanticBatchFixture(t *testing.T) (*RuntimeController, *controll
 		aggregate.Facts.RunID,
 		aggregate.Definition,
 		aggregate.Facts.DefinitionSeed,
+		aggregate.Facts.DefinitionFocuses,
 		aggregate.Facts.Activation.ExecutionContract,
 		aggregate.Facts.Resources.OperationAdmissibilities,
 		runtimecontract.RuntimeCWIsEligibleForPlanning(aggregate.Facts),
@@ -2099,6 +2107,7 @@ func sealedSemanticPlanningAggregate(t *testing.T) (*RuntimeController, *control
 	facts.Resources.OperationAdmissibilities = []runtimecontract.RuntimeOperationAdmissibility{catalog}
 	facts.Resources.PrerequisiteObservations = []runtimecontract.RuntimePrerequisiteObservation{observation}
 	facts.Prerequisites.Satisfied = []runtimecontract.RuntimePrerequisite{prerequisite}
+	facts.DefinitionFocuses = runtimeTestDefinitionFocuses(facts)
 	aggregate, err := controller.initialize(context.Background(), facts, controllerDefinition(), nil)
 	if err != nil {
 		t.Fatal(err)
@@ -2177,6 +2186,7 @@ func semanticPlanningFixture(t *testing.T, aggregate RuntimeAggregate) (runtimec
 		aggregate.Facts.RunID,
 		aggregate.Definition,
 		aggregate.Facts.DefinitionSeed,
+		aggregate.Facts.DefinitionFocuses,
 		aggregate.Facts.Activation.ExecutionContract,
 		aggregate.Facts.Resources.OperationAdmissibilities,
 		runtimecontract.RuntimeCWIsEligibleForPlanning(aggregate.Facts),

@@ -82,7 +82,10 @@ application、Web 与 orchestrator 不直接访问 ai-proxy。
     “不返回 proposals”制造 schema/prompt 冲突；结构错误只返回 factual diagnostic，由 Orchestrator SM-3 决定一次有界纠错。
 13. profile `RequiredOwnerFacts` 作为 immutable declaration 进入 C2 和 stable prefix；它不是 current availability。
     current selectable identity 只能来自同 owner 的 C3 catalog。semantic instruction 明确禁止模型发明或宣称 owner fact；
-    assessment credit/replan 仍只属于 Orchestrator SM-2。
+    assessment credit/replan 仍只属于 Orchestrator SM-2。owner fact 缺失时，C3 只渲染 Orchestrator 已封存的 per-CWI
+    proof obligation：Definition selector 仅作为声明 lineage 展示，proposal 的 `targetSelectorRef` 必须是 capability
+    catalog 授权的 acquisition operation selector。LLM 不得复制 Definition selector 充当 File/Shell/MCP target；两者
+    不一致时也不得自行协调，typed field violation 交由 Orchestrator attempt-0 有界纠错，且不形成 candidate/dispatch。
 14. Skill 只从 Run owner 的 sealed activation 进入 volatile C3。每项携带 WorkOrch Registry 或 SkillHub typed
     provenance、original/truncated instruction identity 与 activation-time byte budget；LLM 不读取 Skill repository/catalog、
     不重新选择或裁剪 Skill，也不把 Skill material 移入 C0～C2。缺失/漂移的 provenance 或 budget 在 Runtime

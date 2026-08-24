@@ -964,6 +964,8 @@
                   "missingTrigger": "owner_fact_missing",
                   "acquisitionOwnerModuleId": "blocks/file",
                   "acquisitionOperationKind": "file/write",
+                  "acquisitionTargetPolicy": "prospective_owner_target",
+                  "acquisitionTargetSelectorRef": "workspace-relative-new-file-target",
                   "targetSelectorRef": "file/workspace_deliverable",
                   "targetSelectorOwnerRef": "software-dev",
                   "targetSelectorSubjectRef": "validation_readiness",

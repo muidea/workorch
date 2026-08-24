@@ -36,13 +36,14 @@ func validateSemanticManifestIdentity(aggregate RuntimeAggregate, manifest runti
 		return fmt.Errorf("%w: runtime semantic manifest has no eligible CWI", common.ErrConflict)
 	}
 	return semanticplan.ValidateManifestIdentity(semanticplan.ManifestIdentity{
-		WorkspaceID:      aggregate.Facts.WorkspaceID,
-		RunID:            aggregate.Facts.RunID,
-		Definition:       aggregate.Definition,
-		DefinitionSeed:   aggregate.Facts.DefinitionSeed,
-		Execution:        aggregate.Facts.Activation.ExecutionContract,
-		Admissibilities:  aggregate.Facts.Resources.OperationAdmissibilities,
-		EligibleCoverage: eligible,
+		WorkspaceID:       aggregate.Facts.WorkspaceID,
+		RunID:             aggregate.Facts.RunID,
+		Definition:        aggregate.Definition,
+		DefinitionSeed:    aggregate.Facts.DefinitionSeed,
+		DefinitionFocuses: aggregate.Facts.DefinitionFocuses,
+		Execution:         aggregate.Facts.Activation.ExecutionContract,
+		Admissibilities:   aggregate.Facts.Resources.OperationAdmissibilities,
+		EligibleCoverage:  eligible,
 	}, manifest)
 }
 
@@ -769,12 +770,6 @@ func (c *planningTransactionComponent) observeSemanticPlanBatchDocument(ctx cont
 		if err := document.ValidateAgainstManifest(*ledger.Manifest); err != nil {
 			return false, err
 		}
-		if document.PlanStep == runtimecontract.RuntimeSemanticPlanStepProofBatch {
-			sourceFocuses := aggregate.Facts.DefinitionFocuses
-			if err := runtimecontract.ValidateRuntimeSemanticPlanSourceDeclarationsWithOwnerFacts(document, sourceFocuses, ledger.Manifest.OwnerCatalogs); err != nil {
-				return false, err
-			}
-		}
 		if ledger.ActiveBatchID != document.BatchID {
 			return false, fmt.Errorf("%w: semantic batch document is not active", common.ErrConflict)
 		}
@@ -1045,11 +1040,6 @@ func evaluateSemanticPlanMutation(aggregate RuntimeAggregate, ledger *runtimecon
 	}
 	if err := validateSemanticPlanDocumentPhase(*ledger, document); err != nil {
 		return false, err
-	}
-	if document.PlanStep == runtimecontract.RuntimeSemanticPlanStepProofBatch {
-		if err := runtimecontract.ValidateRuntimeSemanticPlanSourceDeclarationsWithOwnerFacts(document, aggregate.Facts.DefinitionFocuses, ledger.Manifest.OwnerCatalogs); err != nil {
-			return false, err
-		}
 	}
 	if document.PlanStep == runtimecontract.RuntimeSemanticPlanStepCoverageOrder {
 		applySemanticCoverageOrderDocument(ledger, document, documentHash)

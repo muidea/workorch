@@ -42,7 +42,7 @@ func TestExistingTargetContextCarriesRevisionAndOwnerAlternatives(t *testing.T) 
 	manifest := runtimecontract.RuntimeSemanticPlanManifest{
 		SchemaVersion: runtimecontract.RuntimeSemanticPlanManifestSchemaCurrent, WorkspaceID: "ws-1", RunID: "run-1", DefinitionRevision: "definition-1", DefinitionSeedHash: "seed-1", OperationContractRevision: runtimecontract.RuntimeOperationContractRevision(),
 		CoverageItems:         []runtimecontract.RuntimeCoverageItem{{ID: "cwi-1", SliceID: "slice-1", SourceScope: "dodItem", SourceID: "dod-1", TargetText: "change", Order: 1}},
-		AllowedOwnerModuleIDs: []string{runtimecontract.RuntimeModuleFile}, AllowedOperationKinds: []string{runtimecontract.StepKindFileWrite, runtimecontract.RuntimeBlockKindPatchApply}, AllowedTargetPolicies: []runtimecontract.RuntimeOperationTargetPolicy{runtimecontract.RuntimeOperationTargetPolicyExactTarget, runtimecontract.RuntimeOperationTargetPolicyExistingOwnerScope, runtimecontract.RuntimeOperationTargetPolicyProspectiveOwnerTarget}, OwnerCatalogs: []runtimecontract.RuntimeOperationAdmissibility{catalog},
+		AllowedOwnerModuleIDs: []string{runtimecontract.RuntimeModuleFile}, AllowedOperationKinds: []string{runtimecontract.StepKindFileWrite, runtimecontract.RuntimeBlockKindPatchApply}, AllowedTargetPolicies: []runtimecontract.RuntimeOperationTargetPolicy{runtimecontract.RuntimeOperationTargetPolicyExactTarget, runtimecontract.RuntimeOperationTargetPolicyExistingOwnerScope, runtimecontract.RuntimeOperationTargetPolicyProspectiveOwnerTarget}, ProofObligations: []runtimecontract.RuntimeSemanticProofObligation{{CoverageWorkItemID: "cwi-1", RequiredEvidenceKinds: []string{runtimecontract.EvidenceKindStateChange}}}, OwnerCatalogs: []runtimecontract.RuntimeOperationAdmissibility{catalog},
 	}
 	manifest.Hash = runtimecontract.StableRuntimeSemanticPlanManifestHash(manifest)
 	diagnostic := &runtimecontract.RuntimeOriginalDiagnostic{SchemaVersion: runtimecontract.RuntimeOriginalDiagnosticSchemaCurrent, OwnerModuleID: runtimecontract.RuntimeModuleFile, OriginalClass: "semantic_feasibility", OriginalCode: "operation_target_exists", OriginalMessage: "must not be rendered", Signature: "file/operation-target-exists", TargetRefs: []string{"mcp-lsp-bridge/server.go"}, ExpectedRevision: "tree-v1", ObservedRevision: "tree-v2"}
@@ -83,17 +83,22 @@ func TestValidateManifestIdentityUsesCanonicalCompilation(t *testing.T) {
 	}
 	catalog.OperationVariants = []runtimecontract.RuntimeOperationAdmissibilityVariant{{Kind: runtimecontract.StepKindFileWrite, AllowedTargetPolicies: []runtimecontract.RuntimeOperationTargetPolicy{runtimecontract.RuntimeOperationTargetPolicyProspectiveOwnerTarget}, SelectorRefs: []string{"new-target"}, ConstraintRefs: []string{"path"}}}
 	catalog.SnapshotID = runtimecontract.StableRuntimeOperationAdmissibilitySnapshotID(catalog)
-	manifest, err := CompileManifest(ManifestIdentity{WorkspaceID: "ws-1", RunID: "run-1", Definition: definition, DefinitionSeed: seed, Execution: activation.ExecutionContract, Admissibilities: []runtimecontract.RuntimeOperationAdmissibility{catalog}, EligibleCoverage: []common.CoverageWorkItemID{"cwi-1"}})
+	focuses := runtimecontract.CompileRuntimeDefinitionFocuses([]runtimecontract.CoverageFocus{{
+		ID: "focus-1", SliceID: "slice-1", AssessmentScope: "dodItem", AssessmentID: "dod-1",
+		CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-1"}, RequiredEvidenceKinds: []string{runtimecontract.EvidenceKindStateChange}, RequireAssessment: true,
+	}})
+	identity := ManifestIdentity{WorkspaceID: "ws-1", RunID: "run-1", Definition: definition, DefinitionSeed: seed, DefinitionFocuses: focuses, Execution: activation.ExecutionContract, Admissibilities: []runtimecontract.RuntimeOperationAdmissibility{catalog}, EligibleCoverage: []common.CoverageWorkItemID{"cwi-1"}}
+	manifest, err := CompileManifest(identity)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := ValidateManifestIdentity(ManifestIdentity{WorkspaceID: "ws-1", RunID: "run-1", Definition: definition, DefinitionSeed: seed, Execution: activation.ExecutionContract, Admissibilities: []runtimecontract.RuntimeOperationAdmissibility{catalog}, EligibleCoverage: []common.CoverageWorkItemID{"cwi-1"}}, manifest); err != nil {
+	if err := ValidateManifestIdentity(identity, manifest); err != nil {
 		t.Fatal(err)
 	}
 	stale := manifest.Clone()
 	stale.DefinitionRevision = "definition-stale"
 	stale.Hash = runtimecontract.StableRuntimeSemanticPlanManifestHash(stale)
-	if err := ValidateManifestIdentity(ManifestIdentity{WorkspaceID: "ws-1", RunID: "run-1", Definition: definition, DefinitionSeed: seed, Execution: activation.ExecutionContract, Admissibilities: []runtimecontract.RuntimeOperationAdmissibility{catalog}, EligibleCoverage: []common.CoverageWorkItemID{"cwi-1"}}, stale); err == nil || !errors.Is(err, common.ErrConflict) {
+	if err := ValidateManifestIdentity(identity, stale); err == nil || !errors.Is(err, common.ErrConflict) {
 		t.Fatalf("stale manifest error = %v", err)
 	}
 }
