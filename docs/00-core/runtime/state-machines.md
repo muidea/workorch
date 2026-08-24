@@ -4,7 +4,7 @@ Status: normative
 
 Type: core-contract-part
 
-Last Verified: 2026-08-23
+Last Verified: 2026-08-24
 
 ## 四个协调状态机
 
@@ -242,6 +242,11 @@ sealed authority + preflight ready
   同一owner-local handoff一次，不能重复drive或跳过inventory completeness。
 - reducer terminal 已 sealed 后，SM-4 仅重试已持久化 terminal delivery request，等待 Result、Workspace、Run
   owner acknowledgement。projection health 不参与 reducer，也不是 runtime blocker。
+- catalog retirement 后若 current eligible CWI 尚无 sealed binding，SM-4 必须把 semantic generation 视为更高优先级的
+  owner-local 待办；该窗口中由缺少 binding 产生的 `target_grounding_unresolved` view 不能生成 drive result、startup
+  terminal-delivery classification 或 Result delivery request。current semantic operation authority ready 或 semantic
+  transaction 自身 failed 后才满足该 convergence terminal 的 delivery readiness。其它 sealed terminal 不得被重规划覆盖；
+  administrative termination 走独立 lane。此例外只允许 `semantic_plan` request；operations request 继续 fail-closed。
 - current-baseline Restart 的 SM-1 replacement 使用 Run-owned persisted stage/generation lease。clarification resolution、
   administrative termination、successor materialization 每一步都先由 Run private event claim，再由 exact result/ack 推进；
   process-local task 只唤醒 lease，失败/重启不能退化为 application/Orchestrator 第二份 scheduler。

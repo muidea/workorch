@@ -291,7 +291,15 @@ func (m *Biz) initializeRuntimeDrive(ctx context.Context, command orchestratorev
 func (m *Biz) driveOneRuntimeTransition(ctx context.Context, run *runmodel.Run, aggregate runtime.RuntimeAggregate, command orchestratorevents.DriveRuntimeCommand, stablePrefixHash string) (runtimeDriveTransitionOutcome, error) {
 	previousRevision := aggregate.StateRevision
 	previousConvergence := runtime.RuntimeConvergenceProgressSignature(aggregate)
-	if runtimeConvergenceTerminal(aggregate.Decision.State) {
+	// A catalog retirement can persist a fresh SM-3 semantic generation before
+	// SM-2 has a binding for the newly eligible CWI. The reducer decision stored
+	// in that same owner-local CAS is not operation authority until the semantic
+	// generation is sealed. In particular, a target-grounding terminal produced
+	// from the binding-free focus must not cross into SM-4 delivery. A terminal
+	// is final at this gate only when semantic operation authority is already
+	// usable, or when the semantic transaction itself has failed.
+	semanticAuthorityPending := runtimeSemanticAuthorityPending(aggregate)
+	if runtimeTerminalDeliveryReady(aggregate) {
 		return terminalRuntimeDriveTransition(aggregate), nil
 	}
 	if wait, pendingRetirement := runtimeRecoverableWaitPendingRetirement(aggregate); pendingRetirement {
@@ -324,7 +332,7 @@ func (m *Biz) driveOneRuntimeTransition(ctx context.Context, run *runmodel.Run, 
 		}
 		return runtimeDriveTransitionOutcome{aggregate: updated}, nil
 	}
-	if !runtime.SemanticOperationAuthorityReady(aggregate) && aggregate.SemanticPlanning.Phase != runtimecontract.RuntimeSemanticPlanningFailed {
+	if semanticAuthorityPending {
 		return m.driveOneRuntimeSemanticTransition(ctx, aggregate, previousRevision, previousConvergence)
 	}
 	if aggregate.SemanticPlanning.Phase == runtimecontract.RuntimeSemanticPlanningFailed {
@@ -365,6 +373,30 @@ func (m *Biz) driveRuntimeDefinitionClarification(ctx context.Context, aggregate
 
 func runtimeConvergenceTerminal(state runtimecontract.ConvergenceState) bool {
 	return state == runtimecontract.ConvergenceStateComplete || state == runtimecontract.ConvergenceStateFailed
+}
+
+// runtimeSemanticAuthorityPending is the SM-3-before-SM-4 ordering fence. A
+// retired/requesting semantic generation is still owner-local work whenever
+// the current CWI cannot reuse an execution-locked sealed binding.
+func runtimeSemanticAuthorityPending(aggregate runtime.RuntimeAggregate) bool {
+	return aggregate.SemanticPlanning.Phase != runtimecontract.RuntimeSemanticPlanningFailed &&
+		!runtime.SemanticOperationAuthorityReady(aggregate)
+}
+
+// runtimeTerminalDeliveryReady prevents the one reducer terminal that can be
+// computed from a binding-free focus while a new semantic generation is still
+// pending from escaping as an SM-4 outcome. Other reducer terminals already
+// express durable authority (for example a contract defect or exhausted
+// budget); a failed semantic transaction is likewise final.
+func runtimeTerminalDeliveryReady(aggregate runtime.RuntimeAggregate) bool {
+	if !runtimeConvergenceTerminal(aggregate.Decision.State) || aggregate.Decision.Terminal == nil {
+		return false
+	}
+	if aggregate.Decision.Terminal.Code != "target_grounding_unresolved" ||
+		aggregate.SemanticPlanning.Phase == runtimecontract.RuntimeSemanticPlanningFailed {
+		return true
+	}
+	return runtime.SemanticOperationAuthorityReady(aggregate)
 }
 
 func terminalRuntimeDriveTransition(aggregate runtime.RuntimeAggregate) runtimeDriveTransitionOutcome {
@@ -424,7 +456,7 @@ func finishRuntimeConvergenceTransition(aggregate runtime.RuntimeAggregate, prev
 		}
 		return runtimeDriveTransitionOutcome{aggregate: aggregate, result: &result}, nil
 	}
-	if runtimeConvergenceTerminal(aggregate.Decision.State) {
+	if runtimeTerminalDeliveryReady(aggregate) {
 		return terminalRuntimeDriveTransition(aggregate), nil
 	}
 	if aggregate.StateRevision <= previousRevision {

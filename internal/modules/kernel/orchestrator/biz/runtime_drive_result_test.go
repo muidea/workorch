@@ -3,10 +3,56 @@ package orchestrator
 import (
 	"testing"
 
+	runtime "github.com/muidea/workorch/internal/modules/kernel/orchestrator/biz/runtime"
 	orchestratorevents "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/common"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
+
+func TestRuntimeTerminalDeliveryWaitsForCurrentSemanticAuthority(t *testing.T) {
+	aggregate := runtime.RuntimeAggregate{
+		StateRevision: 2,
+		Facts: runtimecontract.RuntimeFacts{
+			Focus: runtimecontract.CoverageFocus{ID: "semantic-pending/cwi-2", CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-2"}},
+			Coverage: []runtimecontract.RuntimeCoverageItemFact{{
+				ID: "cwi-2", State: runtimecontract.RuntimeCoverageItemStateOpen,
+				CWIConvergenceState: runtimecontract.RuntimeCWIConvergenceStatePlanning,
+			}},
+		},
+		Decision: runtimecontract.RuntimeDecision{
+			State: runtimecontract.ConvergenceStateFailed,
+			Terminal: &runtimecontract.RuntimeTerminalDecision{
+				Code: "target_grounding_unresolved", Summary: "binding-free focus has no target yet",
+			},
+		},
+		SemanticPlanning: runtimecontract.RuntimeSemanticPlanningLedger{Phase: runtimecontract.RuntimeSemanticPlanningRequired},
+	}
+	if runtimeTerminalDeliveryReady(aggregate) {
+		t.Fatal("binding-free reducer terminal escaped before semantic re-seal")
+	}
+	if outcome, err := finishRuntimeConvergenceTransition(aggregate, 1, "before-catalog-retirement"); err != nil || outcome.result != nil {
+		t.Fatalf("provisional terminal produced an SM-4 result: outcome=%+v err=%v", outcome, err)
+	}
+
+	aggregate.Decision.Terminal.Code = "runtime_contract_defect"
+	if !runtimeTerminalDeliveryReady(aggregate) {
+		t.Fatal("authoritative non-grounding terminal was incorrectly reopened for semantic planning")
+	}
+	aggregate.Decision.Terminal.Code = "target_grounding_unresolved"
+
+	aggregate.SemanticPlanning.Phase = runtimecontract.RuntimeSemanticPlanningSealed
+	if !runtimeTerminalDeliveryReady(aggregate) {
+		t.Fatal("sealed semantic terminal was not delivery-ready")
+	}
+	if outcome, err := finishRuntimeConvergenceTransition(aggregate, 1, "before-semantic-seal"); err != nil || outcome.result == nil || outcome.result.Terminal == nil {
+		t.Fatalf("sealed terminal did not produce its SM-4 result: outcome=%+v err=%v", outcome, err)
+	}
+
+	aggregate.SemanticPlanning.Phase = runtimecontract.RuntimeSemanticPlanningFailed
+	if !runtimeTerminalDeliveryReady(aggregate) {
+		t.Fatal("semantic transaction failure was not delivery-ready")
+	}
+}
 
 func TestRuntimeDriveResultDerivesItsOnlyValidDispositionFromSealedFacts(t *testing.T) {
 	base := orchestratorevents.DriveRuntimeResult{

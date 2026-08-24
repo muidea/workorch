@@ -40,3 +40,22 @@ func WorkspaceToolContextHintsFor(ctx context.Context, hub magicevent.Hub, works
 		Effective: activationcore.MergeTemplateWorkspaceToolContextHints(templateHints, workspaceHints),
 	}
 }
+
+// WorkspaceToolContextHintsFromTemplate is the Runtime activation path. It
+// consumes the exact Template instance already bound by Definition admission
+// and therefore performs no second live owner read.
+func WorkspaceToolContextHintsFromTemplate(workspace *workspacemodel.Workspace, template *workspacemodel.WorkspaceTemplate) WorkspaceToolContextHints {
+	if workspace == nil {
+		return WorkspaceToolContextHints{}
+	}
+	workspaceHints := activationcore.CloneContextHints(workspace.ContextHints.Map())
+	var templateHints map[string]any
+	if template != nil {
+		templateHints = activationcore.CloneContextHints(template.ContextHints.Map())
+	}
+	return WorkspaceToolContextHints{
+		Template:  templateHints,
+		Workspace: workspaceHints,
+		Effective: activationcore.MergeTemplateWorkspaceToolContextHints(templateHints, workspaceHints),
+	}
+}

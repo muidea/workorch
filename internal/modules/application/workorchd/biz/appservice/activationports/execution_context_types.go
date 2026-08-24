@@ -10,6 +10,7 @@ import (
 type workspaceRuntimeActivationRequest struct {
 	Hub                            magicevent.Hub
 	Workspace                      *workspacemodel.Workspace
+	Template                       *workspacemodel.WorkspaceTemplate
 	Goal                           *workspacemodel.Goal
 	DoD                            *workspacemodel.DoD
 	SystemDefaultSoulID            common.SoulID

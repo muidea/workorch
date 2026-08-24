@@ -2,6 +2,7 @@ package activationports
 
 import (
 	"context"
+	"strings"
 
 	magicevent "github.com/muidea/magicCommon/event"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/activationcore"
@@ -23,9 +24,10 @@ type workspaceRuntimeActivationBuild struct {
 
 func buildWorkspaceRuntimeActivation(ctx context.Context, request workspaceRuntimeActivationRequest) (workspaceRuntimeActivationBuild, error) {
 	workspace := request.Workspace
+	template := request.Template
 	goal := request.Goal
 	dod := request.DoD
-	if request.Hub == nil || workspace == nil || goal == nil || dod == nil || goal.WorkspaceID != workspace.ID || dod.WorkspaceID != workspace.ID {
+	if request.Hub == nil || workspace == nil || template == nil || goal == nil || dod == nil || goal.WorkspaceID != workspace.ID || dod.WorkspaceID != workspace.ID || strings.TrimSpace(template.ID) != strings.TrimSpace(workspace.TemplateID) {
 		return workspaceRuntimeActivationBuild{}, common.ErrInvalidArgument
 	}
 	definitions, err := WorkspaceExecutionDefinitionsContext(ctx, request.Hub, workspace.ID, goal, dod)
@@ -36,11 +38,11 @@ func buildWorkspaceRuntimeActivation(ctx context.Context, request workspaceRunti
 	effectiveDoD := definitions.EffectiveDoD
 	definitionChangeImpact := definitions.DefinitionChangeImpact
 	dialogLanguage := activationcore.DialogLanguage("", request.DefaultDialogLanguage)
-	executionContract := WorkspaceExecutionContract(ctx, request.Hub, workspace)
+	executionContract := activationcore.WorkspaceExecutionContractForTemplate(workspace, template)
 	if err := applyConfiguredRuntimeRepairLimit(ctx, executionContract); err != nil {
 		return workspaceRuntimeActivationBuild{}, err
 	}
-	toolHints := WorkspaceToolContextHintsFor(ctx, request.Hub, workspace)
+	toolHints := WorkspaceToolContextHintsFromTemplate(workspace, template)
 	if err := workspacecore.EnsureManagedConfigs(workspace.InternalDirectory, toolHints.Template, toolHints.Workspace); err != nil {
 		return workspaceRuntimeActivationBuild{}, err
 	}

@@ -17,6 +17,11 @@ candidate 还封存 required owner-fact binding 与唯一 acquisition/reobserve 
 不读取 capability catalog 或选择运行期动作。`CandidateHash` 覆盖 acquisition operation variant、operation target policy、
 operation selector 与 Definition target-selection scope；owner ingress 不替 caller 重新计算 hash。
 
+pure compiler 位于 Workspace owner package，只做 immutable candidate 的静态计算。submit owner-private event 在同一 CAS
+路径生成并返回 exact `DefinitionAdmissionResult`；promotion command 不接收 caller 计算的 admission outcome，promotion
+owner-private event 必须重新编译 repository 中的 current exact candidate，且只允许 `admitted_all_of`。Application 对同一
+pure helper 的 read-side 调用只是防御校验，不产生或迁移 admission state。
+
 ## 组件交互及合同
 
 - Workspace、Goal、DoD 和 Template 的 CRUD input，以及 Template defaults ensure input，均由
@@ -30,7 +35,8 @@ operation selector 与 Definition target-selection scope；owner ingress 不替 
   definition revision；其他 owner 不直接访问 Workspace repository。
 - `application/workorchd` 通过 owner command/read port 管理和展示 workspace definition。
 - Definition admission 使用三个独立 concrete command/result：submit candidate、promote admitted candidate、acknowledge
-  clarification resolution。promotion 若绑定 blocking ticket，只能先进入 `pending_clarification_resolution`；逐字段匹配
+  clarification resolution。submit result 携带 Workspace owner 生成的 exact admission result；promotion command 只携带
+  candidate identity/hash 与可选 ticket，不携带 admission result/hash。promotion 若绑定 blocking ticket，只能先进入 `pending_clarification_resolution`；逐字段匹配
   Decision resolution 后才可 CAS 为 `eligible`。eligible revision 只关闭不晚于自身的旧 clarification lineage；其后的
   invalid candidate 仍须由后续 corrected candidate 精确 reconcile。三个 handler 只把 immutable fact 翻译成
   exactly-one owner-private event；candidate/startup/admission 的状态选择和 CAS 只经过一个 dispatcher，调用方不能携带
@@ -97,7 +103,8 @@ operation selector 与 Definition target-selection scope；owner ingress 不替 
 - [x] 缺失 current lineage 的 Goal/DoD 更新直接拒绝且不会补写 `active`。
 - [x] memory/file backend 上 Goal/DoD 局部 identity、错误 Workspace scope 的 Get/Update/Delete 与无 scope 歧义拒绝。
 - [x] sealed terminal outcome 的匹配释放、空 slot/其他 active Run/冲突 identity 拒绝和同 identity 重投递幂等。
-- [x] immutable candidate create/duplicate/stale revision、all-of promotion、pending clarification acknowledgement、
+- [x] immutable candidate create/duplicate/stale revision、owner-generated admission result、identity-only promotion 重编译、
+  unsupported alternative 零 promotion、all-of promotion、pending clarification acknowledgement、
   exactly-one private-event payload、duplicate acknowledgement noop 与 startup-input hash clone/persistence。
 - [x] application-owned directory resolver 的空目录默认值、相对/绝对路径规范化、workspace ID/相对路径逃逸拒绝和
   多 workspace 默认目录隔离。

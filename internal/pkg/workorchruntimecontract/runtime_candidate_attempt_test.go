@@ -162,7 +162,7 @@ func TestRuntimeStateRecordRejectsTerminalDecisionWithPendingCandidateAttempt(t 
 		Slices:        []RuntimeAcceptanceSlice{{ID: "slice-1", CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-1"}}},
 	}
 	facts.DefinitionSeed.Hash = StableRuntimeDefinitionSeedHash(facts.DefinitionSeed)
-	facts.DefinitionFocuses = []CoverageFocus{{
+	facts.DefinitionFocuses = []RuntimeDefinitionFocus{{
 		ID: facts.Focus.ID, SliceID: "slice-1", CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-1"},
 		RequiredEvidenceKinds: []string{EvidenceKindStateChange},
 	}}

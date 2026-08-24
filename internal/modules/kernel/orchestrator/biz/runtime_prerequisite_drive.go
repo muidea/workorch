@@ -272,14 +272,14 @@ func runtimeWorkspaceManifestBinding(facts runtimecontract.RuntimeFacts) (runtim
 }
 
 // runtimeOperationAdmissibilityTargetRefs supplies the Shell owner with the
-// bounded File-owner catalog targets needed to describe a validation recipe
-// before semantic authority exists. The Orchestrator only forwards already
-// persisted owner facts; it neither invents a path nor lets Shell become the
-// workspace-target owner. After semantic seal, ordinary grounded repair
-// targets remain the narrow operation inventory input.
+// bounded File-owner catalog targets needed to describe a validation recipe.
+// The Orchestrator only forwards already persisted owner facts; it neither
+// invents a path nor lets Shell become the workspace-target owner. Retaining
+// that intersection after a semantic seal is required because a File effect
+// retires both owner catalogs before SM-2 can seal the next generation.
 func runtimeOperationAdmissibilityTargetRefs(aggregate runtime.RuntimeAggregate, ownerModuleID string) []string {
 	targets := runtime.GroundedRepairTargets(aggregate.Facts)
-	if ownerModuleID != runtimecontract.RuntimeModuleShell || aggregate.SemanticPlanning.Phase == runtimecontract.RuntimeSemanticPlanningSealed {
+	if ownerModuleID != runtimecontract.RuntimeModuleShell {
 		return targets
 	}
 	for _, inventory := range aggregate.Facts.Resources.OperationAdmissibilities {

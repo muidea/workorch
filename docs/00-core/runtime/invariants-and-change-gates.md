@@ -4,7 +4,7 @@ Status: normative
 
 Type: core-contract-part
 
-Last Verified: 2026-08-21
+Last Verified: 2026-08-24
 
 ## 跨状态机不变量
 
@@ -21,6 +21,9 @@ Last Verified: 2026-08-21
    它不创建 SM-1 state、Decision/Approval 或 application scheduler authority。
 8. execution-budget view 只能从 owner/Runtime sub-ledger 纯派生；allocation 先于 physical call/effect，unknown consumption
    不得被解释为 zero。
+9. `target_grounding_unresolved` terminal delivery 必须同时满足 canonical terminal 与 current semantic-authority readiness；
+   binding-free semantic generation pending 时只能请求 semantic plan，不能投递该临时终态或请求 operations candidate。
+   其它 canonical terminal 不得因此被改写或重规划。
 
 ## 中立 effect、evidence 与治理
 

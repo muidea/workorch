@@ -257,10 +257,8 @@ func TestRuntimeBootstrapCompilesBroadDoDIntoSemanticPlanningSeed(t *testing.T) 
 	if err != nil || bootstrap == nil || len(bootstrap.DefinitionSeed.CoverageItems) != 32 {
 		t.Fatalf("broad semantic planning seed bootstrap=%+v err=%v", bootstrap, err)
 	}
-	for _, focus := range bootstrap.Focuses {
-		if len(focus.CoverageEvidenceBindings) != 0 {
-			t.Fatalf("activation sealed broad semantic proof: %+v", focus)
-		}
+	if err := runtimecontract.ValidateRuntimeDefinitionFocuses(bootstrap.DefinitionSeed, bootstrap.DefinitionFocuses); err != nil {
+		t.Fatalf("activation definition focuses: %v", err)
 	}
 }
 
@@ -570,7 +568,7 @@ func TestRuntimeBootstrapSealsRunLevelStateChangeRequirement(t *testing.T) {
 		t.Fatalf("coverage ids = %v", bootstrap.StateChangeRequirement.CoverageWorkItemIDs)
 	}
 	// DoD focuses themselves must not be mechanically forced to state_change.
-	for _, focus := range bootstrap.Focuses {
+	for _, focus := range bootstrap.DefinitionFocuses {
 		for _, kind := range focus.RequiredEvidenceKinds {
 			if kind == runtimecontract.EvidenceKindStateChange {
 				t.Fatalf("DoD focus unexpectedly requires state_change: %+v", focus)

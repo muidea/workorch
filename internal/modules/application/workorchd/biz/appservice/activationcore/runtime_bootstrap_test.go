@@ -122,7 +122,7 @@ func TestRuntimeBootstrapAcceptsDefinitionSeedWithoutPrecompiledProof(t *testing
 	if err != nil || bootstrap == nil {
 		t.Fatalf("definition seed bootstrap=%+v err=%v", bootstrap, err)
 	}
-	if err := bootstrap.DefinitionSeed.Validate(); err != nil || len(bootstrap.Focuses) != 1 || len(bootstrap.Focuses[0].CoverageEvidenceBindings) != 0 {
+	if err := bootstrap.DefinitionSeed.Validate(); err != nil || len(bootstrap.DefinitionFocuses) != 1 {
 		t.Fatalf("unsealed semantic bootstrap=%+v seedErr=%v", bootstrap, err)
 	}
 }
@@ -160,14 +160,10 @@ func TestRuntimeBootstrapLeavesReadOnlyValidationProposalUnsealed(t *testing.T) 
 		&workspacemodel.DoD{ID: "dod-1", WorkspaceID: "ws-1", Items: []string{"inspection is verified"}},
 		"definition-1", "startup-input-test", nil, activation,
 	)
-	if err != nil || bootstrap == nil || len(bootstrap.Focuses) != 2 {
+	if err != nil || bootstrap == nil || len(bootstrap.DefinitionFocuses) != 2 {
 		t.Fatalf("read-only semantic seed bootstrap=%+v err=%v", bootstrap, err)
 	}
-	for _, focus := range bootstrap.Focuses {
-		if len(focus.CoverageEvidenceBindings) != 0 {
-			t.Fatalf("activation sealed owner proof: %+v", focus)
-		}
-	}
+	assertRuntimeBootstrapDefinitionFocuses(t, bootstrap)
 }
 
 func TestRuntimeBootstrapKeepsSharedValidationDeclarationAsNonAuthoritativeSeed(t *testing.T) {
@@ -249,7 +245,7 @@ func TestRuntimeBootstrapDoesNotClaimShellOwnerRecipeFeasibility(t *testing.T) {
 	goal := &workspacemodel.Goal{ID: "goal", WorkspaceID: "workspace", Text: "goal"}
 	dod := &workspacemodel.DoD{ID: "dod", WorkspaceID: "workspace", Items: []string{"bridge starts"}}
 	bootstrap, err := RuntimeBootstrap(goal, dod, "definition", "startup-input-test", nil, activation)
-	if err != nil || bootstrap == nil || len(bootstrap.Focuses) != 1 || len(bootstrap.Focuses[0].CoverageEvidenceBindings) != 0 {
+	if err != nil || bootstrap == nil || len(bootstrap.DefinitionFocuses) != 1 {
 		t.Fatalf("bootstrap shell recipe seed=%+v err=%v", bootstrap, err)
 	}
 }
@@ -316,11 +312,11 @@ func TestRuntimeBootstrapAllowsPerCWIVariationWithSharedRecipe(t *testing.T) {
 	if err != nil {
 		t.Fatalf("per-CWI proof bootstrap: %v", err)
 	}
-	if len(bootstrap.Focuses) != 2 {
-		t.Fatalf("per-CWI proof focus count = %d, want 2", len(bootstrap.Focuses))
+	if len(bootstrap.DefinitionFocuses) != 2 {
+		t.Fatalf("per-CWI proof focus count = %d, want 2", len(bootstrap.DefinitionFocuses))
 	}
-	for _, focus := range bootstrap.Focuses {
-		if len(focus.CoverageWorkItemIDs) != 1 || len(focus.CoverageEvidenceBindings) != 0 {
+	for _, focus := range bootstrap.DefinitionFocuses {
+		if len(focus.CoverageWorkItemIDs) != 1 {
 			t.Fatalf("activation sealed semantic proof: %+v", focus)
 		}
 	}
@@ -359,12 +355,12 @@ func TestRuntimeBootstrapSeparatesFourValidationCWIsInsideOnePresentationSlice(t
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(bootstrap.Slices) != 1 || len(bootstrap.Slices[0].CoverageWorkItemIDs) != 4 || len(bootstrap.Focuses) != 4 {
-		t.Fatalf("presentation slices/focuses = %+v / %+v, want one four-item slice and four focuses", bootstrap.Slices, bootstrap.Focuses)
+	if len(bootstrap.Slices) != 1 || len(bootstrap.Slices[0].CoverageWorkItemIDs) != 4 || len(bootstrap.DefinitionFocuses) != 4 {
+		t.Fatalf("presentation slices/focuses = %+v / %+v, want one four-item slice and four focuses", bootstrap.Slices, bootstrap.DefinitionFocuses)
 	}
 	seen := map[common.CoverageWorkItemID]struct{}{}
-	for _, focus := range bootstrap.Focuses {
-		if focus.SliceID != bootstrap.Slices[0].ID || len(focus.CoverageWorkItemIDs) != 1 || len(focus.CoverageEvidenceBindings) != 0 {
+	for _, focus := range bootstrap.DefinitionFocuses {
+		if focus.SliceID != bootstrap.Slices[0].ID || len(focus.CoverageWorkItemIDs) != 1 {
 			t.Fatalf("semantic focus = %+v, want one unsealed CWI", focus)
 		}
 		coverageID := focus.CoverageWorkItemIDs[0]
@@ -422,10 +418,10 @@ func TestRuntimeBootstrapDoesNotCarryEvidencePolicyBindingTarget(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(bootstrap.Focuses) != 1 || len(bootstrap.Focuses[0].CoverageEvidenceBindings) != 0 {
-		t.Fatalf("activation sealed coverage bindings = %+v", bootstrap.Focuses)
+	if len(bootstrap.DefinitionFocuses) != 1 {
+		t.Fatalf("activation sealed coverage bindings = %+v", bootstrap.DefinitionFocuses)
 	}
-	assertRuntimeBootstrapHasNoSemanticFocusAuthority(t, bootstrap.Focuses)
+	assertRuntimeBootstrapDefinitionFocuses(t, bootstrap)
 }
 
 func TestRuntimeBootstrapBuildsOrderedDoDFocuses(t *testing.T) {
@@ -439,8 +435,8 @@ func TestRuntimeBootstrapBuildsOrderedDoDFocuses(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(bootstrap.Focuses) != 3 || bootstrap.Focuses[0].ID != "focus-001" || bootstrap.Focuses[2].CoverageWorkItemIDs[0] != "cwi-003" {
-		t.Fatalf("bootstrap focuses = %+v", bootstrap.Focuses)
+	if len(bootstrap.DefinitionFocuses) != 3 || bootstrap.DefinitionFocuses[0].ID != "focus-001" || bootstrap.DefinitionFocuses[2].CoverageWorkItemIDs[0] != "cwi-003" {
+		t.Fatalf("bootstrap focuses = %+v", bootstrap.DefinitionFocuses)
 	}
 	if bootstrap.Definition.GoalDefinition != "交付完整能力" || bootstrap.Definition.DoDDefinition == "" || len(bootstrap.Requirements) != 9 {
 		t.Fatalf("bootstrap = %+v", bootstrap)
@@ -520,8 +516,8 @@ func TestRuntimeBootstrapAllowsValidationOnlyFocusWhenStateChangeIsOptional(t *t
 		t.Fatal(err)
 	}
 	want := []string{runtimecontract.EvidenceKindValidation}
-	if len(bootstrap.Focuses) != 1 || len(bootstrap.Focuses[0].RequiredEvidenceKinds) != 1 || bootstrap.Focuses[0].RequiredEvidenceKinds[0] != want[0] {
-		t.Fatalf("optional state-change focus = %+v, want validation only", bootstrap.Focuses)
+	if len(bootstrap.DefinitionFocuses) != 1 || len(bootstrap.DefinitionFocuses[0].RequiredEvidenceKinds) != 1 || bootstrap.DefinitionFocuses[0].RequiredEvidenceKinds[0] != want[0] {
+		t.Fatalf("optional state-change focus = %+v, want validation only", bootstrap.DefinitionFocuses)
 	}
 }
 
@@ -586,10 +582,10 @@ func TestRuntimeBootstrapAppendsRequiredProfileFocusesWithTypedRequirements(t *t
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(bootstrap.Focuses) != 5 {
-		t.Fatalf("profile focuses = %+v", bootstrap.Focuses)
+	if len(bootstrap.DefinitionFocuses) != 5 {
+		t.Fatalf("profile focuses = %+v", bootstrap.DefinitionFocuses)
 	}
-	assertRuntimeBootstrapHasNoSemanticFocusAuthority(t, bootstrap.Focuses)
+	assertRuntimeBootstrapDefinitionFocuses(t, bootstrap)
 	compiled, err := compileRuntimeCoverage(
 		&workspacemodel.Goal{ID: "goal-1", WorkspaceID: "ws-1", Text: "交付完整能力"},
 		&workspacemodel.DoD{ID: "dod-1", WorkspaceID: "ws-1", Items: []string{"行为已验证"}},
@@ -646,10 +642,10 @@ func TestRuntimeBootstrapBuildsBoundedGitCapabilityStateFixture(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(bootstrap.Focuses) != 2 || len(bootstrap.Slices) != 2 || len(bootstrap.Focuses[0].CoverageWorkItemIDs) != 1 || len(bootstrap.Focuses[1].CoverageWorkItemIDs) != 1 {
-		t.Fatalf("bounded Git fixture focuses/slices = %+v / %+v", bootstrap.Focuses, bootstrap.Slices)
+	if len(bootstrap.DefinitionFocuses) != 2 || len(bootstrap.Slices) != 2 || len(bootstrap.DefinitionFocuses[0].CoverageWorkItemIDs) != 1 || len(bootstrap.DefinitionFocuses[1].CoverageWorkItemIDs) != 1 {
+		t.Fatalf("bounded Git fixture focuses/slices = %+v / %+v", bootstrap.DefinitionFocuses, bootstrap.Slices)
 	}
-	assertRuntimeBootstrapHasNoSemanticFocusAuthority(t, bootstrap.Focuses)
+	assertRuntimeBootstrapDefinitionFocuses(t, bootstrap)
 	compiled, err := compileRuntimeCoverage(
 		&workspacemodel.Goal{ID: "goal-1", WorkspaceID: "ws-1", Text: "create a local checkpoint and validate fixture content"},
 		&workspacemodel.DoD{ID: "dod-1", WorkspaceID: "ws-1", Items: []string{"fixture content is validated"}},
@@ -678,18 +674,13 @@ func TestRuntimeBootstrapBuildsBoundedGitCapabilityStateFixture(t *testing.T) {
 	}
 }
 
-func assertRuntimeBootstrapHasNoSemanticFocusAuthority(t *testing.T, focuses []runtimecontract.CoverageFocus) {
+func assertRuntimeBootstrapDefinitionFocuses(t *testing.T, bootstrap *runtimecontract.RuntimeBootstrap) {
 	t.Helper()
-	for _, focus := range focuses {
-		if len(focus.CoverageEvidenceBindings) != 0 || focus.EvidenceDeclarationRef != "" || len(focus.TargetRefs) != 0 ||
-			focus.TargetRole != "" || len(focus.TargetDiscoverySources) != 0 || focus.TargetSelectorRef != "" ||
-			focus.TargetSelectorOwnerRef != "" || focus.TargetSelectorSubjectRef != "" || len(focus.TargetSelectorCandidateRefs) != 0 ||
-			focus.ProspectiveTargetRef != "" || focus.RequireTargetGrounding || len(focus.AcceptedStepKinds) != 0 ||
-			len(focus.AcceptedOperationVariants) != 0 || len(focus.RejectedStepKinds) != 0 || focus.RequireDirectEvidence ||
-			focus.RequireClaimEvidence || focus.RequireExecutableBehaviorEvidence || focus.RequireCoverageTargets ||
-			focus.ValidationRecipeID != "" || len(focus.RequiredCheckRefs) != 0 || len(focus.MetricConstraints) != 0 || len(focus.ArtifactRefs) != 0 {
-			t.Fatalf("bootstrap focus carries provisional semantic authority: %+v", focus)
-		}
+	if bootstrap == nil {
+		t.Fatal("bootstrap is nil")
+	}
+	if err := runtimecontract.ValidateRuntimeDefinitionFocuses(bootstrap.DefinitionSeed, bootstrap.DefinitionFocuses); err != nil {
+		t.Fatalf("bootstrap definition focuses: %v", err)
 	}
 }
 

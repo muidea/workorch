@@ -4,7 +4,7 @@ Status: active
 
 Type: kernel-module-implementation-contract
 
-Last Verified: 2026-08-23
+Last Verified: 2026-08-24
 
 ## 功能范围与边界
 
@@ -302,6 +302,10 @@ deployed run ID 只属于 archive regression evidence，不定义当前候选、
 
 - Activation 必须封存 Definition seed；fresh restart 缺 workspace-specific exact proof 时进入 persisted
   `semantic_contract_required`，不得由 application 终止或要求普通用户补 `contextHints/evidencePolicies` JSON。
+- activation declaration 与 generation authority 使用不同类型：`RuntimeDefinitionFocus` 只能携带 CWI、slice、evidence/
+  assessment、declarative selector/owner-fact/metric/artifact obligation；`RuntimeFocusSeedsFromDefinitionFocuses` 生成的初始
+  `CoverageFocus` cursor 不携带 selector closure 或任何 resolved target/operation/recipe/check/binding。只有 SM-2 semantic
+  seal 可以写 generation-specific `CoverageFocus`；restart 不得从旧 focus queue 重建 Definition declaration。
 - semantic-plan document 使用 SM-3 现有 request session/evaluator/attempt 预算，但 accepted 只产生 internal fact。
   canonical owner feasibility 完整匹配后，SM-2 原子封存 `RuntimeCWIReconciliationContract`；每个 CWI/binding
   必须有 deterministic target 或 owner selector、operation kind/variant、validation recipe/check 以及适用的
@@ -329,6 +333,10 @@ deployed run ID 只属于 archive regression evidence，不定义当前候选、
 - File/Shell/Git/MCP owner 只能返回 factual observation：File 不从 Goal/DoD 猜 target，Shell 没有 CWI-specific checks
   时返回 `unverifiable`，Git repository revision 不等于 semantic proof，MCP surface readiness 没有 behavior probe 时
   返回 `unverifiable`。coverage credit 仍只由 SM-2 从 matching sealed receipt 派生。
+- 空 target scope 只是一条“当前无 existing target”的 owner observation，不能授权候选任意创建路径。prospective target
+  必须同时匹配 activation-sealed target、完整 selector ref/owner/subject 和 File owner catalog 的 selector/constraint/variant。
+  Shell validation acquisition 所需 target vocabulary 仅由 Orchestrator 转交当前 persisted File owner inventory；File effect
+  退休旧 observation 后仍重获 fresh inventory，Shell 只拥有 recipe/surface readiness，不获得 File target state authority。
 
 
 
@@ -395,6 +403,11 @@ deployed run ID 只属于 archive regression evidence，不定义当前候选、
   绝不能重新成为 current。
 - File owner 对 `unified_diff` 在 owner feasibility probe 中执行无写入 dry-run；hunk/context 冲突必须在 dispatch seal 前以 typed infeasible result 返回，owner 不选择后续 RuntimeAction。
 - active Runtime Cancel/Supersede 必须先 `RequestTermination` CAS 持久化 `RuntimeTerminationRecord`，再投影 SM-1 terminal。
+- semantic owner catalog 退休后，若 current eligible CWI 尚无 binding，SM-4 drive/startup recovery 必须先推进新的 semantic
+  generation；该窗口中因 binding 缺失产生的 `target_grounding_unresolved` decision 不得进入 Result/Workspace/Run
+  delivery。`candidateRequestSessionActionAllowed` 只为这一精确窗口放行 `semantic_plan`，operations request 继续拒绝。
+  current semantic operation authority ready 或 semantic transaction failed 后才满足该 convergence terminal 的 delivery
+  readiness；其它 sealed terminal 不得被语义重规划覆盖，administrative termination 走独立 Run-owner lane。
 - aggregate invariant 要求非终态 Decision 且无 administrative termination 时
   `TerminalDeliveryAttempts=0` 且无 terminal acknowledgement。不满足时由当前 invariant 校验在 owner load 边界
   直接失败；不得形成兼容分类、升级或 data-reset 状态，不得由 projection 修复、归零或隐藏。清理数据后

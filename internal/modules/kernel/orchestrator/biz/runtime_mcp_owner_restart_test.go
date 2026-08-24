@@ -432,7 +432,7 @@ func TestRuntimeFileBackedMCPOwnerFailureTargetReceiptRestartMatrix(t *testing.T
 						resources.FailureTarget != nil && resources.FailureTarget.TargetObservation != nil &&
 						len(resources.FailureTarget.TargetRefs) == 1 && resources.FailureTarget.TargetRefs[0] == target &&
 						runtimeFileBackedHasCompleteTargetSnapshot(resources.TargetSnapshots, target, snapshot.Snapshot.ContentHash) &&
-						command.CandidateContext.Focus.TargetRole == "implementation" {
+						command.CandidateContext.Focus.TargetRole == "semantic_proof_target" {
 						contextBound = true
 					}
 					result.Set(runtimeCandidateResultForTest(t, command, fileCandidate), nil)

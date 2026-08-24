@@ -30,16 +30,19 @@ func SubmitDefinitionAdmissionCandidate(ctx context.Context, hub magicevent.Hub,
 	if err := value.Candidate.Validate(); err != nil || value.Candidate.CandidateHash != candidate.CandidateHash {
 		return workspaceevents.SubmitDefinitionAdmissionCandidateResult{}, fmt.Errorf("%w: Workspace owner returned invalid definition candidate", common.ErrConflict)
 	}
+	if err := value.AdmissionResult.ValidateFor(value.Candidate); err != nil {
+		return workspaceevents.SubmitDefinitionAdmissionCandidateResult{}, fmt.Errorf("%w: Workspace owner returned invalid definition admission result", common.ErrConflict)
+	}
 	return value, nil
 }
 
-func PromoteDefinitionAdmissionCandidate(ctx context.Context, hub magicevent.Hub, candidate workspacemodel.DefinitionAdmissionCandidate, admission workspacemodel.DefinitionAdmissionResult, blockingTicketID common.TicketID) (workspaceevents.PromoteDefinitionAdmissionCandidateResult, error) {
+func PromoteDefinitionAdmissionCandidate(ctx context.Context, hub magicevent.Hub, candidate workspacemodel.DefinitionAdmissionCandidate, blockingTicketID common.TicketID) (workspaceevents.PromoteDefinitionAdmissionCandidateResult, error) {
 	if hub == nil || candidate.WorkspaceID == "" {
 		return workspaceevents.PromoteDefinitionAdmissionCandidateResult{}, common.ErrInvalidArgument
 	}
 	event := magicevent.NewEventWithContext(workspaceevents.TopicWorkspaceCommandPromoteDefinitionAdmissionCandidate, definitionAdmissionSourceModule, workspaceevents.CommandDestination, magicevent.NewHeader(), ctx, workspaceevents.PromoteDefinitionAdmissionCandidateCommand{
 		WorkspaceID: candidate.WorkspaceID, CandidateID: candidate.CandidateID, CandidateRevision: candidate.CandidateRevision,
-		CandidateHash: candidate.CandidateHash, AdmissionResult: admission, BlockingTicketID: blockingTicketID,
+		CandidateHash: candidate.CandidateHash, BlockingTicketID: blockingTicketID,
 	})
 	ownerevent.BindLane(event, workspaceevents.Contracts(), event.ID(), "workspace", string(candidate.WorkspaceID), candidate.WorkspaceID, "", "")
 	value, err := ownerevent.WorkspaceOwner[workspaceevents.PromoteDefinitionAdmissionCandidateResult](hub.Send(event), event.ID())

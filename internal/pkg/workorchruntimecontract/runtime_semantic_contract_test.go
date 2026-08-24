@@ -7,7 +7,7 @@ import (
 	"github.com/muidea/workorch/internal/pkg/common"
 )
 
-func semanticDefinitionFocuses(items []RuntimeCoverageItem) []CoverageFocus {
+func semanticDefinitionFocuses(items []RuntimeCoverageItem) []RuntimeDefinitionFocus {
 	ret := make([]CoverageFocus, 0, len(items))
 	for _, item := range items {
 		ret = append(ret, CoverageFocus{
@@ -700,7 +700,7 @@ func sealSemanticTestManifestWithSource(t *testing.T, manifest RuntimeSemanticPl
 		manifest.OwnerCatalogs[index].SnapshotID = StableRuntimeOperationAdmissibilitySnapshotID(manifest.OwnerCatalogs[index])
 	}
 	manifest = manifest.Normalized()
-	obligations, err := compileRuntimeSemanticProofObligations([]CoverageFocus{source}, manifest.CoverageItems, manifest.OwnerCatalogs)
+	obligations, err := compileRuntimeSemanticProofObligations(CompileRuntimeDefinitionFocuses([]CoverageFocus{source}), manifest.CoverageItems, manifest.OwnerCatalogs)
 	if err != nil {
 		t.Fatalf("compile semantic test obligations: %v", err)
 	}

@@ -274,7 +274,7 @@ func (m *Biz) recoverRuntimeStartup(ctx context.Context) error {
 				(lifecycleHandoff.Kind == runtimeGovernanceLifecycleContinuationApproval && item.State == common.RunStateBlockedOnApproval))
 		source := ""
 		switch {
-		case aggregate.Decision.State == runtimecontract.ConvergenceStateComplete || aggregate.Decision.State == runtimecontract.ConvergenceStateFailed:
+		case runtimeTerminalDeliveryReady(aggregate):
 			source = "startup_recovery:terminal_delivery"
 		case blockedOnPersistedContinuation:
 			// Resolution is durable but Run is still blocked: the crash cut lies

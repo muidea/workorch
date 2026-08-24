@@ -4,7 +4,7 @@ Status: normative
 
 Type: core-contract-part
 
-Last Verified: 2026-08-23
+Last Verified: 2026-08-24
 
 ## 仅允许 all-of terminal 语义
 
@@ -57,9 +57,13 @@ DefinitionAdmissionCandidate
   不得在 owner 外维护第二份可提升状态；
 - candidate submit 使用 Workspace owner-defined concrete typed
   `SubmitDefinitionAdmissionCandidateCommand/Result`；result 必须返回 exact normalized candidate identity/hash 与
-  `created|duplicate` disposition。CandidateItemRef 只在该 candidate scope 内引用 proposed relation，不能充当正式 ItemRef；
+  owner 编译并绑定该 candidate 的完整 `DefinitionAdmissionResult`，以及 `created|duplicate` disposition。
+  `DefinitionAdmissionResult` 只能由 Workspace owner 的 pure static compiler 在 submit owner-private event 中产生；
+  Application 不得提交、覆盖或选择 disposition。CandidateItemRef 只在该 candidate scope 内引用 proposed relation，
+  不能充当正式 ItemRef；
 - `CandidateID` 标识一次连续 authoring/admission lineage，`CandidateRevision` 标识该 lineage 下的一次不可变尝试；对同一
-  expected revision 提交 exact normalized duplicate 必须返回原 `CandidateID + CandidateRevision + CandidateHash`，不得新增记录。
+  expected revision 提交 exact normalized duplicate 必须返回原 `CandidateID + CandidateRevision + CandidateHash` 以及确定性相同的
+  owner admission result，不得新增记录。
   任何 materially changed input 必须以同一 lineage 的下一 revision CAS 提交，stale expected revision 拒绝且不得覆盖旧尝试；
 - `ProposedRelationInputs` 是唯一允许暂存 unsupported aggregation token 的 typed admission surface。它可以保留
   `one_of/any_of/...` 以产生精确 violation，但这些值不得进入 `WorkspaceDefinitionItem`、canonical relation、
@@ -80,16 +84,21 @@ DefinitionAdmissionCandidate
 - 同一 candidate 内容 permutation 后必须得到同一 `CandidateHash`；candidate identity/hash 的 schema version、compiler version、
   canonical bytes、base input identity、exact text、Template/Profile policy snapshot 和 resolved directory 均进入 admission/ticket
   stale 与 duplicate 校验；
-- Workorchd pure admission compiler 只能返回绑定 exact `CandidateID + CandidateRevision + CandidateHash` 的 typed outcome。
-  只有 `admitted_all_of` outcome 可由 Workorchd application use case 通过同步 EventHub `Send` 提交 Workspace owner
-  `PromoteDefinitionAdmissionCandidateCommand/Result`；
-- Workspace owner 只在 candidate identity、admission-result hash 和 current candidate CAS 全部匹配时原子 promotion，生成正式
-  semantic `DefinitionRevision` 与 `WorkspaceStartupInputContract`。duplicate promotion 返回同一正式 identity，stale/mismatched
-  outcome 拒绝且不产生部分 Goal/DoD、relation 或 startup-input 写入；
+- Workspace owner 的 pure compiler 只能返回绑定 exact `CandidateID + CandidateRevision + CandidateHash` 的 typed outcome。
+  Workorchd 只消费 submit result：非 `admitted_all_of` 必须按 owner result 打开/协调 typed clarification ticket；只有
+  `admitted_all_of` 才可提交 identity-only `PromoteDefinitionAdmissionCandidateCommand`；
+- promotion owner-private event 必须从 Workspace repository 精确定位 current immutable candidate，并重新运行同一 pure compiler。
+  只有重编译结果仍为 `admitted_all_of` 才能原子生成正式 semantic `DefinitionRevision` 与
+  `WorkspaceStartupInputContract`。Application 不能把 `AdmissionResult`、result hash 或 canonical admitted hash 作为 promotion
+  authority 传入。duplicate promotion 返回同一正式 identity；stale/mismatched candidate 或 owner 重编译拒绝均不得产生部分
+  Goal/DoD、relation 或 startup-input 写入；
 - `PromoteDefinitionAdmissionCandidateCommand/Result` 必须是 Workspace owner `pkg/events` 的 concrete typed contract。command
-  只携带 candidate identity/hash、`admitted_all_of` result hash 与 canonical admitted-input hash；result 返回正式
+  只携带 candidate identity/hash 与可选 blocking ticket identity；result 返回正式
   `DefinitionRevision + StartupInputHash + CandidateItemToItemRefMappingHash`。Workspace owner 持久化完整 mapping，Workorchd 只能
   使用该 owner result 编译 Runtime mapping，不能自行把 CandidateItemRef 提升为 ItemRef。
+
+Workorchd 可以调用同一 Workspace-owned pure compiler 做 read-side current-shape 防御校验或生成 ticket payload，但该调用
+不产生 admission state、不能替代 submit result，也不能触发 promotion；所有正式迁移仍只来自 Workspace owner-private event。
 
 Workspace owner 还必须为每次 promotion 持久化不进入 `StartupInputHash` 的 activation admission fact：
 

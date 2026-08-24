@@ -8,7 +8,7 @@ import (
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
-func TestRuntimeOperationAdmissibilityTargetsExposeFileCatalogOnlyToPreSealShellCatalog(t *testing.T) {
+func TestRuntimeOperationAdmissibilityTargetsExposeFileCatalogOnlyToShellCatalog(t *testing.T) {
 	aggregate := runtime.RuntimeAggregate{
 		Facts: runtimecontract.RuntimeFacts{
 			Resources: runtimecontract.RuntimeResourceFacts{OperationAdmissibilities: []runtimecontract.RuntimeOperationAdmissibility{{
@@ -25,7 +25,7 @@ func TestRuntimeOperationAdmissibilityTargetsExposeFileCatalogOnlyToPreSealShell
 		t.Fatalf("File catalog received cross-owner target injection: %v", got)
 	}
 	aggregate.SemanticPlanning.Phase = runtimecontract.RuntimeSemanticPlanningSealed
-	if got := runtimeOperationAdmissibilityTargetRefs(aggregate, runtimecontract.RuntimeModuleShell); len(got) != 0 {
-		t.Fatalf("sealed Shell catalog widened back to manifest: %v", got)
+	if got, want := runtimeOperationAdmissibilityTargetRefs(aggregate, runtimecontract.RuntimeModuleShell), []string{"a.go", "z.go"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("post-seal Shell targets = %v, want retained File-owner intersection %v", got, want)
 	}
 }

@@ -79,6 +79,44 @@ func TestRuntimeCandidateRequestSessionCASLifecycleDoesNotAllocateCandidateAttem
 	}
 }
 
+func TestSemanticRequestMayReplaceOnlyBindingFreeProvisionalTerminal(t *testing.T) {
+	aggregate := RuntimeAggregate{
+		Facts: runtimecontract.RuntimeFacts{
+			Focus: runtimecontract.CoverageFocus{ID: "semantic-pending/cwi-2", CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-2"}},
+			Coverage: []runtimecontract.RuntimeCoverageItemFact{{
+				ID: "cwi-2", State: runtimecontract.RuntimeCoverageItemStateOpen,
+				CWIConvergenceState: runtimecontract.RuntimeCWIConvergenceStatePlanning,
+			}},
+		},
+		Decision: runtimecontract.RuntimeDecision{
+			State: runtimecontract.ConvergenceStateFailed,
+			Terminal: &runtimecontract.RuntimeTerminalDecision{
+				Code: "target_grounding_unresolved", Summary: "binding-free focus has no target yet",
+			},
+		},
+		SemanticPlanning: runtimecontract.RuntimeSemanticPlanningLedger{Phase: runtimecontract.RuntimeSemanticPlanningRequired},
+	}
+	if SemanticOperationAuthorityReady(aggregate) {
+		t.Fatal("binding-free provisional terminal unexpectedly has semantic operation authority")
+	}
+	if err := candidateRequestSessionActionAllowed(aggregate, runtimecontract.RuntimeProviderDocumentSemanticPlan); err != nil {
+		t.Fatalf("fresh semantic generation was blocked by provisional reducer terminal: %v", err)
+	}
+	if err := candidateRequestSessionActionAllowed(aggregate, runtimecontract.RuntimeProviderDocumentOperations); !errors.Is(err, common.ErrConflict) {
+		t.Fatalf("operations request crossed binding-free terminal window: %v", err)
+	}
+	aggregate.Decision.Terminal.Code = "runtime_contract_defect"
+	if err := candidateRequestSessionActionAllowed(aggregate, runtimecontract.RuntimeProviderDocumentSemanticPlan); !errors.Is(err, common.ErrConflict) {
+		t.Fatalf("semantic request replaced an authoritative non-grounding terminal: %v", err)
+	}
+	aggregate.Decision.Terminal.Code = "target_grounding_unresolved"
+
+	aggregate.SemanticPlanning.Phase = runtimecontract.RuntimeSemanticPlanningSealed
+	if err := candidateRequestSessionActionAllowed(aggregate, runtimecontract.RuntimeProviderDocumentSemanticPlan); !errors.Is(err, common.ErrConflict) {
+		t.Fatalf("semantic request replaced an authoritative sealed terminal: %v", err)
+	}
+}
+
 func TestBeginCandidateAttemptRequiresCompletedSessionAndPersistsManifestBinding(t *testing.T) {
 	ctx := context.Background()
 	aggregate := stateChangeAggregate(t)

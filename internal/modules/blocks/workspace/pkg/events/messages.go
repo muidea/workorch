@@ -169,8 +169,9 @@ const (
 )
 
 type SubmitDefinitionAdmissionCandidateResult struct {
-	Candidate   workspacemodel.DefinitionAdmissionCandidate
-	Disposition DefinitionAdmissionCandidateDisposition
+	Candidate       workspacemodel.DefinitionAdmissionCandidate
+	AdmissionResult workspacemodel.DefinitionAdmissionResult
+	Disposition     DefinitionAdmissionCandidateDisposition
 }
 
 type PromoteDefinitionAdmissionCandidateCommand struct {
@@ -178,7 +179,6 @@ type PromoteDefinitionAdmissionCandidateCommand struct {
 	CandidateID       string
 	CandidateRevision uint64
 	CandidateHash     string
-	AdmissionResult   workspacemodel.DefinitionAdmissionResult
 	BlockingTicketID  common.TicketID
 }
 

@@ -1,4 +1,4 @@
-package definitionadmissioncore
+package definitionadmission
 
 import (
 	"testing"

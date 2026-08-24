@@ -177,7 +177,7 @@ type RuntimeSemanticPlanManifest struct {
 // vocabulary exclusively from activation-sealed definition capabilities. It
 // is deliberately pure: owner resource availability is established later by
 // typed feasibility observations and is never inferred here.
-func CompileRuntimeSemanticPlanManifest(workspaceID common.WorkspaceID, runID common.RunID, definition RuntimeDefinitionContext, seed RuntimeDefinitionSeed, definitionFocuses []CoverageFocus, execution RuntimeExecutionContract, admissibilities []RuntimeOperationAdmissibility) (RuntimeSemanticPlanManifest, error) {
+func CompileRuntimeSemanticPlanManifest(workspaceID common.WorkspaceID, runID common.RunID, definition RuntimeDefinitionContext, seed RuntimeDefinitionSeed, definitionFocuses []RuntimeDefinitionFocus, execution RuntimeExecutionContract, admissibilities []RuntimeOperationAdmissibility) (RuntimeSemanticPlanManifest, error) {
 	seed = seed.Clone()
 	coverageIDs := make([]common.CoverageWorkItemID, 0, len(seed.CoverageItems))
 	for _, item := range seed.CoverageItems {
@@ -191,7 +191,7 @@ func CompileRuntimeSemanticPlanManifest(workspaceID common.WorkspaceID, runID co
 // Definition seed hash stays whole-run identity; only provider-visible work
 // items are narrowed. This is not a compatibility path and never recreates a
 // settled CWI from historical focus state.
-func CompileRuntimeSemanticPlanManifestForCoverage(workspaceID common.WorkspaceID, runID common.RunID, definition RuntimeDefinitionContext, seed RuntimeDefinitionSeed, definitionFocuses []CoverageFocus, execution RuntimeExecutionContract, admissibilities []RuntimeOperationAdmissibility, coverageIDs []common.CoverageWorkItemID) (RuntimeSemanticPlanManifest, error) {
+func CompileRuntimeSemanticPlanManifestForCoverage(workspaceID common.WorkspaceID, runID common.RunID, definition RuntimeDefinitionContext, seed RuntimeDefinitionSeed, definitionFocuses []RuntimeDefinitionFocus, execution RuntimeExecutionContract, admissibilities []RuntimeOperationAdmissibility, coverageIDs []common.CoverageWorkItemID) (RuntimeSemanticPlanManifest, error) {
 	definition = definition.Normalized()
 	seed = seed.Clone()
 	execution = execution.Normalized()
@@ -204,7 +204,7 @@ func CompileRuntimeSemanticPlanManifestForCoverage(workspaceID common.WorkspaceI
 	if err := seed.Validate(); err != nil {
 		return RuntimeSemanticPlanManifest{}, err
 	}
-	definitionFocuses = CompileRuntimeDefinitionFocuses(definitionFocuses)
+	definitionFocuses = NormalizeRuntimeDefinitionFocuses(definitionFocuses)
 	if err := ValidateRuntimeDefinitionFocuses(seed, definitionFocuses); err != nil {
 		return RuntimeSemanticPlanManifest{}, err
 	}
@@ -585,7 +585,7 @@ func (m RuntimeSemanticPlanManifest) Validate() error {
 			return fmt.Errorf("runtime semantic manifest duplicates obligation coverage %q", obligation.CoverageWorkItemID)
 		}
 		recompiled, err := compileRuntimeSemanticProofObligations(
-			[]CoverageFocus{runtimeSemanticProofObligationSourceFocus(obligation)},
+			CompileRuntimeDefinitionFocuses([]CoverageFocus{runtimeSemanticProofObligationSourceFocus(obligation)}),
 			[]RuntimeCoverageItem{coverageItems[obligation.CoverageWorkItemID]},
 			m.OwnerCatalogs,
 		)

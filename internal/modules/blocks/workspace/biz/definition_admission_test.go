@@ -64,8 +64,10 @@ func TestDefinitionAdmissionOwnerSubmitPromoteAndAcknowledge(t *testing.T) {
 	if err != nil || duplicate.Disposition != workspaceevents.DefinitionAdmissionCandidateDuplicate {
 		t.Fatalf("duplicate = %+v err=%v", duplicate, err)
 	}
-	admission := (workspacemodel.DefinitionAdmissionResult{WorkspaceID: candidate.WorkspaceID, CandidateID: candidate.CandidateID, CandidateRevision: candidate.CandidateRevision, CandidateHash: candidate.CandidateHash, Disposition: workspacemodel.DefinitionAdmissionAdmittedAllOf, AdmissionCompilerVersion: candidate.AdmissionCompilerVersion, CanonicalAdmittedInputHash: "admitted-hash"}).WithHash()
-	promoted, err := biz.promoteDefinitionAdmissionCandidate(ctx, workspaceevents.PromoteDefinitionAdmissionCandidateCommand{WorkspaceID: candidate.WorkspaceID, CandidateID: candidate.CandidateID, CandidateRevision: candidate.CandidateRevision, CandidateHash: candidate.CandidateHash, AdmissionResult: admission, BlockingTicketID: "ticket-1"})
+	if submitted.AdmissionResult.Disposition != workspacemodel.DefinitionAdmissionAdmittedAllOf || submitted.AdmissionResult.AdmissionResultHash == "" {
+		t.Fatalf("owner admission = %+v", submitted.AdmissionResult)
+	}
+	promoted, err := biz.promoteDefinitionAdmissionCandidate(ctx, workspaceevents.PromoteDefinitionAdmissionCandidateCommand{WorkspaceID: candidate.WorkspaceID, CandidateID: candidate.CandidateID, CandidateRevision: candidate.CandidateRevision, CandidateHash: candidate.CandidateHash, BlockingTicketID: "ticket-1"})
 	if err != nil {
 		t.Fatalf("promote: %v", err)
 	}
@@ -79,5 +81,31 @@ func TestDefinitionAdmissionOwnerSubmitPromoteAndAcknowledge(t *testing.T) {
 	duplicateAck, err := biz.acknowledgeWorkspaceDefinitionClarification(ctx, workspaceevents.AcknowledgeWorkspaceDefinitionClarificationResolutionCommand{WorkspaceID: candidate.WorkspaceID, CandidateID: candidate.CandidateID, CandidateRevision: candidate.CandidateRevision, CandidateHash: candidate.CandidateHash, BlockingTicketID: "ticket-1", ResolutionID: "resolution-1", ResolutionBindingHash: "binding-hash", DefinitionRevision: promoted.DefinitionRevision, StartupInputHash: promoted.StartupInputHash})
 	if err != nil || duplicateAck.Transitioned || duplicateAck.ActivationAdmission.State != workspacemodel.WorkspaceActivationEligible {
 		t.Fatalf("duplicate ack = %+v err=%v", duplicateAck, err)
+	}
+}
+
+func TestDefinitionAdmissionOwnerCannotPromoteUnsupportedAlternative(t *testing.T) {
+	ctx := context.Background()
+	repo := memoryrepo.NewWorkspaceRepository()
+	if err := repo.Create(ctx, &workspacemodel.Workspace{ID: "workspace-1", State: common.WorkspaceStateActive}); err != nil {
+		t.Fatal(err)
+	}
+	biz := &Biz{workspaces: repo}
+	candidate := testAdmissionCandidate()
+	candidate.ProposedRelationInputs[0].RelationKind = "one_of"
+	candidate = candidate.WithHash()
+	submitted, err := biz.submitDefinitionAdmissionCandidate(ctx, workspaceevents.SubmitDefinitionAdmissionCandidateCommand{Candidate: candidate})
+	if err != nil {
+		t.Fatalf("submit unsupported candidate: %v", err)
+	}
+	if submitted.AdmissionResult.Disposition != workspacemodel.DefinitionAdmissionClarificationRequired || submitted.AdmissionResult.ViolationCode != workspacemodel.DefinitionAdmissionOneOfUnsupported {
+		t.Fatalf("owner admission = %+v", submitted.AdmissionResult)
+	}
+	_, err = biz.promoteDefinitionAdmissionCandidate(ctx, workspaceevents.PromoteDefinitionAdmissionCandidateCommand{
+		WorkspaceID: candidate.WorkspaceID, CandidateID: candidate.CandidateID,
+		CandidateRevision: candidate.CandidateRevision, CandidateHash: candidate.CandidateHash,
+	})
+	if !errors.Is(err, common.ErrConflict) {
+		t.Fatalf("unsupported candidate promotion err = %v, want conflict", err)
 	}
 }

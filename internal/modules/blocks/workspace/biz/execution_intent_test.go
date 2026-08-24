@@ -132,8 +132,8 @@ func workspaceExecutionIntentBootstrap(t *testing.T, workspaceID common.Workspac
 	}
 	bootstrap := runtimecontract.RuntimeBootstrap{
 		Definition: definition, Activation: activation, DefinitionSeed: seed,
-		Focuses: []runtimecontract.CoverageFocus{{ID: "focus-1", SliceID: "slice-1", CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-1"}, RequireAssessment: true}},
-		Slices:  slices, CoverageItems: coverageItems,
+		DefinitionFocuses: []runtimecontract.RuntimeDefinitionFocus{{ID: "focus-1", SliceID: "slice-1", CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-1"}, RequireAssessment: true}},
+		Slices:            slices, CoverageItems: coverageItems,
 		ConvergencePolicy: runtimecontract.DefaultRuntimeConvergencePolicy(), RecoveryPolicy: runtimecontract.DefaultRuntimeRecoveryPolicy(),
 	}
 	bootstrap.ExecutionBudgetPolicy = runtimecontract.RuntimeExecutionBudgetPolicyForRuntimePolicies(bootstrap.ConvergencePolicy, bootstrap.RecoveryPolicy)

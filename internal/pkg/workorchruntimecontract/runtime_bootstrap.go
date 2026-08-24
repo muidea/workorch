@@ -15,7 +15,7 @@ type RuntimeBootstrap struct {
 	// DefinitionSeed is the complete activation input for semantic planning.
 	// It carries no proof binding or owner feasibility authority.
 	DefinitionSeed         RuntimeDefinitionSeed
-	Focuses                []CoverageFocus
+	DefinitionFocuses      []RuntimeDefinitionFocus
 	Slices                 []RuntimeAcceptanceSlice
 	CoverageItems          []RuntimeCoverageItem
 	Requirements           []RuntimeRequirement
@@ -29,7 +29,7 @@ func (b RuntimeBootstrap) Normalized() RuntimeBootstrap {
 	b.Definition = b.Definition.Normalized()
 	b.Activation = b.Activation.Normalized()
 	b.DefinitionSeed = b.DefinitionSeed.Normalized()
-	b.Focuses = normalizeCoverageFocusQueue(b.Focuses)
+	b.DefinitionFocuses = NormalizeRuntimeDefinitionFocuses(b.DefinitionFocuses)
 	b.Slices = NormalizeRuntimeAcceptanceSlices(b.Slices)
 	b.CoverageItems = NormalizeRuntimeCoverageItems(b.CoverageItems)
 	b.Requirements = normalizeRuntimeRequirements(b.Requirements)
@@ -66,11 +66,11 @@ func (b RuntimeBootstrap) Validate() error {
 	if err := ValidateRuntimeExecutionBudgetPolicySources(b.ExecutionBudgetPolicy, b.ConvergencePolicy, b.RecoveryPolicy); err != nil {
 		return err
 	}
-	if len(b.Focuses) == 0 {
-		return fmt.Errorf("runtime bootstrap requires at least one coverage focus")
+	if len(b.DefinitionFocuses) == 0 {
+		return fmt.Errorf("runtime bootstrap requires at least one definition focus")
 	}
-	if len(b.Focuses) > b.ConvergencePolicy.MaxFocuses {
-		return fmt.Errorf("runtime bootstrap has %d focuses, exceeding sealed limit %d", len(b.Focuses), b.ConvergencePolicy.MaxFocuses)
+	if len(b.DefinitionFocuses) > b.ConvergencePolicy.MaxFocuses {
+		return fmt.Errorf("runtime bootstrap has %d definition focuses, exceeding sealed limit %d", len(b.DefinitionFocuses), b.ConvergencePolicy.MaxFocuses)
 	}
 	if len(b.CoverageItems) == 0 {
 		return fmt.Errorf("runtime bootstrap requires explicit coverage items")
@@ -84,6 +84,25 @@ func (b RuntimeBootstrap) Validate() error {
 	}
 	if err := ValidateRuntimeCoverageItemDependencies(b.CoverageItems); err != nil {
 		return fmt.Errorf("runtime bootstrap coverage dependencies: %w", err)
+	}
+	if len(b.DefinitionSeed.CoverageItems) != len(b.CoverageItems) {
+		return fmt.Errorf("runtime bootstrap definition seed coverage inventory mismatch")
+	}
+	for idx := range b.CoverageItems {
+		if !sameRuntimeCoverageItem(b.DefinitionSeed.CoverageItems[idx], b.CoverageItems[idx]) {
+			return fmt.Errorf("runtime bootstrap definition seed coverage item %q mismatch", b.CoverageItems[idx].ID)
+		}
+	}
+	if len(b.DefinitionSeed.Slices) != len(b.Slices) {
+		return fmt.Errorf("runtime bootstrap definition seed slice inventory mismatch")
+	}
+	for idx := range b.Slices {
+		if !sameRuntimeAcceptanceSlice(b.DefinitionSeed.Slices[idx], b.Slices[idx]) {
+			return fmt.Errorf("runtime bootstrap definition seed slice %q mismatch", b.Slices[idx].ID)
+		}
+	}
+	if err := ValidateRuntimeDefinitionFocuses(b.DefinitionSeed, b.DefinitionFocuses); err != nil {
+		return fmt.Errorf("runtime bootstrap definition focuses: %w", err)
 	}
 	slices := make(map[string]RuntimeAcceptanceSlice, len(b.Slices))
 	for _, slice := range b.Slices {
@@ -100,7 +119,7 @@ func (b RuntimeBootstrap) Validate() error {
 	}
 	seen := map[string]struct{}{}
 	coveredByFocus := map[common.CoverageWorkItemID]struct{}{}
-	for _, focus := range b.Focuses {
+	for _, focus := range b.DefinitionFocuses {
 		if focus.ID == "" || len(focus.CoverageWorkItemIDs) == 0 || (len(focus.RequiredEvidenceKinds) == 0 && !focus.RequireAssessment) {
 			return fmt.Errorf("runtime bootstrap focus requires identity, coverage and evidence or assessment")
 		}
@@ -111,15 +130,6 @@ func (b RuntimeBootstrap) Validate() error {
 		// ambiguous current-binding owner before the Run can persist it.
 		if len(focus.CoverageWorkItemIDs) != 1 {
 			return fmt.Errorf("runtime bootstrap focus %s must contain exactly one coverage item", focus.ID)
-		}
-		if err := ValidateRuntimeTargetGrounding(focus.RequireTargetGrounding, focus.TargetRole, focus.TargetRefs, focus.TargetDiscoverySources, focus.TargetSelectorRef); err != nil {
-			return fmt.Errorf("runtime bootstrap focus %s: %w", focus.ID, err)
-		}
-		if err := ValidateRuntimeOwnerFactRequirements(focus.RequiredOwnerFacts); err != nil {
-			return fmt.Errorf("runtime bootstrap focus %s owner facts: %w", focus.ID, err)
-		}
-		if err := ValidateRuntimeOwnerFactConvergences(focus.RequiredOwnerFacts, focus.OwnerFactConvergences); err != nil {
-			return fmt.Errorf("runtime bootstrap focus %s owner-fact convergence: %w", focus.ID, err)
 		}
 		if _, ok := seen[focus.ID]; ok {
 			return fmt.Errorf("runtime bootstrap focus %s is duplicated", focus.ID)
@@ -143,13 +153,6 @@ func (b RuntimeBootstrap) Validate() error {
 				return fmt.Errorf("runtime bootstrap coverage item %s appears in more than one focus", id)
 			}
 			coveredByFocus[id] = struct{}{}
-		}
-		// A bootstrap seals only the Definition seed and declarative policy.
-		// Per-CWI proof bindings are created later by the Orchestrator after the
-		// bounded semantic-plan and owner-feasibility sequence. Accepting one
-		// here would let activation bypass the canonical CWI ledger.
-		if len(focus.CoverageEvidenceBindings) != 0 {
-			return fmt.Errorf("runtime bootstrap focus %s must not contain sealed coverage evidence bindings", focus.ID)
 		}
 		seen[focus.ID] = struct{}{}
 	}
@@ -180,10 +183,7 @@ func (b RuntimeBootstrap) Clone() RuntimeBootstrap {
 	b.Definition = b.Definition.Clone()
 	b.Activation = b.Activation.Clone()
 	b.DefinitionSeed = b.DefinitionSeed.Clone()
-	b.Focuses = append([]CoverageFocus(nil), b.Focuses...)
-	for idx := range b.Focuses {
-		b.Focuses[idx] = b.Focuses[idx].Normalized()
-	}
+	b.DefinitionFocuses = CloneRuntimeDefinitionFocuses(b.DefinitionFocuses)
 	b.Slices = append([]RuntimeAcceptanceSlice(nil), b.Slices...)
 	for idx := range b.Slices {
 		b.Slices[idx] = b.Slices[idx].Normalized()
@@ -208,11 +208,12 @@ func (b RuntimeBootstrap) InitialFacts(workspaceID common.WorkspaceID, runID com
 	if err := b.Validate(); err != nil {
 		return RuntimeFacts{}, err
 	}
+	focusSeeds := RuntimeFocusSeedsFromDefinitionFocuses(b.DefinitionFocuses)
 	facts := RuntimeFacts{
 		WorkspaceID: workspaceID, RunID: runID, DefinitionRevision: b.Definition.Revision,
-		DefinitionSeed: b.DefinitionSeed.Clone(), DefinitionFocuses: CompileRuntimeDefinitionFocuses(b.Focuses),
-		EvidenceRevision: InitialRuntimeEvidenceRevision, Focus: b.Focuses[0],
-		RemainingFocuses:      append([]CoverageFocus(nil), b.Focuses[1:]...),
+		DefinitionSeed: b.DefinitionSeed.Clone(), DefinitionFocuses: CloneRuntimeDefinitionFocuses(b.DefinitionFocuses),
+		EvidenceRevision: InitialRuntimeEvidenceRevision, Focus: focusSeeds[0],
+		RemainingFocuses:      append([]CoverageFocus(nil), focusSeeds[1:]...),
 		Activation:            b.Activation.Clone(),
 		StateChange:           NewRuntimeStateChangeLedger(b.StateChangeRequirement),
 		ConvergencePolicy:     b.ConvergencePolicy.Normalized(),
@@ -231,7 +232,7 @@ func SameRuntimeBootstrap(left RuntimeBootstrap, right RuntimeBootstrap) bool {
 	right = right.Normalized()
 	if !SameRuntimeDefinitionContext(left.Definition, right.Definition) || !SameRuntimeActivationContext(left.Activation, right.Activation) ||
 		left.DefinitionSeed.Hash != right.DefinitionSeed.Hash ||
-		len(left.Focuses) != len(right.Focuses) || len(left.Slices) != len(right.Slices) || len(left.CoverageItems) != len(right.CoverageItems) ||
+		len(left.DefinitionFocuses) != len(right.DefinitionFocuses) || len(left.Slices) != len(right.Slices) || len(left.CoverageItems) != len(right.CoverageItems) ||
 		len(left.Requirements) != len(right.Requirements) ||
 		left.StateChangeRequirement.Required != right.StateChangeRequirement.Required ||
 		!sameCoverageWorkItemIDs(left.StateChangeRequirement.CoverageWorkItemIDs, right.StateChangeRequirement.CoverageWorkItemIDs) ||
@@ -239,8 +240,8 @@ func SameRuntimeBootstrap(left RuntimeBootstrap, right RuntimeBootstrap) bool {
 		!SameRuntimeExecutionBudgetPolicy(left.ExecutionBudgetPolicy, right.ExecutionBudgetPolicy) {
 		return false
 	}
-	for idx := range left.Focuses {
-		if !sameCoverageFocus(left.Focuses[idx], right.Focuses[idx]) {
+	for idx := range left.DefinitionFocuses {
+		if !sameRuntimeDefinitionFocus(left.DefinitionFocuses[idx], right.DefinitionFocuses[idx]) {
 			return false
 		}
 	}

@@ -162,8 +162,8 @@ func validateRuntimeSemanticOwnerFactAcquisition(proofSet RuntimeSemanticCWIProo
 	return nil
 }
 
-func runtimeSemanticBindingSourceFocuses(values []CoverageFocus) (map[common.CoverageWorkItemID]CoverageFocus, error) {
-	ret := make(map[common.CoverageWorkItemID]CoverageFocus, len(values))
+func runtimeSemanticBindingSourceFocuses(values []RuntimeDefinitionFocus) (map[common.CoverageWorkItemID]RuntimeDefinitionFocus, error) {
+	ret := make(map[common.CoverageWorkItemID]RuntimeDefinitionFocus, len(values))
 	for _, value := range values {
 		value = value.Normalized()
 		for _, coverageID := range value.CoverageWorkItemIDs {

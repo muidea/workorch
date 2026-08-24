@@ -23,9 +23,9 @@ Last Verified: 2026-08-24
 | materially replace/delete item | old ItemRef retired且不复用；fresh activation使用新 mapping |
 | pre-seal candidate | exact proposed Goal/DoD、Template snapshot、transitively sealed Profile/policy bindings、required owner-fact/convergence bindings、Profile contract hash、compiler version、resolved directory 与 admission-only relation input 产生稳定 versioned `CandidateHash`；仍无 Definition revision/startup-input/Run |
 | current candidate seal | `CandidateHash` 同时覆盖 acquisition operation variant、operation target policy 与 operation selector；caller/Workspace owner/pure compiler均不能重算 hash 后接受发生漂移的 immutable candidate |
-| candidate lineage/revision | exact normalized duplicate 返回原 CandidateID/revision/hash；materially changed input 只以 next revision CAS 新增；stale expected revision 零覆盖/零 promotion |
+| candidate lineage/revision | exact normalized duplicate 返回原 CandidateID/revision/hash 与确定性相同的 Workspace-owner admission result；materially changed input 只以 next revision CAS 新增；stale expected revision 零覆盖/零 promotion |
 | invalid candidate | 只持久化 candidate/violation/ticket lineage；零 canonical item/relation、`StartupInputHash`、Runtime/provider/capability work |
-| admitted candidate promotion | exact-current candidate + `admitted_all_of` result 由 Workspace owner 一次 CAS 产生正式 Definition revision/startup input 与 activation-admission fact；无 static ticket 时直接 eligible，corrected ticket lineage 必须 pending；duplicate 返回同一 identity，stale/mismatch 零部分写 |
+| admitted candidate promotion | submit 的 `DefinitionAdmissionResult` 由 Workspace owner compiler 生成；identity-only promotion 在 owner-private event 中重新编译 exact-current candidate，并一次 CAS 产生正式 Definition revision/startup input 与 activation-admission fact；caller 无 outcome/result-hash 写权限；无 static ticket 时直接 eligible，corrected ticket lineage 必须 pending；duplicate 返回同一 identity，stale/mismatch/unsupported alternative 零部分写 |
 | startup input seal | promoted exact Goal/DoD、Template snapshot、resolved directory 与 Definition revision 共同产生稳定 `StartupInputHash` |
 | change any startup input | 新 owner-sealed startup-input snapshot/hash；Goal/DoD/关系变化另产生新 Definition revision；当前 Run/bootstrap/graph 不变 |
 | required item has no CWI / CWI has two primary items | static mapping validation fail-closed before Run creation |

@@ -696,7 +696,7 @@ func (r RuntimeStateRecord) Clone() RuntimeStateRecord {
 	ret := r
 	ret.Definition = r.Definition.Clone()
 	ret.Facts = r.Facts.Normalized()
-	ret.Facts.DefinitionFocuses = CompileRuntimeDefinitionFocuses(r.Facts.DefinitionFocuses)
+	ret.Facts.DefinitionFocuses = CloneRuntimeDefinitionFocuses(r.Facts.DefinitionFocuses)
 	ret.SemanticPlanning = r.SemanticPlanning.Clone()
 	ret.Reconciliation = r.Reconciliation.Clone()
 	ret.CoverageProofLineage = NormalizeRuntimeCoverageProofLineage(r.CoverageProofLineage)

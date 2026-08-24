@@ -1,7 +1,8 @@
-// Package definitionadmissioncore contains the Workorchd pure static
+// Package definitionadmission contains the Workspace-owner pure static
 // Definition compiler. It has no EventHub, repository, LLM or capability
-// dependency and cannot promote owner state.
-package definitionadmissioncore
+// dependency. Only the Workspace private reducer may use its result to select
+// an admission state transition.
+package definitionadmission
 
 import (
 	"crypto/sha256"

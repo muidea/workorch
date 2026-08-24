@@ -250,10 +250,11 @@ func runtimeTestAggregateWithSemanticPlanning(t *testing.T, aggregate runtime.Ru
 			aggregate.Facts.DefinitionSeed = seed
 		}
 	}
-	// Direct fixtures frequently mutate their source focus after constructing a
-	// base aggregate. Re-project the immutable declaration before the fixture
-	// enters production validation; production creates it exactly once in
-	// RuntimeBootstrap.InitialFacts.
+	// Direct fixtures that do not start from RuntimeBootstrap still need an
+	// immutable declaration. Preserve every declaration produced by
+	// RuntimeBootstrap.InitialFacts: the pre-semantic queue is only a cursor and
+	// deliberately does not carry the declaration's target-grounding policy.
+	// Production creates this inventory exactly once during activation.
 	queue := append([]runtimecontract.CoverageFocus{aggregate.Facts.Focus}, aggregate.Facts.RemainingFocuses...)
 	queue = append(queue, aggregate.Facts.CompletedFocuses...)
 	items := make(map[common.CoverageWorkItemID]runtimecontract.RuntimeCoverageItem, len(aggregate.Facts.DefinitionSeed.CoverageItems))
@@ -268,7 +269,36 @@ func runtimeTestAggregateWithSemanticPlanning(t *testing.T, aggregate runtime.Ru
 			queue[index].TargetSelectorSubjectRef = string(queue[index].CoverageWorkItemIDs[0])
 		}
 	}
-	aggregate.Facts.DefinitionFocuses = runtimecontract.CompileRuntimeDefinitionFocuses(queue)
+	declarations := runtimecontract.CloneRuntimeDefinitionFocuses(aggregate.Facts.DefinitionFocuses)
+	// Aggregate-only reducer fixtures intentionally have no presentation-slice
+	// projection. They often specialize the pre-semantic focus immediately
+	// before calling this helper; mirror that specialization into their test
+	// Definition declaration. Run-backed fixtures always carry Facts.Slices and
+	// must preserve the immutable activation inventory exactly.
+	if len(aggregate.Facts.Slices) == 0 {
+		declarations = runtimecontract.CompileRuntimeDefinitionFocuses(queue)
+	}
+	declaredCoverage := make(map[common.CoverageWorkItemID]struct{}, len(declarations))
+	for _, declaration := range declarations {
+		for _, coverageID := range declaration.CoverageWorkItemIDs {
+			declaredCoverage[coverageID] = struct{}{}
+		}
+	}
+	missingDeclarations := make([]runtimecontract.CoverageFocus, 0, len(queue))
+	for _, source := range queue {
+		missing := false
+		for _, coverageID := range source.CoverageWorkItemIDs {
+			if _, found := declaredCoverage[coverageID]; !found {
+				missing = true
+				declaredCoverage[coverageID] = struct{}{}
+			}
+		}
+		if missing {
+			missingDeclarations = append(missingDeclarations, source)
+		}
+	}
+	declarations = append(declarations, runtimecontract.CompileRuntimeDefinitionFocuses(missingDeclarations)...)
+	aggregate.Facts.DefinitionFocuses = runtimecontract.NormalizeRuntimeDefinitionFocuses(declarations)
 	if aggregate.Facts.CWILedgerSchemaVersion == "" {
 		// Test-only post-semantic fixtures begin from the same unbound activation
 		// shape as production. Do not let an older fixture's hand-written binding
@@ -347,6 +377,16 @@ func runtimeTestProjectSealedSemanticFacts(t *testing.T, facts runtimecontract.R
 			sourceByCoverage[coverageID] = source
 		}
 	}
+	// The pre-seal queue is intentionally only a generation cursor. Restore the
+	// immutable declaration view before copying target-grounding context onto
+	// the newly sealed semantic focus; otherwise this test projection would
+	// erase the very Definition authority production keeps separately.
+	for _, declaration := range facts.DefinitionFocuses {
+		declaration = declaration.Normalized()
+		for _, coverageID := range declaration.CoverageWorkItemIDs {
+			sourceByCoverage[coverageID] = declaration.CoverageFocusDeclaration()
+		}
+	}
 	for focusIndex := range focuses {
 		focus := focuses[focusIndex].Normalized()
 		if len(focus.CoverageWorkItemIDs) != 1 || len(focus.CoverageEvidenceBindings) != 1 {
@@ -360,11 +400,19 @@ func runtimeTestProjectSealedSemanticFacts(t *testing.T, facts runtimecontract.R
 			t.Fatalf("test semantic projection duplicates coverage %q", coverageID)
 		}
 		if source, found := sourceByCoverage[coverageID]; found {
+			// Direct reducer/candidate fixtures may deliberately declare that target
+			// grounding is outside their subject. Keep that immutable test contract;
+			// Run-backed fixtures that exercise owner grounding declare it true and
+			// still pass through the production prerequisite path.
+			focus.RequireTargetGrounding = source.RequireTargetGrounding
+		}
+		if source, found := sourceByCoverage[coverageID]; found && focus.TargetSelectorRef != "" && source.TargetSelectorRef == focus.TargetSelectorRef {
 			// Semantic binding owns the executable proof. The original focus still
 			// owns profile-declared target discovery context, which remains a
 			// prerequisite input rather than a binding or credit authority.
 			focus.TargetRole = source.TargetRole
 			focus.TargetDiscoverySources = append([]string(nil), source.TargetDiscoverySources...)
+			focus.TargetSelectorRef = source.TargetSelectorRef
 			focus.TargetSelectorOwnerRef = source.TargetSelectorOwnerRef
 			focus.TargetSelectorSubjectRef = source.TargetSelectorSubjectRef
 			focus.TargetSelectorCandidateRefs = append([]string(nil), source.TargetSelectorCandidateRefs...)
@@ -766,7 +814,7 @@ func runtimeTestSealedSemanticPlanning(t *testing.T, aggregate runtime.RuntimeAg
 // once from Runtime DefinitionFocuses by the contract package.
 func runtimeTestSemanticProofObligations(t *testing.T, facts runtimecontract.RuntimeFacts, coverageItems []runtimecontract.RuntimeCoverageItem, catalogs []runtimecontract.RuntimeOperationAdmissibility, specs []runtimeTestSemanticFixtureSpec) []runtimecontract.RuntimeSemanticProofObligation {
 	t.Helper()
-	sources := make(map[common.CoverageWorkItemID]runtimecontract.CoverageFocus, len(facts.DefinitionFocuses))
+	sources := make(map[common.CoverageWorkItemID]runtimecontract.RuntimeDefinitionFocus, len(facts.DefinitionFocuses))
 	for _, source := range facts.DefinitionFocuses {
 		source = source.Normalized()
 		for _, coverageID := range source.CoverageWorkItemIDs {
@@ -860,12 +908,42 @@ func runtimeTestSemanticFixtureSpecs(t *testing.T, aggregate runtime.RuntimeAggr
 			sources[coverageID] = source
 		}
 	}
+	// RuntimeDefinitionFocus is the activation declaration SoT. Overlay its
+	// immutable fields onto any hand-written generation fixture while retaining
+	// generation-only target/operation data that a direct post-semantic test
+	// explicitly supplied. A production semantic proposal receives the same
+	// declaration through RuntimeSemanticProofObligation.
+	for _, declaration := range aggregate.Facts.DefinitionFocuses {
+		declaration = declaration.Normalized()
+		for _, coverageID := range declaration.CoverageWorkItemIDs {
+			source := sources[coverageID]
+			generationID := source.ID
+			generationTargetRefs := append([]string(nil), source.TargetRefs...)
+			generationProspectiveTargetRef := source.ProspectiveTargetRef
+			generationAcceptedKinds := append([]string(nil), source.AcceptedStepKinds...)
+			generationAcceptedVariants := append([]runtimecontract.RuntimeOperationVariantRef(nil), source.AcceptedOperationVariants...)
+			generationValidationRecipeID := source.ValidationRecipeID
+			generationRequiredCheckRefs := append([]string(nil), source.RequiredCheckRefs...)
+			source = declaration.CoverageFocusDeclaration()
+			if generationID != "" {
+				source.ID = generationID
+			}
+			source.TargetRefs = generationTargetRefs
+			source.ProspectiveTargetRef = generationProspectiveTargetRef
+			source.AcceptedStepKinds = generationAcceptedKinds
+			source.AcceptedOperationVariants = generationAcceptedVariants
+			source.ValidationRecipeID = generationValidationRecipeID
+			source.RequiredCheckRefs = generationRequiredCheckRefs
+			sources[coverageID] = source.Normalized()
+		}
+	}
 	specs := make([]runtimeTestSemanticFixtureSpec, 0, len(eligible)*2)
 	for _, coverageID := range eligible {
 		source, found := sources[coverageID]
 		if !found {
 			t.Fatalf("test semantic fixture has no source focus for coverage %q", coverageID)
 		}
+		source = runtimeTestSemanticFixtureProfileOverlay(aggregate, source, coverageID)
 		evidenceKinds, required := runtimeTestSemanticFixtureEvidenceKinds(source)
 		for _, evidenceKind := range evidenceKinds {
 			kind, ok := runtimeTestSemanticFixtureOperation(aggregate, source, evidenceKind)
@@ -879,8 +957,8 @@ func runtimeTestSemanticFixtureSpecs(t *testing.T, aggregate runtime.RuntimeAggr
 			if !found {
 				t.Fatalf("test semantic fixture operation %q has no descriptor", kind)
 			}
-			variantID := runtimeTestSemanticFixtureVariant(t, source, kind)
-			target, feasibilityRefs, selectorRefs, constraintRefs, catalogTargets := runtimeTestSemanticFixtureTarget(aggregate.Facts, source, coverageID, evidenceKind)
+			variantID := runtimeTestSemanticFixtureVariant(t, aggregate, source, kind)
+			target, feasibilityRefs, selectorRefs, constraintRefs, catalogTargets := runtimeTestSemanticFixtureTarget(aggregate.Facts, source, coverageID, evidenceKind, kind)
 			proposal := runtimecontract.RuntimeSemanticProofProposal{
 				CoverageWorkItemID: coverageID,
 				OwnerModuleID:      descriptor.OwnerModuleID,
@@ -903,6 +981,12 @@ func runtimeTestSemanticFixtureSpecs(t *testing.T, aggregate runtime.RuntimeAggr
 				}
 				proposal.ValidationRecipeID = source.ValidationRecipeID
 				if proposal.ValidationRecipeID == "" {
+					recipes := runtimecontract.RuntimeValidationRecipeDeclarationsFromEvidencePolicies(aggregate.Facts.Activation.EvidencePolicies)
+					if len(recipes) == 1 {
+						proposal.ValidationRecipeID = recipes[0].ID
+					}
+				}
+				if proposal.ValidationRecipeID == "" {
 					proposal.ValidationRecipeID = "test-runtime-validation-recipe"
 				}
 				checks = append([]string(nil), source.RequiredCheckRefs...)
@@ -924,6 +1008,53 @@ func runtimeTestSemanticFixtureSpecs(t *testing.T, aggregate runtime.RuntimeAggr
 		t.Fatal("test semantic fixture has no proof proposals")
 	}
 	return specs
+}
+
+// runtimeTestSemanticFixtureProfileOverlay supplies generation-only values
+// from the activation-sealed profile declaration. RuntimeDefinitionFocus is
+// intentionally unable to carry these values; production SM-2 receives them
+// through the semantic manifest, while this scripted provider needs the same
+// declarative source to construct a valid proposal.
+func runtimeTestSemanticFixtureProfileOverlay(aggregate runtime.RuntimeAggregate, source runtimecontract.CoverageFocus, coverageID common.CoverageWorkItemID) runtimecontract.CoverageFocus {
+	var matches []runtimecontract.RuntimeProfileEvidenceRequirement
+	var coverage runtimecontract.RuntimeCoverageItemFact
+	coverageFound := false
+	for _, item := range aggregate.Facts.Coverage {
+		if item.ID == coverageID {
+			coverage, coverageFound = item, true
+			break
+		}
+	}
+	for _, profile := range runtimecontract.NormalizeRuntimeProfileContracts(aggregate.Facts.Activation.ExecutionContract.ProfileContracts) {
+		for _, requirement := range profile.EvidenceRequirements {
+			if coverageFound && requirement.Scope == coverage.SourceScope && requirement.ID == coverage.SourceID {
+				matches = append(matches, requirement)
+			}
+		}
+	}
+	if len(matches) != 1 {
+		return source.Normalized()
+	}
+	requirement := matches[0]
+	if len(source.TargetRefs) == 0 {
+		source.TargetRefs = append([]string(nil), requirement.TargetRefs...)
+	}
+	if source.ProspectiveTargetRef == "" {
+		source.ProspectiveTargetRef = requirement.ProspectiveTargetRef
+	}
+	if len(source.AcceptedStepKinds) == 0 {
+		source.AcceptedStepKinds = append([]string(nil), requirement.AcceptedStepKinds...)
+	}
+	if len(source.AcceptedOperationVariants) == 0 {
+		source.AcceptedOperationVariants = append([]runtimecontract.RuntimeOperationVariantRef(nil), requirement.AcceptedOperationVariants...)
+	}
+	if source.ValidationRecipeID == "" {
+		source.ValidationRecipeID = requirement.ValidationRecipeID
+	}
+	if len(source.RequiredCheckRefs) == 0 {
+		source.RequiredCheckRefs = append([]string(nil), requirement.RequiredCheckRefs...)
+	}
+	return source.Normalized()
 }
 
 func runtimeTestSemanticFixtureEvidenceKinds(source runtimecontract.CoverageFocus) ([]string, bool) {
@@ -966,7 +1097,7 @@ func runtimeTestSemanticFixtureOperation(aggregate runtime.RuntimeAggregate, sou
 	return "", false
 }
 
-func runtimeTestSemanticFixtureVariant(t *testing.T, source runtimecontract.CoverageFocus, kind string) string {
+func runtimeTestSemanticFixtureVariant(t *testing.T, aggregate runtime.RuntimeAggregate, source runtimecontract.CoverageFocus, kind string) string {
 	t.Helper()
 	kind = runtimecontract.CanonicalRuntimeBlockKind(kind)
 	for _, ref := range source.Normalized().AcceptedOperationVariants {
@@ -974,12 +1105,32 @@ func runtimeTestSemanticFixtureVariant(t *testing.T, source runtimecontract.Cove
 			return ref.VariantID
 		}
 	}
+	profileVariants := make([]string, 0, 1)
+	for _, profile := range runtimecontract.NormalizeRuntimeProfileContracts(aggregate.Facts.Activation.ExecutionContract.ProfileContracts) {
+		for _, requirement := range profile.EvidenceRequirements {
+			for _, ref := range requirement.AcceptedOperationVariants {
+				if runtimecontract.CanonicalRuntimeBlockKind(ref.Kind) == kind {
+					profileVariants = append(profileVariants, ref.VariantID)
+				}
+			}
+		}
+	}
+	profileVariants = runtimeTestNormalizeStrings(profileVariants)
+	if len(profileVariants) == 1 {
+		return profileVariants[0]
+	}
+	if len(profileVariants) > 1 {
+		t.Fatalf("test semantic fixture operation %q has ambiguous profile variants %v", kind, profileVariants)
+	}
 	contract, found := runtimecontract.RuntimeOperationContractForKind(kind)
 	if !found || len(contract.Variants) == 0 {
 		return ""
 	}
-	t.Fatalf("test semantic fixture operation %q has static variants but source focus %q does not declare one", kind, source.ID)
-	return ""
+	// RuntimeDefinitionFocus cannot carry generation-specific operation
+	// variants. Dedicated variant-admission tests declare one on their generated
+	// focus; generic post-semantic fixtures deterministically choose the first
+	// owner-declared variant while constructing their synthetic SM-3 binding.
+	return contract.Variants[0].ID
 }
 
 func runtimeTestSemanticFixtureTarget(
@@ -987,24 +1138,35 @@ func runtimeTestSemanticFixtureTarget(
 	source runtimecontract.CoverageFocus,
 	coverageID common.CoverageWorkItemID,
 	evidenceKind string,
+	operationKind string,
 ) (runtimecontract.RuntimeOperationTargetAuthorization, []string, []string, []string, []string) {
 	source = source.Normalized()
 	targets := append([]string(nil), source.TargetRefs...)
 	if len(targets) == 0 && facts.Resources.TargetSelection != nil {
 		targets = append(targets, facts.Resources.TargetSelection.TargetRefs...)
 	}
+	if len(targets) == 0 {
+		targets = append(targets, source.TargetSelectorCandidateRefs...)
+	}
 	selector := source.TargetSelectorRef
 	if selector == "" {
 		selector = "test/fixture-owner-selector/" + string(coverageID)
 	}
 	if source.ProspectiveTargetRef != "" && evidenceKind == runtimecontract.EvidenceKindStateChange {
-		constraint := "test/fixture-prospective-target/" + string(coverageID)
+		constraints := []string{"test/fixture-prospective-target/" + string(coverageID)}
+		if descriptor, found := runtimecontract.RuntimeOperationDescriptorForKind(operationKind); found && descriptor.OwnerModuleID == runtimecontract.RuntimeModuleFile {
+			// File is the owner of workspace-path creation semantics. Use its
+			// concrete selector/constraints so the post-dispatch reconciliation
+			// observes the same owner surface instead of an invented test selector.
+			selector = "workspace-relative-new-file-target"
+			constraints = []string{"new-target-requires-owner-selector", "workspace-relative-path"}
+		}
 		return runtimecontract.RuntimeOperationTargetAuthorization{
 			Policy:                    runtimecontract.RuntimeOperationTargetPolicyProspectiveOwnerTarget,
 			OwnerSelectorRefs:         []string{selector},
-			ProspectiveConstraintRefs: []string{constraint},
+			ProspectiveConstraintRefs: constraints,
 			ProspectiveTargetRef:      source.ProspectiveTargetRef,
-		}, []string{source.ProspectiveTargetRef}, []string{selector}, []string{constraint}, nil
+		}, []string{source.ProspectiveTargetRef}, []string{selector}, constraints, nil
 	}
 	if source.ProspectiveTargetRef != "" && evidenceKind == runtimecontract.EvidenceKindValidation {
 		return runtimecontract.RuntimeOperationTargetAuthorization{
@@ -1016,17 +1178,25 @@ func runtimeTestSemanticFixtureTarget(
 			Policy: runtimecontract.RuntimeOperationTargetPolicyExistingOwnerScope, OwnerSelectorRefs: []string{selector},
 		}, nil, []string{selector}, nil, nil
 	}
-	if len(targets) == 0 {
-		targets = append(targets, source.TargetSelectorCandidateRefs...)
-	}
 	if len(targets) != 0 {
 		return runtimecontract.RuntimeOperationTargetAuthorization{
 			Policy: runtimecontract.RuntimeOperationTargetPolicyExactTarget, ExactTargetRefs: targets,
 		}, targets, nil, nil, targets
 	}
+	// A single-proof direct fixture can retain the historical closed synthetic
+	// owner scope: no second owner exists with which its selector ownership could
+	// conflict, and forcing an invented exact file would add a target-snapshot
+	// prerequisite unrelated to the test. Multi-proof fixtures need one bounded
+	// exact surface so independent state-change and validation owners converge.
+	if len(source.RequiredEvidenceKinds) == 1 {
+		return runtimecontract.RuntimeOperationTargetAuthorization{
+			Policy: runtimecontract.RuntimeOperationTargetPolicyExistingOwnerScope, OwnerSelectorRefs: []string{selector},
+		}, nil, []string{selector}, nil, []string{"target.txt"}
+	}
+	targets = []string{"target.txt"}
 	return runtimecontract.RuntimeOperationTargetAuthorization{
-		Policy: runtimecontract.RuntimeOperationTargetPolicyExistingOwnerScope, OwnerSelectorRefs: []string{selector},
-	}, nil, []string{selector}, nil, nil
+		Policy: runtimecontract.RuntimeOperationTargetPolicyExactTarget, ExactTargetRefs: targets,
+	}, targets, nil, nil, targets
 }
 
 func runtimeTestSemanticFixtureCatalogs(t *testing.T, specs []runtimeTestSemanticFixtureSpec) []runtimecontract.RuntimeOperationAdmissibility {
@@ -1034,6 +1204,7 @@ func runtimeTestSemanticFixtureCatalogs(t *testing.T, specs []runtimeTestSemanti
 	byOwner := make(map[string]*runtimecontract.RuntimeOperationAdmissibility, len(specs))
 	order := make([]string, 0, len(specs))
 	variantIndex := make(map[string]map[string]int, len(specs))
+	validationSurfaceIndex := make(map[string]map[string]int, len(specs))
 	for _, spec := range specs {
 		proposal := spec.proposal.Normalized()
 		catalog := byOwner[proposal.OwnerModuleID]
@@ -1046,6 +1217,7 @@ func runtimeTestSemanticFixtureCatalogs(t *testing.T, specs []runtimeTestSemanti
 			byOwner[proposal.OwnerModuleID] = catalog
 			order = append(order, proposal.OwnerModuleID)
 			variantIndex[proposal.OwnerModuleID] = make(map[string]int)
+			validationSurfaceIndex[proposal.OwnerModuleID] = make(map[string]int)
 		}
 		catalog.OperationKinds = append(catalog.OperationKinds, proposal.OperationKind)
 		catalog.TargetRefs = append(catalog.TargetRefs, spec.targetRefs...)
@@ -1057,18 +1229,32 @@ func runtimeTestSemanticFixtureCatalogs(t *testing.T, specs []runtimeTestSemanti
 			if len(proposal.RequiredEffectScopes) != 0 {
 				effect = proposal.RequiredEffectScopes[0]
 			}
-			catalog.ValidationSurfaces = append(catalog.ValidationSurfaces, runtimecontract.RuntimeValidationSurface{
+			surface := runtimecontract.RuntimeValidationSurface{
 				ID: proposal.ValidationRecipeID, OwnerModuleID: proposal.OwnerModuleID, OperationKind: proposal.OperationKind,
 				Readiness: runtimecontract.RuntimeValidationSurfaceReady, InputSchemaHash: "test-semantic-input-schema",
 				InputBindingRef: "test-semantic-input/" + proposal.ValidationRecipeID,
 				CheckRefs:       append([]string(nil), spec.validationChecks...), ProofApplicability: runtimecontract.RuntimeValidationProofDirect,
 				EffectScope: effect, IdempotencyClass: runtimecontract.RuntimeOperationIdempotencyAtMostOnce,
-			})
-			catalog.OperationPolicies = append(catalog.OperationPolicies, runtimecontract.RuntimeOperationPolicyFact{
-				ID: "test-semantic-policy/" + proposal.ValidationRecipeID, OwnerModuleID: proposal.OwnerModuleID,
-				OperationKind: proposal.OperationKind, EffectScope: effect,
-				IdempotencyClass: runtimecontract.RuntimeOperationIdempotencyAtMostOnce,
-			})
+			}.Normalized()
+			if index, duplicate := validationSurfaceIndex[proposal.OwnerModuleID][surface.ID]; duplicate {
+				existing := catalog.ValidationSurfaces[index].Normalized()
+				if existing.OwnerModuleID != surface.OwnerModuleID || existing.OperationKind != surface.OperationKind ||
+					existing.Readiness != surface.Readiness || existing.InputSchemaHash != surface.InputSchemaHash ||
+					existing.InputBindingRef != surface.InputBindingRef || existing.ProofApplicability != surface.ProofApplicability ||
+					existing.EffectScope != surface.EffectScope || existing.IdempotencyClass != surface.IdempotencyClass {
+					t.Fatalf("test semantic validation surface %q has conflicting declarations", surface.ID)
+				}
+				existing.CheckRefs = runtimeTestNormalizeStrings(append(existing.CheckRefs, surface.CheckRefs...))
+				catalog.ValidationSurfaces[index] = existing
+			} else {
+				catalog.ValidationSurfaces = append(catalog.ValidationSurfaces, surface)
+				validationSurfaceIndex[proposal.OwnerModuleID][surface.ID] = len(catalog.ValidationSurfaces) - 1
+				catalog.OperationPolicies = append(catalog.OperationPolicies, runtimecontract.RuntimeOperationPolicyFact{
+					ID: "test-semantic-policy/" + proposal.ValidationRecipeID, OwnerModuleID: proposal.OwnerModuleID,
+					OperationKind: proposal.OperationKind, EffectScope: effect,
+					IdempotencyClass: runtimecontract.RuntimeOperationIdempotencyAtMostOnce,
+				})
+			}
 		}
 		// Publish one explicit policy fact per kind/variant. This matters when a
 		// single owner catalog mixes a discriminated kind (for example patch/apply)
@@ -1077,6 +1263,8 @@ func runtimeTestSemanticFixtureCatalogs(t *testing.T, specs []runtimeTestSemanti
 		key := proposal.OperationKind + "|" + proposal.OperationVariantID
 		if index, found := variantIndex[proposal.OwnerModuleID][key]; found {
 			catalog.OperationVariants[index].AllowedTargetPolicies = append(catalog.OperationVariants[index].AllowedTargetPolicies, proposal.Target.Policy)
+			catalog.OperationVariants[index].SelectorRefs = append(catalog.OperationVariants[index].SelectorRefs, spec.selectorRefs...)
+			catalog.OperationVariants[index].ConstraintRefs = append(catalog.OperationVariants[index].ConstraintRefs, spec.constraintRefs...)
 			continue
 		}
 		catalog.OperationVariants = append(catalog.OperationVariants, runtimecontract.RuntimeOperationAdmissibilityVariant{
@@ -1357,7 +1545,15 @@ func bindRuntimeTestCandidateToManifest(manifest runtimecontract.RuntimeCandidat
 		if operation == nil || len(operation.CoverageWorkItemIDs) == 0 || len(operation.BindingRefs) != 0 {
 			return
 		}
-		allowed := runtimeTestManifestBindingRefsForOperation(manifest, operation.Kind)
+		operationManifest, found := runtimeTestManifestOperationForKind(manifest, operation.Kind)
+		if !found {
+			return
+		}
+		authorization, err := runtimecontract.RuntimeCandidateOperationBindingAuthorizationFor(operationManifest, *operation)
+		if err != nil {
+			return
+		}
+		allowed := authorization.AllowedBindingRefs
 		if len(allowed) == 0 {
 			return
 		}
@@ -1390,18 +1586,14 @@ func bindRuntimeTestCandidateToManifest(manifest runtimecontract.RuntimeCandidat
 	return candidate
 }
 
-func runtimeTestManifestBindingRefsForOperation(manifest runtimecontract.RuntimeCandidateContractManifest, kind string) []string {
+func runtimeTestManifestOperationForKind(manifest runtimecontract.RuntimeCandidateContractManifest, kind string) (runtimecontract.RuntimeCandidateOperationManifest, bool) {
 	kind = runtimecontract.CanonicalRuntimeBlockKind(kind)
 	for _, operation := range manifest.Normalized().Operations {
 		if operation.Kind == kind {
-			refs := make([]string, 0)
-			for _, authorization := range operation.BindingAuthorizations {
-				refs = append(refs, authorization.AllowedBindingRefs...)
-			}
-			return runtimeTestNormalizeStrings(refs)
+			return operation, true
 		}
 	}
-	return nil
+	return runtimecontract.RuntimeCandidateOperationManifest{}, false
 }
 
 func runtimeTestStringIncluded(values []string, expected string) bool {
@@ -1439,34 +1631,6 @@ func runtimeTestBootstrapWithBindings(bootstrap runtimecontract.RuntimeBootstrap
 	if bootstrap.ExecutionBudgetPolicy.PolicyRevision == "" {
 		bootstrap.ExecutionBudgetPolicy = runtimecontract.RuntimeExecutionBudgetPolicyForRuntimePolicies(bootstrap.ConvergencePolicy, bootstrap.RecoveryPolicy)
 	}
-	for focusIndex := range bootstrap.Focuses {
-		focus := &bootstrap.Focuses[focusIndex]
-		if len(focus.CoverageWorkItemIDs) == 0 {
-			continue
-		}
-		if len(focus.AcceptedStepKinds) == 0 {
-			for _, kind := range focus.RequiredEvidenceKinds {
-				switch kind {
-				case runtimecontract.EvidenceKindStateChange:
-					focus.AcceptedStepKinds = append(focus.AcceptedStepKinds, runtimecontract.StepKindFileEdit)
-				case runtimecontract.EvidenceKindValidation:
-					focus.AcceptedStepKinds = append(focus.AcceptedStepKinds, runtimecontract.RuntimeBlockKindManagedValidationSession)
-				}
-			}
-		}
-		if focus.ValidationRecipeID == "" {
-			for _, kind := range focus.RequiredEvidenceKinds {
-				if kind == runtimecontract.EvidenceKindValidation {
-					// Direct in-process fixtures must name an exact validation
-					// recipe just as activationcore requires in production. This is
-					// test data, not an inferred production recipe.
-					focus.ValidationRecipeID = "test-runtime-validation-recipe"
-					break
-				}
-			}
-		}
-		focus.CoverageEvidenceBindings = nil
-	}
 	for index := range bootstrap.CoverageItems {
 		if bootstrap.CoverageItems[index].SourceScope == "" {
 			bootstrap.CoverageItems[index].SourceScope = "test"
@@ -1485,9 +1649,6 @@ func runtimeTestBootstrapWithBindings(bootstrap runtimecontract.RuntimeBootstrap
 // runtimeTestBootstrapWithReboundBindings clears any obsolete test-only proof
 // data. The later semantic fixture seal creates the replacement binding.
 func runtimeTestBootstrapWithReboundBindings(bootstrap runtimecontract.RuntimeBootstrap) runtimecontract.RuntimeBootstrap {
-	for index := range bootstrap.Focuses {
-		bootstrap.Focuses[index].CoverageEvidenceBindings = nil
-	}
 	return runtimeTestBootstrapWithBindings(bootstrap)
 }
 

@@ -4,7 +4,7 @@ Status: normative
 
 Type: core-contract-index
 
-Last Verified: 2026-08-23
+Last Verified: 2026-08-24
 
 ## Purpose
 
@@ -47,6 +47,13 @@ Workspace owner seals admitted startup input
 
 Recovery is idempotent re-drive from the Run-owned opaque aggregate. Projection、Eventstream、provider text、process-local cache
 和历史 event sequence 都不能重建或替代 authority。
+
+SM-4 convergence-terminal delivery 还必须通过 current semantic-authority fence：catalog retirement 后，只要当前 eligible
+CWI 仍是 binding-free、semantic generation 尚未 seal，且 reducer 仅因该缺口形成
+`target_grounding_unresolved`，SM-4 必须先 re-drive SM-3/SM-2 semantic transaction，不能把该临时 view 投递给
+Result/Workspace/Run。current semantic operation authority ready 或 semantic transaction 自身 failed 后才可交付该终态；
+其它已封存的 contract/budget/owner failure terminal 不得被重写为 semantic replan。administrative termination 使用独立的
+Run-owner fact 与 delivery lane，不经过这一 convergence-only 例外。
 
 Runtime 必须区分 genuine governance wait、具备 typed recovery condition/trigger/deadline/budget 的 bounded recoverable
 runtime wait 和 terminal failure。recoverable wait 是 SM-2/3/4 aggregate fact 与 SM-4 re-drive responsibility，不新增

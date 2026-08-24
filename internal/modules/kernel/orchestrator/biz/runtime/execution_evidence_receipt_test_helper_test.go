@@ -556,7 +556,13 @@ func runtimeTestBuildSealedSemanticPlanning(aggregate RuntimeAggregate) (runtime
 
 func runtimeTestSemanticSourceFocuses(facts runtimecontract.RuntimeFacts, seed runtimecontract.RuntimeDefinitionSeed) []runtimecontract.CoverageFocus {
 	byCoverage := make(map[common.CoverageWorkItemID]runtimecontract.CoverageFocus, len(seed.CoverageItems))
-	for _, raw := range append(append(append([]runtimecontract.CoverageFocus{facts.Focus}, facts.RemainingFocuses...), facts.CompletedFocuses...), facts.DefinitionFocuses...) {
+	for _, declaration := range facts.DefinitionFocuses {
+		focus := declaration.CoverageFocusDeclaration()
+		for _, coverageID := range focus.CoverageWorkItemIDs {
+			byCoverage[coverageID] = focus
+		}
+	}
+	for _, raw := range append(append([]runtimecontract.CoverageFocus{facts.Focus}, facts.RemainingFocuses...), facts.CompletedFocuses...) {
 		focus := raw.Normalized()
 		for _, coverageID := range focus.CoverageWorkItemIDs {
 			if _, found := byCoverage[coverageID]; !found {
@@ -780,9 +786,15 @@ func runtimeTestFactsWithCurrentFocusBindings(t *testing.T, facts runtimecontrac
 	return aggregate.Facts
 }
 
-func runtimeTestDefinitionFocuses(facts runtimecontract.RuntimeFacts) []runtimecontract.CoverageFocus {
+func runtimeTestDefinitionFocuses(facts runtimecontract.RuntimeFacts) []runtimecontract.RuntimeDefinitionFocus {
 	byCoverage := make(map[common.CoverageWorkItemID]runtimecontract.CoverageFocus, len(facts.DefinitionSeed.CoverageItems))
-	for _, raw := range append(append(append([]runtimecontract.CoverageFocus{facts.Focus}, facts.RemainingFocuses...), facts.CompletedFocuses...), facts.DefinitionFocuses...) {
+	for _, declaration := range facts.DefinitionFocuses {
+		focus := declaration.CoverageFocusDeclaration()
+		for _, coverageID := range focus.CoverageWorkItemIDs {
+			byCoverage[coverageID] = focus
+		}
+	}
+	for _, raw := range append(append([]runtimecontract.CoverageFocus{facts.Focus}, facts.RemainingFocuses...), facts.CompletedFocuses...) {
 		focus := raw.Normalized()
 		for _, coverageID := range focus.CoverageWorkItemIDs {
 			if _, found := byCoverage[coverageID]; !found {
@@ -790,7 +802,7 @@ func runtimeTestDefinitionFocuses(facts runtimecontract.RuntimeFacts) []runtimec
 			}
 		}
 	}
-	ret := make([]runtimecontract.CoverageFocus, 0, len(facts.DefinitionSeed.CoverageItems))
+	ret := make([]runtimecontract.RuntimeDefinitionFocus, 0, len(facts.DefinitionSeed.CoverageItems))
 	for _, item := range facts.DefinitionSeed.CoverageItems {
 		focus, found := byCoverage[item.ID]
 		if !found {
@@ -804,6 +816,28 @@ func runtimeTestDefinitionFocuses(facts runtimecontract.RuntimeFacts) []runtimec
 		focus.CoverageWorkItemIDs = []common.CoverageWorkItemID{item.ID}
 		if len(focus.RequiredEvidenceKinds) == 0 && !focus.RequireAssessment {
 			focus.RequiredEvidenceKinds = []string{runtimecontract.EvidenceKindStateChange}
+		}
+		// Hand-written reducer fixtures often declare only the generation-side
+		// selector ref or grounding flag. Complete the immutable declaration
+		// identity explicitly before compiling it; production never synthesizes
+		// these fields and receives all three from the admitted Profile.
+		if focus.TargetSelectorRef == "" && len(focus.TargetDiscoverySources) != 0 {
+			focus.TargetSelectorRef = "test/definition-selector/" + string(item.ID)
+		}
+		if focus.TargetSelectorRef != "" {
+			if focus.TargetSelectorOwnerRef == "" {
+				focus.TargetSelectorOwnerRef = "test-definition"
+			}
+			if focus.TargetSelectorSubjectRef == "" {
+				focus.TargetSelectorSubjectRef = string(item.ID)
+			}
+		} else {
+			focus.TargetSelectorOwnerRef = ""
+			focus.TargetSelectorSubjectRef = ""
+			focus.TargetSelectorCandidateRefs = nil
+		}
+		if focus.RequireTargetGrounding && focus.TargetRole == "" {
+			focus.TargetRole = "test_target"
 		}
 		ret = append(ret, runtimecontract.CompileRuntimeDefinitionFocuses([]runtimecontract.CoverageFocus{focus})...)
 	}

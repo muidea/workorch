@@ -4,7 +4,7 @@ Status: normative
 
 Type: verification
 
-Last Verified: 2026-08-23
+Last Verified: 2026-08-24
 
 ## Purpose
 
@@ -78,6 +78,10 @@ Cross-owner regression必须证明 concrete receiving-owner Command/Result、wor
 - SM-4 sealed delivery 使用 `TerminalOutcome.Kind = completed | failed | cancelled | superseded`；
 - completed/failed 只来自 sealed SM-2 terminal，cancelled/superseded 只来自 SM-1 typed administrative fact；
 - terminal delivery identity/acknowledgement 不保留 action 或第二份 administrative kind；
+- semantic catalog retirement 后，由 binding-free target 缺口产生的 `target_grounding_unresolved` view 不得生成 SM-4 drive
+  result、startup terminal classification 或 delivery request；只允许 semantic-plan request。semantic seal/semantic failure
+  后才可交付该 convergence terminal，operations request 在该窗口始终拒绝；其它 contract/budget/owner terminal 必须原样
+  交付，administrative termination 继续使用独立 lane；
 - Run/Workspace/Result 不解释 Orchestrator decision，只执行各自 owner-local typed outcome transition。
 
 ### Feedback Preservation
@@ -142,6 +146,10 @@ Cross-owner regression必须证明 concrete receiving-owner Command/Result、wor
   accepted，`Changed` 只作 observed effect metadata；
 - accepted receipt 不携带 failure，rejected/unknown outcome 保留完整 safe original diagnostic；
 - durable effect 使用稳定 ExecutionKey/Fence/owner receipt，restart/duplicate 不重复副作用或改变 diagnostic hash；
+- File/Shell/Git fresh chain 必须使用 owner catalog 的 exact kind/variant/target policy；File effect 退休 catalog 后，Shell
+  从 fresh File-owner inventory 重获 target vocabulary，不把空 scope 当创建授权；
+- MCP owner failure-target + File repair 的 receipt 矩阵至少覆盖 `file_write|text_replace|unified_diff` × CAS-before/
+  CAS-after-response-loss；重启复用 exact owner receipt，MCP remote call 与 File durable effect 均不重复；
 - stale/resource revision 独立于 failure/candidate budget；accepted resource change 不消耗 recovery budget。
 
 ### Failure, Recovery And Governance

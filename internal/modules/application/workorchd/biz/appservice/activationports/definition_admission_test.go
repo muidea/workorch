@@ -7,10 +7,11 @@ import (
 	"testing"
 
 	magicevent "github.com/muidea/magicCommon/event"
-	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/definitionadmissioncore"
+	definitionadmission "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/definitionadmission"
 	workspacemodel "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
+	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
 func TestLatestPriorInvalidDefinitionCandidateDoesNotReopenAcknowledgedLineage(t *testing.T) {
@@ -84,7 +85,7 @@ func TestDefinitionAdmissionCandidateSealsProfileOwnerFactClosureBeforeRun(t *te
 	if len(candidate.AdmissionPolicyBindings) != 1 || len(candidate.RequiredOwnerFactBindings) != 1 || len(candidate.OwnerFactConvergenceBindings) != 1 {
 		t.Fatalf("candidate profile closure = %+v", candidate)
 	}
-	result, err := definitionadmissioncore.Compile(candidate)
+	result, err := definitionadmission.Compile(candidate)
 	if err != nil || result.Disposition != workspacemodel.DefinitionAdmissionAdmittedAllOf {
 		t.Fatalf("profile closure admission = %+v err=%v", result, err)
 	}
@@ -102,7 +103,7 @@ func TestDefinitionAdmissionCandidateSealsProfileOwnerFactClosureBeforeRun(t *te
 	if err != nil {
 		t.Fatalf("candidate without closure: %v", err)
 	}
-	blocked, err := definitionadmissioncore.Compile(missing)
+	blocked, err := definitionadmission.Compile(missing)
 	if err != nil || blocked.Disposition != workspacemodel.DefinitionAdmissionClarificationRequired || blocked.ViolationCode != workspacemodel.DefinitionAdmissionPrerequisiteUnresolved {
 		t.Fatalf("missing profile closure result = %+v err=%v", blocked, err)
 	}
@@ -164,6 +165,78 @@ func TestCurrentEligibleDefinitionAdmissionRejectsIncompleteCurrentConvergenceWi
 	_, ensureErr := EnsureWorkspaceDefinitionAdmission(context.Background(), hub, workspace, goal, dod)
 	if !errors.Is(ensureErr, common.ErrConflict) || !strings.Contains(ensureErr.Error(), "recreate the Workspace from the current Template") {
 		t.Fatalf("Restart pre-seal current-shape error = %v", ensureErr)
+	}
+}
+
+func TestCurrentDefinitionAdmissionMatchesOnlyExactOwnerInputSnapshot(t *testing.T) {
+	workspace := &workspacemodel.Workspace{ID: "workspace-exact", DeliverableDirectory: "/workspace", TemplateID: "template-exact"}
+	goal := &workspacemodel.Goal{ID: "goal-1", WorkspaceID: workspace.ID, Text: "goal", DefinitionRevision: "goal-r1"}
+	dod := &workspacemodel.DoD{ID: "dod-1", WorkspaceID: workspace.ID, Items: []string{"done"}, DefinitionRevision: "dod-r1"}
+	template := &workspacemodel.WorkspaceTemplate{ID: workspace.TemplateID, Name: "exact", Description: "sealed"}
+	candidate, err := definitionAdmissionCandidate(workspace, goal, dod, template)
+	if err != nil {
+		t.Fatal(err)
+	}
+	startup := startupInputForActivationPortTest(candidate)
+	workspace.DefinitionAdmissionCandidates = []workspacemodel.DefinitionAdmissionCandidate{candidate}
+	workspace.StartupInput = &startup
+	workspace.ActivationAdmission = &workspacemodel.WorkspaceActivationAdmission{
+		WorkspaceID: workspace.ID, CandidateID: candidate.CandidateID, CandidateRevision: candidate.CandidateRevision, CandidateHash: candidate.CandidateHash,
+		DefinitionRevision: startup.DefinitionRevision, StartupInputHash: startup.StartupInputHash, State: workspacemodel.WorkspaceActivationEligible,
+	}
+	matchedCandidate, matches, err := currentDefinitionAdmissionMatchesOwnerInputs(workspace, goal, dod, template, startup.DefinitionRevision)
+	if err != nil || !matches || !workspaceDefinitionAdmissionEligible(workspace, matchedCandidate) {
+		t.Fatalf("exact owner input did not reuse admission: matches=%t err=%v candidate=%+v", matches, err, matchedCandidate)
+	}
+
+	driftedTemplate := *template
+	driftedTemplate.Description = "new live template revision"
+	_, matches, err = currentDefinitionAdmissionMatchesOwnerInputs(workspace, goal, dod, &driftedTemplate, startup.DefinitionRevision)
+	if err != nil || matches {
+		t.Fatalf("live Template drift reused stale admission: matches=%t err=%v", matches, err)
+	}
+
+	driftedWorkspace := *workspace
+	driftedWorkspace.DeliverableDirectory = "/workspace-v2"
+	_, matches, err = currentDefinitionAdmissionMatchesOwnerInputs(&driftedWorkspace, goal, dod, template, startup.DefinitionRevision)
+	if err != nil || matches {
+		t.Fatalf("resolved directory drift reused stale admission: matches=%t err=%v", matches, err)
+	}
+}
+
+func TestRuntimeBootstrapStartupSealRejectsTemplateAndProfileDrift(t *testing.T) {
+	workspace := &workspacemodel.Workspace{ID: "workspace-seal", DeliverableDirectory: "/workspace", TemplateID: "template-seal"}
+	goal := &workspacemodel.Goal{ID: "goal-1", WorkspaceID: workspace.ID, Text: "goal", DefinitionRevision: "goal-r1"}
+	dod := &workspacemodel.DoD{ID: "dod-1", WorkspaceID: workspace.ID, Items: []string{"done"}, DefinitionRevision: "dod-r1"}
+	template := &workspacemodel.WorkspaceTemplate{ID: workspace.TemplateID, Name: "sealed"}
+	candidate, err := definitionAdmissionCandidate(workspace, goal, dod, template)
+	if err != nil {
+		t.Fatal(err)
+	}
+	startup := startupInputForActivationPortTest(candidate)
+	workspace.DefinitionAdmissionCandidates = []workspacemodel.DefinitionAdmissionCandidate{candidate}
+	workspace.StartupInput = &startup
+	workspace.ActivationAdmission = &workspacemodel.WorkspaceActivationAdmission{
+		WorkspaceID: workspace.ID, CandidateID: candidate.CandidateID, CandidateRevision: candidate.CandidateRevision, CandidateHash: candidate.CandidateHash,
+		DefinitionRevision: startup.DefinitionRevision, StartupInputHash: startup.StartupInputHash, State: workspacemodel.WorkspaceActivationEligible,
+	}
+	bootstrap := &runtimecontract.RuntimeBootstrap{
+		Definition: runtimecontract.RuntimeDefinitionContext{Revision: startup.DefinitionRevision, StartupInputHash: startup.StartupInputHash},
+		Activation: runtimecontract.RuntimeActivationContext{ExecutionContract: runtimecontract.RuntimeExecutionContract{}},
+	}
+	if err := validateRuntimeBootstrapStartupSeal(workspace, template, candidate, bootstrap); err != nil {
+		t.Fatalf("exact startup seal rejected: %v", err)
+	}
+
+	driftedTemplate := *template
+	driftedTemplate.Description = "drifted"
+	if err := validateRuntimeBootstrapStartupSeal(workspace, &driftedTemplate, candidate, bootstrap); err == nil {
+		t.Fatal("Template drift was accepted by final bootstrap gate")
+	}
+	driftedBootstrap := *bootstrap
+	driftedBootstrap.Activation.ExecutionContract.ProfileContracts = []runtimecontract.RuntimeProfileContract{{ID: "drifted-profile"}}
+	if err := validateRuntimeBootstrapStartupSeal(workspace, template, candidate, &driftedBootstrap); err == nil {
+		t.Fatal("Runtime profile drift was accepted by final bootstrap gate")
 	}
 }
 

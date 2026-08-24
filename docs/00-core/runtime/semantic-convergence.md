@@ -4,7 +4,7 @@ Status: normative
 
 Type: core-contract-part
 
-Last Verified: 2026-08-22
+Last Verified: 2026-08-24
 
 ## Runtime 生产主链
 
@@ -148,6 +148,28 @@ evidence/assessment、声明式 metric/artifact obligation、owner-fact postcond
 不得携带 resolved target、operation kind/variant、recipe/check 或 binding。后者可以随 owner resource revision
 退休、重开和重新 seal。semantic document admission、owner feasibility 与 final seal 都只能用 immutable
 DefinitionFocus 检查 source declaration，不能把上一 generation 的 accepted operation 当成下一 generation 声明。
+
+该分离必须由类型而非运行期字段清空实现：`RuntimeBootstrap.DefinitionFocuses` 与
+`RuntimeFacts.DefinitionFocuses` 使用 `RuntimeDefinitionFocus`；初始执行游标只能由
+`RuntimeFocusSeedsFromDefinitionFocuses` 生成不含 target selector、owner-fact closure、resolved target、operation、recipe、
+check 或 binding 的 `CoverageFocus` seed。只有 SM-2 semantic seal 可以用 generation-specific `CoverageFocus` 替换该游标。
+Profile 声明的 exact target 仍保留在 sealed activation/profile contract，并与 current capability-owner catalog 取交集；
+不得把它复制进 immutable DefinitionFocus 冒充 owner-resolved target authority。
+
+owner target scope 的空观察只证明当前不存在既有目标，不能授权任意新路径。prospective creation 必须同时具有 activation
+封存的 exact prospective target、完整 `selector ref + owner ref + subject ref`，以及同一 capability owner catalog 发布的
+matching selector/constraint/operation variant；缺任一项即在 provider 前以 typed target-grounding terminal 收口。
+Shell managed-validation catalog 需要 target vocabulary 时，Orchestrator 只可把已持久化的 File-owner target inventory 作为
+typed acquisition input 转交 Shell；File effect 使旧目录失效后，新一代 acquisition 仍使用 fresh File observation。
+Shell 独立决定 recipe/surface readiness，Orchestrator 不扩张路径，Shell 也不成为 File target owner。
+
+catalog retirement 可以在同一 Orchestrator owner-local CAS 中打开新的 semantic generation，而当前 binding-free CWI 的
+SM-2 reducer view 尚未获得 target/binding。仅当该窗口形成的 terminal code 是 `target_grounding_unresolved` 时，它不具备
+SM-4 delivery authority：drive、candidate request guard 与 fresh-start recovery 必须先完成 `semantic_plan`
+request/owner feasibility/SM-2 seal。`SemanticOperationAuthorityReady` 或 `semantic_contract_failed` 成立后才可交付该终态；
+其它已封存的 contract defect、budget exhaustion 或 owner failure terminal 必须保持原权威，不能被语义重规划覆盖。
+administrative termination 仍走独立 Run-owner fact/delivery lane。该门禁不允许 operations request 穿过 binding-free 窗口，
+也不允许 capability owner、Application 或 projection 改写任何 Runtime state。
 
 当前 authority 同时绑定 capability-owner policy revision、equivalent-authority input、binding contradiction 和 opaque
 lifecycle fence。File 等 owner 的 semantic/operation feasibility 必须消费同一 owner policy；Orchestrator 只有在

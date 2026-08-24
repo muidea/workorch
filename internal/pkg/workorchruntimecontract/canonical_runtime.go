@@ -537,7 +537,7 @@ type RuntimeFacts struct {
 	// They remain separate from Focus/RemainingFocuses/CompletedFocuses because
 	// those queues are replaced with generation-specific semantic bindings by
 	// SM-2. Only fresh activation may populate this declaration queue.
-	DefinitionFocuses []CoverageFocus
+	DefinitionFocuses []RuntimeDefinitionFocus
 	EvidenceRevision  string
 	Focus             CoverageFocus
 	RemainingFocuses  []CoverageFocus
@@ -1480,7 +1480,7 @@ func (f RuntimeFacts) Normalized() RuntimeFacts {
 	f.DefinitionRevision = strings.TrimSpace(f.DefinitionRevision)
 	f.CWILedgerSchemaVersion = strings.TrimSpace(f.CWILedgerSchemaVersion)
 	f.DefinitionSeed = f.DefinitionSeed.Clone()
-	f.DefinitionFocuses = normalizeCoverageFocusQueue(f.DefinitionFocuses)
+	f.DefinitionFocuses = NormalizeRuntimeDefinitionFocuses(f.DefinitionFocuses)
 	f.EvidenceRevision = strings.TrimSpace(f.EvidenceRevision)
 	f.Focus = f.Focus.Normalized()
 	f.RemainingFocuses = normalizeCoverageFocusQueue(f.RemainingFocuses)

@@ -1688,7 +1688,7 @@ func controllerFacts() runtimecontract.RuntimeFacts {
 		Slices: facts.Slices,
 	}
 	facts.DefinitionSeed.Hash = runtimecontract.StableRuntimeDefinitionSeedHash(facts.DefinitionSeed)
-	facts.DefinitionFocuses = []runtimecontract.CoverageFocus{{
+	facts.DefinitionFocuses = []runtimecontract.RuntimeDefinitionFocus{{
 		ID: "definition-focus-v2", SliceID: "slice-v2", CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-v2"},
 		RequiredEvidenceKinds: []string{runtimecontract.EvidenceKindStateChange},
 	}}

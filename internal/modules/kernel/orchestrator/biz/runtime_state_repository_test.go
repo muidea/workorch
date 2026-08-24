@@ -1464,11 +1464,14 @@ func TestRuntimeStateRepositoryTargetSnapshotCommitCrashRestartIsAtomic(t *testi
 		t.Fatal(err)
 	}
 	facts := runtimeAggregate(t, 1).Facts
+	facts.Focus.TargetRefs = []string{"target.txt"}
+	facts.Focus.TargetRole = "test_target"
 	facts.Focus.RequireTargetGrounding = true
 	initialized, err := runtimeTestControllerInitialize(controller, ctx, facts, runtimeDefinition(), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
+	initialized = runtimeTestPersistSealedSemanticAuthority(t, ctx, repository, initialized)
 	var prerequisite runtimecontract.RuntimePrerequisite
 	for _, value := range initialized.Facts.Prerequisites.Pending {
 		if value.Kind == runtimecontract.PrerequisiteKindTargetSnapshot && value.SubjectRef == "target.txt" {
@@ -2854,6 +2857,12 @@ func TestRuntimeStateRepositoryClaimedSameGapAssessmentCrashRestartUsesCanonical
 // be saved or later recovered as an opaque aggregate.
 func TestRuntimeStateRepositoryRejectsSharedSemanticFocusBeforePersistence(t *testing.T) {
 	bootstrap := runtimeFileBackedAssessmentBootstrap([]common.CoverageWorkItemID{"cwi-a", "cwi-b"})
+	bootstrap.DefinitionFocuses = []runtimecontract.RuntimeDefinitionFocus{{
+		ID: "shared-focus", SliceID: bootstrap.Slices[0].ID,
+		CoverageWorkItemIDs:   []common.CoverageWorkItemID{"cwi-a", "cwi-b"},
+		RequiredEvidenceKinds: []string{runtimecontract.EvidenceKindStateChange, runtimecontract.EvidenceKindValidation},
+		RequireAssessment:     true,
+	}}
 	if err := bootstrap.Validate(); err == nil {
 		t.Fatalf("shared semantic focus bootstrap was accepted: %+v", bootstrap)
 	}
@@ -4249,7 +4258,9 @@ func TestRuntimeStateRecordPreservesSemanticPlanningLedgerAcrossOpaqueReload(t *
 }
 
 func TestRuntimeStateRecordPreservesCoverageProofLineageAcrossOpaqueReload(t *testing.T) {
-	aggregate := runtimeTestAggregateWithSemanticPlanning(t, runtimeAggregate(t, 7))
+	aggregate := runtimeAggregate(t, 7)
+	aggregate.Facts.Focus.TargetRefs = []string{"target.txt"}
+	aggregate = runtimeTestAggregateWithSemanticPlanning(t, aggregate)
 	lineage := runtimecontract.NormalizeRuntimeCoverageProofLineage(runtimeCoverageProofLineageForRepositoryTest(t, aggregate))
 	aggregate.CoverageProofLineage = lineage
 	if err := aggregate.Validate(); err != nil {
@@ -4320,8 +4331,8 @@ func runtimeAggregate(t *testing.T, revision uint64) runtime.RuntimeAggregate {
 	facts := runtimecontract.RuntimeFacts{
 		Activation:  bootstrap.Activation,
 		WorkspaceID: "ws-v2", RunID: "run-v2", DefinitionRevision: "definition-v2", DefinitionSeed: bootstrap.DefinitionSeed, EvidenceRevision: "runtime-evidence-00000000000000000000",
-		DefinitionFocuses:     runtimecontract.CompileRuntimeDefinitionFocuses(bootstrap.Focuses),
-		Focus:                 bootstrap.Focuses[0],
+		DefinitionFocuses:     runtimecontract.CloneRuntimeDefinitionFocuses(bootstrap.DefinitionFocuses),
+		Focus:                 bootstrap.DefinitionFocuses[0].RuntimeFocusSeed(),
 		Coverage:              []runtimecontract.RuntimeCoverageItemFact{{ID: "cwi-v2", SliceID: "slice-v2", State: runtimecontract.RuntimeCoverageItemStateOpen}},
 		Capabilities:          runtimecontract.RuntimeCapabilities{StateChangeKinds: []string{runtimecontract.StepKindFileEdit}},
 		ConvergencePolicy:     runtimeTestConvergencePolicy(),
@@ -4489,9 +4500,9 @@ func runtimeBootstrap() runtimecontract.RuntimeBootstrap {
 				AcceptanceSlicePolicy:     &policy,
 			},
 		},
-		Focuses: []runtimecontract.CoverageFocus{{
+		DefinitionFocuses: []runtimecontract.RuntimeDefinitionFocus{{
 			ID: "focus-v2", SliceID: "slice-v2", CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-v2"},
-			RequiredEvidenceKinds: []string{runtimecontract.EvidenceKindStateChange}, TargetRefs: []string{"target.txt"},
+			RequiredEvidenceKinds: []string{runtimecontract.EvidenceKindStateChange},
 		}},
 		Slices:        []runtimecontract.RuntimeAcceptanceSlice{{ID: "slice-v2", Title: "Test", Scope: "test", Priority: 1, CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-v2"}, RequiredEvidenceKinds: []string{runtimecontract.EvidenceKindStateChange}, CompletionPolicy: runtimecontract.RuntimeAcceptanceSliceCompletionAll, ResultPolicy: runtimecontract.RuntimeAcceptanceSliceResultAllowed}},
 		CoverageItems: []runtimecontract.RuntimeCoverageItem{{ID: "cwi-v2", SliceID: "slice-v2"}},
@@ -4512,18 +4523,18 @@ func runtimeBootstrap() runtimecontract.RuntimeBootstrap {
 // from the activation it persisted for the Run.
 func runtimeFileBackedAssessmentBootstrap(coverageIDs []common.CoverageWorkItemID) runtimecontract.RuntimeBootstrap {
 	bootstrap := runtimeBootstrap()
-	bootstrap.Focuses[0].CoverageWorkItemIDs = append([]common.CoverageWorkItemID(nil), coverageIDs...)
-	bootstrap.Focuses[0].RequiredEvidenceKinds = []string{runtimecontract.EvidenceKindStateChange, runtimecontract.EvidenceKindValidation}
-	bootstrap.Focuses[0].AcceptedStepKinds = []string{runtimecontract.StepKindFileEdit, runtimecontract.RuntimeBlockKindManagedValidationSession}
-	bootstrap.Focuses[0].RequireAssessment = true
-	bootstrap.Focuses[0].ValidationRecipeID = runtimeFileBackedValidationRecipeID
-	bootstrap.Focuses[0].RequiredCheckRefs = []string{runtimeFileBackedValidationCheck}
-	bootstrap.Focuses[0].CoverageEvidenceBindings = nil
+	bootstrap.DefinitionFocuses = make([]runtimecontract.RuntimeDefinitionFocus, 0, len(coverageIDs))
 	bootstrap.Slices[0].CoverageWorkItemIDs = append([]common.CoverageWorkItemID(nil), coverageIDs...)
 	bootstrap.Slices[0].RequiredEvidenceKinds = []string{runtimecontract.EvidenceKindStateChange, runtimecontract.EvidenceKindValidation}
 	bootstrap.CoverageItems = make([]runtimecontract.RuntimeCoverageItem, 0, len(coverageIDs))
-	for _, coverageID := range coverageIDs {
-		bootstrap.CoverageItems = append(bootstrap.CoverageItems, runtimecontract.RuntimeCoverageItem{ID: coverageID, SliceID: bootstrap.Focuses[0].SliceID})
+	for idx, coverageID := range coverageIDs {
+		bootstrap.DefinitionFocuses = append(bootstrap.DefinitionFocuses, runtimecontract.RuntimeDefinitionFocus{
+			ID: fmt.Sprintf("focus-v2-%03d", idx+1), SliceID: bootstrap.Slices[0].ID,
+			CoverageWorkItemIDs:   []common.CoverageWorkItemID{coverageID},
+			RequiredEvidenceKinds: []string{runtimecontract.EvidenceKindStateChange, runtimecontract.EvidenceKindValidation},
+			RequireAssessment:     true,
+		})
+		bootstrap.CoverageItems = append(bootstrap.CoverageItems, runtimecontract.RuntimeCoverageItem{ID: coverageID, SliceID: bootstrap.Slices[0].ID})
 	}
 	bootstrap.Activation.EvidencePolicies = append(bootstrap.Activation.EvidencePolicies, runtimeFileBackedManagedValidationEvidencePolicy())
 	return runtimeTestBootstrapWithReboundBindings(bootstrap)

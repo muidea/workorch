@@ -19,7 +19,7 @@ type ManifestIdentity struct {
 	RunID             common.RunID
 	Definition        runtimecontract.RuntimeDefinitionContext
 	DefinitionSeed    runtimecontract.RuntimeDefinitionSeed
-	DefinitionFocuses []runtimecontract.CoverageFocus
+	DefinitionFocuses []runtimecontract.RuntimeDefinitionFocus
 	Execution         runtimecontract.RuntimeExecutionContract
 	Admissibilities   []runtimecontract.RuntimeOperationAdmissibility
 	EligibleCoverage  []common.CoverageWorkItemID

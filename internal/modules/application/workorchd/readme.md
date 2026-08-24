@@ -51,11 +51,12 @@ Last Verified: 2026-08-24
 - `biz/runtimeComponent` 是 Workorchd 内唯一长生命周期 runtime session owner；`runtimeApplicationPorts` 只保存借用函数，不复制 Session 指针，并通过 `ApplicationPorts` 向 Biz/use case 提供短生命周期借用，`service/server` 不接触 `runtimecore.Session`。`ManagedRuntime` 的 Eventstream 订阅、有限缓存与释放仍由 `biz/appservice/runtimecore` 实现，但其构造和关闭只由该组件持有；`pkg/observed` 仅保存快照 DTO 与纯映射，不提供 owner action、snapshot facade 或跨 owner service adapter；生产 bootstrap 不暴露 owner repository。
 - workspace activation 使用 cumulative effective Goal/DoD 与 profile capability policy 构造 typed `RuntimeBootstrap`，并将它封装进 workspace-scoped restart intent；Workspace owner 校验 definition/scope 后再把 typed intent 交给 Run owner，Application 不直接发送 Run create command。
 - RuntimeBootstrap 编译前，application 先把 exact Goal、DoD、Template snapshot 与 resolved workspace directory 组装为
-  Workspace-owned immutable `DefinitionAdmissionCandidate`。pure compiler 不调用 LLM/capability，只接受完整 `all_of`；
+  Workspace-owned immutable `DefinitionAdmissionCandidate`。Workspace owner 的 pure compiler 不调用 LLM/capability，只接受完整 `all_of`；
   candidate 同步封存 required owner-fact binding、唯一 one-shot acquisition/reobserve closure 及 Profile contract hash；
   `one_of/any_of/quorum/threshold/first_success`、缺失/重复/成环的 owner-fact closure 或其他 unresolved declared prerequisite
   通过 Decision owner 专用 typed ticket
-  fail-closed。新 invalid revision（包括既有 eligible revision 之后的 authoring attempt）使用 reconcile-candidate；新 admitted revision严格执行 Workspace promotion(pending) →
+  fail-closed。submit result 的 typed admission outcome 由 Workspace owner 生成；Application 只据此建票或提交
+  identity-only promotion，不能向 Workspace 传入自算 outcome。新 invalid revision（包括既有 eligible revision 之后的 authoring attempt）使用 reconcile-candidate；新 admitted revision严格执行 Workspace promotion(pending) →
   Decision resolution → Workspace acknowledgement(eligible)，之后仍需用户显式 Restart。
 - activation 可以把 profile 显式声明的 `targetSelectorOwnerRef + targetSelectorSubjectRef` 封存为 File target-selection scope。空 workspace 的 scope 只表示该 profile 已授权 File owner 接受一个后续的具体 workspace-relative 创建目标；它不从 Goal/DoD 或目录名猜文件路径，且不绕过 File owner 的 operation admissibility/feasibility。
 - activation 将每个 DoD item 标记为需要 typed assessment，并按 profile contract 的 required acceptance dimension/deliverable expectation 追加稳定 focus；primary state-change 优先于 supplemental evidence，同一 `scope + id` 只生成一个 baseline item。
@@ -70,7 +71,8 @@ Last Verified: 2026-08-24
 - Runtime definition context 同时保存 Workspace owner 签发的 `StartupInputHash`。Restart 必须与 current eligible admission
   精确匹配；Resume 不读取最新 Goal/DoD，也不把后续 candidate/promotion 注入既有 Run。
 - Restart bootstrap compiler 在 managed-config materialization 与 Workspace intent 之前，先验证 admission 精确绑定的
-  current-shape candidate，并用 pure compiler重验其 `admitted_all_of` 结果。candidate hash 不匹配、旧 schema/compiler、
+  current-shape candidate、同一次读取的 exact Template snapshot 与 promoted startup input，并用 Workspace-owned pure compiler
+  做 read-side `admitted_all_of` 防御重验。该重验不产生 admission transition；candidate hash 不匹配、旧 schema/compiler、
   acquisition selector/policy/variant 缠绕不完整时同步返回 conflict；不生成 execution-admission outcome、不补写 candidate、
   不发送 Workspace/Run command。当前阶段没有 migration/backfill；运维恢复是用 current Template 重新创建 Workspace。
 - activation同时封存与repair/recovery source policy一致的`RuntimeExecutionBudgetPolicy`。read-model从opaque Runtime

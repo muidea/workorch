@@ -40,13 +40,12 @@ func RuntimeBootstrap(goal *workspacemodel.Goal, dod *workspacemodel.DoD, defini
 	// source. Runtime then asks the owning File block to select from the actual
 	// workspace manifest before any candidate request; activation never asks a
 	// user to provide a file path.
-	// Bootstrap carries only a presentation/cursor seed. The richer compiler
-	// output below is still useful for deriving the finite capability and
-	// prerequisite vocabulary, but target, selector, recipe, operation and
-	// proof fields are semantic authority. They may enter RuntimeFacts only via
-	// the Orchestrator's semantic_contract_sealed private transition.
+	// Bootstrap carries the complete immutable Definition declaration. The
+	// contract type has no generation-specific target, operation, recipe or
+	// proof fields; Orchestrator derives a non-authoritative queue cursor from it
+	// and may add generation authority only via semantic_contract_sealed.
 	compiledFocuses := compiled.Focuses
-	focuses := runtimeBootstrapFocusSeeds(compiledFocuses)
+	definitionFocuses := runtimecontract.CompileRuntimeDefinitionFocuses(compiledFocuses)
 	capabilityContract := []string{
 		runtimecontract.StepKindFileEdit,
 		runtimecontract.StepKindFileRead,
@@ -111,7 +110,7 @@ func RuntimeBootstrap(goal *workspacemodel.Goal, dod *workspacemodel.DoD, defini
 	if stateChangeRequirement.Required {
 		// Seal all coverage IDs as the Run-level state-change alignment set. Focus-level
 		// requirements stay independent; ledger satisfaction needs coverage-bound evidence.
-		for _, focus := range focuses {
+		for _, focus := range definitionFocuses {
 			stateChangeRequirement.CoverageWorkItemIDs = append(stateChangeRequirement.CoverageWorkItemIDs, focus.CoverageWorkItemIDs...)
 		}
 	}
@@ -135,7 +134,7 @@ func RuntimeBootstrap(goal *workspacemodel.Goal, dod *workspacemodel.DoD, defini
 		Activation:             activation,
 		Definition:             definition,
 		DefinitionSeed:         definitionSeed,
-		Focuses:                focuses,
+		DefinitionFocuses:      definitionFocuses,
 		Slices:                 compiled.Slices,
 		CoverageItems:          compiled.CoverageItems,
 		Requirements:           requirements,
@@ -159,26 +158,6 @@ func containsRuntimeEvidenceKind(values []string, wanted string) bool {
 		}
 	}
 	return false
-}
-
-func runtimeBootstrapFocusSeeds(values []runtimecontract.CoverageFocus) []runtimecontract.CoverageFocus {
-	ret := make([]runtimecontract.CoverageFocus, 0, len(values))
-	for _, value := range values {
-		value = value.Normalized()
-		ret = append(ret, runtimecontract.CoverageFocus{
-			ID:                    value.ID,
-			SliceID:               value.SliceID,
-			AssessmentScope:       value.AssessmentScope,
-			AssessmentID:          value.AssessmentID,
-			AssessmentText:        value.AssessmentText,
-			CoverageWorkItemIDs:   append([]common.CoverageWorkItemID(nil), value.CoverageWorkItemIDs...),
-			RequiredEvidenceKinds: append([]string(nil), value.RequiredEvidenceKinds...),
-			RequireAssessment:     value.RequireAssessment,
-			RequiredOwnerFacts:    append([]runtimecontract.RuntimeOwnerFactRequirement(nil), value.RequiredOwnerFacts...),
-			OwnerFactConvergences: runtimecontract.CloneRuntimeOwnerFactConvergences(value.OwnerFactConvergences),
-		}.Normalized())
-	}
-	return ret
 }
 
 func runtimeOperationAdmissibilityRequirements(kinds []string) ([]runtimecontract.RuntimeRequirement, error) {

@@ -103,7 +103,13 @@ func TestSubmitDefinitionAdmissionCandidateUsesRuntimeAuthoritySource(t *testing
 	testHub.subscribe(workspaceevents.CommandDestination, workspaceevents.TopicWorkspaceCommandSubmitDefinitionAdmissionCandidate, func(data any) (any, error) {
 		command := data.(workspaceevents.SubmitDefinitionAdmissionCandidateCommand)
 		return workspaceevents.SubmitDefinitionAdmissionCandidateResult{
-			Candidate:   command.Candidate,
+			Candidate: command.Candidate,
+			AdmissionResult: (workspacemodel.DefinitionAdmissionResult{
+				WorkspaceID: command.Candidate.WorkspaceID, CandidateID: command.Candidate.CandidateID,
+				CandidateRevision: command.Candidate.CandidateRevision, CandidateHash: command.Candidate.CandidateHash,
+				Disposition: workspacemodel.DefinitionAdmissionAdmittedAllOf, AdmissionCompilerVersion: command.Candidate.AdmissionCompilerVersion,
+				CanonicalAdmittedInputHash: "test-admitted-all-of",
+			}).WithHash(),
 			Disposition: workspaceevents.DefinitionAdmissionCandidateCreated,
 		}, nil
 	})

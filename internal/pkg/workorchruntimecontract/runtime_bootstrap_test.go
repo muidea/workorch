@@ -8,12 +8,6 @@ import (
 
 func TestRuntimeBootstrapCloneAndEqualityPreserveTypedContract(t *testing.T) {
 	skills, skillBudget := sealedRuntimeSkillFixture(t, "skill-1", "typed instruction")
-	binding := CoverageEvidenceBinding{
-		ID: "binding/cwi-1", CoverageWorkItemID: "cwi-1", FocusID: "focus-1", DefinitionRevision: "definition-1",
-		Proofs:     []CoverageEvidenceProof{{EvidenceKind: EvidenceKindStateChange, RequiredEffectScopes: []RuntimeEffectScope{RuntimeEffectWorkspaceDurable}, AllowedOperationKinds: []string{StepKindFileEdit}}},
-		TargetRefs: []string{"target.txt"}, DeclarationRef: "test/bootstrap",
-	}.Normalized()
-	binding.Hash = StableCoverageEvidenceBindingHash(binding)
 	bootstrap := RuntimeBootstrap{
 		Definition: RuntimeDefinitionContext{StartupInputHash: "startup-input-test",
 			Revision: "definition-1", GoalID: "goal-1", GoalDefinition: "goal", DoDID: "dod-1", DoDDefinition: "dod",
@@ -23,9 +17,9 @@ func TestRuntimeBootstrapCloneAndEqualityPreserveTypedContract(t *testing.T) {
 			StateChangePolicy:         RuntimeStateChangeAllowedButNotRequired,
 			MaxRepairAttemptsPerFocus: 7, ValidationPolicies: []RuntimeValidationPolicy{{ID: "validation", Scope: "workspace_profile", AppliesToEvidenceKinds: []string{EvidenceKindValidation}, MaxValidationOnlyRetriesPerFocus: 2}},
 		}},
-		Focuses: []CoverageFocus{
-			{ID: "focus-1", SliceID: "slice-1", CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-1"}, RequiredEvidenceKinds: []string{EvidenceKindStateChange}, TargetRefs: []string{"target.txt"}, AcceptedStepKinds: []string{StepKindFileEdit}, CoverageEvidenceBindings: []CoverageEvidenceBinding{binding}},
-			{ID: "focus-0", SliceID: "slice-1", CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-0"}, RequiredEvidenceKinds: []string{EvidenceKindStateChange}, TargetRefs: []string{"target.txt"}, AcceptedStepKinds: []string{StepKindFileEdit}},
+		DefinitionFocuses: []RuntimeDefinitionFocus{
+			{ID: "focus-1", SliceID: "slice-1", CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-1"}, RequiredEvidenceKinds: []string{EvidenceKindStateChange}},
+			{ID: "focus-0", SliceID: "slice-1", CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-0"}, RequiredEvidenceKinds: []string{EvidenceKindStateChange}},
 		},
 		Slices: []RuntimeAcceptanceSlice{{ID: "slice-1", CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-1", "cwi-0"}, CompletionPolicy: RuntimeAcceptanceSliceCompletionAll, ResultPolicy: RuntimeAcceptanceSliceResultAllowed}},
 		CoverageItems: []RuntimeCoverageItem{
@@ -39,7 +33,6 @@ func TestRuntimeBootstrapCloneAndEqualityPreserveTypedContract(t *testing.T) {
 	}
 	bootstrap.RecoveryPolicy = DefaultRuntimeRecoveryPolicy()
 	bootstrap.ExecutionBudgetPolicy = RuntimeExecutionBudgetPolicyForRuntimePolicies(bootstrap.ConvergencePolicy, bootstrap.RecoveryPolicy)
-	bootstrap.Focuses[0].CoverageEvidenceBindings = nil
 	seed, err := CompileRuntimeDefinitionSeed(bootstrap.Definition, bootstrap.Activation, bootstrap.CoverageItems, bootstrap.Slices)
 	if err != nil {
 		t.Fatal(err)
@@ -69,16 +62,11 @@ func TestRuntimeBootstrapCloneAndEqualityPreserveTypedContract(t *testing.T) {
 	if len(facts.DefinitionFocuses) != 2 {
 		t.Fatalf("initial facts definition focus count = %d", len(facts.DefinitionFocuses))
 	}
-	for _, declaration := range facts.DefinitionFocuses {
-		if len(declaration.AcceptedStepKinds) != 0 || len(declaration.TargetRefs) != 0 || declaration.ValidationRecipeID != "" || len(declaration.RequiredCheckRefs) != 0 || len(declaration.CoverageEvidenceBindings) != 0 {
-			t.Fatalf("definition focus retained generation-specific authority: %+v", declaration)
-		}
-	}
 	facts.Focus.AcceptedStepKinds = []string{RuntimeBlockKindPatchApply}
-	if len(facts.DefinitionFocuses[0].AcceptedStepKinds) != 0 {
+	if facts.DefinitionFocuses[0].ID != "focus-1" {
 		t.Fatal("semantic generation mutation changed immutable definition focus")
 	}
-	cloned.Focuses[0].ID = "focus-2"
+	cloned.DefinitionFocuses[0].ID = "focus-2"
 	if SameRuntimeBootstrap(bootstrap, cloned) {
 		t.Fatal("focus drift was not detected")
 	}
@@ -93,7 +81,7 @@ func TestRuntimeBootstrapRejectsUnknownCoverageReopenDependency(t *testing.T) {
 	bootstrap := RuntimeBootstrap{
 		Definition:        RuntimeDefinitionContext{StartupInputHash: "startup-input-test", Revision: "definition-1", GoalID: "goal-1", GoalDefinition: "goal", DoDID: "dod-1", DoDDefinition: "dod", CapabilityContract: []string{"file/write"}},
 		Activation:        RuntimeActivationContext{ProviderSelection: ProviderInferenceSelection{Target: ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "gpt-4o"}}},
-		Focuses:           []CoverageFocus{{ID: "focus-1", SliceID: "slice-1", CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-1"}, RequiredEvidenceKinds: []string{EvidenceKindStateChange}}},
+		DefinitionFocuses: []RuntimeDefinitionFocus{{ID: "focus-1", SliceID: "slice-1", CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-1"}, RequiredEvidenceKinds: []string{EvidenceKindStateChange}}},
 		Slices:            []RuntimeAcceptanceSlice{{ID: "slice-1", CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-1"}, CompletionPolicy: RuntimeAcceptanceSliceCompletionAll, ResultPolicy: RuntimeAcceptanceSliceResultAllowed}},
 		CoverageItems:     []RuntimeCoverageItem{{ID: "cwi-1", SliceID: "slice-1", SourceScope: "deliverable", SourceID: "source", Order: 1, ReopenDependencies: []RuntimeCoverageReopenDependency{{CoverageWorkItemID: "cwi-missing", TriggerEvidenceKinds: []string{EvidenceKindStateChange}}}}},
 		ConvergencePolicy: RuntimeConvergencePolicy{MaxRepairAttemptsPerFocus: 1, MaxValidationOnlyRetriesPerFocus: 1, MaxAcceptanceSliceWorkItems: 1, MaxFocuses: 1, MaxCandidateContextItems: 1},
@@ -129,7 +117,7 @@ func TestRuntimeBootstrapRejectsSharedCoverageFocus(t *testing.T) {
 			Revision: "definition-1", GoalID: "goal-1", GoalDefinition: "goal", DoDID: "dod-1", DoDDefinition: "dod",
 		},
 		Activation: RuntimeActivationContext{ProviderSelection: ProviderInferenceSelection{Target: ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "gpt-4o"}}},
-		Focuses: []CoverageFocus{{
+		DefinitionFocuses: []RuntimeDefinitionFocus{{
 			ID: "focus-shared", SliceID: "slice-1", CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-1", "cwi-2"},
 			RequiredEvidenceKinds: []string{EvidenceKindStateChange},
 		}},
@@ -152,5 +140,59 @@ func TestRuntimeBootstrapRejectsSharedCoverageFocus(t *testing.T) {
 	bootstrap.DefinitionSeed = seed
 	if err := bootstrap.Validate(); err == nil {
 		t.Fatalf("shared CWI focus was accepted: %+v", bootstrap)
+	}
+}
+
+func TestRuntimeDefinitionFocusPreservesDeclarationWithoutGenerationAuthority(t *testing.T) {
+	seed := RuntimeDefinitionSeed{
+		SchemaVersion:      RuntimeDefinitionSeedSchemaCurrent,
+		DefinitionRevision: "definition-1",
+		PolicyHash:         "policy-1",
+		CoverageItems:      []RuntimeCoverageItem{{ID: "cwi-1", SliceID: "slice-1", SourceScope: "dodItem", SourceID: "dod-1"}},
+		Slices:             []RuntimeAcceptanceSlice{{ID: "slice-1", CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-1"}, CompletionPolicy: RuntimeAcceptanceSliceCompletionAll, ResultPolicy: RuntimeAcceptanceSliceResultAllowed}},
+	}.Normalized()
+	seed.Hash = StableRuntimeDefinitionSeedHash(seed)
+
+	compiled := CompileRuntimeDefinitionFocuses([]CoverageFocus{{
+		ID: "focus-1", SliceID: "slice-1", CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-1"},
+		RequiredEvidenceKinds: []string{EvidenceKindValidation}, TargetRole: "verification_target",
+		TargetRefs: []string{"declared-but-not-owner-resolved.txt"}, RequireTargetGrounding: true,
+		AcceptedStepKinds: []string{RuntimeBlockKindManagedValidationSession}, ValidationRecipeID: "recipe-1",
+		RequiredCheckRefs: []string{"check-1"},
+	}})
+	if err := ValidateRuntimeDefinitionFocuses(seed, compiled); err != nil {
+		t.Fatalf("immutable declaration rejected: %v", err)
+	}
+	if len(compiled) != 1 || compiled[0].TargetRole != "verification_target" || !compiled[0].RequireTargetGrounding {
+		t.Fatalf("definition declaration lost grounding obligation: %+v", compiled)
+	}
+	seedFocus := compiled[0].RuntimeFocusSeed()
+	if len(seedFocus.TargetRefs) != 0 || len(seedFocus.AcceptedStepKinds) != 0 || seedFocus.ValidationRecipeID != "" || len(seedFocus.RequiredCheckRefs) != 0 {
+		t.Fatalf("initial generation queue contains pre-sealed authority: %+v", seedFocus)
+	}
+}
+
+func TestRuntimeDefinitionFocusRejectsAcquisitionSelectorDrift(t *testing.T) {
+	requirement := RuntimeOwnerFactRequirement{OwnerModuleID: RuntimeModuleShell, FactKind: RuntimeOwnerFactSelectableValidationSurface, OperationKind: RuntimeBlockKindManagedValidationSession}
+	convergence := RuntimeOwnerFactConvergence{
+		Requirement: requirement, MissingTrigger: RuntimeOwnerFactMissingTrigger,
+		AcquisitionOwnerModuleID: RuntimeModuleFile, AcquisitionOperationKind: StepKindFileWrite,
+		AcquisitionTargetPolicy: RuntimeOperationTargetPolicyProspectiveOwnerTarget, AcquisitionTargetSelectorRef: "file/new-target",
+		TargetSelectorRef: "file/workspace-deliverable", TargetSelectorOwnerRef: "profile-a", TargetSelectorSubjectRef: "validation",
+		ReobserveOwnerModuleID: RuntimeModuleShell, ReobserveFactKind: RuntimeOwnerFactSelectableValidationSurface, MaxAcquisitionAttempts: 1,
+	}
+	seed := RuntimeDefinitionSeed{
+		SchemaVersion: RuntimeDefinitionSeedSchemaCurrent, DefinitionRevision: "definition-1", PolicyHash: "policy-1",
+		CoverageItems: []RuntimeCoverageItem{{ID: "cwi-1", SliceID: "slice-1", SourceScope: "dodItem", SourceID: "dod-1"}},
+		Slices:        []RuntimeAcceptanceSlice{{ID: "slice-1", CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-1"}, CompletionPolicy: RuntimeAcceptanceSliceCompletionAll, ResultPolicy: RuntimeAcceptanceSliceResultAllowed}},
+	}.Normalized()
+	seed.Hash = StableRuntimeDefinitionSeedHash(seed)
+	focus := RuntimeDefinitionFocus{
+		ID: "focus-1", SliceID: "slice-1", CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-1"}, RequiredEvidenceKinds: []string{EvidenceKindValidation},
+		TargetSelectorRef: "file/other", TargetSelectorOwnerRef: "profile-a", TargetSelectorSubjectRef: "validation",
+		RequiredOwnerFacts: []RuntimeOwnerFactRequirement{requirement}, OwnerFactConvergences: []RuntimeOwnerFactConvergence{convergence},
+	}
+	if err := ValidateRuntimeDefinitionFocuses(seed, []RuntimeDefinitionFocus{focus}); err == nil {
+		t.Fatal("definition/acquisition selector drift was accepted before Run activation")
 	}
 }

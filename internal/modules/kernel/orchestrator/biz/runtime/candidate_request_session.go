@@ -245,16 +245,29 @@ func candidateRequestSessionActionAllowed(aggregate RuntimeAggregate, documentKi
 	if err := rejectRuntimeProgressAfterTermination(aggregate); err != nil {
 		return err
 	}
-	if aggregate.ActiveDispatch != nil || aggregate.Decision.Terminal != nil || isTerminalConvergenceState(aggregate.Decision.State) {
+	if aggregate.ActiveDispatch != nil {
 		return fmt.Errorf("%w: current runtime authority does not accept a candidate request", common.ErrConflict)
 	}
 	if documentKind == runtimecontract.RuntimeProviderDocumentSemanticPlan {
+		// Catalog retirement can make the binding-free reducer view terminal
+		// before the next semantic generation has sealed the current CWI. That
+		// provisional SM-2 view is not an SM-4 terminal and may open only a
+		// semantic-plan request. If an execution-locked binding still makes
+		// operation authority usable, the terminal is already authoritative.
+		if isTerminalConvergenceState(aggregate.Decision.State) {
+			if aggregate.Decision.Terminal == nil || aggregate.Decision.Terminal.Code != "target_grounding_unresolved" || SemanticOperationAuthorityReady(aggregate) {
+				return fmt.Errorf("%w: current runtime authority does not accept a candidate request", common.ErrConflict)
+			}
+		}
 		switch aggregate.SemanticPlanning.Phase {
 		case runtimecontract.RuntimeSemanticPlanningRequired, runtimecontract.RuntimeSemanticPlanningOrderRequestOpen, runtimecontract.RuntimeSemanticPlanningRequestOpen, runtimecontract.RuntimeSemanticPlanningOrderAccepted, runtimecontract.RuntimeSemanticPlanningCorrectionRequired, runtimecontract.RuntimeSemanticPlanningProofBatchRequestOpen, runtimecontract.RuntimeSemanticPlanningProofBatchDocumentAccepted:
 			return nil
 		default:
 			return fmt.Errorf("%w: current semantic phase does not accept a provider request", common.ErrConflict)
 		}
+	}
+	if aggregate.Decision.Terminal != nil || isTerminalConvergenceState(aggregate.Decision.State) {
+		return fmt.Errorf("%w: current runtime authority does not accept a candidate request", common.ErrConflict)
 	}
 	if documentKind != runtimecontract.RuntimeProviderDocumentOperations || !SemanticOperationAuthorityReady(aggregate) {
 		return fmt.Errorf("%w: operations request requires a sealed semantic contract", common.ErrConflict)

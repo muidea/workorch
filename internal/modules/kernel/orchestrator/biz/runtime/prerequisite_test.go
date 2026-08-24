@@ -483,7 +483,7 @@ func TestReduceRuntimeStateWithDirectiveAllowsBoundedOwnerWorkspaceScopeWithoutC
 	}
 }
 
-func TestReduceRuntimeStateWithDirectiveAllowsProfileBoundEmptyWorkspaceScope(t *testing.T) {
+func TestReduceRuntimeStateWithDirectiveRejectsProfileBoundEmptyWorkspaceScopeWithoutProspectiveTarget(t *testing.T) {
 	facts := validationFacts()
 	facts.Focus.RequireTargetGrounding = true
 	facts.Focus.TargetRole = "deliverable"
@@ -507,8 +507,8 @@ func TestReduceRuntimeStateWithDirectiveAllowsProfileBoundEmptyWorkspaceScope(t 
 	if err != nil {
 		t.Fatal(err)
 	}
-	if decision.State != runtimecontract.ConvergenceStateNeedStateChange || len(decision.RequiredOutput.TargetRefs) != 0 || len(updated.Prerequisites.Pending) != 0 {
-		t.Fatalf("empty workspace scope decision=%+v prerequisites=%+v", decision, updated.Prerequisites)
+	if decision.State != runtimecontract.ConvergenceStateFailed || decision.Terminal == nil || decision.Terminal.Code != "target_grounding_unresolved" || len(updated.Prerequisites.Pending) != 0 {
+		t.Fatalf("unbound empty workspace scope decision=%+v prerequisites=%+v", decision, updated.Prerequisites)
 	}
 }
 

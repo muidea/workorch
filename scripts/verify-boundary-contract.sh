@@ -1602,10 +1602,12 @@ if grep -q -E -- 'LineageState[[:space:]]*==[[:space:]]*""' internal/modules/blo
 	exit 1
 fi
 
-# Definition admission has one current immutable candidate shape. Neither the
-# pure compiler nor the Workspace owner may reseal caller/persisted bytes, and
-# Restart must reject that shape before materializing managed files or sending
-# an owner execution intent.
+# Definition admission has one current immutable candidate shape. Its pure
+# compiler and transition-selecting result belong to the Workspace owner;
+# Workorchd may consume that result and perform read-side validation, but it
+# cannot submit an admission outcome or choose the Workspace transition.
+# Neither side may reseal caller/persisted bytes, and Restart must reject that
+# shape before materializing managed files or sending an owner execution intent.
 definition_candidate_hash_shape="$(sed -n '/^func (c DefinitionAdmissionCandidate) computeHash()/,/^}/p' internal/modules/blocks/workspace/pkg/models/definition_admission.go)"
 for required_field in AcquisitionOperationVariantID AcquisitionTargetPolicy AcquisitionTargetSelectorRef; do
 	if ! grep -q -F -- "$required_field" <<<"$definition_candidate_hash_shape"; then
@@ -1613,19 +1615,77 @@ for required_field in AcquisitionOperationVariantID AcquisitionTargetPolicy Acqu
 		exit 1
 	fi
 done
-if grep -q -F -- 'candidate = candidate.WithHash()' internal/modules/application/workorchd/biz/appservice/definitionadmissioncore/compiler.go ||
+definition_compiler="internal/modules/blocks/workspace/pkg/definitionadmission/compiler.go"
+definition_compiler_test="internal/modules/blocks/workspace/pkg/definitionadmission/compiler_test.go"
+definition_submit_result_shape="$(sed -n '/^type SubmitDefinitionAdmissionCandidateResult struct {/,/^}/p' internal/modules/blocks/workspace/pkg/events/messages.go)"
+definition_promote_command_shape="$(sed -n '/^type PromoteDefinitionAdmissionCandidateCommand struct {/,/^}/p' internal/modules/blocks/workspace/pkg/events/messages.go)"
+definition_submit_reducer="$(sed -n '/^func reduceDefinitionAdmissionCandidateSubmission(/,/^}/p' internal/modules/blocks/workspace/biz/definition_admission_internal_event.go)"
+definition_promote_reducer="$(sed -n '/^func reduceDefinitionAdmissionCandidatePromotion(/,/^}/p' internal/modules/blocks/workspace/biz/definition_admission_internal_event.go)"
+if [[ -f internal/modules/application/workorchd/biz/appservice/definitionadmissioncore/compiler.go ]] ||
+	[[ ! -f "$definition_compiler" ]] ||
+	! grep -q -E -- 'AdmissionResult[[:space:]]+workspacemodel\.DefinitionAdmissionResult' <<<"$definition_submit_result_shape" ||
+	grep -q -F -- 'AdmissionResult' <<<"$definition_promote_command_shape" ||
+	! grep -q -F -- 'definitionadmission.Compile(candidate)' <<<"$definition_submit_reducer" ||
+	! grep -q -F -- 'definitionadmission.Compile(*candidate)' <<<"$definition_promote_reducer" ||
+	grep -q -F -- 'candidate = candidate.WithHash()' "$definition_compiler" ||
 	grep -q -F -- 'command.Candidate = command.Candidate.WithHash()' internal/modules/blocks/workspace/biz/definition_admission_internal_event.go ||
-	! grep -q -F -- 'TestCompileRejectsCandidateHashDriftInsteadOfResealingCallerInput' internal/modules/application/workorchd/biz/appservice/definitionadmissioncore/compiler_test.go ||
+	! grep -q -F -- 'TestCompileRejectsCandidateHashDriftInsteadOfResealingCallerInput' "$definition_compiler_test" ||
 	! grep -q -F -- 'TestDefinitionAdmissionOwnerDoesNotResealCallerCandidate' internal/modules/blocks/workspace/biz/definition_admission_test.go ||
 	! grep -q -F -- 'TestWorkspaceExecutionRestartRequiresCurrentAdmissionCandidateBeforeRunOwner' internal/modules/blocks/workspace/biz/execution_intent_test.go; then
-	echo "boundary contract violation: Definition admission regained candidate resealing or lost strict Restart regressions" >&2
+	echo "boundary contract violation: Definition admission escaped Workspace ownership, regained caller outcome/resealing, or lost strict Restart regressions" >&2
 	exit 1
 fi
 restart_compiler_file="internal/modules/application/workorchd/biz/appservice/activationports/workspace_execution_intent.go"
 restart_admission_line="$(grep -n -m1 -F -- 'EnsureWorkspaceDefinitionAdmission(' "$restart_compiler_file" | cut -d: -f1)"
-restart_managed_config_line="$(grep -n -m1 -F -- 'workspacecore.EnsureManagedConfigs(' "$restart_compiler_file" | cut -d: -f1)"
-if [[ -z "$restart_admission_line" || -z "$restart_managed_config_line" || "$restart_admission_line" -ge "$restart_managed_config_line" ]]; then
+restart_activation_line="$(grep -n -m1 -F -- 'workspaceRuntimeActivation(' "$restart_compiler_file" | cut -d: -f1)"
+if [[ -z "$restart_admission_line" || -z "$restart_activation_line" || "$restart_admission_line" -ge "$restart_activation_line" ]] ||
+	! grep -q -F -- 'workspacecore.EnsureManagedConfigs(' internal/modules/application/workorchd/biz/appservice/activationports/execution_context.go; then
 	echo "boundary contract violation: Restart must validate Definition admission before managed-config materialization" >&2
+	exit 1
+fi
+
+# Activation declarations and semantic-generation authority are distinct
+# concrete types. RuntimeBootstrap/Facts retain immutable DefinitionFocuses;
+# only SM-2 may create a CoverageFocus carrying target/operation/proof binding.
+runtime_bootstrap_shape="$(sed -n '/^type RuntimeBootstrap struct {/,/^}/p' internal/pkg/workorchruntimecontract/runtime_bootstrap.go)"
+runtime_focus_seed_shape="$(sed -n '/^func (f RuntimeDefinitionFocus) RuntimeFocusSeed()/,/^}/p' internal/pkg/workorchruntimecontract/runtime_definition_focus.go)"
+if ! grep -q -E -- 'DefinitionFocuses[[:space:]]+\[\]RuntimeDefinitionFocus' <<<"$runtime_bootstrap_shape" ||
+	grep -q -E -- '(^|[[:space:]])Focuses[[:space:]]+\[\]CoverageFocus' <<<"$runtime_bootstrap_shape" ||
+	! grep -q -F -- 'RuntimeFocusSeedsFromDefinitionFocuses(b.DefinitionFocuses)' internal/pkg/workorchruntimecontract/runtime_bootstrap.go ||
+	grep -q -E -- '(TargetRefs|TargetSelectorRef|TargetSelectorCandidateRefs|CoverageEvidenceBindings|Operations|ValidationRecipe|ProofBinding)' <<<"$runtime_focus_seed_shape" ||
+	! grep -q -F -- 'TestRuntimeDefinitionFocusPreservesDeclarationWithoutGenerationAuthority' internal/pkg/workorchruntimecontract/runtime_bootstrap_test.go; then
+	echo "boundary contract violation: activation DefinitionFocus and SM-2 generation Focus authority were merged" >&2
+	exit 1
+fi
+
+# The target_grounding_unresolved view created from a binding-free focus during
+# catalog retirement cannot cross SM-4. It remains owner-local until the
+# current semantic generation is sealed or fails. Other sealed terminals stay
+# authoritative. Startup recovery must apply the same convergence fence.
+runtime_drive_transition_shape="$(sed -n '/^func (m \*Biz) driveOneRuntimeTransition(/,/^}/p' internal/modules/kernel/orchestrator/biz/runtime_drive.go)"
+runtime_finish_transition_shape="$(sed -n '/^func finishRuntimeConvergenceTransition(/,/^}/p' internal/modules/kernel/orchestrator/biz/runtime_drive.go)"
+runtime_startup_recovery_shape="$(sed -n '/^func (m \*Biz) recoverRuntimeStartup(/,/^}/p' internal/modules/kernel/orchestrator/biz/owner.go)"
+if ! grep -q -F -- 'runtimeTerminalDeliveryReady(aggregate)' <<<"$runtime_drive_transition_shape" ||
+	! grep -q -F -- 'runtimeTerminalDeliveryReady(aggregate)' <<<"$runtime_finish_transition_shape" ||
+	! grep -q -F -- 'runtimeTerminalDeliveryReady(aggregate)' <<<"$runtime_startup_recovery_shape" ||
+	! grep -q -F -- 'aggregate.Decision.Terminal.Code != "target_grounding_unresolved"' internal/modules/kernel/orchestrator/biz/runtime_drive.go ||
+	! grep -q -F -- 'aggregate.Decision.Terminal.Code != "target_grounding_unresolved"' internal/modules/kernel/orchestrator/biz/runtime/candidate_request_session.go ||
+	! grep -q -F -- 'TestRuntimeTerminalDeliveryWaitsForCurrentSemanticAuthority' internal/modules/kernel/orchestrator/biz/runtime_drive_result_test.go ||
+	! grep -q -F -- 'TestSemanticRequestMayReplaceOnlyBindingFreeProvisionalTerminal' internal/modules/kernel/orchestrator/biz/runtime/candidate_request_session_test.go; then
+	echo "boundary contract violation: target-grounding provisional terminal can bypass current semantic authority, or another sealed terminal can be reopened" >&2
+	exit 1
+fi
+
+# File remains target-inventory owner. Orchestrator may forward only the
+# persisted File catalog to Shell when reacquiring its validation catalog, and
+# that bounded vocabulary must survive semantic-generation retirement.
+runtime_shell_target_forwarding_shape="$(sed -n '/^func runtimeOperationAdmissibilityTargetRefs(/,/^}/p' internal/modules/kernel/orchestrator/biz/runtime_prerequisite_drive.go)"
+if ! grep -q -F -- 'ownerModuleID != runtimecontract.RuntimeModuleShell' <<<"$runtime_shell_target_forwarding_shape" ||
+	! grep -q -F -- 'aggregate.Facts.Resources.OperationAdmissibilities' <<<"$runtime_shell_target_forwarding_shape" ||
+	grep -q -F -- 'aggregate.SemanticPlanning.Phase' <<<"$runtime_shell_target_forwarding_shape" ||
+	! grep -q -F -- 'TestRuntimeOperationAdmissibilityTargetsExposeFileCatalogOnlyToShellCatalog' internal/modules/kernel/orchestrator/biz/runtime_mainline_semantic_test.go ||
+	! grep -q -F -- 'TestDriveRuntimeFileBackedTwoFocusStateValidationAssessmentAndRestart' internal/modules/kernel/orchestrator/biz/runtime_drive_test.go; then
+	echo "boundary contract violation: Shell validation catalog can lose or invent the File-owned target vocabulary" >&2
 	exit 1
 fi
 
@@ -3568,7 +3628,7 @@ fi
 # projection may invent an action after Run creation.
 definition_owner_fact_contract="$(cat \
 	internal/modules/blocks/workspace/pkg/models/definition_admission.go \
-	internal/modules/application/workorchd/biz/appservice/definitionadmissioncore/compiler.go \
+	internal/modules/blocks/workspace/pkg/definitionadmission/compiler.go \
 	internal/pkg/workorchruntimecontract/runtime_owner_fact.go)"
 for marker in RequiredOwnerFactBindings OwnerFactConvergenceBindings RuntimeProfileContractsHash RuntimeOwnerFactMissingTrigger AcquisitionOperationVariantID AcquisitionTargetPolicy AcquisitionTargetSelectorRef MaxAcquisitionAttempts; do
 	if ! grep -q -F "$marker" <<<"$definition_owner_fact_contract"; then

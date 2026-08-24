@@ -27,7 +27,7 @@ func TestRuntimeStateRecordClonePreservesCandidateFailureDiagnostic(t *testing.T
 }
 
 func TestRuntimeStateRecordCloneDetachesDefinitionFocuses(t *testing.T) {
-	state := RuntimeStateRecord{Facts: RuntimeFacts{DefinitionFocuses: []CoverageFocus{{
+	state := RuntimeStateRecord{Facts: RuntimeFacts{DefinitionFocuses: []RuntimeDefinitionFocus{{
 		ID: "definition-focus-1", SliceID: "slice-1",
 		CoverageWorkItemIDs:   []common.CoverageWorkItemID{"cwi-1"},
 		RequiredEvidenceKinds: []string{EvidenceKindStateChange},

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strings"
 
+	definitionadmission "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/definitionadmission"
 	workspaceevents "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/events"
 	workspacemodel "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
@@ -74,7 +75,7 @@ func normalizeDefinitionAdmissionInternalEvent(event definitionAdmissionInternal
 		command := *event.CandidatePromotion
 		command.CandidateID = strings.TrimSpace(command.CandidateID)
 		command.CandidateHash = strings.TrimSpace(command.CandidateHash)
-		if command.WorkspaceID != event.WorkspaceID || command.CandidateID == "" || command.CandidateRevision == 0 || command.CandidateHash == "" || command.AdmissionResult.Disposition != workspacemodel.DefinitionAdmissionAdmittedAllOf {
+		if command.WorkspaceID != event.WorkspaceID || command.CandidateID == "" || command.CandidateRevision == 0 || command.CandidateHash == "" {
 			return definitionAdmissionInternalEvent{}, common.ErrInvalidArgument
 		}
 		event.CandidatePromotion = &command
@@ -116,6 +117,10 @@ func reduceDefinitionAdmissionInternalEvent(current *workspacemodel.Workspace, e
 
 func reduceDefinitionAdmissionCandidateSubmission(current *workspacemodel.Workspace, command workspaceevents.SubmitDefinitionAdmissionCandidateCommand) (definitionAdmissionTransition, error) {
 	candidate := command.Candidate
+	admission, err := definitionadmission.Compile(candidate)
+	if err != nil {
+		return definitionAdmissionTransition{}, fmt.Errorf("%w: %v", common.ErrInvalidArgument, err)
+	}
 	currentRevision := uint64(0)
 	for _, existing := range current.DefinitionAdmissionCandidates {
 		if existing.CandidateID != candidate.CandidateID {
@@ -125,7 +130,7 @@ func reduceDefinitionAdmissionCandidateSubmission(current *workspacemodel.Worksp
 			if existing.CandidateHash != candidate.CandidateHash {
 				return definitionAdmissionTransition{}, common.ErrConflict
 			}
-			result := workspaceevents.SubmitDefinitionAdmissionCandidateResult{Candidate: existing.Clone(), Disposition: workspaceevents.DefinitionAdmissionCandidateDuplicate}
+			result := workspaceevents.SubmitDefinitionAdmissionCandidateResult{Candidate: existing.Clone(), AdmissionResult: admission, Disposition: workspaceevents.DefinitionAdmissionCandidateDuplicate}
 			return definitionAdmissionTransition{Noop: true, CandidateSubmissionResult: &result}, nil
 		}
 		if existing.CandidateRevision > currentRevision {
@@ -137,7 +142,7 @@ func reduceDefinitionAdmissionCandidateSubmission(current *workspacemodel.Worksp
 	}
 	next := *current
 	next.DefinitionAdmissionCandidates = append(cloneDefinitionAdmissionCandidates(current.DefinitionAdmissionCandidates), candidate.Clone())
-	result := workspaceevents.SubmitDefinitionAdmissionCandidateResult{Candidate: candidate.Clone(), Disposition: workspaceevents.DefinitionAdmissionCandidateCreated}
+	result := workspaceevents.SubmitDefinitionAdmissionCandidateResult{Candidate: candidate.Clone(), AdmissionResult: admission, Disposition: workspaceevents.DefinitionAdmissionCandidateCreated}
 	return definitionAdmissionTransition{Next: &next, CandidateSubmissionResult: &result}, nil
 }
 
@@ -146,11 +151,15 @@ func reduceDefinitionAdmissionCandidatePromotion(current *workspacemodel.Workspa
 	if candidate == nil || !isCurrent || candidate.CandidateRevision != command.CandidateRevision || candidate.CandidateHash != command.CandidateHash {
 		return definitionAdmissionTransition{}, common.ErrConflict
 	}
-	if err := command.AdmissionResult.ValidateFor(*candidate); err != nil {
+	admissionResult, err := definitionadmission.Compile(*candidate)
+	if err != nil {
 		return definitionAdmissionTransition{}, fmt.Errorf("%w: %v", common.ErrConflict, err)
 	}
+	if admissionResult.Disposition != workspacemodel.DefinitionAdmissionAdmittedAllOf {
+		return definitionAdmissionTransition{}, common.ErrConflict
+	}
 	if current.StartupInput != nil || current.ActivationAdmission != nil {
-		if samePromotion(current, *candidate, command.AdmissionResult, command.BlockingTicketID) {
+		if samePromotion(current, *candidate, admissionResult, command.BlockingTicketID) {
 			result := workspaceevents.PromoteDefinitionAdmissionCandidateResult{
 				DefinitionRevision: current.StartupInput.DefinitionRevision, StartupInputHash: current.StartupInput.StartupInputHash,
 				CandidateItemToItemRefMappingHash: current.StartupInput.CandidateItemToItemRefMappingHash,
@@ -162,7 +171,7 @@ func reduceDefinitionAdmissionCandidatePromotion(current *workspacemodel.Workspa
 			return definitionAdmissionTransition{}, common.ErrConflict
 		}
 	}
-	startup := startupInputFromCandidate(*candidate, command.AdmissionResult)
+	startup := startupInputFromCandidate(*candidate, admissionResult)
 	if err := startup.Validate(); err != nil {
 		return definitionAdmissionTransition{}, fmt.Errorf("%w: %v", common.ErrInvalidArgument, err)
 	}

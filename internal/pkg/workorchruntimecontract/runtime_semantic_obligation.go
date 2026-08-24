@@ -316,7 +316,7 @@ func writeRuntimeSemanticProofObligationsHash(h hashStringWriter, values []Runti
 	}
 }
 
-func compileRuntimeSemanticProofObligations(sourceFocuses []CoverageFocus, coverageItems []RuntimeCoverageItem, catalogs []RuntimeOperationAdmissibility) ([]RuntimeSemanticProofObligation, error) {
+func compileRuntimeSemanticProofObligations(sourceFocuses []RuntimeDefinitionFocus, coverageItems []RuntimeCoverageItem, catalogs []RuntimeOperationAdmissibility) ([]RuntimeSemanticProofObligation, error) {
 	sourceByCoverage, err := runtimeSemanticBindingSourceFocuses(sourceFocuses)
 	if err != nil {
 		return nil, err

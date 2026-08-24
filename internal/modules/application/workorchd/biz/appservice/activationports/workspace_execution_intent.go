@@ -2,10 +2,10 @@ package activationports
 
 import (
 	"context"
+	"fmt"
 	"strings"
 
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/activationcore"
-	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/workspacecore"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/workspaceports"
 	workspacemodel "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
@@ -33,15 +33,12 @@ func CompileWorkspaceExecutionRestartBootstrap(ctx context.Context, request Acti
 	if err != nil {
 		return nil, err
 	}
-	workspace, err = EnsureWorkspaceDefinitionAdmission(ctx, request.Hub, workspace, goal, dod)
+	admissionSnapshot, err := EnsureWorkspaceDefinitionAdmission(ctx, request.Hub, workspace, goal, dod)
 	if err != nil {
 		return nil, err
 	}
-	toolHints := WorkspaceToolContextHintsFor(ctx, request.Hub, workspace)
-	if err := workspacecore.EnsureManagedConfigs(workspace.InternalDirectory, toolHints.Template, toolHints.Workspace); err != nil {
-		return nil, err
-	}
-	activationBuild, err := workspaceRuntimeActivation(ctx, request, workspace, goal, dod)
+	workspace = admissionSnapshot.Workspace
+	activationBuild, err := workspaceRuntimeActivation(ctx, request, workspace, admissionSnapshot.Template, goal, dod)
 	if err != nil {
 		return nil, err
 	}
@@ -56,7 +53,29 @@ func CompileWorkspaceExecutionRestartBootstrap(ctx context.Context, request Acti
 	if err != nil {
 		return nil, err
 	}
+	if err := validateRuntimeBootstrapStartupSeal(workspace, admissionSnapshot.Template, admissionSnapshot.Candidate, bootstrap); err != nil {
+		return nil, err
+	}
 	return bootstrap, nil
+}
+
+func validateRuntimeBootstrapStartupSeal(workspace *workspacemodel.Workspace, template *workspacemodel.WorkspaceTemplate, candidate workspacemodel.DefinitionAdmissionCandidate, bootstrap *runtimecontract.RuntimeBootstrap) error {
+	if workspace == nil || workspace.StartupInput == nil || workspace.ActivationAdmission == nil || template == nil || bootstrap == nil {
+		return common.ErrInvalidArgument
+	}
+	startup := workspace.StartupInput.Normalized()
+	admission := workspace.ActivationAdmission.Normalized()
+	if startup.ValidateCandidate(candidate) != nil || admission.ValidateCandidate(startup, candidate) != nil || admission.State != workspacemodel.WorkspaceActivationEligible {
+		return fmt.Errorf("%w: Runtime bootstrap does not bind an eligible Workspace Definition admission", common.ErrConflict)
+	}
+	if startup.WorkspaceTemplateRef != strings.TrimSpace(template.ID) || startup.TemplateSnapshotHash != workspaceTemplateSnapshotHash(template) {
+		return fmt.Errorf("%w: Runtime bootstrap Template snapshot drifted after Definition admission", common.ErrConflict)
+	}
+	if bootstrap.Definition.Revision != startup.DefinitionRevision || bootstrap.Definition.StartupInputHash != startup.StartupInputHash ||
+		runtimecontract.StableRuntimeProfileContractsHash(bootstrap.Activation.ExecutionContract.ProfileContracts) != startup.RuntimeProfileContractsHash {
+		return fmt.Errorf("%w: Runtime bootstrap definition/profile snapshot drifted from Workspace startup input", common.ErrConflict)
+	}
+	return nil
 }
 
 func workspaceStartupInputHash(workspace *workspacemodel.Workspace, definitionRevision string) string {
@@ -75,11 +94,12 @@ func workspaceStartupInputHash(workspace *workspacemodel.Workspace, definitionRe
 // owner snapshots to an activation context.  It deliberately has no Run or
 // Workspace lifecycle side effect; lifecycle admission belongs to the
 // Workspace and Run owners after the compiler returns its sealed bootstrap.
-func workspaceRuntimeActivation(ctx context.Context, request ActivateWorkspaceExecutionViewRequest, workspace *workspacemodel.Workspace, goal *workspacemodel.Goal, dod *workspacemodel.DoD) (workspaceRuntimeActivationBuild, error) {
+func workspaceRuntimeActivation(ctx context.Context, request ActivateWorkspaceExecutionViewRequest, workspace *workspacemodel.Workspace, template *workspacemodel.WorkspaceTemplate, goal *workspacemodel.Goal, dod *workspacemodel.DoD) (workspaceRuntimeActivationBuild, error) {
 	return buildWorkspaceRuntimeActivation(ctx, workspaceRuntimeActivationRequest{
 		Hub: request.Hub,
 
 		Workspace:                      workspace,
+		Template:                       template,
 		Goal:                           goal,
 		DoD:                            dod,
 		SystemDefaultSoulID:            common.SoulID(strings.TrimSpace(string(request.SystemDefaultSoulID))),

@@ -79,19 +79,16 @@ func HasOwnerGroundedCreationScope(facts runtimecontract.RuntimeFacts) bool {
 		value.ProspectiveTargetRef != "" && value.ProspectiveTargetRef == focus.ProspectiveTargetRef
 }
 
-// HasOwnerGroundedTargetScope recognizes a bounded existing owner inventory. An
-// empty scope is authoritative only when it retains an activation-sealed owner
-// and subject identity.
+// HasOwnerGroundedTargetScope recognizes a bounded, non-empty existing owner
+// inventory. An empty observation proves only that no existing target was
+// found; creation requires a separate activation-sealed prospective target.
 func HasOwnerGroundedTargetScope(facts runtimecontract.RuntimeFacts) bool {
 	selection := CurrentFocusTargetSelection(facts)
 	if selection == nil || selection.Disposition != runtimecontract.RuntimeTargetSelectionScope ||
 		selection.OwnerModuleID == "" {
 		return false
 	}
-	return len(selection.TargetRefs) != 0 ||
-		(selection.CandidateCount == 0 && len(selection.CandidateTargetRefs) == 0 &&
-			selection.ProspectiveTargetRef == "" && selection.SelectorOwnerRef != "" &&
-			selection.SelectorSubjectRef != "")
+	return len(selection.TargetRefs) != 0
 }
 
 // TargetSelectionHasConcreteTarget distinguishes an exact selected target from
@@ -102,8 +99,8 @@ func TargetSelectionHasConcreteTarget(selection runtimecontract.RuntimeTargetSel
 }
 
 // OwnerGroundedTargetScopeMaySelectNewTarget preserves an owner's bounded
-// scope adjudication only while no higher-precedence target fact has been
-// sealed for the current focus.
+// existing-target scope adjudication only while no higher-precedence target
+// fact has been sealed for the current focus.
 func OwnerGroundedTargetScopeMaySelectNewTarget(facts runtimecontract.RuntimeFacts) bool {
 	facts = facts.Normalized()
 	if !HasOwnerGroundedTargetScope(facts) || len(facts.Focus.TargetRefs) != 0 {
