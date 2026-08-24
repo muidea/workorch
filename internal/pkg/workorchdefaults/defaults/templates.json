@@ -619,52 +619,23 @@
               "description": "Source, configuration, documentation, or workspace state change directly related to Goal"
             },
             {
-              "id": "validation_preparation",
-              "required": true,
-              "evidenceRole": "supplemental_evidence",
-              "description": "Current owner-grounded validation readiness, either already present or established after one bounded workspace preparation change"
-            },
-            {
               "id": "validation_report",
               "required": true,
               "evidenceRole": "supplemental_evidence",
               "description": "Validation command, test report, lint/static check, or justified skipped validation"
             },
             {
-              "id": "coverage_map",
-              "required": true,
-              "evidenceRole": "supplemental_evidence",
-              "description": "Mapping between Goal leaves, DoD items, acceptance dimensions, evidenceRefs, and residual risks"
-            },
-            {
               "id": "version_control_snapshot",
               "required": true,
               "evidenceRole": "supplemental_evidence",
               "description": "Local version-control snapshot for meaningful workspace output changes, including changed paths and commit evidence"
-            },
-            {
-              "id": "user_deliverable",
-              "required": true,
-              "evidenceRole": "supplemental_evidence",
-              "description": "Goal-specific user-facing artifact such as binary, package, service endpoint, document, or generated data"
             }
           ],
           "coverageDependencies": [
             {
-              "id": "source-change-precedes-and-refreshes-validation-preparation",
+              "id": "source-change-precedes-and-refreshes-dod-validation",
               "sourceScope": "deliverable",
               "sourceRequirementId": "source_change",
-              "dependentScope": "deliverable",
-              "dependentRequirementId": "validation_preparation",
-              "requireSourceSettled": true,
-              "triggerEvidenceKinds": [
-                "state_change"
-              ]
-            },
-            {
-              "id": "validation-preparation-precedes-and-refreshes-dod-validation",
-              "sourceScope": "deliverable",
-              "sourceRequirementId": "validation_preparation",
               "dependentScope": "dodItem",
               "dependentRequirementId": "*",
               "requireSourceSettled": true,
@@ -695,17 +666,6 @@
               ]
             },
             {
-              "id": "validation-preparation-precedes-and-refreshes-final-snapshot",
-              "sourceScope": "deliverable",
-              "sourceRequirementId": "validation_preparation",
-              "dependentScope": "deliverable",
-              "dependentRequirementId": "version_control_snapshot",
-              "requireSourceSettled": true,
-              "triggerEvidenceKinds": [
-                "state_change"
-              ]
-            },
-            {
               "id": "dod-validation-precedes-and-refreshes-final-snapshot",
               "sourceScope": "dodItem",
               "sourceRequirementId": "*",
@@ -723,28 +683,6 @@
               "dependentScope": "deliverable",
               "dependentRequirementId": "version_control_snapshot",
               "requireSourceSettled": true
-            },
-            {
-              "id": "coverage-map-precedes-and-refreshes-final-snapshot",
-              "sourceScope": "deliverable",
-              "sourceRequirementId": "coverage_map",
-              "dependentScope": "deliverable",
-              "dependentRequirementId": "version_control_snapshot",
-              "requireSourceSettled": true,
-              "triggerEvidenceKinds": [
-                "state_change"
-              ]
-            },
-            {
-              "id": "user-deliverable-precedes-and-refreshes-final-snapshot",
-              "sourceScope": "deliverable",
-              "sourceRequirementId": "user_deliverable",
-              "dependentScope": "deliverable",
-              "dependentRequirementId": "version_control_snapshot",
-              "requireSourceSettled": true,
-              "triggerEvidenceKinds": [
-                "state_change"
-              ]
             }
           ],
           "validationEnvironmentPolicy": {
@@ -907,6 +845,9 @@
               "id": "source_change",
               "scope": "deliverable",
               "evidenceRole": "primary_state_change",
+              "requiredEvidenceKinds": [
+                "state_change"
+              ],
               "targetRole": "deliverable_implementation",
               "targetDiscoverySources": [
                 "workspace_manifest",
@@ -931,23 +872,79 @@
               "description": "A satisfied source_change deliverable must cite direct state-changing File write or patch evidence for the workspace output with coverageTargets aligned to the Goal, DoD, or deliverable item, not only read-only inspection or summary artifacts."
             },
             {
-              "id": "validation_preparation",
+              "id": "validation_report",
               "scope": "deliverable",
               "evidenceRole": "supplemental_evidence",
-              "targetRole": "validation_readiness",
+              "requiredEvidenceKinds": [
+                "validation"
+              ],
+              "requireDirectEvidence": true,
+              "acceptedStepKinds": [
+                "validation/managed_session"
+              ],
+              "rejectedStepKinds": [
+                "file/read",
+                "file/list",
+                "mcp/resource_read",
+                "mcp/prompt_get"
+              ],
+              "description": "A validation_report must cite bounded executed validation evidence. Any accepted source_change evidence declared after this report reopens the report through the sealed coverage dependency."
+            },
+            {
+              "id": "version_control_snapshot",
+              "scope": "deliverable",
+              "evidenceRole": "supplemental_evidence",
+              "requiredEvidenceKinds": [
+                "state_change"
+              ],
+              "requireDirectEvidence": true,
+              "acceptedStepKinds": [
+                "git/write"
+              ],
+              "acceptedOperationVariants": [
+                {
+                  "kind": "git/write",
+                  "variantId": "commit"
+                }
+              ],
+              "capabilityStateRequirements": [
+                {
+                  "ownerModuleId": "blocks/git",
+                  "capabilityStateKind": "repository_state",
+                  "subjectRef": "workspace_deliverable"
+                }
+              ],
+              "rejectedStepKinds": [
+                "file/read",
+                "file/list",
+                "mcp/resource_read",
+                "mcp/prompt_get",
+                "shell/command"
+              ],
+              "description": "A satisfied version-control snapshot must cite git/write evidence, normally add plus commit, rather than read-only inspection or shell-based git commands."
+            },
+            {
+              "id": "*",
+              "scope": "dodItem",
+              "requiredEvidenceKinds": [
+                "validation"
+              ],
+              "targetRole": "deliverable_implementation",
               "targetDiscoverySources": [
                 "workspace_manifest",
                 "project_files"
               ],
               "targetSelectorRef": "file/workspace_deliverable",
-              "targetSelectorOwnerRef": "software-dev",
-              "targetSelectorSubjectRef": "validation_readiness",
               "requireTargetGrounding": true,
               "requireDirectEvidence": true,
+              "requireClaimEvidence": true,
+              "requireExecutableBehaviorEvidence": true,
               "acceptedStepKinds": [
+                "validation/managed_session",
+                "shell/command",
                 "file/write",
                 "patch/apply",
-                "validation/managed_session"
+                "mcp/tool_call"
               ],
               "requiredOwnerFacts": [
                 {
@@ -980,89 +977,14 @@
                 "mcp/resource_read",
                 "mcp/prompt_get"
               ],
-              "description": "Validation readiness may use an owner-grounded executable recipe already applicable to the workspace, or one bounded File-owned preparation change selected through the declared workspace scope, but closes only when the current Shell catalog publishes a selectable managed-validation surface."
-            },
-            {
-              "id": "validation_report",
-              "scope": "deliverable",
-              "evidenceRole": "supplemental_evidence",
-              "requiredEvidenceKinds": [
-                "validation"
-              ],
-              "requireDirectEvidence": true,
-              "acceptedStepKinds": [
-                "validation/managed_session",
-                "shell/command"
-              ],
-              "rejectedStepKinds": [
-                "file/read",
-                "file/list",
-                "mcp/resource_read",
-                "mcp/prompt_get"
-              ],
-              "description": "A validation_report must cite bounded executed validation evidence. Any accepted source_change evidence declared after this report reopens the report through the sealed coverage dependency."
-            },
-            {
-              "id": "version_control_snapshot",
-              "scope": "deliverable",
-              "evidenceRole": "supplemental_evidence",
-              "requireDirectEvidence": true,
-              "acceptedStepKinds": [
-                "git/write"
-              ],
-              "acceptedOperationVariants": [
-                {
-                  "kind": "git/write",
-                  "variantId": "commit"
-                }
-              ],
-              "capabilityStateRequirements": [
-                {
-                  "ownerModuleId": "blocks/git",
-                  "capabilityStateKind": "repository_state",
-                  "subjectRef": "workspace_deliverable"
-                }
-              ],
-              "rejectedStepKinds": [
-                "file/read",
-                "file/list",
-                "mcp/resource_read",
-                "mcp/prompt_get",
-                "shell/command"
-              ],
-              "description": "A satisfied version-control snapshot must cite git/write evidence, normally add plus commit, rather than read-only inspection or shell-based git commands."
-            },
-            {
-              "id": "*",
-              "scope": "dodItem",
-              "targetRole": "deliverable_implementation",
-              "targetDiscoverySources": [
-                "workspace_manifest",
-                "project_files"
-              ],
-              "targetSelectorRef": "file/workspace_deliverable",
-              "requireTargetGrounding": true,
-              "requireDirectEvidence": true,
-              "requireClaimEvidence": true,
-              "requireExecutableBehaviorEvidence": true,
-              "acceptedStepKinds": [
-                "validation/managed_session",
-                "shell/command",
-                "file/write",
-                "patch/apply",
-                "mcp/tool_call"
-              ],
-              "rejectedStepKinds": [
-                "file/read",
-                "file/list",
-                "mcp/resource_read",
-                "mcp/prompt_get"
-              ],
               "description": "Satisfied DoD items must be backed by direct evidence whose output, input, or coverageTargets align with the specific claim; a generic build/test pass is not sufficient for detailed behavioral claims."
             },
             {
               "id": "*",
               "scope": "goalCoverage",
+              "requiredEvidenceKinds": [
+                "validation"
+              ],
               "targetRole": "deliverable_implementation",
               "targetDiscoverySources": [
                 "workspace_manifest",

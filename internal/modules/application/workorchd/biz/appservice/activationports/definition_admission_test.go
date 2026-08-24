@@ -104,8 +104,11 @@ func TestDefinitionAdmissionCandidateSealsProfileOwnerFactClosureBeforeRun(t *te
 		t.Fatalf("candidate without closure: %v", err)
 	}
 	blocked, err := definitionadmission.Compile(missing)
-	if err != nil || blocked.Disposition != workspacemodel.DefinitionAdmissionClarificationRequired || blocked.ViolationCode != workspacemodel.DefinitionAdmissionPrerequisiteUnresolved {
+	if err != nil || blocked.Disposition != workspacemodel.DefinitionAdmissionClarificationRequired || blocked.ViolationCode != workspacemodel.DefinitionAdmissionProfilePrerequisiteUnresolved {
 		t.Fatalf("missing profile closure result = %+v err=%v", blocked, err)
+	}
+	if command := workspaceClarificationCommand(missing, blocked); command.RequiredActionKind != "select_or_fix_template_profile" {
+		t.Fatalf("profile clarification action = %q", command.RequiredActionKind)
 	}
 }
 

@@ -80,15 +80,18 @@ func TestRuntimeActivationContextUsesConcreteSelectionSnapshots(t *testing.T) {
 						"id": "go-empty-workspace", "requiredGoalTerms": []any{"Go"}, "requiredDoDTerms": []any{"test"},
 						"artifacts": []any{map[string]any{"id": "module", "targetRole": "module_definition", "targetRef": "go.mod", "allowedOperationKinds": []any{"file/write"}}},
 					}},
-					"evidenceRequirements": []any{map[string]any{
-						"id": "version_control_snapshot", "scope": "deliverable", "evidenceRole": "supplemental_evidence",
-						"targetRole": "repository", "targetRefs": []any{".git"}, "targetDiscoverySources": []any{"workspace_manifest"}, "targetSelectorRef": "file/unique_workspace_entry", "targetSelectorOwnerRef": "profile-owner", "targetSelectorSubjectRef": "profile-subject", "prospectiveTargetRef": "initial-deliverable.txt", "requireTargetGrounding": true,
-						"requireDirectEvidence": true, "requireClaimEvidence": true, "requireExecutableBehaviorEvidence": true, "requireCoverageTargets": true,
-						"acceptedStepKinds": []any{"git/write", "validation/managed_session"}, "acceptedOperationVariants": []any{map[string]any{"kind": "git/write", "variantId": "commit"}},
-						"requiredOwnerFacts":    []any{map[string]any{"ownerModuleId": "blocks/shell", "factKind": "selectable_validation_surface", "operationKind": "validation/managed_session"}},
-						"ownerFactConvergences": []any{map[string]any{"ownerModuleId": "blocks/shell", "factKind": "selectable_validation_surface", "operationKind": "validation/managed_session", "requirePreexisting": true}},
-						"rejectedStepKinds":     []any{"shell/read"},
-					}},
+					"evidenceRequirements": []any{
+						map[string]any{"id": "runtime_entrypoint", "scope": "acceptanceDimension", "requiredEvidenceKinds": []any{"validation"}, "acceptedStepKinds": []any{"validation/managed_session"}},
+						map[string]any{
+							"id": "version_control_snapshot", "scope": "deliverable", "evidenceRole": "supplemental_evidence", "requiredEvidenceKinds": []any{"state_change"},
+							"targetRole": "repository", "targetRefs": []any{".git"}, "targetDiscoverySources": []any{"workspace_manifest"}, "targetSelectorRef": "file/unique_workspace_entry", "targetSelectorOwnerRef": "profile-owner", "targetSelectorSubjectRef": "profile-subject", "prospectiveTargetRef": "initial-deliverable.txt", "requireTargetGrounding": true,
+							"requireDirectEvidence": true, "requireClaimEvidence": true, "requireExecutableBehaviorEvidence": true, "requireCoverageTargets": true,
+							"acceptedStepKinds": []any{"git/write", "validation/managed_session"}, "acceptedOperationVariants": []any{map[string]any{"kind": "git/write", "variantId": "commit"}},
+							"requiredOwnerFacts":    []any{map[string]any{"ownerModuleId": "blocks/shell", "factKind": "selectable_validation_surface", "operationKind": "validation/managed_session"}},
+							"ownerFactConvergences": []any{map[string]any{"ownerModuleId": "blocks/shell", "factKind": "selectable_validation_surface", "operationKind": "validation/managed_session", "requirePreexisting": true}},
+							"rejectedStepKinds":     []any{"shell/read"},
+						},
+					},
 				},
 			},
 			"templateStagePolicies": map[string]any{
@@ -141,16 +144,20 @@ func TestRuntimeActivationContextUsesConcreteSelectionSnapshots(t *testing.T) {
 		t.Fatalf("runtime execution contract = %+v", activation.ExecutionContract)
 	}
 	profile := activation.ExecutionContract.ProfileContracts[0]
+	var deliverableRequirement runtimecontract.RuntimeProfileEvidenceRequirement
+	if len(profile.EvidenceRequirements) == 2 {
+		deliverableRequirement = profile.EvidenceRequirements[1]
+	}
 	if profile.ID != "software-dev" || len(profile.AcceptanceDimensions) != 1 || profile.AcceptanceDimensions[0].ID != "runtime_entrypoint" || !profile.AcceptanceDimensions[0].Required ||
 		len(profile.DeliverableExpectations) != 1 || profile.DeliverableExpectations[0].ID != "version_control_snapshot" || profile.DeliverableExpectations[0].EvidenceRole != "supplemental_evidence" ||
-		len(profile.EvidenceRequirements) != 1 || profile.EvidenceRequirements[0].Scope != "deliverable" || profile.EvidenceRequirements[0].TargetRole != "repository" ||
-		len(profile.EvidenceRequirements[0].TargetRefs) != 1 || profile.EvidenceRequirements[0].TargetRefs[0] != ".git" ||
-		len(profile.EvidenceRequirements[0].TargetDiscoverySources) != 1 || profile.EvidenceRequirements[0].TargetDiscoverySources[0] != "workspace_manifest" || profile.EvidenceRequirements[0].TargetSelectorRef != "file/unique_workspace_entry" || profile.EvidenceRequirements[0].TargetSelectorOwnerRef != "profile-owner" || profile.EvidenceRequirements[0].TargetSelectorSubjectRef != "profile-subject" || profile.EvidenceRequirements[0].ProspectiveTargetRef != "initial-deliverable.txt" || !profile.EvidenceRequirements[0].RequireTargetGrounding || !profile.EvidenceRequirements[0].RequireDirectEvidence ||
-		!profile.EvidenceRequirements[0].RequireClaimEvidence || !profile.EvidenceRequirements[0].RequireExecutableBehaviorEvidence || !profile.EvidenceRequirements[0].RequireCoverageTargets ||
-		len(profile.EvidenceRequirements[0].AcceptedStepKinds) != 2 || profile.EvidenceRequirements[0].AcceptedStepKinds[0] != "git/write" || profile.EvidenceRequirements[0].AcceptedStepKinds[1] != "validation/managed_session" ||
-		len(profile.EvidenceRequirements[0].AcceptedOperationVariants) != 1 || profile.EvidenceRequirements[0].AcceptedOperationVariants[0] != (runtimecontract.RuntimeOperationVariantRef{Kind: "git/write", VariantID: "commit"}) ||
-		len(profile.EvidenceRequirements[0].RequiredOwnerFacts) != 1 || profile.EvidenceRequirements[0].RequiredOwnerFacts[0] != (runtimecontract.RuntimeOwnerFactRequirement{OwnerModuleID: runtimecontract.RuntimeModuleShell, FactKind: runtimecontract.RuntimeOwnerFactSelectableValidationSurface, OperationKind: runtimecontract.RuntimeBlockKindManagedValidationSession}) ||
-		len(profile.EvidenceRequirements[0].RejectedStepKinds) != 1 || profile.EvidenceRequirements[0].RejectedStepKinds[0] != "shell/read" ||
+		len(profile.EvidenceRequirements) != 2 || deliverableRequirement.Scope != "deliverable" || deliverableRequirement.TargetRole != "repository" ||
+		len(deliverableRequirement.TargetRefs) != 1 || deliverableRequirement.TargetRefs[0] != ".git" ||
+		len(deliverableRequirement.TargetDiscoverySources) != 1 || deliverableRequirement.TargetDiscoverySources[0] != "workspace_manifest" || deliverableRequirement.TargetSelectorRef != "file/unique_workspace_entry" || deliverableRequirement.TargetSelectorOwnerRef != "profile-owner" || deliverableRequirement.TargetSelectorSubjectRef != "profile-subject" || deliverableRequirement.ProspectiveTargetRef != "initial-deliverable.txt" || !deliverableRequirement.RequireTargetGrounding || !deliverableRequirement.RequireDirectEvidence ||
+		!deliverableRequirement.RequireClaimEvidence || !deliverableRequirement.RequireExecutableBehaviorEvidence || !deliverableRequirement.RequireCoverageTargets ||
+		len(deliverableRequirement.AcceptedStepKinds) != 2 || deliverableRequirement.AcceptedStepKinds[0] != "git/write" || deliverableRequirement.AcceptedStepKinds[1] != "validation/managed_session" ||
+		len(deliverableRequirement.AcceptedOperationVariants) != 1 || deliverableRequirement.AcceptedOperationVariants[0] != (runtimecontract.RuntimeOperationVariantRef{Kind: "git/write", VariantID: "commit"}) ||
+		len(deliverableRequirement.RequiredOwnerFacts) != 1 || deliverableRequirement.RequiredOwnerFacts[0] != (runtimecontract.RuntimeOwnerFactRequirement{OwnerModuleID: runtimecontract.RuntimeModuleShell, FactKind: runtimecontract.RuntimeOwnerFactSelectableValidationSurface, OperationKind: runtimecontract.RuntimeBlockKindManagedValidationSession}) ||
+		len(deliverableRequirement.RejectedStepKinds) != 1 || deliverableRequirement.RejectedStepKinds[0] != "shell/read" ||
 		len(profile.CoverageDependencies) != 1 || profile.CoverageDependencies[0].ID != "source-refreshes-validation" || profile.CoverageDependencies[0].SourceRequirementID != "source" || profile.CoverageDependencies[0].DependentRequirementID != "version_control_snapshot" ||
 		len(profile.CoverageDependencies[0].TriggerEvidenceKinds) != 1 || profile.CoverageDependencies[0].TriggerEvidenceKinds[0] != runtimecontract.EvidenceKindStateChange ||
 		len(profile.BootstrapRecipes) != 1 || profile.BootstrapRecipes[0].ID != "go-empty-workspace" || len(profile.BootstrapRecipes[0].Artifacts) != 1 || profile.BootstrapRecipes[0].Artifacts[0].TargetRef != "go.mod" {

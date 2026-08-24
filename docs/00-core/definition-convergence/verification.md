@@ -21,8 +21,9 @@ Last Verified: 2026-08-24
 | smaller numeric ID is dependent | prerequisite仍先执行 |
 | clarify same semantic item | 保留 ItemRef、创建新 Definition revision；既有 Run 不漂移 |
 | materially replace/delete item | old ItemRef retired且不复用；fresh activation使用新 mapping |
-| pre-seal candidate | exact proposed Goal/DoD、Template snapshot、transitively sealed Profile/policy bindings、required owner-fact/convergence bindings、Profile contract hash、compiler version、resolved directory 与 admission-only relation input 产生稳定 versioned `CandidateHash`；仍无 Definition revision/startup-input/Run |
+| pre-seal candidate | exact proposed Goal/DoD、Template snapshot、transitively sealed Profile/policy bindings、完整 normalized typed Profile contract snapshot、required owner-fact/convergence bindings、Profile contract hash、compiler version、resolved directory 与 admission-only relation input 产生稳定 versioned `CandidateHash`；仍无 Definition revision/startup-input/Run |
 | current candidate seal | `CandidateHash` 同时覆盖 acquisition operation variant、operation target policy 与 operation selector；caller/Workspace owner/pure compiler均不能重算 hash 后接受发生漂移的 immutable candidate |
+| Profile snapshot/hash drift | candidate 的 typed Profile snapshot hash 与`RuntimeProfileContractsHash`不一致时，owner ingress在admission前拒绝；不得仅凭caller提供的hash或bindings继续 |
 | candidate lineage/revision | exact normalized duplicate 返回原 CandidateID/revision/hash 与确定性相同的 Workspace-owner admission result；materially changed input 只以 next revision CAS 新增；stale expected revision 零覆盖/零 promotion |
 | invalid candidate | 只持久化 candidate/violation/ticket lineage；零 canonical item/relation、`StartupInputHash`、Runtime/provider/capability work |
 | admitted candidate promotion | submit 的 `DefinitionAdmissionResult` 由 Workspace owner compiler 生成；identity-only promotion 在 owner-private event 中重新编译 exact-current candidate，并一次 CAS 产生正式 Definition revision/startup input 与 activation-admission fact；caller 无 outcome/result-hash 写权限；无 static ticket 时直接 eligible，corrected ticket lineage 必须 pending；duplicate 返回同一 identity，stale/mismatch/unsupported alternative 零部分写 |
@@ -30,7 +31,11 @@ Last Verified: 2026-08-24
 | change any startup input | 新 owner-sealed startup-input snapshot/hash；Goal/DoD/关系变化另产生新 Definition revision；当前 Run/bootstrap/graph 不变 |
 | required item has no CWI / CWI has two primary items | static mapping validation fail-closed before Run creation |
 | constraint has no consumer / all-of aggregation has no gate | static disposition validation fail-closed |
-| required owner fact has no unique acquisition/reobserve closure | candidate promotion 前 `declared_prerequisite_unresolved + BlockingTicketID`；零 startup-input/Runtime/provider/dispatch/effect |
+| required Profile CWI lacks exact proof declaration | candidate promotion 前`definition_profile_contract_invalid + select_or_fix_template_profile + BlockingTicketID`；wildcard evidence policy不能代替exact `scope + id`；零 startup-input/Runtime/provider/dispatch/effect |
+| required Profile CWI has empty/unsupported evidence kinds or no proof-capable accepted operation | 同一确定性Profile violation/ticket；不得降级为assessment-only focus；零 startup-input/Runtime/provider/dispatch/effect |
+| duplicate required Profile source across profiles | `definition_profile_contract_invalid`精确报告全部Profile source refs；不得按Profile顺序覆盖或合并 |
+| required Profile owner fact has no unique acquisition/reobserve closure | candidate promotion 前 `definition_profile_prerequisite_unresolved + select_or_fix_template_profile + BlockingTicketID`；零 startup-input/Runtime/provider/dispatch/effect |
+| candidate owner-fact manifest differs from exact Profile snapshot derivation | `definition_profile_prerequisite_unresolved`；Application不能省略、替换或附加binding，Workspace pure compiler独立派生比较 |
 | required owner fact declares exact one-shot acquisition | candidate封存missing trigger、acquisition owner/kind/selector、reobserve owner/fact与max=1；promotion/startup hash稳定；missing 时 semantic proof 只能封存该 exact acquisition，accepted operation 后 reobserve 仍缺失则零第二次 acquisition并 typed exhausted |
 | free text may imply an undeclared prerequisite | static compiler 不做领域猜测或伪报完备；执行期只能走 typed semantic-gap lane |
 | dangling/self dependency | fail-closed before Run creation |
@@ -89,7 +94,7 @@ Last Verified: 2026-08-24
 | LLM proposes rewritten Goal/DoD/Template/directory | schema/integrity fail-closed；零 Workspace/bootstrap/graph/startup-input mutation |
 | LLM exposes implicit one-of | 只封存 bounded diagnostic；SM-2/SM-3 建 current Run scoped governed ticket，affected focus 零 candidate/dispatch/effect |
 | LLM exposes undeclared prerequisite/semantic ambiguity | 不自动补 relation 或扩图；绑定 current authority 的 `revise_definition_and_restart` ticket |
-| required owner fact closure omits operation selector/variant/policy | pre-seal `declared_prerequisite_unresolved`；零 Run/provider/capability work |
+| Profile required owner fact closure omits operation selector/variant/policy | pre-seal `definition_profile_prerequisite_unresolved`；零 Run/provider/capability work |
 | Definition selector differs from capability operation selector | manifest 同时封存两份 identity；provider schema只允许 operation selector，返回 Definition selector时 attempt-0 typed correction、零 dispatch |
 | assisted draft returns one-of | raw draft 只形成不可采用 diagnostic，UI/schema 不把它显示为合法 relation；只有用户另行显式提交的 admission candidate 才可保留 token 并进入 candidate-scoped ticket |
 | malformed/timeout context request | whole-document recovery或typed terminal；不扩 dependency/priority |
@@ -99,6 +104,7 @@ Last Verified: 2026-08-24
 | Scenario | Required assertion |
 | --- | --- |
 | scheduling contract missing | SM-3 provider request和dispatch均为零 |
+| internal caller bypasses Profile admission | Runtime focus compiler在任何SM-2 focus mutation/SM-3 request前重复执行同一pure Profile validation并fail-closed；不建第二状态机或ticket |
 | duplicate schedule/private event | zero revision/CAS |
 | CAS conflict during seal | reload + pure recompute；无 process-local order复用 |
 | crash after schedule before proof | exact contract/window恢复；一次 logical request |

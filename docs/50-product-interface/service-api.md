@@ -4,7 +4,7 @@ Status: normative
 
 Type: product-interface
 
-Last Verified: 2026-08-23
+Last Verified: 2026-08-24
 
 ## Purpose And Authority
 
@@ -93,10 +93,15 @@ Goal/DoD mutation先提交 immutable `DefinitionAdmissionCandidate` 并执行 pu
 可以 promotion；`definition_one_of_unsupported` 或 declared ambiguity 返回 typed `BlockingTicketID`。Corrected
 candidate 仍需 Decision resolution 与 Workspace acknowledgement 才能变为 eligible。
 
-candidate 还必须封存 exact Profile/policy snapshot、`RuntimeProfileContractsHash`、required owner-fact bindings 与唯一
-one-shot acquisition/reobserve bindings。缺失、重复、悬空或成环的 closure 返回
-`declared_prerequisite_unresolved + BlockingTicketID`，且在 promotion/Run/provider/dispatch/effect 前停止。HTTP/Application
-不得查询 live catalog 代替该静态合同，也不得接受 caller 提供的 acquisition action。
+candidate 还必须封存 exact normalized typed Profile/policy snapshot、`RuntimeProfileContractsHash`、required owner-fact bindings
+与唯一 one-shot acquisition/reobserve bindings。每个 Profile-required acceptance/deliverable source 缺 exact proof declaration、
+受支持 evidence kind 或 owner-receipt-capable operation 时，返回
+`definition_profile_contract_invalid + select_or_fix_template_profile + BlockingTicketID`；Profile-derived owner-fact closure
+缺失/重复/悬空/成环，或 candidate manifest 与 snapshot 派生值不一致时，返回
+`definition_profile_prerequisite_unresolved + select_or_fix_template_profile + BlockingTicketID`。两者都在
+promotion/Run/provider/dispatch/effect 前停止。candidate-owned relation/ref closure failure 仍使用
+`declared_prerequisite_unresolved + rewrite_definition_all_of`。HTTP/Application 不得查询 live catalog、使用 wildcard evidence、
+接受 caller 提供的 acquisition action，或仅凭 hash 代替该静态合同。
 
 必须区分两类 Definition clarification：
 

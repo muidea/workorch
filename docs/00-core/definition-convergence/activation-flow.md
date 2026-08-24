@@ -4,7 +4,7 @@ Status: normative
 
 Type: runtime-flow
 
-Last Verified: 2026-08-18
+Last Verified: 2026-08-24
 
 ## Purpose
 
@@ -16,8 +16,10 @@ drive。它绑定 SM-1、SM-2 与 SM-4，但不另立状态迁移。
 ```text
 fresh Start/Restart authoring submits DefinitionAdmissionCandidate
   -> Workspace owner normalizes and CAS-persists immutable candidate
-  -> workorchd pure admission compiler checks complete all-of semantics and typed owner-fact closure
-       invalid/ambiguous -> Decision owner blocking clarification ticket; no formal Definition or Run
+  -> Workspace pure admission compiler checks complete all-of semantics, exact Profile proof closure and typed owner-fact closure
+       Definition invalid/ambiguous -> Decision owner rewrite_definition_all_of blocking ticket
+       Profile proof/prerequisite invalid -> Decision owner select_or_fix_template_profile blocking ticket
+       either failure -> no formal Definition, Run, provider request or capability work
        admitted          -> Workspace owner promotes formal Definition + StartupInputContract
        corrected ticket  -> promotion remains pending until Decision resolution acknowledgement
   -> user explicitly submits fresh Start/Restart execution intent
@@ -48,7 +50,11 @@ A fresh bootstrap requires an admitted and activation-eligible startup input con
 - one Workspace and its resolved project workspace directory plus internal boundary;
 - exact Goal and DoD item set with stable definition revision/lineage and `StartupInputHash`;
 - exact Workspace Template snapshot and any independently bound Profile/policy snapshot;
-- exact normalized Profile contract hash plus every required owner fact's preexisting or unique acquisition/reobserve declaration;
+- candidate-bound exact normalized typed Profile contract snapshot plus the matching startup-input Profile hash; every required
+  Profile acceptance/deliverable CWI has an exact evidence requirement, nonempty supported evidence kinds and at least one typed
+  owner-receipt proof operation;
+- every Profile-required owner fact has a preexisting or unique acquisition/reobserve declaration, and the candidate manifest equals
+  the manifest independently derived from the exact Profile snapshot;
 - Workspace canonical provider selection and referenced Soul/Skill/MCP/Memory resources;
 - template/profile/capability/evidence policy declarations;
 - bounded convergence/recovery policy.
@@ -56,6 +62,10 @@ A fresh bootstrap requires an admitted and activation-eligible startup input con
 Missing, pending, cross-scoped or non-`all_of` definitions fail before Run creation. Definition identity/revision is sealed with the Run and must
 remain equal across bootstrap, facts, authority transaction and candidate. A caller cannot rebuild it from a projection or
 map during Resume.
+
+Profile wildcard evidence declarations remain policy for Definition-derived rows only; they cannot close an exact Profile-owned required
+CWI. A proof-incomplete Profile never reaches bootstrap compilation. The Runtime compiler repeats the Profile validation only as a
+fail-closed SM-2 input defense if an internal caller bypasses normal admission; it does not open a second ticket or become a state owner.
 
 ## Typed RuntimeBootstrap
 

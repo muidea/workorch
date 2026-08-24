@@ -44,7 +44,10 @@ func TestRuntimeActivationContextCloneAndEqualityPreserveTypedSelections(t *test
 				ID:                      "software-dev",
 				AcceptanceDimensions:    []RuntimeAcceptanceDimension{{ID: "runtime_entrypoint", Required: true}},
 				DeliverableExpectations: []RuntimeDeliverableExpectation{{ID: "version_control_snapshot", Required: true, EvidenceRole: "supplemental_evidence"}},
-				EvidenceRequirements:    []RuntimeProfileEvidenceRequirement{{ID: "version_control_snapshot", Scope: "deliverable", AcceptedStepKinds: []string{"git/write"}, AcceptedOperationVariants: []RuntimeOperationVariantRef{{Kind: "git/write", VariantID: "commit"}}}},
+				EvidenceRequirements: []RuntimeProfileEvidenceRequirement{
+					{ID: "runtime_entrypoint", Scope: "acceptanceDimension", RequiredEvidenceKinds: []string{EvidenceKindValidation}, AcceptedStepKinds: []string{RuntimeBlockKindManagedValidationSession}},
+					{ID: "version_control_snapshot", Scope: "deliverable", RequiredEvidenceKinds: []string{EvidenceKindStateChange}, AcceptedStepKinds: []string{"git/write"}, AcceptedOperationVariants: []RuntimeOperationVariantRef{{Kind: "git/write", VariantID: "commit"}}},
+				},
 			}},
 			TemplateStagePolicy: &RuntimeTemplateStagePolicy{SchemaVersion: RuntimeTemplateStagePolicySchemaCurrent, Stages: []RuntimeTemplateStage{{
 				ID: "execution", SoulBinding: "execution",
@@ -74,7 +77,7 @@ func TestRuntimeActivationContextCloneAndEqualityPreserveTypedSelections(t *test
 		t.Fatal("execution contract drift was not detected")
 	}
 	cloned = activation.Clone()
-	cloned.ExecutionContract.ProfileContracts[0].EvidenceRequirements[0].AcceptedOperationVariants[0].VariantID = "push"
+	cloned.ExecutionContract.ProfileContracts[0].EvidenceRequirements[1].AcceptedOperationVariants[0].VariantID = "push"
 	if SameRuntimeActivationContext(activation, cloned) {
 		t.Fatal("profile contract drift was not detected")
 	}

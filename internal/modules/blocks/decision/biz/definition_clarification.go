@@ -110,7 +110,7 @@ func (m *Biz) openWorkspaceDefinitionClarification(ctx context.Context, cmd deci
 	} else if !errors.Is(err, common.ErrNotFound) {
 		return decisionevents.OpenWorkspaceDefinitionClarificationRequestResult{}, err
 	}
-	seed := &decisionmodel.Ticket{ID: cmd.TicketID, WorkspaceID: cmd.WorkspaceID, Reason: cmd.ViolationCode, DecisionKind: "workspace_definition_clarification", Question: "Revise the Definition into explicit all-of semantics", FailureClass: "definition_admission", FailureSignature: cmd.CanonicalSignatureHash, AllowedRecoveryActions: []string{cmd.RequiredActionKind},
+	seed := &decisionmodel.Ticket{ID: cmd.TicketID, WorkspaceID: cmd.WorkspaceID, Reason: cmd.ViolationCode, DecisionKind: "workspace_definition_clarification", Question: workspaceDefinitionClarificationQuestion(cmd.RequiredActionKind), FailureClass: "definition_admission", FailureSignature: cmd.CanonicalSignatureHash, AllowedRecoveryActions: []string{cmd.RequiredActionKind},
 		DefinitionClarification: &decisionmodel.DefinitionClarificationBinding{Class: decisionmodel.DefinitionClarificationWorkspacePreSeal, OpenBindingHash: bindingHash, RequiredActionKind: cmd.RequiredActionKind, CandidateID: cmd.CandidateID, CandidateRevision: cmd.CandidateRevision, CandidateHash: cmd.CandidateHash, ViolationOrGapCode: cmd.ViolationCode, CanonicalSignatureVersion: cmd.CanonicalSignatureVersion, CanonicalSignature: cmd.CanonicalSignature, CanonicalSignatureHash: cmd.CanonicalSignatureHash, OffendingRefs: append([]string(nil), cmd.OffendingRefs...)}}
 	ticket, err := m.service.applyLifecycleInternalEvent(bound, nil, lifecycleInternalEvent{Kind: lifecycleInternalEventOpened, TicketID: seed.ID, Ticket: seed})
 	if err != nil {
@@ -120,6 +120,13 @@ func (m *Biz) openWorkspaceDefinitionClarification(ctx context.Context, cmd deci
 		return decisionevents.OpenWorkspaceDefinitionClarificationRequestResult{}, err
 	}
 	return decisionevents.OpenWorkspaceDefinitionClarificationRequestResult{TicketID: cmd.TicketID, WorkspaceID: cmd.WorkspaceID, CandidateID: cmd.CandidateID, CandidateRevision: cmd.CandidateRevision, Disposition: decisionevents.DefinitionClarificationCreated, ClarificationRequestBindingHash: bindingHash}, nil
+}
+
+func workspaceDefinitionClarificationQuestion(requiredAction string) string {
+	if requiredAction == decisionevents.DefinitionClarificationActionFixTemplateProfile {
+		return "Select or fix the Workspace Template/Profile proof contract"
+	}
+	return "Revise the Definition into explicit all-of semantics"
 }
 
 func (m *Biz) openRuntimeDefinitionClarification(ctx context.Context, cmd decisionevents.OpenRuntimeDefinitionClarificationRequestCommand) (decisionevents.OpenRuntimeDefinitionClarificationRequestResult, error) {

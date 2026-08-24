@@ -52,19 +52,29 @@ Last Verified: 2026-08-24
 - workspace activation 使用 cumulative effective Goal/DoD 与 profile capability policy 构造 typed `RuntimeBootstrap`，并将它封装进 workspace-scoped restart intent；Workspace owner 校验 definition/scope 后再把 typed intent 交给 Run owner，Application 不直接发送 Run create command。
 - RuntimeBootstrap 编译前，application 先把 exact Goal、DoD、Template snapshot 与 resolved workspace directory 组装为
   Workspace-owned immutable `DefinitionAdmissionCandidate`。Workspace owner 的 pure compiler 不调用 LLM/capability，只接受完整 `all_of`；
-  candidate 同步封存 required owner-fact binding、唯一 one-shot acquisition/reobserve closure 及 Profile contract hash；
-  `one_of/any_of/quorum/threshold/first_success`、缺失/重复/成环的 owner-fact closure 或其他 unresolved declared prerequisite
-  通过 Decision owner 专用 typed ticket
-  fail-closed。submit result 的 typed admission outcome 由 Workspace owner 生成；Application 只据此建票或提交
+  candidate 同步封存完整 normalized typed Profile contract snapshot/hash、required owner-fact binding 及唯一 one-shot
+  acquisition/reobserve closure；Application 使用 Workspace owner 的 pure manifest helper 组装输入，但 Workspace compiler 会从
+  exact Profile snapshot 独立派生并逐项比较，Application 无 admission outcome 或 manifest authority；
+  `one_of/any_of/quorum/threshold/first_success` 或其他 candidate-owned unresolved relation 使用
+  `rewrite_definition_all_of` ticket；Profile proof closure 返回 `definition_profile_contract_invalid`，Profile-derived owner-fact
+  closure/manifest mismatch 返回 `definition_profile_prerequisite_unresolved`，两者使用 `select_or_fix_template_profile` ticket。
+  所有分支都通过 Decision owner 专用 typed ticket fail-closed。submit result 的 typed admission outcome 由 Workspace owner
+  生成；Application 只据此建票或提交
   identity-only promotion，不能向 Workspace 传入自算 outcome。新 invalid revision（包括既有 eligible revision 之后的 authoring attempt）使用 reconcile-candidate；新 admitted revision严格执行 Workspace promotion(pending) →
   Decision resolution → Workspace acknowledgement(eligible)，之后仍需用户显式 Restart。
 - activation 可以把 profile 显式声明的 `targetSelectorOwnerRef + targetSelectorSubjectRef` 封存为 File target-selection scope。空 workspace 的 scope 只表示该 profile 已授权 File owner 接受一个后续的具体 workspace-relative 创建目标；它不从 Goal/DoD 或目录名猜文件路径，且不绕过 File owner 的 operation admissibility/feasibility。
 - activation 将每个 DoD item 标记为需要 typed assessment，并按 profile contract 的 required acceptance dimension/deliverable expectation 追加稳定 focus；primary state-change 优先于 supplemental evidence，同一 `scope + id` 只生成一个 baseline item。
-- activation 可以把 profile 的 `RuntimeOwnerFactRequirement` 编译进 immutable DefinitionFocus；例如 software-dev
-  `validation_preparation` 要求 `blocks/shell` 当前发布 selectable `validation/managed_session` surface。Workorchd 只做
-  typed parsing、normalization、pre-seal closure 验证与 bootstrap propagation，不读取 capability repository/catalog、不判断
-  事实是否满足，也不触发 CWI/semantic state transition。默认 software profile 封存一次 `blocks/file file/write`
-  acquisition 后由 `blocks/shell` reobserve 的 typed 合同；SM-2 只能消费该合同，不能在 kernel 中硬编码 Go 或测试文件。
+- 每个 Profile-required acceptance/deliverable focus 在 pre-seal admission 时必须已有 exact `scope + id` proof declaration、非空
+  `requiredEvidenceKinds` 和至少一个可返回对应 typed owner receipt proof 的 accepted operation。缺失时返回
+  `definition_profile_contract_invalid + select_or_fix_template_profile`，不得生成 assessment-only focus；Runtime focus compiler
+  只保留同一 pure validator 作为绕过正常 admission 时的 fail-closed 防线。
+- activation 可以把 profile 的 `RuntimeOwnerFactRequirement` 编译进 immutable DefinitionFocus。默认 software-dev Profile
+  只生成 `source_change`、每个 DoD validation、`validation_report` 与 `version_control_snapshot` 这组可证明 CWI；
+  `validation_preparation` 是 DoD validation requirement 的 owner-fact prerequisite，不是独立 terminal CWI，`coverage_map` 与
+  generic `user_deliverable` 是 Result/投影可派生材料，不是无条件 required CWI。Workorchd 只做 typed parsing、normalization、
+  pre-seal closure 验证与 bootstrap propagation，不读取 capability repository/catalog、不判断事实是否满足，也不触发
+  CWI/semantic state transition。该 Profile 在 DoD proof 上封存一次 `blocks/file file/write` acquisition 后由 `blocks/shell`
+  reobserve selectable `validation/managed_session` 的 typed 合同；SM-2 只能消费该合同，不能在 kernel 中硬编码 Go 或测试文件。
 - RuntimeBootstrap 的 typed activation context 直接保存 dialog language、默认及 stage Soul 内容快照、Skill、MCP server/capability 选择、Memory、evidence policy，以及 state-change、capability-usage、typed validation、profile acceptance/deliverable/evidence、acceptance-slice、template stage policy execution contract。Skill 明确区分 WorkOrch Registry 与外部 SkillHub Catalog provenance，并在进入 Run bootstrap 前封存最多 5 项、单项 instruction 8 KiB、instruction 总计 24 KiB、metadata 总计 16 KiB 的 C3 byte budget；只有 instruction 可做确定性 UTF-8 裁剪，来源身份与原始长度随 snapshot 保存。Memory 同时封存 bounded candidate/selected/excluded、quota、score/hit 与 byte/token budget provenance；这些 provenance 只解释 context selection，不参与 SM-2 credit。application 将系统 repair limit 和 matched validation retry limit 封存进新 Run convergence policy，Orchestrator 不读取 template map。
 - acceptance compiler 对 focus 总数执行中立上限门禁。software-dev profile 的 `direct_validation` 分组每个 slice 最多 4 个 work item，全部 focus 最多 64 个；slice 只约束 presentation/candidate context，每个 CWI 仍生成独立 focus，不能据此声称减少 assessment 循环。
 - RuntimeBootstrap 的 typed definition context 保存 definition change impact，包括累积 Goal/DoD identity、原位修订记录、pre-execution assessment 要求与中立 strategy requirements；该快照直接进入 LLM C1。
@@ -117,7 +127,9 @@ Last Verified: 2026-08-24
 - 跨组件 command/data/result 必须使用具体类型，不得引入 Envelope、通用 map payload、JSON 类型桥、reflect 或双 Hub 兼容层。
 - repository builder、owner module fixture 和 repository 直写只能存在于 `biz/testkit` 或测试文件。
 - application 可以定义 profile 到 focus/capability/prerequisite 的映射，但不得把该领域映射下沉到 kernel reducer。
-- 没有显式 executable evidence requirement 的 supplemental deliverable 只能生成 assessment-only focus；不得为了关闭 coverage 制造报告文件或泛化 validation。声明 accepted step kind/operation 的 profile item 必须同步生成对应 capability prerequisite。
+- required acceptance/deliverable 没有 exact executable evidence requirement 时必须在 pre-seal admission 阻塞；只有明确
+  `required=false` 的 supplemental display material 才能保持非终态派生信息。不得为了关闭 coverage 制造报告文件或泛化
+  validation；声明 accepted step kind/operation 的 profile item 必须同步生成对应 capability prerequisite。
 - 历史主链对象只保留为只读审计；application 不得为其取消、重派发、重建 continuation 或新增维护命令。
 - application 不订阅 Decision/Approval resolved notification 来恢复 Run，不维护 governance pending、attempt、recovery scan 或 application replan 分支。
 - application event、HTTP/client、backend port、CLI/TUI 和 Web surface 已全部删除 `executionContextPatch`；历史上下文 patch 不得作为 activation、恢复 authority、兼容 DTO 或跨组件 payload。
@@ -143,6 +155,8 @@ Last Verified: 2026-08-24
 - [x] 七组 `ApplicationPorts` 的每个缺失 port 都会在 transport 启动前 fail-closed。
 - [x] HTTP handler 经 workspace-scoped Workorchd lane 等待 Workspace owner 同步 admission；成功前零 `queued` 投影，owner 失败在当前请求返回；同 workspace 并发结果不能反序提交，重复 request 每次交由 owner 幂等裁决且不改写既有 immutable observation。
 - [x] 大 DoD 的稳定语义排序、slice 分组、每 CWI 独立 focus 以及 focus 总数上限门禁。
+- [x] Profile-required source 的 exact proof closure、snapshot/hash 与 derived owner-fact manifest 防漂移门禁；默认 software-dev
+  graph 不再为 preparation/coverage-map/generic-deliverable 创建不可证明 terminal CWI。
 - [x] projection lag/high-watermark reconciliation、显式 rebuild、重启 generation 与“不得向 owner 回写修复”。
 - [x] projection lifecycle 合法/禁止迁移、stopped late-event noop、failed 经成功 owner mutation/显式 rebuild 恢复与
   未知 state/event 拒绝。

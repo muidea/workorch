@@ -17,6 +17,12 @@ candidate 还封存 required owner-fact binding 与唯一 acquisition/reobserve 
 不读取 capability catalog 或选择运行期动作。`CandidateHash` 覆盖 acquisition operation variant、operation target policy、
 operation selector 与 Definition target-selection scope；owner ingress 不替 caller 重新计算 hash。
 
+candidate 同时封存完整 normalized typed `RuntimeProfileContracts` snapshot，而不只保存 hash。pure compiler 从该 snapshot
+独立派生 owner-fact/convergence manifest，并要求与 candidate bindings 逐项相等；每个 Profile-required acceptance/deliverable
+CWI 还必须有 exact `scope + id` evidence requirement、非空受支持 evidence kinds，以及至少一个能返回对应 typed owner receipt
+proof 的 accepted operation。wildcard policy 不能替代 exact Profile-owned CWI proof，也不能把无证明交付项降级为
+assessment-only Runtime focus。
+
 pure compiler 位于 Workspace owner package，只做 immutable candidate 的静态计算。submit owner-private event 在同一 CAS
 路径生成并返回 exact `DefinitionAdmissionResult`；promotion command 不接收 caller 计算的 admission outcome，promotion
 owner-private event 必须重新编译 repository 中的 current exact candidate，且只允许 `admitted_all_of`。Application 对同一
@@ -87,11 +93,16 @@ pure helper 的 read-side 调用只是防御校验，不产生或迁移 admissio
 - Start/Restart 在任何 Run-owner command 前必须从 `WorkspaceActivationAdmission` 精确定位唯一 immutable candidate，并验证
   `candidate -> startup input -> admission` 的完整 current-shape 绑定。缺 candidate、重复 identity、hash 漂移、旧 schema/compiler
   或不再满足 `admitted_all_of` 的 closure 都直接 conflict；不得重封存、补字段、创建替代 candidate 或生成兼容 admission outcome。
-- Start/Restart 必须逐字段匹配 promoted `RuntimeProfileContractsHash`；required owner fact 缺少 preexisting 声明或 exact
-  one-shot acquisition/reobserve closure 时，pure admission 在 promotion 前返回 `declared_prerequisite_unresolved`。
-  Workspace 不得用 live owner 事实、LLM 文本或默认动作修补 candidate。
+- Start/Restart 必须逐字段匹配 promoted `RuntimeProfileContractsHash` 与 candidate 中的 exact typed Profile snapshot。
+  Profile-required CWI proof 不闭包时，pure admission 在 promotion 前返回 `definition_profile_contract_invalid`；Profile-derived
+  owner fact 缺少 preexisting 声明或 exact one-shot acquisition/reobserve closure，或 candidate manifest 与 snapshot 派生值不同时，
+  返回 `definition_profile_prerequisite_unresolved`。两者都要求 `select_or_fix_template_profile` blocking ticket；Workspace 不得用
+  live owner 事实、LLM 文本、wildcard evidence 或默认动作修补 candidate。candidate-owned relation/ref failure 仍使用
+  `declared_prerequisite_unresolved + rewrite_definition_all_of`。
 - 默认 WorkspaceTemplate 是可由用户编辑的首次启动种子；普通 ensure 不得覆盖内置 ID 上的当前对象。当前阶段不提供
   默认资源升级或数据迁移；需要新默认值时清理数据后重新初始化。
+- current candidate schema/compiler 严格要求完整 Profile snapshot（schema v4/compiler v4）；旧 shape 不迁移、不补写，必须
+  清理并按 current Template 重新创建 Workspace。
 - file repository 只接受 current object-shaped `ContextHints`；`null`、数组、标量、未知/退役字段与空持久化文件均 fail-closed。
 
 ## 已覆盖测试点
@@ -112,6 +123,8 @@ pure helper 的 read-side 调用只是防御校验，不产生或迁移 admissio
 - [x] 无效持久化数据不会生成 execution admission outcome，也不会修改 Workspace 元数据。
 - [x] Restart 对 admission-bound candidate 的缺失/重复/旧 schema/hash 与 acquisition selector 漂移严格拒绝，零 Run command；
   current exact candidate 可正常进入 Run owner。
+- [x] Profile snapshot/hash 漂移、required CWI 缺 exact proof/evidence kind/owner receipt operation、重复 Profile source，以及
+  snapshot-derived owner-fact manifest 缺失/附加/漂移均在 promotion 前 fail-closed，并映射到可执行的 Template/Profile 修订动作。
 - [x] 普通/治理/冲突 Run notification 与 `fresh_activation_required` 均不能释放 active slot；只有 matching terminal delivery 可释放。
 - [x] Template command、repository DTO、EventHub DTO 与 list mapping 对 slice/map/nested payload 的完整深拷贝。
 - [x] `ContextHints:null`、非对象 payload、未知/退役字段与空文件严格拒绝。

@@ -123,6 +123,123 @@ type RuntimeCoverageDependency struct {
 	TriggerEvidenceKinds []string
 }
 
+// RuntimeProfileProofClosureViolation identifies one profile-owned CWI source
+// that cannot be closed by the profile's exact, typed evidence declaration.
+// It is a pure contract finding: Workspace admission decides whether the
+// finding blocks promotion, while Runtime keeps a defensive validation gate.
+type RuntimeProfileProofClosureViolation struct {
+	ProfileID   string
+	SourceScope string
+	SourceID    string
+	Rule        string
+}
+
+func (v RuntimeProfileProofClosureViolation) SourceRef() string {
+	return strings.Join([]string{"profile", strings.TrimSpace(v.ProfileID), strings.TrimSpace(v.SourceScope), strings.TrimSpace(v.SourceID)}, "/")
+}
+
+// RuntimeProfileProofClosureViolations returns deterministic static findings
+// for every profile-required acceptance/deliverable CWI. A required source
+// must have one exact evidence declaration with at least one supported proof
+// operation for every required evidence kind. Wildcards remain quality policy
+// for Definition-derived CWIs and cannot stand in for an exact profile-owned
+// terminal proof declaration.
+func RuntimeProfileProofClosureViolations(values []RuntimeProfileContract) []RuntimeProfileProofClosureViolation {
+	profiles := NormalizeRuntimeProfileContracts(values)
+	violations := make([]RuntimeProfileProofClosureViolation, 0)
+	requiredSourceRefs := make(map[string][]string)
+	for _, profile := range profiles {
+		exactRequirements := make(map[string]RuntimeProfileEvidenceRequirement, len(profile.EvidenceRequirements))
+		for _, requirement := range profile.EvidenceRequirements {
+			exactRequirements[runtimeProfileSourceKey(requirement.Scope, requirement.ID)] = requirement
+		}
+		sources := make([]RuntimeProfileProofClosureViolation, 0, len(profile.AcceptanceDimensions)+len(profile.DeliverableExpectations))
+		for _, dimension := range profile.AcceptanceDimensions {
+			if dimension.Required {
+				sources = append(sources, RuntimeProfileProofClosureViolation{ProfileID: profile.ID, SourceScope: "acceptanceDimension", SourceID: dimension.ID})
+			}
+		}
+		for _, deliverable := range profile.DeliverableExpectations {
+			if deliverable.Required {
+				sources = append(sources, RuntimeProfileProofClosureViolation{ProfileID: profile.ID, SourceScope: "deliverable", SourceID: deliverable.ID})
+			}
+		}
+		for _, source := range sources {
+			key := runtimeProfileSourceKey(source.SourceScope, source.SourceID)
+			requiredSourceRefs[key] = append(requiredSourceRefs[key], source.SourceRef())
+			requirement, found := exactRequirements[key]
+			if !found {
+				source.Rule = "missing_exact_evidence_requirement"
+				violations = append(violations, source)
+				continue
+			}
+			if len(requirement.RequiredEvidenceKinds) == 0 {
+				source.Rule = "missing_required_evidence_kind"
+				violations = append(violations, source)
+				continue
+			}
+			for _, evidenceKind := range requirement.RequiredEvidenceKinds {
+				if evidenceKind != EvidenceKindStateChange && evidenceKind != EvidenceKindValidation {
+					invalid := source
+					invalid.Rule = "unsupported_required_evidence_kind"
+					violations = append(violations, invalid)
+					continue
+				}
+				if !runtimeProfileHasProofOperation(requirement.AcceptedStepKinds, evidenceKind) {
+					invalid := source
+					invalid.Rule = "missing_owner_receipt_proof_operation"
+					violations = append(violations, invalid)
+				}
+			}
+		}
+	}
+	for key, refs := range requiredSourceRefs {
+		if len(refs) < 2 {
+			continue
+		}
+		parts := strings.SplitN(key, "|", 2)
+		for _, ref := range refs {
+			profileID := ""
+			segments := strings.Split(ref, "/")
+			if len(segments) > 1 {
+				profileID = segments[1]
+			}
+			violations = append(violations, RuntimeProfileProofClosureViolation{
+				ProfileID: profileID, SourceScope: parts[0], SourceID: parts[1], Rule: "duplicate_required_profile_source",
+			})
+		}
+	}
+	sort.Slice(violations, func(i, j int) bool {
+		left := violations[i].SourceRef() + "|" + violations[i].Rule
+		right := violations[j].SourceRef() + "|" + violations[j].Rule
+		return left < right
+	})
+	ret := violations[:0]
+	last := ""
+	for _, violation := range violations {
+		key := violation.SourceRef() + "|" + violation.Rule
+		if key == last {
+			continue
+		}
+		last = key
+		ret = append(ret, violation)
+	}
+	return nilIfEmpty(ret)
+}
+
+func runtimeProfileSourceKey(scope, id string) string {
+	return strings.TrimSpace(scope) + "|" + strings.TrimSpace(id)
+}
+
+func runtimeProfileHasProofOperation(kinds []string, evidenceKind string) bool {
+	for _, kind := range kinds {
+		if RuntimeOperationKindSupportsCoverageEvidence(kind, evidenceKind) {
+			return true
+		}
+	}
+	return false
+}
+
 func NormalizeRuntimeProfileContracts(values []RuntimeProfileContract) []RuntimeProfileContract {
 	byID := map[string]RuntimeProfileContract{}
 	for _, value := range values {
@@ -202,6 +319,19 @@ func ValidateRuntimeProfileContracts(values []RuntimeProfileContract) error {
 					return fmt.Errorf("runtime profile evidence requirement %q owner-fact acquisition %q is outside accepted operation kinds", item.ID, convergence.AcquisitionOperationKind)
 				}
 			}
+			for _, variant := range item.AcceptedOperationVariants {
+				if !runtimeProfileContainsOperationKind(item.AcceptedStepKinds, variant.Kind) {
+					return fmt.Errorf("runtime profile evidence requirement %q operation variant %q is outside accepted operation kinds", item.ID, variant.VariantID)
+				}
+			}
+			for _, evidenceKind := range item.RequiredEvidenceKinds {
+				if evidenceKind != EvidenceKindStateChange && evidenceKind != EvidenceKindValidation {
+					return fmt.Errorf("runtime profile evidence requirement %q has unsupported evidence kind %q", item.ID, evidenceKind)
+				}
+				if !runtimeProfileHasProofOperation(item.AcceptedStepKinds, evidenceKind) {
+					return fmt.Errorf("runtime profile evidence requirement %q has no owner receipt operation for evidence kind %q", item.ID, evidenceKind)
+				}
+			}
 		}
 		for _, dependency := range profile.CoverageDependencies {
 			if dependency.ID == "" || dependency.SourceScope == "" || dependency.SourceRequirementID == "" ||
@@ -220,6 +350,10 @@ func ValidateRuntimeProfileContracts(values []RuntimeProfileContract) error {
 				return fmt.Errorf("runtime bootstrap recipe %q: %w", recipe.ID, err)
 			}
 		}
+	}
+	if violations := RuntimeProfileProofClosureViolations(values); len(violations) > 0 {
+		first := violations[0]
+		return fmt.Errorf("runtime profile proof closure %q violates %s", first.SourceRef(), first.Rule)
 	}
 	return nil
 }

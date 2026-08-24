@@ -11,18 +11,20 @@ import (
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
-const DefinitionAdmissionCandidateSchemaVersionCurrent uint32 = 3
+const DefinitionAdmissionCandidateSchemaVersionCurrent uint32 = 4
 
-const DefinitionAdmissionCompilerVersionCurrent = "workorch-definition-admission-v3"
+const DefinitionAdmissionCompilerVersionCurrent = "workorch-definition-admission-v4"
 
 type DefinitionAdmissionDisposition string
 
 const (
-	DefinitionAdmissionAdmittedAllOf             DefinitionAdmissionDisposition = "admitted_all_of"
-	DefinitionAdmissionClarificationRequired     DefinitionAdmissionDisposition = "definition_clarification_required"
-	DefinitionAdmissionOneOfUnsupported          string                         = "definition_one_of_unsupported"
-	DefinitionAdmissionPrerequisiteUnresolved    string                         = "declared_prerequisite_unresolved"
-	DefinitionAdmissionTerminalPolicyUnsupported string                         = "definition_terminal_policy_unsupported"
+	DefinitionAdmissionAdmittedAllOf                 DefinitionAdmissionDisposition = "admitted_all_of"
+	DefinitionAdmissionClarificationRequired         DefinitionAdmissionDisposition = "definition_clarification_required"
+	DefinitionAdmissionOneOfUnsupported              string                         = "definition_one_of_unsupported"
+	DefinitionAdmissionPrerequisiteUnresolved        string                         = "declared_prerequisite_unresolved"
+	DefinitionAdmissionProfileContractInvalid        string                         = "definition_profile_contract_invalid"
+	DefinitionAdmissionProfilePrerequisiteUnresolved string                         = "definition_profile_prerequisite_unresolved"
+	DefinitionAdmissionTerminalPolicyUnsupported     string                         = "definition_terminal_policy_unsupported"
 )
 
 type DefinitionCandidateItem struct {
@@ -81,6 +83,7 @@ type DefinitionAdmissionCandidate struct {
 	DoDInputs                         []DefinitionCandidateItem
 	WorkspaceTemplateSnapshot         DefinitionTemplateSnapshot
 	AdmissionPolicyBindings           []DefinitionAdmissionPolicyBinding
+	RuntimeProfileContracts           []runtimecontract.RuntimeProfileContract
 	RequiredOwnerFactBindings         []DefinitionRequiredOwnerFactBinding
 	OwnerFactConvergenceBindings      []DefinitionOwnerFactConvergenceBinding
 	RuntimeProfileContractsHash       string
@@ -157,6 +160,7 @@ func (c DefinitionAdmissionCandidate) Normalized() DefinitionAdmissionCandidate 
 	c.WorkspaceTemplateSnapshot.Revision = strings.TrimSpace(c.WorkspaceTemplateSnapshot.Revision)
 	c.WorkspaceTemplateSnapshot.SnapshotHash = strings.TrimSpace(c.WorkspaceTemplateSnapshot.SnapshotHash)
 	c.AdmissionPolicyBindings = normalizeAdmissionPolicyBindings(c.AdmissionPolicyBindings)
+	c.RuntimeProfileContracts = runtimecontract.NormalizeRuntimeProfileContracts(c.RuntimeProfileContracts)
 	c.RequiredOwnerFactBindings = normalizeDefinitionRequiredOwnerFactBindings(c.RequiredOwnerFactBindings)
 	c.OwnerFactConvergenceBindings = normalizeDefinitionOwnerFactConvergenceBindings(c.OwnerFactConvergenceBindings)
 	c.RuntimeProfileContractsHash = strings.TrimSpace(c.RuntimeProfileContractsHash)
@@ -190,6 +194,9 @@ func (c DefinitionAdmissionCandidate) Validate() error {
 	}
 	if c.WorkspaceTemplateSnapshot.TemplateRef == "" || c.WorkspaceTemplateSnapshot.Revision == "" || c.WorkspaceTemplateSnapshot.SnapshotHash == "" || c.RuntimeProfileContractsHash == "" || c.ResolvedProjectWorkspaceDirectory == "" {
 		return fmt.Errorf("definition admission candidate requires template/profile snapshot and resolved directory")
+	}
+	if runtimecontract.StableRuntimeProfileContractsHash(c.RuntimeProfileContracts) != c.RuntimeProfileContractsHash {
+		return fmt.Errorf("definition admission candidate profile contract snapshot hash mismatch")
 	}
 	if c.AdmissionCompilerVersion != DefinitionAdmissionCompilerVersionCurrent {
 		return fmt.Errorf("definition admission candidate requires current compiler %q", DefinitionAdmissionCompilerVersionCurrent)
@@ -247,6 +254,7 @@ func (c DefinitionAdmissionCandidate) Clone() DefinitionAdmissionCandidate {
 	c = c.Normalized()
 	c.DoDInputs = append([]DefinitionCandidateItem(nil), c.DoDInputs...)
 	c.AdmissionPolicyBindings = append([]DefinitionAdmissionPolicyBinding(nil), c.AdmissionPolicyBindings...)
+	c.RuntimeProfileContracts = runtimecontract.NormalizeRuntimeProfileContracts(c.RuntimeProfileContracts)
 	c.RequiredOwnerFactBindings = append([]DefinitionRequiredOwnerFactBinding(nil), c.RequiredOwnerFactBindings...)
 	c.OwnerFactConvergenceBindings = append([]DefinitionOwnerFactConvergenceBinding(nil), c.OwnerFactConvergenceBindings...)
 	for idx := range c.OwnerFactConvergenceBindings {

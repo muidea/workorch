@@ -12,6 +12,7 @@ import (
 	"strings"
 
 	workspacemodel "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/models"
+	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
 var allOfRelationKinds = map[string]struct{}{
@@ -44,8 +45,21 @@ func Compile(candidate workspacemodel.DefinitionAdmissionCandidate) (workspacemo
 	if cycle := hardDependencyCycle(candidate.ProposedRelationInputs); len(cycle) > 0 {
 		return clarification(candidate, workspacemodel.DefinitionAdmissionPrerequisiteUnresolved, cycle, "hard_dependency_cycle"), nil
 	}
-	if unresolved := unresolvedOwnerFactConvergence(candidate); len(unresolved) > 0 {
-		return clarification(candidate, workspacemodel.DefinitionAdmissionPrerequisiteUnresolved, unresolved, "owner_fact_convergence_incomplete"), nil
+	profilePrerequisiteRefs := append(unresolvedOwnerFactConvergence(candidate), mismatchedProfileOwnerFactBindings(candidate)...)
+	if unresolved := normalizeStrings(profilePrerequisiteRefs); len(unresolved) > 0 {
+		return clarification(candidate, workspacemodel.DefinitionAdmissionProfilePrerequisiteUnresolved, unresolved, "profile_owner_fact_convergence_incomplete"), nil
+	}
+	if violations := runtimecontract.RuntimeProfileProofClosureViolations(candidate.RuntimeProfileContracts); len(violations) > 0 {
+		refs := make([]string, 0, len(violations))
+		rules := make([]string, 0, len(violations))
+		for _, violation := range violations {
+			refs = append(refs, violation.SourceRef())
+			rules = append(rules, violation.SourceRef()+"="+violation.Rule)
+		}
+		return clarification(candidate, workspacemodel.DefinitionAdmissionProfileContractInvalid, refs, "profile_proof_closure_incomplete:"+strings.Join(normalizeStrings(rules), ",")), nil
+	}
+	if err := runtimecontract.ValidateRuntimeProfileContracts(candidate.RuntimeProfileContracts); err != nil {
+		return clarification(candidate, workspacemodel.DefinitionAdmissionProfileContractInvalid, runtimeProfileRefs(candidate.RuntimeProfileContracts), "runtime_profile_contract_invalid"), nil
 	}
 	result := workspacemodel.DefinitionAdmissionResult{
 		WorkspaceID: candidate.WorkspaceID, CandidateID: candidate.CandidateID, CandidateRevision: candidate.CandidateRevision,
@@ -54,6 +68,108 @@ func Compile(candidate workspacemodel.DefinitionAdmissionCandidate) (workspacemo
 		CanonicalAdmittedInputHash: stableHash("admitted_all_of", candidate.CandidateHash, candidate.AdmissionCompilerVersion),
 	}.WithHash()
 	return result, result.ValidateFor(candidate)
+}
+
+// CompileProfileOwnerFactBindings derives the exact pre-seal manifest from a
+// normalized Profile snapshot. Application may use this pure helper to author
+// a candidate, while Workspace Compile independently derives and compares the
+// same manifest before selecting an owner-local admission transition.
+func CompileProfileOwnerFactBindings(profiles []runtimecontract.RuntimeProfileContract) ([]workspacemodel.DefinitionRequiredOwnerFactBinding, []workspacemodel.DefinitionOwnerFactConvergenceBinding) {
+	required := make([]workspacemodel.DefinitionRequiredOwnerFactBinding, 0)
+	convergences := make([]workspacemodel.DefinitionOwnerFactConvergenceBinding, 0)
+	for _, profile := range runtimecontract.NormalizeRuntimeProfileContracts(profiles) {
+		for _, evidence := range profile.EvidenceRequirements {
+			sourceByRequirement := make(map[string]string, len(evidence.RequiredOwnerFacts))
+			for _, fact := range evidence.RequiredOwnerFacts {
+				sourceRef := definitionOwnerFactSourceRef(profile.ID, evidence.Scope, evidence.ID, fact)
+				required = append(required, workspacemodel.DefinitionRequiredOwnerFactBinding{SourceRef: sourceRef, Requirement: fact})
+				sourceByRequirement[runtimecontract.RuntimeOwnerFactRequirementRef(fact)] = sourceRef
+			}
+			for _, convergence := range evidence.OwnerFactConvergences {
+				sourceRef := definitionOwnerFactSourceRef(profile.ID, evidence.Scope, evidence.ID, convergence.Requirement)
+				convergence = convergence.Normalized()
+				for idx, dependency := range convergence.DependsOnRequirementRefs {
+					if mapped := sourceByRequirement[dependency]; mapped != "" {
+						convergence.DependsOnRequirementRefs[idx] = mapped
+					}
+				}
+				convergences = append(convergences, workspacemodel.DefinitionOwnerFactConvergenceBinding{SourceRef: sourceRef, Convergence: convergence})
+			}
+		}
+	}
+	sort.Slice(required, func(i, j int) bool {
+		return definitionRequiredOwnerFactKey(required[i]) < definitionRequiredOwnerFactKey(required[j])
+	})
+	sort.Slice(convergences, func(i, j int) bool {
+		return definitionOwnerFactConvergenceKey(convergences[i]) < definitionOwnerFactConvergenceKey(convergences[j])
+	})
+	return required, convergences
+}
+
+func mismatchedProfileOwnerFactBindings(candidate workspacemodel.DefinitionAdmissionCandidate) []string {
+	expectedRequired, expectedConvergences := CompileProfileOwnerFactBindings(candidate.RuntimeProfileContracts)
+	refs := make([]string, 0)
+	requiredCounts := make(map[string]int, len(candidate.RequiredOwnerFactBindings))
+	for _, binding := range candidate.RequiredOwnerFactBindings {
+		requiredCounts[definitionRequiredOwnerFactKey(binding)]++
+	}
+	expectedRequiredKeys := make(map[string]struct{}, len(expectedRequired))
+	for _, binding := range expectedRequired {
+		key := definitionRequiredOwnerFactKey(binding)
+		expectedRequiredKeys[key] = struct{}{}
+		if requiredCounts[key] != 1 {
+			refs = append(refs, binding.SourceRef)
+		}
+	}
+	for _, binding := range candidate.RequiredOwnerFactBindings {
+		if _, expected := expectedRequiredKeys[definitionRequiredOwnerFactKey(binding)]; !expected {
+			refs = append(refs, binding.SourceRef)
+		}
+	}
+
+	actualConvergences := make(map[string][]runtimecontract.RuntimeOwnerFactConvergence, len(candidate.OwnerFactConvergenceBindings))
+	for _, binding := range candidate.OwnerFactConvergenceBindings {
+		key := definitionOwnerFactConvergenceKey(binding)
+		actualConvergences[key] = append(actualConvergences[key], binding.Convergence)
+	}
+	expectedConvergenceKeys := make(map[string]struct{}, len(expectedConvergences))
+	for _, binding := range expectedConvergences {
+		key := definitionOwnerFactConvergenceKey(binding)
+		expectedConvergenceKeys[key] = struct{}{}
+		actual := actualConvergences[key]
+		if len(actual) != 1 || !runtimecontract.SameRuntimeOwnerFactConvergences(actual, []runtimecontract.RuntimeOwnerFactConvergence{binding.Convergence}) {
+			refs = append(refs, binding.SourceRef)
+		}
+	}
+	for _, binding := range candidate.OwnerFactConvergenceBindings {
+		if _, expected := expectedConvergenceKeys[definitionOwnerFactConvergenceKey(binding)]; !expected {
+			refs = append(refs, binding.SourceRef)
+		}
+	}
+	return normalizeStrings(refs)
+}
+
+func definitionRequiredOwnerFactKey(binding workspacemodel.DefinitionRequiredOwnerFactBinding) string {
+	value := binding.Requirement.Normalized()
+	return definitionOwnerFactBindingKey(binding.SourceRef, value.OwnerModuleID, string(value.FactKind), value.OperationKind)
+}
+
+func definitionOwnerFactConvergenceKey(binding workspacemodel.DefinitionOwnerFactConvergenceBinding) string {
+	value := binding.Convergence.Normalized().Requirement
+	return definitionOwnerFactBindingKey(binding.SourceRef, value.OwnerModuleID, string(value.FactKind), value.OperationKind)
+}
+
+func definitionOwnerFactSourceRef(profileID, scope, requirementID string, fact runtimecontract.RuntimeOwnerFactRequirement) string {
+	fact = fact.Normalized()
+	return strings.Join([]string{"profile", strings.TrimSpace(profileID), strings.TrimSpace(scope), strings.TrimSpace(requirementID), fact.OwnerModuleID, string(fact.FactKind), fact.OperationKind}, "/")
+}
+
+func runtimeProfileRefs(profiles []runtimecontract.RuntimeProfileContract) []string {
+	refs := make([]string, 0, len(profiles))
+	for _, profile := range runtimecontract.NormalizeRuntimeProfileContracts(profiles) {
+		refs = append(refs, "profile/"+profile.ID)
+	}
+	return normalizeStrings(refs)
 }
 
 func unresolvedOwnerFactConvergence(candidate workspacemodel.DefinitionAdmissionCandidate) []string {

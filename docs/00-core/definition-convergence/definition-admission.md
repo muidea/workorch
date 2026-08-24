@@ -44,6 +44,7 @@ DefinitionAdmissionCandidate
   DoDInputs[]                   CandidateItemRef + exact proposed item + source identity
   WorkspaceTemplateSnapshot    ref + revision + exact snapshot hash
   AdmissionPolicyBindings[]    exact Profile/policy ref + revision + snapshot hash
+  RuntimeProfileContracts[]    exact normalized typed Profile proof snapshot
   RequiredOwnerFactBindings[]  exact Profile requirement ref + owner/fact/operation
   OwnerFactConvergenceBindings[] exact missing trigger + one acquisition + reobserve contract
   RuntimeProfileContractsHash  hash of the exact normalized Profile contracts
@@ -74,15 +75,29 @@ DefinitionAdmissionCandidate
   lineage，不授予 candidate 任何 canonical/restart authority，且 promotion 必须验证二者仍属于同一 Workspace sealed input；
 - `WorkspaceTemplateSnapshot` 必须传递性封存其选择的 exact Profile/policy snapshot；若 Profile 是独立资源，则使用
   `AdmissionPolicyBindings` 显式携带 ref/revision/hash。不得根据 candidate 提交后的 live Profile 重新解释同一 candidate；
+- `RuntimeProfileContracts` 是 admission compiler 的完整 typed 输入，不是仅供展示的副本。其规范化 hash 必须与
+  `RuntimeProfileContractsHash` 精确一致；Workspace pure compiler 必须从该 snapshot 独立派生 owner-fact/convergence
+  manifest，并逐项匹配 candidate 中的 bindings，Application 不能只提交一个 hash 或自算 manifest 取代 owner 校验；
+- Profile 中每个 `required=true` 的 acceptance dimension/deliverable expectation 都会形成 required CWI，因此必须存在同一
+  `scope + id` 的 exact evidence requirement，显式声明非空 `requiredEvidenceKinds`，且每种 evidence kind 至少有一个
+  accepted operation 能返回对应 typed owner receipt proof。`dodItem:*`、`goalCoverage:*` 等 wildcard quality policy 不能
+  替代 Profile-owned required CWI 的 exact proof declaration；相同 `scope + id` 也不能被多个 Profile 重复声明；
+- 上述 Profile proof closure 缺失、evidence kind 不受支持或 operation 无 owner receipt proof 时返回
+  `definition_profile_contract_invalid`；Profile snapshot 与派生 owner-fact/convergence manifest 不一致、closure 缺失、重复、
+  悬空或成环时返回 `definition_profile_prerequisite_unresolved`。两者都必须在 promotion 前打开
+  `select_or_fix_template_profile` blocking ticket，且零 Run/provider/capability work；candidate-owned relation/ref failure 仍使用
+  `declared_prerequisite_unresolved + rewrite_definition_all_of`，不得混为同一修订入口；
 - 每个 required owner fact 必须在 candidate 中恰好绑定一次。它要么声明为 activation 前必须已存在，要么封存唯一
   `owner_fact_missing` acquisition：接收 owner、operation kind/variant、target policy、capability operation selector、
   独立的 Definition target selector identity、reobserve owner/fact 与
-  `MaxAcquisitionAttempts=1`。缺失、重复、多 provider、依赖悬空或依赖环统一返回
-  `declared_prerequisite_unresolved`；两套 selector 不得缺省、互相复制或作为 alias。compiler 不读取 live catalog，也不猜测 File/Shell 领域动作；
+  `MaxAcquisitionAttempts=1`。Profile-derived binding 的缺失、重复、多 provider、依赖悬空或依赖环统一返回
+  `definition_profile_prerequisite_unresolved`；两套 selector 不得缺省、互相复制或作为 alias。compiler 不读取 live catalog，
+  也不猜测 File/Shell 领域动作；
 - `RuntimeProfileContractsHash` 同时进入 candidate 与 promoted startup input。Start/Restart 编译出的 normalized
   Profile contract hash 必须与 Workspace owner 封存值精确一致；Profile 后续漂移不能改变已封存 candidate/Run；
 - 同一 candidate 内容 permutation 后必须得到同一 `CandidateHash`；candidate identity/hash 的 schema version、compiler version、
-  canonical bytes、base input identity、exact text、Template/Profile policy snapshot 和 resolved directory 均进入 admission/ticket
+  canonical bytes、base input identity、exact text、Template/Profile policy snapshot hash（完整 typed snapshot 必须可重算匹配）
+  和 resolved directory 均进入 admission/ticket
   stale 与 duplicate 校验；
 - Workspace owner 的 pure compiler 只能返回绑定 exact `CandidateID + CandidateRevision + CandidateHash` 的 typed outcome。
   Workorchd 只消费 submit result：非 `admitted_all_of` 必须按 owner result 打开/协调 typed clarification ticket；只有

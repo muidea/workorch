@@ -183,7 +183,7 @@ func definitionAdmissionCandidateForIdentity(workspace *workspacemodel.Workspace
 		return workspacemodel.DefinitionAdmissionCandidate{}, common.ErrInvalidArgument
 	}
 	templateHash := workspaceTemplateSnapshotHash(template)
-	policyBindings, requiredOwnerFacts, ownerFactConvergences, profileContractsHash, err := definitionAdmissionProfileBindings(workspace, template)
+	policyBindings, profileContracts, requiredOwnerFacts, ownerFactConvergences, profileContractsHash, err := definitionAdmissionProfileBindings(workspace, template)
 	if err != nil {
 		return workspacemodel.DefinitionAdmissionCandidate{}, err
 	}
@@ -197,27 +197,25 @@ func definitionAdmissionCandidateForIdentity(workspace *workspacemodel.Workspace
 	candidate := workspacemodel.DefinitionAdmissionCandidate{SchemaVersion: workspacemodel.DefinitionAdmissionCandidateSchemaVersionCurrent, WorkspaceID: workspace.ID, CandidateID: strings.TrimSpace(candidateID), CandidateRevision: revision, BaseDefinitionRevision: baseRevision, BaseStartupInputHash: baseHash,
 		GoalInput: workspacemodel.DefinitionCandidateItem{CandidateItemRef: "goal:" + string(goal.ID), Text: goal.Text, SourceIdentity: "goal:" + string(goal.ID) + "@" + goal.DefinitionRevision}, DoDInputs: dodInputs,
 		WorkspaceTemplateSnapshot: workspacemodel.DefinitionTemplateSnapshot{TemplateRef: template.ID, Revision: "template:" + templateHash, SnapshotHash: templateHash}, AdmissionCompilerVersion: workspacemodel.DefinitionAdmissionCompilerVersionCurrent, ResolvedProjectWorkspaceDirectory: workspace.DeliverableDirectory,
-		AdmissionPolicyBindings: policyBindings, RequiredOwnerFactBindings: requiredOwnerFacts, OwnerFactConvergenceBindings: ownerFactConvergences,
+		AdmissionPolicyBindings: policyBindings, RuntimeProfileContracts: profileContracts, RequiredOwnerFactBindings: requiredOwnerFacts, OwnerFactConvergenceBindings: ownerFactConvergences,
 		RuntimeProfileContractsHash: profileContractsHash,
 		ProposedRelationInputs:      []workspacemodel.DefinitionProposedRelationInput{{RelationRef: "terminal-all-of", RelationKind: "all_of", SourceItemRefs: dodRefs, TargetItemRefs: []string{"goal:" + string(goal.ID)}}}}
 	return candidate.WithHash(), nil
 }
 
-func definitionAdmissionProfileBindings(workspace *workspacemodel.Workspace, template *workspacemodel.WorkspaceTemplate) ([]workspacemodel.DefinitionAdmissionPolicyBinding, []workspacemodel.DefinitionRequiredOwnerFactBinding, []workspacemodel.DefinitionOwnerFactConvergenceBinding, string, error) {
+func definitionAdmissionProfileBindings(workspace *workspacemodel.Workspace, template *workspacemodel.WorkspaceTemplate) ([]workspacemodel.DefinitionAdmissionPolicyBinding, []runtimecontract.RuntimeProfileContract, []workspacemodel.DefinitionRequiredOwnerFactBinding, []workspacemodel.DefinitionOwnerFactConvergenceBinding, string, error) {
 	if workspace == nil || template == nil {
-		return nil, nil, nil, "", common.ErrInvalidArgument
+		return nil, nil, nil, nil, "", common.ErrInvalidArgument
 	}
 	effective := activationcore.MergeTemplateWorkspaceContextHintsForExecutionContract(template.ContextHints.Map(), workspace.ContextHints.Map())
 	rawProfiles := runtimeMap(effective["profileContracts"])
 	contract := runtimeExecutionContract(map[string]any{"profileContracts": rawProfiles})
 	profiles := runtimecontract.NormalizeRuntimeProfileContracts(contract.ProfileContracts)
 	policies := make([]workspacemodel.DefinitionAdmissionPolicyBinding, 0, len(profiles))
-	required := make([]workspacemodel.DefinitionRequiredOwnerFactBinding, 0)
-	convergences := make([]workspacemodel.DefinitionOwnerFactConvergenceBinding, 0)
 	for _, profile := range profiles {
 		encoded, err := json.Marshal(rawProfiles[profile.ID])
 		if err != nil {
-			return nil, nil, nil, "", fmt.Errorf("%w: profile %q cannot be canonically sealed", common.ErrConflict, profile.ID)
+			return nil, nil, nil, nil, "", fmt.Errorf("%w: profile %q cannot be canonically sealed", common.ErrConflict, profile.ID)
 		}
 		h := sha256.New()
 		_, _ = fmt.Fprintf(h, "%08x%s%08x%s", len(profile.ID), profile.ID, len(encoded), encoded)
@@ -225,31 +223,9 @@ func definitionAdmissionProfileBindings(workspace *workspacemodel.Workspace, tem
 			PolicyRef: "profile:" + profile.ID, Revision: "runtime-profile-contract-v1",
 			SnapshotHash: "profile-snapshot-sha256:" + hex.EncodeToString(h.Sum(nil)),
 		})
-		for _, evidence := range profile.EvidenceRequirements {
-			sourceByRequirement := make(map[string]string, len(evidence.RequiredOwnerFacts))
-			for _, fact := range evidence.RequiredOwnerFacts {
-				sourceRef := definitionOwnerFactSourceRef(profile.ID, evidence.Scope, evidence.ID, fact)
-				required = append(required, workspacemodel.DefinitionRequiredOwnerFactBinding{SourceRef: sourceRef, Requirement: fact})
-				sourceByRequirement[runtimecontract.RuntimeOwnerFactRequirementRef(fact)] = sourceRef
-			}
-			for _, convergence := range evidence.OwnerFactConvergences {
-				sourceRef := definitionOwnerFactSourceRef(profile.ID, evidence.Scope, evidence.ID, convergence.Requirement)
-				convergence = convergence.Normalized()
-				for idx, dependency := range convergence.DependsOnRequirementRefs {
-					if mapped := sourceByRequirement[dependency]; mapped != "" {
-						convergence.DependsOnRequirementRefs[idx] = mapped
-					}
-				}
-				convergences = append(convergences, workspacemodel.DefinitionOwnerFactConvergenceBinding{SourceRef: sourceRef, Convergence: convergence})
-			}
-		}
 	}
-	return policies, required, convergences, runtimecontract.StableRuntimeProfileContractsHash(profiles), nil
-}
-
-func definitionOwnerFactSourceRef(profileID, scope, requirementID string, fact runtimecontract.RuntimeOwnerFactRequirement) string {
-	fact = fact.Normalized()
-	return strings.Join([]string{"profile", strings.TrimSpace(profileID), strings.TrimSpace(scope), strings.TrimSpace(requirementID), fact.OwnerModuleID, string(fact.FactKind), fact.OperationKind}, "/")
+	required, convergences := definitionadmission.CompileProfileOwnerFactBindings(profiles)
+	return policies, profiles, required, convergences, runtimecontract.StableRuntimeProfileContractsHash(profiles), nil
 }
 
 func latestPriorInvalidDefinitionCandidate(workspace *workspacemodel.Workspace, current workspacemodel.DefinitionAdmissionCandidate) (workspacemodel.DefinitionAdmissionCandidate, workspacemodel.DefinitionAdmissionResult, bool) {
@@ -383,8 +359,18 @@ func workspaceTemplateSnapshotHash(template *workspacemodel.WorkspaceTemplate) s
 }
 
 func workspaceClarificationCommand(candidate workspacemodel.DefinitionAdmissionCandidate, admission workspacemodel.DefinitionAdmissionResult) decisionevents.OpenWorkspaceDefinitionClarificationRequestCommand {
-	command := decisionevents.OpenWorkspaceDefinitionClarificationRequestCommand{SchemaVersion: decisionevents.DefinitionClarificationSchemaVersionCurrent, WorkspaceID: candidate.WorkspaceID, CandidateID: candidate.CandidateID, CandidateRevision: candidate.CandidateRevision, CandidateHash: candidate.CandidateHash, ViolationCode: admission.ViolationCode, OffendingRefs: append([]string(nil), admission.OffendingRefs...), CanonicalSignatureVersion: "workspace-definition-clarification-v1", CanonicalSignature: admission.CanonicalViolation, RequiredActionKind: decisionevents.DefinitionClarificationActionRewriteAllOf}
+	command := decisionevents.OpenWorkspaceDefinitionClarificationRequestCommand{SchemaVersion: decisionevents.DefinitionClarificationSchemaVersionCurrent, WorkspaceID: candidate.WorkspaceID, CandidateID: candidate.CandidateID, CandidateRevision: candidate.CandidateRevision, CandidateHash: candidate.CandidateHash, ViolationCode: admission.ViolationCode, OffendingRefs: append([]string(nil), admission.OffendingRefs...), CanonicalSignatureVersion: "workspace-definition-clarification-v1", CanonicalSignature: admission.CanonicalViolation, RequiredActionKind: workspaceDefinitionClarificationAction(admission.ViolationCode)}
 	command.CanonicalSignatureHash = decisionevents.CanonicalDefinitionClarificationSignatureHash("workspace-signature", command.CanonicalSignatureVersion, command.CanonicalSignature)
 	command.TicketID = decisionevents.StableWorkspaceDefinitionClarificationTicketID(command)
 	return command
+}
+
+func workspaceDefinitionClarificationAction(violationCode string) string {
+	switch strings.TrimSpace(violationCode) {
+	case workspacemodel.DefinitionAdmissionProfileContractInvalid,
+		workspacemodel.DefinitionAdmissionProfilePrerequisiteUnresolved:
+		return decisionevents.DefinitionClarificationActionFixTemplateProfile
+	default:
+		return decisionevents.DefinitionClarificationActionRewriteAllOf
+	}
 }

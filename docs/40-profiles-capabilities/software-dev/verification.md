@@ -17,6 +17,13 @@ and converges through the same neutral Runtime owner model. It must not make leg
 
 - `software-dev` template, six Soul bindings and full Soul bodies load through the correct owners;
 - Goal/DoD compile into bounded CWIs, evidence roles and typed profile/execution contracts;
+- the built-in terminal set is exactly `source_change`, each DoD validation, `validation_report` and
+  `version_control_snapshot`; validation preparation remains a DoD prerequisite, while coverage-map/generic-deliverable remain
+  derived Result material rather than independent CWIs;
+- every required Profile source has an exact same-scope/id evidence declaration, explicit supported evidence kind and a
+  proof-capable owner receipt operation; wildcard policy cannot substitute for an exact source;
+- Profile snapshot/hash or snapshot-derived owner-fact manifest drift fails pre-seal with the Template/Profile correction action
+  and creates no Run/provider/capability work;
 - software-dev strings do not appear in Orchestrator reducer branches;
 - current provider guidance uses current semantic-plan/candidate schemas.
 

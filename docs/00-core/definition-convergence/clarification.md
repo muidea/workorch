@@ -4,7 +4,7 @@ Status: normative
 
 Type: core-contract-part
 
-Last Verified: 2026-08-18
+Last Verified: 2026-08-24
 
 ## Scope
 
@@ -19,21 +19,25 @@ failure，不属于 canonical Workspace Definition 或 SM-2 Runtime governance�
 candidate compiler 返回 violation 后按以下顺序收口：
 
 1. pure compiler 返回 `definition_one_of_unsupported | declared_prerequisite_unresolved |
-   definition_clarification_required`；只报告显式 relation/ref/mapping，不能声称已理解任意自由文本；
+   definition_profile_contract_invalid | definition_profile_prerequisite_unresolved |
+   definition_clarification_required`；只报告显式 relation/ref/mapping/Profile proof contract，不能声称已理解任意自由文本；
 2. 在 promotion、创建 Workspace 对应 Run/Runtime aggregate 或发起 provider/capability work 前，通过同步 EventHub `Send` 向
    Decision owner 的 `pkg/events` 提交 concrete typed `OpenWorkspaceDefinitionClarificationRequestCommand`，并取得 concrete
    result；调用 context 必须已绑定 matching `WorkspaceID`；
 3. ticket scope 固定为 `WorkspaceID + CandidateID + CandidateRevision + CandidateHash`，不含尚不存在的
    `DefinitionRevision/StartupInputHash`，也不含伪造的
    `RunID/DispatchID/AuthorityTransaction`。Run-scoped runtime-definition-clarification ticket/command 不得复用；
-4. ticket 至少持久化 violation code、offending item/relation refs、canonical violation signature/hash、typed
-   `RequiredActionKind` 和原始 candidate identity/hash。candidate-owned relation 使用 `rewrite_definition_all_of`；来自独立
-   Template/Profile snapshot 的违规使用 `select_or_fix_template_profile`，不得向用户提供无法修改相应 owner 输入的动作；不得使用 `map[string]any`、自由文本 reason 或
+4. ticket 至少持久化 violation code、offending item/relation/Profile source refs、canonical violation signature/hash、typed
+   `RequiredActionKind` 和原始 candidate identity/hash。candidate-owned relation/ref 使用 `rewrite_definition_all_of`；
+   `definition_profile_contract_invalid` 与 `definition_profile_prerequisite_unresolved` 使用
+   `select_or_fix_template_profile`，其问题文本明确要求选择或修订 Workspace Template/Profile proof contract。不得向用户提供
+   无法修改相应 owner 输入的动作；不得使用 `map[string]any`、自由文本 reason 或
    UI payload 作为 admission authority，也不得只凭 hash equality 合并 canonical signature bytes 不同的 violation；
 5. ticket identity 由 `WorkspaceID + CandidateID + CandidateRevision + CandidateHash + violation code + canonical violation hash`
    确定性派生。同一无效 candidate 的重复 setup/admission 返回同一 `BlockingTicketID`，零重复写；
-6. required action 只能要求用户通过 Workspace owner command 提交新的 immutable candidate，将可替代分支改写为完整
-   all-of、唯一 provider 和明确 required refs。Decision owner 不读取 Workspace repository，也不替用户修改 candidate/Definition；
+6. required action 只能要求用户通过 Workspace owner command 提交新的 immutable candidate：Definition-owned 输入将可替代
+   分支改写为完整 all-of、唯一 provider 和明确 required refs；Profile-owned 输入则选择或修订 proof-complete
+   Template/Profile snapshot。Decision owner 不读取 Workspace repository，也不替用户修改 candidate/Definition/Profile；
 7. Workorchd 对新 candidate revision 重新执行同一 pure validation。新 candidate 通过 all-of admission 后，Workspace owner
    先原子 promotion，并将 `WorkspaceActivationAdmission` 封存为 `pending_clarification_resolution`；Workorchd 再通过 Decision owner-defined concrete
    `ResolveWorkspaceDefinitionClarificationByAdmissionCommand/Result` 提交 old/new candidate identity、admission-result hash 与

@@ -87,6 +87,9 @@ func compileRuntimeCoverage(goal *workspacemodel.Goal, dod *workspacemodel.DoD, 
 		return compiledCoverage{}, common.ErrInvalidArgument
 	}
 	activation = activation.Normalized()
+	if err := runtimecontract.ValidateRuntimeProfileContracts(activation.ExecutionContract.ProfileContracts); err != nil {
+		return compiledCoverage{}, fmt.Errorf("runtime profile proof closure: %w", err)
+	}
 	units, err := compileRuntimeCoverageWorkUnits(goal, dod, activation.ExecutionContract.ProfileContracts)
 	if err != nil {
 		return compiledCoverage{}, err

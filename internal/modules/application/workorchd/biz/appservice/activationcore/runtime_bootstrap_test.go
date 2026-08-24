@@ -131,7 +131,7 @@ func TestRuntimeBootstrapAcceptsDefinitionSeedWithoutPrecompiledProof(t *testing
 // coverage proof. File read receipts have no owner-executed recipe/check
 // observation, so activation must reject this profile before a Run, LLM call,
 // operation, or ticket can exist.
-func TestRuntimeBootstrapLeavesReadOnlyValidationProposalUnsealed(t *testing.T) {
+func TestRuntimeBootstrapRejectsReadOnlyValidationProfileBeforeRun(t *testing.T) {
 	activation := runtimecontract.RuntimeActivationContext{
 		ProviderSelection: runtimecontract.ProviderInferenceSelection{Target: runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "gpt-4o"}},
 		ExecutionContract: runtimecontract.RuntimeExecutionContract{
@@ -160,10 +160,9 @@ func TestRuntimeBootstrapLeavesReadOnlyValidationProposalUnsealed(t *testing.T) 
 		&workspacemodel.DoD{ID: "dod-1", WorkspaceID: "ws-1", Items: []string{"inspection is verified"}},
 		"definition-1", "startup-input-test", nil, activation,
 	)
-	if err != nil || bootstrap == nil || len(bootstrap.DefinitionFocuses) != 2 {
-		t.Fatalf("read-only semantic seed bootstrap=%+v err=%v", bootstrap, err)
+	if err == nil || bootstrap != nil || !strings.Contains(err.Error(), "has no owner receipt operation") {
+		t.Fatalf("read-only proof profile crossed activation gate bootstrap=%+v err=%v", bootstrap, err)
 	}
-	assertRuntimeBootstrapDefinitionFocuses(t, bootstrap)
 }
 
 func TestRuntimeBootstrapKeepsSharedValidationDeclarationAsNonAuthoritativeSeed(t *testing.T) {
@@ -558,19 +557,20 @@ func TestRuntimeBootstrapAppendsRequiredProfileFocusesWithTypedRequirements(t *t
 			AcceptanceDimensions: []runtimecontract.RuntimeAcceptanceDimension{{ID: "runtime_entrypoint", Required: true, Description: "entrypoint works"}},
 			DeliverableExpectations: []runtimecontract.RuntimeDeliverableExpectation{
 				{ID: "source_change", Required: true, EvidenceRole: "primary_state_change", Description: "workspace changed"},
-				{ID: "coverage_map", Required: true, EvidenceRole: "supplemental_evidence", Description: "coverage is mapped"},
+				{ID: "validation_report", Required: true, EvidenceRole: "supplemental_evidence", Description: "validation is recorded"},
 				{ID: "version_control_snapshot", Required: true, EvidenceRole: "supplemental_evidence", Description: "snapshot exists"},
 			},
 			EvidenceRequirements: []runtimecontract.RuntimeProfileEvidenceRequirement{
-				{ID: "runtime_entrypoint", Scope: "acceptanceDimension", AcceptedStepKinds: []string{"shell/command", runtimecontract.RuntimeBlockKindManagedValidationSession}, RequiredOwnerFacts: []runtimecontract.RuntimeOwnerFactRequirement{{
+				{ID: "runtime_entrypoint", Scope: "acceptanceDimension", RequiredEvidenceKinds: []string{runtimecontract.EvidenceKindValidation}, AcceptedStepKinds: []string{"shell/command", runtimecontract.RuntimeBlockKindManagedValidationSession}, RequiredOwnerFacts: []runtimecontract.RuntimeOwnerFactRequirement{{
 					OwnerModuleID: runtimecontract.RuntimeModuleShell, FactKind: runtimecontract.RuntimeOwnerFactSelectableValidationSurface,
 					OperationKind: runtimecontract.RuntimeBlockKindManagedValidationSession,
 				}}, OwnerFactConvergences: []runtimecontract.RuntimeOwnerFactConvergence{{
 					Requirement:        runtimecontract.RuntimeOwnerFactRequirement{OwnerModuleID: runtimecontract.RuntimeModuleShell, FactKind: runtimecontract.RuntimeOwnerFactSelectableValidationSurface, OperationKind: runtimecontract.RuntimeBlockKindManagedValidationSession},
 					RequirePreexisting: true,
 				}}},
-				{ID: "source_change", Scope: "deliverable", EvidenceRole: "primary_state_change", AcceptedStepKinds: []string{"patch/apply"}},
-				{ID: "version_control_snapshot", Scope: "deliverable", AcceptedStepKinds: []string{"git/write"}, AcceptedOperationVariants: []runtimecontract.RuntimeOperationVariantRef{{Kind: "git/write", VariantID: "commit"}}},
+				{ID: "source_change", Scope: "deliverable", EvidenceRole: "primary_state_change", RequiredEvidenceKinds: []string{runtimecontract.EvidenceKindStateChange}, AcceptedStepKinds: []string{"patch/apply"}},
+				{ID: "validation_report", Scope: "deliverable", RequiredEvidenceKinds: []string{runtimecontract.EvidenceKindValidation}, AcceptedStepKinds: []string{runtimecontract.RuntimeBlockKindManagedValidationSession}},
+				{ID: "version_control_snapshot", Scope: "deliverable", RequiredEvidenceKinds: []string{runtimecontract.EvidenceKindStateChange}, AcceptedStepKinds: []string{"git/write"}, AcceptedOperationVariants: []runtimecontract.RuntimeOperationVariantRef{{Kind: "git/write", VariantID: "commit"}}},
 			},
 		}},
 	}}
@@ -596,11 +596,11 @@ func TestRuntimeBootstrapAppendsRequiredProfileFocusesWithTypedRequirements(t *t
 	if err != nil || len(compiled.Focuses) != 5 {
 		t.Fatalf("compiled profile focuses=%+v err=%v", compiled.Focuses, err)
 	}
-	entrypoint, sourceChange, coverageMap, snapshot := compiled.Focuses[1], compiled.Focuses[2], compiled.Focuses[3], compiled.Focuses[4]
+	entrypoint, sourceChange, validationReport, snapshot := compiled.Focuses[1], compiled.Focuses[2], compiled.Focuses[3], compiled.Focuses[4]
 	if entrypoint.AssessmentScope != "acceptanceDimension" || len(entrypoint.RequiredEvidenceKinds) != 1 || entrypoint.RequiredEvidenceKinds[0] != runtimecontract.EvidenceKindValidation ||
 		len(entrypoint.RequiredOwnerFacts) != 1 || entrypoint.RequiredOwnerFacts[0] != (runtimecontract.RuntimeOwnerFactRequirement{OwnerModuleID: runtimecontract.RuntimeModuleShell, FactKind: runtimecontract.RuntimeOwnerFactSelectableValidationSurface, OperationKind: runtimecontract.RuntimeBlockKindManagedValidationSession}) ||
 		sourceChange.EvidenceRole != "primary_state_change" || sourceChange.RequiredEvidenceKinds[0] != runtimecontract.EvidenceKindStateChange ||
-		len(coverageMap.RequiredEvidenceKinds) != 1 || coverageMap.RequiredEvidenceKinds[0] != runtimecontract.EvidenceKindValidation || !coverageMap.RequireAssessment ||
+		len(validationReport.RequiredEvidenceKinds) != 1 || validationReport.RequiredEvidenceKinds[0] != runtimecontract.EvidenceKindValidation || !validationReport.RequireAssessment ||
 		len(snapshot.AcceptedOperationVariants) != 1 || snapshot.AcceptedOperationVariants[0] != (runtimecontract.RuntimeOperationVariantRef{Kind: "git/write", VariantID: "commit"}) || snapshot.RequiredEvidenceKinds[0] != runtimecontract.EvidenceKindStateChange {
 		t.Fatalf("typed profile focuses = %+v", compiled.Focuses)
 	}

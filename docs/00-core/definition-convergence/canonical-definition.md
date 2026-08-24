@@ -4,7 +4,7 @@ Status: normative
 
 Type: core-contract-part
 
-Last Verified: 2026-08-18
+Last Verified: 2026-08-24
 
 ## Workspace-owned semantic items
 
@@ -183,18 +183,23 @@ promotion；activation compiler 只能消费 promotion 后的正式 startup inpu
 10. immutable Definition partition 完整覆盖 active item，每个 CWI 绑定一个 home partition，partition 无超限或正文摘要；
 11. Definition item、edge、gate、gate membership、partition 和总字节数符合彼此独立的容量预算；
 12. 不因 context budget 较小而裁剪 authority inventory；
-13. Profile requirement/convergence declaration 无悬空 dependency 或 cycle，normalized profile-contract hash 与 candidate
-    中封存值一致；
-14. admission result 在输入 slice/map permutation 后保持同一 candidate/admission-result hash。
+13. candidate 封存完整 normalized typed Profile snapshot，hash 与 candidate 中封存值一致；每个 Profile-required
+    acceptance/deliverable source 具有 exact `scope + id` proof declaration、非空受支持 evidence kinds 和至少一个可返回
+    对应 typed owner receipt 的 accepted operation；wildcard 不能替代 exact proof，多个 Profile 不能重复声明同一 required source；
+14. Profile requirement/convergence declaration 无悬空 dependency 或 cycle，candidate bindings 与从 exact Profile snapshot
+    独立派生的 manifest 逐项一致；
+15. admission result 在输入 slice/map permutation 后保持同一 candidate/admission-result hash。
 
 只有上述检查返回 `admitted_all_of` 后，Workspace owner 才可 promotion。随后 activation compiler 必须从正式
 `WorkspaceStartupInputContract` 重新验证 candidate/admission-result lineage，编译 Definition→CWI mapping、graph、gate、partition
 和 bootstrap；结果必须绑定 promotion 产生的 `DefinitionRevision + StartupInputHash`。任何 candidate/promoted snapshot 漂移均返回
 stale/conflict，不得复用旧 admission result 或部分编译物。
 
-Static completeness 只检查**已声明合同**。稳定错误码 `declared_prerequisite_unresolved` 表示一个显式 `RequiresRef`、
-`DependsOnItemRef`、Profile relation 或 required owner fact 没有唯一 source/provider/acquisition/reobserve closure；它不宣称
-发现 Goal/DoD 自由文本中从未声明的业务前置项。
+Static completeness 只检查**已声明合同**。稳定错误码 `declared_prerequisite_unresolved` 表示 candidate-owned 显式
+`RequiresRef`/`DependsOnItemRef` 没有唯一 source/provider closure；`definition_profile_contract_invalid` 表示 Profile-required
+CWI 没有 exact executable proof closure；`definition_profile_prerequisite_unresolved` 表示 Profile-derived required owner fact
+或其 candidate manifest 没有唯一 acquisition/reobserve closure。后两者要求 `select_or_fix_template_profile`，前者要求
+`rewrite_definition_all_of`；三者都不宣称发现 Goal/DoD 自由文本中从未声明的业务前置项。
 Workorchd 不使用关键词、文本相似度或领域规则补写 relation。Template/Profile 可以在自己的领域层确定性声明关系；可选
 setup draft 只有用户采用后才成为 Workspace owner candidate；只有 admitted promotion 后才成为 definition-confirmed input。
 

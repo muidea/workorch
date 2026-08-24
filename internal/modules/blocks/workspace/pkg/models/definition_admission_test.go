@@ -30,6 +30,30 @@ func TestDefinitionAdmissionCandidateHashIsPermutationStable(t *testing.T) {
 	}
 }
 
+func TestDefinitionAdmissionCandidateSealsExactRuntimeProfileSnapshot(t *testing.T) {
+	profiles := []runtimecontract.RuntimeProfileContract{{
+		ID:                      "profile",
+		DeliverableExpectations: []runtimecontract.RuntimeDeliverableExpectation{{ID: "source", Required: true}},
+	}}
+	candidate := (DefinitionAdmissionCandidate{
+		SchemaVersion: DefinitionAdmissionCandidateSchemaVersionCurrent, WorkspaceID: "workspace-profile", CandidateID: "candidate-profile", CandidateRevision: 1,
+		GoalInput:                 DefinitionCandidateItem{CandidateItemRef: "goal", Text: "goal", SourceIdentity: "goal-r1"},
+		DoDInputs:                 []DefinitionCandidateItem{{CandidateItemRef: "dod", Text: "done", SourceIdentity: "dod-r1"}},
+		WorkspaceTemplateSnapshot: DefinitionTemplateSnapshot{TemplateRef: "template", Revision: "r1", SnapshotHash: "template-hash"},
+		RuntimeProfileContracts:   profiles, RuntimeProfileContractsHash: runtimecontract.StableRuntimeProfileContractsHash(profiles),
+		AdmissionCompilerVersion: DefinitionAdmissionCompilerVersionCurrent, ResolvedProjectWorkspaceDirectory: "/tmp/workspace-profile",
+		ProposedRelationInputs: []DefinitionProposedRelationInput{{RelationRef: "all", RelationKind: "all_of", SourceItemRefs: []string{"dod"}, TargetItemRefs: []string{"goal"}}},
+	}).WithHash()
+	if err := candidate.Validate(); err != nil {
+		t.Fatalf("sealed candidate: %v", err)
+	}
+	tampered := candidate.Clone()
+	tampered.RuntimeProfileContracts[0].DeliverableExpectations[0].ID = "other"
+	if err := tampered.Validate(); err == nil {
+		t.Fatal("profile snapshot drift retained the candidate profile hash")
+	}
+}
+
 func TestWorkspaceActivationAdmissionRequiresClarificationAcknowledgement(t *testing.T) {
 	startup := WorkspaceStartupInputContract{WorkspaceID: "workspace-1", DefinitionRevision: "definition-1", GoalDefinitionRef: "goal", GoalTextHash: "goal-hash", DoDDefinitionRefs: []string{"dod"}, DoDItemSetHash: "dod-hash", WorkspaceTemplateRef: "template", TemplateRevision: "r1", TemplateSnapshotHash: "template-hash", RuntimeProfileContractsHash: runtimecontract.StableRuntimeProfileContractsHash(nil), ResolvedProjectWorkspaceDirectory: "/tmp/workspace-1", CandidateItemToItemRefMappings: []CandidateItemToItemRefMapping{{CandidateItemRef: "goal", ItemRef: "goal"}, {CandidateItemRef: "dod", ItemRef: "dod"}}}.WithHash()
 	pending := WorkspaceActivationAdmission{WorkspaceID: "workspace-1", CandidateID: "candidate-1", CandidateRevision: 1, CandidateHash: "candidate-hash", DefinitionRevision: startup.DefinitionRevision, StartupInputHash: startup.StartupInputHash, State: WorkspaceActivationPendingClarificationResolution, BlockingTicketID: "ticket-1"}

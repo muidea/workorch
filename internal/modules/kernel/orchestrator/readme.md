@@ -303,6 +303,10 @@ deployed run ID 只属于 archive regression evidence，不定义当前候选、
 
 ## CWI semantic planning / reconciliation owner contract
 
+- Workspace pre-seal admission must reject every Profile-required acceptance/deliverable source that lacks an exact typed proof
+  declaration; wildcard evidence policy cannot substitute for its `scope + id`, and activation cannot silently emit an
+  assessment-only CWI. Activation/compiler and bootstrap validation repeat the same pure Profile contract check only as a fail-closed
+  input defense before any SM-2 mutation or SM-3 request. They do not open tickets, repair Profile input or create a second state owner.
 - Activation 必须封存 Definition seed；fresh restart 缺 workspace-specific exact proof 时进入 persisted
   `semantic_contract_required`，不得由 application 终止或要求普通用户补 `contextHints/evidencePolicies` JSON。
 - activation declaration 与 generation authority 使用不同类型：`RuntimeDefinitionFocus` 只能携带 CWI、slice、evidence/
@@ -650,6 +654,8 @@ deployed run ID 只属于 archive regression evidence，不定义当前候选、
   assessment、check 名称相似、文件存在、Git commit 或通用 validation 成功不得满足后续 focus；最后一个 focus 的
   每个 required CWI 都有 binding-matched proof 后才允许 Complete。
 - profile-specific accepted/rejected kinds 只能作为 typed focus requirement 输入；reducer 不识别 profile ID、deliverable ID、软件开发术语或具体业务语义。
+- Profile required-source completeness is decided before Run creation; Orchestrator consumes only proof-complete typed focus
+  declarations and never invents proof kinds, owner operations or terminal members from a Profile label or description.
 - authority attempt 只有在 canonical state、focus、definition/evidence revision 和 requiredOutput hash 全部相同时才增加；prerequisite 或其他事实推进必须重置 attempt。派生 action 不参与 identity。
 - block adapter 的既有 map 输入只能存在于消费 block 内部的技术适配边界，不得重新进入 EventHub command/result、RuntimeFacts、candidate、dispatch 或 evidence。
 - accepted candidate attempt 必须对应 active 或 completed sealed dispatch；不存在 dispatch 的 accepted attempt、第三次请求或 accepted 后重试都必须被 invariant validation 拒绝。

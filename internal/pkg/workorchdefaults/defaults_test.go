@@ -178,7 +178,7 @@ func TestEmbeddedSoftwareDevTemplateDoDItemsCoverScopeEvidenceAndRisk(t *testing
 	}
 }
 
-func TestValidationPreparationContractIsSoftwareDevelopmentScoped(t *testing.T) {
+func TestValidationPreparationIsNotDeclaredAsAProfileCWI(t *testing.T) {
 	templates, err := loadEmbeddedTemplates()
 	if err != nil {
 		t.Fatal(err)
@@ -191,15 +191,8 @@ func TestValidationPreparationContractIsSoftwareDevelopmentScoped(t *testing.T) 
 			if err != nil {
 				t.Fatal(err)
 			}
-			hasPreparation := strings.Contains(string(encoded), "validation_preparation")
-			if template.ID == "software-dev" && profileID == "software-dev" {
-				if !hasPreparation {
-					t.Fatal("software-development profile is missing validation preparation")
-				}
-				continue
-			}
-			if hasPreparation {
-				t.Fatalf("template/profile %s/%s inherited software-development validation preparation", template.ID, profileID)
+			if strings.Contains(string(encoded), "validation_preparation") {
+				t.Fatalf("template/profile %s/%s declares validation_preparation as an independent CWI", template.ID, profileID)
 			}
 		}
 	}
@@ -665,16 +658,13 @@ func assertSoftwareDevAcceptanceDimensions(t *testing.T, hints map[string]any) {
 		}
 	}
 	deliverables, ok := softwareDev["deliverableExpectations"].([]any)
-	if !ok || len(deliverables) < 4 {
+	if !ok || len(deliverables) != 3 {
 		t.Fatalf("software-dev deliverableExpectations = %+v, want declared expectations", softwareDev["deliverableExpectations"])
 	}
 	requiredDeliverables := map[string]bool{
 		"source_change":            false,
-		"validation_preparation":   false,
 		"validation_report":        false,
-		"coverage_map":             false,
 		"version_control_snapshot": false,
-		"user_deliverable":         false,
 	}
 	for _, raw := range deliverables {
 		item, ok := raw.(map[string]any)
@@ -707,15 +697,11 @@ func assertSoftwareDevAcceptanceDimensions(t *testing.T, hints map[string]any) {
 		t.Fatalf("software-dev coverageDependencies = %+v, want declared source-to-validation dependency", softwareDev["coverageDependencies"])
 	}
 	wantDependencies := map[string]bool{
-		"source-change-precedes-and-refreshes-validation-preparation":  false,
-		"validation-preparation-precedes-and-refreshes-dod-validation": false,
-		"dod-validation-precedes-and-refreshes-validation-report":      false,
-		"source-change-precedes-and-refreshes-final-snapshot":          false,
-		"validation-preparation-precedes-and-refreshes-final-snapshot": false,
-		"dod-validation-precedes-and-refreshes-final-snapshot":         false,
-		"validation-report-precedes-final-snapshot":                    false,
-		"coverage-map-precedes-and-refreshes-final-snapshot":           false,
-		"user-deliverable-precedes-and-refreshes-final-snapshot":       false,
+		"source-change-precedes-and-refreshes-dod-validation":     false,
+		"dod-validation-precedes-and-refreshes-validation-report": false,
+		"source-change-precedes-and-refreshes-final-snapshot":     false,
+		"dod-validation-precedes-and-refreshes-final-snapshot":    false,
+		"validation-report-precedes-final-snapshot":               false,
 	}
 	for _, raw := range dependencies {
 		item, ok := raw.(map[string]any)
@@ -778,7 +764,8 @@ func assertSoftwareDevAcceptanceDimensions(t *testing.T, hints map[string]any) {
 		"quantitative_behavior":      false,
 	}
 	sourceChangeEvidenceFound := false
-	validationPreparationEvidenceFound := false
+	validationReportEvidenceFound := false
+	validationReadinessPrerequisiteFound := false
 	versionControlEvidenceFound := false
 	directValidationTargetContracts := map[string]bool{
 		"dodItem":      false,
@@ -821,6 +808,10 @@ func assertSoftwareDevAcceptanceDimensions(t *testing.T, hints map[string]any) {
 			if coverageTargets, _ := item["requireCoverageTargets"].(bool); !coverageTargets {
 				t.Fatalf("source_change requireCoverageTargets = false, want true")
 			}
+			requiredKinds, ok := item["requiredEvidenceKinds"].([]any)
+			if !ok || len(requiredKinds) != 1 || requiredKinds[0] != "state_change" {
+				t.Fatalf("source_change requiredEvidenceKinds = %+v, want state_change", item["requiredEvidenceKinds"])
+			}
 			accepted, ok := item["acceptedStepKinds"].([]any)
 			if !ok {
 				t.Fatalf("source_change acceptedStepKinds = %+v, want list", item["acceptedStepKinds"])
@@ -844,6 +835,10 @@ func assertSoftwareDevAcceptanceDimensions(t *testing.T, hints map[string]any) {
 			}
 			if role, _ := item["evidenceRole"].(string); role != "supplemental_evidence" {
 				t.Fatalf("version_control_snapshot evidenceRole = %q, want supplemental_evidence", role)
+			}
+			requiredKinds, ok := item["requiredEvidenceKinds"].([]any)
+			if !ok || len(requiredKinds) != 1 || requiredKinds[0] != "state_change" {
+				t.Fatalf("version_control_snapshot requiredEvidenceKinds = %+v, want state_change", item["requiredEvidenceKinds"])
 			}
 			accepted, ok := item["acceptedStepKinds"].([]any)
 			if !ok {
@@ -878,32 +873,18 @@ func assertSoftwareDevAcceptanceDimensions(t *testing.T, hints map[string]any) {
 			versionControlEvidenceFound = true
 			continue
 		}
-		if id == "validation_preparation" {
+		if id == "validation_report" {
+			requiredKinds, ok := item["requiredEvidenceKinds"].([]any)
+			if !ok || len(requiredKinds) != 1 || requiredKinds[0] != "validation" {
+				t.Fatalf("validation_report requiredEvidenceKinds = %+v, want validation", item["requiredEvidenceKinds"])
+			}
 			accepted, ok := item["acceptedStepKinds"].([]any)
 			if !ok {
-				t.Fatalf("validation_preparation acceptedStepKinds = %+v, want list", item["acceptedStepKinds"])
+				t.Fatalf("validation_report acceptedStepKinds = %+v, want list", item["acceptedStepKinds"])
 			}
-			assertStringListContains(t, accepted, "file/write")
-			assertStringListContains(t, accepted, "patch/apply")
 			assertStringListContains(t, accepted, "validation/managed_session")
 			assertStringListNotContains(t, accepted, "shell/command")
-			ownerFacts, ok := item["requiredOwnerFacts"].([]any)
-			if !ok || len(ownerFacts) != 1 {
-				t.Fatalf("validation_preparation requiredOwnerFacts = %+v, want one Shell postcondition", item["requiredOwnerFacts"])
-			}
-			ownerFact, ok := ownerFacts[0].(map[string]any)
-			if !ok || ownerFact["ownerModuleId"] != "blocks/shell" || ownerFact["factKind"] != "selectable_validation_surface" || ownerFact["operationKind"] != "validation/managed_session" {
-				t.Fatalf("validation_preparation requiredOwnerFacts = %+v, want selectable Shell managed-validation surface", ownerFacts)
-			}
-			convergences, ok := item["ownerFactConvergences"].([]any)
-			if !ok || len(convergences) != 1 {
-				t.Fatalf("validation_preparation ownerFactConvergences = %+v, want one bounded acquisition", item["ownerFactConvergences"])
-			}
-			convergence, ok := convergences[0].(map[string]any)
-			if !ok || convergence["missingTrigger"] != "owner_fact_missing" || convergence["acquisitionOwnerModuleId"] != "blocks/file" || convergence["acquisitionOperationKind"] != "file/write" || convergence["acquisitionTargetPolicy"] != "prospective_owner_target" || convergence["acquisitionTargetSelectorRef"] != "workspace-relative-new-file-target" || convergence["reobserveOwnerModuleId"] != "blocks/shell" || convergence["maxAcquisitionAttempts"] != float64(1) {
-				t.Fatalf("validation_preparation ownerFactConvergences = %+v, want File acquisition then Shell re-observation", convergences)
-			}
-			validationPreparationEvidenceFound = true
+			validationReportEvidenceFound = true
 			continue
 		}
 		if id == "*" {
@@ -932,6 +913,25 @@ func assertSoftwareDevAcceptanceDimensions(t *testing.T, hints map[string]any) {
 					t.Fatalf("%s wildcard acceptedStepKinds = %+v, want list", scope, item["acceptedStepKinds"])
 				}
 				assertStringListContains(t, accepted, "file/write")
+				if scope == "dodItem" {
+					ownerFacts, ok := item["requiredOwnerFacts"].([]any)
+					if !ok || len(ownerFacts) != 1 {
+						t.Fatalf("dodItem validation readiness owner facts = %+v, want one Shell postcondition", item["requiredOwnerFacts"])
+					}
+					ownerFact, ok := ownerFacts[0].(map[string]any)
+					if !ok || ownerFact["ownerModuleId"] != "blocks/shell" || ownerFact["factKind"] != "selectable_validation_surface" || ownerFact["operationKind"] != "validation/managed_session" {
+						t.Fatalf("dodItem validation readiness owner facts = %+v", ownerFacts)
+					}
+					convergences, ok := item["ownerFactConvergences"].([]any)
+					if !ok || len(convergences) != 1 {
+						t.Fatalf("dodItem validation readiness convergence = %+v, want one bounded acquisition", item["ownerFactConvergences"])
+					}
+					convergence, ok := convergences[0].(map[string]any)
+					if !ok || convergence["missingTrigger"] != "owner_fact_missing" || convergence["acquisitionOwnerModuleId"] != "blocks/file" || convergence["acquisitionOperationKind"] != "file/write" || convergence["acquisitionTargetPolicy"] != "prospective_owner_target" || convergence["acquisitionTargetSelectorRef"] != "workspace-relative-new-file-target" || convergence["reobserveOwnerModuleId"] != "blocks/shell" || convergence["maxAcquisitionAttempts"] != float64(1) {
+						t.Fatalf("dodItem validation readiness convergence = %+v, want File acquisition then Shell re-observation", convergences)
+					}
+					validationReadinessPrerequisiteFound = true
+				}
 				directValidationTargetContracts[scope] = true
 			}
 			continue
@@ -981,8 +981,11 @@ func assertSoftwareDevAcceptanceDimensions(t *testing.T, hints map[string]any) {
 	if !sourceChangeEvidenceFound {
 		t.Fatalf("software-dev evidenceRequirements missing source_change in %+v", requirements)
 	}
-	if !validationPreparationEvidenceFound {
-		t.Fatalf("software-dev evidenceRequirements missing validation_preparation in %+v", requirements)
+	if !validationReportEvidenceFound {
+		t.Fatalf("software-dev evidenceRequirements missing validation_report in %+v", requirements)
+	}
+	if !validationReadinessPrerequisiteFound {
+		t.Fatalf("software-dev dodItem proof contract is missing validation-readiness convergence in %+v", requirements)
 	}
 	for scope, found := range directValidationTargetContracts {
 		if !found {

@@ -4,7 +4,7 @@ Status: normative
 
 Type: verification-contract
 
-Last Verified: 2026-08-23
+Last Verified: 2026-08-24
 
 ## Purpose
 
@@ -68,8 +68,14 @@ HTTP/owner integration acceptance必须证明：
 - Workspace owner先持久化exact pre-seal candidate；只有pure `admitted_all_of` result可以promotion；
 - one-of/any-of/threshold、未声明替代分支或无法确定唯一required relation返回稳定violation与`BlockingTicketID`，且零
   promotion/Run/provider/dispatch/effect；
-- required owner fact 缺少 exact preexisting 或唯一 one-shot acquisition/reobserve closure、存在重复/悬空/环时返回
-  `declared_prerequisite_unresolved + BlockingTicketID`；Profile contract hash permutation稳定且漂移必须在Start/Restart前拒绝；
+- candidate 保存的完整 normalized typed Profile snapshot 与`RuntimeProfileContractsHash`精确匹配；hash-only、snapshot drift、
+  candidate owner-fact manifest 与 snapshot 派生值不一致均在admission/Start/Restart前拒绝；
+- 每个 Profile-required acceptance/deliverable source 缺 exact proof/evidence kind/owner-receipt-capable operation 时返回
+  `definition_profile_contract_invalid + select_or_fix_template_profile + BlockingTicketID`；wildcard不能替代exact proof，
+  也不能降级为assessment-only focus；
+- Profile required owner fact 缺 exact preexisting 或唯一 one-shot acquisition/reobserve closure、存在重复/悬空/环时返回
+  `definition_profile_prerequisite_unresolved + select_or_fix_template_profile + BlockingTicketID`；Profile contract snapshot/hash
+  permutation稳定；
 - corrected static candidate经过promotion、专用Decision resolution与Workspace acknowledgement后才eligible；response loss、
   duplicate或stale binding不能产生第二ticket/revision或运行窗口；
 - Run-scoped runtime-definition clarification只投影`revise_definition_and_restart`；通用Decision single/batch resolve与Resume

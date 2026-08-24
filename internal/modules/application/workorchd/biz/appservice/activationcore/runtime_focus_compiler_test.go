@@ -97,7 +97,7 @@ func TestCompileRuntimeCoverageCarriesProfileProspectiveTarget(t *testing.T) {
 			ID: "profile", DeliverableExpectations: []runtimecontract.RuntimeDeliverableExpectation{{ID: "initial-deliverable", Required: true}}, EvidenceRequirements: []runtimecontract.RuntimeProfileEvidenceRequirement{{
 				ID: "initial-deliverable", Scope: "deliverable", RequireTargetGrounding: true, TargetRole: "deliverable",
 				TargetDiscoverySources: []string{runtimecontract.RuntimeValidationDiscoverySourceWorkspaceManifest}, TargetSelectorRef: "file/workspace_deliverable", ProspectiveTargetRef: "initial-deliverable.txt",
-				AcceptedStepKinds: []string{runtimecontract.StepKindFileWrite},
+				RequiredEvidenceKinds: []string{runtimecontract.EvidenceKindStateChange}, AcceptedStepKinds: []string{runtimecontract.StepKindFileWrite},
 			}},
 		}}},
 	}
@@ -126,7 +126,7 @@ func TestCompileRuntimeCoverageCarriesProfileBoundEmptyWorkspaceScope(t *testing
 				ID: "source_change", Scope: "deliverable", EvidenceRole: "primary_state_change", RequireTargetGrounding: true, TargetRole: "deliverable_implementation",
 				TargetDiscoverySources: []string{runtimecontract.RuntimeValidationDiscoverySourceWorkspaceManifest}, TargetSelectorRef: "file/workspace_deliverable",
 				TargetSelectorOwnerRef: "software-dev", TargetSelectorSubjectRef: "workspace_deliverable_create_scope",
-				AcceptedStepKinds: []string{runtimecontract.StepKindFileWrite},
+				RequiredEvidenceKinds: []string{runtimecontract.EvidenceKindStateChange}, AcceptedStepKinds: []string{runtimecontract.StepKindFileWrite},
 			}},
 		}}},
 	}
@@ -236,14 +236,12 @@ func TestRuntimeBootstrapCompilesBroadDoDIntoSemanticPlanningSeed(t *testing.T) 
 				DeliverableExpectations: []runtimecontract.RuntimeDeliverableExpectation{
 					{ID: "source_change", Required: true, EvidenceRole: "primary_state_change"},
 					{ID: "validation_report", Required: true, EvidenceRole: "supplemental_evidence"},
-					{ID: "coverage_map", Required: true, EvidenceRole: "supplemental_evidence"},
 					{ID: "version_control_snapshot", Required: true, EvidenceRole: "supplemental_evidence"},
 				},
 				EvidenceRequirements: []runtimecontract.RuntimeProfileEvidenceRequirement{
-					{ID: "source_change", Scope: "deliverable", EvidenceRole: "primary_state_change", AcceptedStepKinds: []string{runtimecontract.StepKindFileWrite}},
+					{ID: "source_change", Scope: "deliverable", EvidenceRole: "primary_state_change", RequiredEvidenceKinds: []string{runtimecontract.EvidenceKindStateChange}, AcceptedStepKinds: []string{runtimecontract.StepKindFileWrite}},
 					{ID: "validation_report", Scope: "deliverable", EvidenceRole: "supplemental_evidence", RequiredEvidenceKinds: []string{runtimecontract.EvidenceKindValidation}, AcceptedStepKinds: []string{runtimecontract.RuntimeBlockKindManagedValidationSession}},
-					{ID: "coverage_map", Scope: "deliverable", EvidenceRole: "supplemental_evidence", AcceptedStepKinds: []string{runtimecontract.StepKindMCPToolCall}},
-					{ID: "version_control_snapshot", Scope: "deliverable", EvidenceRole: "supplemental_evidence", AcceptedStepKinds: []string{runtimecontract.StepKindGitWrite}, AcceptedOperationVariants: []runtimecontract.RuntimeOperationVariantRef{{Kind: runtimecontract.StepKindGitWrite, VariantID: "commit"}}},
+					{ID: "version_control_snapshot", Scope: "deliverable", EvidenceRole: "supplemental_evidence", RequiredEvidenceKinds: []string{runtimecontract.EvidenceKindStateChange}, AcceptedStepKinds: []string{runtimecontract.StepKindGitWrite}, AcceptedOperationVariants: []runtimecontract.RuntimeOperationVariantRef{{Kind: runtimecontract.StepKindGitWrite, VariantID: "commit"}}},
 					{ID: "*", Scope: "dodItem", RequiredEvidenceKinds: []string{runtimecontract.EvidenceKindValidation}, AcceptedStepKinds: []string{runtimecontract.RuntimeBlockKindManagedValidationSession}},
 				},
 			}},
@@ -254,7 +252,7 @@ func TestRuntimeBootstrapCompilesBroadDoDIntoSemanticPlanningSeed(t *testing.T) 
 		&workspacemodel.DoD{ID: "dod-1", WorkspaceID: "ws-1", Items: dodItems},
 		"definition-1", "startup-input-test", nil, activation,
 	)
-	if err != nil || bootstrap == nil || len(bootstrap.DefinitionSeed.CoverageItems) != 32 {
+	if err != nil || bootstrap == nil || len(bootstrap.DefinitionSeed.CoverageItems) != 31 {
 		t.Fatalf("broad semantic planning seed bootstrap=%+v err=%v", bootstrap, err)
 	}
 	if err := runtimecontract.ValidateRuntimeDefinitionFocuses(bootstrap.DefinitionSeed, bootstrap.DefinitionFocuses); err != nil {
@@ -269,7 +267,7 @@ func TestCompileRuntimeCoverageCarriesProfileDeclaredSelector(t *testing.T) {
 			ID: "profile-lsp", DeliverableExpectations: []runtimecontract.RuntimeDeliverableExpectation{{ID: "implementation", Required: true}}, EvidenceRequirements: []runtimecontract.RuntimeProfileEvidenceRequirement{{
 				ID: "implementation", Scope: "deliverable", RequireTargetGrounding: true, TargetRole: "implementation",
 				TargetDiscoverySources: []string{runtimecontract.RuntimeValidationDiscoverySourceWorkspaceManifest}, TargetSelectorRef: "file/profile_declared_candidates", TargetSelectorSubjectRef: "implementation", TargetSelectorCandidateRefs: []string{"internal/lsp/manager.go", "internal/lsp/server.go"},
-				AcceptedStepKinds: []string{runtimecontract.RuntimeBlockKindPatchApply},
+				RequiredEvidenceKinds: []string{runtimecontract.EvidenceKindStateChange}, AcceptedStepKinds: []string{runtimecontract.RuntimeBlockKindPatchApply},
 			}},
 		}}},
 	}
@@ -406,7 +404,7 @@ func TestCompileRuntimeCoverageFocusesExactBeatsWildcard(t *testing.T) {
 						RejectedStepKinds: []string{"file/read"},
 					},
 					{
-						ID: "runtime_entrypoint", Scope: "acceptanceDimension",
+						ID: "runtime_entrypoint", Scope: "acceptanceDimension", RequiredEvidenceKinds: []string{runtimecontract.EvidenceKindValidation},
 						RequireExecutableBehaviorEvidence: true,
 						AcceptedStepKinds:                 []string{"validation/managed_session", "shell/command"},
 						RejectedStepKinds:                 []string{"file/read", "file/list"},
@@ -624,7 +622,7 @@ func TestCompileRuntimeCoverageFocusesKeepsDeliverableStateChange(t *testing.T) 
 				EvidenceRequirements: []runtimecontract.RuntimeProfileEvidenceRequirement{{
 					ID: "source_change", Scope: "deliverable", EvidenceRole: "primary_state_change",
 					TargetRole: "implementation", TargetRefs: []string{"cmd/main.go"}, TargetDiscoverySources: []string{runtimecontract.RuntimeValidationDiscoverySourceWorkspaceManifest}, RequireTargetGrounding: true,
-					AcceptedStepKinds: []string{"patch/apply"},
+					RequiredEvidenceKinds: []string{runtimecontract.EvidenceKindStateChange}, AcceptedStepKinds: []string{"patch/apply"},
 				}},
 			}},
 		},
@@ -664,7 +662,7 @@ func TestCompileRuntimeCoverageFocusesRejectsUngroundedRequiredTarget(t *testing
 		ExecutionContract: runtimecontract.RuntimeExecutionContract{ProfileContracts: []runtimecontract.RuntimeProfileContract{{
 			ID: "profile", DeliverableExpectations: []runtimecontract.RuntimeDeliverableExpectation{{ID: "source", Required: true, EvidenceRole: "primary_state_change"}},
 			EvidenceRequirements: []runtimecontract.RuntimeProfileEvidenceRequirement{{
-				ID: "source", Scope: "deliverable", RequireTargetGrounding: true, TargetRole: "implementation", AcceptedStepKinds: []string{"patch/apply"},
+				ID: "source", Scope: "deliverable", RequiredEvidenceKinds: []string{runtimecontract.EvidenceKindStateChange}, RequireTargetGrounding: true, TargetRole: "implementation", AcceptedStepKinds: []string{"patch/apply"},
 			}},
 		}}},
 	}
@@ -718,8 +716,8 @@ func TestCompileRuntimeCoverageFocusesSplitsIncompatibleTargetBindingsWithinSlic
 							{ID: "second", Required: true, EvidenceRole: "primary_state_change"},
 						},
 						EvidenceRequirements: []runtimecontract.RuntimeProfileEvidenceRequirement{
-							{ID: "first", Scope: "deliverable", EvidenceRole: "primary_state_change", TargetRole: tc.firstRole, TargetSelectorRef: tc.firstSelector, TargetDiscoverySources: []string{runtimecontract.RuntimeValidationDiscoverySourceWorkspaceManifest}, RequireTargetGrounding: true, AcceptedStepKinds: []string{"patch/apply"}},
-							{ID: "second", Scope: "deliverable", EvidenceRole: "primary_state_change", TargetRole: tc.secondRole, TargetSelectorRef: tc.secondSelector, TargetDiscoverySources: []string{runtimecontract.RuntimeValidationDiscoverySourceWorkspaceManifest}, RequireTargetGrounding: true, AcceptedStepKinds: []string{"patch/apply"}},
+							{ID: "first", Scope: "deliverable", EvidenceRole: "primary_state_change", RequiredEvidenceKinds: []string{runtimecontract.EvidenceKindStateChange}, TargetRole: tc.firstRole, TargetSelectorRef: tc.firstSelector, TargetDiscoverySources: []string{runtimecontract.RuntimeValidationDiscoverySourceWorkspaceManifest}, RequireTargetGrounding: true, AcceptedStepKinds: []string{"patch/apply"}},
+							{ID: "second", Scope: "deliverable", EvidenceRole: "primary_state_change", RequiredEvidenceKinds: []string{runtimecontract.EvidenceKindStateChange}, TargetRole: tc.secondRole, TargetSelectorRef: tc.secondSelector, TargetDiscoverySources: []string{runtimecontract.RuntimeValidationDiscoverySourceWorkspaceManifest}, RequireTargetGrounding: true, AcceptedStepKinds: []string{"patch/apply"}},
 						},
 					}},
 				},
@@ -763,8 +761,8 @@ func TestCompileRuntimeCoverageFocusesPreservesTargetContractAcrossIndependentFo
 					{ID: "second", Required: true, EvidenceRole: "primary_state_change"},
 				},
 				EvidenceRequirements: []runtimecontract.RuntimeProfileEvidenceRequirement{
-					{ID: "first", Scope: "deliverable", EvidenceRole: "primary_state_change", TargetRole: "implementation", TargetSelectorRef: "file/unique_workspace_entry", TargetDiscoverySources: []string{runtimecontract.RuntimeValidationDiscoverySourceWorkspaceManifest}, RequireTargetGrounding: true, AcceptedStepKinds: []string{"patch/apply"}},
-					{ID: "second", Scope: "deliverable", EvidenceRole: "primary_state_change", TargetRole: "implementation", TargetSelectorRef: "file/unique_workspace_entry", TargetDiscoverySources: []string{runtimecontract.RuntimeValidationDiscoverySourceWorkspaceManifest}, RequireTargetGrounding: true, AcceptedStepKinds: []string{"patch/apply"}},
+					{ID: "first", Scope: "deliverable", EvidenceRole: "primary_state_change", RequiredEvidenceKinds: []string{runtimecontract.EvidenceKindStateChange}, TargetRole: "implementation", TargetSelectorRef: "file/unique_workspace_entry", TargetDiscoverySources: []string{runtimecontract.RuntimeValidationDiscoverySourceWorkspaceManifest}, RequireTargetGrounding: true, AcceptedStepKinds: []string{"patch/apply"}},
+					{ID: "second", Scope: "deliverable", EvidenceRole: "primary_state_change", RequiredEvidenceKinds: []string{runtimecontract.EvidenceKindStateChange}, TargetRole: "implementation", TargetSelectorRef: "file/unique_workspace_entry", TargetDiscoverySources: []string{runtimecontract.RuntimeValidationDiscoverySourceWorkspaceManifest}, RequireTargetGrounding: true, AcceptedStepKinds: []string{"patch/apply"}},
 				},
 			}},
 		},
@@ -798,7 +796,7 @@ func TestCompileRuntimeCoverageCompilesProfileCoverageDependencies(t *testing.T)
 				ID:                      "profile",
 				DeliverableExpectations: []runtimecontract.RuntimeDeliverableExpectation{{ID: "source", Required: true, EvidenceRole: "primary_state_change"}, {ID: "validation", Required: true, EvidenceRole: "supplemental_evidence"}},
 				EvidenceRequirements: []runtimecontract.RuntimeProfileEvidenceRequirement{
-					{ID: "source", Scope: "deliverable", EvidenceRole: "primary_state_change", AcceptedStepKinds: []string{"file/write"}},
+					{ID: "source", Scope: "deliverable", EvidenceRole: "primary_state_change", RequiredEvidenceKinds: []string{runtimecontract.EvidenceKindStateChange}, AcceptedStepKinds: []string{"file/write"}},
 					{ID: "validation", Scope: "deliverable", EvidenceRole: "supplemental_evidence", RequiredEvidenceKinds: []string{runtimecontract.EvidenceKindValidation}, AcceptedStepKinds: []string{"validation/managed_session"}},
 				},
 				CoverageDependencies: []runtimecontract.RuntimeCoverageDependency{{ID: "source-precedes-and-invalidates-validation", SourceScope: "deliverable", SourceRequirementID: "source", DependentScope: "deliverable", DependentRequirementID: "validation", RequireSourceSettled: true, TriggerEvidenceKinds: []string{runtimecontract.EvidenceKindStateChange}}},
@@ -827,6 +825,10 @@ func TestCompileRuntimeCoverageKeepsAdmissionAndInvalidationIndependent(t *testi
 		ProviderSelection: runtimecontract.ProviderInferenceSelection{Target: runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "gpt-4o"}},
 		ExecutionContract: runtimecontract.RuntimeExecutionContract{ProfileContracts: []runtimecontract.RuntimeProfileContract{{
 			ID: "profile", DeliverableExpectations: []runtimecontract.RuntimeDeliverableExpectation{{ID: "source", Required: true}, {ID: "dependent", Required: true}},
+			EvidenceRequirements: []runtimecontract.RuntimeProfileEvidenceRequirement{
+				{ID: "source", Scope: "deliverable", RequiredEvidenceKinds: []string{runtimecontract.EvidenceKindStateChange}, AcceptedStepKinds: []string{runtimecontract.StepKindFileWrite}},
+				{ID: "dependent", Scope: "deliverable", RequiredEvidenceKinds: []string{runtimecontract.EvidenceKindStateChange}, AcceptedStepKinds: []string{runtimecontract.StepKindFileWrite}},
+			},
 		}}},
 	}
 	for name, dependency := range map[string]runtimecontract.RuntimeCoverageDependency{
@@ -860,7 +862,7 @@ func TestCompileRuntimeCoverageKeepsAdmissionAndInvalidationIndependent(t *testi
 	}
 }
 
-func TestCompileRuntimeCoverageBuildsDeclaredPreparationValidationAndSnapshotGraph(t *testing.T) {
+func TestCompileRuntimeCoverageBuildsDeclaredSourceValidationAndSnapshotGraph(t *testing.T) {
 	dependency := func(id, sourceScope, sourceID, dependentScope, dependentID string, reopen bool) runtimecontract.RuntimeCoverageDependency {
 		value := runtimecontract.RuntimeCoverageDependency{
 			ID: id, SourceScope: sourceScope, SourceRequirementID: sourceID,
@@ -877,22 +879,21 @@ func TestCompileRuntimeCoverageBuildsDeclaredPreparationValidationAndSnapshotGra
 			ID: "software-dev",
 			DeliverableExpectations: []runtimecontract.RuntimeDeliverableExpectation{
 				{ID: "source_change", Required: true, EvidenceRole: "primary_state_change"},
-				{ID: "validation_preparation", Required: true, EvidenceRole: "supplemental_evidence"},
 				{ID: "validation_report", Required: true, EvidenceRole: "supplemental_evidence"},
-				{ID: "coverage_map", Required: true, EvidenceRole: "supplemental_evidence"},
-				{ID: "user_deliverable", Required: true, EvidenceRole: "supplemental_evidence"},
 				{ID: "version_control_snapshot", Required: true, EvidenceRole: "supplemental_evidence"},
 			},
+			EvidenceRequirements: []runtimecontract.RuntimeProfileEvidenceRequirement{
+				{ID: "source_change", Scope: "deliverable", RequiredEvidenceKinds: []string{runtimecontract.EvidenceKindStateChange}, AcceptedStepKinds: []string{runtimecontract.StepKindFileWrite}},
+				{ID: "validation_report", Scope: "deliverable", RequiredEvidenceKinds: []string{runtimecontract.EvidenceKindValidation}, AcceptedStepKinds: []string{runtimecontract.RuntimeBlockKindManagedValidationSession}},
+				{ID: "version_control_snapshot", Scope: "deliverable", RequiredEvidenceKinds: []string{runtimecontract.EvidenceKindStateChange}, AcceptedStepKinds: []string{runtimecontract.StepKindGitWrite}},
+				{ID: "*", Scope: "dodItem", RequiredEvidenceKinds: []string{runtimecontract.EvidenceKindValidation}, AcceptedStepKinds: []string{runtimecontract.RuntimeBlockKindManagedValidationSession}},
+			},
 			CoverageDependencies: []runtimecontract.RuntimeCoverageDependency{
-				dependency("source-preparation", "deliverable", "source_change", "deliverable", "validation_preparation", true),
-				dependency("preparation-dod", "deliverable", "validation_preparation", "dodItem", "*", true),
+				dependency("source-dod", "deliverable", "source_change", "dodItem", "*", true),
 				dependency("dod-report", "dodItem", "*", "deliverable", "validation_report", true),
 				dependency("source-snapshot", "deliverable", "source_change", "deliverable", "version_control_snapshot", true),
-				dependency("preparation-snapshot", "deliverable", "validation_preparation", "deliverable", "version_control_snapshot", true),
 				dependency("dod-snapshot", "dodItem", "*", "deliverable", "version_control_snapshot", true),
 				dependency("report-snapshot", "deliverable", "validation_report", "deliverable", "version_control_snapshot", false),
-				dependency("coverage-snapshot", "deliverable", "coverage_map", "deliverable", "version_control_snapshot", true),
-				dependency("deliverable-snapshot", "deliverable", "user_deliverable", "deliverable", "version_control_snapshot", true),
 			},
 		}}},
 	}
@@ -908,18 +909,13 @@ func TestCompileRuntimeCoverageBuildsDeclaredPreparationValidationAndSnapshotGra
 		bySource[item.SourceScope+"/"+item.SourceID] = item
 	}
 	source := bySource["deliverable/source_change"]
-	preparation := bySource["deliverable/validation_preparation"]
 	report := bySource["deliverable/validation_report"]
 	snapshot := bySource["deliverable/version_control_snapshot"]
-	if source.ID == "" || preparation.ID == "" || report.ID == "" || snapshot.ID == "" {
+	if source.ID == "" || report.ID == "" || snapshot.ID == "" {
 		t.Fatalf("compiled graph misses required nodes: %+v", bySource)
 	}
-	if !containsCoverageID(preparation.PrerequisiteCoverageWorkItemIDs, source.ID) {
-		t.Fatalf("preparation prerequisites = %v, want %s", preparation.PrerequisiteCoverageWorkItemIDs, source.ID)
-	}
 	wantSnapshotPrerequisites := []common.CoverageWorkItemID{
-		source.ID, preparation.ID, report.ID,
-		bySource["deliverable/coverage_map"].ID, bySource["deliverable/user_deliverable"].ID,
+		source.ID, report.ID,
 		bySource["dodItem/dod-001"].ID, bySource["dodItem/dod-002"].ID,
 	}
 	for _, id := range wantSnapshotPrerequisites {
@@ -929,8 +925,8 @@ func TestCompileRuntimeCoverageBuildsDeclaredPreparationValidationAndSnapshotGra
 	}
 	for _, dodID := range []string{"dod-001", "dod-002"} {
 		dodItem := bySource["dodItem/"+dodID]
-		if !containsCoverageID(dodItem.PrerequisiteCoverageWorkItemIDs, preparation.ID) || !containsCoverageID(report.PrerequisiteCoverageWorkItemIDs, dodItem.ID) {
-			t.Fatalf("validation chain for %s = preparation %v report %v", dodID, dodItem.PrerequisiteCoverageWorkItemIDs, report.PrerequisiteCoverageWorkItemIDs)
+		if !containsCoverageID(dodItem.PrerequisiteCoverageWorkItemIDs, source.ID) || !containsCoverageID(report.PrerequisiteCoverageWorkItemIDs, dodItem.ID) {
+			t.Fatalf("validation chain for %s = source %v report %v", dodID, dodItem.PrerequisiteCoverageWorkItemIDs, report.PrerequisiteCoverageWorkItemIDs)
 		}
 	}
 }
@@ -949,6 +945,7 @@ func TestCompileRuntimeCoverageRejectsUnresolvedCoverageDependency(t *testing.T)
 		ProviderSelection: runtimecontract.ProviderInferenceSelection{Target: runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "gpt-4o"}},
 		ExecutionContract: runtimecontract.RuntimeExecutionContract{ProfileContracts: []runtimecontract.RuntimeProfileContract{{
 			ID: "profile", DeliverableExpectations: []runtimecontract.RuntimeDeliverableExpectation{{ID: "source", Required: true}},
+			EvidenceRequirements: []runtimecontract.RuntimeProfileEvidenceRequirement{{ID: "source", Scope: "deliverable", RequiredEvidenceKinds: []string{runtimecontract.EvidenceKindStateChange}, AcceptedStepKinds: []string{runtimecontract.StepKindFileWrite}}},
 			CoverageDependencies: []runtimecontract.RuntimeCoverageDependency{{ID: "missing-dependent", SourceScope: "deliverable", SourceRequirementID: "source", DependentScope: "deliverable", DependentRequirementID: "missing", TriggerEvidenceKinds: []string{runtimecontract.EvidenceKindStateChange}}},
 		}}},
 	}
@@ -963,6 +960,10 @@ func TestCompileRuntimeCoverageRejectsCyclicCoverageDependencies(t *testing.T) {
 		ProviderSelection: runtimecontract.ProviderInferenceSelection{Target: runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "gpt-4o"}},
 		ExecutionContract: runtimecontract.RuntimeExecutionContract{ProfileContracts: []runtimecontract.RuntimeProfileContract{{
 			ID: "profile", DeliverableExpectations: []runtimecontract.RuntimeDeliverableExpectation{{ID: "first", Required: true}, {ID: "second", Required: true}},
+			EvidenceRequirements: []runtimecontract.RuntimeProfileEvidenceRequirement{
+				{ID: "first", Scope: "deliverable", RequiredEvidenceKinds: []string{runtimecontract.EvidenceKindStateChange}, AcceptedStepKinds: []string{runtimecontract.StepKindFileWrite}},
+				{ID: "second", Scope: "deliverable", RequiredEvidenceKinds: []string{runtimecontract.EvidenceKindStateChange}, AcceptedStepKinds: []string{runtimecontract.StepKindFileWrite}},
+			},
 			CoverageDependencies: []runtimecontract.RuntimeCoverageDependency{
 				{ID: "first-refreshes-second", SourceScope: "deliverable", SourceRequirementID: "first", DependentScope: "deliverable", DependentRequirementID: "second", TriggerEvidenceKinds: []string{runtimecontract.EvidenceKindStateChange}},
 				{ID: "second-refreshes-first", SourceScope: "deliverable", SourceRequirementID: "second", DependentScope: "deliverable", DependentRequirementID: "first", TriggerEvidenceKinds: []string{runtimecontract.EvidenceKindStateChange}},
@@ -980,6 +981,10 @@ func TestCompileRuntimeCoverageRejectsCyclicAdmissionDependencies(t *testing.T) 
 		ProviderSelection: runtimecontract.ProviderInferenceSelection{Target: runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "gpt-4o"}},
 		ExecutionContract: runtimecontract.RuntimeExecutionContract{ProfileContracts: []runtimecontract.RuntimeProfileContract{{
 			ID: "profile", DeliverableExpectations: []runtimecontract.RuntimeDeliverableExpectation{{ID: "first", Required: true}, {ID: "second", Required: true}},
+			EvidenceRequirements: []runtimecontract.RuntimeProfileEvidenceRequirement{
+				{ID: "first", Scope: "deliverable", RequiredEvidenceKinds: []string{runtimecontract.EvidenceKindStateChange}, AcceptedStepKinds: []string{runtimecontract.StepKindFileWrite}},
+				{ID: "second", Scope: "deliverable", RequiredEvidenceKinds: []string{runtimecontract.EvidenceKindStateChange}, AcceptedStepKinds: []string{runtimecontract.StepKindFileWrite}},
+			},
 			CoverageDependencies: []runtimecontract.RuntimeCoverageDependency{
 				{ID: "first-precedes-second", SourceScope: "deliverable", SourceRequirementID: "first", DependentScope: "deliverable", DependentRequirementID: "second", RequireSourceSettled: true},
 				{ID: "second-precedes-first", SourceScope: "deliverable", SourceRequirementID: "second", DependentScope: "deliverable", DependentRequirementID: "first", RequireSourceSettled: true},

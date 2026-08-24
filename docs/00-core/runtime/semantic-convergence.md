@@ -87,7 +87,10 @@ Workorchd 只把 profile 声明编译进 bootstrap/DefinitionFocus；capability 
 
 每个 required owner fact 在 pre-seal candidate 中还必须封存 preexisting，或唯一的
 `owner_fact_missing -> acquisition owner/kind/variant/target-policy/operation-selector -> reobserve owner/fact` closure，且
-`MaxAcquisitionAttempts=1`。缺失、重复、依赖悬空/成环在 Run 前返回 `declared_prerequisite_unresolved`。SM-2 只消费这条
+`MaxAcquisitionAttempts=1`。Profile-derived closure 缺失、重复、与 exact Profile snapshot 派生 manifest 不一致、依赖悬空/
+成环时，在 Run 前返回 `definition_profile_prerequisite_unresolved + select_or_fix_template_profile`。每个 Profile-required
+acceptance/deliverable CWI 还必须在 pre-seal 具有 exact proof declaration、非空受支持 evidence kind 和 owner-receipt-capable
+operation；否则返回 `definition_profile_contract_invalid`，不得降级为 assessment-only focus。SM-2 只消费这条
 sealed declaration：Definition 的 target selector 只标识声明侧 subject/lineage，不是 capability operation authorization；
 acquisition 必须另外绑定 capability owner catalog 中的 exact operation selector。current catalog 缺 fact 时，SM-2/SM-3
 先把每个 CWI 的声明 lineage、required fact 与 exact acquisition 编译为唯一 `RuntimeSemanticProofObligation` 并封存进

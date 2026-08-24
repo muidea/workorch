@@ -2,6 +2,65 @@ package workorchruntimecontract
 
 import "testing"
 
+func TestRuntimeProfileRequiredCWIsRequireExactOwnerReceiptProofClosure(t *testing.T) {
+	valid := RuntimeProfileContract{
+		ID: "software-dev",
+		DeliverableExpectations: []RuntimeDeliverableExpectation{{
+			ID: "source_change", Required: true, EvidenceRole: "primary_state_change",
+		}},
+		EvidenceRequirements: []RuntimeProfileEvidenceRequirement{{
+			ID: "source_change", Scope: "deliverable", RequiredEvidenceKinds: []string{EvidenceKindStateChange},
+			AcceptedStepKinds: []string{StepKindFileWrite},
+		}},
+	}
+	if err := ValidateRuntimeProfileContracts([]RuntimeProfileContract{valid}); err != nil {
+		t.Fatalf("valid profile proof closure rejected: %v", err)
+	}
+
+	for name, mutate := range map[string]func(*RuntimeProfileContract){
+		"missing exact declaration": func(profile *RuntimeProfileContract) { profile.EvidenceRequirements = nil },
+		"wildcard cannot replace exact declaration": func(profile *RuntimeProfileContract) {
+			profile.EvidenceRequirements[0].ID = "*"
+		},
+		"missing evidence kind": func(profile *RuntimeProfileContract) {
+			profile.EvidenceRequirements[0].RequiredEvidenceKinds = nil
+		},
+		"unsupported evidence kind": func(profile *RuntimeProfileContract) {
+			profile.EvidenceRequirements[0].RequiredEvidenceKinds = []string{"claim"}
+		},
+		"operation cannot attest proof": func(profile *RuntimeProfileContract) {
+			profile.EvidenceRequirements[0].AcceptedStepKinds = []string{StepKindFileRead}
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			invalid := valid
+			invalid.EvidenceRequirements = append([]RuntimeProfileEvidenceRequirement(nil), valid.EvidenceRequirements...)
+			mutate(&invalid)
+			violations := RuntimeProfileProofClosureViolations([]RuntimeProfileContract{invalid})
+			if len(violations) == 0 || violations[0].SourceRef() != "profile/software-dev/deliverable/source_change" {
+				t.Fatalf("proof closure violations = %+v", violations)
+			}
+			if err := ValidateRuntimeProfileContracts([]RuntimeProfileContract{invalid}); err == nil {
+				t.Fatal("invalid profile proof closure was accepted")
+			}
+		})
+	}
+
+	duplicate := valid
+	duplicate.ID = "second-profile"
+	violations := RuntimeProfileProofClosureViolations([]RuntimeProfileContract{valid, duplicate})
+	if len(violations) != 2 || violations[0].Rule != "duplicate_required_profile_source" || violations[1].Rule != "duplicate_required_profile_source" {
+		t.Fatalf("duplicate required Profile source violations = %+v", violations)
+	}
+
+	invalidVariant := valid
+	invalidVariant.EvidenceRequirements = append([]RuntimeProfileEvidenceRequirement(nil), valid.EvidenceRequirements...)
+	invalidVariant.EvidenceRequirements[0].AcceptedOperationVariants = []RuntimeOperationVariantRef{{Kind: StepKindGitWrite, VariantID: "commit"}}
+	if err := ValidateRuntimeProfileContracts([]RuntimeProfileContract{invalidVariant}); err == nil {
+		t.Fatal("operation variant outside accepted operation kinds was accepted")
+	}
+}
+
 func TestRuntimeCoverageDependenciesNormalizeAndRejectIncompleteBindings(t *testing.T) {
 	valid := RuntimeProfileContract{ID: "profile", CoverageDependencies: []RuntimeCoverageDependency{
 		{ID: "source-precedes-and-refreshes-validation", SourceScope: "deliverable", SourceRequirementID: "source", DependentScope: "deliverable", DependentRequirementID: "validation", RequireSourceSettled: true, TriggerEvidenceKinds: []string{EvidenceKindStateChange, EvidenceKindStateChange}},

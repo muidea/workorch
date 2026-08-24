@@ -63,18 +63,6 @@ func TestCompileRequiresExactStaticOwnerFactConvergenceBeforeAdmission(t *testin
 		OwnerModuleID: runtimecontract.RuntimeModuleShell, FactKind: runtimecontract.RuntimeOwnerFactSelectableValidationSurface,
 		OperationKind: runtimecontract.RuntimeBlockKindManagedValidationSession,
 	}
-	candidate := candidateWithRelation("all_of")
-	candidate.RequiredOwnerFactBindings = []workspacemodel.DefinitionRequiredOwnerFactBinding{{SourceRef: "profile/software-dev/validation-preparation", Requirement: requirement}}
-	candidate = candidate.WithHash()
-
-	missing, err := Compile(candidate)
-	if err != nil {
-		t.Fatalf("compile missing convergence: %v", err)
-	}
-	if missing.Disposition != workspacemodel.DefinitionAdmissionClarificationRequired || missing.ViolationCode != workspacemodel.DefinitionAdmissionPrerequisiteUnresolved || len(missing.OffendingRefs) != 1 {
-		t.Fatalf("missing convergence result = %+v", missing)
-	}
-
 	convergence := runtimecontract.RuntimeOwnerFactConvergence{
 		Requirement: requirement, MissingTrigger: runtimecontract.RuntimeOwnerFactMissingTrigger,
 		AcquisitionOwnerModuleID: runtimecontract.RuntimeModuleFile, AcquisitionOperationKind: runtimecontract.StepKindFileWrite,
@@ -83,18 +71,44 @@ func TestCompileRequiresExactStaticOwnerFactConvergenceBeforeAdmission(t *testin
 		ReobserveOwnerModuleID: runtimecontract.RuntimeModuleShell, ReobserveFactKind: runtimecontract.RuntimeOwnerFactSelectableValidationSurface,
 		MaxAcquisitionAttempts: 1,
 	}
-	candidate.OwnerFactConvergenceBindings = []workspacemodel.DefinitionOwnerFactConvergenceBinding{{SourceRef: candidate.RequiredOwnerFactBindings[0].SourceRef, Convergence: convergence}}
+	profile := runtimecontract.RuntimeProfileContract{ID: "software-dev", EvidenceRequirements: []runtimecontract.RuntimeProfileEvidenceRequirement{{
+		ID: "validation", Scope: "dodItem", AcceptedStepKinds: []string{runtimecontract.StepKindFileWrite, runtimecontract.RuntimeBlockKindManagedValidationSession},
+		RequiredOwnerFacts: []runtimecontract.RuntimeOwnerFactRequirement{requirement}, OwnerFactConvergences: []runtimecontract.RuntimeOwnerFactConvergence{convergence},
+	}}}
+	candidate := candidateWithRelation("all_of")
+	candidate.RuntimeProfileContracts = []runtimecontract.RuntimeProfileContract{profile}
+	candidate.RuntimeProfileContractsHash = runtimecontract.StableRuntimeProfileContractsHash(candidate.RuntimeProfileContracts)
+	candidate.RequiredOwnerFactBindings, _ = CompileProfileOwnerFactBindings(candidate.RuntimeProfileContracts)
+	candidate = candidate.WithHash()
+
+	missing, err := Compile(candidate)
+	if err != nil {
+		t.Fatalf("compile missing convergence: %v", err)
+	}
+	if missing.Disposition != workspacemodel.DefinitionAdmissionClarificationRequired || missing.ViolationCode != workspacemodel.DefinitionAdmissionProfilePrerequisiteUnresolved || len(missing.OffendingRefs) != 1 {
+		t.Fatalf("missing convergence result = %+v", missing)
+	}
+
+	_, candidate.OwnerFactConvergenceBindings = CompileProfileOwnerFactBindings(candidate.RuntimeProfileContracts)
 	candidate = candidate.WithHash()
 	admitted, err := Compile(candidate)
 	if err != nil || admitted.Disposition != workspacemodel.DefinitionAdmissionAdmittedAllOf {
 		t.Fatalf("exact convergence admission = %+v err=%v", admitted, err)
 	}
 
+	drifted := candidate.Clone()
+	drifted.OwnerFactConvergenceBindings[0].Convergence.TargetSelectorSubjectRef = "caller-overridden-subject"
+	drifted = drifted.WithHash()
+	driftedResult, err := Compile(drifted)
+	if err != nil || driftedResult.Disposition != workspacemodel.DefinitionAdmissionClarificationRequired || driftedResult.ViolationCode != workspacemodel.DefinitionAdmissionProfilePrerequisiteUnresolved {
+		t.Fatalf("snapshot-derived manifest drift result = %+v err=%v", driftedResult, err)
+	}
+
 	incomplete := candidate.Clone()
 	incomplete.OwnerFactConvergenceBindings[0].Convergence.AcquisitionTargetSelectorRef = ""
 	incomplete = incomplete.WithHash()
 	blocked, err := Compile(incomplete)
-	if err != nil || blocked.Disposition != workspacemodel.DefinitionAdmissionClarificationRequired || blocked.ViolationCode != workspacemodel.DefinitionAdmissionPrerequisiteUnresolved {
+	if err != nil || blocked.Disposition != workspacemodel.DefinitionAdmissionClarificationRequired || blocked.ViolationCode != workspacemodel.DefinitionAdmissionProfilePrerequisiteUnresolved {
 		t.Fatalf("incomplete acquisition operation selector result = %+v err=%v", blocked, err)
 	}
 
@@ -104,7 +118,27 @@ func TestCompileRequiresExactStaticOwnerFactConvergenceBeforeAdmission(t *testin
 	if err != nil {
 		t.Fatalf("compile duplicate convergence: %v", err)
 	}
-	if duplicate.Disposition != workspacemodel.DefinitionAdmissionClarificationRequired || duplicate.ViolationCode != workspacemodel.DefinitionAdmissionPrerequisiteUnresolved {
+	if duplicate.Disposition != workspacemodel.DefinitionAdmissionClarificationRequired || duplicate.ViolationCode != workspacemodel.DefinitionAdmissionProfilePrerequisiteUnresolved {
 		t.Fatalf("duplicate convergence result = %+v", duplicate)
+	}
+}
+
+func TestCompileBlocksUnprovableRequiredProfileCWI(t *testing.T) {
+	candidate := candidateWithRelation("all_of")
+	candidate.RuntimeProfileContracts = []runtimecontract.RuntimeProfileContract{{
+		ID:                      "software-dev",
+		DeliverableExpectations: []runtimecontract.RuntimeDeliverableExpectation{{ID: "coverage_map", Required: true, EvidenceRole: "supplemental_evidence"}},
+	}}
+	candidate.RuntimeProfileContractsHash = runtimecontract.StableRuntimeProfileContractsHash(candidate.RuntimeProfileContracts)
+	candidate = candidate.WithHash()
+
+	result, err := Compile(candidate)
+	if err != nil {
+		t.Fatalf("compile: %v", err)
+	}
+	if result.Disposition != workspacemodel.DefinitionAdmissionClarificationRequired ||
+		result.ViolationCode != workspacemodel.DefinitionAdmissionProfileContractInvalid ||
+		len(result.OffendingRefs) != 1 || result.OffendingRefs[0] != "profile/software-dev/deliverable/coverage_map" {
+		t.Fatalf("unprovable Profile admission = %+v", result)
 	}
 }
