@@ -203,6 +203,32 @@ func AdvanceRuntimeSemanticPlanBatch(batch RuntimeSemanticPlanBatch, next Runtim
 	return batch, nil
 }
 
+// ReopenRuntimeSemanticPlanBatchForCorrection is the sole bounded SM-3 return
+// edge for an owner-rejected proof target. It deliberately retains the first
+// document hash: that document is the immutable baseline against which the
+// attempt-1 target-only delta is admitted. An already reopened value is an
+// idempotent replay; every other lifecycle edge remains owned by
+// AdvanceRuntimeSemanticPlanBatch.
+func ReopenRuntimeSemanticPlanBatchForCorrection(manifest RuntimeSemanticPlanManifest, batch RuntimeSemanticPlanBatch) (RuntimeSemanticPlanBatch, error) {
+	if err := batch.ValidateAgainstManifest(manifest); err != nil {
+		return RuntimeSemanticPlanBatch{}, fmt.Errorf("runtime semantic plan batch correction requires current sealed identity: %w", err)
+	}
+	batch = batch.Normalized()
+	if batch.DocumentHash == "" {
+		return RuntimeSemanticPlanBatch{}, fmt.Errorf("runtime semantic plan batch correction requires a baseline document")
+	}
+	switch batch.State {
+	case RuntimeSemanticPlanBatchFeasibilityPending:
+		batch.State = RuntimeSemanticPlanBatchRequesting
+		batch.Hash = StableRuntimeSemanticPlanBatchHash(batch)
+		return batch, nil
+	case RuntimeSemanticPlanBatchRequesting:
+		return batch, nil
+	default:
+		return RuntimeSemanticPlanBatch{}, fmt.Errorf("runtime semantic plan batch correction transition %q -> %q is not allowed", batch.State, RuntimeSemanticPlanBatchRequesting)
+	}
+}
+
 func StableRuntimeSemanticPlanBatchHash(batch RuntimeSemanticPlanBatch) string {
 	batch = batch.Normalized()
 	batch.Hash = ""

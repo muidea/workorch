@@ -53,7 +53,6 @@ type compiledEvidencePolicy struct {
 	TargetSelectorOwnerRef            string
 	TargetSelectorSubjectRef          string
 	TargetSelectorCandidateRefs       []string
-	ProspectiveTargetRef              string
 	RequireTargetGrounding            bool
 	RequireDirectEvidence             bool
 	RequireClaimEvidence              bool
@@ -115,9 +114,10 @@ func compileRuntimeCoverage(goal *workspacemodel.Goal, dod *workspacemodel.DoD, 
 }
 
 func compileRuntimeCoverageWorkUnits(goal *workspacemodel.Goal, dod *workspacemodel.DoD, profiles []runtimecontract.RuntimeProfileContract) ([]workUnit, error) {
-	// Profile-owned bootstrap artifacts are compiled before ordinary definition
-	// units. Runtime therefore receives only sealed Focus contracts and never
-	// derives a project layout from prose, suffixes, or provider output.
+	// Profile-owned bootstrap artifact roles are compiled before ordinary
+	// definition units. Runtime receives sealed role/operation/dependency
+	// declarations, while the post-seal semantic proposal chooses a concrete
+	// target within owner-published selector constraints.
 	units, err := compileRuntimeBootstrapWorkUnits(goal, dod, profiles)
 	if err != nil {
 		return nil, err
@@ -337,8 +337,8 @@ func newCompiledCoverageFocus(id, sliceID, groupScope string, item resolvedCover
 		EvidenceRole: policy.EvidenceRole, TargetRole: policy.TargetRole, TargetRefs: policy.TargetRefs,
 		TargetDiscoverySources: policy.TargetDiscoverySources, TargetSelectorRef: policy.TargetSelectorRef,
 		TargetSelectorOwnerRef: policy.TargetSelectorOwnerRef, TargetSelectorSubjectRef: policy.TargetSelectorSubjectRef,
-		TargetSelectorCandidateRefs: policy.TargetSelectorCandidateRefs, ProspectiveTargetRef: policy.ProspectiveTargetRef,
-		RequireTargetGrounding: policy.RequireTargetGrounding, AcceptedStepKinds: policy.AcceptedStepKinds,
+		TargetSelectorCandidateRefs: policy.TargetSelectorCandidateRefs,
+		RequireTargetGrounding:      policy.RequireTargetGrounding, AcceptedStepKinds: policy.AcceptedStepKinds,
 		AcceptedOperationVariants: policy.AcceptedOperationVariants, RejectedStepKinds: policy.RejectedStepKinds,
 		RequireDirectEvidence: policy.RequireDirectEvidence, RequireClaimEvidence: policy.RequireClaimEvidence,
 		RequireExecutableBehaviorEvidence: policy.RequireExecutableBehaviorEvidence, RequireCoverageTargets: policy.RequireCoverageTargets,
@@ -351,8 +351,9 @@ func newCompiledCoverageFocus(id, sliceID, groupScope string, item resolvedCover
 // compileRuntimeBootstrapWorkUnits resolves a declarative profile recipe using
 // only activation inputs. A recipe is either exactly selected or not selected;
 // ambiguous profile declarations are rejected before a Run can seal an
-// arbitrary bootstrap target. No filesystem or capability-owner access occurs
-// here, preserving File as the owner of path/manifest observations.
+// arbitrary bootstrap graph. Concrete targets remain post-seal semantic
+// proposals. No filesystem or capability-owner access occurs here, preserving
+// File as the owner of path/manifest observations.
 func compileRuntimeBootstrapWorkUnits(goal *workspacemodel.Goal, dod *workspacemodel.DoD, profiles []runtimecontract.RuntimeProfileContract) ([]workUnit, error) {
 	goalText := ""
 	if goal != nil {
@@ -420,24 +421,22 @@ func compileRuntimeBootstrapArtifactPolicy(unit workUnit) (compiledEvidencePolic
 		return compiledEvidencePolicy{}, fmt.Errorf("bootstrap work unit requires profile, recipe and artifact")
 	}
 	artifact := unit.bootstrapArtifact.Normalized()
-	if artifact.ID == "" || artifact.TargetRole == "" || artifact.TargetRef == "" || len(artifact.AllowedOperationKinds) == 0 {
+	if artifact.ID == "" || artifact.TargetRole == "" || len(artifact.AllowedOperationKinds) == 0 {
 		return compiledEvidencePolicy{}, fmt.Errorf("bootstrap artifact work unit is incomplete")
 	}
 	return compiledEvidencePolicy{
-		RequiredEvidenceKinds:       []string{runtimecontract.EvidenceKindStateChange},
-		AcceptedStepKinds:           append([]string(nil), artifact.AllowedOperationKinds...),
-		EvidenceRole:                "bootstrap_artifact",
-		TargetRole:                  artifact.TargetRole,
-		TargetDiscoverySources:      []string{runtimecontract.RuntimeValidationDiscoverySourceWorkspaceManifest, runtimecontract.RuntimeValidationDiscoverySourceProjectFiles},
-		TargetSelectorRef:           "file/profile_declared_candidates",
-		TargetSelectorOwnerRef:      unit.bootstrapProfile,
-		TargetSelectorSubjectRef:    unit.bootstrapRecipe + "/" + artifact.ID,
-		TargetSelectorCandidateRefs: []string{artifact.TargetRef},
-		ProspectiveTargetRef:        artifact.TargetRef,
-		RequireTargetGrounding:      true,
-		RequireDirectEvidence:       true,
-		RequireCoverageTargets:      true,
-		Description:                 "profile-declared workspace bootstrap artifact",
+		RequiredEvidenceKinds:    []string{runtimecontract.EvidenceKindStateChange},
+		AcceptedStepKinds:        append([]string(nil), artifact.AllowedOperationKinds...),
+		EvidenceRole:             "bootstrap_artifact",
+		TargetRole:               artifact.TargetRole,
+		TargetDiscoverySources:   []string{runtimecontract.RuntimeValidationDiscoverySourceWorkspaceManifest, runtimecontract.RuntimeValidationDiscoverySourceProjectFiles},
+		TargetSelectorRef:        "file/workspace_deliverable",
+		TargetSelectorOwnerRef:   unit.bootstrapProfile,
+		TargetSelectorSubjectRef: unit.bootstrapRecipe + "/" + artifact.ID,
+		RequireTargetGrounding:   true,
+		RequireDirectEvidence:    true,
+		RequireCoverageTargets:   true,
+		Description:              "profile-declared workspace bootstrap artifact",
 	}, nil
 }
 
@@ -663,7 +662,6 @@ func resolveCoverageEvidencePolicy(scope, id string, activation runtimecontract.
 				TargetSelectorOwnerRef:            requirement.TargetSelectorOwnerRef,
 				TargetSelectorSubjectRef:          requirement.TargetSelectorSubjectRef,
 				TargetSelectorCandidateRefs:       append([]string(nil), requirement.TargetSelectorCandidateRefs...),
-				ProspectiveTargetRef:              requirement.ProspectiveTargetRef,
 				RequireTargetGrounding:            requirement.RequireTargetGrounding,
 				RequiredEvidenceKinds:             append([]string(nil), requirement.RequiredEvidenceKinds...),
 				RequireDirectEvidence:             requirement.RequireDirectEvidence,
@@ -763,9 +761,6 @@ func mergeCompiledEvidencePolicy(base compiledEvidencePolicy, requirements []run
 			base.TargetSelectorSubjectRef = strings.TrimSpace(requirement.TargetSelectorSubjectRef)
 		}
 		base.TargetSelectorCandidateRefs = stableStringUnion(base.TargetSelectorCandidateRefs, requirement.TargetSelectorCandidateRefs)
-		if base.ProspectiveTargetRef == "" && strings.TrimSpace(requirement.ProspectiveTargetRef) != "" {
-			base.ProspectiveTargetRef = strings.TrimSpace(requirement.ProspectiveTargetRef)
-		}
 		base.TargetRefs = stableStringUnion(base.TargetRefs, requirement.TargetRefs)
 		base.TargetDiscoverySources = stableStringUnion(base.TargetDiscoverySources, requirement.TargetDiscoverySources)
 		base.RequireTargetGrounding = base.RequireTargetGrounding || requirement.RequireTargetGrounding
@@ -803,7 +798,6 @@ func applyCompiledEvidencePolicy(focus runtimecontract.CoverageFocus, policy com
 	focus.TargetSelectorOwnerRef = policy.TargetSelectorOwnerRef
 	focus.TargetSelectorSubjectRef = policy.TargetSelectorSubjectRef
 	focus.TargetSelectorCandidateRefs = append([]string(nil), policy.TargetSelectorCandidateRefs...)
-	focus.ProspectiveTargetRef = policy.ProspectiveTargetRef
 	focus.TargetRefs = append([]string(nil), policy.TargetRefs...)
 	focus.TargetDiscoverySources = append([]string(nil), policy.TargetDiscoverySources...)
 	focus.RequireTargetGrounding = policy.RequireTargetGrounding

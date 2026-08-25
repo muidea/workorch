@@ -162,9 +162,10 @@ func NormalizeCoverageEvidenceProofs(values []CoverageEvidenceProof) []CoverageE
 	return nilIfEmpty(ret)
 }
 
-// CoverageEvidenceBinding is the immutable, profile/template-compiled proof
-// contract for exactly one coverage work item. It is a pure value: only the
-// SM-2 reducer may turn a receipt match into coverage credit.
+// CoverageEvidenceBinding is the immutable, SM-2-sealed proof contract for
+// exactly one coverage work item. It is a pure value: only the SM-2 reducer may
+// seal semantic proposal/owner-fact agreement or turn a receipt match into
+// coverage credit.
 type CoverageEvidenceBinding struct {
 	ID                       string
 	CoverageWorkItemID       common.CoverageWorkItemID
@@ -180,10 +181,13 @@ type CoverageEvidenceBinding struct {
 	// It is sealed with the binding so reconciliation can ask the owner to
 	// verify the same target surface after a process restart.
 	TargetSelectorCandidateRefs []string
-	ProspectiveTargetRef        string
-	DeclarationRef              string
-	PrerequisiteRefs            []string
-	Hash                        string
+	// ProspectiveTargetRef is the concrete semantic-proposal target accepted by
+	// owner facts and sealed by SM-2. It is generation authority and is never a
+	// pre-seal Definition/Profile declaration.
+	ProspectiveTargetRef string
+	DeclarationRef       string
+	PrerequisiteRefs     []string
+	Hash                 string
 }
 
 func (b CoverageEvidenceBinding) Normalized() CoverageEvidenceBinding {
@@ -237,6 +241,14 @@ func (b CoverageEvidenceBinding) Validate() error {
 	}
 	if len(b.TargetSelectorCandidateRefs) != 0 && b.TargetSelectorRef == "" {
 		return fmt.Errorf("coverage evidence binding %q selector candidates require a selector", b.ID)
+	}
+	if b.ProspectiveTargetRef != "" {
+		if len(b.TargetRefs) != 0 || b.TargetSelectorRef == "" || b.TargetSelectorOwnerRef == "" || b.TargetSelectorSubjectRef == "" {
+			return fmt.Errorf("coverage evidence binding %q prospective target requires only a complete selector target surface", b.ID)
+		}
+		if len(b.TargetSelectorCandidateRefs) != 0 && !containsString(b.TargetSelectorCandidateRefs, b.ProspectiveTargetRef) {
+			return fmt.Errorf("coverage evidence binding %q prospective target is outside selector candidates", b.ID)
+		}
 	}
 	if b.Hash != "" && b.Hash != StableCoverageEvidenceBindingHash(b) {
 		return fmt.Errorf("coverage evidence binding %q hash does not match contents", b.ID)
@@ -332,6 +344,14 @@ func ValidateCoverageEvidenceBindingsForFocus(focus CoverageFocus, definitionRev
 		}
 		if !sameStrings(binding.EvidenceKinds(), focus.RequiredEvidenceKinds) {
 			return fmt.Errorf("coverage binding %q proof kinds do not match focus requirements", binding.ID)
+		}
+		if !sameStrings(binding.TargetRefs, focus.TargetRefs) ||
+			binding.TargetSelectorRef != focus.TargetSelectorRef ||
+			binding.TargetSelectorOwnerRef != focus.TargetSelectorOwnerRef ||
+			binding.TargetSelectorSubjectRef != focus.TargetSelectorSubjectRef ||
+			!sameStrings(binding.TargetSelectorCandidateRefs, focus.TargetSelectorCandidateRefs) ||
+			binding.ProspectiveTargetRef != focus.ProspectiveTargetRef {
+			return fmt.Errorf("coverage binding %q target surface does not match focus authority", binding.ID)
 		}
 		if _, ok := expected[binding.CoverageWorkItemID]; !ok {
 			return fmt.Errorf("coverage binding %q references coverage item outside focus", binding.ID)

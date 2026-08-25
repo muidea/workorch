@@ -848,7 +848,7 @@ func runtimeTestAttachProspectiveOwnerFactSatisfaction(t *testing.T, manifest ru
 		runtimecontract.WorkspaceManifest{Revision: catalog.ObservedRevision, TargetRefs: append([]string(nil), catalog.TargetRefs...)},
 	)
 	if err != nil {
-		t.Fatalf("build test prospective workspace delta: %v", err)
+		t.Fatalf("build test prospective workspace delta: %v proposal=%+v catalog=%+v", err, proposal, catalog)
 	}
 	var dependencyCatalog runtimecontract.RuntimeOperationAdmissibility
 	for _, candidate := range manifest.OwnerFactDependencyCatalogs {
@@ -901,19 +901,6 @@ func runtimeTestSemanticProofObligations(t *testing.T, facts runtimecontract.Run
 	ret := make([]runtimecontract.RuntimeSemanticProofObligation, 0, len(coverageItems))
 	for _, item := range coverageItems {
 		source := sources[item.ID].Normalized()
-		prospectiveTargetRef := source.ProspectiveTargetRef
-		if prospectiveTargetRef == "" {
-			candidates := make([]string, 0, 1)
-			for _, spec := range specs {
-				if spec.proposal.CoverageWorkItemID == item.ID && spec.proposal.Target.ProspectiveTargetRef != "" {
-					candidates = append(candidates, spec.proposal.Target.ProspectiveTargetRef)
-				}
-			}
-			candidates = runtimeTestNormalizeStrings(candidates)
-			if len(candidates) == 1 {
-				prospectiveTargetRef = candidates[0]
-			}
-		}
 		evidenceKinds := append([]string(nil), source.RequiredEvidenceKinds...)
 		if len(evidenceKinds) == 0 {
 			for _, spec := range specs {
@@ -925,8 +912,7 @@ func runtimeTestSemanticProofObligations(t *testing.T, facts runtimecontract.Run
 		obligation := runtimecontract.RuntimeSemanticProofObligation{
 			CoverageWorkItemID: item.ID, RequiredEvidenceKinds: runtimeTestNormalizeStrings(evidenceKinds),
 			DeclarationTargetRole: source.TargetRole, DeclarationTargetDiscoverySources: append([]string(nil), source.TargetDiscoverySources...),
-			DeclarationProspectiveTargetRef: prospectiveTargetRef,
-			RequireTargetGrounding:          source.RequireTargetGrounding || prospectiveTargetRef != "", RequireAssessment: source.RequireAssessment,
+			RequireTargetGrounding: source.RequireTargetGrounding, RequireAssessment: source.RequireAssessment,
 			RequiredOwnerFacts:    append([]runtimecontract.RuntimeOwnerFactRequirement(nil), source.RequiredOwnerFacts...),
 			OwnerFactConvergences: runtimecontract.CloneRuntimeOwnerFactConvergences(source.OwnerFactConvergences),
 			MetricConstraints:     append([]string(nil), source.MetricConstraints...), ArtifactRefs: append([]string(nil), source.ArtifactRefs...),
@@ -942,11 +928,6 @@ func runtimeTestSemanticProofObligations(t *testing.T, facts runtimecontract.Run
 				obligation.DeclarationTargetSelectorSubjectRef = "test/coverage/" + string(item.ID)
 			}
 			obligation.DeclarationTargetSelectorCandidateRefs = append([]string(nil), source.TargetSelectorCandidateRefs...)
-		}
-		if prospectiveTargetRef != "" && obligation.DeclarationTargetSelectorRef == "" {
-			obligation.DeclarationTargetSelectorRef = "test/definition-target-selector/" + string(item.ID)
-			obligation.DeclarationTargetSelectorOwnerRef = "test/profile"
-			obligation.DeclarationTargetSelectorSubjectRef = "test/coverage/" + string(item.ID)
 		}
 		if len(runtimecontract.RuntimeMissingOwnerFactRequirements(source.RequiredOwnerFacts, catalogs)) != 0 {
 			convergence, required := runtimecontract.ResolveRuntimeOwnerFactAcquisition(source.RequiredOwnerFacts, source.OwnerFactConvergences, catalogs)
@@ -968,9 +949,7 @@ func runtimeTestSemanticProofObligations(t *testing.T, facts runtimecontract.Run
 			if convergence.AcquisitionTargetPolicy != runtimecontract.RuntimeOperationTargetPolicyProspectiveOwnerTarget {
 				constraints = nil
 			}
-			acquisitionProspectiveTargetRef := ""
 			if convergence.AcquisitionTargetPolicy == runtimecontract.RuntimeOperationTargetPolicyProspectiveOwnerTarget {
-				acquisitionProspectiveTargetRef = prospectiveTargetRef
 				obligation.DeclarationTargetSelectorRef = convergence.TargetSelectorRef
 				obligation.DeclarationTargetSelectorOwnerRef = convergence.TargetSelectorOwnerRef
 				obligation.DeclarationTargetSelectorSubjectRef = convergence.TargetSelectorSubjectRef
@@ -978,7 +957,6 @@ func runtimeTestSemanticProofObligations(t *testing.T, facts runtimecontract.Run
 			obligation.OwnerFactAcquisition = &runtimecontract.RuntimeSemanticOwnerFactAcquisition{
 				Requirement:                        convergence.Requirement,
 				ProspectiveSatisfactionContractRef: convergence.ProspectiveSatisfactionContractRef,
-				ProspectiveTargetRef:               acquisitionProspectiveTargetRef,
 				DeclarationTargetSelectorRef:       convergence.TargetSelectorRef, DeclarationTargetSelectorOwnerRef: convergence.TargetSelectorOwnerRef, DeclarationTargetSelectorSubjectRef: convergence.TargetSelectorSubjectRef,
 				AcquisitionOwnerModuleID: convergence.AcquisitionOwnerModuleID, AcquisitionOperationKind: convergence.AcquisitionOperationKind, AcquisitionOperationVariantID: convergence.AcquisitionOperationVariantID,
 				AcquisitionTargetPolicy: convergence.AcquisitionTargetPolicy, AcquisitionTargetSelectorRef: convergence.AcquisitionTargetSelectorRef, AcquisitionConstraintRefs: constraints,
@@ -1050,6 +1028,23 @@ func runtimeTestSemanticFixtureSpecs(t *testing.T, aggregate runtime.RuntimeAggr
 		if !found {
 			t.Fatalf("test semantic fixture has no source focus for coverage %q", coverageID)
 		}
+		// A missing immutable owner fact specializes the current proof to the
+		// one pre-seal acquisition declared by Definition. Resolve that rule
+		// before projecting terminal evidence kinds: otherwise a synthetic Shell
+		// validation proposal can be paired later with a File acquisition
+		// obligation, a shape production admission never permits.
+		if len(runtimecontract.RuntimeMissingOwnerFactRequirements(source.RequiredOwnerFacts, aggregate.Facts.Resources.OperationAdmissibilities)) != 0 {
+			convergence, required := runtimecontract.ResolveRuntimeOwnerFactAcquisition(
+				source.RequiredOwnerFacts,
+				source.OwnerFactConvergences,
+				aggregate.Facts.Resources.OperationAdmissibilities,
+			)
+			if !required {
+				t.Fatalf("test semantic fixture coverage %q has a missing owner fact without one ready acquisition", coverageID)
+			}
+			specs = append(specs, runtimeTestSemanticFixtureAcquisitionSpec(t, aggregate, source, coverageID, convergence))
+			continue
+		}
 		source = runtimeTestSemanticFixtureProfileOverlay(aggregate, source, coverageID)
 		evidenceKinds, required := runtimeTestSemanticFixtureEvidenceKinds(source)
 		for _, evidenceKind := range evidenceKinds {
@@ -1117,6 +1112,85 @@ func runtimeTestSemanticFixtureSpecs(t *testing.T, aggregate runtime.RuntimeAggr
 	return specs
 }
 
+func runtimeTestSemanticFixtureAcquisitionSpec(
+	t *testing.T,
+	aggregate runtime.RuntimeAggregate,
+	source runtimecontract.CoverageFocus,
+	coverageID common.CoverageWorkItemID,
+	convergence runtimecontract.RuntimeOwnerFactConvergence,
+) runtimeTestSemanticFixtureSpec {
+	t.Helper()
+	source = source.Normalized()
+	convergence = convergence.Normalized()
+	descriptor, found := runtimecontract.RuntimeOperationDescriptorForKind(convergence.AcquisitionOperationKind)
+	if !found || descriptor.OwnerModuleID != convergence.AcquisitionOwnerModuleID {
+		t.Fatalf("test semantic acquisition %q has invalid owner operation %q", coverageID, convergence.AcquisitionOperationKind)
+	}
+	catalog := runtimeTestSemanticFixtureCatalogForOwner(t, aggregate.Facts.Resources.OperationAdmissibilities, convergence.AcquisitionOwnerModuleID).Normalized()
+	variantIDs := []string(nil)
+	if convergence.AcquisitionOperationVariantID != "" {
+		variantIDs = []string{convergence.AcquisitionOperationVariantID}
+	}
+	allowed, selectors, constraints, variantFound, err := runtimecontract.RuntimeOperationAdmissibilityAllowsTargetPolicyForVariants(
+		catalog,
+		convergence.AcquisitionOperationKind,
+		variantIDs,
+		convergence.AcquisitionTargetPolicy,
+	)
+	if err != nil || !variantFound || !allowed || !runtimeTestStringContains(selectors, convergence.AcquisitionTargetSelectorRef) {
+		t.Fatalf("test semantic acquisition %q is outside owner catalog: found=%t allowed=%t selectors=%v err=%v", coverageID, variantFound, allowed, selectors, err)
+	}
+
+	target := runtimecontract.RuntimeOperationTargetAuthorization{Policy: convergence.AcquisitionTargetPolicy}
+	feasibilityRefs := append([]string(nil), catalog.TargetRefs...)
+	selectorRefs := []string{convergence.AcquisitionTargetSelectorRef}
+	constraintRefs := []string(nil)
+	switch convergence.AcquisitionTargetPolicy {
+	case runtimecontract.RuntimeOperationTargetPolicyExistingOwnerScope:
+		target.OwnerSelectorRefs = append([]string(nil), selectorRefs...)
+	case runtimecontract.RuntimeOperationTargetPolicyProspectiveOwnerTarget:
+		prospectiveTarget := source.ProspectiveTargetRef
+		if prospectiveTarget == "" && len(source.TargetRefs) == 1 {
+			// TargetRefs here are the generation cursor retained before Definition
+			// overlay; they are not copied from the startup declaration.
+			prospectiveTarget = source.TargetRefs[0]
+		}
+		if prospectiveTarget == "" && len(source.TargetSelectorCandidateRefs) != 0 {
+			prospectiveTarget = source.TargetSelectorCandidateRefs[0]
+		}
+		if prospectiveTarget == "" {
+			t.Fatalf("test semantic acquisition %q has neither generation target nor bounded selector candidate", coverageID)
+		}
+		if runtimeTestStringContains(catalog.TargetRefs, prospectiveTarget) {
+			t.Fatalf("test semantic acquisition %q prospective target %q already exists in owner catalog", coverageID, prospectiveTarget)
+		}
+		target.OwnerSelectorRefs = append([]string(nil), selectorRefs...)
+		target.ProspectiveConstraintRefs = append([]string(nil), constraints...)
+		target.ProspectiveTargetRef = prospectiveTarget
+		feasibilityRefs = []string{prospectiveTarget}
+		constraintRefs = append([]string(nil), constraints...)
+	default:
+		t.Fatalf("test semantic acquisition %q has unsupported target policy %q", coverageID, convergence.AcquisitionTargetPolicy)
+	}
+	proposal := runtimecontract.RuntimeSemanticProofProposal{
+		CoverageWorkItemID: coverageID,
+		OwnerModuleID:      convergence.AcquisitionOwnerModuleID,
+		OperationKind:      convergence.AcquisitionOperationKind,
+		OperationVariantID: convergence.AcquisitionOperationVariantID,
+		Target:             target,
+		RequiredEvidenceKinds: []string{
+			runtimecontract.EvidenceKindStateChange,
+		},
+		RequiredEffectScopes: []runtimecontract.RuntimeEffectScope{runtimecontract.RuntimeEffectWorkspaceDurable},
+		DeclarationRef:       "test/semantic-fixture/acquisition/" + string(coverageID),
+	}.Normalized()
+	return runtimeTestSemanticFixtureSpec{
+		proposal: proposal, feasibilityRefs: feasibilityRefs,
+		selectorRefs: selectorRefs, constraintRefs: constraintRefs,
+		targetRefs: append([]string(nil), catalog.TargetRefs...),
+	}
+}
+
 // runtimeTestSemanticFixtureProfileOverlay supplies generation-only values
 // from the activation-sealed profile declaration. RuntimeDefinitionFocus is
 // intentionally unable to carry these values; production SM-2 receives them
@@ -1145,9 +1219,6 @@ func runtimeTestSemanticFixtureProfileOverlay(aggregate runtime.RuntimeAggregate
 	requirement := matches[0]
 	if len(source.TargetRefs) == 0 {
 		source.TargetRefs = append([]string(nil), requirement.TargetRefs...)
-	}
-	if source.ProspectiveTargetRef == "" {
-		source.ProspectiveTargetRef = requirement.ProspectiveTargetRef
 	}
 	if len(source.AcceptedStepKinds) == 0 {
 		source.AcceptedStepKinds = append([]string(nil), requirement.AcceptedStepKinds...)
@@ -1252,14 +1323,15 @@ func runtimeTestSemanticFixtureTarget(
 	if len(targets) == 0 && facts.Resources.TargetSelection != nil {
 		targets = append(targets, facts.Resources.TargetSelection.TargetRefs...)
 	}
-	if len(targets) == 0 {
-		targets = append(targets, source.TargetSelectorCandidateRefs...)
-	}
 	selector := source.TargetSelectorRef
 	if selector == "" {
 		selector = "test/fixture-owner-selector/" + string(coverageID)
 	}
-	if source.ProspectiveTargetRef != "" && evidenceKind == runtimecontract.EvidenceKindStateChange {
+	prospectiveTargetRef := source.ProspectiveTargetRef
+	if prospectiveTargetRef == "" && len(targets) == 0 && len(source.TargetSelectorCandidateRefs) != 0 {
+		prospectiveTargetRef = source.TargetSelectorCandidateRefs[0]
+	}
+	if prospectiveTargetRef != "" && evidenceKind == runtimecontract.EvidenceKindStateChange {
 		constraints := []string{"test/fixture-prospective-target/" + string(coverageID)}
 		if descriptor, found := runtimecontract.RuntimeOperationDescriptorForKind(operationKind); found && descriptor.OwnerModuleID == runtimecontract.RuntimeModuleFile {
 			// File is the owner of workspace-path creation semantics. Use its
@@ -1272,13 +1344,13 @@ func runtimeTestSemanticFixtureTarget(
 			Policy:                    runtimecontract.RuntimeOperationTargetPolicyProspectiveOwnerTarget,
 			OwnerSelectorRefs:         []string{selector},
 			ProspectiveConstraintRefs: constraints,
-			ProspectiveTargetRef:      source.ProspectiveTargetRef,
-		}, []string{source.ProspectiveTargetRef}, []string{selector}, constraints, nil
+			ProspectiveTargetRef:      prospectiveTargetRef,
+		}, []string{prospectiveTargetRef}, []string{selector}, constraints, nil
 	}
-	if source.ProspectiveTargetRef != "" && evidenceKind == runtimecontract.EvidenceKindValidation {
+	if prospectiveTargetRef != "" && evidenceKind == runtimecontract.EvidenceKindValidation {
 		return runtimecontract.RuntimeOperationTargetAuthorization{
-			Policy: runtimecontract.RuntimeOperationTargetPolicyExactTarget, ExactTargetRefs: []string{source.ProspectiveTargetRef},
-		}, []string{source.ProspectiveTargetRef}, nil, nil, []string{source.ProspectiveTargetRef}
+			Policy: runtimecontract.RuntimeOperationTargetPolicyExactTarget, ExactTargetRefs: []string{prospectiveTargetRef},
+		}, []string{prospectiveTargetRef}, nil, nil, []string{prospectiveTargetRef}
 	}
 	if len(targets) == 0 && source.TargetSelectorRef != "" {
 		return runtimecontract.RuntimeOperationTargetAuthorization{

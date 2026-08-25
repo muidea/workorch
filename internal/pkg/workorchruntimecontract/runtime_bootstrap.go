@@ -66,6 +66,11 @@ func (b RuntimeBootstrap) Validate() error {
 	if err := ValidateRuntimeExecutionBudgetPolicySources(b.ExecutionBudgetPolicy, b.ConvergencePolicy, b.RecoveryPolicy); err != nil {
 		return err
 	}
+	for _, requirement := range b.Requirements {
+		if requirement.ProspectiveTargetRef != "" {
+			return fmt.Errorf("runtime bootstrap requirement cannot carry a prospective target before semantic binding")
+		}
+	}
 	if len(b.DefinitionFocuses) == 0 {
 		return fmt.Errorf("runtime bootstrap requires at least one definition focus")
 	}

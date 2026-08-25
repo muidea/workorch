@@ -18,6 +18,7 @@ import (
 	workspaceevents "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/events"
 	workspacemodel "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
+	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
@@ -209,9 +210,16 @@ func definitionAdmissionProfileBindings(workspace *workspacemodel.Workspace, tem
 	}
 	effective := activationcore.MergeTemplateWorkspaceContextHintsForExecutionContract(template.ContextHints.Map(), workspace.ContextHints.Map())
 	rawProfiles := runtimeMap(effective["profileContracts"])
+	if err := validateRuntimePresealTargetDeclarations(map[string]any{"profileContracts": rawProfiles}, nil); err != nil {
+		return nil, nil, nil, nil, "", err
+	}
+	evidencePolicyBindings, err := definitionAdmissionEvidencePolicyBindings(workspace, template)
+	if err != nil {
+		return nil, nil, nil, nil, "", err
+	}
 	contract := runtimeExecutionContract(map[string]any{"profileContracts": rawProfiles})
 	profiles := runtimecontract.NormalizeRuntimeProfileContracts(contract.ProfileContracts)
-	policies := make([]workspacemodel.DefinitionAdmissionPolicyBinding, 0, len(profiles))
+	policies := make([]workspacemodel.DefinitionAdmissionPolicyBinding, 0, len(profiles)+len(evidencePolicyBindings))
 	for _, profile := range profiles {
 		encoded, err := json.Marshal(rawProfiles[profile.ID])
 		if err != nil {
@@ -224,8 +232,43 @@ func definitionAdmissionProfileBindings(workspace *workspacemodel.Workspace, tem
 			SnapshotHash: "profile-snapshot-sha256:" + hex.EncodeToString(h.Sum(nil)),
 		})
 	}
+	policies = append(policies, evidencePolicyBindings...)
 	required, convergences := definitionadmission.CompileProfileOwnerFactBindings(profiles)
 	return policies, profiles, required, convergences, runtimecontract.StableRuntimeProfileContractsHash(profiles), nil
+}
+
+// definitionAdmissionEvidencePolicyBindings seals both Template input and the
+// Workspace-owned effective copy before promotion. Runtime activation consumes
+// the Workspace policies, while the Template remains a formal startup input;
+// neither surface may hide the removed exact prospective-target declaration.
+func definitionAdmissionEvidencePolicyBindings(workspace *workspacemodel.Workspace, template *workspacemodel.WorkspaceTemplate) ([]workspacemodel.DefinitionAdmissionPolicyBinding, error) {
+	if workspace == nil || template == nil {
+		return nil, common.ErrInvalidArgument
+	}
+	if err := validateRuntimeEvidencePolicyInputs("Template "+strings.TrimSpace(template.ID), template.EvidencePolicies); err != nil {
+		return nil, err
+	}
+	if err := validateRuntimeEvidencePolicyInputs("Workspace "+strings.TrimSpace(string(workspace.ID)), workspace.EvidencePolicies); err != nil {
+		return nil, err
+	}
+	ret := make([]workspacemodel.DefinitionAdmissionPolicyBinding, 0, len(template.EvidencePolicies)+len(workspace.EvidencePolicies))
+	appendBindings := func(owner string, policies []workorcheventpayload.Payload) {
+		for idx, policy := range policies {
+			policyID, _ := policy.String("id")
+			policyID = strings.TrimSpace(policyID)
+			canonical := policy.CanonicalString()
+			h := sha256.New()
+			_, _ = fmt.Fprintf(h, "%08x%s", len(canonical), canonical)
+			ret = append(ret, workspacemodel.DefinitionAdmissionPolicyBinding{
+				PolicyRef:    fmt.Sprintf("%s-evidence-policy:%06d:%s", owner, idx+1, policyID),
+				Revision:     "runtime-evidence-policy-v1",
+				SnapshotHash: "evidence-policy-snapshot-sha256:" + hex.EncodeToString(h.Sum(nil)),
+			})
+		}
+	}
+	appendBindings("template", template.EvidencePolicies)
+	appendBindings("workspace", workspace.EvidencePolicies)
+	return ret, nil
 }
 
 func latestPriorInvalidDefinitionCandidate(workspace *workspacemodel.Workspace, current workspacemodel.DefinitionAdmissionCandidate) (workspacemodel.DefinitionAdmissionCandidate, workspacemodel.DefinitionAdmissionResult, bool) {

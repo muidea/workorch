@@ -45,11 +45,21 @@ For `prospective_owner_target`, the pre-seal declaration's exact `ProspectiveSat
 join the acquisition owner and required owner facts. The semantic manifest keeps required-owner
 `OwnerFactDependencyCatalogs` separate from provider-selectable `OwnerCatalogs`: dependency catalogs participate in hash,
 freshness, CAS and seal, but never appear as LLM-selectable operations/surfaces. File and Shell return only their own factual
-outer/nested observations. Shell typed stale uses the existing bounded catalog-refresh transition; `would_not_satisfy` permits
-no provider correction because the exact target is activation-sealed: it is persisted as the complete composite fact and the
-next drive deterministically closes the common `semantic_contract_failed` terminal while preserving
-`prospective_owner_fact_unsatisfied` as its typed original reason. None of these owner results can directly change SM-2 or either
-capability owner's state.
+outer/nested observations. The pre-seal declaration and compiled obligation contain no exact prospective target. The SM-3
+semantic proposal supplies one concrete value at the intersection of the Definition declaration selector/candidate refs and the
+current semantic manifest's operation selector/owner constraints; non-empty candidate refs require an exact member match. Only
+the SM-2 binding seal makes that target authoritative. A later operation candidate may only reference that current binding, and
+dispatch derives and consumes the exact target from the binding rather than from provider output.
+Shell typed stale uses the existing bounded catalog-refresh transition and does not consume semantic correction. A
+`would_not_satisfy` result is eligible for correction only after the exact-current File+Shell composite is persisted. If semantic
+attempt 0 still has a legal different target under the original declaration selector/candidate refs and current owner
+constraints, an Orchestrator-private SM-3 transition reuses the same semantic batch and sole correction ledger, removes only the
+feasibility working set, retains the attempt-0 proof document/hash as the immutable target-only delta baseline, and returns that
+batch to `Requesting` through the canonical correction transition. Attempt 1 must propose a different target inside the same
+bounds and may change no sibling field. A fixed/singleton or exhausted target set at attempt 0, an invalid attempt-1 document, or
+an attempt-1 `would_not_satisfy` closes the common `semantic_contract_failed` terminal. A second owner rejection preserves
+`prospective_owner_fact_unsatisfied` as its typed original reason; a valid attempt-1 `would_satisfy` continues to the SM-2 seal.
+None of these owner results directly changes SM-2/SM-3 or either capability owner's state.
 
 ## Governance, Resume And Restart
 

@@ -14,9 +14,9 @@ import (
 // AcquireRuntimeTargetSelection applies the File owner's neutral cardinality
 // rule to a bounded workspace inventory. It does not inspect source syntax,
 // file names, suffixes, or a profile's semantic TargetRole. The
-// workspace-deliverable selector has both a profile-declared creation form for
+// workspace-deliverable selector has both an SM-2 binding-sealed creation form for
 // an empty inventory and a bounded complete-scope form for multiple entries.
-// File never derives a path: it only verifies the declared prospective path
+// File never derives a path: it only verifies the binding-sealed prospective path
 // and operation admissibility validates every operation target.
 type runtimeTargetSelectionBinding struct {
 	ownerRef      string
@@ -46,7 +46,7 @@ func (a *RuntimeAdapter) AcquireRuntimeTargetSelection(workspaceDirectory, prere
 	case runtimeFileTargetSelectorUniqueWorkspaceEntry:
 		return acquireUniqueWorkspaceEntryRuntimeTargetSelection(request, manifest)
 	case runtimeFileTargetSelectorProfileCandidates:
-		return acquireProfileDeclaredTargetSelection(
+		return acquireBoundedCandidateTargetSelection(
 			request.workspaceDirectory, request.prerequisiteID, request.targetRole, request.selectorRef,
 			request.prospectiveTargetRef, request.maxItems, observation.entryCount, manifest, request.binding,
 		)
@@ -241,10 +241,11 @@ func sealRuntimeTargetSelection(selection runtimemodel.RuntimeTargetSelection) (
 	return selection, nil
 }
 
-// acquireProfileDeclaredTargetSelection only intersects the profile-provided,
-// bounded candidate set with the File manifest. The profile binding supplies
-// all semantics; File does not inspect a name, suffix, content or role.
-func acquireProfileDeclaredTargetSelection(workspaceDirectory, prerequisiteID, targetRole, selectorRef, prospectiveTargetRef string, maxItems int, manifestEntryCount int, manifest runtimemodel.WorkspaceManifest, binding runtimeTargetSelectionBinding) (runtimemodel.RuntimeTargetSelection, error) {
+// acquireBoundedCandidateTargetSelection intersects the Definition-declared,
+// bounded candidate set with the File manifest. An exact prospective target,
+// when present, has already been sealed by SM-2 binding. File only evaluates
+// path and inventory facts; it does not inspect a name, suffix, content or role.
+func acquireBoundedCandidateTargetSelection(workspaceDirectory, prerequisiteID, targetRole, selectorRef, prospectiveTargetRef string, maxItems int, manifestEntryCount int, manifest runtimemodel.WorkspaceManifest, binding runtimeTargetSelectionBinding) (runtimemodel.RuntimeTargetSelection, error) {
 	if binding.ownerRef == "" || binding.subjectRef == "" || len(binding.candidateRefs) == 0 || len(binding.candidateRefs) > maxItems {
 		return runtimemodel.RuntimeTargetSelection{}, common.ErrInvalidArgument
 	}
@@ -290,9 +291,9 @@ func acquireProfileDeclaredTargetSelection(workspaceDirectory, prerequisiteID, t
 			return sealRuntimeTargetSelection(selection)
 		}
 		prospectiveTarget = target
-		// The profile-declared prospective target must participate in the exact
+		// The binding-sealed prospective target must participate in the bounded
 		// current candidate set. A different current match cannot make an absent
-		// declaration admissible by cardinality alone.
+		// target admissible by cardinality alone.
 		if len(matched) != 0 && !containsString(matched, prospectiveTargetRef) {
 			selection.Disposition = runtimemodel.RuntimeTargetSelectionUnsupported
 			return sealRuntimeTargetSelection(selection)

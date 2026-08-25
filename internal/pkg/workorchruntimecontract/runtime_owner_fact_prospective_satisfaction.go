@@ -628,8 +628,7 @@ func validateRuntimeProspectiveWorkspaceManifestDeltaForProposal(delta RuntimePr
 		delta.CatalogSnapshotID != acquisition.OwnerCatalogSnapshotID ||
 		delta.ProspectiveSatisfactionContractRef != acquisition.ProspectiveSatisfactionContractRef ||
 		delta.BaseWorkspaceManifestRevision != acquisition.OwnerCatalogObservedRevision ||
-		delta.ProspectiveTargetRef != proposal.Target.ProspectiveTargetRef ||
-		delta.ProspectiveTargetRef != acquisition.ProspectiveTargetRef {
+		delta.ProspectiveTargetRef != proposal.Target.ProspectiveTargetRef {
 		return fmt.Errorf("runtime prospective workspace manifest delta does not match sealed prospective proposal")
 	}
 	return nil

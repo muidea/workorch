@@ -122,18 +122,36 @@ func TestSemanticBindingMissingOwnerFactRequiresExactSealedAcquisition(t *testin
 	wrongTarget.Proposals[0].Target.ProspectiveTargetRef = "provider-selected-target.sh"
 	var targetViolation *RuntimeSemanticProposalViolationError
 	if err := wrongTarget.ValidateAgainstManifest(manifest); !errors.As(err, &targetViolation) || targetViolation.Violation().Path != "$.proposals[0].target.prospectiveTargetRef" {
-		t.Fatalf("provider-selected target was not rejected as an exact typed violation: violation=%+v err=%v", targetViolation, err)
+		t.Fatalf("out-of-bounds provider-selected target was not rejected as a typed violation: violation=%+v err=%v", targetViolation, err)
+	}
+	targetViolation = nil
+	if _, _, err := CompileRuntimeSemanticBindings(manifest, runtimeSemanticBindingTestRequestID, wrongTarget, []RuntimeSemanticProofFeasibility{fact}); !errors.As(err, &targetViolation) || targetViolation.Violation().Path != "$.proposals[0].target.prospectiveTargetRef" {
+		t.Fatalf("binding compilation did not preserve the typed target-bound violation: violation=%+v err=%v", targetViolation, err)
 	}
 
 	changedTargetAuthority := manifest.Clone()
-	changedTargetAuthority.ProofObligations[0].DeclarationProspectiveTargetRef = "other-activation-target.sh"
-	changedTargetAuthority.ProofObligations[0].OwnerFactAcquisition.ProspectiveTargetRef = "other-activation-target.sh"
+	changedTargetAuthority.ProofObligations[0].DeclarationTargetSelectorCandidateRefs = []string{"other-activation-target.sh"}
 	changedTargetAuthority.Hash = StableRuntimeSemanticPlanManifestHash(changedTargetAuthority)
 	if changedTargetAuthority.Hash == manifest.Hash {
-		t.Fatal("semantic manifest hash ignored the exact prospective target authority")
+		t.Fatal("semantic manifest hash ignored the bounded prospective target declaration")
 	}
 	if err := changedTargetAuthority.Validate(); err != nil {
 		t.Fatalf("self-consistent changed prospective target authority was rejected: %v", err)
+	}
+	for name, mutate := range map[string]func(*RuntimeSemanticProofObligation){
+		"missing grounding":        func(value *RuntimeSemanticProofObligation) { value.RequireTargetGrounding = false },
+		"missing selector ref":     func(value *RuntimeSemanticProofObligation) { value.DeclarationTargetSelectorRef = "" },
+		"missing selector owner":   func(value *RuntimeSemanticProofObligation) { value.DeclarationTargetSelectorOwnerRef = "" },
+		"missing selector subject": func(value *RuntimeSemanticProofObligation) { value.DeclarationTargetSelectorSubjectRef = "" },
+	} {
+		t.Run(name, func(t *testing.T) {
+			invalid := manifest.Clone()
+			mutate(&invalid.ProofObligations[0])
+			invalid.Hash = StableRuntimeSemanticPlanManifestHash(invalid)
+			if err := invalid.Validate(); err == nil {
+				t.Fatalf("semantic obligation accepted selector candidates without grounding and a complete selector: %+v", invalid.ProofObligations[0])
+			}
+		})
 	}
 
 	parallel := document.Clone()
@@ -173,9 +191,9 @@ func semanticMissingOwnerFactAcquisitionFixture(t *testing.T) (RuntimeSemanticPl
 	source.TargetSelectorRef = declarationSelector
 	source.TargetSelectorOwnerRef = convergence.TargetSelectorOwnerRef
 	source.TargetSelectorSubjectRef = convergence.TargetSelectorSubjectRef
+	source.TargetSelectorCandidateRefs = []string{prospectiveTarget}
 	source.TargetRole = "validation-input"
 	source.RequireTargetGrounding = true
-	source.ProspectiveTargetRef = prospectiveTarget
 
 	for index := range manifest.OwnerCatalogs {
 		if manifest.OwnerCatalogs[index].OwnerModuleID != RuntimeModuleShell {
@@ -409,7 +427,7 @@ func TestCompileRuntimeSemanticBindingsRetainsSourceSelectorCandidates(t *testin
 		RequiredEvidenceKinds: []string{EvidenceKindStateChange},
 		TargetRole:            "deliverable", TargetDiscoverySources: []string{RuntimeValidationDiscoverySourceWorkspaceManifest},
 		TargetSelectorRef: "file/workspace-relative-create", TargetSelectorOwnerRef: "profile-test", TargetSelectorSubjectRef: "deliverable",
-		TargetSelectorCandidateRefs: []string{"main.go"}, RequireTargetGrounding: true,
+		TargetSelectorCandidateRefs: []string{proposal.Target.ProspectiveTargetRef}, RequireTargetGrounding: true,
 	}
 	manifest = sealSemanticTestManifestWithSource(t, manifest, source)
 	document.ManifestHash = manifest.Hash
@@ -422,11 +440,11 @@ func TestCompileRuntimeSemanticBindingsRetainsSourceSelectorCandidates(t *testin
 		t.Fatalf("compiled focuses = %+v", focuses)
 	}
 	binding := focuses[0].CoverageEvidenceBindings[0]
-	if !SameRuntimeTargetSelectorCandidateRefs(binding.TargetSelectorCandidateRefs, []string{"main.go"}) ||
-		!SameRuntimeTargetSelectorCandidateRefs(focuses[0].TargetSelectorCandidateRefs, []string{"main.go"}) {
+	if !SameRuntimeTargetSelectorCandidateRefs(binding.TargetSelectorCandidateRefs, []string{proposal.Target.ProspectiveTargetRef}) ||
+		!SameRuntimeTargetSelectorCandidateRefs(focuses[0].TargetSelectorCandidateRefs, []string{proposal.Target.ProspectiveTargetRef}) {
 		t.Fatalf("compiled selector declaration = binding:%+v focus:%+v", binding, focuses[0])
 	}
-	if len(contract.Bindings) != 1 || !SameRuntimeTargetSelectorCandidateRefs(contract.Bindings[0].TargetSelectorCandidateRefs, []string{"main.go"}) {
+	if len(contract.Bindings) != 1 || !SameRuntimeTargetSelectorCandidateRefs(contract.Bindings[0].TargetSelectorCandidateRefs, []string{proposal.Target.ProspectiveTargetRef}) {
 		t.Fatalf("reconciliation contract lost selector candidates: %+v", contract)
 	}
 }

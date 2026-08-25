@@ -58,7 +58,6 @@ type RuntimeCoverageEvidenceRequirement struct {
 	TargetSelectorOwnerRef            string
 	TargetSelectorSubjectRef          string
 	TargetSelectorCandidateRefs       []string
-	ProspectiveTargetRef              string
 	RequireTargetGrounding            bool
 	RequiredEvidenceKinds             []string
 	RequireDirectEvidence             bool
@@ -157,14 +156,8 @@ func (p RuntimeEvidencePolicy) Validate() error {
 		if err := ValidateRuntimeTargetGrounding(requirement.RequireTargetGrounding, requirement.TargetRole, requirement.TargetRefs, requirement.TargetDiscoverySources, requirement.TargetSelectorRef); err != nil {
 			return fmt.Errorf("runtime coverage evidence requirement %q: %w", requirement.ID, err)
 		}
-		if requirement.ProspectiveTargetRef != "" && (!requirement.RequireTargetGrounding || requirement.TargetSelectorRef == "") {
-			return fmt.Errorf("runtime coverage evidence requirement %q prospective target requires target grounding and selector", requirement.ID)
-		}
-		if len(requirement.TargetSelectorCandidateRefs) > 0 && (!requirement.RequireTargetGrounding || requirement.TargetSelectorRef == "" || requirement.TargetSelectorSubjectRef == "") {
-			return fmt.Errorf("runtime coverage evidence requirement %q candidate selector requires grounding, selector and subject", requirement.ID)
-		}
-		if requirement.ProspectiveTargetRef != "" && len(requirement.TargetSelectorCandidateRefs) > 0 && !runtimeProfileContainsTargetRef(requirement.TargetSelectorCandidateRefs, requirement.ProspectiveTargetRef) {
-			return fmt.Errorf("runtime coverage evidence requirement %q prospective target must be declared as a selector candidate", requirement.ID)
+		if len(requirement.TargetSelectorCandidateRefs) > 0 && (!requirement.RequireTargetGrounding || requirement.TargetSelectorRef == "" || requirement.TargetSelectorOwnerRef == "" || requirement.TargetSelectorSubjectRef == "") {
+			return fmt.Errorf("runtime coverage evidence requirement %q candidate selector requires grounding and a complete selector", requirement.ID)
 		}
 	}
 	return nil
@@ -368,7 +361,6 @@ func normalizeRuntimeCoverageEvidenceRequirements(values []RuntimeCoverageEviden
 		value.TargetSelectorOwnerRef = strings.TrimSpace(value.TargetSelectorOwnerRef)
 		value.TargetSelectorSubjectRef = strings.TrimSpace(value.TargetSelectorSubjectRef)
 		value.TargetSelectorCandidateRefs = normalizeStrings(value.TargetSelectorCandidateRefs)
-		value.ProspectiveTargetRef = strings.TrimSpace(value.ProspectiveTargetRef)
 		value.RequiredEvidenceKinds = normalizeStrings(value.RequiredEvidenceKinds)
 		value.AcceptedStepKinds = normalizeStrings(value.AcceptedStepKinds)
 		value.AcceptedOperationVariants = NormalizeRuntimeOperationVariantRefs(value.AcceptedOperationVariants)
@@ -409,7 +401,7 @@ func sameRuntimeEvidencePolicy(left RuntimeEvidencePolicy, right RuntimeEvidence
 	for idx := range left.CoverageRequirements {
 		l, r := left.CoverageRequirements[idx], right.CoverageRequirements[idx]
 		if l.ID != r.ID || l.Scope != r.Scope || l.EvidenceRole != r.EvidenceRole || l.TargetRole != r.TargetRole || l.TargetSelectorRef != r.TargetSelectorRef ||
-			l.TargetSelectorOwnerRef != r.TargetSelectorOwnerRef || l.TargetSelectorSubjectRef != r.TargetSelectorSubjectRef || l.ProspectiveTargetRef != r.ProspectiveTargetRef ||
+			l.TargetSelectorOwnerRef != r.TargetSelectorOwnerRef || l.TargetSelectorSubjectRef != r.TargetSelectorSubjectRef ||
 			l.RequireTargetGrounding != r.RequireTargetGrounding || l.RequireDirectEvidence != r.RequireDirectEvidence || l.RequireClaimEvidence != r.RequireClaimEvidence ||
 			l.RequireExecutableBehaviorEvidence != r.RequireExecutableBehaviorEvidence || l.RequireCoverageTargets != r.RequireCoverageTargets || l.ValidationRecipeID != r.ValidationRecipeID || l.Description != r.Description ||
 			!sameStrings(l.TargetRefs, r.TargetRefs) || !sameStrings(l.TargetDiscoverySources, r.TargetDiscoverySources) || !sameStrings(l.TargetSelectorCandidateRefs, r.TargetSelectorCandidateRefs) ||

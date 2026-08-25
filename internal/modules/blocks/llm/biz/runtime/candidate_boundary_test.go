@@ -529,12 +529,14 @@ func candidateRequest(t *testing.T, state runtimecontract.ConvergenceState) llmm
 	if state == runtimecontract.ConvergenceStateNeedValidation {
 		evidenceKind = runtimecontract.EvidenceKindValidation
 	}
+	binding := candidateRequestCoverageBinding(evidenceKind)
 	facts := runtimecontract.RuntimeFacts{
 		WorkspaceID: "ws-1", RunID: "run-1", DefinitionRevision: "definition-1", EvidenceRevision: "evidence-1",
 		Focus: runtimecontract.CoverageFocus{
 			ID: "focus-1", CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-1"},
 			RequiredEvidenceKinds:    []string{evidenceKind},
-			CoverageEvidenceBindings: []runtimecontract.CoverageEvidenceBinding{candidateRequestCoverageBinding(evidenceKind)},
+			CoverageEvidenceBindings: []runtimecontract.CoverageEvidenceBinding{binding},
+			TargetRefs:               append([]string(nil), binding.TargetRefs...),
 		},
 		Coverage: []runtimecontract.RuntimeCoverageItemFact{{ID: "cwi-1", State: runtimecontract.RuntimeCoverageItemStateOpen}},
 		Activation: runtimecontract.RuntimeActivationContext{

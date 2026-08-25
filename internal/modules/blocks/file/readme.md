@@ -18,7 +18,8 @@ Last Verified: 2026-08-25
   `workspace-relative-new-file-target`）描述具体 capability admission。两者由 File owner 各自解释但不是 alias：File
   只对请求中的 exact selector 返回 factual selection/feasibility/receipt，不把声明 selector 改写成 operation selector，
   也不决定 CWI、重试、reopen 或 Runtime 状态。
-- prospective target 的创建前 admission 与创建后 reconciliation 是两条 File-private 只读语义：admission 对已存在
+- prospective target 的创建前 admission 与创建后 reconciliation 是两条 File-private 只读语义：前者验证
+  SM-3 persisted proposal 提出的 exact path，对已存在
   路径继续返回 `unsupported`，防止 create-only `file/write` 重放；reconciliation 只核验 sealed owner/path 的当前
   manifest 事实，精确存在返回 `satisfied + concrete target/current revision`，缺失返回 `unsatisfied`，歧义、非规范
   或越出 workspace/manifest 的路径返回 `unverifiable`。`file/workspace_deliverable` 表达完整 bounded manifest scope，
@@ -79,8 +80,16 @@ Last Verified: 2026-08-25
 - prospective path 只能按 selector 自身的 canonical admission 能力解释：`workspace-relative-new-file-target`、
   `file/workspace_deliverable` 的完整 bounded owner scope，以及 `file/profile_declared_candidates` 中已声明的 candidate
   可以复核。`workspace_deliverable` 可在非空清单上保留一个经 File 路径/manifest eligibility 校验的 absent prospective
-  target；它不会被当前 1/N 项替换，候选仍只能使用该 sealed target。profile prospective 必须始终属于 sealed candidate
-  set，且在已有其他 candidate match 时不得被静默忽略；尚未出现的另一目标返回 typed `unsupported`。
+  target；它不会被当前 1/N 项替换。在 semantic feasibility 阶段，exact target 只来自 persisted SM-3
+  proposal；若 Definition 声明了 candidate refs，proposal 必须 exact-match 其中一项，并命中 current File
+  operation selector/constraints。File fact 不封存 target authority；后续 reconciliation、operation admission 与
+  dispatch 只能消费 SM-2 sealed binding 中的 target。已有其他 candidate match 时不得静默忽略 proposal；
+  尚未出现的另一目标返回 typed `unsupported`。
+  required owner 可以对 File delta 返回 nested `would_not_satisfy` fact；只有 Orchestrator 将其与 exact-current File
+  outer fact 持久化为完整 composite 后才可评估 correction。File 不选择替代 target，也不触发 correction。
+  若 Orchestrator 在 semantic attempt=0 使用既有 SM-3 correction ledger 回到 `Requesting`，File 只对新的、
+  不同且仍受原 selector/constraints/candidate refs 限制的 proposal 重新返回 fresh factual feasibility/delta；
+  duplicate/restart 不重放旧 proposal probe。
   `file/unique_workspace_entry` 是纯当前清单基数 selector，创建前无论当前清单为 0/1/N，只要同时携带
   prospective path 就必须返回 typed `unsupported` 且零写，创建后 reconciliation 对同一非法组合返回
   `unverifiable`。未知 selector 同样不得取得 prospective 语义。`.git`、`.workorch-data`、`node_modules`、`vendor`、

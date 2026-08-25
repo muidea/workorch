@@ -652,7 +652,16 @@ func attachRuntimeSemanticProofObligationSchema(items map[string]any, manifest R
 		if acquisition.AcquisitionTargetPolicy == RuntimeOperationTargetPolicyProspectiveOwnerTarget {
 			targetRequired = append(targetRequired, "prospectiveConstraintRefs", "prospectiveTargetRef")
 			targetProperties["prospectiveConstraintRefs"] = exactStringArraySchema(acquisition.AcquisitionConstraintRefs)
-			targetProperties["prospectiveTargetRef"] = map[string]any{"const": acquisition.ProspectiveTargetRef}
+			prospectiveTargetSchema := map[string]any{"type": "string", "minLength": 1, "maxLength": 65536}
+			switch len(obligation.DeclarationTargetSelectorCandidateRefs) {
+			case 1:
+				prospectiveTargetSchema["const"] = obligation.DeclarationTargetSelectorCandidateRefs[0]
+			default:
+				if len(obligation.DeclarationTargetSelectorCandidateRefs) > 1 {
+					prospectiveTargetSchema["enum"] = append([]string(nil), obligation.DeclarationTargetSelectorCandidateRefs...)
+				}
+			}
+			targetProperties["prospectiveTargetRef"] = prospectiveTargetSchema
 		}
 		proposalProperties := map[string]any{
 			"ownerModuleId":         map[string]any{"const": acquisition.AcquisitionOwnerModuleID},

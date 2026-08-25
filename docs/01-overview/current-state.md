@@ -47,7 +47,9 @@ this path without a parallel compatibility authority.
   `.workorch-workspaces/<workspace-id>` before sealing;
 - Workspace owner persists a pre-seal `DefinitionAdmissionCandidate`; pure admission accepts only complete `all_of` semantics;
 - explicit `one_of`/`any_of`, threshold or unresolved required relation creates a blocking clarification ticket and cannot create a Run;
-- promotion seals exact Goal/DoD, Template/Profile snapshot, resolved directory and `StartupInputHash`;
+- promotion seals exact Goal/DoD, Template/Profile snapshot, resolved directory and `StartupInputHash`; Definition admission
+  additionally binds canonical Template/Workspace evidence-policy snapshots through `AdmissionPolicyBindings` and rejects any
+  legacy `prospectiveTargetRef` before promotion, so policy sealing cannot preselect a Runtime exact target;
 - formal Workspace-owned DoD resource only has `ready`; pre-seal draft belongs to the admission candidate, while
   satisfied/unsatisfied/indeterminate are per-Run Orchestrator assessment facts and are never written back to the DoD definition;
 - every Start/Restart ingress requires `WorkspaceActivationAdmission=eligible`;
@@ -58,7 +60,12 @@ this path without a parallel compatibility authority.
   command/result；affected focus停止新operation，修正只通过新candidate + explicit Restart进入successor，predecessor不扩图。
 - every prospective owner-fact acquisition seals an exact `ProspectiveSatisfactionContractRef`; Runtime composes the acquisition
   owner's hypothetical delta with the required owner's non-selectable dependency observation. The dependency catalog never
-  becomes an LLM-selectable operation/surface.
+  becomes an LLM-selectable operation/surface. Definition/activation does not seal an exact prospective target: SM-3 proposes it
+  at the intersection of Definition declaration selector/candidate refs and current operation selector/owner constraints, owner
+  facts validate it, and only the SM-2 binding makes it authoritative. Operation candidate references that binding, and dispatch
+  derives the target from it. An exact-current composite `would_not_satisfy` may consume the existing sole SM-3 correction only
+  at attempt 0 when a different legal target remains; the same batch returns to `Requesting`, while stale only refreshes facts.
+  Fixed/singleton/exhausted bounds or a second rejection close `semantic_contract_failed`.
 
 See [Definition Convergence](../00-core/definition-convergence/overview.md) and
 [Activation Flow](../00-core/definition-convergence/activation-flow.md).

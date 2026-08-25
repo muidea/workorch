@@ -96,6 +96,98 @@ func TestCoverageEvidenceBindingSealsSelectorCandidateRefs(t *testing.T) {
 	}
 }
 
+func TestCoverageEvidenceBindingProspectiveTargetRequiresBoundedSelectorSurface(t *testing.T) {
+	binding := CoverageEvidenceBinding{
+		ID: "binding-prospective", CoverageWorkItemID: "cwi-prospective", FocusID: "focus-prospective", DefinitionRevision: "definition-prospective",
+		Proofs: []CoverageEvidenceProof{{
+			EvidenceKind: EvidenceKindStateChange, RequiredEffectScopes: []RuntimeEffectScope{RuntimeEffectWorkspaceDurable},
+			AllowedOperationKinds: []string{StepKindFileWrite},
+		}},
+		TargetSelectorRef: "file/workspace-relative-create", TargetSelectorOwnerRef: RuntimeModuleFile,
+		TargetSelectorSubjectRef: "deliverable", TargetSelectorCandidateRefs: []string{"README.md", "internal/main.go"},
+		ProspectiveTargetRef: "internal/main.go", DeclarationRef: "profile/prospective",
+	}.Normalized()
+	binding.Hash = StableCoverageEvidenceBindingHash(binding)
+	if err := binding.Validate(); err != nil {
+		t.Fatalf("valid prospective binding rejected: %v", err)
+	}
+
+	for name, mutate := range map[string]func(*CoverageEvidenceBinding){
+		"exact target alongside prospective target": func(value *CoverageEvidenceBinding) { value.TargetRefs = []string{"internal/main.go"} },
+		"missing selector":                          func(value *CoverageEvidenceBinding) { value.TargetSelectorRef = "" },
+		"missing selector owner":                    func(value *CoverageEvidenceBinding) { value.TargetSelectorOwnerRef = "" },
+		"missing selector subject":                  func(value *CoverageEvidenceBinding) { value.TargetSelectorSubjectRef = "" },
+		"target outside candidates":                 func(value *CoverageEvidenceBinding) { value.ProspectiveTargetRef = "other.go" },
+	} {
+		t.Run(name, func(t *testing.T) {
+			invalid := binding.Clone()
+			mutate(&invalid)
+			if err := invalid.Validate(); err == nil {
+				t.Fatalf("invalid prospective binding accepted: %+v", invalid)
+			}
+		})
+	}
+}
+
+func TestValidateCoverageEvidenceBindingsForFocusRequiresExactTargetSurface(t *testing.T) {
+	proof := CoverageEvidenceProof{
+		EvidenceKind: EvidenceKindStateChange, RequiredEffectScopes: []RuntimeEffectScope{RuntimeEffectWorkspaceDurable},
+		AllowedOperationKinds: []string{StepKindFileWrite},
+	}
+	validFocus := func(binding CoverageEvidenceBinding) CoverageFocus {
+		binding = binding.Normalized()
+		binding.Hash = StableCoverageEvidenceBindingHash(binding)
+		return CoverageFocus{
+			ID: binding.FocusID, SliceID: "slice-target-surface", EvidenceDeclarationRef: binding.DeclarationRef,
+			CoverageWorkItemIDs:   []common.CoverageWorkItemID{binding.CoverageWorkItemID},
+			RequiredEvidenceKinds: binding.EvidenceKinds(), CoverageEvidenceBindings: []CoverageEvidenceBinding{binding},
+			TargetRefs: binding.TargetRefs, TargetSelectorRef: binding.TargetSelectorRef,
+			TargetSelectorOwnerRef: binding.TargetSelectorOwnerRef, TargetSelectorSubjectRef: binding.TargetSelectorSubjectRef,
+			TargetSelectorCandidateRefs: binding.TargetSelectorCandidateRefs, ProspectiveTargetRef: binding.ProspectiveTargetRef,
+		}
+	}
+
+	existing := CoverageEvidenceBinding{
+		ID: "binding-existing", CoverageWorkItemID: "cwi-existing", FocusID: "focus-existing", DefinitionRevision: "definition-target-surface",
+		Proofs: []CoverageEvidenceProof{proof}, TargetRefs: []string{"internal/main.go"}, DeclarationRef: "profile/existing",
+	}
+	if err := ValidateCoverageEvidenceBindingsForFocus(validFocus(existing), existing.DefinitionRevision); err != nil {
+		t.Fatalf("valid existing-target surface rejected: %v", err)
+	}
+
+	prospective := CoverageEvidenceBinding{
+		ID: "binding-prospective", CoverageWorkItemID: "cwi-prospective", FocusID: "focus-prospective", DefinitionRevision: "definition-target-surface",
+		Proofs: []CoverageEvidenceProof{proof}, TargetSelectorRef: "workspace-relative-new-file-target",
+		TargetSelectorOwnerRef: RuntimeModuleFile, TargetSelectorSubjectRef: "workspace_deliverable",
+		TargetSelectorCandidateRefs: []string{"README.md", "internal/main.go"}, ProspectiveTargetRef: "internal/main.go",
+		DeclarationRef: "profile/prospective",
+	}
+	prospectiveFocus := validFocus(prospective)
+	if err := ValidateCoverageEvidenceBindingsForFocus(prospectiveFocus, prospective.DefinitionRevision); err != nil {
+		t.Fatalf("valid prospective-target surface rejected: %v", err)
+	}
+
+	for _, testCase := range []struct {
+		name   string
+		mutate func(*CoverageFocus)
+	}{
+		{name: "target refs", mutate: func(value *CoverageFocus) { value.TargetRefs = []string{"other.go"} }},
+		{name: "selector ref", mutate: func(value *CoverageFocus) { value.TargetSelectorRef = "file/other" }},
+		{name: "selector owner", mutate: func(value *CoverageFocus) { value.TargetSelectorOwnerRef = "blocks/other" }},
+		{name: "selector subject", mutate: func(value *CoverageFocus) { value.TargetSelectorSubjectRef = "other-subject" }},
+		{name: "selector candidates", mutate: func(value *CoverageFocus) { value.TargetSelectorCandidateRefs = []string{"other.go"} }},
+		{name: "prospective target", mutate: func(value *CoverageFocus) { value.ProspectiveTargetRef = "other.go" }},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			mismatched := prospectiveFocus
+			testCase.mutate(&mismatched)
+			if err := ValidateCoverageEvidenceBindingsForFocus(mismatched, prospective.DefinitionRevision); err == nil || !strings.Contains(err.Error(), "target surface") {
+				t.Fatalf("mismatched %s accepted: %v", testCase.name, err)
+			}
+		})
+	}
+}
+
 func TestValidateCoverageEvidenceBindingsForFocusRejectsSharedSemanticProof(t *testing.T) {
 	focus := CoverageFocus{
 		ID: "focus-shared", SliceID: "slice-presentation", EvidenceDeclarationRef: "profile/dodItem/dod-001",

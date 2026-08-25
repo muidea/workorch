@@ -230,11 +230,14 @@ func TestReduceRuntimeStateCreationScopeRequiresAdmissibleDurableFileOperation(t
 		facts.Focus.TargetRole = "deliverable"
 		facts.Focus.TargetDiscoverySources = []string{runtimecontract.RuntimeValidationDiscoverySourceWorkspaceManifest}
 		facts.Focus.TargetSelectorRef = "file/workspace_deliverable"
+		facts.Focus.TargetSelectorOwnerRef = runtimecontract.RuntimeModuleFile
+		facts.Focus.TargetSelectorSubjectRef = facts.Focus.TargetRole
 		facts.Focus.ProspectiveTargetRef = "initial-deliverable.txt"
 		facts.Focus.RequireTargetGrounding = true
 		selection := runtimecontract.RuntimeTargetSelection{
 			PrerequisiteID: "selection-1", OwnerModuleID: runtimecontract.RuntimeModuleFile,
 			TargetRole: facts.Focus.TargetRole, SelectorRef: facts.Focus.TargetSelectorRef,
+			SelectorOwnerRef: facts.Focus.TargetSelectorOwnerRef, SelectorSubjectRef: facts.Focus.TargetSelectorSubjectRef,
 			Disposition: runtimecontract.RuntimeTargetSelectionCreate, ProspectiveTargetRef: facts.Focus.ProspectiveTargetRef, CandidateCount: 0, ObservedRevision: "workspace-empty-v1",
 		}
 		selection.SnapshotID = runtimecontract.StableRuntimeTargetSelectionSnapshotID(selection)
@@ -318,8 +321,9 @@ func TestReduceRuntimeStateCreationScopeRequiresAdmissibleDurableFileOperation(t
 		}}
 		facts.Resources.TargetSelection = &runtimecontract.RuntimeTargetSelection{
 			PrerequisiteID: "selection-1", OwnerModuleID: runtimecontract.RuntimeModuleFile, TargetRole: facts.Focus.TargetRole,
-			SelectorRef: facts.Focus.TargetSelectorRef, Disposition: runtimecontract.RuntimeTargetSelectionSelected,
-			TargetRefs: []string{"initial-deliverable.txt"}, CandidateTargetRefs: []string{"initial-deliverable.txt"}, CandidateCount: 1, ObservedRevision: "workspace-created-v1",
+			SelectorRef: facts.Focus.TargetSelectorRef, SelectorOwnerRef: facts.Focus.TargetSelectorOwnerRef, SelectorSubjectRef: facts.Focus.TargetSelectorSubjectRef,
+			Disposition: runtimecontract.RuntimeTargetSelectionSelected,
+			TargetRefs:  []string{"initial-deliverable.txt"}, CandidateTargetRefs: []string{"initial-deliverable.txt"}, CandidateCount: 1, ObservedRevision: "workspace-created-v1",
 		}
 		facts.Resources.TargetSelection.SnapshotID = runtimecontract.StableRuntimeTargetSelectionSnapshotID(*facts.Resources.TargetSelection)
 		bindCurrentFocusTargetSelection(&facts)
@@ -479,6 +483,12 @@ func TestSemanticFileProspectiveTargetScopeRequiresMatchingSealedOwnerFacts(t *t
 		t.Run(test.name, func(t *testing.T) {
 			facts := newFacts()
 			test.mutate(&facts)
+			if test.name == "prospective target mismatch" {
+				if err := runtimecontract.ValidateCoverageEvidenceBindingsForFocus(facts.Focus, facts.DefinitionRevision); err == nil || !strings.Contains(err.Error(), "target surface") {
+					t.Fatalf("mismatched binding escaped the sealed target-surface contract: %v", err)
+				}
+				return
+			}
 			facts = runtimeTestFactsWithCanonicalCWIProjection(t, facts)
 			if hasSemanticOwnerGroundedTargetScope(facts) || hasOwnerGroundedProspectiveCreationScope(facts) {
 				t.Fatal("unsealed or mismatched File prospective scope was accepted")

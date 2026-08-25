@@ -1072,6 +1072,11 @@ func semanticPlanDocumentReplay(ledger runtimecontract.RuntimeSemanticPlanningLe
 		return true
 	}
 	for _, existing := range ledger.BatchDocuments {
+		if ledger.Phase == runtimecontract.RuntimeSemanticPlanningCorrectionRequired && existing.BatchID == ledger.ActiveBatchID {
+			// The active document is the rejected attempt-0 baseline, not an
+			// attempt-1 provider replay. It must pass the bounded-delta fence.
+			continue
+		}
 		if existing.BatchID == document.BatchID && runtimecontract.StableRuntimeSemanticPlanDocumentHash(existing) == documentHash {
 			return true
 		}
@@ -1118,6 +1123,84 @@ func validateSemanticCorrectionDocumentIdentity(ledger runtimecontract.RuntimeSe
 	if document.PlanStep != runtimecontract.RuntimeSemanticPlanStepProofBatch || document.BatchID != ledger.ActiveBatchID {
 		return fmt.Errorf("%w: proof-batch correction is outside active batch", common.ErrConflict)
 	}
+	return validateProspectiveSemanticCorrectionDocument(ledger, document)
+}
+
+// validateProspectiveSemanticCorrectionDocument is the owner-local admission
+// fence for the would_not_satisfy delta. Provider rendering is advisory; this
+// pure check makes the persisted directive an authority contract by rejecting
+// the failed target again and by enforcing the exact remaining candidate set.
+// The ordinary manifest validator has already proved selector, constraints,
+// proposal shape, and non-empty prospective target before this function runs.
+func validateProspectiveSemanticCorrectionDocument(ledger runtimecontract.RuntimeSemanticPlanningLedger, document runtimecontract.RuntimeSemanticPlanDocument) error {
+	return ValidateRuntimeProspectiveSemanticCorrectionDocument(ledger, document)
+}
+
+// ValidateRuntimeProspectiveSemanticCorrectionDocument exposes the pure
+// owner-local fence to the provider-document admission adapter. The reducer
+// calls the same function again as its final CAS boundary.
+func ValidateRuntimeProspectiveSemanticCorrectionDocument(ledger runtimecontract.RuntimeSemanticPlanningLedger, document runtimecontract.RuntimeSemanticPlanDocument) error {
+	if ledger.Attempt != 1 || ledger.CorrectionDirective == nil || len(ledger.Rejections) != 1 ||
+		ledger.Rejections[0].OriginalCode != "prospective_owner_fact_unsatisfied" {
+		return nil
+	}
+	baseline, found := runtimeSemanticBatchDocument(ledger.BatchDocuments, ledger.ActiveBatchID)
+	if !found {
+		return fmt.Errorf("%w: prospective correction has no immutable baseline document", common.ErrConflict)
+	}
+	directive := ledger.CorrectionDirective.Clone()
+	matched := 0
+	for _, violation := range directive.Violations {
+		if violation.Kind != runtimecontract.RuntimeSemanticContractViolationProposalConstraint ||
+			!strings.HasSuffix(violation.Path, ".target.prospectiveTargetRef") {
+			continue
+		}
+		if violation.ProposalIndex < 0 || violation.ProposalIndex >= len(document.Proposals) {
+			return fmt.Errorf("%w: prospective correction target is outside the proof document", common.ErrConflict)
+		}
+		matched++
+		if matched != 1 || violation.ProposalIndex >= len(baseline.Proposals) {
+			return fmt.Errorf("%w: prospective correction directive is not one exact target delta", common.ErrConflict)
+		}
+		proposal := document.Proposals[violation.ProposalIndex].Normalized()
+		if proposal.CoverageWorkItemID != violation.CoverageWorkItemID ||
+			violation.Path != fmt.Sprintf("$.proposals[%d].target.prospectiveTargetRef", violation.ProposalIndex) ||
+			proposal.Target.Policy != runtimecontract.RuntimeOperationTargetPolicyProspectiveOwnerTarget {
+			return fmt.Errorf("%w: prospective correction target identity differs from the directive", common.ErrConflict)
+		}
+		target := strings.TrimSpace(proposal.Target.ProspectiveTargetRef)
+		if target == "" || target == strings.TrimSpace(violation.Actual) {
+			return fmt.Errorf("%w: prospective correction repeated the rejected target", common.ErrConflict)
+		}
+		switch violation.Rule {
+		case runtimecontract.RuntimeSemanticConstraintAllowedValue:
+			allowed := false
+			for _, candidate := range violation.Allowed {
+				if target == candidate {
+					allowed = true
+					break
+				}
+			}
+			if !allowed {
+				return fmt.Errorf("%w: prospective correction target is outside the remaining candidates", common.ErrConflict)
+			}
+		case runtimecontract.RuntimeSemanticConstraintRelational:
+			// Non-empty and != Actual are the executable part of the open-selector
+			// relation; manifest admission independently rechecks its sealed selector
+			// and prospective constraints.
+		default:
+			return fmt.Errorf("%w: prospective correction target rule is unsupported", common.ErrConflict)
+		}
+		expected := baseline.Clone()
+		expected.Proposals[violation.ProposalIndex].Target.ProspectiveTargetRef = target
+		expected = expected.Normalized()
+		if runtimecontract.StableRuntimeSemanticPlanDocumentHash(expected) != runtimecontract.StableRuntimeSemanticPlanDocumentHash(document) {
+			return fmt.Errorf("%w: prospective correction changed fields outside the rejected target", common.ErrConflict)
+		}
+	}
+	if matched != 1 {
+		return fmt.Errorf("%w: prospective correction directive has no exact target constraint", common.ErrConflict)
+	}
 	return nil
 }
 
@@ -1137,6 +1220,19 @@ func applySemanticProofBatchDocument(ledger *runtimecontract.RuntimeSemanticPlan
 	for _, existing := range ledger.BatchDocuments {
 		if existing.BatchID != document.BatchID {
 			continue
+		}
+		if ledger.Phase == runtimecontract.RuntimeSemanticPlanningCorrectionRequired && document.BatchID == ledger.ActiveBatchID {
+			if err := advanceSemanticProofBatchDocument(ledger, document.BatchID, documentHash); err != nil {
+				return false, err
+			}
+			for idx := range ledger.BatchDocuments {
+				if ledger.BatchDocuments[idx].BatchID == document.BatchID {
+					ledger.BatchDocuments[idx] = document.Clone()
+					break
+				}
+			}
+			ledger.Phase = runtimecontract.RuntimeSemanticPlanningProofBatchDocumentAccepted
+			return true, nil
 		}
 		if runtimecontract.StableRuntimeSemanticPlanDocumentHash(existing) == documentHash {
 			return false, nil
@@ -1382,7 +1478,7 @@ func (c *planningTransactionComponent) requireSemanticPlanCorrection(ctx context
 	if err != nil {
 		return RuntimeAggregate{}, err
 	}
-	changed, err := func(_ RuntimeAggregate, ledger *runtimecontract.RuntimeSemanticPlanningLedger) (bool, error) {
+	changed, err := func(aggregate RuntimeAggregate, ledger *runtimecontract.RuntimeSemanticPlanningLedger) (bool, error) {
 		if ledger.Manifest == nil {
 			return false, fmt.Errorf("%w: semantic correction has no sealed manifest", common.ErrConflict)
 		}
@@ -1406,8 +1502,22 @@ func (c *planningTransactionComponent) requireSemanticPlanCorrection(ctx context
 		if ledger.Phase == runtimecontract.RuntimeSemanticPlanningCorrectionRequired && ledger.LogicalRequestID == logicalRequestID && ledger.CorrectionDirective != nil && ledger.CorrectionDirective.Hash == directive.Hash {
 			return false, nil
 		}
-		if (ledger.Phase != runtimecontract.RuntimeSemanticPlanningRequestOpen && ledger.Phase != runtimecontract.RuntimeSemanticPlanningProofBatchRequestOpen) || ledger.Attempt != 0 || ledger.Manifest == nil || ledger.StablePrefixHash != stablePrefixHash {
+		feasibilityCorrection := ledger.Phase == runtimecontract.RuntimeSemanticPlanningFeasibilityRequired
+		if !feasibilityCorrection && ledger.Phase != runtimecontract.RuntimeSemanticPlanningRequestOpen && ledger.Phase != runtimecontract.RuntimeSemanticPlanningProofBatchRequestOpen {
 			return false, fmt.Errorf("%w: semantic plan correction has no matching attempt 0", common.ErrConflict)
+		}
+		if ledger.Attempt != 0 || ledger.StablePrefixHash != stablePrefixHash {
+			return false, fmt.Errorf("%w: semantic plan correction has no matching attempt 0", common.ErrConflict)
+		}
+		if feasibilityCorrection {
+			if err := validateProspectiveFeasibilityCorrection(
+				aggregate, *ledger, expected, logicalRequestID, rejection, directive,
+			); err != nil {
+				return false, err
+			}
+			if err := reopenRuntimeSemanticBatchForCorrection(ledger); err != nil {
+				return false, err
+			}
 		}
 		ledger.Phase = runtimecontract.RuntimeSemanticPlanningCorrectionRequired
 		ledger.Attempt = 1
@@ -1421,6 +1531,120 @@ func (c *planningTransactionComponent) requireSemanticPlanCorrection(ctx context
 		return RuntimeAggregate{}, err
 	}
 	return c.commitSemanticPlanningMutation(ctx, transaction, changed)
+}
+
+func validateProspectiveFeasibilityCorrection(
+	aggregate RuntimeAggregate,
+	ledger runtimecontract.RuntimeSemanticPlanningLedger,
+	expected runtimecontract.RuntimeExpectedDocumentContract,
+	logicalRequestID string,
+	rejection runtimecontract.RuntimeOriginalDiagnostic,
+	directive runtimecontract.RuntimeSemanticCorrectionDirective,
+) error {
+	if ledger.Manifest == nil || ledger.ActiveBatchID == "" || ledger.FeasibilityBatchID == "" {
+		return fmt.Errorf("%w: prospective feasibility correction has no active batch", common.ErrConflict)
+	}
+	batch, found := runtimeSemanticBatch(ledger.Batches, ledger.ActiveBatchID)
+	if !found || batch.State != runtimecontract.RuntimeSemanticPlanBatchFeasibilityPending {
+		return fmt.Errorf("%w: prospective feasibility correction has no pending proof batch", common.ErrConflict)
+	}
+	expected = expected.Normalized()
+	if expected.DocumentKind != runtimecontract.RuntimeProviderDocumentSemanticPlan ||
+		expected.PlanStep != runtimecontract.RuntimeSemanticPlanStepProofBatch ||
+		expected.ManifestHash != ledger.Manifest.Hash || expected.DefinitionSeedHash != ledger.Manifest.DefinitionSeedHash ||
+		expected.CorrectionAttempt != 1 || expected.BatchID != batch.BatchID || expected.BatchSequence != batch.Sequence ||
+		expected.CoverageOrderHash != batch.CoverageOrderHash || !sameSemanticCoverageIDs(expected.BatchCoverageWorkItemIDs, batch.CoverageWorkItemIDs) {
+		return fmt.Errorf("%w: prospective feasibility correction expected document is outside the active batch", common.ErrConflict)
+	}
+
+	matched := 0
+	correctable := false
+	for _, fact := range ledger.Feasibilities {
+		prospective := fact.OwnerFactProspectiveSatisfactionObservation
+		if prospective == nil || prospective.Satisfaction == nil ||
+			prospective.Satisfaction.Outcome != runtimecontract.RuntimeOwnerFactProspectiveWouldNotSatisfy {
+			continue
+		}
+		derived, candidateCorrectable, err := DeriveRuntimeProspectiveSatisfactionCorrection(ledger, fact)
+		if err != nil {
+			return err
+		}
+		if !sameProspectiveCorrectionDiagnostic(derived, rejection) {
+			continue
+		}
+		matched++
+		correctable = candidateCorrectable
+	}
+	if matched != 1 || !correctable {
+		return fmt.Errorf("%w: prospective feasibility correction is not the unique remaining-target delta", common.ErrConflict)
+	}
+	expectedLogicalRequestID := runtimecontract.StableRuntimeCandidateRequestSessionID(
+		runtimecontract.RuntimeProviderDocumentSemanticPlan,
+		aggregate.Facts.WorkspaceID,
+		aggregate.Facts.RunID,
+		aggregate.Decision.AuthorityTransaction(),
+		ledger.StablePrefixHash,
+		ledger.Manifest.Hash,
+		directive.Hash,
+	)
+	if logicalRequestID != expectedLogicalRequestID {
+		return fmt.Errorf("%w: prospective feasibility correction logical request identity is invalid", common.ErrConflict)
+	}
+	return nil
+}
+
+func sameSemanticCoverageIDs(left, right []common.CoverageWorkItemID) bool {
+	if len(left) != len(right) {
+		return false
+	}
+	for idx := range left {
+		if left[idx] != right[idx] {
+			return false
+		}
+	}
+	return true
+}
+
+func sameProspectiveCorrectionDiagnostic(derived, submitted runtimecontract.RuntimeOriginalDiagnostic) bool {
+	submittedValue := submitted.Normalized()
+	if submittedValue == nil || submittedValue.ExpectedRevision != "" || submittedValue.ObservedRevision != "" ||
+		submittedValue.DetailsRef != "" || submittedValue.DetailsHash != "" || submittedValue.DetailsBytes != 0 ||
+		submittedValue.ContentType != "" || submittedValue.OmittedReason != "" || submittedValue.Truncated || submittedValue.Redacted ||
+		submittedValue.TargetObservation != nil || submittedValue.ValidationDiagnostic != nil ||
+		submittedValue.ValidationFailureObservation != nil || submittedValue.GovernanceDependency != nil {
+		return false
+	}
+	return runtimecontract.StableRuntimeSemanticPlanCorrectionHash(derived) ==
+		runtimecontract.StableRuntimeSemanticPlanCorrectionHash(submitted)
+}
+
+func reopenRuntimeSemanticBatchForCorrection(ledger *runtimecontract.RuntimeSemanticPlanningLedger) error {
+	if ledger == nil || ledger.ActiveBatchID == "" || ledger.Manifest == nil {
+		return fmt.Errorf("%w: semantic correction has no active batch", common.ErrConflict)
+	}
+	found := false
+	for idx := range ledger.Batches {
+		if ledger.Batches[idx].BatchID != ledger.ActiveBatchID {
+			continue
+		}
+		// This is the sole bounded correction edge inside existing SM-3. It keeps
+		// immutable batch/order/request lineage and the rejected document as a
+		// read-only delta baseline while clearing its feasibility working set.
+		reopened, err := runtimecontract.ReopenRuntimeSemanticPlanBatchForCorrection(*ledger.Manifest, ledger.Batches[idx])
+		if err != nil {
+			return fmt.Errorf("%w: semantic correction cannot reopen the active batch: %v", common.ErrConflict, err)
+		}
+		ledger.Batches[idx] = reopened
+		found = true
+		break
+	}
+	if !found {
+		return fmt.Errorf("%w: semantic correction active batch is missing", common.ErrConflict)
+	}
+	ledger.FeasibilityBatchID = ""
+	ledger.Feasibilities = nil
+	ledger.FeasibilitySetHash = ""
+	return nil
 }
 
 func validateSemanticPlanCorrectionScope(ledger runtimecontract.RuntimeSemanticPlanningLedger, directive runtimecontract.RuntimeSemanticCorrectionDirective) error {

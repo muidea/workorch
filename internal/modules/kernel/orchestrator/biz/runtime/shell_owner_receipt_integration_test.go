@@ -67,6 +67,9 @@ func TestShellOwnerObservedFailureTargetBindsThroughEventHubAndFileSnapshot(t *t
 	aggregate.Facts.Focus.TargetRefs = nil
 	aggregate.Facts.Focus.TargetRole = "implementation"
 	aggregate.Facts.Focus.RequireTargetGrounding = true
+	runtimeTestSealCurrentFocusBindingTargetSurface(&aggregate.Facts, runtimeTestBindingTargetSurface{
+		SelectorRef: "test/runtime-shell-failure-target", SelectorOwnerRef: "test/runtime-profile", SelectorSubjectRef: "implementation",
+	})
 	addObservedShellFailureTargetFreshness(t, ctx, hub, &aggregate, workspaceDirectory)
 	decision, err := runtimecontract.SealRuntimeDecision(aggregate.Facts, runtimecontract.RuntimeDecision{
 		State: runtimecontract.ConvergenceStateNeedValidation,

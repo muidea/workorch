@@ -39,10 +39,19 @@ raw diagnostic 留在 Shell-private adapter；receipt 只携带有界、脱敏�
   `would_satisfy | would_not_satisfy`；若 exact Shell policy/catalog dependency 已漂移，则返回绑定 expected/observed
   revision 的 typed stale nested observation。该 dependency catalog只供 Runtime freshness/CAS/seal，不进入 provider-selectable
   catalog projection。任一 recipe 身份缺失或漂移均 typed fail-closed；该 query 不访问 File、不观察 workspace、不启动进程，
-  也不改变 Shell/Runtime 状态。只有 Orchestrator SM-2 private event可持久化 factual result，并选择 refresh、seal 或统一
-  `semantic_contract_failed` terminal；该 terminal 的 typed original reason 为 `prospective_owner_fact_unsatisfied`。exact target
-  已由 activation 封存，`would_not_satisfy` 不得触发 LLM correction。Shell 只署名 satisfaction fact/reason，不署名或选择
-  Orchestrator 的 terminal diagnostic。
+  也不改变 Shell/Runtime 状态。只有 Orchestrator private event可持久化 factual result：SM-2 选择 fact
+  refresh/seal/terminal eligibility，SM-3 只在下述有界条件成立时消耗既有 sole semantic correction。exact
+  target 来自 persisted SM-3 proposal，Shell 只通过 File delta 验证它，不选择 target；只有 SM-2 sealed
+  binding 才形成 authority。
+- Shell `would_not_satisfy` 自身不触发 correction。只有它与 exact-current File delta/outer feasibility、
+  proposal/batch/manifest/catalog lineage 组成已持久化 full composite，且 Orchestrator semantic attempt=0 仍有
+  不同合法 target 时，SM-3 才可复用同一 batch/correction ledger 回到 `Requesting`。新 proposal 必须
+  target 不同且仍命中原 selector/constraints/candidate bounds，Shell 对新 File delta 独立重新评估。
+  attempt=0 fixed/singleton/无剩余 target、invalid attempt-1 document 或 attempt-1 `would_not_satisfy` 由
+  Orchestrator 收口为 `semantic_contract_failed`；第二次 owner rejection 保留 typed original
+  reason=`prospective_owner_fact_unsatisfied`，合法 attempt-1 `would_satisfy` 可继续进入 SM-2 seal。typed stale 只刷新
+  dependency fact，不消耗 correction。Shell 始终只署名 satisfaction/stale fact 与 reason，不署名或选择
+  correction/terminal diagnostic。
 - workspace-sensitive Shell catalog 的 observation 必须依赖该 File manifest 的 exact workspace-tree revision；后续
   File receipt 改变该 revision 时，SM-2 仅按依赖交集退休并重获 catalog。该 freshness lineage 不允许 Shell 修改
   Manifest、CWI 或 Runtime 状态。

@@ -75,6 +75,14 @@ func TestRuntimeBootstrapCloneAndEqualityPreserveTypedContract(t *testing.T) {
 	if SameRuntimeBootstrap(bootstrap, cloned) {
 		t.Fatal("convergence policy drift was not detected")
 	}
+	presealedTarget := bootstrap.Clone()
+	presealedTarget.Requirements = append(presealedTarget.Requirements, RuntimeRequirement{
+		Kind: PrerequisiteKindTargetSelection, OwnerModuleID: RuntimeModuleFile,
+		TargetSelectorRef: "file/workspace-relative-create", ProspectiveTargetRef: "presealed-target.txt",
+	})
+	if err := presealedTarget.Validate(); err == nil {
+		t.Fatal("bootstrap requirement accepted a pre-seal prospective target")
+	}
 }
 
 func TestRuntimeBootstrapRejectsUnknownCoverageReopenDependency(t *testing.T) {
@@ -158,7 +166,7 @@ func TestRuntimeDefinitionFocusPreservesDeclarationWithoutGenerationAuthority(t 
 		RequiredEvidenceKinds: []string{EvidenceKindValidation}, TargetRole: "verification_target",
 		TargetRefs: []string{"declared-but-not-owner-resolved.txt"}, TargetSelectorRef: "file/workspace-deliverable",
 		TargetSelectorOwnerRef: "profile/test", TargetSelectorSubjectRef: "verification_target",
-		ProspectiveTargetRef: "activation-sealed-validation.sh", RequireTargetGrounding: true,
+		TargetSelectorCandidateRefs: []string{"activation-sealed-validation.sh"}, RequireTargetGrounding: true,
 		AcceptedStepKinds: []string{RuntimeBlockKindManagedValidationSession}, ValidationRecipeID: "recipe-1",
 		RequiredCheckRefs: []string{"check-1"},
 	}})
@@ -166,8 +174,22 @@ func TestRuntimeDefinitionFocusPreservesDeclarationWithoutGenerationAuthority(t 
 		t.Fatalf("immutable declaration rejected: %v", err)
 	}
 	if len(compiled) != 1 || compiled[0].TargetRole != "verification_target" || !compiled[0].RequireTargetGrounding ||
-		compiled[0].ProspectiveTargetRef != "activation-sealed-validation.sh" {
+		!sameStrings(compiled[0].TargetSelectorCandidateRefs, []string{"activation-sealed-validation.sh"}) {
 		t.Fatalf("definition declaration lost grounding obligation: %+v", compiled)
+	}
+	for name, mutate := range map[string]func(*RuntimeDefinitionFocus){
+		"missing grounding":        func(value *RuntimeDefinitionFocus) { value.RequireTargetGrounding = false },
+		"missing selector ref":     func(value *RuntimeDefinitionFocus) { value.TargetSelectorRef = "" },
+		"missing selector owner":   func(value *RuntimeDefinitionFocus) { value.TargetSelectorOwnerRef = "" },
+		"missing selector subject": func(value *RuntimeDefinitionFocus) { value.TargetSelectorSubjectRef = "" },
+	} {
+		t.Run(name, func(t *testing.T) {
+			invalid := compiled[0].Clone()
+			mutate(&invalid)
+			if err := ValidateRuntimeDefinitionFocuses(seed, []RuntimeDefinitionFocus{invalid}); err == nil {
+				t.Fatalf("definition focus accepted selector candidates without grounding and a complete selector: %+v", invalid)
+			}
+		})
 	}
 	seedFocus := compiled[0].RuntimeFocusSeed()
 	if len(seedFocus.TargetRefs) != 0 || seedFocus.ProspectiveTargetRef != "" || len(seedFocus.AcceptedStepKinds) != 0 || seedFocus.ValidationRecipeID != "" || len(seedFocus.RequiredCheckRefs) != 0 {

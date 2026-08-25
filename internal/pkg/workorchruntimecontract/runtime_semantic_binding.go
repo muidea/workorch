@@ -173,9 +173,6 @@ func validateRuntimeSemanticOwnerFactAcquisition(proofSet RuntimeSemanticCWIProo
 	if !sameStrings(proposal.Target.ProspectiveConstraintRefs, sealed.AcquisitionConstraintRefs) {
 		return runtimeSemanticProposalViolation(proposal, proposalIndex, "target.prospectiveConstraintRefs", RuntimeSemanticConstraintAllowedValue, strings.Join(proposal.Target.ProspectiveConstraintRefs, ","), nil, sealed.AcquisitionConstraintRefs, fmt.Errorf("runtime semantic proof for coverage %q does not match sealed owner-fact acquisition constraints", proofSet.CoverageWorkItemID))
 	}
-	if proposal.Target.ProspectiveTargetRef != sealed.ProspectiveTargetRef {
-		return runtimeSemanticProposalViolation(proposal, proposalIndex, "target.prospectiveTargetRef", RuntimeSemanticConstraintAllowedValue, proposal.Target.ProspectiveTargetRef, nil, []string{sealed.ProspectiveTargetRef}, fmt.Errorf("runtime semantic proof for coverage %q does not match sealed owner-fact acquisition target", proofSet.CoverageWorkItemID))
-	}
 	return nil
 }
 
@@ -216,8 +213,21 @@ func validateRuntimeSemanticProofSetSourceWithEvidenceKinds(proofSet RuntimeSema
 	if len(requiredEvidenceKinds) != 0 && !sameStrings(proofSet.EvidenceKinds(), requiredEvidenceKinds) {
 		return fmt.Errorf("runtime semantic proof set for coverage %q does not cover source required evidence kinds", proofSet.CoverageWorkItemID)
 	}
-	for _, proposal := range proofSet.Proposals {
+	for proposalIndex, proposal := range proofSet.Proposals {
 		proposal = proposal.Normalized()
+		if proposal.Target.Policy == RuntimeOperationTargetPolicyProspectiveOwnerTarget && len(declaration.TargetSelectorCandidateRefs) != 0 &&
+			!containsString(declaration.TargetSelectorCandidateRefs, proposal.Target.ProspectiveTargetRef) {
+			return runtimeSemanticProposalViolation(
+				proposal,
+				proposalIndex,
+				"target.prospectiveTargetRef",
+				RuntimeSemanticConstraintAllowedValue,
+				proposal.Target.ProspectiveTargetRef,
+				nil,
+				declaration.TargetSelectorCandidateRefs,
+				fmt.Errorf("runtime semantic proof for coverage %q prospective target %q is outside source selector candidates", proofSet.CoverageWorkItemID, proposal.Target.ProspectiveTargetRef),
+			)
+		}
 		if len(declaration.AcceptedStepKinds) != 0 && !runtimeOperationKindsContain(declaration.AcceptedStepKinds, proposal.OperationKind) {
 			return fmt.Errorf("runtime semantic proof for coverage %q operation kind %q is outside source declaration", proofSet.CoverageWorkItemID, proposal.OperationKind)
 		}
@@ -359,6 +369,8 @@ func compileRuntimeSemanticFocus(manifest RuntimeSemanticPlanManifest, generatio
 		if source != nil {
 			declaration := source.Normalized()
 			if declaration.TargetSelectorRef == selectorRef {
+				binding.TargetSelectorOwnerRef = declaration.TargetSelectorOwnerRef
+				binding.TargetSelectorSubjectRef = declaration.TargetSelectorSubjectRef
 				binding.TargetSelectorCandidateRefs = append([]string(nil), declaration.TargetSelectorCandidateRefs...)
 			}
 		}

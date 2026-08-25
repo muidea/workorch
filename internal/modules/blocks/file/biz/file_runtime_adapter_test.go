@@ -101,6 +101,21 @@ func TestRuntimeAdapterAcquireRuntimeTargetSelectionIsCardinalityBounded(t *test
 			t.Fatalf("creation selection lost owner selector binding: %+v", selection)
 		}
 	})
+	t.Run("post-binding bootstrap target uses open declaration selector", func(t *testing.T) {
+		binding := runtimeTargetSelectionBinding{ownerRef: "software-dev", subjectRef: "go-service/source"}
+		selection, err := adapter.AcquireRuntimeTargetSelection(
+			t.TempDir(), "target-selection-bootstrap-create", "implementation",
+			runtimeFileTargetSelectorWorkspaceDeliverable, "cmd/service/main.go", 4, binding,
+		)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if selection.Disposition != runtimecontract.RuntimeTargetSelectionCreate || selection.ProspectiveTargetRef != "cmd/service/main.go" ||
+			selection.SelectorOwnerRef != binding.ownerRef || selection.SelectorSubjectRef != binding.subjectRef ||
+			len(selection.SelectorCandidateRefs) != 0 || selection.CandidateCount != 0 {
+			t.Fatalf("post-binding bootstrap target selection = %+v", selection)
+		}
+	})
 	t.Run("workspace-relative new target grounds an absent prospective path", func(t *testing.T) {
 		workspace := t.TempDir()
 		binding := runtimeTargetSelectionBinding{ownerRef: "blocks/file", subjectRef: "workspace_deliverable"}

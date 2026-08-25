@@ -111,7 +111,7 @@ type runtimeCandidateCorrectionFailureProjection struct {
 
 // runtimeTargetSelectionInstruction converts the persisted File-owner
 // selection disposition into provider-facing C3 guidance. A create selection
-// carries the activation-sealed prospective path; a complete scope does not.
+// carries the SM-2 binding-sealed prospective path; a complete scope does not.
 // Only a durable File-owner operation is admissible for creation, and the File
 // owner remains the final workspace-boundary authority.
 func runtimeTargetSelectionInstruction(selection *runtimecontract.RuntimeTargetSelection, state runtimecontract.ConvergenceState) string {
@@ -127,7 +127,7 @@ func runtimeTargetSelectionInstruction(selection *runtimecontract.RuntimeTargetS
 		if value.ProspectiveTargetRef == "" {
 			return ""
 		}
-		return fmt.Sprintf("The File owner observed an empty workspace creation scope with sealed prospective target %q. Propose at least one durable File-owner operation whose sole targetRefs entry is exactly that path. Do not duplicate the target as an operation parameter, substitute another path, leave it blank, or use this scope to authorize Git, Shell, MCP, or another owner. The File owner will validate the path before execution.", value.ProspectiveTargetRef)
+		return fmt.Sprintf("The File owner observed an empty workspace creation scope with SM-2 binding-sealed prospective target %q. Propose at least one durable File-owner operation whose sole targetRefs entry is exactly that path. Do not duplicate the target as an operation parameter, substitute another path, leave it blank, or use this scope to authorize Git, Shell, MCP, or another owner. The File owner will validate the path before execution.", value.ProspectiveTargetRef)
 	case runtimecontract.RuntimeTargetSelectionScope:
 		return "The File owner provided a bounded workspace feasibility scope, not a selected repair target. Follow any concrete target already sealed in the Focus, FailureTarget, current failure, or RepairDirective. Only when none is present, propose at least one durable File-owner operation with a concrete workspace-relative targetRefs entry; do not duplicate it as an operation parameter. That target may be a new file and remains subject to File-owner feasibility. Do not use this scope to authorize Git, Shell, MCP, or another owner."
 	default:

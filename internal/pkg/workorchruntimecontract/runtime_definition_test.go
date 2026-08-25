@@ -123,28 +123,29 @@ func TestRuntimeCandidatePrefixChangesWithOwnerFactAcquisitionAuthorization(t *t
 	}
 }
 
-func TestRuntimeCandidatePrefixChangesWithProfileTargetSelectorAndProspectiveTarget(t *testing.T) {
+func TestRuntimeCandidatePrefixChangesWithProfileTargetSelectorAndCandidateBounds(t *testing.T) {
 	definition := RuntimeDefinitionContext{StartupInputHash: "startup-input-test", Revision: "definition-1", GoalID: "goal-1", GoalDefinition: "goal", DoDID: "dod-1", DoDDefinition: "dod", CapabilityContract: []string{"file/write"}}
 	base := RuntimeExecutionContract{ProfileContracts: []RuntimeProfileContract{{
 		ID: "profile", EvidenceRequirements: []RuntimeProfileEvidenceRequirement{{
 			ID: "initial-deliverable", Scope: "deliverable", RequireTargetGrounding: true, TargetRole: "deliverable",
-			TargetDiscoverySources: []string{RuntimeValidationDiscoverySourceWorkspaceManifest}, TargetSelectorRef: "file/workspace_deliverable", ProspectiveTargetRef: "initial-deliverable.txt",
+			TargetDiscoverySources: []string{RuntimeValidationDiscoverySourceWorkspaceManifest}, TargetSelectorRef: "file/workspace_deliverable",
+			TargetSelectorOwnerRef: "profile", TargetSelectorSubjectRef: "initial-deliverable", TargetSelectorCandidateRefs: []string{"initial-deliverable.txt"},
 		}},
 	}}}
 	changedSelector := base
 	changedSelector.ProfileContracts = append([]RuntimeProfileContract(nil), base.ProfileContracts...)
 	changedSelector.ProfileContracts[0].EvidenceRequirements = append([]RuntimeProfileEvidenceRequirement(nil), base.ProfileContracts[0].EvidenceRequirements...)
 	changedSelector.ProfileContracts[0].EvidenceRequirements[0].TargetSelectorRef = "file/unique_workspace_entry"
-	changedTarget := base
-	changedTarget.ProfileContracts = append([]RuntimeProfileContract(nil), base.ProfileContracts...)
-	changedTarget.ProfileContracts[0].EvidenceRequirements = append([]RuntimeProfileEvidenceRequirement(nil), base.ProfileContracts[0].EvidenceRequirements...)
-	changedTarget.ProfileContracts[0].EvidenceRequirements[0].ProspectiveTargetRef = "other-deliverable.txt"
+	changedCandidates := base
+	changedCandidates.ProfileContracts = append([]RuntimeProfileContract(nil), base.ProfileContracts...)
+	changedCandidates.ProfileContracts[0].EvidenceRequirements = append([]RuntimeProfileEvidenceRequirement(nil), base.ProfileContracts[0].EvidenceRequirements...)
+	changedCandidates.ProfileContracts[0].EvidenceRequirements[0].TargetSelectorCandidateRefs = []string{"other-deliverable.txt"}
 	baseHash := StableRuntimeCandidatePrefixHashWithExecutionContract(definition, base)
 	if baseHash == StableRuntimeCandidatePrefixHashWithExecutionContract(definition, changedSelector) {
 		t.Fatal("candidate prefix did not change with target selector")
 	}
-	if baseHash == StableRuntimeCandidatePrefixHashWithExecutionContract(definition, changedTarget) {
-		t.Fatal("candidate prefix did not change with prospective target")
+	if baseHash == StableRuntimeCandidatePrefixHashWithExecutionContract(definition, changedCandidates) {
+		t.Fatal("candidate prefix did not change with prospective target candidate bounds")
 	}
 }
 
@@ -154,7 +155,7 @@ func TestRuntimeCandidatePrefixChangesWithProfileDeclaredSelectorBinding(t *test
 		ID: "profile-lsp", EvidenceRequirements: []RuntimeProfileEvidenceRequirement{{
 			ID: "implementation", Scope: "deliverable", RequireTargetGrounding: true, TargetRole: "implementation",
 			TargetDiscoverySources: []string{RuntimeValidationDiscoverySourceWorkspaceManifest}, TargetSelectorRef: "file/profile_declared_candidates",
-			TargetSelectorSubjectRef: "implementation", TargetSelectorCandidateRefs: []string{"internal/lsp/manager.go", "internal/lsp/server.go"},
+			TargetSelectorOwnerRef: "profile-lsp", TargetSelectorSubjectRef: "implementation", TargetSelectorCandidateRefs: []string{"internal/lsp/manager.go", "internal/lsp/server.go"},
 		}},
 	}}}
 	changed := base

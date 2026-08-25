@@ -48,6 +48,7 @@ func TestValidateRuntimeCWILedgerRequiresOneCurrentBindingPerCWI(t *testing.T) {
 	secondFocus := CoverageFocus{
 		ID: "focus-2", CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-2"},
 		RequiredEvidenceKinds: []string{EvidenceKindValidation}, CoverageEvidenceBindings: []CoverageEvidenceBinding{second},
+		TargetRefs: second.TargetRefs,
 	}
 	secondRef := RuntimeCWIBindingRefForCoverageBinding(second, "semantic-manifest-1")
 	facts.RemainingFocuses = []CoverageFocus{secondFocus}

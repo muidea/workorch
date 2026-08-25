@@ -80,6 +80,10 @@ provider、candidate、semantic proof、capability operation、repair 与 recove
 - 正式 startup input 是 Goal、DoD、Workspace Template snapshot 与 resolved project workspace directory。
 - canonical Goal/DoD aggregation、dependency、gate 与 terminal 只支持 `all_of`；不提供 `one_of`/`any_of` terminal escape。
 - 显式 unsupported relation 只能存在于 Workspace owner 的 pre-seal admission candidate，并必须在 Run 前形成 blocking ticket。
+- Definition admission 在 promotion 前分别无损编译 Template 与 Workspace 的 `EvidencePolicies`，拒绝空/重复 ID、
+  invalid typed policy、normalize cardinality drift 及任何退役 `prospectiveTargetRef`，并把双方 exact policy
+  ref/revision/snapshot hash 封存为 candidate 的 `AdmissionPolicyBindings`；final bootstrap 还 exact 比较 admitted
+  Workspace policy projection。这些 binding 是 immutable policy authority，不是 exact prospective target authority。
 - startup input 封存后允许执行期 LLM 基于 exact revision/hash 处理 semantic proof、candidate 或 bounded gap diagnostic；LLM
   不得改写输入、选择 Runtime action、授予 credit 或裁决 terminal。
 - owner-fact acquisition 是同一 CWI 的有界前置 transaction，不是 terminal proof：manifest 必须同时保留 Definition 的
@@ -87,10 +91,26 @@ provider、candidate、semantic proof、capability operation、repair 与 recove
   同一 CWI 并生成 terminal-proof successor；已有 sealed acquisition 时，LLM 的 `undeclared_prerequisite` 必须在 ticket 前
   由 pure manifest admission 拒绝。
 - prospective acquisition 还必须用 pre-seal exact contract ref 组合 acquisition-owner hypothetical delta 与 required-owner
-  dependency observation。dependency catalog不进入LLM selectable surface；typed stale只走bounded refresh，
-  `would_not_satisfy`先持久化full composite fact，再由下一次drive形成统一`semantic_contract_failed` terminal，并保留
-  typed original reason=`prospective_owner_fact_unsatisfied`；该 terminal diagnostic 由 Orchestrator 署名，Shell 只拥有已持久化
-  factual satisfaction/reason。禁止provider correction，两个 capability owner均不能触发SM-2 transition。
+  dependency observation。pre-seal Definition 只封存 target policy、declaration selector/candidate refs 与 acquisition
+  closure；由其编译的 generation-specific obligation/manifest 再封存 operation selector 与 current owner
+  constraints，两者都不封存 exact prospective target。SM-3 semantic proposal 必须在两者交集内提出一个具体
+  target，非空 candidate refs 还要求 exact member match；File/Shell
+  只返回绑定该 proposal 的 factual feasibility/satisfaction，只有 SM-2 private event 封存的
+  `CoverageEvidenceBinding` 首次使该 target 成为 authoritative；operation candidate 只能引用 current binding，
+  dispatch 只从该 binding 派生并消费 exact target，不能重新选择。dependency catalog不进入LLM selectable surface。
+  typed stale 只走 bounded fact refresh，不消耗 semantic correction。`would_not_satisfy` 必须先作为 exact-current
+  File+Shell full composite fact 持久化，且只有 semantic attempt=0 可消耗既有的唯一 correction ledger。finite candidate
+  catalog 才允许 pure evaluator 通过“排除 failed target、排除 current owner catalog 已存在 target、逐项重验 manifest”
+  证明 exact remaining members；无剩余即 terminal。open selector 不提供可证明的 remaining member，只允许一次
+  “不同的非空 target 且仍满足原 selector/constraints”的 relational target-only retry，Orchestrator 不得选择或合成 target。
+  两者都保留同一 semantic batch/manifest/order lineage 和 attempt-0 proposal/document/hash 作为 immutable delta baseline，
+  只清理 feasibility working set 并由 canonical correction transition 回到 `Requesting`。attempt=1 document 只能替换
+  被拒 target；finite replacement 必须属于 exact remaining set，open replacement 必须满足 relational directive，并都要
+  重新取得 fresh File feasibility/delta 与 fresh Shell satisfaction fact。attempt=0 时 fixed/singleton finite catalog、
+  finite catalog 无剩余合法 target、invalid attempt-1 document，
+  或 attempt-1 `would_not_satisfy` 均收口为 `semantic_contract_failed`；第二次 owner rejection 保留 typed original
+  reason=`prospective_owner_fact_unsatisfied`，合法 attempt-1 `would_satisfy` 则可继续进入 SM-2 seal。File/Shell 只拥有 factual feasibility/satisfaction，不触发
+  correction/terminal/SM-2 transition；该边不新增状态机、跨 owner transition 或可替代 terminal 关系。
 - Definition 修订不能被 Resume 吸收；需要新输入时必须显式 Restart，并遵守 replacement/delivery transaction。
 
 ## Four Coordinated Machines

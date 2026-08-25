@@ -4,7 +4,7 @@ Status: normative
 
 Type: profile-capability
 
-Last Verified: 2026-08-23
+Last Verified: 2026-08-25
 
 ## Purpose
 
@@ -43,9 +43,10 @@ that latest catalog:
   `file/profile_declared_candidates` require a unique current match and report multiple matches as unverifiable;
 - a prospective path is valid only for `workspace-relative-new-file-target`, the complete bounded
   `file/workspace_deliverable` owner scope, or a path inside `file/profile_declared_candidates`. A non-empty
-  workspace-deliverable scope may retain one eligible absent prospective path; it remains the exact candidate target and is
-  never replaced by a current inventory member. A profile prospective path must always belong to its sealed candidate set,
-  and another 1/N profile match cannot silently absorb an absent declaration. Prospective semantics cannot be granted to
+  workspace-deliverable scope may admit one eligible absent path proposed by the SM-3 semantic document; it remains a proposal
+  until SM-2 seals the owner-validated binding and is never replaced by a current inventory member. A proposal using the profile
+  selector must belong to its sealed candidate refs when that set is non-empty,
+  and another 1/N profile match cannot silently absorb an absent proposal. Prospective semantics cannot be granted to
   `file/unique_workspace_entry` or an unknown selector. Pre-effect `file/unique_workspace_entry` combined with any non-empty
   prospective path returns typed `unsupported` before operation admission for every current manifest cardinality (0/1/N),
   with no write; post-effect reconciliation classifies the same invalid selector combination as `unverifiable`;
@@ -63,7 +64,12 @@ that latest catalog:
 
 Capability owner reports feasibility/admissibility facts. Only Orchestrator SM-2 may seal/reopen CWI binding and only SM-3
 may admit the resulting candidate/dispatch. File reconciliation never returns retain/reopen/CWI state and never grants new
-credit.
+credit. Pre-seal Definition/Profile policy contains selector/candidate refs but no exact prospective target; File validates the
+SM-3 proposal against those refs and its current operation selector/constraints. After SM-2 seals the binding, operation
+candidate only references it; dispatch and File execution admission consume the exact target derived from that binding.
+If the required owner later returns a persisted full-composite `would_not_satisfy`, File neither selects a replacement nor opens
+correction. A sole attempt-1 correction, when Orchestrator admits it, returns a different still-bounded SM-3 proposal to the same
+File feasibility path for a fresh delta; replay of the rejected proposal remains idempotent and read-only.
 
 ## Target And Path Safety
 
@@ -107,7 +113,7 @@ applicable. Technical file success is not business completion.
 - replay duplicate reconciliation and reload a fresh File owner with zero workspace write; deletion must produce a current
   unsatisfied observation, while ambiguous/out-of-workspace scope remains unverifiable;
 - cover each File selector at zero/one/many current targets, with and without a prospective path; in particular, preserve
-  full bounded workspace scope, preserve an exact current prospective declaration, and reject prospective unique-entry,
+  full bounded workspace scope, preserve an exact persisted SM-3 prospective proposal, and reject prospective unique-entry,
   non-participating workspace-deliverable/profile, and outside-profile-candidate selection;
 - reject root and nested manifest-excluded prospective targets before effect for each prospective-capable selector, and
   keep missing or realized noncanonical bindings `unverifiable` without mutation;

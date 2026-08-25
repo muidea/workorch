@@ -71,9 +71,14 @@ func validateRuntimeBootstrapStartupSeal(workspace *workspacemodel.Workspace, te
 	if startup.WorkspaceTemplateRef != strings.TrimSpace(template.ID) || startup.TemplateSnapshotHash != workspaceTemplateSnapshotHash(template) {
 		return fmt.Errorf("%w: Runtime bootstrap Template snapshot drifted after Definition admission", common.ErrConflict)
 	}
+	expectedEvidencePolicies, err := compileRuntimeEvidencePolicies("Workspace "+strings.TrimSpace(string(workspace.ID)), workspace.EvidencePolicies)
+	if err != nil {
+		return fmt.Errorf("%w: admitted Workspace evidence policies are invalid: %v", common.ErrConflict, err)
+	}
 	if bootstrap.Definition.Revision != startup.DefinitionRevision || bootstrap.Definition.StartupInputHash != startup.StartupInputHash ||
-		runtimecontract.StableRuntimeProfileContractsHash(bootstrap.Activation.ExecutionContract.ProfileContracts) != startup.RuntimeProfileContractsHash {
-		return fmt.Errorf("%w: Runtime bootstrap definition/profile snapshot drifted from Workspace startup input", common.ErrConflict)
+		runtimecontract.StableRuntimeProfileContractsHash(bootstrap.Activation.ExecutionContract.ProfileContracts) != startup.RuntimeProfileContractsHash ||
+		!runtimecontract.SameRuntimeEvidencePolicies(bootstrap.Activation.EvidencePolicies, expectedEvidencePolicies) {
+		return fmt.Errorf("%w: Runtime bootstrap definition/profile/evidence-policy snapshot drifted from Workspace startup input", common.ErrConflict)
 	}
 	return nil
 }

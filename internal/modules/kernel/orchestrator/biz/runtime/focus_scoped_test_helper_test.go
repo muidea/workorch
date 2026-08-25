@@ -35,3 +35,54 @@ func bindCurrentFocusTargetSelection(facts *runtimecontract.RuntimeFacts) {
 	}
 	facts.Prerequisites.Satisfied = append(facts.Prerequisites.Satisfied, prerequisite)
 }
+
+type runtimeTestBindingTargetSurface struct {
+	TargetRefs            []string
+	SelectorRef           string
+	SelectorOwnerRef      string
+	SelectorSubjectRef    string
+	SelectorCandidateRefs []string
+	ProspectiveTargetRef  string
+}
+
+// runtimeTestSealCurrentFocusBindingTargetSurface explicitly constructs the
+// post-SM-2 authority surface used by a fixture. The binding is written first;
+// Focus is then projected from it. Owner observations remain consumers and are
+// never allowed to rewrite this surface implicitly.
+func runtimeTestSealCurrentFocusBindingTargetSurface(facts *runtimecontract.RuntimeFacts, surface runtimeTestBindingTargetSurface) {
+	if facts == nil || len(facts.Focus.CoverageEvidenceBindings) == 0 {
+		return
+	}
+	focus := facts.Focus.Normalized()
+	for index := range focus.CoverageEvidenceBindings {
+		binding := focus.CoverageEvidenceBindings[index].Clone()
+		binding.TargetRefs = append([]string(nil), surface.TargetRefs...)
+		binding.TargetSelectorRef = surface.SelectorRef
+		binding.TargetSelectorOwnerRef = surface.SelectorOwnerRef
+		binding.TargetSelectorSubjectRef = surface.SelectorSubjectRef
+		binding.TargetSelectorCandidateRefs = append([]string(nil), surface.SelectorCandidateRefs...)
+		binding.ProspectiveTargetRef = surface.ProspectiveTargetRef
+		binding.Hash = runtimecontract.StableCoverageEvidenceBindingHash(binding)
+		focus.CoverageEvidenceBindings[index] = binding
+	}
+	focus = runtimeTestAlignFocusTargetSurfaceFromBindings(focus)
+	facts.Focus = focus
+	allFocuses := append([]runtimecontract.CoverageFocus{focus}, facts.RemainingFocuses...)
+	allFocuses = append(allFocuses, facts.CompletedFocuses...)
+	if contract, err := runtimecontract.CompileRuntimeCWIReconciliationContract(facts.DefinitionRevision, allFocuses); err == nil {
+		facts.ReconciliationContract = contract
+	}
+	for coverageIndex := range facts.Coverage {
+		row := &facts.Coverage[coverageIndex]
+		for _, binding := range focus.CoverageEvidenceBindings {
+			if binding.CoverageWorkItemID != row.ID || row.CurrentBindingRef == nil {
+				continue
+			}
+			ref := runtimecontract.RuntimeCWIBindingRefForCoverageBinding(binding, row.CurrentBindingRef.SemanticManifestHash)
+			row.CurrentBindingRef = &ref
+			if len(row.BindingLineage) != 0 {
+				row.BindingLineage[len(row.BindingLineage)-1] = ref
+			}
+		}
+	}
+}

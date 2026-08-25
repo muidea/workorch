@@ -90,13 +90,14 @@ func TestCompileRuntimeCoverageDefersTargetSelectionToFileOwner(t *testing.T) {
 	}
 }
 
-func TestCompileRuntimeCoverageCarriesProfileProspectiveTarget(t *testing.T) {
+func TestCompileRuntimeCoverageCarriesProfileProspectiveTargetCandidates(t *testing.T) {
 	activation := runtimecontract.RuntimeActivationContext{
 		ProviderSelection: runtimecontract.ProviderInferenceSelection{Target: runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "gpt-4o"}},
 		ExecutionContract: runtimecontract.RuntimeExecutionContract{AcceptanceSlicePolicy: testAcceptanceSlicePolicy(), ProfileContracts: []runtimecontract.RuntimeProfileContract{{
 			ID: "profile", DeliverableExpectations: []runtimecontract.RuntimeDeliverableExpectation{{ID: "initial-deliverable", Required: true}}, EvidenceRequirements: []runtimecontract.RuntimeProfileEvidenceRequirement{{
 				ID: "initial-deliverable", Scope: "deliverable", RequireTargetGrounding: true, TargetRole: "deliverable",
-				TargetDiscoverySources: []string{runtimecontract.RuntimeValidationDiscoverySourceWorkspaceManifest}, TargetSelectorRef: "file/workspace_deliverable", ProspectiveTargetRef: "initial-deliverable.txt",
+				TargetDiscoverySources: []string{runtimecontract.RuntimeValidationDiscoverySourceWorkspaceManifest}, TargetSelectorRef: "file/workspace_deliverable",
+				TargetSelectorOwnerRef: runtimecontract.RuntimeModuleFile, TargetSelectorSubjectRef: "initial-deliverable", TargetSelectorCandidateRefs: []string{"initial-deliverable.txt"},
 				RequiredEvidenceKinds: []string{runtimecontract.EvidenceKindStateChange}, AcceptedStepKinds: []string{runtimecontract.StepKindFileWrite},
 			}},
 		}}},
@@ -112,8 +113,8 @@ func TestCompileRuntimeCoverageCarriesProfileProspectiveTarget(t *testing.T) {
 			break
 		}
 	}
-	if focus == nil || focus.ProspectiveTargetRef != "initial-deliverable.txt" {
-		t.Fatalf("compiler lost prospective target: %+v", focuses)
+	if focus == nil || focus.ProspectiveTargetRef != "" || !runtimecontract.SameRuntimeTargetSelectorCandidateRefs(focus.TargetSelectorCandidateRefs, []string{"initial-deliverable.txt"}) {
+		t.Fatalf("compiler did not preserve target-free bounded prospective selector: %+v", focuses)
 	}
 }
 
@@ -167,9 +168,9 @@ func TestCompileRuntimeCoverageFocusesPrependsMatchedBootstrapArtifactsInDepende
 			BootstrapRecipes: []runtimecontract.RuntimeBootstrapRecipe{{
 				ID: "go-service", RequiredGoalTerms: []string{"gopls"}, RequiredDoDTerms: []string{"go test"},
 				Artifacts: []runtimecontract.RuntimeBootstrapArtifact{
-					{ID: "test", TargetRole: "test_source", TargetRef: "internal/service/main_test.go", AllowedOperationKinds: []string{runtimecontract.StepKindFileWrite}, DependsOnArtifactIDs: []string{"source"}},
-					{ID: "module", TargetRole: "module_definition", TargetRef: "go.mod", AllowedOperationKinds: []string{runtimecontract.StepKindFileWrite}},
-					{ID: "source", TargetRole: "implementation", TargetRef: "internal/service/main.go", AllowedOperationKinds: []string{runtimecontract.StepKindFileWrite}, DependsOnArtifactIDs: []string{"module"}},
+					{ID: "test", TargetRole: "test_source", AllowedOperationKinds: []string{runtimecontract.StepKindFileWrite}, DependsOnArtifactIDs: []string{"source"}},
+					{ID: "module", TargetRole: "module_definition", AllowedOperationKinds: []string{runtimecontract.StepKindFileWrite}},
+					{ID: "source", TargetRole: "implementation", AllowedOperationKinds: []string{runtimecontract.StepKindFileWrite}, DependsOnArtifactIDs: []string{"module"}},
 				},
 			}},
 		}}},
@@ -184,10 +185,10 @@ func TestCompileRuntimeCoverageFocusesPrependsMatchedBootstrapArtifactsInDepende
 	if len(focuses) != 4 {
 		t.Fatalf("focus count = %d, want 4: %+v", len(focuses), focuses)
 	}
-	for idx, want := range []string{"go.mod", "internal/service/main.go", "internal/service/main_test.go"} {
+	for idx, wantRole := range []string{"module_definition", "implementation", "test_source"} {
 		focus := focuses[idx]
-		if focus.TargetSelectorRef != "file/profile_declared_candidates" || focus.ProspectiveTargetRef != want ||
-			len(focus.TargetSelectorCandidateRefs) != 1 || focus.TargetSelectorCandidateRefs[0] != want ||
+		if focus.TargetSelectorRef != "file/workspace_deliverable" || focus.ProspectiveTargetRef != "" ||
+			len(focus.TargetSelectorCandidateRefs) != 0 || focus.TargetRole != wantRole ||
 			len(focus.RequiredEvidenceKinds) != 1 || focus.RequiredEvidenceKinds[0] != runtimecontract.EvidenceKindStateChange ||
 			len(focus.AcceptedStepKinds) != 1 || focus.AcceptedStepKinds[0] != runtimecontract.StepKindFileWrite || !focus.RequireTargetGrounding || focus.RequireAssessment {
 			t.Fatalf("bootstrap focus %d = %+v", idx, focus)
@@ -228,9 +229,9 @@ func TestRuntimeBootstrapCompilesBroadDoDIntoSemanticPlanningSeed(t *testing.T) 
 				BootstrapRecipes: []runtimecontract.RuntimeBootstrapRecipe{{
 					ID: "go-lsp", RequiredGoalTerms: []string{"gopls"},
 					Artifacts: []runtimecontract.RuntimeBootstrapArtifact{
-						{ID: "module", TargetRole: "module", TargetRef: "go.mod", AllowedOperationKinds: []string{runtimecontract.StepKindFileWrite}},
-						{ID: "implementation", TargetRole: "implementation", TargetRef: "internal/lsp/manager.go", AllowedOperationKinds: []string{runtimecontract.StepKindFileWrite}, DependsOnArtifactIDs: []string{"module"}},
-						{ID: "test", TargetRole: "test", TargetRef: "internal/lsp/manager_test.go", AllowedOperationKinds: []string{runtimecontract.StepKindFileWrite}, DependsOnArtifactIDs: []string{"implementation"}},
+						{ID: "module", TargetRole: "module", AllowedOperationKinds: []string{runtimecontract.StepKindFileWrite}},
+						{ID: "implementation", TargetRole: "implementation", AllowedOperationKinds: []string{runtimecontract.StepKindFileWrite}, DependsOnArtifactIDs: []string{"module"}},
+						{ID: "test", TargetRole: "test", AllowedOperationKinds: []string{runtimecontract.StepKindFileWrite}, DependsOnArtifactIDs: []string{"implementation"}},
 					},
 				}},
 				DeliverableExpectations: []runtimecontract.RuntimeDeliverableExpectation{
@@ -266,7 +267,7 @@ func TestCompileRuntimeCoverageCarriesProfileDeclaredSelector(t *testing.T) {
 		ExecutionContract: runtimecontract.RuntimeExecutionContract{AcceptanceSlicePolicy: testAcceptanceSlicePolicy(), ProfileContracts: []runtimecontract.RuntimeProfileContract{{
 			ID: "profile-lsp", DeliverableExpectations: []runtimecontract.RuntimeDeliverableExpectation{{ID: "implementation", Required: true}}, EvidenceRequirements: []runtimecontract.RuntimeProfileEvidenceRequirement{{
 				ID: "implementation", Scope: "deliverable", RequireTargetGrounding: true, TargetRole: "implementation",
-				TargetDiscoverySources: []string{runtimecontract.RuntimeValidationDiscoverySourceWorkspaceManifest}, TargetSelectorRef: "file/profile_declared_candidates", TargetSelectorSubjectRef: "implementation", TargetSelectorCandidateRefs: []string{"internal/lsp/manager.go", "internal/lsp/server.go"},
+				TargetDiscoverySources: []string{runtimecontract.RuntimeValidationDiscoverySourceWorkspaceManifest}, TargetSelectorRef: "file/profile_declared_candidates", TargetSelectorOwnerRef: "profile-lsp", TargetSelectorSubjectRef: "implementation", TargetSelectorCandidateRefs: []string{"internal/lsp/manager.go", "internal/lsp/server.go"},
 				RequiredEvidenceKinds: []string{runtimecontract.EvidenceKindStateChange}, AcceptedStepKinds: []string{runtimecontract.RuntimeBlockKindPatchApply},
 			}},
 		}}},
@@ -288,11 +289,11 @@ func TestCompileRuntimeCoverageCarriesProfileDeclaredSelector(t *testing.T) {
 }
 
 // DoD work units precede profile deliverables in a fresh activation. A profile
-// that only declares a prospective target on its later source-change item
+// that only declares prospective target candidates on its later source-change item
 // therefore still deadlocks an empty workspace at the first direct-evidence
 // DoD focus. The declaration must be compiled into that leading focus too;
 // File remains the owner that verifies the path and reports the create fact.
-func TestCompileRuntimeCoverageCarriesProspectiveTargetIntoLeadingDoDFocus(t *testing.T) {
+func TestCompileRuntimeCoverageCarriesProspectiveTargetCandidatesIntoLeadingDoDFocus(t *testing.T) {
 	activation := runtimecontract.RuntimeActivationContext{
 		ProviderSelection: runtimecontract.ProviderInferenceSelection{Target: runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "gpt-4o"}},
 		ExecutionContract: runtimecontract.RuntimeExecutionContract{AcceptanceSlicePolicy: testAcceptanceSlicePolicy(), ProfileContracts: []runtimecontract.RuntimeProfileContract{{
@@ -300,13 +301,15 @@ func TestCompileRuntimeCoverageCarriesProspectiveTargetIntoLeadingDoDFocus(t *te
 				{
 					ID: "*", Scope: "dodItem", RequireTargetGrounding: true, TargetRole: "deliverable_implementation",
 					TargetDiscoverySources: []string{runtimecontract.RuntimeValidationDiscoverySourceWorkspaceManifest},
-					TargetSelectorRef:      "file/workspace_deliverable", ProspectiveTargetRef: "workorch-deliverable.md",
+					TargetSelectorRef:      "file/workspace_deliverable", TargetSelectorOwnerRef: runtimecontract.RuntimeModuleFile,
+					TargetSelectorSubjectRef: "dod-deliverable", TargetSelectorCandidateRefs: []string{"workorch-deliverable.md"},
 					AcceptedStepKinds: []string{runtimecontract.StepKindFileWrite, runtimecontract.RuntimeBlockKindPatchApply},
 				},
 				{
 					ID: "source_change", Scope: "deliverable", RequireTargetGrounding: true, TargetRole: "deliverable_implementation",
 					TargetDiscoverySources: []string{runtimecontract.RuntimeValidationDiscoverySourceWorkspaceManifest},
-					TargetSelectorRef:      "file/workspace_deliverable", ProspectiveTargetRef: "workorch-deliverable.md",
+					TargetSelectorRef:      "file/workspace_deliverable", TargetSelectorOwnerRef: runtimecontract.RuntimeModuleFile,
+					TargetSelectorSubjectRef: "source-deliverable", TargetSelectorCandidateRefs: []string{"workorch-deliverable.md"},
 					AcceptedStepKinds: []string{runtimecontract.StepKindFileWrite, runtimecontract.RuntimeBlockKindPatchApply},
 				},
 			},
@@ -325,7 +328,7 @@ func TestCompileRuntimeCoverageCarriesProspectiveTargetIntoLeadingDoDFocus(t *te
 	}
 	leading := focuses[0]
 	if leading.AssessmentScope != "dodItem" || leading.TargetSelectorRef != "file/workspace_deliverable" ||
-		leading.ProspectiveTargetRef != "workorch-deliverable.md" || !leading.RequireTargetGrounding {
+		leading.ProspectiveTargetRef != "" || !runtimecontract.SameRuntimeTargetSelectorCandidateRefs(leading.TargetSelectorCandidateRefs, []string{"workorch-deliverable.md"}) || !leading.RequireTargetGrounding {
 		t.Fatalf("leading DoD focus lost profile creation declaration: %+v", leading)
 	}
 	hasFileWrite, hasPatchApply := false, false

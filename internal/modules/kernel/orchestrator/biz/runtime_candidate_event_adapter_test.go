@@ -733,10 +733,7 @@ func TestRequestRuntimeCandidatePreservesSealedReadOnlyMCPMetadata(t *testing.T)
 	})
 	facts := runtimecontract.RuntimeFacts{
 		Activation: activation, WorkspaceID: "ws-1", RunID: "run-1", DefinitionRevision: "definition-1", EvidenceRevision: "evidence-1",
-		Focus: runtimecontract.CoverageFocus{
-			ID: "focus-1", CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-1"}, RequiredEvidenceKinds: []string{runtimecontract.EvidenceKindValidation},
-			CoverageEvidenceBindings: []runtimecontract.CoverageEvidenceBinding{binding},
-		},
+		Focus:    eventTestCoverageFocus(binding),
 		Coverage: []runtimecontract.RuntimeCoverageItemFact{{ID: "cwi-1", State: runtimecontract.RuntimeCoverageItemStateOpen}},
 	}
 	facts.ConvergencePolicy = runtimecontract.DefaultRuntimeConvergencePolicy()
@@ -845,10 +842,7 @@ func sealedCandidateTestDecision(t *testing.T) runtimecontract.RuntimeDecision {
 			ExecutionContract: runtimecontract.RuntimeExecutionContract{StateChangePolicy: runtimecontract.RuntimeStateChangeAllowedButNotRequired},
 		},
 		WorkspaceID: "ws-1", RunID: "run-1", DefinitionRevision: "definition-1", EvidenceRevision: "evidence-1",
-		Focus: runtimecontract.CoverageFocus{
-			ID: "focus-1", CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-1"}, RequiredEvidenceKinds: []string{runtimecontract.EvidenceKindStateChange},
-			CoverageEvidenceBindings: []runtimecontract.CoverageEvidenceBinding{binding},
-		},
+		Focus:    eventTestCoverageFocus(binding),
 		Coverage: []runtimecontract.RuntimeCoverageItemFact{{ID: "cwi-1", State: runtimecontract.RuntimeCoverageItemStateOpen}},
 	}
 	facts.ConvergencePolicy = runtimecontract.DefaultRuntimeConvergencePolicy()
@@ -872,6 +866,18 @@ func sealedCandidateTestDecision(t *testing.T) runtimecontract.RuntimeDecision {
 func eventTestCoverageBinding(binding runtimecontract.CoverageEvidenceBinding) runtimecontract.CoverageEvidenceBinding {
 	binding.Hash = runtimecontract.StableCoverageEvidenceBindingHash(binding)
 	return binding
+}
+
+func eventTestCoverageFocus(binding runtimecontract.CoverageEvidenceBinding) runtimecontract.CoverageFocus {
+	binding = binding.Clone()
+	return runtimecontract.CoverageFocus{
+		ID: binding.FocusID, CoverageWorkItemIDs: []common.CoverageWorkItemID{binding.CoverageWorkItemID},
+		CoverageEvidenceBindings: []runtimecontract.CoverageEvidenceBinding{binding}, EvidenceDeclarationRef: binding.DeclarationRef,
+		RequiredEvidenceKinds: binding.EvidenceKinds(), TargetRefs: append([]string(nil), binding.TargetRefs...),
+		TargetSelectorRef: binding.TargetSelectorRef, TargetSelectorOwnerRef: binding.TargetSelectorOwnerRef,
+		TargetSelectorSubjectRef: binding.TargetSelectorSubjectRef, TargetSelectorCandidateRefs: append([]string(nil), binding.TargetSelectorCandidateRefs...),
+		ProspectiveTargetRef: binding.ProspectiveTargetRef,
+	}
 }
 
 func candidateContextForDecision(decision runtimecontract.RuntimeDecision) runtimecontract.RuntimeCandidateContext {

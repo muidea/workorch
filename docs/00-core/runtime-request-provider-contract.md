@@ -133,6 +133,11 @@ attempt 1 只允许改变 C4 中 provider-safe `CandidateRejection` 与 Orchestr
 改变 operation authorization、target policy、allowed targets、manifest 或 C0～C3，则必须终止 current transaction，
 等待 SM-2 以新 owner fact 建立新 authority。
 
+已持久化 exact-current File+Shell full-composite `would_not_satisfy` 的 bounded different-target correction 不改变
+allowed-target authority：它只在 attempt=0 且原 selector/constraints/candidate bounds 仍允许其他 target 时，在 C4
+封存 failed target forbidden delta 与原允许集内的 remaining/relational requirement。C0～C3、manifest、semantic
+batch/order 和 stable prefix 保持不变；typed stale 只刷新 owner fact，不生成 C4 correction。
+
 ## Context Priority And Integrity
 
 | Priority | Protected content |

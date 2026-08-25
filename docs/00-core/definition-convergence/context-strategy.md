@@ -42,6 +42,14 @@ RuntimeDefinitionPartitionSet
 semantic manifest 的 provider-selectable `OwnerCatalogs` 可以按 C3 bounded projection 暴露 exact allowed values；
 prospective owner-fact composite probe 使用的 `OwnerFactDependencyCatalogs` 不属于 prompt context。它们只在 aggregate
 中参与 manifest/hash/freshness/CAS/seal，不能进入 C3、schema enum、correction directive 或任何 LLM-visible catalog dump。
+Template 与 Workspace 两侧的 evidence-policy snapshots 在 Definition admission 时分别形成 canonical
+`AdmissionPolicyBindings`，作为稳定 C2 policy authority；任一含有退役 `prospectiveTargetRef` 的 snapshot 在 promotion
+前即拒绝，binding 本身也不能向 C3/SM-3 注入 exact target。
+pre-seal Definition/Profile authority 只声明 prospective target policy、declaration selector/candidate refs 与
+satisfaction contract；generation-specific semantic obligation/manifest 再与 current owner catalog 编译 operation
+selector/constraints，C3 只投影其 provider-visible bounded 部分。SM-3 semantic document 的 proposal 在两者交集内
+提出 exact target；File/Shell fact 对该 proposal 进行绑定观测，只有 SM-2 sealed binding 才形成 target
+authority。proposal、owner fact 或上一 generation target 均不得回写 C1/C2。
 
 “Goal/DoD 不压缩”和 stable-prefix 规则具体化为：
 
@@ -51,6 +59,9 @@ prospective owner-fact composite probe 使用的 `OwnerFactDependencyCatalogs` �
 - current focus 在同一 partition 内变化时只改变 C3，C0/C1/C2 和 `StablePrefixHash` 必须保持不变；
 - attempt 0/1、whole-document recovery 和同 semantic transaction 的所有 physical call 必须复用同一
   `DefinitionPartitionRef/Hash` 与 stable prefix；
+- exact-current full-composite `would_not_satisfy` 的 bounded different-target attempt 1 仅在 C4 增加 failed-target
+  forbidden/remaining-target directive，复用同一 semantic batch、C0～C3 与 stable prefix；typed stale 只刷新 fact，
+  不生成 correction C4；
 - 从一个 home partition 切到另一个时，SM-2 先持久化新的 logical request 和
   `StablePrefixChangeDisposition=definition_partition_switch`。这是显式新 stable-prefix generation，不是 renderer drift；
 - 同一 Run 内只有 sealed partition switch 可以预期改变 stable prefix；Definition revision 或 C2 immutable contract

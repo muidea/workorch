@@ -68,6 +68,12 @@ func TestBuildRuntimeCandidateContractManifestNarrowsCreationScopeWithoutSecondF
 		len(operation.Target.ExactTargetRefs) != 0 {
 		t.Fatalf("create selection must seal prospective_owner_target: %+v", operation.Target)
 	}
+
+	missingTarget := *selection
+	missingTarget.ProspectiveTargetRef = ""
+	if _, err := BuildRuntimeCandidateContractManifest(decision, RuntimeCandidateManifestOwnerFacts{TargetSelection: &missingTarget, OperationAdmissibilities: []RuntimeOperationAdmissibility{inventory}}); err == nil || !strings.Contains(err.Error(), "requires a binding-derived prospective target") {
+		t.Fatalf("create selection rebuilt missing prospective target from required output: %v", err)
+	}
 }
 
 func TestBuildRuntimeCandidateContractManifestScopeAllowsOnlyOwnerPublishedKind(t *testing.T) {

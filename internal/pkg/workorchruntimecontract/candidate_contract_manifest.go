@@ -497,7 +497,7 @@ func (t RuntimeOperationTargetAuthorization) RequireTargets() bool {
 
 // AllowedTargetRefs returns the bounded membership set a pure evaluator may use
 // for target membership checks under the sealed TargetPolicy. Prospective
-// create only returns the profile-declared prospective target when sealed.
+// create only returns the SM-2 binding-sealed prospective target.
 func (t RuntimeOperationTargetAuthorization) AllowedTargetRefs() []string {
 	t = t.Normalized()
 	switch t.Policy {
@@ -877,19 +877,15 @@ func runtimeCandidateTargetAuthorizationForKind(
 	}
 	switch value.Disposition {
 	case RuntimeTargetSelectionCreate:
-		// Create kind-narrowing already admits only owner facts that declare a
-		// prospective target. A sealed ProspectiveTargetRef turns that into
-		// prospective_owner_target; without it the authorization stays exact and
-		// only kind narrowing applies.
+		// Create kind-narrowing admits only an owner fact carrying the exact
+		// SM-2 binding-derived prospective target. RequiredOutput.TargetRefs is a
+		// downstream projection and must never reconstruct a missing owner fact.
 		allowsProspective, ownerSelectors, ownerConstraints := runtimeCandidateAdmissibilityAllowsProspective(required, contract, admissibility, hasAdmissibility)
 		prospectiveRef := value.ProspectiveTargetRef
-		if prospectiveRef == "" && len(exactRefs) == 1 {
-			// Required output may already seal the single create path while the
-			// selection disposition still marks create. Prefer prospective so the
-			// authorization carries create semantics rather than a second exact set.
-			prospectiveRef = exactRefs[0]
+		if prospectiveRef == "" {
+			return RuntimeOperationTargetAuthorization{}, nil, nil, fmt.Errorf("candidate manifest create selection for %q requires a binding-derived prospective target", descriptor.Kind)
 		}
-		if !allowsProspective || prospectiveRef == "" {
+		if !allowsProspective {
 			if target, ok := runtimeCandidateTargetAuthorizationFromAdmissibility(descriptor, contract, required, admissibility, hasAdmissibility, exactRefs, true); ok {
 				return target, prerequisiteRefs, admissibilityRefs, nil
 			}
@@ -940,7 +936,7 @@ func runtimeCandidateTargetAuthorizationForKind(
 			}, prerequisiteRefs, admissibilityRefs, nil
 		}
 		// A non-empty workspace may carry both a bounded existing inventory and
-		// an activation-sealed prospective deliverable. When the selected owner
+		// an SM-2 binding-sealed prospective deliverable. When the selected owner
 		// kind/variant explicitly authorizes creation, the prospective target is
 		// the only valid policy for this authorization. Do not downgrade it to
 		// selector-only existing_owner_scope: that policy would erase the

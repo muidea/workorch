@@ -1443,15 +1443,32 @@ func runtimeTestDeclareProspectiveWorkspaceTarget(bootstrap *runtimecontract.Run
 			ID: "cwi-v2", Scope: "test", TargetRole: "deliverable",
 			TargetDiscoverySources: []string{runtimecontract.RuntimeValidationDiscoverySourceWorkspaceManifest},
 			TargetSelectorRef:      "file/workspace_deliverable", TargetSelectorOwnerRef: runtimecontract.RuntimeModuleFile,
-			TargetSelectorSubjectRef: "deliverable", ProspectiveTargetRef: target, RequireTargetGrounding: true,
+			TargetSelectorSubjectRef: "deliverable", TargetSelectorCandidateRefs: []string{target}, RequireTargetGrounding: true,
 			RequiredEvidenceKinds: []string{runtimecontract.EvidenceKindStateChange, runtimecontract.EvidenceKindValidation},
 			AcceptedStepKinds:     []string{runtimecontract.StepKindFileWrite, runtimecontract.RuntimeBlockKindManagedValidationSession},
 			ValidationRecipeID:    "grounded-target-validation", RequiredCheckRefs: []string{"grounded-target-validation"},
 		}},
 	}}
+	if len(bootstrap.DefinitionFocuses) != 0 {
+		focus := &bootstrap.DefinitionFocuses[0]
+		focus.TargetRole = "deliverable"
+		focus.TargetDiscoverySources = []string{runtimecontract.RuntimeValidationDiscoverySourceWorkspaceManifest}
+		focus.TargetSelectorRef = "file/workspace_deliverable"
+		focus.TargetSelectorOwnerRef = runtimecontract.RuntimeModuleFile
+		focus.TargetSelectorSubjectRef = "deliverable"
+		focus.TargetSelectorCandidateRefs = []string{target}
+		focus.RequireTargetGrounding = true
+	}
 }
 
 func runtimeTestDeclareExistingWorkspaceTarget(bootstrap *runtimecontract.RuntimeBootstrap, target string) {
+	bootstrap.Activation.ExecutionContract.ProfileContracts = []runtimecontract.RuntimeProfileContract{{
+		ID: "test-existing-workspace-target",
+		EvidenceRequirements: []runtimecontract.RuntimeProfileEvidenceRequirement{{
+			ID: "cwi-v2", Scope: "test", TargetRole: "deliverable", TargetRefs: []string{target},
+			RequireTargetGrounding: true,
+		}},
+	}}
 	bootstrap.DefinitionFocuses[0].TargetRole = "deliverable"
 	bootstrap.DefinitionFocuses[0].TargetDiscoverySources = []string{runtimecontract.RuntimeValidationDiscoverySourceWorkspaceManifest}
 	bootstrap.DefinitionFocuses[0].TargetSelectorRef = "file/profile_declared_candidates"
@@ -5983,7 +6000,7 @@ func runtimeFileShellGitBootstrap() runtimecontract.RuntimeBootstrap {
 				ID: "cwi-file", Scope: "test", TargetRole: "deliverable",
 				TargetDiscoverySources: []string{runtimecontract.RuntimeValidationDiscoverySourceWorkspaceManifest},
 				TargetSelectorRef:      "file/workspace_deliverable", TargetSelectorOwnerRef: runtimecontract.RuntimeModuleFile, TargetSelectorSubjectRef: "main-deliverable",
-				TargetSelectorCandidateRefs: []string{"main.go"}, ProspectiveTargetRef: "main.go", RequireTargetGrounding: true,
+				TargetSelectorCandidateRefs: []string{"main.go"}, RequireTargetGrounding: true,
 				RequiredEvidenceKinds: []string{runtimecontract.EvidenceKindStateChange, runtimecontract.EvidenceKindValidation},
 				AcceptedStepKinds:     []string{runtimecontract.StepKindFileWrite, runtimecontract.RuntimeBlockKindManagedValidationSession},
 				ValidationRecipeID:    "fixture-main-go-created", RequiredCheckRefs: []string{"fixture-main-go-created"},
@@ -6000,7 +6017,12 @@ func runtimeFileShellGitBootstrap() runtimecontract.RuntimeBootstrap {
 		},
 	}}
 	bootstrap.DefinitionFocuses = []runtimecontract.RuntimeDefinitionFocus{
-		{ID: "focus-file", SliceID: "slice-file", CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-file"}, RequiredEvidenceKinds: []string{runtimecontract.EvidenceKindStateChange, runtimecontract.EvidenceKindValidation}},
+		{
+			ID: "focus-file", SliceID: "slice-file", CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-file"}, RequiredEvidenceKinds: []string{runtimecontract.EvidenceKindStateChange, runtimecontract.EvidenceKindValidation},
+			TargetRole: "deliverable", TargetDiscoverySources: []string{runtimecontract.RuntimeValidationDiscoverySourceWorkspaceManifest},
+			TargetSelectorRef: "file/workspace_deliverable", TargetSelectorOwnerRef: runtimecontract.RuntimeModuleFile,
+			TargetSelectorSubjectRef: "main-deliverable", TargetSelectorCandidateRefs: []string{"main.go"}, RequireTargetGrounding: true,
+		},
 		{ID: "focus-edit", SliceID: "slice-edit", CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-edit"}, RequiredEvidenceKinds: []string{runtimecontract.EvidenceKindStateChange}},
 		{ID: "focus-git", SliceID: "slice-git", CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-git"}, RequiredEvidenceKinds: []string{runtimecontract.EvidenceKindStateChange}, RequireAssessment: true},
 	}
@@ -6040,7 +6062,7 @@ func runtimeTestUseExistingMainTarget(bootstrap *runtimecontract.RuntimeBootstra
 			if requirement.ID != "cwi-file" {
 				continue
 			}
-			requirement.ProspectiveTargetRef = ""
+			requirement.TargetSelectorCandidateRefs = nil
 			requirement.TargetRefs = []string{"main.go"}
 			requirement.AcceptedStepKinds = []string{runtimecontract.StepKindFileEdit, runtimecontract.RuntimeBlockKindManagedValidationSession}
 		}
@@ -7230,8 +7252,9 @@ func runtimePatchVariantBootstrap(variant, target string) runtimecontract.Runtim
 	bootstrap.Activation.ExecutionContract.ProfileContracts = []runtimecontract.RuntimeProfileContract{{
 		ID: "test-patch-profile",
 		EvidenceRequirements: []runtimecontract.RuntimeProfileEvidenceRequirement{{
-			ID: "patch-state-change", Scope: "test", RequiredEvidenceKinds: []string{runtimecontract.EvidenceKindStateChange},
-			AcceptedStepKinds: []string{runtimecontract.RuntimeBlockKindPatchApply},
+			ID: "cwi-v2", Scope: "test", TargetRole: "patch_target", TargetRefs: []string{target}, RequireTargetGrounding: true,
+			RequiredEvidenceKinds: []string{runtimecontract.EvidenceKindStateChange},
+			AcceptedStepKinds:     []string{runtimecontract.RuntimeBlockKindPatchApply},
 			AcceptedOperationVariants: []runtimecontract.RuntimeOperationVariantRef{{
 				Kind: runtimecontract.RuntimeBlockKindPatchApply, VariantID: variant,
 			}},

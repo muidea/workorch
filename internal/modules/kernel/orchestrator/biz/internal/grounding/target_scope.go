@@ -63,7 +63,8 @@ func CurrentFocusTargetSelection(facts runtimecontract.RuntimeFacts) *runtimecon
 }
 
 // HasOwnerGroundedCreationScope recognizes only a persisted owner create
-// observation matching the activation-sealed selector and prospective target.
+// observation matching the sealed Definition selector and the SM-2
+// binding-sealed prospective target.
 func HasOwnerGroundedCreationScope(facts runtimecontract.RuntimeFacts) bool {
 	selection := CurrentFocusTargetSelection(facts)
 	if selection == nil {
@@ -81,7 +82,7 @@ func HasOwnerGroundedCreationScope(facts runtimecontract.RuntimeFacts) bool {
 
 // HasOwnerGroundedTargetScope recognizes a bounded, non-empty existing owner
 // inventory. An empty observation proves only that no existing target was
-// found; creation requires a separate activation-sealed prospective target.
+// found; creation requires a separate SM-2 binding-sealed prospective target.
 func HasOwnerGroundedTargetScope(facts runtimecontract.RuntimeFacts) bool {
 	selection := CurrentFocusTargetSelection(facts)
 	if selection == nil || selection.Disposition != runtimecontract.RuntimeTargetSelectionScope ||

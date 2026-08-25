@@ -1,6 +1,7 @@
 package activationports
 
 import (
+	"fmt"
 	"sort"
 	"strings"
 
@@ -31,6 +32,13 @@ func RuntimeActivationContext(
 	executionContract map[string]any,
 	continuation runtimecontract.RuntimeContinuationContext,
 ) (runtimecontract.RuntimeActivationContext, error) {
+	if err := validateRuntimePresealTargetDeclarations(executionContract, nil); err != nil {
+		return runtimecontract.RuntimeActivationContext{}, err
+	}
+	runtimePolicies, err := compileRuntimeEvidencePolicies("Workspace", evidencePolicies)
+	if err != nil {
+		return runtimecontract.RuntimeActivationContext{}, err
+	}
 	mcpCapabilities := runtimeMCPCapabilityContexts(capabilities)
 	runtimeSkills, skillBudget, err := runtimeSkillContexts(skills)
 	if err != nil {
@@ -47,7 +55,7 @@ func RuntimeActivationContext(
 		OperationPolicies:  runtimeMCPOperationPolicies(mcpCapabilities),
 		Memories:           runtimeMemoryContexts(memories),
 		MemorySelection:    runtimeMemorySelectionEvidence(memorySelection),
-		EvidencePolicies:   runtimeEvidencePolicies(evidencePolicies),
+		EvidencePolicies:   runtimePolicies,
 		ExecutionContract:  runtimeExecutionContract(executionContract),
 		Continuation:       continuation,
 	}
@@ -67,6 +75,124 @@ func RuntimeActivationContext(
 		})
 	}
 	return ret.Normalized(), nil
+}
+
+// validateRuntimePresealTargetDeclarations rejects the removed exact-target
+// startup surface instead of silently treating it as a compatibility alias.
+// Startup may seal selector candidate bounds; the concrete prospective target
+// first appears in an SM-3 proposal and becomes authority only after SM-2
+// binding.
+func validateRuntimePresealTargetDeclarations(executionContract map[string]any, evidencePolicies []workorcheventpayload.Payload) error {
+	if runtimeValueContainsField(executionContract, "prospectiveTargetRef") {
+		return fmt.Errorf("%w: pre-seal execution contract rejects prospectiveTargetRef; declare targetSelectorCandidateRefs instead", common.ErrInvalidArgument)
+	}
+	if runtimeExecutionContractContainsBootstrapArtifactField(executionContract, "targetRef") {
+		return fmt.Errorf("%w: pre-seal bootstrap artifact rejects targetRef; the semantic proposal must choose its target after activation", common.ErrInvalidArgument)
+	}
+	for _, policy := range evidencePolicies {
+		if runtimePayloadFieldsContainField(policy.Fields, "prospectiveTargetRef") {
+			return fmt.Errorf("%w: pre-seal evidence policy rejects prospectiveTargetRef; declare targetSelectorCandidateRefs instead", common.ErrInvalidArgument)
+		}
+	}
+	return nil
+}
+
+func runtimeExecutionContractContainsBootstrapArtifactField(executionContract map[string]any, fieldName string) bool {
+	profiles := runtimeMap(executionContract["profileContracts"])
+	for _, rawProfile := range profiles {
+		profile := runtimeMap(rawProfile)
+		for _, recipe := range runtimeMapSlice(profile["bootstrapRecipes"]) {
+			for _, artifact := range runtimeMapSlice(recipe["artifacts"]) {
+				for key := range artifact {
+					if strings.EqualFold(strings.TrimSpace(key), fieldName) {
+						return true
+					}
+				}
+			}
+		}
+	}
+	return false
+}
+
+func runtimeValueContainsField(value any, fieldName string) bool {
+	switch typed := value.(type) {
+	case map[string]any:
+		for key, child := range typed {
+			if strings.EqualFold(strings.TrimSpace(key), fieldName) || runtimeValueContainsField(child, fieldName) {
+				return true
+			}
+		}
+	case []any:
+		for _, child := range typed {
+			if runtimeValueContainsField(child, fieldName) {
+				return true
+			}
+		}
+	case []map[string]any:
+		for _, child := range typed {
+			if runtimeValueContainsField(child, fieldName) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func runtimePayloadFieldsContainField(fields []workorcheventpayload.Field, fieldName string) bool {
+	for _, field := range fields {
+		if strings.EqualFold(strings.TrimSpace(field.Name), fieldName) {
+			return true
+		}
+		if runtimePayloadValueContainsField(field.Value, fieldName) {
+			return true
+		}
+	}
+	return false
+}
+
+func runtimePayloadValueContainsField(value workorcheventpayload.Value, fieldName string) bool {
+	switch value.Kind {
+	case workorcheventpayload.ValueObject:
+		return runtimePayloadFieldsContainField(value.Object, fieldName)
+	case workorcheventpayload.ValueArray:
+		for _, item := range value.Array {
+			if runtimePayloadValueContainsField(item, fieldName) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// validateRuntimeEvidencePolicyInputs keeps the raw owner snapshot lossless at
+// the admission boundary. Runtime normalization is intentionally ID-based; an
+// empty or duplicate ID would otherwise be silently dropped or overwritten
+// before the typed policy validator could observe it.
+func validateRuntimeEvidencePolicyInputs(owner string, items []workorcheventpayload.Payload) error {
+	owner = strings.TrimSpace(owner)
+	if owner == "" {
+		owner = "Runtime"
+	}
+	if err := validateRuntimePresealTargetDeclarations(nil, items); err != nil {
+		return fmt.Errorf("%s evidence policies: %w", owner, err)
+	}
+	seen := make(map[string]struct{}, len(items))
+	for idx, item := range items {
+		id, ok := item.String("id")
+		id = strings.TrimSpace(id)
+		if !ok || id == "" {
+			return fmt.Errorf("%w: %s evidence policy %d requires a non-empty string id", common.ErrInvalidArgument, owner, idx+1)
+		}
+		if _, duplicate := seen[id]; duplicate {
+			return fmt.Errorf("%w: %s evidence policies duplicate id %q", common.ErrInvalidArgument, owner, id)
+		}
+		seen[id] = struct{}{}
+		policy := runtimeEvidencePolicy(item)
+		if err := policy.Validate(); err != nil {
+			return fmt.Errorf("%w: %s evidence policy %q is invalid: %v", common.ErrInvalidArgument, owner, id, err)
+		}
+	}
+	return nil
 }
 
 func RuntimeDefinitionChangeImpact(input map[string]any) *runtimecontract.RuntimeDefinitionChangeImpact {
@@ -175,7 +301,7 @@ func runtimeExecutionContract(input map[string]any) runtimecontract.RuntimeExecu
 			}
 			for _, artifact := range runtimeMapSlice(item["artifacts"]) {
 				recipe.Artifacts = append(recipe.Artifacts, runtimecontract.RuntimeBootstrapArtifact{
-					ID: runtimeString(artifact["id"]), TargetRole: runtimeString(artifact["targetRole"]), TargetRef: runtimeString(artifact["targetRef"]),
+					ID: runtimeString(artifact["id"]), TargetRole: runtimeString(artifact["targetRole"]),
 					AllowedOperationKinds: runtimeStrings(artifact["allowedOperationKinds"]), DependsOnArtifactIDs: runtimeStrings(artifact["dependsOnArtifactIds"]),
 				})
 			}
@@ -226,7 +352,7 @@ func runtimeExecutionContract(input map[string]any) runtimecontract.RuntimeExecu
 			contract.EvidenceRequirements = append(contract.EvidenceRequirements, runtimecontract.RuntimeProfileEvidenceRequirement{
 				ID: runtimeString(item["id"]), Scope: runtimeString(item["scope"]), EvidenceRole: runtimeString(item["evidenceRole"]),
 				TargetRole: runtimeString(item["targetRole"]), TargetRefs: runtimeStrings(item["targetRefs"]),
-				TargetDiscoverySources: runtimeStrings(item["targetDiscoverySources"]), TargetSelectorRef: runtimeString(item["targetSelectorRef"]), TargetSelectorOwnerRef: runtimeString(item["targetSelectorOwnerRef"]), TargetSelectorSubjectRef: runtimeString(item["targetSelectorSubjectRef"]), TargetSelectorCandidateRefs: runtimeStrings(item["targetSelectorCandidateRefs"]), ProspectiveTargetRef: runtimeString(item["prospectiveTargetRef"]), RequireTargetGrounding: runtimeBool(item["requireTargetGrounding"]),
+				TargetDiscoverySources: runtimeStrings(item["targetDiscoverySources"]), TargetSelectorRef: runtimeString(item["targetSelectorRef"]), TargetSelectorOwnerRef: runtimeString(item["targetSelectorOwnerRef"]), TargetSelectorSubjectRef: runtimeString(item["targetSelectorSubjectRef"]), TargetSelectorCandidateRefs: runtimeStrings(item["targetSelectorCandidateRefs"]), RequireTargetGrounding: runtimeBool(item["requireTargetGrounding"]),
 				RequiredEvidenceKinds: runtimeStrings(item["requiredEvidenceKinds"]),
 				RequireDirectEvidence: runtimeBool(item["requireDirectEvidence"]), RequireClaimEvidence: runtimeBool(item["requireClaimEvidence"]),
 				RequireExecutableBehaviorEvidence: runtimeBool(item["requireExecutableBehaviorEvidence"]), RequireCoverageTargets: runtimeBool(item["requireCoverageTargets"]),
@@ -297,24 +423,32 @@ func runtimeExecutionContract(input map[string]any) runtimecontract.RuntimeExecu
 	return ret.Normalized()
 }
 
-func runtimeEvidencePolicies(items []workorcheventpayload.Payload) []runtimecontract.RuntimeEvidencePolicy {
+func compileRuntimeEvidencePolicies(owner string, items []workorcheventpayload.Payload) ([]runtimecontract.RuntimeEvidencePolicy, error) {
+	if err := validateRuntimeEvidencePolicyInputs(owner, items); err != nil {
+		return nil, err
+	}
 	ret := make([]runtimecontract.RuntimeEvidencePolicy, 0, len(items))
 	for _, item := range items {
-		if len(item.Fields) == 0 {
-			continue
-		}
-		ret = append(ret, runtimecontract.RuntimeEvidencePolicy{
-			ID: payloadString(item, "id"), Profile: payloadString(item, "profile"), Rule: payloadString(item, "rule"),
-			AppliesTo: payloadString(item, "appliesTo"), CommandName: payloadString(item, "commandName"),
-			ArgsContain: payloadStrings(item, "argsContain"), RecipeDeclared: payloadBool(item, "recipeDeclared"), RecipeArgs: payloadStrings(item, "recipeArgs"), RecipeTimeoutMillis: int64(payloadInt(item, "recipeTimeoutMillis")),
-			RequiredArgs: payloadStrings(item, "requiredArgs"), ZeroWorkMarkers: payloadStrings(item, "zeroWorkMarkers"),
-			WorkEvidenceMarkers: payloadStrings(item, "workEvidenceMarkers"), QualityOnZeroWork: payloadString(item, "qualityOnZeroWork"),
-			MarksZeroWork: payloadBool(item, "zeroWork"), EvidenceTags: payloadStrings(item, "evidenceTags"),
-			EvidenceReason: payloadString(item, "evidenceReason"), CoverageRequirements: payloadCoverageEvidenceRequirements(item, "coverageRequirements"),
-			Description: payloadString(item, "description"),
-		})
+		ret = append(ret, runtimeEvidencePolicy(item))
 	}
-	return runtimecontract.NormalizeRuntimeEvidencePolicies(ret)
+	normalized := runtimecontract.NormalizeRuntimeEvidencePolicies(ret)
+	if len(normalized) != len(ret) {
+		return nil, fmt.Errorf("%w: %s evidence policy normalization changed policy cardinality", common.ErrInvalidArgument, strings.TrimSpace(owner))
+	}
+	return normalized, nil
+}
+
+func runtimeEvidencePolicy(item workorcheventpayload.Payload) runtimecontract.RuntimeEvidencePolicy {
+	return runtimecontract.RuntimeEvidencePolicy{
+		ID: payloadString(item, "id"), Profile: payloadString(item, "profile"), Rule: payloadString(item, "rule"),
+		AppliesTo: payloadString(item, "appliesTo"), CommandName: payloadString(item, "commandName"),
+		ArgsContain: payloadStrings(item, "argsContain"), RecipeDeclared: payloadBool(item, "recipeDeclared"), RecipeArgs: payloadStrings(item, "recipeArgs"), RecipeTimeoutMillis: int64(payloadInt(item, "recipeTimeoutMillis")),
+		RequiredArgs: payloadStrings(item, "requiredArgs"), ZeroWorkMarkers: payloadStrings(item, "zeroWorkMarkers"),
+		WorkEvidenceMarkers: payloadStrings(item, "workEvidenceMarkers"), QualityOnZeroWork: payloadString(item, "qualityOnZeroWork"),
+		MarksZeroWork: payloadBool(item, "zeroWork"), EvidenceTags: payloadStrings(item, "evidenceTags"),
+		EvidenceReason: payloadString(item, "evidenceReason"), CoverageRequirements: payloadCoverageEvidenceRequirements(item, "coverageRequirements"),
+		Description: payloadString(item, "description"),
+	}
 }
 
 func payloadString(input workorcheventpayload.Payload, key string) string {
@@ -353,7 +487,7 @@ func payloadCoverageEvidenceRequirements(input workorcheventpayload.Payload, key
 			TargetRole: payloadString(payload, "targetRole"), TargetRefs: payloadStrings(payload, "targetRefs"),
 			TargetDiscoverySources: payloadStrings(payload, "targetDiscoverySources"), TargetSelectorRef: payloadString(payload, "targetSelectorRef"),
 			TargetSelectorOwnerRef: payloadString(payload, "targetSelectorOwnerRef"), TargetSelectorSubjectRef: payloadString(payload, "targetSelectorSubjectRef"),
-			TargetSelectorCandidateRefs: payloadStrings(payload, "targetSelectorCandidateRefs"), ProspectiveTargetRef: payloadString(payload, "prospectiveTargetRef"), RequireTargetGrounding: payloadBool(payload, "requireTargetGrounding"),
+			TargetSelectorCandidateRefs: payloadStrings(payload, "targetSelectorCandidateRefs"), RequireTargetGrounding: payloadBool(payload, "requireTargetGrounding"),
 			RequiredEvidenceKinds: payloadStrings(payload, "requiredEvidenceKinds"),
 			RequireDirectEvidence: payloadBool(payload, "requireDirectEvidence"), RequireClaimEvidence: payloadBool(payload, "requireClaimEvidence"),
 			RequireExecutableBehaviorEvidence: payloadBool(payload, "requireExecutableBehaviorEvidence"), RequireCoverageTargets: payloadBool(payload, "requireCoverageTargets"),
@@ -392,7 +526,7 @@ func runtimeCoverageEvidenceRequirements(value any) []runtimecontract.RuntimeCov
 			TargetRole: runtimeString(item["targetRole"]), TargetRefs: runtimeStrings(item["targetRefs"]),
 			TargetDiscoverySources: runtimeStrings(item["targetDiscoverySources"]), TargetSelectorRef: runtimeString(item["targetSelectorRef"]),
 			TargetSelectorOwnerRef: runtimeString(item["targetSelectorOwnerRef"]), TargetSelectorSubjectRef: runtimeString(item["targetSelectorSubjectRef"]),
-			TargetSelectorCandidateRefs: runtimeStrings(item["targetSelectorCandidateRefs"]), ProspectiveTargetRef: runtimeString(item["prospectiveTargetRef"]), RequireTargetGrounding: runtimeBool(item["requireTargetGrounding"]),
+			TargetSelectorCandidateRefs: runtimeStrings(item["targetSelectorCandidateRefs"]), RequireTargetGrounding: runtimeBool(item["requireTargetGrounding"]),
 			RequiredEvidenceKinds: runtimeStrings(item["requiredEvidenceKinds"]),
 			RequireDirectEvidence: runtimeBool(item["requireDirectEvidence"]), RequireClaimEvidence: runtimeBool(item["requireClaimEvidence"]),
 			RequireExecutableBehaviorEvidence: runtimeBool(item["requireExecutableBehaviorEvidence"]), RequireCoverageTargets: runtimeBool(item["requireCoverageTargets"]),

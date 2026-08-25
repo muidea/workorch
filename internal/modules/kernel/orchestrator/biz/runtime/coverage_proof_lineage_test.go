@@ -221,8 +221,8 @@ func TestCoverageProofLineageIncompatibleResealRecordsGapWithoutCredit(t *testin
 }
 
 func TestCoverageProofLineageEquivalentResolutionUnlocksOnlyCurrentTargetAndRepairGates(t *testing.T) {
-	oldBinding := coverageProofLineageTestBinding("binding/old", "main.go")
-	currentBinding := coverageProofLineageTestBinding("binding/current", "main.go")
+	oldBinding := coverageProofLineageTestSelectorBinding("binding/old", "main.go")
+	currentBinding := coverageProofLineageTestSelectorBinding("binding/current", "main.go")
 	aggregate, fact, receipt := coverageProofLineageTestAggregate(oldBinding)
 	coverageProofLineageSynchronizeLedger(t, &aggregate)
 	fact.TargetRefs = []string{"main.go"}
@@ -277,8 +277,11 @@ func TestCoverageProofLineageEquivalentResolutionUnlocksOnlyCurrentTargetAndRepa
 }
 
 func TestCoverageProofLineageIncompatibleResolutionCannotUnlockTargetOrRepairGates(t *testing.T) {
-	oldBinding := coverageProofLineageTestBinding("binding/old", "main.go")
-	incompatibleBinding := coverageProofLineageTestBinding("binding/current", "other.go")
+	oldBinding := coverageProofLineageTestSelectorBinding("binding/old", "main.go")
+	incompatibleBinding := coverageProofLineageTestSelectorBinding("binding/current", "main.go")
+	incompatibleBinding.Proofs[0].AllowedOperationKinds = []string{runtimecontract.RuntimeBlockKindPatchApply}
+	incompatibleBinding = incompatibleBinding.Normalized()
+	incompatibleBinding.Hash = runtimecontract.StableCoverageEvidenceBindingHash(incompatibleBinding)
 	aggregate, fact, receipt := coverageProofLineageTestAggregate(oldBinding)
 	coverageProofLineageSynchronizeLedger(t, &aggregate)
 	fact.TargetRefs = []string{"main.go"}
@@ -300,7 +303,7 @@ func TestCoverageProofLineageIncompatibleResolutionCannotUnlockTargetOrRepairGat
 		RequiredState:         runtimecontract.ConvergenceStateNeedStateChange,
 		RequiredEvidenceKinds: []string{runtimecontract.EvidenceKindStateChange},
 		CoverageWorkItemIDs:   []common.CoverageWorkItemID{"cwi-lineage"},
-		TargetRefs:            []string{"other.go"},
+		TargetRefs:            []string{"main.go"},
 	}
 	if hasCurrentFocusTargetBoundStateChangeEvidence(aggregate.Facts, aggregate.CoverageProofLineage) {
 		t.Fatal("incompatible source binding bypassed current target grounding")
@@ -442,6 +445,18 @@ func coverageProofLineageTestBinding(id, target string) runtimecontract.Coverage
 			},
 		},
 	}.Normalized()
+	binding.Hash = runtimecontract.StableCoverageEvidenceBindingHash(binding)
+	return binding
+}
+
+func coverageProofLineageTestSelectorBinding(id, target string) runtimecontract.CoverageEvidenceBinding {
+	binding := coverageProofLineageTestBinding(id, target)
+	binding.TargetRefs = nil
+	binding.TargetSelectorRef = "file/test-lineage-target"
+	binding.TargetSelectorOwnerRef = runtimecontract.RuntimeModuleFile
+	binding.TargetSelectorSubjectRef = "implementation"
+	binding.TargetSelectorCandidateRefs = []string{target}
+	binding = binding.Normalized()
 	binding.Hash = runtimecontract.StableCoverageEvidenceBindingHash(binding)
 	return binding
 }

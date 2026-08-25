@@ -4,7 +4,7 @@ Status: active
 
 Type: stateful-block-contract
 
-Last Verified: 2026-08-24
+Last Verified: 2026-08-25
 
 ## 功能范围与边界
 
@@ -15,7 +15,14 @@ Workspace 还独占 immutable pre-seal `DefinitionAdmissionCandidate`、promoted
 确认的完整 `all_of`，并以 `StartupInputHash` 封存 Definition、Template/Profile contract hash、目录和 candidate-item mapping。
 candidate 还封存 required owner-fact binding 与唯一 acquisition/reobserve closure；Workspace 只持久化/校验该事实，
 不读取 capability catalog 或选择运行期动作。`CandidateHash` 覆盖 acquisition operation variant、operation target policy、
-operation selector 与 Definition target-selection scope；owner ingress 不替 caller 重新计算 hash。
+operation selector 与 Definition declaration selector/candidate refs；owner ingress 不替 caller 重新计算 hash。pre-seal
+candidate/startup input 不携带 exact `ProspectiveTargetRef`；该值只能由运行期 SM-3 semantic proposal 在这份
+declaration 与 current owner constraints 的交集中提出，Workspace 不补默认值、不回写 proposal/owner fact/binding。
+candidate 的 `AdmissionPolicyBindings` 分别保存 Template 与 Workspace 两侧每项 canonical evidence-policy
+ref/revision/snapshot hash，`CandidateHash` 覆盖这些 immutable bindings。任一 raw policy snapshot 含退役
+`prospectiveTargetRef`、空/非字符串 ID、同 owner 重复 ID、invalid typed policy 或 normalize cardinality drift 时必须在
+submit/promotion 前拒绝；Workspace 不把 policy binding 解释为 target authority，也不让 live policy 漂移修改既有
+candidate/admission lineage。Application final bootstrap gate 另行 exact 比较 admitted Workspace policy 的 typed projection。
 
 candidate 同时封存完整 normalized typed `RuntimeProfileContracts` snapshot，而不只保存 hash。pure compiler 从该 snapshot
 独立派生 owner-fact/convergence manifest，并要求与 candidate bindings 逐项相等；每个 Profile-required acceptance/deliverable
@@ -117,6 +124,8 @@ pure helper 的 read-side 调用只是防御校验，不产生或迁移 admissio
 - [x] immutable candidate create/duplicate/stale revision、owner-generated admission result、identity-only promotion 重编译、
   unsupported alternative 零 promotion、all-of promotion、pending clarification acknowledgement、
   exactly-one private-event payload、duplicate acknowledgement noop 与 startup-input hash clone/persistence。
+- [x] Template/Workspace evidence-policy snapshot bindings 完整进入 candidate hash；任一侧 legacy target 字段或 snapshot
+  漂移在 promotion 前 fail-closed，且零 Run/provider/capability work。
 - [x] application-owned directory resolver 的空目录默认值、相对/绝对路径规范化、workspace ID/相对路径逃逸拒绝和
   多 workspace 默认目录隔离。
 - [x] execution intent 的缺失 Goal/DoD、context scope mismatch、duplicate replay 与 active Run result fence。

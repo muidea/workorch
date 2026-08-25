@@ -105,6 +105,9 @@ candidate 还必须封存 exact normalized typed Profile/policy snapshot、`Runt
 promotion/Run/provider/dispatch/effect 前停止。candidate-owned relation/ref closure failure 仍使用
 `declared_prerequisite_unresolved + rewrite_definition_all_of`。HTTP/Application 不得查询 live catalog、使用 wildcard evidence、
 接受 caller 提供的 acquisition action，或仅凭 hash 代替该静态合同。
+Template 与 Workspace 的 `EvidencePolicies` 分别形成 candidate-bound `AdmissionPolicyBindings`；任一 snapshot 中出现退役
+`prospectiveTargetRef` 时，API 在 promotion/Run 前同步拒绝，不能将其解释为 Runtime target。双方
+policy snapshot ref/revision/hash 均进入 immutable candidate hash，后续 live policy 漂移不能修改已封存 admission。
 
 必须区分两类 Definition clarification：
 

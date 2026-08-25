@@ -4,7 +4,7 @@ Status: active
 
 Type: application-module-contract
 
-Last Verified: 2026-08-24
+Last Verified: 2026-08-25
 
 ## 功能范围与边界
 
@@ -52,6 +52,10 @@ Last Verified: 2026-08-24
 - workspace activation 使用 cumulative effective Goal/DoD 与 profile capability policy 构造 typed `RuntimeBootstrap`，并将它封装进 workspace-scoped restart intent；Workspace owner 校验 definition/scope 后再把 typed intent 交给 Run owner，Application 不直接发送 Run create command。
 - RuntimeBootstrap 编译前，application 先把 exact Goal、DoD、Template snapshot 与 resolved workspace directory 组装为
   Workspace-owned immutable `DefinitionAdmissionCandidate`。Workspace owner 的 pure compiler 不调用 LLM/capability，只接受完整 `all_of`；
+  Workorchd 在提交 candidate 前分别无损编译并递归校验 Template 与 Workspace 的 `EvidencePolicies`：每个 owner slice
+  拒绝空/非字符串 ID、重复 ID、invalid typed policy、normalize cardinality drift 及退役 `prospectiveTargetRef`；双方每项 canonical policy ref/revision/hash 都编译为
+  `AdmissionPolicyBindings` 交给 Workspace owner 封存并纳入 `CandidateHash`，但不产生 exact prospective target 或默认值；
+  final bootstrap gate 将 activation typed policies 与 admitted Workspace raw snapshot 的 typed projection exact 比较；
   candidate 同步封存完整 normalized typed Profile contract snapshot/hash、required owner-fact binding 及唯一 one-shot
   acquisition/reobserve closure；Application 使用 Workspace owner 的 pure manifest helper 组装输入，但 Workspace compiler 会从
   exact Profile snapshot 独立派生并逐项比较，Application 无 admission outcome 或 manifest authority；
@@ -62,7 +66,11 @@ Last Verified: 2026-08-24
   生成；Application 只据此建票或提交
   identity-only promotion，不能向 Workspace 传入自算 outcome。新 invalid revision（包括既有 eligible revision 之后的 authoring attempt）使用 reconcile-candidate；新 admitted revision严格执行 Workspace promotion(pending) →
   Decision resolution → Workspace acknowledgement(eligible)，之后仍需用户显式 Restart。
-- activation 可以把 profile 显式声明的 `targetSelectorOwnerRef + targetSelectorSubjectRef` 封存为 File target-selection scope。空 workspace 的 scope 只表示该 profile 已授权 File owner 接受一个后续的具体 workspace-relative 创建目标；它不从 Goal/DoD 或目录名猜文件路径，且不绕过 File owner 的 operation admissibility/feasibility。
+- activation 可以把 profile 显式声明的 `targetSelectorOwnerRef`、`targetSelectorSubjectRef` 与
+  `targetSelectorCandidateRefs` 封存为 File declaration scope，但不封存 exact `ProspectiveTargetRef`。空 candidate
+  refs 只表示 profile 授权 SM-3 semantic proposal 在 current File operation selector/constraints 内提出一个具体
+  workspace-relative 创建目标；非空 refs 要求 exact member match。Workorchd 不从 Goal/DoD 或目录名猜路径，
+  不把 proposal/owner fact 回写 bootstrap，也不绕过 File owner feasibility 或 SM-2 binding seal。
 - activation 将每个 DoD item 标记为需要 typed assessment，并按 profile contract 的 required acceptance dimension/deliverable expectation 追加稳定 focus；primary state-change 优先于 supplemental evidence，同一 `scope + id` 只生成一个 baseline item。
 - 每个 Profile-required acceptance/deliverable focus 在 pre-seal admission 时必须已有 exact `scope + id` proof declaration、非空
   `requiredEvidenceKinds` 和至少一个可返回对应 typed owner receipt proof 的 accepted operation。缺失时返回

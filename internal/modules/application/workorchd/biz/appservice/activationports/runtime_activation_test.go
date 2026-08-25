@@ -78,13 +78,13 @@ func TestRuntimeActivationContextUsesConcreteSelectionSnapshots(t *testing.T) {
 					"coverageDependencies":    []any{map[string]any{"id": "source-refreshes-validation", "sourceScope": "deliverable", "sourceRequirementId": "source", "dependentScope": "deliverable", "dependentRequirementId": "version_control_snapshot", "triggerEvidenceKinds": []any{"state_change"}}},
 					"bootstrapRecipes": []any{map[string]any{
 						"id": "go-empty-workspace", "requiredGoalTerms": []any{"Go"}, "requiredDoDTerms": []any{"test"},
-						"artifacts": []any{map[string]any{"id": "module", "targetRole": "module_definition", "targetRef": "go.mod", "allowedOperationKinds": []any{"file/write"}}},
+						"artifacts": []any{map[string]any{"id": "module", "targetRole": "module_definition", "allowedOperationKinds": []any{"file/write"}}},
 					}},
 					"evidenceRequirements": []any{
 						map[string]any{"id": "runtime_entrypoint", "scope": "acceptanceDimension", "requiredEvidenceKinds": []any{"validation"}, "acceptedStepKinds": []any{"validation/managed_session"}},
 						map[string]any{
 							"id": "version_control_snapshot", "scope": "deliverable", "evidenceRole": "supplemental_evidence", "requiredEvidenceKinds": []any{"state_change"},
-							"targetRole": "repository", "targetRefs": []any{".git"}, "targetDiscoverySources": []any{"workspace_manifest"}, "targetSelectorRef": "file/unique_workspace_entry", "targetSelectorOwnerRef": "profile-owner", "targetSelectorSubjectRef": "profile-subject", "prospectiveTargetRef": "initial-deliverable.txt", "requireTargetGrounding": true,
+							"targetRole": "repository", "targetRefs": []any{".git"}, "targetDiscoverySources": []any{"workspace_manifest"}, "targetSelectorRef": "file/unique_workspace_entry", "targetSelectorOwnerRef": "profile-owner", "targetSelectorSubjectRef": "profile-subject", "targetSelectorCandidateRefs": []any{"initial-deliverable.txt"}, "requireTargetGrounding": true,
 							"requireDirectEvidence": true, "requireClaimEvidence": true, "requireExecutableBehaviorEvidence": true, "requireCoverageTargets": true,
 							"acceptedStepKinds": []any{"git/write", "validation/managed_session"}, "acceptedOperationVariants": []any{map[string]any{"kind": "git/write", "variantId": "commit"}},
 							"requiredOwnerFacts":    []any{map[string]any{"ownerModuleId": "blocks/shell", "factKind": "selectable_validation_surface", "operationKind": "validation/managed_session"}},
@@ -152,7 +152,7 @@ func TestRuntimeActivationContextUsesConcreteSelectionSnapshots(t *testing.T) {
 		len(profile.DeliverableExpectations) != 1 || profile.DeliverableExpectations[0].ID != "version_control_snapshot" || profile.DeliverableExpectations[0].EvidenceRole != "supplemental_evidence" ||
 		len(profile.EvidenceRequirements) != 2 || deliverableRequirement.Scope != "deliverable" || deliverableRequirement.TargetRole != "repository" ||
 		len(deliverableRequirement.TargetRefs) != 1 || deliverableRequirement.TargetRefs[0] != ".git" ||
-		len(deliverableRequirement.TargetDiscoverySources) != 1 || deliverableRequirement.TargetDiscoverySources[0] != "workspace_manifest" || deliverableRequirement.TargetSelectorRef != "file/unique_workspace_entry" || deliverableRequirement.TargetSelectorOwnerRef != "profile-owner" || deliverableRequirement.TargetSelectorSubjectRef != "profile-subject" || deliverableRequirement.ProspectiveTargetRef != "initial-deliverable.txt" || !deliverableRequirement.RequireTargetGrounding || !deliverableRequirement.RequireDirectEvidence ||
+		len(deliverableRequirement.TargetDiscoverySources) != 1 || deliverableRequirement.TargetDiscoverySources[0] != "workspace_manifest" || deliverableRequirement.TargetSelectorRef != "file/unique_workspace_entry" || deliverableRequirement.TargetSelectorOwnerRef != "profile-owner" || deliverableRequirement.TargetSelectorSubjectRef != "profile-subject" || !runtimecontract.SameRuntimeTargetSelectorCandidateRefs(deliverableRequirement.TargetSelectorCandidateRefs, []string{"initial-deliverable.txt"}) || !deliverableRequirement.RequireTargetGrounding || !deliverableRequirement.RequireDirectEvidence ||
 		!deliverableRequirement.RequireClaimEvidence || !deliverableRequirement.RequireExecutableBehaviorEvidence || !deliverableRequirement.RequireCoverageTargets ||
 		len(deliverableRequirement.AcceptedStepKinds) != 2 || deliverableRequirement.AcceptedStepKinds[0] != "git/write" || deliverableRequirement.AcceptedStepKinds[1] != "validation/managed_session" ||
 		len(deliverableRequirement.AcceptedOperationVariants) != 1 || deliverableRequirement.AcceptedOperationVariants[0] != (runtimecontract.RuntimeOperationVariantRef{Kind: "git/write", VariantID: "commit"}) ||
@@ -160,7 +160,7 @@ func TestRuntimeActivationContextUsesConcreteSelectionSnapshots(t *testing.T) {
 		len(deliverableRequirement.RejectedStepKinds) != 1 || deliverableRequirement.RejectedStepKinds[0] != "shell/read" ||
 		len(profile.CoverageDependencies) != 1 || profile.CoverageDependencies[0].ID != "source-refreshes-validation" || profile.CoverageDependencies[0].SourceRequirementID != "source" || profile.CoverageDependencies[0].DependentRequirementID != "version_control_snapshot" ||
 		len(profile.CoverageDependencies[0].TriggerEvidenceKinds) != 1 || profile.CoverageDependencies[0].TriggerEvidenceKinds[0] != runtimecontract.EvidenceKindStateChange ||
-		len(profile.BootstrapRecipes) != 1 || profile.BootstrapRecipes[0].ID != "go-empty-workspace" || len(profile.BootstrapRecipes[0].Artifacts) != 1 || profile.BootstrapRecipes[0].Artifacts[0].TargetRef != "go.mod" {
+		len(profile.BootstrapRecipes) != 1 || profile.BootstrapRecipes[0].ID != "go-empty-workspace" || len(profile.BootstrapRecipes[0].Artifacts) != 1 || profile.BootstrapRecipes[0].Artifacts[0].TargetRole != "module_definition" {
 		t.Fatalf("runtime profile contract = %+v", profile)
 	}
 	stagePolicy := activation.ExecutionContract.TemplateStagePolicy
@@ -170,6 +170,36 @@ func TestRuntimeActivationContextUsesConcreteSelectionSnapshots(t *testing.T) {
 		stagePolicy.Stages[0].Governance.DecisionMode != "when_required" || len(stagePolicy.Stages[0].PolicyRefs.EvidencePolicies) != 1 ||
 		len(stagePolicy.Stages[0].PolicyRefs.CapabilityUsagePolicies) != 1 {
 		t.Fatalf("runtime template stage policy = %+v", stagePolicy)
+	}
+}
+
+func TestRuntimeActivationContextRejectsPresealExactProspectiveTarget(t *testing.T) {
+	_, err := RuntimeActivationContext(
+		runtimecontract.ProviderInferenceSelection{Target: runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "gpt-4o"}},
+		"", nil, nil, appmodelcore.SoulRouting{}, nil, nil, nil, nil, nil, nil,
+		map[string]any{"profileContracts": map[string]any{"profile": map[string]any{"evidenceRequirements": []any{map[string]any{
+			"id": "deliverable", "scope": "deliverable", "prospectiveTargetRef": "legacy-target.txt",
+		}}}}},
+		runtimecontract.RuntimeContinuationContext{},
+	)
+	if err == nil || !strings.Contains(err.Error(), "pre-seal execution contract rejects prospectiveTargetRef") {
+		t.Fatalf("expected pre-seal exact target rejection, got %v", err)
+	}
+}
+
+func TestRuntimeActivationContextRejectsBootstrapArtifactExactTarget(t *testing.T) {
+	_, err := RuntimeActivationContext(
+		runtimecontract.ProviderInferenceSelection{Target: runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "gpt-4o"}},
+		"", nil, nil, appmodelcore.SoulRouting{}, nil, nil, nil, nil, nil, nil,
+		map[string]any{"profileContracts": map[string]any{"profile": map[string]any{"bootstrapRecipes": []any{map[string]any{
+			"id": "bootstrap", "requiredGoalTerms": []any{"build"}, "artifacts": []any{map[string]any{
+				"id": "source", "targetRole": "implementation", "TargetRef": "main.go", "allowedOperationKinds": []any{"file/write"},
+			}},
+		}}}}},
+		runtimecontract.RuntimeContinuationContext{},
+	)
+	if err == nil || !strings.Contains(err.Error(), "pre-seal bootstrap artifact rejects targetRef") {
+		t.Fatalf("expected bootstrap artifact exact target rejection, got %v", err)
 	}
 }
 

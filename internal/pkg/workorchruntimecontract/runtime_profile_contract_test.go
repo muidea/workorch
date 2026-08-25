@@ -245,46 +245,18 @@ func TestRuntimeProfileTargetGroundingIsNormalizedAndRequiredWhenDeclared(t *tes
 	}
 }
 
-func TestRuntimeProfileProspectiveTargetRequiresGroundedSelectorAndAffectsEquality(t *testing.T) {
-	valid := RuntimeProfileContract{ID: "profile", EvidenceRequirements: []RuntimeProfileEvidenceRequirement{{
-		ID: "initial-deliverable", Scope: "deliverable", RequireTargetGrounding: true, TargetRole: "deliverable",
-		TargetDiscoverySources: []string{RuntimeValidationDiscoverySourceWorkspaceManifest}, TargetSelectorRef: "file/workspace_deliverable",
-		ProspectiveTargetRef: "  initial-deliverable.txt  ",
-	}}}
-	if err := ValidateRuntimeProfileContracts([]RuntimeProfileContract{valid}); err != nil {
-		t.Fatalf("valid prospective target rejected: %v", err)
-	}
-	normalized := NormalizeRuntimeProfileContracts([]RuntimeProfileContract{valid})
-	if got := normalized[0].EvidenceRequirements[0].ProspectiveTargetRef; got != "initial-deliverable.txt" {
-		t.Fatalf("prospective target normalization = %q", got)
-	}
-	changed := append([]RuntimeProfileContract(nil), normalized...)
-	changed[0].EvidenceRequirements = append([]RuntimeProfileEvidenceRequirement(nil), normalized[0].EvidenceRequirements...)
-	changed[0].EvidenceRequirements[0].ProspectiveTargetRef = "other-deliverable.txt"
-	if SameRuntimeProfileContracts(normalized, changed) {
-		t.Fatal("prospective target drift was not detected")
-	}
-	invalid := valid
-	invalid.EvidenceRequirements = append([]RuntimeProfileEvidenceRequirement(nil), valid.EvidenceRequirements...)
-	invalid.EvidenceRequirements[0].TargetSelectorRef = ""
-	if err := ValidateRuntimeProfileContracts([]RuntimeProfileContract{invalid}); err == nil {
-		t.Fatal("prospective target without target selector was accepted")
-	}
-}
-
 func TestRuntimeProfileDeclaredSelectorCandidatesAreBoundedAndAffectEquality(t *testing.T) {
 	valid := RuntimeProfileContract{ID: "profile-lsp", EvidenceRequirements: []RuntimeProfileEvidenceRequirement{{
 		ID: "implementation", Scope: "deliverable", RequireTargetGrounding: true, TargetRole: "implementation",
 		TargetDiscoverySources: []string{RuntimeValidationDiscoverySourceWorkspaceManifest}, TargetSelectorRef: "file/profile_declared_candidates",
-		TargetSelectorSubjectRef: "implementation", TargetSelectorCandidateRefs: []string{"internal/lsp/server.go", "internal/lsp/manager.go", "internal/lsp/manager.go"},
-		ProspectiveTargetRef: "internal/lsp/manager.go",
+		TargetSelectorOwnerRef: "profile-lsp", TargetSelectorSubjectRef: "implementation", TargetSelectorCandidateRefs: []string{"internal/lsp/server.go", "internal/lsp/manager.go", "internal/lsp/manager.go"},
 	}}}
 	if err := ValidateRuntimeProfileContracts([]RuntimeProfileContract{valid}); err != nil {
 		t.Fatalf("valid profile-declared selector candidates rejected: %v", err)
 	}
 	normalized := NormalizeRuntimeProfileContracts([]RuntimeProfileContract{valid})
 	requirement := normalized[0].EvidenceRequirements[0]
-	if requirement.TargetSelectorOwnerRef != "" || requirement.TargetSelectorSubjectRef != "implementation" || !SameRuntimeTargetSelectorCandidateRefs(requirement.TargetSelectorCandidateRefs, []string{"internal/lsp/manager.go", "internal/lsp/server.go"}) {
+	if requirement.TargetSelectorOwnerRef != "profile-lsp" || requirement.TargetSelectorSubjectRef != "implementation" || !SameRuntimeTargetSelectorCandidateRefs(requirement.TargetSelectorCandidateRefs, []string{"internal/lsp/manager.go", "internal/lsp/server.go"}) {
 		t.Fatalf("profile-declared selector candidate normalization = %+v", requirement)
 	}
 	changed := append([]RuntimeProfileContract(nil), normalized...)
@@ -294,8 +266,10 @@ func TestRuntimeProfileDeclaredSelectorCandidatesAreBoundedAndAffectEquality(t *
 		t.Fatal("profile-declared selector candidate drift was not detected")
 	}
 	for name, mutate := range map[string]func(*RuntimeProfileEvidenceRequirement){
-		"missing selector subject":              func(item *RuntimeProfileEvidenceRequirement) { item.TargetSelectorSubjectRef = "" },
-		"prospective target outside candidates": func(item *RuntimeProfileEvidenceRequirement) { item.ProspectiveTargetRef = "internal/lsp/other.go" },
+		"missing target grounding": func(item *RuntimeProfileEvidenceRequirement) { item.RequireTargetGrounding = false },
+		"missing selector":         func(item *RuntimeProfileEvidenceRequirement) { item.TargetSelectorRef = "" },
+		"missing selector owner":   func(item *RuntimeProfileEvidenceRequirement) { item.TargetSelectorOwnerRef = "" },
+		"missing selector subject": func(item *RuntimeProfileEvidenceRequirement) { item.TargetSelectorSubjectRef = "" },
 	} {
 		t.Run(name, func(t *testing.T) {
 			invalid := valid
@@ -312,9 +286,9 @@ func TestRuntimeBootstrapRecipeIsBoundedOrderedAndAffectsProfileEquality(t *test
 	profile := RuntimeProfileContract{ID: "software-dev", BootstrapRecipes: []RuntimeBootstrapRecipe{{
 		ID: "go-module", RequiredGoalTerms: []string{" Go ", "Go"}, RequiredDoDTerms: []string{"test"},
 		Artifacts: []RuntimeBootstrapArtifact{
-			{ID: "source", TargetRole: "implementation", TargetRef: "cmd/service/main.go", AllowedOperationKinds: []string{StepKindFileWrite}, DependsOnArtifactIDs: []string{"module"}},
-			{ID: "module", TargetRole: "module_definition", TargetRef: "go.mod", AllowedOperationKinds: []string{StepKindFileWrite}},
-			{ID: "test", TargetRole: "executable_validation", TargetRef: "cmd/service/main_test.go", AllowedOperationKinds: []string{StepKindFileWrite}, DependsOnArtifactIDs: []string{"source"}},
+			{ID: "source", TargetRole: "implementation", AllowedOperationKinds: []string{StepKindFileWrite}, DependsOnArtifactIDs: []string{"module"}},
+			{ID: "module", TargetRole: "module_definition", AllowedOperationKinds: []string{StepKindFileWrite}},
+			{ID: "test", TargetRole: "executable_validation", AllowedOperationKinds: []string{StepKindFileWrite}, DependsOnArtifactIDs: []string{"source"}},
 		},
 	}}}
 	if err := ValidateRuntimeProfileContracts([]RuntimeProfileContract{profile}); err != nil {
@@ -331,12 +305,13 @@ func TestRuntimeBootstrapRecipeIsBoundedOrderedAndAffectsProfileEquality(t *test
 	changed := NormalizeRuntimeProfileContracts([]RuntimeProfileContract{normalized[0]})
 	changed[0].BootstrapRecipes = append([]RuntimeBootstrapRecipe(nil), normalized[0].BootstrapRecipes...)
 	changed[0].BootstrapRecipes[0].Artifacts = append([]RuntimeBootstrapArtifact(nil), normalized[0].BootstrapRecipes[0].Artifacts...)
-	changed[0].BootstrapRecipes[0].Artifacts[0].TargetRef = "other.go"
+	changed[0].BootstrapRecipes[0].Artifacts[0].TargetRole = "changed-role"
 	if SameRuntimeProfileContracts(normalized, changed) {
-		t.Fatal("bootstrap artifact path drift was not detected")
+		t.Fatal("bootstrap artifact role drift was not detected")
 	}
 	for name, mutate := range map[string]func(*RuntimeBootstrapRecipe){
 		"missing matcher":    func(recipe *RuntimeBootstrapRecipe) { recipe.RequiredGoalTerms = nil; recipe.RequiredDoDTerms = nil },
+		"missing role":       func(recipe *RuntimeBootstrapRecipe) { recipe.Artifacts[0].TargetRole = "" },
 		"unknown dependency": func(recipe *RuntimeBootstrapRecipe) { recipe.Artifacts[0].DependsOnArtifactIDs = []string{"missing"} },
 		"unknown operation": func(recipe *RuntimeBootstrapRecipe) {
 			recipe.Artifacts[0].AllowedOperationKinds = []string{"unknown/operation"}

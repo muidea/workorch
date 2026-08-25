@@ -55,7 +55,7 @@ type runtimeSemanticProofObligationProjection struct {
 	DeclarationTargetSelectorRef        string                                                   `json:"declarationTargetSelectorRef,omitempty"`
 	DeclarationTargetSelectorOwnerRef   string                                                   `json:"declarationTargetSelectorOwnerRef,omitempty"`
 	DeclarationTargetSelectorSubjectRef string                                                   `json:"declarationTargetSelectorSubjectRef,omitempty"`
-	DeclarationProspectiveTargetRef     string                                                   `json:"declarationProspectiveTargetRef,omitempty"`
+	DeclarationTargetSelectorCandidates []string                                                 `json:"declarationTargetSelectorCandidateRefs,omitempty"`
 	OwnerFactAcquisition                *runtimeSemanticOwnerFactAcquisitionProjection           `json:"ownerFactAcquisition,omitempty"`
 }
 
@@ -72,7 +72,6 @@ type runtimeSemanticOwnerFactAcquisitionProjection struct {
 	AcquisitionTargetSelectorRef       string                                       `json:"acquisitionTargetSelectorRef"`
 	AcquisitionConstraintRefs          []string                                     `json:"acquisitionConstraintRefs,omitempty"`
 	ProspectiveSatisfactionContractRef string                                       `json:"prospectiveSatisfactionContractRef,omitempty"`
-	ProspectiveTargetRef               string                                       `json:"prospectiveTargetRef,omitempty"`
 	OwnerCatalogSnapshotID             string                                       `json:"ownerCatalogSnapshotId"`
 	OwnerCatalogObservedRevision       string                                       `json:"ownerCatalogObservedRevision"`
 	ReobserveOwnerModuleID             string                                       `json:"reobserveOwnerModuleId"`
@@ -173,7 +172,7 @@ func runtimeSemanticProofObligationsForProvider(values []runtimecontract.Runtime
 			DeclarationTargetSelectorRef:        value.DeclarationTargetSelectorRef,
 			DeclarationTargetSelectorOwnerRef:   value.DeclarationTargetSelectorOwnerRef,
 			DeclarationTargetSelectorSubjectRef: value.DeclarationTargetSelectorSubjectRef,
-			DeclarationProspectiveTargetRef:     value.DeclarationProspectiveTargetRef,
+			DeclarationTargetSelectorCandidates: append([]string(nil), value.DeclarationTargetSelectorCandidateRefs...),
 		}
 		if value.OwnerFactAcquisition != nil {
 			acquisition := value.OwnerFactAcquisition.Normalized()
@@ -190,7 +189,6 @@ func runtimeSemanticProofObligationsForProvider(values []runtimecontract.Runtime
 				AcquisitionTargetSelectorRef:       acquisition.AcquisitionTargetSelectorRef,
 				AcquisitionConstraintRefs:          append([]string(nil), acquisition.AcquisitionConstraintRefs...),
 				ProspectiveSatisfactionContractRef: acquisition.ProspectiveSatisfactionContractRef,
-				ProspectiveTargetRef:               acquisition.ProspectiveTargetRef,
 				OwnerCatalogSnapshotID:             acquisition.OwnerCatalogSnapshotID,
 				OwnerCatalogObservedRevision:       acquisition.OwnerCatalogObservedRevision,
 				ReobserveOwnerModuleID:             acquisition.ReobserveOwnerModuleID,

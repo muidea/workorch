@@ -29,17 +29,24 @@ func TestBuiltinSoftwareDevProfilePassesDefinitionAdmissionBeforeRun(t *testing.
 		if err != nil {
 			t.Fatalf("software-dev context hints: %v", err)
 		}
+		evidencePolicies, err := workorcheventpayload.FromMapSlice(item.EvidencePolicies)
+		if err != nil {
+			t.Fatalf("software-dev evidence policies: %v", err)
+		}
 		builtin = &workspacemodel.WorkspaceTemplate{
 			ID: item.ID, Name: item.Name, Description: item.Description,
 			GoalText: item.GoalText, DoDItems: append([]string(nil), item.DoDItems...),
-			DefaultSoulID: item.DefaultSoulID, SoulBindings: item.SoulBindings, ContextHints: hints,
+			DefaultSoulID: item.DefaultSoulID, SoulBindings: item.SoulBindings, ContextHints: hints, EvidencePolicies: evidencePolicies,
 		}
 		break
 	}
 	if builtin == nil {
 		t.Fatal("software-dev builtin template is missing")
 	}
-	workspace := &workspacemodel.Workspace{ID: "workspace-builtin-software-dev", DeliverableDirectory: "/workspace", TemplateID: builtin.ID}
+	workspace := &workspacemodel.Workspace{
+		ID: "workspace-builtin-software-dev", DeliverableDirectory: "/workspace", TemplateID: builtin.ID,
+		EvidencePolicies: workorcheventpayload.CloneSlice(builtin.EvidencePolicies),
+	}
 	goal := &workspacemodel.Goal{ID: "goal-builtin", WorkspaceID: workspace.ID, Text: "implement the requested behavior", DefinitionRevision: "goal-r1"}
 	dod := &workspacemodel.DoD{ID: "dod-builtin", WorkspaceID: workspace.ID, Items: []string{"requested behavior is validated"}, DefinitionRevision: "dod-r1"}
 	candidate, err := definitionAdmissionCandidate(workspace, goal, dod, builtin)
@@ -49,6 +56,169 @@ func TestBuiltinSoftwareDevProfilePassesDefinitionAdmissionBeforeRun(t *testing.
 	result, err := definitionadmission.Compile(candidate)
 	if err != nil || result.Disposition != workspacemodel.DefinitionAdmissionAdmittedAllOf {
 		t.Fatalf("builtin software-dev admission = %+v err=%v", result, err)
+	}
+}
+
+func TestDefinitionAdmissionRejectsRemovedPresealExactTargetField(t *testing.T) {
+	hints, err := workorcheventpayload.FromMap(map[string]any{"profileContracts": map[string]any{"software-dev": map[string]any{
+		"evidenceRequirements": []any{map[string]any{
+			"id": "source_change", "scope": "deliverable", "prospectiveTargetRef": "legacy-target.txt",
+		}},
+	}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	workspace := &workspacemodel.Workspace{ID: "workspace-legacy-target", DeliverableDirectory: "/workspace", TemplateID: "software-dev"}
+	goal := &workspacemodel.Goal{ID: "goal-legacy-target", WorkspaceID: workspace.ID, Text: "goal", DefinitionRevision: "goal-r1"}
+	dod := &workspacemodel.DoD{ID: "dod-legacy-target", WorkspaceID: workspace.ID, Items: []string{"done"}, DefinitionRevision: "dod-r1"}
+	template := &workspacemodel.WorkspaceTemplate{ID: workspace.TemplateID, Name: "software dev", ContextHints: hints}
+	_, err = definitionAdmissionCandidate(workspace, goal, dod, template)
+	if !errors.Is(err, common.ErrInvalidArgument) || !strings.Contains(err.Error(), "pre-seal execution contract rejects prospectiveTargetRef") {
+		t.Fatalf("removed pre-seal exact target field err=%v", err)
+	}
+}
+
+func TestDefinitionAdmissionRejectsBootstrapArtifactExactTarget(t *testing.T) {
+	hints, err := workorcheventpayload.FromMap(map[string]any{"profileContracts": map[string]any{"software-dev": map[string]any{
+		"bootstrapRecipes": []any{map[string]any{
+			"id": "bootstrap", "requiredGoalTerms": []any{"goal"}, "artifacts": []any{map[string]any{
+				"id": "source", "targetRole": "implementation", "TargetRef": "main.go", "allowedOperationKinds": []any{"file/write"},
+			}},
+		}},
+	}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	workspace := &workspacemodel.Workspace{ID: "workspace-bootstrap-target", DeliverableDirectory: "/workspace", TemplateID: "software-dev"}
+	goal := &workspacemodel.Goal{ID: "goal-bootstrap-target", WorkspaceID: workspace.ID, Text: "goal", DefinitionRevision: "goal-r1"}
+	dod := &workspacemodel.DoD{ID: "dod-bootstrap-target", WorkspaceID: workspace.ID, Items: []string{"done"}, DefinitionRevision: "dod-r1"}
+	template := &workspacemodel.WorkspaceTemplate{ID: workspace.TemplateID, Name: "software dev", ContextHints: hints}
+	_, err = definitionAdmissionCandidate(workspace, goal, dod, template)
+	if !errors.Is(err, common.ErrInvalidArgument) || !strings.Contains(err.Error(), "pre-seal bootstrap artifact rejects targetRef") {
+		t.Fatalf("bootstrap artifact exact target err=%v", err)
+	}
+}
+
+func TestDefinitionAdmissionRejectsRemovedPresealExactTargetInEvidencePolicies(t *testing.T) {
+	legacyPolicy, err := workorcheventpayload.FromMap(map[string]any{
+		"id": "legacy-target-policy", "appliesTo": "file/write",
+		"coverageRequirements": []any{map[string]any{
+			"id": "deliverable", "scope": "deliverable", "ProspectiveTargetRef": "legacy-target.txt",
+		}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	newInputs := func() (*workspacemodel.Workspace, *workspacemodel.Goal, *workspacemodel.DoD, *workspacemodel.WorkspaceTemplate) {
+		workspace := &workspacemodel.Workspace{ID: "workspace-legacy-policy", DeliverableDirectory: "/workspace", TemplateID: "template-legacy-policy"}
+		goal := &workspacemodel.Goal{ID: "goal-legacy-policy", WorkspaceID: workspace.ID, Text: "goal", DefinitionRevision: "goal-r1"}
+		dod := &workspacemodel.DoD{ID: "dod-legacy-policy", WorkspaceID: workspace.ID, Items: []string{"done"}, DefinitionRevision: "dod-r1"}
+		template := &workspacemodel.WorkspaceTemplate{ID: workspace.TemplateID, Name: "legacy policy"}
+		return workspace, goal, dod, template
+	}
+	for _, tc := range []struct {
+		name   string
+		attach func(*workspacemodel.Workspace, *workspacemodel.WorkspaceTemplate)
+	}{
+		{name: "template", attach: func(_ *workspacemodel.Workspace, template *workspacemodel.WorkspaceTemplate) {
+			template.EvidencePolicies = []workorcheventpayload.Payload{legacyPolicy}
+		}},
+		{name: "workspace", attach: func(workspace *workspacemodel.Workspace, _ *workspacemodel.WorkspaceTemplate) {
+			workspace.EvidencePolicies = []workorcheventpayload.Payload{legacyPolicy}
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			workspace, goal, dod, template := newInputs()
+			tc.attach(workspace, template)
+			_, err := definitionAdmissionCandidate(workspace, goal, dod, template)
+			if !errors.Is(err, common.ErrInvalidArgument) || !strings.Contains(err.Error(), "pre-seal evidence policy rejects prospectiveTargetRef") {
+				t.Fatalf("removed evidence-policy exact target err=%v", err)
+			}
+		})
+	}
+}
+
+func TestDefinitionAdmissionCandidateSealsWorkspaceEvidencePolicySnapshot(t *testing.T) {
+	policy, err := workorcheventpayload.FromMap(map[string]any{
+		"id": "workspace-validation", "appliesTo": "shell/command", "commandName": "go",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	workspace := &workspacemodel.Workspace{
+		ID: "workspace-evidence-seal", DeliverableDirectory: "/workspace", TemplateID: "template-evidence-seal",
+		EvidencePolicies: []workorcheventpayload.Payload{policy},
+	}
+	goal := &workspacemodel.Goal{ID: "goal-evidence-seal", WorkspaceID: workspace.ID, Text: "goal", DefinitionRevision: "goal-r1"}
+	dod := &workspacemodel.DoD{ID: "dod-evidence-seal", WorkspaceID: workspace.ID, Items: []string{"done"}, DefinitionRevision: "dod-r1"}
+	template := &workspacemodel.WorkspaceTemplate{ID: workspace.TemplateID, Name: "evidence seal"}
+	candidate, err := definitionAdmissionCandidate(workspace, goal, dod, template)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(candidate.AdmissionPolicyBindings) != 1 || !strings.HasPrefix(candidate.AdmissionPolicyBindings[0].PolicyRef, "workspace-evidence-policy:") {
+		t.Fatalf("workspace evidence policy was not sealed: %+v", candidate.AdmissionPolicyBindings)
+	}
+	changedPolicy := policy.Clone()
+	for idx := range changedPolicy.Fields {
+		if changedPolicy.Fields[idx].Name == "commandName" {
+			changedPolicy.Fields[idx].Value.String = "make"
+		}
+	}
+	changedWorkspace := *workspace
+	changedWorkspace.EvidencePolicies = []workorcheventpayload.Payload{changedPolicy}
+	changed, err := definitionAdmissionCandidate(&changedWorkspace, goal, dod, template)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if changed.CandidateHash == candidate.CandidateHash {
+		t.Fatal("workspace evidence policy drift did not change the pre-seal candidate hash")
+	}
+}
+
+func TestDefinitionAdmissionRejectsLossyEvidencePolicyInputsPerOwner(t *testing.T) {
+	valid := workorcheventpayload.New(
+		workorcheventpayload.StringField("id", "validation-policy"),
+		workorcheventpayload.StringField("appliesTo", runtimecontract.StepKindShellCommand),
+	)
+	missingID := workorcheventpayload.New(
+		workorcheventpayload.StringField("appliesTo", runtimecontract.StepKindShellCommand),
+	)
+	invalidTypedPolicy := workorcheventpayload.New(
+		workorcheventpayload.StringField("id", "invalid-policy"),
+	)
+	for _, owner := range []struct {
+		name   string
+		attach func(*workspacemodel.Workspace, *workspacemodel.WorkspaceTemplate, []workorcheventpayload.Payload)
+	}{
+		{name: "template", attach: func(_ *workspacemodel.Workspace, template *workspacemodel.WorkspaceTemplate, policies []workorcheventpayload.Payload) {
+			template.EvidencePolicies = policies
+		}},
+		{name: "workspace", attach: func(workspace *workspacemodel.Workspace, _ *workspacemodel.WorkspaceTemplate, policies []workorcheventpayload.Payload) {
+			workspace.EvidencePolicies = policies
+		}},
+	} {
+		for _, input := range []struct {
+			name     string
+			policies []workorcheventpayload.Payload
+			want     string
+		}{
+			{name: "empty id", policies: []workorcheventpayload.Payload{missingID}, want: "requires a non-empty string id"},
+			{name: "duplicate id", policies: []workorcheventpayload.Payload{valid, valid.Clone()}, want: "duplicate id"},
+			{name: "invalid typed policy", policies: []workorcheventpayload.Payload{invalidTypedPolicy}, want: "is invalid"},
+		} {
+			t.Run(owner.name+"/"+input.name, func(t *testing.T) {
+				workspace := &workspacemodel.Workspace{ID: "workspace-lossy-policy", DeliverableDirectory: "/workspace", TemplateID: "template-lossy-policy"}
+				goal := &workspacemodel.Goal{ID: "goal-lossy-policy", WorkspaceID: workspace.ID, Text: "goal", DefinitionRevision: "goal-r1"}
+				dod := &workspacemodel.DoD{ID: "dod-lossy-policy", WorkspaceID: workspace.ID, Items: []string{"done"}, DefinitionRevision: "dod-r1"}
+				template := &workspacemodel.WorkspaceTemplate{ID: workspace.TemplateID, Name: "lossy policy"}
+				owner.attach(workspace, template, workorcheventpayload.CloneSlice(input.policies))
+				_, err := definitionAdmissionCandidate(workspace, goal, dod, template)
+				if !errors.Is(err, common.ErrInvalidArgument) || !strings.Contains(err.Error(), input.want) {
+					t.Fatalf("lossy evidence policy err=%v, want %q", err, input.want)
+				}
+			})
+		}
 	}
 }
 
@@ -248,7 +418,15 @@ func TestCurrentDefinitionAdmissionMatchesOnlyExactOwnerInputSnapshot(t *testing
 }
 
 func TestRuntimeBootstrapStartupSealRejectsTemplateAndProfileDrift(t *testing.T) {
-	workspace := &workspacemodel.Workspace{ID: "workspace-seal", DeliverableDirectory: "/workspace", TemplateID: "template-seal"}
+	workspacePolicy := workorcheventpayload.New(
+		workorcheventpayload.StringField("id", "workspace-validation"),
+		workorcheventpayload.StringField("appliesTo", runtimecontract.StepKindShellCommand),
+		workorcheventpayload.StringField("commandName", "go"),
+	)
+	workspace := &workspacemodel.Workspace{
+		ID: "workspace-seal", DeliverableDirectory: "/workspace", TemplateID: "template-seal",
+		EvidencePolicies: []workorcheventpayload.Payload{workspacePolicy},
+	}
 	goal := &workspacemodel.Goal{ID: "goal-1", WorkspaceID: workspace.ID, Text: "goal", DefinitionRevision: "goal-r1"}
 	dod := &workspacemodel.DoD{ID: "dod-1", WorkspaceID: workspace.ID, Items: []string{"done"}, DefinitionRevision: "dod-r1"}
 	template := &workspacemodel.WorkspaceTemplate{ID: workspace.TemplateID, Name: "sealed"}
@@ -263,9 +441,13 @@ func TestRuntimeBootstrapStartupSealRejectsTemplateAndProfileDrift(t *testing.T)
 		WorkspaceID: workspace.ID, CandidateID: candidate.CandidateID, CandidateRevision: candidate.CandidateRevision, CandidateHash: candidate.CandidateHash,
 		DefinitionRevision: startup.DefinitionRevision, StartupInputHash: startup.StartupInputHash, State: workspacemodel.WorkspaceActivationEligible,
 	}
+	sealedPolicies, err := compileRuntimeEvidencePolicies("Workspace "+string(workspace.ID), workspace.EvidencePolicies)
+	if err != nil {
+		t.Fatal(err)
+	}
 	bootstrap := &runtimecontract.RuntimeBootstrap{
 		Definition: runtimecontract.RuntimeDefinitionContext{Revision: startup.DefinitionRevision, StartupInputHash: startup.StartupInputHash},
-		Activation: runtimecontract.RuntimeActivationContext{ExecutionContract: runtimecontract.RuntimeExecutionContract{}},
+		Activation: runtimecontract.RuntimeActivationContext{ExecutionContract: runtimecontract.RuntimeExecutionContract{}, EvidencePolicies: sealedPolicies},
 	}
 	if err := validateRuntimeBootstrapStartupSeal(workspace, template, candidate, bootstrap); err != nil {
 		t.Fatalf("exact startup seal rejected: %v", err)
@@ -280,6 +462,11 @@ func TestRuntimeBootstrapStartupSealRejectsTemplateAndProfileDrift(t *testing.T)
 	driftedBootstrap.Activation.ExecutionContract.ProfileContracts = []runtimecontract.RuntimeProfileContract{{ID: "drifted-profile"}}
 	if err := validateRuntimeBootstrapStartupSeal(workspace, template, candidate, &driftedBootstrap); err == nil {
 		t.Fatal("Runtime profile drift was accepted by final bootstrap gate")
+	}
+	policyDriftedBootstrap := bootstrap.Clone()
+	policyDriftedBootstrap.Activation.EvidencePolicies[0].CommandName = "make"
+	if err := validateRuntimeBootstrapStartupSeal(workspace, template, candidate, &policyDriftedBootstrap); err == nil {
+		t.Fatal("Runtime evidence-policy projection drift was accepted by final bootstrap gate")
 	}
 }
 

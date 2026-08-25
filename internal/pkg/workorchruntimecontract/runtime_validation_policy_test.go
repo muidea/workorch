@@ -34,6 +34,35 @@ func TestRuntimeValidationEvidenceRecipeRequiresObservableArguments(t *testing.T
 	}
 }
 
+func TestRuntimeEvidencePolicySelectorCandidatesRequireGroundingAndCompleteSelector(t *testing.T) {
+	policy := RuntimeEvidencePolicy{
+		ID: "candidate-selector", AppliesTo: StepKindFileWrite,
+		CoverageRequirements: []RuntimeCoverageEvidenceRequirement{{
+			ID: "deliverable", Scope: "deliverable", TargetRole: "deliverable", RequireTargetGrounding: true,
+			TargetDiscoverySources: []string{RuntimeValidationDiscoverySourceWorkspaceManifest},
+			TargetSelectorRef:      "file/profile-declared-candidates", TargetSelectorOwnerRef: "profile/test", TargetSelectorSubjectRef: "deliverable",
+			TargetSelectorCandidateRefs: []string{"README.md", "internal/main.go"},
+		}},
+	}
+	if err := policy.Validate(); err != nil {
+		t.Fatalf("valid bounded candidate selector rejected: %v", err)
+	}
+	for name, mutate := range map[string]func(*RuntimeCoverageEvidenceRequirement){
+		"missing grounding":        func(value *RuntimeCoverageEvidenceRequirement) { value.RequireTargetGrounding = false },
+		"missing selector ref":     func(value *RuntimeCoverageEvidenceRequirement) { value.TargetSelectorRef = "" },
+		"missing selector owner":   func(value *RuntimeCoverageEvidenceRequirement) { value.TargetSelectorOwnerRef = "" },
+		"missing selector subject": func(value *RuntimeCoverageEvidenceRequirement) { value.TargetSelectorSubjectRef = "" },
+	} {
+		t.Run(name, func(t *testing.T) {
+			invalid := CloneRuntimeEvidencePolicies([]RuntimeEvidencePolicy{policy})[0]
+			mutate(&invalid.CoverageRequirements[0])
+			if err := invalid.Validate(); err == nil {
+				t.Fatalf("coverage requirement accepted selector candidates without grounding and a complete selector: %+v", invalid.CoverageRequirements[0])
+			}
+		})
+	}
+}
+
 func TestRuntimeValidationRecipeDeclarationIsExplicitAndAllowsNoArguments(t *testing.T) {
 	policy := RuntimeEvidencePolicy{
 		ID: "no-arg-check", AppliesTo: StepKindShellCommand, CommandName: "true",

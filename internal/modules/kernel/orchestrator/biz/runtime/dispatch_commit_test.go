@@ -389,6 +389,9 @@ func TestRejectedValidationEntryDoesNotBootstrapUngroundedFailureTarget(t *testi
 	aggregate.Facts.Focus.TargetRole = "deliverable"
 	aggregate.Facts.Focus.RequireTargetGrounding = true
 	aggregate.Facts.Focus.TargetDiscoverySources = []string{runtimecontract.RuntimeValidationDiscoverySourceWorkspaceManifest}
+	runtimeTestSealCurrentFocusBindingTargetSurface(&aggregate.Facts, runtimeTestBindingTargetSurface{
+		SelectorRef: "test/runtime-ungrounded-target", SelectorOwnerRef: "test/runtime-profile", SelectorSubjectRef: "deliverable",
+	})
 	repository := &durableRuntimeStateRepository{aggregate: aggregate}
 	coordinator, _ := NewDispatchCoordinator(repository)
 	candidate := validationCandidate()
@@ -427,6 +430,9 @@ func TestRejectedValidationScopeMemberDoesNotBecomeFailureTarget(t *testing.T) {
 	}
 	selection.SnapshotID = runtimecontract.StableRuntimeTargetSelectionSnapshotID(selection)
 	aggregate.Facts.Resources.TargetSelection = &selection
+	runtimeTestSealCurrentFocusBindingTargetSurface(&aggregate.Facts, runtimeTestBindingTargetSurface{
+		SelectorRef: selection.SelectorRef, SelectorOwnerRef: selection.OwnerModuleID, SelectorSubjectRef: selection.TargetRole,
+	})
 	bindCurrentFocusTargetSelection(&aggregate.Facts)
 	repository := &durableRuntimeStateRepository{aggregate: aggregate}
 	coordinator, _ := NewDispatchCoordinator(repository)
@@ -467,6 +473,9 @@ func TestRejectedValidationOwnerObservationBindsCompatibleTarget(t *testing.T) {
 	aggregate.Facts.Focus.TargetRole = "implementation"
 	aggregate.Facts.Focus.RequireTargetGrounding = true
 	aggregate.Facts.Focus.TargetDiscoverySources = []string{runtimecontract.RuntimeValidationDiscoverySourceWorkspaceManifest}
+	runtimeTestSealCurrentFocusBindingTargetSurface(&aggregate.Facts, runtimeTestBindingTargetSurface{
+		SelectorRef: "test/runtime-ungrounded-target", SelectorOwnerRef: "test/runtime-profile", SelectorSubjectRef: "implementation",
+	})
 	addCurrentMCPFailureObservationFreshness(t, &aggregate, "mcp-server-v1")
 	repository := &durableRuntimeStateRepository{aggregate: aggregate}
 	coordinator, _ := NewDispatchCoordinator(repository)
@@ -694,6 +703,9 @@ func TestRejectedValidationOwnerObservationRejectsMismatchedRole(t *testing.T) {
 	aggregate.Facts.Focus.TargetRole = "implementation"
 	aggregate.Facts.Focus.RequireTargetGrounding = true
 	aggregate.Facts.Focus.TargetDiscoverySources = []string{runtimecontract.RuntimeValidationDiscoverySourceWorkspaceManifest}
+	runtimeTestSealCurrentFocusBindingTargetSurface(&aggregate.Facts, runtimeTestBindingTargetSurface{
+		SelectorRef: "test/runtime-ungrounded-target", SelectorOwnerRef: "test/runtime-profile", SelectorSubjectRef: "implementation",
+	})
 	repository := &durableRuntimeStateRepository{aggregate: aggregate}
 	coordinator, _ := NewDispatchCoordinator(repository)
 	candidate := validationCandidate()

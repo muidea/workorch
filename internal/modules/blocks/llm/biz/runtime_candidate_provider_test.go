@@ -513,12 +513,11 @@ func TestRuntimeSemanticProviderProjectsDefinitionLineageAndExactAcquisitionSele
 	request.SemanticManifest.ProofObligations = []runtimecontract.RuntimeSemanticProofObligation{{
 		CoverageWorkItemID: "cwi-001", RequiredEvidenceKinds: []string{runtimecontract.EvidenceKindValidation},
 		DeclarationTargetSelectorRef: "file/workspace_deliverable", DeclarationTargetSelectorOwnerRef: "software-dev", DeclarationTargetSelectorSubjectRef: "validation_preparation",
-		DeclarationProspectiveTargetRef: prospectiveTarget,
-		RequireTargetGrounding:          true,
-		RequiredOwnerFacts:              []runtimecontract.RuntimeOwnerFactRequirement{requirement}, OwnerFactConvergences: []runtimecontract.RuntimeOwnerFactConvergence{convergence},
+		DeclarationTargetSelectorCandidateRefs: []string{prospectiveTarget},
+		RequireTargetGrounding:                 true,
+		RequiredOwnerFacts:                     []runtimecontract.RuntimeOwnerFactRequirement{requirement}, OwnerFactConvergences: []runtimecontract.RuntimeOwnerFactConvergence{convergence},
 		OwnerFactAcquisition: &runtimecontract.RuntimeSemanticOwnerFactAcquisition{
 			Requirement:                  requirement,
-			ProspectiveTargetRef:         prospectiveTarget,
 			DeclarationTargetSelectorRef: "file/workspace_deliverable", DeclarationTargetSelectorOwnerRef: "software-dev", DeclarationTargetSelectorSubjectRef: "validation_preparation",
 			AcquisitionOwnerModuleID: runtimecontract.RuntimeModuleFile, AcquisitionOperationKind: runtimecontract.StepKindFileWrite,
 			AcquisitionTargetPolicy:      runtimecontract.RuntimeOperationTargetPolicyProspectiveOwnerTarget,
@@ -573,20 +572,20 @@ func TestRuntimeSemanticProviderProjectsDefinitionLineageAndExactAcquisitionSele
 	if !strings.Contains(authority, `"declarationTargetSelectorRef":"file/workspace_deliverable"`) ||
 		!strings.Contains(authority, `"acquisitionTargetSelectorRef":"workspace-relative-new-file-target"`) ||
 		!strings.Contains(authority, `"prospectiveSatisfactionContractRef":"shell/selectable-validation-surface/prospective-workspace-manifest/v1"`) ||
-		!strings.Contains(authority, `"declarationProspectiveTargetRef":"validation-readiness.sh"`) ||
-		!strings.Contains(authority, `"prospectiveTargetRef":"validation-readiness.sh"`) {
+		!strings.Contains(authority, `"declarationTargetSelectorCandidateRefs":["validation-readiness.sh"]`) ||
+		strings.Contains(authority, `"declarationProspectiveTargetRef"`) || strings.Contains(authority, `"prospectiveTargetRef":"validation-readiness.sh"`) {
 		t.Fatalf("provider projection conflated Definition lineage and operation selector: %s", authority)
 	}
 	if strings.Contains(authority, dependencyCatalog.PrerequisiteID) || strings.Contains(providerRequest.Schema, dependencyCatalog.PrerequisiteID) {
 		t.Fatalf("provider projection leaked non-selectable dependency catalog: authority=%s schema=%s", authority, providerRequest.Schema)
 	}
-	for _, required := range []string{"exact current acquisition proof", "ownerModuleId=acquisitionOwnerModuleId", "target.prospectiveTargetRef=prospectiveTargetRef", `requiredEvidenceKinds=["state_change"]`, "do not return gapKind=undeclared_prerequisite solely", "does not grant terminal validation evidence or coverage credit"} {
+	for _, required := range []string{"exact current acquisition proof", "ownerModuleId=acquisitionOwnerModuleId", "one concrete non-empty target.prospectiveTargetRef", "not Definition authority", "only an SM-2 CoverageEvidenceBinding", `requiredEvidenceKinds=["state_change"]`, "do not return gapKind=undeclared_prerequisite solely", "does not grant terminal validation evidence or coverage credit"} {
 		if !strings.Contains(projection.OutputInstruction, required) {
 			t.Fatalf("provider acquisition instruction lost %q: %s", required, projection.OutputInstruction)
 		}
 	}
 	if !strings.Contains(providerRequest.Schema, `"const":"workspace-relative-new-file-target"`) ||
-		!strings.Contains(providerRequest.Schema, `"prospectiveTargetRef":{"const":"validation-readiness.sh"}`) ||
+		!strings.Contains(providerRequest.Schema, `"prospectiveTargetRef":{"const":"validation-readiness.sh"`) ||
 		strings.Contains(providerRequest.Schema, `"const":"file/workspace_deliverable"`) {
 		t.Fatalf("provider schema did not constrain the exact operation selector: %s", providerRequest.Schema)
 	}
@@ -853,7 +852,10 @@ func TestRuntimeProviderRequestPreservesStablePrefixAndTypedContext(t *testing.T
 	}
 	facts := runtimecontract.RuntimeFacts{
 		WorkspaceID: "ws-1", RunID: "run-1", DefinitionRevision: "definition-1", EvidenceRevision: runtimecontract.InitialRuntimeEvidenceRevision,
-		Focus:    runtimecontract.CoverageFocus{ID: "focus-1", CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-1"}},
+		Focus: runtimecontract.CoverageFocus{
+			ID: "focus-1", CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-1"}, TargetRole: "deliverable",
+			TargetDiscoverySources: []string{runtimecontract.RuntimeValidationDiscoverySourceWorkspaceManifest}, RequireTargetGrounding: true,
+		},
 		Coverage: []runtimecontract.RuntimeCoverageItemFact{{ID: "cwi-1", State: runtimecontract.RuntimeCoverageItemStateOpen}},
 		Resources: runtimecontract.RuntimeResourceFacts{ProviderCeiling: &runtimecontract.ProviderCeiling{
 			Selection:                runtimecontract.ProviderInferenceSelection{Target: runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "gpt-4o"}},
@@ -906,8 +908,9 @@ func TestRuntimeProviderRequestPreservesStablePrefixAndTypedContext(t *testing.T
 	sealRuntimeProviderTestPolicies(&facts)
 	selection := runtimecontract.RuntimeTargetSelection{
 		PrerequisiteID: "target-selection-1", OwnerModuleID: runtimecontract.RuntimeModuleFile,
-		TargetRole: "deliverable", SelectorRef: "file/workspace_deliverable",
-		Disposition: runtimecontract.RuntimeTargetSelectionCreate, ProspectiveTargetRef: "initial-deliverable.txt", CandidateCount: 0, ObservedRevision: "workspace-empty-v1",
+		TargetRole: "deliverable", SelectorRef: "file/workspace_deliverable", SelectorOwnerRef: "profile/test", SelectorSubjectRef: "deliverable",
+		SelectorCandidateRefs: []string{"initial-deliverable.txt"},
+		Disposition:           runtimecontract.RuntimeTargetSelectionCreate, ProspectiveTargetRef: "initial-deliverable.txt", CandidateCount: 0, ObservedRevision: "workspace-empty-v1",
 	}
 	selection.SnapshotID = runtimecontract.StableRuntimeTargetSelectionSnapshotID(selection)
 	facts.Resources.TargetSelection = &selection
@@ -2013,8 +2016,9 @@ func TestRuntimeCandidateSchemaKeepsExplicitSequenceDuringFileScopeNarrowing(t *
 func TestRuntimeProviderRequestNarrowsFileScopeAcrossSchemaContextAndRetry(t *testing.T) {
 	selection := runtimecontract.RuntimeTargetSelection{
 		PrerequisiteID: "target-selection-scope", OwnerModuleID: runtimecontract.RuntimeModuleFile,
-		TargetRole: "deliverable", SelectorRef: "file/workspace_deliverable",
-		Disposition: runtimecontract.RuntimeTargetSelectionScope, CandidateCount: 2,
+		TargetRole: "deliverable", SelectorRef: "file/workspace_deliverable", SelectorOwnerRef: "profile/test", SelectorSubjectRef: "deliverable",
+		SelectorCandidateRefs: []string{"main.go", "support.go"},
+		Disposition:           runtimecontract.RuntimeTargetSelectionScope, CandidateCount: 2,
 		TargetRefs: []string{"main.go", "support.go"}, CandidateTargetRefs: []string{"main.go", "support.go"}, ObservedRevision: "workspace-v1",
 	}
 	selection.SnapshotID = runtimecontract.StableRuntimeTargetSelectionSnapshotID(selection)
@@ -2122,6 +2126,15 @@ func bindRuntimeCandidateTestFocus(t *testing.T, facts *runtimecontract.RuntimeF
 		return
 	}
 	focus := facts.Focus.Normalized()
+	if selection := facts.Resources.TargetSelection; selection != nil {
+		source := selection.Normalized()
+		focus.TargetRefs = append([]string(nil), source.TargetRefs...)
+		focus.TargetSelectorRef = source.SelectorRef
+		focus.TargetSelectorOwnerRef = source.SelectorOwnerRef
+		focus.TargetSelectorSubjectRef = source.SelectorSubjectRef
+		focus.TargetSelectorCandidateRefs = append([]string(nil), source.SelectorCandidateRefs...)
+		focus.ProspectiveTargetRef = source.ProspectiveTargetRef
+	}
 	evidenceKind := runtimecontract.EvidenceKindStateChange
 	effectScopes := []runtimecontract.RuntimeEffectScope{runtimecontract.RuntimeEffectWorkspaceDurable}
 	if state == runtimecontract.ConvergenceStateNeedValidation {
@@ -2147,12 +2160,10 @@ func bindRuntimeCandidateTestFocus(t *testing.T, facts *runtimecontract.RuntimeF
 		binding := runtimecontract.CoverageEvidenceBinding{
 			ID: "binding/test/llm/" + focus.ID + "/" + string(coverageID), CoverageWorkItemID: coverageID,
 			FocusID: focus.ID, DefinitionRevision: facts.DefinitionRevision, Proofs: proofs,
-			TargetRefs: append([]string(nil), focus.TargetRefs...), DeclarationRef: "test/llm-provider-render",
-		}
-		if len(binding.TargetRefs) == 0 {
-			binding.TargetSelectorRef = "test/provider-render-selector"
-			binding.TargetSelectorOwnerRef = "test-llm"
-			binding.TargetSelectorSubjectRef = focus.ID
+			TargetRefs: append([]string(nil), focus.TargetRefs...), TargetSelectorRef: focus.TargetSelectorRef,
+			TargetSelectorOwnerRef: focus.TargetSelectorOwnerRef, TargetSelectorSubjectRef: focus.TargetSelectorSubjectRef,
+			TargetSelectorCandidateRefs: append([]string(nil), focus.TargetSelectorCandidateRefs...), ProspectiveTargetRef: focus.ProspectiveTargetRef,
+			DeclarationRef: "test/llm-provider-render",
 		}
 		binding.Hash = runtimecontract.StableCoverageEvidenceBindingHash(binding)
 		bindings = append(bindings, binding)

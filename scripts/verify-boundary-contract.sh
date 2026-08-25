@@ -1625,7 +1625,7 @@ fi
 # Neither side may reseal caller/persisted bytes, and Restart must reject that
 # shape before materializing managed files or sending an owner execution intent.
 definition_candidate_hash_shape="$(sed -n '/^func (c DefinitionAdmissionCandidate) computeHash()/,/^}/p' internal/modules/blocks/workspace/pkg/models/definition_admission.go)"
-for required_field in AcquisitionOperationVariantID AcquisitionTargetPolicy AcquisitionTargetSelectorRef; do
+for required_field in AdmissionPolicyBindings AcquisitionOperationVariantID AcquisitionTargetPolicy AcquisitionTargetSelectorRef; do
 	if ! grep -q -F -- "$required_field" <<<"$definition_candidate_hash_shape"; then
 		echo "boundary contract violation: Definition candidate hash omits $required_field" >&2
 		exit 1
@@ -1868,7 +1868,7 @@ for owner in file git mcp shell; do
   fi
 done
 
-# File prospective-target admission is a pre-effect create gate. Post-effect
+# File prospective-target admission is a post-binding, pre-effect create gate. Post-effect
 # reconciliation must use a separate File-private observer; reusing admission
 # turns the successfully created target into unsupported/unverifiable and can
 # make SM-2 reopen the CWI for a second effect. The observer remains factual
@@ -1909,11 +1909,11 @@ fi
 file_path_guard="internal/modules/blocks/file/biz/file_path_guard.go"
 prospective_target_admission="$(sed -n '/^func acquireProspectiveRuntimeTargetSelection(/,/^}/p' "$file_target_admission")"
 workspace_target_admission="$(sed -n '/^func acquireManifestRuntimeTargetSelection(/,/^}/p' "$file_target_admission")"
-profile_target_admission="$(sed -n '/^func acquireProfileDeclaredTargetSelection(/,/^}/p' "$file_target_admission")"
+bounded_target_admission="$(sed -n '/^func acquireBoundedCandidateTargetSelection(/,/^}/p' "$file_target_admission")"
 if ! grep -q -F -- 'func runtimeFileDeliverableTargetEligible(' "$file_path_guard" ||
    ! grep -q -F -- 'runtimeFileDeliverableTargetEligible' <<<"$prospective_target_admission" ||
    ! grep -q -F -- 'runtimeFileDeliverableTargetEligible' <<<"$workspace_target_admission" ||
-   ! grep -q -F -- 'runtimeFileDeliverableTargetEligible' <<<"$profile_target_admission" ||
+   ! grep -q -F -- 'runtimeFileDeliverableTargetEligible' <<<"$bounded_target_admission" ||
    ! grep -q -F -- 'runtimeFileDeliverableTargetEligible' "$file_reconciliation_observer"; then
   echo "boundary contract violation: File prospective target can escape the deliverable manifest eligibility shared by factual reconciliation" >&2
   exit 1
@@ -3687,12 +3687,61 @@ runtime_owner_fact_consumption="$(cat \
 	internal/pkg/workorchruntimecontract/runtime_semantic_payload.go \
 	internal/modules/kernel/orchestrator/biz/runtime/semantic_planning.go \
 	internal/modules/kernel/orchestrator/biz/runtime/assessment_owner_fact_replan.go)"
-for marker in RuntimeSemanticProofObligation AcquisitionTargetSelectorRef CompileRuntimeSemanticBindings runtimeOwnerFactAcquisitionFailureSignature; do
-	if ! grep -q -F "$marker" <<<"$runtime_owner_fact_consumption"; then
-		echo "boundary contract violation: SM-2 owner-fact acquisition lost exact sealed selection or one-shot accounting ($marker)" >&2
+preseal_target_shapes=""
+append_preseal_target_shape() {
+	local type_name="$1"
+	local source_file="$2"
+	local shape
+	shape="$(sed -n "/^type ${type_name} struct {/,/^}/p" "$source_file")"
+	if [[ -z "$shape" ]]; then
+		echo "boundary contract violation: cannot extract pre-seal type $type_name from $source_file" >&2
+		return 1
+	fi
+	preseal_target_shapes+=$'\n'"$shape"
+}
+append_preseal_target_shape RuntimeProfileEvidenceRequirement internal/pkg/workorchruntimecontract/runtime_profile_contract.go
+append_preseal_target_shape RuntimeBootstrapArtifact internal/pkg/workorchruntimecontract/runtime_profile_contract.go
+append_preseal_target_shape RuntimeCoverageEvidenceRequirement internal/pkg/workorchruntimecontract/runtime_evidence_policy.go
+append_preseal_target_shape RuntimeDefinitionFocus internal/pkg/workorchruntimecontract/runtime_definition_focus.go
+append_preseal_target_shape RuntimeSemanticProofObligation internal/pkg/workorchruntimecontract/runtime_semantic_obligation.go
+append_preseal_target_shape RuntimeSemanticOwnerFactAcquisition internal/pkg/workorchruntimecontract/runtime_semantic_obligation.go
+if grep -q -i -E -- '[[:space:]](Prospective)?TargetRef[[:space:]]|json:"[^"]*(prospective)?targetRef' <<<"$preseal_target_shapes"; then
+	echo "boundary contract violation: a pre-seal Definition/profile/semantic declaration regained an exact prospective target" >&2
+	exit 1
+fi
+runtime_bootstrap_artifact_parser="$(sed -n '/^func runtimeExecutionContract(/,/^}/p' internal/modules/application/workorchd/biz/appservice/activationports/runtime_activation.go)"
+if ! grep -q -F 'runtimecontract.RuntimeBootstrapArtifact{' <<<"$runtime_bootstrap_artifact_parser" ||
+	! grep -q -F 'AllowedOperationKinds: runtimeStrings(artifact["allowedOperationKinds"])' <<<"$runtime_bootstrap_artifact_parser" ||
+	grep -q -i -E -- 'artifact\[[^]]*"(prospective)?targetRef"|[[:space:]](Prospective)?TargetRef[[:space:]]*:' <<<"$runtime_bootstrap_artifact_parser"; then
+	echo "boundary contract violation: pre-seal profile parser regained an exact RuntimeBootstrapArtifact target" >&2
+	exit 1
+fi
+runtime_bootstrap_artifact_compiler="$(sed -n '/^func compileRuntimeBootstrapArtifactPolicy(/,/^}/p' internal/modules/application/workorchd/biz/appservice/activationcore/runtime_focus_compiler.go)"
+if ! grep -q -F 'file/workspace_deliverable' <<<"$runtime_bootstrap_artifact_compiler" ||
+	grep -q -E -- 'file/profile_declared_candidates|TargetSelectorCandidateRefs:|ProspectiveTargetRef|artifact\.TargetRef' <<<"$runtime_bootstrap_artifact_compiler"; then
+	echo "boundary contract violation: bootstrap artifact compilation regained a pre-seal exact target or closed candidate selector" >&2
+	exit 1
+fi
+bootstrap_artifact_compiler_regression="$(sed -n '/^func TestCompileRuntimeCoverageFocusesPrependsMatchedBootstrapArtifactsInDependencyOrder(/,/^}/p' internal/modules/application/workorchd/biz/appservice/activationcore/runtime_focus_compiler_test.go)"
+for marker in \
+	'focus.TargetSelectorRef != "file/workspace_deliverable"' \
+	'focus.ProspectiveTargetRef != ""' \
+	'len(focus.TargetSelectorCandidateRefs) != 0'; do
+	if ! grep -q -F "$marker" <<<"$bootstrap_artifact_compiler_regression"; then
+		echo "boundary contract violation: target-free bootstrap artifact compiler regression is missing ($marker)" >&2
 		exit 1
 	fi
 done
+for marker in RuntimeSemanticProofObligation AcquisitionTargetSelectorRef DeclarationTargetSelectorCandidateRefs CompileRuntimeSemanticBindings runtimeOwnerFactAcquisitionFailureSignature; do
+	if ! grep -q -F "$marker" <<<"$runtime_owner_fact_consumption"; then
+		echo "boundary contract violation: SM-2 owner-fact acquisition lost bounded proposal selection or one-shot accounting ($marker)" >&2
+		exit 1
+	fi
+done
+if grep -q -F -- 'DeclarationProspectiveTargetRef' <<<"$runtime_owner_fact_consumption"; then
+	echo "boundary contract violation: pre-seal semantic authority regained an exact prospective target" >&2
+	exit 1
+fi
 if grep -R -n -E \
 	--include='*.go' \
 	--exclude='*_test.go' \
@@ -3703,6 +3752,8 @@ if grep -R -n -E \
 fi
 for regression in \
 	'TestRuntimeSemanticOwnerFactAcquisitionSchemaUsesOperationSelectorNotDefinitionSelector' \
+	'TestRuntimeSemanticOwnerFactAcquisitionSchemaBoundsProspectiveTargetByCandidateCardinality' \
+	'TestCoverageEvidenceBindingProspectiveTargetRequiresBoundedSelectorSurface' \
 	'TestRuntimeSemanticManifestRejectsAcquisitionSelectorDriftFromSealedCatalog' \
 	'TestRuntimeSemanticProviderProjectsDefinitionLineageAndExactAcquisitionSelector' \
 	'TestRuntimeCandidatePrefixChangesWithOwnerFactAcquisitionAuthorization' \
@@ -3712,8 +3763,253 @@ for regression in \
 		exit 1
 	fi
 done
+semantic_fixture_adapter="$(sed -n '/^func runtimeTestSemanticProofObligations(/,/^}/p' internal/modules/kernel/orchestrator/biz/runtime_test_support_test.go)"
+if grep -q -E -- 'spec\.proposal.*ProspectiveTargetRef|DeclarationProspectiveTargetRef' <<<"$semantic_fixture_adapter"; then
+	echo "boundary contract violation: test semantic fixture restored proposal-to-Definition target authority rebuild" >&2
+	exit 1
+fi
 if ! grep -q -F 'TestCommitAssessmentFailsClosedAfterSingleSealedOwnerFactAcquisition' internal/modules/kernel/orchestrator/biz/runtime/assessment_owner_fact_replan_test.go; then
 	echo "boundary contract violation: one-shot owner-fact acquisition exhaustion regression is missing" >&2
+	exit 1
+fi
+
+# Definition admission owns the entire pre-seal input fence. Exact prospective
+# targets cannot survive in a typed bootstrap declaration or hide recursively
+# in raw Template/Workspace policy payloads. Policy normalization must be
+# lossless per owner, and the final Runtime bootstrap must exactly match the
+# Workspace policy projection sealed into the admission candidate.
+runtime_bootstrap_validation="$(sed -n '/^func (b RuntimeBootstrap) Validate() error {/,/^}/p' internal/pkg/workorchruntimecontract/runtime_bootstrap.go)"
+if ! grep -q -F 'requirement.ProspectiveTargetRef != ""' <<<"$runtime_bootstrap_validation" ||
+	! grep -q -F 'runtime bootstrap requirement cannot carry a prospective target before semantic binding' <<<"$runtime_bootstrap_validation"; then
+	echo "boundary contract violation: Runtime bootstrap no longer rejects a pre-seal exact prospective target" >&2
+	exit 1
+fi
+runtime_preseal_input_guard="$({
+	sed -n '/^func validateRuntimePresealTargetDeclarations(/,/^}/p' internal/modules/application/workorchd/biz/appservice/activationports/runtime_activation.go
+	sed -n '/^func runtimeExecutionContractContainsBootstrapArtifactField(/,/^}/p' internal/modules/application/workorchd/biz/appservice/activationports/runtime_activation.go
+	sed -n '/^func runtimeValueContainsField(/,/^}/p' internal/modules/application/workorchd/biz/appservice/activationports/runtime_activation.go
+	sed -n '/^func runtimePayloadFieldsContainField(/,/^}/p' internal/modules/application/workorchd/biz/appservice/activationports/runtime_activation.go
+	sed -n '/^func runtimePayloadValueContainsField(/,/^}/p' internal/modules/application/workorchd/biz/appservice/activationports/runtime_activation.go
+})"
+for marker in \
+	'prospectiveTargetRef' \
+	'targetRef' \
+	'runtimeExecutionContractContainsBootstrapArtifactField' \
+	'runtimeValueContainsField(child, fieldName)' \
+	'runtimePayloadValueContainsField(field.Value, fieldName)' \
+	'runtimePayloadValueContainsField(item, fieldName)' \
+	'strings.EqualFold'; do
+	if ! grep -q -F "$marker" <<<"$runtime_preseal_input_guard"; then
+		echo "boundary contract violation: recursive pre-seal exact-target rejection lost $marker" >&2
+		exit 1
+	fi
+done
+runtime_evidence_policy_admission="$({
+	sed -n '/^func validateRuntimeEvidencePolicyInputs(/,/^}/p' internal/modules/application/workorchd/biz/appservice/activationports/runtime_activation.go
+	sed -n '/^func compileRuntimeEvidencePolicies(/,/^}/p' internal/modules/application/workorchd/biz/appservice/activationports/runtime_activation.go
+})"
+for marker in \
+	'validateRuntimePresealTargetDeclarations(nil, items)' \
+	'requires a non-empty string id' \
+	'evidence policies duplicate id' \
+	'policy.Validate()' \
+	'len(normalized) != len(ret)' \
+	'evidence policy normalization changed policy cardinality'; do
+	if ! grep -q -F "$marker" <<<"$runtime_evidence_policy_admission"; then
+		echo "boundary contract violation: Definition evidence-policy admission is no longer lossless ($marker)" >&2
+		exit 1
+	fi
+done
+definition_policy_seal="$(sed -n '/^func definitionAdmissionEvidencePolicyBindings(/,/^}/p' internal/modules/application/workorchd/biz/appservice/activationports/definition_admission.go)"
+for marker in \
+	'validateRuntimeEvidencePolicyInputs("Template ' \
+	'validateRuntimeEvidencePolicyInputs("Workspace ' \
+	'policy.CanonicalString()' \
+	'PolicyRef:' \
+	'Revision:' \
+	'SnapshotHash:'; do
+	if ! grep -q -F "$marker" <<<"$definition_policy_seal"; then
+		echo "boundary contract violation: Definition candidate policy snapshot lost $marker" >&2
+		exit 1
+	fi
+done
+if ! grep -q -F 'AdmissionPolicyBindings: policyBindings' internal/modules/application/workorchd/biz/appservice/activationports/definition_admission.go; then
+	echo "boundary contract violation: Definition candidate assembly omits the admitted policy snapshot bindings" >&2
+	exit 1
+fi
+runtime_bootstrap_startup_seal="$(sed -n '/^func validateRuntimeBootstrapStartupSeal(/,/^}/p' internal/modules/application/workorchd/biz/appservice/activationports/workspace_execution_intent.go)"
+if ! grep -q -F 'compileRuntimeEvidencePolicies("Workspace ' <<<"$runtime_bootstrap_startup_seal" ||
+	! grep -q -F 'SameRuntimeEvidencePolicies(bootstrap.Activation.EvidencePolicies, expectedEvidencePolicies)' <<<"$runtime_bootstrap_startup_seal"; then
+	echo "boundary contract violation: final Runtime bootstrap lost exact admitted Workspace evidence-policy projection" >&2
+	exit 1
+fi
+for regression in \
+	'TestDefinitionAdmissionRejectsRemovedPresealExactTargetField' \
+	'TestDefinitionAdmissionRejectsBootstrapArtifactExactTarget' \
+	'TestDefinitionAdmissionRejectsRemovedPresealExactTargetInEvidencePolicies' \
+	'TestDefinitionAdmissionRejectsLossyEvidencePolicyInputsPerOwner' \
+	'TestDefinitionAdmissionCandidateSealsWorkspaceEvidencePolicySnapshot' \
+	'TestRuntimeBootstrapStartupSealRejectsTemplateAndProfileDrift' \
+	'TestRuntimeActivationContextRejectsPresealExactProspectiveTarget' \
+	'TestRuntimeActivationContextRejectsBootstrapArtifactExactTarget' \
+	'post-binding bootstrap target uses open declaration selector'; do
+	if ! grep -R -q -F --include='*_test.go' -- "$regression" internal; then
+		echo "boundary contract violation: strict Definition/pre-seal policy regression is missing ($regression)" >&2
+		exit 1
+	fi
+done
+
+# SM-2 seals one exact target surface into both CoverageEvidenceBinding and its
+# focus. Selector identity, candidate bounds, and the accepted prospective
+# target must all match; partial equality would let either value become a
+# shadow authority after restart.
+coverage_binding_focus_validation="$(sed -n '/^func ValidateCoverageEvidenceBindingsForFocus(/,/^}/p' internal/pkg/workorchruntimecontract/runtime_coverage_evidence_binding.go)"
+for marker in \
+	'!sameStrings(binding.TargetRefs, focus.TargetRefs)' \
+	'binding.TargetSelectorRef != focus.TargetSelectorRef' \
+	'binding.TargetSelectorOwnerRef != focus.TargetSelectorOwnerRef' \
+	'binding.TargetSelectorSubjectRef != focus.TargetSelectorSubjectRef' \
+	'!sameStrings(binding.TargetSelectorCandidateRefs, focus.TargetSelectorCandidateRefs)' \
+	'binding.ProspectiveTargetRef != focus.ProspectiveTargetRef'; do
+	if ! grep -q -F "$marker" <<<"$coverage_binding_focus_validation"; then
+		echo "boundary contract violation: Coverage binding/focus exact target surface lost $marker" >&2
+		exit 1
+	fi
+done
+if ! grep -q -F 'TestValidateCoverageEvidenceBindingsForFocusRequiresExactTargetSurface' internal/pkg/workorchruntimecontract/runtime_coverage_evidence_binding_test.go; then
+	echo "boundary contract violation: Coverage binding/focus exact target surface regression is missing" >&2
+	exit 1
+fi
+
+# SM-3 is forward-only except for the one bounded owner-rejection correction
+# edge. The contract helper validates the current sealed batch/manifest and
+# retains the attempt-0 document as the immutable delta baseline. Orchestrator
+# may invoke that helper, but must never write a semantic batch State directly.
+semantic_batch_advance="$(sed -n '/^func AdvanceRuntimeSemanticPlanBatch(/,/^}/p' internal/pkg/workorchruntimecontract/runtime_semantic_batch.go)"
+semantic_batch_reopen="$(sed -n '/^func ReopenRuntimeSemanticPlanBatchForCorrection(/,/^}/p' internal/pkg/workorchruntimecontract/runtime_semantic_batch.go)"
+for marker in \
+	'batch.ValidateAgainstManifest(manifest)' \
+	'batch.DocumentHash == ""' \
+	'case RuntimeSemanticPlanBatchFeasibilityPending:' \
+	'batch.State = RuntimeSemanticPlanBatchRequesting' \
+	'case RuntimeSemanticPlanBatchRequesting:' \
+	'default:'; do
+	if ! grep -q -F "$marker" <<<"$semantic_batch_reopen"; then
+		echo "boundary contract violation: canonical SM-3 correction edge lost $marker" >&2
+		exit 1
+	fi
+done
+if grep -F 'RuntimeSemanticPlanBatchFeasibilityPending:' <<<"$semantic_batch_advance" | grep -q -F 'RuntimeSemanticPlanBatchRequesting'; then
+	echo "boundary contract violation: ordinary SM-3 advance table regained a correction back edge" >&2
+	exit 1
+fi
+semantic_batch_requesting_writes="$({
+	source_matches '\.State[[:space:]]*=[[:space:]]*RuntimeSemanticPlanBatchRequesting' internal/pkg/workorchruntimecontract
+	source_matches 'State:[[:space:]]*RuntimeSemanticPlanBatchRequesting' internal/pkg/workorchruntimecontract
+} | sed '/^[[:space:]]*$/d')"
+if [[ "$(awk 'NF { count++ } END { print count + 0 }' <<<"$semantic_batch_requesting_writes")" -ne 1 ]] ||
+	! grep -q -F 'internal/pkg/workorchruntimecontract/runtime_semantic_batch.go:' <<<"$semantic_batch_requesting_writes"; then
+	echo "boundary contract violation: ReopenRuntimeSemanticPlanBatchForCorrection is not the sole direct SM-3 correction edge" >&2
+	echo "$semantic_batch_requesting_writes" >&2
+	exit 1
+fi
+orchestrator_semantic_batch_state_writes="$({
+	source_matches '([A-Za-z0-9_]*[Bb]atch|Batches\[[^]]+\])\.State[[:space:]]*=[[:space:]]*[^=]' internal/modules/kernel/orchestrator/biz
+	source_matches '\.State[[:space:]]*=[[:space:]]*runtimecontract\.RuntimeSemanticPlanBatch|State:[[:space:]]*runtimecontract\.RuntimeSemanticPlanBatch' internal/modules/kernel/orchestrator/biz
+} | sed '/^[[:space:]]*$/d')"
+if [[ -n "$orchestrator_semantic_batch_state_writes" ]]; then
+	echo "boundary contract violation: Orchestrator writes RuntimeSemanticPlanBatch.State outside the canonical contract transition" >&2
+	echo "$orchestrator_semantic_batch_state_writes" >&2
+	exit 1
+fi
+orchestrator_semantic_batch_reopen_calls="$(source_matches 'ReopenRuntimeSemanticPlanBatchForCorrection\(' internal/modules/kernel/orchestrator/biz)"
+if [[ "$(awk 'NF { count++ } END { print count + 0 }' <<<"$orchestrator_semantic_batch_reopen_calls")" -ne 1 ]]; then
+	echo "boundary contract violation: Orchestrator must have exactly one canonical SM-3 correction-edge call site" >&2
+	echo "$orchestrator_semantic_batch_reopen_calls" >&2
+	exit 1
+fi
+if ! grep -q -F 'TestReopenRuntimeSemanticPlanBatchForCorrectionIsTheOnlyIdempotentReturnEdge' internal/pkg/workorchruntimecontract/runtime_semantic_batch_test.go; then
+	echo "boundary contract violation: canonical SM-3 correction edge regression is missing" >&2
+	exit 1
+fi
+
+# Provider decode admission and the reducer CAS boundary must reuse the same
+# pure prospective-correction validator. Candidate derivation must also reuse
+# the sealed manifest validator, so a retry cannot reinterpret selector,
+# variant, constraint, or owner-catalog authority more loosely than attempt 0.
+semantic_provider_document_admission="$(sed -n '/^func (m \*Biz) admitRuntimeCompletedSemanticPlanDocument(/,/^}/p' internal/modules/kernel/orchestrator/biz/runtime_semantic_drive.go)"
+if ! grep -q -F 'runtime.ValidateRuntimeProspectiveSemanticCorrectionDocument(ledger, document)' <<<"$semantic_provider_document_admission" ||
+	! grep -q -F 'handleRuntimeSemanticDocumentDecodeFailure(ctx, aggregate, session, ledger, admissionErr)' <<<"$semantic_provider_document_admission"; then
+	echo "boundary contract violation: provider semantic document admission bypasses the canonical prospective-correction validator" >&2
+	exit 1
+fi
+semantic_reducer_correction_admission="$({
+	sed -n '/^func validateSemanticPlanDocumentPhase(/,/^}/p' internal/modules/kernel/orchestrator/biz/runtime/semantic_planning.go
+	sed -n '/^func validateSemanticCorrectionDocumentIdentity(/,/^}/p' internal/modules/kernel/orchestrator/biz/runtime/semantic_planning.go
+	sed -n '/^func validateProspectiveSemanticCorrectionDocument(/,/^}/p' internal/modules/kernel/orchestrator/biz/runtime/semantic_planning.go
+})"
+for marker in \
+	'case runtimecontract.RuntimeSemanticPlanningCorrectionRequired:' \
+	'return validateSemanticCorrectionDocumentIdentity(ledger, document)' \
+	'return validateProspectiveSemanticCorrectionDocument(ledger, document)' \
+	'return ValidateRuntimeProspectiveSemanticCorrectionDocument(ledger, document)'; do
+	if ! grep -q -F "$marker" <<<"$semantic_reducer_correction_admission"; then
+		echo "boundary contract violation: reducer prospective correction does not reuse the canonical admission fence ($marker)" >&2
+		exit 1
+	fi
+done
+prospective_correction_derivation="$(sed -n '/^func DeriveRuntimeProspectiveSatisfactionCorrection(/,/^}/p' internal/modules/kernel/orchestrator/biz/runtime/prospective_semantic_correction.go)"
+for marker in \
+	'acquisitionCatalog.TargetRefs' \
+	'candidateDocument := document.Clone()' \
+	'candidateDocument.Proposals[proposalIndex].Target.ProspectiveTargetRef = candidate' \
+	'candidateDocument.ValidateAgainstManifest(*ledger.Manifest)'; do
+	if ! grep -q -F "$marker" <<<"$prospective_correction_derivation"; then
+		echo "boundary contract violation: prospective target correction bypasses sealed manifest/catalog admission ($marker)" >&2
+		exit 1
+	fi
+done
+for regression in \
+	'TestRuntimeProspectiveWouldNotSatisfyReopensSameBatchOnceAndReplaysIdempotently' \
+	'TestRuntimeProspectiveCorrectionDocumentEnforcesAllowedAndOpenSelectorDelta' \
+	'TestRuntimeProspectiveDrivePersistsWouldNotSatisfyBeforeTerminalAndDoesNotReprobeAfterRestart' \
+	'TestRuntimeProspectiveDriveUsesOneBoundedTargetCorrection'; do
+	if ! grep -R -q -F --include='*_test.go' -- "$regression" internal/modules/kernel/orchestrator; then
+		echo "boundary contract violation: bounded prospective correction regression is missing ($regression)" >&2
+		exit 1
+	fi
+done
+prospective_full_drive_regression="$(sed -n '/^func TestRuntimeProspectiveDriveUsesOneBoundedTargetCorrection(/,/^}/p' internal/modules/kernel/orchestrator/biz/runtime_prospective_composite_drive_test.go)"
+for marker in \
+	'corrected target satisfies' \
+	'fileSelectionObserver.Subscribe(fileevents.TopicAcquireRuntimeTargetSelection' \
+	'sealed.SemanticPlanning.Phase != runtimecontract.RuntimeSemanticPlanningSealed' \
+	'binding.ProspectiveTargetRef != secondTarget' \
+	'len(binding.TargetRefs) != 0' \
+	'sealed.Facts.Focus.ProspectiveTargetRef != secondTarget' \
+	'len(sealed.Facts.Focus.TargetRefs) != 0' \
+	'reconciliationBinding.ProspectiveTargetRef != secondTarget' \
+	'len(reconciliationBinding.TargetRefs) != 0' \
+	'runtimecontract.ValidateCoverageEvidenceBindingsForFocus' \
+	'sealed.Facts.ReconciliationContract.Validate()' \
+	'targetSelectionCalls != 1' \
+	'selection.ProspectiveTargetRef != secondTarget' \
+	'len(selection.TargetRefs) != 0' \
+	'len(selection.CandidateTargetRefs) != 0' \
+	'runtimecontract.BuildRuntimeCandidateContractManifest(' \
+	'runtimecontract.ValidateRuntimeCandidateContractManifestForDecision(' \
+	'candidateManifest.Bindings[0].ProspectiveTargetRef != secondTarget' \
+	'fileWrite.Target.Policy != runtimecontract.RuntimeOperationTargetPolicyProspectiveOwnerTarget' \
+	'fileWrite.Target.ProspectiveTargetRef != secondTarget' \
+	'len(fileWrite.Target.ExactTargetRefs) != 0' \
+	'len(fileWrite.Target.OwnerScopeTargetRefs) != 0'; do
+	if ! grep -q -F "$marker" <<<"$prospective_full_drive_regression"; then
+		echo "boundary contract violation: corrected prospective full-drive authority assertion is missing ($marker)" >&2
+		exit 1
+	fi
+done
+if ! grep -q -F 'remaining candidate already exists is terminal without correction' internal/modules/kernel/orchestrator/biz/runtime_prospective_composite_drive_test.go; then
+	echo "boundary contract violation: current-catalog prospective target exclusion regression is missing" >&2
 	exit 1
 fi
 

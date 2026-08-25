@@ -13,16 +13,17 @@ type RuntimeProfileContract struct {
 	EvidenceRequirements    []RuntimeProfileEvidenceRequirement
 	CoverageDependencies    []RuntimeCoverageDependency
 	// BootstrapRecipes are profile/template-owned, bounded declarations for
-	// initializing an otherwise empty workspace. They are compiled at
-	// activation into sealed Focus contracts; they do not grant the runtime a
-	// free-form path or let File infer a project layout.
+	// initializing an otherwise empty workspace. They seal artifact roles,
+	// operation kinds and dependency order, but never an exact prospective
+	// target. A semantic proposal chooses the concrete target after activation,
+	// and File independently validates it before SM-2 can seal a binding.
 	BootstrapRecipes []RuntimeBootstrapRecipe
 }
 
 // RuntimeBootstrapRecipe is declarative input for an activation adapter. The
 // matcher terms are profile data rather than orchestrator policy; a profile
-// that cannot select exactly one bounded recipe must leave target grounding
-// unresolved instead of asking a provider to invent an artifact path.
+// that cannot select exactly one bounded recipe must leave artifact-role
+// grounding unresolved. The recipe never supplies the concrete target path.
 type RuntimeBootstrapRecipe struct {
 	ID                string
 	RequiredGoalTerms []string
@@ -31,13 +32,12 @@ type RuntimeBootstrapRecipe struct {
 }
 
 // RuntimeBootstrapArtifact is one opaque, profile-owned artifact declaration.
-// TargetRef is validated by the File owner against the workspace boundary only.
 // DependsOnArtifactIDs establishes an ordered, finite bootstrap graph; the
-// activation adapter compiles that graph before Runtime is started.
+// activation adapter compiles that graph before Runtime is started. It has no
+// exact target field: the post-seal semantic proposal supplies that value.
 type RuntimeBootstrapArtifact struct {
 	ID                    string
 	TargetRole            string
-	TargetRef             string
 	AllowedOperationKinds []string
 	DependsOnArtifactIDs  []string
 }
@@ -68,13 +68,9 @@ type RuntimeProfileEvidenceRequirement struct {
 	// TargetSelectorOwnerRef and TargetSelectorSubjectRef bind a generic File
 	// selection query to the profile declaration which owns its semantics. File
 	// only evaluates the bounded candidate refs; it never interprets these values.
-	TargetSelectorOwnerRef      string
-	TargetSelectorSubjectRef    string
-	TargetSelectorCandidateRefs []string
-	// ProspectiveTargetRef is a profile-declared, canonical workspace-relative
-	// path for an empty-workspace durable create. It is sealed during activation
-	// and verified by the File owner; Runtime never derives it from prose.
-	ProspectiveTargetRef              string
+	TargetSelectorOwnerRef            string
+	TargetSelectorSubjectRef          string
+	TargetSelectorCandidateRefs       []string
 	RequireTargetGrounding            bool
 	RequiredEvidenceKinds             []string
 	RequireDirectEvidence             bool
@@ -308,15 +304,9 @@ func ValidateRuntimeProfileContracts(values []RuntimeProfileContract) error {
 			if err := ValidateRuntimeTargetGrounding(item.RequireTargetGrounding, item.TargetRole, item.TargetRefs, item.TargetDiscoverySources, item.TargetSelectorRef); err != nil {
 				return fmt.Errorf("runtime profile evidence requirement %q: %w", item.ID, err)
 			}
-			if item.ProspectiveTargetRef != "" && (!item.RequireTargetGrounding || item.TargetSelectorRef == "") {
-				return fmt.Errorf("runtime profile evidence requirement %q prospective target requires target grounding and selector", item.ID)
-			}
 			if len(item.TargetSelectorCandidateRefs) > 0 {
-				if !item.RequireTargetGrounding || item.TargetSelectorRef == "" || item.TargetSelectorSubjectRef == "" {
-					return fmt.Errorf("runtime profile evidence requirement %q candidate selector requires grounding, selector and subject", item.ID)
-				}
-				if item.ProspectiveTargetRef != "" && !runtimeProfileContainsTargetRef(item.TargetSelectorCandidateRefs, item.ProspectiveTargetRef) {
-					return fmt.Errorf("runtime profile evidence requirement %q prospective target must be declared as a selector candidate", item.ID)
+				if !item.RequireTargetGrounding || item.TargetSelectorRef == "" || item.TargetSelectorOwnerRef == "" || item.TargetSelectorSubjectRef == "" {
+					return fmt.Errorf("runtime profile evidence requirement %q candidate selector requires grounding and a complete selector", item.ID)
 				}
 			}
 			for _, state := range item.CapabilityStateRequirements {
@@ -415,7 +405,6 @@ func (r RuntimeBootstrapRecipe) Normalized() RuntimeBootstrapRecipe {
 func (a RuntimeBootstrapArtifact) Normalized() RuntimeBootstrapArtifact {
 	a.ID = strings.TrimSpace(a.ID)
 	a.TargetRole = strings.TrimSpace(a.TargetRole)
-	a.TargetRef = strings.TrimSpace(a.TargetRef)
 	a.AllowedOperationKinds = normalizeStrings(a.AllowedOperationKinds)
 	a.DependsOnArtifactIDs = normalizeStrings(a.DependsOnArtifactIDs)
 	return a
@@ -430,16 +419,12 @@ func (r RuntimeBootstrapRecipe) Validate() error {
 		return fmt.Errorf("runtime bootstrap recipe %q requires bounded goal or DoD matcher terms", r.ID)
 	}
 	known := make(map[string]RuntimeBootstrapArtifact, len(r.Artifacts))
-	paths := make(map[string]struct{}, len(r.Artifacts))
 	for _, artifact := range r.Artifacts {
-		if artifact.ID == "" || artifact.TargetRole == "" || artifact.TargetRef == "" || len(artifact.AllowedOperationKinds) == 0 {
-			return fmt.Errorf("runtime bootstrap artifact requires id, role, target and allowed operation kinds")
+		if artifact.ID == "" || artifact.TargetRole == "" || len(artifact.AllowedOperationKinds) == 0 {
+			return fmt.Errorf("runtime bootstrap artifact requires id, role and allowed operation kinds")
 		}
 		if _, exists := known[artifact.ID]; exists {
 			return fmt.Errorf("runtime bootstrap recipe %q duplicates artifact %q", r.ID, artifact.ID)
-		}
-		if _, exists := paths[artifact.TargetRef]; exists {
-			return fmt.Errorf("runtime bootstrap recipe %q duplicates artifact target %q", r.ID, artifact.TargetRef)
 		}
 		for _, kind := range artifact.AllowedOperationKinds {
 			if _, ok := RuntimeOperationDescriptorForKind(CanonicalRuntimeBlockKind(kind)); !ok {
@@ -447,7 +432,6 @@ func (r RuntimeBootstrapRecipe) Validate() error {
 			}
 		}
 		known[artifact.ID] = artifact
-		paths[artifact.TargetRef] = struct{}{}
 	}
 	for _, artifact := range r.Artifacts {
 		for _, dependency := range artifact.DependsOnArtifactIDs {
@@ -517,16 +501,6 @@ func (r RuntimeBootstrapRecipe) OrderedArtifacts() ([]RuntimeBootstrapArtifact, 
 		visit(artifact.ID)
 	}
 	return ordered, nil
-}
-
-func runtimeProfileContainsTargetRef(values []string, target string) bool {
-	target = strings.TrimSpace(target)
-	for _, value := range values {
-		if value == target {
-			return true
-		}
-	}
-	return false
 }
 
 func runtimeProfileContainsOperationKind(values []string, expected string) bool {
@@ -610,7 +584,6 @@ func normalizeRuntimeProfileEvidenceRequirements(values []RuntimeProfileEvidence
 		value.TargetSelectorOwnerRef = strings.TrimSpace(value.TargetSelectorOwnerRef)
 		value.TargetSelectorSubjectRef = strings.TrimSpace(value.TargetSelectorSubjectRef)
 		value.TargetSelectorCandidateRefs = normalizeStrings(value.TargetSelectorCandidateRefs)
-		value.ProspectiveTargetRef = strings.TrimSpace(value.ProspectiveTargetRef)
 		value.RequiredEvidenceKinds = normalizeStrings(value.RequiredEvidenceKinds)
 		value.AcceptedStepKinds = normalizeStrings(value.AcceptedStepKinds)
 		value.AcceptedOperationVariants = NormalizeRuntimeOperationVariantRefs(value.AcceptedOperationVariants)
@@ -691,7 +664,7 @@ func sameRuntimeProfileContract(left RuntimeProfileContract, right RuntimeProfil
 	}
 	for idx := range left.EvidenceRequirements {
 		l, r := left.EvidenceRequirements[idx], right.EvidenceRequirements[idx]
-		if l.ID != r.ID || l.Scope != r.Scope || l.EvidenceRole != r.EvidenceRole || l.TargetRole != r.TargetRole || l.TargetSelectorRef != r.TargetSelectorRef || l.TargetSelectorOwnerRef != r.TargetSelectorOwnerRef || l.TargetSelectorSubjectRef != r.TargetSelectorSubjectRef || l.ProspectiveTargetRef != r.ProspectiveTargetRef ||
+		if l.ID != r.ID || l.Scope != r.Scope || l.EvidenceRole != r.EvidenceRole || l.TargetRole != r.TargetRole || l.TargetSelectorRef != r.TargetSelectorRef || l.TargetSelectorOwnerRef != r.TargetSelectorOwnerRef || l.TargetSelectorSubjectRef != r.TargetSelectorSubjectRef ||
 			!sameStrings(l.TargetRefs, r.TargetRefs) || !sameStrings(l.TargetDiscoverySources, r.TargetDiscoverySources) || !sameStrings(l.TargetSelectorCandidateRefs, r.TargetSelectorCandidateRefs) || l.RequireTargetGrounding != r.RequireTargetGrounding ||
 			!sameStrings(l.RequiredEvidenceKinds, r.RequiredEvidenceKinds) || l.RequireDirectEvidence != r.RequireDirectEvidence ||
 			l.RequireClaimEvidence != r.RequireClaimEvidence || l.RequireExecutableBehaviorEvidence != r.RequireExecutableBehaviorEvidence ||
@@ -724,7 +697,7 @@ func sameRuntimeProfileContract(left RuntimeProfileContract, right RuntimeProfil
 		}
 		for artifactIdx := range l.Artifacts {
 			la, ra := l.Artifacts[artifactIdx], r.Artifacts[artifactIdx]
-			if la.ID != ra.ID || la.TargetRole != ra.TargetRole || la.TargetRef != ra.TargetRef ||
+			if la.ID != ra.ID || la.TargetRole != ra.TargetRole ||
 				!sameStrings(la.AllowedOperationKinds, ra.AllowedOperationKinds) || !sameStrings(la.DependsOnArtifactIDs, ra.DependsOnArtifactIDs) {
 				return false
 			}

@@ -95,7 +95,6 @@ func StableRuntimeCandidatePrefixHashWithExecutionContract(definition RuntimeDef
 			writeHashString(h, requirement.TargetSelectorOwnerRef)
 			writeHashString(h, requirement.TargetSelectorSubjectRef)
 			writeHashStrings(h, requirement.TargetSelectorCandidateRefs)
-			writeHashString(h, requirement.ProspectiveTargetRef)
 			writeHashString(h, fmt.Sprintf("%t", requirement.RequireTargetGrounding))
 			writeHashStrings(h, requirement.RequiredEvidenceKinds)
 			writeHashString(h, fmt.Sprintf("%t", requirement.RequireDirectEvidence))
@@ -156,7 +155,6 @@ func StableRuntimeCandidatePrefixHashWithExecutionContract(definition RuntimeDef
 			for _, artifact := range recipe.Artifacts {
 				writeHashString(h, artifact.ID)
 				writeHashString(h, artifact.TargetRole)
-				writeHashString(h, artifact.TargetRef)
 				writeHashStrings(h, artifact.AllowedOperationKinds)
 				writeHashStrings(h, artifact.DependsOnArtifactIDs)
 			}

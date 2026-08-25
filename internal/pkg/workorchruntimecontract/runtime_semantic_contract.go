@@ -2032,7 +2032,9 @@ func (l RuntimeSemanticPlanningLedger) Validate() error {
 		if err := document.ValidateAgainstManifest(*l.Manifest); err != nil {
 			return err
 		}
-		if batch.State == RuntimeSemanticPlanBatchPending || batch.State == RuntimeSemanticPlanBatchRequesting || batch.State == RuntimeSemanticPlanBatchFailed {
+		correctionBaseline := (l.Phase == RuntimeSemanticPlanningCorrectionRequired || l.Phase == RuntimeSemanticPlanningFailed) && l.Attempt == 1 &&
+			document.BatchID == l.ActiveBatchID && batch.State == RuntimeSemanticPlanBatchRequesting
+		if batch.State == RuntimeSemanticPlanBatchPending || (batch.State == RuntimeSemanticPlanBatchRequesting && !correctionBaseline) || batch.State == RuntimeSemanticPlanBatchFailed {
 			return fmt.Errorf("runtime semantic batch document %q is not in a document-bearing batch state", document.BatchID)
 		}
 		batchDocuments[document.BatchID] = document.Clone()
@@ -2178,7 +2180,9 @@ func (l RuntimeSemanticPlanningLedger) Validate() error {
 			}
 		} else if l.ActiveBatchID != "" {
 			batch, found := runtimeSemanticPlanningBatch(l.Batches, l.ActiveBatchID)
-			if !found || batch.State != RuntimeSemanticPlanBatchRequesting || l.CoverageOrderDocument == nil || l.Document == nil || l.Document.PlanStep != RuntimeSemanticPlanStepCoverageOrder {
+			_, baselineFound := batchDocuments[l.ActiveBatchID]
+			requiresBaseline := len(l.Rejections) == 1 && l.Rejections[0].OriginalCode == "prospective_owner_fact_unsatisfied"
+			if !found || batch.State != RuntimeSemanticPlanBatchRequesting || (requiresBaseline && !baselineFound) || l.CoverageOrderDocument == nil || l.Document == nil || l.Document.PlanStep != RuntimeSemanticPlanStepCoverageOrder {
 				return fmt.Errorf("proof-batch correction ledger has invalid active batch lineage")
 			}
 			if err := validateRuntimeSemanticPendingForBatch(l, batch); err != nil {

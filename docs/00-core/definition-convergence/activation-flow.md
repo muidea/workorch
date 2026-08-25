@@ -49,7 +49,10 @@ A fresh bootstrap requires an admitted and activation-eligible startup input con
 
 - one Workspace and its resolved project workspace directory plus internal boundary;
 - exact Goal and DoD item set with stable definition revision/lineage and `StartupInputHash`;
-- exact Workspace Template snapshot and any independently bound Profile/policy snapshot;
+- exact Workspace Template snapshot and every independently bound Profile/policy snapshot；current
+  candidate→startup→admission binding chain 中，Template 与 Workspace `EvidencePolicies` 分别以 canonical
+  `AdmissionPolicyBindings` ref/revision/hash 封存，promotion 前已拒绝其中任何退役的 `prospectiveTargetRef`，且这些
+  policy binding 不授予 exact prospective target authority；
 - candidate-bound exact normalized typed Profile contract snapshot plus the matching startup-input Profile hash; every required
   Profile acceptance/deliverable CWI has an exact evidence requirement, nonempty supported evidence kinds and at least one typed
   owner-receipt proof operation;
@@ -58,7 +61,7 @@ A fresh bootstrap requires an admitted and activation-eligible startup input con
   `ProspectiveSatisfactionContractRef`, while other policies have none; the candidate manifest equals the manifest independently
   derived from the exact Profile snapshot;
 - Workspace canonical provider selection and referenced Soul/Skill/MCP/Memory resources;
-- template/profile/capability/evidence policy declarations;
+- template/profile/capability declarations，以及 candidate-bound Template/Workspace evidence-policy snapshots；
 - bounded convergence/recovery policy.
 
 Missing, pending, cross-scoped or non-`all_of` definitions fail before Run creation. Definition identity/revision is sealed with the Run and must

@@ -79,6 +79,18 @@ func runtimeCandidateTestDecisionWithBindings(t testing.TB, decision RuntimeDeci
 		bindings = append(bindings, binding)
 	}
 	decision.Focus.CoverageEvidenceBindings = NormalizeCoverageEvidenceBindings(bindings)
+	// A sealed generation focus and every binding it contains carry one exact
+	// target surface. Keep this fixture on the same production invariant instead
+	// of letting tests rely on binding-only target authority.
+	if len(decision.Focus.CoverageEvidenceBindings) != 0 {
+		binding := decision.Focus.CoverageEvidenceBindings[0]
+		decision.Focus.TargetRefs = append([]string(nil), binding.TargetRefs...)
+		decision.Focus.TargetSelectorRef = binding.TargetSelectorRef
+		decision.Focus.TargetSelectorOwnerRef = binding.TargetSelectorOwnerRef
+		decision.Focus.TargetSelectorSubjectRef = binding.TargetSelectorSubjectRef
+		decision.Focus.TargetSelectorCandidateRefs = append([]string(nil), binding.TargetSelectorCandidateRefs...)
+		decision.Focus.ProspectiveTargetRef = binding.ProspectiveTargetRef
+	}
 	return decision
 }
 

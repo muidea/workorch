@@ -58,6 +58,11 @@ func TestRuntimeCWIReconciliationContractRetainsSelectorCandidates(t *testing.T)
 	focus.CoverageEvidenceBindings[0].TargetSelectorSubjectRef = "deliverable"
 	focus.CoverageEvidenceBindings[0].TargetSelectorCandidateRefs = []string{"main.go"}
 	focus.CoverageEvidenceBindings[0].Hash = StableCoverageEvidenceBindingHash(focus.CoverageEvidenceBindings[0])
+	focus.TargetRefs = nil
+	focus.TargetSelectorRef = "file/profile_declared_candidates"
+	focus.TargetSelectorOwnerRef = RuntimeModuleFile
+	focus.TargetSelectorSubjectRef = "deliverable"
+	focus.TargetSelectorCandidateRefs = []string{"main.go"}
 	contract, err := CompileRuntimeCWIReconciliationContract("definition-1", []CoverageFocus{focus})
 	if err != nil {
 		t.Fatal(err)
@@ -181,6 +186,6 @@ func runtimeCWIReconciliationFocus() CoverageFocus {
 	binding.Hash = StableCoverageEvidenceBindingHash(binding)
 	return CoverageFocus{
 		ID: "focus-1", CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-1"}, RequiredEvidenceKinds: []string{EvidenceKindValidation},
-		CoverageEvidenceBindings: []CoverageEvidenceBinding{binding},
+		CoverageEvidenceBindings: []CoverageEvidenceBinding{binding}, TargetRefs: []string{"main.go"},
 	}
 }

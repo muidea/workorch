@@ -104,7 +104,12 @@ generation 的 current kinds 只能是 acquisition 所需的 `state_change`，�
 也不能继承 terminal metric/artifact credit。
 
 `prospective_owner_target` acquisition 必须在 pre-seal Profile declaration、compiled obligation 与 provider projection 中携带
-同一个非空 `ProspectiveSatisfactionContractRef`；preexisting 与 `existing_owner_scope` 禁止携带。proposal 通过 File owner
+同一个非空 `ProspectiveSatisfactionContractRef`；preexisting 与 `existing_owner_scope` 禁止携带。pre-seal
+Definition 只封存 declaration selector/candidate refs 与 acquisition closure；compiled obligation/manifest 只追加
+acquisition owner/kind/variant/target-policy/operation-selector 与 current owner constraints，两者都不携带 exact
+prospective target。SM-3 semantic proposal 必须在这两组权威的交集内提出一个 nonempty exact target；
+当 declaration candidate refs 非空时还必须精确命中其中一项。它在 SM-2 seal 前只是 proposal，不是
+Definition 或 operation authority。proposal 通过 File owner
 只读 feasibility 后，File 仅基于 current complete manifest 生成 exact base-revision-bound
 `RuntimeProspectiveWorkspaceManifestDelta`。Orchestrator 再把该 immutable delta、activation-sealed recipe declarations 和
 required-owner current dependency catalog/observation 交给 required owner 的 concrete typed pure query。semantic manifest
@@ -116,11 +121,29 @@ Runtime state。Orchestrator 必须在 owner-private observation CAS 与 semanti
 required-owner nested observation，以及 manifest/batch/request 和两组 catalog/observation identity。`would_satisfy` 才可加入
 final feasibility set；nested typed stale 不能伪装成 File outer stale或直接 terminal，只进入既有 bounded catalog refresh；
 missing dependency 在 query 前退休 generation并保持零 required-owner call。`would_not_satisfy` 是 proposal relational
-factual rejection，必须先随 File delta 持久化为完整 composite observation；activation-sealed exact target 不允许 provider
-替换，因此下一次 drive 直接形成统一 `semantic_contract_failed` terminal，并把 `prospective_owner_fact_unsatisfied` 保留为
-typed original reason。Shell 只拥有 persisted satisfaction/reason；把该 fact 解释为无 correction path 的 terminal diagnostic
-由 Orchestrator SM-2 署名。整个链零 provider correction/request、零 ticket、零 refresh/acquisition/operation budget，并在
-semantic seal、operation candidate 与 dispatch 前保持零 effect、零 coverage；duplicate/restart 不重复 owner probe。
+factual rejection，必须先随 File delta 持久化为完整 composite observation；该 target 仍未封存为 binding，且不产生任何
+operation authority。typed stale 只刷新 exact dependency fact，不增加 semantic attempt 或消耗 correction。
+
+仅 exact-current full composite `would_not_satisfy` 可进入 Orchestrator 的 bounded target-correction evaluator，且
+semantic attempt 必须为 0。只有 finite declaration candidate catalog 允许 pure evaluator 证明 concrete remaining
+members：它排除 failed target、排除 acquisition-owner current catalog 中已经存在的 target，并让每个 replacement
+重新通过 canonical document/manifest fence；非空结果才成为 exact `Allowed`。candidate refs 为空的 open selector
+不能证明任何 remaining member，也不能生成 `Allowed`；它只允许一次 relational target-only retry，要求新值非空、不同于
+failed target，并继续满足原 operation selector 与 prospective constraints。该 relational directive 不证明 target
+feasible，也不证明 required owner fact 将成立。
+
+SM-3 使用既有 correction ledger 持久化 failed-target delta，保留 active batch/manifest/coverage order/CWI set/
+stable-prefix lineage，以及 attempt-0 proof document/hash 作为 immutable delta baseline；它只清理 feasibility working
+set，并由 canonical correction transition 使 batch `FeasibilityPending -> Requesting`。attempt-1 document 除被拒
+`prospectiveTargetRef` 外必须与 baseline 完全一致；finite replacement 必须属于 exact `Allowed`，open replacement 必须
+满足 relational directive，两者都仍受原 selector/constraints/candidate bounds 限制，并重新取得 fresh File
+feasibility/delta 与 fresh Shell satisfaction observation。fixed/singleton finite catalog 或 finite catalog 无剩余合法
+target 在 attempt=0 不开 correction；invalid attempt-1 document 或 attempt-1 `would_not_satisfy` 由下一
+drive 形成统一 `semantic_contract_failed` terminal。第二次 owner rejection 把
+`prospective_owner_fact_unsatisfied` 保留为 typed original reason；合法 attempt-1 `would_satisfy` 可继续进入 SM-2 seal。
+Shell 只拥有 persisted satisfaction/reason；correction/terminal diagnostic 均由 Orchestrator private event
+署名和提交。两条路径均零 ticket/governance/acquisition/operation/effect/coverage，duplicate/restart 不重复
+消耗 correction 或重放同一 owner probe；这个边界不新增状态机或跨 owner transition。
 
 owner feasibility 与 receipt 后只重获声明的 owner/fact。若 reobserve 仍缺失，一次 accepted acquisition operation/evidence
 立即耗尽，不能再生成第二个 semantic acquisition；若 reobserve 已满足，SM-2 也不得把 acquisition evidence 记为 terminal
@@ -184,8 +207,8 @@ decode/validate 边界失败；不得补声明、推导旧状态、生成 compat
 
 Fresh activation 的 immutable `DefinitionFocuses` 与 SM-2 generation-specific
 `Focus/RemainingFocuses/CompletedFocuses` 必须分离。前者只包含 CWI、presentation slice、required
-evidence/assessment、声明式 metric/artifact obligation、owner-fact postcondition 与可选 profile selector identity；
-不得携带 resolved target、operation kind/variant、recipe/check 或 binding。后者可以随 owner resource revision
+evidence/assessment、声明式 metric/artifact obligation、owner-fact postcondition、target role 与可选 profile
+selector/candidate scope；不得携带 exact/resolved/prospective target、operation kind/variant、recipe/check 或 binding。后者可以随 owner resource revision
 退休、重开和重新 seal。semantic document admission、owner feasibility 与 final seal 都只能用 immutable
 DefinitionFocus 检查 source declaration，不能把上一 generation 的 accepted operation 当成下一 generation 声明。
 
@@ -193,12 +216,17 @@ DefinitionFocus 检查 source declaration，不能把上一 generation 的 accep
 `RuntimeFacts.DefinitionFocuses` 使用 `RuntimeDefinitionFocus`；初始执行游标只能由
 `RuntimeFocusSeedsFromDefinitionFocuses` 生成不含 target selector、owner-fact closure、resolved target、operation、recipe、
 check 或 binding 的 `CoverageFocus` seed。只有 SM-2 semantic seal 可以用 generation-specific `CoverageFocus` 替换该游标。
-Profile 声明的 exact target 仍保留在 sealed activation/profile contract，并与 current capability-owner catalog 取交集；
-不得把它复制进 immutable DefinitionFocus 冒充 owner-resolved target authority。
+Definition/activation 只封存 declaration selector identity、candidate refs 与 acquisition closure；它们不封存
+`ProspectiveTargetRef`。exact prospective target 首次出现在 SM-3 semantic proposal，File/Shell owner fact 只通过
+typed lineage 绑定该 proposal/target 并返回 factual feasibility/satisfaction；只有 SM-2 private event 封存的
+`CoverageEvidenceBinding` 才是 target authority，后续 operation
+candidate 只能引用该 binding，dispatch 只从 binding 派生 target。
 
-owner target scope 的空观察只证明当前不存在既有目标，不能授权任意新路径。prospective creation 必须同时具有 activation
-封存的 exact prospective target、完整 `selector ref + owner ref + subject ref`，以及同一 capability owner catalog 发布的
-matching selector/constraint/operation variant；缺任一项即在 provider 前以 typed target-grounding terminal 收口。
+owner target scope 的空观察只证明当前不存在既有目标，不能授权任意新路径。prospective creation 必须同时具有
+SM-3 document 提出的 nonempty exact target、Definition 的完整 `selector ref + owner ref + subject ref`/candidate scope，以及同一
+capability owner catalog 发布的 matching operation selector/constraint/variant。缺 proposal target 由 strict schema/admission 拒绝；
+scope/catalog 不匹配由 pure evaluator 或 File feasibility 拒绝。全部 exact-current owner fact 通过后，SM-2 才封存 binding；
+之前始终零 candidate/dispatch/effect。
 ordinary Shell managed-validation catalog acquisition 需要 target vocabulary 时，Orchestrator 只可把已持久化的 File-owner
 target inventory 作为 typed input 转交 Shell；prospective-satisfaction pure query 只额外接收 File owner 从该 inventory
 计算的 immutable hypothetical delta/resulting refs。File effect 使旧目录失效后，新一代 acquisition 仍使用 fresh File

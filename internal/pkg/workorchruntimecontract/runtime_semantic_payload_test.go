@@ -97,8 +97,9 @@ func TestRuntimeSemanticOwnerFactAcquisitionSchemaUsesOperationSelectorNotDefini
 	if !strings.Contains(schema, `"const":"file/workspace-relative-create"`) {
 		t.Fatalf("owner-fact acquisition schema lost exact operation selector: %s", schema)
 	}
-	if !strings.Contains(schema, `"prospectiveTargetRef":{"const":"validation-readiness.sh"}`) {
-		t.Fatalf("owner-fact acquisition schema did not seal the exact Definition target: %s", schema)
+	prospectiveTarget := runtimeSemanticProspectiveTargetConstraintForTest(t, schema)
+	if prospectiveTarget["const"] != "validation-readiness.sh" {
+		t.Fatalf("owner-fact acquisition schema did not bound the dynamic proposal to the single declared candidate: %v", prospectiveTarget)
 	}
 	if !strings.Contains(schema, `"requiredEvidenceKinds":{"items":{"const":"state_change"}`) {
 		t.Fatalf("owner-fact acquisition schema did not use the current evidence obligation: %s", schema)
@@ -112,6 +113,117 @@ func TestRuntimeSemanticOwnerFactAcquisitionSchemaUsesOperationSelectorNotDefini
 	if err := wrong.ValidateAgainstManifest(manifest); !errors.As(err, &violation) || violation.Violation().Path != "$.proposals[0].target.ownerSelectorRefs" {
 		t.Fatalf("Definition selector mismatch was not a typed semantic violation: %+v err=%v", violation, err)
 	}
+}
+
+func TestRuntimeSemanticOwnerFactAcquisitionSchemaBoundsProspectiveTargetByCandidateCardinality(t *testing.T) {
+	base, document, _ := semanticMissingOwnerFactAcquisitionFixture(t)
+	for _, tc := range []struct {
+		name       string
+		candidates []string
+		wantConst  string
+		wantEnum   []string
+	}{
+		{name: "no candidates"},
+		{name: "single candidate", candidates: []string{"validation-readiness.sh"}, wantConst: "validation-readiness.sh"},
+		{name: "multiple candidates", candidates: []string{"validation-readiness.sh", "alternate-readiness.sh"}, wantEnum: []string{"alternate-readiness.sh", "validation-readiness.sh"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			manifest := base.Clone()
+			manifest.ProofObligations[0].DeclarationTargetSelectorCandidateRefs = append([]string(nil), tc.candidates...)
+			manifest.Hash = StableRuntimeSemanticPlanManifestHash(manifest)
+			if err := manifest.Validate(); err != nil {
+				t.Fatalf("candidate-cardinality manifest rejected: %v", err)
+			}
+			schema, err := RuntimeSemanticPlanJSONSchemaForRequest(
+				manifest,
+				RuntimeSemanticPlanStepProofBatch,
+				document.BatchID,
+				document.BatchSequence,
+				document.BatchCoverageWorkItemIDs,
+			)
+			if err != nil {
+				t.Fatal(err)
+			}
+			constraint := runtimeSemanticProspectiveTargetConstraintForTest(t, schema)
+			if constraint["minLength"] != float64(1) {
+				t.Fatalf("prospective target constraint permits an empty value: %v", constraint)
+			}
+			actualConst, hasConst := constraint["const"]
+			actualEnum, hasEnum := constraint["enum"]
+			switch {
+			case tc.wantConst != "":
+				if !hasConst || actualConst != tc.wantConst || hasEnum {
+					t.Fatalf("single-candidate constraint = %v", constraint)
+				}
+			case len(tc.wantEnum) != 0:
+				values, ok := actualEnum.([]any)
+				if !ok || hasConst || len(values) != len(tc.wantEnum) {
+					t.Fatalf("multi-candidate constraint = %v", constraint)
+				}
+				for index, want := range tc.wantEnum {
+					if values[index] != want {
+						t.Fatalf("multi-candidate constraint = %v, want %v", constraint, tc.wantEnum)
+					}
+				}
+			default:
+				if hasConst || hasEnum {
+					t.Fatalf("unbounded prospective selector unexpectedly gained a candidate bound: %v", constraint)
+				}
+			}
+		})
+	}
+}
+
+func runtimeSemanticProspectiveTargetConstraintForTest(t *testing.T, schema string) map[string]any {
+	t.Helper()
+	var decoded map[string]any
+	if err := json.Unmarshal([]byte(schema), &decoded); err != nil {
+		t.Fatal(err)
+	}
+	properties, ok := decoded["properties"].(map[string]any)
+	if !ok {
+		t.Fatalf("semantic schema has no properties: %s", schema)
+	}
+	proposals, ok := properties["proposals"].(map[string]any)
+	if !ok {
+		t.Fatalf("semantic schema has no proposals: %s", schema)
+	}
+	items, ok := proposals["items"].(map[string]any)
+	if !ok {
+		t.Fatalf("semantic proposal schema has no items: %v", proposals)
+	}
+	allOf, ok := items["allOf"].([]any)
+	if !ok {
+		t.Fatalf("semantic proposal schema has no conditional constraints: %v", items)
+	}
+	for _, rawBranch := range allOf {
+		branch, ok := rawBranch.(map[string]any)
+		if !ok {
+			continue
+		}
+		then, ok := branch["then"].(map[string]any)
+		if !ok {
+			continue
+		}
+		thenProperties, ok := then["properties"].(map[string]any)
+		if !ok {
+			continue
+		}
+		target, ok := thenProperties["target"].(map[string]any)
+		if !ok {
+			continue
+		}
+		targetProperties, ok := target["properties"].(map[string]any)
+		if !ok {
+			continue
+		}
+		prospectiveTarget, ok := targetProperties["prospectiveTargetRef"].(map[string]any)
+		if ok {
+			return prospectiveTarget
+		}
+	}
+	t.Fatalf("semantic proposal schema has no owner-fact acquisition prospective target constraint: %s", schema)
+	return nil
 }
 
 func TestRuntimeSemanticManifestRejectsAcquisitionSelectorDriftFromSealedCatalog(t *testing.T) {

@@ -90,13 +90,24 @@ application、Web 与 orchestrator 不直接访问 ai-proxy。
     不一致时也不得自行协调，typed field violation 交由 Orchestrator attempt-0 有界纠错，且不形成 candidate/dispatch。
     C3 通过同一个 derived evidence obligation 同时投影 immutable `terminalRequiredEvidenceKinds` 与本轮
     `currentRequiredEvidenceKinds`。`evidencePurpose=owner_fact_acquisition` 及其 `ownerFactAcquisition` 表示已经封存的当前
-    前置 acquisition proof，不是尚待模型发现的 Definition 缺口：provider 必须使用其中 exact
-    owner/operation/variant/target authorization，并只声明 `state_change` evidence。最终 validation surface/recipe 在
+    前置 acquisition proof，不是尚待模型发现的 Definition 缺口：obligation 精确固定
+    owner/operation/variant/target policy/operation selector/constraints，但故意不携带 exact prospective target。对
+    `prospective_owner_target`，semantic-plan provider 必须在 Definition declaration selector/candidate refs 与
+    current operation selector/owner constraints 的交集内提出一个 nonempty exact target，非空 candidate refs 要求
+    exact member match，并只声明 `state_change` evidence。该值仍只是 proposal，File/Shell fact 只验证它，只有
+    SM-2 sealed binding 才形成 authority。后续 operations provider 只能选择 binding ref；target 不再是 provider
+    choice，由 candidate/dispatch 从 current binding 派生并校验。最终 validation surface/recipe 在
     acquisition 与 owner re-observation 前暂不可选择是预期事实，不能单独据此输出 `undeclared_prerequisite`。acquisition
     receipt 只证明前置状态变化，不产生 terminal validation evidence/coverage credit；ticket、retry、Runtime state/action
     以及 re-observation 后的新 planning generation 仍完全由 Orchestrator owner 决定。
     prospective obligation只可回显pre-seal sealed `ProspectiveSatisfactionContractRef`作为proposal合同，不能回显required-owner
     dependency catalog或让模型填写`would_satisfy|would_not_satisfy|stale`；这些 outcome只来自required owner typed result。
+    只有 Orchestrator 已持久化的 exact-current File+Shell full-composite `would_not_satisfy` 可在 semantic
+    attempt=0 且仍有不同合法 target 时生成既有 attempt-1 `RuntimeSemanticCorrectionDirective`。LLM
+    只在 C4 取得 manifest-bound failed-target forbidden delta 与 bounded allowed/relational requirement，不取得 raw
+    owner diagnostic/dependency catalog，也不决定是否 retry/terminal。attempt-1 proposal 必须提出不同 target 且仍命中
+    原 selector/constraints/candidate bounds；fixed/singleton/exhausted 或第二次 rejection 不会产生新 LLM
+    correction。typed stale 只使 Orchestrator 刷新 owner fact，不改变 LLM correction attempt。
 14. Skill 只从 Run owner 的 sealed activation 进入 volatile C3。每项携带 WorkOrch Registry 或 SkillHub typed
     provenance、original/truncated instruction identity 与 activation-time byte budget；LLM 不读取 Skill repository/catalog、
     不重新选择或裁剪 Skill，也不把 Skill material 移入 C0～C2。缺失/漂移的 provenance 或 budget 在 Runtime

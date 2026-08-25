@@ -75,6 +75,13 @@ DefinitionAdmissionCandidate
   lineage，不授予 candidate 任何 canonical/restart authority，且 promotion 必须验证二者仍属于同一 Workspace sealed input；
 - `WorkspaceTemplateSnapshot` 必须传递性封存其选择的 exact Profile/policy snapshot；若 Profile 是独立资源，则使用
   `AdmissionPolicyBindings` 显式携带 ref/revision/hash。不得根据 candidate 提交后的 live Profile 重新解释同一 candidate；
+- Template 与 Workspace 两侧的 `EvidencePolicies` 都必须在 candidate submit/promotion 前完成无损 typed 编译和递归校验；
+  每个 owner slice 内的 policy ID 必须为非空字符串且唯一，typed policy 必须有效，normalize 不得丢项或覆盖重复项。任一
+  policy snapshot 含有退役字段 `prospectiveTargetRef` 时直接拒绝，不能把它解释为默认 target 或延后到 Runtime 修正。
+  两侧每一项 exact policy snapshot 都以独立 ref/revision/hash 进入 `AdmissionPolicyBindings`，并由 `CandidateHash` 覆盖；
+  binding 只封存 admission policy authority，不携带 exact prospective target。任一侧 policy 内容漂移都必须形成新的
+  candidate revision，不能修改已封存 lineage；final bootstrap gate 还必须把 activation 中的 typed policies 与 exact-current
+  admitted Workspace policy projection 逐项比较，投影漂移不得创建 Run；
 - `RuntimeProfileContracts` 是 admission compiler 的完整 typed 输入，不是仅供展示的副本。其规范化 hash 必须与
   `RuntimeProfileContractsHash` 精确一致；Workspace pure compiler 必须从该 snapshot 独立派生 owner-fact/convergence
   manifest，并逐项匹配 candidate 中的 bindings，Application 不能只提交一个 hash 或自算 manifest 取代 owner 校验；

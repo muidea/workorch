@@ -401,6 +401,9 @@ func TestEvaluateCandidateAdmissionAllowsFiniteOwnerGroundedWorkspaceScopeThroug
 	}
 	selection.SnapshotID = runtimecontract.StableRuntimeTargetSelectionSnapshotID(selection)
 	aggregate.Facts.Resources.TargetSelection = &selection
+	runtimeTestSealCurrentFocusBindingTargetSurface(&aggregate.Facts, runtimeTestBindingTargetSurface{
+		SelectorRef: selection.SelectorRef, SelectorOwnerRef: selection.OwnerModuleID, SelectorSubjectRef: selection.TargetRole,
+	})
 	bindCurrentFocusTargetSelection(&aggregate.Facts)
 	addCandidateAdmissionTargetPolicyFixture(&aggregate.Facts, runtimecontract.RuntimeModuleFile, runtimecontract.RuntimeBlockKindPatchApply, "file_write", runtimecontract.RuntimeOperationTargetPolicyExistingOwnerScope, selection.TargetRefs)
 
@@ -425,6 +428,9 @@ func TestEvaluateCandidateAdmissionRejectsTargetOutsideFiniteOwnerGroundedWorksp
 	}
 	selection.SnapshotID = runtimecontract.StableRuntimeTargetSelectionSnapshotID(selection)
 	aggregate.Facts.Resources.TargetSelection = &selection
+	runtimeTestSealCurrentFocusBindingTargetSurface(&aggregate.Facts, runtimeTestBindingTargetSurface{
+		SelectorRef: selection.SelectorRef, SelectorOwnerRef: selection.OwnerModuleID, SelectorSubjectRef: selection.TargetRole,
+	})
 	bindCurrentFocusTargetSelection(&aggregate.Facts)
 	addCandidateAdmissionTargetPolicyFixture(&aggregate.Facts, runtimecontract.RuntimeModuleFile, runtimecontract.RuntimeBlockKindPatchApply, "file_write", runtimecontract.RuntimeOperationTargetPolicyExistingOwnerScope, selection.TargetRefs)
 
@@ -450,6 +456,9 @@ func TestEvaluateCandidateAdmissionWorkspaceScopeDoesNotAuthorizeOtherDurableOwn
 	}
 	selection.SnapshotID = runtimecontract.StableRuntimeTargetSelectionSnapshotID(selection)
 	aggregate.Facts.Resources.TargetSelection = &selection
+	runtimeTestSealCurrentFocusBindingTargetSurface(&aggregate.Facts, runtimeTestBindingTargetSurface{
+		SelectorRef: selection.SelectorRef, SelectorOwnerRef: selection.OwnerModuleID, SelectorSubjectRef: selection.TargetRole,
+	})
 	bindCurrentFocusTargetSelection(&aggregate.Facts)
 
 	operation := runtimecontract.RuntimeOperation{ID: "initialize-repository", Kind: runtimecontract.StepKindGitWrite, TargetRefs: []string{"implementation.go"}}
@@ -583,6 +592,9 @@ func TestEvaluateCandidateAdmissionScopeCannotBypassOwnerFailureTarget(t *testin
 	}
 	selection.SnapshotID = runtimecontract.StableRuntimeTargetSelectionSnapshotID(selection)
 	aggregate.Facts.Resources.TargetSelection = &selection
+	runtimeTestSealCurrentFocusBindingTargetSurface(&aggregate.Facts, runtimeTestBindingTargetSurface{
+		SelectorRef: selection.SelectorRef, SelectorOwnerRef: selection.OwnerModuleID, SelectorSubjectRef: selection.TargetRole,
+	})
 	bindCurrentFocusTargetSelection(&aggregate.Facts)
 	aggregate.Facts.Resources.FailureTarget = &runtimecontract.FailureTarget{
 		Signature: "owner-observed-failure", TargetRefs: []string{"implementation.go"},
@@ -660,7 +672,9 @@ func TestAdmitCandidateProposalExhaustsSemanticReplayWithoutOperationIdentity(t 
 		aggregate := stateChangeAggregate(t)
 		aggregate.Facts.Focus.RequireTargetGrounding = true
 		aggregate.Facts.Focus.TargetRole = "implementation"
-		aggregate.Facts.Focus.TargetRefs = nil
+		runtimeTestSealCurrentFocusBindingTargetSurface(&aggregate.Facts, runtimeTestBindingTargetSurface{
+			SelectorRef: "test/runtime-repair-target", SelectorOwnerRef: runtimecontract.RuntimeModuleFile, SelectorSubjectRef: "implementation",
+		})
 		aggregate.Facts.Resources.FailureTarget = &runtimecontract.FailureTarget{
 			Signature: "owner-observed-failure", TargetRefs: []string{"implementation.go"},
 		}

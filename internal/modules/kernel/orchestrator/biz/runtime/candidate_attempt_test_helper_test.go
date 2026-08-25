@@ -337,6 +337,10 @@ func candidateAttemptTestBinding(ctx context.Context, c *RuntimeController, work
 }
 
 func EvaluateCandidateAdmission(aggregate RuntimeAggregate, candidate runtimecontract.RuntimeCandidate) CandidateAdmissionResult {
+	// Candidate admission consumes the sealed SM-2 target surface. Hand-written
+	// tests must construct that binding explicitly instead of allowing a later
+	// owner selection to mutate semantic authority.
+	aggregate.Facts.Focus = runtimeTestAlignFocusTargetSurfaceFromBindings(aggregate.Facts.Focus)
 	candidate = runtimeTestBindCandidateToFocusBindings(aggregate.Facts.Focus.CoverageEvidenceBindings, candidate)
 	// Test fixtures sometimes mutate Facts (FailureTarget, TargetSelection, focus
 	// TargetRefs) after the initial Reduce. Production always builds the Decision

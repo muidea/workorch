@@ -1187,8 +1187,8 @@ type RuntimeTargetSelectionDisposition string
 const (
 	RuntimeTargetSelectionSelected RuntimeTargetSelectionDisposition = "selected"
 	// RuntimeTargetSelectionCreate authorizes a creation candidate within an
-	// owner-observed empty workspace. It carries an activation-sealed,
-	// profile-declared prospective path; File validates that path against its
+	// owner-observed empty workspace. It carries an SM-2 binding-sealed
+	// prospective path; File validates that path against its
 	// workspace boundary and operation admissibility inventory.
 	RuntimeTargetSelectionCreate RuntimeTargetSelectionDisposition = "create"
 	// RuntimeTargetSelectionScope binds either a bounded complete File
@@ -1218,9 +1218,10 @@ type RuntimeTargetSelection struct {
 	Disposition           RuntimeTargetSelectionDisposition
 	TargetRefs            []string
 	CandidateTargetRefs   []string
-	// ProspectiveTargetRef is an activation-sealed profile declaration for an
-	// empty-workspace durable create. The File owner only validates that it is
-	// a bounded workspace-relative absent path; it does not derive the value.
+	// ProspectiveTargetRef is the concrete semantic-proposal target sealed by
+	// SM-2 binding for an empty-workspace durable create. The File owner only
+	// validates that it is a bounded workspace-relative absent path; it does not
+	// derive the value.
 	ProspectiveTargetRef string
 	// CandidateCount is observed before the bounded candidate projection. It
 	// prevents a max-items=1 context from turning a multi-target workspace into
@@ -1264,7 +1265,7 @@ func (s RuntimeTargetSelection) Validate() error {
 			return fmt.Errorf("create runtime target selection requires an empty owner inventory")
 		}
 		if s.ProspectiveTargetRef == "" {
-			return fmt.Errorf("create runtime target selection requires a profile-declared prospective target")
+			return fmt.Errorf("create runtime target selection requires an SM-2 binding-sealed prospective target")
 		}
 	case RuntimeTargetSelectionScope:
 		if s.CandidateCount == 0 {

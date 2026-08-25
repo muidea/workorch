@@ -557,6 +557,9 @@ func (m *Biz) admitRuntimeCompletedSemanticPlanDocument(ctx context.Context, agg
 	}
 	document, decodeErr := runtimecontract.DecodeRuntimeSemanticPlanPayloadWithManifest(*ledger.Manifest, payload)
 	if decodeErr == nil {
+		if admissionErr := runtime.ValidateRuntimeProspectiveSemanticCorrectionDocument(ledger, document); admissionErr != nil {
+			return m.handleRuntimeSemanticDocumentDecodeFailure(ctx, aggregate, session, ledger, admissionErr)
+		}
 		updated, err := m.submitRuntimeInternalEvent(ctx, runtime.RuntimeInternalEvent{
 			Kind: runtime.RuntimeInternalEventSemanticPlanEvaluated, Scope: runtime.RuntimeInternalEventScope{WorkspaceID: aggregate.Facts.WorkspaceID, RunID: aggregate.Facts.RunID}, Transaction: &runtime.RuntimeInternalTransactionPayload{LogicalRequestID: session.LogicalRequestID, SemanticDocument: &document},
 		})
@@ -667,11 +670,38 @@ func (m *Biz) driveRuntimeSemanticFeasibility(ctx context.Context, aggregate run
 				return updated.Aggregate, err
 			}
 			if prospective.Satisfaction != nil && prospective.Satisfaction.Outcome == runtimecontract.RuntimeOwnerFactProspectiveWouldNotSatisfy {
-				diagnostic, err := runtimeProspectiveSatisfactionDiagnostic(fact, *prospective.Satisfaction)
+				diagnostic, correctable, err := runtime.DeriveRuntimeProspectiveSatisfactionCorrection(ledger, fact)
 				if err != nil {
 					return m.failRuntimeSemanticContract(ctx, aggregate, "runtime_contract_defect", err.Error(), nil)
 				}
-				return m.failRuntimeSemanticContract(ctx, aggregate, "prospective_owner_fact_unsatisfied", diagnostic.OriginalMessage, &diagnostic)
+				if ledger.Attempt >= 1 {
+					return m.failRuntimeSemanticContract(ctx, aggregate, "semantic_plan_retry_exhausted", diagnostic.OriginalMessage, &diagnostic)
+				}
+				if !correctable {
+					return m.failRuntimeSemanticContract(ctx, aggregate, "prospective_owner_fact_unsatisfied", diagnostic.OriginalMessage, &diagnostic)
+				}
+				expected, expectedErr := runtimeSemanticExpectedDocumentForLedger(aggregate, ledger)
+				if expectedErr != nil {
+					return m.failRuntimeSemanticContract(ctx, aggregate, "runtime_contract_defect", expectedErr.Error(), &diagnostic)
+				}
+				expected.CorrectionAttempt = 1
+				expected.ManifestHash = ledger.Manifest.Hash
+				expected.LogicalRequestID = ""
+				expected.Hash = ""
+				directive, deriveErr := runtimecontract.DeriveRuntimeSemanticCorrectionDirective(*ledger.Manifest, expected, ledger.StablePrefixHash, diagnostic)
+				if deriveErr != nil {
+					return m.failRuntimeSemanticContract(ctx, aggregate, "runtime_contract_defect", deriveErr.Error(), &diagnostic)
+				}
+				logicalRequestID := runtimeSemanticLogicalRequestID(aggregate, ledger.StablePrefixHash, ledger.Manifest.Hash, directive.Hash)
+				updated, submitErr := m.submitRuntimeInternalEvent(ctx, runtime.RuntimeInternalEvent{
+					Kind:  runtime.RuntimeInternalEventSemanticPlanCorrectionRequired,
+					Scope: runtime.RuntimeInternalEventScope{WorkspaceID: aggregate.Facts.WorkspaceID, RunID: aggregate.Facts.RunID},
+					Transaction: &runtime.RuntimeInternalTransactionPayload{
+						StablePrefixHash: ledger.StablePrefixHash, LogicalRequestID: logicalRequestID,
+						ExpectedDocument: &expected, SemanticDiagnostic: &diagnostic,
+					},
+				})
+				return updated.Aggregate, submitErr
 			}
 		}
 		switch fact.Status {
@@ -855,28 +885,6 @@ func runtimeSemanticManifestDependencyCatalog(manifest runtimecontract.RuntimeSe
 		}
 	}
 	return runtimecontract.RuntimeOperationAdmissibility{}, false
-}
-
-func runtimeProspectiveSatisfactionDiagnostic(fact runtimecontract.RuntimeSemanticProofFeasibility, satisfaction runtimecontract.RuntimeOwnerFactProspectiveSatisfaction) (runtimecontract.RuntimeOriginalDiagnostic, error) {
-	fact = fact.Normalized()
-	satisfaction = satisfaction.Clone()
-	if satisfaction.Outcome != runtimecontract.RuntimeOwnerFactProspectiveWouldNotSatisfy || strings.TrimSpace(satisfaction.Reason) == "" || len(fact.TargetRefs) == 0 {
-		return runtimecontract.RuntimeOriginalDiagnostic{}, common.ErrInvalidArgument
-	}
-	diagnostic := runtimecontract.RuntimeOriginalDiagnostic{
-		SchemaVersion: runtimecontract.RuntimeOriginalDiagnosticSchemaCurrent,
-		// Shell owns only the persisted factual satisfaction result and reason.
-		// Orchestrator owns the SM-2 interpretation that the exact sealed target
-		// leaves no correction path, so it must not attribute this terminal
-		// diagnostic to the capability owner.
-		OwnerModuleID:   runtimecontract.RuntimeModuleOrchestrator,
-		OriginalClass:   "semantic_contract",
-		OriginalCode:    "prospective_owner_fact_unsatisfied",
-		OriginalMessage: satisfaction.Reason,
-		Signature:       "semantic-feasibility/prospective-owner-fact/" + strings.TrimPrefix(runtimecontract.StableRuntimeOwnerFactProspectiveSatisfactionHash(satisfaction), runtimecontract.RuntimeOwnerFactProspectiveSatisfactionHashPrefix),
-		TargetRefs:      append([]string(nil), fact.TargetRefs...),
-	}
-	return diagnostic, diagnostic.Validate()
 }
 
 func runtimeSemanticManifestOwnerCatalog(manifest runtimecontract.RuntimeSemanticPlanManifest, ownerModuleID string) (runtimecontract.RuntimeOperationAdmissibility, bool) {

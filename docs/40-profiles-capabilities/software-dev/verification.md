@@ -40,9 +40,14 @@ and converges through the same neutral Runtime owner model. It must not make leg
   `*_test.go` may yield Shell `would_satisfy` for the exact default Go recipe, while `scripts/validate.sh` alone yields
   `would_not_satisfy`; neither pure probe creates a file, directory, process/session, receipt or credit;
 - Shell dependency catalog/observation remains absent from provider C3/schema choices; File delta and Shell nested observation
-  must both be exact-current at CAS and seal. Shell typed stale uses bounded refresh; persisted `would_not_satisfy` directly
-  reaches the common `semantic_contract_failed` terminal with typed original reason `prospective_owner_fact_unsatisfied`, with no
-  provider correction or repeated owner probe;
+  must both be exact-current at CAS and seal. Shell typed stale uses bounded refresh without consuming semantic correction.
+  Persisted full-composite `would_not_satisfy` at attempt 0 reuses the same semantic batch and sole correction ledger only when a
+  different target remains, retains the attempt-0 proof document/hash as the immutable target-only delta baseline, clears only
+  the feasibility working set, and requires an in-bounds different target plus fresh owner facts. Fixed/singleton/exhausted
+  bounds at attempt 0, an invalid attempt-1 document, or an attempt-1 second rejection reach `semantic_contract_failed`; the
+  second owner rejection retains typed original reason `prospective_owner_fact_unsatisfied`, while a valid attempt-1
+  `would_satisfy` may proceed to the SM-2 binding seal. Duplicate/restart neither charges
+  correction twice nor repeats the same proposal's owner probe;
 - a validation entry is recipe lineage, not an implementation repair target; unstructured output yields no target candidate,
   while managed Go diagnostics may report only actual `*.go:line[:column]` locations inside the fresh File manifest scope;
 - Git snapshot requirements use `git/write:add` + `git/write:commit`, not shell/read evidence;

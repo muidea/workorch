@@ -59,12 +59,19 @@ and reopens the same CWI for a fresh validation binding; it never grants DoD cre
 
 That one-shot closure uses the Profile-sealed
 `shell/selectable-validation-surface/prospective-workspace-manifest/v1` satisfaction contract. Before any File effect, File
-returns an immutable current-tree-revision-bound hypothetical manifest delta and Shell evaluates it against its exact non-selectable
+validates the exact target proposed by SM-3 at the intersection of the Definition declaration selector/candidate refs and the
+current File operation selector/constraints, and returns an immutable
+current-tree-revision-bound hypothetical manifest delta. Shell evaluates it against its exact non-selectable
 dependency catalog/observation plus the activation-sealed recipe identity. For the default Go recipe, a resulting `*_test.go`
 can make `go test ./...` applicable; a resulting `scripts/validate.sh` alone cannot. A Shell `would_not_satisfy` result is first
-persisted and then deterministically reaches the common `semantic_contract_failed` terminal with typed original reason
-`prospective_owner_fact_unsatisfied`; it cannot ask the provider to replace the activation-sealed target. Shell typed stale uses
-bounded catalog refresh. Neither outcome creates validation credit, governance, a ticket or an acquisition effect.
+persisted with the File delta as one exact-current composite and never becomes a binding by itself. At semantic attempt 0, if the
+same declaration selector/candidate refs and File constraints still admit a different target, the existing SM-3 correction ledger
+reopens the same batch at `Requesting`; the next proposal must use that different in-bounds target and obtain fresh File/Shell
+facts. A fixed/singleton or exhausted candidate scope at attempt 0, an invalid attempt-1 document, or an attempt-1
+`would_not_satisfy` reaches the common `semantic_contract_failed` terminal; the second owner rejection retains typed original
+reason `prospective_owner_fact_unsatisfied`, while a valid attempt-1 `would_satisfy` may proceed to the SM-2 binding seal. Shell typed stale only uses
+bounded catalog refresh and does not consume correction. None of these branches creates validation credit, governance, a ticket
+or an acquisition effect.
 
 `coverage_map` and a generic `user_deliverable` are Result/trace material derived from the proved CWI set, not unconditional
 terminal members. A concrete Goal may still declare an additional artifact through its admitted Definition/Profile contract, but
@@ -81,6 +88,9 @@ the Runtime must not manufacture a generic CWI without an exact proof declaratio
 - validation recipes must be activation-sealed and owner-confirmed;
 - `prospective_owner_target` validation preparation must carry the exact Profile-derived
   `ProspectiveSatisfactionContractRef`; the Shell dependency catalog is freshness authority only and never LLM-selectable;
+- the Profile declaration does not carry an exact prospective target; SM-3 proposes one at the intersection of its declaration
+  selector/candidate refs and the current operation selector/owner constraints, File/Shell validate it, and only the SM-2 binding
+  authorizes the later operation candidate/dispatch;
 - evidence from a predecessor or another Workspace cannot close the current Run;
 - partial assessment closes only explicitly satisfied work items and leaves the rest active;
 - no current-Run accepted evidence means a satisfied assessment is invalid.
