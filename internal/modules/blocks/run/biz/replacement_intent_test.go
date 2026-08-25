@@ -234,8 +234,13 @@ func TestMaterializeReplacementRequiresTerminalPredecessorAndIsIdempotent(t *tes
 
 func restartTestBootstrap(t *testing.T, workspaceID common.WorkspaceID) runtimecontract.RuntimeBootstrap {
 	t.Helper()
-	definition := runtimecontract.RuntimeDefinitionContext{StartupInputHash: "startup-input-test",
-		Revision: "def-1", GoalID: "goal-1", GoalDefinition: "finish goal",
+	return restartTestBootstrapWithDefinition(t, workspaceID, "def-1", "startup-input-test")
+}
+
+func restartTestBootstrapWithDefinition(t *testing.T, workspaceID common.WorkspaceID, definitionRevision, startupInputHash string) runtimecontract.RuntimeBootstrap {
+	t.Helper()
+	definition := runtimecontract.RuntimeDefinitionContext{StartupInputHash: startupInputHash,
+		Revision: definitionRevision, GoalID: "goal-1", GoalDefinition: "finish goal",
 		DoDID: "dod-1", DoDDefinition: "produce evidence", CapabilityContract: []string{runtimecontract.StepKindFileEdit},
 	}
 	activation := runtimecontract.RuntimeActivationContext{

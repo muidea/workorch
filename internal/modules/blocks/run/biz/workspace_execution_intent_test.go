@@ -223,6 +223,83 @@ func TestWorkspaceExecutionDefinitionClarificationBindsPersistedIntentAndReplays
 	}
 }
 
+func TestWorkspaceExecutionDefinitionClarificationRequiresRevisedSealedInput(t *testing.T) {
+	for _, testCase := range []struct {
+		name               string
+		definitionRevision string
+		startupInputHash   string
+	}{
+		{name: "same definition and startup input", definitionRevision: "def-1", startupInputHash: "startup-input-test"},
+		{name: "only definition revision changed", definitionRevision: "def-2", startupInputHash: "startup-input-test"},
+		{name: "only startup input hash changed", definitionRevision: "def-1", startupInputHash: "startup-input-new"},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			runs := memory.NewRunRepository()
+			hub := magicevent.NewHub(16)
+			t.Cleanup(func() { hub.Terminate(context.Background()) })
+			biz := New()
+			if err := biz.Configure(Dependencies{Runs: runs, EventHub: hub}); err != nil {
+				t.Fatal(err)
+			}
+			ctx := common.ContextWithRuntimeWorkspaceID(context.Background(), "ws-revision-required")
+			predecessorBootstrap := restartTestBootstrapWithDefinition(t, "ws-revision-required", "def-1", "startup-input-test")
+			predecessor := &runmodel.Run{
+				ID: "run-001", WorkspaceID: "ws-revision-required", GoalID: "goal-1", DoDID: "dod-1",
+				DefinitionRevision: "def-1", StartupInputHash: "startup-input-test", RuntimeBootstrap: &predecessorBootstrap,
+				State: common.RunStateBlockedOnDecision, BlockingTicketID: "runtime-definition-clarification:ticket-revision-required",
+			}
+			if err := runs.Create(ctx, predecessor); err != nil {
+				t.Fatal(err)
+			}
+			before, err := runs.GetByWorkspaceID(ctx, predecessor.WorkspaceID, predecessor.ID)
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			bootstrap := restartTestBootstrapWithDefinition(t, predecessor.WorkspaceID, testCase.definitionRevision, testCase.startupInputHash)
+			command := runevents.WorkspaceExecutionIntentCommand{
+				WorkspaceID: predecessor.WorkspaceID, RequestID: "restart-revision-required", Kind: runtimecontract.RuntimeExecutionIntentRestart,
+				GoalID: "goal-1", DoDID: "dod-1", DefinitionRevision: testCase.definitionRevision,
+				StartupInputHash: testCase.startupInputHash, Bootstrap: &bootstrap,
+			}
+			event := magicevent.NewEventWithContext(
+				runevents.TopicRunCommandWorkspaceExecutionIntent,
+				workspaceExecutionIntentRunSource,
+				runevents.CommandDestination,
+				magicevent.NewHeader(),
+				ctx,
+				command,
+			)
+			for attempt := 1; attempt <= 2; attempt++ {
+				admission, err := biz.executeWorkspaceExecutionIntent(event)
+				if err != nil {
+					t.Fatalf("clarification restart attempt %d returned error: %v", attempt, err)
+				}
+				if admission.RunID != predecessor.ID ||
+					admission.Outcome != runtimecontract.RuntimeExecutionIntentGovernanceRequired ||
+					admission.Reason != runtimecontract.RuntimeExecutionIntentReasonDefinitionClarificationPending {
+					t.Fatalf("clarification restart attempt %d admission = %+v", attempt, admission)
+				}
+			}
+
+			after, err := runs.GetByWorkspaceID(ctx, predecessor.WorkspaceID, predecessor.ID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if after.Revision != before.Revision || after.ReplacementIntent != nil {
+				t.Fatalf("rejected clarification restart mutated predecessor: before=%+v after=%+v", before, after)
+			}
+			items, err := runs.ListByWorkspaceID(ctx, predecessor.WorkspaceID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(items) != 1 || items[0].ID != predecessor.ID {
+				t.Fatalf("rejected clarification restart created a successor: %+v", items)
+			}
+		})
+	}
+}
+
 func TestRuntimeClarificationRejectsForgedConflictBindingWithoutStateAdvance(t *testing.T) {
 	runs := memory.NewRunRepository()
 	hub := magicevent.NewHub(16)

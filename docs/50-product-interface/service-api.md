@@ -39,10 +39,13 @@ POST /api/v1/workorch/workspaces/:workspaceId/execution-activations
 - `intent` 空值规范化为 `resume`，只允许 `resume|restart`；
 - execution admission 不接受 body/query/header priority；Run 顺序与 owner activation identity 不由 caller priority 控制；
 - caller 不能注入 RunID、Goal/DoD、provider/Soul/Skill/MCP/Memory selection、Runtime context、target state 或 successor identity；
-- fresh Start/Restart 必须绑定 exact `WorkspaceActivationAdmission=eligible`；pending/missing/mismatch 返回
-  `definition_clarification_pending`，零 Run/replacement intent；
+- fresh Start/Restart 必须绑定 exact `WorkspaceActivationAdmission=eligible`；pending 返回
+  `governance_required/definition_clarification_pending`，missing/mismatch 分别返回
+  `fresh_activation_required/definition_admission_missing|definition_admission_mismatch`，三者均零 Run/replacement intent；
 - Resume 只复用 existing Run 的 original sealed startup input，不吸收 newer candidate/revision；
-- Restart 使用 fresh eligible bootstrap；Run owner先 seal predecessor `ReplacementIntent`，terminal delivery 完成后才创建 successor；
+- Restart 使用 fresh eligible bootstrap；runtime clarification predecessor 要求 Definition revision 与 StartupInputHash 均变化，
+  任一未变化返回 `governance_required/definition_clarification_pending` 且零写入；通过后 Run owner先 seal predecessor
+  `ReplacementIntent`，terminal delivery 完成后才创建 successor；
 - handler 同步等待并校验 exact Workspace owner result。只有 `reconciliation_requested|replacement_pending` 返回
   `202`；`restart_required|fresh_activation_required|definition_changed_requires_restart|governance_required`
   返回 typed `409`。两类响应都原样携带 `workspaceId/runId/requestId/intent/outcome/reason`，不存在

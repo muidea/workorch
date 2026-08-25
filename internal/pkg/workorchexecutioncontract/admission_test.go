@@ -21,6 +21,7 @@ func TestPresentAdmissionClassifiesAllCanonicalOutcomes(t *testing.T) {
 		{runtimecontract.RuntimeExecutionIntentFreshActivationRequired, runtimecontract.RuntimeExecutionIntentReasonRuntimeBootstrapMissing, false, http.StatusConflict, AdmissionDisplayRejected},
 		{runtimecontract.RuntimeExecutionIntentDefinitionChanged, runtimecontract.RuntimeExecutionIntentReasonDefinitionChanged, false, http.StatusConflict, AdmissionDisplayRejected},
 		{runtimecontract.RuntimeExecutionIntentGovernanceRequired, runtimecontract.RuntimeExecutionIntentReasonGovernancePending, false, http.StatusConflict, AdmissionDisplayRejected},
+		{runtimecontract.RuntimeExecutionIntentGovernanceRequired, runtimecontract.RuntimeExecutionIntentReasonDefinitionClarificationPending, false, http.StatusConflict, AdmissionDisplayRejected},
 	}
 	for _, test := range tests {
 		t.Run(string(test.outcome), func(t *testing.T) {

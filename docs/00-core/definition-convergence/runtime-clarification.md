@@ -87,7 +87,9 @@ validation surface 尚未 ready，不是 Definition 缺声明，因而零 observ
 8. ticket 唯一恢复要求是 `revise_definition_and_restart`。用户通过新的 pre-seal candidate、all-of admission 和 Workspace
    promotion 取得新 Definition revision/startup input 后，ticket 仍不允许 `continue` 或 Resume；用户必须显式提交 Restart；
 9. Run owner 验证 predecessor 当前正被 exact clarification ticket 阻塞、新 bootstrap 绑定新
-   `DefinitionRevision + StartupInputHash` 且与旧 startup input 不同后，先 CAS 持久化 matching `ReplacementIntent`。该 intent
+   `DefinitionRevision + StartupInputHash`，且 revision 与 hash 两项均不同于 predecessor 后，先 CAS 持久化 matching
+   `ReplacementIntent`。任一项未变化时必须在 private event/CAS 前返回 typed
+   `governance_required/definition_clarification_pending`，不得写 intent、提交 Decision/Orchestrator command 或挂 recovery。该 intent
    必须新增并封存 `ClarificationTicketID + PredecessorStartupInputHash + SuccessorStartupInputHash`；在 Decision owner
    acknowledgement 前状态为 `pending_clarification_resolution`，不得开始 administrative supersede/terminal delivery；
 10. intent CAS 成功后，Run owner 通过同步 EventHub `Send` 向 Decision owner 提交：

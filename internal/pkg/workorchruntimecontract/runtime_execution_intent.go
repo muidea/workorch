@@ -152,7 +152,7 @@ func RuntimeExecutionIntentReasonSummary(reason RuntimeExecutionIntentReason) st
 	case RuntimeExecutionIntentReasonDefinitionAdmissionMismatch:
 		return "restart bootstrap does not match the admitted Workspace startup input"
 	case RuntimeExecutionIntentReasonDefinitionClarificationPending:
-		return "Workspace definition clarification is pending an exact owner acknowledgement"
+		return "revise Goal/DoD to produce a newly admitted startup input before restarting"
 	default:
 		return ""
 	}

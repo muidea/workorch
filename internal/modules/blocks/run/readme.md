@@ -70,7 +70,10 @@ terminal seal 均由 Orchestrator 负责；Run 不承担跨组件编排。
   时在 Workspace ingress fail-closed，Run 不接受半封存 startup input。
 - Runtime-definition clarification 的 successor replacement 先持久化 immutable intent，再同步提交 Decision owner 专用
   resolution command。intent 按 `pending_clarification_resolution -> clarification_resolution_bound` 后才允许 administrative
-  supersede/delivery；scope mismatch 进入 `clarification_resolution_rejected`，不得创建 successor。只有用户提交不同
+  supersede/delivery。若 Restart 的 Definition revision 或 `StartupInputHash` 任一仍与 exact-ticket predecessor 相同，Run owner
+  必须在 private replacement event/CAS 前返回 typed `governance_required/definition_clarification_pending`，零 intent、零 recovery
+  调度、零跨 owner command；只有两项均更新才可进入 replacement transaction。scope mismatch 进入
+  `clarification_resolution_rejected`，不得创建 successor。只有用户提交不同
   RequestID 的显式 Restart 才能把 rejected intent 移入 immutable retirement history 并封存新 intent；相同 RequestID
   仍为 typed conflict，且 bound/deliverable/completed intent 均不可替换。`ticket_already_bound` 的不同 current identity/hash
   会随 rejection 持久化为 owner invariant breach，不能从 hash 重建 bootstrap 或由 Restart 覆盖。启动恢复只重放相同
@@ -158,7 +161,7 @@ terminal seal 均由 Orchestrator 负责；Run 不承担跨组件编排。
 
 已覆盖：SM-1 全状态合法/非法边矩阵（含 administrative cancel/supersede、终态反向迁移与未知状态拒绝）；Run creation/replacement successor 共用 private dispatcher、caller-selected initial state 与直达 repository Create 拒绝；ticket/approval
 两类 wait/continuation、terminal stale/duplicate、fresh-activation；restart RequestID sealed-payload 冲突、intent 先持久化、
-runtime clarification acknowledgement gate，以及
+runtime clarification 同 seal/仅单项 lineage 变化的 typed 零写入拒绝、两项均变化的 acknowledgement gate，以及
 terminal→successor create→lineage CAS→activation 各持久化切点的崩溃恢复与
 唯一 successor；Runtime CAS source/scope/hash、aggregate revision race、物理 rebase 与 retired-field rejection；Setup 阶段
 inventory/record read、commands-ready 元数据与重复 handoff、typed result clone、workspace scope；activation Memory 完整

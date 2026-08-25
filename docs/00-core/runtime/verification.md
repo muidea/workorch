@@ -244,6 +244,9 @@ Cross-owner regression必须证明 concrete receiving-owner Command/Result、wor
 - 不出现 `active + nonterminal + no scheduled drive`，也不使用人工 Resume 作为恢复机制。
 - current-baseline Restart 必须先 CAS predecessor `ReplacementIntent`，再完成 Result→Workspace→Run terminal delivery，
   最后由 Run-private reducer 幂等创建/激活唯一 successor；其他组件不能提前创建或链接；
+- runtime clarification Restart 必须覆盖 Definition revision/StartupInputHash 的同 seal、仅 revision 变化、仅 hash 变化与两项均
+  变化矩阵；前三类返回 typed `governance_required/definition_clarification_pending` 且零 CAS/跨 owner command/recovery，只有最后
+  一类允许持久化 replacement intent；
 - replacement 的 clarification resolution、administrative termination、successor materialization 使用 Run-owned persisted
   stage/state/generation/attempt/dueAt lease；每一步先claim、failure续排、Stop/fresh restart恢复。进程内task不得成为唯一后继，
   duplicate/stale generation不得重复Decision/Orchestrator call或successor create；

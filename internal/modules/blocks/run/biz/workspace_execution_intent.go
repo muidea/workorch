@@ -181,6 +181,9 @@ func (m *Biz) restartWorkspaceExecutionIntent(ctx context.Context, cmd runevents
 		return runExecutionIntentResult(cmd, created.ID, runtimecontract.RuntimeExecutionIntentReconciliationRequested, runtimecontract.RuntimeExecutionIntentReasonNewRunActivated), nil
 	}
 	requestedIntent = replacementIntentForPredecessor(requestedIntent, predecessor)
+	if runtimeDefinitionClarificationInputNotRevised(predecessor, requestedIntent) {
+		return runExecutionIntentResult(cmd, predecessor.ID, runtimecontract.RuntimeExecutionIntentGovernanceRequired, runtimecontract.RuntimeExecutionIntentReasonDefinitionClarificationPending), nil
+	}
 	if err := m.persistReplacementIntent(ctx, predecessor, requestedIntent); err != nil {
 		return runevents.WorkspaceExecutionIntentResult{}, err
 	}
@@ -213,6 +216,21 @@ func replacementIntentForPredecessor(intent runmodel.ReplacementIntent, predeces
 	intent.ReplacementIntentID = "runtime-definition-replacement/" + intent.RequestID
 	intent.ReplacementIntentHash = runmodel.StableReplacementIntentHash(intent)
 	return intent
+}
+
+// runtimeDefinitionClarificationInputNotRevised is the Run-owner admission
+// guard for a clarification replacement. Both lineage coordinates must move
+// before the private replacement reducer is invoked; ReplacementIntent.ValidFor
+// retains the same rule as a defensive persistence invariant.
+func runtimeDefinitionClarificationInputNotRevised(predecessor *runmodel.Run, intent runmodel.ReplacementIntent) bool {
+	if predecessor == nil ||
+		predecessor.State != common.RunStateBlockedOnDecision ||
+		!isRuntimeDefinitionClarificationTicket(predecessor.BlockingTicketID) ||
+		intent.ClarificationTicketID != predecessor.BlockingTicketID {
+		return false
+	}
+	return strings.TrimSpace(intent.DefinitionRevision) == strings.TrimSpace(predecessor.DefinitionRevision) ||
+		strings.TrimSpace(intent.StartupInputHash) == strings.TrimSpace(predecessor.StartupInputHash)
 }
 
 func replacementIntentMatches(current *runmodel.ReplacementIntent, requested runmodel.ReplacementIntent) bool {

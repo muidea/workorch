@@ -106,7 +106,9 @@ typed violation 与 `BlockingTicketID`；TUI 不提供 one-of branch selection �
 Run-scoped runtime-definition clarification是专用例外：prompt只从typed `Decision.definitionClarification`显示class、binding state、
 gap、offending refs与`revise_definition_and_restart`，不得从Context、reason、DecisionKind、failureClass或提示文案猜测；不把裸文本、
 `/decision answer`、batch resolution或`/run resume`解释为合法resolution。用户必须用`/goal`、`/dod`形成新的all-of candidate，
-然后显式`/run restart`并由Workspace/Run owner判定admission；TUI不关闭ticket、不构造replacement binding，也不预创建successor。pre-seal
+然后显式`/run restart`并由Workspace/Run owner判定admission；若 Definition revision 或 StartupInputHash 任一未变化，TUI显示
+owner返回的typed `governance_required/definition_clarification_pending` rejection及修正提示，不得显示为transport failure。TUI不关闭
+ticket、不构造replacement binding，也不预创建successor。pre-seal
 clarification同样只能通过修正candidate收口，不能“确认one-of”。
 
 ## Model Selection

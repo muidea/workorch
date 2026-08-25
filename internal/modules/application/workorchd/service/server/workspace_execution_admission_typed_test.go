@@ -51,6 +51,7 @@ func TestWorkspaceExecutionHTTPClassifiesAllOwnerOutcomesWithoutLosingIdentity(t
 		{runtimecontract.RuntimeExecutionIntentFreshActivationRequired, runtimecontract.RuntimeExecutionIntentReasonRuntimeBootstrapMissing, http.StatusConflict, executioncontract.AdmissionDisplayRejected},
 		{runtimecontract.RuntimeExecutionIntentDefinitionChanged, runtimecontract.RuntimeExecutionIntentReasonDefinitionChanged, http.StatusConflict, executioncontract.AdmissionDisplayRejected},
 		{runtimecontract.RuntimeExecutionIntentGovernanceRequired, runtimecontract.RuntimeExecutionIntentReasonGovernancePending, http.StatusConflict, executioncontract.AdmissionDisplayRejected},
+		{runtimecontract.RuntimeExecutionIntentGovernanceRequired, runtimecontract.RuntimeExecutionIntentReasonDefinitionClarificationPending, http.StatusConflict, executioncontract.AdmissionDisplayRejected},
 	}
 	state := newTestServerState(t, normalizeConfig(Config{Backend: "memory"}))
 	admissionPort := &fixedWorkspaceExecutionAdmission{}

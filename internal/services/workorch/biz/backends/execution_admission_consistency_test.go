@@ -27,6 +27,7 @@ func TestLocalAndRemoteRunBackendsReturnTheSameOwnerAdmission(t *testing.T) {
 		{runtimecontract.RuntimeExecutionIntentFreshActivationRequired, runtimecontract.RuntimeExecutionIntentReasonRuntimeBootstrapMissing},
 		{runtimecontract.RuntimeExecutionIntentDefinitionChanged, runtimecontract.RuntimeExecutionIntentReasonDefinitionChanged},
 		{runtimecontract.RuntimeExecutionIntentGovernanceRequired, runtimecontract.RuntimeExecutionIntentReasonGovernancePending},
+		{runtimecontract.RuntimeExecutionIntentGovernanceRequired, runtimecontract.RuntimeExecutionIntentReasonDefinitionClarificationPending},
 	}
 	for _, test := range tests {
 		t.Run(string(test.outcome), func(t *testing.T) {
