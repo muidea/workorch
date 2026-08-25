@@ -123,11 +123,15 @@ func TestFileOwnerSemanticFeasibilityDoesNotPublishProspectiveDeltaForNonFeasibl
 	})
 
 	t.Run("invalid target", func(t *testing.T) {
-		ctx, hub := startFileProspectiveDeltaModule(t)
 		workspace := t.TempDir()
-		command := fileProspectiveDeltaCommand(t, workspace, "../escape.txt", nil)
-		observation := sendFileProspectiveDeltaProbe(t, ctx, hub, command)
-		assertFileProspectiveDeltaAbsent(t, observation, runtimecontract.RuntimeSemanticFeasibilityInfeasible)
+		command := fileProspectiveDeltaCommand(t, workspace, "safe.txt", nil)
+		command.Proposal.Target.ProspectiveTargetRef = "../escape.txt"
+		if err := fileevents.ValidateRuntimeSemanticProofFeasibilityCommand(command, runtimecontract.RuntimeModuleFile); err == nil {
+			t.Fatal("unsafe prospective target reached the File owner probe boundary")
+		}
+		if _, err := os.Lstat(filepath.Join(workspace, "safe.txt")); !os.IsNotExist(err) {
+			t.Fatalf("pre-probe rejection touched workspace: %v", err)
+		}
 	})
 }
 
@@ -136,10 +140,11 @@ func TestFileOwnerSemanticFeasibilityReusesCanonicalProspectiveAdmissionMatrixWi
 		name      string
 		targetRef string
 		prepare   func(*testing.T, string)
+		preProbe  bool
 	}{
 		{name: "excluded node modules", targetRef: "node_modules/new.go"},
-		{name: "noncanonical clean alias", targetRef: "a/../new.go"},
-		{name: "backslash", targetRef: `nested\new.go`},
+		{name: "noncanonical clean alias", targetRef: "a/../new.go", preProbe: true},
+		{name: "backslash", targetRef: `nested\new.go`, preProbe: true},
 		{name: "internal symlink alias", targetRef: "alias/new.go", prepare: func(t *testing.T, workspace string) {
 			if err := os.Mkdir(filepath.Join(workspace, "real"), 0o755); err != nil {
 				t.Fatal(err)
@@ -169,7 +174,22 @@ func TestFileOwnerSemanticFeasibilityReusesCanonicalProspectiveAdmissionMatrixWi
 			if err != nil {
 				t.Fatal(err)
 			}
-			command := fileProspectiveDeltaCommand(t, workspace, testCase.targetRef, nil)
+			commandTarget := testCase.targetRef
+			if testCase.preProbe {
+				commandTarget = "safe.go"
+			}
+			command := fileProspectiveDeltaCommand(t, workspace, commandTarget, nil)
+			if testCase.preProbe {
+				command.Proposal.Target.ProspectiveTargetRef = testCase.targetRef
+				if err := fileevents.ValidateRuntimeSemanticProofFeasibilityCommand(command, runtimecontract.RuntimeModuleFile); err == nil {
+					t.Fatalf("unsafe target %q reached the File owner probe boundary", testCase.targetRef)
+				}
+				after, err := adapter.AcquireWorkspaceManifest(workspace)
+				if err != nil || !reflect.DeepEqual(after, before) {
+					t.Fatalf("pre-probe rejection changed File manifest: before=%+v after=%+v err=%v", before, after, err)
+				}
+				return
+			}
 			observation := sendFileProspectiveDeltaProbe(t, ctx, hub, command)
 			assertFileProspectiveDeltaAbsent(t, observation, runtimecontract.RuntimeSemanticFeasibilityInfeasible)
 			after, err := adapter.AcquireWorkspaceManifest(workspace)
@@ -341,17 +361,27 @@ func fileProspectiveDeltaCommand(t *testing.T, workspace, targetRef string, cata
 		ReobserveFactKind:      runtimecontract.RuntimeOwnerFactSelectableValidationSurface,
 		MaxAcquisitionAttempts: 1,
 	}
+	prospectiveConstraint := runtimecontract.RuntimeProspectiveTargetSatisfactionConstraint{
+		SchemaVersion: runtimecontract.RuntimeProspectiveTargetSatisfactionConstraintSchemaCurrent,
+		OwnerModuleID: runtimecontract.RuntimeModuleShell, ProspectiveSatisfactionContractRef: fileProspectiveDeltaContractRef,
+		ValidationSurfaceID: "recipe/prospective", ValidationRecipeID: "recipe/prospective",
+		InputSchemaHash: "schema/prospective", CatalogObservedRevision: "shell-policy-prospective",
+		AllOf: []runtimecontract.RuntimeProspectiveTargetPredicate{{
+			Kind: runtimecontract.RuntimeProspectiveTargetPredicatePathSegmentNotEqual, Value: "__workorch_never_target_segment__",
+		}},
+	}
 	acquisition := runtimecontract.RuntimeSemanticOwnerFactAcquisition{
 		Requirement: requirement, ProspectiveSatisfactionContractRef: fileProspectiveDeltaContractRef,
-		DeclarationTargetSelectorRef:        convergence.TargetSelectorRef,
-		DeclarationTargetSelectorOwnerRef:   convergence.TargetSelectorOwnerRef,
-		DeclarationTargetSelectorSubjectRef: convergence.TargetSelectorSubjectRef,
-		AcquisitionOwnerModuleID:            runtimecontract.RuntimeModuleFile,
-		AcquisitionOperationKind:            runtimecontract.StepKindFileWrite,
-		AcquisitionTargetPolicy:             runtimecontract.RuntimeOperationTargetPolicyProspectiveOwnerTarget,
-		AcquisitionTargetSelectorRef:        fileProspectiveDeltaSelector,
-		AcquisitionConstraintRefs:           []string{fileProspectiveDeltaConstraint},
-		OwnerCatalogSnapshotID:              catalog.SnapshotID, OwnerCatalogObservedRevision: catalog.ObservedRevision,
+		ProspectiveTargetSatisfactionConstraint: &prospectiveConstraint,
+		DeclarationTargetSelectorRef:            convergence.TargetSelectorRef,
+		DeclarationTargetSelectorOwnerRef:       convergence.TargetSelectorOwnerRef,
+		DeclarationTargetSelectorSubjectRef:     convergence.TargetSelectorSubjectRef,
+		AcquisitionOwnerModuleID:                runtimecontract.RuntimeModuleFile,
+		AcquisitionOperationKind:                runtimecontract.StepKindFileWrite,
+		AcquisitionTargetPolicy:                 runtimecontract.RuntimeOperationTargetPolicyProspectiveOwnerTarget,
+		AcquisitionTargetSelectorRef:            fileProspectiveDeltaSelector,
+		AcquisitionConstraintRefs:               []string{fileProspectiveDeltaConstraint},
+		OwnerCatalogSnapshotID:                  catalog.SnapshotID, OwnerCatalogObservedRevision: catalog.ObservedRevision,
 		ReobserveOwnerModuleID: runtimecontract.RuntimeModuleShell,
 		ReobserveFactKind:      runtimecontract.RuntimeOwnerFactSelectableValidationSurface,
 		MaxAcquisitionAttempts: 1,
@@ -368,8 +398,9 @@ func fileProspectiveDeltaCommand(t *testing.T, workspace, targetRef string, cata
 		OperationKind: runtimecontract.RuntimeBlockKindManagedValidationSession,
 		Readiness:     runtimecontract.RuntimeValidationSurfacePrerequisiteRequired, ReadinessReason: "applicable workspace input required",
 		InputSchemaHash: "schema/prospective", PrerequisiteRef: "workspace/validation-input",
-		ProspectiveSatisfactionContractRef: fileProspectiveDeltaContractRef,
-		CheckRefs:                          []string{"check/prospective"}, ProofApplicability: runtimecontract.RuntimeValidationProofDirect,
+		ProspectiveSatisfactionContractRef:      fileProspectiveDeltaContractRef,
+		ProspectiveTargetSatisfactionConstraint: &prospectiveConstraint,
+		CheckRefs:                               []string{"check/prospective"}, ProofApplicability: runtimecontract.RuntimeValidationProofDirect,
 		EffectScope: runtimecontract.RuntimeEffectEphemeralSession, IdempotencyClass: runtimecontract.RuntimeOperationIdempotencyAtMostOnce,
 	}}
 	dependencyCatalog.SnapshotID = runtimecontract.StableRuntimeOperationAdmissibilitySnapshotID(dependencyCatalog)

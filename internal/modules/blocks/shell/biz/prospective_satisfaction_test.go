@@ -18,37 +18,48 @@ import (
 
 func TestShellOwnerProspectiveSatisfactionUsesOnlyResultingManifestTargets(t *testing.T) {
 	ctx, hub, owner := newShellProspectiveSatisfactionOwner(t, NewRuntimeAdapter())
-	for _, test := range []struct {
-		name       string
-		targetRef  string
-		want       runtimecontract.RuntimeOwnerFactProspectiveSatisfactionOutcome
-		wantRecipe bool
-	}{
-		{name: "ordinary script does not make go test selectable", targetRef: "scripts/validate.sh", want: runtimecontract.RuntimeOwnerFactProspectiveWouldNotSatisfy},
-		{name: "go test source makes go test selectable", targetRef: "x_test.go", want: runtimecontract.RuntimeOwnerFactProspectiveWouldSatisfy, wantRecipe: true},
-	} {
-		t.Run(test.name, func(t *testing.T) {
-			workspace := t.TempDir()
-			command := shellProspectiveSatisfactionCommandFixture(t, owner.runtimeAdapter, workspace, test.targetRef)
-			response, err := sendShellProspectiveSatisfaction(ctx, hub, runtimecontract.RuntimeModuleOrchestrator, command)
-			if err != nil {
-				t.Fatal(err)
-			}
-			satisfaction := response.Observation.Satisfaction
-			if satisfaction.Outcome != test.want {
-				t.Fatalf("prospective satisfaction = %+v, want %q", satisfaction, test.want)
-			}
-			if test.wantRecipe {
-				if len(satisfaction.ProspectiveValidationRecipeRefs) != 1 || satisfaction.ProspectiveValidationRecipeRefs[0] != "go-test" || satisfaction.Reason != "" {
-					t.Fatalf("would-satisfy result = %+v", satisfaction)
-				}
-			} else if len(satisfaction.ProspectiveValidationRecipeRefs) != 0 || satisfaction.Reason != shellProspectiveValidationNotSatisfiedReason {
-				t.Fatalf("would-not-satisfy result = %+v", satisfaction)
-			}
-			if _, statErr := os.Stat(filepath.Join(workspace, filepath.FromSlash(test.targetRef))); !os.IsNotExist(statErr) {
-				t.Fatalf("prospective query touched target %q: %v", test.targetRef, statErr)
-			}
-		})
+	workspace := t.TempDir()
+	const targetRef = "x_test.go"
+	command := shellProspectiveSatisfactionCommandFixture(t, owner.runtimeAdapter, workspace, targetRef)
+	response, err := sendShellProspectiveSatisfaction(ctx, hub, runtimecontract.RuntimeModuleOrchestrator, command)
+	if err != nil {
+		t.Fatal(err)
+	}
+	satisfaction := response.Observation.Satisfaction
+	if satisfaction.Outcome != runtimecontract.RuntimeOwnerFactProspectiveWouldSatisfy ||
+		len(satisfaction.ProspectiveValidationRecipeRefs) != 1 || satisfaction.ProspectiveValidationRecipeRefs[0] != "go-test" || satisfaction.Reason != "" {
+		t.Fatalf("would-satisfy result = %+v", satisfaction)
+	}
+	if _, statErr := os.Stat(filepath.Join(workspace, filepath.FromSlash(targetRef))); !os.IsNotExist(statErr) {
+		t.Fatalf("prospective query touched target %q: %v", targetRef, statErr)
+	}
+}
+
+func TestShellOwnerProspectiveSatisfactionRejectsTargetOutsidePublishedAllOfBeforeOwnerProbe(t *testing.T) {
+	_, _, owner := newShellProspectiveSatisfactionOwner(t, NewRuntimeAdapter())
+	workspace := t.TempDir()
+	command := shellProspectiveSatisfactionCommandFixture(t, owner.runtimeAdapter, workspace, "x_test.go")
+	request := runtimecontract.RuntimeOwnerFactProspectiveSatisfactionRequest(command)
+	proposal := request.Proposal.Clone()
+	proposal.Target.ProspectiveTargetRef = "scripts/validate.sh"
+	document := runtimecontract.RuntimeSemanticPlanDocument{
+		SchemaVersion:            runtimecontract.RuntimeSemanticPlanDocumentSchemaCurrent,
+		ManifestHash:             request.Manifest.Hash,
+		DefinitionSeedHash:       request.Manifest.DefinitionSeedHash,
+		PlanStep:                 runtimecontract.RuntimeSemanticPlanStepProofBatch,
+		BatchID:                  "batch-outside-shell-all-of",
+		BatchCoverageWorkItemIDs: []common.CoverageWorkItemID{proposal.CoverageWorkItemID},
+		Proposals:                []runtimecontract.RuntimeSemanticProofProposal{proposal},
+	}
+	// The canonical semantic validator rejects this target before a Shell query
+	// can be formed. A would-not-satisfy owner round trip would reintroduce the
+	// blind candidate loop that the typed contract removes.
+	if err := document.ValidateAgainstManifest(request.Manifest); err == nil {
+		t.Fatal("semantic validator admitted a target outside the Shell all-of constraint")
+	}
+	entries, err := os.ReadDir(workspace)
+	if err != nil || len(entries) != 0 {
+		t.Fatalf("rejected prospective target touched workspace: entries=%v err=%v", entries, err)
 	}
 }
 
@@ -129,21 +140,21 @@ func TestShellOwnerProspectiveSatisfactionRejectsRecipeIdentityDriftWithoutEffec
 	}
 }
 
-func TestShellOwnerProspectiveSatisfactionRequiresExactRecipeForEveryContractSurface(t *testing.T) {
+func TestShellOwnerProspectiveSatisfactionUsesOnlyTheUniqueAllOfContractSurface(t *testing.T) {
 	ctx, hub, owner := newShellProspectiveSatisfactionOwner(t, NewRuntimeAdapter())
 	recipes := []runtimecontract.RuntimeValidationRecipe{
 		{ID: "go-test", Command: "go", Args: []string{"test", "./..."}},
 		{ID: "shell-check", Command: "sh", Args: []string{"-c", "true"}, TimeoutMillis: 5000},
 	}
 
-	t.Run("all exact surface identities are evaluated", func(t *testing.T) {
+	t.Run("non-contract recipe does not become an implicit alternative", func(t *testing.T) {
 		workspace := t.TempDir()
 		command := shellProspectiveSatisfactionCommandWithRecipesFixture(t, owner.runtimeAdapter, workspace, "x_test.go", recipes)
 		response, err := sendShellProspectiveSatisfaction(ctx, hub, runtimecontract.RuntimeModuleOrchestrator, command)
 		if err != nil {
 			t.Fatal(err)
 		}
-		want := []string{"go-test", "shell-check"}
+		want := []string{"go-test"}
 		if response.Observation.Satisfaction.Outcome != runtimecontract.RuntimeOwnerFactProspectiveWouldSatisfy ||
 			!reflect.DeepEqual(response.Observation.Satisfaction.ProspectiveValidationRecipeRefs, want) {
 			t.Fatalf("multi-surface satisfaction = %+v, want recipes %v", response.Observation.Satisfaction, want)
@@ -154,10 +165,10 @@ func TestShellOwnerProspectiveSatisfactionRequiresExactRecipeForEveryContractSur
 		}
 	})
 
-	t.Run("one missing recipe fails the entire query closed", func(t *testing.T) {
+	t.Run("missing exact contract recipe fails the query closed", func(t *testing.T) {
 		workspace := t.TempDir()
 		command := shellProspectiveSatisfactionCommandWithRecipesFixture(t, owner.runtimeAdapter, workspace, "x_test.go", recipes)
-		command.ValidationRecipes = command.ValidationRecipes[:1]
+		command.ValidationRecipes = command.ValidationRecipes[1:]
 		if _, err := sendShellProspectiveSatisfaction(ctx, hub, runtimecontract.RuntimeModuleOrchestrator, command); !errors.Is(err, common.ErrConflict) {
 			t.Fatalf("missing surface recipe error = %v, want typed conflict", err)
 		}
@@ -237,18 +248,26 @@ func shellProspectiveSatisfactionCommandWithRecipesFixture(t *testing.T, adapter
 	shellCatalog.TargetRefs = []string{"main.go"}
 	shellCatalog.ValidationSurfaces = make([]runtimecontract.RuntimeValidationSurface, 0, len(recipes))
 	for _, recipe := range recipes {
-		shellCatalog.ValidationSurfaces = append(shellCatalog.ValidationSurfaces, runtimecontract.RuntimeValidationSurface{
+		surface := runtimecontract.RuntimeValidationSurface{
 			ID: recipe.ID, OwnerModuleID: modulecommon.ModuleID, OperationKind: runtimecontract.RuntimeBlockKindManagedValidationSession,
-			Readiness:                          runtimecontract.RuntimeValidationSurfacePrerequisiteRequired,
-			ReadinessReason:                    shellValidationApplicableInputRequiredReason,
-			InputSchemaHash:                    shellValidationRecipeSchemaHash(recipe),
-			PrerequisiteRef:                    "shell-validation-prerequisite/" + shellValidationRecipeSchemaHash(recipe) + "/applicable-workspace-input",
-			ProspectiveSatisfactionContractRef: modulecommon.ProspectiveSatisfactionContractRef,
-			CheckRefs:                          []string{shellValidationRecipeProofCheckRef(recipe.ID)},
-			ProofApplicability:                 runtimecontract.RuntimeValidationProofDirect,
-			EffectScope:                        runtimecontract.RuntimeEffectEphemeralSession,
-			IdempotencyClass:                   runtimecontract.RuntimeOperationIdempotencyAtMostOnce,
-		})
+			Readiness:          runtimecontract.RuntimeValidationSurfacePrerequisiteRequired,
+			ReadinessReason:    shellValidationApplicableInputRequiredReason,
+			InputSchemaHash:    shellValidationRecipeSchemaHash(recipe),
+			PrerequisiteRef:    "shell-validation-prerequisite/" + shellValidationRecipeSchemaHash(recipe) + "/applicable-workspace-input",
+			CheckRefs:          []string{shellValidationRecipeProofCheckRef(recipe.ID)},
+			ProofApplicability: runtimecontract.RuntimeValidationProofDirect,
+			EffectScope:        runtimecontract.RuntimeEffectEphemeralSession,
+			IdempotencyClass:   runtimecontract.RuntimeOperationIdempotencyAtMostOnce,
+		}
+		if constraint, ok := shellProspectiveTargetSatisfactionConstraint(recipe, shellCatalog.TargetRefs, shellCatalog.ObservedRevision); ok {
+			surface.ProspectiveSatisfactionContractRef = modulecommon.ProspectiveSatisfactionContractRef
+			surface.ProspectiveTargetSatisfactionConstraint = &constraint
+		} else {
+			surface.Readiness = runtimecontract.RuntimeValidationSurfaceUnavailable
+			surface.ReadinessReason = shellValidationStaticUnavailableReason
+			surface.PrerequisiteRef = ""
+		}
+		shellCatalog.ValidationSurfaces = append(shellCatalog.ValidationSurfaces, surface)
 	}
 	shellCatalog = shellCatalog.Normalized()
 	shellCatalog.SnapshotID = runtimecontract.StableRuntimeOperationAdmissibilitySnapshotID(shellCatalog)
@@ -296,10 +315,19 @@ func shellProspectiveSatisfactionCommandWithRecipesFixture(t *testing.T, adapter
 		ReobserveFactKind:      runtimecontract.RuntimeOwnerFactSelectableValidationSurface,
 		MaxAcquisitionAttempts: 1,
 	}
+	prospectiveConstraint, err := runtimecontract.ResolveRuntimeProspectiveTargetSatisfactionConstraint(
+		shellCatalog,
+		requirement,
+		modulecommon.ProspectiveSatisfactionContractRef,
+	)
+	if err != nil {
+		t.Fatalf("resolve Shell prospective target constraint: %v", err)
+	}
 	acquisition := runtimecontract.RuntimeSemanticOwnerFactAcquisition{
 		Requirement: requirement, ProspectiveSatisfactionContractRef: modulecommon.ProspectiveSatisfactionContractRef,
-		DeclarationTargetSelectorRef:      declarationSelector,
-		DeclarationTargetSelectorOwnerRef: "software-dev", DeclarationTargetSelectorSubjectRef: "validation_preparation",
+		ProspectiveTargetSatisfactionConstraint: &prospectiveConstraint,
+		DeclarationTargetSelectorRef:            declarationSelector,
+		DeclarationTargetSelectorOwnerRef:       "software-dev", DeclarationTargetSelectorSubjectRef: "validation_preparation",
 		AcquisitionOwnerModuleID:     runtimecontract.RuntimeModuleFile,
 		AcquisitionOperationKind:     runtimecontract.StepKindFileWrite,
 		AcquisitionTargetPolicy:      runtimecontract.RuntimeOperationTargetPolicyProspectiveOwnerTarget,

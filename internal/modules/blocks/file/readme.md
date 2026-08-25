@@ -85,11 +85,11 @@ Last Verified: 2026-08-25
   operation selector/constraints。File fact 不封存 target authority；后续 reconciliation、operation admission 与
   dispatch 只能消费 SM-2 sealed binding 中的 target。已有其他 candidate match 时不得静默忽略 proposal；
   尚未出现的另一目标返回 typed `unsupported`。
-  required owner 可以对 File delta 返回 nested `would_not_satisfy` fact；只有 Orchestrator 将其与 exact-current File
-  outer fact 持久化为完整 composite 后才可评估 correction。File 不选择替代 target，也不触发 correction。
-  若 Orchestrator 在 semantic attempt=0 使用既有 SM-3 correction ledger 回到 `Requesting`，File 只对新的、
-  不同且仍受原 selector/constraints/candidate refs 限制的 proposal 重新返回 fresh factual feasibility/delta；
-  duplicate/restart 不重放旧 proposal probe。
+  required owner 的 provider-safe typed `all_of` constraint 必须先由 semantic schema/document admission 校验；mismatch
+  只形成普通完整文档 correction，零 File probe。required owner 仍可对已通过 constraint 的 File delta 返回 nested
+  `would_not_satisfy` fact；只有 Orchestrator 将其与 exact-current File outer fact 持久化为完整 composite 后，才以
+  `prospective_satisfaction_contract_violated` 直接收口 `semantic_contract_failed`。File 不选择替代 target，也不触发
+  correction；duplicate/restart 不重放同一 proposal probe。
   `file/unique_workspace_entry` 是纯当前清单基数 selector，创建前无论当前清单为 0/1/N，只要同时携带
   prospective path 就必须返回 typed `unsupported` 且零写，创建后 reconciliation 对同一非法组合返回
   `unverifiable`。未知 selector 同样不得取得 prospective 语义。`.git`、`.workorch-data`、`node_modules`、`vendor`、

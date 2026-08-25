@@ -505,7 +505,14 @@ func runtimeTestProspectiveValidationDependencyCatalog(t *testing.T, contractRef
 		Readiness:     runtimecontract.RuntimeValidationSurfacePrerequisiteRequired, ReadinessReason: "applicable workspace input required",
 		InputSchemaHash: "schema/owner-fact-prospective-v1", PrerequisiteRef: "workspace/owner-fact-validation-input",
 		ProspectiveSatisfactionContractRef: contractRef,
-		CheckRefs:                          []string{"check/owner-fact-prospective"}, ProofApplicability: runtimecontract.RuntimeValidationProofDirect,
+		ProspectiveTargetSatisfactionConstraint: &runtimecontract.RuntimeProspectiveTargetSatisfactionConstraint{
+			SchemaVersion: runtimecontract.RuntimeProspectiveTargetSatisfactionConstraintSchemaCurrent,
+			OwnerModuleID: runtimecontract.RuntimeModuleShell, ProspectiveSatisfactionContractRef: contractRef,
+			ValidationSurfaceID: "recipe/owner-fact-prospective", ValidationRecipeID: "recipe/owner-fact-prospective",
+			InputSchemaHash: "schema/owner-fact-prospective-v1", CatalogObservedRevision: "shell-owner-fact-policy-v1",
+			AllOf: []runtimecontract.RuntimeProspectiveTargetPredicate{{Kind: runtimecontract.RuntimeProspectiveTargetPredicatePathSuffix, Value: "_test.go"}},
+		},
+		CheckRefs: []string{"check/owner-fact-prospective"}, ProofApplicability: runtimecontract.RuntimeValidationProofDirect,
 		EffectScope: runtimecontract.RuntimeEffectEphemeralSession, IdempotencyClass: runtimecontract.RuntimeOperationIdempotencyAtMostOnce,
 	}
 	catalog := runtimecontract.RuntimeOperationAdmissibility{

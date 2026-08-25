@@ -131,8 +131,11 @@ load facts
   跨 successor semantic focus 保留；SM-2 不携带 predecessor repair attempt/gap/directive，SM-3 在 dispatch 前拒绝等价
   shape，因此新 binding generation 不能重置等价副作用的防重放边界。
 - prospective composite feasibility 的 pre-seal Definition 不携带 exact target；compiled obligation/manifest 也不补写。
-  SM-3 proposal 必须在 Definition declaration selector/candidate refs 与 current operation selector/owner constraints
-  的交集内提出一个 nonempty exact target，非空 candidate refs 还要求 exact member match。只有在 File
+  required owner catalog 发布 provider-safe typed `ProspectiveTargetSatisfactionConstraint`，且只允许 `all_of`；同一值封存
+  到 acquisition/manifest 并在 C3 投影。SM-3 proposal 必须在 Definition declaration selector/candidate refs 与 current
+  operation selector/owner constraints 的交集内提出一个 nonempty exact target，非空 candidate refs 还要求 exact member
+  match，并在 schema/document admission 阶段满足全部 owner predicate；不匹配只使用普通完整文档 correction，零
+  File/Shell probe。只有在 File
   delta、File catalog/observation、Shell dependency catalog/observation、activation-sealed exact recipe identity、
   manifest/batch/request/contract ref全部 current 且 nested outcome 为
   `would_satisfy` 时才 seal-ready。SM-2 在 observation CAS 与 semantic seal 前各重验一次；任一 lineage 漂移都保持零
@@ -140,13 +143,11 @@ load facts
   它只通过既有 `semantic_contract_required` private transition消费 bounded refresh generation并退休 exact dependency。
   missing dependency 在 query 前退休 generation，零 Shell call。`would_not_satisfy` 必须先以
   `semantic_feasibility_observed` 持久化完整 composite fact；该 target 仍是未封存的 proposal，不产生 binding。
-  stale 只消耗独立 bounded refresh，不消耗 correction。对 exact-current full-composite rejection，attempt=0
-  且仍有合法不同 target 时，SM-2 保留 factual observation，由同一 Orchestrator owner 的 SM-3 private
-  correction event 处理；attempt=0 fixed/singleton/无剩余候选、invalid attempt-1 document 或 attempt-1 第二次
-  `would_not_satisfy` 才由下一 drive 收口为统一 `semantic_contract_failed`。第二次 owner rejection 保留 typed original
-  reason `prospective_owner_fact_unsatisfied`；合法 attempt-1 `would_satisfy` 继续进入 SM-2 seal。零
-  ticket/governance/acquisition/operation/effect/coverage；duplicate/restart 不重复
-  消耗 correction 或重放同一 File/Shell probe。
+  stale 只消耗独立 bounded refresh，不消耗 correction。由于 owner probe 之前的 admission 已证明 target 满足 published
+  constraint，exact-current full-composite `would_not_satisfy` 是 owner contract contradiction；下一 owner-private drive
+  记录 `prospective_satisfaction_contract_violated` 并统一收口为 `semantic_contract_failed`，不得生成 replacement-target
+  correction。零 ticket/governance/acquisition/operation/effect/coverage；duplicate/restart 不重复 terminal 或同一
+  File/Shell probe。
 - terminal `RuntimeResultCloseout` 以 canonical coverage ledger 为 closure authority。只有 canonical non-satisfied
   assessment/active gap 与当前 unsatisfied CWI 的交集可进入结构化 gap；producer 的 claimed disposition 或已满足 CWI
   的历史 gap 只能保留为 audit。top failure 依次使用 current `Facts.Failure`、current active/formal gap、terminal
@@ -204,16 +205,10 @@ sealed authority + preflight ready
   SM-2 封存 binding 前不得生成 operations request/dispatch。operations document 只能选择 binding ref；
   candidate evaluator 和 dispatch sealer 必须从 current binding 派生/校验 target，不得把 target 作为 provider
   choice 或替换它。
-- persisted full-composite `would_not_satisfy` 是 SM-3 在 owner feasibility 后仍可使用既有 sole semantic
-  correction ledger 的唯一例外。前提是 attempt=0 且 bounded evaluator 证明仍有不同合法 target；
-  private transition 保留 active `BatchID/Sequence/CoverageWorkItemIDs/CoverageOrderHash`、manifest/seed/stable prefix、
-  rejection audit 与 attempt-0 proof document/`DocumentHash`；后者是 immutable target-only delta baseline。该 transition
-  只清理 feasibility batch/set/hash，并由 canonical correction edge 将 batch
-  `FeasibilityPending -> Requesting` 且进入 attempt=1。correction directive 封存 failed target 与 allowed different-target
-  delta，但不为 Orchestrator 选择替代 target。attempt-1 document 除该 target 外必须与 baseline 完全一致；新 target
-  必须不同且仍命中原
-  selector/constraints/candidate bounds；第二次 rejection 或无剩余 target 直接交回 SM-2 形成
-  `semantic_contract_failed`。该边是现有 SM-3 batch/correction transition，不新增 machine、owner 或跨 owner
+- prospective `would_not_satisfy` 不属于 SM-3 correction ledger：它在 SM-2 作为 published constraint 与 owner judgment
+  矛盾的 full-composite factual observation，直接形成 `prospective_satisfaction_contract_violated` terminal。SM-3 的
+  attempt 1 只服务普通完整 document/schema rejection，继续复用 transaction/manifest/C0～C3/stable prefix；C4 只携带
+  manifest/CWI/field-path-bound typed violation，不复制 C3 constraint，也不新增 machine、owner 或跨 owner
   state write。typed stale 仍只走 SM-2 fact refresh，不触发该边。
 - 单一 evaluator 必须在 seal 前拒绝同一 candidate 中重复的 durable `(OwnerModuleID, TargetRef)`，并要求 provider 将同目标
   变更合并为一个 operation/receipt；普通 `DependsOn` 不能放宽，因为所有 replay proof 均在首个 effect 前封存。只有

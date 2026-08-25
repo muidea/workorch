@@ -173,6 +173,24 @@ func validateRuntimeSemanticOwnerFactAcquisition(proofSet RuntimeSemanticCWIProo
 	if !sameStrings(proposal.Target.ProspectiveConstraintRefs, sealed.AcquisitionConstraintRefs) {
 		return runtimeSemanticProposalViolation(proposal, proposalIndex, "target.prospectiveConstraintRefs", RuntimeSemanticConstraintAllowedValue, strings.Join(proposal.Target.ProspectiveConstraintRefs, ","), nil, sealed.AcquisitionConstraintRefs, fmt.Errorf("runtime semantic proof for coverage %q does not match sealed owner-fact acquisition constraints", proofSet.CoverageWorkItemID))
 	}
+	if sealed.AcquisitionTargetPolicy == RuntimeOperationTargetPolicyProspectiveOwnerTarget &&
+		(sealed.ProspectiveTargetSatisfactionConstraint == nil ||
+			!RuntimeProspectiveTargetSatisfiesConstraint(proposal.Target.ProspectiveTargetRef, *sealed.ProspectiveTargetSatisfactionConstraint)) {
+		required := []string(nil)
+		if sealed.ProspectiveTargetSatisfactionConstraint != nil {
+			required = []string{StableRuntimeProspectiveTargetSatisfactionConstraintHash(*sealed.ProspectiveTargetSatisfactionConstraint)}
+		}
+		return runtimeSemanticProposalViolation(
+			proposal,
+			proposalIndex,
+			"target.prospectiveTargetRef",
+			RuntimeSemanticConstraintRelational,
+			proposal.Target.ProspectiveTargetRef,
+			required,
+			nil,
+			fmt.Errorf("runtime semantic proof for coverage %q prospective target does not satisfy the sealed owner all-of constraint", proofSet.CoverageWorkItemID),
+		)
+	}
 	return nil
 }
 

@@ -640,7 +640,7 @@ func (m *Biz) handleRuntimeOperationAdmissibility(event magicevent.Event, result
 		}
 		confirmed := runtimeValidationRecipesApplicableToManifest(staticallyReady, command.WorkspaceManifestBinding.Manifest.TargetRefs)
 		inventory.ValidationRecipes = confirmed
-		inventory.ValidationSurfaces = shellValidationSurfaces(command.ValidationRecipes, staticallyReady, confirmed, command.WorkspaceManifestBinding)
+		inventory.ValidationSurfaces = shellValidationSurfaces(command.ValidationRecipes, staticallyReady, confirmed, command.WorkspaceManifestBinding, inventory.ObservedRevision)
 	}
 	inventory = inventory.Normalized()
 	inventory.SnapshotID = runtimecontract.StableRuntimeOperationAdmissibilitySnapshotID(inventory)

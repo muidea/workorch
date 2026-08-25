@@ -207,7 +207,9 @@ deployed run ID 只属于 archive regression evidence，不定义当前候选、
 - owner-fact acquisition 使用 `prospective_owner_target` 时，manifest 同时维护 provider-selectable `OwnerCatalogs` 与
   non-selectable `OwnerFactDependencyCatalogs`。后者只保存 required owner 对 prospective satisfaction 判断所需的 exact
   catalog snapshot；它进入 manifest/hash/freshness/CAS/seal，但不进入 LLM C3、allowed operation/surface、schema enum、
-  correction values 或 provider choice。Definition 只封存 declaration selector/candidate refs 与 acquisition closure，
+  correction values 或 provider choice。required owner catalog 还必须发布唯一 provider-safe typed
+  `ProspectiveTargetSatisfactionConstraint`，只允许 `all_of`；同一值封存到 acquisition/manifest 并只在 C3 投影，dependency
+  recipe identity/command 不进入 provider。Definition 只封存 declaration selector/candidate refs 与 acquisition closure，
   obligation/manifest 只追加 owner/kind/variant/policy/operation-selector/current constraints 与 exact contract ref，两者都不封存
   prospective target；SM-3 proposal 必须在两者交集内提出 nonempty exact target。Orchestrator 不把
   non-ready Shell surface伪装为 provider 可选 operation。
@@ -220,26 +222,16 @@ deployed run ID 只属于 archive regression evidence，不定义当前候选、
 - observation CAS 与 semantic seal 都必须重验 manifest/batch/request/contract ref、delta、File catalog/observation 和 Shell
   dependency catalog/observation。只有 nested `would_satisfy` seal-ready；nested typed stale保持 Shell-authored factual
   identity并进入既有 bounded prerequisite-refresh generation，不能重写为 File outer stale或即时 terminal。missing dependency
-  在 Shell query 前退休 semantic generation。`would_not_satisfy` 必须先作为 full composite observation 经 owner-private
-  `semantic_feasibility_observed` 持久化；该 exact target 仍只是未封存的 semantic proposal，不产生 binding。
-  typed stale 只走 bounded fact refresh，不消耗 semantic correction。只有 full composite exact-current 且 ledger
-  attempt=0 才可进入 correction evaluator。finite declaration candidate catalog 是 pure evaluator 唯一能证明 concrete
-  remaining members 的分支：排除 failed target、排除 File current catalog 中已存在 target，并逐项通过 canonical
-  document/manifest fence 后，非空结果才成为 exact `Allowed`。candidate refs 为空的 open selector 不证明任何
-  remaining member，也不生成 `Allowed`；它只允许一次“不同的非空 target 且仍满足原 operation selector/prospective
-  constraints”的 relational target-only retry，Orchestrator 不得选择或合成 replacement。
-  Orchestrator SM-3 private `semantic_plan_correction_required` 复用同一 active batch/manifest/order lineage 与唯一
-  correction ledger；当前 proof document/hash 作为 immutable delta baseline 保留，只清理 feasibility working set，
-  并由 canonical correction transition 使 batch `FeasibilityPending -> Requesting` 并进入 attempt=1。新 document 除被拒
-  target 外必须与 baseline 完全一致；finite replacement 必须属于 exact `Allowed`，open replacement 必须满足 relational
-  directive。两者都必须为新 target 重获 fresh File feasibility/delta 与 fresh Shell satisfaction observation，pure
-  evaluator 或 provider proposal 本身都不证明最终可 seal。attempt=0 fixed/singleton finite catalog、finite catalog 无剩余
-  target、invalid attempt-1 document 或 attempt-1 `would_not_satisfy` 才由
-  下一 drive 收口为统一 `semantic_contract_failed` terminal；第二次 owner rejection 把
-  `prospective_owner_fact_unsatisfied` 保留为 typed original reason，合法 attempt-1 `would_satisfy` 可继续进入 SM-2 seal。
-  Shell 仍只拥有 persisted satisfaction/reason，correction/terminal 均由 Orchestrator private
-  event 署名和提交。零 ticket/governance/acquisition/operation/effect/coverage，duplicate/restart 不重复消耗
-  correction 或重放同一 File/Shell probe。
+  在 Shell query 前退休 semantic generation。semantic schema/document admission 先验证 proposal target 同时满足
+  candidate const/enum 与 sealed `all_of` constraint；mismatch 只产生普通完整 document correction，C4 仅引用
+  manifest/CWI/field path 且不复制 C3 constraint，零 File/Shell probe。`would_not_satisfy` 必须先作为 full composite
+  observation 经 owner-private `semantic_feasibility_observed` 持久化；该 exact target 仍只是未封存的 semantic proposal，
+  不产生 binding。因为 admission 已证明 target 满足 published contract，exact-current full-composite
+  `would_not_satisfy` 表示 owner contract contradiction；下一 drive 直接记录
+  `prospective_satisfaction_contract_violated` 并形成 `semantic_contract_failed`，不得生成 replacement target、
+  `Allowed` 或第二 provider request。Shell 仍只拥有 persisted satisfaction/reason，terminal 由 Orchestrator
+  private event 署名和提交。typed stale 只走 bounded fact refresh；零 ticket/governance/acquisition/operation/effect/
+  coverage，duplicate/restart 不重复 terminal 或同一 File/Shell probe。
 - renderer、wire schema、strict decoder、candidate evaluator、owner feasibility command 与 fixture 只消费该
   manifest 及其 hash，不得从 profile、focus、raw reason 或临时 inventory 重建第二份允许集。
 - complete document 只调用一个纯 `CandidateEvaluator`，并按 manifest identity → wire/field →
@@ -280,17 +272,16 @@ deployed run ID 只属于 archive regression evidence，不定义当前候选、
   `proof_batch_document`。二者都只有 attempt 1，不得因无 typed delta 误报 `runtime_contract_defect`，也不得由 LLM 或
   application 选择 retry。correction lineage 只属于一个 sealed provider document；coverage-order attempt 1 即使 accepted，创建新的
   proof-batch request 时也必须在同一 SM-3 private CAS 中重置 attempt、directive 与 current rejection lineage。
-  feasibility 后的 full-composite `would_not_satisfy` 复用同一 ledger；attempt=0 的 finite catalog 只在 pure evaluator
-  证明 exact remaining member 时封存 `Allowed` delta，open selector 则只封存一次 relational target-only delta。两者都
-  保留 batch/order lineage并回到 `Requesting`，不创建第二份 correction budget 或 semantic machine，且 attempt-1 target
-  仍必须由 fresh File/Shell owner facts 最终证明。
+  prospective target constraint mismatch 属于相同的普通 document/schema correction ledger：attempt 1 复用
+  transaction/manifest/C0～C3/stable prefix，C4 只引用 typed field violation。feasibility 后的 full-composite
+  `would_not_satisfy` 不进入该 ledger，而按 owner-contract contradiction 直接 terminal。
 - candidate pipeline 只接收 `request_recoverable`、`request_terminal`、`candidate_rejection`、`owner_feasibility` 和 `accepted`
   factual result。attempt 0/1 与 correction policy 只由 SM-3 reducer 消费 persisted diagnostic；owner feasibility
   必须先成为 Orchestrator internal event，再由 SM-2 coordinator 选择 prerequisite、新 authority 或 typed
   terminal，普通 operation owner feasibility 零 correction attempt。SM-4 只从 persisted result 恢复，不再解释
   raw failure。prospective satisfaction 的 exact-current full-composite `would_not_satisfy` 在 operation candidate 前
-  属于 persisted semantic-plan factual rejection；它不进入本段普通 operation `owner_feasibility`，只按上述现有
-  SM-3 sole correction/terminal 矩阵处理，也不能借此为普通 owner feasibility 增加 correction。
+  属于 persisted semantic-plan factual rejection；它不进入本段普通 operation `owner_feasibility`，只按上述
+  `prospective_satisfaction_contract_violated` terminal 处理，也不能借此为普通 owner feasibility 增加 correction。
 - owner feasibility 若证明当前 sealed validation recipe 不可用，SM-2 必须以
   `validation_recipe_exhausted` 直接形成 typed terminal；不得将其降级为普通 repair、candidate correction 或
   `runtime_contract_defect`。
@@ -824,12 +815,11 @@ deployed run ID 只属于 archive regression evidence，不定义当前候选、
   prerequisite 组合矩阵；semantic manifest hash 回滚重现仍由新 logical request 隔离。
 - [x] prospective owner-fact composite probe 的 File hypothetical delta + Shell dependency catalog/observation exact binding、
   dependency catalog provider 隔离、CAS/seal 双 freshness gate、nested typed stale bounded refresh 且零 correction 消耗，
-  以及 persisted full-composite `would_not_satisfy` 的 attempt-0 finite exact-remaining/open relational target-only
-  same-batch correction、current File catalog existing-target filtering、fixed/singleton/exhausted/attempt-1 second-rejection
-  `semantic_contract_failed` + typed original reason 矩阵；验证
-  Requesting 回边保留 active document/hash 作为 target-only delta baseline，只清理 feasibility working set，
-  duplicate/restart 零重复 correction/probe，所有分支
-  零 probe-time effect/ticket/governance/coverage。
+  required-owner provider-safe typed `all_of` constraint 的 acquisition/manifest/C3 seal、schema/admission pre-probe
+  rejection，以及 persisted full-composite `would_not_satisfy` 的
+  `prospective_satisfaction_contract_violated -> semantic_contract_failed` 矩阵；验证普通 document attempt-1 只在 C4
+  引用违规 field、不复制 constraint，duplicate/restart 零重复 correction/terminal/probe，所有分支零 probe-time
+  effect/ticket/governance/coverage。
 - [x] validation discovery 回到 typed prerequisite 且局部 preflight 保留完整 pending graph；同 owner-target durable
   overlap 在 seal 前拒绝，Shell validation entry 不被提升为 failure target 且 Go diagnostic 只落入 manifest scope。
 - [x] `BenchmarkRuntimeAggregateInvariantValidation64CWI`、`BenchmarkRuntimeLongFocusQueueProjection64CWI`、

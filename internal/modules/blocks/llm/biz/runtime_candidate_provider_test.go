@@ -3,6 +3,7 @@ package llm
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"reflect"
 	"slices"
@@ -481,7 +482,7 @@ func TestRuntimeSemanticProviderProjectionOmitsNonReadyValidationAndOwnerPrivate
 }
 
 func TestRuntimeSemanticProviderProjectsDefinitionLineageAndExactAcquisitionSelector(t *testing.T) {
-	const prospectiveTarget = "validation-readiness.sh"
+	const prospectiveTarget = "validation-readiness.spec"
 	request := runtimeSemanticProviderTestRequest(t)
 	baseline, err := runtimeProviderRequest(request)
 	if err != nil {
@@ -498,6 +499,15 @@ func TestRuntimeSemanticProviderProjectsDefinitionLineageAndExactAcquisitionSele
 		OwnerModuleID: runtimecontract.RuntimeModuleShell,
 		FactKind:      runtimecontract.RuntimeOwnerFactSelectableValidationSurface,
 		OperationKind: runtimecontract.RuntimeBlockKindManagedValidationSession,
+	}
+	prospectiveConstraint := runtimecontract.RuntimeProspectiveTargetSatisfactionConstraint{
+		SchemaVersion: runtimecontract.RuntimeProspectiveTargetSatisfactionConstraintSchemaCurrent,
+		OwnerModuleID: runtimecontract.RuntimeModuleShell, ProspectiveSatisfactionContractRef: "shell/selectable-validation-surface/prospective-workspace-manifest/v1",
+		ValidationSurfaceID: "validation-surface-dependency", ValidationRecipeID: "validation-surface-dependency",
+		InputSchemaHash: "shell-schema-dependency", CatalogObservedRevision: "shell-policy-dependency-v1",
+		AllOf: []runtimecontract.RuntimeProspectiveTargetPredicate{{
+			Kind: runtimecontract.RuntimeProspectiveTargetPredicatePathSuffix, Value: ".spec",
+		}},
 	}
 	convergence := runtimecontract.RuntimeOwnerFactConvergence{
 		Requirement: requirement, MissingTrigger: runtimecontract.RuntimeOwnerFactMissingTrigger,
@@ -522,8 +532,9 @@ func TestRuntimeSemanticProviderProjectsDefinitionLineageAndExactAcquisitionSele
 			AcquisitionOwnerModuleID: runtimecontract.RuntimeModuleFile, AcquisitionOperationKind: runtimecontract.StepKindFileWrite,
 			AcquisitionTargetPolicy:      runtimecontract.RuntimeOperationTargetPolicyProspectiveOwnerTarget,
 			AcquisitionTargetSelectorRef: "workspace-relative-new-file-target", AcquisitionConstraintRefs: []string{"workspace-relative-path"},
-			ProspectiveSatisfactionContractRef: "shell/selectable-validation-surface/prospective-workspace-manifest/v1",
-			OwnerCatalogSnapshotID:             catalog.SnapshotID, OwnerCatalogObservedRevision: catalog.ObservedRevision,
+			ProspectiveSatisfactionContractRef:      "shell/selectable-validation-surface/prospective-workspace-manifest/v1",
+			ProspectiveTargetSatisfactionConstraint: &prospectiveConstraint,
+			OwnerCatalogSnapshotID:                  catalog.SnapshotID, OwnerCatalogObservedRevision: catalog.ObservedRevision,
 			ReobserveOwnerModuleID: runtimecontract.RuntimeModuleShell, ReobserveFactKind: runtimecontract.RuntimeOwnerFactSelectableValidationSurface,
 			MaxAcquisitionAttempts: 1,
 		},
@@ -532,15 +543,16 @@ func TestRuntimeSemanticProviderProjectsDefinitionLineageAndExactAcquisitionSele
 		PrerequisiteID: "shell-prospective-dependency", OwnerModuleID: runtimecontract.RuntimeModuleShell,
 		OperationKinds: []string{runtimecontract.RuntimeBlockKindManagedValidationSession},
 		ValidationSurfaces: []runtimecontract.RuntimeValidationSurface{{
-			ID: "go-test-dependency", OwnerModuleID: runtimecontract.RuntimeModuleShell,
+			ID: "validation-surface-dependency", OwnerModuleID: runtimecontract.RuntimeModuleShell,
 			OperationKind: runtimecontract.RuntimeBlockKindManagedValidationSession,
 			Readiness:     runtimecontract.RuntimeValidationSurfacePrerequisiteRequired, ReadinessReason: "workspace input required",
 			InputSchemaHash: "shell-schema-dependency", PrerequisiteRef: "workspace/validation-input",
-			ProspectiveSatisfactionContractRef: "shell/selectable-validation-surface/prospective-workspace-manifest/v1",
-			CheckRefs:                          []string{"check/go-test-dependency"},
-			ProofApplicability:                 runtimecontract.RuntimeValidationProofDirect,
-			EffectScope:                        runtimecontract.RuntimeEffectEphemeralSession,
-			IdempotencyClass:                   runtimecontract.RuntimeOperationIdempotencyAtMostOnce,
+			ProspectiveSatisfactionContractRef:      "shell/selectable-validation-surface/prospective-workspace-manifest/v1",
+			ProspectiveTargetSatisfactionConstraint: &prospectiveConstraint,
+			CheckRefs:                               []string{"check/validation-surface-dependency"},
+			ProofApplicability:                      runtimecontract.RuntimeValidationProofDirect,
+			EffectScope:                             runtimecontract.RuntimeEffectEphemeralSession,
+			IdempotencyClass:                        runtimecontract.RuntimeOperationIdempotencyAtMostOnce,
 		}},
 		ObservedRevision: "shell-policy-dependency-v1",
 	}
@@ -569,23 +581,45 @@ func TestRuntimeSemanticProviderProjectsDefinitionLineageAndExactAcquisitionSele
 		acquisition.AcquisitionOperationKind != runtimecontract.StepKindFileWrite {
 		t.Fatalf("provider projection conflated current acquisition with terminal validation proof: obligation=%+v acquisition=%+v", obligation, acquisition)
 	}
+	constraintProjectionJSON, err := json.Marshal(acquisition.ProspectiveTargetConstraint)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if acquisition.ProspectiveTargetConstraint == nil ||
+		strings.Contains(string(constraintProjectionJSON), `"validationRecipeId"`) ||
+		strings.Contains(string(constraintProjectionJSON), `"validationSurfaceId"`) ||
+		strings.Contains(string(constraintProjectionJSON), prospectiveConstraint.ValidationRecipeID) ||
+		strings.Contains(authority, prospectiveConstraint.ValidationRecipeID) {
+		t.Fatalf("provider-safe prospective target constraint leaked its dependency recipe identity: %s", constraintProjectionJSON)
+	}
 	if !strings.Contains(authority, `"declarationTargetSelectorRef":"file/workspace_deliverable"`) ||
 		!strings.Contains(authority, `"acquisitionTargetSelectorRef":"workspace-relative-new-file-target"`) ||
 		!strings.Contains(authority, `"prospectiveSatisfactionContractRef":"shell/selectable-validation-surface/prospective-workspace-manifest/v1"`) ||
-		!strings.Contains(authority, `"declarationTargetSelectorCandidateRefs":["validation-readiness.sh"]`) ||
-		strings.Contains(authority, `"declarationProspectiveTargetRef"`) || strings.Contains(authority, `"prospectiveTargetRef":"validation-readiness.sh"`) {
+		!strings.Contains(authority, `"declarationTargetSelectorCandidateRefs":["validation-readiness.spec"]`) ||
+		!strings.Contains(authority, `"prospectiveTargetConstraint"`) ||
+		!strings.Contains(authority, `"kind":"target_ref_path_suffix","value":".spec"`) ||
+		strings.Contains(authority, `"declarationProspectiveTargetRef"`) || strings.Contains(authority, `"prospectiveTargetRef":"validation-readiness.spec"`) {
 		t.Fatalf("provider projection conflated Definition lineage and operation selector: %s", authority)
 	}
 	if strings.Contains(authority, dependencyCatalog.PrerequisiteID) || strings.Contains(providerRequest.Schema, dependencyCatalog.PrerequisiteID) {
 		t.Fatalf("provider projection leaked non-selectable dependency catalog: authority=%s schema=%s", authority, providerRequest.Schema)
 	}
-	for _, required := range []string{"exact current acquisition proof", "ownerModuleId=acquisitionOwnerModuleId", "one concrete non-empty target.prospectiveTargetRef", "not Definition authority", "only an SM-2 CoverageEvidenceBinding", `requiredEvidenceKinds=["state_change"]`, "do not return gapKind=undeclared_prerequisite solely", "does not grant terminal validation evidence or coverage credit"} {
+	if strings.Contains(providerRequest.Schema, prospectiveConstraint.ValidationRecipeID) {
+		t.Fatalf("provider schema promoted a dependency recipe into selectable authority: %s", providerRequest.Schema)
+	}
+	for _, required := range []string{"exact current acquisition proof", "ownerModuleId=acquisitionOwnerModuleId", "one concrete non-empty target.prospectiveTargetRef", "prospectiveTargetConstraint.allOf conjunctively", "not Definition authority", "only an SM-2 CoverageEvidenceBinding", `requiredEvidenceKinds=["state_change"]`, "do not return gapKind=undeclared_prerequisite solely", "does not grant terminal validation evidence or coverage credit"} {
 		if !strings.Contains(projection.OutputInstruction, required) {
 			t.Fatalf("provider acquisition instruction lost %q: %s", required, projection.OutputInstruction)
 		}
 	}
+	prospectiveTargetSchema := runtimeSemanticProviderProspectiveTargetSchemaForTest(t, providerRequest.Schema)
+	prospectiveTargetSchemaJSON, err := json.Marshal(prospectiveTargetSchema)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if !strings.Contains(providerRequest.Schema, `"const":"workspace-relative-new-file-target"`) ||
-		!strings.Contains(providerRequest.Schema, `"prospectiveTargetRef":{"const":"validation-readiness.sh"`) ||
+		prospectiveTargetSchema["const"] != prospectiveTarget ||
+		!strings.Contains(string(prospectiveTargetSchemaJSON), `"pattern"`) || !strings.Contains(string(prospectiveTargetSchemaJSON), ".spec") ||
 		strings.Contains(providerRequest.Schema, `"const":"file/workspace_deliverable"`) {
 		t.Fatalf("provider schema did not constrain the exact operation selector: %s", providerRequest.Schema)
 	}
@@ -602,6 +636,138 @@ func TestRuntimeSemanticProviderProjectsDefinitionLineageAndExactAcquisitionSele
 		baselinePlan.CapabilityContractHash != acquisitionPlan.CapabilityContractHash {
 		t.Fatalf("owner-fact acquisition changed C0-C2 cache identity: baseline=%+v acquisition=%+v", baselinePlan, acquisitionPlan)
 	}
+
+	openSelectorRequest := request
+	openSelectorRequest.SemanticManifest = request.SemanticManifest.Clone()
+	openSelectorRequest.SemanticManifest.ProofObligations[0].DeclarationTargetSelectorCandidateRefs = nil
+	openSelectorRequest.SemanticManifest.Hash = runtimecontract.StableRuntimeSemanticPlanManifestHash(openSelectorRequest.SemanticManifest)
+	openSelectorProviderRequest, err := runtimeProviderRequest(openSelectorRequest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	invalidAuthorityRequest := openSelectorRequest
+	invalidAuthorityRequest.SemanticManifest = openSelectorRequest.SemanticManifest.Clone()
+	invalidConstraint := invalidAuthorityRequest.SemanticManifest.ProofObligations[0].OwnerFactAcquisition.ProspectiveTargetSatisfactionConstraint.Clone()
+	invalidConstraint.AllOf = nil
+	invalidAuthorityRequest.SemanticManifest.ProofObligations[0].OwnerFactAcquisition.ProspectiveTargetSatisfactionConstraint = &invalidConstraint
+	invalidAuthorityRequest.SemanticManifest.Hash = runtimecontract.StableRuntimeSemanticPlanManifestHash(invalidAuthorityRequest.SemanticManifest)
+	if _, err := runtimeProviderRequest(invalidAuthorityRequest); err == nil {
+		t.Fatal("semantic provider accepted an acquisition with an empty owner-authored all-of constraint")
+	}
+	openTargetSchema := runtimeSemanticProviderProspectiveTargetSchemaForTest(t, openSelectorProviderRequest.Schema)
+	openTargetSchemaJSON, err := json.Marshal(openTargetSchema)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, hasConst := openTargetSchema["const"]; hasConst || openTargetSchema["enum"] != nil ||
+		!strings.Contains(string(openTargetSchemaJSON), `"pattern"`) || !strings.Contains(string(openTargetSchemaJSON), ".spec") {
+		t.Fatalf("open selector schema did not retain only the owner-authored all-of predicate: %s", openTargetSchemaJSON)
+	}
+	validPayload := runtimeSemanticProviderAcquisitionPayloadForTest(t, openSelectorRequest.SemanticManifest, prospectiveTarget)
+	if _, err := runtimecontract.DecodeRuntimeSemanticPlanPayloadWithManifest(openSelectorRequest.SemanticManifest, validPayload); err != nil {
+		t.Fatalf("owner-compatible prospective target was rejected before feasibility: %v", err)
+	}
+	invalidPayload := runtimeSemanticProviderAcquisitionPayloadForTest(t, openSelectorRequest.SemanticManifest, "workspace-manifest.data")
+	_, err = runtimecontract.DecodeRuntimeSemanticPlanPayloadWithManifest(openSelectorRequest.SemanticManifest, invalidPayload)
+	var diagnostic *runtimecontract.RuntimeCandidatePayloadDiagnostic
+	if !errors.As(err, &diagnostic) || diagnostic.Path != "$.proposals[0].target.prospectiveTargetRef" {
+		t.Fatalf("owner-incompatible prospective target did not fail as a typed pre-probe field violation: diagnostic=%+v err=%v", diagnostic, err)
+	}
+	rejection := &runtimecontract.RuntimeOriginalDiagnostic{
+		SchemaVersion: runtimecontract.RuntimeOriginalDiagnosticSchemaCurrent,
+		OwnerModuleID: runtimecontract.RuntimeModuleLLM, OriginalClass: "semantic", OriginalCode: "prospective_target_constraint",
+		OriginalMessage: "private evaluator detail must remain outside the correction prompt", Signature: "semantic/prospective-target-constraint",
+		FieldViolations: []runtimecontract.RuntimeFieldViolation{{
+			Path: diagnostic.Path, Actual: diagnostic.Actual,
+			Allowed: append([]string(nil), diagnostic.Allowed...), Required: append([]string(nil), diagnostic.Required...),
+		}},
+		SemanticViolations: append([]runtimecontract.RuntimeSemanticContractViolation(nil), diagnostic.SemanticViolations...),
+	}
+	directive := runtimecontract.RuntimeSemanticCorrectionDirective{
+		SchemaVersion: runtimecontract.RuntimeSemanticCorrectionDirectiveSchemaCurrent,
+		PlanStep:      runtimecontract.RuntimeSemanticPlanStepProofBatch, ManifestHash: openSelectorRequest.SemanticManifest.Hash,
+		DefinitionSeedHash: openSelectorRequest.SemanticManifest.DefinitionSeedHash, StablePrefixHash: openSelectorRequest.StablePrefixHash,
+		SourceRejectionHash: runtimecontract.StableRuntimeSemanticPlanCorrectionHash(*rejection), Attempt: 1,
+		Violations: append([]runtimecontract.RuntimeSemanticContractViolation(nil), rejection.SemanticViolations...),
+	}
+	directive.Hash = runtimecontract.StableRuntimeSemanticCorrectionDirectiveHash(directive)
+	retryRequest := openSelectorRequest
+	retryRequest.CandidateAttempt = 1
+	retryRequest.PreviousSemanticRejection = rejection
+	retryRequest.SemanticCorrectionDirective = &directive
+	retryProviderRequest, err := runtimeProviderRequest(retryRequest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for index := 0; index <= 3; index++ {
+		if openSelectorProviderRequest.PromptContext.Sections[index].Content != retryProviderRequest.PromptContext.Sections[index].Content {
+			t.Fatalf("typed prospective-target correction drifted C%d authority", index)
+		}
+	}
+	retryTail := retryProviderRequest.PromptContext.Sections[4].Content
+	if !strings.Contains(retryTail, diagnostic.Path) || strings.Contains(retryTail, `"prospectiveTargetConstraint"`) || strings.Contains(retryTail, rejection.OriginalMessage) {
+		t.Fatalf("C4 did not remain a typed reference to the single C3 prospective-target authority: %s", retryTail)
+	}
+}
+
+func runtimeSemanticProviderProspectiveTargetSchemaForTest(t *testing.T, schema string) map[string]any {
+	t.Helper()
+	var decoded map[string]any
+	if err := json.Unmarshal([]byte(schema), &decoded); err != nil {
+		t.Fatal(err)
+	}
+	properties, _ := decoded["properties"].(map[string]any)
+	proposals, _ := properties["proposals"].(map[string]any)
+	items, _ := proposals["items"].(map[string]any)
+	allOf, _ := items["allOf"].([]any)
+	for _, rawBranch := range allOf {
+		branch, _ := rawBranch.(map[string]any)
+		then, _ := branch["then"].(map[string]any)
+		thenProperties, _ := then["properties"].(map[string]any)
+		target, _ := thenProperties["target"].(map[string]any)
+		targetProperties, _ := target["properties"].(map[string]any)
+		if prospective, ok := targetProperties["prospectiveTargetRef"].(map[string]any); ok {
+			return prospective
+		}
+	}
+	t.Fatalf("semantic provider schema has no owner-fact prospective target constraint: %s", schema)
+	return nil
+}
+
+func runtimeSemanticProviderAcquisitionPayloadForTest(t *testing.T, manifest runtimecontract.RuntimeSemanticPlanManifest, targetRef string) []byte {
+	t.Helper()
+	manifest = manifest.Normalized()
+	if len(manifest.ProofObligations) != 1 || manifest.ProofObligations[0].OwnerFactAcquisition == nil {
+		t.Fatalf("semantic provider acquisition payload requires one owner-fact obligation: %+v", manifest.ProofObligations)
+	}
+	acquisition := manifest.ProofObligations[0].OwnerFactAcquisition.Normalized()
+	payload, err := json.Marshal(map[string]any{
+		"documentKind":             runtimecontract.RuntimeProviderDocumentSemanticPlan,
+		"schemaVersion":            runtimecontract.RuntimeSemanticPlanDocumentSchemaCurrent,
+		"manifestHash":             manifest.Hash,
+		"definitionSeedHash":       manifest.DefinitionSeedHash,
+		"planStep":                 runtimecontract.RuntimeSemanticPlanStepProofBatch,
+		"batchId":                  "batch-1",
+		"batchSequence":            0,
+		"batchCoverageWorkItemIds": []common.CoverageWorkItemID{"cwi-001"},
+		"proposals": []any{map[string]any{
+			"coverageWorkItemId": "cwi-001",
+			"ownerModuleId":      acquisition.AcquisitionOwnerModuleID,
+			"operationKind":      acquisition.AcquisitionOperationKind,
+			"target": map[string]any{
+				"policy":                    acquisition.AcquisitionTargetPolicy,
+				"ownerSelectorRefs":         []string{acquisition.AcquisitionTargetSelectorRef},
+				"prospectiveConstraintRefs": acquisition.AcquisitionConstraintRefs,
+				"prospectiveTargetRef":      targetRef,
+			},
+			"requiredEvidenceKinds": []string{runtimecontract.EvidenceKindStateChange},
+			"declarationRef":        "semantic-plan/dod-001",
+		}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return payload
 }
 
 func TestRuntimeSemanticCoverageOrderProjectionOmitsUnrelatedDefinitionSlices(t *testing.T) {

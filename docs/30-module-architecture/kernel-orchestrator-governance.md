@@ -41,17 +41,14 @@ effect。SM-2 选择 canonical convergence state但不执行 operation；SM-3 �
 
 prospective owner-fact probe 也不放宽该边界：SM-2 组合 File-authored hypothetical delta 与 Shell-authored nested
 satisfaction observation，required-owner dependency catalog只进入 manifest freshness/CAS/seal，不进入 LLM selectable
-surface。exact target 由 SM-3 在 Definition declaration selector/candidate refs 与 current operation selector/owner
-constraints 的交集中提出，owner fact 只验证，SM-2 binding 才首次形成authority；operation candidate
-只引用该binding，dispatch只从binding派生target。typed stale走bounded fact refresh且不消耗correction。
-`would_not_satisfy` 必须先持久化 full File+Shell composite；attempt=0 且仍有不同合法 target 时，
-Orchestrator 只复用既有 SM-3 batch/correction ledger，保留当前 proposal/document/hash 作为 immutable
-target-only delta baseline，只清理 feasibility working set并经 canonical correction transition 回到
-`Requesting`；新 document 除被拒 target 外保持不变，新 target 仍受原 bounds 限制。attempt=0
-fixed/singleton/无剩余 target、invalid attempt-1 document（包括重复/越界/扩大 delta）或 attempt-1 第二次
-`would_not_satisfy` 才形成统一 `semantic_contract_failed` terminal。第二次 owner rejection 保留 typed original
-reason=`prospective_owner_fact_unsatisfied`；合法 attempt-1 `would_satisfy` 继续进入 SM-2 seal。所有状态变化仍只能由
-Orchestrator private internal event提交；
+surface。required owner catalog 发布 provider-safe typed `all_of` target constraint，并由 acquisition/manifest/C3 封存；
+exact target 由 SM-3 在 Definition declaration selector/candidate refs、current operation selector/owner constraints 与该
+constraint 的交集中提出。mismatch 只走普通 document/schema correction，零 File/Shell probe；owner fact 只验证 admitted
+proposal，SM-2 binding 才首次形成authority，operation candidate只引用该binding，dispatch只从binding派生target。typed
+stale走bounded fact refresh且不消耗correction。`would_not_satisfy` 必须先持久化 full File+Shell composite，随后作为
+published constraint 与 owner judgment 的 contradiction 直接形成
+`prospective_satisfaction_contract_violated -> semantic_contract_failed`；不得生成 replacement target 或第二 provider request。
+所有状态变化仍只能由 Orchestrator private internal event提交；
 File/Shell 不选择 correction/terminal，也不修改兄弟 owner 状态。
 
 ## Governance Boundary

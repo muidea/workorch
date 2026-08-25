@@ -999,6 +999,12 @@ func (a RuntimeOperationAdmissibility) Validate() error {
 			if surface.OwnerModuleID != a.OwnerModuleID || !runtimeOperationKindsContain(a.OperationKinds, surface.OperationKind) {
 				return fmt.Errorf("runtime validation surface %q is outside owner operation inventory", surface.ID)
 			}
+			if surface.ProspectiveTargetSatisfactionConstraint != nil {
+				constraint := surface.ProspectiveTargetSatisfactionConstraint.Normalized()
+				if constraint.CatalogObservedRevision != a.ObservedRevision {
+					return fmt.Errorf("runtime validation surface %q prospective target constraint catalog revision mismatch", surface.ID)
+				}
+			}
 		}
 		if selectable := RuntimeSelectableValidationRecipeRefs(a.ValidationSurfaces); !sameStrings(selectable, a.ValidationRecipeRefs) {
 			return fmt.Errorf("runtime operation admissibility validation recipe refs do not match selectable validation surfaces")
@@ -1055,6 +1061,11 @@ func StableRuntimeOperationAdmissibilitySnapshotID(value RuntimeOperationAdmissi
 		writeHashString(h, surface.InputBindingRef)
 		writeHashString(h, surface.PrerequisiteRef)
 		writeHashString(h, surface.ProspectiveSatisfactionContractRef)
+		if surface.ProspectiveTargetSatisfactionConstraint == nil {
+			writeHashString(h, "no-prospective-target-satisfaction-constraint")
+		} else {
+			writeHashString(h, StableRuntimeProspectiveTargetSatisfactionConstraintHash(*surface.ProspectiveTargetSatisfactionConstraint))
+		}
 		writeHashStrings(h, surface.CheckRefs)
 		writeHashString(h, string(surface.ProofApplicability))
 		writeHashString(h, string(surface.EffectScope))

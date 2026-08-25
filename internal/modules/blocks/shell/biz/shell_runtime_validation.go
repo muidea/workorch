@@ -94,8 +94,9 @@ func runtimeValidationRecipesApplicableToManifest(recipes []runtimemodel.Runtime
 // shellValidationSurfaces preserves every activation-declared recipe as one
 // Shell-owner readiness fact while keeping the executable recipe inventory
 // ready-only. It owns no Runtime transition and performs no additional I/O.
-func shellValidationSurfaces(declared, staticallyReady, ready []runtimemodel.RuntimeValidationRecipe, binding runtimemodel.RuntimeWorkspaceManifestBinding) []runtimemodel.RuntimeValidationSurface {
+func shellValidationSurfaces(declared, staticallyReady, ready []runtimemodel.RuntimeValidationRecipe, binding runtimemodel.RuntimeWorkspaceManifestBinding, catalogObservedRevision string) []runtimemodel.RuntimeValidationSurface {
 	binding = binding.Normalized()
+	catalogObservedRevision = strings.TrimSpace(catalogObservedRevision)
 	staticIDs := shellValidationRecipeIDs(staticallyReady)
 	readyIDs := shellValidationRecipeIDs(ready)
 	ret := make([]runtimemodel.RuntimeValidationSurface, 0, len(declared))
@@ -115,7 +116,10 @@ func shellValidationSurfaces(declared, staticallyReady, ready []runtimemodel.Run
 			surface.Readiness = runtimemodel.RuntimeValidationSurfacePrerequisiteRequired
 			surface.ReadinessReason = shellValidationApplicableInputRequiredReason
 			surface.PrerequisiteRef = "shell-validation-prerequisite/" + schemaHash + "/applicable-workspace-input"
-			surface.ProspectiveSatisfactionContractRef = modulecommon.ProspectiveSatisfactionContractRef
+			if constraint, ok := shellProspectiveTargetSatisfactionConstraint(recipe, binding.Manifest.TargetRefs, catalogObservedRevision); ok {
+				surface.ProspectiveSatisfactionContractRef = modulecommon.ProspectiveSatisfactionContractRef
+				surface.ProspectiveTargetSatisfactionConstraint = &constraint
+			}
 		default:
 			surface.Readiness = runtimemodel.RuntimeValidationSurfaceUnavailable
 			surface.ReadinessReason = shellValidationStaticUnavailableReason
@@ -123,6 +127,62 @@ func shellValidationSurfaces(declared, staticallyReady, ready []runtimemodel.Run
 		ret = append(ret, surface)
 	}
 	return runtimemodel.NormalizeRuntimeValidationSurfaces(ret)
+}
+
+// shellProspectiveTargetSatisfactionConstraint publishes only predicates for
+// which one target satisfying every conjunct is sufficient to make the exact
+// activation-sealed recipe applicable to the resulting manifest. Recipes
+// whose missing package roots require multiple incomparable targets remain a
+// non-actionable prerequisite; Shell never publishes an implicit any-of.
+func shellProspectiveTargetSatisfactionConstraint(recipe runtimemodel.RuntimeValidationRecipe, currentTargetRefs []string, catalogObservedRevision string) (runtimemodel.RuntimeProspectiveTargetSatisfactionConstraint, bool) {
+	recipe = recipe.Normalized()
+	catalogObservedRevision = strings.TrimSpace(catalogObservedRevision)
+	isGoTest, packageRoots, ok := shellGoTestManifestRequirements(recipe)
+	if !ok || !isGoTest || catalogObservedRevision == "" {
+		return runtimemodel.RuntimeProspectiveTargetSatisfactionConstraint{}, false
+	}
+	currentTargetRefs = normalizeShellStrings(currentTargetRefs)
+	predicates := make([]runtimemodel.RuntimeProspectiveTargetPredicate, 0, 6)
+	if !shellManifestHasApplicableGoTestTarget(currentTargetRefs) {
+		predicates = append(predicates, runtimemodel.RuntimeProspectiveTargetPredicate{
+			Kind: runtimemodel.RuntimeProspectiveTargetPredicatePathSuffix, Value: "_test.go",
+		})
+		for _, segment := range shellManifestExcludedPathSegments() {
+			predicates = append(predicates, runtimemodel.RuntimeProspectiveTargetPredicate{
+				Kind: runtimemodel.RuntimeProspectiveTargetPredicatePathSegmentNotEqual, Value: segment,
+			})
+		}
+	}
+	missingRoots := make([]string, 0, len(packageRoots))
+	for _, root := range packageRoots {
+		if !shellManifestContainsPackageRoot(currentTargetRefs, root) {
+			missingRoots = append(missingRoots, root)
+		}
+	}
+	if prefix, expressible := shellSingleProspectivePackagePrefix(missingRoots); !expressible {
+		return runtimemodel.RuntimeProspectiveTargetSatisfactionConstraint{}, false
+	} else if prefix != "" {
+		predicates = append(predicates, runtimemodel.RuntimeProspectiveTargetPredicate{
+			Kind: runtimemodel.RuntimeProspectiveTargetPredicatePathPrefix, Value: prefix,
+		})
+	}
+	if len(predicates) == 0 {
+		return runtimemodel.RuntimeProspectiveTargetSatisfactionConstraint{}, false
+	}
+	value := runtimemodel.RuntimeProspectiveTargetSatisfactionConstraint{
+		SchemaVersion:                      runtimemodel.RuntimeProspectiveTargetSatisfactionConstraintSchemaCurrent,
+		OwnerModuleID:                      ModuleID,
+		ProspectiveSatisfactionContractRef: modulecommon.ProspectiveSatisfactionContractRef,
+		ValidationSurfaceID:                recipe.ID,
+		ValidationRecipeID:                 recipe.ID,
+		InputSchemaHash:                    shellValidationRecipeSchemaHash(recipe),
+		CatalogObservedRevision:            catalogObservedRevision,
+		AllOf:                              predicates,
+	}.Normalized()
+	if err := value.Validate(); err != nil {
+		return runtimemodel.RuntimeProspectiveTargetSatisfactionConstraint{}, false
+	}
+	return value, true
 }
 
 // shellValidationRecipeProofCheckRef is the exact owner-published aggregate
@@ -157,26 +217,35 @@ func shellValidationRecipeSchemaHash(recipe runtimemodel.RuntimeValidationRecipe
 }
 
 func runtimeValidationRecipeApplicableToManifest(recipe runtimemodel.RuntimeValidationRecipe, targetRefs []string) bool {
+	isGoTest, packageRoots, ok := shellGoTestManifestRequirements(recipe)
+	if !ok {
+		return false
+	}
+	if !isGoTest {
+		return true
+	}
+	allRefs := normalizeShellStrings(targetRefs)
+	if !shellManifestHasApplicableGoTestTarget(allRefs) {
+		return false
+	}
+	for _, root := range packageRoots {
+		if !shellManifestContainsPackageRoot(allRefs, root) {
+			return false
+		}
+	}
+	return true
+}
+
+func shellGoTestManifestRequirements(recipe runtimemodel.RuntimeValidationRecipe) (bool, []string, bool) {
 	command, args, err := shellCommandSpec(recipe.Command, recipe.Args)
 	if err != nil {
-		return false
+		return false, nil, false
 	}
 	command, args, _ = normalizeShellExecutionCommand(command, args)
 	if filepath.Base(strings.TrimSpace(command)) != "go" || len(args) == 0 || strings.TrimSpace(args[0]) != "test" {
-		return true
+		return false, nil, true
 	}
-	testRefs := make([]string, 0)
-	allRefs := normalizeShellStrings(targetRefs)
-	for _, ref := range allRefs {
-		clean := filepath.ToSlash(filepath.Clean(ref))
-		if clean == "." || shellManifestPathExcluded(clean) || !strings.HasSuffix(pathBase(clean), "_test.go") {
-			continue
-		}
-		testRefs = append(testRefs, clean)
-	}
-	if len(testRefs) == 0 {
-		return false
-	}
+	roots := make([]string, 0)
 	for idx := 1; idx < len(args); idx++ {
 		arg := strings.TrimSpace(args[idx])
 		if arg == "-run" || arg == "--run" {
@@ -191,33 +260,65 @@ func runtimeValidationRecipeApplicableToManifest(recipe runtimemodel.RuntimeVali
 			root = strings.TrimSuffix(root[:wildcard], "/")
 		}
 		root = strings.Trim(strings.TrimSpace(root), "/")
-		if root == "" || root == "." {
-			continue
-		}
-		prefix := root + "/"
-		found := false
-		for _, ref := range allRefs {
-			clean := filepath.ToSlash(filepath.Clean(ref))
-			if strings.HasPrefix(clean, prefix) {
-				found = true
-				break
-			}
-		}
-		if !found {
-			return false
+		if root != "" && root != "." {
+			roots = append(roots, root)
 		}
 	}
-	return true
+	return true, normalizeShellStrings(roots), true
 }
 
-func shellManifestPathExcluded(ref string) bool {
-	for _, part := range strings.Split(filepath.ToSlash(ref), "/") {
-		switch part {
-		case ".git", "vendor", "node_modules", ".workorch-data":
+func shellManifestHasApplicableGoTestTarget(targetRefs []string) bool {
+	for _, ref := range normalizeShellStrings(targetRefs) {
+		clean := filepath.ToSlash(filepath.Clean(ref))
+		if clean != "." && !shellManifestPathExcluded(clean) && strings.HasSuffix(pathBase(clean), "_test.go") {
 			return true
 		}
 	}
 	return false
+}
+
+func shellManifestContainsPackageRoot(targetRefs []string, root string) bool {
+	prefix := strings.Trim(strings.TrimSpace(root), "/") + "/"
+	for _, ref := range normalizeShellStrings(targetRefs) {
+		if strings.HasPrefix(filepath.ToSlash(filepath.Clean(ref)), prefix) {
+			return true
+		}
+	}
+	return false
+}
+
+func shellSingleProspectivePackagePrefix(roots []string) (string, bool) {
+	roots = normalizeShellStrings(roots)
+	if len(roots) == 0 {
+		return "", true
+	}
+	longest := roots[0]
+	for _, root := range roots[1:] {
+		if len(root) > len(longest) {
+			longest = root
+		}
+	}
+	for _, root := range roots {
+		if longest != root && !strings.HasPrefix(longest, strings.TrimSuffix(root, "/")+"/") {
+			return "", false
+		}
+	}
+	return strings.Trim(longest, "/") + "/", true
+}
+
+func shellManifestPathExcluded(ref string) bool {
+	for _, part := range strings.Split(filepath.ToSlash(ref), "/") {
+		for _, excluded := range shellManifestExcludedPathSegments() {
+			if part == excluded {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func shellManifestExcludedPathSegments() []string {
+	return []string{".git", ".workorch-data", "node_modules", "vendor"}
 }
 
 func pathBase(ref string) string {

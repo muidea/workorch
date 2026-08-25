@@ -214,7 +214,7 @@ func runtimeProspectiveSatisfactionOwnerFactsForTest(t *testing.T, catalog Runti
 }
 
 func runtimeProspectiveSatisfactionSurfaceForTest() RuntimeValidationSurface {
-	return RuntimeValidationSurface{
+	value := RuntimeValidationSurface{
 		ID: "recipe/prospective", OwnerModuleID: RuntimeModuleShell, OperationKind: RuntimeBlockKindManagedValidationSession,
 		Readiness: RuntimeValidationSurfacePrerequisiteRequired, ReadinessReason: "applicable workspace input required",
 		InputSchemaHash: "schema/prospective", PrerequisiteRef: "workspace/validation-input",
@@ -222,6 +222,24 @@ func runtimeProspectiveSatisfactionSurfaceForTest() RuntimeValidationSurface {
 		CheckRefs:                          []string{"check/prospective"}, ProofApplicability: RuntimeValidationProofDirect,
 		EffectScope: RuntimeEffectEphemeralSession, IdempotencyClass: RuntimeOperationIdempotencyAtMostOnce,
 	}
+	constraint := runtimeProspectiveTargetConstraintForTest(value, runtimeProspectiveSatisfactionContractRefForTest, "shell-policy-test", ".sh")
+	value.ProspectiveTargetSatisfactionConstraint = &constraint
+	return value
+}
+
+func runtimeProspectiveTargetConstraintForTest(surface RuntimeValidationSurface, contractRef, catalogRevision, suffix string) RuntimeProspectiveTargetSatisfactionConstraint {
+	return RuntimeProspectiveTargetSatisfactionConstraint{
+		SchemaVersion:                      RuntimeProspectiveTargetSatisfactionConstraintSchemaCurrent,
+		OwnerModuleID:                      surface.OwnerModuleID,
+		ProspectiveSatisfactionContractRef: contractRef,
+		ValidationSurfaceID:                surface.ID,
+		ValidationRecipeID:                 surface.ID,
+		InputSchemaHash:                    surface.InputSchemaHash,
+		CatalogObservedRevision:            catalogRevision,
+		AllOf: []RuntimeProspectiveTargetPredicate{{
+			Kind: RuntimeProspectiveTargetPredicatePathSuffix, Value: suffix,
+		}},
+	}.Normalized()
 }
 
 func ptrRuntimeProspectiveWorkspaceManifestDelta(value RuntimeProspectiveWorkspaceManifestDelta) *RuntimeProspectiveWorkspaceManifestDelta {

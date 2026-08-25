@@ -141,7 +141,9 @@ Cross-owner regression必须证明 concrete receiving-owner Command/Result、wor
 - `prospective_owner_target` declaration/obligation/projection 必须具有同一 nonempty
   `ProspectiveSatisfactionContractRef`，其它 policy 禁止携带；manifest 分离 provider-selectable `OwnerCatalogs` 与
   `OwnerFactDependencyCatalogs`。dependency catalog参与hash/freshness/CAS/seal但必须从 C3、allowed operation/surface、
-  schema enum、correction values中完全缺席。
+  schema enum、correction values中完全缺席。required owner catalog 还必须发布唯一 provider-safe typed
+  `ProspectiveTargetSatisfactionConstraint`，只能表达 `all_of`；同一 constraint 封存到 acquisition/manifest/C3，dependency
+  recipe identity/command 不进入 provider。
 - composite prospective probe必须覆盖：File outer feasibility生成exact base-workspace-tree-revision-bound immutable delta且
   零文件/目录写入；Shell只消费该delta、activation-sealed recipes和自身dependency catalog/observation，逐surface校验
   recipe command/ordered args/timeout schema identity且零workspace read/process/session/effect；Orchestrator不解释path/recipe。
@@ -150,31 +152,22 @@ Cross-owner regression必须证明 concrete receiving-owner Command/Result、wor
   幂等，冲突payload拒绝。
 - pre-seal Definition 不携带 exact prospective target，compiled obligation/manifest 也不回填；SM-3
   schema/admission要求 proposal 在 Definition declaration selector/candidate refs 与 current operation selector/owner
-  constraints 交集中提交 nonempty exact target，非空 candidate refs 要求 exact member match。File/Shell fact
+  constraints 交集中提交 nonempty exact target，非空 candidate refs 要求 exact member match，并同时满足 owner `all_of`
+  predicate。mismatch 在 document admission/schema correction 阶段形成 typed field violation，零 File/Shell probe。File/Shell fact
   绑定同一 proposal hash/target，只有 SM-2 sealed binding 形成 authority；operations schema 只把 binding ref
   作为选择面，candidate/dispatch 只从 binding 派生并消费 target。
 - Shell typed stale必须作为nested owner-authored observation走一次bounded prerequisite refresh，不能伪装成File outer stale或
   直接terminal；missing dependency在Shell call前退休generation。stale 不改变 semantic attempt/correction
   directive/rejection ledger，duplicate/restart 不重复扣减 refresh，也不消耗 correction。
-- `would_not_satisfy` 必须先持久化唯一、exact-current 且完整的 File delta + Shell nested
-  observation composite；partial/forged/stale/mismatched proposal hash/target 均不得打开 correction。它不产生
-  binding/effect/coverage。
-- attempt=0 finite candidate catalog：验证 pure evaluator 排除 failed target、排除 acquisition-owner current catalog
-  中已经存在的 target，并让每个 replacement 重新通过 canonical document/manifest fence；只有非空结果成为 exact
-  `Allowed`，fixed/singleton/exhausted 均零 correction/provider call。attempt=0 open selector：验证 evaluator 不声称存在
-  remaining member、不生成 `Allowed` 或 target，只生成一次“不同非空且仍满足原 selector/constraints”的 relational delta。
-  两种分支都验证 SM-3 复用同一 batch/manifest/seed/order/CWI set/stable prefix 与 sole correction ledger；attempt-0 proof document/
-  `DocumentHash` 作为 immutable delta baseline 保留，只清理 feasibility batch/set/hash，并由 canonical correction
-  transition 使 batch `FeasibilityPending -> Requesting` 且 attempt=1。新 document 除被拒 target 外必须与 baseline
-  完全一致；finite target 必须命中 exact `Allowed`，open target 必须满足 relational directive，两者都取得 fresh File
-  feasibility/delta 与 fresh Shell satisfaction observation，才能证明可进入 SM-2 seal；其它 batch/order/rejection audit
-  不能被清理。
-- attempt=0 fixed/singleton finite catalog、finite catalog 无剩余合法 target、invalid attempt-1 document 或 attempt-1 第二次
-  `would_not_satisfy` 均零第二个 correction/request/batch，形成统一 `semantic_contract_failed`。第二次 owner rejection 保留
-  typed original reason `prospective_owner_fact_unsatisfied`；合法 attempt-1 `would_satisfy` 继续进入 SM-2 seal。
-  duplicate composite、CAS-before/CAS-after response loss 与 fresh-process reload 必须证明
-  correction/terminal 只消耗一次，同 proposal 的 owner probe 不重放；全部分支零 ticket/governance/
-  acquisition/operation/effect/coverage，File/Shell result 不含 SM-2/SM-3 target state。
+- `would_not_satisfy` 必须先持久化唯一、exact-current 且完整的 File delta + Shell nested observation composite；
+  partial/forged/stale/mismatched proposal hash/target 均不得 terminal。完整结果因与 admission 已验证的 published constraint
+  矛盾，必须一次性记录 `prospective_satisfaction_contract_violated` 并形成 `semantic_contract_failed`；不得生成
+  replacement target、`Allowed`、第二 provider request 或第二 owner probe。
+- attempt 1 仅验证普通完整 document/schema correction：复用 transaction/manifest/C0～C3/stable prefix，C4 只携带
+  manifest/CWI/field-path-bound typed violation，不复制 constraint；第二次 complete rejection 仍为
+  `candidate_retry_exhausted`。duplicate composite、CAS-before/CAS-after response loss 与 fresh-process reload 必须证明
+  correction/terminal 只消耗一次，同 proposal 的 owner probe 不重放；全部分支零 ticket/governance/acquisition/
+  operation/effect/coverage，File/Shell result 不含 SM-2/SM-3 target state。
 - Definition-gap complete document 在 owner-private transition 前必须通过 pure manifest/expected-document admission；已有 sealed
   acquisition 的 `undeclared_prerequisite` 只产生 attempt-0 typed correction，零 gap observation、governance、ticket、dispatch、
   effect 或 Definition mutation；stale identity 同样不能越过 admission。

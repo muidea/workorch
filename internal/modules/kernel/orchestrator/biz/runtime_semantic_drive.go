@@ -557,9 +557,6 @@ func (m *Biz) admitRuntimeCompletedSemanticPlanDocument(ctx context.Context, agg
 	}
 	document, decodeErr := runtimecontract.DecodeRuntimeSemanticPlanPayloadWithManifest(*ledger.Manifest, payload)
 	if decodeErr == nil {
-		if admissionErr := runtime.ValidateRuntimeProspectiveSemanticCorrectionDocument(ledger, document); admissionErr != nil {
-			return m.handleRuntimeSemanticDocumentDecodeFailure(ctx, aggregate, session, ledger, admissionErr)
-		}
 		updated, err := m.submitRuntimeInternalEvent(ctx, runtime.RuntimeInternalEvent{
 			Kind: runtime.RuntimeInternalEventSemanticPlanEvaluated, Scope: runtime.RuntimeInternalEventScope{WorkspaceID: aggregate.Facts.WorkspaceID, RunID: aggregate.Facts.RunID}, Transaction: &runtime.RuntimeInternalTransactionPayload{LogicalRequestID: session.LogicalRequestID, SemanticDocument: &document},
 		})
@@ -670,38 +667,11 @@ func (m *Biz) driveRuntimeSemanticFeasibility(ctx context.Context, aggregate run
 				return updated.Aggregate, err
 			}
 			if prospective.Satisfaction != nil && prospective.Satisfaction.Outcome == runtimecontract.RuntimeOwnerFactProspectiveWouldNotSatisfy {
-				diagnostic, correctable, err := runtime.DeriveRuntimeProspectiveSatisfactionCorrection(ledger, fact)
+				diagnostic, err := runtime.RuntimeProspectiveSatisfactionContractViolationDiagnostic(fact)
 				if err != nil {
 					return m.failRuntimeSemanticContract(ctx, aggregate, "runtime_contract_defect", err.Error(), nil)
 				}
-				if ledger.Attempt >= 1 {
-					return m.failRuntimeSemanticContract(ctx, aggregate, "semantic_plan_retry_exhausted", diagnostic.OriginalMessage, &diagnostic)
-				}
-				if !correctable {
-					return m.failRuntimeSemanticContract(ctx, aggregate, "prospective_owner_fact_unsatisfied", diagnostic.OriginalMessage, &diagnostic)
-				}
-				expected, expectedErr := runtimeSemanticExpectedDocumentForLedger(aggregate, ledger)
-				if expectedErr != nil {
-					return m.failRuntimeSemanticContract(ctx, aggregate, "runtime_contract_defect", expectedErr.Error(), &diagnostic)
-				}
-				expected.CorrectionAttempt = 1
-				expected.ManifestHash = ledger.Manifest.Hash
-				expected.LogicalRequestID = ""
-				expected.Hash = ""
-				directive, deriveErr := runtimecontract.DeriveRuntimeSemanticCorrectionDirective(*ledger.Manifest, expected, ledger.StablePrefixHash, diagnostic)
-				if deriveErr != nil {
-					return m.failRuntimeSemanticContract(ctx, aggregate, "runtime_contract_defect", deriveErr.Error(), &diagnostic)
-				}
-				logicalRequestID := runtimeSemanticLogicalRequestID(aggregate, ledger.StablePrefixHash, ledger.Manifest.Hash, directive.Hash)
-				updated, submitErr := m.submitRuntimeInternalEvent(ctx, runtime.RuntimeInternalEvent{
-					Kind:  runtime.RuntimeInternalEventSemanticPlanCorrectionRequired,
-					Scope: runtime.RuntimeInternalEventScope{WorkspaceID: aggregate.Facts.WorkspaceID, RunID: aggregate.Facts.RunID},
-					Transaction: &runtime.RuntimeInternalTransactionPayload{
-						StablePrefixHash: ledger.StablePrefixHash, LogicalRequestID: logicalRequestID,
-						ExpectedDocument: &expected, SemanticDiagnostic: &diagnostic,
-					},
-				})
-				return updated.Aggregate, submitErr
+				return m.failRuntimeSemanticContract(ctx, aggregate, diagnostic.OriginalCode, diagnostic.OriginalMessage, &diagnostic)
 			}
 		}
 		switch fact.Status {
@@ -787,9 +757,8 @@ func runtimeSemanticActiveFeasibilityDocument(ledger runtimecontract.RuntimeSema
 
 func (m *Biz) probeRuntimeSemanticProposal(ctx context.Context, aggregate runtime.RuntimeAggregate, proposal runtimecontract.RuntimeSemanticProofProposal) (runtime.RuntimeAggregate, error) {
 	ledger := aggregate.SemanticPlanning.Clone()
-	workspace, err := (workspaceSnapshotReader{hub: m.EventHub()}).Read(ctx, aggregate.Facts.WorkspaceID)
-	if err != nil {
-		return runtime.RuntimeAggregate{}, err
+	if ledger.Manifest == nil {
+		return m.failRuntimeSemanticContract(ctx, aggregate, "semantic_probe_proposal_invalid", "semantic proposal has no sealed manifest", nil)
 	}
 	catalog, found := runtimeSemanticManifestOwnerCatalog(*ledger.Manifest, proposal.OwnerModuleID)
 	if !found {
@@ -807,6 +776,16 @@ func (m *Biz) probeRuntimeSemanticProposal(ctx context.Context, aggregate runtim
 				LogicalRequestID: ledger.LogicalRequestID},
 		})
 		return refreshed.Aggregate, refreshErr
+	}
+	// Fresh sealed authority is a prerequisite for interpreting the proposal.
+	// Once it is known to be current, reject a proposal outside the owner-authored
+	// typed target constraint before any workspace or capability-owner I/O.
+	if err := runtime.ValidateRuntimeSemanticProposalBeforeOwnerProbe(ledger, proposal); err != nil {
+		return m.failRuntimeSemanticContract(ctx, aggregate, "semantic_probe_proposal_invalid", err.Error(), nil)
+	}
+	workspace, err := (workspaceSnapshotReader{hub: m.EventHub()}).Read(ctx, aggregate.Facts.WorkspaceID)
+	if err != nil {
+		return runtime.RuntimeAggregate{}, err
 	}
 	response, err := ProbeRuntimeSemanticProofFeasibility(ctx, m.EventHub(), runtimecontract.RuntimeSemanticProofFeasibilityRequest{
 		WorkspaceID: aggregate.Facts.WorkspaceID, RunID: aggregate.Facts.RunID,

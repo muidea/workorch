@@ -3881,36 +3881,22 @@ if ! grep -q -F 'TestValidateCoverageEvidenceBindingsForFocusRequiresExactTarget
 	exit 1
 fi
 
-# SM-3 is forward-only except for the one bounded owner-rejection correction
-# edge. The contract helper validates the current sealed batch/manifest and
-# retains the attempt-0 document as the immutable delta baseline. Orchestrator
-# may invoke that helper, but must never write a semantic batch State directly.
+# SM-3 semantic batches are forward-only. Provider document/schema correction
+# happens while the batch remains Requesting; an owner feasibility result can
+# never reopen the batch or authorize another target-selection attempt.
 semantic_batch_advance="$(sed -n '/^func AdvanceRuntimeSemanticPlanBatch(/,/^}/p' internal/pkg/workorchruntimecontract/runtime_semantic_batch.go)"
-semantic_batch_reopen="$(sed -n '/^func ReopenRuntimeSemanticPlanBatchForCorrection(/,/^}/p' internal/pkg/workorchruntimecontract/runtime_semantic_batch.go)"
-for marker in \
-	'batch.ValidateAgainstManifest(manifest)' \
-	'batch.DocumentHash == ""' \
-	'case RuntimeSemanticPlanBatchFeasibilityPending:' \
-	'batch.State = RuntimeSemanticPlanBatchRequesting' \
-	'case RuntimeSemanticPlanBatchRequesting:' \
-	'default:'; do
-	if ! grep -q -F "$marker" <<<"$semantic_batch_reopen"; then
-		echo "boundary contract violation: canonical SM-3 correction edge lost $marker" >&2
-		exit 1
-	fi
-done
 if grep -F 'RuntimeSemanticPlanBatchFeasibilityPending:' <<<"$semantic_batch_advance" | grep -q -F 'RuntimeSemanticPlanBatchRequesting'; then
-	echo "boundary contract violation: ordinary SM-3 advance table regained a correction back edge" >&2
+	echo "boundary contract violation: SM-3 regained a feasibility-to-requesting correction back edge" >&2
 	exit 1
 fi
-semantic_batch_requesting_writes="$({
-	source_matches '\.State[[:space:]]*=[[:space:]]*RuntimeSemanticPlanBatchRequesting' internal/pkg/workorchruntimecontract
-	source_matches 'State:[[:space:]]*RuntimeSemanticPlanBatchRequesting' internal/pkg/workorchruntimecontract
-} | sed '/^[[:space:]]*$/d')"
-if [[ "$(awk 'NF { count++ } END { print count + 0 }' <<<"$semantic_batch_requesting_writes")" -ne 1 ]] ||
-	! grep -q -F 'internal/pkg/workorchruntimecontract/runtime_semantic_batch.go:' <<<"$semantic_batch_requesting_writes"; then
-	echo "boundary contract violation: ReopenRuntimeSemanticPlanBatchForCorrection is not the sole direct SM-3 correction edge" >&2
-	echo "$semantic_batch_requesting_writes" >&2
+if grep -R -q -E --include='*.go' -- \
+	'ReopenRuntimeSemanticPlanBatchForCorrection|DeriveRuntimeProspectiveSatisfactionCorrection|ValidateRuntimeProspectiveSemanticCorrectionDocument|prospective_owner_fact_unsatisfied' \
+	internal/pkg/workorchruntimecontract internal/modules/kernel/orchestrator; then
+	echo "boundary contract violation: retired owner-rejection target-correction authority returned" >&2
+	exit 1
+fi
+if [[ -e internal/modules/kernel/orchestrator/biz/runtime/prospective_semantic_correction.go ]]; then
+	echo "boundary contract violation: retired prospective semantic correction implementation returned" >&2
 	exit 1
 fi
 orchestrator_semantic_batch_state_writes="$({
@@ -3918,101 +3904,93 @@ orchestrator_semantic_batch_state_writes="$({
 	source_matches '\.State[[:space:]]*=[[:space:]]*runtimecontract\.RuntimeSemanticPlanBatch|State:[[:space:]]*runtimecontract\.RuntimeSemanticPlanBatch' internal/modules/kernel/orchestrator/biz
 } | sed '/^[[:space:]]*$/d')"
 if [[ -n "$orchestrator_semantic_batch_state_writes" ]]; then
-	echo "boundary contract violation: Orchestrator writes RuntimeSemanticPlanBatch.State outside the canonical contract transition" >&2
+	echo "boundary contract violation: Orchestrator writes RuntimeSemanticPlanBatch.State outside the canonical forward transition" >&2
 	echo "$orchestrator_semantic_batch_state_writes" >&2
 	exit 1
 fi
-orchestrator_semantic_batch_reopen_calls="$(source_matches 'ReopenRuntimeSemanticPlanBatchForCorrection\(' internal/modules/kernel/orchestrator/biz)"
-if [[ "$(awk 'NF { count++ } END { print count + 0 }' <<<"$orchestrator_semantic_batch_reopen_calls")" -ne 1 ]]; then
-	echo "boundary contract violation: Orchestrator must have exactly one canonical SM-3 correction-edge call site" >&2
-	echo "$orchestrator_semantic_batch_reopen_calls" >&2
-	exit 1
-fi
-if ! grep -q -F 'TestReopenRuntimeSemanticPlanBatchForCorrectionIsTheOnlyIdempotentReturnEdge' internal/pkg/workorchruntimecontract/runtime_semantic_batch_test.go; then
-	echo "boundary contract violation: canonical SM-3 correction edge regression is missing" >&2
-	exit 1
-fi
 
-# Provider decode admission and the reducer CAS boundary must reuse the same
-# pure prospective-correction validator. Candidate derivation must also reuse
-# the sealed manifest validator, so a retry cannot reinterpret selector,
-# variant, constraint, or owner-catalog authority more loosely than attempt 0.
-semantic_provider_document_admission="$(sed -n '/^func (m \*Biz) admitRuntimeCompletedSemanticPlanDocument(/,/^}/p' internal/modules/kernel/orchestrator/biz/runtime_semantic_drive.go)"
-if ! grep -q -F 'runtime.ValidateRuntimeProspectiveSemanticCorrectionDocument(ledger, document)' <<<"$semantic_provider_document_admission" ||
-	! grep -q -F 'handleRuntimeSemanticDocumentDecodeFailure(ctx, aggregate, session, ledger, admissionErr)' <<<"$semantic_provider_document_admission"; then
-	echo "boundary contract violation: provider semantic document admission bypasses the canonical prospective-correction validator" >&2
+# The persisted proof document and its exact proposal are revalidated against
+# the manifest-sealed, Shell-authored all-of target constraint before any File
+# or Shell owner probe. A matching target followed by would_not_satisfy is an
+# owner-contract contradiction and terminates through the existing private
+# semantic-contract event; it never opens a finite or open-selector retry.
+semantic_proposal_preprobe="$(sed -n '/^func ValidateRuntimeSemanticProposalBeforeOwnerProbe(/,/^}/p' internal/modules/kernel/orchestrator/biz/runtime/prospective_satisfaction_contract.go)"
+for marker in \
+	'document.ValidateAgainstManifest(*ledger.Manifest)' \
+	'StableRuntimeSemanticProofProposalHash(proposal)' \
+	'matches != 1'; do
+	if ! grep -q -F "$marker" <<<"$semantic_proposal_preprobe"; then
+		echo "boundary contract violation: semantic proposal pre-probe guard lost $marker" >&2
+		exit 1
+	fi
+done
+semantic_owner_probe="$(sed -n '/^func (m \*Biz) probeRuntimeSemanticProposal(/,/^}/p' internal/modules/kernel/orchestrator/biz/runtime_semantic_drive.go)"
+if ! grep -q -F 'runtime.ValidateRuntimeSemanticProposalBeforeOwnerProbe(ledger, proposal)' <<<"$semantic_owner_probe" ||
+	! grep -q -F 'semantic_probe_proposal_invalid' <<<"$semantic_owner_probe"; then
+	echo "boundary contract violation: semantic owner probe bypasses the persisted manifest/document preflight" >&2
 	exit 1
 fi
-semantic_reducer_correction_admission="$({
-	sed -n '/^func validateSemanticPlanDocumentPhase(/,/^}/p' internal/modules/kernel/orchestrator/biz/runtime/semantic_planning.go
-	sed -n '/^func validateSemanticCorrectionDocumentIdentity(/,/^}/p' internal/modules/kernel/orchestrator/biz/runtime/semantic_planning.go
-	sed -n '/^func validateProspectiveSemanticCorrectionDocument(/,/^}/p' internal/modules/kernel/orchestrator/biz/runtime/semantic_planning.go
-})"
+prospective_contract_violation="$(sed -n '/^func RuntimeProspectiveSatisfactionContractViolationDiagnostic(/,/^}/p' internal/modules/kernel/orchestrator/biz/runtime/prospective_satisfaction_contract.go)"
 for marker in \
-	'case runtimecontract.RuntimeSemanticPlanningCorrectionRequired:' \
-	'return validateSemanticCorrectionDocumentIdentity(ledger, document)' \
-	'return validateProspectiveSemanticCorrectionDocument(ledger, document)' \
-	'return ValidateRuntimeProspectiveSemanticCorrectionDocument(ledger, document)'; do
-	if ! grep -q -F "$marker" <<<"$semantic_reducer_correction_admission"; then
-		echo "boundary contract violation: reducer prospective correction does not reuse the canonical admission fence ($marker)" >&2
+	'RuntimeOwnerFactProspectiveWouldNotSatisfy' \
+	'prospective_satisfaction_contract_violated' \
+	'StableRuntimeOwnerFactProspectiveSatisfactionHash(satisfaction)'; do
+	if ! grep -q -F "$marker" <<<"$prospective_contract_violation"; then
+		echo "boundary contract violation: prospective satisfaction contradiction mapping lost $marker" >&2
 		exit 1
 	fi
 done
-prospective_correction_derivation="$(sed -n '/^func DeriveRuntimeProspectiveSatisfactionCorrection(/,/^}/p' internal/modules/kernel/orchestrator/biz/runtime/prospective_semantic_correction.go)"
-for marker in \
-	'acquisitionCatalog.TargetRefs' \
-	'candidateDocument := document.Clone()' \
-	'candidateDocument.Proposals[proposalIndex].Target.ProspectiveTargetRef = candidate' \
-	'candidateDocument.ValidateAgainstManifest(*ledger.Manifest)'; do
-	if ! grep -q -F "$marker" <<<"$prospective_correction_derivation"; then
-		echo "boundary contract violation: prospective target correction bypasses sealed manifest/catalog admission ($marker)" >&2
-		exit 1
-	fi
-done
+semantic_feasibility_drive="$(sed -n '/^func (m \*Biz) driveRuntimeSemanticFeasibility(/,/^}/p' internal/modules/kernel/orchestrator/biz/runtime_semantic_drive.go)"
+if ! grep -q -F 'runtime.RuntimeProspectiveSatisfactionContractViolationDiagnostic(fact)' <<<"$semantic_feasibility_drive" ||
+	! grep -q -F 'm.failRuntimeSemanticContract(ctx, aggregate, diagnostic.OriginalCode' <<<"$semantic_feasibility_drive" ||
+	grep -q -F 'RuntimeInternalEventSemanticPlanCorrectionRequired' <<<"$semantic_feasibility_drive"; then
+	echo "boundary contract violation: would_not_satisfy did not converge directly as an owner-contract violation" >&2
+	exit 1
+fi
 for regression in \
-	'TestRuntimeProspectiveWouldNotSatisfyReopensSameBatchOnceAndReplaysIdempotently' \
-	'TestRuntimeProspectiveCorrectionDocumentEnforcesAllowedAndOpenSelectorDelta' \
-	'TestRuntimeProspectiveDrivePersistsWouldNotSatisfyBeforeTerminalAndDoesNotReprobeAfterRestart' \
-	'TestRuntimeProspectiveDriveUsesOneBoundedTargetCorrection'; do
+	'TestRuntimeProspectiveProposalPreProbeRejectsTargetOutsideSealedConstraint' \
+	'TestRuntimeProspectiveDriveTreatsConstraintValidOwnerRejectionAsContractViolation'; do
 	if ! grep -R -q -F --include='*_test.go' -- "$regression" internal/modules/kernel/orchestrator; then
-		echo "boundary contract violation: bounded prospective correction regression is missing ($regression)" >&2
+		echo "boundary contract violation: prospective all-of convergence regression is missing ($regression)" >&2
 		exit 1
 	fi
 done
-prospective_full_drive_regression="$(sed -n '/^func TestRuntimeProspectiveDriveUsesOneBoundedTargetCorrection(/,/^}/p' internal/modules/kernel/orchestrator/biz/runtime_prospective_composite_drive_test.go)"
+
+# The required-owner target fact is conjunctive only. Its provider projection
+# carries the predicates and opaque provenance needed for admission, but must
+# not leak the hidden dependency surface/recipe identity under an alias.
+prospective_target_contract="$(cat internal/pkg/workorchruntimecontract/runtime_prospective_target_constraint.go)"
 for marker in \
-	'corrected target satisfies' \
-	'fileSelectionObserver.Subscribe(fileevents.TopicAcquireRuntimeTargetSelection' \
-	'sealed.SemanticPlanning.Phase != runtimecontract.RuntimeSemanticPlanningSealed' \
-	'binding.ProspectiveTargetRef != secondTarget' \
-	'len(binding.TargetRefs) != 0' \
-	'sealed.Facts.Focus.ProspectiveTargetRef != secondTarget' \
-	'len(sealed.Facts.Focus.TargetRefs) != 0' \
-	'reconciliationBinding.ProspectiveTargetRef != secondTarget' \
-	'len(reconciliationBinding.TargetRefs) != 0' \
-	'runtimecontract.ValidateCoverageEvidenceBindingsForFocus' \
-	'sealed.Facts.ReconciliationContract.Validate()' \
-	'targetSelectionCalls != 1' \
-	'selection.ProspectiveTargetRef != secondTarget' \
-	'len(selection.TargetRefs) != 0' \
-	'len(selection.CandidateTargetRefs) != 0' \
-	'runtimecontract.BuildRuntimeCandidateContractManifest(' \
-	'runtimecontract.ValidateRuntimeCandidateContractManifestForDecision(' \
-	'candidateManifest.Bindings[0].ProspectiveTargetRef != secondTarget' \
-	'fileWrite.Target.Policy != runtimecontract.RuntimeOperationTargetPolicyProspectiveOwnerTarget' \
-	'fileWrite.Target.ProspectiveTargetRef != secondTarget' \
-	'len(fileWrite.Target.ExactTargetRefs) != 0' \
-	'len(fileWrite.Target.OwnerScopeTargetRefs) != 0'; do
-	if ! grep -q -F "$marker" <<<"$prospective_full_drive_regression"; then
-		echo "boundary contract violation: corrected prospective full-drive authority assertion is missing ($marker)" >&2
+	'RuntimeProspectiveTargetSatisfiesConstraint' \
+	'ResolveRuntimeProspectiveTargetSatisfactionConstraint'; do
+	if ! grep -q -F "$marker" <<<"$prospective_target_contract"; then
+		echo "boundary contract violation: prospective all-of target contract lost $marker" >&2
 		exit 1
 	fi
 done
-if ! grep -q -F 'remaining candidate already exists is terminal without correction' internal/modules/kernel/orchestrator/biz/runtime_prospective_composite_drive_test.go; then
-	echo "boundary contract violation: current-catalog prospective target exclusion regression is missing" >&2
+if ! grep -q -E -- 'AllOf[[:space:]]+\[\]RuntimeProspectiveTargetPredicate' <<<"$prospective_target_contract"; then
+	echo "boundary contract violation: prospective all-of target contract lost AllOf" >&2
 	exit 1
 fi
-
+if grep -q -E -- 'AnyOf|OneOf|Aggregation' <<<"$prospective_target_contract"; then
+	echo "boundary contract violation: prospective target contract regained alternative aggregation" >&2
+	exit 1
+fi
+provider_target_projection="$(sed -n '/^type runtimeSemanticProspectiveTargetConstraintProjection struct {/,/^}/p' internal/modules/blocks/llm/biz/runtime_semantic_projection.go)"
+for marker in OwnerModuleID ProspectiveSatisfactionContractRef InputSchemaHash CatalogObservedRevision AllOf; do
+	if ! grep -q -F "$marker" <<<"$provider_target_projection"; then
+		echo "boundary contract violation: provider-safe prospective target projection lost $marker" >&2
+		exit 1
+	fi
+done
+if grep -q -E -- 'ValidationSurfaceID|ValidationRecipeID|validationSurfaceId|validationRecipeId' <<<"$provider_target_projection"; then
+	echo "boundary contract violation: provider projection leaked dependency surface/recipe identity" >&2
+	exit 1
+fi
+if ! grep -q -F 'strings.Contains(authority, prospectiveConstraint.ValidationRecipeID)' internal/modules/blocks/llm/biz/runtime_candidate_provider_test.go; then
+	echo "boundary contract violation: dependency recipe identity value-isolation regression is missing" >&2
+	exit 1
+fi
 # Run replacement recovery is one owner-private durable stage/generation
 # ledger. Process-local tasks may only wake the persisted lease.
 run_replacement_recovery_contract="$(cat \

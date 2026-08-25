@@ -94,20 +94,24 @@ application、Web 与 orchestrator 不直接访问 ai-proxy。
     owner/operation/variant/target policy/operation selector/constraints，但故意不携带 exact prospective target。对
     `prospective_owner_target`，semantic-plan provider 必须在 Definition declaration selector/candidate refs 与
     current operation selector/owner constraints 的交集内提出一个 nonempty exact target，非空 candidate refs 要求
-    exact member match，并只声明 `state_change` evidence。该值仍只是 proposal，File/Shell fact 只验证它，只有
+    exact member match；required owner 已发布 `ProspectiveTargetSatisfactionConstraint` 时，C3 还要投影其
+    surface/contract/input-schema/catalog-revision lineage 与完整 `allOf` predicate，并由同一 manifest 驱动的 JSON Schema
+    和本地 evaluator 在任何 File/Shell probe 前执行合取校验。projection 故意省略该 dependency surface 的
+    `ValidationRecipeID`，不得把它提升成 selectable validation recipe，也不得解释 owner reason 或引入 `any_of/one_of`。
+    proposal 只声明 `state_change` evidence。该值仍只是 proposal，File/Shell fact 只验证它，只有
     SM-2 sealed binding 才形成 authority。后续 operations provider 只能选择 binding ref；target 不再是 provider
     choice，由 candidate/dispatch 从 current binding 派生并校验。最终 validation surface/recipe 在
     acquisition 与 owner re-observation 前暂不可选择是预期事实，不能单独据此输出 `undeclared_prerequisite`。acquisition
     receipt 只证明前置状态变化，不产生 terminal validation evidence/coverage credit；ticket、retry、Runtime state/action
     以及 re-observation 后的新 planning generation 仍完全由 Orchestrator owner 决定。
-    prospective obligation只可回显pre-seal sealed `ProspectiveSatisfactionContractRef`作为proposal合同，不能回显required-owner
-    dependency catalog或让模型填写`would_satisfy|would_not_satisfy|stale`；这些 outcome只来自required owner typed result。
-    只有 Orchestrator 已持久化的 exact-current File+Shell full-composite `would_not_satisfy` 可在 semantic
-    attempt=0 且仍有不同合法 target 时生成既有 attempt-1 `RuntimeSemanticCorrectionDirective`。LLM
-    只在 C4 取得 manifest-bound failed-target forbidden delta 与 bounded allowed/relational requirement，不取得 raw
-    owner diagnostic/dependency catalog，也不决定是否 retry/terminal。attempt-1 proposal 必须提出不同 target 且仍命中
-    原 selector/constraints/candidate bounds；fixed/singleton/exhausted 或第二次 rejection 不会产生新 LLM
-    correction。typed stale 只使 Orchestrator 刷新 owner fact，不改变 LLM correction attempt。
+    prospective obligation只可回显pre-seal sealed `ProspectiveSatisfactionContractRef`及上述 owner-authored typed constraint
+    作为 proposal 合同，不能回显 required-owner dependency catalog、recipe command 或让模型填写
+    `would_satisfy|would_not_satisfy|stale`；这些 outcome 只来自 required owner typed result。
+    prospective target 不满足 sealed typed constraint 时，只形成普通完整 document/schema rejection；LLM attempt 1
+    继续复用同一 transaction/manifest/C0～C3/stable prefix，并只在 C4 取得 manifest/CWI/field-path-bound typed
+    violation，不复制第二份 constraint authority，也不取得 raw owner diagnostic/dependency catalog。通过 constraint 后的
+    exact-current File+Shell full-composite `would_not_satisfy` 不再调用 LLM；它由 Orchestrator 直接归类为
+    `prospective_satisfaction_contract_violated -> semantic_contract_failed`。typed stale 只使 Orchestrator 刷新 owner fact。
 14. Skill 只从 Run owner 的 sealed activation 进入 volatile C3。每项携带 WorkOrch Registry 或 SkillHub typed
     provenance、original/truncated instruction identity 与 activation-time byte budget；LLM 不读取 Skill repository/catalog、
     不重新选择或裁剪 Skill，也不把 Skill material 移入 C0～C2。缺失/漂移的 provenance 或 budget 在 Runtime
@@ -195,6 +199,8 @@ application、Web 与 orchestrator 不直接访问 ai-proxy。
   未声明时省略 provider format，且任何 structured-output failure 都不触发第二次 provider call。
 - [x] C3 owner-fact acquisition 同时保留 terminal `validation` 与 current `state_change` obligation，投影 exact
   File/write selector，明确暂未 ready 的 validation surface 不构成 `undeclared_prerequisite`；该动态变化不改变 C0～C2 bytes/hash。
+- [x] prospective target 的 owner-authored `allOf` constraint 只进入 C3 volatile authority；provider schema 与本地 evaluator
+  在 owner probe 前执行同一合取合同，C4 只携带 typed violation 引用，且 dependency recipe identity/command 不进入 provider。
 - [x] candidate terminal framing 强制 `Stale | Feedback | DocumentOutcome` exactly-one；complete content 与 hash/bytes
   一致，所有非 complete outcome 拒绝 content-only/混合 envelope。
 - [x] completion/stream/embedding/preflight 的 physical response mode 在成功、transport failure 与 output-limit audit 中

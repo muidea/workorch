@@ -60,12 +60,13 @@ this path without a parallel compatibility authority.
   command/result；affected focus停止新operation，修正只通过新candidate + explicit Restart进入successor，predecessor不扩图。
 - every prospective owner-fact acquisition seals an exact `ProspectiveSatisfactionContractRef`; Runtime composes the acquisition
   owner's hypothetical delta with the required owner's non-selectable dependency observation. The dependency catalog never
-  becomes an LLM-selectable operation/surface. Definition/activation does not seal an exact prospective target: SM-3 proposes it
-  at the intersection of Definition declaration selector/candidate refs and current operation selector/owner constraints, owner
-  facts validate it, and only the SM-2 binding makes it authoritative. Operation candidate references that binding, and dispatch
-  derives the target from it. An exact-current composite `would_not_satisfy` may consume the existing sole SM-3 correction only
-  at attempt 0 when a different legal target remains; the same batch returns to `Requesting`, while stale only refreshes facts.
-  Fixed/singleton/exhausted bounds or a second rejection close `semantic_contract_failed`.
+  becomes an LLM-selectable operation/surface. The required owner publishes one provider-safe typed `all_of` target constraint;
+  Runtime seals it into the acquisition/manifest and projects it only in C3. Definition/activation does not seal an exact
+  prospective target: SM-3 proposes it at the intersection of Definition declaration selector/candidate refs, current operation
+  selector/owner constraints and that typed constraint. A mismatch is rejected by document admission/schema correction with zero
+  File/Shell probe; only the SM-2 binding makes an admitted owner-validated target authoritative. An exact-current composite
+  `would_not_satisfy` contradicts the published contract and directly closes
+  `prospective_satisfaction_contract_violated -> semantic_contract_failed`; stale only refreshes facts.
 
 See [Definition Convergence](../00-core/definition-convergence/overview.md) and
 [Activation Flow](../00-core/definition-convergence/activation-flow.md).

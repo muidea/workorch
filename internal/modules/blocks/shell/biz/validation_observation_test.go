@@ -137,7 +137,7 @@ func TestDefaultManagedValidationRecipeClosesItsPublishedProofCheck(t *testing.T
 		ID: "software-dev-validation-evidence", Command: "go", Args: []string{"test", "-v", "./..."}, TimeoutMillis: 60_000,
 	}
 	binding := shellTestWorkspaceManifestBinding("tree-default-validation", []string{"fixture.go", "fixture_test.go", "go.mod"})
-	surfaces := shellValidationSurfaces([]runtimecontract.RuntimeValidationRecipe{recipe}, []runtimecontract.RuntimeValidationRecipe{recipe}, []runtimecontract.RuntimeValidationRecipe{recipe}, binding)
+	surfaces := shellValidationSurfaces([]runtimecontract.RuntimeValidationRecipe{recipe}, []runtimecontract.RuntimeValidationRecipe{recipe}, []runtimecontract.RuntimeValidationRecipe{recipe}, binding, "shell-policy-test")
 	if len(surfaces) != 1 || len(surfaces[0].CheckRefs) != 1 {
 		t.Fatalf("default validation surface = %+v", surfaces)
 	}

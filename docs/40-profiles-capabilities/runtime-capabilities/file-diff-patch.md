@@ -67,9 +67,10 @@ may admit the resulting candidate/dispatch. File reconciliation never returns re
 credit. Pre-seal Definition/Profile policy contains selector/candidate refs but no exact prospective target; File validates the
 SM-3 proposal against those refs and its current operation selector/constraints. After SM-2 seals the binding, operation
 candidate only references it; dispatch and File execution admission consume the exact target derived from that binding.
-If the required owner later returns a persisted full-composite `would_not_satisfy`, File neither selects a replacement nor opens
-correction. A sole attempt-1 correction, when Orchestrator admits it, returns a different still-bounded SM-3 proposal to the same
-File feasibility path for a fresh delta; replay of the rejected proposal remains idempotent and read-only.
+The required owner's provider-safe typed `all_of` constraint is checked by semantic schema/document admission before File is
+called. A mismatch may use the ordinary complete-document attempt-1 correction but produces zero File probe. If a matching target
+later receives a persisted full-composite `would_not_satisfy`, File neither selects a replacement nor opens correction; Orchestrator
+records `prospective_satisfaction_contract_violated` and terminates the semantic contract. Replay remains idempotent and read-only.
 
 ## Target And Path Safety
 

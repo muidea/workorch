@@ -954,10 +954,23 @@ func runtimeTestSemanticProofObligations(t *testing.T, facts runtimecontract.Run
 				obligation.DeclarationTargetSelectorOwnerRef = convergence.TargetSelectorOwnerRef
 				obligation.DeclarationTargetSelectorSubjectRef = convergence.TargetSelectorSubjectRef
 			}
+			var prospectiveTargetConstraint *runtimecontract.RuntimeProspectiveTargetSatisfactionConstraint
+			if convergence.AcquisitionTargetPolicy == runtimecontract.RuntimeOperationTargetPolicyProspectiveOwnerTarget {
+				requiredOwnerCatalog, found := catalogsByOwner[convergence.Requirement.OwnerModuleID]
+				if !found {
+					t.Fatalf("test semantic obligation %q lacks prospective required-owner catalog %q", item.ID, convergence.Requirement.OwnerModuleID)
+				}
+				resolved, resolveErr := runtimecontract.ResolveRuntimeProspectiveTargetSatisfactionConstraint(requiredOwnerCatalog, convergence.Requirement, convergence.ProspectiveSatisfactionContractRef)
+				if resolveErr != nil {
+					t.Fatalf("test semantic obligation %q prospective target constraint: %v", item.ID, resolveErr)
+				}
+				prospectiveTargetConstraint = &resolved
+			}
 			obligation.OwnerFactAcquisition = &runtimecontract.RuntimeSemanticOwnerFactAcquisition{
-				Requirement:                        convergence.Requirement,
-				ProspectiveSatisfactionContractRef: convergence.ProspectiveSatisfactionContractRef,
-				DeclarationTargetSelectorRef:       convergence.TargetSelectorRef, DeclarationTargetSelectorOwnerRef: convergence.TargetSelectorOwnerRef, DeclarationTargetSelectorSubjectRef: convergence.TargetSelectorSubjectRef,
+				Requirement:                             convergence.Requirement,
+				ProspectiveSatisfactionContractRef:      convergence.ProspectiveSatisfactionContractRef,
+				ProspectiveTargetSatisfactionConstraint: prospectiveTargetConstraint,
+				DeclarationTargetSelectorRef:            convergence.TargetSelectorRef, DeclarationTargetSelectorOwnerRef: convergence.TargetSelectorOwnerRef, DeclarationTargetSelectorSubjectRef: convergence.TargetSelectorSubjectRef,
 				AcquisitionOwnerModuleID: convergence.AcquisitionOwnerModuleID, AcquisitionOperationKind: convergence.AcquisitionOperationKind, AcquisitionOperationVariantID: convergence.AcquisitionOperationVariantID,
 				AcquisitionTargetPolicy: convergence.AcquisitionTargetPolicy, AcquisitionTargetSelectorRef: convergence.AcquisitionTargetSelectorRef, AcquisitionConstraintRefs: constraints,
 				OwnerCatalogSnapshotID: catalog.SnapshotID, OwnerCatalogObservedRevision: catalog.ObservedRevision,

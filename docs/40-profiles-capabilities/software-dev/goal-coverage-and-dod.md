@@ -60,18 +60,17 @@ and reopens the same CWI for a fresh validation binding; it never grants DoD cre
 That one-shot closure uses the Profile-sealed
 `shell/selectable-validation-surface/prospective-workspace-manifest/v1` satisfaction contract. Before any File effect, File
 validates the exact target proposed by SM-3 at the intersection of the Definition declaration selector/candidate refs and the
-current File operation selector/constraints, and returns an immutable
-current-tree-revision-bound hypothetical manifest delta. Shell evaluates it against its exact non-selectable
-dependency catalog/observation plus the activation-sealed recipe identity. For the default Go recipe, a resulting `*_test.go`
-can make `go test ./...` applicable; a resulting `scripts/validate.sh` alone cannot. A Shell `would_not_satisfy` result is first
-persisted with the File delta as one exact-current composite and never becomes a binding by itself. At semantic attempt 0, if the
-same declaration selector/candidate refs and File constraints still admit a different target, the existing SM-3 correction ledger
-reopens the same batch at `Requesting`; the next proposal must use that different in-bounds target and obtain fresh File/Shell
-facts. A fixed/singleton or exhausted candidate scope at attempt 0, an invalid attempt-1 document, or an attempt-1
-`would_not_satisfy` reaches the common `semantic_contract_failed` terminal; the second owner rejection retains typed original
-reason `prospective_owner_fact_unsatisfied`, while a valid attempt-1 `would_satisfy` may proceed to the SM-2 binding seal. Shell typed stale only uses
-bounded catalog refresh and does not consume correction. None of these branches creates validation credit, governance, a ticket
-or an acquisition effect.
+current File operation selector/constraints. Shell publishes a provider-safe typed `all_of` target constraint derived from the
+activation-sealed recipe applicability rule; the acquisition/manifest seals it into C3. For the default Go recipe this generic
+constraint requires a target compatible with the recipe's test-input shape. A mismatching proposal is rejected by JSON
+Schema/document admission before File or Shell is called, and only an ordinary complete-document correction may replace it.
+File then returns an immutable current-tree-revision-bound hypothetical manifest delta, which Shell evaluates against its exact
+non-selectable dependency catalog/observation plus the activation-sealed recipe identity. A Shell `would_not_satisfy` result is
+persisted with the File delta as one exact-current composite and never becomes a binding; because the proposal already satisfied
+the published constraint, it is an owner contract contradiction and directly reaches
+`prospective_satisfaction_contract_violated -> semantic_contract_failed`, with no replacement-target correction. Shell typed
+stale only uses bounded catalog refresh. None of these branches creates validation credit, governance, a ticket or an acquisition
+effect.
 
 `coverage_map` and a generic `user_deliverable` are Result/trace material derived from the proved CWI set, not unconditional
 terminal members. A concrete Goal may still declare an additional artifact through its admitted Definition/Profile contract, but
@@ -87,7 +86,8 @@ the Runtime must not manufacture a generic CWI without an exact proof declaratio
 - existing files require revision-bound replacement; `file/write` is create-only;
 - validation recipes must be activation-sealed and owner-confirmed;
 - `prospective_owner_target` validation preparation must carry the exact Profile-derived
-  `ProspectiveSatisfactionContractRef`; the Shell dependency catalog is freshness authority only and never LLM-selectable;
+  `ProspectiveSatisfactionContractRef`; Shell must publish one matching provider-safe typed `all_of` constraint, while the
+  dependency catalog and recipe command remain freshness authority only and never LLM-selectable;
 - the Profile declaration does not carry an exact prospective target; SM-3 proposes one at the intersection of its declaration
   selector/candidate refs and the current operation selector/owner constraints, File/Shell validate it, and only the SM-2 binding
   authorizes the later operation candidate/dispatch;

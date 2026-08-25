@@ -2,7 +2,6 @@ package runtime
 
 import (
 	"context"
-	"errors"
 	"testing"
 
 	"github.com/muidea/workorch/internal/pkg/common"
@@ -69,174 +68,24 @@ func TestRuntimeProspectiveCompositePersistsOneBatchAndReplaysIdempotently(t *te
 	}
 }
 
-func TestRuntimeProspectiveWouldNotSatisfyReopensSameBatchOnceAndReplaysIdempotently(t *testing.T) {
+func TestRuntimeProspectiveProposalPreProbeRejectsTargetOutsideSealedConstraint(t *testing.T) {
 	fixture := newProspectiveSemanticTransitionFixture(t)
-	composite := fixture.wouldNotSatisfyCompositeObservation(t, "first prospective target cannot make validation selectable")
-	batchID := fixture.aggregate.SemanticPlanning.FeasibilityBatchID
-	fixture.apply(t, RuntimeInternalEvent{
-		Kind: RuntimeInternalEventSemanticFeasibilityObserved,
-		Authority: &RuntimeInternalAuthorityPayload{
-			SemanticBatchID: batchID, SemanticFeasibility: &composite,
-		},
-	})
-	diagnostic, correctable, err := DeriveRuntimeProspectiveSatisfactionCorrection(fixture.aggregate.SemanticPlanning, composite)
-	if err != nil || !correctable {
-		t.Fatalf("derive prospective correction: correctable=%t diagnostic=%+v err=%v", correctable, diagnostic, err)
+	ledger := fixture.aggregate.SemanticPlanning.Clone()
+	proposal := fixture.proposal.Clone()
+	proposal.Target.ProspectiveTargetRef = "Makefile"
+	document, found := runtimeSemanticBatchDocument(ledger.BatchDocuments, ledger.ActiveBatchID)
+	if !found || len(document.Proposals) != 1 {
+		t.Fatalf("prospective pre-probe fixture has no active proposal: %+v", ledger)
 	}
-	active, found := runtimeSemanticBatch(fixture.aggregate.SemanticPlanning.Batches, fixture.aggregate.SemanticPlanning.ActiveBatchID)
-	if !found {
-		t.Fatal("prospective correction fixture lost active batch")
+	document.Proposals[0] = proposal.Clone()
+	ledger.BatchDocuments[0] = document
+	acquisition := fixture.manifest.ProofObligations[0].OwnerFactAcquisition
+	if acquisition == nil || acquisition.ProspectiveTargetSatisfactionConstraint == nil ||
+		runtimecontract.RuntimeProspectiveTargetSatisfiesConstraint(proposal.Target.ProspectiveTargetRef, *acquisition.ProspectiveTargetSatisfactionConstraint) {
+		t.Fatalf("fixture did not seal a rejecting all-of target constraint: %+v", acquisition)
 	}
-	baselineDocument, found := runtimeSemanticBatchDocument(fixture.aggregate.SemanticPlanning.BatchDocuments, active.BatchID)
-	if !found {
-		t.Fatal("prospective correction fixture lost baseline document")
-	}
-	baselineDocumentHash := runtimecontract.StableRuntimeSemanticPlanDocumentHash(baselineDocument)
-	expected := runtimecontract.RuntimeExpectedDocumentContract{
-		SchemaVersion: runtimecontract.RuntimeExpectedDocumentSchemaCurrent,
-		DocumentKind:  runtimecontract.RuntimeProviderDocumentSemanticPlan,
-		PlanStep:      runtimecontract.RuntimeSemanticPlanStepProofBatch,
-		ManifestHash:  fixture.manifest.Hash, DefinitionSeedHash: fixture.manifest.DefinitionSeedHash,
-		BatchID: active.BatchID, BatchSequence: active.Sequence,
-		BatchCoverageWorkItemIDs: append([]common.CoverageWorkItemID(nil), active.CoverageWorkItemIDs...),
-		CoverageOrderHash:        active.CoverageOrderHash,
-		CorrectionAttempt:        1,
-	}
-	directive, err := runtimecontract.DeriveRuntimeSemanticCorrectionDirective(
-		fixture.manifest, expected, fixture.aggregate.SemanticPlanning.StablePrefixHash, diagnostic,
-	)
-	if err != nil {
-		t.Fatal(err)
-	}
-	logicalRequestID := runtimecontract.StableRuntimeCandidateRequestSessionID(
-		runtimecontract.RuntimeProviderDocumentSemanticPlan,
-		fixture.aggregate.Facts.WorkspaceID,
-		fixture.aggregate.Facts.RunID,
-		fixture.aggregate.Decision.AuthorityTransaction(),
-		fixture.aggregate.SemanticPlanning.StablePrefixHash,
-		fixture.manifest.Hash,
-		directive.Hash,
-	)
-	event := RuntimeInternalEvent{
-		Kind:  RuntimeInternalEventSemanticPlanCorrectionRequired,
-		Scope: RuntimeInternalEventScope{WorkspaceID: fixture.aggregate.Facts.WorkspaceID, RunID: fixture.aggregate.Facts.RunID},
-		Transaction: &RuntimeInternalTransactionPayload{
-			StablePrefixHash: fixture.aggregate.SemanticPlanning.StablePrefixHash,
-			LogicalRequestID: logicalRequestID, ExpectedDocument: &expected, SemanticDiagnostic: &diagnostic,
-		},
-	}
-	beforeRevision := fixture.aggregate.StateRevision
-	beforeSaves := fixture.repository.saves
-	fixture.apply(t, event)
-	ledger := fixture.aggregate.SemanticPlanning
-	reopened, found := runtimeSemanticBatch(ledger.Batches, ledger.ActiveBatchID)
-	if !found || ledger.Phase != runtimecontract.RuntimeSemanticPlanningCorrectionRequired || ledger.Attempt != 1 ||
-		ledger.LogicalRequestID != logicalRequestID || ledger.CorrectionDirective == nil || ledger.CorrectionDirective.Hash != directive.Hash ||
-		reopened.State != runtimecontract.RuntimeSemanticPlanBatchRequesting || reopened.DocumentHash != baselineDocumentHash ||
-		len(ledger.BatchDocuments) != 1 || runtimecontract.StableRuntimeSemanticPlanDocumentHash(ledger.BatchDocuments[0]) != baselineDocumentHash ||
-		ledger.FeasibilityBatchID != "" || len(ledger.Feasibilities) != 0 || ledger.FeasibilitySetHash != "" ||
-		ledger.CoverageOrderDocument == nil || ledger.Document == nil || ledger.Document.PlanStep != runtimecontract.RuntimeSemanticPlanStepCoverageOrder ||
-		len(ledger.Rejections) != 1 || len(fixture.aggregate.CandidateRequestSessions) != 0 || fixture.aggregate.StateRevision != beforeRevision+1 || fixture.repository.saves != beforeSaves+1 {
-		t.Fatalf("bounded prospective correction did not preserve/reopen exact lineage: ledger=%+v batch=%+v sessions=%+v", ledger, reopened, fixture.aggregate.CandidateRequestSessions)
-	}
-	repeated := runtimecontract.RuntimeSemanticPlanDocument{
-		SchemaVersion: runtimecontract.RuntimeSemanticPlanDocumentSchemaCurrent,
-		ManifestHash:  fixture.manifest.Hash, DefinitionSeedHash: fixture.manifest.DefinitionSeedHash,
-		PlanStep: runtimecontract.RuntimeSemanticPlanStepProofBatch,
-		BatchID:  reopened.BatchID, BatchSequence: reopened.Sequence,
-		BatchCoverageWorkItemIDs: append([]common.CoverageWorkItemID(nil), reopened.CoverageWorkItemIDs...),
-		Proposals:                []runtimecontract.RuntimeSemanticProofProposal{fixture.proposal.Clone()},
-	}
-	if err := repeated.ValidateAgainstManifest(fixture.manifest); err != nil {
-		t.Fatal(err)
-	}
-	savesAfterCorrection := fixture.repository.saves
-	if _, err := fixture.controller.ApplyInternalEvent(context.Background(), RuntimeInternalEvent{
-		Kind:  RuntimeInternalEventSemanticPlanEvaluated,
-		Scope: RuntimeInternalEventScope{WorkspaceID: fixture.aggregate.Facts.WorkspaceID, RunID: fixture.aggregate.Facts.RunID},
-		Transaction: &RuntimeInternalTransactionPayload{
-			LogicalRequestID: logicalRequestID, SemanticDocument: &repeated,
-		},
-	}); !errors.Is(err, common.ErrConflict) {
-		t.Fatalf("attempt-1 document repeated rejected target: err=%v", err)
-	}
-	if fixture.repository.saves != savesAfterCorrection {
-		t.Fatalf("repeated rejected target changed owner state: saves=%d/%d", fixture.repository.saves, savesAfterCorrection)
-	}
-
-	// Duplicate delivery after the correction CAS and a fresh controller after
-	// restart both resolve from the persisted directive without another save.
-	revision := fixture.aggregate.StateRevision
-	saves := fixture.repository.saves
-	restarted, err := NewRuntimeController(fixture.repository)
-	if err != nil {
-		t.Fatal(err)
-	}
-	replayed, err := restarted.ApplyInternalEvent(context.Background(), event)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if replayed.Aggregate.StateRevision != revision || fixture.repository.saves != saves ||
-		replayed.Aggregate.SemanticPlanning.CorrectionDirective == nil || replayed.Aggregate.SemanticPlanning.CorrectionDirective.Hash != directive.Hash {
-		t.Fatalf("restart/duplicate correction changed owner state: revision=%d/%d saves=%d/%d ledger=%+v", replayed.Aggregate.StateRevision, revision, fixture.repository.saves, saves, replayed.Aggregate.SemanticPlanning)
-	}
-}
-
-func TestRuntimeProspectiveCorrectionDocumentEnforcesAllowedAndOpenSelectorDelta(t *testing.T) {
-	base := runtimecontract.RuntimeSemanticPlanningLedger{
-		Attempt: 1,
-		Rejections: []runtimecontract.RuntimeOriginalDiagnostic{{
-			OriginalCode: "prospective_owner_fact_unsatisfied",
-		}},
-		CorrectionDirective: &runtimecontract.RuntimeSemanticCorrectionDirective{
-			Violations: []runtimecontract.RuntimeSemanticContractViolation{{
-				Kind: runtimecontract.RuntimeSemanticContractViolationProposalConstraint,
-				Path: "$.proposals[0].target.prospectiveTargetRef", CoverageWorkItemID: "cwi-001", ProposalIndex: 0,
-				Rule: runtimecontract.RuntimeSemanticConstraintAllowedValue, Actual: "failed.txt", Allowed: []string{"remaining.txt"},
-			}},
-		},
-	}
-	document := runtimecontract.RuntimeSemanticPlanDocument{Proposals: []runtimecontract.RuntimeSemanticProofProposal{{
-		CoverageWorkItemID: "cwi-001",
-		Target: runtimecontract.RuntimeOperationTargetAuthorization{
-			Policy: runtimecontract.RuntimeOperationTargetPolicyProspectiveOwnerTarget, ProspectiveTargetRef: "failed.txt",
-		},
-	}}}
-	document.BatchID = "batch-001"
-	base.ActiveBatchID = document.BatchID
-	base.BatchDocuments = []runtimecontract.RuntimeSemanticPlanDocument{document.Clone()}
-	if err := validateProspectiveSemanticCorrectionDocument(base, document); !errors.Is(err, common.ErrConflict) {
-		t.Fatalf("allowed-value correction repeated Actual: err=%v", err)
-	}
-	document.Proposals[0].Target.ProspectiveTargetRef = "outside.txt"
-	if err := validateProspectiveSemanticCorrectionDocument(base, document); !errors.Is(err, common.ErrConflict) {
-		t.Fatalf("allowed-value correction admitted outside target: err=%v", err)
-	}
-	document.Proposals[0].Target.ProspectiveTargetRef = "remaining.txt"
-	document.Proposals[0].DeclarationRef = "mutated-sibling-field"
-	if err := validateProspectiveSemanticCorrectionDocument(base, document); !errors.Is(err, common.ErrConflict) {
-		t.Fatalf("allowed-value correction changed a non-target baseline field: err=%v", err)
-	}
-	document.Proposals[0].DeclarationRef = ""
-	if err := validateProspectiveSemanticCorrectionDocument(base, document); err != nil {
-		t.Fatalf("allowed-value correction rejected remaining target: %v", err)
-	}
-
-	open := base.Clone()
-	open.CorrectionDirective.Violations[0].Rule = runtimecontract.RuntimeSemanticConstraintRelational
-	open.CorrectionDirective.Violations[0].Allowed = nil
-	open.CorrectionDirective.Violations[0].Required = []string{"a different non-empty target satisfying the sealed selector and prospective constraints"}
-	document.Proposals[0].Target.ProspectiveTargetRef = "failed.txt"
-	if err := validateProspectiveSemanticCorrectionDocument(open, document); !errors.Is(err, common.ErrConflict) {
-		t.Fatalf("open-selector correction repeated Actual: err=%v", err)
-	}
-	document.Proposals[0].Target.ProspectiveTargetRef = ""
-	if err := validateProspectiveSemanticCorrectionDocument(open, document); !errors.Is(err, common.ErrConflict) {
-		t.Fatalf("open-selector correction admitted empty target: err=%v", err)
-	}
-	document.Proposals[0].Target.ProspectiveTargetRef = "fresh-open-target.txt"
-	if err := validateProspectiveSemanticCorrectionDocument(open, document); err != nil {
-		t.Fatalf("open-selector correction rejected changed non-empty target: %v", err)
+	if err := ValidateRuntimeSemanticProposalBeforeOwnerProbe(ledger, proposal); err == nil {
+		t.Fatal("pre-probe guard admitted a target outside the Shell-authored all-of constraint")
 	}
 }
 
@@ -321,6 +170,15 @@ func TestRuntimeProspectiveCompositeRetiresGenerationWhenDependencyCatalogDrifts
 
 	advancedCatalog := fixture.shellCatalog.Normalized()
 	advancedCatalog.ObservedRevision = "shell-policy-v2"
+	for idx := range advancedCatalog.ValidationSurfaces {
+		constraint := advancedCatalog.ValidationSurfaces[idx].ProspectiveTargetSatisfactionConstraint
+		if constraint == nil {
+			continue
+		}
+		value := constraint.Clone()
+		value.CatalogObservedRevision = advancedCatalog.ObservedRevision
+		advancedCatalog.ValidationSurfaces[idx].ProspectiveTargetSatisfactionConstraint = &value
+	}
 	advancedCatalog.SnapshotID = runtimecontract.StableRuntimeOperationAdmissibilitySnapshotID(advancedCatalog)
 	advancedObservation := prospectiveSemanticCatalogObservation(advancedCatalog, fixture.delta.BaseWorkspaceManifestRevision)
 	for idx := range fixture.aggregate.Facts.Resources.OperationAdmissibilities {
@@ -441,7 +299,14 @@ func newProspectiveSemanticTransitionFixture(t *testing.T) *prospectiveSemanticT
 		Readiness:     runtimecontract.RuntimeValidationSurfacePrerequisiteRequired, ReadinessReason: "prospective workspace input required",
 		InputSchemaHash: "prospective-validation-schema-v1", PrerequisiteRef: "workspace/prospective-validation-input",
 		ProspectiveSatisfactionContractRef: convergence.ProspectiveSatisfactionContractRef,
-		CheckRefs:                          []string{"check/prospective-validation"}, ProofApplicability: runtimecontract.RuntimeValidationProofDirect,
+		ProspectiveTargetSatisfactionConstraint: &runtimecontract.RuntimeProspectiveTargetSatisfactionConstraint{
+			SchemaVersion: runtimecontract.RuntimeProspectiveTargetSatisfactionConstraintSchemaCurrent,
+			OwnerModuleID: runtimecontract.RuntimeModuleShell, ProspectiveSatisfactionContractRef: convergence.ProspectiveSatisfactionContractRef,
+			ValidationSurfaceID: recipe.ID, ValidationRecipeID: recipe.ID,
+			InputSchemaHash: "prospective-validation-schema-v1", CatalogObservedRevision: "shell-policy-v1",
+			AllOf: []runtimecontract.RuntimeProspectiveTargetPredicate{{Kind: runtimecontract.RuntimeProspectiveTargetPredicatePathSuffix, Value: ".txt"}},
+		},
+		CheckRefs: []string{"check/prospective-validation"}, ProofApplicability: runtimecontract.RuntimeValidationProofDirect,
 		EffectScope: runtimecontract.RuntimeEffectEphemeralSession, IdempotencyClass: runtimecontract.RuntimeOperationIdempotencyAtMostOnce,
 	}
 	shellCatalog := runtimecontract.RuntimeOperationAdmissibility{

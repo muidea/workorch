@@ -15,22 +15,23 @@ import (
 // operation selector identifies the capability owner's concrete authorization.
 // They are independent identities and are never treated as aliases.
 type RuntimeSemanticOwnerFactAcquisition struct {
-	Requirement                         RuntimeOwnerFactRequirement
-	ProspectiveSatisfactionContractRef  string
-	DeclarationTargetSelectorRef        string
-	DeclarationTargetSelectorOwnerRef   string
-	DeclarationTargetSelectorSubjectRef string
-	AcquisitionOwnerModuleID            string
-	AcquisitionOperationKind            string
-	AcquisitionOperationVariantID       string
-	AcquisitionTargetPolicy             RuntimeOperationTargetPolicy
-	AcquisitionTargetSelectorRef        string
-	AcquisitionConstraintRefs           []string
-	OwnerCatalogSnapshotID              string
-	OwnerCatalogObservedRevision        string
-	ReobserveOwnerModuleID              string
-	ReobserveFactKind                   RuntimeOwnerFactKind
-	MaxAcquisitionAttempts              int
+	Requirement                             RuntimeOwnerFactRequirement
+	ProspectiveSatisfactionContractRef      string
+	ProspectiveTargetSatisfactionConstraint *RuntimeProspectiveTargetSatisfactionConstraint
+	DeclarationTargetSelectorRef            string
+	DeclarationTargetSelectorOwnerRef       string
+	DeclarationTargetSelectorSubjectRef     string
+	AcquisitionOwnerModuleID                string
+	AcquisitionOperationKind                string
+	AcquisitionOperationVariantID           string
+	AcquisitionTargetPolicy                 RuntimeOperationTargetPolicy
+	AcquisitionTargetSelectorRef            string
+	AcquisitionConstraintRefs               []string
+	OwnerCatalogSnapshotID                  string
+	OwnerCatalogObservedRevision            string
+	ReobserveOwnerModuleID                  string
+	ReobserveFactKind                       RuntimeOwnerFactKind
+	MaxAcquisitionAttempts                  int
 }
 
 // RuntimeSemanticEvidenceObligationPurpose identifies which immutable proof
@@ -86,6 +87,10 @@ func ResolveRuntimeSemanticEvidenceObligation(obligation RuntimeSemanticProofObl
 func (a RuntimeSemanticOwnerFactAcquisition) Normalized() RuntimeSemanticOwnerFactAcquisition {
 	a.Requirement = a.Requirement.Normalized()
 	a.ProspectiveSatisfactionContractRef = strings.TrimSpace(a.ProspectiveSatisfactionContractRef)
+	if a.ProspectiveTargetSatisfactionConstraint != nil {
+		value := a.ProspectiveTargetSatisfactionConstraint.Normalized()
+		a.ProspectiveTargetSatisfactionConstraint = &value
+	}
 	a.DeclarationTargetSelectorRef = strings.TrimSpace(a.DeclarationTargetSelectorRef)
 	a.DeclarationTargetSelectorOwnerRef = strings.TrimSpace(a.DeclarationTargetSelectorOwnerRef)
 	a.DeclarationTargetSelectorSubjectRef = strings.TrimSpace(a.DeclarationTargetSelectorSubjectRef)
@@ -105,6 +110,10 @@ func (a RuntimeSemanticOwnerFactAcquisition) Normalized() RuntimeSemanticOwnerFa
 func (a RuntimeSemanticOwnerFactAcquisition) Clone() RuntimeSemanticOwnerFactAcquisition {
 	a = a.Normalized()
 	a.AcquisitionConstraintRefs = append([]string(nil), a.AcquisitionConstraintRefs...)
+	if a.ProspectiveTargetSatisfactionConstraint != nil {
+		value := a.ProspectiveTargetSatisfactionConstraint.Clone()
+		a.ProspectiveTargetSatisfactionConstraint = &value
+	}
 	return a
 }
 
@@ -125,12 +134,20 @@ func (a RuntimeSemanticOwnerFactAcquisition) Validate() error {
 	}
 	switch a.AcquisitionTargetPolicy {
 	case RuntimeOperationTargetPolicyExistingOwnerScope:
-		if a.ProspectiveSatisfactionContractRef != "" {
+		if a.ProspectiveSatisfactionContractRef != "" || a.ProspectiveTargetSatisfactionConstraint != nil {
 			return fmt.Errorf("runtime semantic existing-scope owner-fact acquisition cannot declare prospective satisfaction")
 		}
 	case RuntimeOperationTargetPolicyProspectiveOwnerTarget:
-		if a.ProspectiveSatisfactionContractRef == "" {
-			return fmt.Errorf("runtime semantic prospective owner-fact acquisition requires a prospective satisfaction contract")
+		if a.ProspectiveSatisfactionContractRef == "" || a.ProspectiveTargetSatisfactionConstraint == nil {
+			return fmt.Errorf("runtime semantic prospective owner-fact acquisition requires a prospective satisfaction contract and typed all-of target constraint")
+		}
+		constraint := a.ProspectiveTargetSatisfactionConstraint.Normalized()
+		if err := constraint.Validate(); err != nil {
+			return err
+		}
+		if constraint.OwnerModuleID != a.Requirement.OwnerModuleID ||
+			constraint.ProspectiveSatisfactionContractRef != a.ProspectiveSatisfactionContractRef {
+			return fmt.Errorf("runtime semantic prospective target constraint does not match required owner fact")
 		}
 	default:
 		return fmt.Errorf("runtime semantic owner-fact acquisition requires a selector-backed target policy, got %q", a.AcquisitionTargetPolicy)
@@ -282,6 +299,7 @@ func sameRuntimeSemanticOwnerFactAcquisition(left, right *RuntimeSemanticOwnerFa
 	l, r := left.Normalized(), right.Normalized()
 	return l.Requirement == r.Requirement &&
 		l.ProspectiveSatisfactionContractRef == r.ProspectiveSatisfactionContractRef &&
+		sameRuntimeProspectiveTargetSatisfactionConstraints(l.ProspectiveTargetSatisfactionConstraint, r.ProspectiveTargetSatisfactionConstraint) &&
 		l.DeclarationTargetSelectorRef == r.DeclarationTargetSelectorRef &&
 		l.DeclarationTargetSelectorOwnerRef == r.DeclarationTargetSelectorOwnerRef &&
 		l.DeclarationTargetSelectorSubjectRef == r.DeclarationTargetSelectorSubjectRef &&
@@ -296,6 +314,13 @@ func sameRuntimeSemanticOwnerFactAcquisition(left, right *RuntimeSemanticOwnerFa
 		l.ReobserveOwnerModuleID == r.ReobserveOwnerModuleID &&
 		l.ReobserveFactKind == r.ReobserveFactKind &&
 		l.MaxAcquisitionAttempts == r.MaxAcquisitionAttempts
+}
+
+func sameRuntimeProspectiveTargetSatisfactionConstraints(left, right *RuntimeProspectiveTargetSatisfactionConstraint) bool {
+	if left == nil || right == nil {
+		return left == nil && right == nil
+	}
+	return StableRuntimeProspectiveTargetSatisfactionConstraintHash(*left) == StableRuntimeProspectiveTargetSatisfactionConstraintHash(*right)
 }
 
 func runtimeSemanticProofObligationSourceFocus(o RuntimeSemanticProofObligation) CoverageFocus {
@@ -364,6 +389,11 @@ func writeRuntimeSemanticProofObligationsHash(h hashStringWriter, values []Runti
 		acquisition := value.OwnerFactAcquisition.Normalized()
 		writeHashString(h, RuntimeOwnerFactRequirementRef(acquisition.Requirement))
 		writeHashString(h, acquisition.ProspectiveSatisfactionContractRef)
+		if acquisition.ProspectiveTargetSatisfactionConstraint == nil {
+			writeHashString(h, "no-prospective-target-satisfaction-constraint")
+		} else {
+			writeHashString(h, StableRuntimeProspectiveTargetSatisfactionConstraintHash(*acquisition.ProspectiveTargetSatisfactionConstraint))
+		}
 		writeHashString(h, acquisition.DeclarationTargetSelectorRef)
 		writeHashString(h, acquisition.DeclarationTargetSelectorOwnerRef)
 		writeHashString(h, acquisition.DeclarationTargetSelectorSubjectRef)
@@ -444,23 +474,41 @@ func compileRuntimeSemanticProofObligations(sourceFocuses []RuntimeDefinitionFoc
 			if convergence.AcquisitionTargetPolicy != RuntimeOperationTargetPolicyProspectiveOwnerTarget {
 				constraints = nil
 			}
+			var prospectiveConstraint *RuntimeProspectiveTargetSatisfactionConstraint
+			if convergence.AcquisitionTargetPolicy == RuntimeOperationTargetPolicyProspectiveOwnerTarget {
+				requiredOwnerCatalog, found := catalogByOwner[convergence.Requirement.OwnerModuleID]
+				if !found {
+					return nil, fmt.Errorf("runtime semantic proof obligation for coverage %q has no required owner dependency catalog", item.ID)
+				}
+				resolved, resolveErr := ResolveRuntimeProspectiveTargetSatisfactionConstraint(
+					requiredOwnerCatalog,
+					convergence.Requirement,
+					convergence.ProspectiveSatisfactionContractRef,
+				)
+				if resolveErr != nil {
+					return nil, fmt.Errorf("runtime semantic proof obligation for coverage %q prospective target constraint: %w", item.ID, resolveErr)
+				}
+				resolved = resolved.Clone()
+				prospectiveConstraint = &resolved
+			}
 			obligation.OwnerFactAcquisition = &RuntimeSemanticOwnerFactAcquisition{
-				Requirement:                         convergence.Requirement,
-				ProspectiveSatisfactionContractRef:  convergence.ProspectiveSatisfactionContractRef,
-				DeclarationTargetSelectorRef:        convergence.TargetSelectorRef,
-				DeclarationTargetSelectorOwnerRef:   convergence.TargetSelectorOwnerRef,
-				DeclarationTargetSelectorSubjectRef: convergence.TargetSelectorSubjectRef,
-				AcquisitionOwnerModuleID:            convergence.AcquisitionOwnerModuleID,
-				AcquisitionOperationKind:            convergence.AcquisitionOperationKind,
-				AcquisitionOperationVariantID:       convergence.AcquisitionOperationVariantID,
-				AcquisitionTargetPolicy:             convergence.AcquisitionTargetPolicy,
-				AcquisitionTargetSelectorRef:        convergence.AcquisitionTargetSelectorRef,
-				AcquisitionConstraintRefs:           constraints,
-				OwnerCatalogSnapshotID:              catalog.SnapshotID,
-				OwnerCatalogObservedRevision:        catalog.ObservedRevision,
-				ReobserveOwnerModuleID:              convergence.ReobserveOwnerModuleID,
-				ReobserveFactKind:                   convergence.ReobserveFactKind,
-				MaxAcquisitionAttempts:              convergence.MaxAcquisitionAttempts,
+				Requirement:                             convergence.Requirement,
+				ProspectiveSatisfactionContractRef:      convergence.ProspectiveSatisfactionContractRef,
+				ProspectiveTargetSatisfactionConstraint: prospectiveConstraint,
+				DeclarationTargetSelectorRef:            convergence.TargetSelectorRef,
+				DeclarationTargetSelectorOwnerRef:       convergence.TargetSelectorOwnerRef,
+				DeclarationTargetSelectorSubjectRef:     convergence.TargetSelectorSubjectRef,
+				AcquisitionOwnerModuleID:                convergence.AcquisitionOwnerModuleID,
+				AcquisitionOperationKind:                convergence.AcquisitionOperationKind,
+				AcquisitionOperationVariantID:           convergence.AcquisitionOperationVariantID,
+				AcquisitionTargetPolicy:                 convergence.AcquisitionTargetPolicy,
+				AcquisitionTargetSelectorRef:            convergence.AcquisitionTargetSelectorRef,
+				AcquisitionConstraintRefs:               constraints,
+				OwnerCatalogSnapshotID:                  catalog.SnapshotID,
+				OwnerCatalogObservedRevision:            catalog.ObservedRevision,
+				ReobserveOwnerModuleID:                  convergence.ReobserveOwnerModuleID,
+				ReobserveFactKind:                       convergence.ReobserveFactKind,
+				MaxAcquisitionAttempts:                  convergence.MaxAcquisitionAttempts,
 			}
 		}
 		obligation = obligation.Normalized()

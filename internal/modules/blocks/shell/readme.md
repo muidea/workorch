@@ -31,27 +31,25 @@ raw diagnostic 留在 Shell-private adapter；receipt 只携带有界、脱敏�
   直接证明的 recipe 才以 `ready + direct` 进入 provider-selectable catalog；例如 `go test` 在没有非排除
   `*_test.go` 时发布带稳定 prerequisite ref 的 `prerequisite_required`，而不是丢失该 Owner fact。静态 executable/policy
   不可用时发布 `unavailable`。Shell 不读取 File service/repository，也不取得 workspace tree 所有权。
-- `prerequisite_required` validation surface 同时发布
-  `shell/selectable-validation-surface/prospective-workspace-manifest/v1`。Orchestrator 只可通过 Shell owner 的 typed
-  prospective-satisfaction query 转交 activation-sealed recipes 和 File owner 已计算的 immutable resulting target refs；
-  Shell 先要求每个匹配 contract 的 prerequisite surface 都存在同 ID recipe，且 command、ordered args、timeout 计算的
-  owner schema hash 与 surface `InputSchemaHash` 完全一致，再复用 owner-private recipe applicability 规则返回
+- 当一个 `prerequisite_required` validation surface 能由单个 prospective target 的合取条件充分满足时，Shell 才同时发布
+  `shell/selectable-validation-surface/prospective-workspace-manifest/v1` 及 typed immutable
+  `RuntimeProspectiveTargetSatisfactionConstraint`。该事实绑定 owner、surface、activation-sealed recipe/schema 与 Shell catalog
+  revision，只包含 `AllOf` predicates，不包含 exact target、action、retry 或状态；不允许多个 surface 形成隐式
+  recipe `one_of`。当前 Go recipe 发布 `target_ref_path_suffix=_test.go`、排除 `.git`/`.workorch-data`/`node_modules`/`vendor`
+  segment，并在 `./pkg/...` 尚无 package input 时增加 `target_ref_path_prefix=pkg/`。若一个 prospective target 无法同时满足
+  多个不相容 package root，Shell 保留普通 prerequisite surface，但不发布 prospective contract。
+- Orchestrator 必须在 provider proposal 和 File probe 前使用 shared pure matcher 验证上述 typed `AllOf`，随后才可通过 Shell
+  owner 的 typed prospective-satisfaction query 转交 activation-sealed recipes 和 File owner 已计算的 immutable resulting
+  target refs。Shell 要求匹配 contract 的唯一 prerequisite surface 存在同 ID recipe，且 command、ordered args、timeout
+  计算的 owner schema hash 与 surface `InputSchemaHash` 完全一致，再复用 owner-private recipe applicability 规则返回
   `would_satisfy | would_not_satisfy`；若 exact Shell policy/catalog dependency 已漂移，则返回绑定 expected/observed
   revision 的 typed stale nested observation。该 dependency catalog只供 Runtime freshness/CAS/seal，不进入 provider-selectable
   catalog projection。任一 recipe 身份缺失或漂移均 typed fail-closed；该 query 不访问 File、不观察 workspace、不启动进程，
-  也不改变 Shell/Runtime 状态。只有 Orchestrator private event可持久化 factual result：SM-2 选择 fact
-  refresh/seal/terminal eligibility，SM-3 只在下述有界条件成立时消耗既有 sole semantic correction。exact
-  target 来自 persisted SM-3 proposal，Shell 只通过 File delta 验证它，不选择 target；只有 SM-2 sealed
-  binding 才形成 authority。
-- Shell `would_not_satisfy` 自身不触发 correction。只有它与 exact-current File delta/outer feasibility、
-  proposal/batch/manifest/catalog lineage 组成已持久化 full composite，且 Orchestrator semantic attempt=0 仍有
-  不同合法 target 时，SM-3 才可复用同一 batch/correction ledger 回到 `Requesting`。新 proposal 必须
-  target 不同且仍命中原 selector/constraints/candidate bounds，Shell 对新 File delta 独立重新评估。
-  attempt=0 fixed/singleton/无剩余 target、invalid attempt-1 document 或 attempt-1 `would_not_satisfy` 由
-  Orchestrator 收口为 `semantic_contract_failed`；第二次 owner rejection 保留 typed original
-  reason=`prospective_owner_fact_unsatisfied`，合法 attempt-1 `would_satisfy` 可继续进入 SM-2 seal。typed stale 只刷新
-  dependency fact，不消耗 correction。Shell 始终只署名 satisfaction/stale fact 与 reason，不署名或选择
-  correction/terminal diagnostic。
+  也不改变 Shell/Runtime 状态。只有 Orchestrator private event可持久化 factual result并选择 fact refresh/seal/terminal。
+  exact target 来自 persisted SM-3 proposal，Shell 只通过 File delta 验证它，不选择 target；只有 SM-2 sealed binding 才形成
+  authority。typed stale 只刷新 dependency fact；在 proposal 已满足 sealed `AllOf` 后仍出现 `would_not_satisfy` 表示 owner
+  contract 与实际判断矛盾，Orchestrator 必须一次性收口为 `prospective_satisfaction_contract_violated`，不得再次调用 LLM、
+  更换 target、创建治理 ticket 或进入 correction。Shell 始终只署名 satisfaction/stale fact 与 reason，不署名 terminal。
 - workspace-sensitive Shell catalog 的 observation 必须依赖该 File manifest 的 exact workspace-tree revision；后续
   File receipt 改变该 revision 时，SM-2 仅按依赖交集退休并重获 catalog。该 freshness lineage 不允许 Shell 修改
   Manifest、CWI 或 Runtime 状态。
@@ -116,9 +114,10 @@ raw diagnostic 留在 Shell-private adapter；receipt 只携带有界、脱敏�
 ## 测试覆盖
 
 - 已覆盖 catalog 的 ready/prerequisite-required/unavailable、manifest freshness、空 confirmed recipe 与 owner selector。
-- 已覆盖 prospective-satisfaction 对 ordinary script 与 `*_test.go` resulting target 的纯值判定，以及错误 source/scope、
-  typed stale Shell catalog、duplicate request、多 prerequisite surface 和 recipe command/args/timeout 身份漂移；测试确认
-  dependency catalog不进入provider choice、不创建target、不执行命令且不改变owner状态。
+- 已覆盖 prospective contract 的 suffix/prefix/excluded-segment 合取、多个不相容 package root fail-closed、非匹配 target
+  在 owner probe 前拒绝，以及匹配 target 的 `would_satisfy`；同时覆盖错误 source/scope、typed stale Shell catalog、
+  duplicate request、唯一 contract surface 和 recipe command/args/timeout 身份漂移。测试确认 dependency catalog不进入
+  provider choice、不创建target、不执行命令且不改变owner状态。
 - 已覆盖强调用 nil result、伪造 source、receipt query failure、sealed data 漂移均在进程调用前拒绝。
 - 已覆盖 managed validation 临时副本、原 workspace/`.git` 隔离、外指 symlink、正常完成与 timeout 的进程组清理。
 - 已覆盖默认 software-development recipe 的 owner proof check、generic success/zero-work/all-skipped、显式 marker 与

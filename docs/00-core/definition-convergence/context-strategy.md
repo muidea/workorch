@@ -59,9 +59,10 @@ authority。proposal、owner fact 或上一 generation target 均不得回写 C1
 - current focus 在同一 partition 内变化时只改变 C3，C0/C1/C2 和 `StablePrefixHash` 必须保持不变；
 - attempt 0/1、whole-document recovery 和同 semantic transaction 的所有 physical call 必须复用同一
   `DefinitionPartitionRef/Hash` 与 stable prefix；
-- exact-current full-composite `would_not_satisfy` 的 bounded different-target attempt 1 仅在 C4 增加 failed-target
-  forbidden/remaining-target directive，复用同一 semantic batch、C0～C3 与 stable prefix；typed stale 只刷新 fact，
-  不生成 correction C4；
+- prospective target 的 typed `all_of` mismatch 使用普通完整 document/schema attempt 1：只在 C4 增加
+  manifest/CWI/field-path-bound violation 引用，复用同一 semantic batch、C0～C3 与 stable prefix，且不复制 C3
+  constraint。exact-current full-composite `would_not_satisfy` 直接形成 owner-contract contradiction terminal，不生成 C4；
+  typed stale 只刷新 fact；
 - 从一个 home partition 切到另一个时，SM-2 先持久化新的 logical request 和
   `StablePrefixChangeDisposition=definition_partition_switch`。这是显式新 stable-prefix generation，不是 renderer drift；
 - 同一 Run 内只有 sealed partition switch 可以预期改变 stable prefix；Definition revision 或 C2 immutable contract

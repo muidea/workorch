@@ -207,6 +207,13 @@ func semanticMissingOwnerFactAcquisitionFixture(t *testing.T) (RuntimeSemanticPl
 			surface.InputBindingRef = ""
 			surface.PrerequisiteRef = "workspace/validation-input"
 			surface.ProspectiveSatisfactionContractRef = convergence.ProspectiveSatisfactionContractRef
+			constraint := runtimeProspectiveTargetConstraintForTest(
+				*surface,
+				convergence.ProspectiveSatisfactionContractRef,
+				manifest.OwnerCatalogs[index].ObservedRevision,
+				".sh",
+			)
+			surface.ProspectiveTargetSatisfactionConstraint = &constraint
 		}
 		manifest.OwnerCatalogs[index].SnapshotID = StableRuntimeOperationAdmissibilitySnapshotID(manifest.OwnerCatalogs[index])
 	}

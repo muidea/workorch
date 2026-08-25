@@ -60,23 +60,44 @@ type runtimeSemanticProofObligationProjection struct {
 }
 
 type runtimeSemanticOwnerFactAcquisitionProjection struct {
-	DefinitionPrerequisiteDeclared     bool                                         `json:"definitionPrerequisiteDeclared"`
-	TerminalEvidenceCredit             bool                                         `json:"terminalEvidenceCredit"`
-	RequiredOwnerModuleID              string                                       `json:"requiredOwnerModuleId"`
-	RequiredFactKind                   runtimecontract.RuntimeOwnerFactKind         `json:"requiredFactKind"`
-	RequiredOperationKind              string                                       `json:"requiredOperationKind"`
-	AcquisitionOwnerModuleID           string                                       `json:"acquisitionOwnerModuleId"`
-	AcquisitionOperationKind           string                                       `json:"acquisitionOperationKind"`
-	AcquisitionOperationVariantID      string                                       `json:"acquisitionOperationVariantId,omitempty"`
-	AcquisitionTargetPolicy            runtimecontract.RuntimeOperationTargetPolicy `json:"acquisitionTargetPolicy"`
-	AcquisitionTargetSelectorRef       string                                       `json:"acquisitionTargetSelectorRef"`
-	AcquisitionConstraintRefs          []string                                     `json:"acquisitionConstraintRefs,omitempty"`
-	ProspectiveSatisfactionContractRef string                                       `json:"prospectiveSatisfactionContractRef,omitempty"`
-	OwnerCatalogSnapshotID             string                                       `json:"ownerCatalogSnapshotId"`
-	OwnerCatalogObservedRevision       string                                       `json:"ownerCatalogObservedRevision"`
-	ReobserveOwnerModuleID             string                                       `json:"reobserveOwnerModuleId"`
-	ReobserveFactKind                  runtimecontract.RuntimeOwnerFactKind         `json:"reobserveFactKind"`
-	MaxAcquisitionAttempts             int                                          `json:"maxAcquisitionAttempts"`
+	DefinitionPrerequisiteDeclared     bool                                                  `json:"definitionPrerequisiteDeclared"`
+	TerminalEvidenceCredit             bool                                                  `json:"terminalEvidenceCredit"`
+	RequiredOwnerModuleID              string                                                `json:"requiredOwnerModuleId"`
+	RequiredFactKind                   runtimecontract.RuntimeOwnerFactKind                  `json:"requiredFactKind"`
+	RequiredOperationKind              string                                                `json:"requiredOperationKind"`
+	AcquisitionOwnerModuleID           string                                                `json:"acquisitionOwnerModuleId"`
+	AcquisitionOperationKind           string                                                `json:"acquisitionOperationKind"`
+	AcquisitionOperationVariantID      string                                                `json:"acquisitionOperationVariantId,omitempty"`
+	AcquisitionTargetPolicy            runtimecontract.RuntimeOperationTargetPolicy          `json:"acquisitionTargetPolicy"`
+	AcquisitionTargetSelectorRef       string                                                `json:"acquisitionTargetSelectorRef"`
+	AcquisitionConstraintRefs          []string                                              `json:"acquisitionConstraintRefs,omitempty"`
+	ProspectiveSatisfactionContractRef string                                                `json:"prospectiveSatisfactionContractRef,omitempty"`
+	ProspectiveTargetConstraint        *runtimeSemanticProspectiveTargetConstraintProjection `json:"prospectiveTargetConstraint,omitempty"`
+	OwnerCatalogSnapshotID             string                                                `json:"ownerCatalogSnapshotId"`
+	OwnerCatalogObservedRevision       string                                                `json:"ownerCatalogObservedRevision"`
+	ReobserveOwnerModuleID             string                                                `json:"reobserveOwnerModuleId"`
+	ReobserveFactKind                  runtimecontract.RuntimeOwnerFactKind                  `json:"reobserveFactKind"`
+	MaxAcquisitionAttempts             int                                                   `json:"maxAcquisitionAttempts"`
+}
+
+// runtimeSemanticProspectiveTargetConstraintProjection is the provider-safe
+// C3 view of one required-owner-authored prospective target predicate. It
+// preserves the exact conjunctive predicate set and its owner/catalog
+// provenance, while deliberately omitting the surface/recipe identity,
+// command and args used by Shell to derive the fact. Those remain dependency
+// facts and are not provider-selectable.
+type runtimeSemanticProspectiveTargetConstraintProjection struct {
+	SchemaVersion                      string                                                `json:"schemaVersion"`
+	OwnerModuleID                      string                                                `json:"ownerModuleId"`
+	ProspectiveSatisfactionContractRef string                                                `json:"prospectiveSatisfactionContractRef"`
+	InputSchemaHash                    string                                                `json:"inputSchemaHash"`
+	CatalogObservedRevision            string                                                `json:"catalogObservedRevision"`
+	AllOf                              []runtimeSemanticProspectiveTargetPredicateProjection `json:"allOf"`
+}
+
+type runtimeSemanticProspectiveTargetPredicateProjection struct {
+	Kind  runtimecontract.RuntimeProspectiveTargetPredicateKind `json:"kind"`
+	Value string                                                `json:"value"`
 }
 
 // runtimeSemanticOwnerCatalogProjection is the provider-safe vocabulary from
@@ -176,6 +197,10 @@ func runtimeSemanticProofObligationsForProvider(values []runtimecontract.Runtime
 		}
 		if value.OwnerFactAcquisition != nil {
 			acquisition := value.OwnerFactAcquisition.Normalized()
+			prospectiveConstraint, err := runtimeSemanticProspectiveTargetConstraintForProvider(acquisition.ProspectiveTargetSatisfactionConstraint)
+			if err != nil {
+				return nil, err
+			}
 			projection.OwnerFactAcquisition = &runtimeSemanticOwnerFactAcquisitionProjection{
 				DefinitionPrerequisiteDeclared:     true,
 				TerminalEvidenceCredit:             false,
@@ -189,6 +214,7 @@ func runtimeSemanticProofObligationsForProvider(values []runtimecontract.Runtime
 				AcquisitionTargetSelectorRef:       acquisition.AcquisitionTargetSelectorRef,
 				AcquisitionConstraintRefs:          append([]string(nil), acquisition.AcquisitionConstraintRefs...),
 				ProspectiveSatisfactionContractRef: acquisition.ProspectiveSatisfactionContractRef,
+				ProspectiveTargetConstraint:        prospectiveConstraint,
 				OwnerCatalogSnapshotID:             acquisition.OwnerCatalogSnapshotID,
 				OwnerCatalogObservedRevision:       acquisition.OwnerCatalogObservedRevision,
 				ReobserveOwnerModuleID:             acquisition.ReobserveOwnerModuleID,
@@ -202,6 +228,30 @@ func runtimeSemanticProofObligationsForProvider(values []runtimecontract.Runtime
 		return nil, nil
 	}
 	return ret, nil
+}
+
+func runtimeSemanticProspectiveTargetConstraintForProvider(value *runtimecontract.RuntimeProspectiveTargetSatisfactionConstraint) (*runtimeSemanticProspectiveTargetConstraintProjection, error) {
+	if value == nil {
+		return nil, nil
+	}
+	constraint := value.Normalized()
+	if err := constraint.Validate(); err != nil {
+		return nil, err
+	}
+	projection := &runtimeSemanticProspectiveTargetConstraintProjection{
+		SchemaVersion:                      constraint.SchemaVersion,
+		OwnerModuleID:                      constraint.OwnerModuleID,
+		ProspectiveSatisfactionContractRef: constraint.ProspectiveSatisfactionContractRef,
+		InputSchemaHash:                    constraint.InputSchemaHash,
+		CatalogObservedRevision:            constraint.CatalogObservedRevision,
+		AllOf:                              make([]runtimeSemanticProspectiveTargetPredicateProjection, 0, len(constraint.AllOf)),
+	}
+	for _, predicate := range constraint.AllOf {
+		projection.AllOf = append(projection.AllOf, runtimeSemanticProspectiveTargetPredicateProjection{
+			Kind: predicate.Kind, Value: predicate.Value,
+		})
+	}
+	return projection, nil
 }
 
 func runtimeSemanticOwnerCatalogsForProvider(values []runtimecontract.RuntimeOperationAdmissibility) []runtimeSemanticOwnerCatalogProjection {

@@ -72,9 +72,11 @@ projection-to-owner repair, and application-to-Orchestrator service calls.
 - core Runtime remains profile/domain neutral;
 - prospective owner-fact feasibility composes acquisition-owner delta and required-owner dependency observation through typed
   queries; the exact target is an SM-3 proposal until SM-2 seals the owner-validated binding, operation candidate references that
-  binding and dispatch derives its target from it, non-selectable dependency catalogs remain out of the LLM surface, and no
-  participant mutates a sibling owner. A complete `would_not_satisfy` may reuse the same SM-3 batch and sole correction ledger once
-  when another bounded target remains; stale stays on fact refresh and neither capability owner chooses that transition;
+  binding and dispatch derives its target from it. The required owner publishes one provider-safe typed `all_of` constraint that
+  is sealed into acquisition/manifest/C3; mismatch is handled by document admission/schema correction before any capability
+  probe. Non-selectable dependency catalogs remain out of the LLM surface and no participant mutates a sibling owner. A complete
+  `would_not_satisfy` is an owner-contract contradiction and directly closes
+  `prospective_satisfaction_contract_violated -> semantic_contract_failed`; stale stays on fact refresh;
 - removed StagePacket, NextAction, DispatchNextStep, ExecutionContextPatch, graph dispatcher and application recovery queues are
   not compatibility paths;
 - LLM provider configuration/ceiling interpretation belongs to LLM owner; sealed selection cannot drift on Resume.

@@ -346,6 +346,9 @@ func TestShellOwnerAdmissibilityPublishesManifestPrerequisiteBeforeValidationIsR
 	if !found || waitingSurface.Readiness != runtimecontract.RuntimeValidationSurfacePrerequisiteRequired ||
 		waitingSurface.ReadinessReason != shellValidationApplicableInputRequiredReason || waitingSurface.PrerequisiteRef == "" ||
 		waitingSurface.ProspectiveSatisfactionContractRef != modulecommon.ProspectiveSatisfactionContractRef ||
+		waitingSurface.ProspectiveTargetSatisfactionConstraint == nil ||
+		waitingSurface.ProspectiveTargetSatisfactionConstraint.CatalogObservedRevision != waiting.ObservedRevision ||
+		!runtimecontract.RuntimeProspectiveTargetSatisfiesConstraint("owner_fact_test.go", *waitingSurface.ProspectiveTargetSatisfactionConstraint) ||
 		waitingSurface.InputBindingRef != "" || len(waiting.ValidationRecipes) != 0 || len(waiting.ValidationRecipeRefs) != 0 {
 		t.Fatalf("manifest-prerequisite validation inventory = %+v surface=%+v found=%t", waiting, waitingSurface, found)
 	}
@@ -355,6 +358,7 @@ func TestShellOwnerAdmissibilityPublishesManifestPrerequisiteBeforeValidationIsR
 	if !found || readySurface.Readiness != runtimecontract.RuntimeValidationSurfaceReady ||
 		!strings.Contains(readySurface.InputBindingRef, "tree-with-tests") || readySurface.PrerequisiteRef != "" ||
 		readySurface.ProspectiveSatisfactionContractRef != "" ||
+		readySurface.ProspectiveTargetSatisfactionConstraint != nil ||
 		len(ready.ValidationRecipes) != 1 || len(ready.ValidationRecipeRefs) != 1 || ready.ValidationRecipeRefs[0] != recipe.ID {
 		t.Fatalf("ready validation inventory = %+v surface=%+v found=%t", ready, readySurface, found)
 	}

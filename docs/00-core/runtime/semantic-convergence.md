@@ -107,8 +107,10 @@ generation 的 current kinds 只能是 acquisition 所需的 `state_change`，�
 同一个非空 `ProspectiveSatisfactionContractRef`；preexisting 与 `existing_owner_scope` 禁止携带。pre-seal
 Definition 只封存 declaration selector/candidate refs 与 acquisition closure；compiled obligation/manifest 只追加
 acquisition owner/kind/variant/target-policy/operation-selector 与 current owner constraints，两者都不携带 exact
-prospective target。SM-3 semantic proposal 必须在这两组权威的交集内提出一个 nonempty exact target；
-当 declaration candidate refs 非空时还必须精确命中其中一项。它在 SM-2 seal 前只是 proposal，不是
+prospective target。required owner catalog 发布 provider-safe typed `ProspectiveTargetSatisfactionConstraint`，只含
+`all_of` predicate；compiled acquisition/manifest 完整封存它并只在 C3 投影。SM-3 semantic proposal 必须在这两组权威
+的交集内提出一个 nonempty exact target；当 declaration candidate refs 非空时还必须精确命中其中一项，且 schema/document
+admission 必须在 owner probe 前验证全部 typed predicate。它在 SM-2 seal 前只是 proposal，不是
 Definition 或 operation authority。proposal 通过 File owner
 只读 feasibility 后，File 仅基于 current complete manifest 生成 exact base-revision-bound
 `RuntimeProspectiveWorkspaceManifestDelta`。Orchestrator 再把该 immutable delta、activation-sealed recipe declarations 和
@@ -120,30 +122,17 @@ contract ref、recipe command/ordered args/timeout schema identity、catalog/obs
 Runtime state。Orchestrator 必须在 owner-private observation CAS 与 semantic seal 前重验 File outer feasibility/delta、
 required-owner nested observation，以及 manifest/batch/request 和两组 catalog/observation identity。`would_satisfy` 才可加入
 final feasibility set；nested typed stale 不能伪装成 File outer stale或直接 terminal，只进入既有 bounded catalog refresh；
-missing dependency 在 query 前退休 generation并保持零 required-owner call。`would_not_satisfy` 是 proposal relational
-factual rejection，必须先随 File delta 持久化为完整 composite observation；该 target 仍未封存为 binding，且不产生任何
-operation authority。typed stale 只刷新 exact dependency fact，不增加 semantic attempt 或消耗 correction。
+missing dependency 在 query 前退休 generation并保持零 required-owner call。typed constraint 不匹配只产生普通完整
+document/schema correction，C4 引用 manifest/CWI/field path 且不复制 C3 constraint；该分支零 File/Shell probe。
 
-仅 exact-current full composite `would_not_satisfy` 可进入 Orchestrator 的 bounded target-correction evaluator，且
-semantic attempt 必须为 0。只有 finite declaration candidate catalog 允许 pure evaluator 证明 concrete remaining
-members：它排除 failed target、排除 acquisition-owner current catalog 中已经存在的 target，并让每个 replacement
-重新通过 canonical document/manifest fence；非空结果才成为 exact `Allowed`。candidate refs 为空的 open selector
-不能证明任何 remaining member，也不能生成 `Allowed`；它只允许一次 relational target-only retry，要求新值非空、不同于
-failed target，并继续满足原 operation selector 与 prospective constraints。该 relational directive 不证明 target
-feasible，也不证明 required owner fact 将成立。
-
-SM-3 使用既有 correction ledger 持久化 failed-target delta，保留 active batch/manifest/coverage order/CWI set/
-stable-prefix lineage，以及 attempt-0 proof document/hash 作为 immutable delta baseline；它只清理 feasibility working
-set，并由 canonical correction transition 使 batch `FeasibilityPending -> Requesting`。attempt-1 document 除被拒
-`prospectiveTargetRef` 外必须与 baseline 完全一致；finite replacement 必须属于 exact `Allowed`，open replacement 必须
-满足 relational directive，两者都仍受原 selector/constraints/candidate bounds 限制，并重新取得 fresh File
-feasibility/delta 与 fresh Shell satisfaction observation。fixed/singleton finite catalog 或 finite catalog 无剩余合法
-target 在 attempt=0 不开 correction；invalid attempt-1 document 或 attempt-1 `would_not_satisfy` 由下一
-drive 形成统一 `semantic_contract_failed` terminal。第二次 owner rejection 把
-`prospective_owner_fact_unsatisfied` 保留为 typed original reason；合法 attempt-1 `would_satisfy` 可继续进入 SM-2 seal。
-Shell 只拥有 persisted satisfaction/reason；correction/terminal diagnostic 均由 Orchestrator private event
-署名和提交。两条路径均零 ticket/governance/acquisition/operation/effect/coverage，duplicate/restart 不重复
-消耗 correction 或重放同一 owner probe；这个边界不新增状态机或跨 owner transition。
+`would_not_satisfy` 必须先随 File delta 持久化为 exact-current full composite observation；该 target 仍未封存为 binding，
+且不产生 operation authority。由于 document admission 已证明 target 满足 published `all_of` contract，这个 owner result
+表示 required-owner contract contradiction。Orchestrator private drive 直接记录
+`prospective_satisfaction_contract_violated` 并形成 `semantic_contract_failed`，不得创建 replacement-target correction、
+`Allowed` 或第二 provider request。Shell 只拥有 persisted satisfaction/reason；terminal
+diagnostic 仍由 Orchestrator private event 署名和提交。typed stale 只刷新 exact dependency fact，不增加 semantic attempt
+或消耗 correction；所有分支零 ticket/governance/acquisition/operation/effect/coverage，duplicate/restart 不重复 terminal
+或同一 owner probe。这个边界不新增状态机或跨 owner transition。
 
 owner feasibility 与 receipt 后只重获声明的 owner/fact。若 reobserve 仍缺失，一次 accepted acquisition operation/evidence
 立即耗尽，不能再生成第二个 semantic acquisition；若 reobserve 已满足，SM-2 也不得把 acquisition evidence 记为 terminal

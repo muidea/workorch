@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"regexp"
 	"sort"
 	"strings"
 
@@ -661,6 +662,29 @@ func attachRuntimeSemanticProofObligationSchema(items map[string]any, manifest R
 					prospectiveTargetSchema["enum"] = append([]string(nil), obligation.DeclarationTargetSelectorCandidateRefs...)
 				}
 			}
+			constraint := acquisition.ProspectiveTargetSatisfactionConstraint
+			if constraint == nil {
+				return fmt.Errorf("runtime semantic proof-batch coverage %q has no typed prospective target constraint", coverageID)
+			}
+			constraintAllOf := []any{
+				map[string]any{"not": map[string]any{"pattern": "^/"}},
+				map[string]any{"not": map[string]any{"pattern": `(^|/)\.(/|$)`}},
+				map[string]any{"not": map[string]any{"pattern": `(^|/)\.\.(/|$)`}},
+				map[string]any{"not": map[string]any{"pattern": `\\`}},
+			}
+			for _, predicate := range constraint.Normalized().AllOf {
+				switch predicate.Kind {
+				case RuntimeProspectiveTargetPredicatePathSuffix:
+					constraintAllOf = append(constraintAllOf, map[string]any{"pattern": regexp.QuoteMeta(predicate.Value) + "$"})
+				case RuntimeProspectiveTargetPredicatePathPrefix:
+					constraintAllOf = append(constraintAllOf, map[string]any{"pattern": "^" + regexp.QuoteMeta(predicate.Value)})
+				case RuntimeProspectiveTargetPredicatePathSegmentNotEqual:
+					constraintAllOf = append(constraintAllOf, map[string]any{"not": map[string]any{"pattern": "(^|/)" + regexp.QuoteMeta(predicate.Value) + "(/|$)"}})
+				default:
+					return fmt.Errorf("runtime semantic proof-batch coverage %q has unsupported prospective target predicate %q", coverageID, predicate.Kind)
+				}
+			}
+			prospectiveTargetSchema["allOf"] = constraintAllOf
 			targetProperties["prospectiveTargetRef"] = prospectiveTargetSchema
 		}
 		proposalProperties := map[string]any{

@@ -174,8 +174,9 @@ type RuntimeSemanticPlanManifest struct {
 	// OwnerFactDependencyCatalogs seal capability-owner facts that are required
 	// to judge a prospective owner-fact acquisition but are intentionally not
 	// selectable semantic-plan vocabulary. They participate in freshness/CAS
-	// and seal guards, while provider projections continue to expose only
-	// OwnerCatalogs.
+	// and seal guards. Provider projection may expose only the copied,
+	// provider-safe all-of target constraint in the matching proof obligation;
+	// the dependency catalog, recipe and command remain hidden.
 	OwnerFactDependencyCatalogs []RuntimeOperationAdmissibility
 }
 
@@ -318,9 +319,14 @@ func CompileRuntimeSemanticPlanManifestForCoverage(workspaceID common.WorkspaceI
 		}
 		sealedCatalogs = append(sealedCatalogs, catalog)
 	}
-	// Owner catalogs retain every activation-sealed kind so their immutable
-	// snapshot identity can be replayed and probed.  The provider-visible
-	// vocabulary is narrower: an operation that structurally requires a
+	// Preserve the complete activation-sealed authority set for proof-obligation
+	// compilation. Provider-selectable catalogs are narrowed below, but a
+	// prerequisite-required owner catalog still carries the immutable all-of
+	// constraint that makes prospective acquisition sound.
+	authorityCatalogs := append([]RuntimeOperationAdmissibility(nil), sealedCatalogs...)
+	// authorityCatalogs retains every activation-sealed kind so its immutable
+	// snapshot identity can be replayed and checked. The provider-visible
+	// OwnerCatalogs vocabulary is narrower: an operation that structurally requires a
 	// currently applicable owner fact must not be offered when that fact is
 	// absent.  In particular, a managed-validation session without a confirmed
 	// recipe is not a speculative action for semantic planning.
@@ -393,7 +399,7 @@ func CompileRuntimeSemanticPlanManifestForCoverage(workspaceID common.WorkspaceI
 	if allowsProspectiveTarget {
 		policies = append(policies, RuntimeOperationTargetPolicyProspectiveOwnerTarget)
 	}
-	proofObligations, err := compileRuntimeSemanticProofObligations(definitionFocuses, coverageItems, sealedCatalogs)
+	proofObligations, err := compileRuntimeSemanticProofObligations(definitionFocuses, coverageItems, authorityCatalogs)
 	if err != nil {
 		return RuntimeSemanticPlanManifest{}, err
 	}
@@ -619,10 +625,12 @@ func (m RuntimeSemanticPlanManifest) Validate() error {
 		if _, duplicate := obligationCoverage[obligation.CoverageWorkItemID]; duplicate {
 			return fmt.Errorf("runtime semantic manifest duplicates obligation coverage %q", obligation.CoverageWorkItemID)
 		}
+		reproductionCatalogs := append([]RuntimeOperationAdmissibility(nil), m.OwnerCatalogs...)
+		reproductionCatalogs = append(reproductionCatalogs, m.OwnerFactDependencyCatalogs...)
 		recompiled, err := compileRuntimeSemanticProofObligations(
 			CompileRuntimeDefinitionFocuses([]CoverageFocus{runtimeSemanticProofObligationSourceFocus(obligation)}),
 			[]RuntimeCoverageItem{coverageItems[obligation.CoverageWorkItemID]},
-			m.OwnerCatalogs,
+			reproductionCatalogs,
 		)
 		if err != nil {
 			return fmt.Errorf("runtime semantic manifest obligation coverage %q is not reproducible from sealed owner facts: %w", obligation.CoverageWorkItemID, err)
@@ -687,6 +695,17 @@ func (m RuntimeSemanticPlanManifest) Validate() error {
 		}
 		if len(runtimeProspectiveSatisfactionContractRecipeRefs(catalog, acquisition.Requirement, acquisition.ProspectiveSatisfactionContractRef)) == 0 {
 			return fmt.Errorf("runtime semantic manifest owner-fact dependency catalog %q does not seal the prospective satisfaction contract", owner)
+		}
+		sealedConstraint, err := ResolveRuntimeProspectiveTargetSatisfactionConstraint(
+			catalog,
+			acquisition.Requirement,
+			acquisition.ProspectiveSatisfactionContractRef,
+		)
+		if err != nil {
+			return fmt.Errorf("runtime semantic manifest owner-fact dependency catalog %q does not seal one typed all-of target constraint: %w", owner, err)
+		}
+		if !sameRuntimeProspectiveTargetSatisfactionConstraints(acquisition.ProspectiveTargetSatisfactionConstraint, &sealedConstraint) {
+			return fmt.Errorf("runtime semantic manifest owner-fact acquisition target constraint does not match dependency catalog %q", owner)
 		}
 		referencedDependencies[owner] = struct{}{}
 	}
@@ -2180,9 +2199,7 @@ func (l RuntimeSemanticPlanningLedger) Validate() error {
 			}
 		} else if l.ActiveBatchID != "" {
 			batch, found := runtimeSemanticPlanningBatch(l.Batches, l.ActiveBatchID)
-			_, baselineFound := batchDocuments[l.ActiveBatchID]
-			requiresBaseline := len(l.Rejections) == 1 && l.Rejections[0].OriginalCode == "prospective_owner_fact_unsatisfied"
-			if !found || batch.State != RuntimeSemanticPlanBatchRequesting || (requiresBaseline && !baselineFound) || l.CoverageOrderDocument == nil || l.Document == nil || l.Document.PlanStep != RuntimeSemanticPlanStepCoverageOrder {
+			if !found || batch.State != RuntimeSemanticPlanBatchRequesting || l.CoverageOrderDocument == nil || l.Document == nil || l.Document.PlanStep != RuntimeSemanticPlanStepCoverageOrder {
 				return fmt.Errorf("proof-batch correction ledger has invalid active batch lineage")
 			}
 			if err := validateRuntimeSemanticPendingForBatch(l, batch); err != nil {

@@ -36,18 +36,15 @@ and converges through the same neutral Runtime owner model. It must not make leg
   merged even when dependency order is declared, while an owner-sealed exact required operation sequence and distinct targets
   remain executable in one dispatch;
 - build/test/lint and direct entrypoint checks produce matching validation receipts;
-- prospective validation preparation proves the profile-specific applicability split: with the same base manifest, a resulting
-  `*_test.go` may yield Shell `would_satisfy` for the exact default Go recipe, while `scripts/validate.sh` alone yields
-  `would_not_satisfy`; neither pure probe creates a file, directory, process/session, receipt or credit;
+- prospective validation preparation proves the profile-specific applicability split by publishing a provider-safe typed
+  `all_of` constraint derived from the exact default recipe. Schema/document admission accepts a matching target and rejects a
+  mismatching target with a typed `prospectiveTargetRef` violation before File/Shell probe; neither path creates a file, directory,
+  process/session, receipt or credit;
 - Shell dependency catalog/observation remains absent from provider C3/schema choices; File delta and Shell nested observation
   must both be exact-current at CAS and seal. Shell typed stale uses bounded refresh without consuming semantic correction.
-  Persisted full-composite `would_not_satisfy` at attempt 0 reuses the same semantic batch and sole correction ledger only when a
-  different target remains, retains the attempt-0 proof document/hash as the immutable target-only delta baseline, clears only
-  the feasibility working set, and requires an in-bounds different target plus fresh owner facts. Fixed/singleton/exhausted
-  bounds at attempt 0, an invalid attempt-1 document, or an attempt-1 second rejection reach `semantic_contract_failed`; the
-  second owner rejection retains typed original reason `prospective_owner_fact_unsatisfied`, while a valid attempt-1
-  `would_satisfy` may proceed to the SM-2 binding seal. Duplicate/restart neither charges
-  correction twice nor repeats the same proposal's owner probe;
+  Persisted full-composite `would_not_satisfy` after a constraint-compatible proposal proves an owner contract contradiction and
+  reaches `prospective_satisfaction_contract_violated -> semantic_contract_failed`; it never reuses the correction ledger for a
+  replacement target or second provider request. Duplicate/restart neither repeats terminal delivery nor the same proposal's owner probe;
 - a validation entry is recipe lineage, not an implementation repair target; unstructured output yields no target candidate,
   while managed Go diagnostics may report only actual `*.go:line[:column]` locations inside the fresh File manifest scope;
 - Git snapshot requirements use `git/write:add` + `git/write:commit`, not shell/read evidence;
