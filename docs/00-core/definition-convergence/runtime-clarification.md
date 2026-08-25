@@ -4,7 +4,7 @@ Status: normative
 
 Type: core-contract-part
 
-Last Verified: 2026-08-21
+Last Verified: 2026-08-24
 
 ## Scope
 
@@ -19,7 +19,13 @@ startup input 与 Run 已封存后，SM-3 的 bounded semantic document 可以�
 undeclared_prerequisite | semantic_ambiguity`。这只是 provider original diagnostic，不是 relation、Runtime action 或 ticket
 command；LLM 不携带或生成 WorkspaceID、RunID、authority、ticket、replacement intent 或 target state。
 
-1. SM-3 先把 complete document 与 original diagnostic 持久化；Orchestrator 从 current aggregate 派生并绑定
+该 provider document 只有经过 `EvaluateRuntimeDefinitionGapAdmission` 的 pure manifest-bound admission 才能成为 gap fact。
+admission 精确校验 manifest、expected-document、plan step/batch identity 与 offending CWI/source ref；`stale_conflict` 或
+`rejected` 都回到同 request 的 bounded typed semantic correction，不触发 owner state。尤其当 sealed proof obligation 已经
+包含 exact `OwnerFactAcquisition` 时，`undeclared_prerequisite` 必须以 `owner_fact_acquisition_declared` 拒绝：当前只是
+validation surface 尚未 ready，不是 Definition 缺声明，因而零 observation、`need_governance`、clarification dispatch 或 ticket。
+
+1. SM-3 先把 complete document 与 original diagnostic 持久化；pure admission 通过后，Orchestrator 才从 current aggregate 派生并绑定
    `WorkspaceID + RunID + DefinitionRevision + StartupInputHash + AuthoritySnapshotID + FocusRef + LogicalRequestID`，形成
    typed `RuntimeDefinitionGapObservation`；
 2. SM-2 只接受 exact-current scope、manifest-authorized offending item refs 和完整 document hash。stale/mismatched/duplicate

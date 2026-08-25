@@ -2144,6 +2144,31 @@ EOF
   exit 1
 fi
 
+# RuntimeController test facades must not compile into production. Direct
+# component mutation is legal only inside the exhaustive owner-private event
+# routes reached by ApplyInternalEvent; helpers elsewhere must submit a
+# concrete RuntimeInternalEvent instead of selecting a component mutator.
+if [[ -f "$runtime_transition_root/component_facades.go" ]]; then
+	echo "boundary contract violation: RuntimeController component facade is compiled into production" >&2
+	exit 1
+fi
+runtime_controller_component_mutator_facades="$(
+  find "$runtime_transition_root" -type f -name '*.go' ! -name '*_test.go' ! -name 'internal_event_route_*.go' -print0 |
+    xargs -0 -r grep -Hn -E -- '[A-Za-z_][A-Za-z0-9_]*\.(authority|planning|candidateDispatch|driveDelivery)\.[A-Za-z_][A-Za-z0-9_]*\(' || true
+)"
+if [[ -n "$runtime_controller_component_mutator_facades" ]]; then
+  cat >&2 <<EOF
+Boundary contract violation: a production RuntimeController facade calls a
+private component mutator outside the owner-private internal-event routes.
+
+$runtime_controller_component_mutator_facades
+
+Submit a concrete RuntimeInternalEvent through ApplyInternalEvent. Direct
+component dispatch remains legal only in internal_event_route_*.go.
+EOF
+  exit 1
+fi
+
 # Biz directly owns the controller and evidence dependencies.  Restoring a
 # RuntimeOrchestrator shell would create a second apparent owner/mutation
 # surface and hide which object crosses the Run-owner CAS boundary.

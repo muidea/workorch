@@ -100,9 +100,13 @@ load facts
   closure 中 current all-of dependency 已就绪的 exact acquisition owner/kind/variant/target-policy/operation-selector。
   Definition target selector 只保留声明 lineage，不能替代 capability operation selector。SM-2/SM-3 必须先把二者
   编译为 manifest 内唯一的 per-CWI `RuntimeSemanticProofObligation`，provider schema、typed correction 与 binding seal
-  全部消费该 obligation；batch 必须恰含一项，不能让 LLM、Shell、File 或后续 aggregate read 另选动作。预算按实际
-  accepted acquisition operation 记账而不是按 provider replan 次数记账；当前 `MaxAcquisitionAttempts=1`，reobserve 后仍
-  缺失即以 `owner_fact_convergence_exhausted` fail-closed。duplicate/restart 不重复
+  全部消费该 obligation；batch 必须恰含一项，不能让 LLM、Shell、File 或后续 aggregate read 另选动作。obligation 必须将
+  Definition terminal evidence 与 current acquisition evidence 分字段保存；acquisition generation 的 `state_change` 不能满足
+  terminal `validation`。预算按实际 accepted acquisition operation 记账而不是按 provider replan 次数记账；当前
+  `MaxAcquisitionAttempts=1`，reobserve 后仍缺失即以 `owner_fact_convergence_exhausted` fail-closed。reobserve 已满足时，
+  `assessment_observed` private event 在同一 CAS 中保留 acquisition audit/anti-replay fact、保持 CWI open、写入
+  `assessment_owner_fact_acquisition_settled` reopen lineage并退休 generation；successor semantic generation 必须恢复原
+  terminal evidence obligation，不能继承 acquisition credit。duplicate/restart 不重复
   reopen、request、effect 或预算扣减。重开 CWI 固定返回 `semantic-pending/<cwi>`；当新的 current-focus acquisition 与
   上一 generation 已退休 prerequisite 使用同一 canonical ID 时，SM-2 必须在排入 pending 前原子移出该 retired ID 及其
   旧 observation，且不得复用旧 observation。无关 retired lineage 必须保留，审计由 CWI reopen lineage 与 semantic
@@ -121,6 +125,10 @@ load facts
 - governance 只用于独立封存的真实权限、外部依赖或明确要求人工输入的配置/策略阻塞。capability infeasible、
   retry/repair budget exhaustion、候选/证据合同违规本身不能创建 ticket；只有对应 owner fact 同时携带 typed
   `ExternalDependency/GovernanceRequirement` 时才可进入 `need_governance`。
+- complete Definition-gap document 只是 LLM observation candidate。SM-2/SM-3 必须先执行 pure manifest admission；已有 sealed
+  acquisition 的 CWI 报 `undeclared_prerequisite` 时只能进入 bounded semantic correction，不能提交
+  `definition_gap_observed`、`need_governance` 或 ticket。只有 admitted gap 才能由 Orchestrator 的 owner-private event 选择
+  clarification transition。
 - capability/provider unavailable、consumption unknown 或 owner dependency 暂时不可用时，只有已经存在 owner-defined typed
   recovery/reconciliation contract、明确 recovery condition、deadline/trigger 与可用 budget，SM-2 才可持久化
   `recoverable_runtime_wait` fact。缺少任一条件、guard/budget耗尽或owner明示不可恢复时必须形成typed terminal；

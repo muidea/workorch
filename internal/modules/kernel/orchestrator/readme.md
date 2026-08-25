@@ -133,7 +133,8 @@ contradiction 只通过 `semantic_binding_contradiction_observed` 私有事件�
   的 candidate/planning/authority transition 也已按 owner 分文件。执行恢复先由
   `candidateDispatchComponent` 返回只读 recovery-budget handoff，再由独立 `recovery_budget_consumed` SM-4 event
   提交预算并以 operation identity/fenced attempt 授权重试，不在 SM-3 事件内修改 SM-4 ledger。Controller 的
-  package-private compatibility adapter 只复用同一 dispatcher，不能形成额外 mutation entry；外部仍只能使用
+  focused reducer 测试所需的 package-private controller adapter 只存在于 `_test.go`，不进入 production 编译；生产
+  `RuntimeController` 只能由 `ApplyInternalEvent` 的 `internal_event_route_*` 直接分派 component mutator，外部仍只能使用
   `ApplyInternalEvent`、`Load`、`QueryOperationReceipt`。
 - `RuntimeAggregate.Validate` 仍是一次完整、顺序固定且 fail-fast 的 aggregate validation；activation、SM-2、SM-3、
   SM-4 与 cross-machine fence 仅以 private validator 分段。evidence commit 的 receipt admission、fact derivation、
@@ -399,13 +400,17 @@ deployed run ID 只属于 archive regression evidence，不定义当前候选、
   lineage，不是 capability authorization。Orchestrator 在 manifest seal 时为每个 CWI 编译唯一
   `RuntimeSemanticProofObligation`；provider schema、typed correction 与 binding compiler 只消费该 immutable obligation，
   不得随后重读 aggregate `DefinitionFocuses` 或将两套 selector 归一为同一值。proof batch 必须恰含这一项，不能让
-  LLM、Shell 或 File 另选动作。
+  LLM、Shell 或 File 另选动作。obligation 的 terminal evidence kinds 必须始终保留 Definition 声明；current acquisition
+  evidence kinds 单独派生为 `state_change`，不得获得 terminal validation/metric/artifact credit。
   若历史/旧 generation 先执行了非 acquisition proof，assessment commit 可在同一 Orchestrator CAS 中提交 audit、把
   current bound CWI 转为 `reopened`、清除 current binding、更新 reconciliation，并以
   `assessment_owner_fact_postcondition_unmet` lineage 退休该 generation；SM-4 只从 aggregate 幂等 re-drive。真正的
   acquisition receipt/assessment 计入封存的 `MaxAcquisitionAttempts=1`；reobserve 后 fact 仍缺失即 deterministic
   `owner_fact_convergence_exhausted`，不得以 semantic replan 形成第二次 acquisition。duplicate/restart 不产生第二次
-  reopen/CAS/request/effect。若 sealed proof 本身仍缺失，则保持普通 evidence/repair 主线。CWI 重开后
+  reopen/CAS/request/effect。reobserve 已满足时，只有 `assessment_observed` private event 可在同一 CAS 中保留 exact
+  acquisition attempt/audit、保持 CWI open、写入 `assessment_owner_fact_acquisition_settled` reopen lineage并退休当前
+  generation；successor manifest 恢复原 terminal evidence obligation，acquisition evidence 不得关闭 CWI。若 sealed proof
+  本身仍缺失，则保持普通 evidence/repair 主线。CWI 重开后
   固定回到 `semantic-pending/<cwi>`；若该 current-focus prerequisite ID 已由上一 semantic generation 退休，SM-2 必须在
   重新排入 acquisition 前原子移出同 ID 的 retired prerequisite 及其旧 observation，只保留无关 retired lineage。旧
   observation 不得复用为当前 authority，审计继续由 CWI reopen lineage 与 semantic generation history 承载，且
@@ -413,6 +418,10 @@ deployed run ID 只属于 archive regression evidence，不定义当前候选、
   的防重放事实：SM-2 只把 shape 携带到 successor focus，repair attempt/gap/directive 仍按 focus 清零；SM-3 必须拒绝
   successor candidate 重放该 shape。新 generation 必须使用新 logical request 派生 focus/binding，历史 reopened binding
   绝不能重新成为 current。
+- semantic Definition-gap document 在提交 `definition_gap_observed` 前必须通过 pure manifest admission。已有 sealed
+  `OwnerFactAcquisition` 时，provider 的 `undeclared_prerequisite` 只进入 bounded typed correction，不能创建
+  clarification observation、`need_governance` 或 ticket；只有 admitted gap 才由 owner-private internal event 选择专用
+  clarification transition。
 - File owner 对 `unified_diff` 在 owner feasibility probe 中执行无写入 dry-run；hunk/context 冲突必须在 dispatch seal 前以 typed infeasible result 返回，owner 不选择后续 RuntimeAction。
 - active Runtime Cancel/Supersede 必须先 `RequestTermination` CAS 持久化 `RuntimeTerminationRecord`，再投影 SM-1 terminal。
 - semantic owner catalog 退休后，若 current eligible CWI 尚无 binding，SM-4 drive/startup recovery 必须先推进新的 semantic

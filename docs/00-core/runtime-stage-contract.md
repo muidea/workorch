@@ -71,6 +71,10 @@ provider、candidate、semantic proof、capability operation、repair 与 recove
 - 显式 unsupported relation 只能存在于 Workspace owner 的 pre-seal admission candidate，并必须在 Run 前形成 blocking ticket。
 - startup input 封存后允许执行期 LLM 基于 exact revision/hash 处理 semantic proof、candidate 或 bounded gap diagnostic；LLM
   不得改写输入、选择 Runtime action、授予 credit 或裁决 terminal。
+- owner-fact acquisition 是同一 CWI 的有界前置 transaction，不是 terminal proof：manifest 必须同时保留 Definition 的
+  terminal evidence kinds 与当前 acquisition evidence kinds。acquisition 成功只允许 SM-2 通过 owner-private event 重开
+  同一 CWI 并生成 terminal-proof successor；已有 sealed acquisition 时，LLM 的 `undeclared_prerequisite` 必须在 ticket 前
+  由 pure manifest admission 拒绝。
 - Definition 修订不能被 Resume 吸收；需要新输入时必须显式 Restart，并遵守 replacement/delivery transaction。
 
 ## Four Coordinated Machines

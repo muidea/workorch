@@ -256,6 +256,64 @@ func TestRuntimePrivateComponentsUseTheControllerKernelInstance(t *testing.T) {
 	}
 }
 
+// TestRuntimeControllerComponentMutationsOnlyEnterThroughInternalEventRoutes
+// keeps the owner-local dispatcher as the sole production mutation surface.
+// Focused tests may use test-only controller adapters, but production
+// RuntimeController methods may reach component mutators only while reducing
+// an already-classified RuntimeInternalEvent.
+func TestRuntimeControllerComponentMutationsOnlyEnterThroughInternalEventRoutes(t *testing.T) {
+	t.Parallel()
+
+	components := map[string]struct{}{
+		"authority":         {},
+		"planning":          {},
+		"candidateDispatch": {},
+		"driveDelivery":     {},
+	}
+	for filename, file := range parseRuntimeProductionSources(t) {
+		base := filepath.Base(filename)
+		if base == "component_facades.go" {
+			t.Fatal("RuntimeController component facade is compiled into production")
+		}
+		for _, declaration := range file.Decls {
+			function, ok := declaration.(*ast.FuncDecl)
+			if !ok || function.Recv == nil || len(function.Recv.List) != 1 || runtimeReceiverType(function.Recv.List[0].Type) != "RuntimeController" {
+				continue
+			}
+			receiverNames := function.Recv.List[0].Names
+			if len(receiverNames) != 1 {
+				t.Fatalf("RuntimeController.%s must use one named receiver", function.Name.Name)
+			}
+			receiverName := receiverNames[0].Name
+			ast.Inspect(function.Body, func(node ast.Node) bool {
+				call, ok := node.(*ast.CallExpr)
+				if !ok {
+					return true
+				}
+				method, ok := call.Fun.(*ast.SelectorExpr)
+				if !ok {
+					return true
+				}
+				component, ok := method.X.(*ast.SelectorExpr)
+				if !ok || component.Sel == nil {
+					return true
+				}
+				receiver, ok := component.X.(*ast.Ident)
+				if !ok || receiver.Name != receiverName {
+					return true
+				}
+				if _, tracked := components[component.Sel.Name]; !tracked {
+					return true
+				}
+				if !strings.HasPrefix(base, "internal_event_route_") {
+					t.Fatalf("production RuntimeController.%s calls %s.%s from %s; route through ApplyInternalEvent", function.Name.Name, component.Sel.Name, method.Sel.Name, base)
+				}
+				return true
+			})
+		}
+	}
+}
+
 // TestFocusedRulePackagesRemainStateless freezes the O3-O6 extraction rule:
 // focused rule packages may project facts, but cannot become a second Runtime
 // owner through repository/EventHub/aggregate access.
@@ -536,7 +594,6 @@ func TestO7CandidateRequestAndExecutionFacetsRemainNarrow(t *testing.T) {
 	t.Parallel()
 	files := parseRuntimeProductionSources(t)
 	ensureReceivers := map[string]bool{}
-	ensureFacadeReceivers := map[string]bool{}
 	terminalizerCount := 0
 	controllerExecutionMethods := map[string]bool{}
 	for filename, file := range files {
@@ -548,11 +605,7 @@ func TestO7CandidateRequestAndExecutionFacetsRemainNarrow(t *testing.T) {
 			receiver := runtimeReceiverType(function.Recv.List[0].Type)
 			switch function.Name.Name {
 			case "ensureCandidateRequestSessionWithExpected":
-				if filepath.Base(filename) == "component_facades.go" {
-					ensureFacadeReceivers[receiver] = true
-				} else {
-					ensureReceivers[receiver] = true
-				}
+				ensureReceivers[receiver] = true
 			case "terminalizeEquivalentAuthorityNoProgress":
 				terminalizerCount++
 			}
@@ -564,7 +617,7 @@ func TestO7CandidateRequestAndExecutionFacetsRemainNarrow(t *testing.T) {
 			}
 		}
 	}
-	if !ensureReceivers["planningTransactionComponent"] || len(ensureReceivers) != 1 || !ensureFacadeReceivers["RuntimeController"] {
+	if !ensureReceivers["planningTransactionComponent"] || len(ensureReceivers) != 1 {
 		t.Fatalf("candidate request ensure receiver = %v, want planningTransactionComponent only", ensureReceivers)
 	}
 	if terminalizerCount != 0 {

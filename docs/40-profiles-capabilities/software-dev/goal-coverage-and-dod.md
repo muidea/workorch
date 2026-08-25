@@ -53,7 +53,9 @@ The built-in `software-dev` Profile declares only terminal work that has an exac
 `source_change` must settle before DoD validation; DoD validation must settle before `validation_report`; source, DoD validation
 and report feed the final version-control snapshot gate. Validation readiness is a prerequisite of each DoD proof: if Shell does
 not publish the required selectable managed-validation surface, the sealed Profile allows at most one File-owned preparation
-acquisition followed by Shell reobservation. It is not an independent terminal CWI.
+acquisition followed by Shell reobservation. The acquisition generation requires only its exact File `state_change` receipt while
+the immutable DoD CWI continues to require terminal `validation`. A ready Shell reobservation retires the acquisition generation
+and reopens the same CWI for a fresh validation binding; it never grants DoD credit and is not an independent terminal CWI.
 
 `coverage_map` and a generic `user_deliverable` are Result/trace material derived from the proved CWI set, not unconditional
 terminal members. A concrete Goal may still declare an additional artifact through its admitted Definition/Profile contract, but

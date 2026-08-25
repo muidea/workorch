@@ -39,11 +39,26 @@ func (c *authorityComponent) commitAssessment(ctx context.Context, workspaceID c
 		aggregate.Facts.Focus.RequiredOwnerFacts,
 		aggregate.Facts.Resources.OperationAdmissibilities,
 	)
+	ownerFactAcquisition, hasOwnerFactAcquisition, err := currentRuntimeSemanticOwnerFactAcquisition(aggregate)
+	if err != nil {
+		return RuntimeAggregate{}, err
+	}
+	ownerFactAcquisitionSettled := hasOwnerFactAcquisition && len(missingOwnerFacts) == 0 && canonicalAssessmentProofCompleteWithoutOwnerFacts(aggregate)
 	ownerFactOnlyGap := len(missingOwnerFacts) != 0 && canonicalAssessmentProofCompleteWithoutOwnerFacts(aggregate)
 	canonicalCoverage := applyCanonicalAssessmentCoverage(aggregate, aggregate.ActiveDispatch.ID)
 	canonicalGap := canonicalAssessmentCoverageGap(canonicalCoverage, aggregate.Facts.Focus, nil)
 	if ownerFactOnlyGap {
 		canonicalGap = canonicalAssessmentCoverageGap(canonicalCoverage, aggregate.Facts.Focus, missingOwnerFacts)
+	}
+	if ownerFactAcquisitionSettled {
+		// This assessment closes only the manifest-sealed acquisition
+		// transaction. Preserve its evidence lineage, but keep the Definition
+		// CWI open: a fresh semantic generation must still bind and prove the
+		// immutable terminal evidence contract.
+		canonicalCoverage, err = retainRuntimeOwnerFactAcquisitionCoverageOpen(canonicalCoverage, aggregate.Facts.Focus)
+		if err != nil {
+			return RuntimeAggregate{}, err
+		}
 	}
 	canonicalDisposition := runtimecontract.AssessmentDispositionSatisfied
 	if canonicalGap != nil {
@@ -122,7 +137,12 @@ func (c *authorityComponent) commitAssessment(ctx context.Context, workspaceID c
 	aggregate.ActiveDispatch = nil
 	previousFocusID := aggregate.Facts.Focus.ID
 	replanned := false
-	if canonicalDisposition == runtimecontract.AssessmentDispositionRepairableGap && ownerFactOnlyGap {
+	if ownerFactAcquisitionSettled {
+		replanned, err = settleRuntimeOwnerFactAcquisition(&aggregate, fact.ID, ownerFactAcquisition)
+		if err != nil {
+			return RuntimeAggregate{}, err
+		}
+	} else if canonicalDisposition == runtimecontract.AssessmentDispositionRepairableGap && ownerFactOnlyGap {
 		replanned, err = replanRuntimeCWIForUnmetOwnerFacts(&aggregate, fact.ID)
 		if err != nil {
 			return RuntimeAggregate{}, err

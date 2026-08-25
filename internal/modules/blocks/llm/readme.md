@@ -4,7 +4,7 @@ Status: active
 
 Type: capability-block-contract
 
-Last Verified: 2026-08-23
+Last Verified: 2026-08-24
 
 ## 功能范围与边界
 
@@ -86,6 +86,13 @@ application、Web 与 orchestrator 不直接访问 ai-proxy。
     proof obligation：Definition selector 仅作为声明 lineage 展示，proposal 的 `targetSelectorRef` 必须是 capability
     catalog 授权的 acquisition operation selector。LLM 不得复制 Definition selector 充当 File/Shell/MCP target；两者
     不一致时也不得自行协调，typed field violation 交由 Orchestrator attempt-0 有界纠错，且不形成 candidate/dispatch。
+    C3 通过同一个 derived evidence obligation 同时投影 immutable `terminalRequiredEvidenceKinds` 与本轮
+    `currentRequiredEvidenceKinds`。`evidencePurpose=owner_fact_acquisition` 及其 `ownerFactAcquisition` 表示已经封存的当前
+    前置 acquisition proof，不是尚待模型发现的 Definition 缺口：provider 必须使用其中 exact
+    owner/operation/variant/target authorization，并只声明 `state_change` evidence。最终 validation surface/recipe 在
+    acquisition 与 owner re-observation 前暂不可选择是预期事实，不能单独据此输出 `undeclared_prerequisite`。acquisition
+    receipt 只证明前置状态变化，不产生 terminal validation evidence/coverage credit；ticket、retry、Runtime state/action
+    以及 re-observation 后的新 planning generation 仍完全由 Orchestrator owner 决定。
 14. Skill 只从 Run owner 的 sealed activation 进入 volatile C3。每项携带 WorkOrch Registry 或 SkillHub typed
     provenance、original/truncated instruction identity 与 activation-time byte budget；LLM 不读取 Skill repository/catalog、
     不重新选择或裁剪 Skill，也不把 Skill material 移入 C0～C2。缺失/漂移的 provenance 或 budget 在 Runtime
@@ -171,6 +178,8 @@ application、Web 与 orchestrator 不直接访问 ai-proxy。
 - [x] provider-ceiling transient failure的exact recoverable-wait probe、普通drive/伪造lease零额外调用与matching result恢复。
 - [x] C0～C2 stable prefix、C3～C5 volatile tail；JSON Schema 只受显式 provider capability 控制，模型名不参与推断，
   未声明时省略 provider format，且任何 structured-output failure 都不触发第二次 provider call。
+- [x] C3 owner-fact acquisition 同时保留 terminal `validation` 与 current `state_change` obligation，投影 exact
+  File/write selector，明确暂未 ready 的 validation surface 不构成 `undeclared_prerequisite`；该动态变化不改变 C0～C2 bytes/hash。
 - [x] candidate terminal framing 强制 `Stale | Feedback | DocumentOutcome` exactly-one；complete content 与 hash/bytes
   一致，所有非 complete outcome 拒绝 content-only/混合 envelope。
 - [x] completion/stream/embedding/preflight 的 physical response mode 在成功、transport failure 与 output-limit audit 中

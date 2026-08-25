@@ -639,6 +639,10 @@ func attachRuntimeSemanticProofObligationSchema(items map[string]any, manifest R
 		if obligation.OwnerFactAcquisition == nil {
 			continue
 		}
+		evidenceObligation, err := ResolveRuntimeSemanticEvidenceObligation(obligation)
+		if err != nil {
+			return err
+		}
 		acquisition := obligation.OwnerFactAcquisition.Normalized()
 		targetRequired := []string{"policy", "ownerSelectorRefs"}
 		targetProperties := map[string]any{
@@ -652,7 +656,7 @@ func attachRuntimeSemanticProofObligationSchema(items map[string]any, manifest R
 		proposalProperties := map[string]any{
 			"ownerModuleId":         map[string]any{"const": acquisition.AcquisitionOwnerModuleID},
 			"operationKind":         map[string]any{"const": acquisition.AcquisitionOperationKind},
-			"requiredEvidenceKinds": exactStringArraySchema([]string{EvidenceKindStateChange}),
+			"requiredEvidenceKinds": exactStringArraySchema(evidenceObligation.CurrentRequiredEvidenceKinds),
 			"target": map[string]any{
 				"required":   targetRequired,
 				"properties": targetProperties,

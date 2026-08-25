@@ -481,8 +481,11 @@ func ownerFactReopenRepairContinuation(facts runtimecontract.RuntimeFacts, byID 
 		return runtimeCWIRepairContinuation{}
 	}
 	item := facts.Coverage[index]
-	if item.CWIConvergenceState != runtimecontract.RuntimeCWIConvergenceStateReopened || len(item.ReopenLineage) == 0 ||
-		item.ReopenLineage[len(item.ReopenLineage)-1].Normalized().Reason != runtimeCWIReopenReasonOwnerFactPostcondition {
+	if item.CWIConvergenceState != runtimecontract.RuntimeCWIConvergenceStateReopened || len(item.ReopenLineage) == 0 {
+		return runtimeCWIRepairContinuation{}
+	}
+	reason := item.ReopenLineage[len(item.ReopenLineage)-1].Normalized().Reason
+	if reason != runtimeCWIReopenReasonOwnerFactPostcondition && reason != runtimeCWIReopenReasonOwnerFactAcquisitionSettled {
 		return runtimeCWIRepairContinuation{}
 	}
 	return runtimeCWIRepairContinuation{

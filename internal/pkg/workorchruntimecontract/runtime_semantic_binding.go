@@ -25,8 +25,10 @@ func CompileRuntimeSemanticBindings(manifest RuntimeSemanticPlanManifest, logica
 		return nil, RuntimeCWIReconciliationContract{}, err
 	}
 	sourceByCoverage := make(map[common.CoverageWorkItemID]CoverageFocus, len(manifest.ProofObligations))
+	obligationByCoverage := make(map[common.CoverageWorkItemID]RuntimeSemanticProofObligation, len(manifest.ProofObligations))
 	for _, obligation := range manifest.ProofObligations {
 		sourceByCoverage[obligation.CoverageWorkItemID] = runtimeSemanticProofObligationSourceFocus(obligation)
+		obligationByCoverage[obligation.CoverageWorkItemID] = obligation.Clone()
 	}
 	items := make(map[string]RuntimeCoverageItem, len(manifest.CoverageItems))
 	for _, item := range manifest.CoverageItems {
@@ -67,10 +69,18 @@ func CompileRuntimeSemanticBindings(manifest RuntimeSemanticPlanManifest, logica
 			value := value
 			source = &value
 		}
-		if err := validateRuntimeSemanticProofSetSource(proofSet, source); err != nil {
+		obligation, found := obligationByCoverage[proofSet.CoverageWorkItemID]
+		if !found {
+			return nil, RuntimeCWIReconciliationContract{}, fmt.Errorf("runtime semantic binding has no proof obligation for coverage %q", proofSet.CoverageWorkItemID)
+		}
+		evidenceObligation, err := ResolveRuntimeSemanticEvidenceObligation(obligation)
+		if err != nil {
 			return nil, RuntimeCWIReconciliationContract{}, err
 		}
-		focus, err := compileRuntimeSemanticFocus(manifest, generationID, item, proofSet, proofFacts, source)
+		if err := validateRuntimeSemanticProofSetSourceWithEvidenceKinds(proofSet, source, evidenceObligation.CurrentRequiredEvidenceKinds); err != nil {
+			return nil, RuntimeCWIReconciliationContract{}, err
+		}
+		focus, err := compileRuntimeSemanticFocus(manifest, generationID, item, proofSet, proofFacts, source, evidenceObligation)
 		if err != nil {
 			return nil, RuntimeCWIReconciliationContract{}, err
 		}
@@ -105,9 +115,13 @@ func validateRuntimeSemanticPlanProofObligations(document RuntimeSemanticPlanDoc
 		if !found {
 			return fmt.Errorf("runtime semantic proof for coverage %q has no sealed obligation", proofSet.CoverageWorkItemID)
 		}
+		evidenceObligation, err := ResolveRuntimeSemanticEvidenceObligation(obligation)
+		if err != nil {
+			return err
+		}
 		sourceValue := runtimeSemanticProofObligationSourceFocus(obligation)
 		source := &sourceValue
-		if err := validateRuntimeSemanticProofSetSource(proofSet, source); err != nil {
+		if err := validateRuntimeSemanticProofSetSourceWithEvidenceKinds(proofSet, source, evidenceObligation.CurrentRequiredEvidenceKinds); err != nil {
 			return err
 		}
 		proposalIndex := -1
@@ -183,11 +197,20 @@ func runtimeSemanticBindingSourceFocuses(values []RuntimeDefinitionFocus) (map[c
 // weaken the exact evidence contract that activation/profile already declared
 // for a CWI. It is a pure SM-2 pre-seal check; it does not choose a proof.
 func validateRuntimeSemanticProofSetSource(proofSet RuntimeSemanticCWIProofSet, source *CoverageFocus) error {
+	var requiredEvidenceKinds []string
+	if source != nil {
+		requiredEvidenceKinds = source.Normalized().RequiredEvidenceKinds
+	}
+	return validateRuntimeSemanticProofSetSourceWithEvidenceKinds(proofSet, source, requiredEvidenceKinds)
+}
+
+func validateRuntimeSemanticProofSetSourceWithEvidenceKinds(proofSet RuntimeSemanticCWIProofSet, source *CoverageFocus, requiredEvidenceKinds []string) error {
 	if source == nil {
 		return nil
 	}
 	declaration := source.Normalized()
-	if len(declaration.RequiredEvidenceKinds) != 0 && !sameStrings(proofSet.EvidenceKinds(), declaration.RequiredEvidenceKinds) {
+	requiredEvidenceKinds = normalizeStrings(requiredEvidenceKinds)
+	if len(requiredEvidenceKinds) != 0 && !sameStrings(proofSet.EvidenceKinds(), requiredEvidenceKinds) {
 		return fmt.Errorf("runtime semantic proof set for coverage %q does not cover source required evidence kinds", proofSet.CoverageWorkItemID)
 	}
 	for _, proposal := range proofSet.Proposals {
@@ -223,7 +246,7 @@ func validateRuntimeSemanticProofSetSource(proofSet RuntimeSemanticCWIProofSet, 
 	return nil
 }
 
-func compileRuntimeSemanticFocus(manifest RuntimeSemanticPlanManifest, generationID string, item RuntimeCoverageItem, proofSet RuntimeSemanticCWIProofSet, facts map[string]RuntimeSemanticProofFeasibility, source *CoverageFocus) (CoverageFocus, error) {
+func compileRuntimeSemanticFocus(manifest RuntimeSemanticPlanManifest, generationID string, item RuntimeCoverageItem, proofSet RuntimeSemanticCWIProofSet, facts map[string]RuntimeSemanticProofFeasibility, source *CoverageFocus, evidenceObligation RuntimeSemanticEvidenceObligation) (CoverageFocus, error) {
 	manifest = manifest.Normalized()
 	proofSetHash := StableRuntimeSemanticCWIProofSetHash(proofSet.CoverageWorkItemID, proofSet.Proposals)
 	idSuffix := strings.TrimPrefix(proofSetHash, "runtime-semantic-cwi-proof-set-")
@@ -245,9 +268,13 @@ func compileRuntimeSemanticFocus(manifest RuntimeSemanticPlanManifest, generatio
 	var selectorRef, prospectiveTargetRef, declarationRef, selectorOwner string
 	var validationRecipeID string
 	validationChecks := make([]string, 0)
-	proofRequirementIndex, err := runtimeSemanticSourceProofRequirementIndex(proofSet, source)
-	if err != nil {
-		return CoverageFocus{}, err
+	proofRequirementIndex := -1
+	if evidenceObligation.Purpose == RuntimeSemanticEvidenceObligationDefinitionProof {
+		var err error
+		proofRequirementIndex, err = runtimeSemanticSourceProofRequirementIndex(proofSet, source)
+		if err != nil {
+			return CoverageFocus{}, err
+		}
 	}
 	for proofIndex, rawProposal := range proofSet.Proposals {
 		proposal := rawProposal.Normalized()

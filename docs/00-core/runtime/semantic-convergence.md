@@ -96,9 +96,25 @@ acquisition 必须另外绑定 capability owner catalog 中的 exact operation s
 先把每个 CWI 的声明 lineage、required fact 与 exact acquisition 编译为唯一 `RuntimeSemanticProofObligation` 并封存进
 semantic manifest，后续 provider schema、纠错和 binding compiler 只能消费该 obligation，不能再次读取 aggregate
 `DefinitionFocuses` 或把两套 selector 当作别名。semantic proof batch 必须恰好匹配当前 all-of dependency 已就绪的
-acquisition owner/kind/variant/target-policy/operation-selector；owner feasibility 与 receipt 后只重获声明的 owner/fact。一次 acquisition 已形成 accepted
-operation/evidence 但 reobserve 仍缺失时直接耗尽，不能再生成第二个 semantic acquisition。Shell 不选择 File 操作，File
-不解释 Shell fact，kernel 不硬编码语言/测试框架。
+acquisition owner/kind/variant/target-policy/operation-selector。`RuntimeSemanticEvidenceObligation` 必须同时保留 immutable
+`TerminalRequiredEvidenceKinds` 与 generation-specific `CurrentRequiredEvidenceKinds`：正常 generation 二者一致；acquisition
+generation 的 current kinds 只能是 acquisition 所需的 `state_change`，不能覆盖 Definition 的 terminal `validation` 等声明，
+也不能继承 terminal metric/artifact credit。
+
+owner feasibility 与 receipt 后只重获声明的 owner/fact。若 reobserve 仍缺失，一次 accepted acquisition operation/evidence
+立即耗尽，不能再生成第二个 semantic acquisition；若 reobserve 已满足，SM-2 也不得把 acquisition evidence 记为 terminal
+coverage。只有 `assessment_observed` owner-private event 可以在同一 CAS 中提交 acquisition assessment/audit、保留 exact
+operation anti-replay/attempt fact、将 CWI 保持为 open 并记为 `reopened`、以
+`assessment_owner_fact_acquisition_settled` lineage 退休当前 generation，然后回到 `semantic-pending/<cwi>`。successor
+manifest 必须移除 acquisition、恢复原 terminal evidence obligation；只有 successor binding 的 matching terminal receipt/
+assessment 可以 settle CWI。duplicate/restart 只从该 aggregate 幂等 re-drive，不能重复 effect、assessment、reopen 或 attempt。
+Shell 不选择 File 操作，File 不解释 Shell fact，kernel 不硬编码语言/测试框架。
+
+Definition-gap provider document 还必须通过 pure、manifest-bound admission 才能成为
+`RuntimeDefinitionGapObservation`。当 offending CWI 已有 sealed `OwnerFactAcquisition` 时，provider 报告
+`undeclared_prerequisite` 与 manifest 冲突，必须进入同 request 的 bounded typed correction，且零 clarification observation、
+`need_governance`、ticket 或 Definition mutation。只有 manifest 未声明 closure 的真实 gap/ambiguity才可进入专用
+Runtime clarification lane；LLM 不能借 gap kind 选择 ticket 或任何状态转换。
 
 同一 proposal 的 operation kind、concrete variant 与 target policy 必须来自同一条 owner catalog fact；catalog
 已列出的现有目标不得使用仅允许 prospective target 的 create-only fact。若相同 evidence kind 与 target policy

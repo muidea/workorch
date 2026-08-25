@@ -134,6 +134,112 @@ func (d RuntimeDefinitionGapProviderDocument) ValidateAgainst(manifest RuntimeSe
 	return nil
 }
 
+// RuntimeDefinitionGapAdmissionDisposition is a pure, manifest-bound
+// classification of one structurally valid provider gap document. It neither
+// selects a Runtime transition nor implies a retry or ticket action.
+type RuntimeDefinitionGapAdmissionDisposition string
+
+const (
+	RuntimeDefinitionGapAdmissionAdmitted      RuntimeDefinitionGapAdmissionDisposition = "admitted"
+	RuntimeDefinitionGapAdmissionRejected      RuntimeDefinitionGapAdmissionDisposition = "rejected"
+	RuntimeDefinitionGapAdmissionStaleConflict RuntimeDefinitionGapAdmissionDisposition = "stale_conflict"
+)
+
+// RuntimeDefinitionGapAdmissionDecision carries a stable classification code;
+// Message is diagnostic only and must never be parsed to select a transition.
+type RuntimeDefinitionGapAdmissionDecision struct {
+	Disposition RuntimeDefinitionGapAdmissionDisposition
+	Code        string
+	Message     string
+}
+
+func (d RuntimeDefinitionGapAdmissionDecision) Admitted() bool {
+	return d.Disposition == RuntimeDefinitionGapAdmissionAdmitted
+}
+
+func runtimeDefinitionGapAdmissionFailure(disposition RuntimeDefinitionGapAdmissionDisposition, code string, err error) RuntimeDefinitionGapAdmissionDecision {
+	decision := RuntimeDefinitionGapAdmissionDecision{Disposition: disposition, Code: strings.TrimSpace(code)}
+	if err != nil {
+		decision.Message = strings.TrimSpace(err.Error())
+	}
+	return decision
+}
+
+// EvaluateRuntimeDefinitionGapAdmission evaluates only detached manifest,
+// expected-document and provider-document values. It owns no state, CAS,
+// EventHub, retry accounting or action selection. In particular, a provider
+// cannot classify a prerequisite as undeclared when the same sealed manifest
+// already carries an exact owner-fact acquisition for the offending CWI.
+func EvaluateRuntimeDefinitionGapAdmission(manifest RuntimeSemanticPlanManifest, expected RuntimeExpectedDocumentContract, document RuntimeDefinitionGapProviderDocument) RuntimeDefinitionGapAdmissionDecision {
+	if err := manifest.Validate(); err != nil {
+		return runtimeDefinitionGapAdmissionFailure(RuntimeDefinitionGapAdmissionRejected, "manifest_invalid", err)
+	}
+	if err := expected.Validate(); err != nil {
+		return runtimeDefinitionGapAdmissionFailure(RuntimeDefinitionGapAdmissionRejected, "expected_document_invalid", err)
+	}
+	normalizedManifest := manifest.Normalized()
+	normalizedExpected := expected.Normalized()
+	if normalizedExpected.DocumentKind != RuntimeProviderDocumentSemanticPlan ||
+		normalizedExpected.ManifestHash != normalizedManifest.Hash ||
+		normalizedExpected.DefinitionSeedHash != normalizedManifest.DefinitionSeedHash {
+		return runtimeDefinitionGapAdmissionFailure(RuntimeDefinitionGapAdmissionStaleConflict, "expected_document_stale", fmt.Errorf("runtime Definition gap expected document does not match the sealed manifest"))
+	}
+	if !runtimeDefinitionGapDocumentMatchesExpectedIdentity(document, normalizedManifest, normalizedExpected) {
+		return runtimeDefinitionGapAdmissionFailure(RuntimeDefinitionGapAdmissionStaleConflict, "document_identity_stale", fmt.Errorf("runtime Definition gap document does not match the sealed request identity"))
+	}
+	if err := document.ValidateAgainst(normalizedManifest, normalizedExpected); err != nil {
+		return runtimeDefinitionGapAdmissionFailure(RuntimeDefinitionGapAdmissionRejected, "document_invalid", err)
+	}
+	normalizedDocument := document.Normalized()
+	if normalizedDocument.GapKind == RuntimeDefinitionGapUndeclaredPrerequisite {
+		for _, ref := range normalizedDocument.OffendingItemRefs {
+			if runtimeDefinitionGapRefHasOwnerFactAcquisition(normalizedManifest, ref) {
+				return runtimeDefinitionGapAdmissionFailure(RuntimeDefinitionGapAdmissionRejected, "owner_fact_acquisition_declared", fmt.Errorf("runtime Definition gap prerequisite %q already has a sealed owner-fact acquisition", ref))
+			}
+		}
+	}
+	return RuntimeDefinitionGapAdmissionDecision{Disposition: RuntimeDefinitionGapAdmissionAdmitted, Code: "gap_admitted"}
+}
+
+func runtimeDefinitionGapDocumentMatchesExpectedIdentity(document RuntimeDefinitionGapProviderDocument, manifest RuntimeSemanticPlanManifest, expected RuntimeExpectedDocumentContract) bool {
+	document = document.Normalized()
+	manifest = manifest.Normalized()
+	expected = expected.Normalized()
+	if document.DocumentKind != RuntimeProviderDocumentSemanticPlan || document.ManifestHash != manifest.Hash ||
+		document.DefinitionSeedHash != manifest.DefinitionSeedHash || document.PlanStep != expected.PlanStep {
+		return false
+	}
+	switch expected.PlanStep {
+	case RuntimeSemanticPlanStepCoverageOrder:
+		return document.BatchID == "" && document.BatchSequence == nil && len(document.BatchCoverageWorkItemIDs) == 0
+	case RuntimeSemanticPlanStepProofBatch:
+		return document.BatchID == expected.BatchID && document.BatchSequence != nil && *document.BatchSequence == expected.BatchSequence &&
+			sameCoverageIDsInOrder(document.BatchCoverageWorkItemIDs, expected.BatchCoverageWorkItemIDs)
+	default:
+		return false
+	}
+}
+
+func runtimeDefinitionGapRefHasOwnerFactAcquisition(manifest RuntimeSemanticPlanManifest, ref string) bool {
+	manifest = manifest.Normalized()
+	ref = strings.TrimSpace(ref)
+	if ref == "" {
+		return false
+	}
+	acquisitionByCoverage := make(map[common.CoverageWorkItemID]bool, len(manifest.ProofObligations))
+	for _, obligation := range manifest.ProofObligations {
+		acquisitionByCoverage[obligation.CoverageWorkItemID] = obligation.OwnerFactAcquisition != nil
+	}
+	for _, item := range manifest.CoverageItems {
+		if ref == string(item.ID) || ref == strings.TrimSpace(item.SourceID) {
+			if acquisitionByCoverage[item.ID] {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 func sameCoverageIDsInOrder(left, right []common.CoverageWorkItemID) bool {
 	if len(left) != len(right) {
 		return false

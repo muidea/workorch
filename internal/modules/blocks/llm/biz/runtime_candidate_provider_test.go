@@ -482,6 +482,10 @@ func TestRuntimeSemanticProviderProjectionOmitsNonReadyValidationAndOwnerPrivate
 
 func TestRuntimeSemanticProviderProjectsDefinitionLineageAndExactAcquisitionSelector(t *testing.T) {
 	request := runtimeSemanticProviderTestRequest(t)
+	baseline, err := runtimeProviderRequest(request)
+	if err != nil {
+		t.Fatal(err)
+	}
 	catalog := request.SemanticManifest.OwnerCatalogs[0].Normalized()
 	catalog.OperationVariants = []runtimecontract.RuntimeOperationAdmissibilityVariant{{
 		Kind:                  runtimecontract.StepKindFileWrite,
@@ -505,7 +509,7 @@ func TestRuntimeSemanticProviderProjectsDefinitionLineageAndExactAcquisitionSele
 	}
 	request.SemanticManifest.OwnerCatalogs[0] = catalog
 	request.SemanticManifest.ProofObligations = []runtimecontract.RuntimeSemanticProofObligation{{
-		CoverageWorkItemID: "cwi-001", RequiredEvidenceKinds: []string{runtimecontract.EvidenceKindStateChange},
+		CoverageWorkItemID: "cwi-001", RequiredEvidenceKinds: []string{runtimecontract.EvidenceKindValidation},
 		DeclarationTargetSelectorRef: "file/workspace_deliverable", DeclarationTargetSelectorOwnerRef: "software-dev", DeclarationTargetSelectorSubjectRef: "validation_preparation",
 		RequiredOwnerFacts: []runtimecontract.RuntimeOwnerFactRequirement{requirement}, OwnerFactConvergences: []runtimecontract.RuntimeOwnerFactConvergence{convergence},
 		OwnerFactAcquisition: &runtimecontract.RuntimeSemanticOwnerFactAcquisition{
@@ -525,13 +529,48 @@ func TestRuntimeSemanticProviderProjectsDefinitionLineageAndExactAcquisitionSele
 		t.Fatal(err)
 	}
 	authority := providerRequest.PromptContext.Sections[3].Content
+	var projection runtimeSemanticAuthorityProjection
+	if err := json.Unmarshal([]byte(authority), &projection); err != nil {
+		t.Fatal(err)
+	}
+	if len(projection.Manifest.ProofObligations) != 1 || projection.Manifest.ProofObligations[0].OwnerFactAcquisition == nil {
+		t.Fatalf("provider projection lost current owner-fact acquisition: %+v", projection.Manifest.ProofObligations)
+	}
+	obligation := projection.Manifest.ProofObligations[0]
+	acquisition := obligation.OwnerFactAcquisition
+	if obligation.EvidencePurpose != runtimecontract.RuntimeSemanticEvidenceObligationOwnerFactAcquisition ||
+		!slices.Equal(obligation.TerminalRequiredEvidenceKinds, []string{runtimecontract.EvidenceKindValidation}) ||
+		!slices.Equal(obligation.CurrentRequiredEvidenceKinds, []string{runtimecontract.EvidenceKindStateChange}) ||
+		!acquisition.DefinitionPrerequisiteDeclared || acquisition.TerminalEvidenceCredit ||
+		acquisition.AcquisitionOwnerModuleID != runtimecontract.RuntimeModuleFile ||
+		acquisition.AcquisitionOperationKind != runtimecontract.StepKindFileWrite {
+		t.Fatalf("provider projection conflated current acquisition with terminal validation proof: obligation=%+v acquisition=%+v", obligation, acquisition)
+	}
 	if !strings.Contains(authority, `"declarationTargetSelectorRef":"file/workspace_deliverable"`) ||
 		!strings.Contains(authority, `"acquisitionTargetSelectorRef":"workspace-relative-new-file-target"`) {
 		t.Fatalf("provider projection conflated Definition lineage and operation selector: %s", authority)
 	}
+	for _, required := range []string{"exact current acquisition proof", "ownerModuleId=acquisitionOwnerModuleId", `requiredEvidenceKinds=["state_change"]`, "do not return gapKind=undeclared_prerequisite solely", "does not grant terminal validation evidence or coverage credit"} {
+		if !strings.Contains(projection.OutputInstruction, required) {
+			t.Fatalf("provider acquisition instruction lost %q: %s", required, projection.OutputInstruction)
+		}
+	}
 	if !strings.Contains(providerRequest.Schema, `"const":"workspace-relative-new-file-target"`) ||
 		strings.Contains(providerRequest.Schema, `"const":"file/workspace_deliverable"`) {
 		t.Fatalf("provider schema did not constrain the exact operation selector: %s", providerRequest.Schema)
+	}
+	for index := 0; index < 3; index++ {
+		if baseline.PromptContext.Sections[index].Content != providerRequest.PromptContext.Sections[index].Content {
+			t.Fatalf("owner-fact acquisition projection changed stable section %d", index)
+		}
+	}
+	baselinePlan := baseline.ContextBudget.CachePlan
+	acquisitionPlan := providerRequest.ContextBudget.CachePlan
+	if baselinePlan.StablePrefixHash != acquisitionPlan.StablePrefixHash ||
+		baselinePlan.RenderedStablePrefixHash != acquisitionPlan.RenderedStablePrefixHash ||
+		baselinePlan.WorkspaceDefinitionHash != acquisitionPlan.WorkspaceDefinitionHash ||
+		baselinePlan.CapabilityContractHash != acquisitionPlan.CapabilityContractHash {
+		t.Fatalf("owner-fact acquisition changed C0-C2 cache identity: baseline=%+v acquisition=%+v", baselinePlan, acquisitionPlan)
 	}
 }
 

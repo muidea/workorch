@@ -7,10 +7,10 @@ import (
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
-// These package-private adapters preserve the existing reducer test seam while
-// keeping production dispatch routed to the owning private component.  They
-// are not additional mutation entries: callers outside this package can only
-// reach RuntimeController.ApplyInternalEvent.
+// These test-only adapters preserve focused reducer seams without compiling a
+// second RuntimeController mutation surface into production. Production
+// dispatch reaches the owning private component only through
+// RuntimeController.ApplyInternalEvent and its internal-event routes.
 func (c *RuntimeController) scheduleDriveLease(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, requested runtimecontract.RuntimeDriveLease) (RuntimeAggregate, runtimecontract.RuntimeDriveLease, bool, error) {
 	if c == nil || c.driveDelivery == nil {
 		return RuntimeAggregate{}, runtimecontract.RuntimeDriveLease{}, false, common.ErrInvalidArgument

@@ -132,6 +132,12 @@ Cross-owner regression必须证明 concrete receiving-owner Command/Result、wor
 - request session + authority transaction + canonical state/RequiredOutput + DocumentKind/ExpectedDocument + provider
   ceiling/reasoning/budget/stable prefix构成唯一purpose-bound semantic invocation seal；不得出现独立SemanticActivation
   repository/lifecycle或assessment通过operations envelope升级role。
+- owner-fact acquisition manifest 必须同时投影 immutable terminal evidence kinds 与 current acquisition evidence kinds；
+  schema、decoder 与 binding compiler 对 terminal `validation` + current File `state_change` 给出同一解释，且 C0～C2 bytes/hash
+  不因 current acquisition 改变；acquisition 不携带 terminal metric/artifact credit。
+- Definition-gap complete document 在 owner-private transition 前必须通过 pure manifest/expected-document admission；已有 sealed
+  acquisition 的 `undeclared_prerequisite` 只产生 attempt-0 typed correction，零 gap observation、governance、ticket、dispatch、
+  effect 或 Definition mutation；stale identity 同样不能越过 admission。
 
 ### Capability And Receipt
 
@@ -209,6 +215,10 @@ Cross-owner regression必须证明 concrete receiving-owner Command/Result、wor
 - 内部`partially_satisfied`只关闭明确satisfied CWI；其余逐项仍投影为unassessed/unsatisfied/indeterminate；
 - `indeterminate`在当前all-of基线下始终不通过terminal gate，且保留reason、missing evidence/owner fact；任何
   Definition/Profile/LLM/client声明的成功例外都必须在admission或candidate校验时拒绝；
+- owner-fact acquisition 的 accepted receipt/assessment 只结算当前前置 transaction。reobserve missing 必须按 actual operation
+  耗尽 one-shot budget；reobserve ready 必须在 `assessment_observed` 单一 CAS 中保留 audit/attempt lineage、保持 CWI open、
+  重开并退休 generation，successor manifest 恢复原 terminal proof。两者都不得直接产生 terminal credit 或 ticket，fresh
+  reload 不重复 CAS/effect/request；
 - candidate/accepted/rejected/stale-or-superseded由receipt judgement、diagnostic和binding/freshness lineage纯派生；
 - evidence只绑定实际依赖的owner revision/snapshot/fence set/hash；无关owner mutation不扩大stale范围；
 - successful closeout包含Definition/Run lineage、逐CWI coverage、accepted evidence、assessment、deliverable/artifact、

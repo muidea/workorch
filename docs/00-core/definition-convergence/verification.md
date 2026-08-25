@@ -36,7 +36,7 @@ Last Verified: 2026-08-24
 | duplicate required Profile source across profiles | `definition_profile_contract_invalid`精确报告全部Profile source refs；不得按Profile顺序覆盖或合并 |
 | required Profile owner fact has no unique acquisition/reobserve closure | candidate promotion 前 `definition_profile_prerequisite_unresolved + select_or_fix_template_profile + BlockingTicketID`；零 startup-input/Runtime/provider/dispatch/effect |
 | candidate owner-fact manifest differs from exact Profile snapshot derivation | `definition_profile_prerequisite_unresolved`；Application不能省略、替换或附加binding，Workspace pure compiler独立派生比较 |
-| required owner fact declares exact one-shot acquisition | candidate封存missing trigger、acquisition owner/kind/selector、reobserve owner/fact与max=1；promotion/startup hash稳定；missing 时 semantic proof 只能封存该 exact acquisition，accepted operation 后 reobserve 仍缺失则零第二次 acquisition并 typed exhausted |
+| required owner fact declares exact one-shot acquisition | candidate封存missing trigger、acquisition owner/kind/selector、reobserve owner/fact与max=1；promotion/startup hash稳定；semantic obligation 同时保留 terminal 与 current evidence kinds；missing 时只能封存该 exact acquisition；accepted operation 后 reobserve 仍缺失则零第二次 acquisition并 typed exhausted，reobserve ready则重开同一CWI并以fresh generation恢复terminal proof，acquisition零terminal credit |
 | free text may imply an undeclared prerequisite | static compiler 不做领域猜测或伪报完备；执行期只能走 typed semantic-gap lane |
 | dangling/self dependency | fail-closed before Run creation |
 | hard/reopen cycle | exact typed cycle path；零 Runtime work |
@@ -93,7 +93,8 @@ Last Verified: 2026-08-24
 | LLM orders by IDs | 输出无该字段/权限，不能影响 scheduler |
 | LLM proposes rewritten Goal/DoD/Template/directory | schema/integrity fail-closed；零 Workspace/bootstrap/graph/startup-input mutation |
 | LLM exposes implicit one-of | 只封存 bounded diagnostic；SM-2/SM-3 建 current Run scoped governed ticket，affected focus 零 candidate/dispatch/effect |
-| LLM exposes undeclared prerequisite/semantic ambiguity | 不自动补 relation 或扩图；绑定 current authority 的 `revise_definition_and_restart` ticket |
+| LLM exposes undeclared prerequisite for CWI with sealed acquisition | pure manifest admission 返回`rejected/owner_fact_acquisition_declared`并进入同request bounded correction；零gap observation、governance、ticket、Definition mutation或effect |
+| LLM exposes admitted undeclared prerequisite/semantic ambiguity | 不自动补 relation 或扩图；只有通过exact manifest/expected-document admission后才绑定 current authority 的 `revise_definition_and_restart` ticket |
 | Profile required owner fact closure omits operation selector/variant/policy | pre-seal `definition_profile_prerequisite_unresolved`；零 Run/provider/capability work |
 | Definition selector differs from capability operation selector | manifest 同时封存两份 identity；provider schema只允许 operation selector，返回 Definition selector时 attempt-0 typed correction、零 dispatch |
 | assisted draft returns one-of | raw draft 只形成不可采用 diagnostic，UI/schema 不把它显示为合法 relation；只有用户另行显式提交的 admission candidate 才可保留 token 并进入 candidate-scoped ticket |
@@ -109,6 +110,8 @@ Last Verified: 2026-08-24
 | CAS conflict during seal | reload + pure recompute；无 process-local order复用 |
 | crash after schedule before proof | exact contract/window恢复；一次 logical request |
 | crash after dispatch/receipt | 不重放 durable effect；一次 evidence credit |
+| owner-fact acquisition reobserve ready | `assessment_observed`一次CAS保留operation/evidence/assessment与attempt lineage，但CWI仍open/reopened；current binding清除、generation退休、successor manifest恢复原terminal evidence；零terminal credit/ticket，restart零重复CAS/effect/request |
+| owner-fact acquisition reobserve missing | exact accepted attempt计入`MaxAcquisitionAttempts=1`并`owner_fact_convergence_exhausted`；零第二acquisition/reopen/provider escape |
 | settled CWI unlocks next wave | SM-2重投影并继续正向推进 |
 | reopen after resource effect | exact successor closure重开；无全局重排/全量 prompt |
 | all-of gate witness member reopened | 原 witness 立即 stale且 dependent 退出ready；全部member再次current后才可重封存 |

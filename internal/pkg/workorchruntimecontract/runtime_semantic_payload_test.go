@@ -81,6 +81,9 @@ func TestRuntimeSemanticPlanRequestSchemaNarrowsOrderAndProofBatch(t *testing.T)
 
 func TestRuntimeSemanticOwnerFactAcquisitionSchemaUsesOperationSelectorNotDefinitionSelector(t *testing.T) {
 	manifest, document, _ := semanticMissingOwnerFactAcquisitionFixture(t)
+	if !sameStrings(manifest.ProofObligations[0].RequiredEvidenceKinds, []string{EvidenceKindValidation}) {
+		t.Fatalf("owner-fact fixture lost terminal Definition evidence: %+v", manifest.ProofObligations[0])
+	}
 	schema, err := RuntimeSemanticPlanJSONSchemaForRequest(
 		manifest,
 		RuntimeSemanticPlanStepProofBatch,
@@ -93,6 +96,9 @@ func TestRuntimeSemanticOwnerFactAcquisitionSchemaUsesOperationSelectorNotDefini
 	}
 	if !strings.Contains(schema, `"const":"file/workspace-relative-create"`) {
 		t.Fatalf("owner-fact acquisition schema lost exact operation selector: %s", schema)
+	}
+	if !strings.Contains(schema, `"requiredEvidenceKinds":{"items":{"const":"state_change"}`) {
+		t.Fatalf("owner-fact acquisition schema did not use the current evidence obligation: %s", schema)
 	}
 	if strings.Contains(schema, `"const":"file/workspace-deliverable"`) {
 		t.Fatalf("Definition selector was treated as an operation selector: %s", schema)

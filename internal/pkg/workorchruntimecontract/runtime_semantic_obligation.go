@@ -32,6 +32,56 @@ type RuntimeSemanticOwnerFactAcquisition struct {
 	MaxAcquisitionAttempts              int
 }
 
+// RuntimeSemanticEvidenceObligationPurpose identifies which immutable proof
+// contract is current for one CWI. DefinitionProof means the Definition's
+// terminal evidence contract is directly actionable. OwnerFactAcquisition
+// means the terminal contract remains unchanged, but the current bounded proof
+// must first establish the manifest-sealed owner-fact acquisition postcondition.
+// This is a pure derived vocabulary; it is not a Runtime state machine.
+type RuntimeSemanticEvidenceObligationPurpose string
+
+const (
+	RuntimeSemanticEvidenceObligationDefinitionProof      RuntimeSemanticEvidenceObligationPurpose = "definition_proof"
+	RuntimeSemanticEvidenceObligationOwnerFactAcquisition RuntimeSemanticEvidenceObligationPurpose = "owner_fact_acquisition"
+)
+
+// RuntimeSemanticEvidenceObligation is the single derived source of truth for
+// evidence-kind validation and provider schema narrowing. The terminal kinds
+// always retain the sealed Definition declaration. Current kinds describe only
+// the proof that may be proposed in the current semantic generation.
+type RuntimeSemanticEvidenceObligation struct {
+	Purpose                       RuntimeSemanticEvidenceObligationPurpose
+	TerminalRequiredEvidenceKinds []string
+	CurrentRequiredEvidenceKinds  []string
+}
+
+func (o RuntimeSemanticEvidenceObligation) Clone() RuntimeSemanticEvidenceObligation {
+	o.TerminalRequiredEvidenceKinds = append([]string(nil), o.TerminalRequiredEvidenceKinds...)
+	o.CurrentRequiredEvidenceKinds = append([]string(nil), o.CurrentRequiredEvidenceKinds...)
+	return o
+}
+
+// ResolveRuntimeSemanticEvidenceObligation derives the current evidence
+// contract without mutating the sealed proof obligation. A missing owner fact
+// is acquired only through state-change evidence; that intermediate evidence
+// never weakens or replaces the Definition's terminal evidence kinds.
+func ResolveRuntimeSemanticEvidenceObligation(obligation RuntimeSemanticProofObligation) (RuntimeSemanticEvidenceObligation, error) {
+	obligation = obligation.Normalized()
+	if err := obligation.Validate(); err != nil {
+		return RuntimeSemanticEvidenceObligation{}, err
+	}
+	ret := RuntimeSemanticEvidenceObligation{
+		Purpose:                       RuntimeSemanticEvidenceObligationDefinitionProof,
+		TerminalRequiredEvidenceKinds: append([]string(nil), obligation.RequiredEvidenceKinds...),
+		CurrentRequiredEvidenceKinds:  append([]string(nil), obligation.RequiredEvidenceKinds...),
+	}
+	if obligation.OwnerFactAcquisition != nil {
+		ret.Purpose = RuntimeSemanticEvidenceObligationOwnerFactAcquisition
+		ret.CurrentRequiredEvidenceKinds = []string{EvidenceKindStateChange}
+	}
+	return ret, nil
+}
+
 func (a RuntimeSemanticOwnerFactAcquisition) Normalized() RuntimeSemanticOwnerFactAcquisition {
 	a.Requirement = a.Requirement.Normalized()
 	a.DeclarationTargetSelectorRef = strings.TrimSpace(a.DeclarationTargetSelectorRef)

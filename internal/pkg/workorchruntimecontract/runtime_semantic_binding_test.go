@@ -91,9 +91,30 @@ func TestCompileRuntimeSemanticBindingsSealsSourceProofRequirementsOnUniqueValid
 
 func TestSemanticBindingMissingOwnerFactRequiresExactSealedAcquisition(t *testing.T) {
 	manifest, document, proposal := semanticMissingOwnerFactAcquisitionFixture(t)
+	obligation := manifest.ProofObligations[0]
+	evidenceObligation, err := ResolveRuntimeSemanticEvidenceObligation(obligation)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !sameStrings(evidenceObligation.TerminalRequiredEvidenceKinds, []string{EvidenceKindValidation}) ||
+		!sameStrings(evidenceObligation.CurrentRequiredEvidenceKinds, []string{EvidenceKindStateChange}) ||
+		evidenceObligation.Purpose != RuntimeSemanticEvidenceObligationOwnerFactAcquisition {
+		t.Fatalf("owner-fact evidence obligation = %+v", evidenceObligation)
+	}
 	fact := semanticFeasibilityForTest(t, manifest, proposal, []string{"validation-readiness.sh"}, "", nil)
-	if _, _, err := CompileRuntimeSemanticBindings(manifest, runtimeSemanticBindingTestRequestID, document, []RuntimeSemanticProofFeasibility{fact}); err != nil {
+	focuses, _, err := CompileRuntimeSemanticBindings(manifest, runtimeSemanticBindingTestRequestID, document, []RuntimeSemanticProofFeasibility{fact})
+	if err != nil {
 		t.Fatalf("exact sealed owner-fact acquisition was rejected: %v", err)
+	}
+	if len(focuses) != 1 || !sameStrings(focuses[0].RequiredEvidenceKinds, []string{EvidenceKindStateChange}) ||
+		!sameStrings(obligation.RequiredEvidenceKinds, []string{EvidenceKindValidation}) {
+		t.Fatalf("compiled acquisition weakened terminal evidence: focus=%+v obligation=%+v", focuses, obligation)
+	}
+
+	terminalInsteadOfCurrent := document.Clone()
+	terminalInsteadOfCurrent.Proposals[0].RequiredEvidenceKinds = []string{EvidenceKindValidation}
+	if err := terminalInsteadOfCurrent.ValidateAgainstManifest(manifest); err == nil {
+		t.Fatal("terminal validation proof was accepted in place of the current owner-fact acquisition")
 	}
 
 	parallel := document.Clone()
@@ -122,7 +143,9 @@ func semanticMissingOwnerFactAcquisitionFixture(t *testing.T) (RuntimeSemanticPl
 		ReobserveOwnerModuleID: RuntimeModuleShell, ReobserveFactKind: RuntimeOwnerFactSelectableValidationSurface,
 		MaxAcquisitionAttempts: 1,
 	}
-	source.RequiredEvidenceKinds = []string{EvidenceKindStateChange}
+	// The Definition's terminal proof remains validation. The sealed acquisition
+	// is a distinct, current state-change obligation and must not overwrite it.
+	source.RequiredEvidenceKinds = []string{EvidenceKindValidation}
 	source.AcceptedStepKinds = []string{StepKindFileWrite, RuntimeBlockKindManagedValidationSession}
 	source.RequiredOwnerFacts = []RuntimeOwnerFactRequirement{requirement}
 	source.OwnerFactConvergences = []RuntimeOwnerFactConvergence{convergence}

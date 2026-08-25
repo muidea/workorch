@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"strings"
 	"testing"
+
+	"github.com/muidea/workorch/internal/pkg/common"
 )
 
 func runtimeDefinitionGapDocumentForTest(t *testing.T) (RuntimeSemanticPlanManifest, RuntimeExpectedDocumentContract, RuntimeDefinitionGapProviderDocument) {
@@ -68,6 +70,78 @@ func TestRuntimeDefinitionGapDecoderIsManifestBoundAndStrict(t *testing.T) {
 	if _, err := DecodeRuntimeDefinitionGapPayloadWithManifest(manifest, expected, overBudgetPayload); err == nil {
 		t.Fatal("over-budget diagnostic was accepted")
 	}
+}
+
+func TestEvaluateRuntimeDefinitionGapAdmissionAcceptsManifestBoundGapWithoutDeclaredAcquisition(t *testing.T) {
+	manifest, expected, document := runtimeDefinitionGapDocumentForTest(t)
+	document.GapKind = RuntimeDefinitionGapUndeclaredPrerequisite
+	document.DiagnosticMessage = "The sealed item omits a prerequisite needed to form its proof."
+	decision := EvaluateRuntimeDefinitionGapAdmission(manifest, expected, document)
+	if !decision.Admitted() || decision.Code != "gap_admitted" {
+		t.Fatalf("Definition gap admission = %+v", decision)
+	}
+}
+
+func TestEvaluateRuntimeDefinitionGapAdmissionRejectsUndeclaredPrerequisiteWithSealedOwnerFactAcquisition(t *testing.T) {
+	manifest, semanticDocument, _ := semanticMissingOwnerFactAcquisitionFixture(t)
+	expected := RuntimeExpectedDocumentContract{
+		SchemaVersion:            RuntimeExpectedDocumentSchemaCurrent,
+		DocumentKind:             RuntimeProviderDocumentSemanticPlan,
+		PlanStep:                 RuntimeSemanticPlanStepProofBatch,
+		ManifestHash:             manifest.Hash,
+		DefinitionSeedHash:       manifest.DefinitionSeedHash,
+		LogicalRequestID:         "semantic-request-owner-fact-gap",
+		StablePrefixHash:         "stable-prefix-owner-fact-gap",
+		BatchID:                  semanticDocument.BatchID,
+		BatchSequence:            semanticDocument.BatchSequence,
+		BatchCoverageWorkItemIDs: append([]common.CoverageWorkItemID(nil), semanticDocument.BatchCoverageWorkItemIDs...),
+		CoverageOrderHash:        "coverage-order-owner-fact-gap",
+		MaxOutputTokens:          4096,
+		MaxRecoveryAttempts:      1,
+	}
+	expected.Hash = StableRuntimeExpectedDocumentHash(expected)
+	document := RuntimeDefinitionGapProviderDocument{
+		DocumentKind:             RuntimeProviderDocumentSemanticPlan,
+		SchemaVersion:            RuntimeSemanticPlanDocumentSchemaCurrent,
+		ManifestHash:             manifest.Hash,
+		DefinitionSeedHash:       manifest.DefinitionSeedHash,
+		ResultKind:               RuntimeDefinitionGapResultKind,
+		PlanStep:                 RuntimeSemanticPlanStepProofBatch,
+		BatchID:                  expected.BatchID,
+		BatchSequence:            &expected.BatchSequence,
+		BatchCoverageWorkItemIDs: append([]common.CoverageWorkItemID(nil), expected.BatchCoverageWorkItemIDs...),
+		GapKind:                  RuntimeDefinitionGapUndeclaredPrerequisite,
+		OffendingItemRefs:        []string{string(expected.BatchCoverageWorkItemIDs[0])},
+		DiagnosticMessage:        "No selectable validation surface is currently published.",
+	}
+	if err := document.ValidateAgainst(manifest, expected); err != nil {
+		t.Fatalf("structurally valid gap fixture: %v", err)
+	}
+	decision := EvaluateRuntimeDefinitionGapAdmission(manifest, expected, document)
+	if decision.Disposition != RuntimeDefinitionGapAdmissionRejected || decision.Code != "owner_fact_acquisition_declared" {
+		t.Fatalf("false undeclared-prerequisite admission = %+v", decision)
+	}
+}
+
+func TestEvaluateRuntimeDefinitionGapAdmissionClassifiesStaleIdentity(t *testing.T) {
+	manifest, expected, document := runtimeDefinitionGapDocumentForTest(t)
+	t.Run("provider document", func(t *testing.T) {
+		stale := document.Clone()
+		stale.ManifestHash = "runtime-semantic-manifest-stale"
+		decision := EvaluateRuntimeDefinitionGapAdmission(manifest, expected, stale)
+		if decision.Disposition != RuntimeDefinitionGapAdmissionStaleConflict || decision.Code != "document_identity_stale" || decision.Admitted() {
+			t.Fatalf("stale Definition gap admission = %+v", decision)
+		}
+	})
+	t.Run("expected document", func(t *testing.T) {
+		stale := expected.Clone()
+		stale.ManifestHash = "runtime-semantic-manifest-stale"
+		stale.Hash = StableRuntimeExpectedDocumentHash(stale)
+		decision := EvaluateRuntimeDefinitionGapAdmission(manifest, stale, document)
+		if decision.Disposition != RuntimeDefinitionGapAdmissionStaleConflict || decision.Code != "expected_document_stale" || decision.Admitted() {
+			t.Fatalf("stale expected document admission = %+v", decision)
+		}
+	})
 }
 
 func TestRuntimeDefinitionClarificationIdentityIsStableAndBounded(t *testing.T) {
