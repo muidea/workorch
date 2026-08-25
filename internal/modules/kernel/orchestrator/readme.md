@@ -4,7 +4,7 @@ Status: active
 
 Type: kernel-module-implementation-contract
 
-Last Verified: 2026-08-24
+Last Verified: 2026-08-25
 
 ## 功能范围与边界
 
@@ -82,7 +82,9 @@ aggregate validator 在持久化后均 fail-closed。capability owner 只报告�
 无法按 current shape 读取或校验的 aggregate 不进入 Resume/Restart/SM-4，且不调用 LLM/capability owner、不创建
 invalid-data fact 或 replacement intent。数据清理后创建的 current Run 才能进入 Runtime。`fresh_activation_required`
 只适用于可读 current Run 缺少 sealed bootstrap。current Restart 的 predecessor/replacement/successor 完全由 Run owner 的
-`ReplacementIntent` 与 owner-private reducer 管理，Orchestrator 只处理已封存的 administrative terminal delivery。
+`run.replacement` subordinate transaction 与 owner-private reducer 管理。administrative cancellation/supersede intent 属于
+Run SM-1；Orchestrator 只在 SM-4 private event 中把 `RuntimeTerminationRecord` CAS 保存为 exact delivery handoff，驱动
+`Result -> Workspace -> Run`，但不选择或执行 Run terminal transition。最终 terminal 只由 Run-private SM-1 delivery event迁移。
 
 当前 baseline 为每个 authority 封存不含 request/lease/CAS bookkeeping 的 `AuthorityInputID`。相同 Definition、focus/binding、
 evidence、capability/catalog、freshness 与 owner observation lineage 不能创建第二个 AuthoritySnapshot；精确 owner binding
@@ -202,6 +204,24 @@ deployed run ID 只属于 archive regression evidence，不定义当前候选、
   focus/required output 与 typed owner facts 编译唯一 `RuntimeCandidateContractManifest`。每个 operation kind 恰好对应一条纯值
   `SealedOperationAuthorization`，target 只能使用 `exact_target`、`existing_owner_scope`
   或 `prospective_owner_target`；每个可关闭 CWI 都必须带唯一、封存的 `CoverageEvidenceBinding` / `BindingRef`。
+- owner-fact acquisition 使用 `prospective_owner_target` 时，manifest 同时维护 provider-selectable `OwnerCatalogs` 与
+  non-selectable `OwnerFactDependencyCatalogs`。后者只保存 required owner 对 prospective satisfaction 判断所需的 exact
+  catalog snapshot；它进入 manifest/hash/freshness/CAS/seal，但不进入 LLM C3、allowed operation/surface、schema enum、
+  correction values 或 provider choice。Orchestrator 不把 non-ready Shell surface伪装为 provider 可选 operation。
+- SM-2 composite prospective probe 固定为 File outer feasibility + immutable
+  `RuntimeProspectiveWorkspaceManifestDelta` + Shell nested
+  `RuntimeOwnerFactProspectiveSatisfactionObservation`。File delta 绑定 exact current workspace-tree revision，只描述
+  hypothetical resulting refs；Shell concrete typed query只消费 delta、activation-sealed recipes 与 exact Shell dependency
+  catalog/observation，并逐 recipe 校验 command/ordered args/timeout 对应的 surface schema identity。File 不创建 target，
+  Shell 不读 File/workspace、不启动 managed session，Orchestrator 不解释路径/recipe；三方都不得跨 owner 修改状态。
+- observation CAS 与 semantic seal 都必须重验 manifest/batch/request/contract ref、delta、File catalog/observation 和 Shell
+  dependency catalog/observation。只有 nested `would_satisfy` seal-ready；nested typed stale保持 Shell-authored factual
+  identity并进入既有 bounded prerequisite-refresh generation，不能重写为 File outer stale或即时 terminal。missing dependency
+  在 Shell query 前退休 semantic generation。`would_not_satisfy` 必须先作为 full composite observation 经 owner-private
+  `semantic_feasibility_observed` 持久化；因 `ProspectiveTargetRef` 是 activation-sealed exact constant，不存在同合同可修正字段，
+  下一次 drive 直接收口为统一 `semantic_contract_failed` terminal，并把 `prospective_owner_fact_unsatisfied` 保留为 typed
+  original reason；Shell 仍只拥有 persisted satisfaction/reason，terminal diagnostic 由 Orchestrator SM-2 署名。零 provider
+  correction/request、ticket、refresh budget、operation 或 effect，duplicate/restart 不重复 File/Shell probe。
 - renderer、wire schema、strict decoder、candidate evaluator、owner feasibility command 与 fixture 只消费该
   manifest 及其 hash，不得从 profile、focus、raw reason 或临时 inventory 重建第二份允许集。
 - complete document 只调用一个纯 `CandidateEvaluator`，并按 manifest identity → wire/field →
@@ -246,6 +266,8 @@ deployed run ID 只属于 archive regression evidence，不定义当前候选、
   factual result。attempt 0/1 与 correction policy 只由 SM-3 reducer 消费 persisted diagnostic；owner feasibility
   必须先成为 Orchestrator internal event，再由 SM-2 coordinator 选择 prerequisite、新 authority 或 typed
   terminal，零 correction attempt。SM-4 只从 persisted result 恢复，不再解释 raw failure。
+  prospective satisfaction 的 `would_not_satisfy` 在 operation candidate 前属于 persisted semantic-plan composite factual
+  rejection，并直接形成上述 typed terminal；它不进入本段普通 operation `owner_feasibility`，也不能借此为后者增加 correction。
 - owner feasibility 若证明当前 sealed validation recipe 不可用，SM-2 必须以
   `validation_recipe_exhausted` 直接形成 typed terminal；不得将其降级为普通 repair、candidate correction 或
   `runtime_contract_defect`。
@@ -343,8 +365,10 @@ deployed run ID 只属于 archive regression evidence，不定义当前候选、
   返回 `unverifiable`。coverage credit 仍只由 SM-2 从 matching sealed receipt 派生。
 - 空 target scope 只是一条“当前无 existing target”的 owner observation，不能授权候选任意创建路径。prospective target
   必须同时匹配 activation-sealed target、完整 selector ref/owner/subject 和 File owner catalog 的 selector/constraint/variant。
-  Shell validation acquisition 所需 target vocabulary 仅由 Orchestrator 转交当前 persisted File owner inventory；File effect
-  退休旧 observation 后仍重获 fresh inventory，Shell 只拥有 recipe/surface readiness，不获得 File target state authority。
+  ordinary Shell validation acquisition 所需 target vocabulary 仅由 Orchestrator 转交当前 persisted File owner inventory；
+  prospective satisfaction pure query 只额外接收 File owner 从该 exact inventory 计算的 immutable hypothetical delta。
+  File effect退休旧 observation 后仍重获 fresh inventory；Shell 只拥有 recipe/surface readiness 与 prospective satisfaction
+  judgment，不获得 File target state authority。
 
 
 
@@ -402,6 +426,11 @@ deployed run ID 只属于 archive regression evidence，不定义当前候选、
   不得随后重读 aggregate `DefinitionFocuses` 或将两套 selector 归一为同一值。proof batch 必须恰含这一项，不能让
   LLM、Shell 或 File 另选动作。obligation 的 terminal evidence kinds 必须始终保留 Definition 声明；current acquisition
   evidence kinds 单独派生为 `state_change`，不得获得 terminal validation/metric/artifact credit。
+  `prospective_owner_target` acquisition 的 pre-seal declaration、compiled obligation 与 provider projection还必须具有同一
+  非空 `ProspectiveSatisfactionContractRef`；preexisting/existing-scope 禁止携带。required-owner dependency catalog不属于
+  provider-selectable catalog，LLM 不能根据它选择 recipe readiness或 satisfaction outcome。SM-2 只消费上述 composite
+  File-delta/Shell-observation事实，并通过自己的 private event决定 refresh、typed terminal 或 seal；File/Shell result本身不带
+  transition target。
   若历史/旧 generation 先执行了非 acquisition proof，assessment commit 可在同一 Orchestrator CAS 中提交 audit、把
   current bound CWI 转为 `reopened`、清除 current binding、更新 reconciliation，并以
   `assessment_owner_fact_postcondition_unmet` lineage 退休该 generation；SM-4 只从 aggregate 幂等 re-drive。真正的
@@ -423,7 +452,9 @@ deployed run ID 只属于 archive regression evidence，不定义当前候选、
   clarification observation、`need_governance` 或 ticket；只有 admitted gap 才由 owner-private internal event 选择专用
   clarification transition。
 - File owner 对 `unified_diff` 在 owner feasibility probe 中执行无写入 dry-run；hunk/context 冲突必须在 dispatch seal 前以 typed infeasible result 返回，owner 不选择后续 RuntimeAction。
-- active Runtime Cancel/Supersede 必须先 `RequestTermination` CAS 持久化 `RuntimeTerminationRecord`，再投影 SM-1 terminal。
+- active Runtime Cancel/Supersede 必须来自 Run SM-1 typed administrative intent；Orchestrator SM-4 先 CAS 持久化
+  `RuntimeTerminationRecord` handoff 并执行 ordered delivery，Run owner 再由 private SM-1 event 持久化 terminal。
+  handoff record 不是 SM-1 state，Orchestrator 不得“投影”或代写 Run lifecycle。
 - semantic owner catalog 退休后，若 current eligible CWI 尚无 binding，SM-4 drive/startup recovery 必须先推进新的 semantic
   generation；该窗口中因 binding 缺失产生的 `target_grounding_unresolved` decision 不得进入 Result/Workspace/Run
   delivery。`candidateRequestSessionActionAllowed` 只为这一精确窗口放行 `semantic_plan`，operations request 继续拒绝。
@@ -450,7 +481,7 @@ deployed run ID 只属于 archive regression evidence，不定义当前候选、
   resolution 间接汇合，Orchestrator 保持 runtime contract gate 权威。
 - Decision 与 Approval 使用各自 `pkg/events` 定义 evidence command；Orchestrator 幂等写入自己的 EvidenceRecord 并返回具体 result。
 - Orchestrator 只在 `kernel/orchestrator/pkg/events` 定义由自身接收的 Runtime drive、receipt commit/query、governance resolution 与只读查询合同；投递给其他 owner 的 command/result 由接收 owner 定义。
-- File target snapshot、target selection、workspace manifest 与 repair-surface confirmation command/result 由 File owner 在 `blocks/file/pkg/events` 定义；前三类 acquisition Result 必须回显 workspace/run/authority scope，prerequisite identity 只由 payload/必需 freshness observation 表达。Git capability-state 与 LLM provider-ceiling acquisition 使用相同 scoped Result 规则。Decision、Approval、File、Git、LLM、MCP、Shell、SSH、Web 各自在自身 `pkg/events` 定义并消费 Runtime capability acquisition；其 Result 只返回一份带 workspace/run/authority scope 的 canonical acquisition，prerequisite identity 只由必需 freshness observation 承载。File、Git、MCP、Shell、SSH、Web 的 operation admissibility acquisition 采用相同 scoped canonical fact，prerequisite identity 只存在于 inventory/必需 observation，不再由 Result 外层重复回显；六个 owner 同时拥有 operation feasibility 与 semantic-proof feasibility topic/Command/Result，File、Git、MCP、Shell 各自拥有 CWI reconciliation query。Orchestrator 仅按 canonical owner 分派具体合同并归一 owner-neutral observation。
+- File target snapshot、target selection、workspace manifest 与 repair-surface confirmation command/result 由 File owner 在 `blocks/file/pkg/events` 定义；前三类 acquisition Result 必须回显 workspace/run/authority scope，prerequisite identity 只由 payload/必需 freshness observation 表达。Git capability-state 与 LLM provider-ceiling acquisition 使用相同 scoped Result 规则。Decision、Approval、File、Git、LLM、MCP、Shell、SSH、Web 各自在自身 `pkg/events` 定义并消费 Runtime capability acquisition；其 Result 只返回一份带 workspace/run/authority scope 的 canonical acquisition，prerequisite identity 只由必需 freshness observation 承载。File、Git、MCP、Shell、SSH、Web 的 operation admissibility acquisition 采用相同 scoped canonical fact，prerequisite identity 只存在于 inventory/必需 observation，不再由 Result 外层重复回显；六个 owner 同时拥有 operation feasibility 与 semantic-proof feasibility topic/Command/Result，File、Git、MCP、Shell 各自拥有 CWI reconciliation query。Shell 还独占 required-owner prospective-satisfaction concrete typed query/result，File 只在自己的 semantic feasibility result 中发布 hypothetical manifest delta；Orchestrator 仅按 canonical owner 分派具体合同并归一 composite observation。
 - `kernel/orchestrator/pkg/events` 只保存 typed command/result、receipt DTO 与确定性校验/构造；能力 Block 的 Biz 负责发送 receipt query/commit command，Orchestrator Biz 负责消费并持久化，任何 `pkg` 不得持有 Hub、执行 I/O 或推进状态。
 - Provider ceiling、candidate preflight 与 candidate request command/result 由 LLM owner 在 `blocks/llm/pkg/events` 定义；Orchestrator 的 SM-3 request session 封存完整 authority transaction，跨 Orchestrator → LLM → provider 的一次物理请求只携带 canonical `RuntimeCandidateRequestIdentity`，EventHub command/result 与 LLM request/response model 不得再次平铺 logical/sequence/physical 三字段。Orchestrator private session/internal event 可按 owner-local ledger 结构保存其状态字段，不构成跨 owner wire authority。LLM block 返回的 document 必须绑定同一 snapshot 和 request identity，transaction/identity 漂移不得进入执行。
 - LLM owner-private candidate response 不复制 sealed provider audit/typed error 已拥有的 `RequestID/Status`；usage audit 从 canonical audit/error 读取，不能以 response mirror 覆盖 provider outcome。
@@ -675,8 +706,9 @@ deployed run ID 只属于 archive regression evidence，不定义当前候选、
 - Orchestrator service facade 不暴露 `DispatchNextStep`；Runtime operation 只能由 persisted drive/reducer 主链调度，外部 module 不得直接推进 Step 投影。
 - Orchestrator service facade 不暴露 Start/Resume；这两个生产 EventHub handler 属于 Run owner，Run state notification
   才触发 Orchestrator internal drive，禁止外部组件通过 service lifecycle 重新进入 禁止的 主链。
-- Runtime/Orchestrator 不自动创建 replan successor；current-baseline restart 的 replacement intent、terminal delivery
-  后 successor materialization 与 lineage 都由 Run owner 管理。重新定义目标或执行基准必须使用新的 typed
+- Runtime/Orchestrator 不自动创建 replan successor；current-baseline restart 的 `run.replacement` 是同一 Run owner 下
+  的 SM-1 subordinate transaction，replacement intent、terminal delivery acknowledgement 后 successor materialization
+  与 lineage 都由 Run owner 管理。重新定义目标或执行基准必须使用新的 typed
   activation/bootstrap，不能由 Orchestrator 从旧 aggregate 派生。
 - 不记录或恢复 `runtime_step_result_available`、watchdog recovery policy 等旧 checkpoint；历史 checkpoint 仅作为只读审计数据。
 - Run/Workspace 状态通知不再隐式写入 禁止的 runtime checkpoint；状态事件与 Runtime aggregate 各自保持单一职责。
@@ -762,6 +794,10 @@ deployed run ID 只属于 archive regression evidence，不定义当前候选、
   Definition `Order` 重排；proof-batch provider projection 只携带相关 coverage，C0～C5 stable prefix/context 分层保持不变。
 - [x] owner fact 的 missing、stale、duplicate、out-of-order、rollback/reappearance（ABA）、新 generation 与无关
   prerequisite 组合矩阵；semantic manifest hash 回滚重现仍由新 logical request 隔离。
+- [x] prospective owner-fact composite probe 的 File hypothetical delta + Shell dependency catalog/observation exact binding、
+  dependency catalog provider 隔离、CAS/seal 双 freshness gate、nested typed stale bounded refresh，以及 persisted
+  `would_not_satisfy` 的统一 `semantic_contract_failed` terminal + typed original reason；所有分支零 probe-time
+  effect/ticket/coverage，且无无效 provider correction。
 - [x] validation discovery 回到 typed prerequisite 且局部 preflight 保留完整 pending graph；同 owner-target durable
   overlap 在 seal 前拒绝，Shell validation entry 不被提升为 failure target 且 Go diagnostic 只落入 manifest scope。
 - [x] `BenchmarkRuntimeAggregateInvariantValidation64CWI`、`BenchmarkRuntimeLongFocusQueueProjection64CWI`、

@@ -729,6 +729,24 @@ func sealSemanticTestManifest(t *testing.T, manifest RuntimeSemanticPlanManifest
 		}
 		manifest.ProofObligations = append(manifest.ProofObligations, obligation)
 	}
+	manifest.OwnerFactDependencyCatalogs = nil
+	dependencyOwners := make(map[string]struct{})
+	for _, obligation := range manifest.ProofObligations {
+		if obligation.OwnerFactAcquisition == nil || obligation.OwnerFactAcquisition.ProspectiveSatisfactionContractRef == "" {
+			continue
+		}
+		owner := obligation.OwnerFactAcquisition.Requirement.OwnerModuleID
+		if _, duplicate := dependencyOwners[owner]; duplicate {
+			continue
+		}
+		for _, catalog := range manifest.OwnerCatalogs {
+			if catalog.OwnerModuleID == owner {
+				manifest.OwnerFactDependencyCatalogs = append(manifest.OwnerFactDependencyCatalogs, catalog)
+				dependencyOwners[owner] = struct{}{}
+				break
+			}
+		}
+	}
 	manifest = manifest.Normalized()
 	manifest.Hash = StableRuntimeSemanticPlanManifestHash(manifest)
 	if err := manifest.Validate(); err != nil {

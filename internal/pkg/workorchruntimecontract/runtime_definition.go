@@ -119,6 +119,7 @@ func StableRuntimeCandidatePrefixHashWithExecutionContract(definition RuntimeDef
 				writeHashString(h, string(convergence.Requirement.FactKind))
 				writeHashString(h, convergence.Requirement.OperationKind)
 				writeHashString(h, fmt.Sprintf("%t", convergence.RequirePreexisting))
+				writeHashString(h, convergence.ProspectiveSatisfactionContractRef)
 				writeHashString(h, convergence.MissingTrigger)
 				writeHashString(h, convergence.AcquisitionOwnerModuleID)
 				writeHashString(h, convergence.AcquisitionOperationKind)

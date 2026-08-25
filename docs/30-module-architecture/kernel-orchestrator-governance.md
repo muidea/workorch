@@ -4,7 +4,7 @@ Status: normative
 
 Type: module-architecture
 
-Last Verified: 2026-08-21
+Last Verified: 2026-08-25
 
 ## Purpose
 
@@ -28,7 +28,8 @@ Orchestrator 是 SM-2、SM-3、SM-4 的唯一语义 owner，负责：
 
 - authority/focus、semantic reconciliation、binding、evidence、assessment 与 terminal decision；
 - request session、candidate evaluation、sealed dispatch 与 operation receipt transaction；
-- bounded drive/recovery、governance wait 与 Result→Workspace→Run delivery ledger。
+- bounded drive/recovery、governance wait 与 Result→Workspace→Run delivery ledger；其中
+  `RuntimeTerminationRecord` 只是一项 SM-4 exact delivery handoff，不是 Run state。
 
 所有外部 typed fact 必须先成为 Orchestrator 私有 internal event，再经唯一 transition coordinator 提交同一 aggregate
 mutation。Run owner 只通过 concrete EventHub contract 提供 opaque Runtime record 的 expected-revision CAS；它不解释
@@ -37,6 +38,12 @@ Orchestrator aggregate。私有 internal event、reducer family 和 mutation rou
 Orchestrator 不拥有 SM-1、Workspace Definition/active slot、Result lifecycle、Decision/Approval 状态或 capability side
 effect。SM-2 选择 canonical convergence state但不执行 operation；SM-3 只执行已经选择并密封的 transaction；SM-4
 只从 persisted aggregate 再 drive 和投递，不从 projection/history 重建 authority。
+
+prospective owner-fact probe 也不放宽该边界：SM-2 组合 File-authored hypothetical delta 与 Shell-authored nested
+satisfaction observation，required-owner dependency catalog只进入 manifest freshness/CAS/seal，不进入 LLM selectable
+surface。typed stale走bounded refresh；`would_not_satisfy`先持久化后由下一次drive形成统一`semantic_contract_failed`
+terminal，并保留typed original reason=`prospective_owner_fact_unsatisfied`，禁止provider correction。所有状态变化仍只能由
+Orchestrator private internal event提交。
 
 ## Governance Boundary
 
@@ -72,6 +79,7 @@ System Module 在 framework dependencies 就绪后，按确定顺序向 Soul、W
 | governance request/resolution | Decision or Approval owner contracts |
 | Runtime Definition clarification | dedicated persisted Orchestrator dispatch and Decision/Run replacement-resolution contracts |
 | formal terminal persistence | Result owner consumes sealed already-judged material |
+| administrative terminal handoff | Orchestrator persists/retries exact `RuntimeTerminationRecord`; Result/Workspace/Run each acknowledge privately; only Run-private SM-1 event changes Run state |
 | audit/projection observation | immutable notification only; never mutation authority |
 
 Repeated notification、resolution、drive、ensure 或 delivery acknowledgement 必须保持 owner-local idempotency，不得重复

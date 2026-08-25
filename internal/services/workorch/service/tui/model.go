@@ -497,6 +497,7 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.decisions = msg.Decisions
 		m.syncBlockingDecisionFromList()
+		m.settleGovernanceCommandFromProjection(msg.WorkspaceID)
 		m.followBlockerTailUnlessUserScrolled()
 		return m, nil
 	case DecisionDetailMsg:
@@ -515,6 +516,7 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.followBlockerTailUnlessUserScrolled()
 			}
 		}
+		m.settleGovernanceCommandFromProjection(msg.WorkspaceID)
 		return m, nil
 	case ApprovalListMsg:
 		if !m.workspaceMessageBelongsToActiveWorkspace(msg.WorkspaceID) {
@@ -526,6 +528,7 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.approvals = msg.Approvals
 		m.syncBlockingApprovalFromList()
+		m.settleGovernanceCommandFromProjection(msg.WorkspaceID)
 		m.followBlockerTailUnlessUserScrolled()
 		return m, nil
 	case ApprovalDetailMsg:
@@ -544,6 +547,7 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.followBlockerTailUnlessUserScrolled()
 			}
 		}
+		m.settleGovernanceCommandFromProjection(msg.WorkspaceID)
 		return m, nil
 	case SubscriptionStatusMsg:
 		cmd := m.applySubscriptionStatus(msg.Status)
@@ -642,6 +646,7 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, m.refreshActiveWorkspaceState()
 	case DecisionResolvedMsg:
 		if msg.Error != nil {
+			m.clearGovernanceCommandAfterError(governanceCommandDecision, msg.WorkspaceID)
 			m.setLastError(msg.Error)
 			if msg.WorkspaceID != "" {
 				return m, tea.Batch(FetchWorkspaceContext(m.be, string(msg.WorkspaceID)), FetchDecisions(m.be, string(msg.WorkspaceID)))
@@ -653,18 +658,12 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if refreshWorkspaceID == "" {
 				refreshWorkspaceID = common.WorkspaceID(msg.Decision.WorkspaceID)
 			}
-			if string(refreshWorkspaceID) == m.activeWorkspaceID && msg.Decision.RunID != "" {
-				m.activeRunID = string(msg.Decision.RunID)
-			}
-			m.markDecisionResolvedForWorkspace(common.WorkspaceID(refreshWorkspaceID), common.TicketID(msg.Decision.ID), common.RunID(msg.Decision.RunID))
-			m.markDecisionResolved(common.TicketID(msg.Decision.ID), common.WorkspaceID(refreshWorkspaceID), common.RunID(msg.Decision.RunID))
 		}
-		if string(refreshWorkspaceID) == m.activeWorkspaceID {
-			m.canonicalBlockingTicketID = ""
-			m.blockingDecision = nil
+		matchedCommand := m.markGovernanceCommandRefreshPending(governanceCommandDecision, refreshWorkspaceID)
+		if matchedCommand && string(refreshWorkspaceID) == m.activeWorkspaceID {
 			m.clearInput()
 			m.progress = progressSubmitting
-			m.progressText = "Decision resolved; waiting for server continuation"
+			m.progressText = governanceCommandWaitText(governanceCommandDecision)
 		}
 		cmds := []tea.Cmd{m.refreshActiveWorkspaceState()}
 		if refreshWorkspaceID != "" {
@@ -673,6 +672,7 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, tea.Batch(cmds...)
 	case ApprovalResolvedMsg:
 		if msg.Error != nil {
+			m.clearGovernanceCommandAfterError(governanceCommandApproval, msg.WorkspaceID)
 			m.setLastError(msg.Error)
 			return m, nil
 		}
@@ -681,18 +681,12 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if refreshWorkspaceID == "" {
 				refreshWorkspaceID = common.WorkspaceID(msg.Approval.WorkspaceID)
 			}
-			if string(refreshWorkspaceID) == m.activeWorkspaceID && msg.Approval.RunID != "" {
-				m.activeRunID = string(msg.Approval.RunID)
-			}
-			m.markApprovalResolvedForWorkspace(refreshWorkspaceID, common.ApprovalID(msg.Approval.ID), common.RunID(msg.Approval.RunID))
-			m.markApprovalResolved(common.ApprovalID(msg.Approval.ID), refreshWorkspaceID, common.RunID(msg.Approval.RunID))
 		}
-		if string(refreshWorkspaceID) == m.activeWorkspaceID {
-			m.canonicalBlockingApprovalID = ""
-			m.blockingApproval = nil
+		matchedCommand := m.markGovernanceCommandRefreshPending(governanceCommandApproval, refreshWorkspaceID)
+		if matchedCommand && string(refreshWorkspaceID) == m.activeWorkspaceID {
 			m.clearInput()
 			m.progress = progressSubmitting
-			m.progressText = "Approval resolved; waiting for server continuation"
+			m.progressText = governanceCommandWaitText(governanceCommandApproval)
 		}
 		cmds := []tea.Cmd{m.refreshActiveWorkspaceState()}
 		if refreshWorkspaceID != "" {
@@ -875,6 +869,9 @@ func (m *AppModel) submitInput() (tea.Model, tea.Cmd) {
 	}
 	if decision := m.activeBlockingDecision(); decision != nil {
 		ticketID := string(decision.ID)
+		if !m.beginGovernanceCommand(governanceCommandDecision, common.WorkspaceID(m.activeWorkspaceID), common.RunID(decision.RunID), ticketID) {
+			return m, nil
+		}
 		m.clearInput()
 		m.lastError = nil
 		m.appendTranscript("Decision", text)
@@ -888,6 +885,9 @@ func (m *AppModel) submitInput() (tea.Model, tea.Cmd) {
 			m.progress = progressWaitingApproval
 			m.progressText = "Approval intent unclear; use a clear approval or rejection"
 			m.lastError = nil
+			return m, nil
+		}
+		if !m.beginGovernanceCommand(governanceCommandApproval, common.WorkspaceID(m.activeWorkspaceID), common.RunID(approval.RunID), approvalID) {
 			return m, nil
 		}
 		m.clearInput()
@@ -1123,6 +1123,9 @@ func (m *AppModel) handleSlashCommand(text string) (tea.Model, tea.Cmd, bool) {
 				return m, nil, true
 			}
 			ticketID := string(decision.ID)
+			if !m.beginGovernanceCommand(governanceCommandDecision, common.WorkspaceID(m.activeWorkspaceID), common.RunID(decision.RunID), ticketID) {
+				return m, nil, true
+			}
 			m.clearInput()
 			m.lastError = nil
 			m.appendTranscript("Decision", rest)
@@ -1145,6 +1148,9 @@ func (m *AppModel) handleSlashCommand(text string) (tea.Model, tea.Cmd, bool) {
 			}
 			answer := nonEmpty(rest, "terminate current path")
 			ticketID := string(decision.ID)
+			if !m.beginGovernanceCommand(governanceCommandDecision, common.WorkspaceID(m.activeWorkspaceID), common.RunID(decision.RunID), ticketID) {
+				return m, nil, true
+			}
 			m.clearInput()
 			m.lastError = nil
 			m.appendTranscript("Decision", answer)
@@ -1183,6 +1189,9 @@ func (m *AppModel) handleSlashCommand(text string) (tea.Model, tea.Cmd, bool) {
 				return m, nil, true
 			}
 			approvalID := string(approval.ID)
+			if !m.beginGovernanceCommand(governanceCommandApproval, common.WorkspaceID(m.activeWorkspaceID), common.RunID(approval.RunID), approvalID) {
+				return m, nil, true
+			}
 			m.clearInput()
 			m.lastError = nil
 			m.appendTranscript("Approval", "approve")
@@ -1198,6 +1207,9 @@ func (m *AppModel) handleSlashCommand(text string) (tea.Model, tea.Cmd, bool) {
 				return m, nil, true
 			}
 			approvalID := string(approval.ID)
+			if !m.beginGovernanceCommand(governanceCommandApproval, common.WorkspaceID(m.activeWorkspaceID), common.RunID(approval.RunID), approvalID) {
+				return m, nil, true
+			}
 			m.clearInput()
 			m.lastError = nil
 			m.appendTranscript("Approval", "reject")
@@ -2247,50 +2259,6 @@ func (m AppModel) activeScopeApprovals() []projectioncontract.Approval {
 		out = append(out, item)
 	}
 	return out
-}
-
-func (m *AppModel) markDecisionResolved(id common.TicketID, workspaceID common.WorkspaceID, runID common.RunID) {
-	if id == "" {
-		return
-	}
-	for i := range m.decisions {
-		if m.decisions[i].ID == string(id) && decisionScopeMatches(m.decisions[i], workspaceID, runID) {
-			m.decisions[i].State = "resolved"
-			return
-		}
-	}
-}
-
-func (m *AppModel) markApprovalResolved(id common.ApprovalID, workspaceID common.WorkspaceID, runID common.RunID) {
-	if id == "" {
-		return
-	}
-	for i := range m.approvals {
-		if m.approvals[i].ID == string(id) && approvalScopeMatches(m.approvals[i], workspaceID, runID) {
-			m.approvals[i].State = "resolved"
-			return
-		}
-	}
-}
-
-func decisionScopeMatches(item projectioncontract.Decision, workspaceID common.WorkspaceID, runID common.RunID) bool {
-	if workspaceID != "" && item.WorkspaceID != "" && item.WorkspaceID != string(workspaceID) {
-		return false
-	}
-	if runID != "" && item.RunID != "" && item.RunID != string(runID) {
-		return false
-	}
-	return true
-}
-
-func approvalScopeMatches(item projectioncontract.Approval, workspaceID common.WorkspaceID, runID common.RunID) bool {
-	if workspaceID != "" && item.WorkspaceID != "" && item.WorkspaceID != string(workspaceID) {
-		return false
-	}
-	if runID != "" && item.RunID != "" && item.RunID != string(runID) {
-		return false
-	}
-	return true
 }
 
 func (m *AppModel) applySubscriptionStatus(status backend.SubscriptionStatus) tea.Cmd {

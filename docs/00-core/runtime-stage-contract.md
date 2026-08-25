@@ -4,7 +4,7 @@ Status: normative
 
 Type: core-contract-index
 
-Last Verified: 2026-08-24
+Last Verified: 2026-08-25
 
 ## Purpose
 
@@ -22,8 +22,10 @@ Runtime 行为变更必须先读取总入口，再从 Runtime Topics 进入受�
 
 ## Authority And Ownership
 
-- SM-1 只属于 Run owner：Run lifecycle、continuation、administrative termination 和 replacement intent。
-- SM-2、SM-3、SM-4 只属于 Orchestrator：authority/focus convergence、candidate/sealed dispatch、drive/recovery/delivery。
+- SM-1 只属于 Run owner：Run lifecycle、continuation 与 administrative termination intent。`run.replacement` 是同一
+  Run owner 在 SM-1 下的 subordinate transaction，不是第五个状态机或第二个 lifecycle owner。
+- SM-2、SM-3、SM-4 只属于 Orchestrator：authority/focus convergence、candidate/sealed dispatch、drive/recovery/delivery；
+  SM-4 的 delivery handoff record 不授予 Orchestrator 任何 SM-1 transition authority。
 - Workspace、Result、Decision、Approval、Memory 与 capability owners 只修改自己的正式状态。
 - Application 构造 typed bootstrap、提交 Start/Resume/Restart intent、提供协议与 projection；它不拥有 Runtime drive。
 - 跨 owner I/O 只使用 EventHub 与接收 owner 定义的 concrete typed command/data/result；禁止 service/repository 直连。
@@ -45,6 +47,15 @@ Workspace owner seals admitted startup input
   -> SM-4 delivers Result -> Workspace -> Run
 ```
 
+administrative cancellation/replacement 使用独立但同方向的交接链：
+
+```text
+Run SM-1 administrative termination intent
+  -> Orchestrator SM-4 CAS-persists RuntimeTerminationRecord as delivery handoff
+  -> SM-4 delivers Result -> Workspace -> Run
+  -> Run private SM-1 terminal-delivery event applies cancelled/superseded
+```
+
 Recovery is idempotent re-drive from the Run-owned opaque aggregate. Projection、Eventstream、provider text、process-local cache
 和历史 event sequence 都不能重建或替代 authority。
 
@@ -53,7 +64,7 @@ CWI 仍是 binding-free、semantic generation 尚未 seal，且 reducer 仅因�
 `target_grounding_unresolved`，SM-4 必须先 re-drive SM-3/SM-2 semantic transaction，不能把该临时 view 投递给
 Result/Workspace/Run。current semantic operation authority ready 或 semantic transaction 自身 failed 后才可交付该终态；
 其它已封存的 contract/budget/owner failure terminal 不得被重写为 semantic replan。administrative termination 使用独立的
-Run-owner fact 与 delivery lane，不经过这一 convergence-only 例外。
+Run-owner intent 与 SM-4 delivery handoff lane，不经过这一 convergence-only 例外；handoff record 本身不修改 Run state。
 
 Runtime 必须区分 genuine governance wait、具备 typed recovery condition/trigger/deadline/budget 的 bounded recoverable
 runtime wait 和 terminal failure。recoverable wait 是 SM-2/3/4 aggregate fact 与 SM-4 re-drive responsibility，不新增
@@ -75,13 +86,18 @@ provider、candidate、semantic proof、capability operation、repair 与 recove
   terminal evidence kinds 与当前 acquisition evidence kinds。acquisition 成功只允许 SM-2 通过 owner-private event 重开
   同一 CWI 并生成 terminal-proof successor；已有 sealed acquisition 时，LLM 的 `undeclared_prerequisite` 必须在 ticket 前
   由 pure manifest admission 拒绝。
+- prospective acquisition 还必须用 pre-seal exact contract ref 组合 acquisition-owner hypothetical delta 与 required-owner
+  dependency observation。dependency catalog不进入LLM selectable surface；typed stale只走bounded refresh，
+  `would_not_satisfy`先持久化full composite fact，再由下一次drive形成统一`semantic_contract_failed` terminal，并保留
+  typed original reason=`prospective_owner_fact_unsatisfied`；该 terminal diagnostic 由 Orchestrator 署名，Shell 只拥有已持久化
+  factual satisfaction/reason。禁止provider correction，两个 capability owner均不能触发SM-2 transition。
 - Definition 修订不能被 Resume 吸收；需要新输入时必须显式 Restart，并遵守 replacement/delivery transaction。
 
 ## Four Coordinated Machines
 
 | ID | Sole owner | Owns | Must not |
 | --- | --- | --- | --- |
-| SM-1 | Run | activation、continuation、replacement、administrative lifecycle | 选择 focus/action 或解释 aggregate |
+| SM-1 | Run | activation、continuation、administrative lifecycle，以及同 owner subordinate replacement transaction | 选择 focus/action、解释 aggregate，或让 SM-4 代写 Run terminal |
 | SM-2 | Orchestrator | authority、CWI、binding、credit、assessment、terminal | 调 provider 或执行 capability effect |
 | SM-3 | Orchestrator | request session、attempt、candidate、sealed dispatch、receipt transaction | 选择下一 action 或绕过 seal |
 | SM-4 | Orchestrator | bounded drive、singleflight、recovery、delivery ledger | 从 projection/history 重建 authority |
@@ -102,8 +118,8 @@ Start/Resume queue、自动 replan successor、checkpoint replay，以及 map/JS
 5. 同步对应 core 子合同、组件 README、flow 与 verification；
 6. 新增或重命名任何 `State | Status | Phase | Disposition | Outcome | Mode | Lifecycle | Stage` string type 时，必须在
    verification-only `scripts/state-model-owners.manifest` 中把它穷尽分类；只有 authoritative/owner-private state 可以绑定
-   `scripts/state-transition-owners.manifest` 中的唯一 owner-private dispatcher，projection、outcome、disposition、technical
-   mode 与 invariant 不得绑定 transition；
+   `scripts/state-transition-owners.manifest` transition。一个 state type 可绑定多个协调 transition，但所有 transition 必须
+   回到该 type 的同一个唯一 owner；projection、outcome、disposition、technical mode 与 invariant 不得绑定 transition；
 7. 通过 `make verify-boundary-contract` 及受影响测试。
 
 实施进度、候选需求、dated run 和 closure diary 不属于本合同，也不进入 `docs/` 的规范树。

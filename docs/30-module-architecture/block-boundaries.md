@@ -4,7 +4,7 @@ Status: normative
 
 Type: module-architecture
 
-Last Verified: 2026-08-23
+Last Verified: 2026-08-25
 
 ## Purpose
 
@@ -50,7 +50,7 @@ module.go
 | Owner | Sole authority | Accepted cross-owner contribution |
 | --- | --- | --- |
 | Workspace | admission candidate、formal Definition/startup input、activation eligibility、active Run slot | application submits typed candidate/admission outcome/intent; terminal delivery fact |
-| Run | SM-1 lifecycle、opaque Runtime record CAS、replacement intent/lineage | Workspace activation/continuation intent; Orchestrator wait/terminal fact |
+| Run | SM-1 lifecycle、opaque Runtime record CAS、same-owner replacement transaction/lineage | Workspace activation/continuation intent; Orchestrator wait fact or exact SM-4 terminal handoff，均先转成Run-private event |
 | Result | already-judged formal terminal outcome/artifact index | sealed Orchestrator terminal delivery |
 | Decision | decision and Definition-clarification ticket lifecycle | concrete open/resolve request bound to persisted authority |
 | Approval | approval lifecycle | concrete approval request/resolution |
@@ -79,6 +79,12 @@ SM-2/SM-4 authority。
 Capability owner publishes current catalog/admissibility/feasibility and executes only a concrete sealed operation. It does
 not own SM-2/SM-3, candidate correction, CWI mapping, evidence acceptance, repair or terminal. Multiple variants for one CWI
 are operation feasibility choices, never Definition `one_of`。
+
+Prospective owner-fact feasibility follows the same boundary without cross-owner reads: File may publish only its immutable,
+base-revision-bound hypothetical workspace-manifest delta; Shell may publish only a pure satisfaction observation against its own
+exact dependency catalog/observation and the supplied delta. The Shell dependency catalog participates in Runtime freshness but is
+not provider-selectable. Orchestrator joins both facts through its SM-2 private event; File, Shell and Orchestrator cannot mutate
+one another's state machines.
 
 ## EventHub Interaction
 

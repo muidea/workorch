@@ -37,11 +37,16 @@ type RuntimeOwnerFactRequirement struct {
 // of the original fact owner. It is immutable policy input, not a retry state
 // or an instruction that capability owners may use to transition Runtime.
 type RuntimeOwnerFactConvergence struct {
-	Requirement              RuntimeOwnerFactRequirement
-	RequirePreexisting       bool
-	MissingTrigger           string
-	AcquisitionOwnerModuleID string
-	AcquisitionOperationKind string
+	Requirement        RuntimeOwnerFactRequirement
+	RequirePreexisting bool
+	// ProspectiveSatisfactionContractRef binds a bounded acquisition to the
+	// required-fact owner's declaration of the exact postcondition that the
+	// proposed owner delta must satisfy. It is static Definition/profile
+	// authority, not a capability-owner prediction or a Runtime transition.
+	ProspectiveSatisfactionContractRef string
+	MissingTrigger                     string
+	AcquisitionOwnerModuleID           string
+	AcquisitionOperationKind           string
 	// AcquisitionOperationVariantID and AcquisitionTarget* identify the
 	// concrete operation-admissibility fact that authorizes the one allowed
 	// acquisition. TargetSelectorRef below remains the Definition-owned target
@@ -61,6 +66,7 @@ type RuntimeOwnerFactConvergence struct {
 
 func (c RuntimeOwnerFactConvergence) Normalized() RuntimeOwnerFactConvergence {
 	c.Requirement = c.Requirement.Normalized()
+	c.ProspectiveSatisfactionContractRef = strings.TrimSpace(c.ProspectiveSatisfactionContractRef)
 	c.MissingTrigger = strings.TrimSpace(c.MissingTrigger)
 	c.AcquisitionOwnerModuleID = strings.TrimSpace(c.AcquisitionOwnerModuleID)
 	c.AcquisitionOperationKind = CanonicalRuntimeBlockKind(c.AcquisitionOperationKind)
@@ -82,7 +88,7 @@ func (c RuntimeOwnerFactConvergence) Validate() error {
 		return err
 	}
 	if c.RequirePreexisting {
-		if c.MissingTrigger != "" || c.AcquisitionOwnerModuleID != "" || c.AcquisitionOperationKind != "" ||
+		if c.ProspectiveSatisfactionContractRef != "" || c.MissingTrigger != "" || c.AcquisitionOwnerModuleID != "" || c.AcquisitionOperationKind != "" ||
 			c.AcquisitionOperationVariantID != "" || c.AcquisitionTargetPolicy != "" || c.AcquisitionTargetSelectorRef != "" ||
 			c.TargetSelectorRef != "" || c.TargetSelectorOwnerRef != "" || c.TargetSelectorSubjectRef != "" ||
 			c.ReobserveOwnerModuleID != "" || c.ReobserveFactKind != "" || c.MaxAcquisitionAttempts != 0 || len(c.DependsOnRequirementRefs) != 0 {
@@ -118,7 +124,14 @@ func (c RuntimeOwnerFactConvergence) Validate() error {
 		}
 	}
 	switch c.AcquisitionTargetPolicy {
-	case RuntimeOperationTargetPolicyExistingOwnerScope, RuntimeOperationTargetPolicyProspectiveOwnerTarget:
+	case RuntimeOperationTargetPolicyExistingOwnerScope:
+		if c.ProspectiveSatisfactionContractRef != "" {
+			return fmt.Errorf("existing-scope owner-fact acquisition cannot declare a prospective satisfaction contract")
+		}
+	case RuntimeOperationTargetPolicyProspectiveOwnerTarget:
+		if c.ProspectiveSatisfactionContractRef == "" {
+			return fmt.Errorf("prospective owner-fact acquisition requires a prospective satisfaction contract")
+		}
 	default:
 		return fmt.Errorf("owner-fact acquisition requires a selector-backed target policy, got %q", c.AcquisitionTargetPolicy)
 	}
@@ -197,6 +210,7 @@ func SameRuntimeOwnerFactConvergences(left, right []RuntimeOwnerFactConvergence)
 	}
 	for idx := range left {
 		if left[idx].Requirement != right[idx].Requirement || left[idx].RequirePreexisting != right[idx].RequirePreexisting ||
+			left[idx].ProspectiveSatisfactionContractRef != right[idx].ProspectiveSatisfactionContractRef ||
 			left[idx].MissingTrigger != right[idx].MissingTrigger || left[idx].AcquisitionOwnerModuleID != right[idx].AcquisitionOwnerModuleID ||
 			left[idx].AcquisitionOperationKind != right[idx].AcquisitionOperationKind || left[idx].AcquisitionOperationVariantID != right[idx].AcquisitionOperationVariantID ||
 			left[idx].AcquisitionTargetPolicy != right[idx].AcquisitionTargetPolicy || left[idx].AcquisitionTargetSelectorRef != right[idx].AcquisitionTargetSelectorRef ||

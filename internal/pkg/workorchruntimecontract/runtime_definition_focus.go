@@ -9,23 +9,28 @@ import (
 
 // RuntimeDefinitionFocus is the immutable activation declaration for exactly
 // one coverage work item. It intentionally cannot carry generation-specific
-// target resolutions, operations, recipes, checks or proof bindings. Those
-// fields exist only on CoverageFocus after an SM-2 semantic generation seals.
+// target resolutions, operations, recipes, checks or proof bindings. An exact
+// prospective target declared at activation is Definition authority, not a
+// generation-specific target resolution.
 type RuntimeDefinitionFocus struct {
-	ID                                string
-	SliceID                           string
-	AssessmentScope                   string
-	AssessmentID                      string
-	AssessmentText                    string
-	CoverageWorkItemIDs               []common.CoverageWorkItemID
-	RequiredEvidenceKinds             []string
-	EvidenceRole                      string
-	TargetRole                        string
-	TargetDiscoverySources            []string
-	TargetSelectorRef                 string
-	TargetSelectorOwnerRef            string
-	TargetSelectorSubjectRef          string
-	TargetSelectorCandidateRefs       []string
+	ID                          string
+	SliceID                     string
+	AssessmentScope             string
+	AssessmentID                string
+	AssessmentText              string
+	CoverageWorkItemIDs         []common.CoverageWorkItemID
+	RequiredEvidenceKinds       []string
+	EvidenceRole                string
+	TargetRole                  string
+	TargetDiscoverySources      []string
+	TargetSelectorRef           string
+	TargetSelectorOwnerRef      string
+	TargetSelectorSubjectRef    string
+	TargetSelectorCandidateRefs []string
+	// ProspectiveTargetRef is the exact activation-sealed profile declaration
+	// for a prospective owner target. It is immutable Definition authority, not
+	// a semantic-generation choice.
+	ProspectiveTargetRef              string
 	RequireTargetGrounding            bool
 	RequireDirectEvidence             bool
 	RequireClaimEvidence              bool
@@ -53,6 +58,7 @@ func (f RuntimeDefinitionFocus) Normalized() RuntimeDefinitionFocus {
 	f.TargetSelectorOwnerRef = strings.TrimSpace(f.TargetSelectorOwnerRef)
 	f.TargetSelectorSubjectRef = strings.TrimSpace(f.TargetSelectorSubjectRef)
 	f.TargetSelectorCandidateRefs = normalizeStrings(f.TargetSelectorCandidateRefs)
+	f.ProspectiveTargetRef = strings.TrimSpace(f.ProspectiveTargetRef)
 	f.RequiredOwnerFacts = NormalizeRuntimeOwnerFactRequirements(f.RequiredOwnerFacts)
 	f.OwnerFactConvergences = NormalizeRuntimeOwnerFactConvergences(f.OwnerFactConvergences)
 	f.MetricConstraints = normalizeStrings(f.MetricConstraints)
@@ -90,6 +96,7 @@ func (f RuntimeDefinitionFocus) CoverageFocusDeclaration() CoverageFocus {
 		TargetSelectorOwnerRef:            f.TargetSelectorOwnerRef,
 		TargetSelectorSubjectRef:          f.TargetSelectorSubjectRef,
 		TargetSelectorCandidateRefs:       append([]string(nil), f.TargetSelectorCandidateRefs...),
+		ProspectiveTargetRef:              f.ProspectiveTargetRef,
 		RequireTargetGrounding:            f.RequireTargetGrounding,
 		RequireDirectEvidence:             f.RequireDirectEvidence,
 		RequireClaimEvidence:              f.RequireClaimEvidence,
@@ -142,6 +149,7 @@ func CompileRuntimeDefinitionFocuses(values []CoverageFocus) []RuntimeDefinition
 			TargetSelectorOwnerRef:            value.TargetSelectorOwnerRef,
 			TargetSelectorSubjectRef:          value.TargetSelectorSubjectRef,
 			TargetSelectorCandidateRefs:       append([]string(nil), value.TargetSelectorCandidateRefs...),
+			ProspectiveTargetRef:              value.ProspectiveTargetRef,
 			RequireTargetGrounding:            value.RequireTargetGrounding,
 			RequireDirectEvidence:             value.RequireDirectEvidence,
 			RequireClaimEvidence:              value.RequireClaimEvidence,
@@ -229,16 +237,16 @@ func ValidateRuntimeDefinitionFocuses(seed RuntimeDefinitionSeed, focuses []Runt
 		if len(focus.TargetSelectorCandidateRefs) != 0 && selectorParts != 3 {
 			return fmt.Errorf("runtime definition focus %q selector candidates require a complete selector", focus.ID)
 		}
-		// DefinitionFocus deliberately does not persist profile-declared exact
-		// target refs: exact target authority is sealed only after SM-2 observes
-		// the capability-owner catalog.  It must nevertheless preserve the
-		// grounding obligation and any declaration-side discovery/selector
-		// identity.  The profile/evidence-policy compiler has already validated
-		// an exact target, bounded discovery source, or selector before this
-		// projection; requiring an exact target again here would force the
-		// activation DTO to carry generation authority.
 		if focus.RequireTargetGrounding && focus.TargetRole == "" {
 			return fmt.Errorf("runtime definition focus %q target grounding requires a target role", focus.ID)
+		}
+		if focus.ProspectiveTargetRef != "" {
+			if !focus.RequireTargetGrounding || selectorParts != 3 {
+				return fmt.Errorf("runtime definition focus %q prospective target requires grounding and a complete selector", focus.ID)
+			}
+			if len(focus.TargetSelectorCandidateRefs) != 0 && !containsString(focus.TargetSelectorCandidateRefs, focus.ProspectiveTargetRef) {
+				return fmt.Errorf("runtime definition focus %q prospective target is outside selector candidates", focus.ID)
+			}
 		}
 		if len(focus.TargetDiscoverySources) != 0 {
 			if err := ValidateRuntimeTargetGrounding(focus.RequireTargetGrounding, focus.TargetRole, nil, focus.TargetDiscoverySources, focus.TargetSelectorRef); err != nil {
@@ -278,6 +286,7 @@ func sameRuntimeDefinitionFocus(left, right RuntimeDefinitionFocus) bool {
 		left.TargetRole == right.TargetRole && sameStrings(left.TargetDiscoverySources, right.TargetDiscoverySources) &&
 		left.TargetSelectorRef == right.TargetSelectorRef && left.TargetSelectorOwnerRef == right.TargetSelectorOwnerRef &&
 		left.TargetSelectorSubjectRef == right.TargetSelectorSubjectRef && sameStrings(left.TargetSelectorCandidateRefs, right.TargetSelectorCandidateRefs) &&
+		left.ProspectiveTargetRef == right.ProspectiveTargetRef &&
 		left.RequireTargetGrounding == right.RequireTargetGrounding && left.RequireDirectEvidence == right.RequireDirectEvidence &&
 		left.RequireClaimEvidence == right.RequireClaimEvidence && left.RequireExecutableBehaviorEvidence == right.RequireExecutableBehaviorEvidence &&
 		left.RequireCoverageTargets == right.RequireCoverageTargets && left.RequireAssessment == right.RequireAssessment &&

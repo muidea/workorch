@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	modulecommon "github.com/muidea/workorch/internal/modules/blocks/shell/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/common"
 	runtimemodel "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
@@ -114,6 +115,7 @@ func shellValidationSurfaces(declared, staticallyReady, ready []runtimemodel.Run
 			surface.Readiness = runtimemodel.RuntimeValidationSurfacePrerequisiteRequired
 			surface.ReadinessReason = shellValidationApplicableInputRequiredReason
 			surface.PrerequisiteRef = "shell-validation-prerequisite/" + schemaHash + "/applicable-workspace-input"
+			surface.ProspectiveSatisfactionContractRef = modulecommon.ProspectiveSatisfactionContractRef
 		default:
 			surface.Readiness = runtimemodel.RuntimeValidationSurfaceUnavailable
 			surface.ReadinessReason = shellValidationStaticUnavailableReason

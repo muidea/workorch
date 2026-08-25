@@ -4,7 +4,7 @@ Status: normative
 
 Type: core-contract-part
 
-Last Verified: 2026-08-24
+Last Verified: 2026-08-25
 
 ## 仅允许 all-of terminal 语义
 
@@ -46,7 +46,7 @@ DefinitionAdmissionCandidate
   AdmissionPolicyBindings[]    exact Profile/policy ref + revision + snapshot hash
   RuntimeProfileContracts[]    exact normalized typed Profile proof snapshot
   RequiredOwnerFactBindings[]  exact Profile requirement ref + owner/fact/operation
-  OwnerFactConvergenceBindings[] exact missing trigger + one acquisition + reobserve contract
+  OwnerFactConvergenceBindings[] exact missing trigger + one acquisition + prospective-satisfaction ref when required + reobserve contract
   RuntimeProfileContractsHash  hash of the exact normalized Profile contracts
   AdmissionCompilerVersion
   ResolvedProjectWorkspaceDirectory
@@ -93,6 +93,11 @@ DefinitionAdmissionCandidate
   `MaxAcquisitionAttempts=1`。Profile-derived binding 的缺失、重复、多 provider、依赖悬空或依赖环统一返回
   `definition_profile_prerequisite_unresolved`；两套 selector 不得缺省、互相复制或作为 alias。compiler 不读取 live catalog，
   也不猜测 File/Shell 领域动作；
+- acquisition target policy 为 `prospective_owner_target` 时，convergence binding 还必须携带一个非空、Profile-sealed
+  `ProspectiveSatisfactionContractRef`；preexisting、`exact_target` 与 `existing_owner_scope` 禁止携带。Workspace pure compiler
+  必须从 exact Profile snapshot 独立派生并逐项比较该 ref，且把它纳入 candidate/startup Profile contract hash。缺失、额外、
+  与 Profile 漂移或用于非 prospective policy 都返回 `definition_profile_prerequisite_unresolved`，在 Run/provider/capability
+  work 前打开 `select_or_fix_template_profile` blocking ticket；Application/LLM 不得补默认 ref。
 - `RuntimeProfileContractsHash` 同时进入 candidate 与 promoted startup input。Start/Restart 编译出的 normalized
   Profile contract hash 必须与 Workspace owner 封存值精确一致；Profile 后续漂移不能改变已封存 candidate/Run；
 - 同一 candidate 内容 permutation 后必须得到同一 `CandidateHash`；candidate identity/hash 的 schema version、compiler version、

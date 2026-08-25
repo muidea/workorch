@@ -44,7 +44,11 @@ func ProbeRuntimeSemanticProofFeasibility(ctx context.Context, hub magicevent.Hu
 	if !ok || response.FeasibilityBatchID != command.FeasibilityBatchID {
 		return runtimecontract.RuntimeSemanticProofFeasibilityObservation{}, fmt.Errorf("runtime semantic feasibility probe returned an invalid batch result")
 	}
-	if err := response.Observation.ValidateForProposal(command.Manifest, command.Proposal); err != nil {
+	// The proposal owner can attest only its own feasibility and, for a File
+	// prospective acquisition, the hypothetical workspace delta. The required-
+	// fact owner's independent satisfaction observation is composed below this
+	// adapter and only then admitted by the full ValidateForProposal gate.
+	if err := response.Observation.ValidateOwnerForProposal(command.Manifest, command.Proposal); err != nil {
 		return runtimecontract.RuntimeSemanticProofFeasibilityObservation{}, err
 	}
 	if response.Observation.OwnerModuleID != owner || response.Observation.ManifestHash != command.Manifest.Hash ||

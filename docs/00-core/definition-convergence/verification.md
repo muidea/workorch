@@ -4,7 +4,7 @@ Status: normative
 
 Type: verification-contract
 
-Last Verified: 2026-08-24
+Last Verified: 2026-08-25
 
 ## Purpose
 
@@ -22,7 +22,7 @@ Last Verified: 2026-08-24
 | clarify same semantic item | 保留 ItemRef、创建新 Definition revision；既有 Run 不漂移 |
 | materially replace/delete item | old ItemRef retired且不复用；fresh activation使用新 mapping |
 | pre-seal candidate | exact proposed Goal/DoD、Template snapshot、transitively sealed Profile/policy bindings、完整 normalized typed Profile contract snapshot、required owner-fact/convergence bindings、Profile contract hash、compiler version、resolved directory 与 admission-only relation input 产生稳定 versioned `CandidateHash`；仍无 Definition revision/startup-input/Run |
-| current candidate seal | `CandidateHash` 同时覆盖 acquisition operation variant、operation target policy 与 operation selector；caller/Workspace owner/pure compiler均不能重算 hash 后接受发生漂移的 immutable candidate |
+| current candidate seal | `CandidateHash` 同时覆盖 acquisition operation variant、operation target policy、operation selector，以及 prospective policy 必需的 `ProspectiveSatisfactionContractRef`；caller/Workspace owner/pure compiler均不能重算 hash 后接受发生漂移的 immutable candidate |
 | Profile snapshot/hash drift | candidate 的 typed Profile snapshot hash 与`RuntimeProfileContractsHash`不一致时，owner ingress在admission前拒绝；不得仅凭caller提供的hash或bindings继续 |
 | candidate lineage/revision | exact normalized duplicate 返回原 CandidateID/revision/hash 与确定性相同的 Workspace-owner admission result；materially changed input 只以 next revision CAS 新增；stale expected revision 零覆盖/零 promotion |
 | invalid candidate | 只持久化 candidate/violation/ticket lineage；零 canonical item/relation、`StartupInputHash`、Runtime/provider/capability work |
@@ -37,6 +37,7 @@ Last Verified: 2026-08-24
 | required Profile owner fact has no unique acquisition/reobserve closure | candidate promotion 前 `definition_profile_prerequisite_unresolved + select_or_fix_template_profile + BlockingTicketID`；零 startup-input/Runtime/provider/dispatch/effect |
 | candidate owner-fact manifest differs from exact Profile snapshot derivation | `definition_profile_prerequisite_unresolved`；Application不能省略、替换或附加binding，Workspace pure compiler独立派生比较 |
 | required owner fact declares exact one-shot acquisition | candidate封存missing trigger、acquisition owner/kind/selector、reobserve owner/fact与max=1；promotion/startup hash稳定；semantic obligation 同时保留 terminal 与 current evidence kinds；missing 时只能封存该 exact acquisition；accepted operation 后 reobserve 仍缺失则零第二次 acquisition并 typed exhausted，reobserve ready则重开同一CWI并以fresh generation恢复terminal proof，acquisition零terminal credit |
+| prospective owner-fact convergence declaration | `prospective_owner_target` 恰有 nonempty Profile-derived `ProspectiveSatisfactionContractRef`；missing/extra/drift或其它policy携带ref均在promotion前`definition_profile_prerequisite_unresolved`，零Run/provider/capability work |
 | free text may imply an undeclared prerequisite | static compiler 不做领域猜测或伪报完备；执行期只能走 typed semantic-gap lane |
 | dangling/self dependency | fail-closed before Run creation |
 | hard/reopen cycle | exact typed cycle path；零 Runtime work |
@@ -97,6 +98,7 @@ Last Verified: 2026-08-24
 | LLM exposes admitted undeclared prerequisite/semantic ambiguity | 不自动补 relation 或扩图；只有通过exact manifest/expected-document admission后才绑定 current authority 的 `revise_definition_and_restart` ticket |
 | Profile required owner fact closure omits operation selector/variant/policy | pre-seal `definition_profile_prerequisite_unresolved`；零 Run/provider/capability work |
 | Definition selector differs from capability operation selector | manifest 同时封存两份 identity；provider schema只允许 operation selector，返回 Definition selector时 attempt-0 typed correction、零 dispatch |
+| prospective dependency catalog provider isolation | required-owner `OwnerFactDependencyCatalogs` 进入 manifest/hash/freshness，但不进入 C3 owner catalog、allowed operation/surface、schema enum 或 correction allowed values；LLM 无法选择 Shell readiness/satisfaction |
 | assisted draft returns one-of | raw draft 只形成不可采用 diagnostic，UI/schema 不把它显示为合法 relation；只有用户另行显式提交的 admission candidate 才可保留 token 并进入 candidate-scoped ticket |
 | malformed/timeout context request | whole-document recovery或typed terminal；不扩 dependency/priority |
 
@@ -112,6 +114,10 @@ Last Verified: 2026-08-24
 | crash after dispatch/receipt | 不重放 durable effect；一次 evidence credit |
 | owner-fact acquisition reobserve ready | `assessment_observed`一次CAS保留operation/evidence/assessment与attempt lineage，但CWI仍open/reopened；current binding清除、generation退休、successor manifest恢复原terminal evidence；零terminal credit/ticket，restart零重复CAS/effect/request |
 | owner-fact acquisition reobserve missing | exact accepted attempt计入`MaxAcquisitionAttempts=1`并`owner_fact_convergence_exhausted`；零第二acquisition/reopen/provider escape |
+| prospective satisfaction would-satisfy | File outer feasibility生成base-revision-bound immutable delta；Shell只消费delta+exact recipe+dependency catalog/observation并返回nested observation；CAS与seal双重验后才可封存，probe全程零File/Shell effect |
+| prospective satisfaction dependency stale/missing | Shell typed stale保留为nested owner fact并只消费bounded refresh generation；不得伪造File outer stale或直接terminal；probe前missing dependency退休generation且零Shell call；refresh后新manifest/request，duplicate/restart幂等 |
+| prospective satisfaction would-not-satisfy | 先持久化exact File delta + Shell observation；下一次drive以统一`semantic_contract_failed` terminal确定性收口，并保留typed original reason=`prospective_owner_fact_unsatisfied`；零provider correction/request、新batch/ticket、refresh/acquisition/operation budget/effect，duplicate/restart零重复owner probe |
+| prospective observation CAS race | File tree、File catalog/observation、Shell dependency catalog/observation或recipe schema在probe→CAS/持久化→seal任一窗口漂移时，exact-current composite校验拒绝seal并有界刷新；零binding/dispatch/effect |
 | settled CWI unlocks next wave | SM-2重投影并继续正向推进 |
 | reopen after resource effect | exact successor closure重开；无全局重排/全量 prompt |
 | all-of gate witness member reopened | 原 witness 立即 stale且 dependent 退出ready；全部member再次current后才可重封存 |

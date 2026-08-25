@@ -49,6 +49,14 @@ func ValidateRuntimeSemanticProofFeasibilityRequest(command RuntimeSemanticProof
 	if proposal.OwnerModuleID != ownerModuleID {
 		return fmt.Errorf("runtime semantic feasibility proposal owner %q does not match receiver %q", proposal.OwnerModuleID, ownerModuleID)
 	}
+	if acquisition, found := runtimeSemanticOwnerFactAcquisitionForCoverage(manifest, proposal.CoverageWorkItemID); found {
+		if err := validateRuntimeSemanticOwnerFactAcquisition(RuntimeSemanticCWIProofSet{
+			CoverageWorkItemID: proposal.CoverageWorkItemID,
+			Proposals:          []RuntimeSemanticProofProposal{proposal},
+		}, &acquisition, 0); err != nil {
+			return err
+		}
+	}
 	if !runtimeSemanticManifestContainsProposal(manifest, proposal) {
 		return fmt.Errorf("runtime semantic feasibility proposal is outside sealed manifest")
 	}
@@ -275,6 +283,14 @@ func allStringsContained(values, allowed []string) bool {
 // Non-feasible statuses require an original, audit-safe diagnostic; this
 // constructor never summarizes or rewrites that diagnostic.
 func NewRuntimeSemanticProofFeasibilityObservation(command RuntimeSemanticProofFeasibilityRequest, status RuntimeSemanticFeasibilityStatus, observedRevision string, targetRefs []string, diagnostic *RuntimeOriginalDiagnostic) (RuntimeSemanticProofFeasibilityObservation, error) {
+	return NewRuntimeSemanticProofFeasibilityOwnerObservation(command, status, observedRevision, targetRefs, nil, diagnostic)
+}
+
+// NewRuntimeSemanticProofFeasibilityOwnerObservation permits the addressed
+// File owner to attach its typed prospective workspace delta before owner-
+// stage validation. Required-fact-owner satisfaction is deliberately absent
+// at this stage and is validated only after Orchestrator attaches it.
+func NewRuntimeSemanticProofFeasibilityOwnerObservation(command RuntimeSemanticProofFeasibilityRequest, status RuntimeSemanticFeasibilityStatus, observedRevision string, targetRefs []string, prospectiveDelta *RuntimeProspectiveWorkspaceManifestDelta, diagnostic *RuntimeOriginalDiagnostic) (RuntimeSemanticProofFeasibilityObservation, error) {
 	proposal := command.Proposal.Normalized()
 	confirmedChecks := runtimeSemanticOwnerConfirmedCheckRefs(command.OwnerCatalog, proposal.ValidationRecipeID)
 	observation := RuntimeSemanticProofFeasibility{
@@ -285,10 +301,14 @@ func NewRuntimeSemanticProofFeasibilityObservation(command RuntimeSemanticProofF
 		TargetRefs: append([]string(nil), targetRefs...), ValidationRecipeID: proposal.ValidationRecipeID,
 		RequiredCheckRefs: confirmedChecks, OriginalDiagnostic: diagnostic.CloneOriginal(),
 	}
+	if prospectiveDelta != nil {
+		value := prospectiveDelta.Clone()
+		observation.ProspectiveWorkspaceManifestDelta = &value
+	}
 	if command.CatalogObservation != nil {
 		observation.CatalogObservationID = command.CatalogObservation.ObservationID
 	}
-	if err := observation.ValidateForProposal(command.Manifest, proposal); err != nil {
+	if err := observation.ValidateOwnerForProposal(command.Manifest, proposal); err != nil {
 		return RuntimeSemanticProofFeasibilityObservation{}, err
 	}
 	return RuntimeSemanticProofFeasibilityObservation{FeasibilityBatchID: strings.TrimSpace(command.FeasibilityBatchID), Observation: observation}, nil

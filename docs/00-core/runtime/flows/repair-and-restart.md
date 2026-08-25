@@ -4,7 +4,7 @@ Status: normative
 
 Type: runtime-flow
 
-Last Verified: 2026-08-18
+Last Verified: 2026-08-25
 
 ## Purpose
 
@@ -16,7 +16,7 @@ Last Verified: 2026-08-18
 | --- | --- |
 | **repair** | **同一 Run、同一 focus** 上重新收敛：prerequisite 补齐、candidate attempt 1、operation evidence、governance continue |
 | **recoverable runtime wait** | **同一 Run、同一 aggregate** 等待typed recovery condition/trigger；必须有deadline、budget和persisted re-drive successor，不需要人类选择 |
-| **restart/replacement** | **不是**同 Run 内自动 successor；需要 fresh baseline 时由显式 Workspace `restart` 提交 fresh bootstrap，并由 Run-owned replacement transaction 创建独立 Run |
+| **restart/replacement** | **不是**同 Run 内自动 successor；需要 fresh baseline 时由显式 Workspace `restart` 提交 fresh bootstrap，并由 SM-1 唯一 Run owner 的 subordinate `run.replacement` transaction 创建独立 Run |
 
 生产主线**不**存在自动 replan successor lifecycle、`ExecutionContextPatch` resume 或 graph 重放。
 
@@ -26,8 +26,8 @@ Last Verified: 2026-08-18
 
 - SM-2：same-focus repair、failure signature budget、typed external dependency governance 或 terminal；
 - SM-3：same-transaction candidate retry 与 rejected operation evidence；
-- SM-1：blocked/active/terminal lifecycle，以及显式新 Run lineage；
-- SM-4：restart/load、governance continuation 与 bounded no-progress guard。
+- SM-1：blocked/active/terminal lifecycle，以及同 owner subordinate replacement transaction 和显式新 Run lineage；
+- SM-4：restart/load、governance continuation、administrative delivery handoff 与 bounded no-progress guard；不迁移 Run。
 
 repair 与 restart/replacement 的边界不得由 application queue、自动 successor 或 projection watcher实现。完整规约见
 [Runtime State Machines](../state-machines.md)。
@@ -122,9 +122,9 @@ Runtime/Orchestrator **不自动创建** replan successor Run；HTTP/TUI 也不�
 operator
   -> Workspace execution intent=restart + fresh RuntimeBootstrap
   -> Workspace owner validates current definition/scope
-  -> Run owner persists predecessor ReplacementIntent
-  -> Orchestrator seals predecessor superseded terminal
-  -> Result owner ack -> Workspace owner releases active slot -> Run owner ack
+  -> Run owner persists predecessor ReplacementIntent and claims termination intent
+  -> Orchestrator SM-4 persists RuntimeTerminationRecord delivery handoff
+  -> Result owner ack -> Workspace owner releases active slot -> Run owner private SM-1 terminal event
   -> Run-private reducer creates/links/activates one successor
   -> successor independently enters DriveRuntime
 ```
@@ -161,7 +161,8 @@ dependency 才可进入 `need_governance`，
 
 - repair 继承当前 definition revision、focus 与 authority 约束
 - failure / diagnostic 分层：stale 只进 diagnostic lineage
-- fresh replacement = 显式 Workspace restart + Run-owned transaction，不是 Orchestrator/application 自动 successor
+- fresh replacement = 显式 Workspace restart + SM-1 sole-owner subordinate Run transaction，不是第五个状态机或
+  Orchestrator/application 自动 successor
 - governance resolution 单次消费并回到同一 reducer
 - Start/Resume 生产入口只向 Run owner 发送 intent；缺少 bootstrap 通过 owner-local terminal delivery 收敛
 

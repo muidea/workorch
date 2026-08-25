@@ -4,7 +4,7 @@ Status: normative
 
 Type: core-contract-part
 
-Last Verified: 2026-08-22
+Last Verified: 2026-08-25
 
 ## Core Neutrality And Owner Layers
 
@@ -24,7 +24,7 @@ operation、effect、evidence、assessment、governance、recoverable wait、bud
 
 ## Cross-Owner Contract Boundary
 
-- 正式状态（包括对象创建时的 initial state）只由唯一 owner 的 private event/reducer 选择并持久化；外部 command/service 只表达 immutable intent/fact，不携带或直写 target/initial state。
+- 正式状态（包括对象创建时的 initial state）只由唯一 owner 的 private event/reducer 选择并持久化；外部 command/service 只表达 immutable intent/fact，不携带或直写 target/initial state。同一 state type 可以由该唯一 owner 的多个内部 transition 协调，但任何一个 transition 都不能属于第二个 owner。
 - 跨 owner runtime I/O 只使用 EventHub 与接收 owner `pkg/events` 定义的 concrete typed Command/Data/Result。
 - 需要同步结果、强一致写入或 admission 的交互使用 `Send`；审计通知使用 `Post`，Post handler 不依赖 `event.Result`。
 - 禁止跨 owner service/repository/adapter callback、Envelope、`map[string]any`、无约束 `any`、JSON/reflect bridge 或通用 registry。
@@ -47,8 +47,9 @@ Workspace scope 是 command execution context 的一部分，不是组件实例�
 SM-2 的唯一 canonical decision 是 `ConvergenceState`。action 文案、candidate mode 与 required-output kind 只能由该
 state 和 sealed output constraints 纯派生，不得成为独立 persisted authority、CAS 或跨 owner lifecycle 字段。
 `RuntimeDecision` 只保存 canonical state 与 terminal code/summary；SM-4 seal delivery 时才生成
-`TerminalOutcome{Kind,Code,Summary}`。`completed|failed` 来自 sealed SM-2 terminal，`cancelled|superseded` 只能来自
-SM-1 typed administrative fact。
+`TerminalOutcome{Kind,Code,Summary}`。`completed|failed` 来自 sealed SM-2 terminal；`cancelled|superseded` 只能源自
+Run SM-1 typed administrative intent。后一种 intent 由 SM-4 以 `RuntimeTerminationRecord` 保存为 exact delivery handoff，
+但 record 不迁移 Run；只有最终 Run-private SM-1 terminal-delivery event 可以改变 Run lifecycle。
 
 `recoverable_runtime_wait`是canonical nonterminal state/fact：只能从typed condition、trigger/deadline、budget和guard派生，
 并由SM-4持有persisted re-drive successor。reason/message、projection或客户端不能创建/解除它。execution-budget view

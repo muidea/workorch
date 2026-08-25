@@ -653,6 +653,27 @@ func (m *Biz) driveRuntimeSemanticFeasibility(ctx context.Context, aggregate run
 		return m.failRuntimeSemanticContract(ctx, aggregate, "semantic_feasibility_context_invalid", "semantic feasibility has no persisted manifest or document", nil)
 	}
 	for _, fact := range ledger.Feasibilities {
+		if prospective := fact.OwnerFactProspectiveSatisfactionObservation; prospective != nil {
+			if prospective.Stale != nil {
+				policy := aggregate.Facts.RecoveryPolicy.Normalized()
+				if aggregate.Facts.Recovery.PrerequisiteRefreshes >= policy.MaxPrerequisiteRefreshes {
+					return m.failRuntimeSemanticContract(ctx, aggregate, "semantic_catalog_refresh_exhausted", prospective.Stale.Reason, nil)
+				}
+				updated, err := m.submitRuntimeInternalEvent(ctx, runtime.RuntimeInternalEvent{
+					Kind:      runtime.RuntimeInternalEventSemanticContractRequired,
+					Scope:     runtime.RuntimeInternalEventScope{WorkspaceID: aggregate.Facts.WorkspaceID, RunID: aggregate.Facts.RunID},
+					Authority: &runtime.RuntimeInternalAuthorityPayload{SemanticBatchID: ledger.FeasibilityBatchID, SemanticRefreshGeneration: ledger.CatalogRefreshAttempts},
+				})
+				return updated.Aggregate, err
+			}
+			if prospective.Satisfaction != nil && prospective.Satisfaction.Outcome == runtimecontract.RuntimeOwnerFactProspectiveWouldNotSatisfy {
+				diagnostic, err := runtimeProspectiveSatisfactionDiagnostic(fact, *prospective.Satisfaction)
+				if err != nil {
+					return m.failRuntimeSemanticContract(ctx, aggregate, "runtime_contract_defect", err.Error(), nil)
+				}
+				return m.failRuntimeSemanticContract(ctx, aggregate, "prospective_owner_fact_unsatisfied", diagnostic.OriginalMessage, &diagnostic)
+			}
+		}
 		switch fact.Status {
 		case runtimecontract.RuntimeSemanticFeasibilityStale:
 			if fact.OriginalDiagnostic == nil {
@@ -765,10 +786,97 @@ func (m *Biz) probeRuntimeSemanticProposal(ctx context.Context, aggregate runtim
 	if err != nil {
 		return m.failRuntimeSemanticContract(ctx, aggregate, "semantic_owner_probe_invalid", err.Error(), nil)
 	}
+	ownerFactAcquisition, requiresProspectiveSatisfaction := runtimeSemanticProspectiveOwnerFactAcquisition(*ledger.Manifest, proposal)
+	if response.Observation.Status == runtimecontract.RuntimeSemanticFeasibilityFeasible && requiresProspectiveSatisfaction {
+		if response.Observation.ProspectiveWorkspaceManifestDelta == nil {
+			return m.failRuntimeSemanticContract(ctx, aggregate, "semantic_owner_probe_invalid", "prospective owner-fact feasibility omitted the File-authored workspace manifest delta", nil)
+		}
+		requiredOwnerCatalog, found := runtimeSemanticManifestDependencyCatalog(*ledger.Manifest, ownerFactAcquisition.Requirement.OwnerModuleID)
+		if !found {
+			return m.failRuntimeSemanticContract(ctx, aggregate, "runtime_contract_defect", "prospective owner-fact satisfaction has no sealed required-owner dependency catalog", nil)
+		}
+		requiredOwnerObservation := runtimeSemanticCatalogObservation(aggregate, requiredOwnerCatalog)
+		if requiredOwnerObservation == nil {
+			refreshed, refreshErr := m.submitRuntimeInternalEvent(ctx, runtime.RuntimeInternalEvent{
+				Kind:  runtime.RuntimeInternalEventSemanticCatalogInvalidated,
+				Scope: runtime.RuntimeInternalEventScope{WorkspaceID: aggregate.Facts.WorkspaceID, RunID: aggregate.Facts.RunID},
+				Authority: &runtime.RuntimeInternalAuthorityPayload{
+					ManifestHash: ledger.Manifest.Hash, LogicalRequestID: ledger.LogicalRequestID,
+				},
+			})
+			return refreshed.Aggregate, refreshErr
+		}
+		satisfactionResponse, satisfactionErr := ProbeRuntimeOwnerFactProspectiveSatisfaction(ctx, m.EventHub(), runtimecontract.RuntimeOwnerFactProspectiveSatisfactionRequest{
+			WorkspaceID: aggregate.Facts.WorkspaceID, RunID: aggregate.Facts.RunID,
+			FeasibilityBatchID: ledger.FeasibilityBatchID,
+			Manifest:           *ledger.Manifest, Proposal: proposal, Requirement: ownerFactAcquisition.Requirement,
+			ProspectiveSatisfactionContractRef: ownerFactAcquisition.ProspectiveSatisfactionContractRef,
+			OwnerCatalog:                       requiredOwnerCatalog, CatalogObservation: requiredOwnerObservation,
+			ValidationRecipes:                 runtimecontract.RuntimeValidationRecipeDeclarationsFromEvidencePolicies(aggregate.Facts.Activation.EvidencePolicies),
+			ProspectiveWorkspaceManifestDelta: response.Observation.ProspectiveWorkspaceManifestDelta.Clone(),
+		})
+		if satisfactionErr != nil {
+			return m.failRuntimeSemanticContract(ctx, aggregate, "semantic_owner_probe_invalid", satisfactionErr.Error(), nil)
+		}
+		prospectiveObservation := satisfactionResponse.Clone()
+		response.Observation.OwnerFactProspectiveSatisfactionObservation = &prospectiveObservation
+	}
+	if err := response.Observation.ValidateCompositeForProposal(*ledger.Manifest, proposal); err != nil {
+		return m.failRuntimeSemanticContract(ctx, aggregate, "semantic_owner_probe_invalid", err.Error(), nil)
+	}
 	updated, err := m.submitRuntimeInternalEvent(ctx, runtime.RuntimeInternalEvent{
 		Kind: runtime.RuntimeInternalEventSemanticFeasibilityObserved, Scope: runtime.RuntimeInternalEventScope{WorkspaceID: aggregate.Facts.WorkspaceID, RunID: aggregate.Facts.RunID}, Authority: &runtime.RuntimeInternalAuthorityPayload{SemanticBatchID: ledger.FeasibilityBatchID, SemanticFeasibility: &response.Observation},
 	})
 	return updated.Aggregate, err
+}
+
+func runtimeSemanticProspectiveOwnerFactAcquisition(manifest runtimecontract.RuntimeSemanticPlanManifest, proposal runtimecontract.RuntimeSemanticProofProposal) (runtimecontract.RuntimeSemanticOwnerFactAcquisition, bool) {
+	proposal = proposal.Normalized()
+	for _, obligation := range manifest.Normalized().ProofObligations {
+		if obligation.CoverageWorkItemID != proposal.CoverageWorkItemID || obligation.OwnerFactAcquisition == nil {
+			continue
+		}
+		acquisition := obligation.OwnerFactAcquisition.Clone()
+		if acquisition.AcquisitionOwnerModuleID == proposal.OwnerModuleID &&
+			acquisition.AcquisitionTargetPolicy == runtimecontract.RuntimeOperationTargetPolicyProspectiveOwnerTarget &&
+			acquisition.ProspectiveSatisfactionContractRef != "" {
+			return acquisition, true
+		}
+		return runtimecontract.RuntimeSemanticOwnerFactAcquisition{}, false
+	}
+	return runtimecontract.RuntimeSemanticOwnerFactAcquisition{}, false
+}
+
+func runtimeSemanticManifestDependencyCatalog(manifest runtimecontract.RuntimeSemanticPlanManifest, ownerModuleID string) (runtimecontract.RuntimeOperationAdmissibility, bool) {
+	ownerModuleID = strings.TrimSpace(ownerModuleID)
+	for _, catalog := range manifest.Normalized().OwnerFactDependencyCatalogs {
+		if catalog.OwnerModuleID == ownerModuleID {
+			return catalog, true
+		}
+	}
+	return runtimecontract.RuntimeOperationAdmissibility{}, false
+}
+
+func runtimeProspectiveSatisfactionDiagnostic(fact runtimecontract.RuntimeSemanticProofFeasibility, satisfaction runtimecontract.RuntimeOwnerFactProspectiveSatisfaction) (runtimecontract.RuntimeOriginalDiagnostic, error) {
+	fact = fact.Normalized()
+	satisfaction = satisfaction.Clone()
+	if satisfaction.Outcome != runtimecontract.RuntimeOwnerFactProspectiveWouldNotSatisfy || strings.TrimSpace(satisfaction.Reason) == "" || len(fact.TargetRefs) == 0 {
+		return runtimecontract.RuntimeOriginalDiagnostic{}, common.ErrInvalidArgument
+	}
+	diagnostic := runtimecontract.RuntimeOriginalDiagnostic{
+		SchemaVersion: runtimecontract.RuntimeOriginalDiagnosticSchemaCurrent,
+		// Shell owns only the persisted factual satisfaction result and reason.
+		// Orchestrator owns the SM-2 interpretation that the exact sealed target
+		// leaves no correction path, so it must not attribute this terminal
+		// diagnostic to the capability owner.
+		OwnerModuleID:   runtimecontract.RuntimeModuleOrchestrator,
+		OriginalClass:   "semantic_contract",
+		OriginalCode:    "prospective_owner_fact_unsatisfied",
+		OriginalMessage: satisfaction.Reason,
+		Signature:       "semantic-feasibility/prospective-owner-fact/" + strings.TrimPrefix(runtimecontract.StableRuntimeOwnerFactProspectiveSatisfactionHash(satisfaction), runtimecontract.RuntimeOwnerFactProspectiveSatisfactionHashPrefix),
+		TargetRefs:      append([]string(nil), fact.TargetRefs...),
+	}
+	return diagnostic, diagnostic.Validate()
 }
 
 func runtimeSemanticManifestOwnerCatalog(manifest runtimecontract.RuntimeSemanticPlanManifest, ownerModuleID string) (runtimecontract.RuntimeOperationAdmissibility, bool) {

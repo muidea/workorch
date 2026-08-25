@@ -14,6 +14,7 @@ func TestSemanticFailureClassForFailureCodePreservesBoundedTerminalCategories(t 
 		want runtimecontract.FailureClass
 	}{
 		{name: "owner infeasible", code: "semantic_owner_feasibility_infeasible", want: runtimecontract.FailureClassCandidateInfeasible},
+		{name: "prospective owner fact unsatisfied", code: "prospective_owner_fact_unsatisfied", want: runtimecontract.FailureClassCandidateInfeasible},
 		{name: "catalog refresh exhausted", code: "semantic_catalog_refresh_exhausted", want: runtimecontract.FailureClassPrerequisiteRefreshExhausted},
 		{name: "candidate correction exhausted", code: "semantic_plan_retry_exhausted", want: runtimecontract.FailureClassCandidateExhausted},
 		{name: "document recovery exhausted", code: "semantic_document_recovery_exhausted", want: runtimecontract.FailureClassCandidateDocumentRecoveryExhausted},

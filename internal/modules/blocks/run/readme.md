@@ -4,7 +4,7 @@ Status: active
 
 Type: stateful-block-contract
 
-Last Verified: 2026-08-24
+Last Verified: 2026-08-25
 
 ## 组件类型
 
@@ -17,7 +17,8 @@ opaque `RuntimeStateRecord` 物理 CAS/查询合同；不解释 SM-2/3/4 语义�
 `blocks/run` 管理 Run lifecycle、Run-owned replacement intent，以及 Step、RuntimeCheckpoint 的持久化查询/清理，
 并提供 Runtime aggregate 的 opaque 物理持久化、
 expected-revision CAS 和查询合同。Runtime 的 reducer、invariant、candidate、dispatch、evidence、recovery 与
-terminal seal 均由 Orchestrator 负责；Run 不承担跨组件编排。
+terminal decision/delivery handoff 均由 Orchestrator 负责；Run 不承担跨组件编排，但 Run terminal lifecycle 仍只由
+本 owner 的 SM-1 private event 持久化。
 
 ## 组件交互及合同
 
@@ -46,6 +47,11 @@ terminal seal 均由 Orchestrator 负责；Run 不承担跨组件编排。
 - ordinary Run creation 与 replacement successor materialization 共用唯一 `run.creation` owner-private
   dispatcher。两个入口只提交 immutable creation fact，不携带 `State`/时间戳；Run owner 选择
   initial SM-1 `pending`、initial lineage `active`、封存 `CreatedAt` 并执行唯一 repository Create。
+- `run.replacement` 不是独立 resource state machine，而是 SM-1 唯一 Run owner 的 subordinate transaction。它只推进
+  clarification、administrative termination handoff acknowledgement 与 successor materialization 的私有 stage/lease；
+  不能选择 SM-2～SM-4 authority，也不成为 Run lifecycle 的第二 owner。交接顺序固定为：Run-private replacement event
+  claim termination intent → Orchestrator SM-4 CAS 保存 `RuntimeTerminationRecord` 并投递 Result/Workspace/Run → Run-private
+  SM-1 terminal event → replacement transaction 消费 exact acknowledgement 并继续唯一 successor。
 - workspace/run purge 通过 `PurgeRuntimeResourcesCommand` 由 Run owner 删除该 scope 下的 Step 与 RuntimeCheckpoint；命令必须先确认 Run 属于指定 workspace，并返回实际删除数量。
 - Runtime 正式状态使用 typed `RuntimeStateRecord` 随 Run 物理持久化；update command 必须携带 expected runtime
   revision，并返回唯一的 `accepted`、`aggregate_revision_mismatch`、`semantic_rejection` 或 `owner_transient`
@@ -99,7 +105,7 @@ terminal seal 均由 Orchestrator 负责；Run 不承担跨组件编排。
 
 | 交互组件 | 方向 | 具体合同 | 当前结论 |
 | --- | --- | --- | --- |
-| `kernel/orchestrator` | 双向 | recovery inventory/readiness、opaque Runtime record query/CAS、lifecycle/governance/terminal facts | 完整；SM-2/3/4 语义只在 Orchestrator |
+| `kernel/orchestrator` | 双向 | recovery inventory/readiness、opaque Runtime record query/CAS、lifecycle/governance/terminal handoff facts | 完整；SM-2/3/4 语义只在 Orchestrator，Run terminal 只在 SM-1 |
 | `blocks/workspace` | 双向 | Workspace-owner `WorkspaceExecutionIntentCommand`、Run state notification | 完整；application 不直连 Run mutation，SM-1 转换只在 Run reducer |
 | `blocks/memory` | Run → Memory | activation recall trace upsert | 完整；观测失败不回滚 Run |
 | `application/workorchd` | 双向只读/清理 | typed Run/Step/Checkpoint query、Run delete、`RunStateChangedData` | 完整；不提交 lifecycle 或 Runtime CAS |
@@ -111,7 +117,8 @@ terminal seal 均由 Orchestrator 负责；Run 不承担跨组件编排。
 - 生产装配只接收 Run 自身 repository 与 EventHub，不得注入 WorkspaceReader、Orchestrator service、callback 或其他 owner repository。
 - `Stop`/`Teardown` 必须逆序、幂等地解除 recovery inventory 与常规 topic；recovery inventory 不得在 owner 停止后继续响应。
 - Run 不负责 coverage、evidence quality、Result acceptance 或 LLM 输出正确性判断。
-- current-baseline restart 由 Run owner 先在非终态 predecessor 上 CAS 持久化 immutable `ReplacementIntent`；只有
+- current-baseline restart 由 SM-1 唯一 Run owner 的 subordinate `run.replacement` transaction 先在非终态 predecessor
+  上 CAS 持久化 immutable `ReplacementIntent`；只有
   predecessor 的 `Result -> Workspace -> Run` terminal delivery 完成后，Run-private reducer 才幂等创建并激活
   successor。相同 RequestID 只有在完整 sealed activation payload 相同的情况下才是 duplicate；否则 fail-closed。
   request fact 不携带 `State` 或 mutable progress；唯一 private-event dispatcher 根据 clarification binding 选择

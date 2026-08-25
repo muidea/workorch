@@ -4,7 +4,7 @@ Status: normative
 
 Type: core-contract-part
 
-Last Verified: 2026-08-24
+Last Verified: 2026-08-25
 
 ## 跨状态机不变量
 
@@ -24,6 +24,11 @@ Last Verified: 2026-08-24
 9. `target_grounding_unresolved` terminal delivery 必须同时满足 canonical terminal 与 current semantic-authority readiness；
    binding-free semantic generation pending 时只能请求 semantic plan，不能投递该临时终态或请求 operations candidate。
    其它 canonical terminal 不得因此被改写或重规划。
+
+唯一 owner 约束的是 state authority，不是“每个 state type 只能有一个内部 transition ID”。同一 owner 可以用多个
+private transition 协调自己的状态，但任何 transition 都不能跨 owner；`run.replacement` 因此只能作为 Run SM-1 的
+subordinate transaction，不能升级为第五个状态机。administrative termination 必须保持
+`Run SM-1 intent -> Orchestrator SM-4 handoff record/delivery -> Run-private SM-1 terminal`，handoff 不得代写 lifecycle。
 
 ## 中立 effect、evidence 与治理
 

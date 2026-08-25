@@ -303,17 +303,18 @@ func TestRuntimeRepairDirectiveRoundTrip(t *testing.T) {
 	}
 }
 
-func TestRuntimeTerminationRecordAndCurrentSchema(t *testing.T) {
+func TestRuntimeTerminationRecordAdministrativeHandoffSchema(t *testing.T) {
 	term := RuntimeTerminationRecord{
-		Kind: RuntimeTerminationCancelled, RequestedBy: "user", Reason: "operator cancel", Revision: 3,
+		Kind: RuntimeTerminationCancelled, RequestedBy: "blocks/run", Reason: "operator cancel", Revision: 3,
 		RequestedAt: "2026-07-17T01:00:00Z",
 	}
 	if err := term.Validate(); err != nil {
 		t.Fatalf("termination validate: %v", err)
 	}
+	if clone := term.Clone(); clone != term {
+		t.Fatalf("administrative handoff clone = %+v, want %+v", clone, term)
+	}
 	if err := (RuntimeTerminationRecord{Kind: RuntimeTerminationCancelled, Reason: "x"}).Validate(); err == nil {
 		t.Fatal("termination without revision must fail")
 	}
-
-	_ = term
 }

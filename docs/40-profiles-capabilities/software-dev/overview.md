@@ -4,7 +4,7 @@ Status: normative
 
 Type: profile-capability-index
 
-Last Verified: 2026-08-18
+Last Verified: 2026-08-25
 
 | Topic | Contract |
 | --- | --- |
@@ -15,3 +15,7 @@ Last Verified: 2026-08-18
 
 These documents specialize Template/Profile/Soul/capability behavior without adding a Runtime state machine or hard-coded
 software-development branch to Orchestrator.
+
+The built-in Profile also seals the File-to-Shell prospective-satisfaction contract for one-shot DoD validation preparation.
+File owns the hypothetical workspace-manifest delta, Shell owns managed-validation applicability, and Orchestrator only joins
+their typed facts inside SM-2; none of the three may transition a sibling owner's state.

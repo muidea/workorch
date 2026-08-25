@@ -4,7 +4,7 @@ Status: normative
 
 Type: profile-capability
 
-Last Verified: 2026-08-24
+Last Verified: 2026-08-25
 
 ## Scope
 
@@ -57,6 +57,15 @@ acquisition followed by Shell reobservation. The acquisition generation requires
 the immutable DoD CWI continues to require terminal `validation`. A ready Shell reobservation retires the acquisition generation
 and reopens the same CWI for a fresh validation binding; it never grants DoD credit and is not an independent terminal CWI.
 
+That one-shot closure uses the Profile-sealed
+`shell/selectable-validation-surface/prospective-workspace-manifest/v1` satisfaction contract. Before any File effect, File
+returns an immutable current-tree-revision-bound hypothetical manifest delta and Shell evaluates it against its exact non-selectable
+dependency catalog/observation plus the activation-sealed recipe identity. For the default Go recipe, a resulting `*_test.go`
+can make `go test ./...` applicable; a resulting `scripts/validate.sh` alone cannot. A Shell `would_not_satisfy` result is first
+persisted and then deterministically reaches the common `semantic_contract_failed` terminal with typed original reason
+`prospective_owner_fact_unsatisfied`; it cannot ask the provider to replace the activation-sealed target. Shell typed stale uses
+bounded catalog refresh. Neither outcome creates validation credit, governance, a ticket or an acquisition effect.
+
 `coverage_map` and a generic `user_deliverable` are Result/trace material derived from the proved CWI set, not unconditional
 terminal members. A concrete Goal may still declare an additional artifact through its admitted Definition/Profile contract, but
 the Runtime must not manufacture a generic CWI without an exact proof declaration.
@@ -70,6 +79,8 @@ the Runtime must not manufacture a generic CWI without an exact proof declaratio
 - every operation must match the current binding, required variant, target authorization and owner catalog revision;
 - existing files require revision-bound replacement; `file/write` is create-only;
 - validation recipes must be activation-sealed and owner-confirmed;
+- `prospective_owner_target` validation preparation must carry the exact Profile-derived
+  `ProspectiveSatisfactionContractRef`; the Shell dependency catalog is freshness authority only and never LLM-selectable;
 - evidence from a predecessor or another Workspace cannot close the current Run;
 - partial assessment closes only explicitly satisfied work items and leaves the rest active;
 - no current-Run accepted evidence means a satisfied assessment is invalid.

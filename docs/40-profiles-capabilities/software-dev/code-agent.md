@@ -4,7 +4,7 @@ Status: normative
 
 Type: profile-capability
 
-Last Verified: 2026-08-24
+Last Verified: 2026-08-25
 
 ## Purpose
 
@@ -37,6 +37,12 @@ evidence requirements and allowed capability classes; it does not add a code-spe
 | semantic assistance | selected LSP MCP tools | auxiliary; cannot replace build/test evidence |
 
 Only operations present in the activation-sealed capability contract and current owner admissibility catalog are candidates.
+
+For the built-in DoD validation-readiness closure, a prospective File create is eligible only when the sealed
+`ProspectiveSatisfactionContractRef` lets Shell prove from the File-authored hypothetical resulting manifest that an exact
+managed-validation recipe would become selectable. In the default Go recipe, adding a real `*_test.go` target can satisfy this
+applicability contract; adding only a generic `scripts/validate.sh` does not make `go test ./...` selectable. This is
+software-dev Profile/Shell policy, not an Orchestrator filename or language rule.
 
 ## Runtime Mapping
 

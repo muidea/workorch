@@ -4,7 +4,7 @@ Status: normative
 
 Type: core-contract-part
 
-Last Verified: 2026-08-24
+Last Verified: 2026-08-25
 
 ## Workspace-owned semantic items
 
@@ -174,7 +174,9 @@ promotion；activation compiler 只能消费 promotion 后的正式 startup inpu
 3. hard dependency 与 reopen graph 分别无 cycle；
 4. 每个 `RequiresRef` 恰好由初始事实或一个唯一 provider item 满足；每个 required owner fact 也必须恰有一个
    sealed convergence declaration：preexisting，或 exact missing trigger + 唯一 acquisition owner/kind/selector +
-   reobserve owner/fact + `MaxAcquisitionAttempts=1`；确实要求多个输入时必须拆成不同 required ref 并由显式 all-of 汇合；
+   reobserve owner/fact + `MaxAcquisitionAttempts=1`；`prospective_owner_target` 还必须携带 nonempty exact
+   `ProspectiveSatisfactionContractRef`，而 preexisting/其它 target policy 禁止携带；确实要求多个输入时必须拆成不同
+   required ref 并由显式 all-of 汇合；
 5. 多 provider、`one_of/any_of/any_settled`、quorum/threshold/first-success relation 或其他可替代分支语义一律拒绝；
 6. 不存在 `indeterminate_as_success`、unknown-pass、assessment threshold 或其它降低 all-of terminal completeness 的策略；
 7. 每个 disposition 与 Definition→CWI mapping 满足本文的 mapping cardinality；

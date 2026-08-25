@@ -171,6 +171,12 @@ type RuntimeSemanticPlanManifest struct {
 	// selectors, constraints, recipes, or catalog revisions and then learning
 	// those facts only through a later rejection.
 	OwnerCatalogs []RuntimeOperationAdmissibility
+	// OwnerFactDependencyCatalogs seal capability-owner facts that are required
+	// to judge a prospective owner-fact acquisition but are intentionally not
+	// selectable semantic-plan vocabulary. They participate in freshness/CAS
+	// and seal guards, while provider projections continue to expose only
+	// OwnerCatalogs.
+	OwnerFactDependencyCatalogs []RuntimeOperationAdmissibility
 }
 
 // CompileRuntimeSemanticPlanManifest compiles the provider-visible semantic
@@ -391,6 +397,27 @@ func CompileRuntimeSemanticPlanManifestForCoverage(workspaceID common.WorkspaceI
 	if err != nil {
 		return RuntimeSemanticPlanManifest{}, err
 	}
+	dependencyCatalogs := make([]RuntimeOperationAdmissibility, 0)
+	dependencyOwners := make(map[string]struct{})
+	for _, obligation := range proofObligations {
+		if obligation.OwnerFactAcquisition == nil || obligation.OwnerFactAcquisition.ProspectiveSatisfactionContractRef == "" {
+			continue
+		}
+		acquisition := obligation.OwnerFactAcquisition.Normalized()
+		owner := acquisition.Requirement.OwnerModuleID
+		catalog, found := catalogByOwner[owner]
+		if !found {
+			return RuntimeSemanticPlanManifest{}, fmt.Errorf("runtime semantic manifest prospective owner-fact dependency %q has no sealed catalog", owner)
+		}
+		if len(runtimeProspectiveSatisfactionContractRecipeRefs(catalog, acquisition.Requirement, acquisition.ProspectiveSatisfactionContractRef)) == 0 {
+			return RuntimeSemanticPlanManifest{}, fmt.Errorf("runtime semantic manifest prospective owner-fact dependency %q has no matching satisfaction surface", owner)
+		}
+		if _, duplicate := dependencyOwners[owner]; duplicate {
+			continue
+		}
+		dependencyOwners[owner] = struct{}{}
+		dependencyCatalogs = append(dependencyCatalogs, catalog)
+	}
 	manifest := RuntimeSemanticPlanManifest{
 		SchemaVersion: RuntimeSemanticPlanManifestSchemaCurrent,
 		WorkspaceID:   workspaceID, RunID: runID,
@@ -399,6 +426,7 @@ func CompileRuntimeSemanticPlanManifestForCoverage(workspaceID common.WorkspaceI
 		CoverageItems:             coverageItems,
 		AllowedOwnerModuleIDs:     owners, AllowedOperationKinds: kinds,
 		AllowedTargetPolicies: policies, ProofObligations: proofObligations, OwnerCatalogs: sealedCatalogs,
+		OwnerFactDependencyCatalogs: dependencyCatalogs,
 	}
 	manifest.Hash = StableRuntimeSemanticPlanManifestHash(manifest)
 	if err := manifest.Validate(); err != nil {
@@ -526,6 +554,7 @@ func (m RuntimeSemanticPlanManifest) Normalized() RuntimeSemanticPlanManifest {
 	m.AllowedTargetPolicies = normalizeRuntimeSemanticTargetPolicies(m.AllowedTargetPolicies)
 	m.ProofObligations = normalizeRuntimeSemanticProofObligations(m.ProofObligations)
 	m.OwnerCatalogs = NormalizeRuntimeOperationAdmissibilities(m.OwnerCatalogs)
+	m.OwnerFactDependencyCatalogs = NormalizeRuntimeOperationAdmissibilities(m.OwnerFactDependencyCatalogs)
 	return m
 }
 
@@ -536,27 +565,33 @@ func (m RuntimeSemanticPlanManifest) Clone() RuntimeSemanticPlanManifest {
 	m.AllowedOperationKinds = append([]string(nil), m.AllowedOperationKinds...)
 	m.AllowedTargetPolicies = append([]RuntimeOperationTargetPolicy(nil), m.AllowedTargetPolicies...)
 	m.ProofObligations = cloneRuntimeSemanticProofObligations(m.ProofObligations)
-	m.OwnerCatalogs = append([]RuntimeOperationAdmissibility(nil), m.OwnerCatalogs...)
-	for idx := range m.OwnerCatalogs {
-		m.OwnerCatalogs[idx].OperationKinds = append([]string(nil), m.OwnerCatalogs[idx].OperationKinds...)
-		m.OwnerCatalogs[idx].OperationVariants = append([]RuntimeOperationAdmissibilityVariant(nil), m.OwnerCatalogs[idx].OperationVariants...)
-		for variantIdx := range m.OwnerCatalogs[idx].OperationVariants {
-			m.OwnerCatalogs[idx].OperationVariants[variantIdx].AllowedTargetPolicies = append([]RuntimeOperationTargetPolicy(nil), m.OwnerCatalogs[idx].OperationVariants[variantIdx].AllowedTargetPolicies...)
-			m.OwnerCatalogs[idx].OperationVariants[variantIdx].SelectorRefs = append([]string(nil), m.OwnerCatalogs[idx].OperationVariants[variantIdx].SelectorRefs...)
-			m.OwnerCatalogs[idx].OperationVariants[variantIdx].ConstraintRefs = append([]string(nil), m.OwnerCatalogs[idx].OperationVariants[variantIdx].ConstraintRefs...)
+	m.OwnerCatalogs = cloneRuntimeSemanticManifestCatalogs(m.OwnerCatalogs)
+	m.OwnerFactDependencyCatalogs = cloneRuntimeSemanticManifestCatalogs(m.OwnerFactDependencyCatalogs)
+	return m
+}
+
+func cloneRuntimeSemanticManifestCatalogs(values []RuntimeOperationAdmissibility) []RuntimeOperationAdmissibility {
+	values = append([]RuntimeOperationAdmissibility(nil), values...)
+	for idx := range values {
+		values[idx].OperationKinds = append([]string(nil), values[idx].OperationKinds...)
+		values[idx].OperationVariants = append([]RuntimeOperationAdmissibilityVariant(nil), values[idx].OperationVariants...)
+		for variantIdx := range values[idx].OperationVariants {
+			values[idx].OperationVariants[variantIdx].AllowedTargetPolicies = append([]RuntimeOperationTargetPolicy(nil), values[idx].OperationVariants[variantIdx].AllowedTargetPolicies...)
+			values[idx].OperationVariants[variantIdx].SelectorRefs = append([]string(nil), values[idx].OperationVariants[variantIdx].SelectorRefs...)
+			values[idx].OperationVariants[variantIdx].ConstraintRefs = append([]string(nil), values[idx].OperationVariants[variantIdx].ConstraintRefs...)
 		}
-		m.OwnerCatalogs[idx].TargetRefs = append([]string(nil), m.OwnerCatalogs[idx].TargetRefs...)
-		m.OwnerCatalogs[idx].SelectorRefs = append([]string(nil), m.OwnerCatalogs[idx].SelectorRefs...)
-		m.OwnerCatalogs[idx].ConstraintRefs = append([]string(nil), m.OwnerCatalogs[idx].ConstraintRefs...)
-		m.OwnerCatalogs[idx].ValidationRecipeRefs = append([]string(nil), m.OwnerCatalogs[idx].ValidationRecipeRefs...)
-		m.OwnerCatalogs[idx].ValidationSurfaces = NormalizeRuntimeValidationSurfaces(m.OwnerCatalogs[idx].ValidationSurfaces)
-		m.OwnerCatalogs[idx].OperationPolicies = NormalizeRuntimeOperationPolicyFacts(m.OwnerCatalogs[idx].OperationPolicies)
-		m.OwnerCatalogs[idx].ValidationRecipes = append([]RuntimeValidationRecipe(nil), m.OwnerCatalogs[idx].ValidationRecipes...)
-		for recipeIdx := range m.OwnerCatalogs[idx].ValidationRecipes {
-			m.OwnerCatalogs[idx].ValidationRecipes[recipeIdx].Args = append([]string(nil), m.OwnerCatalogs[idx].ValidationRecipes[recipeIdx].Args...)
+		values[idx].TargetRefs = append([]string(nil), values[idx].TargetRefs...)
+		values[idx].SelectorRefs = append([]string(nil), values[idx].SelectorRefs...)
+		values[idx].ConstraintRefs = append([]string(nil), values[idx].ConstraintRefs...)
+		values[idx].ValidationRecipeRefs = append([]string(nil), values[idx].ValidationRecipeRefs...)
+		values[idx].ValidationSurfaces = NormalizeRuntimeValidationSurfaces(values[idx].ValidationSurfaces)
+		values[idx].OperationPolicies = NormalizeRuntimeOperationPolicyFacts(values[idx].OperationPolicies)
+		values[idx].ValidationRecipes = append([]RuntimeValidationRecipe(nil), values[idx].ValidationRecipes...)
+		for recipeIdx := range values[idx].ValidationRecipes {
+			values[idx].ValidationRecipes[recipeIdx].Args = append([]string(nil), values[idx].ValidationRecipes[recipeIdx].Args...)
 		}
 	}
-	return m
+	return nilIfEmpty(values)
 }
 
 func (m RuntimeSemanticPlanManifest) Validate() error {
@@ -629,6 +664,35 @@ func (m RuntimeSemanticPlanManifest) Validate() error {
 	if len(catalogOwners) != len(owners) {
 		return fmt.Errorf("runtime semantic manifest does not seal every owner catalog")
 	}
+	dependencyOwners := make(map[string]RuntimeOperationAdmissibility, len(m.OwnerFactDependencyCatalogs))
+	for _, catalog := range m.OwnerFactDependencyCatalogs {
+		if err := catalog.Validate(); err != nil {
+			return err
+		}
+		if _, duplicate := dependencyOwners[catalog.OwnerModuleID]; duplicate {
+			return fmt.Errorf("runtime semantic manifest duplicates owner-fact dependency catalog owner %q", catalog.OwnerModuleID)
+		}
+		dependencyOwners[catalog.OwnerModuleID] = catalog
+	}
+	referencedDependencies := make(map[string]struct{})
+	for _, obligation := range m.ProofObligations {
+		if obligation.OwnerFactAcquisition == nil || obligation.OwnerFactAcquisition.ProspectiveSatisfactionContractRef == "" {
+			continue
+		}
+		acquisition := obligation.OwnerFactAcquisition.Normalized()
+		owner := acquisition.Requirement.OwnerModuleID
+		catalog, found := dependencyOwners[owner]
+		if !found {
+			return fmt.Errorf("runtime semantic manifest prospective owner-fact acquisition requires dependency catalog %q", owner)
+		}
+		if len(runtimeProspectiveSatisfactionContractRecipeRefs(catalog, acquisition.Requirement, acquisition.ProspectiveSatisfactionContractRef)) == 0 {
+			return fmt.Errorf("runtime semantic manifest owner-fact dependency catalog %q does not seal the prospective satisfaction contract", owner)
+		}
+		referencedDependencies[owner] = struct{}{}
+	}
+	if len(referencedDependencies) != len(dependencyOwners) {
+		return fmt.Errorf("runtime semantic manifest contains an unreferenced owner-fact dependency catalog")
+	}
 	if m.Hash != StableRuntimeSemanticPlanManifestHash(m) {
 		return fmt.Errorf("runtime semantic manifest hash does not match contents")
 	}
@@ -652,6 +716,9 @@ func StableRuntimeSemanticPlanManifestHash(manifest RuntimeSemanticPlanManifest)
 	}
 	writeRuntimeSemanticProofObligationsHash(h, manifest.ProofObligations)
 	for _, catalog := range manifest.OwnerCatalogs {
+		writeHashString(h, catalog.SnapshotID)
+	}
+	for _, catalog := range manifest.OwnerFactDependencyCatalogs {
 		writeHashString(h, catalog.SnapshotID)
 	}
 	return "runtime-semantic-manifest-" + hex.EncodeToString(h.Sum(nil))[:20]
@@ -1110,21 +1177,23 @@ const (
 // RuntimeSemanticProofFeasibility is an owner-authored fact for exactly one
 // proposal.  It cannot select a retry, terminal or coverage outcome.
 type RuntimeSemanticProofFeasibility struct {
-	SchemaVersion        string
-	ManifestHash         string
-	DefinitionSeedHash   string
-	CoverageWorkItemID   common.CoverageWorkItemID
-	ProposalHash         string
-	OwnerModuleID        string
-	CatalogSnapshotID    string
-	CatalogObservationID string
-	OwnerPolicy          RuntimeOwnerPolicyIdentity
-	Status               RuntimeSemanticFeasibilityStatus
-	ObservedRevision     string
-	TargetRefs           []string
-	ValidationRecipeID   string
-	RequiredCheckRefs    []string
-	OriginalDiagnostic   *RuntimeOriginalDiagnostic
+	SchemaVersion                               string
+	ManifestHash                                string
+	DefinitionSeedHash                          string
+	CoverageWorkItemID                          common.CoverageWorkItemID
+	ProposalHash                                string
+	OwnerModuleID                               string
+	CatalogSnapshotID                           string
+	CatalogObservationID                        string
+	OwnerPolicy                                 RuntimeOwnerPolicyIdentity
+	Status                                      RuntimeSemanticFeasibilityStatus
+	ObservedRevision                            string
+	TargetRefs                                  []string
+	ValidationRecipeID                          string
+	RequiredCheckRefs                           []string
+	ProspectiveWorkspaceManifestDelta           *RuntimeProspectiveWorkspaceManifestDelta
+	OwnerFactProspectiveSatisfactionObservation *RuntimeOwnerFactProspectiveSatisfactionObservation
+	OriginalDiagnostic                          *RuntimeOriginalDiagnostic
 }
 
 func (f RuntimeSemanticProofFeasibility) Normalized() RuntimeSemanticProofFeasibility {
@@ -1142,6 +1211,14 @@ func (f RuntimeSemanticProofFeasibility) Normalized() RuntimeSemanticProofFeasib
 	f.TargetRefs = normalizeStrings(f.TargetRefs)
 	f.ValidationRecipeID = strings.TrimSpace(f.ValidationRecipeID)
 	f.RequiredCheckRefs = normalizeStrings(f.RequiredCheckRefs)
+	if f.ProspectiveWorkspaceManifestDelta != nil {
+		value := f.ProspectiveWorkspaceManifestDelta.Normalized()
+		f.ProspectiveWorkspaceManifestDelta = &value
+	}
+	if f.OwnerFactProspectiveSatisfactionObservation != nil {
+		value := f.OwnerFactProspectiveSatisfactionObservation.Normalized()
+		f.OwnerFactProspectiveSatisfactionObservation = &value
+	}
 	f.OriginalDiagnostic = f.OriginalDiagnostic.Normalized()
 	return f
 }
@@ -1151,11 +1228,42 @@ func (f RuntimeSemanticProofFeasibility) Clone() RuntimeSemanticProofFeasibility
 	f = f.Normalized()
 	f.TargetRefs = append([]string(nil), f.TargetRefs...)
 	f.RequiredCheckRefs = append([]string(nil), f.RequiredCheckRefs...)
+	if f.ProspectiveWorkspaceManifestDelta != nil {
+		value := f.ProspectiveWorkspaceManifestDelta.Clone()
+		f.ProspectiveWorkspaceManifestDelta = &value
+	}
+	if f.OwnerFactProspectiveSatisfactionObservation != nil {
+		value := f.OwnerFactProspectiveSatisfactionObservation.Clone()
+		f.OwnerFactProspectiveSatisfactionObservation = &value
+	}
 	f.OriginalDiagnostic = originalDiagnostic
 	return f
 }
 
+// ValidateOwnerForProposal validates the addressed capability owner's direct
+// observation. For a prospective owner-fact acquisition the File-authored
+// manifest delta is mandatory, while the required-fact owner's later
+// satisfaction observation may still be absent.
+func (f RuntimeSemanticProofFeasibility) ValidateOwnerForProposal(manifest RuntimeSemanticPlanManifest, proposal RuntimeSemanticProofProposal) error {
+	if f.OwnerFactProspectiveSatisfactionObservation != nil {
+		return fmt.Errorf("capability-owner semantic feasibility cannot carry another owner's prospective satisfaction observation")
+	}
+	return f.validateForProposal(manifest, proposal, false, false, false)
+}
+
+// ValidateCompositeForProposal accepts a complete pair of owner observations,
+// including typed required-owner stale and would-not-satisfy results. It is
+// the persistence gate; ValidateForProposal remains the stricter seal-ready
+// gate so a factual rejection can never grant operation authority.
+func (f RuntimeSemanticProofFeasibility) ValidateCompositeForProposal(manifest RuntimeSemanticPlanManifest, proposal RuntimeSemanticProofProposal) error {
+	return f.validateForProposal(manifest, proposal, true, true, true)
+}
+
 func (f RuntimeSemanticProofFeasibility) ValidateForProposal(manifest RuntimeSemanticPlanManifest, proposal RuntimeSemanticProofProposal) error {
+	return f.validateForProposal(manifest, proposal, true, false, false)
+}
+
+func (f RuntimeSemanticProofFeasibility) validateForProposal(manifest RuntimeSemanticPlanManifest, proposal RuntimeSemanticProofProposal, requireProspectiveObservation, allowProspectiveStale, allowProspectiveWouldNotSatisfy bool) error {
 	f = f.Normalized()
 	manifest = manifest.Normalized()
 	proposal = proposal.Normalized()
@@ -1187,6 +1295,8 @@ func (f RuntimeSemanticProofFeasibility) ValidateForProposal(manifest RuntimeSem
 	if err := validateSemanticProposalAgainstOwnerCatalog(proposal, catalog); err != nil {
 		return err
 	}
+	acquisition, hasAcquisition := runtimeSemanticOwnerFactAcquisitionForCoverage(manifest, proposal.CoverageWorkItemID)
+	prospectiveAcquisition := hasAcquisition && acquisition.AcquisitionTargetPolicy == RuntimeOperationTargetPolicyProspectiveOwnerTarget
 	switch f.Status {
 	case RuntimeSemanticFeasibilityFeasible:
 		if f.OriginalDiagnostic != nil {
@@ -1231,7 +1341,43 @@ func (f RuntimeSemanticProofFeasibility) ValidateForProposal(manifest RuntimeSem
 				return fmt.Errorf("feasible runtime semantic observation requires owner-confirmed validation checks")
 			}
 		}
+		if prospectiveAcquisition {
+			if f.CatalogObservationID == "" {
+				return fmt.Errorf("feasible prospective owner-fact acquisition requires the File catalog observation identity")
+			}
+			if f.ProspectiveWorkspaceManifestDelta == nil {
+				return fmt.Errorf("feasible prospective owner-fact acquisition requires a File workspace manifest delta")
+			}
+			delta := f.ProspectiveWorkspaceManifestDelta.Normalized()
+			if err := delta.Validate(); err != nil {
+				return err
+			}
+			if err := validateRuntimeProspectiveWorkspaceManifestDeltaForProposal(delta, manifest, proposal, acquisition); err != nil {
+				return err
+			}
+			if f.OwnerFactProspectiveSatisfactionObservation == nil {
+				if requireProspectiveObservation {
+					return fmt.Errorf("feasible prospective owner-fact acquisition requires a required-owner observation")
+				}
+				break
+			}
+			prospectiveObservation := f.OwnerFactProspectiveSatisfactionObservation.Normalized()
+			if err := validateRuntimeOwnerFactProspectiveSatisfactionObservationForProposal(prospectiveObservation, manifest, proposal, acquisition, delta); err != nil {
+				return err
+			}
+			if prospectiveObservation.Stale != nil && !allowProspectiveStale {
+				return fmt.Errorf("feasible prospective owner-fact acquisition cannot seal a stale required-owner observation")
+			}
+			if prospectiveObservation.Satisfaction != nil && prospectiveObservation.Satisfaction.Normalized().Outcome != RuntimeOwnerFactProspectiveWouldSatisfy && !allowProspectiveWouldNotSatisfy {
+				return fmt.Errorf("feasible prospective owner-fact acquisition requires exact would_satisfy outcome")
+			}
+		} else if f.ProspectiveWorkspaceManifestDelta != nil || f.OwnerFactProspectiveSatisfactionObservation != nil {
+			return fmt.Errorf("runtime semantic feasibility without prospective owner-fact acquisition cannot carry prospective satisfaction facts")
+		}
 	case RuntimeSemanticFeasibilityStale, RuntimeSemanticFeasibilityPrerequisiteRequired, RuntimeSemanticFeasibilityInfeasible:
+		if f.ProspectiveWorkspaceManifestDelta != nil || f.OwnerFactProspectiveSatisfactionObservation != nil {
+			return fmt.Errorf("non-feasible runtime semantic observation cannot carry prospective satisfaction facts")
+		}
 		if f.OriginalDiagnostic == nil {
 			return fmt.Errorf("non-feasible runtime semantic observation requires original diagnostic")
 		}
@@ -1343,7 +1489,9 @@ func (g RuntimeSemanticFeasibilityGap) Validate() error {
 	}
 	refreshable := false
 	for _, feasibility := range g.Feasibilities {
-		if feasibility.Status == RuntimeSemanticFeasibilityStale {
+		if feasibility.Status == RuntimeSemanticFeasibilityStale ||
+			(feasibility.OwnerFactProspectiveSatisfactionObservation != nil &&
+				feasibility.OwnerFactProspectiveSatisfactionObservation.Stale != nil) {
 			refreshable = true
 		}
 		if feasibility.OriginalDiagnostic != nil {
@@ -1462,8 +1610,10 @@ func (g RuntimeSemanticPlanningGeneration) Validate() error {
 	if err := g.Snapshot.Validate(); err != nil {
 		return fmt.Errorf("runtime semantic planning generation snapshot: %w", err)
 	}
-	manifestPrerequisites := make(map[string]struct{}, len(g.Snapshot.Manifest.OwnerCatalogs))
-	for _, catalog := range g.Snapshot.Manifest.OwnerCatalogs {
+	manifestCatalogs := append([]RuntimeOperationAdmissibility(nil), g.Snapshot.Manifest.OwnerCatalogs...)
+	manifestCatalogs = append(manifestCatalogs, g.Snapshot.Manifest.OwnerFactDependencyCatalogs...)
+	manifestPrerequisites := make(map[string]struct{}, len(manifestCatalogs))
+	for _, catalog := range manifestCatalogs {
 		manifestPrerequisites[catalog.PrerequisiteID] = struct{}{}
 	}
 	seenPrerequisites := make(map[string]struct{}, len(g.PrerequisiteIDs))
@@ -2458,6 +2608,16 @@ func StableRuntimeSemanticFeasibilitySetHash(values []RuntimeSemanticProofFeasib
 		writeHashStrings(h, value.TargetRefs)
 		writeHashString(h, value.ValidationRecipeID)
 		writeHashStrings(h, value.RequiredCheckRefs)
+		if value.ProspectiveWorkspaceManifestDelta == nil {
+			writeHashString(h, "no-prospective-workspace-manifest-delta")
+		} else {
+			writeHashString(h, StableRuntimeProspectiveWorkspaceManifestDeltaHash(*value.ProspectiveWorkspaceManifestDelta))
+		}
+		if value.OwnerFactProspectiveSatisfactionObservation == nil {
+			writeHashString(h, "no-owner-fact-prospective-satisfaction")
+		} else {
+			writeHashString(h, StableRuntimeOwnerFactProspectiveSatisfactionObservationHash(*value.OwnerFactProspectiveSatisfactionObservation))
+		}
 		if value.OriginalDiagnostic != nil {
 			diagnostic := value.OriginalDiagnostic.Normalized()
 			writeHashString(h, diagnostic.OwnerModuleID)
@@ -2496,7 +2656,11 @@ func validateRuntimeSemanticFeasibilitySet(manifest RuntimeSemanticPlanManifest,
 			return fmt.Errorf("runtime semantic feasibility duplicates proof %q", feasibility.ProposalHash)
 		}
 		seen[feasibility.ProposalHash] = struct{}{}
-		if err := feasibility.ValidateForProposal(manifest, proposal); err != nil {
+		if complete {
+			if err := feasibility.ValidateForProposal(manifest, proposal); err != nil {
+				return err
+			}
+		} else if err := feasibility.ValidateCompositeForProposal(manifest, proposal); err != nil {
 			return err
 		}
 		if complete && feasibility.Status != RuntimeSemanticFeasibilityFeasible {

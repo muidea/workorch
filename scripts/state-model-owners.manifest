@@ -1,8 +1,10 @@
 # declaration_file|type_name|classification|owner_root|transition_ids
 #
 # This is an exhaustive verification inventory, never production transition
-# data. A type is transition-bearing only when it names exactly one owner-local
-# reducer family below. Immutable outcomes, pure dispositions, projections,
+# data. A transition-bearing type may name one or more coordinated transition
+# families only when every family has the same unique owner_root as the type.
+# Multiple IDs describe same-owner coordination, never shared or cross-owner
+# reducer authority. Immutable outcomes, pure dispositions, projections,
 # technical state and invariant values must keep transition_ids="-".
 internal/modules/blocks/approval/pkg/models/runtime_governance.go|ResolutionProposalState|owner_private_state|internal/modules/blocks/approval|approval.lifecycle
 internal/modules/blocks/decision/pkg/events/definition_clarification.go|DefinitionClarificationDisposition|immutable_outcome|internal/modules/blocks/decision|-
@@ -67,6 +69,7 @@ internal/pkg/workorchruntimecontract/runtime_lifecycle_delivery.go|RuntimeDelive
 internal/pkg/workorchruntimecontract/runtime_operation_receipt.go|RuntimeOperationExecutionState|owner_private_state|internal/modules/kernel/orchestrator|sm_3
 internal/pkg/workorchruntimecontract/runtime_operation_receipt.go|RuntimeOperationOutcome|immutable_outcome|-|-
 internal/pkg/workorchruntimecontract/runtime_owner_feasibility.go|RuntimeOwnerFeasibilityOutcome|immutable_outcome|-|-
+internal/pkg/workorchruntimecontract/runtime_owner_fact_prospective_satisfaction.go|RuntimeOwnerFactProspectiveSatisfactionOutcome|immutable_outcome|-|-
 internal/pkg/workorchruntimecontract/runtime_recoverable_wait.go|RuntimeRecoverableWaitStatus|immutable_outcome|-|-
 internal/pkg/workorchruntimecontract/runtime_repair_surface.go|RuntimeRepairSurfaceDisposition|pure_disposition|internal/modules/kernel/orchestrator|-
 internal/pkg/workorchruntimecontract/runtime_result_closeout_formal.go|RuntimeRequirementCoverageState|owner_private_state|internal/modules/kernel/orchestrator|sm_2

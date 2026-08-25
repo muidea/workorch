@@ -21,9 +21,9 @@ const (
 	frameworkInitiatorImport       = "github.com/muidea/magicCommon/framework/plugin/initiator"
 )
 
-// The workorchdeps consumer argument is diagnostic context, not an
-// authorization mechanism. Keep owner isolation enforceable by scanning every
-// production resolver call instead.
+// The workorchdeps consumer argument is a runtime authorization fence. Keep
+// the static callsite scan as a second, compile-time-visible owner boundary so
+// production code cannot accidentally request a sibling repository family.
 func TestRepositoryConsumersUseTheirOwnerRepositoryGroups(t *testing.T) {
 	repositoryRoot := repositoryBoundaryRoot(t)
 	wantResolvers := map[string]string{

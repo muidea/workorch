@@ -56,10 +56,11 @@ func (a *RuntimeAdapter) AcquireWorkspaceManifest(workspaceDirectory string) (ru
 }
 
 // acquireWorkspaceManifestObservation keeps the File owner's bounded list
-// cardinality alongside the file-only manifest. Directories consume the same
-// ListFiles bound as files, but are intentionally absent from TargetRefs; a
-// prospective create must therefore reserve capacity against entryCount, not
-// only the deliverable file count.
+// cardinality alongside the file-only manifest. Directories and safe internal
+// symlinks consume the same ListFiles bound as files, so their canonical
+// topology identity is part of Revision even though only regular files enter
+// TargetRefs. A prospective create can then bind both target visibility and
+// capacity to one exact owner observation.
 func (a *RuntimeAdapter) acquireWorkspaceManifestObservation(workspaceDirectory string) (workspaceManifestObservation, error) {
 	result, err := a.ListFiles(FileListRequest{
 		WorkspaceDirectory: workspaceDirectory,
@@ -75,15 +76,28 @@ func (a *RuntimeAdapter) acquireWorkspaceManifestObservation(workspaceDirectory 
 	targetRefs := make([]string, 0, len(result.Entries))
 	h := sha256.New()
 	for _, entry := range result.Entries {
-		if entry.Kind != "file" {
-			continue
-		}
 		ref := strings.TrimSpace(entry.Path)
-		if ref == "" {
+		kind := strings.TrimSpace(entry.Kind)
+		if ref == "" || kind == "" {
 			continue
 		}
-		targetRefs = append(targetRefs, ref)
-		_, _ = fmt.Fprintf(h, "%d:%s|%s|%d|%s;", len(ref), ref, entry.ContentHash, entry.Size, entry.ModifiedAt)
+		// Path + kind bind every entry that consumes the bounded File inventory.
+		// Directory mtimes are deliberately excluded: the canonical child entry
+		// set already represents topology and remains stable when an idempotent
+		// file write merely touches its parent directory metadata.
+		_, _ = fmt.Fprintf(h, "%d:%s|%d:%s|", len(ref), ref, len(kind), kind)
+		switch kind {
+		case "file":
+			targetRefs = append(targetRefs, ref)
+			_, _ = fmt.Fprintf(h, "%s|%d|%s;", entry.ContentHash, entry.Size, entry.ModifiedAt)
+		case "symlink":
+			// ListFiles resolves safe internal aliases to their current target ref.
+			// Size/mtime additionally invalidate an alias replacement whose target
+			// happens to normalize to the same path.
+			_, _ = fmt.Fprintf(h, "%d|%s;", entry.Size, entry.ModifiedAt)
+		default:
+			_, _ = fmt.Fprint(h, ";")
+		}
 	}
 	return workspaceManifestObservation{
 		manifest: runtimemodel.WorkspaceManifest{

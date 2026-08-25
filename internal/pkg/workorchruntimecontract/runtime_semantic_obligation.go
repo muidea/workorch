@@ -15,7 +15,11 @@ import (
 // operation selector identifies the capability owner's concrete authorization.
 // They are independent identities and are never treated as aliases.
 type RuntimeSemanticOwnerFactAcquisition struct {
-	Requirement                         RuntimeOwnerFactRequirement
+	Requirement                        RuntimeOwnerFactRequirement
+	ProspectiveSatisfactionContractRef string
+	// ProspectiveTargetRef is copied from the immutable Definition declaration.
+	// The provider may echo it but cannot select or replace it.
+	ProspectiveTargetRef                string
 	DeclarationTargetSelectorRef        string
 	DeclarationTargetSelectorOwnerRef   string
 	DeclarationTargetSelectorSubjectRef string
@@ -84,6 +88,8 @@ func ResolveRuntimeSemanticEvidenceObligation(obligation RuntimeSemanticProofObl
 
 func (a RuntimeSemanticOwnerFactAcquisition) Normalized() RuntimeSemanticOwnerFactAcquisition {
 	a.Requirement = a.Requirement.Normalized()
+	a.ProspectiveSatisfactionContractRef = strings.TrimSpace(a.ProspectiveSatisfactionContractRef)
+	a.ProspectiveTargetRef = strings.TrimSpace(a.ProspectiveTargetRef)
 	a.DeclarationTargetSelectorRef = strings.TrimSpace(a.DeclarationTargetSelectorRef)
 	a.DeclarationTargetSelectorOwnerRef = strings.TrimSpace(a.DeclarationTargetSelectorOwnerRef)
 	a.DeclarationTargetSelectorSubjectRef = strings.TrimSpace(a.DeclarationTargetSelectorSubjectRef)
@@ -122,7 +128,14 @@ func (a RuntimeSemanticOwnerFactAcquisition) Validate() error {
 		return fmt.Errorf("runtime semantic owner-fact acquisition operation %q does not belong to owner %q", a.AcquisitionOperationKind, a.AcquisitionOwnerModuleID)
 	}
 	switch a.AcquisitionTargetPolicy {
-	case RuntimeOperationTargetPolicyExistingOwnerScope, RuntimeOperationTargetPolicyProspectiveOwnerTarget:
+	case RuntimeOperationTargetPolicyExistingOwnerScope:
+		if a.ProspectiveSatisfactionContractRef != "" || a.ProspectiveTargetRef != "" {
+			return fmt.Errorf("runtime semantic existing-scope owner-fact acquisition cannot declare prospective satisfaction or target authority")
+		}
+	case RuntimeOperationTargetPolicyProspectiveOwnerTarget:
+		if a.ProspectiveSatisfactionContractRef == "" || a.ProspectiveTargetRef == "" {
+			return fmt.Errorf("runtime semantic prospective owner-fact acquisition requires a prospective satisfaction contract and exact target")
+		}
 	default:
 		return fmt.Errorf("runtime semantic owner-fact acquisition requires a selector-backed target policy, got %q", a.AcquisitionTargetPolicy)
 	}
@@ -147,6 +160,7 @@ type RuntimeSemanticProofObligation struct {
 	DeclarationTargetSelectorOwnerRef      string
 	DeclarationTargetSelectorSubjectRef    string
 	DeclarationTargetSelectorCandidateRefs []string
+	DeclarationProspectiveTargetRef        string
 	RequireTargetGrounding                 bool
 	RequireAssessment                      bool
 	RequiredOwnerFacts                     []RuntimeOwnerFactRequirement
@@ -165,6 +179,7 @@ func (o RuntimeSemanticProofObligation) Normalized() RuntimeSemanticProofObligat
 	o.DeclarationTargetSelectorOwnerRef = strings.TrimSpace(o.DeclarationTargetSelectorOwnerRef)
 	o.DeclarationTargetSelectorSubjectRef = strings.TrimSpace(o.DeclarationTargetSelectorSubjectRef)
 	o.DeclarationTargetSelectorCandidateRefs = normalizeStrings(o.DeclarationTargetSelectorCandidateRefs)
+	o.DeclarationProspectiveTargetRef = strings.TrimSpace(o.DeclarationProspectiveTargetRef)
 	o.RequiredOwnerFacts = NormalizeRuntimeOwnerFactRequirements(o.RequiredOwnerFacts)
 	o.OwnerFactConvergences = NormalizeRuntimeOwnerFactConvergences(o.OwnerFactConvergences)
 	o.MetricConstraints = normalizeStrings(o.MetricConstraints)
@@ -206,6 +221,14 @@ func (o RuntimeSemanticProofObligation) Validate() error {
 	if o.DeclarationTargetSelectorRef != "" && (o.DeclarationTargetSelectorOwnerRef == "" || o.DeclarationTargetSelectorSubjectRef == "") {
 		return fmt.Errorf("runtime semantic proof obligation declaration selector requires owner and subject")
 	}
+	if o.DeclarationProspectiveTargetRef != "" {
+		if !o.RequireTargetGrounding || o.DeclarationTargetSelectorRef == "" || o.DeclarationTargetSelectorOwnerRef == "" || o.DeclarationTargetSelectorSubjectRef == "" {
+			return fmt.Errorf("runtime semantic proof obligation prospective target requires grounding and a complete declaration selector")
+		}
+		if len(o.DeclarationTargetSelectorCandidateRefs) != 0 && !containsString(o.DeclarationTargetSelectorCandidateRefs, o.DeclarationProspectiveTargetRef) {
+			return fmt.Errorf("runtime semantic proof obligation prospective target is outside declaration selector candidates")
+		}
+	}
 	if o.OwnerFactAcquisition != nil {
 		if err := o.OwnerFactAcquisition.Validate(); err != nil {
 			return err
@@ -214,6 +237,10 @@ func (o RuntimeSemanticProofObligation) Validate() error {
 			o.OwnerFactAcquisition.DeclarationTargetSelectorOwnerRef != o.DeclarationTargetSelectorOwnerRef ||
 			o.OwnerFactAcquisition.DeclarationTargetSelectorSubjectRef != o.DeclarationTargetSelectorSubjectRef {
 			return fmt.Errorf("runtime semantic owner-fact acquisition declaration does not match proof obligation")
+		}
+		if o.OwnerFactAcquisition.AcquisitionTargetPolicy == RuntimeOperationTargetPolicyProspectiveOwnerTarget &&
+			o.OwnerFactAcquisition.ProspectiveTargetRef != o.DeclarationProspectiveTargetRef {
+			return fmt.Errorf("runtime semantic owner-fact acquisition prospective target does not match proof obligation")
 		}
 	}
 	return nil
@@ -252,6 +279,7 @@ func sameRuntimeSemanticProofObligations(left, right []RuntimeSemanticProofOblig
 			l.DeclarationTargetSelectorOwnerRef != r.DeclarationTargetSelectorOwnerRef ||
 			l.DeclarationTargetSelectorSubjectRef != r.DeclarationTargetSelectorSubjectRef ||
 			!sameStrings(l.DeclarationTargetSelectorCandidateRefs, r.DeclarationTargetSelectorCandidateRefs) ||
+			l.DeclarationProspectiveTargetRef != r.DeclarationProspectiveTargetRef ||
 			l.RequireTargetGrounding != r.RequireTargetGrounding || l.RequireAssessment != r.RequireAssessment ||
 			!sameRuntimeOwnerFactRequirements(l.RequiredOwnerFacts, r.RequiredOwnerFacts) ||
 			!SameRuntimeOwnerFactConvergences(l.OwnerFactConvergences, r.OwnerFactConvergences) ||
@@ -269,6 +297,8 @@ func sameRuntimeSemanticOwnerFactAcquisition(left, right *RuntimeSemanticOwnerFa
 	}
 	l, r := left.Normalized(), right.Normalized()
 	return l.Requirement == r.Requirement &&
+		l.ProspectiveSatisfactionContractRef == r.ProspectiveSatisfactionContractRef &&
+		l.ProspectiveTargetRef == r.ProspectiveTargetRef &&
 		l.DeclarationTargetSelectorRef == r.DeclarationTargetSelectorRef &&
 		l.DeclarationTargetSelectorOwnerRef == r.DeclarationTargetSelectorOwnerRef &&
 		l.DeclarationTargetSelectorSubjectRef == r.DeclarationTargetSelectorSubjectRef &&
@@ -296,6 +326,7 @@ func runtimeSemanticProofObligationSourceFocus(o RuntimeSemanticProofObligation)
 		TargetSelectorOwnerRef:      o.DeclarationTargetSelectorOwnerRef,
 		TargetSelectorSubjectRef:    o.DeclarationTargetSelectorSubjectRef,
 		TargetSelectorCandidateRefs: append([]string(nil), o.DeclarationTargetSelectorCandidateRefs...),
+		ProspectiveTargetRef:        o.DeclarationProspectiveTargetRef,
 		RequireTargetGrounding:      o.RequireTargetGrounding,
 		RequireAssessment:           o.RequireAssessment,
 		RequiredOwnerFacts:          append([]RuntimeOwnerFactRequirement(nil), o.RequiredOwnerFacts...),
@@ -316,6 +347,7 @@ func writeRuntimeSemanticProofObligationsHash(h hashStringWriter, values []Runti
 		writeHashString(h, value.DeclarationTargetSelectorOwnerRef)
 		writeHashString(h, value.DeclarationTargetSelectorSubjectRef)
 		writeHashStrings(h, value.DeclarationTargetSelectorCandidateRefs)
+		writeHashString(h, value.DeclarationProspectiveTargetRef)
 		writeHashString(h, strconv.FormatBool(value.RequireTargetGrounding))
 		writeHashString(h, strconv.FormatBool(value.RequireAssessment))
 		for _, requirement := range value.RequiredOwnerFacts {
@@ -327,6 +359,7 @@ func writeRuntimeSemanticProofObligationsHash(h hashStringWriter, values []Runti
 			convergence = convergence.Normalized()
 			writeHashString(h, RuntimeOwnerFactRequirementRef(convergence.Requirement))
 			writeHashString(h, strconv.FormatBool(convergence.RequirePreexisting))
+			writeHashString(h, convergence.ProspectiveSatisfactionContractRef)
 			writeHashString(h, convergence.MissingTrigger)
 			writeHashString(h, convergence.AcquisitionOwnerModuleID)
 			writeHashString(h, convergence.AcquisitionOperationKind)
@@ -349,6 +382,8 @@ func writeRuntimeSemanticProofObligationsHash(h hashStringWriter, values []Runti
 		}
 		acquisition := value.OwnerFactAcquisition.Normalized()
 		writeHashString(h, RuntimeOwnerFactRequirementRef(acquisition.Requirement))
+		writeHashString(h, acquisition.ProspectiveSatisfactionContractRef)
+		writeHashString(h, acquisition.ProspectiveTargetRef)
 		writeHashString(h, acquisition.DeclarationTargetSelectorRef)
 		writeHashString(h, acquisition.DeclarationTargetSelectorOwnerRef)
 		writeHashString(h, acquisition.DeclarationTargetSelectorSubjectRef)
@@ -394,6 +429,7 @@ func compileRuntimeSemanticProofObligations(sourceFocuses []RuntimeDefinitionFoc
 			DeclarationTargetSelectorOwnerRef:      source.TargetSelectorOwnerRef,
 			DeclarationTargetSelectorSubjectRef:    source.TargetSelectorSubjectRef,
 			DeclarationTargetSelectorCandidateRefs: append([]string(nil), source.TargetSelectorCandidateRefs...),
+			DeclarationProspectiveTargetRef:        source.ProspectiveTargetRef,
 			RequireTargetGrounding:                 source.RequireTargetGrounding,
 			RequireAssessment:                      source.RequireAssessment,
 			RequiredOwnerFacts:                     append([]RuntimeOwnerFactRequirement(nil), source.RequiredOwnerFacts...),
@@ -429,8 +465,14 @@ func compileRuntimeSemanticProofObligations(sourceFocuses []RuntimeDefinitionFoc
 			if convergence.AcquisitionTargetPolicy != RuntimeOperationTargetPolicyProspectiveOwnerTarget {
 				constraints = nil
 			}
+			prospectiveTargetRef := ""
+			if convergence.AcquisitionTargetPolicy == RuntimeOperationTargetPolicyProspectiveOwnerTarget {
+				prospectiveTargetRef = source.ProspectiveTargetRef
+			}
 			obligation.OwnerFactAcquisition = &RuntimeSemanticOwnerFactAcquisition{
 				Requirement:                         convergence.Requirement,
+				ProspectiveSatisfactionContractRef:  convergence.ProspectiveSatisfactionContractRef,
+				ProspectiveTargetRef:                prospectiveTargetRef,
 				DeclarationTargetSelectorRef:        convergence.TargetSelectorRef,
 				DeclarationTargetSelectorOwnerRef:   convergence.TargetSelectorOwnerRef,
 				DeclarationTargetSelectorSubjectRef: convergence.TargetSelectorSubjectRef,

@@ -4,7 +4,7 @@ Status: normative
 
 Type: verification-contract
 
-Last Verified: 2026-08-23
+Last Verified: 2026-08-25
 
 ## Scope
 
@@ -73,7 +73,7 @@ tested revision/config.
 | resume | bare text or `/run resume` requests current Run continuation without context patch |
 | restart | `/run restart` sends workspace intent; UI does not choose successor |
 | admission | accepted/rejected只来自shared owner-outcome classifier；exact outcome/admissionReason/diagnostic不丢失，409不触发client-side重判 |
-| governance | active blocker controls prompt; resolution clears prompt and waits for owner facts |
+| governance | active blocker controls prompt；resolution response 只推进 UI-private delivery latch，canonical blocker/prompt 保留到 matching owner projection readback，且不额外 Resume |
 | definition clarification | static ticket只接受corrected candidate；Runtime ticket只引导revise-and-restart，零one-of confirm、generic answer、Resume或client-built replacement binding |
 | recoverable wait | status shows typed reason/condition/deadline/budget; no Decision prompt、auto-Resume、force retry or local countdown authority |
 | coverage | requirement/CWI三轴保持独立；partial/indeterminate/stale evidence不显示为完成 |

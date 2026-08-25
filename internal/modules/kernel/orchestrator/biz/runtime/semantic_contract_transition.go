@@ -76,24 +76,42 @@ func semanticCatalogRefreshMatches(ledger runtimecontract.RuntimeSemanticPlannin
 
 func prepareSemanticCatalogRefresh(facts runtimecontract.RuntimeFacts, ledger runtimecontract.RuntimeSemanticPlanningLedger, feasibilityBatchID string, refreshGeneration int) (runtimecontract.RuntimeFacts, runtimecontract.RuntimePrerequisiteInvalidationRecord, error) {
 	gapFact, found := refreshableRuntimeSemanticFeasibility(ledger.Feasibilities)
-	if !found || gapFact.OriginalDiagnostic == nil {
+	if !found {
 		return runtimecontract.RuntimeFacts{}, runtimecontract.RuntimePrerequisiteInvalidationRecord{}, fmt.Errorf("%w: semantic feasibility batch has no refreshable owner fact", common.ErrConflict)
 	}
-	catalog, found := runtimeSemanticCatalogForOwner(*ledger.Manifest, gapFact.OwnerModuleID)
-	if !found || catalog.SnapshotID != gapFact.CatalogSnapshotID {
-		return runtimecontract.RuntimeFacts{}, runtimecontract.RuntimePrerequisiteInvalidationRecord{}, fmt.Errorf("%w: semantic feasibility catalog identity is stale", common.ErrConflict)
+	var stale runtimecontract.RuntimePrerequisiteStale
+	if prospective := gapFact.OwnerFactProspectiveSatisfactionObservation; prospective != nil && prospective.Stale != nil {
+		catalog, catalogFound := runtimeSemanticDependencyCatalogForOwner(*ledger.Manifest, prospective.Stale.OwnerModuleID)
+		if !catalogFound || catalog.SnapshotID == "" || catalog.ObservedRevision != prospective.Stale.ExpectedRevision {
+			return runtimecontract.RuntimeFacts{}, runtimecontract.RuntimePrerequisiteInvalidationRecord{}, fmt.Errorf("%w: prospective satisfaction dependency catalog identity is stale", common.ErrConflict)
+		}
+		observation, observationFound := semanticCatalogPrerequisiteObservation(facts, catalog, prospective.Stale.ObservationID)
+		if !observationFound || observation.PrerequisiteID != prospective.Stale.PrerequisiteID {
+			return runtimecontract.RuntimeFacts{}, runtimecontract.RuntimePrerequisiteInvalidationRecord{}, fmt.Errorf("%w: prospective satisfaction dependency observation is not current", common.ErrConflict)
+		}
+		stale = prospective.Stale.Normalized()
+		if err := stale.Validate(); err != nil {
+			return runtimecontract.RuntimeFacts{}, runtimecontract.RuntimePrerequisiteInvalidationRecord{}, err
+		}
+	} else {
+		if gapFact.OriginalDiagnostic == nil || gapFact.Status != runtimecontract.RuntimeSemanticFeasibilityStale {
+			return runtimecontract.RuntimeFacts{}, runtimecontract.RuntimePrerequisiteInvalidationRecord{}, fmt.Errorf("%w: semantic catalog refresh requires a stale owner revision", common.ErrConflict)
+		}
+		catalog, catalogFound := runtimeSemanticCatalogForOwner(*ledger.Manifest, gapFact.OwnerModuleID)
+		if !catalogFound || catalog.SnapshotID != gapFact.CatalogSnapshotID {
+			return runtimecontract.RuntimeFacts{}, runtimecontract.RuntimePrerequisiteInvalidationRecord{}, fmt.Errorf("%w: semantic feasibility catalog identity is stale", common.ErrConflict)
+		}
+		observation, observationFound := semanticCatalogPrerequisiteObservation(facts, catalog, gapFact.CatalogObservationID)
+		if !observationFound {
+			return runtimecontract.RuntimeFacts{}, runtimecontract.RuntimePrerequisiteInvalidationRecord{}, fmt.Errorf("%w: semantic catalog prerequisite observation is not current", common.ErrConflict)
+		}
+		var staleErr error
+		stale, staleErr = runtimeSemanticCatalogStale(observation, *gapFact.OriginalDiagnostic)
+		if staleErr != nil {
+			return runtimecontract.RuntimeFacts{}, runtimecontract.RuntimePrerequisiteInvalidationRecord{}, staleErr
+		}
 	}
-	observation, found := semanticCatalogPrerequisiteObservation(facts, catalog, gapFact.CatalogObservationID)
-	if !found {
-		return runtimecontract.RuntimeFacts{}, runtimecontract.RuntimePrerequisiteInvalidationRecord{}, fmt.Errorf("%w: semantic catalog prerequisite observation is not current", common.ErrConflict)
-	}
-	if gapFact.Status != runtimecontract.RuntimeSemanticFeasibilityStale {
-		return runtimecontract.RuntimeFacts{}, runtimecontract.RuntimePrerequisiteInvalidationRecord{}, fmt.Errorf("%w: semantic catalog refresh requires a stale owner revision", common.ErrConflict)
-	}
-	stale, err := runtimeSemanticCatalogStale(observation, *gapFact.OriginalDiagnostic)
-	if err != nil {
-		return runtimecontract.RuntimeFacts{}, runtimecontract.RuntimePrerequisiteInvalidationRecord{}, err
-	}
+	var err error
 	facts, prerequisiteIDs, observationIDs, dependencies, err := invalidatePrerequisiteObservationsForStale(facts, stale)
 	if err != nil {
 		return runtimecontract.RuntimeFacts{}, runtimecontract.RuntimePrerequisiteInvalidationRecord{}, err
@@ -221,6 +239,52 @@ func (c *planningTransactionComponent) sealSemanticContract(ctx context.Context,
 		return RuntimeAggregate{}, fmt.Errorf("%w: runtime semantic seal scope mismatch", common.ErrConflict)
 	}
 	ledger := aggregate.SemanticPlanning.Clone()
+	if ledger.Manifest != nil {
+		gaps, current := semanticPlanningCatalogsCurrent(aggregate, *ledger.Manifest)
+		if current {
+			for _, feasibility := range ledger.Feasibilities {
+				gaps = append(gaps, SemanticProspectiveFeasibilityFreshnessGaps(aggregate, *ledger.Manifest, feasibility)...)
+			}
+			current = len(gaps) == 0
+		}
+		if current && ledger.Document != nil {
+			for _, feasibility := range ledger.Feasibilities {
+				if feasibility.OwnerFactProspectiveSatisfactionObservation == nil {
+					continue
+				}
+				proposal, found := runtimecontract.RuntimeSemanticProofProposalForHash(*ledger.Document, feasibility.ProposalHash)
+				if !found {
+					return RuntimeAggregate{}, fmt.Errorf("%w: prospective semantic feasibility proposal is absent at seal", common.ErrConflict)
+				}
+				batchID := feasibility.OwnerFactProspectiveSatisfactionObservation.FeasibilityBatchID
+				if err := validateRuntimeSemanticProspectiveObservationRequest(aggregate, *ledger.Manifest, proposal, batchID, feasibility); err != nil {
+					return RuntimeAggregate{}, err
+				}
+			}
+		}
+		if !current {
+			if aggregate.ActiveDispatch != nil {
+				return RuntimeAggregate{}, fmt.Errorf("%w: stale semantic contract cannot retire an active dispatch", common.ErrConflict)
+			}
+			expectedRevision := aggregate.StateRevision
+			if err := retireSemanticPlanningGeneration(&aggregate, runtimecontract.RuntimeSemanticPlanningRetirementResourceInvalidated, gaps); err != nil {
+				return RuntimeAggregate{}, err
+			}
+			facts, decision, reduceErr := ReduceRuntimeStateWithDirective(aggregate.Facts, nil, aggregate.CoverageProofLineage)
+			if reduceErr != nil {
+				return RuntimeAggregate{}, reduceErr
+			}
+			aggregate.Facts, aggregate.Decision = facts, decision
+			aggregate.StateRevision++
+			if err := aggregate.Validate(); err != nil {
+				return RuntimeAggregate{}, err
+			}
+			if err := c.transitions.Commit(ctx, aggregate, expectedRevision); err != nil {
+				return RuntimeAggregate{}, err
+			}
+			return aggregate, nil
+		}
+	}
 	if ledger.Phase == runtimecontract.RuntimeSemanticPlanningSealed {
 		if aggregate.Facts.ReconciliationContract.BindingSetHash != ledger.SealedBindingSetHash {
 			return RuntimeAggregate{}, fmt.Errorf("%w: sealed semantic ledger and reconciliation contract differ", common.ErrConflict)

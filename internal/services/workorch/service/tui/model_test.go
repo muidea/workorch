@@ -1006,8 +1006,11 @@ func TestModelBlockedWorkspaceInputRefreshesBlockerInsteadOfContinuing(t *testin
 	if len(be.goals) != 0 {
 		t.Fatalf("unexpected goal calls: %v", be.goals)
 	}
-	if m.progress != progressWaitingDecision || m.blockingDecision == nil || m.blockingDecision.ID != "ticket-1" {
-		t.Fatalf("progress/blocker = %s/%+v, want waiting decision ticket-1", m.progress, m.blockingDecision)
+	if m.progress != progressSubmitting || m.blockingDecision == nil || m.blockingDecision.ID != "ticket-1" {
+		t.Fatalf("progress/blocker = %s/%+v, want submitting decision with canonical ticket-1 retained", m.progress, m.blockingDecision)
+	}
+	if technical := m.ensureWorkspaceRuntimeState("ws-1").GovernanceCommand; !technical.CommandInFlight || technical.RefreshPending {
+		t.Fatalf("governance command state = %+v, want command in flight", technical)
 	}
 }
 
@@ -1681,8 +1684,13 @@ func TestModelDecisionAnswerNormalizesReplanIntent(t *testing.T) {
 	if cmd == nil {
 		t.Fatal("expected decision resolve command")
 	}
+	m = asModel(next)
+	technical := m.ensureWorkspaceRuntimeState("ws-1").GovernanceCommand
+	if !technical.CommandInFlight || technical.RefreshPending {
+		t.Fatalf("governance command state = %+v, want command in flight", technical)
+	}
 	msg := cmd()
-	next, _ = next.(*AppModel).Update(msg)
+	next, _ = m.Update(msg)
 	m = asModel(next)
 
 	if len(be.decisions) != 1 {
@@ -1696,8 +1704,12 @@ func TestModelDecisionAnswerNormalizesReplanIntent(t *testing.T) {
 	if answer != "请重新规划当前路径" {
 		t.Fatalf("payload = %+v, want note as answer", req.Payload)
 	}
-	if m.blockingDecision != nil {
-		t.Fatalf("blockingDecision = %+v, want cleared after resolution", m.blockingDecision)
+	if m.blockingDecision == nil || m.blockingDecision.State != "open" || len(m.decisions) != 1 || m.decisions[0].State != "open" || m.canonicalBlockingTicketID != "ticket-1" {
+		t.Fatalf("canonical decision projection changed before readback: blocker=%+v list=%+v id=%q", m.blockingDecision, m.decisions, m.canonicalBlockingTicketID)
+	}
+	technical = m.ensureWorkspaceRuntimeState("ws-1").GovernanceCommand
+	if technical.CommandInFlight || !technical.RefreshPending {
+		t.Fatalf("governance command state = %+v, want projection refresh pending", technical)
 	}
 }
 
@@ -2030,74 +2042,123 @@ func TestModelDecisionReplanUsesCanonicalRuntimeViewTicketOverStaleLocalBlocker(
 	}
 }
 
-func TestModelDecisionReplanUsesServerProjectionEvenAfterOptimisticResolvedMark(t *testing.T) {
+func TestModelDecisionCommandKeepsCanonicalBlockerUntilProjectionReadback(t *testing.T) {
 	be := &decisionRecordingBE{fakeBE: newFake(t)}
 	m := NewAppModel(be, "ws-1", "")
-	next, _ := m.Update(WorkspaceListMsg{Workspaces: []projectioncontract.Workspace{{
-		ID:          "ws-1",
-		Title:       "A",
-		State:       string(common.WorkspaceStateActive),
-		ActiveRunID: "run-1",
-		Projection:  projectioncontract.ProjectionStatus{WorkspaceRevision: 21},
-		ViewModel:   projectioncontract.WorkspaceViewModel{WorkspaceID: "ws-1", PromptMode: workspacePromptModeDecision, WorkspaceRevision: 21},
-	}}})
-	m = asModel(next)
-	m.activeWorkspaceID = "ws-1"
-	m.selectedWorkspaceID = "ws-1"
-	m.activeRunID = "run-1"
-	m.markDecisionResolvedForWorkspace("ws-1", "ticket-1", "run-1")
-	m.markDecisionResolved("ticket-1", "ws-1", "run-1")
-	m.blockingDecision = nil
-	m.decisions = []projectioncontract.Decision{{ID: "ticket-1", WorkspaceID: "ws-1", RunID: "run-1", State: "open"}}
-	m.applyWorkspaceRuntimeView(projectioncontract.WorkspaceRuntimeView{
-		WorkspaceID:      "ws-1",
-		ActiveRunID:      "run-1",
-		RunState:         string(common.RunStateBlockedOnDecision),
-		Revision:         projectioncontract.WorkspaceRefreshRevision{WorkspaceRevision: 21},
-		BlockingDecision: &m.decisions[0],
-	}, false)
+	projectDecisionBlocker(&m, "ws-1", "run-1", "ticket-1")
 	m.setInput("/decision answer 请重新规划")
 
 	next, cmd := m.submitInput()
 	if cmd == nil {
 		t.Fatal("expected decision resolve command")
 	}
-	_ = next
-	_ = cmd()
+	m = asModel(next)
+	if m.blockingDecision == nil || m.blockingDecision.State != "open" || m.decisions[0].State != "open" || m.canonicalBlockingTicketID != "ticket-1" {
+		t.Fatalf("command submission mutated canonical decision projection: blocker=%+v list=%+v id=%q", m.blockingDecision, m.decisions, m.canonicalBlockingTicketID)
+	}
+	m.setInput("/decision answer duplicate")
+	duplicateNext, duplicateCmd := m.submitInput()
+	m = asModel(duplicateNext)
+	if duplicateCmd != nil || len(be.decisions) != 0 {
+		t.Fatalf("duplicate command escaped technical latch: cmd=%v calls=%d", duplicateCmd != nil, len(be.decisions))
+	}
+
+	msg := cmd()
+	next, _ = m.Update(msg)
+	m = asModel(next)
 	if len(be.decisions) != 1 {
 		t.Fatalf("resolved decisions = %d, want one", len(be.decisions))
 	}
-	req := be.decisions[0]
-	if req.WorkspaceID != "ws-1" || req.TicketID != "ticket-1" || req.ResolutionType != backend.DecisionResolutionTypeReplan {
-		t.Fatalf("decision request = %+v, want server-projected ticket despite optimistic resolved mark", req)
+	if m.blockingDecision == nil || m.blockingDecision.State != "open" || m.decisions[0].State != "open" || m.canonicalBlockingTicketID != "ticket-1" {
+		t.Fatalf("owner response mutated canonical decision projection before readback: blocker=%+v list=%+v id=%q", m.blockingDecision, m.decisions, m.canonicalBlockingTicketID)
+	}
+	technical := m.ensureWorkspaceRuntimeState("ws-1").GovernanceCommand
+	if technical.CommandInFlight || !technical.RefreshPending {
+		t.Fatalf("governance command state = %+v, want refresh pending", technical)
+	}
+	m.applyWorkspaceRuntimeView(projectioncontract.WorkspaceRuntimeView{
+		WorkspaceID: "ws-1",
+		ActiveRunID: "run-1",
+		RunState:    string(common.RunStateActive),
+		Revision:    projectioncontract.WorkspaceRefreshRevision{WorkspaceRevision: 2, RuntimeStateRevision: 2},
+	}, false)
+	if m.blockingDecision != nil || m.canonicalBlockingTicketID != "" {
+		t.Fatalf("canonical decision blocker survived authoritative readback: blocker=%+v id=%q", m.blockingDecision, m.canonicalBlockingTicketID)
+	}
+	if technical = m.ensureWorkspaceRuntimeState("ws-1").GovernanceCommand; technical.pending() {
+		t.Fatalf("governance technical state survived authoritative readback: %+v", technical)
 	}
 }
 
-func TestModelResolvedMarkersAreScopedAcrossDuplicateIDs(t *testing.T) {
-	m := NewAppModel(newFake(t), "ws-b", "")
-	m.workspaces = []projectioncontract.Workspace{
-		{ID: "ws-a", State: string(common.WorkspaceStateActive), ActiveRunID: "run-a"},
-		{ID: "ws-b", State: string(common.WorkspaceStateActive), ActiveRunID: "run-b"},
-	}
-	m.activeWorkspaceID = "ws-b"
-	m.activeRunID = "run-b"
-	m.decisions = []projectioncontract.Decision{
-		{ID: "ticket-shared", WorkspaceID: "ws-a", RunID: "run-a", State: "open"},
-		{ID: "ticket-shared", WorkspaceID: "ws-b", RunID: "run-b", State: "open"},
-	}
-	m.approvals = []projectioncontract.Approval{
-		{ID: "approval-shared", WorkspaceID: "ws-a", RunID: "run-a", State: "pending"},
-		{ID: "approval-shared", WorkspaceID: "ws-b", RunID: "run-b", State: "pending"},
-	}
+func TestModelApprovalCommandKeepsCanonicalBlockerUntilProjectionReadback(t *testing.T) {
+	approval := &recordingTUIApprovalBackend{}
+	be := tuiResolutionBackend{fakeBE: newFake(t), decision: &recordingTUIDecisionBackend{}, approval: approval}
+	m := NewAppModel(be, "ws-1", "")
+	projectApprovalBlocker(&m, "ws-1", "run-1", "approval-1")
+	m.setInput("/approval approve")
 
-	m.markDecisionResolved("ticket-shared", "ws-b", "run-b")
-	m.markApprovalResolved("approval-shared", "ws-b", "run-b")
-
-	if m.decisions[0].State != "open" || m.decisions[1].State != "resolved" {
-		t.Fatalf("decision states = %+v, want only ws-b resolved", m.decisions)
+	next, cmd := m.submitInput()
+	if cmd == nil {
+		t.Fatal("expected approval command")
 	}
-	if m.approvals[0].State != "pending" || m.approvals[1].State != "resolved" {
-		t.Fatalf("approval states = %+v, want only ws-b resolved", m.approvals)
+	m = asModel(next)
+	if m.blockingApproval == nil || m.blockingApproval.State != "pending" || m.approvals[0].State != "pending" || m.canonicalBlockingApprovalID != "approval-1" {
+		t.Fatalf("command submission mutated canonical approval projection: blocker=%+v list=%+v id=%q", m.blockingApproval, m.approvals, m.canonicalBlockingApprovalID)
+	}
+	msg := cmd()
+	next, _ = m.Update(msg)
+	m = asModel(next)
+	if len(approval.approvals) != 1 {
+		t.Fatalf("approval calls = %d, want one", len(approval.approvals))
+	}
+	if m.blockingApproval == nil || m.blockingApproval.State != "pending" || m.approvals[0].State != "pending" || m.canonicalBlockingApprovalID != "approval-1" {
+		t.Fatalf("owner response mutated canonical approval projection before readback: blocker=%+v list=%+v id=%q", m.blockingApproval, m.approvals, m.canonicalBlockingApprovalID)
+	}
+	technical := m.ensureWorkspaceRuntimeState("ws-1").GovernanceCommand
+	if technical.CommandInFlight || !technical.RefreshPending {
+		t.Fatalf("governance command state = %+v, want refresh pending", technical)
+	}
+	m.applyWorkspaceRuntimeView(projectioncontract.WorkspaceRuntimeView{
+		WorkspaceID: "ws-1",
+		ActiveRunID: "run-1",
+		RunState:    string(common.RunStateActive),
+		Revision:    projectioncontract.WorkspaceRefreshRevision{WorkspaceRevision: 2, RuntimeStateRevision: 2},
+	}, false)
+	if m.blockingApproval != nil || m.canonicalBlockingApprovalID != "" {
+		t.Fatalf("canonical approval blocker survived authoritative readback: blocker=%+v id=%q", m.blockingApproval, m.canonicalBlockingApprovalID)
+	}
+	if technical = m.ensureWorkspaceRuntimeState("ws-1").GovernanceCommand; technical.pending() {
+		t.Fatalf("governance technical state survived authoritative readback: %+v", technical)
+	}
+}
+
+func TestModelApprovalCommandErrorReleasesTechnicalLatchWithoutChangingBlocker(t *testing.T) {
+	be := &conflictApprovalBE{fakeBE: newFake(t), runState: common.RunStateBlockedOnApproval}
+	m := NewAppModel(be, "ws-1", "")
+	projectApprovalBlocker(&m, "ws-1", "run-1", "approval-1")
+	m.setInput("/approval approve")
+
+	next, cmd := m.submitInput()
+	if cmd == nil {
+		t.Fatal("expected approval command")
+	}
+	m = asModel(next)
+	next, _ = m.Update(cmd())
+	m = asModel(next)
+
+	if technical := m.ensureWorkspaceRuntimeState("ws-1").GovernanceCommand; technical.pending() {
+		t.Fatalf("failed command retained technical latch: %+v", technical)
+	}
+	if m.blockingApproval == nil || m.blockingApproval.State != "pending" || m.approvals[0].State != "pending" || m.canonicalBlockingApprovalID != "approval-1" {
+		t.Fatalf("failed command changed canonical blocker: blocker=%+v list=%+v id=%q", m.blockingApproval, m.approvals, m.canonicalBlockingApprovalID)
+	}
+	if !errors.Is(m.lastError, common.ErrConflict) || m.progress != progressWaitingApproval {
+		t.Fatalf("failed command presentation = error:%v progress:%s", m.lastError, m.progress)
+	}
+	m.setInput("/approval approve")
+	_, retry := m.submitInput()
+	if retry == nil {
+		t.Fatal("failed command did not release latch for retry")
 	}
 }
 
@@ -2767,6 +2828,11 @@ func TestModelDecisionResolvedRefreshesWorkspaceState(t *testing.T) {
 	}}
 	m.decisions = []projectioncontract.Decision{{ID: "ticket-1", WorkspaceID: "ws-1", RunID: "run-1", State: "open"}}
 	m.blockingDecision = &m.decisions[0]
+	m.activeRunID = "run-1"
+	m.canonicalBlockingTicketID = "ticket-1"
+	if !m.beginGovernanceCommand(governanceCommandDecision, "ws-1", "run-1", "ticket-1") {
+		t.Fatal("expected decision command technical state")
+	}
 	m.input = "补充上下文"
 	m.inputCursor = len([]rune(m.input))
 
@@ -2781,8 +2847,8 @@ func TestModelDecisionResolvedRefreshesWorkspaceState(t *testing.T) {
 	if cmd == nil || !m.workspaceListRefreshInFlight {
 		t.Fatalf("expected workspace refresh after decision resolve: cmd=%v inFlight=%v", cmd != nil, m.workspaceListRefreshInFlight)
 	}
-	if m.blockingDecision != nil || m.input != "" || m.activeRunID != "run-1" {
-		t.Fatalf("state not cleared/refreshed: blocker=%+v input=%q activeRun=%q", m.blockingDecision, m.input, m.activeRunID)
+	if m.blockingDecision == nil || m.blockingDecision.State != "open" || m.input != "" || m.activeRunID != "run-1" || m.canonicalBlockingTicketID != "ticket-1" {
+		t.Fatalf("canonical state changed before projection readback: blocker=%+v input=%q activeRun=%q id=%q", m.blockingDecision, m.input, m.activeRunID, m.canonicalBlockingTicketID)
 	}
 	if ws := findWorkspace(m.workspaces, "ws-1"); ws == nil || ws.State != string(common.WorkspaceStateActive) {
 		t.Fatalf("workspace overview after resolve = %+v, want unchanged until server projection updates", ws)
@@ -2793,8 +2859,11 @@ func TestModelDecisionResolvedRefreshesWorkspaceState(t *testing.T) {
 	if !strings.Contains(view, "ws-1 decision >") || strings.Contains(view, "ws-1 submitting >") {
 		t.Fatalf("prompt should follow server waiting projection until refresh converges:\n%s", view)
 	}
-	if m.decisions[0].State != "resolved" {
-		t.Fatalf("decision state = %q, want resolved", m.decisions[0].State)
+	if m.decisions[0].State != "open" {
+		t.Fatalf("decision state = %q, want unchanged owner projection", m.decisions[0].State)
+	}
+	if technical := m.ensureWorkspaceRuntimeState("ws-1").GovernanceCommand; technical.CommandInFlight || !technical.RefreshPending {
+		t.Fatalf("governance command state = %+v, want readback pending", technical)
 	}
 	if _, ok := cmd().(tea.BatchMsg); !ok {
 		t.Fatalf("refresh command should batch workspace context and list refresh")
@@ -2803,8 +2872,10 @@ func TestModelDecisionResolvedRefreshesWorkspaceState(t *testing.T) {
 
 func TestModelApprovalResolvedRefreshesWorkspaceState(t *testing.T) {
 	m := NewAppModel(newFake(t), "ws-1", "")
-	m.approvals = []projectioncontract.Approval{{ID: "approval-1", WorkspaceID: "ws-1", RunID: "run-1", State: "pending"}}
-	m.blockingApproval = &m.approvals[0]
+	projectApprovalBlocker(&m, "ws-1", "run-1", "approval-1")
+	if !m.beginGovernanceCommand(governanceCommandApproval, "ws-1", "run-1", "approval-1") {
+		t.Fatal("expected approval command technical state")
+	}
 	m.input = "同意"
 	m.inputCursor = len([]rune(m.input))
 
@@ -2819,14 +2890,17 @@ func TestModelApprovalResolvedRefreshesWorkspaceState(t *testing.T) {
 	if cmd == nil || !m.workspaceListRefreshInFlight {
 		t.Fatalf("expected workspace refresh after approval resolve: cmd=%v inFlight=%v", cmd != nil, m.workspaceListRefreshInFlight)
 	}
-	if m.blockingApproval != nil || m.input != "" || m.activeRunID != "run-1" {
-		t.Fatalf("state not cleared/refreshed: blocker=%+v input=%q activeRun=%q", m.blockingApproval, m.input, m.activeRunID)
+	if m.blockingApproval == nil || m.blockingApproval.State != "pending" || m.input != "" || m.activeRunID != "run-1" || m.canonicalBlockingApprovalID != "approval-1" {
+		t.Fatalf("canonical state changed before projection readback: blocker=%+v input=%q activeRun=%q id=%q", m.blockingApproval, m.input, m.activeRunID, m.canonicalBlockingApprovalID)
 	}
-	if m.progress != progressSubmitting || !strings.Contains(m.progressText, "waiting for server continuation") {
-		t.Fatalf("approval resolve progress = %s/%q, want server continuation wait", m.progress, m.progressText)
+	if m.progress != progressSubmitting || !strings.Contains(m.progressText, "projection readback") {
+		t.Fatalf("approval resolve progress = %s/%q, want projection readback wait", m.progress, m.progressText)
 	}
-	if m.approvals[0].State != "resolved" {
-		t.Fatalf("approval state = %q, want resolved", m.approvals[0].State)
+	if m.approvals[0].State != "pending" {
+		t.Fatalf("approval state = %q, want unchanged owner projection", m.approvals[0].State)
+	}
+	if technical := m.ensureWorkspaceRuntimeState("ws-1").GovernanceCommand; technical.CommandInFlight || !technical.RefreshPending {
+		t.Fatalf("governance command state = %+v, want readback pending", technical)
 	}
 	batch, ok := cmd().(tea.BatchMsg)
 	if !ok {
@@ -5103,8 +5177,8 @@ func TestModelDecisionResolvedDoesNotHideServerOpenProjection(t *testing.T) {
 		State:       "resolved",
 	}})
 	m = asModel(next)
-	if m.blockingDecision != nil || !strings.Contains(stripANSI(m.renderInput(120)), "ws-a decision >") {
-		t.Fatalf("resolved prompt/blocker = %q/%+v, want server-projected decision prompt", stripANSI(m.renderInput(120)), m.blockingDecision)
+	if m.blockingDecision == nil || m.blockingDecision.State != "open" || !strings.Contains(stripANSI(m.renderInput(120)), "ws-a decision >") {
+		t.Fatalf("command response prompt/blocker = %q/%+v, want unchanged server-projected decision", stripANSI(m.renderInput(120)), m.blockingDecision)
 	}
 
 	next, _ = m.Update(WorkspaceListMsg{Workspaces: []projectioncontract.Workspace{{

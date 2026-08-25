@@ -481,6 +481,7 @@ func TestRuntimeSemanticProviderProjectionOmitsNonReadyValidationAndOwnerPrivate
 }
 
 func TestRuntimeSemanticProviderProjectsDefinitionLineageAndExactAcquisitionSelector(t *testing.T) {
+	const prospectiveTarget = "validation-readiness.sh"
 	request := runtimeSemanticProviderTestRequest(t)
 	baseline, err := runtimeProviderRequest(request)
 	if err != nil {
@@ -501,9 +502,10 @@ func TestRuntimeSemanticProviderProjectsDefinitionLineageAndExactAcquisitionSele
 	convergence := runtimecontract.RuntimeOwnerFactConvergence{
 		Requirement: requirement, MissingTrigger: runtimecontract.RuntimeOwnerFactMissingTrigger,
 		AcquisitionOwnerModuleID: runtimecontract.RuntimeModuleFile, AcquisitionOperationKind: runtimecontract.StepKindFileWrite,
-		AcquisitionTargetPolicy:      runtimecontract.RuntimeOperationTargetPolicyProspectiveOwnerTarget,
-		AcquisitionTargetSelectorRef: "workspace-relative-new-file-target",
-		TargetSelectorRef:            "file/workspace_deliverable", TargetSelectorOwnerRef: "software-dev", TargetSelectorSubjectRef: "validation_preparation",
+		AcquisitionTargetPolicy:            runtimecontract.RuntimeOperationTargetPolicyProspectiveOwnerTarget,
+		AcquisitionTargetSelectorRef:       "workspace-relative-new-file-target",
+		ProspectiveSatisfactionContractRef: "shell/selectable-validation-surface/prospective-workspace-manifest/v1",
+		TargetSelectorRef:                  "file/workspace_deliverable", TargetSelectorOwnerRef: "software-dev", TargetSelectorSubjectRef: "validation_preparation",
 		ReobserveOwnerModuleID: runtimecontract.RuntimeModuleShell, ReobserveFactKind: runtimecontract.RuntimeOwnerFactSelectableValidationSurface,
 		MaxAcquisitionAttempts: 1,
 	}
@@ -511,18 +513,40 @@ func TestRuntimeSemanticProviderProjectsDefinitionLineageAndExactAcquisitionSele
 	request.SemanticManifest.ProofObligations = []runtimecontract.RuntimeSemanticProofObligation{{
 		CoverageWorkItemID: "cwi-001", RequiredEvidenceKinds: []string{runtimecontract.EvidenceKindValidation},
 		DeclarationTargetSelectorRef: "file/workspace_deliverable", DeclarationTargetSelectorOwnerRef: "software-dev", DeclarationTargetSelectorSubjectRef: "validation_preparation",
-		RequiredOwnerFacts: []runtimecontract.RuntimeOwnerFactRequirement{requirement}, OwnerFactConvergences: []runtimecontract.RuntimeOwnerFactConvergence{convergence},
+		DeclarationProspectiveTargetRef: prospectiveTarget,
+		RequireTargetGrounding:          true,
+		RequiredOwnerFacts:              []runtimecontract.RuntimeOwnerFactRequirement{requirement}, OwnerFactConvergences: []runtimecontract.RuntimeOwnerFactConvergence{convergence},
 		OwnerFactAcquisition: &runtimecontract.RuntimeSemanticOwnerFactAcquisition{
 			Requirement:                  requirement,
+			ProspectiveTargetRef:         prospectiveTarget,
 			DeclarationTargetSelectorRef: "file/workspace_deliverable", DeclarationTargetSelectorOwnerRef: "software-dev", DeclarationTargetSelectorSubjectRef: "validation_preparation",
 			AcquisitionOwnerModuleID: runtimecontract.RuntimeModuleFile, AcquisitionOperationKind: runtimecontract.StepKindFileWrite,
 			AcquisitionTargetPolicy:      runtimecontract.RuntimeOperationTargetPolicyProspectiveOwnerTarget,
 			AcquisitionTargetSelectorRef: "workspace-relative-new-file-target", AcquisitionConstraintRefs: []string{"workspace-relative-path"},
-			OwnerCatalogSnapshotID: catalog.SnapshotID, OwnerCatalogObservedRevision: catalog.ObservedRevision,
+			ProspectiveSatisfactionContractRef: "shell/selectable-validation-surface/prospective-workspace-manifest/v1",
+			OwnerCatalogSnapshotID:             catalog.SnapshotID, OwnerCatalogObservedRevision: catalog.ObservedRevision,
 			ReobserveOwnerModuleID: runtimecontract.RuntimeModuleShell, ReobserveFactKind: runtimecontract.RuntimeOwnerFactSelectableValidationSurface,
 			MaxAcquisitionAttempts: 1,
 		},
 	}}
+	dependencyCatalog := runtimecontract.RuntimeOperationAdmissibility{
+		PrerequisiteID: "shell-prospective-dependency", OwnerModuleID: runtimecontract.RuntimeModuleShell,
+		OperationKinds: []string{runtimecontract.RuntimeBlockKindManagedValidationSession},
+		ValidationSurfaces: []runtimecontract.RuntimeValidationSurface{{
+			ID: "go-test-dependency", OwnerModuleID: runtimecontract.RuntimeModuleShell,
+			OperationKind: runtimecontract.RuntimeBlockKindManagedValidationSession,
+			Readiness:     runtimecontract.RuntimeValidationSurfacePrerequisiteRequired, ReadinessReason: "workspace input required",
+			InputSchemaHash: "shell-schema-dependency", PrerequisiteRef: "workspace/validation-input",
+			ProspectiveSatisfactionContractRef: "shell/selectable-validation-surface/prospective-workspace-manifest/v1",
+			CheckRefs:                          []string{"check/go-test-dependency"},
+			ProofApplicability:                 runtimecontract.RuntimeValidationProofDirect,
+			EffectScope:                        runtimecontract.RuntimeEffectEphemeralSession,
+			IdempotencyClass:                   runtimecontract.RuntimeOperationIdempotencyAtMostOnce,
+		}},
+		ObservedRevision: "shell-policy-dependency-v1",
+	}
+	dependencyCatalog.SnapshotID = runtimecontract.StableRuntimeOperationAdmissibilitySnapshotID(dependencyCatalog)
+	request.SemanticManifest.OwnerFactDependencyCatalogs = []runtimecontract.RuntimeOperationAdmissibility{dependencyCatalog}
 	request.SemanticManifest.Hash = runtimecontract.StableRuntimeSemanticPlanManifestHash(request.SemanticManifest)
 	providerRequest, err := runtimeProviderRequest(request)
 	if err != nil {
@@ -547,15 +571,22 @@ func TestRuntimeSemanticProviderProjectsDefinitionLineageAndExactAcquisitionSele
 		t.Fatalf("provider projection conflated current acquisition with terminal validation proof: obligation=%+v acquisition=%+v", obligation, acquisition)
 	}
 	if !strings.Contains(authority, `"declarationTargetSelectorRef":"file/workspace_deliverable"`) ||
-		!strings.Contains(authority, `"acquisitionTargetSelectorRef":"workspace-relative-new-file-target"`) {
+		!strings.Contains(authority, `"acquisitionTargetSelectorRef":"workspace-relative-new-file-target"`) ||
+		!strings.Contains(authority, `"prospectiveSatisfactionContractRef":"shell/selectable-validation-surface/prospective-workspace-manifest/v1"`) ||
+		!strings.Contains(authority, `"declarationProspectiveTargetRef":"validation-readiness.sh"`) ||
+		!strings.Contains(authority, `"prospectiveTargetRef":"validation-readiness.sh"`) {
 		t.Fatalf("provider projection conflated Definition lineage and operation selector: %s", authority)
 	}
-	for _, required := range []string{"exact current acquisition proof", "ownerModuleId=acquisitionOwnerModuleId", `requiredEvidenceKinds=["state_change"]`, "do not return gapKind=undeclared_prerequisite solely", "does not grant terminal validation evidence or coverage credit"} {
+	if strings.Contains(authority, dependencyCatalog.PrerequisiteID) || strings.Contains(providerRequest.Schema, dependencyCatalog.PrerequisiteID) {
+		t.Fatalf("provider projection leaked non-selectable dependency catalog: authority=%s schema=%s", authority, providerRequest.Schema)
+	}
+	for _, required := range []string{"exact current acquisition proof", "ownerModuleId=acquisitionOwnerModuleId", "target.prospectiveTargetRef=prospectiveTargetRef", `requiredEvidenceKinds=["state_change"]`, "do not return gapKind=undeclared_prerequisite solely", "does not grant terminal validation evidence or coverage credit"} {
 		if !strings.Contains(projection.OutputInstruction, required) {
 			t.Fatalf("provider acquisition instruction lost %q: %s", required, projection.OutputInstruction)
 		}
 	}
 	if !strings.Contains(providerRequest.Schema, `"const":"workspace-relative-new-file-target"`) ||
+		!strings.Contains(providerRequest.Schema, `"prospectiveTargetRef":{"const":"validation-readiness.sh"}`) ||
 		strings.Contains(providerRequest.Schema, `"const":"file/workspace_deliverable"`) {
 		t.Fatalf("provider schema did not constrain the exact operation selector: %s", providerRequest.Schema)
 	}

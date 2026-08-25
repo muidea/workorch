@@ -1054,6 +1054,7 @@ func StableRuntimeOperationAdmissibilitySnapshotID(value RuntimeOperationAdmissi
 		writeHashString(h, surface.InputSchemaHash)
 		writeHashString(h, surface.InputBindingRef)
 		writeHashString(h, surface.PrerequisiteRef)
+		writeHashString(h, surface.ProspectiveSatisfactionContractRef)
 		writeHashStrings(h, surface.CheckRefs)
 		writeHashString(h, string(surface.ProofApplicability))
 		writeHashString(h, string(surface.EffectScope))

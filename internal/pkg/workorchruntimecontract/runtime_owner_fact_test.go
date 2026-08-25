@@ -99,7 +99,8 @@ func TestResolveRuntimeOwnerFactAcquisitionUsesOnlySealedMissingFactClosure(t *t
 	}
 	convergence := RuntimeOwnerFactConvergence{
 		Requirement: requirement, MissingTrigger: RuntimeOwnerFactMissingTrigger,
-		AcquisitionOwnerModuleID: RuntimeModuleFile, AcquisitionOperationKind: StepKindFileWrite,
+		ProspectiveSatisfactionContractRef: "shell/managed-validation/workspace-manifest-v1",
+		AcquisitionOwnerModuleID:           RuntimeModuleFile, AcquisitionOperationKind: StepKindFileWrite,
 		AcquisitionTargetPolicy: RuntimeOperationTargetPolicyProspectiveOwnerTarget, AcquisitionTargetSelectorRef: "workspace-relative-new-file-target",
 		TargetSelectorRef: "file/workspace_deliverable", TargetSelectorOwnerRef: "profile/test", TargetSelectorSubjectRef: "validation_preparation",
 		ReobserveOwnerModuleID: RuntimeModuleShell, ReobserveFactKind: RuntimeOwnerFactSelectableValidationSurface,

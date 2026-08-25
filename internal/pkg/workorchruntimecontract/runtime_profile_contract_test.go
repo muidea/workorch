@@ -155,7 +155,8 @@ func TestRuntimeProfileOwnerFactRequirementIsNormalizedBoundedAndCompared(t *tes
 			RequiredOwnerFacts: []RuntimeOwnerFactRequirement{requirement, requirement},
 			OwnerFactConvergences: []RuntimeOwnerFactConvergence{{
 				Requirement: requirement, MissingTrigger: RuntimeOwnerFactMissingTrigger,
-				AcquisitionOwnerModuleID: RuntimeModuleFile, AcquisitionOperationKind: StepKindFileWrite,
+				ProspectiveSatisfactionContractRef: "shell/managed-validation/workspace-manifest-v1",
+				AcquisitionOwnerModuleID:           RuntimeModuleFile, AcquisitionOperationKind: StepKindFileWrite,
 				AcquisitionTargetPolicy: RuntimeOperationTargetPolicyProspectiveOwnerTarget, AcquisitionTargetSelectorRef: "workspace-relative-new-file-target",
 				TargetSelectorRef: "file/workspace_deliverable", TargetSelectorOwnerRef: "software-dev", TargetSelectorSubjectRef: "validation_preparation",
 				ReobserveOwnerModuleID: RuntimeModuleShell, ReobserveFactKind: RuntimeOwnerFactSelectableValidationSurface, MaxAcquisitionAttempts: 1,

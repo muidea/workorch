@@ -4,7 +4,7 @@ Status: normative
 
 Type: core-contract-part
 
-Last Verified: 2026-08-24
+Last Verified: 2026-08-25
 
 ## 规范化候选合同
 
@@ -74,11 +74,50 @@ owner batch/observation set 与 sealed binding lineage hash；这些 identity �
 duplicate event 不增加 revision，scope/seed/request/batch 漂移必须拒绝，任何阶段都不得直接创建 dispatch、coverage、
 Decision 或 Approval。
 
+### Prospective owner-fact composite feasibility
+
+当一个 sealed owner-fact acquisition 使用 `prospective_owner_target` 时，普通“File 可创建该 target”的 observation
+不足以证明 acquisition 后 required owner fact 会成立。pre-seal convergence declaration、semantic proof obligation 和
+provider projection 必须携带同一个非空 `ProspectiveSatisfactionContractRef`；其它 target policy 禁止携带该 ref。
+
+SM-2 对每个 proposal 只接受以下 composite factual chain：
+
+1. acquisition owner（当前为 File）按 current complete workspace manifest、exact File catalog/observation 和 proposal
+   执行无副作用 feasibility，并生成 immutable、base-workspace-tree-revision-bound 的
+   `RuntimeProspectiveWorkspaceManifestDelta`；delta 只描述 hypothetical resulting target refs，不创建目录或文件；
+2. Orchestrator 把该 delta、activation-sealed exact recipe declarations，以及 required owner（当前为 Shell）的 exact
+   dependency catalog/observation交给 required owner 自有 concrete typed pure query；
+3. required owner 独立验证 contract ref、recipe command/ordered args/timeout schema identity、catalog/observation 与 delta
+   lineage，并返回嵌套的 `would_satisfy | would_not_satisfy | typed stale` observation；它不读取 File/workspace、
+   不执行 recipe、不开 session，也不选择 Runtime transition；
+4. Orchestrator 只在同一个 SM-2 private event/CAS 中提交完整 File outer feasibility、delta 与 required-owner nested
+   observation，并在 CAS 和 semantic seal 两个边界重验 manifest/batch/request/delta 以及两组 catalog/observation freshness。
+
+semantic manifest 因此必须把 provider-selectable `OwnerCatalogs` 与 non-selectable
+`OwnerFactDependencyCatalogs` 分开。后者只封存 prospective fact judgment 所依赖的 required-owner catalog snapshot，
+进入 manifest/hash/freshness/CAS/seal，但不得进入 LLM C3 owner catalog、allowed operation/surface、schema enum、correction
+allowed values 或任何 provider choice。LLM 只能提出 manifest 已授权的 acquisition proposal，不能选择 dependency catalog、
+required owner recipe readiness 或 satisfaction outcome。
+
+只有 exact-current `would_satisfy` 可进入 seal-ready feasibility set。required owner 返回的 typed stale 必须保留为 nested
+owner-authored observation，不能伪装成 acquisition owner 的 outer `stale`，也不能直接终态化；SM-2 通过既有
+`semantic_contract_required` owner-private transition消费一次 persisted prerequisite-refresh generation，退休精确相交的
+dependency catalog/observation并重获新 manifest/request。missing dependency catalog/observation 在 probe 前同样先退休
+generation，零 required-owner query。refresh 耗尽才以原始 diagnostic fail-closed。
+
+`would_not_satisfy` 是 proposal 与 required owner fact 的 factual relational rejection，不是 catalog stale、operation
+infeasible、Definition ambiguity 或 governance blocker。Orchestrator 先以 `semantic_feasibility_observed` 持久化完整
+File delta + Shell observation；因 `ProspectiveTargetRef` 已由 activation 精确封存，provider 没有可更换目标或其它同合同
+修正空间，下一次 SM-4 drive 直接收口为统一 `semantic_contract_failed` terminal，并把
+`prospective_owner_fact_unsatisfied` 保留为 typed original reason。该分支不退休有效 catalog，不创建
+correction/request/batch/ticket，不消耗 refresh/acquisition/operation budget；duplicate/restart 不重复 owner query，并在
+semantic seal、operation candidate 与 dispatch 前保持零 effect、零 coverage credit。
+
 每次semantic-plan或operations provider call都必须使用SM-3 persisted request session形成purpose-bound invocation seal；
 seal不是另一份activation authority。对应call、correction、semantic generation和operation consumption必须引用
 [Execution Budget](execution-budget.md)中的exact sub-ledger identity。
 
-`stale | prerequisite_required` 先以 `semantic_feasibility_observed` 单独持久化 owner factual observation。
+普通 owner feasibility 的 `stale | prerequisite_required` 先以 `semantic_feasibility_observed` 单独持久化 owner factual observation。
 只有带有 expected/observed revision 且精确匹配当前 catalog dependency 的 `stale` 事实，才能复用
 `semantic_contract_required` private transition，按 persisted refresh generation 原子退休 matching catalog
 observation、保存完整 gap/diagnostic lineage，并回到 bounded catalog acquisition。`prerequisite_required` 不得被
@@ -94,10 +133,11 @@ correction/focus request 变化不会制造重复 history，而资源回滚重�
 耗尽才以原始 owner diagnostic 进入
 `semantic_contract_failed`。
 
-catalog acquisition 已标记的 validation-surface `prerequisite_required` 不进入上述 feasibility transition：正常
-provider request 根本看不到该 identity，也不会为它创建 semantic attempt 或调用 endpoint。只有已经封存为 ready 的
-surface 在后续发生 catalog 漂移，或接收了不符合 current catalog 的旧/伪造 proposal 时，owner feasibility 才按上述
-规则 fail-closed；任何自动 input acquisition 仍必须先新增 owner-defined typed command/result。
+catalog acquisition 已标记的 validation-surface `prerequisite_required` 不进入普通 provider-selectable catalog 或普通
+operation feasibility transition：正常 provider request 看不到该 identity，也不会为它创建 executable operation 或调用
+endpoint。唯一当前例外是 pre-seal 已声明 `ProspectiveSatisfactionContractRef` 的 owner-fact acquisition；该 surface 只能
+进入 `OwnerFactDependencyCatalogs` 并由上述 concrete typed pure query 判断 hypothetical delta，不成为 LLM choice。
+其它自动 input acquisition 仍必须先新增 owner-defined typed command/result，不能复用该例外或扩大 dependency catalog。
 
 ### 单一 candidate evaluator
 
@@ -136,7 +176,9 @@ semantic shape；它不修改 authority，也不包含 raw provider/decoder/owne
 
 ### 正交候选与 owner 处理结果
 
-provider dependency/governance 在进入 candidate pipeline 前单独处理。进入候选处理后，所有结果只允许归入：
+provider dependency/governance 在进入 candidate pipeline 前单独处理。上述 semantic-plan prospective
+`would_not_satisfy` 是 SM-2 persisted composite factual rejection，已在 operation candidate pipeline 前完成并 deterministic
+terminal，因此不属于下表 `owner_feasibility`，也不放宽普通 operation owner feasibility 的零 correction 规则。进入候选处理后，所有结果只允许归入：
 
 | 结果 | 来源 | 状态机行为 |
 | --- | --- | --- |

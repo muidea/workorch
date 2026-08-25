@@ -4,14 +4,14 @@ Status: normative
 
 Type: core-contract-part
 
-Last Verified: 2026-08-18
+Last Verified: 2026-08-25
 
 ## State-Machine Binding
 
 | Machine | Definition-convergence responsibility | Boundary |
 | --- | --- | --- |
 | SM-1 | seal exact startup-input identity; for a Definition-gap Restart persist ticket-bound `ReplacementIntent` and wait for Decision acknowledgement before administrative delivery | does not select dependency, rank, focus or next action; does not read Decision/Workspace repository or treat clarification as continuation |
-| SM-2 | validate/seal scheduling contract, all-of gate witness, partition selection and ready projection; admit exact-current gap observation; settle/reopen and re-project | does not call provider, execute effects, interpret domain wording or mutate startup input |
+| SM-2 | validate/seal scheduling contract, all-of gate witness, partition selection and ready projection; commit composite prospective owner facts; admit exact-current gap observation; settle/reopen and re-project | does not call provider, execute effects, interpret domain wording or mutate startup input |
 | SM-3 | bounded proof/context/gap/operation documents plus ordinary governance and dedicated clarification sealed dispatch | does not choose the next CWI, write scheduling graph/startup input or directly create a ticket |
 | SM-4 | require complete startup/scheduling/projection facts before drive; idempotently recover clarification wait and delivery | does not rebuild authority from projection/LLM or mix a new Definition into Resume |
 
@@ -30,6 +30,9 @@ admitted activation fact
          -> Decision replacement-resolution acknowledgement
          -> predecessor administrative delivery -> fresh successor
        proof accepted -> capability-owner feasibility
+         -> prospective acquisition: File outer feasibility + immutable hypothetical manifest delta
+           -> Shell dependency catalog/observation-bound pure satisfaction result
+           -> SM-2 exact-current composite CAS + seal gate
          -> SM-2 seals binding/reconciliation
          -> SM-3 operation candidate/dispatch/receipt
          -> SM-2 settles or reopens and re-projects
@@ -37,6 +40,16 @@ admitted activation fact
 
 All aggregate mutation still uses the sole `ApplyInternalEvent -> RuntimeTransitionCoordinator.Commit` boundary. Scheduling,
 ready projection and clarification dispatch are Orchestrator-private facts, not EventHub target-state topics.
+
+For `prospective_owner_target`, the pre-seal declaration's exact `ProspectiveSatisfactionContractRef` is the only authority to
+join the acquisition owner and required owner facts. The semantic manifest keeps required-owner
+`OwnerFactDependencyCatalogs` separate from provider-selectable `OwnerCatalogs`: dependency catalogs participate in hash,
+freshness, CAS and seal, but never appear as LLM-selectable operations/surfaces. File and Shell return only their own factual
+outer/nested observations. Shell typed stale uses the existing bounded catalog-refresh transition; `would_not_satisfy` permits
+no provider correction because the exact target is activation-sealed: it is persisted as the complete composite fact and the
+next drive deterministically closes the common `semantic_contract_failed` terminal while preserving
+`prospective_owner_fact_unsatisfied` as its typed original reason. None of these owner results can directly change SM-2 or either
+capability owner's state.
 
 ## Governance, Resume And Restart
 
@@ -75,7 +88,7 @@ the Definition, and provider diagnostics do not become compiler facts or capabil
 | `workorchruntimecontract` | pure startup/mapping/relation/schedule/gate/partition/gap DTO validation and hashing | EventHub, repository, CAS, one-of terminal evaluator or transition policy |
 | `kernel/orchestrator` | SM-2/3/4 scheduling, ready/witness, bounded documents, clarification dispatch and recovery | domain inference, startup mutation, direct ticket write or second queue owner |
 | `blocks/llm` | startup-bound C1/C5 rendering and factual provider result | ordering/dependency/ticket authority or input rewriting |
-| capability blocks | current readiness, feasibility and receipt facts | choose CWI, graph, rank, partition or target state |
+| capability blocks | current readiness, feasibility and receipt facts; File prospective delta and required-owner pure satisfaction observation | choose CWI, graph, rank, partition, correction or target state; read/mutate a sibling owner |
 | `blocks/run` | opaque aggregate persistence and ticket/startup-bound replacement transaction | decode schedule, choose focus, terminate predecessor before acknowledgement or continue old Run |
 | projection/Web/TUI | typed startup/ticket/rank/context explanation | offer one-of, parse display text into action or drive Runtime |
 

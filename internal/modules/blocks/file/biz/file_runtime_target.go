@@ -347,9 +347,19 @@ func runtimeFileProspectiveTargetAdditionalEntries(workspaceDirectory, prospecti
 	}
 	additional := 0
 	for current := target; current != root; current = filepath.Dir(current) {
-		_, statErr := os.Lstat(current)
+		info, statErr := os.Lstat(current)
 		switch {
 		case statErr == nil:
+			// An admitted create may not traverse even an internal symlink alias:
+			// the sealed prospective ref must name one canonical workspace tree
+			// location. Existing parents must be real directories; otherwise the
+			// later mkdir/write effect cannot implement the admitted topology.
+			if info.Mode()&os.ModeSymlink != 0 {
+				return 0, fmt.Errorf("%w: prospective target %q traverses symbolic link %q", common.ErrInvalidArgument, prospectiveTargetRef, filepath.Base(current))
+			}
+			if current == target || !info.IsDir() {
+				return 0, fmt.Errorf("%w: prospective target %q has an invalid existing path component", common.ErrInvalidArgument, prospectiveTargetRef)
+			}
 			return additional, nil
 		case os.IsNotExist(statErr):
 			additional++

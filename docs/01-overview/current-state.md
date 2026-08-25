@@ -4,7 +4,7 @@ Status: normative
 
 Type: design-baseline
 
-Last Verified: 2026-08-23
+Last Verified: 2026-08-25
 
 ## Purpose
 
@@ -30,6 +30,9 @@ Workspace owner seals admitted startup input
 - capability blocks execute owner-defined typed operations; Result stores already-judged formal outcomes.
 - Eventstream, projection, HTTP/SSE, TUI/Web and historical process records are audit/display only.
 - recovery is idempotent re-drive from the persisted aggregate.
+- `run.replacement` is a Run-owner SM-1 subordinate transaction, not another machine. Administrative termination starts as a
+  Run-private intent; Orchestrator only persists/retries the SM-4 `RuntimeTerminationRecord` delivery handoff, and the final Run
+  lifecycle change occurs only through a Run-private SM-1 event.
 - bounded recoverable runtime wait只在typed recovery condition、trigger/deadline和budget完整时成立；它是SM-2/3/4
   aggregate fact与SM-4 re-drive责任，不新增SM-1 lifecycle state。
 - provider、candidate、semantic proof、operation、repair与recovery消费由各自persisted sub-ledger持有；产品级budget
@@ -53,6 +56,9 @@ this path without a parallel compatibility authority.
 - Definition changes require a newly admitted revision and explicit Restart; Resume stays on the original revision.
 - execution-time implicit one-of、undeclared prerequisite或semantic ambiguity走专用Run-scoped clarification
   command/result；affected focus停止新operation，修正只通过新candidate + explicit Restart进入successor，predecessor不扩图。
+- every prospective owner-fact acquisition seals an exact `ProspectiveSatisfactionContractRef`; Runtime composes the acquisition
+  owner's hypothetical delta with the required owner's non-selectable dependency observation. The dependency catalog never
+  becomes an LLM-selectable operation/surface.
 
 See [Definition Convergence](../00-core/definition-convergence/overview.md) and
 [Activation Flow](../00-core/definition-convergence/activation-flow.md).
@@ -73,12 +79,13 @@ See [Semantic Convergence](../00-core/runtime/semantic-convergence.md) and
 
 | Machine | Sole owner | Scope |
 | --- | --- | --- |
-| SM-1 | `blocks/run` | Run lifecycle, continuation, replacement and administrative termination |
+| SM-1 | `blocks/run` | Run lifecycle, continuation, administrative intent and same-owner subordinate replacement transaction |
 | SM-2 | `kernel/orchestrator` | authority/focus, CWI binding/credit, assessment, repair and terminal |
 | SM-3 | `kernel/orchestrator` | request session, candidate attempts, sealed dispatch and receipt transaction |
 | SM-4 | `kernel/orchestrator` | bounded drive, recovery, singleflight and delivery ledger |
 
-All formal state transitions first become a private internal event of their sole owner. External Runtime results become
+All formal state transitions first become a private internal event of their sole owner. A state type may have multiple coordinated
+private transition IDs, but all of them must resolve to that same owner; no cross-owner transition is legal. External Runtime results become
 Orchestrator private internal events before aggregate mutation; Workspace definition admission, Run replacement intent and
 Governance trace progress follow the same owner-local rule. Cross-owner I/O uses EventHub plus concrete typed contracts only.
 EventHub `StateMachine` metadata means participation, while `ReducerOwner + MachineRole` fixes SM-1 to Run and SM-2～SM-4 to

@@ -28,6 +28,18 @@ func NewRuntimeSemanticProofFeasibilityResult(c ProbeRuntimeSemanticProofFeasibi
 	return ProbeRuntimeSemanticProofFeasibilityResult(v), nil
 }
 
+// NewRuntimeSemanticProofFeasibilityOwnerResult keeps File's prospective
+// manifest delta inside its concrete owner observation. The required-fact
+// owner's prospective-satisfaction judgment is attached later by Orchestrator
+// and is never synthesized at the File boundary.
+func NewRuntimeSemanticProofFeasibilityOwnerResult(c ProbeRuntimeSemanticProofFeasibilityCommand, status runtimecontract.RuntimeSemanticFeasibilityStatus, observedRevision string, targetRefs []string, prospectiveDelta *runtimecontract.RuntimeProspectiveWorkspaceManifestDelta, diagnostic *runtimecontract.RuntimeOriginalDiagnostic) (ProbeRuntimeSemanticProofFeasibilityResult, error) {
+	v, err := runtimecontract.NewRuntimeSemanticProofFeasibilityOwnerObservation(runtimecontract.RuntimeSemanticProofFeasibilityRequest(c), status, observedRevision, targetRefs, prospectiveDelta, diagnostic)
+	if err != nil {
+		return ProbeRuntimeSemanticProofFeasibilityResult{}, err
+	}
+	return ProbeRuntimeSemanticProofFeasibilityResult(v), nil
+}
+
 func ValidateRuntimeOperationFeasibilityCommand(c ProbeRuntimeOperationFeasibilityCommand, owner string) error {
 	return runtimecontract.ValidateRuntimeOperationFeasibilityRequest(runtimecontract.RuntimeOperationFeasibilityRequest(c), owner)
 }

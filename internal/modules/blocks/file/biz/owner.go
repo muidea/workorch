@@ -575,21 +575,30 @@ func (m *Biz) handleRuntimeSemanticProofFeasibility(event magicevent.Event, resu
 	if result == nil {
 		return
 	}
-	command, ok := event.Data().(fileevents.ProbeRuntimeSemanticProofFeasibilityCommand)
-	if !ok || m.runtimeAdapter == nil {
+	if event == nil || event.Source() != runtimecontract.RuntimeModuleOrchestrator || m == nil || m.runtimeAdapter == nil {
 		setPrerequisiteError(result, common.ErrInvalidArgument)
+		return
+	}
+	command, ok := event.Data().(fileevents.ProbeRuntimeSemanticProofFeasibilityCommand)
+	if !ok {
+		setPrerequisiteError(result, common.ErrInvalidArgument)
+		return
+	}
+	if _, err := common.BindRuntimeWorkspaceContext(event.Context(), command.WorkspaceID); err != nil {
+		setPrerequisiteError(result, err)
 		return
 	}
 	if err := fileevents.ValidateRuntimeSemanticProofFeasibilityCommand(command, ModuleID); err != nil {
 		setPrerequisiteError(result, err)
 		return
 	}
-	manifest, err := m.runtimeAdapter.AcquireWorkspaceManifest(command.WorkspaceDeliverableDirectory)
+	manifestObservation, err := m.runtimeAdapter.acquireWorkspaceManifestObservation(command.WorkspaceDeliverableDirectory)
 	if err != nil {
 		m.setRuntimeSemanticProofFeasibility(result, command, runtimecontract.RuntimeSemanticFeasibilityInfeasible, command.OwnerCatalog.ObservedRevision, nil,
 			runtimecontract.RuntimeSemanticFeasibilityDiagnostic(ModuleID, "workspace_manifest_unavailable", err.Error(), command.OwnerCatalog.ObservedRevision, "", nil))
 		return
 	}
+	manifest := manifestObservation.manifest
 	if manifest.Revision != command.OwnerCatalog.ObservedRevision {
 		m.setRuntimeSemanticProofFeasibility(result, command, runtimecontract.RuntimeSemanticFeasibilityStale, manifest.Revision, nil,
 			runtimecontract.RuntimeSemanticFeasibilityDiagnostic(ModuleID, "semantic_catalog_stale", "runtime File semantic catalog is stale", command.OwnerCatalog.ObservedRevision, manifest.Revision, nil))
@@ -613,23 +622,105 @@ func (m *Biz) handleRuntimeSemanticProofFeasibility(event magicevent.Event, resu
 			return
 		}
 	}
+	if command.Proposal.Normalized().Target.Policy == runtimecontract.RuntimeOperationTargetPolicyProspectiveOwnerTarget {
+		selection, selectionErr := fileProspectiveSemanticTargetAdmission(command, manifestObservation)
+		if selectionErr != nil || selection.Disposition != runtimecontract.RuntimeTargetSelectionCreate || selection.ObservedRevision != manifest.Revision {
+			message := "runtime prospective File target is outside the owner create admission"
+			if selectionErr != nil {
+				message = selectionErr.Error()
+			}
+			m.setRuntimeSemanticProofFeasibility(result, command, runtimecontract.RuntimeSemanticFeasibilityInfeasible, manifest.Revision, targetRefs,
+				runtimecontract.RuntimeSemanticFeasibilityDiagnostic(ModuleID, "semantic_target_not_admissible", message, "", manifest.Revision, targetRefs))
+			return
+		}
+	}
 	if strings.TrimSpace(command.Proposal.ValidationRecipeID) != "" || len(command.Proposal.RequiredCheckRefs) != 0 {
 		m.setRuntimeSemanticProofFeasibility(result, command, runtimecontract.RuntimeSemanticFeasibilityInfeasible, manifest.Revision, nil,
 			runtimecontract.RuntimeSemanticFeasibilityDiagnostic(ModuleID, "file_semantic_proof_unavailable", "File target observation is not an independent semantic validation proof", "", manifest.Revision, targetRefs))
 		return
 	}
-	m.setRuntimeSemanticProofFeasibility(result, command, runtimecontract.RuntimeSemanticFeasibilityFeasible, manifest.Revision, targetRefs, nil)
+	prospectiveDelta, err := fileProspectiveWorkspaceManifestDelta(command, manifest)
+	if err != nil {
+		setPrerequisiteError(result, err)
+		return
+	}
+	m.setRuntimeSemanticProofFeasibilityOwnerResult(result, command, runtimecontract.RuntimeSemanticFeasibilityFeasible, manifest.Revision, targetRefs, prospectiveDelta, nil)
+}
+
+// fileProspectiveSemanticTargetAdmission reuses the File owner's canonical
+// prospective selector against the exact manifest observation used by the
+// semantic probe. It is a pure SM-2 query: no directory/file is created and no
+// other capability owner is called.
+func fileProspectiveSemanticTargetAdmission(command fileevents.ProbeRuntimeSemanticProofFeasibilityCommand, observation workspaceManifestObservation) (runtimecontract.RuntimeTargetSelection, error) {
+	proposal := command.Proposal.Normalized()
+	if proposal.Target.Policy != runtimecontract.RuntimeOperationTargetPolicyProspectiveOwnerTarget ||
+		len(proposal.Target.OwnerSelectorRefs) != 1 ||
+		proposal.Target.OwnerSelectorRefs[0] != runtimeFileSelectorWorkspaceRelativeNewTarget {
+		return runtimecontract.RuntimeTargetSelection{}, common.ErrInvalidArgument
+	}
+	request, err := normalizeRuntimeTargetSelectionRequest(
+		command.WorkspaceDeliverableDirectory,
+		command.OwnerCatalog.PrerequisiteID,
+		proposal.DeclarationRef,
+		proposal.Target.OwnerSelectorRefs[0],
+		proposal.Target.ProspectiveTargetRef,
+		runtimecontract.RuntimeOwnerInventoryItemsMaxCount,
+		nil,
+	)
+	if err != nil {
+		return runtimecontract.RuntimeTargetSelection{}, err
+	}
+	request.manifestEntryCount = observation.entryCount
+	return acquireProspectiveRuntimeTargetSelection(request, observation.manifest)
 }
 
 func (m *Biz) setRuntimeSemanticProofFeasibility(result magicevent.Result, command fileevents.ProbeRuntimeSemanticProofFeasibilityCommand, status runtimecontract.RuntimeSemanticFeasibilityStatus, revision string, targetRefs []string, diagnostic *runtimecontract.RuntimeOriginalDiagnostic) {
-	response, err := fileevents.NewRuntimeSemanticProofFeasibilityResult(command, status, revision, targetRefs, diagnostic)
+	m.setRuntimeSemanticProofFeasibilityOwnerResult(result, command, status, revision, targetRefs, nil, diagnostic)
+}
+
+func (m *Biz) setRuntimeSemanticProofFeasibilityOwnerResult(result magicevent.Result, command fileevents.ProbeRuntimeSemanticProofFeasibilityCommand, status runtimecontract.RuntimeSemanticFeasibilityStatus, revision string, targetRefs []string, prospectiveDelta *runtimecontract.RuntimeProspectiveWorkspaceManifestDelta, diagnostic *runtimecontract.RuntimeOriginalDiagnostic) {
+	response, err := fileevents.NewRuntimeSemanticProofFeasibilityOwnerResult(command, status, revision, targetRefs, prospectiveDelta, diagnostic)
 	if err != nil {
 		setPrerequisiteError(result, err)
 		return
 	}
 	value := runtimecontract.RuntimeSemanticProofFeasibilityObservation(response)
 	value.Observation.OwnerPolicy = runtimecontract.RuntimeOwnerPolicyIdentity{OwnerModuleID: ModuleID, PolicyRevision: fileOwnerFeasibilityPolicyRevision, CatalogSnapshotID: command.OwnerCatalog.SnapshotID}
+	if err := value.Observation.ValidateOwnerForProposal(command.Manifest, command.Proposal); err != nil {
+		setPrerequisiteError(result, err)
+		return
+	}
 	result.Set(fileevents.ProbeRuntimeSemanticProofFeasibilityResult(value), nil)
+}
+
+// fileProspectiveWorkspaceManifestDelta derives only the File-authored,
+// hypothetical manifest for a sealed owner-fact acquisition through a
+// prospective file/write. It performs no filesystem mutation and does not
+// inspect or invoke the required-fact owner (for example Shell).
+func fileProspectiveWorkspaceManifestDelta(command fileevents.ProbeRuntimeSemanticProofFeasibilityCommand, current runtimecontract.WorkspaceManifest) (*runtimecontract.RuntimeProspectiveWorkspaceManifestDelta, error) {
+	manifest := command.Manifest.Normalized()
+	proposal := command.Proposal.Normalized()
+	if proposal.OwnerModuleID != ModuleID || proposal.OperationKind != runtimecontract.StepKindFileWrite ||
+		proposal.Target.Policy != runtimecontract.RuntimeOperationTargetPolicyProspectiveOwnerTarget {
+		return nil, nil
+	}
+	for _, obligation := range manifest.ProofObligations {
+		if obligation.CoverageWorkItemID != proposal.CoverageWorkItemID || obligation.OwnerFactAcquisition == nil {
+			continue
+		}
+		acquisition := obligation.OwnerFactAcquisition.Normalized()
+		if acquisition.AcquisitionOwnerModuleID != ModuleID || acquisition.AcquisitionOperationKind != proposal.OperationKind ||
+			acquisition.AcquisitionOperationVariantID != proposal.OperationVariantID ||
+			acquisition.AcquisitionTargetPolicy != proposal.Target.Policy {
+			return nil, nil
+		}
+		delta, err := runtimecontract.NewRuntimeProspectiveWorkspaceManifestDelta(manifest, proposal, acquisition.ProspectiveSatisfactionContractRef, command.OwnerCatalog, current)
+		if err != nil {
+			return nil, err
+		}
+		return &delta, nil
+	}
+	return nil, nil
 }
 
 func (m *Biz) handleAcquireWorkspaceManifest(event magicevent.Event, result magicevent.Result) {

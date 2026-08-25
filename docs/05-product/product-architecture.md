@@ -4,7 +4,7 @@ Status: normative
 
 Type: product-architecture
 
-Last Verified: 2026-08-21
+Last Verified: 2026-08-25
 
 ## Product Interaction View
 
@@ -60,8 +60,9 @@ clear wait、force retry、budget top-up 或用普通 Resume 解除这些状态�
 provider/context selection。Caller does not supply revision、next action or authority patch。
 
 `restart` requires a fresh eligible startup input。Run owner persists predecessor `ReplacementIntent`；only after predecessor
-terminal delivery is complete may its private reducer create the successor。Application/projection does not queue、infer or
-pre-create successor。
+terminal delivery is complete may its private reducer create the successor。The replacement is a same-owner SM-1 subordinate
+transaction. Orchestrator's `RuntimeTerminationRecord` is only an SM-4 delivery handoff; only a Run-private SM-1 event changes
+the predecessor lifecycle。Application/projection does not queue、infer or pre-create successor。
 
 成功不是 operation、artifact 或全部 CWI 执行结束的别名。产品 Result 必须逐 requirement/CWI 展示独立的 coverage、evidence
 和 assessment，并引用 current accepted evidence 与实际依赖的 owner revision set；required item 的 `indeterminate` 不能进入
@@ -74,3 +75,5 @@ successful closeout。Result owner只保存 Orchestrator 已裁决的密封 clos
 - Eventstream is audit only；projection can rebuild/cache but cannot repair formal state；
 - command acknowledgement means accepted for processing；final progress/outcome comes from owner projection；
 - each interface exposes the same business semantics regardless of local/remote transport。
+- every state transition belongs to exactly one owner and is triggered through that owner's private internal event; cross-owner
+  commands carry intent/fact only, never a target state。

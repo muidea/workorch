@@ -4,7 +4,7 @@ Status: normative
 
 Type: domain-model
 
-Last Verified: 2026-08-23
+Last Verified: 2026-08-25
 
 ## Ownership Map
 
@@ -40,7 +40,7 @@ condition、trigger/deadline、budget和guard属于Orchestrator aggregate，由S
 
 ## Replacement Intent
 
-`ReplacementIntent` 是 predecessor Run 的 owner-local restart transaction：
+`ReplacementIntent` 是 predecessor Run 的 owner-local SM-1 subordinate restart transaction，不是第五个状态机：
 
 1. `pending`：普通 restart 已封存 immutable successor input，尚未创建 successor；
 2. `pending_clarification_resolution`：Definition-gap intent 已绑定 ticket 与 predecessor/successor startup-input lineage，
@@ -56,6 +56,10 @@ condition、trigger/deadline、budget和guard属于Orchestrator aggregate，由S
 scope-mismatch `clarification_resolution_rejected` intent 移入 predecessor 的 immutable retirement history 并封存新 intent；
 `ticket_already_bound` rejection 是不可由 Restart 覆盖的 owner invariant breach。相同 RequestID重用、自动 supersede以及
 替换bound/deliverable/completed intent均为typed conflict。
+
+administrative cancelled/superseded 先由 Run-private event claim intent；Orchestrator 只在 SM-4 opaque aggregate 中保存并重投
+exact `RuntimeTerminationRecord` handoff。Result、Workspace 与 Run 各自以 private event确认自身 delivery；最终 Run terminal
+只能由 Run-private SM-1 delivery event持久化，handoff record本身不属于 Run lifecycle state。
 
 ## Runtime Aggregate
 
@@ -102,5 +106,5 @@ typed/logical reference。Artifact 可支持 Result，但 artifact 存在本身�
 - capability receipt 不等于 accepted evidence。
 - projection outcome 不等于 formal Result。
 - terminal delivery 顺序固定为 Orchestrator → Result → Workspace → Run。
-- restart successor 只能由 Run owner transaction 创建。
+- restart successor 只能由同一 Run owner 的 SM-1 subordinate transaction 创建。
 - 新 definition 必须进入新 Run，不能 patch 当前 aggregate。

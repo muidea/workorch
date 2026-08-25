@@ -4,7 +4,7 @@ Status: active
 
 Type: capability-block-contract
 
-Last Verified: 2026-08-24
+Last Verified: 2026-08-25
 
 ## 功能范围与边界
 
@@ -31,6 +31,18 @@ raw diagnostic 留在 Shell-private adapter；receipt 只携带有界、脱敏�
   直接证明的 recipe 才以 `ready + direct` 进入 provider-selectable catalog；例如 `go test` 在没有非排除
   `*_test.go` 时发布带稳定 prerequisite ref 的 `prerequisite_required`，而不是丢失该 Owner fact。静态 executable/policy
   不可用时发布 `unavailable`。Shell 不读取 File service/repository，也不取得 workspace tree 所有权。
+- `prerequisite_required` validation surface 同时发布
+  `shell/selectable-validation-surface/prospective-workspace-manifest/v1`。Orchestrator 只可通过 Shell owner 的 typed
+  prospective-satisfaction query 转交 activation-sealed recipes 和 File owner 已计算的 immutable resulting target refs；
+  Shell 先要求每个匹配 contract 的 prerequisite surface 都存在同 ID recipe，且 command、ordered args、timeout 计算的
+  owner schema hash 与 surface `InputSchemaHash` 完全一致，再复用 owner-private recipe applicability 规则返回
+  `would_satisfy | would_not_satisfy`；若 exact Shell policy/catalog dependency 已漂移，则返回绑定 expected/observed
+  revision 的 typed stale nested observation。该 dependency catalog只供 Runtime freshness/CAS/seal，不进入 provider-selectable
+  catalog projection。任一 recipe 身份缺失或漂移均 typed fail-closed；该 query 不访问 File、不观察 workspace、不启动进程，
+  也不改变 Shell/Runtime 状态。只有 Orchestrator SM-2 private event可持久化 factual result，并选择 refresh、seal 或统一
+  `semantic_contract_failed` terminal；该 terminal 的 typed original reason 为 `prospective_owner_fact_unsatisfied`。exact target
+  已由 activation 封存，`would_not_satisfy` 不得触发 LLM correction。Shell 只署名 satisfaction fact/reason，不署名或选择
+  Orchestrator 的 terminal diagnostic。
 - workspace-sensitive Shell catalog 的 observation 必须依赖该 File manifest 的 exact workspace-tree revision；后续
   File receipt 改变该 revision 时，SM-2 仅按依赖交集退休并重获 catalog。该 freshness lineage 不允许 Shell 修改
   Manifest、CWI 或 Runtime 状态。
@@ -68,7 +80,7 @@ raw diagnostic 留在 Shell-private adapter；receipt 只携带有界、脱敏�
 
 | 交互组件 | 方向 | 具体合同 | 当前结论 |
 | --- | --- | --- | --- |
-| `kernel/orchestrator` | 双向 | capability/admissibility/feasibility/reconciliation/execute、manifest prerequisite；receipt query/commit | 完整 |
+| `kernel/orchestrator` | 双向 | capability/admissibility/feasibility/prospective-satisfaction/reconciliation/execute、manifest prerequisite；receipt query/commit | 完整 |
 | `blocks/file` | 间接 typed fact | File owner manifest 由 Orchestrator 转交，Shell 不直连 File | 完整 |
 | 本地进程/workspace | Shell-private adapter | sealed command/recipe、临时副本、cwd、timeout、进程组清理、effect observation | 完整；不承诺 host/container 级沙箱 |
 
@@ -95,6 +107,9 @@ raw diagnostic 留在 Shell-private adapter；receipt 只携带有界、脱敏�
 ## 测试覆盖
 
 - 已覆盖 catalog 的 ready/prerequisite-required/unavailable、manifest freshness、空 confirmed recipe 与 owner selector。
+- 已覆盖 prospective-satisfaction 对 ordinary script 与 `*_test.go` resulting target 的纯值判定，以及错误 source/scope、
+  typed stale Shell catalog、duplicate request、多 prerequisite surface 和 recipe command/args/timeout 身份漂移；测试确认
+  dependency catalog不进入provider choice、不创建target、不执行命令且不改变owner状态。
 - 已覆盖强调用 nil result、伪造 source、receipt query failure、sealed data 漂移均在进程调用前拒绝。
 - 已覆盖 managed validation 临时副本、原 workspace/`.git` 隔离、外指 symlink、正常完成与 timeout 的进程组清理。
 - 已覆盖默认 software-development recipe 的 owner proof check、generic success/zero-work/all-skipped、显式 marker 与

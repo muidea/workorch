@@ -4,7 +4,7 @@ Status: active
 
 Type: capability-block-contract
 
-Last Verified: 2026-08-24
+Last Verified: 2026-08-25
 
 ## 功能范围与边界
 
@@ -78,6 +78,8 @@ application、Web 与 orchestrator 不直接访问 ai-proxy。
     constraint 和 `ready + direct` validation recipe identity。non-ready 或 auxiliary/not-declared validation surface、
     input schema/binding/prerequisite、完整 MCP capability effect metadata 与 Shell command/args 都不得进入 provider context；
     最终 renderer 必须再次按 readiness 与 proof applicability 取交集，不能把 audit fact 变成 model hint。
+    prospective owner-fact pure query 使用的 `OwnerFactDependencyCatalogs` 也必须完全排除；它只属于 Orchestrator aggregate
+    freshness/CAS/seal，不得进入 C3 catalog、allowed operation/surface、schema enum、correction values 或 provider instruction。
     coverage-order schema 要求 `proposals` 字段存在且恒为 `[]`，provider instruction 必须逐字保持同一合同，禁止用
     “不返回 proposals”制造 schema/prompt 冲突；结构错误只返回 factual diagnostic，由 Orchestrator SM-3 决定一次有界纠错。
 13. profile `RequiredOwnerFacts` 作为 immutable declaration 进入 C2 和 stable prefix；它不是 current availability。
@@ -93,6 +95,8 @@ application、Web 与 orchestrator 不直接访问 ai-proxy。
     acquisition 与 owner re-observation 前暂不可选择是预期事实，不能单独据此输出 `undeclared_prerequisite`。acquisition
     receipt 只证明前置状态变化，不产生 terminal validation evidence/coverage credit；ticket、retry、Runtime state/action
     以及 re-observation 后的新 planning generation 仍完全由 Orchestrator owner 决定。
+    prospective obligation只可回显pre-seal sealed `ProspectiveSatisfactionContractRef`作为proposal合同，不能回显required-owner
+    dependency catalog或让模型填写`would_satisfy|would_not_satisfy|stale`；这些 outcome只来自required owner typed result。
 14. Skill 只从 Run owner 的 sealed activation 进入 volatile C3。每项携带 WorkOrch Registry 或 SkillHub typed
     provenance、original/truncated instruction identity 与 activation-time byte budget；LLM 不读取 Skill repository/catalog、
     不重新选择或裁剪 Skill，也不把 Skill material 移入 C0～C2。缺失/漂移的 provenance 或 budget 在 Runtime

@@ -4,7 +4,7 @@ Status: normative
 
 Type: core-contract-index
 
-Last Verified: 2026-08-18
+Last Verified: 2026-08-25
 
 ## Purpose
 
@@ -30,3 +30,6 @@ Runtime processing 和 terminal completion。它不维护实施阶段或迁移�
 - Workspace owner 独占 candidate 与 formal Definition；Run owner 独占 activation/replacement；Orchestrator 独占 Runtime authority。
 - Workorchd 做 pure static compile 和 application orchestration，不成为 Definition、ticket 或 Runtime owner。
 - static declared gap、dynamic owner readiness 和 runtime-discovered semantic gap 是三条独立、不可互相伪装的 lane。
+- pre-seal Profile 声明必须为每个 `prospective_owner_target` owner-fact acquisition 封存 exact
+  `ProspectiveSatisfactionContractRef`；Runtime 只能用该 ref 触发 owner-defined pure composite feasibility，不能由
+  Orchestrator/Application/LLM 推断 acquisition 后的 owner fact。

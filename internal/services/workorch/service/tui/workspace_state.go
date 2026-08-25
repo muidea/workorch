@@ -75,9 +75,7 @@ type workspaceRuntimeState struct {
 	ActivityDirtyRevision int64
 	FollowTail            bool
 	UnreadUpdateCount     int
-	ResolvedTickets       map[common.TicketID]struct{}
-	ResolvedApprovals     map[common.ApprovalID]struct{}
-	OptimisticRunID       common.RunID
+	GovernanceCommand     governanceCommandTechnicalState
 }
 
 const (
@@ -680,6 +678,7 @@ func (m *AppModel) applyWorkspaceContext(msg WorkspaceContextMsg) {
 		return
 	}
 	defer m.markWorkspaceContextDisplayLoaded(workspaceID, msg)
+	defer m.settleGovernanceCommandFromProjection(workspaceID)
 	previousTask := m.currentTask
 	previousTranscript := append([]transcriptItem(nil), m.transcript...)
 	previousDoDItems := append([]string(nil), m.dodItems...)
@@ -864,6 +863,7 @@ func (m *AppModel) applyWorkspaceRuntimeView(view projectioncontract.WorkspaceRu
 		runtimeViewDisplayContentEqual(entry.RuntimeView, view) {
 		return
 	}
+	defer m.settleGovernanceCommandFromProjection(workspaceID)
 	entry.RuntimeView = view
 	entry.HasRuntimeView = true
 	entry.AppliedRevision = view.Revision
@@ -2016,34 +2016,6 @@ func (m *AppModel) syncActiveWorkspaceOverview() tea.Cmd {
 		m.clearCanonicalBlockingTargets()
 	}
 	return nil
-}
-
-func (m *AppModel) markDecisionResolvedForWorkspace(workspaceID common.WorkspaceID, id common.TicketID, runID common.RunID) {
-	entry := m.ensureWorkspaceRuntimeState(string(workspaceID))
-	if entry == nil || id == "" {
-		return
-	}
-	if entry.ResolvedTickets == nil {
-		entry.ResolvedTickets = map[common.TicketID]struct{}{}
-	}
-	entry.ResolvedTickets[id] = struct{}{}
-	if runID != "" {
-		entry.OptimisticRunID = runID
-	}
-}
-
-func (m *AppModel) markApprovalResolvedForWorkspace(workspaceID common.WorkspaceID, id common.ApprovalID, runID common.RunID) {
-	entry := m.ensureWorkspaceRuntimeState(string(workspaceID))
-	if entry == nil || id == "" {
-		return
-	}
-	if entry.ResolvedApprovals == nil {
-		entry.ResolvedApprovals = map[common.ApprovalID]struct{}{}
-	}
-	entry.ResolvedApprovals[id] = struct{}{}
-	if runID != "" {
-		entry.OptimisticRunID = runID
-	}
 }
 
 func refreshRevisionBelow(current, target projectioncontract.WorkspaceRefreshRevision) bool {

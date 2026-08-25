@@ -36,18 +36,22 @@ const (
 // ready-and-direct set; this value preserves why another callable surface was
 // not exposed without leaking owner implementation or choosing a retry.
 type RuntimeValidationSurface struct {
-	ID                 string
-	OwnerModuleID      string
-	OperationKind      string
-	Readiness          RuntimeValidationSurfaceReadiness
-	ReadinessReason    string
-	InputSchemaHash    string
-	InputBindingRef    string
-	PrerequisiteRef    string
-	CheckRefs          []string
-	ProofApplicability RuntimeValidationProofApplicability
-	EffectScope        RuntimeEffectScope
-	IdempotencyClass   RuntimeOperationIdempotencyClass
+	ID              string
+	OwnerModuleID   string
+	OperationKind   string
+	Readiness       RuntimeValidationSurfaceReadiness
+	ReadinessReason string
+	InputSchemaHash string
+	InputBindingRef string
+	PrerequisiteRef string
+	// ProspectiveSatisfactionContractRef is present only on a prerequisite-
+	// required surface whose owner can judge whether a typed prospective
+	// workspace delta would make that surface selectable.
+	ProspectiveSatisfactionContractRef string
+	CheckRefs                          []string
+	ProofApplicability                 RuntimeValidationProofApplicability
+	EffectScope                        RuntimeEffectScope
+	IdempotencyClass                   RuntimeOperationIdempotencyClass
 }
 
 func (s RuntimeValidationSurface) Normalized() RuntimeValidationSurface {
@@ -59,6 +63,7 @@ func (s RuntimeValidationSurface) Normalized() RuntimeValidationSurface {
 	s.InputSchemaHash = strings.TrimSpace(s.InputSchemaHash)
 	s.InputBindingRef = strings.TrimSpace(s.InputBindingRef)
 	s.PrerequisiteRef = strings.TrimSpace(s.PrerequisiteRef)
+	s.ProspectiveSatisfactionContractRef = strings.TrimSpace(s.ProspectiveSatisfactionContractRef)
 	s.CheckRefs = normalizeStrings(s.CheckRefs)
 	s.ProofApplicability = RuntimeValidationProofApplicability(strings.TrimSpace(string(s.ProofApplicability)))
 	s.EffectScope = NormalizeRuntimeEffectScope(s.EffectScope)
@@ -94,7 +99,7 @@ func (s RuntimeValidationSurface) Validate() error {
 	}
 	switch s.Readiness {
 	case RuntimeValidationSurfaceReady:
-		if s.InputBindingRef == "" || s.PrerequisiteRef != "" || s.ReadinessReason != "" {
+		if s.InputBindingRef == "" || s.PrerequisiteRef != "" || s.ProspectiveSatisfactionContractRef != "" || s.ReadinessReason != "" {
 			return fmt.Errorf("ready runtime validation surface %q requires only an input binding", s.ID)
 		}
 	case RuntimeValidationSurfacePrerequisiteRequired:
@@ -102,7 +107,7 @@ func (s RuntimeValidationSurface) Validate() error {
 			return fmt.Errorf("prerequisite runtime validation surface %q requires only prerequisite lineage", s.ID)
 		}
 	case RuntimeValidationSurfaceUnavailable:
-		if s.InputBindingRef != "" || s.PrerequisiteRef != "" || s.ReadinessReason == "" {
+		if s.InputBindingRef != "" || s.PrerequisiteRef != "" || s.ProspectiveSatisfactionContractRef != "" || s.ReadinessReason == "" {
 			return fmt.Errorf("unavailable runtime validation surface %q requires only a factual reason", s.ID)
 		}
 	default:

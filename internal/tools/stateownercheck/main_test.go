@@ -69,3 +69,50 @@ func TestVerifyRejectsTransitionBearingMachineWithoutNamedStateType(t *testing.T
 		t.Fatalf("verify error = %v, want missing named state type rejection", err)
 	}
 }
+
+func TestVerifyAllowsSameOwnerCoordinatedTransitions(t *testing.T) {
+	root := t.TempDir()
+	for _, directory := range []string{"application/demo", "internal", "scripts"} {
+		if err := os.MkdirAll(filepath.Join(root, directory), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(root, "application/demo/state.go"), []byte("package demo\ntype RunState string\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "scripts/state-model-owners.manifest"), []byte("application/demo/state.go|RunState|authoritative_state_machine|application/demo|demo.lifecycle,demo.replacement\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	transitions := "demo.lifecycle|resource_state_machine|application/demo|application/demo/lifecycle_internal_event.go|application/demo/lifecycle_internal_event.go|submitLifecycleInternalEvent\n" +
+		"demo.replacement|owner_private_transaction|application/demo|application/demo/replacement_internal_event.go|application/demo/replacement_internal_event.go|submitReplacementInternalEvent\n"
+	if err := os.WriteFile(filepath.Join(root, "scripts/state-transition-owners.manifest"), []byte(transitions), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := verify(root, "scripts/state-model-owners.manifest", "scripts/state-transition-owners.manifest"); err != nil {
+		t.Fatalf("same-owner coordinated transitions must be allowed: %v", err)
+	}
+}
+
+func TestVerifyRejectsCoordinatedTransitionsAcrossOwners(t *testing.T) {
+	root := t.TempDir()
+	for _, directory := range []string{"application/demo", "internal", "scripts"} {
+		if err := os.MkdirAll(filepath.Join(root, directory), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(root, "application/demo/state.go"), []byte("package demo\ntype RunState string\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "scripts/state-model-owners.manifest"), []byte("application/demo/state.go|RunState|authoritative_state_machine|application/demo|demo.lifecycle,demo.foreign\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	transitions := "demo.lifecycle|resource_state_machine|application/demo|application/demo/lifecycle_internal_event.go|application/demo/lifecycle_internal_event.go|submitLifecycleInternalEvent\n" +
+		"demo.foreign|owner_private_transaction|internal/other|internal/other/foreign_internal_event.go|internal/other/foreign_internal_event.go|submitForeignInternalEvent\n"
+	if err := os.WriteFile(filepath.Join(root, "scripts/state-transition-owners.manifest"), []byte(transitions), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	err := verify(root, "scripts/state-model-owners.manifest", "scripts/state-transition-owners.manifest")
+	if err == nil || !strings.Contains(err.Error(), "transition demo.foreign is owned by internal/other") {
+		t.Fatalf("verify error = %v, want cross-owner coordination rejection", err)
+	}
+}

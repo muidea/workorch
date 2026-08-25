@@ -4,7 +4,7 @@ Status: normative
 
 Type: verification-contract
 
-Last Verified: 2026-08-24
+Last Verified: 2026-08-25
 
 ## Purpose
 
@@ -24,6 +24,8 @@ and converges through the same neutral Runtime owner model. It must not make leg
   proof-capable owner receipt operation; wildcard policy cannot substitute for an exact source;
 - Profile snapshot/hash or snapshot-derived owner-fact manifest drift fails pre-seal with the Template/Profile correction action
   and creates no Run/provider/capability work;
+- DoD validation preparation seals the exact prospective-satisfaction contract ref; missing/extra/drifted ref or use on a
+  non-prospective policy fails pre-seal and creates no Run/provider/capability work;
 - software-dev strings do not appear in Orchestrator reducer branches;
 - current provider guidance uses current semantic-plan/candidate schemas.
 
@@ -34,6 +36,13 @@ and converges through the same neutral Runtime owner model. It must not make leg
   merged even when dependency order is declared, while an owner-sealed exact required operation sequence and distinct targets
   remain executable in one dispatch;
 - build/test/lint and direct entrypoint checks produce matching validation receipts;
+- prospective validation preparation proves the profile-specific applicability split: with the same base manifest, a resulting
+  `*_test.go` may yield Shell `would_satisfy` for the exact default Go recipe, while `scripts/validate.sh` alone yields
+  `would_not_satisfy`; neither pure probe creates a file, directory, process/session, receipt or credit;
+- Shell dependency catalog/observation remains absent from provider C3/schema choices; File delta and Shell nested observation
+  must both be exact-current at CAS and seal. Shell typed stale uses bounded refresh; persisted `would_not_satisfy` directly
+  reaches the common `semantic_contract_failed` terminal with typed original reason `prospective_owner_fact_unsatisfied`, with no
+  provider correction or repeated owner probe;
 - a validation entry is recipe lineage, not an implementation repair target; unstructured output yields no target candidate,
   while managed Go diagnostics may report only actual `*.go:line[:column]` locations inside the fresh File manifest scope;
 - Git snapshot requirements use `git/write:add` + `git/write:commit`, not shell/read evidence;

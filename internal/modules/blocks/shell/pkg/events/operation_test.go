@@ -9,7 +9,7 @@ import (
 
 func TestContractsDeclareShellAsExecutionReceiver(t *testing.T) {
 	contracts := Contracts()
-	if len(contracts) != 6 {
+	if len(contracts) != 7 {
 		t.Fatalf("contracts = %+v", contracts)
 	}
 	for _, contract := range contracts {
@@ -17,8 +17,8 @@ func TestContractsDeclareShellAsExecutionReceiver(t *testing.T) {
 			t.Fatalf("contract = %+v", contract)
 		}
 	}
-	if len(MessageContracts()) != 6 {
-		t.Fatalf("message contract count = %d, want 6", len(MessageContracts()))
+	if len(MessageContracts()) != 7 {
+		t.Fatalf("message contract count = %d, want 7", len(MessageContracts()))
 	}
 }
 

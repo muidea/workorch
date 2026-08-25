@@ -4,7 +4,7 @@ Status: normative
 
 Type: verification
 
-Last Verified: 2026-08-24
+Last Verified: 2026-08-25
 
 ## Purpose
 
@@ -35,7 +35,9 @@ core verifier 不验证 software-dev 特定文件、语言、测试命令、目�
 以及每个 `*_internal_event.go` / `*_internal_events.go` / `internal_event.go` owner-private transition、transaction、effect、audit 或 derived
 projection gate；owner root、private-event file 与 dispatcher 必须都位于同一组件 `biz/`。新增内部事件文件但未归属、
 重复 transition ID、未知分类、dispatcher 缺失或 owner 漂移必须使 boundary verification 失败。该清单不得被生产代码
-导入或用于 reducer dispatch；正式 Runtime owner 仍只由 typed contract 和 private reducer 决定。
+导入或用于 reducer dispatch；正式 Runtime owner 仍只由 typed contract 和 private reducer 决定。state model 可以列出
+多个协调 transition ID，但 verifier 必须证明它们全部回到该 state type 的同一唯一 owner；跨 owner 组合必须失败。
+`run.replacement` 必须分类为 Run-owner `owner_private_transaction` 并与 SM-1 owner 相同，不能作为第五个状态机。
 
 静态门禁同时将 initial state 视为 transition：Workspace/Run/Decision/Approval 的创建必须经过各自
 owner-private creation/lifecycle dispatcher，创建入口不得直接 repository `Create` 带 state。它还必须拒绝
@@ -45,10 +47,10 @@ application-local execution queue/queued projection 的回归，以及 setup-dra
 
 | 状态机 | 唯一 owner | 必须验证的合法迁移 | 必须拒绝的迁移 |
 | --- | --- | --- | --- |
-| SM-1 Run lifecycle | `blocks/run` | activation/continuation/typed terminal fact 先成为 owner-local event，再执行 pending→active、blocked continuation 或 terminal | 外部指定目标 state、读取 Orchestrator action/focus 选择 lifecycle、terminal→active |
+| SM-1 Run lifecycle | `blocks/run` | activation/continuation/typed terminal delivery 先成为 owner-local event，再执行 pending→active、blocked continuation 或 terminal；replacement 仅作为同 owner subordinate transaction 协调交接 | 外部指定目标 state、读取 Orchestrator action/focus 选择 lifecycle、SM-4 handoff record 直接改 Run、terminal→active |
 | SM-2 authority/focus | `kernel/orchestrator` | prerequisite/feasibility/receipt/assessment/governance fact→internal event→canonical decision；focus/evidence/repair 原子推进 | capability/adapter 选 decision、错误文本选 target、直接写 Run/Workspace/Result |
 | SM-3 candidate/dispatch | `kernel/orchestrator` | request session→complete document→single evaluator→persist diagnostic→final/唯一 correction；accepted→seal→execute | incomplete/transport 创建 attempt、attempt 2、adapter 选 correction/terminal、未 seal 执行 |
-| SM-4 drive/recovery/delivery | `kernel/orchestrator` | Run fact→run-scoped singleflight→load/re-drive；typed conflict/recovery；Result→Workspace→Run acknowledgement | 重建 SM-2 authority、projection/application 反向驱动、重复 durable effect、写其他 owner state |
+| SM-4 drive/recovery/delivery | `kernel/orchestrator` | Run fact→run-scoped singleflight→load/re-drive；typed conflict/recovery；administrative `RuntimeTerminationRecord` handoff；Result→Workspace→Run acknowledgement | 重建 SM-2 authority、projection/application 反向驱动、重复 durable effect、把 handoff 当 SM-1 transition、写其他 owner state |
 
 每次 Runtime 变更必须标出受影响 SM，并补：transition、invariant、restart/idempotency、stale/duplicate、
 budget/guard 以及适用的跨状态机合同测试。
@@ -58,7 +60,7 @@ budget/guard 以及适用的跨状态机合同测试。
 | Resource | Sole owner | Verification must reject |
 | --- | --- | --- |
 | Workspace candidate/Definition/startup/active slot | Workspace Block | projection/Run/Application direct mutation or unresolved activation |
-| Run lifecycle/opaque record/replacement intent | Run Block | caller target state、Orchestrator lifecycle choice、duplicate successor |
+| Run lifecycle/opaque record/replacement intent | Run Block | caller target state、Orchestrator lifecycle choice、把 same-owner replacement transaction 注册为另一状态机、duplicate successor |
 | Result formal outcome | Result Block | Result recomputing acceptance or generic entity write bypass |
 | Decision/Approval | corresponding Block | unbound ticket/resolution or cross-owner repository access |
 | capability effect/session | corresponding capability Block | generic executor、unsealed operation、owner receipt rebuilding credit |
@@ -76,7 +78,8 @@ Cross-owner regression必须证明 concrete receiving-owner Command/Result、wor
 - provider-facing operation mode 只能从 sealed canonical state/output constraints 派生；
 - Runtime aggregate 只保存 canonical state + terminal code/summary，不保存第二个 terminal kind；
 - SM-4 sealed delivery 使用 `TerminalOutcome.Kind = completed | failed | cancelled | superseded`；
-- completed/failed 只来自 sealed SM-2 terminal，cancelled/superseded 只来自 SM-1 typed administrative fact；
+- completed/failed 只来自 sealed SM-2 terminal；cancelled/superseded 只来自 Run SM-1 typed administrative intent，且
+  `RuntimeTerminationRecord` 仅可作为 SM-4 exact handoff，不能直接改变 Run state；
 - terminal delivery identity/acknowledgement 不保留 action 或第二份 administrative kind；
 - semantic catalog retirement 后，由 binding-free target 缺口产生的 `target_grounding_unresolved` view 不得生成 SM-4 drive
   result、startup terminal classification 或 delivery request；只允许 semantic-plan request。semantic seal/semantic failure
@@ -135,6 +138,21 @@ Cross-owner regression必须证明 concrete receiving-owner Command/Result、wor
 - owner-fact acquisition manifest 必须同时投影 immutable terminal evidence kinds 与 current acquisition evidence kinds；
   schema、decoder 与 binding compiler 对 terminal `validation` + current File `state_change` 给出同一解释，且 C0～C2 bytes/hash
   不因 current acquisition 改变；acquisition 不携带 terminal metric/artifact credit。
+- `prospective_owner_target` declaration/obligation/projection 必须具有同一 nonempty
+  `ProspectiveSatisfactionContractRef`，其它 policy 禁止携带；manifest 分离 provider-selectable `OwnerCatalogs` 与
+  `OwnerFactDependencyCatalogs`。dependency catalog参与hash/freshness/CAS/seal但必须从 C3、allowed operation/surface、
+  schema enum、correction values中完全缺席。
+- composite prospective probe必须覆盖：File outer feasibility生成exact base-workspace-tree-revision-bound immutable delta且
+  零文件/目录写入；Shell只消费该delta、activation-sealed recipes和自身dependency catalog/observation，逐surface校验
+  recipe command/ordered args/timeout schema identity且零workspace read/process/session/effect；Orchestrator不解释path/recipe。
+- observation CAS与semantic seal分别重验manifest/batch/request/contract ref、delta、File catalog/observation与Shell dependency
+  catalog/observation；probe→CAS、persist→seal任一漂移均零binding/dispatch/effect。duplicate/restart使用full composite hash
+  幂等，冲突payload拒绝。
+- Shell typed stale必须作为nested owner-authored observation走一次bounded prerequisite refresh，不能伪装成File outer stale或
+  直接terminal；missing dependency在Shell call前退休generation。`would_not_satisfy` 必须先持久化完整 composite fact；因 exact
+  target 已由 activation 封存，下一次 drive 直接形成统一 `semantic_contract_failed` terminal，并保留 typed original reason
+  `prospective_owner_fact_unsatisfied`；零 provider correction/request、ticket、refresh/acquisition/operation budget或effect，
+  duplicate/restart不重复owner probe。
 - Definition-gap complete document 在 owner-private transition 前必须通过 pure manifest/expected-document admission；已有 sealed
   acquisition 的 `undeclared_prerequisite` 只产生 attempt-0 typed correction，零 gap observation、governance、ticket、dispatch、
   effect 或 Definition mutation；stale identity 同样不能越过 admission。
@@ -247,8 +265,9 @@ Cross-owner regression必须证明 concrete receiving-owner Command/Result、wor
 - runtime clarification Restart 必须覆盖 Definition revision/StartupInputHash 的同 seal、仅 revision 变化、仅 hash 变化与两项均
   变化矩阵；前三类返回 typed `governance_required/definition_clarification_pending` 且零 CAS/跨 owner command/recovery，只有最后
   一类允许持久化 replacement intent；
-- replacement 的 clarification resolution、administrative termination、successor materialization 使用 Run-owned persisted
-  stage/state/generation/attempt/dueAt lease；每一步先claim、failure续排、Stop/fresh restart恢复。进程内task不得成为唯一后继，
+- replacement 的 clarification resolution、administrative termination intent、SM-4 handoff acknowledgement 与 successor
+  materialization 使用 Run-owned persisted stage/state/generation/attempt/dueAt lease；每一步先claim、failure续排、Stop/fresh
+  restart恢复；Run terminal 必须经 private SM-1 delivery event。进程内task不得成为唯一后继，
   duplicate/stale generation不得重复Decision/Orchestrator call或successor create；
 - terminal delivery 已提交、successor 已创建但 lineage 未提交、lineage 已提交但 successor 尚未激活三个 restart cut point
   均必须在进程重启后收敛到同一 successor，重复 recovery 不得再次创建或激活；

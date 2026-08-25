@@ -503,6 +503,92 @@ func TestRuntimeSemanticPlanningRejectsInvalidStaleAndThirdAttemptTransitions(t 
 	}
 }
 
+func TestRuntimeSemanticFeasibilityRejectsProviderCorrectionAfterOwnerFactsBegin(t *testing.T) {
+	controller, repository, aggregate := newSemanticPlanningController(t)
+	manifest, proof, _ := semanticPlanningFixture(t, aggregate)
+	ctx := context.Background()
+	apply := func(event RuntimeInternalEvent) RuntimeAggregate {
+		t.Helper()
+		event.Scope = RuntimeInternalEventScope{WorkspaceID: aggregate.Facts.WorkspaceID, RunID: aggregate.Facts.RunID}
+		result, err := controller.ApplyInternalEvent(ctx, event)
+		if err != nil {
+			t.Fatalf("apply %s: %v", event.Kind, err)
+		}
+		aggregate = result.Aggregate
+		return aggregate
+	}
+	apply(RuntimeInternalEvent{Kind: RuntimeInternalEventSemanticPlanRequestStarted, Transaction: &RuntimeInternalTransactionPayload{
+		SemanticManifest: &manifest, StablePrefixHash: "semantic-prefix-feasibility", LogicalRequestID: "semantic-order-request",
+	}})
+	order := proof.Clone()
+	order.PlanStep = runtimecontract.RuntimeSemanticPlanStepCoverageOrder
+	order.BatchID = ""
+	order.BatchSequence = 0
+	order.BatchCoverageWorkItemIDs = nil
+	order.CoverageOrder = []common.CoverageWorkItemID{manifest.CoverageItems[0].ID}
+	order.Proposals = nil
+	apply(RuntimeInternalEvent{Kind: RuntimeInternalEventSemanticPlanEvaluated, Transaction: &RuntimeInternalTransactionPayload{
+		SemanticDocument: &order, LogicalRequestID: "semantic-order-request",
+	}})
+	batch, err := runtimecontract.CompileRuntimeSemanticPlanFocusBatch(
+		manifest, order, 0, "semantic-proof-request", aggregate.Facts.Focus.CoverageWorkItemIDs,
+		aggregate.SemanticPlanning.PendingCoverageIDs, 1,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	aggregate, err = controller.compileSemanticPlanBatch(ctx, aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, batch)
+	if err != nil {
+		t.Fatal(err)
+	}
+	proof.BatchID = batch.BatchID
+	proof.BatchSequence = batch.Sequence
+	proof.BatchCoverageWorkItemIDs = append([]common.CoverageWorkItemID(nil), batch.CoverageWorkItemIDs...)
+	apply(RuntimeInternalEvent{Kind: RuntimeInternalEventSemanticPlanEvaluated, Transaction: &RuntimeInternalTransactionPayload{
+		SemanticDocument: &proof, LogicalRequestID: "semantic-proof-request",
+	}})
+	apply(RuntimeInternalEvent{Kind: RuntimeInternalEventSemanticFeasibilityRequired, Authority: &RuntimeInternalAuthorityPayload{}})
+	if aggregate.SemanticPlanning.Phase != runtimecontract.RuntimeSemanticPlanningFeasibilityRequired {
+		t.Fatalf("phase = %q, want feasibility required", aggregate.SemanticPlanning.Phase)
+	}
+	beforeRevision := aggregate.StateRevision
+	beforeAttempts := len(aggregate.CandidateAttempts)
+	rejection := semanticPlanningDiagnostic()
+	rejection.OriginalCode = "semantic_owner_proposal_constraint"
+	rejection.OriginalMessage = "proposal omitted its required durable effect scope"
+	rejection.SemanticViolations = []runtimecontract.RuntimeSemanticContractViolation{{
+		Kind: runtimecontract.RuntimeSemanticContractViolationProposalConstraint,
+		Path: "$.proposals[0].requiredEffectScopes", CoverageWorkItemID: manifest.CoverageItems[0].ID,
+		ProposalIndex: 0, Rule: runtimecontract.RuntimeSemanticConstraintRelational,
+		Actual: "empty_array", Required: []string{string(runtimecontract.RuntimeEffectWorkspaceDurable)},
+	}}
+	expected := runtimecontract.RuntimeExpectedDocumentContract{
+		DocumentKind: runtimecontract.RuntimeProviderDocumentSemanticPlan, PlanStep: runtimecontract.RuntimeSemanticPlanStepProofBatch,
+		ManifestHash: manifest.Hash, DefinitionSeedHash: manifest.DefinitionSeedHash, CorrectionAttempt: 1,
+	}
+	event := RuntimeInternalEvent{Kind: RuntimeInternalEventSemanticPlanCorrectionRequired, Scope: RuntimeInternalEventScope{
+		WorkspaceID: aggregate.Facts.WorkspaceID, RunID: aggregate.Facts.RunID,
+	}, Transaction: &RuntimeInternalTransactionPayload{
+		StablePrefixHash: "semantic-prefix-feasibility", LogicalRequestID: "semantic-proof-correction",
+		ExpectedDocument: &expected, SemanticDiagnostic: &rejection,
+	}}
+	if _, err := controller.ApplyInternalEvent(ctx, event); !errors.Is(err, common.ErrConflict) {
+		t.Fatalf("feasibility-stage provider correction error = %v, want conflict", err)
+	}
+	reloaded, err := repository.Load(ctx, aggregate.Facts.WorkspaceID, aggregate.Facts.RunID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ledger := reloaded.SemanticPlanning
+	active, found := runtimeSemanticBatch(ledger.Batches, ledger.ActiveBatchID)
+	if !found || ledger.Phase != runtimecontract.RuntimeSemanticPlanningFeasibilityRequired || ledger.Attempt != 0 ||
+		active.State != runtimecontract.RuntimeSemanticPlanBatchFeasibilityPending || active.DocumentHash == "" ||
+		len(ledger.BatchDocuments) != 1 || ledger.FeasibilityBatchID == "" || len(ledger.Feasibilities) != 0 || ledger.FeasibilitySetHash != "" ||
+		len(reloaded.CandidateAttempts) != beforeAttempts || reloaded.ActiveDispatch != nil || reloaded.StateRevision != beforeRevision {
+		t.Fatalf("rejected feasibility correction changed owner state: ledger=%+v batch=%+v", ledger, active)
+	}
+}
+
 func TestRuntimeSemanticCoverageOrderCorrectionPersistsAndReplaysIdempotently(t *testing.T) {
 	controller, _, aggregate := newSemanticPlanningController(t)
 	manifest, _, _ := semanticPlanningFixture(t, aggregate)
@@ -1523,6 +1609,23 @@ func TestRuntimeSemanticCrossOwnerPartialBatchIsOrderIndependentAndRecoversAfter
 	}
 	gitCatalog.SnapshotID = runtimecontract.StableRuntimeOperationAdmissibilitySnapshotID(gitCatalog)
 	facts.Resources.OperationAdmissibilities = []runtimecontract.RuntimeOperationAdmissibility{fileCatalog, gitCatalog}
+	for _, catalog := range facts.Resources.OperationAdmissibilities {
+		prerequisite := runtimecontract.RuntimePrerequisite{
+			ID: catalog.PrerequisiteID, Kind: runtimecontract.PrerequisiteKindOperationAdmissibility,
+			OwnerModuleID: catalog.OwnerModuleID, RequiredCapabilities: append([]string(nil), catalog.OperationKinds...),
+		}
+		observation := runtimecontract.RuntimePrerequisiteObservation{
+			PrerequisiteID: prerequisite.ID, Kind: prerequisite.Kind, OwnerModuleID: prerequisite.OwnerModuleID,
+			ContentHash: catalog.SnapshotID,
+			Dependencies: []runtimecontract.RuntimeFreshnessDependency{{
+				Domain: runtimecontract.RuntimeResourceOwnerCatalog, OwnerModuleID: catalog.OwnerModuleID,
+				SubjectRef: "semantic-test-catalog", Revision: catalog.ObservedRevision,
+			}},
+		}
+		observation.ObservationID = runtimecontract.StableRuntimePrerequisiteObservationID(observation)
+		facts.Prerequisites.Satisfied = append(facts.Prerequisites.Satisfied, prerequisite)
+		facts.Resources.PrerequisiteObservations = append(facts.Resources.PrerequisiteObservations, observation)
+	}
 	facts.DefinitionFocuses = runtimeTestDefinitionFocuses(facts)
 	aggregate, err := controller.initialize(ctx, facts, definition, nil)
 	if err != nil {
@@ -2172,7 +2275,12 @@ func newSemanticPlanningController(t *testing.T) (*RuntimeController, *controlle
 	if err != nil {
 		t.Fatal(err)
 	}
-	aggregate, err := controller.initialize(context.Background(), controllerFacts(), controllerDefinition(), nil)
+	facts := controllerFacts()
+	catalog, prerequisite, observation := semanticPlanningCatalogFixture()
+	facts.Resources.OperationAdmissibilities = []runtimecontract.RuntimeOperationAdmissibility{catalog}
+	facts.Resources.PrerequisiteObservations = []runtimecontract.RuntimePrerequisiteObservation{observation}
+	facts.Prerequisites.Satisfied = []runtimecontract.RuntimePrerequisite{prerequisite}
+	aggregate, err := controller.initialize(context.Background(), facts, controllerDefinition(), nil)
 	if err != nil {
 		t.Fatal(err)
 	}

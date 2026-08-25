@@ -202,8 +202,16 @@ func (a *RuntimeAdapter) ListFiles(request FileListRequest) (FileListResult, err
 			truncated = true
 			return filepath.SkipAll
 		}
+		entryRef := filepath.ToSlash(relEntry)
+		if entry.Type()&os.ModeSymlink != 0 {
+			// guardedWorkspacePath has already proved the alias resolves inside
+			// the workspace. Preserve the alias's own canonical tree identity in
+			// the bounded inventory so rename/replace topology cannot retain the
+			// previous workspace-manifest revision.
+			entryRef = filepath.ToSlash(filepath.Clean(relInput))
+		}
 		item := FileListEntry{
-			Path: filepath.ToSlash(relEntry), Kind: fileKind(entryInfo), Size: entryInfo.Size(),
+			Path: entryRef, Kind: fileKind(entryInfo), Size: entryInfo.Size(),
 			ModifiedAt: entryInfo.ModTime().UTC().Format("2006-01-02T15:04:05Z07:00"),
 		}
 		if !entryInfo.IsDir() && entryInfo.Mode()&os.ModeSymlink == 0 {

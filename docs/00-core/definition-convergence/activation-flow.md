@@ -4,7 +4,7 @@ Status: normative
 
 Type: runtime-flow
 
-Last Verified: 2026-08-24
+Last Verified: 2026-08-25
 
 ## Purpose
 
@@ -53,8 +53,10 @@ A fresh bootstrap requires an admitted and activation-eligible startup input con
 - candidate-bound exact normalized typed Profile contract snapshot plus the matching startup-input Profile hash; every required
   Profile acceptance/deliverable CWI has an exact evidence requirement, nonempty supported evidence kinds and at least one typed
   owner-receipt proof operation;
-- every Profile-required owner fact has a preexisting or unique acquisition/reobserve declaration, and the candidate manifest equals
-  the manifest independently derived from the exact Profile snapshot;
+- every Profile-required owner fact has a preexisting or unique acquisition/reobserve declaration; a
+  `prospective_owner_target` acquisition additionally has the exact Profile-derived nonempty
+  `ProspectiveSatisfactionContractRef`, while other policies have none; the candidate manifest equals the manifest independently
+  derived from the exact Profile snapshot;
 - Workspace canonical provider selection and referenced Soul/Skill/MCP/Memory resources;
 - template/profile/capability/evidence policy declarations;
 - bounded convergence/recovery policy.

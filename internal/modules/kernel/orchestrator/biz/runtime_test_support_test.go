@@ -680,17 +680,33 @@ func runtimeTestSealedSemanticPlanning(t *testing.T, aggregate runtime.RuntimeAg
 		allowedKinds = append(allowedKinds, spec.proposal.OperationKind)
 		allowedPolicies = append(allowedPolicies, spec.proposal.Target.Policy)
 	}
+	proofObligations := runtimeTestSemanticProofObligations(t, aggregate.Facts, coverageItems, catalogs, fixtureSpecs)
+	dependencyCatalogs := make([]runtimecontract.RuntimeOperationAdmissibility, 0)
+	dependencyOwners := make(map[string]struct{})
+	for _, obligation := range proofObligations {
+		if obligation.OwnerFactAcquisition == nil || obligation.OwnerFactAcquisition.ProspectiveSatisfactionContractRef == "" {
+			continue
+		}
+		owner := obligation.OwnerFactAcquisition.Requirement.OwnerModuleID
+		if _, duplicate := dependencyOwners[owner]; duplicate {
+			continue
+		}
+		catalog := runtimeTestSemanticFixtureCatalogForOwner(t, aggregate.Facts.Resources.OperationAdmissibilities, owner)
+		dependencyCatalogs = append(dependencyCatalogs, catalog)
+		dependencyOwners[owner] = struct{}{}
+	}
 	manifest := runtimecontract.RuntimeSemanticPlanManifest{
 		SchemaVersion: runtimecontract.RuntimeSemanticPlanManifestSchemaCurrent,
 		WorkspaceID:   aggregate.Facts.WorkspaceID, RunID: aggregate.Facts.RunID,
 		DefinitionRevision: aggregate.Facts.DefinitionRevision, DefinitionSeedHash: aggregate.Facts.DefinitionSeed.Hash,
-		OperationContractRevision: operationContractRevision,
-		CoverageItems:             coverageItems,
-		AllowedOwnerModuleIDs:     runtimeTestNormalizeStrings(allowedOwners),
-		AllowedOperationKinds:     runtimeTestNormalizeStrings(allowedKinds),
-		AllowedTargetPolicies:     runtimeTestNormalizeTargetPolicies(allowedPolicies),
-		ProofObligations:          runtimeTestSemanticProofObligations(t, aggregate.Facts, coverageItems, catalogs, fixtureSpecs),
-		OwnerCatalogs:             catalogs,
+		OperationContractRevision:   operationContractRevision,
+		CoverageItems:               coverageItems,
+		AllowedOwnerModuleIDs:       runtimeTestNormalizeStrings(allowedOwners),
+		AllowedOperationKinds:       runtimeTestNormalizeStrings(allowedKinds),
+		AllowedTargetPolicies:       runtimeTestNormalizeTargetPolicies(allowedPolicies),
+		ProofObligations:            proofObligations,
+		OwnerCatalogs:               catalogs,
+		OwnerFactDependencyCatalogs: dependencyCatalogs,
 	}
 	manifest.Hash = runtimecontract.StableRuntimeSemanticPlanManifestHash(manifest)
 	coverageOrder, err := runtimeTestSemanticCoverageOrderForItems(coverageItems)
@@ -749,14 +765,16 @@ func runtimeTestSealedSemanticPlanning(t *testing.T, aggregate runtime.RuntimeAg
 			proposal := spec.proposal
 			document.Proposals = append(document.Proposals, proposal)
 			catalog := runtimeTestSemanticFixtureCatalogForOwner(t, catalogs, proposal.OwnerModuleID)
-			feasibilities = append(feasibilities, runtimecontract.RuntimeSemanticProofFeasibility{
+			feasibility := runtimecontract.RuntimeSemanticProofFeasibility{
 				SchemaVersion: runtimecontract.RuntimeSemanticFeasibilitySchemaCurrent,
 				ManifestHash:  manifest.Hash, DefinitionSeedHash: manifest.DefinitionSeedHash,
 				CoverageWorkItemID: coverageID, ProposalHash: runtimecontract.StableRuntimeSemanticProofProposalHash(proposal),
 				OwnerModuleID: proposal.OwnerModuleID, CatalogSnapshotID: catalog.SnapshotID, Status: runtimecontract.RuntimeSemanticFeasibilityFeasible,
 				ObservedRevision: catalog.ObservedRevision, TargetRefs: append([]string(nil), spec.feasibilityRefs...),
 				ValidationRecipeID: proposal.ValidationRecipeID, RequiredCheckRefs: append([]string(nil), spec.validationChecks...),
-			})
+			}
+			runtimeTestAttachProspectiveOwnerFactSatisfaction(t, manifest, proposal, catalog, &feasibility)
+			feasibilities = append(feasibilities, feasibility)
 		}
 	}
 	if len(document.Proposals) < len(batch.CoverageWorkItemIDs) {
@@ -808,6 +826,61 @@ func runtimeTestSealedSemanticPlanning(t *testing.T, aggregate runtime.RuntimeAg
 	return ledger.Normalized()
 }
 
+func runtimeTestAttachProspectiveOwnerFactSatisfaction(t *testing.T, manifest runtimecontract.RuntimeSemanticPlanManifest, proposal runtimecontract.RuntimeSemanticProofProposal, catalog runtimecontract.RuntimeOperationAdmissibility, feasibility *runtimecontract.RuntimeSemanticProofFeasibility) {
+	t.Helper()
+	if feasibility == nil {
+		t.Fatal("prospective owner-fact fixture requires feasibility")
+	}
+	var acquisition *runtimecontract.RuntimeSemanticOwnerFactAcquisition
+	for _, obligation := range manifest.ProofObligations {
+		if obligation.CoverageWorkItemID == proposal.CoverageWorkItemID && obligation.OwnerFactAcquisition != nil {
+			value := obligation.OwnerFactAcquisition.Clone()
+			acquisition = &value
+			break
+		}
+	}
+	if acquisition == nil || acquisition.AcquisitionTargetPolicy != runtimecontract.RuntimeOperationTargetPolicyProspectiveOwnerTarget {
+		return
+	}
+	feasibility.CatalogObservationID = "test-prospective-file-observation"
+	delta, err := runtimecontract.NewRuntimeProspectiveWorkspaceManifestDelta(
+		manifest, proposal, acquisition.ProspectiveSatisfactionContractRef, catalog,
+		runtimecontract.WorkspaceManifest{Revision: catalog.ObservedRevision, TargetRefs: append([]string(nil), catalog.TargetRefs...)},
+	)
+	if err != nil {
+		t.Fatalf("build test prospective workspace delta: %v", err)
+	}
+	var dependencyCatalog runtimecontract.RuntimeOperationAdmissibility
+	for _, candidate := range manifest.OwnerFactDependencyCatalogs {
+		if candidate.OwnerModuleID == acquisition.Requirement.OwnerModuleID {
+			dependencyCatalog = candidate
+			break
+		}
+	}
+	if dependencyCatalog.SnapshotID == "" {
+		t.Fatalf("build test prospective satisfaction: missing dependency catalog %q", acquisition.Requirement.OwnerModuleID)
+	}
+	satisfaction := runtimecontract.RuntimeOwnerFactProspectiveSatisfaction{
+		SchemaVersion: runtimecontract.RuntimeOwnerFactProspectiveSatisfactionSchemaCurrent,
+		WorkspaceID:   manifest.WorkspaceID, RunID: manifest.RunID, ManifestHash: manifest.Hash,
+		DefinitionSeedHash: manifest.DefinitionSeedHash, CoverageWorkItemID: proposal.CoverageWorkItemID,
+		ProposalHash: runtimecontract.StableRuntimeSemanticProofProposalHash(proposal), Requirement: acquisition.Requirement,
+		ProspectiveSatisfactionContractRef: acquisition.ProspectiveSatisfactionContractRef,
+		OwnerModuleID:                      acquisition.Requirement.OwnerModuleID, CatalogSnapshotID: dependencyCatalog.SnapshotID,
+		CatalogObservationID: "test-prospective-required-owner-observation", ObservedRevision: dependencyCatalog.ObservedRevision,
+		ProspectiveWorkspaceManifestDeltaHash: runtimecontract.StableRuntimeProspectiveWorkspaceManifestDeltaHash(delta),
+		Outcome:                               runtimecontract.RuntimeOwnerFactProspectiveWouldSatisfy, ProspectiveValidationRecipeRefs: []string{"test-prospective-validation-recipe"},
+	}
+	if err := satisfaction.Validate(); err != nil {
+		t.Fatalf("build test prospective owner-fact satisfaction: %v", err)
+	}
+	feasibility.ProspectiveWorkspaceManifestDelta = &delta
+	observation := runtimecontract.RuntimeOwnerFactProspectiveSatisfactionObservation{
+		FeasibilityBatchID: "test-feasibility-batch", RequestHash: "test-prospective-request", Satisfaction: &satisfaction,
+	}
+	feasibility.OwnerFactProspectiveSatisfactionObservation = &observation
+}
+
 // runtimeTestSemanticProofObligations adapts hand-written post-semantic test
 // fixtures to the same immutable per-CWI contract now sealed by production.
 // It is deliberately test-only: production obligations are compiled exactly
@@ -828,6 +901,19 @@ func runtimeTestSemanticProofObligations(t *testing.T, facts runtimecontract.Run
 	ret := make([]runtimecontract.RuntimeSemanticProofObligation, 0, len(coverageItems))
 	for _, item := range coverageItems {
 		source := sources[item.ID].Normalized()
+		prospectiveTargetRef := source.ProspectiveTargetRef
+		if prospectiveTargetRef == "" {
+			candidates := make([]string, 0, 1)
+			for _, spec := range specs {
+				if spec.proposal.CoverageWorkItemID == item.ID && spec.proposal.Target.ProspectiveTargetRef != "" {
+					candidates = append(candidates, spec.proposal.Target.ProspectiveTargetRef)
+				}
+			}
+			candidates = runtimeTestNormalizeStrings(candidates)
+			if len(candidates) == 1 {
+				prospectiveTargetRef = candidates[0]
+			}
+		}
 		evidenceKinds := append([]string(nil), source.RequiredEvidenceKinds...)
 		if len(evidenceKinds) == 0 {
 			for _, spec := range specs {
@@ -839,16 +925,28 @@ func runtimeTestSemanticProofObligations(t *testing.T, facts runtimecontract.Run
 		obligation := runtimecontract.RuntimeSemanticProofObligation{
 			CoverageWorkItemID: item.ID, RequiredEvidenceKinds: runtimeTestNormalizeStrings(evidenceKinds),
 			DeclarationTargetRole: source.TargetRole, DeclarationTargetDiscoverySources: append([]string(nil), source.TargetDiscoverySources...),
-			RequireTargetGrounding: source.RequireTargetGrounding, RequireAssessment: source.RequireAssessment,
+			DeclarationProspectiveTargetRef: prospectiveTargetRef,
+			RequireTargetGrounding:          source.RequireTargetGrounding || prospectiveTargetRef != "", RequireAssessment: source.RequireAssessment,
 			RequiredOwnerFacts:    append([]runtimecontract.RuntimeOwnerFactRequirement(nil), source.RequiredOwnerFacts...),
 			OwnerFactConvergences: runtimecontract.CloneRuntimeOwnerFactConvergences(source.OwnerFactConvergences),
 			MetricConstraints:     append([]string(nil), source.MetricConstraints...), ArtifactRefs: append([]string(nil), source.ArtifactRefs...),
 		}
-		if source.TargetSelectorRef != "" && source.TargetSelectorOwnerRef != "" && source.TargetSelectorSubjectRef != "" {
+		if source.TargetSelectorRef != "" {
 			obligation.DeclarationTargetSelectorRef = source.TargetSelectorRef
 			obligation.DeclarationTargetSelectorOwnerRef = source.TargetSelectorOwnerRef
 			obligation.DeclarationTargetSelectorSubjectRef = source.TargetSelectorSubjectRef
+			if obligation.DeclarationTargetSelectorOwnerRef == "" {
+				obligation.DeclarationTargetSelectorOwnerRef = "test/profile"
+			}
+			if obligation.DeclarationTargetSelectorSubjectRef == "" {
+				obligation.DeclarationTargetSelectorSubjectRef = "test/coverage/" + string(item.ID)
+			}
 			obligation.DeclarationTargetSelectorCandidateRefs = append([]string(nil), source.TargetSelectorCandidateRefs...)
+		}
+		if prospectiveTargetRef != "" && obligation.DeclarationTargetSelectorRef == "" {
+			obligation.DeclarationTargetSelectorRef = "test/definition-target-selector/" + string(item.ID)
+			obligation.DeclarationTargetSelectorOwnerRef = "test/profile"
+			obligation.DeclarationTargetSelectorSubjectRef = "test/coverage/" + string(item.ID)
 		}
 		if len(runtimecontract.RuntimeMissingOwnerFactRequirements(source.RequiredOwnerFacts, catalogs)) != 0 {
 			convergence, required := runtimecontract.ResolveRuntimeOwnerFactAcquisition(source.RequiredOwnerFacts, source.OwnerFactConvergences, catalogs)
@@ -870,9 +968,18 @@ func runtimeTestSemanticProofObligations(t *testing.T, facts runtimecontract.Run
 			if convergence.AcquisitionTargetPolicy != runtimecontract.RuntimeOperationTargetPolicyProspectiveOwnerTarget {
 				constraints = nil
 			}
+			acquisitionProspectiveTargetRef := ""
+			if convergence.AcquisitionTargetPolicy == runtimecontract.RuntimeOperationTargetPolicyProspectiveOwnerTarget {
+				acquisitionProspectiveTargetRef = prospectiveTargetRef
+				obligation.DeclarationTargetSelectorRef = convergence.TargetSelectorRef
+				obligation.DeclarationTargetSelectorOwnerRef = convergence.TargetSelectorOwnerRef
+				obligation.DeclarationTargetSelectorSubjectRef = convergence.TargetSelectorSubjectRef
+			}
 			obligation.OwnerFactAcquisition = &runtimecontract.RuntimeSemanticOwnerFactAcquisition{
-				Requirement:                  convergence.Requirement,
-				DeclarationTargetSelectorRef: convergence.TargetSelectorRef, DeclarationTargetSelectorOwnerRef: convergence.TargetSelectorOwnerRef, DeclarationTargetSelectorSubjectRef: convergence.TargetSelectorSubjectRef,
+				Requirement:                        convergence.Requirement,
+				ProspectiveSatisfactionContractRef: convergence.ProspectiveSatisfactionContractRef,
+				ProspectiveTargetRef:               acquisitionProspectiveTargetRef,
+				DeclarationTargetSelectorRef:       convergence.TargetSelectorRef, DeclarationTargetSelectorOwnerRef: convergence.TargetSelectorOwnerRef, DeclarationTargetSelectorSubjectRef: convergence.TargetSelectorSubjectRef,
 				AcquisitionOwnerModuleID: convergence.AcquisitionOwnerModuleID, AcquisitionOperationKind: convergence.AcquisitionOperationKind, AcquisitionOperationVariantID: convergence.AcquisitionOperationVariantID,
 				AcquisitionTargetPolicy: convergence.AcquisitionTargetPolicy, AcquisitionTargetSelectorRef: convergence.AcquisitionTargetSelectorRef, AcquisitionConstraintRefs: constraints,
 				OwnerCatalogSnapshotID: catalog.SnapshotID, OwnerCatalogObservedRevision: catalog.ObservedRevision,

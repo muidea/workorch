@@ -113,6 +113,9 @@ func verify(root, inventoryPath, transitionPath string) error {
 				return fmt.Errorf("state-model inventory row %d classifies %s as invariant but it has %d explicitly typed constants, want exactly 1", entry.Line, key, typedConstantCounts[constantKey])
 			}
 		}
+		// Multiple transition IDs are legal only as coordination inside the
+		// state type's one owner. Each referenced transition must therefore
+		// resolve back to the exact same owner root.
 		for _, transitionID := range entry.TransitionIDs {
 			transition, found := transitions[transitionID]
 			if !found {

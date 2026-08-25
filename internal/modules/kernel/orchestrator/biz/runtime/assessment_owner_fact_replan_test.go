@@ -134,10 +134,17 @@ func TestCommitAssessmentSettlesAcquisitionBeforeTerminalDefinitionProof(t *test
 	// not an Orchestrator transition; commitAssessment may only consume it after
 	// the private AssessmentObserved route invokes SM-2.
 	shellCatalog := runtimeTestSelectableValidationCatalog(t)
-	repository.aggregate.Facts.Resources.OperationAdmissibilities = runtimecontract.NormalizeRuntimeOperationAdmissibilities(append(
-		repository.aggregate.Facts.Resources.OperationAdmissibilities,
-		shellCatalog,
-	))
+	for index := range repository.aggregate.Facts.Resources.OperationAdmissibilities {
+		if repository.aggregate.Facts.Resources.OperationAdmissibilities[index].OwnerModuleID == runtimecontract.RuntimeModuleShell {
+			repository.aggregate.Facts.Resources.OperationAdmissibilities[index] = shellCatalog
+			shellCatalog = runtimecontract.RuntimeOperationAdmissibility{}
+			break
+		}
+	}
+	if shellCatalog.OwnerModuleID != "" {
+		repository.aggregate.Facts.Resources.OperationAdmissibilities = append(repository.aggregate.Facts.Resources.OperationAdmissibilities, shellCatalog)
+	}
+	repository.aggregate.Facts.Resources.OperationAdmissibilities = runtimecontract.NormalizeRuntimeOperationAdmissibilities(repository.aggregate.Facts.Resources.OperationAdmissibilities)
 
 	progressed, err := controller.commitAssessment(context.Background(), "ws-v2", "run-v2")
 	if err != nil {
@@ -356,6 +363,8 @@ func prepareTerminalValidationOwnerFactAcquisitionAssessment(t *testing.T) (*Run
 	facts.Focus.TargetSelectorRef = convergence.TargetSelectorRef
 	facts.Focus.TargetSelectorOwnerRef = convergence.TargetSelectorOwnerRef
 	facts.Focus.TargetSelectorSubjectRef = convergence.TargetSelectorSubjectRef
+	facts.Focus.TargetRole = "validation-input"
+	facts.Focus.ProspectiveTargetRef = "runtime-owner-fact-validation_test.go"
 	facts.Focus.RequireTargetGrounding = true
 	fileCatalog := facts.Resources.OperationAdmissibilities[0]
 	fileCatalog.SelectorRefs = []string{convergence.AcquisitionTargetSelectorRef}
@@ -370,7 +379,10 @@ func prepareTerminalValidationOwnerFactAcquisitionAssessment(t *testing.T) (*Run
 		ConstraintRefs: []string{"workspace-relative-path"},
 	}}
 	fileCatalog.SnapshotID = runtimecontract.StableRuntimeOperationAdmissibilitySnapshotID(fileCatalog)
-	facts.Resources.OperationAdmissibilities = []runtimecontract.RuntimeOperationAdmissibility{fileCatalog}
+	facts.Resources.OperationAdmissibilities = []runtimecontract.RuntimeOperationAdmissibility{
+		fileCatalog,
+		runtimeTestProspectiveValidationDependencyCatalog(t, convergence.ProspectiveSatisfactionContractRef),
+	}
 	facts.DefinitionFocuses = nil
 	facts.DefinitionFocuses = runtimeTestDefinitionFocuses(facts)
 	bootstrapFacts := facts
@@ -456,7 +468,8 @@ func runtimeTestSelectableValidationOwnerFactConvergence() runtimecontract.Runti
 		Requirement: runtimeTestSelectableValidationOwnerFact(), MissingTrigger: runtimecontract.RuntimeOwnerFactMissingTrigger,
 		AcquisitionOwnerModuleID: runtimecontract.RuntimeModuleFile, AcquisitionOperationKind: runtimecontract.StepKindFileWrite,
 		AcquisitionTargetPolicy: runtimecontract.RuntimeOperationTargetPolicyProspectiveOwnerTarget, AcquisitionTargetSelectorRef: "workspace-relative-new-file-target",
-		TargetSelectorRef: "file/workspace_deliverable", TargetSelectorOwnerRef: "test-profile", TargetSelectorSubjectRef: "validation_preparation",
+		ProspectiveSatisfactionContractRef: "shell/selectable-validation-surface/prospective-workspace-manifest/v1",
+		TargetSelectorRef:                  "file/workspace_deliverable", TargetSelectorOwnerRef: "test-profile", TargetSelectorSubjectRef: "validation_preparation",
 		ReobserveOwnerModuleID: runtimecontract.RuntimeModuleShell, ReobserveFactKind: runtimecontract.RuntimeOwnerFactSelectableValidationSurface,
 		MaxAcquisitionAttempts: 1,
 	}
@@ -480,6 +493,30 @@ func runtimeTestSelectableValidationCatalog(t *testing.T) runtimecontract.Runtim
 	catalog.SnapshotID = runtimecontract.StableRuntimeOperationAdmissibilitySnapshotID(catalog)
 	if err := catalog.Validate(); err != nil {
 		t.Fatalf("owner-fact test catalog: %v", err)
+	}
+	return catalog
+}
+
+func runtimeTestProspectiveValidationDependencyCatalog(t *testing.T, contractRef string) runtimecontract.RuntimeOperationAdmissibility {
+	t.Helper()
+	surface := runtimecontract.RuntimeValidationSurface{
+		ID: "recipe/owner-fact-prospective", OwnerModuleID: runtimecontract.RuntimeModuleShell,
+		OperationKind: runtimecontract.RuntimeBlockKindManagedValidationSession,
+		Readiness:     runtimecontract.RuntimeValidationSurfacePrerequisiteRequired, ReadinessReason: "applicable workspace input required",
+		InputSchemaHash: "schema/owner-fact-prospective-v1", PrerequisiteRef: "workspace/owner-fact-validation-input",
+		ProspectiveSatisfactionContractRef: contractRef,
+		CheckRefs:                          []string{"check/owner-fact-prospective"}, ProofApplicability: runtimecontract.RuntimeValidationProofDirect,
+		EffectScope: runtimecontract.RuntimeEffectEphemeralSession, IdempotencyClass: runtimecontract.RuntimeOperationIdempotencyAtMostOnce,
+	}
+	catalog := runtimecontract.RuntimeOperationAdmissibility{
+		PrerequisiteID: "operation-admissibility-shell-owner-fact", OwnerModuleID: runtimecontract.RuntimeModuleShell,
+		OperationKinds:     []string{runtimecontract.RuntimeBlockKindManagedValidationSession},
+		ValidationSurfaces: []runtimecontract.RuntimeValidationSurface{surface},
+		ObservedRevision:   "shell-owner-fact-policy-v1",
+	}
+	catalog.SnapshotID = runtimecontract.StableRuntimeOperationAdmissibilitySnapshotID(catalog)
+	if err := catalog.Validate(); err != nil {
+		t.Fatalf("prospective owner-fact dependency catalog: %v", err)
 	}
 	return catalog
 }

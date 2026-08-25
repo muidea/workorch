@@ -173,6 +173,9 @@ func validateRuntimeSemanticOwnerFactAcquisition(proofSet RuntimeSemanticCWIProo
 	if !sameStrings(proposal.Target.ProspectiveConstraintRefs, sealed.AcquisitionConstraintRefs) {
 		return runtimeSemanticProposalViolation(proposal, proposalIndex, "target.prospectiveConstraintRefs", RuntimeSemanticConstraintAllowedValue, strings.Join(proposal.Target.ProspectiveConstraintRefs, ","), nil, sealed.AcquisitionConstraintRefs, fmt.Errorf("runtime semantic proof for coverage %q does not match sealed owner-fact acquisition constraints", proofSet.CoverageWorkItemID))
 	}
+	if proposal.Target.ProspectiveTargetRef != sealed.ProspectiveTargetRef {
+		return runtimeSemanticProposalViolation(proposal, proposalIndex, "target.prospectiveTargetRef", RuntimeSemanticConstraintAllowedValue, proposal.Target.ProspectiveTargetRef, nil, []string{sealed.ProspectiveTargetRef}, fmt.Errorf("runtime semantic proof for coverage %q does not match sealed owner-fact acquisition target", proofSet.CoverageWorkItemID))
+	}
 	return nil
 }
 

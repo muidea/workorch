@@ -163,7 +163,8 @@ func SameRuntimeGovernanceRequirement(left RuntimeGovernanceRequirement, right R
 		left.AuthorizationContext.Equal(right.AuthorizationContext)
 }
 
-// RuntimeTerminationKind is the administrative terminal kind for SM-1 cancel/supersede.
+// RuntimeTerminationKind is the Run SM-1 administrative termination-intent kind
+// carried through the Orchestrator SM-4 delivery handoff.
 type RuntimeTerminationKind string
 
 const (
@@ -171,8 +172,12 @@ const (
 	RuntimeTerminationSuperseded RuntimeTerminationKind = "superseded"
 )
 
-// RuntimeTerminationRecord is CAS-persisted before SM-1 projects cancelled/superseded (INV-08).
-// completed/failed remain SM-2 sealed terminal only and do not use this record.
+// RuntimeTerminationRecord records a Run-owned SM-1 administrative termination
+// intent in the opaque Runtime aggregate so Orchestrator SM-4 can drive the exact
+// Result -> Workspace -> Run handoff. Persisting this record does not transition
+// Run; only Run's private SM-1 terminal-delivery event may apply cancelled or
+// superseded after the handoff. completed/failed originate from an SM-2 sealed
+// terminal decision and do not use this administrative-intent record.
 type RuntimeTerminationRecord struct {
 	Kind        RuntimeTerminationKind
 	RequestedBy string

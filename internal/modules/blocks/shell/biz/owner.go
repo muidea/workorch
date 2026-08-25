@@ -65,6 +65,7 @@ func (m *Biz) Start() error {
 	m.SubscribeFunc(shellevents.TopicAcquireRuntimeOperationAdmissibility, m.handleRuntimeOperationAdmissibility)
 	m.SubscribeFunc(shellevents.TopicProbeRuntimeOperationFeasibility, m.handleRuntimeOperationFeasibility)
 	m.SubscribeFunc(shellevents.TopicProbeRuntimeSemanticProofFeasibility, m.handleRuntimeSemanticProofFeasibility)
+	m.SubscribeFunc(shellevents.TopicProbeRuntimeOwnerFactProspectiveSatisfaction, m.handleRuntimeOwnerFactProspectiveSatisfaction)
 	m.SubscribeFunc(shellevents.TopicQueryRuntimeCWIReconciliation, m.handleRuntimeCWIReconciliationQuery)
 	m.SubscribeFunc(shellevents.TopicExecuteOperation, m.handleShellOperation)
 	return nil
@@ -79,6 +80,7 @@ func (m *Biz) Teardown(context.Context) {
 	m.UnsubscribeFunc(shellevents.TopicAcquireRuntimeOperationAdmissibility)
 	m.UnsubscribeFunc(shellevents.TopicProbeRuntimeOperationFeasibility)
 	m.UnsubscribeFunc(shellevents.TopicProbeRuntimeSemanticProofFeasibility)
+	m.UnsubscribeFunc(shellevents.TopicProbeRuntimeOwnerFactProspectiveSatisfaction)
 	m.UnsubscribeFunc(shellevents.TopicQueryRuntimeCWIReconciliation)
 	m.runtimeAdapter = nil
 }

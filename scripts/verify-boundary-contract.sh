@@ -694,9 +694,10 @@ EOF
   exit 1
 fi
 
-# Secondary owner state machines and audit/read-model carriers follow the same
-# rule: public/cross-owner handlers translate immutable facts, while exactly
-# one owner-private dispatcher selects and persists the next state.
+# Secondary owner transitions and audit/read-model carriers follow the same
+# rule: public/cross-owner handlers translate immutable facts, while the sole
+# owner uses its private dispatchers to select and persist the next state.
+# Multiple coordinated transition IDs are allowed only inside that same owner.
 owner_secondary_state_bypass_matches="$({
   source_matches '\.(DefinitionAdmissionCandidates|StartupInput|ActivationAdmission)(\.[A-Za-z0-9_]+)?[[:space:]]*=[[:space:]]*[^=]' \
     internal/modules/blocks/workspace/biz |
@@ -727,8 +728,9 @@ fi
 # Keep one verification-only inventory for every formal Runtime machine and
 # every owner-private transition/effect gate.  This is deliberately not a Go
 # production registry: reducers cannot use it to select transitions.  It makes
-# owner identity and the sole private dispatcher reviewable, and makes a newly
-# added *_internal_event(s).go fail CI until it is classified here.
+# owner identity and each private dispatcher reviewable, and makes a newly
+# added *_internal_event(s).go fail CI until it is classified here. One state
+# type may reference coordinated transitions only when they retain one owner.
 state_transition_owner_manifest="scripts/state-transition-owners.manifest"
 if [[ ! -f "$state_transition_owner_manifest" ]]; then
   echo "boundary contract violation: state-transition owner manifest is missing: $state_transition_owner_manifest" >&2
@@ -762,6 +764,8 @@ EOF
 fi
 
 declare -A state_transition_ids=()
+declare -A state_transition_owner_roots=()
+declare -A state_transition_classifications=()
 declare -A declared_internal_event_files=()
 declare -A formal_runtime_machine_owners=()
 manifest_line=0
@@ -783,6 +787,8 @@ while IFS='|' read -r transition_id classification owner_root internal_event_fil
     exit 1
   fi
   state_transition_ids["$transition_id"]=1
+  state_transition_owner_roots["$transition_id"]="$owner_root"
+  state_transition_classifications["$transition_id"]="$classification"
 
   case "$classification" in
     formal_runtime_machine|resource_state_machine|audit_carrier|owner_private_transaction|owner_private_effect_gate|derived_projection_lifecycle) ;;
@@ -862,6 +868,16 @@ for transition_id in sm_1 sm_2 sm_3 sm_4; do
     exit 1
   fi
 done
+
+# run.replacement is a Run-owner-private subordinate transaction of SM-1. It
+# may coordinate clarification, termination handoff acknowledgement and
+# successor materialization, but it is not a fifth state machine or a second
+# owner of Run lifecycle.
+if [[ "${state_transition_classifications[run.replacement]-}" != "owner_private_transaction" ||
+      "${state_transition_owner_roots[run.replacement]-}" != "${formal_runtime_machine_owners[sm_1]-}" ]]; then
+  echo "boundary contract violation: run.replacement must be an SM-1-owner-private subordinate transaction" >&2
+  exit 1
+fi
 
 while IFS= read -r internal_event_file; do
   if [[ -z "${declared_internal_event_files[$internal_event_file]+x}" ]]; then

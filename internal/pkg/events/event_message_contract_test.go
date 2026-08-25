@@ -47,7 +47,10 @@ func TestOwnerEventContractsAreCompleteAndUnique(t *testing.T) {
 	// contracts deliberately replace implicit setup/governance mutations.
 	// Run's retired Runtime-activation compatibility notification is absent:
 	// current-format Runtime state is loaded directly or rejected by its owner.
-	const expectedProductionTopicCount = 272
+	// Shell adds one bounded, pure prospective-satisfaction query so SM-2 can
+	// prove an unexecuted File manifest delta would unlock the required Shell
+	// validation surface without crossing owner state or performing an effect.
+	const expectedProductionTopicCount = 273
 	if len(contracts) != expectedProductionTopicCount {
 		t.Fatalf("production EventHub topic inventory = %d, want %d; adjudicate additions/removals in the active component contract closure plan", len(contracts), expectedProductionTopicCount)
 	}

@@ -1,6 +1,7 @@
 package workorchruntimecontract
 
 import (
+	"errors"
 	"strings"
 	"testing"
 
@@ -117,6 +118,24 @@ func TestSemanticBindingMissingOwnerFactRequiresExactSealedAcquisition(t *testin
 		t.Fatal("terminal validation proof was accepted in place of the current owner-fact acquisition")
 	}
 
+	wrongTarget := document.Clone()
+	wrongTarget.Proposals[0].Target.ProspectiveTargetRef = "provider-selected-target.sh"
+	var targetViolation *RuntimeSemanticProposalViolationError
+	if err := wrongTarget.ValidateAgainstManifest(manifest); !errors.As(err, &targetViolation) || targetViolation.Violation().Path != "$.proposals[0].target.prospectiveTargetRef" {
+		t.Fatalf("provider-selected target was not rejected as an exact typed violation: violation=%+v err=%v", targetViolation, err)
+	}
+
+	changedTargetAuthority := manifest.Clone()
+	changedTargetAuthority.ProofObligations[0].DeclarationProspectiveTargetRef = "other-activation-target.sh"
+	changedTargetAuthority.ProofObligations[0].OwnerFactAcquisition.ProspectiveTargetRef = "other-activation-target.sh"
+	changedTargetAuthority.Hash = StableRuntimeSemanticPlanManifestHash(changedTargetAuthority)
+	if changedTargetAuthority.Hash == manifest.Hash {
+		t.Fatal("semantic manifest hash ignored the exact prospective target authority")
+	}
+	if err := changedTargetAuthority.Validate(); err != nil {
+		t.Fatalf("self-consistent changed prospective target authority was rejected: %v", err)
+	}
+
 	parallel := document.Clone()
 	second := proposal.Clone()
 	second.Target.ProspectiveTargetRef = "other.go"
@@ -135,9 +154,11 @@ func semanticMissingOwnerFactAcquisitionFixture(t *testing.T) (RuntimeSemanticPl
 	}
 	const declarationSelector = "file/workspace-deliverable"
 	const operationSelector = "file/workspace-relative-create"
+	const prospectiveTarget = "validation-readiness.sh"
 	convergence := RuntimeOwnerFactConvergence{
 		Requirement: requirement, MissingTrigger: RuntimeOwnerFactMissingTrigger,
-		AcquisitionOwnerModuleID: RuntimeModuleFile, AcquisitionOperationKind: StepKindFileWrite,
+		ProspectiveSatisfactionContractRef: "shell/managed-validation/workspace-manifest-v1",
+		AcquisitionOwnerModuleID:           RuntimeModuleFile, AcquisitionOperationKind: StepKindFileWrite,
 		AcquisitionTargetPolicy: RuntimeOperationTargetPolicyProspectiveOwnerTarget, AcquisitionTargetSelectorRef: operationSelector,
 		TargetSelectorRef: declarationSelector, TargetSelectorOwnerRef: "profile/test", TargetSelectorSubjectRef: "validation_preparation",
 		ReobserveOwnerModuleID: RuntimeModuleShell, ReobserveFactKind: RuntimeOwnerFactSelectableValidationSurface,
@@ -152,6 +173,9 @@ func semanticMissingOwnerFactAcquisitionFixture(t *testing.T) (RuntimeSemanticPl
 	source.TargetSelectorRef = declarationSelector
 	source.TargetSelectorOwnerRef = convergence.TargetSelectorOwnerRef
 	source.TargetSelectorSubjectRef = convergence.TargetSelectorSubjectRef
+	source.TargetRole = "validation-input"
+	source.RequireTargetGrounding = true
+	source.ProspectiveTargetRef = prospectiveTarget
 
 	for index := range manifest.OwnerCatalogs {
 		if manifest.OwnerCatalogs[index].OwnerModuleID != RuntimeModuleShell {
@@ -164,6 +188,7 @@ func semanticMissingOwnerFactAcquisitionFixture(t *testing.T) (RuntimeSemanticPl
 			surface.ReadinessReason = "validation input is not present"
 			surface.InputBindingRef = ""
 			surface.PrerequisiteRef = "workspace/validation-input"
+			surface.ProspectiveSatisfactionContractRef = convergence.ProspectiveSatisfactionContractRef
 		}
 		manifest.OwnerCatalogs[index].SnapshotID = StableRuntimeOperationAdmissibilitySnapshotID(manifest.OwnerCatalogs[index])
 	}
@@ -171,7 +196,7 @@ func semanticMissingOwnerFactAcquisitionFixture(t *testing.T) (RuntimeSemanticPl
 	proposal := document.Proposals[0].Clone()
 	proposal.Target = RuntimeOperationTargetAuthorization{
 		Policy: RuntimeOperationTargetPolicyProspectiveOwnerTarget, OwnerSelectorRefs: []string{operationSelector},
-		ProspectiveConstraintRefs: []string{"workspace-relative-path"}, ProspectiveTargetRef: "validation-readiness.sh",
+		ProspectiveConstraintRefs: []string{"workspace-relative-path"}, ProspectiveTargetRef: prospectiveTarget,
 	}
 	document.ManifestHash = manifest.Hash
 	document.Proposals = []RuntimeSemanticProofProposal{proposal}
@@ -565,12 +590,45 @@ func semanticFeasibilityForTest(t *testing.T, manifest RuntimeSemanticPlanManife
 		if catalog.OwnerModuleID != proposal.OwnerModuleID {
 			continue
 		}
-		return RuntimeSemanticProofFeasibility{
+		fact := RuntimeSemanticProofFeasibility{
 			SchemaVersion: RuntimeSemanticFeasibilitySchemaCurrent, ManifestHash: manifest.Hash, DefinitionSeedHash: manifest.DefinitionSeedHash,
 			CoverageWorkItemID: proposal.CoverageWorkItemID, ProposalHash: StableRuntimeSemanticProofProposalHash(proposal),
 			OwnerModuleID: proposal.OwnerModuleID, CatalogSnapshotID: catalog.SnapshotID, Status: RuntimeSemanticFeasibilityFeasible,
 			ObservedRevision: catalog.ObservedRevision, TargetRefs: targetRefs, ValidationRecipeID: recipeID, RequiredCheckRefs: checkRefs,
 		}
+		if acquisition, found := runtimeSemanticOwnerFactAcquisitionForCoverage(manifest, proposal.CoverageWorkItemID); found &&
+			acquisition.AcquisitionTargetPolicy == RuntimeOperationTargetPolicyProspectiveOwnerTarget {
+			fact.CatalogObservationID = "file-owner-observation-test"
+			delta := RuntimeProspectiveWorkspaceManifestDelta{
+				SchemaVersion: RuntimeProspectiveWorkspaceManifestDeltaSchemaCurrent,
+				WorkspaceID:   manifest.WorkspaceID, RunID: manifest.RunID, ManifestHash: manifest.Hash, DefinitionSeedHash: manifest.DefinitionSeedHash,
+				CoverageWorkItemID: proposal.CoverageWorkItemID, ProposalHash: StableRuntimeSemanticProofProposalHash(proposal),
+				OwnerModuleID: proposal.OwnerModuleID, CatalogSnapshotID: catalog.SnapshotID,
+				ProspectiveSatisfactionContractRef: acquisition.ProspectiveSatisfactionContractRef,
+				BaseWorkspaceManifestRevision:      catalog.ObservedRevision, ProspectiveTargetRef: proposal.Target.ProspectiveTargetRef,
+				ResultingTargetRefs: append(append([]string(nil), catalog.TargetRefs...), proposal.Target.ProspectiveTargetRef),
+			}.Normalized()
+			fact.ProspectiveWorkspaceManifestDelta = &delta
+			dependencyCatalog, found := runtimeSemanticOwnerFactDependencyCatalogFor(manifest, acquisition.Requirement.OwnerModuleID)
+			if !found {
+				t.Fatalf("missing prospective dependency catalog %q", acquisition.Requirement.OwnerModuleID)
+			}
+			satisfaction := RuntimeOwnerFactProspectiveSatisfaction{
+				SchemaVersion: RuntimeOwnerFactProspectiveSatisfactionSchemaCurrent,
+				WorkspaceID:   manifest.WorkspaceID, RunID: manifest.RunID, ManifestHash: manifest.Hash, DefinitionSeedHash: manifest.DefinitionSeedHash,
+				CoverageWorkItemID: proposal.CoverageWorkItemID, ProposalHash: StableRuntimeSemanticProofProposalHash(proposal),
+				Requirement: acquisition.Requirement, ProspectiveSatisfactionContractRef: acquisition.ProspectiveSatisfactionContractRef,
+				OwnerModuleID: acquisition.Requirement.OwnerModuleID, CatalogSnapshotID: dependencyCatalog.SnapshotID,
+				CatalogObservationID: "required-owner-observation-test", ObservedRevision: dependencyCatalog.ObservedRevision,
+				ProspectiveWorkspaceManifestDeltaHash: StableRuntimeProspectiveWorkspaceManifestDeltaHash(delta),
+				Outcome:                               RuntimeOwnerFactProspectiveWouldSatisfy, ProspectiveValidationRecipeRefs: []string{"recipe/prospective-validation"},
+			}.Normalized()
+			observation := RuntimeOwnerFactProspectiveSatisfactionObservation{
+				FeasibilityBatchID: "test-feasibility-batch", RequestHash: "test-prospective-request", Satisfaction: &satisfaction,
+			}
+			fact.OwnerFactProspectiveSatisfactionObservation = &observation
+		}
+		return fact
 	}
 	t.Fatalf("missing owner catalog %q", proposal.OwnerModuleID)
 	return RuntimeSemanticProofFeasibility{}

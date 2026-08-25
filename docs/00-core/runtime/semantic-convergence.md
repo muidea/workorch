@@ -4,7 +4,7 @@ Status: normative
 
 Type: core-contract-part
 
-Last Verified: 2026-08-24
+Last Verified: 2026-08-25
 
 ## Runtime 生产主链
 
@@ -25,9 +25,11 @@ typed RuntimeBootstrap
 
 1. Application 只构造 typed `RuntimeBootstrap` 并向 Workspace/Run owner 提交 scoped activation / continuation intent；
    不指定 Run、Workspace 或 Result 的目标状态。用户明确 restart 时，Run owner 先在 predecessor 上持久化 immutable
-   replacement intent；SM-4 再按 `Result -> Workspace -> Run` 投递 administrative terminal fact。Workspace 仅在
+   replacement intent；该 `run.replacement` 是同 Run owner 下的 SM-1 subordinate transaction。SM-4 仅把
+   `RuntimeTerminationRecord` 持久化为 delivery handoff，再按 `Result -> Workspace -> Run` 投递 administrative terminal fact；Workspace 仅在
    `ActiveRunID` 精确匹配时通过内部事件释放 slot；Run owner 只有收到该顺序的最终 Run delivery 后，才能通过内部事件
-   幂等创建并激活 current-baseline successor。Application、Workspace 和 Orchestrator 均不得提前创建 successor。
+   迁移 predecessor terminal，并幂等创建、激活 current-baseline successor。Application、Workspace 和 Orchestrator 均不得
+   直接迁移 Run 或提前创建 successor。
 2. Run owner 持久化 Run lifecycle、definition revision、lineage 与 Runtime aggregate；其中 aggregate 是
    Orchestrator 的不透明持久化负载。其语义 CAS 只比较 `RuntimeState.StateRevision`，不得以完整 Run 模型
    revision（SM-1/lifecycle 或其他 Run 字段）阻断 SM-2/SM-3/SM-4 的保存。
@@ -100,6 +102,25 @@ acquisition owner/kind/variant/target-policy/operation-selector。`RuntimeSemant
 `TerminalRequiredEvidenceKinds` 与 generation-specific `CurrentRequiredEvidenceKinds`：正常 generation 二者一致；acquisition
 generation 的 current kinds 只能是 acquisition 所需的 `state_change`，不能覆盖 Definition 的 terminal `validation` 等声明，
 也不能继承 terminal metric/artifact credit。
+
+`prospective_owner_target` acquisition 必须在 pre-seal Profile declaration、compiled obligation 与 provider projection 中携带
+同一个非空 `ProspectiveSatisfactionContractRef`；preexisting 与 `existing_owner_scope` 禁止携带。proposal 通过 File owner
+只读 feasibility 后，File 仅基于 current complete manifest 生成 exact base-revision-bound
+`RuntimeProspectiveWorkspaceManifestDelta`。Orchestrator 再把该 immutable delta、activation-sealed recipe declarations 和
+required-owner current dependency catalog/observation 交给 required owner 的 concrete typed pure query。semantic manifest
+必须把 provider-selectable `OwnerCatalogs` 与 `OwnerFactDependencyCatalogs` 分开：后者进入 manifest/hash/freshness/CAS/seal，
+但不进入 LLM C3 owner catalog、allowed operation/surface、schema enum 或 correction choice。required owner 逐项重验
+contract ref、recipe command/ordered args/timeout schema identity、catalog/observation 与 delta lineage，只返回 nested
+`would_satisfy | would_not_satisfy | typed stale` factual observation；它不访问 File/workspace、不执行 operation、不选择
+Runtime state。Orchestrator 必须在 owner-private observation CAS 与 semantic seal 前重验 File outer feasibility/delta、
+required-owner nested observation，以及 manifest/batch/request 和两组 catalog/observation identity。`would_satisfy` 才可加入
+final feasibility set；nested typed stale 不能伪装成 File outer stale或直接 terminal，只进入既有 bounded catalog refresh；
+missing dependency 在 query 前退休 generation并保持零 required-owner call。`would_not_satisfy` 是 proposal relational
+factual rejection，必须先随 File delta 持久化为完整 composite observation；activation-sealed exact target 不允许 provider
+替换，因此下一次 drive 直接形成统一 `semantic_contract_failed` terminal，并把 `prospective_owner_fact_unsatisfied` 保留为
+typed original reason。Shell 只拥有 persisted satisfaction/reason；把该 fact 解释为无 correction path 的 terminal diagnostic
+由 Orchestrator SM-2 署名。整个链零 provider correction/request、零 ticket、零 refresh/acquisition/operation budget，并在
+semantic seal、operation candidate 与 dispatch 前保持零 effect、零 coverage；duplicate/restart 不重复 owner probe。
 
 owner feasibility 与 receipt 后只重获声明的 owner/fact。若 reobserve 仍缺失，一次 accepted acquisition operation/evidence
 立即耗尽，不能再生成第二个 semantic acquisition；若 reobserve 已满足，SM-2 也不得把 acquisition evidence 记为 terminal
@@ -178,16 +199,18 @@ Profile 声明的 exact target 仍保留在 sealed activation/profile contract�
 owner target scope 的空观察只证明当前不存在既有目标，不能授权任意新路径。prospective creation 必须同时具有 activation
 封存的 exact prospective target、完整 `selector ref + owner ref + subject ref`，以及同一 capability owner catalog 发布的
 matching selector/constraint/operation variant；缺任一项即在 provider 前以 typed target-grounding terminal 收口。
-Shell managed-validation catalog 需要 target vocabulary 时，Orchestrator 只可把已持久化的 File-owner target inventory 作为
-typed acquisition input 转交 Shell；File effect 使旧目录失效后，新一代 acquisition 仍使用 fresh File observation。
-Shell 独立决定 recipe/surface readiness，Orchestrator 不扩张路径，Shell 也不成为 File target owner。
+ordinary Shell managed-validation catalog acquisition 需要 target vocabulary 时，Orchestrator 只可把已持久化的 File-owner
+target inventory 作为 typed input 转交 Shell；prospective-satisfaction pure query 只额外接收 File owner 从该 inventory
+计算的 immutable hypothetical delta/resulting refs。File effect 使旧目录失效后，新一代 acquisition 仍使用 fresh File
+observation。Shell 独立决定 recipe/surface readiness 与 prospective satisfaction judgment，Orchestrator 不扩张路径，
+Shell 也不成为 File target owner。
 
 catalog retirement 可以在同一 Orchestrator owner-local CAS 中打开新的 semantic generation，而当前 binding-free CWI 的
 SM-2 reducer view 尚未获得 target/binding。仅当该窗口形成的 terminal code 是 `target_grounding_unresolved` 时，它不具备
 SM-4 delivery authority：drive、candidate request guard 与 fresh-start recovery 必须先完成 `semantic_plan`
 request/owner feasibility/SM-2 seal。`SemanticOperationAuthorityReady` 或 `semantic_contract_failed` 成立后才可交付该终态；
 其它已封存的 contract defect、budget exhaustion 或 owner failure terminal 必须保持原权威，不能被语义重规划覆盖。
-administrative termination 仍走独立 Run-owner fact/delivery lane。该门禁不允许 operations request 穿过 binding-free 窗口，
+administrative termination 仍走独立 Run-owner intent/SM-4 handoff lane。该门禁不允许 operations request 穿过 binding-free 窗口，
 也不允许 capability owner、Application 或 projection 改写任何 Runtime state。
 
 当前 authority 同时绑定 capability-owner policy revision、equivalent-authority input、binding contradiction 和 opaque
@@ -214,6 +237,6 @@ aggregate transition；内部 dispatcher 校验后调用 reducer/controller，�
 - SM-1 Run lifecycle 只由 `blocks/run` 迁移；Workspace active-run/state projection 只由
   `blocks/workspace` 迁移；Result lifecycle 只由 `blocks/result` 迁移。
 - Orchestrator 只拥有 SM-2、SM-3、SM-4。SM-4 只记录 delivery request/acknowledgement 与重试，
-  不直接写 Run、Workspace 或 Result。
+  administrative termination 的 `RuntimeTerminationRecord` 也只属于 handoff ledger；SM-4 不直接写 Run、Workspace 或 Result。
 - terminal delivery 的稳定顺序是 `Result -> Workspace -> Run`。任一步失败仅为 delivery pending；
   不得改写已 sealed 的 SM-2 terminal，亦不得以投影失败把 Run 反向置为 failed。

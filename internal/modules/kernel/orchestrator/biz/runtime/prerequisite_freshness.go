@@ -105,7 +105,9 @@ func runtimeSemanticCatalogScopeGapSignature(gap RuntimeSemanticCatalogScopeGap)
 // progression, not an owner resource failure.
 func SemanticManifestCatalogFreshnessGaps(aggregate RuntimeAggregate, manifest runtimecontract.RuntimeSemanticPlanManifest) []RuntimeSemanticCatalogFreshnessGap {
 	manifest = manifest.Normalized()
-	compared := grounding.CompareCatalogFreshness(manifest.OwnerCatalogs, aggregate.Facts)
+	sealedCatalogs := append([]runtimecontract.RuntimeOperationAdmissibility(nil), manifest.OwnerCatalogs...)
+	sealedCatalogs = append(sealedCatalogs, manifest.OwnerFactDependencyCatalogs...)
+	compared := grounding.CompareCatalogFreshness(sealedCatalogs, aggregate.Facts)
 	gaps := make([]RuntimeSemanticCatalogFreshnessGap, 0, len(compared))
 	for _, gap := range compared {
 		gaps = append(gaps, RuntimeSemanticCatalogFreshnessGap{
@@ -115,6 +117,71 @@ func SemanticManifestCatalogFreshnessGaps(aggregate RuntimeAggregate, manifest r
 		})
 	}
 	return gaps
+}
+
+// SemanticProspectiveFeasibilityFreshnessGaps compares the exact observation
+// identities persisted by one composite File→required-owner fact. A catalog
+// snapshot can remain byte-identical while its workspace dependency is
+// re-observed, so snapshot-only freshness is insufficient at CAS and seal.
+func SemanticProspectiveFeasibilityFreshnessGaps(aggregate RuntimeAggregate, manifest runtimecontract.RuntimeSemanticPlanManifest, feasibility runtimecontract.RuntimeSemanticProofFeasibility) []RuntimeSemanticCatalogFreshnessGap {
+	manifest = manifest.Normalized()
+	feasibility = feasibility.Normalized()
+	if feasibility.ProspectiveWorkspaceManifestDelta == nil || feasibility.OwnerFactProspectiveSatisfactionObservation == nil {
+		return nil
+	}
+	gaps := make([]RuntimeSemanticCatalogFreshnessGap, 0, 2)
+	if catalog, found := runtimeSemanticManifestCatalogForOwner(manifest, feasibility.OwnerModuleID); found {
+		current, currentFound := CurrentSemanticCatalogObservation(aggregate, catalog)
+		if !currentFound || current.ObservationID != feasibility.CatalogObservationID {
+			gap := RuntimeSemanticCatalogFreshnessGap{PrerequisiteID: catalog.PrerequisiteID, ManifestSnapshotID: catalog.SnapshotID, ManifestObservationID: feasibility.CatalogObservationID}
+			if currentFound {
+				gap.CurrentSnapshotID, gap.CurrentObservationID = catalog.SnapshotID, current.ObservationID
+			}
+			gaps = append(gaps, gap)
+		}
+	}
+	prospective := feasibility.OwnerFactProspectiveSatisfactionObservation.Normalized()
+	requiredOwnerID := ""
+	requiredObservationID := ""
+	if prospective.Satisfaction != nil {
+		requiredOwnerID = prospective.Satisfaction.OwnerModuleID
+		requiredObservationID = prospective.Satisfaction.CatalogObservationID
+	} else if prospective.Stale != nil {
+		requiredOwnerID = prospective.Stale.OwnerModuleID
+		requiredObservationID = prospective.Stale.ObservationID
+	}
+	if catalog, found := runtimeSemanticManifestDependencyCatalogForOwner(manifest, requiredOwnerID); found {
+		current, currentFound := CurrentSemanticCatalogObservation(aggregate, catalog)
+		if !currentFound || current.ObservationID != requiredObservationID {
+			gap := RuntimeSemanticCatalogFreshnessGap{PrerequisiteID: catalog.PrerequisiteID, ManifestSnapshotID: catalog.SnapshotID, ManifestObservationID: requiredObservationID}
+			if currentFound {
+				gap.CurrentSnapshotID, gap.CurrentObservationID = catalog.SnapshotID, current.ObservationID
+			}
+			gaps = append(gaps, gap)
+		}
+	}
+	sort.SliceStable(gaps, func(i, j int) bool { return gaps[i].PrerequisiteID < gaps[j].PrerequisiteID })
+	return gaps
+}
+
+func runtimeSemanticManifestCatalogForOwner(manifest runtimecontract.RuntimeSemanticPlanManifest, ownerModuleID string) (runtimecontract.RuntimeOperationAdmissibility, bool) {
+	ownerModuleID = strings.TrimSpace(ownerModuleID)
+	for _, catalog := range manifest.OwnerCatalogs {
+		if catalog.OwnerModuleID == ownerModuleID {
+			return catalog.Normalized(), true
+		}
+	}
+	return runtimecontract.RuntimeOperationAdmissibility{}, false
+}
+
+func runtimeSemanticManifestDependencyCatalogForOwner(manifest runtimecontract.RuntimeSemanticPlanManifest, ownerModuleID string) (runtimecontract.RuntimeOperationAdmissibility, bool) {
+	ownerModuleID = strings.TrimSpace(ownerModuleID)
+	for _, catalog := range manifest.OwnerFactDependencyCatalogs {
+		if catalog.OwnerModuleID == ownerModuleID {
+			return catalog.Normalized(), true
+		}
+	}
+	return runtimecontract.RuntimeOperationAdmissibility{}, false
 }
 
 func currentOperationAdmissibility(facts runtimecontract.RuntimeFacts, wanted runtimecontract.RuntimeOperationAdmissibility) (runtimecontract.RuntimeOperationAdmissibility, bool) {

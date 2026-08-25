@@ -55,26 +55,29 @@ type runtimeSemanticProofObligationProjection struct {
 	DeclarationTargetSelectorRef        string                                                   `json:"declarationTargetSelectorRef,omitempty"`
 	DeclarationTargetSelectorOwnerRef   string                                                   `json:"declarationTargetSelectorOwnerRef,omitempty"`
 	DeclarationTargetSelectorSubjectRef string                                                   `json:"declarationTargetSelectorSubjectRef,omitempty"`
+	DeclarationProspectiveTargetRef     string                                                   `json:"declarationProspectiveTargetRef,omitempty"`
 	OwnerFactAcquisition                *runtimeSemanticOwnerFactAcquisitionProjection           `json:"ownerFactAcquisition,omitempty"`
 }
 
 type runtimeSemanticOwnerFactAcquisitionProjection struct {
-	DefinitionPrerequisiteDeclared bool                                         `json:"definitionPrerequisiteDeclared"`
-	TerminalEvidenceCredit         bool                                         `json:"terminalEvidenceCredit"`
-	RequiredOwnerModuleID          string                                       `json:"requiredOwnerModuleId"`
-	RequiredFactKind               runtimecontract.RuntimeOwnerFactKind         `json:"requiredFactKind"`
-	RequiredOperationKind          string                                       `json:"requiredOperationKind"`
-	AcquisitionOwnerModuleID       string                                       `json:"acquisitionOwnerModuleId"`
-	AcquisitionOperationKind       string                                       `json:"acquisitionOperationKind"`
-	AcquisitionOperationVariantID  string                                       `json:"acquisitionOperationVariantId,omitempty"`
-	AcquisitionTargetPolicy        runtimecontract.RuntimeOperationTargetPolicy `json:"acquisitionTargetPolicy"`
-	AcquisitionTargetSelectorRef   string                                       `json:"acquisitionTargetSelectorRef"`
-	AcquisitionConstraintRefs      []string                                     `json:"acquisitionConstraintRefs,omitempty"`
-	OwnerCatalogSnapshotID         string                                       `json:"ownerCatalogSnapshotId"`
-	OwnerCatalogObservedRevision   string                                       `json:"ownerCatalogObservedRevision"`
-	ReobserveOwnerModuleID         string                                       `json:"reobserveOwnerModuleId"`
-	ReobserveFactKind              runtimecontract.RuntimeOwnerFactKind         `json:"reobserveFactKind"`
-	MaxAcquisitionAttempts         int                                          `json:"maxAcquisitionAttempts"`
+	DefinitionPrerequisiteDeclared     bool                                         `json:"definitionPrerequisiteDeclared"`
+	TerminalEvidenceCredit             bool                                         `json:"terminalEvidenceCredit"`
+	RequiredOwnerModuleID              string                                       `json:"requiredOwnerModuleId"`
+	RequiredFactKind                   runtimecontract.RuntimeOwnerFactKind         `json:"requiredFactKind"`
+	RequiredOperationKind              string                                       `json:"requiredOperationKind"`
+	AcquisitionOwnerModuleID           string                                       `json:"acquisitionOwnerModuleId"`
+	AcquisitionOperationKind           string                                       `json:"acquisitionOperationKind"`
+	AcquisitionOperationVariantID      string                                       `json:"acquisitionOperationVariantId,omitempty"`
+	AcquisitionTargetPolicy            runtimecontract.RuntimeOperationTargetPolicy `json:"acquisitionTargetPolicy"`
+	AcquisitionTargetSelectorRef       string                                       `json:"acquisitionTargetSelectorRef"`
+	AcquisitionConstraintRefs          []string                                     `json:"acquisitionConstraintRefs,omitempty"`
+	ProspectiveSatisfactionContractRef string                                       `json:"prospectiveSatisfactionContractRef,omitempty"`
+	ProspectiveTargetRef               string                                       `json:"prospectiveTargetRef,omitempty"`
+	OwnerCatalogSnapshotID             string                                       `json:"ownerCatalogSnapshotId"`
+	OwnerCatalogObservedRevision       string                                       `json:"ownerCatalogObservedRevision"`
+	ReobserveOwnerModuleID             string                                       `json:"reobserveOwnerModuleId"`
+	ReobserveFactKind                  runtimecontract.RuntimeOwnerFactKind         `json:"reobserveFactKind"`
+	MaxAcquisitionAttempts             int                                          `json:"maxAcquisitionAttempts"`
 }
 
 // runtimeSemanticOwnerCatalogProjection is the provider-safe vocabulary from
@@ -170,26 +173,29 @@ func runtimeSemanticProofObligationsForProvider(values []runtimecontract.Runtime
 			DeclarationTargetSelectorRef:        value.DeclarationTargetSelectorRef,
 			DeclarationTargetSelectorOwnerRef:   value.DeclarationTargetSelectorOwnerRef,
 			DeclarationTargetSelectorSubjectRef: value.DeclarationTargetSelectorSubjectRef,
+			DeclarationProspectiveTargetRef:     value.DeclarationProspectiveTargetRef,
 		}
 		if value.OwnerFactAcquisition != nil {
 			acquisition := value.OwnerFactAcquisition.Normalized()
 			projection.OwnerFactAcquisition = &runtimeSemanticOwnerFactAcquisitionProjection{
-				DefinitionPrerequisiteDeclared: true,
-				TerminalEvidenceCredit:         false,
-				RequiredOwnerModuleID:          acquisition.Requirement.OwnerModuleID,
-				RequiredFactKind:               acquisition.Requirement.FactKind,
-				RequiredOperationKind:          acquisition.Requirement.OperationKind,
-				AcquisitionOwnerModuleID:       acquisition.AcquisitionOwnerModuleID,
-				AcquisitionOperationKind:       acquisition.AcquisitionOperationKind,
-				AcquisitionOperationVariantID:  acquisition.AcquisitionOperationVariantID,
-				AcquisitionTargetPolicy:        acquisition.AcquisitionTargetPolicy,
-				AcquisitionTargetSelectorRef:   acquisition.AcquisitionTargetSelectorRef,
-				AcquisitionConstraintRefs:      append([]string(nil), acquisition.AcquisitionConstraintRefs...),
-				OwnerCatalogSnapshotID:         acquisition.OwnerCatalogSnapshotID,
-				OwnerCatalogObservedRevision:   acquisition.OwnerCatalogObservedRevision,
-				ReobserveOwnerModuleID:         acquisition.ReobserveOwnerModuleID,
-				ReobserveFactKind:              acquisition.ReobserveFactKind,
-				MaxAcquisitionAttempts:         acquisition.MaxAcquisitionAttempts,
+				DefinitionPrerequisiteDeclared:     true,
+				TerminalEvidenceCredit:             false,
+				RequiredOwnerModuleID:              acquisition.Requirement.OwnerModuleID,
+				RequiredFactKind:                   acquisition.Requirement.FactKind,
+				RequiredOperationKind:              acquisition.Requirement.OperationKind,
+				AcquisitionOwnerModuleID:           acquisition.AcquisitionOwnerModuleID,
+				AcquisitionOperationKind:           acquisition.AcquisitionOperationKind,
+				AcquisitionOperationVariantID:      acquisition.AcquisitionOperationVariantID,
+				AcquisitionTargetPolicy:            acquisition.AcquisitionTargetPolicy,
+				AcquisitionTargetSelectorRef:       acquisition.AcquisitionTargetSelectorRef,
+				AcquisitionConstraintRefs:          append([]string(nil), acquisition.AcquisitionConstraintRefs...),
+				ProspectiveSatisfactionContractRef: acquisition.ProspectiveSatisfactionContractRef,
+				ProspectiveTargetRef:               acquisition.ProspectiveTargetRef,
+				OwnerCatalogSnapshotID:             acquisition.OwnerCatalogSnapshotID,
+				OwnerCatalogObservedRevision:       acquisition.OwnerCatalogObservedRevision,
+				ReobserveOwnerModuleID:             acquisition.ReobserveOwnerModuleID,
+				ReobserveFactKind:                  acquisition.ReobserveFactKind,
+				MaxAcquisitionAttempts:             acquisition.MaxAcquisitionAttempts,
 			}
 		}
 		ret = append(ret, projection)

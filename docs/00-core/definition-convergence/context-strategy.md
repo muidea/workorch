@@ -4,7 +4,7 @@ Status: normative
 
 Type: core-contract-part
 
-Last Verified: 2026-08-18
+Last Verified: 2026-08-25
 
 ## Large Goal/DoD Context Strategy
 
@@ -38,6 +38,10 @@ RuntimeDefinitionPartitionSet
 | C3 | current CWI/focus、required output、schedule/gate-witness/binding refs；不复制 Definition 正文 |
 | C4 | provider-safe failure、evidence、attempt/correction diagnostic |
 | C5 | manifest-authorized、content-addressed exact cross-partition context 与有界 trace |
+
+semantic manifest 的 provider-selectable `OwnerCatalogs` 可以按 C3 bounded projection 暴露 exact allowed values；
+prospective owner-fact composite probe 使用的 `OwnerFactDependencyCatalogs` 不属于 prompt context。它们只在 aggregate
+中参与 manifest/hash/freshness/CAS/seal，不能进入 C3、schema enum、correction directive 或任何 LLM-visible catalog dump。
 
 “Goal/DoD 不压缩”和 stable-prefix 规则具体化为：
 

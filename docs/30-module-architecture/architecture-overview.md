@@ -4,7 +4,7 @@ Status: normative
 
 Type: module-architecture
 
-Last Verified: 2026-08-23
+Last Verified: 2026-08-25
 
 ## Stable Layers
 
@@ -28,14 +28,16 @@ The exact 1+4+17 framework inventory and physical paths are maintained by
 | Machine/concern | Sole owner | External contribution |
 | --- | --- | --- |
 | Workspace Definition/startup eligibility | Workspace block | application submits candidate/admission outcome and typed clarification acknowledgement |
-| SM-1 Run lifecycle/lineage/replacement | Run block | Workspace/application submit eligible intent; Orchestrator submits immutable wait/terminal facts |
+| SM-1 Run lifecycle/lineage/replacement | Run block | Workspace/application submit eligible intent; Orchestrator delivers immutable wait facts and exact SM-4 terminal handoff |
 | SM-2 authority/focus convergence | Orchestrator | application compiles from owner-sealed startup input; other owners return facts |
 | SM-3 candidate/sealed dispatch transaction | Orchestrator | LLM returns exactly one factual `Stale\|Feedback\|DocumentOutcome`; Orchestrator alone decodes/evaluates a complete authority document into a candidate, and the capability owner executes only a sealed operation |
-| SM-4 drive/recovery/delivery ledger | Orchestrator | Run persists opaque aggregate; Result/Workspace/Run acknowledge their own delivery |
+| SM-4 drive/recovery/delivery ledger | Orchestrator | Run persists opaque aggregate; `RuntimeTerminationRecord` is delivery handoff only; Result/Workspace/Run acknowledge and privately transition their own resources |
 | formal outcome persistence | Result block | Orchestrator supplies sealed already-judged terminal material |
 | projection/audit | workorchd/Eventstream | consume immutable facts; never write owner state |
 
-No machine may be split across components. A cross-owner request expresses intent or fact, not a target state transition.
+No machine may be split across components. A state type has one owner, and every transition is triggered only after an input has
+been converted to that owner's private internal event. A cross-owner request expresses intent or fact, never a target state
+transition. `run.replacement` is a Run-owner SM-1 subordinate transaction, not a fifth machine.
 
 ## Dependency Direction
 
@@ -56,7 +58,9 @@ projection-to-owner repair, and application-to-Orchestrator service calls.
 - process restart: Run owner inventories SM-1 state and opaque Runtime records; Orchestrator loads and idempotently re-drives;
 - Resume: same Run, same sealed bootstrap/provider selection, no context patch;
 - current-baseline Restart: eligible fresh bootstrap plus Run-owned predecessor `ReplacementIntent`; a Definition-gap intent
-  first requires dedicated Decision acknowledgement, and successor still appears only after terminal delivery;
+  first requires dedicated Decision acknowledgement. Orchestrator may persist/retry the exact `RuntimeTerminationRecord` SM-4
+  handoff, but only a Run-private SM-1 delivery event makes the predecessor terminal; the Run-owned replacement transaction creates
+  the successor only after ordered delivery acknowledgement;
 - persisted data has one current shape and one repository layout; invalid/retired data fails at load and has no migration or projected disposition;
 - repeated notification/Drive/acknowledgment cannot duplicate attempt, side effect, evidence, Result or successor.
 
@@ -66,6 +70,8 @@ projection-to-owner repair, and application-to-Orchestrator service calls.
 - owner units expose EventHub contracts, not direct service facades;
 - Runtime aggregate is typed, Orchestrator-owned semantically, and Run-owned only as opaque CAS storage;
 - core Runtime remains profile/domain neutral;
+- prospective owner-fact feasibility composes acquisition-owner delta and required-owner dependency observation through typed
+  queries; non-selectable dependency catalogs remain out of the LLM surface and no participant mutates a sibling owner;
 - removed StagePacket, NextAction, DispatchNextStep, ExecutionContextPatch, graph dispatcher and application recovery queues are
   not compatibility paths;
 - LLM provider configuration/ceiling interpretation belongs to LLM owner; sealed selection cannot drift on Resume.

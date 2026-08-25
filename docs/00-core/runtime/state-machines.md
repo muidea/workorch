@@ -4,9 +4,13 @@ Status: normative
 
 Type: core-contract-part
 
-Last Verified: 2026-08-24
+Last Verified: 2026-08-25
 
 ## 四个协调状态机
+
+每个 authoritative state type 只有一个 owner；同 owner 可以用多个私有 transition 协调，但每次状态变化都只能由该
+owner 的 private internal event 触发。跨 owner command/result只交付intent或fact，不能携带target state、调用对方reducer或
+直接修改对方aggregate。以下任何 handoff 都不构成共享 owner。
 
 ### SM-1：Run lifecycle
 
@@ -24,8 +28,12 @@ active -> completed | failed | cancelled | superseded
   `fresh_activation_required` 仅适用于可读 current Run 缺失 sealed bootstrap。current Run 的显式 Restart 才能持久化
   Run-owned replacement intent，经 SM-4 `Result -> Workspace -> Run` delivery 释放 Workspace 后创建唯一 successor并保存lineage。
 - blocked 回 active 必须有匹配的 persisted governance resolution。
-- complete/fail 只能来自 SM-2 sealed terminal decision；cancel/supersede 必须先持久化
-  `RuntimeTerminationRecord`。
+- completed/failed 的 authority source 只能是 SM-2 sealed terminal decision；cancelled/superseded 的 intent source 只能是
+  Run SM-1。两类 terminal 都经 SM-4 exact delivery handoff，最终 Run state 只由 Run private SM-1 event 迁移。
+- administrative termination 由 Orchestrator SM-4 在 opaque aggregate 中 CAS 持久化 `RuntimeTerminationRecord` 后交付；
+  该 record 是 delivery handoff，不是 Run state，也不允许 Orchestrator 选择或执行 SM-1 terminal transition。
+- `run.replacement` 是 SM-1 唯一 owner 内的 subordinate transaction：它只管理 clarification、termination handoff
+  acknowledgement 与 successor materialization，不是独立 lifecycle state machine，也不共享 Run state owner。
 - Run/Workspace/Result terminal delivery 是单向 owner-local saga；失败仅可重试对应 delivery，不能改写 authority。
 
 禁止：SM-1 选择 action、HTTP/TUI/Web 直接写 terminal、Resume 注入 definition/provider/model/repair
@@ -60,6 +68,12 @@ load facts
   必须再次按 readiness 与 proof applicability fail-closed，不能把 `prerequisite_required`/auxiliary identity、
   schema/input binding、MCP effect metadata 或 Shell executable recipe 当作 model hint。readiness、proof applicability 或
   binding 变化必须改变 owner catalog snapshot/manifest identity。
+- prospective owner-fact acquisition 的 manifest 必须把 provider-selectable `OwnerCatalogs` 与
+  `OwnerFactDependencyCatalogs` 分开。required owner 的 `prerequisite_required` catalog/observation 只作为 composite
+  feasibility dependency进入 manifest/hash/freshness/CAS/seal，不进入 LLM C3、allowed operation/surface、schema enum 或
+  correction values。SM-2 先接收 acquisition owner 的 outer feasibility 与 base-revision-bound hypothetical delta，再经
+  required owner concrete pure query取得 nested `would_satisfy | would_not_satisfy | typed stale` observation；两个 owner
+  都只报告事实，只有 Orchestrator private event 可以改变 SM-2 semantic ledger。
 - accepted owner receipt 的资源变更是正常前进：它只退休 dependency 精确相交的 observation，并以该
   `PrerequisiteID` 已持久化 invalidation record 的代际重获；不得消耗 recovery budget。read-only stale/
   no-progress 才使用封存且有界的 `prerequisite_refresh` ledger。duplicate 不得重复 CAS、查询、代际或扣减预算。
@@ -114,6 +128,16 @@ load facts
   `CurrentBindingRef`。导致 owner-fact gap 的 accepted state-change operation shape 必须作为同一 CWI 的 anti-replay fact
   跨 successor semantic focus 保留；SM-2 不携带 predecessor repair attempt/gap/directive，SM-3 在 dispatch 前拒绝等价
   shape，因此新 binding generation 不能重置等价副作用的防重放边界。
+- prospective composite feasibility 只有在 File delta、File catalog/observation、Shell dependency catalog/observation、
+  activation-sealed exact recipe identity、manifest/batch/request/contract ref全部 current 且 nested outcome 为
+  `would_satisfy` 时才 seal-ready。SM-2 在 observation CAS 与 semantic seal 前各重验一次；任一 lineage 漂移都保持零
+  binding/operation/effect。Shell typed stale 保留在 nested observation 中，不能改写成 File outer stale或即时 terminal；
+  它只通过既有 `semantic_contract_required` private transition消费 bounded refresh generation并退休 exact dependency。
+  missing dependency 在 query 前退休 generation，零 Shell call。`would_not_satisfy` 必须先以
+  `semantic_feasibility_observed` 持久化完整 composite fact；activation-sealed exact target 不存在 provider correction 空间，
+  下一次 drive 直接收口为统一 `semantic_contract_failed` terminal，并保留 typed original reason
+  `prospective_owner_fact_unsatisfied`；零 provider request/ticket、零 refresh/acquisition/operation budget或effect，
+  duplicate/restart不重复File/Shell probe。
 - terminal `RuntimeResultCloseout` 以 canonical coverage ledger 为 closure authority。只有 canonical non-satisfied
   assessment/active gap 与当前 unsatisfied CWI 的交集可进入结构化 gap；producer 的 claimed disposition 或已满足 CWI
   的历史 gap 只能保留为 audit。top failure 依次使用 current `Facts.Failure`、current active/formal gap、terminal
@@ -135,7 +159,8 @@ load facts
   不得用free-form retry hint创建wait。
 
 禁止：SM-2 调 provider、执行 operation、直读其他 owner repository、将 profile/软件领域语义写进 reducer、
-用数量而非质量关闭 evidence gate。
+用数量而非质量关闭 evidence gate；禁止 File/Shell/application/projection 直接提交 SM-2 transition 或由 Orchestrator
+修改 File/Shell owner state。
 
 ### SM-3：Candidate and sealed-dispatch transaction
 
@@ -267,9 +292,11 @@ sealed authority + preflight ready
   terminal-delivery classification 或 Result delivery request。current semantic operation authority ready 或 semantic
   transaction 自身 failed 后才满足该 convergence terminal 的 delivery readiness。其它 sealed terminal 不得被重规划覆盖；
   administrative termination 走独立 lane。此例外只允许 `semantic_plan` request；operations request 继续 fail-closed。
-- current-baseline Restart 的 SM-1 replacement 使用 Run-owned persisted stage/generation lease。clarification resolution、
-  administrative termination、successor materialization 每一步都先由 Run private event claim，再由 exact result/ack 推进；
-  process-local task 只唤醒 lease，失败/重启不能退化为 application/Orchestrator 第二份 scheduler。
+- current-baseline Restart 的 `run.replacement` 是 Run SM-1 subordinate transaction，使用 Run-owned persisted
+  stage/generation lease。clarification resolution、administrative termination intent、SM-4 delivery handoff acknowledgement、
+  successor materialization 每一步都先由 Run private event claim，再由 exact result/ack 推进；SM-4 可保存并重投
+  `RuntimeTerminationRecord` handoff，但 Run terminal 仍只由 private SM-1 delivery event迁移。process-local task 只唤醒 lease，
+  失败/重启不能退化为 application/Orchestrator 第二份 scheduler。
 
 禁止：重启重新 initialize 已有 aggregate、watcher/projection/TUI/Web 驱动 reducer、无 revision 进展的循环、
 projection failure 覆盖既有 terminal、重放已知 provider/durable effect。

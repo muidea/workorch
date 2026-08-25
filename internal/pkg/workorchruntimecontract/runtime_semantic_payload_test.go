@@ -97,6 +97,9 @@ func TestRuntimeSemanticOwnerFactAcquisitionSchemaUsesOperationSelectorNotDefini
 	if !strings.Contains(schema, `"const":"file/workspace-relative-create"`) {
 		t.Fatalf("owner-fact acquisition schema lost exact operation selector: %s", schema)
 	}
+	if !strings.Contains(schema, `"prospectiveTargetRef":{"const":"validation-readiness.sh"}`) {
+		t.Fatalf("owner-fact acquisition schema did not seal the exact Definition target: %s", schema)
+	}
 	if !strings.Contains(schema, `"requiredEvidenceKinds":{"items":{"const":"state_change"}`) {
 		t.Fatalf("owner-fact acquisition schema did not use the current evidence obligation: %s", schema)
 	}

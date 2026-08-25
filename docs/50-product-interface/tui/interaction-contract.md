@@ -4,7 +4,7 @@ Status: normative
 
 Type: product-interface
 
-Last Verified: 2026-08-23
+Last Verified: 2026-08-25
 
 ## Mode And Authority
 
@@ -99,8 +99,10 @@ typed violation 与 `BlockingTicketID`；TUI 不提供 one-of branch selection �
   generic command；相同revision下scope、typed `definitionClarification`或Approval scope变化必须撤销旧target，detail merge不得
   丢失typed binding或复用其`offendingRefs` slice；
 - resolution is sent once to the appropriate owner API/backend；TUI 必须原样保留 Approval owner conflict，不能用 terminal state readback 重判 payload/principal/resolution identity 的 duplicate equivalence；
-- successful resolution clears the prompt and waits for owner continuation facts；owner persisted continuation自动收敛，若
-  canonical Run持续阻塞则显示resolution delivery diagnostic，不提示或要求用户额外`/run resume`；
+- successful resolution response 只把 UI-private command latch 从 `in-flight` 切到 `projection-readback pending`；TUI 不得
+  乐观清除或改写 Decision/Approval/Run/Workspace canonical DTO、blocker ID 或 active Run。prompt/blocker 必须保持 owner
+  最近一次 projection，直到 scoped Decision/Approval/RuntimeView readback 证明资源已离开 open/pending；owner persisted
+  continuation自动收敛，若 canonical Run持续阻塞则显示resolution delivery diagnostic，不提示或要求用户额外`/run resume`；
 - the TUI does not submit an extra Resume after resolution.
 
 Run-scoped runtime-definition clarification是专用例外：prompt只从typed `Decision.definitionClarification`显示class、binding state、
