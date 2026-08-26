@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"fmt"
 
 	cd "github.com/muidea/magicCommon/def"
 	magicevent "github.com/muidea/magicCommon/event"
@@ -16,9 +17,7 @@ const definitionAdmissionCommandSource = "application/workorchd"
 
 func definitionAdmissionTopics() []string {
 	return []string{
-		workspaceevents.TopicWorkspaceCommandSubmitDefinitionAdmissionCandidate,
-		workspaceevents.TopicWorkspaceCommandPromoteDefinitionAdmissionCandidate,
-		workspaceevents.TopicWorkspaceCommandAcknowledgeDefinitionClarification,
+		workspaceevents.TopicWorkspaceDefinitionAdmissionIntent,
 	}
 }
 
@@ -30,18 +29,14 @@ func (m *Biz) handleDefinitionAdmissionCommand(ev magicevent.Event, result magic
 		result.Set(nil, &cd.Error{Code: cd.IllegalParam, Message: common.ErrInvalidArgument.Error(), Cause: common.ErrInvalidArgument})
 		return
 	}
-	var response any
-	var err error
-	switch cmd := ev.Data().(type) {
-	case workspaceevents.SubmitDefinitionAdmissionCandidateCommand:
-		response, err = m.submitDefinitionAdmissionCandidate(ev.Context(), cmd)
-	case workspaceevents.PromoteDefinitionAdmissionCandidateCommand:
-		response, err = m.promoteDefinitionAdmissionCandidate(ev.Context(), cmd)
-	case workspaceevents.AcknowledgeWorkspaceDefinitionClarificationResolutionCommand:
-		response, err = m.acknowledgeWorkspaceDefinitionClarification(ev.Context(), cmd)
-	default:
-		err = common.ErrInvalidArgument
+	m.deletionIngressMu.RLock()
+	defer m.deletionIngressMu.RUnlock()
+	cmd, ok := ev.Data().(workspaceevents.DefinitionAdmissionIntentCommand)
+	if !ok {
+		result.Set(nil, &cd.Error{Code: cd.IllegalParam, Message: common.ErrInvalidArgument.Error(), Cause: common.ErrInvalidArgument})
+		return
 	}
+	response, err := m.submitDefinitionAdmissionIntent(ev.Context(), cmd)
 	if err != nil {
 		result.Set(nil, &cd.Error{Code: cd.Unexpected, Message: err.Error(), Cause: err})
 		return
@@ -49,60 +44,48 @@ func (m *Biz) handleDefinitionAdmissionCommand(ev magicevent.Event, result magic
 	result.Set(response, nil)
 }
 
-func (m *Biz) submitDefinitionAdmissionCandidate(ctx context.Context, cmd workspaceevents.SubmitDefinitionAdmissionCandidateCommand) (workspaceevents.SubmitDefinitionAdmissionCandidateResult, error) {
+func (m *Biz) submitDefinitionAdmissionIntent(ctx context.Context, cmd workspaceevents.DefinitionAdmissionIntentCommand) (workspaceevents.DefinitionAdmissionIntentResult, error) {
+	cmd = cmd.Normalized()
+	if err := cmd.Validate(); err != nil {
+		return workspaceevents.DefinitionAdmissionIntentResult{}, fmt.Errorf("%w: %v", common.ErrInvalidArgument, err)
+	}
+	if err := m.verifyDefinitionClarificationProvenance(ctx, cmd); err != nil {
+		return workspaceevents.DefinitionAdmissionIntentResult{}, err
+	}
 	transition, err := m.submitDefinitionAdmissionInternalEvent(ctx, definitionAdmissionInternalEvent{
-		Kind: definitionAdmissionInternalEventCandidateSubmitted, WorkspaceID: cmd.Candidate.WorkspaceID, CandidateSubmission: &cmd,
+		WorkspaceID: cmd.Candidate.WorkspaceID, Intent: &cmd,
 	})
 	if err != nil {
-		return workspaceevents.SubmitDefinitionAdmissionCandidateResult{}, err
+		return workspaceevents.DefinitionAdmissionIntentResult{}, err
 	}
-	if transition.CandidateSubmissionResult == nil {
-		return workspaceevents.SubmitDefinitionAdmissionCandidateResult{}, common.ErrInvalidArgument
+	if transition.Result == nil {
+		return workspaceevents.DefinitionAdmissionIntentResult{}, common.ErrInvalidArgument
 	}
-	return *transition.CandidateSubmissionResult, nil
-}
-
-func (m *Biz) promoteDefinitionAdmissionCandidate(ctx context.Context, cmd workspaceevents.PromoteDefinitionAdmissionCandidateCommand) (workspaceevents.PromoteDefinitionAdmissionCandidateResult, error) {
-	transition, err := m.submitDefinitionAdmissionInternalEvent(ctx, definitionAdmissionInternalEvent{
-		Kind: definitionAdmissionInternalEventCandidatePromoted, WorkspaceID: cmd.WorkspaceID, CandidatePromotion: &cmd,
-	})
-	if err != nil {
-		return workspaceevents.PromoteDefinitionAdmissionCandidateResult{}, err
-	}
-	if transition.CandidatePromotionResult == nil {
-		return workspaceevents.PromoteDefinitionAdmissionCandidateResult{}, common.ErrInvalidArgument
-	}
-	return *transition.CandidatePromotionResult, nil
-}
-
-func (m *Biz) acknowledgeWorkspaceDefinitionClarification(ctx context.Context, cmd workspaceevents.AcknowledgeWorkspaceDefinitionClarificationResolutionCommand) (workspaceevents.AcknowledgeWorkspaceDefinitionClarificationResolutionResult, error) {
-	transition, err := m.submitDefinitionAdmissionInternalEvent(ctx, definitionAdmissionInternalEvent{
-		Kind: definitionAdmissionInternalEventClarificationResolutionObserved, WorkspaceID: cmd.WorkspaceID, ClarificationResolution: &cmd,
-	})
-	if err != nil {
-		return workspaceevents.AcknowledgeWorkspaceDefinitionClarificationResolutionResult{}, err
-	}
-	if transition.ClarificationResolutionResult == nil {
-		return workspaceevents.AcknowledgeWorkspaceDefinitionClarificationResolutionResult{}, common.ErrInvalidArgument
-	}
-	return *transition.ClarificationResolutionResult, nil
+	return *transition.Result, nil
 }
 
 func currentDefinitionAdmissionCandidate(values []workspacemodel.DefinitionAdmissionCandidate, candidateID string) (*workspacemodel.DefinitionAdmissionCandidate, bool) {
 	var current *workspacemodel.DefinitionAdmissionCandidate
-	var globalRevision uint64
-	var globalID string
+	lineageID := ""
+	seenRevisions := map[uint64]struct{}{}
 	for idx := range values {
 		value := values[idx].Clone()
-		if value.CandidateRevision > globalRevision || (value.CandidateRevision == globalRevision && value.CandidateID > globalID) {
-			globalRevision, globalID = value.CandidateRevision, value.CandidateID
+		if lineageID == "" {
+			lineageID = value.CandidateID
 		}
-		if value.CandidateID == candidateID && (current == nil || value.CandidateRevision > current.CandidateRevision) {
+		if value.CandidateID != lineageID {
+			return nil, false
+		}
+		if _, duplicate := seenRevisions[value.CandidateRevision]; duplicate {
+			return nil, false
+		}
+		seenRevisions[value.CandidateRevision] = struct{}{}
+		if current == nil || value.CandidateRevision > current.CandidateRevision {
 			copy := value
 			current = &copy
 		}
 	}
-	return current, current != nil && current.CandidateRevision == globalRevision && current.CandidateID == globalID
+	return current, current != nil && current.CandidateID == candidateID && current.CandidateRevision == uint64(len(seenRevisions))
 }
 
 func startupInputFromCandidate(candidate workspacemodel.DefinitionAdmissionCandidate, result workspacemodel.DefinitionAdmissionResult) workspacemodel.WorkspaceStartupInputContract {
@@ -136,15 +119,6 @@ func startupInputFromCandidate(candidate workspacemodel.DefinitionAdmissionCandi
 		ResolvedProjectWorkspaceDirectory: candidate.ResolvedProjectWorkspaceDirectory,
 		CandidateItemToItemRefMappings:    mappings,
 	}).WithHash()
-}
-
-func samePromotion(workspace *workspacemodel.Workspace, candidate workspacemodel.DefinitionAdmissionCandidate, result workspacemodel.DefinitionAdmissionResult, blockingTicketID common.TicketID) bool {
-	if workspace == nil || workspace.StartupInput == nil || workspace.ActivationAdmission == nil {
-		return false
-	}
-	expected := startupInputFromCandidate(candidate, result)
-	current := workspace.ActivationAdmission.Normalized()
-	return workspace.StartupInput.StartupInputHash == expected.StartupInputHash && current.CandidateID == candidate.CandidateID && current.CandidateRevision == candidate.CandidateRevision && current.CandidateHash == candidate.CandidateHash && current.BlockingTicketID == blockingTicketID
 }
 
 func cloneDefinitionAdmissionCandidates(values []workspacemodel.DefinitionAdmissionCandidate) []workspacemodel.DefinitionAdmissionCandidate {

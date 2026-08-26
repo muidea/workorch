@@ -30,6 +30,7 @@ import (
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/runtimecore"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/testkit"
 	"github.com/muidea/workorch/internal/pkg/common"
+	deletioncontract "github.com/muidea/workorch/internal/pkg/workorchdeletioncontract"
 )
 
 func TestEventHubBackendRoutesWorkspaceCreateThroughCLICommand(t *testing.T) {
@@ -208,6 +209,52 @@ func TestEventHubEventsBackendReceivesTypedEventStreamRecord(t *testing.T) {
 		}
 	case <-time.After(500 * time.Millisecond):
 		t.Fatal("timed out waiting for typed event stream record")
+	}
+}
+
+func TestEventHubEventsBackendReceivesPostSealWorkspaceDeletedReceiptDirectly(t *testing.T) {
+	ctx := context.Background()
+	rawHub := magicevent.NewHub(32)
+	defer rawHub.Terminate(ctx)
+
+	be := NewEventHub(rawHub)
+	received := make(chan port.Event, 1)
+	unsubscribe, err := be.Events().Subscribe(ctx, func(_ context.Context, evt port.Event) {
+		if evt.Type == port.EventWorkspaceDeleted {
+			received <- evt
+		}
+	})
+	if err != nil {
+		t.Fatalf("subscribe events: %v", err)
+	}
+	defer unsubscribe()
+
+	data := workspaceevents.WorkspaceDeletedData{
+		WorkspaceID:       "ws-deleted-eventhub",
+		RequestID:         "request-deleted-eventhub",
+		Mode:              deletioncontract.ModeRetain,
+		Disposition:       workspaceevents.DeleteWorkspaceCompleted,
+		DeletionRevision:  7,
+		WorkspaceRevision: 11,
+		CompletedAt:       time.Date(2026, 8, 26, 3, 4, 5, 0, time.UTC),
+	}
+	data.DeletionID = workspaceevents.StableWorkspaceDeletionID(data.WorkspaceID, data.RequestID)
+	rawHub.Post(magicevent.NewEventWithContext(
+		workspaceevents.TopicWorkspaceDeleted,
+		"blocks/workspace",
+		workspaceevents.NotificationDestination,
+		magicevent.NewHeader(),
+		ctx,
+		data,
+	))
+
+	select {
+	case event := <-received:
+		if event.ID != data.DeletionID || event.WorkspaceID != data.WorkspaceID || event.Revision != int64(data.WorkspaceRevision) || event.Payload["deletionId"] != data.DeletionID || event.Payload["disposition"] != string(workspaceevents.DeleteWorkspaceCompleted) {
+			t.Fatalf("workspace deleted event=%+v", event)
+		}
+	case <-time.After(500 * time.Millisecond):
+		t.Fatal("timed out waiting for direct post-seal Workspace deleted receipt")
 	}
 }
 

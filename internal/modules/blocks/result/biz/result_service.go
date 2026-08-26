@@ -2,7 +2,6 @@ package result
 
 import (
 	"context"
-	"errors"
 
 	resultmodel "github.com/muidea/workorch/internal/modules/blocks/result/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
@@ -61,48 +60,6 @@ func (s *service) UpdateResult(ctx context.Context, item *resultmodel.Result) er
 		return common.ErrConflict
 	}
 	return s.results.CompareAndSwap(ctx, item, item.Revision)
-}
-
-func (s *service) DeleteResult(ctx context.Context, workspaceID common.WorkspaceID, id common.ResultID) error {
-	if workspaceID == "" || id == "" {
-		return common.ErrInvalidArgument
-	}
-	ctx, err := common.BindRuntimeWorkspaceContext(ctx, workspaceID)
-	if err != nil {
-		return err
-	}
-	current, err := s.results.Get(ctx, id)
-	if err != nil && !errors.Is(err, common.ErrNotFound) {
-		return err
-	}
-	if current != nil && current.WorkspaceID != workspaceID {
-		return common.ErrConflict
-	}
-	artifacts, err := s.artifacts.ListByResult(ctx, id)
-	if err != nil {
-		return err
-	}
-	if current == nil && len(artifacts) == 0 {
-		return common.ErrNotFound
-	}
-	// Delete the aggregate root first, then its formal children. If a child
-	// delete fails, a retry sees the missing root and resumes orphan cleanup.
-	// This prevents a successful command from leaving a Result that references
-	// child metadata which no longer exists.
-	if current != nil {
-		if err := s.results.Delete(ctx, id); err != nil {
-			return err
-		}
-	}
-	for _, artifact := range artifacts {
-		if artifact == nil || artifact.WorkspaceID != workspaceID || artifact.ResultID != id {
-			return common.ErrConflict
-		}
-		if err := s.artifacts.Delete(ctx, artifact.ID); err != nil && !errors.Is(err, common.ErrNotFound) {
-			return err
-		}
-	}
-	return nil
 }
 
 func (s *service) CreateArtifact(ctx context.Context, item *resultmodel.Artifact) error {
@@ -182,29 +139,6 @@ func (s *service) UpdateArtifact(ctx context.Context, item *resultmodel.Artifact
 		return common.ErrConflict
 	}
 	return s.artifacts.Update(ctx, item)
-}
-
-func (s *service) DeleteArtifact(ctx context.Context, workspaceID common.WorkspaceID, id common.ArtifactID) error {
-	if workspaceID == "" || id == "" {
-		return common.ErrInvalidArgument
-	}
-	ctx, err := common.BindRuntimeWorkspaceContext(ctx, workspaceID)
-	if err != nil {
-		return err
-	}
-	current, err := s.artifacts.Get(ctx, id)
-	if err != nil {
-		return err
-	}
-	if current.WorkspaceID != workspaceID {
-		return common.ErrConflict
-	}
-	if _, err := s.results.Get(ctx, current.ResultID); err == nil {
-		return common.ErrConflict
-	} else if !errors.Is(err, common.ErrNotFound) {
-		return err
-	}
-	return s.artifacts.Delete(ctx, id)
 }
 
 func validateResult(item *resultmodel.Result) error {

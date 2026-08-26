@@ -4,7 +4,7 @@ Status: active
 
 Type: kernel-module-implementation-contract
 
-Last Verified: 2026-08-25
+Last Verified: 2026-08-26
 
 ## 功能范围与边界
 
@@ -337,6 +337,9 @@ deployed run ID 只属于 archive regression evidence，不定义当前候选、
   sealed binding + owner receipt 迁移 coverage。
 - `internal/pkg/workorchruntimecontract` 只实现 DTO、enum、normalize/validate/clone/hash、纯 manifest
   compiler 与 evaluator helper；不持有 Hub、不执行 I/O/CAS、不选择 retry/terminal/Runtime action。
+  `RuntimeSemanticPlanBatchState` 的初始 `pending` 只由 `biz/internal/semanticplan` 的 owner-private compiler 产生，并经
+  SM-3 internal event 进入 `biz/runtime` 私有 reducer；后续合法 forward transition 也只由该 reducer 选择。共享包只校验
+  persisted state shape 和 stable hash，不导出 initialization/compiler/transition helper。
 
 ## CWI semantic planning / reconciliation owner contract
 
@@ -494,8 +497,9 @@ deployed run ID 只属于 archive regression evidence，不定义当前候选、
   governance 的 ticket/approval open request 分别由 Decision/Approval owner 定义。terminal 后只发布 immutable delivery fact，
   Result/Workspace/Run owner 各自消费并产生 acknowledgement。不得直接持有这些 owner 的 service 或 repository。
 - Runtime terminal Result 只通过 Result owner 的 typed SM-4 delivery command 写入；Orchestrator 不构造或提交完整
-  Result/Artifact entity。Orchestrator 的 Result adapter 只为 owner-local terminal cleanup 提供 EventHub read/delete，
-  并对 owner query result 再次 detach，不伪装成具备 generic create/update 的 repository facade。
+  Result/Artifact entity，也不保留 Result/Artifact generic repository facade。Result/Artifact 的查询、清理和生命周期
+  继续完全属于 Result owner；Workspace deletion 只向 Orchestrator 提交 workspace-scoped typed purge，Orchestrator 仅清理
+  自身证据资源，不发起跨 Run/Memory/Result 的逐 Run purge saga。
 - Orchestrator 与 `kernel/governance` 没有直接 EventHub 合同；治理策略经 Decision/Approval/Run owner 的 typed fact 与
   resolution 间接汇合，Orchestrator 保持 runtime contract gate 权威。
 - Decision 与 Approval 使用各自 `pkg/events` 定义 evidence command；Orchestrator 幂等写入自己的 EvidenceRecord 并返回具体 result。
@@ -686,7 +690,22 @@ deployed run ID 只属于 archive regression evidence，不定义当前候选、
   current authority；即使资源内容回到历史形态，owner 也必须发布新的 opaque generation/revision。semantic manifest 的内容
   hash 可以在资源回滚后重现，但只能绑定新的 logical request generation，不能复用旧 owner observation 或 active request。
 - application projection 消费 Orchestrator immutable drive observation；Eventstream 当前不直接订阅 Orchestrator topic，Runtime 只消费同步 typed operation result 推进状态。
-- workspace/run purge 时，Orchestrator 只删除自身 ToolCall/Patch/ValidationResult/Evidence/Coverage/ArtifactContinuation/MemoryTrace；Step 与 RuntimeCheckpoint 必须通过带 WorkspaceID/RunID 的 Run owner purge command 删除，Orchestrator 不持有其 repository。
+- Workspace 删除采用 typed 两阶段握手：Orchestrator 只在 exact Run-owner `draining` fact 已持久化后允许既有
+  terminal-delivery/lease drain；`BeginWorkspaceRuntimeQuiescence` 在 Runtime CAS、drive/timer 与 evidence mutation 共用的
+  workspace barrier 内确认无进程内 writer、无 lease 且 terminal delivery 已完整 ack，随后由 owner-private reducer 落
+  `quiescing` gate。gate 落盘后所有普通、延迟与恢复 Runtime/evidence ingress 均 fail closed；`Confirm` 只从同一冻结快照
+  生成绑定 Run generation/revision、canonical Runtime state ref/hash 与 Orchestrator revision 的 typed quiescence token。
+  Run owner exact finalize 为 `retired` 后，Orchestrator 才能将私有资源推进为 `fenced`；retain 与 purge 都永久保留 tombstone。
+- purge 只接受 `blocks/workspace` 的 fixed-mode concrete command，调用者不能选择 owner phase 或把 retain replay 为 purge。
+  command adapter 只能提交 owner-private `purge_requested` event；同一 private dispatcher 先推进 evidence purge journal，
+  再以 `purge_completed` event 提交 deletion aggregate CAS，adapter 不得直接调用物理 purge sink。canonical memory/file
+  repository set 在同一 durable workspace gate 下按 WorkspaceID 清理自身
+  ToolCall/Patch/ValidationResult/Evidence/Coverage/ArtifactContinuation 以及 orphan chunk/assembled children；receipt 对十个
+  logical surface 分别记录 `observed-before/deleted/remaining=0` 并纳入 proof hash。file backend 在任何物理删除前先持久化
+  `pending` receipt，删除并复核十个 surface 归零后才持久化 `completed`；进程在物理删除与 aggregate CAS 之间崩溃时，
+  restart 必须完成 pending sweep 并 exact replay 首次非空 receipt/proof，不能重算全零证明。Run、Step、RuntimeCheckpoint、
+  MemoryRecallTrace、Result 与 Artifact 均由各自 owner 的 fixed-point sink 清理；不存在逐 Run purge、跨 owner cleanup saga
+  或 foreign-owner generic repository。
 
 ## 交互合同完整性
 
@@ -698,8 +717,9 @@ deployed run ID 只属于 archive regression evidence，不定义当前候选、
 | File / Git / Shell / MCP / Web / SSH | 双向 | owner capability/admissibility/feasibility/reconciliation/execute 与 receipt query/commit | 完整；能力 owner 不选择下一 action |
 | Decision / Approval | 双向 | governance open/resolution/evidence 与 immutable continuation/terminal fact | 完整；无 Application resume 旁路 |
 | `kernel/governance` | 无直接 I/O | 经 Decision/Approval/Run typed fact 间接协作 | 完整；不存在 Orchestrator ↔ Governance 直连合同 |
-| `blocks/memory` | Orchestrator → Memory | workspace-scoped concrete item/trace read 与 bounded paged purge | 完整；Memory 只提供 owner fact，activation trace 由 Run owner 记录 |
-| `application/workorchd` | 双向 | Orchestrator → Application immutable drive observation；Application → Orchestrator evidence/read-model list 与 scoped purge command | 完整；Application 不推进 reducer、不持有 aggregate |
+| `blocks/memory` | Orchestrator → Memory | workspace-scoped concrete item/trace read | 完整；Memory 删除只由其 owner-private fixed-point sink推进，activation trace 由 Run owner 记录 |
+| `application/workorchd` | 双向 | Orchestrator → Application immutable drive observation；Application → Orchestrator evidence/read-model list | 完整；Application 不推进 reducer、不持有 aggregate |
+| `blocks/workspace` | Workspace → Orchestrator | typed quiescence begin/confirm、deletion seal 与 fixed-mode owner-local evidence purge | 完整；Workspace 是 durable coordinator，Orchestrator 只推进自身 private reducer |
 | Skill Registry / SkillHub Catalog / Soul / MCP Registry | 无直接 I/O | 只消费 Run owner 已持久化的 activation snapshot | 完整；Skill provenance/budget 与 Soul guidance/allowlist 已在 activation 封存，后续 Registry/Catalog 更新不改变既有 Run |
 | `blocks/eventstream` | 无直接订阅 | 审计通过正式 owner notification 形成 | 完整；不从审计重建 authority |
 
@@ -802,7 +822,10 @@ deployed run ID 只属于 archive regression evidence，不定义当前候选、
   commands-ready 首次/重复 handoff。
 - [x] forbidden production surface、generic effect/prerequisite compiler 的 capability-neutrality，以及 Run/Workspace
   snapshot reader 只读表面的静态/反射边界。
-- [x] Memory adapter get 强制传播 WorkspaceID；trace 全量恢复/清理按 concrete bounded result 逐页读取，并检测空页游标、重复游标、页数和条目 hard limit。
+- [x] Workspace two-phase retirement、Runtime/evidence shared barrier、durable quiescence token 与 owner-local evidence
+  purge receipt；purge effect 只由 owner-private dispatcher 推进，pending-before-delete journal 在物理删除/aggregate CAS
+  crash cut 后 exact replay 首次 receipt；Orchestrator 不暴露逐 Run purge，也不跨 Run/Memory owner 组合删除，
+  duplicate/restart 复用同一 durable deletion identity，retain/purge 后均无法复生。
 - [x] Skill activation 的 typed provenance/budget invariant，以及 Orchestrator/LLM 不导入 Skill owner、repository 或
   EventHub topic 的静态边界。
 - [x] 全量 owner-private fact 的 SM-2/SM-3/SM-4 分类、唯一 payload route、malformed pre-CAS gate，以及单 aggregate/

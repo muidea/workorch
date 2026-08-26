@@ -18,6 +18,20 @@ func (m *Biz) submitRuntimeInternalEvent(ctx context.Context, event runtime.Runt
 	if m == nil || m.runtimeController == nil || event.Scope.WorkspaceID == "" || event.Scope.RunID == "" {
 		return runtime.RuntimeInternalEventResult{}, common.ErrInvalidArgument
 	}
+	// The Workspace deletion gate and every Runtime Apply/CAS share this owner
+	// barrier. Begin holds the write side while it proves the workspace has no
+	// local or persisted drain work and durably creates the gate. Consequently
+	// a quiescing gate never needs to admit a loosely classified late event:
+	// every post-gate mutation fails closed, including delayed evidence,
+	// governance and lease callbacks.
+	m.runtimeMutationFence.RLock()
+	defer m.runtimeMutationFence.RUnlock()
+	if _, quiescing := m.quiescingWorkspaces[event.Scope.WorkspaceID]; quiescing {
+		return runtime.RuntimeInternalEventResult{}, common.ErrConflict
+	}
+	if err := m.validateRuntimeInternalEventWorkspaceRetirementAdmission(ctx, event); err != nil {
+		return runtime.RuntimeInternalEventResult{}, err
+	}
 	result, err := m.runtimeController.ApplyInternalEvent(ctx, event)
 	if err == nil && result.Aggregate.Facts.WorkspaceID != "" {
 		// The reducer remains the sole Runtime state owner. This immutable
@@ -32,6 +46,82 @@ func (m *Biz) submitRuntimeInternalEvent(ctx context.Context, event runtime.Runt
 		})
 	}
 	return result, err
+}
+
+// validateRuntimeInternalEventWorkspaceRetirementAdmission closes the typed
+// gap between Run's durable draining fence and Orchestrator's durable
+// quiescing gate. The only mutations admitted in that interval are the exact
+// SM-4 terminal-delivery ledger and its delivery-retry lease. All SM-2/SM-3,
+// provider, capability, governance and ordinary recovery facts fail closed.
+func (m *Biz) validateRuntimeInternalEventWorkspaceRetirementAdmission(ctx context.Context, event runtime.RuntimeInternalEvent) error {
+	fence, observed, err := m.observeWorkspaceRetirementFence(ctx, event.Scope.WorkspaceID)
+	if err != nil || !observed {
+		return err
+	}
+	if runWorkspaceRetirementFenceIsRetired(fence) {
+		return common.ErrNotFound
+	}
+	if !runWorkspaceRetirementFenceIsDraining(fence) {
+		return common.ErrConflict
+	}
+	aggregate, err := m.runtimeController.Load(ctx, event.Scope.WorkspaceID, event.Scope.RunID)
+	if err != nil {
+		return err
+	}
+	if aggregate.Facts.WorkspaceID != event.Scope.WorkspaceID || aggregate.Facts.RunID != event.Scope.RunID {
+		return common.ErrConflict
+	}
+	request, err := terminalDeliveryRequest(aggregate)
+	if err != nil || event.Delivery == nil {
+		return common.ErrConflict
+	}
+	delivery := event.Delivery
+	switch event.Kind {
+	case runtime.RuntimeInternalEventTerminalDeliveryAcknowledged:
+		ack := delivery.DeliveryAcknowledgement
+		if ack == nil || ack.WorkspaceID != event.Scope.WorkspaceID || ack.RunID != event.Scope.RunID || ack.TerminalDeliveryID != request.TerminalDeliveryID {
+			return common.ErrConflict
+		}
+		return nil
+	case runtime.RuntimeInternalEventRecoveryBudgetConsumed:
+		if delivery.RecoveryBudgetKind != runtimecontract.RuntimeRecoveryBudgetTerminalDelivery || runtimeTerminalDeliveryFullyAcknowledged(aggregate) {
+			return common.ErrConflict
+		}
+		return nil
+	case runtime.RuntimeInternalEventDriveLeaseScheduled:
+		lease := delivery.DriveLease
+		if lease == nil || lease.WorkspaceID != event.Scope.WorkspaceID || lease.RunID != event.Scope.RunID || lease.Reason != runtimecontract.RuntimeDriveLeaseReasonDeliveryRetry || lease.FailureSignature == "" || lease.DueAt == "" || runtimeTerminalDeliveryFullyAcknowledged(aggregate) {
+			return common.ErrConflict
+		}
+		if aggregate.DriveLease == nil {
+			if delivery.LeaseGeneration != 0 {
+				return common.ErrConflict
+			}
+			return nil
+		}
+		if aggregate.DriveLease.Reason != runtimecontract.RuntimeDriveLeaseReasonDeliveryRetry || aggregate.DriveLease.State != runtimecontract.RuntimeDriveLeaseRunning || delivery.LeaseGeneration != aggregate.DriveLease.RecoveryGeneration {
+			return common.ErrConflict
+		}
+		return nil
+	case runtime.RuntimeInternalEventDriveLeaseClaimed:
+		lease := delivery.DriveLease
+		if lease == nil || aggregate.DriveLease == nil || aggregate.DriveLease.Reason != runtimecontract.RuntimeDriveLeaseReasonDeliveryRetry || aggregate.DriveLease.State != runtimecontract.RuntimeDriveLeaseScheduled || !runtimecontract.SameRuntimeDriveLeaseIdentity(*aggregate.DriveLease, *lease) {
+			return common.ErrConflict
+		}
+		return nil
+	case runtime.RuntimeInternalEventDriveLeaseRecovered:
+		if aggregate.DriveLease == nil || aggregate.DriveLease.Reason != runtimecontract.RuntimeDriveLeaseReasonDeliveryRetry || aggregate.DriveLease.State != runtimecontract.RuntimeDriveLeaseRunning {
+			return common.ErrConflict
+		}
+		return nil
+	case runtime.RuntimeInternalEventDriveLeaseReleased:
+		if aggregate.DriveLease == nil || aggregate.DriveLease.Reason != runtimecontract.RuntimeDriveLeaseReasonDeliveryRetry || aggregate.DriveLease.State != runtimecontract.RuntimeDriveLeaseRunning || delivery.LeaseGeneration != aggregate.DriveLease.RecoveryGeneration {
+			return common.ErrConflict
+		}
+		return nil
+	default:
+		return common.ErrConflict
+	}
 }
 
 func (m *Biz) runtimeRecordFailure(ctx context.Context, aggregate runtime.RuntimeAggregate, fact runtimecontract.FailureFact) (runtime.RuntimeAggregate, error) {

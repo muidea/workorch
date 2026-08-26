@@ -34,19 +34,6 @@ func (m *Biz) executeMemoryRecallTraceCommand(ctx context.Context, ev magicevent
 			WorkspaceID: trace.WorkspaceID, RunID: trace.RunID, TraceID: trace.ID, Disposition: disposition,
 		}, nil)
 		return nil
-	case memoryevents.TopicMemoryRecallTraceCommandGet:
-		cmd, ok := ev.Data().(memoryevents.GetMemoryRecallTraceCommand)
-		if !ok || cmd.WorkspaceID == "" || cmd.TraceID == "" {
-			setMemoryMagicResult(result, memoryevents.GetMemoryRecallTraceResult{}, common.ErrInvalidArgument)
-			return common.ErrInvalidArgument
-		}
-		item, err := m.service.GetMemoryRecallTrace(ctx, cmd.WorkspaceID, cmd.TraceID)
-		if err != nil {
-			setMemoryMagicResult(result, memoryevents.GetMemoryRecallTraceResult{}, err)
-			return err
-		}
-		setMemoryMagicResult(result, (memoryevents.GetMemoryRecallTraceResult{Trace: memoryevents.MemoryRecallTraceFromModel(item)}).Clone(), nil)
-		return nil
 	case memoryevents.TopicMemoryRecallTraceCommandList:
 		cmd, ok := ev.Data().(memoryevents.ListMemoryRecallTracesCommand)
 		if !ok || cmd.Query.WorkspaceID == "" {
@@ -61,25 +48,6 @@ func (m *Biz) executeMemoryRecallTraceCommand(ctx context.Context, ev magicevent
 		setMemoryMagicResult(result, (memoryevents.ListMemoryRecallTracesResult{
 			Traces: memoryevents.MemoryRecallTracesFromModels(items), NextCursor: nextCursor,
 		}).Clone(), nil)
-		return nil
-	case memoryevents.TopicMemoryRecallTraceCommandDelete:
-		cmd, ok := ev.Data().(memoryevents.DeleteMemoryRecallTraceCommand)
-		if !ok || cmd.WorkspaceID == "" || cmd.TraceID == "" {
-			setMemoryMagicResult(result, memoryevents.DeleteMemoryRecallTraceResult{}, common.ErrInvalidArgument)
-			return common.ErrInvalidArgument
-		}
-		item, err := m.service.GetMemoryRecallTrace(ctx, cmd.WorkspaceID, cmd.TraceID)
-		if err != nil {
-			setMemoryMagicResult(result, memoryevents.DeleteMemoryRecallTraceResult{}, err)
-			return err
-		}
-		if err := m.service.DeleteMemoryRecallTrace(ctx, cmd.TraceID); err != nil {
-			setMemoryMagicResult(result, memoryevents.DeleteMemoryRecallTraceResult{}, err)
-			return err
-		}
-		setMemoryMagicResult(result, memoryevents.DeleteMemoryRecallTraceResult{
-			WorkspaceID: item.WorkspaceID, RunID: item.RunID, TraceID: item.ID,
-		}, nil)
 		return nil
 	default:
 		setMemoryMagicResult(result, struct{}{}, common.ErrInvalidArgument)

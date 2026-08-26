@@ -1,6 +1,10 @@
 package appmodelcore
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
+	"strings"
+
 	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
@@ -25,5 +29,19 @@ type Workspace struct {
 }
 
 type DeleteWorkspaceCommand struct {
-	Purge bool `json:"purge,omitempty"`
+	RequestID        string `json:"requestId,omitempty"`
+	Purge            bool   `json:"purge,omitempty"`
+	ExpectedRevision uint64 `json:"expectedRevision,omitempty"`
+}
+
+func (c DeleteWorkspaceCommand) Normalized(workspaceID string) DeleteWorkspaceCommand {
+	c.RequestID = strings.TrimSpace(c.RequestID)
+	if c.RequestID == "" && strings.TrimSpace(workspaceID) != "" {
+		// Workspace IDs are never reused. Keep the ingress request identity mode
+		// independent so a retry with changed intent cannot create a second
+		// deletion journal; the Workspace owner rejects the payload mismatch.
+		digest := sha256.Sum256([]byte("workorchd.workspace-deletion-request\x00" + strings.TrimSpace(workspaceID)))
+		c.RequestID = "workspace-deletion-request-sha256:" + hex.EncodeToString(digest[:])
+	}
+	return c
 }

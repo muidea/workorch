@@ -6,19 +6,163 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 
 	approvalmodel "github.com/muidea/workorch/internal/modules/blocks/approval/pkg/models"
 	decisionmodel "github.com/muidea/workorch/internal/modules/blocks/decision/pkg/models"
 	eventstreammodel "github.com/muidea/workorch/internal/modules/blocks/eventstream/pkg/models"
+	memoryevents "github.com/muidea/workorch/internal/modules/blocks/memory/pkg/events"
+	memorymodel "github.com/muidea/workorch/internal/modules/blocks/memory/pkg/models"
+	resultevents "github.com/muidea/workorch/internal/modules/blocks/result/pkg/events"
 	resultmodel "github.com/muidea/workorch/internal/modules/blocks/result/pkg/models"
 	runmodel "github.com/muidea/workorch/internal/modules/blocks/run/pkg/models"
 	workspacemodel "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/repository"
+	deletioncontract "github.com/muidea/workorch/internal/pkg/workorchdeletioncontract"
 	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
 	"github.com/muidea/workorch/internal/pkg/workorchquerycontract"
 )
+
+func TestWorkspaceDeletionFileFenceSerializesIndependentRepositorySets(t *testing.T) {
+	ctx := context.Background()
+	dataRoot := t.TempDir()
+	first := NewWorkspaceScopedFileRepositorySet(dataRoot)
+	second := NewWorkspaceScopedFileRepositorySet(dataRoot)
+
+	t.Run("memory", func(t *testing.T) {
+		workspaceID := common.WorkspaceID("ws-memory-race")
+		scope := deletioncontract.Scope{WorkspaceID: workspaceID, DeletionID: "delete-memory", DeletionGeneration: 1, Mode: deletioncontract.ModeRetain, QuiescenceID: "quiescence-memory"}
+		scope.RequestHash = deletioncontract.StableRequestHash(scope)
+		now := time.Now().UTC().Format(time.RFC3339Nano)
+		fence := &memorymodel.WorkspaceDeletion{
+			WorkspaceID: workspaceID, DeletionID: scope.DeletionID, DeletionGeneration: 1, Mode: scope.Mode,
+			QuiescenceID: scope.QuiescenceID, RequestHash: scope.RequestHash, FenceID: memoryevents.StableMemoryDeletionFenceID(scope),
+			Phase: memorymodel.WorkspaceDeletionPhaseFenced, Revision: 1, SealAckHash: memoryevents.StableMemoryDeletionSealAckHash(scope), RequestedAt: now, UpdatedAt: now,
+		}
+		start := make(chan struct{})
+		results := make(chan error, 2)
+		go func() {
+			<-start
+			results <- first.MemoryItems.Create(ctx, &memorymodel.MemoryItem{ID: "memory-race", WorkspaceID: workspaceID})
+		}()
+		go func() {
+			<-start
+			results <- second.MemoryDeletions.Create(ctx, fence)
+		}()
+		close(start)
+		for range 2 {
+			err := <-results
+			if err != nil && !errors.Is(err, common.ErrNotFound) {
+				t.Fatalf("concurrent result = %v", err)
+			}
+		}
+		if err := first.MemoryItems.Create(ctx, &memorymodel.MemoryItem{ID: "memory-after-fence", WorkspaceID: workspaceID}); !errors.Is(err, common.ErrNotFound) {
+			t.Fatalf("post-fence memory write = %v, want not found", err)
+		}
+		if _, err := NewWorkspaceScopedFileRepositorySet(dataRoot).MemoryDeletions.Get(ctx, workspaceID); err != nil {
+			t.Fatalf("reopen memory tombstone: %v", err)
+		}
+	})
+
+	t.Run("result", func(t *testing.T) {
+		workspaceID := common.WorkspaceID("ws-result-race")
+		scope := deletioncontract.Scope{WorkspaceID: workspaceID, DeletionID: "delete-result", DeletionGeneration: 1, Mode: deletioncontract.ModeRetain, QuiescenceID: "quiescence-result"}
+		scope.RequestHash = deletioncontract.StableRequestHash(scope)
+		now := time.Now().UTC().Format(time.RFC3339Nano)
+		fence := &resultmodel.WorkspaceDeletion{
+			WorkspaceID: workspaceID, DeletionID: scope.DeletionID, DeletionGeneration: 1, Mode: scope.Mode,
+			QuiescenceID: scope.QuiescenceID, RequestHash: scope.RequestHash, FenceID: resultevents.StableResultDeletionFenceID(scope),
+			Phase: resultmodel.WorkspaceDeletionPhaseFenced, Revision: 1, SealAckHash: resultevents.StableResultDeletionSealAckHash(scope), RequestedAt: now, UpdatedAt: now,
+		}
+		start := make(chan struct{})
+		results := make(chan error, 2)
+		go func() {
+			<-start
+			results <- first.Results.Create(ctx, &resultmodel.Result{ID: "result-race", WorkspaceID: workspaceID, RunID: "run-race"})
+		}()
+		go func() {
+			<-start
+			results <- second.ResultDeletions.Create(ctx, fence)
+		}()
+		close(start)
+		for range 2 {
+			err := <-results
+			if err != nil && !errors.Is(err, common.ErrNotFound) {
+				t.Fatalf("concurrent result = %v", err)
+			}
+		}
+		if err := first.Results.Create(ctx, &resultmodel.Result{ID: "result-after-fence", WorkspaceID: workspaceID, RunID: "run-race"}); !errors.Is(err, common.ErrNotFound) {
+			t.Fatalf("post-fence result write = %v, want not found", err)
+		}
+		if _, err := NewWorkspaceScopedFileRepositorySet(dataRoot).ResultDeletions.Get(ctx, workspaceID); err != nil {
+			t.Fatalf("reopen result tombstone: %v", err)
+		}
+	})
+}
+
+func TestWorkspaceDeletionPurgeTombstonesPersistAcrossReopen(t *testing.T) {
+	ctx := context.Background()
+	dataRoot := t.TempDir()
+	repositories := NewWorkspaceScopedFileRepositorySet(dataRoot)
+	now := time.Now().UTC().Format(time.RFC3339Nano)
+
+	memoryScope := deletioncontract.Scope{WorkspaceID: "ws-memory-purged-reopen", DeletionID: "delete-memory", DeletionGeneration: 1, Mode: deletioncontract.ModePurge, QuiescenceID: "quiescence-memory"}
+	memoryScope.RequestHash = deletioncontract.StableRequestHash(memoryScope)
+	memoryFence := &memorymodel.WorkspaceDeletion{
+		WorkspaceID: memoryScope.WorkspaceID, DeletionID: memoryScope.DeletionID, DeletionGeneration: 1, Mode: memoryScope.Mode,
+		QuiescenceID: memoryScope.QuiescenceID, RequestHash: memoryScope.RequestHash, FenceID: memoryevents.StableMemoryDeletionFenceID(memoryScope),
+		Phase: memorymodel.WorkspaceDeletionPhaseFenced, Revision: 1, SealAckHash: memoryevents.StableMemoryDeletionSealAckHash(memoryScope), RequestedAt: now, UpdatedAt: now,
+	}
+	if err := repositories.MemoryDeletions.Create(ctx, memoryFence); err != nil {
+		t.Fatal(err)
+	}
+	memoryPurged := memorymodel.CloneWorkspaceDeletion(memoryFence)
+	memoryPurged.Phase, memoryPurged.Revision = memorymodel.WorkspaceDeletionPhasePurged, 2
+	memoryPurged.PurgeID = memoryevents.StableMemoryDeletionPurgeID(memoryScope)
+	memoryPurged.PurgeProofHash = memoryevents.StableMemoryDeletionPurgeProofHash(memoryScope)
+	memoryPurged.PurgeAckHash = memoryevents.StableMemoryDeletionPurgeAckHash(memoryScope)
+	memoryPurged.PurgedAt, memoryPurged.UpdatedAt = now, now
+	if err := repositories.MemoryDeletions.CompareAndSwap(ctx, memoryPurged, 1); err != nil {
+		t.Fatal(err)
+	}
+
+	resultScope := deletioncontract.Scope{WorkspaceID: "ws-result-purged-reopen", DeletionID: "delete-result", DeletionGeneration: 1, Mode: deletioncontract.ModePurge, QuiescenceID: "quiescence-result"}
+	resultScope.RequestHash = deletioncontract.StableRequestHash(resultScope)
+	resultFence := &resultmodel.WorkspaceDeletion{
+		WorkspaceID: resultScope.WorkspaceID, DeletionID: resultScope.DeletionID, DeletionGeneration: 1, Mode: resultScope.Mode,
+		QuiescenceID: resultScope.QuiescenceID, RequestHash: resultScope.RequestHash, FenceID: resultevents.StableResultDeletionFenceID(resultScope),
+		Phase: resultmodel.WorkspaceDeletionPhaseFenced, Revision: 1, SealAckHash: resultevents.StableResultDeletionSealAckHash(resultScope), RequestedAt: now, UpdatedAt: now,
+	}
+	if err := repositories.ResultDeletions.Create(ctx, resultFence); err != nil {
+		t.Fatal(err)
+	}
+	resultPurged := resultmodel.CloneWorkspaceDeletion(resultFence)
+	resultPurged.Phase, resultPurged.Revision = resultmodel.WorkspaceDeletionPhasePurged, 2
+	resultPurged.PurgeID = resultevents.StableResultDeletionPurgeID(resultScope)
+	resultPurged.PurgeProofHash = resultevents.StableResultDeletionPurgeProofHash(resultScope)
+	resultPurged.PurgeAckHash = resultevents.StableResultDeletionPurgeAckHash(resultScope)
+	resultPurged.PurgedAt, resultPurged.UpdatedAt = now, now
+	if err := repositories.ResultDeletions.CompareAndSwap(ctx, resultPurged, 1); err != nil {
+		t.Fatal(err)
+	}
+
+	reopened := NewWorkspaceScopedFileRepositorySet(dataRoot)
+	if current, err := reopened.MemoryDeletions.Get(ctx, memoryScope.WorkspaceID); err != nil || current.Phase != memorymodel.WorkspaceDeletionPhasePurged || current.PurgeID != memoryPurged.PurgeID {
+		t.Fatalf("reopened memory tombstone = %#v err=%v", current, err)
+	}
+	if current, err := reopened.ResultDeletions.Get(ctx, resultScope.WorkspaceID); err != nil || current.Phase != resultmodel.WorkspaceDeletionPhasePurged || current.PurgeID != resultPurged.PurgeID {
+		t.Fatalf("reopened result tombstone = %#v err=%v", current, err)
+	}
+	if err := reopened.MemoryItems.Create(ctx, &memorymodel.MemoryItem{ID: "late", WorkspaceID: memoryScope.WorkspaceID}); !errors.Is(err, common.ErrNotFound) {
+		t.Fatalf("memory write after purged reopen = %v", err)
+	}
+	if err := reopened.Results.Create(ctx, &resultmodel.Result{ID: "late", WorkspaceID: resultScope.WorkspaceID, RunID: "run"}); !errors.Is(err, common.ErrNotFound) {
+		t.Fatalf("result write after purged reopen = %v", err)
+	}
+}
 
 func mustWorkspaceScopedPayload(t *testing.T, input map[string]any) workorcheventpayload.Payload {
 	t.Helper()
@@ -116,7 +260,7 @@ func TestWorkspaceScopedFileApprovalRepositoryAddressesExactRunScope(t *testing.
 		approvalID  = common.ApprovalID("approval-shared-across-file-runs")
 	)
 	for _, runID := range []common.RunID{"run-file-approval-a", "run-file-approval-b"} {
-		if err := repos.Runs.Create(ctx, &runmodel.Run{ID: runID, WorkspaceID: workspaceID, State: common.RunStateBlockedOnApproval}); err != nil {
+		if err := repos.Runs.Create(ctx, &runmodel.Run{ID: runID, WorkspaceID: workspaceID, State: common.RunStateCompleted}); err != nil {
 			t.Fatalf("create run %s: %v", runID, err)
 		}
 		if err := repos.Approvals.Create(ctx, &approvalmodel.Approval{
@@ -223,7 +367,7 @@ func TestWorkspaceScopedRunLocalGetRequiresUniqueUnscopedID(t *testing.T) {
 		if err := repos.Runs.Create(scoped, &runmodel.Run{
 			ID:          "run-shared-local",
 			WorkspaceID: workspaceID,
-			State:       common.RunStateActive,
+			State:       common.RunStateCompleted,
 		}); err != nil {
 			t.Fatalf("create run %s: %v", workspaceID, err)
 		}
@@ -268,6 +412,122 @@ func TestWorkspaceScopedRunLocalGetRequiresUniqueUnscopedID(t *testing.T) {
 	}
 	if len(steps) != 1 || steps[0].ID != "run-shared-local/step-001" {
 		t.Fatalf("scoped step list = %#v, want one scoped step", steps)
+	}
+}
+
+func TestWorkspaceScopedRunGenerationAndIDSurviveConcurrentCreateDeletePurgeAndRestart(t *testing.T) {
+	dataRoot := t.TempDir()
+	workspaceID := common.WorkspaceID("ws-run-generation")
+	ctx := common.ContextWithRuntimeWorkspaceID(context.Background(), workspaceID)
+	repos := NewWorkspaceScopedFileRepositorySet(dataRoot)
+
+	// Low-level explicit terminal fixtures still use the same owner-persistence
+	// head. Concurrent commits must receive distinct generations.
+	items := []*runmodel.Run{
+		{ID: "historical-a", WorkspaceID: workspaceID, State: common.RunStateCompleted},
+		{ID: "historical-b", WorkspaceID: workspaceID, State: common.RunStateFailed},
+	}
+	var wg sync.WaitGroup
+	errs := make(chan error, len(items))
+	for _, item := range items {
+		item := item
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			errs <- repos.Runs.Create(ctx, item)
+		}()
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		if err != nil {
+			t.Fatalf("concurrent Run create: %v", err)
+		}
+	}
+	if items[0].WorkspaceRunGeneration == items[1].WorkspaceRunGeneration ||
+		(items[0].WorkspaceRunGeneration != 1 && items[0].WorkspaceRunGeneration != 2) ||
+		(items[1].WorkspaceRunGeneration != 1 && items[1].WorkspaceRunGeneration != 2) {
+		t.Fatalf("concurrent generations = %d, %d; want distinct 1/2", items[0].WorkspaceRunGeneration, items[1].WorkspaceRunGeneration)
+	}
+	// A response-loss replay sees the durable identity and cannot consume a new
+	// generation.
+	if err := repos.Runs.Create(ctx, &runmodel.Run{ID: items[0].ID, WorkspaceID: workspaceID, State: common.RunStateCompleted}); !errors.Is(err, common.ErrConflict) {
+		t.Fatalf("duplicate replay err=%v, want conflict", err)
+	}
+	for _, item := range items {
+		if err := repos.Runs.Delete(ctx, item.ID); err != nil {
+			t.Fatalf("delete %s: %v", item.ID, err)
+		}
+	}
+	// Simulate workspace runtime-directory purge. The Run-owner high-watermark
+	// lives under system state and must survive a fresh repository set.
+	if err := os.RemoveAll(filepath.Join(dataRoot, "internal", "workspaces", string(workspaceID), "runs")); err != nil {
+		t.Fatal(err)
+	}
+	restarted := NewWorkspaceScopedFileRepositorySet(dataRoot)
+	next := &runmodel.Run{WorkspaceID: workspaceID, State: common.RunStatePending}
+	if err := restarted.Runs.CreateNextWorkspaceRun(ctx, next); err != nil {
+		t.Fatalf("create after purge/restart: %v", err)
+	}
+	if next.WorkspaceRunGeneration != 3 || next.ID != "run-003" {
+		t.Fatalf("post-purge Run = id:%s generation:%d, want run-003/3", next.ID, next.WorkspaceRunGeneration)
+	}
+	if err := restarted.Runs.CreateNextWorkspaceRun(ctx, &runmodel.Run{WorkspaceID: workspaceID, State: common.RunStatePending}); !errors.Is(err, common.ErrConflict) {
+		t.Fatalf("second live Run err=%v, want conflict", err)
+	}
+	stored, err := restarted.Runs.GetByWorkspaceID(ctx, workspaceID, next.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	stored.State = common.RunStateCompleted
+	if err := restarted.Runs.CompareAndSwap(ctx, stored, stored.Revision); err != nil {
+		t.Fatal(err)
+	}
+	if err := restarted.Runs.Delete(ctx, stored.ID); err != nil {
+		t.Fatal(err)
+	}
+	last := &runmodel.Run{WorkspaceID: workspaceID, State: common.RunStatePending}
+	if err := NewWorkspaceScopedFileRepositorySet(dataRoot).Runs.CreateNextWorkspaceRun(ctx, last); err != nil {
+		t.Fatal(err)
+	}
+	if last.WorkspaceRunGeneration != 4 || last.ID != "run-004" {
+		t.Fatalf("Run identity was reused after delete/restart: %+v", last)
+	}
+}
+
+func TestWorkspaceScopedRunGenerationSerializesIndependentRepositorySets(t *testing.T) {
+	dataRoot := t.TempDir()
+	workspaceID := common.WorkspaceID("ws-independent-run-generation")
+	ctx := common.ContextWithRuntimeWorkspaceID(context.Background(), workspaceID)
+	repositories := []WorkspaceScopedFileRepositorySet{
+		NewWorkspaceScopedFileRepositorySet(dataRoot),
+		NewWorkspaceScopedFileRepositorySet(dataRoot),
+	}
+	items := []*runmodel.Run{
+		{ID: "historical-a", WorkspaceID: workspaceID, State: common.RunStateCompleted},
+		{ID: "historical-b", WorkspaceID: workspaceID, State: common.RunStateFailed},
+	}
+	errs := make(chan error, len(items))
+	var wg sync.WaitGroup
+	for idx := range items {
+		idx := idx
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			errs <- repositories[idx].Runs.Create(ctx, items[idx])
+		}()
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		if err != nil {
+			t.Fatalf("independent repository create: %v", err)
+		}
+	}
+	if items[0].WorkspaceRunGeneration == items[1].WorkspaceRunGeneration ||
+		(items[0].WorkspaceRunGeneration != 1 && items[0].WorkspaceRunGeneration != 2) ||
+		(items[1].WorkspaceRunGeneration != 1 && items[1].WorkspaceRunGeneration != 2) {
+		t.Fatalf("independent repository generations = %d/%d, want distinct 1/2", items[0].WorkspaceRunGeneration, items[1].WorkspaceRunGeneration)
 	}
 }
 
@@ -338,7 +598,7 @@ func TestWorkspaceScopedEventRecordListHonorsRunScopeCursorAndLimit(t *testing.T
 		if err := repos.Runs.Create(scoped, &runmodel.Run{
 			ID:          runID,
 			WorkspaceID: workspaceID,
-			State:       common.RunStateActive,
+			State:       common.RunStateCompleted,
 		}); err != nil {
 			t.Fatalf("create run %s: %v", runID, err)
 		}
@@ -420,7 +680,10 @@ func TestWorkspaceScopedEventRecordWorkspaceLatestUsesBoundedPerRunLists(t *test
 		if err := repos.Runs.Create(scoped, &runmodel.Run{
 			ID:          runID,
 			WorkspaceID: workspaceID,
-			State:       common.RunStateActive,
+			// Event retention is independent of the current Run lifecycle.
+			// Historical fixtures must not violate the Run owner's single-current
+			// Workspace invariant.
+			State: common.RunStateCompleted,
 		}); err != nil {
 			t.Fatalf("create run %s: %v", runID, err)
 		}
@@ -497,7 +760,22 @@ func TestWorkspaceScopedEventPurgePreservesOwnerFilesAndGlobalPosition(t *testin
 			t.Fatal(err)
 		}
 	}
-	if deleted, err := repos.EventRecords.PurgeWorkspace(scoped, workspaceID); err != nil || deleted != 2 {
+	scope := deletioncontract.Scope{
+		WorkspaceID: workspaceID, DeletionID: "delete-event-purge-files", DeletionGeneration: 1,
+		Mode: deletioncontract.ModePurge, QuiescenceID: "quiescence-event-purge-files",
+	}
+	scope.RequestHash = deletioncontract.StableRequestHash(scope)
+	now := time.Now().UTC().Format(time.RFC3339Nano)
+	fence := &eventstreammodel.WorkspaceDeletion{
+		WorkspaceID: workspaceID, DeletionID: scope.DeletionID, DeletionGeneration: scope.DeletionGeneration,
+		Mode: scope.Mode, QuiescenceID: scope.QuiescenceID, RequestHash: scope.RequestHash,
+		FenceID: "eventstream-fence-event-purge-files", Phase: eventstreammodel.WorkspaceDeletionPhaseFenced,
+		Revision: 1, SealAckHash: "eventstream-seal-ack-event-purge-files", RequestedAt: now, UpdatedAt: now,
+	}
+	if err := repos.EventStreamDeletions.Create(scoped, fence); err != nil {
+		t.Fatal(err)
+	}
+	if deleted, err := repos.EventStreamPurger.PurgeWorkspaceEventRecords(scoped, *fence); err != nil || deleted != 2 {
 		t.Fatalf("purge deleted=%d err=%v", deleted, err)
 	}
 	if workspace, err := repos.Workspaces.Get(scoped, workspaceID); err != nil || workspace.Title != "preserve me" {

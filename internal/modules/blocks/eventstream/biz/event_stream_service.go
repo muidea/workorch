@@ -48,31 +48,36 @@ import (
 // remain private; callers interact only through concrete pkg/events contracts.
 type Biz struct {
 	basebiz.Base
-	repo          repository.EventRecordRepository
-	unsubscribers []func()
-	topics        []string
-	appendMu      sync.Mutex
-	revisions     map[common.WorkspaceID]int64
+	repo               repository.EventRecordRepository
+	workspaceDeletions repository.EventStreamWorkspaceDeletionRepository
+	workspacePurger    repository.EventStreamWorkspacePurger
+	unsubscribers      []func()
+	topics             []string
+	appendMu           sync.Mutex
+	revisions          map[common.WorkspaceID]int64
 }
-
-const eventstreamApplicationCommandSource = "application/workorchd/appservice"
 
 // Dependencies are the EventStream owner's construction inputs. Keeping this
 // in biz prevents the module lifecycle bridge from owning EventHub types.
 type Dependencies struct {
-	EventRecords      repository.EventRecordRepository
-	EventHub          magicevent.Hub
-	BackgroundRoutine magictask.BackgroundRoutine
+	EventRecords       repository.EventRecordRepository
+	WorkspaceDeletions repository.EventStreamWorkspaceDeletionRepository
+	WorkspacePurger    repository.EventStreamWorkspacePurger
+	EventHub           magicevent.Hub
+	BackgroundRoutine  magictask.BackgroundRoutine
 }
 
 var eventRecordIDSequence atomic.Uint64
 
 func New(deps Dependencies) *Biz {
-	return &Biz{Base: basebiz.New(modulecommon.ModuleID, deps.EventHub, deps.BackgroundRoutine), repo: deps.EventRecords}
+	return &Biz{
+		Base: basebiz.New(modulecommon.ModuleID, deps.EventHub, deps.BackgroundRoutine), repo: deps.EventRecords,
+		workspaceDeletions: deps.WorkspaceDeletions, workspacePurger: deps.WorkspacePurger,
+	}
 }
 
 func (s *Biz) highWatermarks(ctx context.Context, workspaceIDs []common.WorkspaceID) ([]eventstreamevents.WorkspaceHighWatermark, error) {
-	if s == nil || s.repo == nil || len(workspaceIDs) == 0 || len(workspaceIDs) > eventstreamevents.MaxHighWatermarkScopes {
+	if s == nil || s.repo == nil || s.workspaceDeletions == nil || len(workspaceIDs) == 0 || len(workspaceIDs) > eventstreamevents.MaxHighWatermarkScopes {
 		return nil, common.ErrInvalidArgument
 	}
 	revisions := map[common.WorkspaceID]int64{}
@@ -82,6 +87,14 @@ func (s *Biz) highWatermarks(ctx context.Context, workspaceIDs []common.Workspac
 			continue
 		}
 		if _, exists := revisions[workspaceID]; exists {
+			continue
+		}
+		hidden, err := s.workspaceDeletionHidden(ctx, workspaceID)
+		if err != nil {
+			return nil, err
+		}
+		if hidden {
+			revisions[workspaceID] = 0
 			continue
 		}
 		bound, err := common.BindRuntimeWorkspaceContext(ctx, workspaceID)
@@ -107,7 +120,7 @@ func (s *Biz) highWatermarks(ctx context.Context, workspaceIDs []common.Workspac
 }
 
 func (s *Biz) Start() error {
-	if s == nil || s.repo == nil || s.EventHub() == nil {
+	if s == nil || s.repo == nil || s.workspaceDeletions == nil || s.workspacePurger == nil || s.EventHub() == nil {
 		return common.ErrInvalidArgument
 	}
 	if len(s.unsubscribers) > 0 {
@@ -124,6 +137,7 @@ func (s *Biz) Start() error {
 	s.topics = []string{
 		eventstreamevents.TopicEventStreamCommandList,
 		eventstreamevents.TopicEventStreamCommandHighWatermarks,
+		eventstreamevents.TopicEventStreamCommandSealWorkspaceDeletion,
 		eventstreamevents.TopicEventStreamCommandPurgeWorkspace,
 		approvalevents.TopicApprovalCommandRecordResolution,
 	}
@@ -238,17 +252,9 @@ func (s *Biz) executeCommand(ev magicevent.Event) (any, error) {
 		}
 		items, err := s.highWatermarks(ev.Context(), cmd.WorkspaceIDs)
 		return eventstreamevents.HighWatermarksResult{HighWatermarks: items}, err
-	case eventstreamevents.TopicEventStreamCommandPurgeWorkspace:
-		cmd, ok := ev.Data().(eventstreamevents.PurgeWorkspaceCommand)
-		if !ok || cmd.WorkspaceID == "" || ev.Source() != eventstreamApplicationCommandSource {
-			return nil, common.ErrInvalidArgument
-		}
-		ctx, err := common.BindRuntimeWorkspaceContext(ev.Context(), cmd.WorkspaceID)
-		if err != nil {
-			return nil, err
-		}
-		deleted, err := s.purgeWorkspaceEvents(ctx, cmd.WorkspaceID)
-		return eventstreamevents.PurgeWorkspaceResult{DeletedCount: deleted}, err
+	case eventstreamevents.TopicEventStreamCommandSealWorkspaceDeletion,
+		eventstreamevents.TopicEventStreamCommandPurgeWorkspace:
+		return s.executeWorkspaceDeletionCommand(ev.Context(), ev)
 	default:
 		return nil, common.ErrInvalidArgument
 	}
@@ -352,10 +358,12 @@ func (s *Biz) subscribeWorkspaceNotifications() {
 		return
 	}
 	const observerID = "/workspace/consumers/blocks/eventstream"
+	// TopicWorkspaceDeleted is a post-seal transport receipt. The permanent
+	// Eventstream fence deliberately excludes it from the durable audit lineage;
+	// EventHub projection/SSE consumers still receive the Workspace-owned fact.
 	workspaceTopics := []string{
 		workspaceevents.TopicWorkspaceCreated,
 		workspaceevents.TopicWorkspaceStateChanged,
-		workspaceevents.TopicWorkspaceDeleted,
 	}
 	for _, topic := range workspaceTopics {
 		topic := topic
@@ -617,6 +625,15 @@ func (s *Biz) appendRecord(ctx context.Context, record *eventstreammodel.EventRe
 	}
 	s.appendMu.Lock()
 	defer s.appendMu.Unlock()
+	if record.WorkspaceID != "" {
+		hidden, err := s.workspaceDeletionHidden(ctx, record.WorkspaceID)
+		if err != nil {
+			return err
+		}
+		if hidden {
+			return common.ErrNotFound
+		}
+	}
 	if record.ID == "" {
 		record.ID = common.EventRecordID(fmt.Sprintf("evt-%d-%d", time.Now().UTC().UnixNano(), eventRecordIDSequence.Add(1)))
 	}
@@ -975,28 +992,46 @@ func (s *Biz) Stop() {
 }
 
 func (s *Biz) listEvents(ctx context.Context, query workorchquerycontract.EventRecordQuery) ([]*eventstreammodel.EventRecord, error) {
-	if s == nil || s.repo == nil {
+	if s == nil || s.repo == nil || s.workspaceDeletions == nil {
 		return nil, common.ErrInvalidArgument
 	}
-	return s.repo.List(ctx, query)
-}
-
-func (s *Biz) purgeWorkspaceEvents(ctx context.Context, workspaceID common.WorkspaceID) (int, error) {
-	if s == nil || s.repo == nil || workspaceID == "" {
-		return 0, common.ErrInvalidArgument
+	if query.WorkspaceID != "" {
+		hidden, err := s.workspaceDeletionHidden(ctx, query.WorkspaceID)
+		if err != nil {
+			return nil, err
+		}
+		if hidden {
+			return nil, nil
+		}
 	}
-	s.appendMu.Lock()
-	defer s.appendMu.Unlock()
-	deleted, err := s.repo.PurgeWorkspace(ctx, workspaceID)
-	if err == nil {
-		s.forgetWorkspaceRevision(workspaceID)
+	items, err := s.repo.List(ctx, query)
+	if err != nil {
+		return nil, err
 	}
-	return deleted, err
-}
-
-func (s *Biz) forgetWorkspaceRevision(workspaceID common.WorkspaceID) {
-	if s == nil || workspaceID == "" {
-		return
+	if query.WorkspaceID != "" || len(items) == 0 {
+		return items, nil
 	}
-	delete(s.revisions, workspaceID)
+	visible := items[:0]
+	visibility := map[common.WorkspaceID]bool{}
+	for _, item := range items {
+		if item == nil || item.WorkspaceID == "" {
+			visible = append(visible, item)
+			continue
+		}
+		hidden, known := visibility[item.WorkspaceID]
+		if !known {
+			hidden, err = s.workspaceDeletionHidden(ctx, item.WorkspaceID)
+			if err != nil {
+				return nil, err
+			}
+			visibility[item.WorkspaceID] = hidden
+		}
+		if !hidden {
+			visible = append(visible, item)
+		}
+	}
+	if len(visible) == 0 {
+		return nil, nil
+	}
+	return visible, nil
 }

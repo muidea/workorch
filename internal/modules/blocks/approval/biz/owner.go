@@ -18,28 +18,32 @@ import (
 const ModuleID = modulecommon.ModuleID
 
 type Dependencies struct {
-	Approvals         repository.ApprovalRepository
-	EventHub          magicevent.Hub
-	BackgroundRoutine task.BackgroundRoutine
+	Approvals          repository.ApprovalRepository
+	WorkspaceDeletions repository.ApprovalWorkspaceDeletionRepository
+	EventHub           magicevent.Hub
+	BackgroundRoutine  task.BackgroundRoutine
 }
 
 type Biz struct {
 	basebiz.Base
-	service         *mutationService
-	approvals       repository.ApprovalRepository
-	topics          []string
-	started         bool
-	lifecycleMu     sync.Mutex
-	reconcileMu     sync.Mutex
-	reconcileCancel context.CancelFunc
-	reconcileDone   chan struct{}
+	service            *mutationService
+	approvals          repository.ApprovalRepository
+	topics             []string
+	started            bool
+	lifecycleMu        sync.Mutex
+	reconcileMu        sync.Mutex
+	reconcileCancel    context.CancelFunc
+	reconcileDone      chan struct{}
+	workspaceDeletions repository.ApprovalWorkspaceDeletionRepository
+	workspaceLocksMu   sync.Mutex
+	workspaceLocks     map[common.WorkspaceID]*sync.Mutex
 }
 
 func New(h magicevent.Hub, b task.BackgroundRoutine, deps Dependencies) (*Biz, error) {
-	if deps.Approvals == nil || deps.EventHub == nil || h == nil {
+	if deps.Approvals == nil || deps.WorkspaceDeletions == nil || deps.EventHub == nil || h == nil {
 		return nil, common.ErrInvalidArgument
 	}
-	return &Biz{Base: basebiz.New(modulecommon.ModuleID, h, b), service: newMutationService(deps.Approvals), approvals: deps.Approvals}, nil
+	return &Biz{Base: basebiz.New(modulecommon.ModuleID, h, b), service: newMutationService(deps.Approvals), approvals: deps.Approvals, workspaceDeletions: deps.WorkspaceDeletions, workspaceLocks: map[common.WorkspaceID]*sync.Mutex{}}, nil
 }
 
 func (m *Biz) Start() error {
@@ -109,5 +113,6 @@ func (m *Biz) Teardown(context.Context) {
 	m.topics = nil
 	m.service = nil
 	m.approvals = nil
+	m.workspaceDeletions = nil
 	m.started = false
 }

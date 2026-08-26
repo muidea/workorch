@@ -32,6 +32,12 @@ func (m *Biz) handleRuntimeGovernanceRequest(event magicevent.Event, result magi
 		setRuntimeGovernanceRequestResult(result, decisionevents.OpenRuntimeGovernanceRequestResult{}, err)
 		return
 	}
+	unlock := m.lockWorkspaceMutation(command.WorkspaceID)
+	defer unlock()
+	if err := m.rejectFencedWorkspace(ctx, command.WorkspaceID); err != nil {
+		setRuntimeGovernanceRequestResult(result, decisionevents.OpenRuntimeGovernanceRequestResult{}, err)
+		return
+	}
 	ticket, _, err := m.service.EnsureTicketAndReturn(ctx, decisioncontracts.CreateTicketCommand{
 		TicketID: command.TicketID, WorkspaceID: command.WorkspaceID, RunID: command.RunID,
 		StepID: common.StepID("runtime/" + command.DispatchID), Reason: command.Dependency.Reason,
@@ -69,7 +75,7 @@ func (m *Biz) executeRuntimeGovernanceResolution(ctx context.Context, cmd decisi
 	if err != nil {
 		return decisionevents.EnsureResolvedResult{}, err
 	}
-	if currentTicket.DeletionRequestedAt != "" || currentTicket.DecisionKind != cmd.DecisionKind {
+	if currentTicket.DecisionKind != cmd.DecisionKind {
 		return decisionevents.EnsureResolvedResult{}, common.ErrConflict
 	}
 	ticket, proposal, err := m.service.EnsureRuntimeGovernanceResolutionProposal(ctx, resolveCommand)
@@ -114,36 +120,41 @@ func (m *Biz) commitRuntimeGovernanceTicketProposal(ctx context.Context, ticket 
 	default:
 		return orchestratorevents.CommitRuntimeGovernanceResolutionResult{}, common.ErrInvalidArgument
 	}
-	result := m.SendEvent(magicevent.NewEventWithContext(
-		orchestratorevents.TopicOrchestratorCommitRuntimeGovernanceTicket,
-		ModuleID,
-		orchestratorevents.CommandDestination,
-		magicevent.NewHeader(),
-		ctx,
-		orchestratorevents.CommitRuntimeGovernanceTicketResolutionCommand{
-			ResolutionID: proposal.ResolutionID, TicketID: ticket.ID,
-			WorkspaceID: ticket.WorkspaceID, RunID: ticket.RunID,
-			Outcome: outcome, Summary: runtimeGovernanceProposalSummary(ticket, proposal),
-		},
-	))
-	if result == nil {
-		return orchestratorevents.CommitRuntimeGovernanceResolutionResult{}, common.ErrInvalidArgument
-	}
-	if err := result.Error(); err != nil {
-		return orchestratorevents.CommitRuntimeGovernanceResolutionResult{}, err
-	}
-	data, resultErr := result.Get()
-	if resultErr != nil {
-		return orchestratorevents.CommitRuntimeGovernanceResolutionResult{}, resultErr
-	}
-	response, ok := data.(orchestratorevents.CommitRuntimeGovernanceResolutionResult)
-	if !ok || response.WorkspaceID != ticket.WorkspaceID || response.RunID != ticket.RunID || response.ResolutionID != proposal.ResolutionID {
-		return orchestratorevents.CommitRuntimeGovernanceResolutionResult{}, common.ErrInvalidArgument
-	}
-	if err := response.Validate(); err != nil {
-		return orchestratorevents.CommitRuntimeGovernanceResolutionResult{}, err
-	}
-	return response, nil
+	var response orchestratorevents.CommitRuntimeGovernanceResolutionResult
+	err := m.withWorkspaceActiveDelivery(ctx, ticket.WorkspaceID, func(guarded context.Context) error {
+		result := m.SendEvent(magicevent.NewEventWithContext(
+			orchestratorevents.TopicOrchestratorCommitRuntimeGovernanceTicket,
+			ModuleID,
+			orchestratorevents.CommandDestination,
+			magicevent.NewHeader(),
+			guarded,
+			orchestratorevents.CommitRuntimeGovernanceTicketResolutionCommand{
+				ResolutionID: proposal.ResolutionID, TicketID: ticket.ID,
+				WorkspaceID: ticket.WorkspaceID, RunID: ticket.RunID,
+				Outcome: outcome, Summary: runtimeGovernanceProposalSummary(ticket, proposal),
+			},
+		))
+		if result == nil {
+			return common.ErrInvalidArgument
+		}
+		if resultErr := result.Error(); resultErr != nil {
+			return resultErr
+		}
+		data, resultErr := result.Get()
+		if resultErr != nil {
+			return resultErr
+		}
+		value, ok := data.(orchestratorevents.CommitRuntimeGovernanceResolutionResult)
+		if !ok || value.WorkspaceID != ticket.WorkspaceID || value.RunID != ticket.RunID || value.ResolutionID != proposal.ResolutionID {
+			return common.ErrInvalidArgument
+		}
+		if err := value.Validate(); err != nil {
+			return err
+		}
+		response = value
+		return nil
+	})
+	return response, err
 }
 
 func runtimeGovernanceProposalSummary(ticket *decisionmodel.Ticket, proposal *decisionmodel.RuntimeGovernanceResolutionProposal) string {

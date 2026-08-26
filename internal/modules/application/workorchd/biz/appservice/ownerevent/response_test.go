@@ -28,8 +28,8 @@ func TestOwnerResponseDecodersFailClosedForNilWrongTypeAndOwnerError(t *testing.
 		decode  func(magicevent.Result) error
 	}{
 		{name: "workspace", correct: workspaceevents.WorkspaceCommandResult{}, decode: func(response magicevent.Result) error { _, err := Workspace(response, topic); return err }},
-		{name: "workspace focused", correct: workspaceevents.SubmitDefinitionAdmissionCandidateResult{}, decode: func(response magicevent.Result) error {
-			_, err := WorkspaceOwner[workspaceevents.SubmitDefinitionAdmissionCandidateResult](response, topic)
+		{name: "workspace focused", correct: workspaceevents.DefinitionAdmissionIntentResult{}, decode: func(response magicevent.Result) error {
+			_, err := WorkspaceOwner[workspaceevents.DefinitionAdmissionIntentResult](response, topic)
 			return err
 		}},
 		{name: "workspace lifecycle", correct: workspaceevents.WorkspaceLifecycleCommandResult{}, decode: func(response magicevent.Result) error { _, err := WorkspaceLifecycle(response, topic); return err }},

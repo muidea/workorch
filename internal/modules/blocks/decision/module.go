@@ -18,7 +18,7 @@ func (m *Module) Configure(d decisionbiz.Dependencies) error {
 	return m.configure(d)
 }
 func (m *Module) configure(d decisionbiz.Dependencies) error {
-	if m == nil || d.EventHub == nil || d.Tickets == nil || d.Resolutions == nil {
+	if m == nil || d.EventHub == nil || d.Tickets == nil || d.Resolutions == nil || d.WorkspaceDeletions == nil {
 		return common.ErrInvalidArgument
 	}
 	x, err := decisionbiz.New(d.EventHub, d.BackgroundRoutine, d)

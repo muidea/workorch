@@ -16,11 +16,6 @@ import (
 const definitionPackage = "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/events"
 const CommandDestination = modulecommon.ModuleID
 
-type PurgeRunCommand struct {
-	WorkspaceID common.WorkspaceID
-	RunID       common.RunID
-}
-
 type DriveRuntimeCommand struct {
 	WorkspaceID common.WorkspaceID
 	RunID       common.RunID
@@ -316,12 +311,14 @@ type OrchestratorCommandResult struct {
 	ValidationResults     []*runtimeevidencemodel.ValidationResult
 	CoverageWorkItems     []*runtimecontract.CoverageWorkItem
 	ArtifactContinuations []*ArtifactContinuation
-	DeletedCount          int
 }
 
 func MessageContracts() []eventcontract.MessageContract {
 	ret := []eventcontract.MessageContract{
-		eventcontract.CommandTopic[PurgeRunCommand, OrchestratorCommandResult]("orchestrator", definitionPackage, eventcontract.CommandClassWrite, eventcontract.LanePolicyState, TopicOrchestratorCommandPurgeRun).MessageContract(),
+		eventcontract.CommandTopic[BeginWorkspaceRuntimeQuiescenceCommand, BeginWorkspaceRuntimeQuiescenceResult]("orchestrator", definitionPackage, eventcontract.CommandClassWrite, eventcontract.LanePolicyState, TopicOrchestratorCommandBeginWorkspaceRuntimeQuiescence).MessageContract(),
+		eventcontract.CommandTopic[ConfirmWorkspaceRuntimeQuiescenceCommand, ConfirmWorkspaceRuntimeQuiescenceResult]("orchestrator", definitionPackage, eventcontract.CommandClassWrite, eventcontract.LanePolicyState, TopicOrchestratorCommandConfirmWorkspaceRuntimeQuiescence).MessageContract(),
+		eventcontract.CommandTopic[SealWorkspaceOrchestratorDeletionCommand, SealWorkspaceOrchestratorDeletionResult]("orchestrator", definitionPackage, eventcontract.CommandClassWrite, eventcontract.LanePolicyState, TopicOrchestratorCommandSealWorkspaceDeletion).MessageContract(),
+		eventcontract.CommandTopic[PurgeWorkspaceOrchestratorEvidenceCommand, PurgeWorkspaceOrchestratorEvidenceResult]("orchestrator", definitionPackage, eventcontract.CommandClassWrite, eventcontract.LanePolicyState, TopicOrchestratorCommandPurgeWorkspaceEvidence).MessageContract(),
 		eventcontract.CommandTopic[ListToolCallsByRunCommand, OrchestratorCommandResult]("orchestrator", definitionPackage, eventcontract.CommandClassRead, eventcontract.LanePolicyQuery, TopicOrchestratorCommandListToolCallsByRun).MessageContract(),
 		eventcontract.CommandTopic[ListPatchesByRunCommand, OrchestratorCommandResult]("orchestrator", definitionPackage, eventcontract.CommandClassRead, eventcontract.LanePolicyQuery, TopicOrchestratorCommandListPatchesByRun).MessageContract(),
 		eventcontract.CommandTopic[ListValidationResultsByRunCommand, OrchestratorCommandResult]("orchestrator", definitionPackage, eventcontract.CommandClassRead, eventcontract.LanePolicyQuery, TopicOrchestratorCommandListValidationResultsByRun).MessageContract(),

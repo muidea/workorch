@@ -25,6 +25,7 @@ type Dependencies struct {
 	Runs              repository.RunRepository
 	Steps             repository.StepRepository
 	Checkpoints       repository.RuntimeCheckpointRepository
+	OwnerRepositories repository.RunOwnerRepositories
 	EventHub          magicevent.Hub
 	BackgroundRoutine magictask.BackgroundRoutine
 }
@@ -33,15 +34,21 @@ type Biz struct {
 	basebiz.Base
 	// commandMu only coordinates in-flight EventHub owner commands with Stop.
 	// Framework serializes Configure/Start/Stop lifecycle calls.
-	commandMu     sync.RWMutex
-	stopping      bool
-	notifier      runStateNotifier
-	runs          repository.RunRepository
-	steps         repository.StepRepository
-	checkpoints   repository.RuntimeCheckpointRepository
-	topics        []string
-	recoveryReady bool
-	started       bool
+	commandMu sync.RWMutex
+	// workspaceExecutionMu serializes Workspace-scoped restart admission with
+	// successor materialization. Durable repository guards remain the final
+	// fence; this lock prevents two owner-private workflows from racing toward
+	// different live Runs in one process.
+	workspaceExecutionMu sync.Mutex
+	stopping             bool
+	notifier             runStateNotifier
+	runs                 repository.RunRepository
+	steps                repository.StepRepository
+	checkpoints          repository.RuntimeCheckpointRepository
+	workspacePurger      repository.RunWorkspaceResourcePurger
+	topics               []string
+	recoveryReady        bool
+	started              bool
 	// replacementRecoveryTasks is process-local wakeup deduplication only. The
 	// exact stage/generation/due time authority remains persisted inside the
 	// Run-owned ReplacementIntent recovery lease.
@@ -61,13 +68,27 @@ func (m *Biz) Configure(deps Dependencies) error {
 	if m == nil {
 		return common.ErrInvalidArgument
 	}
-	if deps.Runs == nil || deps.EventHub == nil {
+	if deps.EventHub == nil {
 		return common.ErrInvalidArgument
 	}
+	if deps.OwnerRepositories.Present() {
+		if deps.OwnerRepositories.Validate() != nil || deps.Runs != nil || deps.Steps != nil || deps.Checkpoints != nil {
+			return common.ErrInvalidArgument
+		}
+		m.runs = deps.OwnerRepositories.Runs()
+		m.steps = deps.OwnerRepositories.Steps()
+		m.checkpoints = deps.OwnerRepositories.Checkpoints()
+		m.workspacePurger = deps.OwnerRepositories.WorkspacePurger()
+	} else {
+		if deps.Runs == nil {
+			return common.ErrInvalidArgument
+		}
+		m.runs = deps.Runs
+		m.steps = deps.Steps
+		m.checkpoints = deps.Checkpoints
+		m.workspacePurger = nil
+	}
 	m.stopping = false
-	m.runs = deps.Runs
-	m.steps = deps.Steps
-	m.checkpoints = deps.Checkpoints
 	m.Base = basebiz.New(modulecommon.ModuleID, deps.EventHub, deps.BackgroundRoutine)
 	m.notifier = eventRunStateNotifier{post: m.PostEvent}
 	m.replacementRecoveryMu.Lock()
@@ -78,6 +99,13 @@ func (m *Biz) Configure(deps Dependencies) error {
 	m.replacementRecoveryCtx, m.replacementRecoveryCancel = context.WithCancel(context.Background())
 	m.replacementRecoveryTasks = make(map[string]uint64)
 	m.replacementRecoveryMu.Unlock()
+	// A restart creates the Run and activates it in two owner-private writes.
+	// Recover that durable cut before exposing the SM-4 inventory subscription:
+	// Orchestrator setup must either observe the Run as active or fail startup,
+	// never inventory a pending Run whose activation notification was lost.
+	if err := m.recoverPendingWorkspaceActivations(); err != nil {
+		return err
+	}
 	// Configure is invoked exclusively from Setup (or explicit test assembly).
 	// Establish the SM-4 downstream read contract before any later module Run.
 	return m.prepareRuntimeRecoveryInventory()
@@ -102,9 +130,12 @@ func (m *Biz) Start() error {
 	}
 	regularTopics := runCommandTopics()
 	for _, topic := range regularTopics {
+		if topic == runevents.TopicRunCommandWorkspaceRetirementFact {
+			continue
+		}
 		m.SubscribeFunc(topic, m.handleCommand)
+		m.topics = append(m.topics, topic)
 	}
-	m.topics = append(m.topics, regularTopics...)
 	for _, topic := range m.lifecycleTopics() {
 		m.SubscribeFunc(topic, m.handleLifecycleCommand)
 		m.topics = append(m.topics, topic)
@@ -153,10 +184,17 @@ func (m *Biz) ensureRuntimeRecoveryInventoryLocked() error {
 	m.SubscribeFunc(runevents.TopicRunCommandRuntimeRecoveryInventory, m.handleRuntimeRecoveryInventory)
 	m.SubscribeFunc(runevents.TopicRunCommandRuntimeStateRecordReadiness, m.handleRuntimeStateRecordReadiness)
 	m.SubscribeFunc(runevents.TopicRunCommandRuntimeStateRecord, m.handleRuntimeStateRecord)
+	m.SubscribeFunc(runevents.TopicRunCommandWorkspaceRetirementInventory, m.handleWorkspaceRetirementInventory)
+	// Orchestrator starts before Run by framework weight. A persisted draining
+	// or retired head therefore needs both the inventory and its exact physical
+	// Run fact during Setup, before ordinary Run commands are exposed.
+	m.SubscribeFunc(runevents.TopicRunCommandWorkspaceRetirementFact, m.handleCommand)
 	m.topics = append(m.topics,
 		runevents.TopicRunCommandRuntimeRecoveryInventory,
 		runevents.TopicRunCommandRuntimeStateRecordReadiness,
 		runevents.TopicRunCommandRuntimeStateRecord,
+		runevents.TopicRunCommandWorkspaceRetirementInventory,
+		runevents.TopicRunCommandWorkspaceRetirementFact,
 	)
 	m.recoveryReady = true
 	return nil
@@ -166,8 +204,12 @@ func (m *Biz) handleRuntimeRecoveryInventory(ev magicevent.Event, result magicev
 	if result == nil {
 		return
 	}
+	if ev == nil {
+		result.Set(nil, &cd.Error{Code: cd.IllegalParam, Message: common.ErrInvalidArgument.Error(), Cause: common.ErrInvalidArgument})
+		return
+	}
 	cmd, ok := ev.Data().(runevents.QueryRuntimeRecoveryInventoryCommand)
-	if !ok || m == nil {
+	if !ok || m == nil || ev.Source() != workspaceRetirementFactQuerySource {
 		result.Set(nil, &cd.Error{Code: cd.IllegalParam, Message: common.ErrInvalidArgument.Error(), Cause: common.ErrInvalidArgument})
 		return
 	}
@@ -177,19 +219,80 @@ func (m *Biz) handleRuntimeRecoveryInventory(ev magicevent.Event, result magicev
 		result.Set(nil, &cd.Error{Code: cd.IllegalParam, Message: common.ErrInvalidArgument.Error(), Cause: common.ErrInvalidArgument})
 		return
 	}
+	// Runtime recovery inventory and retirement finalization share the Run
+	// owner's workflow lock. A successful inventory response therefore cannot
+	// cross the retired visibility linearization point in this process.
+	m.workspaceExecutionMu.Lock()
+	defer m.workspaceExecutionMu.Unlock()
 	runs, err := m.runs.List(ev.Context())
 	if err != nil {
 		result.Set(nil, &cd.Error{Code: cd.Unexpected, Message: err.Error(), Cause: err})
 		return
 	}
-	result.Set(buildRuntimeRecoveryInventory(runs, cmd), nil)
+	retirements, err := m.runs.ListWorkspaceRetirements(ev.Context())
+	if err != nil {
+		result.Set(nil, &cd.Error{Code: cd.Unexpected, Message: err.Error(), Cause: err})
+		return
+	}
+	retired := make(map[common.WorkspaceID]struct{}, len(retirements))
+	draining := make(map[common.WorkspaceID]struct{}, len(retirements))
+	for _, fence := range retirements {
+		if fence.IsRetired() {
+			retired[fence.WorkspaceID] = struct{}{}
+		} else if fence.IsDraining() {
+			draining[fence.WorkspaceID] = struct{}{}
+		}
+	}
+	filtered := make([]*runmodel.Run, 0, len(runs))
+	for _, item := range runs {
+		if item == nil {
+			continue
+		}
+		if _, fenced := retired[item.WorkspaceID]; !fenced {
+			filtered = append(filtered, item)
+		}
+	}
+	result.Set(buildRuntimeRecoveryInventoryWithDraining(filtered, cmd, draining), nil)
 }
 
-func (m *Biz) handleRuntimeStateRecordReadiness(_ magicevent.Event, result magicevent.Result) {
+func (m *Biz) handleWorkspaceRetirementInventory(ev magicevent.Event, result magicevent.Result) {
 	if result == nil {
 		return
 	}
-	if m == nil {
+	cmd, ok := ev.Data().(runevents.QueryWorkspaceRetirementInventoryCommand)
+	if !ok || m == nil || ev.Source() != workspaceRetirementFactQuerySource {
+		result.Set(nil, &cd.Error{Code: cd.IllegalParam, Message: common.ErrInvalidArgument.Error(), Cause: common.ErrInvalidArgument})
+		return
+	}
+	m.commandMu.RLock()
+	defer m.commandMu.RUnlock()
+	if m.stopping || m.runs == nil {
+		result.Set(nil, &cd.Error{Code: cd.IllegalParam, Message: common.ErrInvalidArgument.Error(), Cause: common.ErrInvalidArgument})
+		return
+	}
+	items, err := m.runs.ListWorkspaceRetirements(ev.Context())
+	if err != nil {
+		result.Set(nil, &cd.Error{Code: cd.Unexpected, Message: err.Error(), Cause: err})
+		return
+	}
+	response, err := buildWorkspaceRetirementInventory(items, cmd)
+	if err != nil {
+		result.Set(nil, &cd.Error{Code: cd.Unexpected, Message: err.Error(), Cause: err})
+		return
+	}
+	result.Set(response, nil)
+}
+
+func (m *Biz) handleRuntimeStateRecordReadiness(ev magicevent.Event, result magicevent.Result) {
+	if result == nil {
+		return
+	}
+	if ev == nil {
+		result.Set(nil, &cd.Error{Code: cd.IllegalParam, Message: common.ErrInvalidArgument.Error(), Cause: common.ErrInvalidArgument})
+		return
+	}
+	_, ok := ev.Data().(runevents.QueryRuntimeStateRecordReadinessCommand)
+	if !ok || m == nil || ev.Source() != workspaceRetirementFactQuerySource {
 		result.Set(nil, &cd.Error{Code: cd.IllegalParam, Message: common.ErrInvalidArgument.Error(), Cause: common.ErrInvalidArgument})
 		return
 	}
@@ -206,8 +309,12 @@ func (m *Biz) handleRuntimeStateRecord(ev magicevent.Event, result magicevent.Re
 	if result == nil {
 		return
 	}
+	if ev == nil {
+		result.Set(nil, &cd.Error{Code: cd.IllegalParam, Message: common.ErrInvalidArgument.Error(), Cause: common.ErrInvalidArgument})
+		return
+	}
 	cmd, ok := ev.Data().(runevents.QueryRuntimeStateRecordCommand)
-	if !ok || cmd.Validate() != nil || m == nil {
+	if !ok || cmd.Validate() != nil || m == nil || ev.Source() != workspaceRetirementFactQuerySource {
 		result.Set(nil, &cd.Error{Code: cd.IllegalParam, Message: common.ErrInvalidArgument.Error(), Cause: common.ErrInvalidArgument})
 		return
 	}
@@ -217,9 +324,20 @@ func (m *Biz) handleRuntimeStateRecord(ev magicevent.Event, result magicevent.Re
 		result.Set(nil, &cd.Error{Code: cd.IllegalParam, Message: common.ErrInvalidArgument.Error(), Cause: common.ErrInvalidArgument})
 		return
 	}
+	m.workspaceExecutionMu.Lock()
+	defer m.workspaceExecutionMu.Unlock()
 	ctx, err := common.BindRuntimeWorkspaceContext(ev.Context(), cmd.WorkspaceID)
 	if err != nil {
 		result.Set(nil, &cd.Error{Code: cd.IllegalParam, Message: err.Error(), Cause: err})
+		return
+	}
+	retired, err := m.workspaceRunsRetired(ctx, cmd.WorkspaceID)
+	if err != nil {
+		result.Set(nil, &cd.Error{Code: cd.Unexpected, Message: err.Error(), Cause: err})
+		return
+	}
+	if retired {
+		result.Set(nil, &cd.Error{Code: cd.NotFound, Message: common.ErrNotFound.Error(), Cause: common.ErrNotFound})
 		return
 	}
 	run, err := m.runs.GetByWorkspaceID(ctx, cmd.WorkspaceID, cmd.RunID)
@@ -266,6 +384,10 @@ func (m *Biz) publishRuntimeCommandsReady() {
 }
 
 func buildRuntimeRecoveryInventory(runs []*runmodel.Run, cmd runevents.QueryRuntimeRecoveryInventoryCommand) runevents.QueryRuntimeRecoveryInventoryResult {
+	return buildRuntimeRecoveryInventoryWithDraining(runs, cmd, nil)
+}
+
+func buildRuntimeRecoveryInventoryWithDraining(runs []*runmodel.Run, cmd runevents.QueryRuntimeRecoveryInventoryCommand, draining map[common.WorkspaceID]struct{}) runevents.QueryRuntimeRecoveryInventoryResult {
 	limit := cmd.Limit
 	if limit <= 0 || limit > 500 {
 		limit = 100
@@ -283,7 +405,8 @@ func buildRuntimeRecoveryInventory(runs []*runmodel.Run, cmd runevents.QueryRunt
 		// This inventory is deliberately raw: Run owns only its lifecycle and
 		// opaque persistence record. It must not inspect Decision, dispatch,
 		// governance, delivery, or recovery semantics owned by Orchestrator.
-		if runStateIsTerminal(run.State) || run.RuntimeBootstrap == nil {
+		_, retirementDraining := draining[run.WorkspaceID]
+		if run.RuntimeBootstrap == nil || (runStateIsTerminal(run.State) && (!retirementDraining || run.RuntimeState == nil)) {
 			continue
 		}
 		item := runevents.RuntimeRecoveryInventoryItem{
@@ -366,6 +489,7 @@ func (m *Biz) Stop(ctx context.Context) error {
 	m.runs = nil
 	m.steps = nil
 	m.checkpoints = nil
+	m.workspacePurger = nil
 	m.notifier = nil
 	m.commandMu.Unlock()
 	return nil

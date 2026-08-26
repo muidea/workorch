@@ -499,7 +499,7 @@ func TestReadWorkspaceWithBackendReturnsNotFoundWhenMissing(t *testing.T) {
 	}
 }
 
-func TestDeleteWorkspaceWithBackendDeletesOnlyWorkspaceByDefault(t *testing.T) {
+func TestDeleteWorkspaceWithBackendRetiresWorkspaceAndPreservesDeliverableByDefault(t *testing.T) {
 	ctx := context.Background()
 	dataRoot := t.TempDir()
 	created, err := CreateWorkspaceWithBackend(ctx, "file", dataRoot, "delete workspace", "", "")
@@ -556,8 +556,8 @@ func TestDeleteWorkspaceWithBackendPurgesWorkspaceData(t *testing.T) {
 	if _, err := ReadWorkspaceWithBackend(ctx, "file", dataRoot, created.ID); !errors.Is(err, common.ErrNotFound) {
 		t.Fatalf("ReadWorkspaceWithBackend err = %v, want not found", err)
 	}
-	if _, err := os.Stat(filepath.Join(dataRoot, "internal", "workspaces", created.ID)); !os.IsNotExist(err) {
-		t.Fatalf("workspace data root stat err = %v, want not exist", err)
+	if info, err := os.Stat(filepath.Join(dataRoot, "internal", "workspaces", created.ID)); err != nil || !info.IsDir() {
+		t.Fatalf("workspace tombstone/journal root = %v/%v, want retained directory", info, err)
 	}
 	if _, err := os.Stat(created.DeliverableDirectory); !os.IsNotExist(err) {
 		t.Fatalf("workspace deliverable root stat err = %v, want not exist", err)

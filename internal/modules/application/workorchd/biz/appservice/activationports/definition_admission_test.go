@@ -8,6 +8,7 @@ import (
 
 	magicevent "github.com/muidea/magicCommon/event"
 	definitionadmission "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/definitionadmission"
+	workspaceevents "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/events"
 	workspacemodel "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/workorchdefaults"
@@ -222,47 +223,6 @@ func TestDefinitionAdmissionRejectsLossyEvidencePolicyInputsPerOwner(t *testing.
 	}
 }
 
-func TestLatestPriorInvalidDefinitionCandidateDoesNotReopenAcknowledgedLineage(t *testing.T) {
-	workspace := &workspacemodel.Workspace{ID: "workspace-1", DeliverableDirectory: "/workspace"}
-	goal := &workspacemodel.Goal{ID: "goal-1", WorkspaceID: workspace.ID, Text: "goal", DefinitionRevision: "goal-revision-1"}
-	dod := &workspacemodel.DoD{ID: "dod-1", WorkspaceID: workspace.ID, Items: []string{"done"}, DefinitionRevision: "dod-revision-1"}
-	template := &workspacemodel.WorkspaceTemplate{ID: "template-1", Name: "template"}
-	invalidBeforeEligible, err := definitionAdmissionCandidate(workspace, goal, dod, template)
-	if err != nil {
-		t.Fatalf("definitionAdmissionCandidate: %v", err)
-	}
-	invalidBeforeEligible.ProposedRelationInputs[0].RelationKind = "one_of"
-	invalidBeforeEligible = invalidBeforeEligible.WithHash()
-	eligible := invalidBeforeEligible.Clone()
-	eligible.CandidateRevision = 2
-	eligible.ProposedRelationInputs[0].RelationKind = "all_of"
-	eligible = eligible.WithHash()
-	workspace.DefinitionAdmissionCandidates = []workspacemodel.DefinitionAdmissionCandidate{invalidBeforeEligible, eligible}
-	workspace.ActivationAdmission = &workspacemodel.WorkspaceActivationAdmission{
-		CandidateID: eligible.CandidateID, CandidateRevision: eligible.CandidateRevision,
-		State: workspacemodel.WorkspaceActivationEligible,
-	}
-	current := eligible.Clone()
-	current.CandidateRevision = 3
-	current = current.WithHash()
-	if _, _, ok := latestPriorInvalidDefinitionCandidate(workspace, current); ok {
-		t.Fatal("invalid candidate before eligible baseline was reopened")
-	}
-
-	invalidAfterEligible := current.Clone()
-	invalidAfterEligible.ProposedRelationInputs[0].RelationKind = "one_of"
-	invalidAfterEligible = invalidAfterEligible.WithHash()
-	workspace.DefinitionAdmissionCandidates = append(workspace.DefinitionAdmissionCandidates, invalidAfterEligible)
-	corrected := invalidAfterEligible.Clone()
-	corrected.CandidateRevision = 4
-	corrected.ProposedRelationInputs[0].RelationKind = "all_of"
-	corrected = corrected.WithHash()
-	selected, _, ok := latestPriorInvalidDefinitionCandidate(workspace, corrected)
-	if !ok || selected.CandidateRevision != invalidAfterEligible.CandidateRevision {
-		t.Fatal("unresolved invalid predecessor was not selected")
-	}
-}
-
 func TestDefinitionAdmissionCandidateSealsProfileOwnerFactClosureBeforeRun(t *testing.T) {
 	profile := map[string]any{"profileContracts": map[string]any{"software-dev": map[string]any{
 		"evidenceRequirements": []any{map[string]any{
@@ -316,7 +276,11 @@ func TestDefinitionAdmissionCandidateSealsProfileOwnerFactClosureBeforeRun(t *te
 	if err != nil || blocked.Disposition != workspacemodel.DefinitionAdmissionClarificationRequired || blocked.ViolationCode != workspacemodel.DefinitionAdmissionProfilePrerequisiteUnresolved {
 		t.Fatalf("missing profile closure result = %+v err=%v", blocked, err)
 	}
-	if command := workspaceClarificationCommand(missing, blocked); command.RequiredActionKind != "select_or_fix_template_profile" {
+	command, err := (workspaceevents.DefinitionAdmissionClarificationBinding{Candidate: missing, AdmissionResult: blocked}).DecisionRequestIdentity()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if command.RequiredActionKind != "select_or_fix_template_profile" {
 		t.Fatalf("profile clarification action = %q", command.RequiredActionKind)
 	}
 }
@@ -381,11 +345,36 @@ func TestCurrentEligibleDefinitionAdmissionRejectsIncompleteCurrentConvergenceWi
 	}
 }
 
-func TestCurrentDefinitionAdmissionMatchesOnlyExactOwnerInputSnapshot(t *testing.T) {
+func TestDefinitionAdmissionCandidateBindsExactOwnerInputSnapshot(t *testing.T) {
 	workspace := &workspacemodel.Workspace{ID: "workspace-exact", DeliverableDirectory: "/workspace", TemplateID: "template-exact"}
 	goal := &workspacemodel.Goal{ID: "goal-1", WorkspaceID: workspace.ID, Text: "goal", DefinitionRevision: "goal-r1"}
 	dod := &workspacemodel.DoD{ID: "dod-1", WorkspaceID: workspace.ID, Items: []string{"done"}, DefinitionRevision: "dod-r1"}
 	template := &workspacemodel.WorkspaceTemplate{ID: workspace.TemplateID, Name: "exact", Description: "sealed"}
+	candidate, err := definitionAdmissionCandidateForIdentity(workspace, goal, dod, template, "workspace-definition", 1, "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	driftedTemplate := *template
+	driftedTemplate.Description = "new live template revision"
+	templateDrift, err := definitionAdmissionCandidateForIdentity(workspace, goal, dod, &driftedTemplate, candidate.CandidateID, candidate.CandidateRevision, "", "")
+	if err != nil || templateDrift.CandidateHash == candidate.CandidateHash {
+		t.Fatalf("live Template drift reused candidate hash: candidate=%q drift=%q err=%v", candidate.CandidateHash, templateDrift.CandidateHash, err)
+	}
+
+	driftedWorkspace := *workspace
+	driftedWorkspace.DeliverableDirectory = "/workspace-v2"
+	directoryDrift, err := definitionAdmissionCandidateForIdentity(&driftedWorkspace, goal, dod, template, candidate.CandidateID, candidate.CandidateRevision, "", "")
+	if err != nil || directoryDrift.CandidateHash == candidate.CandidateHash {
+		t.Fatalf("resolved directory drift reused candidate hash: candidate=%q drift=%q err=%v", candidate.CandidateHash, directoryDrift.CandidateHash, err)
+	}
+}
+
+func TestDefinitionAdmissionCandidateReusesExactCurrentCandidateAfterPromotion(t *testing.T) {
+	workspace := &workspacemodel.Workspace{ID: "workspace-reuse", DeliverableDirectory: "/workspace", TemplateID: "template-reuse"}
+	goal := &workspacemodel.Goal{ID: "goal-reuse", WorkspaceID: workspace.ID, Text: "goal", DefinitionRevision: "goal-r1"}
+	dod := &workspacemodel.DoD{ID: "dod-reuse", WorkspaceID: workspace.ID, Items: []string{"done"}, DefinitionRevision: "dod-r1"}
+	template := &workspacemodel.WorkspaceTemplate{ID: workspace.TemplateID, Name: "reuse"}
 	candidate, err := definitionAdmissionCandidate(workspace, goal, dod, template)
 	if err != nil {
 		t.Fatal(err)
@@ -397,23 +386,9 @@ func TestCurrentDefinitionAdmissionMatchesOnlyExactOwnerInputSnapshot(t *testing
 		WorkspaceID: workspace.ID, CandidateID: candidate.CandidateID, CandidateRevision: candidate.CandidateRevision, CandidateHash: candidate.CandidateHash,
 		DefinitionRevision: startup.DefinitionRevision, StartupInputHash: startup.StartupInputHash, State: workspacemodel.WorkspaceActivationEligible,
 	}
-	matchedCandidate, matches, err := currentDefinitionAdmissionMatchesOwnerInputs(workspace, goal, dod, template, startup.DefinitionRevision)
-	if err != nil || !matches || !workspaceDefinitionAdmissionEligible(workspace, matchedCandidate) {
-		t.Fatalf("exact owner input did not reuse admission: matches=%t err=%v candidate=%+v", matches, err, matchedCandidate)
-	}
-
-	driftedTemplate := *template
-	driftedTemplate.Description = "new live template revision"
-	_, matches, err = currentDefinitionAdmissionMatchesOwnerInputs(workspace, goal, dod, &driftedTemplate, startup.DefinitionRevision)
-	if err != nil || matches {
-		t.Fatalf("live Template drift reused stale admission: matches=%t err=%v", matches, err)
-	}
-
-	driftedWorkspace := *workspace
-	driftedWorkspace.DeliverableDirectory = "/workspace-v2"
-	_, matches, err = currentDefinitionAdmissionMatchesOwnerInputs(&driftedWorkspace, goal, dod, template, startup.DefinitionRevision)
-	if err != nil || matches {
-		t.Fatalf("resolved directory drift reused stale admission: matches=%t err=%v", matches, err)
+	reused, err := definitionAdmissionCandidate(workspace, goal, dod, template)
+	if err != nil || reused.CandidateRevision != candidate.CandidateRevision || reused.CandidateHash != candidate.CandidateHash {
+		t.Fatalf("exact promoted candidate was not reused: got=%+v want=%+v err=%v", reused, candidate, err)
 	}
 }
 

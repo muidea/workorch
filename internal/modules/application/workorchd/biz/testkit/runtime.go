@@ -210,7 +210,7 @@ func startOwnerModules(exports Exports, rawHub magicevent.Hub, dataRoot string) 
 		return nil, err
 	}
 	memoryModule := memorymodule.New()
-	if err := configure(memoryModule, memoryModule.Configure(memorybiz.Dependencies{MemoryItems: repositories.MemoryItems, MemoryRecallTraces: repositories.MemoryRecallTraces, EventHub: rawHub})); err != nil {
+	if err := configure(memoryModule, memoryModule.Configure(memorybiz.Dependencies{MemoryItems: repositories.MemoryItems, MemoryRecallTraces: repositories.MemoryRecallTraces, WorkspaceDeletions: repositories.MemoryDeletions, EventHub: rawHub})); err != nil {
 		return nil, err
 	}
 	skillModule := skillmodule.New()
@@ -222,38 +222,42 @@ func startOwnerModules(exports Exports, rawHub magicevent.Hub, dataRoot string) 
 		return nil, err
 	}
 	eventStreamModule := eventstreammodule.New()
-	if err := configure(eventStreamModule, eventStreamModule.Configure(eventstreambiz.Dependencies{EventRecords: repositories.EventRecords, EventHub: rawHub})); err != nil {
-		return nil, err
-	}
-	workspaceModule := workspacemodule.New()
-	if err := configure(workspaceModule, workspaceModule.Configure(workspacebiz.Dependencies{Workspaces: repositories.Workspaces, Goals: repositories.Goals, DoDs: repositories.DoDs, Templates: repositories.WorkspaceTemplates, EventHub: rawHub})); err != nil {
-		return nil, err
-	}
-	decisionModule := decisionmodule.New()
-	if err := configure(decisionModule, decisionModule.Configure(decisionbiz.Dependencies{Tickets: repositories.Tickets, Resolutions: repositories.Resolutions, EventHub: rawHub})); err != nil {
-		return nil, err
-	}
-	approvalModule := approvalmodule.New()
-	if err := configure(approvalModule, approvalModule.Configure(approvalbiz.Dependencies{Approvals: repositories.Approvals, EventHub: rawHub})); err != nil {
-		return nil, err
-	}
-	resultModule := resultmodule.New()
-	if err := configure(resultModule, resultModule.Configure(resultbiz.Dependencies{Results: repositories.Results, Artifacts: repositories.Artifacts, EventHub: rawHub})); err != nil {
-		return nil, err
-	}
-
-	orchestratorModule := orchestratormodule.New()
-	if err := configure(orchestratorModule, orchestratorModule.Configure(orchestratorbiz.Dependencies{
-		ToolCalls: repositories.ToolCalls,
-		Patches:   repositories.Patches, ValidationResults: repositories.ValidationResults,
-		EvidenceRecords:   repositories.EvidenceRecords,
-		CoverageWorkItems: repositories.CoverageWorkItems, ArtifactContinuations: repositories.ArtifactContinuations,
-		CommandHub: rawHub, BackgroundRoutine: background,
+	if err := configure(eventStreamModule, eventStreamModule.Configure(eventstreambiz.Dependencies{
+		EventRecords: repositories.EventRecords, WorkspaceDeletions: repositories.EventStreamDeletions,
+		WorkspacePurger: repositories.EventStreamPurger, EventHub: rawHub,
 	})); err != nil {
 		return nil, err
 	}
+	workspaceModule := workspacemodule.New()
+	if err := configure(workspaceModule, workspaceModule.Configure(workspacebiz.Dependencies{Workspaces: repositories.Workspaces, DeletionMaterialCleaner: repositories.WorkspaceCleaner, Goals: repositories.Goals, DoDs: repositories.DoDs, Templates: repositories.WorkspaceTemplates, EventHub: rawHub})); err != nil {
+		return nil, err
+	}
+	decisionModule := decisionmodule.New()
+	if err := configure(decisionModule, decisionModule.Configure(decisionbiz.Dependencies{Tickets: repositories.Tickets, Resolutions: repositories.Resolutions, WorkspaceDeletions: repositories.DecisionDeletions, EventHub: rawHub})); err != nil {
+		return nil, err
+	}
+	approvalModule := approvalmodule.New()
+	if err := configure(approvalModule, approvalModule.Configure(approvalbiz.Dependencies{Approvals: repositories.Approvals, WorkspaceDeletions: repositories.ApprovalDeletions, EventHub: rawHub})); err != nil {
+		return nil, err
+	}
+	resultModule := resultmodule.New()
+	if err := configure(resultModule, resultModule.Configure(resultbiz.Dependencies{Results: repositories.Results, Artifacts: repositories.Artifacts, WorkspaceDeletions: repositories.ResultDeletions, EventHub: rawHub})); err != nil {
+		return nil, err
+	}
+
+	// Run starts before Orchestrator so Run-owner pending activation and
+	// retirement facts are queryable when Orchestrator performs its startup
+	// inventory. Orchestrator then observes the already-recovered current facts;
+	// it must not rely on a best-effort Run notification sent before subscription.
 	runModule := runmodule.New()
-	if err := configure(runModule, runModule.Configure(runbiz.Dependencies{Runs: repositories.Runs, Steps: repositories.Steps, Checkpoints: repositories.RuntimeCheckpoints, EventHub: rawHub})); err != nil {
+	if err := configure(runModule, runModule.Configure(runbiz.Dependencies{OwnerRepositories: repositories.RunOwner, EventHub: rawHub})); err != nil {
+		return nil, err
+	}
+	orchestratorModule := orchestratormodule.New()
+	if err := configure(orchestratorModule, orchestratorModule.Configure(orchestratorbiz.Dependencies{
+		Evidence:   repositories.OrchestratorEvidence,
+		CommandHub: rawHub, BackgroundRoutine: background,
+	})); err != nil {
 		return nil, err
 	}
 	governanceModule := governancemodule.New()

@@ -19,11 +19,18 @@ const (
 	// TopicRunContinuationRequested is an owner notification for an accepted
 	// Continue intent against an already-active Run. It asks SM-4 for a re-drive
 	// without claiming a second SM-1 state transition.
-	TopicRunContinuationRequested           = "/run/continuation-requested"
-	TopicRunCommandGet                      = "/run/command/get"
-	TopicRunCommandList                     = "/run/command/list"
-	TopicRunCommandListByWorkspace          = "/run/command/list-by-workspace"
-	TopicRunCommandRuntimeRecoveryInventory = "/run/command/runtime-recovery-inventory"
+	TopicRunContinuationRequested  = "/run/continuation-requested"
+	TopicRunCommandGet             = "/run/command/get"
+	TopicRunCommandList            = "/run/command/list"
+	TopicRunCommandListByWorkspace = "/run/command/list-by-workspace"
+	// TopicRunCommandLifecycleFactInventory returns the Run owner's current
+	// non-terminal lifecycle facts. Consumers use it to reconcile a missed
+	// notification; it never exposes the opaque Runtime aggregate or accepts a
+	// requested lifecycle state.
+	TopicRunCommandLifecycleFactInventory       = "/run/command/lifecycle-fact-inventory"
+	TopicRunCommandRuntimeRecoveryInventory     = "/run/command/runtime-recovery-inventory"
+	TopicRunCommandWorkspaceRetirementFact      = "/run/command/workspace-retirement-fact"
+	TopicRunCommandWorkspaceRetirementInventory = "/run/command/workspace-retirement-inventory"
 	// Runtime recovery reads are available during Setup because
 	// Orchestrator performs its synchronous SM-4 inventory/load before the Run
 	// module reaches Run. They are deliberately narrower than the normal Get
@@ -35,9 +42,10 @@ const (
 	TopicRunCommandListStepSummariesByRun      = "/run/command/list-step-summaries-by-run"
 	TopicRunCommandGetRuntimeCheckpoint        = "/run/command/get-runtime-checkpoint"
 	TopicRunCommandListCheckpointsByRun        = "/run/command/list-runtime-checkpoints-by-run"
-	TopicRunCommandPurgeRuntimeResources       = "/run/command/purge-runtime-resources"
 	TopicRunCommandStoreRuntimeStateRecord     = "/run/command/store-runtime-state-record"
-	TopicRunCommandDelete                      = "/run/command/delete"
+	TopicRunCommandPrepareWorkspaceRetirement  = "/run/command/prepare-workspace-retirement"
+	TopicRunCommandFinalizeWorkspaceRetirement = "/run/command/finalize-workspace-retirement"
+	TopicRunCommandPurgeWorkspace              = "/run/command/purge-workspace"
 
 	// RUNTIME-SMO owner-local lifecycle commands. External inputs never carry a
 	// target RunState; only Run Biz may transition SM-1.

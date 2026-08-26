@@ -6,6 +6,7 @@ import (
 	cd "github.com/muidea/magicCommon/def"
 	magicevent "github.com/muidea/magicCommon/event"
 	runevents "github.com/muidea/workorch/internal/modules/blocks/run/pkg/events"
+	runmodel "github.com/muidea/workorch/internal/modules/blocks/run/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 )
 
@@ -16,7 +17,7 @@ const (
 	runCommandFamilyStepQuery
 	runCommandFamilyCheckpointQuery
 	runCommandFamilyRuntimeStateStore
-	runCommandFamilyResourceCleanup
+	runCommandFamilyWorkspaceRetirement
 )
 
 func runCommandTopics() []string {
@@ -24,14 +25,17 @@ func runCommandTopics() []string {
 		runevents.TopicRunCommandGet,
 		runevents.TopicRunCommandList,
 		runevents.TopicRunCommandListByWorkspace,
+		runevents.TopicRunCommandLifecycleFactInventory,
 		runevents.TopicRunCommandGetStep,
 		runevents.TopicRunCommandListStepsByRun,
 		runevents.TopicRunCommandListStepSummariesByRun,
 		runevents.TopicRunCommandGetRuntimeCheckpoint,
 		runevents.TopicRunCommandListCheckpointsByRun,
-		runevents.TopicRunCommandPurgeRuntimeResources,
 		runevents.TopicRunCommandStoreRuntimeStateRecord,
-		runevents.TopicRunCommandDelete,
+		runevents.TopicRunCommandWorkspaceRetirementFact,
+		runevents.TopicRunCommandPrepareWorkspaceRetirement,
+		runevents.TopicRunCommandFinalizeWorkspaceRetirement,
+		runevents.TopicRunCommandPurgeWorkspace,
 	}
 }
 
@@ -39,7 +43,8 @@ func runCommandFamilyForTopic(topic string) (runCommandFamily, bool) {
 	switch topic {
 	case runevents.TopicRunCommandGet,
 		runevents.TopicRunCommandList,
-		runevents.TopicRunCommandListByWorkspace:
+		runevents.TopicRunCommandListByWorkspace,
+		runevents.TopicRunCommandLifecycleFactInventory:
 		return runCommandFamilyRunQuery, true
 	case runevents.TopicRunCommandGetStep,
 		runevents.TopicRunCommandListStepsByRun,
@@ -50,9 +55,11 @@ func runCommandFamilyForTopic(topic string) (runCommandFamily, bool) {
 		return runCommandFamilyCheckpointQuery, true
 	case runevents.TopicRunCommandStoreRuntimeStateRecord:
 		return runCommandFamilyRuntimeStateStore, true
-	case runevents.TopicRunCommandPurgeRuntimeResources,
-		runevents.TopicRunCommandDelete:
-		return runCommandFamilyResourceCleanup, true
+	case runevents.TopicRunCommandWorkspaceRetirementFact,
+		runevents.TopicRunCommandPrepareWorkspaceRetirement,
+		runevents.TopicRunCommandFinalizeWorkspaceRetirement,
+		runevents.TopicRunCommandPurgeWorkspace:
+		return runCommandFamilyWorkspaceRetirement, true
 	default:
 		return 0, false
 	}
@@ -94,8 +101,8 @@ func (m *Biz) executeCommand(ev magicevent.Event) (any, error) {
 		return m.executeCheckpointQueryCommand(ctx, ev)
 	case runCommandFamilyRuntimeStateStore:
 		return m.executeRuntimeStateStoreCommand(ctx, ev)
-	case runCommandFamilyResourceCleanup:
-		return m.executeRunResourceCleanupCommand(ctx, ev)
+	case runCommandFamilyWorkspaceRetirement:
+		return m.executeWorkspaceRetirementCommand(ctx, ev)
 	default:
 		return nil, common.ErrInvalidArgument
 	}
@@ -117,11 +124,15 @@ func workspaceScopeFromRunCommand(data any) common.WorkspaceID {
 		return cmd.WorkspaceID
 	case runevents.ListRuntimeCheckpointsByRunCommand:
 		return cmd.WorkspaceID
-	case runevents.PurgeRuntimeResourcesCommand:
-		return cmd.WorkspaceID
 	case runevents.StoreRuntimeStateRecordCommand:
 		return cmd.WorkspaceID
-	case runevents.DeleteRunCommand:
+	case runevents.QueryWorkspaceRetirementFactCommand:
+		return cmd.WorkspaceID
+	case runevents.PrepareWorkspaceRetirementCommand:
+		return cmd.WorkspaceID
+	case runevents.FinalizeWorkspaceRetirementCommand:
+		return cmd.QuiescenceToken.WorkspaceID
+	case runevents.PurgeWorkspaceRunsCommand:
 		return cmd.WorkspaceID
 	default:
 		return ""
@@ -129,11 +140,27 @@ func workspaceScopeFromRunCommand(data any) common.WorkspaceID {
 }
 
 func (m *Biz) validateRunReadScope(ctx context.Context, runID common.RunID, workspaceID common.WorkspaceID) error {
-	if runID == "" || workspaceID == "" {
-		return nil
+	if runID == "" {
+		return common.ErrInvalidArgument
 	}
-	_, err := m.runs.GetByWorkspaceID(ctx, workspaceID, runID)
-	return err
+	var item *runmodel.Run
+	var err error
+	if workspaceID == "" {
+		item, err = m.runs.Get(ctx, runID)
+	} else {
+		item, err = m.runs.GetByWorkspaceID(ctx, workspaceID, runID)
+	}
+	if err != nil {
+		return err
+	}
+	retired, err := m.workspaceRunsRetired(ctx, item.WorkspaceID)
+	if err != nil {
+		return err
+	}
+	if retired {
+		return common.ErrNotFound
+	}
+	return nil
 }
 
 func setRunMagicResult(result magicevent.Result, data any, err error) {
@@ -160,6 +187,8 @@ func cloneRunCommandResult(data any) (any, bool) {
 		return value.Clone(), true
 	case runevents.ListRunsByWorkspaceResult:
 		return value.Clone(), true
+	case runevents.QueryRunLifecycleFactInventoryResult:
+		return value, true
 	case runevents.GetStepResult:
 		return value.Clone(), true
 	case runevents.ListStepsByRunResult:
@@ -170,12 +199,16 @@ func cloneRunCommandResult(data any) (any, bool) {
 		return value.Clone(), true
 	case runevents.ListRuntimeCheckpointsByRunResult:
 		return value.Clone(), true
-	case runevents.PurgeRuntimeResourcesResult:
-		return value, true
 	case runevents.StoreRuntimeStateRecordResult:
 		return value.Clone(), true
-	case runevents.DeleteRunResult:
+	case runevents.QueryWorkspaceRetirementFactResult:
+		return value.Clone(), true
+	case runevents.PrepareWorkspaceRetirementResult:
 		return value, true
+	case runevents.FinalizeWorkspaceRetirementResult:
+		return value, true
+	case runevents.PurgeWorkspaceRunsResult:
+		return value.Clone(), true
 	default:
 		return nil, false
 	}

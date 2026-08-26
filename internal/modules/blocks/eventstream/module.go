@@ -21,7 +21,7 @@ func New() *Module { return &Module{} }
 func (m *Module) ID() string { return ModuleID }
 
 func (m *Module) Configure(deps eventstreambiz.Dependencies) error {
-	if m == nil || deps.EventRecords == nil || deps.EventHub == nil {
+	if m == nil || deps.EventRecords == nil || deps.WorkspaceDeletions == nil || deps.WorkspacePurger == nil || deps.EventHub == nil {
 		return common.ErrInvalidArgument
 	}
 	m.bizPtr = eventstreambiz.New(deps)

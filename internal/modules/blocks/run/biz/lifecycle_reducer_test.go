@@ -524,10 +524,10 @@ type runtimeStateCASRaceRepository struct {
 	casCalls        int
 }
 
-func (r *runtimeStateCASRaceRepository) CompareAndSwap(ctx context.Context, item *runmodel.Run, expectedRevision uint64) error {
+func (r *runtimeStateCASRaceRepository) CompareAndSwapRuntimeState(ctx context.Context, item *runmodel.Run, expectedRevision, expectedRuntimeStateRevision uint64) error {
 	r.casCalls++
 	if r.casCalls != 1 {
-		return r.RunRepository.CompareAndSwap(ctx, item, expectedRevision)
+		return r.RunRepository.CompareAndSwapRuntimeState(ctx, item, expectedRevision, expectedRuntimeStateRevision)
 	}
 	current, err := r.RunRepository.GetByWorkspaceID(ctx, item.WorkspaceID, item.ID)
 	if err != nil {

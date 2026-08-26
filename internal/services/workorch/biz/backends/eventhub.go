@@ -88,9 +88,10 @@ func (b *eventHubEventsBackend) Subscribe(ctx context.Context, handler port.Even
 
 	unsubscribers := make([]func(), 0, 1)
 	if b.parent.commandHub != nil {
-		observerID := fmt.Sprintf("/eventstream/consumers/services/workorch/backend/%d", eventHubObserverSequence.Add(1))
-		observer := magicevent.NewSimpleObserverWithMatchID(observerID, observerID, b.parent.commandHub)
-		observer.Subscribe(eventstreamevents.TopicEventStreamRecordAppended, func(event magicevent.Event, result magicevent.Result) {
+		sequence := eventHubObserverSequence.Add(1)
+		eventstreamObserverID := fmt.Sprintf("/eventstream/consumers/services/workorch/backend/%d", sequence)
+		eventstreamObserver := magicevent.NewSimpleObserverWithMatchID(eventstreamObserverID, eventstreamObserverID, b.parent.commandHub)
+		eventstreamObserver.Subscribe(eventstreamevents.TopicEventStreamRecordAppended, func(event magicevent.Event, result magicevent.Result) {
 			data, ok := event.Data().(eventstreamevents.EventRecordAppendedData)
 			if ok {
 				evt := convertBackendEvent(eventRecordBackendEvent(data.Record))
@@ -102,8 +103,23 @@ func (b *eventHubEventsBackend) Subscribe(ctx context.Context, handler port.Even
 				result.Set(nil, nil)
 			}
 		})
+		workspaceObserverID := fmt.Sprintf("/workspace/consumers/services/workorch/backend/%d", sequence)
+		workspaceObserver := magicevent.NewSimpleObserverWithMatchID(workspaceObserverID, workspaceObserverID, b.parent.commandHub)
+		workspaceObserver.Subscribe(workspaceevents.TopicWorkspaceDeleted, func(event magicevent.Event, result magicevent.Result) {
+			data, ok := event.Data().(workspaceevents.WorkspaceDeletedData)
+			if ok && event.Source() == "blocks/workspace" && data.Validate() == nil {
+				evt := convertBackendEvent(workspaceDeletedBackendEvent(data))
+				if evt.Type != "" {
+					handler(event.Context(), evt)
+				}
+			}
+			if result != nil {
+				result.Set(nil, nil)
+			}
+		})
 		unsubscribers = append(unsubscribers, func() {
-			observer.Unsubscribe(eventstreamevents.TopicEventStreamRecordAppended)
+			eventstreamObserver.Unsubscribe(eventstreamevents.TopicEventStreamRecordAppended)
+			workspaceObserver.Unsubscribe(workspaceevents.TopicWorkspaceDeleted)
 		})
 	}
 
@@ -210,6 +226,25 @@ func eventRecordBackendEvent(data eventstreamevents.EventRecordData) backendEven
 		RunID:       string(data.RunID),
 		Revision:    data.Revision,
 		Payload:     data.Payload.Map(),
+	}
+}
+
+func workspaceDeletedBackendEvent(data workspaceevents.WorkspaceDeletedData) backendEventData {
+	return backendEventData{
+		ID:          data.DeletionID,
+		Topic:       workspaceevents.TopicWorkspaceDeleted,
+		SubjectID:   data.DeletionID,
+		WorkspaceID: string(data.WorkspaceID),
+		Revision:    int64(data.WorkspaceRevision),
+		Payload: map[string]any{
+			"deletionId":        data.DeletionID,
+			"requestId":         data.RequestID,
+			"mode":              string(data.Mode),
+			"disposition":       string(data.Disposition),
+			"deletionRevision":  data.DeletionRevision,
+			"workspaceRevision": data.WorkspaceRevision,
+			"completedAt":       data.CompletedAt.UTC().Format(time.RFC3339Nano),
+		},
 	}
 }
 

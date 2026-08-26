@@ -49,10 +49,8 @@ func CreateWorkspaceFromEnv(ctx context.Context, title string, description strin
 func DeleteWorkspaceWithSession(ctx context.Context, session *runtimecore.Session, workspaceID string, cmd appmodelcore.DeleteWorkspaceCommand) (err error) {
 	_, err = withCommandHubSession(ctx, session, func(ctx context.Context, hub magicevent.Hub) (struct{}, error) {
 		return struct{}{}, workspaceports.DeleteWorkspaceView(ctx, hub, workspaceports.DeleteWorkspaceViewRequest{
-			RepositoryBackend: session.RepositoryBackend(),
-			RepositoryDataDir: session.RepositoryDataDir(),
-			WorkspaceID:       workspaceID,
-			Command:           cmd,
+			WorkspaceID: workspaceID,
+			Command:     cmd.Normalized(workspaceID),
 		})
 	})
 	return err

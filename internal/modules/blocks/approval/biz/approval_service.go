@@ -75,9 +75,6 @@ func (s *mutationService) EnsureResolutionProposal(ctx context.Context, cmd appr
 	if err != nil {
 		return nil, nil, err
 	}
-	if item.DeletionRequestedAt != "" {
-		return nil, nil, common.ErrConflict
-	}
 	if item.State != common.ApprovalStatePending {
 		if item.State == target && item.ResolutionID == want.ResolutionID && item.ResolutionPrincipal.Normalized() == want.Principal && item.ResolutionContext.Equal(want.Context) {
 			return item, item.ResolutionProposal, nil

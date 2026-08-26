@@ -69,9 +69,10 @@ func TestRuntimeExpectedDocumentHashIsOrderSensitiveAndCloneDetached(t *testing.
 func TestRuntimeProviderDocumentFramingIsOwnerNeutral(t *testing.T) {
 	cases := []RuntimeProviderDocumentFraming{
 		{Disposition: RuntimeProviderDocumentComplete, ExpectedDocumentHash: "expected-1", ResponseHash: "response-1", ResponseBytes: 32},
-		{Disposition: RuntimeProviderDocumentIncomplete, ExpectedDocumentHash: "expected-1", ResponseHash: "response-2", ResponseBytes: 16, Code: "max_output_tokens"},
-		{Disposition: RuntimeProviderDocumentInvalid, ExpectedDocumentHash: "expected-1", ResponseHash: "response-3", ResponseBytes: 8, Code: "multiple_json_values"},
-		{Disposition: RuntimeProviderDocumentEmpty, ExpectedDocumentHash: "expected-1", Code: "final_output_missing"},
+		{Disposition: RuntimeProviderDocumentIncomplete, ExpectedDocumentHash: "expected-1", ResponseHash: "response-2", ResponseBytes: 16, Code: "max_output_tokens", Signature: "provider-output-limit"},
+		{Disposition: RuntimeProviderDocumentIncomplete, ExpectedDocumentHash: "expected-1", Code: "max_output_tokens", Signature: "provider-output-limit"},
+		{Disposition: RuntimeProviderDocumentInvalid, ExpectedDocumentHash: "expected-1", ResponseHash: "response-3", ResponseBytes: 8, Code: "multiple_json_values", Signature: "multiple-json-values"},
+		{Disposition: RuntimeProviderDocumentEmpty, ExpectedDocumentHash: "expected-1", Code: "final_output_missing", Signature: "final-output-missing"},
 	}
 	for _, outcome := range cases {
 		if err := outcome.Validate(); err != nil {
@@ -82,5 +83,20 @@ func TestRuntimeProviderDocumentFramingIsOwnerNeutral(t *testing.T) {
 	invalid.ExpectedDocumentHash = ""
 	if err := invalid.Validate(); err == nil {
 		t.Fatal("provider framing without expected-document identity accepted")
+	}
+
+	invalidCases := []RuntimeProviderDocumentFraming{
+		{Disposition: RuntimeProviderDocumentIncomplete, ExpectedDocumentHash: "expected-1", Code: "incomplete_json_document", Signature: "provider-document-incomplete"},
+		{Disposition: RuntimeProviderDocumentIncomplete, ExpectedDocumentHash: "expected-1", Code: "max_output_tokens"},
+		{Disposition: RuntimeProviderDocumentIncomplete, ExpectedDocumentHash: "expected-1", Code: "max_output_tokens", Signature: "wrong-signature"},
+		{Disposition: RuntimeProviderDocumentIncomplete, ExpectedDocumentHash: "expected-1", ResponseHash: "response-without-bytes", Code: "max_output_tokens", Signature: "provider-output-limit"},
+		{Disposition: RuntimeProviderDocumentIncomplete, ExpectedDocumentHash: "expected-1", ResponseBytes: 1, Code: "max_output_tokens", Signature: "provider-output-limit"},
+		{Disposition: RuntimeProviderDocumentInvalid, ExpectedDocumentHash: "expected-1", Code: "multiple_json_values", Signature: "multiple-json-values"},
+		{Disposition: RuntimeProviderDocumentEmpty, ExpectedDocumentHash: "expected-1", ResponseHash: "unexpected", Code: "final_output_missing", Signature: "final-output-missing"},
+	}
+	for _, outcome := range invalidCases {
+		if err := outcome.Validate(); err == nil {
+			t.Fatalf("invalid framing was accepted: %+v", outcome)
+		}
 	}
 }

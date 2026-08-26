@@ -17,6 +17,7 @@ import (
 	runevents "github.com/muidea/workorch/internal/modules/blocks/run/pkg/events"
 	workspaceevents "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/common"
+	deletioncontract "github.com/muidea/workorch/internal/pkg/workorchdeletioncontract"
 	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
 )
 
@@ -100,8 +101,8 @@ func postServerTestRunState(ctx context.Context, hub magicevent.Hub, workspaceID
 	hub.Post(magicevent.NewEventWithContext(
 		runevents.TopicRunStateChanged, "blocks/run", runevents.NotificationDestination,
 		magicevent.NewHeader(), ctx, runevents.RunStateChangedData{
-			WorkspaceID: workspaceID, RunID: runID, State: common.RunStateActive,
-			CausationID: "run-state/" + string(workspaceID) + "/" + string(runID),
+			WorkspaceID: workspaceID, RunID: runID, RunRevision: 1, State: common.RunStateActive,
+			WorkspaceRunGeneration: 1, CausationID: runevents.RunStateChangedCausationID(runID, 1, 1, 0),
 		},
 	))
 }
@@ -160,7 +161,8 @@ func TestServerRunMetricsConsumeTypedRunNotificationNotEventstreamPayload(t *tes
 	}
 	state.RecordRunStateChanged(context.Background(), runevents.RunStateChangedData{
 		WorkspaceID: "ws-metrics", RunID: "run-metrics", State: common.RunStateFailed,
-		RuntimeStateRevision: 9, RuntimeStateRef: "runtime-state/ws-metrics/run-metrics/9", CausationID: "run-state/9",
+		RunRevision: 3, RuntimeStateRevision: 9, RuntimeStateRef: "runtime-state/ws-metrics/run-metrics/9",
+		WorkspaceRunGeneration: 1, CausationID: runevents.RunStateChangedCausationID("run-metrics", 1, 3, 9),
 	})
 	if got := state.metrics.runFailed.Load(); got != 1 {
 		t.Fatalf("typed run notification terminal metric = %d, want 1", got)
@@ -170,11 +172,43 @@ func TestServerRunMetricsConsumeTypedRunNotificationNotEventstreamPayload(t *tes
 func TestServerRunMetricsRejectInvalidTypedRunNotification(t *testing.T) {
 	state := &serverState{metrics: &serverMetrics{}}
 	state.RecordRunStateChanged(context.Background(), runevents.RunStateChangedData{
-		WorkspaceID: "ws-invalid", RunID: "run-invalid", State: common.RunStateFailed,
+		WorkspaceID: "ws-invalid", RunID: "run-invalid", RunRevision: 1, State: common.RunStateFailed,
 		// Missing CausationID makes this an invalid owner notification.
 	})
 	if got := state.metrics.runFailed.Load(); got != 0 {
 		t.Fatalf("invalid notification changed terminal metric to %d, want 0", got)
+	}
+}
+
+func TestServerStreamsTypedWorkspaceDeletedReceiptWithoutEventstreamAppend(t *testing.T) {
+	state := &serverState{
+		eventReplay:       newSSEReplayBuffer(defaultSSEReplayLimit),
+		streamSubscribers: make(map[uint64]chan streamEvent),
+	}
+	stream, unsubscribe := state.subscribeStreamEvents()
+	defer unsubscribe()
+	data := workspaceevents.WorkspaceDeletedData{
+		WorkspaceID:       "ws-deleted-sse",
+		RequestID:         "request-deleted-sse",
+		Mode:              deletioncontract.ModePurge,
+		Disposition:       workspaceevents.DeleteWorkspaceCompleted,
+		DeletionRevision:  8,
+		WorkspaceRevision: 13,
+		CompletedAt:       time.Date(2026, 8, 26, 2, 3, 4, 0, time.UTC),
+	}
+	data.DeletionID = workspaceevents.StableWorkspaceDeletionID(data.WorkspaceID, data.RequestID)
+	state.RecordWorkspaceDeleted(context.Background(), data)
+
+	select {
+	case envelope := <-stream:
+		if envelope.Topic != workspaceevents.TopicWorkspaceDeleted || envelope.ID != data.DeletionID || envelope.SubjectID != data.DeletionID || envelope.WorkspaceID != string(data.WorkspaceID) || envelope.Revision != int64(data.WorkspaceRevision) {
+			t.Fatalf("workspace deleted envelope=%+v", envelope)
+		}
+		if len(envelope.Payload) != 7 || envelope.Payload["deletionId"] != data.DeletionID || envelope.Payload["requestId"] != data.RequestID || envelope.Payload["mode"] != string(data.Mode) || envelope.Payload["disposition"] != string(data.Disposition) {
+			t.Fatalf("workspace deleted payload=%+v, want immutable public receipt only", envelope.Payload)
+		}
+	case <-time.After(500 * time.Millisecond):
+		t.Fatal("timed out waiting for direct Workspace deleted SSE receipt")
 	}
 }
 
@@ -333,7 +367,19 @@ func subscribeServerStreamEvents(hub magicevent.Hub, view string, handler func(c
 			result.Set(nil, nil)
 		}
 	})
-	return append(unsubscribers, func() { records.Unsubscribe(eventstreamevents.TopicEventStreamRecordAppended) })
+	deletions := magicevent.NewSimpleObserver(workspaceevents.NotificationDestination, hub)
+	deletions.Subscribe(workspaceevents.TopicWorkspaceDeleted, func(event magicevent.Event, result magicevent.Result) {
+		if data, ok := event.Data().(workspaceevents.WorkspaceDeletedData); ok && data.Validate() == nil {
+			_ = handler(event.Context(), workspaceDeletedStreamEvent(data))
+		}
+		if result != nil {
+			result.Set(nil, nil)
+		}
+	})
+	return append(unsubscribers,
+		func() { records.Unsubscribe(eventstreamevents.TopicEventStreamRecordAppended) },
+		func() { deletions.Unsubscribe(workspaceevents.TopicWorkspaceDeleted) },
+	)
 }
 
 func unsubscribeAll(unsubscribers []func()) {

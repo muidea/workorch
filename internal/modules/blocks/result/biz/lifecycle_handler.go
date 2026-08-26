@@ -20,12 +20,49 @@ import (
 )
 
 func (m *Biz) lifecycleTopics() []string {
-	return []string{resultevents.TopicResultFactTerminalDelivery}
+	return []string{
+		resultevents.TopicResultFactTerminalDelivery,
+		resultevents.TopicResultCommandSealWorkspaceDeletion,
+		resultevents.TopicResultCommandPurgeWorkspace,
+	}
 }
 
 func (m *Biz) handleLifecycleCommand(ev magicevent.Event, result magicevent.Result) {
-	response, err := m.executeLifecycleCommand(ev)
+	workspaceID, ok := resultEventWorkspaceID(ev)
+	if !ok {
+		setCommandResult(result, struct{}{}, common.ErrInvalidArgument)
+		return
+	}
+	unlock := m.lockWorkspaceMutation(workspaceID)
+	defer unlock()
+	if ev.ID() == resultevents.TopicResultCommandSealWorkspaceDeletion || ev.ID() == resultevents.TopicResultCommandPurgeWorkspace {
+		response, err := m.executeWorkspaceDeletionCommand(ev.Context(), ev)
+		setCommandResult(result, response, err)
+		return
+	}
+	var response resultevents.ResultLifecycleCommandResult
+	err := m.workspaceDeletions.WithWorkspaceActiveFence(ev.Context(), workspaceID, func(guarded context.Context) error {
+		var executeErr error
+		response, executeErr = m.executeLifecycleCommand(guarded, ev)
+		return executeErr
+	})
 	setResultLifecycleResult(result, response, err)
+}
+
+func resultEventWorkspaceID(ev magicevent.Event) (common.WorkspaceID, bool) {
+	if ev == nil {
+		return "", false
+	}
+	switch command := ev.Data().(type) {
+	case resultevents.RuntimeTerminalDeliveryFact:
+		return command.WorkspaceID, command.WorkspaceID != ""
+	case resultevents.SealWorkspaceResultDeletionCommand:
+		return command.WorkspaceID, command.WorkspaceID != ""
+	case resultevents.PurgeWorkspaceResultsCommand:
+		return command.WorkspaceID, command.WorkspaceID != ""
+	default:
+		return "", false
+	}
 }
 
 func setResultLifecycleResult(result magicevent.Result, data resultevents.ResultLifecycleCommandResult, err error) {
@@ -44,7 +81,7 @@ func setResultLifecycleResult(result magicevent.Result, data resultevents.Result
 	result.Set(data, nil)
 }
 
-func (m *Biz) executeLifecycleCommand(ev magicevent.Event) (resultevents.ResultLifecycleCommandResult, error) {
+func (m *Biz) executeLifecycleCommand(ctx context.Context, ev magicevent.Event) (resultevents.ResultLifecycleCommandResult, error) {
 	if m == nil || m.service == nil {
 		return resultevents.ResultLifecycleCommandResult{}, common.ErrInvalidArgument
 	}
@@ -55,7 +92,7 @@ func (m *Biz) executeLifecycleCommand(ev magicevent.Event) (resultevents.ResultL
 	if !ok || ev.Source() != "kernel/orchestrator" {
 		return resultevents.ResultLifecycleCommandResult{}, common.ErrInvalidArgument
 	}
-	boundCtx, err := resultCommandContext(ev.Context(), cmd.WorkspaceID)
+	boundCtx, err := resultCommandContext(ctx, cmd.WorkspaceID)
 	if err != nil {
 		return resultevents.ResultLifecycleCommandResult{}, err
 	}

@@ -41,16 +41,27 @@ func TestOwnerEventContractsAreCompleteAndUnique(t *testing.T) {
 	// durable Eventstream resolution record handshake. MCP Registry adds two
 	// bounded concrete reads so activation and execution consume one
 	// revision-consistent selection/full aggregate instead of joining lists.
-	// Definition admission adds three Workspace-owner commands. Dedicated
-	// clarification adds five Decision-owner commands: static open/reconcile/
-	// admission-resolution and Runtime open/replacement-resolution. These eight
-	// contracts deliberately replace implicit setup/governance mutations.
+	// Definition admission has one Workspace-owner intent. Dedicated
+	// clarification has five Decision-owner write commands (static open/
+	// reconcile/admission-resolution and Runtime open/replacement-resolution)
+	// plus one Decision-owned persisted-fact query used by Workspace before its
+	// private reducer/CAS. These contracts replace implicit setup/governance
+	// mutations without accepting caller-authored provenance.
 	// Run's retired Runtime-activation compatibility notification is absent:
 	// current-format Runtime state is loaded directly or rejected by its owner.
 	// Shell adds one bounded, pure prospective-satisfaction query so SM-2 can
 	// prove an unexecuted File manifest delta would unlock the required Shell
 	// validation surface without crossing owner state or performing an effect.
-	const expectedProductionTopicCount = 273
+	// Memory removes the unused single RecallTrace get command; all production
+	// consumers use the bounded workspace/run-scoped list contract instead.
+	// The receiver-only Run delete/purge-runtime-resources, Orchestrator
+	// purge-run, Result/Artifact delete and RecallTrace delete mutations are
+	// absent. Workspace deletion now has one durable coordinator and invokes
+	// only each owner's workspace-scoped seal/purge contract. Two-phase Runtime
+	// retirement adds Orchestrator Begin/Confirm quiescence and Run Finalize;
+	// each carries immutable facts while the respective owner-private reducer
+	// remains the sole transition authority.
+	const expectedProductionTopicCount = 282
 	if len(contracts) != expectedProductionTopicCount {
 		t.Fatalf("production EventHub topic inventory = %d, want %d; adjudicate additions/removals in the active component contract closure plan", len(contracts), expectedProductionTopicCount)
 	}
@@ -77,6 +88,13 @@ func TestOwnerEventContractsAreCompleteAndUnique(t *testing.T) {
 		if message.Owner != contract.Owner || message.CommandClass != contract.CommandClass || message.LanePolicy != contract.LanePolicy || !slices.Equal(message.ReceiverOwners, contract.ReceiverOwners) {
 			t.Fatalf("topic %s message/delivery metadata mismatch: message=%+v delivery=%+v", topic, message, contract)
 		}
+		if isWorkspaceRetirementResourceTopic(topic) {
+			if contract.Metadata.StateMachine != eventcontract.StateMachineNone || contract.Metadata.MachineRole != eventcontract.StateMachineRoleNone ||
+				contract.Metadata.EffectClass != eventcontract.EffectClassOwnerState || contract.Metadata.TransitionTarget != eventcontract.TransitionTargetReceiverOwnerPrivate {
+				t.Fatalf("Workspace retirement resource topic %s is mislabeled as a Runtime state machine: %+v", topic, contract.Metadata)
+			}
+			continue
+		}
 		if strings.Contains(strings.ToLower(topic), "runtime") {
 			opaquePersistence := contract.Metadata.StateMachine == eventcontract.StateMachineNone && contract.Metadata.EffectClass == eventcontract.EffectClassOpaquePersistence && contract.Metadata.TransitionTarget == eventcontract.TransitionTargetOpaquePersistence
 			if (!opaquePersistence && contract.Metadata.StateMachine == eventcontract.StateMachineNone) || contract.Metadata.ScopePolicy == eventcontract.ScopePolicyDeclared || contract.Metadata.IdentityPolicy == eventcontract.IdentityPolicyTopicOwnerReceiver {
@@ -90,6 +108,19 @@ func TestOwnerEventContractsAreCompleteAndUnique(t *testing.T) {
 				t.Fatalf("Runtime-sensitive topic %s has ambiguous reducer ownership: %+v", topic, contract.Metadata)
 			}
 		}
+	}
+}
+
+func isWorkspaceRetirementResourceTopic(topic string) bool {
+	switch topic {
+	case orchestratorevents.TopicOrchestratorCommandBeginWorkspaceRuntimeQuiescence,
+		orchestratorevents.TopicOrchestratorCommandConfirmWorkspaceRuntimeQuiescence,
+		runevents.TopicRunCommandPrepareWorkspaceRetirement,
+		runevents.TopicRunCommandFinalizeWorkspaceRetirement,
+		runevents.TopicRunCommandPurgeWorkspace:
+		return true
+	default:
+		return false
 	}
 }
 

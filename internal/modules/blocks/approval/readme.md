@@ -4,7 +4,7 @@ Status: active
 
 Type: stateful-block-contract
 
-Last Verified: 2026-08-23
+Last Verified: 2026-08-26
 
 ## 功能范围与边界
 
@@ -39,8 +39,14 @@ Orchestrator 创建 Runtime Approval 请求，Approval 在终态落库前将 Run
    的 durable ack，再发布稳定 `NotificationID` 的 `TopicApprovalResolved` 展示通知并写入交付检查点。
    任一阶段失败都保留可恢复状态；后台 reconciliation 从 proposal/terminal checkpoint 继续，不重新解决
    Approval，也不把失败描述成跨 owner transaction。
-5. Workspace purge 是唯一公开删除语义：先写 deletion tombstone，再按完整 scope 删除；不存在独立的
-   Approval delete command。
+5. Workspace 删除由 `SealWorkspaceApprovalDeletionCommand` 先持久化永久 tombstone。`retain` 物理保留但永久隐藏，
+   `purge` 仅允许同一 scope 的 `PurgeWorkspaceApprovalsCommand` 翻译为 `purge_requested` owner-private event；只有同一个
+   private dispatcher 能在 exact `fenced` scope 下进入 privileged sink 并 fixed-point 清空，再提交 `purge_completed` CAS。
+   command adapter 不直接调用 purge fence/物理 helper，伪造 `purge_completed` 不能越过 dispatcher；
+   所有普通 Create/Update/Delete、延迟事实和 recovery 在 fence 后 fail closed，不存在逐 Approval 删除状态机。seal、purge、
+   resolution、Runtime request 与逐 Approval reconciliation 只通过统一的 `workspace -> lifecycle` owner-local mutation lock；
+   reconciliation 入锁后重新读取最新聚合。每次 Orchestrator/Eventstream outbound 都在 durable active-fence 回调中再次裁决，
+   所以 tombstone 持久化后，当前进程和重启实例都不能补发 late evidence、audit record 或 notification。
 
 ## 组件交互及合同
 
@@ -48,7 +54,8 @@ Orchestrator 创建 Runtime Approval 请求，Approval 在终态落库前将 Run
 | --- | --- | --- | --- |
 | `kernel/orchestrator` | Orchestrator → Approval | `AcquireRuntimeCapabilitiesCommand/Result`、`OpenRuntimeApprovalRequestCommand/Result` | 只接受 Orchestrator；请求绑定 workspace/run、dispatch、authority snapshot、action 与 authorization hash |
 | `kernel/orchestrator` | Approval → Orchestrator | `CommitRuntimeGovernanceApprovalResolutionCommand/Result`、`RecordApprovalEvidenceCommand/Result` | 前者是终态前 SM-2 commit；后者是终态后 exact-scope evidence ack |
-| `application/workorchd` | Application → Approval | `GetApprovalCommand/Result`、三类 bounded list result、`EnsureApprovedCommand/Result`、`EnsureRejectedCommand/Result`、`PurgeWorkspaceApprovalsCommand/Result` | ID-only HTTP 路由先做有界全局发现；重复 identity 必须报 conflict |
+| `blocks/workspace` | Workspace → Approval | `SealWorkspaceApprovalDeletionCommand/Result`、`PurgeWorkspaceApprovalsCommand/Result` | 只接受 Workspace owner；exact scope/replay，普通删除不可越过 fence |
+| `application/workorchd` | Application → Approval | `GetApprovalCommand/Result`、三类 bounded list result、`EnsureApprovedCommand/Result`、`EnsureRejectedCommand/Result` | ID-only HTTP 路由先做有界全局发现；重复 identity 必须报 conflict |
 | `kernel/governance` | Governance → Approval | scoped get、`EnsureApprovedCommand/Result` | 仅以 `auto_governance` principal 解决当前 workspace/run Approval |
 | `blocks/web` | Web → Approval | scoped `GetApprovalCommand/Result` | capability 只消费与 sealed target/hash 精确一致的 approved grant |
 | `blocks/eventstream` | Approval → Eventstream | `RecordApprovalResolutionCommand/Result` | 同步持久化；相同 notification material 幂等，不同 material 冲突 |
@@ -64,7 +71,7 @@ Orchestrator 创建 Runtime Approval 请求，Approval 在终态落库前将 Run
 - mutation implementation 与 constructor 均为 Approval owner-private；跨 package（包括测试）只能启动 owner Module
   后发送 `pkg/events` concrete command/result，或消费 owner 已发布的 immutable fact，不得直接构造 mutation service、
   导入 `biz/contracts` 或注入 Approval repository。
-- `command_router.go` 对 query、resolution、purge 三类 topic 做穷尽分派，未知 topic fail closed。
+- `command_router.go` 对 query、resolution、workspace deletion 三类 topic 做穷尽分派，未知 topic fail closed。
 - `runtime_governance_adapter.go` 只负责可信 Runtime create ingress；`resolution_commands.go` 负责
   proposal/commit/finalize 协议；private lifecycle reducer 是 creation 与全部聚合变更的唯一入口。
 - `evidence_event.go`、`approval_notification.go` 只执行 scope-validated delivery；`reconciliation.go`
@@ -80,7 +87,9 @@ Orchestrator 创建 Runtime Approval 请求，Approval 在终态落库前将 Run
 - Approval/proposal seed 均拒绝 caller-selected initial/progress state，静态门禁拒绝 lifecycle reducer 之外的 initial state 与 Approval repository Create；
 - 同 Approval ID 跨 workspace/run 的 memory/file backend 隔离及错误 scope 拒绝；
 - concrete typed result、显式 all scope、cursor/limit 边界与 detached deep-copy；
-- workspace purge tombstone、重复 Teardown、capability/open ingress 的 Orchestrator-only 边界。
+- workspace retain/purge 永久 tombstone、普通 Delete-after-seal 拒绝、exact replay、重复 Teardown，以及 capability/open ingress 的 Orchestrator-only 边界。
+- deletion seal 与在途 reconciliation delivery 的线性化、统一双锁顺序的并发无死锁、seal 后零 Orchestrator/Eventstream
+  delivery，以及重启实例对未完成 terminal delivery checkpoint 的永久抑制。
 
 ## 非本 Block 合同
 

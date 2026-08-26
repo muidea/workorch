@@ -8,26 +8,27 @@ import (
 	"strings"
 
 	"github.com/muidea/workorch/internal/pkg/common"
+	definitioncontract "github.com/muidea/workorch/internal/pkg/workorchdefinitioncontract"
 )
 
-const DefinitionClarificationSchemaVersionCurrent uint32 = 1
+const DefinitionClarificationSchemaVersionCurrent = definitioncontract.DefinitionClarificationSchemaVersionCurrent
 
 const (
-	DefinitionClarificationActionRewriteAllOf            = "rewrite_definition_all_of"
-	DefinitionClarificationActionFixTemplateProfile      = "select_or_fix_template_profile"
+	DefinitionClarificationActionRewriteAllOf            = definitioncontract.DefinitionClarificationActionRewriteAllOf
+	DefinitionClarificationActionFixTemplateProfile      = definitioncontract.DefinitionClarificationActionFixTemplateProfile
 	DefinitionClarificationActionReviseAndRestart        = "revise_definition_and_restart"
-	DefinitionClarificationResolutionCandidateAdjusted   = "definition_candidate_adjusted"
-	DefinitionClarificationResolutionCandidateSuperseded = "definition_candidate_revision_superseded"
+	DefinitionClarificationResolutionCandidateAdjusted   = definitioncontract.DefinitionClarificationResolutionCandidateAdjusted
+	DefinitionClarificationResolutionCandidateSuperseded = definitioncontract.DefinitionClarificationResolutionCandidateSuperseded
 	DefinitionClarificationResolutionReplacementBound    = "definition_replacement_intent_bound"
 )
 
 type DefinitionClarificationDisposition string
 
 const (
-	DefinitionClarificationCreated   DefinitionClarificationDisposition = "created"
-	DefinitionClarificationDuplicate DefinitionClarificationDisposition = "duplicate"
-	DefinitionClarificationResolved  DefinitionClarificationDisposition = "resolved"
-	DefinitionClarificationStale     DefinitionClarificationDisposition = "stale"
+	DefinitionClarificationCreated   DefinitionClarificationDisposition = DefinitionClarificationDisposition(definitioncontract.DefinitionClarificationCreated)
+	DefinitionClarificationDuplicate DefinitionClarificationDisposition = DefinitionClarificationDisposition(definitioncontract.DefinitionClarificationDuplicate)
+	DefinitionClarificationResolved  DefinitionClarificationDisposition = DefinitionClarificationDisposition(definitioncontract.DefinitionClarificationResolved)
+	DefinitionClarificationStale     DefinitionClarificationDisposition = DefinitionClarificationDisposition(definitioncontract.DefinitionClarificationStale)
 )
 
 type RuntimeDefinitionGapKind string
@@ -38,21 +39,11 @@ const (
 	RuntimeDefinitionGapSemanticAmbiguity      RuntimeDefinitionGapKind = "semantic_ambiguity"
 )
 
-type OpenWorkspaceDefinitionClarificationRequestCommand struct {
-	SchemaVersion             uint32
-	TicketID                  common.TicketID
-	WorkspaceID               common.WorkspaceID
-	CandidateID               string
-	CandidateRevision         uint64
-	CandidateHash             string
-	ViolationCode             string
-	OffendingRefs             []string
-	CanonicalSignatureVersion string
-	CanonicalSignature        string
-	CanonicalSignatureHash    string
-	RequiredActionKind        string
-}
-
+// Workspace clarification EventHub roots are Decision-owned declared types.
+// Their underlying values are the owner-neutral DTO contract, but keeping the
+// roots named prevents another owner package from becoming the EventHub
+// authority by type aliasing.
+type OpenWorkspaceDefinitionClarificationRequestCommand definitioncontract.WorkspaceDefinitionClarificationRequestIdentity
 type OpenWorkspaceDefinitionClarificationRequestResult struct {
 	TicketID                        common.TicketID
 	WorkspaceID                     common.WorkspaceID
@@ -61,25 +52,8 @@ type OpenWorkspaceDefinitionClarificationRequestResult struct {
 	Disposition                     DefinitionClarificationDisposition
 	ClarificationRequestBindingHash string
 }
+type ResolveWorkspaceDefinitionClarificationByAdmissionCommand definitioncontract.WorkspaceDefinitionClarificationAdmissionResolutionIdentity
 
-type ResolveWorkspaceDefinitionClarificationByAdmissionCommand struct {
-	TicketID             common.TicketID
-	WorkspaceID          common.WorkspaceID
-	OldCandidateID       string
-	OldCandidateRevision uint64
-	OldCandidateHash     string
-	NewCandidateID       string
-	NewCandidateRevision uint64
-	NewCandidateHash     string
-	AdmissionResultHash  string
-	DefinitionRevision   string
-	StartupInputHash     string
-}
-
-// ReconcileWorkspaceDefinitionClarificationCandidate replaces one exact
-// invalid pre-seal candidate with a newer exact invalid candidate. Both open
-// request values are carried in full so Decision can verify the old ticket and
-// create/return the new deterministic ticket without consulting Workspace.
 type ReconcileWorkspaceDefinitionClarificationCandidateCommand struct {
 	OldRequest OpenWorkspaceDefinitionClarificationRequestCommand
 	NewRequest OpenWorkspaceDefinitionClarificationRequestCommand
@@ -94,7 +68,6 @@ type ReconcileWorkspaceDefinitionClarificationCandidateResult struct {
 	NewRequestBindingHash     string
 	ReconciliationBindingHash string
 }
-
 type ResolveWorkspaceDefinitionClarificationByAdmissionResult struct {
 	TicketID              common.TicketID
 	WorkspaceID           common.WorkspaceID
@@ -102,6 +75,196 @@ type ResolveWorkspaceDefinitionClarificationByAdmissionResult struct {
 	ResolutionType        string
 	Disposition           DefinitionClarificationDisposition
 	ResolutionBindingHash string
+}
+
+type QueryWorkspaceDefinitionClarificationFactCommand struct {
+	WorkspaceID common.WorkspaceID
+	TicketID    common.TicketID
+}
+
+type QueryWorkspaceDefinitionClarificationFactResult struct {
+	Found      bool
+	Ticket     *definitioncontract.WorkspaceDefinitionClarificationTicketRecord
+	Resolution *definitioncontract.WorkspaceDefinitionClarificationResolutionRecord
+}
+
+func (c QueryWorkspaceDefinitionClarificationFactCommand) Validate() error {
+	if c.WorkspaceID == "" || c.TicketID == "" {
+		return fmt.Errorf("%w: workspace Definition clarification query requires scope", common.ErrInvalidArgument)
+	}
+	return nil
+}
+
+func (r QueryWorkspaceDefinitionClarificationFactResult) Normalized() QueryWorkspaceDefinitionClarificationFactResult {
+	if r.Ticket != nil {
+		value := r.Ticket.Normalized()
+		r.Ticket = &value
+	}
+	if r.Resolution != nil {
+		value := r.Resolution.Normalized()
+		r.Resolution = &value
+	}
+	return r
+}
+
+func (r QueryWorkspaceDefinitionClarificationFactResult) ValidateFor(c QueryWorkspaceDefinitionClarificationFactCommand) error {
+	if err := c.Validate(); err != nil {
+		return err
+	}
+	r = r.Normalized()
+	if !r.Found {
+		if r.Ticket != nil || r.Resolution != nil {
+			return fmt.Errorf("workspace Definition clarification absent query contains facts")
+		}
+		return nil
+	}
+	if r.Ticket == nil {
+		return fmt.Errorf("workspace Definition clarification persisted ticket is missing")
+	}
+	if err := r.Ticket.Validate(); err != nil {
+		return err
+	}
+	request := r.Ticket.RequestIdentity
+	if request.WorkspaceID != c.WorkspaceID || request.TicketID != c.TicketID {
+		return fmt.Errorf("workspace Definition clarification persisted ticket scope mismatch")
+	}
+	if r.Resolution == nil {
+		return nil
+	}
+	if err := r.Resolution.Validate(); err != nil {
+		return err
+	}
+	resolution := r.Resolution.ResolutionIdentity
+	if resolution.WorkspaceID != request.WorkspaceID || resolution.TicketID != request.TicketID ||
+		resolution.OldCandidateID != request.CandidateID || resolution.OldCandidateRevision != request.CandidateRevision || resolution.OldCandidateHash != request.CandidateHash {
+		return fmt.Errorf("workspace Definition clarification persisted resolution does not bind ticket")
+	}
+	return nil
+}
+
+func (c OpenWorkspaceDefinitionClarificationRequestCommand) contract() definitioncontract.WorkspaceDefinitionClarificationRequestIdentity {
+	return definitioncontract.WorkspaceDefinitionClarificationRequestIdentity(c)
+}
+
+func (c OpenWorkspaceDefinitionClarificationRequestCommand) Normalized() OpenWorkspaceDefinitionClarificationRequestCommand {
+	return OpenWorkspaceDefinitionClarificationRequestCommand(c.contract().Normalized())
+}
+
+func (c OpenWorkspaceDefinitionClarificationRequestCommand) Validate() error {
+	return c.contract().Validate()
+}
+
+func (c OpenWorkspaceDefinitionClarificationRequestCommand) BindingHash() string {
+	return c.contract().BindingHash()
+}
+
+func (r OpenWorkspaceDefinitionClarificationRequestResult) Normalized() OpenWorkspaceDefinitionClarificationRequestResult {
+	value := r.contract().Normalized()
+	return OpenWorkspaceDefinitionClarificationRequestResult{
+		TicketID: value.TicketID, WorkspaceID: value.WorkspaceID, CandidateID: value.CandidateID,
+		CandidateRevision: value.CandidateRevision, Disposition: DefinitionClarificationDisposition(value.Disposition),
+		ClarificationRequestBindingHash: value.ClarificationRequestBindingHash,
+	}
+}
+
+func (r OpenWorkspaceDefinitionClarificationRequestResult) ValidateFor(c OpenWorkspaceDefinitionClarificationRequestCommand) error {
+	return r.contract().ValidateFor(c.contract())
+}
+
+func (r OpenWorkspaceDefinitionClarificationRequestResult) contract() definitioncontract.WorkspaceDefinitionClarificationTicketBinding {
+	return definitioncontract.WorkspaceDefinitionClarificationTicketBinding{
+		TicketID: r.TicketID, WorkspaceID: r.WorkspaceID, CandidateID: r.CandidateID,
+		CandidateRevision: r.CandidateRevision, Disposition: definitioncontract.DefinitionClarificationDisposition(r.Disposition),
+		ClarificationRequestBindingHash: r.ClarificationRequestBindingHash,
+	}
+}
+
+func (r OpenWorkspaceDefinitionClarificationRequestResult) BindingValue() definitioncontract.WorkspaceDefinitionClarificationTicketBinding {
+	return r.contract().Normalized()
+}
+
+func (c ResolveWorkspaceDefinitionClarificationByAdmissionCommand) contract() definitioncontract.WorkspaceDefinitionClarificationAdmissionResolutionIdentity {
+	return definitioncontract.WorkspaceDefinitionClarificationAdmissionResolutionIdentity(c)
+}
+
+func (c ResolveWorkspaceDefinitionClarificationByAdmissionCommand) Normalized() ResolveWorkspaceDefinitionClarificationByAdmissionCommand {
+	return ResolveWorkspaceDefinitionClarificationByAdmissionCommand(c.contract().Normalized())
+}
+
+func (c ResolveWorkspaceDefinitionClarificationByAdmissionCommand) Validate() error {
+	return c.contract().Validate()
+}
+
+func (c ResolveWorkspaceDefinitionClarificationByAdmissionCommand) BindingHash(resolutionID common.ResolutionID) string {
+	return c.contract().BindingHash(resolutionID)
+}
+
+func (c ReconcileWorkspaceDefinitionClarificationCandidateCommand) contract() definitioncontract.WorkspaceDefinitionClarificationReconciliationIdentity {
+	return definitioncontract.WorkspaceDefinitionClarificationReconciliationIdentity{
+		OldRequest: c.OldRequest.contract(),
+		NewRequest: c.NewRequest.contract(),
+	}
+}
+
+func (c ReconcileWorkspaceDefinitionClarificationCandidateCommand) Normalized() ReconcileWorkspaceDefinitionClarificationCandidateCommand {
+	return ReconcileWorkspaceDefinitionClarificationCandidateCommand{
+		OldRequest: c.OldRequest.Normalized(),
+		NewRequest: c.NewRequest.Normalized(),
+	}
+}
+
+func (c ReconcileWorkspaceDefinitionClarificationCandidateCommand) Validate() error {
+	return c.contract().Validate()
+}
+
+func (c ReconcileWorkspaceDefinitionClarificationCandidateCommand) BindingHash(resolutionID common.ResolutionID) string {
+	return c.contract().BindingHash(resolutionID)
+}
+
+func (r ReconcileWorkspaceDefinitionClarificationCandidateResult) Normalized() ReconcileWorkspaceDefinitionClarificationCandidateResult {
+	value := r.contract().Normalized()
+	return ReconcileWorkspaceDefinitionClarificationCandidateResult{
+		WorkspaceID: value.WorkspaceID, OldTicketID: value.OldTicketID, OldResolutionID: value.OldResolutionID,
+		NewTicketID: value.NewTicketID, NewTicketDisposition: DefinitionClarificationDisposition(value.NewTicketDisposition),
+		NewRequestBindingHash: value.NewRequestBindingHash, ReconciliationBindingHash: value.ReconciliationBindingHash,
+	}
+}
+
+func (r ReconcileWorkspaceDefinitionClarificationCandidateResult) ValidateFor(c ReconcileWorkspaceDefinitionClarificationCandidateCommand) error {
+	return r.contract().ValidateFor(c.contract())
+}
+
+func (r ReconcileWorkspaceDefinitionClarificationCandidateResult) contract() definitioncontract.WorkspaceDefinitionClarificationReconciliationBinding {
+	return definitioncontract.WorkspaceDefinitionClarificationReconciliationBinding{
+		WorkspaceID: r.WorkspaceID, OldTicketID: r.OldTicketID, OldResolutionID: r.OldResolutionID,
+		NewTicketID: r.NewTicketID, NewTicketDisposition: definitioncontract.DefinitionClarificationDisposition(r.NewTicketDisposition),
+		NewRequestBindingHash: r.NewRequestBindingHash, ReconciliationBindingHash: r.ReconciliationBindingHash,
+	}
+}
+
+func (r ResolveWorkspaceDefinitionClarificationByAdmissionResult) Normalized() ResolveWorkspaceDefinitionClarificationByAdmissionResult {
+	value := r.contract().Normalized()
+	return ResolveWorkspaceDefinitionClarificationByAdmissionResult{
+		TicketID: value.TicketID, WorkspaceID: value.WorkspaceID, ResolutionID: value.ResolutionID,
+		ResolutionType: value.ResolutionType, Disposition: DefinitionClarificationDisposition(value.Disposition),
+		ResolutionBindingHash: value.ResolutionBindingHash,
+	}
+}
+
+func (r ResolveWorkspaceDefinitionClarificationByAdmissionResult) ValidateFor(c ResolveWorkspaceDefinitionClarificationByAdmissionCommand) error {
+	return r.contract().ValidateFor(c.contract())
+}
+
+func (r ResolveWorkspaceDefinitionClarificationByAdmissionResult) contract() definitioncontract.WorkspaceDefinitionClarificationResolutionBinding {
+	return definitioncontract.WorkspaceDefinitionClarificationResolutionBinding{
+		TicketID: r.TicketID, WorkspaceID: r.WorkspaceID, ResolutionID: r.ResolutionID,
+		ResolutionType: r.ResolutionType, Disposition: definitioncontract.DefinitionClarificationDisposition(r.Disposition),
+		ResolutionBindingHash: r.ResolutionBindingHash,
+	}
+}
+
+func (r ResolveWorkspaceDefinitionClarificationByAdmissionResult) BindingValue() definitioncontract.WorkspaceDefinitionClarificationResolutionBinding {
+	return r.contract().Normalized()
 }
 
 type OpenRuntimeDefinitionClarificationRequestCommand struct {
@@ -210,42 +373,6 @@ func (r ResolveRuntimeDefinitionClarificationByReplacementResult) ValidateFor(c 
 	}
 }
 
-func (c OpenWorkspaceDefinitionClarificationRequestCommand) Normalized() OpenWorkspaceDefinitionClarificationRequestCommand {
-	c.CandidateID = strings.TrimSpace(c.CandidateID)
-	c.CandidateHash = strings.TrimSpace(c.CandidateHash)
-	c.ViolationCode = strings.TrimSpace(c.ViolationCode)
-	c.OffendingRefs = normalizeClarificationRefs(c.OffendingRefs)
-	c.CanonicalSignatureVersion = strings.TrimSpace(c.CanonicalSignatureVersion)
-	c.CanonicalSignature = strings.TrimSpace(c.CanonicalSignature)
-	c.CanonicalSignatureHash = strings.TrimSpace(c.CanonicalSignatureHash)
-	c.RequiredActionKind = strings.TrimSpace(c.RequiredActionKind)
-	return c
-}
-
-func (c OpenWorkspaceDefinitionClarificationRequestCommand) Validate() error {
-	c = c.Normalized()
-	if c.SchemaVersion != DefinitionClarificationSchemaVersionCurrent || c.TicketID == "" || c.WorkspaceID == "" || c.CandidateID == "" || c.CandidateRevision == 0 || c.CandidateHash == "" || c.ViolationCode == "" || len(c.OffendingRefs) == 0 || c.CanonicalSignatureVersion == "" || c.CanonicalSignature == "" || c.CanonicalSignatureHash == "" {
-		return fmt.Errorf("workspace Definition clarification request is incomplete")
-	}
-	if c.RequiredActionKind != DefinitionClarificationActionRewriteAllOf && c.RequiredActionKind != DefinitionClarificationActionFixTemplateProfile {
-		return fmt.Errorf("workspace Definition clarification action is invalid")
-	}
-	if c.CanonicalSignatureHash != clarificationHash("workspace-signature", c.CanonicalSignatureVersion, c.CanonicalSignature) || c.TicketID != StableWorkspaceDefinitionClarificationTicketID(c) {
-		return fmt.Errorf("workspace Definition clarification signature or ticket identity mismatch")
-	}
-	return nil
-}
-
-func (c OpenWorkspaceDefinitionClarificationRequestCommand) BindingHash() string {
-	c = c.Normalized()
-	return clarificationHash("workspace-open", fmt.Sprintf("%d", c.SchemaVersion), string(c.TicketID), string(c.WorkspaceID), c.CandidateID, fmt.Sprintf("%d", c.CandidateRevision), c.CandidateHash, c.ViolationCode, strings.Join(c.OffendingRefs, "\x00"), c.CanonicalSignatureVersion, c.CanonicalSignature, c.CanonicalSignatureHash, c.RequiredActionKind)
-}
-
-func StableWorkspaceDefinitionClarificationTicketID(c OpenWorkspaceDefinitionClarificationRequestCommand) common.TicketID {
-	c = c.Normalized()
-	return common.TicketID("workspace-definition-clarification:" + clarificationDigest(string(c.WorkspaceID), c.CandidateID, fmt.Sprintf("%d", c.CandidateRevision), c.CandidateHash, c.ViolationCode, c.CanonicalSignatureHash)[:32])
-}
-
 func (c OpenRuntimeDefinitionClarificationRequestCommand) Normalized() OpenRuntimeDefinitionClarificationRequestCommand {
 	c.DefinitionRevision = strings.TrimSpace(c.DefinitionRevision)
 	c.StartupInputHash = strings.TrimSpace(c.StartupInputHash)
@@ -289,55 +416,6 @@ func StableRuntimeDefinitionClarificationTicketID(c OpenRuntimeDefinitionClarifi
 	return common.TicketID("runtime-definition-clarification:" + clarificationDigest(string(c.WorkspaceID), string(c.RunID), c.ClarificationDispatchID, c.CanonicalGapSignatureHash)[:32])
 }
 
-func (c ResolveWorkspaceDefinitionClarificationByAdmissionCommand) Normalized() ResolveWorkspaceDefinitionClarificationByAdmissionCommand {
-	c.OldCandidateID = strings.TrimSpace(c.OldCandidateID)
-	c.OldCandidateHash = strings.TrimSpace(c.OldCandidateHash)
-	c.NewCandidateID = strings.TrimSpace(c.NewCandidateID)
-	c.NewCandidateHash = strings.TrimSpace(c.NewCandidateHash)
-	c.AdmissionResultHash = strings.TrimSpace(c.AdmissionResultHash)
-	c.DefinitionRevision = strings.TrimSpace(c.DefinitionRevision)
-	c.StartupInputHash = strings.TrimSpace(c.StartupInputHash)
-	return c
-}
-
-func (c ReconcileWorkspaceDefinitionClarificationCandidateCommand) Normalized() ReconcileWorkspaceDefinitionClarificationCandidateCommand {
-	c.OldRequest = c.OldRequest.Normalized()
-	c.NewRequest = c.NewRequest.Normalized()
-	return c
-}
-
-func (c ReconcileWorkspaceDefinitionClarificationCandidateCommand) Validate() error {
-	c = c.Normalized()
-	if err := c.OldRequest.Validate(); err != nil {
-		return err
-	}
-	if err := c.NewRequest.Validate(); err != nil {
-		return err
-	}
-	if c.OldRequest.WorkspaceID != c.NewRequest.WorkspaceID || c.OldRequest.CandidateID != c.NewRequest.CandidateID || c.NewRequest.CandidateRevision <= c.OldRequest.CandidateRevision || c.OldRequest.TicketID == c.NewRequest.TicketID {
-		return fmt.Errorf("workspace Definition clarification reconciliation scope is invalid")
-	}
-	return nil
-}
-
-func (c ReconcileWorkspaceDefinitionClarificationCandidateCommand) BindingHash(resolutionID common.ResolutionID) string {
-	c = c.Normalized()
-	return clarificationHash("workspace-reconcile", c.OldRequest.BindingHash(), c.NewRequest.BindingHash(), string(resolutionID), DefinitionClarificationResolutionCandidateSuperseded)
-}
-
-func (c ResolveWorkspaceDefinitionClarificationByAdmissionCommand) Validate() error {
-	c = c.Normalized()
-	if c.TicketID == "" || c.WorkspaceID == "" || c.OldCandidateID == "" || c.OldCandidateRevision == 0 || c.OldCandidateHash == "" || c.NewCandidateID == "" || c.NewCandidateRevision == 0 || c.NewCandidateHash == "" || c.AdmissionResultHash == "" || c.DefinitionRevision == "" || c.StartupInputHash == "" || (c.OldCandidateID == c.NewCandidateID && c.NewCandidateRevision <= c.OldCandidateRevision) {
-		return fmt.Errorf("workspace Definition clarification admission resolution is incomplete")
-	}
-	return nil
-}
-
-func (c ResolveWorkspaceDefinitionClarificationByAdmissionCommand) BindingHash(resolutionID common.ResolutionID) string {
-	c = c.Normalized()
-	return clarificationHash("workspace-resolution", string(c.TicketID), string(c.WorkspaceID), c.OldCandidateID, fmt.Sprintf("%d", c.OldCandidateRevision), c.OldCandidateHash, c.NewCandidateID, fmt.Sprintf("%d", c.NewCandidateRevision), c.NewCandidateHash, c.AdmissionResultHash, c.DefinitionRevision, c.StartupInputHash, string(resolutionID), DefinitionClarificationResolutionCandidateAdjusted)
-}
-
 func (c ResolveRuntimeDefinitionClarificationByReplacementCommand) Normalized() ResolveRuntimeDefinitionClarificationByReplacementCommand {
 	c.ReplacementIntentID = strings.TrimSpace(c.ReplacementIntentID)
 	c.PredecessorDefinitionRevision = strings.TrimSpace(c.PredecessorDefinitionRevision)
@@ -362,11 +440,15 @@ func (c ResolveRuntimeDefinitionClarificationByReplacementCommand) BindingHash(r
 }
 
 func StableDefinitionClarificationResolutionID(ticketID common.TicketID, bindingHash string) common.ResolutionID {
-	return common.ResolutionID("definition-clarification-resolution:" + clarificationDigest(string(ticketID), strings.TrimSpace(bindingHash))[:32])
+	return definitioncontract.StableDefinitionClarificationResolutionID(ticketID, bindingHash)
 }
 
 func CanonicalDefinitionClarificationSignatureHash(kind, version, signature string) string {
-	return clarificationHash(kind, strings.TrimSpace(version), strings.TrimSpace(signature))
+	return definitioncontract.CanonicalDefinitionClarificationSignatureHash(kind, version, signature)
+}
+
+func StableWorkspaceDefinitionClarificationTicketID(c OpenWorkspaceDefinitionClarificationRequestCommand) common.TicketID {
+	return definitioncontract.StableWorkspaceDefinitionClarificationTicketID(c.contract())
 }
 
 func normalizeClarificationRefs(values []string) []string {

@@ -3,14 +3,19 @@ package orchestrator
 import (
 	"context"
 	"fmt"
+	"strings"
 	"sync"
 	"testing"
 
+	cd "github.com/muidea/magicCommon/def"
 	llmevents "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/events"
 
 	magicevent "github.com/muidea/magicCommon/event"
 	magictask "github.com/muidea/magicCommon/task"
 	basebiz "github.com/muidea/workorch/internal/modules/base/biz"
+	runevents "github.com/muidea/workorch/internal/modules/blocks/run/pkg/events"
+	workspacemodel "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/models"
+	"github.com/muidea/workorch/internal/modules/kernel/orchestrator/biz/internal/semanticplan"
 	runtime "github.com/muidea/workorch/internal/modules/kernel/orchestrator/biz/runtime"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/llmaudit"
@@ -20,6 +25,36 @@ import (
 )
 
 var runtimeCandidateRequestContentTestStores sync.Map
+
+func runtimeWorkspaceForPersistedRunTest(
+	t *testing.T,
+	ctx context.Context,
+	runs repository.RunRepository,
+	workspaceID common.WorkspaceID,
+	runID common.RunID,
+	deliverableDirectory string,
+	internalDirectory string,
+) *workspacemodel.Workspace {
+	t.Helper()
+	item, err := runs.GetByWorkspaceID(ctx, workspaceID, runID)
+	if err != nil {
+		t.Fatalf("load current Run projection fixture: %v", err)
+	}
+	fact := runevents.RunStateChangedDataFromModel(item)
+	if err := fact.Validate(); err != nil {
+		t.Fatalf("current Run projection fixture: %v", err)
+	}
+	return &workspacemodel.Workspace{
+		ID: workspaceID, State: common.WorkspaceStateActive, ActiveRunID: runID,
+		DeliverableDirectory: deliverableDirectory, InternalDirectory: internalDirectory,
+		RunProjectionCursor: workspacemodel.WorkspaceRunProjectionCursor{
+			WorkspaceRunGeneration: fact.WorkspaceRunGeneration,
+			RunID:                  fact.RunID, RunRevision: fact.RunRevision,
+			RuntimeStateRevision: fact.RuntimeStateRevision, RuntimeStateRef: fact.RuntimeStateRef,
+			CausationID: fact.CausationID,
+		},
+	}
+}
 
 func runtimeProviderFeedbackForTest(t *testing.T, command llmevents.RequestRuntimeCandidateCommand, failure runtimecontract.RuntimeCandidateFailure) *runtimecontract.RuntimeFeedback {
 	t.Helper()
@@ -634,7 +669,7 @@ func runtimeTestPersistBootstrappedOperationFixture(
 		t.Fatalf("build runtime operation fixture facts: %v", err)
 	}
 	repository := runtimeStateRepository{hub: hub}
-	owner := newRuntimeTestOwner()
+	owner := newTestBiz(newRuntimeTestOwner(), hub, nil)
 	if err := owner.ConfigureRuntimeRepository(repository); err != nil {
 		t.Fatalf("configure runtime operation fixture repository: %v", err)
 	}
@@ -653,6 +688,15 @@ type runtimeTestSemanticFixtureSpec struct {
 	selectorRefs     []string
 	constraintRefs   []string
 	targetRefs       []string
+}
+
+// runtimeTestAdvanceSemanticPlanBatchState seals fixture state without
+// exposing the production SM-3 reducer outside biz/runtime.
+func runtimeTestAdvanceSemanticPlanBatchState(batch runtimecontract.RuntimeSemanticPlanBatch, next runtimecontract.RuntimeSemanticPlanBatchState) (runtimecontract.RuntimeSemanticPlanBatch, error) {
+	batch = batch.Normalized()
+	batch.State = next
+	batch.Hash = runtimecontract.StableRuntimeSemanticPlanBatchHash(batch)
+	return batch, nil
 }
 
 // runtimeTestSealedSemanticPlanning builds a minimal valid semantic fact set
@@ -728,7 +772,7 @@ func runtimeTestSealedSemanticPlanning(t *testing.T, aggregate runtime.RuntimeAg
 		}
 		activeCoverageIDs = []common.CoverageWorkItemID{coverageOrder[0]}
 	}
-	batch, err := runtimecontract.CompileRuntimeSemanticPlanFocusBatch(
+	batch, err := semanticplan.CompileFocusBatch(
 		manifest, orderDocument, 0, "test-semantic-request", activeCoverageIDs, coverageOrder, len(coverageOrder),
 	)
 	if err != nil {
@@ -738,7 +782,7 @@ func runtimeTestSealedSemanticPlanning(t *testing.T, aggregate runtime.RuntimeAg
 		runtimecontract.RuntimeSemanticPlanBatchRequesting,
 		runtimecontract.RuntimeSemanticPlanBatchDocumentComplete,
 	} {
-		batch, err = runtimecontract.AdvanceRuntimeSemanticPlanBatch(batch, next)
+		batch, err = runtimeTestAdvanceSemanticPlanBatchState(batch, next)
 		if err != nil {
 			t.Fatalf("advance test semantic focus batch: %v", err)
 		}
@@ -791,7 +835,7 @@ func runtimeTestSealedSemanticPlanning(t *testing.T, aggregate runtime.RuntimeAg
 		runtimecontract.RuntimeSemanticPlanBatchFeasibilityComplete,
 		runtimecontract.RuntimeSemanticPlanBatchAccepted,
 	} {
-		batch, err = runtimecontract.AdvanceRuntimeSemanticPlanBatch(batch, next)
+		batch, err = runtimeTestAdvanceSemanticPlanBatchState(batch, next)
 		if err != nil {
 			t.Fatalf("accept test semantic focus batch: %v", err)
 		}
@@ -1630,7 +1674,10 @@ func newRuntimeTestOwner() *Biz {
 }
 
 func newRuntimeTestOwnerWithEvidence(evidence RuntimeEvidenceRepositories) *Biz {
-	return &Biz{evidence: evidence}
+	return &Biz{
+		Base:     basebiz.New(ModuleID, runtimeTestHubWithRunRetirementFallback(nil), nil),
+		evidence: evidence,
+	}
 }
 
 func (m *Biz) ConfigureRuntimeRepository(repository runtime.RuntimeStateRepository) error {
@@ -1678,8 +1725,71 @@ func newTestBiz(owner *Biz, hub magicevent.Hub, background magictask.BackgroundR
 	if owner.evidence.ArtifactContinuations == nil {
 		owner.evidence.ArtifactContinuations = runtimeCandidateRequestContentTestStore(hub)
 	}
+	if owner.workspaceDeletions == nil {
+		evidenceOwner := memory.NewOrchestratorOwnerRepositorySet()
+		owner.workspaceDeletions = evidenceOwner.WorkspaceDeletions()
+		owner.workspacePurger = evidenceOwner.WorkspacePurger()
+	}
+	hub = runtimeTestHubWithRunRetirementFallback(hub)
 	owner.Base = basebiz.New(ModuleID, hub, background)
 	return owner
+}
+
+func runtimeTestHubWithRunRetirementFallback(hub magicevent.Hub) magicevent.Hub {
+	if _, ok := hub.(runtimeTestRunRetirementFallbackHub); ok {
+		return hub
+	}
+	return runtimeTestRunRetirementFallbackHub{Hub: hub}
+}
+
+// runtimeTestRunRetirementFallbackHub gives isolated Orchestrator fixtures the
+// same typed "no retirement fence" fact that an empty Run owner would return.
+// It only translates EventHub's missing-observer transport error; a real Run
+// owner result, including every owner error, remains authoritative.
+type runtimeTestRunRetirementFallbackHub struct {
+	magicevent.Hub
+}
+
+func (h runtimeTestRunRetirementFallbackHub) Subscribe(eventID string, observer magicevent.Observer) {
+	if h.Hub != nil {
+		h.Hub.Subscribe(eventID, observer)
+	}
+}
+
+func (h runtimeTestRunRetirementFallbackHub) Unsubscribe(eventID string, observer magicevent.Observer) {
+	if h.Hub != nil {
+		h.Hub.Unsubscribe(eventID, observer)
+	}
+}
+
+func (h runtimeTestRunRetirementFallbackHub) Post(event magicevent.Event) {
+	if h.Hub != nil {
+		h.Hub.Post(event)
+	}
+}
+
+func (h runtimeTestRunRetirementFallbackHub) Terminate(ctx context.Context) {
+	if h.Hub != nil {
+		h.Hub.Terminate(ctx)
+	}
+}
+
+func (h runtimeTestRunRetirementFallbackHub) Send(event magicevent.Event) magicevent.Result {
+	if event != nil && event.ID() == runevents.TopicRunCommandWorkspaceRetirementFact && h.Hub == nil {
+		result := magicevent.NewResult(event.ID(), event.Source(), event.Destination())
+		result.Set(nil, &cd.Error{Code: cd.NotFound, Message: common.ErrNotFound.Error(), Cause: common.ErrNotFound})
+		return result
+	}
+	if h.Hub == nil {
+		return nil
+	}
+	result := h.Hub.Send(event)
+	if event == nil || event.ID() != runevents.TopicRunCommandWorkspaceRetirementFact || result == nil || result.Error() == nil ||
+		!strings.Contains(result.Error().Error(), "missing observer") {
+		return result
+	}
+	result.Set(nil, &cd.Error{Code: cd.NotFound, Message: common.ErrNotFound.Error(), Cause: common.ErrNotFound})
+	return result
 }
 
 // runtimeCandidateResultForTest is the only scripted-provider success

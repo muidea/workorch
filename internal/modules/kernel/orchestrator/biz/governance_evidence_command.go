@@ -18,7 +18,7 @@ import (
 )
 
 func (m *Biz) handleDecisionEvidenceCommand(ev magicevent.Event, result magicevent.Result) {
-	if m == nil {
+	if m == nil || ev == nil || ev.Source() != "blocks/decision" {
 		setDecisionEvidenceResult(result, decisionevents.RecordDecisionEvidenceResult{}, common.ErrInvalidArgument)
 		return
 	}
@@ -84,7 +84,9 @@ func (m *Biz) recordDecisionEvidence(ctx context.Context, command decisionevents
 	if err != nil {
 		return decisionevents.RecordDecisionEvidenceResult{}, err
 	}
-	if err := repository.CreateOrUpdateEvidenceRecord(ctx, m.evidenceRecords, record); err != nil {
+	if err := m.withOrchestratorEvidenceMutation(ctx, command.WorkspaceID, func(guarded context.Context) error {
+		return repository.CreateOrUpdateEvidenceRecord(guarded, m.evidenceRecords, record)
+	}); err != nil {
 		return decisionevents.RecordDecisionEvidenceResult{}, err
 	}
 	return decisionevents.RecordDecisionEvidenceResult{EvidenceRecordID: command.EvidenceRecordID}, nil
@@ -176,7 +178,9 @@ func (m *Biz) recordApprovalEvidence(ctx context.Context, command approvalevents
 	if err != nil {
 		return approvalevents.RecordApprovalEvidenceResult{}, err
 	}
-	if err := repository.CreateOrUpdateEvidenceRecord(ctx, m.evidenceRecords, record); err != nil {
+	if err := m.withOrchestratorEvidenceMutation(ctx, command.WorkspaceID, func(guarded context.Context) error {
+		return repository.CreateOrUpdateEvidenceRecord(guarded, m.evidenceRecords, record)
+	}); err != nil {
 		return approvalevents.RecordApprovalEvidenceResult{}, err
 	}
 	return approvalevents.RecordApprovalEvidenceResult{

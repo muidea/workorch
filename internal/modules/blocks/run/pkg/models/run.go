@@ -196,16 +196,21 @@ func StableReplacementIntentHash(i ReplacementIntent) string {
 type Run struct {
 	// Revision is the owner-local persistence revision. Lifecycle and Runtime
 	// aggregate writes compare it before replacing the record.
-	Revision           uint64
-	ID                 common.RunID
-	WorkspaceID        common.WorkspaceID
-	GoalID             common.GoalID
-	DoDID              common.DoDID
-	Lineage            RunLineage
-	DefinitionRevision string
-	StartupInputHash   string
-	InitialStepKind    string
-	RuntimeBootstrap   *runtimecontract.RuntimeBootstrap
+	Revision uint64
+	// WorkspaceRunGeneration is the Run owner's durable monotonic lineage
+	// coordinate inside one Workspace. It is allocated by Run persistence when
+	// the creation-private dispatcher commits a new Run; callers cannot select
+	// it and consumers must not infer it from RunID or timestamps.
+	WorkspaceRunGeneration uint64
+	ID                     common.RunID
+	WorkspaceID            common.WorkspaceID
+	GoalID                 common.GoalID
+	DoDID                  common.DoDID
+	Lineage                RunLineage
+	DefinitionRevision     string
+	StartupInputHash       string
+	InitialStepKind        string
+	RuntimeBootstrap       *runtimecontract.RuntimeBootstrap
 	// ActivationRequestID is the Workspace-scoped idempotency identity for a
 	// Runtime replacement activation. It is owned by Run and is never used
 	// as an authority/coverage/dispatch value.
@@ -246,6 +251,16 @@ type RunLineage struct {
 	PredecessorResultID common.ResultID
 	SuccessorRunID      common.RunID
 	LineageState        string
+}
+
+// WorkspaceRunID derives the public Run identity from the same durable
+// Workspace-scoped sequence used for WorkspaceRunGeneration. Repositories
+// allocate both atomically, so deleting a Run can never make its ID reusable.
+func WorkspaceRunID(generation uint64) common.RunID {
+	if generation == 0 {
+		return ""
+	}
+	return common.RunID(fmt.Sprintf("run-%03d", generation))
 }
 
 func CloneRun(item *Run) *Run {

@@ -27,14 +27,9 @@ func (m *Module) Setup(_ context.Context, rawEventHub event.Hub, backgroundRouti
 		return err
 	}
 	if setupErr := m.Configure(orchestratorbiz.Dependencies{
-		ToolCalls:             repos.ToolCalls,
-		Patches:               repos.Patches,
-		ValidationResults:     repos.ValidationResults,
-		EvidenceRecords:       repos.EvidenceRecords,
-		CoverageWorkItems:     repos.CoverageWorkItems,
-		ArtifactContinuations: repos.ArtifactContinuations,
-		CommandHub:            rawEventHub,
-		BackgroundRoutine:     backgroundRoutine,
+		Evidence:          repos,
+		CommandHub:        rawEventHub,
+		BackgroundRoutine: backgroundRoutine,
 	}); setupErr != nil {
 		return cd.NewError(cd.Unexpected, setupErr.Error())
 	}

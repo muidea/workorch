@@ -186,9 +186,10 @@ func validateProviderResponseMediaType(header http.Header, expected string) erro
 }
 
 // ProviderOutputLimitError is a typed, non-transport completion outcome. The
-// provider has returned a valid prefix and explicitly stopped because the
-// output token budget was reached; callers must retain Payload and continue
-// the same logical request rather than retrying the full request.
+// provider explicitly stopped because the output token budget was reached.
+// Payload is retained only for bounded framing/audit; it is not a continuation
+// prefix. The Runtime owner may reissue the same sealed expected document from
+// scratch with a new physical-call identity.
 type ProviderOutputLimitError struct {
 	Payload []byte
 	Usage   *llmaudit.ProviderUsage
@@ -435,15 +436,20 @@ func (p *HTTPProvider) completeResponses(ctx context.Context, request llmmodels.
 		return result, withProviderProtocolResponseBytes(err, responseBytes)
 	}
 	content := providerCompletionContent(request, rawContent)
-	result.Payload = []byte(content)
-	result.Usage = usage
-	if decoded.Status == "incomplete" && decoded.IncompleteDetails.Reason == "max_output_tokens" {
+	disposition, err := classifyResponsesTerminal(decoded.Status, decoded.IncompleteDetails.Reason)
+	if err != nil {
+		return result, withProviderProtocolResponseBytes(err, responseBytes)
+	}
+	if disposition == responsesTerminalOutputLimit {
+		result.Payload = []byte(content)
+		result.Usage = usage
 		return result, &ProviderOutputLimitError{Payload: []byte(content), Usage: usage}
 	}
 	if strings.TrimSpace(content) == "" {
-		result.Payload = nil
 		return result, providerProtocolError("final_output_missing", responseBytes)
 	}
+	result.Payload = []byte(content)
+	result.Usage = usage
 	return result, nil
 }
 
@@ -678,6 +684,40 @@ type responsesIncompleteDetails struct {
 	Reason string `json:"reason,omitempty"`
 }
 
+type responsesTerminalDisposition uint8
+
+const (
+	responsesTerminalCompleted responsesTerminalDisposition = iota + 1
+	responsesTerminalOutputLimit
+)
+
+// classifyResponsesTerminal is the provider-adapter-owned terminal reducer.
+// Only an internally coherent completed response or the explicitly bounded
+// max-output stop is authoritative; every other terminal shape fails closed.
+func classifyResponsesTerminal(status string, reason string) (responsesTerminalDisposition, error) {
+	status = strings.TrimSpace(status)
+	reason = strings.TrimSpace(reason)
+	switch status {
+	case "completed":
+		if reason != "" {
+			return 0, providerProtocolError("response_completed_with_incomplete_details", 0)
+		}
+		return responsesTerminalCompleted, nil
+	case "incomplete":
+		if reason == "max_output_tokens" {
+			return responsesTerminalOutputLimit, nil
+		}
+		if reason == "" {
+			return 0, providerProtocolError("response_incomplete_reason_missing", 0)
+		}
+		return 0, providerProtocolError("response_incomplete_"+sanitizeCatalogLogValue(reason, 64), 0)
+	case "":
+		return 0, providerProtocolError("response_terminal_status_missing", 0)
+	default:
+		return 0, providerProtocolError("response_terminal_status_"+sanitizeCatalogLogValue(status, 64), 0)
+	}
+}
+
 type responsesOutputItem struct {
 	Type    string                 `json:"type"`
 	Content []responsesContentItem `json:"content"`
@@ -869,20 +909,23 @@ func ensureOpenAICompatibleAPIRoot(path string) string {
 }
 
 type responsesStreamEvent struct {
-	Type              string                     `json:"type"`
-	Delta             string                     `json:"delta,omitempty"`
-	Text              string                     `json:"text,omitempty"`
-	Response          *responsesResponse         `json:"response,omitempty"`
-	IncompleteDetails responsesIncompleteDetails `json:"incomplete_details,omitempty"`
-	Error             *providerResponseError     `json:"error,omitempty"`
+	Type              string                 `json:"type"`
+	Delta             string                 `json:"delta,omitempty"`
+	Text              string                 `json:"text,omitempty"`
+	Response          *responsesResponse     `json:"response,omitempty"`
+	IncompleteDetails json.RawMessage        `json:"incomplete_details,omitempty"`
+	Error             *providerResponseError `json:"error,omitempty"`
 }
 
 type responsesStreamReader struct {
-	builder   strings.Builder
-	usage     *llmaudit.ProviderUsage
-	guard     *providerStreamGuard
-	emit      func(llmmodels.ProviderStreamEvent) error
-	completed bool
+	builder      strings.Builder
+	usage        *llmaudit.ProviderUsage
+	guard        *providerStreamGuard
+	emit         func(llmmodels.ProviderStreamEvent) error
+	completed    bool
+	terminalErr  error
+	doneReceived bool
+	doneEmitted  bool
 }
 
 func readResponsesStream(reader io.Reader, emit func(llmmodels.ProviderStreamEvent) error, limits providerStreamLimits) (string, *llmaudit.ProviderUsage, error) {
@@ -952,6 +995,13 @@ func readResponsesStream(reader io.Reader, emit func(llmmodels.ProviderStreamEve
 	if !stream.completed {
 		return "", nil, providerProtocolError("stream_ended_before_completion", 0)
 	}
+	if err := stream.finish(); err != nil {
+		var outputLimitErr *ProviderOutputLimitError
+		if errors.As(err, &outputLimitErr) {
+			return stream.builder.String(), stream.usage, err
+		}
+		return "", nil, err
+	}
 	return stream.builder.String(), stream.usage, nil
 }
 
@@ -965,7 +1015,22 @@ func responsesStreamData(line string) (string, bool) {
 
 func (s *responsesStreamReader) consume(data string) (stop bool, preservePartial bool, err error) {
 	if data == "[DONE]" {
-		return true, false, s.complete()
+		if !s.completed {
+			return false, false, providerProtocolError("stream_done_before_terminal", 0)
+		}
+		if s.doneReceived {
+			return false, false, providerProtocolError("stream_duplicate_done", 0)
+		}
+		// [DONE] is a terminal wire marker, not permission to ignore the
+		// remaining response body. Keep scanning to EOF so a provider cannot
+		// append a contradictory data event after the marker and still obtain a
+		// successful completion. The done callback is emitted only after that
+		// bounded validation has succeeded.
+		s.doneReceived = true
+		return false, false, nil
+	}
+	if s.completed {
+		return false, false, providerProtocolError("stream_event_after_terminal", 0)
 	}
 	if err := s.guard.observeDataEvent(); err != nil {
 		return false, false, err
@@ -987,11 +1052,16 @@ func (s *responsesStreamReader) consume(data string) (stop bool, preservePartial
 	case "response.output_text.delta":
 		return false, false, s.appendOutput(event.Delta, event.Delta != "")
 	case "response.output_text.done":
-		return false, false, s.appendOutput(event.Text, event.Text != "" && s.builder.Len() == 0)
+		return false, false, s.consumeOutputTextDone(event.Text)
 	case "response.completed":
-		return false, false, s.consumeCompleted(event.Response)
+		return false, false, s.consumeCompleted(event)
 	case "response.incomplete":
-		return false, true, s.incompleteError(event)
+		err := s.incompleteError(event)
+		var outputLimitErr *ProviderOutputLimitError
+		if !errors.As(err, &outputLimitErr) {
+			return false, false, err
+		}
+		return false, false, s.completeWithTerminalError(err)
 	default:
 		return false, false, nil
 	}
@@ -1024,19 +1094,76 @@ func (s *responsesStreamReader) appendOutput(content string, accepted bool) erro
 	return s.emit(llmmodels.ProviderStreamEvent{Type: "delta", Delta: content})
 }
 
-func (s *responsesStreamReader) consumeCompleted(response *responsesResponse) error {
-	if s.builder.Len() == 0 && response != nil {
-		if content := response.Content(); content != "" {
+func (s *responsesStreamReader) consumeOutputTextDone(content string) error {
+	if content == "" {
+		return nil
+	}
+	if s.builder.Len() == 0 {
+		return s.appendOutput(content, true)
+	}
+	if content != s.builder.String() {
+		return providerProtocolError("stream_output_text_done_conflict", 0)
+	}
+	return nil
+}
+
+func (s *responsesStreamReader) consumeCompleted(event responsesStreamEvent) error {
+	if len(event.IncompleteDetails) != 0 {
+		return providerProtocolError("stream_completed_with_incomplete_details", 0)
+	}
+	response := event.Response
+	if response == nil {
+		return providerProtocolError("stream_completed_response_missing", 0)
+	}
+	disposition, err := classifyResponsesTerminal(response.Status, response.IncompleteDetails.Reason)
+	if err != nil {
+		return err
+	}
+	if content := response.Content(); content != "" {
+		if s.builder.Len() == 0 {
 			if err := s.appendOutput(content, true); err != nil {
 				return err
 			}
+		} else if content != s.builder.String() {
+			return providerProtocolError("stream_completed_output_conflict", 0)
 		}
+	}
+	if disposition == responsesTerminalOutputLimit {
+		return s.completeWithTerminalError(&ProviderOutputLimitError{Payload: []byte(s.builder.String()), Usage: s.usage})
 	}
 	return s.complete()
 }
 
 func (s *responsesStreamReader) complete() error {
+	if s.completed {
+		return providerProtocolError("stream_duplicate_terminal", 0)
+	}
 	s.completed = true
+	return nil
+}
+
+func (s *responsesStreamReader) completeWithTerminalError(err error) error {
+	if err == nil {
+		return providerProtocolError("stream_terminal_error_missing", 0)
+	}
+	if completeErr := s.complete(); completeErr != nil {
+		return completeErr
+	}
+	s.terminalErr = err
+	return nil
+}
+
+func (s *responsesStreamReader) finish() error {
+	if !s.completed {
+		return providerProtocolError("stream_done_before_terminal", 0)
+	}
+	if s.terminalErr != nil {
+		return s.terminalErr
+	}
+	if s.doneEmitted {
+		return providerProtocolError("stream_duplicate_done", 0)
+	}
+	s.doneEmitted = true
 	if s.emit == nil {
 		return nil
 	}
@@ -1044,14 +1171,33 @@ func (s *responsesStreamReader) complete() error {
 }
 
 func (s *responsesStreamReader) incompleteError(event responsesStreamEvent) error {
-	reason := event.IncompleteDetails.Reason
-	if reason == "" && event.Response != nil {
-		reason = event.Response.IncompleteDetails.Reason
+	if event.Response == nil {
+		return providerProtocolError("stream_incomplete_response_missing", 0)
 	}
-	if reason == "max_output_tokens" {
+	topReason := ""
+	if len(event.IncompleteDetails) != 0 {
+		var details responsesIncompleteDetails
+		if err := json.Unmarshal(event.IncompleteDetails, &details); err != nil {
+			return providerProtocolError("stream_incomplete_details_invalid", 0)
+		}
+		topReason = strings.TrimSpace(details.Reason)
+	}
+	responseReason := strings.TrimSpace(event.Response.IncompleteDetails.Reason)
+	if topReason != "" && responseReason != "" && topReason != responseReason {
+		return providerProtocolError("stream_incomplete_reason_conflict", 0)
+	}
+	reason := responseReason
+	if reason == "" {
+		reason = topReason
+	}
+	disposition, err := classifyResponsesTerminal(event.Response.Status, reason)
+	if err != nil {
+		return err
+	}
+	if disposition == responsesTerminalOutputLimit {
 		return &ProviderOutputLimitError{Payload: []byte(s.builder.String()), Usage: s.usage}
 	}
-	return providerProtocolError("stream_incomplete_"+sanitizeCatalogLogValue(reason, 64), 0)
+	return providerProtocolError("stream_incomplete_with_completed_status", 0)
 }
 
 func (e *providerResponseError) Summary() string {

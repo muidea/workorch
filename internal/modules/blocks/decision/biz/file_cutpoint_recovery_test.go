@@ -3,19 +3,18 @@ package decision
 import (
 	"bytes"
 	"context"
-	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"testing"
 	"time"
 
-	magicevent "github.com/muidea/magicCommon/event"
 	decisioncontracts "github.com/muidea/workorch/internal/modules/blocks/decision/biz/contracts"
 	decisioncommon "github.com/muidea/workorch/internal/modules/blocks/decision/pkg/common"
 	decisionmodel "github.com/muidea/workorch/internal/modules/blocks/decision/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 	filerepo "github.com/muidea/workorch/internal/pkg/repository/file"
+	"github.com/muidea/workorch/internal/pkg/repository/memory"
 )
 
 const (
@@ -30,8 +29,6 @@ func TestFileBackedDecisionRecoversEveryOwnerWriteCutAfterProcessKill(t *testing
 		"proposal-resolution-created",
 		"delivery-finalized",
 		"delivery-evidence-recorded",
-		"purge-tombstone",
-		"purge-resolution-deleted",
 	} {
 		t.Run(phase, func(t *testing.T) {
 			root := t.TempDir()
@@ -68,25 +65,11 @@ func TestDecisionFileCutpointHelperProcess(t *testing.T) {
 		if err := resolutions.Create(ctx, resolutionFromResolveCommand(command)); err != nil {
 			t.Fatalf("persist formal resolution cut: %v", err)
 		}
-	case "delivery-finalized", "delivery-evidence-recorded", "purge-tombstone", "purge-resolution-deleted":
+	case "delivery-finalized", "delivery-evidence-recorded":
 		ticket := finalizeDecisionFileCutpointProposal(t, ctx, service, command)
 		if phase == "delivery-evidence-recorded" {
 			if _, err := service.markRuntimeGovernanceDelivery(ctx, ticket, lifecycleInternalEventProposalEvidenceRecorded); err != nil {
 				t.Fatalf("persist evidence delivery marker: %v", err)
-			}
-		}
-		if phase == "purge-tombstone" || phase == "purge-resolution-deleted" {
-			current, err := tickets.Get(ctx, ticket.ID)
-			if err != nil {
-				t.Fatalf("load ticket before purge cut: %v", err)
-			}
-			if _, err := service.applyLifecycleInternalEvent(ctx, current, lifecycleInternalEvent{Kind: lifecycleInternalEventAggregateDeletionRequested, TicketID: current.ID}); err != nil {
-				t.Fatalf("persist purge tombstone: %v", err)
-			}
-			if phase == "purge-resolution-deleted" {
-				if err := resolutions.DeleteByTicketID(ctx, current.ID); err != nil {
-					t.Fatalf("delete resolution at purge cut: %v", err)
-				}
 			}
 		}
 	default:
@@ -163,7 +146,7 @@ func assertDecisionCutpointRecovery(t *testing.T, root string, phase string) {
 		}
 	case "delivery-finalized", "delivery-evidence-recorded":
 		hub := newRecordingDecisionHub(t)
-		owner, err := New(hub, nil, Dependencies{Tickets: tickets, Resolutions: resolutions, EventHub: hub})
+		owner, err := New(hub, nil, Dependencies{WorkspaceDeletions: memory.NewDecisionWorkspaceDeletionRepository(), Tickets: tickets, Resolutions: resolutions, EventHub: hub})
 		if err != nil {
 			t.Fatalf("recreate Decision owner: %v", err)
 		}
@@ -192,22 +175,6 @@ func assertDecisionCutpointRecovery(t *testing.T, root string, phase string) {
 		}
 		if got := len(hub.Posted()); got != 1 {
 			t.Fatalf("resolved notification duplicated after marker = %d", got)
-		}
-	case "purge-tombstone", "purge-resolution-deleted":
-		hub := magicevent.NewHub(8)
-		t.Cleanup(func() { hub.Terminate(context.Background()) })
-		owner, err := New(hub, nil, Dependencies{Tickets: tickets, Resolutions: resolutions, EventHub: hub})
-		if err != nil {
-			t.Fatalf("recreate Decision owner: %v", err)
-		}
-		if err := owner.ReconcileRuntimeGovernanceProposals(context.Background()); err != nil {
-			t.Fatalf("reconcile purge cut: %v", err)
-		}
-		if _, err := tickets.Get(ctx, command.TicketID); !errors.Is(err, common.ErrNotFound) {
-			t.Fatalf("ticket after purge recovery error = %v, want ErrNotFound", err)
-		}
-		if _, err := resolutions.GetByTicketID(ctx, command.TicketID); !errors.Is(err, common.ErrNotFound) {
-			t.Fatalf("resolution after purge recovery error = %v, want ErrNotFound", err)
 		}
 	default:
 		t.Fatalf("unknown Decision cut-point phase %q", phase)

@@ -9,6 +9,7 @@ import (
 	memorymodel "github.com/muidea/workorch/internal/modules/blocks/memory/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/eventcontract"
+	deletioncontract "github.com/muidea/workorch/internal/pkg/workorchdeletioncontract"
 	"github.com/muidea/workorch/internal/pkg/workorchmemorycontract"
 	"github.com/muidea/workorch/internal/pkg/workorchquerycontract"
 )
@@ -134,9 +135,35 @@ func (c UpsertMemoryRecallTraceCommand) Validate() error {
 	return nil
 }
 
-type DeleteMemoryRecallTraceCommand struct {
-	WorkspaceID common.WorkspaceID
-	TraceID     common.MemoryRecallTraceID
+type SealWorkspaceMemoryDeletionCommand struct {
+	WorkspaceID           common.WorkspaceID
+	DeletionID            string
+	DeletionGeneration    uint64
+	DataDispositionIntent deletioncontract.Mode
+	QuiescenceID          string
+	RequestHash           string
+}
+
+func (c SealWorkspaceMemoryDeletionCommand) Scope() deletioncontract.Scope {
+	return deletioncontract.Scope{WorkspaceID: c.WorkspaceID, DeletionID: c.DeletionID, DeletionGeneration: c.DeletionGeneration, Mode: c.DataDispositionIntent, QuiescenceID: c.QuiescenceID, RequestHash: c.RequestHash}.Normalize()
+}
+
+func (c SealWorkspaceMemoryDeletionCommand) Validate() error { return c.Scope().Validate() }
+
+type PurgeWorkspaceMemoryCommand struct {
+	WorkspaceID        common.WorkspaceID
+	DeletionID         string
+	DeletionGeneration uint64
+	QuiescenceID       string
+	RequestHash        string
+}
+
+func (c PurgeWorkspaceMemoryCommand) Scope() deletioncontract.Scope {
+	return deletioncontract.Scope{WorkspaceID: c.WorkspaceID, DeletionID: c.DeletionID, DeletionGeneration: c.DeletionGeneration, Mode: deletioncontract.ModePurge, QuiescenceID: c.QuiescenceID, RequestHash: c.RequestHash}.Normalize()
+}
+
+func (c PurgeWorkspaceMemoryCommand) Validate() error {
+	return c.Scope().Validate()
 }
 
 type GetMemoryCommand struct {
@@ -152,11 +179,6 @@ type ListMemoryByWorkspaceCommand struct {
 
 type SearchMemoryCommand struct {
 	Query workorchquerycontract.MemorySearchQuery
-}
-
-type GetMemoryRecallTraceCommand struct {
-	WorkspaceID common.WorkspaceID
-	TraceID     common.MemoryRecallTraceID
 }
 
 type ListMemoryRecallTracesCommand struct {
@@ -229,14 +251,6 @@ func (r UpsertMemoryRecallTraceResult) Validate(expectedWorkspaceID common.Works
 	}
 }
 
-type GetMemoryRecallTraceResult struct {
-	Trace *MemoryRecallTrace
-}
-
-func (r GetMemoryRecallTraceResult) Clone() GetMemoryRecallTraceResult {
-	return GetMemoryRecallTraceResult{Trace: cloneMemoryRecallTrace(r.Trace)}
-}
-
 type ListMemoryRecallTracesResult struct {
 	Traces     []*MemoryRecallTrace
 	NextCursor common.MemoryRecallTraceID
@@ -246,10 +260,24 @@ func (r ListMemoryRecallTracesResult) Clone() ListMemoryRecallTracesResult {
 	return ListMemoryRecallTracesResult{Traces: cloneMemoryRecallTraces(r.Traces), NextCursor: r.NextCursor}
 }
 
-type DeleteMemoryRecallTraceResult struct {
-	WorkspaceID common.WorkspaceID
-	RunID       common.RunID
-	TraceID     common.MemoryRecallTraceID
+type SealWorkspaceMemoryDeletionResult struct {
+	WorkspaceID        common.WorkspaceID
+	DeletionID         string
+	DeletionGeneration uint64
+	FenceID            string
+	Revision           uint64
+	AckHash            string
+}
+
+type PurgeWorkspaceMemoryResult struct {
+	WorkspaceID        common.WorkspaceID
+	DeletionID         string
+	DeletionGeneration uint64
+	FenceID            string
+	PurgeID            string
+	Revision           uint64
+	AckHash            string
+	PurgeProofHash     string
 }
 
 type MemoryChangedData struct {
@@ -479,9 +507,9 @@ func MessageContracts() []eventcontract.MessageContract {
 		eventcontract.CommandTopic[UpdateMemoryCommand, UpdateMemoryResult]("memory", definitionPackage, eventcontract.CommandClassWrite, eventcontract.LanePolicyState, TopicMemoryCommandUpdate).MessageContract(),
 		eventcontract.CommandTopic[DeleteMemoryCommand, DeleteMemoryResult]("memory", definitionPackage, eventcontract.CommandClassWrite, eventcontract.LanePolicyState, TopicMemoryCommandDelete).MessageContract(),
 		eventcontract.CommandTopic[UpsertMemoryRecallTraceCommand, UpsertMemoryRecallTraceResult]("memory", definitionPackage, eventcontract.CommandClassWrite, eventcontract.LanePolicyState, TopicMemoryRecallTraceCommandUpsert).MessageContract(),
-		eventcontract.CommandTopic[GetMemoryRecallTraceCommand, GetMemoryRecallTraceResult]("memory", definitionPackage, eventcontract.CommandClassRead, eventcontract.LanePolicyQuery, TopicMemoryRecallTraceCommandGet).MessageContract(),
 		eventcontract.CommandTopic[ListMemoryRecallTracesCommand, ListMemoryRecallTracesResult]("memory", definitionPackage, eventcontract.CommandClassRead, eventcontract.LanePolicyQuery, TopicMemoryRecallTraceCommandList).MessageContract(),
-		eventcontract.CommandTopic[DeleteMemoryRecallTraceCommand, DeleteMemoryRecallTraceResult]("memory", definitionPackage, eventcontract.CommandClassWrite, eventcontract.LanePolicyState, TopicMemoryRecallTraceCommandDelete).MessageContract(),
+		eventcontract.CommandTopic[SealWorkspaceMemoryDeletionCommand, SealWorkspaceMemoryDeletionResult]("memory", definitionPackage, eventcontract.CommandClassWrite, eventcontract.LanePolicyState, TopicMemoryCommandSealWorkspaceDeletion).MessageContract(),
+		eventcontract.CommandTopic[PurgeWorkspaceMemoryCommand, PurgeWorkspaceMemoryResult]("memory", definitionPackage, eventcontract.CommandClassWrite, eventcontract.LanePolicyState, TopicMemoryCommandPurgeWorkspace).MessageContract(),
 	}
 	for _, topic := range []string{
 		TopicMemoryCreated,

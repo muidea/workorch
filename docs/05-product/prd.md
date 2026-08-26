@@ -4,7 +4,7 @@ Status: normative
 
 Type: product-requirements
 
-Last Verified: 2026-08-21
+Last Verified: 2026-08-26
 
 ## Product Positioning
 
@@ -195,6 +195,12 @@ Definition revision，在可审计、可治理、可恢复、fail-closed 的 Run
 | Projection / Eventstream | workorchd/eventstream | 回建或修改 authority |
 | LLM/provider | no Runtime authority | 直接产生 transition/effect/credit |
 | Web/TUI | no business authority | 维护影子状态机 |
+
+每个状态机必须只有一个 owner，状态选择和转换只能由该 owner 的 private internal event/reducer
+执行。需要跨多个 owner 分段收集事实的可恢复流程，必须明确一个业务 owner 持久化唯一
+coordinator aggregate；Application/projection 不得保存第二份 saga、phase、retry journal 或根据
+部分结果代替 owner 推进。Workspace delete/retain/purge 的这个 owner 固定为 Workspace：
+Application 只提交一个 delete intent，其余 owner 只执行自身的 typed fence/query/purge 并返回事实。
 
 跨 owner I/O 只使用 EventHub 与接收 owner 定义的 concrete typed command/result；禁止跨 owner service/repository、
 `map[string]any` authority bridge 和通用 callback/registry。

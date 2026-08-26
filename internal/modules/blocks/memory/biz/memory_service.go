@@ -141,7 +141,7 @@ func (s *Service) RecordMemoryRecallTrace(ctx context.Context, trace *memorymode
 	return memoryevents.MemoryRecallTraceDuplicate, nil
 }
 
-func (s *Service) GetMemoryRecallTrace(ctx context.Context, workspaceID common.WorkspaceID, id common.MemoryRecallTraceID) (*memorymodel.MemoryRecallTrace, error) {
+func (s *Service) loadMemoryRecallTrace(ctx context.Context, workspaceID common.WorkspaceID, id common.MemoryRecallTraceID) (*memorymodel.MemoryRecallTrace, error) {
 	if s == nil || s.traces == nil || workspaceID == "" || id == "" {
 		return nil, common.ErrInvalidArgument
 	}
@@ -149,7 +149,7 @@ func (s *Service) GetMemoryRecallTrace(ctx context.Context, workspaceID common.W
 	if err != nil {
 		return nil, err
 	}
-	if item.WorkspaceID != workspaceID {
+	if item == nil || item.ID != id || item.WorkspaceID != workspaceID {
 		return nil, common.ErrConflict
 	}
 	return memorymodel.CloneMemoryRecallTrace(item), nil
@@ -180,13 +180,6 @@ func (s *Service) ListMemoryRecallTraces(ctx context.Context, query workorchquer
 		ret = append(ret, memorymodel.CloneMemoryRecallTrace(item))
 	}
 	return ret, nextCursor, nil
-}
-
-func (s *Service) DeleteMemoryRecallTrace(ctx context.Context, id common.MemoryRecallTraceID) error {
-	if s == nil || s.traces == nil || id == "" {
-		return common.ErrInvalidArgument
-	}
-	return s.traces.Delete(ctx, id)
 }
 
 func normalizedLimit(value, defaultLimit, maxLimit int) int {

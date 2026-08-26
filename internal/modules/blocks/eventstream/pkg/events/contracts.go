@@ -11,6 +11,7 @@ func Contracts() []eventcontract.Contract {
 		TopicEventStreamCommandHighWatermarks,
 	)...)
 	ret = append(ret, eventcontract.Build("eventstream", eventcontract.CommandClassWrite, eventcontract.LanePolicyState,
+		TopicEventStreamCommandSealWorkspaceDeletion,
 		TopicEventStreamCommandPurgeWorkspace,
 	)...)
 	ret = append(ret, eventcontract.Build("eventstream", eventcontract.CommandClassNotify, eventcontract.LanePolicyState,

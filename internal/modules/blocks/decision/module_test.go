@@ -3,6 +3,7 @@ package decision
 import (
 	"context"
 	"errors"
+	"sync"
 	"testing"
 
 	cd "github.com/muidea/magicCommon/def"
@@ -17,9 +18,169 @@ import (
 	orchestratorevents "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/repository/memory"
+	deletioncontract "github.com/muidea/workorch/internal/pkg/workorchdeletioncontract"
 	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
+	"github.com/muidea/workorch/internal/pkg/workorchrepo"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
+
+func TestDecisionWorkspaceDeletionFenceRetainAndPurgeAreStable(t *testing.T) {
+	ctx := context.Background()
+	hub := magicevent.NewHub(32)
+	t.Cleanup(func() { hub.Terminate(ctx) })
+	repos := memory.NewDecisionOwnerRepositorySet()
+	module := New()
+	if err := module.Configure(decisionbiz.Dependencies{Tickets: repos.Tickets, Resolutions: repos.Resolutions, WorkspaceDeletions: repos.WorkspaceDeletions, EventHub: hub}); err != nil {
+		t.Fatal(err)
+	}
+	if err := module.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = module.Stop(ctx) })
+
+	retainID := common.WorkspaceID("ws-decision-retain")
+	retained := &decisionmodel.Ticket{ID: "ticket-retain", WorkspaceID: retainID, RunID: "run-retain", State: common.DecisionTicketStateOpen, Reason: "retain"}
+	if err := repos.Tickets.Create(ctx, retained); err != nil {
+		t.Fatal(err)
+	}
+	retain := deletioncontract.Scope{WorkspaceID: retainID, DeletionID: "delete-retain", DeletionGeneration: 1, Mode: deletioncontract.ModeRetain, QuiescenceID: "quiescence-retain"}
+	retain.RequestHash = deletioncontract.StableRequestHash(retain)
+	sealDecisionDeletion(t, ctx, hub, decisionevents.SealWorkspaceDecisionDeletionCommand{WorkspaceID: retain.WorkspaceID, DeletionID: retain.DeletionID, DeletionGeneration: 1, DataDispositionIntent: retain.Mode, QuiescenceID: retain.QuiescenceID, RequestHash: retain.RequestHash})
+	query := hub.Send(magicevent.NewEventWithContext(decisionevents.TopicDecisionCommandGetTicket, "test", decisionevents.CommandDestination, magicevent.NewHeader(), ctx, decisionevents.GetTicketCommand{WorkspaceID: retainID, TicketID: retained.ID}))
+	if query == nil || !errors.Is(query.Error(), common.ErrNotFound) {
+		t.Fatalf("retained public read error = %v", query)
+	}
+	if _, err := repos.Tickets.Get(common.ContextWithRuntimeWorkspaceID(ctx, retainID), retained.ID); err != nil {
+		t.Fatalf("retain physically removed ticket: %v", err)
+	}
+	if err := repos.Tickets.Delete(common.ContextWithRuntimeWorkspaceID(ctx, retainID), retained.ID); !errors.Is(err, common.ErrNotFound) {
+		t.Fatalf("ordinary delete crossed retain fence: %v", err)
+	}
+
+	purgeID := common.WorkspaceID("ws-decision-purge")
+	purged := &decisionmodel.Ticket{ID: "ticket-purge", WorkspaceID: purgeID, RunID: "run-purge", State: common.DecisionTicketStateResolved, Reason: "purge"}
+	if err := repos.Tickets.Create(ctx, purged); err != nil {
+		t.Fatal(err)
+	}
+	if err := repos.Resolutions.Create(common.ContextWithRuntimeWorkspaceID(ctx, purgeID), &decisionmodel.Resolution{ID: "resolution-purge", TicketID: purged.ID, Type: decisioncommon.ResolutionTypeProvideMissingInfo}); err != nil {
+		t.Fatal(err)
+	}
+	purge := deletioncontract.Scope{WorkspaceID: purgeID, DeletionID: "delete-purge", DeletionGeneration: 1, Mode: deletioncontract.ModePurge, QuiescenceID: "quiescence-purge"}
+	purge.RequestHash = deletioncontract.StableRequestHash(purge)
+	sealCommand := decisionevents.SealWorkspaceDecisionDeletionCommand{WorkspaceID: purge.WorkspaceID, DeletionID: purge.DeletionID, DeletionGeneration: 1, DataDispositionIntent: purge.Mode, QuiescenceID: purge.QuiescenceID, RequestHash: purge.RequestHash}
+	sealDecisionDeletion(t, ctx, hub, sealCommand)
+	if err := repos.Tickets.Delete(common.ContextWithRuntimeWorkspaceID(ctx, purgeID), purged.ID); !errors.Is(err, common.ErrNotFound) {
+		t.Fatalf("ordinary delete crossed purge fence: %v", err)
+	}
+	command := decisionevents.PurgeWorkspaceDecisionsCommand{WorkspaceID: sealCommand.WorkspaceID, DeletionID: sealCommand.DeletionID, DeletionGeneration: sealCommand.DeletionGeneration, QuiescenceID: sealCommand.QuiescenceID, RequestHash: sealCommand.RequestHash}
+	var first decisionevents.PurgeWorkspaceDecisionsResult
+	for attempt := 0; attempt < 2; attempt++ {
+		response := hub.Send(magicevent.NewEventWithContext(decisionevents.TopicDecisionCommandPurgeWorkspace, "blocks/workspace", decisionevents.CommandDestination, magicevent.NewHeader(), ctx, command))
+		if response == nil || response.Error() != nil {
+			t.Fatalf("purge response = %v", response)
+		}
+		data, err := response.Get()
+		if err != nil {
+			t.Fatal(err)
+		}
+		got := data.(decisionevents.PurgeWorkspaceDecisionsResult)
+		if got.ValidateFor(command) != nil {
+			t.Fatalf("invalid purge result: %#v", got)
+		}
+		if attempt == 0 {
+			first = got
+		} else if got != first {
+			t.Fatalf("purge replay drift: %#v != %#v", got, first)
+		}
+	}
+	if items, _ := repos.Tickets.ListByWorkspaceID(ctx, purgeID); len(items) != 0 {
+		t.Fatalf("purge left %d tickets", len(items))
+	}
+}
+
+func sealDecisionDeletion(t *testing.T, ctx context.Context, hub magicevent.Hub, command decisionevents.SealWorkspaceDecisionDeletionCommand) {
+	t.Helper()
+	var first decisionevents.SealWorkspaceDecisionDeletionResult
+	for attempt := 0; attempt < 2; attempt++ {
+		response := hub.Send(magicevent.NewEventWithContext(decisionevents.TopicDecisionCommandSealWorkspaceDeletion, "blocks/workspace", decisionevents.CommandDestination, magicevent.NewHeader(), ctx, command))
+		if response == nil || response.Error() != nil {
+			t.Fatalf("seal response = %v", response)
+		}
+		data, err := response.Get()
+		if err != nil {
+			t.Fatal(err)
+		}
+		got := data.(decisionevents.SealWorkspaceDecisionDeletionResult)
+		if got.ValidateFor(command) != nil {
+			t.Fatalf("invalid seal result: %#v", got)
+		}
+		if attempt == 0 {
+			first = got
+		} else if got != first {
+			t.Fatalf("seal replay drift: %#v != %#v", got, first)
+		}
+	}
+}
+
+func TestDecisionFileDeletionFenceLinearizesAcrossRepositorySets(t *testing.T) {
+	for _, mode := range []deletioncontract.Mode{deletioncontract.ModeRetain, deletioncontract.ModePurge} {
+		t.Run(string(mode), func(t *testing.T) {
+			ctx, root := context.Background(), t.TempDir()
+			first, second := workorchrepo.NewWorkspaceScopedFileRepositorySet(root), workorchrepo.NewWorkspaceScopedFileRepositorySet(root)
+			hub := magicevent.NewHub(32)
+			t.Cleanup(func() { hub.Terminate(ctx) })
+			module := New()
+			if err := module.Configure(decisionbiz.Dependencies{Tickets: first.Tickets, Resolutions: first.Resolutions, WorkspaceDeletions: first.DecisionDeletions, EventHub: hub}); err != nil {
+				t.Fatal(err)
+			}
+			if err := module.Start(); err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() { _ = module.Stop(ctx) })
+			workspaceID := common.WorkspaceID("ws-decision-file-" + string(mode))
+			scope := deletioncontract.Scope{WorkspaceID: workspaceID, DeletionID: "delete-file", DeletionGeneration: 1, Mode: mode, QuiescenceID: "quiescence-file"}
+			scope.RequestHash = deletioncontract.StableRequestHash(scope)
+			command := decisionevents.SealWorkspaceDecisionDeletionCommand{WorkspaceID: scope.WorkspaceID, DeletionID: scope.DeletionID, DeletionGeneration: 1, DataDispositionIntent: scope.Mode, QuiescenceID: scope.QuiescenceID, RequestHash: scope.RequestHash}
+			start := make(chan struct{})
+			var wg sync.WaitGroup
+			wg.Add(2)
+			var writeErr error
+			go func() {
+				defer wg.Done()
+				<-start
+				writeErr = second.Tickets.Create(ctx, &decisionmodel.Ticket{ID: "race-ticket", WorkspaceID: workspaceID, RunID: "run", State: common.DecisionTicketStateOpen, Reason: "race"})
+			}()
+			go func() { defer wg.Done(); <-start; sealDecisionDeletion(t, ctx, hub, command) }()
+			close(start)
+			wg.Wait()
+			if writeErr != nil && !errors.Is(writeErr, common.ErrNotFound) {
+				t.Fatalf("seal-vs-write error: %v", writeErr)
+			}
+			if err := second.Tickets.Create(ctx, &decisionmodel.Ticket{ID: "late-ticket", WorkspaceID: workspaceID, RunID: "run", State: common.DecisionTicketStateOpen, Reason: "late"}); !errors.Is(err, common.ErrNotFound) {
+				t.Fatalf("late write crossed fence: %v", err)
+			}
+			reopened := workorchrepo.NewWorkspaceScopedFileRepositorySet(root)
+			if tombstone, err := reopened.DecisionDeletions.Get(ctx, workspaceID); err != nil || tombstone.Revision != 1 {
+				t.Fatalf("reopened tombstone=%#v err=%v", tombstone, err)
+			}
+			if mode == deletioncontract.ModePurge {
+				purgeCommand := decisionevents.PurgeWorkspaceDecisionsCommand{WorkspaceID: command.WorkspaceID, DeletionID: command.DeletionID, DeletionGeneration: command.DeletionGeneration, QuiescenceID: command.QuiescenceID, RequestHash: command.RequestHash}
+				response := hub.Send(magicevent.NewEventWithContext(decisionevents.TopicDecisionCommandPurgeWorkspace, "blocks/workspace", decisionevents.CommandDestination, magicevent.NewHeader(), ctx, purgeCommand))
+				if response == nil || response.Error() != nil {
+					t.Fatalf("file purge response=%v", response)
+				}
+				data, err := response.Get()
+				if err != nil || data.(decisionevents.PurgeWorkspaceDecisionsResult).ValidateFor(purgeCommand) != nil {
+					t.Fatalf("file purge result=%#v err=%v", data, err)
+				}
+				final := workorchrepo.NewWorkspaceScopedFileRepositorySet(root)
+				if tombstone, err := final.DecisionDeletions.Get(ctx, workspaceID); err != nil || tombstone.Revision != 2 {
+					t.Fatalf("reopened purge tombstone=%#v err=%v", tombstone, err)
+				}
+			}
+		})
+	}
+}
 
 func mustDecisionEventPayload(t *testing.T, input map[string]any) []workorcheventpayload.Field {
 	t.Helper()
@@ -178,7 +339,7 @@ func TestDecisionTicketCommandGetHonorsScope(t *testing.T) {
 	}
 
 	module := New()
-	if err := module.Configure(decisionbiz.Dependencies{Tickets: tickets, Resolutions: resolutions, EventHub: rawHub, BackgroundRoutine: magictask.NewBackgroundRoutine(1)}); err != nil {
+	if err := module.Configure(decisionbiz.Dependencies{WorkspaceDeletions: memory.NewDecisionWorkspaceDeletionRepository(), Tickets: tickets, Resolutions: resolutions, EventHub: rawHub, BackgroundRoutine: magictask.NewBackgroundRoutine(1)}); err != nil {
 		t.Fatalf("Setup: %v", err)
 	}
 	if err := module.Start(); err != nil {
@@ -242,7 +403,7 @@ func TestDecisionTicketCommandListByRunHonorsWorkspaceScope(t *testing.T) {
 	}
 
 	module := New()
-	if err := module.Configure(decisionbiz.Dependencies{Tickets: tickets, Resolutions: resolutions, EventHub: rawHub}); err != nil {
+	if err := module.Configure(decisionbiz.Dependencies{WorkspaceDeletions: memory.NewDecisionWorkspaceDeletionRepository(), Tickets: tickets, Resolutions: resolutions, EventHub: rawHub}); err != nil {
 		t.Fatalf("Setup: %v", err)
 	}
 	if err := module.Start(); err != nil {
@@ -282,7 +443,7 @@ func TestDecisionTicketListsAreExplicitBoundedAndCompositeCursorPaged(t *testing
 		}
 	}
 	module := New()
-	if err := module.Configure(decisionbiz.Dependencies{Tickets: tickets, Resolutions: resolutions, EventHub: rawHub}); err != nil {
+	if err := module.Configure(decisionbiz.Dependencies{WorkspaceDeletions: memory.NewDecisionWorkspaceDeletionRepository(), Tickets: tickets, Resolutions: resolutions, EventHub: rawHub}); err != nil {
 		t.Fatalf("Configure: %v", err)
 	}
 	if err := module.Start(); err != nil {
@@ -349,7 +510,7 @@ func TestDecisionMutationCommandsHonorWorkspaceScope(t *testing.T) {
 	}
 
 	module := New()
-	if err := module.Configure(decisionbiz.Dependencies{Tickets: tickets, Resolutions: resolutions, EventHub: rawHub}); err != nil {
+	if err := module.Configure(decisionbiz.Dependencies{WorkspaceDeletions: memory.NewDecisionWorkspaceDeletionRepository(), Tickets: tickets, Resolutions: resolutions, EventHub: rawHub}); err != nil {
 		t.Fatalf("Setup: %v", err)
 	}
 	if err := module.Start(); err != nil {
@@ -379,18 +540,6 @@ func TestDecisionMutationCommandsHonorWorkspaceScope(t *testing.T) {
 		t.Fatalf("ticket state = %s, want open", item.State)
 	}
 
-	purge, err := sendDecisionTestCommand[decisionevents.PurgeWorkspaceDecisionsResult](ctx, rawHub, decisionevents.TopicDecisionCommandPurgeWorkspace, decisionevents.PurgeWorkspaceDecisionsCommand{
-		WorkspaceID: "ws-ticket-mutate-b",
-	})
-	if err != nil {
-		t.Fatalf("purge unrelated workspace: %v", err)
-	}
-	if purge.Deleted != 0 {
-		t.Fatalf("purge unrelated workspace deleted = %d, want 0", purge.Deleted)
-	}
-	if _, err := tickets.Get(ctx, ticketID); err != nil {
-		t.Fatalf("ticket should remain after unrelated workspace purge: %v", err)
-	}
 }
 
 func TestDecisionResolveCommandWithoutScopeResolvesUniqueOpenTicket(t *testing.T) {
@@ -412,7 +561,7 @@ func TestDecisionResolveCommandWithoutScopeResolvesUniqueOpenTicket(t *testing.T
 	}
 
 	module := New()
-	if err := module.Configure(decisionbiz.Dependencies{Tickets: tickets, Resolutions: resolutions, EventHub: rawHub}); err != nil {
+	if err := module.Configure(decisionbiz.Dependencies{WorkspaceDeletions: memory.NewDecisionWorkspaceDeletionRepository(), Tickets: tickets, Resolutions: resolutions, EventHub: rawHub}); err != nil {
 		t.Fatalf("Setup: %v", err)
 	}
 	if err := module.Start(); err != nil {
@@ -473,7 +622,7 @@ func TestDecisionResolveCommandWithoutScopeConflictsOnDuplicateOpenTickets(t *te
 	}
 
 	module := New()
-	if err := module.Configure(decisionbiz.Dependencies{Tickets: tickets, Resolutions: resolutions, EventHub: rawHub}); err != nil {
+	if err := module.Configure(decisionbiz.Dependencies{WorkspaceDeletions: memory.NewDecisionWorkspaceDeletionRepository(), Tickets: tickets, Resolutions: resolutions, EventHub: rawHub}); err != nil {
 		t.Fatalf("Setup: %v", err)
 	}
 	if err := module.Start(); err != nil {
@@ -507,60 +656,6 @@ func TestDecisionResolveCommandWithoutScopeConflictsOnDuplicateOpenTickets(t *te
 	}
 }
 
-func TestDecisionPurgeWorkspaceDeletesTicketAndResolutionAggregate(t *testing.T) {
-	ctx := context.Background()
-	rawHub := magicevent.NewHub(16)
-	tickets := memory.NewDecisionTicketRepository()
-	resolutions := memory.NewDecisionResolutionRepository()
-	ticketID := common.TicketID("ticket-workspace-purge")
-	workspaceID := common.WorkspaceID("ws-ticket-workspace-purge")
-	if err := tickets.Create(ctx, &decisionmodel.Ticket{
-		ID:          ticketID,
-		WorkspaceID: workspaceID,
-		RunID:       "run-ticket-workspace-purge",
-		State:       common.DecisionTicketStateResolved,
-		Reason:      "decision workspace purge test",
-	}); err != nil {
-		t.Fatalf("create ticket: %v", err)
-	}
-	if err := resolutions.Create(common.ContextWithRuntimeWorkspaceID(ctx, workspaceID), &decisionmodel.Resolution{
-		ID:       "resolution-workspace-purge",
-		TicketID: ticketID,
-		Type:     "provide_missing_info",
-	}); err != nil {
-		t.Fatalf("create resolution: %v", err)
-	}
-
-	module := New()
-	if err := module.Configure(decisionbiz.Dependencies{Tickets: tickets, Resolutions: resolutions, EventHub: rawHub}); err != nil {
-		t.Fatalf("Setup: %v", err)
-	}
-	if err := module.Start(); err != nil {
-		t.Fatalf("Run: %v", err)
-	}
-	t.Cleanup(func() {
-		if err := module.Stop(ctx); err != nil {
-			t.Fatalf("Teardown: %v", err)
-		}
-	})
-
-	response, err := sendDecisionTestCommand[decisionevents.PurgeWorkspaceDecisionsResult](ctx, rawHub, decisionevents.TopicDecisionCommandPurgeWorkspace, decisionevents.PurgeWorkspaceDecisionsCommand{
-		WorkspaceID: workspaceID,
-	})
-	if err != nil {
-		t.Fatalf("purge workspace: %v", err)
-	}
-	if response.Deleted != 1 {
-		t.Fatalf("purge deleted = %d, want 1", response.Deleted)
-	}
-	if _, err := tickets.Get(ctx, ticketID); !errors.Is(err, common.ErrNotFound) {
-		t.Fatalf("get purged ticket err = %v, want not found", err)
-	}
-	if _, err := resolutions.GetByTicketID(common.ContextWithRuntimeWorkspaceID(ctx, workspaceID), ticketID); !errors.Is(err, common.ErrNotFound) {
-		t.Fatalf("get purged resolution err = %v, want not found", err)
-	}
-}
-
 func TestDecisionResolutionCommandGetHonorsTicketScope(t *testing.T) {
 	ctx := context.Background()
 	rawHub := magicevent.NewHub(16)
@@ -587,7 +682,7 @@ func TestDecisionResolutionCommandGetHonorsTicketScope(t *testing.T) {
 	}
 
 	module := New()
-	if err := module.Configure(decisionbiz.Dependencies{Tickets: tickets, Resolutions: resolutions, EventHub: rawHub}); err != nil {
+	if err := module.Configure(decisionbiz.Dependencies{WorkspaceDeletions: memory.NewDecisionWorkspaceDeletionRepository(), Tickets: tickets, Resolutions: resolutions, EventHub: rawHub}); err != nil {
 		t.Fatalf("Configure: %v", err)
 	}
 	if err := module.Start(); err != nil {
@@ -649,7 +744,7 @@ func TestDecisionResolutionCommandWithoutScopeConflictsOnDuplicateOpenTickets(t 
 	}
 
 	module := New()
-	if err := module.Configure(decisionbiz.Dependencies{Tickets: tickets, Resolutions: resolutions, EventHub: rawHub}); err != nil {
+	if err := module.Configure(decisionbiz.Dependencies{WorkspaceDeletions: memory.NewDecisionWorkspaceDeletionRepository(), Tickets: tickets, Resolutions: resolutions, EventHub: rawHub}); err != nil {
 		t.Fatalf("Configure: %v", err)
 	}
 	if err := module.Start(); err != nil {
@@ -671,7 +766,7 @@ func TestDecisionResolutionCommandWithoutScopeConflictsOnDuplicateOpenTickets(t 
 }
 
 func decisionModuleContractDependencies() decisionbiz.Dependencies {
-	return decisionbiz.Dependencies{
+	return decisionbiz.Dependencies{WorkspaceDeletions: memory.NewDecisionWorkspaceDeletionRepository(),
 		Tickets:     memory.NewDecisionTicketRepository(),
 		Resolutions: memory.NewDecisionResolutionRepository(),
 		EventHub:    magicevent.NewHub(16),
@@ -683,7 +778,7 @@ func TestRuntimeGovernanceOpenRequiresOrchestratorSourceAndMatchingWorkspaceCont
 	rawHub := magicevent.NewHub(16)
 	tickets := memory.NewDecisionTicketRepository()
 	module := New()
-	if err := module.Configure(decisionbiz.Dependencies{Tickets: tickets, Resolutions: memory.NewDecisionResolutionRepository(), EventHub: rawHub}); err != nil {
+	if err := module.Configure(decisionbiz.Dependencies{WorkspaceDeletions: memory.NewDecisionWorkspaceDeletionRepository(), Tickets: tickets, Resolutions: memory.NewDecisionResolutionRepository(), EventHub: rawHub}); err != nil {
 		t.Fatalf("Configure: %v", err)
 	}
 	if err := module.Start(); err != nil {
@@ -753,7 +848,7 @@ func TestRuntimeGovernanceInvalidCommitResultRemainsRecoverable(t *testing.T) {
 				t.Fatalf("create ticket: %v", err)
 			}
 			module := New()
-			if err := module.Configure(decisionbiz.Dependencies{Tickets: tickets, Resolutions: resolutions, EventHub: rawHub}); err != nil {
+			if err := module.Configure(decisionbiz.Dependencies{WorkspaceDeletions: memory.NewDecisionWorkspaceDeletionRepository(), Tickets: tickets, Resolutions: resolutions, EventHub: rawHub}); err != nil {
 				t.Fatalf("Configure: %v", err)
 			}
 			if err := module.Start(); err != nil {
@@ -805,7 +900,7 @@ func TestRuntimeGovernanceEvidenceFailureRecoversAfterFinalize(t *testing.T) {
 		t.Fatalf("create ticket: %v", err)
 	}
 	module := New()
-	if err := module.Configure(decisionbiz.Dependencies{Tickets: tickets, Resolutions: resolutions, EventHub: rawHub}); err != nil {
+	if err := module.Configure(decisionbiz.Dependencies{WorkspaceDeletions: memory.NewDecisionWorkspaceDeletionRepository(), Tickets: tickets, Resolutions: resolutions, EventHub: rawHub}); err != nil {
 		t.Fatalf("Configure: %v", err)
 	}
 	if err := module.Start(); err != nil {
@@ -882,7 +977,7 @@ func TestRuntimeGovernanceResolutionDoesNotResolveTicketBeforeAggregateCommit(t 
 		t.Fatalf("create ticket: %v", err)
 	}
 	module := New()
-	if err := module.Configure(decisionbiz.Dependencies{Tickets: tickets, Resolutions: resolutions, EventHub: rawHub, BackgroundRoutine: magictask.NewBackgroundRoutine(1)}); err != nil {
+	if err := module.Configure(decisionbiz.Dependencies{WorkspaceDeletions: memory.NewDecisionWorkspaceDeletionRepository(), Tickets: tickets, Resolutions: resolutions, EventHub: rawHub, BackgroundRoutine: magictask.NewBackgroundRoutine(1)}); err != nil {
 		t.Fatalf("Configure: %v", err)
 	}
 	if err := module.Start(); err != nil {

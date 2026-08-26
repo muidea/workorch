@@ -17,13 +17,17 @@ type Workspace struct {
 	InternalDirectory    string
 	State                common.WorkspaceState
 	ActiveRunID          common.RunID
-	TemplateID           string
-	ProfileID            string
-	DefaultLLMSelection  *runtimecontract.ProviderInferenceSelection
-	DefaultSoulID        common.SoulID
-	SoulBindings         map[string]common.SoulID
-	ContextHints         workorcheventpayload.Payload
-	EvidencePolicies     []workorcheventpayload.Payload
+	// RunProjectionCursor is the Workspace owner's durable observation fence.
+	// It stores only Run-owner fact identity, never decoded Runtime authority or
+	// a caller-selected target state.
+	RunProjectionCursor WorkspaceRunProjectionCursor
+	TemplateID          string
+	ProfileID           string
+	DefaultLLMSelection *runtimecontract.ProviderInferenceSelection
+	DefaultSoulID       common.SoulID
+	SoulBindings        map[string]common.SoulID
+	ContextHints        workorcheventpayload.Payload
+	EvidencePolicies    []workorcheventpayload.Payload
 	// DefinitionAdmissionCandidates is immutable owner history. The current
 	// candidate is the highest revision in one CandidateID lineage.
 	DefinitionAdmissionCandidates []DefinitionAdmissionCandidate
@@ -32,4 +36,19 @@ type Workspace struct {
 	// TerminalDelivery is the Workspace owner's persisted release fence. It is
 	// written only by the lifecycle reducer and never by generic metadata update.
 	TerminalDelivery *runtimecontract.RuntimeTerminalDeliveryIdentity
+	// Deletion is the Workspace owner's private retirement/purge aggregate. It
+	// is deliberately omitted from public Workspace EventHub DTOs.
+	Deletion *WorkspaceDeletionRecord
+}
+
+// WorkspaceRunProjectionCursor prevents a delayed/duplicate Run fact from
+// rolling the Workspace lifecycle projection backward after CAS retries or a
+// fresh-process reconciliation.
+type WorkspaceRunProjectionCursor struct {
+	WorkspaceRunGeneration uint64
+	RunID                  common.RunID
+	RunRevision            uint64
+	RuntimeStateRevision   uint64
+	RuntimeStateRef        string
+	CausationID            string
 }

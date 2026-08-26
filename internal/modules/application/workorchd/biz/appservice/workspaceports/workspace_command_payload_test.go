@@ -7,18 +7,8 @@ import (
 	cd "github.com/muidea/magicCommon/def"
 	magicevent "github.com/muidea/magicCommon/event"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/appmodelcore"
-	approvalevents "github.com/muidea/workorch/internal/modules/blocks/approval/pkg/events"
-	decisionevents "github.com/muidea/workorch/internal/modules/blocks/decision/pkg/events"
-	eventstreamevents "github.com/muidea/workorch/internal/modules/blocks/eventstream/pkg/events"
-	memoryevents "github.com/muidea/workorch/internal/modules/blocks/memory/pkg/events"
-	memorymodel "github.com/muidea/workorch/internal/modules/blocks/memory/pkg/models"
-	resultevents "github.com/muidea/workorch/internal/modules/blocks/result/pkg/events"
-	resultmodel "github.com/muidea/workorch/internal/modules/blocks/result/pkg/models"
-	runevents "github.com/muidea/workorch/internal/modules/blocks/run/pkg/events"
-	runmodel "github.com/muidea/workorch/internal/modules/blocks/run/pkg/models"
 	workspaceevents "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/events"
 	workspacemodel "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/models"
-	orchestratorevents "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
@@ -71,7 +61,7 @@ func (h *workspaceCommandTestHub) source(t *testing.T, topic string, index int) 
 	return items[index]
 }
 
-func TestSubmitDefinitionAdmissionCandidateUsesRuntimeAuthoritySource(t *testing.T) {
+func TestSubmitDefinitionAdmissionIntentUsesRuntimeAuthoritySource(t *testing.T) {
 	ctx := context.Background()
 	testHub := newWorkspaceCommandTestHub(t)
 	candidate := (workspacemodel.DefinitionAdmissionCandidate{
@@ -100,9 +90,22 @@ func TestSubmitDefinitionAdmissionCandidateUsesRuntimeAuthoritySource(t *testing
 			SourceItemRefs: []string{"dod:dod-source:item:000001"}, TargetItemRefs: []string{"goal:goal-source"},
 		}},
 	}).WithHash()
-	testHub.subscribe(workspaceevents.CommandDestination, workspaceevents.TopicWorkspaceCommandSubmitDefinitionAdmissionCandidate, func(data any) (any, error) {
-		command := data.(workspaceevents.SubmitDefinitionAdmissionCandidateCommand)
-		return workspaceevents.SubmitDefinitionAdmissionCandidateResult{
+	testHub.subscribe(workspaceevents.CommandDestination, workspaceevents.TopicWorkspaceDefinitionAdmissionIntent, func(data any) (any, error) {
+		command := data.(workspaceevents.DefinitionAdmissionIntentCommand)
+		startup := (workspacemodel.WorkspaceStartupInputContract{
+			WorkspaceID: command.Candidate.WorkspaceID, DefinitionRevision: command.Candidate.GoalInput.SourceIdentity + "|" + command.Candidate.DoDInputs[0].SourceIdentity,
+			GoalDefinitionRef: "goal-item", GoalTextHash: workspacemodel.StableDefinitionTextHash(command.Candidate.GoalInput.Text),
+			DoDDefinitionRefs: []string{"dod-item"}, DoDItemSetHash: workspacemodel.StableDefinitionStringSetHash([]string{command.Candidate.DoDInputs[0].Text}),
+			WorkspaceTemplateRef: command.Candidate.WorkspaceTemplateSnapshot.TemplateRef, TemplateRevision: command.Candidate.WorkspaceTemplateSnapshot.Revision,
+			TemplateSnapshotHash: command.Candidate.WorkspaceTemplateSnapshot.SnapshotHash, RuntimeProfileContractsHash: command.Candidate.RuntimeProfileContractsHash,
+			ResolvedProjectWorkspaceDirectory: command.Candidate.ResolvedProjectWorkspaceDirectory,
+			CandidateItemToItemRefMappings:    []workspacemodel.CandidateItemToItemRefMapping{{CandidateItemRef: command.Candidate.GoalInput.CandidateItemRef, ItemRef: "goal-item"}, {CandidateItemRef: command.Candidate.DoDInputs[0].CandidateItemRef, ItemRef: "dod-item"}},
+		}).WithHash()
+		activation := workspacemodel.WorkspaceActivationAdmission{
+			WorkspaceID: command.Candidate.WorkspaceID, CandidateID: command.Candidate.CandidateID, CandidateRevision: command.Candidate.CandidateRevision, CandidateHash: command.Candidate.CandidateHash,
+			DefinitionRevision: startup.DefinitionRevision, StartupInputHash: startup.StartupInputHash, State: workspacemodel.WorkspaceActivationEligible,
+		}
+		return workspaceevents.DefinitionAdmissionIntentResult{
 			Candidate: command.Candidate,
 			AdmissionResult: (workspacemodel.DefinitionAdmissionResult{
 				WorkspaceID: command.Candidate.WorkspaceID, CandidateID: command.Candidate.CandidateID,
@@ -110,14 +113,17 @@ func TestSubmitDefinitionAdmissionCandidateUsesRuntimeAuthoritySource(t *testing
 				Disposition: workspacemodel.DefinitionAdmissionAdmittedAllOf, AdmissionCompilerVersion: command.Candidate.AdmissionCompilerVersion,
 				CanonicalAdmittedInputHash: "test-admitted-all-of",
 			}).WithHash(),
-			Disposition: workspaceevents.DefinitionAdmissionCandidateCreated,
+			CandidateDisposition: workspaceevents.DefinitionAdmissionCandidateCreated,
+			Disposition:          workspaceevents.DefinitionAdmissionIntentEligible,
+			StartupInput:         &startup,
+			ActivationAdmission:  &activation,
 		}, nil
 	})
 
-	if _, err := SubmitDefinitionAdmissionCandidate(ctx, testHub.raw, candidate, 0); err != nil {
-		t.Fatalf("SubmitDefinitionAdmissionCandidate: %v", err)
+	if _, err := SubmitDefinitionAdmissionIntent(ctx, testHub.raw, workspaceevents.DefinitionAdmissionIntentCommand{Candidate: candidate}); err != nil {
+		t.Fatalf("SubmitDefinitionAdmissionIntent: %v", err)
 	}
-	if got := testHub.source(t, workspaceevents.TopicWorkspaceCommandSubmitDefinitionAdmissionCandidate, 0); got != "application/workorchd" {
+	if got := testHub.source(t, workspaceevents.TopicWorkspaceDefinitionAdmissionIntent, 0); got != "application/workorchd" {
 		t.Fatalf("definition admission source = %q, want application/workorchd", got)
 	}
 }
@@ -203,205 +209,64 @@ func TestWorkspaceTemplateRecordsSendOwnerCommands(t *testing.T) {
 	}
 }
 
-func TestPurgeWorkspaceRecordsSendsOwnerCommands(t *testing.T) {
-	ctx := context.Background()
+func TestDeleteWorkspaceViewSendsOnlyWorkspaceOwnerCommand(t *testing.T) {
 	testHub := newWorkspaceCommandTestHub(t)
-	workspaceID := common.WorkspaceID("ws-purge-command-payload")
-	runID := common.RunID("run-purge-command-payload")
-	memoryID := common.MemoryID("memory-purge-command-payload")
-
-	testHub.subscribe(runevents.CommandDestination, runevents.TopicRunCommandListByWorkspace, func(any) (any, error) {
-		return runevents.ListRunsByWorkspaceResult{Runs: []*runmodel.Run{{ID: runID, WorkspaceID: workspaceID}}}, nil
-	})
-	testHub.subscribe(orchestratorevents.CommandDestination, orchestratorevents.TopicOrchestratorCommandPurgeRun, emptyOrchestratorResult)
-	testHub.subscribe(memoryevents.CommandDestination, memoryevents.TopicMemoryCommandListByWorkspace, func(any) (any, error) {
-		return memoryevents.ListMemoryByWorkspaceResult{Items: []*memorymodel.MemoryItem{{ID: memoryID, WorkspaceID: workspaceID, RunID: runID}}}, nil
-	})
-	testHub.subscribe(decisionevents.CommandDestination, decisionevents.TopicDecisionCommandPurgeWorkspace, func(any) (any, error) {
-		return decisionevents.PurgeWorkspaceDecisionsResult{Deleted: 1}, nil
-	})
-	testHub.subscribe(approvalevents.CommandDestination, approvalevents.TopicApprovalCommandPurgeWorkspace, func(any) (any, error) {
-		return approvalevents.PurgeWorkspaceApprovalsResult{Deleted: 1}, nil
-	})
-	testHub.subscribe(resultevents.CommandDestination, resultevents.TopicArtifactCommandListByWorkspace, func(any) (any, error) {
-		return resultevents.ListArtifactsByWorkspaceResult{Artifacts: []*resultmodel.Artifact{}}, nil
-	})
-	testHub.subscribe(resultevents.CommandDestination, resultevents.TopicResultCommandListByWorkspace, func(any) (any, error) {
-		return resultevents.ListResultsByWorkspaceResult{Results: []*resultmodel.Result{}}, nil
-	})
-	testHub.subscribe(memoryevents.CommandDestination, memoryevents.TopicMemoryCommandDelete, emptyMemoryResult)
-	testHub.subscribe(runevents.CommandDestination, runevents.TopicRunCommandDelete, emptyRunResult)
-
-	if err := PurgeWorkspaceRecords(ctx, testHub.raw, workspaceID); err != nil {
-		t.Fatalf("PurgeWorkspaceRecords: %v", err)
-	}
-
-	orchestratorCmd, ok := testHub.command(t, orchestratorevents.TopicOrchestratorCommandPurgeRun, 0).(orchestratorevents.PurgeRunCommand)
-	if !ok || orchestratorCmd.RunID != runID {
-		t.Fatalf("orchestrator purge command = %#v, want run %s", orchestratorCmd, runID)
-	}
-	memoryCmd, ok := testHub.command(t, memoryevents.TopicMemoryCommandDelete, 0).(memoryevents.DeleteMemoryCommand)
-	if !ok || memoryCmd.MemoryID != memoryID {
-		t.Fatalf("memory delete command = %#v, want memory %s", memoryCmd, memoryID)
-	}
-	decisionCmd, ok := testHub.command(t, decisionevents.TopicDecisionCommandPurgeWorkspace, 0).(decisionevents.PurgeWorkspaceDecisionsCommand)
-	if !ok || decisionCmd.WorkspaceID != workspaceID {
-		t.Fatalf("decision purge command = %#v, want workspace %s", decisionCmd, workspaceID)
-	}
-	approvalCmd, ok := testHub.command(t, approvalevents.TopicApprovalCommandPurgeWorkspace, 0).(approvalevents.PurgeWorkspaceApprovalsCommand)
-	if !ok || approvalCmd.WorkspaceID != workspaceID {
-		t.Fatalf("approval purge command = %#v, want workspace %s", approvalCmd, workspaceID)
-	}
-	runCmd, ok := testHub.command(t, runevents.TopicRunCommandDelete, 0).(runevents.DeleteRunCommand)
-	if !ok || runCmd.RunID != runID {
-		t.Fatalf("run delete command = %#v, want run %s", runCmd, runID)
-	}
-}
-
-func TestPurgeWorkspaceRecordsTreatsMissingChildRecordsAsAlreadyPurged(t *testing.T) {
-	ctx := context.Background()
-	testHub := newWorkspaceCommandTestHub(t)
-	workspaceID := common.WorkspaceID("ws-purge-missing-children")
-	runID := common.RunID("run-purge-missing-children")
-	resultListCalled := false
-
-	testHub.subscribe(runevents.CommandDestination, runevents.TopicRunCommandListByWorkspace, func(any) (any, error) {
-		return runevents.ListRunsByWorkspaceResult{Runs: []*runmodel.Run{{ID: runID, WorkspaceID: workspaceID}}}, nil
-	})
-	for _, command := range []struct {
-		destination string
-		topic       string
-	}{
-		{orchestratorevents.CommandDestination, orchestratorevents.TopicOrchestratorCommandPurgeRun},
-		{memoryevents.CommandDestination, memoryevents.TopicMemoryCommandListByWorkspace},
-		{decisionevents.CommandDestination, decisionevents.TopicDecisionCommandPurgeWorkspace},
-		{approvalevents.CommandDestination, approvalevents.TopicApprovalCommandPurgeWorkspace},
-		{resultevents.CommandDestination, resultevents.TopicArtifactCommandListByWorkspace},
-		{runevents.CommandDestination, runevents.TopicRunCommandDelete},
-	} {
-		testHub.subscribe(command.destination, command.topic, func(any) (any, error) { return nil, common.ErrNotFound })
-	}
-	testHub.subscribe(resultevents.CommandDestination, resultevents.TopicResultCommandListByWorkspace, func(any) (any, error) {
-		resultListCalled = true
-		return nil, common.ErrNotFound
-	})
-
-	if err := PurgeWorkspaceRecords(ctx, testHub.raw, workspaceID); err != nil {
-		t.Fatalf("PurgeWorkspaceRecords err = %v, want nil", err)
-	}
-	if !resultListCalled {
-		t.Fatalf("result purge was skipped after missing artifact records")
-	}
-}
-
-func TestPurgeWorkspaceEventStreamTreatsMissingRecordsAsAlreadyPurged(t *testing.T) {
-	for _, tc := range []struct {
-		name string
-		err  error
-	}{
-		{name: "not_found", err: common.ErrNotFound},
-		{name: "conflict", err: common.ErrConflict},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			testHub := newWorkspaceCommandTestHub(t)
-			testHub.subscribe(eventstreamevents.CommandDestination, eventstreamevents.TopicEventStreamCommandPurgeWorkspace, func(any) (any, error) {
-				return nil, tc.err
-			})
-			if err := PurgeWorkspaceEventStream(context.Background(), testHub.raw, "ws-eventstream-already-purged"); err != nil {
-				t.Fatalf("PurgeWorkspaceEventStream err = %v, want nil", err)
-			}
-		})
-	}
-}
-
-func TestDeleteWorkspaceViewDoesNotFailAfterWorkspaceDeletedWhenPostPurgeCleanupIsAlreadyGone(t *testing.T) {
-	for _, tc := range []struct {
-		name string
-		err  error
-	}{
-		{name: "not_found", err: common.ErrNotFound},
-		{name: "conflict", err: common.ErrConflict},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			testHub := newWorkspaceCommandTestHub(t)
-			workspaceID := common.WorkspaceID("ws-delete-post-purge-" + tc.name)
-			testHub.subscribe(workspaceevents.CommandDestination, workspaceevents.TopicWorkspaceCommandGet, func(any) (any, error) {
-				return workspaceevents.WorkspaceCommandResult{Workspace: &workspaceevents.Workspace{ID: workspaceID}}, nil
-			})
-			testHub.subscribe(runevents.CommandDestination, runevents.TopicRunCommandListByWorkspace, func(any) (any, error) {
-				return runevents.ListRunsByWorkspaceResult{Runs: []*runmodel.Run{}}, nil
-			})
-			testHub.subscribe(memoryevents.CommandDestination, memoryevents.TopicMemoryCommandListByWorkspace, func(any) (any, error) {
-				return memoryevents.ListMemoryByWorkspaceResult{Items: []*memorymodel.MemoryItem{}}, nil
-			})
-			testHub.subscribe(decisionevents.CommandDestination, decisionevents.TopicDecisionCommandPurgeWorkspace, func(any) (any, error) {
-				return decisionevents.PurgeWorkspaceDecisionsResult{}, nil
-			})
-			testHub.subscribe(approvalevents.CommandDestination, approvalevents.TopicApprovalCommandPurgeWorkspace, func(any) (any, error) {
-				return approvalevents.PurgeWorkspaceApprovalsResult{}, nil
-			})
-			testHub.subscribe(resultevents.CommandDestination, resultevents.TopicArtifactCommandListByWorkspace, func(any) (any, error) {
-				return resultevents.ListArtifactsByWorkspaceResult{Artifacts: []*resultmodel.Artifact{}}, nil
-			})
-			testHub.subscribe(resultevents.CommandDestination, resultevents.TopicResultCommandListByWorkspace, func(any) (any, error) {
-				return resultevents.ListResultsByWorkspaceResult{Results: []*resultmodel.Result{}}, nil
-			})
-			testHub.subscribe(workspaceevents.CommandDestination, workspaceevents.TopicWorkspaceCommandDelete, func(any) (any, error) {
-				return workspaceevents.WorkspaceCommandResult{}, nil
-			})
-			testHub.subscribe(eventstreamevents.CommandDestination, eventstreamevents.TopicEventStreamCommandPurgeWorkspace, func(any) (any, error) {
-				return nil, tc.err
-			})
-
-			err := DeleteWorkspaceView(context.Background(), testHub.raw, DeleteWorkspaceViewRequest{
-				WorkspaceID: string(workspaceID),
-				Command:     appmodelcore.DeleteWorkspaceCommand{Purge: true},
-			})
-			if err != nil {
-				t.Fatalf("DeleteWorkspaceView err = %v, want nil", err)
-			}
-		})
-	}
-}
-
-func TestDeleteWorkspaceRecordSendsOwnerCommand(t *testing.T) {
-	testHub := newWorkspaceCommandTestHub(t)
-	testHub.subscribe(workspaceevents.CommandDestination, workspaceevents.TopicWorkspaceCommandDelete, func(any) (any, error) {
-		return workspaceevents.WorkspaceCommandResult{}, nil
-	})
 	workspaceID := common.WorkspaceID("ws-delete-command-payload")
-	if err := DeleteWorkspaceRecord(context.Background(), testHub.raw, workspaceID); err != nil {
-		t.Fatalf("DeleteWorkspaceRecord: %v", err)
+	request := appmodelcore.DeleteWorkspaceCommand{RequestID: "delete-request-1", Purge: true, ExpectedRevision: 7}
+	testHub.subscribe(workspaceevents.CommandDestination, workspaceevents.TopicWorkspaceCommandDelete, func(data any) (any, error) {
+		cmd := data.(workspaceevents.DeleteWorkspaceCommand)
+		return workspaceevents.DeleteWorkspaceResult{
+			WorkspaceID:       cmd.WorkspaceID,
+			DeletionID:        workspaceevents.StableWorkspaceDeletionID(cmd.WorkspaceID, cmd.RequestID),
+			RequestID:         cmd.RequestID,
+			Mode:              cmd.Mode(),
+			Disposition:       workspaceevents.DeleteWorkspaceCompleted,
+			DeletionRevision:  8,
+			WorkspaceRevision: 9,
+			Completed:         true,
+		}, nil
+	})
+	if err := DeleteWorkspaceView(context.Background(), testHub.raw, DeleteWorkspaceViewRequest{WorkspaceID: string(workspaceID), Command: request}); err != nil {
+		t.Fatalf("DeleteWorkspaceView: %v", err)
 	}
 	cmd, ok := testHub.command(t, workspaceevents.TopicWorkspaceCommandDelete, 0).(workspaceevents.DeleteWorkspaceCommand)
-	if !ok || cmd.WorkspaceID != workspaceID {
-		t.Fatalf("command = %#v, want DeleteWorkspaceCommand(%s)", cmd, workspaceID)
+	if !ok || cmd.WorkspaceID != workspaceID || cmd.RequestID != request.RequestID || !cmd.Purge || cmd.ExpectedRevision != 7 {
+		t.Fatalf("command = %#v, want exact Workspace deletion intent", cmd)
+	}
+	if got := testHub.source(t, workspaceevents.TopicWorkspaceCommandDelete, 0); got != workspaceDeletionIngressSource {
+		t.Fatalf("deletion command source = %q, want %q", got, workspaceDeletionIngressSource)
+	}
+	if len(testHub.captured) != 1 {
+		t.Fatalf("captured topics = %#v, want only Workspace deletion command", testHub.captured)
 	}
 }
 
-func TestPurgeWorkspaceEventStreamSendsOwnerCommand(t *testing.T) {
+func TestDeleteWorkspaceViewDerivesStableRequestIdentity(t *testing.T) {
+	workspaceID := common.WorkspaceID("ws-delete-stable-request")
+	var commands []workspaceevents.DeleteWorkspaceCommand
 	testHub := newWorkspaceCommandTestHub(t)
-	testHub.subscribe(eventstreamevents.CommandDestination, eventstreamevents.TopicEventStreamCommandPurgeWorkspace, func(any) (any, error) {
-		return eventstreamevents.PurgeWorkspaceResult{}, nil
+	testHub.subscribe(workspaceevents.CommandDestination, workspaceevents.TopicWorkspaceCommandDelete, func(data any) (any, error) {
+		cmd := data.(workspaceevents.DeleteWorkspaceCommand)
+		commands = append(commands, cmd)
+		return workspaceevents.DeleteWorkspaceResult{
+			WorkspaceID:       cmd.WorkspaceID,
+			DeletionID:        workspaceevents.StableWorkspaceDeletionID(cmd.WorkspaceID, cmd.RequestID),
+			RequestID:         cmd.RequestID,
+			Mode:              cmd.Mode(),
+			Disposition:       workspaceevents.DeleteWorkspaceDuplicate,
+			DeletionRevision:  3,
+			WorkspaceRevision: 4,
+			Completed:         true,
+		}, nil
 	})
-	workspaceID := common.WorkspaceID("ws-eventstream-purge-command")
-	if err := PurgeWorkspaceEventStream(context.Background(), testHub.raw, workspaceID); err != nil {
-		t.Fatalf("PurgeWorkspaceEventStream: %v", err)
+	request := DeleteWorkspaceViewRequest{WorkspaceID: string(workspaceID), Command: appmodelcore.DeleteWorkspaceCommand{Purge: true}}
+	if err := DeleteWorkspaceView(context.Background(), testHub.raw, request); err != nil {
+		t.Fatal(err)
 	}
-	cmd, ok := testHub.command(t, eventstreamevents.TopicEventStreamCommandPurgeWorkspace, 0).(eventstreamevents.PurgeWorkspaceCommand)
-	if !ok || cmd.WorkspaceID != workspaceID {
-		t.Fatalf("command = %#v, want PurgeWorkspaceCommand(%s)", cmd, workspaceID)
+	if err := DeleteWorkspaceView(context.Background(), testHub.raw, request); err != nil {
+		t.Fatal(err)
 	}
-}
-
-func emptyOrchestratorResult(any) (any, error) {
-	return orchestratorevents.OrchestratorCommandResult{}, nil
-}
-
-func emptyMemoryResult(any) (any, error) {
-	return memoryevents.DeleteMemoryResult{}, nil
-}
-
-func emptyRunResult(any) (any, error) {
-	return runevents.DeleteRunResult{Deleted: true}, nil
+	if len(commands) != 2 || commands[0].RequestID == "" || commands[0].RequestID != commands[1].RequestID {
+		t.Fatalf("commands = %#v, want stable non-empty request identity", commands)
+	}
 }

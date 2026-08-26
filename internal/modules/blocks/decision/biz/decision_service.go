@@ -74,9 +74,6 @@ func (s *mutationService) EnsureTicketAndReturn(ctx context.Context, cmd decisio
 
 	item, err := s.tickets.Get(ctx, cmd.TicketID)
 	if err == nil {
-		if item.DeletionRequestedAt != "" {
-			return nil, false, common.ErrConflict
-		}
 		if item.WorkspaceID != cmd.WorkspaceID ||
 			item.RunID != cmd.RunID ||
 			item.StepID != cmd.StepID ||
@@ -119,9 +116,6 @@ func (s *mutationService) ResolveTicketAndReturn(ctx context.Context, cmd decisi
 	ticket, err := s.tickets.Get(ctx, cmd.TicketID)
 	if err != nil {
 		return nil, nil, err
-	}
-	if ticket.DeletionRequestedAt != "" {
-		return nil, nil, common.ErrNotFound
 	}
 	if !ticketMatchesResolveScope(ticket, cmd) {
 		return nil, nil, common.ErrNotFound
@@ -200,9 +194,6 @@ func (s *mutationService) EnsureResolvedTicketAndReturnWithTransition(ctx contex
 	ticket, err := s.tickets.Get(ctx, cmd.TicketID)
 	if err != nil {
 		return nil, nil, false, err
-	}
-	if ticket.DeletionRequestedAt != "" {
-		return nil, nil, false, common.ErrNotFound
 	}
 	if !ticketMatchesResolveScope(ticket, cmd) {
 		return nil, nil, false, common.ErrNotFound
@@ -377,9 +368,6 @@ func (s *mutationService) EnsureRuntimeGovernanceResolutionProposal(ctx context.
 	if err != nil {
 		return nil, nil, err
 	}
-	if ticket.DeletionRequestedAt != "" {
-		return nil, nil, common.ErrNotFound
-	}
 	if !ticketMatchesResolveScope(ticket, cmd) {
 		return nil, nil, common.ErrNotFound
 	}
@@ -455,9 +443,6 @@ func (s *mutationService) FinalizeRuntimeGovernanceResolutionProposalWithTransit
 	if err != nil {
 		return nil, nil, false, err
 	}
-	if ticket.DeletionRequestedAt != "" {
-		return nil, nil, false, common.ErrNotFound
-	}
 	if !ticketMatchesResolveScope(ticket, cmd) || ticket.DecisionKind != "runtime_governance" {
 		return nil, nil, false, common.ErrNotFound
 	}
@@ -514,9 +499,6 @@ func (s *mutationService) RejectRuntimeGovernanceResolutionProposal(ctx context.
 	ticket, err := s.tickets.Get(ctx, cmd.TicketID)
 	if err != nil {
 		return err
-	}
-	if ticket.DeletionRequestedAt != "" {
-		return common.ErrNotFound
 	}
 	proposal, err := runtimeGovernanceProposalFromCommand(cmd)
 	if err != nil {
@@ -698,12 +680,6 @@ func (s *mutationService) PurgeDecisionAggregate(ctx context.Context, ticket *de
 	}
 	if current.WorkspaceID != ticket.WorkspaceID {
 		return common.ErrConflict
-	}
-	if current.DeletionRequestedAt == "" {
-		current, err = s.applyLifecycleInternalEvent(ctx, current, lifecycleInternalEvent{Kind: lifecycleInternalEventAggregateDeletionRequested, TicketID: current.ID})
-		if err != nil {
-			return err
-		}
 	}
 	if err := s.resolutions.DeleteByTicketID(ctx, current.ID); err != nil && !errors.Is(err, common.ErrNotFound) {
 		return err

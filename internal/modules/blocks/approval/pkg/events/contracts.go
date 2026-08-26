@@ -16,6 +16,7 @@ func Contracts() []eventcontract.Contract {
 	)...)
 	ret = append(ret, eventcontract.Build("approval", eventcontract.CommandClassWrite, eventcontract.LanePolicyState,
 		TopicApprovalCommandPurgeWorkspace,
+		TopicApprovalCommandSealWorkspaceDeletion,
 		TopicApprovalCommandEnsureApproved,
 		TopicApprovalCommandEnsureRejected,
 		TopicApprovalCommandRecordEvidence,

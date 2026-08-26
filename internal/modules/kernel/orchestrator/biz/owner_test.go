@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	cd "github.com/muidea/magicCommon/def"
 	runbiz "github.com/muidea/workorch/internal/modules/blocks/run/biz"
 
 	llmevents "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/events"
@@ -43,8 +44,14 @@ func TestModuleIdentityConfigureStartStopContract(t *testing.T) {
 			result.Set(runevents.QueryRuntimeRecoveryInventoryResult{}, nil)
 		}
 	})
+	recoveryObserver.Subscribe(runevents.TopicRunCommandWorkspaceRetirementInventory, func(_ magicevent.Event, result magicevent.Result) {
+		if result != nil {
+			result.Set(runevents.QueryWorkspaceRetirementInventoryResult{}, nil)
+		}
+	})
 	t.Cleanup(func() {
 		recoveryObserver.Unsubscribe(runevents.TopicRunCommandRuntimeRecoveryInventory)
+		recoveryObserver.Unsubscribe(runevents.TopicRunCommandWorkspaceRetirementInventory)
 		deps.CommandHub.Terminate(context.Background())
 	})
 	if err := module.Configure(deps); err != nil {
@@ -113,14 +120,26 @@ func TestGMMR1SM4StartupRecoverySchedulesBootstrapOnlyActiveRun(t *testing.T) {
 			}}}, nil)
 		}
 	})
+	recoveryObserver.Subscribe(runevents.TopicRunCommandWorkspaceRetirementInventory, func(_ magicevent.Event, result magicevent.Result) {
+		if result != nil {
+			result.Set(runevents.QueryWorkspaceRetirementInventoryResult{}, nil)
+		}
+	})
 	recoveryObserver.Subscribe(runevents.TopicRunCommandRuntimeStateRecordReadiness, func(_ magicevent.Event, result magicevent.Result) {
 		if result != nil {
 			result.Set(runevents.QueryRuntimeStateRecordReadinessResult{Ready: true}, nil)
 		}
 	})
+	recoveryObserver.Subscribe(runevents.TopicRunCommandWorkspaceRetirementFact, func(_ magicevent.Event, result magicevent.Result) {
+		if result != nil {
+			result.Set(nil, &cd.Error{Code: cd.NotFound, Message: common.ErrNotFound.Error(), Cause: common.ErrNotFound})
+		}
+	})
 	t.Cleanup(func() {
 		recoveryObserver.Unsubscribe(runevents.TopicRunCommandRuntimeRecoveryInventory)
+		recoveryObserver.Unsubscribe(runevents.TopicRunCommandWorkspaceRetirementInventory)
 		recoveryObserver.Unsubscribe(runevents.TopicRunCommandRuntimeStateRecordReadiness)
+		recoveryObserver.Unsubscribe(runevents.TopicRunCommandWorkspaceRetirementFact)
 		deps.CommandHub.Terminate(context.Background())
 	})
 
@@ -202,12 +221,11 @@ func TestModuleConfigureRequiresCoreDependencies(t *testing.T) {
 		name string
 		deps Dependencies
 	}{
-		{name: "missing tool calls", deps: func() Dependencies { d := base; d.ToolCalls = nil; return d }()},
-		{name: "missing patches", deps: func() Dependencies { d := base; d.Patches = nil; return d }()},
-		{name: "missing validation results", deps: func() Dependencies { d := base; d.ValidationResults = nil; return d }()},
-		{name: "missing evidence", deps: func() Dependencies { d := base; d.EvidenceRecords = nil; return d }()},
-		{name: "missing coverage", deps: func() Dependencies { d := base; d.CoverageWorkItems = nil; return d }()},
-		{name: "missing artifact continuations", deps: func() Dependencies { d := base; d.ArtifactContinuations = nil; return d }()},
+		{name: "missing canonical evidence owner", deps: func() Dependencies {
+			d := base
+			d.Evidence = repository.OrchestratorEvidenceOwnerRepositories{}
+			return d
+		}()},
 		{name: "missing command hub", deps: func() Dependencies { d := base; d.CommandHub = nil; return d }()},
 	}
 	for _, tc := range tests {
@@ -221,7 +239,9 @@ func TestModuleConfigureRequiresCoreDependencies(t *testing.T) {
 
 func TestScheduleRuntimeDriveCoalescesDuplicateRunRequests(t *testing.T) {
 	background := &recordingBackgroundRoutine{}
-	module := newTestBiz(newRuntimeTestOwner(), nil, background)
+	hub := magicevent.NewHub(8)
+	t.Cleanup(func() { hub.Terminate(context.Background()) })
+	module := newTestBiz(newRuntimeTestOwner(), hub, background)
 	if err := module.scheduleRuntimeDrive(context.Background(), "ws-drive-singleflight", "run-drive-singleflight", "first"); err != nil {
 		t.Fatal(err)
 	}
@@ -238,7 +258,9 @@ func TestScheduleRuntimeDriveCoalescesDuplicateRunRequests(t *testing.T) {
 
 func TestScheduleRuntimeDriveReleasesKeyWhenSchedulingFails(t *testing.T) {
 	background := &recordingBackgroundRoutine{err: errors.New("scheduler unavailable")}
-	module := newTestBiz(newRuntimeTestOwner(), nil, background)
+	hub := magicevent.NewHub(8)
+	t.Cleanup(func() { hub.Terminate(context.Background()) })
+	module := newTestBiz(newRuntimeTestOwner(), hub, background)
 	for attempt := 0; attempt < 2; attempt++ {
 		if err := module.scheduleRuntimeDrive(context.Background(), "ws-drive-retry", "run-drive-retry", "retry"); !errors.Is(err, background.err) {
 			t.Fatalf("attempt %d err = %v, want scheduler error", attempt, err)
@@ -398,7 +420,9 @@ func TestSemanticDocumentPendingSchedulesOnePersistedLeaseWithoutBusyLoop(t *tes
 
 func TestScheduleRuntimeDriveSeparatesSameRunIDAcrossWorkspaces(t *testing.T) {
 	background := &recordingBackgroundRoutine{}
-	module := newTestBiz(newRuntimeTestOwner(), nil, background)
+	hub := magicevent.NewHub(8)
+	t.Cleanup(func() { hub.Terminate(context.Background()) })
+	module := newTestBiz(newRuntimeTestOwner(), hub, background)
 	for _, workspaceID := range []common.WorkspaceID{"ws-drive-a", "ws-drive-b"} {
 		if err := module.scheduleRuntimeDrive(context.Background(), workspaceID, "run-shared", "workspace-isolation"); err != nil {
 			t.Fatal(err)
@@ -414,7 +438,9 @@ func TestScheduleRuntimeDriveSeparatesSameRunIDAcrossWorkspaces(t *testing.T) {
 
 func TestScheduledRuntimeDriveReleasesSingleflightKeyWhenOwnerStopsBeforeTaskStarts(t *testing.T) {
 	background := &recordingBackgroundRoutine{}
-	module := newTestBiz(newRuntimeTestOwner(), nil, background)
+	hub := magicevent.NewHub(8)
+	t.Cleanup(func() { hub.Terminate(context.Background()) })
+	module := newTestBiz(newRuntimeTestOwner(), hub, background)
 	const driveKey = "ws-drive-stopped\x00run-drive-stopped"
 	if err := module.scheduleRuntimeDrive(context.Background(), "ws-drive-stopped", "run-drive-stopped", "late-start"); err != nil {
 		t.Fatal(err)
@@ -466,13 +492,16 @@ func TestStopWaitsForRuntimeDriveLifecycleReadLockBeforeClearingDependencies(t *
 }
 
 func TestStopWaitsForQueuedDecisionEvidenceHandlerBeforeClearingDependencies(t *testing.T) {
+	hub := magicevent.NewHub(8)
+	installEmptyRecoveryInventory(t, hub)
+	t.Cleanup(func() { hub.Terminate(context.Background()) })
 	base := memoryrepo.NewEvidenceRecordRepository()
 	blocking := &blockingEvidenceRecordRepository{
 		EvidenceRecordRepository: base,
 		createEntered:            make(chan struct{}),
 		releaseCreate:            make(chan struct{}),
 	}
-	module := newTestBiz(nil, nil, nil)
+	module := newTestBiz(nil, hub, nil)
 	module.evidenceRecords = blocking
 	event := magicevent.NewEventWithContext(
 		decisionevents.TopicDecisionCommandRecordEvidence,
@@ -557,12 +586,15 @@ func TestStopWaitsForQueuedRuntimeOperationReceiptHandlerBeforeClearingDependenc
 }
 
 func TestStopWaitsForQueuedRuntimeGovernanceResolutionHandlerBeforeClearingDependencies(t *testing.T) {
+	hub := magicevent.NewHub(8)
+	installEmptyRecoveryInventory(t, hub)
+	t.Cleanup(func() { hub.Terminate(context.Background()) })
 	repository := &blockingRuntimeStateRepository{loadEntered: make(chan struct{}), releaseLoad: make(chan struct{})}
 	owner := newRuntimeTestOwner()
 	if err := owner.ConfigureRuntimeRepository(repository); err != nil {
 		t.Fatal(err)
 	}
-	module := newTestBiz(owner, nil, nil)
+	module := newTestBiz(owner, hub, nil)
 	event := magicevent.NewEventWithContext(
 		orchestratorevents.TopicOrchestratorCommitRuntimeGovernanceResolution,
 		decisioncommon.ModuleID,
@@ -629,13 +661,8 @@ func (*blockingRuntimeStateRepository) Save(context.Context, runtime.RuntimeAggr
 func moduleContractDependencies() Dependencies {
 	rawHub := magicevent.NewHub(32)
 	return Dependencies{
-		ToolCalls:             memoryrepo.NewToolCallRepository(),
-		Patches:               memoryrepo.NewPatchRepository(),
-		ValidationResults:     memoryrepo.NewValidationResultRepository(),
-		EvidenceRecords:       memoryrepo.NewEvidenceRecordRepository(),
-		CoverageWorkItems:     memoryrepo.NewCoverageWorkItemRepository(),
-		ArtifactContinuations: memoryrepo.NewArtifactContinuationRepository(),
-		CommandHub:            rawHub,
+		Evidence:   memoryrepo.NewOrchestratorOwnerRepositorySet(),
+		CommandHub: rawHub,
 	}
 }
 

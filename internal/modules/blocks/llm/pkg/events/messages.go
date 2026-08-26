@@ -293,8 +293,8 @@ func (r RequestRuntimeCandidateResult) Validate() error {
 		if !r.Audit.ProviderSubmitted {
 			return fmt.Errorf("LLM provider document outcome requires a submitted physical request")
 		}
-		if strings.TrimSpace(r.Audit.Status) == "failed" && strings.TrimSpace(r.Audit.FailureClass) != string(runtimecontract.RuntimeCandidateFailureClassProviderProtocol) {
-			return fmt.Errorf("failed LLM provider document outcome requires provider protocol audit class")
+		if strings.TrimSpace(r.Audit.Status) != llmmodel.RuntimeCandidateStatusCompleted || strings.TrimSpace(r.Audit.FailureClass) != "" {
+			return fmt.Errorf("LLM provider document outcome requires a completed audit without failure class")
 		}
 	}
 	return nil

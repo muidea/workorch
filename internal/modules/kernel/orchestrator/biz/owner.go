@@ -24,28 +24,26 @@ import (
 	runtimeevidencemodel "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/repository"
+	deletioncontract "github.com/muidea/workorch/internal/pkg/workorchdeletioncontract"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
 const ModuleID = modulecommon.ModuleID
 
 type Dependencies struct {
-	ToolCalls             repository.ToolCallRepository
-	Patches               repository.PatchRepository
-	ValidationResults     repository.ValidationResultRepository
-	EvidenceRecords       repository.EvidenceRecordRepository
-	CoverageWorkItems     repository.CoverageWorkItemRepository
-	ArtifactContinuations repository.ArtifactContinuationRepository
-	CommandHub            magicevent.Hub
-	BackgroundRoutine     task.BackgroundRoutine
+	Evidence          repository.OrchestratorEvidenceOwnerRepositories
+	CommandHub        magicevent.Hub
+	BackgroundRoutine task.BackgroundRoutine
 }
 
 type Biz struct {
 	basebiz.Base
-	runtimeController *runtime.RuntimeController
-	evidence          RuntimeEvidenceRepositories
-	evidenceRecords   repository.EvidenceRecordRepository
-	rawTopics         []string
+	runtimeController  *runtime.RuntimeController
+	evidence           RuntimeEvidenceRepositories
+	evidenceRecords    repository.EvidenceRecordRepository
+	workspaceDeletions repository.OrchestratorWorkspaceDeletionRepository
+	workspacePurger    repository.OrchestratorWorkspaceEvidencePurger
+	rawTopics          []string
 	// startupRecoveryActions are owner-local lifecycle handoff data only. They
 	// are rebuilt from the persisted Run inventory on every process start and
 	// are released solely by the Run owner's commands-ready fact; they are not
@@ -57,11 +55,19 @@ type Biz struct {
 	// drive is using them. Stop takes the write lock before clearing pointers;
 	// every drive holds the read lock through authority and projection work.
 	lifecycleMu sync.RWMutex
-	driveMu     sync.Mutex
+	// runtimeMutationFence linearizes the durable Workspace quiescing gate and
+	// final quiescence token with every owner-private Runtime aggregate CAS.
+	runtimeMutationFence sync.RWMutex
+	driveMu              sync.Mutex
 	// drivingRuns records the lifecycle epoch which owns each process-local
 	// gate. Epoch fencing prevents a retiring timer from an earlier Start/Stop
 	// lifecycle from deleting a newly started gate for the same run.
 	drivingRuns map[string]uint64
+	// retiredWorkspaces is a process-local gate derived exclusively from the
+	// Run owner's durable retirement head. It is rebuilt before startup
+	// recovery and never becomes a second persisted deletion authority.
+	retiredWorkspaces   map[common.WorkspaceID]runevents.RunWorkspaceRetirementFence
+	quiescingWorkspaces map[common.WorkspaceID]deletioncontract.WorkspaceRuntimeQuiescenceIntent
 	// persistedLeaseMounts is a process-local generation latch used only when
 	// an SM-4 lifecycle delivery lease is persisted while another worker owns
 	// the run-scoped drive gate. The persisted RuntimeDriveLease remains the
@@ -101,34 +107,26 @@ func New() *Biz { return &Biz{} }
 func (m *Biz) ID() string { return ModuleID }
 
 func (m *Biz) Configure(deps Dependencies) error {
-	if deps.ToolCalls == nil ||
-		deps.Patches == nil ||
-		deps.ValidationResults == nil ||
-		deps.EvidenceRecords == nil ||
-		deps.CoverageWorkItems == nil ||
-		deps.ArtifactContinuations == nil ||
-		deps.CommandHub == nil {
+	if deps.Evidence.Validate() != nil || deps.CommandHub == nil {
 		return common.ErrInvalidArgument
 	}
 	m.Base = basebiz.New(ModuleID, deps.CommandHub, deps.BackgroundRoutine)
 	m.evidence = RuntimeEvidenceRepositories{
-		Results:               resultEventResultRepository{hub: m.EventHub()},
-		Artifacts:             resultEventArtifactRepository{hub: deps.CommandHub},
-		ToolCalls:             deps.ToolCalls,
-		Patches:               deps.Patches,
-		ValidationResults:     deps.ValidationResults,
-		EvidenceRecords:       deps.EvidenceRecords,
-		CoverageWorkItems:     deps.CoverageWorkItems,
-		ArtifactContinuations: deps.ArtifactContinuations,
-		MemoryItems:           memoryEventRepository{hub: m.EventHub()},
-		MemoryRecallTraces:    memoryRecallTraceEventRepository{hub: m.EventHub()},
+		ToolCalls:             deps.Evidence.ToolCalls(),
+		Patches:               deps.Evidence.Patches(),
+		ValidationResults:     deps.Evidence.ValidationResults(),
+		EvidenceRecords:       deps.Evidence.EvidenceRecords(),
+		CoverageWorkItems:     deps.Evidence.CoverageWorkItems(),
+		ArtifactContinuations: deps.Evidence.ArtifactContinuations(),
 	}
 	controller, err := runtime.NewRuntimeController(runtimeStateRepository{hub: m.EventHub()})
 	if err != nil {
 		return err
 	}
 	m.runtimeController = controller
-	m.evidenceRecords = deps.EvidenceRecords
+	m.evidenceRecords = deps.Evidence.EvidenceRecords()
+	m.workspaceDeletions = deps.Evidence.WorkspaceDeletions()
+	m.workspacePurger = deps.Evidence.WorkspacePurger()
 	return nil
 }
 
@@ -144,11 +142,25 @@ func (m *Biz) Start() error {
 		m.runtimeLeaseTimerEpoch = 1
 	}
 	m.runtimeLeaseTimerClosing = false
+	m.retiredWorkspaces = make(map[common.WorkspaceID]runevents.RunWorkspaceRetirementFence)
+	m.quiescingWorkspaces = make(map[common.WorkspaceID]deletioncontract.WorkspaceRuntimeQuiescenceIntent)
 	m.driveMu.Unlock()
+	// Durable Orchestrator gates are restored before either Run retirement
+	// inventory or ordinary SM-4 recovery is classified. A fresh process must
+	// never briefly reopen a workspace that was already quiesced.
+	if err := m.recoverWorkspaceRuntimeQuiescenceGates(context.Background()); err != nil {
+		return fmt.Errorf("Runtime startup Workspace quiescence inventory: %w", err)
+	}
+	if err := m.recoverWorkspaceRetirementGates(context.Background()); err != nil {
+		return fmt.Errorf("Runtime startup retirement inventory: %w", err)
+	}
 	if len(m.rawTopics) == 0 {
 		m.rawTopics = []string{
 			// RUNTIME-SMO: Run lifecycle topics are owned by blocks/run. The
-			orchestratorevents.TopicOrchestratorCommandPurgeRun,
+			orchestratorevents.TopicOrchestratorCommandBeginWorkspaceRuntimeQuiescence,
+			orchestratorevents.TopicOrchestratorCommandConfirmWorkspaceRuntimeQuiescence,
+			orchestratorevents.TopicOrchestratorCommandSealWorkspaceDeletion,
+			orchestratorevents.TopicOrchestratorCommandPurgeWorkspaceEvidence,
 			orchestratorevents.TopicOrchestratorCommandListToolCallsByRun,
 			orchestratorevents.TopicOrchestratorCommandListPatchesByRun,
 			orchestratorevents.TopicOrchestratorCommandListValidationResultsByRun,
@@ -156,7 +168,16 @@ func (m *Biz) Start() error {
 			orchestratorevents.TopicOrchestratorCommandListArtifactContinuationsByRun,
 		}
 		for _, topic := range m.rawTopics {
-			m.SubscribeFunc(topic, m.handleMagicCommand)
+			switch topic {
+			case orchestratorevents.TopicOrchestratorCommandBeginWorkspaceRuntimeQuiescence,
+				orchestratorevents.TopicOrchestratorCommandConfirmWorkspaceRuntimeQuiescence:
+				m.SubscribeFunc(topic, m.handleWorkspaceRuntimeQuiescence)
+			case orchestratorevents.TopicOrchestratorCommandSealWorkspaceDeletion,
+				orchestratorevents.TopicOrchestratorCommandPurgeWorkspaceEvidence:
+				m.SubscribeFunc(topic, m.handleWorkspaceDeletion)
+			default:
+				m.SubscribeFunc(topic, m.handleMagicCommand)
+			}
 		}
 		m.rawTopics = append(m.rawTopics,
 			orchestratorevents.TopicOrchestratorDriveRuntime,
@@ -243,6 +264,12 @@ func (m *Biz) recoverRuntimeStartup(ctx context.Context) error {
 	}
 	actions := make([]runtimeStartupRecoveryAction, 0)
 	for _, item := range items {
+		m.runtimeMutationFence.RLock()
+		_, quiescing := m.quiescingWorkspaces[item.WorkspaceID]
+		m.runtimeMutationFence.RUnlock()
+		if quiescing {
+			continue
+		}
 		if !item.HasRuntimeState {
 			if item.State == common.RunStateActive && item.HasRuntimeBootstrap {
 				actions = append(actions, runtimeStartupRecoveryAction{Kind: runtimeStartupRecoveryActionDrive, Item: item, Source: "startup_recovery:bootstrap"})
@@ -253,6 +280,28 @@ func (m *Biz) recoverRuntimeStartup(ctx context.Context) error {
 		aggregate, loadErr := (runtimeStateRepository{hub: m.EventHub()}).LoadRuntimeRecoveryRecord(ctx, item)
 		if loadErr != nil {
 			return fmt.Errorf("Runtime startup recovery load workspace=%s run=%s: %w", item.WorkspaceID, item.RunID, loadErr)
+		}
+		if fence, observed := m.workspaceRetirementGate(item.WorkspaceID); observed {
+			if runWorkspaceRetirementFenceIsRetired(fence) {
+				continue
+			}
+			if !runWorkspaceRetirementFenceIsDraining(fence) {
+				return fmt.Errorf("Runtime startup recovery workspace=%s has unsupported Run retirement phase", item.WorkspaceID)
+			}
+			if _, terminalErr := terminalDeliveryRequest(aggregate); terminalErr != nil {
+				return fmt.Errorf("Runtime startup recovery workspace=%s run=%s draining aggregate is not terminal: %w", item.WorkspaceID, item.RunID, terminalErr)
+			}
+			if aggregate.DriveLease != nil {
+				if aggregate.DriveLease.Reason != runtimecontract.RuntimeDriveLeaseReasonDeliveryRetry {
+					return fmt.Errorf("%w: Runtime startup recovery workspace=%s run=%s draining lease is not terminal delivery", common.ErrConflict, item.WorkspaceID, item.RunID)
+				}
+				actions = append(actions, runtimeStartupRecoveryAction{Kind: runtimeStartupRecoveryActionRecoverLease, Item: item, Source: "startup_recovery:workspace_retirement_drain"})
+				continue
+			}
+			if !runtimeTerminalDeliveryFullyAcknowledged(aggregate) {
+				actions = append(actions, runtimeStartupRecoveryAction{Kind: runtimeStartupRecoveryActionDrive, Item: item, Source: "startup_recovery:workspace_retirement_terminal_delivery"})
+			}
+			continue
 		}
 
 		// A persisted SM-4 lease survives process restart. It is resumed before
@@ -501,7 +550,10 @@ func (m *Biz) Stop(ctx context.Context) error {
 	m.runtimeController = nil
 	m.evidence = RuntimeEvidenceRepositories{}
 	m.evidenceRecords = nil
+	m.workspaceDeletions = nil
+	m.workspacePurger = nil
 	m.started = false
+	m.runtimeMutationFence.Lock()
 	m.driveMu.Lock()
 	// Cancel again under the lifecycle write fence. A pre-existing reader may
 	// have captured the prior context before the first cancel point, but the
@@ -513,9 +565,12 @@ func (m *Biz) Stop(ctx context.Context) error {
 	m.drivingRuns = nil
 	m.persistedLeaseMounts = nil
 	m.retryLeaseTimers = nil
+	m.retiredWorkspaces = nil
+	m.quiescingWorkspaces = nil
 	m.runtimeLeaseTimerCtx = nil
 	m.runtimeLeaseTimerCancel = nil
 	m.driveMu.Unlock()
+	m.runtimeMutationFence.Unlock()
 	m.startupRecoveryMu.Lock()
 	m.runRuntimeCommandsReady = false
 	m.startupRecoveryActions = nil
@@ -618,24 +673,7 @@ func (m *Biz) executeMagicCommandLocked(ev magicevent.Event) (orchestratorevents
 	if m == nil {
 		return orchestratorevents.OrchestratorCommandResult{}, common.ErrInvalidArgument
 	}
-	ctx := ev.Context()
 	switch ev.ID() {
-	case orchestratorevents.TopicOrchestratorCommandPurgeRun:
-		cmd, ok := ev.Data().(orchestratorevents.PurgeRunCommand)
-		if !ok || cmd.WorkspaceID == "" || cmd.RunID == "" {
-			return orchestratorevents.OrchestratorCommandResult{}, common.ErrInvalidArgument
-		}
-		var err error
-		ctx, err = common.BindRuntimeWorkspaceContext(ctx, cmd.WorkspaceID)
-		if err != nil {
-			return orchestratorevents.OrchestratorCommandResult{}, err
-		}
-		runResult, err := m.purgeRunOwnerResources(ctx, cmd.WorkspaceID, cmd.RunID)
-		if err != nil {
-			return orchestratorevents.OrchestratorCommandResult{}, err
-		}
-		deleted, err := purgeRunEvidence(ctx, m.evidence, cmd.RunID)
-		return orchestratorevents.OrchestratorCommandResult{DeletedCount: runResult.DeletedCount + deleted}, err
 	case orchestratorevents.TopicOrchestratorCommandListToolCallsByRun,
 		orchestratorevents.TopicOrchestratorCommandListPatchesByRun,
 		orchestratorevents.TopicOrchestratorCommandListValidationResultsByRun,
@@ -691,6 +729,18 @@ func (m *Biz) scheduleRuntimeDriveWithLease(ctx context.Context, workspaceID com
 func (m *Biz) scheduleRuntimeDriveWithLeaseAndReconciliation(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, source string, leaseGeneration uint64, reconciliationRequestID string, reconciliationGeneration uint64) error {
 	if m == nil || workspaceID == "" || runID == "" {
 		return common.ErrInvalidArgument
+	}
+	if err := m.validateWorkspaceRetirementDriveAdmission(ctx, workspaceID, runID, leaseGeneration); err != nil {
+		if errors.Is(err, common.ErrNotFound) {
+			return nil
+		}
+		return err
+	}
+	m.runtimeMutationFence.RLock()
+	_, quiescing := m.quiescingWorkspaces[workspaceID]
+	m.runtimeMutationFence.RUnlock()
+	if quiescing {
+		return common.ErrConflict
 	}
 	driveKey := runtimeDriveKey(workspaceID, runID)
 	if leaseGeneration == 0 && !m.beginRuntimeDrive(driveKey) {
@@ -1114,6 +1164,14 @@ func runtimeDriveKey(workspaceID common.WorkspaceID, runID common.RunID) string 
 	return string(workspaceID) + "\x00" + string(runID)
 }
 
+func runtimeDriveWorkspaceID(key string) common.WorkspaceID {
+	workspaceID, _, ok := strings.Cut(key, "\x00")
+	if !ok {
+		return ""
+	}
+	return common.WorkspaceID(strings.TrimSpace(workspaceID))
+}
+
 func runtimeLeaseRequestForFailure(failure runtimecontract.FailureFact, err error, source string, delay time.Duration) *runtimeRecoveryLeaseRequest {
 	reason := runtimecontract.RuntimeDriveLeaseReasonOperationRetry
 	if failure.Class == runtimecontract.FailureClassCASConflict {
@@ -1177,6 +1235,9 @@ func (m *Biz) recoverRuntimeDriveLease(ctx context.Context, aggregate runtime.Ru
 
 func (m *Biz) enqueueRuntimeDriveLeaseTimer(ctx context.Context, lease runtimecontract.RuntimeDriveLease, source string) bool {
 	if m == nil || m.BackgroundRoutine() == nil || lease.Validate() != nil || lease.State != runtimecontract.RuntimeDriveLeaseScheduled {
+		return false
+	}
+	if err := m.validateWorkspaceRetirementLeaseTimerAdmission(ctx, lease); err != nil {
 		return false
 	}
 	key := runtimeDriveKey(lease.WorkspaceID, lease.RunID)
@@ -1299,6 +1360,9 @@ func (m *Biz) runtimeDriveLeaseTimerCallbackActive(ctx context.Context, epoch ui
 	}
 	m.driveMu.Lock()
 	active := !m.runtimeLeaseTimerClosing && m.runtimeLeaseTimerEpoch == epoch
+	if workspaceID := common.RuntimeWorkspaceIDFromContext(ctx); workspaceID != "" && (runWorkspaceRetirementFenceIsRetired(m.retiredWorkspaces[workspaceID]) || m.quiescingWorkspaces[workspaceID].WorkspaceID != "") {
+		active = false
+	}
 	m.driveMu.Unlock()
 	return active && ctx.Err() == nil
 }
@@ -1353,6 +1417,11 @@ func (m *Biz) replaceRuntimeDriveLeaseTimerAtGateExit(
 			delete(m.persistedLeaseMounts, key)
 			delete(m.drivingRuns, key)
 		}
+		return runtimecontract.RuntimeDriveLease{}, false
+	}
+	if workspaceID := runtimeDriveWorkspaceID(key); workspaceID == "" || runWorkspaceRetirementFenceIsRetired(m.retiredWorkspaces[workspaceID]) || m.quiescingWorkspaces[workspaceID].WorkspaceID != "" {
+		delete(m.persistedLeaseMounts, key)
+		delete(m.drivingRuns, key)
 		return runtimecontract.RuntimeDriveLease{}, false
 	}
 	var next runtimecontract.RuntimeDriveLease
@@ -1443,9 +1512,14 @@ func (m *Biz) retainRuntimeDriveGateForPersistedLease(key string, lease runtimec
 	if m == nil || key == "" || lease.Validate() != nil || lease.State != runtimecontract.RuntimeDriveLeaseScheduled {
 		return false
 	}
+	m.runtimeMutationFence.RLock()
+	defer m.runtimeMutationFence.RUnlock()
 	m.driveMu.Lock()
 	defer m.driveMu.Unlock()
 	if m.runtimeLeaseTimerClosing {
+		return false
+	}
+	if workspaceID := runtimeDriveWorkspaceID(key); workspaceID == "" || runWorkspaceRetirementFenceIsRetired(m.retiredWorkspaces[workspaceID]) || m.quiescingWorkspaces[workspaceID].WorkspaceID != "" {
 		return false
 	}
 	if m.runtimeLeaseTimerEpoch == 0 {
@@ -1525,9 +1599,14 @@ func (m *Biz) beginRuntimeDrive(key string) bool {
 	if m == nil || key == "" {
 		return false
 	}
+	m.runtimeMutationFence.RLock()
+	defer m.runtimeMutationFence.RUnlock()
 	m.driveMu.Lock()
 	defer m.driveMu.Unlock()
 	if m.runtimeLeaseTimerClosing {
+		return false
+	}
+	if workspaceID := runtimeDriveWorkspaceID(key); workspaceID == "" || runWorkspaceRetirementFenceIsRetired(m.retiredWorkspaces[workspaceID]) || m.quiescingWorkspaces[workspaceID].WorkspaceID != "" {
 		return false
 	}
 	if m.runtimeLeaseTimerEpoch == 0 {
@@ -1556,9 +1635,14 @@ func (m *Biz) beginRuntimeLeaseTimer(key string, generation uint64) (registered 
 	if m == nil || key == "" || generation == 0 {
 		return false, false, 0
 	}
+	m.runtimeMutationFence.RLock()
+	defer m.runtimeMutationFence.RUnlock()
 	m.driveMu.Lock()
 	defer m.driveMu.Unlock()
 	if m.runtimeLeaseTimerClosing {
+		return false, false, m.runtimeLeaseTimerEpoch
+	}
+	if workspaceID := runtimeDriveWorkspaceID(key); workspaceID == "" || runWorkspaceRetirementFenceIsRetired(m.retiredWorkspaces[workspaceID]) || m.quiescingWorkspaces[workspaceID].WorkspaceID != "" {
 		return false, false, m.runtimeLeaseTimerEpoch
 	}
 	if m.runtimeLeaseTimerEpoch == 0 {
@@ -1602,16 +1686,14 @@ func (m *Biz) readEvidenceMagicCommand(ev magicevent.Event) (orchestratorevents.
 		return orchestratorevents.OrchestratorCommandResult{}, common.ErrInvalidArgument
 	}
 	cmd, ok := listRunEvidenceCommand(ev.ID(), ev.Data())
-	if !ok || cmd.RunID == "" {
+	if !ok || cmd.WorkspaceID == "" || cmd.RunID == "" {
 		return orchestratorevents.OrchestratorCommandResult{}, common.ErrInvalidArgument
 	}
 	ctx := ev.Context()
-	if cmd.WorkspaceID != "" {
-		var err error
-		ctx, err = common.BindRuntimeWorkspaceContext(ctx, cmd.WorkspaceID)
-		if err != nil {
-			return orchestratorevents.OrchestratorCommandResult{}, err
-		}
+	var err error
+	ctx, err = common.BindRuntimeWorkspaceContext(ctx, cmd.WorkspaceID)
+	if err != nil {
+		return orchestratorevents.OrchestratorCommandResult{}, err
 	}
 	evidence := m.evidence
 	switch ev.ID() {

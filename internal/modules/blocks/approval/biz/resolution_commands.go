@@ -2,7 +2,6 @@ package approval
 
 import (
 	"context"
-	"errors"
 	"strings"
 
 	magicevent "github.com/muidea/magicCommon/event"
@@ -74,35 +73,40 @@ func (m *Biz) commitRuntimeApprovalProposal(ctx context.Context, item *approvalm
 	if proposal.TargetState == common.ApprovalStateRejected {
 		outcome = runtimecontract.RuntimeGovernanceResolutionOutcomeFail
 	}
-	event := magicevent.NewEventWithContext(
-		orchestratorevents.TopicOrchestratorCommitRuntimeGovernanceApproval, ModuleID, orchestratorevents.CommandDestination,
-		magicevent.NewHeader(), ctx, orchestratorevents.CommitRuntimeGovernanceApprovalResolutionCommand{
-			ResolutionID: proposal.ResolutionID, ApprovalID: item.ID, WorkspaceID: item.WorkspaceID, RunID: item.RunID,
-			Outcome: outcome, Summary: approvalResolutionSummary(item, proposal),
-		},
-	)
-	result := m.SendEvent(event)
-	if result == nil {
-		return orchestratorevents.CommitRuntimeGovernanceResolutionResult{}, common.ErrInvalidArgument
-	}
-	if err := result.Error(); err != nil {
-		if err.Cause != nil {
-			return orchestratorevents.CommitRuntimeGovernanceResolutionResult{}, err.Cause
+	var response orchestratorevents.CommitRuntimeGovernanceResolutionResult
+	err := m.withWorkspaceActiveDelivery(ctx, item.WorkspaceID, func(guarded context.Context) error {
+		event := magicevent.NewEventWithContext(
+			orchestratorevents.TopicOrchestratorCommitRuntimeGovernanceApproval, ModuleID, orchestratorevents.CommandDestination,
+			magicevent.NewHeader(), guarded, orchestratorevents.CommitRuntimeGovernanceApprovalResolutionCommand{
+				ResolutionID: proposal.ResolutionID, ApprovalID: item.ID, WorkspaceID: item.WorkspaceID, RunID: item.RunID,
+				Outcome: outcome, Summary: approvalResolutionSummary(item, proposal),
+			},
+		)
+		result := m.SendEvent(event)
+		if result == nil {
+			return common.ErrInvalidArgument
 		}
-		return orchestratorevents.CommitRuntimeGovernanceResolutionResult{}, err
-	}
-	data, resultErr := result.Get()
-	if resultErr != nil {
-		if resultErr.Cause != nil {
-			return orchestratorevents.CommitRuntimeGovernanceResolutionResult{}, resultErr.Cause
+		if resultErr := result.Error(); resultErr != nil {
+			if resultErr.Cause != nil {
+				return resultErr.Cause
+			}
+			return resultErr
 		}
-		return orchestratorevents.CommitRuntimeGovernanceResolutionResult{}, resultErr
-	}
-	response, ok := data.(orchestratorevents.CommitRuntimeGovernanceResolutionResult)
-	if !ok || response.WorkspaceID != item.WorkspaceID || response.RunID != item.RunID || response.ResolutionID != proposal.ResolutionID || response.Validate() != nil {
-		return orchestratorevents.CommitRuntimeGovernanceResolutionResult{}, common.ErrInvalidArgument
-	}
-	return response, nil
+		data, resultErr := result.Get()
+		if resultErr != nil {
+			if resultErr.Cause != nil {
+				return resultErr.Cause
+			}
+			return resultErr
+		}
+		value, ok := data.(orchestratorevents.CommitRuntimeGovernanceResolutionResult)
+		if !ok || value.WorkspaceID != item.WorkspaceID || value.RunID != item.RunID || value.ResolutionID != proposal.ResolutionID || value.Validate() != nil {
+			return common.ErrInvalidArgument
+		}
+		response = value
+		return nil
+	})
+	return response, err
 }
 
 func approvalResolutionSummary(item *approvalmodel.Approval, proposal *approvalmodel.ResolutionProposal) string {
@@ -124,32 +128,4 @@ func resolveApprovalContract(cmd approvalevents.ResolveApprovalCommand) approval
 		ApprovalID: cmd.ApprovalID, WorkspaceID: cmd.WorkspaceID, RunID: cmd.RunID,
 		Principal: cmd.Principal.Normalized(), Context: workorcheventpayload.New(cmd.ResolutionContext...),
 	}
-}
-
-func (m *Biz) executePurgeWorkspaceCommand(ctx context.Context, ev magicevent.Event) (approvalevents.PurgeWorkspaceApprovalsResult, error) {
-	cmd, ok := ev.Data().(approvalevents.PurgeWorkspaceApprovalsCommand)
-	if !ok || cmd.WorkspaceID == "" || ev.Source() != approvalApplicationSource {
-		return approvalevents.PurgeWorkspaceApprovalsResult{}, common.ErrInvalidArgument
-	}
-	items, err := m.approvals.ListByWorkspaceID(ctx, cmd.WorkspaceID)
-	if err != nil {
-		return approvalevents.PurgeWorkspaceApprovalsResult{}, err
-	}
-	deleted := 0
-	for _, item := range items {
-		if item == nil {
-			continue
-		}
-		if item.DeletionRequestedAt == "" {
-			item, err = m.service.applyLifecycleInternalEvent(ctx, item, lifecycleInternalEvent{ApprovalID: item.ID, WorkspaceID: item.WorkspaceID, RunID: item.RunID, Kind: lifecycleInternalEventDeletionRequested})
-			if err != nil && !errors.Is(err, common.ErrConflict) {
-				return approvalevents.PurgeWorkspaceApprovalsResult{Deleted: deleted}, err
-			}
-		}
-		if err := m.approvals.DeleteScoped(ctx, item.WorkspaceID, item.RunID, item.ID); err != nil && !errors.Is(err, common.ErrNotFound) {
-			return approvalevents.PurgeWorkspaceApprovalsResult{Deleted: deleted}, err
-		}
-		deleted++
-	}
-	return approvalevents.PurgeWorkspaceApprovalsResult{Deleted: deleted}, nil
 }

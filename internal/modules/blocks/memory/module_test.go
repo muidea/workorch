@@ -15,9 +15,116 @@ import (
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/repository"
 	memoryrepo "github.com/muidea/workorch/internal/pkg/repository/memory"
+	deletioncontract "github.com/muidea/workorch/internal/pkg/workorchdeletioncontract"
 	"github.com/muidea/workorch/internal/pkg/workorchmemorycontract"
+	"github.com/muidea/workorch/internal/pkg/workorchquerycontract"
 	"github.com/muidea/workorch/internal/pkg/workorchrepo"
 )
+
+func TestMemoryWorkspaceDeletionFenceHidesRetainedDataAndPurgeIsStable(t *testing.T) {
+	ctx := context.Background()
+	hub := magicevent.NewHub(32)
+	t.Cleanup(func() { hub.Terminate(ctx) })
+	repositories := memoryrepo.NewMemoryOwnerRepositorySet()
+	module := New()
+	if err := module.Configure(memorybiz.Dependencies{
+		MemoryItems: repositories.Items, MemoryRecallTraces: repositories.RecallTraces,
+		WorkspaceDeletions: repositories.WorkspaceDeletions, EventHub: hub,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := module.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = module.Stop(ctx) })
+
+	retainWorkspace := common.WorkspaceID("ws-memory-retain")
+	retainMemory := &memorymodel.MemoryItem{ID: "memory-retain", WorkspaceID: retainWorkspace, MemoryType: memorycommon.MemoryTypeProjectContext, SourceType: memorycommon.MemorySourceUser, Summary: "retain"}
+	if err := repositories.Items.Create(ctx, retainMemory); err != nil {
+		t.Fatal(err)
+	}
+	retainScope := deletioncontract.Scope{WorkspaceID: retainWorkspace, DeletionID: "delete-retain", DeletionGeneration: 1, Mode: deletioncontract.ModeRetain, QuiescenceID: "quiescence-retain"}
+	retainScope.RequestHash = deletioncontract.StableRequestHash(retainScope)
+	sealMemoryWorkspaceDeletion(t, ctx, hub, memoryevents.SealWorkspaceMemoryDeletionCommand{
+		WorkspaceID: retainScope.WorkspaceID, DeletionID: retainScope.DeletionID, DeletionGeneration: retainScope.DeletionGeneration,
+		DataDispositionIntent: retainScope.Mode, QuiescenceID: retainScope.QuiescenceID, RequestHash: retainScope.RequestHash,
+	})
+	query := hub.Send(magicevent.NewEventWithContext(memoryevents.TopicMemoryCommandGet, "test", memoryevents.CommandDestination, magicevent.NewHeader(), ctx, memoryevents.GetMemoryCommand{WorkspaceID: retainWorkspace, MemoryID: retainMemory.ID}))
+	if query == nil || !errors.Is(query.Error(), common.ErrNotFound) {
+		t.Fatalf("retained public read error = %v, want not found", query)
+	}
+	if _, err := repositories.Items.Get(common.ContextWithRuntimeWorkspaceID(ctx, retainWorkspace), retainMemory.ID); err != nil {
+		t.Fatalf("retain physically removed memory: %v", err)
+	}
+	if err := repositories.Items.Create(ctx, &memorymodel.MemoryItem{ID: "late", WorkspaceID: retainWorkspace, MemoryType: memorycommon.MemoryTypeProjectContext, SourceType: memorycommon.MemorySourceUser, Summary: "late"}); !errors.Is(err, common.ErrNotFound) {
+		t.Fatalf("late retained write error = %v, want not found", err)
+	}
+
+	purgeWorkspace := common.WorkspaceID("ws-memory-purge")
+	if err := repositories.Items.Create(ctx, &memorymodel.MemoryItem{ID: "memory-purge", WorkspaceID: purgeWorkspace, MemoryType: memorycommon.MemoryTypeProjectContext, SourceType: memorycommon.MemorySourceUser, Summary: "purge"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := repositories.RecallTraces.Create(ctx, &memorymodel.MemoryRecallTrace{ID: "trace-purge", WorkspaceID: purgeWorkspace, RunID: "run-purge"}); err != nil {
+		t.Fatal(err)
+	}
+	purgeScope := deletioncontract.Scope{WorkspaceID: purgeWorkspace, DeletionID: "delete-purge", DeletionGeneration: 1, Mode: deletioncontract.ModePurge, QuiescenceID: "quiescence-purge"}
+	purgeScope.RequestHash = deletioncontract.StableRequestHash(purgeScope)
+	sealCommand := memoryevents.SealWorkspaceMemoryDeletionCommand{WorkspaceID: purgeScope.WorkspaceID, DeletionID: purgeScope.DeletionID, DeletionGeneration: 1, DataDispositionIntent: purgeScope.Mode, QuiescenceID: purgeScope.QuiescenceID, RequestHash: purgeScope.RequestHash}
+	sealMemoryWorkspaceDeletion(t, ctx, hub, sealCommand)
+	purgeCommand := memoryevents.PurgeWorkspaceMemoryCommand{WorkspaceID: sealCommand.WorkspaceID, DeletionID: sealCommand.DeletionID, DeletionGeneration: sealCommand.DeletionGeneration, QuiescenceID: sealCommand.QuiescenceID, RequestHash: sealCommand.RequestHash}
+	response := hub.Send(magicevent.NewEventWithContext(memoryevents.TopicMemoryCommandPurgeWorkspace, "blocks/workspace", memoryevents.CommandDestination, magicevent.NewHeader(), ctx, purgeCommand))
+	if response == nil || response.Error() != nil {
+		t.Fatalf("purge response = %v", response)
+	}
+	data, err := response.Get()
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, ok := data.(memoryevents.PurgeWorkspaceMemoryResult)
+	if !ok || result.ValidateFor(purgeCommand) != nil {
+		t.Fatalf("purge result = %#v", data)
+	}
+	replay := hub.Send(magicevent.NewEventWithContext(memoryevents.TopicMemoryCommandPurgeWorkspace, "blocks/workspace", memoryevents.CommandDestination, magicevent.NewHeader(), ctx, purgeCommand))
+	if replay == nil || replay.Error() != nil {
+		t.Fatalf("purge replay = %v", replay)
+	}
+	replayData, err := replay.Get()
+	if err != nil || replayData.(memoryevents.PurgeWorkspaceMemoryResult) != result {
+		t.Fatalf("purge replay drift: first=%#v replay=%#v err=%v", result, replayData, err)
+	}
+	items, _ := repositories.Items.ListByWorkspaceID(ctx, purgeWorkspace)
+	traces, _ := repositories.RecallTraces.List(ctx, workorchquerycontract.MemoryRecallTraceQuery{WorkspaceID: purgeWorkspace})
+	if len(items) != 0 || len(traces) != 0 {
+		t.Fatalf("purge left data: items=%d traces=%d", len(items), len(traces))
+	}
+	if tombstone, err := repositories.WorkspaceDeletions.Get(ctx, purgeWorkspace); err != nil || tombstone.Phase != memorymodel.WorkspaceDeletionPhasePurged {
+		t.Fatalf("purge tombstone = %#v err=%v", tombstone, err)
+	}
+}
+
+func sealMemoryWorkspaceDeletion(t *testing.T, ctx context.Context, hub magicevent.Hub, command memoryevents.SealWorkspaceMemoryDeletionCommand) {
+	t.Helper()
+	var first memoryevents.SealWorkspaceMemoryDeletionResult
+	for attempt := 0; attempt < 2; attempt++ {
+		response := hub.Send(magicevent.NewEventWithContext(memoryevents.TopicMemoryCommandSealWorkspaceDeletion, "blocks/workspace", memoryevents.CommandDestination, magicevent.NewHeader(), ctx, command))
+		if response == nil || response.Error() != nil {
+			t.Fatalf("seal response = %v", response)
+		}
+		data, err := response.Get()
+		if err != nil {
+			t.Fatal(err)
+		}
+		result, ok := data.(memoryevents.SealWorkspaceMemoryDeletionResult)
+		if !ok || result.ValidateFor(command) != nil {
+			t.Fatalf("seal result = %#v", data)
+		}
+		if attempt == 0 {
+			first = result
+		} else if result != first {
+			t.Fatalf("seal replay drift: first=%#v replay=%#v", first, result)
+		}
+	}
+}
 
 func TestModuleIdentityConfigureStartStopContract(t *testing.T) {
 	module := New()
@@ -71,6 +178,7 @@ func TestMemoryRecallTraceCommandsAcceptContractPayloads(t *testing.T) {
 	if err := module.Configure(memorybiz.Dependencies{
 		MemoryItems:        memoryrepo.NewMemoryItemRepository(),
 		MemoryRecallTraces: traces,
+		WorkspaceDeletions: memoryrepo.NewMemoryWorkspaceDeletionRepository(),
 		EventHub:           hub,
 	}); err != nil {
 		t.Fatalf("Configure: %v", err)
@@ -167,24 +275,6 @@ func TestMemoryRecallTraceCommandsAcceptContractPayloads(t *testing.T) {
 		stored.SelectionScores[1].Reason != "excluded_low_value_process_memory" {
 		t.Fatalf("stored trace = %+v, want selected/excluded recall audit fields", stored)
 	}
-
-	response = hub.Send(magicevent.NewEventWithContext(
-		memoryevents.TopicMemoryRecallTraceCommandDelete,
-		"test",
-		memoryevents.CommandDestination,
-		magicevent.NewHeader(),
-		ctx,
-		memoryevents.DeleteMemoryRecallTraceCommand{WorkspaceID: "ws-trace-contract", TraceID: traceID},
-	))
-	if response == nil {
-		t.Fatal("delete response is nil")
-	}
-	if response.Error() != nil {
-		t.Fatalf("delete error = %v", response.Error())
-	}
-	if _, err := traces.Get(ctx, traceID); err == nil {
-		t.Fatalf("trace still exists after delete")
-	}
 }
 
 func TestMemoryRecallTraceOwnerEnforcesScopeAndImmutableReplay(t *testing.T) {
@@ -193,7 +283,7 @@ func TestMemoryRecallTraceOwnerEnforcesScopeAndImmutableReplay(t *testing.T) {
 	traces := memoryrepo.NewMemoryRecallTraceRepository()
 	module := New()
 	if err := module.Configure(memorybiz.Dependencies{
-		MemoryItems: memoryrepo.NewMemoryItemRepository(), MemoryRecallTraces: traces, EventHub: hub,
+		MemoryItems: memoryrepo.NewMemoryItemRepository(), MemoryRecallTraces: traces, WorkspaceDeletions: memoryrepo.NewMemoryWorkspaceDeletionRepository(), EventHub: hub,
 	}); err != nil {
 		t.Fatalf("Configure: %v", err)
 	}
@@ -256,41 +346,17 @@ func TestMemoryRecallTraceOwnerEnforcesScopeAndImmutableReplay(t *testing.T) {
 		t.Fatalf("conflicting replay overwrote trace: %+v", stored)
 	}
 
-	for _, payload := range []any{
-		memoryevents.GetMemoryRecallTraceCommand{TraceID: command.TraceID},
-		memoryevents.ListMemoryRecallTracesCommand{},
-		memoryevents.DeleteMemoryRecallTraceCommand{TraceID: command.TraceID},
-	} {
-		topic := memoryevents.TopicMemoryRecallTraceCommandGet
-		switch payload.(type) {
-		case memoryevents.ListMemoryRecallTracesCommand:
-			topic = memoryevents.TopicMemoryRecallTraceCommandList
-		case memoryevents.DeleteMemoryRecallTraceCommand:
-			topic = memoryevents.TopicMemoryRecallTraceCommandDelete
-		}
-		response := hub.Send(magicevent.NewEventWithContext(topic, "test", memoryevents.CommandDestination, magicevent.NewHeader(), ctx, payload))
-		if response == nil || response.Error() == nil {
-			t.Fatalf("empty-scope %s was accepted", topic)
-		}
+	response = hub.Send(magicevent.NewEventWithContext(memoryevents.TopicMemoryRecallTraceCommandList, "test", memoryevents.CommandDestination, magicevent.NewHeader(), ctx, memoryevents.ListMemoryRecallTracesCommand{}))
+	if response == nil || response.Error() == nil {
+		t.Fatalf("empty-scope trace list was accepted")
 	}
 	mismatchedContext := common.ContextWithRuntimeWorkspaceID(ctx, "ws-b")
 	mismatchedScope := hub.Send(magicevent.NewEventWithContext(
-		memoryevents.TopicMemoryRecallTraceCommandGet, "test", memoryevents.CommandDestination, magicevent.NewHeader(), mismatchedContext,
-		memoryevents.GetMemoryRecallTraceCommand{WorkspaceID: "ws-a", TraceID: command.TraceID},
+		memoryevents.TopicMemoryRecallTraceCommandList, "test", memoryevents.CommandDestination, magicevent.NewHeader(), mismatchedContext,
+		memoryevents.ListMemoryRecallTracesCommand{Query: workorchquerycontract.MemoryRecallTraceQuery{WorkspaceID: "ws-a", RunID: command.RunID}},
 	))
 	if mismatchedScope == nil || !errors.Is(mismatchedScope.Error(), common.ErrConflict) {
 		t.Fatalf("mismatched command/context scope error = %v, want conflict", mismatchedScope)
-	}
-
-	wrongScope := hub.Send(magicevent.NewEventWithContext(
-		memoryevents.TopicMemoryRecallTraceCommandDelete, "test", memoryevents.CommandDestination, magicevent.NewHeader(), ctx,
-		memoryevents.DeleteMemoryRecallTraceCommand{WorkspaceID: "ws-b", TraceID: command.TraceID},
-	))
-	if wrongScope == nil || wrongScope.Error() == nil {
-		t.Fatal("cross-workspace trace delete was accepted")
-	}
-	if _, err := traces.Get(common.ContextWithRuntimeWorkspaceID(ctx, "ws-a"), command.TraceID); err != nil {
-		t.Fatalf("cross-workspace delete removed trace: %v", err)
 	}
 
 	secondWorkspace := command
@@ -301,13 +367,19 @@ func TestMemoryRecallTraceOwnerEnforcesScopeAndImmutableReplay(t *testing.T) {
 	if second.Disposition != memoryevents.MemoryRecallTraceRecorded {
 		t.Fatalf("same trace ID in another workspace disposition = %q", second.Disposition)
 	}
-	for workspaceID, wantReason := range map[common.WorkspaceID]string{"ws-a": "stable", "ws-b": "workspace b"} {
-		result := sendMemoryOwnerResult[memoryevents.GetMemoryRecallTraceResult](t, ctx, hub, memoryevents.TopicMemoryRecallTraceCommandGet, memoryevents.GetMemoryRecallTraceCommand{WorkspaceID: workspaceID, TraceID: command.TraceID})
-		if result.Trace == nil {
-			t.Fatalf("workspace %s trace is nil", workspaceID)
+	for workspaceID, want := range map[common.WorkspaceID]struct {
+		runID  common.RunID
+		reason string
+	}{
+		"ws-a": {runID: "run-a", reason: "stable"},
+		"ws-b": {runID: "run-b", reason: "workspace b"},
+	} {
+		result := sendMemoryOwnerResult[memoryevents.ListMemoryRecallTracesResult](t, ctx, hub, memoryevents.TopicMemoryRecallTraceCommandList, memoryevents.ListMemoryRecallTracesCommand{Query: workorchquerycontract.MemoryRecallTraceQuery{WorkspaceID: workspaceID, RunID: want.runID}})
+		if len(result.Traces) != 1 || result.Traces[0] == nil {
+			t.Fatalf("workspace %s traces = %+v, want one", workspaceID, result.Traces)
 		}
-		model, err := result.Trace.Model()
-		if err != nil || model.Reason != wantReason {
+		model, err := result.Traces[0].Model()
+		if err != nil || model.ID != command.TraceID || model.Reason != want.reason {
 			t.Fatalf("workspace %s trace = %+v, err=%v", workspaceID, model, err)
 		}
 	}
@@ -319,7 +391,7 @@ func TestMemoryRecallTraceOwnerPreservesScopeWithFileBackend(t *testing.T) {
 	repositories := workorchrepo.NewWorkspaceScopedFileRepositorySet(t.TempDir())
 	module := New()
 	if err := module.Configure(memorybiz.Dependencies{
-		MemoryItems: repositories.MemoryItems, MemoryRecallTraces: repositories.MemoryRecallTraces, EventHub: hub,
+		MemoryItems: repositories.MemoryItems, MemoryRecallTraces: repositories.MemoryRecallTraces, WorkspaceDeletions: repositories.MemoryDeletions, EventHub: hub,
 	}); err != nil {
 		t.Fatalf("Configure: %v", err)
 	}
@@ -336,27 +408,21 @@ func TestMemoryRecallTraceOwnerPreservesScopeWithFileBackend(t *testing.T) {
 	other := base
 	other.WorkspaceID, other.RunID, other.Reason = "ws-file-b", "run-b", "workspace b"
 	sendMemoryOwnerResult[memoryevents.UpsertMemoryRecallTraceResult](t, ctx, hub, memoryevents.TopicMemoryRecallTraceCommandUpsert, other)
-	for workspaceID, wantReason := range map[common.WorkspaceID]string{"ws-file-a": "workspace a", "ws-file-b": "workspace b"} {
-		result := sendMemoryOwnerResult[memoryevents.GetMemoryRecallTraceResult](t, ctx, hub, memoryevents.TopicMemoryRecallTraceCommandGet, memoryevents.GetMemoryRecallTraceCommand{WorkspaceID: workspaceID, TraceID: base.TraceID})
-		model, err := result.Trace.Model()
-		if err != nil || model.Reason != wantReason {
+	for workspaceID, want := range map[common.WorkspaceID]struct {
+		runID  common.RunID
+		reason string
+	}{
+		"ws-file-a": {runID: "run-a", reason: "workspace a"},
+		"ws-file-b": {runID: "run-b", reason: "workspace b"},
+	} {
+		result := sendMemoryOwnerResult[memoryevents.ListMemoryRecallTracesResult](t, ctx, hub, memoryevents.TopicMemoryRecallTraceCommandList, memoryevents.ListMemoryRecallTracesCommand{Query: workorchquerycontract.MemoryRecallTraceQuery{WorkspaceID: workspaceID, RunID: want.runID}})
+		if len(result.Traces) != 1 || result.Traces[0] == nil {
+			t.Fatalf("file workspace %s traces = %+v, want one", workspaceID, result.Traces)
+		}
+		model, err := result.Traces[0].Model()
+		if err != nil || model.ID != base.TraceID || model.Reason != want.reason {
 			t.Fatalf("file workspace %s trace = %+v, err=%v", workspaceID, model, err)
 		}
-	}
-
-	onlyA := base
-	onlyA.TraceID, onlyA.Reason = "trace-only-a", "only workspace a"
-	sendMemoryOwnerResult[memoryevents.UpsertMemoryRecallTraceResult](t, ctx, hub, memoryevents.TopicMemoryRecallTraceCommandUpsert, onlyA)
-	wrongDelete := hub.Send(magicevent.NewEventWithContext(
-		memoryevents.TopicMemoryRecallTraceCommandDelete, "test", memoryevents.CommandDestination, magicevent.NewHeader(), ctx,
-		memoryevents.DeleteMemoryRecallTraceCommand{WorkspaceID: "ws-file-b", TraceID: onlyA.TraceID},
-	))
-	if wrongDelete == nil || wrongDelete.Error() == nil {
-		t.Fatal("file backend cross-workspace trace delete was accepted")
-	}
-	result := sendMemoryOwnerResult[memoryevents.GetMemoryRecallTraceResult](t, ctx, hub, memoryevents.TopicMemoryRecallTraceCommandGet, memoryevents.GetMemoryRecallTraceCommand{WorkspaceID: "ws-file-a", TraceID: onlyA.TraceID})
-	if result.Trace == nil {
-		t.Fatal("file backend cross-workspace delete removed source trace")
 	}
 }
 
@@ -365,7 +431,7 @@ func TestMemoryItemOwnerEnforcesWorkspaceScope(t *testing.T) {
 	hub := magicevent.NewHub(32)
 	module := New()
 	if err := module.Configure(memorybiz.Dependencies{
-		MemoryItems: memoryrepo.NewMemoryItemRepository(), MemoryRecallTraces: memoryrepo.NewMemoryRecallTraceRepository(), EventHub: hub,
+		MemoryItems: memoryrepo.NewMemoryItemRepository(), MemoryRecallTraces: memoryrepo.NewMemoryRecallTraceRepository(), WorkspaceDeletions: memoryrepo.NewMemoryWorkspaceDeletionRepository(), EventHub: hub,
 	}); err != nil {
 		t.Fatalf("Configure: %v", err)
 	}
@@ -442,6 +508,7 @@ func TestMemoryOwnerCommandsPublishLifecycleNotifications(t *testing.T) {
 	if err := module.Configure(memorybiz.Dependencies{
 		MemoryItems:        memoryrepo.NewMemoryItemRepository(),
 		MemoryRecallTraces: memoryrepo.NewMemoryRecallTraceRepository(),
+		WorkspaceDeletions: memoryrepo.NewMemoryWorkspaceDeletionRepository(),
 		EventHub:           hub,
 	}); err != nil {
 		t.Fatalf("Configure: %v", err)
@@ -511,6 +578,7 @@ func TestMemoryOwnerDoesNotPublishWhenRepositoryCommitFails(t *testing.T) {
 	if err := module.Configure(memorybiz.Dependencies{
 		MemoryItems:        &failingMemoryItemRepository{MemoryItemRepository: memoryrepo.NewMemoryItemRepository(), failures: 1, err: commitErr},
 		MemoryRecallTraces: &failingMemoryRecallTraceRepository{MemoryRecallTraceRepository: memoryrepo.NewMemoryRecallTraceRepository(), failures: 1, err: commitErr},
+		WorkspaceDeletions: memoryrepo.NewMemoryWorkspaceDeletionRepository(),
 		EventHub:           hub,
 	}); err != nil {
 		t.Fatalf("Configure: %v", err)
@@ -632,6 +700,7 @@ func memoryModuleContractDependencies() memorybiz.Dependencies {
 	return memorybiz.Dependencies{
 		MemoryItems:        memoryrepo.NewMemoryItemRepository(),
 		MemoryRecallTraces: memoryrepo.NewMemoryRecallTraceRepository(),
+		WorkspaceDeletions: memoryrepo.NewMemoryWorkspaceDeletionRepository(),
 		EventHub:           magicevent.NewHub(16),
 	}
 }

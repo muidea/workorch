@@ -29,6 +29,7 @@ import (
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/repository"
 	"github.com/muidea/workorch/internal/pkg/runtimepath"
+	deletioncontract "github.com/muidea/workorch/internal/pkg/workorchdeletioncontract"
 	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
 	"github.com/muidea/workorch/internal/pkg/workorchquerycontract"
 	"github.com/muidea/workorch/internal/pkg/workorchresultcontract"
@@ -135,6 +136,17 @@ type ArtifactRepository struct {
 type EventRecordRepository struct {
 	mu   sync.RWMutex
 	path string
+
+	// eventRecordPurgeSwapCut is an owner-private crash-injection seam. It is
+	// nil in production and deliberately lives below the public repository
+	// contract so no caller can drive the physical purge state machine.
+	eventRecordPurgeSwapCut func(eventRecordPurgeSwapCut) error
+}
+
+type eventStreamWorkspacePurger struct {
+	eventRecords       *EventRecordRepository
+	workspaceDeletions repository.EventStreamWorkspaceDeletionRepository
+	physicalLock       sync.Locker
 }
 
 const (
@@ -1129,10 +1141,23 @@ func NewEventRecordRepository(path string) *EventRecordRepository {
 	return &EventRecordRepository{path: path}
 }
 
+// NewEventStreamWorkspacePurger binds the low-level EventRecord compactor to
+// the Eventstream owner's exact persisted deletion fence. The raw repository
+// deliberately exposes no workspace purge method of its own.
+func NewEventStreamWorkspacePurger(eventRecords *EventRecordRepository, workspaceDeletions repository.EventStreamWorkspaceDeletionRepository, physicalLock sync.Locker) repository.EventStreamWorkspacePurger {
+	return &eventStreamWorkspacePurger{eventRecords: eventRecords, workspaceDeletions: workspaceDeletions, physicalLock: physicalLock}
+}
+
 func (r *EventRecordRepository) Append(_ context.Context, item *eventstream.EventRecord) error {
+	if r == nil {
+		return common.ErrInvalidArgument
+	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
+	if _, _, err := r.recoverEventRecordPurgeSwap(nil); err != nil {
+		return err
+	}
 	if item == nil || item.ID == "" || strings.TrimSpace(item.PayloadRef) != "" {
 		return common.ErrInvalidArgument
 	}
@@ -1171,6 +1196,9 @@ func (r *EventRecordRepository) ReserveEventRecordStreamPosition(_ context.Conte
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	if _, _, err := r.recoverEventRecordPurgeSwap(nil); err != nil {
+		return 0, err
+	}
 	state, err := r.eventRecordStreamPositionState()
 	if err != nil {
 		return 0, err
@@ -1189,11 +1217,17 @@ func (r *EventRecordRepository) ReserveEventRecordStreamPosition(_ context.Conte
 // appended through a repository decorator that may hide the optional reserve
 // capability from Eventstream.
 func (r *EventRecordRepository) ObserveEventRecordStreamPosition(position int64) error {
-	if r == nil || position < 0 {
+	if r == nil {
 		return common.ErrInvalidArgument
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	if _, _, err := r.recoverEventRecordPurgeSwap(nil); err != nil {
+		return err
+	}
+	if position < 0 {
+		return common.ErrInvalidArgument
+	}
 	return r.observeEventRecordStreamPosition(position)
 }
 
@@ -1245,9 +1279,15 @@ func (r *EventRecordRepository) eventRecordStreamPositionPath() string {
 }
 
 func (r *EventRecordRepository) Get(_ context.Context, id common.EventRecordID) (*eventstream.EventRecord, error) {
-	r.mu.RLock()
-	defer r.mu.RUnlock()
+	if r == nil {
+		return nil, common.ErrInvalidArgument
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
 
+	if _, _, err := r.recoverEventRecordPurgeSwap(nil); err != nil {
+		return nil, err
+	}
 	if id == "" {
 		return nil, common.ErrInvalidArgument
 	}
@@ -1273,9 +1313,15 @@ func (r *EventRecordRepository) Get(_ context.Context, id common.EventRecordID) 
 }
 
 func (r *EventRecordRepository) List(_ context.Context, query workorchquerycontract.EventRecordQuery) ([]*eventstream.EventRecord, error) {
-	r.mu.RLock()
-	defer r.mu.RUnlock()
+	if r == nil {
+		return nil, common.ErrInvalidArgument
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
 
+	if _, _, err := r.recoverEventRecordPurgeSwap(nil); err != nil {
+		return nil, err
+	}
 	deleted, err := r.deletedEventIDs()
 	if err != nil {
 		return nil, err
@@ -1346,8 +1392,14 @@ func (r *EventRecordRepository) listLatestEventRecords(query workorchquerycontra
 }
 
 func (r *EventRecordRepository) Delete(_ context.Context, id common.EventRecordID) error {
+	if r == nil {
+		return common.ErrInvalidArgument
+	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	if _, _, err := r.recoverEventRecordPurgeSwap(nil); err != nil {
+		return err
+	}
 	if id == "" {
 		return common.ErrInvalidArgument
 	}
@@ -1369,21 +1421,48 @@ func (r *EventRecordRepository) Delete(_ context.Context, id common.EventRecordI
 	return nil
 }
 
-// PurgeWorkspace compacts the append log so purged records, tombstones and
+func (p *eventStreamWorkspacePurger) PurgeWorkspaceEventRecords(ctx context.Context, expected eventstream.WorkspaceDeletion) (int, error) {
+	if p == nil || p.eventRecords == nil || p.workspaceDeletions == nil || p.physicalLock == nil || expected.Validate() != nil ||
+		expected.Phase != eventstream.WorkspaceDeletionPhaseFenced || expected.Mode != deletioncontract.ModePurge {
+		return 0, common.ErrInvalidArgument
+	}
+	deleted := 0
+	err := p.workspaceDeletions.WithWorkspacePurgeFence(ctx, expected, func(guarded context.Context) error {
+		p.physicalLock.Lock()
+		defer p.physicalLock.Unlock()
+		count, err := p.eventRecords.purgeWorkspace(guarded, expected)
+		deleted = count
+		return err
+	})
+	if err != nil {
+		return 0, err
+	}
+	return deleted, nil
+}
+
+// purgeWorkspace compacts the append log so purged records, tombstones and
 // external payload files are physically removed instead of merely hidden by
-// delete markers.
-func (r *EventRecordRepository) PurgeWorkspace(_ context.Context, workspaceID common.WorkspaceID) (int, error) {
-	if r == nil || workspaceID == "" {
+// delete markers. It is backend-private and can only be reached through the
+// exact-fenced Eventstream purger above.
+func (r *EventRecordRepository) purgeWorkspace(_ context.Context, expected eventstream.WorkspaceDeletion) (int, error) {
+	if r == nil || expected.Validate() != nil || expected.Phase != eventstream.WorkspaceDeletionPhaseFenced || expected.Mode != deletioncontract.ModePurge {
 		return 0, common.ErrInvalidArgument
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	installed, recoveredDeleted, err := r.recoverEventRecordPurgeSwap(&expected)
+	if err != nil {
+		return 0, err
+	}
+	if installed {
+		return recoveredDeleted, nil
+	}
 
 	deletedIDs, err := r.deletedEventIDs()
 	if err != nil {
 		return 0, err
 	}
-	retained := make([]*eventstream.EventRecord, 0)
+	retained := make([]eventRecordPurgeRetainedRecord, 0)
 	deleted := 0
 	matchedPhysicalRecord := false
 	if err := r.scanEventRecords(func(item *eventstream.EventRecord) error {
@@ -1391,21 +1470,18 @@ func (r *EventRecordRepository) PurgeWorkspace(_ context.Context, workspaceID co
 			return nil
 		}
 		_, alreadyDeleted := deletedIDs[item.ID]
-		if item.WorkspaceID == workspaceID {
+		if item.WorkspaceID == expected.WorkspaceID {
 			matchedPhysicalRecord = true
 			if !alreadyDeleted {
 				deleted++
 			}
 			return nil
 		}
-		if alreadyDeleted {
-			return nil
-		}
 		if err := r.hydrateEventRecordPayload(item); err != nil {
 			return err
 		}
 		item.PayloadRef = ""
-		retained = append(retained, cloneEventRecord(item))
+		retained = append(retained, eventRecordPurgeRetainedRecord{Record: cloneEventRecord(item), Deleted: alreadyDeleted})
 		return nil
 	}); err != nil {
 		return 0, err
@@ -1414,92 +1490,7 @@ func (r *EventRecordRepository) PurgeWorkspace(_ context.Context, workspaceID co
 		return 0, nil
 	}
 
-	root := filepath.Clean(r.eventLogRoot())
-	absRoot, err := filepath.Abs(root)
-	if err != nil || root == "." || root == string(filepath.Separator) || absRoot == string(filepath.Separator) {
-		return 0, common.ErrInvalidArgument
-	}
-	parent := filepath.Dir(absRoot)
-	if err := os.MkdirAll(absRoot, 0o755); err != nil {
-		return 0, err
-	}
-	temporaryRoot, err := os.MkdirTemp(parent, "."+filepath.Base(absRoot)+".compact-")
-	if err != nil {
-		return 0, err
-	}
-	defer func() {
-		_ = os.RemoveAll(temporaryRoot)
-	}()
-	temporaryRepository := NewEventRecordRepository(temporaryRoot)
-	for _, item := range retained {
-		if err := temporaryRepository.Append(context.Background(), item); err != nil {
-			return 0, err
-		}
-	}
-
-	backupRoot, err := os.MkdirTemp(parent, ".eventstream-purge-backup-")
-	if err != nil {
-		return 0, err
-	}
-	defer func() { _ = os.RemoveAll(backupRoot) }()
-	if err := replaceEventRecordStorage(absRoot, temporaryRoot, backupRoot); err != nil {
-		return 0, err
-	}
-	if err := os.RemoveAll(backupRoot); err != nil {
-		return 0, err
-	}
-	return deleted, nil
-}
-
-func replaceEventRecordStorage(root, replacementRoot, backupRoot string) error {
-	names := []string{"events", "payloads", "ids", "deleted"}
-	movedOld := make([]string, 0, len(names))
-	for _, name := range names {
-		current := filepath.Join(root, name)
-		if _, err := os.Stat(current); err != nil {
-			if os.IsNotExist(err) {
-				continue
-			}
-			for idx := len(movedOld) - 1; idx >= 0; idx-- {
-				_ = os.Rename(filepath.Join(backupRoot, movedOld[idx]), filepath.Join(root, movedOld[idx]))
-			}
-			return err
-		}
-		if err := os.Rename(current, filepath.Join(backupRoot, name)); err != nil {
-			for idx := len(movedOld) - 1; idx >= 0; idx-- {
-				_ = os.Rename(filepath.Join(backupRoot, movedOld[idx]), filepath.Join(root, movedOld[idx]))
-			}
-			return err
-		}
-		movedOld = append(movedOld, name)
-	}
-	movedNew := make([]string, 0, len(names))
-	for _, name := range names {
-		replacement := filepath.Join(replacementRoot, name)
-		if _, err := os.Stat(replacement); err != nil {
-			if os.IsNotExist(err) {
-				continue
-			}
-			return restoreEventRecordStorage(root, replacementRoot, backupRoot, movedOld, movedNew, err)
-		}
-		if err := os.Rename(replacement, filepath.Join(root, name)); err != nil {
-			return restoreEventRecordStorage(root, replacementRoot, backupRoot, movedOld, movedNew, err)
-		}
-		movedNew = append(movedNew, name)
-	}
-	return nil
-}
-
-func restoreEventRecordStorage(root, replacementRoot, backupRoot string, movedOld, movedNew []string, cause error) error {
-	for idx := len(movedNew) - 1; idx >= 0; idx-- {
-		name := movedNew[idx]
-		_ = os.Rename(filepath.Join(root, name), filepath.Join(replacementRoot, name))
-	}
-	for idx := len(movedOld) - 1; idx >= 0; idx-- {
-		name := movedOld[idx]
-		_ = os.Rename(filepath.Join(backupRoot, name), filepath.Join(root, name))
-	}
-	return cause
+	return r.installEventRecordPurgeSwap(expected, retained, deleted)
 }
 
 func (r *EventRecordRepository) eventLogRoot() string {
@@ -2152,6 +2143,26 @@ func (r *WorkspaceRepository) CompareAndSwap(_ context.Context, item *workspace.
 	return saveWorkspacePersistenceMap(r.path, items)
 }
 
+func (r *WorkspaceRepository) CleanupDeletionMaterial(ctx context.Context, scope repository.WorkspaceDeletionMaterialCleanupScope) error {
+	if r == nil {
+		return common.ErrInvalidArgument
+	}
+	if err := repository.ValidateWorkspaceDeletionMaterialCleanupContext(ctx, scope); err != nil {
+		return err
+	}
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	items, err := loadWorkspacePersistenceMap(r.path)
+	if err != nil {
+		return err
+	}
+	current, ok := items[scope.WorkspaceID]
+	if !ok {
+		return common.ErrConflict
+	}
+	return repository.ValidateWorkspaceDeletionMaterialCleanupCurrent(&current, scope)
+}
+
 func (r *WorkspaceRepository) Delete(_ context.Context, id common.WorkspaceID) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -2584,26 +2595,165 @@ type RunRepository struct {
 	path string
 }
 
+type runWorkspacePersistenceHead struct {
+	Generation uint64                        `json:"generation"`
+	Retirement *run.WorkspaceRetirementFence `json:"retirement,omitempty"`
+}
+
 func NewRunRepository(path string) *RunRepository {
 	return &RunRepository{path: path}
 }
 
 func (r *RunRepository) Create(_ context.Context, item *run.Run) error {
+	return r.create(item, 0, false, false)
+}
+
+func (r *RunRepository) CreateNextWorkspaceRun(_ context.Context, item *run.Run) error {
+	return r.create(item, 0, false, true)
+}
+
+// CreateWithWorkspaceRunGeneration persists a generation already allocated by
+// a workspace-scoped Run repository. The allocation authority remains inside
+// Run persistence; this hook prevents a per-Run file from creating a separate
+// local watermark for every Run directory.
+func (r *RunRepository) CreateWithWorkspaceRunGeneration(_ context.Context, item *run.Run, generation uint64) error {
+	return r.create(item, generation, true, false)
+}
+
+// CreateNextWorkspaceRunWithGeneration persists both identity coordinates
+// allocated by the workspace-scoped repository's shared durable head.
+func (r *RunRepository) CreateNextWorkspaceRunWithGeneration(_ context.Context, item *run.Run, generation uint64) error {
+	return r.create(item, generation, true, true)
+}
+
+func (r *RunRepository) create(item *run.Run, allocatedGeneration uint64, generationPreallocated, allocateID bool) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	if item == nil || item.WorkspaceID == "" || (allocateID && item.ID != "") || (!allocateID && item.ID == "") {
+		return common.ErrInvalidArgument
+	}
+	if generationPreallocated && allocatedGeneration == 0 {
+		return common.ErrInvalidArgument
+	}
 
 	items, err := loadMap[common.RunID, run.Run](r.path)
 	if err != nil {
 		return err
 	}
-	if _, ok := items[item.ID]; ok {
-		return common.ErrConflict
+	if !allocateID {
+		if _, ok := items[item.ID]; ok {
+			return common.ErrConflict
+		}
+	}
+	if item.WorkspaceRunGeneration != 0 {
+		return common.ErrInvalidArgument
+	}
+	if !fileRunStateIsTerminal(item.State) {
+		for _, current := range items {
+			if current.WorkspaceID == item.WorkspaceID && !fileRunStateIsTerminal(current.State) {
+				return common.ErrConflict
+			}
+		}
+	}
+	if generationPreallocated {
+		item.WorkspaceRunGeneration = allocatedGeneration
+		if allocateID {
+			item.ID = run.WorkspaceRunID(allocatedGeneration)
+			if _, occupied := items[item.ID]; occupied {
+				return common.ErrConflict
+			}
+		}
+	} else {
+		heads, err := loadMap[common.WorkspaceID, runWorkspacePersistenceHead](r.workspaceGenerationPath())
+		if err != nil {
+			return err
+		}
+		if err := validatePersistedRunGenerationWatermarks(items, heads); err != nil {
+			return err
+		}
+		head := heads[item.WorkspaceID]
+		if head.Retirement != nil {
+			return common.ErrConflict
+		}
+		watermark := head.Generation
+		for {
+			if watermark == math.MaxUint64 {
+				return common.ErrConflict
+			}
+			watermark++
+			if !allocateID {
+				break
+			}
+			candidate := run.WorkspaceRunID(watermark)
+			if _, occupied := items[candidate]; occupied {
+				continue
+			}
+			item.ID = candidate
+			break
+		}
+		item.WorkspaceRunGeneration = watermark
+		// Persist the watermark first. If the subsequent Run write fails, the
+		// generation is intentionally skipped; it can never be reused after
+		// restart or purge.
+		head.Generation = item.WorkspaceRunGeneration
+		heads[item.WorkspaceID] = head
+		if err := saveMap(r.workspaceGenerationPath(), heads); err != nil {
+			item.WorkspaceRunGeneration = 0
+			return err
+		}
 	}
 	if item.Revision == 0 {
 		item.Revision = 1
 	}
 	items[item.ID] = *cloneRun(item)
-	return saveMap(r.path, items)
+	if err := saveMap(r.path, items); err != nil {
+		item.WorkspaceRunGeneration = 0
+		return err
+	}
+	return nil
+}
+
+func fileRunStateIsTerminal(state common.RunState) bool {
+	switch state {
+	case common.RunStateCompleted, common.RunStateFailed, common.RunStateCancelled, common.RunStateSuperseded:
+		return true
+	default:
+		return false
+	}
+}
+
+func (r *RunRepository) workspaceGenerationPath() string {
+	return r.path + ".workspace-generations"
+}
+
+func validatePersistedRunGenerationWatermarks(items map[common.RunID]run.Run, heads map[common.WorkspaceID]runWorkspacePersistenceHead) error {
+	seen := map[common.WorkspaceID]map[uint64]struct{}{}
+	for _, item := range items {
+		if item.ID == "" || item.WorkspaceID == "" || item.WorkspaceRunGeneration == 0 || heads[item.WorkspaceID].Generation < item.WorkspaceRunGeneration {
+			return fmt.Errorf("%w: Run workspace generation persistence is incomplete", common.ErrConflict)
+		}
+		workspaceSeen := seen[item.WorkspaceID]
+		if workspaceSeen == nil {
+			workspaceSeen = map[uint64]struct{}{}
+			seen[item.WorkspaceID] = workspaceSeen
+		}
+		if _, duplicate := workspaceSeen[item.WorkspaceRunGeneration]; duplicate {
+			return fmt.Errorf("%w: duplicate Run workspace generation", common.ErrConflict)
+		}
+		workspaceSeen[item.WorkspaceRunGeneration] = struct{}{}
+	}
+	for workspaceID, head := range heads {
+		if workspaceID == "" || (head.Generation == 0 && head.Retirement == nil) {
+			return fmt.Errorf("%w: Run workspace head is incomplete", common.ErrConflict)
+		}
+		if head.Retirement != nil {
+			fence := head.Retirement.Normalized()
+			if fence.Validate() != nil || fence.WorkspaceID != workspaceID || fence.WorkspaceRunGeneration != head.Generation {
+				return fmt.Errorf("%w: Run workspace retirement head is inconsistent", common.ErrConflict)
+			}
+		}
+	}
+	return nil
 }
 
 func (r *RunRepository) Get(_ context.Context, id common.RunID) (*run.Run, error) {
@@ -2690,13 +2840,38 @@ func (r *RunRepository) ListByWorkspaceID(_ context.Context, workspaceID common.
 func (r *RunRepository) Update(_ context.Context, item *run.Run) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	if item == nil || item.ID == "" {
+		return common.ErrInvalidArgument
+	}
 
 	items, err := loadMap[common.RunID, run.Run](r.path)
 	if err != nil {
 		return err
 	}
-	if _, ok := items[item.ID]; !ok {
+	current, ok := items[item.ID]
+	if !ok {
 		return common.ErrNotFound
+	}
+	if item.WorkspaceID == "" {
+		return common.ErrInvalidArgument
+	}
+	if current.WorkspaceID != item.WorkspaceID {
+		return common.ErrConflict
+	}
+	heads, err := loadMap[common.WorkspaceID, runWorkspacePersistenceHead](r.workspaceGenerationPath())
+	if err != nil {
+		return err
+	}
+	if len(heads) > 0 {
+		if err := validatePersistedRunGenerationWatermarks(items, heads); err != nil {
+			return err
+		}
+		if heads[current.WorkspaceID].Retirement != nil {
+			return common.ErrConflict
+		}
+	}
+	if item.WorkspaceRunGeneration == 0 || item.WorkspaceRunGeneration != current.WorkspaceRunGeneration {
+		return common.ErrConflict
 	}
 	items[item.ID] = *cloneRun(item)
 	return saveMap(r.path, items)
@@ -2719,8 +2894,65 @@ func (r *RunRepository) CompareAndSwap(_ context.Context, item *run.Run, expecte
 	if current.WorkspaceID != item.WorkspaceID {
 		return common.ErrConflict
 	}
+	heads, err := loadMap[common.WorkspaceID, runWorkspacePersistenceHead](r.workspaceGenerationPath())
+	if err != nil {
+		return err
+	}
+	if len(heads) > 0 {
+		if err := validatePersistedRunGenerationWatermarks(items, heads); err != nil {
+			return err
+		}
+		if heads[current.WorkspaceID].Retirement != nil {
+			return common.ErrConflict
+		}
+	}
 	if current.Revision != expectedRevision {
 		return common.ErrConflict
+	}
+	if item.WorkspaceRunGeneration == 0 || item.WorkspaceRunGeneration != current.WorkspaceRunGeneration {
+		return common.ErrConflict
+	}
+	item.Revision = expectedRevision + 1
+	items[item.ID] = *cloneRun(item)
+	return saveMap(r.path, items)
+}
+
+func (r *RunRepository) CompareAndSwapRuntimeState(ctx context.Context, item *run.Run, expectedRevision, expectedRuntimeStateRevision uint64) error {
+	if r == nil || item == nil || item.ID == "" || item.WorkspaceID == "" || expectedRevision == 0 {
+		return common.ErrInvalidArgument
+	}
+	if err := validateRuntimeWorkspaceScope(ctx, item.WorkspaceID); err != nil {
+		return err
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	items, err := loadMap[common.RunID, run.Run](r.path)
+	if err != nil {
+		return err
+	}
+	current, ok := items[item.ID]
+	if !ok {
+		return common.ErrNotFound
+	}
+	if current.WorkspaceID != item.WorkspaceID || current.Revision != expectedRevision {
+		return common.ErrConflict
+	}
+	heads, err := loadMap[common.WorkspaceID, runWorkspacePersistenceHead](r.workspaceGenerationPath())
+	if err != nil {
+		return err
+	}
+	if len(heads) > 0 {
+		if err := validatePersistedRunGenerationWatermarks(items, heads); err != nil {
+			return err
+		}
+		if fence := heads[current.WorkspaceID].Retirement; fence != nil {
+			if fence.Validate() != nil || fence.IsRetired() || !fileRunStateIsTerminal(current.State) {
+				return common.ErrConflict
+			}
+		}
+	}
+	if err := run.ValidateOpaqueRuntimeStateCAS(&current, item, expectedRuntimeStateRevision); err != nil {
+		return err
 	}
 	item.Revision = expectedRevision + 1
 	items[item.ID] = *cloneRun(item)
@@ -2730,7 +2962,190 @@ func (r *RunRepository) CompareAndSwap(_ context.Context, item *run.Run, expecte
 func (r *RunRepository) Delete(_ context.Context, id common.RunID) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	return deleteMapItem[common.RunID, run.Run](r.path, id)
+	items, err := loadMap[common.RunID, run.Run](r.path)
+	if err != nil {
+		return err
+	}
+	current, ok := items[id]
+	if !ok {
+		return common.ErrNotFound
+	}
+	heads, err := loadMap[common.WorkspaceID, runWorkspacePersistenceHead](r.workspaceGenerationPath())
+	if err != nil {
+		return err
+	}
+	if len(heads) > 0 && heads[current.WorkspaceID].Retirement != nil {
+		return common.ErrConflict
+	}
+	delete(items, id)
+	return saveMap(r.path, items)
+}
+
+func (r *RunRepository) PrepareWorkspaceRetirement(ctx context.Context, intent run.WorkspaceRetirementIntent) (*run.WorkspaceRetirementFence, error) {
+	intent = intent.Normalized()
+	if err := intent.Validate(); err != nil {
+		return nil, common.ErrInvalidArgument
+	}
+	if err := validateRuntimeWorkspaceScope(ctx, intent.WorkspaceID); err != nil {
+		return nil, err
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	items, err := loadMap[common.RunID, run.Run](r.path)
+	if err != nil {
+		return nil, err
+	}
+	heads, err := loadMap[common.WorkspaceID, runWorkspacePersistenceHead](r.workspaceGenerationPath())
+	if err != nil {
+		return nil, err
+	}
+	if err := validatePersistedRunGenerationWatermarks(items, heads); err != nil {
+		return nil, err
+	}
+	head := heads[intent.WorkspaceID]
+	if head.Retirement != nil {
+		current := head.Retirement.Normalized()
+		if current.Intent() != intent {
+			return nil, common.ErrConflict
+		}
+		return &current, nil
+	}
+	workspaceRuns := make([]*run.Run, 0)
+	for _, item := range items {
+		if item.WorkspaceID == intent.WorkspaceID {
+			current := item
+			workspaceRuns = append(workspaceRuns, cloneRun(&current))
+		}
+	}
+	if err := run.WorkspaceRetirementEligible(workspaceRuns, intent.WorkspaceID); err != nil {
+		return nil, err
+	}
+	fence := run.WorkspaceRetirementFence{
+		WorkspaceID:            intent.WorkspaceID,
+		DeletionID:             intent.DeletionID,
+		DeletionGeneration:     intent.DeletionGeneration,
+		DataDispositionIntent:  intent.DataDispositionIntent,
+		WorkspaceIntentHash:    intent.WorkspaceIntentHash,
+		Phase:                  run.WorkspaceRetirementPhaseDraining,
+		FenceRevision:          1,
+		WorkspaceRunGeneration: head.Generation,
+	}
+	head.Retirement = &fence
+	heads[intent.WorkspaceID] = head
+	if err := saveMap(r.workspaceGenerationPath(), heads); err != nil {
+		return nil, err
+	}
+	ret := fence
+	return &ret, nil
+}
+
+func (r *RunRepository) FinalizeWorkspaceRetirement(ctx context.Context, token deletioncontract.WorkspaceRuntimeQuiescenceToken) (*run.WorkspaceRetirementFence, error) {
+	token = token.Normalized()
+	if r == nil || token.Validate() != nil {
+		return nil, common.ErrInvalidArgument
+	}
+	if err := validateRuntimeWorkspaceScope(ctx, token.WorkspaceID); err != nil {
+		return nil, err
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	items, err := loadMap[common.RunID, run.Run](r.path)
+	if err != nil {
+		return nil, err
+	}
+	heads, err := loadMap[common.WorkspaceID, runWorkspacePersistenceHead](r.workspaceGenerationPath())
+	if err != nil {
+		return nil, err
+	}
+	if err := validatePersistedRunGenerationWatermarks(items, heads); err != nil {
+		return nil, err
+	}
+	head, ok := heads[token.WorkspaceID]
+	if !ok || head.Retirement == nil {
+		return nil, common.ErrNotFound
+	}
+	current := head.Retirement.Normalized()
+	if current.IsRetired() {
+		if current.QuiescenceID != token.QuiescenceID || current.RuntimeInventoryHash != token.RuntimeInventoryHash || current.FenceRevision != token.RunDrainingRevision+1 {
+			return nil, common.ErrConflict
+		}
+		return &current, nil
+	}
+	workspaceRuns := make([]*run.Run, 0)
+	for _, item := range items {
+		if item.WorkspaceID == token.WorkspaceID {
+			copy := item
+			workspaceRuns = append(workspaceRuns, cloneRun(&copy))
+		}
+	}
+	if head.Generation != token.WorkspaceRunGeneration || run.ValidateWorkspaceRetirementFinalization(current, workspaceRuns, token) != nil {
+		return nil, common.ErrConflict
+	}
+	current.Phase = run.WorkspaceRetirementPhaseRetired
+	current.FenceRevision++
+	current.QuiescenceID = token.QuiescenceID
+	current.RuntimeInventoryHash = token.RuntimeInventoryHash
+	if err := current.Validate(); err != nil {
+		return nil, err
+	}
+	head.Retirement = &current
+	heads[token.WorkspaceID] = head
+	if err := saveMap(r.workspaceGenerationPath(), heads); err != nil {
+		return nil, err
+	}
+	return &current, nil
+}
+
+func (r *RunRepository) GetWorkspaceRetirement(ctx context.Context, workspaceID common.WorkspaceID) (*run.WorkspaceRetirementFence, error) {
+	workspaceID = common.WorkspaceID(strings.TrimSpace(string(workspaceID)))
+	if workspaceID == "" {
+		return nil, common.ErrInvalidArgument
+	}
+	if err := validateRuntimeWorkspaceScope(ctx, workspaceID); err != nil {
+		return nil, err
+	}
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	heads, err := loadMap[common.WorkspaceID, runWorkspacePersistenceHead](r.workspaceGenerationPath())
+	if err != nil {
+		return nil, err
+	}
+	head, ok := heads[workspaceID]
+	if !ok || head.Retirement == nil {
+		return nil, common.ErrNotFound
+	}
+	fence := head.Retirement.Normalized()
+	if fence.Validate() != nil || fence.WorkspaceID != workspaceID || fence.WorkspaceRunGeneration != head.Generation {
+		return nil, common.ErrConflict
+	}
+	return &fence, nil
+}
+
+func (r *RunRepository) ListWorkspaceRetirements(_ context.Context) ([]run.WorkspaceRetirementFence, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	heads, err := loadMap[common.WorkspaceID, runWorkspacePersistenceHead](r.workspaceGenerationPath())
+	if err != nil {
+		return nil, err
+	}
+	workspaceIDs := make([]string, 0, len(heads))
+	for workspaceID, head := range heads {
+		if head.Retirement != nil {
+			workspaceIDs = append(workspaceIDs, string(workspaceID))
+		}
+	}
+	sort.Strings(workspaceIDs)
+	ret := make([]run.WorkspaceRetirementFence, 0, len(workspaceIDs))
+	for _, rawWorkspaceID := range workspaceIDs {
+		workspaceID := common.WorkspaceID(rawWorkspaceID)
+		head := heads[workspaceID]
+		fence := head.Retirement.Normalized()
+		if fence.Validate() != nil || fence.WorkspaceID != workspaceID || fence.WorkspaceRunGeneration != head.Generation {
+			return nil, common.ErrConflict
+		}
+		ret = append(ret, fence)
+	}
+	return ret, nil
 }
 
 type StepRepository struct {
@@ -4170,6 +4585,27 @@ func mapCacheEntry(path string) *mapFileCacheEntry {
 	return item.(*mapFileCacheEntry)
 }
 
+// EvictMapFileCache removes the process-wide decoded-map cache for one exact
+// repository path after an owner transaction has physically removed that
+// path. Callers must already hold their owner-level mutation fence; this
+// helper only synchronizes the cache entry itself.
+func EvictMapFileCache(path string) {
+	path = strings.TrimSpace(path)
+	if path == "" {
+		return
+	}
+	item, ok := mapFileCache.Load(path)
+	if !ok {
+		return
+	}
+	entry := item.(*mapFileCacheEntry)
+	entry.mu.Lock()
+	entry.loaded = false
+	entry.items = nil
+	mapFileCache.Delete(path)
+	entry.mu.Unlock()
+}
+
 func cloneStoredMap[K comparable, V any](items map[K]V) map[K]V {
 	cloned := make(map[K]V, len(items))
 	for key, value := range items {
@@ -4205,6 +4641,10 @@ func cloneWorkspace(item *workspace.Workspace) *workspace.Workspace {
 	if item.ActivationAdmission != nil {
 		value := item.ActivationAdmission.Normalized()
 		cloned.ActivationAdmission = &value
+	}
+	if item.Deletion != nil {
+		value := item.Deletion.Clone()
+		cloned.Deletion = &value
 	}
 	return &cloned
 }

@@ -8,6 +8,7 @@ import (
 	fileevents "github.com/muidea/workorch/internal/modules/blocks/file/pkg/events"
 	shellevents "github.com/muidea/workorch/internal/modules/blocks/shell/pkg/events"
 	workspaceevents "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/events"
+	"github.com/muidea/workorch/internal/modules/kernel/orchestrator/biz/internal/semanticplan"
 	runtime "github.com/muidea/workorch/internal/modules/kernel/orchestrator/biz/runtime"
 	"github.com/muidea/workorch/internal/pkg/common"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
@@ -460,7 +461,7 @@ func prospectiveCompositeDriveAggregateWithCandidatesAndExisting(t *testing.T, c
 		Kind:        runtime.RuntimeInternalEventSemanticPlanEvaluated,
 		Transaction: &runtime.RuntimeInternalTransactionPayload{SemanticDocument: &order, LogicalRequestID: "prospective-drive-order"},
 	})
-	batch, err := runtimecontract.CompileRuntimeSemanticPlanFocusBatch(
+	batch, err := semanticplan.CompileFocusBatch(
 		manifest, order, 0, "prospective-drive-proof", aggregate.Facts.Focus.CoverageWorkItemIDs,
 		aggregate.SemanticPlanning.PendingCoverageIDs, 1,
 	)

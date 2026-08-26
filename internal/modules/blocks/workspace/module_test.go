@@ -31,12 +31,14 @@ func TestModuleIdentityConfigureStartStopContract(t *testing.T) {
 	}
 
 	hub := magicevent.NewHub(16)
+	workspaces := memory.NewWorkspaceRepository()
 	if err := module.Configure(workspacebiz.Dependencies{
-		Workspaces: memory.NewWorkspaceRepository(),
-		Goals:      memory.NewGoalRepository(),
-		DoDs:       memory.NewDoDRepository(),
-		Templates:  memory.NewWorkspaceTemplateRepository(),
-		EventHub:   hub,
+		Workspaces:              workspaces,
+		DeletionMaterialCleaner: workspaces,
+		Goals:                   memory.NewGoalRepository(),
+		DoDs:                    memory.NewDoDRepository(),
+		Templates:               memory.NewWorkspaceTemplateRepository(),
+		EventHub:                hub,
 	}); err != nil {
 		t.Fatalf("Configure: %v", err)
 	}
@@ -71,7 +73,7 @@ func TestWorkspaceChangedNotificationClonesDefaultLLMSelection(t *testing.T) {
 		t.Fatalf("create workspace: %v", err)
 	}
 	module := New()
-	if err := module.Configure(workspacebiz.Dependencies{Workspaces: workspaces, Goals: memory.NewGoalRepository(), DoDs: memory.NewDoDRepository(), Templates: memory.NewWorkspaceTemplateRepository(), EventHub: hub}); err != nil {
+	if err := module.Configure(workspacebiz.Dependencies{Workspaces: workspaces, DeletionMaterialCleaner: workspaces, Goals: memory.NewGoalRepository(), DoDs: memory.NewDoDRepository(), Templates: memory.NewWorkspaceTemplateRepository(), EventHub: hub}); err != nil {
 		t.Fatalf("Configure: %v", err)
 	}
 	if err := module.Start(); err != nil {
@@ -113,7 +115,7 @@ func TestUpdateWorkspaceLLMSelectionCommandPersistsCompleteTargetAndClears(t *te
 	}
 	hub := magicevent.NewHub(16)
 	module := New()
-	if err := module.Configure(workspacebiz.Dependencies{Workspaces: repo, Goals: memory.NewGoalRepository(), DoDs: memory.NewDoDRepository(), Templates: memory.NewWorkspaceTemplateRepository(), EventHub: hub}); err != nil {
+	if err := module.Configure(workspacebiz.Dependencies{Workspaces: repo, DeletionMaterialCleaner: repo, Goals: memory.NewGoalRepository(), DoDs: memory.NewDoDRepository(), Templates: memory.NewWorkspaceTemplateRepository(), EventHub: hub}); err != nil {
 		t.Fatalf("Configure: %v", err)
 	}
 	if err := module.Start(); err != nil {
@@ -182,7 +184,7 @@ func TestWorkspaceLLMSelectionSurvivesFileBackedOwnerRestart(t *testing.T) {
 	firstHub := magicevent.NewHub(16)
 	t.Cleanup(func() { firstHub.Terminate(context.Background()) })
 	first := New()
-	if err := first.Configure(workspacebiz.Dependencies{Workspaces: firstRepo, Goals: memory.NewGoalRepository(), DoDs: memory.NewDoDRepository(), Templates: memory.NewWorkspaceTemplateRepository(), EventHub: firstHub}); err != nil {
+	if err := first.Configure(workspacebiz.Dependencies{Workspaces: firstRepo, DeletionMaterialCleaner: firstRepo, Goals: memory.NewGoalRepository(), DoDs: memory.NewDoDRepository(), Templates: memory.NewWorkspaceTemplateRepository(), EventHub: firstHub}); err != nil {
 		t.Fatalf("configure first owner: %v", err)
 	}
 	if err := first.Start(); err != nil {
@@ -196,7 +198,8 @@ func TestWorkspaceLLMSelectionSurvivesFileBackedOwnerRestart(t *testing.T) {
 	secondHub := magicevent.NewHub(16)
 	t.Cleanup(func() { secondHub.Terminate(context.Background()) })
 	second := New()
-	if err := second.Configure(workspacebiz.Dependencies{Workspaces: filerepository.NewWorkspaceRepository(path), Goals: memory.NewGoalRepository(), DoDs: memory.NewDoDRepository(), Templates: memory.NewWorkspaceTemplateRepository(), EventHub: secondHub}); err != nil {
+	secondRepo := filerepository.NewWorkspaceRepository(path)
+	if err := second.Configure(workspacebiz.Dependencies{Workspaces: secondRepo, DeletionMaterialCleaner: secondRepo, Goals: memory.NewGoalRepository(), DoDs: memory.NewDoDRepository(), Templates: memory.NewWorkspaceTemplateRepository(), EventHub: secondHub}); err != nil {
 		t.Fatalf("configure restarted owner: %v", err)
 	}
 	if err := second.Start(); err != nil {
@@ -226,22 +229,25 @@ func sendWorkspaceTestCommand[Command any](t *testing.T, ctx context.Context, hu
 }
 
 func TestModuleConfigureRequiresAllRepositories(t *testing.T) {
+	workspaces := memory.NewWorkspaceRepository()
 	valid := workspacebiz.Dependencies{
-		Workspaces: memory.NewWorkspaceRepository(),
-		Goals:      memory.NewGoalRepository(),
-		DoDs:       memory.NewDoDRepository(),
-		Templates:  memory.NewWorkspaceTemplateRepository(),
-		EventHub:   magicevent.NewHub(16),
+		Workspaces:              workspaces,
+		DeletionMaterialCleaner: workspaces,
+		Goals:                   memory.NewGoalRepository(),
+		DoDs:                    memory.NewDoDRepository(),
+		Templates:               memory.NewWorkspaceTemplateRepository(),
+		EventHub:                magicevent.NewHub(16),
 	}
 	tests := []struct {
 		name string
 		deps workspacebiz.Dependencies
 	}{
-		{name: "missing workspaces", deps: workspacebiz.Dependencies{Goals: valid.Goals, DoDs: valid.DoDs, Templates: valid.Templates, EventHub: valid.EventHub}},
-		{name: "missing goals", deps: workspacebiz.Dependencies{Workspaces: valid.Workspaces, DoDs: valid.DoDs, Templates: valid.Templates, EventHub: valid.EventHub}},
-		{name: "missing dods", deps: workspacebiz.Dependencies{Workspaces: valid.Workspaces, Goals: valid.Goals, Templates: valid.Templates, EventHub: valid.EventHub}},
-		{name: "missing templates", deps: workspacebiz.Dependencies{Workspaces: valid.Workspaces, Goals: valid.Goals, DoDs: valid.DoDs, EventHub: valid.EventHub}},
-		{name: "missing event hub", deps: workspacebiz.Dependencies{Workspaces: valid.Workspaces, Goals: valid.Goals, DoDs: valid.DoDs, Templates: valid.Templates}},
+		{name: "missing workspaces", deps: workspacebiz.Dependencies{DeletionMaterialCleaner: valid.DeletionMaterialCleaner, Goals: valid.Goals, DoDs: valid.DoDs, Templates: valid.Templates, EventHub: valid.EventHub}},
+		{name: "missing deletion material cleaner", deps: workspacebiz.Dependencies{Workspaces: valid.Workspaces, Goals: valid.Goals, DoDs: valid.DoDs, Templates: valid.Templates, EventHub: valid.EventHub}},
+		{name: "missing goals", deps: workspacebiz.Dependencies{Workspaces: valid.Workspaces, DeletionMaterialCleaner: valid.DeletionMaterialCleaner, DoDs: valid.DoDs, Templates: valid.Templates, EventHub: valid.EventHub}},
+		{name: "missing dods", deps: workspacebiz.Dependencies{Workspaces: valid.Workspaces, DeletionMaterialCleaner: valid.DeletionMaterialCleaner, Goals: valid.Goals, Templates: valid.Templates, EventHub: valid.EventHub}},
+		{name: "missing templates", deps: workspacebiz.Dependencies{Workspaces: valid.Workspaces, DeletionMaterialCleaner: valid.DeletionMaterialCleaner, Goals: valid.Goals, DoDs: valid.DoDs, EventHub: valid.EventHub}},
+		{name: "missing event hub", deps: workspacebiz.Dependencies{Workspaces: valid.Workspaces, DeletionMaterialCleaner: valid.DeletionMaterialCleaner, Goals: valid.Goals, DoDs: valid.DoDs, Templates: valid.Templates}},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {

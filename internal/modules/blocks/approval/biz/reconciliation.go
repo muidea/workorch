@@ -19,8 +19,6 @@ func (m *Biz) ReconcileApprovalDeliveries(ctx context.Context) error {
 	if m == nil {
 		return common.ErrInvalidArgument
 	}
-	m.lifecycleMu.Lock()
-	defer m.lifecycleMu.Unlock()
 	return m.reconcileApprovalDeliveries(ctx)
 }
 
@@ -101,31 +99,56 @@ func (m *Biz) reconcileApprovalDeliveries(ctx context.Context) error {
 		if item == nil {
 			continue
 		}
-		itemCtx, bindErr := common.BindRuntimeWorkspaceContext(ctx, item.WorkspaceID)
-		if bindErr != nil {
-			errs = append(errs, bindErr)
-			continue
-		}
-		if item.DeletionRequestedAt != "" {
-			if err := m.approvals.DeleteScoped(itemCtx, item.WorkspaceID, item.RunID, item.ID); err != nil && !errors.Is(err, common.ErrNotFound) {
-				errs = append(errs, err)
-			}
-			continue
-		}
-		if item.State == common.ApprovalStatePending && item.ResolutionProposal != nil && item.ResolutionProposal.State == approvalmodel.ResolutionProposalPending {
-			if err := m.reconcileApprovalProposal(itemCtx, item); err != nil {
-				errs = append(errs, fmt.Errorf("reconcile approval %s: %w", item.ID, err))
-			}
-			continue
-		}
-		if (item.State == common.ApprovalStateApproved || item.State == common.ApprovalStateRejected) &&
-			(item.EvidenceRecordedAt == "" || item.ResolutionNotificationPublishedAt == "") {
-			if err := m.deliverResolvedApproval(itemCtx, item); err != nil {
-				errs = append(errs, fmt.Errorf("deliver approval %s: %w", item.ID, err))
-			}
+		if err := m.reconcileApprovalDelivery(ctx, item); err != nil {
+			errs = append(errs, err)
 		}
 	}
 	return errors.Join(errs...)
+}
+
+func (m *Biz) reconcileApprovalDelivery(ctx context.Context, observed *approvalmodel.Approval) error {
+	if m == nil || observed == nil || observed.WorkspaceID == "" || observed.RunID == "" || observed.ID == "" {
+		return common.ErrInvalidArgument
+	}
+	// All Approval owner paths use workspace -> lifecycle ordering. This makes
+	// deletion seal, ingress mutation and background recovery linearizable while
+	// avoiding the previous lifecycle -> workspace inversion.
+	unlock := m.lockWorkspaceLifecycleMutation(observed.WorkspaceID)
+	defer unlock()
+
+	itemCtx, err := common.BindRuntimeWorkspaceContext(ctx, observed.WorkspaceID)
+	if err != nil {
+		return err
+	}
+	if err := m.rejectFencedWorkspace(itemCtx, observed.WorkspaceID); err != nil {
+		if errors.Is(err, common.ErrNotFound) {
+			return nil
+		}
+		return err
+	}
+	item, err := m.approvals.GetScoped(itemCtx, observed.WorkspaceID, observed.RunID, observed.ID)
+	if errors.Is(err, common.ErrNotFound) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	if item.WorkspaceID != observed.WorkspaceID || item.RunID != observed.RunID {
+		return common.ErrConflict
+	}
+	if item.State == common.ApprovalStatePending && item.ResolutionProposal != nil && item.ResolutionProposal.State == approvalmodel.ResolutionProposalPending {
+		if err := m.reconcileApprovalProposal(itemCtx, item); err != nil {
+			return fmt.Errorf("reconcile approval %s: %w", item.ID, err)
+		}
+		return nil
+	}
+	if (item.State == common.ApprovalStateApproved || item.State == common.ApprovalStateRejected) &&
+		(item.EvidenceRecordedAt == "" || item.ResolutionNotificationPublishedAt == "") {
+		if err := m.deliverResolvedApproval(itemCtx, item); err != nil {
+			return fmt.Errorf("deliver approval %s: %w", item.ID, err)
+		}
+	}
+	return nil
 }
 
 func (m *Biz) reconcileApprovalProposal(ctx context.Context, item *approvalmodel.Approval) error {

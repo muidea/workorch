@@ -108,7 +108,7 @@ func TestRestartSealsSoulMCPAndProfileSnapshotsAcrossOwnerRestart(t *testing.T) 
 	replay := command
 	replay.Bootstrap = &replayBootstrap
 	duplicate := sendSealedSnapshotRestart(t, secondHub, replay)
-	if duplicate.RunID != first.RunID || duplicate.Reason != runtimecontract.RuntimeExecutionIntentReasonDuplicateRestart {
+	if duplicate.RunID != first.RunID || duplicate.Outcome != runtimecontract.RuntimeExecutionIntentReconciliationRequested || duplicate.Reason != runtimecontract.RuntimeExecutionIntentReasonCurrentRunContinuationAccepted {
 		t.Fatalf("restart replay = %+v, first=%+v", duplicate, first)
 	}
 

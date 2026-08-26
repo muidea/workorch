@@ -14,7 +14,6 @@ func Contracts() []eventcontract.Contract {
 		TopicMemoryCommandGet,
 		TopicMemoryCommandListByWorkspace,
 		TopicMemoryCommandSearch,
-		TopicMemoryRecallTraceCommandGet,
 		TopicMemoryRecallTraceCommandList,
 	)...)
 	ret = append(ret, eventcontract.Build("memory", eventcontract.CommandClassWrite, eventcontract.LanePolicyState,
@@ -22,7 +21,8 @@ func Contracts() []eventcontract.Contract {
 		TopicMemoryCommandUpdate,
 		TopicMemoryCommandDelete,
 		TopicMemoryRecallTraceCommandUpsert,
-		TopicMemoryRecallTraceCommandDelete,
+		TopicMemoryCommandSealWorkspaceDeletion,
+		TopicMemoryCommandPurgeWorkspace,
 	)...)
 	return ret
 }

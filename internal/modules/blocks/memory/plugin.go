@@ -26,6 +26,7 @@ func (m *Module) Setup(_ context.Context, eventHub event.Hub, backgroundRoutine 
 	if setupErr := m.configure(memorybiz.Dependencies{
 		MemoryItems:        repos.MemoryItems,
 		MemoryRecallTraces: repos.MemoryRecallTraces,
+		WorkspaceDeletions: repos.WorkspaceDeletions,
 		EventHub:           eventHub,
 		BackgroundRoutine:  backgroundRoutine,
 	}); setupErr != nil {

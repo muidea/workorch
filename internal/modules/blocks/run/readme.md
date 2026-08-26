@@ -4,7 +4,7 @@ Status: active
 
 Type: stateful-block-contract
 
-Last Verified: 2026-08-25
+Last Verified: 2026-08-26
 
 ## 组件类型
 
@@ -14,7 +14,7 @@ opaque `RuntimeStateRecord` 物理 CAS/查询合同；不解释 SM-2/3/4 语义�
 
 ## 功能范围与边界
 
-`blocks/run` 管理 Run lifecycle、Run-owned replacement intent，以及 Step、RuntimeCheckpoint 的持久化查询/清理，
+`blocks/run` 管理 Run lifecycle、Run-owned replacement intent，以及 Step、RuntimeCheckpoint 的持久化查询和 Workspace-scoped 清理，
 并提供 Runtime aggregate 的 opaque 物理持久化、
 expected-revision CAS 和查询合同。Runtime 的 reducer、invariant、candidate、dispatch、evidence、recovery 与
 terminal decision/delivery handoff 均由 Orchestrator 负责；Run 不承担跨组件编排，但 Run terminal lifecycle 仍只由
@@ -27,8 +27,22 @@ terminal decision/delivery handoff 均由 Orchestrator 负责；Run 不承担跨
   administrative disposition，不读取 dispatch/governance/delivery ledger 做 SM-2/3/4 分类。该窄只读 topic，以及
   `TopicRunCommandRuntimeStateRecord` 和 readiness query，在 `Setup`（Configure 后）即订阅，早于常规 Run
   query/cleanup/CAS topic；state-record query 只能按 workspace/run 与可选的 opaque ref/revision 返回克隆的 record 或明确缺失，
-  不解释其 aggregate 语义。Orchestrator 通过该 typed record query load 后在 owner-local SM-4 分类 recovery case，
+  且三条 SM-4 read topic 都只接受 `kernel/orchestrator` source，不向 Application、projection 或其它 owner 暴露 opaque
+  aggregate。Orchestrator 通过该 typed record query load 后在 owner-local SM-4 分类 recovery case，
   不直接扫描 Run repository。
+  `TopicRunCommandWorkspaceRetirementInventory` 与 exact `TopicRunCommandWorkspaceRetirementFact` 也在 Setup phase
+  提前订阅，但只接受 `kernel/orchestrator` source；前者列出 durable `draining/retired` fence，后者在 Run owner
+  边界验证 Run、opaque Runtime record、lifecycle fence、terminal-delivery ref/revision/hash 的物理一致性。这样
+  Orchestrator 以更早 framework weight 启动时仍能恢复删除 gate；`draining` 中 terminal 且仍有 Runtime record 的
+  Run 会保留在 recovery inventory 供 terminal drain，`retired` Workspace 则不产生 recovery action。
+
+- Run owner 另通过 `TopicRunCommandLifecycleFactInventory` 提供分页、稳定排序的 current non-terminal
+  `RunStateChangedData` inventory，供 Workspace owner 补偿通知丢失或自身 CAS/存储失败。每项携带 Run owner 的
+  `WorkspaceRunGeneration`、`RunRevision`、opaque `RuntimeStateRevision/RuntimeStateRef` 与由这些坐标精确派生的
+  causation；opaque cursor 按 `WorkspaceID + generation + RunID` 排序，不从 RunID 字符串猜测先后。若同一 Workspace
+  出现多个 non-terminal Run，inventory 必须 fail-closed。它只重放
+  current SM-1 fact，不暴露 Runtime aggregate，也不接受目标 Run/Workspace state。terminal Run 不进入该 inventory，
+  Workspace 的 terminal slot release 仍只消费 Orchestrator 的 sealed terminal delivery。
 
 - 常规 Run command subscription 完成后，Run owner 发布一次 `TopicRunRuntimeCommandsReady` process-lifecycle
   fact。该 fact 的合同元数据为 `SM-4 + process scope + process-lifecycle identity`，不携带 workspace/run，也不迁移
@@ -36,23 +50,43 @@ terminal decision/delivery handoff 均由 Orchestrator 负责；Run 不承担跨
   owner-local startup recovery actions。这样 recovery 不依赖 `Weight()`，且不会在 `StoreRuntimeStateRecordCommand` 尚未注册时
   由 BackgroundRoutine 提前驱动。重复 ready fact 只能观察已清空的同一 handoff，不能再次调度 startup drive。
 
-- Run、Step、RuntimeCheckpoint 的查询、Run 删除、runtime resource purge 与 opaque Runtime CAS 均由
+- Run、Step、RuntimeCheckpoint 的查询、Workspace retirement/purge 与 opaque Runtime CAS 均由
   `blocks/run/pkg/events` 定义逐 topic 的具体 command/result。不存在跨 topic 的 `RunCommandResult` 联合 envelope；
-  `GetRunResult`、两类 Run list result、三类 Step result、两类 Checkpoint result、`PurgeRuntimeResourcesResult`、
-  `StoreRuntimeStateRecordResult` 和 `DeleteRunResult` 彼此不可替代，返回实体在离开 owner 前显式深拷贝。
+  `GetRunResult`、两类 Run list result、三类 Step result、两类 Checkpoint result、opaque store result 与
+  Workspace retirement/purge result 彼此不可替代，返回实体在离开 owner 前显式深拷贝。
 - 常规命令保持唯一入口 `handleCommand -> executeCommand`，并在同一次 `commandMu` 读锁与 workspace scope
-  fence 内，静态穷尽地委派到 Run query、Step query、Checkpoint query、opaque Runtime state store 和 resource
-  cleanup 五个 owner-private handler。公开 EventHub surface 不提供 create/ensure/update topic；Run creation material
+  fence 内，静态穷尽地委派到 Run query、Step query、Checkpoint query、opaque Runtime state store 和 Workspace
+  retirement 五个 owner-private handler。公开 EventHub surface 不提供 create/ensure/update/delete topic；Run creation material
   与 activation-memory handoff 均为 Biz 私有值，不在 `pkg/events` 暴露伪 create command。
 - ordinary Run creation 与 replacement successor materialization 共用唯一 `run.creation` owner-private
   dispatcher。两个入口只提交 immutable creation fact，不携带 `State`/时间戳；Run owner 选择
-  initial SM-1 `pending`、initial lineage `active`、封存 `CreatedAt` 并执行唯一 repository Create。
+  initial SM-1 `pending`、initial lineage `active`、封存 `CreatedAt`，再调用唯一
+  `CreateNextWorkspaceRun` persistence sink。repository 在共享 Workspace durable head 的同一临界区内原子分配
+  `WorkspaceRunGeneration` 与同源 `RunID`；二者均不能由 caller 指定、不能从现存 row/时间戳推断，且 Run delete、
+  runtime-directory purge、response loss 与进程重启均不复用。watermark 先于 Run row 持久化，因此写失败可以留下合法
+  generation gap，但不能重复 identity；Workspace purge 后也保留 generation head 与永久 retirement fence。同一 data root 的进程内独立 repository set 也按 head path 串行。file backend
+  当前合同为单进程 writer。
 - `run.replacement` 不是独立 resource state machine，而是 SM-1 唯一 Run owner 的 subordinate transaction。它只推进
   clarification、administrative termination handoff acknowledgement 与 successor materialization 的私有 stage/lease；
   不能选择 SM-2～SM-4 authority，也不成为 Run lifecycle 的第二 owner。交接顺序固定为：Run-private replacement event
   claim termination intent → Orchestrator SM-4 CAS 保存 `RuntimeTerminationRecord` 并投递 Result/Workspace/Run → Run-private
   SM-1 terminal event → replacement transaction 消费 exact acknowledgement 并继续唯一 successor。
-- workspace/run purge 通过 `PurgeRuntimeResourcesCommand` 由 Run owner 删除该 scope 下的 Step 与 RuntimeCheckpoint；命令必须先确认 Run 属于指定 workspace，并返回实际删除数量。
+- Workspace 删除只接受 `blocks/workspace` 的 typed prepare/finalize/purge command，并推进独立的 Run-owned resource
+  machine `run.workspace_retirement`，它不是 SM-1 transition，也不是第五个 Runtime SM。Prepare 在 Workspace generation-head
+  同一锁内验证 terminal/replacement invariant 与完整 immutable deletion identity，只落 `draining`；该 phase 永久拒绝
+  create/restart、普通 SM-1、Step 与 Checkpoint mutation，只为 terminal Run 保留 exact opaque Runtime-state CAS。
+  Orchestrator durable quiescing gate 封闭该 CAS 后返回绑定 generation head、ordered Run/Runtime physical revisions 与
+  hashes 的 typed token；Finalize 在同一 generation-head 锁内 exact compare 后才原子 `draining -> retired`，stale、duplicate
+  different payload 与 CAS race 都 fail-closed。generation watermark 允许合法 gap，但 token 的每个 Run generation 必须严格
+  递增且不越过 head；`retired` 后包括 opaque CAS 在内的所有 mutation 均永久关闭。
+- purge 只能由 canonical `RunOwnerRepositories` bundle 的唯一三 surface transaction 执行；Run/Step/RuntimeCheckpoint
+  repository 不再暴露可逐面调用的 purge lane。memory backend 在同一 owner lock、file backend 在同一 generation-head
+  lock 中独立枚举并复核三面（包括 orphan resource），返回固定顺序的 `ObservedBefore/Deleted/Remaining` receipt。
+  file backend 先持久化 named `pending` journal 与首次 observations，再物理删除并落 `completed`；response loss、重启或
+  中间 cut 都重放相同 receipt/proof hash，而不是伪造新的 empty proof。永久 retirement/generation head 始终保留。
+- retain 模式到达 `retired` 后，普通 Run/Step/RuntimeCheckpoint Get/List 在 owner query adapter 隐藏；专用 retirement
+  fact/inventory 与 private purge surface 仍按其窄合同可读，SM-4 recovery inventory不再产生该 Workspace 的 item，exact
+  Runtime-state record read返回 NotFound。`draining` 期间这些读取仅对 Orchestrator 保持可用，以完成 terminal drain。
 - Runtime 正式状态使用 typed `RuntimeStateRecord` 随 Run 物理持久化；update command 必须携带 expected runtime
   revision，并返回唯一的 `accepted`、`aggregate_revision_mismatch`、`semantic_rejection` 或 `owner_transient`
   typed fact。只有 expected/observed aggregate revision 实际不匹配才是 CAS；Run 对无关物理 record write 自行
@@ -64,6 +98,13 @@ terminal decision/delivery handoff 均由 Orchestrator 负责；Run 不承担跨
 - `WorkspaceExecutionIntentCommand` 的 restart 分支携带 typed `RuntimeBootstrap`，保存 effective Goal/DoD definition、
   ordered focus queue 与 prerequisite requirements，并显式绑定 Workspace owner 封存的 `StartupInputHash`。RequestID 的幂等身份绑定 workspace、Goal、DoD、definition
   revision、bootstrap hash 与固定 replacement policy；同 ID、不同 sealed payload 必须 conflict。Run 不接受或持久化没有执行消费者的队列优先级输入。
+- Restart 的 create 与 activation 是两个可恢复的 Run-private CAS 切点。Run 在暴露 Setup-phase Runtime inventory 前，
+  先完整扫描并校验所有 non-terminal/pending records；只有全量通过后，才将
+  `pending + valid sealed bootstrap + ActivationRequestID` 幂等激活。任何 malformed record、同 Workspace 多个
+  non-terminal Run 或 CAS/storage failure 都使 startup fail-closed，不能边扫描边部分写入。同 RequestID 重放时，
+  pending Run 继续 owner-private activation；active Run 补发 typed `RunContinuationRequestedData` 以修复 activation CAS
+  已提交但首次 notification/response 丢失的切点；不同 RequestID 不能抢占仍 pending 的 activation。重复恢复不创建
+  新 Run、不分配新 generation，也不重复推进已 active 的 SM-1 transition。
 - `ReplacementIntent` identity 只哈希当前 sealed payload；caller `Priority` 不属于模型、持久化、EventHub result、
   API projection 或调度。带 `Priority` 或其他退役/未知字段的 Run/intent JSON 在 repository decode 时直接失败。
 - 当 bootstrap 含有 activation Memory selection 时，Run owner 在 Run record 成功持久化后向 `blocks/memory` 发送一次 typed `UpsertMemoryRecallTraceCommand`。它使用稳定的 Run CreatedAt，并透传 sealed candidate/selected/excluded、quota、score/hit 与 byte/token budget；该消息只是不可变 activation audit，Memory owner 独占 create-once RecallTrace 持久化与首次 `MemoryRecallRecorded` 通知。固定 trace ID + 完整内容比较使 exact replay 零写入、内容漂移 conflict；memory observability 失败不得回滚已成功的 Run 创建。Run 启动时会从已持久化 bootstrap 重放该 fact，补偿 Run 提交后、Memory 交接前的崩溃窗口。
@@ -94,8 +135,10 @@ terminal decision/delivery handoff 均由 Orchestrator 负责；Run 不承担跨
   acknowledgement 必须匹配 fence 中 exact `ResolutionID`，即使 Run 已经 active 也要先完成该比较；opaque fence 的
   governance/terminal mode 必须恰选其一，terminal 不得夹带历史 governance identity。stale/错 resolution 零写入
   fail-closed；approval-only 路径与 ticket-only 路径同等合法。
-- Run 创建及状态变化使用 `RunStateChangedData` typed notification；通知只包含 SM-1 state、causation 与 opaque
-  RuntimeState revision/ref，不镜像 Orchestrator action/focus/repair。current Runtime record 同时持久化 Orchestrator-authored
+- Run 创建及状态变化使用 `RunStateChangedData` typed notification；通知只包含 SM-1 state、Run owner 分配的
+  `WorkspaceRunGeneration`、Run revision、causation 与 opaque RuntimeState revision/ref，不镜像 Orchestrator
+  action/focus/repair。同一个 generation/Run/revision/runtime-revision tuple 具有唯一事实身份，消费者可据此拒绝
+  stale、duplicate 或不可比较的投影输入。current Runtime record 同时持久化 Orchestrator-authored
   opaque lifecycle fence；Run 仅比较 scope/revision/ref/hash/bootstrap/fence，禁止解码 Decision、semantic、candidate、
   governance、evidence 或 drive 内容。通知不携带 schema-validity identity、不公开 aggregate 内容或选择 recovery action。
   Governance、Eventstream 和 application 按需订阅。
@@ -106,9 +149,9 @@ terminal decision/delivery handoff 均由 Orchestrator 负责；Run 不承担跨
 | 交互组件 | 方向 | 具体合同 | 当前结论 |
 | --- | --- | --- | --- |
 | `kernel/orchestrator` | 双向 | recovery inventory/readiness、opaque Runtime record query/CAS、lifecycle/governance/terminal handoff facts | 完整；SM-2/3/4 语义只在 Orchestrator，Run terminal 只在 SM-1 |
-| `blocks/workspace` | 双向 | Workspace-owner `WorkspaceExecutionIntentCommand`、Run state notification | 完整；application 不直连 Run mutation，SM-1 转换只在 Run reducer |
+| `blocks/workspace` | 双向 | Workspace-owner execution intent、retirement prepare/finalize/purge、Run state notification 与 current lifecycle fact inventory | 完整；application 不直连 Run mutation，SM-1 与 `run.workspace_retirement` 各自只在 Run private reducer |
 | `blocks/memory` | Run → Memory | activation recall trace upsert | 完整；观测失败不回滚 Run |
-| `application/workorchd` | 双向只读/清理 | typed Run/Step/Checkpoint query、Run delete、`RunStateChangedData` | 完整；不提交 lifecycle 或 Runtime CAS |
+| `application/workorchd` | 双向只读 | typed Run/Step/Checkpoint query、`RunStateChangedData` | 完整；不提交 lifecycle、删除或 Runtime CAS |
 | `kernel/governance` / `blocks/eventstream` | Run → consumer（Governance 另有只读 query） | typed Run query 与 `RunStateChangedData` | 完整；无 service/repository 注入 |
 
 ## 相关约束
@@ -126,6 +169,9 @@ terminal decision/delivery handoff 均由 Orchestrator 负责；Run 不承担跨
   materialization 与 lineage/activation 全部经同一 CAS reducer 推进，禁止 generic mutate callback。
   successor create、predecessor lineage CAS 和 successor activation 是可独立重放的持久化切点；任一切点后重启都只
   收敛到同一 successor。无法按当前结构读取的 predecessor 在 admission 前失败，且不持久化 replacement intent。
+  Run owner 以 Workspace-scoped private mutex 串行 restart admission 与 successor materialization；任何未完成
+  replacement transaction 对该 Workspace 独占，同 RequestID 只做 exact replay，不同 RequestID fail-closed。repository
+  在相同 Workspace identity 临界区内再原子拒绝第二个 non-terminal Run，形成 owner workflow 与 persistence 双 fence。
 - `ReplacementIntent.Recovery` 是 Run owner-private durable successor：stage 只允许 clarification resolution、administrative
   termination 与 successor materialization，state 只允许 scheduled/running/exhausted/completed，并绑定 exact intent hash、
   generation、attempt、dueAt。每次 side-effect 前先 CAS claim；失败在同一 owner reducer 中续排下一 generation。进程内
@@ -166,11 +212,12 @@ terminal decision/delivery handoff 均由 Orchestrator 负责；Run 不承担跨
 
 ## 回归覆盖
 
-已覆盖：SM-1 全状态合法/非法边矩阵（含 administrative cancel/supersede、终态反向迁移与未知状态拒绝）；Run creation/replacement successor 共用 private dispatcher、caller-selected initial state 与直达 repository Create 拒绝；ticket/approval
+已覆盖：SM-1 全状态合法/非法边矩阵（含 administrative cancel/supersede、终态反向迁移与未知状态拒绝）；Run creation/replacement successor 共用 private dispatcher、caller-selected initial state 与直达 repository Create 拒绝；durable Workspace head 的并发分配、watermark-first gap、delete/purge/reopen 后 RunID/generation 不复用、独立 repository set 串行与 single-live guard；ticket/approval
 两类 wait/continuation、terminal stale/duplicate、fresh-activation；restart RequestID sealed-payload 冲突、intent 先持久化、
 runtime clarification 同 seal/仅单项 lineage 变化的 typed 零写入拒绝、两项均变化的 acknowledgement gate，以及
 terminal→successor create→lineage CAS→activation 各持久化切点的崩溃恢复与
-唯一 successor；Runtime CAS source/scope/hash、aggregate revision race、物理 rebase 与 retired-field rejection；Setup 阶段
-inventory/record read、commands-ready 元数据与重复 handoff、typed result clone、workspace scope；activation Memory 完整
+唯一 successor；普通 create→activation cut 的 fresh-owner Setup 前自动恢复、全量校验后 CAS、same-request
+pending/active replay、typed continuation 补发、different-request pending conflict 与重复恢复零新 generation；Runtime CAS source/scope/hash、aggregate revision race、物理 rebase 与 retired-field rejection；Setup 阶段
+inventory/record read、三条 SM-4 read forged-source 拒绝、draining 可读与 retired exact-record 隐藏、commands-ready 元数据与重复 handoff、typed result clone、workspace scope；activation Memory 完整
 selection fact、missing subscriber/owner error 不回滚、Run 启动补写与 Memory owner exact replay、in-flight Stop 与重复
 Start/Stop。当前无本 README 已知可执行缺口。

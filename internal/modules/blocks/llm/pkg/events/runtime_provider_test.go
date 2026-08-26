@@ -52,6 +52,20 @@ func TestRequestRuntimeCandidateResultRequiresExclusiveOwnerFact(t *testing.T) {
 	if err := valid.Validate(); err != nil {
 		t.Fatalf("valid complete owner fact rejected: %v", err)
 	}
+	zeroByteOutputLimit := cloneRuntimeCandidateResult(valid)
+	zeroByteOutputLimit.DocumentOutcome = &RuntimeProviderDocumentOutcome{Framing: runtimecontract.RuntimeProviderDocumentFraming{
+		Disposition: runtimecontract.RuntimeProviderDocumentIncomplete, ExpectedDocumentHash: "expected-1",
+		Code: "max_output_tokens", Signature: "provider-output-limit",
+	}}
+	if err := zeroByteOutputLimit.Validate(); err != nil {
+		t.Fatalf("explicit zero-byte output-limit owner fact rejected: %v", err)
+	}
+	contradictoryOutputLimitAudit := cloneRuntimeCandidateResult(zeroByteOutputLimit)
+	contradictoryOutputLimitAudit.Audit.Status = "failed"
+	contradictoryOutputLimitAudit.Audit.FailureClass = string(runtimecontract.RuntimeCandidateFailureClassProviderProtocol)
+	if err := contradictoryOutputLimitAudit.Validate(); err == nil {
+		t.Fatal("incomplete document fact with a parallel protocol-failure audit was accepted")
+	}
 
 	missingContent := cloneRuntimeCandidateResult(valid)
 	missingContent.DocumentOutcome.Content = nil

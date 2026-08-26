@@ -18,8 +18,6 @@ func (m *Biz) handleRuntimeApprovalRequest(event magicevent.Event, result magice
 		setRuntimeApprovalRequestResult(result, approvalevents.OpenRuntimeApprovalRequestResult{}, common.ErrInvalidArgument)
 		return
 	}
-	m.lifecycleMu.Lock()
-	defer m.lifecycleMu.Unlock()
 	command, ok := event.Data().(approvalevents.OpenRuntimeApprovalRequestCommand)
 	if !ok || command.ApprovalID == "" || command.WorkspaceID == "" || command.RunID == "" || strings.TrimSpace(command.DispatchID) == "" ||
 		strings.TrimSpace(command.AuthoritySnapshotID) == "" || strings.TrimSpace(command.DependencyKind) != string(runtimecontract.GovernanceApproval) ||
@@ -29,6 +27,12 @@ func (m *Biz) handleRuntimeApprovalRequest(event magicevent.Event, result magice
 	}
 	ctx, err := common.BindRuntimeWorkspaceContext(event.Context(), command.WorkspaceID)
 	if err != nil {
+		setRuntimeApprovalRequestResult(result, approvalevents.OpenRuntimeApprovalRequestResult{}, err)
+		return
+	}
+	unlock := m.lockWorkspaceLifecycleMutation(command.WorkspaceID)
+	defer unlock()
+	if err := m.rejectFencedWorkspace(ctx, command.WorkspaceID); err != nil {
 		setRuntimeApprovalRequestResult(result, approvalevents.OpenRuntimeApprovalRequestResult{}, err)
 		return
 	}

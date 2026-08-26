@@ -18,7 +18,7 @@ func TestTerminalDeliveryDerivesCanonicalResultAndRejectsMaterialDrift(t *testin
 	hub := magicevent.NewHub(16)
 	t.Cleanup(func() { hub.Terminate(ctx) })
 	results := memory.NewResultRepository()
-	biz, err := New(hub, nil, Dependencies{Results: results, Artifacts: memory.NewArtifactRepository(), EventHub: hub})
+	biz, err := New(hub, nil, Dependencies{Results: results, Artifacts: memory.NewArtifactRepository(), WorkspaceDeletions: memory.NewResultWorkspaceDeletionRepository(), EventHub: hub})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -60,7 +60,7 @@ func TestTerminalDeliveryRecoversDraftAndPartialArtifactMaterialization(t *testi
 	t.Cleanup(func() { hub.Terminate(ctx) })
 	results := memory.NewResultRepository()
 	artifacts := memory.NewArtifactRepository()
-	biz, err := New(hub, nil, Dependencies{Results: results, Artifacts: artifacts, EventHub: hub})
+	biz, err := New(hub, nil, Dependencies{Results: results, Artifacts: artifacts, WorkspaceDeletions: memory.NewResultWorkspaceDeletionRepository(), EventHub: hub})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -108,7 +108,7 @@ func TestTerminalDeliveryPreservesFormalCloseoutArtifactHashAndMapsChildProjecti
 	t.Cleanup(func() { hub.Terminate(ctx) })
 	results := memory.NewResultRepository()
 	artifacts := memory.NewArtifactRepository()
-	biz, err := New(hub, nil, Dependencies{Results: results, Artifacts: artifacts, EventHub: hub})
+	biz, err := New(hub, nil, Dependencies{Results: results, Artifacts: artifacts, WorkspaceDeletions: memory.NewResultWorkspaceDeletionRepository(), EventHub: hub})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -164,7 +164,7 @@ func TestTerminalDeliveryReplayReemitsStableNotification(t *testing.T) {
 	ctx := context.Background()
 	hub := magicevent.NewHub(16)
 	t.Cleanup(func() { hub.Terminate(ctx) })
-	biz, err := New(hub, nil, Dependencies{Results: memory.NewResultRepository(), Artifacts: memory.NewArtifactRepository(), EventHub: hub})
+	biz, err := New(hub, nil, Dependencies{Results: memory.NewResultRepository(), Artifacts: memory.NewArtifactRepository(), WorkspaceDeletions: memory.NewResultWorkspaceDeletionRepository(), EventHub: hub})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -196,7 +196,8 @@ func TestResultOwnerStartReplaysDurableTerminalNotification(t *testing.T) {
 	results := memory.NewResultRepository()
 	artifacts := memory.NewArtifactRepository()
 	firstHub := magicevent.NewHub(16)
-	first, err := New(firstHub, nil, Dependencies{Results: results, Artifacts: artifacts, EventHub: firstHub})
+	deletions := memory.NewResultWorkspaceDeletionRepository()
+	first, err := New(firstHub, nil, Dependencies{Results: results, Artifacts: artifacts, WorkspaceDeletions: deletions, EventHub: firstHub})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -218,7 +219,7 @@ func TestResultOwnerStartReplaysDurableTerminalNotification(t *testing.T) {
 		}
 	})
 	t.Cleanup(func() { observer.Unsubscribe(resultevents.TopicResultAccepted) })
-	restarted, err := New(restartedHub, nil, Dependencies{Results: results, Artifacts: artifacts, EventHub: restartedHub})
+	restarted, err := New(restartedHub, nil, Dependencies{Results: results, Artifacts: artifacts, WorkspaceDeletions: deletions, EventHub: restartedHub})
 	if err != nil {
 		t.Fatal(err)
 	}

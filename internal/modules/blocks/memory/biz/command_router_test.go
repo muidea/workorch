@@ -8,16 +8,16 @@ import (
 
 func TestMemoryCommandTopicsHaveOneSemanticFamily(t *testing.T) {
 	expected := map[string]memoryCommandFamily{
-		memoryevents.TopicMemoryCommandCreate:            memoryCommandFamilyItem,
-		memoryevents.TopicMemoryCommandGet:               memoryCommandFamilyItem,
-		memoryevents.TopicMemoryCommandListByWorkspace:   memoryCommandFamilyItem,
-		memoryevents.TopicMemoryCommandSearch:            memoryCommandFamilyItem,
-		memoryevents.TopicMemoryCommandUpdate:            memoryCommandFamilyItem,
-		memoryevents.TopicMemoryCommandDelete:            memoryCommandFamilyItem,
-		memoryevents.TopicMemoryRecallTraceCommandUpsert: memoryCommandFamilyRecallTrace,
-		memoryevents.TopicMemoryRecallTraceCommandGet:    memoryCommandFamilyRecallTrace,
-		memoryevents.TopicMemoryRecallTraceCommandList:   memoryCommandFamilyRecallTrace,
-		memoryevents.TopicMemoryRecallTraceCommandDelete: memoryCommandFamilyRecallTrace,
+		memoryevents.TopicMemoryCommandCreate:                memoryCommandFamilyItem,
+		memoryevents.TopicMemoryCommandGet:                   memoryCommandFamilyItem,
+		memoryevents.TopicMemoryCommandListByWorkspace:       memoryCommandFamilyItem,
+		memoryevents.TopicMemoryCommandSearch:                memoryCommandFamilyItem,
+		memoryevents.TopicMemoryCommandUpdate:                memoryCommandFamilyItem,
+		memoryevents.TopicMemoryCommandDelete:                memoryCommandFamilyItem,
+		memoryevents.TopicMemoryRecallTraceCommandUpsert:     memoryCommandFamilyRecallTrace,
+		memoryevents.TopicMemoryRecallTraceCommandList:       memoryCommandFamilyRecallTrace,
+		memoryevents.TopicMemoryCommandSealWorkspaceDeletion: memoryCommandFamilyWorkspaceDeletion,
+		memoryevents.TopicMemoryCommandPurgeWorkspace:        memoryCommandFamilyWorkspaceDeletion,
 	}
 	topics := memoryCommandTopics()
 	if len(topics) != len(expected) {

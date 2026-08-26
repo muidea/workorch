@@ -28,10 +28,15 @@ func NewArtifactStorageRepository(base repository.ArtifactRepository, dataRoot s
 }
 
 func (r *artifactStorageRepository) Create(ctx context.Context, item *resultmodel.Artifact) error {
-	if err := r.prepareStoredArtifact(item); err != nil {
-		return err
+	if item == nil || item.WorkspaceID == "" {
+		return r.base.Create(ctx, item)
 	}
-	return r.base.Create(ctx, item)
+	return withWorkspaceDeletionMutation(ctx, r.dataRoot, "result", item.WorkspaceID, func(guarded context.Context) error {
+		if err := r.prepareStoredArtifact(item); err != nil {
+			return err
+		}
+		return r.base.Create(guarded, item)
+	})
 }
 
 func (r *artifactStorageRepository) Get(ctx context.Context, id common.ArtifactID) (*resultmodel.Artifact, error) {
@@ -51,10 +56,15 @@ func (r *artifactStorageRepository) ListByResult(ctx context.Context, resultID c
 }
 
 func (r *artifactStorageRepository) Update(ctx context.Context, item *resultmodel.Artifact) error {
-	if err := r.prepareStoredArtifact(item); err != nil {
-		return err
+	if item == nil || item.WorkspaceID == "" {
+		return r.base.Update(ctx, item)
 	}
-	return r.base.Update(ctx, item)
+	return withWorkspaceDeletionMutation(ctx, r.dataRoot, "result", item.WorkspaceID, func(guarded context.Context) error {
+		if err := r.prepareStoredArtifact(item); err != nil {
+			return err
+		}
+		return r.base.Update(guarded, item)
+	})
 }
 
 func (r *artifactStorageRepository) Delete(ctx context.Context, id common.ArtifactID) error {

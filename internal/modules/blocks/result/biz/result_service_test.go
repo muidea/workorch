@@ -7,23 +7,9 @@ import (
 
 	resultmodel "github.com/muidea/workorch/internal/modules/blocks/result/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
-	"github.com/muidea/workorch/internal/pkg/repository"
 	"github.com/muidea/workorch/internal/pkg/repository/memory"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
-
-type failOnceArtifactDeleteRepository struct {
-	repository.ArtifactRepository
-	failed bool
-}
-
-func (r *failOnceArtifactDeleteRepository) Delete(ctx context.Context, id common.ArtifactID) error {
-	if !r.failed {
-		r.failed = true
-		return errors.New("injected artifact delete interruption")
-	}
-	return r.ArtifactRepository.Delete(ctx, id)
-}
 
 func TestServiceRejectsInvalidResultAndArtifact(t *testing.T) {
 	ctx := context.Background()
@@ -41,7 +27,7 @@ func TestServiceRejectsInvalidResultAndArtifact(t *testing.T) {
 	}
 }
 
-func TestServiceCRUD(t *testing.T) {
+func TestServiceCreateReadUpdate(t *testing.T) {
 	ctx := context.Background()
 	service := newService(memory.NewResultRepository(), memory.NewArtifactRepository())
 	result := validTestResult()
@@ -67,21 +53,13 @@ func TestServiceCRUD(t *testing.T) {
 	if err := service.UpdateArtifact(ctx, artifact); err != nil {
 		t.Fatalf("UpdateArtifact: %v", err)
 	}
-	if err := service.DeleteArtifact(ctx, artifact.WorkspaceID, artifact.ID); !errors.Is(err, common.ErrConflict) {
-		t.Fatalf("DeleteArtifact while parent exists err = %v, want conflict", err)
-	}
-	if err := service.DeleteResult(ctx, result.WorkspaceID, result.ID); err != nil {
-		t.Fatalf("DeleteResult: %v", err)
-	}
-	if _, err := service.GetResult(ctx, result.ID); !errors.Is(err, common.ErrNotFound) {
-		t.Fatalf("GetResult after delete err = %v, want not found", err)
-	}
-	if _, err := service.GetArtifact(ctx, artifact.ID); !errors.Is(err, common.ErrNotFound) {
-		t.Fatalf("GetArtifact after aggregate delete err = %v, want not found", err)
+	updatedArtifact, err := service.GetArtifact(ctx, artifact.ID)
+	if err != nil || updatedArtifact.State != common.ArtifactStateAvailable {
+		t.Fatalf("GetArtifact after update = %+v, err=%v", updatedArtifact, err)
 	}
 }
 
-func TestServiceEnforcesArtifactParentScopeAndDeleteOrder(t *testing.T) {
+func TestServiceEnforcesArtifactParentScope(t *testing.T) {
 	ctx := context.Background()
 	resultRepo := memory.NewResultRepository()
 	artifactRepo := memory.NewArtifactRepository()
@@ -107,26 +85,9 @@ func TestServiceEnforcesArtifactParentScopeAndDeleteOrder(t *testing.T) {
 	if err := service.CreateArtifact(ctx, artifact); err != nil {
 		t.Fatal(err)
 	}
-	if err := service.DeleteArtifact(ctx, "ws-other", artifact.ID); !errors.Is(err, common.ErrNotFound) && !errors.Is(err, common.ErrConflict) {
-		t.Fatalf("cross-workspace artifact delete err = %v, want scoped rejection", err)
-	}
-	if err := service.DeleteArtifact(ctx, artifact.WorkspaceID, artifact.ID); !errors.Is(err, common.ErrConflict) {
-		t.Fatalf("delete attached artifact err = %v, want conflict", err)
-	}
-	if err := service.DeleteResult(ctx, result.WorkspaceID, result.ID); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := service.GetArtifact(ctx, artifact.ID); !errors.Is(err, common.ErrNotFound) {
-		t.Fatalf("aggregate child after parent delete err = %v, want not found", err)
-	}
-
-	orphan := validTestArtifact("missing-result")
-	orphan.ID = "artifact-orphan"
-	if err := artifactRepo.Create(ctx, orphan); err != nil {
-		t.Fatal(err)
-	}
-	if err := service.DeleteArtifact(ctx, orphan.WorkspaceID, orphan.ID); err != nil {
-		t.Fatalf("delete orphan artifact: %v", err)
+	stored, err := artifactRepo.Get(common.ContextWithRuntimeWorkspaceID(ctx, artifact.WorkspaceID), artifact.ID)
+	if err != nil || stored.ResultID != result.ID {
+		t.Fatalf("stored artifact = %+v, err=%v", stored, err)
 	}
 }
 
@@ -163,37 +124,6 @@ func TestServiceRejectsTerminalMaterialMutation(t *testing.T) {
 	item.Summary = "mutated after terminal persistence"
 	if err := service.UpdateResult(ctx, item); !errors.Is(err, common.ErrConflict) {
 		t.Fatalf("terminal material mutation err = %v, want conflict", err)
-	}
-}
-
-func TestResultAggregateDeleteResumesOrphanCleanupAfterInterruption(t *testing.T) {
-	ctx := context.Background()
-	results := memory.NewResultRepository()
-	baseArtifacts := memory.NewArtifactRepository()
-	artifacts := &failOnceArtifactDeleteRepository{ArtifactRepository: baseArtifacts}
-	service := newService(results, artifacts)
-	item := validTestResult()
-	if err := service.CreateResult(ctx, item); err != nil {
-		t.Fatal(err)
-	}
-	child := validTestArtifact(item.ID)
-	if err := service.CreateArtifact(ctx, child); err != nil {
-		t.Fatal(err)
-	}
-	if err := service.DeleteResult(ctx, item.WorkspaceID, item.ID); err == nil {
-		t.Fatal("aggregate delete unexpectedly ignored child interruption")
-	}
-	if _, err := results.Get(common.ContextWithRuntimeWorkspaceID(ctx, item.WorkspaceID), item.ID); !errors.Is(err, common.ErrNotFound) {
-		t.Fatalf("aggregate root after interruption err = %v, want not found", err)
-	}
-	if _, err := baseArtifacts.Get(common.ContextWithRuntimeWorkspaceID(ctx, item.WorkspaceID), child.ID); err != nil {
-		t.Fatalf("orphan child was not retained for retry: %v", err)
-	}
-	if err := service.DeleteResult(ctx, item.WorkspaceID, item.ID); err != nil {
-		t.Fatalf("resume orphan cleanup: %v", err)
-	}
-	if _, err := baseArtifacts.Get(common.ContextWithRuntimeWorkspaceID(ctx, item.WorkspaceID), child.ID); !errors.Is(err, common.ErrNotFound) {
-		t.Fatalf("orphan child after retry err = %v, want not found", err)
 	}
 }
 

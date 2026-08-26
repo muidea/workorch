@@ -15,7 +15,6 @@ type EventRecordRepository interface {
 	Get(context.Context, common.EventRecordID) (*eventstream.EventRecord, error)
 	List(context.Context, workorchquerycontract.EventRecordQuery) ([]*eventstream.EventRecord, error)
 	Delete(context.Context, common.EventRecordID) error
-	PurgeWorkspace(context.Context, common.WorkspaceID) (int, error)
 	EventRecordStreamPositionStore
 }
 

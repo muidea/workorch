@@ -8,6 +8,7 @@ import (
 	resultmodel "github.com/muidea/workorch/internal/modules/blocks/result/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/eventcontract"
+	deletioncontract "github.com/muidea/workorch/internal/pkg/workorchdeletioncontract"
 	"github.com/muidea/workorch/internal/pkg/workorchresultcontract"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
@@ -38,11 +39,6 @@ type ListResultsByRunCommand struct {
 	Limit       int
 }
 
-type DeleteResultCommand struct {
-	WorkspaceID common.WorkspaceID
-	ResultID    common.ResultID
-}
-
 type ListArtifactsByWorkspaceCommand struct {
 	WorkspaceID common.WorkspaceID
 	Cursor      string
@@ -63,9 +59,35 @@ type ListArtifactsByResultCommand struct {
 	Limit       int
 }
 
-type DeleteArtifactCommand struct {
-	WorkspaceID common.WorkspaceID
-	ArtifactID  common.ArtifactID
+type SealWorkspaceResultDeletionCommand struct {
+	WorkspaceID           common.WorkspaceID
+	DeletionID            string
+	DeletionGeneration    uint64
+	DataDispositionIntent deletioncontract.Mode
+	QuiescenceID          string
+	RequestHash           string
+}
+
+func (c SealWorkspaceResultDeletionCommand) Scope() deletioncontract.Scope {
+	return deletioncontract.Scope{WorkspaceID: c.WorkspaceID, DeletionID: c.DeletionID, DeletionGeneration: c.DeletionGeneration, Mode: c.DataDispositionIntent, QuiescenceID: c.QuiescenceID, RequestHash: c.RequestHash}.Normalize()
+}
+
+func (c SealWorkspaceResultDeletionCommand) Validate() error { return c.Scope().Validate() }
+
+type PurgeWorkspaceResultsCommand struct {
+	WorkspaceID        common.WorkspaceID
+	DeletionID         string
+	DeletionGeneration uint64
+	QuiescenceID       string
+	RequestHash        string
+}
+
+func (c PurgeWorkspaceResultsCommand) Scope() deletioncontract.Scope {
+	return deletioncontract.Scope{WorkspaceID: c.WorkspaceID, DeletionID: c.DeletionID, DeletionGeneration: c.DeletionGeneration, Mode: deletioncontract.ModePurge, QuiescenceID: c.QuiescenceID, RequestHash: c.RequestHash}.Normalize()
+}
+
+func (c PurgeWorkspaceResultsCommand) Validate() error {
+	return c.Scope().Validate()
 }
 
 type ResultChangedData struct {
@@ -128,7 +150,6 @@ type ListResultsByRunResult struct {
 	Results    []*resultmodel.Result
 	NextCursor string
 }
-type DeleteResultResult struct{ Deleted bool }
 type ListArtifactsByWorkspaceResult struct {
 	Artifacts  []*resultmodel.Artifact
 	NextCursor string
@@ -141,7 +162,26 @@ type ListArtifactsByResultResult struct {
 	Artifacts  []*resultmodel.Artifact
 	NextCursor string
 }
-type DeleteArtifactResult struct{ Deleted bool }
+
+type SealWorkspaceResultDeletionResult struct {
+	WorkspaceID        common.WorkspaceID
+	DeletionID         string
+	DeletionGeneration uint64
+	FenceID            string
+	Revision           uint64
+	AckHash            string
+}
+
+type PurgeWorkspaceResultsResult struct {
+	WorkspaceID        common.WorkspaceID
+	DeletionID         string
+	DeletionGeneration uint64
+	FenceID            string
+	PurgeID            string
+	Revision           uint64
+	AckHash            string
+	PurgeProofHash     string
+}
 
 func NormalizeListWindow(cursor string, limit int) (string, int, error) {
 	cursor = strings.TrimSpace(cursor)
@@ -285,11 +325,11 @@ func MessageContracts() []eventcontract.MessageContract {
 		eventcontract.CommandTopic[GetResultCommand, GetResultResult]("result", definitionPackage, eventcontract.CommandClassRead, eventcontract.LanePolicyQuery, TopicResultCommandGet).MessageContract(),
 		eventcontract.CommandTopic[ListResultsByWorkspaceCommand, ListResultsByWorkspaceResult]("result", definitionPackage, eventcontract.CommandClassRead, eventcontract.LanePolicyQuery, TopicResultCommandListByWorkspace).MessageContract(),
 		eventcontract.CommandTopic[ListResultsByRunCommand, ListResultsByRunResult]("result", definitionPackage, eventcontract.CommandClassRead, eventcontract.LanePolicyQuery, TopicResultCommandListByRun).MessageContract(),
-		eventcontract.CommandTopic[DeleteResultCommand, DeleteResultResult]("result", definitionPackage, eventcontract.CommandClassWrite, eventcontract.LanePolicyState, TopicResultCommandDelete).MessageContract(),
 		eventcontract.CommandTopic[ListArtifactsByWorkspaceCommand, ListArtifactsByWorkspaceResult]("result", definitionPackage, eventcontract.CommandClassRead, eventcontract.LanePolicyQuery, TopicArtifactCommandListByWorkspace).MessageContract(),
 		eventcontract.CommandTopic[ListArtifactsByRunCommand, ListArtifactsByRunResult]("result", definitionPackage, eventcontract.CommandClassRead, eventcontract.LanePolicyQuery, TopicArtifactCommandListByRun).MessageContract(),
 		eventcontract.CommandTopic[ListArtifactsByResultCommand, ListArtifactsByResultResult]("result", definitionPackage, eventcontract.CommandClassRead, eventcontract.LanePolicyQuery, TopicArtifactCommandListByResult).MessageContract(),
-		eventcontract.CommandTopic[DeleteArtifactCommand, DeleteArtifactResult]("result", definitionPackage, eventcontract.CommandClassWrite, eventcontract.LanePolicyState, TopicArtifactCommandDelete).MessageContract(),
+		eventcontract.CommandTopic[SealWorkspaceResultDeletionCommand, SealWorkspaceResultDeletionResult]("result", definitionPackage, eventcontract.CommandClassWrite, eventcontract.LanePolicyState, TopicResultCommandSealWorkspaceDeletion).MessageContract(),
+		eventcontract.CommandTopic[PurgeWorkspaceResultsCommand, PurgeWorkspaceResultsResult]("result", definitionPackage, eventcontract.CommandClassWrite, eventcontract.LanePolicyState, TopicResultCommandPurgeWorkspace).MessageContract(),
 	}
 	for _, topic := range []string{
 		TopicResultCreated,

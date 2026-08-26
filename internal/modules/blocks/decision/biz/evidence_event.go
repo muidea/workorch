@@ -41,41 +41,43 @@ func (m *Biz) recordDecisionResolutionEvidence(ctx context.Context, ticket *deci
 		SuccessorRunID:     resolution.SuccessorRunID,
 		Timestamp:          timestamp,
 	}
-	ev := magicevent.NewEventWithContext(
-		decisionevents.TopicDecisionCommandRecordEvidence,
-		modulecommon.ModuleID,
-		decisionevents.EvidenceCommandDestination,
-		magicevent.NewHeader(),
-		ctx,
-		command,
-	)
-	ev.BindLaneKey(workorchevents.EventHubLaneKeyFor(decisionevents.Contracts(), ev.ID(), eventcontract.LaneScope{
-		SubjectType: "decision_ticket",
-		SubjectID:   string(ticket.ID),
-		WorkspaceID: string(ticket.WorkspaceID),
-		RunID:       string(ticket.RunID),
-		StepID:      string(ticket.StepID),
-	}))
-	result := m.SendEvent(ev)
-	if result == nil {
-		return fmt.Errorf("decision evidence command returned no result")
-	}
-	if resultErr := result.Error(); resultErr != nil {
-		if resultErr.Cause != nil {
-			return resultErr.Cause
+	return m.withWorkspaceActiveDelivery(ctx, ticket.WorkspaceID, func(guarded context.Context) error {
+		ev := magicevent.NewEventWithContext(
+			decisionevents.TopicDecisionCommandRecordEvidence,
+			modulecommon.ModuleID,
+			decisionevents.EvidenceCommandDestination,
+			magicevent.NewHeader(),
+			guarded,
+			command,
+		)
+		ev.BindLaneKey(workorchevents.EventHubLaneKeyFor(decisionevents.Contracts(), ev.ID(), eventcontract.LaneScope{
+			SubjectType: "decision_ticket",
+			SubjectID:   string(ticket.ID),
+			WorkspaceID: string(ticket.WorkspaceID),
+			RunID:       string(ticket.RunID),
+			StepID:      string(ticket.StepID),
+		}))
+		result := m.SendEvent(ev)
+		if result == nil {
+			return fmt.Errorf("decision evidence command returned no result")
 		}
-		return resultErr
-	}
-	data, resultErr := result.Get()
-	if resultErr != nil {
-		if resultErr.Cause != nil {
-			return resultErr.Cause
+		if resultErr := result.Error(); resultErr != nil {
+			if resultErr.Cause != nil {
+				return resultErr.Cause
+			}
+			return resultErr
 		}
-		return resultErr
-	}
-	response, ok := data.(decisionevents.RecordDecisionEvidenceResult)
-	if !ok || response.EvidenceRecordID != command.EvidenceRecordID {
-		return fmt.Errorf("%w: decision evidence result type %T", common.ErrInvalidArgument, data)
-	}
-	return nil
+		data, resultErr := result.Get()
+		if resultErr != nil {
+			if resultErr.Cause != nil {
+				return resultErr.Cause
+			}
+			return resultErr
+		}
+		response, ok := data.(decisionevents.RecordDecisionEvidenceResult)
+		if !ok || response.EvidenceRecordID != command.EvidenceRecordID {
+			return fmt.Errorf("%w: decision evidence result type %T", common.ErrInvalidArgument, data)
+		}
+		return nil
+	})
 }

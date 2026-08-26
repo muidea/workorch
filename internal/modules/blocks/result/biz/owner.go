@@ -2,6 +2,7 @@ package result
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"sync"
 	"time"
@@ -22,10 +23,11 @@ import (
 const ModuleID = modulecommon.ModuleID
 
 type Dependencies struct {
-	Results           repository.ResultRepository
-	Artifacts         repository.ArtifactRepository
-	EventHub          magicevent.Hub
-	BackgroundRoutine task.BackgroundRoutine
+	Results            repository.ResultRepository
+	Artifacts          repository.ArtifactRepository
+	WorkspaceDeletions repository.ResultWorkspaceDeletionRepository
+	EventHub           magicevent.Hub
+	BackgroundRoutine  task.BackgroundRoutine
 }
 
 type Biz struct {
@@ -35,6 +37,9 @@ type Biz struct {
 	started                    bool
 	notificationRecoveryMu     sync.Mutex
 	notificationRecoveryCancel context.CancelFunc
+	workspaceDeletions         repository.ResultWorkspaceDeletionRepository
+	workspaceLocksMu           sync.Mutex
+	workspaceLocks             map[common.WorkspaceID]*sync.Mutex
 }
 
 const (
@@ -43,13 +48,16 @@ const (
 )
 
 func New(h magicevent.Hub, b task.BackgroundRoutine, deps Dependencies) (*Biz, error) {
-	if deps.Results == nil || deps.Artifacts == nil || deps.EventHub == nil {
+	if deps.Results == nil || deps.Artifacts == nil || deps.WorkspaceDeletions == nil || deps.EventHub == nil {
 		return nil, common.ErrInvalidArgument
 	}
 	if h == nil {
 		return nil, common.ErrInvalidArgument
 	}
-	return &Biz{Base: basebiz.New(modulecommon.ModuleID, h, b), service: newService(deps.Results, deps.Artifacts)}, nil
+	return &Biz{
+		Base: basebiz.New(modulecommon.ModuleID, h, b), service: newService(deps.Results, deps.Artifacts),
+		workspaceDeletions: deps.WorkspaceDeletions, workspaceLocks: map[common.WorkspaceID]*sync.Mutex{},
+	}, nil
 }
 
 func (m *Biz) Start() error {
@@ -63,11 +71,9 @@ func (m *Biz) Start() error {
 		resultevents.TopicResultCommandGet,
 		resultevents.TopicResultCommandListByWorkspace,
 		resultevents.TopicResultCommandListByRun,
-		resultevents.TopicResultCommandDelete,
 		resultevents.TopicArtifactCommandListByWorkspace,
 		resultevents.TopicArtifactCommandListByRun,
 		resultevents.TopicArtifactCommandListByResult,
-		resultevents.TopicArtifactCommandDelete,
 	}
 	for _, topic := range m.topics {
 		m.SubscribeFunc(topic, m.handleCommand)
@@ -108,6 +114,8 @@ func (m *Biz) Teardown(context.Context) {
 	m.service = nil
 	m.started = false
 	m.notificationRecoveryCancel = nil
+	m.workspaceDeletions = nil
+	m.workspaceLocks = nil
 }
 
 func (m *Biz) replayTerminalNotifications(ctx context.Context) error {
@@ -134,9 +142,20 @@ func (m *Biz) replayTerminalNotifications(ctx context.Context) error {
 			if item == nil || resultevents.ResultNotificationID(item) == "" {
 				continue
 			}
-			switch item.State {
-			case common.ResultStateAccepted, common.ResultStateRejected, common.ResultStateSuperseded:
-				m.publishResultChanged(ctx, item)
+			unlock := m.lockWorkspaceMutation(item.WorkspaceID)
+			fenceErr := m.workspaceDeletions.WithWorkspaceActiveFence(ctx, item.WorkspaceID, func(context.Context) error {
+				switch item.State {
+				case common.ResultStateAccepted, common.ResultStateRejected, common.ResultStateSuperseded:
+					m.publishResultChanged(ctx, item)
+				}
+				return nil
+			})
+			unlock()
+			if fenceErr != nil {
+				if errors.Is(fenceErr, common.ErrNotFound) {
+					continue
+				}
+				return fenceErr
 			}
 		}
 		if next == "" {
@@ -156,6 +175,17 @@ func (m *Biz) handleCommand(ev magicevent.Event, result magicevent.Result) {
 		setCommandResult(result, struct{}{}, common.ErrInvalidArgument)
 		return
 	}
+	workspaceID, ok := resultQueryWorkspaceID(ev)
+	if !ok {
+		setCommandResult(result, struct{}{}, common.ErrInvalidArgument)
+		return
+	}
+	unlock := m.lockWorkspaceMutation(workspaceID)
+	defer unlock()
+	if err := m.rejectFencedWorkspace(ev.Context(), workspaceID); err != nil {
+		setCommandResult(result, struct{}{}, err)
+		return
+	}
 	switch ev.ID() {
 	case resultevents.TopicResultCommandGet:
 		response, err := m.getResult(ev)
@@ -166,9 +196,6 @@ func (m *Biz) handleCommand(ev magicevent.Event, result magicevent.Result) {
 	case resultevents.TopicResultCommandListByRun:
 		response, err := m.listResultsByRun(ev)
 		setCommandResult(result, response, err)
-	case resultevents.TopicResultCommandDelete:
-		response, err := m.deleteResult(ev)
-		setCommandResult(result, response, err)
 	case resultevents.TopicArtifactCommandListByWorkspace:
 		response, err := m.listArtifactsByWorkspace(ev)
 		setCommandResult(result, response, err)
@@ -178,11 +205,30 @@ func (m *Biz) handleCommand(ev magicevent.Event, result magicevent.Result) {
 	case resultevents.TopicArtifactCommandListByResult:
 		response, err := m.listArtifactsByResult(ev)
 		setCommandResult(result, response, err)
-	case resultevents.TopicArtifactCommandDelete:
-		response, err := m.deleteArtifact(ev)
-		setCommandResult(result, response, err)
 	default:
 		setCommandResult(result, struct{}{}, common.ErrInvalidArgument)
+	}
+}
+
+func resultQueryWorkspaceID(ev magicevent.Event) (common.WorkspaceID, bool) {
+	if ev == nil {
+		return "", false
+	}
+	switch command := ev.Data().(type) {
+	case resultevents.GetResultCommand:
+		return command.WorkspaceID, command.WorkspaceID != ""
+	case resultevents.ListResultsByWorkspaceCommand:
+		return command.WorkspaceID, command.WorkspaceID != ""
+	case resultevents.ListResultsByRunCommand:
+		return command.WorkspaceID, command.WorkspaceID != ""
+	case resultevents.ListArtifactsByWorkspaceCommand:
+		return command.WorkspaceID, command.WorkspaceID != ""
+	case resultevents.ListArtifactsByRunCommand:
+		return command.WorkspaceID, command.WorkspaceID != ""
+	case resultevents.ListArtifactsByResultCommand:
+		return command.WorkspaceID, command.WorkspaceID != ""
+	default:
+		return "", false
 	}
 }
 
@@ -239,21 +285,6 @@ func (m *Biz) listResultsByRun(ev magicevent.Event) (resultevents.ListResultsByR
 	return resultevents.ListResultsByRunResult{Results: page, NextCursor: next}, err
 }
 
-func (m *Biz) deleteResult(ev magicevent.Event) (resultevents.DeleteResultResult, error) {
-	cmd, ok := ev.Data().(resultevents.DeleteResultCommand)
-	if !ok || cmd.WorkspaceID == "" || cmd.ResultID == "" {
-		return resultevents.DeleteResultResult{}, common.ErrInvalidArgument
-	}
-	ctx, err := resultCommandContext(ev.Context(), cmd.WorkspaceID)
-	if err != nil {
-		return resultevents.DeleteResultResult{}, err
-	}
-	if err := m.service.DeleteResult(ctx, cmd.WorkspaceID, cmd.ResultID); err != nil {
-		return resultevents.DeleteResultResult{}, err
-	}
-	return resultevents.DeleteResultResult{Deleted: true}, nil
-}
-
 func (m *Biz) listArtifactsByWorkspace(ev magicevent.Event) (resultevents.ListArtifactsByWorkspaceResult, error) {
 	cmd, ok := ev.Data().(resultevents.ListArtifactsByWorkspaceCommand)
 	if !ok || cmd.WorkspaceID == "" {
@@ -303,21 +334,6 @@ func (m *Biz) listArtifactsByResult(ev magicevent.Event) (resultevents.ListArtif
 	}
 	page, next, err := paginateArtifacts(items, cmd.Cursor, cmd.Limit)
 	return resultevents.ListArtifactsByResultResult{Artifacts: page, NextCursor: next}, err
-}
-
-func (m *Biz) deleteArtifact(ev magicevent.Event) (resultevents.DeleteArtifactResult, error) {
-	cmd, ok := ev.Data().(resultevents.DeleteArtifactCommand)
-	if !ok || cmd.WorkspaceID == "" || cmd.ArtifactID == "" {
-		return resultevents.DeleteArtifactResult{}, common.ErrInvalidArgument
-	}
-	ctx, err := resultCommandContext(ev.Context(), cmd.WorkspaceID)
-	if err != nil {
-		return resultevents.DeleteArtifactResult{}, err
-	}
-	if err := m.service.DeleteArtifact(ctx, cmd.WorkspaceID, cmd.ArtifactID); err != nil {
-		return resultevents.DeleteArtifactResult{}, err
-	}
-	return resultevents.DeleteArtifactResult{Deleted: true}, nil
 }
 
 func paginateResults(items []*resultmodel.Result, cursor string, limit int) ([]*resultmodel.Result, string, error) {

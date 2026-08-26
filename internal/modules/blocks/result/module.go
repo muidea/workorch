@@ -19,7 +19,7 @@ func (m *Module) configure(d resultbiz.Dependencies) error {
 	if m == nil {
 		return common.ErrInvalidArgument
 	}
-	if d.EventHub == nil || d.Results == nil || d.Artifacts == nil {
+	if d.EventHub == nil || d.Results == nil || d.Artifacts == nil || d.WorkspaceDeletions == nil {
 		return common.ErrInvalidArgument
 	}
 	x, e := resultbiz.New(d.EventHub, d.BackgroundRoutine, d)

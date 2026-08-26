@@ -14,8 +14,119 @@ import (
 	resultmodel "github.com/muidea/workorch/internal/modules/blocks/result/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/repository/memory"
+	deletioncontract "github.com/muidea/workorch/internal/pkg/workorchdeletioncontract"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
+
+func TestResultWorkspaceDeletionFenceHidesRetainedDataAndPurgeIsStable(t *testing.T) {
+	ctx := context.Background()
+	hub := magicevent.NewHub(32)
+	t.Cleanup(func() { hub.Terminate(ctx) })
+	repositories := memory.NewResultOwnerRepositorySet()
+	module := New()
+	if err := module.Configure(resultbiz.Dependencies{
+		Results: repositories.Results, Artifacts: repositories.Artifacts,
+		WorkspaceDeletions: repositories.WorkspaceDeletions, EventHub: hub,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := module.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = module.Stop(ctx) })
+
+	retained := validModuleTestResult()
+	retained.WorkspaceID, retained.ID = "ws-result-retain", "result-retain"
+	if err := repositories.Results.Create(ctx, retained); err != nil {
+		t.Fatal(err)
+	}
+	retainScope := deletioncontract.Scope{WorkspaceID: retained.WorkspaceID, DeletionID: "delete-retain", DeletionGeneration: 1, Mode: deletioncontract.ModeRetain, QuiescenceID: "quiescence-retain"}
+	retainScope.RequestHash = deletioncontract.StableRequestHash(retainScope)
+	sealResultWorkspaceDeletion(t, ctx, hub, resultevents.SealWorkspaceResultDeletionCommand{
+		WorkspaceID: retainScope.WorkspaceID, DeletionID: retainScope.DeletionID, DeletionGeneration: 1,
+		DataDispositionIntent: retainScope.Mode, QuiescenceID: retainScope.QuiescenceID, RequestHash: retainScope.RequestHash,
+	})
+	query := hub.Send(magicevent.NewEventWithContext(resultevents.TopicResultCommandGet, "test", resultevents.CommandDestination, magicevent.NewHeader(), ctx, resultevents.GetResultCommand{WorkspaceID: retained.WorkspaceID, ResultID: retained.ID}))
+	if query == nil || !errors.Is(query.Error(), common.ErrNotFound) {
+		t.Fatalf("retained public read error = %v, want not found", query)
+	}
+	if _, err := repositories.Results.Get(common.ContextWithRuntimeWorkspaceID(ctx, retained.WorkspaceID), retained.ID); err != nil {
+		t.Fatalf("retain physically removed result: %v", err)
+	}
+	late := validModuleTestResult()
+	late.WorkspaceID, late.ID = retained.WorkspaceID, "result-late"
+	if err := repositories.Results.Create(ctx, late); !errors.Is(err, common.ErrNotFound) {
+		t.Fatalf("late retained write error = %v, want not found", err)
+	}
+
+	purged := validModuleTestResult()
+	purged.WorkspaceID, purged.ID = "ws-result-purge", "result-purge"
+	artifact := validModuleTestArtifact(purged.ID)
+	artifact.WorkspaceID = purged.WorkspaceID
+	if err := repositories.Results.Create(ctx, purged); err != nil {
+		t.Fatal(err)
+	}
+	if err := repositories.Artifacts.Create(ctx, artifact); err != nil {
+		t.Fatal(err)
+	}
+	purgeScope := deletioncontract.Scope{WorkspaceID: purged.WorkspaceID, DeletionID: "delete-purge", DeletionGeneration: 1, Mode: deletioncontract.ModePurge, QuiescenceID: "quiescence-purge"}
+	purgeScope.RequestHash = deletioncontract.StableRequestHash(purgeScope)
+	sealCommand := resultevents.SealWorkspaceResultDeletionCommand{WorkspaceID: purgeScope.WorkspaceID, DeletionID: purgeScope.DeletionID, DeletionGeneration: 1, DataDispositionIntent: purgeScope.Mode, QuiescenceID: purgeScope.QuiescenceID, RequestHash: purgeScope.RequestHash}
+	sealResultWorkspaceDeletion(t, ctx, hub, sealCommand)
+	purgeCommand := resultevents.PurgeWorkspaceResultsCommand{WorkspaceID: sealCommand.WorkspaceID, DeletionID: sealCommand.DeletionID, DeletionGeneration: sealCommand.DeletionGeneration, QuiescenceID: sealCommand.QuiescenceID, RequestHash: sealCommand.RequestHash}
+	response := hub.Send(magicevent.NewEventWithContext(resultevents.TopicResultCommandPurgeWorkspace, "blocks/workspace", resultevents.CommandDestination, magicevent.NewHeader(), ctx, purgeCommand))
+	if response == nil || response.Error() != nil {
+		t.Fatalf("purge response = %v", response)
+	}
+	data, err := response.Get()
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, ok := data.(resultevents.PurgeWorkspaceResultsResult)
+	if !ok || result.ValidateFor(purgeCommand) != nil {
+		t.Fatalf("purge result = %#v", data)
+	}
+	replay := hub.Send(magicevent.NewEventWithContext(resultevents.TopicResultCommandPurgeWorkspace, "blocks/workspace", resultevents.CommandDestination, magicevent.NewHeader(), ctx, purgeCommand))
+	if replay == nil || replay.Error() != nil {
+		t.Fatalf("purge replay = %v", replay)
+	}
+	replayData, err := replay.Get()
+	if err != nil || replayData.(resultevents.PurgeWorkspaceResultsResult) != result {
+		t.Fatalf("purge replay drift: first=%#v replay=%#v err=%v", result, replayData, err)
+	}
+	results, _ := repositories.Results.ListByWorkspace(ctx, purged.WorkspaceID)
+	artifacts, _ := repositories.Artifacts.ListByWorkspace(ctx, purged.WorkspaceID)
+	if len(results) != 0 || len(artifacts) != 0 {
+		t.Fatalf("purge left data: results=%d artifacts=%d", len(results), len(artifacts))
+	}
+	if tombstone, err := repositories.WorkspaceDeletions.Get(ctx, purged.WorkspaceID); err != nil || tombstone.Phase != resultmodel.WorkspaceDeletionPhasePurged {
+		t.Fatalf("purge tombstone = %#v err=%v", tombstone, err)
+	}
+}
+
+func sealResultWorkspaceDeletion(t *testing.T, ctx context.Context, hub magicevent.Hub, command resultevents.SealWorkspaceResultDeletionCommand) {
+	t.Helper()
+	var first resultevents.SealWorkspaceResultDeletionResult
+	for attempt := 0; attempt < 2; attempt++ {
+		response := hub.Send(magicevent.NewEventWithContext(resultevents.TopicResultCommandSealWorkspaceDeletion, "blocks/workspace", resultevents.CommandDestination, magicevent.NewHeader(), ctx, command))
+		if response == nil || response.Error() != nil {
+			t.Fatalf("seal response = %v", response)
+		}
+		data, err := response.Get()
+		if err != nil {
+			t.Fatal(err)
+		}
+		result, ok := data.(resultevents.SealWorkspaceResultDeletionResult)
+		if !ok || result.ValidateFor(command) != nil {
+			t.Fatalf("seal result = %#v", data)
+		}
+		if attempt == 0 {
+			first = result
+		} else if result != first {
+			t.Fatalf("seal replay drift: first=%#v replay=%#v", first, result)
+		}
+	}
+}
 
 func TestModuleSetupRequiresRepositories(t *testing.T) {
 	if ModuleID != "blocks/result" {
@@ -82,9 +193,7 @@ func TestModuleManagesResultsAndArtifacts(t *testing.T) {
 	}
 	module := New()
 	if err := module.Configure(resultbiz.Dependencies{
-		Results:   resultRepo,
-		Artifacts: artifactRepo,
-		EventHub:  hub,
+		Results: resultRepo, Artifacts: artifactRepo, WorkspaceDeletions: memory.NewResultWorkspaceDeletionRepository(), EventHub: hub,
 	}); err != nil {
 		t.Fatalf("Setup: %v", err)
 	}
@@ -111,9 +220,7 @@ func TestModuleRunIsIdempotent(t *testing.T) {
 	ctx := context.Background()
 	module := New()
 	if err := module.Configure(resultbiz.Dependencies{
-		Results:   memory.NewResultRepository(),
-		Artifacts: memory.NewArtifactRepository(),
-		EventHub:  magicevent.NewHub(16),
+		Results: memory.NewResultRepository(), Artifacts: memory.NewArtifactRepository(), WorkspaceDeletions: memory.NewResultWorkspaceDeletionRepository(), EventHub: magicevent.NewHub(16),
 	}); err != nil {
 		t.Fatalf("Setup: %v", err)
 	}
@@ -127,9 +234,7 @@ func TestModuleRunIsIdempotent(t *testing.T) {
 		t.Fatalf("Teardown: %v", err)
 	}
 	if err := module.Configure(resultbiz.Dependencies{
-		Results:   memory.NewResultRepository(),
-		Artifacts: memory.NewArtifactRepository(),
-		EventHub:  magicevent.NewHub(16),
+		Results: memory.NewResultRepository(), Artifacts: memory.NewArtifactRepository(), WorkspaceDeletions: memory.NewResultWorkspaceDeletionRepository(), EventHub: magicevent.NewHub(16),
 	}); err != nil {
 		t.Fatalf("Setup after Teardown: %v", err)
 	}
@@ -144,9 +249,7 @@ func TestModuleRejectsInvalidResultCommandWithoutSideEffect(t *testing.T) {
 	resultRepo := memory.NewResultRepository()
 	module := New()
 	if err := module.Configure(resultbiz.Dependencies{
-		Results:   resultRepo,
-		Artifacts: memory.NewArtifactRepository(),
-		EventHub:  hub,
+		Results: resultRepo, Artifacts: memory.NewArtifactRepository(), WorkspaceDeletions: memory.NewResultWorkspaceDeletionRepository(), EventHub: hub,
 	}); err != nil {
 		t.Fatalf("Configure: %v", err)
 	}
@@ -184,9 +287,7 @@ func TestModuleHandlesResultCommandsOverEventHub(t *testing.T) {
 	}
 	module := New()
 	if err := module.Configure(resultbiz.Dependencies{
-		Results:   resultRepo,
-		Artifacts: memory.NewArtifactRepository(),
-		EventHub:  hub,
+		Results: resultRepo, Artifacts: memory.NewArtifactRepository(), WorkspaceDeletions: memory.NewResultWorkspaceDeletionRepository(), EventHub: hub,
 	}); err != nil {
 		t.Fatalf("Setup: %v", err)
 	}
@@ -212,7 +313,7 @@ func TestResultOwnerListContractsAreBoundedAndCursorBased(t *testing.T) {
 		}
 	}
 	module := New()
-	if err := module.Configure(resultbiz.Dependencies{Results: results, Artifacts: memory.NewArtifactRepository(), EventHub: hub}); err != nil {
+	if err := module.Configure(resultbiz.Dependencies{Results: results, Artifacts: memory.NewArtifactRepository(), WorkspaceDeletions: memory.NewResultWorkspaceDeletionRepository(), EventHub: hub}); err != nil {
 		t.Fatal(err)
 	}
 	if err := module.Start(); err != nil {
@@ -248,9 +349,7 @@ func TestResultOwnerCommandsPublishLifecycleNotifications(t *testing.T) {
 	t.Cleanup(func() { hub.Terminate(ctx) })
 	module := New()
 	if err := module.Configure(resultbiz.Dependencies{
-		Results:   memory.NewResultRepository(),
-		Artifacts: memory.NewArtifactRepository(),
-		EventHub:  hub,
+		Results: memory.NewResultRepository(), Artifacts: memory.NewArtifactRepository(), WorkspaceDeletions: memory.NewResultWorkspaceDeletionRepository(), EventHub: hub,
 	}); err != nil {
 		t.Fatalf("Configure: %v", err)
 	}
@@ -331,9 +430,7 @@ func receiveResultNotification(t *testing.T, received <-chan struct {
 
 func resultModuleContractDependencies() resultbiz.Dependencies {
 	return resultbiz.Dependencies{
-		Results:   memory.NewResultRepository(),
-		Artifacts: memory.NewArtifactRepository(),
-		EventHub:  magicevent.NewHub(16),
+		Results: memory.NewResultRepository(), Artifacts: memory.NewArtifactRepository(), WorkspaceDeletions: memory.NewResultWorkspaceDeletionRepository(), EventHub: magicevent.NewHub(16),
 	}
 }
 

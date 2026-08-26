@@ -24,9 +24,7 @@ func (m *Module) Setup(_ context.Context, eventHub event.Hub, background task.Ba
 		return err
 	}
 	if setupErr := m.Configure(runbiz.Dependencies{
-		Runs:              repos.Runs,
-		Steps:             repos.Steps,
-		Checkpoints:       repos.Checkpoints,
+		OwnerRepositories: repos.Owner,
 		EventHub:          eventHub,
 		BackgroundRoutine: background,
 	}); setupErr != nil {

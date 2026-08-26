@@ -3,6 +3,7 @@ package approval
 import (
 	"context"
 	"errors"
+	"sync"
 	"testing"
 
 	approvalbiz "github.com/muidea/workorch/internal/modules/blocks/approval/biz"
@@ -13,8 +14,164 @@ import (
 	approvalmodel "github.com/muidea/workorch/internal/modules/blocks/approval/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/repository/memory"
+	deletioncontract "github.com/muidea/workorch/internal/pkg/workorchdeletioncontract"
+	"github.com/muidea/workorch/internal/pkg/workorchrepo"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
+
+func TestApprovalWorkspaceDeletionFenceRetainAndPurgeAreStable(t *testing.T) {
+	ctx := context.Background()
+	hub := magicevent.NewHub(32)
+	t.Cleanup(func() { hub.Terminate(ctx) })
+	repos := memory.NewApprovalOwnerRepositorySet()
+	module := New()
+	if err := module.Configure(approvalbiz.Dependencies{Approvals: repos.Approvals, WorkspaceDeletions: repos.WorkspaceDeletions, EventHub: hub}); err != nil {
+		t.Fatal(err)
+	}
+	if err := module.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = module.Stop(ctx) })
+	retainID := common.WorkspaceID("ws-approval-retain")
+	retained := &approvalmodel.Approval{ID: "approval-retain", WorkspaceID: retainID, RunID: "run-retain", StepID: "step", State: common.ApprovalStatePending, Reason: "retain"}
+	if err := repos.Approvals.Create(ctx, retained); err != nil {
+		t.Fatal(err)
+	}
+	retain := deletioncontract.Scope{WorkspaceID: retainID, DeletionID: "delete-retain", DeletionGeneration: 1, Mode: deletioncontract.ModeRetain, QuiescenceID: "quiescence-retain"}
+	retain.RequestHash = deletioncontract.StableRequestHash(retain)
+	sealApprovalDeletion(t, ctx, hub, approvalevents.SealWorkspaceApprovalDeletionCommand{WorkspaceID: retain.WorkspaceID, DeletionID: retain.DeletionID, DeletionGeneration: 1, DataDispositionIntent: retain.Mode, QuiescenceID: retain.QuiescenceID, RequestHash: retain.RequestHash})
+	query := hub.Send(magicevent.NewEventWithContext(approvalevents.TopicApprovalCommandGet, "test", approvalevents.CommandDestination, magicevent.NewHeader(), ctx, approvalevents.GetApprovalCommand{WorkspaceID: retainID, RunID: retained.RunID, ApprovalID: retained.ID}))
+	if query == nil || !errors.Is(query.Error(), common.ErrNotFound) {
+		t.Fatalf("retained public read error = %v", query)
+	}
+	if _, err := repos.Approvals.GetScoped(ctx, retainID, retained.RunID, retained.ID); err != nil {
+		t.Fatalf("retain physically removed approval: %v", err)
+	}
+	if err := repos.Approvals.DeleteScoped(ctx, retainID, retained.RunID, retained.ID); !errors.Is(err, common.ErrNotFound) {
+		t.Fatalf("ordinary delete crossed retain fence: %v", err)
+	}
+
+	purgeID := common.WorkspaceID("ws-approval-purge")
+	purged := &approvalmodel.Approval{ID: "approval-purge", WorkspaceID: purgeID, RunID: "run-purge", StepID: "step", State: common.ApprovalStatePending, Reason: "purge"}
+	if err := repos.Approvals.Create(ctx, purged); err != nil {
+		t.Fatal(err)
+	}
+	purge := deletioncontract.Scope{WorkspaceID: purgeID, DeletionID: "delete-purge", DeletionGeneration: 1, Mode: deletioncontract.ModePurge, QuiescenceID: "quiescence-purge"}
+	purge.RequestHash = deletioncontract.StableRequestHash(purge)
+	sealCommand := approvalevents.SealWorkspaceApprovalDeletionCommand{WorkspaceID: purge.WorkspaceID, DeletionID: purge.DeletionID, DeletionGeneration: 1, DataDispositionIntent: purge.Mode, QuiescenceID: purge.QuiescenceID, RequestHash: purge.RequestHash}
+	sealApprovalDeletion(t, ctx, hub, sealCommand)
+	if err := repos.Approvals.DeleteScoped(ctx, purgeID, purged.RunID, purged.ID); !errors.Is(err, common.ErrNotFound) {
+		t.Fatalf("ordinary delete crossed purge fence: %v", err)
+	}
+	command := approvalevents.PurgeWorkspaceApprovalsCommand{WorkspaceID: sealCommand.WorkspaceID, DeletionID: sealCommand.DeletionID, DeletionGeneration: sealCommand.DeletionGeneration, QuiescenceID: sealCommand.QuiescenceID, RequestHash: sealCommand.RequestHash}
+	var first approvalevents.PurgeWorkspaceApprovalsResult
+	for attempt := 0; attempt < 2; attempt++ {
+		response := hub.Send(magicevent.NewEventWithContext(approvalevents.TopicApprovalCommandPurgeWorkspace, "blocks/workspace", approvalevents.CommandDestination, magicevent.NewHeader(), ctx, command))
+		if response == nil || response.Error() != nil {
+			t.Fatalf("purge response = %v", response)
+		}
+		data, err := response.Get()
+		if err != nil {
+			t.Fatal(err)
+		}
+		got := data.(approvalevents.PurgeWorkspaceApprovalsResult)
+		if got.ValidateFor(command) != nil {
+			t.Fatalf("invalid purge result: %#v", got)
+		}
+		if attempt == 0 {
+			first = got
+		} else if got != first {
+			t.Fatalf("purge replay drift: %#v != %#v", got, first)
+		}
+	}
+	if items, _ := repos.Approvals.ListByWorkspaceID(ctx, purgeID); len(items) != 0 {
+		t.Fatalf("purge left %d approvals", len(items))
+	}
+}
+
+func sealApprovalDeletion(t *testing.T, ctx context.Context, hub magicevent.Hub, command approvalevents.SealWorkspaceApprovalDeletionCommand) {
+	t.Helper()
+	var first approvalevents.SealWorkspaceApprovalDeletionResult
+	for attempt := 0; attempt < 2; attempt++ {
+		response := hub.Send(magicevent.NewEventWithContext(approvalevents.TopicApprovalCommandSealWorkspaceDeletion, "blocks/workspace", approvalevents.CommandDestination, magicevent.NewHeader(), ctx, command))
+		if response == nil || response.Error() != nil {
+			t.Fatalf("seal response = %v", response)
+		}
+		data, err := response.Get()
+		if err != nil {
+			t.Fatal(err)
+		}
+		got := data.(approvalevents.SealWorkspaceApprovalDeletionResult)
+		if got.ValidateFor(command) != nil {
+			t.Fatalf("invalid seal result: %#v", got)
+		}
+		if attempt == 0 {
+			first = got
+		} else if got != first {
+			t.Fatalf("seal replay drift: %#v != %#v", got, first)
+		}
+	}
+}
+
+func TestApprovalFileDeletionFenceLinearizesAcrossRepositorySets(t *testing.T) {
+	for _, mode := range []deletioncontract.Mode{deletioncontract.ModeRetain, deletioncontract.ModePurge} {
+		t.Run(string(mode), func(t *testing.T) {
+			ctx, root := context.Background(), t.TempDir()
+			first, second := workorchrepo.NewWorkspaceScopedFileRepositorySet(root), workorchrepo.NewWorkspaceScopedFileRepositorySet(root)
+			hub := magicevent.NewHub(32)
+			t.Cleanup(func() { hub.Terminate(ctx) })
+			module := New()
+			if err := module.Configure(approvalbiz.Dependencies{Approvals: first.Approvals, WorkspaceDeletions: first.ApprovalDeletions, EventHub: hub}); err != nil {
+				t.Fatal(err)
+			}
+			if err := module.Start(); err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() { _ = module.Stop(ctx) })
+			workspaceID := common.WorkspaceID("ws-approval-file-" + string(mode))
+			scope := deletioncontract.Scope{WorkspaceID: workspaceID, DeletionID: "delete-file", DeletionGeneration: 1, Mode: mode, QuiescenceID: "quiescence-file"}
+			scope.RequestHash = deletioncontract.StableRequestHash(scope)
+			command := approvalevents.SealWorkspaceApprovalDeletionCommand{WorkspaceID: scope.WorkspaceID, DeletionID: scope.DeletionID, DeletionGeneration: 1, DataDispositionIntent: scope.Mode, QuiescenceID: scope.QuiescenceID, RequestHash: scope.RequestHash}
+			start := make(chan struct{})
+			var wg sync.WaitGroup
+			wg.Add(2)
+			var writeErr error
+			go func() {
+				defer wg.Done()
+				<-start
+				writeErr = second.Approvals.Create(ctx, &approvalmodel.Approval{ID: "race-approval", WorkspaceID: workspaceID, RunID: "run", StepID: "step", State: common.ApprovalStatePending, Reason: "race"})
+			}()
+			go func() { defer wg.Done(); <-start; sealApprovalDeletion(t, ctx, hub, command) }()
+			close(start)
+			wg.Wait()
+			if writeErr != nil && !errors.Is(writeErr, common.ErrNotFound) {
+				t.Fatalf("seal-vs-write error: %v", writeErr)
+			}
+			if err := second.Approvals.Create(ctx, &approvalmodel.Approval{ID: "late-approval", WorkspaceID: workspaceID, RunID: "run", StepID: "step", State: common.ApprovalStatePending, Reason: "late"}); !errors.Is(err, common.ErrNotFound) {
+				t.Fatalf("late write crossed fence: %v", err)
+			}
+			reopened := workorchrepo.NewWorkspaceScopedFileRepositorySet(root)
+			if tombstone, err := reopened.ApprovalDeletions.Get(ctx, workspaceID); err != nil || tombstone.Revision != 1 {
+				t.Fatalf("reopened tombstone=%#v err=%v", tombstone, err)
+			}
+			if mode == deletioncontract.ModePurge {
+				purgeCommand := approvalevents.PurgeWorkspaceApprovalsCommand{WorkspaceID: command.WorkspaceID, DeletionID: command.DeletionID, DeletionGeneration: command.DeletionGeneration, QuiescenceID: command.QuiescenceID, RequestHash: command.RequestHash}
+				response := hub.Send(magicevent.NewEventWithContext(approvalevents.TopicApprovalCommandPurgeWorkspace, "blocks/workspace", approvalevents.CommandDestination, magicevent.NewHeader(), ctx, purgeCommand))
+				if response == nil || response.Error() != nil {
+					t.Fatalf("file purge response=%v", response)
+				}
+				data, err := response.Get()
+				if err != nil || data.(approvalevents.PurgeWorkspaceApprovalsResult).ValidateFor(purgeCommand) != nil {
+					t.Fatalf("file purge result=%#v err=%v", data, err)
+				}
+				final := workorchrepo.NewWorkspaceScopedFileRepositorySet(root)
+				if tombstone, err := final.ApprovalDeletions.Get(ctx, workspaceID); err != nil || tombstone.Revision != 2 {
+					t.Fatalf("reopened purge tombstone=%#v err=%v", tombstone, err)
+				}
+			}
+		})
+	}
+}
 
 type approvalTestResult struct {
 	Approval   *approvalmodel.Approval
@@ -53,7 +210,7 @@ func sendApprovalTestCommand[Command any](ctx context.Context, rawHub magicevent
 	case approvalevents.EnsureRejectedResult:
 		return approvalTestResult{Approval: response.Approval}, nil
 	case approvalevents.PurgeWorkspaceApprovalsResult:
-		return approvalTestResult{Deleted: response.Deleted}, nil
+		return approvalTestResult{}, nil
 	default:
 		return approvalTestResult{}, common.ErrInvalidArgument
 	}
@@ -165,7 +322,7 @@ func TestApprovalCommandGetHonorsScope(t *testing.T) {
 	}
 
 	module := New()
-	if err := module.Configure(approvalbiz.Dependencies{Approvals: approvals, EventHub: rawHub}); err != nil {
+	if err := module.Configure(approvalbiz.Dependencies{WorkspaceDeletions: memory.NewApprovalWorkspaceDeletionRepository(), Approvals: approvals, EventHub: rawHub}); err != nil {
 		t.Fatalf("Setup: %v", err)
 	}
 	if err := module.Start(); err != nil {
@@ -200,7 +357,7 @@ func TestApprovalCommandGetHonorsScope(t *testing.T) {
 }
 
 func approvalModuleContractDependencies() approvalbiz.Dependencies {
-	return approvalbiz.Dependencies{
+	return approvalbiz.Dependencies{WorkspaceDeletions: memory.NewApprovalWorkspaceDeletionRepository(),
 		Approvals: memory.NewApprovalRepository(),
 		EventHub:  magicevent.NewHub(16),
 	}
@@ -233,7 +390,7 @@ func TestApprovalCommandListByRunHonorsWorkspaceScope(t *testing.T) {
 	}
 
 	module := New()
-	if err := module.Configure(approvalbiz.Dependencies{Approvals: approvals, EventHub: rawHub}); err != nil {
+	if err := module.Configure(approvalbiz.Dependencies{WorkspaceDeletions: memory.NewApprovalWorkspaceDeletionRepository(), Approvals: approvals, EventHub: rawHub}); err != nil {
 		t.Fatalf("Setup: %v", err)
 	}
 	if err := module.Start(); err != nil {
@@ -273,7 +430,7 @@ func TestApprovalMutationCommandsHonorWorkspaceScope(t *testing.T) {
 	}
 
 	module := New()
-	if err := module.Configure(approvalbiz.Dependencies{Approvals: approvals, EventHub: rawHub}); err != nil {
+	if err := module.Configure(approvalbiz.Dependencies{WorkspaceDeletions: memory.NewApprovalWorkspaceDeletionRepository(), Approvals: approvals, EventHub: rawHub}); err != nil {
 		t.Fatalf("Setup: %v", err)
 	}
 	if err := module.Start(); err != nil {
@@ -323,7 +480,7 @@ func TestApprovalMutationCommandWithoutScopeFailsClosed(t *testing.T) {
 	}
 
 	module := New()
-	if err := module.Configure(approvalbiz.Dependencies{Approvals: approvals, EventHub: rawHub}); err != nil {
+	if err := module.Configure(approvalbiz.Dependencies{WorkspaceDeletions: memory.NewApprovalWorkspaceDeletionRepository(), Approvals: approvals, EventHub: rawHub}); err != nil {
 		t.Fatalf("Setup: %v", err)
 	}
 	if err := module.Start(); err != nil {
@@ -373,7 +530,7 @@ func TestApprovalMutationCommandWithoutScopeConflictsOnDuplicatePendingApprovals
 	}
 
 	module := New()
-	if err := module.Configure(approvalbiz.Dependencies{Approvals: approvals, EventHub: rawHub}); err != nil {
+	if err := module.Configure(approvalbiz.Dependencies{WorkspaceDeletions: memory.NewApprovalWorkspaceDeletionRepository(), Approvals: approvals, EventHub: rawHub}); err != nil {
 		t.Fatalf("Setup: %v", err)
 	}
 	if err := module.Start(); err != nil {
@@ -420,7 +577,7 @@ func TestApprovalListCommandsAreTypedBoundedAndCursorValidated(t *testing.T) {
 		}
 	}
 	module := New()
-	if err := module.Configure(approvalbiz.Dependencies{Approvals: approvals, EventHub: rawHub}); err != nil {
+	if err := module.Configure(approvalbiz.Dependencies{WorkspaceDeletions: memory.NewApprovalWorkspaceDeletionRepository(), Approvals: approvals, EventHub: rawHub}); err != nil {
 		t.Fatal(err)
 	}
 	if err := module.Start(); err != nil {
@@ -463,7 +620,7 @@ func TestApprovalPublishesRuntimeGovernanceCapabilityOnlyToOrchestrator(t *testi
 	rawHub := magicevent.NewHub(16)
 	t.Cleanup(func() { rawHub.Terminate(ctx) })
 	module := New()
-	if err := module.Configure(approvalbiz.Dependencies{Approvals: memory.NewApprovalRepository(), EventHub: rawHub}); err != nil {
+	if err := module.Configure(approvalbiz.Dependencies{WorkspaceDeletions: memory.NewApprovalWorkspaceDeletionRepository(), Approvals: memory.NewApprovalRepository(), EventHub: rawHub}); err != nil {
 		t.Fatal(err)
 	}
 	if err := module.Start(); err != nil {

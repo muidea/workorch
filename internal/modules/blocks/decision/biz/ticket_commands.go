@@ -2,6 +2,7 @@ package decision
 
 import (
 	"context"
+	"errors"
 	"sort"
 	"strings"
 
@@ -19,7 +20,7 @@ func (m *Biz) executeGetTicketCommand(ctx context.Context, data any) (decisionev
 	if err != nil {
 		return decisionevents.GetTicketResult{}, err
 	}
-	if item.DeletionRequestedAt != "" || !ticketMatchesDecisionScope(item, decisionCommandScope{WorkspaceID: cmd.WorkspaceID, RunID: cmd.RunID, StepID: cmd.StepID}) {
+	if !ticketMatchesDecisionScope(item, decisionCommandScope{WorkspaceID: cmd.WorkspaceID, RunID: cmd.RunID, StepID: cmd.StepID}) {
 		return decisionevents.GetTicketResult{}, common.ErrNotFound
 	}
 	return decisionevents.GetTicketResult{Ticket: decisionmodel.CloneTicket(item)}, nil
@@ -34,6 +35,21 @@ func (m *Biz) executeListTicketsCommand(ctx context.Context, data any) (decision
 	if err != nil {
 		return decisionevents.ListTicketsResult{}, err
 	}
+	visible := items[:0]
+	for _, item := range items {
+		if item == nil {
+			continue
+		}
+		err := m.rejectFencedWorkspace(ctx, item.WorkspaceID)
+		if errors.Is(err, common.ErrNotFound) {
+			continue
+		}
+		if err != nil {
+			return decisionevents.ListTicketsResult{}, err
+		}
+		visible = append(visible, item)
+	}
+	items = visible
 	page, next, err := paginateDecisionTickets(items, cmd.Cursor, cmd.Limit)
 	return decisionevents.ListTicketsResult{Tickets: page, NextCursor: next}, err
 }
@@ -72,7 +88,7 @@ func paginateDecisionTickets(items []*decisionmodel.Ticket, cursor string, limit
 	}
 	visible := make([]*decisionmodel.Ticket, 0, len(items))
 	for _, item := range items {
-		if item == nil || item.DeletionRequestedAt != "" {
+		if item == nil {
 			continue
 		}
 		visible = append(visible, item)
@@ -138,26 +154,4 @@ func compareDecisionTicketToCursor(item *decisionmodel.Ticket, cursor string) in
 		return value
 	}
 	return strings.Compare(string(item.ID), ticketID)
-}
-
-func (m *Biz) executePurgeWorkspaceCommand(ctx context.Context, data any) (decisionevents.PurgeWorkspaceDecisionsResult, error) {
-	cmd, ok := data.(decisionevents.PurgeWorkspaceDecisionsCommand)
-	if !ok || cmd.WorkspaceID == "" {
-		return decisionevents.PurgeWorkspaceDecisionsResult{}, common.ErrInvalidArgument
-	}
-	items, err := m.tickets.ListByWorkspaceID(ctx, cmd.WorkspaceID)
-	if err != nil {
-		return decisionevents.PurgeWorkspaceDecisionsResult{}, err
-	}
-	deleted := 0
-	for _, item := range items {
-		if item == nil || item.WorkspaceID != cmd.WorkspaceID {
-			continue
-		}
-		if err := m.service.PurgeDecisionAggregate(ctx, item); err != nil {
-			return decisionevents.PurgeWorkspaceDecisionsResult{Deleted: deleted}, err
-		}
-		deleted++
-	}
-	return decisionevents.PurgeWorkspaceDecisionsResult{Deleted: deleted}, nil
 }

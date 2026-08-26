@@ -3,11 +3,14 @@ package orchestrator
 // Operation receipt adapter is internal to the Runtime owner Biz.
 
 import (
+	"context"
+
 	cd "github.com/muidea/magicCommon/def"
 	magicevent "github.com/muidea/magicCommon/event"
 	runtime "github.com/muidea/workorch/internal/modules/kernel/orchestrator/biz/runtime"
 	orchestratorevents "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/common"
+	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
 func runtimeOperationMagicFailure(err error) *cd.Error {
@@ -40,7 +43,13 @@ func (m *Biz) handleRuntimeOperationReceipt(event magicevent.Event, result magic
 			result.Set(nil, runtimeOperationMagicFailure(common.ErrInvalidArgument))
 			return
 		}
-		receipt, found, err := m.runtimeController.QueryOperationReceipt(event.Context(), command.WorkspaceID, command.RunID, command.DispatchID, command.OperationID, command.ExecutionKey, command.Fence, command.GovernanceGrant)
+		var receipt runtimecontract.RuntimeOperationReceipt
+		var found bool
+		err := m.withOrchestratorWorkspaceResourceRead(event.Context(), command.WorkspaceID, func(guarded context.Context) error {
+			var queryErr error
+			receipt, found, queryErr = m.runtimeController.QueryOperationReceipt(guarded, command.WorkspaceID, command.RunID, command.DispatchID, command.OperationID, command.ExecutionKey, command.Fence, command.GovernanceGrant)
+			return queryErr
+		})
 		if err != nil {
 			result.Set(nil, runtimeOperationMagicFailure(err))
 			return

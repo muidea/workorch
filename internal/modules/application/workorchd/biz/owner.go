@@ -20,6 +20,8 @@ import (
 	eventstreamcommon "github.com/muidea/workorch/internal/modules/blocks/eventstream/pkg/common"
 	eventstreamevents "github.com/muidea/workorch/internal/modules/blocks/eventstream/pkg/events"
 	runevents "github.com/muidea/workorch/internal/modules/blocks/run/pkg/events"
+	workspacecommon "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/common"
+	workspaceevents "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/events"
 	orchestratorevents "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/eventcontract"
@@ -84,6 +86,10 @@ func (b *Biz) Setup(ctx context.Context, commandHub magicevent.Hub, backgroundRo
 	b.SubscribeMatchedFunc(ModuleID+"/run-metrics", runevents.NotificationDestination, runevents.TopicRunStateChanged, b.handleRunStateChanged)
 	b.SubscribeMatchedFunc(ModuleID+"/runtime-drive-metrics", orchestratorevents.NotificationDestination, orchestratorevents.TopicOrchestratorRuntimeDriveObserved, b.handleRuntimeDriveObserved)
 	b.SubscribeMatchedFunc(ModuleID+"/eventstream", eventstreamevents.NotificationDestination, eventstreamevents.TopicEventStreamRecordAppended, b.handleEventRecordAppended)
+	// WorkspaceDeleted is intentionally emitted after Eventstream's final
+	// deletion fence. Application consumes this immutable receipt directly for
+	// SSE/remote transport only; it never feeds owner state or durable audit.
+	b.SubscribeMatchedFunc(ModuleID+"/workspace-deletion-transport", workspaceevents.NotificationDestination, workspaceevents.TopicWorkspaceDeleted, b.handleWorkspaceDeleted)
 	return nil
 }
 
@@ -152,6 +158,7 @@ func (b *Biz) Stop(ctx context.Context) {
 		b.UnsubscribeMatchedFunc(ModuleID+"/run-metrics", runevents.TopicRunStateChanged)
 		b.UnsubscribeMatchedFunc(ModuleID+"/runtime-drive-metrics", orchestratorevents.TopicOrchestratorRuntimeDriveObserved)
 		b.UnsubscribeMatchedFunc(ModuleID+"/eventstream", eventstreamevents.TopicEventStreamRecordAppended)
+		b.UnsubscribeMatchedFunc(ModuleID+"/workspace-deletion-transport", workspaceevents.TopicWorkspaceDeleted)
 	}
 	b.execution = nil
 	if b.projection != nil {
@@ -203,6 +210,13 @@ func (b *Biz) handleEventRecordAppended(event magicevent.Event, _ magicevent.Res
 		if b.projection != nil {
 			_ = b.projection.HandleEventRecord(event.Context(), data.Record)
 		}
+	}
+}
+
+func (b *Biz) handleWorkspaceDeleted(event magicevent.Event, _ magicevent.Result) {
+	data, ok := event.Data().(workspaceevents.WorkspaceDeletedData)
+	if ok && event.Source() == workspacecommon.ModuleID && data.Validate() == nil && b != nil && b.service != nil {
+		b.service.RecordWorkspaceDeleted(event.Context(), data)
 	}
 }
 

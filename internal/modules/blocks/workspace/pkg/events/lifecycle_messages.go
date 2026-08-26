@@ -64,65 +64,6 @@ func (r WorkspaceExecutionIntentResult) Validate() error {
 	return nil
 }
 
-// RUNTIME-SMO workspace projection contracts.
-//
-// Workspace owner alone mutates ActiveRunID / Workspace.State. Inputs are
-// immutable facts about a Run; they never carry a caller-chosen target state.
-
-// RunProjectionFact asks Workspace to converge its projection from
-// an already-persisted Run state fact (active/blocked).
-//
-// Publisher: blocks/run (via RunStateChanged observation) or Orchestrator only
-// as a typed fact forwarder — never as a model update with target State.
-type RunProjectionFact struct {
-	WorkspaceID common.WorkspaceID
-	RunID       common.RunID
-	SourceOwner string
-	CausationID string
-	RunState    common.RunState
-	// RuntimeStateRevision is zero only for the Run owner's initial
-	// activation fact.  That fact is authoritative for the SM-1 transition,
-	// but necessarily precedes SM-2 aggregate initialization.
-	RuntimeStateRevision uint64
-	RuntimeStateRef      string
-}
-
-func (c RunProjectionFact) Normalized() RunProjectionFact {
-	c.SourceOwner = strings.TrimSpace(c.SourceOwner)
-	c.CausationID = strings.TrimSpace(c.CausationID)
-	c.RuntimeStateRef = strings.TrimSpace(c.RuntimeStateRef)
-	return c
-}
-
-func (c RunProjectionFact) Validate() error {
-	c = c.Normalized()
-	if c.WorkspaceID == "" || c.RunID == "" || c.SourceOwner != "blocks/run" || c.CausationID == "" {
-		return fmt.Errorf("%w: run projection fact requires Run owner scope and causation", common.ErrInvalidArgument)
-	}
-	switch c.RunState {
-	case common.RunStateActive, common.RunStateBlockedOnDecision, common.RunStateBlockedOnApproval, common.RunStatePending:
-	default:
-		return fmt.Errorf("%w: run projection fact has unsupported run state %q", common.ErrInvalidArgument, c.RunState)
-	}
-	if c.RuntimeStateRevision == 0 {
-		// A first pending/active projection cannot carry an authority snapshot:
-		// SM-2 is initialized only after the Run owner has committed active.
-		// Keep this exception explicit and narrow so it cannot become a generic
-		// partial-identity path for governance states.
-		if c.RunState != common.RunStatePending && c.RunState != common.RunStateActive {
-			return fmt.Errorf("%w: pre-runtime projection only permits pending or active Run", common.ErrInvalidArgument)
-		}
-		if c.RuntimeStateRef != "" {
-			return fmt.Errorf("%w: pre-runtime projection must not mix runtime state ref", common.ErrInvalidArgument)
-		}
-		return nil
-	}
-	if c.RuntimeStateRef == "" {
-		return fmt.Errorf("%w: runtime projection fact requires opaque Run runtime ref", common.ErrInvalidArgument)
-	}
-	return nil
-}
-
 // RuntimeTerminalDeliveryFact asks Workspace to release ActiveRun for a
 // sealed terminal delivery. Workspace never invents a new terminal.
 type RuntimeTerminalDeliveryFact struct {

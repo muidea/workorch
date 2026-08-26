@@ -1,11 +1,21 @@
 package workorchruntimecontract
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 
 	"github.com/muidea/workorch/internal/pkg/common"
 )
+
+// advanceRuntimeSemanticPlanBatchFixtureState constructs persisted contract
+// fixtures. Production transition authority remains private to Orchestrator.
+func advanceRuntimeSemanticPlanBatchFixtureState(batch RuntimeSemanticPlanBatch, next RuntimeSemanticPlanBatchState) (RuntimeSemanticPlanBatch, error) {
+	batch = batch.Normalized()
+	batch.State = next
+	batch.Hash = StableRuntimeSemanticPlanBatchHash(batch)
+	return batch, nil
+}
 
 func semanticDefinitionFocuses(items []RuntimeCoverageItem) []RuntimeDefinitionFocus {
 	ret := make([]CoverageFocus, 0, len(items))
@@ -459,11 +469,9 @@ func TestRuntimeSemanticPlanningFailedValidatesActiveBatchFeasibilityLineage(t *
 		CoverageOrder: []common.CoverageWorkItemID{"cwi-001"},
 	}
 	proposal := semanticContractTestProposal("cwi-001")
-	batch, err := CompileRuntimeSemanticPlanBatch(manifest, order, 0, "request-1", 1)
-	if err != nil {
-		t.Fatal(err)
-	}
-	batch, err = AdvanceRuntimeSemanticPlanBatch(batch, RuntimeSemanticPlanBatchRequesting)
+	batch := semanticContractTestPendingBatch(t, manifest, order, 0, "request-1", []common.CoverageWorkItemID{"cwi-001"}, []common.CoverageWorkItemID{"cwi-001"})
+	var err error
+	batch, err = advanceRuntimeSemanticPlanBatchFixtureState(batch, RuntimeSemanticPlanBatchRequesting)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -476,7 +484,7 @@ func TestRuntimeSemanticPlanningFailedValidatesActiveBatchFeasibilityLineage(t *
 	if err := document.ValidateAgainstManifest(manifest); err != nil {
 		t.Fatal(err)
 	}
-	batch, err = AdvanceRuntimeSemanticPlanBatch(batch, RuntimeSemanticPlanBatchDocumentComplete)
+	batch, err = advanceRuntimeSemanticPlanBatchFixtureState(batch, RuntimeSemanticPlanBatchDocumentComplete)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -577,15 +585,13 @@ func TestRuntimeSemanticPlanningSealedRequiresCompleteFeasibleOwnerBatch(t *test
 	if err := order.ValidateAgainstManifest(manifest); err != nil {
 		t.Fatal(err)
 	}
-	batch, err := CompileRuntimeSemanticPlanFocusBatch(manifest, order, 0, "request-1", []common.CoverageWorkItemID{"cwi-001"}, []common.CoverageWorkItemID{"cwi-001"}, 1)
-	if err != nil {
-		t.Fatal(err)
-	}
+	batch := semanticContractTestPendingBatch(t, manifest, order, 0, "request-1", []common.CoverageWorkItemID{"cwi-001"}, []common.CoverageWorkItemID{"cwi-001"})
+	var err error
 	for _, next := range []RuntimeSemanticPlanBatchState{
 		RuntimeSemanticPlanBatchRequesting,
 		RuntimeSemanticPlanBatchDocumentComplete,
 	} {
-		batch, err = AdvanceRuntimeSemanticPlanBatch(batch, next)
+		batch, err = advanceRuntimeSemanticPlanBatchFixtureState(batch, next)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -607,7 +613,7 @@ func TestRuntimeSemanticPlanningSealedRequiresCompleteFeasibleOwnerBatch(t *test
 		RuntimeSemanticPlanBatchFeasibilityComplete,
 		RuntimeSemanticPlanBatchAccepted,
 	} {
-		batch, err = AdvanceRuntimeSemanticPlanBatch(batch, next)
+		batch, err = advanceRuntimeSemanticPlanBatchFixtureState(batch, next)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -808,11 +814,8 @@ func semanticSealedLedgerFixture(t *testing.T) RuntimeSemanticPlanningLedger {
 	if err := order.ValidateAgainstManifest(manifest); err != nil {
 		t.Fatal(err)
 	}
-	batch, err := CompileRuntimeSemanticPlanFocusBatch(manifest, order, 0, "semantic-history-request", []common.CoverageWorkItemID{"cwi-history"}, []common.CoverageWorkItemID{"cwi-history"}, 1)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if batch, err = AdvanceRuntimeSemanticPlanBatch(batch, RuntimeSemanticPlanBatchRequesting); err != nil {
+	batch := semanticContractTestPendingBatch(t, manifest, order, 0, "semantic-history-request", []common.CoverageWorkItemID{"cwi-history"}, []common.CoverageWorkItemID{"cwi-history"})
+	if batch, err = advanceRuntimeSemanticPlanBatchFixtureState(batch, RuntimeSemanticPlanBatchRequesting); err != nil {
 		t.Fatal(err)
 	}
 	document := RuntimeSemanticPlanDocument{
@@ -831,7 +834,7 @@ func semanticSealedLedgerFixture(t *testing.T) RuntimeSemanticPlanningLedger {
 		RuntimeSemanticPlanBatchFeasibilityComplete,
 		RuntimeSemanticPlanBatchAccepted,
 	} {
-		batch, err = AdvanceRuntimeSemanticPlanBatch(batch, next)
+		batch, err = advanceRuntimeSemanticPlanBatchFixtureState(batch, next)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -860,6 +863,54 @@ func semanticSealedLedgerFixture(t *testing.T) RuntimeSemanticPlanningLedger {
 		t.Fatalf("sealed semantic fixture invalid: %v", err)
 	}
 	return ledger
+}
+
+// semanticContractTestPendingBatch builds persisted-shape fixture data only.
+// Production initialization belongs to the Orchestrator-private semanticplan
+// compiler and reducer; contract tests must not restore shared transition
+// authority merely to assemble a ledger fixture.
+func semanticContractTestPendingBatch(
+	t *testing.T,
+	manifest RuntimeSemanticPlanManifest,
+	order RuntimeSemanticPlanDocument,
+	sequence int,
+	logicalRequestID string,
+	selectedIDs []common.CoverageWorkItemID,
+	pendingBefore []common.CoverageWorkItemID,
+) RuntimeSemanticPlanBatch {
+	t.Helper()
+	selected := make(map[common.CoverageWorkItemID]struct{}, len(selectedIDs))
+	for _, id := range selectedIDs {
+		selected[id] = struct{}{}
+	}
+	pending := make([]common.CoverageWorkItemID, 0, len(pendingBefore))
+	for _, id := range pendingBefore {
+		if _, chosen := selected[id]; !chosen {
+			pending = append(pending, id)
+		}
+	}
+	items := make(map[common.CoverageWorkItemID]RuntimeCoverageItem, len(manifest.CoverageItems))
+	for _, item := range manifest.CoverageItems {
+		items[item.ID] = item
+	}
+	orderHash := StableRuntimeSemanticPlanCoverageOrderHash(order)
+	batch := RuntimeSemanticPlanBatch{
+		BatchID:                    fmt.Sprintf("semantic-batch-%d-%s", sequence, strings.TrimPrefix(orderHash, "runtime-semantic-plan-order-")),
+		ManifestHash:               manifest.Hash,
+		DefinitionSeedHash:         manifest.DefinitionSeedHash,
+		CoverageOrderHash:          orderHash,
+		Sequence:                   sequence,
+		CoverageWorkItemIDs:        append([]common.CoverageWorkItemID(nil), selectedIDs...),
+		PendingCoverageWorkItemIDs: pending,
+		RequestLogicalID:           logicalRequestID,
+		DependencyBarrierRefs:      runtimeSemanticPendingDependencyBarriers(items, pending, selected),
+		State:                      RuntimeSemanticPlanBatchPending,
+	}
+	batch.Hash = StableRuntimeSemanticPlanBatchHash(batch)
+	if err := batch.ValidateAgainstManifest(manifest); err != nil {
+		t.Fatalf("pending semantic batch fixture: %v", err)
+	}
+	return batch
 }
 
 func TestRuntimeSemanticPlanningHistoryRetainsBoundedDetachedGenerations(t *testing.T) {

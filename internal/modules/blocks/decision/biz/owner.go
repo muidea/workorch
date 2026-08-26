@@ -18,29 +18,33 @@ import (
 const ModuleID = modulecommon.ModuleID
 
 type Dependencies struct {
-	Tickets           repository.DecisionTicketRepository
-	Resolutions       repository.DecisionResolutionRepository
-	EventHub          magicevent.Hub
-	BackgroundRoutine magictask.BackgroundRoutine
+	Tickets            repository.DecisionTicketRepository
+	Resolutions        repository.DecisionResolutionRepository
+	WorkspaceDeletions repository.DecisionWorkspaceDeletionRepository
+	EventHub           magicevent.Hub
+	BackgroundRoutine  magictask.BackgroundRoutine
 }
 
 type Biz struct {
 	basebiz.Base
-	service         *mutationService
-	tickets         repository.DecisionTicketRepository
-	resolutions     repository.DecisionResolutionRepository
-	topics          []string
-	started         bool
-	reconcileMu     sync.Mutex
-	reconcileCancel context.CancelFunc
-	reconcileDone   chan struct{}
+	service            *mutationService
+	tickets            repository.DecisionTicketRepository
+	resolutions        repository.DecisionResolutionRepository
+	topics             []string
+	started            bool
+	reconcileMu        sync.Mutex
+	reconcileCancel    context.CancelFunc
+	reconcileDone      chan struct{}
+	workspaceDeletions repository.DecisionWorkspaceDeletionRepository
+	workspaceLocksMu   sync.Mutex
+	workspaceLocks     map[common.WorkspaceID]*sync.Mutex
 }
 
 func New(h magicevent.Hub, background magictask.BackgroundRoutine, deps Dependencies) (*Biz, error) {
-	if deps.Tickets == nil || deps.Resolutions == nil || deps.EventHub == nil || h == nil {
+	if deps.Tickets == nil || deps.Resolutions == nil || deps.WorkspaceDeletions == nil || deps.EventHub == nil || h == nil {
 		return nil, common.ErrInvalidArgument
 	}
-	return &Biz{Base: basebiz.New(modulecommon.ModuleID, h, background), service: newMutationService(deps.Tickets, deps.Resolutions), tickets: deps.Tickets, resolutions: deps.Resolutions}, nil
+	return &Biz{Base: basebiz.New(modulecommon.ModuleID, h, background), service: newMutationService(deps.Tickets, deps.Resolutions), tickets: deps.Tickets, resolutions: deps.Resolutions, workspaceDeletions: deps.WorkspaceDeletions, workspaceLocks: map[common.WorkspaceID]*sync.Mutex{}}, nil
 }
 
 func (m *Biz) Start() error {
@@ -64,6 +68,8 @@ func (m *Biz) Start() error {
 			m.SubscribeFunc(topic, m.handleReconcileWorkspaceDefinitionClarification)
 		case decisionevents.TopicResolveWorkspaceDefinitionClarificationByAdmission:
 			m.SubscribeFunc(topic, m.handleResolveWorkspaceDefinitionClarification)
+		case decisionevents.TopicQueryWorkspaceDefinitionClarificationFact:
+			m.SubscribeFunc(topic, m.handleQueryWorkspaceDefinitionClarificationFact)
 		case decisionevents.TopicOpenRuntimeDefinitionClarification:
 			m.SubscribeFunc(topic, m.handleOpenRuntimeDefinitionClarification)
 		case decisionevents.TopicResolveRuntimeDefinitionClarificationByReplacement:
@@ -122,5 +128,6 @@ func (m *Biz) Teardown(context.Context) {
 	m.service = nil
 	m.tickets = nil
 	m.resolutions = nil
+	m.workspaceDeletions = nil
 	m.started = false
 }

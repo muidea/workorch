@@ -24,9 +24,10 @@ func (m *Module) Setup(_ context.Context, eventHub event.Hub, backgroundRoutine 
 		return err
 	}
 	if setupErr := m.configure(approvalbiz.Dependencies{
-		Approvals:         repos.Approvals,
-		EventHub:          eventHub,
-		BackgroundRoutine: backgroundRoutine,
+		Approvals:          repos.Approvals,
+		WorkspaceDeletions: repos.WorkspaceDeletions,
+		EventHub:           eventHub,
+		BackgroundRoutine:  backgroundRoutine,
 	}); setupErr != nil {
 		return cd.NewError(cd.Unexpected, setupErr.Error())
 	}

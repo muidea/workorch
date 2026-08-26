@@ -8,13 +8,14 @@ import (
 
 func TestDecisionCommandTopicsHaveOneSemanticFamily(t *testing.T) {
 	expected := map[string]decisionCommandFamily{
-		decisionevents.TopicDecisionCommandGetTicket:        decisionCommandFamilyTicketQuery,
-		decisionevents.TopicDecisionCommandListTickets:      decisionCommandFamilyTicketQuery,
-		decisionevents.TopicDecisionCommandListTicketsByRun: decisionCommandFamilyTicketQuery,
-		decisionevents.TopicDecisionCommandListTicketsByWS:  decisionCommandFamilyTicketQuery,
-		decisionevents.TopicDecisionCommandEnsureResolved:   decisionCommandFamilyResolution,
-		decisionevents.TopicDecisionCommandGetResolution:    decisionCommandFamilyResolution,
-		decisionevents.TopicDecisionCommandPurgeWorkspace:   decisionCommandFamilyAggregatePurge,
+		decisionevents.TopicDecisionCommandGetTicket:             decisionCommandFamilyTicketQuery,
+		decisionevents.TopicDecisionCommandListTickets:           decisionCommandFamilyTicketQuery,
+		decisionevents.TopicDecisionCommandListTicketsByRun:      decisionCommandFamilyTicketQuery,
+		decisionevents.TopicDecisionCommandListTicketsByWS:       decisionCommandFamilyTicketQuery,
+		decisionevents.TopicDecisionCommandEnsureResolved:        decisionCommandFamilyResolution,
+		decisionevents.TopicDecisionCommandGetResolution:         decisionCommandFamilyResolution,
+		decisionevents.TopicDecisionCommandPurgeWorkspace:        decisionCommandFamilyAggregatePurge,
+		decisionevents.TopicDecisionCommandSealWorkspaceDeletion: decisionCommandFamilyAggregatePurge,
 	}
 	topics := decisionCommandTopics()
 	if len(topics) != len(expected) {

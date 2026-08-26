@@ -9,6 +9,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	approvalmodel "github.com/muidea/workorch/internal/modules/blocks/approval/pkg/models"
 	decisionmodel "github.com/muidea/workorch/internal/modules/blocks/decision/pkg/models"
@@ -19,6 +20,7 @@ import (
 	runtimeevidencemodel "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/repository"
+	deletioncontract "github.com/muidea/workorch/internal/pkg/workorchdeletioncontract"
 	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
 	"github.com/muidea/workorch/internal/pkg/workorchquerycontract"
 	orchestratormodel "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
@@ -31,6 +33,21 @@ func mustFileRepositoryPayload(t *testing.T, input map[string]any) workorchevent
 		t.Fatal(err)
 	}
 	return payload
+}
+
+func fileEventStreamPurgeFence(workspaceID common.WorkspaceID) eventstreammodel.WorkspaceDeletion {
+	scope := deletioncontract.Scope{
+		WorkspaceID: workspaceID, DeletionID: "delete-" + string(workspaceID), DeletionGeneration: 1,
+		Mode: deletioncontract.ModePurge, QuiescenceID: "quiesced-" + string(workspaceID),
+	}
+	scope.RequestHash = deletioncontract.StableRequestHash(scope)
+	now := time.Date(2026, 8, 26, 0, 0, 0, 0, time.UTC).Format(time.RFC3339Nano)
+	return eventstreammodel.WorkspaceDeletion{
+		WorkspaceID: scope.WorkspaceID, DeletionID: scope.DeletionID, DeletionGeneration: scope.DeletionGeneration,
+		Mode: scope.Mode, QuiescenceID: scope.QuiescenceID, RequestHash: scope.RequestHash,
+		FenceID: "fence-" + string(workspaceID), Phase: eventstreammodel.WorkspaceDeletionPhaseFenced,
+		Revision: 1, SealAckHash: "seal-" + string(workspaceID), RequestedAt: now, UpdatedAt: now,
+	}
 }
 
 func TestWorkspaceRepositoryGetReturnsErrorWhenPersistedJSONCorrupt(t *testing.T) {
@@ -372,7 +389,9 @@ func TestEventRecordRepositoryPurgeWorkspacePhysicallyCompactsPayloads(t *testin
 	if err := repo.Delete(ctx, "event-purge-physical"); err != nil {
 		t.Fatal(err)
 	}
-	if deleted, err := repo.PurgeWorkspace(ctx, "ws-purge-physical"); err != nil || deleted != 0 {
+	// This package-local call verifies the compactor itself. Production callers
+	// can only reach it through the exact-fenced Eventstream purger.
+	if deleted, err := repo.purgeWorkspace(ctx, fileEventStreamPurgeFence("ws-purge-physical")); err != nil || deleted != 0 {
 		t.Fatalf("purge deleted=%d err=%v", deleted, err)
 	}
 	if err := filepath.Walk(root, func(path string, info os.FileInfo, walkErr error) error {

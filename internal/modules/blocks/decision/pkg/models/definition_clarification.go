@@ -16,6 +16,7 @@ const (
 // text or a Runtime continuation action.
 type DefinitionClarificationBinding struct {
 	Class                       DefinitionClarificationClass
+	SchemaVersion               uint32
 	OpenBindingHash             string
 	RequiredActionKind          string
 	CandidateID                 string
@@ -35,6 +36,10 @@ type DefinitionClarificationBinding struct {
 	SemanticDocumentHash        string
 	ResolutionID                common.ResolutionID
 	ResolutionBindingHash       string
+	ResolutionCandidateID       string
+	ResolutionCandidateRevision uint64
+	ResolutionCandidateHash     string
+	AdmissionResultHash         string
 	ReplacementIntentID         string
 	ReplacementIntentHash       string
 	SuccessorDefinitionRevision string

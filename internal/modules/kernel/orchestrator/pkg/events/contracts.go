@@ -13,7 +13,10 @@ func Contracts() []eventcontract.Contract {
 		TopicOrchestratorQueryRuntimeOperationReceipt,
 	)...)
 	ret = append(ret, eventcontract.Build("orchestrator", eventcontract.CommandClassWrite, eventcontract.LanePolicyState,
-		TopicOrchestratorCommandPurgeRun,
+		TopicOrchestratorCommandBeginWorkspaceRuntimeQuiescence,
+		TopicOrchestratorCommandConfirmWorkspaceRuntimeQuiescence,
+		TopicOrchestratorCommandSealWorkspaceDeletion,
+		TopicOrchestratorCommandPurgeWorkspaceEvidence,
 		TopicOrchestratorCommitRuntimeGovernanceResolution,
 		TopicOrchestratorCommitRuntimeGovernanceApproval,
 		TopicOrchestratorCommitRuntimeGovernanceTicket,
@@ -35,7 +38,7 @@ func Contracts() []eventcontract.Contract {
 		TopicOrchestratorCommitRuntimeGovernanceResolution, TopicOrchestratorCommitRuntimeGovernanceTicket, TopicOrchestratorCommitRuntimeGovernanceApproval,
 	)
 	ret = eventcontract.Annotate(ret, eventcontract.RuntimeMetadata(eventcontract.CommandClassWrite, eventcontract.StateMachineSM3, eventcontract.ScopePolicyWorkspaceRunStep, eventcontract.IdentityPolicyRuntimeOperation, true), TopicOrchestratorCommitRuntimeOperationReceipt)
-	ret = eventcontract.Annotate(ret, eventcontract.RuntimeMetadata(eventcontract.CommandClassWrite, eventcontract.StateMachineSM4, eventcontract.ScopePolicyWorkspaceRun, eventcontract.IdentityPolicyRuntimeAuthority, true), TopicOrchestratorCommandPurgeRun, TopicOrchestratorRequestRuntimeTermination)
+	ret = eventcontract.Annotate(ret, eventcontract.RuntimeMetadata(eventcontract.CommandClassWrite, eventcontract.StateMachineSM4, eventcontract.ScopePolicyWorkspaceRun, eventcontract.IdentityPolicyRuntimeAuthority, true), TopicOrchestratorRequestRuntimeTermination)
 	ret = eventcontract.Annotate(ret, eventcontract.RuntimeMetadata(eventcontract.CommandClassExecute, eventcontract.StateMachineSM4, eventcontract.ScopePolicyWorkspaceRun, eventcontract.IdentityPolicyRuntimeAuthority, true), TopicOrchestratorDriveRuntime)
 	ret = eventcontract.Annotate(ret, eventcontract.RuntimeMetadata(eventcontract.CommandClassNotify, eventcontract.StateMachineSM4, eventcontract.ScopePolicyWorkspaceRun, eventcontract.IdentityPolicyRuntimeAuthority, true), TopicOrchestratorRuntimeDriveObserved)
 	return ret

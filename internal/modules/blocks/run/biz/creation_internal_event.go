@@ -17,7 +17,6 @@ const runCreationInternalEventRequested runCreationInternalEventKind = "creation
 
 type runCreationRequestedFact struct {
 	WorkspaceID         common.WorkspaceID
-	RunID               common.RunID
 	GoalID              common.GoalID
 	DoDID               common.DoDID
 	PredecessorRunID    common.RunID
@@ -45,7 +44,7 @@ func submitRunCreationInternalEvent(ctx context.Context, runs repository.RunRepo
 		return nil, common.ErrInvalidArgument
 	}
 	fact := *event.Requested
-	if fact.WorkspaceID == "" || fact.RunID == "" ||
+	if fact.WorkspaceID == "" ||
 		(fact.ReconciliationScope != runtimecontract.RuntimeCWIReconciliationScopeCurrentRun && fact.ReconciliationScope != runtimecontract.RuntimeCWIReconciliationScopeWorkspaceFull) {
 		return nil, common.ErrInvalidArgument
 	}
@@ -54,7 +53,6 @@ func submitRunCreationInternalEvent(ctx context.Context, runs repository.RunRepo
 		return nil, err
 	}
 	run := &runmodel.Run{
-		ID:                  fact.RunID,
 		WorkspaceID:         fact.WorkspaceID,
 		GoalID:              fact.GoalID,
 		DoDID:               fact.DoDID,
@@ -68,8 +66,11 @@ func submitRunCreationInternalEvent(ctx context.Context, runs repository.RunRepo
 		State:               common.RunStatePending,
 		CreatedAt:           time.Now().UTC().Format(time.RFC3339Nano),
 	}
-	if err := runs.Create(bound, run); err != nil {
+	if err := runs.CreateNextWorkspaceRun(bound, run); err != nil {
 		return nil, err
+	}
+	if run.ID == "" || run.WorkspaceRunGeneration == 0 {
+		return nil, common.ErrConflict
 	}
 	return run, nil
 }

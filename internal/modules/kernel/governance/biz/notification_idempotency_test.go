@@ -52,8 +52,8 @@ func TestGovernanceDuplicateDecisionAndRunFactsDoNotRepublishResolvedTrace(t *te
 		TicketID: ticketID, WorkspaceID: workspaceID, RunID: runID, State: common.DecisionTicketStateOpen,
 	})
 	svc.processRunStateChanged(context.Background(), runevents.RunStateChangedData{
-		RunID: runID, WorkspaceID: workspaceID, State: common.RunStateBlockedOnDecision,
-		BlockingTicketID: ticketID, CausationID: "duplicate-run-fact",
+		RunID: runID, WorkspaceID: workspaceID, RunRevision: 1, State: common.RunStateBlockedOnDecision,
+		BlockingTicketID: ticketID, WorkspaceRunGeneration: 1, CausationID: runevents.RunStateChangedCausationID(runID, 1, 1, 0),
 	})
 
 	if got := resolveCount.Load(); got != 1 {

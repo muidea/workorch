@@ -4,7 +4,7 @@ Status: normative
 
 Type: verification-contract
 
-Last Verified: 2026-08-24
+Last Verified: 2026-08-26
 
 ## Purpose
 
@@ -60,6 +60,40 @@ Acceptance must prove:
 
 Do not reintroduce tests for `POST .../runs`, `POST .../runs/:runId/start`, `POST .../runs/:runId/resume` or
 `ExecutionContextPatch` as successful behavior. Their rejection is the retired-surface guard.
+
+## Workspace Deletion Contract
+
+HTTP/owner integration acceptance must prove:
+
+- Application sends exactly one concrete Workspace-owner command and has no Run/resource enumeration, cross-owner purge list,
+  directory cleanup, phase, retry journal or partial-ack state;
+- an initially non-empty `activeRunId` returns `409` before any durable deletion intent or Run command is created;
+- after admission, every ordinary Workspace setup/execution mutation conflicts, including while Run reports busy; an exact retry
+  in the stable waiting phase does not consume another Workspace/deletion revision;
+- Run's `draining -> retired` fence, Orchestrator's durable `quiescing/quiesced` token aggregate, Workspace's deletion aggregate,
+  and every participant's local tombstone survive file-backed reopen;
+  recovery re-drives the exact scope and response loss returns the same deterministic receipt; for Run and Orchestrator evidence,
+  a crash after physical removal but before the owner aggregate records `purged` must reopen the owner-local pending journal and
+  replay the original non-empty observations/proof rather than synthesize a zero-count receipt;
+- retain hides Workspace, Run/Step/RuntimeCheckpoint, Result/Artifact, Memory/trace, Decision, Approval and EventRecord reads without physically deleting
+  owner records; purge removes only each owner's own records through its exact private sink;
+- ordinary create/update/CAS/delete/purge and delayed Runtime/notification writes cannot cross an owner fence, including races
+  between independently constructed file repository sets; only the Run-owned opaque Runtime CAS drain lane remains legal during
+  `draining`, and it closes atomically at `retired`;
+- Run Setup-phase recovery inventory/readiness/exact-state topics reject every source except `kernel/orchestrator`; after `retired`,
+  the inventory omits the Workspace and exact opaque state read returns NotFound, while `draining` exposes it only for terminal drain;
+- purge ordering is Run draining/terminal drain, Orchestrator durable quiescing/token seal, Run retired, Orchestrator durable evidence seal,
+  Result/Memory/Decision/Approval seal, owner-local purges, safe Workspace-owned directory cleanup, then Eventstream seal/purge
+  last; Eventstream retains its tombstone
+  and global `StreamPosition` floor;
+- a terminal Run commit followed by a lost/pending Runtime delivery-ack CAS, a persisted scheduled/running terminal lease, and
+  restart all converge through the exact private drain while Run remains `draining`; Orchestrator Begin has zero durable transition
+  until that drain is empty, then the durable gate rejects every Runtime mutation. Generic drive/SM-2/SM-3/provider/capability/
+  evidence work stays rejected throughout;
+- quiescence tokens bind the exact ordered Run generation/revision and Runtime ref/revision/hash inventory; stale tokens and a
+  concurrent opaque CAS produce zero retirement transition, while a completed retirement rejects the CAS;
+- duplicate/stale/source-forged commands, payload drift, retain-to-purge escalation, unsafe directory targets and partial cleanup
+  fail closed without a second state machine or cross-owner write.
 
 ## Definition Admission And Clarification
 

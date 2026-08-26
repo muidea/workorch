@@ -4,7 +4,7 @@ Status: normative
 
 Type: design-baseline
 
-Last Verified: 2026-08-25
+Last Verified: 2026-08-26
 
 ## Purpose
 
@@ -91,6 +91,7 @@ See [Semantic Convergence](../00-core/runtime/semantic-convergence.md) and
 | SM-2 | `kernel/orchestrator` | authority/focus, CWI binding/credit, assessment, repair and terminal |
 | SM-3 | `kernel/orchestrator` | request session, candidate attempts, sealed dispatch and receipt transaction |
 | SM-4 | `kernel/orchestrator` | bounded drive, recovery, singleflight and delivery ledger |
+| Workspace deletion | `blocks/workspace` | durable retain/purge phase, ordered owner acknowledgements and restart re-drive |
 
 All formal state transitions first become a private internal event of their sole owner. A state type may have multiple coordinated
 private transition IDs, but all of them must resolve to that same owner; no cross-owner transition is legal. External Runtime results become
@@ -98,6 +99,15 @@ Orchestrator private internal events before aggregate mutation; Workspace defini
 Governance trace progress follow the same owner-local rule. Cross-owner I/O uses EventHub plus concrete typed contracts only.
 EventHub `StateMachine` metadata means participation, while `ReducerOwner + MachineRole` fixes SM-1 to Run and SM-2～SM-4 to
 Orchestrator; participant and opaque-persistence contracts never acquire reducer authority.
+
+Stateful multi-owner coordination follows the same rule: one business owner persists the only coordinator aggregate, while each
+participant changes only its own state through its own private reducer. Workspace deletion is Workspace-owned; Application sends
+one intent, Run owns the two-phase `draining -> retired` fence, and Orchestrator owns the durable
+`quiescing -> quiesced -> evidence-fenced -> purged` aggregate plus exact cleanup. `draining` blocks ordinary Run mutation while
+allowing only the narrow terminal SM-4 opaque drain lane；Orchestrator 仅在该 lane 已完全排空后才持久化 `quiescing`，此后
+所有 Runtime mutation 都 fail-closed。其 token 绑定 exact ordered Run/Runtime inventory，Run 才能 seal `retired`。
+Every resource owner owns its local tombstone. Eventstream seals last, and projection is never a deletion
+recovery journal. These deletion phases coordinate SM-1 and SM-4 owners but do not create a fifth Runtime state machine.
 
 - 同一 Orchestrator owner 内需要跨 SM 协调的 provider terminal，只能先归一为一个 private fact，再由一次 aggregate CAS
   同时关闭 SM-3 request session 并应用 exact SM-2 failure；不存在可被重启观察到的双写中间态。

@@ -31,7 +31,7 @@ func newWorkspaceExecutionIntentFixture(t *testing.T, respond func(runevents.Wor
 		hub: hub, workspaces: memoryrepo.NewWorkspaceRepository(), goals: memoryrepo.NewGoalRepository(), dods: memoryrepo.NewDoDRepository(),
 	}
 	biz, err := New(hub, nil, Dependencies{
-		Workspaces: fixture.workspaces, Goals: fixture.goals, DoDs: fixture.dods,
+		Workspaces: fixture.workspaces, DeletionMaterialCleaner: fixture.workspaces, Goals: fixture.goals, DoDs: fixture.dods,
 		Templates: memoryrepo.NewWorkspaceTemplateRepository(), EventHub: hub,
 	})
 	if err != nil {
@@ -158,6 +158,10 @@ func TestWorkspaceExecutionIntentRejectsMissingDefinitionAndCrossScope(t *testin
 		if !errors.Is(err, common.ErrConflict) || fixture.received != 0 {
 			t.Fatalf("missing definition err=%v received=%d", err, fixture.received)
 		}
+		stored, readErr := fixture.workspaces.Get(context.Background(), "workspace-1")
+		if readErr != nil || stored.DefaultLLMSelection != nil {
+			t.Fatalf("rejected admission changed Workspace default selection=%+v readErr=%v", stored.DefaultLLMSelection, readErr)
+		}
 	})
 
 	t.Run("context scope mismatch", func(t *testing.T) {
@@ -169,6 +173,166 @@ func TestWorkspaceExecutionIntentRejectsMissingDefinitionAndCrossScope(t *testin
 			t.Fatalf("cross-scope err=%v received=%d", err, fixture.received)
 		}
 	})
+}
+
+func TestWorkspaceExecutionIntentWaitingDeletionBlocksResumeAndRestartBeforeRunOwner(t *testing.T) {
+	response := func(command runevents.WorkspaceExecutionIntentCommand) runevents.WorkspaceExecutionIntentResult {
+		return runevents.WorkspaceExecutionIntentResult{RuntimeExecutionIntentAdmission: runtimecontract.RuntimeExecutionIntentAdmission{
+			WorkspaceID: command.WorkspaceID, RunID: command.RunID, RequestID: command.RequestID, Kind: command.Kind,
+			Outcome: runtimecontract.RuntimeExecutionIntentReconciliationRequested, Reason: runtimecontract.RuntimeExecutionIntentReasonCurrentRunContinuationAccepted,
+		}}
+	}
+	fixture := newWorkspaceExecutionIntentFixture(t, response)
+	workspaceID := common.WorkspaceID("workspace-deletion-waiting")
+	bootstrap := fixture.seedWorkspace(t, workspaceID, "", true)
+	current, err := fixture.workspaces.Get(context.Background(), workspaceID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	waiting := workspaceWithWaitingDeletionForTest(t, current, "delete-waiting")
+	if err := fixture.workspaces.CompareAndSwap(context.Background(), waiting, current.Revision); err != nil {
+		t.Fatal(err)
+	}
+	for _, command := range []workspaceevents.WorkspaceExecutionIntentCommand{
+		{WorkspaceID: workspaceID, RequestID: "resume-while-deleting", Kind: runtimecontract.RuntimeExecutionIntentResume},
+		{WorkspaceID: workspaceID, RequestID: "restart-while-deleting", Kind: runtimecontract.RuntimeExecutionIntentRestart, Bootstrap: &bootstrap},
+	} {
+		if _, err := fixture.execute(context.Background(), command); !errors.Is(err, common.ErrConflict) {
+			t.Fatalf("kind=%s err=%v, want conflict", command.Kind, err)
+		}
+	}
+	if fixture.received != 0 {
+		t.Fatalf("Run owner received %d execution intents while deletion waits", fixture.received)
+	}
+}
+
+func TestWorkspaceRestartMaterializesDefaultSelectionByPrivateEventBeforeRunOwner(t *testing.T) {
+	var fixture *workspaceExecutionIntentFixture
+	observedBeforeRun := false
+	fixture = newWorkspaceExecutionIntentFixture(t, func(command runevents.WorkspaceExecutionIntentCommand) runevents.WorkspaceExecutionIntentResult {
+		stored, err := fixture.workspaces.Get(context.Background(), command.WorkspaceID)
+		observedBeforeRun = err == nil && stored.DefaultLLMSelection != nil &&
+			stored.DefaultLLMSelection.Target.ProviderID == "provider-1" && stored.DefaultLLMSelection.Target.ModelID == "model-1"
+		return runevents.WorkspaceExecutionIntentResult{RuntimeExecutionIntentAdmission: runtimecontract.RuntimeExecutionIntentAdmission{
+			WorkspaceID: command.WorkspaceID, RunID: "run-new", RequestID: command.RequestID, Kind: command.Kind,
+			Outcome: runtimecontract.RuntimeExecutionIntentReconciliationRequested, Reason: runtimecontract.RuntimeExecutionIntentReasonNewRunActivated,
+		}}
+	})
+	bootstrap := fixture.seedWorkspace(t, "workspace-default", "", true)
+	bootstrap.Activation.ProviderSelection.ReasoningEffort = "high"
+	result, err := fixture.execute(context.Background(), workspaceevents.WorkspaceExecutionIntentCommand{
+		WorkspaceID: "workspace-default", RequestID: "restart-default", Kind: runtimecontract.RuntimeExecutionIntentRestart, Bootstrap: &bootstrap,
+	})
+	if err != nil || result.RunID != "run-new" || !observedBeforeRun || fixture.received != 1 {
+		t.Fatalf("restart result=%+v err=%v observedBeforeRun=%t received=%d", result, err, observedBeforeRun, fixture.received)
+	}
+	stored, err := fixture.workspaces.Get(context.Background(), "workspace-default")
+	if err != nil || stored.DefaultLLMSelection == nil {
+		t.Fatalf("stored Workspace=%+v err=%v", stored, err)
+	}
+	if stored.DefaultLLMSelection.ReasoningEffort != "" {
+		t.Fatalf("Run-scoped reasoning effort leaked into Workspace default: %+v", stored.DefaultLLMSelection)
+	}
+
+	firstRevision := stored.Revision
+	_, err = fixture.execute(context.Background(), workspaceevents.WorkspaceExecutionIntentCommand{
+		WorkspaceID: "workspace-default", RequestID: "restart-default-duplicate", Kind: runtimecontract.RuntimeExecutionIntentRestart, Bootstrap: &bootstrap,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	duplicate, err := fixture.workspaces.Get(context.Background(), "workspace-default")
+	if err != nil || duplicate.Revision != firstRevision {
+		t.Fatalf("duplicate materialization revision=%d want=%d err=%v", duplicate.Revision, firstRevision, err)
+	}
+}
+
+func TestWorkspaceExecutionInternalEventRejectsStaleStartupWithoutMutation(t *testing.T) {
+	fixture := newWorkspaceExecutionIntentFixture(t, func(command runevents.WorkspaceExecutionIntentCommand) runevents.WorkspaceExecutionIntentResult {
+		return runevents.WorkspaceExecutionIntentResult{}
+	})
+	bootstrap := fixture.seedWorkspace(t, "workspace-stale", "", true)
+	before, err := fixture.workspaces.Get(context.Background(), "workspace-stale")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = fixture.biz.submitWorkspaceExecutionInternalEvent(context.Background(), workspaceExecutionInternalEvent{
+		Kind:              workspaceExecutionInternalEventActivationProviderSelectionObserved,
+		WorkspaceID:       before.ID,
+		StartupInputHash:  "stale-startup-input",
+		ProviderSelection: bootstrap.Activation.ProviderSelection,
+	})
+	if !errors.Is(err, common.ErrConflict) {
+		t.Fatalf("stale startup event err=%v", err)
+	}
+	after, readErr := fixture.workspaces.Get(context.Background(), "workspace-stale")
+	if readErr != nil || after.Revision != before.Revision || after.DefaultLLMSelection != nil {
+		t.Fatalf("stale event mutated Workspace before=%+v after=%+v readErr=%v", before, after, readErr)
+	}
+}
+
+func TestWorkspaceExecutionInternalEventRejectsStaleStartupWithExistingDefault(t *testing.T) {
+	fixture := newWorkspaceExecutionIntentFixture(t, func(command runevents.WorkspaceExecutionIntentCommand) runevents.WorkspaceExecutionIntentResult {
+		return runevents.WorkspaceExecutionIntentResult{}
+	})
+	bootstrap := fixture.seedWorkspace(t, "workspace-stale-existing", "", true)
+	current, err := fixture.workspaces.Get(context.Background(), "workspace-stale-existing")
+	if err != nil {
+		t.Fatal(err)
+	}
+	existing := runtimecontract.ProviderInferenceSelection{Target: runtimecontract.ProviderModelTarget{ProviderID: "user-provider", ModelID: "user-model"}}
+	current.DefaultLLMSelection = &existing
+	if err := fixture.workspaces.Update(context.Background(), current); err != nil {
+		t.Fatal(err)
+	}
+	before, err := fixture.workspaces.Get(context.Background(), current.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = fixture.biz.submitWorkspaceExecutionInternalEvent(context.Background(), workspaceExecutionInternalEvent{
+		Kind:              workspaceExecutionInternalEventActivationProviderSelectionObserved,
+		WorkspaceID:       before.ID,
+		StartupInputHash:  "stale-startup-input",
+		ProviderSelection: bootstrap.Activation.ProviderSelection,
+	})
+	if !errors.Is(err, common.ErrConflict) {
+		t.Fatalf("stale startup with existing default err=%v", err)
+	}
+	after, readErr := fixture.workspaces.Get(context.Background(), before.ID)
+	if readErr != nil || after.Revision != before.Revision || after.DefaultLLMSelection == nil || !after.DefaultLLMSelection.Same(existing) || fixture.received != 0 {
+		t.Fatalf("stale existing-default event mutated or reached Run: before=%+v after=%+v received=%d readErr=%v", before, after, fixture.received, readErr)
+	}
+}
+
+func TestWorkspaceExecutionInternalEventPreservesExistingOwnerPreference(t *testing.T) {
+	fixture := newWorkspaceExecutionIntentFixture(t, func(command runevents.WorkspaceExecutionIntentCommand) runevents.WorkspaceExecutionIntentResult {
+		return runevents.WorkspaceExecutionIntentResult{}
+	})
+	bootstrap := fixture.seedWorkspace(t, "workspace-preference", "", true)
+	current, err := fixture.workspaces.Get(context.Background(), "workspace-preference")
+	if err != nil {
+		t.Fatal(err)
+	}
+	existing := runtimecontract.ProviderInferenceSelection{
+		Target: runtimecontract.ProviderModelTarget{ProviderID: "user-provider", ModelID: "user-model"}, ReasoningEffort: "low",
+	}
+	current.DefaultLLMSelection = &existing
+	if err := fixture.workspaces.Update(context.Background(), current); err != nil {
+		t.Fatal(err)
+	}
+	before, err := fixture.workspaces.Get(context.Background(), "workspace-preference")
+	if err != nil {
+		t.Fatal(err)
+	}
+	stored, err := fixture.biz.submitWorkspaceExecutionInternalEvent(context.Background(), workspaceExecutionInternalEvent{
+		Kind:              workspaceExecutionInternalEventActivationProviderSelectionObserved,
+		WorkspaceID:       before.ID,
+		StartupInputHash:  before.StartupInput.StartupInputHash,
+		ProviderSelection: bootstrap.Activation.ProviderSelection,
+	})
+	if err != nil || stored.Revision != before.Revision || stored.DefaultLLMSelection == nil || !stored.DefaultLLMSelection.Same(existing) {
+		t.Fatalf("existing preference was not preserved stored=%+v beforeRevision=%d err=%v", stored, before.Revision, err)
+	}
 }
 
 func TestWorkspaceExecutionRestartRequiresCurrentAdmissionCandidateBeforeRunOwner(t *testing.T) {

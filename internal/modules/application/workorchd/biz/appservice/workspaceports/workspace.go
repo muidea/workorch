@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	magicevent "github.com/muidea/magicCommon/event"
+	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/appmodelcore"
 	workspaceeventmapping "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/eventmapping"
 	workspaceevents "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/events"
 
@@ -16,6 +17,8 @@ import (
 	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
+
+const workspaceDeletionIngressSource = "application/workorchd"
 
 func ReadWorkspaceRecord(ctx context.Context, hub magicevent.Hub, workspaceID common.WorkspaceID) (*workspacemodel.Workspace, error) {
 	return ownerreadports.ReadWorkspaceByOwnerCommand(ctx, hub, workspaceID)
@@ -92,12 +95,23 @@ func UpdateWorkspaceLLMSelection(ctx context.Context, hub magicevent.Hub, worksp
 	return workspaceeventmapping.Workspace(response.Workspace), nil
 }
 
-func DeleteWorkspaceRecord(ctx context.Context, hub magicevent.Hub, workspaceID common.WorkspaceID) error {
-	if hub == nil {
-		return common.ErrInvalidArgument
+func DeleteWorkspaceRecord(ctx context.Context, hub magicevent.Hub, workspaceID common.WorkspaceID, command appmodelcore.DeleteWorkspaceCommand) (workspaceevents.DeleteWorkspaceResult, error) {
+	if hub == nil || workspaceID == "" {
+		return workspaceevents.DeleteWorkspaceResult{}, common.ErrInvalidArgument
 	}
-	event := magicevent.NewEventWithContext(workspaceevents.TopicWorkspaceCommandDelete, sourceModule, workspaceevents.CommandDestination, magicevent.NewHeader(), ctx, workspaceevents.DeleteWorkspaceCommand{WorkspaceID: workspaceID})
+	command = command.Normalized(string(workspaceID))
+	ownerCommand := workspaceevents.DeleteWorkspaceCommand{WorkspaceID: workspaceID, RequestID: command.RequestID, Purge: command.Purge, ExpectedRevision: command.ExpectedRevision}.Normalized()
+	if err := ownerCommand.Validate(); err != nil {
+		return workspaceevents.DeleteWorkspaceResult{}, err
+	}
+	event := magicevent.NewEventWithContext(workspaceevents.TopicWorkspaceCommandDelete, workspaceDeletionIngressSource, workspaceevents.CommandDestination, magicevent.NewHeader(), ctx, ownerCommand)
 	ownerevent.BindLane(event, workspaceevents.Contracts(), workspaceevents.TopicWorkspaceCommandDelete, "workspace", string(workspaceID), workspaceID, "", "")
-	_, err := ownerevent.Workspace(hub.Send(event), workspaceevents.TopicWorkspaceCommandDelete)
-	return err
+	response, err := ownerevent.WorkspaceOwner[workspaceevents.DeleteWorkspaceResult](hub.Send(event), workspaceevents.TopicWorkspaceCommandDelete)
+	if err != nil {
+		return workspaceevents.DeleteWorkspaceResult{}, err
+	}
+	if err := response.ValidateFor(ownerCommand); err != nil {
+		return workspaceevents.DeleteWorkspaceResult{}, err
+	}
+	return response, nil
 }

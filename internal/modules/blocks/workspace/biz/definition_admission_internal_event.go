@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"strings"
 
 	definitionadmission "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/definitionadmission"
 	workspaceevents "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/events"
@@ -12,223 +11,298 @@ import (
 	"github.com/muidea/workorch/internal/pkg/common"
 )
 
-type definitionAdmissionInternalEventKind string
-
-const (
-	definitionAdmissionInternalEventCandidateSubmitted              definitionAdmissionInternalEventKind = "candidate_submitted"
-	definitionAdmissionInternalEventCandidatePromoted               definitionAdmissionInternalEventKind = "candidate_promoted"
-	definitionAdmissionInternalEventClarificationResolutionObserved definitionAdmissionInternalEventKind = "clarification_resolution_observed"
-)
-
 // definitionAdmissionInternalEvent is the only Workspace-owner input allowed
-// to select a pre-seal admission reducer. External commands carry immutable
-// authoring facts; they never carry a target activation-admission state.
+// to select a pre-seal admission transition. Its public source carries one
+// immutable candidate intent and, at most, one immutable Decision-owner fact.
 type definitionAdmissionInternalEvent struct {
-	Kind        definitionAdmissionInternalEventKind
 	WorkspaceID common.WorkspaceID
-
-	CandidateSubmission     *workspaceevents.SubmitDefinitionAdmissionCandidateCommand
-	CandidatePromotion      *workspaceevents.PromoteDefinitionAdmissionCandidateCommand
-	ClarificationResolution *workspaceevents.AcknowledgeWorkspaceDefinitionClarificationResolutionCommand
+	Intent      *workspaceevents.DefinitionAdmissionIntentCommand
 }
 
 type definitionAdmissionTransition struct {
-	Next *workspacemodel.Workspace
-	Noop bool
-
-	CandidateSubmissionResult     *workspaceevents.SubmitDefinitionAdmissionCandidateResult
-	CandidatePromotionResult      *workspaceevents.PromoteDefinitionAdmissionCandidateResult
-	ClarificationResolutionResult *workspaceevents.AcknowledgeWorkspaceDefinitionClarificationResolutionResult
+	Next   *workspacemodel.Workspace
+	Noop   bool
+	Result *workspaceevents.DefinitionAdmissionIntentResult
 }
 
 func normalizeDefinitionAdmissionInternalEvent(event definitionAdmissionInternalEvent) (definitionAdmissionInternalEvent, error) {
-	if event.WorkspaceID == "" {
+	if event.WorkspaceID == "" || event.Intent == nil {
 		return definitionAdmissionInternalEvent{}, common.ErrInvalidArgument
 	}
-	payloadCount := 0
-	for _, present := range []bool{event.CandidateSubmission != nil, event.CandidatePromotion != nil, event.ClarificationResolution != nil} {
-		if present {
-			payloadCount++
+	intent := event.Intent.Normalized()
+	if err := intent.Validate(); err != nil || intent.Candidate.WorkspaceID != event.WorkspaceID {
+		if err != nil {
+			return definitionAdmissionInternalEvent{}, fmt.Errorf("%w: %v", common.ErrInvalidArgument, err)
 		}
-	}
-	if payloadCount != 1 {
 		return definitionAdmissionInternalEvent{}, common.ErrInvalidArgument
 	}
-	switch event.Kind {
-	case definitionAdmissionInternalEventCandidateSubmitted:
-		if event.CandidateSubmission == nil {
-			return definitionAdmissionInternalEvent{}, common.ErrInvalidArgument
-		}
-		command := *event.CandidateSubmission
-		command.Candidate = command.Candidate.Normalized()
-		if err := command.Candidate.Validate(); err != nil || command.Candidate.WorkspaceID != event.WorkspaceID {
-			if err != nil {
-				return definitionAdmissionInternalEvent{}, fmt.Errorf("%w: %v", common.ErrInvalidArgument, err)
-			}
-			return definitionAdmissionInternalEvent{}, common.ErrInvalidArgument
-		}
-		event.CandidateSubmission = &command
-	case definitionAdmissionInternalEventCandidatePromoted:
-		if event.CandidatePromotion == nil {
-			return definitionAdmissionInternalEvent{}, common.ErrInvalidArgument
-		}
-		command := *event.CandidatePromotion
-		command.CandidateID = strings.TrimSpace(command.CandidateID)
-		command.CandidateHash = strings.TrimSpace(command.CandidateHash)
-		if command.WorkspaceID != event.WorkspaceID || command.CandidateID == "" || command.CandidateRevision == 0 || command.CandidateHash == "" {
-			return definitionAdmissionInternalEvent{}, common.ErrInvalidArgument
-		}
-		event.CandidatePromotion = &command
-	case definitionAdmissionInternalEventClarificationResolutionObserved:
-		if event.ClarificationResolution == nil {
-			return definitionAdmissionInternalEvent{}, common.ErrInvalidArgument
-		}
-		command := *event.ClarificationResolution
-		command.CandidateID = strings.TrimSpace(command.CandidateID)
-		command.CandidateHash = strings.TrimSpace(command.CandidateHash)
-		command.ResolutionBindingHash = strings.TrimSpace(command.ResolutionBindingHash)
-		command.DefinitionRevision = strings.TrimSpace(command.DefinitionRevision)
-		command.StartupInputHash = strings.TrimSpace(command.StartupInputHash)
-		if command.WorkspaceID != event.WorkspaceID || command.CandidateID == "" || command.CandidateRevision == 0 || command.CandidateHash == "" || command.BlockingTicketID == "" || command.ResolutionID == "" || command.ResolutionBindingHash == "" || command.DefinitionRevision == "" || command.StartupInputHash == "" {
-			return definitionAdmissionInternalEvent{}, common.ErrInvalidArgument
-		}
-		event.ClarificationResolution = &command
-	default:
-		return definitionAdmissionInternalEvent{}, common.ErrInvalidArgument
-	}
+	event.Intent = &intent
 	return event, nil
 }
 
 func reduceDefinitionAdmissionInternalEvent(current *workspacemodel.Workspace, event definitionAdmissionInternalEvent) (definitionAdmissionTransition, error) {
-	if current == nil || current.ID != event.WorkspaceID {
+	if current == nil || current.ID != event.WorkspaceID || event.Intent == nil {
 		return definitionAdmissionTransition{}, common.ErrConflict
 	}
-	switch event.Kind {
-	case definitionAdmissionInternalEventCandidateSubmitted:
-		return reduceDefinitionAdmissionCandidateSubmission(current, *event.CandidateSubmission)
-	case definitionAdmissionInternalEventCandidatePromoted:
-		return reduceDefinitionAdmissionCandidatePromotion(current, *event.CandidatePromotion)
-	case definitionAdmissionInternalEventClarificationResolutionObserved:
-		return reduceDefinitionClarificationResolution(current, *event.ClarificationResolution)
-	default:
-		return definitionAdmissionTransition{}, common.ErrInvalidArgument
+	if err := workspaceDeletionRejectsMutation(current); err != nil {
+		return definitionAdmissionTransition{}, err
 	}
+	if _, _, err := current.ValidateActivationAdmissionPersistence(); err != nil {
+		return definitionAdmissionTransition{}, fmt.Errorf("%w: invalid current definition admission: %v", common.ErrConflict, err)
+	}
+	return reduceDefinitionAdmissionIntent(current, *event.Intent)
 }
 
-func reduceDefinitionAdmissionCandidateSubmission(current *workspacemodel.Workspace, command workspaceevents.SubmitDefinitionAdmissionCandidateCommand) (definitionAdmissionTransition, error) {
+func reduceDefinitionAdmissionIntent(current *workspacemodel.Workspace, command workspaceevents.DefinitionAdmissionIntentCommand) (definitionAdmissionTransition, error) {
 	candidate := command.Candidate
-	admission, err := definitionadmission.Compile(candidate)
+	admissionResult, err := definitionadmission.Compile(candidate)
 	if err != nil {
 		return definitionAdmissionTransition{}, fmt.Errorf("%w: %v", common.ErrInvalidArgument, err)
 	}
-	currentRevision := uint64(0)
-	for _, existing := range current.DefinitionAdmissionCandidates {
-		if existing.CandidateID != candidate.CandidateID {
-			continue
+	next, candidateDisposition, candidateChanged, err := persistDefinitionAdmissionCandidate(current, command)
+	if err != nil {
+		return definitionAdmissionTransition{}, err
+	}
+	stored, isCurrent := currentDefinitionAdmissionCandidate(next.DefinitionAdmissionCandidates, candidate.CandidateID)
+	if stored == nil || !isCurrent || stored.CandidateRevision != candidate.CandidateRevision || stored.CandidateHash != candidate.CandidateHash {
+		return definitionAdmissionTransition{}, common.ErrConflict
+	}
+	priorClarification := outstandingDefinitionClarification(&next, candidate)
+
+	if admissionResult.Disposition == workspacemodel.DefinitionAdmissionClarificationRequired {
+		if command.ClarificationTicket != nil || command.ClarificationResolution != nil {
+			return definitionAdmissionTransition{}, common.ErrConflict
 		}
-		if existing.CandidateRevision == candidate.CandidateRevision {
-			if existing.CandidateHash != candidate.CandidateHash {
+		result := definitionAdmissionIntentResult(candidate, admissionResult, candidateDisposition, workspaceevents.DefinitionAdmissionIntentClarificationRequired, priorClarification, nil, nil)
+		return definitionAdmissionTransitionFor(next, candidateChanged, result)
+	}
+	if admissionResult.Disposition != workspacemodel.DefinitionAdmissionAdmittedAllOf {
+		return definitionAdmissionTransition{}, common.ErrConflict
+	}
+
+	startup, activation, bound := definitionActivationForCandidate(&next, candidate)
+	if bound {
+		switch activation.State {
+		case workspacemodel.WorkspaceActivationEligible:
+			if command.ClarificationTicket != nil {
 				return definitionAdmissionTransition{}, common.ErrConflict
 			}
-			result := workspaceevents.SubmitDefinitionAdmissionCandidateResult{Candidate: existing.Clone(), AdmissionResult: admission, Disposition: workspaceevents.DefinitionAdmissionCandidateDuplicate}
-			return definitionAdmissionTransition{Noop: true, CandidateSubmissionResult: &result}, nil
+			if command.ClarificationResolution != nil {
+				if err := command.ClarificationResolution.ValidateForEligible(candidate, admissionResult, startup, activation); err != nil {
+					return definitionAdmissionTransition{}, common.ErrConflict
+				}
+			}
+			result := definitionAdmissionIntentResult(candidate, admissionResult, candidateDisposition, workspaceevents.DefinitionAdmissionIntentEligible, priorClarification, &startup, &activation)
+			return definitionAdmissionTransitionFor(next, candidateChanged, result)
+		case workspacemodel.WorkspaceActivationPendingClarificationResolution:
+			if priorClarification == nil {
+				return definitionAdmissionTransition{}, common.ErrConflict
+			}
+			if command.ClarificationTicket != nil {
+				if err := command.ClarificationTicket.ValidateFor(*priorClarification); err != nil || command.ClarificationTicket.TicketBinding.TicketID != activation.BlockingTicketID {
+					return definitionAdmissionTransition{}, common.ErrConflict
+				}
+			}
+			if command.ClarificationResolution != nil {
+				if err := command.ClarificationResolution.ValidateFor(*priorClarification, candidate, admissionResult, startup, activation); err != nil {
+					return definitionAdmissionTransition{}, common.ErrConflict
+				}
+				activation.State = workspacemodel.WorkspaceActivationEligible
+				activation.ClarificationResolutionID = command.ClarificationResolution.ResolutionBinding.ResolutionID
+				activation.ClarificationResolutionBindingHash = command.ClarificationResolution.ResolutionBinding.ResolutionBindingHash
+				if err := activation.ValidateCandidate(startup, candidate); err != nil {
+					return definitionAdmissionTransition{}, common.ErrConflict
+				}
+				next.ActivationAdmission = &activation
+				result := definitionAdmissionIntentResult(candidate, admissionResult, candidateDisposition, workspaceevents.DefinitionAdmissionIntentEligible, priorClarification, &startup, &activation)
+				return definitionAdmissionTransitionFor(next, true, result)
+			}
+			result := definitionAdmissionIntentResult(candidate, admissionResult, candidateDisposition, workspaceevents.DefinitionAdmissionIntentClarificationResolutionRequired, priorClarification, &startup, &activation)
+			return definitionAdmissionTransitionFor(next, candidateChanged, result)
+		default:
+			return definitionAdmissionTransition{}, common.ErrConflict
+		}
+	}
+
+	if command.ClarificationResolution != nil {
+		return definitionAdmissionTransition{}, common.ErrConflict
+	}
+	if priorClarification != nil {
+		if command.ClarificationTicket == nil {
+			result := definitionAdmissionIntentResult(candidate, admissionResult, candidateDisposition, workspaceevents.DefinitionAdmissionIntentClarificationTicketRequired, priorClarification, nil, nil)
+			return definitionAdmissionTransitionFor(next, candidateChanged, result)
+		}
+		if err := command.ClarificationTicket.ValidateFor(*priorClarification); err != nil {
+			return definitionAdmissionTransition{}, common.ErrConflict
+		}
+		promoted, startup, activation, err := promoteDefinitionAdmission(&next, candidate, admissionResult, command.ClarificationTicket.TicketBinding.TicketID)
+		if err != nil {
+			return definitionAdmissionTransition{}, err
+		}
+		result := definitionAdmissionIntentResult(candidate, admissionResult, candidateDisposition, workspaceevents.DefinitionAdmissionIntentClarificationResolutionRequired, priorClarification, &startup, &activation)
+		return definitionAdmissionTransitionFor(promoted, true, result)
+	}
+	if command.ClarificationTicket != nil {
+		return definitionAdmissionTransition{}, common.ErrConflict
+	}
+	promoted, startup, activation, err := promoteDefinitionAdmission(&next, candidate, admissionResult, "")
+	if err != nil {
+		return definitionAdmissionTransition{}, err
+	}
+	result := definitionAdmissionIntentResult(candidate, admissionResult, candidateDisposition, workspaceevents.DefinitionAdmissionIntentEligible, nil, &startup, &activation)
+	return definitionAdmissionTransitionFor(promoted, true, result)
+}
+
+func persistDefinitionAdmissionCandidate(current *workspacemodel.Workspace, command workspaceevents.DefinitionAdmissionIntentCommand) (workspacemodel.Workspace, workspaceevents.DefinitionAdmissionCandidateDisposition, bool, error) {
+	candidate := command.Candidate
+	currentRevision := uint64(0)
+	lineageID := ""
+	seenRevisions := map[uint64]struct{}{}
+	duplicateCandidate := false
+	for _, existing := range current.DefinitionAdmissionCandidates {
+		existing = existing.Normalized()
+		if err := existing.Validate(); err != nil {
+			return workspacemodel.Workspace{}, "", false, common.ErrConflict
+		}
+		if lineageID == "" {
+			lineageID = existing.CandidateID
+		}
+		if existing.CandidateID != lineageID {
+			return workspacemodel.Workspace{}, "", false, common.ErrConflict
+		}
+		if _, duplicate := seenRevisions[existing.CandidateRevision]; duplicate {
+			return workspacemodel.Workspace{}, "", false, common.ErrConflict
+		}
+		seenRevisions[existing.CandidateRevision] = struct{}{}
+		if existing.CandidateRevision == candidate.CandidateRevision {
+			if existing.CandidateID != candidate.CandidateID || existing.CandidateHash != candidate.CandidateHash {
+				return workspacemodel.Workspace{}, "", false, common.ErrConflict
+			}
+			duplicateCandidate = true
 		}
 		if existing.CandidateRevision > currentRevision {
 			currentRevision = existing.CandidateRevision
 		}
 	}
+	if currentRevision != uint64(len(seenRevisions)) {
+		return workspacemodel.Workspace{}, "", false, common.ErrConflict
+	}
+	if lineageID != "" && candidate.CandidateID != lineageID {
+		return workspacemodel.Workspace{}, "", false, common.ErrConflict
+	}
+	if duplicateCandidate {
+		return *current, workspaceevents.DefinitionAdmissionCandidateDuplicate, false, nil
+	}
 	if command.ExpectedCandidateRevision != currentRevision || candidate.CandidateRevision != currentRevision+1 {
-		return definitionAdmissionTransition{}, common.ErrConflict
+		return workspacemodel.Workspace{}, "", false, common.ErrConflict
+	}
+	if current.StartupInput == nil {
+		if candidate.BaseDefinitionRevision != "" || candidate.BaseStartupInputHash != "" {
+			return workspacemodel.Workspace{}, "", false, common.ErrConflict
+		}
+	} else if candidate.BaseDefinitionRevision != current.StartupInput.DefinitionRevision || candidate.BaseStartupInputHash != current.StartupInput.StartupInputHash {
+		return workspacemodel.Workspace{}, "", false, common.ErrConflict
 	}
 	next := *current
 	next.DefinitionAdmissionCandidates = append(cloneDefinitionAdmissionCandidates(current.DefinitionAdmissionCandidates), candidate.Clone())
-	result := workspaceevents.SubmitDefinitionAdmissionCandidateResult{Candidate: candidate.Clone(), AdmissionResult: admission, Disposition: workspaceevents.DefinitionAdmissionCandidateCreated}
-	return definitionAdmissionTransition{Next: &next, CandidateSubmissionResult: &result}, nil
+	return next, workspaceevents.DefinitionAdmissionCandidateCreated, true, nil
 }
 
-func reduceDefinitionAdmissionCandidatePromotion(current *workspacemodel.Workspace, command workspaceevents.PromoteDefinitionAdmissionCandidateCommand) (definitionAdmissionTransition, error) {
-	candidate, isCurrent := currentDefinitionAdmissionCandidate(current.DefinitionAdmissionCandidates, command.CandidateID)
-	if candidate == nil || !isCurrent || candidate.CandidateRevision != command.CandidateRevision || candidate.CandidateHash != command.CandidateHash {
-		return definitionAdmissionTransition{}, common.ErrConflict
+func outstandingDefinitionClarification(current *workspacemodel.Workspace, candidate workspacemodel.DefinitionAdmissionCandidate) *workspaceevents.DefinitionAdmissionClarificationBinding {
+	if current == nil {
+		return nil
 	}
-	admissionResult, err := definitionadmission.Compile(*candidate)
-	if err != nil {
-		return definitionAdmissionTransition{}, fmt.Errorf("%w: %v", common.ErrConflict, err)
+	eligibleBaseline := uint64(0)
+	if current.ActivationAdmission != nil {
+		activation := current.ActivationAdmission.Normalized()
+		if activation.State == workspacemodel.WorkspaceActivationEligible && activation.CandidateID == candidate.CandidateID {
+			eligibleBaseline = activation.CandidateRevision
+		}
 	}
-	if admissionResult.Disposition != workspacemodel.DefinitionAdmissionAdmittedAllOf {
-		return definitionAdmissionTransition{}, common.ErrConflict
+	var selected *workspaceevents.DefinitionAdmissionClarificationBinding
+	for _, existing := range current.DefinitionAdmissionCandidates {
+		if existing.CandidateID != candidate.CandidateID || existing.CandidateRevision <= eligibleBaseline || existing.CandidateRevision >= candidate.CandidateRevision || (selected != nil && existing.CandidateRevision <= selected.Candidate.CandidateRevision) {
+			continue
+		}
+		admission, err := definitionadmission.Compile(existing)
+		if err != nil || admission.Disposition != workspacemodel.DefinitionAdmissionClarificationRequired {
+			continue
+		}
+		binding := workspaceevents.DefinitionAdmissionClarificationBinding{Candidate: existing.Clone(), AdmissionResult: admission}
+		selected = &binding
+	}
+	return selected
+}
+
+func definitionActivationForCandidate(current *workspacemodel.Workspace, candidate workspacemodel.DefinitionAdmissionCandidate) (workspacemodel.WorkspaceStartupInputContract, workspacemodel.WorkspaceActivationAdmission, bool) {
+	if current == nil || current.StartupInput == nil || current.ActivationAdmission == nil {
+		return workspacemodel.WorkspaceStartupInputContract{}, workspacemodel.WorkspaceActivationAdmission{}, false
+	}
+	startup := current.StartupInput.Clone()
+	activation := current.ActivationAdmission.Normalized()
+	if activation.CandidateID != candidate.CandidateID || activation.CandidateRevision != candidate.CandidateRevision || activation.CandidateHash != candidate.CandidateHash {
+		return workspacemodel.WorkspaceStartupInputContract{}, workspacemodel.WorkspaceActivationAdmission{}, false
+	}
+	return startup, activation, true
+}
+
+func promoteDefinitionAdmission(current *workspacemodel.Workspace, candidate workspacemodel.DefinitionAdmissionCandidate, admissionResult workspacemodel.DefinitionAdmissionResult, blockingTicketID common.TicketID) (workspacemodel.Workspace, workspacemodel.WorkspaceStartupInputContract, workspacemodel.WorkspaceActivationAdmission, error) {
+	if current == nil {
+		return workspacemodel.Workspace{}, workspacemodel.WorkspaceStartupInputContract{}, workspacemodel.WorkspaceActivationAdmission{}, common.ErrInvalidArgument
 	}
 	if current.StartupInput != nil || current.ActivationAdmission != nil {
-		if samePromotion(current, *candidate, admissionResult, command.BlockingTicketID) {
-			result := workspaceevents.PromoteDefinitionAdmissionCandidateResult{
-				DefinitionRevision: current.StartupInput.DefinitionRevision, StartupInputHash: current.StartupInput.StartupInputHash,
-				CandidateItemToItemRefMappingHash: current.StartupInput.CandidateItemToItemRefMappingHash,
-				StartupInput:                      current.StartupInput.Clone(), ActivationAdmission: current.ActivationAdmission.Normalized(), Duplicate: true,
-			}
-			return definitionAdmissionTransition{Noop: true, CandidatePromotionResult: &result}, nil
-		}
-		if candidate.BaseDefinitionRevision == "" || candidate.BaseStartupInputHash == "" || current.StartupInput == nil || candidate.BaseDefinitionRevision != current.StartupInput.DefinitionRevision || candidate.BaseStartupInputHash != current.StartupInput.StartupInputHash {
-			return definitionAdmissionTransition{}, common.ErrConflict
+		if current.StartupInput == nil || current.ActivationAdmission == nil || candidate.BaseDefinitionRevision == "" || candidate.BaseStartupInputHash == "" || candidate.BaseDefinitionRevision != current.StartupInput.DefinitionRevision || candidate.BaseStartupInputHash != current.StartupInput.StartupInputHash {
+			return workspacemodel.Workspace{}, workspacemodel.WorkspaceStartupInputContract{}, workspacemodel.WorkspaceActivationAdmission{}, common.ErrConflict
 		}
 	}
-	startup := startupInputFromCandidate(*candidate, admissionResult)
+	startup := startupInputFromCandidate(candidate, admissionResult)
 	if err := startup.Validate(); err != nil {
-		return definitionAdmissionTransition{}, fmt.Errorf("%w: %v", common.ErrInvalidArgument, err)
+		return workspacemodel.Workspace{}, workspacemodel.WorkspaceStartupInputContract{}, workspacemodel.WorkspaceActivationAdmission{}, fmt.Errorf("%w: %v", common.ErrInvalidArgument, err)
 	}
-	admission := workspacemodel.WorkspaceActivationAdmission{
-		WorkspaceID: command.WorkspaceID, CandidateID: candidate.CandidateID, CandidateRevision: candidate.CandidateRevision, CandidateHash: candidate.CandidateHash,
+	activation := workspacemodel.WorkspaceActivationAdmission{
+		WorkspaceID: candidate.WorkspaceID, CandidateID: candidate.CandidateID, CandidateRevision: candidate.CandidateRevision, CandidateHash: candidate.CandidateHash,
 		DefinitionRevision: startup.DefinitionRevision, StartupInputHash: startup.StartupInputHash, State: workspacemodel.WorkspaceActivationEligible,
 	}
-	if command.BlockingTicketID != "" {
-		admission.State = workspacemodel.WorkspaceActivationPendingClarificationResolution
-		admission.BlockingTicketID = command.BlockingTicketID
+	if blockingTicketID != "" {
+		activation.State = workspacemodel.WorkspaceActivationPendingClarificationResolution
+		activation.BlockingTicketID = blockingTicketID
 	}
-	if err := admission.ValidateCandidate(startup, *candidate); err != nil {
-		return definitionAdmissionTransition{}, fmt.Errorf("%w: %v", common.ErrInvalidArgument, err)
+	if err := activation.ValidateCandidate(startup, candidate); err != nil {
+		return workspacemodel.Workspace{}, workspacemodel.WorkspaceStartupInputContract{}, workspacemodel.WorkspaceActivationAdmission{}, fmt.Errorf("%w: %v", common.ErrInvalidArgument, err)
 	}
 	next := *current
 	next.StartupInput = &startup
-	next.ActivationAdmission = &admission
-	result := workspaceevents.PromoteDefinitionAdmissionCandidateResult{
-		DefinitionRevision: startup.DefinitionRevision, StartupInputHash: startup.StartupInputHash,
-		CandidateItemToItemRefMappingHash: startup.CandidateItemToItemRefMappingHash,
-		StartupInput:                      startup.Clone(), ActivationAdmission: admission.Normalized(),
-	}
-	return definitionAdmissionTransition{Next: &next, CandidatePromotionResult: &result}, nil
+	next.ActivationAdmission = &activation
+	return next, startup, activation, nil
 }
 
-func reduceDefinitionClarificationResolution(current *workspacemodel.Workspace, command workspaceevents.AcknowledgeWorkspaceDefinitionClarificationResolutionCommand) (definitionAdmissionTransition, error) {
-	if current.StartupInput == nil || current.ActivationAdmission == nil {
-		return definitionAdmissionTransition{}, common.ErrConflict
+func definitionAdmissionIntentResult(candidate workspacemodel.DefinitionAdmissionCandidate, admissionResult workspacemodel.DefinitionAdmissionResult, candidateDisposition workspaceevents.DefinitionAdmissionCandidateDisposition, disposition workspaceevents.DefinitionAdmissionIntentDisposition, prior *workspaceevents.DefinitionAdmissionClarificationBinding, startup *workspacemodel.WorkspaceStartupInputContract, activation *workspacemodel.WorkspaceActivationAdmission) workspaceevents.DefinitionAdmissionIntentResult {
+	result := workspaceevents.DefinitionAdmissionIntentResult{
+		Candidate: candidate.Clone(), AdmissionResult: admissionResult, CandidateDisposition: candidateDisposition, Disposition: disposition,
 	}
-	admission := current.ActivationAdmission.Normalized()
-	if admission.WorkspaceID != command.WorkspaceID || admission.CandidateID != command.CandidateID || admission.CandidateRevision != command.CandidateRevision || admission.CandidateHash != command.CandidateHash || admission.BlockingTicketID != command.BlockingTicketID || admission.DefinitionRevision != command.DefinitionRevision || admission.StartupInputHash != command.StartupInputHash {
-		return definitionAdmissionTransition{}, common.ErrConflict
+	if prior != nil {
+		binding := prior.Clone()
+		result.PriorClarification = &binding
 	}
-	if admission.State == workspacemodel.WorkspaceActivationEligible {
-		if admission.ClarificationResolutionID == command.ResolutionID && admission.ClarificationResolutionBindingHash == command.ResolutionBindingHash {
-			result := workspaceevents.AcknowledgeWorkspaceDefinitionClarificationResolutionResult{ActivationAdmission: admission, Transitioned: false}
-			return definitionAdmissionTransition{Noop: true, ClarificationResolutionResult: &result}, nil
-		}
-		return definitionAdmissionTransition{}, common.ErrConflict
+	if startup != nil {
+		value := startup.Clone()
+		result.StartupInput = &value
 	}
-	if admission.State != workspacemodel.WorkspaceActivationPendingClarificationResolution {
-		return definitionAdmissionTransition{}, common.ErrConflict
+	if activation != nil {
+		value := activation.Normalized()
+		result.ActivationAdmission = &value
 	}
-	admission.State = workspacemodel.WorkspaceActivationEligible
-	admission.ClarificationResolutionID = command.ResolutionID
-	admission.ClarificationResolutionBindingHash = command.ResolutionBindingHash
-	candidate, isCurrent := currentDefinitionAdmissionCandidate(current.DefinitionAdmissionCandidates, admission.CandidateID)
-	if candidate == nil || !isCurrent || candidate.CandidateRevision != admission.CandidateRevision || candidate.CandidateHash != admission.CandidateHash {
-		return definitionAdmissionTransition{}, common.ErrConflict
+	return result.Normalized()
+}
+
+func definitionAdmissionTransitionFor(next workspacemodel.Workspace, changed bool, result workspaceevents.DefinitionAdmissionIntentResult) (definitionAdmissionTransition, error) {
+	if err := result.Validate(); err != nil {
+		return definitionAdmissionTransition{}, fmt.Errorf("%w: %v", common.ErrInvalidArgument, err)
 	}
-	if err := admission.ValidateCandidate(*current.StartupInput, *candidate); err != nil {
-		return definitionAdmissionTransition{}, common.ErrConflict
+	if changed {
+		return definitionAdmissionTransition{Next: &next, Result: &result}, nil
 	}
-	next := *current
-	next.ActivationAdmission = &admission
-	result := workspaceevents.AcknowledgeWorkspaceDefinitionClarificationResolutionResult{ActivationAdmission: admission, Transitioned: true}
-	return definitionAdmissionTransition{Next: &next, ClarificationResolutionResult: &result}, nil
+	return definitionAdmissionTransition{Noop: true, Result: &result}, nil
 }
 
 func (m *Biz) submitDefinitionAdmissionInternalEvent(ctx context.Context, event definitionAdmissionInternalEvent) (definitionAdmissionTransition, error) {

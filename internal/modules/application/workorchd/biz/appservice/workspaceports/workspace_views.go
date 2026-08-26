@@ -2,7 +2,6 @@ package workspaceports
 
 import (
 	"context"
-	"errors"
 	"strings"
 
 	magicevent "github.com/muidea/magicCommon/event"
@@ -20,10 +19,8 @@ type CreateWorkspaceViewRequest struct {
 }
 
 type DeleteWorkspaceViewRequest struct {
-	RepositoryBackend string
-	RepositoryDataDir string
-	WorkspaceID       string
-	Command           appmodelcore.DeleteWorkspaceCommand
+	WorkspaceID string
+	Command     appmodelcore.DeleteWorkspaceCommand
 }
 
 func CreateWorkspaceView(ctx context.Context, hub magicevent.Hub, req CreateWorkspaceViewRequest) (appmodelcore.Workspace, error) {
@@ -54,26 +51,7 @@ func DeleteWorkspaceView(ctx context.Context, hub magicevent.Hub, req DeleteWork
 	if id == "" {
 		return common.ErrInvalidArgument
 	}
-	workspace, err := ReadWorkspaceRecord(ctx, hub, id)
-	if err != nil {
-		return err
-	}
-	if req.Command.Purge {
-		if err := PurgeWorkspaceRecords(ctx, hub, id); err != nil {
-			return err
-		}
-	}
-	if err := DeleteWorkspaceRecord(ctx, hub, id); err != nil {
-		return err
-	}
-	if !req.Command.Purge {
-		return nil
-	}
-	if err := purgeDeletedWorkspaceView(ctx, hub, req, id, workspace); err != nil {
-		if errors.Is(err, common.ErrNotFound) || errors.Is(err, common.ErrConflict) {
-			return nil
-		}
-		return err
-	}
-	return nil
+	command := req.Command.Normalized(string(id))
+	_, err := DeleteWorkspaceRecord(ctx, hub, id, command)
+	return err
 }

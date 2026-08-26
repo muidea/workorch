@@ -25,7 +25,7 @@ func New() *Module { return &Module{} }
 func (m *Module) ID() string { return ModuleID }
 
 func (m *Module) Configure(deps runbiz.Dependencies) error {
-	if m == nil || deps.Runs == nil || deps.EventHub == nil {
+	if m == nil || deps.EventHub == nil || (deps.Runs == nil && !deps.OwnerRepositories.Present()) {
 		return common.ErrInvalidArgument
 	}
 	owner := runbiz.New()

@@ -67,6 +67,13 @@ func (m *Biz) executeDoDCommand(ctx context.Context, ev magicevent.Event) (works
 		if err != nil {
 			return workspaceevents.WorkspaceCommandResult{}, err
 		}
+		hidden, err := m.workspaceDeletionReadHidden(scopedCtx, cmd.WorkspaceID)
+		if err != nil {
+			return workspaceevents.WorkspaceCommandResult{}, err
+		}
+		if hidden {
+			return workspaceevents.WorkspaceCommandResult{}, common.ErrNotFound
+		}
 		item, err := m.dods.Get(scopedCtx, cmd.DoDID)
 		if err != nil {
 			return workspaceevents.WorkspaceCommandResult{}, err
@@ -80,6 +87,13 @@ func (m *Biz) executeDoDCommand(ctx context.Context, ev magicevent.Event) (works
 		scopedCtx, err := common.BindRuntimeWorkspaceContext(ctx, cmd.WorkspaceID)
 		if err != nil {
 			return workspaceevents.WorkspaceCommandResult{}, err
+		}
+		hidden, err := m.workspaceDeletionReadHidden(scopedCtx, cmd.WorkspaceID)
+		if err != nil {
+			return workspaceevents.WorkspaceCommandResult{}, err
+		}
+		if hidden {
+			return workspaceevents.WorkspaceCommandResult{DoDs: []*workspacemodel.DoD{}}, nil
 		}
 		items, err := m.dods.ListByWorkspaceID(scopedCtx, cmd.WorkspaceID)
 		if err != nil {

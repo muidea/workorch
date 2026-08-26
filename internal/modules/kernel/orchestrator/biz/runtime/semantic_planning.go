@@ -515,8 +515,8 @@ func (c *planningTransactionComponent) compileSemanticPlanBatch(ctx context.Cont
 			return false, fmt.Errorf("%w: semantic batch sequence is not the next contiguous sequence", common.ErrConflict)
 		}
 		batch = batch.Normalized()
-		if batch.State != runtimecontract.RuntimeSemanticPlanBatchPending && batch.State != runtimecontract.RuntimeSemanticPlanBatchRequesting {
-			return false, fmt.Errorf("%w: semantic batch compile requires pending/requesting state", common.ErrConflict)
+		if batch.State != runtimecontract.RuntimeSemanticPlanBatchPending {
+			return false, fmt.Errorf("%w: semantic batch compile requires owner-internal pending initialization", common.ErrConflict)
 		}
 		if err := batch.ValidateAgainstManifest(*ledger.Manifest); err != nil {
 			return false, err
@@ -525,7 +525,7 @@ func (c *planningTransactionComponent) compileSemanticPlanBatch(ctx context.Cont
 		if maxItems <= 0 {
 			maxItems = len(ledger.Manifest.CoverageItems)
 		}
-		expected, err := runtimecontract.CompileRuntimeSemanticPlanFocusBatch(
+		expected, err := semanticplan.CompileFocusBatch(
 			*ledger.Manifest, *ledger.CoverageOrderDocument, batch.Sequence, batch.RequestLogicalID,
 			SemanticPlanActiveCoverageIDsForDrive(aggregate.Facts, *ledger.CoverageOrderDocument, ledger.PendingCoverageIDs), ledger.PendingCoverageIDs, maxItems,
 		)
@@ -535,7 +535,7 @@ func (c *planningTransactionComponent) compileSemanticPlanBatch(ctx context.Cont
 		if !runtimecontract.SameRuntimeSemanticPlanBatchImmutableIdentity(batch, expected) {
 			return false, fmt.Errorf("%w: semantic batch identity does not match current focus and pending lineage", common.ErrConflict)
 		}
-		requesting, err := runtimecontract.AdvanceRuntimeSemanticPlanBatch(expected, runtimecontract.RuntimeSemanticPlanBatchRequesting)
+		requesting, err := advanceRuntimeSemanticPlanBatch(expected, runtimecontract.RuntimeSemanticPlanBatchRequesting)
 		if err != nil {
 			return false, err
 		}
@@ -685,7 +685,7 @@ func (c *planningTransactionComponent) advanceSemanticPlanBatch(ctx context.Cont
 			if persisted.Hash != identity.Hash || persisted.State != identity.State {
 				return false, fmt.Errorf("%w: semantic batch identity is stale", common.ErrConflict)
 			}
-			advanced, err := runtimecontract.AdvanceRuntimeSemanticPlanBatch(persisted, next)
+			advanced, err := advanceRuntimeSemanticPlanBatch(persisted, next)
 			if err != nil {
 				return false, err
 			}
@@ -790,7 +790,7 @@ func (c *planningTransactionComponent) observeSemanticPlanBatchDocument(ctx cont
 				if ledger.Batches[idx].State != runtimecontract.RuntimeSemanticPlanBatchRequesting {
 					return false, fmt.Errorf("%w: semantic batch document is not expected", common.ErrConflict)
 				}
-				advanced, advanceErr := runtimecontract.AdvanceRuntimeSemanticPlanBatch(ledger.Batches[idx], runtimecontract.RuntimeSemanticPlanBatchDocumentComplete)
+				advanced, advanceErr := advanceRuntimeSemanticPlanBatch(ledger.Batches[idx], runtimecontract.RuntimeSemanticPlanBatchDocumentComplete)
 				if advanceErr != nil {
 					return false, advanceErr
 				}
@@ -1174,7 +1174,7 @@ func advanceSemanticProofBatchDocument(ledger *runtimecontract.RuntimeSemanticPl
 		if ledger.Batches[idx].BatchID != batchID {
 			continue
 		}
-		advanced, err := runtimecontract.AdvanceRuntimeSemanticPlanBatch(ledger.Batches[idx], runtimecontract.RuntimeSemanticPlanBatchDocumentComplete)
+		advanced, err := advanceRuntimeSemanticPlanBatch(ledger.Batches[idx], runtimecontract.RuntimeSemanticPlanBatchDocumentComplete)
 		if err != nil {
 			return err
 		}
@@ -1211,7 +1211,7 @@ func (c *planningTransactionComponent) requireSemanticFeasibility(ctx context.Co
 		ledger.Phase = runtimecontract.RuntimeSemanticPlanningFeasibilityRequired
 		for idx := range ledger.Batches {
 			if ledger.Batches[idx].BatchID == ledger.ActiveBatchID {
-				advanced, advanceErr := runtimecontract.AdvanceRuntimeSemanticPlanBatch(ledger.Batches[idx], runtimecontract.RuntimeSemanticPlanBatchFeasibilityPending)
+				advanced, advanceErr := advanceRuntimeSemanticPlanBatch(ledger.Batches[idx], runtimecontract.RuntimeSemanticPlanBatchFeasibilityPending)
 				if advanceErr != nil {
 					return false, advanceErr
 				}
@@ -1321,11 +1321,11 @@ func (c *planningTransactionComponent) observeSemanticFeasibility(ctx context.Co
 				ledger.Phase = runtimecontract.RuntimeSemanticPlanningProofBatchFeasibilityComplete
 				for idx := range ledger.Batches {
 					if ledger.Batches[idx].BatchID == ledger.ActiveBatchID {
-						advanced, advanceErr := runtimecontract.AdvanceRuntimeSemanticPlanBatch(ledger.Batches[idx], runtimecontract.RuntimeSemanticPlanBatchFeasibilityComplete)
+						advanced, advanceErr := advanceRuntimeSemanticPlanBatch(ledger.Batches[idx], runtimecontract.RuntimeSemanticPlanBatchFeasibilityComplete)
 						if advanceErr != nil {
 							return false, advanceErr
 						}
-						advanced, advanceErr = runtimecontract.AdvanceRuntimeSemanticPlanBatch(advanced, runtimecontract.RuntimeSemanticPlanBatchAccepted)
+						advanced, advanceErr = advanceRuntimeSemanticPlanBatch(advanced, runtimecontract.RuntimeSemanticPlanBatchAccepted)
 						if advanceErr != nil {
 							return false, advanceErr
 						}

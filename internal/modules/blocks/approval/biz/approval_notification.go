@@ -65,46 +65,50 @@ func (m *Biz) recordApprovalResolution(ctx context.Context, data approvalevents.
 	if m == nil || m.EventHub() == nil || data.Validate() != nil {
 		return common.ErrInvalidArgument
 	}
-	topic := approvalevents.TopicApprovalCommandRecordResolution
-	event := magicevent.NewEventWithContext(topic, modulecommon.ModuleID, approvalevents.ResolutionRecordCommandDestination, magicevent.NewHeader(), ctx, approvalevents.RecordApprovalResolutionCommand{Data: data})
-	event.BindLaneKey(workorchevents.EventHubLaneKeyFor(approvalevents.Contracts(), topic, eventcontract.LaneScope{
-		SubjectType: "approval", SubjectID: string(data.ApprovalID), WorkspaceID: string(data.WorkspaceID), RunID: string(data.RunID), StepID: string(data.StepID),
-	}))
-	result := m.SendEvent(event)
-	if result == nil {
-		return common.ErrInvalidArgument
-	}
-	if resultErr := result.Error(); resultErr != nil {
-		if resultErr.Cause != nil {
-			return resultErr.Cause
+	return m.withWorkspaceActiveDelivery(ctx, data.WorkspaceID, func(guarded context.Context) error {
+		topic := approvalevents.TopicApprovalCommandRecordResolution
+		event := magicevent.NewEventWithContext(topic, modulecommon.ModuleID, approvalevents.ResolutionRecordCommandDestination, magicevent.NewHeader(), guarded, approvalevents.RecordApprovalResolutionCommand{Data: data})
+		event.BindLaneKey(workorchevents.EventHubLaneKeyFor(approvalevents.Contracts(), topic, eventcontract.LaneScope{
+			SubjectType: "approval", SubjectID: string(data.ApprovalID), WorkspaceID: string(data.WorkspaceID), RunID: string(data.RunID), StepID: string(data.StepID),
+		}))
+		result := m.SendEvent(event)
+		if result == nil {
+			return common.ErrInvalidArgument
 		}
-		return resultErr
-	}
-	value, resultErr := result.Get()
-	if resultErr != nil {
-		if resultErr.Cause != nil {
-			return resultErr.Cause
+		if resultErr := result.Error(); resultErr != nil {
+			if resultErr.Cause != nil {
+				return resultErr.Cause
+			}
+			return resultErr
 		}
-		return resultErr
-	}
-	response, ok := value.(approvalevents.RecordApprovalResolutionResult)
-	if !ok || response.NotificationID != data.NotificationID || response.ResolutionID != data.ResolutionID || response.ApprovalID != data.ApprovalID ||
-		response.WorkspaceID != data.WorkspaceID || response.RunID != data.RunID {
-		return common.ErrInvalidArgument
-	}
-	return nil
+		value, resultErr := result.Get()
+		if resultErr != nil {
+			if resultErr.Cause != nil {
+				return resultErr.Cause
+			}
+			return resultErr
+		}
+		response, ok := value.(approvalevents.RecordApprovalResolutionResult)
+		if !ok || response.NotificationID != data.NotificationID || response.ResolutionID != data.ResolutionID || response.ApprovalID != data.ApprovalID ||
+			response.WorkspaceID != data.WorkspaceID || response.RunID != data.RunID {
+			return common.ErrInvalidArgument
+		}
+		return nil
+	})
 }
 
 func (m *Biz) publishApprovalChanged(ctx context.Context, topic string, data approvalevents.ApprovalChangedData) error {
 	if m == nil || m.EventHub() == nil || data.Validate() != nil {
 		return common.ErrInvalidArgument
 	}
-	event := magicevent.NewEventWithContext(topic, modulecommon.ModuleID, approvalevents.NotificationDestination, magicevent.NewHeader(), ctx, data)
-	event.BindLaneKey(workorchevents.EventHubLaneKeyFor(approvalevents.Contracts(), topic, eventcontract.LaneScope{
-		SubjectType: "approval", SubjectID: string(data.ApprovalID), WorkspaceID: string(data.WorkspaceID), RunID: string(data.RunID), StepID: string(data.StepID),
-	}))
-	m.PostEvent(event)
-	return nil
+	return m.withWorkspaceActiveDelivery(ctx, data.WorkspaceID, func(guarded context.Context) error {
+		event := magicevent.NewEventWithContext(topic, modulecommon.ModuleID, approvalevents.NotificationDestination, magicevent.NewHeader(), guarded, data)
+		event.BindLaneKey(workorchevents.EventHubLaneKeyFor(approvalevents.Contracts(), topic, eventcontract.LaneScope{
+			SubjectType: "approval", SubjectID: string(data.ApprovalID), WorkspaceID: string(data.WorkspaceID), RunID: string(data.RunID), StepID: string(data.StepID),
+		}))
+		m.PostEvent(event)
+		return nil
+	})
 }
 
 func approvalResolvedNotificationID(item *approvalmodel.Approval) string {

@@ -4,7 +4,7 @@ Status: normative
 
 Type: core-contract-part
 
-Last Verified: 2026-08-25
+Last Verified: 2026-08-26
 
 ## Core Neutrality And Owner Layers
 
@@ -29,7 +29,10 @@ operation、effect、evidence、assessment、governance、recoverable wait、bud
 - 需要同步结果、强一致写入或 admission 的交互使用 `Send`；审计通知使用 `Post`，Post handler 不依赖 `event.Result`。
 - 禁止跨 owner service/repository/adapter callback、Envelope、`map[string]any`、无约束 `any`、JSON/reflect bridge 或通用 registry。
 - EventHub payload 只传 bounded immutable data，不传 repository、registry、recorder、channel、writer 或其它可变资源。
-- Application 可以编排多个 owner command，但不能代替接收 owner校验、持久化或选择 transition。
+- 无持久化过程状态的 Application use case 可以组合 owner query/command；一旦流程需要 phase、
+  retry journal、partial-ack 或 restart recovery，必须由一个明确的业务 owner 持久化唯一 coordinator
+  aggregate，并且只由该 owner 的 private internal event/reducer 选择 transition。Application 只提交
+  单一 intent，不得保存影子 saga 或用部分 owner result 直接推进状态。
 - read model/UI/session 中的 display state 只能从 owner fact 或自身源 fact 纯派生；不得另存一份可独立迁移的 mirror lifecycle，也不得使用 queued/active 等展示值触发 owner transition。
 - Runtime EventHub metadata 中的 `StateMachine` 只表示参与哪一条协调链，不授予 reducer authority；`ReducerOwner`
   固定为 SM-1=`run`、SM-2～SM-4=`orchestrator`，`MachineRole` 区分 participant、owner ingress 与 owner observation。

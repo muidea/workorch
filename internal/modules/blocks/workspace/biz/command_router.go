@@ -75,8 +75,42 @@ func workspaceCommandFamilyForTopic(topic string) (workspaceCommandFamily, bool)
 }
 
 func (m *Biz) handleCommand(ev magicevent.Event, result magicevent.Result) {
+	if ev != nil && ev.ID() == workspaceevents.TopicWorkspaceCommandDelete {
+		if m == nil {
+			setWorkspaceDeletionMagicResult(result, workspaceevents.DeleteWorkspaceResult{}, common.ErrInvalidArgument)
+			return
+		}
+		m.deletionIngressMu.Lock()
+		response, err := m.deleteWorkspace(ev.Context(), ev)
+		m.deletionIngressMu.Unlock()
+		setWorkspaceDeletionMagicResult(result, response, err)
+		return
+	}
+	if m != nil && workspaceMutationTopic(ev) {
+		m.deletionIngressMu.RLock()
+		defer m.deletionIngressMu.RUnlock()
+	}
 	response, err := m.executeCommand(ev)
 	setWorkspaceMagicResult(result, response, err)
+}
+
+func workspaceMutationTopic(ev magicevent.Event) bool {
+	if ev == nil {
+		return false
+	}
+	switch ev.ID() {
+	case workspaceevents.TopicWorkspaceCommandUpdate,
+		workspaceevents.TopicWorkspaceCommandUpdateLLMSelection,
+		workspaceevents.TopicWorkspaceCommandDefineGoal,
+		workspaceevents.TopicWorkspaceCommandUpdateGoal,
+		workspaceevents.TopicWorkspaceCommandDeleteGoal,
+		workspaceevents.TopicWorkspaceCommandDefineDoD,
+		workspaceevents.TopicWorkspaceCommandUpdateDoD,
+		workspaceevents.TopicWorkspaceCommandDeleteDoD:
+		return true
+	default:
+		return false
+	}
 }
 
 func (m *Biz) executeCommand(ev magicevent.Event) (workspaceevents.WorkspaceCommandResult, error) {
@@ -156,6 +190,17 @@ func workspaceScopeFromCommand(ev magicevent.Event) (common.WorkspaceID, error) 
 }
 
 func setWorkspaceMagicResult(result magicevent.Result, data workspaceevents.WorkspaceCommandResult, err error) {
+	if result == nil {
+		return
+	}
+	if err != nil {
+		result.Set(nil, &cd.Error{Code: cd.Unexpected, Message: err.Error(), Cause: err})
+		return
+	}
+	result.Set(data, nil)
+}
+
+func setWorkspaceDeletionMagicResult(result magicevent.Result, data workspaceevents.DeleteWorkspaceResult, err error) {
 	if result == nil {
 		return
 	}

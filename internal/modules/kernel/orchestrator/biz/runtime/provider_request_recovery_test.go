@@ -160,6 +160,77 @@ func TestProviderRequestIncompleteRecoveryCoordinatesPendingAndExhaustedTerminal
 	}
 }
 
+func TestProviderRequestZeroByteOutputLimitUsesOwnerPrivateWholeDocumentRecovery(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name    string
+		prepare func(*testing.T) (RuntimeAggregate, runtimecontract.RuntimeCandidateRequestSession)
+	}{
+		{name: "operations", prepare: preparedOperationsProviderTerminalSession},
+		{name: "semantic_plan", prepare: preparedSemanticProviderTerminalSession},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ctx := context.Background()
+			aggregate, session := tt.prepare(t)
+			repository := &providerTerminalCASRepository{aggregate: aggregate, mode: providerTerminalCASNormal}
+			controller, err := NewRuntimeController(repository)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if session.ExpectedDocument == nil {
+				t.Fatal("prepared request session has no expected document")
+			}
+			expected := session.ExpectedDocument.Clone()
+			framing := runtimecontract.RuntimeProviderDocumentFraming{
+				Disposition:          runtimecontract.RuntimeProviderDocumentIncomplete,
+				ExpectedDocumentHash: expected.Hash,
+				Code:                 "max_output_tokens",
+				Signature:            "provider-output-limit",
+			}
+			fact := runtimeProviderDocumentRecoveryFactForTest(t, session.DocumentKind, framing)
+			settlement := runtimeProviderConfirmedBudgetSettlementForTest(t, session.LogicalRequestID, session.LastPhysicalCallID, nil)
+			pending, err := controller.coordinateProviderRequestRecovery(
+				ctx, aggregate.Facts.WorkspaceID, aggregate.Facts.RunID,
+				session.LogicalRequestID, session.LastPhysicalCallID, fact, settlement,
+			)
+			if err != nil {
+				t.Fatal(err)
+			}
+			current := pending.CandidateRequestSessions[0]
+			if repository.saves != 1 || current.State != runtimecontract.RuntimeCandidateRequestSessionRecoveryPending || current.IncompleteOutcomes != 1 || current.ProviderSubmitted || current.LogicalRequestID != session.LogicalRequestID {
+				t.Fatalf("zero-byte output limit did not enter one owner-private recovery CAS: saves=%d session=%+v", repository.saves, current)
+			}
+			if current.ExpectedDocument == nil || current.ExpectedDocument.Hash != expected.Hash || runtimecontract.StableRuntimeExpectedDocumentHash(*current.ExpectedDocument) != runtimecontract.StableRuntimeExpectedDocumentHash(expected) {
+				t.Fatalf("whole-document recovery changed sealed expected document: before=%+v after=%+v", expected, current.ExpectedDocument)
+			}
+			if pending.Facts.Failure != nil || len(pending.CandidateAttempts) != len(aggregate.CandidateAttempts) || pending.ActiveDispatch != nil || len(pending.CompletedDispatches) != len(aggregate.CompletedDispatches) {
+				t.Fatalf("zero-byte output limit created candidate/dispatch/terminal authority: %+v", pending)
+			}
+
+			nextPhysicalCallID := runtimecontract.StableRuntimeCandidatePhysicalCallID(current.LogicalRequestID, current.NextSequence)
+			if nextPhysicalCallID == "" || nextPhysicalCallID == session.LastPhysicalCallID {
+				t.Fatalf("recovery did not derive a fresh physical identity: old=%q next=%q", session.LastPhysicalCallID, nextPhysicalCallID)
+			}
+			resubmitted, err := controller.markCandidateRequestSubmitted(
+				ctx, pending.Facts.WorkspaceID, pending.Facts.RunID,
+				current.LogicalRequestID, current.NextSequence, nextPhysicalCallID,
+			)
+			if err != nil {
+				t.Fatal(err)
+			}
+			retried := resubmitted.CandidateRequestSessions[0]
+			if retried.LastPhysicalCallID != nextPhysicalCallID || !retried.ProviderSubmitted || retried.LogicalRequestID != session.LogicalRequestID || retried.ExpectedDocument == nil || retried.ExpectedDocument.Hash != expected.Hash {
+				t.Fatalf("whole-document retry changed logical/expected identity: %+v", retried)
+			}
+			if len(resubmitted.CandidateAttempts) != len(aggregate.CandidateAttempts) || resubmitted.ActiveDispatch != nil || len(resubmitted.CompletedDispatches) != len(aggregate.CompletedDispatches) {
+				t.Fatalf("physical retry authorization created candidate or dispatch: %+v", resubmitted)
+			}
+		})
+	}
+}
+
 func TestProviderRequestIncompleteRecoveryCASCutPointsNeverReplayProvider(t *testing.T) {
 	ctx := context.Background()
 	for _, mode := range []providerTerminalCASMode{providerTerminalCASFailBeforeWrite, providerTerminalCASLoseResponse} {

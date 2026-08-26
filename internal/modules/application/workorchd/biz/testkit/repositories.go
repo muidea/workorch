@@ -21,6 +21,7 @@ type RepositoryExports struct {
 	WorkspaceTemplates    repository.WorkspaceTemplateRepository
 	MemoryItems           repository.MemoryItemRepository
 	MemoryRecallTraces    repository.MemoryRecallTraceRepository
+	MemoryDeletions       repository.MemoryWorkspaceDeletionRepository
 	AutoGovernanceTraces  repository.AutoGovernanceTraceRepository
 	Skills                repository.SkillRepository
 	MCPRegistry           repository.MCPRegistryRepository
@@ -28,10 +29,15 @@ type RepositoryExports struct {
 	MCPCapabilities       repository.MCPCapabilityRepository
 	Results               repository.ResultRepository
 	Artifacts             repository.ArtifactRepository
+	ResultDeletions       repository.ResultWorkspaceDeletionRepository
 	EventRecords          repository.EventRecordRepository
+	EventStreamDeletions  repository.EventStreamWorkspaceDeletionRepository
+	EventStreamPurger     repository.EventStreamWorkspacePurger
 	Workspaces            repository.WorkspaceRepository
+	WorkspaceCleaner      repository.WorkspaceDeletionMaterialCleaner
 	Goals                 repository.GoalRepository
 	DoDs                  repository.DoDRepository
+	RunOwner              repository.RunOwnerRepositories
 	Runs                  repository.RunRepository
 	Steps                 repository.StepRepository
 	ToolCalls             repository.ToolCallRepository
@@ -41,9 +47,12 @@ type RepositoryExports struct {
 	EvidenceRecords       repository.EvidenceRecordRepository
 	CoverageWorkItems     repository.CoverageWorkItemRepository
 	ArtifactContinuations repository.ArtifactContinuationRepository
+	OrchestratorEvidence  repository.OrchestratorEvidenceOwnerRepositories
 	Tickets               repository.DecisionTicketRepository
 	Resolutions           repository.DecisionResolutionRepository
+	DecisionDeletions     repository.DecisionWorkspaceDeletionRepository
 	Approvals             repository.ApprovalRepository
+	ApprovalDeletions     repository.ApprovalWorkspaceDeletionRepository
 }
 
 type Exports struct {
@@ -94,35 +103,52 @@ func buildRepositories(backend string, dataRoot string) RepositoryExports {
 	backend = workorchrepo.NormalizeRepositoryBackend(backend)
 	switch backend {
 	case "memory":
+		workspaceRepository := memory.NewWorkspaceRepository()
 		registry := memory.NewMCPRegistryRepository()
+		memoryOwner := memory.NewMemoryOwnerRepositorySet()
+		resultOwner := memory.NewResultOwnerRepositorySet()
+		decisionOwner := memory.NewDecisionOwnerRepositorySet()
+		approvalOwner := memory.NewApprovalOwnerRepositorySet()
+		eventStreamOwner := memory.NewEventStreamOwnerRepositorySet()
+		orchestratorOwner := memory.NewOrchestratorOwnerRepositorySet()
+		runOwner := memory.NewRunOwnerRepositorySet()
 		return RepositoryExports{
 			Souls:                 memory.NewSoulRepository(),
 			WorkspaceTemplates:    memory.NewWorkspaceTemplateRepository(),
-			MemoryItems:           memory.NewMemoryItemRepository(),
-			MemoryRecallTraces:    memory.NewMemoryRecallTraceRepository(),
+			MemoryItems:           memoryOwner.Items,
+			MemoryRecallTraces:    memoryOwner.RecallTraces,
+			MemoryDeletions:       memoryOwner.WorkspaceDeletions,
 			AutoGovernanceTraces:  memory.NewAutoGovernanceTraceRepository(),
 			Skills:                memory.NewSkillRepository(),
 			MCPRegistry:           registry,
 			MCPServers:            aggregateServerRepository{registry: registry},
 			MCPCapabilities:       aggregateCapabilityRepository{registry: registry},
-			Results:               memory.NewResultRepository(),
-			Artifacts:             memory.NewArtifactRepository(),
-			EventRecords:          memory.NewEventRecordRepository(),
-			Workspaces:            memory.NewWorkspaceRepository(),
+			Results:               resultOwner.Results,
+			Artifacts:             resultOwner.Artifacts,
+			ResultDeletions:       resultOwner.WorkspaceDeletions,
+			EventRecords:          eventStreamOwner.EventRecords,
+			EventStreamDeletions:  eventStreamOwner.WorkspaceDeletions,
+			EventStreamPurger:     eventStreamOwner.EventRecords,
+			Workspaces:            workspaceRepository,
+			WorkspaceCleaner:      workspaceRepository,
 			Goals:                 memory.NewGoalRepository(),
 			DoDs:                  memory.NewDoDRepository(),
-			Runs:                  memory.NewRunRepository(),
-			Steps:                 memory.NewStepRepository(),
-			ToolCalls:             memory.NewToolCallRepository(),
-			Patches:               memory.NewPatchRepository(),
-			ValidationResults:     memory.NewValidationResultRepository(),
-			RuntimeCheckpoints:    memory.NewRuntimeCheckpointRepository(),
-			EvidenceRecords:       memory.NewEvidenceRecordRepository(),
-			CoverageWorkItems:     memory.NewCoverageWorkItemRepository(),
-			ArtifactContinuations: memory.NewArtifactContinuationRepository(),
-			Tickets:               memory.NewDecisionTicketRepository(),
-			Resolutions:           memory.NewDecisionResolutionRepository(),
-			Approvals:             memory.NewApprovalRepository(),
+			RunOwner:              runOwner,
+			Runs:                  runOwner.Runs(),
+			Steps:                 runOwner.Steps(),
+			ToolCalls:             orchestratorOwner.ToolCalls(),
+			Patches:               orchestratorOwner.Patches(),
+			ValidationResults:     orchestratorOwner.ValidationResults(),
+			RuntimeCheckpoints:    runOwner.Checkpoints(),
+			EvidenceRecords:       orchestratorOwner.EvidenceRecords(),
+			CoverageWorkItems:     orchestratorOwner.CoverageWorkItems(),
+			ArtifactContinuations: orchestratorOwner.ArtifactContinuations(),
+			OrchestratorEvidence:  orchestratorOwner,
+			Tickets:               decisionOwner.Tickets,
+			Resolutions:           decisionOwner.Resolutions,
+			DecisionDeletions:     decisionOwner.WorkspaceDeletions,
+			Approvals:             approvalOwner.Approvals,
+			ApprovalDeletions:     approvalOwner.WorkspaceDeletions,
 		}
 	case "file":
 		dataRoot = workorchrepo.ResolveRepositoryDataRoot(backend, dataRoot)
@@ -133,6 +159,7 @@ func buildRepositories(backend string, dataRoot string) RepositoryExports {
 			WorkspaceTemplates:    fileRepo.NewWorkspaceTemplateRepository(filepath.Join(dataRoot, "system", "workspace_templates.json")),
 			MemoryItems:           workspaceScopedRepos.MemoryItems,
 			MemoryRecallTraces:    workspaceScopedRepos.MemoryRecallTraces,
+			MemoryDeletions:       workspaceScopedRepos.MemoryDeletions,
 			AutoGovernanceTraces:  fileRepo.NewAutoGovernanceTraceRepository(filepath.Join(dataRoot, "system", "auto_governance_trace.json")),
 			Skills:                fileRepo.NewSkillRepository(filepath.Join(dataRoot, "system", "skill.json")),
 			MCPRegistry:           registry,
@@ -140,22 +167,30 @@ func buildRepositories(backend string, dataRoot string) RepositoryExports {
 			MCPCapabilities:       aggregateCapabilityRepository{registry: registry},
 			Results:               workspaceScopedRepos.Results,
 			Artifacts:             workspaceScopedRepos.Artifacts,
+			ResultDeletions:       workspaceScopedRepos.ResultDeletions,
 			EventRecords:          workspaceScopedRepos.EventRecords,
+			EventStreamDeletions:  workspaceScopedRepos.EventStreamDeletions,
+			EventStreamPurger:     workspaceScopedRepos.EventStreamPurger,
 			Workspaces:            workspaceScopedRepos.Workspaces,
+			WorkspaceCleaner:      workspaceScopedRepos.WorkspaceCleaner,
 			Goals:                 workspaceScopedRepos.Goals,
 			DoDs:                  workspaceScopedRepos.DoDs,
-			Runs:                  workspaceScopedRepos.Runs,
-			Steps:                 workspaceScopedRepos.Steps,
+			RunOwner:              workspaceScopedRepos.RunOwner,
+			Runs:                  workspaceScopedRepos.RunOwner.Runs(),
+			Steps:                 workspaceScopedRepos.RunOwner.Steps(),
 			ToolCalls:             workspaceScopedRepos.ToolCalls,
 			Patches:               workspaceScopedRepos.Patches,
 			ValidationResults:     workspaceScopedRepos.ValidationResults,
-			RuntimeCheckpoints:    workspaceScopedRepos.RuntimeCheckpoints,
+			RuntimeCheckpoints:    workspaceScopedRepos.RunOwner.Checkpoints(),
 			EvidenceRecords:       workspaceScopedRepos.EvidenceRecords,
 			CoverageWorkItems:     workspaceScopedRepos.CoverageWorkItems,
 			ArtifactContinuations: workspaceScopedRepos.ArtifactContinuations,
+			OrchestratorEvidence:  workspaceScopedRepos.OrchestratorEvidence,
 			Tickets:               workspaceScopedRepos.Tickets,
 			Resolutions:           workspaceScopedRepos.Resolutions,
+			DecisionDeletions:     workspaceScopedRepos.DecisionDeletions,
 			Approvals:             workspaceScopedRepos.Approvals,
+			ApprovalDeletions:     workspaceScopedRepos.ApprovalDeletions,
 		}
 	default:
 		panic("unsupported repository backend: " + backend)

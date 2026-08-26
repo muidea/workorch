@@ -14,12 +14,17 @@ import (
 	eventstreammodel "github.com/muidea/workorch/internal/modules/blocks/eventstream/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/repository/memory"
+	deletioncontract "github.com/muidea/workorch/internal/pkg/workorchdeletioncontract"
 	"github.com/muidea/workorch/internal/pkg/workorchquerycontract"
 )
 
 func sendEventStreamTestCommand[Command any, Response any](ctx context.Context, rawHub magicevent.Hub, topic string, command Command) (Response, error) {
+	return sendEventStreamTestCommandFrom[Command, Response](ctx, rawHub, topic, "application/workorchd/appservice", command)
+}
+
+func sendEventStreamTestCommandFrom[Command any, Response any](ctx context.Context, rawHub magicevent.Hub, topic, source string, command Command) (Response, error) {
 	var zero Response
-	ev := magicevent.NewEventWithContext(topic, "application/workorchd/appservice", eventstreamevents.CommandDestination, magicevent.NewHeader(), ctx, command)
+	ev := magicevent.NewEventWithContext(topic, source, eventstreamevents.CommandDestination, magicevent.NewHeader(), ctx, command)
 	result := rawHub.Send(ev)
 	if result == nil {
 		return zero, common.ErrInvalidArgument
@@ -79,6 +84,8 @@ func TestModuleConfigureRequiresCoreDependencies(t *testing.T) {
 		deps eventstreambiz.Dependencies
 	}{
 		{name: "missing event records", deps: func() eventstreambiz.Dependencies { d := base; d.EventRecords = nil; return d }()},
+		{name: "missing workspace deletions", deps: func() eventstreambiz.Dependencies { d := base; d.WorkspaceDeletions = nil; return d }()},
+		{name: "missing workspace purger", deps: func() eventstreambiz.Dependencies { d := base; d.WorkspacePurger = nil; return d }()},
 		{name: "missing event hub", deps: func() eventstreambiz.Dependencies { d := base; d.EventHub = nil; return d }()},
 	}
 	for _, tc := range tests {
@@ -93,9 +100,10 @@ func TestModuleConfigureRequiresCoreDependencies(t *testing.T) {
 func TestModuleRunIsIdempotentAndTeardownUnsubscribes(t *testing.T) {
 	ctx := context.Background()
 	module := New()
+	owner := memory.NewEventStreamOwnerRepositorySet()
 	if err := module.Configure(eventstreambiz.Dependencies{
-		EventRecords: memory.NewEventRecordRepository(),
-		EventHub:     magicevent.NewHub(16),
+		EventRecords: owner.EventRecords, WorkspaceDeletions: owner.WorkspaceDeletions, WorkspacePurger: owner.EventRecords,
+		EventHub: magicevent.NewHub(16),
 	}); err != nil {
 		t.Fatalf("Setup: %v", err)
 	}
@@ -114,22 +122,24 @@ func TestModuleRunIsIdempotentAndTeardownUnsubscribes(t *testing.T) {
 }
 
 func eventstreamModuleContractDependencies() eventstreambiz.Dependencies {
+	owner := memory.NewEventStreamOwnerRepositorySet()
 	return eventstreambiz.Dependencies{
-		EventRecords: memory.NewEventRecordRepository(),
-		EventHub:     magicevent.NewHub(16),
+		EventRecords: owner.EventRecords, WorkspaceDeletions: owner.WorkspaceDeletions, WorkspacePurger: owner.EventRecords,
+		EventHub: magicevent.NewHub(16),
 	}
 }
 
 func TestPurgeWorkspaceCommandAcceptsContractPayload(t *testing.T) {
 	ctx := context.Background()
 	rawHub := magicevent.NewHub(16)
-	repo := memory.NewEventRecordRepository()
+	owner := memory.NewEventStreamOwnerRepositorySet()
+	repo := owner.EventRecords
 	workspaceID := common.WorkspaceID("ws-eventstream-contract")
 	if err := repo.Append(ctx, &eventstreammodel.EventRecord{ID: "event-contract", WorkspaceID: workspaceID, Topic: "/test"}); err != nil {
 		t.Fatalf("seed event record: %v", err)
 	}
 	module := New()
-	if err := module.Configure(eventstreambiz.Dependencies{EventRecords: repo, EventHub: rawHub}); err != nil {
+	if err := module.Configure(eventstreambiz.Dependencies{EventRecords: repo, WorkspaceDeletions: owner.WorkspaceDeletions, WorkspacePurger: repo, EventHub: rawHub}); err != nil {
 		t.Fatalf("Configure: %v", err)
 	}
 	if err := module.Start(); err != nil {
@@ -141,12 +151,20 @@ func TestPurgeWorkspaceCommandAcceptsContractPayload(t *testing.T) {
 		}
 	})
 
-	response, err := sendEventStreamTestCommand[eventstreamevents.PurgeWorkspaceCommand, eventstreamevents.PurgeWorkspaceResult](ctx, rawHub, eventstreamevents.TopicEventStreamCommandPurgeWorkspace, eventstreamevents.PurgeWorkspaceCommand{WorkspaceID: workspaceID})
+	scope := deletioncontract.Scope{WorkspaceID: workspaceID, DeletionID: "deletion-eventstream-contract", DeletionGeneration: 1, Mode: deletioncontract.ModePurge, QuiescenceID: "quiescence-eventstream-contract"}
+	scope.RequestHash = deletioncontract.StableRequestHash(scope)
+	sealCommand := eventstreamevents.SealWorkspaceEventStreamDeletionCommand{WorkspaceID: scope.WorkspaceID, DeletionID: scope.DeletionID, DeletionGeneration: scope.DeletionGeneration, DataDispositionIntent: scope.Mode, QuiescenceID: scope.QuiescenceID, RequestHash: scope.RequestHash}
+	seal, err := sendEventStreamTestCommandFrom[eventstreamevents.SealWorkspaceEventStreamDeletionCommand, eventstreamevents.SealWorkspaceEventStreamDeletionResult](ctx, rawHub, eventstreamevents.TopicEventStreamCommandSealWorkspaceDeletion, "blocks/workspace", sealCommand)
+	if err != nil || seal.ValidateFor(sealCommand) != nil {
+		t.Fatalf("seal = %+v err=%v", seal, err)
+	}
+	purgeCommand := eventstreamevents.PurgeWorkspaceCommand{WorkspaceID: scope.WorkspaceID, DeletionID: scope.DeletionID, DeletionGeneration: scope.DeletionGeneration, QuiescenceID: scope.QuiescenceID, RequestHash: scope.RequestHash}
+	response, err := sendEventStreamTestCommandFrom[eventstreamevents.PurgeWorkspaceCommand, eventstreamevents.PurgeWorkspaceResult](ctx, rawHub, eventstreamevents.TopicEventStreamCommandPurgeWorkspace, "blocks/workspace", purgeCommand)
 	if err != nil {
 		t.Fatalf("purge err = %v", err)
 	}
-	if response.DeletedCount != 1 {
-		t.Fatalf("deleted count = %d, want 1", response.DeletedCount)
+	if err := response.ValidateFor(purgeCommand); err != nil {
+		t.Fatalf("purge response = %+v: %v", response, err)
 	}
 	items, err := repo.List(ctx, workorchquerycontract.EventRecordQuery{WorkspaceID: workspaceID})
 	if err != nil {
@@ -157,16 +175,17 @@ func TestPurgeWorkspaceCommandAcceptsContractPayload(t *testing.T) {
 	}
 }
 
-func TestPurgeWorkspaceCommandPostedWithoutResultDoesNotDelete(t *testing.T) {
+func TestWorkspaceDeletionSealPostedWithoutResultDoesNotFence(t *testing.T) {
 	ctx := context.Background()
 	rawHub := magicevent.NewHub(16)
-	repo := memory.NewEventRecordRepository()
+	owner := memory.NewEventStreamOwnerRepositorySet()
+	repo := owner.EventRecords
 	workspaceID := common.WorkspaceID("ws-eventstream-post-purge")
 	if err := repo.Append(ctx, &eventstreammodel.EventRecord{ID: "event-post-purge", WorkspaceID: workspaceID, Topic: "/test"}); err != nil {
 		t.Fatal(err)
 	}
 	module := New()
-	if err := module.Configure(eventstreambiz.Dependencies{EventRecords: repo, EventHub: rawHub}); err != nil {
+	if err := module.Configure(eventstreambiz.Dependencies{EventRecords: repo, WorkspaceDeletions: owner.WorkspaceDeletions, WorkspacePurger: repo, EventHub: rawHub}); err != nil {
 		t.Fatal(err)
 	}
 	if err := module.Start(); err != nil {
@@ -174,30 +193,34 @@ func TestPurgeWorkspaceCommandPostedWithoutResultDoesNotDelete(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = module.Stop(ctx) })
 
+	scope := deletioncontract.Scope{WorkspaceID: workspaceID, DeletionID: "deletion-eventstream-post", DeletionGeneration: 1, Mode: deletioncontract.ModePurge, QuiescenceID: "quiescence-eventstream-post"}
+	scope.RequestHash = deletioncontract.StableRequestHash(scope)
+	command := eventstreamevents.SealWorkspaceEventStreamDeletionCommand{WorkspaceID: scope.WorkspaceID, DeletionID: scope.DeletionID, DeletionGeneration: scope.DeletionGeneration, DataDispositionIntent: scope.Mode, QuiescenceID: scope.QuiescenceID, RequestHash: scope.RequestHash}
 	forged := rawHub.Send(magicevent.NewEventWithContext(
-		eventstreamevents.TopicEventStreamCommandPurgeWorkspace, "untrusted/module",
+		eventstreamevents.TopicEventStreamCommandSealWorkspaceDeletion, "untrusted/module",
 		eventstreamevents.CommandDestination, magicevent.NewHeader(), ctx,
-		eventstreamevents.PurgeWorkspaceCommand{WorkspaceID: workspaceID},
+		command,
 	))
 	if forged == nil || forged.Error() == nil || !errors.Is(forged.Error().Cause, common.ErrInvalidArgument) {
-		t.Fatalf("forged purge result = %+v, want invalid argument", forged)
+		t.Fatalf("forged deletion seal result = %+v, want invalid argument", forged)
 	}
 
 	rawHub.Post(magicevent.NewEventWithContext(
-		eventstreamevents.TopicEventStreamCommandPurgeWorkspace, "application/workorchd/appservice",
+		eventstreamevents.TopicEventStreamCommandSealWorkspaceDeletion, "blocks/workspace",
 		eventstreamevents.CommandDestination, magicevent.NewHeader(), ctx,
-		eventstreamevents.PurgeWorkspaceCommand{WorkspaceID: workspaceID},
+		command,
 	))
 	time.Sleep(20 * time.Millisecond)
 	if _, err := repo.Get(common.ContextWithRuntimeWorkspaceID(ctx, workspaceID), "event-post-purge"); err != nil {
-		t.Fatalf("posted purge mutated owner state: %v", err)
+		t.Fatalf("posted deletion seal mutated owner state: %v", err)
 	}
 }
 
 func TestListEventsCommandUsesConcreteBoundedResult(t *testing.T) {
 	ctx := context.Background()
 	rawHub := magicevent.NewHub(16)
-	repo := memory.NewEventRecordRepository()
+	owner := memory.NewEventStreamOwnerRepositorySet()
+	repo := owner.EventRecords
 	workspaceID := common.WorkspaceID("ws-eventstream-list")
 	for _, item := range []*eventstreammodel.EventRecord{
 		{ID: "event-list-1", WorkspaceID: workspaceID, Topic: "/test", Revision: 1},
@@ -208,7 +231,7 @@ func TestListEventsCommandUsesConcreteBoundedResult(t *testing.T) {
 		}
 	}
 	module := New()
-	if err := module.Configure(eventstreambiz.Dependencies{EventRecords: repo, EventHub: rawHub}); err != nil {
+	if err := module.Configure(eventstreambiz.Dependencies{EventRecords: repo, WorkspaceDeletions: owner.WorkspaceDeletions, WorkspacePurger: repo, EventHub: rawHub}); err != nil {
 		t.Fatal(err)
 	}
 	if err := module.Start(); err != nil {
@@ -228,7 +251,8 @@ func TestListEventsCommandUsesConcreteBoundedResult(t *testing.T) {
 func TestHighWatermarksCommandReadsPersistedWorkspaceRevisions(t *testing.T) {
 	ctx := context.Background()
 	rawHub := magicevent.NewHub(16)
-	repo := memory.NewEventRecordRepository()
+	owner := memory.NewEventStreamOwnerRepositorySet()
+	repo := owner.EventRecords
 	for _, item := range []*eventstreammodel.EventRecord{
 		{ID: "event-a-1", WorkspaceID: "ws-a", Topic: "/test", Revision: 1},
 		{ID: "event-a-7", WorkspaceID: "ws-a", Topic: "/test", Revision: 7},
@@ -239,7 +263,7 @@ func TestHighWatermarksCommandReadsPersistedWorkspaceRevisions(t *testing.T) {
 		}
 	}
 	module := New()
-	if err := module.Configure(eventstreambiz.Dependencies{EventRecords: repo, EventHub: rawHub}); err != nil {
+	if err := module.Configure(eventstreambiz.Dependencies{EventRecords: repo, WorkspaceDeletions: owner.WorkspaceDeletions, WorkspacePurger: repo, EventHub: rawHub}); err != nil {
 		t.Fatal(err)
 	}
 	if err := module.Start(); err != nil {

@@ -453,7 +453,7 @@ func (m *Biz) compileRuntimeSemanticPlanBatch(ctx context.Context, aggregate run
 	if limit := aggregate.Facts.ConvergencePolicy.MaxCandidateContextItems; limit > 0 && limit < maxItems {
 		maxItems = limit
 	}
-	batch, err := runtimecontract.CompileRuntimeSemanticPlanFocusBatch(
+	batch, err := semanticplan.CompileFocusBatch(
 		*ledger.Manifest,
 		*ledger.CoverageOrderDocument,
 		sequence,

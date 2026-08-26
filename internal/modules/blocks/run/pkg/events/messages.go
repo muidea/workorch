@@ -21,11 +21,6 @@ type StoreRuntimeStateRecordCommand struct {
 	ExpectedRuntimeStateRevision *uint64
 }
 
-type DeleteRunCommand struct {
-	WorkspaceID common.WorkspaceID
-	RunID       common.RunID
-}
-
 type GetRunCommand struct {
 	WorkspaceID common.WorkspaceID
 	RunID       common.RunID
@@ -40,6 +35,45 @@ type ListRunsByWorkspaceCommand struct {
 	WorkspaceID common.WorkspaceID
 	States      []common.RunState
 	Compact     bool
+}
+
+// QueryRunLifecycleFactInventoryCommand asks the Run owner for a bounded page
+// of current non-terminal lifecycle facts. It is a read/reconciliation
+// contract, not an instruction to choose a Run or Workspace state.
+type QueryRunLifecycleFactInventoryCommand struct {
+	Cursor string
+	Limit  int
+}
+
+type QueryRunLifecycleFactInventoryResult struct {
+	Items      []RunStateChangedData
+	NextCursor string
+}
+
+func (r QueryRunLifecycleFactInventoryResult) Validate() error {
+	if len(r.Items) > 500 {
+		return fmt.Errorf("%w: run lifecycle fact inventory exceeds page limit", common.ErrInvalidArgument)
+	}
+	previous := ""
+	for idx, item := range r.Items {
+		if err := item.Validate(); err != nil {
+			return fmt.Errorf("%w: run lifecycle fact inventory item %d: %v", common.ErrInvalidArgument, idx, err)
+		}
+		switch item.State {
+		case common.RunStatePending, common.RunStateActive, common.RunStateBlockedOnDecision, common.RunStateBlockedOnApproval:
+		default:
+			return fmt.Errorf("%w: run lifecycle fact inventory contains terminal or unsupported state", common.ErrInvalidArgument)
+		}
+		key := RunLifecycleFactInventoryCursorKey(item)
+		if previous != "" && key <= previous {
+			return fmt.Errorf("%w: run lifecycle fact inventory is not strictly ordered", common.ErrInvalidArgument)
+		}
+		previous = key
+	}
+	if r.NextCursor != "" && (len(r.Items) == 0 || r.NextCursor != previous) {
+		return fmt.Errorf("%w: run lifecycle fact inventory cursor does not match page tail", common.ErrInvalidArgument)
+	}
+	return nil
 }
 
 type QueryRuntimeRecoveryInventoryCommand struct {
@@ -184,14 +218,17 @@ type ListRuntimeCheckpointsByRunCommand struct {
 	RunID       common.RunID
 }
 
-type PurgeRuntimeResourcesCommand struct {
-	WorkspaceID common.WorkspaceID
-	RunID       common.RunID
-}
-
 type RunStateChangedData struct {
-	RunID              common.RunID
-	WorkspaceID        common.WorkspaceID
+	RunID       common.RunID
+	WorkspaceID common.WorkspaceID
+	// WorkspaceRunGeneration is the Run owner's durable Workspace-scoped
+	// lineage coordinate. It is allocated at Run creation and never inferred
+	// from RunID, timestamps, notification order, or Runtime state.
+	WorkspaceRunGeneration uint64
+	// RunRevision is the Run owner's lifecycle/model CAS revision. Together
+	// with RuntimeStateRevision it gives consumers a monotonic factual fence
+	// without exposing or transferring SM-1 or Runtime authority.
+	RunRevision        uint64
 	GoalID             common.GoalID
 	DoDID              common.DoDID
 	State              common.RunState
@@ -264,6 +301,8 @@ func RunStateChangedDataFromModel(run *runmodel.Run) RunStateChangedData {
 	ret := RunStateChangedData{
 		RunID:                   run.ID,
 		WorkspaceID:             run.WorkspaceID,
+		WorkspaceRunGeneration:  run.WorkspaceRunGeneration,
+		RunRevision:             run.Revision,
 		GoalID:                  run.GoalID,
 		DoDID:                   run.DoDID,
 		State:                   run.State,
@@ -277,8 +316,25 @@ func RunStateChangedDataFromModel(run *runmodel.Run) RunStateChangedData {
 		ret.RuntimeStateRevision = run.RuntimeState.StateRevision
 		ret.RuntimeStateRef = RuntimeStateRef(run.WorkspaceID, run.ID, run.RuntimeState.StateRevision)
 	}
-	ret.CausationID = "run-state/" + string(run.ID) + "/" + fmt.Sprintf("%d", ret.RuntimeStateRevision)
+	ret.CausationID = RunStateChangedCausationID(run.ID, ret.WorkspaceRunGeneration, ret.RunRevision, ret.RuntimeStateRevision)
 	return ret
+}
+
+// RunStateChangedCausationID is derived only from Run-owner persisted
+// revisions. A lifecycle transition with the same Runtime revision still has
+// a distinct identity because the Run model revision advances.
+func RunStateChangedCausationID(runID common.RunID, workspaceRunGeneration, runRevision, runtimeStateRevision uint64) string {
+	if runID == "" || workspaceRunGeneration == 0 || runRevision == 0 {
+		return ""
+	}
+	return fmt.Sprintf("run-state/%s/%d/%d/%d", runID, workspaceRunGeneration, runRevision, runtimeStateRevision)
+}
+
+// RunLifecycleFactInventoryCursorKey is the Run-owner opaque current-fact
+// order. Generation precedes RunID so pagination never infers lifecycle order
+// from an identifier's spelling.
+func RunLifecycleFactInventoryCursorKey(d RunStateChangedData) string {
+	return fmt.Sprintf("%s\x00%020d\x00%s", d.WorkspaceID, d.WorkspaceRunGeneration, d.RunID)
 }
 
 // RuntimeStateRef returns the opaque Run-owner reference used by recovery,
@@ -296,11 +352,20 @@ func RuntimeStateRef(workspaceID common.WorkspaceID, runID common.RunID, revisio
 // pre-runtime create notification; every Runtime transition carries the
 // persisted authority/facts identity.
 func (d RunStateChangedData) Validate() error {
-	if d.WorkspaceID == "" || d.RunID == "" || d.CausationID == "" {
+	if d.WorkspaceID == "" || d.RunID == "" || d.WorkspaceRunGeneration == 0 || d.RunRevision == 0 || d.CausationID == "" {
 		return fmt.Errorf("%w: run state fact requires scope and causation", common.ErrInvalidArgument)
+	}
+	if d.CausationID != RunStateChangedCausationID(d.RunID, d.WorkspaceRunGeneration, d.RunRevision, d.RuntimeStateRevision) {
+		return fmt.Errorf("%w: run state fact causation does not match owner revisions", common.ErrInvalidArgument)
 	}
 	if d.RuntimeStateRevision > 0 && strings.TrimSpace(d.RuntimeStateRef) == "" {
 		return fmt.Errorf("%w: runtime run state fact requires opaque runtime state ref", common.ErrInvalidArgument)
+	}
+	if d.RuntimeStateRevision == 0 && strings.TrimSpace(d.RuntimeStateRef) != "" {
+		return fmt.Errorf("%w: pre-runtime run state fact must not carry opaque runtime state ref", common.ErrInvalidArgument)
+	}
+	if d.RuntimeStateRevision > 0 && d.RuntimeStateRef != RuntimeStateRef(d.WorkspaceID, d.RunID, d.RuntimeStateRevision) {
+		return fmt.Errorf("%w: runtime run state fact opaque ref does not match scope", common.ErrInvalidArgument)
 	}
 	return nil
 }
@@ -316,8 +381,6 @@ type ListStepsByRunResult struct{ Steps []*runmodel.Step }
 type ListStepSummariesByRunResult struct{ Steps []*runmodel.Step }
 type GetRuntimeCheckpointResult struct{ Checkpoint *runmodel.RuntimeCheckpoint }
 type ListRuntimeCheckpointsByRunResult struct{ Checkpoints []*runmodel.RuntimeCheckpoint }
-type PurgeRuntimeResourcesResult struct{ DeletedCount int }
-type DeleteRunResult struct{ Deleted bool }
 
 // StoreRuntimeStateRecordResult is the concrete opaque-CAS receipt. It exposes
 // only the canonical persistence feedback consumed by Orchestrator, not a
@@ -373,7 +436,10 @@ func MessageContracts() []eventcontract.MessageContract {
 		eventcontract.CommandTopic[GetRunCommand, GetRunResult]("run", definitionPackage, eventcontract.CommandClassRead, eventcontract.LanePolicyQuery, TopicRunCommandGet).MessageContract(),
 		eventcontract.CommandTopic[ListRunsCommand, ListRunsResult]("run", definitionPackage, eventcontract.CommandClassRead, eventcontract.LanePolicyQuery, TopicRunCommandList).MessageContract(),
 		eventcontract.CommandTopic[ListRunsByWorkspaceCommand, ListRunsByWorkspaceResult]("run", definitionPackage, eventcontract.CommandClassRead, eventcontract.LanePolicyQuery, TopicRunCommandListByWorkspace).MessageContract(),
+		eventcontract.CommandTopic[QueryRunLifecycleFactInventoryCommand, QueryRunLifecycleFactInventoryResult]("run", definitionPackage, eventcontract.CommandClassRead, eventcontract.LanePolicyQuery, TopicRunCommandLifecycleFactInventory).MessageContract(),
 		eventcontract.CommandTopic[QueryRuntimeRecoveryInventoryCommand, QueryRuntimeRecoveryInventoryResult]("run", definitionPackage, eventcontract.CommandClassRead, eventcontract.LanePolicyQuery, TopicRunCommandRuntimeRecoveryInventory).MessageContract(),
+		eventcontract.CommandTopic[QueryWorkspaceRetirementFactCommand, QueryWorkspaceRetirementFactResult]("run", definitionPackage, eventcontract.CommandClassRead, eventcontract.LanePolicyQuery, TopicRunCommandWorkspaceRetirementFact).MessageContract(),
+		eventcontract.CommandTopic[QueryWorkspaceRetirementInventoryCommand, QueryWorkspaceRetirementInventoryResult]("run", definitionPackage, eventcontract.CommandClassRead, eventcontract.LanePolicyQuery, TopicRunCommandWorkspaceRetirementInventory).MessageContract(),
 		eventcontract.CommandTopic[QueryRuntimeStateRecordReadinessCommand, QueryRuntimeStateRecordReadinessResult]("run", definitionPackage, eventcontract.CommandClassRead, eventcontract.LanePolicyQuery, TopicRunCommandRuntimeStateRecordReadiness).MessageContract(),
 		eventcontract.CommandTopic[QueryRuntimeStateRecordCommand, QueryRuntimeStateRecordResult]("run", definitionPackage, eventcontract.CommandClassRead, eventcontract.LanePolicyQuery, TopicRunCommandRuntimeStateRecord).MessageContract(),
 		eventcontract.CommandTopic[GetStepCommand, GetStepResult]("run", definitionPackage, eventcontract.CommandClassRead, eventcontract.LanePolicyQuery, TopicRunCommandGetStep).MessageContract(),
@@ -381,9 +447,10 @@ func MessageContracts() []eventcontract.MessageContract {
 		eventcontract.CommandTopic[ListStepSummariesByRunCommand, ListStepSummariesByRunResult]("run", definitionPackage, eventcontract.CommandClassRead, eventcontract.LanePolicyQuery, TopicRunCommandListStepSummariesByRun).MessageContract(),
 		eventcontract.CommandTopic[GetRuntimeCheckpointCommand, GetRuntimeCheckpointResult]("run", definitionPackage, eventcontract.CommandClassRead, eventcontract.LanePolicyQuery, TopicRunCommandGetRuntimeCheckpoint).MessageContract(),
 		eventcontract.CommandTopic[ListRuntimeCheckpointsByRunCommand, ListRuntimeCheckpointsByRunResult]("run", definitionPackage, eventcontract.CommandClassRead, eventcontract.LanePolicyQuery, TopicRunCommandListCheckpointsByRun).MessageContract(),
-		eventcontract.CommandTopic[PurgeRuntimeResourcesCommand, PurgeRuntimeResourcesResult]("run", definitionPackage, eventcontract.CommandClassWrite, eventcontract.LanePolicyState, TopicRunCommandPurgeRuntimeResources).MessageContract(),
 		eventcontract.CommandTopic[StoreRuntimeStateRecordCommand, StoreRuntimeStateRecordResult]("run", definitionPackage, eventcontract.CommandClassWrite, eventcontract.LanePolicyState, TopicRunCommandStoreRuntimeStateRecord).MessageContract(),
-		eventcontract.CommandTopic[DeleteRunCommand, DeleteRunResult]("run", definitionPackage, eventcontract.CommandClassWrite, eventcontract.LanePolicyState, TopicRunCommandDelete).MessageContract(),
+		eventcontract.CommandTopic[PrepareWorkspaceRetirementCommand, PrepareWorkspaceRetirementResult]("run", definitionPackage, eventcontract.CommandClassWrite, eventcontract.LanePolicyState, TopicRunCommandPrepareWorkspaceRetirement).MessageContract(),
+		eventcontract.CommandTopic[FinalizeWorkspaceRetirementCommand, FinalizeWorkspaceRetirementResult]("run", definitionPackage, eventcontract.CommandClassWrite, eventcontract.LanePolicyState, TopicRunCommandFinalizeWorkspaceRetirement).MessageContract(),
+		eventcontract.CommandTopic[PurgeWorkspaceRunsCommand, PurgeWorkspaceRunsResult]("run", definitionPackage, eventcontract.CommandClassWrite, eventcontract.LanePolicyState, TopicRunCommandPurgeWorkspace).MessageContract(),
 		eventcontract.CommandTopic[WorkspaceExecutionIntentCommand, WorkspaceExecutionIntentResult]("run", definitionPackage, eventcontract.CommandClassWrite, eventcontract.LanePolicyState, TopicRunCommandWorkspaceExecutionIntent).MessageContract(),
 		eventcontract.CommandTopic[RuntimeGovernanceWaitFact, RunLifecycleCommandResult]("run", definitionPackage, eventcontract.CommandClassWrite, eventcontract.LanePolicyState, TopicRunFactGovernanceWait).MessageContract(),
 		eventcontract.CommandTopic[RuntimeContinuationEligibleFact, RunLifecycleCommandResult]("run", definitionPackage, eventcontract.CommandClassWrite, eventcontract.LanePolicyState, TopicRunFactContinuationEligible).MessageContract(),

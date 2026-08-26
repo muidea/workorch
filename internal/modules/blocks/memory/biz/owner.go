@@ -2,6 +2,7 @@ package memory
 
 import (
 	"context"
+	"sync"
 
 	magicevent "github.com/muidea/magicCommon/event"
 	"github.com/muidea/magicCommon/task"
@@ -16,22 +17,26 @@ const ModuleID = modulecommon.ModuleID
 type Dependencies struct {
 	MemoryItems        repository.MemoryItemRepository
 	MemoryRecallTraces repository.MemoryRecallTraceRepository
+	WorkspaceDeletions repository.MemoryWorkspaceDeletionRepository
 	EventHub           magicevent.Hub
 	BackgroundRoutine  task.BackgroundRoutine
 }
 
 type Biz struct {
 	basebiz.Base
-	service *Service
-	topics  []string
-	started bool
+	service            *Service
+	workspaceDeletions repository.MemoryWorkspaceDeletionRepository
+	topics             []string
+	started            bool
+	workspaceLocksMu   sync.Mutex
+	workspaceLocks     map[common.WorkspaceID]*sync.Mutex
 }
 
 func New(h magicevent.Hub, b task.BackgroundRoutine, deps Dependencies) (*Biz, error) {
-	if deps.MemoryItems == nil || deps.MemoryRecallTraces == nil || deps.EventHub == nil || h == nil {
+	if deps.MemoryItems == nil || deps.MemoryRecallTraces == nil || deps.WorkspaceDeletions == nil || deps.EventHub == nil || h == nil {
 		return nil, common.ErrInvalidArgument
 	}
-	return &Biz{Base: basebiz.New(modulecommon.ModuleID, h, b), service: NewServiceWithRecallTraces(deps.MemoryItems, deps.MemoryRecallTraces)}, nil
+	return &Biz{Base: basebiz.New(modulecommon.ModuleID, h, b), service: NewServiceWithRecallTraces(deps.MemoryItems, deps.MemoryRecallTraces), workspaceDeletions: deps.WorkspaceDeletions, workspaceLocks: map[common.WorkspaceID]*sync.Mutex{}}, nil
 }
 
 func (m *Biz) Start() error {
@@ -58,5 +63,7 @@ func (m *Biz) Teardown(context.Context) {
 	}
 	m.topics = nil
 	m.service = nil
+	m.workspaceDeletions = nil
+	m.workspaceLocks = nil
 	m.started = false
 }

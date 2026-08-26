@@ -24,10 +24,11 @@ func (m *Module) Setup(_ context.Context, eventHub event.Hub, background task.Ba
 		return err
 	}
 	if setupErr := m.configure(decisionbiz.Dependencies{
-		Tickets:           repos.Tickets,
-		Resolutions:       repos.Resolutions,
-		EventHub:          eventHub,
-		BackgroundRoutine: background,
+		Tickets:            repos.Tickets,
+		Resolutions:        repos.Resolutions,
+		WorkspaceDeletions: repos.WorkspaceDeletions,
+		EventHub:           eventHub,
+		BackgroundRoutine:  background,
 	}); setupErr != nil {
 		return cd.NewError(cd.Unexpected, setupErr.Error())
 	}

@@ -108,10 +108,11 @@ func TestRuntimeActivationMemoryRecallSkipsEmptySelection(t *testing.T) {
 func TestPublishRuntimeActivationMemoryRecallPersistsThroughMemoryOwner(t *testing.T) {
 	ctx := context.Background()
 	hub := magicevent.NewHub(16)
-	traces := memoryrepo.NewMemoryRecallTraceRepository()
+	repositories := memoryrepo.NewMemoryOwnerRepositorySet()
+	traces := repositories.RecallTraces
 	memoryOwner := memorymodule.New()
-	if err := memoryOwner.Configure(memorybiz.Dependencies{
-		MemoryItems:        memoryrepo.NewMemoryItemRepository(),
+	if err := memoryOwner.Configure(memorybiz.Dependencies{WorkspaceDeletions: repositories.WorkspaceDeletions,
+		MemoryItems:        repositories.Items,
 		MemoryRecallTraces: traces,
 		EventHub:           hub,
 	}); err != nil {
@@ -147,10 +148,11 @@ func TestPublishRuntimeActivationMemoryRecallPersistsThroughMemoryOwner(t *testi
 func TestRuntimeActivationMemoryRecallReDrivesFromPersistedRunOnStartup(t *testing.T) {
 	ctx := context.Background()
 	hub := magicevent.NewHub(16)
-	traces := memoryrepo.NewMemoryRecallTraceRepository()
+	repositories := memoryrepo.NewMemoryOwnerRepositorySet()
+	traces := repositories.RecallTraces
 	memoryOwner := memorymodule.New()
-	if err := memoryOwner.Configure(memorybiz.Dependencies{
-		MemoryItems:        memoryrepo.NewMemoryItemRepository(),
+	if err := memoryOwner.Configure(memorybiz.Dependencies{WorkspaceDeletions: repositories.WorkspaceDeletions,
+		MemoryItems:        repositories.Items,
 		MemoryRecallTraces: traces,
 		EventHub:           hub,
 	}); err != nil {

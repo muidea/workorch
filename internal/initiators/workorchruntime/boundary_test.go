@@ -183,21 +183,20 @@ func TestRepositoryInitiatorExportSurfaceStaysRepositoryOnly(t *testing.T) {
 			"RepositoryProvider":  true,
 		},
 		"internal/initiators/workorchruntime/pkg/common": {
-			"InitiatorID":              true,
-			"WorkspaceRepositories":    true,
-			"DecisionRepositories":     true,
-			"ApprovalRepositories":     true,
-			"EventStreamRepositories":  true,
-			"GovernanceRepositories":   true,
-			"MCPRepositories":          true,
-			"MemoryRepositories":       true,
-			"OrchestratorRepositories": true,
-			"ResultRepositories":       true,
-			"RunRepositories":          true,
-			"SkillRepositories":        true,
-			"SoulRepositories":         true,
-			"RepositoryProvider":       true,
-			"Provider":                 true,
+			"InitiatorID":             true,
+			"WorkspaceRepositories":   true,
+			"DecisionRepositories":    true,
+			"ApprovalRepositories":    true,
+			"EventStreamRepositories": true,
+			"GovernanceRepositories":  true,
+			"MCPRepositories":         true,
+			"MemoryRepositories":      true,
+			"ResultRepositories":      true,
+			"RunRepositories":         true,
+			"SkillRepositories":       true,
+			"SoulRepositories":        true,
+			"RepositoryProvider":      true,
+			"Provider":                true,
 		},
 	}
 
@@ -339,7 +338,7 @@ func assertRepositoryContractShape(t *testing.T, packagePath string, path string
 						"Governance":   "GovernanceRepositories",
 						"MCP":          "MCPRepositories",
 						"Memory":       "MemoryRepositories",
-						"Orchestrator": "OrchestratorRepositories",
+						"Orchestrator": "OrchestratorEvidenceOwnerRepositories",
 						"Result":       "ResultRepositories",
 						"Run":          "RunRepositories",
 						"Skill":        "SkillRepositories",
@@ -426,20 +425,25 @@ func assertRepositoryStructFields(t *testing.T, path string, typeSpec *ast.TypeS
 func repositoryGroupFieldContracts() map[string]map[string]string {
 	return map[string]map[string]string{
 		"WorkspaceRepositories": {
-			"Workspaces": "WorkspaceRepository",
-			"Goals":      "GoalRepository",
-			"DoDs":       "DoDRepository",
-			"Templates":  "WorkspaceTemplateRepository",
+			"Workspaces":              "WorkspaceRepository",
+			"DeletionMaterialCleaner": "WorkspaceDeletionMaterialCleaner",
+			"Goals":                   "GoalRepository",
+			"DoDs":                    "DoDRepository",
+			"Templates":               "WorkspaceTemplateRepository",
 		},
 		"DecisionRepositories": {
-			"Tickets":     "DecisionTicketRepository",
-			"Resolutions": "DecisionResolutionRepository",
+			"Tickets":            "DecisionTicketRepository",
+			"Resolutions":        "DecisionResolutionRepository",
+			"WorkspaceDeletions": "DecisionWorkspaceDeletionRepository",
 		},
 		"ApprovalRepositories": {
-			"Approvals": "ApprovalRepository",
+			"Approvals":          "ApprovalRepository",
+			"WorkspaceDeletions": "ApprovalWorkspaceDeletionRepository",
 		},
 		"EventStreamRepositories": {
-			"EventRecords": "EventRecordRepository",
+			"EventRecords":       "EventRecordRepository",
+			"WorkspaceDeletions": "EventStreamWorkspaceDeletionRepository",
+			"WorkspacePurger":    "EventStreamWorkspacePurger",
 		},
 		"GovernanceRepositories": {
 			"AutoGovernanceTraces": "AutoGovernanceTraceRepository",
@@ -450,23 +454,18 @@ func repositoryGroupFieldContracts() map[string]map[string]string {
 		"MemoryRepositories": {
 			"MemoryItems":        "MemoryItemRepository",
 			"MemoryRecallTraces": "MemoryRecallTraceRepository",
-		},
-		"OrchestratorRepositories": {
-			"ToolCalls":             "ToolCallRepository",
-			"Patches":               "PatchRepository",
-			"ValidationResults":     "ValidationResultRepository",
-			"EvidenceRecords":       "EvidenceRecordRepository",
-			"CoverageWorkItems":     "CoverageWorkItemRepository",
-			"ArtifactContinuations": "ArtifactContinuationRepository",
+			"WorkspaceDeletions": "MemoryWorkspaceDeletionRepository",
 		},
 		"ResultRepositories": {
-			"Results":   "ResultRepository",
-			"Artifacts": "ArtifactRepository",
+			"Results":            "ResultRepository",
+			"Artifacts":          "ArtifactRepository",
+			"WorkspaceDeletions": "ResultWorkspaceDeletionRepository",
 		},
 		"RunRepositories": {
 			"Runs":        "RunRepository",
 			"Steps":       "StepRepository",
 			"Checkpoints": "RuntimeCheckpointRepository",
+			"Owner":       "RunOwnerRepositories",
 		},
 		"SkillRepositories": {
 			"Skills": "SkillRepository",
@@ -519,7 +518,7 @@ func isPointerToIdentifier(expression ast.Expr, name string) bool {
 
 func repositoryInterfaceTypeName(expression ast.Expr, imports []repositoryBoundaryImport) string {
 	selector, ok := expression.(*ast.SelectorExpr)
-	if !ok || !strings.HasSuffix(selector.Sel.Name, "Repository") {
+	if !ok {
 		return ""
 	}
 	qualifier, ok := selector.X.(*ast.Ident)
@@ -553,7 +552,11 @@ func fieldListReturnsIdentifier(fields *ast.FieldList, name string) bool {
 	if fields == nil || len(fields.List) != 1 || len(fields.List[0].Names) > 1 {
 		return false
 	}
-	return isIdentifier(fields.List[0].Type, name)
+	if isIdentifier(fields.List[0].Type, name) {
+		return true
+	}
+	selector, ok := fields.List[0].Type.(*ast.SelectorExpr)
+	return ok && selector.Sel.Name == name
 }
 
 func parseRepositoryBoundaryFile(path string) (*ast.File, map[string]bool, error) {

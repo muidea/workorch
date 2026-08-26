@@ -40,7 +40,7 @@ func TestRuntimeCommandsReadyMetadataIsProcessScopedSM4Handoff(t *testing.T) {
 
 func TestRunStateChangedDataFromModelIncludesOnlyOpaqueRuntimeReference(t *testing.T) {
 	run := &runmodel.Run{
-		ID: "run-1", WorkspaceID: "ws-1", State: common.RunStateActive,
+		Revision: 3, WorkspaceRunGeneration: 1, ID: "run-1", WorkspaceID: "ws-1", State: common.RunStateActive,
 		RuntimeState: &runtimecontract.RuntimeStateRecord{
 			StateRevision: 7,
 			Facts:         runtimecontract.RuntimeFacts{WorkspaceID: "ws-1", RunID: "run-1"},
@@ -51,8 +51,33 @@ func TestRunStateChangedDataFromModelIncludesOnlyOpaqueRuntimeReference(t *testi
 		},
 	}
 	data := RunStateChangedDataFromModel(run)
-	if data.RuntimeStateRevision != 7 || data.RuntimeStateRef != "runtime-state/ws-1/run-1/7" {
+	if data.RunRevision != 3 || data.WorkspaceRunGeneration != 1 || data.RuntimeStateRevision != 7 || data.RuntimeStateRef != "runtime-state/ws-1/run-1/7" || data.CausationID != "run-state/run-1/1/3/7" {
 		t.Fatalf("runtime reference data = %+v", data)
+	}
+	if err := data.Validate(); err != nil {
+		t.Fatalf("valid Run state fact: %v", err)
+	}
+}
+
+func TestRunStateChangedDataRejectsOwnerRevisionIdentityDrift(t *testing.T) {
+	valid := RunStateChangedData{
+		WorkspaceID: "ws-1", RunID: "run-1", RunRevision: 4, State: common.RunStateActive,
+		RuntimeStateRevision: 7, RuntimeStateRef: RuntimeStateRef("ws-1", "run-1", 7),
+		WorkspaceRunGeneration: 1,
+		CausationID:            RunStateChangedCausationID("run-1", 1, 4, 7),
+	}
+	if err := valid.Validate(); err != nil {
+		t.Fatalf("valid fact: %v", err)
+	}
+	invalid := valid
+	invalid.RunRevision++
+	if err := invalid.Validate(); err == nil {
+		t.Fatal("Run revision drift must invalidate causation identity")
+	}
+	invalid = valid
+	invalid.RuntimeStateRevision--
+	if err := invalid.Validate(); err == nil {
+		t.Fatal("Runtime revision drift must invalidate causation/ref identity")
 	}
 }
 

@@ -110,7 +110,7 @@ func newCountingDecisionRuntimeSession(t *testing.T) (*runtimecore.Session, *cou
 		return nil, common.ErrNotFound
 	})
 	decisionModule := decisionmodule.New()
-	if err := decisionModule.Configure(decisionbiz.Dependencies{Tickets: tickets, Resolutions: resolutions, EventHub: rawHub}); err != nil {
+	if err := decisionModule.Configure(decisionbiz.Dependencies{WorkspaceDeletions: memory.NewDecisionWorkspaceDeletionRepository(), Tickets: tickets, Resolutions: resolutions, EventHub: rawHub}); err != nil {
 		t.Fatalf("setup decision module: %v", err)
 	}
 	if err := decisionModule.Start(); err != nil {
@@ -122,7 +122,7 @@ func newCountingDecisionRuntimeSession(t *testing.T) (*runtimecore.Session, *cou
 		}
 	})
 	approvalModule := approvalmodule.New()
-	if err := approvalModule.Configure(approvalbiz.Dependencies{Approvals: memory.NewApprovalRepository(), EventHub: rawHub}); err != nil {
+	if err := approvalModule.Configure(approvalbiz.Dependencies{WorkspaceDeletions: memory.NewApprovalWorkspaceDeletionRepository(), Approvals: memory.NewApprovalRepository(), EventHub: rawHub}); err != nil {
 		t.Fatalf("setup approval module: %v", err)
 	}
 	if err := approvalModule.Start(); err != nil {

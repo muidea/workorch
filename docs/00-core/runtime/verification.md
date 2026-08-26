@@ -4,7 +4,7 @@ Status: normative
 
 Type: verification
 
-Last Verified: 2026-08-25
+Last Verified: 2026-08-26
 
 ## Purpose
 
@@ -38,6 +38,11 @@ projection gate；owner root、private-event file 与 dispatcher 必须都位于
 导入或用于 reducer dispatch；正式 Runtime owner 仍只由 typed contract 和 private reducer 决定。state model 可以列出
 多个协调 transition ID，但 verifier 必须证明它们全部回到该 state type 的同一唯一 owner；跨 owner 组合必须失败。
 `run.replacement` 必须分类为 Run-owner `owner_private_transaction` 并与 SM-1 owner 相同，不能作为第五个状态机。
+Workspace 删除、Run 退役以及各资源 owner purge 的 privileged physical sink 还必须在所属 owner production root 中只有
+一个调用点，且该调用点必须位于清单声明的 private dispatcher；全 production tree 的其他 reference 仅允许列明的
+repository storage delegation。仅证明 dispatcher 内“存在一次”不足以阻止第二入口或 owner 外 helper 转调。
+repository family 的解析只允许经 `internal/pkg/workorchdeps` 完成，其他生产包直接调用 Initiator
+`RepositoryProvider()` 必须由同一 AST 门禁拒绝。
 
 静态门禁同时将 initial state 视为 transition：Workspace/Run/Decision/Approval 的创建必须经过各自
 owner-private creation/lifecycle dispatcher，创建入口不得直接 repository `Create` 带 state。它还必须拒绝
@@ -60,7 +65,9 @@ budget/guard 以及适用的跨状态机合同测试。
 | Resource | Sole owner | Verification must reject |
 | --- | --- | --- |
 | Workspace candidate/Definition/startup/active slot | Workspace Block | projection/Run/Application direct mutation or unresolved activation |
-| Run lifecycle/opaque record/replacement intent | Run Block | caller target state、Orchestrator lifecycle choice、把 same-owner replacement transaction 注册为另一状态机、duplicate successor |
+| Workspace deletion coordinator | Workspace Block | Application/participant phase journal、cross-owner partial ack authority或projection recovery |
+| Run lifecycle/opaque record/replacement/retirement | Run Block | caller target state、Orchestrator lifecycle choice、把 same-owner transaction 注册为另一状态机、duplicate successor、跳过 `draining -> retired` token seal |
+| Runtime quiescing/evidence deletion | Orchestrator | process-only gate、Run permanent fence前关闭opaque drain、伪造quiescence inventory或跨owner purge |
 | Result formal outcome | Result Block | Result recomputing acceptance or generic entity write bypass |
 | Decision/Approval | corresponding Block | unbound ticket/resolution or cross-owner repository access |
 | capability effect/session | corresponding capability Block | generic executor、unsealed operation、owner receipt rebuilding credit |
@@ -106,6 +113,8 @@ Cross-owner regression必须证明 concrete receiving-owner Command/Result、wor
 ### Candidate And Request
 
 - incomplete document、fragment/EOF 与 transient transport 只使用 request-session recovery，不创建 attempt；
+- streaming `response.incomplete/max_output_tokens` 是唯一 terminal fact；必须继续校验剩余 wire framing，拒绝 late event、
+  第二个 terminal 与重复 `[DONE]`，且 partial bytes 只进入 bounded framing/audit；
 - authentication/configuration/protocol/submission-unknown/document-recovery-exhausted 形成 factual result，不创建
   candidate attempt；
 - LLM request result 必须是 `Stale | Feedback | DocumentOutcome` exactly-one；complete content 与 framing hash/bytes
@@ -275,6 +284,31 @@ Cross-owner regression必须证明 concrete receiving-owner Command/Result、wor
   `active_no_dispatch`、`active_sealed_dispatch`、`blocked_governance`、`recoverable_runtime_wait`、
   `terminal_delivery_pending` 并自动恢复；
 - 不出现 `active + nonterminal + no scheduled drive`，也不使用人工 Resume 作为恢复机制。
+- Workspace 删除必须证明 Run `draining -> retired` 与 Orchestrator `quiescing -> quiesced -> evidence-fenced` 分属各自
+  owner-private reducer，Workspace只持久化协调 phase和typed ack；这些资源状态机不得标成第五 Runtime SM，也不得由
+  Application、projection或对方 owner推进。
+- Run `draining` 与 Restart/Create/普通 SM-1/Step/Checkpoint mutation共享 generation-head线性化点并全部拒绝后者；
+  仅 `kernel/orchestrator` 的专用 opaque Runtime CAS drain lane可继续。Run finalize必须精确比较 deletion identity、
+  generation、每个 Run revision/terminal state及 Runtime ref/revision/hash，再原子升级 `retired`；CAS-first/token-stale与
+  finalize-first/CAS-rejected 两种顺序都必须零越权写入。
+- Run `draining` fact必须在 Orchestrator 的 drive、timer、mount、internal-event入口形成 typed admission：只允许 exact
+  terminal-delivery acknowledgement及其 delivery lease claim/recover/release drain；SM-2/SM-3、普通 drive、非 terminal
+  lease、budget、provider、capability与evidence mutation全部拒绝。Orchestrator Begin与这些入口共享 write barrier，只要
+  local activity、persisted lease或未确认 delivery 非空就必须零 durable gate返回 conflict。完全排空后才持久化
+  `quiescing`，且 gate 后所有 Runtime mutation一律拒绝。terminal Run commit后 Runtime ack CAS pending/response loss、
+  scheduled/running terminal lease及 fresh-process restart都必须先在 `draining` 区间收敛，再产生同一完整 token和
+  retired fence。
+- Run 的 recovery inventory、readiness 与 exact opaque Runtime-state read 都只接受 `kernel/orchestrator` source；forged
+  Application/owner source 必须在 repository read 前拒绝。`draining` 可为 terminal drain 返回 exact record，`retired`
+  必须从 recovery inventory消失且 exact read返回 NotFound，不能借 Setup-phase 私有 topic 绕过 Run/Step/Checkpoint 隐藏。
+- quiescence token必须稳定覆盖有序逐 Run generation/Run revision/Runtime ref/revision/hash；仅 workspace/deletion/generation
+  hash不合格。duplicate返回同一 token，stale/source-forged/cross-workspace token零状态变化。
+- Run 与 Orchestrator evidence 的 purge receipt 绑定首次观察计数；测试必须覆盖 `pending` receipt 先于物理删除、删除后
+  且 owner aggregate `purged` CAS 前崩溃、fresh-process 重开继续清理，以及完成后 duplicate 精确重放原 non-empty
+  observations/proof。重试从空 surface 生成新的 zero-count proof 不合格；journal 只能是对应 owner 的私有事务技术状态。
+- 每个参与 Workspace 删除的资源 owner 都必须用静态边界测试证明 command adapter 不直接调用 purge repository、
+  `WithWorkspacePurgeFence` 或物理 fixed-point sink；这些 effect 只能出现在 owner-private `purge_requested` dispatcher，
+  成功后再提交 `purge_completed` CAS。崩溃、重复与 stale scope 测试必须证明不会出现第二条 transition/effect ingress。
 - current-baseline Restart 必须先 CAS predecessor `ReplacementIntent`，再完成 Result→Workspace→Run terminal delivery，
   最后由 Run-private reducer 幂等创建/激活唯一 successor；其他组件不能提前创建或链接；
 - runtime clarification Restart 必须覆盖 Definition revision/StartupInputHash 的同 seal、仅 revision 变化、仅 hash 变化与两项均

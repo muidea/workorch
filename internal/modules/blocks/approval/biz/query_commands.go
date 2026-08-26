@@ -2,6 +2,7 @@ package approval
 
 import (
 	"context"
+	"errors"
 	"sort"
 
 	approvalevents "github.com/muidea/workorch/internal/modules/blocks/approval/pkg/events"
@@ -17,9 +18,6 @@ func (m *Biz) executeGetApprovalCommand(ctx context.Context, data any) (approval
 	item, err := m.approvals.GetScoped(ctx, cmd.WorkspaceID, cmd.RunID, cmd.ApprovalID)
 	if err != nil {
 		return approvalevents.GetApprovalResult{}, err
-	}
-	if item.DeletionRequestedAt != "" {
-		return approvalevents.GetApprovalResult{}, common.ErrNotFound
 	}
 	return approvalevents.GetApprovalResult{Approval: approvalmodel.CloneApproval(item)}, nil
 }
@@ -37,6 +35,21 @@ func (m *Biz) executeListApprovalsCommand(ctx context.Context, data any) (approv
 	if err != nil {
 		return approvalevents.ListApprovalsResult{}, err
 	}
+	visible := items[:0]
+	for _, item := range items {
+		if item == nil {
+			continue
+		}
+		err := m.rejectFencedWorkspace(ctx, item.WorkspaceID)
+		if errors.Is(err, common.ErrNotFound) {
+			continue
+		}
+		if err != nil {
+			return approvalevents.ListApprovalsResult{}, err
+		}
+		visible = append(visible, item)
+	}
+	items = visible
 	items, next, err := pageApprovals(items, cursor, limit)
 	return approvalevents.ListApprovalsResult{Approvals: items, NextCursor: next}, err
 }
@@ -78,7 +91,7 @@ func (m *Biz) executeListApprovalsByWorkspaceCommand(ctx context.Context, data a
 func pageApprovals(items []*approvalmodel.Approval, cursor string, limit int) ([]*approvalmodel.Approval, string, error) {
 	filtered := make([]*approvalmodel.Approval, 0, len(items))
 	for _, item := range items {
-		if item != nil && item.DeletionRequestedAt == "" {
+		if item != nil {
 			filtered = append(filtered, approvalmodel.CloneApproval(item))
 		}
 	}

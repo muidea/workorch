@@ -2625,8 +2625,8 @@ func TestWorkspaceDeleteEndpointDeletesWorkspaceAndSupportsPurge(t *testing.T) {
 	if getRec.Code != http.StatusNotFound {
 		t.Fatalf("get deleted status = %d, want 404, body=%s", getRec.Code, getRec.Body.String())
 	}
-	if _, err := os.Stat(filepath.Join(dataRoot, "internal", "workspaces", workspace.ID)); !os.IsNotExist(err) {
-		t.Fatalf("workspace data dir err = %v, want not exist", err)
+	if _, err := os.Stat(filepath.Join(dataRoot, "internal", "workspaces", workspace.ID)); err != nil {
+		t.Fatalf("Workspace tombstone/journal dir err = %v, want retained", err)
 	}
 }
 
@@ -3145,10 +3145,11 @@ func TestRunStatusEndpointInvalidatesCachedTerminalSnapshotOnTypedOwnerRunStateN
 	}
 
 	state.RecordRunStateChanged(context.Background(), runevents.RunStateChangedData{
-		WorkspaceID: "ws-status-owner-event",
-		RunID:       "run-status-owner-event",
-		State:       common.RunStateActive,
-		CausationID: "run-state/status-owner-event",
+		WorkspaceID:            "ws-status-owner-event",
+		RunID:                  "run-status-owner-event",
+		RunRevision:            1,
+		State:                  common.RunStateActive,
+		WorkspaceRunGeneration: 1, CausationID: runevents.RunStateChangedCausationID("run-status-owner-event", 1, 1, 0),
 	})
 
 	rec = httptest.NewRecorder()
@@ -3577,6 +3578,16 @@ func TestWorkspaceSnapshotEndpointReturnsRelatedRunsAndBlockingItems(t *testing.
 		t.Fatalf("create completed run: %v", err)
 	}
 	decisionRun := seedBlockedDecisionRunInWorkspaceForHTTP(t, dataRoot, workspace.ID, "run-decision-workspace-snapshot-http")
+	decisionTicketID := decisionRun.BlockingTicketID
+	retiredDecisionRun, err := runScopedRepos.Runs.GetByWorkspaceID(ctx, common.WorkspaceID(workspace.ID), common.RunID(decisionRun.ID))
+	if err != nil {
+		t.Fatalf("get decision Run for retirement: %v", err)
+	}
+	retiredDecisionRun.State = common.RunStateCompleted
+	retiredDecisionRun.BlockingTicketID = ""
+	if err := runScopedRepos.Runs.Update(ctx, retiredDecisionRun); err != nil {
+		t.Fatalf("retire decision Run fixture: %v", err)
+	}
 	approvalRun := seedBlockedApprovalRunInWorkspaceForHTTP(t, dataRoot, workspace.ID, "run-approval-workspace-snapshot-http")
 	workspaceItem, err := workspaceRepo.Get(ctx, common.WorkspaceID(workspace.ID))
 	if err != nil {
@@ -3611,8 +3622,8 @@ func TestWorkspaceSnapshotEndpointReturnsRelatedRunsAndBlockingItems(t *testing.
 	if len(body.Snapshot.Runs) != 3 {
 		t.Fatalf("runs = %+v, want 3 runs", body.Snapshot.Runs)
 	}
-	if len(body.Snapshot.Decisions) != 1 || body.Snapshot.Decisions[0].ID != decisionRun.BlockingTicketID {
-		t.Fatalf("decisions = %+v, want decision %s", body.Snapshot.Decisions, decisionRun.BlockingTicketID)
+	if len(body.Snapshot.Decisions) != 1 || body.Snapshot.Decisions[0].ID != decisionTicketID {
+		t.Fatalf("decisions = %+v, want decision %s", body.Snapshot.Decisions, decisionTicketID)
 	}
 	if len(body.Snapshot.Approvals) != 1 || body.Snapshot.Approvals[0].ID != approvalRun.BlockingApprovalID {
 		t.Fatalf("approvals = %+v, want approval %s", body.Snapshot.Approvals, approvalRun.BlockingApprovalID)
@@ -3623,6 +3634,7 @@ func TestWorkspaceSnapshotEndpointReturnsCompactProjection(t *testing.T) {
 	dataRoot := t.TempDir()
 	workspaceID := common.WorkspaceID("ws-compact-http")
 	state := newTestServerState(t, normalizeConfig(Config{Backend: "file", DataRoot: dataRoot}))
+	handler := newMuxWithState(state)
 	ctx := context.Background()
 	repos := workorchrepo.NewWorkspaceScopedFileRepositorySet(dataRoot)
 	if err := repos.Workspaces.Create(ctx, &workspacemodel.Workspace{
@@ -3638,8 +3650,12 @@ func TestWorkspaceSnapshotEndpointReturnsCompactProjection(t *testing.T) {
 	}
 	for idx := 0; idx < 12; idx++ {
 		runID := common.RunID(fmt.Sprintf("run-%02d", idx))
+		state := common.RunStateCompleted
+		if idx == 0 {
+			state = common.RunStateActive
+		}
 		if err := repos.Runs.Create(ctx, &runmodel.Run{
-			ID: runID, WorkspaceID: workspaceID, State: common.RunStateActive,
+			ID: runID, WorkspaceID: workspaceID, State: state,
 		}); err != nil {
 			t.Fatalf("create run %s: %v", runID, err)
 		}
@@ -3676,8 +3692,14 @@ func TestWorkspaceSnapshotEndpointReturnsCompactProjection(t *testing.T) {
 			t.Fatalf("append usage event %d: %v", idx, err)
 		}
 	}
+	// Let the asynchronous baseline finish after the direct repository fixture,
+	// then perform the explicit per-Workspace readback. This prevents an older
+	// empty baseline from committing after the focused rebuild and erasing its
+	// workspace-local revision.
+	waitForCondition(t, 2*time.Second, func() bool {
+		return state.workspaceProjectionStatus().State == workspaceProjectionStateReady
+	})
 	state.rebuildProjectedWorkspace(ctx, string(workspaceID))
-	handler := newMuxWithState(state)
 
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/workorch/workspaces/"+string(workspaceID)+"/snapshot", nil)

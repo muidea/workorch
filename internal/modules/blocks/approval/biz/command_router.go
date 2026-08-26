@@ -29,6 +29,7 @@ func approvalCommandTopics() []string {
 		approvalevents.TopicApprovalCommandGet, approvalevents.TopicApprovalCommandList,
 		approvalevents.TopicApprovalCommandListByRun, approvalevents.TopicApprovalCommandListByWorkspace,
 		approvalevents.TopicApprovalCommandPurgeWorkspace,
+		approvalevents.TopicApprovalCommandSealWorkspaceDeletion,
 	}
 }
 
@@ -38,7 +39,7 @@ func approvalCommandFamilyForTopic(topic string) (approvalCommandFamily, bool) {
 		return approvalCommandFamilyQuery, true
 	case approvalevents.TopicApprovalCommandEnsureApproved, approvalevents.TopicApprovalCommandEnsureRejected:
 		return approvalCommandFamilyResolution, true
-	case approvalevents.TopicApprovalCommandPurgeWorkspace:
+	case approvalevents.TopicApprovalCommandPurgeWorkspace, approvalevents.TopicApprovalCommandSealWorkspaceDeletion:
 		return approvalCommandFamilyPurge, true
 	default:
 		return 0, false
@@ -55,7 +56,26 @@ func (m *Biz) handleCommand(ev magicevent.Event, result magicevent.Result) {
 		setApprovalMagicResult(result, struct{}{}, err)
 		return
 	}
+	workspaceID := approvalCommandWorkspaceID(ev.Data())
+	if workspaceID != "" {
+		var unlock func()
+		if approvalCommandMutatesLifecycle(ev.ID()) {
+			unlock = m.lockWorkspaceLifecycleMutation(workspaceID)
+		} else {
+			unlock = m.lockWorkspaceMutation(workspaceID)
+		}
+		defer unlock()
+		if ev.ID() != approvalevents.TopicApprovalCommandSealWorkspaceDeletion && ev.ID() != approvalevents.TopicApprovalCommandPurgeWorkspace {
+			if err := m.rejectFencedWorkspace(ctx, workspaceID); err != nil {
+				setApprovalMagicResult(result, struct{}{}, err)
+				return
+			}
+		}
+	}
 	switch ev.ID() {
+	case approvalevents.TopicApprovalCommandSealWorkspaceDeletion:
+		response, err := m.executeSealWorkspaceDeletion(ctx, ev)
+		setApprovalMagicResult(result, response, err)
 	case approvalevents.TopicApprovalCommandGet:
 		response, err := m.executeGetApprovalCommand(ctx, ev.Data())
 		setApprovalMagicResult(result, response, err)
@@ -69,22 +89,28 @@ func (m *Biz) handleCommand(ev magicevent.Event, result magicevent.Result) {
 		response, err := m.executeListApprovalsByWorkspaceCommand(ctx, ev.Data())
 		setApprovalMagicResult(result, response, err)
 	case approvalevents.TopicApprovalCommandEnsureApproved:
-		m.lifecycleMu.Lock()
-		defer m.lifecycleMu.Unlock()
 		response, err := m.executeEnsureApprovedCommand(ctx, ev)
 		setApprovalMagicResult(result, response, err)
 	case approvalevents.TopicApprovalCommandEnsureRejected:
-		m.lifecycleMu.Lock()
-		defer m.lifecycleMu.Unlock()
 		response, err := m.executeEnsureRejectedCommand(ctx, ev)
 		setApprovalMagicResult(result, response, err)
 	case approvalevents.TopicApprovalCommandPurgeWorkspace:
-		m.lifecycleMu.Lock()
-		defer m.lifecycleMu.Unlock()
 		response, err := m.executePurgeWorkspaceCommand(ctx, ev)
 		setApprovalMagicResult(result, response, err)
 	default:
 		setApprovalMagicResult(result, struct{}{}, common.ErrInvalidArgument)
+	}
+}
+
+func approvalCommandMutatesLifecycle(topic string) bool {
+	switch topic {
+	case approvalevents.TopicApprovalCommandEnsureApproved,
+		approvalevents.TopicApprovalCommandEnsureRejected,
+		approvalevents.TopicApprovalCommandSealWorkspaceDeletion,
+		approvalevents.TopicApprovalCommandPurgeWorkspace:
+		return true
+	default:
+		return false
 	}
 }
 
@@ -103,11 +129,33 @@ func bindApprovalCommandScope(ctx context.Context, data any) (context.Context, e
 		workspaceID = cmd.WorkspaceID
 	case approvalevents.PurgeWorkspaceApprovalsCommand:
 		workspaceID = cmd.WorkspaceID
+	case approvalevents.SealWorkspaceApprovalDeletionCommand:
+		workspaceID = cmd.WorkspaceID
 	}
 	if workspaceID == "" {
 		return ctx, nil
 	}
 	return common.BindRuntimeWorkspaceContext(ctx, workspaceID)
+}
+
+func approvalCommandWorkspaceID(data any) common.WorkspaceID {
+	switch cmd := data.(type) {
+	case approvalevents.EnsureApprovedCommand:
+		return cmd.WorkspaceID
+	case approvalevents.EnsureRejectedCommand:
+		return cmd.WorkspaceID
+	case approvalevents.GetApprovalCommand:
+		return cmd.WorkspaceID
+	case approvalevents.ListApprovalsByRunCommand:
+		return cmd.WorkspaceID
+	case approvalevents.ListApprovalsByWorkspaceCommand:
+		return cmd.WorkspaceID
+	case approvalevents.PurgeWorkspaceApprovalsCommand:
+		return cmd.WorkspaceID
+	case approvalevents.SealWorkspaceApprovalDeletionCommand:
+		return cmd.WorkspaceID
+	}
+	return ""
 }
 
 func validateApprovalResolutionSource(ev magicevent.Event, principal approvalmodel.ApprovalResolutionPrincipal) error {

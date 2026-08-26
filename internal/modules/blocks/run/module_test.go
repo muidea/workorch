@@ -76,7 +76,10 @@ type runTestCommandResult struct {
 
 func sendRunTestCommand[Command any](ctx context.Context, rawHub magicevent.Hub, topic string, command Command) (runTestCommandResult, error) {
 	source := "run/module_test"
-	if topic == runevents.TopicRunCommandStoreRuntimeStateRecord {
+	if topic == runevents.TopicRunCommandStoreRuntimeStateRecord ||
+		topic == runevents.TopicRunCommandRuntimeRecoveryInventory ||
+		topic == runevents.TopicRunCommandRuntimeStateRecordReadiness ||
+		topic == runevents.TopicRunCommandRuntimeStateRecord {
 		source = "kernel/orchestrator"
 	}
 	ev := magicevent.NewEventWithContext(topic, source, runevents.CommandDestination, magicevent.NewHeader(), ctx, command)
@@ -105,8 +108,8 @@ func sendRunTestCommand[Command any](ctx context.Context, rawHub magicevent.Hub,
 		return runTestCommandResult{Step: response.Step}, nil
 	case runevents.GetRuntimeCheckpointResult:
 		return runTestCommandResult{Checkpoint: response.Checkpoint}, nil
-	case runevents.StoreRuntimeStateRecordResult, runevents.DeleteRunResult, runevents.ListStepsByRunResult,
-		runevents.ListStepSummariesByRunResult, runevents.ListRuntimeCheckpointsByRunResult, runevents.PurgeRuntimeResourcesResult:
+	case runevents.StoreRuntimeStateRecordResult, runevents.ListStepsByRunResult,
+		runevents.ListStepSummariesByRunResult, runevents.ListRuntimeCheckpointsByRunResult:
 		return runTestCommandResult{}, nil
 	default:
 		return runTestCommandResult{}, common.ErrInvalidArgument
@@ -163,7 +166,7 @@ func TestGMMR1SM4RecoveryInventoryAvailableAfterSetupBeforeRun(t *testing.T) {
 		t.Fatalf("Setup recovery subscription: %v", err)
 	}
 	result := rawHub.Send(magicevent.NewEventWithContext(
-		runevents.TopicRunCommandRuntimeRecoveryInventory, "run/module_test", runevents.CommandDestination,
+		runevents.TopicRunCommandRuntimeRecoveryInventory, "kernel/orchestrator", runevents.CommandDestination,
 		magicevent.NewHeader(), ctx, runevents.QueryRuntimeRecoveryInventoryCommand{},
 	))
 	if result == nil {
@@ -186,7 +189,7 @@ func TestGMMR1SM4RecoveryInventoryAvailableAfterSetupBeforeRun(t *testing.T) {
 		t.Fatalf("Stop: %v", err)
 	}
 	result = rawHub.Send(magicevent.NewEventWithContext(
-		runevents.TopicRunCommandRuntimeRecoveryInventory, "run/module_test", runevents.CommandDestination,
+		runevents.TopicRunCommandRuntimeRecoveryInventory, "kernel/orchestrator", runevents.CommandDestination,
 		magicevent.NewHeader(), ctx, runevents.QueryRuntimeRecoveryInventoryCommand{},
 	))
 	if result != nil {
@@ -212,7 +215,7 @@ func TestGMMR3RuntimeStateRecordReadIsAvailableDuringSetupWithoutRegularGet(t *t
 	}
 
 	readinessResult := rawHub.Send(magicevent.NewEventWithContext(
-		runevents.TopicRunCommandRuntimeStateRecordReadiness, "run/module_test", runevents.CommandDestination,
+		runevents.TopicRunCommandRuntimeStateRecordReadiness, "kernel/orchestrator", runevents.CommandDestination,
 		magicevent.NewHeader(), ctx, runevents.QueryRuntimeStateRecordReadinessCommand{},
 	))
 	if readinessResult == nil {
@@ -227,7 +230,7 @@ func TestGMMR3RuntimeStateRecordReadIsAvailableDuringSetupWithoutRegularGet(t *t
 	}
 
 	stateResult := rawHub.Send(magicevent.NewEventWithContext(
-		runevents.TopicRunCommandRuntimeStateRecord, "run/module_test", runevents.CommandDestination,
+		runevents.TopicRunCommandRuntimeStateRecord, "kernel/orchestrator", runevents.CommandDestination,
 		magicevent.NewHeader(), ctx, runevents.QueryRuntimeStateRecordCommand{
 			WorkspaceID: "ws-setup-record", RunID: "run-setup-record",
 			ExpectedRuntimeStateRef: runevents.RuntimeStateRef("ws-setup-record", "run-setup-record", 7), ExpectedRuntimeStateRevision: 7,
@@ -260,7 +263,7 @@ func TestGMMR3RuntimeStateRecordReadIsAvailableDuringSetupWithoutRegularGet(t *t
 		t.Fatalf("Start: %v", err)
 	}
 	readinessResult = rawHub.Send(magicevent.NewEventWithContext(
-		runevents.TopicRunCommandRuntimeStateRecordReadiness, "run/module_test", runevents.CommandDestination,
+		runevents.TopicRunCommandRuntimeStateRecordReadiness, "kernel/orchestrator", runevents.CommandDestination,
 		magicevent.NewHeader(), ctx, runevents.QueryRuntimeStateRecordReadinessCommand{},
 	))
 	if readinessResult == nil {
@@ -275,6 +278,51 @@ func TestGMMR3RuntimeStateRecordReadIsAvailableDuringSetupWithoutRegularGet(t *t
 	}
 	if err := module.Stop(ctx); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestSM4OwnerPrivateReadCommandsRejectForgedSource(t *testing.T) {
+	ctx := context.Background()
+	rawHub := newRunModuleTestHub(t)
+	module := New()
+	if err := module.Configure(runbiz.Dependencies{Runs: memory.NewRunRepository(), EventHub: rawHub}); err != nil {
+		t.Fatalf("Configure: %v", err)
+	}
+	if err := module.prepareRuntimeRecoveryInventory(); err != nil {
+		t.Fatalf("Setup recovery subscription: %v", err)
+	}
+	t.Cleanup(func() { _ = module.Stop(context.Background()) })
+
+	for name, request := range map[string]struct {
+		topic string
+		data  any
+	}{
+		"recovery inventory": {
+			topic: runevents.TopicRunCommandRuntimeRecoveryInventory,
+			data:  runevents.QueryRuntimeRecoveryInventoryCommand{},
+		},
+		"state readiness": {
+			topic: runevents.TopicRunCommandRuntimeStateRecordReadiness,
+			data:  runevents.QueryRuntimeStateRecordReadinessCommand{},
+		},
+		"exact state": {
+			topic: runevents.TopicRunCommandRuntimeStateRecord,
+			data:  runevents.QueryRuntimeStateRecordCommand{WorkspaceID: "ws-forged-source", RunID: "run-forged-source"},
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			result := rawHub.Send(magicevent.NewEventWithContext(
+				request.topic, "application/workorchd", runevents.CommandDestination,
+				magicevent.NewHeader(), ctx, request.data,
+			))
+			if result == nil {
+				t.Fatal("forged source returned nil result")
+			}
+			ownerErr := result.Error()
+			if ownerErr == nil || !errors.Is(ownerErr.Cause, common.ErrInvalidArgument) {
+				t.Fatalf("forged source error=%v, want invalid argument", ownerErr)
+			}
+		})
 	}
 }
 
@@ -336,10 +384,10 @@ type blockingRunUpdateRepository struct {
 	release chan struct{}
 }
 
-func (r *blockingRunUpdateRepository) CompareAndSwap(ctx context.Context, run *runmodel.Run, expectedRevision uint64) error {
+func (r *blockingRunUpdateRepository) CompareAndSwapRuntimeState(ctx context.Context, run *runmodel.Run, expectedRevision, expectedRuntimeStateRevision uint64) error {
 	r.once.Do(func() { close(r.started) })
 	<-r.release
-	return r.RunRepository.CompareAndSwap(ctx, run, expectedRevision)
+	return r.RunRepository.CompareAndSwapRuntimeState(ctx, run, expectedRevision, expectedRuntimeStateRevision)
 }
 
 func TestModuleConfigureRequiresRunRepositoryAndEventHub(t *testing.T) {
@@ -473,55 +521,6 @@ func TestRunCommandListSupportsCompactStateFilter(t *testing.T) {
 	}
 }
 
-func TestRunCommandDeleteHonorsWorkspaceScope(t *testing.T) {
-	ctx := context.Background()
-	rawHub := newRunModuleTestHub(t)
-	runs := memory.NewRunRepository()
-	runID := common.RunID("run-scoped-delete")
-	if err := runs.Create(ctx, &runmodel.Run{
-		ID:          runID,
-		WorkspaceID: "ws-run-delete-a",
-		State:       common.RunStatePending,
-	}); err != nil {
-		t.Fatalf("create run: %v", err)
-	}
-
-	module := New()
-	if err := module.Configure(runbiz.Dependencies{Runs: runs, EventHub: rawHub}); err != nil {
-		t.Fatalf("Setup: %v", err)
-	}
-	if err := module.Start(); err != nil {
-		t.Fatalf("Run: %v", err)
-	}
-	t.Cleanup(func() {
-		if err := module.Stop(ctx); err != nil {
-			t.Fatalf("Teardown: %v", err)
-		}
-	})
-
-	_, err := sendRunTestCommand(ctx, rawHub, runevents.TopicRunCommandDelete, runevents.DeleteRunCommand{
-		WorkspaceID: "ws-run-delete-b",
-		RunID:       runID,
-	})
-	if !errors.Is(err, common.ErrNotFound) {
-		t.Fatalf("wrong workspace delete err = %v, want not found", err)
-	}
-	if _, err := runs.Get(ctx, runID); err != nil {
-		t.Fatalf("run deleted on wrong workspace: %v", err)
-	}
-
-	_, err = sendRunTestCommand(ctx, rawHub, runevents.TopicRunCommandDelete, runevents.DeleteRunCommand{
-		WorkspaceID: "ws-run-delete-a",
-		RunID:       runID,
-	})
-	if err != nil {
-		t.Fatalf("scoped delete err = %v, want response", err)
-	}
-	if _, err := runs.Get(ctx, runID); !errors.Is(err, common.ErrNotFound) {
-		t.Fatalf("run still exists after scoped delete err = %v", err)
-	}
-}
-
 func TestRunWriteCommandsRequireWorkspaceScope(t *testing.T) {
 	ctx := context.Background()
 	rawHub := newRunModuleTestHub(t)
@@ -553,13 +552,6 @@ func TestRunWriteCommandsRequireWorkspaceScope(t *testing.T) {
 	})
 	if !errors.Is(err, common.ErrInvalidArgument) {
 		t.Fatalf("unscoped update err = %v, want invalid argument", err)
-	}
-
-	_, err = sendRunTestCommand(ctx, rawHub, runevents.TopicRunCommandDelete, runevents.DeleteRunCommand{
-		RunID: runID,
-	})
-	if !errors.Is(err, common.ErrInvalidArgument) {
-		t.Fatalf("unscoped delete err = %v, want invalid argument", err)
 	}
 }
 

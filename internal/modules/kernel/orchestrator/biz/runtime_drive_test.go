@@ -45,7 +45,6 @@ import (
 	shellevents "github.com/muidea/workorch/internal/modules/blocks/shell/pkg/events"
 	workspacemodule "github.com/muidea/workorch/internal/modules/blocks/workspace"
 	workspaceevents "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/events"
-	workspacemodel "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/models"
 	runtime "github.com/muidea/workorch/internal/modules/kernel/orchestrator/biz/runtime"
 	orchestratorevents "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/common"
@@ -775,7 +774,7 @@ func TestRuntimeFileBackedGroundedTargetStateSequenceRestartsAtCommittedBoundari
 				}); err != nil {
 					t.Fatal(err)
 				}
-				if err := workspaces.Create(ctx, &workspacemodel.Workspace{ID: "ws-v2", State: common.WorkspaceStateActive, ActiveRunID: "run-v2", DeliverableDirectory: deliverable, InternalDirectory: internalDir}); err != nil {
+				if err := workspaces.Create(ctx, runtimeWorkspaceForPersistedRunTest(t, ctx, runs, "ws-v2", "run-v2", deliverable, internalDir)); err != nil {
 					t.Fatal(err)
 				}
 				runOwner := runmodule.New()
@@ -788,7 +787,7 @@ func TestRuntimeFileBackedGroundedTargetStateSequenceRestartsAtCommittedBoundari
 				t.Cleanup(func() { _ = runOwner.Stop(ctx) })
 				workspaceOwner := workspacemodule.New()
 				if err := workspaceOwner.Configure(workspacebiz.Dependencies{
-					Workspaces: workspaces, Goals: memory.NewGoalRepository(), DoDs: memory.NewDoDRepository(),
+					Workspaces: workspaces, DeletionMaterialCleaner: workspaces, Goals: memory.NewGoalRepository(), DoDs: memory.NewDoDRepository(),
 					Templates: memory.NewWorkspaceTemplateRepository(), EventHub: hub,
 				}); err != nil {
 					t.Fatal(err)
@@ -798,7 +797,7 @@ func TestRuntimeFileBackedGroundedTargetStateSequenceRestartsAtCommittedBoundari
 				}
 				t.Cleanup(func() { _ = workspaceOwner.Stop(ctx) })
 				resultOwner := resultmodule.New()
-				if err := resultOwner.Configure(resultbiz.Dependencies{Results: results, Artifacts: memory.NewArtifactRepository(), EventHub: hub}); err != nil {
+				if err := resultOwner.Configure(resultbiz.Dependencies{WorkspaceDeletions: memory.NewResultWorkspaceDeletionRepository(), Results: results, Artifacts: memory.NewArtifactRepository(), EventHub: hub}); err != nil {
 					t.Fatal(err)
 				}
 				if err := resultOwner.Start(); err != nil {
@@ -1060,7 +1059,7 @@ func TestRuntimeFileBackedEmptyWorkspaceCreationReceiptCrashRestartDoesNotReplay
 			if err := runs.Create(ctx, &runmodel.Run{ID: "run-v2", WorkspaceID: "ws-v2", GoalID: bootstrap.Definition.GoalID, DoDID: bootstrap.Definition.DoDID, DefinitionRevision: bootstrap.Definition.Revision, RuntimeBootstrap: &bootstrap, ReconciliationScope: runtimecontract.RuntimeCWIReconciliationScopeCurrentRun, State: common.RunStateActive}); err != nil {
 				t.Fatal(err)
 			}
-			if err := workspaces.Create(ctx, &workspacemodel.Workspace{ID: "ws-v2", State: common.WorkspaceStateActive, ActiveRunID: "run-v2", DeliverableDirectory: deliverable, InternalDirectory: internalDir}); err != nil {
+			if err := workspaces.Create(ctx, runtimeWorkspaceForPersistedRunTest(t, ctx, runs, "ws-v2", "run-v2", deliverable, internalDir)); err != nil {
 				t.Fatal(err)
 			}
 			runOwner := runmodule.New()
@@ -1073,7 +1072,7 @@ func TestRuntimeFileBackedEmptyWorkspaceCreationReceiptCrashRestartDoesNotReplay
 			t.Cleanup(func() { _ = runOwner.Stop(ctx) })
 			workspaceOwner := workspacemodule.New()
 			if err := workspaceOwner.Configure(workspacebiz.Dependencies{
-				Workspaces: workspaces, Goals: memory.NewGoalRepository(), DoDs: memory.NewDoDRepository(),
+				Workspaces: workspaces, DeletionMaterialCleaner: workspaces, Goals: memory.NewGoalRepository(), DoDs: memory.NewDoDRepository(),
 				Templates: memory.NewWorkspaceTemplateRepository(), EventHub: hub,
 			}); err != nil {
 				t.Fatal(err)
@@ -1083,7 +1082,7 @@ func TestRuntimeFileBackedEmptyWorkspaceCreationReceiptCrashRestartDoesNotReplay
 			}
 			t.Cleanup(func() { _ = workspaceOwner.Stop(ctx) })
 			resultOwner := resultmodule.New()
-			if err := resultOwner.Configure(resultbiz.Dependencies{Results: results, Artifacts: memory.NewArtifactRepository(), EventHub: hub}); err != nil {
+			if err := resultOwner.Configure(resultbiz.Dependencies{WorkspaceDeletions: memory.NewResultWorkspaceDeletionRepository(), Results: results, Artifacts: memory.NewArtifactRepository(), EventHub: hub}); err != nil {
 				t.Fatal(err)
 			}
 			if err := resultOwner.Start(); err != nil {
@@ -1688,13 +1687,12 @@ func newRuntimeGroundedTargetSequenceModule(t *testing.T, hub magicevent.Hub, ru
 	}
 	module := New()
 	if err := module.Configure(Dependencies{
-		ToolCalls: memory.NewToolCallRepository(), Patches: memory.NewPatchRepository(),
-		ValidationResults: memory.NewValidationResultRepository(), EvidenceRecords: memory.NewEvidenceRecordRepository(),
-		CoverageWorkItems: memory.NewCoverageWorkItemRepository(), ArtifactContinuations: candidateRequestContents,
-		CommandHub: hub,
+		Evidence:   memory.NewOrchestratorOwnerRepositorySet(),
+		CommandHub: runtimeTestHubWithRunRetirementFallback(hub),
 	}); err != nil {
 		t.Fatal(err)
 	}
+	module.evidence.ArtifactContinuations = candidateRequestContents
 	if err := module.ConfigureRuntimeRepository(runtimeRepository); err != nil {
 		t.Fatal(err)
 	}
@@ -5809,7 +5807,7 @@ func TestDriveRuntimeFileBackedFreshFileShellGitAcceptance(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if err := workspaces.Create(ctx, &workspacemodel.Workspace{ID: "ws-v2", State: common.WorkspaceStateActive, ActiveRunID: "run-v2", DeliverableDirectory: deliverable, InternalDirectory: internalDir}); err != nil {
+	if err := workspaces.Create(ctx, runtimeWorkspaceForPersistedRunTest(t, ctx, runs, "ws-v2", "run-v2", deliverable, internalDir)); err != nil {
 		t.Fatal(err)
 	}
 	runOwner := runmodule.New()
@@ -5822,7 +5820,7 @@ func TestDriveRuntimeFileBackedFreshFileShellGitAcceptance(t *testing.T) {
 	t.Cleanup(func() { _ = runOwner.Stop(ctx) })
 	startRuntimeReceiptTestOwner(t, hub)
 	workspaceOwner := workspacemodule.New()
-	if err := workspaceOwner.Configure(workspacebiz.Dependencies{Workspaces: workspaces, Goals: memory.NewGoalRepository(), DoDs: memory.NewDoDRepository(), Templates: memory.NewWorkspaceTemplateRepository(), EventHub: hub}); err != nil {
+	if err := workspaceOwner.Configure(workspacebiz.Dependencies{Workspaces: workspaces, DeletionMaterialCleaner: workspaces, Goals: memory.NewGoalRepository(), DoDs: memory.NewDoDRepository(), Templates: memory.NewWorkspaceTemplateRepository(), EventHub: hub}); err != nil {
 		t.Fatal(err)
 	}
 	if err := workspaceOwner.Start(); err != nil {
@@ -5858,7 +5856,7 @@ func TestDriveRuntimeFileBackedFreshFileShellGitAcceptance(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = gitOwner.Stop(ctx) })
 	resultOwner := resultmodule.New()
-	if err := resultOwner.Configure(resultbiz.Dependencies{Results: results, Artifacts: artifacts, EventHub: hub}); err != nil {
+	if err := resultOwner.Configure(resultbiz.Dependencies{WorkspaceDeletions: memory.NewResultWorkspaceDeletionRepository(), Results: results, Artifacts: artifacts, EventHub: hub}); err != nil {
 		t.Fatal(err)
 	}
 	if err := resultOwner.Start(); err != nil {
@@ -7630,15 +7628,12 @@ func testRuntimeFileBackedPatchReplayProofRestartsAfterOwnerReceiptCASFailure(t 
 	// projection below deliberately uses the production Workspace owner.
 	restartedWorkspaceObserver.Unsubscribe(workspaceevents.TopicWorkspaceCommandGet)
 	workspaces := filerepository.NewWorkspaceRepository(filepath.Join(root, "workspaces.json"))
-	if err := workspaces.Create(ctx, &workspacemodel.Workspace{
-		ID: "ws-v2", State: common.WorkspaceStateActive, ActiveRunID: "run-v2",
-		DeliverableDirectory: deliverable, InternalDirectory: internalDir,
-	}); err != nil {
+	if err := workspaces.Create(ctx, runtimeWorkspaceForPersistedRunTest(t, ctx, runs, "ws-v2", "run-v2", deliverable, internalDir)); err != nil {
 		t.Fatal(err)
 	}
 	workspaceOwner := workspacemodule.New()
 	if err := workspaceOwner.Configure(workspacebiz.Dependencies{
-		Workspaces: workspaces, Goals: memory.NewGoalRepository(), DoDs: memory.NewDoDRepository(),
+		Workspaces: workspaces, DeletionMaterialCleaner: workspaces, Goals: memory.NewGoalRepository(), DoDs: memory.NewDoDRepository(),
 		Templates: memory.NewWorkspaceTemplateRepository(), EventHub: restartedHub,
 	}); err != nil {
 		t.Fatal(err)
@@ -7655,7 +7650,7 @@ func testRuntimeFileBackedPatchReplayProofRestartsAfterOwnerReceiptCASFailure(t 
 	results := filerepository.NewResultRepository(filepath.Join(root, "results.json"))
 	interruptedResults := &failAfterResultCreateRepository{ResultRepository: results}
 	firstResultOwner := resultmodule.New()
-	if err := firstResultOwner.Configure(resultbiz.Dependencies{
+	if err := firstResultOwner.Configure(resultbiz.Dependencies{WorkspaceDeletions: memory.NewResultWorkspaceDeletionRepository(),
 		Results: interruptedResults, Artifacts: filerepository.NewArtifactRepository(filepath.Join(root, "artifacts.json")), EventHub: restartedHub,
 	}); err != nil {
 		t.Fatal(err)
@@ -7679,7 +7674,7 @@ func testRuntimeFileBackedPatchReplayProofRestartsAfterOwnerReceiptCASFailure(t 
 		t.Fatal(err)
 	}
 	restartedResultOwner := resultmodule.New()
-	if err := restartedResultOwner.Configure(resultbiz.Dependencies{
+	if err := restartedResultOwner.Configure(resultbiz.Dependencies{WorkspaceDeletions: memory.NewResultWorkspaceDeletionRepository(),
 		Results: results, Artifacts: filerepository.NewArtifactRepository(filepath.Join(root, "artifacts.json")), EventHub: restartedHub,
 	}); err != nil {
 		t.Fatal(err)
@@ -8647,7 +8642,7 @@ func TestRuntimeFileBackedOperationGovernanceGrantFreshProcessCrashRestart(t *te
 					t.Fatal(err)
 				}
 				approvalOwner := approvalmodule.New()
-				if err := approvalOwner.Configure(approvalbiz.Dependencies{Approvals: approvals, EventHub: hub}); err != nil {
+				if err := approvalOwner.Configure(approvalbiz.Dependencies{WorkspaceDeletions: memory.NewApprovalWorkspaceDeletionRepository(), Approvals: approvals, EventHub: hub}); err != nil {
 					_ = runOwner.Stop(ctx)
 					hub.Terminate(ctx)
 					t.Fatal(err)
@@ -8972,7 +8967,7 @@ func TestDriveRuntimeFileBackedTwoFocusStateValidationAssessmentAndRestart(t *te
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if err := workspaces.Create(ctx, &workspacemodel.Workspace{ID: "ws-v2", DeliverableDirectory: deliverable, InternalDirectory: internalDir, State: common.WorkspaceStateActive, ActiveRunID: "run-v2"}); err != nil {
+	if err := workspaces.Create(ctx, runtimeWorkspaceForPersistedRunTest(t, ctx, runs, "ws-v2", "run-v2", deliverable, internalDir)); err != nil {
 		t.Fatal(err)
 	}
 	runOwner := runmodule.New()
@@ -8985,7 +8980,7 @@ func TestDriveRuntimeFileBackedTwoFocusStateValidationAssessmentAndRestart(t *te
 	t.Cleanup(func() { _ = runOwner.Stop(ctx) })
 	workspaceOwner := workspacemodule.New()
 	if err := workspaceOwner.Configure(workspacebiz.Dependencies{
-		Workspaces: workspaces, Goals: memory.NewGoalRepository(), DoDs: memory.NewDoDRepository(),
+		Workspaces: workspaces, DeletionMaterialCleaner: workspaces, Goals: memory.NewGoalRepository(), DoDs: memory.NewDoDRepository(),
 		Templates: memory.NewWorkspaceTemplateRepository(), EventHub: hub,
 	}); err != nil {
 		t.Fatal(err)
@@ -8996,7 +8991,7 @@ func TestDriveRuntimeFileBackedTwoFocusStateValidationAssessmentAndRestart(t *te
 	t.Cleanup(func() { _ = workspaceOwner.Stop(ctx) })
 	startRuntimeReceiptTestOwner(t, hub)
 	decisionOwner := decisionmodule.New()
-	if err := decisionOwner.Configure(decisionbiz.Dependencies{Tickets: decisionTickets, Resolutions: decisionResolutions, EventHub: hub}); err != nil {
+	if err := decisionOwner.Configure(decisionbiz.Dependencies{WorkspaceDeletions: memory.NewDecisionWorkspaceDeletionRepository(), Tickets: decisionTickets, Resolutions: decisionResolutions, EventHub: hub}); err != nil {
 		t.Fatal(err)
 	}
 	if err := decisionOwner.Start(); err != nil {
@@ -9021,7 +9016,7 @@ func TestDriveRuntimeFileBackedTwoFocusStateValidationAssessmentAndRestart(t *te
 	startRuntimeManagedValidationTestOwner(t, hub)
 	startRuntimeProviderCeilingTestOwner(t, hub)
 	resultOwner := resultmodule.New()
-	if err := resultOwner.Configure(resultbiz.Dependencies{Results: failingResults, Artifacts: artifacts, EventHub: hub}); err != nil {
+	if err := resultOwner.Configure(resultbiz.Dependencies{WorkspaceDeletions: memory.NewResultWorkspaceDeletionRepository(), Results: failingResults, Artifacts: artifacts, EventHub: hub}); err != nil {
 		t.Fatal(err)
 	}
 	if err := resultOwner.Start(); err != nil {
@@ -9208,7 +9203,7 @@ func TestDriveRuntimeFileBackedTwoFocusStateValidationAssessmentAndRestart(t *te
 		t.Fatal(err)
 	}
 	restartedResultOwner := resultmodule.New()
-	if err := restartedResultOwner.Configure(resultbiz.Dependencies{Results: results, Artifacts: artifacts, EventHub: hub}); err != nil {
+	if err := restartedResultOwner.Configure(resultbiz.Dependencies{WorkspaceDeletions: memory.NewResultWorkspaceDeletionRepository(), Results: results, Artifacts: artifacts, EventHub: hub}); err != nil {
 		t.Fatal(err)
 	}
 	if err := restartedResultOwner.Start(); err != nil {
@@ -9462,7 +9457,7 @@ func TestDriveRuntimeReturnsPersistedGovernedWait(t *testing.T) {
 	t.Cleanup(func() { _ = runOwner.Stop(ctx) })
 
 	decisionOwner := decisionmodule.New()
-	if err := decisionOwner.Configure(decisionbiz.Dependencies{
+	if err := decisionOwner.Configure(decisionbiz.Dependencies{WorkspaceDeletions: memory.NewDecisionWorkspaceDeletionRepository(),
 		Tickets: memory.NewDecisionTicketRepository(), Resolutions: memory.NewDecisionResolutionRepository(), EventHub: hub,
 	}); err != nil {
 		t.Fatal(err)

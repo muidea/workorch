@@ -6,6 +6,7 @@ import (
 	cd "github.com/muidea/magicCommon/def"
 	"github.com/muidea/magicCommon/framework/plugin/initiator"
 	runtimecommon "github.com/muidea/workorch/internal/initiators/workorchruntime/pkg/common"
+	"github.com/muidea/workorch/internal/pkg/repository"
 )
 
 // RepositoryConsumerID is the owner identity presented when a component
@@ -101,10 +102,10 @@ func ResolveMemoryRepositories(consumer RepositoryConsumerID) (runtimecommon.Mem
 	return provider.Memory(), nil
 }
 
-func ResolveOrchestratorRepositories(consumer RepositoryConsumerID) (runtimecommon.OrchestratorRepositories, *cd.Error) {
+func ResolveOrchestratorRepositories(consumer RepositoryConsumerID) (repository.OrchestratorEvidenceOwnerRepositories, *cd.Error) {
 	provider, err := resolveRepositoryProvider(consumer, repositoryFamilyOrchestrator)
 	if err != nil {
-		return runtimecommon.OrchestratorRepositories{}, err
+		return repository.OrchestratorEvidenceOwnerRepositories{}, err
 	}
 	return provider.Orchestrator(), nil
 }

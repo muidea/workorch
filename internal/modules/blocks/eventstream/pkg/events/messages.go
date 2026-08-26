@@ -70,10 +70,6 @@ type ListEventsCommand struct {
 	Query EventQuery
 }
 
-type PurgeWorkspaceCommand struct {
-	WorkspaceID common.WorkspaceID
-}
-
 type HighWatermarksCommand struct {
 	WorkspaceIDs []common.WorkspaceID
 }
@@ -87,8 +83,6 @@ type ListEventsResult struct{ Events []EventRecordData }
 
 type HighWatermarksResult struct{ HighWatermarks []WorkspaceHighWatermark }
 
-type PurgeWorkspaceResult struct{ DeletedCount int }
-
 type EventRecordAppendedData struct {
 	Record EventRecordData
 }
@@ -97,6 +91,7 @@ func MessageContracts() []eventcontract.MessageContract {
 	return eventcontract.MessageContracts(
 		eventcontract.CommandTopic[ListEventsCommand, ListEventsResult]("eventstream", definitionPackage, eventcontract.CommandClassRead, eventcontract.LanePolicyQuery, TopicEventStreamCommandList),
 		eventcontract.CommandTopic[HighWatermarksCommand, HighWatermarksResult]("eventstream", definitionPackage, eventcontract.CommandClassRead, eventcontract.LanePolicyQuery, TopicEventStreamCommandHighWatermarks),
+		eventcontract.CommandTopic[SealWorkspaceEventStreamDeletionCommand, SealWorkspaceEventStreamDeletionResult]("eventstream", definitionPackage, eventcontract.CommandClassWrite, eventcontract.LanePolicyState, TopicEventStreamCommandSealWorkspaceDeletion),
 		eventcontract.CommandTopic[PurgeWorkspaceCommand, PurgeWorkspaceResult]("eventstream", definitionPackage, eventcontract.CommandClassWrite, eventcontract.LanePolicyState, TopicEventStreamCommandPurgeWorkspace),
 		eventcontract.DataTopic[EventRecordAppendedData]("eventstream", definitionPackage, eventcontract.LanePolicyState, TopicEventStreamRecordAppended),
 	)

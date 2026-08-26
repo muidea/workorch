@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"path/filepath"
+	"sync"
 	"testing"
 	"time"
 
@@ -12,10 +13,33 @@ import (
 	runevents "github.com/muidea/workorch/internal/modules/blocks/run/pkg/events"
 	runmodel "github.com/muidea/workorch/internal/modules/blocks/run/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
+	"github.com/muidea/workorch/internal/pkg/repository"
 	filerepo "github.com/muidea/workorch/internal/pkg/repository/file"
 	"github.com/muidea/workorch/internal/pkg/repository/memory"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
+
+type blockingNextWorkspaceRunRepository struct {
+	repository.RunRepository
+	entered chan struct{}
+	release chan struct{}
+	once    sync.Once
+}
+
+type fixedRunInventoryRepository struct {
+	repository.RunRepository
+	items []*runmodel.Run
+}
+
+func (r *fixedRunInventoryRepository) List(context.Context) ([]*runmodel.Run, error) {
+	return runmodel.CloneRuns(r.items), nil
+}
+
+func (r *blockingNextWorkspaceRunRepository) CreateNextWorkspaceRun(ctx context.Context, item *runmodel.Run) error {
+	r.once.Do(func() { close(r.entered) })
+	<-r.release
+	return r.RunRepository.CreateNextWorkspaceRun(ctx, item)
+}
 
 func TestWorkspaceExecutionRestartReplaysFromFilePersistenceAfterOwnerRestart(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "runs.json")
@@ -58,7 +82,7 @@ func TestWorkspaceExecutionRestartReplaysFromFilePersistenceAfterOwnerRestart(t 
 	secondOwner, secondRuns, secondHub := startOwner(t)
 	t.Cleanup(func() { stopOwner(t, secondOwner, secondHub) })
 	duplicate, err := secondOwner.restartWorkspaceExecutionIntent(ctx, command)
-	if err != nil || duplicate.RunID != first.RunID || duplicate.Outcome != runtimecontract.RuntimeExecutionIntentReplacementPending || duplicate.Reason != runtimecontract.RuntimeExecutionIntentReasonDuplicateRestart {
+	if err != nil || duplicate.RunID != first.RunID || duplicate.Outcome != runtimecontract.RuntimeExecutionIntentReconciliationRequested || duplicate.Reason != runtimecontract.RuntimeExecutionIntentReasonCurrentRunContinuationAccepted {
 		t.Fatalf("persisted duplicate admission = %+v, first=%+v, err=%v", duplicate, first, err)
 	}
 	items, err := secondRuns.ListByWorkspaceID(ctx, command.WorkspaceID)
@@ -75,6 +99,289 @@ func TestWorkspaceExecutionRestartReplaysFromFilePersistenceAfterOwnerRestart(t 
 	conflicting.Bootstrap = &changedBootstrap
 	if _, err := secondOwner.restartWorkspaceExecutionIntent(ctx, conflicting); !errors.Is(err, common.ErrConflict) {
 		t.Fatalf("changed payload after owner restart = %v, want ErrConflict", err)
+	}
+}
+
+func TestConcurrentDifferentRestartsPersistAtMostOneCurrentRun(t *testing.T) {
+	runs := memory.NewRunRepository()
+	biz := &Biz{runs: runs}
+	workspaceID := common.WorkspaceID("ws-concurrent-restart")
+	ctx := common.ContextWithRuntimeWorkspaceID(context.Background(), workspaceID)
+	bootstrap := restartTestBootstrap(t, workspaceID)
+	commands := []runevents.WorkspaceExecutionIntentCommand{
+		{WorkspaceID: workspaceID, RequestID: "restart-a", Kind: runtimecontract.RuntimeExecutionIntentRestart, GoalID: "goal-1", DoDID: "dod-1", DefinitionRevision: "def-1", StartupInputHash: "startup-input-test", Bootstrap: &bootstrap},
+		{WorkspaceID: workspaceID, RequestID: "restart-b", Kind: runtimecontract.RuntimeExecutionIntentRestart, GoalID: "goal-1", DoDID: "dod-1", DefinitionRevision: "def-1", StartupInputHash: "startup-input-test", Bootstrap: &bootstrap},
+	}
+	errs := make(chan error, len(commands))
+	var wg sync.WaitGroup
+	for _, command := range commands {
+		command := command
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			_, err := biz.restartWorkspaceExecutionIntent(ctx, command)
+			errs <- err
+		}()
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		if err != nil {
+			t.Fatalf("concurrent restart: %v", err)
+		}
+	}
+	items, err := runs.ListByWorkspaceID(ctx, workspaceID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	current := 0
+	for _, item := range items {
+		if !runStateIsTerminal(item.State) {
+			current++
+		}
+	}
+	if current != 1 || len(items) != 1 {
+		t.Fatalf("concurrent restart persisted Runs=%+v, want one current Run", items)
+	}
+}
+
+func TestWorkspaceExecutionRestartReplayActivatesDurablePendingCutWithoutNewRun(t *testing.T) {
+	runs := memory.NewRunRepository()
+	workspaceID := common.WorkspaceID("ws-pending-replay")
+	ctx := common.ContextWithRuntimeWorkspaceID(context.Background(), workspaceID)
+	bootstrap := restartTestBootstrap(t, workspaceID)
+	command := runevents.WorkspaceExecutionIntentCommand{
+		WorkspaceID: workspaceID, RequestID: "restart-pending-replay", Kind: runtimecontract.RuntimeExecutionIntentRestart,
+		GoalID: "goal-1", DoDID: "dod-1", DefinitionRevision: "def-1", StartupInputHash: "startup-input-test", Bootstrap: &bootstrap,
+	}
+	biz := &Biz{runs: runs}
+	created, err := biz.createWorkspaceExecutionReplacement(ctx, replacementIntentFromCommand(command), "")
+	if err != nil || created.State != common.RunStatePending {
+		t.Fatalf("durable create cut = %+v, err=%v", created, err)
+	}
+	generation := created.WorkspaceRunGeneration
+
+	replayed, err := biz.restartWorkspaceExecutionIntent(ctx, command)
+	if err != nil || replayed.RunID != created.ID || replayed.Outcome != runtimecontract.RuntimeExecutionIntentReconciliationRequested || replayed.Reason != runtimecontract.RuntimeExecutionIntentReasonPendingRunActivated {
+		t.Fatalf("pending replay = %+v, err=%v", replayed, err)
+	}
+	items, err := runs.ListByWorkspaceID(ctx, workspaceID)
+	if err != nil || len(items) != 1 || items[0].State != common.RunStateActive || items[0].WorkspaceRunGeneration != generation {
+		t.Fatalf("pending replay Runs = %+v, err=%v", items, err)
+	}
+
+}
+
+func TestWorkspaceExecutionRestartRejectsDifferentRequestWhileActivationPending(t *testing.T) {
+	runs := memory.NewRunRepository()
+	workspaceID := common.WorkspaceID("ws-pending-conflict")
+	ctx := common.ContextWithRuntimeWorkspaceID(context.Background(), workspaceID)
+	bootstrap := restartTestBootstrap(t, workspaceID)
+	command := runevents.WorkspaceExecutionIntentCommand{
+		WorkspaceID: workspaceID, RequestID: "restart-original", Kind: runtimecontract.RuntimeExecutionIntentRestart,
+		GoalID: "goal-1", DoDID: "dod-1", DefinitionRevision: "def-1", StartupInputHash: "startup-input-test", Bootstrap: &bootstrap,
+	}
+	biz := &Biz{runs: runs}
+	created, err := biz.createWorkspaceExecutionReplacement(ctx, replacementIntentFromCommand(command), "")
+	if err != nil || created.State != common.RunStatePending {
+		t.Fatalf("durable create cut = %+v, err=%v", created, err)
+	}
+	different := command
+	different.RequestID = "restart-different"
+	if _, err := biz.restartWorkspaceExecutionIntent(ctx, different); !errors.Is(err, common.ErrConflict) {
+		t.Fatalf("different request during pending activation err=%v, want conflict", err)
+	}
+	items, _ := runs.ListByWorkspaceID(ctx, workspaceID)
+	if len(items) != 1 || items[0].State != common.RunStatePending || items[0].WorkspaceRunGeneration != created.WorkspaceRunGeneration {
+		t.Fatalf("different request mutated pending activation: %+v", items)
+	}
+}
+
+func TestRunConfigureRecoversPendingActivationBeforeRuntimeInventory(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "runs.json")
+	workspaceID := common.WorkspaceID("ws-configure-recovery")
+	ctx := common.ContextWithRuntimeWorkspaceID(context.Background(), workspaceID)
+	bootstrap := restartTestBootstrap(t, workspaceID)
+	command := runevents.WorkspaceExecutionIntentCommand{
+		WorkspaceID: workspaceID, RequestID: "restart-configure-recovery", Kind: runtimecontract.RuntimeExecutionIntentRestart,
+		GoalID: "goal-1", DoDID: "dod-1", DefinitionRevision: "def-1", StartupInputHash: "startup-input-test", Bootstrap: &bootstrap,
+	}
+	creatorRuns := filerepo.NewRunRepository(path)
+	creator := &Biz{runs: creatorRuns}
+	created, err := creator.createWorkspaceExecutionReplacement(ctx, replacementIntentFromCommand(command), "")
+	if err != nil || created.State != common.RunStatePending {
+		t.Fatalf("persist create-before-activation cut = %+v, err=%v", created, err)
+	}
+
+	hub := magicevent.NewHub(32)
+	owner := New()
+	if err := owner.Configure(Dependencies{Runs: filerepo.NewRunRepository(path), EventHub: hub}); err != nil {
+		t.Fatalf("fresh owner Configure recovery: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = owner.Stop(context.Background())
+		hub.Terminate(context.Background())
+	})
+	// Configure installs this read contract only after pending activation CAS.
+	response := hub.Send(magicevent.NewEventWithContext(
+		runevents.TopicRunCommandRuntimeRecoveryInventory, "kernel/orchestrator", runevents.CommandDestination,
+		magicevent.NewHeader(), context.Background(), runevents.QueryRuntimeRecoveryInventoryCommand{Limit: 10},
+	))
+	data, _ := response.Get()
+	inventory, ok := data.(runevents.QueryRuntimeRecoveryInventoryResult)
+	if !ok || len(inventory.Items) != 1 || inventory.Items[0].RunID != created.ID || inventory.Items[0].State != common.RunStateActive {
+		t.Fatalf("post-recovery Setup inventory = %#v", data)
+	}
+	stored, err := filerepo.NewRunRepository(path).GetByWorkspaceID(ctx, workspaceID, created.ID)
+	if err != nil || stored.State != common.RunStateActive || stored.WorkspaceRunGeneration != created.WorkspaceRunGeneration {
+		t.Fatalf("recovered Run = %+v, err=%v", stored, err)
+	}
+	revision := stored.Revision
+
+	// A second fresh owner observes the already-active record and performs no
+	// additional transition or generation allocation.
+	secondHub := magicevent.NewHub(16)
+	second := New()
+	if err := second.Configure(Dependencies{Runs: filerepo.NewRunRepository(path), EventHub: secondHub}); err != nil {
+		t.Fatalf("second fresh owner Configure: %v", err)
+	}
+	if err := second.Stop(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	secondHub.Terminate(context.Background())
+	items, err := filerepo.NewRunRepository(path).ListByWorkspaceID(ctx, workspaceID)
+	if err != nil || len(items) != 1 || items[0].Revision != revision || items[0].WorkspaceRunGeneration != created.WorkspaceRunGeneration {
+		t.Fatalf("duplicate startup recovery = %+v, err=%v", items, err)
+	}
+}
+
+func TestRunConfigureValidatesAllPendingActivationsBeforeAnyCAS(t *testing.T) {
+	runs := memory.NewRunRepository()
+	createPending := func(workspaceID common.WorkspaceID, requestID string) *runmodel.Run {
+		t.Helper()
+		bootstrap := restartTestBootstrap(t, workspaceID)
+		command := runevents.WorkspaceExecutionIntentCommand{
+			WorkspaceID: workspaceID, RequestID: requestID, Kind: runtimecontract.RuntimeExecutionIntentRestart,
+			GoalID: "goal-1", DoDID: "dod-1", DefinitionRevision: "def-1", StartupInputHash: "startup-input-test", Bootstrap: &bootstrap,
+		}
+		created, err := (&Biz{runs: runs}).createWorkspaceExecutionReplacement(common.ContextWithRuntimeWorkspaceID(context.Background(), workspaceID), replacementIntentFromCommand(command), "")
+		if err != nil {
+			t.Fatal(err)
+		}
+		return created
+	}
+	valid := createPending("ws-validation-a", "restart-valid")
+	malformed := createPending("ws-validation-b", "restart-malformed")
+	storedMalformed, err := runs.GetByWorkspaceID(context.Background(), malformed.WorkspaceID, malformed.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	storedMalformed.StartupInputHash = "corrupt-startup-input"
+	if err := runs.CompareAndSwap(context.Background(), storedMalformed, storedMalformed.Revision); err != nil {
+		t.Fatal(err)
+	}
+
+	owner := New()
+	hub := magicevent.NewHub(16)
+	defer hub.Terminate(context.Background())
+	if err := owner.Configure(Dependencies{Runs: runs, EventHub: hub}); !errors.Is(err, common.ErrConflict) {
+		t.Fatalf("Configure malformed inventory err=%v, want conflict", err)
+	}
+	unchanged, err := runs.GetByWorkspaceID(context.Background(), valid.WorkspaceID, valid.ID)
+	if err != nil || unchanged.State != common.RunStatePending || unchanged.Revision != valid.Revision {
+		t.Fatalf("valid earlier item was partially activated: %+v, err=%v", unchanged, err)
+	}
+}
+
+func TestRunConfigureRejectsMultipleCurrentRunsBeforeAnyCAS(t *testing.T) {
+	base := memory.NewRunRepository()
+	workspaceID := common.WorkspaceID("ws-multiple-current")
+	ctx := common.ContextWithRuntimeWorkspaceID(context.Background(), workspaceID)
+	bootstrap := restartTestBootstrap(t, workspaceID)
+	command := runevents.WorkspaceExecutionIntentCommand{
+		WorkspaceID: workspaceID, RequestID: "restart-one", Kind: runtimecontract.RuntimeExecutionIntentRestart,
+		GoalID: "goal-1", DoDID: "dod-1", DefinitionRevision: "def-1", StartupInputHash: "startup-input-test", Bootstrap: &bootstrap,
+	}
+	created, err := (&Biz{runs: base}).createWorkspaceExecutionReplacement(ctx, replacementIntentFromCommand(command), "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	second := runmodel.CloneRun(created)
+	second.ID = "run-corrupt-second-current"
+	second.WorkspaceRunGeneration++
+	second.ActivationRequestID = "restart-two"
+	repo := &fixedRunInventoryRepository{RunRepository: base, items: []*runmodel.Run{created, second}}
+	owner := New()
+	hub := magicevent.NewHub(16)
+	defer hub.Terminate(context.Background())
+	if err := owner.Configure(Dependencies{Runs: repo, EventHub: hub}); !errors.Is(err, common.ErrConflict) {
+		t.Fatalf("Configure multiple current Runs err=%v, want conflict", err)
+	}
+	unchanged, err := base.GetByWorkspaceID(ctx, workspaceID, created.ID)
+	if err != nil || unchanged.State != common.RunStatePending || unchanged.Revision != created.Revision {
+		t.Fatalf("multiple-current validation partially activated Run: %+v, err=%v", unchanged, err)
+	}
+}
+
+func TestReplacementMaterializationSerializesDifferentRestartAndKeepsOneCurrentRun(t *testing.T) {
+	base := memory.NewRunRepository()
+	blocking := &blockingNextWorkspaceRunRepository{RunRepository: base, entered: make(chan struct{}), release: make(chan struct{})}
+	biz := &Biz{runs: blocking}
+	workspaceID := common.WorkspaceID("ws-materialize-race")
+	ctx := common.ContextWithRuntimeWorkspaceID(context.Background(), workspaceID)
+	bootstrap := restartTestBootstrap(t, workspaceID)
+	oldCommand := runevents.WorkspaceExecutionIntentCommand{
+		WorkspaceID: workspaceID, RequestID: "restart-old", Kind: runtimecontract.RuntimeExecutionIntentRestart,
+		GoalID: "goal-1", DoDID: "dod-1", DefinitionRevision: "def-1", StartupInputHash: "startup-input-test", Bootstrap: &bootstrap,
+	}
+	intent := replacementIntentFromCommand(oldCommand)
+	intent.State = runmodel.ReplacementIntentTerminationAcknowledged
+	intent.TerminalDeliveryID = "terminal-old"
+	intent.RuntimeStateRevision = 3
+	intent.Recovery = newReplacementRecoveryLease(intent, runmodel.ReplacementRecoverySuccessorMaterialization, 1, "2026-08-25T00:00:00Z")
+	intent.Recovery.State = runmodel.ReplacementRecoveryRunning
+	intent.Recovery.DueAt = ""
+	terminal := runtimecontract.RuntimeTerminalDeliveryIdentity{WorkspaceID: workspaceID, RunID: "historical-predecessor", TerminalDeliveryID: intent.TerminalDeliveryID}
+	predecessor := &runmodel.Run{
+		ID: "historical-predecessor", WorkspaceID: workspaceID, State: common.RunStateSuperseded,
+		GoalID: "goal-old", DoDID: "dod-old", DefinitionRevision: "def-old", StartupInputHash: "startup-old",
+		Lineage: runmodel.RunLineage{LineageState: "superseded"}, TerminalDelivery: &terminal, ReplacementIntent: &intent,
+	}
+	if err := base.Create(ctx, predecessor); err != nil {
+		t.Fatal(err)
+	}
+	materialized := make(chan error, 1)
+	go func() {
+		_, err := biz.materializeReplacementAfterTerminalDelivery(ctx, predecessor, terminal.TerminalDeliveryID)
+		materialized <- err
+	}()
+	<-blocking.entered
+	newCommand := oldCommand
+	newCommand.RequestID = "restart-new"
+	restarted := make(chan error, 1)
+	go func() {
+		_, err := biz.restartWorkspaceExecutionIntent(ctx, newCommand)
+		restarted <- err
+	}()
+	close(blocking.release)
+	if err := <-materialized; err != nil {
+		t.Fatalf("materialize: %v", err)
+	}
+	if err := <-restarted; err != nil {
+		t.Fatalf("serialized restart: %v", err)
+	}
+	items, err := base.ListByWorkspaceID(ctx, workspaceID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	current := 0
+	for _, item := range items {
+		if !runStateIsTerminal(item.State) {
+			current++
+		}
+	}
+	if current != 1 {
+		t.Fatalf("materialize/restart race persisted %d current Runs: %+v", current, items)
 	}
 }
 
@@ -110,7 +417,7 @@ func TestWorkspaceExecutionRestartRejectsInvalidPersistedDuplicateIntent(t *test
 }
 
 func TestWorkspaceExecutionRestartRequestIDBindsSealedPayload(t *testing.T) {
-	biz, runs, _ := newLifecycleTestBiz(t)
+	biz, runs, hub := newLifecycleTestBiz(t)
 	ctx := common.ContextWithRuntimeWorkspaceID(context.Background(), "ws-1")
 	bootstrap := restartTestBootstrap(t, "ws-1")
 	existing := &runmodel.Run{
@@ -125,9 +432,28 @@ func TestWorkspaceExecutionRestartRequestIDBindsSealedPayload(t *testing.T) {
 		WorkspaceID: "ws-1", RequestID: "restart-1", Kind: runtimecontract.RuntimeExecutionIntentRestart,
 		GoalID: "goal-1", DoDID: "dod-1", DefinitionRevision: "def-1", StartupInputHash: "startup-input-test", Bootstrap: &bootstrap,
 	}
+	continuations := make(chan runevents.RunContinuationRequestedData, 1)
+	observer := magicevent.NewSimpleObserver(runevents.NotificationDestination, hub)
+	observer.Subscribe(runevents.TopicRunContinuationRequested, func(event magicevent.Event, result magicevent.Result) {
+		if data, ok := event.Data().(runevents.RunContinuationRequestedData); ok {
+			continuations <- data
+		}
+		if result != nil {
+			result.Set(nil, nil)
+		}
+	})
+	t.Cleanup(func() { observer.Unsubscribe(runevents.TopicRunContinuationRequested) })
 	duplicate, err := biz.restartWorkspaceExecutionIntent(ctx, cmd)
-	if err != nil || duplicate.Reason != runtimecontract.RuntimeExecutionIntentReasonDuplicateRestart || duplicate.RunID != existing.ID {
+	if err != nil || duplicate.Outcome != runtimecontract.RuntimeExecutionIntentReconciliationRequested || duplicate.Reason != runtimecontract.RuntimeExecutionIntentReasonCurrentRunContinuationAccepted || duplicate.RunID != existing.ID {
 		t.Fatalf("matching duplicate=%+v err=%v", duplicate, err)
+	}
+	select {
+	case continuation := <-continuations:
+		if continuation.WorkspaceID != existing.WorkspaceID || continuation.RunID != existing.ID || continuation.RequestID == "" {
+			t.Fatalf("restart replay continuation = %+v", continuation)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("active restart replay did not republish a typed continuation fact")
 	}
 	for _, test := range []struct {
 		name   string

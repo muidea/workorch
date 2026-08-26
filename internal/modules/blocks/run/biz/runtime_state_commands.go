@@ -50,7 +50,7 @@ func (m *Biz) updateRuntimeState(ctx context.Context, current *runmodel.Run, cmd
 			return runtimeStateUpdateOutcome(current, cmd, runtimemodel.RuntimeFeedbackCategoryAggregateRevisionMismatch, currentRevision, nil), nil
 		}
 		item := runFromUpdateCommand(current, cmd)
-		err := m.runs.CompareAndSwap(ctx, item, current.Revision)
+		err := m.runs.CompareAndSwapRuntimeState(ctx, item, current.Revision, currentRevision)
 		if err == nil {
 			return runtimeStateUpdateOutcome(item, cmd, runtimemodel.RuntimeFeedbackCategoryAccepted, item.RuntimeState.StateRevision, nil), nil
 		}

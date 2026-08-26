@@ -4,7 +4,7 @@ Status: active
 
 Type: capability-block-contract
 
-Last Verified: 2026-08-25
+Last Verified: 2026-08-26
 
 ## 功能范围与边界
 
@@ -64,8 +64,19 @@ application、Web 与 orchestrator 不直接访问 ai-proxy。
    `Error()` 文本重新猜测该 identity，也不得以 generic `provider_request_failed` 覆盖它。
 10. `/llm/runtime-candidate/request` 的结果是严格互斥的 `Stale | Feedback | DocumentOutcome`，不存在顶层
     content-only 兼容面。`DocumentOutcome` 是 LLM owner 事实：`complete_document` 必须携带与 response hash/bytes
-    一致的 opaque content，`incomplete_document | empty_document | invalid_provider_output` 禁止携带 content；共享
-    Runtime package 只保留 owner-neutral framing DTO，不能把 framing 当成 Orchestrator durable authority。
+    一致的 opaque content，`incomplete_document | empty_document | invalid_provider_output` 禁止携带 content；provider
+    显式返回 `response.incomplete/max_output_tokens` 时，该事实优先于 final-output payload 形态，即使 reasoning 已耗尽
+    output budget、最终 document bytes 为零，也必须归一为 `incomplete_document/max_output_tokens`。partial JSON、prose
+    或看似完整的片段都只保留 bounded hash/bytes，不作为 continuation prefix；该 owner fact 必须绑定
+    `submitted + completed + empty failureClass` 的同一 physical audit，任何 failed/unsubmitted 平行状态在 LLM boundary
+    直接 fail-closed，不得发布 usage 与 document 两套相互矛盾的事实。Orchestrator 只能复用 sealed
+    ExpectedDocument 从头发起 whole-document recovery。streaming adapter 只有在 embedded response 明确为
+    `completed`、event 顶层没有 `incomplete_details`，且 `output_text.done`/terminal response 中提供的非空全文与累计
+    delta 逐字一致时才接受 terminal；`response.incomplete/max_output_tokens` 也必须先封存为唯一 typed terminal 并继续
+    消费至 EOF，以拒绝其后的第二个 terminal、late data event 或重复 `[DONE]`。缺失、未知或互相矛盾的 terminal
+    framing 一律是 typed protocol failure，不能发送 `done` 或保留 rejected payload/usage。completed 且 final output 为空仍为
+    `empty_document/provider_final_output_missing`。共享 Runtime package 只保留 owner-neutral framing DTO，不能把 framing
+    当成 Orchestrator durable authority。
     audit-safe original diagnostic 与 provider-safe field-violation projection 分开生成，任一转换都不得覆盖另一份；
     raw provider body/prompt/credential/endpoint 不进入 eventstream、projection、memory 或后续 request。
 11. `Start()` 只读取一次 LLM configuration，并冻结为本 owner 的 active snapshot。配置文件 watcher 与 Web 保存
@@ -202,7 +213,9 @@ application、Web 与 orchestrator 不直接访问 ai-proxy。
 - [x] prospective target 的 owner-authored `allOf` constraint 只进入 C3 volatile authority；provider schema 与本地 evaluator
   在 owner probe 前执行同一合取合同，C4 只携带 typed violation 引用，且 dependency recipe identity/command 不进入 provider。
 - [x] candidate terminal framing 强制 `Stale | Feedback | DocumentOutcome` exactly-one；complete content 与 hash/bytes
-  一致，所有非 complete outcome 拒绝 content-only/混合 envelope。
+  一致，所有非 complete outcome 拒绝 content-only/混合 envelope；显式 max-output stop 在零 final-document bytes、
+  partial/prose 与 complete-looking payload 下均保持 incomplete fact，并只授权 whole-document recovery；streaming terminal
+  另覆盖 `[DONE]` 前置、terminal 后事件、顶层/embedded incomplete 矛盾、未知状态，以及累计 delta 与 done/terminal 全文漂移。
 - [x] completion/stream/embedding/preflight 的 physical response mode 在成功、transport failure 与 output-limit audit 中
   保真；pre-dispatch failure 保留 `non_streaming + submitted=false`，invalid audit publication 显式 fail-closed，并由
   Eventstream 无损持久化；durable payload 不含 raw body、prompt、credential 或 endpoint。

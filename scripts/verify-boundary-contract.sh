@@ -32,6 +32,22 @@ source_matches() {
     -- "$pattern" "$@" || true
 }
 
+# Workspace is the sole deletion/retirement aggregate owner. Application has
+# one Workspace command ingress and must not regain a cross-owner purge list,
+# directory cleanup, or Run enumeration saga.
+application_workspace_delete_orchestration="$({
+  source_matches 'purgeDeletedWorkspaceView|PurgeWorkspaceRecords|PurgeWorkspaceEventStream|Topic(Orchestrator|Run|Memory|Result|Decision|Approval|EventStream)Command(PurgeWorkspace|PurgeRun)' \
+    internal/modules/application/workorchd
+  source_matches 'PurgeDirectories|os\.RemoveAll' \
+    internal/modules/application/workorchd/biz/appservice/workspaceports \
+    internal/modules/application/workorchd/biz/appservice/workspacecore
+} | sed '/^[[:space:]]*$/d')"
+if [[ -n "$application_workspace_delete_orchestration" ]]; then
+  echo "boundary contract violation: Application regained cross-owner Workspace deletion orchestration" >&2
+  echo "$application_workspace_delete_orchestration" >&2
+  exit 1
+fi
+
 # Component type is determined by responsibility and directory placement.
 # Keep this inventory explicit so a new unit cannot silently bypass
 # type/ownership review.
@@ -565,41 +581,55 @@ EOF
   exit 1
 fi
 
-# Eventstream purge is one owner-private implementation reachable only from its
-# concrete synchronous EventHub command handler. A second call site would
-# recreate a direct mutation facade even if the helper remained unexported.
-eventstream_purge_file="internal/modules/blocks/eventstream/biz/event_stream_service.go"
+# Eventstream workspace deletion is one owner-private reducer reachable only
+# from concrete synchronous EventHub commands sent by the Workspace owner.
+# Physical cleanup uses the exact persisted fence sink; ordinary repository
+# purge/delete cannot cross a sealed tombstone.
+eventstream_lifecycle_file="internal/modules/blocks/eventstream/biz/event_stream_service.go"
+eventstream_deletion_file="internal/modules/blocks/eventstream/biz/workspace_deletion_internal_event.go"
 eventstream_exported_biz_surface_matches="$({
   source_matches '^func[[:space:]]+[A-Z][A-Za-z0-9_]*([[:space:]]*\[[^]]+\])?[[:space:]]*\(' internal/modules/blocks/eventstream/biz |
     grep -v -E -- ':func[[:space:]]+New\(' || true
   source_matches '^func[[:space:]]+\([^)]*\)[[:space:]]+[A-Z][A-Za-z0-9_]*\(' internal/modules/blocks/eventstream/biz |
     grep -v -E -- ':func[[:space:]]+\([^)]*\*?Biz\)[[:space:]]+(Start|Stop)\(' || true
 } | sed '/^[[:space:]]*$/d')"
-eventstream_purge_implementation_matches="$(source_matches '^func[[:space:]]+\([^)]*\)[[:space:]]+purgeWorkspaceEvents\(' internal/modules/blocks/eventstream/biz)"
-eventstream_purge_call_matches="$(source_matches '\.purgeWorkspaceEvents([[:space:]]|\(|$)' internal/modules/blocks/eventstream/biz)"
-eventstream_repository_purge_matches="$(source_matches '\.PurgeWorkspace([[:space:]]|\(|$)' internal/modules/blocks/eventstream/biz)"
-eventstream_cross_owner_repository_purge_matches="$({
-  source_matches '\.PurgeWorkspace([[:space:]]|\(|$)' internal |
-    grep -v -F -- 'internal/modules/blocks/eventstream/biz/event_stream_service.go:' |
-    grep -v -F -- 'internal/pkg/workorchrepo/workspace_scoped_repositories.go:' || true
+eventstream_deletion_ingress_implementation_matches="$(source_matches '^func[[:space:]]+\([^)]*\)[[:space:]]+executeWorkspaceDeletionCommand\(' internal/modules/blocks/eventstream/biz)"
+eventstream_deletion_ingress_call_matches="$(source_matches '\.executeWorkspaceDeletionCommand([[:space:]]|\(|$)' internal/modules/blocks/eventstream/biz)"
+eventstream_purge_implementation_matches="$(source_matches '^func[[:space:]]+\([^)]*\)[[:space:]]+purgeWorkspace\(' internal/modules/blocks/eventstream/biz)"
+eventstream_purge_call_matches="$(source_matches '\.purgeWorkspace([[:space:]]|\(|$)' internal/modules/blocks/eventstream/biz)"
+eventstream_exact_repository_purge_matches="$(source_matches '\.PurgeWorkspaceEventRecords([[:space:]]|\(|$)' internal/modules/blocks/eventstream/biz)"
+eventstream_ordinary_repository_purge_matches="$(source_matches '\.PurgeWorkspace([[:space:]]|\(|$)' internal/modules/blocks/eventstream/biz)"
+eventstream_deleted_receipt_audit_matches="$(source_matches 'workspaceevents\.TopicWorkspaceDeleted' "$eventstream_lifecycle_file")"
+eventstream_legacy_application_purge_matches="$({
+  source_matches 'eventstreamApplicationCommandSource|application/workorchd/appservice' internal/modules/blocks/eventstream/biz |
+    grep -v -E -- '_test\.go:' || true
 } | sed '/^[[:space:]]*$/d')"
 if [[ -n "$eventstream_exported_biz_surface_matches" ]] ||
-   ! grep -q -F -- 'func New(deps Dependencies) *Biz' "$eventstream_purge_file" ||
-   ! grep -q -F -- 'func (s *Biz) Start() error' "$eventstream_purge_file" ||
-   ! grep -q -F -- 'func (s *Biz) Stop()' "$eventstream_purge_file" ||
+   ! grep -q -F -- 'func New(deps Dependencies) *Biz' "$eventstream_lifecycle_file" ||
+   ! grep -q -F -- 'func (s *Biz) Start() error' "$eventstream_lifecycle_file" ||
+   ! grep -q -F -- 'func (s *Biz) Stop()' "$eventstream_lifecycle_file" ||
+   [[ "$(awk 'NF { count++ } END { print count + 0 }' <<<"$eventstream_deletion_ingress_implementation_matches")" -ne 1 ]] ||
+   [[ "$(awk 'NF { count++ } END { print count + 0 }' <<<"$eventstream_deletion_ingress_call_matches")" -ne 1 ]] ||
    [[ "$(awk 'NF { count++ } END { print count + 0 }' <<<"$eventstream_purge_implementation_matches")" -ne 1 ]] ||
    [[ "$(awk 'NF { count++ } END { print count + 0 }' <<<"$eventstream_purge_call_matches")" -ne 1 ]] ||
-   [[ "$(awk 'NF { count++ } END { print count + 0 }' <<<"$eventstream_repository_purge_matches")" -ne 1 ]] ||
-   [[ -n "$eventstream_cross_owner_repository_purge_matches" ]] ||
-   ! grep -q -F -- 'case eventstreamevents.TopicEventStreamCommandPurgeWorkspace:' "$eventstream_purge_file" ||
-   ! grep -q -F -- 'cmd, ok := ev.Data().(eventstreamevents.PurgeWorkspaceCommand)' "$eventstream_purge_file" ||
-   ! grep -q -F -- 'ev.Source() != eventstreamApplicationCommandSource' "$eventstream_purge_file"; then
-  echo "boundary contract violation: Eventstream Biz may export only New/Start/Stop and purge must have exactly one typed EventHub command ingress" >&2
+   [[ "$(awk 'NF { count++ } END { print count + 0 }' <<<"$eventstream_exact_repository_purge_matches")" -ne 1 ]] ||
+   [[ -n "$eventstream_ordinary_repository_purge_matches" ]] ||
+   [[ -n "$eventstream_deleted_receipt_audit_matches" ]] ||
+   [[ -n "$eventstream_legacy_application_purge_matches" ]] ||
+   ! grep -q -F -- 'case eventstreamevents.TopicEventStreamCommandSealWorkspaceDeletion:' "$eventstream_deletion_file" ||
+   ! grep -q -F -- 'case eventstreamevents.TopicEventStreamCommandPurgeWorkspace:' "$eventstream_deletion_file" ||
+   ! grep -q -F -- 'cmd, ok := ev.Data().(eventstreamevents.SealWorkspaceEventStreamDeletionCommand)' "$eventstream_deletion_file" ||
+   ! grep -q -F -- 'cmd, ok := ev.Data().(eventstreamevents.PurgeWorkspaceCommand)' "$eventstream_deletion_file" ||
+   ! grep -q -F -- 'ev.Source() != workspaceDeletionCommandSource' "$eventstream_deletion_file"; then
+  echo "boundary contract violation: Eventstream Biz may export only New/Start/Stop and deletion must use one Workspace-owned typed ingress plus the exact fenced purge sink" >&2
   if [[ -n "$eventstream_exported_biz_surface_matches" ]]; then
     echo "$eventstream_exported_biz_surface_matches" >&2
   fi
-  if [[ -n "$eventstream_cross_owner_repository_purge_matches" ]]; then
-    echo "$eventstream_cross_owner_repository_purge_matches" >&2
+  if [[ -n "$eventstream_legacy_application_purge_matches" ]]; then
+    echo "$eventstream_legacy_application_purge_matches" >&2
+  fi
+  if [[ -n "$eventstream_deleted_receipt_audit_matches" ]]; then
+    echo "$eventstream_deleted_receipt_audit_matches" >&2
   fi
   exit 1
 fi
@@ -728,9 +758,10 @@ fi
 # Keep one verification-only inventory for every formal Runtime machine and
 # every owner-private transition/effect gate.  This is deliberately not a Go
 # production registry: reducers cannot use it to select transitions.  It makes
-# owner identity and each private dispatcher reviewable, and makes a newly
-# added *_internal_event(s).go fail CI until it is classified here. One state
-# type may reference coordinated transitions only when they retain one owner.
+# owner identity, each private dispatcher, and its exact reducer/persistence
+# sinks reviewable, and makes a newly added *_internal_event(s).go fail CI
+# until it is classified here. One state type may reference coordinated
+# transitions only when they retain one owner.
 state_transition_owner_manifest="scripts/state-transition-owners.manifest"
 if [[ ! -f "$state_transition_owner_manifest" ]]; then
   echo "boundary contract violation: state-transition owner manifest is missing: $state_transition_owner_manifest" >&2
@@ -769,16 +800,16 @@ declare -A state_transition_classifications=()
 declare -A declared_internal_event_files=()
 declare -A formal_runtime_machine_owners=()
 manifest_line=0
-while IFS='|' read -r transition_id classification owner_root internal_event_file dispatcher_file dispatcher_symbol unexpected; do
+while IFS='|' read -r transition_id classification owner_root internal_event_file dispatcher_file dispatcher_symbol internal_event_type transition_sinks unexpected; do
   manifest_line=$((manifest_line + 1))
   if [[ -z "$transition_id" || "$transition_id" == \#* ]]; then
     continue
   fi
-  if [[ -n "${unexpected:-}" || -z "$classification" || -z "$owner_root" || -z "$internal_event_file" || -z "$dispatcher_file" || -z "$dispatcher_symbol" ]]; then
+  if [[ -n "${unexpected:-}" || -z "$classification" || -z "$owner_root" || -z "$internal_event_file" || -z "$dispatcher_file" || -z "$dispatcher_symbol" || -z "$internal_event_type" || -z "$transition_sinks" ]]; then
     echo "boundary contract violation: malformed state-transition owner manifest row $manifest_line" >&2
     exit 1
   fi
-  if [[ ! "$transition_id" =~ ^[a-z0-9_.-]+$ || ! "$dispatcher_symbol" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]]; then
+  if [[ ! "$transition_id" =~ ^[a-z0-9_.-]+$ || ! "$dispatcher_symbol" =~ ^[A-Za-z_][A-Za-z0-9_]*$ || ! "$internal_event_type" =~ ^[A-Za-z_][A-Za-z0-9_]*$ || ! "$transition_sinks" =~ ^[A-Za-z_][A-Za-z0-9_.]*(,[A-Za-z_][A-Za-z0-9_.]*)*$ ]]; then
     echo "boundary contract violation: invalid transition or dispatcher identity at manifest row $manifest_line" >&2
     exit 1
   fi
@@ -1618,10 +1649,10 @@ if grep -q -E -- 'LineageState[[:space:]]*==[[:space:]]*""' internal/modules/blo
 	exit 1
 fi
 
-# Definition admission has one current immutable candidate shape. Its pure
-# compiler and transition-selecting result belong to the Workspace owner;
-# Workorchd may consume that result and perform read-side validation, but it
-# cannot submit an admission outcome or choose the Workspace transition.
+# Definition admission has one current immutable candidate shape and one
+# public intent/fact ingress. Its pure compiler and transition-selecting result
+# belong to the Workspace owner; Workorchd may consume that result and compose
+# Decision-owner commands, but it cannot submit promotion/eligibility targets.
 # Neither side may reseal caller/persisted bytes, and Restart must reject that
 # shape before materializing managed files or sending an owner execution intent.
 definition_candidate_hash_shape="$(sed -n '/^func (c DefinitionAdmissionCandidate) computeHash()/,/^}/p' internal/modules/blocks/workspace/pkg/models/definition_admission.go)"
@@ -1633,20 +1664,24 @@ for required_field in AdmissionPolicyBindings AcquisitionOperationVariantID Acqu
 done
 definition_compiler="internal/modules/blocks/workspace/pkg/definitionadmission/compiler.go"
 definition_compiler_test="internal/modules/blocks/workspace/pkg/definitionadmission/compiler_test.go"
-definition_submit_result_shape="$(sed -n '/^type SubmitDefinitionAdmissionCandidateResult struct {/,/^}/p' internal/modules/blocks/workspace/pkg/events/messages.go)"
-definition_promote_command_shape="$(sed -n '/^type PromoteDefinitionAdmissionCandidateCommand struct {/,/^}/p' internal/modules/blocks/workspace/pkg/events/messages.go)"
-definition_submit_reducer="$(sed -n '/^func reduceDefinitionAdmissionCandidateSubmission(/,/^}/p' internal/modules/blocks/workspace/biz/definition_admission_internal_event.go)"
-definition_promote_reducer="$(sed -n '/^func reduceDefinitionAdmissionCandidatePromotion(/,/^}/p' internal/modules/blocks/workspace/biz/definition_admission_internal_event.go)"
+definition_intent_command_shape="$(sed -n '/^type DefinitionAdmissionIntentCommand struct {/,/^}/p' internal/modules/blocks/workspace/pkg/events/messages.go)"
+definition_intent_result_shape="$(sed -n '/^type DefinitionAdmissionIntentResult struct {/,/^}/p' internal/modules/blocks/workspace/pkg/events/messages.go)"
+definition_intent_reducer="$(sed -n '/^func reduceDefinitionAdmissionIntent(/,/^}/p' internal/modules/blocks/workspace/biz/definition_admission_internal_event.go)"
+definition_legacy_target_commands="$(source_matches 'SubmitDefinitionAdmissionCandidate(Command|Result)|PromoteDefinitionAdmissionCandidate(Command|Result)|AcknowledgeWorkspaceDefinitionClarificationResolution(Command|Result)|TopicWorkspaceCommandSubmitDefinitionAdmissionCandidate|TopicWorkspaceCommandPromoteDefinitionAdmissionCandidate|TopicWorkspaceCommandAcknowledgeDefinitionClarification|/workspace/definition-admission/command/(submit-candidate|promote-candidate|acknowledge-clarification)' internal/modules || true)"
 if [[ -f internal/modules/application/workorchd/biz/appservice/definitionadmissioncore/compiler.go ]] ||
 	[[ ! -f "$definition_compiler" ]] ||
-	! grep -q -E -- 'AdmissionResult[[:space:]]+workspacemodel\.DefinitionAdmissionResult' <<<"$definition_submit_result_shape" ||
-	grep -q -F -- 'AdmissionResult' <<<"$definition_promote_command_shape" ||
-	! grep -q -F -- 'definitionadmission.Compile(candidate)' <<<"$definition_submit_reducer" ||
-	! grep -q -F -- 'definitionadmission.Compile(*candidate)' <<<"$definition_promote_reducer" ||
+	! grep -q -E -- 'AdmissionResult[[:space:]]+workspacemodel\.DefinitionAdmissionResult' <<<"$definition_intent_result_shape" ||
+	! grep -q -F -- 'ClarificationTicket' <<<"$definition_intent_command_shape" ||
+	! grep -q -F -- 'ClarificationResolution' <<<"$definition_intent_command_shape" ||
+	grep -q -E -- 'TargetState|RequestedState|PromotionState' <<<"$definition_intent_command_shape" ||
+	[[ -n "$definition_legacy_target_commands" ]] ||
+	! grep -q -F -- 'definitionadmission.Compile(candidate)' <<<"$definition_intent_reducer" ||
 	grep -q -F -- 'candidate = candidate.WithHash()' "$definition_compiler" ||
 	grep -q -F -- 'command.Candidate = command.Candidate.WithHash()' internal/modules/blocks/workspace/biz/definition_admission_internal_event.go ||
 	! grep -q -F -- 'TestCompileRejectsCandidateHashDriftInsteadOfResealingCallerInput' "$definition_compiler_test" ||
 	! grep -q -F -- 'TestDefinitionAdmissionOwnerDoesNotResealCallerCandidate' internal/modules/blocks/workspace/biz/definition_admission_test.go ||
+	! grep -q -F -- 'TestDefinitionAdmissionIntentAutomaticallyPromotesEligibleCandidate' internal/modules/blocks/workspace/biz/definition_admission_test.go ||
+	! grep -q -F -- 'TestDefinitionAdmissionIntentAloneSelectsTicketPromotionAndResolution' internal/modules/blocks/workspace/biz/definition_admission_test.go ||
 	! grep -q -F -- 'TestWorkspaceExecutionRestartRequiresCurrentAdmissionCandidateBeforeRunOwner' internal/modules/blocks/workspace/biz/execution_intent_test.go; then
 	echo "boundary contract violation: Definition admission escaped Workspace ownership, regained caller outcome/resealing, or lost strict Restart regressions" >&2
 	exit 1
@@ -2345,9 +2380,9 @@ if grep -q -E -- '(^|[[:space:]])Result[[:space:]]+\*' <<<"$result_terminal_body
 fi
 
 # Run, Result, and Workspace own their lifecycle wire contracts. Orchestrator
-# may send those concrete contracts but must not redefine them, and the owner
-# Biz packages must not depend on an Orchestrator-defined lifecycle command.
-for owner in result workspace; do
+# may send those concrete contracts but must not redefine them, and lifecycle
+# handlers must not depend on an Orchestrator-defined lifecycle command.
+for owner in result; do
   matches="$(source_matches 'internal/modules/kernel/orchestrator/pkg/events' "internal/modules/blocks/$owner/biz")"
   if [[ -n "$matches" ]]; then
     echo "boundary contract violation: $owner lifecycle owner imports Orchestrator event contracts" >&2
@@ -2355,6 +2390,16 @@ for owner in result workspace; do
     exit 1
   fi
 done
+# Workspace deletion is a distinct Workspace-owned state machine. Its sole
+# coordinator is a legitimate typed sender of Orchestrator quiescence/purge
+# commands; no other Workspace production file may import that target-owner
+# package.
+matches="$(source_matches 'internal/modules/kernel/orchestrator/pkg/events' internal/modules/blocks/workspace/biz | sed '/internal\/modules\/blocks\/workspace\/biz\/deletion_coordinator\.go:/d')"
+if [[ -n "$matches" ]]; then
+  echo "boundary contract violation: workspace lifecycle owner imports Orchestrator event contracts" >&2
+  echo "$matches" >&2
+  exit 1
+fi
 if ! grep -q -F -- 'TopicRunFactTerminalDelivery' internal/modules/blocks/run/pkg/events/topics.go ||
    ! grep -q -F -- 'TopicResultFactTerminalDelivery' internal/modules/blocks/result/pkg/events/topics.go ||
    ! grep -q -F -- 'TopicWorkspaceFactTerminalDelivery' internal/modules/blocks/workspace/pkg/events/topics.go ||
@@ -3161,7 +3206,7 @@ EOF
 	exit 1
 fi
 
-result_owner_write_leaks="$(source_matches 'Topic(Result|Artifact)Command(Create|Update)|type (Create|Update)(Result|Artifact)Command' internal/modules/blocks/result/pkg/events internal/modules/kernel/orchestrator/biz/result_event_adapter.go)"
+result_owner_write_leaks="$(source_matches 'Topic(Result|Artifact)Command(Create|Update)|type (Create|Update)(Result|Artifact)Command' internal/modules/blocks/result/pkg/events internal/modules/kernel/orchestrator/biz)"
 if [[ -n "$result_owner_write_leaks" ]]; then
 	cat >&2 <<EOF
 boundary contract violation: Result/Artifact generic entity writes bypass the
@@ -3884,7 +3929,18 @@ fi
 # SM-3 semantic batches are forward-only. Provider document/schema correction
 # happens while the batch remains Requesting; an owner feasibility result can
 # never reopen the batch or authorize another target-selection attempt.
-semantic_batch_advance="$(sed -n '/^func AdvanceRuntimeSemanticPlanBatch(/,/^}/p' internal/pkg/workorchruntimecontract/runtime_semantic_batch.go)"
+semantic_batch_reducer="internal/modules/kernel/orchestrator/biz/runtime/semantic_plan_batch_reducer.go"
+semantic_batch_compiler="internal/modules/kernel/orchestrator/biz/internal/semanticplan/batch_compiler.go"
+if [[ ! -f "$semantic_batch_reducer" || ! -f "$semantic_batch_compiler" ]]; then
+	echo "boundary contract violation: SM-3 semantic batch reducer/compiler is not owner-private" >&2
+	exit 1
+fi
+if grep -q -E 'func (AdvanceRuntimeSemanticPlanBatch|CompileRuntimeSemanticPlanBatch|CompileRuntimeSemanticPlanBatchFromOffset|CompileRuntimeSemanticPlanFocusBatch)\(' internal/pkg/workorchruntimecontract/runtime_semantic_batch.go ||
+	grep -q -E 'State:[[:space:]]*RuntimeSemanticPlanBatchPending' internal/pkg/workorchruntimecontract/runtime_semantic_batch.go; then
+	echo "boundary contract violation: shared Runtime contract regained semantic batch initialization or transition authority" >&2
+	exit 1
+fi
+semantic_batch_advance="$(sed -n '/^func runtimeSemanticPlanBatchTransitionAllowed(/,/^}/p' "$semantic_batch_reducer")"
 if grep -F 'RuntimeSemanticPlanBatchFeasibilityPending:' <<<"$semantic_batch_advance" | grep -q -F 'RuntimeSemanticPlanBatchRequesting'; then
 	echo "boundary contract violation: SM-3 regained a feasibility-to-requesting correction back edge" >&2
 	exit 1
@@ -3902,10 +3958,29 @@ fi
 orchestrator_semantic_batch_state_writes="$({
 	source_matches '([A-Za-z0-9_]*[Bb]atch|Batches\[[^]]+\])\.State[[:space:]]*=[[:space:]]*[^=]' internal/modules/kernel/orchestrator/biz
 	source_matches '\.State[[:space:]]*=[[:space:]]*runtimecontract\.RuntimeSemanticPlanBatch|State:[[:space:]]*runtimecontract\.RuntimeSemanticPlanBatch' internal/modules/kernel/orchestrator/biz
-} | sed '/^[[:space:]]*$/d')"
+} | grep -v -F -- "$semantic_batch_reducer:" | sed '/^[[:space:]]*$/d' || true)"
+orchestrator_semantic_batch_state_writes="$(grep -v -F -- "$semantic_batch_compiler:" <<<"$orchestrator_semantic_batch_state_writes" || true)"
 if [[ -n "$orchestrator_semantic_batch_state_writes" ]]; then
 	echo "boundary contract violation: Orchestrator writes RuntimeSemanticPlanBatch.State outside the canonical forward transition" >&2
 	echo "$orchestrator_semantic_batch_state_writes" >&2
+	exit 1
+fi
+semantic_batch_compiler_state_writes="$({
+	source_matches '\.State[[:space:]]*=[[:space:]]*[^=]' "$semantic_batch_compiler"
+	source_matches '(^|[^A-Za-z0-9_])State[[:space:]]*:' "$semantic_batch_compiler"
+} | sed '/^[[:space:]]*$/d')"
+if [[ "$(grep -c -E 'State:[[:space:]]*runtimecontract\.RuntimeSemanticPlanBatchPending' <<<"$semantic_batch_compiler_state_writes")" -ne 2 || "$(wc -l <<<"$semantic_batch_compiler_state_writes" | tr -d ' ')" -ne 2 ]]; then
+	echo "boundary contract violation: owner-private semantic batch compiler must contain only its two canonical Pending initializations" >&2
+	echo "$semantic_batch_compiler_state_writes" >&2
+	exit 1
+fi
+semantic_batch_reducer_state_writes="$({
+	source_matches '\.State[[:space:]]*=[[:space:]]*[^=]' "$semantic_batch_reducer"
+	source_matches '(^|[^A-Za-z0-9_])State[[:space:]]*:' "$semantic_batch_reducer"
+} | sed '/^[[:space:]]*$/d')"
+if [[ "$(grep -c -F 'advanced.State = next' <<<"$semantic_batch_reducer_state_writes")" -ne 1 || "$(wc -l <<<"$semantic_batch_reducer_state_writes" | tr -d ' ')" -ne 1 ]]; then
+	echo "boundary contract violation: owner-private SM-3 semantic batch reducer must contain exactly one state write, the canonical advanced.State = next assignment" >&2
+	echo "$semantic_batch_reducer_state_writes" >&2
 	exit 1
 fi
 
@@ -4196,6 +4271,29 @@ if ! grep -q -F 'event.Source() == "blocks/run"' <<<"$run_state_handler" ||
 	! grep -q -F 'data.Validate() == nil' <<<"$run_state_handler" ||
 	! grep -q -F 'data.Validate() != nil' <<<"$run_state_recorder"; then
 	echo "boundary contract violation: RunStateChanged cache/metrics ingress lost source or typed validation gate" >&2
+	exit 1
+fi
+
+# Orchestrator evidence repositories form one backend-owned capability set.
+# Production callers may obtain that set only from the memory/file factories;
+# injecting raw repositories or a differently rooted purger would separate the
+# permanent tombstone from the resources it is meant to fence and purge.
+orchestrator_evidence_constructor_files="$(grep -R -l -F --include='*.go' -- 'NewOrchestratorEvidenceOwnerRepositories(' internal | sort)"
+expected_orchestrator_evidence_constructor_files="$(printf '%s\n' \
+	internal/pkg/repository/memory/orchestrator_workspace_deletion.go \
+	internal/pkg/repository/orchestrator_evidence_fence.go \
+	internal/pkg/workorchrepo/workspace_scoped_repositories.go | sort)"
+if [[ "$orchestrator_evidence_constructor_files" != "$expected_orchestrator_evidence_constructor_files" ]]; then
+	echo "boundary contract violation: Orchestrator evidence owner set gained a non-canonical constructor callsite" >&2
+	exit 1
+fi
+orchestrator_evidence_backend_files="$(grep -R -l -F --include='*.go' -- 'OrchestratorWorkspaceDeletions()' internal | sort)"
+expected_orchestrator_evidence_backend_files="$(printf '%s\n' \
+	internal/pkg/repository/memory/orchestrator_workspace_deletion.go \
+	internal/pkg/repository/orchestrator_evidence_fence.go \
+	internal/pkg/workorchrepo/workspace_scoped_repositories.go | sort)"
+if [[ "$orchestrator_evidence_backend_files" != "$expected_orchestrator_evidence_backend_files" ]]; then
+	echo "boundary contract violation: Orchestrator evidence owner set gained a non-canonical backend implementation" >&2
 	exit 1
 fi
 

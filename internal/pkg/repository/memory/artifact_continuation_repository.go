@@ -16,6 +16,7 @@ type ArtifactContinuationRepository struct {
 	chunkContent     map[common.ArtifactContinuationID]map[int]string
 	assembledMeta    map[common.ArtifactContinuationID]*orchestratormodel.ArtifactContinuationAssembledMetadata
 	assembledContent map[common.ArtifactContinuationID]string
+	workspaceScopes  map[common.ArtifactContinuationID]common.WorkspaceID
 }
 
 func NewArtifactContinuationRepository() *ArtifactContinuationRepository {
@@ -25,6 +26,7 @@ func NewArtifactContinuationRepository() *ArtifactContinuationRepository {
 		chunkContent:     map[common.ArtifactContinuationID]map[int]string{},
 		assembledMeta:    map[common.ArtifactContinuationID]*orchestratormodel.ArtifactContinuationAssembledMetadata{},
 		assembledContent: map[common.ArtifactContinuationID]string{},
+		workspaceScopes:  map[common.ArtifactContinuationID]common.WorkspaceID{},
 	}
 }
 
@@ -38,6 +40,7 @@ func (r *ArtifactContinuationRepository) Create(_ context.Context, item *orchest
 		return common.ErrConflict
 	}
 	r.items[item.ID] = cloneArtifactContinuation(item)
+	r.workspaceScopes[item.ID] = item.WorkspaceID
 	return nil
 }
 
@@ -108,6 +111,7 @@ func (r *ArtifactContinuationRepository) Delete(_ context.Context, id common.Art
 	delete(r.chunkContent, id)
 	delete(r.assembledMeta, id)
 	delete(r.assembledContent, id)
+	delete(r.workspaceScopes, id)
 	return nil
 }
 

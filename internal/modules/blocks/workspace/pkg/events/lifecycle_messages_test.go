@@ -8,31 +8,6 @@ import (
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
-func TestRunProjectionFactValidate(t *testing.T) {
-	cmd := RunProjectionFact{
-		WorkspaceID: "ws-1", RunID: "run-1", SourceOwner: "blocks/run", CausationID: "run-state/run-1/1",
-		RunState: common.RunStateActive, RuntimeStateRevision: 1, RuntimeStateRef: "runtime-state/ws-1/run-1/1",
-	}
-	if err := cmd.Validate(); err != nil {
-		t.Fatalf("valid projection: %v", err)
-	}
-	preRuntime := RunProjectionFact{
-		WorkspaceID: "ws-1", RunID: "run-1", SourceOwner: "blocks/run", CausationID: "run-state/run-1/0",
-		RunState: common.RunStateActive,
-	}
-	if err := preRuntime.Validate(); err != nil {
-		t.Fatalf("valid pre-runtime activation projection: %v", err)
-	}
-	preRuntime.RunState = common.RunStateBlockedOnDecision
-	if err := preRuntime.Validate(); err == nil {
-		t.Fatal("pre-runtime governance projection must be rejected")
-	}
-	cmd.RunState = common.RunStateCompleted
-	if err := cmd.Validate(); err == nil {
-		t.Fatal("expected unsupported terminal run state")
-	}
-}
-
 func TestWorkspaceExecutionIntentResultUsesTypedAdmissionWithoutInventedRun(t *testing.T) {
 	result := WorkspaceExecutionIntentResult{
 		WorkspaceID: "ws-1", RequestID: "request-1", Kind: runtimecontract.RuntimeExecutionIntentResume,

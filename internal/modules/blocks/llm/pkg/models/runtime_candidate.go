@@ -41,9 +41,10 @@ type RuntimeCandidateGenerationResult struct {
 	FailureClass string `json:"failureClass,omitempty"`
 	// FailureReason is a redacted human-readable failure summary.
 	FailureReason string `json:"failureReason,omitempty"`
-	// ReachedProviderLimit indicates that the provider returned a bounded,
-	// usable prefix but stopped at its output limit. Payload must be preserved
-	// so the Runtime owner can continue the same logical document.
+	// ReachedProviderLimit records an explicit provider max-output stop. Payload
+	// is retained only long enough for bounded framing audit and is never
+	// published as partial document content. The Runtime owner may reissue the
+	// same sealed expected document as a new physical call.
 	ReachedProviderLimit bool `json:"reachedProviderLimit,omitempty"`
 	// PrerequisiteStale is present only when the LLM owner has confirmed that
 	// a persisted prerequisite observation no longer represents the sealed

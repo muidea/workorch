@@ -4,7 +4,7 @@ Status: normative
 
 Type: core-contract-part
 
-Last Verified: 2026-08-25
+Last Verified: 2026-08-26
 
 ## 仅允许 all-of terminal 语义
 
@@ -54,18 +54,28 @@ DefinitionAdmissionCandidate
   CandidateHash
 ```
 
-- candidate 由 Workspace owner command normalize、hash 和 CAS 持久化；Workorchd、setupdraft、HTTP/Web/TUI 或 LLM
-  不得在 owner 外维护第二份可提升状态；
-- candidate submit 使用 Workspace owner-defined concrete typed
-  `SubmitDefinitionAdmissionCandidateCommand/Result`；result 必须返回 exact normalized candidate identity/hash 与
-  owner 编译并绑定该 candidate 的完整 `DefinitionAdmissionResult`，以及 `created|duplicate` disposition。
-  `DefinitionAdmissionResult` 只能由 Workspace owner 的 pure static compiler 在 submit owner-private event 中产生；
-  Application 不得提交、覆盖或选择 disposition。CandidateItemRef 只在该 candidate scope 内引用 proposed relation，
-  不能充当正式 ItemRef；
+- Definition admission 只提供 Workspace owner-defined concrete typed
+  `DefinitionAdmissionIntentCommand/Result`。command 携带 immutable candidate、`ExpectedCandidateRevision`，且至多附带一个
+  Decision owner 已返回的 immutable `WorkspaceDefinitionClarificationTicketFact` 或
+  `WorkspaceDefinitionClarificationResolutionFact`；它不携带 target state、promotion/ack 意图或 caller 编译的
+  admission outcome；
+- public intent 只能映射为 Workspace-private event。Workspace private reducer 在 owner-local CAS 路径中完成
+  candidate normalize/hash 校验与持久化、运行 pure static compiler，并独自选择 persistence、promotion、
+  `pending_clarification_resolution` 或 `eligible`。Workorchd、setupdraft、HTTP/Web/TUI 或 LLM 不得在
+  owner 外维护第二份可提升状态；
+- result 必须返回 exact normalized candidate、绑定该 candidate 的完整 `DefinitionAdmissionResult`、
+  `created|duplicate` candidate disposition，以及
+  `clarification_required | clarification_ticket_required | clarification_resolution_required | eligible` factual disposition。
+  只有 owner reducer 已完成 promotion 时 result 才可返回成对的 `WorkspaceStartupInputContract` 与
+  `WorkspaceActivationAdmission`；Application 不得提交、覆盖或选择这些 disposition。CandidateItemRef 只在
+  该 candidate scope 内引用 proposed relation，不能充当正式 ItemRef；
 - `CandidateID` 标识一次连续 authoring/admission lineage，`CandidateRevision` 标识该 lineage 下的一次不可变尝试；对同一
   expected revision 提交 exact normalized duplicate 必须返回原 `CandidateID + CandidateRevision + CandidateHash` 以及确定性相同的
   owner admission result，不得新增记录。
   任何 materially changed input 必须以同一 lineage 的下一 revision CAS 提交，stale expected revision 拒绝且不得覆盖旧尝试；
+- 一个 Workspace 的 admission history 只能存在一个 `CandidateID`；revision 必须从 1 开始严格连续为 `1..n`。不得以新的
+  `CandidateID@revision=1` 重置 lineage，也不得插入 revision gap、跳过 expected-revision CAS 或以不同 base startup input
+  续写既有 lineage；这些输入一律 fail-closed 且零 candidate/promotion 写入；
 - `ProposedRelationInputs` 是唯一允许暂存 unsupported aggregation token 的 typed admission surface。它可以保留
   `one_of/any_of/...` 以产生精确 violation，但这些值不得进入 `WorkspaceDefinitionItem`、canonical relation、
   Template/Profile canonical contract、RuntimeBootstrap、provider-facing execution schema 或 startup-input contract；
@@ -112,20 +122,26 @@ DefinitionAdmissionCandidate
   和 resolved directory 均进入 admission/ticket
   stale 与 duplicate 校验；
 - Workspace owner 的 pure compiler 只能返回绑定 exact `CandidateID + CandidateRevision + CandidateHash` 的 typed outcome。
-  Workorchd 只消费 submit result：非 `admitted_all_of` 必须按 owner result 打开/协调 typed clarification ticket；只有
-  `admitted_all_of` 才可提交 identity-only `PromoteDefinitionAdmissionCandidateCommand`；
-- promotion owner-private event 必须从 Workspace repository 精确定位 current immutable candidate，并重新运行同一 pure compiler。
-  只有重编译结果仍为 `admitted_all_of` 才能原子生成正式 semantic `DefinitionRevision` 与
-  `WorkspaceStartupInputContract`。Application 不能把 `AdmissionResult`、result hash 或 canonical admitted hash 作为 promotion
-  authority 传入。duplicate promotion 返回同一正式 identity；stale/mismatched candidate 或 owner 重编译拒绝均不得产生部分
-  Goal/DoD、relation 或 startup-input 写入；
-- `PromoteDefinitionAdmissionCandidateCommand/Result` 必须是 Workspace owner `pkg/events` 的 concrete typed contract。command
-  只携带 candidate identity/hash 与可选 blocking ticket identity；result 返回正式
-  `DefinitionRevision + StartupInputHash + CandidateItemToItemRefMappingHash`。Workspace owner 持久化完整 mapping，Workorchd 只能
-  使用该 owner result 编译 Runtime mapping，不能自行把 CandidateItemRef 提升为 ItemRef。
-
-Workorchd 可以调用同一 Workspace-owned pure compiler 做 read-side current-shape 防御校验或生成 ticket payload，但该调用
-不产生 admission state、不能替代 submit result，也不能触发 promotion；所有正式迁移仍只来自 Workspace owner-private event。
+  Workspace private reducer 必须从 repository 精确定位 current immutable candidate，并以同一 compiler 的结果作为
+  admission 事实；Application 不能把 `AdmissionResult`、result hash 或 canonical admitted hash 作为 transition
+  authority 传入；
+- reducer 对非 `admitted_all_of` 只持久化 candidate，并返回 `clarification_required`。对无既往 blocking
+  clarification 的 `admitted_all_of` candidate，reducer 在同一 CAS 中自动 promotion 并返回 `eligible`。
+  对修正既往 invalid candidate 的 `admitted_all_of` revision，未观察到 Decision ticket fact 时返回
+  `clarification_ticket_required`；精确匹配 ticket fact 后才原子 promotion 并封存
+  `pending_clarification_resolution`；精确匹配 resolution fact 后才由同一 reducer CAS 为 `eligible`；
+- promotion 与 clarification acknowledgement 都不提供独立 public target-state command。重编译结果仍为
+  `admitted_all_of` 时，Workspace private reducer 才能原子生成正式 semantic `DefinitionRevision`、
+  `WorkspaceStartupInputContract`、完整 candidate-item mapping 与 activation admission。duplicate intent 返回同一正式
+  identity；stale/mismatched candidate、ticket fact、resolution fact 或 owner 重编译拒绝均不得产生部分 Goal/DoD、
+  relation、startup-input 或 eligibility 写入；
+- Workorchd 只做跨 owner 用例组合：编译 immutable candidate、发送 single intent、根据 Workspace owner factual result
+  打开/协调 Decision ticket 或 resolution，将 Decision owner result 映射为 immutable ticket/resolution fact 后重新发送
+  同一 intent，最后读取 owner snapshot。它不能选择 persistence、promotion、pending 或 eligible transition，也不能
+  自行把 CandidateItemRef 提升为 ItemRef。Workorchd 对 pure helper 的 read-side 调用只是防御校验或 ticket
+  payload 编译，不产生 admission state；所有正式迁移仍只来自 Workspace owner-private event。ticket/resolution fact 必须携带
+  exact Decision command/result pair；Workorchd 在映射前调用 result 的 `ValidateFor(exact command)`，Workspace owner 在 reducer
+  内再次调用同一校验并重算 ticket/resolution identity 与 candidate/startup binding，任一不一致均拒绝；
 
 Workspace owner 还必须为每次 promotion 持久化不进入 `StartupInputHash` 的 activation admission fact：
 

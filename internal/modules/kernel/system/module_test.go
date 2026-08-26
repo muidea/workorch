@@ -65,12 +65,14 @@ func TestSystemModuleStartEnsuresBuiltinDefaultsThroughEventHubConsumers(t *test
 		t.Fatalf("configure soul owner: %v", err)
 	}
 	workspaceOwner := workspacemodule.New()
+	workspaces := memoryrepo.NewWorkspaceRepository()
 	if err := workspaceOwner.Configure(workspacebiz.Dependencies{
-		Workspaces: memoryrepo.NewWorkspaceRepository(),
-		Goals:      memoryrepo.NewGoalRepository(),
-		DoDs:       memoryrepo.NewDoDRepository(),
-		Templates:  templates,
-		EventHub:   hub,
+		Workspaces:              workspaces,
+		DeletionMaterialCleaner: workspaces,
+		Goals:                   memoryrepo.NewGoalRepository(),
+		DoDs:                    memoryrepo.NewDoDRepository(),
+		Templates:               templates,
+		EventHub:                hub,
 	}); err != nil {
 		t.Fatalf("configure workspace owner: %v", err)
 	}
@@ -124,12 +126,14 @@ func TestSystemModuleStartConvergesAfterPartialFailureWithoutOverwritingUserChan
 		t.Fatalf("configure soul owner: %v", err)
 	}
 	workspaceOwner := workspacemodule.New()
+	workspaces := memoryrepo.NewWorkspaceRepository()
 	if err := workspaceOwner.Configure(workspacebiz.Dependencies{
-		Workspaces: memoryrepo.NewWorkspaceRepository(),
-		Goals:      memoryrepo.NewGoalRepository(),
-		DoDs:       memoryrepo.NewDoDRepository(),
-		Templates:  templates,
-		EventHub:   hub,
+		Workspaces:              workspaces,
+		DeletionMaterialCleaner: workspaces,
+		Goals:                   memoryrepo.NewGoalRepository(),
+		DoDs:                    memoryrepo.NewDoDRepository(),
+		Templates:               templates,
+		EventHub:                hub,
 	}); err != nil {
 		t.Fatalf("configure workspace owner: %v", err)
 	}

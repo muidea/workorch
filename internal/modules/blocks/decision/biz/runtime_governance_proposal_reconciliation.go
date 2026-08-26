@@ -100,51 +100,72 @@ func (m *Biz) reconcileRuntimeGovernanceProposals(ctx context.Context) error {
 		if ticket == nil {
 			continue
 		}
-		ticketCtx, err := common.BindRuntimeWorkspaceContext(ctx, ticket.WorkspaceID)
-		if err != nil {
+		if err := m.reconcileDecisionTicket(ctx, ticket); err != nil {
 			reconcileErrs = append(reconcileErrs, err)
-			continue
-		}
-		if ticket.DeletionRequestedAt != "" {
-			if err := m.service.PurgeDecisionAggregate(ticketCtx, ticket); err != nil {
-				reconcileErrs = append(reconcileErrs, fmt.Errorf("purge decision %s: %w", ticket.ID, err))
-			}
-			continue
-		}
-		if ticket.DecisionKind != "runtime_governance" {
-			if err := m.reconcileOrdinaryDecisionDelivery(ticketCtx, ticket); err != nil {
-				reconcileErrs = append(reconcileErrs, fmt.Errorf("reconcile decision delivery %s: %w", ticket.ID, err))
-			}
-			continue
-		}
-		if ticket.CreatedNotificationPublishedAt == "" {
-			if err := m.ensureTicketCreatedNotification(ticketCtx, ticket); err != nil {
-				reconcileErrs = append(reconcileErrs, fmt.Errorf("deliver runtime governance creation %s: %w", ticket.ID, err))
-				continue
-			}
-		}
-		if ticket.RuntimeGovernanceProposal == nil {
-			continue
-		}
-		proposal := ticket.RuntimeGovernanceProposal
-		switch {
-		case ticket.State == common.DecisionTicketStateOpen && proposal.State == decisionmodel.RuntimeGovernanceResolutionProposalPending:
-			if err := m.reconcileRuntimeGovernanceProposal(ticketCtx, ticket); err != nil {
-				reconcileErrs = append(reconcileErrs, fmt.Errorf("reconcile runtime governance proposal %s: %w", ticket.ID, err))
-			}
-		case ticket.State == common.DecisionTicketStateResolved && proposal.State == decisionmodel.RuntimeGovernanceResolutionProposalCommitted &&
-			(proposal.EvidenceRecordedAt == "" || proposal.ResolutionNotificationPublishedAt == ""):
-			resolution, err := m.resolutions.GetByTicketID(ticketCtx, ticket.ID)
-			if err != nil {
-				reconcileErrs = append(reconcileErrs, fmt.Errorf("load runtime governance resolution %s: %w", ticket.ID, err))
-				continue
-			}
-			if err := m.recordAndPublishResolvedTicket(ticketCtx, ticket, resolution, false); err != nil {
-				reconcileErrs = append(reconcileErrs, fmt.Errorf("deliver runtime governance resolution %s: %w", ticket.ID, err))
-			}
 		}
 	}
 	return errors.Join(reconcileErrs...)
+}
+
+func (m *Biz) reconcileDecisionTicket(ctx context.Context, observed *decisionmodel.Ticket) error {
+	if m == nil || observed == nil || observed.WorkspaceID == "" || observed.ID == "" {
+		return common.ErrInvalidArgument
+	}
+	unlock := m.lockWorkspaceMutation(observed.WorkspaceID)
+	defer unlock()
+
+	ticketCtx, err := common.BindRuntimeWorkspaceContext(ctx, observed.WorkspaceID)
+	if err != nil {
+		return err
+	}
+	if err := m.rejectFencedWorkspace(ticketCtx, observed.WorkspaceID); err != nil {
+		if errors.Is(err, common.ErrNotFound) {
+			return nil
+		}
+		return err
+	}
+	ticket, err := m.tickets.Get(ticketCtx, observed.ID)
+	if errors.Is(err, common.ErrNotFound) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	if ticket.WorkspaceID != observed.WorkspaceID {
+		return common.ErrConflict
+	}
+
+	if ticket.DecisionKind != "runtime_governance" {
+		if err := m.reconcileOrdinaryDecisionDelivery(ticketCtx, ticket); err != nil {
+			return fmt.Errorf("reconcile decision delivery %s: %w", ticket.ID, err)
+		}
+		return nil
+	}
+	if ticket.CreatedNotificationPublishedAt == "" {
+		if err := m.ensureTicketCreatedNotification(ticketCtx, ticket); err != nil {
+			return fmt.Errorf("deliver runtime governance creation %s: %w", ticket.ID, err)
+		}
+	}
+	if ticket.RuntimeGovernanceProposal == nil {
+		return nil
+	}
+	proposal := ticket.RuntimeGovernanceProposal
+	switch {
+	case ticket.State == common.DecisionTicketStateOpen && proposal.State == decisionmodel.RuntimeGovernanceResolutionProposalPending:
+		if err := m.reconcileRuntimeGovernanceProposal(ticketCtx, ticket); err != nil {
+			return fmt.Errorf("reconcile runtime governance proposal %s: %w", ticket.ID, err)
+		}
+	case ticket.State == common.DecisionTicketStateResolved && proposal.State == decisionmodel.RuntimeGovernanceResolutionProposalCommitted &&
+		(proposal.EvidenceRecordedAt == "" || proposal.ResolutionNotificationPublishedAt == ""):
+		resolution, err := m.resolutions.GetByTicketID(ticketCtx, ticket.ID)
+		if err != nil {
+			return fmt.Errorf("load runtime governance resolution %s: %w", ticket.ID, err)
+		}
+		if err := m.recordAndPublishResolvedTicket(ticketCtx, ticket, resolution, false); err != nil {
+			return fmt.Errorf("deliver runtime governance resolution %s: %w", ticket.ID, err)
+		}
+	}
+	return nil
 }
 
 func (m *Biz) reconcileOrdinaryDecisionDelivery(ctx context.Context, ticket *decisionmodel.Ticket) error {

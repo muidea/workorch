@@ -10,6 +10,7 @@ import (
 	eventstreamevents "github.com/muidea/workorch/internal/modules/blocks/eventstream/pkg/events"
 	"github.com/muidea/workorch/internal/modules/blocks/eventstream/pkg/recordpayload"
 	runevents "github.com/muidea/workorch/internal/modules/blocks/run/pkg/events"
+	workspaceevents "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/events"
 	orchestratorevents "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/events"
 )
 
@@ -107,6 +108,37 @@ func (s *serverState) RecordEventRecordAppended(_ context.Context, data eventstr
 	}
 	if envelope, valid := eventRecordStreamEvent(data); valid {
 		s.recordStreamEvent(envelope)
+	}
+}
+
+func (s *serverState) RecordWorkspaceDeleted(_ context.Context, data workspaceevents.WorkspaceDeletedData) {
+	if s == nil || data.Validate() != nil {
+		return
+	}
+	s.recordStreamEvent(workspaceDeletedStreamEvent(data))
+}
+
+func workspaceDeletedStreamEvent(data workspaceevents.WorkspaceDeletedData) streamEvent {
+	completedAt := data.CompletedAt.UTC().Format("2006-01-02T15:04:05.999999999Z07:00")
+	return streamEvent{
+		ID:           data.DeletionID,
+		Version:      recordpayload.WorkorchEventVersion,
+		Topic:        workspaceevents.TopicWorkspaceDeleted,
+		OccurredAt:   completedAt,
+		SourceModule: "blocks/workspace",
+		SubjectType:  "workspace_deletion",
+		SubjectID:    data.DeletionID,
+		WorkspaceID:  string(data.WorkspaceID),
+		Revision:     int64(data.WorkspaceRevision),
+		Payload: map[string]any{
+			"deletionId":        data.DeletionID,
+			"requestId":         data.RequestID,
+			"mode":              string(data.Mode),
+			"disposition":       string(data.Disposition),
+			"deletionRevision":  data.DeletionRevision,
+			"workspaceRevision": data.WorkspaceRevision,
+			"completedAt":       completedAt,
+		},
 	}
 }
 

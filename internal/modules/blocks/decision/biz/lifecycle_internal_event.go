@@ -29,6 +29,10 @@ type lifecycleInternalEvent struct {
 type definitionClarificationResolutionFact struct {
 	ResolutionID                common.ResolutionID
 	ResolutionBindingHash       string
+	ResolutionCandidateID       string
+	ResolutionCandidateRevision uint64
+	ResolutionCandidateHash     string
+	AdmissionResultHash         string
 	DefinitionRevision          string
 	StartupInputHash            string
 	ReplacementIntentID         string
@@ -50,7 +54,6 @@ const (
 	lifecycleInternalEventResolutionNotificationPublished lifecycleInternalEventKind = "resolution_notification_published"
 	lifecycleInternalEventProposalEvidenceRecorded        lifecycleInternalEventKind = "proposal_evidence_recorded"
 	lifecycleInternalEventProposalNotificationPublished   lifecycleInternalEventKind = "proposal_notification_published"
-	lifecycleInternalEventAggregateDeletionRequested      lifecycleInternalEventKind = "aggregate_deletion_requested"
 )
 
 func (s *mutationService) applyLifecycleInternalEvent(ctx context.Context, current *decisionModel.Ticket, event lifecycleInternalEvent) (*decisionModel.Ticket, error) {
@@ -96,7 +99,7 @@ func reduceDecisionLifecycle(current *decisionModel.Ticket, event lifecycleInter
 			return nil, common.ErrInvalidArgument
 		}
 		seed := event.Ticket
-		if seed.State != "" || seed.RuntimeGovernanceProposal != nil || seed.ResolvedAt != "" || seed.ResolvedBy != "" || seed.CreatedAt != "" || seed.UpdatedAt != "" || seed.CreatedNotificationPublishedAt != "" || seed.ResolutionNotificationPublishedAt != "" || seed.DeletionRequestedAt != "" || event.Proposal != nil || event.Clarification != nil {
+		if seed.State != "" || seed.RuntimeGovernanceProposal != nil || seed.ResolvedAt != "" || seed.ResolvedBy != "" || seed.CreatedAt != "" || seed.UpdatedAt != "" || seed.CreatedNotificationPublishedAt != "" || seed.ResolutionNotificationPublishedAt != "" || event.Proposal != nil || event.Clarification != nil {
 			return nil, common.ErrInvalidArgument
 		}
 		if seed.DefinitionClarification != nil && definitionClarificationBindingHasResolution(seed.DefinitionClarification) {
@@ -193,11 +196,6 @@ func reduceDecisionLifecycle(current *decisionModel.Ticket, event lifecycleInter
 		}
 		next.RuntimeGovernanceProposal.ResolutionNotificationPublishedAt = now
 		next.RuntimeGovernanceProposal.UpdatedAt = now
-	case lifecycleInternalEventAggregateDeletionRequested:
-		if current.DeletionRequestedAt != "" {
-			return nil, common.ErrConflict
-		}
-		next.DeletionRequestedAt = now
 	default:
 		return nil, common.ErrInvalidArgument
 	}
@@ -207,6 +205,8 @@ func reduceDecisionLifecycle(current *decisionModel.Ticket, event lifecycleInter
 
 func definitionClarificationBindingHasResolution(binding *decisionModel.DefinitionClarificationBinding) bool {
 	return binding != nil && (binding.ResolutionID != "" || strings.TrimSpace(binding.ResolutionBindingHash) != "" ||
+		strings.TrimSpace(binding.ResolutionCandidateID) != "" || binding.ResolutionCandidateRevision != 0 ||
+		strings.TrimSpace(binding.ResolutionCandidateHash) != "" || strings.TrimSpace(binding.AdmissionResultHash) != "" ||
 		strings.TrimSpace(binding.ReplacementIntentID) != "" || strings.TrimSpace(binding.ReplacementIntentHash) != "" ||
 		strings.TrimSpace(binding.SuccessorDefinitionRevision) != "" || strings.TrimSpace(binding.SuccessorStartupInputHash) != "")
 }
@@ -224,6 +224,21 @@ func reduceDefinitionClarificationResolution(current *decisionModel.DefinitionCl
 			((fact.DefinitionRevision == "") != (fact.StartupInputHash == "")) {
 			return nil, common.ErrInvalidArgument
 		}
+		resolutionIdentityPresent := strings.TrimSpace(fact.ResolutionCandidateID) != "" || fact.ResolutionCandidateRevision != 0 ||
+			strings.TrimSpace(fact.ResolutionCandidateHash) != "" || strings.TrimSpace(fact.AdmissionResultHash) != ""
+		if resolutionIdentityPresent {
+			if strings.TrimSpace(fact.ResolutionCandidateID) == "" || fact.ResolutionCandidateID != current.CandidateID ||
+				fact.ResolutionCandidateRevision <= current.CandidateRevision || strings.TrimSpace(fact.ResolutionCandidateHash) == "" ||
+				strings.TrimSpace(fact.AdmissionResultHash) == "" || strings.TrimSpace(fact.DefinitionRevision) == "" || strings.TrimSpace(fact.StartupInputHash) == "" {
+				return nil, common.ErrInvalidArgument
+			}
+		} else if fact.DefinitionRevision != "" || fact.StartupInputHash != "" {
+			return nil, common.ErrInvalidArgument
+		}
+		next.ResolutionCandidateID = strings.TrimSpace(fact.ResolutionCandidateID)
+		next.ResolutionCandidateRevision = fact.ResolutionCandidateRevision
+		next.ResolutionCandidateHash = strings.TrimSpace(fact.ResolutionCandidateHash)
+		next.AdmissionResultHash = strings.TrimSpace(fact.AdmissionResultHash)
 		next.DefinitionRevision = strings.TrimSpace(fact.DefinitionRevision)
 		next.StartupInputHash = strings.TrimSpace(fact.StartupInputHash)
 	case decisionModel.DefinitionClarificationRuntime:

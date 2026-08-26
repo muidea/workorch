@@ -164,6 +164,14 @@ func runtimeBoundDefinitionClarificationAggregate(t *testing.T) runtime.RuntimeA
 	if err != nil {
 		t.Fatalf("bind Definition clarification request: %v", err)
 	}
+	// This helper returns one pre-existing owner snapshot, not the sequence of
+	// private reducer commits used to build it. Seed that snapshot through the
+	// Run owner's initial opaque CAS at revision 1; all behavior under test then
+	// advances it through ordinary typed internal events.
+	bound.Aggregate.StateRevision = 1
+	if err := bound.Aggregate.Validate(); err != nil {
+		t.Fatalf("normalize Definition clarification fixture revision: %v", err)
+	}
 	return bound.Aggregate
 }
 
@@ -2045,6 +2053,9 @@ func TestRuntimeStartupRecoveryDeliversPersistedGovernanceContinuationToBlockedR
 		t.Fatalf("governance CAS cut Run=%+v err=%v", cutRun, err)
 	}
 	cutRuns := memory.NewRunRepository()
+	// This fixture copies the logical Run into a distinct persistence owner;
+	// the destination repository must allocate its own workspace generation.
+	cutRun.WorkspaceRunGeneration = 0
 	if err := cutRuns.Create(ctx, cutRun); err != nil {
 		t.Fatal(err)
 	}

@@ -36,6 +36,7 @@ import (
 	"github.com/muidea/workorch/internal/pkg/llmaudit"
 	"github.com/muidea/workorch/internal/pkg/repository"
 	"github.com/muidea/workorch/internal/pkg/repository/memory"
+	deletioncontract "github.com/muidea/workorch/internal/pkg/workorchdeletioncontract"
 	"github.com/muidea/workorch/internal/pkg/workorchmanagementcontract"
 	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
 	"github.com/muidea/workorch/internal/pkg/workorchquerycontract"
@@ -211,6 +212,10 @@ func (r *blockingRunListRepository) Create(ctx context.Context, item *runmodel.R
 	return r.base.Create(ctx, item)
 }
 
+func (r *blockingRunListRepository) CreateNextWorkspaceRun(ctx context.Context, item *runmodel.Run) error {
+	return r.base.CreateNextWorkspaceRun(ctx, item)
+}
+
 func (r *blockingRunListRepository) Get(ctx context.Context, id common.RunID) (*runmodel.Run, error) {
 	return r.base.Get(ctx, id)
 }
@@ -244,8 +249,28 @@ func (r *blockingRunListRepository) CompareAndSwap(ctx context.Context, item *ru
 	return r.base.CompareAndSwap(ctx, item, expectedRevision)
 }
 
+func (r *blockingRunListRepository) CompareAndSwapRuntimeState(ctx context.Context, item *runmodel.Run, expectedRevision, expectedRuntimeRevision uint64) error {
+	return r.base.CompareAndSwapRuntimeState(ctx, item, expectedRevision, expectedRuntimeRevision)
+}
+
 func (r *blockingRunListRepository) Delete(ctx context.Context, id common.RunID) error {
 	return r.base.Delete(ctx, id)
+}
+
+func (r *blockingRunListRepository) PrepareWorkspaceRetirement(ctx context.Context, intent runmodel.WorkspaceRetirementIntent) (*runmodel.WorkspaceRetirementFence, error) {
+	return r.base.PrepareWorkspaceRetirement(ctx, intent)
+}
+
+func (r *blockingRunListRepository) FinalizeWorkspaceRetirement(ctx context.Context, token deletioncontract.WorkspaceRuntimeQuiescenceToken) (*runmodel.WorkspaceRetirementFence, error) {
+	return r.base.FinalizeWorkspaceRetirement(ctx, token)
+}
+
+func (r *blockingRunListRepository) GetWorkspaceRetirement(ctx context.Context, workspaceID common.WorkspaceID) (*runmodel.WorkspaceRetirementFence, error) {
+	return r.base.GetWorkspaceRetirement(ctx, workspaceID)
+}
+
+func (r *blockingRunListRepository) ListWorkspaceRetirements(ctx context.Context) ([]runmodel.WorkspaceRetirementFence, error) {
+	return r.base.ListWorkspaceRetirements(ctx)
 }
 
 var _ repository.RunRepository = (*blockingRunListRepository)(nil)
@@ -3580,6 +3605,18 @@ func TestReadWorkspaceSnapshotWithBackendReturnsRelatedRunsAndBlockingItems(t *t
 		ResolutionType: decisioncommon.ResolutionTypeProvideMissingInfo,
 	}); err != nil {
 		t.Fatalf("ResolveDecisionWithBackend: %v", err)
+	}
+	// This snapshot fixture exercises historical read models, not concurrent
+	// lifecycle ownership. Retire the decision Run before seeding the approval
+	// Run so it respects Run persistence's one-current-Run-per-Workspace fence.
+	retiredDecisionRun, err := exports.Repositories.Runs.GetByWorkspaceID(ctx, common.WorkspaceID(workspaceID), common.RunID(decisionRunID))
+	if err != nil {
+		t.Fatalf("get decision Run for retirement: %v", err)
+	}
+	retiredDecisionRun.State = common.RunStateCompleted
+	retiredDecisionRun.BlockingTicketID = ""
+	if err := exports.Repositories.Runs.Update(ctx, retiredDecisionRun); err != nil {
+		t.Fatalf("retire decision Run fixture: %v", err)
 	}
 	workspaceAfterDecision, err := exports.Repositories.Workspaces.Get(ctx, common.WorkspaceID(workspaceID))
 	if err != nil {

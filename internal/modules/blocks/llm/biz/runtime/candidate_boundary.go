@@ -35,10 +35,23 @@ func RequestCandidate(ctx context.Context, provider CandidateProvider, request l
 		ctx = context.Background()
 	}
 	generation, err := provider.GenerateCandidate(ctx, request)
-	if err != nil {
-		if generation.ReachedProviderLimit {
-			return providerDocumentResponse(request, generation), nil
+	if generation.ReachedProviderLimit {
+		if invariantErr := validateProviderOutputLimitGeneration(generation); invariantErr != nil {
+			// A contradictory provider result must not be normalized into a
+			// successful owner fact. Drop its audit at this boundary so the
+			// EventHub handler cannot publish one physical call as both failed
+			// and completed/incomplete.
+			return llmmodels.RuntimeCandidateResponse{}, candidateRequestError(
+				CandidateFailureClassInternal,
+				fmt.Errorf("invalid provider output-limit result: %w", invariantErr),
+				nil,
+				generation.RequestID,
+				llmmodels.RuntimeCandidateStatusFailed,
+			)
 		}
+		return providerDocumentResponse(request, generation), nil
+	}
+	if err != nil {
 		if stale := generation.PrerequisiteStale; stale != nil {
 			staleCopy := stale.Normalized()
 			if validateErr := staleCopy.Validate(); validateErr != nil {
@@ -66,9 +79,24 @@ func RequestCandidate(ctx context.Context, provider CandidateProvider, request l
 	return providerDocumentResponse(request, generation), nil
 }
 
+func validateProviderOutputLimitGeneration(generation llmmodels.RuntimeCandidateGenerationResult) error {
+	if !generation.ReachedProviderLimit || generation.Audit == nil {
+		return fmt.Errorf("completed output-limit audit is required")
+	}
+	if strings.TrimSpace(generation.Status) != llmmodels.RuntimeCandidateStatusCompleted ||
+		strings.TrimSpace(generation.FailureClass) != "" || strings.TrimSpace(generation.FailureReason) != "" {
+		return fmt.Errorf("output-limit generation must be completed without failure fields")
+	}
+	if !generation.Audit.ProviderSubmitted ||
+		strings.TrimSpace(generation.Audit.Status) != llmmodels.RuntimeCandidateStatusCompleted ||
+		strings.TrimSpace(generation.Audit.FailureClass) != "" {
+		return fmt.Errorf("output-limit audit must be submitted and completed without failure class")
+	}
+	return nil
+}
+
 func providerDocumentResponse(request llmmodels.RuntimeCandidateRequest, generation llmmodels.RuntimeCandidateGenerationResult) llmmodels.RuntimeCandidateResponse {
 	payload := append([]byte(nil), generation.Payload...)
-	disposition := inspectProviderCandidateDocumentFraming(payload)
 	outcome := llmmodels.RuntimeCandidateDocumentObservation{Framing: runtimecontract.RuntimeProviderDocumentFraming{
 		ExpectedDocumentHash: request.ExpectedDocument.Normalized().Hash,
 		ResponseHash:         runtimecontract.StableRuntimeProviderResponseHash(payload),
@@ -79,6 +107,21 @@ func providerDocumentResponse(request llmmodels.RuntimeCandidateRequest, generat
 		Transaction: request.Transaction, DocumentKind: request.DocumentKind, RequestIdentity: request.RequestIdentity,
 		Audit: generation.Audit, Usage: generation.Usage,
 	}
+	// An explicit provider stop reason is a stronger factual signal than the
+	// shape of the final-output payload. In particular, Responses providers can
+	// consume their output budget entirely in reasoning and return no
+	// output_text. Preserve the bounded framing measurements, discard every
+	// partial fragment, and let the Runtime owner decide whole-document
+	// recovery from the typed incomplete outcome.
+	if generation.ReachedProviderLimit {
+		outcome.Framing.Disposition = runtimecontract.RuntimeProviderDocumentIncomplete
+		outcome.Framing.Code = "max_output_tokens"
+		outcome.Framing.Signature = "provider-output-limit"
+		response.DocumentOutcome = &outcome
+		return response
+	}
+
+	disposition := inspectProviderCandidateDocumentFraming(payload)
 	switch disposition {
 	case runtimecontract.RuntimeCandidateDocumentComplete:
 		outcome.Framing.Disposition = runtimecontract.RuntimeProviderDocumentComplete
@@ -87,7 +130,7 @@ func providerDocumentResponse(request llmmodels.RuntimeCandidateRequest, generat
 		outcome.Framing.Disposition = runtimecontract.RuntimeProviderDocumentIncomplete
 		outcome.Framing.Code = "incomplete_json_document"
 		outcome.Framing.Signature = "provider-document-incomplete"
-		if generation.ReachedProviderLimit || candidatePayloadReachedOutputLimit(generation, io.ErrUnexpectedEOF) {
+		if candidatePayloadReachedOutputLimit(generation, io.ErrUnexpectedEOF) {
 			outcome.Framing.Code = "max_output_tokens"
 			outcome.Framing.Signature = "provider-output-limit"
 		}

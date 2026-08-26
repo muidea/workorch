@@ -4,7 +4,7 @@ Status: normative
 
 Type: product-interface
 
-Last Verified: 2026-08-24
+Last Verified: 2026-08-26
 
 ## Purpose And Authority
 
@@ -78,7 +78,7 @@ LLM configuration save does not mutate the running LLM owner snapshot or any sea
 | Method | Path | Command semantics |
 | --- | --- | --- |
 | `POST` | `/workspaces` | create owner-identified Workspace |
-| `DELETE` | `/workspaces/:workspaceId` | delete; optional typed purge request |
+| `DELETE` | `/workspaces/:workspaceId` | submit one Workspace-owner delete intent; optional typed purge mode |
 | `PUT` / `DELETE` | `/workspaces/:workspaceId/llm-selection` | owner-CAS update/clear selection |
 | `PUT` | `/workspaces/:workspaceId/soul-bindings` | update owner-managed Soul routing |
 | `POST` | `/workspaces/:workspaceId/goals` | submit Goal authoring change through admission candidate |
@@ -91,6 +91,12 @@ LLM configuration save does not mutate the running LLM owner snapshot or any sea
 Workspace creation accepts title、optional description、optional directory and template ID；owner generates identity。
 Blank directory resolves to `.workorch-workspaces/<workspace-id>` before candidate promotion。普通 setup 不要求 raw
 context/evidence/target/recipe/check/metric/artifact JSON。
+
+Workspace delete 默认为 retain：完成后隐藏 Workspace 及各 owner 的 workspace-scoped 资源，保留物理
+记录与永久 fence。显式 purge 仅请求每个 owner 幂等清理自身数据。Application 不执行
+跨 owner saga；它只向 Workspace 发送一个带 stable `requestId`/optional expected revision 的 command。初始
+`activeRunId` 非空时零 intent 写入并返回 `409`；已接纳流程在部分失败、响应丢失或重启后由
+Workspace owner 从 durable deletion aggregate 幂等重驱，exact retry 不创建第二个删除链。
 
 Goal/DoD mutation先提交 immutable `DefinitionAdmissionCandidate` 并执行 pure admission。只有 `admitted_all_of`
 可以 promotion；`definition_one_of_unsupported` 或 declared ambiguity 返回 typed `BlockingTicketID`。Corrected

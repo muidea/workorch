@@ -4,7 +4,7 @@ Status: normative
 
 Type: module-architecture
 
-Last Verified: 2026-08-25
+Last Verified: 2026-08-26
 
 ## Purpose
 
@@ -42,15 +42,16 @@ module.go
 - resource owner 的 repository-facing mutation implementation、constructor 与非 EventHub use-case input 均留在 `biz/`
   私有范围；sibling production 与跨 owner 测试不得调用 `Service/NewService` 或导入 `biz/contracts`，只能经 owner `pkg/events` concrete
   command/result 交互，或构造 immutable fact fixture 验证 consumer。
-- Eventstream 也不例外：workspace purge 的 repository helper 为 owner-private，唯一入口是其 concrete synchronous
-  `PurgeWorkspaceCommand`；module bridge 只持有标准 `biz.Biz` 生命周期对象。
+- Eventstream 也不例外：workspace deletion 的 repository helper 为 owner-private，只接受
+  `blocks/workspace` 发送的 concrete synchronous seal/purge command；module bridge 只持有标准
+  `biz.Biz` 生命周期对象。
 
 ## Resource Owner Responsibilities
 
 | Owner | Sole authority | Accepted cross-owner contribution |
 | --- | --- | --- |
-| Workspace | admission candidate、formal Definition/startup input、activation eligibility、active Run slot | application submits typed candidate/admission outcome/intent; terminal delivery fact |
-| Run | SM-1 lifecycle、opaque Runtime record CAS、same-owner replacement transaction/lineage | Workspace activation/continuation intent; Orchestrator wait fact or exact SM-4 terminal handoff，均先转成Run-private event |
+| Workspace | admission candidate、formal Definition/startup input、activation eligibility、active Run slot、Workspace deletion coordinator aggregate | application submits typed candidate/admission/delete intent; terminal delivery and owner deletion ack facts |
+| Run | SM-1 lifecycle、opaque Runtime record CAS、same-owner replacement transaction/lineage、durable two-phase Workspace retirement fence | Workspace activation/continuation/deletion intent与 exact quiescence token；Orchestrator wait fact或 exact SM-4 terminal handoff，均先转成 Run-private event |
 | Result | already-judged formal terminal outcome/artifact index | sealed Orchestrator terminal delivery |
 | Decision | decision and Definition-clarification ticket lifecycle | concrete open/resolve request bound to persisted authority |
 | Approval | approval lifecycle | concrete approval request/resolution |
@@ -60,10 +61,27 @@ module.go
 | Eventstream | immutable bounded audit events | typed notification; never replay authority |
 
 Resource owner只修改自己的 repository/aggregate。它可以验证 caller 提交的 intent/fact，但不能读取 sibling owner
-repository 来补全跨 owner transaction。Application Module 负责有序编排多个 concrete Send；每一步仍由接收 owner
-独立校验并持久化。Decision/Approval 的 lifecycle transition 只能由各自 EventHub handler 归约为 owner-private event 后
-触发；它们参与 Runtime SM-2 governance 与 SM-4 delivery，但不向 Orchestrator 暴露第二条 mutation ingress，也不拥有
+repository 来补全跨 owner transaction。一个多 owner 流程若需要 persisted phase/retry/partial ack，必须由
+一个业务 owner 持久化 coordinator aggregate，且只由该 owner 的 private internal event 推进。Application
+可组合无状态的 query/use case，但不得持有这类流程的影子 saga。Workspace deletion 由 Workspace
+持有唯一 durable coordinator，Application 只发送一个 intent，每个接收 owner 只返回自身事实。
+跨 owner command adapter 只能校验并提交接收 owner 的 private requested event；任何物理清理或外部 effect 只能由该
+owner 的 private dispatcher 调用，并在 effect 成功后通过 private completed event/CAS 推进 aggregate。adapter 直接调用
+repository purge、先写 completed 再清理，或由 coordinator 代替资源 owner 清理，均属于第二条状态迁移入口。
+owner-private physical sink 也不得混入普通 CRUD repository capability。Workspace configuration sidecar/index cleanup 通过
+Workspace repository family 的独立 typed cleaner 注入，只能由 `directory_cleanup_requested` dispatcher 使用；Application、
+Initiator adapter 与其他 owner 不能从 `WorkspaceRepository` 获得该 authority。
+Decision/Approval 的 lifecycle transition 只能由各自 EventHub handler 归约为 owner-private event 后触发；
+它们参与 Runtime SM-2 governance 与 SM-4 delivery，但不向 Orchestrator 暴露第二条 mutation ingress，也不拥有
 SM-2/SM-4 authority。
+
+Orchestrator 在 Workspace 删除中只拥有自己的 durable `quiescing -> quiesced -> evidence-fenced -> purged` aggregate。
+它与 SM-4 terminal-delivery/lease drain 是同一 owner 内的协调，但不是新的 Runtime 状态机，也不授予 Workspace 或
+其他 owner 修改 SM-2/3/4 的能力。Run `draining` 先把所有 Orchestrator ingress 限定为 exact terminal-delivery drain；
+`quiescing` Begin 与这些入口共享 write barrier，只有 local/persisted drain 全空时才能落盘，落盘后所有 Runtime
+mutation 都拒绝。`quiesced` token绑定完整有序 Run/Runtime inventory，不能只绑定 Workspace generation。
+六类 Orchestrator evidence/content repository 必须通过一个 canonical owner repository set 共用该 tombstone；禁止将 raw
+repository 与另一个 deletion fence 混装。
 
 ## Capability Owner Responsibilities
 

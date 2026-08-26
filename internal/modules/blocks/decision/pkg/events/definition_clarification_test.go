@@ -37,6 +37,61 @@ func TestReconcileWorkspaceDefinitionClarificationCandidateBindsExactRevisionPai
 	}
 }
 
+func TestWorkspaceDefinitionClarificationResultsValidateDeterministicBindings(t *testing.T) {
+	openCommand := workspaceClarificationRequestForTest(1, "candidate-hash-1", "one-of:a")
+	opened := OpenWorkspaceDefinitionClarificationRequestResult{
+		TicketID: openCommand.TicketID, WorkspaceID: openCommand.WorkspaceID, CandidateID: openCommand.CandidateID, CandidateRevision: openCommand.CandidateRevision,
+		Disposition: DefinitionClarificationCreated, ClarificationRequestBindingHash: openCommand.BindingHash(),
+	}
+	if err := opened.ValidateFor(openCommand); err != nil {
+		t.Fatalf("valid open result: %v", err)
+	}
+	forgedOpen := opened
+	forgedOpen.ClarificationRequestBindingHash = "forged"
+	if err := forgedOpen.ValidateFor(openCommand); err == nil {
+		t.Fatal("forged open result binding was accepted")
+	}
+
+	newCommand := workspaceClarificationRequestForTest(2, "candidate-hash-2", "one-of:b")
+	reconcileCommand := ReconcileWorkspaceDefinitionClarificationCandidateCommand{OldRequest: openCommand, NewRequest: newCommand}
+	reconciliationResolutionID := StableDefinitionClarificationResolutionID(openCommand.TicketID, newCommand.BindingHash())
+	reconciled := ReconcileWorkspaceDefinitionClarificationCandidateResult{
+		WorkspaceID: openCommand.WorkspaceID, OldTicketID: openCommand.TicketID, OldResolutionID: reconciliationResolutionID,
+		NewTicketID: newCommand.TicketID, NewTicketDisposition: DefinitionClarificationCreated,
+		NewRequestBindingHash: newCommand.BindingHash(), ReconciliationBindingHash: reconcileCommand.BindingHash(reconciliationResolutionID),
+	}
+	if err := reconciled.ValidateFor(reconcileCommand); err != nil {
+		t.Fatalf("valid reconciliation result: %v", err)
+	}
+	forgedReconciliation := reconciled
+	forgedReconciliation.NewTicketID = "unrelated-ticket"
+	if err := forgedReconciliation.ValidateFor(reconcileCommand); err == nil {
+		t.Fatal("mismatched reconciliation result was accepted")
+	}
+
+	resolveCommand := ResolveWorkspaceDefinitionClarificationByAdmissionCommand{
+		TicketID: openCommand.TicketID, WorkspaceID: openCommand.WorkspaceID,
+		OldCandidateID: openCommand.CandidateID, OldCandidateRevision: openCommand.CandidateRevision, OldCandidateHash: openCommand.CandidateHash,
+		NewCandidateID: newCommand.CandidateID, NewCandidateRevision: newCommand.CandidateRevision, NewCandidateHash: newCommand.CandidateHash,
+		AdmissionResultHash: "admission-result-hash", DefinitionRevision: "definition-r2", StartupInputHash: "startup-r2",
+	}
+	seed := resolveCommand.AdmissionResultHash + "\x00" + resolveCommand.StartupInputHash
+	resolutionID := StableDefinitionClarificationResolutionID(resolveCommand.TicketID, seed)
+	resolved := ResolveWorkspaceDefinitionClarificationByAdmissionResult{
+		TicketID: resolveCommand.TicketID, WorkspaceID: resolveCommand.WorkspaceID, ResolutionID: resolutionID,
+		ResolutionType: DefinitionClarificationResolutionCandidateAdjusted, Disposition: DefinitionClarificationResolved,
+		ResolutionBindingHash: resolveCommand.BindingHash(resolutionID),
+	}
+	if err := resolved.ValidateFor(resolveCommand); err != nil {
+		t.Fatalf("valid resolution result: %v", err)
+	}
+	forgedResolution := resolved
+	forgedResolution.ResolutionID = "forged-resolution"
+	if err := forgedResolution.ValidateFor(resolveCommand); err == nil {
+		t.Fatal("mismatched resolution result was accepted")
+	}
+}
+
 func runtimeReplacementResolutionCommandForTest() ResolveRuntimeDefinitionClarificationByReplacementCommand {
 	return ResolveRuntimeDefinitionClarificationByReplacementCommand{
 		TicketID: "runtime-definition-clarification:ticket-1", WorkspaceID: "workspace-1", PredecessorRunID: "run-1",

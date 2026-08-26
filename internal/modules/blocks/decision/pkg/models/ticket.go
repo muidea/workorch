@@ -27,7 +27,6 @@ type Ticket struct {
 	UpdatedAt                         string
 	CreatedNotificationPublishedAt    string
 	ResolutionNotificationPublishedAt string
-	DeletionRequestedAt               string
 }
 
 func CloneTicket(item *Ticket) *Ticket {

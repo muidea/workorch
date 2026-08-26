@@ -93,15 +93,21 @@ func (m *Biz) persistAndCompleteRuntimeCandidateRequestDocument(ctx context.Cont
 	if m == nil || m.runtimeController == nil || m.evidence.ArtifactContinuations == nil {
 		return runtime.RuntimeAggregate{}, "", "", common.ErrInvalidArgument
 	}
-	id, hash, err := persistRuntimeCandidateRequestDocument(
-		ctx,
-		m.evidence.ArtifactContinuations,
-		aggregate,
-		logicalRequestID,
-		sequence,
-		physicalCallID,
-		content,
-	)
+	var id common.ArtifactContinuationID
+	var hash string
+	err := m.withOrchestratorEvidenceMutation(ctx, aggregate.Facts.WorkspaceID, func(guarded context.Context) error {
+		var persistErr error
+		id, hash, persistErr = persistRuntimeCandidateRequestDocument(
+			guarded,
+			m.evidence.ArtifactContinuations,
+			aggregate,
+			logicalRequestID,
+			sequence,
+			physicalCallID,
+			content,
+		)
+		return persistErr
+	})
 	if err != nil {
 		return runtime.RuntimeAggregate{}, "", "", err
 	}
@@ -123,6 +129,12 @@ func (m *Biz) markRuntimeCandidateRequestContentFailed(ctx context.Context, aggr
 		return common.ErrInvalidArgument
 	}
 	repository := m.evidence.ArtifactContinuations
+	return m.withOrchestratorEvidenceMutation(ctx, aggregate.Facts.WorkspaceID, func(guarded context.Context) error {
+		return m.markRuntimeCandidateRequestContentFailedGuarded(guarded, repository, aggregate, logicalRequestID)
+	})
+}
+
+func (m *Biz) markRuntimeCandidateRequestContentFailedGuarded(ctx context.Context, repository repository.ArtifactContinuationRepository, aggregate runtime.RuntimeAggregate, logicalRequestID string) error {
 	id := runtimecontract.StableRuntimeCandidateRequestContentID(logicalRequestID)
 	content, err := repository.Get(ctx, id)
 	if err != nil {

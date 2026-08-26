@@ -510,6 +510,7 @@ func registerWorkspaceDeleteRoute(router engine.RouteRegistry, state *serverStat
 			}
 			cmd.Purge = purge
 		}
+		cmd = cmd.Normalized(workspaceID)
 		state.metrics.workspaceDeleteRequests.Add(1)
 		if err := state.deleteWorkspace(r.Context(), state.config.Backend, state.config.DataRoot, workspaceID, cmd); err != nil {
 			writeBusinessError(w, err)

@@ -7,23 +7,28 @@ import (
 const InitiatorID = "workorch/repositories"
 
 type WorkspaceRepositories struct {
-	Workspaces repository.WorkspaceRepository
-	Goals      repository.GoalRepository
-	DoDs       repository.DoDRepository
-	Templates  repository.WorkspaceTemplateRepository
+	Workspaces              repository.WorkspaceRepository
+	DeletionMaterialCleaner repository.WorkspaceDeletionMaterialCleaner
+	Goals                   repository.GoalRepository
+	DoDs                    repository.DoDRepository
+	Templates               repository.WorkspaceTemplateRepository
 }
 
 type DecisionRepositories struct {
-	Tickets     repository.DecisionTicketRepository
-	Resolutions repository.DecisionResolutionRepository
+	Tickets            repository.DecisionTicketRepository
+	Resolutions        repository.DecisionResolutionRepository
+	WorkspaceDeletions repository.DecisionWorkspaceDeletionRepository
 }
 
 type ApprovalRepositories struct {
-	Approvals repository.ApprovalRepository
+	Approvals          repository.ApprovalRepository
+	WorkspaceDeletions repository.ApprovalWorkspaceDeletionRepository
 }
 
 type EventStreamRepositories struct {
-	EventRecords repository.EventRecordRepository
+	EventRecords       repository.EventRecordRepository
+	WorkspaceDeletions repository.EventStreamWorkspaceDeletionRepository
+	WorkspacePurger    repository.EventStreamWorkspacePurger
 }
 
 type GovernanceRepositories struct {
@@ -37,26 +42,20 @@ type MCPRepositories struct {
 type MemoryRepositories struct {
 	MemoryItems        repository.MemoryItemRepository
 	MemoryRecallTraces repository.MemoryRecallTraceRepository
-}
-
-type OrchestratorRepositories struct {
-	ToolCalls             repository.ToolCallRepository
-	Patches               repository.PatchRepository
-	ValidationResults     repository.ValidationResultRepository
-	EvidenceRecords       repository.EvidenceRecordRepository
-	CoverageWorkItems     repository.CoverageWorkItemRepository
-	ArtifactContinuations repository.ArtifactContinuationRepository
+	WorkspaceDeletions repository.MemoryWorkspaceDeletionRepository
 }
 
 type ResultRepositories struct {
-	Results   repository.ResultRepository
-	Artifacts repository.ArtifactRepository
+	Results            repository.ResultRepository
+	Artifacts          repository.ArtifactRepository
+	WorkspaceDeletions repository.ResultWorkspaceDeletionRepository
 }
 
 type RunRepositories struct {
 	Runs        repository.RunRepository
 	Steps       repository.StepRepository
 	Checkpoints repository.RuntimeCheckpointRepository
+	Owner       repository.RunOwnerRepositories
 }
 
 type SkillRepositories struct {
@@ -75,7 +74,7 @@ type RepositoryProvider interface {
 	Governance() GovernanceRepositories
 	MCP() MCPRepositories
 	Memory() MemoryRepositories
-	Orchestrator() OrchestratorRepositories
+	Orchestrator() repository.OrchestratorEvidenceOwnerRepositories
 	Result() ResultRepositories
 	Run() RunRepositories
 	Skill() SkillRepositories

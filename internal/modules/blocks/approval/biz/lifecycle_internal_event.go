@@ -29,7 +29,6 @@ const (
 	lifecycleInternalEventResolutionProposalRejected lifecycleInternalEventKind = "resolution_proposal_rejected"
 	lifecycleInternalEventEvidenceRecorded           lifecycleInternalEventKind = "evidence_recorded"
 	lifecycleInternalEventNotificationPublished      lifecycleInternalEventKind = "notification_published"
-	lifecycleInternalEventDeletionRequested          lifecycleInternalEventKind = "deletion_requested"
 )
 
 func (s *mutationService) applyLifecycleInternalEvent(ctx context.Context, current *approvalmodel.Approval, event lifecycleInternalEvent) (*approvalmodel.Approval, error) {
@@ -68,7 +67,7 @@ func reduceApprovalLifecycle(current *approvalmodel.Approval, event lifecycleInt
 	if event.Kind == lifecycleInternalEventOpened {
 		seed := event.Approval
 		if current != nil || seed == nil || seed.ID == "" || seed.ID != event.ApprovalID || seed.WorkspaceID != event.WorkspaceID || seed.RunID != event.RunID || strings.TrimSpace(seed.Reason) == "" ||
-			seed.State != "" || seed.ResolutionID != "" || seed.ResolutionProposal != nil || seed.EvidenceRecordedAt != "" || seed.ResolutionNotificationPublishedAt != "" || seed.DeletionRequestedAt != "" || seed.ResolvedAt != "" || seed.ResolvedBy != "" || seed.CreatedAt != "" || seed.UpdatedAt != "" || event.Proposal != nil {
+			seed.State != "" || seed.ResolutionID != "" || seed.ResolutionProposal != nil || seed.EvidenceRecordedAt != "" || seed.ResolutionNotificationPublishedAt != "" || seed.ResolvedAt != "" || seed.ResolvedBy != "" || seed.CreatedAt != "" || seed.UpdatedAt != "" || event.Proposal != nil {
 			return nil, common.ErrInvalidArgument
 		}
 		next := approvalmodel.CloneApproval(seed)
@@ -136,11 +135,6 @@ func reduceApprovalLifecycle(current *approvalmodel.Approval, event lifecycleInt
 		if next.ResolutionProposal != nil {
 			next.ResolutionProposal.ResolutionNotificationPublishedAt = now
 		}
-	case lifecycleInternalEventDeletionRequested:
-		if current.DeletionRequestedAt != "" {
-			return nil, common.ErrConflict
-		}
-		next.DeletionRequestedAt = now
 	default:
 		return nil, common.ErrInvalidArgument
 	}

@@ -117,6 +117,228 @@ func TestHTTPProviderOutputLimitPreservesOnlyOutputText(t *testing.T) {
 	}
 }
 
+func TestHTTPProviderOutputLimitWithoutFinalOutputKeepsTypedStopReason(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write([]byte("data: {\"type\":\"response.reasoning_summary_text.delta\",\"delta\":\"hidden reasoning consumed the budget\"}\n\n"))
+		_, _ = w.Write([]byte("data: {\"type\":\"response.incomplete\",\"response\":{\"status\":\"incomplete\",\"incomplete_details\":{\"reason\":\"max_output_tokens\"},\"usage\":{\"input_tokens\":20,\"output_tokens\":8,\"total_tokens\":28}}}\n\n"))
+	}))
+	defer server.Close()
+
+	result, err := NewHTTPProvider(testAIProxyProviderConfig(server.URL+"/v1")).StreamComplete(context.Background(), llmProviderRequest(), nil)
+	var limitErr *ProviderOutputLimitError
+	if !errors.As(err, &limitErr) {
+		t.Fatalf("error = %v, want output limit", err)
+	}
+	if len(result.Payload) != 0 || len(limitErr.Payload) != 0 {
+		t.Fatalf("reasoning-only output limit exposed document payload: result=%q error=%q", result.Payload, limitErr.Payload)
+	}
+	if result.Usage == nil || result.Usage.OutputTokens != 8 || !result.ProviderSubmitted || result.PhysicalResponseMode != llmaudit.PhysicalResponseModeStreaming {
+		t.Fatalf("reasoning-only output-limit result = %+v", result)
+	}
+}
+
+func TestHTTPProviderNonStreamTerminalStatusFailsClosed(t *testing.T) {
+	tests := []struct {
+		name     string
+		body     string
+		wantCode string
+	}{
+		{
+			name:     "incomplete non-budget reason",
+			body:     `{"status":"incomplete","incomplete_details":{"reason":"content_filter"},"output_text":"{\"ok\":true}","usage":{"input_tokens":3,"output_tokens":2,"total_tokens":5}}`,
+			wantCode: "response_incomplete_content_filter",
+		},
+		{
+			name:     "completed contradicts incomplete details",
+			body:     `{"status":"completed","incomplete_details":{"reason":"max_output_tokens"},"output_text":"{\"ok\":true}","usage":{"input_tokens":3,"output_tokens":2,"total_tokens":5}}`,
+			wantCode: "response_completed_with_incomplete_details",
+		},
+		{
+			name:     "missing terminal status",
+			body:     `{"output_text":"{\"ok\":true}","usage":{"input_tokens":3,"output_tokens":2,"total_tokens":5}}`,
+			wantCode: "response_terminal_status_missing",
+		},
+		{
+			name:     "unknown terminal status",
+			body:     `{"status":"failed","output_text":"{\"ok\":true}","usage":{"input_tokens":3,"output_tokens":2,"total_tokens":5}}`,
+			wantCode: "response_terminal_status_failed",
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = w.Write([]byte(test.body))
+			}))
+			defer server.Close()
+
+			result, err := NewHTTPProvider(testAIProxyProviderConfig(server.URL+"/v1")).Complete(context.Background(), llmProviderRequest())
+			var protocolErr *ProviderProtocolError
+			if !errors.As(err, &protocolErr) || protocolErr.Code != test.wantCode || protocolErr.ResponseBytes != len(test.body) {
+				t.Fatalf("terminal error = %#v (%v), want code=%q bytes=%d", protocolErr, err, test.wantCode, len(test.body))
+			}
+			if result.Payload != nil || result.Usage != nil || result.ResponseBytes != len(test.body) {
+				t.Fatalf("protocol failure exposed rejected payload/usage: %+v", result)
+			}
+			var outputLimitErr *ProviderOutputLimitError
+			if errors.As(err, &outputLimitErr) {
+				t.Fatalf("protocol defect became output-limit outcome: %#v", outputLimitErr)
+			}
+		})
+	}
+}
+
+func TestHTTPProviderStreamTerminalStatusFailsClosed(t *testing.T) {
+	tests := []struct {
+		name        string
+		body        string
+		wantCode    string
+		wantLimit   bool
+		wantPayload string
+		wantDone    int
+	}{
+		{
+			name:        "completed envelope reports output limit",
+			body:        "data: {\"type\":\"response.completed\",\"response\":{\"status\":\"incomplete\",\"incomplete_details\":{\"reason\":\"max_output_tokens\"},\"output_text\":\"{\\\"partial\\\":\",\"usage\":{\"input_tokens\":20,\"output_tokens\":8,\"total_tokens\":28}}}\n\n",
+			wantLimit:   true,
+			wantPayload: `{"partial":`,
+		},
+		{
+			name:     "done before authoritative terminal",
+			body:     "data: [DONE]\n\n",
+			wantCode: "stream_done_before_terminal",
+		},
+		{
+			name:        "completed then done",
+			body:        "data: {\"type\":\"response.output_text.delta\",\"delta\":\"ok\"}\n\ndata: {\"type\":\"response.completed\",\"response\":{\"status\":\"completed\"}}\n\ndata: [DONE]\n\n",
+			wantPayload: "ok",
+			wantDone:    1,
+		},
+		{
+			name:     "completed event has top level incomplete details",
+			body:     "data: {\"type\":\"response.output_text.delta\",\"delta\":\"partial\"}\n\ndata: {\"type\":\"response.completed\",\"incomplete_details\":{\"reason\":\"max_output_tokens\"},\"response\":{\"status\":\"completed\",\"output_text\":\"partial\",\"usage\":{\"input_tokens\":3,\"output_tokens\":2,\"total_tokens\":5}}}\n\n",
+			wantCode: "stream_completed_with_incomplete_details",
+		},
+		{
+			name:     "completed event has empty top level incomplete details",
+			body:     "data: {\"type\":\"response.completed\",\"incomplete_details\":{},\"response\":{\"status\":\"completed\",\"output_text\":\"ok\"}}\n\n",
+			wantCode: "stream_completed_with_incomplete_details",
+		},
+		{
+			name:     "completed event has null top level incomplete details",
+			body:     "data: {\"type\":\"response.completed\",\"incomplete_details\":null,\"response\":{\"status\":\"completed\",\"output_text\":\"ok\"}}\n\n",
+			wantCode: "stream_completed_with_incomplete_details",
+		},
+		{
+			name:     "output text done conflicts with accumulated delta",
+			body:     "data: {\"type\":\"response.output_text.delta\",\"delta\":\"first\"}\n\ndata: {\"type\":\"response.output_text.done\",\"text\":\"second\"}\n\ndata: {\"type\":\"response.completed\",\"response\":{\"status\":\"completed\"}}\n\n",
+			wantCode: "stream_output_text_done_conflict",
+		},
+		{
+			name:     "completed output conflicts with accumulated delta",
+			body:     "data: {\"type\":\"response.output_text.delta\",\"delta\":\"first\"}\n\ndata: {\"type\":\"response.completed\",\"response\":{\"status\":\"completed\",\"output_text\":\"second\",\"usage\":{\"input_tokens\":3,\"output_tokens\":2,\"total_tokens\":5}}}\n\n",
+			wantCode: "stream_completed_output_conflict",
+		},
+		{
+			name:        "done and completed output match accumulated delta",
+			body:        "data: {\"type\":\"response.output_text.delta\",\"delta\":\"ok\"}\n\ndata: {\"type\":\"response.output_text.done\",\"text\":\"ok\"}\n\ndata: {\"type\":\"response.completed\",\"response\":{\"status\":\"completed\",\"output_text\":\"ok\"}}\n\n",
+			wantPayload: "ok",
+			wantDone:    1,
+		},
+		{
+			name:     "incomplete event contradicts completed response",
+			body:     "data: {\"type\":\"response.incomplete\",\"incomplete_details\":{\"reason\":\"max_output_tokens\"},\"response\":{\"status\":\"completed\"}}\n\n",
+			wantCode: "response_completed_with_incomplete_details",
+		},
+		{
+			name:     "completed event missing response status",
+			body:     "data: {\"type\":\"response.completed\",\"response\":{\"output_text\":\"ok\"}}\n\n",
+			wantCode: "response_terminal_status_missing",
+		},
+		{
+			name:     "completed event missing response",
+			body:     "data: {\"type\":\"response.completed\"}\n\n",
+			wantCode: "stream_completed_response_missing",
+		},
+		{
+			name:     "completed event has unknown response status",
+			body:     "data: {\"type\":\"response.completed\",\"response\":{\"status\":\"failed\",\"output_text\":\"ok\"}}\n\n",
+			wantCode: "response_terminal_status_failed",
+		},
+		{
+			name:     "incomplete reasons conflict",
+			body:     "data: {\"type\":\"response.incomplete\",\"incomplete_details\":{\"reason\":\"max_output_tokens\"},\"response\":{\"status\":\"incomplete\",\"incomplete_details\":{\"reason\":\"content_filter\"}}}\n\n",
+			wantCode: "stream_incomplete_reason_conflict",
+		},
+		{
+			name:     "event after incomplete terminal",
+			body:     "data: {\"type\":\"response.incomplete\",\"response\":{\"status\":\"incomplete\",\"incomplete_details\":{\"reason\":\"max_output_tokens\"}}}\n\ndata: {\"type\":\"response.output_text.delta\",\"delta\":\"late\"}\n\n",
+			wantCode: "stream_event_after_terminal",
+		},
+		{
+			name:     "event after completed envelope output limit",
+			body:     "data: {\"type\":\"response.completed\",\"response\":{\"status\":\"incomplete\",\"incomplete_details\":{\"reason\":\"max_output_tokens\"},\"output_text\":\"partial\"}}\n\ndata: {\"type\":\"response.completed\",\"response\":{\"status\":\"completed\",\"output_text\":\"partial\"}}\n\n",
+			wantCode: "stream_event_after_terminal",
+		},
+		{
+			name:     "event after completed terminal",
+			body:     "data: {\"type\":\"response.output_text.delta\",\"delta\":\"ok\"}\n\ndata: {\"type\":\"response.completed\",\"response\":{\"status\":\"completed\"}}\n\ndata: {\"type\":\"response.output_text.delta\",\"delta\":\"late\"}\n\n",
+			wantCode: "stream_event_after_terminal",
+		},
+		{
+			name:     "event after done marker",
+			body:     "data: {\"type\":\"response.output_text.delta\",\"delta\":\"ok\"}\n\ndata: {\"type\":\"response.completed\",\"response\":{\"status\":\"completed\"}}\n\ndata: [DONE]\n\ndata: {\"type\":\"response.output_text.delta\",\"delta\":\"late\"}\n\n",
+			wantCode: "stream_event_after_terminal",
+		},
+		{
+			name:     "duplicate done marker",
+			body:     "data: {\"type\":\"response.output_text.delta\",\"delta\":\"ok\"}\n\ndata: {\"type\":\"response.completed\",\"response\":{\"status\":\"completed\"}}\n\ndata: [DONE]\n\ndata: [DONE]\n\n",
+			wantCode: "stream_duplicate_done",
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				w.Header().Set("Content-Type", "text/event-stream")
+				_, _ = w.Write([]byte(test.body))
+			}))
+			defer server.Close()
+
+			events := []llmmodels.ProviderStreamEvent{}
+			result, err := NewHTTPProvider(testAIProxyProviderConfig(server.URL+"/v1")).StreamComplete(context.Background(), llmProviderRequest(), func(event llmmodels.ProviderStreamEvent) error {
+				events = append(events, event)
+				return nil
+			})
+			if test.wantLimit {
+				var outputLimitErr *ProviderOutputLimitError
+				if !errors.As(err, &outputLimitErr) || string(result.Payload) != test.wantPayload || string(outputLimitErr.Payload) != test.wantPayload || result.Usage == nil {
+					t.Fatalf("output-limit result=%+v error=%#v (%v)", result, outputLimitErr, err)
+				}
+			} else if test.wantCode != "" {
+				var protocolErr *ProviderProtocolError
+				if !errors.As(err, &protocolErr) || protocolErr.Code != test.wantCode || protocolErr.ResponseBytes != len(test.body) {
+					t.Fatalf("terminal error = %#v (%v), want code=%q bytes=%d", protocolErr, err, test.wantCode, len(test.body))
+				}
+				if result.Payload != nil || result.Usage != nil {
+					t.Fatalf("protocol failure exposed rejected payload/usage: %+v", result)
+				}
+			} else if err != nil || string(result.Payload) != test.wantPayload {
+				t.Fatalf("completed result=%+v error=%v", result, err)
+			}
+			doneEvents := 0
+			for _, event := range events {
+				if event.Type == "done" {
+					doneEvents++
+				}
+			}
+			if doneEvents != test.wantDone {
+				t.Fatalf("done events = %d, want %d; events=%+v", doneEvents, test.wantDone, events)
+			}
+		})
+	}
+}
+
 func TestHTTPProviderEmbedsThroughAIProxy(t *testing.T) {
 	var gotPath string
 	var gotAuthorization string

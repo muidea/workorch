@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"testing"
 
+	"github.com/muidea/workorch/internal/modules/kernel/orchestrator/biz/internal/semanticplan"
 	"github.com/muidea/workorch/internal/pkg/common"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
@@ -131,7 +132,7 @@ func TestRuntimeSemanticPlanningPrivateTransitionSequenceIsPersistedAndIdempoten
 		t.Fatal("duplicate request changed aggregate revision")
 	}
 	apply(RuntimeInternalEvent{Kind: RuntimeInternalEventSemanticPlanEvaluated, Transaction: &RuntimeInternalTransactionPayload{SemanticDocument: &order, LogicalRequestID: "semantic-request-1"}})
-	batch, err := runtimecontract.CompileRuntimeSemanticPlanFocusBatch(
+	batch, err := semanticplan.CompileFocusBatch(
 		manifest, order, 0, "proof-request-1", aggregate.Facts.Focus.CoverageWorkItemIDs,
 		aggregate.SemanticPlanning.PendingCoverageIDs, 1,
 	)
@@ -213,7 +214,7 @@ func TestRuntimeSemanticBatchDocumentReplayIsIdempotent(t *testing.T) {
 	}
 	apply(RuntimeInternalEvent{Kind: RuntimeInternalEventSemanticPlanRequestStarted, Transaction: &RuntimeInternalTransactionPayload{SemanticManifest: &manifest, StablePrefixHash: "batch-prefix", LogicalRequestID: "order-request"}})
 	apply(RuntimeInternalEvent{Kind: RuntimeInternalEventSemanticPlanEvaluated, Transaction: &RuntimeInternalTransactionPayload{SemanticDocument: &order, LogicalRequestID: "order-request"}})
-	batch, err := runtimecontract.CompileRuntimeSemanticPlanFocusBatch(
+	batch, err := semanticplan.CompileFocusBatch(
 		manifest, order, 0, "batch-request", aggregate.Facts.Focus.CoverageWorkItemIDs,
 		aggregate.SemanticPlanning.PendingCoverageIDs, 1,
 	)
@@ -308,7 +309,7 @@ func TestRuntimeSemanticBatchCorrectionRejectsUnclassifiedDiagnostic(t *testing.
 	}
 	apply(RuntimeInternalEvent{Kind: RuntimeInternalEventSemanticPlanRequestStarted, Transaction: &RuntimeInternalTransactionPayload{SemanticManifest: &manifest, StablePrefixHash: "batch-correction-prefix", LogicalRequestID: "order-request"}})
 	apply(RuntimeInternalEvent{Kind: RuntimeInternalEventSemanticPlanEvaluated, Transaction: &RuntimeInternalTransactionPayload{SemanticDocument: &order, LogicalRequestID: "order-request"}})
-	batch, err := runtimecontract.CompileRuntimeSemanticPlanFocusBatch(
+	batch, err := semanticplan.CompileFocusBatch(
 		manifest, order, 0, "batch-request", aggregate.Facts.Focus.CoverageWorkItemIDs,
 		aggregate.SemanticPlanning.PendingCoverageIDs, 1,
 	)
@@ -346,7 +347,7 @@ func TestRuntimeSemanticBatchCorrectionRejectsCoverageOutsideActiveBatch(t *test
 	}
 	apply(RuntimeInternalEvent{Kind: RuntimeInternalEventSemanticPlanRequestStarted, Transaction: &RuntimeInternalTransactionPayload{SemanticManifest: &manifest, StablePrefixHash: "batch-scope-prefix", LogicalRequestID: "order-request"}})
 	apply(RuntimeInternalEvent{Kind: RuntimeInternalEventSemanticPlanEvaluated, Transaction: &RuntimeInternalTransactionPayload{SemanticDocument: &order, LogicalRequestID: "order-request"}})
-	batch, err := runtimecontract.CompileRuntimeSemanticPlanFocusBatch(
+	batch, err := semanticplan.CompileFocusBatch(
 		manifest, order, 0, "batch-request", aggregate.Facts.Focus.CoverageWorkItemIDs,
 		aggregate.SemanticPlanning.PendingCoverageIDs, 1,
 	)
@@ -439,7 +440,7 @@ func TestRuntimeSemanticPlanningRejectsInvalidStaleAndThirdAttemptTransitions(t 
 	order.CoverageOrder = []common.CoverageWorkItemID{manifest.CoverageItems[0].ID}
 	order.Proposals = nil
 	apply(RuntimeInternalEvent{Kind: RuntimeInternalEventSemanticPlanEvaluated, Transaction: &RuntimeInternalTransactionPayload{SemanticDocument: &order, LogicalRequestID: "semantic-request-1"}})
-	batch, err := runtimecontract.CompileRuntimeSemanticPlanFocusBatch(
+	batch, err := semanticplan.CompileFocusBatch(
 		manifest, order, 0, "proof-request-1", aggregate.Facts.Focus.CoverageWorkItemIDs,
 		aggregate.SemanticPlanning.PendingCoverageIDs, 1,
 	)
@@ -530,7 +531,7 @@ func TestRuntimeSemanticFeasibilityRejectsProviderCorrectionAfterOwnerFactsBegin
 	apply(RuntimeInternalEvent{Kind: RuntimeInternalEventSemanticPlanEvaluated, Transaction: &RuntimeInternalTransactionPayload{
 		SemanticDocument: &order, LogicalRequestID: "semantic-order-request",
 	}})
-	batch, err := runtimecontract.CompileRuntimeSemanticPlanFocusBatch(
+	batch, err := semanticplan.CompileFocusBatch(
 		manifest, order, 0, "semantic-proof-request", aggregate.Facts.Focus.CoverageWorkItemIDs,
 		aggregate.SemanticPlanning.PendingCoverageIDs, 1,
 	)
@@ -673,7 +674,7 @@ func TestRuntimeSemanticPlanningFailurePreservesOwnerDiagnosticFacts(t *testing.
 	}
 	apply(RuntimeInternalEvent{Kind: RuntimeInternalEventSemanticPlanRequestStarted, Transaction: &RuntimeInternalTransactionPayload{SemanticManifest: &manifest, StablePrefixHash: "semantic-prefix-1", LogicalRequestID: "semantic-request-1"}})
 	apply(RuntimeInternalEvent{Kind: RuntimeInternalEventSemanticPlanEvaluated, Transaction: &RuntimeInternalTransactionPayload{SemanticDocument: &order, LogicalRequestID: "semantic-request-1"}})
-	batch, err := runtimecontract.CompileRuntimeSemanticPlanFocusBatch(
+	batch, err := semanticplan.CompileFocusBatch(
 		manifest, order, 0, "proof-request-1", aggregate.Facts.Focus.CoverageWorkItemIDs,
 		aggregate.SemanticPlanning.PendingCoverageIDs, 1,
 	)
@@ -800,7 +801,7 @@ func TestRuntimeSemanticStaleFactPrecedesBoundedCatalogRefreshAndSurvivesReload(
 		t.Fatal(err)
 	}
 	apply(RuntimeInternalEvent{Kind: RuntimeInternalEventSemanticPlanEvaluated, Transaction: &RuntimeInternalTransactionPayload{SemanticDocument: &order, LogicalRequestID: session.LogicalRequestID}})
-	batch, err := runtimecontract.CompileRuntimeSemanticPlanFocusBatch(
+	batch, err := semanticplan.CompileFocusBatch(
 		manifest, order, 0, "proof-request-1", aggregate.Facts.Focus.CoverageWorkItemIDs,
 		aggregate.SemanticPlanning.PendingCoverageIDs, 1,
 	)
@@ -1001,7 +1002,7 @@ func TestRuntimeSemanticPrerequisiteRequiredFailsClosedWithoutRetiringCatalog(t 
 	}
 	apply(RuntimeInternalEvent{Kind: RuntimeInternalEventSemanticPlanRequestStarted, Transaction: &RuntimeInternalTransactionPayload{SemanticManifest: &manifest, StablePrefixHash: "semantic-prefix-1", LogicalRequestID: "semantic-request-1"}})
 	apply(RuntimeInternalEvent{Kind: RuntimeInternalEventSemanticPlanEvaluated, Transaction: &RuntimeInternalTransactionPayload{SemanticDocument: &order, LogicalRequestID: "semantic-request-1"}})
-	batch, err := runtimecontract.CompileRuntimeSemanticPlanFocusBatch(
+	batch, err := semanticplan.CompileFocusBatch(
 		manifest, order, 0, "proof-request-1", aggregate.Facts.Focus.CoverageWorkItemIDs,
 		aggregate.SemanticPlanning.PendingCoverageIDs, 1,
 	)
@@ -1681,7 +1682,7 @@ func TestRuntimeSemanticCrossOwnerPartialBatchIsOrderIndependentAndRecoversAfter
 	}
 	apply(controller, RuntimeInternalEvent{Kind: RuntimeInternalEventSemanticPlanRequestStarted, Transaction: &RuntimeInternalTransactionPayload{SemanticManifest: &manifest, StablePrefixHash: "semantic-prefix-1", LogicalRequestID: "semantic-request-1"}})
 	apply(controller, RuntimeInternalEvent{Kind: RuntimeInternalEventSemanticPlanEvaluated, Transaction: &RuntimeInternalTransactionPayload{SemanticDocument: &order, LogicalRequestID: "semantic-request-1"}})
-	batch, err := runtimecontract.CompileRuntimeSemanticPlanFocusBatch(
+	batch, err := semanticplan.CompileFocusBatch(
 		manifest, order, 0, "proof-request-1", aggregate.Facts.Focus.CoverageWorkItemIDs,
 		aggregate.SemanticPlanning.PendingCoverageIDs, 1,
 	)
@@ -1779,7 +1780,7 @@ func TestRuntimeSemanticMultiBatchFeasibilityMergeRecoversAfterResponseLoss(t *t
 	// First transaction is scoped to the active focus only. The second CWI is
 	// retained as an inert pending placeholder and cannot enter this proof
 	// document or owner-fact set.
-	firstBatch, err := runtimecontract.CompileRuntimeSemanticPlanFocusBatch(
+	firstBatch, err := semanticplan.CompileFocusBatch(
 		manifest, order, 0, "batch-request-0", aggregate.Facts.Focus.CoverageWorkItemIDs,
 		aggregate.SemanticPlanning.PendingCoverageIDs, 1,
 	)
@@ -1830,7 +1831,7 @@ func TestRuntimeSemanticMultiBatchFeasibilityMergeRecoversAfterResponseLoss(t *t
 	if aggregate.StateRevision != projectedRevision || aggregate.Facts.Focus.CoverageWorkItemIDs[0] != "cwi-v2-second" {
 		t.Fatalf("settled predecessor projection changed current closure: revision=%d want=%d focus=%+v", aggregate.StateRevision, projectedRevision, aggregate.Facts.Focus)
 	}
-	secondBatch, err := runtimecontract.CompileRuntimeSemanticPlanFocusBatch(
+	secondBatch, err := semanticplan.CompileFocusBatch(
 		manifest, order, aggregate.SemanticPlanning.NextBatchSequence, "batch-request-1", aggregate.Facts.Focus.CoverageWorkItemIDs,
 		aggregate.SemanticPlanning.PendingCoverageIDs, 1,
 	)
@@ -2022,7 +2023,7 @@ func TestRuntimeSemanticSettlementRetiresGenerationWhenDependencyBecomesEligible
 	}
 	apply(RuntimeInternalEvent{Kind: RuntimeInternalEventSemanticPlanRequestStarted, Transaction: &RuntimeInternalTransactionPayload{SemanticManifest: &manifest, StablePrefixHash: "dependency-prefix", LogicalRequestID: "dependency-order-request"}})
 	apply(RuntimeInternalEvent{Kind: RuntimeInternalEventSemanticPlanEvaluated, Transaction: &RuntimeInternalTransactionPayload{SemanticDocument: &order, LogicalRequestID: "dependency-order-request"}})
-	batch, err := runtimecontract.CompileRuntimeSemanticPlanFocusBatch(manifest, order, 0, "dependency-batch-request", aggregate.Facts.Focus.CoverageWorkItemIDs, aggregate.SemanticPlanning.PendingCoverageIDs, 1)
+	batch, err := semanticplan.CompileFocusBatch(manifest, order, 0, "dependency-batch-request", aggregate.Facts.Focus.CoverageWorkItemIDs, aggregate.SemanticPlanning.PendingCoverageIDs, 1)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2089,7 +2090,7 @@ func sealFirstTwoItemSemanticBatch(
 
 	apply(RuntimeInternalEvent{Kind: RuntimeInternalEventSemanticPlanRequestStarted, Transaction: &RuntimeInternalTransactionPayload{SemanticManifest: &manifest, StablePrefixHash: "settled-cwi-catalog-prefix", LogicalRequestID: "settled-cwi-order-request"}})
 	apply(RuntimeInternalEvent{Kind: RuntimeInternalEventSemanticPlanEvaluated, Transaction: &RuntimeInternalTransactionPayload{SemanticDocument: &order, LogicalRequestID: "settled-cwi-order-request"}})
-	batch, err := runtimecontract.CompileRuntimeSemanticPlanFocusBatch(
+	batch, err := semanticplan.CompileFocusBatch(
 		manifest, order, 0, "settled-cwi-batch-request", aggregate.Facts.Focus.CoverageWorkItemIDs,
 		aggregate.SemanticPlanning.PendingCoverageIDs, 1,
 	)
@@ -2236,7 +2237,7 @@ func sealedSemanticPlanningAggregate(t *testing.T) (*RuntimeController, *control
 	}
 	apply(RuntimeInternalEvent{Kind: RuntimeInternalEventSemanticPlanRequestStarted, Transaction: &RuntimeInternalTransactionPayload{SemanticManifest: &manifest, StablePrefixHash: "semantic-retirement-prefix", LogicalRequestID: "semantic-retirement-request"}})
 	apply(RuntimeInternalEvent{Kind: RuntimeInternalEventSemanticPlanEvaluated, Transaction: &RuntimeInternalTransactionPayload{SemanticDocument: &order, LogicalRequestID: "semantic-retirement-request"}})
-	batch, err := runtimecontract.CompileRuntimeSemanticPlanFocusBatch(manifest, order, 0, "semantic-retirement-batch", aggregate.Facts.Focus.CoverageWorkItemIDs, aggregate.SemanticPlanning.PendingCoverageIDs, 1)
+	batch, err := semanticplan.CompileFocusBatch(manifest, order, 0, "semantic-retirement-batch", aggregate.Facts.Focus.CoverageWorkItemIDs, aggregate.SemanticPlanning.PendingCoverageIDs, 1)
 	if err != nil {
 		t.Fatal(err)
 	}

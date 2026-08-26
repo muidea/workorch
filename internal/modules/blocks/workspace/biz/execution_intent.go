@@ -33,6 +33,10 @@ type preparedWorkspaceExecutionIntent struct {
 // owner derives the active Run selection and current Goal/DoD identity before
 // forwarding a concrete fact to the Run owner.
 func (m *Biz) handleExecutionIntentCommand(ev magicevent.Event, result magicevent.Result) {
+	if m != nil {
+		m.deletionIngressMu.RLock()
+		defer m.deletionIngressMu.RUnlock()
+	}
 	response, err := m.executeExecutionIntent(ev)
 	if result == nil {
 		return
@@ -56,6 +60,19 @@ func (m *Biz) executeExecutionIntent(ev magicevent.Event) (workspaceevents.Works
 	if result, admitted := prepared.ownerAdmission(); admitted {
 		return result, nil
 	}
+	if prepared.command.Kind == runtimecontract.RuntimeExecutionIntentRestart {
+		definition := prepared.command.Bootstrap.Definition.Normalized()
+		workspace, err := m.submitWorkspaceExecutionInternalEvent(prepared.ctx, workspaceExecutionInternalEvent{
+			Kind:              workspaceExecutionInternalEventActivationProviderSelectionObserved,
+			WorkspaceID:       prepared.workspace.ID,
+			StartupInputHash:  definition.StartupInputHash,
+			ProviderSelection: prepared.command.Bootstrap.Activation.ProviderSelection,
+		})
+		if err != nil {
+			return workspaceevents.WorkspaceExecutionIntentResult{}, err
+		}
+		prepared.workspace = workspace
+	}
 	forward := prepared.runCommand()
 	runResult, err := m.sendRunExecutionIntent(prepared.ctx, prepared.workspace.ID, forward)
 	if err != nil {
@@ -63,12 +80,6 @@ func (m *Biz) executeExecutionIntent(ev magicevent.Event) (workspaceevents.Works
 	}
 	if err := validateRunExecutionIntentResult(runResult, prepared.workspace.ID, prepared.command.RequestID, forward.Kind, forward.RunID); err != nil {
 		return workspaceevents.WorkspaceExecutionIntentResult{}, err
-	}
-	if prepared.command.Kind == runtimecontract.RuntimeExecutionIntentRestart &&
-		(runResult.Outcome == runtimecontract.RuntimeExecutionIntentReconciliationRequested || runResult.Outcome == runtimecontract.RuntimeExecutionIntentReplacementPending) {
-		if _, err := m.materializeDefaultLLMSelectionFromBootstrap(prepared.ctx, prepared.workspace, prepared.command.Bootstrap); err != nil {
-			return workspaceevents.WorkspaceExecutionIntentResult{}, err
-		}
 	}
 	return workspaceevents.WorkspaceExecutionIntentResult(runResult.RuntimeExecutionIntentAdmission), nil
 }
@@ -91,6 +102,9 @@ func (m *Biz) prepareWorkspaceExecutionIntent(ev magicevent.Event) (preparedWork
 	}
 	workspace, err := m.workspaces.Get(ctx, cmd.WorkspaceID)
 	if err != nil {
+		return preparedWorkspaceExecutionIntent{}, err
+	}
+	if err := workspaceDeletionRejectsMutation(workspace); err != nil {
 		return preparedWorkspaceExecutionIntent{}, err
 	}
 	if cmd.Kind == runtimecontract.RuntimeExecutionIntentResume {
@@ -240,48 +254,6 @@ func validateRunExecutionIntentResult(runResult runevents.WorkspaceExecutionInte
 		return fmt.Errorf("%w: Run execution intent result: %v", common.ErrConflict, err)
 	}
 	return nil
-}
-
-// materializeDefaultLLMSelectionFromBootstrap is an owner-local Workspace
-// metadata transition. The value is derived only from the validated sealed
-// bootstrap of a successful restart admission; resume never changes the
-// next-run preference and application ingress never writes Workspace state.
-func (m *Biz) materializeDefaultLLMSelectionFromBootstrap(ctx context.Context, workspace *workspacemodel.Workspace, bootstrap *runtimecontract.RuntimeBootstrap) (*workspacemodel.Workspace, error) {
-	if workspace == nil || bootstrap == nil {
-		return nil, common.ErrInvalidArgument
-	}
-	if workspace.DefaultLLMSelection != nil {
-		return workspace, nil
-	}
-	target := bootstrap.Activation.ProviderSelection.Target.Normalized()
-	if err := target.Validate(); err != nil {
-		return nil, err
-	}
-	selection := runtimecontract.ProviderInferenceSelection{Target: target}
-	for attempt := 0; attempt < 3; attempt++ {
-		current := workspace
-		if attempt > 0 {
-			var err error
-			current, err = m.workspaces.Get(ctx, workspace.ID)
-			if err != nil {
-				return nil, err
-			}
-			if current.DefaultLLMSelection != nil {
-				return current, nil
-			}
-		}
-		next := *current
-		next.DefaultLLMSelection = &selection
-		if err := m.workspaces.CompareAndSwap(ctx, &next, current.Revision); err != nil {
-			if err == common.ErrConflict {
-				continue
-			}
-			return nil, err
-		}
-		m.publishWorkspaceUpdated(ctx, &next)
-		return &next, nil
-	}
-	return nil, common.ErrConflict
 }
 
 // currentExecutionDefinitions is deliberately owner-local.  A Workspace may

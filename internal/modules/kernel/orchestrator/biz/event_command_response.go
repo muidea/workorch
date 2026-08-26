@@ -92,22 +92,3 @@ func memoryCommandResponse[Response any](response magicevent.Result, topic strin
 	}
 	return result, nil
 }
-
-func resultCommandResponse[Response any](response magicevent.Result, topic string) (Response, error) {
-	var zero Response
-	if response == nil {
-		return zero, fmt.Errorf("result command %s returned no response", topic)
-	}
-	if err := response.Error(); err != nil {
-		return zero, err
-	}
-	data, resultErr := response.Get()
-	if resultErr != nil {
-		return zero, resultErr
-	}
-	result, ok := data.(Response)
-	if !ok {
-		return zero, common.ErrInvalidArgument
-	}
-	return result, nil
-}

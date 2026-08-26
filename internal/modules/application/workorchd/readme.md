@@ -4,7 +4,7 @@ Status: active
 
 Type: application-module-contract
 
-Last Verified: 2026-08-25
+Last Verified: 2026-08-26
 
 ## 功能范围与边界
 
@@ -14,6 +14,17 @@ Last Verified: 2026-08-25
 
 - framework 注入的 magicCommon `event.Hub` 只进入 `biz/` 子树：`biz.Biz` 内嵌 Base 并拥有顶层订阅生命周期，`workspaceCommandGateway`、CLI dispatcher、runtime event collector 和 focused Biz port 可以按职责保存 Hub/Base；module root 与生产 HTTP/SSE transport 不保存 Hub 或 runtime session。Biz 通过七组 concrete named `ApplicationPorts` 向 server 注入应用操作，禁止 callback type alias、通用 dispatcher 或 owner service/repository。包内测试基础设施可以构造 owner runtime，但不得扩展生产 `Service` API 或提供 exported Session-backed server constructor；生产默认构造器 fail-closed。
 - 对 Workspace、Orchestrator、Result、Decision、Approval、Memory、MCP Registry、Skill、Soul、Governance 和 Eventstream 的读写，以及对 Run 的读取，必须发送对应 owner `pkg/events` 定义的具体 command，并校验具体 result。execution mutation 只提交 Workspace owner；HTTP `RunPorts` 全部为只读端口。
+- Workspace DELETE 是例外清晰的单 owner ingress，而不是 Application saga：HTTP body 只接收
+  `requestId/purge/expectedRevision`，缺失 `requestId` 时按不可复用的 WorkspaceID 生成跨进程、与 mode 无关的 stable identity；
+  mode 变化因此命中同一 request 并由 Workspace owner 判为 payload conflict。Application 只发送一个 concrete
+  `DeleteWorkspaceCommand` 并验证 immutable completed receipt，不预读 Workspace、枚举 Run、不调用任何其他 owner purge，
+  也不删除目录。retirement fence、quiescence、owner seal/purge、cleanup、重试与启动恢复全部属于 Workspace owner 的
+  durable deletion journal。
+- 删除完成通知不回流 Eventstream：Workspace 在 Eventstream 最终 fence 后发布 concrete immutable
+  `WorkspaceDeletedData`。Workorchd Biz 只接受 `source=blocks/workspace` 且通过 typed `Validate` 的 receipt，并直接写入
+  process-local full SSE replay/fan-out；remote/local event adapter 以 stable `DeletionID` 作为 transport identity。该只读链路
+  不 append audit、不重开 Eventstream、不持有 private phase/ack，也不能触发任何 owner transition；响应丢失时相同 DELETE
+  会从 tombstone 重发同一 receipt，进程重启后的最终收敛仍以普通 Workspace List/Get 隐藏 tombstone 为准。
 - HTTP server 退出时发布只含数据的 `ServiceStoppedData` notification；process service 在 framework `Run` 前建立 observer，并在自身维护 local wait state。EventHub 不传退出 channel、server 或 error object。`WorkspaceRunRequestedCommand` / `WorkspaceRunRequestedResult` 是 Workorchd typed execution ingress；embedded CLI facade 使用按操作拆分的具体 command/result，例如 `CLIWorkspaceCreateCommand` / `CLIWorkspaceCreateResult`，不存在通用 `CLICommand` / `CLIResult`。
 - Biz-owned `executionAdmissionGateway` 先将 HTTP 请求规范化并发送
   `TopicWorkorchDCommandWorkspaceRunRequested`；HTTP、CLI 与 TUI 因而在同一 workspace-scoped Workorchd lane 内调用
@@ -62,10 +73,14 @@ Last Verified: 2026-08-25
   `one_of/any_of/quorum/threshold/first_success` 或其他 candidate-owned unresolved relation 使用
   `rewrite_definition_all_of` ticket；Profile proof closure 返回 `definition_profile_contract_invalid`，Profile-derived owner-fact
   closure/manifest mismatch 返回 `definition_profile_prerequisite_unresolved`，两者使用 `select_or_fix_template_profile` ticket。
-  所有分支都通过 Decision owner 专用 typed ticket fail-closed。submit result 的 typed admission outcome 由 Workspace owner
-  生成；Application 只据此建票或提交
-  identity-only promotion，不能向 Workspace 传入自算 outcome。新 invalid revision（包括既有 eligible revision 之后的 authoring attempt）使用 reconcile-candidate；新 admitted revision严格执行 Workspace promotion(pending) →
-  Decision resolution → Workspace acknowledgement(eligible)，之后仍需用户显式 Restart。
+  所有分支都通过 Decision owner 专用 typed ticket fail-closed。single admission-intent result 的 typed outcome 由 Workspace
+  owner 生成；Application 只据此编排 Decision open/reconcile/resolve，并对每个 concrete result 执行
+  `ValidateFor(exact command)`，再把 exact Decision command/result pair 映射为 immutable ticket/resolution fact；Workspace
+  会独立重算 binding，Application 不能向 Workspace 传入 promotion/ack target、opaque owner ID/hash 或自算 outcome。
+  candidate authoring 固定使用同一 `CandidateID` lineage 与 global next-revision CAS，不能用新 ID/revision 1 绕过旧 ticket。
+  新 invalid revision（包括既有 eligible revision 之后的 authoring
+  attempt）使用 reconcile-candidate；新 admitted revision严格执行 Workspace owner-selected pending promotion → Decision
+  resolution → Workspace owner-selected eligible，之后仍需用户显式 Restart。
 - activation 可以把 profile 显式声明的 `targetSelectorOwnerRef`、`targetSelectorSubjectRef` 与
   `targetSelectorCandidateRefs` 封存为 File declaration scope，但不封存 exact `ProspectiveTargetRef`。空 candidate
   refs 只表示 profile 授权 SM-3 semantic proposal 在 current File operation selector/constraints 内提出一个具体
@@ -118,18 +133,20 @@ Last Verified: 2026-08-25
 | 交互组件 | 方向 | 具体合同 | 当前结论 |
 | --- | --- | --- | --- |
 | `blocks/workspace` | Application → Workspace | definition/template CRUD、candidate admission/promotion/ack、execution intent、terminal/read model query | 完整；Workspace owner 决定 startup input、eligibility 与 active slot |
-| `blocks/run` | Application → Run | Run/snapshot/status/关联资源读取；显式 workspace purge 的 owner cleanup | 完整；`RunPorts` 只读，execution intent 不直达 Run owner |
-| `kernel/orchestrator` | Application → Orchestrator | Runtime read/drive observation、受限 purge/management query | 完整；不持有 drive/reducer |
+| `blocks/run` | Application → Run | Run/snapshot/status/关联资源读取 | 完整；`RunPorts` 只读，execution/deletion intent 不直达 Run owner |
+| `kernel/orchestrator` | Application → Orchestrator | Runtime read/drive observation与受限 management query | 完整；不持有 drive/reducer/deletion phase |
 | `blocks/llm` | Application → LLM | active config、catalog、refresh、selection validation、通用 completion/embedding | 完整；不直连 ai-proxy |
 | Decision / Approval / Governance | 双向应用用例 | owner query/resolve 与 governance trace 展示 | 完整；resolve 不触发 Application Resume |
 | Result / Memory / MCP Registry / Soul | Application → owner | 各 owner 的具体 CRUD/query；MCP paged read 与一致 selection snapshot；activation 只封存 detached snapshot | 完整 |
 | Skill Registry / SkillHub Catalog | Application → owner/catalog | Registry concrete create/get/bounded-list；SkillHub external catalog read；typed provenance + sealed activation budget | 完整；SkillHub 不是 Skill Block 正式状态 |
-| Eventstream / projection | 双向只读链路 | event list/high-watermark/purge、appended/drive/execution observation | 完整；projection 不修复 owner |
+| Eventstream / projection | 双向只读链路 | event list/high-watermark、appended/drive/execution observation | 完整；projection 不修复 owner，Application 不编排 purge |
 | File / Git / Shell / SSH / Web / MCP execution | 无直接执行 I/O | capability operation 只由 Orchestrator sealed dispatch 调用 | 完整 |
 
 ## 相关约束
 
 - application 只负责入口、用例编排、facade 和投影，不得成为正式状态 owner。
+- Workspace delete port 禁止重新引入跨 owner purge command、owner 列表、目录路径清理或 application-local deletion
+  phase/retry journal；相同 HTTP URL 的响应丢失重试必须复用 normalized stable RequestID。
 - HTTP、CLI、TUI、execution-admission adapter 和 projection 不得直接访问 owner repository 或 service。
 - projection 只能读取和投影事件，不得修复 owner 状态或重建业务状态机。
 - 跨组件 command/data/result 必须使用具体类型，不得引入 Envelope、通用 map payload、JSON 类型桥、reflect 或双 Hub 兼容层。
@@ -169,6 +186,8 @@ Last Verified: 2026-08-25
 - [x] projection lifecycle 合法/禁止迁移、stopped late-event noop、failed 经成功 owner mutation/显式 rebuild 恢复与
   未知 state/event 拒绝。
 - [x] run-scoped execution route 已移除，workspace-scoped resume/restart 进入 Workspace owner，且 restart 使用 fresh bootstrap。
+- [x] Workspace DELETE 只发送一个 Workspace owner command；缺省 RequestID stable且 mode-independent，changed mode由
+  same-request payload conflict关闭；静态扫描拒绝 Application 重新导入 owner purge orchestration。
 - [x] owner-lane 测试确认 HTTP/CLI/TUI execution ingress 的 owner admission 与 projection commit 共享 workspace-scoped Workorchd lane，并确认 execution gateway 投递 Workspace owner；聚合边界校验确认唯一 HTTP execution write route 为 workspace-scoped `execution-activations`，Run HTTP route 保持只读。
 - [x] 生产 transport AST 扫描确认 `service/server` 不导入或保存 EventHub、runtime Session、root appservice 兼容状态；聚合边界校验禁止 workorchd 生产代码直接导入 repository。
 - [x] activation Memory selection 执行 candidate/final item、type quota、byte/token hard limit；完整 selection evidence 深拷贝后进入 sealed Runtime activation，并与最终 Memory identity 精确匹配。

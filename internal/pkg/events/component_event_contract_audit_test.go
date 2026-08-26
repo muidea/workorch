@@ -384,6 +384,7 @@ func TestEventHubPostSitesRemainNotificationOnly(t *testing.T) {
 		"internal/modules/blocks/workspace/biz/goal_dod_manager.go:publishDoDEvent":                    1,
 		"internal/modules/blocks/workspace/biz/goal_dod_manager.go:publishGoalEvent":                   1,
 		"internal/modules/blocks/workspace/biz/goal_dod_manager.go:publishWorkspaceEvent":              1,
+		"internal/modules/blocks/workspace/biz/goal_dod_manager.go:publishWorkspaceDeleted":            1,
 		"internal/modules/blocks/workspace/biz/owner.go:publishWorkspaceUpdated":                       1,
 		"internal/modules/kernel/governance/biz/governance_support.go:publishGovernanceEvent":          1,
 		"internal/modules/kernel/orchestrator/biz/runtime_observability.go:observeRuntimeDrive":        1,

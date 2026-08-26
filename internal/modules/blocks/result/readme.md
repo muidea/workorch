@@ -4,12 +4,12 @@ Status: active
 
 Type: stateful-block-contract
 
-Last Verified: 2026-08-22
+Last Verified: 2026-08-26
 
 ## 功能范围与边界
 
 `blocks/result` 是 Result formal outcome 聚合的唯一 owner。聚合根为 Result，Artifact 是 owner 物化并与
-Result 同 scope 的正式子实体。该 block 负责 identity、持久化状态、幂等 fence、artifact 元数据、查询与聚合删除；
+Result 同 scope 的正式子实体。该 block 负责 identity、持久化状态、幂等 fence、artifact 元数据、查询与 Workspace-scoped 清理；
 不负责 evidence quality、DoD coverage 或 accepted 判定策略，也不读取 Runtime authority 重新裁决结果。
 
 ## 写入与状态合同
@@ -32,16 +32,17 @@ Result 同 scope 的正式子实体。该 block 负责 identity、持久化状�
   并逐 requirement/CWI 保存 coverage、assessment、evidence 三个独立状态。accepted evidence 必须给出 owner revision-set
   hash；顶层 accepted refs 必须等于逐项 accepted union，完整 closeout 以 canonical hash 防漂移。`completed` 不接受
   uncovered、unsatisfied、indeterminate 或无 accepted evidence 的 requirement；Result owner只校验封存完整性，不重新授予 credit。
-- Result 删除是可重试的聚合删除：先删除聚合根，再清理全部正式子 Artifact；中途失败后可从 orphan cleanup 继续。
-  单独 Artifact delete 只允许清理父 Result 已不存在的 orphan，不能使一个仍存在的 Result 留下悬空引用。
+- 不提供 Result/Artifact 单项 delete command。删除只进入 Workspace owner 的 durable deletion transaction；Result owner
+  自己执行 fixed-point Result/Artifact purge，外部 caller 不能绕过 tombstone 或留下孤立子实体。
 
 ## 查询合同
 
 - 每个 topic 都有独立 concrete result type；不存在同时承载 Result、Artifact、列表和删除计数的通用 result
   envelope，也不存在 generic entity create/update command。
+- Workspace 删除只接受 `blocks/workspace` 的 concrete seal/purge command。Result owner 持久化自身 tombstone，并以 owner-private internal event 推进 `fenced → purged`；command adapter 只能提交 `purge_requested`，物理 Result/Artifact fixed-point sink 只能由同一 private dispatcher 调用，完成后再提交 `purge_completed` CAS。retain 隐藏公共 Result/Artifact 查询且不物理删除。所有 terminal delivery、recovery 及实体 mutation 都先核对同一 owner fence；file backend 与 tombstone 共用 path-global workspace 锁，memory production repository set 共用 guard。seal/purge ack 使用确定性的 `FenceID`、`PurgeID`、`Revision`、`AckHash`、`PurgeProofHash`，重放不以删除计数作为身份。
 - repository helper 与 Result/Artifact mutation method 均为 Biz 包内私有实现；Biz 不导出或嵌入可由其他组件取得的
   `Service` facade，跨组件写入只能进入 owner typed EventHub handler。
-- 所有 get/list/delete command 都显式携带 `WorkspaceID`。按 Run/Result 查询时也必须绑定相同 workspace context；
+- 所有 get/list command 都显式携带 `WorkspaceID`。按 Run/Result 查询时也必须绑定相同 workspace context；
   memory 与 file backend 对重复局部 ID 采用相同的 scoped/ambiguous 语义。
 - 所有 list command 使用 ID keyset `Cursor` 和 `Limit`，默认 100、单页上限 200。Application 与 Orchestrator 的
   production collector 同时具备 cursor visited-set 与 1,000 页 hard limit。
@@ -66,7 +67,8 @@ Result 同 scope 的正式子实体。该 block 负责 identity、持久化状�
 | 交互组件 | 方向 | 具体合同 | 当前结论 |
 | --- | --- | --- | --- |
 | `kernel/orchestrator` | Orchestrator → Result | sealed `RuntimeTerminalDeliveryFact` / `ResultLifecycleCommandResult` | 完整；Result owner 派生 identity/state，SM-4 只接收 owner ack |
-| `application/workorchd` | Application → Result | concrete scoped get/list/delete command/result；workspace purge | 完整；分页有界，聚合根先删、orphan 后清理 |
+| `application/workorchd` | Application → Result | concrete scoped get/list command/result | 完整；Application 只读，Workspace owner 独占删除协调 ingress |
+| `blocks/workspace` | Workspace → Result | workspace-scoped seal/purge command/result | 完整；Result owner 私有 fence 与 fixed-point sink |
 | Eventstream / projection | Result → consumer | accepted/rejected `ResultChangedData` + stable `NotificationID` | 完整；Result durable replay、Eventstream 幂等去重，projection 不参与 Runtime authority |
 | Run / Workspace | 无 repository 直连 | 同一 sealed terminal outcome 的 Result → Workspace → Run delivery 顺序 | 完整；Result 不直接迁移 SM-1 或 Workspace lifecycle |
 
@@ -83,7 +85,7 @@ Result 同 scope 的正式子实体。该 block 负责 identity、持久化状�
 
 - canonical Result/Artifact ID、规范化 material hash、相同 delivery 重放、material/identity drift conflict。
 - Result pending、Artifact 部分写入后的重启收敛，以及持久化 terminal Result 的启动通知重放。
-- Result/Artifact scope、父引用、聚合级联删除、orphan delete 与 file backend 跨 workspace ResultID 隔离。
+- Result/Artifact scope、父引用、Workspace retain/purge fixed point 与 file backend 跨 workspace ResultID 隔离。
 - concrete command/result 类型、默认/最大分页、cursor continuation/cycle guard 和 query clone 隔离。
 - stable Eventstream dedupe、nested artifact reference closure、terminal material isolation 与 allocation benchmark。
 - formal closeout identity/hash、三轴 requirement outcome、accepted-evidence union、owner revision set 与 indeterminate-success 拒绝。

@@ -59,7 +59,7 @@ func (m *Biz) executeLifecycleCommand(ev magicevent.Event) (workspaceevents.Work
 	}
 }
 
-func (m *Biz) applyRunProjection(ctx context.Context, cmd workspaceevents.RunProjectionFact) (workspaceevents.WorkspaceLifecycleCommandResult, error) {
+func (m *Biz) applyRunProjection(ctx context.Context, cmd workspaceRunProjectionFact) (workspaceevents.WorkspaceLifecycleCommandResult, error) {
 	for attempt := 0; attempt < 3; attempt++ {
 		current, err := m.workspaces.Get(ctx, cmd.WorkspaceID)
 		if err != nil {

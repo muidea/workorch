@@ -15,10 +15,12 @@ func Contracts() []eventcontract.Contract {
 		TopicDecisionCommandListTicketsByRun,
 		TopicDecisionCommandListTicketsByWS,
 		TopicDecisionCommandGetResolution,
+		TopicQueryWorkspaceDefinitionClarificationFact,
 	)...)
 	ret = append(ret, eventcontract.Build("decision", eventcontract.CommandClassWrite, eventcontract.LanePolicyState,
 		TopicDecisionCommandEnsureResolved,
 		TopicDecisionCommandPurgeWorkspace,
+		TopicDecisionCommandSealWorkspaceDeletion,
 		TopicDecisionCommandRecordEvidence,
 		TopicOpenRuntimeGovernanceRequest,
 		TopicOpenWorkspaceDefinitionClarification,

@@ -93,7 +93,7 @@ func TestRuntimeCandidateRequestContentBridgeCompletesDocumentWithoutCandidateAt
 	if err := owner.ConfigureRuntimeRepository(state); err != nil {
 		t.Fatal(err)
 	}
-	module := owner
+	module := newTestBiz(owner, nil, nil)
 	prepared, session, err := owner.EnsureRuntimeCandidateRequestSession(ctx, initial.Facts.WorkspaceID, initial.Facts.RunID, "stable-prefix", "manifest-v1", "")
 	if err != nil {
 		t.Fatal(err)

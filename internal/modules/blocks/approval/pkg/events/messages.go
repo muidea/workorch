@@ -8,6 +8,7 @@ import (
 	approvalmodel "github.com/muidea/workorch/internal/modules/blocks/approval/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/eventcontract"
+	deletioncontract "github.com/muidea/workorch/internal/pkg/workorchdeletioncontract"
 	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
 )
 
@@ -62,7 +63,32 @@ type ListApprovalsByWorkspaceCommand struct {
 	Limit       int
 }
 
-type PurgeWorkspaceApprovalsCommand struct{ WorkspaceID common.WorkspaceID }
+type SealWorkspaceApprovalDeletionCommand struct {
+	WorkspaceID               common.WorkspaceID
+	DeletionID                string
+	DeletionGeneration        uint64
+	DataDispositionIntent     deletioncontract.Mode
+	QuiescenceID, RequestHash string
+}
+
+func (c SealWorkspaceApprovalDeletionCommand) Scope() deletioncontract.Scope {
+	return deletioncontract.Scope{WorkspaceID: c.WorkspaceID, DeletionID: c.DeletionID, DeletionGeneration: c.DeletionGeneration, Mode: c.DataDispositionIntent, QuiescenceID: c.QuiescenceID, RequestHash: c.RequestHash}.Normalize()
+}
+func (c SealWorkspaceApprovalDeletionCommand) Validate() error { return c.Scope().Validate() }
+
+type PurgeWorkspaceApprovalsCommand struct {
+	WorkspaceID               common.WorkspaceID
+	DeletionID                string
+	DeletionGeneration        uint64
+	QuiescenceID, RequestHash string
+}
+
+func (c PurgeWorkspaceApprovalsCommand) Scope() deletioncontract.Scope {
+	return deletioncontract.Scope{WorkspaceID: c.WorkspaceID, DeletionID: c.DeletionID, DeletionGeneration: c.DeletionGeneration, Mode: deletioncontract.ModePurge, QuiescenceID: c.QuiescenceID, RequestHash: c.RequestHash}.Normalize()
+}
+func (c PurgeWorkspaceApprovalsCommand) Validate() error {
+	return c.Scope().Validate()
+}
 
 type OpenRuntimeApprovalRequestCommand struct {
 	ApprovalID           common.ApprovalID
@@ -136,7 +162,22 @@ type ListApprovalsByWorkspaceResult struct {
 }
 type EnsureApprovedResult struct{ Approval *approvalmodel.Approval }
 type EnsureRejectedResult struct{ Approval *approvalmodel.Approval }
-type PurgeWorkspaceApprovalsResult struct{ Deleted int }
+type SealWorkspaceApprovalDeletionResult struct {
+	WorkspaceID        common.WorkspaceID
+	DeletionID         string
+	DeletionGeneration uint64
+	FenceID            string
+	Revision           uint64
+	AckHash            string
+}
+type PurgeWorkspaceApprovalsResult struct {
+	WorkspaceID             common.WorkspaceID
+	DeletionID              string
+	DeletionGeneration      uint64
+	FenceID, PurgeID        string
+	Revision                uint64
+	AckHash, PurgeProofHash string
+}
 
 func NormalizeListWindow(cursor string, limit int) (string, int, error) {
 	cursor = strings.TrimSpace(cursor)
@@ -164,6 +205,7 @@ func MessageContracts() []eventcontract.MessageContract {
 		eventcontract.CommandTopic[ListApprovalsByRunCommand, ListApprovalsByRunResult]("approval", definitionPackage, eventcontract.CommandClassRead, eventcontract.LanePolicyQuery, TopicApprovalCommandListByRun).MessageContract(),
 		eventcontract.CommandTopic[ListApprovalsByWorkspaceCommand, ListApprovalsByWorkspaceResult]("approval", definitionPackage, eventcontract.CommandClassRead, eventcontract.LanePolicyQuery, TopicApprovalCommandListByWorkspace).MessageContract(),
 		eventcontract.CommandTopic[PurgeWorkspaceApprovalsCommand, PurgeWorkspaceApprovalsResult]("approval", definitionPackage, eventcontract.CommandClassWrite, eventcontract.LanePolicyState, TopicApprovalCommandPurgeWorkspace).MessageContract(),
+		eventcontract.CommandTopic[SealWorkspaceApprovalDeletionCommand, SealWorkspaceApprovalDeletionResult]("approval", definitionPackage, eventcontract.CommandClassWrite, eventcontract.LanePolicyState, TopicApprovalCommandSealWorkspaceDeletion).MessageContract(),
 		eventcontract.CommandTopic[EnsureApprovedCommand, EnsureApprovedResult]("approval", definitionPackage, eventcontract.CommandClassWrite, eventcontract.LanePolicyState, TopicApprovalCommandEnsureApproved).MessageContract(),
 		eventcontract.CommandTopic[EnsureRejectedCommand, EnsureRejectedResult]("approval", definitionPackage, eventcontract.CommandClassWrite, eventcontract.LanePolicyState, TopicApprovalCommandEnsureRejected).MessageContract(),
 		eventcontract.CommandTopic[RecordApprovalEvidenceCommand, RecordApprovalEvidenceResult]("approval", definitionPackage, eventcontract.CommandClassWrite, eventcontract.LanePolicyState, TopicApprovalCommandRecordEvidence).MessageContract(),

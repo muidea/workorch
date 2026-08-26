@@ -1,6 +1,8 @@
 // Package semanticplan contains deterministic semantic-plan rules used by the
 // Orchestrator owner.  It deliberately has no access to Runtime aggregates,
-// repositories, EventHub or clocks; state transitions remain in biz/runtime.
+// repositories, EventHub or clocks. It may compile the owner-private initial
+// Pending batch fact, but only biz/runtime's internal-event reducer may persist
+// that initialization or select any later lifecycle transition.
 package semanticplan
 
 import (

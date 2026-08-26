@@ -399,7 +399,9 @@ func TestRuntimeStateRepositoryFileReloadRetainsSemanticPlanningGenerationHistor
 		stopFirst()
 		t.Fatalf("file-backed semantic fixture invalid before retirement: %v", err)
 	}
-	if err := firstRepository.Save(ctx, sealed, sealed.StateRevision); err != nil {
+	expectedSealedRevision := sealed.StateRevision
+	sealed.StateRevision++
+	if err := firstRepository.Save(ctx, sealed, expectedSealedRevision); err != nil {
 		stopFirst()
 		t.Fatalf("persist sealed semantic fixture: %v", err)
 	}
@@ -3492,6 +3494,7 @@ func TestDriveRuntimeDecisionReacquiresMissingSealedProviderCeilingBeforeLLM(t *
 	// driveRuntimeDecision reconciles it back to the sealed prerequisite.
 	broken := committed
 	broken.Facts.Resources.ProviderCeiling = nil
+	broken.StateRevision++
 	if err := (runtimeStateRepository{hub: hub}).Save(ctx, broken, committed.StateRevision); err != nil {
 		t.Fatalf("persist missing provider ceiling aggregate: %v", err)
 	}

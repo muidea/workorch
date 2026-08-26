@@ -4,8 +4,10 @@ package orchestrator
 
 import (
 	"context"
+	"errors"
 	"testing"
 
+	cd "github.com/muidea/magicCommon/def"
 	magicevent "github.com/muidea/magicCommon/event"
 	approvalevents "github.com/muidea/workorch/internal/modules/blocks/approval/pkg/events"
 	approvalmodel "github.com/muidea/workorch/internal/modules/blocks/approval/pkg/models"
@@ -13,16 +15,14 @@ import (
 	decisionevents "github.com/muidea/workorch/internal/modules/blocks/decision/pkg/events"
 	runevents "github.com/muidea/workorch/internal/modules/blocks/run/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/common"
-	memoryrepo "github.com/muidea/workorch/internal/pkg/repository/memory"
 	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
 	runtimemodel "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
 func TestDecisionEvidenceCommandPersistsThroughOrchestratorConsumer(t *testing.T) {
 	ctx := context.Background()
-	evidenceRepo := memoryrepo.NewEvidenceRecordRepository()
 	deps := moduleContractDependencies()
-	deps.EvidenceRecords = evidenceRepo
+	evidenceRepo := deps.Evidence.EvidenceRecords()
 	installEmptyRecoveryInventory(t, deps.CommandHub)
 	module := New()
 	if err := module.Configure(deps); err != nil {
@@ -80,9 +80,8 @@ func TestDecisionEvidenceCommandPersistsThroughOrchestratorConsumer(t *testing.T
 
 func TestApprovalEvidenceCommandPersistsThroughOrchestratorConsumer(t *testing.T) {
 	ctx := context.Background()
-	evidenceRepo := memoryrepo.NewEvidenceRecordRepository()
 	deps := moduleContractDependencies()
-	deps.EvidenceRecords = evidenceRepo
+	evidenceRepo := deps.Evidence.EvidenceRecords()
 	installEmptyRecoveryInventory(t, deps.CommandHub)
 	module := New()
 	if err := module.Configure(deps); err != nil {
@@ -141,6 +140,43 @@ func TestApprovalEvidenceCommandPersistsThroughOrchestratorConsumer(t *testing.T
 	}
 }
 
+func TestDecisionEvidenceCommandRejectsForgedSource(t *testing.T) {
+	ctx := context.Background()
+	deps := moduleContractDependencies()
+	installEmptyRecoveryInventory(t, deps.CommandHub)
+	module := New()
+	if err := module.Configure(deps); err != nil {
+		t.Fatal(err)
+	}
+	if err := module.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_ = module.Stop(ctx)
+		deps.CommandHub.Terminate(ctx)
+	})
+
+	command := decisionevents.RecordDecisionEvidenceCommand{
+		EvidenceRecordID: "evidence-forged-source", WorkspaceID: "ws-forged-source", RunID: "run-forged-source",
+		TicketID: "ticket-forged-source", ResolutionID: "resolution-forged-source",
+	}
+	event := magicevent.NewEventWithContext(
+		decisionevents.TopicDecisionCommandRecordEvidence,
+		"application/workorchd",
+		ModuleID,
+		magicevent.NewHeader(),
+		ctx,
+		command,
+	)
+	result := deps.CommandHub.Send(event)
+	if result == nil || result.Error() == nil || !errors.Is(result.Error().Cause, common.ErrInvalidArgument) {
+		t.Fatalf("forged decision evidence result = %v", result)
+	}
+	if _, err := deps.Evidence.EvidenceRecords().Get(common.ContextWithRuntimeWorkspaceID(ctx, command.WorkspaceID), command.EvidenceRecordID); !errors.Is(err, common.ErrNotFound) {
+		t.Fatalf("forged source persisted evidence: %v", err)
+	}
+}
+
 func installEmptyRecoveryInventory(t *testing.T, hub magicevent.Hub) {
 	t.Helper()
 	observer := magicevent.NewSimpleObserver(runevents.CommandDestination, hub)
@@ -149,5 +185,19 @@ func installEmptyRecoveryInventory(t *testing.T, hub magicevent.Hub) {
 			result.Set(runevents.QueryRuntimeRecoveryInventoryResult{}, nil)
 		}
 	})
-	t.Cleanup(func() { observer.Unsubscribe(runevents.TopicRunCommandRuntimeRecoveryInventory) })
+	observer.Subscribe(runevents.TopicRunCommandWorkspaceRetirementInventory, func(_ magicevent.Event, result magicevent.Result) {
+		if result != nil {
+			result.Set(runevents.QueryWorkspaceRetirementInventoryResult{}, nil)
+		}
+	})
+	observer.Subscribe(runevents.TopicRunCommandWorkspaceRetirementFact, func(_ magicevent.Event, result magicevent.Result) {
+		if result != nil {
+			result.Set(nil, &cd.Error{Code: cd.NotFound, Message: common.ErrNotFound.Error(), Cause: common.ErrNotFound})
+		}
+	})
+	t.Cleanup(func() {
+		observer.Unsubscribe(runevents.TopicRunCommandRuntimeRecoveryInventory)
+		observer.Unsubscribe(runevents.TopicRunCommandWorkspaceRetirementInventory)
+		observer.Unsubscribe(runevents.TopicRunCommandWorkspaceRetirementFact)
+	})
 }

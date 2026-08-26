@@ -17,7 +17,7 @@ func (m *Module) ID() string                                    { return ModuleI
 func (m *Module) Configure(deps approvalbiz.Dependencies) error { return m.configure(deps) }
 
 func (m *Module) configure(deps approvalbiz.Dependencies) error {
-	if m == nil || deps.EventHub == nil || deps.Approvals == nil {
+	if m == nil || deps.EventHub == nil || deps.Approvals == nil || deps.WorkspaceDeletions == nil {
 		return common.ErrInvalidArgument
 	}
 	bizPtr, err := approvalbiz.New(deps.EventHub, deps.BackgroundRoutine, deps)

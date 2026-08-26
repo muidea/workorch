@@ -62,9 +62,13 @@ Blocks 的 owner 边界，不保存历史偏差、重构过程或 closure 记录
 
 - each formal state has one owner and only that owner's private reducer chooses transitions;
 - `scripts/state-transition-owners.manifest` is the sole verification-only inventory for formal machines and owner-private
-  transition/effect gates; it must never become a production dispatcher or shared reducer registry;
+  transition/effect gates; each privileged owner sink has exactly one owner-root call in the declared private dispatcher, while
+  any other production reference must be an explicitly inventoried repository storage delegation; the inventory must never
+  become a production dispatcher or shared reducer registry;
 - cross-owner I/O is EventHub plus receiver-defined concrete typed command/data/result;
 - no owner exposes a sibling service or repository facade;
+- repository-family access is resolved only through `internal/pkg/workorchdeps`; other production packages cannot call the
+  Initiator `RepositoryProvider()` directly;
 - Workorchd owns entry/use-case/projection concerns, Run owns SM-1, Orchestrator owns SM-2/3/4, capability blocks own effects,
   and Result persists already-judged outcomes;
 - projection, Eventstream, HTTP DTO and process records are non-authoritative;

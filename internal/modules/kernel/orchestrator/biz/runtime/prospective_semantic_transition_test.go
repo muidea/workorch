@@ -4,6 +4,7 @@ import (
 	"context"
 	"testing"
 
+	"github.com/muidea/workorch/internal/modules/kernel/orchestrator/biz/internal/semanticplan"
 	"github.com/muidea/workorch/internal/pkg/common"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
@@ -398,7 +399,7 @@ func newProspectiveSemanticTransitionFixture(t *testing.T) *prospectiveSemanticT
 		Kind:        RuntimeInternalEventSemanticPlanEvaluated,
 		Transaction: &RuntimeInternalTransactionPayload{SemanticDocument: &order, LogicalRequestID: "prospective-order-request"},
 	})
-	batch, err := runtimecontract.CompileRuntimeSemanticPlanFocusBatch(
+	batch, err := semanticplan.CompileFocusBatch(
 		manifest, order, 0, "prospective-proof-request", fixture.aggregate.Facts.Focus.CoverageWorkItemIDs,
 		fixture.aggregate.SemanticPlanning.PendingCoverageIDs, 1,
 	)

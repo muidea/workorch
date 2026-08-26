@@ -67,6 +67,13 @@ func (m *Biz) executeGoalCommand(ctx context.Context, ev magicevent.Event) (work
 		if err != nil {
 			return workspaceevents.WorkspaceCommandResult{}, err
 		}
+		hidden, err := m.workspaceDeletionReadHidden(scopedCtx, cmd.WorkspaceID)
+		if err != nil {
+			return workspaceevents.WorkspaceCommandResult{}, err
+		}
+		if hidden {
+			return workspaceevents.WorkspaceCommandResult{}, common.ErrNotFound
+		}
 		item, err := m.goals.Get(scopedCtx, cmd.GoalID)
 		if err != nil {
 			return workspaceevents.WorkspaceCommandResult{}, err
@@ -80,6 +87,13 @@ func (m *Biz) executeGoalCommand(ctx context.Context, ev magicevent.Event) (work
 		scopedCtx, err := common.BindRuntimeWorkspaceContext(ctx, cmd.WorkspaceID)
 		if err != nil {
 			return workspaceevents.WorkspaceCommandResult{}, err
+		}
+		hidden, err := m.workspaceDeletionReadHidden(scopedCtx, cmd.WorkspaceID)
+		if err != nil {
+			return workspaceevents.WorkspaceCommandResult{}, err
+		}
+		if hidden {
+			return workspaceevents.WorkspaceCommandResult{Goals: []*workspacemodel.Goal{}}, nil
 		}
 		items, err := m.goals.ListByWorkspaceID(scopedCtx, cmd.WorkspaceID)
 		if err != nil {

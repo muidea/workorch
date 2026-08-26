@@ -425,65 +425,12 @@ func TestService_OrdinaryResolutionReplayUsesCanonicalSealedFingerprint(t *testi
 	}
 }
 
-func TestService_DecisionAggregatePurgeHidesAndRecoversPartialDeletion(t *testing.T) {
-	ctx := context.Background()
-	workspaceID := common.WorkspaceID("ws-decision-purge-recovery")
-	ticketID := common.TicketID("ticket-decision-purge-recovery")
-	scopedCtx := common.ContextWithRuntimeWorkspaceID(ctx, workspaceID)
-	tickets := memory.NewDecisionTicketRepository()
-	resolutions := newFailingDeleteDecisionResolutionRepository()
-	if err := tickets.Create(scopedCtx, &decisionModel.Ticket{
-		ID: ticketID, WorkspaceID: workspaceID, RunID: "run-decision-purge-recovery", State: common.DecisionTicketStateResolved, Reason: "purge recovery",
-	}); err != nil {
-		t.Fatalf("create ticket: %v", err)
-	}
-	if err := resolutions.Create(scopedCtx, &decisionModel.Resolution{ID: "resolution-decision-purge-recovery", TicketID: ticketID, Type: decisioncommon.ResolutionTypeProvideMissingInfo}); err != nil {
-		t.Fatalf("create resolution: %v", err)
-	}
-	rawHub := magicevent.NewHub(16)
-	t.Cleanup(func() { rawHub.Terminate(ctx) })
-	owner, err := New(rawHub, nil, Dependencies{Tickets: tickets, Resolutions: resolutions, EventHub: rawHub})
-	if err != nil {
-		t.Fatalf("New Biz: %v", err)
-	}
-	item, err := tickets.Get(scopedCtx, ticketID)
-	if err != nil {
-		t.Fatalf("get ticket: %v", err)
-	}
-	resolutions.failDelete.Store(true)
-	if err := owner.service.PurgeDecisionAggregate(scopedCtx, item); err == nil {
-		t.Fatal("partial purge unexpectedly succeeded")
-	}
-	tombstone, err := tickets.Get(scopedCtx, ticketID)
-	if err != nil || tombstone.DeletionRequestedAt == "" {
-		t.Fatalf("partial purge tombstone = %+v err=%v", tombstone, err)
-	}
-	if _, err := owner.executeGetTicketCommand(scopedCtx, decisionevents.GetTicketCommand{WorkspaceID: workspaceID, TicketID: ticketID}); !errors.Is(err, common.ErrNotFound) {
-		t.Fatalf("public get of tombstone err = %v, want not found", err)
-	}
-	page, err := owner.executeListTicketsByWorkspaceCommand(scopedCtx, decisionevents.ListTicketsByWorkspaceCommand{WorkspaceID: workspaceID})
-	if err != nil || len(page.Tickets) != 0 {
-		t.Fatalf("public list of tombstone = %+v err=%v", page, err)
-	}
-
-	resolutions.failDelete.Store(false)
-	if err := owner.ReconcileRuntimeGovernanceProposals(ctx); err != nil {
-		t.Fatalf("recover aggregate purge: %v", err)
-	}
-	if _, err := tickets.Get(scopedCtx, ticketID); !errors.Is(err, common.ErrNotFound) {
-		t.Fatalf("ticket after purge recovery err = %v, want not found", err)
-	}
-	if _, err := resolutions.GetByTicketID(scopedCtx, ticketID); !errors.Is(err, common.ErrNotFound) {
-		t.Fatalf("resolution after purge recovery err = %v, want not found", err)
-	}
-}
-
 func TestBiz_ReconciliationClosesOrdinaryResolutionWriteCut(t *testing.T) {
 	ctx := context.Background()
 	tickets := newCountingDecisionTicketRepository()
 	resolutions := memory.NewDecisionResolutionRepository()
 	hub := newRecordingDecisionHub(t)
-	owner, err := New(hub, nil, Dependencies{Tickets: tickets, Resolutions: resolutions, EventHub: hub})
+	owner, err := New(hub, nil, Dependencies{WorkspaceDeletions: memory.NewDecisionWorkspaceDeletionRepository(), Tickets: tickets, Resolutions: resolutions, EventHub: hub})
 	if err != nil {
 		t.Fatalf("New Biz: %v", err)
 	}
@@ -1377,7 +1324,7 @@ func TestBiz_PublishesDecisionNotificationsAndRecordsEvidence(t *testing.T) {
 	ticketRepo := memory.NewDecisionTicketRepository()
 	resolutionRepo := memory.NewDecisionResolutionRepository()
 	hub := newRecordingDecisionHub(t)
-	owner, err := New(hub, nil, Dependencies{Tickets: ticketRepo, Resolutions: resolutionRepo, EventHub: hub})
+	owner, err := New(hub, nil, Dependencies{WorkspaceDeletions: memory.NewDecisionWorkspaceDeletionRepository(), Tickets: ticketRepo, Resolutions: resolutionRepo, EventHub: hub})
 	if err != nil {
 		t.Fatalf("New Biz: %v", err)
 	}

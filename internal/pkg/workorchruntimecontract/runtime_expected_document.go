@@ -162,17 +162,32 @@ func (o RuntimeProviderDocumentFraming) Validate() error {
 	if o.ExpectedDocumentHash == "" || o.ResponseBytes < 0 {
 		return common.ErrInvalidArgument
 	}
+	// ResponseHash and ResponseBytes describe the same bounded provider bytes
+	// and therefore must always be present or absent together. An explicit
+	// max-output stop may legitimately have no final-document bytes when the
+	// provider spent its entire output budget on reasoning.
+	hasResponse := o.ResponseBytes > 0
+	if hasResponse != (o.ResponseHash != "") {
+		return common.ErrInvalidArgument
+	}
 	switch o.Disposition {
 	case RuntimeProviderDocumentComplete:
-		if o.ResponseHash == "" || o.ResponseBytes == 0 || o.Code != "" {
+		if !hasResponse || o.Code != "" || o.Signature != "" {
 			return common.ErrInvalidArgument
 		}
-	case RuntimeProviderDocumentIncomplete, RuntimeProviderDocumentInvalid:
-		if o.ResponseHash == "" || o.ResponseBytes == 0 || o.Code == "" {
+	case RuntimeProviderDocumentIncomplete:
+		if o.Code == "" || o.Signature == "" {
+			return common.ErrInvalidArgument
+		}
+		if !hasResponse && (o.Code != "max_output_tokens" || o.Signature != "provider-output-limit") {
+			return common.ErrInvalidArgument
+		}
+	case RuntimeProviderDocumentInvalid:
+		if !hasResponse || o.Code == "" || o.Signature == "" {
 			return common.ErrInvalidArgument
 		}
 	case RuntimeProviderDocumentEmpty:
-		if o.ResponseHash != "" || o.ResponseBytes != 0 || o.Code == "" {
+		if hasResponse || o.Code == "" || o.Signature == "" {
 			return common.ErrInvalidArgument
 		}
 	default:

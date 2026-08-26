@@ -16,10 +16,12 @@ func (m *Biz) publishTicketCreated(ctx context.Context, ticket *decisionmodel.Ti
 	if m == nil || m.EventHub() == nil || ticket == nil {
 		return nil
 	}
-	event := magicevent.NewEventWithContext(decisionevents.TopicTicketCreated, modulecommon.ModuleID, decisionevents.NotificationDestination, magicevent.NewHeader(), ctx, ticketChangedData(ticket))
-	m.bindDecisionNotificationLane(event, ticket)
-	m.PostEvent(event)
-	return nil
+	return m.withWorkspaceActiveDelivery(ctx, ticket.WorkspaceID, func(guarded context.Context) error {
+		event := magicevent.NewEventWithContext(decisionevents.TopicTicketCreated, modulecommon.ModuleID, decisionevents.NotificationDestination, magicevent.NewHeader(), guarded, ticketChangedData(ticket))
+		m.bindDecisionNotificationLane(event, ticket)
+		m.PostEvent(event)
+		return nil
+	})
 }
 
 func (m *Biz) ensureTicketCreatedNotification(ctx context.Context, ticket *decisionmodel.Ticket) error {
@@ -77,9 +79,14 @@ func (m *Biz) recordAndPublishResolvedTicket(ctx context.Context, ticket *decisi
 		ResumeRunID:        resolution.ResumeRunID,
 		SuccessorRunID:     resolution.SuccessorRunID,
 	}
-	event := magicevent.NewEventWithContext(decisionevents.TopicTicketResolved, modulecommon.ModuleID, decisionevents.NotificationDestination, magicevent.NewHeader(), ctx, data)
-	m.bindDecisionNotificationLane(event, ticket)
-	m.PostEvent(event)
+	if err := m.withWorkspaceActiveDelivery(ctx, ticket.WorkspaceID, func(guarded context.Context) error {
+		event := magicevent.NewEventWithContext(decisionevents.TopicTicketResolved, modulecommon.ModuleID, decisionevents.NotificationDestination, magicevent.NewHeader(), guarded, data)
+		m.bindDecisionNotificationLane(event, ticket)
+		m.PostEvent(event)
+		return nil
+	}); err != nil {
+		return err
+	}
 	if runtimeProposal {
 		updated, err := m.service.MarkRuntimeGovernanceNotificationPublished(ctx, ticket)
 		if err != nil {

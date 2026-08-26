@@ -19,7 +19,7 @@ import (
 
 func startApprovalBizForGovernanceTest(t *testing.T, hub magicevent.Hub, approvals *memory.ApprovalRepository) *Biz {
 	t.Helper()
-	owner, err := New(hub, nil, Dependencies{Approvals: approvals, EventHub: hub})
+	owner, err := New(hub, nil, Dependencies{WorkspaceDeletions: memory.NewApprovalWorkspaceDeletionRepository(), Approvals: approvals, EventHub: hub})
 	if err != nil {
 		t.Fatal(err)
 	}

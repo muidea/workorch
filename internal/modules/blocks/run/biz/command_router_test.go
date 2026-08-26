@@ -8,17 +8,20 @@ import (
 
 func TestRunCommandTopicsHaveOneSemanticFamily(t *testing.T) {
 	expected := map[string]runCommandFamily{
-		runevents.TopicRunCommandGet:                     runCommandFamilyRunQuery,
-		runevents.TopicRunCommandList:                    runCommandFamilyRunQuery,
-		runevents.TopicRunCommandListByWorkspace:         runCommandFamilyRunQuery,
-		runevents.TopicRunCommandGetStep:                 runCommandFamilyStepQuery,
-		runevents.TopicRunCommandListStepsByRun:          runCommandFamilyStepQuery,
-		runevents.TopicRunCommandListStepSummariesByRun:  runCommandFamilyStepQuery,
-		runevents.TopicRunCommandGetRuntimeCheckpoint:    runCommandFamilyCheckpointQuery,
-		runevents.TopicRunCommandListCheckpointsByRun:    runCommandFamilyCheckpointQuery,
-		runevents.TopicRunCommandStoreRuntimeStateRecord: runCommandFamilyRuntimeStateStore,
-		runevents.TopicRunCommandPurgeRuntimeResources:   runCommandFamilyResourceCleanup,
-		runevents.TopicRunCommandDelete:                  runCommandFamilyResourceCleanup,
+		runevents.TopicRunCommandGet:                         runCommandFamilyRunQuery,
+		runevents.TopicRunCommandList:                        runCommandFamilyRunQuery,
+		runevents.TopicRunCommandListByWorkspace:             runCommandFamilyRunQuery,
+		runevents.TopicRunCommandLifecycleFactInventory:      runCommandFamilyRunQuery,
+		runevents.TopicRunCommandGetStep:                     runCommandFamilyStepQuery,
+		runevents.TopicRunCommandListStepsByRun:              runCommandFamilyStepQuery,
+		runevents.TopicRunCommandListStepSummariesByRun:      runCommandFamilyStepQuery,
+		runevents.TopicRunCommandGetRuntimeCheckpoint:        runCommandFamilyCheckpointQuery,
+		runevents.TopicRunCommandListCheckpointsByRun:        runCommandFamilyCheckpointQuery,
+		runevents.TopicRunCommandStoreRuntimeStateRecord:     runCommandFamilyRuntimeStateStore,
+		runevents.TopicRunCommandWorkspaceRetirementFact:     runCommandFamilyWorkspaceRetirement,
+		runevents.TopicRunCommandPrepareWorkspaceRetirement:  runCommandFamilyWorkspaceRetirement,
+		runevents.TopicRunCommandFinalizeWorkspaceRetirement: runCommandFamilyWorkspaceRetirement,
+		runevents.TopicRunCommandPurgeWorkspace:              runCommandFamilyWorkspaceRetirement,
 	}
 	topics := runCommandTopics()
 	if len(topics) != len(expected) {

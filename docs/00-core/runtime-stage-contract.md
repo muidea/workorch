@@ -4,7 +4,7 @@ Status: normative
 
 Type: core-contract-index
 
-Last Verified: 2026-08-25
+Last Verified: 2026-08-26
 
 ## Purpose
 
@@ -58,6 +58,38 @@ Run SM-1 administrative termination intent
 
 Recovery is idempotent re-drive from the Run-owned opaque aggregate. Projection、Eventstream、provider text、process-local cache
 和历史 event sequence 都不能重建或替代 authority。
+
+Workspace 删除不是第五个 Runtime 状态机。Workspace owner 持久化唯一 deletion coordinator aggregate；Application
+只提交一次 typed 删除意图。初次发现 active Run 时必须零删除意图返回 conflict。准入后，Run owner 先在自身
+generation-head 线性化点以 private reducer/CAS 封存 `draining` fence：它永久拒绝新 Run、Restart、普通 SM-1、Step、
+Checkpoint 与 generic Run mutation，只保留 Run owner 验证后的 exact opaque Runtime CAS drain lane。Orchestrator 在这一
+`draining` 区间只允许已经存在的 terminal-delivery 与 delivery-lease claim/recover/release 收尾；SM-2/SM-3、普通 drive、
+provider/capability/evidence 与非 terminal lease authority 都必须拒绝。其 `BeginWorkspaceRuntimeQuiescence` 与所有 Runtime
+private mutation 共用 owner write barrier：只要仍有进程内 writer、timer、mount、persisted lease 或未完整确认的 terminal
+delivery，就零状态变化返回 conflict。全部排空后，Orchestrator 才由自身 private reducer 持久化 `quiescing` gate；该
+gate 落地后所有 Runtime mutation 一律 fail-closed，不再保留 drain 例外。随后 Orchestrator 封存绑定有序逐 Run
+generation、Run revision、Runtime ref/revision/hash 的 typed quiescence token。Run owner 在同一 generation-head
+锁内精确复核 token inventory后，才把自身 fence从 `draining` 原子升级为永久 `retired`；这是禁止后续 opaque Runtime
+CAS 的唯一线性化点。CAS 先完成会使旧 token stale，`retired` 先完成则后续 CAS fail-closed，Run 不解释 Runtime
+aggregate语义。Workspace 只有取得 exact retired fact后才能请求 Orchestrator seal；随后由独立的 Orchestrator-owner
+private reducer把 durable deletion aggregate推进到 evidence-fenced。该 tombstone 与 ToolCall、Patch、
+ValidationResult、Evidence、Coverage 和 ArtifactContinuation 的所有读写及 exact purge 共用同一
+owner gate，`retain` 与 `purge` 后都禁止复生。Orchestrator 不能终止 Run、替 Workspace 推进删除 phase，也不能跨 owner
+删除 Memory、Result、Decision、Approval 或 Eventstream 数据。各资源 owner 以各自 private reducer封存 tombstone 并执行
+fixed-point purge；cross-owner command adapter 只能提交 owner-private `purge_requested`，物理 sink 成功后由同一个 private
+dispatcher 生成 `purge_completed` 并 CAS，直接 completion 注入必须拒绝。Workspace 自有 Goal/DoD/目录与 ordinary
+configuration sidecar/index 清理同样只允许 `directory_cleanup_requested` dispatcher 执行；它必须先通过独立 owner-family
+typed cleaner 对 exact deletion identity 做 pre-clean/空集复核，再生成 `directory_cleanup_observed`，普通 Workspace CRUD
+repository 不暴露该 effect authority。Eventstream 最后封存且 revision/global position floor 不复用。恢复只从
+这些 owner aggregate/fence
+幂等续驱；启动必须先恢复 Orchestrator durable gate 和 Run retirement fact：若 durable gate 已存在则不得再恢复任何
+Runtime mutation；若只有 Run `draining`，则只恢复 exact terminal-delivery drain，排空后再重试 Begin。普通 Runtime
+recovery不能越过任一 retirement admission。projection 与删除通知都不提供 authority。
+
+凡 owner purge proof 绑定首次观察计数，owner 必须在任何物理删除前持久化包含该 exact receipt 的 `pending` journal，
+清空并复核全部 owner surface 后再标记 `completed`。物理删除后、aggregate `purged` CAS 前的进程崩溃只能继续同一
+pending transaction，并重放原 receipt/proof；不得从已经为空的 surface 重新推导零计数 proof。该 journal 是相同 owner
+的事务技术状态，不构成新的 Runtime 状态机或跨 owner authority。
 
 SM-4 convergence-terminal delivery 还必须通过 current semantic-authority fence：catalog retirement 后，只要当前 eligible
 CWI 仍是 binding-free、semantic generation 尚未 seal，且 reducer 仅因该缺口形成

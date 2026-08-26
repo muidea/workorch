@@ -1114,8 +1114,13 @@ func testEventRecordRepositoryContract(t *testing.T, factory func() repository.E
 	if err != nil || len(afterPositionCursor) != 1 || afterPositionCursor[0].ID != "event-position-2" {
 		t.Fatalf("position cursor events = %+v err=%v", afterPositionCursor, err)
 	}
-	if _, err := repo.PurgeWorkspace(ctx, "ws-position-b"); err != nil {
-		t.Fatalf("purge highest-position workspace: %v", err)
+	if _, ok := repo.(interface {
+		PurgeWorkspace(context.Context, common.WorkspaceID) (int, error)
+	}); ok {
+		t.Fatal("EventRecord repository exposes forbidden generic workspace purge")
+	}
+	if err := repo.Delete(common.ContextWithRuntimeWorkspaceID(ctx, "ws-position-b"), "event-position-2"); err != nil {
+		t.Fatalf("delete highest-position event: %v", err)
 	}
 	thirdPosition, err := repo.ReserveEventRecordStreamPosition(ctx)
 	if err != nil || thirdPosition <= secondPosition {

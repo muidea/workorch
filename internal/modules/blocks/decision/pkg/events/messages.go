@@ -8,6 +8,7 @@ import (
 	decisionmodel "github.com/muidea/workorch/internal/modules/blocks/decision/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/eventcontract"
+	deletioncontract "github.com/muidea/workorch/internal/pkg/workorchdeletioncontract"
 	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
@@ -82,8 +83,31 @@ type ListTicketsByWorkspaceCommand struct {
 	Limit       int
 }
 
+type SealWorkspaceDecisionDeletionCommand struct {
+	WorkspaceID               common.WorkspaceID
+	DeletionID                string
+	DeletionGeneration        uint64
+	DataDispositionIntent     deletioncontract.Mode
+	QuiescenceID, RequestHash string
+}
+
+func (c SealWorkspaceDecisionDeletionCommand) Scope() deletioncontract.Scope {
+	return deletioncontract.Scope{WorkspaceID: c.WorkspaceID, DeletionID: c.DeletionID, DeletionGeneration: c.DeletionGeneration, Mode: c.DataDispositionIntent, QuiescenceID: c.QuiescenceID, RequestHash: c.RequestHash}.Normalize()
+}
+func (c SealWorkspaceDecisionDeletionCommand) Validate() error { return c.Scope().Validate() }
+
 type PurgeWorkspaceDecisionsCommand struct {
-	WorkspaceID common.WorkspaceID
+	WorkspaceID               common.WorkspaceID
+	DeletionID                string
+	DeletionGeneration        uint64
+	QuiescenceID, RequestHash string
+}
+
+func (c PurgeWorkspaceDecisionsCommand) Scope() deletioncontract.Scope {
+	return deletioncontract.Scope{WorkspaceID: c.WorkspaceID, DeletionID: c.DeletionID, DeletionGeneration: c.DeletionGeneration, Mode: deletioncontract.ModePurge, QuiescenceID: c.QuiescenceID, RequestHash: c.RequestHash}.Normalize()
+}
+func (c PurgeWorkspaceDecisionsCommand) Validate() error {
+	return c.Scope().Validate()
 }
 
 type GetResolutionCommand struct {
@@ -132,7 +156,22 @@ type EnsureResolvedResult struct {
 	Ticket     *decisionmodel.Ticket
 	Resolution *decisionmodel.Resolution
 }
-type PurgeWorkspaceDecisionsResult struct{ Deleted int }
+type SealWorkspaceDecisionDeletionResult struct {
+	WorkspaceID        common.WorkspaceID
+	DeletionID         string
+	DeletionGeneration uint64
+	FenceID            string
+	Revision           uint64
+	AckHash            string
+}
+type PurgeWorkspaceDecisionsResult struct {
+	WorkspaceID             common.WorkspaceID
+	DeletionID              string
+	DeletionGeneration      uint64
+	FenceID, PurgeID        string
+	Revision                uint64
+	AckHash, PurgeProofHash string
+}
 
 func NormalizeListWindow(cursor string, limit int) (string, int, error) {
 	cursor = strings.TrimSpace(cursor)
@@ -160,7 +199,9 @@ func MessageContracts() []eventcontract.MessageContract {
 		eventcontract.CommandTopic[ListTicketsByRunCommand, ListTicketsByRunResult]("decision", definitionPackage, eventcontract.CommandClassRead, eventcontract.LanePolicyQuery, TopicDecisionCommandListTicketsByRun).MessageContract(),
 		eventcontract.CommandTopic[ListTicketsByWorkspaceCommand, ListTicketsByWorkspaceResult]("decision", definitionPackage, eventcontract.CommandClassRead, eventcontract.LanePolicyQuery, TopicDecisionCommandListTicketsByWS).MessageContract(),
 		eventcontract.CommandTopic[GetResolutionCommand, GetResolutionResult]("decision", definitionPackage, eventcontract.CommandClassRead, eventcontract.LanePolicyQuery, TopicDecisionCommandGetResolution).MessageContract(),
+		eventcontract.CommandTopic[QueryWorkspaceDefinitionClarificationFactCommand, QueryWorkspaceDefinitionClarificationFactResult]("decision", definitionPackage, eventcontract.CommandClassRead, eventcontract.LanePolicyQuery, TopicQueryWorkspaceDefinitionClarificationFact).MessageContract(),
 		eventcontract.CommandTopic[EnsureResolvedCommand, EnsureResolvedResult]("decision", definitionPackage, eventcontract.CommandClassWrite, eventcontract.LanePolicyState, TopicDecisionCommandEnsureResolved).MessageContract(),
+		eventcontract.CommandTopic[SealWorkspaceDecisionDeletionCommand, SealWorkspaceDecisionDeletionResult]("decision", definitionPackage, eventcontract.CommandClassWrite, eventcontract.LanePolicyState, TopicDecisionCommandSealWorkspaceDeletion).MessageContract(),
 		eventcontract.CommandTopic[PurgeWorkspaceDecisionsCommand, PurgeWorkspaceDecisionsResult]("decision", definitionPackage, eventcontract.CommandClassWrite, eventcontract.LanePolicyState, TopicDecisionCommandPurgeWorkspace).MessageContract(),
 		eventcontract.CommandTopic[RecordDecisionEvidenceCommand, RecordDecisionEvidenceResult]("decision", definitionPackage, eventcontract.CommandClassWrite, eventcontract.LanePolicyState, TopicDecisionCommandRecordEvidence).MessageContract(),
 		eventcontract.CommandTopic[OpenRuntimeGovernanceRequestCommand, OpenRuntimeGovernanceRequestResult]("decision", definitionPackage, eventcontract.CommandClassWrite, eventcontract.LanePolicyState, TopicOpenRuntimeGovernanceRequest).MessageContract(),

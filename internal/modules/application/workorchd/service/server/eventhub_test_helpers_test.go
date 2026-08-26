@@ -13,6 +13,7 @@ import (
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/workspaceviewcore"
 	workorchdevents "github.com/muidea/workorch/internal/modules/application/workorchd/pkg/events"
 	eventstreamevents "github.com/muidea/workorch/internal/modules/blocks/eventstream/pkg/events"
+	workspaceevents "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/common"
 )
 
@@ -51,9 +52,19 @@ func attachTestEventNotifications(state *serverState) {
 			result.Set(nil, nil)
 		}
 	})
+	workspaceDeletionReceipts := magicevent.NewSimpleObserver(workspaceevents.NotificationDestination, hub)
+	workspaceDeletionReceipts.Subscribe(workspaceevents.TopicWorkspaceDeleted, func(event magicevent.Event, result magicevent.Result) {
+		if data, ok := event.Data().(workspaceevents.WorkspaceDeletedData); ok {
+			state.RecordWorkspaceDeleted(event.Context(), data)
+		}
+		if result != nil {
+			result.Set(nil, nil)
+		}
+	})
 	state.eventUnsubscribes = append(state.eventUnsubscribes,
 		func() { projection.Unsubscribe(workorchdevents.TopicWorkspaceProjectionChanged) },
 		func() { records.Unsubscribe(eventstreamevents.TopicEventStreamRecordAppended) },
+		func() { workspaceDeletionReceipts.Unsubscribe(workspaceevents.TopicWorkspaceDeleted) },
 	)
 	observer, ok := state.workspaceProjection.(interface {
 		SetEventPorts(workspaceviewcore.EventPorts)

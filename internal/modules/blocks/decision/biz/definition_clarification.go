@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 
 	cd "github.com/muidea/magicCommon/def"
@@ -11,11 +12,13 @@ import (
 	decisionevents "github.com/muidea/workorch/internal/modules/blocks/decision/pkg/events"
 	decisionmodel "github.com/muidea/workorch/internal/modules/blocks/decision/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
+	definitioncontract "github.com/muidea/workorch/internal/pkg/workorchdefinitioncontract"
 	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
 )
 
 const (
 	workspaceDefinitionClarificationSource = "application/workorchd"
+	workspaceDefinitionFactQuerySource     = "blocks/workspace"
 	runtimeDefinitionClarificationSource   = "kernel/orchestrator"
 	runtimeDefinitionReplacementSource     = "blocks/run"
 )
@@ -25,15 +28,38 @@ func definitionClarificationTopics() []string {
 		decisionevents.TopicOpenWorkspaceDefinitionClarification,
 		decisionevents.TopicReconcileWorkspaceDefinitionClarificationCandidate,
 		decisionevents.TopicResolveWorkspaceDefinitionClarificationByAdmission,
+		decisionevents.TopicQueryWorkspaceDefinitionClarificationFact,
 		decisionevents.TopicOpenRuntimeDefinitionClarification,
 		decisionevents.TopicResolveRuntimeDefinitionClarificationByReplacement,
 	}
+}
+
+func (m *Biz) handleQueryWorkspaceDefinitionClarificationFact(ev magicevent.Event, result magicevent.Result) {
+	cmd, ok := ev.Data().(decisionevents.QueryWorkspaceDefinitionClarificationFactCommand)
+	if !ok || ev.Source() != workspaceDefinitionFactQuerySource || m == nil || m.tickets == nil || m.resolutions == nil {
+		setDefinitionClarificationResult(result, decisionevents.QueryWorkspaceDefinitionClarificationFactResult{}, common.ErrInvalidArgument)
+		return
+	}
+	unlock := m.lockWorkspaceMutation(cmd.WorkspaceID)
+	defer unlock()
+	if err := m.rejectFencedWorkspace(ev.Context(), cmd.WorkspaceID); err != nil {
+		setDefinitionClarificationResult(result, decisionevents.QueryWorkspaceDefinitionClarificationFactResult{}, err)
+		return
+	}
+	response, err := m.queryWorkspaceDefinitionClarificationFact(ev.Context(), cmd)
+	setDefinitionClarificationResult(result, response, err)
 }
 
 func (m *Biz) handleReconcileWorkspaceDefinitionClarification(ev magicevent.Event, result magicevent.Result) {
 	cmd, ok := ev.Data().(decisionevents.ReconcileWorkspaceDefinitionClarificationCandidateCommand)
 	if !ok || ev.Source() != workspaceDefinitionClarificationSource || m == nil || m.tickets == nil || m.resolutions == nil {
 		setDefinitionClarificationResult(result, decisionevents.ReconcileWorkspaceDefinitionClarificationCandidateResult{}, common.ErrInvalidArgument)
+		return
+	}
+	unlock := m.lockWorkspaceMutation(cmd.NewRequest.WorkspaceID)
+	defer unlock()
+	if err := m.rejectFencedWorkspace(ev.Context(), cmd.NewRequest.WorkspaceID); err != nil {
+		setDefinitionClarificationResult(result, decisionevents.ReconcileWorkspaceDefinitionClarificationCandidateResult{}, err)
 		return
 	}
 	response, err := m.reconcileWorkspaceDefinitionClarification(ev.Context(), cmd)
@@ -46,6 +72,12 @@ func (m *Biz) handleOpenWorkspaceDefinitionClarification(ev magicevent.Event, re
 		setDefinitionClarificationResult(result, decisionevents.OpenWorkspaceDefinitionClarificationRequestResult{}, common.ErrInvalidArgument)
 		return
 	}
+	unlock := m.lockWorkspaceMutation(cmd.WorkspaceID)
+	defer unlock()
+	if err := m.rejectFencedWorkspace(ev.Context(), cmd.WorkspaceID); err != nil {
+		setDefinitionClarificationResult(result, decisionevents.OpenWorkspaceDefinitionClarificationRequestResult{}, err)
+		return
+	}
 	response, err := m.openWorkspaceDefinitionClarification(ev.Context(), cmd)
 	setDefinitionClarificationResult(result, response, err)
 }
@@ -54,6 +86,12 @@ func (m *Biz) handleResolveWorkspaceDefinitionClarification(ev magicevent.Event,
 	cmd, ok := ev.Data().(decisionevents.ResolveWorkspaceDefinitionClarificationByAdmissionCommand)
 	if !ok || ev.Source() != workspaceDefinitionClarificationSource || m == nil || m.tickets == nil || m.resolutions == nil {
 		setDefinitionClarificationResult(result, decisionevents.ResolveWorkspaceDefinitionClarificationByAdmissionResult{}, common.ErrInvalidArgument)
+		return
+	}
+	unlock := m.lockWorkspaceMutation(cmd.WorkspaceID)
+	defer unlock()
+	if err := m.rejectFencedWorkspace(ev.Context(), cmd.WorkspaceID); err != nil {
+		setDefinitionClarificationResult(result, decisionevents.ResolveWorkspaceDefinitionClarificationByAdmissionResult{}, err)
 		return
 	}
 	response, err := m.resolveWorkspaceDefinitionClarification(ev.Context(), cmd)
@@ -66,6 +104,12 @@ func (m *Biz) handleOpenRuntimeDefinitionClarification(ev magicevent.Event, resu
 		setDefinitionClarificationResult(result, decisionevents.OpenRuntimeDefinitionClarificationRequestResult{}, common.ErrInvalidArgument)
 		return
 	}
+	unlock := m.lockWorkspaceMutation(cmd.WorkspaceID)
+	defer unlock()
+	if err := m.rejectFencedWorkspace(ev.Context(), cmd.WorkspaceID); err != nil {
+		setDefinitionClarificationResult(result, decisionevents.OpenRuntimeDefinitionClarificationRequestResult{}, err)
+		return
+	}
 	response, err := m.openRuntimeDefinitionClarification(ev.Context(), cmd)
 	setDefinitionClarificationResult(result, response, err)
 }
@@ -74,6 +118,12 @@ func (m *Biz) handleResolveRuntimeDefinitionClarification(ev magicevent.Event, r
 	cmd, ok := ev.Data().(decisionevents.ResolveRuntimeDefinitionClarificationByReplacementCommand)
 	if !ok || ev.Source() != runtimeDefinitionReplacementSource || m == nil || m.tickets == nil || m.resolutions == nil {
 		setDefinitionClarificationResult(result, decisionevents.ResolveRuntimeDefinitionClarificationByReplacementResult{}, common.ErrInvalidArgument)
+		return
+	}
+	unlock := m.lockWorkspaceMutation(cmd.WorkspaceID)
+	defer unlock()
+	if err := m.rejectFencedWorkspace(ev.Context(), cmd.WorkspaceID); err != nil {
+		setDefinitionClarificationResult(result, decisionevents.ResolveRuntimeDefinitionClarificationByReplacementResult{}, err)
 		return
 	}
 	response, err := m.resolveRuntimeDefinitionClarification(ev.Context(), cmd)
@@ -103,15 +153,14 @@ func (m *Biz) openWorkspaceDefinitionClarification(ctx context.Context, cmd deci
 	bindingHash := cmd.BindingHash()
 	if existing, err := m.tickets.Get(bound, cmd.TicketID); err == nil {
 		binding := existing.DefinitionClarification
-		if existing.WorkspaceID != cmd.WorkspaceID || existing.RunID != "" || binding == nil || binding.Class != decisionmodel.DefinitionClarificationWorkspacePreSeal || binding.OpenBindingHash != bindingHash {
+		if !workspaceDefinitionClarificationTicketSemanticsMatch(existing, cmd) || !workspaceDefinitionClarificationBindingMatchesCommand(binding, cmd) {
 			return decisionevents.OpenWorkspaceDefinitionClarificationRequestResult{}, common.ErrConflict
 		}
 		return decisionevents.OpenWorkspaceDefinitionClarificationRequestResult{TicketID: cmd.TicketID, WorkspaceID: cmd.WorkspaceID, CandidateID: cmd.CandidateID, CandidateRevision: cmd.CandidateRevision, Disposition: decisionevents.DefinitionClarificationDuplicate, ClarificationRequestBindingHash: bindingHash}, nil
 	} else if !errors.Is(err, common.ErrNotFound) {
 		return decisionevents.OpenWorkspaceDefinitionClarificationRequestResult{}, err
 	}
-	seed := &decisionmodel.Ticket{ID: cmd.TicketID, WorkspaceID: cmd.WorkspaceID, Reason: cmd.ViolationCode, DecisionKind: "workspace_definition_clarification", Question: workspaceDefinitionClarificationQuestion(cmd.RequiredActionKind), FailureClass: "definition_admission", FailureSignature: cmd.CanonicalSignatureHash, AllowedRecoveryActions: []string{cmd.RequiredActionKind},
-		DefinitionClarification: &decisionmodel.DefinitionClarificationBinding{Class: decisionmodel.DefinitionClarificationWorkspacePreSeal, OpenBindingHash: bindingHash, RequiredActionKind: cmd.RequiredActionKind, CandidateID: cmd.CandidateID, CandidateRevision: cmd.CandidateRevision, CandidateHash: cmd.CandidateHash, ViolationOrGapCode: cmd.ViolationCode, CanonicalSignatureVersion: cmd.CanonicalSignatureVersion, CanonicalSignature: cmd.CanonicalSignature, CanonicalSignatureHash: cmd.CanonicalSignatureHash, OffendingRefs: append([]string(nil), cmd.OffendingRefs...)}}
+	seed := workspaceDefinitionClarificationTicketForCommand(cmd)
 	ticket, err := m.service.applyLifecycleInternalEvent(bound, nil, lifecycleInternalEvent{Kind: lifecycleInternalEventOpened, TicketID: seed.ID, Ticket: seed})
 	if err != nil {
 		return decisionevents.OpenWorkspaceDefinitionClarificationRequestResult{}, err
@@ -122,11 +171,159 @@ func (m *Biz) openWorkspaceDefinitionClarification(ctx context.Context, cmd deci
 	return decisionevents.OpenWorkspaceDefinitionClarificationRequestResult{TicketID: cmd.TicketID, WorkspaceID: cmd.WorkspaceID, CandidateID: cmd.CandidateID, CandidateRevision: cmd.CandidateRevision, Disposition: decisionevents.DefinitionClarificationCreated, ClarificationRequestBindingHash: bindingHash}, nil
 }
 
+func (m *Biz) queryWorkspaceDefinitionClarificationFact(ctx context.Context, cmd decisionevents.QueryWorkspaceDefinitionClarificationFactCommand) (decisionevents.QueryWorkspaceDefinitionClarificationFactResult, error) {
+	if err := cmd.Validate(); err != nil {
+		return decisionevents.QueryWorkspaceDefinitionClarificationFactResult{}, fmt.Errorf("%w: %v", common.ErrInvalidArgument, err)
+	}
+	bound, err := common.BindRuntimeWorkspaceContext(ctx, cmd.WorkspaceID)
+	if err != nil {
+		return decisionevents.QueryWorkspaceDefinitionClarificationFactResult{}, err
+	}
+	ticket, err := m.tickets.Get(bound, cmd.TicketID)
+	if errors.Is(err, common.ErrNotFound) {
+		return decisionevents.QueryWorkspaceDefinitionClarificationFactResult{Found: false}, nil
+	}
+	if err != nil {
+		return decisionevents.QueryWorkspaceDefinitionClarificationFactResult{}, err
+	}
+	binding := ticket.DefinitionClarification
+	if binding == nil || binding.Class != decisionmodel.DefinitionClarificationWorkspacePreSeal {
+		return decisionevents.QueryWorkspaceDefinitionClarificationFactResult{}, common.ErrConflict
+	}
+	request := definitioncontract.WorkspaceDefinitionClarificationRequestIdentity{
+		SchemaVersion: binding.SchemaVersion, TicketID: ticket.ID, WorkspaceID: ticket.WorkspaceID,
+		CandidateID: binding.CandidateID, CandidateRevision: binding.CandidateRevision, CandidateHash: binding.CandidateHash,
+		ViolationCode: binding.ViolationOrGapCode, OffendingRefs: append([]string(nil), binding.OffendingRefs...),
+		CanonicalSignatureVersion: binding.CanonicalSignatureVersion, CanonicalSignature: binding.CanonicalSignature,
+		CanonicalSignatureHash: binding.CanonicalSignatureHash, RequiredActionKind: binding.RequiredActionKind,
+	}.Normalized()
+	ticketRecord := definitioncontract.WorkspaceDefinitionClarificationTicketRecord{
+		RequestIdentity: request, OpenBindingHash: binding.OpenBindingHash,
+	}.Normalized()
+	requestCommand := decisionevents.OpenWorkspaceDefinitionClarificationRequestCommand(request)
+	if err := ticketRecord.Validate(); err != nil ||
+		!workspaceDefinitionClarificationTicketSemanticsMatch(ticket, requestCommand) ||
+		!workspaceDefinitionClarificationBindingMatchesCommand(binding, requestCommand) {
+		return decisionevents.QueryWorkspaceDefinitionClarificationFactResult{}, common.ErrConflict
+	}
+	response := decisionevents.QueryWorkspaceDefinitionClarificationFactResult{Found: true, Ticket: &ticketRecord}
+	resolutionIdentityPresent := binding.ResolutionCandidateID != "" || binding.ResolutionCandidateRevision != 0 || binding.ResolutionCandidateHash != "" || binding.AdmissionResultHash != "" || binding.DefinitionRevision != "" || binding.StartupInputHash != ""
+	if !resolutionIdentityPresent {
+		if ticket.State != common.DecisionTicketStateOpen || binding.ResolutionID != "" || binding.ResolutionBindingHash != "" ||
+			binding.ReplacementIntentID != "" || binding.ReplacementIntentHash != "" || binding.SuccessorDefinitionRevision != "" || binding.SuccessorStartupInputHash != "" {
+			return decisionevents.QueryWorkspaceDefinitionClarificationFactResult{}, common.ErrConflict
+		}
+		if err := response.ValidateFor(cmd); err != nil {
+			return decisionevents.QueryWorkspaceDefinitionClarificationFactResult{}, common.ErrConflict
+		}
+		return response, nil
+	}
+	if ticket.State != common.DecisionTicketStateResolved || binding.ResolutionID == "" || binding.ResolutionBindingHash == "" ||
+		binding.ReplacementIntentID != "" || binding.ReplacementIntentHash != "" || binding.SuccessorDefinitionRevision != "" || binding.SuccessorStartupInputHash != "" {
+		return decisionevents.QueryWorkspaceDefinitionClarificationFactResult{}, common.ErrConflict
+	}
+	identity := definitioncontract.WorkspaceDefinitionClarificationAdmissionResolutionIdentity{
+		TicketID: ticket.ID, WorkspaceID: ticket.WorkspaceID,
+		OldCandidateID: binding.CandidateID, OldCandidateRevision: binding.CandidateRevision, OldCandidateHash: binding.CandidateHash,
+		NewCandidateID: binding.ResolutionCandidateID, NewCandidateRevision: binding.ResolutionCandidateRevision, NewCandidateHash: binding.ResolutionCandidateHash,
+		AdmissionResultHash: binding.AdmissionResultHash, DefinitionRevision: binding.DefinitionRevision, StartupInputHash: binding.StartupInputHash,
+	}.Normalized()
+	record := definitioncontract.WorkspaceDefinitionClarificationResolutionRecord{
+		ResolutionIdentity: identity, ResolutionID: binding.ResolutionID,
+		ResolutionType:        definitioncontract.DefinitionClarificationResolutionCandidateAdjusted,
+		ResolutionBindingHash: binding.ResolutionBindingHash,
+	}.Normalized()
+	if err := record.Validate(); err != nil {
+		return decisionevents.QueryWorkspaceDefinitionClarificationFactResult{}, common.ErrConflict
+	}
+	persistedResolution, err := m.resolutions.GetByTicketID(bound, ticket.ID)
+	if err != nil {
+		return decisionevents.QueryWorkspaceDefinitionClarificationFactResult{}, err
+	}
+	expectedResolution := &decisionmodel.Resolution{
+		ID: record.ResolutionID, TicketID: ticket.ID, Type: record.ResolutionType,
+		Payload: workorcheventpayload.New(
+			workorcheventpayload.StringField("definitionRevision", identity.DefinitionRevision),
+			workorcheventpayload.StringField("startupInputHash", identity.StartupInputHash),
+		),
+	}
+	if !definitionClarificationResolutionMatches(persistedResolution, expectedResolution) {
+		return decisionevents.QueryWorkspaceDefinitionClarificationFactResult{}, common.ErrConflict
+	}
+	response.Resolution = &record
+	if err := response.ValidateFor(cmd); err != nil {
+		return decisionevents.QueryWorkspaceDefinitionClarificationFactResult{}, common.ErrConflict
+	}
+	return response, nil
+}
+
 func workspaceDefinitionClarificationQuestion(requiredAction string) string {
 	if requiredAction == decisionevents.DefinitionClarificationActionFixTemplateProfile {
 		return "Select or fix the Workspace Template/Profile proof contract"
 	}
 	return "Revise the Definition into explicit all-of semantics"
+}
+
+// workspaceDefinitionClarificationTicketSemanticsMatch verifies the immutable
+// outer Ticket semantics selected by Decision when it opens a Workspace
+// clarification. A valid DefinitionClarification binding is not sufficient
+// provenance when the enclosing aggregate was repurposed or partially edited.
+func workspaceDefinitionClarificationTicketSemanticsMatch(ticket *decisionmodel.Ticket, cmd decisionevents.OpenWorkspaceDefinitionClarificationRequestCommand) bool {
+	if ticket == nil {
+		return false
+	}
+	cmd = cmd.Normalized()
+	expected := workspaceDefinitionClarificationTicketForCommand(cmd)
+	return ticket.ID == expected.ID &&
+		ticket.WorkspaceID == expected.WorkspaceID &&
+		ticket.RunID == "" &&
+		ticket.StepID == "" &&
+		ticket.Reason == expected.Reason &&
+		ticket.DecisionKind == expected.DecisionKind &&
+		ticket.Question == expected.Question &&
+		ticket.Context.Equal(expected.Context) &&
+		ticket.AutoGovernance.Equal(expected.AutoGovernance) &&
+		ticket.FailureClass == expected.FailureClass &&
+		ticket.FailureSignature == expected.FailureSignature &&
+		slices.Equal(ticket.AllowedRecoveryActions, expected.AllowedRecoveryActions) &&
+		ticket.RuntimeGovernanceProposal == nil &&
+		workspaceDefinitionClarificationTicketStateTimeMatches(ticket)
+}
+
+// workspaceDefinitionClarificationTicketStateTimeMatches rejects an enclosing
+// Ticket whose lifecycle metadata cannot have been produced by Decision's
+// private reducer. Workspace Definition clarifications never use the generic
+// resolution-recovered transition: their open->resolved transition always
+// stamps ResolvedAt and never selects an operator ResolvedBy. Resolution
+// notification publication is a later idempotent cut point, so it is optional
+// only after the ticket is resolved.
+func workspaceDefinitionClarificationTicketStateTimeMatches(ticket *decisionmodel.Ticket) bool {
+	if ticket == nil {
+		return false
+	}
+	switch ticket.State {
+	case common.DecisionTicketStateOpen:
+		return ticket.ResolvedAt == "" && ticket.ResolvedBy == "" && ticket.ResolutionNotificationPublishedAt == ""
+	case common.DecisionTicketStateResolved:
+		return ticket.ResolvedAt != "" && ticket.ResolvedBy == ""
+	default:
+		return false
+	}
+}
+
+func workspaceDefinitionClarificationTicketForCommand(cmd decisionevents.OpenWorkspaceDefinitionClarificationRequestCommand) *decisionmodel.Ticket {
+	cmd = cmd.Normalized()
+	return &decisionmodel.Ticket{
+		ID:                      cmd.TicketID,
+		WorkspaceID:             cmd.WorkspaceID,
+		Reason:                  cmd.ViolationCode,
+		DecisionKind:            "workspace_definition_clarification",
+		Question:                workspaceDefinitionClarificationQuestion(cmd.RequiredActionKind),
+		FailureClass:            "definition_admission",
+		FailureSignature:        cmd.CanonicalSignatureHash,
+		AllowedRecoveryActions:  []string{cmd.RequiredActionKind},
+		DefinitionClarification: workspaceDefinitionClarificationBindingForCommand(cmd),
+	}
 }
 
 func (m *Biz) openRuntimeDefinitionClarification(ctx context.Context, cmd decisionevents.OpenRuntimeDefinitionClarificationRequestCommand) (decisionevents.OpenRuntimeDefinitionClarificationRequestResult, error) {
@@ -149,7 +346,7 @@ func (m *Biz) openRuntimeDefinitionClarification(ctx context.Context, cmd decisi
 		return decisionevents.OpenRuntimeDefinitionClarificationRequestResult{}, err
 	}
 	seed := &decisionmodel.Ticket{ID: cmd.TicketID, WorkspaceID: cmd.WorkspaceID, RunID: cmd.RunID, StepID: common.StepID("runtime-definition/" + cmd.ClarificationDispatchID), Reason: string(cmd.GapKind), DecisionKind: "runtime_definition_clarification", Question: "Revise the Workspace Definition and explicitly restart", FailureClass: "runtime_definition_gap", FailureSignature: cmd.CanonicalGapSignatureHash, AllowedRecoveryActions: []string{cmd.RequiredActionKind},
-		DefinitionClarification: &decisionmodel.DefinitionClarificationBinding{Class: decisionmodel.DefinitionClarificationRuntime, OpenBindingHash: bindingHash, RequiredActionKind: cmd.RequiredActionKind, ViolationOrGapCode: string(cmd.GapKind), CanonicalSignatureVersion: cmd.CanonicalGapSignatureVersion, CanonicalSignature: cmd.CanonicalGapSignature, CanonicalSignatureHash: cmd.CanonicalGapSignatureHash, OffendingRefs: append([]string(nil), cmd.OffendingItemRefs...), DefinitionRevision: cmd.DefinitionRevision, StartupInputHash: cmd.StartupInputHash, AuthoritySnapshotID: cmd.AuthoritySnapshotID, ClarificationDispatchID: cmd.ClarificationDispatchID, FocusRef: cmd.FocusRef, LogicalRequestID: cmd.LogicalRequestID, SemanticDocumentHash: cmd.SemanticDocumentHash}}
+		DefinitionClarification: &decisionmodel.DefinitionClarificationBinding{Class: decisionmodel.DefinitionClarificationRuntime, SchemaVersion: cmd.SchemaVersion, OpenBindingHash: bindingHash, RequiredActionKind: cmd.RequiredActionKind, ViolationOrGapCode: string(cmd.GapKind), CanonicalSignatureVersion: cmd.CanonicalGapSignatureVersion, CanonicalSignature: cmd.CanonicalGapSignature, CanonicalSignatureHash: cmd.CanonicalGapSignatureHash, OffendingRefs: append([]string(nil), cmd.OffendingItemRefs...), DefinitionRevision: cmd.DefinitionRevision, StartupInputHash: cmd.StartupInputHash, AuthoritySnapshotID: cmd.AuthoritySnapshotID, ClarificationDispatchID: cmd.ClarificationDispatchID, FocusRef: cmd.FocusRef, LogicalRequestID: cmd.LogicalRequestID, SemanticDocumentHash: cmd.SemanticDocumentHash}}
 	ticket, err := m.service.applyLifecycleInternalEvent(bound, nil, lifecycleInternalEvent{Kind: lifecycleInternalEventOpened, TicketID: seed.ID, Ticket: seed})
 	if err != nil {
 		return decisionevents.OpenRuntimeDefinitionClarificationRequestResult{}, err
@@ -174,7 +371,7 @@ func (m *Biz) reconcileWorkspaceDefinitionClarification(ctx context.Context, cmd
 		return decisionevents.ReconcileWorkspaceDefinitionClarificationCandidateResult{}, err
 	}
 	oldBinding := oldTicket.DefinitionClarification
-	if oldTicket.WorkspaceID != cmd.OldRequest.WorkspaceID || oldTicket.RunID != "" || oldBinding == nil || oldBinding.Class != decisionmodel.DefinitionClarificationWorkspacePreSeal || oldBinding.OpenBindingHash != cmd.OldRequest.BindingHash() {
+	if oldTicket.WorkspaceID != cmd.OldRequest.WorkspaceID || oldTicket.RunID != "" || !workspaceDefinitionClarificationBindingMatchesCommand(oldBinding, cmd.OldRequest) {
 		return decisionevents.ReconcileWorkspaceDefinitionClarificationCandidateResult{}, common.ErrConflict
 	}
 	// Establish the new blocking ticket before retiring the old one. A crash at
@@ -233,6 +430,52 @@ func (m *Biz) reconcileWorkspaceDefinitionClarification(ctx context.Context, cmd
 	return result, nil
 }
 
+// workspaceDefinitionClarificationBindingMatchesCommand verifies the durable
+// Decision-owned opening identity field by field. OpenBindingHash remains an
+// integrity fence, but is not accepted as a substitute for the persisted DTO
+// fields (notably OffendingRefs) during idempotent replay/reconciliation.
+func workspaceDefinitionClarificationBindingMatchesCommand(binding *decisionmodel.DefinitionClarificationBinding, cmd decisionevents.OpenWorkspaceDefinitionClarificationRequestCommand) bool {
+	if binding == nil {
+		return false
+	}
+	cmd = cmd.Normalized()
+	return binding.Class == decisionmodel.DefinitionClarificationWorkspacePreSeal &&
+		binding.SchemaVersion == cmd.SchemaVersion &&
+		binding.OpenBindingHash == cmd.BindingHash() &&
+		binding.RequiredActionKind == cmd.RequiredActionKind &&
+		binding.CandidateID == cmd.CandidateID &&
+		binding.CandidateRevision == cmd.CandidateRevision &&
+		binding.CandidateHash == cmd.CandidateHash &&
+		binding.ViolationOrGapCode == cmd.ViolationCode &&
+		binding.CanonicalSignatureVersion == cmd.CanonicalSignatureVersion &&
+		binding.CanonicalSignature == cmd.CanonicalSignature &&
+		binding.CanonicalSignatureHash == cmd.CanonicalSignatureHash &&
+		slices.Equal(binding.OffendingRefs, cmd.OffendingRefs) &&
+		binding.AuthoritySnapshotID == "" &&
+		binding.ClarificationDispatchID == "" &&
+		binding.FocusRef == "" &&
+		binding.LogicalRequestID == "" &&
+		binding.SemanticDocumentHash == ""
+}
+
+func workspaceDefinitionClarificationBindingForCommand(cmd decisionevents.OpenWorkspaceDefinitionClarificationRequestCommand) *decisionmodel.DefinitionClarificationBinding {
+	cmd = cmd.Normalized()
+	return &decisionmodel.DefinitionClarificationBinding{
+		Class:                     decisionmodel.DefinitionClarificationWorkspacePreSeal,
+		SchemaVersion:             cmd.SchemaVersion,
+		OpenBindingHash:           cmd.BindingHash(),
+		RequiredActionKind:        cmd.RequiredActionKind,
+		CandidateID:               cmd.CandidateID,
+		CandidateRevision:         cmd.CandidateRevision,
+		CandidateHash:             cmd.CandidateHash,
+		ViolationOrGapCode:        cmd.ViolationCode,
+		CanonicalSignatureVersion: cmd.CanonicalSignatureVersion,
+		CanonicalSignature:        cmd.CanonicalSignature,
+		CanonicalSignatureHash:    cmd.CanonicalSignatureHash,
+		OffendingRefs:             append([]string(nil), cmd.OffendingRefs...),
+	}
+}
+
 func (m *Biz) resolveWorkspaceDefinitionClarification(ctx context.Context, cmd decisionevents.ResolveWorkspaceDefinitionClarificationByAdmissionCommand) (decisionevents.ResolveWorkspaceDefinitionClarificationByAdmissionResult, error) {
 	cmd = cmd.Normalized()
 	if err := cmd.Validate(); err != nil {
@@ -281,6 +524,8 @@ func (m *Biz) resolveWorkspaceDefinitionClarification(ctx context.Context, cmd d
 		Kind: lifecycleInternalEventResolutionObserved, TicketID: ticket.ID,
 		Clarification: &definitionClarificationResolutionFact{
 			ResolutionID: resolutionID, ResolutionBindingHash: resolutionHash,
+			ResolutionCandidateID: cmd.NewCandidateID, ResolutionCandidateRevision: cmd.NewCandidateRevision,
+			ResolutionCandidateHash: cmd.NewCandidateHash, AdmissionResultHash: cmd.AdmissionResultHash,
 			DefinitionRevision: cmd.DefinitionRevision, StartupInputHash: cmd.StartupInputHash,
 		},
 	})

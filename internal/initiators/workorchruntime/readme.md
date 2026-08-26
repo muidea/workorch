@@ -15,7 +15,8 @@ Last Verified: 2026-08-25
 - 应用入口通过 side-effect import 显式启用本 initiator。
 - 各状态 owner 通过 `internal/pkg/workorchdeps` 获取职责对应的 repository 分组。每个 resolver 接收 typed
   `RepositoryConsumerID`，并在查找本 Initiator 之前按固定 consumer→repository-family 矩阵 fail-fast；未知 consumer、
-  sibling family 或伪造 identity 均不能取得 provider。生产 AST 扫描继续作为可审查的第二道静态边界。
+  sibling family 或伪造 identity 均不能取得 provider。生产 AST 扫描继续作为可审查的第二道静态边界，并拒绝
+  Initiator / `workorchdeps` 之外的任何生产代码直接调用 `RepositoryProvider()` 绕过 resolver。
 - `Setup` 必须完成配置读取和全部 repository 创建后才发布 provider；首次或重复 `Setup` 失败都必须 fail-closed，不得保留半初始化或上一次 Setup 的旧 provider。
 - `RepositoryProvider` 在成功 `Setup` 前和 `Teardown` 后返回 `nil`；就绪时只返回按职责划分的 repository 接口，不暴露内部 `repositorySet`。
 - `Run` 不创建业务状态；`Teardown` 只释放 provider 引用。
@@ -42,7 +43,7 @@ Last Verified: 2026-08-25
 - [x] 成功 `Setup` 才发布完整 provider；非法配置和未知 backend 均会 fail-fast，失败的重复 Setup 会先撤销旧 provider。
 - [x] 重复 `Run` 无业务动作且保持 provider 不变；`Teardown` 清空 provider 引用，重复调用不产生残留状态。
 - [x] 12×12 consumer/family 矩阵、未知 consumer 与 sibling family 均 fail-fast；生产 AST 边界扫描同时确认 12 个 owner
-  只请求各自 repository 分组，provider 解析只经 `workorchdeps`，实现包只由入口启用。
+  只请求各自 repository 分组，provider 解析只经 `workorchdeps`，直接 provider 调用无旁路，实现包只由入口启用。
 - [x] 导出面 AST 扫描固定 Initiator 私有存储、12 组 repository 字段和 provider 接口方法集，且不允许导出或留存 EventHub、Runtime policy、owner service 或 `repositorySet`。
 
 当前没有可执行的待完善测试项。现有 memory/file repository 构造器均不返回错误，`buildRepositories` 也没有可注入工厂，因此“任一 repository 构造失败”不是当前可直接触发的测试分支，也不列为测试缺口；只有引入可失败构造器或工厂注入后，才应补充该失败路径测试。

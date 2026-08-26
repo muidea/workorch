@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"testing"
 
+	"github.com/muidea/workorch/internal/modules/kernel/orchestrator/biz/internal/semanticplan"
 	"github.com/muidea/workorch/internal/pkg/common"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
@@ -501,7 +502,7 @@ func runtimeTestBuildSealedSemanticPlanning(aggregate RuntimeAggregate) (runtime
 		}
 		activeCoverageIDs = []common.CoverageWorkItemID{coverageOrder[0]}
 	}
-	batch, err := runtimecontract.CompileRuntimeSemanticPlanFocusBatch(
+	batch, err := semanticplan.CompileFocusBatch(
 		manifest, orderDocument, 0, "test-semantic-request", activeCoverageIDs, coverageOrder, len(coverageOrder),
 	)
 	if err != nil {
@@ -511,7 +512,7 @@ func runtimeTestBuildSealedSemanticPlanning(aggregate RuntimeAggregate) (runtime
 		runtimecontract.RuntimeSemanticPlanBatchRequesting,
 		runtimecontract.RuntimeSemanticPlanBatchDocumentComplete,
 	} {
-		batch, err = runtimecontract.AdvanceRuntimeSemanticPlanBatch(batch, next)
+		batch, err = advanceRuntimeSemanticPlanBatch(batch, next)
 		if err != nil {
 			return runtimecontract.RuntimeSemanticPlanningLedger{}, fmt.Errorf("advance test semantic batch: %w", err)
 		}
@@ -629,7 +630,7 @@ func runtimeTestBuildSealedSemanticPlanning(aggregate RuntimeAggregate) (runtime
 		runtimecontract.RuntimeSemanticPlanBatchFeasibilityComplete,
 		runtimecontract.RuntimeSemanticPlanBatchAccepted,
 	} {
-		batch, err = runtimecontract.AdvanceRuntimeSemanticPlanBatch(batch, next)
+		batch, err = advanceRuntimeSemanticPlanBatch(batch, next)
 		if err != nil {
 			return runtimecontract.RuntimeSemanticPlanningLedger{}, fmt.Errorf("accept test semantic batch: %w", err)
 		}

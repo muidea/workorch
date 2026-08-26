@@ -27,7 +27,6 @@ type Approval struct {
 	ResolutionProposal                *ResolutionProposal
 	EvidenceRecordedAt                string
 	ResolutionNotificationPublishedAt string
-	DeletionRequestedAt               string
 	ResolvedAt                        string
 	ResolvedBy                        string
 	CreatedAt                         string

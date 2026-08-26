@@ -21,7 +21,10 @@ func Contracts() []eventcontract.Contract {
 		TopicRunCommandGet,
 		TopicRunCommandList,
 		TopicRunCommandListByWorkspace,
+		TopicRunCommandLifecycleFactInventory,
 		TopicRunCommandRuntimeRecoveryInventory,
+		TopicRunCommandWorkspaceRetirementFact,
+		TopicRunCommandWorkspaceRetirementInventory,
 		TopicRunCommandRuntimeStateRecordReadiness,
 		TopicRunCommandRuntimeStateRecord,
 		TopicRunCommandGetStep,
@@ -31,9 +34,10 @@ func Contracts() []eventcontract.Contract {
 		TopicRunCommandListCheckpointsByRun,
 	)...)
 	ret = append(ret, eventcontract.Build("run", eventcontract.CommandClassWrite, eventcontract.LanePolicyState,
-		TopicRunCommandPurgeRuntimeResources,
 		TopicRunCommandStoreRuntimeStateRecord,
-		TopicRunCommandDelete,
+		TopicRunCommandPrepareWorkspaceRetirement,
+		TopicRunCommandFinalizeWorkspaceRetirement,
+		TopicRunCommandPurgeWorkspace,
 		TopicRunCommandWorkspaceExecutionIntent,
 		TopicRunFactGovernanceWait,
 		TopicRunFactContinuationEligible,
@@ -45,16 +49,16 @@ func Contracts() []eventcontract.Contract {
 		TopicRunContinuationRequested,
 	)
 	ret = eventcontract.Annotate(ret, eventcontract.RuntimeMetadata(eventcontract.CommandClassNotify, eventcontract.StateMachineSM4, eventcontract.ScopePolicyProcess, eventcontract.IdentityPolicyProcessLifecycle, false), TopicRunRuntimeCommandsReady)
+	ret = eventcontract.Annotate(ret, eventcontract.RuntimeMetadata(eventcontract.CommandClassRead, eventcontract.StateMachineSM1, eventcontract.ScopePolicyWorkspaceRun, eventcontract.IdentityPolicyRuntimeAuthority, true), TopicRunCommandLifecycleFactInventory)
 	ret = eventcontract.Annotate(ret, eventcontract.RuntimeMetadata(eventcontract.CommandClassRead, eventcontract.StateMachineSM4, eventcontract.ScopePolicyWorkspaceRun, eventcontract.IdentityPolicyRuntimeAuthority, true),
 		TopicRunCommandRuntimeRecoveryInventory, TopicRunCommandRuntimeStateRecordReadiness, TopicRunCommandRuntimeStateRecord,
 		TopicRunCommandGetRuntimeCheckpoint, TopicRunCommandListCheckpointsByRun,
 	)
 	ret = eventcontract.Annotate(ret, eventcontract.RuntimeMetadata(eventcontract.CommandClassWrite, eventcontract.StateMachineSM1, eventcontract.ScopePolicyWorkspaceRun, eventcontract.IdentityPolicyRuntimeAuthority, true),
-		TopicRunCommandDelete, TopicRunCommandWorkspaceExecutionIntent,
+		TopicRunCommandWorkspaceExecutionIntent,
 		TopicRunFactGovernanceWait, TopicRunFactContinuationEligible,
 		TopicRunFactTerminalDelivery,
 	)
 	ret = eventcontract.Annotate(ret, eventcontract.OpaquePersistenceMetadata(eventcontract.ScopePolicyWorkspaceRun, eventcontract.IdentityPolicyRuntimeAuthority), TopicRunCommandStoreRuntimeStateRecord)
-	ret = eventcontract.Annotate(ret, eventcontract.RuntimeMetadata(eventcontract.CommandClassWrite, eventcontract.StateMachineSM4, eventcontract.ScopePolicyWorkspaceRun, eventcontract.IdentityPolicyRuntimeAuthority, true), TopicRunCommandPurgeRuntimeResources)
 	return ret
 }

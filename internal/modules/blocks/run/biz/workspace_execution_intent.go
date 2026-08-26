@@ -3,7 +3,6 @@ package run
 import (
 	"context"
 	"fmt"
-	"strconv"
 	"strings"
 	"time"
 
@@ -129,6 +128,8 @@ func (m *Biz) resumeWorkspaceExecutionIntent(ctx context.Context, cmd runevents.
 }
 
 func (m *Biz) restartWorkspaceExecutionIntent(ctx context.Context, cmd runevents.WorkspaceExecutionIntentCommand) (runevents.WorkspaceExecutionIntentResult, error) {
+	m.workspaceExecutionMu.Lock()
+	defer m.workspaceExecutionMu.Unlock()
 	requestedIntent := replacementIntentFromCommand(cmd)
 	items, err := m.runs.ListByWorkspaceID(ctx, cmd.WorkspaceID)
 	if err != nil {
@@ -139,7 +140,30 @@ func (m *Biz) restartWorkspaceExecutionIntent(ctx context.Context, cmd runevents
 			if !replacementRunMatchesIntent(item, requestedIntent) {
 				return runevents.WorkspaceExecutionIntentResult{}, fmt.Errorf("%w: restart request identity was reused with different sealed input", common.ErrConflict)
 			}
-			return runExecutionIntentResult(cmd, item.ID, runtimecontract.RuntimeExecutionIntentReplacementPending, runtimecontract.RuntimeExecutionIntentReasonDuplicateRestart), nil
+			switch item.State {
+			case common.RunStatePending:
+				if err := validatePendingWorkspaceActivation(item); err != nil {
+					return runevents.WorkspaceExecutionIntentResult{}, err
+				}
+				transition, err := m.applyRunActivation(ctx, activateRunFact{
+					WorkspaceID: item.WorkspaceID, RunID: item.ID,
+					CausationID: "workspace-execution/restart-replay/" + cmd.RequestID,
+				})
+				if err != nil {
+					return runevents.WorkspaceExecutionIntentResult{}, err
+				}
+				return runExecutionIntentResult(cmd, transition.Run.ID, runtimecontract.RuntimeExecutionIntentReconciliationRequested, runtimecontract.RuntimeExecutionIntentReasonPendingRunActivated), nil
+			case common.RunStateActive:
+				// Run-state notifications are an at-least-once hint, not durable
+				// authority. Replaying the exact restart must therefore provide a
+				// fresh owner fact after the activation CAS/notification cut.
+				m.publishContinuationRequested(ctx, item, "workspace-execution/restart-replay/"+cmd.RequestID)
+				return runExecutionIntentResult(cmd, item.ID, runtimecontract.RuntimeExecutionIntentReconciliationRequested, runtimecontract.RuntimeExecutionIntentReasonCurrentRunContinuationAccepted), nil
+			case common.RunStateBlockedOnDecision, common.RunStateBlockedOnApproval:
+				return runExecutionIntentResult(cmd, item.ID, runtimecontract.RuntimeExecutionIntentGovernanceRequired, runtimecontract.RuntimeExecutionIntentReasonGovernancePending), nil
+			default:
+				return runevents.WorkspaceExecutionIntentResult{}, fmt.Errorf("%w: restart request already belongs to a terminal or non-reconcilable Run", common.ErrConflict)
+			}
 		}
 		if item != nil && item.ReplacementIntent != nil && item.ReplacementIntent.RequestID == cmd.RequestID {
 			if !item.ReplacementIntent.ValidFor(item) {
@@ -158,6 +182,23 @@ func (m *Biz) restartWorkspaceExecutionIntent(ctx context.Context, cmd runevents
 			}
 			m.scheduleReplacementRecovery(item.WorkspaceID, item.ID)
 			return runExecutionIntentResult(cmd, runID, runtimecontract.RuntimeExecutionIntentReplacementPending, runtimecontract.RuntimeExecutionIntentReasonDuplicateRestart), nil
+		}
+	}
+	for _, item := range items {
+		if item != nil && item.State == common.RunStatePending && strings.TrimSpace(item.ActivationRequestID) != "" {
+			return runevents.WorkspaceExecutionIntentResult{}, fmt.Errorf("%w: another restart activation is durably pending", common.ErrConflict)
+		}
+	}
+	for _, item := range items {
+		if item == nil || item.ReplacementIntent == nil {
+			continue
+		}
+		if !item.ReplacementIntent.ValidFor(item) {
+			return runevents.WorkspaceExecutionIntentResult{}, fmt.Errorf("%w: persisted replacement intent is invalid", common.ErrConflict)
+		}
+		if item.ReplacementIntent.State != runmodel.ReplacementIntentCompleted &&
+			item.ReplacementIntent.State != runmodel.ReplacementIntentClarificationResolutionRejected {
+			return runevents.WorkspaceExecutionIntentResult{}, fmt.Errorf("%w: another Workspace replacement transaction is still open", common.ErrConflict)
 		}
 	}
 	var predecessor *runmodel.Run
@@ -310,54 +351,29 @@ func (m *Biz) createWorkspaceExecutionReplacement(ctx context.Context, intent ru
 			return nil, common.ErrConflict
 		}
 	}
-	maxSequence := 0
-	for _, item := range items {
-		if item == nil {
-			continue
-		}
-		if sequence, ok := numericRunSequence(item.ID); ok && sequence > maxSequence {
-			maxSequence = sequence
-		}
+	item, err := submitRunCreationInternalEvent(ctx, m.runs, runCreationInternalEvent{
+		Kind: runCreationInternalEventRequested,
+		Requested: &runCreationRequestedFact{
+			WorkspaceID: intent.WorkspaceID, GoalID: intent.GoalID, DoDID: intent.DoDID,
+			PredecessorRunID:   predecessorID,
+			DefinitionRevision: intent.DefinitionRevision, StartupInputHash: intent.StartupInputHash,
+			InitialStepKind: llmcommon.StepKindWorkspaceExecution, RuntimeBootstrap: &bootstrap,
+			ActivationRequestID: intent.RequestID, ReconciliationScope: intent.ReconciliationScope,
+		},
+	})
+	if err != nil {
+		return nil, err
 	}
-	for attempt := 1; attempt <= 8; attempt++ {
-		runID := common.RunID(fmt.Sprintf("run-%03d", maxSequence+attempt))
-		item, err := submitRunCreationInternalEvent(ctx, m.runs, runCreationInternalEvent{
-			Kind: runCreationInternalEventRequested,
-			Requested: &runCreationRequestedFact{
-				WorkspaceID: intent.WorkspaceID, RunID: runID, GoalID: intent.GoalID, DoDID: intent.DoDID,
-				PredecessorRunID:   predecessorID,
-				DefinitionRevision: intent.DefinitionRevision, StartupInputHash: intent.StartupInputHash,
-				InitialStepKind: llmcommon.StepKindWorkspaceExecution, RuntimeBootstrap: &bootstrap,
-				ActivationRequestID: intent.RequestID, ReconciliationScope: intent.ReconciliationScope,
-			},
-		})
-		if err != nil {
-			if err == common.ErrConflict {
-				continue
-			}
-			return nil, err
-		}
-		if err := m.publishRunEvent(ctx, runevents.TopicRunCreated, item); err != nil {
-			return nil, err
-		}
-		// Workspace execution replacement persists the successor and its lineage
-		// inside the Run owner. Hand off the sealed activation-memory fact only
-		// after the Run record is durable.
-		m.publishRuntimeActivationMemoryRecall(ctx, runtimeActivationMemoryRecall{
-			RunID: item.ID, WorkspaceID: item.WorkspaceID, RuntimeBootstrap: item.RuntimeBootstrap,
-		}, item.CreatedAt)
-		return item, nil
+	if err := m.publishRunEvent(ctx, runevents.TopicRunCreated, item); err != nil {
+		return nil, err
 	}
-	return nil, common.ErrConflict
-}
-
-func numericRunSequence(runID common.RunID) (int, bool) {
-	raw := strings.TrimSpace(string(runID))
-	if !strings.HasPrefix(raw, "run-") {
-		return 0, false
-	}
-	value, err := strconv.Atoi(strings.TrimPrefix(raw, "run-"))
-	return value, err == nil && value > 0
+	// Workspace execution replacement persists the successor and its lineage
+	// inside the Run owner. Hand off the sealed activation-memory fact only
+	// after the Run record is durable.
+	m.publishRuntimeActivationMemoryRecall(ctx, runtimeActivationMemoryRecall{
+		RunID: item.ID, WorkspaceID: item.WorkspaceID, RuntimeBootstrap: item.RuntimeBootstrap,
+	}, item.CreatedAt)
+	return item, nil
 }
 
 func (m *Biz) activateWorkspaceExecutionReplacement(ctx context.Context, run *runmodel.Run, requestID string) error {
@@ -366,6 +382,81 @@ func (m *Biz) activateWorkspaceExecutionReplacement(ctx context.Context, run *ru
 	}
 	_, err := m.applyRunActivation(ctx, activateRunFact{WorkspaceID: run.WorkspaceID, RunID: run.ID, CausationID: "workspace-execution/restart/" + requestID})
 	return err
+}
+
+// validatePendingWorkspaceActivation proves that a pending Run is exactly the
+// durable first half of Workspace restart activation. Recovery never guesses
+// from RunID or timestamps and never rebuilds sealed startup input.
+func validatePendingWorkspaceActivation(item *runmodel.Run) error {
+	if item == nil || item.State != common.RunStatePending || item.ID == "" || item.WorkspaceID == "" ||
+		item.WorkspaceRunGeneration == 0 || strings.TrimSpace(item.ActivationRequestID) == "" ||
+		item.RuntimeBootstrap == nil || item.ReconciliationScope != runtimecontract.RuntimeCWIReconciliationScopeWorkspaceFull ||
+		strings.TrimSpace(item.InitialStepKind) != llmcommon.StepKindWorkspaceExecution ||
+		strings.TrimSpace(item.StartedAt) != "" || strings.TrimSpace(item.EndedAt) != "" || item.TerminalDelivery != nil ||
+		item.BlockingTicketID != "" || item.BlockingApprovalID != "" || strings.TrimSpace(item.FailureReason) != "" {
+		return fmt.Errorf("%w: pending restart activation record is incomplete or inconsistent", common.ErrConflict)
+	}
+	if err := item.RuntimeBootstrap.Validate(); err != nil {
+		return fmt.Errorf("%w: pending restart bootstrap is invalid: %v", common.ErrConflict, err)
+	}
+	definition := item.RuntimeBootstrap.Definition.Normalized()
+	if definition.GoalID != item.GoalID || definition.DoDID != item.DoDID ||
+		definition.Revision != strings.TrimSpace(item.DefinitionRevision) ||
+		definition.StartupInputHash != strings.TrimSpace(item.StartupInputHash) {
+		return fmt.Errorf("%w: pending restart bootstrap does not match Run identity", common.ErrConflict)
+	}
+	return nil
+}
+
+// recoverPendingWorkspaceActivations closes the Run-create -> activation CAS
+// crash cut before downstream startup inventory is visible. A failed owner
+// reducer or repository write aborts startup; it is never swallowed.
+func (m *Biz) recoverPendingWorkspaceActivations() error {
+	if m == nil || m.runs == nil {
+		return common.ErrInvalidArgument
+	}
+	m.workspaceExecutionMu.Lock()
+	defer m.workspaceExecutionMu.Unlock()
+	items, err := m.runs.List(context.Background())
+	if err != nil {
+		return err
+	}
+	// Validate the complete owner inventory before the first CAS. Startup must
+	// not partially activate one Workspace and only then discover corrupt
+	// activation lineage in another.
+	currentByWorkspace := make(map[common.WorkspaceID]common.RunID)
+	plan := make([]*runmodel.Run, 0)
+	for _, item := range items {
+		if item == nil {
+			continue
+		}
+		if !runStateIsTerminal(item.State) {
+			if currentRunID := currentByWorkspace[item.WorkspaceID]; currentRunID != "" && currentRunID != item.ID {
+				return fmt.Errorf("%w: Workspace %s has more than one non-terminal Run", common.ErrConflict, item.WorkspaceID)
+			}
+			currentByWorkspace[item.WorkspaceID] = item.ID
+		}
+		if item.State != common.RunStatePending || strings.TrimSpace(item.ActivationRequestID) == "" {
+			continue
+		}
+		if err := validatePendingWorkspaceActivation(item); err != nil {
+			return err
+		}
+		plan = append(plan, item)
+	}
+	for _, item := range plan {
+		ctx, err := common.BindRuntimeWorkspaceContext(context.Background(), item.WorkspaceID)
+		if err != nil {
+			return err
+		}
+		if _, err := m.applyRunActivation(ctx, activateRunFact{
+			WorkspaceID: item.WorkspaceID, RunID: item.ID,
+			CausationID: "workspace-execution/startup-recovery/" + strings.TrimSpace(item.ActivationRequestID),
+		}); err != nil {
+			return fmt.Errorf("recover pending Workspace activation %s/%s: %w", item.WorkspaceID, item.ID, err)
+		}
+	}
+	return nil
 }
 
 const (
@@ -647,6 +738,8 @@ func (m *Biz) activeRunRepository() (repository.RunRepository, error) {
 }
 
 func (m *Biz) materializeReplacementAfterTerminalDelivery(ctx context.Context, predecessor *runmodel.Run, terminalDeliveryID string, generations ...uint64) (*runmodel.Run, error) {
+	m.workspaceExecutionMu.Lock()
+	defer m.workspaceExecutionMu.Unlock()
 	if predecessor == nil || strings.TrimSpace(terminalDeliveryID) == "" {
 		return nil, common.ErrInvalidArgument
 	}

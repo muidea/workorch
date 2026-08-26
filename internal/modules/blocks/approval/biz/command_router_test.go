@@ -8,13 +8,14 @@ import (
 
 func TestApprovalCommandTopicsHaveOneSemanticFamily(t *testing.T) {
 	expected := map[string]approvalCommandFamily{
-		approvalevents.TopicApprovalCommandGet:             approvalCommandFamilyQuery,
-		approvalevents.TopicApprovalCommandList:            approvalCommandFamilyQuery,
-		approvalevents.TopicApprovalCommandListByRun:       approvalCommandFamilyQuery,
-		approvalevents.TopicApprovalCommandListByWorkspace: approvalCommandFamilyQuery,
-		approvalevents.TopicApprovalCommandEnsureApproved:  approvalCommandFamilyResolution,
-		approvalevents.TopicApprovalCommandEnsureRejected:  approvalCommandFamilyResolution,
-		approvalevents.TopicApprovalCommandPurgeWorkspace:  approvalCommandFamilyPurge,
+		approvalevents.TopicApprovalCommandGet:                   approvalCommandFamilyQuery,
+		approvalevents.TopicApprovalCommandList:                  approvalCommandFamilyQuery,
+		approvalevents.TopicApprovalCommandListByRun:             approvalCommandFamilyQuery,
+		approvalevents.TopicApprovalCommandListByWorkspace:       approvalCommandFamilyQuery,
+		approvalevents.TopicApprovalCommandEnsureApproved:        approvalCommandFamilyResolution,
+		approvalevents.TopicApprovalCommandEnsureRejected:        approvalCommandFamilyResolution,
+		approvalevents.TopicApprovalCommandPurgeWorkspace:        approvalCommandFamilyPurge,
+		approvalevents.TopicApprovalCommandSealWorkspaceDeletion: approvalCommandFamilyPurge,
 	}
 	topics := approvalCommandTopics()
 	if len(topics) != len(expected) {

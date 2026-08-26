@@ -27,6 +27,17 @@ type goalDoDManager struct {
 	definitionMu sync.Mutex
 }
 
+func (m *goalDoDManager) requireMutableWorkspace(ctx context.Context, workspaceID common.WorkspaceID) error {
+	if m == nil || m.workspaces == nil || workspaceID == "" {
+		return common.ErrInvalidArgument
+	}
+	item, err := m.workspaces.Get(ctx, workspaceID)
+	if err != nil {
+		return err
+	}
+	return workspaceDeletionRejectsMutation(item)
+}
+
 func newGoalDoDManager(workspaces repository.WorkspaceRepository, goals repository.GoalRepository, dods repository.DoDRepository) *goalDoDManager {
 	return &goalDoDManager{workspaces: workspaces, goals: goals, dods: dods}
 }
@@ -52,51 +63,6 @@ func (m *goalDoDManager) CreateWorkspace(ctx context.Context, cmd workspaceevent
 	return m.publishWorkspaceEvent(ctx, workspaceevents.TopicWorkspaceCreated, workspace)
 }
 
-func (m *goalDoDManager) DeleteWorkspace(ctx context.Context, id common.WorkspaceID) error {
-	if id == "" {
-		return common.ErrInvalidArgument
-	}
-	var err error
-	ctx, err = common.BindRuntimeWorkspaceContext(ctx, id)
-	if err != nil {
-		return err
-	}
-	m.definitionMu.Lock()
-	defer m.definitionMu.Unlock()
-	workspace, err := m.workspaces.Get(ctx, id)
-	if err != nil {
-		return err
-	}
-	goals, err := m.goals.ListByWorkspaceID(ctx, id)
-	if err != nil {
-		return err
-	}
-	dods, err := m.dods.ListByWorkspaceID(ctx, id)
-	if err != nil {
-		return err
-	}
-	for _, goal := range goals {
-		if goal == nil {
-			continue
-		}
-		if err := m.goals.Delete(ctx, goal.ID); err != nil {
-			return err
-		}
-	}
-	for _, dod := range dods {
-		if dod == nil {
-			continue
-		}
-		if err := m.dods.Delete(ctx, dod.ID); err != nil {
-			return err
-		}
-	}
-	if err := m.workspaces.Delete(ctx, id); err != nil {
-		return err
-	}
-	return m.publishWorkspaceEvent(ctx, workspaceevents.TopicWorkspaceDeleted, workspace)
-}
-
 func (m *goalDoDManager) DefineGoal(ctx context.Context, cmd workspaceevents.DefineGoalCommand) error {
 	if cmd.GoalID == "" || cmd.WorkspaceID == "" || strings.TrimSpace(cmd.Text) == "" {
 		return common.ErrInvalidArgument
@@ -116,7 +82,7 @@ func (m *goalDoDManager) DefineGoal(ctx context.Context, cmd workspaceevents.Def
 }
 
 func (m *goalDoDManager) defineGoal(ctx context.Context, cmd workspaceevents.DefineGoalCommand) (*workspaceModel.Goal, error) {
-	if _, err := m.workspaces.Get(ctx, cmd.WorkspaceID); err != nil {
+	if err := m.requireMutableWorkspace(ctx, cmd.WorkspaceID); err != nil {
 		return nil, err
 	}
 	items, err := m.goals.ListByWorkspaceID(ctx, cmd.WorkspaceID)
@@ -166,7 +132,7 @@ func (m *goalDoDManager) UpdateGoal(ctx context.Context, cmd workspaceevents.Upd
 }
 
 func (m *goalDoDManager) updateGoal(ctx context.Context, cmd workspaceevents.UpdateGoalCommand) (*workspaceModel.Goal, bool, error) {
-	if _, err := m.workspaces.Get(ctx, cmd.WorkspaceID); err != nil {
+	if err := m.requireMutableWorkspace(ctx, cmd.WorkspaceID); err != nil {
 		return nil, false, err
 	}
 	items, err := m.goals.ListByWorkspaceID(ctx, cmd.WorkspaceID)
@@ -220,7 +186,7 @@ func (m *goalDoDManager) DefineDoD(ctx context.Context, cmd workspaceevents.Defi
 }
 
 func (m *goalDoDManager) defineDoD(ctx context.Context, cmd workspaceevents.DefineDoDCommand) (*workspaceModel.DoD, error) {
-	if _, err := m.workspaces.Get(ctx, cmd.WorkspaceID); err != nil {
+	if err := m.requireMutableWorkspace(ctx, cmd.WorkspaceID); err != nil {
 		return nil, err
 	}
 	items, err := m.dods.ListByWorkspaceID(ctx, cmd.WorkspaceID)
@@ -276,7 +242,7 @@ func (m *goalDoDManager) UpdateDoD(ctx context.Context, cmd workspaceevents.Upda
 }
 
 func (m *goalDoDManager) updateDoD(ctx context.Context, cmd workspaceevents.UpdateDoDCommand) (*workspaceModel.DoD, bool, error) {
-	if _, err := m.workspaces.Get(ctx, cmd.WorkspaceID); err != nil {
+	if err := m.requireMutableWorkspace(ctx, cmd.WorkspaceID); err != nil {
 		return nil, false, err
 	}
 	items, err := m.dods.ListByWorkspaceID(ctx, cmd.WorkspaceID)
@@ -318,6 +284,9 @@ func (m *goalDoDManager) DeleteGoal(ctx context.Context, cmd workspaceevents.Del
 	}
 	m.definitionMu.Lock()
 	defer m.definitionMu.Unlock()
+	if err := m.requireMutableWorkspace(ctx, cmd.WorkspaceID); err != nil {
+		return err
+	}
 	items, err := m.goals.ListByWorkspaceID(ctx, cmd.WorkspaceID)
 	if err != nil {
 		return err
@@ -346,6 +315,9 @@ func (m *goalDoDManager) DeleteDoD(ctx context.Context, cmd workspaceevents.Dele
 	}
 	m.definitionMu.Lock()
 	defer m.definitionMu.Unlock()
+	if err := m.requireMutableWorkspace(ctx, cmd.WorkspaceID); err != nil {
+		return err
+	}
 	items, err := m.dods.ListByWorkspaceID(ctx, cmd.WorkspaceID)
 	if err != nil {
 		return err
@@ -396,6 +368,30 @@ func (m *goalDoDManager) publishWorkspaceEvent(ctx context.Context, topic string
 	}
 	event := magicevent.NewEventWithContext(topic, modulecommon.ModuleID, workspaceevents.NotificationDestination, magicevent.NewHeader(), ctx, data)
 	event.BindLaneKey(events.EventHubLaneKeyFor(workspaceevents.Contracts(), topic, eventcontract.LaneScope{SubjectType: "workspace", SubjectID: string(workspace.ID), WorkspaceID: string(workspace.ID)}))
+	m.publish(event)
+	return nil
+}
+
+func (m *goalDoDManager) publishWorkspaceDeleted(ctx context.Context, workspace *workspaceModel.Workspace) error {
+	if m.publish == nil || workspace == nil || workspace.Deletion == nil || !workspace.Deletion.Completed {
+		return common.ErrInvalidArgument
+	}
+	deletion := workspace.Deletion
+	data := workspaceevents.WorkspaceDeletedData{
+		WorkspaceID:       workspace.ID,
+		DeletionID:        deletion.DeletionID,
+		RequestID:         deletion.RequestID,
+		Mode:              deletion.Mode,
+		Disposition:       workspaceevents.DeleteWorkspaceCompleted,
+		DeletionRevision:  deletion.Revision,
+		WorkspaceRevision: workspace.Revision,
+		CompletedAt:       deletion.CompletedAt.UTC(),
+	}
+	if err := data.Validate(); err != nil {
+		return err
+	}
+	event := magicevent.NewEventWithContext(workspaceevents.TopicWorkspaceDeleted, modulecommon.ModuleID, workspaceevents.NotificationDestination, magicevent.NewHeader(), ctx, data)
+	event.BindLaneKey(events.EventHubLaneKeyFor(workspaceevents.Contracts(), workspaceevents.TopicWorkspaceDeleted, eventcontract.LaneScope{SubjectType: "workspace", SubjectID: string(workspace.ID), WorkspaceID: string(workspace.ID)}))
 	m.publish(event)
 	return nil
 }

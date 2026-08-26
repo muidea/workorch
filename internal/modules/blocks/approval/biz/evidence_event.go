@@ -42,42 +42,44 @@ func (m *Biz) recordApprovalGovernanceEvidence(ctx context.Context, item *approv
 		ResolutionContext: item.ResolutionContext.Clone().Fields,
 		Timestamp:         timestamp,
 	}
-	ev := magicevent.NewEventWithContext(
-		approvalevents.TopicApprovalCommandRecordEvidence,
-		modulecommon.ModuleID,
-		approvalevents.EvidenceCommandDestination,
-		magicevent.NewHeader(),
-		ctx,
-		command,
-	)
-	ev.BindLaneKey(workorchevents.EventHubLaneKeyFor(approvalevents.Contracts(), ev.ID(), eventcontract.LaneScope{
-		SubjectType: "approval",
-		SubjectID:   string(item.ID),
-		WorkspaceID: string(item.WorkspaceID),
-		RunID:       string(item.RunID),
-		StepID:      string(item.StepID),
-	}))
-	result := m.SendEvent(ev)
-	if result == nil {
-		return fmt.Errorf("approval evidence command returned no result")
-	}
-	if resultErr := result.Error(); resultErr != nil {
-		if resultErr.Cause != nil {
-			return resultErr.Cause
+	return m.withWorkspaceActiveDelivery(ctx, item.WorkspaceID, func(guarded context.Context) error {
+		ev := magicevent.NewEventWithContext(
+			approvalevents.TopicApprovalCommandRecordEvidence,
+			modulecommon.ModuleID,
+			approvalevents.EvidenceCommandDestination,
+			magicevent.NewHeader(),
+			guarded,
+			command,
+		)
+		ev.BindLaneKey(workorchevents.EventHubLaneKeyFor(approvalevents.Contracts(), ev.ID(), eventcontract.LaneScope{
+			SubjectType: "approval",
+			SubjectID:   string(item.ID),
+			WorkspaceID: string(item.WorkspaceID),
+			RunID:       string(item.RunID),
+			StepID:      string(item.StepID),
+		}))
+		result := m.SendEvent(ev)
+		if result == nil {
+			return fmt.Errorf("approval evidence command returned no result")
 		}
-		return resultErr
-	}
-	data, resultErr := result.Get()
-	if resultErr != nil {
-		if resultErr.Cause != nil {
-			return resultErr.Cause
+		if resultErr := result.Error(); resultErr != nil {
+			if resultErr.Cause != nil {
+				return resultErr.Cause
+			}
+			return resultErr
 		}
-		return resultErr
-	}
-	response, ok := data.(approvalevents.RecordApprovalEvidenceResult)
-	if !ok || response.EvidenceRecordID != command.EvidenceRecordID || response.WorkspaceID != command.WorkspaceID || response.RunID != command.RunID ||
-		response.ApprovalID != command.ApprovalID || response.ResolutionID != command.ResolutionID || response.ApprovalState != command.ApprovalState {
-		return fmt.Errorf("%w: approval evidence result type %T", common.ErrInvalidArgument, data)
-	}
-	return nil
+		data, resultErr := result.Get()
+		if resultErr != nil {
+			if resultErr.Cause != nil {
+				return resultErr.Cause
+			}
+			return resultErr
+		}
+		response, ok := data.(approvalevents.RecordApprovalEvidenceResult)
+		if !ok || response.EvidenceRecordID != command.EvidenceRecordID || response.WorkspaceID != command.WorkspaceID || response.RunID != command.RunID ||
+			response.ApprovalID != command.ApprovalID || response.ResolutionID != command.ResolutionID || response.ApprovalState != command.ApprovalState {
+			return fmt.Errorf("%w: approval evidence result type %T", common.ErrInvalidArgument, data)
+		}
+		return nil
+	})
 }

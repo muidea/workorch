@@ -24,6 +24,7 @@ import (
 	resultevents "github.com/muidea/workorch/internal/modules/blocks/result/pkg/events"
 	runcommon "github.com/muidea/workorch/internal/modules/blocks/run/pkg/common"
 	runevents "github.com/muidea/workorch/internal/modules/blocks/run/pkg/events"
+	workspacecommon "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/common"
 	workspaceevents "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/events"
 	governancecommon "github.com/muidea/workorch/internal/modules/kernel/governance/pkg/common"
 	governanceevents "github.com/muidea/workorch/internal/modules/kernel/governance/pkg/events"
@@ -34,6 +35,7 @@ import (
 	"github.com/muidea/workorch/internal/pkg/llmaudit"
 	"github.com/muidea/workorch/internal/pkg/repository"
 	"github.com/muidea/workorch/internal/pkg/repository/memory"
+	deletioncontract "github.com/muidea/workorch/internal/pkg/workorchdeletioncontract"
 	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
 	"github.com/muidea/workorch/internal/pkg/workorchmemorycontract"
 	"github.com/muidea/workorch/internal/pkg/workorchquerycontract"
@@ -50,6 +52,31 @@ type failingAppendEventRecordRepository struct {
 	mu       sync.Mutex
 	failures int
 	err      error
+}
+
+type eventStreamTestPurger struct {
+	repo repository.EventRecordRepository
+}
+
+func (p eventStreamTestPurger) PurgeWorkspaceEventRecords(ctx context.Context, expected eventstreammodel.WorkspaceDeletion) (int, error) {
+	if p.repo == nil || expected.Validate() != nil || expected.Phase != eventstreammodel.WorkspaceDeletionPhaseFenced || expected.Mode != deletioncontract.ModePurge {
+		return 0, common.ErrInvalidArgument
+	}
+	items, err := p.repo.List(ctx, workorchquerycontract.EventRecordQuery{WorkspaceID: expected.WorkspaceID, IncludePayload: true})
+	if err != nil {
+		return 0, err
+	}
+	deleted := 0
+	for _, item := range items {
+		if item == nil || item.WorkspaceID != expected.WorkspaceID {
+			return 0, common.ErrConflict
+		}
+		if err := p.repo.Delete(common.ContextWithRuntimeWorkspaceID(ctx, expected.WorkspaceID), item.ID); err != nil {
+			return 0, err
+		}
+		deleted++
+	}
+	return deleted, nil
 }
 
 func waitForEventRecords(t *testing.T, repo repository.EventRecordRepository, query workorchquerycontract.EventRecordQuery, want int) []*eventstreammodel.EventRecord {
@@ -105,10 +132,6 @@ func (r *countingEventRecordRepository) Delete(ctx context.Context, id common.Ev
 	return r.base.Delete(ctx, id)
 }
 
-func (r *countingEventRecordRepository) PurgeWorkspace(ctx context.Context, workspaceID common.WorkspaceID) (int, error) {
-	return r.base.PurgeWorkspace(ctx, workspaceID)
-}
-
 func (r *countingEventRecordRepository) ReserveEventRecordStreamPosition(ctx context.Context) (int64, error) {
 	return r.base.ReserveEventRecordStreamPosition(ctx)
 }
@@ -123,20 +146,49 @@ func newEventStreamTestService(t *testing.T, repo repository.EventRecordReposito
 	t.Helper()
 	rawHub := magicevent.NewHub(16)
 	t.Cleanup(func() { rawHub.Terminate(context.Background()) })
-	return New(Dependencies{EventRecords: repo, EventHub: rawHub}), rawHub
+	deletions := memory.NewEventStreamWorkspaceDeletionRepository()
+	return New(Dependencies{
+		EventRecords: repo, WorkspaceDeletions: deletions, WorkspacePurger: eventStreamTestPurger{repo: repo}, EventHub: rawHub,
+	}), rawHub
 }
 
 func sendPurgeWorkspaceCommand(ctx context.Context, rawHub magicevent.Hub, workspaceID common.WorkspaceID) (eventstreamevents.PurgeWorkspaceResult, error) {
 	if rawHub == nil || workspaceID == "" {
 		return eventstreamevents.PurgeWorkspaceResult{}, common.ErrInvalidArgument
 	}
-	event := magicevent.NewEventWithContext(
-		eventstreamevents.TopicEventStreamCommandPurgeWorkspace,
-		eventstreamApplicationCommandSource,
+	scope := deletioncontract.Scope{
+		WorkspaceID: workspaceID, DeletionID: "deletion-" + string(workspaceID), DeletionGeneration: 1,
+		Mode: deletioncontract.ModePurge, QuiescenceID: "quiescence-" + string(workspaceID),
+	}
+	scope.RequestHash = deletioncontract.StableRequestHash(scope)
+	sealEvent := magicevent.NewEventWithContext(
+		eventstreamevents.TopicEventStreamCommandSealWorkspaceDeletion,
+		workspaceDeletionCommandSource,
 		eventstreamevents.CommandDestination,
 		magicevent.NewHeader(),
 		ctx,
-		eventstreamevents.PurgeWorkspaceCommand{WorkspaceID: workspaceID},
+		eventstreamevents.SealWorkspaceEventStreamDeletionCommand{
+			WorkspaceID: scope.WorkspaceID, DeletionID: scope.DeletionID, DeletionGeneration: scope.DeletionGeneration,
+			DataDispositionIntent: scope.Mode, QuiescenceID: scope.QuiescenceID, RequestHash: scope.RequestHash,
+		},
+	)
+	sealResult := rawHub.Send(sealEvent)
+	if sealResult == nil || sealResult.Error() != nil {
+		if sealResult == nil {
+			return eventstreamevents.PurgeWorkspaceResult{}, common.ErrInvalidArgument
+		}
+		return eventstreamevents.PurgeWorkspaceResult{}, sealResult.Error()
+	}
+	event := magicevent.NewEventWithContext(
+		eventstreamevents.TopicEventStreamCommandPurgeWorkspace,
+		workspaceDeletionCommandSource,
+		eventstreamevents.CommandDestination,
+		magicevent.NewHeader(),
+		ctx,
+		eventstreamevents.PurgeWorkspaceCommand{
+			WorkspaceID: scope.WorkspaceID, DeletionID: scope.DeletionID, DeletionGeneration: scope.DeletionGeneration,
+			QuiescenceID: scope.QuiescenceID, RequestHash: scope.RequestHash,
+		},
 	)
 	result := rawHub.Send(event)
 	if result == nil {
@@ -381,16 +433,18 @@ func TestServicePersistsTypedRunStateNotifications(t *testing.T) {
 	defer service.Stop()
 
 	data := runevents.RunStateChangedData{
-		RunID:                "run-event-stream-state",
-		WorkspaceID:          "ws-event-stream-state",
-		GoalID:               "goal-event-stream-state",
-		DoDID:                "dod-event-stream-state",
-		State:                common.RunStateBlockedOnDecision,
-		BlockingTicketID:     "ticket-event-stream-state",
-		FailureReason:        "waiting for decision",
-		RuntimeStateRevision: 7,
-		RuntimeStateRef:      "runtime-state/ws-event-stream-state/run-event-stream-state/7",
-		CausationID:          "run-state/run-event-stream-state/7",
+		RunID:                  "run-event-stream-state",
+		WorkspaceID:            "ws-event-stream-state",
+		RunRevision:            3,
+		GoalID:                 "goal-event-stream-state",
+		DoDID:                  "dod-event-stream-state",
+		State:                  common.RunStateBlockedOnDecision,
+		BlockingTicketID:       "ticket-event-stream-state",
+		FailureReason:          "waiting for decision",
+		RuntimeStateRevision:   7,
+		RuntimeStateRef:        "runtime-state/ws-event-stream-state/run-event-stream-state/7",
+		WorkspaceRunGeneration: 1,
+		CausationID:            runevents.RunStateChangedCausationID("run-event-stream-state", 1, 3, 7),
 	}
 	event := magicevent.NewEventWithContext(runevents.TopicRunStateChanged, runcommon.ModuleID, runevents.NotificationDestination, magicevent.NewHeader(), ctx, data)
 	rawHub.Post(event)
@@ -663,7 +717,9 @@ func TestServiceStartIsIdempotentAndStopReleasesSubscription(t *testing.T) {
 		t.Fatalf("second start event stream service: %v", err)
 	}
 	event := magicevent.NewEventWithContext(runevents.TopicRunCreated, "blocks/run", runevents.NotificationDestination, magicevent.NewHeader(), ctx, runevents.RunStateChangedData{
-		WorkspaceID: "ws-event-stream-idempotent", RunID: "run-event-stream-idempotent", State: common.RunStatePending, CausationID: "run-created/run-event-stream-idempotent",
+		WorkspaceID: "ws-event-stream-idempotent", RunID: "run-event-stream-idempotent", RunRevision: 1, State: common.RunStatePending,
+		WorkspaceRunGeneration: 1,
+		CausationID:            runevents.RunStateChangedCausationID("run-event-stream-idempotent", 1, 1, 0),
 	})
 	rawHub.Post(event)
 	deadline := time.Now().Add(2 * time.Second)
@@ -704,8 +760,8 @@ func TestPurgeWorkspaceCommandDeletesOnlyWorkspaceRecords(t *testing.T) {
 	if err != nil {
 		t.Fatalf("purge workspace events: %v", err)
 	}
-	if response.DeletedCount != 2 {
-		t.Fatalf("deleted = %d, want 2", response.DeletedCount)
+	if response.Revision != 2 || response.PurgeID == "" || response.PurgeProofHash == "" {
+		t.Fatalf("purge response = %+v, want revision 2 exact proof", response)
 	}
 	records, err := repo.List(ctx, workorchquerycontract.EventRecordQuery{})
 	if err != nil {
@@ -738,7 +794,9 @@ func TestServicePublishesTypedRecordAppendedData(t *testing.T) {
 	t.Cleanup(service.Stop)
 
 	event := magicevent.NewEventWithContext(runevents.TopicRunCreated, "blocks/run", runevents.NotificationDestination, magicevent.NewHeader(), ctx, runevents.RunStateChangedData{
-		WorkspaceID: "ws-typed-appended", RunID: "run-typed-appended", GoalID: "goal-typed-appended", DoDID: "dod-typed-appended", State: common.RunStatePending, CausationID: "run-created/run-typed-appended",
+		WorkspaceID: "ws-typed-appended", RunID: "run-typed-appended", RunRevision: 1, GoalID: "goal-typed-appended", DoDID: "dod-typed-appended", State: common.RunStatePending,
+		WorkspaceRunGeneration: 1,
+		CausationID:            runevents.RunStateChangedCausationID("run-typed-appended", 1, 1, 0),
 	})
 	rawHub.Post(event)
 
@@ -753,6 +811,58 @@ func TestServicePublishesTypedRecordAppendedData(t *testing.T) {
 		}
 	case <-time.After(time.Second):
 		t.Fatal("typed record appended data was not published")
+	}
+}
+
+func TestServiceLeavesWorkspaceDeletedAsTransportOnlyReceipt(t *testing.T) {
+	ctx := context.Background()
+	repo := newCountingEventRecordRepository()
+	service, rawHub := newEventStreamTestService(t, repo)
+	received := make(chan workspaceevents.WorkspaceDeletedData, 1)
+	const observerID = "/workspace/consumers/blocks/eventstream/transport-receipt-test"
+	observer := magicevent.NewSimpleObserverWithMatchID(observerID, observerID, rawHub)
+	observer.Subscribe(workspaceevents.TopicWorkspaceDeleted, func(event magicevent.Event, _ magicevent.Result) {
+		if data, ok := event.Data().(workspaceevents.WorkspaceDeletedData); ok {
+			received <- data
+		}
+	})
+	t.Cleanup(func() { observer.Unsubscribe(workspaceevents.TopicWorkspaceDeleted) })
+	if err := service.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(service.Stop)
+
+	data := workspaceevents.WorkspaceDeletedData{
+		WorkspaceID:       "ws-deleted-transport-receipt",
+		RequestID:         "request-deleted-transport-receipt",
+		Mode:              deletioncontract.ModeRetain,
+		Disposition:       workspaceevents.DeleteWorkspaceCompleted,
+		DeletionRevision:  2,
+		WorkspaceRevision: 7,
+		CompletedAt:       time.Date(2026, time.August, 26, 0, 0, 0, 0, time.UTC),
+	}
+	data.DeletionID = workspaceevents.StableWorkspaceDeletionID(data.WorkspaceID, data.RequestID)
+	if err := data.Validate(); err != nil {
+		t.Fatalf("workspace deleted transport receipt fixture: %v", err)
+	}
+	rawHub.Post(magicevent.NewEventWithContext(
+		workspaceevents.TopicWorkspaceDeleted, workspacecommon.ModuleID, workspaceevents.NotificationDestination,
+		magicevent.NewHeader(), ctx, data,
+	))
+	select {
+	case actual := <-received:
+		if actual != data {
+			t.Fatalf("workspace deleted receipt = %+v", actual)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("workspace deleted transport receipt was not delivered")
+	}
+	time.Sleep(50 * time.Millisecond)
+	if repo.AppendCount() != 0 {
+		t.Fatalf("workspace deleted transport receipt attempted %d durable appends", repo.AppendCount())
+	}
+	if records, err := repo.List(ctx, workorchquerycontract.EventRecordQuery{WorkspaceID: data.WorkspaceID}); err != nil || len(records) != 0 {
+		t.Fatalf("workspace deleted transport receipt records = %+v err=%v", records, err)
 	}
 }
 
@@ -778,7 +888,8 @@ func TestServiceDoesNotPublishAppendedWhenRepositoryAppendFails(t *testing.T) {
 		runevents.NotificationDestination,
 		magicevent.NewHeader(),
 		ctx,
-		runevents.RunStateChangedData{WorkspaceID: "ws-append-failure", RunID: "run-append-failure", State: common.RunStatePending, CausationID: "run-created/run-append-failure"},
+		runevents.RunStateChangedData{WorkspaceID: "ws-append-failure", RunID: "run-append-failure", RunRevision: 1, State: common.RunStatePending,
+			WorkspaceRunGeneration: 1, CausationID: runevents.RunStateChangedCausationID("run-append-failure", 1, 1, 0)},
 	))
 	select {
 	case <-appended:
@@ -874,7 +985,8 @@ func TestServiceRetriesTransientNotificationAppendFailure(t *testing.T) {
 	t.Cleanup(service.Stop)
 	rawHub.Post(magicevent.NewEventWithContext(
 		runevents.TopicRunCreated, runcommon.ModuleID, runevents.NotificationDestination, magicevent.NewHeader(), ctx,
-		runevents.RunStateChangedData{WorkspaceID: "ws-retry", RunID: "run-retry", State: common.RunStatePending, CausationID: "run-created/run-retry"},
+		runevents.RunStateChangedData{WorkspaceID: "ws-retry", RunID: "run-retry", RunRevision: 1, State: common.RunStatePending,
+			WorkspaceRunGeneration: 1, CausationID: runevents.RunStateChangedCausationID("run-retry", 1, 1, 0)},
 	))
 	items := waitForEventRecords(t, baseRepo, workorchquerycontract.EventRecordQuery{WorkspaceID: "ws-retry"}, 1)
 	if len(items) != 1 || items[0].Revision != 1 || items[0].StreamPosition != 1 {
@@ -911,7 +1023,7 @@ func TestServiceIssuesGlobalAppendOrderAcrossWorkspaceClockSkew(t *testing.T) {
 	}
 }
 
-func TestServicePurgeResetsRevisionFloorConsistentlyWithRestart(t *testing.T) {
+func TestServicePurgePermanentlyFencesWorkspaceAndPreservesGlobalPosition(t *testing.T) {
 	ctx := context.Background()
 	repo := memory.NewEventRecordRepository()
 	service, rawHub := newEventStreamTestService(t, repo)
@@ -929,24 +1041,22 @@ func TestServicePurgeResetsRevisionFloorConsistentlyWithRestart(t *testing.T) {
 	appendWorkspaceRecord("event-reset-1")
 	appendWorkspaceRecord("event-reset-2")
 	response, err := sendPurgeWorkspaceCommand(common.ContextWithRuntimeWorkspaceID(ctx, "ws-revision-reset"), rawHub, "ws-revision-reset")
-	if err != nil || response.DeletedCount != 2 {
-		t.Fatalf("purge deleted=%d err=%v", response.DeletedCount, err)
+	if err != nil || response.Revision != 2 {
+		t.Fatalf("purge response=%+v err=%v", response, err)
 	}
-	appendWorkspaceRecord("event-reset-3")
-	item, err := repo.Get(common.ContextWithRuntimeWorkspaceID(ctx, "ws-revision-reset"), "event-reset-3")
-	if err != nil || item.Revision != 1 || item.StreamPosition != 3 {
-		t.Fatalf("post-purge record = %+v err=%v, want revision 1/stream position 3", item, err)
+	if err := service.appendRecord(ctx, &eventstreammodel.EventRecord{
+		ID: "event-reset-3", Topic: "/test", SourceModule: "blocks/test", SubjectType: "test", SubjectID: "event-reset-3", WorkspaceID: "ws-revision-reset",
+	}); !errors.Is(err, common.ErrNotFound) {
+		t.Fatalf("post-purge append err = %v, want not found fence", err)
 	}
-	service.Stop()
-	restarted, _ := newEventStreamTestService(t, repo)
-	if err := restarted.appendRecord(ctx, &eventstreammodel.EventRecord{
-		ID: "event-reset-4", Topic: "/test", SourceModule: "blocks/test", SubjectType: "test", SubjectID: "event-reset-4", WorkspaceID: "ws-revision-reset",
+	if err := service.appendRecord(ctx, &eventstreammodel.EventRecord{
+		ID: "event-global-after-purge", Topic: "/test", SourceModule: "blocks/test", SubjectType: "test", SubjectID: "event-global-after-purge",
 	}); err != nil {
 		t.Fatal(err)
 	}
-	item, err = repo.Get(common.ContextWithRuntimeWorkspaceID(ctx, "ws-revision-reset"), "event-reset-4")
-	if err != nil || item.Revision != 2 || item.StreamPosition != 4 {
-		t.Fatalf("post-restart record = %+v err=%v, want revision 2/stream position 4", item, err)
+	item, err := repo.Get(ctx, "event-global-after-purge")
+	if err != nil || item.StreamPosition != 3 {
+		t.Fatalf("global record after purge = %+v err=%v, want stream position 3", item, err)
 	}
 }
 

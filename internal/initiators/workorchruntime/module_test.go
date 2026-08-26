@@ -178,6 +178,7 @@ func assertRepositoryGroupsComplete(t *testing.T, repositories repositorySet) {
 	t.Helper()
 
 	requireNotNil(t, "workspace workspaces", repositories.Workspace().Workspaces)
+	requireNotNil(t, "workspace deletion material cleaner", repositories.Workspace().DeletionMaterialCleaner)
 	requireNotNil(t, "workspace goals", repositories.Workspace().Goals)
 	requireNotNil(t, "workspace dods", repositories.Workspace().DoDs)
 	requireNotNil(t, "workspace templates", repositories.Workspace().Templates)
@@ -186,6 +187,8 @@ func assertRepositoryGroupsComplete(t *testing.T, repositories repositorySet) {
 	requireNotNil(t, "decision resolutions", repositories.Decision().Resolutions)
 	requireNotNil(t, "approval approvals", repositories.Approval().Approvals)
 	requireNotNil(t, "eventstream records", repositories.EventStream().EventRecords)
+	requireNotNil(t, "eventstream workspace deletions", repositories.EventStream().WorkspaceDeletions)
+	requireNotNil(t, "eventstream workspace purger", repositories.EventStream().WorkspacePurger)
 	requireNotNil(t, "governance traces", repositories.Governance().AutoGovernanceTraces)
 	requireNotNil(t, "mcp registry", repositories.MCP().Registry)
 	requireNotNil(t, "memory items", repositories.Memory().MemoryItems)

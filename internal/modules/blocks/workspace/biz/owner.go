@@ -2,6 +2,8 @@ package workspace
 
 import (
 	"context"
+	"log/slog"
+	"sync"
 
 	cd "github.com/muidea/magicCommon/def"
 	magicevent "github.com/muidea/magicCommon/event"
@@ -21,30 +23,46 @@ import (
 const ModuleID = modulecommon.ModuleID
 
 type Dependencies struct {
-	Workspaces        repository.WorkspaceRepository
-	Goals             repository.GoalRepository
-	DoDs              repository.DoDRepository
-	Templates         repository.WorkspaceTemplateRepository
-	EventHub          magicevent.Hub
-	BackgroundRoutine task.BackgroundRoutine
+	Workspaces              repository.WorkspaceRepository
+	DeletionMaterialCleaner repository.WorkspaceDeletionMaterialCleaner
+	Goals                   repository.GoalRepository
+	DoDs                    repository.DoDRepository
+	Templates               repository.WorkspaceTemplateRepository
+	EventHub                magicevent.Hub
+	BackgroundRoutine       task.BackgroundRoutine
 }
 
 type Biz struct {
 	basebiz.Base
 	manager    *goalDoDManager
 	workspaces repository.WorkspaceRepository
+	cleaner    repository.WorkspaceDeletionMaterialCleaner
 	goals      repository.GoalRepository
 	dods       repository.DoDRepository
 	templates  repository.WorkspaceTemplateRepository
 	topics     []string
 	started    bool
+	// deletionIngressMu serializes the initial Workspace deletion admission
+	// against owner public mutation ingresses. Persisted CAS remains the
+	// authority; this lock only closes same-process non-Workspace side-effect
+	// windows such as Goal/DoD writes.
+	deletionIngressMu sync.RWMutex
+	deletionWorkMu    sync.Mutex
+
+	runProjectionStateMu    sync.Mutex
+	runProjectionWorkMu     sync.Mutex
+	runProjectionCtx        context.Context
+	runProjectionCancel     context.CancelFunc
+	runProjectionPending    bool
+	runProjectionGeneration uint64
+	runProjectionLastError  error
 }
 
 func New(h magicevent.Hub, b task.BackgroundRoutine, deps Dependencies) (*Biz, error) {
-	if deps.Workspaces == nil || deps.Goals == nil || deps.DoDs == nil || deps.Templates == nil || deps.EventHub == nil || h == nil {
+	if deps.Workspaces == nil || deps.DeletionMaterialCleaner == nil || deps.Goals == nil || deps.DoDs == nil || deps.Templates == nil || deps.EventHub == nil || h == nil {
 		return nil, common.ErrInvalidArgument
 	}
-	bizPtr := &Biz{Base: basebiz.New(modulecommon.ModuleID, h, b), workspaces: deps.Workspaces, goals: deps.Goals, dods: deps.DoDs, templates: deps.Templates}
+	bizPtr := &Biz{Base: basebiz.New(modulecommon.ModuleID, h, b), workspaces: deps.Workspaces, cleaner: deps.DeletionMaterialCleaner, goals: deps.Goals, dods: deps.DoDs, templates: deps.Templates}
 	bizPtr.manager = newGoalDoDManagerWithPublisher(deps.Workspaces, deps.Goals, deps.DoDs, bizPtr.PostEvent)
 	return bizPtr, nil
 }
@@ -74,8 +92,13 @@ func (m *Biz) Start() error {
 	// fact and posts an owner-local projection command; it never accepts an
 	// Orchestrator-written Workspace model.
 	m.SubscribeMatchedFunc(ModuleID+"/run-projection", runevents.NotificationDestination, runevents.TopicRunStateChanged, m.handleRunStateChanged)
+	m.SubscribeMatchedFunc(ModuleID+"/run-projection", runevents.NotificationDestination, runevents.TopicRunRuntimeCommandsReady, m.handleRunRuntimeCommandsReady)
 	m.topics = append(m.topics, workspaceevents.TopicWorkspaceTemplateCommandEnsureDefaults)
 	m.SubscribeFunc(workspaceevents.TopicWorkspaceTemplateCommandEnsureDefaults, m.handleSystemDefaultsCommand)
+	if err := m.startRunProjectionReconciliation(); err != nil {
+		m.unsubscribeOwnerTopics()
+		return err
+	}
 	m.started = true
 	return nil
 }
@@ -103,43 +126,73 @@ func (m *Biz) Teardown(context.Context) {
 	if m == nil {
 		return
 	}
-	for idx := len(m.topics) - 1; idx >= 0; idx-- {
-		m.UnsubscribeFunc(m.topics[idx])
-	}
-	m.UnsubscribeMatchedFunc(ModuleID+"/run-projection", runevents.TopicRunStateChanged)
-	m.topics = nil
+	m.stopRunProjectionReconciliation()
+	m.unsubscribeOwnerTopics()
 	m.manager = nil
 	m.workspaces = nil
+	m.cleaner = nil
 	m.goals = nil
 	m.dods = nil
 	m.templates = nil
 	m.started = false
 }
 
-func (m *Biz) handleRunStateChanged(ev magicevent.Event, _ magicevent.Result) {
-	data, ok := ev.Data().(runevents.RunStateChangedData)
-	if !ok || ev.Source() != runevents.CommandDestination || data.Validate() != nil || m == nil || m.EventHub() == nil {
+func (m *Biz) unsubscribeOwnerTopics() {
+	if m == nil {
 		return
 	}
-	switch data.State {
-	case common.RunStatePending, common.RunStateActive, common.RunStateBlockedOnDecision, common.RunStateBlockedOnApproval:
-		cmd := workspaceevents.RunProjectionFact{
-			WorkspaceID:          data.WorkspaceID,
-			RunID:                data.RunID,
-			SourceOwner:          runevents.CommandDestination,
-			CausationID:          data.CausationID,
-			RunState:             data.State,
-			RuntimeStateRevision: data.RuntimeStateRevision,
-			RuntimeStateRef:      data.RuntimeStateRef,
-		}
-		// RunStateChanged is already an immutable cross-owner fact. Convert it
-		// directly into the Workspace owner's private reducer input instead of
-		// exposing a second public write command back to this owner.
-		_, _ = m.submitWorkspaceLifecycleInternalEvent(ev.Context(), workspaceLifecycleInternalEvent{
-			Kind:          workspaceLifecycleInternalEventRunProjectionObserved,
-			RunProjection: &cmd,
-		})
+	for idx := len(m.topics) - 1; idx >= 0; idx-- {
+		m.UnsubscribeFunc(m.topics[idx])
 	}
+	m.UnsubscribeMatchedFunc(ModuleID+"/run-projection", runevents.TopicRunStateChanged)
+	m.UnsubscribeMatchedFunc(ModuleID+"/run-projection", runevents.TopicRunRuntimeCommandsReady)
+	m.topics = nil
+}
+
+func (m *Biz) handleRunStateChanged(ev magicevent.Event, _ magicevent.Result) {
+	data, ok := ev.Data().(runevents.RunStateChangedData)
+	if !ok || ev.Source() != runevents.CommandDestination || m == nil || m.EventHub() == nil {
+		return
+	}
+	if err := data.Validate(); err != nil {
+		// The notification is only a delivery hint. Keep reconciliation dirty so
+		// a malformed or incomplete hint cannot make the Workspace projection
+		// silently miss the Run owner's current typed fact.
+		slog.Warn("Workspace Run projection notification rejected; scheduling current-fact reconciliation", "workspace", data.WorkspaceID, "run", data.RunID, "err", err)
+		m.requestRunProjectionReconciliation(err)
+		return
+	}
+	if runProjectionTerminalState(data.State) {
+		// Workspace terminal release is driven only by the sealed Orchestrator
+		// delivery. Reconcile/clear any prior notification retry without ever
+		// translating a terminal Run hint into a Workspace target state.
+		m.requestRunProjectionReconciliation(nil)
+		return
+	}
+	if err := m.applyRunStateChangedNotification(ev.Context(), data); err != nil {
+		// Post has no acknowledgement channel. Preserve the failure as an
+		// owner-local retry request and re-read the current Run-owner fact;
+		// never treat a failed projection CAS as successful delivery.
+		slog.Warn("Workspace Run projection delivery failed; scheduling current-fact reconciliation", "workspace", data.WorkspaceID, "run", data.RunID, "err", err)
+		m.requestRunProjectionReconciliation(err)
+	}
+}
+
+func runProjectionTerminalState(state common.RunState) bool {
+	switch state {
+	case common.RunStateCompleted, common.RunStateFailed, common.RunStateCancelled, common.RunStateSuperseded:
+		return true
+	default:
+		return false
+	}
+}
+
+func (m *Biz) handleRunRuntimeCommandsReady(ev magicevent.Event, _ magicevent.Result) {
+	data, ok := ev.Data().(runevents.RuntimeCommandsReadyData)
+	if !ok || ev.Source() != runevents.CommandDestination || data.Validate() != nil || m == nil {
+		return
+	}
+	m.requestRunProjectionReconciliation(nil)
 }
 
 func (m *Biz) publishWorkspaceUpdated(ctx context.Context, item *workspacemodel.Workspace) {

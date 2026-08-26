@@ -85,7 +85,10 @@ func (m *Biz) GenerateCandidate(ctx context.Context, request llmmodels.RuntimeCa
 					budgetSnapshot.ActualTokens = completion.Usage.TotalTokens
 				}
 			}
-			audit := sealedAuditFromRequest(request, requestID, budgetSnapshot, startedAt, completedAt, execution.Submitted, llmmodels.RuntimeCandidateStatusFailed, string(runtimecontract.RuntimeCandidateFailureClassProviderProtocol), completion.ResponseBytes)
+			// The provider transaction completed with an explicit incomplete
+			// document outcome. Keep that factual outcome orthogonal to protocol
+			// failure: the Runtime owner decides bounded whole-document recovery.
+			audit := sealedAuditFromRequest(request, requestID, budgetSnapshot, startedAt, completedAt, execution.Submitted, llmmodels.RuntimeCandidateStatusCompleted, "", completion.ResponseBytes)
 			audit.PhysicalResponseMode = canonicalProviderPhysicalResponseMode(execution)
 			audit.RequestBytes = providerAuditRequestBytes(completion.RequestBytes, budgetSnapshot)
 			usage := completion.Usage
@@ -95,8 +98,8 @@ func (m *Biz) GenerateCandidate(ctx context.Context, request llmmodels.RuntimeCa
 			}
 			return llmmodels.RuntimeCandidateGenerationResult{
 				RequestID: requestID, Payload: append([]byte(nil), completion.Payload...), Usage: usage,
-				Audit: audit, Status: llmmodels.RuntimeCandidateStatusFailed,
-				FailureClass: string(runtimecontract.RuntimeCandidateFailureClassProviderProtocol), FailureReason: limitErr.Error(), ReachedProviderLimit: true,
+				Audit: audit, Status: llmmodels.RuntimeCandidateStatusCompleted,
+				ReachedProviderLimit: true,
 			}, err
 		}
 		stale := m.providerCeilingConfigurationStale(request, err)

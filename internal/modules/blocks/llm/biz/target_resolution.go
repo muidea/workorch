@@ -186,8 +186,8 @@ func deriveBudgetProfile(
 		}
 	}
 	// The selected provider/model capability is the single source of truth for
-	// the response ceiling. Runtime continuation is reserved for payloads that
-	// actually reach this hard provider boundary.
+	// the response ceiling. An explicit stop at this boundary may authorize
+	// Runtime whole-document recovery; it never authorizes partial continuation.
 	effectiveMaxOutputTokens := minPositive(providerMaxOutputTokens, contextWindowTokens-1)
 	if effectiveMaxOutputTokens <= 0 {
 		return llmmodels.ResolvedProviderModelProfile{}, llmmodels.ProviderModelFailure{

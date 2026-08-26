@@ -276,41 +276,49 @@ func TestRequestCandidateClassifiesOutputLimitSchemaTruncation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if response.DocumentOutcome == nil || response.DocumentOutcome.Framing.Disposition != runtimecontract.RuntimeProviderDocumentIncomplete || response.DocumentOutcome.Framing.Code != "max_output_tokens" || len(response.DocumentOutcome.Content) != 0 {
+	if response.DocumentOutcome == nil || response.DocumentOutcome.Framing.Disposition != runtimecontract.RuntimeProviderDocumentIncomplete || response.DocumentOutcome.Framing.Code != "max_output_tokens" || response.DocumentOutcome.Content != nil {
 		t.Fatalf("truncated candidate outcome = %+v", response.DocumentOutcome)
 	}
 }
 
-func TestRequestCandidateConvertsProviderOutputLimitErrorWithPayloadToContinuationFragment(t *testing.T) {
+func TestRequestCandidateClassifiesProviderOutputLimitForWholeDocumentRecovery(t *testing.T) {
 	request := candidateRequest(t, runtimecontract.ConvergenceStateNeedStateChange)
+	payload := []byte(`{"operations":[`)
 	provider := candidateProviderFunc(func(context.Context, llmmodels.RuntimeCandidateRequest) (llmmodels.RuntimeCandidateGenerationResult, error) {
 		return llmmodels.RuntimeCandidateGenerationResult{
-			Payload: []byte(`{"operations":[`), ReachedProviderLimit: true,
-			Status: llmmodels.RuntimeCandidateStatusFailed,
-			Audit:  &llmmodels.ProviderRequestAudit{Status: llmmodels.RuntimeCandidateStatusFailed, ProviderSubmitted: true},
+			Payload: payload, ReachedProviderLimit: true,
+			Status: llmmodels.RuntimeCandidateStatusCompleted,
+			Audit:  &llmmodels.ProviderRequestAudit{Status: llmmodels.RuntimeCandidateStatusCompleted, ProviderSubmitted: true},
 		}, errors.New("llm provider response incomplete: max_output_tokens")
 	})
 	response, err := RequestCandidate(context.Background(), provider, request)
 	if err != nil {
 		t.Fatalf("output-limit fragment returned error: %v", err)
 	}
-	if response.DocumentOutcome == nil || response.DocumentOutcome.Framing.Disposition != runtimecontract.RuntimeProviderDocumentIncomplete || response.DocumentOutcome.Framing.Code != "max_output_tokens" {
+	if response.DocumentOutcome == nil || response.DocumentOutcome.Framing.Disposition != runtimecontract.RuntimeProviderDocumentIncomplete || response.DocumentOutcome.Framing.Code != "max_output_tokens" || response.DocumentOutcome.Framing.Signature != "provider-output-limit" || response.DocumentOutcome.Framing.ResponseBytes != int64(len(payload)) || response.DocumentOutcome.Framing.ResponseHash != runtimecontract.StableRuntimeProviderResponseHash(payload) || response.DocumentOutcome.Content != nil {
 		t.Fatalf("output-limit response = %+v", response.DocumentOutcome)
 	}
 }
 
-func TestRequestCandidateDoesNotContinueOutputLimitProviderProse(t *testing.T) {
+func TestRequestCandidatePrioritizesProviderOutputLimitOverPayloadShape(t *testing.T) {
 	request := semanticBoundaryRequest(t)
-	provider := candidateProviderFunc(func(context.Context, llmmodels.RuntimeCandidateRequest) (llmmodels.RuntimeCandidateGenerationResult, error) {
-		return llmmodels.RuntimeCandidateGenerationResult{
-			Payload: []byte("The user wants me to generate a semantic plan."), ReachedProviderLimit: true,
-			Status: llmmodels.RuntimeCandidateStatusFailed,
-			Audit:  &llmmodels.ProviderRequestAudit{Status: llmmodels.RuntimeCandidateStatusFailed, ProviderSubmitted: true},
-		}, errors.New("llm provider response incomplete: max_output_tokens")
-	})
-	response, err := RequestCandidate(context.Background(), provider, request)
-	if err != nil || response.DocumentOutcome == nil || response.DocumentOutcome.Framing.Disposition != runtimecontract.RuntimeProviderDocumentInvalid {
-		t.Fatalf("output-limit provider prose result: response=%+v err=%v", response, err)
+	for name, payload := range map[string][]byte{
+		"provider prose":          []byte("The user wants me to generate a semantic plan."),
+		"complete-looking object": []byte(`{"documentKind":"semantic_plan"}`),
+	} {
+		t.Run(name, func(t *testing.T) {
+			provider := candidateProviderFunc(func(context.Context, llmmodels.RuntimeCandidateRequest) (llmmodels.RuntimeCandidateGenerationResult, error) {
+				return llmmodels.RuntimeCandidateGenerationResult{
+					Payload: payload, ReachedProviderLimit: true,
+					Status: llmmodels.RuntimeCandidateStatusCompleted,
+					Audit:  &llmmodels.ProviderRequestAudit{Status: llmmodels.RuntimeCandidateStatusCompleted, ProviderSubmitted: true},
+				}, errors.New("llm provider response incomplete: max_output_tokens")
+			})
+			response, err := RequestCandidate(context.Background(), provider, request)
+			if err != nil || response.DocumentOutcome == nil || response.DocumentOutcome.Framing.Disposition != runtimecontract.RuntimeProviderDocumentIncomplete || response.DocumentOutcome.Framing.Code != "max_output_tokens" || response.DocumentOutcome.Framing.ResponseHash != runtimecontract.StableRuntimeProviderResponseHash(payload) || response.DocumentOutcome.Framing.ResponseBytes != int64(len(payload)) || response.DocumentOutcome.Content != nil {
+				t.Fatalf("output-limit result: response=%+v err=%v", response, err)
+			}
+		})
 	}
 }
 
@@ -319,13 +327,63 @@ func TestRequestCandidateClassifiesOutputLimitWithoutFinalText(t *testing.T) {
 	provider := candidateProviderFunc(func(context.Context, llmmodels.RuntimeCandidateRequest) (llmmodels.RuntimeCandidateGenerationResult, error) {
 		return llmmodels.RuntimeCandidateGenerationResult{
 			ReachedProviderLimit: true,
-			Status:               llmmodels.RuntimeCandidateStatusFailed,
-			Audit:                &llmmodels.ProviderRequestAudit{Status: llmmodels.RuntimeCandidateStatusFailed, ProviderSubmitted: true},
+			Status:               llmmodels.RuntimeCandidateStatusCompleted,
+			Audit:                &llmmodels.ProviderRequestAudit{Status: llmmodels.RuntimeCandidateStatusCompleted, ProviderSubmitted: true},
 		}, errors.New("llm provider response incomplete: max_output_tokens")
 	})
 	response, err := RequestCandidate(context.Background(), provider, request)
-	if err != nil || response.DocumentOutcome == nil || response.DocumentOutcome.Framing.Disposition != runtimecontract.RuntimeProviderDocumentEmpty || response.DocumentOutcome.Framing.Code != "provider_final_output_missing" {
+	if err != nil || response.DocumentOutcome == nil || response.DocumentOutcome.Framing.Disposition != runtimecontract.RuntimeProviderDocumentIncomplete || response.DocumentOutcome.Framing.Code != "max_output_tokens" || response.DocumentOutcome.Framing.Signature != "provider-output-limit" || response.DocumentOutcome.Framing.ResponseHash != "" || response.DocumentOutcome.Framing.ResponseBytes != 0 || response.DocumentOutcome.Content != nil {
 		t.Fatalf("missing final output result: response=%+v err=%v", response, err)
+	}
+}
+
+func TestRequestCandidateRejectsContradictoryProviderOutputLimitGeneration(t *testing.T) {
+	request := semanticBoundaryRequest(t)
+	tests := []struct {
+		name       string
+		generation llmmodels.RuntimeCandidateGenerationResult
+	}{
+		{
+			name: "failed generation and audit",
+			generation: llmmodels.RuntimeCandidateGenerationResult{
+				ReachedProviderLimit: true,
+				Status:               llmmodels.RuntimeCandidateStatusFailed,
+				FailureClass:         string(runtimecontract.RuntimeCandidateFailureClassProviderProtocol),
+				Audit: &llmmodels.ProviderRequestAudit{
+					Status: llmmodels.RuntimeCandidateStatusFailed, FailureClass: string(runtimecontract.RuntimeCandidateFailureClassProviderProtocol), ProviderSubmitted: true,
+				},
+			},
+		},
+		{
+			name: "unsubmitted completed audit",
+			generation: llmmodels.RuntimeCandidateGenerationResult{
+				ReachedProviderLimit: true,
+				Status:               llmmodels.RuntimeCandidateStatusCompleted,
+				Audit:                &llmmodels.ProviderRequestAudit{Status: llmmodels.RuntimeCandidateStatusCompleted},
+			},
+		},
+		{
+			name: "missing audit",
+			generation: llmmodels.RuntimeCandidateGenerationResult{
+				ReachedProviderLimit: true,
+				Status:               llmmodels.RuntimeCandidateStatusCompleted,
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			provider := candidateProviderFunc(func(context.Context, llmmodels.RuntimeCandidateRequest) (llmmodels.RuntimeCandidateGenerationResult, error) {
+				return tt.generation, errors.New("llm provider response incomplete: max_output_tokens")
+			})
+			response, err := RequestCandidate(context.Background(), provider, request)
+			if err == nil || response.DocumentOutcome != nil || response.Audit != nil {
+				t.Fatalf("contradictory output-limit result was accepted: response=%+v err=%v", response, err)
+			}
+			failure := CandidateFailureFromError(err)
+			if failure.Class != CandidateFailureClassInternal {
+				t.Fatalf("failure class = %q, want internal", failure.Class)
+			}
+		})
 	}
 }
 
@@ -341,7 +399,7 @@ func TestRequestCandidateClassifiesMidTokenEOFAsIncompleteDocumentWithoutProvide
 	if err != nil {
 		t.Fatal(err)
 	}
-	if response.DocumentOutcome == nil || response.DocumentOutcome.Framing.Disposition != runtimecontract.RuntimeProviderDocumentIncomplete || response.DocumentOutcome.Framing.Code != "incomplete_json_document" || len(response.DocumentOutcome.Content) != 0 {
+	if response.DocumentOutcome == nil || response.DocumentOutcome.Framing.Disposition != runtimecontract.RuntimeProviderDocumentIncomplete || response.DocumentOutcome.Framing.Code != "incomplete_json_document" || response.DocumentOutcome.Content != nil {
 		t.Fatalf("mid-token candidate outcome = %+v", response.DocumentOutcome)
 	}
 }
@@ -358,7 +416,7 @@ func TestRequestCandidateClassifiesEmptySuccessfulBodyAsProviderOutcome(t *testi
 	if err != nil || response.DocumentOutcome == nil || response.DocumentOutcome.Framing.Disposition != runtimecontract.RuntimeProviderDocumentEmpty || response.DocumentOutcome.Framing.Code != "provider_final_output_missing" {
 		t.Fatalf("empty provider response outcome = %+v err=%v", response.DocumentOutcome, err)
 	}
-	if len(response.DocumentOutcome.Content) != 0 {
+	if response.DocumentOutcome.Content != nil {
 		t.Fatalf("empty provider response leaked complete document = %q", response.DocumentOutcome.Content)
 	}
 }
