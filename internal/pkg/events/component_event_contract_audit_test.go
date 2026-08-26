@@ -83,6 +83,15 @@ func TestBusinessEventTopicsStayOwnerLocal(t *testing.T) {
 						literal, ok := valueSpec.Values[index].(*ast.BasicLit)
 						if !ok || literal.Kind != token.STRING {
 							t.Errorf("owner topic %s at %s forwards or derives an external definition", name.Name, path)
+							continue
+						}
+						topic, err := strconv.Unquote(literal.Value)
+						if err != nil {
+							t.Errorf("owner topic %s at %s is not a valid string literal: %v", name.Name, path, err)
+							continue
+						}
+						if eventHubPathHasWildcardSegment(topic) {
+							t.Errorf("owner topic %s at %s uses wildcard Event.ID %q", name.Name, path, topic)
 						}
 					}
 				}
@@ -95,6 +104,76 @@ func TestBusinessEventTopicsStayOwnerLocal(t *testing.T) {
 	}
 	checkTopics(filepath.Join(repositoryRoot, "internal", "pkg"), false)
 	checkTopics(filepath.Join(repositoryRoot, "internal", "modules"), true)
+}
+
+// TestProductionEventAndObserverIdentitiesStayConcrete keeps destination
+// match patterns out of the two identity surfaces that EventHub uses for
+// subscription de-duplication and publication routing. It inspects the Go AST
+// and resolved constants so formatting and call-site line layout are irrelevant.
+func TestProductionEventAndObserverIdentitiesStayConcrete(t *testing.T) {
+	repositoryRoot := auditRepositoryRoot(t)
+	constants := auditSourceConstants(t, repositoryRoot)
+	internalRoot := filepath.Join(repositoryRoot, "internal")
+	err := filepath.WalkDir(internalRoot, func(path string, entry os.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		if entry.IsDir() || !strings.HasSuffix(path, ".go") || strings.HasSuffix(path, "_test.go") {
+			return nil
+		}
+		file, pkgPath, imports, err := auditParseSourceFile(repositoryRoot, path)
+		if err != nil {
+			return err
+		}
+		ast.Inspect(file, func(node ast.Node) bool {
+			call, ok := node.(*ast.CallExpr)
+			if !ok || len(call.Args) == 0 {
+				return true
+			}
+			selector, ok := call.Fun.(*ast.SelectorExpr)
+			if !ok {
+				return true
+			}
+			qualifier, qualified := selector.X.(*ast.Ident)
+			importPath := ""
+			if qualified {
+				importPath = imports[qualifier.Name]
+			}
+			switch {
+			case importPath == "github.com/muidea/magicCommon/event" && (selector.Sel.Name == "NewEvent" || selector.Sel.Name == "NewEventWithContext"):
+				auditConcreteEventHubIdentity(t, call.Args[0], pkgPath, imports, constants, path, "Event.ID")
+			case importPath == "github.com/muidea/magicCommon/event" && (selector.Sel.Name == "NewSimpleObserver" || selector.Sel.Name == "NewSimpleObserverWithMatchID"):
+				auditConcreteEventHubIdentity(t, call.Args[0], pkgPath, imports, constants, path, "Observer.ID")
+			case importPath == "github.com/muidea/workorch/internal/modules/base/biz" && selector.Sel.Name == "New":
+				auditConcreteEventHubIdentity(t, call.Args[0], pkgPath, imports, constants, path, "Base Observer.ID")
+			case selector.Sel.Name == "SubscribeMatchedFunc":
+				auditConcreteEventHubIdentity(t, call.Args[0], pkgPath, imports, constants, path, "matched Observer.ID")
+			}
+			return true
+		})
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("scan production EventHub identities: %v", err)
+	}
+}
+
+func auditConcreteEventHubIdentity(t *testing.T, expr ast.Expr, pkgPath string, imports map[string]string, constants map[string]auditSourceConst, sourcePath string, identityKind string) {
+	t.Helper()
+	value, resolved := auditStringExpr(expr, pkgPath, imports, constants, map[string]bool{})
+	if resolved && eventHubPathHasWildcardSegment(value) {
+		t.Errorf("production %s in %s uses wildcard identity %q", identityKind, sourcePath, value)
+	}
+}
+
+func eventHubPathHasWildcardSegment(value string) bool {
+	for _, segment := range strings.Split(strings.TrimSpace(value), "/") {
+		switch segment {
+		case "#", "+", ":id":
+			return true
+		}
+	}
+	return false
 }
 
 // TestOwnerEventPackagesDoNotImportOtherOwners keeps Command/Data/Result

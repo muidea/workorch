@@ -1,6 +1,9 @@
 package http
 
 import (
+	"bufio"
+	"fmt"
+	"net"
 	"net/http"
 )
 
@@ -52,5 +55,31 @@ func (rw *responseWriter) Written() bool {
 }
 
 func (rw *responseWriter) Flush() {
-	rw.responseWriter.(http.Flusher).Flush()
+	if flusher, ok := rw.responseWriter.(http.Flusher); ok {
+		if !rw.Written() {
+			rw.WriteHeader(http.StatusOK)
+		}
+		flusher.Flush()
+	}
+}
+
+// Hijack preserves protocol upgrades through the accounting wrapper. Marking
+// the response written prevents the route context from appending a 204 after a
+// successful upgrade.
+func (rw *responseWriter) Hijack() (net.Conn, *bufio.ReadWriter, error) {
+	hijacker, ok := rw.responseWriter.(http.Hijacker)
+	if !ok {
+		return nil, nil, fmt.Errorf("underlying response writer does not support hijacking: %w", http.ErrNotSupported)
+	}
+	conn, buffer, err := hijacker.Hijack()
+	if err == nil && !rw.Written() {
+		rw.status = http.StatusSwitchingProtocols
+	}
+	return conn, buffer, err
+}
+
+// Unwrap lets http.ResponseController discover optional interfaces implemented
+// by the listener's original ResponseWriter.
+func (rw *responseWriter) Unwrap() http.ResponseWriter {
+	return rw.responseWriter
 }

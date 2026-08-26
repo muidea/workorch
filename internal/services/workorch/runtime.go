@@ -11,6 +11,7 @@ import (
 	magicevent "github.com/muidea/magicCommon/event"
 
 	workorchdevents "github.com/muidea/workorch/internal/modules/application/workorchd/pkg/events"
+	workorchservicecommon "github.com/muidea/workorch/internal/services/workorch/pkg/common"
 
 	"github.com/muidea/magicCommon/framework/application"
 	frameworkservice "github.com/muidea/magicCommon/framework/service"
@@ -18,7 +19,10 @@ import (
 	"github.com/muidea/workorch/internal/pkg/workorchconfig"
 )
 
-const defaultApplicationShutdownTimeout = 30 * time.Second
+const (
+	defaultApplicationShutdownTimeout = 30 * time.Second
+	serverStopObserverID              = workorchservicecommon.ModuleID + "/server-stop"
+)
 
 type frameworkRuntime struct {
 	configDir          string
@@ -48,9 +52,13 @@ func (s *frameworkRuntime) Startup(ctx context.Context) error {
 	if hub == nil {
 		return common.ErrInvalidArgument
 	}
-	s.serverStopObserver = magicevent.NewSimpleObserver(workorchdevents.NotificationDestination, hub)
-	s.serverStopObserver.Subscribe(workorchdevents.TopicWorkorchDServiceStopped, s.handleServerStopped)
+	s.subscribeServerStopped(hub)
 	return nil
+}
+
+func (s *frameworkRuntime) subscribeServerStopped(hub magicevent.Hub) {
+	s.serverStopObserver = magicevent.NewSimpleObserverWithMatchID(serverStopObserverID, workorchdevents.NotificationDestination, hub)
+	s.serverStopObserver.Subscribe(workorchdevents.TopicWorkorchDServiceStopped, s.handleServerStopped)
 }
 
 func (s *frameworkRuntime) Run(ctx context.Context) error {

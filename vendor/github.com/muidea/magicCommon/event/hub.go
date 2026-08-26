@@ -81,13 +81,14 @@ type Result interface {
 }
 
 type Observer interface {
+	// ID returns the observer's unique subscription identity. The hub uses it
+	// only for subscription de-duplication and independent unsubscription.
 	ID() string
 	Notify(event Event, result Result)
 }
 
-// destinationMatcher keeps an observer's subscription identity separate from
-// the destination pattern it accepts. Multiple owners may intentionally share
-// one pattern without replacing each other in an event subscription.
+// destinationMatcher is an optional internal routing contract. It keeps an
+// observer's destination pattern independent from its subscription identity.
 type destinationMatcher interface {
 	MatchID() string
 }
@@ -120,7 +121,6 @@ const defaultMaxPerLaneChanSize = 64
 const defaultMaxHubActionChanSize = 1024
 const defaultMaxWorkerPoolSize = 256
 const defaultLaneIdleTimeout = 30 * time.Second
-const controlActionTimeout = time.Second
 
 func defaultHubOptions(capacitySize int) *hubOptions {
 	if capacitySize <= 0 {
@@ -279,7 +279,7 @@ func NewSimpleObserver(id string, hub Hub) SimpleObserver {
 	return &simpleObserver{id: id, matchID: id, eventHub: hub, eventID2ObserverFunc: ID2ObserverFuncMap{}}
 }
 
-// NewSimpleObserverWithMatchID 允许将观察者的逻辑标识与 destination 匹配模式分离。
+// NewSimpleObserverWithMatchID 允许将观察者的唯一订阅标识与 destination 匹配模式分离。
 func NewSimpleObserverWithMatchID(id, matchID string, hub Hub) SimpleObserver {
 	if matchID == "" {
 		matchID = id
@@ -680,19 +680,17 @@ func (s *hubImpl) Subscribe(eventID string, observer Observer) {
 	}
 
 	replay := make(chan bool, 1)
-	// Subscription is control-plane work. Keeping it outside Execute prevents a
-	// saturated data-plane worker pool from blocking owner lifecycle changes.
-	select {
-	case s.hubActionChannel <- &subscribeData{eventID: eventID, observer: observer, result: replay}:
-	case <-time.After(controlActionTimeout):
-		slog.Warn("timeout queueing subscribe action")
-		return
-	}
-	select {
-	case <-replay:
-	case <-time.After(controlActionTimeout):
-		slog.Warn("timeout waiting for subscribe result")
-	}
+	s.Run(func() {
+		select {
+		case s.hubActionChannel <- &subscribeData{eventID: eventID, observer: observer, result: replay}:
+			// 成功发送
+		case <-time.After(10 * time.Millisecond):
+			// 超时，跳过发送，避免长期阻塞调用方
+			replay <- false
+		}
+	})
+	<-replay
+	close(replay)
 }
 
 func (s *hubImpl) Unsubscribe(eventID string, observer Observer) {
@@ -701,17 +699,18 @@ func (s *hubImpl) Unsubscribe(eventID string, observer Observer) {
 	}
 
 	replay := make(chan bool, 1)
-	select {
-	case s.hubActionChannel <- &unsubscribeData{eventID: eventID, observer: observer, result: replay}:
-	case <-time.After(controlActionTimeout):
-		slog.Warn("timeout queueing unsubscribe action")
-		return
-	}
-	select {
-	case <-replay:
-	case <-time.After(controlActionTimeout):
-		slog.Warn("timeout waiting for unsubscribe result")
-	}
+
+	s.Run(func() {
+		select {
+		case s.hubActionChannel <- &unsubscribeData{eventID: eventID, observer: observer, result: replay}:
+			// 成功发送
+		case <-time.After(10 * time.Millisecond):
+			// 超时，跳过发送，避免长期阻塞调用方
+			replay <- false
+		}
+	})
+	<-replay
+	close(replay)
 }
 
 func (s *hubImpl) Post(ev Event) {
@@ -1022,17 +1021,18 @@ func (s *hubImpl) findMatchingObservers(ev Event) ObserverList {
 	return matchList
 }
 
+func matchDestination(destination, matchID string) bool {
+	return MatchValue(destination, matchID) || MatchValue(matchID, destination)
+}
+
 func observerMatchID(observer Observer) string {
 	if matcher, ok := observer.(destinationMatcher); ok {
 		if matchID := matcher.MatchID(); matchID != "" {
 			return matchID
 		}
 	}
-	return observer.ID()
-}
 
-func matchDestination(destination, observerID string) bool {
-	return MatchValue(destination, observerID) || MatchValue(observerID, destination)
+	return observer.ID()
 }
 
 type simpleObserver struct {
@@ -1043,15 +1043,14 @@ type simpleObserver struct {
 	eventIDLock          sync.RWMutex
 }
 
+var _ destinationMatcher = (*simpleObserver)(nil)
+
 func (s *simpleObserver) ID() string {
 	return s.id
 }
 
 func (s *simpleObserver) MatchID() string {
-	if s.matchID != "" {
-		return s.matchID
-	}
-	return s.id
+	return s.matchID
 }
 
 func (s *simpleObserver) Notify(ev Event, re Result) {
