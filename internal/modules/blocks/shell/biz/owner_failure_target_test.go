@@ -56,24 +56,21 @@ func TestShellOwnerDoesNotInferFailureTargetFromValidationCommand(t *testing.T) 
 		t.Fatal(err)
 	}
 	recipe := runtimecontract.RuntimeValidationRecipe{ID: "failing-entry-validation", Command: "sh", Args: []string{"-c", "echo assertion failed >&2; exit 7"}}
-	command := shellevents.ExecuteOperationCommand{
-		RuntimeOperationExecutionContext: runtimecontract.RuntimeOperationExecutionContext{
-			Execution: runtimecontract.RuntimeOperationExecutionEnvelope{
-				ExecutionKey: "exec/ws-shell/run-shell/dispatch-shell/validate-entry", Fence: 1,
-				ExpectedEffectScope: runtimecontract.RuntimeEffectEphemeralSession,
-			},
-			WorkspaceID: "ws-shell", RunID: "run-shell", DispatchID: "dispatch-shell",
-			Transaction: runtimecontract.AuthorityTransaction{AuthoritySnapshotID: "authority-shell", RequiredOutputHash: "output-shell"},
-			OperationID: "validate-entry", EvidenceKind: runtimecontract.EvidenceKindValidation,
-			WorkspaceDeliverableDirectory: workspace, TargetRefs: []string{"validation-entry.go"},
+	executionContext := runtimecontract.RuntimeOperationExecutionContext{
+		Execution: runtimecontract.RuntimeOperationExecutionEnvelope{
+			ExecutionKey: "exec/ws-shell/run-shell/dispatch-shell/validate-entry", Fence: 1,
+			ExpectedEffectScope: runtimecontract.RuntimeEffectEphemeralSession,
 		},
-		TargetRole:                "implementation",
-		ValidationRecipes:         []runtimecontract.RuntimeValidationRecipe{recipe},
-		ValidationScopeTargetRefs: []string{"validation-entry.go"},
-		Data: shellevents.OperationData{ValidationRecipeID: recipe.ID, TargetRefs: []string{"validation-entry.go"}, ManagedValidation: runtimecontract.RuntimeManagedValidation{
-			RuntimeManaged: true, Kind: runtimecontract.RuntimeBlockKindManagedValidationSession,
-		}},
+		WorkspaceID: "ws-shell", RunID: "run-shell", DispatchID: "dispatch-shell",
+		Transaction: runtimecontract.AuthorityTransaction{AuthoritySnapshotID: "authority-shell", RequiredOutputHash: "output-shell"},
+		OperationID: "validate-entry", EvidenceKind: runtimecontract.EvidenceKindValidation,
+		WorkspaceDeliverableDirectory: workspace, TargetRefs: []string{"validation-entry.go"},
 	}
+	command := sealedShellTestCommand(t, owner.runtimeAdapter, executionContext, runtimecontract.RuntimeBlockKindManagedValidationSession, shellevents.OperationData{
+		ValidationRecipeID: recipe.ID, TargetRefs: []string{"validation-entry.go"}, ManagedValidation: runtimecontract.RuntimeManagedValidation{
+			RuntimeManaged: true, Kind: runtimecontract.RuntimeBlockKindManagedValidationSession,
+		},
+	}, "implementation", []runtimecontract.RuntimeValidationRecipe{recipe}, []string{"validation-entry.go"})
 	result := hub.Send(magicevent.NewEventWithContext(
 		shellevents.TopicExecuteOperation, runtimecontract.RuntimeModuleOrchestrator, modulecommon.ModuleID,
 		magicevent.NewHeader(), ctx, command,
@@ -164,17 +161,15 @@ func TestShellManagedGoDiagnosticReportsActualManifestScopedFailureTarget(t *tes
 	if !reflect.DeepEqual(targets, []string{"cmd/lsp-bridge/main.go"}) {
 		t.Fatalf("managed Go failure targets = %v", targets)
 	}
-	command := shellevents.ExecuteOperationCommand{
-		RuntimeOperationExecutionContext: runtimecontract.RuntimeOperationExecutionContext{
-			WorkspaceID: "ws-shell", RunID: "run-shell", DispatchID: "dispatch-shell",
-			Transaction: runtimecontract.AuthorityTransaction{AuthoritySnapshotID: "authority-shell"}, OperationID: "validate-entry",
-		},
-		TargetRole: "implementation", ValidationScopeTargetRefs: request.ValidationScopeTargetRefs,
+	executionContext := runtimecontract.RuntimeOperationExecutionContext{
+		WorkspaceID: "ws-shell", RunID: "run-shell", DispatchID: "dispatch-shell",
+		Transaction: runtimecontract.AuthorityTransaction{AuthoritySnapshotID: "authority-shell"}, OperationID: "validate-entry",
 	}
+	authorization := shellevents.RuntimeExecutionAuthorization{TargetRole: "implementation", ValidationScopeTargetRefs: request.ValidationScopeTargetRefs}
 	diagnostic := runtimecontract.ValidationFailureDiagnostic{
 		Class: runtimecontract.ValidationDiagnosticBuildFailed, Stage: "shell_command_failed", Operation: "shell/command", TargetRefs: targets,
 	}
-	observation := shellValidationFailureObservation(command, diagnostic)
+	observation := shellValidationFailureObservation(executionContext, authorization, diagnostic)
 	if observation == nil || !reflect.DeepEqual(observation.CandidateTargetRefs, []string{"cmd/lsp-bridge/main.go"}) ||
 		!reflect.DeepEqual(observation.ValidationScopeTargetRefs, request.ValidationScopeTargetRefs) {
 		t.Fatalf("managed Go validation observation = %+v", observation)
@@ -219,20 +214,16 @@ func TestShellOwnerEmitsOnlyContentBoundStructuredFailureTarget(t *testing.T) {
 		Command: "sh",
 		Args:    []string{"-c", "printf '%s\\n' 'WORKORCH_FAILURE_TARGET={\"schemaVersion\":\"workorch.shell.failure_target\",\"targetRole\":\"implementation\",\"targetRefs\":[\"implementation.go\"],\"diagnosticClass\":\"validation_build_failed\"}'; exit 7"},
 	}
-	command := shellevents.ExecuteOperationCommand{
-		RuntimeOperationExecutionContext: runtimecontract.RuntimeOperationExecutionContext{
-			Execution:   runtimecontract.RuntimeOperationExecutionEnvelope{ExecutionKey: "exec/ws-shell/run-shell/dispatch-shell/structured", Fence: 1, ExpectedEffectScope: runtimecontract.RuntimeEffectEphemeralSession},
-			WorkspaceID: "ws-shell", RunID: "run-shell", DispatchID: "dispatch-shell", Transaction: runtimecontract.AuthorityTransaction{AuthoritySnapshotID: "authority-shell", RequiredOutputHash: "output-shell"},
-			OperationID: "structured", EvidenceKind: runtimecontract.EvidenceKindValidation, WorkspaceDeliverableDirectory: t.TempDir(),
-		},
-		TargetRole:        "implementation",
-		ValidationRecipes: []runtimecontract.RuntimeValidationRecipe{recipe},
-		Data: shellevents.OperationData{
-			ValidationRecipeID: recipe.ID,
-			ValidationEvidence: runtimecontract.RuntimeValidationEvidence{DiagnosticClass: runtimecontract.ValidationDiagnosticBuildFailed},
-			ManagedValidation:  runtimecontract.RuntimeManagedValidation{RuntimeManaged: true, Kind: runtimecontract.RuntimeBlockKindManagedValidationSession},
-		},
+	executionContext := runtimecontract.RuntimeOperationExecutionContext{
+		Execution:   runtimecontract.RuntimeOperationExecutionEnvelope{ExecutionKey: "exec/ws-shell/run-shell/dispatch-shell/structured", Fence: 1, ExpectedEffectScope: runtimecontract.RuntimeEffectEphemeralSession},
+		WorkspaceID: "ws-shell", RunID: "run-shell", DispatchID: "dispatch-shell", Transaction: runtimecontract.AuthorityTransaction{AuthoritySnapshotID: "authority-shell", RequiredOutputHash: "output-shell"},
+		OperationID: "structured", EvidenceKind: runtimecontract.EvidenceKindValidation, WorkspaceDeliverableDirectory: t.TempDir(),
 	}
+	command := sealedShellTestCommand(t, owner.runtimeAdapter, executionContext, runtimecontract.RuntimeBlockKindManagedValidationSession, shellevents.OperationData{
+		ValidationRecipeID: recipe.ID,
+		ValidationEvidence: runtimecontract.RuntimeValidationEvidence{DiagnosticClass: runtimecontract.ValidationDiagnosticBuildFailed},
+		ManagedValidation:  runtimecontract.RuntimeManagedValidation{RuntimeManaged: true, Kind: runtimecontract.RuntimeBlockKindManagedValidationSession},
+	}, "implementation", []runtimecontract.RuntimeValidationRecipe{recipe}, nil)
 	result := hub.Send(magicevent.NewEventWithContext(shellevents.TopicExecuteOperation, runtimecontract.RuntimeModuleOrchestrator, modulecommon.ModuleID, magicevent.NewHeader(), ctx, command))
 	data, err := result.Get()
 	if err != nil {

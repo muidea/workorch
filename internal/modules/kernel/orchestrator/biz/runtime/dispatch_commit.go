@@ -259,11 +259,15 @@ func sealOperationExecutionRecords(
 			State:               runtimecontract.OperationExecutionSealed,
 		}
 		for _, feasibility := range feasibilities {
-			if feasibility.OperationID != operation.ID || feasibility.Observation == nil || feasibility.Observation.Outcome != runtimecontract.RuntimeOwnerFeasibilityFeasible || feasibility.ReplayProof == nil {
+			if feasibility.OperationID != operation.ID || feasibility.Observation == nil || feasibility.Observation.Outcome != runtimecontract.RuntimeOwnerFeasibilityFeasible {
 				continue
 			}
-			proof := feasibility.ReplayProof.Clone()
-			execution.ReplayProof = &proof
+			execution.AdmissibilitySnapshotID = feasibility.AdmissibilitySnapshotID
+			execution.AcquisitionBinding = feasibility.AcquisitionBinding
+			if feasibility.ReplayProof != nil {
+				proof := feasibility.ReplayProof.Clone()
+				execution.ReplayProof = &proof
+			}
 			break
 		}
 		ret = append(ret, execution)

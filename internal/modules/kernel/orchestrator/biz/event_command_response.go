@@ -6,7 +6,6 @@ import (
 	"fmt"
 
 	magicevent "github.com/muidea/magicCommon/event"
-	workspaceevents "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/eventcontract"
 	"github.com/muidea/workorch/internal/pkg/events"
@@ -56,20 +55,21 @@ func runCommandResponse[Result any](response magicevent.Result, topic string) (R
 	return result, nil
 }
 
-func workspaceCommandResponse(response magicevent.Result, topic string) (workspaceevents.WorkspaceCommandResult, error) {
+func workspaceCommandResponse[Result any](response magicevent.Result, topic string) (Result, error) {
+	var zero Result
 	if response == nil {
-		return workspaceevents.WorkspaceCommandResult{}, fmt.Errorf("workspace command %s returned no response", topic)
+		return zero, fmt.Errorf("workspace command %s returned no response", topic)
 	}
 	if err := response.Error(); err != nil {
-		return workspaceevents.WorkspaceCommandResult{}, err
+		return zero, err
 	}
 	data, resultErr := response.Get()
 	if resultErr != nil {
-		return workspaceevents.WorkspaceCommandResult{}, resultErr
+		return zero, resultErr
 	}
-	result, ok := data.(workspaceevents.WorkspaceCommandResult)
+	result, ok := data.(Result)
 	if !ok {
-		return workspaceevents.WorkspaceCommandResult{}, common.ErrInvalidArgument
+		return zero, common.ErrInvalidArgument
 	}
 	return result, nil
 }

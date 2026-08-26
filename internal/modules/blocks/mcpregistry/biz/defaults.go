@@ -11,7 +11,7 @@ import (
 	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
 )
 
-func (s *Service) EnsureBuiltinDefaults(ctx context.Context) (string, error) {
+func (s *service) ensureBuiltinDefaults(ctx context.Context) (string, error) {
 	serverDefaults, err := workorchdefaults.BuiltinMCPServerDefaults()
 	if err != nil {
 		return "", err

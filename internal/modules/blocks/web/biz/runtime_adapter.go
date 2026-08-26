@@ -105,6 +105,47 @@ func (a *RuntimeAdapter) ExecuteOperation(ctx context.Context, request RuntimeOp
 	}
 }
 
+// ExecuteOperationAtOwnerRevision captures one owner-private provider snapshot,
+// compares its stable revision with the SM-3 authorization, and only then
+// selects a provider and enters transport code. The snapshot is not reloaded
+// between comparison and network call.
+func (a *RuntimeAdapter) ExecuteOperationAtOwnerRevision(ctx context.Context, request RuntimeOperationRequest, expectedRevision string) (RuntimeOperationResult, string, error) {
+	if a == nil {
+		return RuntimeOperationResult{}, "", common.ErrInvalidArgument
+	}
+	defaultID, providers, err := a.providerConfigs()
+	if err != nil {
+		return RuntimeOperationResult{}, "", err
+	}
+	_, currentRevision, err := webProviderConfigurationIdentity(defaultID, providers)
+	if err != nil {
+		return RuntimeOperationResult{}, "", err
+	}
+	if currentRevision != strings.TrimSpace(expectedRevision) {
+		return RuntimeOperationResult{}, currentRevision, nil
+	}
+	if strings.TrimSpace(request.WorkspaceInternalDirectory) == "" {
+		return RuntimeOperationResult{}, currentRevision, fmt.Errorf("%w: runtime Web execution requires workspace internal directory", common.ErrInvalidArgument)
+	}
+	provider, err := selectProviderIDFromConfigs(defaultID, providers, request.ProviderID, request.Kind)
+	if err != nil {
+		return failedWebResult(request, provider, webcommon.ErrorProviderUnavailable, err), currentRevision, err
+	}
+	switch strings.TrimSpace(request.Kind) {
+	case webcommon.StepKindSearch:
+		result, executeErr := a.search(ctx, request, provider)
+		result, executeErr = requireWebApprovalFailure(result, executeErr)
+		return result, currentRevision, executeErr
+	case webcommon.StepKindFetch:
+		result, executeErr := a.fetch(ctx, request, provider)
+		result, executeErr = requireWebApprovalFailure(result, executeErr)
+		return result, currentRevision, executeErr
+	default:
+		err := fmt.Errorf("%w: unsupported web step kind %q", common.ErrInvalidArgument, request.Kind)
+		return failedWebResult(request, provider, webcommon.ErrorInvalidRequest, err), currentRevision, err
+	}
+}
+
 // OperationAdmissibility returns the current, bounded provider selector set and
 // a stable revision for Runtime's read-only candidate-admission inventory.
 // It only reads provider configuration; it never performs an HTTP request.
@@ -116,6 +157,10 @@ func (a *RuntimeAdapter) OperationAdmissibility() ([]string, string, error) {
 	if err != nil {
 		return nil, "", err
 	}
+	return webProviderConfigurationIdentity(defaultID, providers)
+}
+
+func webProviderConfigurationIdentity(defaultID string, providers map[string]webmodels.ProviderConfig) ([]string, string, error) {
 	ids := make([]string, 0, len(providers))
 	for id := range providers {
 		ids = append(ids, id)

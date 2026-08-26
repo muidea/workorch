@@ -15,16 +15,14 @@ import (
 const ModuleID = modulecommon.ModuleID
 
 type Dependencies struct {
-	MemoryItems        repository.MemoryItemRepository
-	MemoryRecallTraces repository.MemoryRecallTraceRepository
-	WorkspaceDeletions repository.MemoryWorkspaceDeletionRepository
-	EventHub           magicevent.Hub
-	BackgroundRoutine  task.BackgroundRoutine
+	OwnerRepositories repository.MemoryOwnerRepositories
+	EventHub          magicevent.Hub
+	BackgroundRoutine task.BackgroundRoutine
 }
 
 type Biz struct {
 	basebiz.Base
-	service            *Service
+	service            *service
 	workspaceDeletions repository.MemoryWorkspaceDeletionRepository
 	topics             []string
 	started            bool
@@ -33,10 +31,13 @@ type Biz struct {
 }
 
 func New(h magicevent.Hub, b task.BackgroundRoutine, deps Dependencies) (*Biz, error) {
-	if deps.MemoryItems == nil || deps.MemoryRecallTraces == nil || deps.WorkspaceDeletions == nil || deps.EventHub == nil || h == nil {
+	if deps.EventHub == nil || h == nil {
 		return nil, common.ErrInvalidArgument
 	}
-	return &Biz{Base: basebiz.New(modulecommon.ModuleID, h, b), service: NewServiceWithRecallTraces(deps.MemoryItems, deps.MemoryRecallTraces), workspaceDeletions: deps.WorkspaceDeletions, workspaceLocks: map[common.WorkspaceID]*sync.Mutex{}}, nil
+	if err := deps.OwnerRepositories.Validate(); err != nil {
+		return nil, err
+	}
+	return &Biz{Base: basebiz.New(modulecommon.ModuleID, h, b), service: newServiceWithRecallTraces(deps.OwnerRepositories.Items(), deps.OwnerRepositories.RecallTraces()), workspaceDeletions: deps.OwnerRepositories.WorkspaceDeletions(), workspaceLocks: map[common.WorkspaceID]*sync.Mutex{}}, nil
 }
 
 func (m *Biz) Start() error {

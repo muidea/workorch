@@ -2,6 +2,7 @@ package governance
 
 import (
 	"context"
+	"errors"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -180,6 +181,7 @@ func (r *countingGovernanceRunReader) List(ctx context.Context) ([]*runmodel.Run
 
 type recordingBackgroundRoutine struct {
 	asyncFunctions atomic.Int32
+	failAsyncAt    int32
 	mu             sync.Mutex
 	done           []chan struct{}
 }
@@ -199,7 +201,10 @@ func (r *recordingBackgroundRoutine) SyncTaskWithTimeOut(task magictask.Task, _ 
 }
 
 func (r *recordingBackgroundRoutine) AsyncFunction(function func()) error {
-	r.asyncFunctions.Add(1)
+	call := r.asyncFunctions.Add(1)
+	if r.failAsyncAt > 0 && call == r.failAsyncAt {
+		return errors.New("injected background registration failure")
+	}
 	done := make(chan struct{})
 	r.mu.Lock()
 	r.done = append(r.done, done)
@@ -237,6 +242,41 @@ func (r *recordingBackgroundRoutine) Shutdown(ctx context.Context) bool {
 		}
 	}
 	return true
+}
+
+func TestServiceStartRollsBackEverySubscriptionAndWorkerWhenReconciliationRegistrationFails(t *testing.T) {
+	ctx := context.Background()
+	hub := magicevent.NewHub(32)
+	routine := &recordingBackgroundRoutine{failAsyncAt: 2}
+	svc := NewService(servicePorts{
+		Tickets:              memory.NewDecisionTicketRepository(),
+		Approvals:            memory.NewApprovalRepository(),
+		Runs:                 memory.NewRunRepository(),
+		WorkspaceDefinitions: testWorkspaceDefinitions{goals: memory.NewGoalRepository(), dods: memory.NewDoDRepository()},
+		MemoryItems:          memory.NewMemoryItemRepository(),
+		AutoGovernanceTraces: memory.NewAutoGovernanceTraceRepository(),
+		ResolveDecision:      func(context.Context, common.TicketID, string, workorcheventpayload.Payload) error { return nil },
+		ResolveApproval:      func(context.Context, common.ApprovalID, common.RunID) error { return nil },
+		LoadConfig:           testGovernanceConfig(true, 0.82, 3),
+		NotificationHub:      hub,
+		BackgroundRoutine:    routine,
+	})
+	if err := svc.Start(); err == nil {
+		t.Fatal("Start succeeded despite injected reconciliation registration failure")
+	}
+	if len(svc.topics) != 0 || len(svc.unsubscribes) != 0 || svc.workCtx != nil || svc.workCancel != nil || svc.workQueue != nil || svc.workDone != nil || svc.reconcileCancel != nil || svc.reconcileDone != nil {
+		t.Fatalf("failed Start retained lifecycle state: topics=%v unsubscribes=%d workCtx=%v workCancel=%v workQueue=%v workDone=%v reconcileCancel=%v reconcileDone=%v", svc.topics, len(svc.unsubscribes), svc.workCtx, svc.workCancel, svc.workQueue, svc.workDone, svc.reconcileCancel, svc.reconcileDone)
+	}
+	// The injected failure is one-shot. A retry must establish exactly one fresh
+	// worker/reconciliation pair rather than inheriting partial Start state.
+	if err := svc.Start(); err != nil {
+		t.Fatalf("retry Start after full rollback: %v", err)
+	}
+	svc.Stop()
+	if !routine.Shutdown(ctx) {
+		t.Fatal("background routine tasks did not stop after retry")
+	}
+	hub.Terminate(ctx)
 }
 
 func TestServiceUsesBackgroundRoutineForWorkerAndReconciliation(t *testing.T) {

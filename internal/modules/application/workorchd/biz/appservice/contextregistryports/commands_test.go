@@ -158,7 +158,7 @@ func TestEnsureWorkspaceExistsPublishesScopedOwnerReadCommand(t *testing.T) {
 		if !ok || cmd.WorkspaceID != "ws-memory-workspace-scope" || common.RuntimeWorkspaceIDFromContext(event.Context()) != "ws-memory-workspace-scope" {
 			t.Fatalf("workspace get command = %+v context workspace=%q", cmd, common.RuntimeWorkspaceIDFromContext(event.Context()))
 		}
-		result.Set(workspaceevents.WorkspaceCommandResult{Workspace: &workspaceevents.Workspace{ID: cmd.WorkspaceID}}, nil)
+		result.Set(workspaceevents.WorkspaceResult{Workspace: &workspaceevents.Workspace{ID: cmd.WorkspaceID}}, nil)
 	})
 	defer observer.Unsubscribe(workspaceevents.TopicWorkspaceCommandGet)
 

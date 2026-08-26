@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"strings"
-	"time"
 
 	magicevent "github.com/muidea/magicCommon/event"
 	modulecommon "github.com/muidea/workorch/internal/modules/blocks/decision/pkg/common"
@@ -20,12 +19,15 @@ func (m *Biz) recordDecisionResolutionEvidence(ctx context.Context, ticket *deci
 	if m == nil || m.EventHub() == nil || ticket == nil || resolution == nil || resolution.ID == "" {
 		return nil
 	}
-	timestamp := strings.TrimSpace(ticket.UpdatedAt)
-	if timestamp == "" {
-		timestamp = time.Now().UTC().Format(time.RFC3339Nano)
+	// Evidence identity is immutable, so replay must use the immutable owner
+	// resolution timestamp rather than UpdatedAt (which advances when delivery
+	// acknowledgements are persisted).
+	timestamp := strings.TrimSpace(resolution.ResolvedAt)
+	if timestamp == "" || timestamp != strings.TrimSpace(ticket.ResolvedAt) {
+		return common.ErrConflict
 	}
 	command := decisionevents.RecordDecisionEvidenceCommand{
-		EvidenceRecordID:   orchestratormodel.StableEvidenceRecordID(string(resolution.ID), "decision-resolution", "decision"),
+		EvidenceRecordID:   orchestratormodel.StableEvidenceRecordID(fmt.Sprintf("%s/%s/%s/%s", ticket.WorkspaceID, ticket.RunID, ticket.ID, resolution.ID), "decision-resolution", "decision"),
 		WorkspaceID:        ticket.WorkspaceID,
 		RunID:              ticket.RunID,
 		StepID:             ticket.StepID,

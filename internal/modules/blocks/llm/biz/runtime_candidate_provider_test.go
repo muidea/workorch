@@ -77,6 +77,32 @@ func TestRuntimeCandidateProviderClassifiesAuthenticationConfigurationAndTransie
 	if got := runtimeCandidateProviderFailureClass(&ProviderProtocolError{Code: "invalid_response_json", ResponseBytes: 17}, true); got != runtimecontract.RuntimeCandidateFailureClassProviderProtocol {
 		t.Fatalf("protocol class = %s, want provider protocol", got)
 	}
+	if got := runtimeCandidateProviderFailureClass(llmmodels.ProviderModelFailure{Code: llmmodels.ProviderModelFailureModelNotFound, Message: "typed catalog fact"}, false); got != runtimecontract.RuntimeCandidateFailureClassProviderConfiguration {
+		t.Fatalf("typed model failure class = %s, want provider configuration", got)
+	}
+	if got := runtimeCandidateProviderFailureClass(&ProviderTransportError{Code: "network_timeout"}, true); got != runtimecontract.RuntimeCandidateFailureClassProviderTransient {
+		t.Fatalf("typed transport failure class = %s, want provider transient", got)
+	}
+}
+
+func TestRuntimeCandidateProviderFailureClassIgnoresAdversarialGenericMessages(t *testing.T) {
+	for _, message := range []string{
+		"authentication_failed: invalid api key",
+		"unauthorized forbidden",
+		"provider client is not configured",
+		"model not found configuration",
+	} {
+		t.Run(message+" submitted", func(t *testing.T) {
+			if got := runtimeCandidateProviderFailureClass(errors.New(message), true); got != runtimecontract.RuntimeCandidateFailureClassProviderTransient {
+				t.Fatalf("generic submitted message %q class = %s, want provider transient", message, got)
+			}
+		})
+		t.Run(message+" unsubmitted", func(t *testing.T) {
+			if got := runtimeCandidateProviderFailureClass(errors.New(message), false); got != runtimecontract.RuntimeCandidateFailureClassProviderConfiguration {
+				t.Fatalf("generic unsubmitted message %q class = %s, want provider configuration", message, got)
+			}
+		})
+	}
 }
 
 func TestProviderErrorsExposeOnlyAuditSafeRuntimeIdentity(t *testing.T) {

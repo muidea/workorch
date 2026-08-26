@@ -27,3 +27,17 @@ func TestCloneRuntimeOperationExecutionContextDetachesNestedValues(t *testing.T)
 		t.Fatalf("clone mutated source context: %+v", input)
 	}
 }
+
+func TestRuntimeOperationExecutionEnvelopeRejectsUnboundAcquisitionIdentity(t *testing.T) {
+	envelope := RuntimeOperationExecutionEnvelope{
+		ExecutionKey: "exec/ws/run/dispatch/operation", Fence: 1,
+		ExpectedEffectScope: RuntimeEffectNone, AcquisitionBinding: "capability-state/ws/run/web/0",
+	}
+	if err := envelope.Validate(); err == nil {
+		t.Fatal("execution envelope accepted acquisition binding without owner catalog snapshot")
+	}
+	envelope.AdmissibilitySnapshotID = "operation-admissibility-1"
+	if err := envelope.Validate(); err != nil {
+		t.Fatalf("bound execution envelope: %v", err)
+	}
+}

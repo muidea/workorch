@@ -29,29 +29,39 @@ func CreateWorkspaceTemplateRecord(ctx context.Context, hub magicevent.Hub, item
 	command := workspaceTemplateCommandFromOwner(item)
 	event := magicevent.NewEventWithContext(workspaceevents.TopicWorkspaceTemplateCommandCreate, sourceModule, workspaceevents.CommandDestination, magicevent.NewHeader(), ctx, command)
 	ownerevent.BindLane(event, workspaceevents.Contracts(), workspaceevents.TopicWorkspaceTemplateCommandCreate, "workspace_template", item.ID, "", "", "")
-	_, err := ownerevent.Workspace(hub.Send(event), workspaceevents.TopicWorkspaceTemplateCommandCreate)
-	return err
+	response, err := ownerevent.WorkspaceOwner[workspaceevents.WorkspaceTemplateResult](hub.Send(event), workspaceevents.TopicWorkspaceTemplateCommandCreate)
+	if err != nil {
+		return err
+	}
+	return response.ValidateFor(command)
 }
 
 func UpdateWorkspaceTemplateRecord(ctx context.Context, hub magicevent.Hub, item *workspacemodel.WorkspaceTemplate) error {
 	if hub == nil || item == nil {
 		return common.ErrInvalidArgument
 	}
-	command := workspaceTemplateCommandFromOwner(item)
-	event := magicevent.NewEventWithContext(workspaceevents.TopicWorkspaceTemplateCommandUpdate, sourceModule, workspaceevents.CommandDestination, magicevent.NewHeader(), ctx, workspaceevents.UpdateWorkspaceTemplateCommand(command))
+	command := workspaceevents.UpdateWorkspaceTemplateCommand(workspaceTemplateCommandFromOwner(item))
+	event := magicevent.NewEventWithContext(workspaceevents.TopicWorkspaceTemplateCommandUpdate, sourceModule, workspaceevents.CommandDestination, magicevent.NewHeader(), ctx, command)
 	ownerevent.BindLane(event, workspaceevents.Contracts(), workspaceevents.TopicWorkspaceTemplateCommandUpdate, "workspace_template", item.ID, "", "", "")
-	_, err := ownerevent.Workspace(hub.Send(event), workspaceevents.TopicWorkspaceTemplateCommandUpdate)
-	return err
+	response, err := ownerevent.WorkspaceOwner[workspaceevents.WorkspaceTemplateResult](hub.Send(event), workspaceevents.TopicWorkspaceTemplateCommandUpdate)
+	if err != nil {
+		return err
+	}
+	return response.ValidateFor(command)
 }
 
 func DeleteWorkspaceTemplateRecord(ctx context.Context, hub magicevent.Hub, templateID string) error {
 	if hub == nil || templateID == "" {
 		return common.ErrInvalidArgument
 	}
-	event := magicevent.NewEventWithContext(workspaceevents.TopicWorkspaceTemplateCommandDelete, sourceModule, workspaceevents.CommandDestination, magicevent.NewHeader(), ctx, workspaceevents.DeleteWorkspaceTemplateCommand{TemplateID: templateID})
+	command := workspaceevents.DeleteWorkspaceTemplateCommand{TemplateID: templateID}
+	event := magicevent.NewEventWithContext(workspaceevents.TopicWorkspaceTemplateCommandDelete, sourceModule, workspaceevents.CommandDestination, magicevent.NewHeader(), ctx, command)
 	ownerevent.BindLane(event, workspaceevents.Contracts(), workspaceevents.TopicWorkspaceTemplateCommandDelete, "workspace_template", templateID, "", "", "")
-	_, err := ownerevent.Workspace(hub.Send(event), workspaceevents.TopicWorkspaceTemplateCommandDelete)
-	return err
+	response, err := ownerevent.WorkspaceOwner[workspaceevents.DeleteWorkspaceTemplateResult](hub.Send(event), workspaceevents.TopicWorkspaceTemplateCommandDelete)
+	if err != nil {
+		return err
+	}
+	return response.ValidateFor(command)
 }
 
 func workspaceTemplateCommandFromOwner(item *workspacemodel.WorkspaceTemplate) workspaceevents.CreateWorkspaceTemplateCommand {

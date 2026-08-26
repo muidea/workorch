@@ -574,7 +574,7 @@ func newApprovalOnlySession(t *testing.T, repo *appserviceCountingApprovalReposi
 		return nil, common.ErrNotFound
 	})
 	approvalModule := approvalmodule.New()
-	if err := approvalModule.Configure(approvalbiz.Dependencies{WorkspaceDeletions: memory.NewApprovalWorkspaceDeletionRepository(), Approvals: repo, EventHub: rawHub}); err != nil {
+	if err := approvalModule.Configure(approvalbiz.Dependencies{OwnerRepositories: appserviceTestApprovalOwnerRepositories(repo, memory.NewApprovalWorkspaceDeletionRepository()), EventHub: rawHub}); err != nil {
 		t.Fatalf("setup approval module: %v", err)
 	}
 	if err := approvalModule.Start(); err != nil {

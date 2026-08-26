@@ -17,8 +17,11 @@ func (m *Module) ID() string                                    { return ModuleI
 func (m *Module) Configure(deps approvalbiz.Dependencies) error { return m.configure(deps) }
 
 func (m *Module) configure(deps approvalbiz.Dependencies) error {
-	if m == nil || deps.EventHub == nil || deps.Approvals == nil || deps.WorkspaceDeletions == nil {
+	if m == nil || deps.EventHub == nil {
 		return common.ErrInvalidArgument
+	}
+	if err := deps.OwnerRepositories.Validate(); err != nil {
+		return err
 	}
 	bizPtr, err := approvalbiz.New(deps.EventHub, deps.BackgroundRoutine, deps)
 	if err != nil {

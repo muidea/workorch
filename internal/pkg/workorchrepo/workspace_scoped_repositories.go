@@ -73,8 +73,13 @@ const (
 )
 
 type workspaceScopedFileStore struct {
-	dataRoot        string
-	runOwnerBinding repository.RunOwnerRepositoryBinding
+	dataRoot                string
+	runOwnerBinding         repository.RunOwnerRepositoryBinding
+	resultOwnerBinding      repository.OwnerRepositoryBinding
+	decisionOwnerBinding    repository.OwnerRepositoryBinding
+	approvalOwnerBinding    repository.OwnerRepositoryBinding
+	memoryOwnerBinding      repository.OwnerRepositoryBinding
+	eventStreamOwnerBinding repository.OwnerRepositoryBinding
 
 	indexMu               sync.Mutex
 	mu                    sync.Mutex
@@ -126,6 +131,7 @@ type WorkspaceScopedFileRepositorySet struct {
 	MemoryItems           repository.MemoryItemRepository
 	MemoryRecallTraces    repository.MemoryRecallTraceRepository
 	MemoryDeletions       repository.MemoryWorkspaceDeletionRepository
+	MemoryOwner           repository.MemoryOwnerRepositories
 	Workspaces            repository.WorkspaceRepository
 	WorkspaceCleaner      repository.WorkspaceDeletionMaterialCleaner
 	Goals                 repository.GoalRepository
@@ -133,9 +139,11 @@ type WorkspaceScopedFileRepositorySet struct {
 	Results               repository.ResultRepository
 	Artifacts             repository.ArtifactRepository
 	ResultDeletions       repository.ResultWorkspaceDeletionRepository
+	ResultOwner           repository.ResultOwnerRepositories
 	EventRecords          repository.EventRecordRepository
 	EventStreamDeletions  repository.EventStreamWorkspaceDeletionRepository
 	EventStreamPurger     repository.EventStreamWorkspacePurger
+	EventStreamOwner      repository.EventStreamOwnerRepositories
 	Runs                  repository.RunRepository
 	Steps                 repository.StepRepository
 	RunOwner              repository.RunOwnerRepositories
@@ -154,6 +162,8 @@ type WorkspaceScopedFileRepositorySet struct {
 	Approvals             repository.ApprovalRepository
 	DecisionDeletions     repository.DecisionWorkspaceDeletionRepository
 	ApprovalDeletions     repository.ApprovalWorkspaceDeletionRepository
+	DecisionOwner         repository.DecisionOwnerRepositories
+	ApprovalOwner         repository.ApprovalOwnerRepositories
 }
 
 type workspaceIndex struct {
@@ -188,22 +198,31 @@ func NewWorkspaceScopedFileRepositorySet(dataRoot string) WorkspaceScopedFileRep
 	}
 	tickets := newWorkspaceScopedDecisionTicketRepository(store)
 	artifacts := NewArtifactStorageRepository(newWorkspaceScopedArtifactRepository(store), dataRoot)
-	eventStreamDeletions := newEventStreamWorkspaceDeletionRepository(dataRoot)
+	memoryItems := newWorkspaceScopedMemoryItemRepository(store)
+	memoryRecallTraces := newWorkspaceScopedMemoryRecallTraceRepository(store)
+	memoryDeletions := newMemoryWorkspaceDeletionRepository(dataRoot, store.memoryOwnerBinding)
+	results := newWorkspaceScopedResultRepository(store)
+	resultDeletions := newResultWorkspaceDeletionRepository(dataRoot, store.resultOwnerBinding)
+	decisionResolutions := newWorkspaceScopedDecisionResolutionRepository(store, tickets)
+	decisionDeletions := newDecisionWorkspaceDeletionRepository(dataRoot, store.decisionOwnerBinding)
+	approvals := newWorkspaceScopedApprovalRepository(store)
+	approvalDeletions := newApprovalWorkspaceDeletionRepository(dataRoot, store.approvalOwnerBinding)
+	eventStreamDeletions := newEventStreamWorkspaceDeletionRepository(dataRoot, store.eventStreamOwnerBinding)
 	eventRecords := newWorkspaceScopedEventRecordRepository(store, eventStreamDeletions)
 	orchestratorDeletions := newOrchestratorWorkspaceDeletionRepository(dataRoot)
 	orchestratorPurger := &workspaceScopedOrchestratorEvidencePurger{store: store, deletions: orchestratorDeletions}
 	orchestratorEvidence, _ := repository.NewOrchestratorEvidenceOwnerRepositories(orchestratorPurger)
-	return WorkspaceScopedFileRepositorySet{
-		MemoryItems:           newWorkspaceScopedMemoryItemRepository(store),
-		MemoryRecallTraces:    newWorkspaceScopedMemoryRecallTraceRepository(store),
-		MemoryDeletions:       newMemoryWorkspaceDeletionRepository(dataRoot),
+	ret := WorkspaceScopedFileRepositorySet{
+		MemoryItems:           memoryItems,
+		MemoryRecallTraces:    memoryRecallTraces,
+		MemoryDeletions:       memoryDeletions,
 		Workspaces:            workspaces,
 		WorkspaceCleaner:      workspaces,
 		Goals:                 newWorkspaceScopedGoalRepository(store),
 		DoDs:                  newWorkspaceScopedDoDRepository(store),
-		Results:               newWorkspaceScopedResultRepository(store),
+		Results:               results,
 		Artifacts:             artifacts,
-		ResultDeletions:       newResultWorkspaceDeletionRepository(dataRoot),
+		ResultDeletions:       resultDeletions,
 		EventRecords:          eventRecords,
 		EventStreamDeletions:  eventStreamDeletions,
 		EventStreamPurger:     eventRecords,
@@ -221,11 +240,106 @@ func NewWorkspaceScopedFileRepositorySet(dataRoot string) WorkspaceScopedFileRep
 		OrchestratorPurger:    orchestratorPurger,
 		OrchestratorEvidence:  orchestratorEvidence,
 		Tickets:               tickets,
-		Resolutions:           newWorkspaceScopedDecisionResolutionRepository(store, tickets),
-		Approvals:             newWorkspaceScopedApprovalRepository(store),
-		DecisionDeletions:     newDecisionWorkspaceDeletionRepository(dataRoot),
-		ApprovalDeletions:     newApprovalWorkspaceDeletionRepository(dataRoot),
+		Resolutions:           decisionResolutions,
+		Approvals:             approvals,
+		DecisionDeletions:     decisionDeletions,
+		ApprovalDeletions:     approvalDeletions,
 	}
+	var err error
+	if ret.MemoryOwner, err = repository.NewMemoryOwnerRepositories(ret); err != nil {
+		panic(err)
+	}
+	if ret.ResultOwner, err = repository.NewResultOwnerRepositories(ret); err != nil {
+		panic(err)
+	}
+	if ret.DecisionOwner, err = repository.NewDecisionOwnerRepositories(ret); err != nil {
+		panic(err)
+	}
+	if ret.ApprovalOwner, err = repository.NewApprovalOwnerRepositories(ret); err != nil {
+		panic(err)
+	}
+	if ret.EventStreamOwner, err = repository.NewEventStreamOwnerRepositories(ret); err != nil {
+		panic(err)
+	}
+	return ret
+}
+
+func (r WorkspaceScopedFileRepositorySet) MemoryOwnerBinding() repository.OwnerRepositoryBinding {
+	bound, _ := r.MemoryItems.(repository.OwnerRepositoryBound)
+	if bound == nil {
+		return repository.OwnerRepositoryBinding{}
+	}
+	return bound.OwnerRepositoryBinding()
+}
+func (r WorkspaceScopedFileRepositorySet) MemoryOwnerItems() repository.MemoryItemRepository {
+	return r.MemoryItems
+}
+func (r WorkspaceScopedFileRepositorySet) MemoryOwnerRecallTraces() repository.MemoryRecallTraceRepository {
+	return r.MemoryRecallTraces
+}
+func (r WorkspaceScopedFileRepositorySet) MemoryOwnerWorkspaceDeletions() repository.MemoryWorkspaceDeletionRepository {
+	return r.MemoryDeletions
+}
+func (r WorkspaceScopedFileRepositorySet) ResultOwnerBinding() repository.OwnerRepositoryBinding {
+	bound, _ := r.Results.(repository.OwnerRepositoryBound)
+	if bound == nil {
+		return repository.OwnerRepositoryBinding{}
+	}
+	return bound.OwnerRepositoryBinding()
+}
+func (r WorkspaceScopedFileRepositorySet) ResultOwnerResults() repository.ResultRepository {
+	return r.Results
+}
+func (r WorkspaceScopedFileRepositorySet) ResultOwnerArtifacts() repository.ArtifactRepository {
+	return r.Artifacts
+}
+func (r WorkspaceScopedFileRepositorySet) ResultOwnerWorkspaceDeletions() repository.ResultWorkspaceDeletionRepository {
+	return r.ResultDeletions
+}
+func (r WorkspaceScopedFileRepositorySet) DecisionOwnerBinding() repository.OwnerRepositoryBinding {
+	bound, _ := r.Tickets.(repository.OwnerRepositoryBound)
+	if bound == nil {
+		return repository.OwnerRepositoryBinding{}
+	}
+	return bound.OwnerRepositoryBinding()
+}
+func (r WorkspaceScopedFileRepositorySet) DecisionOwnerTickets() repository.DecisionTicketRepository {
+	return r.Tickets
+}
+func (r WorkspaceScopedFileRepositorySet) DecisionOwnerResolutions() repository.DecisionResolutionRepository {
+	return r.Resolutions
+}
+func (r WorkspaceScopedFileRepositorySet) DecisionOwnerWorkspaceDeletions() repository.DecisionWorkspaceDeletionRepository {
+	return r.DecisionDeletions
+}
+func (r WorkspaceScopedFileRepositorySet) ApprovalOwnerBinding() repository.OwnerRepositoryBinding {
+	bound, _ := r.Approvals.(repository.OwnerRepositoryBound)
+	if bound == nil {
+		return repository.OwnerRepositoryBinding{}
+	}
+	return bound.OwnerRepositoryBinding()
+}
+func (r WorkspaceScopedFileRepositorySet) ApprovalOwnerApprovals() repository.ApprovalRepository {
+	return r.Approvals
+}
+func (r WorkspaceScopedFileRepositorySet) ApprovalOwnerWorkspaceDeletions() repository.ApprovalWorkspaceDeletionRepository {
+	return r.ApprovalDeletions
+}
+func (r WorkspaceScopedFileRepositorySet) EventStreamOwnerBinding() repository.OwnerRepositoryBinding {
+	bound, _ := r.EventRecords.(repository.OwnerRepositoryBound)
+	if bound == nil {
+		return repository.OwnerRepositoryBinding{}
+	}
+	return bound.OwnerRepositoryBinding()
+}
+func (r WorkspaceScopedFileRepositorySet) EventStreamOwnerEventRecords() repository.EventRecordRepository {
+	return r.EventRecords
+}
+func (r WorkspaceScopedFileRepositorySet) EventStreamOwnerWorkspaceDeletions() repository.EventStreamWorkspaceDeletionRepository {
+	return r.EventStreamDeletions
+}
+func (r WorkspaceScopedFileRepositorySet) EventStreamOwnerWorkspacePurger() repository.EventStreamWorkspacePurger {
+	return r.EventStreamPurger
 }
 
 type workspaceScopedOrchestratorEvidencePurger struct {
@@ -542,28 +656,33 @@ func countWorkspaceScopedArtifactEvidence(root string) (map[string]uint64, error
 
 func newWorkspaceScopedFileStore(dataRoot string) *workspaceScopedFileStore {
 	return &workspaceScopedFileStore{
-		dataRoot:              dataRoot,
-		runOwnerBinding:       repository.NewRunOwnerRepositoryBinding(),
-		workspaces:            map[string]*fileRepo.WorkspaceRepository{},
-		goals:                 map[string]*fileRepo.GoalRepository{},
-		dods:                  map[string]*fileRepo.DoDRepository{},
-		memoryItems:           map[string]*fileRepo.MemoryItemRepository{},
-		memoryRecallTraces:    map[string]*fileRepo.MemoryRecallTraceRepository{},
-		runs:                  map[string]*fileRepo.RunRepository{},
-		steps:                 map[string]*fileRepo.StepRepository{},
-		toolCalls:             map[string]*fileRepo.ToolCallRepository{},
-		patches:               map[string]*fileRepo.PatchRepository{},
-		validationResults:     map[string]*fileRepo.ValidationResultRepository{},
-		runtimeCheckpoints:    map[string]*fileRepo.RuntimeCheckpointRepository{},
-		evidenceRecords:       map[string]*fileRepo.EvidenceRecordRepository{},
-		coverageWorkItems:     map[string]*fileRepo.CoverageWorkItemRepository{},
-		artifactContinuations: map[string]*fileRepo.ArtifactContinuationRepository{},
-		results:               map[string]*fileRepo.ResultRepository{},
-		artifacts:             map[string]*fileRepo.ArtifactRepository{},
-		eventRecords:          map[string]*fileRepo.EventRecordRepository{},
-		tickets:               map[string]*fileRepo.DecisionTicketRepository{},
-		resolutions:           map[string]*fileRepo.DecisionResolutionRepository{},
-		approvals:             map[string]*fileRepo.ApprovalRepository{},
+		dataRoot:                dataRoot,
+		runOwnerBinding:         repository.NewRunOwnerRepositoryBinding(),
+		resultOwnerBinding:      repository.NewResultOwnerRepositoryBinding(),
+		decisionOwnerBinding:    repository.NewDecisionOwnerRepositoryBinding(),
+		approvalOwnerBinding:    repository.NewApprovalOwnerRepositoryBinding(),
+		memoryOwnerBinding:      repository.NewMemoryOwnerRepositoryBinding(),
+		eventStreamOwnerBinding: repository.NewEventStreamOwnerRepositoryBinding(),
+		workspaces:              map[string]*fileRepo.WorkspaceRepository{},
+		goals:                   map[string]*fileRepo.GoalRepository{},
+		dods:                    map[string]*fileRepo.DoDRepository{},
+		memoryItems:             map[string]*fileRepo.MemoryItemRepository{},
+		memoryRecallTraces:      map[string]*fileRepo.MemoryRecallTraceRepository{},
+		runs:                    map[string]*fileRepo.RunRepository{},
+		steps:                   map[string]*fileRepo.StepRepository{},
+		toolCalls:               map[string]*fileRepo.ToolCallRepository{},
+		patches:                 map[string]*fileRepo.PatchRepository{},
+		validationResults:       map[string]*fileRepo.ValidationResultRepository{},
+		runtimeCheckpoints:      map[string]*fileRepo.RuntimeCheckpointRepository{},
+		evidenceRecords:         map[string]*fileRepo.EvidenceRecordRepository{},
+		coverageWorkItems:       map[string]*fileRepo.CoverageWorkItemRepository{},
+		artifactContinuations:   map[string]*fileRepo.ArtifactContinuationRepository{},
+		results:                 map[string]*fileRepo.ResultRepository{},
+		artifacts:               map[string]*fileRepo.ArtifactRepository{},
+		eventRecords:            map[string]*fileRepo.EventRecordRepository{},
+		tickets:                 map[string]*fileRepo.DecisionTicketRepository{},
+		resolutions:             map[string]*fileRepo.DecisionResolutionRepository{},
+		approvals:               map[string]*fileRepo.ApprovalRepository{},
 	}
 }
 
@@ -1582,6 +1701,13 @@ func newWorkspaceScopedMemoryItemRepository(store *workspaceScopedFileStore) *wo
 	return &workspaceScopedMemoryItemRepository{store: store}
 }
 
+func (r *workspaceScopedMemoryItemRepository) OwnerRepositoryBinding() repository.OwnerRepositoryBinding {
+	if r == nil || r.store == nil {
+		return repository.OwnerRepositoryBinding{}
+	}
+	return r.store.memoryOwnerBinding
+}
+
 func (r *workspaceScopedMemoryItemRepository) Create(ctx context.Context, item *memorymodel.MemoryItem) error {
 	if item == nil || item.WorkspaceID == "" || item.ID == "" {
 		return common.ErrInvalidArgument
@@ -1675,6 +1801,13 @@ type workspaceScopedMemoryRecallTraceRepository struct {
 
 func newWorkspaceScopedMemoryRecallTraceRepository(store *workspaceScopedFileStore) *workspaceScopedMemoryRecallTraceRepository {
 	return &workspaceScopedMemoryRecallTraceRepository{store: store}
+}
+
+func (r *workspaceScopedMemoryRecallTraceRepository) OwnerRepositoryBinding() repository.OwnerRepositoryBinding {
+	if r == nil || r.store == nil {
+		return repository.OwnerRepositoryBinding{}
+	}
+	return r.store.memoryOwnerBinding
 }
 
 func (r *workspaceScopedMemoryRecallTraceRepository) Create(ctx context.Context, item *memorymodel.MemoryRecallTrace) error {
@@ -3100,6 +3233,13 @@ func newWorkspaceScopedResultRepository(store *workspaceScopedFileStore) *worksp
 	return &workspaceScopedResultRepository{store: store}
 }
 
+func (r *workspaceScopedResultRepository) OwnerRepositoryBinding() repository.OwnerRepositoryBinding {
+	if r == nil || r.store == nil {
+		return repository.OwnerRepositoryBinding{}
+	}
+	return r.store.resultOwnerBinding
+}
+
 func (r *workspaceScopedResultRepository) Create(ctx context.Context, item *resultmodel.Result) error {
 	if item == nil || item.WorkspaceID == "" || item.RunID == "" || item.ID == "" {
 		return common.ErrInvalidArgument
@@ -3292,6 +3432,13 @@ func newWorkspaceScopedArtifactRepository(store *workspaceScopedFileStore) *work
 	return &workspaceScopedArtifactRepository{store: store}
 }
 
+func (r *workspaceScopedArtifactRepository) OwnerRepositoryBinding() repository.OwnerRepositoryBinding {
+	if r == nil || r.store == nil {
+		return repository.OwnerRepositoryBinding{}
+	}
+	return r.store.resultOwnerBinding
+}
+
 func (r *workspaceScopedArtifactRepository) Create(ctx context.Context, item *resultmodel.Artifact) error {
 	if item == nil || item.WorkspaceID == "" || item.RunID == "" || item.ID == "" {
 		return common.ErrInvalidArgument
@@ -3419,6 +3566,13 @@ type workspaceScopedEventRecordRepository struct {
 
 func newWorkspaceScopedEventRecordRepository(store *workspaceScopedFileStore, deletions *eventStreamWorkspaceDeletionRepository) *workspaceScopedEventRecordRepository {
 	return &workspaceScopedEventRecordRepository{store: store, deletions: deletions}
+}
+
+func (r *workspaceScopedEventRecordRepository) OwnerRepositoryBinding() repository.OwnerRepositoryBinding {
+	if r == nil || r.store == nil {
+		return repository.OwnerRepositoryBinding{}
+	}
+	return r.store.eventStreamOwnerBinding
 }
 
 func (r *workspaceScopedEventRecordRepository) Append(ctx context.Context, item *eventstreammodel.EventRecord) error {
@@ -3696,6 +3850,13 @@ func newWorkspaceScopedDecisionTicketRepository(store *workspaceScopedFileStore)
 	return &workspaceScopedDecisionTicketRepository{store: store}
 }
 
+func (r *workspaceScopedDecisionTicketRepository) OwnerRepositoryBinding() repository.OwnerRepositoryBinding {
+	if r == nil || r.store == nil {
+		return repository.OwnerRepositoryBinding{}
+	}
+	return r.store.decisionOwnerBinding
+}
+
 func (r *workspaceScopedDecisionTicketRepository) Create(ctx context.Context, item *decisionmodel.Ticket) error {
 	if item == nil || item.WorkspaceID == "" || item.RunID == "" || item.ID == "" {
 		return common.ErrInvalidArgument
@@ -3809,6 +3970,13 @@ func newWorkspaceScopedDecisionResolutionRepository(store *workspaceScopedFileSt
 	return &workspaceScopedDecisionResolutionRepository{store: store, tickets: tickets}
 }
 
+func (r *workspaceScopedDecisionResolutionRepository) OwnerRepositoryBinding() repository.OwnerRepositoryBinding {
+	if r == nil || r.store == nil {
+		return repository.OwnerRepositoryBinding{}
+	}
+	return r.store.decisionOwnerBinding
+}
+
 func (r *workspaceScopedDecisionResolutionRepository) Create(ctx context.Context, item *decisionmodel.Resolution) error {
 	if item == nil || item.TicketID == "" {
 		return common.ErrInvalidArgument
@@ -3877,6 +4045,13 @@ type workspaceScopedApprovalRepository struct {
 
 func newWorkspaceScopedApprovalRepository(store *workspaceScopedFileStore) *workspaceScopedApprovalRepository {
 	return &workspaceScopedApprovalRepository{store: store}
+}
+
+func (r *workspaceScopedApprovalRepository) OwnerRepositoryBinding() repository.OwnerRepositoryBinding {
+	if r == nil || r.store == nil {
+		return repository.OwnerRepositoryBinding{}
+	}
+	return r.store.approvalOwnerBinding
 }
 
 func (r *workspaceScopedApprovalRepository) Create(ctx context.Context, item *approvalmodel.Approval) error {

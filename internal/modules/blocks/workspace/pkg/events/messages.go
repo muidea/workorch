@@ -366,41 +366,54 @@ type DoDDefinedData struct {
 	LineageState           string
 }
 
-type WorkspaceCommandResult struct {
-	Workspace  *Workspace
-	Workspaces []*Workspace
-	Changed    bool
-	Goal       *workspacemodel.Goal
-	Goals      []*workspacemodel.Goal
-	DoD        *workspacemodel.DoD
-	DoDs       []*workspacemodel.DoD
-	Template   *WorkspaceTemplate
-	Templates  []*WorkspaceTemplate
+// Management command results are deliberately narrow. A command topic must
+// return only the fact it owns; consumers cannot infer a result variant by
+// inspecting which fields of a shared union happen to be populated.
+type WorkspaceResult struct{ Workspace *Workspace }
+type WorkspaceListResult struct{ Workspaces []*Workspace }
+type WorkspaceLLMSelectionResult struct {
+	Workspace *Workspace
+	Changed   bool
 }
+type GoalResult struct{ Goal *workspacemodel.Goal }
+type GoalListResult struct{ Goals []*workspacemodel.Goal }
+type DeleteGoalResult struct {
+	WorkspaceID common.WorkspaceID
+	GoalID      common.GoalID
+}
+type DoDResult struct{ DoD *workspacemodel.DoD }
+type DoDListResult struct{ DoDs []*workspacemodel.DoD }
+type DeleteDoDResult struct {
+	WorkspaceID common.WorkspaceID
+	DoDID       common.DoDID
+}
+type WorkspaceTemplateResult struct{ Template *WorkspaceTemplate }
+type WorkspaceTemplateListResult struct{ Templates []*WorkspaceTemplate }
+type DeleteWorkspaceTemplateResult struct{ TemplateID string }
 
 func MessageContracts() []eventcontract.MessageContract {
 	ret := []eventcontract.MessageContract{
-		eventcontract.CommandTopic[CreateWorkspaceCommand, WorkspaceCommandResult]("workspace", definitionPackage, eventcontract.CommandClassWrite, eventcontract.LanePolicyState, TopicWorkspaceCommandCreate).MessageContract(),
-		eventcontract.CommandTopic[GetWorkspaceCommand, WorkspaceCommandResult]("workspace", definitionPackage, eventcontract.CommandClassRead, eventcontract.LanePolicyQuery, TopicWorkspaceCommandGet).MessageContract(),
-		eventcontract.CommandTopic[ListWorkspacesCommand, WorkspaceCommandResult]("workspace", definitionPackage, eventcontract.CommandClassRead, eventcontract.LanePolicyQuery, TopicWorkspaceCommandList).MessageContract(),
-		eventcontract.CommandTopic[UpdateWorkspaceCommand, WorkspaceCommandResult]("workspace", definitionPackage, eventcontract.CommandClassWrite, eventcontract.LanePolicyState, TopicWorkspaceCommandUpdate).MessageContract(),
-		eventcontract.CommandTopic[UpdateWorkspaceLLMSelectionCommand, WorkspaceCommandResult]("workspace", definitionPackage, eventcontract.CommandClassWrite, eventcontract.LanePolicyState, TopicWorkspaceCommandUpdateLLMSelection).MessageContract(),
+		eventcontract.CommandTopic[CreateWorkspaceCommand, WorkspaceResult]("workspace", definitionPackage, eventcontract.CommandClassWrite, eventcontract.LanePolicyState, TopicWorkspaceCommandCreate).MessageContract(),
+		eventcontract.CommandTopic[GetWorkspaceCommand, WorkspaceResult]("workspace", definitionPackage, eventcontract.CommandClassRead, eventcontract.LanePolicyQuery, TopicWorkspaceCommandGet).MessageContract(),
+		eventcontract.CommandTopic[ListWorkspacesCommand, WorkspaceListResult]("workspace", definitionPackage, eventcontract.CommandClassRead, eventcontract.LanePolicyQuery, TopicWorkspaceCommandList).MessageContract(),
+		eventcontract.CommandTopic[UpdateWorkspaceCommand, WorkspaceResult]("workspace", definitionPackage, eventcontract.CommandClassWrite, eventcontract.LanePolicyState, TopicWorkspaceCommandUpdate).MessageContract(),
+		eventcontract.CommandTopic[UpdateWorkspaceLLMSelectionCommand, WorkspaceLLMSelectionResult]("workspace", definitionPackage, eventcontract.CommandClassWrite, eventcontract.LanePolicyState, TopicWorkspaceCommandUpdateLLMSelection).MessageContract(),
 		eventcontract.CommandTopic[DeleteWorkspaceCommand, DeleteWorkspaceResult]("workspace", definitionPackage, eventcontract.CommandClassWrite, eventcontract.LanePolicyState, TopicWorkspaceCommandDelete).MessageContract(),
-		eventcontract.CommandTopic[DefineGoalCommand, WorkspaceCommandResult]("workspace", definitionPackage, eventcontract.CommandClassWrite, eventcontract.LanePolicyState, TopicWorkspaceCommandDefineGoal).MessageContract(),
-		eventcontract.CommandTopic[UpdateGoalCommand, WorkspaceCommandResult]("workspace", definitionPackage, eventcontract.CommandClassWrite, eventcontract.LanePolicyState, TopicWorkspaceCommandUpdateGoal).MessageContract(),
-		eventcontract.CommandTopic[DeleteGoalCommand, WorkspaceCommandResult]("workspace", definitionPackage, eventcontract.CommandClassWrite, eventcontract.LanePolicyState, TopicWorkspaceCommandDeleteGoal).MessageContract(),
-		eventcontract.CommandTopic[GetGoalCommand, WorkspaceCommandResult]("workspace", definitionPackage, eventcontract.CommandClassRead, eventcontract.LanePolicyQuery, TopicWorkspaceCommandGetGoal).MessageContract(),
-		eventcontract.CommandTopic[ListGoalsByWorkspaceCommand, WorkspaceCommandResult]("workspace", definitionPackage, eventcontract.CommandClassRead, eventcontract.LanePolicyQuery, TopicWorkspaceCommandListGoalsByWS).MessageContract(),
-		eventcontract.CommandTopic[DefineDoDCommand, WorkspaceCommandResult]("workspace", definitionPackage, eventcontract.CommandClassWrite, eventcontract.LanePolicyState, TopicWorkspaceCommandDefineDoD).MessageContract(),
-		eventcontract.CommandTopic[UpdateDoDCommand, WorkspaceCommandResult]("workspace", definitionPackage, eventcontract.CommandClassWrite, eventcontract.LanePolicyState, TopicWorkspaceCommandUpdateDoD).MessageContract(),
-		eventcontract.CommandTopic[DeleteDoDCommand, WorkspaceCommandResult]("workspace", definitionPackage, eventcontract.CommandClassWrite, eventcontract.LanePolicyState, TopicWorkspaceCommandDeleteDoD).MessageContract(),
-		eventcontract.CommandTopic[GetDoDCommand, WorkspaceCommandResult]("workspace", definitionPackage, eventcontract.CommandClassRead, eventcontract.LanePolicyQuery, TopicWorkspaceCommandGetDoD).MessageContract(),
-		eventcontract.CommandTopic[ListDoDsByWorkspaceCommand, WorkspaceCommandResult]("workspace", definitionPackage, eventcontract.CommandClassRead, eventcontract.LanePolicyQuery, TopicWorkspaceCommandListDoDsByWS).MessageContract(),
-		eventcontract.CommandTopic[CreateWorkspaceTemplateCommand, WorkspaceCommandResult]("workspace", definitionPackage, eventcontract.CommandClassWrite, eventcontract.LanePolicyState, TopicWorkspaceTemplateCommandCreate).MessageContract(),
-		eventcontract.CommandTopic[GetWorkspaceTemplateCommand, WorkspaceCommandResult]("workspace", definitionPackage, eventcontract.CommandClassRead, eventcontract.LanePolicyQuery, TopicWorkspaceTemplateCommandGet).MessageContract(),
-		eventcontract.CommandTopic[ListWorkspaceTemplatesCommand, WorkspaceCommandResult]("workspace", definitionPackage, eventcontract.CommandClassRead, eventcontract.LanePolicyQuery, TopicWorkspaceTemplateCommandList).MessageContract(),
-		eventcontract.CommandTopic[UpdateWorkspaceTemplateCommand, WorkspaceCommandResult]("workspace", definitionPackage, eventcontract.CommandClassWrite, eventcontract.LanePolicyState, TopicWorkspaceTemplateCommandUpdate).MessageContract(),
-		eventcontract.CommandTopic[DeleteWorkspaceTemplateCommand, WorkspaceCommandResult]("workspace", definitionPackage, eventcontract.CommandClassWrite, eventcontract.LanePolicyState, TopicWorkspaceTemplateCommandDelete).MessageContract(),
+		eventcontract.CommandTopic[DefineGoalCommand, GoalResult]("workspace", definitionPackage, eventcontract.CommandClassWrite, eventcontract.LanePolicyState, TopicWorkspaceCommandDefineGoal).MessageContract(),
+		eventcontract.CommandTopic[UpdateGoalCommand, GoalResult]("workspace", definitionPackage, eventcontract.CommandClassWrite, eventcontract.LanePolicyState, TopicWorkspaceCommandUpdateGoal).MessageContract(),
+		eventcontract.CommandTopic[DeleteGoalCommand, DeleteGoalResult]("workspace", definitionPackage, eventcontract.CommandClassWrite, eventcontract.LanePolicyState, TopicWorkspaceCommandDeleteGoal).MessageContract(),
+		eventcontract.CommandTopic[GetGoalCommand, GoalResult]("workspace", definitionPackage, eventcontract.CommandClassRead, eventcontract.LanePolicyQuery, TopicWorkspaceCommandGetGoal).MessageContract(),
+		eventcontract.CommandTopic[ListGoalsByWorkspaceCommand, GoalListResult]("workspace", definitionPackage, eventcontract.CommandClassRead, eventcontract.LanePolicyQuery, TopicWorkspaceCommandListGoalsByWS).MessageContract(),
+		eventcontract.CommandTopic[DefineDoDCommand, DoDResult]("workspace", definitionPackage, eventcontract.CommandClassWrite, eventcontract.LanePolicyState, TopicWorkspaceCommandDefineDoD).MessageContract(),
+		eventcontract.CommandTopic[UpdateDoDCommand, DoDResult]("workspace", definitionPackage, eventcontract.CommandClassWrite, eventcontract.LanePolicyState, TopicWorkspaceCommandUpdateDoD).MessageContract(),
+		eventcontract.CommandTopic[DeleteDoDCommand, DeleteDoDResult]("workspace", definitionPackage, eventcontract.CommandClassWrite, eventcontract.LanePolicyState, TopicWorkspaceCommandDeleteDoD).MessageContract(),
+		eventcontract.CommandTopic[GetDoDCommand, DoDResult]("workspace", definitionPackage, eventcontract.CommandClassRead, eventcontract.LanePolicyQuery, TopicWorkspaceCommandGetDoD).MessageContract(),
+		eventcontract.CommandTopic[ListDoDsByWorkspaceCommand, DoDListResult]("workspace", definitionPackage, eventcontract.CommandClassRead, eventcontract.LanePolicyQuery, TopicWorkspaceCommandListDoDsByWS).MessageContract(),
+		eventcontract.CommandTopic[CreateWorkspaceTemplateCommand, WorkspaceTemplateResult]("workspace", definitionPackage, eventcontract.CommandClassWrite, eventcontract.LanePolicyState, TopicWorkspaceTemplateCommandCreate).MessageContract(),
+		eventcontract.CommandTopic[GetWorkspaceTemplateCommand, WorkspaceTemplateResult]("workspace", definitionPackage, eventcontract.CommandClassRead, eventcontract.LanePolicyQuery, TopicWorkspaceTemplateCommandGet).MessageContract(),
+		eventcontract.CommandTopic[ListWorkspaceTemplatesCommand, WorkspaceTemplateListResult]("workspace", definitionPackage, eventcontract.CommandClassRead, eventcontract.LanePolicyQuery, TopicWorkspaceTemplateCommandList).MessageContract(),
+		eventcontract.CommandTopic[UpdateWorkspaceTemplateCommand, WorkspaceTemplateResult]("workspace", definitionPackage, eventcontract.CommandClassWrite, eventcontract.LanePolicyState, TopicWorkspaceTemplateCommandUpdate).MessageContract(),
+		eventcontract.CommandTopic[DeleteWorkspaceTemplateCommand, DeleteWorkspaceTemplateResult]("workspace", definitionPackage, eventcontract.CommandClassWrite, eventcontract.LanePolicyState, TopicWorkspaceTemplateCommandDelete).MessageContract(),
 		eventcontract.CommandTopic[EnsureWorkspaceTemplateDefaultsCommand, EnsureWorkspaceTemplateDefaultsResult]("workspace", definitionPackage, eventcontract.CommandClassWrite, eventcontract.LanePolicyState, TopicWorkspaceTemplateCommandEnsureDefaults).MessageContract(),
 		eventcontract.CommandTopic[WorkspaceExecutionIntentCommand, WorkspaceExecutionIntentResult]("workspace", definitionPackage, eventcontract.CommandClassWrite, eventcontract.LanePolicyState, TopicWorkspaceCommandExecutionIntent).MessageContract(),
 		eventcontract.CommandTopic[RuntimeTerminalDeliveryFact, WorkspaceLifecycleCommandResult]("workspace", definitionPackage, eventcontract.CommandClassWrite, eventcontract.LanePolicyState, TopicWorkspaceFactTerminalDelivery).MessageContract(),

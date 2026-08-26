@@ -13,6 +13,13 @@ type activeDispatchOwnerCall struct {
 }
 
 func (x *activeDispatchExecution) callOperationOwner(operation runtimecontract.RuntimeOperation, prepared preparedActiveDispatchOperation) (activeDispatchOwnerCall, error) {
+	ownerCatalog := runtimeOwnerCatalogForOperation(
+		x.aggregate.Facts.Resources.OperationAdmissibilities,
+		x.aggregate.Facts.Resources.PrerequisiteObservations,
+		operation,
+		prepared.execution.AdmissibilitySnapshotID,
+		prepared.execution.AcquisitionBinding,
+	)
 	result, err := x.executor.ExecuteRuntimeOperation(x.ctx, RuntimeOperationExecutionRequest{
 		WorkspaceID: x.workspaceID, RunID: x.runID, DispatchID: x.dispatch.ID,
 		Transaction: x.dispatch.Transaction, Operation: operation, Execution: prepared.execution,
@@ -25,7 +32,8 @@ func (x *activeDispatchExecution) callOperationOwner(operation runtimecontract.R
 		CapabilityStates:                   append([]runtimecontract.RuntimeCapabilityStateSnapshot(nil), x.aggregate.Facts.Resources.CapabilityStates...),
 		WorkspaceTreeObservation:           runtimeWorkspaceManifestObservation(x.aggregate),
 		CompletedRequiredOperationReceipts: completedRequiredOperationReceiptBindings(*x.aggregate.ActiveDispatch, x.aggregate.OperationReceipts, x.completed),
-		OwnerCatalog:                       runtimeOwnerCatalogForOperation(x.aggregate.Facts.Resources.OperationAdmissibilities, operation),
+		OwnerCatalog:                       ownerCatalog,
+		OwnerCatalogObservation:            runtimeOwnerCatalogObservationForOperation(x.aggregate.Facts.Resources.PrerequisiteObservations, ownerCatalog),
 	})
 	if err == nil {
 		return activeDispatchOwnerCall{result: result, flow: activeDispatchExecutionReady}, nil
@@ -51,6 +59,23 @@ func (x *activeDispatchExecution) callOperationOwner(operation runtimecontract.R
 	return activeDispatchOwnerCall{}, err
 }
 
+func runtimeOwnerCatalogObservationForOperation(values []runtimecontract.RuntimePrerequisiteObservation, catalog *runtimecontract.RuntimeOperationAdmissibility) *runtimecontract.RuntimePrerequisiteObservation {
+	if catalog == nil {
+		return nil
+	}
+	catalogValue := catalog.Normalized()
+	for _, raw := range values {
+		observation := raw.Normalized()
+		if observation.PrerequisiteID != catalogValue.PrerequisiteID || observation.Kind != runtimecontract.PrerequisiteKindOperationAdmissibility ||
+			observation.OwnerModuleID != catalogValue.OwnerModuleID || observation.ContentHash != catalogValue.SnapshotID || observation.Validate() != nil {
+			continue
+		}
+		observation.Dependencies = append([]runtimecontract.RuntimeFreshnessDependency(nil), observation.Dependencies...)
+		return &observation
+	}
+	return nil
+}
+
 func runtimeValidationScopeTargetRefs(facts runtimecontract.RuntimeFacts, operation runtimecontract.RuntimeOperation) []string {
 	if runtimecontract.CanonicalRuntimeBlockKind(operation.Kind) != runtimecontract.RuntimeBlockKindManagedValidationSession {
 		return nil
@@ -62,13 +87,42 @@ func runtimeValidationScopeTargetRefs(facts runtimecontract.RuntimeFacts, operat
 	return append([]string(nil), facts.Resources.Manifest.TargetRefs...)
 }
 
-func runtimeOwnerCatalogForOperation(values []runtimecontract.RuntimeOperationAdmissibility, operation runtimecontract.RuntimeOperation) *runtimecontract.RuntimeOperationAdmissibility {
+func runtimeOwnerCatalogForOperation(values []runtimecontract.RuntimeOperationAdmissibility, observations []runtimecontract.RuntimePrerequisiteObservation, operation runtimecontract.RuntimeOperation, requiredSnapshotID, requiredAcquisitionBinding string) *runtimecontract.RuntimeOperationAdmissibility {
 	owner := runtimecontract.RuntimeModuleForOperationKind(operation.Kind)
-	catalog, found := runtimeOperationAdmissibilityForKind(values, owner, operation.Kind)
-	if !found {
+	canonicalKind := runtimecontract.CanonicalRuntimeBlockKind(operation.Kind)
+	requiredSnapshotID = strings.TrimSpace(requiredSnapshotID)
+	requiredAcquisitionBinding = strings.TrimSpace(requiredAcquisitionBinding)
+	// SM-3 execution authority comes only from the catalog identity sealed into
+	// the execution record.  Looking up an arbitrary current catalog by owner and
+	// operation kind would silently replace missing authority after restart.
+	if requiredSnapshotID == "" {
 		return nil
 	}
-	return &catalog
+	for _, catalog := range values {
+		catalog = catalog.Normalized()
+		if catalog.OwnerModuleID != owner || catalog.SnapshotID != requiredSnapshotID || catalog.AcquisitionBinding != requiredAcquisitionBinding ||
+			!runtimeCatalogContainsOperationKind(catalog, canonicalKind) || catalog.Validate() != nil {
+			continue
+		}
+		if _, found := runtimecontract.RuntimeOperationPolicyForOperation(operation, catalog.OperationPolicies); !found {
+			continue
+		}
+		if runtimeOwnerCatalogObservationForOperation(observations, &catalog) == nil {
+			continue
+		}
+		value := catalog
+		return &value
+	}
+	return nil
+}
+
+func runtimeCatalogContainsOperationKind(catalog runtimecontract.RuntimeOperationAdmissibility, kind string) bool {
+	for _, available := range catalog.OperationKinds {
+		if runtimecontract.CanonicalRuntimeBlockKind(available) == kind {
+			return true
+		}
+	}
+	return false
 }
 
 func runtimeWorkspaceManifestObservation(aggregate RuntimeAggregate) *runtimecontract.RuntimePrerequisiteObservation {

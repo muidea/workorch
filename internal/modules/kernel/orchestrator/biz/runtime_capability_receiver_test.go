@@ -95,7 +95,7 @@ func TestRuntimeCapabilityReceiverModulesPublishDeclaredInventory(t *testing.T) 
 			start: func(t *testing.T, hub magicevent.Hub) func() {
 				t.Helper()
 				owner := decisionmodule.New()
-				if err := owner.Configure(decisionbiz.Dependencies{WorkspaceDeletions: memory.NewDecisionWorkspaceDeletionRepository(), EventHub: hub, Tickets: memory.NewDecisionTicketRepository(), Resolutions: memory.NewDecisionResolutionRepository()}); err != nil {
+				if err := owner.Configure(decisionbiz.Dependencies{OwnerRepositories: testDecisionOwnerRepositories(memory.NewDecisionTicketRepository(), memory.NewDecisionResolutionRepository(), memory.NewDecisionWorkspaceDeletionRepository()), EventHub: hub}); err != nil {
 					t.Fatal(err)
 				}
 				if err := owner.Start(); err != nil {

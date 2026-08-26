@@ -30,11 +30,26 @@ func TestCapabilityStateReceiptStoreIsDurableAndIdempotent(t *testing.T) {
 	}
 	snapshot.SnapshotID = runtimecontract.StableRuntimeCapabilityStateSnapshotID(snapshot)
 	workspaceID := common.WorkspaceID("ws")
+	wantDir, err := store.workspaceDir(workspaceID, snapshot.AcquisitionKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	directoryChain, err := capabilityStateReceiptDirectoryChain(root, wantDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	directorySyncs := 0
+	store.syncDirectory = func(path string) error {
+		directorySyncs++
+		return syncCapabilityStateReceiptDirectory(path)
+	}
 	persisted, err := store.StoreIfAbsent(workspaceID, snapshot)
 	if err != nil {
 		t.Fatal(err)
 	}
-	wantDir := filepath.Join(root, "internal", "workspaces", string(workspaceID), "runtime", "git-capability-state-receipts")
+	if directorySyncs != len(directoryChain)+1 {
+		t.Fatalf("directory syncs after first publish = %d, want chain+final %d", directorySyncs, len(directoryChain)+1)
+	}
 	entries, err := os.ReadDir(wantDir)
 	if err != nil || len(entries) != 1 {
 		t.Fatalf("workspace receipt directory entries=%d err=%v, want one durable receipt", len(entries), err)
@@ -138,6 +153,176 @@ func TestCapabilityStateReceiptStoreRejectsCrossWorkspaceScope(t *testing.T) {
 	if _, _, err := store.Load("../ws-a", snapshot.AcquisitionKey); !errors.Is(err, common.ErrInvalidArgument) {
 		t.Fatalf("path-like workspace Load err=%v, want invalid argument", err)
 	}
+}
+
+func TestCapabilityStateReceiptStoreRetriesDirectorySyncAfterPublishedEntry(t *testing.T) {
+	store, err := NewCapabilityStateReceiptStore(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	snapshot := runtimecontract.RuntimeCapabilityStateSnapshot{
+		RequirementID: "capability_state:git", AcquisitionKey: "capability-state/ws/run/requirement/fsync-retry",
+		OwnerModuleID: "git", CapabilityStateKind: "repository_state", SubjectRef: "workspace_deliverable",
+		ObservedRevision: "repo-absent", ContentHash: "hash-fsync", Disposition: runtimecontract.RuntimeCapabilityStateReady,
+		QueryReceiptRef: "capability-state-receipt/capability-state/ws/run/requirement/fsync-retry",
+	}
+	snapshot.SnapshotID = runtimecontract.StableRuntimeCapabilityStateSnapshotID(snapshot)
+	dir, err := store.workspaceDir("ws", snapshot.AcquisitionKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	syncFailure := errors.New("injected directory sync failure")
+	leafSyncs := 0
+	store.syncDirectory = func(path string) error {
+		if path == dir {
+			leafSyncs++
+			if leafSyncs == 2 {
+				return syncFailure
+			}
+		}
+		return syncCapabilityStateReceiptDirectory(path)
+	}
+	if _, err := store.StoreIfAbsent("ws", snapshot); !errors.Is(err, syncFailure) {
+		t.Fatalf("first StoreIfAbsent err = %v, want final directory sync failure", err)
+	}
+	entries, readErr := os.ReadDir(dir)
+	if readErr != nil || len(entries) != 1 || strings.HasPrefix(entries[0].Name(), ".capability-state-") {
+		t.Fatalf("failed final sync retained temporary alias: entries=%+v err=%v", entries, readErr)
+	}
+	store.syncDirectory = syncCapabilityStateReceiptDirectory
+	// The hard-link may already be visible after the failed sync. An exact retry
+	// must re-sync the directory before acknowledging the immutable receipt.
+	if persisted, err := store.StoreIfAbsent("ws", snapshot); err != nil || !reflect.DeepEqual(persisted, snapshot) {
+		t.Fatalf("StoreIfAbsent retry = %+v err=%v, want exact durable receipt", persisted, err)
+	}
+}
+
+func TestCapabilityStateReceiptStoreSyncsCreatedChainAndUnlinksBeforeFinalLeafSync(t *testing.T) {
+	root := t.TempDir()
+	store, err := NewCapabilityStateReceiptStore(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	snapshot := capabilityStateReceiptSnapshotForTest("capability-state/ws/run/requirement/order", "hash-order")
+	dir, err := store.workspaceDir("ws", snapshot.AcquisitionKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	chain, err := capabilityStateReceiptDirectoryChain(root, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	steps := make([]string, 0, len(chain)+3)
+	store.syncDirectory = func(path string) error {
+		steps = append(steps, "sync:"+path)
+		return syncCapabilityStateReceiptDirectory(path)
+	}
+	store.linkFile = func(oldPath, newPath string) error {
+		steps = append(steps, "link-final")
+		return os.Link(oldPath, newPath)
+	}
+	store.removeFile = func(path string) error {
+		steps = append(steps, "unlink-temp")
+		return os.Remove(path)
+	}
+	if _, err := store.StoreIfAbsent("ws", snapshot); err != nil {
+		t.Fatal(err)
+	}
+	want := make([]string, 0, len(chain)+3)
+	for _, path := range chain {
+		want = append(want, "sync:"+path)
+	}
+	want = append(want, "link-final", "unlink-temp", "sync:"+dir)
+	if !reflect.DeepEqual(steps, want) {
+		t.Fatalf("durable publication order = %v, want %v", steps, want)
+	}
+}
+
+func TestCapabilityStateReceiptStoreRaceDuplicateUnlinksBeforeFinalLeafSync(t *testing.T) {
+	root := t.TempDir()
+	store, err := NewCapabilityStateReceiptStore(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	snapshot := capabilityStateReceiptSnapshotForTest("capability-state/ws/run/requirement/race", "hash-race")
+	dir, err := store.workspaceDir("ws", snapshot.AcquisitionKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	steps := []string(nil)
+	store.syncDirectory = func(path string) error {
+		steps = append(steps, "sync:"+path)
+		return syncCapabilityStateReceiptDirectory(path)
+	}
+	store.linkFile = func(oldPath, newPath string) error {
+		steps = append(steps, "raced-link")
+		if err := os.Link(oldPath, newPath); err != nil {
+			return err
+		}
+		return os.ErrExist
+	}
+	store.removeFile = func(path string) error {
+		steps = append(steps, "unlink-temp")
+		return os.Remove(path)
+	}
+	persisted, err := store.StoreIfAbsent("ws", snapshot)
+	if err != nil || !reflect.DeepEqual(persisted, snapshot) {
+		t.Fatalf("raced duplicate = %+v err=%v", persisted, err)
+	}
+	if len(steps) < 3 || !reflect.DeepEqual(steps[len(steps)-3:], []string{"raced-link", "unlink-temp", "sync:" + dir}) {
+		t.Fatalf("raced duplicate finalization order = %v", steps)
+	}
+	entries, readErr := os.ReadDir(dir)
+	if readErr != nil || len(entries) != 1 || strings.HasPrefix(entries[0].Name(), ".capability-state-") {
+		t.Fatalf("raced duplicate retained temporary alias: entries=%+v err=%v", entries, readErr)
+	}
+}
+
+func TestCapabilityStateReceiptStoreDirectoryChainSyncFailurePrecedesPublication(t *testing.T) {
+	root := t.TempDir()
+	store, err := NewCapabilityStateReceiptStore(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	snapshot := capabilityStateReceiptSnapshotForTest("capability-state/ws/run/requirement/chain-failure", "hash-chain")
+	dir, err := store.workspaceDir("ws", snapshot.AcquisitionKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	chain, err := capabilityStateReceiptDirectoryChain(root, dir)
+	if err != nil || len(chain) < 2 {
+		t.Fatalf("directory chain = %v err=%v", chain, err)
+	}
+	syncFailure := errors.New("injected directory-chain sync failure")
+	failurePath := chain[1]
+	store.syncDirectory = func(path string) error {
+		if path == failurePath {
+			return syncFailure
+		}
+		return syncCapabilityStateReceiptDirectory(path)
+	}
+	if _, err := store.StoreIfAbsent("ws", snapshot); !errors.Is(err, syncFailure) {
+		t.Fatalf("directory-chain failure err=%v, want injected error", err)
+	}
+	entries, readErr := os.ReadDir(dir)
+	if readErr != nil || len(entries) != 0 {
+		t.Fatalf("directory-chain failure published receipt/temp: entries=%+v err=%v", entries, readErr)
+	}
+	store.syncDirectory = syncCapabilityStateReceiptDirectory
+	if persisted, err := store.StoreIfAbsent("ws", snapshot); err != nil || !reflect.DeepEqual(persisted, snapshot) {
+		t.Fatalf("directory-chain retry = %+v err=%v", persisted, err)
+	}
+}
+
+func capabilityStateReceiptSnapshotForTest(acquisitionKey, contentHash string) runtimecontract.RuntimeCapabilityStateSnapshot {
+	snapshot := runtimecontract.RuntimeCapabilityStateSnapshot{
+		RequirementID: "capability_state:git", AcquisitionKey: acquisitionKey,
+		OwnerModuleID: "git", CapabilityStateKind: "repository_state", SubjectRef: "workspace_deliverable",
+		ObservedRevision: "repo-absent", ContentHash: contentHash, Disposition: runtimecontract.RuntimeCapabilityStateReady,
+		QueryReceiptRef: "capability-state-receipt/" + acquisitionKey,
+	}
+	snapshot.SnapshotID = runtimecontract.StableRuntimeCapabilityStateSnapshotID(snapshot)
+	return snapshot
 }
 
 func TestCapabilityStateReceiptStoreRejectsUnknownPersistedFields(t *testing.T) {

@@ -6,6 +6,7 @@ import (
 
 	eventstreammodel "github.com/muidea/workorch/internal/modules/blocks/eventstream/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
+	"github.com/muidea/workorch/internal/pkg/repository"
 	deletioncontract "github.com/muidea/workorch/internal/pkg/workorchdeletioncontract"
 )
 
@@ -13,12 +14,20 @@ import (
 // memory-backed Eventstream owner set. Its lock is the linearization guard for
 // append, seal, ordinary mutation, and exact purge.
 type EventStreamWorkspaceDeletionRepository struct {
-	mu    sync.RWMutex
-	items map[common.WorkspaceID]*eventstreammodel.WorkspaceDeletion
+	mu           sync.RWMutex
+	items        map[common.WorkspaceID]*eventstreammodel.WorkspaceDeletion
+	ownerBinding repository.OwnerRepositoryBinding
 }
 
 func NewEventStreamWorkspaceDeletionRepository() *EventStreamWorkspaceDeletionRepository {
 	return &EventStreamWorkspaceDeletionRepository{items: map[common.WorkspaceID]*eventstreammodel.WorkspaceDeletion{}}
+}
+
+func (r *EventStreamWorkspaceDeletionRepository) OwnerRepositoryBinding() repository.OwnerRepositoryBinding {
+	if r == nil {
+		return repository.OwnerRepositoryBinding{}
+	}
+	return r.ownerBinding
 }
 
 func (r *EventStreamWorkspaceDeletionRepository) Create(_ context.Context, item *eventstreammodel.WorkspaceDeletion) error {

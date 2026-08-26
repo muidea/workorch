@@ -432,18 +432,13 @@ func repositoryGroupFieldContracts() map[string]map[string]string {
 			"Templates":               "WorkspaceTemplateRepository",
 		},
 		"DecisionRepositories": {
-			"Tickets":            "DecisionTicketRepository",
-			"Resolutions":        "DecisionResolutionRepository",
-			"WorkspaceDeletions": "DecisionWorkspaceDeletionRepository",
+			"Owner": "DecisionOwnerRepositories",
 		},
 		"ApprovalRepositories": {
-			"Approvals":          "ApprovalRepository",
-			"WorkspaceDeletions": "ApprovalWorkspaceDeletionRepository",
+			"Owner": "ApprovalOwnerRepositories",
 		},
 		"EventStreamRepositories": {
-			"EventRecords":       "EventRecordRepository",
-			"WorkspaceDeletions": "EventStreamWorkspaceDeletionRepository",
-			"WorkspacePurger":    "EventStreamWorkspacePurger",
+			"Owner": "EventStreamOwnerRepositories",
 		},
 		"GovernanceRepositories": {
 			"AutoGovernanceTraces": "AutoGovernanceTraceRepository",
@@ -452,14 +447,10 @@ func repositoryGroupFieldContracts() map[string]map[string]string {
 			"Registry": "MCPRegistryRepository",
 		},
 		"MemoryRepositories": {
-			"MemoryItems":        "MemoryItemRepository",
-			"MemoryRecallTraces": "MemoryRecallTraceRepository",
-			"WorkspaceDeletions": "MemoryWorkspaceDeletionRepository",
+			"Owner": "MemoryOwnerRepositories",
 		},
 		"ResultRepositories": {
-			"Results":            "ResultRepository",
-			"Artifacts":          "ArtifactRepository",
-			"WorkspaceDeletions": "ResultWorkspaceDeletionRepository",
+			"Owner": "ResultOwnerRepositories",
 		},
 		"RunRepositories": {
 			"Runs":        "RunRepository",

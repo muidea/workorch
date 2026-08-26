@@ -89,7 +89,7 @@ func TestWorkspaceLLMSelectionRoutesValidateScopeAndPersistCompleteTarget(t *tes
 	workspaceObserver.Subscribe(workspaceevents.TopicWorkspaceCommandUpdateLLMSelection, func(event magicevent.Event, result magicevent.Result) {
 		command := event.Data().(workspaceevents.UpdateWorkspaceLLMSelectionCommand)
 		ownerCommands = append(ownerCommands, command)
-		result.Set(workspaceevents.WorkspaceCommandResult{Workspace: &workspaceevents.Workspace{ID: command.WorkspaceID, Revision: command.ExpectedRevision + 1, State: common.WorkspaceStateActive, DefaultLLMSelection: runtimecontract.CloneProviderInferenceSelection(command.Selection)}}, nil)
+		result.Set(workspaceevents.WorkspaceLLMSelectionResult{Workspace: &workspaceevents.Workspace{ID: command.WorkspaceID, Revision: command.ExpectedRevision + 1, State: common.WorkspaceStateActive, DefaultLLMSelection: runtimecontract.CloneProviderInferenceSelection(command.Selection)}, Changed: true}, nil)
 	})
 	t.Cleanup(func() { workspaceObserver.Unsubscribe(workspaceevents.TopicWorkspaceCommandUpdateLLMSelection) })
 

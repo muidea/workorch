@@ -30,18 +30,12 @@ var _ common.Provider = (*RepositoryInitiator)(nil)
 type repositorySet struct {
 	Souls                 repository.SoulRepository
 	WorkspaceTemplates    repository.WorkspaceTemplateRepository
-	MemoryItems           repository.MemoryItemRepository
-	MemoryRecallTraces    repository.MemoryRecallTraceRepository
-	MemoryDeletions       repository.MemoryWorkspaceDeletionRepository
+	MemoryOwner           repository.MemoryOwnerRepositories
 	AutoGovernanceTraces  repository.AutoGovernanceTraceRepository
 	Skills                repository.SkillRepository
 	MCPRegistry           repository.MCPRegistryRepository
-	Results               repository.ResultRepository
-	Artifacts             repository.ArtifactRepository
-	ResultDeletions       repository.ResultWorkspaceDeletionRepository
-	EventRecords          repository.EventRecordRepository
-	EventStreamDeletions  repository.EventStreamWorkspaceDeletionRepository
-	EventStreamPurger     repository.EventStreamWorkspacePurger
+	ResultOwner           repository.ResultOwnerRepositories
+	EventStreamOwner      repository.EventStreamOwnerRepositories
 	Workspaces            repository.WorkspaceRepository
 	WorkspaceCleaner      repository.WorkspaceDeletionMaterialCleaner
 	Goals                 repository.GoalRepository
@@ -58,11 +52,8 @@ type repositorySet struct {
 	ArtifactContinuations repository.ArtifactContinuationRepository
 	OrchestratorDeletions repository.OrchestratorWorkspaceDeletionRepository
 	OrchestratorPurger    repository.OrchestratorWorkspaceEvidencePurger
-	Tickets               repository.DecisionTicketRepository
-	Resolutions           repository.DecisionResolutionRepository
-	Approvals             repository.ApprovalRepository
-	DecisionDeletions     repository.DecisionWorkspaceDeletionRepository
-	ApprovalDeletions     repository.ApprovalWorkspaceDeletionRepository
+	DecisionOwner         repository.DecisionOwnerRepositories
+	ApprovalOwner         repository.ApprovalOwnerRepositories
 	OrchestratorOwner     repository.OrchestratorEvidenceOwnerRepositories
 }
 
@@ -120,23 +111,15 @@ func (r repositorySet) Workspace() common.WorkspaceRepositories {
 }
 
 func (r repositorySet) Decision() common.DecisionRepositories {
-	return common.DecisionRepositories{
-		Tickets:            r.Tickets,
-		Resolutions:        r.Resolutions,
-		WorkspaceDeletions: r.DecisionDeletions,
-	}
+	return common.DecisionRepositories{Owner: r.DecisionOwner}
 }
 
 func (r repositorySet) Approval() common.ApprovalRepositories {
-	return common.ApprovalRepositories{
-		Approvals: r.Approvals, WorkspaceDeletions: r.ApprovalDeletions,
-	}
+	return common.ApprovalRepositories{Owner: r.ApprovalOwner}
 }
 
 func (r repositorySet) EventStream() common.EventStreamRepositories {
-	return common.EventStreamRepositories{
-		EventRecords: r.EventRecords, WorkspaceDeletions: r.EventStreamDeletions, WorkspacePurger: r.EventStreamPurger,
-	}
+	return common.EventStreamRepositories{Owner: r.EventStreamOwner}
 }
 
 func (r repositorySet) Governance() common.GovernanceRepositories {
@@ -148,11 +131,7 @@ func (r repositorySet) MCP() common.MCPRepositories {
 }
 
 func (r repositorySet) Memory() common.MemoryRepositories {
-	return common.MemoryRepositories{
-		MemoryItems:        r.MemoryItems,
-		MemoryRecallTraces: r.MemoryRecallTraces,
-		WorkspaceDeletions: r.MemoryDeletions,
-	}
+	return common.MemoryRepositories{Owner: r.MemoryOwner}
 }
 
 func (r repositorySet) Orchestrator() repository.OrchestratorEvidenceOwnerRepositories {
@@ -160,11 +139,7 @@ func (r repositorySet) Orchestrator() repository.OrchestratorEvidenceOwnerReposi
 }
 
 func (r repositorySet) Result() common.ResultRepositories {
-	return common.ResultRepositories{
-		Results:            r.Results,
-		Artifacts:          r.Artifacts,
-		WorkspaceDeletions: r.ResultDeletions,
-	}
+	return common.ResultRepositories{Owner: r.ResultOwner}
 }
 
 func (r repositorySet) Run() common.RunRepositories {
@@ -199,18 +174,12 @@ func buildRepositories(backend string, dataRoot string) (repositorySet, error) {
 		return repositorySet{
 			Souls:                 memory.NewSoulRepository(),
 			WorkspaceTemplates:    memory.NewWorkspaceTemplateRepository(),
-			MemoryItems:           memoryOwner.Items,
-			MemoryRecallTraces:    memoryOwner.RecallTraces,
-			MemoryDeletions:       memoryOwner.WorkspaceDeletions,
+			MemoryOwner:           memoryOwner.OwnerRepositories(),
 			AutoGovernanceTraces:  memory.NewAutoGovernanceTraceRepository(),
 			Skills:                memory.NewSkillRepository(),
 			MCPRegistry:           memory.NewMCPRegistryRepository(),
-			Results:               resultOwner.Results,
-			Artifacts:             resultOwner.Artifacts,
-			ResultDeletions:       resultOwner.WorkspaceDeletions,
-			EventRecords:          eventStreamOwner.EventRecords,
-			EventStreamDeletions:  eventStreamOwner.WorkspaceDeletions,
-			EventStreamPurger:     eventStreamOwner.EventRecords,
+			ResultOwner:           resultOwner.OwnerRepositories(),
+			EventStreamOwner:      eventStreamOwner.OwnerRepositories(),
 			Workspaces:            workspaceRepository,
 			WorkspaceCleaner:      workspaceRepository,
 			Goals:                 memory.NewGoalRepository(),
@@ -227,11 +196,8 @@ func buildRepositories(backend string, dataRoot string) (repositorySet, error) {
 			ArtifactContinuations: orchestratorOwner.ArtifactContinuations(),
 			OrchestratorDeletions: orchestratorOwner.WorkspaceDeletions(),
 			OrchestratorPurger:    orchestratorOwner.WorkspacePurger(),
-			Tickets:               decisionOwner.Tickets,
-			Resolutions:           decisionOwner.Resolutions,
-			Approvals:             approvalOwner.Approvals,
-			DecisionDeletions:     decisionOwner.WorkspaceDeletions,
-			ApprovalDeletions:     approvalOwner.WorkspaceDeletions,
+			DecisionOwner:         decisionOwner.OwnerRepositories(),
+			ApprovalOwner:         approvalOwner.OwnerRepositories(),
 			OrchestratorOwner:     orchestratorOwner,
 		}, nil
 	case "file":
@@ -240,18 +206,12 @@ func buildRepositories(backend string, dataRoot string) (repositorySet, error) {
 		return repositorySet{
 			Souls:                 fileRepo.NewSoulRepository(filepath.Join(dataRoot, "system", "souls")),
 			WorkspaceTemplates:    fileRepo.NewWorkspaceTemplateRepository(filepath.Join(dataRoot, "system", "workspace_templates.json")),
-			MemoryItems:           workspaceScopedRepos.MemoryItems,
-			MemoryRecallTraces:    workspaceScopedRepos.MemoryRecallTraces,
-			MemoryDeletions:       workspaceScopedRepos.MemoryDeletions,
+			MemoryOwner:           workspaceScopedRepos.MemoryOwner,
 			AutoGovernanceTraces:  fileRepo.NewAutoGovernanceTraceRepository(filepath.Join(dataRoot, "system", "auto_governance_trace.json")),
 			Skills:                fileRepo.NewSkillRepository(filepath.Join(dataRoot, "system", "skill.json")),
 			MCPRegistry:           fileRepo.NewMCPRegistryRepository(filepath.Join(dataRoot, "system", "mcp_registry.json")),
-			Results:               workspaceScopedRepos.Results,
-			Artifacts:             workspaceScopedRepos.Artifacts,
-			ResultDeletions:       workspaceScopedRepos.ResultDeletions,
-			EventRecords:          workspaceScopedRepos.EventRecords,
-			EventStreamDeletions:  workspaceScopedRepos.EventStreamDeletions,
-			EventStreamPurger:     workspaceScopedRepos.EventStreamPurger,
+			ResultOwner:           workspaceScopedRepos.ResultOwner,
+			EventStreamOwner:      workspaceScopedRepos.EventStreamOwner,
 			Workspaces:            workspaceScopedRepos.Workspaces,
 			WorkspaceCleaner:      workspaceScopedRepos.WorkspaceCleaner,
 			Goals:                 workspaceScopedRepos.Goals,
@@ -268,11 +228,8 @@ func buildRepositories(backend string, dataRoot string) (repositorySet, error) {
 			ArtifactContinuations: workspaceScopedRepos.ArtifactContinuations,
 			OrchestratorDeletions: workspaceScopedRepos.OrchestratorDeletions,
 			OrchestratorPurger:    workspaceScopedRepos.OrchestratorPurger,
-			Tickets:               workspaceScopedRepos.Tickets,
-			Resolutions:           workspaceScopedRepos.Resolutions,
-			Approvals:             workspaceScopedRepos.Approvals,
-			DecisionDeletions:     workspaceScopedRepos.DecisionDeletions,
-			ApprovalDeletions:     workspaceScopedRepos.ApprovalDeletions,
+			DecisionOwner:         workspaceScopedRepos.DecisionOwner,
+			ApprovalOwner:         workspaceScopedRepos.ApprovalOwner,
 			OrchestratorOwner:     workspaceScopedRepos.OrchestratorEvidence,
 		}, nil
 	default:

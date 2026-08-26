@@ -551,14 +551,64 @@ fi
 # Resource-owner Biz packages must not export or embed a generic mutation
 # service. Cross-owner callers use typed EventHub commands; owner-local code
 # reaches private helpers and private internal-event dispatchers only.
+resource_owner_biz_roots=(
+  internal/modules/blocks/workspace/biz
+  internal/modules/blocks/run/biz
+  internal/modules/blocks/result/biz
+  internal/modules/blocks/decision/biz
+  internal/modules/blocks/approval/biz
+  internal/modules/blocks/memory/biz
+  internal/modules/blocks/skill/biz
+  internal/modules/blocks/soul/biz
+  internal/modules/blocks/mcpregistry/biz
+  internal/modules/blocks/eventstream/biz
+)
+owner_generic_service_facade_pattern='^type ([A-Z][A-Za-z0-9]*)?Service[[:space:]]+(struct|interface)|^func New([A-Z][A-Za-z0-9]*)?Service\('
+owner_private_service_export_pattern='^func[[:space:]]+\([^)]*\*(service|[a-z][A-Za-z0-9]*Service)\)[[:space:]]+[A-Z][A-Za-z0-9_]*\('
+
+if ((${#resource_owner_biz_roots[@]} != 10)); then
+  echo "boundary contract violation: resource-owner facade scan must cover exactly 10 owner Biz roots" >&2
+  exit 1
+fi
+for owner_root in "${resource_owner_biz_roots[@]}"; do
+  if [[ ! -d "$owner_root" ]]; then
+    echo "boundary contract violation: resource-owner facade scan path does not exist: $owner_root" >&2
+    exit 1
+  fi
+done
+
+# Inline negative fixtures keep both halves of the scanner executable. The
+# labels also prove the four formerly omitted owners remain in the explicit
+# ten-owner inventory rather than relying on an incidental glob.
+owner_facade_guard_fixtures=(
+  'memory|type Service struct {'
+  'skill|func NewService(repository any) *service {'
+  'soul|func (s *soulService) UpdateSoul() {'
+  'mcpregistry|func (s *service) RegistrySnapshot() {'
+)
+for fixture in "${owner_facade_guard_fixtures[@]}"; do
+  fixture_owner="${fixture%%|*}"
+  fixture_source="${fixture#*|}"
+  if ! printf '%s\n' "${resource_owner_biz_roots[@]}" | grep -q -x -F -- "internal/modules/blocks/$fixture_owner/biz"; then
+    echo "boundary contract violation: resource-owner facade fixture is outside the scanned inventory: $fixture_owner" >&2
+    exit 1
+  fi
+  if ! grep -q -E -- "$owner_generic_service_facade_pattern|$owner_private_service_export_pattern" <<<"$fixture_source"; then
+    echo "boundary contract violation: resource-owner facade scanner missed its $fixture_owner negative fixture" >&2
+    exit 1
+  fi
+done
+
 owner_mutation_facade_matches="$({
-  source_matches '^type Service struct|^[[:space:]]*\*Service$|func \([^)]*\) (CreateRun|EnsureRun)\(' \
+  source_matches "$owner_generic_service_facade_pattern" "${resource_owner_biz_roots[@]}" || true
+  source_matches "$owner_private_service_export_pattern" \
+    internal/modules/blocks/memory/biz internal/modules/blocks/skill/biz \
+    internal/modules/blocks/soul/biz internal/modules/blocks/mcpregistry/biz || true
+  source_matches '^[[:space:]]*\*Service$|func \([^)]*\) (CreateRun|EnsureRun)\(' \
     internal/modules/blocks/run/biz internal/modules/blocks/result/biz || true
   source_matches '^type GoalDoDManager struct|^func NewGoalDoDManager' \
     internal/modules/blocks/workspace/biz || true
-  source_matches '^type ([A-Z][A-Za-z0-9]*)?Service[[:space:]]+(struct|interface)|^func New([A-Z][A-Za-z0-9]*)?Service\(' \
-    internal/modules/blocks/approval/biz internal/modules/blocks/decision/biz || true
-  source_matches '^type ([A-Z][A-Za-z0-9]*)?Service[[:space:]]+(struct|interface)|^func New([A-Z][A-Za-z0-9]*)?Service\(|PurgeWorkspaceEvents' \
+  source_matches 'PurgeWorkspaceEvents' \
     internal/modules/blocks/eventstream/biz || true
   source_matches 'eventstreambiz\.Service|eventstreambiz\.New([A-Z][A-Za-z0-9]*)?Service' \
     internal/modules/blocks/eventstream/module.go || true
@@ -2366,6 +2416,18 @@ if grep -q -E -- "$forbidden_decision_update_fields" <<<"$decision_update_body";
 	 exit 1
 fi
 
+# Workspace pre-seal Definition clarifications are Decision-owned but have no
+# Run scope. They must use their dedicated resolve/replay contract and must
+# never be coerced into ordinary recovery or run-scoped Orchestrator evidence.
+for decision_pre_seal_regression in \
+	TestWorkspaceDefinitionClarificationOrphanResolutionWaitsForDedicatedReplay \
+	TestWorkspacePreSealDefinitionResolutionSkipsRunScopedEvidenceAndReplaysAfterResponseLoss; do
+	if ! grep -R -q -E --include='*_test.go' -- "^func ${decision_pre_seal_regression}\\(" internal; then
+		echo "boundary contract violation: pre-seal Decision resolution regression is missing (${decision_pre_seal_regression})" >&2
+		exit 1
+	fi
+done
+
 forbidden_approval_update_fields='(^|[[:space:]])(State|ResolvedAt|ResolvedBy|CreatedAt)([[:space:]]|$)'
 approval_update_body="$(struct_body internal/modules/blocks/approval/pkg/events/messages.go UpdateApprovalCommand)"
 if grep -q -E -- "$forbidden_approval_update_fields" <<<"$approval_update_body"; then
@@ -3152,6 +3214,52 @@ if grep -q -E -- '^type MCPCommandResult struct' internal/modules/blocks/mcpregi
 	echo "boundary contract violation: MCP Registry topics must use concrete result types, not MCPCommandResult" >&2
 	exit 1
 fi
+if grep -q -E -- '^type WorkspaceCommandResult struct' internal/modules/blocks/workspace/pkg/events/messages.go; then
+	echo "boundary contract violation: Workspace management topics must use concrete result types, not WorkspaceCommandResult" >&2
+	exit 1
+fi
+
+# Workspace management result values cross an owner boundary only when the
+# consumer binds them back to the exact concrete command. Checking near every
+# production use prevents a well-typed but foreign identity/scope (including a
+# foreign item hidden in a list) from being accepted after decoding.
+workspace_management_result_pattern='workspaceevents\.(WorkspaceResult|WorkspaceListResult|WorkspaceLLMSelectionResult|GoalResult|GoalListResult|DeleteGoalResult|DoDResult|DoDListResult|DeleteDoDResult|WorkspaceTemplateResult|WorkspaceTemplateListResult|DeleteWorkspaceTemplateResult|EnsureWorkspaceTemplateDefaultsResult)'
+workspace_management_result_uses="$({
+	grep -R -Hn -E --include='*.go' --exclude='*_test.go' -- "$workspace_management_result_pattern" internal || true
+} | grep -v -E '^internal/modules/blocks/workspace/(biz|pkg/events)/' || true)"
+if [[ -z "$workspace_management_result_uses" ]]; then
+	echo "boundary contract violation: Workspace management result consumers disappeared from command-bound validation audit" >&2
+	exit 1
+fi
+workspace_management_unbound_uses=""
+while IFS=: read -r source_file source_line _; do
+	[[ -n "$source_file" && -n "$source_line" ]] || continue
+	validation_window="$(sed -n "${source_line},$((source_line + 14))p" "$source_file")"
+	if ! grep -q -F -- '.ValidateFor(' <<<"$validation_window"; then
+		workspace_management_unbound_uses+="${source_file}:${source_line}"$'\n'
+	fi
+done <<<"$workspace_management_result_uses"
+if [[ -n "$workspace_management_unbound_uses" ]]; then
+	echo "boundary contract violation: Workspace management result caller does not bind the result to its concrete command with ValidateFor" >&2
+	echo "$workspace_management_unbound_uses" >&2
+	exit 1
+fi
+for sealed_method in workspaceResultWorkspaceID goalResultIdentity doDResultIdentity workspaceTemplateResultID; do
+	if ! grep -q -E -- "^[[:space:]]*${sealed_method}\(\)" internal/modules/blocks/workspace/pkg/events/management_result_validation.go; then
+		echo "boundary contract violation: Workspace command-bound result interface is no longer package-sealed: ${sealed_method}" >&2
+		exit 1
+	fi
+done
+for result_validation_test in \
+	TestWorkspaceManagementResultsValidateExactCommandIdentity \
+	TestWorkspaceManagementListResultsRejectForeignOrDuplicateOwnerIdentity \
+	TestWorkspaceOwnerReadPortsRejectMismatchedResultIdentityAndScope \
+	TestWorkspaceSnapshotReaderRejectsMismatchedOwnerIdentity; do
+	if ! grep -R -q -E --include='*_test.go' -- "^func ${result_validation_test}\\(" internal; then
+		echo "boundary contract violation: Workspace command-bound result regression is missing (${result_validation_test})" >&2
+		exit 1
+	fi
+done
 mcp_result_shapes="$(sed -n \
 	-e '/^type CreateCapabilityResult struct {/,/^}/p' \
 	-e '/^type GetCapabilityResult struct {/,/^}/p' \
@@ -4294,6 +4402,42 @@ expected_orchestrator_evidence_backend_files="$(printf '%s\n' \
 	internal/pkg/workorchrepo/workspace_scoped_repositories.go | sort)"
 if [[ "$orchestrator_evidence_backend_files" != "$expected_orchestrator_evidence_backend_files" ]]; then
 	echo "boundary contract violation: Orchestrator evidence owner set gained a non-canonical backend implementation" >&2
+	exit 1
+fi
+
+# Result, Decision, Approval, Memory, and Eventstream owner repositories are
+# admitted only as backend-minted opaque bundles. Production owner Biz inputs
+# cannot accept separately assembled repositories, and bundle constructors,
+# binding minting, and backend aggregate implementations stay confined to the
+# repository contract plus the memory/file backend factories.
+resource_owner_bundle_files="$({
+	grep -R -l -E --include='*.go' -- 'New(Result|Decision|Approval|Memory|EventStream)OwnerRepositories\(' internal || true
+} | grep -v '_test\.go$' | sort)"
+expected_resource_owner_bundle_files="$(printf '%s\n' \
+	internal/pkg/repository/memory/memory.go \
+	internal/pkg/repository/resource_owner_repositories.go \
+	internal/pkg/workorchrepo/workspace_scoped_repositories.go | sort)"
+if [[ "$resource_owner_bundle_files" != "$expected_resource_owner_bundle_files" ]]; then
+	echo "boundary contract violation: resource owner bundle gained a non-canonical production constructor callsite" >&2
+	exit 1
+fi
+resource_owner_binding_files="$({
+	grep -R -l -E --include='*.go' -- 'New(Result|Decision|Approval|Memory|EventStream)OwnerRepositoryBinding\(' internal || true
+} | grep -v '_test\.go$' | sort)"
+if [[ "$resource_owner_binding_files" != "$expected_resource_owner_bundle_files" ]]; then
+	echo "boundary contract violation: resource owner binding gained a non-canonical production mint callsite" >&2
+	exit 1
+fi
+resource_owner_backend_files="$({
+	grep -R -l -E --include='*.go' -- '(ResultOwnerResults|DecisionOwnerTickets|ApprovalOwnerApprovals|MemoryOwnerItems|EventStreamOwnerEventRecords)\(\)' internal || true
+} | grep -v '_test\.go$' | sort)"
+if [[ "$resource_owner_backend_files" != "$expected_resource_owner_bundle_files" ]]; then
+	echo "boundary contract violation: resource owner bundle gained a non-canonical production backend implementation" >&2
+	exit 1
+fi
+if grep -R -n -E --include='*.go' --exclude='*_test.go' -- '^[[:space:]]+(Results|Artifacts|Tickets|Resolutions|Approvals|MemoryItems|MemoryRecallTraces|EventRecords|WorkspaceDeletions|WorkspacePurger)[[:space:]]+repository\.' \
+	internal/modules/blocks/{result,decision,approval,memory,eventstream}/biz | grep -q .; then
+	echo "boundary contract violation: resource owner Biz Dependencies accept independently supplied repositories" >&2
 	exit 1
 fi
 

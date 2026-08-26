@@ -275,7 +275,7 @@ func TestDriveRuntimeFileBackedRunExecutesDurableFileOwnerAndRestarts(t *testing
 	}
 	workspaceObserver := magicevent.NewSimpleObserver(workspaceevents.CommandDestination, hub)
 	workspaceObserver.Subscribe(workspaceevents.TopicWorkspaceCommandGet, func(_ magicevent.Event, result magicevent.Result) {
-		result.Set(workspaceevents.WorkspaceCommandResult{Workspace: &workspaceevents.Workspace{
+		result.Set(workspaceevents.WorkspaceResult{Workspace: &workspaceevents.Workspace{
 			ID: "ws-v2", DeliverableDirectory: deliverable, InternalDirectory: internalDir,
 		}}, nil)
 	})
@@ -420,7 +420,7 @@ func TestRuntimeFileBackedFocusScopedTargetsStayRetiredAcrossDurableWrites(t *te
 
 	workspaceObserver := magicevent.NewSimpleObserver(workspaceevents.CommandDestination, hub)
 	workspaceObserver.Subscribe(workspaceevents.TopicWorkspaceCommandGet, func(_ magicevent.Event, result magicevent.Result) {
-		result.Set(workspaceevents.WorkspaceCommandResult{Workspace: &workspaceevents.Workspace{
+		result.Set(workspaceevents.WorkspaceResult{Workspace: &workspaceevents.Workspace{
 			ID: "ws-v2", DeliverableDirectory: deliverable, InternalDirectory: internalDir,
 		}}, nil)
 	})
@@ -797,7 +797,7 @@ func TestRuntimeFileBackedGroundedTargetStateSequenceRestartsAtCommittedBoundari
 				}
 				t.Cleanup(func() { _ = workspaceOwner.Stop(ctx) })
 				resultOwner := resultmodule.New()
-				if err := resultOwner.Configure(resultbiz.Dependencies{WorkspaceDeletions: memory.NewResultWorkspaceDeletionRepository(), Results: results, Artifacts: memory.NewArtifactRepository(), EventHub: hub}); err != nil {
+				if err := resultOwner.Configure(resultbiz.Dependencies{OwnerRepositories: testResultOwnerRepositories(results, memory.NewArtifactRepository(), memory.NewResultWorkspaceDeletionRepository()), EventHub: hub}); err != nil {
 					t.Fatal(err)
 				}
 				if err := resultOwner.Start(); err != nil {
@@ -971,7 +971,7 @@ func TestRuntimeFileBackedEmptyWorkspaceCreationSelectionContinuesThroughCandida
 	startRuntimeReceiptTestOwner(t, hub)
 	workspaceObserver := magicevent.NewSimpleObserver(workspaceevents.CommandDestination, hub)
 	workspaceObserver.Subscribe(workspaceevents.TopicWorkspaceCommandGet, func(_ magicevent.Event, result magicevent.Result) {
-		result.Set(workspaceevents.WorkspaceCommandResult{Workspace: &workspaceevents.Workspace{ID: "ws-v2", DeliverableDirectory: deliverable, InternalDirectory: internalDir}}, nil)
+		result.Set(workspaceevents.WorkspaceResult{Workspace: &workspaceevents.Workspace{ID: "ws-v2", DeliverableDirectory: deliverable, InternalDirectory: internalDir}}, nil)
 	})
 	t.Cleanup(func() { workspaceObserver.Unsubscribe(workspaceevents.TopicWorkspaceCommandGet) })
 	fileOwner := filemodule.New()
@@ -1082,7 +1082,7 @@ func TestRuntimeFileBackedEmptyWorkspaceCreationReceiptCrashRestartDoesNotReplay
 			}
 			t.Cleanup(func() { _ = workspaceOwner.Stop(ctx) })
 			resultOwner := resultmodule.New()
-			if err := resultOwner.Configure(resultbiz.Dependencies{WorkspaceDeletions: memory.NewResultWorkspaceDeletionRepository(), Results: results, Artifacts: memory.NewArtifactRepository(), EventHub: hub}); err != nil {
+			if err := resultOwner.Configure(resultbiz.Dependencies{OwnerRepositories: testResultOwnerRepositories(results, memory.NewArtifactRepository(), memory.NewResultWorkspaceDeletionRepository()), EventHub: hub}); err != nil {
 				t.Fatal(err)
 			}
 			if err := resultOwner.Start(); err != nil {
@@ -1212,7 +1212,7 @@ func TestRuntimeFileBackedBoundedWorkspaceScopeAllowsNewDeliverable(t *testing.T
 	startRuntimeReceiptTestOwner(t, hub)
 	workspaceObserver := magicevent.NewSimpleObserver(workspaceevents.CommandDestination, hub)
 	workspaceObserver.Subscribe(workspaceevents.TopicWorkspaceCommandGet, func(_ magicevent.Event, result magicevent.Result) {
-		result.Set(workspaceevents.WorkspaceCommandResult{Workspace: &workspaceevents.Workspace{ID: "ws-v2", DeliverableDirectory: deliverable, InternalDirectory: internalDir}}, nil)
+		result.Set(workspaceevents.WorkspaceResult{Workspace: &workspaceevents.Workspace{ID: "ws-v2", DeliverableDirectory: deliverable, InternalDirectory: internalDir}}, nil)
 	})
 	t.Cleanup(func() { workspaceObserver.Unsubscribe(workspaceevents.TopicWorkspaceCommandGet) })
 	fileOwner := filemodule.New()
@@ -1318,7 +1318,7 @@ func TestRuntimeFileBackedWorkspaceScopeExecutesTargetBoundShellOperation(t *tes
 	startRuntimeReceiptTestOwner(t, hub)
 	workspaceObserver := magicevent.NewSimpleObserver(workspaceevents.CommandDestination, hub)
 	workspaceObserver.Subscribe(workspaceevents.TopicWorkspaceCommandGet, func(_ magicevent.Event, result magicevent.Result) {
-		result.Set(workspaceevents.WorkspaceCommandResult{Workspace: &workspaceevents.Workspace{ID: "ws-v2", DeliverableDirectory: deliverable, InternalDirectory: internalDir}}, nil)
+		result.Set(workspaceevents.WorkspaceResult{Workspace: &workspaceevents.Workspace{ID: "ws-v2", DeliverableDirectory: deliverable, InternalDirectory: internalDir}}, nil)
 	})
 	t.Cleanup(func() { workspaceObserver.Unsubscribe(workspaceevents.TopicWorkspaceCommandGet) })
 	fileOwner := filemodule.New()
@@ -1512,7 +1512,7 @@ func testRuntimeFileBackedUnresolvedTargetSelectionFailsWithoutProvider(t *testi
 	t.Cleanup(func() { _ = runOwner.Stop(ctx) })
 	workspaceObserver := magicevent.NewSimpleObserver(workspaceevents.CommandDestination, hub)
 	workspaceObserver.Subscribe(workspaceevents.TopicWorkspaceCommandGet, func(_ magicevent.Event, result magicevent.Result) {
-		result.Set(workspaceevents.WorkspaceCommandResult{Workspace: &workspaceevents.Workspace{ID: "ws-v2", DeliverableDirectory: deliverable, InternalDirectory: internalDir}}, nil)
+		result.Set(workspaceevents.WorkspaceResult{Workspace: &workspaceevents.Workspace{ID: "ws-v2", DeliverableDirectory: deliverable, InternalDirectory: internalDir}}, nil)
 	})
 	t.Cleanup(func() { workspaceObserver.Unsubscribe(workspaceevents.TopicWorkspaceCommandGet) })
 	fileOwner := filemodule.New()
@@ -1773,7 +1773,7 @@ func TestRuntimeFileBackedGitCapabilityStateSequenceMatrix(t *testing.T) {
 
 			workspaceObserver := magicevent.NewSimpleObserver(workspaceevents.CommandDestination, hub)
 			workspaceObserver.Subscribe(workspaceevents.TopicWorkspaceCommandGet, func(_ magicevent.Event, result magicevent.Result) {
-				result.Set(workspaceevents.WorkspaceCommandResult{Workspace: &workspaceevents.Workspace{ID: "ws-v2", DeliverableDirectory: deliverable, InternalDirectory: internalDir}}, nil)
+				result.Set(workspaceevents.WorkspaceResult{Workspace: &workspaceevents.Workspace{ID: "ws-v2", DeliverableDirectory: deliverable, InternalDirectory: internalDir}}, nil)
 			})
 			t.Cleanup(func() { workspaceObserver.Unsubscribe(workspaceevents.TopicWorkspaceCommandGet) })
 			startRuntimeFileManifestOwner(t, ctx, hub)
@@ -1873,7 +1873,7 @@ func TestRuntimeFileBackedGitRestartAfterInitEvidenceCommitContinuesSequence(t *
 	startRuntimeReceiptTestOwner(t, hub)
 	workspaceObserver := magicevent.NewSimpleObserver(workspaceevents.CommandDestination, hub)
 	workspaceObserver.Subscribe(workspaceevents.TopicWorkspaceCommandGet, func(_ magicevent.Event, result magicevent.Result) {
-		result.Set(workspaceevents.WorkspaceCommandResult{Workspace: &workspaceevents.Workspace{ID: "ws-v2", DeliverableDirectory: deliverable, InternalDirectory: internalDir}}, nil)
+		result.Set(workspaceevents.WorkspaceResult{Workspace: &workspaceevents.Workspace{ID: "ws-v2", DeliverableDirectory: deliverable, InternalDirectory: internalDir}}, nil)
 	})
 	t.Cleanup(func() { workspaceObserver.Unsubscribe(workspaceevents.TopicWorkspaceCommandGet) })
 	startRuntimeFileManifestOwner(t, ctx, hub)
@@ -2015,7 +2015,7 @@ func TestRuntimeFileBackedGitQueryReceiptCrashBeforePrerequisiteCommitReusesSnap
 	startRuntimeReceiptTestOwner(t, hub)
 	workspaceObserver := magicevent.NewSimpleObserver(workspaceevents.CommandDestination, hub)
 	workspaceObserver.Subscribe(workspaceevents.TopicWorkspaceCommandGet, func(_ magicevent.Event, result magicevent.Result) {
-		result.Set(workspaceevents.WorkspaceCommandResult{Workspace: &workspaceevents.Workspace{ID: "ws-v2", DeliverableDirectory: deliverable, InternalDirectory: internalDir}}, nil)
+		result.Set(workspaceevents.WorkspaceResult{Workspace: &workspaceevents.Workspace{ID: "ws-v2", DeliverableDirectory: deliverable, InternalDirectory: internalDir}}, nil)
 	})
 	t.Cleanup(func() { workspaceObserver.Unsubscribe(workspaceevents.TopicWorkspaceCommandGet) })
 	startRuntimeFileManifestOwner(t, ctx, hub)
@@ -2111,7 +2111,7 @@ func TestRuntimeFileBackedGitQueryReceiptCrashBeforePrerequisiteCommitReusesSnap
 	startRuntimeReceiptTestOwner(t, restartedHub)
 	restartedWorkspaceObserver := magicevent.NewSimpleObserver(workspaceevents.CommandDestination, restartedHub)
 	restartedWorkspaceObserver.Subscribe(workspaceevents.TopicWorkspaceCommandGet, func(_ magicevent.Event, result magicevent.Result) {
-		result.Set(workspaceevents.WorkspaceCommandResult{Workspace: &workspaceevents.Workspace{ID: "ws-v2", DeliverableDirectory: deliverable, InternalDirectory: internalDir}}, nil)
+		result.Set(workspaceevents.WorkspaceResult{Workspace: &workspaceevents.Workspace{ID: "ws-v2", DeliverableDirectory: deliverable, InternalDirectory: internalDir}}, nil)
 	})
 	t.Cleanup(func() { restartedWorkspaceObserver.Unsubscribe(workspaceevents.TopicWorkspaceCommandGet) })
 	startRuntimeFileManifestOwner(t, ctx, restartedHub)
@@ -2216,7 +2216,7 @@ func runRuntimeFileBackedManifestCommitCrashRestart(t *testing.T, crashAfterCAS 
 		}
 		workspaceObserver := magicevent.NewSimpleObserver(workspaceevents.CommandDestination, hub)
 		workspaceObserver.Subscribe(workspaceevents.TopicWorkspaceCommandGet, func(_ magicevent.Event, result magicevent.Result) {
-			result.Set(workspaceevents.WorkspaceCommandResult{Workspace: &workspaceevents.Workspace{ID: "ws-v2", DeliverableDirectory: deliverable}}, nil)
+			result.Set(workspaceevents.WorkspaceResult{Workspace: &workspaceevents.Workspace{ID: "ws-v2", DeliverableDirectory: deliverable}}, nil)
 		})
 		fileOwner := filemodule.New()
 		if err := fileOwner.Configure(filebiz.Dependencies{EventHub: hub}); err != nil {
@@ -2390,7 +2390,7 @@ func TestRuntimeFileBackedProviderCeilingCommitCrashRestart(t *testing.T) {
 				}
 				workspaceObserver := magicevent.NewSimpleObserver(workspaceevents.CommandDestination, hub)
 				workspaceObserver.Subscribe(workspaceevents.TopicWorkspaceCommandGet, func(_ magicevent.Event, result magicevent.Result) {
-					result.Set(workspaceevents.WorkspaceCommandResult{Workspace: &workspaceevents.Workspace{ID: "ws-v2", DeliverableDirectory: deliverable}}, nil)
+					result.Set(workspaceevents.WorkspaceResult{Workspace: &workspaceevents.Workspace{ID: "ws-v2", DeliverableDirectory: deliverable}}, nil)
 				})
 				llmOwner := llmmodule.New()
 				if err := llmOwner.Configure(llmbiz.Dependencies{EventHub: hub}); err != nil {
@@ -2590,7 +2590,7 @@ func TestRuntimeFileBackedFileCapabilityCommitCrashRestart(t *testing.T) {
 				}
 				workspaceObserver := magicevent.NewSimpleObserver(workspaceevents.CommandDestination, hub)
 				workspaceObserver.Subscribe(workspaceevents.TopicWorkspaceCommandGet, func(_ magicevent.Event, result magicevent.Result) {
-					result.Set(workspaceevents.WorkspaceCommandResult{Workspace: &workspaceevents.Workspace{ID: "ws-v2", DeliverableDirectory: deliverable}}, nil)
+					result.Set(workspaceevents.WorkspaceResult{Workspace: &workspaceevents.Workspace{ID: "ws-v2", DeliverableDirectory: deliverable}}, nil)
 				})
 				fileOwner := filemodule.New()
 				if err := fileOwner.Configure(filebiz.Dependencies{EventHub: hub}); err != nil {
@@ -2768,7 +2768,7 @@ func TestRuntimeFileBackedGitCapabilityCommitCrashRestart(t *testing.T) {
 				}
 				workspaceObserver := magicevent.NewSimpleObserver(workspaceevents.CommandDestination, hub)
 				workspaceObserver.Subscribe(workspaceevents.TopicWorkspaceCommandGet, func(_ magicevent.Event, result magicevent.Result) {
-					result.Set(workspaceevents.WorkspaceCommandResult{Workspace: &workspaceevents.Workspace{ID: "ws-v2", DeliverableDirectory: deliverable, InternalDirectory: internalDirectory}}, nil)
+					result.Set(workspaceevents.WorkspaceResult{Workspace: &workspaceevents.Workspace{ID: "ws-v2", DeliverableDirectory: deliverable, InternalDirectory: internalDirectory}}, nil)
 				})
 				store, err := gitbiz.NewCapabilityStateReceiptStore(filepath.Join(root, "git-capability-receipts"))
 				if err != nil {
@@ -2948,7 +2948,7 @@ func TestRuntimeFileBackedShellCapabilityCommitCrashRestart(t *testing.T) {
 				}
 				workspaceObserver := magicevent.NewSimpleObserver(workspaceevents.CommandDestination, hub)
 				workspaceObserver.Subscribe(workspaceevents.TopicWorkspaceCommandGet, func(_ magicevent.Event, result magicevent.Result) {
-					result.Set(workspaceevents.WorkspaceCommandResult{Workspace: &workspaceevents.Workspace{ID: "ws-v2", DeliverableDirectory: deliverable, InternalDirectory: internalDirectory}}, nil)
+					result.Set(workspaceevents.WorkspaceResult{Workspace: &workspaceevents.Workspace{ID: "ws-v2", DeliverableDirectory: deliverable, InternalDirectory: internalDirectory}}, nil)
 				})
 				shellOwner := shellmodule.New()
 				if err := shellOwner.Configure(shellbiz.Dependencies{EventHub: hub, RuntimeAdapter: shellbiz.NewRuntimeAdapter()}); err != nil {
@@ -3126,7 +3126,7 @@ func TestRuntimeFileBackedValidationScratchCommitCrashRestart(t *testing.T) {
 				}
 				workspaceObserver := magicevent.NewSimpleObserver(workspaceevents.CommandDestination, hub)
 				workspaceObserver.Subscribe(workspaceevents.TopicWorkspaceCommandGet, func(_ magicevent.Event, result magicevent.Result) {
-					result.Set(workspaceevents.WorkspaceCommandResult{Workspace: &workspaceevents.Workspace{
+					result.Set(workspaceevents.WorkspaceResult{Workspace: &workspaceevents.Workspace{
 						ID: "ws-v2", DeliverableDirectory: deliverable, InternalDirectory: internalDirectory,
 					}}, nil)
 				})
@@ -3303,7 +3303,7 @@ func runRuntimeFileBackedValidationScratchStaleInvalidationCrashRestart(t *testi
 				}
 				workspaceObserver := magicevent.NewSimpleObserver(workspaceevents.CommandDestination, hub)
 				workspaceObserver.Subscribe(workspaceevents.TopicWorkspaceCommandGet, func(_ magicevent.Event, result magicevent.Result) {
-					result.Set(workspaceevents.WorkspaceCommandResult{Workspace: &workspaceevents.Workspace{
+					result.Set(workspaceevents.WorkspaceResult{Workspace: &workspaceevents.Workspace{
 						ID: "ws-v2", DeliverableDirectory: deliverable, InternalDirectory: internalDirectory,
 					}}, nil)
 				})
@@ -3542,7 +3542,7 @@ func TestRuntimeFileBackedFailureTargetCommitCrashRestart(t *testing.T) {
 				}
 				workspaceObserver := magicevent.NewSimpleObserver(workspaceevents.CommandDestination, hub)
 				workspaceObserver.Subscribe(workspaceevents.TopicWorkspaceCommandGet, func(_ magicevent.Event, result magicevent.Result) {
-					result.Set(workspaceevents.WorkspaceCommandResult{Workspace: &workspaceevents.Workspace{ID: "ws-v2", DeliverableDirectory: deliverable}}, nil)
+					result.Set(workspaceevents.WorkspaceResult{Workspace: &workspaceevents.Workspace{ID: "ws-v2", DeliverableDirectory: deliverable}}, nil)
 				})
 				return hub, processRuns, runOwner, workspaceObserver
 			}
@@ -3696,7 +3696,7 @@ func TestRuntimeFileBackedCreationSelectionCommitCrashRestart(t *testing.T) {
 				}
 				workspaceObserver := magicevent.NewSimpleObserver(workspaceevents.CommandDestination, hub)
 				workspaceObserver.Subscribe(workspaceevents.TopicWorkspaceCommandGet, func(_ magicevent.Event, result magicevent.Result) {
-					result.Set(workspaceevents.WorkspaceCommandResult{Workspace: &workspaceevents.Workspace{ID: "ws-v2", DeliverableDirectory: deliverable}}, nil)
+					result.Set(workspaceevents.WorkspaceResult{Workspace: &workspaceevents.Workspace{ID: "ws-v2", DeliverableDirectory: deliverable}}, nil)
 				})
 				fileOwner := filemodule.New()
 				if err := fileOwner.Configure(filebiz.Dependencies{EventHub: hub}); err != nil {
@@ -3872,7 +3872,7 @@ func TestRuntimeFileBackedTargetSnapshotCommitCrashRestart(t *testing.T) {
 				}
 				workspaceObserver := magicevent.NewSimpleObserver(workspaceevents.CommandDestination, hub)
 				workspaceObserver.Subscribe(workspaceevents.TopicWorkspaceCommandGet, func(_ magicevent.Event, result magicevent.Result) {
-					result.Set(workspaceevents.WorkspaceCommandResult{Workspace: &workspaceevents.Workspace{ID: "ws-v2", DeliverableDirectory: deliverable}}, nil)
+					result.Set(workspaceevents.WorkspaceResult{Workspace: &workspaceevents.Workspace{ID: "ws-v2", DeliverableDirectory: deliverable}}, nil)
 				})
 				fileOwner := filemodule.New()
 				if err := fileOwner.Configure(filebiz.Dependencies{EventHub: hub}); err != nil {
@@ -4162,7 +4162,7 @@ func TestRuntimeFileBackedFileAdmissibilityCommitCrashRestart(t *testing.T) {
 				}
 				workspaceObserver := magicevent.NewSimpleObserver(workspaceevents.CommandDestination, hub)
 				workspaceObserver.Subscribe(workspaceevents.TopicWorkspaceCommandGet, func(_ magicevent.Event, result magicevent.Result) {
-					result.Set(workspaceevents.WorkspaceCommandResult{Workspace: &workspaceevents.Workspace{ID: "ws-v2", DeliverableDirectory: deliverable}}, nil)
+					result.Set(workspaceevents.WorkspaceResult{Workspace: &workspaceevents.Workspace{ID: "ws-v2", DeliverableDirectory: deliverable}}, nil)
 				})
 				fileOwner := filemodule.New()
 				if err := fileOwner.Configure(filebiz.Dependencies{EventHub: hub}); err != nil {
@@ -4462,7 +4462,7 @@ func TestRuntimeFileBackedGitAdmissibilityCommitCrashRestart(t *testing.T) {
 				}
 				workspaceObserver := magicevent.NewSimpleObserver(workspaceevents.CommandDestination, hub)
 				workspaceObserver.Subscribe(workspaceevents.TopicWorkspaceCommandGet, func(_ magicevent.Event, result magicevent.Result) {
-					result.Set(workspaceevents.WorkspaceCommandResult{Workspace: &workspaceevents.Workspace{ID: "ws-v2", DeliverableDirectory: deliverable, InternalDirectory: internalDir}}, nil)
+					result.Set(workspaceevents.WorkspaceResult{Workspace: &workspaceevents.Workspace{ID: "ws-v2", DeliverableDirectory: deliverable, InternalDirectory: internalDir}}, nil)
 				})
 				fileOwner := filemodule.New()
 				if err := fileOwner.Configure(filebiz.Dependencies{EventHub: hub}); err != nil {
@@ -4806,7 +4806,7 @@ func TestRuntimeFileBackedShellAdmissibilityCommitCrashRestart(t *testing.T) {
 				}
 				workspaceObserver := magicevent.NewSimpleObserver(workspaceevents.CommandDestination, hub)
 				workspaceObserver.Subscribe(workspaceevents.TopicWorkspaceCommandGet, func(_ magicevent.Event, result magicevent.Result) {
-					result.Set(workspaceevents.WorkspaceCommandResult{Workspace: &workspaceevents.Workspace{ID: "ws-v2", DeliverableDirectory: deliverable}}, nil)
+					result.Set(workspaceevents.WorkspaceResult{Workspace: &workspaceevents.Workspace{ID: "ws-v2", DeliverableDirectory: deliverable}}, nil)
 				})
 				fileOwner := filemodule.New()
 				if err := fileOwner.Configure(filebiz.Dependencies{EventHub: hub}); err != nil {
@@ -5219,7 +5219,7 @@ func runRuntimeFileBackedAdmissibilityThreeOwnerRestart(t *testing.T, staleCase 
 		}
 		value.workspaceObs = magicevent.NewSimpleObserver(workspaceevents.CommandDestination, value.hub)
 		value.workspaceObs.Subscribe(workspaceevents.TopicWorkspaceCommandGet, func(_ magicevent.Event, result magicevent.Result) {
-			result.Set(workspaceevents.WorkspaceCommandResult{Workspace: &workspaceevents.Workspace{ID: "ws-v2", DeliverableDirectory: deliverable, InternalDirectory: internalDir}}, nil)
+			result.Set(workspaceevents.WorkspaceResult{Workspace: &workspaceevents.Workspace{ID: "ws-v2", DeliverableDirectory: deliverable, InternalDirectory: internalDir}}, nil)
 		})
 		value.fileOwner = filemodule.New()
 		if err := value.fileOwner.Configure(filebiz.Dependencies{EventHub: value.hub}); err != nil {
@@ -5641,7 +5641,7 @@ func TestRuntimeFileBackedGitSnapshotCommitResponseLossRestartReusesCommittedSna
 	startRuntimeReceiptTestOwner(t, hub)
 	workspaceObserver := magicevent.NewSimpleObserver(workspaceevents.CommandDestination, hub)
 	workspaceObserver.Subscribe(workspaceevents.TopicWorkspaceCommandGet, func(_ magicevent.Event, result magicevent.Result) {
-		result.Set(workspaceevents.WorkspaceCommandResult{Workspace: &workspaceevents.Workspace{ID: "ws-v2", DeliverableDirectory: deliverable, InternalDirectory: internalDir}}, nil)
+		result.Set(workspaceevents.WorkspaceResult{Workspace: &workspaceevents.Workspace{ID: "ws-v2", DeliverableDirectory: deliverable, InternalDirectory: internalDir}}, nil)
 	})
 	t.Cleanup(func() { workspaceObserver.Unsubscribe(workspaceevents.TopicWorkspaceCommandGet) })
 	startRuntimeFileManifestOwner(t, ctx, hub)
@@ -5732,7 +5732,7 @@ func TestRuntimeFileBackedGitSnapshotCommitResponseLossRestartReusesCommittedSna
 	startRuntimeReceiptTestOwner(t, restartedHub)
 	restartedWorkspaceObserver := magicevent.NewSimpleObserver(workspaceevents.CommandDestination, restartedHub)
 	restartedWorkspaceObserver.Subscribe(workspaceevents.TopicWorkspaceCommandGet, func(_ magicevent.Event, result magicevent.Result) {
-		result.Set(workspaceevents.WorkspaceCommandResult{Workspace: &workspaceevents.Workspace{ID: "ws-v2", DeliverableDirectory: deliverable, InternalDirectory: internalDir}}, nil)
+		result.Set(workspaceevents.WorkspaceResult{Workspace: &workspaceevents.Workspace{ID: "ws-v2", DeliverableDirectory: deliverable, InternalDirectory: internalDir}}, nil)
 	})
 	t.Cleanup(func() { restartedWorkspaceObserver.Unsubscribe(workspaceevents.TopicWorkspaceCommandGet) })
 	startRuntimeFileManifestOwner(t, ctx, restartedHub)
@@ -5856,7 +5856,7 @@ func TestDriveRuntimeFileBackedFreshFileShellGitAcceptance(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = gitOwner.Stop(ctx) })
 	resultOwner := resultmodule.New()
-	if err := resultOwner.Configure(resultbiz.Dependencies{WorkspaceDeletions: memory.NewResultWorkspaceDeletionRepository(), Results: results, Artifacts: artifacts, EventHub: hub}); err != nil {
+	if err := resultOwner.Configure(resultbiz.Dependencies{OwnerRepositories: testResultOwnerRepositories(results, artifacts, memory.NewResultWorkspaceDeletionRepository()), EventHub: hub}); err != nil {
 		t.Fatal(err)
 	}
 	if err := resultOwner.Start(); err != nil {
@@ -6309,7 +6309,7 @@ func runRuntimeFileBackedGitStaleRefreshCrashRestart(t *testing.T, crashAfterCAS
 	startRuntimeReceiptTestOwner(t, hub)
 	workspaceObserver := magicevent.NewSimpleObserver(workspaceevents.CommandDestination, hub)
 	workspaceObserver.Subscribe(workspaceevents.TopicWorkspaceCommandGet, func(_ magicevent.Event, result magicevent.Result) {
-		result.Set(workspaceevents.WorkspaceCommandResult{Workspace: &workspaceevents.Workspace{ID: "ws-v2", DeliverableDirectory: deliverable, InternalDirectory: internalDir}}, nil)
+		result.Set(workspaceevents.WorkspaceResult{Workspace: &workspaceevents.Workspace{ID: "ws-v2", DeliverableDirectory: deliverable, InternalDirectory: internalDir}}, nil)
 	})
 	t.Cleanup(func() { workspaceObserver.Unsubscribe(workspaceevents.TopicWorkspaceCommandGet) })
 	startRuntimeFileManifestOwner(t, ctx, hub)
@@ -6419,7 +6419,7 @@ func runRuntimeFileBackedGitStaleRefreshCrashRestart(t *testing.T, crashAfterCAS
 	startRuntimeReceiptTestOwner(t, restartedHub)
 	restartedWorkspaceObserver := magicevent.NewSimpleObserver(workspaceevents.CommandDestination, restartedHub)
 	restartedWorkspaceObserver.Subscribe(workspaceevents.TopicWorkspaceCommandGet, func(_ magicevent.Event, result magicevent.Result) {
-		result.Set(workspaceevents.WorkspaceCommandResult{Workspace: &workspaceevents.Workspace{ID: "ws-v2", DeliverableDirectory: deliverable, InternalDirectory: internalDir}}, nil)
+		result.Set(workspaceevents.WorkspaceResult{Workspace: &workspaceevents.Workspace{ID: "ws-v2", DeliverableDirectory: deliverable, InternalDirectory: internalDir}}, nil)
 	})
 	t.Cleanup(func() { restartedWorkspaceObserver.Unsubscribe(workspaceevents.TopicWorkspaceCommandGet) })
 	startRuntimeFileManifestOwner(t, ctx, restartedHub)
@@ -6530,7 +6530,7 @@ func runRuntimeFileBackedGitReceiptResourceChangeRefreshCrashRestart(t *testing.
 	startRuntimeReceiptTestOwner(t, hub)
 	workspaceObserver := magicevent.NewSimpleObserver(workspaceevents.CommandDestination, hub)
 	workspaceObserver.Subscribe(workspaceevents.TopicWorkspaceCommandGet, func(_ magicevent.Event, result magicevent.Result) {
-		result.Set(workspaceevents.WorkspaceCommandResult{Workspace: &workspaceevents.Workspace{ID: "ws-v2", DeliverableDirectory: deliverable, InternalDirectory: internalDir}}, nil)
+		result.Set(workspaceevents.WorkspaceResult{Workspace: &workspaceevents.Workspace{ID: "ws-v2", DeliverableDirectory: deliverable, InternalDirectory: internalDir}}, nil)
 	})
 	t.Cleanup(func() { workspaceObserver.Unsubscribe(workspaceevents.TopicWorkspaceCommandGet) })
 	startRuntimeFileManifestOwner(t, ctx, hub)
@@ -6641,7 +6641,7 @@ func runRuntimeFileBackedGitReceiptResourceChangeRefreshCrashRestart(t *testing.
 	startRuntimeReceiptTestOwner(t, restartedHub)
 	restartedWorkspaceObserver := magicevent.NewSimpleObserver(workspaceevents.CommandDestination, restartedHub)
 	restartedWorkspaceObserver.Subscribe(workspaceevents.TopicWorkspaceCommandGet, func(_ magicevent.Event, result magicevent.Result) {
-		result.Set(workspaceevents.WorkspaceCommandResult{Workspace: &workspaceevents.Workspace{ID: "ws-v2", DeliverableDirectory: deliverable, InternalDirectory: internalDir}}, nil)
+		result.Set(workspaceevents.WorkspaceResult{Workspace: &workspaceevents.Workspace{ID: "ws-v2", DeliverableDirectory: deliverable, InternalDirectory: internalDir}}, nil)
 	})
 	t.Cleanup(func() { restartedWorkspaceObserver.Unsubscribe(workspaceevents.TopicWorkspaceCommandGet) })
 	startRuntimeFileManifestOwner(t, ctx, restartedHub)
@@ -6755,7 +6755,7 @@ func TestRuntimeFileBackedMixedOwnerReceiptThenLocalScratchStaleCrashRestart(t *
 				startRuntimeReceiptTestOwner(t, hub)
 				workspaceObserver := magicevent.NewSimpleObserver(workspaceevents.CommandDestination, hub)
 				workspaceObserver.Subscribe(workspaceevents.TopicWorkspaceCommandGet, func(_ magicevent.Event, result magicevent.Result) {
-					result.Set(workspaceevents.WorkspaceCommandResult{Workspace: &workspaceevents.Workspace{
+					result.Set(workspaceevents.WorkspaceResult{Workspace: &workspaceevents.Workspace{
 						ID: "ws-v2", DeliverableDirectory: deliverable, InternalDirectory: internalDirectory,
 					}}, nil)
 				})
@@ -7206,7 +7206,7 @@ func TestRuntimeFileBackedPatchVariantMatrix(t *testing.T) {
 			startRuntimeReceiptTestOwner(t, hub)
 			workspaceObserver := magicevent.NewSimpleObserver(workspaceevents.CommandDestination, hub)
 			workspaceObserver.Subscribe(workspaceevents.TopicWorkspaceCommandGet, func(_ magicevent.Event, result magicevent.Result) {
-				result.Set(workspaceevents.WorkspaceCommandResult{Workspace: &workspaceevents.Workspace{ID: "ws-v2", DeliverableDirectory: deliverable, InternalDirectory: internalDir}}, nil)
+				result.Set(workspaceevents.WorkspaceResult{Workspace: &workspaceevents.Workspace{ID: "ws-v2", DeliverableDirectory: deliverable, InternalDirectory: internalDir}}, nil)
 			})
 			t.Cleanup(func() { workspaceObserver.Unsubscribe(workspaceevents.TopicWorkspaceCommandGet) })
 			fileOwner := filemodule.New()
@@ -7352,7 +7352,7 @@ func testRuntimeFileBackedPatchReplayProofRestartsAfterOwnerReceiptCASFailure(t 
 	t.Cleanup(func() { _ = runOwner.Stop(ctx) })
 	workspaceObserver := magicevent.NewSimpleObserver(workspaceevents.CommandDestination, hub)
 	workspaceObserver.Subscribe(workspaceevents.TopicWorkspaceCommandGet, func(_ magicevent.Event, result magicevent.Result) {
-		result.Set(workspaceevents.WorkspaceCommandResult{Workspace: &workspaceevents.Workspace{ID: "ws-v2", DeliverableDirectory: deliverable, InternalDirectory: internalDir}}, nil)
+		result.Set(workspaceevents.WorkspaceResult{Workspace: &workspaceevents.Workspace{ID: "ws-v2", DeliverableDirectory: deliverable, InternalDirectory: internalDir}}, nil)
 	})
 	t.Cleanup(func() { workspaceObserver.Unsubscribe(workspaceevents.TopicWorkspaceCommandGet) })
 	fileOwner := filemodule.New()
@@ -7482,7 +7482,7 @@ func testRuntimeFileBackedPatchReplayProofRestartsAfterOwnerReceiptCASFailure(t 
 	t.Cleanup(func() { _ = restartedRunOwner.Stop(ctx) })
 	restartedWorkspaceObserver := magicevent.NewSimpleObserver(workspaceevents.CommandDestination, restartedHub)
 	restartedWorkspaceObserver.Subscribe(workspaceevents.TopicWorkspaceCommandGet, func(_ magicevent.Event, result magicevent.Result) {
-		result.Set(workspaceevents.WorkspaceCommandResult{Workspace: &workspaceevents.Workspace{ID: "ws-v2", DeliverableDirectory: deliverable, InternalDirectory: internalDir}}, nil)
+		result.Set(workspaceevents.WorkspaceResult{Workspace: &workspaceevents.Workspace{ID: "ws-v2", DeliverableDirectory: deliverable, InternalDirectory: internalDir}}, nil)
 	})
 	t.Cleanup(func() { restartedWorkspaceObserver.Unsubscribe(workspaceevents.TopicWorkspaceCommandGet) })
 	restartedFileOwner := filemodule.New()
@@ -7650,9 +7650,8 @@ func testRuntimeFileBackedPatchReplayProofRestartsAfterOwnerReceiptCASFailure(t 
 	results := filerepository.NewResultRepository(filepath.Join(root, "results.json"))
 	interruptedResults := &failAfterResultCreateRepository{ResultRepository: results}
 	firstResultOwner := resultmodule.New()
-	if err := firstResultOwner.Configure(resultbiz.Dependencies{WorkspaceDeletions: memory.NewResultWorkspaceDeletionRepository(),
-		Results: interruptedResults, Artifacts: filerepository.NewArtifactRepository(filepath.Join(root, "artifacts.json")), EventHub: restartedHub,
-	}); err != nil {
+	if err := firstResultOwner.Configure(resultbiz.Dependencies{OwnerRepositories: testResultOwnerRepositories(
+		interruptedResults, filerepository.NewArtifactRepository(filepath.Join(root, "artifacts.json")), memory.NewResultWorkspaceDeletionRepository()), EventHub: restartedHub}); err != nil {
 		t.Fatal(err)
 	}
 	if err := firstResultOwner.Start(); err != nil {
@@ -7674,9 +7673,8 @@ func testRuntimeFileBackedPatchReplayProofRestartsAfterOwnerReceiptCASFailure(t 
 		t.Fatal(err)
 	}
 	restartedResultOwner := resultmodule.New()
-	if err := restartedResultOwner.Configure(resultbiz.Dependencies{WorkspaceDeletions: memory.NewResultWorkspaceDeletionRepository(),
-		Results: results, Artifacts: filerepository.NewArtifactRepository(filepath.Join(root, "artifacts.json")), EventHub: restartedHub,
-	}); err != nil {
+	if err := restartedResultOwner.Configure(resultbiz.Dependencies{OwnerRepositories: testResultOwnerRepositories(
+		results, filerepository.NewArtifactRepository(filepath.Join(root, "artifacts.json")), memory.NewResultWorkspaceDeletionRepository()), EventHub: restartedHub}); err != nil {
 		t.Fatal(err)
 	}
 	if err := restartedResultOwner.Start(); err != nil {
@@ -7783,7 +7781,7 @@ func TestRuntimeFileBackedPatchVariantRestartAfterOwnerReceipt(t *testing.T) {
 			startRuntimeReceiptTestOwner(t, hub)
 			workspaceObserver := magicevent.NewSimpleObserver(workspaceevents.CommandDestination, hub)
 			workspaceObserver.Subscribe(workspaceevents.TopicWorkspaceCommandGet, func(_ magicevent.Event, result magicevent.Result) {
-				result.Set(workspaceevents.WorkspaceCommandResult{Workspace: &workspaceevents.Workspace{ID: "ws-v2", DeliverableDirectory: deliverable, InternalDirectory: internalDir}}, nil)
+				result.Set(workspaceevents.WorkspaceResult{Workspace: &workspaceevents.Workspace{ID: "ws-v2", DeliverableDirectory: deliverable, InternalDirectory: internalDir}}, nil)
 			})
 			t.Cleanup(func() { workspaceObserver.Unsubscribe(workspaceevents.TopicWorkspaceCommandGet) })
 			fileOwner := filemodule.New()
@@ -7911,7 +7909,7 @@ func TestDriveRuntimeFileBackedRestartRecoversCrashAfterOwnerReceipt(t *testing.
 	}
 	workspaceObserver := magicevent.NewSimpleObserver(workspaceevents.CommandDestination, hub)
 	workspaceObserver.Subscribe(workspaceevents.TopicWorkspaceCommandGet, func(_ magicevent.Event, result magicevent.Result) {
-		result.Set(workspaceevents.WorkspaceCommandResult{Workspace: &workspaceevents.Workspace{
+		result.Set(workspaceevents.WorkspaceResult{Workspace: &workspaceevents.Workspace{
 			ID: "ws-v2", DeliverableDirectory: deliverable, InternalDirectory: internalDir,
 		}}, nil)
 	})
@@ -8012,7 +8010,7 @@ func TestDriveRuntimeFileBackedRestartRecoversCrashAfterOwnerReceipt(t *testing.
 	startRuntimeReceiptTestOwner(t, restartedHub)
 	restartedWorkspaceObserver := magicevent.NewSimpleObserver(workspaceevents.CommandDestination, restartedHub)
 	restartedWorkspaceObserver.Subscribe(workspaceevents.TopicWorkspaceCommandGet, func(_ magicevent.Event, result magicevent.Result) {
-		result.Set(workspaceevents.WorkspaceCommandResult{Workspace: &workspaceevents.Workspace{
+		result.Set(workspaceevents.WorkspaceResult{Workspace: &workspaceevents.Workspace{
 			ID: "ws-v2", DeliverableDirectory: deliverable, InternalDirectory: internalDir,
 		}}, nil)
 	})
@@ -8144,7 +8142,7 @@ func TestRuntimeFileBackedClaimEvidenceAndDispatchCloseCrashMatrix(t *testing.T)
 			}
 			workspaceObserver := magicevent.NewSimpleObserver(workspaceevents.CommandDestination, hub)
 			workspaceObserver.Subscribe(workspaceevents.TopicWorkspaceCommandGet, func(_ magicevent.Event, result magicevent.Result) {
-				result.Set(workspaceevents.WorkspaceCommandResult{Workspace: &workspaceevents.Workspace{ID: "ws-v2", DeliverableDirectory: deliverable, InternalDirectory: internalDir}}, nil)
+				result.Set(workspaceevents.WorkspaceResult{Workspace: &workspaceevents.Workspace{ID: "ws-v2", DeliverableDirectory: deliverable, InternalDirectory: internalDir}}, nil)
 			})
 			t.Cleanup(func() { workspaceObserver.Unsubscribe(workspaceevents.TopicWorkspaceCommandGet) })
 			fileOwner := filemodule.New()
@@ -8260,7 +8258,7 @@ func TestRuntimeFileBackedClaimEvidenceAndDispatchCloseCrashMatrix(t *testing.T)
 			startRuntimeReceiptTestOwner(t, restartedHub)
 			restartedWorkspaceObserver := magicevent.NewSimpleObserver(workspaceevents.CommandDestination, restartedHub)
 			restartedWorkspaceObserver.Subscribe(workspaceevents.TopicWorkspaceCommandGet, func(_ magicevent.Event, result magicevent.Result) {
-				result.Set(workspaceevents.WorkspaceCommandResult{Workspace: &workspaceevents.Workspace{ID: "ws-v2", DeliverableDirectory: deliverable, InternalDirectory: internalDir}}, nil)
+				result.Set(workspaceevents.WorkspaceResult{Workspace: &workspaceevents.Workspace{ID: "ws-v2", DeliverableDirectory: deliverable, InternalDirectory: internalDir}}, nil)
 			})
 			t.Cleanup(func() { restartedWorkspaceObserver.Unsubscribe(workspaceevents.TopicWorkspaceCommandGet) })
 			restartedFileOwner := filemodule.New()
@@ -8408,7 +8406,7 @@ func TestRuntimeFileBackedEvidenceCoverageFocusAdvanceCrashRestart(t *testing.T)
 				startRuntimeReceiptTestOwner(t, hub)
 				workspaceObserver := magicevent.NewSimpleObserver(workspaceevents.CommandDestination, hub)
 				workspaceObserver.Subscribe(workspaceevents.TopicWorkspaceCommandGet, func(_ magicevent.Event, result magicevent.Result) {
-					result.Set(workspaceevents.WorkspaceCommandResult{Workspace: &workspaceevents.Workspace{ID: "ws-v2", DeliverableDirectory: deliverable}}, nil)
+					result.Set(workspaceevents.WorkspaceResult{Workspace: &workspaceevents.Workspace{ID: "ws-v2", DeliverableDirectory: deliverable}}, nil)
 				})
 				fileOwner := filemodule.New()
 				if err := fileOwner.Configure(filebiz.Dependencies{EventHub: hub}); err != nil {
@@ -8642,7 +8640,7 @@ func TestRuntimeFileBackedOperationGovernanceGrantFreshProcessCrashRestart(t *te
 					t.Fatal(err)
 				}
 				approvalOwner := approvalmodule.New()
-				if err := approvalOwner.Configure(approvalbiz.Dependencies{WorkspaceDeletions: memory.NewApprovalWorkspaceDeletionRepository(), Approvals: approvals, EventHub: hub}); err != nil {
+				if err := approvalOwner.Configure(approvalbiz.Dependencies{OwnerRepositories: testApprovalOwnerRepositories(approvals, memory.NewApprovalWorkspaceDeletionRepository()), EventHub: hub}); err != nil {
 					_ = runOwner.Stop(ctx)
 					hub.Terminate(ctx)
 					t.Fatal(err)
@@ -8654,7 +8652,7 @@ func TestRuntimeFileBackedOperationGovernanceGrantFreshProcessCrashRestart(t *te
 				}
 				workspace := magicevent.NewSimpleObserver(workspaceevents.CommandDestination, hub)
 				workspace.Subscribe(workspaceevents.TopicWorkspaceCommandGet, func(_ magicevent.Event, result magicevent.Result) {
-					result.Set(workspaceevents.WorkspaceCommandResult{Workspace: &workspaceevents.Workspace{
+					result.Set(workspaceevents.WorkspaceResult{Workspace: &workspaceevents.Workspace{
 						ID: "ws-v2", DeliverableDirectory: deliverable, InternalDirectory: internalDirectory,
 					}}, nil)
 				})
@@ -8991,7 +8989,7 @@ func TestDriveRuntimeFileBackedTwoFocusStateValidationAssessmentAndRestart(t *te
 	t.Cleanup(func() { _ = workspaceOwner.Stop(ctx) })
 	startRuntimeReceiptTestOwner(t, hub)
 	decisionOwner := decisionmodule.New()
-	if err := decisionOwner.Configure(decisionbiz.Dependencies{WorkspaceDeletions: memory.NewDecisionWorkspaceDeletionRepository(), Tickets: decisionTickets, Resolutions: decisionResolutions, EventHub: hub}); err != nil {
+	if err := decisionOwner.Configure(decisionbiz.Dependencies{OwnerRepositories: testDecisionOwnerRepositories(decisionTickets, decisionResolutions, memory.NewDecisionWorkspaceDeletionRepository()), EventHub: hub}); err != nil {
 		t.Fatal(err)
 	}
 	if err := decisionOwner.Start(); err != nil {
@@ -9016,7 +9014,7 @@ func TestDriveRuntimeFileBackedTwoFocusStateValidationAssessmentAndRestart(t *te
 	startRuntimeManagedValidationTestOwner(t, hub)
 	startRuntimeProviderCeilingTestOwner(t, hub)
 	resultOwner := resultmodule.New()
-	if err := resultOwner.Configure(resultbiz.Dependencies{WorkspaceDeletions: memory.NewResultWorkspaceDeletionRepository(), Results: failingResults, Artifacts: artifacts, EventHub: hub}); err != nil {
+	if err := resultOwner.Configure(resultbiz.Dependencies{OwnerRepositories: testResultOwnerRepositories(failingResults, artifacts, memory.NewResultWorkspaceDeletionRepository()), EventHub: hub}); err != nil {
 		t.Fatal(err)
 	}
 	if err := resultOwner.Start(); err != nil {
@@ -9203,7 +9201,7 @@ func TestDriveRuntimeFileBackedTwoFocusStateValidationAssessmentAndRestart(t *te
 		t.Fatal(err)
 	}
 	restartedResultOwner := resultmodule.New()
-	if err := restartedResultOwner.Configure(resultbiz.Dependencies{WorkspaceDeletions: memory.NewResultWorkspaceDeletionRepository(), Results: results, Artifacts: artifacts, EventHub: hub}); err != nil {
+	if err := restartedResultOwner.Configure(resultbiz.Dependencies{OwnerRepositories: testResultOwnerRepositories(results, artifacts, memory.NewResultWorkspaceDeletionRepository()), EventHub: hub}); err != nil {
 		t.Fatal(err)
 	}
 	if err := restartedResultOwner.Start(); err != nil {
@@ -9342,7 +9340,7 @@ func TestDriveRuntimeCompletesTypedPathAndIsRestartIdempotent(t *testing.T) {
 
 	workspaceObserver := magicevent.NewSimpleObserver(workspaceevents.CommandDestination, hub)
 	workspaceObserver.Subscribe(workspaceevents.TopicWorkspaceCommandGet, func(_ magicevent.Event, result magicevent.Result) {
-		result.Set(workspaceevents.WorkspaceCommandResult{Workspace: &workspaceevents.Workspace{
+		result.Set(workspaceevents.WorkspaceResult{Workspace: &workspaceevents.Workspace{
 			ID: "ws-v2", DeliverableDirectory: t.TempDir(), InternalDirectory: t.TempDir(),
 		}}, nil)
 	})
@@ -9457,9 +9455,8 @@ func TestDriveRuntimeReturnsPersistedGovernedWait(t *testing.T) {
 	t.Cleanup(func() { _ = runOwner.Stop(ctx) })
 
 	decisionOwner := decisionmodule.New()
-	if err := decisionOwner.Configure(decisionbiz.Dependencies{WorkspaceDeletions: memory.NewDecisionWorkspaceDeletionRepository(),
-		Tickets: memory.NewDecisionTicketRepository(), Resolutions: memory.NewDecisionResolutionRepository(), EventHub: hub,
-	}); err != nil {
+	if err := decisionOwner.Configure(decisionbiz.Dependencies{OwnerRepositories: testDecisionOwnerRepositories(
+		memory.NewDecisionTicketRepository(), memory.NewDecisionResolutionRepository(), memory.NewDecisionWorkspaceDeletionRepository()), EventHub: hub}); err != nil {
 		t.Fatal(err)
 	}
 	if err := decisionOwner.Start(); err != nil {

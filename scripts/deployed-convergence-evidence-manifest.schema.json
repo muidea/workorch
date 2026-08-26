@@ -1,0 +1,198 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://workorch.dev/schemas/deployed-convergence-evidence-manifest-v1.json",
+  "title": "DeployedConvergenceEvidenceManifest",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "scenarioId",
+    "scenarioVariant",
+    "profileId",
+    "providerClass",
+    "producerEntrypoint",
+    "invocationId",
+    "serviceRevision",
+    "configIdentity",
+    "dataRootIdentity",
+    "startedAt",
+    "completedAt",
+    "boundedDeadlineSeconds",
+    "workspaceIds",
+    "runIds",
+    "definitionRevisions",
+    "runtimeStateRevisions",
+    "requestSessionRefs",
+    "dispatchRefs",
+    "ownerReceiptRefs",
+    "evidenceRefs",
+    "ownerRevisionSetHashes",
+    "budgetViewHashes",
+    "waitRefs",
+    "governanceRefs",
+    "definitionCandidateRefs",
+    "definitionClarificationRefs",
+    "replacementIntentRefs",
+    "resultRefs",
+    "terminalDeliveryRefs",
+    "restartEpochs",
+    "assertions",
+    "artifacts"
+  ],
+  "properties": {
+    "schemaVersion": {
+      "const": "workorch.deployed-convergence-evidence/v1"
+    },
+    "scenarioId": {
+      "type": "string",
+      "pattern": "^DC-(0[1-9]|1[0-2])$"
+    },
+    "scenarioVariant": {
+      "type": "string",
+      "pattern": "^[a-z0-9][a-z0-9._:-]*$"
+    },
+    "profileId": {
+      "type": "string",
+      "minLength": 1
+    },
+    "providerClass": {
+      "type": "string",
+      "enum": ["mock", "real", "not_applicable"]
+    },
+    "producerEntrypoint": {
+      "type": "string",
+      "minLength": 1
+    },
+    "invocationId": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+    },
+    "serviceRevision": {
+      "type": "string",
+      "minLength": 1
+    },
+    "configIdentity": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$"
+    },
+    "dataRootIdentity": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$"
+    },
+    "startedAt": {
+      "type": "string",
+      "minLength": 1
+    },
+    "completedAt": {
+      "type": "string",
+      "minLength": 1
+    },
+    "boundedDeadlineSeconds": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 86400
+    },
+    "workspaceIds": {
+      "type": "array",
+      "items": {"type": "string", "minLength": 1},
+      "uniqueItems": true
+    },
+    "runIds": {
+      "type": "array",
+      "items": {"type": "string", "minLength": 1},
+      "uniqueItems": true
+    },
+    "definitionRevisions": {
+      "type": "array",
+      "items": {"type": "string", "minLength": 1},
+      "uniqueItems": true
+    },
+    "runtimeStateRevisions": {
+      "type": "array",
+      "items": {"type": "integer", "minimum": 1},
+      "uniqueItems": true
+    },
+    "requestSessionRefs": {"type": "array", "items": {"type": "string", "minLength": 1}, "uniqueItems": true},
+    "dispatchRefs": {"type": "array", "items": {"type": "string", "minLength": 1}, "uniqueItems": true},
+    "ownerReceiptRefs": {"type": "array", "items": {"type": "string", "minLength": 1}, "uniqueItems": true},
+    "evidenceRefs": {"type": "array", "items": {"type": "string", "minLength": 1}, "uniqueItems": true},
+    "ownerRevisionSetHashes": {"type": "array", "items": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"}, "uniqueItems": true},
+    "budgetViewHashes": {"type": "array", "items": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"}, "uniqueItems": true},
+    "waitRefs": {"type": "array", "items": {"type": "string", "minLength": 1}, "uniqueItems": true},
+    "governanceRefs": {"type": "array", "items": {"type": "string", "minLength": 1}, "uniqueItems": true},
+    "definitionCandidateRefs": {"type": "array", "items": {"type": "string", "minLength": 1}, "uniqueItems": true},
+    "definitionClarificationRefs": {"type": "array", "items": {"type": "string", "minLength": 1}, "uniqueItems": true},
+    "replacementIntentRefs": {"type": "array", "items": {"type": "string", "minLength": 1}, "uniqueItems": true},
+    "resultRefs": {"type": "array", "items": {"type": "string", "minLength": 1}, "uniqueItems": true},
+    "terminalDeliveryRefs": {"type": "array", "items": {"type": "string", "minLength": 1}, "uniqueItems": true},
+    "restartEpochs": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["epochId", "processId", "startedAt", "evidenceRef"],
+        "properties": {
+          "epochId": {"type": "string", "minLength": 1},
+          "processId": {"type": "integer", "minimum": 1},
+          "startedAt": {"type": "string", "minLength": 1},
+          "evidenceRef": {"type": "string", "minLength": 1}
+        }
+      }
+    },
+    "assertions": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "status", "evidenceRefs"],
+        "properties": {
+          "id": {"type": "string", "pattern": "^[a-z][a-z0-9_]*$"},
+          "status": {"type": "string", "enum": ["passed", "failed"]},
+          "evidenceRefs": {
+            "type": "array",
+            "minItems": 1,
+            "items": {"type": "string", "minLength": 1},
+            "uniqueItems": true
+          }
+        }
+      }
+    },
+    "artifacts": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["ref", "kind", "path", "sha256", "dataRootIdentity", "workspaceId", "runId"],
+        "properties": {
+          "ref": {"type": "string", "pattern": "^workorch-evidence://\\S+$"},
+          "kind": {
+            "type": "string",
+            "enum": [
+              "request_session",
+              "sealed_dispatch",
+              "owner_receipt",
+              "accepted_evidence",
+              "owner_revision_set",
+              "budget_view",
+              "recoverable_wait",
+              "governance",
+              "definition_candidate",
+              "definition_clarification",
+              "replacement_intent",
+              "result",
+              "terminal_delivery",
+              "restart_epoch"
+            ]
+          },
+          "path": {"type": "string", "minLength": 1},
+          "sha256": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+          "dataRootIdentity": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+          "workspaceId": {"type": "string"},
+          "runId": {"type": "string"}
+        }
+      }
+    }
+  }
+}

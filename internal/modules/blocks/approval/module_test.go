@@ -25,7 +25,7 @@ func TestApprovalWorkspaceDeletionFenceRetainAndPurgeAreStable(t *testing.T) {
 	t.Cleanup(func() { hub.Terminate(ctx) })
 	repos := memory.NewApprovalOwnerRepositorySet()
 	module := New()
-	if err := module.Configure(approvalbiz.Dependencies{Approvals: repos.Approvals, WorkspaceDeletions: repos.WorkspaceDeletions, EventHub: hub}); err != nil {
+	if err := module.Configure(approvalbiz.Dependencies{OwnerRepositories: approvalTestOwnerRepositories(repos.Approvals, repos.WorkspaceDeletions), EventHub: hub}); err != nil {
 		t.Fatal(err)
 	}
 	if err := module.Start(); err != nil {
@@ -121,7 +121,7 @@ func TestApprovalFileDeletionFenceLinearizesAcrossRepositorySets(t *testing.T) {
 			hub := magicevent.NewHub(32)
 			t.Cleanup(func() { hub.Terminate(ctx) })
 			module := New()
-			if err := module.Configure(approvalbiz.Dependencies{Approvals: first.Approvals, WorkspaceDeletions: first.ApprovalDeletions, EventHub: hub}); err != nil {
+			if err := module.Configure(approvalbiz.Dependencies{OwnerRepositories: approvalTestOwnerRepositories(first.Approvals, first.ApprovalDeletions), EventHub: hub}); err != nil {
 				t.Fatal(err)
 			}
 			if err := module.Start(); err != nil {
@@ -293,7 +293,7 @@ func TestModuleConfigureRequiresCoreDependencies(t *testing.T) {
 		name string
 		deps approvalbiz.Dependencies
 	}{
-		{name: "missing approvals", deps: func() approvalbiz.Dependencies { d := base; d.Approvals = nil; return d }()},
+		{name: "missing owner bundle", deps: approvalbiz.Dependencies{EventHub: base.EventHub}},
 		{name: "missing event hub", deps: func() approvalbiz.Dependencies { d := base; d.EventHub = nil; return d }()},
 	}
 	for _, tc := range tests {
@@ -322,7 +322,7 @@ func TestApprovalCommandGetHonorsScope(t *testing.T) {
 	}
 
 	module := New()
-	if err := module.Configure(approvalbiz.Dependencies{WorkspaceDeletions: memory.NewApprovalWorkspaceDeletionRepository(), Approvals: approvals, EventHub: rawHub}); err != nil {
+	if err := module.Configure(approvalbiz.Dependencies{OwnerRepositories: approvalTestOwnerRepositories(approvals, memory.NewApprovalWorkspaceDeletionRepository()), EventHub: rawHub}); err != nil {
 		t.Fatalf("Setup: %v", err)
 	}
 	if err := module.Start(); err != nil {
@@ -357,10 +357,9 @@ func TestApprovalCommandGetHonorsScope(t *testing.T) {
 }
 
 func approvalModuleContractDependencies() approvalbiz.Dependencies {
-	return approvalbiz.Dependencies{WorkspaceDeletions: memory.NewApprovalWorkspaceDeletionRepository(),
-		Approvals: memory.NewApprovalRepository(),
-		EventHub:  magicevent.NewHub(16),
-	}
+	return approvalbiz.Dependencies{OwnerRepositories: approvalTestOwnerRepositories(
+		memory.NewApprovalRepository(), memory.NewApprovalWorkspaceDeletionRepository()), EventHub: magicevent.NewHub(16)}
+
 }
 
 func TestApprovalCommandListByRunHonorsWorkspaceScope(t *testing.T) {
@@ -390,7 +389,7 @@ func TestApprovalCommandListByRunHonorsWorkspaceScope(t *testing.T) {
 	}
 
 	module := New()
-	if err := module.Configure(approvalbiz.Dependencies{WorkspaceDeletions: memory.NewApprovalWorkspaceDeletionRepository(), Approvals: approvals, EventHub: rawHub}); err != nil {
+	if err := module.Configure(approvalbiz.Dependencies{OwnerRepositories: approvalTestOwnerRepositories(approvals, memory.NewApprovalWorkspaceDeletionRepository()), EventHub: rawHub}); err != nil {
 		t.Fatalf("Setup: %v", err)
 	}
 	if err := module.Start(); err != nil {
@@ -430,7 +429,7 @@ func TestApprovalMutationCommandsHonorWorkspaceScope(t *testing.T) {
 	}
 
 	module := New()
-	if err := module.Configure(approvalbiz.Dependencies{WorkspaceDeletions: memory.NewApprovalWorkspaceDeletionRepository(), Approvals: approvals, EventHub: rawHub}); err != nil {
+	if err := module.Configure(approvalbiz.Dependencies{OwnerRepositories: approvalTestOwnerRepositories(approvals, memory.NewApprovalWorkspaceDeletionRepository()), EventHub: rawHub}); err != nil {
 		t.Fatalf("Setup: %v", err)
 	}
 	if err := module.Start(); err != nil {
@@ -480,7 +479,7 @@ func TestApprovalMutationCommandWithoutScopeFailsClosed(t *testing.T) {
 	}
 
 	module := New()
-	if err := module.Configure(approvalbiz.Dependencies{WorkspaceDeletions: memory.NewApprovalWorkspaceDeletionRepository(), Approvals: approvals, EventHub: rawHub}); err != nil {
+	if err := module.Configure(approvalbiz.Dependencies{OwnerRepositories: approvalTestOwnerRepositories(approvals, memory.NewApprovalWorkspaceDeletionRepository()), EventHub: rawHub}); err != nil {
 		t.Fatalf("Setup: %v", err)
 	}
 	if err := module.Start(); err != nil {
@@ -530,7 +529,7 @@ func TestApprovalMutationCommandWithoutScopeConflictsOnDuplicatePendingApprovals
 	}
 
 	module := New()
-	if err := module.Configure(approvalbiz.Dependencies{WorkspaceDeletions: memory.NewApprovalWorkspaceDeletionRepository(), Approvals: approvals, EventHub: rawHub}); err != nil {
+	if err := module.Configure(approvalbiz.Dependencies{OwnerRepositories: approvalTestOwnerRepositories(approvals, memory.NewApprovalWorkspaceDeletionRepository()), EventHub: rawHub}); err != nil {
 		t.Fatalf("Setup: %v", err)
 	}
 	if err := module.Start(); err != nil {
@@ -577,7 +576,7 @@ func TestApprovalListCommandsAreTypedBoundedAndCursorValidated(t *testing.T) {
 		}
 	}
 	module := New()
-	if err := module.Configure(approvalbiz.Dependencies{WorkspaceDeletions: memory.NewApprovalWorkspaceDeletionRepository(), Approvals: approvals, EventHub: rawHub}); err != nil {
+	if err := module.Configure(approvalbiz.Dependencies{OwnerRepositories: approvalTestOwnerRepositories(approvals, memory.NewApprovalWorkspaceDeletionRepository()), EventHub: rawHub}); err != nil {
 		t.Fatal(err)
 	}
 	if err := module.Start(); err != nil {
@@ -620,7 +619,7 @@ func TestApprovalPublishesRuntimeGovernanceCapabilityOnlyToOrchestrator(t *testi
 	rawHub := magicevent.NewHub(16)
 	t.Cleanup(func() { rawHub.Terminate(ctx) })
 	module := New()
-	if err := module.Configure(approvalbiz.Dependencies{WorkspaceDeletions: memory.NewApprovalWorkspaceDeletionRepository(), Approvals: memory.NewApprovalRepository(), EventHub: rawHub}); err != nil {
+	if err := module.Configure(approvalbiz.Dependencies{OwnerRepositories: approvalTestOwnerRepositories(memory.NewApprovalRepository(), memory.NewApprovalWorkspaceDeletionRepository()), EventHub: rawHub}); err != nil {
 		t.Fatal(err)
 	}
 	if err := module.Start(); err != nil {

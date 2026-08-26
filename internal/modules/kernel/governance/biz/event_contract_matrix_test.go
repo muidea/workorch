@@ -47,7 +47,7 @@ func TestGovernanceOwnerResponseFamiliesFailClosed(t *testing.T) {
 			return err
 		}},
 		{name: "workspace", read: func(result magicevent.Result) error {
-			_, err := workspaceResponse(result, workspaceevents.TopicWorkspaceCommandGetGoal)
+			_, err := workspaceResponse[workspaceevents.GoalResult](result, workspaceevents.TopicWorkspaceCommandGetGoal)
 			return err
 		}},
 		{name: "memory", read: func(result magicevent.Result) error {
@@ -131,13 +131,13 @@ func TestGovernanceOwnerAdaptersRejectMismatchedIdentity(t *testing.T) {
 		}},
 		{name: "goal", call: func() error {
 			_, err := (eventWorkspaceReader{send: func(magicevent.Event) magicevent.Result {
-				return governanceTestResult(workspaceevents.WorkspaceCommandResult{Goal: &workspacemodel.Goal{ID: "other", WorkspaceID: workspaceID}}, nil)
+				return governanceTestResult(workspaceevents.GoalResult{Goal: &workspacemodel.Goal{ID: "other", WorkspaceID: workspaceID}}, nil)
 			}}).GetGoal(ctx, "goal")
 			return err
 		}},
 		{name: "dod", call: func() error {
 			_, err := (eventWorkspaceReader{send: func(magicevent.Event) magicevent.Result {
-				return governanceTestResult(workspaceevents.WorkspaceCommandResult{DoD: &workspacemodel.DoD{ID: "dod", WorkspaceID: "other"}}, nil)
+				return governanceTestResult(workspaceevents.DoDResult{DoD: &workspacemodel.DoD{ID: "dod", WorkspaceID: "other"}}, nil)
 			}}).GetDoD(ctx, "dod")
 			return err
 		}},

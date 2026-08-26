@@ -49,6 +49,10 @@ owner-private helper，不存在可被 sibling 直接调用的 `Service/NewServi
 `purge_requested`；只有 dispatcher 可以调用 exact-fenced `PurgeWorkspaceEventRecords`，成功后再生成私有
 `purge_completed` 并 CAS tombstone。外部或同包误投 `purge_completed` 均拒绝。
 
+生产构造只接受 backend aggregate 铸造并通过 `Validate` 的 opaque `EventStreamOwnerRepositories` bundle；EventRecord、
+Workspace deletion 与 canonical purger surface 必须携带同一 backend binding。zero、fake 或 memory/file mixed-set 在订阅前
+fail closed，Biz、Module、Plugin 和 Initiator 均不保留独立 repository 注入或 legacy fallback。
+
 所有命令 handler 都先要求非空同步 result，再执行读取或写入。因而误用 `PostEvent` 不会建立删除 fence、不会执行 purge，也不会执行 Approval 的同步审计 checkpoint。
 
 ## Workspace 删除生命周期

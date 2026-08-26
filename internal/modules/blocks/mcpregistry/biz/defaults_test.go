@@ -28,8 +28,8 @@ func TestEnsureBuiltinMCPDefaultsIsAtomicAndIdempotent(t *testing.T) {
 		t.Run(testCase.name, func(t *testing.T) {
 			ctx := context.Background()
 			registry := testCase.new(t)
-			service := NewService(registry)
-			firstRevision, err := service.EnsureBuiltinDefaults(ctx)
+			service := newService(registry)
+			firstRevision, err := service.ensureBuiltinDefaults(ctx)
 			if err != nil {
 				t.Fatalf("EnsureBuiltinDefaults: %v", err)
 			}
@@ -37,7 +37,7 @@ func TestEnsureBuiltinMCPDefaultsIsAtomicAndIdempotent(t *testing.T) {
 			if err != nil || len(first.Servers) == 0 || len(first.Capabilities) == 0 {
 				t.Fatalf("first defaults = %+v, err=%v", first, err)
 			}
-			secondRevision, err := service.EnsureBuiltinDefaults(ctx)
+			secondRevision, err := service.ensureBuiltinDefaults(ctx)
 			if err != nil {
 				t.Fatalf("second EnsureBuiltinDefaults: %v", err)
 			}
@@ -81,8 +81,8 @@ func TestEnsureBuiltinMCPDefaultsPreservesCustomizedBuiltinID(t *testing.T) {
 	if err := registry.Commit(ctx, 0, seed); err != nil {
 		t.Fatalf("seed registry: %v", err)
 	}
-	service := NewService(registry)
-	if _, err := service.EnsureBuiltinDefaults(ctx); err != nil {
+	service := newService(registry)
+	if _, err := service.ensureBuiltinDefaults(ctx); err != nil {
 		t.Fatalf("EnsureBuiltinDefaults: %v", err)
 	}
 	after, err := registry.Load(ctx)

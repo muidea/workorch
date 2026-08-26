@@ -22,7 +22,7 @@ func (m *Biz) executeMemoryRecallTraceCommand(ctx context.Context, ev magicevent
 			setMemoryMagicResult(result, memoryevents.UpsertMemoryRecallTraceResult{}, err)
 			return err
 		}
-		disposition, err := m.service.RecordMemoryRecallTrace(ctx, trace)
+		disposition, err := m.service.recordMemoryRecallTrace(ctx, trace)
 		if err != nil {
 			setMemoryMagicResult(result, memoryevents.UpsertMemoryRecallTraceResult{}, err)
 			return err
@@ -40,7 +40,7 @@ func (m *Biz) executeMemoryRecallTraceCommand(ctx context.Context, ev magicevent
 			setMemoryMagicResult(result, memoryevents.ListMemoryRecallTracesResult{}, common.ErrInvalidArgument)
 			return common.ErrInvalidArgument
 		}
-		items, nextCursor, err := m.service.ListMemoryRecallTraces(ctx, cmd.Query)
+		items, nextCursor, err := m.service.listMemoryRecallTraces(ctx, cmd.Query)
 		if err != nil {
 			setMemoryMagicResult(result, memoryevents.ListMemoryRecallTracesResult{}, err)
 			return err

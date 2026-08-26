@@ -13,15 +13,64 @@ import (
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
-// SealedRuntimeOperation is the immutable Web operation persisted by the
-// Orchestrator. Web derives its private request only after the complete
-// operation payload and execution scope have been verified.
-type SealedRuntimeOperation struct {
-	Operation   runtimecontract.RuntimeOperation
-	PayloadHash string
+// RuntimeExecutionAuthorization binds Web execution to the exact provider
+// configuration/catalog fact used by SM-2 and SM-3. It carries no endpoint or
+// credential; Web resolves those owner-private values only after freshness is
+// rechecked.
+type RuntimeExecutionAuthorization struct {
+	CatalogSnapshotID  string
+	AcquisitionBinding string
+	PrerequisiteID     string
+	OwnerRevision      string
+	CatalogObservation runtimecontract.RuntimePrerequisiteObservation
+	Policy             runtimecontract.RuntimeOperationPolicyFact
 }
 
-func SealRuntimeOperation(operation runtimecontract.RuntimeOperation) (SealedRuntimeOperation, error) {
+func (a RuntimeExecutionAuthorization) normalized() RuntimeExecutionAuthorization {
+	a.CatalogSnapshotID = strings.TrimSpace(a.CatalogSnapshotID)
+	a.AcquisitionBinding = strings.TrimSpace(a.AcquisitionBinding)
+	a.PrerequisiteID = strings.TrimSpace(a.PrerequisiteID)
+	a.OwnerRevision = strings.TrimSpace(a.OwnerRevision)
+	a.CatalogObservation = a.CatalogObservation.Normalized()
+	a.Policy = a.Policy.Normalized()
+	return a
+}
+
+func (a RuntimeExecutionAuthorization) validateForOperation(operation runtimecontract.RuntimeOperation) error {
+	a = a.normalized()
+	if a.CatalogSnapshotID == "" || a.PrerequisiteID == "" || a.OwnerRevision == "" {
+		return fmt.Errorf("sealed Web authorization requires catalog identity and revision")
+	}
+	if err := a.CatalogObservation.Validate(); err != nil {
+		return fmt.Errorf("sealed Web catalog observation: %w", err)
+	}
+	if a.CatalogObservation.PrerequisiteID != a.PrerequisiteID ||
+		a.CatalogObservation.Kind != runtimecontract.PrerequisiteKindOperationAdmissibility ||
+		a.CatalogObservation.OwnerModuleID != runtimecontract.RuntimeModuleWeb ||
+		a.CatalogObservation.ContentHash != a.CatalogSnapshotID ||
+		!webObservationHasOwnerRevision(a.CatalogObservation, a.OwnerRevision) {
+		return fmt.Errorf("sealed Web catalog observation does not match authorization")
+	}
+	if err := a.Policy.Validate(); err != nil {
+		return fmt.Errorf("sealed Web operation policy: %w", err)
+	}
+	matched, found := runtimecontract.RuntimeOperationPolicyForOperation(operation, []runtimecontract.RuntimeOperationPolicyFact{a.Policy})
+	if !found || matched.ID != a.Policy.ID || a.Policy.OwnerModuleID != runtimecontract.RuntimeModuleWeb {
+		return fmt.Errorf("sealed Web operation policy does not select the operation")
+	}
+	return nil
+}
+
+// SealedRuntimeOperation is the immutable Web operation persisted by the
+// Orchestrator. Web derives its private request only after the complete
+// operation payload, catalog revision and execution scope have been verified.
+type SealedRuntimeOperation struct {
+	Operation     runtimecontract.RuntimeOperation
+	Authorization RuntimeExecutionAuthorization
+	PayloadHash   string
+}
+
+func SealRuntimeOperation(operation runtimecontract.RuntimeOperation, catalog runtimecontract.RuntimeOperationAdmissibility, observation runtimecontract.RuntimePrerequisiteObservation) (SealedRuntimeOperation, error) {
 	operation = operation.Normalized()
 	if !webOperationKind(operation.Kind) || runtimecontract.RuntimeModuleForOperationKind(operation.Kind) != runtimecontract.RuntimeModuleWeb {
 		return SealedRuntimeOperation{}, fmt.Errorf("runtime operation kind %q is not owned by Web", operation.Kind)
@@ -29,47 +78,108 @@ func SealRuntimeOperation(operation runtimecontract.RuntimeOperation) (SealedRun
 	if err := runtimecontract.ValidateRuntimeOperationContract(operation); err != nil {
 		return SealedRuntimeOperation{}, err
 	}
-	payload, err := json.Marshal(operation)
-	if err != nil {
-		return SealedRuntimeOperation{}, fmt.Errorf("marshal sealed Web operation: %w", err)
+	catalog = catalog.Normalized()
+	if err := catalog.Validate(); err != nil {
+		return SealedRuntimeOperation{}, fmt.Errorf("Web owner catalog: %w", err)
 	}
-	var detached runtimecontract.RuntimeOperation
-	if err := json.Unmarshal(payload, &detached); err != nil {
-		return SealedRuntimeOperation{}, fmt.Errorf("clone sealed Web operation: %w", err)
+	if catalog.OwnerModuleID != runtimecontract.RuntimeModuleWeb || !containsOperationKind(catalog.OperationKinds, operation.Kind) {
+		return SealedRuntimeOperation{}, fmt.Errorf("Web owner catalog does not contain operation kind %q", operation.Kind)
+	}
+	policy, found := runtimecontract.RuntimeOperationPolicyForOperation(operation, catalog.OperationPolicies)
+	if !found {
+		return SealedRuntimeOperation{}, fmt.Errorf("Web owner catalog has no exact operation policy")
+	}
+	authorization := RuntimeExecutionAuthorization{
+		CatalogSnapshotID: catalog.SnapshotID, PrerequisiteID: catalog.PrerequisiteID,
+		AcquisitionBinding: catalog.AcquisitionBinding,
+		OwnerRevision:      catalog.ObservedRevision, CatalogObservation: observation, Policy: policy,
+	}.normalized()
+	if err := authorization.validateForOperation(operation); err != nil {
+		return SealedRuntimeOperation{}, err
+	}
+	payload, detachedOperation, detachedAuthorization, err := sealedRuntimeOperationPayload(operation, authorization)
+	if err != nil {
+		return SealedRuntimeOperation{}, err
 	}
 	sum := sha256.Sum256(payload)
-	return SealedRuntimeOperation{Operation: detached, PayloadHash: hex.EncodeToString(sum[:])}, nil
+	return SealedRuntimeOperation{Operation: detachedOperation, Authorization: detachedAuthorization, PayloadHash: hex.EncodeToString(sum[:])}, nil
 }
 
-func (s SealedRuntimeOperation) ValidateForExecution(context runtimecontract.RuntimeOperationExecutionContext) (runtimecontract.RuntimeOperation, error) {
+func (s SealedRuntimeOperation) ValidateForExecution(context runtimecontract.RuntimeOperationExecutionContext) (runtimecontract.RuntimeOperation, RuntimeExecutionAuthorization, error) {
 	operation := s.Operation.Normalized()
+	authorization := s.Authorization.normalized()
 	if !webOperationKind(operation.Kind) || runtimecontract.RuntimeModuleForOperationKind(operation.Kind) != runtimecontract.RuntimeModuleWeb {
-		return runtimecontract.RuntimeOperation{}, fmt.Errorf("sealed runtime operation is not owned by Web")
+		return runtimecontract.RuntimeOperation{}, RuntimeExecutionAuthorization{}, fmt.Errorf("sealed runtime operation is not owned by Web")
 	}
 	if err := runtimecontract.ValidateRuntimeOperationContract(operation); err != nil {
-		return runtimecontract.RuntimeOperation{}, err
+		return runtimecontract.RuntimeOperation{}, RuntimeExecutionAuthorization{}, err
 	}
 	if operation.ID != strings.TrimSpace(context.OperationID) {
-		return runtimecontract.RuntimeOperation{}, fmt.Errorf("sealed Web operation identity mismatch")
+		return runtimecontract.RuntimeOperation{}, RuntimeExecutionAuthorization{}, fmt.Errorf("sealed Web operation identity mismatch")
 	}
 	if !sameExecutionStrings(operation.TargetRefs, context.TargetRefs) || !sameExecutionCoverage(operation.CoverageWorkItemIDs, context.CoverageWorkItemIDs) {
-		return runtimecontract.RuntimeOperation{}, fmt.Errorf("sealed Web operation scope mismatch")
+		return runtimecontract.RuntimeOperation{}, RuntimeExecutionAuthorization{}, fmt.Errorf("sealed Web operation scope mismatch")
 	}
-	payload, err := json.Marshal(operation)
+	if err := authorization.validateForOperation(operation); err != nil {
+		return runtimecontract.RuntimeOperation{}, RuntimeExecutionAuthorization{}, err
+	}
+	if context.Execution.ExpectedEffectScope != authorization.Policy.EffectScope {
+		return runtimecontract.RuntimeOperation{}, RuntimeExecutionAuthorization{}, fmt.Errorf("sealed Web operation effect does not match claimed execution")
+	}
+	if strings.TrimSpace(context.Execution.AdmissibilitySnapshotID) != authorization.CatalogSnapshotID ||
+		strings.TrimSpace(context.Execution.AcquisitionBinding) != authorization.AcquisitionBinding {
+		return runtimecontract.RuntimeOperation{}, RuntimeExecutionAuthorization{}, fmt.Errorf("sealed Web owner catalog does not match claimed execution")
+	}
+	payload, detachedOperation, detachedAuthorization, err := sealedRuntimeOperationPayload(operation, authorization)
 	if err != nil {
-		return runtimecontract.RuntimeOperation{}, fmt.Errorf("marshal received Web operation: %w", err)
+		return runtimecontract.RuntimeOperation{}, RuntimeExecutionAuthorization{}, err
 	}
 	sum := sha256.Sum256(payload)
 	expectedHash := hex.EncodeToString(sum[:])
 	actualHash := strings.TrimSpace(s.PayloadHash)
 	if len(actualHash) != len(expectedHash) || subtle.ConstantTimeCompare([]byte(actualHash), []byte(expectedHash)) != 1 {
-		return runtimecontract.RuntimeOperation{}, fmt.Errorf("sealed Web operation payload hash mismatch")
+		return runtimecontract.RuntimeOperation{}, RuntimeExecutionAuthorization{}, fmt.Errorf("sealed Web operation payload hash mismatch")
 	}
-	sealed, err := SealRuntimeOperation(operation)
+	return detachedOperation, detachedAuthorization, nil
+}
+
+func sealedRuntimeOperationPayload(operation runtimecontract.RuntimeOperation, authorization RuntimeExecutionAuthorization) ([]byte, runtimecontract.RuntimeOperation, RuntimeExecutionAuthorization, error) {
+	value := struct {
+		Operation     runtimecontract.RuntimeOperation
+		Authorization RuntimeExecutionAuthorization
+	}{Operation: operation.Normalized(), Authorization: authorization.normalized()}
+	payload, err := json.Marshal(value)
 	if err != nil {
-		return runtimecontract.RuntimeOperation{}, err
+		return nil, runtimecontract.RuntimeOperation{}, RuntimeExecutionAuthorization{}, fmt.Errorf("marshal sealed Web operation: %w", err)
 	}
-	return sealed.Operation, nil
+	var detached struct {
+		Operation     runtimecontract.RuntimeOperation
+		Authorization RuntimeExecutionAuthorization
+	}
+	if err := json.Unmarshal(payload, &detached); err != nil {
+		return nil, runtimecontract.RuntimeOperation{}, RuntimeExecutionAuthorization{}, fmt.Errorf("clone sealed Web operation: %w", err)
+	}
+	return payload, detached.Operation, detached.Authorization, nil
+}
+
+func webObservationHasOwnerRevision(observation runtimecontract.RuntimePrerequisiteObservation, revision string) bool {
+	for _, dependency := range observation.Normalized().Dependencies {
+		if dependency.Domain == runtimecontract.RuntimeResourceProviderConfig && dependency.OwnerModuleID == runtimecontract.RuntimeModuleWeb &&
+			dependency.SubjectRef == "configured_web_providers" && dependency.Revision == revision {
+			return true
+		}
+	}
+	return false
+}
+
+func containsOperationKind(values []string, wanted string) bool {
+	wanted = runtimecontract.CanonicalRuntimeBlockKind(wanted)
+	for _, value := range values {
+		if runtimecontract.CanonicalRuntimeBlockKind(value) == wanted {
+			return true
+		}
+	}
+	return false
 }
 
 func OperationDataFromRuntimeOperation(operation runtimecontract.RuntimeOperation) (OperationData, error) {

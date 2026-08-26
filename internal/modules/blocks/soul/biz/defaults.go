@@ -11,7 +11,7 @@ import (
 	"github.com/muidea/workorch/internal/pkg/workorchmanagementcontract"
 )
 
-func ensureBuiltinSoulDefaults(ctx context.Context, service *Service) error {
+func ensureBuiltinSoulDefaults(ctx context.Context, service *service) error {
 	if service == nil || service.souls == nil {
 		return common.ErrInvalidArgument
 	}
@@ -22,7 +22,7 @@ func ensureBuiltinSoulDefaults(ctx context.Context, service *Service) error {
 	return ensureSoulDefaults(ctx, service, defaults)
 }
 
-func ensureSoulDefaults(ctx context.Context, service *Service, defaults []workorchmanagementcontract.Soul) error {
+func ensureSoulDefaults(ctx context.Context, service *service, defaults []workorchmanagementcontract.Soul) error {
 	if service == nil || service.souls == nil {
 		return common.ErrInvalidArgument
 	}

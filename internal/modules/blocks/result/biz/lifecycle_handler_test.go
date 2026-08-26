@@ -9,6 +9,7 @@ import (
 	magicevent "github.com/muidea/magicCommon/event"
 	resultevents "github.com/muidea/workorch/internal/modules/blocks/result/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/common"
+	"github.com/muidea/workorch/internal/pkg/repository"
 	"github.com/muidea/workorch/internal/pkg/repository/memory"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
@@ -18,7 +19,7 @@ func TestTerminalDeliveryDerivesCanonicalResultAndRejectsMaterialDrift(t *testin
 	hub := magicevent.NewHub(16)
 	t.Cleanup(func() { hub.Terminate(ctx) })
 	results := memory.NewResultRepository()
-	biz, err := New(hub, nil, Dependencies{Results: results, Artifacts: memory.NewArtifactRepository(), WorkspaceDeletions: memory.NewResultWorkspaceDeletionRepository(), EventHub: hub})
+	biz, err := New(hub, nil, Dependencies{OwnerRepositories: resultBizTestOwnerRepositories(results, memory.NewArtifactRepository(), memory.NewResultWorkspaceDeletionRepository()), EventHub: hub})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -60,7 +61,7 @@ func TestTerminalDeliveryRecoversDraftAndPartialArtifactMaterialization(t *testi
 	t.Cleanup(func() { hub.Terminate(ctx) })
 	results := memory.NewResultRepository()
 	artifacts := memory.NewArtifactRepository()
-	biz, err := New(hub, nil, Dependencies{Results: results, Artifacts: artifacts, WorkspaceDeletions: memory.NewResultWorkspaceDeletionRepository(), EventHub: hub})
+	biz, err := New(hub, nil, Dependencies{OwnerRepositories: resultBizTestOwnerRepositories(results, artifacts, memory.NewResultWorkspaceDeletionRepository()), EventHub: hub})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -108,7 +109,7 @@ func TestTerminalDeliveryPreservesFormalCloseoutArtifactHashAndMapsChildProjecti
 	t.Cleanup(func() { hub.Terminate(ctx) })
 	results := memory.NewResultRepository()
 	artifacts := memory.NewArtifactRepository()
-	biz, err := New(hub, nil, Dependencies{Results: results, Artifacts: artifacts, WorkspaceDeletions: memory.NewResultWorkspaceDeletionRepository(), EventHub: hub})
+	biz, err := New(hub, nil, Dependencies{OwnerRepositories: resultBizTestOwnerRepositories(results, artifacts, memory.NewResultWorkspaceDeletionRepository()), EventHub: hub})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -164,7 +165,7 @@ func TestTerminalDeliveryReplayReemitsStableNotification(t *testing.T) {
 	ctx := context.Background()
 	hub := magicevent.NewHub(16)
 	t.Cleanup(func() { hub.Terminate(ctx) })
-	biz, err := New(hub, nil, Dependencies{Results: memory.NewResultRepository(), Artifacts: memory.NewArtifactRepository(), WorkspaceDeletions: memory.NewResultWorkspaceDeletionRepository(), EventHub: hub})
+	biz, err := New(hub, nil, Dependencies{OwnerRepositories: memory.NewResultOwnerRepositorySet().OwnerRepositories(), EventHub: hub})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -193,11 +194,10 @@ func TestTerminalDeliveryReplayReemitsStableNotification(t *testing.T) {
 
 func TestResultOwnerStartReplaysDurableTerminalNotification(t *testing.T) {
 	ctx := context.Background()
-	results := memory.NewResultRepository()
-	artifacts := memory.NewArtifactRepository()
+	ownerSet := memory.NewResultOwnerRepositorySet()
 	firstHub := magicevent.NewHub(16)
-	deletions := memory.NewResultWorkspaceDeletionRepository()
-	first, err := New(firstHub, nil, Dependencies{Results: results, Artifacts: artifacts, WorkspaceDeletions: deletions, EventHub: firstHub})
+	ownerRepositories := ownerSet.OwnerRepositories()
+	first, err := New(firstHub, nil, Dependencies{OwnerRepositories: ownerRepositories, EventHub: firstHub})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -219,7 +219,7 @@ func TestResultOwnerStartReplaysDurableTerminalNotification(t *testing.T) {
 		}
 	})
 	t.Cleanup(func() { observer.Unsubscribe(resultevents.TopicResultAccepted) })
-	restarted, err := New(restartedHub, nil, Dependencies{Results: results, Artifacts: artifacts, WorkspaceDeletions: deletions, EventHub: restartedHub})
+	restarted, err := New(restartedHub, nil, Dependencies{OwnerRepositories: ownerRepositories, EventHub: restartedHub})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -243,6 +243,65 @@ func receiveChangedData(t *testing.T, values <-chan resultevents.ResultChangedDa
 		t.Fatal("result notification was not delivered")
 		return resultevents.ResultChangedData{}
 	}
+}
+
+type resultBizTestBoundResults struct {
+	repository.ResultRepository
+	binding repository.OwnerRepositoryBinding
+}
+
+func (r resultBizTestBoundResults) OwnerRepositoryBinding() repository.OwnerRepositoryBinding {
+	return r.binding
+}
+
+type resultBizTestBoundArtifacts struct {
+	repository.ArtifactRepository
+	binding repository.OwnerRepositoryBinding
+}
+
+func (r resultBizTestBoundArtifacts) OwnerRepositoryBinding() repository.OwnerRepositoryBinding {
+	return r.binding
+}
+
+type resultBizTestBoundDeletions struct {
+	repository.ResultWorkspaceDeletionRepository
+	binding repository.OwnerRepositoryBinding
+}
+
+func (r resultBizTestBoundDeletions) OwnerRepositoryBinding() repository.OwnerRepositoryBinding {
+	return r.binding
+}
+
+type resultBizTestBackend struct {
+	binding   repository.OwnerRepositoryBinding
+	results   repository.ResultRepository
+	artifacts repository.ArtifactRepository
+	deletions repository.ResultWorkspaceDeletionRepository
+}
+
+func (b resultBizTestBackend) ResultOwnerBinding() repository.OwnerRepositoryBinding {
+	return b.binding
+}
+func (b resultBizTestBackend) ResultOwnerResults() repository.ResultRepository { return b.results }
+func (b resultBizTestBackend) ResultOwnerArtifacts() repository.ArtifactRepository {
+	return b.artifacts
+}
+func (b resultBizTestBackend) ResultOwnerWorkspaceDeletions() repository.ResultWorkspaceDeletionRepository {
+	return b.deletions
+}
+
+func resultBizTestOwnerRepositories(results repository.ResultRepository, artifacts repository.ArtifactRepository, deletions repository.ResultWorkspaceDeletionRepository) repository.ResultOwnerRepositories {
+	binding := repository.NewResultOwnerRepositoryBinding()
+	owner, err := repository.NewResultOwnerRepositories(resultBizTestBackend{
+		binding:   binding,
+		results:   resultBizTestBoundResults{ResultRepository: results, binding: binding},
+		artifacts: resultBizTestBoundArtifacts{ArtifactRepository: artifacts, binding: binding},
+		deletions: resultBizTestBoundDeletions{ResultWorkspaceDeletionRepository: deletions, binding: binding},
+	})
+	if err != nil {
+		panic(err)
+	}
+	return owner
 }
 
 func terminalDeliveryFixture(deliveryID string, artifactRefs []common.ArtifactID) resultevents.RuntimeTerminalDeliveryFact {

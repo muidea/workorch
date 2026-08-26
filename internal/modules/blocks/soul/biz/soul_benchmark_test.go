@@ -16,9 +16,9 @@ import (
 var soulBenchmarkSink *soulmodel.Soul
 
 func TestServiceAcceptsNearLimitSoulAndRejectsAggregateOverflow(t *testing.T) {
-	service := NewService(memory.NewSoulRepository())
+	service := newService(memory.NewSoulRepository())
 	command := nearLimitSoulCommand()
-	created, err := service.CreateSoul(context.Background(), command)
+	created, err := service.createSoulCommand(context.Background(), command)
 	if err != nil {
 		t.Fatalf("create near-limit Soul: %v", err)
 	}
@@ -29,7 +29,7 @@ func TestServiceAcceptsNearLimitSoulAndRejectsAggregateOverflow(t *testing.T) {
 	overflow := command
 	overflow.SoulID = "soul-overflow"
 	overflow.Name = strings.Repeat("n", modulecommon.SoulNameMaxBytes)
-	if _, err := service.CreateSoul(context.Background(), overflow); err == nil {
+	if _, err := service.createSoulCommand(context.Background(), overflow); err == nil {
 		t.Fatal("aggregate Soul content overflow was accepted")
 	}
 }
@@ -49,8 +49,8 @@ func BenchmarkNormalizeNearLimitSoul(b *testing.B) {
 }
 
 func BenchmarkGetNearLimitSoul(b *testing.B) {
-	service := NewService(memory.NewSoulRepository())
-	if _, err := service.CreateSoul(context.Background(), nearLimitSoulCommand()); err != nil {
+	service := newService(memory.NewSoulRepository())
+	if _, err := service.createSoulCommand(context.Background(), nearLimitSoulCommand()); err != nil {
 		b.Fatal(err)
 	}
 	b.ReportAllocs()
@@ -58,7 +58,7 @@ func BenchmarkGetNearLimitSoul(b *testing.B) {
 	b.ResetTimer()
 	for range b.N {
 		var err error
-		soulBenchmarkSink, err = service.GetSoul(context.Background(), common.SoulID("soul-near-limit"))
+		soulBenchmarkSink, err = service.getSoul(context.Background(), common.SoulID("soul-near-limit"))
 		if err != nil {
 			b.Fatal(err)
 		}

@@ -15,19 +15,19 @@ import (
 	"github.com/muidea/workorch/internal/pkg/repository"
 )
 
-type Service struct {
+type service struct {
 	souls repository.SoulRepository
 }
 
-func NewService(souls repository.SoulRepository) *Service {
-	return &Service{souls: souls}
+func newService(souls repository.SoulRepository) *service {
+	return &service{souls: souls}
 }
 
-func (s *Service) CreateSoul(ctx context.Context, cmd soulevents.CreateSoulCommand) (*soulmodel.Soul, error) {
+func (s *service) createSoulCommand(ctx context.Context, cmd soulevents.CreateSoulCommand) (*soulmodel.Soul, error) {
 	return s.createSoul(ctx, cmd, soulmodel.SoulSourceUserManaged)
 }
 
-func (s *Service) createSoul(ctx context.Context, cmd soulevents.CreateSoulCommand, provenance string) (*soulmodel.Soul, error) {
+func (s *service) createSoul(ctx context.Context, cmd soulevents.CreateSoulCommand, provenance string) (*soulmodel.Soul, error) {
 	item, err := normalizedSoulFromCommand(cmd)
 	if err != nil {
 		return nil, err
@@ -44,12 +44,12 @@ func (s *Service) createSoul(ctx context.Context, cmd soulevents.CreateSoulComma
 	return soulmodel.CloneSoul(item), nil
 }
 
-func (s *Service) UpdateSoul(ctx context.Context, cmd soulevents.CreateSoulCommand) (*soulmodel.Soul, error) {
+func (s *service) updateSoul(ctx context.Context, cmd soulevents.CreateSoulCommand) (*soulmodel.Soul, error) {
 	item, err := normalizedSoulFromCommand(cmd)
 	if err != nil {
 		return nil, err
 	}
-	current, err := s.GetSoul(ctx, item.ID)
+	current, err := s.getSoul(ctx, item.ID)
 	if err != nil {
 		return nil, err
 	}
@@ -66,14 +66,14 @@ func (s *Service) UpdateSoul(ctx context.Context, cmd soulevents.CreateSoulComma
 	return soulmodel.CloneSoul(item), nil
 }
 
-func (s *Service) DeleteSoul(ctx context.Context, id common.SoulID) error {
+func (s *service) deleteSoul(ctx context.Context, id common.SoulID) error {
 	if err := validateSoulID(id); err != nil {
 		return err
 	}
 	return s.souls.Delete(ctx, id)
 }
 
-func (s *Service) GetSoul(ctx context.Context, id common.SoulID) (*soulmodel.Soul, error) {
+func (s *service) getSoul(ctx context.Context, id common.SoulID) (*soulmodel.Soul, error) {
 	if err := validateSoulID(id); err != nil {
 		return nil, err
 	}
@@ -87,7 +87,7 @@ func (s *Service) GetSoul(ctx context.Context, id common.SoulID) (*soulmodel.Sou
 	return normalizedStoredSoul(item)
 }
 
-func (s *Service) ListSouls(ctx context.Context, cursorAfterID common.SoulID, limit int) ([]*soulmodel.Soul, common.SoulID, error) {
+func (s *service) listSouls(ctx context.Context, cursorAfterID common.SoulID, limit int) ([]*soulmodel.Soul, common.SoulID, error) {
 	if cursorAfterID != "" {
 		if err := validateSoulID(cursorAfterID); err != nil {
 			return nil, "", err
@@ -134,7 +134,7 @@ func (s *Service) ListSouls(ctx context.Context, cursorAfterID common.SoulID, li
 // selection allowlists. Resource existence, MCP server/capability ownership,
 // effect, risk and approval are authoritative facts of their respective
 // capability owners and are deliberately not inferred here.
-func (s *Service) ValidateCapabilitySelection(ctx context.Context, cmd soulevents.ValidateCapabilitySelectionCommand) error {
+func (s *service) validateCapabilitySelection(ctx context.Context, cmd soulevents.ValidateCapabilitySelectionCommand) error {
 	if err := validateSoulID(cmd.SoulID); err != nil {
 		return err
 	}
@@ -142,7 +142,7 @@ func (s *Service) ValidateCapabilitySelection(ctx context.Context, cmd soulevent
 	if err != nil {
 		return err
 	}
-	item, err := s.GetSoul(ctx, cmd.SoulID)
+	item, err := s.getSoul(ctx, cmd.SoulID)
 	if err != nil {
 		return err
 	}

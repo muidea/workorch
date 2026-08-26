@@ -60,19 +60,17 @@ type Biz struct {
 // Dependencies are the EventStream owner's construction inputs. Keeping this
 // in biz prevents the module lifecycle bridge from owning EventHub types.
 type Dependencies struct {
-	EventRecords       repository.EventRecordRepository
-	WorkspaceDeletions repository.EventStreamWorkspaceDeletionRepository
-	WorkspacePurger    repository.EventStreamWorkspacePurger
-	EventHub           magicevent.Hub
-	BackgroundRoutine  magictask.BackgroundRoutine
+	OwnerRepositories repository.EventStreamOwnerRepositories
+	EventHub          magicevent.Hub
+	BackgroundRoutine magictask.BackgroundRoutine
 }
 
 var eventRecordIDSequence atomic.Uint64
 
 func New(deps Dependencies) *Biz {
 	return &Biz{
-		Base: basebiz.New(modulecommon.ModuleID, deps.EventHub, deps.BackgroundRoutine), repo: deps.EventRecords,
-		workspaceDeletions: deps.WorkspaceDeletions, workspacePurger: deps.WorkspacePurger,
+		Base: basebiz.New(modulecommon.ModuleID, deps.EventHub, deps.BackgroundRoutine), repo: deps.OwnerRepositories.EventRecords(),
+		workspaceDeletions: deps.OwnerRepositories.WorkspaceDeletions(), workspacePurger: deps.OwnerRepositories.WorkspacePurger(),
 	}
 }
 

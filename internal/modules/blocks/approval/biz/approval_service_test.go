@@ -480,7 +480,7 @@ func TestService_ResolveApproval_RecordsGovernanceEvidence(t *testing.T) {
 				}, nil)
 			})
 			defer observer.Unsubscribe(approvalevents.TopicApprovalCommandRecordEvidence)
-			owner, err := New(rawHub, nil, Dependencies{WorkspaceDeletions: memory.NewApprovalWorkspaceDeletionRepository(), Approvals: repo, EventHub: rawHub})
+			owner, err := New(rawHub, nil, Dependencies{OwnerRepositories: approvalBizTestOwnerRepositories(repo, memory.NewApprovalWorkspaceDeletionRepository()), EventHub: rawHub})
 			if err != nil {
 				t.Fatalf("new owner: %v", err)
 			}
@@ -735,7 +735,7 @@ func TestService_CreateAndResolveApproval_PublishesEvents(t *testing.T) {
 	ctx := context.Background()
 	repo := memory.NewApprovalRepository()
 	hub := newRecordingApprovalHub(t)
-	owner, err := New(hub, nil, Dependencies{WorkspaceDeletions: memory.NewApprovalWorkspaceDeletionRepository(), Approvals: repo, EventHub: hub})
+	owner, err := New(hub, nil, Dependencies{OwnerRepositories: approvalBizTestOwnerRepositories(repo, memory.NewApprovalWorkspaceDeletionRepository()), EventHub: hub})
 	if err != nil {
 		t.Fatalf("new owner: %v", err)
 	}
@@ -833,7 +833,7 @@ func TestService_PublishesConcreteApprovalNotificationsThroughEventHub(t *testin
 	ctx := context.Background()
 	repo := memory.NewApprovalRepository()
 	hub := newRecordingApprovalHub(t)
-	owner, err := New(hub, nil, Dependencies{WorkspaceDeletions: memory.NewApprovalWorkspaceDeletionRepository(), Approvals: repo, EventHub: hub})
+	owner, err := New(hub, nil, Dependencies{OwnerRepositories: approvalBizTestOwnerRepositories(repo, memory.NewApprovalWorkspaceDeletionRepository()), EventHub: hub})
 	if err != nil {
 		t.Fatalf("new owner: %v", err)
 	}

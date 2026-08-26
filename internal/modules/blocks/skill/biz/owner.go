@@ -23,7 +23,7 @@ type Dependencies struct {
 
 type Biz struct {
 	basebiz.Base
-	service *Service
+	service *service
 	topics  []string
 	started bool
 }
@@ -35,7 +35,7 @@ func New(eventHub magicevent.Hub, backgroundRoutine task.BackgroundRoutine, deps
 	if eventHub == nil {
 		return nil, common.ErrInvalidArgument
 	}
-	return &Biz{Base: basebiz.New(modulecommon.ModuleID, eventHub, backgroundRoutine), service: NewService(deps.Skills)}, nil
+	return &Biz{Base: basebiz.New(modulecommon.ModuleID, eventHub, backgroundRoutine), service: newService(deps.Skills)}, nil
 }
 
 func (m *Biz) Start() error {
@@ -87,7 +87,7 @@ func (m *Biz) handleSkillCommand(ev magicevent.Event, result magicevent.Result) 
 			setMagicResult(result, skillevents.CreateSkillResult{}, common.ErrInvalidArgument)
 			return
 		}
-		item, err := m.service.CreateSkill(ctx, cmd)
+		item, err := m.service.createSkill(ctx, cmd)
 		if err != nil {
 			setMagicResult(result, skillevents.CreateSkillResult{}, err)
 			return
@@ -99,7 +99,7 @@ func (m *Biz) handleSkillCommand(ev magicevent.Event, result magicevent.Result) 
 			setMagicResult(result, skillevents.GetSkillResult{}, common.ErrInvalidArgument)
 			return
 		}
-		item, err := m.service.GetSkill(ctx, cmd.SkillID)
+		item, err := m.service.getSkill(ctx, cmd.SkillID)
 		if err != nil {
 			setMagicResult(result, skillevents.GetSkillResult{}, err)
 			return
@@ -111,7 +111,7 @@ func (m *Biz) handleSkillCommand(ev magicevent.Event, result magicevent.Result) 
 			setMagicResult(result, skillevents.ListSkillsResult{}, common.ErrInvalidArgument)
 			return
 		}
-		items, nextCursor, err := m.service.ListSkills(ctx, cmd.CursorAfterID, cmd.Limit)
+		items, nextCursor, err := m.service.listSkills(ctx, cmd.CursorAfterID, cmd.Limit)
 		if err != nil {
 			setMagicResult(result, skillevents.ListSkillsResult{}, err)
 			return

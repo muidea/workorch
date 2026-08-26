@@ -39,6 +39,73 @@ func TestWorkspaceDefinitionClarificationQuestionMatchesRequiredAction(t *testin
 	}
 }
 
+func TestWorkspaceDefinitionClarificationOrphanResolutionWaitsForDedicatedReplay(t *testing.T) {
+	ctx := context.Background()
+	hub := newRecordingDecisionHub(t)
+	repositories := memory.NewDecisionOwnerRepositorySet()
+	owner, err := New(hub, nil, Dependencies{OwnerRepositories: repositories.OwnerRepositories(), EventHub: hub})
+	if err != nil {
+		t.Fatalf("construct Decision owner: %v", err)
+	}
+
+	open := workspaceDefinitionClarificationCommandForBizTest().Normalized()
+	ticket, err := owner.service.applyLifecycleInternalEvent(ctx, nil, lifecycleInternalEvent{
+		Kind:     lifecycleInternalEventOpened,
+		TicketID: open.TicketID,
+		Ticket:   workspaceDefinitionClarificationTicketForCommand(open),
+	})
+	if err != nil {
+		t.Fatalf("persist clarification ticket: %v", err)
+	}
+	resolve := decisionevents.ResolveWorkspaceDefinitionClarificationByAdmissionCommand{
+		TicketID: open.TicketID, WorkspaceID: open.WorkspaceID,
+		OldCandidateID: open.CandidateID, OldCandidateRevision: open.CandidateRevision, OldCandidateHash: open.CandidateHash,
+		NewCandidateID: open.CandidateID, NewCandidateRevision: open.CandidateRevision + 1, NewCandidateHash: "candidate-hash-recovered",
+		AdmissionResultHash: "admission-hash-recovered", DefinitionRevision: "definition-revision-recovered", StartupInputHash: "startup-input-recovered",
+	}.Normalized()
+	resolutionID := decisionevents.StableDefinitionClarificationResolutionID(resolve.TicketID, resolve.AdmissionResultHash+"\x00"+resolve.StartupInputHash)
+	orphan := &decisionmodel.Resolution{
+		ID: resolutionID, TicketID: resolve.TicketID, ResolvedAt: newDecisionResolutionTimestamp(),
+		Type: decisionevents.DefinitionClarificationResolutionCandidateAdjusted,
+		Payload: workorcheventpayload.New(
+			workorcheventpayload.StringField("definitionRevision", resolve.DefinitionRevision),
+			workorcheventpayload.StringField("startupInputHash", resolve.StartupInputHash),
+		),
+	}
+	if err := repositories.Resolutions.Create(ctx, orphan); err != nil {
+		t.Fatalf("persist orphan clarification resolution: %v", err)
+	}
+
+	if err := owner.reconcileDecisionTicket(ctx, ticket); err != nil {
+		t.Fatalf("reconcile clarification orphan: %v", err)
+	}
+	unchanged, err := repositories.Tickets.Get(ctx, open.TicketID)
+	if err != nil {
+		t.Fatalf("read ticket after generic reconciliation: %v", err)
+	}
+	if unchanged.State != common.DecisionTicketStateOpen || unchanged.DefinitionClarification == nil || unchanged.DefinitionClarification.ResolutionID != "" {
+		t.Fatalf("generic reconciliation mutated dedicated clarification = %+v", unchanged)
+	}
+
+	result, err := owner.resolveWorkspaceDefinitionClarification(ctx, resolve)
+	if err != nil {
+		t.Fatalf("dedicated clarification replay: %v", err)
+	}
+	if result.ValidateFor(resolve) != nil || result.Disposition != decisionevents.DefinitionClarificationResolved || result.ResolutionID != resolutionID {
+		t.Fatalf("dedicated replay result = %+v", result)
+	}
+	persisted, err := repositories.Tickets.Get(ctx, open.TicketID)
+	if err != nil {
+		t.Fatalf("read resolved clarification: %v", err)
+	}
+	if persisted.State != common.DecisionTicketStateResolved || persisted.DefinitionClarification == nil || persisted.DefinitionClarification.ResolutionID != resolutionID || persisted.ResolvedAt != orphan.ResolvedAt {
+		t.Fatalf("dedicated replay did not close exact binding = %+v", persisted)
+	}
+	if commands := hub.EvidenceCommands(); len(commands) != 0 {
+		t.Fatalf("pre-seal dedicated replay emitted run-scoped evidence: %+v", commands)
+	}
+}
+
 func workspaceDefinitionClarificationCommandForBizTest() decisionevents.OpenWorkspaceDefinitionClarificationRequestCommand {
 	command := decisionevents.OpenWorkspaceDefinitionClarificationRequestCommand{
 		SchemaVersion: decisionevents.DefinitionClarificationSchemaVersionCurrent,
@@ -128,7 +195,7 @@ func TestQueryWorkspaceDefinitionClarificationFactReadsExactPersistedTicketAndRe
 		t.Fatal(err)
 	}
 	if err := resolutions.Create(context.Background(), &decisionmodel.Resolution{
-		ID: resolutionID, TicketID: command.TicketID, Type: decisionevents.DefinitionClarificationResolutionCandidateAdjusted,
+		ID: resolutionID, TicketID: command.TicketID, ResolvedAt: ticket.ResolvedAt, Type: decisionevents.DefinitionClarificationResolutionCandidateAdjusted,
 		Payload: workorcheventpayload.New(
 			workorcheventpayload.StringField("definitionRevision", resolutionCommand.DefinitionRevision),
 			workorcheventpayload.StringField("startupInputHash", resolutionCommand.StartupInputHash),

@@ -11,11 +11,13 @@ import (
 // identity shared by capability-owner command contracts. It carries no topic,
 // target owner state or transition instruction.
 type RuntimeOperationExecutionEnvelope struct {
-	ExecutionKey        string
-	Fence               uint64
-	ExpectedEffectScope RuntimeEffectScope
-	ReplayProof         *RuntimeOperationReplayProof
-	GovernanceGrant     *RuntimeOperationGovernanceGrant
+	ExecutionKey            string
+	Fence                   uint64
+	ExpectedEffectScope     RuntimeEffectScope
+	AdmissibilitySnapshotID string
+	AcquisitionBinding      string
+	ReplayProof             *RuntimeOperationReplayProof
+	GovernanceGrant         *RuntimeOperationGovernanceGrant
 }
 
 // RuntimeOperationExecutionContext is the immutable owner-neutral scope of one
@@ -59,6 +61,9 @@ func CloneRuntimeOperationExecutionContext(value RuntimeOperationExecutionContex
 func (e RuntimeOperationExecutionEnvelope) Validate() error {
 	if strings.TrimSpace(e.ExecutionKey) == "" || e.Fence == 0 || !ValidRuntimeEffectScope(e.ExpectedEffectScope) {
 		return fmt.Errorf("runtime operation execution envelope requires key, fence and expected effect")
+	}
+	if strings.TrimSpace(e.AdmissibilitySnapshotID) == "" && strings.TrimSpace(e.AcquisitionBinding) != "" {
+		return fmt.Errorf("runtime operation execution acquisition binding requires admissibility snapshot")
 	}
 	if e.ReplayProof != nil {
 		if err := e.ReplayProof.Validate(); err != nil {

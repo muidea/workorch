@@ -4,7 +4,7 @@ Status: active
 
 Type: capability-block-contract
 
-Last Verified: 2026-08-21
+Last Verified: 2026-08-26
 
 ## 功能范围与边界
 
@@ -73,26 +73,32 @@ privateKeyFile = 'id_ed25519'
 
 三个引用必须来自同一条 owner 发布的 `ssh-binding` constraint。`host`、`port`、`username`、`password`、`privateKey`、
 `privateKeyPath` 在 Runtime operation 中均为 forbidden。Orchestrator
-把持久化 operation 克隆为 `SealedRuntimeOperation` 并附完整 payload hash；SSH 在任何 receipt query、治理或网络动作前校验
-source、scope、operation ID、target/CWI scope 与 payload hash。强调用没有同步 result 时直接返回，`Post` 不会触发网络动作。
+只允许从 persisted `RuntimeOperationExecutionRequest.OwnerCatalog` 及其 exact prerequisite observation 构造
+`SealedRuntimeOperation`。完整 payload hash 同时绑定 operation、selected owner policy、catalog snapshot/revision 与 opaque
+target/session/credential binding；缺 catalog、错误 owner、binding 或任一 payload 漂移都不能产生 execute call。SSH 在任何
+receipt query、治理或网络动作前校验 source、scope、operation ID、target/CWI scope 与 payload hash，并要求 execution envelope
+的 `AdmissibilitySnapshotID + AcquisitionBinding` 与 seal 精确相等。强调用没有同步 result 时直接返回，`Post` 不会触发网络动作。
 
 ## 治理、执行与回执
 
 1. SSH 先通过 receipt query 验证当前 active claimed `ExecutionKey + Fence`。有 persisted governance binding 时，查询必须携带
    完全相同的 grant；省略、附加或漂移均 conflict。Found/Receipt 一致性、query identity 与 commit 完整 receipt equality
    由 capability owners 共享的 typed validator 校验。
-2. 每个远端命令都要求 `GovernanceApproval`。不可变 authorization context 绑定 target/session/credential refs、
+2. exact receipt 不存在时，SSH 在治理解析或远端 effect 前把 seal 内 owner policy/catalog revision 与当前 frozen owner
+   revision 作 exact 比较。restart/config/secret/known-hosts drift 返回 `owner_catalog/ssh_runtime_policy` 的 typed
+   `RuntimePrerequisiteStale` rejected receipt，交由 SM-2 重获 catalog；SSH 不自行刷新 dispatch 或选择 retry。
+3. 每个远端命令都要求 `GovernanceApproval`。不可变 authorization context 绑定 target/session/credential refs、
    operation kind、command hash 与 timeout；未获 grant 时只提交 `governance_required` receipt，零网络调用。
-3. grant 必须精确匹配 approval identity、subject、action、risk 和 authorization hash，随后 SSH 才解析 owner-private endpoint
+4. grant 必须精确匹配 approval identity、subject、action、risk 和 authorization hash，随后 SSH 才解析 owner-private endpoint
    与 secret。
-4. transport 固定使用 `-F /dev/null`、`StrictHostKeyChecking=yes`、owner-captured known_hosts、
+5. transport 固定使用 `-F /dev/null`、`StrictHostKeyChecking=yes`、owner-captured known_hosts、
    `GlobalKnownHostsFile=/dev/null` 和 `IdentitiesOnly=yes`，且认证方式绑定所选 password/private-key credential。密码通过临时
    0600 文件供 askpass 读取，不进入 child environment value；
    私钥写入 owner 临时 0600 identity 文件。临时目录按单次调用释放。
-5. SSH 在同一有界 timeout 内执行 `observation-before -> command -> observation-after`。只有前后 observation hash 不同时才报告
+6. SSH 在同一有界 timeout 内执行 `observation-before -> command -> observation-after`。只有前后 observation hash 不同时才报告
    `remote_durable + Changed=true`；相同则返回 `no_op + none + ZeroWork=true`。命令失败后仍尝试 after observation，若事实已改变，
    rejected receipt 仍如实携带 remote change；after observation 不可得时 effect 保持 `unknown`，不得伪造 durable evidence。
-6. `remote_durable` receipt 携带 `BeforeHash/AfterHash` 与 `remote_resource` change。stdout/stderr 不跨 EventHub；evidence 只保存全量
+7. `remote_durable` receipt 携带 `BeforeHash/AfterHash` 与 `remote_resource` change。stdout/stderr 不跨 EventHub；evidence 只保存全量
    stream hash、字节数、截断标记、duration、exit code 与 opaque content-addressed ref。失败 diagnostic 明确标记 raw output omitted/
    redacted，不承诺 output preview 或 raw ref。
 
@@ -113,7 +119,9 @@ source、scope、operation ID、target/CWI scope 与 payload hash。强调用没
 
 ## 回归覆盖
 
-- [x] Runtime/EventHub wire 不含 endpoint、username、password、private key/path；sealed payload drift 在网络调用前拒绝。
+- [x] Runtime/EventHub wire 不含 endpoint、username、password、private key/path；missing/wrong catalog、sealed payload drift
+  、execution-record catalog drift 与 restart/config revision drift 在网络调用前拒绝并返回 typed stale；exact duplicate
+  零二次远端调用。
 - [x] 配置拒绝 absolute/traversal path、symlink escape、宽权限私钥、错绑 session/credential 与 option-shaped endpoint。
 - [x] strict host-key、禁用用户 SSH config、password/private-key 临时文件及清理。
 - [x] governance missing/drift、wrong producer、nil result、active receipt authorization 与 persisted grant 省略均 fail-closed。

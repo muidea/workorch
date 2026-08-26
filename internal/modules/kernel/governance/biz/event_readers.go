@@ -138,17 +138,15 @@ func (r eventWorkspaceReader) GetGoal(ctx context.Context, id common.GoalID) (*w
 	if r.send == nil || workspaceID == "" || id == "" {
 		return nil, common.ErrInvalidArgument
 	}
-	event := magicevent.NewEventWithContext(workspaceevents.TopicWorkspaceCommandGetGoal, governancecommon.ModuleID, workspaceevents.CommandDestination, magicevent.NewHeader(), ctx, workspaceevents.GetGoalCommand{WorkspaceID: workspaceID, GoalID: id})
+	command := workspaceevents.GetGoalCommand{WorkspaceID: workspaceID, GoalID: id}
+	event := magicevent.NewEventWithContext(workspaceevents.TopicWorkspaceCommandGetGoal, governancecommon.ModuleID, workspaceevents.CommandDestination, magicevent.NewHeader(), ctx, command)
 	bindOwnerLane(event, workspaceevents.Contracts(), workspaceevents.TopicWorkspaceCommandGetGoal, "goal", string(id), workspaceID, "", "")
-	response, err := workspaceResponse(r.send(event), workspaceevents.TopicWorkspaceCommandGetGoal)
+	response, err := workspaceResponse[workspaceevents.GoalResult](r.send(event), workspaceevents.TopicWorkspaceCommandGetGoal)
 	if err != nil {
 		return nil, err
 	}
-	if response.Goal == nil {
-		return nil, common.ErrNotFound
-	}
-	if response.Goal.ID != id || response.Goal.WorkspaceID != workspaceID {
-		return nil, ownerResultIdentityError(workspaceevents.TopicWorkspaceCommandGetGoal, fmt.Sprintf("goal %s/%s", response.Goal.WorkspaceID, response.Goal.ID))
+	if err := response.ValidateFor(command); err != nil {
+		return nil, err
 	}
 	return workspacemodel.CloneGoal(response.Goal), nil
 }
@@ -158,17 +156,15 @@ func (r eventWorkspaceReader) GetDoD(ctx context.Context, id common.DoDID) (*wor
 	if r.send == nil || workspaceID == "" || id == "" {
 		return nil, common.ErrInvalidArgument
 	}
-	event := magicevent.NewEventWithContext(workspaceevents.TopicWorkspaceCommandGetDoD, governancecommon.ModuleID, workspaceevents.CommandDestination, magicevent.NewHeader(), ctx, workspaceevents.GetDoDCommand{WorkspaceID: workspaceID, DoDID: id})
+	command := workspaceevents.GetDoDCommand{WorkspaceID: workspaceID, DoDID: id}
+	event := magicevent.NewEventWithContext(workspaceevents.TopicWorkspaceCommandGetDoD, governancecommon.ModuleID, workspaceevents.CommandDestination, magicevent.NewHeader(), ctx, command)
 	bindOwnerLane(event, workspaceevents.Contracts(), workspaceevents.TopicWorkspaceCommandGetDoD, "dod", string(id), workspaceID, "", "")
-	response, err := workspaceResponse(r.send(event), workspaceevents.TopicWorkspaceCommandGetDoD)
+	response, err := workspaceResponse[workspaceevents.DoDResult](r.send(event), workspaceevents.TopicWorkspaceCommandGetDoD)
 	if err != nil {
 		return nil, err
 	}
-	if response.DoD == nil {
-		return nil, common.ErrNotFound
-	}
-	if response.DoD.ID != id || response.DoD.WorkspaceID != workspaceID {
-		return nil, ownerResultIdentityError(workspaceevents.TopicWorkspaceCommandGetDoD, fmt.Sprintf("dod %s/%s", response.DoD.WorkspaceID, response.DoD.ID))
+	if err := response.ValidateFor(command); err != nil {
+		return nil, err
 	}
 	return workspacemodel.CloneDoD(response.DoD), nil
 }

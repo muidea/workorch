@@ -99,7 +99,7 @@ func (m *Biz) handleWebOperation(event magicevent.Event, result magicevent.Resul
 		setCapabilityError(result, err)
 		return
 	}
-	operation, err := command.SealedOperation.ValidateForExecution(command.RuntimeOperationExecutionContext)
+	operation, authorization, err := command.SealedOperation.ValidateForExecution(command.RuntimeOperationExecutionContext)
 	if err != nil {
 		setCapabilityError(result, err)
 		return
@@ -120,7 +120,7 @@ func (m *Biz) handleWebOperation(event magicevent.Event, result magicevent.Resul
 		result.Set(webevents.ExecuteOperationResult{Receipt: receipt}, nil)
 		return
 	}
-	operationResult, executeErr := m.runtimeAdapter.ExecuteOperation(event.Context(), RuntimeOperationRequest{
+	runtimeRequest := RuntimeOperationRequest{
 		WorkspaceID: command.WorkspaceID, RunID: command.RunID, StepID: common.StepID(command.DispatchID + "/" + command.OperationID),
 		Kind: operation.Kind, WorkspaceDeliverableDirectory: command.WorkspaceDeliverableDirectory,
 		WorkspaceInternalDirectory: command.WorkspaceInternalDirectory,
@@ -130,7 +130,34 @@ func (m *Biz) handleWebOperation(event magicevent.Event, result magicevent.Resul
 		GovernanceGrant: command.Execution.GovernanceGrant,
 		MaxBytes:        data.MaxBytes, ExtractMode: data.ExtractMode, TargetRefs: command.TargetRefs,
 		EvidencePolicies: command.EvidencePolicies,
-	})
+	}
+	operationResult, currentRevision, executeErr := m.runtimeAdapter.ExecuteOperationAtOwnerRevision(event.Context(), runtimeRequest, authorization.OwnerRevision)
+	if executeErr != nil && currentRevision == "" {
+		setCapabilityError(result, executeErr)
+		return
+	}
+	if currentRevision != authorization.OwnerRevision {
+		message := "Web provider configuration changed after operation seal"
+		failure := &runtimecontract.FailureFact{
+			Class: runtimecontract.FailureClassExecutionFailure, Code: "operation_admissibility_stale",
+			Signature: "web-owner-catalog-stale:" + authorization.CatalogObservation.ObservationID, Message: message,
+		}
+		receipt := m.newRuntimeOperationReceipt(command.Execution, command.OperationID, runtimecontract.RuntimeOperationExecutionStatusRejected, nil,
+			runtimecontract.RuntimeOperationEvidence{Summary: message}, failure, nil,
+			orchestratorevents.RuntimeOperationReceiptObservation{ObservedEffectScope: runtimecontract.RuntimeEffectNone})
+		receipt.PrerequisiteStale = &runtimecontract.RuntimePrerequisiteStale{
+			PrerequisiteID: authorization.PrerequisiteID, ObservationID: authorization.CatalogObservation.ObservationID,
+			Domain: runtimecontract.RuntimeResourceProviderConfig, OwnerModuleID: ModuleID, SubjectRef: "configured_web_providers",
+			ExpectedRevision: authorization.OwnerRevision, ObservedRevision: currentRevision, Reason: message,
+		}
+		committed, commitErr := m.commitRuntimeOperationReceipt(event.Context(), command.WorkspaceID, command.RunID, command.Transaction.AuthoritySnapshotID, command.DispatchID, command.Execution, receipt)
+		if commitErr != nil {
+			setCapabilityError(result, commitErr)
+			return
+		}
+		result.Set(webevents.ExecuteOperationResult{Receipt: committed}, nil)
+		return
+	}
 	status := runtimecontract.RuntimeOperationExecutionStatusAccepted
 	evidence := operationResult.Evidence
 	var failure *runtimecontract.FailureFact

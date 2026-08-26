@@ -65,7 +65,8 @@ func (s *System) ensureSoulDefaults(ctx context.Context) error {
 }
 
 func (s *System) ensureWorkspaceTemplateDefaults(ctx context.Context) error {
-	result, err := s.sendEnsure(event.NewEventWithContext(workspaceevents.TopicWorkspaceTemplateCommandEnsureDefaults, modulecommon.ModuleID, workspaceevents.CommandDestination, event.NewHeader(), ctx, workspaceevents.EnsureWorkspaceTemplateDefaultsCommand{}))
+	command := workspaceevents.EnsureWorkspaceTemplateDefaultsCommand{}
+	result, err := s.sendEnsure(event.NewEventWithContext(workspaceevents.TopicWorkspaceTemplateCommandEnsureDefaults, modulecommon.ModuleID, workspaceevents.CommandDestination, event.NewHeader(), ctx, command))
 	if err != nil {
 		return err
 	}
@@ -74,10 +75,10 @@ func (s *System) ensureWorkspaceTemplateDefaults(ctx context.Context) error {
 		return resultCause(resultErr)
 	}
 	response, ok := data.(workspaceevents.EnsureWorkspaceTemplateDefaultsResult)
-	if !ok || !response.Ensured {
+	if !ok {
 		return common.ErrInvalidArgument
 	}
-	return nil
+	return response.ValidateFor(command)
 }
 
 func (s *System) ensureMCPDefaults(ctx context.Context) error {

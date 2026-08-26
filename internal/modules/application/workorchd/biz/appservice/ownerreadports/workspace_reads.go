@@ -16,14 +16,15 @@ func ReadWorkspaceByOwnerCommand(ctx context.Context, hub magicevent.Hub, worksp
 	if hub == nil || workspaceID == "" {
 		return nil, common.ErrInvalidArgument
 	}
-	event := magicevent.NewEventWithContext(workspaceevents.TopicWorkspaceCommandGet, sourceModule, workspaceevents.CommandDestination, magicevent.NewHeader(), ctx, workspaceevents.GetWorkspaceCommand{WorkspaceID: workspaceID})
+	command := workspaceevents.GetWorkspaceCommand{WorkspaceID: workspaceID}
+	event := magicevent.NewEventWithContext(workspaceevents.TopicWorkspaceCommandGet, sourceModule, workspaceevents.CommandDestination, magicevent.NewHeader(), ctx, command)
 	ownerevent.BindLane(event, workspaceevents.Contracts(), workspaceevents.TopicWorkspaceCommandGet, "workspace", string(workspaceID), workspaceID, "", "")
-	response, err := ownerevent.Workspace(hub.Send(event), workspaceevents.TopicWorkspaceCommandGet)
+	response, err := ownerevent.WorkspaceOwner[workspaceevents.WorkspaceResult](hub.Send(event), workspaceevents.TopicWorkspaceCommandGet)
 	if err != nil {
 		return nil, err
 	}
-	if response.Workspace == nil {
-		return nil, common.ErrInvalidArgument
+	if err := response.ValidateFor(command); err != nil {
+		return nil, err
 	}
 	return workspaceeventmapping.Workspace(response.Workspace), nil
 }
@@ -32,10 +33,14 @@ func ListWorkspacesByOwnerCommand(ctx context.Context, hub magicevent.Hub) ([]*w
 	if hub == nil {
 		return nil, common.ErrInvalidArgument
 	}
-	event := magicevent.NewEventWithContext(workspaceevents.TopicWorkspaceCommandList, sourceModule, workspaceevents.CommandDestination, magicevent.NewHeader(), ctx, workspaceevents.ListWorkspacesCommand{})
+	command := workspaceevents.ListWorkspacesCommand{}
+	event := magicevent.NewEventWithContext(workspaceevents.TopicWorkspaceCommandList, sourceModule, workspaceevents.CommandDestination, magicevent.NewHeader(), ctx, command)
 	ownerevent.BindLane(event, workspaceevents.Contracts(), workspaceevents.TopicWorkspaceCommandList, "workspace", "all", "", "", "")
-	response, err := ownerevent.Workspace(hub.Send(event), workspaceevents.TopicWorkspaceCommandList)
+	response, err := ownerevent.WorkspaceOwner[workspaceevents.WorkspaceListResult](hub.Send(event), workspaceevents.TopicWorkspaceCommandList)
 	if err != nil {
+		return nil, err
+	}
+	if err := response.ValidateFor(command); err != nil {
 		return nil, err
 	}
 	return workspaceeventmapping.Workspaces(response.Workspaces), nil

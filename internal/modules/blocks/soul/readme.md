@@ -4,7 +4,7 @@ Status: active
 
 Type: stateful-block-contract
 
-Last Verified: 2026-08-21
+Last Verified: 2026-08-26
 
 ## 功能范围与边界
 
@@ -28,6 +28,8 @@ Soul allowlist 只约束 activation 选择和 provider-visible stage context，�
   `DeleteSoulResult`、`ValidateCapabilitySelectionResult`。
 - 所有 topic 都是同步 command。若误用无 result 的 `Post`，handler 在任何读取或写入前直接返回；create、update、
   delete 和 ensure-defaults 不会静默改变 owner 状态。
+- Soul repository helper、constructor 与 CRUD/list/validation 方法全部为 Biz package-private；外部只能通过 concrete
+  EventHub command/result 进入 owner，因此不能绕过 owner ingress 直接执行 read-update-write mutation。
 - `ListSoulsCommand` 使用 `CursorAfterID + Limit`，默认 100、owner hard limit 200；结果回显稳定 `NextCursor`。
   Application 若需完整管理视图，必须逐页读取，并执行页数、条目数、单调 cursor 和 cycle guard。
 - `application/workorchd` 通过 EventHub 管理/读取 Soul。fresh activation 使用 execution stage Soul（缺失时才回退

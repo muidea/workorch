@@ -330,7 +330,7 @@ func (h *governanceMagicTestHub) subscribeCanonicalGovernance(fixtures ...govern
 		if !ok {
 			h.t.Fatalf("unexpected workspace governance admission read: %q", cmd.WorkspaceID)
 		}
-		result.Set(workspaceevents.WorkspaceCommandResult{Workspace: &workspaceevents.Workspace{
+		result.Set(workspaceevents.WorkspaceResult{Workspace: &workspaceevents.Workspace{
 			ID:          fixture.WorkspaceID,
 			ActiveRunID: fixture.RunID,
 		}}, nil)

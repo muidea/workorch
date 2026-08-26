@@ -33,7 +33,7 @@ func TestSSHOwnerRequiresExactApprovalBeforeNetworkAndCommitsObservedChange(t *t
 	t.Cleanup(func() { owner.Teardown(ctx) })
 	installSSHReceiptObserver(t, hub)
 
-	operation, data, sealed := testSSHRuntimeOperation(t, "mutate-state")
+	operation, data, sealed := testSSHRuntimeOperation(t, adapter, "mutate-state")
 	first := testSSHExecuteCommand(t, operation, sealed, nil, 1)
 	firstResult := hub.Send(magicevent.NewEventWithContext(sshevents.TopicExecuteOperation, runtimecontract.RuntimeModuleOrchestrator, ModuleID, magicevent.NewHeader(), ctx, first))
 	firstData, err := firstResult.Get()
@@ -69,6 +69,16 @@ func TestSSHOwnerRequiresExactApprovalBeforeNetworkAndCommitsObservedChange(t *t
 	if err := receipt.Validate(); err != nil {
 		t.Fatalf("receipt validation: %v", err)
 	}
+	captureBeforeReplay := readFile(t, captureFile)
+	duplicateResult := hub.Send(magicevent.NewEventWithContext(sshevents.TopicExecuteOperation, runtimecontract.RuntimeModuleOrchestrator, ModuleID, magicevent.NewHeader(), ctx, second))
+	duplicateData, err := duplicateResult.Get()
+	if err != nil {
+		t.Fatal(err)
+	}
+	duplicateReceipt := duplicateData.(sshevents.ExecuteOperationResult).Receipt
+	if !runtimecontract.SameRuntimeOperationReceipt(receipt, duplicateReceipt) || readFile(t, captureFile) != captureBeforeReplay {
+		t.Fatalf("duplicate SSH execution crossed remote-effect fence: first=%+v duplicate=%+v", receipt, duplicateReceipt)
+	}
 }
 
 func TestSSHOwnerFailsClosedForPostWrongSourceSealedDriftAndGrantDrift(t *testing.T) {
@@ -89,7 +99,7 @@ func TestSSHOwnerFailsClosedForPostWrongSourceSealedDriftAndGrantDrift(t *testin
 	t.Cleanup(func() { owner.Teardown(ctx) })
 	installSSHReceiptObserver(t, hub)
 
-	operation, data, sealed := testSSHRuntimeOperation(t, "mutate-state")
+	operation, data, sealed := testSSHRuntimeOperation(t, adapter, "mutate-state")
 	command := testSSHExecuteCommand(t, operation, sealed, nil, 1)
 	event := magicevent.NewEventWithContext(sshevents.TopicExecuteOperation, runtimecontract.RuntimeModuleOrchestrator, ModuleID, magicevent.NewHeader(), ctx, command)
 	owner.handleSSHOperation(event, nil)
@@ -109,6 +119,30 @@ func TestSSHOwnerFailsClosedForPostWrongSourceSealedDriftAndGrantDrift(t *testin
 	}
 	assertSSHNotCalled(t, marker)
 
+	tamperedExecution := command
+	tamperedExecution.Execution.AcquisitionBinding = "another-capability-state"
+	tamperedExecutionResult := hub.Send(magicevent.NewEventWithContext(sshevents.TopicExecuteOperation, runtimecontract.RuntimeModuleOrchestrator, ModuleID, magicevent.NewHeader(), ctx, tamperedExecution))
+	if _, err := tamperedExecutionResult.Get(); err == nil {
+		t.Fatal("SSH execution bound to another owner catalog was accepted")
+	}
+	assertSSHNotCalled(t, marker)
+
+	adapter.revision = "ssh-policy-restarted"
+	staleResult := hub.Send(magicevent.NewEventWithContext(sshevents.TopicExecuteOperation, runtimecontract.RuntimeModuleOrchestrator, ModuleID, magicevent.NewHeader(), ctx, command))
+	staleData, err := staleResult.Get()
+	if err != nil {
+		t.Fatal(err)
+	}
+	staleReceipt := staleData.(sshevents.ExecuteOperationResult).Receipt
+	if staleReceipt.Outcome != runtimecontract.RuntimeOperationOutcomeRejected || staleReceipt.PrerequisiteStale == nil ||
+		staleReceipt.PrerequisiteStale.Domain != runtimecontract.RuntimeResourceOwnerCatalog ||
+		staleReceipt.PrerequisiteStale.ExpectedRevision != sealed.Authorization.OwnerRevision ||
+		staleReceipt.PrerequisiteStale.ObservedRevision != adapter.revision {
+		t.Fatalf("SSH restart/config drift did not return typed stale receipt: %+v", staleReceipt)
+	}
+	assertSSHNotCalled(t, marker)
+	adapter.revision = sealed.Authorization.OwnerRevision
+
 	requirement := sshApprovalRequirement(data)
 	grant := runtimecontract.RuntimeOperationGovernanceGrant{
 		ResolutionID: "resolution-1", ApprovalID: "approval-1", ExecutionKey: command.Execution.ExecutionKey,
@@ -127,12 +161,24 @@ func TestSSHOwnerFailsClosedForPostWrongSourceSealedDriftAndGrantDrift(t *testin
 
 func installSSHReceiptObserver(t *testing.T, hub magicevent.Hub) {
 	t.Helper()
+	type receiptKey struct {
+		executionKey string
+		fence        uint64
+	}
+	receipts := map[receiptKey]runtimecontract.RuntimeOperationReceipt{}
 	observer := magicevent.NewSimpleObserver(orchestratorevents.CommandDestination, hub)
-	observer.Subscribe(orchestratorevents.TopicOrchestratorQueryRuntimeOperationReceipt, func(_ magicevent.Event, result magicevent.Result) {
-		result.Set(orchestratorevents.QueryRuntimeOperationReceiptResult{}, nil)
+	observer.Subscribe(orchestratorevents.TopicOrchestratorQueryRuntimeOperationReceipt, func(event magicevent.Event, result magicevent.Result) {
+		command := event.Data().(orchestratorevents.QueryRuntimeOperationReceiptCommand)
+		receipt, found := receipts[receiptKey{executionKey: command.ExecutionKey, fence: command.Fence}]
+		response := orchestratorevents.QueryRuntimeOperationReceiptResult{Found: found}
+		if found {
+			response.Receipt = &receipt
+		}
+		result.Set(response, nil)
 	})
 	observer.Subscribe(orchestratorevents.TopicOrchestratorCommitRuntimeOperationReceipt, func(event magicevent.Event, result magicevent.Result) {
 		command := event.Data().(orchestratorevents.CommitRuntimeOperationReceiptCommand)
+		receipts[receiptKey{executionKey: command.Receipt.ExecutionKey, fence: command.Fence}] = command.Receipt
 		result.Set(orchestratorevents.CommitRuntimeOperationReceiptResult{Receipt: command.Receipt}, nil)
 	})
 	t.Cleanup(func() {
@@ -141,7 +187,7 @@ func installSSHReceiptObserver(t *testing.T, hub magicevent.Hub) {
 	})
 }
 
-func testSSHRuntimeOperation(t *testing.T, command string) (runtimecontract.RuntimeOperation, sshevents.OperationData, sshevents.SealedRuntimeOperation) {
+func testSSHRuntimeOperation(t *testing.T, adapter *RuntimeAdapter, command string) (runtimecontract.RuntimeOperation, sshevents.OperationData, sshevents.SealedRuntimeOperation) {
 	t.Helper()
 	sessionRef, credentialRef := "session-a", "credential-a"
 	operation := runtimecontract.RuntimeOperation{
@@ -152,7 +198,19 @@ func testSSHRuntimeOperation(t *testing.T, command string) (runtimecontract.Runt
 	if err != nil {
 		t.Fatal(err)
 	}
-	sealed, err := sshevents.SealRuntimeOperation(operation)
+	constraintRefs := append([]string{"owner-execution-policy"}, adapter.bindingConstraintRefs(runtimecontract.RuntimeOwnerInventoryItemsMaxCount)...)
+	catalog, err := runtimecontract.NewRuntimeOperationAdmissibility("ssh-admissibility", ModuleID, []string{operation.Kind}, adapter.targetRefs(runtimecontract.RuntimeOwnerInventoryItemsMaxCount), nil, constraintRefs, adapter.admissibilityRevision())
+	if err != nil {
+		t.Fatal(err)
+	}
+	catalog.OperationPolicies = []runtimecontract.RuntimeOperationPolicyFact{{
+		ID: "operation-policy/ssh-command", OwnerModuleID: ModuleID, OperationKind: runtimecontract.StepKindSSHCommand,
+		SubjectRef: "configured-ssh-target", EffectScope: runtimecontract.RuntimeEffectRemoteDurable,
+		IdempotencyClass: runtimecontract.RuntimeOperationIdempotencyAtMostOnce,
+	}}
+	catalog.SnapshotID = runtimecontract.StableRuntimeOperationAdmissibilitySnapshotID(catalog)
+	observation := sshAdmissibilityObservation(catalog.PrerequisiteID, catalog)
+	sealed, err := sshevents.SealRuntimeOperation(operation, catalog, observation)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -168,7 +226,11 @@ func testSSHExecuteCommand(t *testing.T, operation runtimecontract.RuntimeOperat
 	}
 	return sshevents.ExecuteOperationCommand{
 		RuntimeOperationExecutionContext: runtimecontract.RuntimeOperationExecutionContext{
-			Execution:   runtimecontract.RuntimeOperationExecutionEnvelope{ExecutionKey: executionKey, Fence: fence, ExpectedEffectScope: runtimecontract.RuntimeEffectRemoteDurable, GovernanceGrant: grant},
+			Execution: runtimecontract.RuntimeOperationExecutionEnvelope{
+				ExecutionKey: executionKey, Fence: fence, ExpectedEffectScope: runtimecontract.RuntimeEffectRemoteDurable,
+				AdmissibilitySnapshotID: sealed.Authorization.CatalogSnapshotID, AcquisitionBinding: sealed.Authorization.AcquisitionBinding,
+				GovernanceGrant: grant,
+			},
 			WorkspaceID: "ws-1", RunID: "run-1", DispatchID: "dispatch-1", Transaction: runtimecontract.AuthorityTransaction{AuthoritySnapshotID: "authority-1"},
 			OperationID: operation.ID, TargetRefs: append([]string(nil), operation.TargetRefs...), EvidenceKind: runtimecontract.EvidenceKindStateChange, WorkspaceDeliverableDirectory: t.TempDir(),
 		},

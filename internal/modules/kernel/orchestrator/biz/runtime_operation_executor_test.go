@@ -1,6 +1,8 @@
 package orchestrator
 
 import (
+	"context"
+	"strings"
 	"testing"
 
 	runtime "github.com/muidea/workorch/internal/modules/kernel/orchestrator/biz/runtime"
@@ -44,5 +46,57 @@ func TestRuntimeOperationExecutionResultUsesOnlyPersistedReceiptGovernance(t *te
 	)
 	if withGovernance.Governance == nil || !runtimecontract.SameRuntimeGovernanceRequirement(*withGovernance.Governance, requirement) {
 		t.Fatalf("persisted typed governance was not preserved: %+v", withGovernance)
+	}
+}
+
+// SM-3 concrete producers must not reconstruct owner authorization from the
+// operation or process configuration. The persisted SM-2 catalog and its
+// observation are both mandatory before an EventHub execute command exists.
+func TestCapabilityConcreteProducersRequirePersistedOwnerCatalog(t *testing.T) {
+	executor := eventRuntimeOperationExecutor{}
+	ctx := context.Background()
+	for name, execute := range map[string]func(runtime.RuntimeOperationExecutionRequest) error{
+		"shell": func(request runtime.RuntimeOperationExecutionRequest) error {
+			_, err := executor.executeShell(ctx, request, "", "")
+			return err
+		},
+		"web": func(request runtime.RuntimeOperationExecutionRequest) error {
+			_, err := executor.executeWeb(ctx, request, "", "")
+			return err
+		},
+		"ssh": func(request runtime.RuntimeOperationExecutionRequest) error {
+			_, err := executor.executeSSH(ctx, request, "", "")
+			return err
+		},
+	} {
+		t.Run(name+"/missing_catalog", func(t *testing.T) {
+			if err := execute(runtime.RuntimeOperationExecutionRequest{}); err == nil || !strings.Contains(err.Error(), "persisted owner catalog") {
+				t.Fatalf("missing owner catalog err = %v", err)
+			}
+		})
+		t.Run(name+"/missing_observation", func(t *testing.T) {
+			catalog := runtimecontract.RuntimeOperationAdmissibility{}
+			if err := execute(runtime.RuntimeOperationExecutionRequest{OwnerCatalog: &catalog}); err == nil || !strings.Contains(err.Error(), "persisted owner catalog") {
+				t.Fatalf("missing owner catalog observation err = %v", err)
+			}
+		})
+	}
+	t.Run("mcp/missing_catalog", func(t *testing.T) {
+		if _, err := executor.executeMCP(ctx, runtime.RuntimeOperationExecutionRequest{}, "", ""); err == nil || !strings.Contains(err.Error(), "persisted owner catalog") {
+			t.Fatalf("missing MCP owner catalog err = %v", err)
+		}
+	})
+}
+
+func TestConcreteProducerCarriesSealedOwnerCatalogExecutionIdentity(t *testing.T) {
+	record := runtimecontract.RuntimeOperationExecutionRecord{
+		OperationID: "web-1", ExecutionKey: "exec/ws/run/dispatch/web-1", Fence: 3,
+		ExpectedEffectScope:     runtimecontract.RuntimeEffectNone,
+		AdmissibilitySnapshotID: "operation-admissibility-web-1",
+		AcquisitionBinding:      "capability-state/ws/run/web/0",
+	}
+	envelope := runtimeOperationExecutionEnvelope(record, nil)
+	if envelope.AdmissibilitySnapshotID != record.AdmissibilitySnapshotID || envelope.AcquisitionBinding != record.AcquisitionBinding {
+		t.Fatalf("concrete producer lost sealed owner catalog identity: record=%+v envelope=%+v", record, envelope)
 	}
 }

@@ -4,7 +4,7 @@ Status: active
 
 Type: stateful-block-contract
 
-Last Verified: 2026-08-21
+Last Verified: 2026-08-26
 
 ## 功能范围与边界
 
@@ -29,6 +29,8 @@ Application 可以在 activation 选择阶段合并两类候选，但必须保�
   1,000 页/100,000 项 hard limit，并拒绝乱序、空页 continuation、重复或异常 cursor。
 - create 是同步 command：handler 在执行任何持久化之前要求非空 result。误用 EventHub `Post` 时必须零写入，
   不产生无回执的 fire-and-forget mutation。
+- Skill Registry 的 repository helper、constructor 与 create/get/list 方法全部为 Biz package-private；跨组件只能使用
+  本 owner 的 concrete EventHub command/result，不能直接构造 Registry service。
 - `application/workorchd` 通过 EventHub create/get/list WorkOrch Registry；SkillHub 只经 Application-private catalog
   adapter 读取。两者都先映射为 detached management DTO，再由 activation builder 封存。
 - activation 最多封存 5 个 Skill；每条 instruction 最多 8 KiB、instruction 总计最多 24 KiB、metadata 总计最多

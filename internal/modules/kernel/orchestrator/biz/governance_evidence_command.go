@@ -85,7 +85,7 @@ func (m *Biz) recordDecisionEvidence(ctx context.Context, command decisionevents
 		return decisionevents.RecordDecisionEvidenceResult{}, err
 	}
 	if err := m.withOrchestratorEvidenceMutation(ctx, command.WorkspaceID, func(guarded context.Context) error {
-		return repository.CreateOrUpdateEvidenceRecord(guarded, m.evidenceRecords, record)
+		return repository.CreateOrVerifyImmutableEvidenceRecord(guarded, m.evidenceRecords, record)
 	}); err != nil {
 		return decisionevents.RecordDecisionEvidenceResult{}, err
 	}
@@ -179,7 +179,7 @@ func (m *Biz) recordApprovalEvidence(ctx context.Context, command approvalevents
 		return approvalevents.RecordApprovalEvidenceResult{}, err
 	}
 	if err := m.withOrchestratorEvidenceMutation(ctx, command.WorkspaceID, func(guarded context.Context) error {
-		return repository.CreateOrUpdateEvidenceRecord(guarded, m.evidenceRecords, record)
+		return repository.CreateOrVerifyImmutableEvidenceRecord(guarded, m.evidenceRecords, record)
 	}); err != nil {
 		return approvalevents.RecordApprovalEvidenceResult{}, err
 	}

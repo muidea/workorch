@@ -236,14 +236,23 @@ func runtimeCandidateProviderFailureClass(err error, submitted bool) runtimecont
 	if errors.As(err, &outputLimitErr) {
 		return runtimecontract.RuntimeCandidateFailureClassProviderProtocol
 	}
-	message := strings.ToLower(err.Error())
-	if strings.Contains(message, "authentication_failed") || strings.Contains(message, "invalid api key") || strings.Contains(message, "unauthorized") || strings.Contains(message, "forbidden") {
-		return runtimecontract.RuntimeCandidateFailureClassProviderAuthentication
-	}
-	if !submitted || strings.Contains(message, "configuration") || strings.Contains(message, "provider client is not configured") || strings.Contains(message, "model not found") {
+	var modelFailure llmmodels.ProviderModelFailure
+	if errors.As(err, &modelFailure) {
 		return runtimecontract.RuntimeCandidateFailureClassProviderConfiguration
 	}
-	return runtimecontract.RuntimeCandidateFailureClassProviderTransient
+	var transportErr *ProviderTransportError
+	if errors.As(err, &transportErr) {
+		return runtimecontract.RuntimeCandidateFailureClassProviderTransient
+	}
+	// Generic errors carry no provider-owned factual identity. The only safe
+	// distinction left is the adapter's independent submission fact: before
+	// submission they are owner/configuration failures; after submission their
+	// outcome is conservatively transient. Error() text never changes either
+	// category.
+	if submitted {
+		return runtimecontract.RuntimeCandidateFailureClassProviderTransient
+	}
+	return runtimecontract.RuntimeCandidateFailureClassProviderConfiguration
 }
 
 func newProviderRequestID(request llmmodels.RuntimeCandidateRequest) string {

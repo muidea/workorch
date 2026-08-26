@@ -210,7 +210,7 @@ func startOwnerModules(exports Exports, rawHub magicevent.Hub, dataRoot string) 
 		return nil, err
 	}
 	memoryModule := memorymodule.New()
-	if err := configure(memoryModule, memoryModule.Configure(memorybiz.Dependencies{MemoryItems: repositories.MemoryItems, MemoryRecallTraces: repositories.MemoryRecallTraces, WorkspaceDeletions: repositories.MemoryDeletions, EventHub: rawHub})); err != nil {
+	if err := configure(memoryModule, memoryModule.Configure(memorybiz.Dependencies{OwnerRepositories: repositories.MemoryOwner, EventHub: rawHub})); err != nil {
 		return nil, err
 	}
 	skillModule := skillmodule.New()
@@ -223,8 +223,7 @@ func startOwnerModules(exports Exports, rawHub magicevent.Hub, dataRoot string) 
 	}
 	eventStreamModule := eventstreammodule.New()
 	if err := configure(eventStreamModule, eventStreamModule.Configure(eventstreambiz.Dependencies{
-		EventRecords: repositories.EventRecords, WorkspaceDeletions: repositories.EventStreamDeletions,
-		WorkspacePurger: repositories.EventStreamPurger, EventHub: rawHub,
+		OwnerRepositories: repositories.EventStreamOwner, EventHub: rawHub,
 	})); err != nil {
 		return nil, err
 	}
@@ -233,15 +232,15 @@ func startOwnerModules(exports Exports, rawHub magicevent.Hub, dataRoot string) 
 		return nil, err
 	}
 	decisionModule := decisionmodule.New()
-	if err := configure(decisionModule, decisionModule.Configure(decisionbiz.Dependencies{Tickets: repositories.Tickets, Resolutions: repositories.Resolutions, WorkspaceDeletions: repositories.DecisionDeletions, EventHub: rawHub})); err != nil {
+	if err := configure(decisionModule, decisionModule.Configure(decisionbiz.Dependencies{OwnerRepositories: repositories.DecisionOwner, EventHub: rawHub})); err != nil {
 		return nil, err
 	}
 	approvalModule := approvalmodule.New()
-	if err := configure(approvalModule, approvalModule.Configure(approvalbiz.Dependencies{Approvals: repositories.Approvals, WorkspaceDeletions: repositories.ApprovalDeletions, EventHub: rawHub})); err != nil {
+	if err := configure(approvalModule, approvalModule.Configure(approvalbiz.Dependencies{OwnerRepositories: repositories.ApprovalOwner, EventHub: rawHub})); err != nil {
 		return nil, err
 	}
 	resultModule := resultmodule.New()
-	if err := configure(resultModule, resultModule.Configure(resultbiz.Dependencies{Results: repositories.Results, Artifacts: repositories.Artifacts, WorkspaceDeletions: repositories.ResultDeletions, EventHub: rawHub})); err != nil {
+	if err := configure(resultModule, resultModule.Configure(resultbiz.Dependencies{OwnerRepositories: repositories.ResultOwner, EventHub: rawHub})); err != nil {
 		return nil, err
 	}
 

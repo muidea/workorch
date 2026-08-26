@@ -27,6 +27,17 @@ func NewArtifactStorageRepository(base repository.ArtifactRepository, dataRoot s
 	return &artifactStorageRepository{base: base, dataRoot: dataRoot}
 }
 
+func (r *artifactStorageRepository) OwnerRepositoryBinding() repository.OwnerRepositoryBinding {
+	if r == nil {
+		return repository.OwnerRepositoryBinding{}
+	}
+	bound, _ := r.base.(repository.OwnerRepositoryBound)
+	if bound == nil {
+		return repository.OwnerRepositoryBinding{}
+	}
+	return bound.OwnerRepositoryBinding()
+}
+
 func (r *artifactStorageRepository) Create(ctx context.Context, item *resultmodel.Artifact) error {
 	if item == nil || item.WorkspaceID == "" {
 		return r.base.Create(ctx, item)

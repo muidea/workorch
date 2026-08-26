@@ -1,0 +1,6 @@
+{
+  "schemaVersion": "workorch.deployed-convergence-evidence/v1",
+  "scenarioId": "DC-06",
+  "scenarioVariant": "ci-safe",
+  "unexpectedCoverageClaim": true
+}

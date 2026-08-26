@@ -19,8 +19,11 @@ func (m *Module) configure(d resultbiz.Dependencies) error {
 	if m == nil {
 		return common.ErrInvalidArgument
 	}
-	if d.EventHub == nil || d.Results == nil || d.Artifacts == nil || d.WorkspaceDeletions == nil {
+	if d.EventHub == nil {
 		return common.ErrInvalidArgument
+	}
+	if err := d.OwnerRepositories.Validate(); err != nil {
+		return err
 	}
 	x, e := resultbiz.New(d.EventHub, d.BackgroundRoutine, d)
 	if e != nil {

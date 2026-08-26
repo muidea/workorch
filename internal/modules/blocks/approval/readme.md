@@ -63,6 +63,9 @@ Orchestrator 创建 Runtime Approval 请求，Approval 在终态落库前将 Run
 
 所有 query/mutation 都有具体 result 类型，不再共用联合 envelope。列表命令必须显式 scope，使用稳定 cursor，
 默认 limit 100、上限 200；`ListAllApprovalsCommand` 还必须显式声明 `Scope: all`。
+任何 ID-only owner discovery 只有在全局恰好一个匹配项时才可返回；跨 workspace 出现两个同 ID Approval 时，无论
+它们是 pending/approved/rejected 的何种组合都必须 conflict，不能按状态优先选择。mutation 继续强制完整
+WorkspaceID + RunID scope。
 
 ## Owner 内部职责边界
 
@@ -76,7 +79,10 @@ Orchestrator 创建 Runtime Approval 请求，Approval 在终态落库前将 Run
   proposal/commit/finalize 协议；private lifecycle reducer 是 creation 与全部聚合变更的唯一入口。
 - `evidence_event.go`、`approval_notification.go` 只执行 scope-validated delivery；`reconciliation.go`
   只重放持久化 proposal/checkpoint。
-- 本 Block 只持有 Approval repository，不直接访问 Run、Workspace、EvidenceRecord 或 capability implementation。
+- 生产构造只接受 backend aggregate 铸造并通过 `Validate` 的 opaque `ApprovalOwnerRepositories` bundle；Approval 与
+  Workspace deletion surface 必须携带同一 backend binding。zero、fake 或 memory/file mixed-set 在订阅前 fail closed，
+  Biz、Module、Plugin 和 Initiator 均不保留独立 repository 注入或 legacy fallback。本 Block 不直接访问 Run、Workspace、
+  EvidenceRecord 或 capability implementation。
 
 ## 已覆盖的合同回归
 
@@ -85,7 +91,7 @@ Orchestrator 创建 Runtime Approval 请求，Approval 在终态落库前将 Run
 - commit 后崩溃、终态后 evidence 失败、Eventstream ack 失败及 notification 重放恢复；
 - pending/approved/rejected 转换、同结果幂等、相反终态冲突、repository 写失败不提前发布；
 - Approval/proposal seed 均拒绝 caller-selected initial/progress state，静态门禁拒绝 lifecycle reducer 之外的 initial state 与 Approval repository Create；
-- 同 Approval ID 跨 workspace/run 的 memory/file backend 隔离及错误 scope 拒绝；
+- 同 Approval ID 跨 workspace/run 的 memory/file backend 隔离、mixed-state ID-only duplicate conflict 及错误 scope 拒绝；
 - concrete typed result、显式 all scope、cursor/limit 边界与 detached deep-copy；
 - workspace retain/purge 永久 tombstone、普通 Delete-after-seal 拒绝、exact replay、重复 Teardown，以及 capability/open ingress 的 Orchestrator-only 边界。
 - deletion seal 与在途 reconciliation delivery 的线性化、统一双锁顺序的并发无死锁、seal 后零 Orchestrator/Eventstream

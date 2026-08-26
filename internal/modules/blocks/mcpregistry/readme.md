@@ -4,7 +4,7 @@ Status: active
 
 Type: stateful-block-contract
 
-Last Verified: 2026-08-21
+Last Verified: 2026-08-26
 
 ## 功能范围与边界
 
@@ -13,6 +13,8 @@ Last Verified: 2026-08-21
 ## 组件交互及合同
 
 - `blocks/mcpregistry/pkg/events` 为每个 create/get/list/update、defaults、完整快照和选择快照 topic 定义独立 command/result；不存在通用 `MCPCommandResult` 联合 envelope。所有同步 handler 在 `result == nil` 时直接返回，因此 EventHub `Post` 不能执行查询或强写。
+- Registry aggregate helper、constructor 与全部 mutation/query/snapshot 方法均为 Biz package-private；Application、System
+  和 MCP execution 只能发送 Registry owner 定义的 concrete EventHub command/result，不能直接构造 Registry service。
 - Server command/result 只携带 `EnvironmentReference{Name, Reference}`。允许的引用为 `env://ENV_NAME`、固定 workspace/run/step/directory 占位符或经校验的 `{workspaceManagedConfig:relative/path}`；明文 secret、credential 和任意字符串在进入 owner 状态前即被拒绝。引用值只由 `blocks/mcp` 在执行边界解析。
 - Server 与 Capability 通过单个 `MCPRegistryRepository.Load/Commit(expectedRevision)` 聚合合同持久化。一次 server update、allowlist reconciliation、Capability create/update 或 defaults ensure 要么整体提交，要么零提交；memory/file backend 均执行相同 CAS 语义。
 - `ReadRegistrySnapshotCommand` 返回同一 revision 的完整 bounded Server/Capability catalog，供 `blocks/mcp` 编译 execution catalog；`ReadSelectionSnapshotCommand` 在同一 revision 内校验选中的 enabled Capability 必须属于选中的 enabled Server 且仍位于对应 allowlist，供 fresh activation 使用。

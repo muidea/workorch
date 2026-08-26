@@ -56,7 +56,10 @@ func TestSealedRuntimeOperationBindsOwnerCatalogAndExecutionScope(t *testing.T) 
 		t.Fatal(err)
 	}
 	context := runtimecontract.RuntimeOperationExecutionContext{
-		Execution:   runtimecontract.RuntimeOperationExecutionEnvelope{ExecutionKey: "exec/ws/run/dispatch/mcp-1", Fence: 1, ExpectedEffectScope: runtimecontract.RuntimeEffectNone},
+		Execution: runtimecontract.RuntimeOperationExecutionEnvelope{
+			ExecutionKey: "exec/ws/run/dispatch/mcp-1", Fence: 1, ExpectedEffectScope: runtimecontract.RuntimeEffectNone,
+			AdmissibilitySnapshotID: catalog.SnapshotID, AcquisitionBinding: catalog.AcquisitionBinding,
+		},
 		OperationID: operation.ID, TargetRefs: append([]string(nil), operation.TargetRefs...), CoverageWorkItemIDs: append([]common.CoverageWorkItemID(nil), operation.CoverageWorkItemIDs...),
 	}
 	got, authorization, err := sealed.ValidateForExecution(context)

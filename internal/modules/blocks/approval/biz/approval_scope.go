@@ -78,21 +78,13 @@ func (m *Biz) resolveUniqueApprovalForUnscopedCommand(ctx context.Context, appro
 		return nil, err
 	}
 	var matches []*approvalmodel.Approval
-	var pendingMatches []*approvalmodel.Approval
 	for _, item := range items {
 		if item == nil || item.ID != approvalID {
 			continue
 		}
 		matches = append(matches, item)
-		if item.State == common.ApprovalStatePending {
-			pendingMatches = append(pendingMatches, item)
-		}
 	}
 	switch {
-	case len(pendingMatches) == 1:
-		return pendingMatches[0], nil
-	case len(pendingMatches) > 1:
-		return nil, common.ErrConflict
 	case len(matches) == 1:
 		return matches[0], nil
 	case len(matches) > 1:

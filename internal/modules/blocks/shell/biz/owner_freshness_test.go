@@ -55,41 +55,38 @@ func TestShellOwnerZeroWorkValidationReceiptReplaysQualityWithoutReexecution(t *
 	}
 	t.Cleanup(func() { owner.Teardown(ctx) })
 	workspace := newGoValidationWorkspace(t, "package fixture\nimport \"testing\"\nfunc TestExisting(t *testing.T) {}\n")
-	command := shellevents.ExecuteOperationCommand{
-		RuntimeOperationExecutionContext: runtimecontract.RuntimeOperationExecutionContext{
-			Execution: runtimecontract.RuntimeOperationExecutionEnvelope{
-				ExecutionKey: "exec/ws-shell/run-shell/dispatch-shell/validate", Fence: 1,
-				ExpectedEffectScope: runtimecontract.RuntimeEffectEphemeralSession,
-			},
-			WorkspaceID: "ws-shell", RunID: "run-shell", DispatchID: "dispatch-shell",
-			Transaction: runtimecontract.AuthorityTransaction{AuthoritySnapshotID: "authority-shell", RequiredOutputHash: "output-shell"},
-			OperationID: "validate", EvidenceKind: runtimecontract.EvidenceKindValidation,
-			WorkspaceDeliverableDirectory: workspace, TargetRefs: []string{"fixture_test.go"},
-			EvidencePolicies: []runtimecontract.RuntimeEvidencePolicy{{
-				ID: "zero-work", AppliesTo: runtimecontract.StepKindShellCommand, CommandName: "go", ArgsContain: []string{"test"},
-				ZeroWorkMarkers: []string{"no tests to run", "[no tests to run]"}, WorkEvidenceMarkers: []string{"=== RUN", "--- PASS:"},
-				QualityOnZeroWork: "inconclusive", EvidenceReason: "no matching validation checks", EvidenceTags: []string{"zero_work"},
-			}},
+	executionContext := runtimecontract.RuntimeOperationExecutionContext{
+		Execution: runtimecontract.RuntimeOperationExecutionEnvelope{
+			ExecutionKey: "exec/ws-shell/run-shell/dispatch-shell/validate", Fence: 1,
+			ExpectedEffectScope: runtimecontract.RuntimeEffectEphemeralSession,
 		},
-		ValidationRecipes: []runtimecontract.RuntimeValidationRecipe{{
-			ID: "go-test-zero-work", Command: "go", Args: []string{"test", "-v", "-run", "TestMissing", "./..."},
+		WorkspaceID: "ws-shell", RunID: "run-shell", DispatchID: "dispatch-shell",
+		Transaction: runtimecontract.AuthorityTransaction{AuthoritySnapshotID: "authority-shell", RequiredOutputHash: "output-shell"},
+		OperationID: "validate", EvidenceKind: runtimecontract.EvidenceKindValidation,
+		WorkspaceDeliverableDirectory: workspace, TargetRefs: []string{"fixture_test.go"},
+		EvidencePolicies: []runtimecontract.RuntimeEvidencePolicy{{
+			ID: "zero-work", AppliesTo: runtimecontract.StepKindShellCommand, CommandName: "go", ArgsContain: []string{"test"},
+			ZeroWorkMarkers: []string{"no tests to run", "[no tests to run]"}, WorkEvidenceMarkers: []string{"=== RUN", "--- PASS:"},
+			QualityOnZeroWork: "inconclusive", EvidenceReason: "no matching validation checks", EvidenceTags: []string{"zero_work"},
 		}},
-		Data: shellevents.OperationData{
-			ValidationRecipeID: "go-test-zero-work",
-			TargetRefs:         []string{"fixture_test.go"},
-			ManagedValidation: runtimecontract.RuntimeManagedValidation{
-				RuntimeManaged: true,
-				Kind:           runtimecontract.RuntimeBlockKindManagedValidationSession,
-			},
-		},
 	}
+	recipes := []runtimecontract.RuntimeValidationRecipe{{
+		ID: "go-test-zero-work", Command: "go", Args: []string{"test", "-v", "-run", "TestMissing", "./..."},
+	}}
+	command := sealedShellTestCommand(t, owner.runtimeAdapter, executionContext, runtimecontract.RuntimeBlockKindManagedValidationSession, shellevents.OperationData{
+		ValidationRecipeID: "go-test-zero-work",
+		TargetRefs:         []string{"fixture_test.go"},
+		ManagedValidation: runtimecontract.RuntimeManagedValidation{
+			RuntimeManaged: true,
+			Kind:           runtimecontract.RuntimeBlockKindManagedValidationSession,
+		},
+	}, "", recipes, nil)
 	first := sendShellStateChangingReceiptCommand(t, ctx, hub, command)
 	if first.Receipt.Evidence.Quality != "inconclusive" || !first.Receipt.Evidence.ZeroWork ||
 		first.Receipt.Evidence.Validation == nil || first.Receipt.Evidence.EvidenceReason != "no matching validation checks" {
 		t.Fatalf("zero-work receipt = %+v", first.Receipt)
 	}
 	firstHash := runtimecontract.StableRuntimeOperationReceiptHash(first.Receipt)
-	command.ValidationRecipes[0].Args = []string{"test", "-v", "-run", "TestExisting", "./..."}
 	replayed := sendShellStateChangingReceiptCommand(t, ctx, hub, command)
 	if runtimecontract.StableRuntimeOperationReceiptHash(replayed.Receipt) != firstHash ||
 		replayed.Receipt.Evidence.Quality != first.Receipt.Evidence.Quality || !replayed.Receipt.Evidence.ZeroWork {
@@ -132,7 +129,7 @@ func TestShellOwnerStateChangingReceiptReportsFileResourcesAndReplays(t *testing
 	}
 	t.Cleanup(func() { owner.Teardown(ctx) })
 	workspace := t.TempDir()
-	command := shellStateChangingReceiptCommand(workspace, "printf first > generated.txt")
+	command := shellStateChangingReceiptCommand(t, owner.runtimeAdapter, workspace, "printf first > generated.txt")
 	response := sendShellStateChangingReceiptCommand(t, ctx, hub, command)
 	if response.Receipt.Outcome != runtimecontract.RuntimeOperationOutcomeAccepted || !response.Receipt.Changed ||
 		response.Receipt.ObservedEffectScope != runtimecontract.RuntimeEffectWorkspaceDurable {
@@ -154,9 +151,8 @@ func TestShellOwnerStateChangingReceiptReportsFileResourcesAndReplays(t *testing
 		t.Fatalf("first owner effect content=%q err=%v", string(content), err)
 	}
 
-	// The same execution key must return the durable receipt instead of running
-	// a second Shell effect, even if a duplicate delivery carries different data.
-	command.Data.Args = []string{"-c", "printf replayed > generated.txt"}
+	// The same sealed delivery must return the durable receipt instead of running
+	// a second Shell effect.
 	replayed := sendShellStateChangingReceiptCommand(t, ctx, hub, command)
 	if replayed.Receipt.ExecutionKey != response.Receipt.ExecutionKey || replayed.Receipt.AfterHash != response.Receipt.AfterHash {
 		t.Fatalf("replayed receipt = %+v, want persisted %+v", replayed.Receipt, response.Receipt)
@@ -196,7 +192,7 @@ func TestShellOwnerRejectsWorkspaceEffectOutsideSealedTargets(t *testing.T) {
 	}
 	t.Cleanup(func() { owner.Teardown(ctx) })
 	workspace := t.TempDir()
-	command := shellStateChangingReceiptCommand(workspace, "printf declared > generated.txt; printf unexpected > rogue.txt")
+	command := shellStateChangingReceiptCommand(t, owner.runtimeAdapter, workspace, "printf declared > generated.txt; printf unexpected > rogue.txt")
 	response := sendShellStateChangingReceiptCommand(t, ctx, hub, command)
 	diagnostic := response.Receipt.Feedback.OriginalDiagnostic
 	if response.Receipt.Outcome != runtimecontract.RuntimeOperationOutcomeRejected || diagnostic == nil ||
@@ -411,23 +407,22 @@ func TestResolveManagedValidationRecipeDoesNotFallbackToActivationPolicy(t *test
 	}
 }
 
-func shellStateChangingReceiptCommand(workspace, script string) shellevents.ExecuteOperationCommand {
-	return shellevents.ExecuteOperationCommand{
-		RuntimeOperationExecutionContext: runtimecontract.RuntimeOperationExecutionContext{
-			Execution: runtimecontract.RuntimeOperationExecutionEnvelope{
-				ExecutionKey: "exec/ws-shell/run-shell/dispatch-shell/shell-write", Fence: 1,
-				ExpectedEffectScope: runtimecontract.RuntimeEffectWorkspaceDurable,
-			},
-			WorkspaceID: "ws-shell", RunID: "run-shell", DispatchID: "dispatch-shell",
-			Transaction: runtimecontract.AuthorityTransaction{AuthoritySnapshotID: "authority-shell", RequiredOutputHash: "output-shell"},
-			OperationID: "shell-write", EvidenceKind: runtimecontract.EvidenceKindStateChange,
-			WorkspaceDeliverableDirectory: workspace, TargetRefs: []string{"generated.txt"},
+func shellStateChangingReceiptCommand(t *testing.T, adapter *RuntimeAdapter, workspace, script string) shellevents.ExecuteOperationCommand {
+	t.Helper()
+	executionContext := runtimecontract.RuntimeOperationExecutionContext{
+		Execution: runtimecontract.RuntimeOperationExecutionEnvelope{
+			ExecutionKey: "exec/ws-shell/run-shell/dispatch-shell/shell-write", Fence: 1,
+			ExpectedEffectScope: runtimecontract.RuntimeEffectWorkspaceDurable,
 		},
-		Data: shellevents.OperationData{
-			Command: "sh", Args: []string{"-c", script}, StateChanging: true,
-			TargetRef: "generated.txt", TargetRefs: []string{"generated.txt"},
-		},
+		WorkspaceID: "ws-shell", RunID: "run-shell", DispatchID: "dispatch-shell",
+		Transaction: runtimecontract.AuthorityTransaction{AuthoritySnapshotID: "authority-shell", RequiredOutputHash: "output-shell"},
+		OperationID: "shell-write", EvidenceKind: runtimecontract.EvidenceKindStateChange,
+		WorkspaceDeliverableDirectory: workspace, TargetRefs: []string{"generated.txt"},
 	}
+	return sealedShellTestCommand(t, adapter, executionContext, runtimecontract.StepKindShellCommand, shellevents.OperationData{
+		Command: "sh", Args: []string{"-c", script}, StateChanging: true,
+		TargetRef: "generated.txt", TargetRefs: []string{"generated.txt"},
+	}, "", nil, nil)
 }
 
 func sendShellStateChangingReceiptCommand(t *testing.T, ctx context.Context, hub magicevent.Hub, command shellevents.ExecuteOperationCommand) shellevents.ExecuteOperationResult {
@@ -450,8 +445,8 @@ func sendShellStateChangingReceiptCommand(t *testing.T, ctx context.Context, hub
 func TestShellExecuteHandlerRejectsNilResultBeforeReceiptQueryOrEffect(t *testing.T) {
 	ctx := context.Background()
 	workspace := t.TempDir()
-	command := shellStateChangingReceiptCommand(workspace, "printf changed > generated.txt")
 	owner := &Biz{runtimeAdapter: NewRuntimeAdapter()}
+	command := shellStateChangingReceiptCommand(t, owner.runtimeAdapter, workspace, "printf changed > generated.txt")
 	event := magicevent.NewEventWithContext(
 		shellevents.TopicExecuteOperation, runtimecontract.RuntimeModuleOrchestrator, modulecommon.ModuleID,
 		magicevent.NewHeader(), ctx, command,
@@ -486,7 +481,7 @@ func TestShellExecuteRejectsUntrustedSourceAndReceiptQueryFailureBeforeEffect(t 
 	}
 	t.Cleanup(func() { owner.Teardown(ctx) })
 	workspace := t.TempDir()
-	command := shellStateChangingReceiptCommand(workspace, "printf changed > generated.txt")
+	command := shellStateChangingReceiptCommand(t, owner.runtimeAdapter, workspace, "printf changed > generated.txt")
 
 	spoofed := hub.Send(magicevent.NewEventWithContext(
 		shellevents.TopicExecuteOperation, runtimecontract.RuntimeModuleFile, modulecommon.ModuleID,
@@ -497,6 +492,40 @@ func TestShellExecuteRejectsUntrustedSourceAndReceiptQueryFailureBeforeEffect(t 
 	}
 	if queries != 0 || commits != 0 {
 		t.Fatalf("untrusted source reached receipt authority: queries=%d commits=%d", queries, commits)
+	}
+
+	missing := command
+	missing.SealedOperation = shellevents.SealedRuntimeOperation{}
+	missingResult := hub.Send(magicevent.NewEventWithContext(
+		shellevents.TopicExecuteOperation, runtimecontract.RuntimeModuleOrchestrator, modulecommon.ModuleID,
+		magicevent.NewHeader(), ctx, missing,
+	))
+	if _, err := missingResult.Get(); err == nil {
+		t.Fatal("Shell accepted missing sealed payload")
+	}
+	tampered := command
+	tampered.SealedOperation.Authorization.TargetRole = "tampered-role"
+	tamperedResult := hub.Send(magicevent.NewEventWithContext(
+		shellevents.TopicExecuteOperation, runtimecontract.RuntimeModuleOrchestrator, modulecommon.ModuleID,
+		magicevent.NewHeader(), ctx, tampered,
+	))
+	if _, err := tamperedResult.Get(); err == nil {
+		t.Fatal("Shell accepted tampered detached authorization")
+	}
+	tamperedExecution := command
+	tamperedExecution.Execution.AdmissibilitySnapshotID = "another-owner-catalog"
+	tamperedExecutionResult := hub.Send(magicevent.NewEventWithContext(
+		shellevents.TopicExecuteOperation, runtimecontract.RuntimeModuleOrchestrator, modulecommon.ModuleID,
+		magicevent.NewHeader(), ctx, tamperedExecution,
+	))
+	if _, err := tamperedExecutionResult.Get(); err == nil {
+		t.Fatal("Shell accepted execution record bound to another owner catalog")
+	}
+	if queries != 0 || commits != 0 {
+		t.Fatalf("missing/tampered Shell seal or execution record reached receipt authority: queries=%d commits=%d", queries, commits)
+	}
+	if _, err := os.Stat(filepath.Join(workspace, "generated.txt")); !os.IsNotExist(err) {
+		t.Fatalf("missing/tampered Shell seal crossed process fence: %v", err)
 	}
 
 	failedQuery := hub.Send(magicevent.NewEventWithContext(

@@ -17,7 +17,7 @@ import (
 
 func TestServiceCreateSearchAndValidateMemory(t *testing.T) {
 	ctx := context.Background()
-	service := NewService(backend.NewMemoryItemRepository())
+	service := newService(backend.NewMemoryItemRepository())
 
 	userMemory := memoryservice.CreateMemoryCommand{
 		MemoryID:    common.MemoryID("memory-user-context"),
@@ -31,7 +31,7 @@ func TestServiceCreateSearchAndValidateMemory(t *testing.T) {
 		Confidence:  8,
 		Visibility:  "workspace",
 	}
-	if err := service.CreateMemoryItem(ctx, userMemory); err != nil {
+	if err := service.createMemoryItem(ctx, userMemory); err != nil {
 		t.Fatalf("create user memory: %v", err)
 	}
 
@@ -47,11 +47,11 @@ func TestServiceCreateSearchAndValidateMemory(t *testing.T) {
 		Importance:  9,
 		Confidence:  9,
 	}
-	if err := service.CreateMemoryItem(ctx, runMemory); err != nil {
+	if err := service.createMemoryItem(ctx, runMemory); err != nil {
 		t.Fatalf("create run memory: %v", err)
 	}
 
-	found, err := service.SearchMemory(ctx, workorchquerycontract.MemorySearchQuery{
+	found, err := service.searchMemory(ctx, workorchquerycontract.MemorySearchQuery{
 		WorkspaceID: common.WorkspaceID("ws-1"),
 		Query:       "local",
 		Tags:        []string{"local"},
@@ -64,7 +64,7 @@ func TestServiceCreateSearchAndValidateMemory(t *testing.T) {
 		t.Fatalf("search result = %+v, want highest importance run memory", found)
 	}
 
-	list, _, err := service.ListMemoryByWorkspace(ctx, common.WorkspaceID("ws-1"), "", 100)
+	list, _, err := service.listMemoryByWorkspace(ctx, common.WorkspaceID("ws-1"), "", 100)
 	if err != nil {
 		t.Fatalf("list memory: %v", err)
 	}
@@ -75,9 +75,9 @@ func TestServiceCreateSearchAndValidateMemory(t *testing.T) {
 
 func TestServiceRejectsExecutionMemoryWithoutSource(t *testing.T) {
 	ctx := context.Background()
-	service := NewService(backend.NewMemoryItemRepository())
+	service := newService(backend.NewMemoryItemRepository())
 
-	err := service.CreateMemoryItem(ctx, memoryservice.CreateMemoryCommand{
+	err := service.createMemoryItem(ctx, memoryservice.CreateMemoryCommand{
 		MemoryID:    common.MemoryID("memory-invalid"),
 		WorkspaceID: common.WorkspaceID("ws-1"),
 		SourceType:  modulecommon.MemorySourceRun,
@@ -88,7 +88,7 @@ func TestServiceRejectsExecutionMemoryWithoutSource(t *testing.T) {
 		t.Fatalf("create execution memory without source err = %v, want invalid argument", err)
 	}
 
-	err = service.CreateMemoryItem(ctx, memoryservice.CreateMemoryCommand{
+	err = service.createMemoryItem(ctx, memoryservice.CreateMemoryCommand{
 		MemoryID:    common.MemoryID("memory-blank-source"),
 		WorkspaceID: common.WorkspaceID("ws-1"),
 		SourceType:  modulecommon.MemorySourceRun,
@@ -103,9 +103,9 @@ func TestServiceRejectsExecutionMemoryWithoutSource(t *testing.T) {
 
 func TestServiceRejectsUnsupportedMemoryType(t *testing.T) {
 	ctx := context.Background()
-	service := NewService(backend.NewMemoryItemRepository())
+	service := newService(backend.NewMemoryItemRepository())
 
-	err := service.CreateMemoryItem(ctx, memoryservice.CreateMemoryCommand{
+	err := service.createMemoryItem(ctx, memoryservice.CreateMemoryCommand{
 		MemoryID:    common.MemoryID("memory-invalid-type"),
 		WorkspaceID: common.WorkspaceID("ws-1"),
 		SourceType:  modulecommon.MemorySourceUser,
@@ -119,9 +119,9 @@ func TestServiceRejectsUnsupportedMemoryType(t *testing.T) {
 
 func TestServiceRejectsMemoryTypeNotAllowedForSource(t *testing.T) {
 	ctx := context.Background()
-	service := NewService(backend.NewMemoryItemRepository())
+	service := newService(backend.NewMemoryItemRepository())
 
-	err := service.CreateMemoryItem(ctx, memoryservice.CreateMemoryCommand{
+	err := service.createMemoryItem(ctx, memoryservice.CreateMemoryCommand{
 		MemoryID:    common.MemoryID("memory-source-type-invalid"),
 		WorkspaceID: common.WorkspaceID("ws-1"),
 		SourceType:  modulecommon.MemorySourceUser,
@@ -136,9 +136,9 @@ func TestServiceRejectsMemoryTypeNotAllowedForSource(t *testing.T) {
 
 func TestServiceRejectsRunSourceDecisionMemory(t *testing.T) {
 	ctx := context.Background()
-	service := NewService(backend.NewMemoryItemRepository())
+	service := newService(backend.NewMemoryItemRepository())
 
-	err := service.CreateMemoryItem(ctx, memoryservice.CreateMemoryCommand{
+	err := service.createMemoryItem(ctx, memoryservice.CreateMemoryCommand{
 		MemoryID:    common.MemoryID("memory-run-decision-invalid"),
 		WorkspaceID: common.WorkspaceID("ws-1"),
 		RunID:       common.RunID("run-1"),
@@ -155,7 +155,7 @@ func TestServiceRejectsRunSourceDecisionMemory(t *testing.T) {
 
 func TestServiceAllowsDecisionSourceDecisionMemory(t *testing.T) {
 	ctx := context.Background()
-	service := NewService(backend.NewMemoryItemRepository())
+	service := newService(backend.NewMemoryItemRepository())
 
 	cmd := memoryservice.CreateMemoryCommand{
 		MemoryID:    common.MemoryID("memory-decision"),
@@ -167,11 +167,11 @@ func TestServiceAllowsDecisionSourceDecisionMemory(t *testing.T) {
 		Summary:     "operator selected the safe retry path",
 		Content:     "Decision ticket ticket-1 was resolved with safe retry.",
 	}
-	if err := service.CreateMemoryItem(ctx, cmd); err != nil {
+	if err := service.createMemoryItem(ctx, cmd); err != nil {
 		t.Fatalf("create decision source memory: %v", err)
 	}
 
-	items, _, err := service.ListMemoryByWorkspace(ctx, cmd.WorkspaceID, "", 100)
+	items, _, err := service.listMemoryByWorkspace(ctx, cmd.WorkspaceID, "", 100)
 	if err != nil {
 		t.Fatalf("list memory: %v", err)
 	}
@@ -182,9 +182,9 @@ func TestServiceAllowsDecisionSourceDecisionMemory(t *testing.T) {
 
 func TestServiceRejectsSensitiveMemoryText(t *testing.T) {
 	ctx := context.Background()
-	service := NewService(backend.NewMemoryItemRepository())
+	service := newService(backend.NewMemoryItemRepository())
 
-	err := service.CreateMemoryItem(ctx, memoryservice.CreateMemoryCommand{
+	err := service.createMemoryItem(ctx, memoryservice.CreateMemoryCommand{
 		MemoryID:    common.MemoryID("memory-sensitive"),
 		WorkspaceID: common.WorkspaceID("ws-1"),
 		SourceType:  modulecommon.MemorySourceUser,
@@ -199,9 +199,9 @@ func TestServiceRejectsSensitiveMemoryText(t *testing.T) {
 
 func TestServiceRejectsBlankMemoryTextAndTags(t *testing.T) {
 	ctx := context.Background()
-	service := NewService(backend.NewMemoryItemRepository())
+	service := newService(backend.NewMemoryItemRepository())
 
-	err := service.CreateMemoryItem(ctx, memoryservice.CreateMemoryCommand{
+	err := service.createMemoryItem(ctx, memoryservice.CreateMemoryCommand{
 		MemoryID:    common.MemoryID("memory-blank-summary"),
 		WorkspaceID: common.WorkspaceID("ws-1"),
 		SourceType:  modulecommon.MemorySourceUser,
@@ -212,7 +212,7 @@ func TestServiceRejectsBlankMemoryTextAndTags(t *testing.T) {
 		t.Fatalf("create blank summary memory err = %v, want invalid argument", err)
 	}
 
-	err = service.CreateMemoryItem(ctx, memoryservice.CreateMemoryCommand{
+	err = service.createMemoryItem(ctx, memoryservice.CreateMemoryCommand{
 		MemoryID:    common.MemoryID("memory-blank-tag"),
 		WorkspaceID: common.WorkspaceID("ws-1"),
 		SourceType:  modulecommon.MemorySourceUser,
@@ -229,11 +229,11 @@ func TestServiceBoundsMemoryAndRecallQueriesWithCursors(t *testing.T) {
 	ctx := context.Background()
 	items := backend.NewMemoryItemRepository()
 	traces := backend.NewMemoryRecallTraceRepository()
-	service := NewServiceWithRecallTraces(items, traces)
+	service := newServiceWithRecallTraces(items, traces)
 	workspaceID := common.WorkspaceID("ws-bounded-memory")
 	for idx := 0; idx < 205; idx++ {
 		id := common.MemoryID(fmt.Sprintf("memory-%03d", idx))
-		if err := service.CreateMemoryItem(common.ContextWithRuntimeWorkspaceID(ctx, workspaceID), memoryservice.CreateMemoryCommand{
+		if err := service.createMemoryItem(common.ContextWithRuntimeWorkspaceID(ctx, workspaceID), memoryservice.CreateMemoryCommand{
 			MemoryID: id, WorkspaceID: workspaceID, SourceType: modulecommon.MemorySourceUser,
 			MemoryType: modulecommon.MemoryTypeProjectContext, Summary: string(id),
 		}); err != nil {
@@ -249,14 +249,14 @@ func TestServiceBoundsMemoryAndRecallQueriesWithCursors(t *testing.T) {
 		}
 	}
 
-	first, itemCursor, err := service.ListMemoryByWorkspace(ctx, workspaceID, "", 0)
+	first, itemCursor, err := service.listMemoryByWorkspace(ctx, workspaceID, "", 0)
 	if err != nil {
 		t.Fatalf("list default memory page: %v", err)
 	}
 	if len(first) != modulecommon.MemoryListDefaultLimit || itemCursor != "memory-099" {
 		t.Fatalf("default memory page len/cursor = %d/%q", len(first), itemCursor)
 	}
-	second, nextItemCursor, err := service.ListMemoryByWorkspace(ctx, workspaceID, itemCursor, 1000)
+	second, nextItemCursor, err := service.listMemoryByWorkspace(ctx, workspaceID, itemCursor, 1000)
 	if err != nil {
 		t.Fatalf("list capped memory page: %v", err)
 	}
@@ -265,7 +265,7 @@ func TestServiceBoundsMemoryAndRecallQueriesWithCursors(t *testing.T) {
 	}
 
 	for name, limit := range map[string]int{"zero": 0, "negative": -1} {
-		found, err := service.SearchMemory(ctx, workorchquerycontract.MemorySearchQuery{WorkspaceID: workspaceID, Limit: limit})
+		found, err := service.searchMemory(ctx, workorchquerycontract.MemorySearchQuery{WorkspaceID: workspaceID, Limit: limit})
 		if err != nil {
 			t.Fatalf("%s-limit search: %v", name, err)
 		}
@@ -273,7 +273,7 @@ func TestServiceBoundsMemoryAndRecallQueriesWithCursors(t *testing.T) {
 			t.Fatalf("%s-limit search len = %d", name, len(found))
 		}
 	}
-	found, err := service.SearchMemory(ctx, workorchquerycontract.MemorySearchQuery{WorkspaceID: workspaceID, Limit: 1000})
+	found, err := service.searchMemory(ctx, workorchquerycontract.MemorySearchQuery{WorkspaceID: workspaceID, Limit: 1000})
 	if err != nil {
 		t.Fatalf("capped search: %v", err)
 	}
@@ -281,21 +281,21 @@ func TestServiceBoundsMemoryAndRecallQueriesWithCursors(t *testing.T) {
 		t.Fatalf("capped search len = %d", len(found))
 	}
 
-	tracePage, traceCursor, err := service.ListMemoryRecallTraces(ctx, workorchquerycontract.MemoryRecallTraceQuery{WorkspaceID: workspaceID})
+	tracePage, traceCursor, err := service.listMemoryRecallTraces(ctx, workorchquerycontract.MemoryRecallTraceQuery{WorkspaceID: workspaceID})
 	if err != nil {
 		t.Fatalf("list default trace page: %v", err)
 	}
 	if len(tracePage) != modulecommon.MemoryRecallListDefaultLimit || traceCursor != "trace-099" {
 		t.Fatalf("default trace page len/cursor = %d/%q", len(tracePage), traceCursor)
 	}
-	tracePage, nextTraceCursor, err := service.ListMemoryRecallTraces(ctx, workorchquerycontract.MemoryRecallTraceQuery{WorkspaceID: workspaceID, CursorAfterID: traceCursor, Limit: 1000})
+	tracePage, nextTraceCursor, err := service.listMemoryRecallTraces(ctx, workorchquerycontract.MemoryRecallTraceQuery{WorkspaceID: workspaceID, CursorAfterID: traceCursor, Limit: 1000})
 	if err != nil {
 		t.Fatalf("list capped trace page: %v", err)
 	}
 	if len(tracePage) != 105 || nextTraceCursor != "" || tracePage[0].ID != "trace-100" {
 		t.Fatalf("second trace page = len:%d cursor:%q first:%v", len(tracePage), nextTraceCursor, tracePage[0].ID)
 	}
-	if _, _, err := service.ListMemoryRecallTraces(ctx, workorchquerycontract.MemoryRecallTraceQuery{WorkspaceID: workspaceID, CursorAfterID: "missing"}); !errors.Is(err, common.ErrInvalidArgument) {
+	if _, _, err := service.listMemoryRecallTraces(ctx, workorchquerycontract.MemoryRecallTraceQuery{WorkspaceID: workspaceID, CursorAfterID: "missing"}); !errors.Is(err, common.ErrInvalidArgument) {
 		t.Fatalf("unknown trace cursor error = %v, want invalid argument", err)
 	}
 }
@@ -303,7 +303,7 @@ func TestServiceBoundsMemoryAndRecallQueriesWithCursors(t *testing.T) {
 func TestServiceRejectsInvalidMemoryVectorsAndScope(t *testing.T) {
 	ctx := context.Background()
 	repo := backend.NewMemoryItemRepository()
-	service := NewService(repo)
+	service := newService(repo)
 	base := memoryservice.CreateMemoryCommand{
 		MemoryID: "memory-vector", WorkspaceID: "ws-vector", SourceType: modulecommon.MemorySourceUser,
 		MemoryType: modulecommon.MemoryTypeProjectContext, Summary: "vector memory",
@@ -316,17 +316,17 @@ func TestServiceRejectsInvalidMemoryVectorsAndScope(t *testing.T) {
 		command := base
 		command.MemoryID = common.MemoryID("memory-" + name)
 		command.Vector = vector
-		if err := service.CreateMemoryItem(ctx, command); !errors.Is(err, common.ErrInvalidArgument) {
+		if err := service.createMemoryItem(ctx, command); !errors.Is(err, common.ErrInvalidArgument) {
 			t.Fatalf("create %s vector error = %v", name, err)
 		}
 	}
-	if err := service.CreateMemoryItem(common.ContextWithRuntimeWorkspaceID(ctx, base.WorkspaceID), base); err != nil {
+	if err := service.createMemoryItem(common.ContextWithRuntimeWorkspaceID(ctx, base.WorkspaceID), base); err != nil {
 		t.Fatalf("create scoped memory: %v", err)
 	}
-	if _, err := service.GetMemoryItemScoped(common.ContextWithRuntimeWorkspaceID(ctx, base.WorkspaceID), base.WorkspaceID, base.MemoryID); err != nil {
+	if _, err := service.getMemoryItemScoped(common.ContextWithRuntimeWorkspaceID(ctx, base.WorkspaceID), base.WorkspaceID, base.MemoryID); err != nil {
 		t.Fatalf("get matching workspace memory: %v", err)
 	}
-	if _, err := service.GetMemoryItemScoped(common.ContextWithRuntimeWorkspaceID(ctx, "ws-other"), "ws-other", base.MemoryID); err == nil {
+	if _, err := service.getMemoryItemScoped(common.ContextWithRuntimeWorkspaceID(ctx, "ws-other"), "ws-other", base.MemoryID); err == nil {
 		t.Fatal("cross-workspace memory get was accepted")
 	}
 	for name, query := range map[string]workorchquerycontract.MemorySearchQuery{
@@ -334,7 +334,7 @@ func TestServiceRejectsInvalidMemoryVectorsAndScope(t *testing.T) {
 		"infinite vector":  {WorkspaceID: base.WorkspaceID, Vector: []float64{math.Inf(-1)}},
 		"oversized vector": {WorkspaceID: base.WorkspaceID, Vector: make([]float64, modulecommon.MemoryVectorMaxDimension+1)},
 	} {
-		if _, err := service.SearchMemory(ctx, query); !errors.Is(err, common.ErrInvalidArgument) {
+		if _, err := service.searchMemory(ctx, query); !errors.Is(err, common.ErrInvalidArgument) {
 			t.Fatalf("%s search error = %v", name, err)
 		}
 	}

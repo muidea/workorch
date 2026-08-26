@@ -4,7 +4,7 @@ Status: active
 
 Type: capability-block-contract
 
-Last Verified: 2026-08-21
+Last Verified: 2026-08-26
 
 ## 功能范围与边界
 
@@ -22,7 +22,15 @@ Web owner 直接执行 GET：每个 hostname 只解析一次，解析地址同�
   capability、operation-admissibility、operation-feasibility、semantic-proof feasibility，并执行 Web operation。
 - Execute command 只携带 `RuntimeOperationExecutionContext + SealedRuntimeOperation`。Web 在网络访问前校验
   Orchestrator producer、非空同步 Result、完整 sealed payload hash、operation/scope、`ExecutionKey + fence`、
-  `ExpectedEffectScope=none`，并向 Orchestrator 查询当前 claimed receipt authority。
+  `ExpectedEffectScope=none`，并向 Orchestrator 查询当前 claimed receipt authority。seal 必须由 persisted
+  `RuntimeOperationExecutionRequest.OwnerCatalog` 及其 exact prerequisite observation 构造，且 hash 绑定 Web owner policy、
+  catalog snapshot、acquisition binding 与 provider configuration revision；execution envelope 的
+  `AdmissibilitySnapshotID + AcquisitionBinding` 必须与 seal 精确相等。缺失、错误 owner、替换 execution catalog 或 detached
+  revision 漂移均不能产生 execute call。
+- exact receipt 不存在时，Web 在任何 provider/network call 前重新读取 owner-private provider configuration revision，并与
+  seal 内 revision 作 exact 比较。配置 reload/restart drift 返回 `provider_config/configured_web_providers` 的 typed
+  `RuntimePrerequisiteStale` rejected receipt，由 SM-2 刷新 catalog 后重新 seal；Web 不自行迁移 Runtime 状态或选择 retry。
+  revision 比较、provider 选择与 transport 使用同一个 owner-private immutable snapshot，中间不再次 reload 配置。
 - Web 不直接查询 Approval owner，也不接受 operation 参数 `approvalId`。需要 plain HTTP、loopback、private network 或
   超 provider result limit 时，Web 返回 exact `RuntimeGovernanceRequirement`；继续执行只接受 Orchestrator 封存且逐字段匹配
   subject/action/risk/authorization hash 与当前 execution key/fence 的 `GovernanceGrant`。
@@ -60,7 +68,8 @@ Web owner 直接执行 GET：每个 hostname 只解析一次，解析地址同�
 
 已覆盖：
 
-- producer、Post/nil Result、sealed payload drift、stale receipt query 均在零 provider call 下 fail closed；
+- producer、Post/nil Result、missing/wrong owner catalog、sealed payload drift、stale receipt query 与 provider configuration
+  revision/execution-record catalog drift 均在零 provider call 下 fail closed；exact duplicate 只重放 persisted receipt；
 - legacy `approvalId` 拒绝、exact grant target/provider 漂移、大 result set 与 private/loopback 访问；
 - redirect target 在 follow 前阻断、DNS 单次解析并绑定实际 dial、redirect hard limit、metadata/allow/deny policy；
 - provider cross-origin redirect、timeout/response limit/bad shape 的稳定安全错误；

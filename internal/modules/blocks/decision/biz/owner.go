@@ -18,11 +18,9 @@ import (
 const ModuleID = modulecommon.ModuleID
 
 type Dependencies struct {
-	Tickets            repository.DecisionTicketRepository
-	Resolutions        repository.DecisionResolutionRepository
-	WorkspaceDeletions repository.DecisionWorkspaceDeletionRepository
-	EventHub           magicevent.Hub
-	BackgroundRoutine  magictask.BackgroundRoutine
+	OwnerRepositories repository.DecisionOwnerRepositories
+	EventHub          magicevent.Hub
+	BackgroundRoutine magictask.BackgroundRoutine
 }
 
 type Biz struct {
@@ -41,10 +39,13 @@ type Biz struct {
 }
 
 func New(h magicevent.Hub, background magictask.BackgroundRoutine, deps Dependencies) (*Biz, error) {
-	if deps.Tickets == nil || deps.Resolutions == nil || deps.WorkspaceDeletions == nil || deps.EventHub == nil || h == nil {
+	if deps.EventHub == nil || h == nil {
 		return nil, common.ErrInvalidArgument
 	}
-	return &Biz{Base: basebiz.New(modulecommon.ModuleID, h, background), service: newMutationService(deps.Tickets, deps.Resolutions), tickets: deps.Tickets, resolutions: deps.Resolutions, workspaceDeletions: deps.WorkspaceDeletions, workspaceLocks: map[common.WorkspaceID]*sync.Mutex{}}, nil
+	if err := deps.OwnerRepositories.Validate(); err != nil {
+		return nil, err
+	}
+	return &Biz{Base: basebiz.New(modulecommon.ModuleID, h, background), service: newMutationService(deps.OwnerRepositories.Tickets(), deps.OwnerRepositories.Resolutions()), tickets: deps.OwnerRepositories.Tickets(), resolutions: deps.OwnerRepositories.Resolutions(), workspaceDeletions: deps.OwnerRepositories.WorkspaceDeletions(), workspaceLocks: map[common.WorkspaceID]*sync.Mutex{}}, nil
 }
 
 func (m *Biz) Start() error {

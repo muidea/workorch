@@ -55,9 +55,8 @@ func TestApprovalWorkspaceDeletionRejectsForgedPurgeAndUsesPrivatePath(t *testin
 	seedResolvedApprovalForDeletionDelivery(t, ctx, repositories, workspaceID, runID, "approval-private-purge")
 
 	hub := magicevent.NewHub(16)
-	owner, err := New(hub, nil, Dependencies{
-		Approvals: repositories.Approvals, WorkspaceDeletions: repositories.WorkspaceDeletions, EventHub: hub,
-	})
+	owner, err := New(hub, nil, Dependencies{OwnerRepositories: approvalBizTestOwnerRepositories(
+		repositories.Approvals, repositories.WorkspaceDeletions), EventHub: hub})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -216,9 +215,8 @@ func TestApprovalDeletionSealLinearizesWithReconciliationDeliveryWithoutDeadlock
 			WorkspaceID: data.WorkspaceID, RunID: data.RunID,
 		}, nil)
 	})
-	owner, err := New(probe, nil, Dependencies{
-		Approvals: repositories.Approvals, WorkspaceDeletions: repositories.WorkspaceDeletions, EventHub: probe,
-	})
+	owner, err := New(probe, nil, Dependencies{OwnerRepositories: approvalBizTestOwnerRepositories(
+		repositories.Approvals, repositories.WorkspaceDeletions), EventHub: probe})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -279,9 +277,8 @@ func TestApprovalRestartSkipsLateResolvedDeliveryAfterDeletionSeal(t *testing.T)
 	item := seedResolvedApprovalForDeletionDelivery(t, ctx, repositories, workspaceID, runID, approvalID)
 
 	firstRaw := magicevent.NewHub(16)
-	first, err := New(firstRaw, nil, Dependencies{
-		Approvals: repositories.Approvals, WorkspaceDeletions: repositories.WorkspaceDeletions, EventHub: firstRaw,
-	})
+	first, err := New(firstRaw, nil, Dependencies{OwnerRepositories: approvalBizTestOwnerRepositories(
+		repositories.Approvals, repositories.WorkspaceDeletions), EventHub: firstRaw})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -296,9 +293,8 @@ func TestApprovalRestartSkipsLateResolvedDeliveryAfterDeletionSeal(t *testing.T)
 
 	restartedRaw := magicevent.NewHub(16)
 	probe := &approvalDeletionDeliveryProbe{Hub: restartedRaw}
-	restarted, err := New(probe, nil, Dependencies{
-		Approvals: repositories.Approvals, WorkspaceDeletions: repositories.WorkspaceDeletions, EventHub: probe,
-	})
+	restarted, err := New(probe, nil, Dependencies{OwnerRepositories: approvalBizTestOwnerRepositories(
+		repositories.Approvals, repositories.WorkspaceDeletions), EventHub: probe})
 	if err != nil {
 		t.Fatal(err)
 	}

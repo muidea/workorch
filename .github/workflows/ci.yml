@@ -28,6 +28,15 @@ jobs:
       - name: Make verify-boundary-contract
         run: make verify-boundary-contract
 
+      - name: Make cli-test
+        run: make cli-test
+
+      - name: Make console-test
+        run: make console-test
+
+      - name: Verify deployed convergence manifest gate contracts
+        run: make verify-deployed-convergence-manifest-tests
+
       - name: Managed verify-ci-mvp-file with mock providers
         env:
           WORKORCH_MANAGED_VERIFY_TARGET: verify-ci-mvp-file

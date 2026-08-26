@@ -24,18 +24,19 @@ func DefineGoal(ctx context.Context, hub magicevent.Hub, workspaceID common.Work
 	if hub == nil {
 		return nil, common.ErrInvalidArgument
 	}
-	event := magicevent.NewEventWithContext(workspaceevents.TopicWorkspaceCommandDefineGoal, "application/workorchd/appservice", workspaceevents.CommandDestination, magicevent.NewHeader(), ctx, workspaceevents.DefineGoalCommand{
+	command := workspaceevents.DefineGoalCommand{
 		GoalID:      goalID,
 		WorkspaceID: workspaceID,
 		Text:        text,
-	})
+	}
+	event := magicevent.NewEventWithContext(workspaceevents.TopicWorkspaceCommandDefineGoal, "application/workorchd/appservice", workspaceevents.CommandDestination, magicevent.NewHeader(), ctx, command)
 	ownerevent.BindLane(event, workspaceevents.Contracts(), workspaceevents.TopicWorkspaceCommandDefineGoal, "goal", string(goalID), workspaceID, "", "")
-	response, err := ownerevent.Workspace(hub.Send(event), workspaceevents.TopicWorkspaceCommandDefineGoal)
+	response, err := ownerevent.WorkspaceOwner[workspaceevents.GoalResult](hub.Send(event), workspaceevents.TopicWorkspaceCommandDefineGoal)
 	if err != nil {
 		return nil, err
 	}
-	if response.Goal == nil {
-		return nil, common.ErrInvalidArgument
+	if err := response.ValidateFor(command); err != nil {
+		return nil, err
 	}
 	return workspacemodel.CloneGoal(response.Goal), nil
 }
@@ -47,18 +48,19 @@ func UpdateGoal(ctx context.Context, hub magicevent.Hub, workspaceID common.Work
 	if hub == nil {
 		return nil, common.ErrInvalidArgument
 	}
-	event := magicevent.NewEventWithContext(workspaceevents.TopicWorkspaceCommandUpdateGoal, "application/workorchd/appservice", workspaceevents.CommandDestination, magicevent.NewHeader(), ctx, workspaceevents.UpdateGoalCommand{
+	command := workspaceevents.UpdateGoalCommand{
 		WorkspaceID: workspaceID,
 		GoalID:      goalID,
 		Text:        text,
-	})
+	}
+	event := magicevent.NewEventWithContext(workspaceevents.TopicWorkspaceCommandUpdateGoal, "application/workorchd/appservice", workspaceevents.CommandDestination, magicevent.NewHeader(), ctx, command)
 	ownerevent.BindLane(event, workspaceevents.Contracts(), workspaceevents.TopicWorkspaceCommandUpdateGoal, "goal", string(goalID), workspaceID, "", "")
-	response, err := ownerevent.Workspace(hub.Send(event), workspaceevents.TopicWorkspaceCommandUpdateGoal)
+	response, err := ownerevent.WorkspaceOwner[workspaceevents.GoalResult](hub.Send(event), workspaceevents.TopicWorkspaceCommandUpdateGoal)
 	if err != nil {
 		return nil, err
 	}
-	if response.Goal == nil {
-		return nil, common.ErrInvalidArgument
+	if err := response.ValidateFor(command); err != nil {
+		return nil, err
 	}
 	return workspacemodel.CloneGoal(response.Goal), nil
 }
@@ -70,8 +72,12 @@ func DeleteGoal(ctx context.Context, hub magicevent.Hub, workspaceID common.Work
 	if hub == nil {
 		return common.ErrInvalidArgument
 	}
-	event := magicevent.NewEventWithContext(workspaceevents.TopicWorkspaceCommandDeleteGoal, "application/workorchd/appservice", workspaceevents.CommandDestination, magicevent.NewHeader(), ctx, workspaceevents.DeleteGoalCommand{WorkspaceID: workspaceID, GoalID: goalID})
+	command := workspaceevents.DeleteGoalCommand{WorkspaceID: workspaceID, GoalID: goalID}
+	event := magicevent.NewEventWithContext(workspaceevents.TopicWorkspaceCommandDeleteGoal, "application/workorchd/appservice", workspaceevents.CommandDestination, magicevent.NewHeader(), ctx, command)
 	ownerevent.BindLane(event, workspaceevents.Contracts(), workspaceevents.TopicWorkspaceCommandDeleteGoal, "goal", string(goalID), workspaceID, "", "")
-	_, err := ownerevent.Workspace(hub.Send(event), workspaceevents.TopicWorkspaceCommandDeleteGoal)
-	return err
+	response, err := ownerevent.WorkspaceOwner[workspaceevents.DeleteGoalResult](hub.Send(event), workspaceevents.TopicWorkspaceCommandDeleteGoal)
+	if err != nil {
+		return err
+	}
+	return response.ValidateFor(command)
 }

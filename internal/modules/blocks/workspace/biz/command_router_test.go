@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"path/filepath"
+	"reflect"
 	"testing"
 
 	magicevent "github.com/muidea/magicCommon/event"
@@ -59,6 +60,57 @@ func TestWorkspaceCommandTopicsHaveOneSemanticFamily(t *testing.T) {
 	}
 	if _, ok := workspaceCommandFamilyForTopic("/workspace/command/unknown"); ok {
 		t.Fatal("unknown command topic must fail closed")
+	}
+}
+
+func TestWorkspaceCommandResultsAreNarrowPerTopic(t *testing.T) {
+	workspaceID := common.WorkspaceID("ws-narrow-result")
+	workspace := &workspaceevents.Workspace{ID: workspaceID, Revision: 2}
+	goal := &workspacemodel.Goal{ID: "goal-narrow-result", WorkspaceID: workspaceID}
+	dod := &workspacemodel.DoD{ID: "dod-narrow-result", WorkspaceID: workspaceID}
+	template := &workspaceevents.WorkspaceTemplate{ID: "template-narrow-result"}
+	tests := []struct {
+		topic   string
+		command any
+		data    workspaceCommandResponse
+		want    any
+	}{
+		{workspaceevents.TopicWorkspaceCommandGet, workspaceevents.GetWorkspaceCommand{WorkspaceID: workspaceID}, workspaceCommandResponse{Workspace: workspace}, workspaceevents.WorkspaceResult{}},
+		{workspaceevents.TopicWorkspaceCommandList, workspaceevents.ListWorkspacesCommand{}, workspaceCommandResponse{Workspaces: []*workspaceevents.Workspace{workspace}}, workspaceevents.WorkspaceListResult{}},
+		{workspaceevents.TopicWorkspaceCommandUpdateLLMSelection, workspaceevents.UpdateWorkspaceLLMSelectionCommand{WorkspaceID: workspaceID, ExpectedRevision: 1}, workspaceCommandResponse{Workspace: workspace, Changed: true}, workspaceevents.WorkspaceLLMSelectionResult{}},
+		{workspaceevents.TopicWorkspaceCommandGetGoal, workspaceevents.GetGoalCommand{WorkspaceID: workspaceID, GoalID: goal.ID}, workspaceCommandResponse{Goal: goal}, workspaceevents.GoalResult{}},
+		{workspaceevents.TopicWorkspaceCommandListGoalsByWS, workspaceevents.ListGoalsByWorkspaceCommand{WorkspaceID: workspaceID}, workspaceCommandResponse{Goals: []*workspacemodel.Goal{goal}}, workspaceevents.GoalListResult{}},
+		{workspaceevents.TopicWorkspaceCommandDeleteGoal, workspaceevents.DeleteGoalCommand{WorkspaceID: workspaceID, GoalID: goal.ID}, workspaceCommandResponse{}, workspaceevents.DeleteGoalResult{}},
+		{workspaceevents.TopicWorkspaceCommandGetDoD, workspaceevents.GetDoDCommand{WorkspaceID: workspaceID, DoDID: dod.ID}, workspaceCommandResponse{DoD: dod}, workspaceevents.DoDResult{}},
+		{workspaceevents.TopicWorkspaceCommandListDoDsByWS, workspaceevents.ListDoDsByWorkspaceCommand{WorkspaceID: workspaceID}, workspaceCommandResponse{DoDs: []*workspacemodel.DoD{dod}}, workspaceevents.DoDListResult{}},
+		{workspaceevents.TopicWorkspaceCommandDeleteDoD, workspaceevents.DeleteDoDCommand{WorkspaceID: workspaceID, DoDID: dod.ID}, workspaceCommandResponse{}, workspaceevents.DeleteDoDResult{}},
+		{workspaceevents.TopicWorkspaceTemplateCommandGet, workspaceevents.GetWorkspaceTemplateCommand{TemplateID: template.ID}, workspaceCommandResponse{Template: template}, workspaceevents.WorkspaceTemplateResult{}},
+		{workspaceevents.TopicWorkspaceTemplateCommandList, workspaceevents.ListWorkspaceTemplatesCommand{}, workspaceCommandResponse{Templates: []*workspaceevents.WorkspaceTemplate{template}}, workspaceevents.WorkspaceTemplateListResult{}},
+		{workspaceevents.TopicWorkspaceTemplateCommandDelete, workspaceevents.DeleteWorkspaceTemplateCommand{TemplateID: template.ID}, workspaceCommandResponse{}, workspaceevents.DeleteWorkspaceTemplateResult{}},
+	}
+	for _, test := range tests {
+		t.Run(test.topic, func(t *testing.T) {
+			event := magicevent.NewEventWithContext(test.topic, "test", workspaceevents.CommandDestination, magicevent.NewHeader(), context.Background(), test.command)
+			result := magicevent.NewResult(test.topic, workspaceevents.CommandDestination, "test")
+			setWorkspaceMagicResult(result, event, test.data, nil)
+			if result.Error() != nil {
+				t.Fatalf("result error = %v", result.Error())
+			}
+			value, err := result.Get()
+			if err != nil {
+				t.Fatalf("get result: %v", err)
+			}
+			if reflect.TypeOf(value) != reflect.TypeOf(test.want) {
+				t.Fatalf("result type = %T, want %T", value, test.want)
+			}
+		})
+	}
+
+	result := magicevent.NewResult(workspaceevents.TopicWorkspaceCommandGet, workspaceevents.CommandDestination, "test")
+	event := magicevent.NewEventWithContext(workspaceevents.TopicWorkspaceCommandGet, "test", workspaceevents.CommandDestination, magicevent.NewHeader(), context.Background(), workspaceevents.GetWorkspaceCommand{WorkspaceID: workspaceID})
+	setWorkspaceMagicResult(result, event, workspaceCommandResponse{}, nil)
+	if result.Error() == nil {
+		t.Fatal("missing item result must fail closed")
 	}
 }
 

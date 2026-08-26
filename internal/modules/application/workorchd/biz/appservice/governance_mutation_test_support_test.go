@@ -28,7 +28,7 @@ func subscribeTestCanonicalGovernanceOwnerReads(t *testing.T, hub magicevent.Hub
 		if err != nil {
 			t.Fatalf("read canonical governance Run for workspace %s: %v", cmd.WorkspaceID, err)
 		}
-		result.Set(workspaceevents.WorkspaceCommandResult{Workspace: &workspaceevents.Workspace{
+		result.Set(workspaceevents.WorkspaceResult{Workspace: &workspaceevents.Workspace{
 			ID: cmd.WorkspaceID, ActiveRunID: run.ID,
 		}}, nil)
 	})

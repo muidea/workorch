@@ -73,6 +73,15 @@ func TestMCPOwnerFailsClosedBeforeTransportForPostSourceSealAndRegistryDrift(t *
 	if requests.Load() != 0 || receipts.queryCount.Load() != 0 {
 		t.Fatalf("sealed payload drift reached receipt/transport: requests=%d queries=%d", requests.Load(), receipts.queryCount.Load())
 	}
+	tamperedExecution := command
+	tamperedExecution.Execution.AdmissibilitySnapshotID = "another-owner-catalog"
+	tamperedExecutionResult := sendMCPExecutionCommand(t, hub, tamperedExecution)
+	if _, err := tamperedExecutionResult.Get(); err == nil {
+		t.Fatal("MCP execution bound to another owner catalog was accepted")
+	}
+	if requests.Load() != 0 || receipts.queryCount.Load() != 0 {
+		t.Fatalf("execution catalog drift reached receipt/transport: requests=%d queries=%d", requests.Load(), receipts.queryCount.Load())
+	}
 
 	// The authority query is deliberately before mutable Registry lookup so an
 	// already committed receipt remains replayable. A missing receipt followed
@@ -435,7 +444,11 @@ func testMCPExecutionCommand(t *testing.T, operation runtimecontract.RuntimeOper
 	}
 	return mcpevents.ExecuteOperationCommand{
 		RuntimeOperationExecutionContext: runtimecontract.RuntimeOperationExecutionContext{
-			Execution:   runtimecontract.RuntimeOperationExecutionEnvelope{ExecutionKey: executionKey, Fence: fence, ExpectedEffectScope: effect, GovernanceGrant: grant},
+			Execution: runtimecontract.RuntimeOperationExecutionEnvelope{
+				ExecutionKey: executionKey, Fence: fence, ExpectedEffectScope: effect,
+				AdmissibilitySnapshotID: sealed.Authorization.CatalogSnapshotID, AcquisitionBinding: sealed.Authorization.AcquisitionBinding,
+				GovernanceGrant: grant,
+			},
 			WorkspaceID: "ws-mcp", RunID: "run-mcp", DispatchID: "dispatch-mcp",
 			Transaction: runtimecontract.AuthorityTransaction{AuthoritySnapshotID: "authority-mcp"},
 			OperationID: operation.ID, CoverageWorkItemIDs: append([]common.CoverageWorkItemID(nil), operation.CoverageWorkItemIDs...),

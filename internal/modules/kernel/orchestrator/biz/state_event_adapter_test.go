@@ -4,12 +4,15 @@ package orchestrator
 
 import (
 	"context"
+	"errors"
 	"reflect"
 	"testing"
 
 	magicevent "github.com/muidea/magicCommon/event"
 	runevents "github.com/muidea/workorch/internal/modules/blocks/run/pkg/events"
 	runmodel "github.com/muidea/workorch/internal/modules/blocks/run/pkg/models"
+	workspaceevents "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/events"
+	"github.com/muidea/workorch/internal/pkg/common"
 )
 
 func TestRunSnapshotReaderPropagatesExplicitWorkspaceScope(t *testing.T) {
@@ -37,6 +40,24 @@ func TestRunSnapshotReaderPropagatesExplicitWorkspaceScope(t *testing.T) {
 	}
 	if captured.WorkspaceID != "ws-run-event-scope" || captured.RunID != "run-001" {
 		t.Fatalf("captured scope = workspace %q run %q", captured.WorkspaceID, captured.RunID)
+	}
+}
+
+func TestWorkspaceSnapshotReaderRejectsMismatchedOwnerIdentity(t *testing.T) {
+	rawHub := magicevent.NewHub(8)
+	observer := magicevent.NewSimpleObserver(workspaceevents.CommandDestination, rawHub)
+	observer.Subscribe(workspaceevents.TopicWorkspaceCommandGet, func(ev magicevent.Event, result magicevent.Result) {
+		command, ok := ev.Data().(workspaceevents.GetWorkspaceCommand)
+		if !ok {
+			t.Fatalf("command type = %T", ev.Data())
+		}
+		result.Set(workspaceevents.WorkspaceResult{Workspace: &workspaceevents.Workspace{ID: command.WorkspaceID + "-foreign"}}, nil)
+	})
+	t.Cleanup(func() { observer.Unsubscribe(workspaceevents.TopicWorkspaceCommandGet) })
+
+	_, err := (workspaceSnapshotReader{hub: rawHub}).Read(context.Background(), "ws-owner-result-contract")
+	if !errors.Is(err, common.ErrConflict) {
+		t.Fatalf("Read error = %v, want owner identity conflict", err)
 	}
 }
 

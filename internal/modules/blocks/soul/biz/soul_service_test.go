@@ -16,7 +16,7 @@ import (
 
 func TestServiceCreateSoulAndValidateCapabilitySelection(t *testing.T) {
 	ctx := context.Background()
-	service := NewService(memory.NewSoulRepository())
+	service := newService(memory.NewSoulRepository())
 
 	cmd := soulservice.CreateSoulCommand{
 		SoulID:                      common.SoulID("soul-engineering"),
@@ -30,11 +30,11 @@ func TestServiceCreateSoulAndValidateCapabilitySelection(t *testing.T) {
 		AllowedCapabilityCategories: []string{"代码仓库"},
 		AllowedToolKinds:            []string{"shell/command", "patch/apply"},
 	}
-	if _, err := service.CreateSoul(ctx, cmd); err != nil {
+	if _, err := service.createSoulCommand(ctx, cmd); err != nil {
 		t.Fatalf("create soul: %v", err)
 	}
 
-	got, err := service.GetSoul(ctx, cmd.SoulID)
+	got, err := service.getSoul(ctx, cmd.SoulID)
 	if err != nil {
 		t.Fatalf("get soul: %v", err)
 	}
@@ -44,18 +44,18 @@ func TestServiceCreateSoulAndValidateCapabilitySelection(t *testing.T) {
 	if got.Revision != 1 || got.ContentHash == "" || got.SourceProvenance != "user_managed" {
 		t.Fatalf("Soul owner identity = %+v", got)
 	}
-	unchanged, err := service.UpdateSoul(ctx, cmd)
+	unchanged, err := service.updateSoul(ctx, cmd)
 	if err != nil || unchanged.Revision != got.Revision || unchanged.ContentHash != got.ContentHash {
 		t.Fatalf("idempotent Soul update = %+v err=%v", unchanged, err)
 	}
 	changedCommand := cmd
 	changedCommand.Description = "updated owner content"
-	changed, err := service.UpdateSoul(ctx, changedCommand)
+	changed, err := service.updateSoul(ctx, changedCommand)
 	if err != nil || changed.Revision != 2 || changed.ContentHash == got.ContentHash || changed.SourceProvenance != got.SourceProvenance {
 		t.Fatalf("changed Soul revision = %+v err=%v", changed, err)
 	}
 
-	if err := service.ValidateCapabilitySelection(ctx, soulservice.ValidateCapabilitySelectionCommand{
+	if err := service.validateCapabilitySelection(ctx, soulservice.ValidateCapabilitySelectionCommand{
 		SoulID:               cmd.SoulID,
 		SkillRefs:            []string{"skill-go"},
 		MCPServerRefs:        []string{"mcp-repo"},
@@ -66,35 +66,35 @@ func TestServiceCreateSoulAndValidateCapabilitySelection(t *testing.T) {
 		t.Fatalf("validate allowed capability selection: %v", err)
 	}
 
-	if err := service.ValidateCapabilitySelection(ctx, soulservice.ValidateCapabilitySelectionCommand{
+	if err := service.validateCapabilitySelection(ctx, soulservice.ValidateCapabilitySelectionCommand{
 		SoulID:    cmd.SoulID,
 		SkillRefs: []string{"skill-python"},
 	}); !errors.Is(err, common.ErrInvalidArgument) || !strings.Contains(err.Error(), "skill-python") {
 		t.Fatalf("validate disallowed skill err = %v, want invalid argument", err)
 	}
 
-	if err := service.ValidateCapabilitySelection(ctx, soulservice.ValidateCapabilitySelectionCommand{
+	if err := service.validateCapabilitySelection(ctx, soulservice.ValidateCapabilitySelectionCommand{
 		SoulID:        cmd.SoulID,
 		MCPServerRefs: []string{"mcp-unapproved"},
 	}); !errors.Is(err, common.ErrInvalidArgument) || !strings.Contains(err.Error(), "mcp-unapproved") {
 		t.Fatalf("validate disallowed MCP err = %v, want invalid argument with MCP ref", err)
 	}
 
-	if err := service.ValidateCapabilitySelection(ctx, soulservice.ValidateCapabilitySelectionCommand{
+	if err := service.validateCapabilitySelection(ctx, soulservice.ValidateCapabilitySelectionCommand{
 		SoulID:    cmd.SoulID,
 		ToolKinds: []string{"shell/ssh"},
 	}); !errors.Is(err, common.ErrInvalidArgument) || !strings.Contains(err.Error(), "shell/ssh") {
 		t.Fatalf("validate disallowed tool kind err = %v, want invalid argument with tool kind", err)
 	}
 
-	if err := service.ValidateCapabilitySelection(ctx, soulservice.ValidateCapabilitySelectionCommand{
+	if err := service.validateCapabilitySelection(ctx, soulservice.ValidateCapabilitySelectionCommand{
 		SoulID:         cmd.SoulID,
 		CapabilityRefs: []string{"mcp-repo:tool:write.file"},
 	}); !errors.Is(err, common.ErrInvalidArgument) || !strings.Contains(err.Error(), "write.file") {
 		t.Fatalf("validate disallowed capability err = %v, want invalid argument with capability ref", err)
 	}
 
-	if err := service.ValidateCapabilitySelection(ctx, soulservice.ValidateCapabilitySelectionCommand{
+	if err := service.validateCapabilitySelection(ctx, soulservice.ValidateCapabilitySelectionCommand{
 		SoulID:    cmd.SoulID,
 		SkillRefs: []string{" "},
 	}); !errors.Is(err, common.ErrInvalidArgument) || !strings.Contains(err.Error(), "selected skill is blank") {
@@ -104,9 +104,9 @@ func TestServiceCreateSoulAndValidateCapabilitySelection(t *testing.T) {
 
 func TestServiceValidateCapabilitySelectionAllowsWildcardRefs(t *testing.T) {
 	ctx := context.Background()
-	service := NewService(memory.NewSoulRepository())
+	service := newService(memory.NewSoulRepository())
 
-	if _, err := service.CreateSoul(ctx, soulservice.CreateSoulCommand{
+	if _, err := service.createSoulCommand(ctx, soulservice.CreateSoulCommand{
 		SoulID:                      common.SoulID("soul-wildcard"),
 		Name:                        "wildcard execution",
 		SoulMD:                      "# Wildcard Execution\n\nAllow dynamic refs while constraining capability categories and tool kinds.\n",
@@ -119,7 +119,7 @@ func TestServiceValidateCapabilitySelectionAllowsWildcardRefs(t *testing.T) {
 		t.Fatalf("create soul: %v", err)
 	}
 
-	if err := service.ValidateCapabilitySelection(ctx, soulservice.ValidateCapabilitySelectionCommand{
+	if err := service.validateCapabilitySelection(ctx, soulservice.ValidateCapabilitySelectionCommand{
 		SoulID:               common.SoulID("soul-wildcard"),
 		SkillRefs:            []string{"skill-dynamic"},
 		MCPServerRefs:        []string{"mcp-dynamic"},
@@ -130,14 +130,14 @@ func TestServiceValidateCapabilitySelectionAllowsWildcardRefs(t *testing.T) {
 		t.Fatalf("validate wildcard capability selection: %v", err)
 	}
 
-	if err := service.ValidateCapabilitySelection(ctx, soulservice.ValidateCapabilitySelectionCommand{
+	if err := service.validateCapabilitySelection(ctx, soulservice.ValidateCapabilitySelectionCommand{
 		SoulID:    common.SoulID("soul-wildcard"),
 		SkillRefs: []string{" "},
 	}); !errors.Is(err, common.ErrInvalidArgument) || !strings.Contains(err.Error(), "selected skill is blank") {
 		t.Fatalf("validate wildcard blank skill err = %v, want invalid argument", err)
 	}
 
-	if err := service.ValidateCapabilitySelection(ctx, soulservice.ValidateCapabilitySelectionCommand{
+	if err := service.validateCapabilitySelection(ctx, soulservice.ValidateCapabilitySelectionCommand{
 		SoulID:               common.SoulID("soul-wildcard"),
 		CapabilityCategories: []string{"resource"},
 	}); !errors.Is(err, common.ErrInvalidArgument) || !strings.Contains(err.Error(), "resource") {
@@ -148,16 +148,16 @@ func TestServiceValidateCapabilitySelectionAllowsWildcardRefs(t *testing.T) {
 func TestServiceRejectsInvalidSoul(t *testing.T) {
 	ctx := context.Background()
 	repository := memory.NewSoulRepository()
-	service := NewService(repository)
+	service := newService(repository)
 
-	if _, err := service.CreateSoul(ctx, soulservice.CreateSoulCommand{
+	if _, err := service.createSoulCommand(ctx, soulservice.CreateSoulCommand{
 		SoulID: common.SoulID("soul-invalid"),
 		Name:   "invalid",
 	}); !errors.Is(err, common.ErrInvalidArgument) {
 		t.Fatalf("create invalid soul err = %v, want invalid argument", err)
 	}
 
-	if _, err := service.CreateSoul(ctx, soulservice.CreateSoulCommand{
+	if _, err := service.createSoulCommand(ctx, soulservice.CreateSoulCommand{
 		SoulID:           common.SoulID("soul-blank-skill"),
 		Name:             "blank skill",
 		SoulMD:           "# Blank Skill\n\ninstruction\n",
@@ -170,41 +170,41 @@ func TestServiceRejectsInvalidSoul(t *testing.T) {
 	if err := repository.Create(ctx, invalidProvenance); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := service.GetSoul(ctx, invalidProvenance.ID); !errors.Is(err, common.ErrConflict) {
+	if _, err := service.getSoul(ctx, invalidProvenance.ID); !errors.Is(err, common.ErrConflict) {
 		t.Fatalf("stored invalid Soul provenance err = %v, want conflict", err)
 	}
 }
 
 func TestServiceDeleteSoul(t *testing.T) {
 	ctx := context.Background()
-	service := NewService(memory.NewSoulRepository())
+	service := newService(memory.NewSoulRepository())
 
 	cmd := soulservice.CreateSoulCommand{
 		SoulID: common.SoulID("soul-delete"),
 		Name:   "delete soul",
 		SoulMD: "# Delete Soul\n",
 	}
-	if _, err := service.CreateSoul(ctx, cmd); err != nil {
+	if _, err := service.createSoulCommand(ctx, cmd); err != nil {
 		t.Fatalf("create soul: %v", err)
 	}
-	if err := service.DeleteSoul(ctx, cmd.SoulID); err != nil {
+	if err := service.deleteSoul(ctx, cmd.SoulID); err != nil {
 		t.Fatalf("delete soul: %v", err)
 	}
-	if _, err := service.GetSoul(ctx, cmd.SoulID); !errors.Is(err, common.ErrNotFound) {
+	if _, err := service.getSoul(ctx, cmd.SoulID); !errors.Is(err, common.ErrNotFound) {
 		t.Fatalf("get deleted soul err = %v, want not found", err)
 	}
-	if err := service.DeleteSoul(ctx, ""); !errors.Is(err, common.ErrInvalidArgument) {
+	if err := service.deleteSoul(ctx, ""); !errors.Is(err, common.ErrInvalidArgument) {
 		t.Fatalf("delete blank soul err = %v, want invalid argument", err)
 	}
-	if err := service.DeleteSoul(ctx, cmd.SoulID); !errors.Is(err, common.ErrNotFound) {
+	if err := service.deleteSoul(ctx, cmd.SoulID); !errors.Is(err, common.ErrNotFound) {
 		t.Fatalf("delete missing soul err = %v, want not found", err)
 	}
 }
 
 func TestServiceCanonicalizesAndBoundsSoulState(t *testing.T) {
 	ctx := context.Background()
-	service := NewService(memory.NewSoulRepository())
-	created, err := service.CreateSoul(ctx, soulservice.CreateSoulCommand{
+	service := newService(memory.NewSoulRepository())
+	created, err := service.createSoulCommand(ctx, soulservice.CreateSoulCommand{
 		SoulID:          "soul-canonical",
 		Name:            "  canonical soul  ",
 		Description:     "  normalized  ",
@@ -224,7 +224,7 @@ func TestServiceCanonicalizesAndBoundsSoulState(t *testing.T) {
 		t.Fatalf("canonical lists = domains:%#v skills:%#v", created.BusinessDomains, created.AllowedSkillRefs)
 	}
 	created.BusinessDomains[0] = "mutated"
-	fresh, err := service.GetSoul(ctx, "soul-canonical")
+	fresh, err := service.getSoul(ctx, "soul-canonical")
 	if err != nil || fresh.BusinessDomains[0] != "analysis" {
 		t.Fatalf("detached read = %+v err=%v", fresh, err)
 	}
@@ -236,7 +236,7 @@ func TestServiceCanonicalizesAndBoundsSoulState(t *testing.T) {
 		"oversized body":  {SoulID: "soul-large", Name: "bad", SoulMD: strings.Repeat("x", modulecommon.SoulInstructionMaxBytes+1)},
 	} {
 		t.Run(name, func(t *testing.T) {
-			if _, err := service.CreateSoul(ctx, command); !errors.Is(err, common.ErrInvalidArgument) {
+			if _, err := service.createSoulCommand(ctx, command); !errors.Is(err, common.ErrInvalidArgument) {
 				t.Fatalf("CreateSoul err = %v, want invalid argument", err)
 			}
 		})
@@ -245,21 +245,21 @@ func TestServiceCanonicalizesAndBoundsSoulState(t *testing.T) {
 
 func TestServiceListSoulsUsesBoundedStableCursor(t *testing.T) {
 	ctx := context.Background()
-	service := NewService(memory.NewSoulRepository())
+	service := newService(memory.NewSoulRepository())
 	for _, id := range []common.SoulID{"soul-c", "soul-a", "soul-b"} {
-		if _, err := service.CreateSoul(ctx, soulservice.CreateSoulCommand{SoulID: id, Name: string(id), SoulMD: "# " + string(id)}); err != nil {
+		if _, err := service.createSoulCommand(ctx, soulservice.CreateSoulCommand{SoulID: id, Name: string(id), SoulMD: "# " + string(id)}); err != nil {
 			t.Fatal(err)
 		}
 	}
-	first, cursor, err := service.ListSouls(ctx, "", 2)
+	first, cursor, err := service.listSouls(ctx, "", 2)
 	if err != nil || len(first) != 2 || first[0].ID != "soul-a" || first[1].ID != "soul-b" || cursor != "soul-b" {
 		t.Fatalf("first page = %+v cursor=%q err=%v", first, cursor, err)
 	}
-	second, cursor, err := service.ListSouls(ctx, cursor, 2)
+	second, cursor, err := service.listSouls(ctx, cursor, 2)
 	if err != nil || len(second) != 1 || second[0].ID != "soul-c" || cursor != "" {
 		t.Fatalf("second page = %+v cursor=%q err=%v", second, cursor, err)
 	}
-	if _, _, err := service.ListSouls(ctx, " soul-b ", 2); !errors.Is(err, common.ErrInvalidArgument) {
+	if _, _, err := service.listSouls(ctx, " soul-b ", 2); !errors.Is(err, common.ErrInvalidArgument) {
 		t.Fatalf("noncanonical cursor err = %v, want invalid argument", err)
 	}
 }

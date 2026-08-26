@@ -17,10 +17,14 @@ import (
 	resultmodel "github.com/muidea/workorch/internal/modules/blocks/result/pkg/models"
 	orchestratormodel "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
+	"github.com/muidea/workorch/internal/pkg/repository"
 	deletioncontract "github.com/muidea/workorch/internal/pkg/workorchdeletioncontract"
 )
 
-type decisionWorkspaceDeletionRepository struct{ dataRoot string }
+type decisionWorkspaceDeletionRepository struct {
+	dataRoot     string
+	ownerBinding repository.OwnerRepositoryBinding
+}
 
 type orchestratorWorkspaceDeletionRepository struct{ dataRoot string }
 
@@ -122,8 +126,14 @@ func (r *orchestratorWorkspaceDeletionRepository) WithWorkspacePurgeFence(ctx co
 	return withWorkspaceDeletionPurgeFence(ctx, r.dataRoot, "orchestrator", scope, operation)
 }
 
-func newDecisionWorkspaceDeletionRepository(root string) *decisionWorkspaceDeletionRepository {
-	return &decisionWorkspaceDeletionRepository{dataRoot: root}
+func newDecisionWorkspaceDeletionRepository(root string, binding repository.OwnerRepositoryBinding) *decisionWorkspaceDeletionRepository {
+	return &decisionWorkspaceDeletionRepository{dataRoot: root, ownerBinding: binding}
+}
+func (r *decisionWorkspaceDeletionRepository) OwnerRepositoryBinding() repository.OwnerRepositoryBinding {
+	if r == nil {
+		return repository.OwnerRepositoryBinding{}
+	}
+	return r.ownerBinding
 }
 func (r *decisionWorkspaceDeletionRepository) Create(_ context.Context, item *decisionmodel.WorkspaceDeletion) error {
 	if r == nil || item == nil || item.Validate() != nil || item.Revision != 1 {
@@ -187,10 +197,19 @@ func (r *decisionWorkspaceDeletionRepository) WithWorkspacePurgeFence(ctx contex
 	return withWorkspaceDeletionPurgeFence(ctx, r.dataRoot, "decision", scope, fn)
 }
 
-type approvalWorkspaceDeletionRepository struct{ dataRoot string }
+type approvalWorkspaceDeletionRepository struct {
+	dataRoot     string
+	ownerBinding repository.OwnerRepositoryBinding
+}
 
-func newApprovalWorkspaceDeletionRepository(root string) *approvalWorkspaceDeletionRepository {
-	return &approvalWorkspaceDeletionRepository{dataRoot: root}
+func newApprovalWorkspaceDeletionRepository(root string, binding repository.OwnerRepositoryBinding) *approvalWorkspaceDeletionRepository {
+	return &approvalWorkspaceDeletionRepository{dataRoot: root, ownerBinding: binding}
+}
+func (r *approvalWorkspaceDeletionRepository) OwnerRepositoryBinding() repository.OwnerRepositoryBinding {
+	if r == nil {
+		return repository.OwnerRepositoryBinding{}
+	}
+	return r.ownerBinding
 }
 func (r *approvalWorkspaceDeletionRepository) Create(_ context.Context, item *approvalmodel.WorkspaceDeletion) error {
 	if r == nil || item == nil || item.Validate() != nil || item.Revision != 1 {
@@ -327,10 +346,19 @@ func writeWorkspaceDeletionFile(path string, item any) error {
 	return nil
 }
 
-type memoryWorkspaceDeletionRepository struct{ dataRoot string }
+type memoryWorkspaceDeletionRepository struct {
+	dataRoot     string
+	ownerBinding repository.OwnerRepositoryBinding
+}
 
-func newMemoryWorkspaceDeletionRepository(dataRoot string) *memoryWorkspaceDeletionRepository {
-	return &memoryWorkspaceDeletionRepository{dataRoot: dataRoot}
+func newMemoryWorkspaceDeletionRepository(dataRoot string, binding repository.OwnerRepositoryBinding) *memoryWorkspaceDeletionRepository {
+	return &memoryWorkspaceDeletionRepository{dataRoot: dataRoot, ownerBinding: binding}
+}
+func (r *memoryWorkspaceDeletionRepository) OwnerRepositoryBinding() repository.OwnerRepositoryBinding {
+	if r == nil {
+		return repository.OwnerRepositoryBinding{}
+	}
+	return r.ownerBinding
 }
 
 func (r *memoryWorkspaceDeletionRepository) Create(_ context.Context, item *memorymodel.WorkspaceDeletion) error {
@@ -401,10 +429,19 @@ func (r *memoryWorkspaceDeletionRepository) WithWorkspacePurgeFence(ctx context.
 	return withWorkspaceDeletionPurgeFence(ctx, r.dataRoot, "memory", scope, operation)
 }
 
-type resultWorkspaceDeletionRepository struct{ dataRoot string }
+type resultWorkspaceDeletionRepository struct {
+	dataRoot     string
+	ownerBinding repository.OwnerRepositoryBinding
+}
 
-func newResultWorkspaceDeletionRepository(dataRoot string) *resultWorkspaceDeletionRepository {
-	return &resultWorkspaceDeletionRepository{dataRoot: dataRoot}
+func newResultWorkspaceDeletionRepository(dataRoot string, binding repository.OwnerRepositoryBinding) *resultWorkspaceDeletionRepository {
+	return &resultWorkspaceDeletionRepository{dataRoot: dataRoot, ownerBinding: binding}
+}
+func (r *resultWorkspaceDeletionRepository) OwnerRepositoryBinding() repository.OwnerRepositoryBinding {
+	if r == nil {
+		return repository.OwnerRepositoryBinding{}
+	}
+	return r.ownerBinding
 }
 
 func (r *resultWorkspaceDeletionRepository) Create(_ context.Context, item *resultmodel.WorkspaceDeletion) error {

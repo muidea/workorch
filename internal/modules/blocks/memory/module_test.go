@@ -28,8 +28,7 @@ func TestMemoryWorkspaceDeletionFenceHidesRetainedDataAndPurgeIsStable(t *testin
 	repositories := memoryrepo.NewMemoryOwnerRepositorySet()
 	module := New()
 	if err := module.Configure(memorybiz.Dependencies{
-		MemoryItems: repositories.Items, MemoryRecallTraces: repositories.RecallTraces,
-		WorkspaceDeletions: repositories.WorkspaceDeletions, EventHub: hub,
+		OwnerRepositories: repositories.OwnerRepositories(), EventHub: hub,
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -158,15 +157,14 @@ func TestModuleIdentityConfigureStartStopContract(t *testing.T) {
 	}
 }
 
-func TestModuleConfigureRequiresMemoryItems(t *testing.T) {
+func TestModuleConfigureRequiresOwnerRepositoryBundle(t *testing.T) {
 	if err := New().Configure(memorybiz.Dependencies{}); !errors.Is(err, common.ErrInvalidArgument) {
 		t.Fatalf("Configure err = %v, want invalid argument", err)
 	}
 	if err := New().Configure(memorybiz.Dependencies{
-		MemoryItems: memoryrepo.NewMemoryItemRepository(),
-		EventHub:    magicevent.NewHub(4),
+		OwnerRepositories: memoryrepo.NewMemoryOwnerRepositorySet().OwnerRepositories(),
 	}); !errors.Is(err, common.ErrInvalidArgument) {
-		t.Fatalf("Configure without recall repository err = %v, want invalid argument", err)
+		t.Fatalf("Configure without EventHub err = %v, want invalid argument", err)
 	}
 }
 
@@ -176,10 +174,8 @@ func TestMemoryRecallTraceCommandsAcceptContractPayloads(t *testing.T) {
 	traces := memoryrepo.NewMemoryRecallTraceRepository()
 	module := New()
 	if err := module.Configure(memorybiz.Dependencies{
-		MemoryItems:        memoryrepo.NewMemoryItemRepository(),
-		MemoryRecallTraces: traces,
-		WorkspaceDeletions: memoryrepo.NewMemoryWorkspaceDeletionRepository(),
-		EventHub:           hub,
+		OwnerRepositories: memoryTestOwnerRepositories(memoryrepo.NewMemoryItemRepository(), traces, memoryrepo.NewMemoryWorkspaceDeletionRepository()),
+		EventHub:          hub,
 	}); err != nil {
 		t.Fatalf("Configure: %v", err)
 	}
@@ -283,7 +279,7 @@ func TestMemoryRecallTraceOwnerEnforcesScopeAndImmutableReplay(t *testing.T) {
 	traces := memoryrepo.NewMemoryRecallTraceRepository()
 	module := New()
 	if err := module.Configure(memorybiz.Dependencies{
-		MemoryItems: memoryrepo.NewMemoryItemRepository(), MemoryRecallTraces: traces, WorkspaceDeletions: memoryrepo.NewMemoryWorkspaceDeletionRepository(), EventHub: hub,
+		OwnerRepositories: memoryTestOwnerRepositories(memoryrepo.NewMemoryItemRepository(), traces, memoryrepo.NewMemoryWorkspaceDeletionRepository()), EventHub: hub,
 	}); err != nil {
 		t.Fatalf("Configure: %v", err)
 	}
@@ -391,7 +387,7 @@ func TestMemoryRecallTraceOwnerPreservesScopeWithFileBackend(t *testing.T) {
 	repositories := workorchrepo.NewWorkspaceScopedFileRepositorySet(t.TempDir())
 	module := New()
 	if err := module.Configure(memorybiz.Dependencies{
-		MemoryItems: repositories.MemoryItems, MemoryRecallTraces: repositories.MemoryRecallTraces, WorkspaceDeletions: repositories.MemoryDeletions, EventHub: hub,
+		OwnerRepositories: repositories.MemoryOwner, EventHub: hub,
 	}); err != nil {
 		t.Fatalf("Configure: %v", err)
 	}
@@ -431,7 +427,7 @@ func TestMemoryItemOwnerEnforcesWorkspaceScope(t *testing.T) {
 	hub := magicevent.NewHub(32)
 	module := New()
 	if err := module.Configure(memorybiz.Dependencies{
-		MemoryItems: memoryrepo.NewMemoryItemRepository(), MemoryRecallTraces: memoryrepo.NewMemoryRecallTraceRepository(), WorkspaceDeletions: memoryrepo.NewMemoryWorkspaceDeletionRepository(), EventHub: hub,
+		OwnerRepositories: memoryrepo.NewMemoryOwnerRepositorySet().OwnerRepositories(), EventHub: hub,
 	}); err != nil {
 		t.Fatalf("Configure: %v", err)
 	}
@@ -506,10 +502,8 @@ func TestMemoryOwnerCommandsPublishLifecycleNotifications(t *testing.T) {
 	t.Cleanup(func() { hub.Terminate(ctx) })
 	module := New()
 	if err := module.Configure(memorybiz.Dependencies{
-		MemoryItems:        memoryrepo.NewMemoryItemRepository(),
-		MemoryRecallTraces: memoryrepo.NewMemoryRecallTraceRepository(),
-		WorkspaceDeletions: memoryrepo.NewMemoryWorkspaceDeletionRepository(),
-		EventHub:           hub,
+		OwnerRepositories: memoryrepo.NewMemoryOwnerRepositorySet().OwnerRepositories(),
+		EventHub:          hub,
 	}); err != nil {
 		t.Fatalf("Configure: %v", err)
 	}
@@ -576,10 +570,12 @@ func TestMemoryOwnerDoesNotPublishWhenRepositoryCommitFails(t *testing.T) {
 	commitErr := errors.New("memory repository unavailable")
 	module := New()
 	if err := module.Configure(memorybiz.Dependencies{
-		MemoryItems:        &failingMemoryItemRepository{MemoryItemRepository: memoryrepo.NewMemoryItemRepository(), failures: 1, err: commitErr},
-		MemoryRecallTraces: &failingMemoryRecallTraceRepository{MemoryRecallTraceRepository: memoryrepo.NewMemoryRecallTraceRepository(), failures: 1, err: commitErr},
-		WorkspaceDeletions: memoryrepo.NewMemoryWorkspaceDeletionRepository(),
-		EventHub:           hub,
+		OwnerRepositories: memoryTestOwnerRepositories(
+			&failingMemoryItemRepository{MemoryItemRepository: memoryrepo.NewMemoryItemRepository(), failures: 1, err: commitErr},
+			&failingMemoryRecallTraceRepository{MemoryRecallTraceRepository: memoryrepo.NewMemoryRecallTraceRepository(), failures: 1, err: commitErr},
+			memoryrepo.NewMemoryWorkspaceDeletionRepository(),
+		),
+		EventHub: hub,
 	}); err != nil {
 		t.Fatalf("Configure: %v", err)
 	}
@@ -698,11 +694,66 @@ func receiveMemoryNotification(t *testing.T, received <-chan struct {
 
 func memoryModuleContractDependencies() memorybiz.Dependencies {
 	return memorybiz.Dependencies{
-		MemoryItems:        memoryrepo.NewMemoryItemRepository(),
-		MemoryRecallTraces: memoryrepo.NewMemoryRecallTraceRepository(),
-		WorkspaceDeletions: memoryrepo.NewMemoryWorkspaceDeletionRepository(),
-		EventHub:           magicevent.NewHub(16),
+		OwnerRepositories: memoryrepo.NewMemoryOwnerRepositorySet().OwnerRepositories(),
+		EventHub:          magicevent.NewHub(16),
 	}
+}
+
+type memoryTestBoundItems struct {
+	repository.MemoryItemRepository
+	binding repository.OwnerRepositoryBinding
+}
+
+func (r memoryTestBoundItems) OwnerRepositoryBinding() repository.OwnerRepositoryBinding {
+	return r.binding
+}
+
+type memoryTestBoundTraces struct {
+	repository.MemoryRecallTraceRepository
+	binding repository.OwnerRepositoryBinding
+}
+
+func (r memoryTestBoundTraces) OwnerRepositoryBinding() repository.OwnerRepositoryBinding {
+	return r.binding
+}
+
+type memoryTestBoundDeletions struct {
+	repository.MemoryWorkspaceDeletionRepository
+	binding repository.OwnerRepositoryBinding
+}
+
+func (r memoryTestBoundDeletions) OwnerRepositoryBinding() repository.OwnerRepositoryBinding {
+	return r.binding
+}
+
+type memoryTestBackend struct {
+	binding   repository.OwnerRepositoryBinding
+	items     repository.MemoryItemRepository
+	traces    repository.MemoryRecallTraceRepository
+	deletions repository.MemoryWorkspaceDeletionRepository
+}
+
+func (b memoryTestBackend) MemoryOwnerBinding() repository.OwnerRepositoryBinding { return b.binding }
+func (b memoryTestBackend) MemoryOwnerItems() repository.MemoryItemRepository     { return b.items }
+func (b memoryTestBackend) MemoryOwnerRecallTraces() repository.MemoryRecallTraceRepository {
+	return b.traces
+}
+func (b memoryTestBackend) MemoryOwnerWorkspaceDeletions() repository.MemoryWorkspaceDeletionRepository {
+	return b.deletions
+}
+
+func memoryTestOwnerRepositories(items repository.MemoryItemRepository, traces repository.MemoryRecallTraceRepository, deletions repository.MemoryWorkspaceDeletionRepository) repository.MemoryOwnerRepositories {
+	binding := repository.NewMemoryOwnerRepositoryBinding()
+	owner, err := repository.NewMemoryOwnerRepositories(memoryTestBackend{
+		binding:   binding,
+		items:     memoryTestBoundItems{MemoryItemRepository: items, binding: binding},
+		traces:    memoryTestBoundTraces{MemoryRecallTraceRepository: traces, binding: binding},
+		deletions: memoryTestBoundDeletions{MemoryWorkspaceDeletionRepository: deletions, binding: binding},
+	})
+	if err != nil {
+		panic(err)
+	}
+	return owner
 }
 
 type failingMemoryItemRepository struct {

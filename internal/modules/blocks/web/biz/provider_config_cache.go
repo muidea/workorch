@@ -15,6 +15,10 @@ func (a *RuntimeAdapter) selectProviderID(requestedID string, operationKind stri
 	if err != nil {
 		return webmodels.ProviderConfig{}, err
 	}
+	return selectProviderIDFromConfigs(defaultID, providers, requestedID, operationKind)
+}
+
+func selectProviderIDFromConfigs(defaultID string, providers map[string]webmodels.ProviderConfig, requestedID string, operationKind string) (webmodels.ProviderConfig, error) {
 	providerID := strings.TrimSpace(requestedID)
 	if providerID == "" {
 		providerID = defaultID

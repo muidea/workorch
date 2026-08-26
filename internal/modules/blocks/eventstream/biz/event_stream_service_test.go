@@ -147,9 +147,8 @@ func newEventStreamTestService(t *testing.T, repo repository.EventRecordReposito
 	rawHub := magicevent.NewHub(16)
 	t.Cleanup(func() { rawHub.Terminate(context.Background()) })
 	deletions := memory.NewEventStreamWorkspaceDeletionRepository()
-	return New(Dependencies{
-		EventRecords: repo, WorkspaceDeletions: deletions, WorkspacePurger: eventStreamTestPurger{repo: repo}, EventHub: rawHub,
-	}), rawHub
+	return New(Dependencies{OwnerRepositories: eventStreamBizTestOwnerRepositories(
+		repo, deletions, eventStreamTestPurger{repo: repo}), EventHub: rawHub}), rawHub
 }
 
 func sendPurgeWorkspaceCommand(ctx context.Context, rawHub magicevent.Hub, workspaceID common.WorkspaceID) (eventstreamevents.PurgeWorkspaceResult, error) {

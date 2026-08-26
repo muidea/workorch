@@ -46,7 +46,13 @@ application、Web 与 orchestrator 不直接访问 ai-proxy。
 7. ai-proxy client API key 是可选配置；catalog、Responses、stream、embedding 仅在 key 非空时发送 Bearer header，
    空 key 不得编码成无效 `Authorization: Bearer `。Responses、stream 与 embedding 对任意 redirect 都必须在
    重发 prompt/input body 前以 typed protocol failure 拒绝；一个 `PhysicalCallID` 恰好只授权一次 physical submission，
-   后续调用必须由 Orchestrator 以新 identity 明确授权。注入 client 的 redirect callback 不能放宽该 owner guard。
+   后续调用必须由 Orchestrator 以新 identity 明确授权。LLM owner 在调用 candidate provider 前还维护有界、进程内的
+   exact identity submission guard：并发或重复的同一 physical identity 在第二次 provider 调用前 fail-closed；只有
+   canonical owner audit 精确证明 `ProviderSubmitted=false` 时才释放该 entry，submitted、unknown 或 malformed observation
+   都保持 fenced。guard 容量耗尽同样 fail-closed，并在 `Teardown()` 清空。它只关闭 live-process 重入窗口，不是恢复
+   authority；跨进程恢复继续只消费 Orchestrator aggregate 中调用前已 CAS 持久化的 submitted marker，不从本地 guard
+   重建、释放或重放请求。该收口只强化 SM-3 provider transaction 与 SM-4 recovery replay guard，不改变 C0～C5、
+   ExpectedDocument 或 sealed startup input。注入 client 的 redirect callback 不能放宽该 owner guard。
    2xx Responses/embedding 的实际 `Content-Type`
    必须与本次声明模式一致：non-stream/embedding 接受 JSON media type，stream 只接受 `text/event-stream`；mismatch
    只解析/处置当前物理响应并返回 typed protocol failure，禁止切换 parser 后发起第二次 provider call。
@@ -152,13 +158,20 @@ application、Web 与 orchestrator 不直接访问 ai-proxy。
     completion/embedding 可不携带两级 identity，但禁止只携带其中一级。notification 自身在发布前重复执行同一
     submitted/mode/bytes/tokens/context 一致性校验，缺失 audit 必须同步 fail-closed，Eventstream 只持久化 owner 已校验事实。
     provider failure code/signature 只接受 adapter 的 typed `RuntimeProviderFailureIdentity`；任意 generic error 文本不得
-    被解析成 timeout、idle、empty-response 或其他 owner fact，只能形成稳定的 `provider_request_failed`。
+    被解析成 timeout、idle、empty-response、authentication、configuration 或其他 owner fact，只能形成稳定的
+    `provider_request_failed`。failure class 同样只消费 typed HTTP/protocol/model/transport error 与 adapter 的独立
+    submitted fact；generic `Error()` 中伪装的 `invalid api key`、`unauthorized`、`model not found` 或 `configuration`
+    不改变分类。
 18. `AcquireProviderCeilingCommand` 的timeout/temporary error只是一项owner factual failure；LLM不自行retry或创建wait。
     Orchestrator若封存bounded recoverable wait，后续probe仍必须使用相同workspace/run/authority、selection、minimum bytes与
     canonical request hash。matching result返回detached ceiling fact；stale selection/revision或非typed diagnostic不能解除wait。
 19. Runtime provider result携带的typed usage只确认LLM owner实际观察到的physical call/token消费；无可靠usage时保持
     unknown，LLM、audit、billing或metrics均不能回写Orchestrator execution-budget allocation。provider返回的负数usage、
     无法安全派生的total或整数溢出属于typed provider protocol failure；不得向调用方暴露该usage或同一响应的payload/vector。
+20. `/llm/runtime/acquire-provider-ceiling`、`/llm/runtime-candidate/preflight` 与
+    `/llm/runtime-candidate/request` 只接受 exact `source=kernel/orchestrator`。nil Event、任意其它 source 以及带空白的
+    lookalike source 都在读取 command、catalog/configuration、渲染 request、调用 provider 或发布 usage 前拒绝；该 source
+    gate 只是 LLM owner ingress authorization，不触发 SM-2/SM-3/SM-4 transition。
 
 ## EventHub 合同
 
@@ -203,6 +216,9 @@ application、Web 与 orchestrator 不直接访问 ai-proxy。
   provider call，不存在 adapter fallback/replay。
 - [x] Responses/stream/embedding 任意 3xx 在第二次 physical submission 前拒绝；跨 origin 保留精确 protocol identity，
   注入 redirect callback 不能放宽 owner at-most-once guard，空 API key 不发送 Authorization。
+- [x] Runtime ceiling/preflight/request 的 exact Orchestrator source 与 nil Event fail-closed；Runtime candidate 同一
+  `PhysicalCallID` 的并发/重复投递零第二次 provider invocation，不同 physical identity 独立执行；有界 guard 满载、
+  canonical unsubmitted release 与 Teardown clear 均覆盖。
 - [x] model-derived request/output/response guard、sealed ProviderCeiling、ExpectedDocument token equality 与 catalog
   refresh 后 sealed revision 不漂移。
 - [x] provider-ceiling transient failure的exact recoverable-wait probe、普通drive/伪造lease零额外调用与matching result恢复。
@@ -221,6 +237,9 @@ application、Web 与 orchestrator 不直接访问 ai-proxy。
   Eventstream 无损持久化；durable payload 不含 raw body、prompt、credential 或 endpoint。
 - [x] completion、stream、embedding 的 deadline/cancel/DNS/TLS/generic transport，以及 400/401/429/503、malformed 2xx
   矩阵均确认不泄漏 raw body、prompt、credential、endpoint 或 transport detail；redirect protocol identity 保持 typed。
+- [x] generic provider error message 中伪装 authentication/configuration/model-not-found 词汇不再改变 failure class；
+  authentication 只来自 typed HTTP fact，configuration 来自 typed model/config fact 或明确的 unsubmitted fact；generic
+  failure 仅按独立 submitted fact 保守分类。
 - [x] completion/stream/embedding usage 的负数与派生 total 溢出均 fail-closed 为 typed protocol fact，结果不携带
   rejected usage/payload/vector，且每个边界只发生一次 physical call。
 - [x] 1M-token capacity limit arithmetic、4096-event SSE 与 8192-dimension embedding decode benchmark 已建立；基准机

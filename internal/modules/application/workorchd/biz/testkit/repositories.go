@@ -22,6 +22,7 @@ type RepositoryExports struct {
 	MemoryItems           repository.MemoryItemRepository
 	MemoryRecallTraces    repository.MemoryRecallTraceRepository
 	MemoryDeletions       repository.MemoryWorkspaceDeletionRepository
+	MemoryOwner           repository.MemoryOwnerRepositories
 	AutoGovernanceTraces  repository.AutoGovernanceTraceRepository
 	Skills                repository.SkillRepository
 	MCPRegistry           repository.MCPRegistryRepository
@@ -30,9 +31,11 @@ type RepositoryExports struct {
 	Results               repository.ResultRepository
 	Artifacts             repository.ArtifactRepository
 	ResultDeletions       repository.ResultWorkspaceDeletionRepository
+	ResultOwner           repository.ResultOwnerRepositories
 	EventRecords          repository.EventRecordRepository
 	EventStreamDeletions  repository.EventStreamWorkspaceDeletionRepository
 	EventStreamPurger     repository.EventStreamWorkspacePurger
+	EventStreamOwner      repository.EventStreamOwnerRepositories
 	Workspaces            repository.WorkspaceRepository
 	WorkspaceCleaner      repository.WorkspaceDeletionMaterialCleaner
 	Goals                 repository.GoalRepository
@@ -51,8 +54,10 @@ type RepositoryExports struct {
 	Tickets               repository.DecisionTicketRepository
 	Resolutions           repository.DecisionResolutionRepository
 	DecisionDeletions     repository.DecisionWorkspaceDeletionRepository
+	DecisionOwner         repository.DecisionOwnerRepositories
 	Approvals             repository.ApprovalRepository
 	ApprovalDeletions     repository.ApprovalWorkspaceDeletionRepository
+	ApprovalOwner         repository.ApprovalOwnerRepositories
 }
 
 type Exports struct {
@@ -118,6 +123,7 @@ func buildRepositories(backend string, dataRoot string) RepositoryExports {
 			MemoryItems:           memoryOwner.Items,
 			MemoryRecallTraces:    memoryOwner.RecallTraces,
 			MemoryDeletions:       memoryOwner.WorkspaceDeletions,
+			MemoryOwner:           memoryOwner.OwnerRepositories(),
 			AutoGovernanceTraces:  memory.NewAutoGovernanceTraceRepository(),
 			Skills:                memory.NewSkillRepository(),
 			MCPRegistry:           registry,
@@ -126,9 +132,11 @@ func buildRepositories(backend string, dataRoot string) RepositoryExports {
 			Results:               resultOwner.Results,
 			Artifacts:             resultOwner.Artifacts,
 			ResultDeletions:       resultOwner.WorkspaceDeletions,
+			ResultOwner:           resultOwner.OwnerRepositories(),
 			EventRecords:          eventStreamOwner.EventRecords,
 			EventStreamDeletions:  eventStreamOwner.WorkspaceDeletions,
 			EventStreamPurger:     eventStreamOwner.EventRecords,
+			EventStreamOwner:      eventStreamOwner.OwnerRepositories(),
 			Workspaces:            workspaceRepository,
 			WorkspaceCleaner:      workspaceRepository,
 			Goals:                 memory.NewGoalRepository(),
@@ -147,8 +155,10 @@ func buildRepositories(backend string, dataRoot string) RepositoryExports {
 			Tickets:               decisionOwner.Tickets,
 			Resolutions:           decisionOwner.Resolutions,
 			DecisionDeletions:     decisionOwner.WorkspaceDeletions,
+			DecisionOwner:         decisionOwner.OwnerRepositories(),
 			Approvals:             approvalOwner.Approvals,
 			ApprovalDeletions:     approvalOwner.WorkspaceDeletions,
+			ApprovalOwner:         approvalOwner.OwnerRepositories(),
 		}
 	case "file":
 		dataRoot = workorchrepo.ResolveRepositoryDataRoot(backend, dataRoot)
@@ -160,6 +170,7 @@ func buildRepositories(backend string, dataRoot string) RepositoryExports {
 			MemoryItems:           workspaceScopedRepos.MemoryItems,
 			MemoryRecallTraces:    workspaceScopedRepos.MemoryRecallTraces,
 			MemoryDeletions:       workspaceScopedRepos.MemoryDeletions,
+			MemoryOwner:           workspaceScopedRepos.MemoryOwner,
 			AutoGovernanceTraces:  fileRepo.NewAutoGovernanceTraceRepository(filepath.Join(dataRoot, "system", "auto_governance_trace.json")),
 			Skills:                fileRepo.NewSkillRepository(filepath.Join(dataRoot, "system", "skill.json")),
 			MCPRegistry:           registry,
@@ -168,9 +179,11 @@ func buildRepositories(backend string, dataRoot string) RepositoryExports {
 			Results:               workspaceScopedRepos.Results,
 			Artifacts:             workspaceScopedRepos.Artifacts,
 			ResultDeletions:       workspaceScopedRepos.ResultDeletions,
+			ResultOwner:           workspaceScopedRepos.ResultOwner,
 			EventRecords:          workspaceScopedRepos.EventRecords,
 			EventStreamDeletions:  workspaceScopedRepos.EventStreamDeletions,
 			EventStreamPurger:     workspaceScopedRepos.EventStreamPurger,
+			EventStreamOwner:      workspaceScopedRepos.EventStreamOwner,
 			Workspaces:            workspaceScopedRepos.Workspaces,
 			WorkspaceCleaner:      workspaceScopedRepos.WorkspaceCleaner,
 			Goals:                 workspaceScopedRepos.Goals,
@@ -189,8 +202,10 @@ func buildRepositories(backend string, dataRoot string) RepositoryExports {
 			Tickets:               workspaceScopedRepos.Tickets,
 			Resolutions:           workspaceScopedRepos.Resolutions,
 			DecisionDeletions:     workspaceScopedRepos.DecisionDeletions,
+			DecisionOwner:         workspaceScopedRepos.DecisionOwner,
 			Approvals:             workspaceScopedRepos.Approvals,
 			ApprovalDeletions:     workspaceScopedRepos.ApprovalDeletions,
+			ApprovalOwner:         workspaceScopedRepos.ApprovalOwner,
 		}
 	default:
 		panic("unsupported repository backend: " + backend)

@@ -267,7 +267,21 @@ func (m *Biz) handleShellOperation(event magicevent.Event, result magicevent.Res
 		setCapabilityError(result, err)
 		return
 	}
-	if err := validateRuntimeShellOperationData(command); err != nil {
+	if err := command.Execution.Validate(); err != nil {
+		setCapabilityError(result, err)
+		return
+	}
+	operation, authorization, err := command.SealedOperation.ValidateForExecution(command.RuntimeOperationExecutionContext)
+	if err != nil {
+		setCapabilityError(result, err)
+		return
+	}
+	data, err := shellevents.OperationDataFromRuntimeOperation(operation)
+	if err != nil {
+		setCapabilityError(result, err)
+		return
+	}
+	if err := validateRuntimeShellOperationData(command.RuntimeOperationExecutionContext, data, authorization); err != nil {
 		setCapabilityError(result, err)
 		return
 	}
@@ -278,22 +292,46 @@ func (m *Biz) handleShellOperation(event magicevent.Event, result magicevent.Res
 		result.Set(shellevents.ExecuteOperationResult{Receipt: receipt}, nil)
 		return
 	}
+	currentRevision := m.runtimeAdapter.runtimeAdmissibilityPolicyRevision()
+	if currentRevision != authorization.OwnerRevision {
+		message := "Shell owner policy changed after operation seal"
+		failure := &runtimecontract.FailureFact{
+			Class: runtimecontract.FailureClassExecutionFailure, Code: "operation_admissibility_stale",
+			Signature: "shell-owner-catalog-stale:" + authorization.CatalogObservation.ObservationID, Message: message,
+			TargetRefs: append([]string(nil), command.TargetRefs...),
+		}
+		receipt := m.newRuntimeOperationReceipt(command.Execution, command.OperationID, runtimecontract.RuntimeOperationExecutionStatusRejected, command.TargetRefs,
+			runtimecontract.RuntimeOperationEvidence{Summary: message}, failure, nil,
+			orchestratorevents.RuntimeOperationReceiptObservation{ObservedEffectScope: runtimecontract.RuntimeEffectNone})
+		receipt.PrerequisiteStale = &runtimecontract.RuntimePrerequisiteStale{
+			PrerequisiteID: authorization.PrerequisiteID, ObservationID: authorization.CatalogObservation.ObservationID,
+			Domain: runtimecontract.RuntimeResourceOwnerCatalog, OwnerModuleID: ModuleID, SubjectRef: "shell_runtime_policy",
+			ExpectedRevision: authorization.OwnerRevision, ObservedRevision: currentRevision, Reason: message,
+		}
+		committed, commitErr := m.commitRuntimeOperationReceipt(event.Context(), command.WorkspaceID, command.RunID, command.Transaction.AuthoritySnapshotID, command.DispatchID, command.Execution, receipt)
+		if commitErr != nil {
+			setCapabilityError(result, commitErr)
+			return
+		}
+		result.Set(shellevents.ExecuteOperationResult{Receipt: committed}, nil)
+		return
+	}
 	runtimeRequest := RuntimeCommandRequest{
 		WorkspaceID: command.WorkspaceID, RunID: command.RunID,
 		StepID:                        common.StepID(command.DispatchID + "/" + command.OperationID),
 		WorkspaceDeliverableDirectory: command.WorkspaceDeliverableDirectory,
 		WorkspaceInternalDirectory:    command.WorkspaceInternalDirectory,
-		ValidationRecipeID:            command.Data.ValidationRecipeID,
-		Command:                       command.Data.Command, Args: command.Data.Args, TimeoutMillis: command.Data.TimeoutMillis,
-		StateChanging: command.Data.StateChanging, TargetRef: command.Data.TargetRef, TargetRefs: command.Data.TargetRefs,
-		ValidationScopeTargetRefs: command.ValidationScopeTargetRefs,
-		VerificationScope:         command.Data.VerificationScope,
-		BoundedReason:             command.Data.BoundedReason, ValidationScratchDirectory: command.Data.ValidationScratchDirectory,
-		ValidationScratchAutoCleanup:    command.Data.ValidationScratchAutoCleanup,
-		ValidationScratchAutoCleanupSet: command.Data.ValidationScratchAutoCleanupSet,
-		ValidationEvidence:              command.Data.ValidationEvidence, ManagedValidation: command.Data.ManagedValidation,
-		EvidencePolicies:  command.EvidencePolicies,
-		ValidationRecipes: command.ValidationRecipes,
+		ValidationRecipeID:            data.ValidationRecipeID,
+		Command:                       data.Command, Args: data.Args, TimeoutMillis: data.TimeoutMillis,
+		StateChanging: data.StateChanging, TargetRef: data.TargetRef, TargetRefs: data.TargetRefs,
+		ValidationScopeTargetRefs: authorization.ValidationScopeTargetRefs,
+		VerificationScope:         data.VerificationScope,
+		BoundedReason:             data.BoundedReason, ValidationScratchDirectory: data.ValidationScratchDirectory,
+		ValidationScratchAutoCleanup:    data.ValidationScratchAutoCleanup,
+		ValidationScratchAutoCleanupSet: data.ValidationScratchAutoCleanupSet,
+		ValidationEvidence:              data.ValidationEvidence, ManagedValidation: data.ManagedValidation,
+		EvidencePolicies:  authorization.EvidencePolicies,
+		ValidationRecipes: authorization.ValidationRecipes,
 	}
 	operationResult := RuntimeCommandResult{}
 	var executeErr error
@@ -307,7 +345,7 @@ func (m *Biz) handleShellOperation(event magicevent.Event, result magicevent.Res
 	var failure *runtimecontract.FailureFact
 	if executeErr != nil {
 		status = runtimecontract.RuntimeOperationExecutionStatusRejected
-		observation := shellFailureTargetObservation(operationResult, command.TargetRole, m.runtimeAdapter.runtimeAdmissibilityPolicyRevision())
+		observation := shellFailureTargetObservation(operationResult, authorization.TargetRole, currentRevision)
 		targetRefs := []string(nil)
 		if observation != nil {
 			targetRefs = append([]string(nil), observation.TargetRefs...)
@@ -319,12 +357,12 @@ func (m *Biz) handleShellOperation(event magicevent.Event, result magicevent.Res
 		if operationResult.ValidationFailureDiagnostic != nil {
 			diagnostic := operationResult.ValidationFailureDiagnostic.Clone()
 			failure.ValidationDiagnostic = &diagnostic
-			if observation := shellValidationFailureObservation(command, diagnostic); observation != nil {
+			if observation := shellValidationFailureObservation(command.RuntimeOperationExecutionContext, authorization, diagnostic); observation != nil {
 				observation.FailureSignature = failure.Signature
 				failure.ValidationFailureObservation = observation
 			}
 		}
-	} else if undeclared := shellUndeclaredWorkspaceTargets(operationResult.WorkspaceObservedTargetChanges, command.Data.TargetRefs); len(undeclared) > 0 {
+	} else if undeclared := shellUndeclaredWorkspaceTargets(operationResult.WorkspaceObservedTargetChanges, data.TargetRefs); len(undeclared) > 0 {
 		status = runtimecontract.RuntimeOperationExecutionStatusRejected
 		failure = &runtimecontract.FailureFact{
 			Class: runtimecontract.FailureClassEffectMismatch, Code: "undeclared_workspace_effect",
@@ -333,9 +371,9 @@ func (m *Biz) handleShellOperation(event magicevent.Event, result magicevent.Res
 			TargetRefs: undeclared,
 		}
 	}
-	observation := shellMutationReceiptObservation(command.Data.StateChanging, shellInputHasManagedValidation(runtimeRequest), status, operationResult)
+	observation := shellMutationReceiptObservation(data.StateChanging, shellInputHasManagedValidation(runtimeRequest), status, operationResult)
 	receiptTargets := operationResult.TargetRefs
-	if status == runtimecontract.RuntimeOperationExecutionStatusAccepted && command.Data.StateChanging {
+	if status == runtimecontract.RuntimeOperationExecutionStatusAccepted && data.StateChanging {
 		receiptTargets = shellObservedChangedWorkspaceTargets(operationResult.WorkspaceObservedTargetChanges)
 	}
 	receipt := m.newRuntimeOperationReceipt(command.Execution, command.OperationID, status, receiptTargets, evidence, failure, nil, observation)
@@ -364,35 +402,35 @@ func (m *Biz) handleShellOperation(event magicevent.Event, result magicevent.Res
 	result.Set(shellevents.ExecuteOperationResult{Receipt: committed}, nil)
 }
 
-func validateRuntimeShellOperationData(command shellevents.ExecuteOperationCommand) error {
-	managed := command.Data.ManagedValidation.RuntimeManaged ||
-		strings.TrimSpace(command.Data.ManagedValidation.Kind) == runtimecontract.RuntimeBlockKindManagedValidationSession ||
-		strings.TrimSpace(command.Data.ManagedValidation.OriginalNodeKind) == runtimecontract.RuntimeBlockKindManagedValidationSession
-	if !sameShellTargetRefs(command.TargetRefs, command.Data.TargetRefs) {
+func validateRuntimeShellOperationData(context runtimecontract.RuntimeOperationExecutionContext, data shellevents.OperationData, authorization shellevents.RuntimeExecutionAuthorization) error {
+	managed := data.ManagedValidation.RuntimeManaged ||
+		strings.TrimSpace(data.ManagedValidation.Kind) == runtimecontract.RuntimeBlockKindManagedValidationSession ||
+		strings.TrimSpace(data.ManagedValidation.OriginalNodeKind) == runtimecontract.RuntimeBlockKindManagedValidationSession
+	if !sameShellTargetRefs(context.TargetRefs, data.TargetRefs) {
 		return fmt.Errorf("runtime Shell operation data target refs do not match sealed execution context")
 	}
 	if managed {
-		if command.Data.StateChanging || strings.TrimSpace(command.Data.ValidationRecipeID) == "" ||
-			strings.TrimSpace(command.Data.Command) != "" || len(command.Data.Args) != 0 ||
-			strings.TrimSpace(command.Data.ValidationScratchDirectory) != "" || command.Data.ValidationScratchAutoCleanupSet ||
-			command.Execution.ExpectedEffectScope != runtimecontract.RuntimeEffectEphemeralSession {
+		if data.StateChanging || strings.TrimSpace(data.ValidationRecipeID) == "" ||
+			strings.TrimSpace(data.Command) != "" || len(data.Args) != 0 ||
+			strings.TrimSpace(data.ValidationScratchDirectory) != "" || data.ValidationScratchAutoCleanupSet ||
+			context.Execution.ExpectedEffectScope != runtimecontract.RuntimeEffectEphemeralSession {
 			return fmt.Errorf("runtime managed validation requires recipe-only ephemeral execution data")
 		}
-		if _, found := runtimecontract.RuntimeValidationRecipeForID(command.ValidationRecipes, command.Data.ValidationRecipeID); !found {
+		if _, found := runtimecontract.RuntimeValidationRecipeForID(authorization.ValidationRecipes, data.ValidationRecipeID); !found {
 			return fmt.Errorf("runtime managed validation recipe is absent from sealed owner catalog")
 		}
 		return nil
 	}
-	if len(command.ValidationScopeTargetRefs) != 0 {
+	if len(authorization.ValidationScopeTargetRefs) != 0 {
 		return fmt.Errorf("runtime shell/command must not carry managed-validation target scope")
 	}
-	if !command.Data.StateChanging || strings.TrimSpace(command.Data.ValidationRecipeID) != "" ||
-		strings.TrimSpace(command.Data.Command) == "" || len(command.TargetRefs) == 0 ||
-		strings.TrimSpace(command.Data.ValidationScratchDirectory) != "" || command.Data.ValidationScratchAutoCleanupSet ||
-		command.Execution.ExpectedEffectScope != runtimecontract.RuntimeEffectWorkspaceDurable {
+	if !data.StateChanging || strings.TrimSpace(data.ValidationRecipeID) != "" ||
+		strings.TrimSpace(data.Command) == "" || len(context.TargetRefs) == 0 ||
+		strings.TrimSpace(data.ValidationScratchDirectory) != "" || data.ValidationScratchAutoCleanupSet ||
+		context.Execution.ExpectedEffectScope != runtimecontract.RuntimeEffectWorkspaceDurable {
 		return fmt.Errorf("runtime shell/command requires durable stateChanging execution data")
 	}
-	if strings.TrimSpace(command.Data.TargetRef) != "" && !shellStringIncluded(command.TargetRefs, command.Data.TargetRef) {
+	if strings.TrimSpace(data.TargetRef) != "" && !shellStringIncluded(context.TargetRefs, data.TargetRef) {
 		return fmt.Errorf("runtime Shell targetRef is outside sealed target refs")
 	}
 	return nil
@@ -472,21 +510,21 @@ func validationRecipeUnavailableResult(request RuntimeCommandRequest, err error)
 // shellValidationFailureObservation exports only the sealed validation scope
 // plus bounded diagnostic candidates.  It is not a repair target and cannot
 // carry a Runtime action; the File owner must independently confirm it.
-func shellValidationFailureObservation(command shellevents.ExecuteOperationCommand, diagnostic runtimecontract.ValidationFailureDiagnostic) *runtimecontract.RuntimeValidationFailureObservation {
+func shellValidationFailureObservation(context runtimecontract.RuntimeOperationExecutionContext, authorization shellevents.RuntimeExecutionAuthorization, diagnostic runtimecontract.ValidationFailureDiagnostic) *runtimecontract.RuntimeValidationFailureObservation {
 	diagnostic = diagnostic.Normalized()
-	if !shellValidationDiagnosticMayIdentifyImplementationEffect(diagnostic.Class) || command.WorkspaceID == "" || command.RunID == "" || command.Transaction.AuthoritySnapshotID == "" || strings.TrimSpace(command.DispatchID) == "" || strings.TrimSpace(command.OperationID) == "" || strings.TrimSpace(command.TargetRole) == "" || strings.TrimSpace(diagnostic.Class) == "" || len(diagnostic.TargetRefs) == 0 || len(command.ValidationScopeTargetRefs) == 0 {
+	if !shellValidationDiagnosticMayIdentifyImplementationEffect(diagnostic.Class) || context.WorkspaceID == "" || context.RunID == "" || context.Transaction.AuthoritySnapshotID == "" || strings.TrimSpace(context.DispatchID) == "" || strings.TrimSpace(context.OperationID) == "" || strings.TrimSpace(authorization.TargetRole) == "" || strings.TrimSpace(diagnostic.Class) == "" || len(diagnostic.TargetRefs) == 0 || len(authorization.ValidationScopeTargetRefs) == 0 {
 		return nil
 	}
-	if !shellTargetRefsSubset(diagnostic.TargetRefs, command.ValidationScopeTargetRefs) {
+	if !shellTargetRefsSubset(diagnostic.TargetRefs, authorization.ValidationScopeTargetRefs) {
 		return nil
 	}
 	// The deterministic bounded digest permits File/Orchestrator causation
 	// checks without passing raw stdout/stderr across owner boundaries.
-	hash := sha256.Sum256([]byte(strings.Join([]string{diagnostic.Class, diagnostic.Stage, diagnostic.Operation, strings.Join(diagnostic.TargetRefs, ","), strings.Join(command.ValidationScopeTargetRefs, ",")}, "\x00")))
+	hash := sha256.Sum256([]byte(strings.Join([]string{diagnostic.Class, diagnostic.Stage, diagnostic.Operation, strings.Join(diagnostic.TargetRefs, ","), strings.Join(authorization.ValidationScopeTargetRefs, ",")}, "\x00")))
 	value := runtimecontract.RuntimeValidationFailureObservation{
-		WorkspaceID: command.WorkspaceID, RunID: command.RunID, AuthoritySnapshotID: command.Transaction.AuthoritySnapshotID,
-		DispatchID: command.DispatchID, OperationID: command.OperationID, TargetRole: command.TargetRole,
-		DiagnosticClass: diagnostic.Class, CandidateTargetRefs: diagnostic.TargetRefs, ValidationScopeTargetRefs: command.ValidationScopeTargetRefs,
+		WorkspaceID: context.WorkspaceID, RunID: context.RunID, AuthoritySnapshotID: context.Transaction.AuthoritySnapshotID,
+		DispatchID: context.DispatchID, OperationID: context.OperationID, TargetRole: authorization.TargetRole,
+		DiagnosticClass: diagnostic.Class, CandidateTargetRefs: diagnostic.TargetRefs, ValidationScopeTargetRefs: authorization.ValidationScopeTargetRefs,
 		DiagnosticHash: hex.EncodeToString(hash[:]),
 	}.Normalized()
 	// The failure signature is added by RuntimeOperationFailure below; do not

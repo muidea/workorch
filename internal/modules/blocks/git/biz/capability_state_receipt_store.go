@@ -37,8 +37,11 @@ func decodeCurrentCapabilityStateReceipt(data []byte, target *runtimecontract.Ru
 // prerequisite acquisition. It lives in the workspace internal directory, not
 // the deliverable, so a query cannot alter user-managed files.
 type CapabilityStateReceiptStore struct {
-	dataDir string
-	mu      sync.Mutex
+	dataDir       string
+	syncDirectory func(string) error
+	linkFile      func(string, string) error
+	removeFile    func(string) error
+	mu            sync.Mutex
 }
 
 func NewCapabilityStateReceiptStore(dataDir string) (*CapabilityStateReceiptStore, error) {
@@ -46,7 +49,10 @@ func NewCapabilityStateReceiptStore(dataDir string) (*CapabilityStateReceiptStor
 	if dataDir == "" {
 		return nil, common.ErrInvalidArgument
 	}
-	return &CapabilityStateReceiptStore{dataDir: filepath.Clean(dataDir)}, nil
+	return &CapabilityStateReceiptStore{
+		dataDir: filepath.Clean(dataDir), syncDirectory: syncCapabilityStateReceiptDirectory,
+		linkFile: os.Link, removeFile: os.Remove,
+	}, nil
 }
 
 func (s *CapabilityStateReceiptStore) Load(workspaceID common.WorkspaceID, acquisitionKey string) (runtimecontract.RuntimeCapabilityStateSnapshot, bool, error) {
@@ -83,13 +89,16 @@ func (s *CapabilityStateReceiptStore) StoreIfAbsent(workspaceID common.Workspace
 		if !reflect.DeepEqual(existing, snapshot) {
 			return runtimecontract.RuntimeCapabilityStateSnapshot{}, fmt.Errorf("%w: capability-state acquisition key %q already has a different snapshot", common.ErrConflict, snapshot.AcquisitionKey)
 		}
+		if err := s.syncDirectory(dir); err != nil {
+			return runtimecontract.RuntimeCapabilityStateSnapshot{}, err
+		}
 		return existing, nil
 	}
 	encoded, err := json.Marshal(snapshot)
 	if err != nil {
 		return runtimecontract.RuntimeCapabilityStateSnapshot{}, err
 	}
-	if err := os.MkdirAll(dir, 0o700); err != nil {
+	if err := s.ensureDurableDirectory(dir); err != nil {
 		return runtimecontract.RuntimeCapabilityStateSnapshot{}, err
 	}
 	path, err := s.path(workspaceID, snapshot.AcquisitionKey)
@@ -101,7 +110,21 @@ func (s *CapabilityStateReceiptStore) StoreIfAbsent(workspaceID common.Workspace
 		return runtimecontract.RuntimeCapabilityStateSnapshot{}, err
 	}
 	temporaryPath := file.Name()
-	defer os.Remove(temporaryPath)
+	cleanupTemporary := func() error {
+		if temporaryPath == "" {
+			return nil
+		}
+		if err := s.removeFile(temporaryPath); err != nil && !errors.Is(err, os.ErrNotExist) {
+			return err
+		}
+		temporaryPath = ""
+		// Persist the unlink as part of the same publication transaction. This
+		// is deliberately the final leaf-directory sync: a successful call can
+		// never acknowledge the final receipt while leaving a crash-recoverable
+		// .capability-state-* alias behind.
+		return s.syncDirectory(dir)
+	}
+	defer func() { _ = cleanupTemporary() }()
 	if err := file.Chmod(0o600); err != nil {
 		_ = file.Close()
 		return runtimecontract.RuntimeCapabilityStateSnapshot{}, err
@@ -119,7 +142,7 @@ func (s *CapabilityStateReceiptStore) StoreIfAbsent(workspaceID common.Workspace
 	// Link publishes only when no other process has already installed this
 	// acquisition key. Unlike O_EXCL on the final file, readers can never
 	// observe a partially written JSON receipt.
-	err = os.Link(temporaryPath, path)
+	err = s.linkFile(temporaryPath, path)
 	if errors.Is(err, os.ErrExist) {
 		value, found, loadErr := s.load(workspaceID, snapshot.AcquisitionKey)
 		if loadErr != nil {
@@ -128,12 +151,92 @@ func (s *CapabilityStateReceiptStore) StoreIfAbsent(workspaceID common.Workspace
 		if !found || !reflect.DeepEqual(value, snapshot) {
 			return runtimecontract.RuntimeCapabilityStateSnapshot{}, fmt.Errorf("%w: capability-state acquisition key %q already has a different snapshot", common.ErrConflict, snapshot.AcquisitionKey)
 		}
+		if err := cleanupTemporary(); err != nil {
+			return runtimecontract.RuntimeCapabilityStateSnapshot{}, err
+		}
 		return value, nil
 	}
 	if err != nil {
 		return runtimecontract.RuntimeCapabilityStateSnapshot{}, err
 	}
+	// The file itself was synced before publication. Remove the temporary hard
+	// link first, then fsync the leaf directory once so the final entry and the
+	// absence of its temporary alias become one durable acknowledgement fence.
+	if err := cleanupTemporary(); err != nil {
+		return runtimecontract.RuntimeCapabilityStateSnapshot{}, err
+	}
 	return snapshot, nil
+}
+
+// ensureDurableDirectory creates the workspace receipt directory and fsyncs
+// every directory from the leaf back through the configured data root. The
+// leaf-to-root order first persists each child inode and then the parent entry
+// naming it. Repeating the whole chain is intentional: a retry after any
+// prior sync error cannot treat a merely visible MkdirAll result as durable.
+func (s *CapabilityStateReceiptStore) ensureDurableDirectory(dir string) error {
+	if s == nil || s.syncDirectory == nil {
+		return common.ErrInvalidArgument
+	}
+	chain, err := capabilityStateReceiptDirectoryChain(s.dataDir, dir)
+	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return err
+	}
+	for _, path := range chain {
+		if err := s.syncDirectory(path); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func capabilityStateReceiptDirectoryChain(dataDir, leaf string) ([]string, error) {
+	root := filepath.Clean(strings.TrimSpace(dataDir))
+	current := filepath.Clean(strings.TrimSpace(leaf))
+	if root == "." || current == "." {
+		return nil, common.ErrInvalidArgument
+	}
+	relative, err := filepath.Rel(root, current)
+	if err != nil || relative == ".." || strings.HasPrefix(relative, ".."+string(filepath.Separator)) {
+		return nil, common.ErrInvalidArgument
+	}
+	ret := make([]string, 0, 8)
+	for {
+		ret = append(ret, current)
+		if current == root {
+			break
+		}
+		parent := filepath.Dir(current)
+		if parent == current {
+			return nil, common.ErrInvalidArgument
+		}
+		current = parent
+	}
+	return ret, nil
+}
+
+func syncCapabilityStateReceiptDirectory(path string) error {
+	directory, err := os.Open(path)
+	if err != nil {
+		return err
+	}
+	info, statErr := directory.Stat()
+	if statErr != nil {
+		_ = directory.Close()
+		return statErr
+	}
+	if !info.IsDir() {
+		_ = directory.Close()
+		return common.ErrInvalidArgument
+	}
+	syncErr := directory.Sync()
+	closeErr := directory.Close()
+	if syncErr != nil {
+		return syncErr
+	}
+	return closeErr
 }
 
 func (s *CapabilityStateReceiptStore) load(workspaceID common.WorkspaceID, acquisitionKey string) (runtimecontract.RuntimeCapabilityStateSnapshot, bool, error) {

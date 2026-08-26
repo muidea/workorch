@@ -168,7 +168,8 @@ func newEventStreamDeletionDispatcherFixture(t *testing.T, scope deletioncontrac
 	if err := deletions.Create(context.Background(), fenced); err != nil {
 		t.Fatal(err)
 	}
-	return New(Dependencies{WorkspaceDeletions: deletions, WorkspacePurger: purger}), deletions, fenced
+	records := memory.NewEventRecordRepository()
+	return New(Dependencies{OwnerRepositories: eventStreamBizTestOwnerRepositories(records, deletions, purger)}), deletions, fenced
 }
 
 func TestEventStreamWorkspaceDeletionPurgeRequestedOwnsEffectAndExactReplay(t *testing.T) {
@@ -288,7 +289,7 @@ func TestEventStreamDeletionRetainExactReplayAndReadFence(t *testing.T) {
 	owner := memory.NewEventStreamOwnerRepositorySet()
 	hub := magicevent.NewHub(16)
 	t.Cleanup(func() { hub.Terminate(ctx) })
-	service := New(Dependencies{EventRecords: owner.EventRecords, WorkspaceDeletions: owner.WorkspaceDeletions, WorkspacePurger: owner.EventRecords, EventHub: hub})
+	service := New(Dependencies{OwnerRepositories: eventStreamBizTestOwnerRepositories(owner.EventRecords, owner.WorkspaceDeletions, owner.EventRecords), EventHub: hub})
 	if err := service.Start(); err != nil {
 		t.Fatal(err)
 	}
@@ -345,7 +346,7 @@ func TestEventStreamDeletionPurgeExactReplay(t *testing.T) {
 	owner := memory.NewEventStreamOwnerRepositorySet()
 	hub := magicevent.NewHub(16)
 	t.Cleanup(func() { hub.Terminate(ctx) })
-	service := New(Dependencies{EventRecords: owner.EventRecords, WorkspaceDeletions: owner.WorkspaceDeletions, WorkspacePurger: owner.EventRecords, EventHub: hub})
+	service := New(Dependencies{OwnerRepositories: eventStreamBizTestOwnerRepositories(owner.EventRecords, owner.WorkspaceDeletions, owner.EventRecords), EventHub: hub})
 	if err := service.Start(); err != nil {
 		t.Fatal(err)
 	}
@@ -393,8 +394,9 @@ func TestEventStreamDeletionConcurrentExactPurgeConverges(t *testing.T) {
 	for iteration := 0; iteration < 100; iteration++ {
 		ctx := context.Background()
 		owner := memory.NewEventStreamOwnerRepositorySet()
-		first := New(Dependencies{EventRecords: owner.EventRecords, WorkspaceDeletions: owner.WorkspaceDeletions, WorkspacePurger: owner.EventRecords})
-		second := New(Dependencies{EventRecords: owner.EventRecords, WorkspaceDeletions: owner.WorkspaceDeletions, WorkspacePurger: owner.EventRecords})
+		ownerRepositories := owner.OwnerRepositories()
+		first := New(Dependencies{OwnerRepositories: ownerRepositories})
+		second := New(Dependencies{OwnerRepositories: ownerRepositories})
 		scope := bizEventStreamDeletionScope("ws-eventstream-concurrent-purge", deletioncontract.ModePurge)
 		if _, err := first.sealWorkspaceDeletion(ctx, scope); err != nil {
 			t.Fatalf("iteration %d seal: %v", iteration, err)

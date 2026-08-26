@@ -150,11 +150,18 @@ func TestRuntimeOperationExecutionRecordAndReceiptRoundTrip(t *testing.T) {
 	}
 	sealed := RuntimeOperationExecutionRecord{
 		OperationID: "op-1", ExecutionKey: key,
-		ExpectedEffectScope: RuntimeEffectWorkspaceDurable,
-		State:               OperationExecutionSealed,
+		ExpectedEffectScope:     RuntimeEffectWorkspaceDurable,
+		AdmissibilitySnapshotID: "admissibility-1",
+		AcquisitionBinding:      "capability-state/ws-1/run-1/owner/0",
+		State:                   OperationExecutionSealed,
 	}
 	if err := sealed.Validate(); err != nil {
 		t.Fatalf("sealed validate: %v", err)
+	}
+	unbound := sealed
+	unbound.AdmissibilitySnapshotID = ""
+	if err := unbound.Validate(); err == nil {
+		t.Fatal("execution record accepted acquisition binding without owner catalog snapshot")
 	}
 	// claimed without fence fails
 	claimed := sealed

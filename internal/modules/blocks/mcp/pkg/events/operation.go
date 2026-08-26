@@ -19,15 +19,17 @@ import (
 // aggregate and requires its revision to remain equal before transport
 // execution.
 type RuntimeExecutionAuthorization struct {
-	CatalogSnapshotID string
-	RegistryRevision  string
-	Capability        runtimecontract.RuntimeMCPCapabilityContext
-	Policy            runtimecontract.RuntimeOperationPolicyFact
-	ValidationSurface *runtimecontract.RuntimeValidationSurface
+	CatalogSnapshotID  string
+	AcquisitionBinding string
+	RegistryRevision   string
+	Capability         runtimecontract.RuntimeMCPCapabilityContext
+	Policy             runtimecontract.RuntimeOperationPolicyFact
+	ValidationSurface  *runtimecontract.RuntimeValidationSurface
 }
 
 func (a RuntimeExecutionAuthorization) normalized() RuntimeExecutionAuthorization {
 	a.CatalogSnapshotID = strings.TrimSpace(a.CatalogSnapshotID)
+	a.AcquisitionBinding = strings.TrimSpace(a.AcquisitionBinding)
 	a.RegistryRevision = strings.TrimSpace(a.RegistryRevision)
 	a.Capability = runtimecontract.SealMCPCapabilityEffect(a.Capability)
 	a.Capability.Tags = append([]string(nil), a.Capability.Tags...)
@@ -142,11 +144,12 @@ func SealRuntimeOperation(operation runtimecontract.RuntimeOperation, catalog ru
 		}
 	}
 	authorization := RuntimeExecutionAuthorization{
-		CatalogSnapshotID: catalog.SnapshotID,
-		RegistryRevision:  catalog.ObservedRevision,
-		Capability:        capability,
-		Policy:            policy,
-		ValidationSurface: validationSurface,
+		CatalogSnapshotID:  catalog.SnapshotID,
+		AcquisitionBinding: catalog.AcquisitionBinding,
+		RegistryRevision:   catalog.ObservedRevision,
+		Capability:         capability,
+		Policy:             policy,
+		ValidationSurface:  validationSurface,
 	}.normalized()
 	if err := authorization.validateForOperation(operation); err != nil {
 		return SealedRuntimeOperation{}, err
@@ -179,6 +182,10 @@ func (s SealedRuntimeOperation) ValidateForExecution(context runtimecontract.Run
 	}
 	if context.Execution.ExpectedEffectScope != authorization.Policy.EffectScope {
 		return runtimecontract.RuntimeOperation{}, RuntimeExecutionAuthorization{}, fmt.Errorf("sealed MCP operation effect does not match claimed execution")
+	}
+	if strings.TrimSpace(context.Execution.AdmissibilitySnapshotID) != authorization.CatalogSnapshotID ||
+		strings.TrimSpace(context.Execution.AcquisitionBinding) != authorization.AcquisitionBinding {
+		return runtimecontract.RuntimeOperation{}, RuntimeExecutionAuthorization{}, fmt.Errorf("sealed MCP owner catalog does not match claimed execution")
 	}
 	payload, detachedOperation, detachedAuthorization, err := sealedRuntimeOperationPayload(operation, authorization)
 	if err != nil {

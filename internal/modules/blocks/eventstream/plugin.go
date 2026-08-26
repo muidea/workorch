@@ -24,11 +24,9 @@ func (m *Module) Setup(_ context.Context, eventHub event.Hub, background task.Ba
 		return err
 	}
 	if setupErr := m.Configure(eventstreambiz.Dependencies{
-		EventRecords:       repos.EventRecords,
-		WorkspaceDeletions: repos.WorkspaceDeletions,
-		WorkspacePurger:    repos.WorkspacePurger,
-		EventHub:           eventHub,
-		BackgroundRoutine:  background,
+		OwnerRepositories: repos.Owner,
+		EventHub:          eventHub,
+		BackgroundRoutine: background,
 	}); setupErr != nil {
 		return cd.NewError(cd.Unexpected, setupErr.Error())
 	}

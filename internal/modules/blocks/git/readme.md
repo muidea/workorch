@@ -4,7 +4,7 @@ Status: active
 
 Type: capability-block-contract
 
-Last Verified: 2026-08-24
+Last Verified: 2026-08-26
 
 ## 功能范围与边界
 
@@ -19,6 +19,10 @@ Last Verified: 2026-08-24
   与 capability-state acquisition 均使用 Git owner 定义的 concrete typed command/result。
 - Git capability-state prerequisite 的 canonical owner identity 是 `blocks/git`；profile 只能通过该 identity 请求 `repository_state`，不得使用 `git` 等 EventHub destination 别名。
 - Git capability-state receipt 是 Git owner 的 durable prerequisite evidence，按 `<repository.dataDir>/internal/workspaces/<workspaceId>/runtime/git-capability-state-receipts/` 分区；同一 workspace/acquisition key 只能对应同一快照。它不写入 deliverable，随 workspace internal directory 的受控删除一并清理。
+- capability-state receipt 的首次发布使用 owner-private temp file `write -> file fsync -> close -> hard-link-if-absent`；创建目录后从
+  receipt leaf 到 configured data root 逐级 fsync。发布成功或并发 exact duplicate 都必须先 unlink 当前 temp alias，再以 leaf
+  directory fsync 作为最终 durability fence；任一 mkdir-chain、unlink 或最终 fsync 失败均不得确认成功，exact retry 只重验并
+  重同步同一 immutable receipt，不引入新的状态转换。
 - Runtime Git operation 以 `RuntimeOperationReceipt.Outcome` 为唯一结果。`ExecuteOperationCommand` 只携带
   execution context、完整 `SealedRuntimeOperation` 与 prerequisite facts；Git 校验发送方必须是 Orchestrator、
   payload hash、operation/target/CWI scope，并从 seal 内派生 adapter 参数，不再接受可独立漂移的 `Data`。
@@ -72,6 +76,8 @@ Last Verified: 2026-08-24
 
 - File workspace-tree binding、dirty-content stale feasibility 与 effect 前 stale 拒绝。
 - durable capability receipt 的重启加载、重复 acquisition、同 key 不同 snapshot 冲突。
+- durable receipt 目录链 leaf-to-root fsync、final-link 后 temp-unlink-before-leaf-fsync 顺序、并发 exact duplicate，以及
+  mkdir-chain/final-sync 故障注入与幂等重试。
 - exact owner receipt 重放、Orchestrator active/claimed query authorization、resource-change crash/restart。
 - ref option injection、sealed payload/target drift、非 Orchestrator source、Post 强调用和重复 add no-op。
 - CWI reconciliation 仅形成 repository fact，check/metric/artifact 要求返回 unverifiable。

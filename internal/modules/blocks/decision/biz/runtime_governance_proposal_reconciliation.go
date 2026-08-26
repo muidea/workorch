@@ -135,6 +135,16 @@ func (m *Biz) reconcileDecisionTicket(ctx context.Context, observed *decisionmod
 		return common.ErrConflict
 	}
 
+	// Definition clarification has dedicated typed resolution commands because
+	// its binding transition needs facts which are intentionally absent from the
+	// generic ResolveTicket contract. Never reinterpret an orphan clarification
+	// Resolution as an ordinary resolution: the exact Workspace/Run owner
+	// command will idempotently re-drive the private clarification reducer and
+	// its delivery cut point.
+	if ticket.DefinitionClarification != nil || ticket.DecisionKind == "workspace_definition_clarification" || ticket.DecisionKind == "runtime_definition_clarification" {
+		return nil
+	}
+
 	if ticket.DecisionKind != "runtime_governance" {
 		if err := m.reconcileOrdinaryDecisionDelivery(ticketCtx, ticket); err != nil {
 			return fmt.Errorf("reconcile decision delivery %s: %w", ticket.ID, err)

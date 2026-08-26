@@ -13,6 +13,7 @@ import (
 
 	resultmodel "github.com/muidea/workorch/internal/modules/blocks/result/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
+	"github.com/muidea/workorch/internal/pkg/repository"
 	"github.com/muidea/workorch/internal/pkg/repository/memory"
 	deletioncontract "github.com/muidea/workorch/internal/pkg/workorchdeletioncontract"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
@@ -25,8 +26,7 @@ func TestResultWorkspaceDeletionFenceHidesRetainedDataAndPurgeIsStable(t *testin
 	repositories := memory.NewResultOwnerRepositorySet()
 	module := New()
 	if err := module.Configure(resultbiz.Dependencies{
-		Results: repositories.Results, Artifacts: repositories.Artifacts,
-		WorkspaceDeletions: repositories.WorkspaceDeletions, EventHub: hub,
+		OwnerRepositories: repositories.OwnerRepositories(), EventHub: hub,
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -138,12 +138,8 @@ func TestModuleSetupRequiresRepositories(t *testing.T) {
 	if err := New().Configure(resultbiz.Dependencies{}); !errors.Is(err, common.ErrInvalidArgument) {
 		t.Fatalf("Setup err = %v, want invalid argument", err)
 	}
-	if err := New().Configure(resultbiz.Dependencies{Results: memory.NewResultRepository()}); !errors.Is(err, common.ErrInvalidArgument) {
-		t.Fatalf("Setup with missing artifacts err = %v, want invalid argument", err)
-	}
 	if err := New().Configure(resultbiz.Dependencies{
-		Results:   memory.NewResultRepository(),
-		Artifacts: memory.NewArtifactRepository(),
+		OwnerRepositories: memory.NewResultOwnerRepositorySet().OwnerRepositories(),
 	}); !errors.Is(err, common.ErrInvalidArgument) {
 		t.Fatalf("Setup with missing EventHub err = %v, want invalid argument", err)
 	}
@@ -193,7 +189,7 @@ func TestModuleManagesResultsAndArtifacts(t *testing.T) {
 	}
 	module := New()
 	if err := module.Configure(resultbiz.Dependencies{
-		Results: resultRepo, Artifacts: artifactRepo, WorkspaceDeletions: memory.NewResultWorkspaceDeletionRepository(), EventHub: hub,
+		OwnerRepositories: resultTestOwnerRepositories(resultRepo, artifactRepo, memory.NewResultWorkspaceDeletionRepository()), EventHub: hub,
 	}); err != nil {
 		t.Fatalf("Setup: %v", err)
 	}
@@ -220,7 +216,7 @@ func TestModuleRunIsIdempotent(t *testing.T) {
 	ctx := context.Background()
 	module := New()
 	if err := module.Configure(resultbiz.Dependencies{
-		Results: memory.NewResultRepository(), Artifacts: memory.NewArtifactRepository(), WorkspaceDeletions: memory.NewResultWorkspaceDeletionRepository(), EventHub: magicevent.NewHub(16),
+		OwnerRepositories: memory.NewResultOwnerRepositorySet().OwnerRepositories(), EventHub: magicevent.NewHub(16),
 	}); err != nil {
 		t.Fatalf("Setup: %v", err)
 	}
@@ -234,7 +230,7 @@ func TestModuleRunIsIdempotent(t *testing.T) {
 		t.Fatalf("Teardown: %v", err)
 	}
 	if err := module.Configure(resultbiz.Dependencies{
-		Results: memory.NewResultRepository(), Artifacts: memory.NewArtifactRepository(), WorkspaceDeletions: memory.NewResultWorkspaceDeletionRepository(), EventHub: magicevent.NewHub(16),
+		OwnerRepositories: memory.NewResultOwnerRepositorySet().OwnerRepositories(), EventHub: magicevent.NewHub(16),
 	}); err != nil {
 		t.Fatalf("Setup after Teardown: %v", err)
 	}
@@ -249,7 +245,7 @@ func TestModuleRejectsInvalidResultCommandWithoutSideEffect(t *testing.T) {
 	resultRepo := memory.NewResultRepository()
 	module := New()
 	if err := module.Configure(resultbiz.Dependencies{
-		Results: resultRepo, Artifacts: memory.NewArtifactRepository(), WorkspaceDeletions: memory.NewResultWorkspaceDeletionRepository(), EventHub: hub,
+		OwnerRepositories: resultTestOwnerRepositories(resultRepo, memory.NewArtifactRepository(), memory.NewResultWorkspaceDeletionRepository()), EventHub: hub,
 	}); err != nil {
 		t.Fatalf("Configure: %v", err)
 	}
@@ -287,7 +283,7 @@ func TestModuleHandlesResultCommandsOverEventHub(t *testing.T) {
 	}
 	module := New()
 	if err := module.Configure(resultbiz.Dependencies{
-		Results: resultRepo, Artifacts: memory.NewArtifactRepository(), WorkspaceDeletions: memory.NewResultWorkspaceDeletionRepository(), EventHub: hub,
+		OwnerRepositories: resultTestOwnerRepositories(resultRepo, memory.NewArtifactRepository(), memory.NewResultWorkspaceDeletionRepository()), EventHub: hub,
 	}); err != nil {
 		t.Fatalf("Setup: %v", err)
 	}
@@ -313,7 +309,7 @@ func TestResultOwnerListContractsAreBoundedAndCursorBased(t *testing.T) {
 		}
 	}
 	module := New()
-	if err := module.Configure(resultbiz.Dependencies{Results: results, Artifacts: memory.NewArtifactRepository(), WorkspaceDeletions: memory.NewResultWorkspaceDeletionRepository(), EventHub: hub}); err != nil {
+	if err := module.Configure(resultbiz.Dependencies{OwnerRepositories: resultTestOwnerRepositories(results, memory.NewArtifactRepository(), memory.NewResultWorkspaceDeletionRepository()), EventHub: hub}); err != nil {
 		t.Fatal(err)
 	}
 	if err := module.Start(); err != nil {
@@ -349,7 +345,7 @@ func TestResultOwnerCommandsPublishLifecycleNotifications(t *testing.T) {
 	t.Cleanup(func() { hub.Terminate(ctx) })
 	module := New()
 	if err := module.Configure(resultbiz.Dependencies{
-		Results: memory.NewResultRepository(), Artifacts: memory.NewArtifactRepository(), WorkspaceDeletions: memory.NewResultWorkspaceDeletionRepository(), EventHub: hub,
+		OwnerRepositories: memory.NewResultOwnerRepositorySet().OwnerRepositories(), EventHub: hub,
 	}); err != nil {
 		t.Fatalf("Configure: %v", err)
 	}
@@ -430,8 +426,63 @@ func receiveResultNotification(t *testing.T, received <-chan struct {
 
 func resultModuleContractDependencies() resultbiz.Dependencies {
 	return resultbiz.Dependencies{
-		Results: memory.NewResultRepository(), Artifacts: memory.NewArtifactRepository(), WorkspaceDeletions: memory.NewResultWorkspaceDeletionRepository(), EventHub: magicevent.NewHub(16),
+		OwnerRepositories: memory.NewResultOwnerRepositorySet().OwnerRepositories(), EventHub: magicevent.NewHub(16),
 	}
+}
+
+type resultTestBoundResults struct {
+	repository.ResultRepository
+	binding repository.OwnerRepositoryBinding
+}
+
+func (r resultTestBoundResults) OwnerRepositoryBinding() repository.OwnerRepositoryBinding {
+	return r.binding
+}
+
+type resultTestBoundArtifacts struct {
+	repository.ArtifactRepository
+	binding repository.OwnerRepositoryBinding
+}
+
+func (r resultTestBoundArtifacts) OwnerRepositoryBinding() repository.OwnerRepositoryBinding {
+	return r.binding
+}
+
+type resultTestBoundDeletions struct {
+	repository.ResultWorkspaceDeletionRepository
+	binding repository.OwnerRepositoryBinding
+}
+
+func (r resultTestBoundDeletions) OwnerRepositoryBinding() repository.OwnerRepositoryBinding {
+	return r.binding
+}
+
+type resultTestBackend struct {
+	binding   repository.OwnerRepositoryBinding
+	results   repository.ResultRepository
+	artifacts repository.ArtifactRepository
+	deletions repository.ResultWorkspaceDeletionRepository
+}
+
+func (b resultTestBackend) ResultOwnerBinding() repository.OwnerRepositoryBinding { return b.binding }
+func (b resultTestBackend) ResultOwnerResults() repository.ResultRepository       { return b.results }
+func (b resultTestBackend) ResultOwnerArtifacts() repository.ArtifactRepository   { return b.artifacts }
+func (b resultTestBackend) ResultOwnerWorkspaceDeletions() repository.ResultWorkspaceDeletionRepository {
+	return b.deletions
+}
+
+func resultTestOwnerRepositories(results repository.ResultRepository, artifacts repository.ArtifactRepository, deletions repository.ResultWorkspaceDeletionRepository) repository.ResultOwnerRepositories {
+	binding := repository.NewResultOwnerRepositoryBinding()
+	owner, err := repository.NewResultOwnerRepositories(resultTestBackend{
+		binding:   binding,
+		results:   resultTestBoundResults{ResultRepository: results, binding: binding},
+		artifacts: resultTestBoundArtifacts{ArtifactRepository: artifacts, binding: binding},
+		deletions: resultTestBoundDeletions{ResultWorkspaceDeletionRepository: deletions, binding: binding},
+	})
+	if err != nil {
+		panic(err)
+	}
+	return owner
 }
 
 func sendResultCommand[Result any, Command any](t *testing.T, ctx context.Context, hub magicevent.Hub, topic string, command Command) Result {

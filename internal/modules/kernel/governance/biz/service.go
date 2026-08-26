@@ -86,7 +86,6 @@ type Service struct {
 	resolve         ResolveDecisionFunc
 	resolveApproval ResolveApprovalFunc
 	loadConfig      func() (workorchconfig.Config, error)
-	background      magictask.BackgroundRoutine
 	mu              sync.Mutex
 	traceMu         sync.Mutex
 	unsubscribes    []func()
@@ -135,7 +134,6 @@ func newServiceWithPorts(deps servicePorts) *Service {
 		resolve:         deps.ResolveDecision,
 		resolveApproval: deps.ResolveApproval,
 		loadConfig:      deps.LoadConfig,
-		background:      deps.BackgroundRoutine,
 	}
 }
 
@@ -199,17 +197,30 @@ func (s *Service) Start() error {
 		s.SubscribeFunc(topic, s.handleCommand)
 	}
 	if err := s.scheduleBlockedRunReconciliationLocked(); err != nil {
+		for idx := len(s.topics) - 1; idx >= 0; idx-- {
+			s.UnsubscribeFunc(s.topics[idx])
+		}
+		s.topics = nil
 		for _, unsub := range s.unsubscribes {
 			if unsub != nil {
 				unsub()
 			}
 		}
 		s.unsubscribes = nil
+		if s.reconcileCancel != nil {
+			s.reconcileCancel()
+		}
+		s.reconcileCancel = nil
+		s.reconcileDone = nil
+		workCancel()
+		select {
+		case <-workDone:
+		case <-time.After(2 * time.Second):
+		}
 		s.workCtx = nil
 		s.workCancel = nil
 		s.workQueue = nil
 		s.workDone = nil
-		workCancel()
 		return err
 	}
 	return nil

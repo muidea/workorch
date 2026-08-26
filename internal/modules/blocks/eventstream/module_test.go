@@ -83,9 +83,7 @@ func TestModuleConfigureRequiresCoreDependencies(t *testing.T) {
 		name string
 		deps eventstreambiz.Dependencies
 	}{
-		{name: "missing event records", deps: func() eventstreambiz.Dependencies { d := base; d.EventRecords = nil; return d }()},
-		{name: "missing workspace deletions", deps: func() eventstreambiz.Dependencies { d := base; d.WorkspaceDeletions = nil; return d }()},
-		{name: "missing workspace purger", deps: func() eventstreambiz.Dependencies { d := base; d.WorkspacePurger = nil; return d }()},
+		{name: "missing owner bundle", deps: eventstreambiz.Dependencies{EventHub: base.EventHub}},
 		{name: "missing event hub", deps: func() eventstreambiz.Dependencies { d := base; d.EventHub = nil; return d }()},
 	}
 	for _, tc := range tests {
@@ -101,10 +99,8 @@ func TestModuleRunIsIdempotentAndTeardownUnsubscribes(t *testing.T) {
 	ctx := context.Background()
 	module := New()
 	owner := memory.NewEventStreamOwnerRepositorySet()
-	if err := module.Configure(eventstreambiz.Dependencies{
-		EventRecords: owner.EventRecords, WorkspaceDeletions: owner.WorkspaceDeletions, WorkspacePurger: owner.EventRecords,
-		EventHub: magicevent.NewHub(16),
-	}); err != nil {
+	if err := module.Configure(eventstreambiz.Dependencies{OwnerRepositories: eventStreamTestOwnerRepositories(
+		owner.EventRecords, owner.WorkspaceDeletions, owner.EventRecords), EventHub: magicevent.NewHub(16)}); err != nil {
 		t.Fatalf("Setup: %v", err)
 	}
 	if err := module.Start(); err != nil {
@@ -123,10 +119,9 @@ func TestModuleRunIsIdempotentAndTeardownUnsubscribes(t *testing.T) {
 
 func eventstreamModuleContractDependencies() eventstreambiz.Dependencies {
 	owner := memory.NewEventStreamOwnerRepositorySet()
-	return eventstreambiz.Dependencies{
-		EventRecords: owner.EventRecords, WorkspaceDeletions: owner.WorkspaceDeletions, WorkspacePurger: owner.EventRecords,
-		EventHub: magicevent.NewHub(16),
-	}
+	return eventstreambiz.Dependencies{OwnerRepositories: eventStreamTestOwnerRepositories(
+		owner.EventRecords, owner.WorkspaceDeletions, owner.EventRecords), EventHub: magicevent.NewHub(16)}
+
 }
 
 func TestPurgeWorkspaceCommandAcceptsContractPayload(t *testing.T) {
@@ -139,7 +134,7 @@ func TestPurgeWorkspaceCommandAcceptsContractPayload(t *testing.T) {
 		t.Fatalf("seed event record: %v", err)
 	}
 	module := New()
-	if err := module.Configure(eventstreambiz.Dependencies{EventRecords: repo, WorkspaceDeletions: owner.WorkspaceDeletions, WorkspacePurger: repo, EventHub: rawHub}); err != nil {
+	if err := module.Configure(eventstreambiz.Dependencies{OwnerRepositories: eventStreamTestOwnerRepositories(repo, owner.WorkspaceDeletions, repo), EventHub: rawHub}); err != nil {
 		t.Fatalf("Configure: %v", err)
 	}
 	if err := module.Start(); err != nil {
@@ -185,7 +180,7 @@ func TestWorkspaceDeletionSealPostedWithoutResultDoesNotFence(t *testing.T) {
 		t.Fatal(err)
 	}
 	module := New()
-	if err := module.Configure(eventstreambiz.Dependencies{EventRecords: repo, WorkspaceDeletions: owner.WorkspaceDeletions, WorkspacePurger: repo, EventHub: rawHub}); err != nil {
+	if err := module.Configure(eventstreambiz.Dependencies{OwnerRepositories: eventStreamTestOwnerRepositories(repo, owner.WorkspaceDeletions, repo), EventHub: rawHub}); err != nil {
 		t.Fatal(err)
 	}
 	if err := module.Start(); err != nil {
@@ -231,7 +226,7 @@ func TestListEventsCommandUsesConcreteBoundedResult(t *testing.T) {
 		}
 	}
 	module := New()
-	if err := module.Configure(eventstreambiz.Dependencies{EventRecords: repo, WorkspaceDeletions: owner.WorkspaceDeletions, WorkspacePurger: repo, EventHub: rawHub}); err != nil {
+	if err := module.Configure(eventstreambiz.Dependencies{OwnerRepositories: eventStreamTestOwnerRepositories(repo, owner.WorkspaceDeletions, repo), EventHub: rawHub}); err != nil {
 		t.Fatal(err)
 	}
 	if err := module.Start(); err != nil {
@@ -263,7 +258,7 @@ func TestHighWatermarksCommandReadsPersistedWorkspaceRevisions(t *testing.T) {
 		}
 	}
 	module := New()
-	if err := module.Configure(eventstreambiz.Dependencies{EventRecords: repo, WorkspaceDeletions: owner.WorkspaceDeletions, WorkspacePurger: repo, EventHub: rawHub}); err != nil {
+	if err := module.Configure(eventstreambiz.Dependencies{OwnerRepositories: eventStreamTestOwnerRepositories(repo, owner.WorkspaceDeletions, repo), EventHub: rawHub}); err != nil {
 		t.Fatal(err)
 	}
 	if err := module.Start(); err != nil {

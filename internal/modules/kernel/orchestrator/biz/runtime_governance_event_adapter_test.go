@@ -124,9 +124,8 @@ func TestRuntimeGovernanceResolutionCommitsThroughTypedEventHubCommand(t *testin
 	t.Cleanup(func() { _ = runOwner.Stop(ctx) })
 	decisionTickets := memory.NewDecisionTicketRepository()
 	decisionOwner := decisionmodule.New()
-	if err := decisionOwner.Configure(decisionbiz.Dependencies{WorkspaceDeletions: memory.NewDecisionWorkspaceDeletionRepository(),
-		Tickets: decisionTickets, Resolutions: memory.NewDecisionResolutionRepository(), EventHub: hub,
-	}); err != nil {
+	if err := decisionOwner.Configure(decisionbiz.Dependencies{OwnerRepositories: testDecisionOwnerRepositories(
+		decisionTickets, memory.NewDecisionResolutionRepository(), memory.NewDecisionWorkspaceDeletionRepository()), EventHub: hub}); err != nil {
 		t.Fatal(err)
 	}
 	if err := decisionOwner.Start(); err != nil {
@@ -269,9 +268,8 @@ func TestRuntimeGovernanceResolutionFileBackedRestartReplaysExactlyOnce(t *testi
 		t.Fatal(err)
 	}
 	decisionOwner := decisionmodule.New()
-	if err := decisionOwner.Configure(decisionbiz.Dependencies{WorkspaceDeletions: memory.NewDecisionWorkspaceDeletionRepository(),
-		Tickets: filerepository.NewDecisionTicketRepository(ticketsPath), Resolutions: filerepository.NewDecisionResolutionRepository(resolutionsPath), EventHub: hub,
-	}); err != nil {
+	if err := decisionOwner.Configure(decisionbiz.Dependencies{OwnerRepositories: testDecisionOwnerRepositories(
+		filerepository.NewDecisionTicketRepository(ticketsPath), filerepository.NewDecisionResolutionRepository(resolutionsPath), memory.NewDecisionWorkspaceDeletionRepository()), EventHub: hub}); err != nil {
 		t.Fatal(err)
 	}
 	if err := decisionOwner.Start(); err != nil {
@@ -355,9 +353,8 @@ func TestRuntimeGovernanceResolutionFileBackedRestartReplaysExactlyOnce(t *testi
 	}
 	t.Cleanup(func() { _ = restartedRunOwner.Stop(ctx) })
 	restartedDecisionOwner := decisionmodule.New()
-	if err := restartedDecisionOwner.Configure(decisionbiz.Dependencies{WorkspaceDeletions: memory.NewDecisionWorkspaceDeletionRepository(),
-		Tickets: filerepository.NewDecisionTicketRepository(ticketsPath), Resolutions: filerepository.NewDecisionResolutionRepository(resolutionsPath), EventHub: restartedHub,
-	}); err != nil {
+	if err := restartedDecisionOwner.Configure(decisionbiz.Dependencies{OwnerRepositories: testDecisionOwnerRepositories(
+		filerepository.NewDecisionTicketRepository(ticketsPath), filerepository.NewDecisionResolutionRepository(resolutionsPath), memory.NewDecisionWorkspaceDeletionRepository()), EventHub: restartedHub}); err != nil {
 		t.Fatal(err)
 	}
 	if err := restartedDecisionOwner.Start(); err != nil {
@@ -447,9 +444,8 @@ func TestRuntimeFileBackedBoundGovernanceRestartPreservesBindingWithoutCandidate
 		t.Fatal(err)
 	}
 	firstDecisionOwner := decisionmodule.New()
-	if err := firstDecisionOwner.Configure(decisionbiz.Dependencies{WorkspaceDeletions: memory.NewDecisionWorkspaceDeletionRepository(),
-		Tickets: filerepository.NewDecisionTicketRepository(ticketsPath), Resolutions: filerepository.NewDecisionResolutionRepository(resolutionsPath), EventHub: firstHub,
-	}); err != nil {
+	if err := firstDecisionOwner.Configure(decisionbiz.Dependencies{OwnerRepositories: testDecisionOwnerRepositories(
+		filerepository.NewDecisionTicketRepository(ticketsPath), filerepository.NewDecisionResolutionRepository(resolutionsPath), memory.NewDecisionWorkspaceDeletionRepository()), EventHub: firstHub}); err != nil {
 		t.Fatal(err)
 	}
 	if err := firstDecisionOwner.Start(); err != nil {
@@ -507,9 +503,8 @@ func TestRuntimeFileBackedBoundGovernanceRestartPreservesBindingWithoutCandidate
 	}
 	t.Cleanup(func() { _ = restartedRunOwner.Stop(ctx) })
 	restartedDecisionOwner := decisionmodule.New()
-	if err := restartedDecisionOwner.Configure(decisionbiz.Dependencies{WorkspaceDeletions: memory.NewDecisionWorkspaceDeletionRepository(),
-		Tickets: filerepository.NewDecisionTicketRepository(ticketsPath), Resolutions: filerepository.NewDecisionResolutionRepository(resolutionsPath), EventHub: restartedHub,
-	}); err != nil {
+	if err := restartedDecisionOwner.Configure(decisionbiz.Dependencies{OwnerRepositories: testDecisionOwnerRepositories(
+		filerepository.NewDecisionTicketRepository(ticketsPath), filerepository.NewDecisionResolutionRepository(resolutionsPath), memory.NewDecisionWorkspaceDeletionRepository()), EventHub: restartedHub}); err != nil {
 		t.Fatal(err)
 	}
 	if err := restartedDecisionOwner.Start(); err != nil {

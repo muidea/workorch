@@ -27,10 +27,15 @@ type RuntimeOperationExecutionRequest struct {
 	CapabilityStates                   []runtimecontract.RuntimeCapabilityStateSnapshot
 	WorkspaceTreeObservation           *runtimecontract.RuntimePrerequisiteObservation
 	CompletedRequiredOperationReceipts []runtimecontract.RuntimeRequiredOperationReceiptBinding
-	// OwnerCatalog is the exact persisted owner-authored admissibility fact for
-	// this operation. Protocol adapters may narrow it into a sealed typed
-	// authorization; Runtime core does not interpret owner-specific metadata.
+	// OwnerCatalog is the exact persisted owner-authored admissibility fact named
+	// by Execution.AdmissibilitySnapshotID and Execution.AcquisitionBinding.
+	// Protocol adapters may narrow it into a sealed typed authorization; Runtime
+	// core does not interpret owner-specific metadata.
 	OwnerCatalog *runtimecontract.RuntimeOperationAdmissibility
+	// OwnerCatalogObservation is the exact persisted observation whose content
+	// hash and freshness dependency bind OwnerCatalog. It is carried only so a
+	// capability owner can return a typed stale receipt before any side effect.
+	OwnerCatalogObservation *runtimecontract.RuntimePrerequisiteObservation
 }
 
 type RuntimeOperationExecutionResult struct {

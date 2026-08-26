@@ -18,8 +18,11 @@ func (m *Module) Configure(d decisionbiz.Dependencies) error {
 	return m.configure(d)
 }
 func (m *Module) configure(d decisionbiz.Dependencies) error {
-	if m == nil || d.EventHub == nil || d.Tickets == nil || d.Resolutions == nil || d.WorkspaceDeletions == nil {
+	if m == nil || d.EventHub == nil {
 		return common.ErrInvalidArgument
+	}
+	if err := d.OwnerRepositories.Validate(); err != nil {
+		return err
 	}
 	x, err := decisionbiz.New(d.EventHub, d.BackgroundRoutine, d)
 	if err != nil {

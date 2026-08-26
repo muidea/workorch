@@ -54,14 +54,15 @@ func (r workspaceSnapshotReader) Read(ctx context.Context, id common.WorkspaceID
 	if r.hub == nil {
 		return nil, common.ErrInvalidArgument
 	}
-	event := magicevent.NewEventWithContext(workspaceevents.TopicWorkspaceCommandGet, ModuleID, workspaceevents.CommandDestination, magicevent.NewHeader(), ctx, workspaceevents.GetWorkspaceCommand{WorkspaceID: id})
+	command := workspaceevents.GetWorkspaceCommand{WorkspaceID: id}
+	event := magicevent.NewEventWithContext(workspaceevents.TopicWorkspaceCommandGet, ModuleID, workspaceevents.CommandDestination, magicevent.NewHeader(), ctx, command)
 	bindOwnerCommandLane(event, workspaceevents.Contracts(), workspaceevents.TopicWorkspaceCommandGet, "workspace", string(id), id, "")
-	response, err := workspaceCommandResponse(r.hub.Send(event), workspaceevents.TopicWorkspaceCommandGet)
+	response, err := workspaceCommandResponse[workspaceevents.WorkspaceResult](r.hub.Send(event), workspaceevents.TopicWorkspaceCommandGet)
 	if err != nil {
 		return nil, err
 	}
-	if response.Workspace == nil {
-		return nil, common.ErrNotFound
+	if err := response.ValidateFor(command); err != nil {
+		return nil, err
 	}
 	return workspaceeventmapping.Workspace(response.Workspace), nil
 }

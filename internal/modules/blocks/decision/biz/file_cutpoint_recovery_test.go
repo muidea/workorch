@@ -146,7 +146,7 @@ func assertDecisionCutpointRecovery(t *testing.T, root string, phase string) {
 		}
 	case "delivery-finalized", "delivery-evidence-recorded":
 		hub := newRecordingDecisionHub(t)
-		owner, err := New(hub, nil, Dependencies{WorkspaceDeletions: memory.NewDecisionWorkspaceDeletionRepository(), Tickets: tickets, Resolutions: resolutions, EventHub: hub})
+		owner, err := New(hub, nil, Dependencies{OwnerRepositories: decisionBizTestOwnerRepositories(tickets, resolutions, memory.NewDecisionWorkspaceDeletionRepository()), EventHub: hub})
 		if err != nil {
 			t.Fatalf("recreate Decision owner: %v", err)
 		}
@@ -167,6 +167,18 @@ func assertDecisionCutpointRecovery(t *testing.T, root string, phase string) {
 		if err != nil || after.RuntimeGovernanceProposal.EvidenceRecordedAt == "" || after.RuntimeGovernanceProposal.ResolutionNotificationPublishedAt == "" {
 			t.Fatalf("recovered delivery markers = %+v err=%v", after.RuntimeGovernanceProposal, err)
 		}
+		resolution, err := resolutions.GetByTicketID(ctx, command.TicketID)
+		if err != nil || resolution.ResolvedAt == "" || after.ResolvedAt != resolution.ResolvedAt {
+			t.Fatalf("recovered durable resolution time ticket=%q resolution=%q err=%v", after.ResolvedAt, resolution.ResolvedAt, err)
+		}
+		evidenceCommands := hub.EvidenceCommands()
+		wantEvidenceCommands := 1
+		if phase == "delivery-evidence-recorded" {
+			wantEvidenceCommands = 0
+		}
+		if len(evidenceCommands) != wantEvidenceCommands || (len(evidenceCommands) == 1 && evidenceCommands[0].Timestamp != resolution.ResolvedAt) {
+			t.Fatalf("recovered evidence commands = %+v, want count=%d durable timestamp %q", evidenceCommands, wantEvidenceCommands, resolution.ResolvedAt)
+		}
 		if got := len(hub.Posted()); got != 1 {
 			t.Fatalf("resolved notifications after recovery = %d, want exactly 1", got)
 		}
@@ -175,6 +187,9 @@ func assertDecisionCutpointRecovery(t *testing.T, root string, phase string) {
 		}
 		if got := len(hub.Posted()); got != 1 {
 			t.Fatalf("resolved notification duplicated after marker = %d", got)
+		}
+		if got := len(hub.EvidenceCommands()); got != wantEvidenceCommands {
+			t.Fatalf("resolved evidence duplicated after marker = %d, want %d", got, wantEvidenceCommands)
 		}
 	default:
 		t.Fatalf("unknown Decision cut-point phase %q", phase)

@@ -211,7 +211,12 @@ func TestWorkspaceLLMSelectionSurvivesFileBackedOwnerRestart(t *testing.T) {
 	}
 }
 
-func sendWorkspaceTestCommand[Command any](t *testing.T, ctx context.Context, hub magicevent.Hub, topic string, command Command) workspaceevents.WorkspaceCommandResult {
+type workspaceTestCommandResult struct {
+	Workspace *workspaceevents.Workspace
+	Changed   bool
+}
+
+func sendWorkspaceTestCommand[Command any](t *testing.T, ctx context.Context, hub magicevent.Hub, topic string, command Command) workspaceTestCommandResult {
 	t.Helper()
 	result := hub.Send(magicevent.NewEventWithContext(topic, "workspace/module-test", workspaceevents.CommandDestination, magicevent.NewHeader(), ctx, command))
 	if result == nil || result.Error() != nil {
@@ -221,8 +226,14 @@ func sendWorkspaceTestCommand[Command any](t *testing.T, ctx context.Context, hu
 	if err != nil {
 		t.Fatalf("result %s: %v", topic, err)
 	}
-	typed, ok := data.(workspaceevents.WorkspaceCommandResult)
-	if !ok {
+	var typed workspaceTestCommandResult
+	switch response := data.(type) {
+	case workspaceevents.WorkspaceResult:
+		typed.Workspace = response.Workspace
+	case workspaceevents.WorkspaceLLMSelectionResult:
+		typed.Workspace = response.Workspace
+		typed.Changed = response.Changed
+	default:
 		t.Fatalf("result %s type = %T", topic, data)
 	}
 	return typed

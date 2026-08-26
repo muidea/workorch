@@ -4,7 +4,7 @@ Status: active
 
 Type: capability-block-contract
 
-Last Verified: 2026-08-25
+Last Verified: 2026-08-26
 
 ## 功能范围与边界
 
@@ -21,8 +21,12 @@ raw diagnostic 留在 Shell-private adapter；receipt 只携带有界、脱敏�
 ## 组件交互及合同
 
 - `kernel/orchestrator` 通过 Shell owner 在 `blocks/shell/pkg/events` 定义的 `ExecuteOperationCommand/Result` 同步投递
-  Shell 操作；execute 是强调用，nil result、非 Orchestrator source、receipt query 失败或 sealed data 漂移均在启动进程前
-  fail-closed。本组件直接订阅 EventHub，不启动通用 runtime executor 或第二套执行通知。
+  Shell 操作；execute command 只有 `RuntimeOperationExecutionContext + SealedRuntimeOperation`。后者的 hash 同时覆盖完整
+  `RuntimeOperation`、exact Shell owner catalog/policy/observation revision，以及会影响执行或诊断归属的 confirmed recipes、
+  target role、managed-validation scope 与 evidence policies。execute 是强调用；nil result、非 Orchestrator source、缺失/错误
+  owner catalog、payload 任一字段漂移或 receipt query 失败均在启动进程前 fail-closed。execution envelope 的
+  `AdmissibilitySnapshotID + AcquisitionBinding` 还必须与 seal 内 catalog identity 精确相等，不能用同 execution key/fence
+  替换另一份 owner authorization。本组件直接订阅 EventHub，不启动通用 runtime executor 或第二套执行通知。
 - Runtime capability、operation-admissibility、operation-feasibility、semantic-proof feasibility 与 CWI reconciliation
   均使用 Shell owner 定义的 concrete typed command/result。
 - 对 profile 明确声明的 managed-validation recipe，SM-2 只通过 typed request 转交 File owner 已持久化的
@@ -53,7 +57,7 @@ raw diagnostic 留在 Shell-private adapter；receipt 只携带有界、脱敏�
 - workspace-sensitive Shell catalog 的 observation 必须依赖该 File manifest 的 exact workspace-tree revision；后续
   File receipt 改变该 revision 时，SM-2 仅按依赖交集退休并重获 catalog。该 freshness lineage 不允许 Shell 修改
   Manifest、CWI 或 Runtime 状态。
-- managed-validation execute command 还携带 fresh File manifest 的 bounded target scope。Shell 只在 owner-private
+- managed-validation sealed authorization 还绑定 fresh File manifest 的 bounded target scope。Shell 只在 owner-private
   adapter 中解析明确支持的结构化工具位置；当前 Go recipe 仅接受 `*.go:line[:column]:` 位置，归一后必须属于该 manifest
   scope 且最多八项。validation entry、operation input target、coverage hint 和无结构化 stderr/stdout 都不能自动成为
   failure target；Shell 只发布 candidate observation，File confirmation 与 Orchestrator SM-2 才能封存 repair surface。
@@ -71,10 +75,11 @@ raw diagnostic 留在 Shell-private adapter；receipt 只携带有界、脱敏�
   snapshot 计算真实 changed refs；外指 symlink 在进程启动前拒绝。所有真实 changed ref 必须是 sealed `TargetRefs` 的
   子集，否则返回 `effect_mismatch/undeclared_workspace_effect` rejected receipt；不能通过同时 touch 一个已声明目标掩盖额外写入。
 - accepted state-changing receipt 的 `TargetRefs` 与 `ResourceChanges` 来自 owner observation，而非直接回显候选输入；无可观察 workspace delta 时返回 no-progress，而不是 durable evidence。
-- request 必须携带 workspace/run/authority/dispatch/operation identity、sealed operation data、working directory/ref、
-  timeout 和 policy。`shell/command` 的 command/args/effect/targets 必须与 sealed execution 一致；managed validation 的
-  command/args 只能由 Shell owner 根据 sealed recipe snapshot 回填，candidate 不能提交执行正文。
-- Runtime evidence policy 使用 Orchestrator command 携带的具体 `RuntimeEvidencePolicy`，用于 zero-work marker、work-evidence marker、evidence quality、reason 和 tag 判定；本组件不从 operation parameter map 解析跨组件 policy。
+- request context 必须携带 workspace/run/authority/dispatch/operation identity 与 working directory；唯一 executable payload
+  是上述 owner-specific seal。`shell/command` 的 command/args/effect/targets 必须与 sealed execution 一致；managed validation
+  的 command/args 只能由 Shell owner 根据 seal 内 owner-confirmed recipe 回填，candidate 不能提交执行正文。
+- Runtime evidence policy 是 seal 内的 immutable detached value，用于 zero-work marker、work-evidence marker、evidence
+  quality、reason 和 tag 判定；Shell 不消费 context 中可独立漂移的副本，也不从 operation parameter map 解析跨组件 policy。
 - Orchestrator 与 Approval 流程在高风险命令进入本 block 前完成准入；只有本 block 返回独立 typed
   `GovernanceRequirement` 时才可进入治理，普通失败或 budget exhaustion 不能创建 ticket。
 - effect 前的 Orchestrator receipt query 同时是 exact sealed-dispatch authorization：只有当前
@@ -118,7 +123,8 @@ raw diagnostic 留在 Shell-private adapter；receipt 只携带有界、脱敏�
   在 owner probe 前拒绝，以及匹配 target 的 `would_satisfy`；同时覆盖错误 source/scope、typed stale Shell catalog、
   duplicate request、唯一 contract surface 和 recipe command/args/timeout 身份漂移。测试确认 dependency catalog不进入
   provider choice、不创建target、不执行命令且不改变owner状态。
-- 已覆盖强调用 nil result、伪造 source、receipt query failure、sealed data 漂移均在进程调用前拒绝。
+- 已覆盖强调用 nil result、伪造 source、missing/wrong catalog、receipt query failure，以及 operation/recipe/scope/role/
+  evidence-policy 或 execution-record catalog identity 任一漂移均在进程调用前拒绝。
 - 已覆盖 managed validation 临时副本、原 workspace/`.git` 隔离、外指 symlink、正常完成与 timeout 的进程组清理。
 - 已覆盖默认 software-development recipe 的 owner proof check、generic success/zero-work/all-skipped、显式 marker 与
   passed+failed / passed+skipped 冲突。

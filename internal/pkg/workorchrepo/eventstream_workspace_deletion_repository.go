@@ -7,13 +7,24 @@ import (
 
 	eventstreammodel "github.com/muidea/workorch/internal/modules/blocks/eventstream/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
+	"github.com/muidea/workorch/internal/pkg/repository"
 	deletioncontract "github.com/muidea/workorch/internal/pkg/workorchdeletioncontract"
 )
 
-type eventStreamWorkspaceDeletionRepository struct{ dataRoot string }
+type eventStreamWorkspaceDeletionRepository struct {
+	dataRoot     string
+	ownerBinding repository.OwnerRepositoryBinding
+}
 
-func newEventStreamWorkspaceDeletionRepository(dataRoot string) *eventStreamWorkspaceDeletionRepository {
-	return &eventStreamWorkspaceDeletionRepository{dataRoot: dataRoot}
+func newEventStreamWorkspaceDeletionRepository(dataRoot string, binding repository.OwnerRepositoryBinding) *eventStreamWorkspaceDeletionRepository {
+	return &eventStreamWorkspaceDeletionRepository{dataRoot: dataRoot, ownerBinding: binding}
+}
+
+func (r *eventStreamWorkspaceDeletionRepository) OwnerRepositoryBinding() repository.OwnerRepositoryBinding {
+	if r == nil {
+		return repository.OwnerRepositoryBinding{}
+	}
+	return r.ownerBinding
 }
 
 func (r *eventStreamWorkspaceDeletionRepository) Create(_ context.Context, item *eventstreammodel.WorkspaceDeletion) error {

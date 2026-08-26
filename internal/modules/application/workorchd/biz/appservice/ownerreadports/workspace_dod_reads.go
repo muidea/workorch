@@ -17,17 +17,18 @@ func ReadDoDByOwnerCommand(ctx context.Context, hub magicevent.Hub, dodID common
 	}
 	workspaceID := workspaceScopeFromContext(ctx)
 	commandCtx := common.ContextWithRuntimeWorkspaceID(ctx, workspaceID)
-	event := magicevent.NewEventWithContext(workspaceevents.TopicWorkspaceCommandGetDoD, sourceModule, workspaceevents.CommandDestination, magicevent.NewHeader(), commandCtx, workspaceevents.GetDoDCommand{
+	command := workspaceevents.GetDoDCommand{
 		WorkspaceID: workspaceID,
 		DoDID:       dodID,
-	})
+	}
+	event := magicevent.NewEventWithContext(workspaceevents.TopicWorkspaceCommandGetDoD, sourceModule, workspaceevents.CommandDestination, magicevent.NewHeader(), commandCtx, command)
 	ownerevent.BindLane(event, workspaceevents.Contracts(), workspaceevents.TopicWorkspaceCommandGetDoD, "dod", string(dodID), workspaceID, "", "")
-	response, err := ownerevent.Workspace(hub.Send(event), workspaceevents.TopicWorkspaceCommandGetDoD)
+	response, err := ownerevent.WorkspaceOwner[workspaceevents.DoDResult](hub.Send(event), workspaceevents.TopicWorkspaceCommandGetDoD)
 	if err != nil {
 		return nil, err
 	}
-	if response.DoD == nil {
-		return nil, common.ErrInvalidArgument
+	if err := response.ValidateFor(command); err != nil {
+		return nil, err
 	}
 	return workspacemodel.CloneDoD(response.DoD), nil
 }
@@ -37,10 +38,14 @@ func ListDoDsByWorkspaceOwnerCommand(ctx context.Context, hub magicevent.Hub, wo
 		return nil, common.ErrInvalidArgument
 	}
 	commandCtx := common.ContextWithRuntimeWorkspaceID(ctx, workspaceID)
-	event := magicevent.NewEventWithContext(workspaceevents.TopicWorkspaceCommandListDoDsByWS, sourceModule, workspaceevents.CommandDestination, magicevent.NewHeader(), commandCtx, workspaceevents.ListDoDsByWorkspaceCommand{WorkspaceID: workspaceID})
+	command := workspaceevents.ListDoDsByWorkspaceCommand{WorkspaceID: workspaceID}
+	event := magicevent.NewEventWithContext(workspaceevents.TopicWorkspaceCommandListDoDsByWS, sourceModule, workspaceevents.CommandDestination, magicevent.NewHeader(), commandCtx, command)
 	ownerevent.BindLane(event, workspaceevents.Contracts(), workspaceevents.TopicWorkspaceCommandListDoDsByWS, "workspace", string(workspaceID), workspaceID, "", "")
-	response, err := ownerevent.Workspace(hub.Send(event), workspaceevents.TopicWorkspaceCommandListDoDsByWS)
+	response, err := ownerevent.WorkspaceOwner[workspaceevents.DoDListResult](hub.Send(event), workspaceevents.TopicWorkspaceCommandListDoDsByWS)
 	if err != nil {
+		return nil, err
+	}
+	if err := response.ValidateFor(command); err != nil {
 		return nil, err
 	}
 	return workspacemodel.CloneDoDs(response.DoDs), nil

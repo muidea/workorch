@@ -23,7 +23,7 @@ type Dependencies struct {
 
 type Biz struct {
 	basebiz.Base
-	service *Service
+	service *service
 	souls   repository.SoulRepository
 	topics  []string
 	started bool
@@ -36,7 +36,7 @@ func New(eventHub magicevent.Hub, background task.BackgroundRoutine, deps Depend
 	if eventHub == nil {
 		return nil, common.ErrInvalidArgument
 	}
-	return &Biz{Base: basebiz.New(modulecommon.ModuleID, eventHub, background), service: NewService(deps.Souls), souls: deps.Souls}, nil
+	return &Biz{Base: basebiz.New(modulecommon.ModuleID, eventHub, background), service: newService(deps.Souls), souls: deps.Souls}, nil
 }
 
 func (m *Biz) Start() error {
@@ -116,7 +116,7 @@ func (m *Biz) handleSoulCommand(ev magicevent.Event, result magicevent.Result) {
 			setMagicResult(result, soulevents.CreateSoulResult{}, common.ErrInvalidArgument)
 			return
 		}
-		item, err := m.service.CreateSoul(ctx, cmd)
+		item, err := m.service.createSoulCommand(ctx, cmd)
 		if err != nil {
 			setMagicResult(result, soulevents.CreateSoulResult{}, err)
 			return
@@ -128,7 +128,7 @@ func (m *Biz) handleSoulCommand(ev magicevent.Event, result magicevent.Result) {
 			setMagicResult(result, soulevents.GetSoulResult{}, common.ErrInvalidArgument)
 			return
 		}
-		item, err := m.service.GetSoul(ctx, cmd.SoulID)
+		item, err := m.service.getSoul(ctx, cmd.SoulID)
 		if err != nil {
 			setMagicResult(result, soulevents.GetSoulResult{}, err)
 			return
@@ -140,7 +140,7 @@ func (m *Biz) handleSoulCommand(ev magicevent.Event, result magicevent.Result) {
 			setMagicResult(result, soulevents.ListSoulsResult{}, common.ErrInvalidArgument)
 			return
 		}
-		items, nextCursor, err := m.service.ListSouls(ctx, cmd.CursorAfterID, cmd.Limit)
+		items, nextCursor, err := m.service.listSouls(ctx, cmd.CursorAfterID, cmd.Limit)
 		if err != nil {
 			setMagicResult(result, soulevents.ListSoulsResult{}, err)
 			return
@@ -152,7 +152,7 @@ func (m *Biz) handleSoulCommand(ev magicevent.Event, result magicevent.Result) {
 			setMagicResult(result, soulevents.UpdateSoulResult{}, common.ErrInvalidArgument)
 			return
 		}
-		item, err := m.service.UpdateSoul(ctx, soulevents.CreateSoulCommand(cmd))
+		item, err := m.service.updateSoul(ctx, soulevents.CreateSoulCommand(cmd))
 		if err != nil {
 			setMagicResult(result, soulevents.UpdateSoulResult{}, err)
 			return
@@ -164,7 +164,7 @@ func (m *Biz) handleSoulCommand(ev magicevent.Event, result magicevent.Result) {
 			setMagicResult(result, soulevents.DeleteSoulResult{}, common.ErrInvalidArgument)
 			return
 		}
-		if err := m.service.DeleteSoul(ctx, cmd.SoulID); err != nil {
+		if err := m.service.deleteSoul(ctx, cmd.SoulID); err != nil {
 			setMagicResult(result, soulevents.DeleteSoulResult{}, err)
 			return
 		}
@@ -175,7 +175,7 @@ func (m *Biz) handleSoulCommand(ev magicevent.Event, result magicevent.Result) {
 			setMagicResult(result, soulevents.ValidateCapabilitySelectionResult{}, common.ErrInvalidArgument)
 			return
 		}
-		if err := m.service.ValidateCapabilitySelection(ctx, cmd); err != nil {
+		if err := m.service.validateCapabilitySelection(ctx, cmd); err != nil {
 			setMagicResult(result, soulevents.ValidateCapabilitySelectionResult{}, err)
 			return
 		}

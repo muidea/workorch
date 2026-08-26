@@ -16,11 +16,11 @@ func (m *Biz) executeMemoryItemCommand(ctx context.Context, ev magicevent.Event,
 			setMemoryMagicResult(result, memoryevents.CreateMemoryResult{}, common.ErrInvalidArgument)
 			return common.ErrInvalidArgument
 		}
-		if err := m.service.CreateMemoryItem(ctx, cmd); err != nil {
+		if err := m.service.createMemoryItem(ctx, cmd); err != nil {
 			setMemoryMagicResult(result, memoryevents.CreateMemoryResult{}, err)
 			return err
 		}
-		item, err := m.service.GetMemoryItemScoped(ctx, cmd.WorkspaceID, cmd.MemoryID)
+		item, err := m.service.getMemoryItemScoped(ctx, cmd.WorkspaceID, cmd.MemoryID)
 		if err != nil {
 			setMemoryMagicResult(result, memoryevents.CreateMemoryResult{}, err)
 			return err
@@ -34,7 +34,7 @@ func (m *Biz) executeMemoryItemCommand(ctx context.Context, ev magicevent.Event,
 			setMemoryMagicResult(result, memoryevents.GetMemoryResult{}, common.ErrInvalidArgument)
 			return common.ErrInvalidArgument
 		}
-		item, err := m.service.GetMemoryItemScoped(ctx, cmd.WorkspaceID, cmd.MemoryID)
+		item, err := m.service.getMemoryItemScoped(ctx, cmd.WorkspaceID, cmd.MemoryID)
 		if err != nil {
 			setMemoryMagicResult(result, memoryevents.GetMemoryResult{}, err)
 			return err
@@ -47,7 +47,7 @@ func (m *Biz) executeMemoryItemCommand(ctx context.Context, ev magicevent.Event,
 			setMemoryMagicResult(result, memoryevents.ListMemoryByWorkspaceResult{}, common.ErrInvalidArgument)
 			return common.ErrInvalidArgument
 		}
-		items, nextCursor, err := m.service.ListMemoryByWorkspace(ctx, cmd.WorkspaceID, cmd.CursorAfterID, cmd.Limit)
+		items, nextCursor, err := m.service.listMemoryByWorkspace(ctx, cmd.WorkspaceID, cmd.CursorAfterID, cmd.Limit)
 		if err != nil {
 			setMemoryMagicResult(result, memoryevents.ListMemoryByWorkspaceResult{}, err)
 			return err
@@ -60,7 +60,7 @@ func (m *Biz) executeMemoryItemCommand(ctx context.Context, ev magicevent.Event,
 			setMemoryMagicResult(result, memoryevents.SearchMemoryResult{}, common.ErrInvalidArgument)
 			return common.ErrInvalidArgument
 		}
-		items, err := m.service.SearchMemory(ctx, cmd.Query)
+		items, err := m.service.searchMemory(ctx, cmd.Query)
 		if err != nil {
 			setMemoryMagicResult(result, memoryevents.SearchMemoryResult{}, err)
 			return err
@@ -73,15 +73,15 @@ func (m *Biz) executeMemoryItemCommand(ctx context.Context, ev magicevent.Event,
 			setMemoryMagicResult(result, memoryevents.UpdateMemoryResult{}, common.ErrInvalidArgument)
 			return common.ErrInvalidArgument
 		}
-		if _, err := m.service.GetMemoryItemScoped(ctx, cmd.WorkspaceID, cmd.MemoryID); err != nil {
+		if _, err := m.service.getMemoryItemScoped(ctx, cmd.WorkspaceID, cmd.MemoryID); err != nil {
 			setMemoryMagicResult(result, memoryevents.UpdateMemoryResult{}, err)
 			return err
 		}
-		if err := m.service.UpdateMemoryItem(ctx, memoryevents.CreateMemoryCommand(cmd)); err != nil {
+		if err := m.service.updateMemoryItem(ctx, memoryevents.CreateMemoryCommand(cmd)); err != nil {
 			setMemoryMagicResult(result, memoryevents.UpdateMemoryResult{}, err)
 			return err
 		}
-		item, err := m.service.GetMemoryItemScoped(ctx, cmd.WorkspaceID, cmd.MemoryID)
+		item, err := m.service.getMemoryItemScoped(ctx, cmd.WorkspaceID, cmd.MemoryID)
 		if err != nil {
 			setMemoryMagicResult(result, memoryevents.UpdateMemoryResult{}, err)
 			return err
@@ -95,12 +95,12 @@ func (m *Biz) executeMemoryItemCommand(ctx context.Context, ev magicevent.Event,
 			setMemoryMagicResult(result, memoryevents.DeleteMemoryResult{}, common.ErrInvalidArgument)
 			return common.ErrInvalidArgument
 		}
-		item, err := m.service.GetMemoryItemScoped(ctx, cmd.WorkspaceID, cmd.MemoryID)
+		item, err := m.service.getMemoryItemScoped(ctx, cmd.WorkspaceID, cmd.MemoryID)
 		if err != nil {
 			setMemoryMagicResult(result, memoryevents.DeleteMemoryResult{}, err)
 			return err
 		}
-		if err := m.service.DeleteMemoryItem(ctx, cmd.MemoryID); err != nil {
+		if err := m.service.deleteMemoryItem(ctx, cmd.MemoryID); err != nil {
 			setMemoryMagicResult(result, memoryevents.DeleteMemoryResult{}, err)
 			return err
 		}

@@ -8,6 +8,7 @@ import (
 type Resolution struct {
 	ID                 common.ResolutionID
 	TicketID           common.TicketID
+	ResolvedAt         string
 	Type               string
 	Payload            workorcheventpayload.Payload
 	ContinuationAction string

@@ -10,7 +10,12 @@ Last Verified: 2026-08-26
 
 `blocks/memory` 是 MemoryItem 与 MemoryRecallTrace 的唯一资源 owner，负责 item CRUD/search、recall 轨迹的不可变记录/读取/分页，以及 Workspace-scoped 清理。它不拥有 SM-1～SM-4 状态，不选择 Runtime action，也不能用 recall 事实关闭 coverage。
 
-Module 根只桥接生命周期；Biz 嵌入共享 Base，并且只持有本 owner 的 MemoryItem、MemoryRecallTrace repository 与 EventHub。Configure 必须同时取得两类 repository，缺少 RecallTrace repository 时即 fail closed，不允许启动后到首次命令才暴露依赖缺失。
+Module 根只桥接生命周期；Biz 嵌入共享 Base，生产构造只接受 backend aggregate 铸造并通过 `Validate` 的 opaque
+`MemoryOwnerRepositories` bundle 与 EventHub；MemoryItem、MemoryRecallTrace 与 Workspace deletion surface 必须携带同一
+backend binding。zero、fake 或 memory/file mixed-set 在订阅前 fail closed，Biz、Module、Plugin 和 Initiator 均不保留
+独立 repository 注入或 legacy fallback，不能把依赖缺失延迟到首次命令才暴露。
+Memory CRUD/search/trace implementation、constructor 与全部方法均为 Biz package-private；跨组件只能发送 Memory owner
+定义的 concrete EventHub command/result，不能构造或保留直接 repository service。
 
 ## EventHub 合同
 

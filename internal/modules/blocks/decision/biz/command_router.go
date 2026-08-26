@@ -52,11 +52,7 @@ func (m *Biz) handleCommand(ev magicevent.Event, result magicevent.Result) {
 		setDecisionMagicResult(result, struct{}{}, common.ErrInvalidArgument)
 		return
 	}
-	data, err := m.resolveDecisionMutationScope(ev.Context(), ev.Data())
-	if err != nil {
-		setDecisionMagicResult(result, struct{}{}, err)
-		return
-	}
+	data := ev.Data()
 	ctx, err := m.bindDecisionCommandScope(ev.Context(), data)
 	if err != nil {
 		setDecisionMagicResult(result, struct{}{}, err)
@@ -101,24 +97,6 @@ func (m *Biz) handleCommand(ev magicevent.Event, result magicevent.Result) {
 	default:
 		setDecisionMagicResult(result, struct{}{}, common.ErrInvalidArgument)
 	}
-}
-
-// resolveDecisionMutationScope preserves the unique unscoped resolution
-// ingress while ensuring the production mutation path acquires the resolved
-// workspace lock before it can mutate state or emit owner delivery.
-func (m *Biz) resolveDecisionMutationScope(ctx context.Context, data any) (any, error) {
-	cmd, ok := data.(decisionevents.EnsureResolvedCommand)
-	if !ok || decisionCommandHasScope(cmd) {
-		return data, nil
-	}
-	ticket, err := m.resolveUniqueTicketForUnscopedCommand(ctx, cmd.TicketID)
-	if err != nil {
-		return nil, err
-	}
-	cmd.WorkspaceID = ticket.WorkspaceID
-	cmd.RunID = ticket.RunID
-	cmd.StepID = ticket.StepID
-	return cmd, nil
 }
 
 func (m *Biz) bindDecisionCommandScope(ctx context.Context, data any) (context.Context, error) {

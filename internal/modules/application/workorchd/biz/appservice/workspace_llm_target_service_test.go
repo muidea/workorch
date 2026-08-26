@@ -25,7 +25,7 @@ func TestUpdateWorkspaceLLMSelectionRejectsUnavailableTargetBeforeOwnerWrite(t *
 	workspaceObserver := magicevent.NewSimpleObserver(workspaceevents.CommandDestination, hub)
 	workspaceObserver.Subscribe(workspaceevents.TopicWorkspaceCommandUpdateLLMSelection, func(_ magicevent.Event, result magicevent.Result) {
 		ownerWrites++
-		result.Set(workspaceevents.WorkspaceCommandResult{}, nil)
+		result.Set(workspaceevents.WorkspaceLLMSelectionResult{}, nil)
 	})
 	t.Cleanup(func() { workspaceObserver.Unsubscribe(workspaceevents.TopicWorkspaceCommandUpdateLLMSelection) })
 

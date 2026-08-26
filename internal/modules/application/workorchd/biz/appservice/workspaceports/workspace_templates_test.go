@@ -21,14 +21,14 @@ func TestWorkspaceTemplateViewUsesOwnerPorts(t *testing.T) {
 	testHub.subscribe(workspaceevents.CommandDestination, workspaceevents.TopicWorkspaceTemplateCommandCreate, func(data any) (any, error) {
 		cmd := data.(workspaceevents.CreateWorkspaceTemplateCommand)
 		templates[cmd.TemplateID] = workspaceTemplateRecordFromCommand(workspaceevents.CreateWorkspaceTemplateCommand(cmd))
-		return workspaceevents.WorkspaceCommandResult{Template: workspaceeventmapping.TemplateDTO(templates[cmd.TemplateID])}, nil
+		return workspaceevents.WorkspaceTemplateResult{Template: workspaceeventmapping.TemplateDTO(templates[cmd.TemplateID])}, nil
 	})
 	testHub.subscribe(workspaceevents.CommandDestination, workspaceevents.TopicWorkspaceTemplateCommandList, func(any) (any, error) {
 		items := make([]*workspacemodel.WorkspaceTemplate, 0, len(templates))
 		for _, item := range templates {
 			items = append(items, item)
 		}
-		return workspaceevents.WorkspaceCommandResult{Templates: workspaceeventmapping.TemplateDTOs(items)}, nil
+		return workspaceevents.WorkspaceTemplateListResult{Templates: workspaceeventmapping.TemplateDTOs(items)}, nil
 	})
 	testHub.subscribe(workspaceevents.CommandDestination, workspaceevents.TopicWorkspaceTemplateCommandGet, func(data any) (any, error) {
 		cmd := data.(workspaceevents.GetWorkspaceTemplateCommand)
@@ -36,17 +36,17 @@ func TestWorkspaceTemplateViewUsesOwnerPorts(t *testing.T) {
 		if item == nil {
 			return nil, common.ErrNotFound
 		}
-		return workspaceevents.WorkspaceCommandResult{Template: workspaceeventmapping.TemplateDTO(item)}, nil
+		return workspaceevents.WorkspaceTemplateResult{Template: workspaceeventmapping.TemplateDTO(item)}, nil
 	})
 	testHub.subscribe(workspaceevents.CommandDestination, workspaceevents.TopicWorkspaceTemplateCommandUpdate, func(data any) (any, error) {
 		cmd := data.(workspaceevents.UpdateWorkspaceTemplateCommand)
 		templates[cmd.TemplateID] = workspaceTemplateRecordFromCommand(workspaceevents.CreateWorkspaceTemplateCommand(cmd))
-		return workspaceevents.WorkspaceCommandResult{Template: workspaceeventmapping.TemplateDTO(templates[cmd.TemplateID])}, nil
+		return workspaceevents.WorkspaceTemplateResult{Template: workspaceeventmapping.TemplateDTO(templates[cmd.TemplateID])}, nil
 	})
 	testHub.subscribe(workspaceevents.CommandDestination, workspaceevents.TopicWorkspaceTemplateCommandDelete, func(data any) (any, error) {
 		cmd := data.(workspaceevents.DeleteWorkspaceTemplateCommand)
 		delete(templates, cmd.TemplateID)
-		return workspaceevents.WorkspaceCommandResult{}, nil
+		return workspaceevents.DeleteWorkspaceTemplateResult{TemplateID: cmd.TemplateID}, nil
 	})
 	hub := testHub.raw
 

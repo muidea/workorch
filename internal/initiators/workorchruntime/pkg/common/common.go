@@ -15,20 +15,15 @@ type WorkspaceRepositories struct {
 }
 
 type DecisionRepositories struct {
-	Tickets            repository.DecisionTicketRepository
-	Resolutions        repository.DecisionResolutionRepository
-	WorkspaceDeletions repository.DecisionWorkspaceDeletionRepository
+	Owner repository.DecisionOwnerRepositories
 }
 
 type ApprovalRepositories struct {
-	Approvals          repository.ApprovalRepository
-	WorkspaceDeletions repository.ApprovalWorkspaceDeletionRepository
+	Owner repository.ApprovalOwnerRepositories
 }
 
 type EventStreamRepositories struct {
-	EventRecords       repository.EventRecordRepository
-	WorkspaceDeletions repository.EventStreamWorkspaceDeletionRepository
-	WorkspacePurger    repository.EventStreamWorkspacePurger
+	Owner repository.EventStreamOwnerRepositories
 }
 
 type GovernanceRepositories struct {
@@ -40,15 +35,11 @@ type MCPRepositories struct {
 }
 
 type MemoryRepositories struct {
-	MemoryItems        repository.MemoryItemRepository
-	MemoryRecallTraces repository.MemoryRecallTraceRepository
-	WorkspaceDeletions repository.MemoryWorkspaceDeletionRepository
+	Owner repository.MemoryOwnerRepositories
 }
 
 type ResultRepositories struct {
-	Results            repository.ResultRepository
-	Artifacts          repository.ArtifactRepository
-	WorkspaceDeletions repository.ResultWorkspaceDeletionRepository
+	Owner repository.ResultOwnerRepositories
 }
 
 type RunRepositories struct {

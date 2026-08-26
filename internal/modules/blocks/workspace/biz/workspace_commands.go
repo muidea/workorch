@@ -17,7 +17,7 @@ import (
 
 const workspaceDeletionIngressSource = "application/workorchd"
 
-func (m *Biz) executeWorkspaceDefinitionCommand(ctx context.Context, ev magicevent.Event) (workspaceevents.WorkspaceCommandResult, error) {
+func (m *Biz) executeWorkspaceDefinitionCommand(ctx context.Context, ev magicevent.Event) (workspaceCommandResponse, error) {
 	switch ev.ID() {
 	case workspaceevents.TopicWorkspaceCommandCreate:
 		return m.createWorkspace(ctx, ev)
@@ -30,46 +30,50 @@ func (m *Biz) executeWorkspaceDefinitionCommand(ctx context.Context, ev magiceve
 	case workspaceevents.TopicWorkspaceCommandUpdateLLMSelection:
 		return m.updateWorkspaceLLMSelection(ctx, ev)
 	default:
-		return workspaceevents.WorkspaceCommandResult{}, common.ErrInvalidArgument
+		return workspaceCommandResponse{}, common.ErrInvalidArgument
 	}
 }
 
-func (m *Biz) createWorkspace(ctx context.Context, ev magicevent.Event) (workspaceevents.WorkspaceCommandResult, error) {
+func (m *Biz) createWorkspace(ctx context.Context, ev magicevent.Event) (workspaceCommandResponse, error) {
 	cmd, ok := ev.Data().(workspaceevents.CreateWorkspaceCommand)
 	if !ok {
-		return workspaceevents.WorkspaceCommandResult{}, common.ErrInvalidArgument
+		return workspaceCommandResponse{}, common.ErrInvalidArgument
 	}
 	if err := m.manager.CreateWorkspace(ctx, workspaceevents.CreateWorkspaceCommand{
 		WorkspaceID: cmd.WorkspaceID, Title: cmd.Title, Description: cmd.Description,
 		DeliverableDirectory: cmd.DeliverableDirectory, InternalDirectory: cmd.InternalDirectory,
 	}); err != nil {
-		return workspaceevents.WorkspaceCommandResult{}, err
-	}
-	return workspaceevents.WorkspaceCommandResult{}, nil
-}
-
-func (m *Biz) getWorkspace(ctx context.Context, ev magicevent.Event) (workspaceevents.WorkspaceCommandResult, error) {
-	cmd, ok := ev.Data().(workspaceevents.GetWorkspaceCommand)
-	if !ok || cmd.WorkspaceID == "" || m.workspaces == nil {
-		return workspaceevents.WorkspaceCommandResult{}, common.ErrInvalidArgument
+		return workspaceCommandResponse{}, err
 	}
 	item, err := m.workspaces.Get(ctx, cmd.WorkspaceID)
 	if err != nil {
-		return workspaceevents.WorkspaceCommandResult{}, err
+		return workspaceCommandResponse{}, err
 	}
-	if workspaceDeletionCompleted(item) {
-		return workspaceevents.WorkspaceCommandResult{}, common.ErrNotFound
-	}
-	return workspaceevents.WorkspaceCommandResult{Workspace: workspaceeventmapping.WorkspaceDTO(item)}, nil
+	return workspaceCommandResponse{Workspace: workspaceeventmapping.WorkspaceDTO(item)}, nil
 }
 
-func (m *Biz) listWorkspaces(ctx context.Context, ev magicevent.Event) (workspaceevents.WorkspaceCommandResult, error) {
+func (m *Biz) getWorkspace(ctx context.Context, ev magicevent.Event) (workspaceCommandResponse, error) {
+	cmd, ok := ev.Data().(workspaceevents.GetWorkspaceCommand)
+	if !ok || cmd.WorkspaceID == "" || m.workspaces == nil {
+		return workspaceCommandResponse{}, common.ErrInvalidArgument
+	}
+	item, err := m.workspaces.Get(ctx, cmd.WorkspaceID)
+	if err != nil {
+		return workspaceCommandResponse{}, err
+	}
+	if workspaceDeletionCompleted(item) {
+		return workspaceCommandResponse{}, common.ErrNotFound
+	}
+	return workspaceCommandResponse{Workspace: workspaceeventmapping.WorkspaceDTO(item)}, nil
+}
+
+func (m *Biz) listWorkspaces(ctx context.Context, ev magicevent.Event) (workspaceCommandResponse, error) {
 	if _, ok := ev.Data().(workspaceevents.ListWorkspacesCommand); !ok || m.workspaces == nil {
-		return workspaceevents.WorkspaceCommandResult{}, common.ErrInvalidArgument
+		return workspaceCommandResponse{}, common.ErrInvalidArgument
 	}
 	items, err := m.workspaces.List(ctx)
 	if err != nil {
-		return workspaceevents.WorkspaceCommandResult{}, err
+		return workspaceCommandResponse{}, err
 	}
 	visible := make([]*workspacemodel.Workspace, 0, len(items))
 	for _, item := range items {
@@ -77,45 +81,45 @@ func (m *Biz) listWorkspaces(ctx context.Context, ev magicevent.Event) (workspac
 			visible = append(visible, item)
 		}
 	}
-	return workspaceevents.WorkspaceCommandResult{Workspaces: workspaceeventmapping.WorkspaceDTOs(visible)}, nil
+	return workspaceCommandResponse{Workspaces: workspaceeventmapping.WorkspaceDTOs(visible)}, nil
 }
 
-func (m *Biz) updateWorkspace(ctx context.Context, ev magicevent.Event) (workspaceevents.WorkspaceCommandResult, error) {
+func (m *Biz) updateWorkspace(ctx context.Context, ev magicevent.Event) (workspaceCommandResponse, error) {
 	cmd, ok := ev.Data().(workspaceevents.UpdateWorkspaceCommand)
 	if !ok || cmd.WorkspaceID == "" || m.workspaces == nil || soulbinding.Validate(cmd.SoulBindings) != nil {
-		return workspaceevents.WorkspaceCommandResult{}, common.ErrInvalidArgument
+		return workspaceCommandResponse{}, common.ErrInvalidArgument
 	}
 	current, err := m.workspaces.Get(ctx, cmd.WorkspaceID)
 	if err != nil {
-		return workspaceevents.WorkspaceCommandResult{}, err
+		return workspaceCommandResponse{}, err
 	}
 	if err := workspaceDeletionRejectsMutation(current); err != nil {
-		return workspaceevents.WorkspaceCommandResult{}, err
+		return workspaceCommandResponse{}, err
 	}
 	// Generic metadata updates deliberately preserve lifecycle-owned fields.
 	// Workspace.State and ActiveRunID may only be changed by lifecycle_reducer.
 	item := workspaceFromUpdateCommand(current, cmd)
 	if err := m.workspaces.CompareAndSwap(ctx, item, item.Revision); err != nil {
-		return workspaceevents.WorkspaceCommandResult{}, err
+		return workspaceCommandResponse{}, err
 	}
 	m.publishWorkspaceUpdated(ctx, item)
-	return workspaceevents.WorkspaceCommandResult{Workspace: workspaceeventmapping.WorkspaceDTO(item)}, nil
+	return workspaceCommandResponse{Workspace: workspaceeventmapping.WorkspaceDTO(item)}, nil
 }
 
-func (m *Biz) updateWorkspaceLLMSelection(ctx context.Context, ev magicevent.Event) (workspaceevents.WorkspaceCommandResult, error) {
+func (m *Biz) updateWorkspaceLLMSelection(ctx context.Context, ev magicevent.Event) (workspaceCommandResponse, error) {
 	cmd, ok := ev.Data().(workspaceevents.UpdateWorkspaceLLMSelectionCommand)
 	if !ok || cmd.WorkspaceID == "" || m.workspaces == nil {
-		return workspaceevents.WorkspaceCommandResult{}, common.ErrInvalidArgument
+		return workspaceCommandResponse{}, common.ErrInvalidArgument
 	}
 	item, err := m.workspaces.Get(ctx, cmd.WorkspaceID)
 	if err != nil {
-		return workspaceevents.WorkspaceCommandResult{}, err
+		return workspaceCommandResponse{}, err
 	}
 	if err := workspaceDeletionRejectsMutation(item); err != nil {
-		return workspaceevents.WorkspaceCommandResult{}, err
+		return workspaceCommandResponse{}, err
 	}
 	if cmd.ExpectedRevision == 0 || item.Revision != cmd.ExpectedRevision {
-		return workspaceevents.WorkspaceCommandResult{}, common.ErrConflict
+		return workspaceCommandResponse{}, common.ErrConflict
 	}
 	currentSelection := runtimecontract.CloneProviderInferenceSelection(item.DefaultLLMSelection)
 	if cmd.Selection == nil {
@@ -123,19 +127,19 @@ func (m *Biz) updateWorkspaceLLMSelection(ctx context.Context, ev magicevent.Eve
 	} else {
 		selection := cmd.Selection.Normalized()
 		if err := selection.Validate(); err != nil {
-			return workspaceevents.WorkspaceCommandResult{}, fmt.Errorf("%w: %v", common.ErrInvalidArgument, err)
+			return workspaceCommandResponse{}, fmt.Errorf("%w: %v", common.ErrInvalidArgument, err)
 		}
 		item.DefaultLLMSelection = &selection
 	}
 	if (currentSelection == nil && item.DefaultLLMSelection == nil) ||
 		(currentSelection != nil && item.DefaultLLMSelection != nil && currentSelection.Same(*item.DefaultLLMSelection)) {
-		return workspaceevents.WorkspaceCommandResult{Workspace: workspaceeventmapping.WorkspaceDTO(item), Changed: false}, nil
+		return workspaceCommandResponse{Workspace: workspaceeventmapping.WorkspaceDTO(item), Changed: false}, nil
 	}
 	if err := m.workspaces.CompareAndSwap(ctx, item, cmd.ExpectedRevision); err != nil {
-		return workspaceevents.WorkspaceCommandResult{}, err
+		return workspaceCommandResponse{}, err
 	}
 	m.publishWorkspaceUpdated(ctx, item)
-	return workspaceevents.WorkspaceCommandResult{Workspace: workspaceeventmapping.WorkspaceDTO(item), Changed: true}, nil
+	return workspaceCommandResponse{Workspace: workspaceeventmapping.WorkspaceDTO(item), Changed: true}, nil
 }
 
 func (m *Biz) deleteWorkspace(ctx context.Context, ev magicevent.Event) (workspaceevents.DeleteWorkspaceResult, error) {

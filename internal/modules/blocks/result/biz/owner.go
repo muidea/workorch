@@ -23,11 +23,9 @@ import (
 const ModuleID = modulecommon.ModuleID
 
 type Dependencies struct {
-	Results            repository.ResultRepository
-	Artifacts          repository.ArtifactRepository
-	WorkspaceDeletions repository.ResultWorkspaceDeletionRepository
-	EventHub           magicevent.Hub
-	BackgroundRoutine  task.BackgroundRoutine
+	OwnerRepositories repository.ResultOwnerRepositories
+	EventHub          magicevent.Hub
+	BackgroundRoutine task.BackgroundRoutine
 }
 
 type Biz struct {
@@ -48,15 +46,15 @@ const (
 )
 
 func New(h magicevent.Hub, b task.BackgroundRoutine, deps Dependencies) (*Biz, error) {
-	if deps.Results == nil || deps.Artifacts == nil || deps.WorkspaceDeletions == nil || deps.EventHub == nil {
+	if deps.EventHub == nil || h == nil {
 		return nil, common.ErrInvalidArgument
 	}
-	if h == nil {
-		return nil, common.ErrInvalidArgument
+	if err := deps.OwnerRepositories.Validate(); err != nil {
+		return nil, err
 	}
 	return &Biz{
-		Base: basebiz.New(modulecommon.ModuleID, h, b), service: newService(deps.Results, deps.Artifacts),
-		workspaceDeletions: deps.WorkspaceDeletions, workspaceLocks: map[common.WorkspaceID]*sync.Mutex{},
+		Base: basebiz.New(modulecommon.ModuleID, h, b), service: newService(deps.OwnerRepositories.Results(), deps.OwnerRepositories.Artifacts()),
+		workspaceDeletions: deps.OwnerRepositories.WorkspaceDeletions(), workspaceLocks: map[common.WorkspaceID]*sync.Mutex{},
 	}, nil
 }
 

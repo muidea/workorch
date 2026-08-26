@@ -39,6 +39,11 @@ type RuntimeOperationExecutionRecord struct {
 	OperationID         string
 	ExecutionKey        string
 	ExpectedEffectScope RuntimeEffectScope
+	// AdmissibilitySnapshotID/AcquisitionBinding persist the exact SM-2 owner
+	// catalog used by the side-effect-free feasibility gate. Capability execute
+	// producers may not substitute another current catalog during SM-3.
+	AdmissibilitySnapshotID string
+	AcquisitionBinding      string
 	// ReplayProof is an owner-authored, read-only preflight proof sealed before
 	// the operation is claimed. It is optional: only a claimed durable operation
 	// carrying a valid proof may be recovered after an owner side effect could
@@ -228,6 +233,8 @@ func (r RuntimeOperationExecutionRecord) Normalized() RuntimeOperationExecutionR
 	r.OperationID = strings.TrimSpace(r.OperationID)
 	r.ExecutionKey = strings.TrimSpace(r.ExecutionKey)
 	r.ExpectedEffectScope = NormalizeRuntimeEffectScope(r.ExpectedEffectScope)
+	r.AdmissibilitySnapshotID = strings.TrimSpace(r.AdmissibilitySnapshotID)
+	r.AcquisitionBinding = strings.TrimSpace(r.AcquisitionBinding)
 	if r.ReplayProof != nil {
 		proof := r.ReplayProof.Normalized()
 		r.ReplayProof = &proof
@@ -249,6 +256,9 @@ func (r RuntimeOperationExecutionRecord) Validate() error {
 	}
 	if !ValidRuntimeEffectScope(r.ExpectedEffectScope) {
 		return fmt.Errorf("operation execution record has invalid expected effect scope %q", r.ExpectedEffectScope)
+	}
+	if r.AdmissibilitySnapshotID == "" && r.AcquisitionBinding != "" {
+		return fmt.Errorf("operation execution record acquisition binding requires owner catalog snapshot")
 	}
 	if r.ReplayProof != nil {
 		if err := r.ReplayProof.Validate(); err != nil {

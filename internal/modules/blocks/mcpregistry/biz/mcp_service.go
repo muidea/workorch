@@ -22,15 +22,15 @@ import (
 
 const maxRegistryCASAttempts = 8
 
-type Service struct {
+type service struct {
 	registry repository.MCPRegistryRepository
 }
 
-func NewService(registry repository.MCPRegistryRepository) *Service {
-	return &Service{registry: registry}
+func newService(registry repository.MCPRegistryRepository) *service {
+	return &service{registry: registry}
 }
 
-func (s *Service) CreateServer(ctx context.Context, cmd mcpevents.CreateServerCommand) (*mcpmodel.Server, string, error) {
+func (s *service) createServer(ctx context.Context, cmd mcpevents.CreateServerCommand) (*mcpmodel.Server, string, error) {
 	server, err := serverFromCommand(cmd)
 	if err != nil {
 		return nil, "", err
@@ -48,7 +48,7 @@ func (s *Service) CreateServer(ctx context.Context, cmd mcpevents.CreateServerCo
 	return mcpmodel.CloneServer(findServer(snapshot.Servers, server.ID)), registryContentRevision(snapshot), nil
 }
 
-func (s *Service) UpdateServer(ctx context.Context, cmd mcpevents.UpdateServerCommand) (*mcpmodel.Server, string, error) {
+func (s *service) updateServer(ctx context.Context, cmd mcpevents.UpdateServerCommand) (*mcpmodel.Server, string, error) {
 	server, err := serverFromCommand(mcpevents.CreateServerCommand(cmd))
 	if err != nil {
 		return nil, "", err
@@ -67,7 +67,7 @@ func (s *Service) UpdateServer(ctx context.Context, cmd mcpevents.UpdateServerCo
 	return mcpmodel.CloneServer(findServer(snapshot.Servers, server.ID)), registryContentRevision(snapshot), nil
 }
 
-func (s *Service) GetServer(ctx context.Context, id common.MCPServerID) (*mcpmodel.Server, string, error) {
+func (s *service) getServer(ctx context.Context, id common.MCPServerID) (*mcpmodel.Server, string, error) {
 	id = common.MCPServerID(strings.TrimSpace(string(id)))
 	if id == "" {
 		return nil, "", common.ErrInvalidArgument
@@ -83,7 +83,7 @@ func (s *Service) GetServer(ctx context.Context, id common.MCPServerID) (*mcpmod
 	return mcpmodel.CloneServer(item), registryContentRevision(snapshot), nil
 }
 
-func (s *Service) ListServers(ctx context.Context, cursor common.MCPServerID, limit int) ([]*mcpmodel.Server, common.MCPServerID, string, error) {
+func (s *service) listServers(ctx context.Context, cursor common.MCPServerID, limit int) ([]*mcpmodel.Server, common.MCPServerID, string, error) {
 	cursorValue, limit, err := normalizeListRequest(string(cursor), limit)
 	if err != nil {
 		return nil, "", "", err
@@ -105,7 +105,7 @@ func (s *Service) ListServers(ctx context.Context, cursor common.MCPServerID, li
 	return items, next, registryContentRevision(snapshot), nil
 }
 
-func (s *Service) CreateCapability(ctx context.Context, cmd mcpevents.CreateCapabilityCommand) (*mcpmodel.Capability, string, error) {
+func (s *service) createCapability(ctx context.Context, cmd mcpevents.CreateCapabilityCommand) (*mcpmodel.Capability, string, error) {
 	var id common.MCPCapabilityID
 	snapshot, err := s.mutate(ctx, func(next *mcpmodel.RegistrySnapshot) error {
 		server := findServer(next.Servers, common.MCPServerID(strings.TrimSpace(string(cmd.ServerID))))
@@ -140,7 +140,7 @@ func (s *Service) CreateCapability(ctx context.Context, cmd mcpevents.CreateCapa
 	return mcpmodel.CloneCapability(findCapability(snapshot.Capabilities, id)), registryContentRevision(snapshot), nil
 }
 
-func (s *Service) UpdateCapability(ctx context.Context, cmd mcpevents.UpdateCapabilityCommand) (*mcpmodel.Capability, string, error) {
+func (s *service) updateCapability(ctx context.Context, cmd mcpevents.UpdateCapabilityCommand) (*mcpmodel.Capability, string, error) {
 	mutation := mcpevents.CreateCapabilityCommand(cmd)
 	id := common.MCPCapabilityID(strings.TrimSpace(string(mutation.CapabilityID)))
 	if id == "" {
@@ -178,7 +178,7 @@ func (s *Service) UpdateCapability(ctx context.Context, cmd mcpevents.UpdateCapa
 	return mcpmodel.CloneCapability(findCapability(snapshot.Capabilities, id)), registryContentRevision(snapshot), nil
 }
 
-func (s *Service) GetCapability(ctx context.Context, id common.MCPCapabilityID) (*mcpmodel.Capability, string, error) {
+func (s *service) getCapability(ctx context.Context, id common.MCPCapabilityID) (*mcpmodel.Capability, string, error) {
 	id = common.MCPCapabilityID(strings.TrimSpace(string(id)))
 	if id == "" {
 		return nil, "", common.ErrInvalidArgument
@@ -194,7 +194,7 @@ func (s *Service) GetCapability(ctx context.Context, id common.MCPCapabilityID) 
 	return mcpmodel.CloneCapability(item), registryContentRevision(snapshot), nil
 }
 
-func (s *Service) ListCapabilities(ctx context.Context, query mcpevents.CapabilityQuery, cursor common.MCPCapabilityID, limit int) ([]*mcpmodel.Capability, common.MCPCapabilityID, string, error) {
+func (s *service) listCapabilities(ctx context.Context, query mcpevents.CapabilityQuery, cursor common.MCPCapabilityID, limit int) ([]*mcpmodel.Capability, common.MCPCapabilityID, string, error) {
 	cursorValue, limit, err := normalizeListRequest(string(cursor), limit)
 	if err != nil {
 		return nil, "", "", err
@@ -225,7 +225,7 @@ func (s *Service) ListCapabilities(ctx context.Context, query mcpevents.Capabili
 	return items, next, registryContentRevision(snapshot), nil
 }
 
-func (s *Service) RegistrySnapshot(ctx context.Context) (*mcpmodel.RegistrySnapshot, string, error) {
+func (s *service) registrySnapshot(ctx context.Context) (*mcpmodel.RegistrySnapshot, string, error) {
 	snapshot, err := s.load(ctx)
 	if err != nil {
 		return nil, "", err
@@ -233,7 +233,7 @@ func (s *Service) RegistrySnapshot(ctx context.Context) (*mcpmodel.RegistrySnaps
 	return mcpmodel.CloneRegistrySnapshot(snapshot), registryContentRevision(snapshot), nil
 }
 
-func (s *Service) SelectionSnapshot(ctx context.Context, serverIDs []common.MCPServerID, capabilityIDs []common.MCPCapabilityID) (*mcpmodel.RegistrySnapshot, string, error) {
+func (s *service) selectionSnapshot(ctx context.Context, serverIDs []common.MCPServerID, capabilityIDs []common.MCPCapabilityID) (*mcpmodel.RegistrySnapshot, string, error) {
 	if len(serverIDs) > modulecommon.MaxSelectionServers || len(capabilityIDs) > modulecommon.MaxSelectionCapabilities {
 		return nil, "", common.ErrInvalidArgument
 	}
@@ -290,7 +290,7 @@ func (s *Service) SelectionSnapshot(ctx context.Context, serverIDs []common.MCPS
 	return selected, registryContentRevision(snapshot), nil
 }
 
-func (s *Service) load(ctx context.Context) (*mcpmodel.RegistrySnapshot, error) {
+func (s *service) load(ctx context.Context) (*mcpmodel.RegistrySnapshot, error) {
 	if s == nil || s.registry == nil {
 		return nil, common.ErrInvalidArgument
 	}
@@ -301,7 +301,7 @@ func (s *Service) load(ctx context.Context) (*mcpmodel.RegistrySnapshot, error) 
 	return canonicalRegistrySnapshot(snapshot)
 }
 
-func (s *Service) mutate(ctx context.Context, apply func(*mcpmodel.RegistrySnapshot) error) (*mcpmodel.RegistrySnapshot, error) {
+func (s *service) mutate(ctx context.Context, apply func(*mcpmodel.RegistrySnapshot) error) (*mcpmodel.RegistrySnapshot, error) {
 	if s == nil || s.registry == nil || apply == nil {
 		return nil, common.ErrInvalidArgument
 	}

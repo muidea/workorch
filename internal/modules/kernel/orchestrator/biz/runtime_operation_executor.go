@@ -102,7 +102,10 @@ func (e eventRuntimeOperationExecutor) executeFileRead(ctx context.Context, requ
 }
 
 func (e eventRuntimeOperationExecutor) executeSSH(ctx context.Context, request runtime.RuntimeOperationExecutionRequest, deliverableDirectory string, internalDirectory string) (runtime.RuntimeOperationExecutionResult, error) {
-	sealedOperation, err := sshevents.SealRuntimeOperation(request.Operation)
+	if request.OwnerCatalog == nil || request.OwnerCatalogObservation == nil {
+		return runtime.RuntimeOperationExecutionResult{}, fmt.Errorf("runtime SSH execution requires persisted owner catalog and observation")
+	}
+	sealedOperation, err := sshevents.SealRuntimeOperation(request.Operation, *request.OwnerCatalog, *request.OwnerCatalogObservation)
 	if err != nil {
 		return runtime.RuntimeOperationExecutionResult{}, err
 	}
@@ -119,7 +122,10 @@ func (e eventRuntimeOperationExecutor) executeSSH(ctx context.Context, request r
 }
 
 func (e eventRuntimeOperationExecutor) executeWeb(ctx context.Context, request runtime.RuntimeOperationExecutionRequest, deliverableDirectory string, internalDirectory string) (runtime.RuntimeOperationExecutionResult, error) {
-	sealedOperation, err := webevents.SealRuntimeOperation(request.Operation)
+	if request.OwnerCatalog == nil || request.OwnerCatalogObservation == nil {
+		return runtime.RuntimeOperationExecutionResult{}, fmt.Errorf("runtime Web execution requires persisted owner catalog and observation")
+	}
+	sealedOperation, err := webevents.SealRuntimeOperation(request.Operation, *request.OwnerCatalog, *request.OwnerCatalogObservation)
 	if err != nil {
 		return runtime.RuntimeOperationExecutionResult{}, err
 	}
@@ -186,16 +192,21 @@ func cloneRuntimePrerequisiteObservation(value *runtimecontract.RuntimePrerequis
 }
 
 func (e eventRuntimeOperationExecutor) executeShell(ctx context.Context, request runtime.RuntimeOperationExecutionRequest, deliverableDirectory string, internalDirectory string) (runtime.RuntimeOperationExecutionResult, error) {
-	data, err := shellevents.OperationDataFromRuntimeOperation(request.Operation)
+	if request.OwnerCatalog == nil || request.OwnerCatalogObservation == nil {
+		return runtime.RuntimeOperationExecutionResult{}, fmt.Errorf("runtime Shell execution requires persisted owner catalog and observation")
+	}
+	sealedOperation, err := shellevents.SealRuntimeOperation(request.Operation, *request.OwnerCatalog, shellevents.RuntimeExecutionSealInput{
+		CatalogObservation:        *request.OwnerCatalogObservation,
+		TargetRole:                request.TargetRole,
+		ValidationScopeTargetRefs: append([]string(nil), request.ValidationScopeTargetRefs...),
+		EvidencePolicies:          append([]runtimecontract.RuntimeEvidencePolicy(nil), request.EvidencePolicies...),
+	})
 	if err != nil {
 		return runtime.RuntimeOperationExecutionResult{}, err
 	}
 	command := shellevents.ExecuteOperationCommand{
 		RuntimeOperationExecutionContext: runtimeOperationExecutionContext(request, deliverableDirectory, internalDirectory),
-		TargetRole:                       request.TargetRole,
-		ValidationRecipes:                append([]runtimecontract.RuntimeValidationRecipe(nil), request.ValidationRecipes...),
-		ValidationScopeTargetRefs:        append([]string(nil), request.ValidationScopeTargetRefs...),
-		Data:                             data,
+		SealedOperation:                  sealedOperation,
 	}
 	result := e.hub.Send(magicevent.NewEventWithContext(shellevents.TopicExecuteOperation, ModuleID, runtimecontract.RuntimeModuleShell, magicevent.NewHeader(), ctx, command))
 	response, err := shellOperationResponse(result)
@@ -322,6 +333,7 @@ func runtimeOperationExecutionEnvelope(execution runtimecontract.RuntimeOperatio
 	execution = execution.Normalized()
 	ret := runtimecontract.RuntimeOperationExecutionEnvelope{
 		ExecutionKey: execution.ExecutionKey, Fence: execution.Fence, ExpectedEffectScope: execution.ExpectedEffectScope,
+		AdmissibilitySnapshotID: execution.AdmissibilitySnapshotID, AcquisitionBinding: execution.AcquisitionBinding,
 	}
 	if execution.ReplayProof != nil {
 		proof := execution.ReplayProof.Clone()

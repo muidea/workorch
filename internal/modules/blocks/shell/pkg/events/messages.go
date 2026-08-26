@@ -28,15 +28,10 @@ type OperationData struct {
 
 type ExecuteOperationCommand struct {
 	runtimecontract.RuntimeOperationExecutionContext
-	TargetRole string
-	// ValidationRecipes is the exact Shell-owner-confirmed recipe set from the
-	// sealed admissibility snapshot.
-	ValidationRecipes []runtimecontract.RuntimeValidationRecipe
-	// ValidationScopeTargetRefs is the fresh File-owner manifest scope carried
-	// by Orchestrator. Shell may only report diagnostic target candidates within
-	// this set; it does not become File state authority.
-	ValidationScopeTargetRefs []string
-	Data                      OperationData
+	// SealedOperation is the only Shell executable payload. Command/args remain
+	// part of Operation; owner-confirmed recipes, diagnostic scope, target role
+	// and evidence policies are hash-bound in its authorization.
+	SealedOperation SealedRuntimeOperation
 }
 
 type ExecuteOperationResult struct {

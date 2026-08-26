@@ -4,7 +4,7 @@ Status: active
 
 Type: capability-block-contract
 
-Last Verified: 2026-08-21
+Last Verified: 2026-08-26
 
 ## 功能范围与边界
 
@@ -22,7 +22,8 @@ Last Verified: 2026-08-21
   surface 只保留 typed audit fact，不能关闭 CWI。
 - SM-3 的 `ExecuteOperationCommand` 只携带完整 `SealedRuntimeOperation`，不存在可独立漂移的第二份 `Data`。payload hash
   同时绑定 operation、参数、target/CWI scope、owner catalog snapshot、Registry revision、exact Capability、effect/
-  idempotency policy 与适用 validation surface。
+  idempotency policy 与适用 validation surface。execution envelope 的 `AdmissibilitySnapshotID + AcquisitionBinding` 必须
+  与 seal 内 catalog identity 精确相等；缺少 SM-3 封存 identity 或用同 execution key/fence 替换 catalog 均 fail-closed。
 - 外部调用前依次校验同步 result、Orchestrator producer、workspace/run/dispatch/execution key/fence、sealed payload、
   Orchestrator receipt authorization、当前 Registry revision、enabled Server/Capability、allowlist、exact kind/name/URI、
   bounded input schema、effect/idempotency 与 exact approval grant。任一漂移均在 transport 前 fail-closed。
@@ -67,7 +68,8 @@ Last Verified: 2026-08-21
 
 - [x] direct/auxiliary/not-declared 与 ready/prerequisite-required/unavailable surface、required input、empty binding、非法 schema。
 - [x] catalog acquisition 与 semantic feasibility 零 endpoint/process side effect；Registry repository 不跨 owner 注入。
-- [x] Post、错误 producer、scope/fence、sealed payload、Capability/allowlist/schema/policy/revision 与 approval grant 漂移。
+- [x] Post、错误 producer、scope/fence、sealed payload、execution-record catalog identity、Capability/allowlist/schema/policy/
+  revision 与 approval grant 漂移，且前述 ingress 漂移均为零 provider transport。
 - [x] tool/resource/prompt exact Capability 选择及 non-durable、durable changed、durable no-op、缺失 effect observation。
 - [x] HTTP/stdio byte/event guard、安全 diagnostic、private raw ref/hash、credential/environment reference 隔离。
 - [x] receipt commit 前后崩溃、response loss、duplicate/restart 与 stale catalog 的 at-most-once/replay 收敛。

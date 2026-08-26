@@ -18,10 +18,9 @@ import (
 const ModuleID = modulecommon.ModuleID
 
 type Dependencies struct {
-	Approvals          repository.ApprovalRepository
-	WorkspaceDeletions repository.ApprovalWorkspaceDeletionRepository
-	EventHub           magicevent.Hub
-	BackgroundRoutine  task.BackgroundRoutine
+	OwnerRepositories repository.ApprovalOwnerRepositories
+	EventHub          magicevent.Hub
+	BackgroundRoutine task.BackgroundRoutine
 }
 
 type Biz struct {
@@ -40,10 +39,13 @@ type Biz struct {
 }
 
 func New(h magicevent.Hub, b task.BackgroundRoutine, deps Dependencies) (*Biz, error) {
-	if deps.Approvals == nil || deps.WorkspaceDeletions == nil || deps.EventHub == nil || h == nil {
+	if deps.EventHub == nil || h == nil {
 		return nil, common.ErrInvalidArgument
 	}
-	return &Biz{Base: basebiz.New(modulecommon.ModuleID, h, b), service: newMutationService(deps.Approvals), approvals: deps.Approvals, workspaceDeletions: deps.WorkspaceDeletions, workspaceLocks: map[common.WorkspaceID]*sync.Mutex{}}, nil
+	if err := deps.OwnerRepositories.Validate(); err != nil {
+		return nil, err
+	}
+	return &Biz{Base: basebiz.New(modulecommon.ModuleID, h, b), service: newMutationService(deps.OwnerRepositories.Approvals()), approvals: deps.OwnerRepositories.Approvals(), workspaceDeletions: deps.OwnerRepositories.WorkspaceDeletions(), workspaceLocks: map[common.WorkspaceID]*sync.Mutex{}}, nil
 }
 
 func (m *Biz) Start() error {

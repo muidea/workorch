@@ -28,7 +28,7 @@ func TestDefineOrConsolidateWorkspaceGoalCreatesWhenMissing(t *testing.T) {
 	defHub := newDefinitionMagicTestHub(t)
 	hub := defHub.rawHub
 	workspaceID := common.WorkspaceID("ws-definition-port")
-	defHub.subscribe(workspaceevents.TopicWorkspaceCommandListGoalsByWS, func(data any) workspaceevents.WorkspaceCommandResult {
+	defHub.subscribe(workspaceevents.TopicWorkspaceCommandListGoalsByWS, func(data any) any {
 		cmd, ok := data.(workspaceevents.ListGoalsByWorkspaceCommand)
 		if !ok {
 			t.Fatalf("command payload type = %T, want ListGoalsByWorkspaceCommand", data)
@@ -36,9 +36,9 @@ func TestDefineOrConsolidateWorkspaceGoalCreatesWhenMissing(t *testing.T) {
 		if cmd.WorkspaceID != workspaceID {
 			t.Fatalf("command workspace = %q, want %s", cmd.WorkspaceID, workspaceID)
 		}
-		return workspaceevents.WorkspaceCommandResult{Goals: []*workspacemodel.Goal{}}
+		return workspaceevents.GoalListResult{Goals: []*workspacemodel.Goal{}}
 	})
-	defHub.subscribe(workspaceevents.TopicWorkspaceCommandDefineGoal, func(data any) workspaceevents.WorkspaceCommandResult {
+	defHub.subscribe(workspaceevents.TopicWorkspaceCommandDefineGoal, func(data any) any {
 		cmd, ok := data.(workspaceevents.DefineGoalCommand)
 		if !ok {
 			t.Fatalf("command payload type = %T, want DefineGoalCommand", data)
@@ -51,7 +51,7 @@ func TestDefineOrConsolidateWorkspaceGoalCreatesWhenMissing(t *testing.T) {
 		if text != "- ship the feature" {
 			t.Fatalf("goal text = %q, want formatted bullet", text)
 		}
-		return workspaceevents.WorkspaceCommandResult{Goal: &workspacemodel.Goal{
+		return workspaceevents.GoalResult{Goal: &workspacemodel.Goal{
 			ID:          goalID,
 			WorkspaceID: workspaceID,
 			Text:        text,
@@ -72,7 +72,7 @@ func TestUpdateGoalViewPublishesExplicitWorkspaceScope(t *testing.T) {
 	defHub := newDefinitionMagicTestHub(t)
 	hub := defHub.rawHub
 	workspaceID := common.WorkspaceID("ws-definition-update-scope")
-	defHub.subscribe(workspaceevents.TopicWorkspaceCommandUpdateGoal, func(data any) workspaceevents.WorkspaceCommandResult {
+	defHub.subscribe(workspaceevents.TopicWorkspaceCommandUpdateGoal, func(data any) any {
 		cmd, ok := data.(workspaceevents.UpdateGoalCommand)
 		if !ok {
 			t.Fatalf("command payload type = %T, want UpdateGoalCommand", data)
@@ -83,7 +83,7 @@ func TestUpdateGoalViewPublishesExplicitWorkspaceScope(t *testing.T) {
 		if cmd.GoalID != "goal-definition-update-scope" || cmd.Text != "- updated goal" {
 			t.Fatalf("command = %+v, want updated scoped goal", cmd)
 		}
-		return workspaceevents.WorkspaceCommandResult{Goal: &workspacemodel.Goal{
+		return workspaceevents.GoalResult{Goal: &workspacemodel.Goal{
 			ID:          cmd.GoalID,
 			WorkspaceID: workspaceID,
 			Text:        cmd.Text,
@@ -105,7 +105,7 @@ func TestListConsolidatedWorkspaceDoDsUpdatesCanonicalAndDeletesObsolete(t *test
 	hub := defHub.rawHub
 	workspaceID := common.WorkspaceID("ws-definition-port")
 	deleteCount := 0
-	defHub.subscribe(workspaceevents.TopicWorkspaceCommandListDoDsByWS, func(data any) workspaceevents.WorkspaceCommandResult {
+	defHub.subscribe(workspaceevents.TopicWorkspaceCommandListDoDsByWS, func(data any) any {
 		cmd, ok := data.(workspaceevents.ListDoDsByWorkspaceCommand)
 		if !ok {
 			t.Fatalf("command payload type = %T, want ListDoDsByWorkspaceCommand", data)
@@ -113,12 +113,12 @@ func TestListConsolidatedWorkspaceDoDsUpdatesCanonicalAndDeletesObsolete(t *test
 		if cmd.WorkspaceID != workspaceID {
 			t.Fatalf("command workspace = %q, want %s", cmd.WorkspaceID, workspaceID)
 		}
-		return workspaceevents.WorkspaceCommandResult{DoDs: []*workspacemodel.DoD{
+		return workspaceevents.DoDListResult{DoDs: []*workspacemodel.DoD{
 			{ID: "dod-001", WorkspaceID: workspaceID, DefinitionRevision: "dod:00000000000000000001:first", Items: []string{"first"}},
 			{ID: "dod-002", WorkspaceID: workspaceID, DefinitionRevision: "dod:00000000000000000002:second", Items: []string{"second"}},
 		}}
 	})
-	defHub.subscribe(workspaceevents.TopicWorkspaceCommandUpdateDoD, func(data any) workspaceevents.WorkspaceCommandResult {
+	defHub.subscribe(workspaceevents.TopicWorkspaceCommandUpdateDoD, func(data any) any {
 		cmd, ok := data.(workspaceevents.UpdateDoDCommand)
 		if !ok {
 			t.Fatalf("command payload type = %T, want UpdateDoDCommand", data)
@@ -131,14 +131,14 @@ func TestListConsolidatedWorkspaceDoDsUpdatesCanonicalAndDeletesObsolete(t *test
 		if len(items) != 2 || items[0] != "first" || items[1] != "second" {
 			t.Fatalf("merged items = %#v, want first/second", items)
 		}
-		return workspaceevents.WorkspaceCommandResult{DoD: &workspacemodel.DoD{
+		return workspaceevents.DoDResult{DoD: &workspacemodel.DoD{
 			ID:                 dodID,
 			WorkspaceID:        workspaceID,
 			DefinitionRevision: "dod:00000000000000000003:merged",
 			Items:              items,
 		}}
 	})
-	defHub.subscribe(workspaceevents.TopicWorkspaceCommandDeleteDoD, func(data any) workspaceevents.WorkspaceCommandResult {
+	defHub.subscribe(workspaceevents.TopicWorkspaceCommandDeleteDoD, func(data any) any {
 		deleteCount++
 		cmd, ok := data.(workspaceevents.DeleteDoDCommand)
 		if !ok {
@@ -147,7 +147,7 @@ func TestListConsolidatedWorkspaceDoDsUpdatesCanonicalAndDeletesObsolete(t *test
 		if got := cmd.DoDID; got != "dod-001" {
 			t.Fatalf("deleted dod id = %q, want dod-001", got)
 		}
-		return workspaceevents.WorkspaceCommandResult{}
+		return workspaceevents.DeleteDoDResult{WorkspaceID: cmd.WorkspaceID, DoDID: cmd.DoDID}
 	})
 
 	items, err := ListConsolidatedWorkspaceDoDs(ctx, hub, workspaceID)
@@ -167,7 +167,7 @@ func TestUpdateDoDViewPublishesWorkspaceScopeFromContext(t *testing.T) {
 	defHub := newDefinitionMagicTestHub(t)
 	hub := defHub.rawHub
 	workspaceID := common.WorkspaceID("ws-definition-update-scope")
-	defHub.subscribe(workspaceevents.TopicWorkspaceCommandUpdateDoD, func(data any) workspaceevents.WorkspaceCommandResult {
+	defHub.subscribe(workspaceevents.TopicWorkspaceCommandUpdateDoD, func(data any) any {
 		cmd, ok := data.(workspaceevents.UpdateDoDCommand)
 		if !ok {
 			t.Fatalf("command payload type = %T, want UpdateDoDCommand", data)
@@ -178,7 +178,7 @@ func TestUpdateDoDViewPublishesWorkspaceScopeFromContext(t *testing.T) {
 		if cmd.DoDID != "dod-definition-update-scope" || len(cmd.Items) != 1 || cmd.Items[0] != "updated dod" {
 			t.Fatalf("command = %+v, want updated scoped dod", cmd)
 		}
-		return workspaceevents.WorkspaceCommandResult{DoD: &workspacemodel.DoD{
+		return workspaceevents.DoDResult{DoD: &workspacemodel.DoD{
 			ID:          cmd.DoDID,
 			WorkspaceID: workspaceID,
 			Items:       cmd.Items,
@@ -199,7 +199,7 @@ func TestDeleteGoalPublishesWorkspaceScopeFromContext(t *testing.T) {
 	defHub := newDefinitionMagicTestHub(t)
 	hub := defHub.rawHub
 	workspaceID := common.WorkspaceID("ws-definition-delete-scope")
-	defHub.subscribe(workspaceevents.TopicWorkspaceCommandDeleteGoal, func(data any) workspaceevents.WorkspaceCommandResult {
+	defHub.subscribe(workspaceevents.TopicWorkspaceCommandDeleteGoal, func(data any) any {
 		cmd, ok := data.(workspaceevents.DeleteGoalCommand)
 		if !ok {
 			t.Fatalf("command payload type = %T, want DeleteGoalCommand", data)
@@ -210,7 +210,7 @@ func TestDeleteGoalPublishesWorkspaceScopeFromContext(t *testing.T) {
 		if cmd.GoalID != "goal-definition-delete-scope" {
 			t.Fatalf("command = %+v, want scoped goal delete", cmd)
 		}
-		return workspaceevents.WorkspaceCommandResult{}
+		return workspaceevents.DeleteGoalResult{WorkspaceID: cmd.WorkspaceID, GoalID: cmd.GoalID}
 	})
 
 	if err := DeleteGoal(ctx, hub, "", "goal-definition-delete-scope"); err != nil {
@@ -223,7 +223,7 @@ func TestDeleteDoDPublishesWorkspaceScopeFromContext(t *testing.T) {
 	defHub := newDefinitionMagicTestHub(t)
 	hub := defHub.rawHub
 	workspaceID := common.WorkspaceID("ws-definition-delete-scope")
-	defHub.subscribe(workspaceevents.TopicWorkspaceCommandDeleteDoD, func(data any) workspaceevents.WorkspaceCommandResult {
+	defHub.subscribe(workspaceevents.TopicWorkspaceCommandDeleteDoD, func(data any) any {
 		cmd, ok := data.(workspaceevents.DeleteDoDCommand)
 		if !ok {
 			t.Fatalf("command payload type = %T, want DeleteDoDCommand", data)
@@ -234,7 +234,7 @@ func TestDeleteDoDPublishesWorkspaceScopeFromContext(t *testing.T) {
 		if cmd.DoDID != "dod-definition-delete-scope" {
 			t.Fatalf("command = %+v, want scoped dod delete", cmd)
 		}
-		return workspaceevents.WorkspaceCommandResult{}
+		return workspaceevents.DeleteDoDResult{WorkspaceID: cmd.WorkspaceID, DoDID: cmd.DoDID}
 	})
 
 	if err := DeleteDoD(ctx, hub, "", "dod-definition-delete-scope"); err != nil {
@@ -265,7 +265,7 @@ func newDefinitionMagicTestHub(t *testing.T) *definitionMagicTestHub {
 	return ret
 }
 
-func (h *definitionMagicTestHub) subscribe(topic string, handler func(any) workspaceevents.WorkspaceCommandResult) {
+func (h *definitionMagicTestHub) subscribe(topic string, handler func(any) any) {
 	h.observer.Subscribe(topic, func(ev magicevent.Event, result magicevent.Result) {
 		result.Set(handler(ev.Data()), nil)
 	})

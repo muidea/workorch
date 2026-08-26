@@ -56,10 +56,9 @@ func TestDecisionWorkspaceDeletionRejectsForgedPurgeAndUsesPrivatePath(t *testin
 	seedResolvedDecisionForDeletionDelivery(t, ctx, repositories, workspaceID, runID, "ticket-decision-private-purge")
 
 	hub := magicevent.NewHub(16)
-	owner, err := New(hub, nil, Dependencies{
-		Tickets: repositories.Tickets, Resolutions: repositories.Resolutions,
-		WorkspaceDeletions: repositories.WorkspaceDeletions, EventHub: hub,
-	})
+	owner, err := New(hub, nil, Dependencies{OwnerRepositories: decisionBizTestOwnerRepositories(
+		repositories.Tickets, repositories.Resolutions,
+		repositories.WorkspaceDeletions), EventHub: hub})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -206,10 +205,9 @@ func TestDecisionDeletionSealLinearizesWithReconciliationDelivery(t *testing.T) 
 		command := event.Data().(decisionevents.RecordDecisionEvidenceCommand)
 		result.Set(decisionevents.RecordDecisionEvidenceResult{EvidenceRecordID: command.EvidenceRecordID}, nil)
 	})
-	owner, err := New(probe, nil, Dependencies{
-		Tickets: repositories.Tickets, Resolutions: repositories.Resolutions,
-		WorkspaceDeletions: repositories.WorkspaceDeletions, EventHub: probe,
-	})
+	owner, err := New(probe, nil, Dependencies{OwnerRepositories: decisionBizTestOwnerRepositories(
+		repositories.Tickets, repositories.Resolutions,
+		repositories.WorkspaceDeletions), EventHub: probe})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -263,10 +261,9 @@ func TestDecisionRestartSkipsLateResolvedDeliveryAfterDeletionSeal(t *testing.T)
 	ticket, resolution := seedResolvedDecisionForDeletionDelivery(t, ctx, repositories, workspaceID, runID, ticketID)
 
 	firstRaw := magicevent.NewHub(16)
-	first, err := New(firstRaw, nil, Dependencies{
-		Tickets: repositories.Tickets, Resolutions: repositories.Resolutions,
-		WorkspaceDeletions: repositories.WorkspaceDeletions, EventHub: firstRaw,
-	})
+	first, err := New(firstRaw, nil, Dependencies{OwnerRepositories: decisionBizTestOwnerRepositories(
+		repositories.Tickets, repositories.Resolutions,
+		repositories.WorkspaceDeletions), EventHub: firstRaw})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -281,10 +278,9 @@ func TestDecisionRestartSkipsLateResolvedDeliveryAfterDeletionSeal(t *testing.T)
 
 	restartedRaw := magicevent.NewHub(16)
 	probe := &decisionDeletionDeliveryProbe{Hub: restartedRaw}
-	restarted, err := New(probe, nil, Dependencies{
-		Tickets: repositories.Tickets, Resolutions: repositories.Resolutions,
-		WorkspaceDeletions: repositories.WorkspaceDeletions, EventHub: probe,
-	})
+	restarted, err := New(probe, nil, Dependencies{OwnerRepositories: decisionBizTestOwnerRepositories(
+		repositories.Tickets, repositories.Resolutions,
+		repositories.WorkspaceDeletions), EventHub: probe})
 	if err != nil {
 		t.Fatal(err)
 	}

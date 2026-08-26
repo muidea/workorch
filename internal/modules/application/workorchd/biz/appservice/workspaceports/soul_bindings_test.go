@@ -30,13 +30,13 @@ func TestWorkspaceSoulBindingsViewUsesOwnerPorts(t *testing.T) {
 		souls[id] = &soulmodel.Soul{ID: id, Name: string(id), SoulMD: "# " + string(id)}
 	}
 	testHub.subscribe(workspaceevents.CommandDestination, workspaceevents.TopicWorkspaceCommandGet, func(any) (any, error) {
-		return workspaceevents.WorkspaceCommandResult{Workspace: workspaceeventmapping.WorkspaceDTO(workspace)}, nil
+		return workspaceevents.WorkspaceResult{Workspace: workspaceeventmapping.WorkspaceDTO(workspace)}, nil
 	})
 	testHub.subscribe(workspaceevents.CommandDestination, workspaceevents.TopicWorkspaceCommandUpdate, func(data any) (any, error) {
 		cmd := data.(workspaceevents.UpdateWorkspaceCommand)
 		workspace.DefaultSoulID = cmd.DefaultSoulID
 		workspace.SoulBindings = soulbinding.SoulIDMap(cmd.SoulBindings)
-		return workspaceevents.WorkspaceCommandResult{Workspace: workspaceeventmapping.WorkspaceDTO(workspace)}, nil
+		return workspaceevents.WorkspaceResult{Workspace: workspaceeventmapping.WorkspaceDTO(workspace)}, nil
 	})
 	testHub.subscribe(soulevents.CommandDestination, soulevents.TopicSoulCommandGet, func(data any) (any, error) {
 		cmd := data.(soulevents.GetSoulCommand)
@@ -78,7 +78,7 @@ func TestUpdateWorkspaceSoulBindingsViewRejectsInvalidInput(t *testing.T) {
 		State: common.WorkspaceStateActive,
 	}
 	testHub.subscribe(workspaceevents.CommandDestination, workspaceevents.TopicWorkspaceCommandGet, func(any) (any, error) {
-		return workspaceevents.WorkspaceCommandResult{Workspace: workspaceeventmapping.WorkspaceDTO(workspace)}, nil
+		return workspaceevents.WorkspaceResult{Workspace: workspaceeventmapping.WorkspaceDTO(workspace)}, nil
 	})
 	testHub.subscribe(soulevents.CommandDestination, soulevents.TopicSoulCommandGet, func(any) (any, error) {
 		return nil, common.ErrNotFound

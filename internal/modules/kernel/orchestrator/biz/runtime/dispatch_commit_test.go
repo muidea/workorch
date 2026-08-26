@@ -1003,6 +1003,10 @@ func sealedTerminalDecision(t *testing.T, facts runtimecontract.RuntimeFacts, st
 // production alternate dispatch entry point. Production code must use the
 // RuntimeController candidate-attempt admission path.
 func sealCandidateForTest(t *testing.T, repository *durableRuntimeStateRepository, candidate runtimecontract.RuntimeCandidate) RuntimeAggregate {
+	return sealCandidateWithFeasibilitiesForTest(t, repository, candidate, nil)
+}
+
+func sealCandidateWithFeasibilitiesForTest(t *testing.T, repository *durableRuntimeStateRepository, candidate runtimecontract.RuntimeCandidate, feasibilities []runtimecontract.RuntimeCandidateFeasibilityRecord) RuntimeAggregate {
 	t.Helper()
 	aggregate := repository.aggregate
 	candidate = runtimeTestBindCandidateToCurrentFocus(t, aggregate, candidate)
@@ -1022,9 +1026,9 @@ func sealCandidateForTest(t *testing.T, repository *durableRuntimeStateRepositor
 		if snapshotErr != nil {
 			t.Fatal(snapshotErr)
 		}
-		dispatch, err = sealDispatchWithActivationAndFeasibilities(aggregate.Decision, candidate, effectiveActivation, recipes, nil)
+		dispatch, err = sealDispatchWithActivationAndFeasibilities(aggregate.Decision, candidate, effectiveActivation, recipes, feasibilities)
 	} else {
-		dispatch, err = SealDispatchWithActivation(aggregate.Decision, candidate, effectiveActivation)
+		dispatch, err = SealDispatchWithActivationAndFeasibilities(aggregate.Decision, candidate, effectiveActivation, feasibilities)
 	}
 	if err != nil {
 		t.Fatal(err)

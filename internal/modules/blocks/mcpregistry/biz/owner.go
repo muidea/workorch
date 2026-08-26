@@ -24,7 +24,7 @@ type Dependencies struct {
 
 type Biz struct {
 	basebiz.Base
-	service *Service
+	service *service
 	topics  []string
 	started bool
 }
@@ -33,7 +33,7 @@ func New(eventHub magicevent.Hub, background task.BackgroundRoutine, deps Depend
 	if deps.Registry == nil || deps.EventHub == nil || eventHub == nil {
 		return nil, common.ErrInvalidArgument
 	}
-	return &Biz{Base: basebiz.New(modulecommon.ModuleID, eventHub, background), service: NewService(deps.Registry)}, nil
+	return &Biz{Base: basebiz.New(modulecommon.ModuleID, eventHub, background), service: newService(deps.Registry)}, nil
 }
 
 func (m *Biz) Start() error {
@@ -93,7 +93,7 @@ func (m *Biz) handleCommand(ev magicevent.Event, result magicevent.Result) {
 			setMagicResult(result, mcpevents.CreateServerResult{}, common.ErrInvalidArgument)
 			return
 		}
-		server, revision, err := m.service.CreateServer(ctx, cmd)
+		server, revision, err := m.service.createServer(ctx, cmd)
 		view, viewErr := mcpevents.MCPServerFromModel(server)
 		setMagicResult(result, mcpevents.CreateServerResult{Server: view, RegistryRevision: revision}, firstError(err, viewErr))
 	case mcpevents.TopicMCPCommandGetServer:
@@ -102,7 +102,7 @@ func (m *Biz) handleCommand(ev magicevent.Event, result magicevent.Result) {
 			setMagicResult(result, mcpevents.GetServerResult{}, common.ErrInvalidArgument)
 			return
 		}
-		server, revision, err := m.service.GetServer(ctx, cmd.ServerID)
+		server, revision, err := m.service.getServer(ctx, cmd.ServerID)
 		view, viewErr := mcpevents.MCPServerFromModel(server)
 		setMagicResult(result, mcpevents.GetServerResult{Server: view, RegistryRevision: revision}, firstError(err, viewErr))
 	case mcpevents.TopicMCPCommandListServers:
@@ -111,7 +111,7 @@ func (m *Biz) handleCommand(ev magicevent.Event, result magicevent.Result) {
 			setMagicResult(result, mcpevents.ListServersResult{}, common.ErrInvalidArgument)
 			return
 		}
-		servers, cursor, revision, err := m.service.ListServers(ctx, cmd.CursorAfterID, cmd.Limit)
+		servers, cursor, revision, err := m.service.listServers(ctx, cmd.CursorAfterID, cmd.Limit)
 		views, viewErr := mcpevents.MCPServersFromModels(servers)
 		setMagicResult(result, mcpevents.ListServersResult{Servers: views, NextCursor: cursor, RegistryRevision: revision}, firstError(err, viewErr))
 	case mcpevents.TopicMCPCommandUpdateServer:
@@ -120,7 +120,7 @@ func (m *Biz) handleCommand(ev magicevent.Event, result magicevent.Result) {
 			setMagicResult(result, mcpevents.UpdateServerResult{}, common.ErrInvalidArgument)
 			return
 		}
-		server, revision, err := m.service.UpdateServer(ctx, cmd)
+		server, revision, err := m.service.updateServer(ctx, cmd)
 		view, viewErr := mcpevents.MCPServerFromModel(server)
 		setMagicResult(result, mcpevents.UpdateServerResult{Server: view, RegistryRevision: revision}, firstError(err, viewErr))
 	case mcpevents.TopicMCPCommandCreateCapability:
@@ -129,7 +129,7 @@ func (m *Biz) handleCommand(ev magicevent.Event, result magicevent.Result) {
 			setMagicResult(result, mcpevents.CreateCapabilityResult{}, common.ErrInvalidArgument)
 			return
 		}
-		item, revision, err := m.service.CreateCapability(ctx, cmd)
+		item, revision, err := m.service.createCapability(ctx, cmd)
 		setMagicResult(result, mcpevents.CreateCapabilityResult{Capability: mcpmodel.CloneCapability(item), RegistryRevision: revision}, err)
 	case mcpevents.TopicMCPCommandGetCapability:
 		cmd, ok := ev.Data().(mcpevents.GetCapabilityCommand)
@@ -137,7 +137,7 @@ func (m *Biz) handleCommand(ev magicevent.Event, result magicevent.Result) {
 			setMagicResult(result, mcpevents.GetCapabilityResult{}, common.ErrInvalidArgument)
 			return
 		}
-		item, revision, err := m.service.GetCapability(ctx, cmd.CapabilityID)
+		item, revision, err := m.service.getCapability(ctx, cmd.CapabilityID)
 		setMagicResult(result, mcpevents.GetCapabilityResult{Capability: mcpmodel.CloneCapability(item), RegistryRevision: revision}, err)
 	case mcpevents.TopicMCPCommandListCapabilities:
 		cmd, ok := ev.Data().(mcpevents.ListCapabilitiesCommand)
@@ -145,7 +145,7 @@ func (m *Biz) handleCommand(ev magicevent.Event, result magicevent.Result) {
 			setMagicResult(result, mcpevents.ListCapabilitiesResult{}, common.ErrInvalidArgument)
 			return
 		}
-		items, cursor, revision, err := m.service.ListCapabilities(ctx, cmd.Query, cmd.CursorAfterID, cmd.Limit)
+		items, cursor, revision, err := m.service.listCapabilities(ctx, cmd.Query, cmd.CursorAfterID, cmd.Limit)
 		setMagicResult(result, mcpevents.ListCapabilitiesResult{Capabilities: mcpmodel.CloneCapabilities(items), NextCursor: cursor, RegistryRevision: revision}, err)
 	case mcpevents.TopicMCPCommandUpdateCapability:
 		cmd, ok := ev.Data().(mcpevents.UpdateCapabilityCommand)
@@ -153,14 +153,14 @@ func (m *Biz) handleCommand(ev magicevent.Event, result magicevent.Result) {
 			setMagicResult(result, mcpevents.UpdateCapabilityResult{}, common.ErrInvalidArgument)
 			return
 		}
-		item, revision, err := m.service.UpdateCapability(ctx, cmd)
+		item, revision, err := m.service.updateCapability(ctx, cmd)
 		setMagicResult(result, mcpevents.UpdateCapabilityResult{Capability: mcpmodel.CloneCapability(item), RegistryRevision: revision}, err)
 	case mcpevents.TopicMCPCommandReadRegistrySnapshot:
 		if _, ok := ev.Data().(mcpevents.ReadRegistrySnapshotCommand); !ok {
 			setMagicResult(result, mcpevents.RegistrySnapshotResult{}, common.ErrInvalidArgument)
 			return
 		}
-		snapshot, revision, err := m.service.RegistrySnapshot(ctx)
+		snapshot, revision, err := m.service.registrySnapshot(ctx)
 		setRegistrySnapshotResult(result, snapshot, revision, err)
 	case mcpevents.TopicMCPCommandReadSelectionSnapshot:
 		cmd, ok := ev.Data().(mcpevents.ReadSelectionSnapshotCommand)
@@ -168,14 +168,14 @@ func (m *Biz) handleCommand(ev magicevent.Event, result magicevent.Result) {
 			setMagicResult(result, mcpevents.SelectionSnapshotResult{}, common.ErrInvalidArgument)
 			return
 		}
-		snapshot, revision, err := m.service.SelectionSnapshot(ctx, cmd.ServerIDs, cmd.CapabilityIDs)
+		snapshot, revision, err := m.service.selectionSnapshot(ctx, cmd.ServerIDs, cmd.CapabilityIDs)
 		setSelectionSnapshotResult(result, snapshot, revision, err)
 	case mcpevents.TopicMCPCommandEnsureDefaults:
 		if _, ok := ev.Data().(mcpevents.EnsureDefaultsCommand); !ok {
 			setMagicResult(result, mcpevents.EnsureDefaultsResult{}, common.ErrInvalidArgument)
 			return
 		}
-		revision, err := m.service.EnsureBuiltinDefaults(ctx)
+		revision, err := m.service.ensureBuiltinDefaults(ctx)
 		setMagicResult(result, mcpevents.EnsureDefaultsResult{Ensured: err == nil, RegistryRevision: revision}, err)
 	default:
 		setMagicResult(result, struct{}{}, common.ErrInvalidArgument)

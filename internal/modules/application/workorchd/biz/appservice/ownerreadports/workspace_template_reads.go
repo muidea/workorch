@@ -16,14 +16,15 @@ func ReadWorkspaceTemplateByOwnerCommand(ctx context.Context, hub magicevent.Hub
 	if hub == nil || templateID == "" {
 		return nil, common.ErrInvalidArgument
 	}
-	event := magicevent.NewEventWithContext(workspaceevents.TopicWorkspaceTemplateCommandGet, sourceModule, workspaceevents.CommandDestination, magicevent.NewHeader(), ctx, workspaceevents.GetWorkspaceTemplateCommand{TemplateID: templateID})
+	command := workspaceevents.GetWorkspaceTemplateCommand{TemplateID: templateID}
+	event := magicevent.NewEventWithContext(workspaceevents.TopicWorkspaceTemplateCommandGet, sourceModule, workspaceevents.CommandDestination, magicevent.NewHeader(), ctx, command)
 	ownerevent.BindLane(event, workspaceevents.Contracts(), workspaceevents.TopicWorkspaceTemplateCommandGet, "workspace_template", templateID, "", "", "")
-	response, err := ownerevent.Workspace(hub.Send(event), workspaceevents.TopicWorkspaceTemplateCommandGet)
+	response, err := ownerevent.WorkspaceOwner[workspaceevents.WorkspaceTemplateResult](hub.Send(event), workspaceevents.TopicWorkspaceTemplateCommandGet)
 	if err != nil {
 		return nil, err
 	}
-	if response.Template == nil {
-		return nil, common.ErrInvalidArgument
+	if err := response.ValidateFor(command); err != nil {
+		return nil, err
 	}
 	return workspaceeventmapping.Template(response.Template), nil
 }
@@ -32,10 +33,14 @@ func ListWorkspaceTemplatesByOwnerCommand(ctx context.Context, hub magicevent.Hu
 	if hub == nil {
 		return nil, common.ErrInvalidArgument
 	}
-	event := magicevent.NewEventWithContext(workspaceevents.TopicWorkspaceTemplateCommandList, sourceModule, workspaceevents.CommandDestination, magicevent.NewHeader(), ctx, workspaceevents.ListWorkspaceTemplatesCommand{})
+	command := workspaceevents.ListWorkspaceTemplatesCommand{}
+	event := magicevent.NewEventWithContext(workspaceevents.TopicWorkspaceTemplateCommandList, sourceModule, workspaceevents.CommandDestination, magicevent.NewHeader(), ctx, command)
 	ownerevent.BindLane(event, workspaceevents.Contracts(), workspaceevents.TopicWorkspaceTemplateCommandList, "workspace_template", "all", "", "", "")
-	response, err := ownerevent.Workspace(hub.Send(event), workspaceevents.TopicWorkspaceTemplateCommandList)
+	response, err := ownerevent.WorkspaceOwner[workspaceevents.WorkspaceTemplateListResult](hub.Send(event), workspaceevents.TopicWorkspaceTemplateCommandList)
 	if err != nil {
+		return nil, err
+	}
+	if err := response.ValidateFor(command); err != nil {
 		return nil, err
 	}
 	return workspaceeventmapping.Templates(response.Templates), nil

@@ -17,8 +17,11 @@ func (m *Module) ID() string                                  { return ModuleID 
 func (m *Module) Configure(deps memorybiz.Dependencies) error { return m.configure(deps) }
 
 func (m *Module) configure(deps memorybiz.Dependencies) error {
-	if m == nil || deps.EventHub == nil || deps.MemoryItems == nil || deps.MemoryRecallTraces == nil || deps.WorkspaceDeletions == nil {
+	if m == nil || deps.EventHub == nil {
 		return common.ErrInvalidArgument
+	}
+	if err := deps.OwnerRepositories.Validate(); err != nil {
+		return err
 	}
 	bizPtr, err := memorybiz.New(deps.EventHub, deps.BackgroundRoutine, deps)
 	if err != nil {

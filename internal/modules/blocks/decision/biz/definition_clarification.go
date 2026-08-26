@@ -247,7 +247,8 @@ func (m *Biz) queryWorkspaceDefinitionClarificationFact(ctx context.Context, cmd
 			workorcheventpayload.StringField("startupInputHash", identity.StartupInputHash),
 		),
 	}
-	if !definitionClarificationResolutionMatches(persistedResolution, expectedResolution) {
+	if !definitionClarificationResolutionMatches(persistedResolution, expectedResolution) ||
+		strings.TrimSpace(persistedResolution.ResolvedAt) != strings.TrimSpace(ticket.ResolvedAt) {
 		return decisionevents.QueryWorkspaceDefinitionClarificationFactResult{}, common.ErrConflict
 	}
 	response.Resolution = &record
@@ -389,7 +390,7 @@ func (m *Biz) reconcileWorkspaceDefinitionClarification(ctx context.Context, cmd
 		NewTicketID: opened.TicketID, NewTicketDisposition: opened.Disposition,
 		NewRequestBindingHash: opened.ClarificationRequestBindingHash, ReconciliationBindingHash: bindingHash,
 	}
-	expected := &decisionmodel.Resolution{ID: resolutionID, TicketID: cmd.OldRequest.TicketID, Type: decisionevents.DefinitionClarificationResolutionCandidateSuperseded,
+	expected := &decisionmodel.Resolution{ID: resolutionID, TicketID: cmd.OldRequest.TicketID, ResolvedAt: newDecisionResolutionTimestamp(), Type: decisionevents.DefinitionClarificationResolutionCandidateSuperseded,
 		Payload: workorcheventpayload.New(workorcheventpayload.StringField("newTicketId", string(opened.TicketID)), workorcheventpayload.StringField("newCandidateHash", cmd.NewRequest.CandidateHash))}
 	if oldBinding.ResolutionID != "" {
 		if oldBinding.ResolutionID != resolutionID || oldBinding.ResolutionBindingHash != bindingHash {
@@ -416,8 +417,11 @@ func (m *Biz) reconcileWorkspaceDefinitionClarification(ctx context.Context, cmd
 	} else if err := m.resolutions.Create(bound, expected); err != nil {
 		return decisionevents.ReconcileWorkspaceDefinitionClarificationCandidateResult{}, err
 	}
+	if strings.TrimSpace(resolution.ResolvedAt) == "" {
+		return decisionevents.ReconcileWorkspaceDefinitionClarificationCandidateResult{}, common.ErrConflict
+	}
 	updated, err := m.service.applyLifecycleInternalEvent(bound, oldTicket, lifecycleInternalEvent{
-		Kind: lifecycleInternalEventResolutionObserved, TicketID: oldTicket.ID,
+		Kind: lifecycleInternalEventResolutionObserved, TicketID: oldTicket.ID, ResolvedAt: resolution.ResolvedAt,
 		Clarification: &definitionClarificationResolutionFact{ResolutionID: resolutionID, ResolutionBindingHash: bindingHash},
 	})
 	if err != nil {
@@ -509,7 +513,7 @@ func (m *Biz) resolveWorkspaceDefinitionClarification(ctx context.Context, cmd d
 		}
 		return decisionevents.ResolveWorkspaceDefinitionClarificationByAdmissionResult{TicketID: cmd.TicketID, WorkspaceID: cmd.WorkspaceID, ResolutionID: resolutionID, ResolutionType: decisionevents.DefinitionClarificationResolutionCandidateAdjusted, Disposition: decisionevents.DefinitionClarificationDuplicate, ResolutionBindingHash: resolutionHash}, nil
 	}
-	resolution := &decisionmodel.Resolution{ID: resolutionID, TicketID: cmd.TicketID, Type: decisionevents.DefinitionClarificationResolutionCandidateAdjusted, Payload: workorcheventpayload.New(workorcheventpayload.StringField("definitionRevision", cmd.DefinitionRevision), workorcheventpayload.StringField("startupInputHash", cmd.StartupInputHash))}
+	resolution := &decisionmodel.Resolution{ID: resolutionID, TicketID: cmd.TicketID, ResolvedAt: newDecisionResolutionTimestamp(), Type: decisionevents.DefinitionClarificationResolutionCandidateAdjusted, Payload: workorcheventpayload.New(workorcheventpayload.StringField("definitionRevision", cmd.DefinitionRevision), workorcheventpayload.StringField("startupInputHash", cmd.StartupInputHash))}
 	if existing, err := m.resolutions.GetByTicketID(bound, cmd.TicketID); err == nil {
 		if !definitionClarificationResolutionMatches(existing, resolution) {
 			return decisionevents.ResolveWorkspaceDefinitionClarificationByAdmissionResult{}, common.ErrConflict
@@ -520,8 +524,11 @@ func (m *Biz) resolveWorkspaceDefinitionClarification(ctx context.Context, cmd d
 	} else if err := m.resolutions.Create(bound, resolution); err != nil {
 		return decisionevents.ResolveWorkspaceDefinitionClarificationByAdmissionResult{}, err
 	}
+	if strings.TrimSpace(resolution.ResolvedAt) == "" {
+		return decisionevents.ResolveWorkspaceDefinitionClarificationByAdmissionResult{}, common.ErrConflict
+	}
 	updated, err := m.service.applyLifecycleInternalEvent(bound, ticket, lifecycleInternalEvent{
-		Kind: lifecycleInternalEventResolutionObserved, TicketID: ticket.ID,
+		Kind: lifecycleInternalEventResolutionObserved, TicketID: ticket.ID, ResolvedAt: resolution.ResolvedAt,
 		Clarification: &definitionClarificationResolutionFact{
 			ResolutionID: resolutionID, ResolutionBindingHash: resolutionHash,
 			ResolutionCandidateID: cmd.NewCandidateID, ResolutionCandidateRevision: cmd.NewCandidateRevision,
@@ -575,7 +582,7 @@ func (m *Biz) resolveRuntimeDefinitionClarification(ctx context.Context, cmd dec
 	}
 	resolutionID := decisionevents.StableDefinitionClarificationResolutionID(cmd.TicketID, cmd.ReplacementIntentHash)
 	result := runtimeClarificationResolvedResult(cmd, resolutionID, decisionevents.DefinitionClarificationResolved, decisionevents.RuntimeDefinitionClarificationNoConflict, "", "")
-	resolution := &decisionmodel.Resolution{ID: resolutionID, TicketID: cmd.TicketID, Type: decisionevents.DefinitionClarificationResolutionReplacementBound, Payload: workorcheventpayload.New(workorcheventpayload.StringField("replacementIntentId", cmd.ReplacementIntentID), workorcheventpayload.StringField("replacementIntentHash", cmd.ReplacementIntentHash))}
+	resolution := &decisionmodel.Resolution{ID: resolutionID, TicketID: cmd.TicketID, ResolvedAt: newDecisionResolutionTimestamp(), Type: decisionevents.DefinitionClarificationResolutionReplacementBound, Payload: workorcheventpayload.New(workorcheventpayload.StringField("replacementIntentId", cmd.ReplacementIntentID), workorcheventpayload.StringField("replacementIntentHash", cmd.ReplacementIntentHash))}
 	if existing, err := m.resolutions.GetByTicketID(bound, cmd.TicketID); err == nil {
 		if !definitionClarificationResolutionMatches(existing, resolution) {
 			return decisionevents.ResolveRuntimeDefinitionClarificationByReplacementResult{}, common.ErrConflict
@@ -586,8 +593,11 @@ func (m *Biz) resolveRuntimeDefinitionClarification(ctx context.Context, cmd dec
 	} else if err := m.resolutions.Create(bound, resolution); err != nil {
 		return decisionevents.ResolveRuntimeDefinitionClarificationByReplacementResult{}, err
 	}
+	if strings.TrimSpace(resolution.ResolvedAt) == "" {
+		return decisionevents.ResolveRuntimeDefinitionClarificationByReplacementResult{}, common.ErrConflict
+	}
 	updated, err := m.service.applyLifecycleInternalEvent(bound, ticket, lifecycleInternalEvent{
-		Kind: lifecycleInternalEventResolutionObserved, TicketID: ticket.ID,
+		Kind: lifecycleInternalEventResolutionObserved, TicketID: ticket.ID, ResolvedAt: resolution.ResolvedAt,
 		Clarification: &definitionClarificationResolutionFact{
 			ResolutionID: resolutionID, ResolutionBindingHash: result.ResolutionBindingHash,
 			ReplacementIntentID: cmd.ReplacementIntentID, ReplacementIntentHash: cmd.ReplacementIntentHash,
@@ -627,14 +637,14 @@ func (m *Biz) matchDefinitionClarificationResolution(ctx context.Context, ticket
 		payloadFields = append(payloadFields, workorcheventpayload.StringField(name, value))
 	}
 	expected.Payload = workorcheventpayload.New(payloadFields...)
-	if !definitionClarificationResolutionMatches(resolution, expected) {
+	if !definitionClarificationResolutionMatches(resolution, expected) || strings.TrimSpace(resolution.ResolvedAt) == "" {
 		return nil, common.ErrConflict
 	}
 	return resolution, nil
 }
 
 func definitionClarificationResolutionMatches(actual, expected *decisionmodel.Resolution) bool {
-	if actual == nil || expected == nil || actual.ID != expected.ID || actual.TicketID != expected.TicketID || actual.Type != expected.Type || actual.ContinuationAction != "" || actual.ResumeRunID != "" || actual.SuccessorRunID != "" {
+	if actual == nil || expected == nil || strings.TrimSpace(actual.ResolvedAt) == "" || actual.ID != expected.ID || actual.TicketID != expected.TicketID || actual.Type != expected.Type || actual.ContinuationAction != "" || actual.ResumeRunID != "" || actual.SuccessorRunID != "" {
 		return false
 	}
 	if len(actual.Payload.Fields) != len(expected.Payload.Fields) {

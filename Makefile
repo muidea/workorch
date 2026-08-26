@@ -18,7 +18,7 @@ CONSOLE_DEPS_STAMP := $(CONSOLE_NODE_MODULES)/.workorch-deps-stamp
 NPM_CI_FLAGS ?=
 NPM_INSTALL_FLAGS ?=
 
-.PHONY: help deps go-deps console-deps fmt fmt-check test test-race vet console-build build clean run run-file verify-boundary-contract verify-runtime-positive-convergence-file verify-runtime-positive-convergence-live verify-runtime-restart-recovery-live verify-runtime-p6-scripted verify-runtime-c7-scripted verify-runtime-c7-fixture verify-runtime-bounded-terminal-live observe-runtime-liveness verify-service verify-service-file verify-workspace-template-soul verify-workspace-template-soul-file verify-llm verify-llm-file verify-contract-violation-recovery-e2e verify-service-restart-recoverable-e2e verify-runtime-profile-software-dev verify-software-dev-code-agent verify-software-dev-goal-dod-e2e verify-software-requirement-orchestration verify-software-requirement-orchestration-deployed verify-skillhub verify-skillhub-file verify-mcp-stdio verify-mcp-stdio-file verify-auto-governance-ticket-approval verify-workspace-file-diff-patch verify-workspace-web-search verify-workspace-web-search-e2e verify-workspace-projection-switch verify-run-resume-gap-confirmation-e2e verify-dual-workspace-resume-replan-e2e verify-approval-decision-resolution-e2e observe-runtime-closure verify-convergence-authority-dispatch-live verify-authority-live-e2e-closure verify-runtime-idle-baseline verify-cpu-io-observation-e2e verify-web-console-projection-visual verify-tui-web-projection-e2e verify-e2e-template-contract verify-ci-mvp verify-ci-mvp-file verify-mvp verify-mvp-file verify-real-llm verify-real-runtime-closure verify-real-mcp-stdio verify-real-vector-memory verify-real-weather verify-weather-ticket-approval verify-weather-ticket-approval-mock verify-real-mvp verify-deployed-full verify-deployed-full-file verify-e2e-full verify-managed-full verify-managed-service-smoke loadtest-governed loadtest-governed-real docker-build docker-run docker-run-file docker-verify docker-verify-file cli-build cli-test cli-clean verify-tui-agent verify-tui-workspace-switch-visual verify-tui-runtime-refresh-history-live verify-tui-terminal-render verify-tui-long-output release release-check install-latest ci
+.PHONY: help deps go-deps console-deps fmt fmt-check test test-race vet console-test console-build build clean run run-file verify-boundary-contract verify-runtime-positive-convergence-file verify-runtime-positive-convergence-live verify-runtime-restart-recovery-live verify-runtime-p6-scripted verify-runtime-c7-scripted verify-runtime-c7-fixture verify-runtime-bounded-terminal-live observe-runtime-liveness verify-service verify-service-file verify-workspace-template-soul verify-workspace-template-soul-file verify-llm verify-llm-file verify-contract-violation-recovery-e2e verify-service-restart-recoverable-e2e verify-runtime-profile-software-dev verify-software-dev-code-agent verify-software-dev-goal-dod-e2e verify-software-requirement-orchestration verify-software-requirement-orchestration-deployed verify-skillhub verify-skillhub-file verify-mcp-stdio verify-mcp-stdio-file verify-auto-governance-ticket-approval verify-workspace-file-diff-patch verify-workspace-web-search verify-workspace-web-search-e2e verify-workspace-projection-switch verify-run-resume-gap-confirmation-e2e verify-dual-workspace-resume-replan-e2e verify-approval-decision-resolution-e2e observe-runtime-closure verify-convergence-authority-dispatch-live verify-authority-live-e2e-closure verify-runtime-idle-baseline verify-cpu-io-observation-e2e verify-web-console-projection-visual verify-tui-web-projection-e2e verify-e2e-template-contract verify-ci-mvp verify-ci-mvp-file verify-mvp verify-mvp-file verify-real-llm verify-real-runtime-closure verify-real-mcp-stdio verify-real-vector-memory verify-real-weather verify-weather-ticket-approval verify-weather-ticket-approval-mock verify-real-mvp verify-deployed-convergence-manifest-tests verify-deployed-convergence-ci-safe verify-deployed-convergence-release verify-deployed-full verify-deployed-full-file verify-e2e-full verify-managed-full verify-managed-service-smoke loadtest-governed loadtest-governed-real docker-build docker-run docker-run-file docker-verify docker-verify-file cli-build cli-test cli-clean verify-tui-agent verify-tui-workspace-switch-visual verify-tui-runtime-refresh-history-live verify-tui-terminal-render verify-tui-long-output release release-check install-latest ci
 
 help:
 	@echo "Targets:"
@@ -30,6 +30,7 @@ help:
 	@echo "  test       - go test $(PKGS)"
 	@echo "  test-race  - go test -race $(PKGS)"
 	@echo "  vet        - go vet $(PKGS)"
+	@echo "  console-test - run Web console contract tests"
 	@echo "  console-build - build the embedded workorch management console assets"
 	@echo "  build      - build workorch into $(BUILD_OUT)"
 	@echo "  clean      - remove workorch build artifacts"
@@ -88,7 +89,10 @@ help:
 	@echo "  verify-weather-ticket-approval - verify weather profile/MCP governance ownership contracts"
 	@echo "  verify-weather-ticket-approval-mock - compatibility alias of weather governance ownership verification"
 	@echo "  verify-real-mvp - verify a running workorch --server with real LLM, MCP stdio, and vector Memory checks"
-	@echo "  verify-deployed-full - verify deployed service with mock, SkillHub, and real LLM e2e checks"
+	@echo "  verify-deployed-convergence-manifest-tests - verify manifest schema/ref/assertion fail-closed behavior"
+	@echo "  verify-deployed-convergence-ci-safe - require producer-registered manifests for all CI-safe DC scenarios"
+	@echo "  verify-deployed-convergence-release - fail closed on missing manifests; historical verifiers are not producers"
+	@echo "  verify-deployed-full - run deployed checks, then the full producer-registered manifest gate"
 	@echo "  verify-e2e-full - verify all currently tracked deployed/local e2e closure scripts"
 	@echo "  verify-managed-full - fmt/vet/test/build, then start and verify a managed local workorch instance"
 	@echo "  verify-managed-service-smoke - start/verify/stop a managed local workorch instance twice"
@@ -156,6 +160,9 @@ test-race: go-deps
 
 vet: go-deps
 	$(GO) vet $(PKGS)
+
+console-test: console-deps
+	@cd $(CONSOLE_WEB) && $(NPM) test
 
 console-build: console-deps
 	@cd $(CONSOLE_WEB) && $(NPM) run build
@@ -348,7 +355,29 @@ verify-weather-ticket-approval-mock:
 
 verify-real-mvp: verify-real-llm verify-real-mcp-stdio verify-real-vector-memory
 
+DEPLOYED_CONVERGENCE_MANIFEST_ROOT ?= .ci-artifacts/deployed-convergence
+DEPLOYED_CONVERGENCE_REPORT ?= .ci-artifacts/deployed-convergence-aggregate.json
+DEPLOYED_CONVERGENCE_PROFILE ?= full
+DEPLOYED_CONVERGENCE_PROFILE_ID ?=
+
+verify-deployed-convergence-manifest-tests:
+	python3 ./scripts/test_verify_deployed_convergence_manifest.py
+
+verify-deployed-convergence-ci-safe:
+	python3 ./scripts/verify_deployed_convergence_manifest.py \
+		--manifest-root "$(DEPLOYED_CONVERGENCE_MANIFEST_ROOT)" \
+		--profile ci-safe \
+		--output "$(DEPLOYED_CONVERGENCE_REPORT)"
+
+verify-deployed-convergence-release:
+	python3 ./scripts/verify_deployed_convergence_manifest.py \
+		--manifest-root "$(DEPLOYED_CONVERGENCE_MANIFEST_ROOT)" \
+		--profile "$(DEPLOYED_CONVERGENCE_PROFILE)" \
+		$(if $(strip $(DEPLOYED_CONVERGENCE_PROFILE_ID)),--profile-id "$(DEPLOYED_CONVERGENCE_PROFILE_ID)") \
+		--output "$(DEPLOYED_CONVERGENCE_REPORT)"
+
 verify-deployed-full: verify-ci-mvp verify-skillhub verify-mvp verify-real-runtime-closure verify-real-mcp-stdio verify-real-vector-memory
+	$(MAKE) verify-deployed-convergence-release
 
 verify-tui-web-projection-e2e: verify-workspace-projection-switch verify-web-console-projection-visual verify-tui-agent verify-tui-workspace-switch-visual verify-tui-terminal-render verify-tui-long-output
 
@@ -408,7 +437,7 @@ release: go-deps console-build
 	@cd $(RELEASE_OUT) && sha256sum *.tar.gz > checksums.txt
 	@echo "release $(RELEASE_TAG) built into $(RELEASE_OUT)"
 
-release-check: fmt-check vet test verify-boundary-contract
+release-check: fmt-check vet test verify-boundary-contract cli-test console-test verify-deployed-convergence-manifest-tests
 	$(MAKE) release
 
 install-latest:
@@ -446,4 +475,4 @@ verify-tui-terminal-render: cli-build
 verify-tui-long-output: cli-build
 	./scripts/verify-tui-long-output-e2e.sh
 
-ci: fmt-check vet test verify-boundary-contract build cli-test
+ci: fmt-check vet test verify-boundary-contract cli-test console-test verify-deployed-convergence-manifest-tests build

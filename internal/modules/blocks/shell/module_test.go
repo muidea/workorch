@@ -119,17 +119,45 @@ func TestShellModuleExecutesConcreteEventHubContract(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = module.Stop(ctx) })
 	workspace := t.TempDir()
+	admissibilityResult := hub.Send(magicevent.NewEventWithContext(
+		shellevents.TopicAcquireRuntimeOperationAdmissibility, runtimecontract.RuntimeModuleOrchestrator, ModuleID, magicevent.NewHeader(), ctx,
+		shellevents.AcquireRuntimeOperationAdmissibilityCommand{
+			WorkspaceID: "ws-1", RunID: "run-1", AuthoritySnapshotID: "authority-1", PrerequisiteID: "shell-module-admissibility",
+			OwnerModuleID: ModuleID, WorkspaceDeliverableDirectory: workspace, RequiredKinds: []string{runtimecontract.StepKindShellCommand},
+			RequiredTargetRefs: []string{"typed.txt"}, MaxItems: 4,
+		},
+	))
+	admissibilityData, admissibilityErr := admissibilityResult.Get()
+	if admissibilityErr != nil {
+		t.Fatal(admissibilityErr)
+	}
+	acquisition := admissibilityData.(shellevents.AcquireRuntimeOperationAdmissibilityResult).Acquisition
+	commandName, script, stateChanging, timeout := "sh", "-c", true, int64(5000)
+	operation := runtimecontract.RuntimeOperation{
+		ID: "shell-1", Kind: runtimecontract.StepKindShellCommand, TargetRefs: []string{"typed.txt"},
+		Parameters: []runtimecontract.OperationParameter{
+			{Name: "command", String: &commandName}, {Name: "args", StringList: []string{script, "printf typed-shell > typed.txt"}},
+			{Name: "timeoutMillis", Integer: &timeout}, {Name: "stateChanging", Boolean: &stateChanging},
+		},
+	}
+	sealed, sealErr := shellevents.SealRuntimeOperation(operation, acquisition.Admissibility, shellevents.RuntimeExecutionSealInput{CatalogObservation: acquisition.Observation})
+	if sealErr != nil {
+		t.Fatal(sealErr)
+	}
 	result := hub.Send(magicevent.NewEventWithContext(
 		shellevents.TopicExecuteOperation, runtimecontract.RuntimeModuleOrchestrator, ModuleID, magicevent.NewHeader(), ctx,
 		shellevents.ExecuteOperationCommand{
 			RuntimeOperationExecutionContext: runtimecontract.RuntimeOperationExecutionContext{
-				Execution:   runtimecontract.RuntimeOperationExecutionEnvelope{ExecutionKey: "exec/ws-1/run-1/dispatch-1/shell-1", Fence: 1, ExpectedEffectScope: runtimecontract.RuntimeEffectWorkspaceDurable},
+				Execution: runtimecontract.RuntimeOperationExecutionEnvelope{
+					ExecutionKey: "exec/ws-1/run-1/dispatch-1/shell-1", Fence: 1, ExpectedEffectScope: runtimecontract.RuntimeEffectWorkspaceDurable,
+					AdmissibilitySnapshotID: sealed.Authorization.CatalogSnapshotID, AcquisitionBinding: sealed.Authorization.AcquisitionBinding,
+				},
 				WorkspaceID: "ws-1", RunID: "run-1", DispatchID: "dispatch-1",
 				Transaction: runtimecontract.AuthorityTransaction{AuthoritySnapshotID: "authority-1", RequiredOutputHash: "output-1"},
 				OperationID: "shell-1", EvidenceKind: runtimecontract.EvidenceKindStateChange,
 				WorkspaceDeliverableDirectory: workspace, TargetRefs: []string{"typed.txt"},
 			},
-			Data: shellevents.OperationData{Command: "sh", Args: []string{"-c", "printf typed-shell > typed.txt"}, TimeoutMillis: 5000, StateChanging: true, TargetRef: "typed.txt", TargetRefs: []string{"typed.txt"}},
+			SealedOperation: sealed,
 		},
 	))
 	data, magicErr := result.Get()

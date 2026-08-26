@@ -14,45 +14,45 @@ import (
 	"github.com/muidea/workorch/internal/pkg/workorchquerycontract"
 )
 
-type Service struct {
+type service struct {
 	items  repository.MemoryItemRepository
 	traces repository.MemoryRecallTraceRepository
 }
 
-func NewService(items repository.MemoryItemRepository) *Service {
-	return &Service{items: items}
+func newService(items repository.MemoryItemRepository) *service {
+	return &service{items: items}
 }
 
-func NewServiceWithRecallTraces(items repository.MemoryItemRepository, traces repository.MemoryRecallTraceRepository) *Service {
-	return &Service{items: items, traces: traces}
+func newServiceWithRecallTraces(items repository.MemoryItemRepository, traces repository.MemoryRecallTraceRepository) *service {
+	return &service{items: items, traces: traces}
 }
 
-func (s *Service) CreateMemoryItem(ctx context.Context, cmd memoryevents.CreateMemoryCommand) error {
+func (s *service) createMemoryItem(ctx context.Context, cmd memoryevents.CreateMemoryCommand) error {
 	if err := validateMemoryCommand(cmd); err != nil {
 		return err
 	}
 	return s.items.Create(ctx, memoryItemFromCommand(cmd))
 }
 
-func (s *Service) UpdateMemoryItem(ctx context.Context, cmd memoryevents.CreateMemoryCommand) error {
+func (s *service) updateMemoryItem(ctx context.Context, cmd memoryevents.CreateMemoryCommand) error {
 	if err := validateMemoryCommand(cmd); err != nil {
 		return err
 	}
 	return s.items.Update(ctx, memoryItemFromCommand(cmd))
 }
 
-func (s *Service) GetMemoryItem(ctx context.Context, id common.MemoryID) (*memorymodel.MemoryItem, error) {
+func (s *service) getMemoryItem(ctx context.Context, id common.MemoryID) (*memorymodel.MemoryItem, error) {
 	if id == "" {
 		return nil, common.ErrInvalidArgument
 	}
 	return s.items.Get(ctx, id)
 }
 
-func (s *Service) GetMemoryItemScoped(ctx context.Context, workspaceID common.WorkspaceID, id common.MemoryID) (*memorymodel.MemoryItem, error) {
+func (s *service) getMemoryItemScoped(ctx context.Context, workspaceID common.WorkspaceID, id common.MemoryID) (*memorymodel.MemoryItem, error) {
 	if workspaceID == "" || id == "" {
 		return nil, common.ErrInvalidArgument
 	}
-	item, err := s.GetMemoryItem(ctx, id)
+	item, err := s.getMemoryItem(ctx, id)
 	if err != nil {
 		return nil, err
 	}
@@ -62,14 +62,14 @@ func (s *Service) GetMemoryItemScoped(ctx context.Context, workspaceID common.Wo
 	return item, nil
 }
 
-func (s *Service) DeleteMemoryItem(ctx context.Context, id common.MemoryID) error {
+func (s *service) deleteMemoryItem(ctx context.Context, id common.MemoryID) error {
 	if id == "" {
 		return common.ErrInvalidArgument
 	}
 	return s.items.Delete(ctx, id)
 }
 
-func (s *Service) ListMemoryByWorkspace(ctx context.Context, workspaceID common.WorkspaceID, cursorAfterID common.MemoryID, limit int) ([]*memorymodel.MemoryItem, common.MemoryID, error) {
+func (s *service) listMemoryByWorkspace(ctx context.Context, workspaceID common.WorkspaceID, cursorAfterID common.MemoryID, limit int) ([]*memorymodel.MemoryItem, common.MemoryID, error) {
 	if workspaceID == "" {
 		return nil, "", common.ErrInvalidArgument
 	}
@@ -96,7 +96,7 @@ func (s *Service) ListMemoryByWorkspace(ctx context.Context, workspaceID common.
 	return memorymodel.CloneMemoryItems(page), nextCursor, nil
 }
 
-func (s *Service) SearchMemory(ctx context.Context, query workorchquerycontract.MemorySearchQuery) ([]*memorymodel.MemoryItem, error) {
+func (s *service) searchMemory(ctx context.Context, query workorchquerycontract.MemorySearchQuery) ([]*memorymodel.MemoryItem, error) {
 	query = query.Normalized()
 	query.Limit = normalizedLimit(query.Limit, modulecommon.MemorySearchDefaultLimit, modulecommon.MemorySearchMaxLimit)
 	if query.WorkspaceID == "" || len(query.Vector) > modulecommon.MemoryVectorMaxDimension || math.IsNaN(query.MinScore) || math.IsInf(query.MinScore, 0) || query.MinScore < -1 || query.MinScore > 1 {
@@ -122,7 +122,7 @@ func (s *Service) SearchMemory(ctx context.Context, query workorchquerycontract.
 	return memorymodel.CloneMemoryItems(items), nil
 }
 
-func (s *Service) RecordMemoryRecallTrace(ctx context.Context, trace *memorymodel.MemoryRecallTrace) (memoryevents.MemoryRecallTraceWriteDisposition, error) {
+func (s *service) recordMemoryRecallTrace(ctx context.Context, trace *memorymodel.MemoryRecallTrace) (memoryevents.MemoryRecallTraceWriteDisposition, error) {
 	if s == nil || s.traces == nil || trace == nil || trace.ID == "" || trace.WorkspaceID == "" || trace.RunID == "" {
 		return "", common.ErrInvalidArgument
 	}
@@ -141,7 +141,7 @@ func (s *Service) RecordMemoryRecallTrace(ctx context.Context, trace *memorymode
 	return memoryevents.MemoryRecallTraceDuplicate, nil
 }
 
-func (s *Service) loadMemoryRecallTrace(ctx context.Context, workspaceID common.WorkspaceID, id common.MemoryRecallTraceID) (*memorymodel.MemoryRecallTrace, error) {
+func (s *service) loadMemoryRecallTrace(ctx context.Context, workspaceID common.WorkspaceID, id common.MemoryRecallTraceID) (*memorymodel.MemoryRecallTrace, error) {
 	if s == nil || s.traces == nil || workspaceID == "" || id == "" {
 		return nil, common.ErrInvalidArgument
 	}
@@ -155,7 +155,7 @@ func (s *Service) loadMemoryRecallTrace(ctx context.Context, workspaceID common.
 	return memorymodel.CloneMemoryRecallTrace(item), nil
 }
 
-func (s *Service) ListMemoryRecallTraces(ctx context.Context, query workorchquerycontract.MemoryRecallTraceQuery) ([]*memorymodel.MemoryRecallTrace, common.MemoryRecallTraceID, error) {
+func (s *service) listMemoryRecallTraces(ctx context.Context, query workorchquerycontract.MemoryRecallTraceQuery) ([]*memorymodel.MemoryRecallTrace, common.MemoryRecallTraceID, error) {
 	query = query.Normalized()
 	if s == nil || s.traces == nil || query.WorkspaceID == "" {
 		return nil, "", common.ErrInvalidArgument

@@ -84,27 +84,6 @@ func (m *Biz) resolveResolutionTicketContextForCommand(ctx context.Context, tick
 	return ctx, nil
 }
 
-func (m *Biz) ensureTicketScopeForCommand(ctx context.Context, ticketID common.TicketID, scope decisionCommandScope) error {
-	if ticketID == "" {
-		return common.ErrInvalidArgument
-	}
-	if m == nil || m.tickets == nil {
-		return common.ErrInvalidArgument
-	}
-	if !scope.hasScope() {
-		_, err := m.resolveUniqueTicketForUnscopedCommand(ctx, ticketID)
-		return err
-	}
-	item, err := m.tickets.Get(ctx, ticketID)
-	if err != nil {
-		return err
-	}
-	if !ticketMatchesDecisionScope(item, scope) {
-		return common.ErrNotFound
-	}
-	return nil
-}
-
 func (m *Biz) resolveUniqueTicketForUnscopedCommand(ctx context.Context, ticketID common.TicketID) (*decisionmodel.Ticket, error) {
 	if ticketID == "" {
 		return nil, common.ErrInvalidArgument
@@ -117,21 +96,13 @@ func (m *Biz) resolveUniqueTicketForUnscopedCommand(ctx context.Context, ticketI
 		return nil, err
 	}
 	var matches []*decisionmodel.Ticket
-	var openMatches []*decisionmodel.Ticket
 	for _, item := range items {
 		if item == nil || item.ID != ticketID {
 			continue
 		}
 		matches = append(matches, item)
-		if item.State == common.DecisionTicketStateOpen {
-			openMatches = append(openMatches, item)
-		}
 	}
 	switch {
-	case len(openMatches) == 1:
-		return openMatches[0], nil
-	case len(openMatches) > 1:
-		return nil, common.ErrConflict
 	case len(matches) == 1:
 		return matches[0], nil
 	case len(matches) > 1:

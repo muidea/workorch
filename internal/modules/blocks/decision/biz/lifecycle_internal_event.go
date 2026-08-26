@@ -18,6 +18,7 @@ type lifecycleInternalEvent struct {
 	Ticket        *decisionModel.Ticket
 	Proposal      *decisionModel.RuntimeGovernanceResolutionProposal
 	Clarification *definitionClarificationResolutionFact
+	ResolvedAt    string
 	ResolvedBy    string
 	FailureClass  string
 	FailureReason string
@@ -120,6 +121,10 @@ func reduceDecisionLifecycle(current *decisionModel.Ticket, event lifecycleInter
 		if current.State != common.DecisionTicketStateOpen || current.DecisionKind == "runtime_governance" {
 			return nil, common.ErrConflict
 		}
+		resolvedAt := strings.TrimSpace(event.ResolvedAt)
+		if resolvedAt == "" {
+			return nil, common.ErrInvalidArgument
+		}
 		if current.DefinitionClarification == nil {
 			if event.Clarification != nil {
 				return nil, common.ErrInvalidArgument
@@ -132,13 +137,15 @@ func reduceDecisionLifecycle(current *decisionModel.Ticket, event lifecycleInter
 			next.DefinitionClarification = binding
 		}
 		next.State = common.DecisionTicketStateResolved
-		next.ResolvedAt = now
+		next.ResolvedAt = resolvedAt
 		next.ResolvedBy = strings.TrimSpace(event.ResolvedBy)
 	case lifecycleInternalEventResolutionRecovered:
-		if current.State != common.DecisionTicketStateOpen {
+		resolvedAt := strings.TrimSpace(event.ResolvedAt)
+		if current.State != common.DecisionTicketStateOpen || resolvedAt == "" {
 			return nil, common.ErrConflict
 		}
 		next.State = common.DecisionTicketStateResolved
+		next.ResolvedAt = resolvedAt
 	case lifecycleInternalEventProposalPrepared:
 		if current.State != common.DecisionTicketStateOpen || current.DecisionKind != "runtime_governance" || current.RuntimeGovernanceProposal != nil || event.Proposal == nil {
 			return nil, common.ErrConflict
@@ -154,11 +161,12 @@ func reduceDecisionLifecycle(current *decisionModel.Ticket, event lifecycleInter
 		proposal.UpdatedAt = now
 		next.RuntimeGovernanceProposal = &proposal
 	case lifecycleInternalEventProposalCommitted:
-		if current.DecisionKind != "runtime_governance" || (current.State != common.DecisionTicketStateOpen && current.State != common.DecisionTicketStateResolved) || current.RuntimeGovernanceProposal == nil {
+		resolvedAt := strings.TrimSpace(event.ResolvedAt)
+		if current.DecisionKind != "runtime_governance" || (current.State != common.DecisionTicketStateOpen && current.State != common.DecisionTicketStateResolved) || current.RuntimeGovernanceProposal == nil || resolvedAt == "" || (current.ResolvedAt != "" && current.ResolvedAt != resolvedAt) {
 			return nil, common.ErrConflict
 		}
 		next.State = common.DecisionTicketStateResolved
-		next.ResolvedAt = nonEmptyString(next.ResolvedAt, now)
+		next.ResolvedAt = resolvedAt
 		next.ResolvedBy = nonEmptyString(next.ResolvedBy, strings.TrimSpace(event.ResolvedBy))
 		next.RuntimeGovernanceProposal.State = decisionModel.RuntimeGovernanceResolutionProposalCommitted
 		next.RuntimeGovernanceProposal.FailureClass = ""

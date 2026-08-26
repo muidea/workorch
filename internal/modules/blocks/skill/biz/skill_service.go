@@ -13,15 +13,15 @@ import (
 	"github.com/muidea/workorch/internal/pkg/workorchskillcontract"
 )
 
-type Service struct {
+type service struct {
 	skills repository.SkillRepository
 }
 
-func NewService(skills repository.SkillRepository) *Service {
-	return &Service{skills: skills}
+func newService(skills repository.SkillRepository) *service {
+	return &service{skills: skills}
 }
 
-func (s *Service) CreateSkill(ctx context.Context, cmd skillevents.CreateSkillCommand) (*skillmodel.Skill, error) {
+func (s *service) createSkill(ctx context.Context, cmd skillevents.CreateSkillCommand) (*skillmodel.Skill, error) {
 	if err := validateSkillCommand(cmd); err != nil {
 		return nil, err
 	}
@@ -32,7 +32,7 @@ func (s *Service) CreateSkill(ctx context.Context, cmd skillevents.CreateSkillCo
 	return skillmodel.CloneSkill(item), nil
 }
 
-func (s *Service) GetSkill(ctx context.Context, id common.SkillID) (*skillmodel.Skill, error) {
+func (s *service) getSkill(ctx context.Context, id common.SkillID) (*skillmodel.Skill, error) {
 	if id == "" {
 		return nil, common.ErrInvalidArgument
 	}
@@ -43,7 +43,7 @@ func (s *Service) GetSkill(ctx context.Context, id common.SkillID) (*skillmodel.
 	return validatedRegistrySkill(item)
 }
 
-func (s *Service) ListSkills(ctx context.Context, cursorAfterID common.SkillID, limit int) ([]*skillmodel.Skill, common.SkillID, error) {
+func (s *service) listSkills(ctx context.Context, cursorAfterID common.SkillID, limit int) ([]*skillmodel.Skill, common.SkillID, error) {
 	limit = normalizedSkillListLimit(limit)
 	items, err := s.skills.List(ctx)
 	if err != nil {

@@ -42,7 +42,7 @@ func TestProviderCeilingTransientOpensPersistedWaitAndResumeCannotProbe(t *testi
 
 	workspaceObserver := magicevent.NewSimpleObserver(workspaceevents.CommandDestination, hub)
 	workspaceObserver.Subscribe(workspaceevents.TopicWorkspaceCommandGet, func(_ magicevent.Event, result magicevent.Result) {
-		result.Set(workspaceevents.WorkspaceCommandResult{Workspace: &workspaceevents.Workspace{
+		result.Set(workspaceevents.WorkspaceResult{Workspace: &workspaceevents.Workspace{
 			ID: aggregate.Facts.WorkspaceID, DeliverableDirectory: t.TempDir(), InternalDirectory: t.TempDir(),
 		}}, nil)
 	})

@@ -4,10 +4,26 @@ import (
 	cd "github.com/muidea/magicCommon/def"
 	magicevent "github.com/muidea/magicCommon/event"
 	workspaceevents "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/events"
+	workspacemodel "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 )
 
 type workspaceCommandFamily uint8
+
+// workspaceCommandResponse is private reducer plumbing. It allows the four
+// command families to share implementation helpers without leaking a tagged-
+// by-populated-field union through EventHub.
+type workspaceCommandResponse struct {
+	Workspace  *workspaceevents.Workspace
+	Workspaces []*workspaceevents.Workspace
+	Changed    bool
+	Goal       *workspacemodel.Goal
+	Goals      []*workspacemodel.Goal
+	DoD        *workspacemodel.DoD
+	DoDs       []*workspacemodel.DoD
+	Template   *workspaceevents.WorkspaceTemplate
+	Templates  []*workspaceevents.WorkspaceTemplate
+}
 
 const (
 	workspaceCommandFamilyDefinition workspaceCommandFamily = iota + 1
@@ -91,7 +107,7 @@ func (m *Biz) handleCommand(ev magicevent.Event, result magicevent.Result) {
 		defer m.deletionIngressMu.RUnlock()
 	}
 	response, err := m.executeCommand(ev)
-	setWorkspaceMagicResult(result, response, err)
+	setWorkspaceMagicResult(result, ev, response, err)
 }
 
 func workspaceMutationTopic(ev magicevent.Event) bool {
@@ -113,24 +129,24 @@ func workspaceMutationTopic(ev magicevent.Event) bool {
 	}
 }
 
-func (m *Biz) executeCommand(ev magicevent.Event) (workspaceevents.WorkspaceCommandResult, error) {
+func (m *Biz) executeCommand(ev magicevent.Event) (workspaceCommandResponse, error) {
 	if m == nil || m.manager == nil {
-		return workspaceevents.WorkspaceCommandResult{}, common.ErrInvalidArgument
+		return workspaceCommandResponse{}, common.ErrInvalidArgument
 	}
 	workspaceID, err := workspaceScopeFromCommand(ev)
 	if err != nil {
-		return workspaceevents.WorkspaceCommandResult{}, err
+		return workspaceCommandResponse{}, err
 	}
 	ctx := ev.Context()
 	if workspaceID != "" {
 		ctx, err = common.BindRuntimeWorkspaceContext(ctx, workspaceID)
 		if err != nil {
-			return workspaceevents.WorkspaceCommandResult{}, err
+			return workspaceCommandResponse{}, err
 		}
 	}
 	family, ok := workspaceCommandFamilyForTopic(ev.ID())
 	if !ok {
-		return workspaceevents.WorkspaceCommandResult{}, common.ErrInvalidArgument
+		return workspaceCommandResponse{}, common.ErrInvalidArgument
 	}
 	switch family {
 	case workspaceCommandFamilyDefinition:
@@ -142,7 +158,7 @@ func (m *Biz) executeCommand(ev magicevent.Event) (workspaceevents.WorkspaceComm
 	case workspaceCommandFamilyTemplate:
 		return m.executeWorkspaceTemplateCommand(ctx, ev)
 	default:
-		return workspaceevents.WorkspaceCommandResult{}, common.ErrInvalidArgument
+		return workspaceCommandResponse{}, common.ErrInvalidArgument
 	}
 }
 
@@ -189,7 +205,7 @@ func workspaceScopeFromCommand(ev magicevent.Event) (common.WorkspaceID, error) 
 	}
 }
 
-func setWorkspaceMagicResult(result magicevent.Result, data workspaceevents.WorkspaceCommandResult, err error) {
+func setWorkspaceMagicResult(result magicevent.Result, ev magicevent.Event, data workspaceCommandResponse, err error) {
 	if result == nil {
 		return
 	}
@@ -197,7 +213,122 @@ func setWorkspaceMagicResult(result magicevent.Result, data workspaceevents.Work
 		result.Set(nil, &cd.Error{Code: cd.Unexpected, Message: err.Error(), Cause: err})
 		return
 	}
-	result.Set(data, nil)
+	if ev == nil {
+		setWorkspaceCommandError(result, common.ErrInvalidArgument)
+		return
+	}
+	switch ev.ID() {
+	case workspaceevents.TopicWorkspaceCommandCreate,
+		workspaceevents.TopicWorkspaceCommandGet,
+		workspaceevents.TopicWorkspaceCommandUpdate:
+		command, ok := ev.Data().(workspaceevents.WorkspaceResultCommand)
+		response := workspaceevents.WorkspaceResult{Workspace: data.Workspace}
+		if !ok || response.ValidateFor(command) != nil {
+			setWorkspaceCommandError(result, common.ErrInvalidArgument)
+			return
+		}
+		result.Set(response, nil)
+	case workspaceevents.TopicWorkspaceCommandList:
+		command, ok := ev.Data().(workspaceevents.ListWorkspacesCommand)
+		response := workspaceevents.WorkspaceListResult{Workspaces: data.Workspaces}
+		if !ok || response.ValidateFor(command) != nil {
+			setWorkspaceCommandError(result, common.ErrInvalidArgument)
+			return
+		}
+		result.Set(response, nil)
+	case workspaceevents.TopicWorkspaceCommandUpdateLLMSelection:
+		command, ok := ev.Data().(workspaceevents.UpdateWorkspaceLLMSelectionCommand)
+		response := workspaceevents.WorkspaceLLMSelectionResult{Workspace: data.Workspace, Changed: data.Changed}
+		if !ok || response.ValidateFor(command) != nil {
+			setWorkspaceCommandError(result, common.ErrInvalidArgument)
+			return
+		}
+		result.Set(response, nil)
+	case workspaceevents.TopicWorkspaceCommandDefineGoal,
+		workspaceevents.TopicWorkspaceCommandUpdateGoal,
+		workspaceevents.TopicWorkspaceCommandGetGoal:
+		command, ok := ev.Data().(workspaceevents.GoalResultCommand)
+		response := workspaceevents.GoalResult{Goal: data.Goal}
+		if !ok || response.ValidateFor(command) != nil {
+			setWorkspaceCommandError(result, common.ErrInvalidArgument)
+			return
+		}
+		result.Set(response, nil)
+	case workspaceevents.TopicWorkspaceCommandListGoalsByWS:
+		command, ok := ev.Data().(workspaceevents.ListGoalsByWorkspaceCommand)
+		response := workspaceevents.GoalListResult{Goals: data.Goals}
+		if !ok || response.ValidateFor(command) != nil {
+			setWorkspaceCommandError(result, common.ErrInvalidArgument)
+			return
+		}
+		result.Set(response, nil)
+	case workspaceevents.TopicWorkspaceCommandDeleteGoal:
+		command, ok := ev.Data().(workspaceevents.DeleteGoalCommand)
+		response := workspaceevents.DeleteGoalResult{WorkspaceID: command.WorkspaceID, GoalID: command.GoalID}
+		if !ok || response.ValidateFor(command) != nil {
+			setWorkspaceCommandError(result, common.ErrInvalidArgument)
+			return
+		}
+		result.Set(response, nil)
+	case workspaceevents.TopicWorkspaceCommandDefineDoD,
+		workspaceevents.TopicWorkspaceCommandUpdateDoD,
+		workspaceevents.TopicWorkspaceCommandGetDoD:
+		command, ok := ev.Data().(workspaceevents.DoDResultCommand)
+		response := workspaceevents.DoDResult{DoD: data.DoD}
+		if !ok || response.ValidateFor(command) != nil {
+			setWorkspaceCommandError(result, common.ErrInvalidArgument)
+			return
+		}
+		result.Set(response, nil)
+	case workspaceevents.TopicWorkspaceCommandListDoDsByWS:
+		command, ok := ev.Data().(workspaceevents.ListDoDsByWorkspaceCommand)
+		response := workspaceevents.DoDListResult{DoDs: data.DoDs}
+		if !ok || response.ValidateFor(command) != nil {
+			setWorkspaceCommandError(result, common.ErrInvalidArgument)
+			return
+		}
+		result.Set(response, nil)
+	case workspaceevents.TopicWorkspaceCommandDeleteDoD:
+		command, ok := ev.Data().(workspaceevents.DeleteDoDCommand)
+		response := workspaceevents.DeleteDoDResult{WorkspaceID: command.WorkspaceID, DoDID: command.DoDID}
+		if !ok || response.ValidateFor(command) != nil {
+			setWorkspaceCommandError(result, common.ErrInvalidArgument)
+			return
+		}
+		result.Set(response, nil)
+	case workspaceevents.TopicWorkspaceTemplateCommandCreate,
+		workspaceevents.TopicWorkspaceTemplateCommandGet,
+		workspaceevents.TopicWorkspaceTemplateCommandUpdate:
+		command, ok := ev.Data().(workspaceevents.WorkspaceTemplateResultCommand)
+		response := workspaceevents.WorkspaceTemplateResult{Template: data.Template}
+		if !ok || response.ValidateFor(command) != nil {
+			setWorkspaceCommandError(result, common.ErrInvalidArgument)
+			return
+		}
+		result.Set(response, nil)
+	case workspaceevents.TopicWorkspaceTemplateCommandList:
+		command, ok := ev.Data().(workspaceevents.ListWorkspaceTemplatesCommand)
+		response := workspaceevents.WorkspaceTemplateListResult{Templates: data.Templates}
+		if !ok || response.ValidateFor(command) != nil {
+			setWorkspaceCommandError(result, common.ErrInvalidArgument)
+			return
+		}
+		result.Set(response, nil)
+	case workspaceevents.TopicWorkspaceTemplateCommandDelete:
+		command, ok := ev.Data().(workspaceevents.DeleteWorkspaceTemplateCommand)
+		response := workspaceevents.DeleteWorkspaceTemplateResult{TemplateID: command.TemplateID}
+		if !ok || response.ValidateFor(command) != nil {
+			setWorkspaceCommandError(result, common.ErrInvalidArgument)
+			return
+		}
+		result.Set(response, nil)
+	default:
+		setWorkspaceCommandError(result, common.ErrInvalidArgument)
+	}
+}
+
+func setWorkspaceCommandError(result magicevent.Result, err error) {
+	result.Set(nil, &cd.Error{Code: cd.Unexpected, Message: err.Error(), Cause: err})
 }
 
 func setWorkspaceDeletionMagicResult(result magicevent.Result, data workspaceevents.DeleteWorkspaceResult, err error) {

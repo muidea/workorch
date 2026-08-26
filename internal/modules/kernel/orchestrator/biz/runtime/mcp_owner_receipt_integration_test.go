@@ -183,7 +183,7 @@ func TestMCPOwnerObservedFailureTargetBindsThroughEventHubAndFileSnapshot(t *tes
 	binding.Hash = runtimecontract.StableCoverageEvidenceBindingHash(binding)
 	aggregate.Facts.Focus.CoverageEvidenceBindings = []runtimecontract.CoverageEvidenceBinding{binding}
 	runtimeTestSynchronizeCanonicalCWILedger(t, &aggregate)
-	addObservedMCPOperationAdmissibilityFixture(t, ctx, hub, &aggregate, catalogRevision)
+	mcpCatalog := addObservedMCPOperationAdmissibilityFixture(t, ctx, hub, &aggregate, catalogRevision)
 	decision, err := runtimecontract.SealRuntimeDecision(aggregate.Facts, runtimecontract.RuntimeDecision{
 		State: runtimecontract.ConvergenceStateNeedValidation,
 		Focus: aggregate.Facts.Focus,
@@ -217,7 +217,11 @@ func TestMCPOwnerObservedFailureTargetBindsThroughEventHubAndFileSnapshot(t *tes
 			{Name: "input.path", String: runtimeStringPointer("validation-entry.go")},
 		},
 	}}}}}
-	sealCandidateForTest(t, repository, candidate)
+	sealCandidateWithFeasibilitiesForTest(t, repository, candidate, []runtimecontract.RuntimeCandidateFeasibilityRecord{{
+		OperationID: candidate.Validation.Operations[0].Operation.ID, AdmissibilitySnapshotID: mcpCatalog.SnapshotID,
+		AcquisitionBinding: mcpCatalog.AcquisitionBinding,
+		Observation:        &runtimecontract.RuntimeOwnerFeasibilityObservation{Outcome: runtimecontract.RuntimeOwnerFeasibilityFeasible},
+	}})
 	controller, err := NewRuntimeController(repository)
 	if err != nil {
 		t.Fatal(err)
@@ -506,17 +510,26 @@ func TestMCPOwnerObservedFailureTargetBindsThroughEventHubAndFileSnapshot(t *tes
 			break
 		}
 	}
-	replayCatalog, found := runtimeOperationAdmissibilityForKind(persisted.Facts.Resources.OperationAdmissibilities, runtimecontract.RuntimeModuleMCP, runtimecontract.StepKindMCPToolCall)
-	if replayOperation.ID == "" || !found {
+	replayCatalog := runtimeOwnerCatalogForOperation(
+		persisted.Facts.Resources.OperationAdmissibilities,
+		persisted.Facts.Resources.PrerequisiteObservations,
+		replayOperation,
+		execution.AdmissibilitySnapshotID,
+		execution.AcquisitionBinding,
+	)
+	if replayOperation.ID == "" || replayCatalog == nil {
 		t.Fatal("persisted MCP operation or owner catalog is missing")
 	}
-	replaySealed, err := mcpevents.SealRuntimeOperation(replayOperation, replayCatalog)
+	replaySealed, err := mcpevents.SealRuntimeOperation(replayOperation, *replayCatalog)
 	if err != nil {
 		t.Fatal(err)
 	}
 	replayed := sendObservedMCPExecution(t, ctx, hub, mcpevents.ExecuteOperationCommand{
 		RuntimeOperationExecutionContext: runtimecontract.RuntimeOperationExecutionContext{
-			Execution:   runtimecontract.RuntimeOperationExecutionEnvelope{ExecutionKey: execution.ExecutionKey, Fence: execution.Fence, ExpectedEffectScope: execution.ExpectedEffectScope},
+			Execution: runtimecontract.RuntimeOperationExecutionEnvelope{
+				ExecutionKey: execution.ExecutionKey, Fence: execution.Fence, ExpectedEffectScope: execution.ExpectedEffectScope,
+				AdmissibilitySnapshotID: execution.AdmissibilitySnapshotID, AcquisitionBinding: execution.AcquisitionBinding,
+			},
 			WorkspaceID: persisted.Facts.WorkspaceID, RunID: persisted.Facts.RunID, DispatchID: dispatch.ID, Transaction: dispatch.Transaction,
 			OperationID: replayOperation.ID, CoverageWorkItemIDs: append([]common.CoverageWorkItemID(nil), replayOperation.CoverageWorkItemIDs...),
 			TargetRefs: append([]string(nil), replayOperation.TargetRefs...), EvidenceKind: runtimecontract.EvidenceKindValidation, WorkspaceDeliverableDirectory: t.TempDir(), WorkspaceInternalDirectory: t.TempDir(),
@@ -579,7 +592,11 @@ func (e runtimeObservedMCPExecutor) ExecuteRuntimeOperation(ctx context.Context,
 		mcpevents.TopicExecuteOperation, runtimecontract.RuntimeModuleOrchestrator, runtimecontract.RuntimeModuleMCP,
 		magicevent.NewHeader(), ctx, mcpevents.ExecuteOperationCommand{
 			RuntimeOperationExecutionContext: runtimecontract.RuntimeOperationExecutionContext{
-				Execution:   runtimecontract.RuntimeOperationExecutionEnvelope{ExecutionKey: request.Execution.ExecutionKey, Fence: request.Execution.Fence, ExpectedEffectScope: request.Execution.ExpectedEffectScope, GovernanceGrant: request.GovernanceGrant},
+				Execution: runtimecontract.RuntimeOperationExecutionEnvelope{
+					ExecutionKey: request.Execution.ExecutionKey, Fence: request.Execution.Fence, ExpectedEffectScope: request.Execution.ExpectedEffectScope,
+					AdmissibilitySnapshotID: request.Execution.AdmissibilitySnapshotID, AcquisitionBinding: request.Execution.AcquisitionBinding,
+					GovernanceGrant: request.GovernanceGrant,
+				},
 				WorkspaceID: request.WorkspaceID, RunID: request.RunID, DispatchID: request.DispatchID, Transaction: request.Transaction,
 				OperationID: request.Operation.ID, CoverageWorkItemIDs: append([]common.CoverageWorkItemID(nil), request.Operation.CoverageWorkItemIDs...),
 				TargetRefs: append([]string(nil), request.Operation.TargetRefs...), EvidenceKind: request.EvidenceKind,
@@ -768,7 +785,7 @@ func addObservedMCPOperationAdmissibilityFixture(
 	hub magicevent.Hub,
 	aggregate *RuntimeAggregate,
 	expectedRevision string,
-) {
+) runtimecontract.RuntimeOperationAdmissibility {
 	t.Helper()
 	if aggregate == nil || aggregate.Decision.AuthoritySnapshot.ID == "" {
 		t.Fatal("aggregate must have sealed authority before MCP preflight")
@@ -800,6 +817,7 @@ func addObservedMCPOperationAdmissibilityFixture(
 		ID: prerequisiteID, Kind: runtimecontract.PrerequisiteKindOperationAdmissibility,
 		OwnerModuleID: runtimecontract.RuntimeModuleMCP, RequiredCapabilities: []string{runtimecontract.StepKindMCPToolCall},
 	})
+	return response.Acquisition.Admissibility
 }
 
 func reacquireObservedFilePrerequisites(t *testing.T, ctx context.Context, hub magicevent.Hub, controller *RuntimeController, aggregate RuntimeAggregate, workspaceDirectory string) RuntimeAggregate {
@@ -974,7 +992,15 @@ func requestAndSealObservedCandidate(t *testing.T, ctx context.Context, hub magi
 	if err != nil {
 		t.Fatal(err)
 	}
-	requestIdentity := runtimecontract.RuntimeCandidateRequestIdentity{LogicalRequestID: "candidate-request-observed-seal", Sequence: 1, PhysicalCallID: "candidate-call-observed-seal"}
+	// Each planning document is a distinct logical provider request. Reusing a
+	// fixed PhysicalCallID across state-change, validation, and assessment would
+	// model an illegal replay and is now correctly rejected by the LLM owner.
+	logicalRequestID := fmt.Sprintf("candidate-request-observed-seal-%s-%d", aggregate.Decision.State, aggregate.StateRevision)
+	requestIdentity := runtimecontract.RuntimeCandidateRequestIdentity{
+		LogicalRequestID: logicalRequestID,
+		Sequence:         1,
+		PhysicalCallID:   runtimecontract.StableRuntimeCandidatePhysicalCallID(logicalRequestID, 1),
+	}
 	expectedDocument := runtimecontract.RuntimeExpectedDocumentContract{
 		SchemaVersion: runtimecontract.RuntimeExpectedDocumentSchemaCurrent,
 		DocumentKind:  runtimecontract.RuntimeProviderDocumentOperations, ManifestHash: manifest.Hash,

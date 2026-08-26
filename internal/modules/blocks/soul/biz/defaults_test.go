@@ -52,7 +52,7 @@ func TestEnsureBuiltinSoulDefaultsSeedsMissingAndPreservesExisting(t *testing.T)
 			}
 
 			for attempt := 1; attempt <= 2; attempt++ {
-				if err := ensureBuiltinSoulDefaults(ctx, NewService(repo)); err != nil {
+				if err := ensureBuiltinSoulDefaults(ctx, newService(repo)); err != nil {
 					t.Fatalf("ensure attempt %d: %v", attempt, err)
 				}
 				got, err := repo.Get(ctx, existing.ID)
@@ -74,7 +74,7 @@ func TestEnsureBuiltinSoulDefaultsSeedsMissingAndPreservesExisting(t *testing.T)
 func TestEnsureSoulDefaultsRejectsInvalidSeedBeforePersistence(t *testing.T) {
 	ctx := context.Background()
 	repo := memoryrepo.NewSoulRepository()
-	err := ensureSoulDefaults(ctx, NewService(repo), []workorchmanagementcontract.Soul{{ID: "invalid-default", Name: "missing instructions"}})
+	err := ensureSoulDefaults(ctx, newService(repo), []workorchmanagementcontract.Soul{{ID: "invalid-default", Name: "missing instructions"}})
 	if !errors.Is(err, common.ErrInvalidArgument) {
 		t.Fatalf("ensure invalid defaults err = %v, want invalid argument", err)
 	}

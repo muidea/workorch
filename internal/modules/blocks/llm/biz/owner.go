@@ -38,6 +38,7 @@ type Biz struct {
 	activeLLMConfig                   workorchconfig.LLMConfig
 	activeLLMConfigurationRevision    string
 	activeLLMConfigurationInitialized bool
+	physicalSubmissionGuard           *runtimePhysicalSubmissionGuard
 	topics                            []string
 }
 
@@ -68,7 +69,10 @@ func New(eventHub magicevent.Hub, backgroundRoutine task.BackgroundRoutine, deps
 	if eventHub == nil {
 		return nil, common.ErrInvalidArgument
 	}
-	m := &Biz{Base: basebiz.New(modulecommon.ModuleID, eventHub, backgroundRoutine)}
+	m := &Biz{
+		Base:                    basebiz.New(modulecommon.ModuleID, eventHub, backgroundRoutine),
+		physicalSubmissionGuard: newRuntimePhysicalSubmissionGuard(defaultRuntimePhysicalSubmissionGuardLimit),
+	}
 	if len(deps) > 0 {
 		m.catalogService = deps[0].CatalogService
 		m.candidateProvider = deps[0].CandidateProvider
@@ -205,6 +209,7 @@ func (m *Biz) Teardown(context.Context) {
 	m.activeLLMConfig = workorchconfig.LLMConfig{}
 	m.activeLLMConfigurationRevision = ""
 	m.activeLLMConfigurationInitialized = false
+	m.physicalSubmissionGuard.clear()
 }
 
 // handleRuntimeCandidatePreflight renders the sealed C0-C5 request and runs
@@ -213,6 +218,10 @@ func (m *Biz) Teardown(context.Context) {
 // reports a bounded, secret-free rendering outcome.
 func (m *Biz) handleRuntimeCandidatePreflight(event magicevent.Event, result magicevent.Result) {
 	if result == nil {
+		return
+	}
+	if !runtimeCommandHasExactOrchestratorSource(event) {
+		setPrerequisiteMagicError(result, fmt.Errorf("%w: runtime LLM preflight requires the exact Orchestrator source", common.ErrInvalidArgument))
 		return
 	}
 	command, ok := event.Data().(llmevents.PreflightRuntimeCandidateCommand)
@@ -312,8 +321,12 @@ func (m *Biz) handleRuntimeCandidate(event magicevent.Event, result magicevent.R
 	if result == nil {
 		return
 	}
+	if !runtimeCommandHasExactOrchestratorSource(event) {
+		setPrerequisiteMagicError(result, fmt.Errorf("%w: runtime LLM request requires the exact Orchestrator source", common.ErrInvalidArgument))
+		return
+	}
 	command, ok := event.Data().(llmevents.RequestRuntimeCandidateCommand)
-	if !ok || m.candidateProvider == nil || !runtimeCandidateCommandScopeValid(command.DocumentKind, command.WorkspaceID, command.RunID, command.Decision, command.SemanticContext) {
+	if !ok || m.candidateProvider == nil || m.physicalSubmissionGuard == nil || !runtimeCandidateCommandScopeValid(command.DocumentKind, command.WorkspaceID, command.RunID, command.Decision, command.SemanticContext) {
 		setPrerequisiteMagicError(result, common.ErrInvalidArgument)
 		return
 	}
@@ -321,7 +334,13 @@ func (m *Biz) handleRuntimeCandidate(event magicevent.Event, result magicevent.R
 		setPrerequisiteMagicError(result, err)
 		return
 	}
-	response, err := llmruntime.RequestCandidate(event.Context(), m.candidateProvider, llmmodels.RuntimeCandidateRequest{
+	if command.RequestIdentity.Normalized() != command.RequestIdentity {
+		setPrerequisiteMagicError(result, common.ErrInvalidArgument)
+		return
+	}
+	response, err := llmruntime.RequestCandidate(event.Context(), runtimePhysicalSubmissionGuardedProvider{
+		guard: m.physicalSubmissionGuard, delegate: m.candidateProvider,
+	}, llmmodels.RuntimeCandidateRequest{
 		DocumentKind:                command.DocumentKind,
 		RequestIdentity:             command.RequestIdentity,
 		ExpectedDocument:            command.ExpectedDocument,
@@ -338,6 +357,10 @@ func (m *Biz) handleRuntimeCandidate(event magicevent.Event, result magicevent.R
 		PreviousSemanticRejection:   cloneRuntimeOriginalDiagnostic(command.PreviousSemanticRejection),
 		SemanticCorrectionDirective: cloneRuntimeSemanticCorrectionDirective(command.SemanticCorrectionDirective),
 	})
+	if isRuntimePhysicalSubmissionGuardError(err) {
+		setPrerequisiteMagicError(result, err)
+		return
+	}
 	// Always attempt to persist sealed request audit when generation produced one.
 	// Audit may also ride on CandidateRequestError for failed provider calls.
 	audit := response.Audit
@@ -735,6 +758,10 @@ func providerCacheUsageAudit(usage *llmaudit.ProviderUsage) llmaudit.CacheUsage 
 
 func (m *Biz) handleProviderCeilingPrerequisite(event magicevent.Event, result magicevent.Result) {
 	if result == nil {
+		return
+	}
+	if !runtimeCommandHasExactOrchestratorSource(event) {
+		setPrerequisiteMagicError(result, fmt.Errorf("%w: provider ceiling acquisition requires the exact Orchestrator source", common.ErrInvalidArgument))
 		return
 	}
 	command, ok := event.Data().(llmevents.AcquireProviderCeilingCommand)

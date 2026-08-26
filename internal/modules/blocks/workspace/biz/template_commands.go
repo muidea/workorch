@@ -11,64 +11,64 @@ import (
 	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
 )
 
-func (m *Biz) executeWorkspaceTemplateCommand(ctx context.Context, ev magicevent.Event) (workspaceevents.WorkspaceCommandResult, error) {
+func (m *Biz) executeWorkspaceTemplateCommand(ctx context.Context, ev magicevent.Event) (workspaceCommandResponse, error) {
 	switch ev.ID() {
 	case workspaceevents.TopicWorkspaceTemplateCommandCreate:
 		cmd, ok := ev.Data().(workspaceevents.CreateWorkspaceTemplateCommand)
 		if !ok || m.templates == nil {
-			return workspaceevents.WorkspaceCommandResult{}, common.ErrInvalidArgument
+			return workspaceCommandResponse{}, common.ErrInvalidArgument
 		}
 		item, err := workspaceTemplateFromCommand(workspaceevents.CreateWorkspaceTemplateCommand(cmd))
 		if err != nil {
-			return workspaceevents.WorkspaceCommandResult{}, err
+			return workspaceCommandResponse{}, err
 		}
 		if err := m.templates.Create(ctx, item); err != nil {
-			return workspaceevents.WorkspaceCommandResult{}, err
+			return workspaceCommandResponse{}, err
 		}
-		return workspaceevents.WorkspaceCommandResult{Template: workspaceTemplateFromRepository(item)}, nil
+		return workspaceCommandResponse{Template: workspaceTemplateFromRepository(item)}, nil
 	case workspaceevents.TopicWorkspaceTemplateCommandGet:
 		cmd, ok := ev.Data().(workspaceevents.GetWorkspaceTemplateCommand)
 		if !ok || cmd.TemplateID == "" || m.templates == nil {
-			return workspaceevents.WorkspaceCommandResult{}, common.ErrInvalidArgument
+			return workspaceCommandResponse{}, common.ErrInvalidArgument
 		}
 		item, err := m.templates.Get(ctx, cmd.TemplateID)
 		if err != nil {
-			return workspaceevents.WorkspaceCommandResult{}, err
+			return workspaceCommandResponse{}, err
 		}
-		return workspaceevents.WorkspaceCommandResult{Template: workspaceTemplateFromRepository(item)}, nil
+		return workspaceCommandResponse{Template: workspaceTemplateFromRepository(item)}, nil
 	case workspaceevents.TopicWorkspaceTemplateCommandList:
 		if _, ok := ev.Data().(workspaceevents.ListWorkspaceTemplatesCommand); !ok || m.templates == nil {
-			return workspaceevents.WorkspaceCommandResult{}, common.ErrInvalidArgument
+			return workspaceCommandResponse{}, common.ErrInvalidArgument
 		}
 		items, err := m.templates.List(ctx)
 		if err != nil {
-			return workspaceevents.WorkspaceCommandResult{}, err
+			return workspaceCommandResponse{}, err
 		}
-		return workspaceevents.WorkspaceCommandResult{Templates: workspaceTemplatesFromRepository(items)}, nil
+		return workspaceCommandResponse{Templates: workspaceTemplatesFromRepository(items)}, nil
 	case workspaceevents.TopicWorkspaceTemplateCommandUpdate:
 		cmd, ok := ev.Data().(workspaceevents.UpdateWorkspaceTemplateCommand)
 		if !ok || m.templates == nil {
-			return workspaceevents.WorkspaceCommandResult{}, common.ErrInvalidArgument
+			return workspaceCommandResponse{}, common.ErrInvalidArgument
 		}
 		item, err := workspaceTemplateFromCommand(workspaceevents.CreateWorkspaceTemplateCommand(cmd))
 		if err != nil {
-			return workspaceevents.WorkspaceCommandResult{}, err
+			return workspaceCommandResponse{}, err
 		}
 		if err := m.templates.Update(ctx, item); err != nil {
-			return workspaceevents.WorkspaceCommandResult{}, err
+			return workspaceCommandResponse{}, err
 		}
-		return workspaceevents.WorkspaceCommandResult{Template: workspaceTemplateFromRepository(item)}, nil
+		return workspaceCommandResponse{Template: workspaceTemplateFromRepository(item)}, nil
 	case workspaceevents.TopicWorkspaceTemplateCommandDelete:
 		cmd, ok := ev.Data().(workspaceevents.DeleteWorkspaceTemplateCommand)
 		if !ok || cmd.TemplateID == "" || m.templates == nil {
-			return workspaceevents.WorkspaceCommandResult{}, common.ErrInvalidArgument
+			return workspaceCommandResponse{}, common.ErrInvalidArgument
 		}
 		if err := m.templates.Delete(ctx, cmd.TemplateID); err != nil {
-			return workspaceevents.WorkspaceCommandResult{}, err
+			return workspaceCommandResponse{}, err
 		}
-		return workspaceevents.WorkspaceCommandResult{}, nil
+		return workspaceCommandResponse{}, nil
 	default:
-		return workspaceevents.WorkspaceCommandResult{}, common.ErrInvalidArgument
+		return workspaceCommandResponse{}, common.ErrInvalidArgument
 	}
 }
 

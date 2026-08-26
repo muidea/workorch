@@ -29,26 +29,7 @@ func BindLane(event magicevent.Event, ownerContracts []eventcontract.Contract, t
 	}))
 }
 
-func Workspace(response magicevent.Result, topic string) (workspaceevents.WorkspaceCommandResult, error) {
-	if response == nil {
-		return workspaceevents.WorkspaceCommandResult{}, common.ErrInvalidArgument
-	}
-	if err := response.Error(); err != nil {
-		return workspaceevents.WorkspaceCommandResult{}, err
-	}
-	data, resultErr := response.Get()
-	if resultErr != nil {
-		return workspaceevents.WorkspaceCommandResult{}, resultErr
-	}
-	result, ok := data.(workspaceevents.WorkspaceCommandResult)
-	if !ok {
-		return workspaceevents.WorkspaceCommandResult{}, fmt.Errorf("%w: event %s result type %T", common.ErrInvalidArgument, topic, data)
-	}
-	return result, nil
-}
-
-// WorkspaceOwner decodes focused Workspace owner contracts which intentionally
-// do not use the broad management WorkspaceCommandResult union.
+// WorkspaceOwner decodes one concrete Workspace owner command result.
 func WorkspaceOwner[Response any](response magicevent.Result, topic string) (Response, error) {
 	var zero Response
 	if response == nil {

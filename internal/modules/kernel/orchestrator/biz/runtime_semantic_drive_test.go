@@ -496,7 +496,7 @@ func TestRuntimeSemanticDriveMissingCatalogObservationReopensGenerationWithoutOw
 
 	workspaceObserver := magicevent.NewSimpleObserver(workspaceevents.CommandDestination, hub)
 	workspaceObserver.Subscribe(workspaceevents.TopicWorkspaceCommandGet, func(_ magicevent.Event, result magicevent.Result) {
-		result.Set(workspaceevents.WorkspaceCommandResult{Workspace: &workspaceevents.Workspace{
+		result.Set(workspaceevents.WorkspaceResult{Workspace: &workspaceevents.Workspace{
 			ID: "ws-v2", DeliverableDirectory: t.TempDir(), InternalDirectory: t.TempDir(),
 		}}, nil)
 	})

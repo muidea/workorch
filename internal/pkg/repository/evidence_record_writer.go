@@ -3,15 +3,21 @@ package repository
 import (
 	"context"
 	"errors"
+	"fmt"
+	"slices"
+	"strings"
 
 	"github.com/muidea/workorch/internal/pkg/common"
-	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
 	orchestratormodel "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
-func CreateOrUpdateEvidenceRecord(ctx context.Context, repo EvidenceRecordRepository, record *orchestratormodel.EvidenceRecord) error {
+// CreateOrVerifyImmutableEvidenceRecord persists an evidence identity once.
+// An exact duplicate is idempotent; the same identity with any different
+// content is a conflict. Governance evidence is an audit fact and must never
+// be rewritten by a later delivery of the same owner command.
+func CreateOrVerifyImmutableEvidenceRecord(ctx context.Context, repo EvidenceRecordRepository, record *orchestratormodel.EvidenceRecord) error {
 	if repo == nil || record == nil {
-		return nil
+		return common.ErrInvalidArgument
 	}
 	if err := repo.Create(ctx, record); err != nil {
 		if !errors.Is(err, common.ErrConflict) {
@@ -21,31 +27,49 @@ func CreateOrUpdateEvidenceRecord(ctx context.Context, repo EvidenceRecordReposi
 		if getErr != nil {
 			return getErr
 		}
-		record.CreatedAt = firstNonEmptyEvidenceRecordString(existing.CreatedAt, record.CreatedAt)
-		preserveEvidenceRecordMetadataValue(record, existing, "capturedAt")
-		if err := repo.Update(ctx, record); err != nil {
-			return err
+		if !sameImmutableEvidenceRecord(existing, record) {
+			return fmt.Errorf("%w: evidence record %q already exists with different immutable fields: %s", common.ErrConflict, record.ID, evidenceRecordDifference(existing, record))
 		}
 	}
 	return nil
 }
 
-func preserveEvidenceRecordMetadataValue(record *orchestratormodel.EvidenceRecord, existing *orchestratormodel.EvidenceRecord, key string) {
-	if record == nil || existing == nil || key == "" || len(existing.Metadata.Fields) == 0 {
-		return
-	}
-	value, ok := existing.Metadata.Field(key)
-	if !ok {
-		return
-	}
-	record.Metadata = record.Metadata.Merge(workorcheventpayload.New(workorcheventpayload.Field{Name: key, Value: value}))
+func sameImmutableEvidenceRecord(left, right *orchestratormodel.EvidenceRecord) bool {
+	return left != nil && right != nil &&
+		left.ID == right.ID && left.WorkspaceID == right.WorkspaceID && left.RunID == right.RunID && left.StepID == right.StepID &&
+		left.DefinitionRevision == right.DefinitionRevision && left.Kind == right.Kind && left.Status == right.Status &&
+		left.SourceType == right.SourceType && left.SourceRef == right.SourceRef && left.SubjectType == right.SubjectType && left.SubjectID == right.SubjectID &&
+		slices.Equal(left.CoverageItemRefs, right.CoverageItemRefs) && slices.Equal(left.Supersedes, right.Supersedes) &&
+		left.CreatedAt == right.CreatedAt && left.UpdatedAt == right.UpdatedAt && left.Metadata.Equal(right.Metadata)
 }
 
-func firstNonEmptyEvidenceRecordString(values ...string) string {
-	for _, value := range values {
-		if value != "" {
-			return value
+func evidenceRecordDifference(left, right *orchestratormodel.EvidenceRecord) string {
+	if left == nil || right == nil {
+		return "record"
+	}
+	differences := make([]string, 0, 8)
+	fields := []struct {
+		name  string
+		equal bool
+	}{
+		{"identity", left.ID == right.ID},
+		{"scope", left.WorkspaceID == right.WorkspaceID && left.RunID == right.RunID && left.StepID == right.StepID},
+		{"definitionRevision", left.DefinitionRevision == right.DefinitionRevision},
+		{"classification", left.Kind == right.Kind && left.Status == right.Status},
+		{"source", left.SourceType == right.SourceType && left.SourceRef == right.SourceRef},
+		{"subject", left.SubjectType == right.SubjectType && left.SubjectID == right.SubjectID},
+		{"coverage", slices.Equal(left.CoverageItemRefs, right.CoverageItemRefs)},
+		{"supersedes", slices.Equal(left.Supersedes, right.Supersedes)},
+		{"timestamps", left.CreatedAt == right.CreatedAt && left.UpdatedAt == right.UpdatedAt},
+		{"metadata", left.Metadata.Equal(right.Metadata)},
+	}
+	for _, field := range fields {
+		if !field.equal {
+			differences = append(differences, field.name)
 		}
 	}
-	return ""
+	if len(differences) == 0 {
+		return "record"
+	}
+	return strings.Join(differences, ",")
 }

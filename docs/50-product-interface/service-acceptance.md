@@ -179,6 +179,26 @@ management. The `-file` aliases target the same deployed-instance contract; back
 governance、revalidation、restart、三轴closeout和双Workspace隔离必须逐行满足
 [Deployed Runtime Convergence Scenario Matrix](deployed-convergence-scenarios.md)。
 
+## Deployed Convergence Evidence Gate
+
+场景producer必须把每个独立执行的`*.dce.json`及其相对路径artifact保留在同一个evidence root。发布聚合器不把
+`verify-ci-mvp-file`、unit test、shell退出码或普通`summary.json`转换成场景证据，只进行以下主动校验：
+
+- `make verify-deployed-convergence-manifest-tests`仅验证manifest verifier自身的schema、path、digest、scope、assertion和缺失
+  scenario fail-closed回归，不属于deployed evidence；
+- `make verify-deployed-convergence-ci-safe`要求`DC-01/03/05/06/07/08/09/10`全部存在且可验证；缺少`DC-06`等任一项时返回非零；
+- `make verify-deployed-convergence-release`按`DEPLOYED_CONVERGENCE_PROFILE`验证`ci-safe`、`definition`、`real-provider`、
+  `profile`或`full`集合；manifest root和aggregate report分别由`DEPLOYED_CONVERGENCE_MANIFEST_ROOT`与
+  `DEPLOYED_CONVERGENCE_REPORT`指定；
+- 每个manifest的`producerEntrypoint`还必须命中逐`scenarioId + scenarioVariant` exact producer registry；schema-valid手写文件、unit fixture或尚未接线的
+  历史script summary均不能通过release gate；
+- `make verify-deployed-full`最后执行`full`聚合，且分别要求`DC-01/ci-safe/non-real`与`DC-01/real-provider/real`；没有其中
+  任一项、`DC-11/12`definition evidence、real-provider `DC-02`或具体profile `DC-04`时都不能形成发布通过结论。
+
+manifest schema和逐场景mandatory assertion/ref要求见
+[Deployed Runtime Convergence Scenario Matrix](deployed-convergence-scenarios.md#evidence-manifest)。服务验收脚本若未显式产出该
+结构，就仍只是对应局部合同检查，不能被聚合器自动提升为发布证据。
+
 ## Persistence And Restart
 
 File-backed acceptance must distinguish four data classes:

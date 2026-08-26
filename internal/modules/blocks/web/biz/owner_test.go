@@ -141,7 +141,7 @@ func TestWebOwnerFailsClosedBeforeNetworkAndCommitsRecoverableEvidence(t *testin
 	t.Cleanup(func() { owner.Teardown(ctx) })
 	rejectQuery := atomic.Bool{}
 	installWebReceiptObserver(t, hub, &rejectQuery)
-	operation, sealed := testWebSearchOperation(t)
+	operation, sealed := testWebSearchOperation(t, adapter)
 	command := testWebExecuteCommand(t, operation, sealed)
 	event := magicevent.NewEventWithContext(webevents.TopicExecuteOperation, runtimecontract.RuntimeModuleOrchestrator, ModuleID, magicevent.NewHeader(), ctx, command)
 
@@ -158,6 +158,12 @@ func TestWebOwnerFailsClosedBeforeNetworkAndCommitsRecoverableEvidence(t *testin
 	driftedResult := hub.Send(magicevent.NewEventWithContext(webevents.TopicExecuteOperation, runtimecontract.RuntimeModuleOrchestrator, ModuleID, magicevent.NewHeader(), ctx, drifted))
 	if _, err := driftedResult.Get(); err == nil || providerCalls.Load() != 0 {
 		t.Fatalf("sealed drift err=%v calls=%d", err, providerCalls.Load())
+	}
+	tamperedExecution := command
+	tamperedExecution.Execution.AdmissibilitySnapshotID = "another-owner-catalog"
+	tamperedExecutionResult := hub.Send(magicevent.NewEventWithContext(webevents.TopicExecuteOperation, runtimecontract.RuntimeModuleOrchestrator, ModuleID, magicevent.NewHeader(), ctx, tamperedExecution))
+	if _, err := tamperedExecutionResult.Get(); err == nil || providerCalls.Load() != 0 {
+		t.Fatalf("execution catalog drift err=%v calls=%d", err, providerCalls.Load())
 	}
 	rejectQuery.Store(true)
 	stale := hub.Send(event)
@@ -178,20 +184,129 @@ func TestWebOwnerFailsClosedBeforeNetworkAndCommitsRecoverableEvidence(t *testin
 	if err := receipt.Validate(); err != nil {
 		t.Fatal(err)
 	}
+	duplicate := hub.Send(event)
+	duplicateData, err := duplicate.Get()
+	if err != nil {
+		t.Fatal(err)
+	}
+	duplicateReceipt := duplicateData.(webevents.ExecuteOperationResult).Receipt
+	if providerCalls.Load() != 1 || !runtimecontract.SameRuntimeOperationReceipt(receipt, duplicateReceipt) {
+		t.Fatalf("duplicate Web execution crossed provider fence: first=%+v duplicate=%+v calls=%d", receipt, duplicateReceipt, providerCalls.Load())
+	}
+}
+
+// SM-2 catalog freshness is an execution fence for the SM-3 sealed
+// transaction: configuration drift produces a typed stale receipt before the
+// provider transport can be called.
+func TestWebOwnerRejectsStaleSealedProviderRevisionBeforeNetwork(t *testing.T) {
+	ctx := context.Background()
+	hub := magicevent.NewHub(16)
+	t.Cleanup(func() { hub.Terminate(ctx) })
+	var providerCalls atomic.Int64
+	provider := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		providerCalls.Add(1)
+		_ = json.NewEncoder(w).Encode(searchGatewayResponse{})
+	}))
+	defer provider.Close()
+	adapter := NewRuntimeAdapterWithHTTPClient("http", map[string]webmodels.ProviderConfig{"http": testWebProvider(provider.URL)}, provider.Client())
+	owner := &Biz{Base: basebiz.New(ModuleID, hub, nil), runtimeAdapter: adapter}
+	if err := owner.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { owner.Teardown(ctx) })
+	installWebReceiptObserver(t, hub, nil)
+	operation, sealed := testWebSearchOperation(t, adapter)
+	adapter.providers["drifted-provider"] = webmodels.ProviderConfig{ID: "drifted-provider", SearchEndpoint: provider.URL}
+	result := hub.Send(magicevent.NewEventWithContext(
+		webevents.TopicExecuteOperation, runtimecontract.RuntimeModuleOrchestrator, ModuleID, magicevent.NewHeader(), ctx,
+		testWebExecuteCommand(t, operation, sealed),
+	))
+	data, err := result.Get()
+	if err != nil {
+		t.Fatal(err)
+	}
+	receipt := data.(webevents.ExecuteOperationResult).Receipt
+	if providerCalls.Load() != 0 || receipt.Outcome != runtimecontract.RuntimeOperationOutcomeRejected || receipt.PrerequisiteStale == nil ||
+		receipt.PrerequisiteStale.Domain != runtimecontract.RuntimeResourceProviderConfig ||
+		receipt.PrerequisiteStale.ExpectedRevision != sealed.Authorization.OwnerRevision ||
+		receipt.PrerequisiteStale.ObservedRevision == sealed.Authorization.OwnerRevision {
+		t.Fatalf("stale Web seal crossed provider fence: receipt=%+v calls=%d", receipt, providerCalls.Load())
+	}
+}
+
+func TestWebOwnerUsesOneProviderSnapshotFromRevisionFenceThroughNetworkCall(t *testing.T) {
+	ctx := context.Background()
+	hub := magicevent.NewHub(16)
+	t.Cleanup(func() { hub.Terminate(ctx) })
+	var firstCalls, driftedCalls, revisionReads atomic.Int64
+	first := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		firstCalls.Add(1)
+		_ = json.NewEncoder(w).Encode(searchGatewayResponse{})
+	}))
+	defer first.Close()
+	drifted := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		driftedCalls.Add(1)
+		_ = json.NewEncoder(w).Encode(searchGatewayResponse{})
+	}))
+	defer drifted.Close()
+	adapter := NewRuntimeAdapterFromConfigLoaderWithRevision(func() (string, map[string]webmodels.ProviderConfig, error) {
+		endpoint := first.URL
+		if revisionReads.Load() >= 3 {
+			endpoint = drifted.URL
+		}
+		return "http", map[string]webmodels.ProviderConfig{"http": testWebProvider(endpoint)}, nil
+	}, func() uint64 {
+		read := revisionReads.Add(1)
+		if read >= 3 {
+			return 2
+		}
+		return 1
+	})
+	owner := &Biz{Base: basebiz.New(ModuleID, hub, nil), runtimeAdapter: adapter}
+	if err := owner.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { owner.Teardown(ctx) })
+	installWebReceiptObserver(t, hub, nil)
+	operation, sealed := testWebSearchOperation(t, adapter)
+	result := hub.Send(magicevent.NewEventWithContext(
+		webevents.TopicExecuteOperation, runtimecontract.RuntimeModuleOrchestrator, ModuleID, magicevent.NewHeader(), ctx,
+		testWebExecuteCommand(t, operation, sealed),
+	))
+	data, err := result.Get()
+	if err != nil {
+		t.Fatal(err)
+	}
+	receipt := data.(webevents.ExecuteOperationResult).Receipt
+	if receipt.Outcome != runtimecontract.RuntimeOperationOutcomeAccepted || revisionReads.Load() != 2 || firstCalls.Load() != 1 || driftedCalls.Load() != 0 {
+		t.Fatalf("Web provider snapshot was reloaded across revision fence: receipt=%+v revisions=%d first=%d drifted=%d", receipt, revisionReads.Load(), firstCalls.Load(), driftedCalls.Load())
+	}
 }
 
 func installWebReceiptObserver(t *testing.T, hub magicevent.Hub, rejectQuery *atomic.Bool) {
 	t.Helper()
+	type receiptKey struct {
+		executionKey string
+		fence        uint64
+	}
+	receipts := map[receiptKey]runtimecontract.RuntimeOperationReceipt{}
 	observer := magicevent.NewSimpleObserver(orchestratorevents.CommandDestination, hub)
-	observer.Subscribe(orchestratorevents.TopicOrchestratorQueryRuntimeOperationReceipt, func(_ magicevent.Event, result magicevent.Result) {
+	observer.Subscribe(orchestratorevents.TopicOrchestratorQueryRuntimeOperationReceipt, func(event magicevent.Event, result magicevent.Result) {
 		if rejectQuery != nil && rejectQuery.Load() {
 			result.Set(nil, &cd.Error{Code: cd.VersionConflict, Message: "stale runtime Web dispatch"})
 			return
 		}
-		result.Set(orchestratorevents.QueryRuntimeOperationReceiptResult{}, nil)
+		command := event.Data().(orchestratorevents.QueryRuntimeOperationReceiptCommand)
+		receipt, found := receipts[receiptKey{executionKey: command.ExecutionKey, fence: command.Fence}]
+		response := orchestratorevents.QueryRuntimeOperationReceiptResult{Found: found}
+		if found {
+			response.Receipt = &receipt
+		}
+		result.Set(response, nil)
 	})
 	observer.Subscribe(orchestratorevents.TopicOrchestratorCommitRuntimeOperationReceipt, func(event magicevent.Event, result magicevent.Result) {
 		command := event.Data().(orchestratorevents.CommitRuntimeOperationReceiptCommand)
+		receipts[receiptKey{executionKey: command.Receipt.ExecutionKey, fence: command.Fence}] = command.Receipt
 		result.Set(orchestratorevents.CommitRuntimeOperationReceiptResult{Receipt: command.Receipt}, nil)
 	})
 	t.Cleanup(func() {
@@ -200,14 +315,30 @@ func installWebReceiptObserver(t *testing.T, hub magicevent.Hub, rejectQuery *at
 	})
 }
 
-func testWebSearchOperation(t *testing.T) (runtimecontract.RuntimeOperation, webevents.SealedRuntimeOperation) {
+func testWebSearchOperation(t *testing.T, adapter *RuntimeAdapter) (runtimecontract.RuntimeOperation, webevents.SealedRuntimeOperation) {
 	t.Helper()
 	query := "owner execution"
 	operation := runtimecontract.RuntimeOperation{
 		ID: "web-search-1", Kind: runtimecontract.StepKindWebSearch, TargetRefs: []string{"web-target"},
 		Parameters: []runtimecontract.OperationParameter{{Name: "query", String: &query}},
 	}
-	sealed, err := webevents.SealRuntimeOperation(operation)
+	providerIDs, revision, err := adapter.OperationAdmissibility()
+	if err != nil {
+		t.Fatal(err)
+	}
+	catalog, err := runtimecontract.NewRuntimeOperationAdmissibility("web-admissibility", ModuleID, []string{operation.Kind}, nil, providerIDs,
+		[]string{"configured-web-provider", "owner-execution-policy"}, revision)
+	if err != nil {
+		t.Fatal(err)
+	}
+	catalog.OperationPolicies = []runtimecontract.RuntimeOperationPolicyFact{{
+		ID: "operation-policy/web-search", OwnerModuleID: ModuleID, OperationKind: runtimecontract.StepKindWebSearch,
+		SubjectRef: "configured-web-provider", EffectScope: runtimecontract.RuntimeEffectNone,
+		IdempotencyClass: runtimecontract.RuntimeOperationIdempotencyAtMostOnce,
+	}}
+	catalog.SnapshotID = runtimecontract.StableRuntimeOperationAdmissibilitySnapshotID(catalog)
+	observation := webAdmissibilityObservation(catalog.PrerequisiteID, catalog)
+	sealed, err := webevents.SealRuntimeOperation(operation, catalog, observation)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -218,7 +349,10 @@ func testWebExecuteCommand(t *testing.T, operation runtimecontract.RuntimeOperat
 	t.Helper()
 	return webevents.ExecuteOperationCommand{
 		RuntimeOperationExecutionContext: runtimecontract.RuntimeOperationExecutionContext{
-			Execution:   runtimecontract.RuntimeOperationExecutionEnvelope{ExecutionKey: "exec/web-search-1", Fence: 1, ExpectedEffectScope: runtimecontract.RuntimeEffectNone},
+			Execution: runtimecontract.RuntimeOperationExecutionEnvelope{
+				ExecutionKey: "exec/web-search-1", Fence: 1, ExpectedEffectScope: runtimecontract.RuntimeEffectNone,
+				AdmissibilitySnapshotID: sealed.Authorization.CatalogSnapshotID, AcquisitionBinding: sealed.Authorization.AcquisitionBinding,
+			},
 			WorkspaceID: "ws-web", RunID: "run-web", DispatchID: "dispatch-web", Transaction: runtimecontract.AuthorityTransaction{AuthoritySnapshotID: "authority-web"},
 			OperationID: operation.ID, TargetRefs: append([]string(nil), operation.TargetRefs...), EvidenceKind: runtimecontract.EvidenceKindValidation,
 			WorkspaceDeliverableDirectory: t.TempDir(), WorkspaceInternalDirectory: t.TempDir(),

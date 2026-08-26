@@ -43,6 +43,9 @@ Orchestrator 与各资源 owner。
 - clarification resolution 不得在 handler 中先改 nested binding 再改 Ticket state。handler 只提交 bounded
   `definitionClarificationResolutionFact`，唯一 lifecycle reducer 在同一 owner Update 中原子绑定
   resolution/replacement/admission identity 并执行 `open -> resolved`；partial binding 或已解决 binding 重写 fail-closed。
+- Definition clarification 不进入 generic ordinary-resolution reconciliation。若进程停在 Resolution create 与 Ticket
+  clarification binding CAS 之间，只有原 dedicated resolve command 的 exact replay 可以补齐 private reducer 所需事实；
+  background reconciliation 不得把它降级为缺少 binding 的普通 resolved Ticket。
 
 - Runtime governance ticket 的唯一创建入口是 `OpenRuntimeGovernanceRequestCommand/Result`。Decision 在任何
   repository 访问前同时校验 EventHub source 必须为 `kernel/orchestrator`，并用 command `WorkspaceID` 绑定已有
@@ -75,8 +78,9 @@ Orchestrator 与各资源 owner。
 - 所有 list command 使用 workspace/run/ticket composite keyset cursor；默认单页 100、上限 200。全局列表必须显式
   指定 `TicketListScopeAll`，workspace/run 列表必须显式携带 WorkspaceID；run query 不允许只有 RunID。Application
   将 HTTP cursor/limit 直接交给 owner，不再先读取全量 Ticket 后本地分页。
-- 兼容性的无 workspace Get/resolve 只允许解析全局唯一 TicketID；跨 workspace 重复 ID 必须 conflict，不能按状态、
-  repository 顺序或“优先 open”猜测 owner scope。所有返回 entity 在离开 owner 前显式深拷贝。
+- 普通 `EnsureResolvedCommand` 必须显式携带 WorkspaceID；不再保留按 TicketID 反查 scope 的无 workspace mutation
+  入口。只读 `GetResolutionCommand` 若未携带 scope，仅可解析全局唯一 TicketID；跨 workspace 任意重复 ID 均 conflict，
+  不得按 open/resolved 状态、repository 顺序或“优先 open”猜测 owner scope。所有返回 entity 在离开 owner 前显式深拷贝。
 - Ticket 与 Resolution 不公开独立 delete command。Workspace owner 先发送
   `SealWorkspaceDecisionDeletionCommand`；Decision 持久化永久、workspace-scoped tombstone 后，所有公共查询、恢复和普通
   Create/Update/Delete 都 fail closed。`retain` 保留物理数据但永久隐藏；`purge` 只能由同一 scope 的
@@ -97,8 +101,13 @@ Orchestrator 与各资源 owner。
   owner-private delivery marker。调用失败和重启恢复不会把未完成交付误判成新治理选择；marker 完成后的相同 Runtime
   resolution 是 owner repository 零写入 duplicate。
 - Resolution evidence 使用 Decision 定义的 `RecordDecisionEvidenceCommand/Result` 同步交给 Orchestrator；Decision
-  不访问 EvidenceRecord repository。EvidenceRecordID 由 resolution identity 稳定派生，因此失败后的重放不会形成
-  第二条 evidence。
+  不访问 EvidenceRecord repository。正式 Resolution 在 Ticket transition 前封存 immutable `ResolvedAt`；write-cut
+  恢复只能从该 durable fact 复原 Ticket 时间，不能使用恢复时钟或可推进的 `UpdatedAt`。EvidenceRecordID 由
+  Workspace/Run/Ticket/Resolution 完整 immutable scope 稳定派生，因此同局部 ResolutionID 可跨 Workspace 隔离，
+  同 scope 失败重放仍是完全相同的一条 evidence。
+- pre-seal Workspace Definition clarification 没有 RunID，因此不进入上述 run-scoped Orchestrator evidence 合同；其
+  dedicated resolve result 与 stable `TicketResolvedData` notification 构成完整交付。普通与 Runtime resolution 仍强制
+  使用带 RunID 的 evidence，不能以 pre-seal 例外放宽 Orchestrator 校验。
 - 通知与 evidence 都是 SM-4 audit/projection 交付，不反向决定 SM-2 authority，也不允许 Application 因通知成功而
   自动 Resume Run。
 
@@ -123,8 +132,10 @@ Orchestrator 与各资源 owner。
   resolution query/ensure；二者共享 workspace fence，但不形成第二个 owner 或 facade。
 - `lifecycle_internal_event.go` 是 Ticket creation/lifecycle、clarification binding、proposal、delivery marker 和 deletion tombstone 的唯一状态 reducer。
   `runtime_governance_proposal_reconciliation.go` 只重放已持久化 fact，不选择新的 resolution 或 Runtime action。
-- 生产依赖只包含 DecisionTicket repository、DecisionResolution repository、EventHub 和 framework background routine；
-  不得注入 Run、Workspace、Evidence、Orchestrator repository/service 或 application callback。
+- 生产构造只接受 backend aggregate 铸造并通过 `Validate` 的 opaque `DecisionOwnerRepositories` bundle，以及 EventHub
+  和 framework background routine；Ticket、Resolution 与 Workspace deletion surface 必须携带同一 backend binding。
+  zero、fake 或 memory/file mixed-set 在订阅前 fail closed，不保留独立 repository 注入或 legacy fallback；也不得注入
+  Run、Workspace、Evidence、Orchestrator repository/service 或 application callback。
 
 ## 已覆盖回归
 
@@ -135,13 +146,16 @@ Orchestrator 与各资源 owner。
 - workspace retain/purge tombstone、public read/recovery 隔离、普通 Delete-after-seal 拒绝、fixed-point purge 与 exact replay。
 - deletion seal 与在途 reconciliation delivery 的线性化、seal 后零 Orchestrator/Eventstream delivery，以及重启实例对未完成
   resolved delivery checkpoint 的永久抑制。
-- concrete result type、显式全局 scope、默认/最大 limit、composite cursor continuation、跨 workspace 重复 ID 和深拷贝。
+- concrete result type、显式全局 scope、默认/最大 limit、composite cursor continuation、无 Workspace resolution mutation
+  零写入拒绝、跨 workspace mixed-state 重复 ID conflict 和深拷贝。
 - stable Decision notification identity 与 Eventstream duplicate append 去重。
 - Workspace invalid-candidate replacement、admission resolution、owner-neutral Identity/Binding values 上的 open/reconcile/resolve
   deterministic pair validation、persisted-fact query 的 Found=false/retired/partial/binding mismatch 与外层 Ticket semantic
   mutation 拒绝、Workspace events 零
   Decision-owner import，以及 Runtime replacement resolution 的 exact
   duplicate、scope mismatch、orphan-resolution recovery。
+- pre-seal resolution 不投递 run-scoped evidence，真实 Decision→Orchestrator handler 保持零调用；首次成功响应丢失后的
+  exact replay 返回同一 duplicate acknowledgement，且 persisted clarification fact 仍可由 Workspace 查询。
 - Ticket/proposal seed 均拒绝 caller-selected initial/progress state；clarification binding 与 `open -> resolved` 单次 owner write，静态门禁拒绝 handler 直写 binding、proposal initial state 或 Ticket repository Create。
 
 ## 闭合验证

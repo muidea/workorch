@@ -2,6 +2,7 @@ package runtime
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -70,7 +71,7 @@ func TestShellOwnerObservedFailureTargetBindsThroughEventHubAndFileSnapshot(t *t
 	runtimeTestSealCurrentFocusBindingTargetSurface(&aggregate.Facts, runtimeTestBindingTargetSurface{
 		SelectorRef: "test/runtime-shell-failure-target", SelectorOwnerRef: "test/runtime-profile", SelectorSubjectRef: "implementation",
 	})
-	addObservedShellFailureTargetFreshness(t, ctx, hub, &aggregate, workspaceDirectory)
+	shellCatalog := addObservedShellFailureTargetFreshness(t, ctx, hub, &aggregate, workspaceDirectory)
 	decision, err := runtimecontract.SealRuntimeDecision(aggregate.Facts, runtimecontract.RuntimeDecision{
 		State: runtimecontract.ConvergenceStateNeedValidation,
 		Focus: aggregate.Facts.Focus,
@@ -98,8 +99,21 @@ func TestShellOwnerObservedFailureTargetBindsThroughEventHubAndFileSnapshot(t *t
 		CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-1"}, TargetRefs: []string{"validation-entry.sh"},
 		Parameters: []runtimecontract.OperationParameter{{Name: "recipeId", String: &recipeID}},
 	}}}}}
-	sealCandidateForTest(t, repository, candidate)
-
+	sealedAggregate := sealCandidateWithFeasibilitiesForTest(t, repository, candidate, []runtimecontract.RuntimeCandidateFeasibilityRecord{{
+		OperationID: candidate.Validation.Operations[0].Operation.ID, AdmissibilitySnapshotID: shellCatalog.SnapshotID,
+		AcquisitionBinding: shellCatalog.AcquisitionBinding,
+		Observation:        &runtimecontract.RuntimeOwnerFeasibilityObservation{Outcome: runtimecontract.RuntimeOwnerFeasibilityFeasible},
+	}})
+	sealedExecution := sealedAggregate.ActiveDispatch.OperationExecutions[0]
+	if selected := runtimeOwnerCatalogForOperation(
+		sealedAggregate.Facts.Resources.OperationAdmissibilities,
+		sealedAggregate.Facts.Resources.PrerequisiteObservations,
+		candidate.Validation.Operations[0].Operation,
+		sealedExecution.AdmissibilitySnapshotID,
+		sealedExecution.AcquisitionBinding,
+	); selected == nil {
+		t.Fatalf("sealed Shell execution cannot recover exact owner catalog: execution=%+v catalog=%+v", sealedExecution, shellCatalog)
+	}
 	persisted, err := controller.executeActiveDispatch(ctx, "ws-1", "run-1", runtimeObservedShellExecutor{hub: hub, deliverableDirectory: workspaceDirectory})
 	if err != nil {
 		t.Fatal(err)
@@ -139,23 +153,39 @@ func TestShellOwnerObservedFailureTargetBindsThroughEventHubAndFileSnapshot(t *t
 		t.Fatalf("restart lost committed Shell target authority: aggregate=%+v err=%v", loaded, err)
 	}
 
-	// Replaying the exact execution key must query the committed receipt rather
-	// than execute the replacement command or manufacture a new observation.
+	// Replaying the exact sealed execution must query the committed receipt rather
+	// than execute again or manufacture a new observation.
 	dispatch := loaded.CompletedDispatches[0]
 	execution := dispatch.OperationExecutions[0]
+	operations, err := orderedCandidateOperations(dispatch.Candidate)
+	if err != nil || len(operations) != 1 {
+		t.Fatalf("completed Shell operations = %+v err=%v", operations, err)
+	}
+	operation := operations[0]
+	catalog := runtimeOwnerCatalogForOperation(loaded.Facts.Resources.OperationAdmissibilities, loaded.Facts.Resources.PrerequisiteObservations, operation, execution.AdmissibilitySnapshotID, execution.AcquisitionBinding)
+	observation := runtimeOwnerCatalogObservationForOperation(loaded.Facts.Resources.PrerequisiteObservations, catalog)
+	if catalog == nil || observation == nil {
+		t.Fatalf("completed Shell dispatch lost owner catalog binding: %+v", loaded.Facts.Resources)
+	}
+	sealed, err := shellevents.SealRuntimeOperation(operation, *catalog, shellevents.RuntimeExecutionSealInput{
+		CatalogObservation: *observation, TargetRole: loaded.Facts.Focus.TargetRole,
+		ValidationScopeTargetRefs: runtimeValidationScopeTargetRefs(loaded.Facts, operation),
+		EvidencePolicies:          loaded.Facts.Activation.EvidencePolicies,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
 	replayed := sendObservedShellExecution(t, ctx, hub, shellevents.ExecuteOperationCommand{
 		RuntimeOperationExecutionContext: runtimecontract.RuntimeOperationExecutionContext{
-			Execution:   runtimecontract.RuntimeOperationExecutionEnvelope{ExecutionKey: execution.ExecutionKey, Fence: execution.Fence, ExpectedEffectScope: execution.ExpectedEffectScope},
+			Execution: runtimecontract.RuntimeOperationExecutionEnvelope{
+				ExecutionKey: execution.ExecutionKey, Fence: execution.Fence, ExpectedEffectScope: execution.ExpectedEffectScope,
+				AdmissibilitySnapshotID: execution.AdmissibilitySnapshotID, AcquisitionBinding: execution.AcquisitionBinding,
+			},
 			WorkspaceID: loaded.Facts.WorkspaceID, RunID: loaded.Facts.RunID, DispatchID: dispatch.ID, Transaction: dispatch.Transaction,
-			OperationID: "validate-with-observed-target", EvidenceKind: runtimecontract.EvidenceKindValidation,
-			WorkspaceDeliverableDirectory: workspaceDirectory, TargetRefs: []string{"replacement-entry.sh"},
+			OperationID: operation.ID, CoverageWorkItemIDs: operation.CoverageWorkItemIDs, EvidenceKind: runtimecontract.EvidenceKindValidation,
+			WorkspaceDeliverableDirectory: workspaceDirectory, TargetRefs: operation.TargetRefs,
 		},
-		TargetRole:        "implementation",
-		ValidationRecipes: runtimecontract.RuntimeValidationRecipeDeclarationsFromEvidencePolicies([]runtimecontract.RuntimeEvidencePolicy{policy}),
-		Data: shellevents.OperationData{
-			ValidationRecipeID: recipeID, TargetRefs: []string{"replacement-entry.sh"},
-			ManagedValidation: runtimecontract.RuntimeManagedValidation{RuntimeManaged: true, Kind: runtimecontract.RuntimeBlockKindManagedValidationSession},
-		},
+		SealedOperation: sealed,
 	})
 	diagnostic := replayed.Receipt.Feedback.OriginalDiagnostic
 	if replayed.Receipt.ExecutionKey != execution.ExecutionKey || diagnostic == nil || diagnostic.TargetObservation == nil ||
@@ -237,7 +267,7 @@ func TestShellOwnerCatalogStaleRestartDoesNotReuseFailureTarget(t *testing.T) {
 	}
 }
 
-func addObservedShellFailureTargetFreshness(t *testing.T, ctx context.Context, hub magicevent.Hub, aggregate *RuntimeAggregate, workspaceDirectory string) {
+func addObservedShellFailureTargetFreshness(t *testing.T, ctx context.Context, hub magicevent.Hub, aggregate *RuntimeAggregate, workspaceDirectory string) runtimecontract.RuntimeOperationAdmissibility {
 	t.Helper()
 	manifestPrerequisite := runtimecontract.RuntimePrerequisite{
 		ID: "manifest:shell-observed-target", Kind: runtimecontract.PrerequisiteKindManifest,
@@ -286,6 +316,7 @@ func addObservedShellFailureTargetFreshness(t *testing.T, ctx context.Context, h
 	aggregate.Facts.Resources.OperationAdmissibilities = append(aggregate.Facts.Resources.OperationAdmissibilities, response.Acquisition.Admissibility)
 	aggregate.Facts.Resources.PrerequisiteObservations = append(aggregate.Facts.Resources.PrerequisiteObservations, response.Acquisition.Observation)
 	aggregate.Facts.Prerequisites.Satisfied = append(aggregate.Facts.Prerequisites.Satisfied, prerequisite)
+	return response.Acquisition.Admissibility
 }
 
 func registerRuntimeOperationReceiptOwner(t *testing.T, hub magicevent.Hub, controller *RuntimeController) {
@@ -325,7 +356,13 @@ type runtimeObservedShellExecutor struct {
 }
 
 func (e runtimeObservedShellExecutor) ExecuteRuntimeOperation(ctx context.Context, request RuntimeOperationExecutionRequest) (RuntimeOperationExecutionResult, error) {
-	data, err := shellevents.OperationDataFromRuntimeOperation(request.Operation)
+	if request.OwnerCatalog == nil || request.OwnerCatalogObservation == nil {
+		return RuntimeOperationExecutionResult{}, fmt.Errorf("test Shell executor requires persisted catalog=%t observation=%t", request.OwnerCatalog != nil, request.OwnerCatalogObservation != nil)
+	}
+	sealed, err := shellevents.SealRuntimeOperation(request.Operation, *request.OwnerCatalog, shellevents.RuntimeExecutionSealInput{
+		CatalogObservation: *request.OwnerCatalogObservation, TargetRole: request.TargetRole,
+		ValidationScopeTargetRefs: request.ValidationScopeTargetRefs, EvidencePolicies: request.EvidencePolicies,
+	})
 	if err != nil {
 		return RuntimeOperationExecutionResult{}, err
 	}
@@ -333,16 +370,17 @@ func (e runtimeObservedShellExecutor) ExecuteRuntimeOperation(ctx context.Contex
 		shellevents.TopicExecuteOperation, runtimecontract.RuntimeModuleOrchestrator, runtimecontract.RuntimeModuleShell,
 		magicevent.NewHeader(), ctx, shellevents.ExecuteOperationCommand{
 			RuntimeOperationExecutionContext: runtimecontract.RuntimeOperationExecutionContext{
-				Execution:   runtimecontract.RuntimeOperationExecutionEnvelope{ExecutionKey: request.Execution.ExecutionKey, Fence: request.Execution.Fence, ExpectedEffectScope: request.Execution.ExpectedEffectScope, GovernanceGrant: request.GovernanceGrant},
+				Execution: runtimecontract.RuntimeOperationExecutionEnvelope{
+					ExecutionKey: request.Execution.ExecutionKey, Fence: request.Execution.Fence, ExpectedEffectScope: request.Execution.ExpectedEffectScope,
+					AdmissibilitySnapshotID: request.Execution.AdmissibilitySnapshotID, AcquisitionBinding: request.Execution.AcquisitionBinding,
+					GovernanceGrant: request.GovernanceGrant,
+				},
 				WorkspaceID: request.WorkspaceID, RunID: request.RunID, DispatchID: request.DispatchID, Transaction: request.Transaction,
 				OperationID: request.Operation.ID, CoverageWorkItemIDs: append([]common.CoverageWorkItemID(nil), request.Operation.CoverageWorkItemIDs...),
 				TargetRefs: append([]string(nil), request.Operation.TargetRefs...), EvidenceKind: request.EvidenceKind,
 				EvidencePolicies: append([]runtimecontract.RuntimeEvidencePolicy(nil), request.EvidencePolicies...), WorkspaceDeliverableDirectory: e.deliverableDirectory,
 			},
-			TargetRole:                request.TargetRole,
-			ValidationRecipes:         append([]runtimecontract.RuntimeValidationRecipe(nil), request.ValidationRecipes...),
-			ValidationScopeTargetRefs: append([]string(nil), request.ValidationScopeTargetRefs...),
-			Data:                      data,
+			SealedOperation: sealed,
 		},
 	))
 	if result == nil {

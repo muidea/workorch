@@ -89,7 +89,7 @@ func (m *Biz) handleSSHOperation(event magicevent.Event, result magicevent.Resul
 		setCapabilityError(result, err)
 		return
 	}
-	operation, err := command.SealedOperation.ValidateForExecution(command.RuntimeOperationExecutionContext)
+	operation, authorization, err := command.SealedOperation.ValidateForExecution(command.RuntimeOperationExecutionContext)
 	if err != nil {
 		setCapabilityError(result, err)
 		return
@@ -108,6 +108,30 @@ func (m *Biz) handleSSHOperation(event magicevent.Event, result magicevent.Resul
 		return
 	} else if found {
 		result.Set(sshevents.ExecuteOperationResult{Receipt: receipt}, nil)
+		return
+	}
+	currentRevision := m.runtimeAdapter.admissibilityRevision()
+	if currentRevision != authorization.OwnerRevision {
+		message := "SSH owner policy changed after operation seal"
+		failure := &runtimecontract.FailureFact{
+			Class: runtimecontract.FailureClassExecutionFailure, Code: "operation_admissibility_stale",
+			Signature: "ssh-owner-catalog-stale:" + authorization.CatalogObservation.ObservationID, Message: message,
+			TargetRefs: append([]string(nil), command.TargetRefs...),
+		}
+		receipt := m.newRuntimeOperationReceipt(command.Execution, command.OperationID, runtimecontract.RuntimeOperationExecutionStatusRejected, command.TargetRefs,
+			runtimecontract.RuntimeOperationEvidence{Summary: message}, failure, nil,
+			orchestratorevents.RuntimeOperationReceiptObservation{ObservedEffectScope: runtimecontract.RuntimeEffectNone})
+		receipt.PrerequisiteStale = &runtimecontract.RuntimePrerequisiteStale{
+			PrerequisiteID: authorization.PrerequisiteID, ObservationID: authorization.CatalogObservation.ObservationID,
+			Domain: runtimecontract.RuntimeResourceOwnerCatalog, OwnerModuleID: ModuleID, SubjectRef: "ssh_runtime_policy",
+			ExpectedRevision: authorization.OwnerRevision, ObservedRevision: currentRevision, Reason: message,
+		}
+		committed, commitErr := m.commitRuntimeOperationReceipt(event.Context(), command.WorkspaceID, command.RunID, command.Transaction.AuthoritySnapshotID, command.DispatchID, command.Execution, receipt)
+		if commitErr != nil {
+			setCapabilityError(result, commitErr)
+			return
+		}
+		result.Set(sshevents.ExecuteOperationResult{Receipt: committed}, nil)
 		return
 	}
 	requirement := sshApprovalRequirement(data)

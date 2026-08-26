@@ -30,7 +30,7 @@ func TestDecisionWorkspaceDeletionFenceRetainAndPurgeAreStable(t *testing.T) {
 	t.Cleanup(func() { hub.Terminate(ctx) })
 	repos := memory.NewDecisionOwnerRepositorySet()
 	module := New()
-	if err := module.Configure(decisionbiz.Dependencies{Tickets: repos.Tickets, Resolutions: repos.Resolutions, WorkspaceDeletions: repos.WorkspaceDeletions, EventHub: hub}); err != nil {
+	if err := module.Configure(decisionbiz.Dependencies{OwnerRepositories: decisionTestOwnerRepositories(repos.Tickets, repos.Resolutions, repos.WorkspaceDeletions), EventHub: hub}); err != nil {
 		t.Fatal(err)
 	}
 	if err := module.Start(); err != nil {
@@ -130,7 +130,7 @@ func TestDecisionFileDeletionFenceLinearizesAcrossRepositorySets(t *testing.T) {
 			hub := magicevent.NewHub(32)
 			t.Cleanup(func() { hub.Terminate(ctx) })
 			module := New()
-			if err := module.Configure(decisionbiz.Dependencies{Tickets: first.Tickets, Resolutions: first.Resolutions, WorkspaceDeletions: first.DecisionDeletions, EventHub: hub}); err != nil {
+			if err := module.Configure(decisionbiz.Dependencies{OwnerRepositories: decisionTestOwnerRepositories(first.Tickets, first.Resolutions, first.DecisionDeletions), EventHub: hub}); err != nil {
 				t.Fatal(err)
 			}
 			if err := module.Start(); err != nil {
@@ -308,8 +308,7 @@ func TestModuleConfigureRequiresCoreDependencies(t *testing.T) {
 		name string
 		deps decisionbiz.Dependencies
 	}{
-		{name: "missing tickets", deps: func() decisionbiz.Dependencies { d := base; d.Tickets = nil; return d }()},
-		{name: "missing resolutions", deps: func() decisionbiz.Dependencies { d := base; d.Resolutions = nil; return d }()},
+		{name: "missing owner bundle", deps: decisionbiz.Dependencies{EventHub: base.EventHub}},
 		{name: "missing event hub", deps: func() decisionbiz.Dependencies { d := base; d.EventHub = nil; return d }()},
 	}
 	for _, tc := range tests {
@@ -339,7 +338,7 @@ func TestDecisionTicketCommandGetHonorsScope(t *testing.T) {
 	}
 
 	module := New()
-	if err := module.Configure(decisionbiz.Dependencies{WorkspaceDeletions: memory.NewDecisionWorkspaceDeletionRepository(), Tickets: tickets, Resolutions: resolutions, EventHub: rawHub, BackgroundRoutine: magictask.NewBackgroundRoutine(1)}); err != nil {
+	if err := module.Configure(decisionbiz.Dependencies{OwnerRepositories: decisionTestOwnerRepositories(tickets, resolutions, memory.NewDecisionWorkspaceDeletionRepository()), EventHub: rawHub, BackgroundRoutine: magictask.NewBackgroundRoutine(1)}); err != nil {
 		t.Fatalf("Setup: %v", err)
 	}
 	if err := module.Start(); err != nil {
@@ -403,7 +402,7 @@ func TestDecisionTicketCommandListByRunHonorsWorkspaceScope(t *testing.T) {
 	}
 
 	module := New()
-	if err := module.Configure(decisionbiz.Dependencies{WorkspaceDeletions: memory.NewDecisionWorkspaceDeletionRepository(), Tickets: tickets, Resolutions: resolutions, EventHub: rawHub}); err != nil {
+	if err := module.Configure(decisionbiz.Dependencies{OwnerRepositories: decisionTestOwnerRepositories(tickets, resolutions, memory.NewDecisionWorkspaceDeletionRepository()), EventHub: rawHub}); err != nil {
 		t.Fatalf("Setup: %v", err)
 	}
 	if err := module.Start(); err != nil {
@@ -443,7 +442,7 @@ func TestDecisionTicketListsAreExplicitBoundedAndCompositeCursorPaged(t *testing
 		}
 	}
 	module := New()
-	if err := module.Configure(decisionbiz.Dependencies{WorkspaceDeletions: memory.NewDecisionWorkspaceDeletionRepository(), Tickets: tickets, Resolutions: resolutions, EventHub: rawHub}); err != nil {
+	if err := module.Configure(decisionbiz.Dependencies{OwnerRepositories: decisionTestOwnerRepositories(tickets, resolutions, memory.NewDecisionWorkspaceDeletionRepository()), EventHub: rawHub}); err != nil {
 		t.Fatalf("Configure: %v", err)
 	}
 	if err := module.Start(); err != nil {
@@ -510,7 +509,7 @@ func TestDecisionMutationCommandsHonorWorkspaceScope(t *testing.T) {
 	}
 
 	module := New()
-	if err := module.Configure(decisionbiz.Dependencies{WorkspaceDeletions: memory.NewDecisionWorkspaceDeletionRepository(), Tickets: tickets, Resolutions: resolutions, EventHub: rawHub}); err != nil {
+	if err := module.Configure(decisionbiz.Dependencies{OwnerRepositories: decisionTestOwnerRepositories(tickets, resolutions, memory.NewDecisionWorkspaceDeletionRepository()), EventHub: rawHub}); err != nil {
 		t.Fatalf("Setup: %v", err)
 	}
 	if err := module.Start(); err != nil {
@@ -542,10 +541,9 @@ func TestDecisionMutationCommandsHonorWorkspaceScope(t *testing.T) {
 
 }
 
-func TestDecisionResolveCommandWithoutScopeResolvesUniqueOpenTicket(t *testing.T) {
+func TestDecisionResolveCommandWithoutWorkspaceScopeFailsClosed(t *testing.T) {
 	ctx := context.Background()
 	rawHub := magicevent.NewHub(16)
-	defer subscribeDecisionEvidenceAck(rawHub)()
 	tickets := memory.NewDecisionTicketRepository()
 	resolutions := memory.NewDecisionResolutionRepository()
 	ticketID := common.TicketID("ticket-unscoped-unique")
@@ -561,7 +559,7 @@ func TestDecisionResolveCommandWithoutScopeResolvesUniqueOpenTicket(t *testing.T
 	}
 
 	module := New()
-	if err := module.Configure(decisionbiz.Dependencies{WorkspaceDeletions: memory.NewDecisionWorkspaceDeletionRepository(), Tickets: tickets, Resolutions: resolutions, EventHub: rawHub}); err != nil {
+	if err := module.Configure(decisionbiz.Dependencies{OwnerRepositories: decisionTestOwnerRepositories(tickets, resolutions, memory.NewDecisionWorkspaceDeletionRepository()), EventHub: rawHub}); err != nil {
 		t.Fatalf("Setup: %v", err)
 	}
 	if err := module.Start(); err != nil {
@@ -573,28 +571,28 @@ func TestDecisionResolveCommandWithoutScopeResolvesUniqueOpenTicket(t *testing.T
 		}
 	})
 
-	response, err := sendDecisionTestCommand[decisionevents.EnsureResolvedResult](ctx, rawHub, decisionevents.TopicDecisionCommandEnsureResolved, decisionevents.EnsureResolvedCommand{
+	_, err := sendDecisionTestCommand[decisionevents.EnsureResolvedResult](ctx, rawHub, decisionevents.TopicDecisionCommandEnsureResolved, decisionevents.EnsureResolvedCommand{
 		TicketID:     ticketID,
 		ResolutionID: "resolution-unscoped-unique",
 		Type:         "provide_missing_info",
 		Payload:      mustDecisionEventPayload(t, map[string]any{"answer": "ok"}),
 	})
+	if !errors.Is(err, common.ErrInvalidArgument) {
+		t.Fatalf("unscoped resolve err = %v, want invalid argument", err)
+	}
+	item, err := tickets.Get(common.ContextWithRuntimeWorkspaceID(ctx, "ws-ticket-unscoped-unique"), ticketID)
 	if err != nil {
-		t.Fatalf("unscoped resolve err = %v, want response", err)
+		t.Fatalf("get ticket: %v", err)
 	}
-	if response.Ticket == nil || response.Ticket.ID != ticketID || response.Ticket.WorkspaceID != "ws-ticket-unscoped-unique" || response.Ticket.State != common.DecisionTicketStateResolved {
-		t.Fatalf("response ticket = %+v, want resolved unique ticket", response.Ticket)
+	if item.State != common.DecisionTicketStateOpen {
+		t.Fatalf("ticket state = %s, want open", item.State)
 	}
-	resolution, err := resolutions.GetByTicketID(ctx, ticketID)
-	if err != nil {
-		t.Fatalf("get resolution: %v", err)
-	}
-	if resolution.ID != "resolution-unscoped-unique" || resolution.Type != "provide_missing_info" {
-		t.Fatalf("resolution = %+v, want unscoped unique resolution", resolution)
+	if _, err := resolutions.GetByTicketID(common.ContextWithRuntimeWorkspaceID(ctx, "ws-ticket-unscoped-unique"), ticketID); !errors.Is(err, common.ErrNotFound) {
+		t.Fatalf("resolution err = %v, want not found", err)
 	}
 }
 
-func TestDecisionResolveCommandWithoutScopeConflictsOnDuplicateOpenTickets(t *testing.T) {
+func TestDecisionResolveCommandWithoutWorkspaceScopeDoesNotDiscoverDuplicateTickets(t *testing.T) {
 	ctx := context.Background()
 	rawHub := magicevent.NewHub(16)
 	tickets := memory.NewDecisionTicketRepository()
@@ -622,7 +620,7 @@ func TestDecisionResolveCommandWithoutScopeConflictsOnDuplicateOpenTickets(t *te
 	}
 
 	module := New()
-	if err := module.Configure(decisionbiz.Dependencies{WorkspaceDeletions: memory.NewDecisionWorkspaceDeletionRepository(), Tickets: tickets, Resolutions: resolutions, EventHub: rawHub}); err != nil {
+	if err := module.Configure(decisionbiz.Dependencies{OwnerRepositories: decisionTestOwnerRepositories(tickets, resolutions, memory.NewDecisionWorkspaceDeletionRepository()), EventHub: rawHub}); err != nil {
 		t.Fatalf("Setup: %v", err)
 	}
 	if err := module.Start(); err != nil {
@@ -639,8 +637,8 @@ func TestDecisionResolveCommandWithoutScopeConflictsOnDuplicateOpenTickets(t *te
 		ResolutionID: "resolution-unscoped-duplicate",
 		Type:         "provide_missing_info",
 	})
-	if !errors.Is(err, common.ErrConflict) {
-		t.Fatalf("unscoped duplicate resolve err = %v, want conflict", err)
+	if !errors.Is(err, common.ErrInvalidArgument) {
+		t.Fatalf("unscoped duplicate resolve err = %v, want invalid argument", err)
 	}
 	if _, err := resolutions.GetByTicketID(ctx, ticketID); !errors.Is(err, common.ErrNotFound) {
 		t.Fatalf("duplicate resolve resolution err = %v, want not found", err)
@@ -682,7 +680,7 @@ func TestDecisionResolutionCommandGetHonorsTicketScope(t *testing.T) {
 	}
 
 	module := New()
-	if err := module.Configure(decisionbiz.Dependencies{WorkspaceDeletions: memory.NewDecisionWorkspaceDeletionRepository(), Tickets: tickets, Resolutions: resolutions, EventHub: rawHub}); err != nil {
+	if err := module.Configure(decisionbiz.Dependencies{OwnerRepositories: decisionTestOwnerRepositories(tickets, resolutions, memory.NewDecisionWorkspaceDeletionRepository()), EventHub: rawHub}); err != nil {
 		t.Fatalf("Configure: %v", err)
 	}
 	if err := module.Start(); err != nil {
@@ -716,7 +714,7 @@ func TestDecisionResolutionCommandGetHonorsTicketScope(t *testing.T) {
 	}
 }
 
-func TestDecisionResolutionCommandWithoutScopeConflictsOnDuplicateOpenTickets(t *testing.T) {
+func TestDecisionResolutionCommandWithoutScopeConflictsOnMixedStateDuplicateTickets(t *testing.T) {
 	ctx := context.Background()
 	rawHub := magicevent.NewHub(16)
 	tickets := memory.NewDecisionTicketRepository()
@@ -734,7 +732,7 @@ func TestDecisionResolutionCommandWithoutScopeConflictsOnDuplicateOpenTickets(t 
 			ID:          ticketID,
 			WorkspaceID: "ws-resolution-duplicate-b",
 			RunID:       "run-resolution-duplicate-b",
-			State:       common.DecisionTicketStateOpen,
+			State:       common.DecisionTicketStateResolved,
 			Reason:      "decision resolution duplicate test",
 		},
 	} {
@@ -744,7 +742,7 @@ func TestDecisionResolutionCommandWithoutScopeConflictsOnDuplicateOpenTickets(t 
 	}
 
 	module := New()
-	if err := module.Configure(decisionbiz.Dependencies{WorkspaceDeletions: memory.NewDecisionWorkspaceDeletionRepository(), Tickets: tickets, Resolutions: resolutions, EventHub: rawHub}); err != nil {
+	if err := module.Configure(decisionbiz.Dependencies{OwnerRepositories: decisionTestOwnerRepositories(tickets, resolutions, memory.NewDecisionWorkspaceDeletionRepository()), EventHub: rawHub}); err != nil {
 		t.Fatalf("Configure: %v", err)
 	}
 	if err := module.Start(); err != nil {
@@ -766,11 +764,10 @@ func TestDecisionResolutionCommandWithoutScopeConflictsOnDuplicateOpenTickets(t 
 }
 
 func decisionModuleContractDependencies() decisionbiz.Dependencies {
-	return decisionbiz.Dependencies{WorkspaceDeletions: memory.NewDecisionWorkspaceDeletionRepository(),
-		Tickets:     memory.NewDecisionTicketRepository(),
-		Resolutions: memory.NewDecisionResolutionRepository(),
-		EventHub:    magicevent.NewHub(16),
-	}
+	return decisionbiz.Dependencies{OwnerRepositories: decisionTestOwnerRepositories(
+		memory.NewDecisionTicketRepository(),
+		memory.NewDecisionResolutionRepository(), memory.NewDecisionWorkspaceDeletionRepository()), EventHub: magicevent.NewHub(16)}
+
 }
 
 func TestRuntimeGovernanceOpenRequiresOrchestratorSourceAndMatchingWorkspaceContext(t *testing.T) {
@@ -778,7 +775,7 @@ func TestRuntimeGovernanceOpenRequiresOrchestratorSourceAndMatchingWorkspaceCont
 	rawHub := magicevent.NewHub(16)
 	tickets := memory.NewDecisionTicketRepository()
 	module := New()
-	if err := module.Configure(decisionbiz.Dependencies{WorkspaceDeletions: memory.NewDecisionWorkspaceDeletionRepository(), Tickets: tickets, Resolutions: memory.NewDecisionResolutionRepository(), EventHub: rawHub}); err != nil {
+	if err := module.Configure(decisionbiz.Dependencies{OwnerRepositories: decisionTestOwnerRepositories(tickets, memory.NewDecisionResolutionRepository(), memory.NewDecisionWorkspaceDeletionRepository()), EventHub: rawHub}); err != nil {
 		t.Fatalf("Configure: %v", err)
 	}
 	if err := module.Start(); err != nil {
@@ -848,7 +845,7 @@ func TestRuntimeGovernanceInvalidCommitResultRemainsRecoverable(t *testing.T) {
 				t.Fatalf("create ticket: %v", err)
 			}
 			module := New()
-			if err := module.Configure(decisionbiz.Dependencies{WorkspaceDeletions: memory.NewDecisionWorkspaceDeletionRepository(), Tickets: tickets, Resolutions: resolutions, EventHub: rawHub}); err != nil {
+			if err := module.Configure(decisionbiz.Dependencies{OwnerRepositories: decisionTestOwnerRepositories(tickets, resolutions, memory.NewDecisionWorkspaceDeletionRepository()), EventHub: rawHub}); err != nil {
 				t.Fatalf("Configure: %v", err)
 			}
 			if err := module.Start(); err != nil {
@@ -900,7 +897,7 @@ func TestRuntimeGovernanceEvidenceFailureRecoversAfterFinalize(t *testing.T) {
 		t.Fatalf("create ticket: %v", err)
 	}
 	module := New()
-	if err := module.Configure(decisionbiz.Dependencies{WorkspaceDeletions: memory.NewDecisionWorkspaceDeletionRepository(), Tickets: tickets, Resolutions: resolutions, EventHub: rawHub}); err != nil {
+	if err := module.Configure(decisionbiz.Dependencies{OwnerRepositories: decisionTestOwnerRepositories(tickets, resolutions, memory.NewDecisionWorkspaceDeletionRepository()), EventHub: rawHub}); err != nil {
 		t.Fatalf("Configure: %v", err)
 	}
 	if err := module.Start(); err != nil {
@@ -977,7 +974,7 @@ func TestRuntimeGovernanceResolutionDoesNotResolveTicketBeforeAggregateCommit(t 
 		t.Fatalf("create ticket: %v", err)
 	}
 	module := New()
-	if err := module.Configure(decisionbiz.Dependencies{WorkspaceDeletions: memory.NewDecisionWorkspaceDeletionRepository(), Tickets: tickets, Resolutions: resolutions, EventHub: rawHub, BackgroundRoutine: magictask.NewBackgroundRoutine(1)}); err != nil {
+	if err := module.Configure(decisionbiz.Dependencies{OwnerRepositories: decisionTestOwnerRepositories(tickets, resolutions, memory.NewDecisionWorkspaceDeletionRepository()), EventHub: rawHub, BackgroundRoutine: magictask.NewBackgroundRoutine(1)}); err != nil {
 		t.Fatalf("Configure: %v", err)
 	}
 	if err := module.Start(); err != nil {

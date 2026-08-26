@@ -45,7 +45,13 @@ func (m *Biz) ensureTicketCreatedNotification(ctx context.Context, ticket *decis
 func (m *Biz) recordAndPublishResolvedTicket(ctx context.Context, ticket *decisionmodel.Ticket, resolution *decisionmodel.Resolution, transitioned bool) error {
 	runtimeProposal := ticket != nil && ticket.DecisionKind == "runtime_governance" && ticket.RuntimeGovernanceProposal != nil &&
 		ticket.RuntimeGovernanceProposal.State == decisionmodel.RuntimeGovernanceResolutionProposalCommitted
-	if !runtimeProposal || ticket.RuntimeGovernanceProposal.EvidenceRecordedAt == "" {
+	workspacePreSealClarification := isWorkspacePreSealDefinitionClarification(ticket)
+	// A pre-seal Definition clarification is workspace-scoped and deliberately
+	// has no Run. Its dedicated resolution result plus TicketResolved
+	// notification are the complete delivery contract. Sending it through the
+	// run-scoped Orchestrator evidence command would make a valid admission
+	// resolution fail after Decision has already persisted it.
+	if !workspacePreSealClarification && (!runtimeProposal || ticket.RuntimeGovernanceProposal.EvidenceRecordedAt == "") {
 		if err := m.recordDecisionResolutionEvidence(ctx, ticket, resolution); err != nil {
 			return err
 		}
@@ -101,6 +107,15 @@ func (m *Biz) recordAndPublishResolvedTicket(ctx context.Context, ticket *decisi
 		*ticket = *updated
 	}
 	return nil
+}
+
+func isWorkspacePreSealDefinitionClarification(ticket *decisionmodel.Ticket) bool {
+	return ticket != nil &&
+		ticket.DecisionKind == "workspace_definition_clarification" &&
+		ticket.RunID == "" &&
+		ticket.StepID == "" &&
+		ticket.DefinitionClarification != nil &&
+		ticket.DefinitionClarification.Class == decisionmodel.DefinitionClarificationWorkspacePreSeal
 }
 
 func ticketChangedData(ticket *decisionmodel.Ticket) decisionevents.TicketChangedData {

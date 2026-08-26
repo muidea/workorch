@@ -74,8 +74,9 @@ internal directory。Eventstream 是最后 owner，使前序 owner purge evidenc
 ## 组件交互及合同
 
 - Workspace、Goal、DoD 和 Template 的 CRUD input，以及 Template defaults ensure input，均由
-  `blocks/workspace/pkg/events` 定义具体 command 类型；普通 CRUD 当前共享 owner-local typed result union
-  `WorkspaceCommandResult`。该 union 不包含 `map[string]any` authority，也不替代各操作的具体 command。
+  `blocks/workspace/pkg/events` 定义具体 command/result 类型。Workspace/Goal/DoD/Template 的 item、list、delete receipt
+  与 LLM-selection CAS 分别使用窄结果；EventHub 上不存在依赖“哪个字段非空”判别语义的共享 result union。四个 command
+  family 只在 Workspace Biz 内通过包私有响应结构复用 reducer plumbing，不能成为跨组件合同。
 - Workspace creation command 只携带 identity、描述和已解析目录，不携带 `State` 或 active slot。
   `workspace.creation` owner-private event/dispatcher 是唯一 repository Create 入口，由 Workspace owner
   选择 initial `active` 并绑定 matching workspace context；protocol/service 不得构造 caller-selected initial state。

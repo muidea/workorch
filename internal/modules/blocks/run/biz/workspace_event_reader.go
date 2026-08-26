@@ -22,7 +22,8 @@ func (r workspaceEventReader) Get(ctx context.Context, id common.WorkspaceID) (*
 	if r.send == nil || id == "" {
 		return nil, common.ErrInvalidArgument
 	}
-	ev := magicevent.NewEventWithContext(workspaceevents.TopicWorkspaceCommandGet, modulecommon.ModuleID, workspaceevents.CommandDestination, magicevent.NewHeader(), ctx, workspaceevents.GetWorkspaceCommand{WorkspaceID: id})
+	command := workspaceevents.GetWorkspaceCommand{WorkspaceID: id}
+	ev := magicevent.NewEventWithContext(workspaceevents.TopicWorkspaceCommandGet, modulecommon.ModuleID, workspaceevents.CommandDestination, magicevent.NewHeader(), ctx, command)
 	ev.BindLaneKey(events.EventHubLaneKeyFor(workspaceevents.Contracts(), workspaceevents.TopicWorkspaceCommandGet, eventcontract.LaneScope{
 		SubjectType: "workspace",
 		SubjectID:   string(id),
@@ -39,9 +40,12 @@ func (r workspaceEventReader) Get(ctx context.Context, id common.WorkspaceID) (*
 	if resultErr != nil {
 		return nil, resultErr
 	}
-	response, ok := data.(workspaceevents.WorkspaceCommandResult)
-	if !ok || response.Workspace == nil {
-		return nil, common.ErrNotFound
+	response, ok := data.(workspaceevents.WorkspaceResult)
+	if !ok {
+		return nil, common.ErrInvalidArgument
+	}
+	if err := response.ValidateFor(command); err != nil {
+		return nil, err
 	}
 	workspace := response.Workspace
 	ret := &workspacemodel.Workspace{

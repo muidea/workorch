@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"slices"
 	"strings"
+	"time"
 
 	decisioncontracts "github.com/muidea/workorch/internal/modules/blocks/decision/biz/contracts"
 	modulecommon "github.com/muidea/workorch/internal/modules/blocks/decision/pkg/common"
@@ -142,21 +143,14 @@ func (s *mutationService) resolveTicketItem(ctx context.Context, ticket *decisio
 		return nil, common.ErrConflict
 	}
 
-	resolution := &decisionModel.Resolution{
-		ID:                 cmd.ResolutionID,
-		TicketID:           cmd.TicketID,
-		Type:               cmd.Type,
-		Payload:            common.RedactSensitivePayload(cmd.Payload),
-		ContinuationAction: nonEmptyString(cmd.ContinuationAction, stringPayloadValue(cmd.Payload, "continuationAction")),
-		ResumeRunID:        nonEmptyRunID(cmd.ResumeRunID, common.RunID(stringPayloadValue(cmd.Payload, "resumeRunId"))),
-		SuccessorRunID:     nonEmptyRunID(cmd.SuccessorRunID, common.RunID(stringPayloadValue(cmd.Payload, "successorRunId"))),
-	}
+	resolution := resolutionFromResolveCommand(cmd)
 	if err := s.resolutions.Create(ctx, resolution); err != nil {
 		return nil, err
 	}
 
 	next, err := s.applyLifecycleInternalEvent(ctx, ticket, lifecycleInternalEvent{
 		Kind: lifecycleInternalEventResolutionObserved, TicketID: ticket.ID,
+		ResolvedAt: resolution.ResolvedAt,
 		ResolvedBy: nonEmptyString(stringPayloadValue(cmd.Payload, "resolvedBy"), stringPayloadValue(cmd.Payload, "actor")),
 	})
 	if err != nil {
@@ -225,9 +219,12 @@ func (s *mutationService) EnsureResolvedTicketAndReturnWithTransition(ctx contex
 		if !resolutionMatchesCommand(existingResolution, cmd) {
 			return nil, nil, false, common.ErrConflict
 		}
+		if ticket.State == common.DecisionTicketStateResolved && strings.TrimSpace(ticket.ResolvedAt) != strings.TrimSpace(existingResolution.ResolvedAt) {
+			return nil, nil, false, common.ErrConflict
+		}
 		transitioned := ticket.State != common.DecisionTicketStateResolved
 		if ticket.State != common.DecisionTicketStateResolved {
-			next, err := s.applyLifecycleInternalEvent(ctx, ticket, lifecycleInternalEvent{Kind: lifecycleInternalEventResolutionRecovered, TicketID: ticket.ID})
+			next, err := s.applyLifecycleInternalEvent(ctx, ticket, lifecycleInternalEvent{Kind: lifecycleInternalEventResolutionRecovered, TicketID: ticket.ID, ResolvedAt: existingResolution.ResolvedAt})
 			if err != nil {
 				return nil, nil, false, err
 			}
@@ -461,7 +458,7 @@ func (s *mutationService) FinalizeRuntimeGovernanceResolutionProposalWithTransit
 		return nil, nil, false, err
 	}
 	if resolution != nil {
-		if !resolutionMatchesCommand(resolution, cmd) {
+		if !resolutionMatchesCommand(resolution, cmd) || strings.TrimSpace(resolution.ResolvedAt) == "" {
 			return nil, nil, false, common.ErrConflict
 		}
 	} else {
@@ -480,6 +477,7 @@ func (s *mutationService) FinalizeRuntimeGovernanceResolutionProposalWithTransit
 	transitioned := ticket.State == common.DecisionTicketStateOpen
 	ticket, err = s.applyLifecycleInternalEvent(ctx, ticket, lifecycleInternalEvent{
 		Kind: lifecycleInternalEventProposalCommitted, TicketID: ticket.ID,
+		ResolvedAt: resolution.ResolvedAt,
 		ResolvedBy: nonEmptyString(stringPayloadValue(cmd.Payload, "resolvedBy"), stringPayloadValue(cmd.Payload, "actor")),
 	})
 	if err != nil {
@@ -566,6 +564,7 @@ func resolutionFromResolveCommand(cmd decisioncontracts.ResolveTicketCommand) *d
 	return &decisionModel.Resolution{
 		ID:                 cmd.ResolutionID,
 		TicketID:           cmd.TicketID,
+		ResolvedAt:         newDecisionResolutionTimestamp(),
 		Type:               cmd.Type,
 		Payload:            common.RedactSensitivePayload(cmd.Payload),
 		ContinuationAction: nonEmptyString(cmd.ContinuationAction, stringPayloadValue(cmd.Payload, "continuationAction")),
@@ -574,8 +573,12 @@ func resolutionFromResolveCommand(cmd decisioncontracts.ResolveTicketCommand) *d
 	}
 }
 
+func newDecisionResolutionTimestamp() string {
+	return time.Now().UTC().Format(time.RFC3339Nano)
+}
+
 func resolutionMatchesCommand(existing *decisionModel.Resolution, cmd decisioncontracts.ResolveTicketCommand) bool {
-	if existing == nil {
+	if existing == nil || strings.TrimSpace(existing.ResolvedAt) == "" {
 		return false
 	}
 	expected := resolutionFromResolveCommand(cmd)

@@ -46,17 +46,20 @@ type MemoryItemRepository struct {
 	mu                 sync.RWMutex
 	items              map[string]*memorymodel.MemoryItem
 	workspaceDeletions *MemoryWorkspaceDeletionRepository
+	ownerBinding       repository.OwnerRepositoryBinding
 }
 
 type MemoryRecallTraceRepository struct {
 	mu                 sync.RWMutex
 	items              map[string]*memorymodel.MemoryRecallTrace
 	workspaceDeletions *MemoryWorkspaceDeletionRepository
+	ownerBinding       repository.OwnerRepositoryBinding
 }
 
 type MemoryWorkspaceDeletionRepository struct {
-	mu    sync.RWMutex
-	items map[common.WorkspaceID]*memorymodel.WorkspaceDeletion
+	mu           sync.RWMutex
+	items        map[common.WorkspaceID]*memorymodel.WorkspaceDeletion
+	ownerBinding repository.OwnerRepositoryBinding
 }
 
 type SkillRepository struct {
@@ -78,47 +81,134 @@ type ResultRepository struct {
 	mu                 sync.RWMutex
 	items              map[string]*resultmodel.Result
 	workspaceDeletions *ResultWorkspaceDeletionRepository
+	ownerBinding       repository.OwnerRepositoryBinding
 }
 
 type ArtifactRepository struct {
 	mu                 sync.RWMutex
 	items              map[string]*resultmodel.Artifact
 	workspaceDeletions *ResultWorkspaceDeletionRepository
+	ownerBinding       repository.OwnerRepositoryBinding
 }
 
 type ResultWorkspaceDeletionRepository struct {
-	mu    sync.RWMutex
-	items map[common.WorkspaceID]*resultmodel.WorkspaceDeletion
+	mu           sync.RWMutex
+	items        map[common.WorkspaceID]*resultmodel.WorkspaceDeletion
+	ownerBinding repository.OwnerRepositoryBinding
 }
 
 type MemoryOwnerRepositorySet struct {
 	Items              *MemoryItemRepository
 	RecallTraces       *MemoryRecallTraceRepository
 	WorkspaceDeletions *MemoryWorkspaceDeletionRepository
+	binding            repository.OwnerRepositoryBinding
 }
 
 func NewMemoryOwnerRepositorySet() MemoryOwnerRepositorySet {
-	deletions := NewMemoryWorkspaceDeletionRepository()
+	binding := repository.NewMemoryOwnerRepositoryBinding()
+	deletions := &MemoryWorkspaceDeletionRepository{items: map[common.WorkspaceID]*memorymodel.WorkspaceDeletion{}, ownerBinding: binding}
 	return MemoryOwnerRepositorySet{
-		Items:              &MemoryItemRepository{items: map[string]*memorymodel.MemoryItem{}, workspaceDeletions: deletions},
-		RecallTraces:       &MemoryRecallTraceRepository{items: map[string]*memorymodel.MemoryRecallTrace{}, workspaceDeletions: deletions},
+		Items:              &MemoryItemRepository{items: map[string]*memorymodel.MemoryItem{}, workspaceDeletions: deletions, ownerBinding: binding},
+		RecallTraces:       &MemoryRecallTraceRepository{items: map[string]*memorymodel.MemoryRecallTrace{}, workspaceDeletions: deletions, ownerBinding: binding},
 		WorkspaceDeletions: deletions,
+		binding:            binding,
 	}
+}
+
+func (s MemoryOwnerRepositorySet) MemoryOwnerBinding() repository.OwnerRepositoryBinding {
+	return s.binding
+}
+func (s MemoryOwnerRepositorySet) MemoryOwnerItems() repository.MemoryItemRepository { return s.Items }
+func (s MemoryOwnerRepositorySet) MemoryOwnerRecallTraces() repository.MemoryRecallTraceRepository {
+	return s.RecallTraces
+}
+func (s MemoryOwnerRepositorySet) MemoryOwnerWorkspaceDeletions() repository.MemoryWorkspaceDeletionRepository {
+	return s.WorkspaceDeletions
+}
+func (s MemoryOwnerRepositorySet) OwnerRepositories() repository.MemoryOwnerRepositories {
+	owner, err := repository.NewMemoryOwnerRepositories(s)
+	if err != nil {
+		panic(err)
+	}
+	return owner
 }
 
 type ResultOwnerRepositorySet struct {
 	Results            *ResultRepository
 	Artifacts          *ArtifactRepository
 	WorkspaceDeletions *ResultWorkspaceDeletionRepository
+	binding            repository.OwnerRepositoryBinding
 }
 
 func NewResultOwnerRepositorySet() ResultOwnerRepositorySet {
-	deletions := NewResultWorkspaceDeletionRepository()
+	binding := repository.NewResultOwnerRepositoryBinding()
+	deletions := &ResultWorkspaceDeletionRepository{items: map[common.WorkspaceID]*resultmodel.WorkspaceDeletion{}, ownerBinding: binding}
 	return ResultOwnerRepositorySet{
-		Results:            &ResultRepository{items: map[string]*resultmodel.Result{}, workspaceDeletions: deletions},
-		Artifacts:          &ArtifactRepository{items: map[string]*resultmodel.Artifact{}, workspaceDeletions: deletions},
+		Results:            &ResultRepository{items: map[string]*resultmodel.Result{}, workspaceDeletions: deletions, ownerBinding: binding},
+		Artifacts:          &ArtifactRepository{items: map[string]*resultmodel.Artifact{}, workspaceDeletions: deletions, ownerBinding: binding},
 		WorkspaceDeletions: deletions,
+		binding:            binding,
 	}
+}
+
+func (r *MemoryItemRepository) OwnerRepositoryBinding() repository.OwnerRepositoryBinding {
+	if r == nil {
+		return repository.OwnerRepositoryBinding{}
+	}
+	return r.ownerBinding
+}
+
+func (r *MemoryRecallTraceRepository) OwnerRepositoryBinding() repository.OwnerRepositoryBinding {
+	if r == nil {
+		return repository.OwnerRepositoryBinding{}
+	}
+	return r.ownerBinding
+}
+
+func (r *MemoryWorkspaceDeletionRepository) OwnerRepositoryBinding() repository.OwnerRepositoryBinding {
+	if r == nil {
+		return repository.OwnerRepositoryBinding{}
+	}
+	return r.ownerBinding
+}
+
+func (r *ResultRepository) OwnerRepositoryBinding() repository.OwnerRepositoryBinding {
+	if r == nil {
+		return repository.OwnerRepositoryBinding{}
+	}
+	return r.ownerBinding
+}
+
+func (r *ArtifactRepository) OwnerRepositoryBinding() repository.OwnerRepositoryBinding {
+	if r == nil {
+		return repository.OwnerRepositoryBinding{}
+	}
+	return r.ownerBinding
+}
+
+func (r *ResultWorkspaceDeletionRepository) OwnerRepositoryBinding() repository.OwnerRepositoryBinding {
+	if r == nil {
+		return repository.OwnerRepositoryBinding{}
+	}
+	return r.ownerBinding
+}
+
+func (s ResultOwnerRepositorySet) ResultOwnerBinding() repository.OwnerRepositoryBinding {
+	return s.binding
+}
+func (s ResultOwnerRepositorySet) ResultOwnerResults() repository.ResultRepository { return s.Results }
+func (s ResultOwnerRepositorySet) ResultOwnerArtifacts() repository.ArtifactRepository {
+	return s.Artifacts
+}
+func (s ResultOwnerRepositorySet) ResultOwnerWorkspaceDeletions() repository.ResultWorkspaceDeletionRepository {
+	return s.WorkspaceDeletions
+}
+func (s ResultOwnerRepositorySet) OwnerRepositories() repository.ResultOwnerRepositories {
+	owner, err := repository.NewResultOwnerRepositories(s)
+	if err != nil {
+		panic(err)
+	}
+	return owner
 }
 
 type workspaceDeletionGuardContextKey struct{}
@@ -322,6 +412,7 @@ type EventRecordRepository struct {
 	items              map[string]*eventstream.EventRecord
 	streamPosition     int64
 	workspaceDeletions *EventStreamWorkspaceDeletionRepository
+	ownerBinding       repository.OwnerRepositoryBinding
 }
 
 func workspaceScopedKey(workspaceID common.WorkspaceID, id string) string {
@@ -1371,14 +1462,44 @@ func (r *ArtifactRepository) Delete(ctx context.Context, id common.ArtifactID) e
 type EventStreamOwnerRepositorySet struct {
 	EventRecords       *EventRecordRepository
 	WorkspaceDeletions *EventStreamWorkspaceDeletionRepository
+	binding            repository.OwnerRepositoryBinding
 }
 
 func NewEventStreamOwnerRepositorySet() EventStreamOwnerRepositorySet {
-	deletions := NewEventStreamWorkspaceDeletionRepository()
+	binding := repository.NewEventStreamOwnerRepositoryBinding()
+	deletions := &EventStreamWorkspaceDeletionRepository{items: map[common.WorkspaceID]*eventstream.WorkspaceDeletion{}, ownerBinding: binding}
 	return EventStreamOwnerRepositorySet{
-		EventRecords:       &EventRecordRepository{items: map[string]*eventstream.EventRecord{}, workspaceDeletions: deletions},
+		EventRecords:       &EventRecordRepository{items: map[string]*eventstream.EventRecord{}, workspaceDeletions: deletions, ownerBinding: binding},
 		WorkspaceDeletions: deletions,
+		binding:            binding,
 	}
+}
+
+func (s EventStreamOwnerRepositorySet) EventStreamOwnerBinding() repository.OwnerRepositoryBinding {
+	return s.binding
+}
+func (s EventStreamOwnerRepositorySet) EventStreamOwnerEventRecords() repository.EventRecordRepository {
+	return s.EventRecords
+}
+func (s EventStreamOwnerRepositorySet) EventStreamOwnerWorkspaceDeletions() repository.EventStreamWorkspaceDeletionRepository {
+	return s.WorkspaceDeletions
+}
+func (s EventStreamOwnerRepositorySet) EventStreamOwnerWorkspacePurger() repository.EventStreamWorkspacePurger {
+	return s.EventRecords
+}
+func (s EventStreamOwnerRepositorySet) OwnerRepositories() repository.EventStreamOwnerRepositories {
+	owner, err := repository.NewEventStreamOwnerRepositories(s)
+	if err != nil {
+		panic(err)
+	}
+	return owner
+}
+
+func (r *EventRecordRepository) OwnerRepositoryBinding() repository.OwnerRepositoryBinding {
+	if r == nil {
+		return repository.OwnerRepositoryBinding{}
+	}
+	return r.ownerBinding
 }
 
 func NewEventRecordRepository() *EventRecordRepository {
@@ -3068,6 +3189,7 @@ type DecisionTicketRepository struct {
 	mu                 sync.RWMutex
 	items              map[string]*decision.Ticket
 	workspaceDeletions *DecisionWorkspaceDeletionRepository
+	ownerBinding       repository.OwnerRepositoryBinding
 }
 
 func NewDecisionTicketRepository() *DecisionTicketRepository {
@@ -3281,6 +3403,7 @@ type DecisionResolutionRepository struct {
 	mu                 sync.RWMutex
 	byTicket           map[string]*decision.Resolution
 	workspaceDeletions *DecisionWorkspaceDeletionRepository
+	ownerBinding       repository.OwnerRepositoryBinding
 }
 
 func NewDecisionResolutionRepository() *DecisionResolutionRepository {
@@ -3347,11 +3470,13 @@ type ApprovalRepository struct {
 	mu                 sync.RWMutex
 	items              map[string]*approval.Approval
 	workspaceDeletions *ApprovalWorkspaceDeletionRepository
+	ownerBinding       repository.OwnerRepositoryBinding
 }
 
 type DecisionWorkspaceDeletionRepository struct {
-	mu    sync.RWMutex
-	items map[common.WorkspaceID]*decision.WorkspaceDeletion
+	mu           sync.RWMutex
+	items        map[common.WorkspaceID]*decision.WorkspaceDeletion
+	ownerBinding repository.OwnerRepositoryBinding
 }
 
 func NewDecisionWorkspaceDeletionRepository() *DecisionWorkspaceDeletionRepository {
@@ -3424,8 +3549,9 @@ func (r *DecisionWorkspaceDeletionRepository) WithWorkspacePurgeFence(ctx contex
 }
 
 type ApprovalWorkspaceDeletionRepository struct {
-	mu    sync.RWMutex
-	items map[common.WorkspaceID]*approval.WorkspaceDeletion
+	mu           sync.RWMutex
+	items        map[common.WorkspaceID]*approval.WorkspaceDeletion
+	ownerBinding repository.OwnerRepositoryBinding
 }
 
 func NewApprovalWorkspaceDeletionRepository() *ApprovalWorkspaceDeletionRepository {
@@ -3526,21 +3652,106 @@ type DecisionOwnerRepositorySet struct {
 	Tickets            *DecisionTicketRepository
 	Resolutions        *DecisionResolutionRepository
 	WorkspaceDeletions *DecisionWorkspaceDeletionRepository
+	binding            repository.OwnerRepositoryBinding
 }
 
 func NewDecisionOwnerRepositorySet() DecisionOwnerRepositorySet {
-	d := NewDecisionWorkspaceDeletionRepository()
-	return DecisionOwnerRepositorySet{Tickets: &DecisionTicketRepository{items: map[string]*decision.Ticket{}, workspaceDeletions: d}, Resolutions: &DecisionResolutionRepository{byTicket: map[string]*decision.Resolution{}, workspaceDeletions: d}, WorkspaceDeletions: d}
+	binding := repository.NewDecisionOwnerRepositoryBinding()
+	d := &DecisionWorkspaceDeletionRepository{items: map[common.WorkspaceID]*decision.WorkspaceDeletion{}, ownerBinding: binding}
+	return DecisionOwnerRepositorySet{
+		Tickets:            &DecisionTicketRepository{items: map[string]*decision.Ticket{}, workspaceDeletions: d, ownerBinding: binding},
+		Resolutions:        &DecisionResolutionRepository{byTicket: map[string]*decision.Resolution{}, workspaceDeletions: d, ownerBinding: binding},
+		WorkspaceDeletions: d,
+		binding:            binding,
+	}
+}
+
+func (s DecisionOwnerRepositorySet) DecisionOwnerBinding() repository.OwnerRepositoryBinding {
+	return s.binding
+}
+func (s DecisionOwnerRepositorySet) DecisionOwnerTickets() repository.DecisionTicketRepository {
+	return s.Tickets
+}
+func (s DecisionOwnerRepositorySet) DecisionOwnerResolutions() repository.DecisionResolutionRepository {
+	return s.Resolutions
+}
+func (s DecisionOwnerRepositorySet) DecisionOwnerWorkspaceDeletions() repository.DecisionWorkspaceDeletionRepository {
+	return s.WorkspaceDeletions
+}
+func (s DecisionOwnerRepositorySet) OwnerRepositories() repository.DecisionOwnerRepositories {
+	owner, err := repository.NewDecisionOwnerRepositories(s)
+	if err != nil {
+		panic(err)
+	}
+	return owner
 }
 
 type ApprovalOwnerRepositorySet struct {
 	Approvals          *ApprovalRepository
 	WorkspaceDeletions *ApprovalWorkspaceDeletionRepository
+	binding            repository.OwnerRepositoryBinding
 }
 
 func NewApprovalOwnerRepositorySet() ApprovalOwnerRepositorySet {
-	d := NewApprovalWorkspaceDeletionRepository()
-	return ApprovalOwnerRepositorySet{Approvals: &ApprovalRepository{items: map[string]*approval.Approval{}, workspaceDeletions: d}, WorkspaceDeletions: d}
+	binding := repository.NewApprovalOwnerRepositoryBinding()
+	d := &ApprovalWorkspaceDeletionRepository{items: map[common.WorkspaceID]*approval.WorkspaceDeletion{}, ownerBinding: binding}
+	return ApprovalOwnerRepositorySet{
+		Approvals:          &ApprovalRepository{items: map[string]*approval.Approval{}, workspaceDeletions: d, ownerBinding: binding},
+		WorkspaceDeletions: d,
+		binding:            binding,
+	}
+}
+
+func (s ApprovalOwnerRepositorySet) ApprovalOwnerBinding() repository.OwnerRepositoryBinding {
+	return s.binding
+}
+func (s ApprovalOwnerRepositorySet) ApprovalOwnerApprovals() repository.ApprovalRepository {
+	return s.Approvals
+}
+func (s ApprovalOwnerRepositorySet) ApprovalOwnerWorkspaceDeletions() repository.ApprovalWorkspaceDeletionRepository {
+	return s.WorkspaceDeletions
+}
+func (s ApprovalOwnerRepositorySet) OwnerRepositories() repository.ApprovalOwnerRepositories {
+	owner, err := repository.NewApprovalOwnerRepositories(s)
+	if err != nil {
+		panic(err)
+	}
+	return owner
+}
+
+func (r *DecisionTicketRepository) OwnerRepositoryBinding() repository.OwnerRepositoryBinding {
+	if r == nil {
+		return repository.OwnerRepositoryBinding{}
+	}
+	return r.ownerBinding
+}
+
+func (r *DecisionResolutionRepository) OwnerRepositoryBinding() repository.OwnerRepositoryBinding {
+	if r == nil {
+		return repository.OwnerRepositoryBinding{}
+	}
+	return r.ownerBinding
+}
+
+func (r *DecisionWorkspaceDeletionRepository) OwnerRepositoryBinding() repository.OwnerRepositoryBinding {
+	if r == nil {
+		return repository.OwnerRepositoryBinding{}
+	}
+	return r.ownerBinding
+}
+
+func (r *ApprovalRepository) OwnerRepositoryBinding() repository.OwnerRepositoryBinding {
+	if r == nil {
+		return repository.OwnerRepositoryBinding{}
+	}
+	return r.ownerBinding
+}
+
+func (r *ApprovalWorkspaceDeletionRepository) OwnerRepositoryBinding() repository.OwnerRepositoryBinding {
+	if r == nil {
+		return repository.OwnerRepositoryBinding{}
+	}
+	return r.ownerBinding
 }
 
 func NewApprovalRepository() *ApprovalRepository {

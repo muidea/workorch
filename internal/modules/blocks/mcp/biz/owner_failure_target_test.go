@@ -142,6 +142,8 @@ func TestMCPOwnerEmitsStructuredFailureTargetObservationThroughTypedReceipt(t *t
 		SealedOperation: sealed,
 		TargetRole:      "implementation",
 	}
+	command.Execution.AdmissibilitySnapshotID = sealed.Authorization.CatalogSnapshotID
+	command.Execution.AcquisitionBinding = sealed.Authorization.AcquisitionBinding
 	result := hub.Send(magicevent.NewEventWithContext(
 		mcpevents.TopicExecuteOperation, runtimecontract.RuntimeModuleOrchestrator, ModuleID,
 		magicevent.NewHeader(), ctx, command,
@@ -259,6 +261,8 @@ func TestMCPOwnerEmitsExactToolValidationObservationThroughTypedReceipt(t *testi
 		},
 		SealedOperation: sealed,
 	}
+	command.Execution.AdmissibilitySnapshotID = sealed.Authorization.CatalogSnapshotID
+	command.Execution.AcquisitionBinding = sealed.Authorization.AcquisitionBinding
 	result := hub.Send(magicevent.NewEventWithContext(
 		mcpevents.TopicExecuteOperation, runtimecontract.RuntimeModuleOrchestrator, ModuleID,
 		magicevent.NewHeader(), ctx, command,

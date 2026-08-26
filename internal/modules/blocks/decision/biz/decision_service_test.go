@@ -29,8 +29,9 @@ func mustDecisionPayload(t *testing.T, input map[string]any) workorcheventpayloa
 
 type recordingDecisionHub struct {
 	magicevent.Hub
-	mu     sync.Mutex
-	posted []magicevent.Event
+	mu               sync.Mutex
+	posted           []magicevent.Event
+	evidenceCommands []decisionevents.RecordDecisionEvidenceCommand
 }
 
 func newRecordingDecisionHub(t *testing.T) *recordingDecisionHub {
@@ -44,6 +45,9 @@ func newRecordingDecisionHub(t *testing.T) *recordingDecisionHub {
 			result.Set(nil, nil)
 			return
 		}
+		hub.mu.Lock()
+		hub.evidenceCommands = append(hub.evidenceCommands, command)
+		hub.mu.Unlock()
 		result.Set(decisionevents.RecordDecisionEvidenceResult{EvidenceRecordID: command.EvidenceRecordID}, nil)
 	})
 	t.Cleanup(func() {
@@ -64,6 +68,12 @@ func (h *recordingDecisionHub) Posted() []magicevent.Event {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	return append([]magicevent.Event(nil), h.posted...)
+}
+
+func (h *recordingDecisionHub) EvidenceCommands() []decisionevents.RecordDecisionEvidenceCommand {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return append([]decisionevents.RecordDecisionEvidenceCommand(nil), h.evidenceCommands...)
 }
 
 type countingDecisionTicketRepository struct {
@@ -430,7 +440,7 @@ func TestBiz_ReconciliationClosesOrdinaryResolutionWriteCut(t *testing.T) {
 	tickets := newCountingDecisionTicketRepository()
 	resolutions := memory.NewDecisionResolutionRepository()
 	hub := newRecordingDecisionHub(t)
-	owner, err := New(hub, nil, Dependencies{WorkspaceDeletions: memory.NewDecisionWorkspaceDeletionRepository(), Tickets: tickets, Resolutions: resolutions, EventHub: hub})
+	owner, err := New(hub, nil, Dependencies{OwnerRepositories: decisionBizTestOwnerRepositories(tickets, resolutions, memory.NewDecisionWorkspaceDeletionRepository()), EventHub: hub})
 	if err != nil {
 		t.Fatalf("New Biz: %v", err)
 	}
@@ -462,6 +472,14 @@ func TestBiz_ReconciliationClosesOrdinaryResolutionWriteCut(t *testing.T) {
 	if err != nil || resolved.State != common.DecisionTicketStateResolved || resolved.ResolutionNotificationPublishedAt == "" {
 		t.Fatalf("recovered ticket = %+v err=%v", resolved, err)
 	}
+	persistedResolution, err := resolutions.GetByTicketID(common.ContextWithRuntimeWorkspaceID(ctx, create.WorkspaceID), create.TicketID)
+	if err != nil || persistedResolution.ResolvedAt == "" || resolved.ResolvedAt != persistedResolution.ResolvedAt {
+		t.Fatalf("recovered durable resolution time ticket=%q resolution=%q err=%v", resolved.ResolvedAt, persistedResolution.ResolvedAt, err)
+	}
+	evidenceCommands := hub.EvidenceCommands()
+	if len(evidenceCommands) != 1 || evidenceCommands[0].Timestamp != persistedResolution.ResolvedAt {
+		t.Fatalf("recovered evidence commands = %+v, want durable resolution timestamp %q", evidenceCommands, persistedResolution.ResolvedAt)
+	}
 	published := hub.Posted()
 	if len(published) != 1 || published[0].ID() != decisionevents.TopicTicketResolved {
 		t.Fatalf("recovery notifications = %+v, want one resolved notification", published)
@@ -471,6 +489,9 @@ func TestBiz_ReconciliationClosesOrdinaryResolutionWriteCut(t *testing.T) {
 	}
 	if got := len(hub.Posted()); got != 1 {
 		t.Fatalf("ordinary notification replayed after durable marker: %d", got)
+	}
+	if got := len(hub.EvidenceCommands()); got != 1 {
+		t.Fatalf("ordinary evidence replayed after durable marker: %d", got)
 	}
 }
 
@@ -1016,6 +1037,7 @@ func TestService_EnsureResolvedTicketAndReturn_OrphanResolutionSamePayloadIsIdem
 	orphan := &decisionModel.Resolution{
 		ID:                 common.ResolutionID("resolution-orphan-recover"),
 		TicketID:           createCmd.TicketID,
+		ResolvedAt:         "2026-08-26T03:10:00Z",
 		Type:               decisioncommon.ResolutionTypeProvideMissingInfo,
 		Payload:            mustDecisionPayload(t, map[string]any{"actor": "operator", "intent": "retry_same_step"}),
 		ContinuationAction: "resume",
@@ -1037,7 +1059,7 @@ func TestService_EnsureResolvedTicketAndReturn_OrphanResolutionSamePayloadIsIdem
 	if err != nil {
 		t.Fatalf("orphan recovery: %v", err)
 	}
-	if ticket == nil || ticket.State != common.DecisionTicketStateResolved {
+	if ticket == nil || ticket.State != common.DecisionTicketStateResolved || ticket.ResolvedAt != orphan.ResolvedAt {
 		t.Fatalf("ticket = %+v, want state resolved after orphan recovery", ticket)
 	}
 	if resolution == nil || resolution.ID != orphan.ID {
@@ -1076,10 +1098,11 @@ func TestService_EnsureResolvedTicketAndReturn_OrphanResolutionDoesNotPublish(t 
 	}
 
 	orphan := &decisionModel.Resolution{
-		ID:       common.ResolutionID("resolution-orphan-event"),
-		TicketID: createCmd.TicketID,
-		Type:     decisioncommon.ResolutionTypeProvideMissingInfo,
-		Payload:  mustDecisionPayload(t, map[string]any{"actor": "operator"}),
+		ID:         common.ResolutionID("resolution-orphan-event"),
+		TicketID:   createCmd.TicketID,
+		ResolvedAt: "2026-08-26T03:11:00Z",
+		Type:       decisioncommon.ResolutionTypeProvideMissingInfo,
+		Payload:    mustDecisionPayload(t, map[string]any{"actor": "operator"}),
 	}
 	if err := resolutionRepo.Create(ctx, orphan); err != nil {
 		t.Fatalf("seed orphan resolution: %v", err)
@@ -1324,7 +1347,7 @@ func TestBiz_PublishesDecisionNotificationsAndRecordsEvidence(t *testing.T) {
 	ticketRepo := memory.NewDecisionTicketRepository()
 	resolutionRepo := memory.NewDecisionResolutionRepository()
 	hub := newRecordingDecisionHub(t)
-	owner, err := New(hub, nil, Dependencies{WorkspaceDeletions: memory.NewDecisionWorkspaceDeletionRepository(), Tickets: ticketRepo, Resolutions: resolutionRepo, EventHub: hub})
+	owner, err := New(hub, nil, Dependencies{OwnerRepositories: decisionBizTestOwnerRepositories(ticketRepo, resolutionRepo, memory.NewDecisionWorkspaceDeletionRepository()), EventHub: hub})
 	if err != nil {
 		t.Fatalf("New Biz: %v", err)
 	}

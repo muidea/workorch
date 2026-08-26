@@ -12,21 +12,8 @@ import (
 
 func (m *Biz) executeEnsureResolvedCommand(ctx context.Context, data any) (decisionevents.EnsureResolvedResult, error) {
 	cmd, ok := data.(decisionevents.EnsureResolvedCommand)
-	if !ok {
+	if !ok || cmd.WorkspaceID == "" {
 		return decisionevents.EnsureResolvedResult{}, common.ErrInvalidArgument
-	}
-	if !decisionCommandHasScope(cmd) {
-		ticket, err := m.resolveUniqueTicketForUnscopedCommand(ctx, cmd.TicketID)
-		if err != nil {
-			return decisionevents.EnsureResolvedResult{}, err
-		}
-		cmd.WorkspaceID = ticket.WorkspaceID
-		cmd.RunID = ticket.RunID
-		cmd.StepID = ticket.StepID
-		ctx, err = common.BindRuntimeWorkspaceContext(ctx, ticket.WorkspaceID)
-		if err != nil {
-			return decisionevents.EnsureResolvedResult{}, err
-		}
 	}
 	resolveCommand := resolveTicketContract(cmd)
 	if cmd.DecisionKind == "runtime_governance" {
@@ -56,10 +43,6 @@ func (m *Biz) executeGetResolutionCommand(ctx context.Context, data any) (decisi
 		return decisionevents.GetResolutionResult{}, err
 	}
 	return decisionevents.GetResolutionResult{Resolution: decisionmodel.CloneResolution(item)}, nil
-}
-
-func decisionCommandHasScope(cmd decisionevents.EnsureResolvedCommand) bool {
-	return cmd.WorkspaceID != "" || cmd.RunID != "" || cmd.StepID != ""
 }
 
 func resolveTicketContract(cmd decisionevents.EnsureResolvedCommand) decisioncontracts.ResolveTicketCommand {

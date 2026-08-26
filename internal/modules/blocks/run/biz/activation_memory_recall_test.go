@@ -111,10 +111,9 @@ func TestPublishRuntimeActivationMemoryRecallPersistsThroughMemoryOwner(t *testi
 	repositories := memoryrepo.NewMemoryOwnerRepositorySet()
 	traces := repositories.RecallTraces
 	memoryOwner := memorymodule.New()
-	if err := memoryOwner.Configure(memorybiz.Dependencies{WorkspaceDeletions: repositories.WorkspaceDeletions,
-		MemoryItems:        repositories.Items,
-		MemoryRecallTraces: traces,
-		EventHub:           hub,
+	if err := memoryOwner.Configure(memorybiz.Dependencies{
+		OwnerRepositories: repositories.OwnerRepositories(),
+		EventHub:          hub,
 	}); err != nil {
 		t.Fatalf("configure memory owner: %v", err)
 	}
@@ -151,10 +150,9 @@ func TestRuntimeActivationMemoryRecallReDrivesFromPersistedRunOnStartup(t *testi
 	repositories := memoryrepo.NewMemoryOwnerRepositorySet()
 	traces := repositories.RecallTraces
 	memoryOwner := memorymodule.New()
-	if err := memoryOwner.Configure(memorybiz.Dependencies{WorkspaceDeletions: repositories.WorkspaceDeletions,
-		MemoryItems:        repositories.Items,
-		MemoryRecallTraces: traces,
-		EventHub:           hub,
+	if err := memoryOwner.Configure(memorybiz.Dependencies{
+		OwnerRepositories: repositories.OwnerRepositories(),
+		EventHub:          hub,
 	}); err != nil {
 		t.Fatalf("configure memory owner: %v", err)
 	}

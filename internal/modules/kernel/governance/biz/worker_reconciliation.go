@@ -22,8 +22,8 @@ import (
 const governanceRecoveryInventoryMaxItems = 100_000
 
 func (s *Service) startGovernanceWorker(ctx context.Context, queue <-chan governanceWork, done chan<- struct{}) error {
-	if s.background != nil {
-		return s.background.AsyncFunction(func() {
+	if background := s.BackgroundRoutine(); background != nil {
+		return background.AsyncFunction(func() {
 			s.runWorkLoop(ctx, queue, done)
 		})
 	}
@@ -66,8 +66,6 @@ func (s *Service) enqueueGovernanceWork(work governanceWork) {
 func (s *Service) scheduleBlockedRunReconciliationLocked() error {
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan struct{})
-	s.reconcileCancel = cancel
-	s.reconcileDone = done
 	reconcile := func() {
 		defer close(done)
 		timer := time.NewTimer(500 * time.Millisecond)
@@ -84,9 +82,17 @@ func (s *Service) scheduleBlockedRunReconciliationLocked() error {
 			return
 		}
 	}
-	if s.background != nil {
-		return s.background.AsyncFunction(reconcile)
+	if background := s.BackgroundRoutine(); background != nil {
+		if err := background.AsyncFunction(reconcile); err != nil {
+			cancel()
+			return err
+		}
+		s.reconcileCancel = cancel
+		s.reconcileDone = done
+		return nil
 	}
+	s.reconcileCancel = cancel
+	s.reconcileDone = done
 	go reconcile()
 	return nil
 }

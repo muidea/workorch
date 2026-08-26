@@ -140,8 +140,9 @@ func (h *workspaceCommandTestHub) command(t *testing.T, topic string, index int)
 func TestCreateWorkspaceRecordSendsOwnerCommand(t *testing.T) {
 	ctx := context.Background()
 	testHub := newWorkspaceCommandTestHub(t)
-	testHub.subscribe(workspaceevents.CommandDestination, workspaceevents.TopicWorkspaceCommandCreate, func(any) (any, error) {
-		return workspaceevents.WorkspaceCommandResult{}, nil
+	testHub.subscribe(workspaceevents.CommandDestination, workspaceevents.TopicWorkspaceCommandCreate, func(data any) (any, error) {
+		command := data.(workspaceevents.CreateWorkspaceCommand)
+		return workspaceevents.WorkspaceResult{Workspace: &workspaceevents.Workspace{ID: command.WorkspaceID}}, nil
 	})
 
 	workspaceID := common.WorkspaceID("ws-command-payload")
@@ -166,8 +167,17 @@ func TestWorkspaceTemplateRecordsSendOwnerCommands(t *testing.T) {
 		workspaceevents.TopicWorkspaceTemplateCommandUpdate,
 		workspaceevents.TopicWorkspaceTemplateCommandDelete,
 	} {
-		testHub.subscribe(workspaceevents.CommandDestination, topic, func(any) (any, error) {
-			return workspaceevents.WorkspaceCommandResult{}, nil
+		testHub.subscribe(workspaceevents.CommandDestination, topic, func(data any) (any, error) {
+			switch command := data.(type) {
+			case workspaceevents.CreateWorkspaceTemplateCommand:
+				return workspaceevents.WorkspaceTemplateResult{Template: &workspaceevents.WorkspaceTemplate{ID: command.TemplateID}}, nil
+			case workspaceevents.UpdateWorkspaceTemplateCommand:
+				return workspaceevents.WorkspaceTemplateResult{Template: &workspaceevents.WorkspaceTemplate{ID: command.TemplateID}}, nil
+			case workspaceevents.DeleteWorkspaceTemplateCommand:
+				return workspaceevents.DeleteWorkspaceTemplateResult{TemplateID: command.TemplateID}, nil
+			default:
+				return nil, common.ErrInvalidArgument
+			}
 		})
 	}
 	template := &workspacemodel.WorkspaceTemplate{

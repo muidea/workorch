@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"strings"
-	"time"
 
 	magicevent "github.com/muidea/magicCommon/event"
 	modulecommon "github.com/muidea/workorch/internal/modules/blocks/approval/pkg/common"
@@ -23,9 +22,12 @@ func (m *Biz) recordApprovalGovernanceEvidence(ctx context.Context, item *approv
 	if item.State != common.ApprovalStateApproved && item.State != common.ApprovalStateRejected {
 		return common.ErrConflict
 	}
-	timestamp := strings.TrimSpace(item.UpdatedAt)
+	// Evidence replay is content-addressed by the owner resolution. UpdatedAt
+	// changes as delivery acknowledgements advance and therefore cannot be part
+	// of the immutable evidence payload.
+	timestamp := strings.TrimSpace(item.ResolvedAt)
 	if timestamp == "" {
-		timestamp = time.Now().UTC().Format(time.RFC3339Nano)
+		return common.ErrConflict
 	}
 	command := approvalevents.RecordApprovalEvidenceCommand{
 		EvidenceRecordID:  orchestratormodel.StableEvidenceRecordID(fmt.Sprintf("%s/%s/%s", item.WorkspaceID, item.RunID, item.ID), "approval", "approval"),
