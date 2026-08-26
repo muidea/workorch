@@ -10,7 +10,11 @@ import (
 
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/appmodelcore"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/workspacecore"
+	eventstreammodel "github.com/muidea/workorch/internal/modules/blocks/eventstream/pkg/models"
+	resultcommon "github.com/muidea/workorch/internal/modules/blocks/result/pkg/common"
+	resultmodel "github.com/muidea/workorch/internal/modules/blocks/result/pkg/models"
 	runmodel "github.com/muidea/workorch/internal/modules/blocks/run/pkg/models"
+	runtimeevidencemodel "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/workorchmanagementcontract"
 )
@@ -409,8 +413,7 @@ func TestCreateWorkspaceWithBackendDefaultsDeliverableDirectory(t *testing.T) {
 	for _, dir := range []string{
 		filepath.Join(filepath.Dir(dataRoot), ".workorch-workspaces", item.ID),
 		filepath.Join(dataRoot, "internal", "workspaces", item.ID),
-		filepath.Join(dataRoot, "internal", "workspaces", item.ID, "artifacts"),
-		filepath.Join(dataRoot, "internal", "workspaces", item.ID, "runs"),
+		filepath.Join(dataRoot, "internal", "workspaces", item.ID, "config"),
 	} {
 		if info, err := os.Stat(dir); err != nil || !info.IsDir() {
 			t.Fatalf("workspace directory %q = %v/%v, want existing directory", dir, info, err)
@@ -434,14 +437,20 @@ func TestCreateWorkspaceWithBackendCreatesExplicitDeliverableDirectory(t *testin
 	for _, dir := range []string{
 		filepath.Join(dataRoot, "internal", "workspaces", item.ID),
 		filepath.Join(dataRoot, "internal", "workspaces", item.ID, "config"),
+	} {
+		if info, err := os.Stat(dir); err != nil || !info.IsDir() {
+			t.Fatalf("workspace application directory %q = %v/%v, want existing directory", dir, info, err)
+		}
+	}
+	for _, dir := range []string{
 		filepath.Join(dataRoot, "internal", "workspaces", item.ID, "runs"),
 		filepath.Join(dataRoot, "internal", "workspaces", item.ID, "artifacts"),
 		filepath.Join(dataRoot, "internal", "workspaces", item.ID, "events"),
 		filepath.Join(dataRoot, "internal", "workspaces", item.ID, "llm-calls"),
 		filepath.Join(dataRoot, "internal", "workspaces", item.ID, "indexes"),
 	} {
-		if info, err := os.Stat(dir); err != nil || !info.IsDir() {
-			t.Fatalf("workspace internal directory %q = %v/%v, want existing directory", dir, info, err)
+		if _, err := os.Stat(dir); !os.IsNotExist(err) {
+			t.Fatalf("owner-private directory %q stat err = %v, want not created by application", dir, err)
 		}
 	}
 	if _, err := os.Stat(filepath.Join(deliverableDirectory, "working")); !os.IsNotExist(err) {
@@ -449,6 +458,68 @@ func TestCreateWorkspaceWithBackendCreatesExplicitDeliverableDirectory(t *testin
 	}
 	if _, err := os.Stat(filepath.Join(dataRoot, "internal", "workspaces", item.ID, "working")); !os.IsNotExist(err) {
 		t.Fatalf("legacy internal working directory stat err = %v, want not exist", err)
+	}
+}
+
+func TestWorkspaceSetupDefersPrivateDirectoriesUntilFirstOwnerWrite(t *testing.T) {
+	dataRoot := t.TempDir()
+	item, err := CreateWorkspaceWithBackend(context.Background(), "file", dataRoot, "lazy owner directories", "", "")
+	if err != nil {
+		t.Fatalf("CreateWorkspaceWithBackend: %v", err)
+	}
+	workspaceID := common.WorkspaceID(item.ID)
+	workspaceRoot := filepath.Join(dataRoot, "internal", "workspaces", item.ID)
+	for _, dir := range []string{"runs", "artifacts", "events", "llm-calls", "indexes"} {
+		if _, err := os.Stat(filepath.Join(workspaceRoot, dir)); !os.IsNotExist(err) {
+			t.Fatalf("owner-private directory %q stat err = %v, want absent before owner write", dir, err)
+		}
+	}
+
+	session, ctx := newTestRuntimeSession(t, "file", dataRoot)
+	exports := testRuntimeExports(session.Bootstrap)
+	ctx = common.ContextWithRuntimeWorkspaceID(ctx, workspaceID)
+	runID := common.RunID("run-lazy-owner-directories")
+	stepID := common.StepID("run-lazy-owner-directories/step-1")
+	if err := exports.Repositories.Runs.Create(ctx, &runmodel.Run{ID: runID, WorkspaceID: workspaceID, State: common.RunStateCompleted}); err != nil {
+		t.Fatalf("Run owner first write: %v", err)
+	}
+	if err := exports.Repositories.Steps.Create(ctx, &runmodel.Step{ID: stepID, RunID: runID, Kind: "test", State: common.StepStateSucceeded}); err != nil {
+		t.Fatalf("Run Step owner first write: %v", err)
+	}
+	if err := exports.Repositories.ToolCalls.Create(ctx, &runtimeevidencemodel.ToolCall{
+		ID: "run-lazy-owner-directories/step-1/tool-1", WorkspaceID: workspaceID, RunID: runID, StepID: stepID,
+		ToolName: "test", State: common.ToolCallStateCompleted,
+	}); err != nil {
+		t.Fatalf("Orchestrator ToolCall owner first write: %v", err)
+	}
+	if err := exports.Repositories.Artifacts.Create(ctx, &resultmodel.Artifact{
+		ID: "run-lazy-owner-directories/artifact/result-summary", WorkspaceID: workspaceID, RunID: runID,
+		ResultID: "run-lazy-owner-directories/result/accepted", ArtifactType: resultcommon.ArtifactTypeText,
+		Summary: "owner-created artifact", State: common.ArtifactStateAvailable,
+	}); err != nil {
+		t.Fatalf("Result Artifact owner first write: %v", err)
+	}
+	if err := exports.Repositories.EventRecords.Append(ctx, &eventstreammodel.EventRecord{
+		ID: "event-lazy-owner-directories", WorkspaceID: workspaceID, RunID: runID, OccurredAt: "2026-08-26T00:00:00Z",
+	}); err != nil {
+		t.Fatalf("Eventstream owner first write: %v", err)
+	}
+
+	for _, dir := range []string{
+		filepath.Join(workspaceRoot, "runs"),
+		filepath.Join(workspaceRoot, "runs", string(runID), "steps"),
+		filepath.Join(workspaceRoot, "runs", string(runID), "tool-calls"),
+		filepath.Join(workspaceRoot, "runs", string(runID), "events"),
+		filepath.Join(workspaceRoot, "artifacts", string(runID)),
+	} {
+		if info, err := os.Stat(dir); err != nil || !info.IsDir() {
+			t.Fatalf("owner first-write directory %q = %v/%v, want owner-created directory", dir, info, err)
+		}
+	}
+	for _, dir := range []string{"llm-calls", "indexes"} {
+		if _, err := os.Stat(filepath.Join(workspaceRoot, dir)); !os.IsNotExist(err) {
+			t.Fatalf("unsupported owner-private directory %q stat err = %v, want absent", dir, err)
+		}
 	}
 }
 

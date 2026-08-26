@@ -119,13 +119,13 @@ func TestSemanticBindingMissingOwnerFactRequiresExactSealedAcquisition(t *testin
 	}
 
 	wrongTarget := document.Clone()
-	wrongTarget.Proposals[0].Target.ProspectiveTargetRef = "provider-selected-target.sh"
+	wrongTarget.Proposals[0].Target.ProspectiveTargetRefs = []string{"provider-selected-target.sh"}
 	var targetViolation *RuntimeSemanticProposalViolationError
-	if err := wrongTarget.ValidateAgainstManifest(manifest); !errors.As(err, &targetViolation) || targetViolation.Violation().Path != "$.proposals[0].target.prospectiveTargetRef" {
+	if err := wrongTarget.ValidateAgainstManifest(manifest); !errors.As(err, &targetViolation) || targetViolation.Violation().Path != "$.proposals[0].target.prospectiveTargetRefs" {
 		t.Fatalf("out-of-bounds provider-selected target was not rejected as a typed violation: violation=%+v err=%v", targetViolation, err)
 	}
 	targetViolation = nil
-	if _, _, err := CompileRuntimeSemanticBindings(manifest, runtimeSemanticBindingTestRequestID, wrongTarget, []RuntimeSemanticProofFeasibility{fact}); !errors.As(err, &targetViolation) || targetViolation.Violation().Path != "$.proposals[0].target.prospectiveTargetRef" {
+	if _, _, err := CompileRuntimeSemanticBindings(manifest, runtimeSemanticBindingTestRequestID, wrongTarget, []RuntimeSemanticProofFeasibility{fact}); !errors.As(err, &targetViolation) || targetViolation.Violation().Path != "$.proposals[0].target.prospectiveTargetRefs" {
 		t.Fatalf("binding compilation did not preserve the typed target-bound violation: violation=%+v err=%v", targetViolation, err)
 	}
 
@@ -156,7 +156,7 @@ func TestSemanticBindingMissingOwnerFactRequiresExactSealedAcquisition(t *testin
 
 	parallel := document.Clone()
 	second := proposal.Clone()
-	second.Target.ProspectiveTargetRef = "other.go"
+	second.Target.ProspectiveTargetRefs = []string{"other.go"}
 	parallel.Proposals = append(parallel.Proposals, second)
 	if err := parallel.ValidateAgainstManifest(manifest); err == nil {
 		t.Fatalf("parallel/unsealed owner-fact acquisition was accepted: %v", err)
@@ -221,7 +221,7 @@ func semanticMissingOwnerFactAcquisitionFixture(t *testing.T) (RuntimeSemanticPl
 	proposal := document.Proposals[0].Clone()
 	proposal.Target = RuntimeOperationTargetAuthorization{
 		Policy: RuntimeOperationTargetPolicyProspectiveOwnerTarget, OwnerSelectorRefs: []string{operationSelector},
-		ProspectiveConstraintRefs: []string{"workspace-relative-path"}, ProspectiveTargetRef: prospectiveTarget,
+		ProspectiveConstraintRefs: []string{"workspace-relative-path"}, ProspectiveTargetRefs: []string{prospectiveTarget},
 	}
 	document.ManifestHash = manifest.Hash
 	document.Proposals = []RuntimeSemanticProofProposal{proposal}
@@ -244,7 +244,7 @@ func TestCompileRuntimeSemanticBindingsCombinesProspectiveCreationAndExactValida
 	manifest, document, facts, source := semanticIndependentProofSetFixture(t)
 	document.Proposals[0].Target = RuntimeOperationTargetAuthorization{
 		Policy: RuntimeOperationTargetPolicyProspectiveOwnerTarget, OwnerSelectorRefs: []string{"file/workspace-relative-create"},
-		ProspectiveConstraintRefs: []string{"new-target-requires-owner-selector"}, ProspectiveTargetRef: "new-file.go",
+		ProspectiveConstraintRefs: []string{"new-target-requires-owner-selector"}, ProspectiveTargetRefs: []string{"new-file.go"},
 	}
 	document.Proposals[1].Target = RuntimeOperationTargetAuthorization{
 		Policy: RuntimeOperationTargetPolicyExactTarget, ExactTargetRefs: []string{"new-file.go"},
@@ -271,7 +271,7 @@ func TestCompileRuntimeSemanticBindingsCombinesProspectiveCreationAndExactValida
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(focuses) != 1 || focuses[0].ProspectiveTargetRef != "new-file.go" || focuses[0].TargetSelectorRef != "file/workspace-relative-create" || len(focuses[0].TargetRefs) != 0 {
+	if len(focuses) != 1 || !sameStrings(focuses[0].ProspectiveTargetRefs, []string{"new-file.go"}) || focuses[0].TargetSelectorRef != "file/workspace-relative-create" || len(focuses[0].TargetRefs) != 0 {
 		t.Fatalf("prospective creation and exact validation target surface = %+v", focuses)
 	}
 
@@ -399,14 +399,14 @@ func TestCompileRuntimeSemanticBindingsSealsOneBindingPerCWI(t *testing.T) {
 	fact := RuntimeSemanticProofFeasibility{
 		SchemaVersion: RuntimeSemanticFeasibilitySchemaCurrent, ManifestHash: manifest.Hash, DefinitionSeedHash: manifest.DefinitionSeedHash,
 		CoverageWorkItemID: proposal.CoverageWorkItemID, ProposalHash: StableRuntimeSemanticProofProposalHash(proposal), OwnerModuleID: proposal.OwnerModuleID,
-		CatalogSnapshotID: manifest.OwnerCatalogs[0].SnapshotID, Status: RuntimeSemanticFeasibilityFeasible, ObservedRevision: "workspace-1", TargetRefs: []string{proposal.Target.ProspectiveTargetRef},
+		CatalogSnapshotID: manifest.OwnerCatalogs[0].SnapshotID, Status: RuntimeSemanticFeasibilityFeasible, ObservedRevision: "workspace-1", TargetRefs: RuntimeSemanticProposalTargetRefs(proposal),
 	}
 	focuses, contract, err := CompileRuntimeSemanticBindings(manifest, runtimeSemanticBindingTestRequestID, document, []RuntimeSemanticProofFeasibility{fact})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(focuses) != 1 || len(focuses[0].CoverageWorkItemIDs) != 1 || len(focuses[0].CoverageEvidenceBindings) != 1 ||
-		focuses[0].ProspectiveTargetRef != "new-file.go" || focuses[0].TargetSelectorRef != "file/workspace-relative-create" {
+		!sameStrings(focuses[0].ProspectiveTargetRefs, []string{"new-file.go"}) || focuses[0].TargetSelectorRef != "file/workspace-relative-create" {
 		t.Fatalf("compiled focuses = %+v", focuses)
 	}
 	if len(contract.Bindings) != 1 || contract.BindingSetHash == "" || contract.Bindings[0].BindingHash != focuses[0].CoverageEvidenceBindings[0].Hash {
@@ -427,18 +427,18 @@ func TestCompileRuntimeSemanticBindingsRetainsSourceSelectorCandidates(t *testin
 		SchemaVersion: RuntimeSemanticFeasibilitySchemaCurrent, ManifestHash: manifest.Hash, DefinitionSeedHash: manifest.DefinitionSeedHash,
 		CoverageWorkItemID: proposal.CoverageWorkItemID, ProposalHash: StableRuntimeSemanticProofProposalHash(proposal), OwnerModuleID: proposal.OwnerModuleID,
 		CatalogSnapshotID: manifest.OwnerCatalogs[0].SnapshotID, Status: RuntimeSemanticFeasibilityFeasible,
-		ObservedRevision: manifest.OwnerCatalogs[0].ObservedRevision, TargetRefs: []string{proposal.Target.ProspectiveTargetRef},
+		ObservedRevision: manifest.OwnerCatalogs[0].ObservedRevision, TargetRefs: RuntimeSemanticProposalTargetRefs(proposal),
 	}
 	source := CoverageFocus{
 		ID: "source-selector", CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-001"},
 		RequiredEvidenceKinds: []string{EvidenceKindStateChange},
 		TargetRole:            "deliverable", TargetDiscoverySources: []string{RuntimeValidationDiscoverySourceWorkspaceManifest},
 		TargetSelectorRef: "file/workspace-relative-create", TargetSelectorOwnerRef: "profile-test", TargetSelectorSubjectRef: "deliverable",
-		TargetSelectorCandidateRefs: []string{proposal.Target.ProspectiveTargetRef}, RequireTargetGrounding: true,
+		TargetSelectorCandidateRefs: RuntimeSemanticProposalTargetRefs(proposal), RequireTargetGrounding: true,
 	}
 	manifest = sealSemanticTestManifestWithSource(t, manifest, source)
 	document.ManifestHash = manifest.Hash
-	fact = semanticFeasibilityForTest(t, manifest, proposal, []string{proposal.Target.ProspectiveTargetRef}, "", nil)
+	fact = semanticFeasibilityForTest(t, manifest, proposal, RuntimeSemanticProposalTargetRefs(proposal), "", nil)
 	focuses, contract, err := CompileRuntimeSemanticBindings(manifest, runtimeSemanticBindingTestRequestID, document, []RuntimeSemanticProofFeasibility{fact})
 	if err != nil {
 		t.Fatal(err)
@@ -447,11 +447,11 @@ func TestCompileRuntimeSemanticBindingsRetainsSourceSelectorCandidates(t *testin
 		t.Fatalf("compiled focuses = %+v", focuses)
 	}
 	binding := focuses[0].CoverageEvidenceBindings[0]
-	if !SameRuntimeTargetSelectorCandidateRefs(binding.TargetSelectorCandidateRefs, []string{proposal.Target.ProspectiveTargetRef}) ||
-		!SameRuntimeTargetSelectorCandidateRefs(focuses[0].TargetSelectorCandidateRefs, []string{proposal.Target.ProspectiveTargetRef}) {
+	if !SameRuntimeTargetSelectorCandidateRefs(binding.TargetSelectorCandidateRefs, RuntimeSemanticProposalTargetRefs(proposal)) ||
+		!SameRuntimeTargetSelectorCandidateRefs(focuses[0].TargetSelectorCandidateRefs, RuntimeSemanticProposalTargetRefs(proposal)) {
 		t.Fatalf("compiled selector declaration = binding:%+v focus:%+v", binding, focuses[0])
 	}
-	if len(contract.Bindings) != 1 || !SameRuntimeTargetSelectorCandidateRefs(contract.Bindings[0].TargetSelectorCandidateRefs, []string{proposal.Target.ProspectiveTargetRef}) {
+	if len(contract.Bindings) != 1 || !SameRuntimeTargetSelectorCandidateRefs(contract.Bindings[0].TargetSelectorCandidateRefs, RuntimeSemanticProposalTargetRefs(proposal)) {
 		t.Fatalf("reconciliation contract lost selector candidates: %+v", contract)
 	}
 }
@@ -483,12 +483,12 @@ func TestCompileRuntimeSemanticBindingsRequiresConcreteProspectiveOwnerFact(t *t
 	manifest := semanticContractTestManifest(t)
 	proposal := semanticContractTestProposal("cwi-001")
 	document := RuntimeSemanticPlanDocument{SchemaVersion: RuntimeSemanticPlanDocumentSchemaCurrent, ManifestHash: manifest.Hash, DefinitionSeedHash: manifest.DefinitionSeedHash, PlanStep: RuntimeSemanticPlanStepProofBatch, BatchID: "batch-1", BatchSequence: 0, BatchCoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-001"}, Proposals: []RuntimeSemanticProofProposal{proposal}}
-	fact := RuntimeSemanticProofFeasibility{SchemaVersion: RuntimeSemanticFeasibilitySchemaCurrent, ManifestHash: manifest.Hash, DefinitionSeedHash: manifest.DefinitionSeedHash, CoverageWorkItemID: proposal.CoverageWorkItemID, ProposalHash: StableRuntimeSemanticProofProposalHash(proposal), OwnerModuleID: proposal.OwnerModuleID, CatalogSnapshotID: manifest.OwnerCatalogs[0].SnapshotID, Status: RuntimeSemanticFeasibilityFeasible, ObservedRevision: "workspace-1", TargetRefs: []string{proposal.Target.ProspectiveTargetRef}}
+	fact := RuntimeSemanticProofFeasibility{SchemaVersion: RuntimeSemanticFeasibilitySchemaCurrent, ManifestHash: manifest.Hash, DefinitionSeedHash: manifest.DefinitionSeedHash, CoverageWorkItemID: proposal.CoverageWorkItemID, ProposalHash: StableRuntimeSemanticProofProposalHash(proposal), OwnerModuleID: proposal.OwnerModuleID, CatalogSnapshotID: manifest.OwnerCatalogs[0].SnapshotID, Status: RuntimeSemanticFeasibilityFeasible, ObservedRevision: "workspace-1", TargetRefs: RuntimeSemanticProposalTargetRefs(proposal)}
 	focuses, _, err := CompileRuntimeSemanticBindings(manifest, runtimeSemanticBindingTestRequestID, document, []RuntimeSemanticProofFeasibility{fact})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(focuses) != 1 || focuses[0].ProspectiveTargetRef != "new-file.go" {
+	if len(focuses) != 1 || !sameStrings(focuses[0].ProspectiveTargetRefs, []string{"new-file.go"}) {
 		t.Fatalf("compiled focus = %+v", focuses)
 	}
 	fact.TargetRefs = nil
@@ -511,7 +511,7 @@ func TestCompileRuntimeSemanticBindingsScopesBindingIdentityToExactSemanticGener
 			SchemaVersion: RuntimeSemanticFeasibilitySchemaCurrent, ManifestHash: manifest.Hash, DefinitionSeedHash: manifest.DefinitionSeedHash,
 			CoverageWorkItemID: proposal.CoverageWorkItemID, ProposalHash: StableRuntimeSemanticProofProposalHash(proposal), OwnerModuleID: proposal.OwnerModuleID,
 			CatalogSnapshotID: manifest.OwnerCatalogs[0].SnapshotID, Status: RuntimeSemanticFeasibilityFeasible,
-			ObservedRevision: manifest.OwnerCatalogs[0].ObservedRevision, TargetRefs: []string{proposal.Target.ProspectiveTargetRef},
+			ObservedRevision: manifest.OwnerCatalogs[0].ObservedRevision, TargetRefs: RuntimeSemanticProposalTargetRefs(proposal),
 		}
 		focuses, _, err := CompileRuntimeSemanticBindings(manifest, logicalRequestID, document, []RuntimeSemanticProofFeasibility{fact})
 		if err != nil {
@@ -630,8 +630,8 @@ func semanticFeasibilityForTest(t *testing.T, manifest RuntimeSemanticPlanManife
 				CoverageWorkItemID: proposal.CoverageWorkItemID, ProposalHash: StableRuntimeSemanticProofProposalHash(proposal),
 				OwnerModuleID: proposal.OwnerModuleID, CatalogSnapshotID: catalog.SnapshotID,
 				ProspectiveSatisfactionContractRef: acquisition.ProspectiveSatisfactionContractRef,
-				BaseWorkspaceManifestRevision:      catalog.ObservedRevision, ProspectiveTargetRef: proposal.Target.ProspectiveTargetRef,
-				ResultingTargetRefs: append(append([]string(nil), catalog.TargetRefs...), proposal.Target.ProspectiveTargetRef),
+				BaseWorkspaceManifestRevision:      catalog.ObservedRevision, ProspectiveTargetRefs: RuntimeSemanticProposalTargetRefs(proposal),
+				ResultingTargetRefs: append(append([]string(nil), catalog.TargetRefs...), RuntimeSemanticProposalTargetRefs(proposal)...),
 			}.Normalized()
 			fact.ProspectiveWorkspaceManifestDelta = &delta
 			dependencyCatalog, found := runtimeSemanticOwnerFactDependencyCatalogFor(manifest, acquisition.Requirement.OwnerModuleID)

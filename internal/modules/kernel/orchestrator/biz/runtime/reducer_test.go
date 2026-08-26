@@ -2,6 +2,7 @@ package runtime
 
 import (
 	"fmt"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -9,6 +10,40 @@ import (
 	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
+
+func TestRequiredStateChangeOperationSequenceSealsCompleteProspectiveAllOfTargets(t *testing.T) {
+	binding := runtimecontract.CoverageEvidenceBinding{
+		ID: "binding/prospective/all-of", CoverageWorkItemID: "cwi-prospective", FocusID: "focus-prospective",
+		DefinitionRevision: "definition-prospective", DeclarationRef: "profile/prospective",
+		Proofs: []runtimecontract.CoverageEvidenceProof{{
+			EvidenceKind: runtimecontract.EvidenceKindStateChange, RequiredEffectScopes: []runtimecontract.RuntimeEffectScope{runtimecontract.RuntimeEffectWorkspaceDurable},
+			AllowedOperationKinds: []string{runtimecontract.StepKindFileWrite},
+		}},
+		TargetSelectorRef: "workspace-relative-new-file-target", TargetSelectorOwnerRef: runtimecontract.RuntimeModuleFile,
+		TargetSelectorSubjectRef: "workspace_deliverable", ProspectiveTargetRefs: []string{"workorch_test.go", "go.mod"},
+	}.Normalized()
+	binding.Hash = runtimecontract.StableCoverageEvidenceBindingHash(binding)
+	facts := runtimecontract.RuntimeFacts{Focus: runtimecontract.CoverageFocus{
+		ID: binding.FocusID, CoverageWorkItemIDs: []common.CoverageWorkItemID{binding.CoverageWorkItemID},
+		CoverageEvidenceBindings: []runtimecontract.CoverageEvidenceBinding{binding},
+	}}
+
+	got := requiredStateChangeOperationSequence(facts, []string{runtimecontract.StepKindFileWrite})
+	requirementPrefix := "prospective-" + binding.Hash[:12] + "-target-"
+	want := []runtimecontract.RuntimeRequiredOperationVariant{
+		{RequirementID: requirementPrefix + "01", Kind: runtimecontract.StepKindFileWrite, TargetRef: "go.mod", Reason: "complete the sealed prospective all-of target transaction"},
+		{RequirementID: requirementPrefix + "02", Kind: runtimecontract.StepKindFileWrite, TargetRef: "workorch_test.go", DependsOnRequirementIDs: []string{requirementPrefix + "01"}, Reason: "complete the sealed prospective all-of target transaction"},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("prospective all-of operation sequence = %+v, want %+v", got, want)
+	}
+	if repeated := requiredStateChangeOperationSequence(facts, []string{runtimecontract.StepKindFileWrite}); !reflect.DeepEqual(repeated, want) {
+		t.Fatalf("prospective all-of sequence changed across deterministic re-drive: %+v", repeated)
+	}
+	if ignored := requiredStateChangeOperationSequence(facts, []string{runtimecontract.StepKindGitWrite}); len(ignored) != 0 {
+		t.Fatalf("prospective sequence escaped accepted owner kind: %+v", ignored)
+	}
+}
 
 func TestReduceRuntimeStateLiveFailureFixtures(t *testing.T) {
 	tests := []struct {
@@ -232,13 +267,13 @@ func TestReduceRuntimeStateCreationScopeRequiresAdmissibleDurableFileOperation(t
 		facts.Focus.TargetSelectorRef = "file/workspace_deliverable"
 		facts.Focus.TargetSelectorOwnerRef = runtimecontract.RuntimeModuleFile
 		facts.Focus.TargetSelectorSubjectRef = facts.Focus.TargetRole
-		facts.Focus.ProspectiveTargetRef = "initial-deliverable.txt"
+		facts.Focus.ProspectiveTargetRefs = []string{"initial-deliverable.txt"}
 		facts.Focus.RequireTargetGrounding = true
 		selection := runtimecontract.RuntimeTargetSelection{
 			PrerequisiteID: "selection-1", OwnerModuleID: runtimecontract.RuntimeModuleFile,
 			TargetRole: facts.Focus.TargetRole, SelectorRef: facts.Focus.TargetSelectorRef,
 			SelectorOwnerRef: facts.Focus.TargetSelectorOwnerRef, SelectorSubjectRef: facts.Focus.TargetSelectorSubjectRef,
-			Disposition: runtimecontract.RuntimeTargetSelectionCreate, ProspectiveTargetRef: facts.Focus.ProspectiveTargetRef, CandidateCount: 0, ObservedRevision: "workspace-empty-v1",
+			Disposition: runtimecontract.RuntimeTargetSelectionCreate, ProspectiveTargetRef: facts.Focus.ProspectiveTargetRefs[0], CandidateCount: 0, ObservedRevision: "workspace-empty-v1",
 		}
 		selection.SnapshotID = runtimecontract.StableRuntimeTargetSelectionSnapshotID(selection)
 		facts.Resources.TargetSelection = &selection
@@ -385,7 +420,7 @@ func TestSemanticFileProspectiveTargetScopeRequiresMatchingSealedOwnerFacts(t *t
 		facts.Focus.TargetSelectorOwnerRef = runtimecontract.RuntimeModuleFile
 		facts.Focus.TargetSelectorRef = "workspace-relative-new-file-target"
 		facts.Focus.TargetSelectorSubjectRef = "workspace_deliverable"
-		facts.Focus.ProspectiveTargetRef = "runtime-validation-source.txt"
+		facts.Focus.ProspectiveTargetRefs = []string{"runtime-validation-source.txt"}
 		facts.Focus.RequireTargetGrounding = true
 		facts.Capabilities.StateChangeKinds = []string{runtimecontract.StepKindFileWrite}
 		facts = runtimeTestFactsWithCurrentFocusBindings(t, facts, runtimecontract.RuntimeDefinitionContext{StartupInputHash: "startup-input-test", Revision: facts.DefinitionRevision})
@@ -469,7 +504,7 @@ func TestSemanticFileProspectiveTargetScopeRequiresMatchingSealedOwnerFacts(t *t
 		}},
 		{name: "prospective target mismatch", mutate: func(facts *runtimecontract.RuntimeFacts) {
 			binding := facts.Focus.CoverageEvidenceBindings[0]
-			binding.ProspectiveTargetRef = "different-target.txt"
+			binding.ProspectiveTargetRefs = []string{"different-target.txt"}
 			binding.Hash = runtimecontract.StableCoverageEvidenceBindingHash(binding)
 			facts.Focus.CoverageEvidenceBindings[0] = binding
 		}},
@@ -510,7 +545,7 @@ func TestAdvanceSatisfiedCoverageFocusDropsPriorFocusTargetFacts(t *testing.T) {
 	facts.RemainingFocuses = []runtimecontract.CoverageFocus{{
 		ID: "bootstrap-source", SliceID: "bootstrap", CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-source"}, RequiredEvidenceKinds: []string{runtimecontract.EvidenceKindStateChange},
 		TargetRole: "implementation", TargetDiscoverySources: []string{runtimecontract.RuntimeValidationDiscoverySourceWorkspaceManifest}, TargetSelectorRef: "file/profile_declared_candidates",
-		TargetSelectorOwnerRef: "software-dev", TargetSelectorSubjectRef: "go-lsp/source", TargetSelectorCandidateRefs: []string{"internal/lsp/manager.go"}, ProspectiveTargetRef: "internal/lsp/manager.go", RequireTargetGrounding: true,
+		TargetSelectorOwnerRef: "software-dev", TargetSelectorSubjectRef: "go-lsp/source", TargetSelectorCandidateRefs: []string{"internal/lsp/manager.go"}, ProspectiveTargetRefs: []string{"internal/lsp/manager.go"}, RequireTargetGrounding: true,
 	}}
 	facts.Coverage = []runtimecontract.RuntimeCoverageItemFact{{ID: "cwi-module", State: runtimecontract.RuntimeCoverageItemStateSatisfied}, {ID: "cwi-source", State: runtimecontract.RuntimeCoverageItemStateOpen}}
 	facts.Evidence.Accepted = []runtimecontract.EvidenceFact{{ID: "module-created", Kind: runtimecontract.EvidenceKindStateChange, CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-module"}}}
@@ -563,12 +598,12 @@ func TestAdvanceSatisfiedCoverageFocusDropsPriorFocusTargetFacts(t *testing.T) {
 		t.Fatalf("workspace change reactivated retired target selection: facts=%+v prerequisiteIDs=%v observationIDs=%v err=%v", refreshed, prerequisiteIDs, observationIDs, err)
 	}
 	updated, decision, err := ReduceRuntimeStateWithDirective(advanced, nil)
-	if err != nil || decision.State != runtimecontract.ConvergenceStateNeedPrerequisite || len(updated.Prerequisites.Pending) == 0 {
+	if err != nil || decision.State != runtimecontract.ConvergenceStateNeedPrerequisite || len(updated.Prerequisites.Pending) != 2 {
 		t.Fatalf("next bootstrap focus did not acquire a fresh target selection: facts=%+v decision=%+v err=%v", updated, decision, err)
 	}
 	found := false
 	for _, prerequisite := range updated.Prerequisites.Pending {
-		if prerequisite.Kind == runtimecontract.PrerequisiteKindTargetSelection && prerequisite.ProspectiveTargetRef == "internal/lsp/manager.go" &&
+		if prerequisite.Kind == runtimecontract.PrerequisiteKindTargetSelection && sameRuntimeTargetRefs(prerequisite.TargetSelectorCandidateRefs, []string{"internal/lsp/manager.go"}) &&
 			prerequisite.Scope == runtimecontract.RuntimePrerequisiteScopeFocus && prerequisite.FocusID == "bootstrap-source" {
 			found = true
 		}

@@ -531,9 +531,9 @@ func TestRuntimeSemanticProviderProjectsDefinitionLineageAndExactAcquisitionSele
 		OwnerModuleID: runtimecontract.RuntimeModuleShell, ProspectiveSatisfactionContractRef: "shell/selectable-validation-surface/prospective-workspace-manifest/v1",
 		ValidationSurfaceID: "validation-surface-dependency", ValidationRecipeID: "validation-surface-dependency",
 		InputSchemaHash: "shell-schema-dependency", CatalogObservedRevision: "shell-policy-dependency-v1",
-		AllOf: []runtimecontract.RuntimeProspectiveTargetPredicate{{
+		AllOf: []runtimecontract.RuntimeProspectiveTargetClause{{ID: "required-input", AllOf: []runtimecontract.RuntimeProspectiveTargetPredicate{{
 			Kind: runtimecontract.RuntimeProspectiveTargetPredicatePathSuffix, Value: ".spec",
-		}},
+		}}}},
 	}
 	convergence := runtimecontract.RuntimeOwnerFactConvergence{
 		Requirement: requirement, MissingTrigger: runtimecontract.RuntimeOwnerFactMissingTrigger,
@@ -624,7 +624,7 @@ func TestRuntimeSemanticProviderProjectsDefinitionLineageAndExactAcquisitionSele
 		!strings.Contains(authority, `"declarationTargetSelectorCandidateRefs":["validation-readiness.spec"]`) ||
 		!strings.Contains(authority, `"prospectiveTargetConstraint"`) ||
 		!strings.Contains(authority, `"kind":"target_ref_path_suffix","value":".spec"`) ||
-		strings.Contains(authority, `"declarationProspectiveTargetRef"`) || strings.Contains(authority, `"prospectiveTargetRef":"validation-readiness.spec"`) {
+		strings.Contains(authority, `"declarationProspectiveTargetRef"`) || strings.Contains(authority, `"prospectiveTargetRefs":["validation-readiness.spec"]`) {
 		t.Fatalf("provider projection conflated Definition lineage and operation selector: %s", authority)
 	}
 	if strings.Contains(authority, dependencyCatalog.PrerequisiteID) || strings.Contains(providerRequest.Schema, dependencyCatalog.PrerequisiteID) {
@@ -633,7 +633,7 @@ func TestRuntimeSemanticProviderProjectsDefinitionLineageAndExactAcquisitionSele
 	if strings.Contains(providerRequest.Schema, prospectiveConstraint.ValidationRecipeID) {
 		t.Fatalf("provider schema promoted a dependency recipe into selectable authority: %s", providerRequest.Schema)
 	}
-	for _, required := range []string{"exact current acquisition proof", "ownerModuleId=acquisitionOwnerModuleId", "one concrete non-empty target.prospectiveTargetRef", "prospectiveTargetConstraint.allOf conjunctively", "not Definition authority", "only an SM-2 CoverageEvidenceBinding", `requiredEvidenceKinds=["state_change"]`, "do not return gapKind=undeclared_prerequisite solely", "does not grant terminal validation evidence or coverage credit"} {
+	for _, required := range []string{"exact current acquisition proof", "ownerModuleId=acquisitionOwnerModuleId", "bounded target.prospectiveTargetRefs", "every allOf target clause", "not Definition authority", "only an SM-2 CoverageEvidenceBinding", `requiredEvidenceKinds=["state_change"]`, "do not return gapKind=undeclared_prerequisite solely", "does not grant terminal validation evidence or coverage credit"} {
 		if !strings.Contains(projection.OutputInstruction, required) {
 			t.Fatalf("provider acquisition instruction lost %q: %s", required, projection.OutputInstruction)
 		}
@@ -644,7 +644,7 @@ func TestRuntimeSemanticProviderProjectsDefinitionLineageAndExactAcquisitionSele
 		t.Fatal(err)
 	}
 	if !strings.Contains(providerRequest.Schema, `"const":"workspace-relative-new-file-target"`) ||
-		prospectiveTargetSchema["const"] != prospectiveTarget ||
+		prospectiveTargetSchema["items"].(map[string]any)["const"] != prospectiveTarget ||
 		!strings.Contains(string(prospectiveTargetSchemaJSON), `"pattern"`) || !strings.Contains(string(prospectiveTargetSchemaJSON), ".spec") ||
 		strings.Contains(providerRequest.Schema, `"const":"file/workspace_deliverable"`) {
 		t.Fatalf("provider schema did not constrain the exact operation selector: %s", providerRequest.Schema)
@@ -685,7 +685,8 @@ func TestRuntimeSemanticProviderProjectsDefinitionLineageAndExactAcquisitionSele
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, hasConst := openTargetSchema["const"]; hasConst || openTargetSchema["enum"] != nil ||
+	openTargetItems := openTargetSchema["items"].(map[string]any)
+	if _, hasConst := openTargetItems["const"]; hasConst || openTargetItems["enum"] != nil ||
 		!strings.Contains(string(openTargetSchemaJSON), `"pattern"`) || !strings.Contains(string(openTargetSchemaJSON), ".spec") {
 		t.Fatalf("open selector schema did not retain only the owner-authored all-of predicate: %s", openTargetSchemaJSON)
 	}
@@ -696,7 +697,7 @@ func TestRuntimeSemanticProviderProjectsDefinitionLineageAndExactAcquisitionSele
 	invalidPayload := runtimeSemanticProviderAcquisitionPayloadForTest(t, openSelectorRequest.SemanticManifest, "workspace-manifest.data")
 	_, err = runtimecontract.DecodeRuntimeSemanticPlanPayloadWithManifest(openSelectorRequest.SemanticManifest, invalidPayload)
 	var diagnostic *runtimecontract.RuntimeCandidatePayloadDiagnostic
-	if !errors.As(err, &diagnostic) || diagnostic.Path != "$.proposals[0].target.prospectiveTargetRef" {
+	if !errors.As(err, &diagnostic) || diagnostic.Path != "$.proposals[0].target.prospectiveTargetRefs" {
 		t.Fatalf("owner-incompatible prospective target did not fail as a typed pre-probe field violation: diagnostic=%+v err=%v", diagnostic, err)
 	}
 	rejection := &runtimecontract.RuntimeOriginalDiagnostic{
@@ -752,7 +753,7 @@ func runtimeSemanticProviderProspectiveTargetSchemaForTest(t *testing.T, schema 
 		thenProperties, _ := then["properties"].(map[string]any)
 		target, _ := thenProperties["target"].(map[string]any)
 		targetProperties, _ := target["properties"].(map[string]any)
-		if prospective, ok := targetProperties["prospectiveTargetRef"].(map[string]any); ok {
+		if prospective, ok := targetProperties["prospectiveTargetRefs"].(map[string]any); ok {
 			return prospective
 		}
 	}
@@ -784,7 +785,7 @@ func runtimeSemanticProviderAcquisitionPayloadForTest(t *testing.T, manifest run
 				"policy":                    acquisition.AcquisitionTargetPolicy,
 				"ownerSelectorRefs":         []string{acquisition.AcquisitionTargetSelectorRef},
 				"prospectiveConstraintRefs": acquisition.AcquisitionConstraintRefs,
-				"prospectiveTargetRef":      targetRef,
+				"prospectiveTargetRefs":     []string{targetRef},
 			},
 			"requiredEvidenceKinds": []string{runtimecontract.EvidenceKindStateChange},
 			"declarationRef":        "semantic-plan/dod-001",
@@ -1100,7 +1101,7 @@ func TestRuntimeProviderRequestPreservesStablePrefixAndTypedContext(t *testing.T
 	sealRuntimeProviderTestPolicies(&facts)
 	selection := runtimecontract.RuntimeTargetSelection{
 		PrerequisiteID: "target-selection-1", OwnerModuleID: runtimecontract.RuntimeModuleFile,
-		TargetRole: "deliverable", SelectorRef: "file/workspace_deliverable", SelectorOwnerRef: "profile/test", SelectorSubjectRef: "deliverable",
+		TargetRole: "deliverable", SelectorRef: "workspace-relative-new-file-target", SelectorOwnerRef: runtimecontract.RuntimeModuleFile, SelectorSubjectRef: "deliverable",
 		SelectorCandidateRefs: []string{"initial-deliverable.txt"},
 		Disposition:           runtimecontract.RuntimeTargetSelectionCreate, ProspectiveTargetRef: "initial-deliverable.txt", CandidateCount: 0, ObservedRevision: "workspace-empty-v1",
 	}
@@ -2205,6 +2206,71 @@ func TestRuntimeCandidateSchemaKeepsExplicitSequenceDuringFileScopeNarrowing(t *
 	}
 }
 
+func TestRuntimeCandidateSchemaBindsEachRequiredOperationToItsExactProspectiveTarget(t *testing.T) {
+	policy, found := runtimecontract.RuntimeConvergenceEffectPolicyFor(runtimecontract.ConvergenceStateNeedStateChange)
+	if !found {
+		t.Fatal("missing state-change effect policy")
+	}
+	manifest := runtimecontract.RuntimeCandidateContractManifest{
+		State:               runtimecontract.ConvergenceStateNeedStateChange,
+		EffectPolicy:        policy,
+		DependenciesAllowed: true,
+		RequiredOperationSequence: []runtimecontract.RuntimeRequiredOperationVariant{
+			{RequirementID: "create-module", Kind: runtimecontract.StepKindFileWrite, TargetRef: "go.mod"},
+			{RequirementID: "create-test", Kind: runtimecontract.StepKindFileWrite, TargetRef: "workorch_test.go", DependsOnRequirementIDs: []string{"create-module"}},
+		},
+		Operations: []runtimecontract.RuntimeCandidateOperationManifest{{
+			Kind: runtimecontract.StepKindFileWrite,
+			AllowedOperationFields: []string{
+				"id", "kind", "requiredOperationRef", "dependsOn", "targetRefs", "parameters", "bindingRefs",
+			},
+			Parameters: []runtimecontract.RuntimeOperationParameterContract{{
+				Name: "content", Type: runtimecontract.RuntimeOperationParameterTypeString, Required: true,
+			}},
+			TargetCardinality:           runtimecontract.RuntimeOperationTargetCardinalityOne,
+			RequireTargetRefs:           true,
+			RequiredOperationReferences: []string{"create-module", "create-test"},
+			Target: runtimecontract.RuntimeOperationTargetAuthorization{
+				Policy:            runtimecontract.RuntimeOperationTargetPolicyProspectiveOwnerTarget,
+				OwnerSelectorRefs: []string{"workspace-relative-new-file-target"}, ProspectiveConstraintRefs: []string{"go-test-input"},
+				ProspectiveTargetRefs: []string{"go.mod", "workorch_test.go"},
+			},
+		}},
+	}
+
+	var schema map[string]any
+	if err := json.Unmarshal([]byte(runtimeCandidateSchemaForManifest(manifest)), &schema); err != nil {
+		t.Fatal(err)
+	}
+	properties, _ := schema["properties"].(map[string]any)
+	operations, _ := properties["operations"].(map[string]any)
+	conditions := runtimeSchemaArray(operations["allOf"])
+	if len(conditions) != 2 {
+		t.Fatalf("required operation conditions = %d, want 2: %+v", len(conditions), conditions)
+	}
+	wantTargets := map[string]string{"create-module": "go.mod", "create-test": "workorch_test.go"}
+	for _, raw := range conditions {
+		condition, _ := raw.(map[string]any)
+		contains, _ := condition["contains"].(map[string]any)
+		containsProperties, _ := contains["properties"].(map[string]any)
+		refSchema, _ := containsProperties["requiredOperationRef"].(map[string]any)
+		ref, _ := refSchema["const"].(string)
+		want, found := wantTargets[ref]
+		if !found {
+			t.Fatalf("unexpected required operation schema ref %q", ref)
+		}
+		targets, _ := containsProperties["targetRefs"].(map[string]any)
+		items, _ := targets["items"].(map[string]any)
+		if targets["minItems"] != float64(1) && targets["minItems"] != 1 || targets["maxItems"] != float64(1) && targets["maxItems"] != 1 || items["const"] != want || !runtimeSchemaStringArrayContains(contains["required"], "targetRefs") {
+			t.Fatalf("required operation %q target schema = %+v, want exact singleton %q", ref, targets, want)
+		}
+		delete(wantTargets, ref)
+	}
+	if len(wantTargets) != 0 {
+		t.Fatalf("missing required operation target schemas: %+v", wantTargets)
+	}
+}
+
 func TestRuntimeProviderRequestNarrowsFileScopeAcrossSchemaContextAndRetry(t *testing.T) {
 	selection := runtimecontract.RuntimeTargetSelection{
 		PrerequisiteID: "target-selection-scope", OwnerModuleID: runtimecontract.RuntimeModuleFile,
@@ -2325,7 +2391,9 @@ func bindRuntimeCandidateTestFocus(t *testing.T, facts *runtimecontract.RuntimeF
 		focus.TargetSelectorOwnerRef = source.SelectorOwnerRef
 		focus.TargetSelectorSubjectRef = source.SelectorSubjectRef
 		focus.TargetSelectorCandidateRefs = append([]string(nil), source.SelectorCandidateRefs...)
-		focus.ProspectiveTargetRef = source.ProspectiveTargetRef
+		if source.ProspectiveTargetRef != "" {
+			focus.ProspectiveTargetRefs = []string{source.ProspectiveTargetRef}
+		}
 	}
 	evidenceKind := runtimecontract.EvidenceKindStateChange
 	effectScopes := []runtimecontract.RuntimeEffectScope{runtimecontract.RuntimeEffectWorkspaceDurable}
@@ -2354,7 +2422,7 @@ func bindRuntimeCandidateTestFocus(t *testing.T, facts *runtimecontract.RuntimeF
 			FocusID: focus.ID, DefinitionRevision: facts.DefinitionRevision, Proofs: proofs,
 			TargetRefs: append([]string(nil), focus.TargetRefs...), TargetSelectorRef: focus.TargetSelectorRef,
 			TargetSelectorOwnerRef: focus.TargetSelectorOwnerRef, TargetSelectorSubjectRef: focus.TargetSelectorSubjectRef,
-			TargetSelectorCandidateRefs: append([]string(nil), focus.TargetSelectorCandidateRefs...), ProspectiveTargetRef: focus.ProspectiveTargetRef,
+			TargetSelectorCandidateRefs: append([]string(nil), focus.TargetSelectorCandidateRefs...), ProspectiveTargetRefs: append([]string(nil), focus.ProspectiveTargetRefs...),
 			DeclarationRef: "test/llm-provider-render",
 		}
 		binding.Hash = runtimecontract.StableCoverageEvidenceBindingHash(binding)

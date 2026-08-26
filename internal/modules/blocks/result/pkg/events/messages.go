@@ -1,6 +1,8 @@
 package events
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"strings"
 
@@ -17,8 +19,9 @@ const definitionPackage = "github.com/muidea/workorch/internal/modules/blocks/re
 const CommandDestination = modulecommon.ModuleID
 
 const (
-	DefaultListLimit = 100
-	MaxListLimit     = 200
+	DefaultListLimit        = 100
+	MaxListLimit            = 200
+	MaxArtifactContentBytes = 1 << 20
 )
 
 type GetResultCommand struct {
@@ -57,6 +60,15 @@ type ListArtifactsByResultCommand struct {
 	ResultID    common.ResultID
 	Cursor      string
 	Limit       int
+}
+
+// ReadArtifactContentCommand asks the Result owner for the bounded content of
+// one Result-owned artifact. URI is an opaque logical identity to callers;
+// only Result may resolve it against Artifact state and material.
+type ReadArtifactContentCommand struct {
+	WorkspaceID common.WorkspaceID
+	RunID       common.RunID
+	URI         string
 }
 
 type SealWorkspaceResultDeletionCommand struct {
@@ -161,6 +173,45 @@ type ListArtifactsByRunResult struct {
 type ListArtifactsByResultResult struct {
 	Artifacts  []*resultmodel.Artifact
 	NextCursor string
+}
+
+// ReadArtifactContentResult is copied before crossing EventHub and is capped
+// so the read contract never exposes a repository, path, reader or unbounded
+// owner-private material.
+type ReadArtifactContentResult struct {
+	ArtifactID    common.ArtifactID
+	WorkspaceID   common.WorkspaceID
+	RunID         common.RunID
+	URI           string
+	FileName      string
+	ContentType   string
+	Content       []byte
+	ContentSHA256 string
+}
+
+func (r ReadArtifactContentResult) Clone() ReadArtifactContentResult {
+	r.Content = append([]byte(nil), r.Content...)
+	return r
+}
+
+func (r ReadArtifactContentResult) Validate() error {
+	if r.ArtifactID == "" || r.WorkspaceID == "" || r.RunID == "" || strings.TrimSpace(r.URI) == "" ||
+		strings.TrimSpace(r.FileName) == "" || strings.TrimSpace(r.ContentType) == "" || len(r.Content) == 0 || len(r.Content) > MaxArtifactContentBytes ||
+		len(strings.TrimSpace(r.ContentSHA256)) != sha256.Size*2 {
+		return fmt.Errorf("%w: invalid bounded artifact content result", common.ErrInvalidArgument)
+	}
+	if strings.Contains(r.FileName, "/") || strings.Contains(r.FileName, "\\") || r.FileName == "." || r.FileName == ".." {
+		return fmt.Errorf("%w: invalid artifact content file name", common.ErrInvalidArgument)
+	}
+	hash, err := hex.DecodeString(strings.TrimSpace(r.ContentSHA256))
+	if err != nil || len(hash) != sha256.Size {
+		return fmt.Errorf("%w: invalid artifact content hash", common.ErrInvalidArgument)
+	}
+	want := sha256.Sum256(r.Content)
+	if !strings.EqualFold(hex.EncodeToString(want[:]), r.ContentSHA256) {
+		return fmt.Errorf("%w: artifact content hash mismatch", common.ErrInvalidArgument)
+	}
+	return nil
 }
 
 type SealWorkspaceResultDeletionResult struct {
@@ -328,6 +379,7 @@ func MessageContracts() []eventcontract.MessageContract {
 		eventcontract.CommandTopic[ListArtifactsByWorkspaceCommand, ListArtifactsByWorkspaceResult]("result", definitionPackage, eventcontract.CommandClassRead, eventcontract.LanePolicyQuery, TopicArtifactCommandListByWorkspace).MessageContract(),
 		eventcontract.CommandTopic[ListArtifactsByRunCommand, ListArtifactsByRunResult]("result", definitionPackage, eventcontract.CommandClassRead, eventcontract.LanePolicyQuery, TopicArtifactCommandListByRun).MessageContract(),
 		eventcontract.CommandTopic[ListArtifactsByResultCommand, ListArtifactsByResultResult]("result", definitionPackage, eventcontract.CommandClassRead, eventcontract.LanePolicyQuery, TopicArtifactCommandListByResult).MessageContract(),
+		eventcontract.CommandTopic[ReadArtifactContentCommand, ReadArtifactContentResult]("result", definitionPackage, eventcontract.CommandClassRead, eventcontract.LanePolicyQuery, TopicArtifactCommandReadContent).MessageContract(),
 		eventcontract.CommandTopic[SealWorkspaceResultDeletionCommand, SealWorkspaceResultDeletionResult]("result", definitionPackage, eventcontract.CommandClassWrite, eventcontract.LanePolicyState, TopicResultCommandSealWorkspaceDeletion).MessageContract(),
 		eventcontract.CommandTopic[PurgeWorkspaceResultsCommand, PurgeWorkspaceResultsResult]("result", definitionPackage, eventcontract.CommandClassWrite, eventcontract.LanePolicyState, TopicResultCommandPurgeWorkspace).MessageContract(),
 	}

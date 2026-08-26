@@ -427,7 +427,7 @@ func TestReadRunSnapshotUsesBoundedProjectedEventRecords(t *testing.T) {
 		}
 		topic := runevents.TopicRunStateChanged
 		if i == readModelEventRecordLimit+20 {
-			topic = "/run/llm_usage/recorded"
+			topic = "/llm/usage/recorded"
 			payload = map[string]any{
 				recordpayload.PayloadKeyWorkspaceID:          string(workspaceID),
 				recordpayload.PayloadKeyRunID:                string(runID),
@@ -474,7 +474,7 @@ func TestReadRunSnapshotUsesBoundedProjectedEventRecords(t *testing.T) {
 	// RVC-14: formal appmodelcore.Run snapshot hydrates topic-scoped usage payloads into summary
 	// even on the compact path. General event timeline remains metadata-only above.
 	if snapshot.LLMUsageSummary.EntryTotal == 0 || snapshot.LLMUsageSummary.TotalTokens == 0 {
-		t.Fatalf("compact llm usage summary = %+v, want non-zero usage from /run/llm_usage/recorded", snapshot.LLMUsageSummary)
+		t.Fatalf("compact llm usage summary = %+v, want non-zero usage from /llm/usage/recorded", snapshot.LLMUsageSummary)
 	}
 	if len(snapshot.LLMUsageTraces) == 0 {
 		t.Fatalf("compact llm usage traces empty, want hydrated run-scoped traces")
@@ -2480,7 +2480,7 @@ func TestMapLLMUsageTracesFromEventRecordsNormalizesUsageAndCostSemantics(t *tes
 	records := []projectioncontract.EventRecord{
 		{
 			ID:         "evt-1",
-			Topic:      "/run/llm_usage/recorded",
+			Topic:      "/llm/usage/recorded",
 			OccurredAt: "2026-05-07T10:00:00Z",
 			RunID:      "run-1",
 			StepID:     "run-1/step-1",
@@ -2512,7 +2512,7 @@ func TestMapLLMUsageTracesFromEventRecordsNormalizesUsageAndCostSemantics(t *tes
 		},
 		{
 			ID:         "evt-2",
-			Topic:      "/run/llm_usage/recorded",
+			Topic:      "/llm/usage/recorded",
 			OccurredAt: "2026-05-07T10:00:01Z",
 			RunID:      "run-1",
 			StepID:     "run-1/step-2",
@@ -3708,7 +3708,7 @@ func TestReadWorkspaceSnapshotWithBackendSummarizesRunScopedLLMUsageRecords(t *t
 	if err := exports.Repositories.EventRecords.Append(ctx, &eventstreammodel.EventRecord{
 		ID:          "run-scoped-llm-usage/event/llm-usage-recorded",
 		Version:     recordpayload.WorkorchEventVersion,
-		Topic:       "/run/llm_usage/recorded",
+		Topic:       "/llm/usage/recorded",
 		WorkspaceID: workspaceID,
 		RunID:       runID,
 		StepID:      "run-scoped-llm-usage/step-1",

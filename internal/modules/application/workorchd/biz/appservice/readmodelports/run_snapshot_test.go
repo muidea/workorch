@@ -78,7 +78,7 @@ func TestRunSnapshotBuildsSnapshotFromReaders(t *testing.T) {
 	}
 	var sawMetadata, sawUsage bool
 	for _, query := range events.queries {
-		if query.Topic == "/run/llm_usage/recorded" {
+		if query.Topic == "/llm/usage/recorded" {
 			sawUsage = true
 			if !query.IncludePayload {
 				t.Fatalf("usage query = %+v, want IncludePayload", query)
@@ -105,7 +105,7 @@ func TestRunObservabilityHydratesLLMUsagePayloads(t *testing.T) {
 	run := &runmodel.Run{ID: "run-observability-usage", WorkspaceID: workspace.ID, State: common.RunStateActive}
 	usage := &eventstreammodel.EventRecord{
 		ID:          "usage-run-observability",
-		Topic:       "/run/llm_usage/recorded",
+		Topic:       "/llm/usage/recorded",
 		WorkspaceID: workspace.ID,
 		RunID:       run.ID,
 		Payload: mustPortEventPayload(t, map[string]any{
@@ -150,7 +150,7 @@ func TestRunObservabilityHydratesLLMUsagePayloads(t *testing.T) {
 	}
 	var usageQuerySeen bool
 	for _, query := range eventReader.queries {
-		if query.Topic == "/run/llm_usage/recorded" && query.IncludePayload {
+		if query.Topic == "/llm/usage/recorded" && query.IncludePayload {
 			usageQuerySeen = true
 		}
 	}

@@ -139,7 +139,7 @@ func TestFileOwnerReconciliationObservesRealizedProspectiveTargetWithoutReopenin
 		CoverageWorkItemID: common.CoverageWorkItemID("cwi-file-prospective"), BindingID: "binding-file-prospective", BindingHash: "binding-hash-file-prospective",
 		OwnerModuleIDs: []string{modulecommon.ModuleID}, RequiredEvidenceKinds: []string{runtimecontract.EvidenceKindStateChange},
 		AllowedOperationKinds: []string{runtimecontract.StepKindFileWrite}, TargetSelectorRef: runtimeFileSelectorWorkspaceRelativeNewTarget,
-		TargetSelectorOwnerRef: modulecommon.ModuleID, TargetSelectorSubjectRef: "workspace_deliverable", ProspectiveTargetRef: targetRef,
+		TargetSelectorOwnerRef: modulecommon.ModuleID, TargetSelectorSubjectRef: "workspace_deliverable", ProspectiveTargetRefs: []string{targetRef},
 	})
 	before := sendFileReconciliationQuery(t, ctx, hub, command)
 	if before.Observation.Status != runtimecontract.RuntimeCWIReconciliationObservationUnsatisfied || len(before.Observation.TargetRefs) != 1 || before.Observation.TargetRefs[0] != targetRef {
@@ -246,7 +246,7 @@ func TestFileOwnerReconciliationClassifiesAmbiguousAndOutOfWorkspaceTargetsAsUnv
 			CoverageWorkItemID: common.CoverageWorkItemID("cwi-file-prospective-outside-profile"), BindingID: "binding-file-prospective-outside-profile", BindingHash: "binding-hash-file-prospective-outside-profile",
 			OwnerModuleIDs: []string{modulecommon.ModuleID}, RequiredEvidenceKinds: []string{runtimecontract.EvidenceKindStateChange},
 			AllowedOperationKinds: []string{runtimecontract.StepKindFileWrite}, TargetSelectorRef: runtimeFileTargetSelectorProfileCandidates,
-			TargetSelectorOwnerRef: modulecommon.ModuleID, TargetSelectorSubjectRef: "deliverable", TargetSelectorCandidateRefs: []string{"first.txt"}, ProspectiveTargetRef: "second.txt",
+			TargetSelectorOwnerRef: modulecommon.ModuleID, TargetSelectorSubjectRef: "deliverable", TargetSelectorCandidateRefs: []string{"first.txt"}, ProspectiveTargetRefs: []string{"second.txt"},
 		})
 		result := sendFileReconciliationQuery(t, ctx, hub, command)
 		if result.Observation.Status != runtimecontract.RuntimeCWIReconciliationObservationUnverifiable || result.Observation.OriginalDiagnostic == nil || result.Observation.OriginalDiagnostic.OriginalCode != "prospective_target_outside_selector" {
@@ -258,7 +258,7 @@ func TestFileOwnerReconciliationClassifiesAmbiguousAndOutOfWorkspaceTargetsAsUnv
 			CoverageWorkItemID: common.CoverageWorkItemID("cwi-file-unauthorized-prospective"), BindingID: "binding-file-unauthorized-prospective", BindingHash: "binding-hash-file-unauthorized-prospective",
 			OwnerModuleIDs: []string{modulecommon.ModuleID}, RequiredEvidenceKinds: []string{runtimecontract.EvidenceKindStateChange},
 			AllowedOperationKinds: []string{runtimecontract.StepKindFileWrite}, TargetRefs: []string{"first.txt"},
-			TargetSelectorRef: runtimeFileTargetSelectorUniqueWorkspaceEntry, ProspectiveTargetRef: "second.txt",
+			TargetSelectorRef: runtimeFileTargetSelectorUniqueWorkspaceEntry, ProspectiveTargetRefs: []string{"second.txt"},
 		})
 		result := sendFileReconciliationQuery(t, ctx, hub, command)
 		if result.Observation.Status != runtimecontract.RuntimeCWIReconciliationObservationUnverifiable || result.Observation.OriginalDiagnostic == nil || result.Observation.OriginalDiagnostic.OriginalCode != "prospective_target_unsupported_for_selector" {
@@ -307,7 +307,7 @@ func TestFileOwnerReconciliationKeepsManifestExcludedProspectiveTargetsUnverifia
 						CoverageWorkItemID: common.CoverageWorkItemID("cwi-file-excluded-prospective"), BindingID: "binding-file-excluded-prospective", BindingHash: "binding-hash-file-excluded-prospective",
 						OwnerModuleIDs: []string{modulecommon.ModuleID}, RequiredEvidenceKinds: []string{runtimecontract.EvidenceKindStateChange},
 						AllowedOperationKinds: []string{runtimecontract.StepKindFileWrite}, TargetSelectorRef: selector,
-						TargetSelectorOwnerRef: modulecommon.ModuleID, TargetSelectorSubjectRef: "workspace_deliverable", ProspectiveTargetRef: targetRef,
+						TargetSelectorOwnerRef: modulecommon.ModuleID, TargetSelectorSubjectRef: "workspace_deliverable", ProspectiveTargetRefs: []string{targetRef},
 					}
 					if selector == runtimeFileTargetSelectorProfileCandidates {
 						binding.TargetSelectorCandidateRefs = []string{targetRef}
@@ -462,7 +462,7 @@ func TestFileOwnerReconciliationSelectorCardinalityAndProspectiveMatrix(t *testi
 				CoverageWorkItemID: common.CoverageWorkItemID("cwi-file-selector-matrix"), BindingID: "binding-file-selector-matrix", BindingHash: "binding-hash-file-selector-matrix",
 				OwnerModuleIDs: []string{modulecommon.ModuleID}, RequiredEvidenceKinds: []string{runtimecontract.EvidenceKindStateChange},
 				AllowedOperationKinds: []string{runtimecontract.StepKindFileWrite}, TargetSelectorRef: testCase.selector,
-				TargetSelectorOwnerRef: modulecommon.ModuleID, TargetSelectorSubjectRef: "workspace_deliverable", ProspectiveTargetRef: testCase.prospective,
+				TargetSelectorOwnerRef: modulecommon.ModuleID, TargetSelectorSubjectRef: "workspace_deliverable", ProspectiveTargetRefs: []string{testCase.prospective},
 			}
 			if testCase.selector == runtimeFileTargetSelectorProfileCandidates {
 				binding.TargetSelectorCandidateRefs = []string{"one.txt", "prospective.txt", "two.txt"}

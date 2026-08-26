@@ -14,6 +14,8 @@ import (
 
 	approvalservice "github.com/muidea/workorch/internal/modules/blocks/approval/biz/contracts"
 	approvalModel "github.com/muidea/workorch/internal/modules/blocks/approval/pkg/models"
+	eventstreamevents "github.com/muidea/workorch/internal/modules/blocks/eventstream/pkg/events"
+	orchestratorevents "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/common"
 	memory "github.com/muidea/workorch/internal/pkg/repository/memory"
 	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
@@ -38,14 +40,14 @@ func newRecordingApprovalHub(t *testing.T) *recordingApprovalHub {
 	t.Helper()
 	rawHub := magicevent.NewHub(32)
 	hub := &recordingApprovalHub{Hub: rawHub}
-	evidenceObserver := magicevent.NewSimpleObserver(approvalevents.EvidenceCommandDestination, rawHub)
-	evidenceObserver.Subscribe(approvalevents.TopicApprovalCommandRecordEvidence, func(event magicevent.Event, result magicevent.Result) {
-		command, ok := event.Data().(approvalevents.RecordApprovalEvidenceCommand)
+	evidenceObserver := magicevent.NewSimpleObserver(orchestratorevents.CommandDestination, rawHub)
+	evidenceObserver.Subscribe(orchestratorevents.TopicOrchestratorCommandRecordApprovalEvidence, func(event magicevent.Event, result magicevent.Result) {
+		command, ok := event.Data().(orchestratorevents.RecordApprovalEvidenceCommand)
 		if !ok {
 			result.Set(nil, nil)
 			return
 		}
-		result.Set(approvalevents.RecordApprovalEvidenceResult{
+		result.Set(orchestratorevents.RecordApprovalEvidenceResult{
 			EvidenceRecordID: command.EvidenceRecordID,
 			WorkspaceID:      command.WorkspaceID,
 			RunID:            command.RunID,
@@ -54,22 +56,22 @@ func newRecordingApprovalHub(t *testing.T) *recordingApprovalHub {
 			ApprovalState:    command.ApprovalState,
 		}, nil)
 	})
-	resolutionObserver := magicevent.NewSimpleObserver(approvalevents.ResolutionRecordCommandDestination, rawHub)
-	resolutionObserver.Subscribe(approvalevents.TopicApprovalCommandRecordResolution, func(event magicevent.Event, result magicevent.Result) {
-		command, ok := event.Data().(approvalevents.RecordApprovalResolutionCommand)
+	resolutionObserver := magicevent.NewSimpleObserver(eventstreamevents.CommandDestination, rawHub)
+	resolutionObserver.Subscribe(eventstreamevents.TopicEventStreamCommandRecordApprovalResolution, func(event magicevent.Event, result magicevent.Result) {
+		command, ok := event.Data().(eventstreamevents.RecordApprovalResolutionCommand)
 		if !ok {
 			result.Set(nil, nil)
 			return
 		}
 		data := command.Data
-		result.Set(approvalevents.RecordApprovalResolutionResult{
+		result.Set(eventstreamevents.RecordApprovalResolutionResult{
 			NotificationID: data.NotificationID, ResolutionID: data.ResolutionID, ApprovalID: data.ApprovalID,
 			WorkspaceID: data.WorkspaceID, RunID: data.RunID,
 		}, nil)
 	})
 	t.Cleanup(func() {
-		evidenceObserver.Unsubscribe(approvalevents.TopicApprovalCommandRecordEvidence)
-		resolutionObserver.Unsubscribe(approvalevents.TopicApprovalCommandRecordResolution)
+		evidenceObserver.Unsubscribe(orchestratorevents.TopicOrchestratorCommandRecordApprovalEvidence)
+		resolutionObserver.Unsubscribe(eventstreamevents.TopicEventStreamCommandRecordApprovalResolution)
 		rawHub.Terminate(context.Background())
 	})
 	return hub
@@ -461,16 +463,16 @@ func TestService_ResolveApproval_RecordsGovernanceEvidence(t *testing.T) {
 			repo := memory.NewApprovalRepository()
 			rawHub := magicevent.NewHub(16)
 			defer rawHub.Terminate(ctx)
-			var evidenceCommand approvalevents.RecordApprovalEvidenceCommand
-			observer := magicevent.NewSimpleObserver(approvalevents.EvidenceCommandDestination, rawHub)
-			observer.Subscribe(approvalevents.TopicApprovalCommandRecordEvidence, func(ev magicevent.Event, result magicevent.Result) {
-				command, ok := ev.Data().(approvalevents.RecordApprovalEvidenceCommand)
+			var evidenceCommand orchestratorevents.RecordApprovalEvidenceCommand
+			observer := magicevent.NewSimpleObserver(orchestratorevents.CommandDestination, rawHub)
+			observer.Subscribe(orchestratorevents.TopicOrchestratorCommandRecordApprovalEvidence, func(ev magicevent.Event, result magicevent.Result) {
+				command, ok := ev.Data().(orchestratorevents.RecordApprovalEvidenceCommand)
 				if !ok {
 					result.Set(nil, nil)
 					return
 				}
 				evidenceCommand = command
-				result.Set(approvalevents.RecordApprovalEvidenceResult{
+				result.Set(orchestratorevents.RecordApprovalEvidenceResult{
 					EvidenceRecordID: command.EvidenceRecordID,
 					WorkspaceID:      command.WorkspaceID,
 					RunID:            command.RunID,
@@ -479,7 +481,7 @@ func TestService_ResolveApproval_RecordsGovernanceEvidence(t *testing.T) {
 					ApprovalState:    command.ApprovalState,
 				}, nil)
 			})
-			defer observer.Unsubscribe(approvalevents.TopicApprovalCommandRecordEvidence)
+			defer observer.Unsubscribe(orchestratorevents.TopicOrchestratorCommandRecordApprovalEvidence)
 			owner, err := New(rawHub, nil, Dependencies{OwnerRepositories: approvalBizTestOwnerRepositories(repo, memory.NewApprovalWorkspaceDeletionRepository()), EventHub: rawHub})
 			if err != nil {
 				t.Fatalf("new owner: %v", err)

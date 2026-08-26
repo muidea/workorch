@@ -14,7 +14,7 @@ func ParseArtifactURI(artifactURI string) (ArtifactRef, error) {
 	}
 	rest := strings.TrimPrefix(artifactURI, prefix)
 	parts := strings.Split(rest, "/")
-	if len(parts) < 4 || parts[0] == "" || parts[1] != "artifacts" || parts[2] == "" {
+	if len(parts) < 4 || !safeContentRefPart(parts[0]) || parts[1] != "artifacts" || !safeContentRefPart(parts[2]) {
 		return ArtifactRef{}, common.ErrInvalidArgument
 	}
 	relativePath := strings.Join(parts[3:], "/")
@@ -22,7 +22,7 @@ func ParseArtifactURI(artifactURI string) (ArtifactRef, error) {
 		return ArtifactRef{}, common.ErrInvalidArgument
 	}
 	for _, part := range parts[3:] {
-		if part == "" || part == "." || part == ".." {
+		if !safeContentRefPart(part) {
 			return ArtifactRef{}, common.ErrInvalidArgument
 		}
 	}

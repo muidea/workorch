@@ -175,7 +175,7 @@ func validateRuntimeSemanticOwnerFactAcquisition(proofSet RuntimeSemanticCWIProo
 	}
 	if sealed.AcquisitionTargetPolicy == RuntimeOperationTargetPolicyProspectiveOwnerTarget &&
 		(sealed.ProspectiveTargetSatisfactionConstraint == nil ||
-			!RuntimeProspectiveTargetSatisfiesConstraint(proposal.Target.ProspectiveTargetRef, *sealed.ProspectiveTargetSatisfactionConstraint)) {
+			!RuntimeProspectiveTargetsSatisfyConstraint(proposal.Target.ProspectiveTargetRefs, *sealed.ProspectiveTargetSatisfactionConstraint)) {
 		required := []string(nil)
 		if sealed.ProspectiveTargetSatisfactionConstraint != nil {
 			required = []string{StableRuntimeProspectiveTargetSatisfactionConstraintHash(*sealed.ProspectiveTargetSatisfactionConstraint)}
@@ -183,9 +183,9 @@ func validateRuntimeSemanticOwnerFactAcquisition(proofSet RuntimeSemanticCWIProo
 		return runtimeSemanticProposalViolation(
 			proposal,
 			proposalIndex,
-			"target.prospectiveTargetRef",
+			"target.prospectiveTargetRefs",
 			RuntimeSemanticConstraintRelational,
-			proposal.Target.ProspectiveTargetRef,
+			strings.Join(proposal.Target.ProspectiveTargetRefs, ","),
 			required,
 			nil,
 			fmt.Errorf("runtime semantic proof for coverage %q prospective target does not satisfy the sealed owner all-of constraint", proofSet.CoverageWorkItemID),
@@ -234,16 +234,16 @@ func validateRuntimeSemanticProofSetSourceWithEvidenceKinds(proofSet RuntimeSema
 	for proposalIndex, proposal := range proofSet.Proposals {
 		proposal = proposal.Normalized()
 		if proposal.Target.Policy == RuntimeOperationTargetPolicyProspectiveOwnerTarget && len(declaration.TargetSelectorCandidateRefs) != 0 &&
-			!containsString(declaration.TargetSelectorCandidateRefs, proposal.Target.ProspectiveTargetRef) {
+			!runtimeSemanticStringsWithin(proposal.Target.ProspectiveTargetRefs, declaration.TargetSelectorCandidateRefs) {
 			return runtimeSemanticProposalViolation(
 				proposal,
 				proposalIndex,
-				"target.prospectiveTargetRef",
+				"target.prospectiveTargetRefs",
 				RuntimeSemanticConstraintAllowedValue,
-				proposal.Target.ProspectiveTargetRef,
+				strings.Join(proposal.Target.ProspectiveTargetRefs, ","),
 				nil,
 				declaration.TargetSelectorCandidateRefs,
-				fmt.Errorf("runtime semantic proof for coverage %q prospective target %q is outside source selector candidates", proofSet.CoverageWorkItemID, proposal.Target.ProspectiveTargetRef),
+				fmt.Errorf("runtime semantic proof for coverage %q prospective targets are outside source selector candidates", proofSet.CoverageWorkItemID),
 			)
 		}
 		if len(declaration.AcceptedStepKinds) != 0 && !runtimeOperationKindsContain(declaration.AcceptedStepKinds, proposal.OperationKind) {
@@ -296,7 +296,8 @@ func compileRuntimeSemanticFocus(manifest RuntimeSemanticPlanManifest, generatio
 	acceptedVariants := make([]RuntimeOperationVariantRef, 0, len(proofSet.Proposals))
 	prerequisiteRefs := make([]string, 0, len(proofSet.Proposals)*2)
 	var targetRefs []string
-	var selectorRef, prospectiveTargetRef, declarationRef, selectorOwner string
+	var prospectiveTargetRefs []string
+	var selectorRef, declarationRef, selectorOwner string
 	var validationRecipeID string
 	validationChecks := make([]string, 0)
 	proofRequirementIndex := -1
@@ -357,14 +358,14 @@ func compileRuntimeSemanticFocus(manifest RuntimeSemanticPlanManifest, generatio
 			}
 		}
 		if proofIndex == 0 {
-			targetRefs, selectorRef, prospectiveTargetRef = currentTargets, currentSelector, currentProspective
+			targetRefs, selectorRef, prospectiveTargetRefs = currentTargets, currentSelector, currentProspective
 			declarationRef, selectorOwner = proposal.DeclarationRef, currentSelectorOwner
 		} else {
 			if declarationRef != proposal.DeclarationRef {
 				return CoverageFocus{}, fmt.Errorf("runtime semantic proofs for coverage %q do not share one target and declaration surface", proofSet.CoverageWorkItemID)
 			}
-			targetRefs, selectorRef, prospectiveTargetRef, selectorOwner, err = mergeRuntimeSemanticBindingTarget(
-				targetRefs, selectorRef, prospectiveTargetRef, selectorOwner,
+			targetRefs, selectorRef, prospectiveTargetRefs, selectorOwner, err = mergeRuntimeSemanticBindingTarget(
+				targetRefs, selectorRef, prospectiveTargetRefs, selectorOwner,
 				currentTargets, currentSelector, currentProspective, currentSelectorOwner,
 			)
 			if err != nil {
@@ -379,7 +380,7 @@ func compileRuntimeSemanticFocus(manifest RuntimeSemanticPlanManifest, generatio
 	binding := CoverageEvidenceBinding{
 		ID: bindingID, CoverageWorkItemID: proofSet.CoverageWorkItemID, FocusID: focusID, DefinitionRevision: manifest.DefinitionRevision,
 		Proofs: proofs, TargetRefs: targetRefs, TargetSelectorRef: selectorRef, DeclarationRef: declarationRef,
-		ProspectiveTargetRef: prospectiveTargetRef, PrerequisiteRefs: prerequisiteRefs,
+		ProspectiveTargetRefs: prospectiveTargetRefs, PrerequisiteRefs: prerequisiteRefs,
 	}
 	if selectorRef != "" {
 		binding.TargetSelectorOwnerRef = selectorOwner
@@ -404,7 +405,7 @@ func compileRuntimeSemanticFocus(manifest RuntimeSemanticPlanManifest, generatio
 		EvidenceDeclarationRef: declarationRef, RequiredEvidenceKinds: binding.EvidenceKinds(),
 		TargetRefs: targetRefs, TargetRole: "semantic_proof_target", TargetSelectorRef: selectorRef,
 		TargetSelectorOwnerRef: binding.TargetSelectorOwnerRef, TargetSelectorSubjectRef: binding.TargetSelectorSubjectRef,
-		ProspectiveTargetRef: prospectiveTargetRef, RequireTargetGrounding: true,
+		ProspectiveTargetRefs: prospectiveTargetRefs, RequireTargetGrounding: true,
 		AcceptedStepKinds: acceptedKinds, AcceptedOperationVariants: acceptedVariants, RequireDirectEvidence: true, RequireAssessment: true,
 		ValidationRecipeID: validationRecipeID, RequiredCheckRefs: validationChecks,
 	}
@@ -472,29 +473,29 @@ func runtimeSemanticSourceProofRequirementIndex(proofSet RuntimeSemanticCWIProof
 // validation owner observes the resulting exact path. They may share one CWI
 // binding only when both facts name that exact same logical target.
 func mergeRuntimeSemanticBindingTarget(
-	targets []string, selector, prospective, selectorOwner string,
-	currentTargets []string, currentSelector, currentProspective, currentOwner string,
-) ([]string, string, string, string, error) {
-	if prospective != "" {
-		if currentProspective == "" && currentSelector == "" && sameStrings(currentTargets, []string{prospective}) {
+	targets []string, selector string, prospective []string, selectorOwner string,
+	currentTargets []string, currentSelector string, currentProspective []string, currentOwner string,
+) ([]string, string, []string, string, error) {
+	if len(prospective) != 0 {
+		if len(currentProspective) == 0 && currentSelector == "" && sameStrings(currentTargets, prospective) {
 			return targets, selector, prospective, selectorOwner, nil
 		}
-		if currentProspective == prospective && currentSelector == selector && sameStrings(currentTargets, targets) && currentOwner == selectorOwner {
+		if sameStrings(currentProspective, prospective) && currentSelector == selector && sameStrings(currentTargets, targets) && currentOwner == selectorOwner {
 			return targets, selector, prospective, selectorOwner, nil
 		}
-		return nil, "", "", "", fmt.Errorf("semantic prospective target surface mismatch")
+		return nil, "", nil, "", fmt.Errorf("semantic prospective target surface mismatch")
 	}
-	if currentProspective != "" {
-		if selector == "" && sameStrings(targets, []string{currentProspective}) {
+	if len(currentProspective) != 0 {
+		if selector == "" && sameStrings(targets, currentProspective) {
 			return currentTargets, currentSelector, currentProspective, currentOwner, nil
 		}
-		return nil, "", "", "", fmt.Errorf("semantic prospective target surface mismatch")
+		return nil, "", nil, "", fmt.Errorf("semantic prospective target surface mismatch")
 	}
 	if !sameStrings(targets, currentTargets) || selector != currentSelector {
-		return nil, "", "", "", fmt.Errorf("semantic target surface mismatch")
+		return nil, "", nil, "", fmt.Errorf("semantic target surface mismatch")
 	}
 	if selector != "" && selectorOwner != currentOwner {
-		return nil, "", "", "", fmt.Errorf("semantic selector owner mismatch")
+		return nil, "", nil, "", fmt.Errorf("semantic selector owner mismatch")
 	}
 	return targets, selector, prospective, selectorOwner, nil
 }
@@ -512,33 +513,33 @@ func semanticProofEffectsForEvidenceKind(values []RuntimeEffectScope, evidenceKi
 	return NormalizeRuntimeEffectScopes(ret)
 }
 
-func semanticBindingTarget(proposal RuntimeSemanticProofProposal, fact RuntimeSemanticProofFeasibility) ([]string, string, string, error) {
+func semanticBindingTarget(proposal RuntimeSemanticProofProposal, fact RuntimeSemanticProofFeasibility) ([]string, string, []string, error) {
 	target := proposal.Target.Normalized()
 	factTargets := normalizeStrings(fact.TargetRefs)
 	switch target.Policy {
 	case RuntimeOperationTargetPolicyExactTarget:
 		if !sameStrings(factTargets, target.ExactTargetRefs) {
-			return nil, "", "", fmt.Errorf("runtime semantic exact target owner fact does not match proposal")
+			return nil, "", nil, fmt.Errorf("runtime semantic exact target owner fact does not match proposal")
 		}
-		return factTargets, "", "", nil
+		return factTargets, "", nil, nil
 	case RuntimeOperationTargetPolicyExistingOwnerScope:
 		if len(target.OwnerScopeTargetRefs) != 0 && !sameStrings(factTargets, target.OwnerScopeTargetRefs) {
-			return nil, "", "", fmt.Errorf("runtime semantic owner scope fact does not match proposal")
+			return nil, "", nil, fmt.Errorf("runtime semantic owner scope fact does not match proposal")
 		}
 		selector := ""
 		if len(target.OwnerSelectorRefs) == 1 {
 			selector = target.OwnerSelectorRefs[0]
 		}
-		return factTargets, selector, "", nil
+		return factTargets, selector, nil, nil
 	case RuntimeOperationTargetPolicyProspectiveOwnerTarget:
 		// A prospective target is not required to exist in the owner inventory.
 		// Feasibility may therefore legitimately return no TargetRefs; when it
 		// does return one, it must agree with the sealed prospective ref.
-		if len(factTargets) != 0 && !sameStrings(factTargets, []string{target.ProspectiveTargetRef}) {
-			return nil, "", "", fmt.Errorf("runtime semantic prospective target owner fact does not match proposal")
+		if len(factTargets) != 0 && !sameStrings(factTargets, target.ProspectiveTargetRefs) {
+			return nil, "", nil, fmt.Errorf("runtime semantic prospective target owner fact does not match proposal")
 		}
-		return nil, target.OwnerSelectorRefs[0], target.ProspectiveTargetRef, nil
+		return nil, target.OwnerSelectorRefs[0], append([]string(nil), target.ProspectiveTargetRefs...), nil
 	default:
-		return nil, "", "", fmt.Errorf("runtime semantic binding has unsupported target policy %q", target.Policy)
+		return nil, "", nil, fmt.Errorf("runtime semantic binding has unsupported target policy %q", target.Policy)
 	}
 }

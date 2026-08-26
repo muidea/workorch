@@ -24,8 +24,8 @@ type Artifact struct {
 	EvidenceRefs       []string
 	Metadata           workorcheventpayload.Payload
 	// SourceRef is the opaque Runtime artifact reference from which this child
-	// metadata record was materialized. Artifact content remains outside the
-	// EventHub payload and is addressed through URI/SourceRef.
+	// metadata record was materialized. Bulk artifact material remains outside
+	// notifications; Result may serve a bounded copied content DTO by URI.
 	SourceRef          string
 	TerminalDeliveryID string
 	MaterialHash       string

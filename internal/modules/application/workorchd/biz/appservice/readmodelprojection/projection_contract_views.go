@@ -1,6 +1,9 @@
 package readmodelprojection
 
-import projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
+import (
+	llmevents "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/events"
+	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
+)
 
 // WD5 mechanical consolidation; source files are listed to preserve review traceability.
 
@@ -463,7 +466,7 @@ func addLLMUsageCacheEntryMetrics(summary *projectioncontract.LLMUsageSummary, m
 // source: llm_usage_event_filter.go
 
 func isLLMUsageEventRecordForRun(item projectioncontract.EventRecord, runID string) bool {
-	if item.Topic != "/run/llm_usage/recorded" {
+	if item.Topic != llmevents.TopicLLMUsageRecorded {
 		return false
 	}
 	return runID == "" || item.RunID == runID

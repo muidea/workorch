@@ -284,8 +284,7 @@ func canonicalAssessmentEvidenceWithoutOwnerFactsForCoverage(aggregate RuntimeAg
 	if bound {
 		needed = stringSet(binding.EvidenceKinds())
 	}
-	seenKinds := make(map[string]struct{}, len(needed))
-	refs := make([]string, 0)
+	eligibleByKind := make(map[string][]runtimecontract.EvidenceFact, len(needed))
 	for _, evidence := range aggregate.Facts.Evidence.Accepted {
 		if weakRuntimeEvidence(evidence) ||
 			!runtimeEvidenceAppliesToCoverageWorkItemWithLineage(aggregate.Facts, evidence, coverageID, aggregate.CoverageProofLineage) {
@@ -303,16 +302,36 @@ func canonicalAssessmentEvidenceWithoutOwnerFactsForCoverage(aggregate RuntimeAg
 				continue
 			}
 		}
-		refs = append(refs, string(evidence.ID))
-		seenKinds[strings.TrimSpace(evidence.Kind)] = struct{}{}
+		kind := strings.TrimSpace(evidence.Kind)
+		eligibleByKind[kind] = append(eligibleByKind[kind], evidence)
+	}
+	refs := make([]string, 0)
+	for kind := range needed {
+		eligible := eligibleByKind[kind]
+		if len(eligible) == 0 {
+			return nil, false
+		}
+		if bound && len(binding.ProspectiveTargetRefs) > 1 {
+			dispatchID, complete := runtimeProspectiveCoverageKindComplete(aggregate, binding, coverageID, kind, eligible)
+			if !complete {
+				return nil, false
+			}
+			// Only the facts belonging to the one complete sealed dispatch form
+			// this all-of proof. Separate repair/restart generations are audit,
+			// not a receipt-set union authority.
+			for _, evidence := range eligible {
+				if evidence.DispatchID == dispatchID {
+					refs = appendNormalizedString(refs, string(evidence.ID))
+				}
+			}
+			continue
+		}
+		for _, evidence := range eligible {
+			refs = appendNormalizedString(refs, string(evidence.ID))
+		}
 	}
 	if len(refs) == 0 {
 		return nil, false
-	}
-	for kind := range needed {
-		if _, ok := seenKinds[kind]; !ok {
-			return nil, false
-		}
 	}
 	// A binding can deliberately require a durable state-change receipt and a
 	// validation receipt. The former proves the effect while the latter proves

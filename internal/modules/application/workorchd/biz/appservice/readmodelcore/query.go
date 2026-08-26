@@ -3,6 +3,7 @@ package readmodelcore
 import (
 	"strings"
 
+	llmevents "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/workorchquerycontract"
 )
@@ -37,7 +38,7 @@ func RunProjectionEventRecordOwnerQuery(runID common.RunID, limit int) workorchq
 
 func RunLLMUsageEventRecordOwnerQuery(runID common.RunID, limit int) workorchquerycontract.EventRecordQuery {
 	query := RunEventRecordOwnerQuery(runID, limit)
-	query.Topic = "/run/llm_usage/recorded"
+	query.Topic = llmevents.TopicLLMUsageRecorded
 	query.IncludePayload = true
 	return query
 }
@@ -51,7 +52,7 @@ func WorkspaceEventRecordOwnerQuery(workspaceID common.WorkspaceID, limit int) w
 
 func WorkspaceLLMUsageEventRecordOwnerQuery(workspaceID common.WorkspaceID, limit int) workorchquerycontract.EventRecordQuery {
 	query := WorkspaceEventRecordOwnerQuery(workspaceID, limit)
-	query.Topic = "/run/llm_usage/recorded"
+	query.Topic = llmevents.TopicLLMUsageRecorded
 	query.IncludePayload = true
 	return query
 }

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"log/slog"
+	"strings"
 	"sync"
 	"time"
 
@@ -72,6 +73,7 @@ func (m *Biz) Start() error {
 		resultevents.TopicArtifactCommandListByWorkspace,
 		resultevents.TopicArtifactCommandListByRun,
 		resultevents.TopicArtifactCommandListByResult,
+		resultevents.TopicArtifactCommandReadContent,
 	}
 	for _, topic := range m.topics {
 		m.SubscribeFunc(topic, m.handleCommand)
@@ -203,6 +205,9 @@ func (m *Biz) handleCommand(ev magicevent.Event, result magicevent.Result) {
 	case resultevents.TopicArtifactCommandListByResult:
 		response, err := m.listArtifactsByResult(ev)
 		setCommandResult(result, response, err)
+	case resultevents.TopicArtifactCommandReadContent:
+		response, err := m.readArtifactContent(ev)
+		setCommandResult(result, response, err)
 	default:
 		setCommandResult(result, struct{}{}, common.ErrInvalidArgument)
 	}
@@ -224,6 +229,8 @@ func resultQueryWorkspaceID(ev magicevent.Event) (common.WorkspaceID, bool) {
 	case resultevents.ListArtifactsByRunCommand:
 		return command.WorkspaceID, command.WorkspaceID != ""
 	case resultevents.ListArtifactsByResultCommand:
+		return command.WorkspaceID, command.WorkspaceID != ""
+	case resultevents.ReadArtifactContentCommand:
 		return command.WorkspaceID, command.WorkspaceID != ""
 	default:
 		return "", false
@@ -332,6 +339,18 @@ func (m *Biz) listArtifactsByResult(ev magicevent.Event) (resultevents.ListArtif
 	}
 	page, next, err := paginateArtifacts(items, cmd.Cursor, cmd.Limit)
 	return resultevents.ListArtifactsByResultResult{Artifacts: page, NextCursor: next}, err
+}
+
+func (m *Biz) readArtifactContent(ev magicevent.Event) (resultevents.ReadArtifactContentResult, error) {
+	cmd, ok := ev.Data().(resultevents.ReadArtifactContentCommand)
+	if !ok || cmd.WorkspaceID == "" || cmd.RunID == "" || strings.TrimSpace(cmd.URI) == "" {
+		return resultevents.ReadArtifactContentResult{}, common.ErrInvalidArgument
+	}
+	ctx, err := resultCommandContext(ev.Context(), cmd.WorkspaceID)
+	if err != nil {
+		return resultevents.ReadArtifactContentResult{}, err
+	}
+	return m.service.ReadArtifactContent(ctx, cmd.WorkspaceID, cmd.RunID, cmd.URI)
 }
 
 func paginateResults(items []*resultmodel.Result, cursor string, limit int) ([]*resultmodel.Result, string, error) {

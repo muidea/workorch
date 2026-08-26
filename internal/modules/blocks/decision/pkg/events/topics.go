@@ -14,7 +14,6 @@ const (
 	TopicDecisionCommandEnsureResolved                      = "/decision/command/ensure-resolved"
 	TopicDecisionCommandPurgeWorkspace                      = "/decision/command/purge-workspace"
 	TopicDecisionCommandSealWorkspaceDeletion               = "/decision/command/seal-workspace-deletion"
-	TopicDecisionCommandRecordEvidence                      = "/decision/command/record-evidence"
 	TopicOpenRuntimeGovernanceRequest                       = "/decision/runtime-governance/open-request"
 	TopicAcquireRuntimeCapabilities                         = "/decision/runtime-prerequisite/acquire-capabilities"
 	TopicOpenWorkspaceDefinitionClarification               = "/decision/definition-clarification/workspace/open"

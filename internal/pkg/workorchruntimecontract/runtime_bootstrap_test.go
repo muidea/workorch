@@ -192,7 +192,7 @@ func TestRuntimeDefinitionFocusPreservesDeclarationWithoutGenerationAuthority(t 
 		})
 	}
 	seedFocus := compiled[0].RuntimeFocusSeed()
-	if len(seedFocus.TargetRefs) != 0 || seedFocus.ProspectiveTargetRef != "" || len(seedFocus.AcceptedStepKinds) != 0 || seedFocus.ValidationRecipeID != "" || len(seedFocus.RequiredCheckRefs) != 0 {
+	if len(seedFocus.TargetRefs) != 0 || len(seedFocus.ProspectiveTargetRefs) != 0 || len(seedFocus.AcceptedStepKinds) != 0 || seedFocus.ValidationRecipeID != "" || len(seedFocus.RequiredCheckRefs) != 0 {
 		t.Fatalf("initial generation queue contains pre-sealed authority: %+v", seedFocus)
 	}
 }

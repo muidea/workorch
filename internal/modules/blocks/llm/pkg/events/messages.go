@@ -505,7 +505,7 @@ type LLMCommandResult struct {
 }
 
 // LLMUsageRecordedData is the durable request audit notification for one provider call.
-// eventstream persists it under TopicLLMUsageRecorded (/run/llm_usage/recorded).
+// eventstream persists it under TopicLLMUsageRecorded (/llm/usage/recorded).
 type LLMUsageRecordedData struct {
 	RequestID             string
 	LogicalRequestID      string

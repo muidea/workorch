@@ -13,6 +13,7 @@ import (
 	decisionservice "github.com/muidea/workorch/internal/modules/blocks/decision/biz/contracts"
 	decisioncommon "github.com/muidea/workorch/internal/modules/blocks/decision/pkg/common"
 	decisionModel "github.com/muidea/workorch/internal/modules/blocks/decision/pkg/models"
+	orchestratorevents "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/common"
 	memory "github.com/muidea/workorch/internal/pkg/repository/memory"
 	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
@@ -31,16 +32,16 @@ type recordingDecisionHub struct {
 	magicevent.Hub
 	mu               sync.Mutex
 	posted           []magicevent.Event
-	evidenceCommands []decisionevents.RecordDecisionEvidenceCommand
+	evidenceCommands []orchestratorevents.RecordDecisionEvidenceCommand
 }
 
 func newRecordingDecisionHub(t *testing.T) *recordingDecisionHub {
 	t.Helper()
 	rawHub := magicevent.NewHub(32)
 	hub := &recordingDecisionHub{Hub: rawHub}
-	evidenceObserver := magicevent.NewSimpleObserver(decisionevents.EvidenceCommandDestination, rawHub)
-	evidenceObserver.Subscribe(decisionevents.TopicDecisionCommandRecordEvidence, func(event magicevent.Event, result magicevent.Result) {
-		command, ok := event.Data().(decisionevents.RecordDecisionEvidenceCommand)
+	evidenceObserver := magicevent.NewSimpleObserver(orchestratorevents.CommandDestination, rawHub)
+	evidenceObserver.Subscribe(orchestratorevents.TopicOrchestratorCommandRecordDecisionEvidence, func(event magicevent.Event, result magicevent.Result) {
+		command, ok := event.Data().(orchestratorevents.RecordDecisionEvidenceCommand)
 		if !ok {
 			result.Set(nil, nil)
 			return
@@ -48,10 +49,10 @@ func newRecordingDecisionHub(t *testing.T) *recordingDecisionHub {
 		hub.mu.Lock()
 		hub.evidenceCommands = append(hub.evidenceCommands, command)
 		hub.mu.Unlock()
-		result.Set(decisionevents.RecordDecisionEvidenceResult{EvidenceRecordID: command.EvidenceRecordID}, nil)
+		result.Set(orchestratorevents.RecordDecisionEvidenceResult{EvidenceRecordID: command.EvidenceRecordID}, nil)
 	})
 	t.Cleanup(func() {
-		evidenceObserver.Unsubscribe(decisionevents.TopicDecisionCommandRecordEvidence)
+		evidenceObserver.Unsubscribe(orchestratorevents.TopicOrchestratorCommandRecordDecisionEvidence)
 		rawHub.Terminate(context.Background())
 	})
 	return hub
@@ -70,10 +71,10 @@ func (h *recordingDecisionHub) Posted() []magicevent.Event {
 	return append([]magicevent.Event(nil), h.posted...)
 }
 
-func (h *recordingDecisionHub) EvidenceCommands() []decisionevents.RecordDecisionEvidenceCommand {
+func (h *recordingDecisionHub) EvidenceCommands() []orchestratorevents.RecordDecisionEvidenceCommand {
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	return append([]decisionevents.RecordDecisionEvidenceCommand(nil), h.evidenceCommands...)
+	return append([]orchestratorevents.RecordDecisionEvidenceCommand(nil), h.evidenceCommands...)
 }
 
 type countingDecisionTicketRepository struct {
@@ -729,18 +730,18 @@ func TestService_ResolveTicket_DoesNotUseEventHub(t *testing.T) {
 	resolutionRepo := memory.NewDecisionResolutionRepository()
 	rawHub := magicevent.NewHub(16)
 	defer rawHub.Terminate(ctx)
-	var evidenceCommand decisionevents.RecordDecisionEvidenceCommand
-	observer := magicevent.NewSimpleObserver(decisionevents.EvidenceCommandDestination, rawHub)
-	observer.Subscribe(decisionevents.TopicDecisionCommandRecordEvidence, func(ev magicevent.Event, result magicevent.Result) {
-		command, ok := ev.Data().(decisionevents.RecordDecisionEvidenceCommand)
+	var evidenceCommand orchestratorevents.RecordDecisionEvidenceCommand
+	observer := magicevent.NewSimpleObserver(orchestratorevents.CommandDestination, rawHub)
+	observer.Subscribe(orchestratorevents.TopicOrchestratorCommandRecordDecisionEvidence, func(ev magicevent.Event, result magicevent.Result) {
+		command, ok := ev.Data().(orchestratorevents.RecordDecisionEvidenceCommand)
 		if !ok {
 			result.Set(nil, nil)
 			return
 		}
 		evidenceCommand = command
-		result.Set(decisionevents.RecordDecisionEvidenceResult{EvidenceRecordID: command.EvidenceRecordID}, nil)
+		result.Set(orchestratorevents.RecordDecisionEvidenceResult{EvidenceRecordID: command.EvidenceRecordID}, nil)
 	})
-	defer observer.Unsubscribe(decisionevents.TopicDecisionCommandRecordEvidence)
+	defer observer.Unsubscribe(orchestratorevents.TopicOrchestratorCommandRecordDecisionEvidence)
 	service := newMutationService(ticketRepo, resolutionRepo)
 
 	createCmd := decisionservice.CreateTicketCommand{

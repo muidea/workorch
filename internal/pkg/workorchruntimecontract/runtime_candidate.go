@@ -895,6 +895,9 @@ func ValidateRequiredOperationBindings(operations []RuntimeOperation, requiremen
 		if err != nil || variant.ID != requirement.VariantID || CanonicalRuntimeBlockKind(operation.Kind) != requirement.Kind {
 			return fmt.Errorf("operation ref %q does not match required variant %s:%s", requirement.RequirementID, requirement.Kind, requirement.VariantID)
 		}
+		if requirement.TargetRef != "" && !sameStrings(operation.TargetRefs, []string{requirement.TargetRef}) {
+			return fmt.Errorf("operation ref %q does not match required target %q", requirement.RequirementID, requirement.TargetRef)
+		}
 		for _, dependency := range requirement.DependsOnRequirementIDs {
 			dep, ok := bound[dependency]
 			if !ok || !containsString(operation.DependsOn, dep.ID) {

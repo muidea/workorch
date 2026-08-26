@@ -129,11 +129,10 @@ func shellValidationSurfaces(declared, staticallyReady, ready []runtimemodel.Run
 	return runtimemodel.NormalizeRuntimeValidationSurfaces(ret)
 }
 
-// shellProspectiveTargetSatisfactionConstraint publishes only predicates for
-// which one target satisfying every conjunct is sufficient to make the exact
-// activation-sealed recipe applicable to the resulting manifest. Recipes
-// whose missing package roots require multiple incomparable targets remain a
-// non-actionable prerequisite; Shell never publishes an implicit any-of.
+// shellProspectiveTargetSatisfactionConstraint publishes one mandatory clause
+// for each missing input of the exact activation-sealed recipe. A bounded set
+// may cover several clauses, but every clause is required; Shell never
+// publishes an alternative aggregation.
 func shellProspectiveTargetSatisfactionConstraint(recipe runtimemodel.RuntimeValidationRecipe, currentTargetRefs []string, catalogObservedRevision string) (runtimemodel.RuntimeProspectiveTargetSatisfactionConstraint, bool) {
 	recipe = recipe.Normalized()
 	catalogObservedRevision = strings.TrimSpace(catalogObservedRevision)
@@ -142,40 +141,37 @@ func shellProspectiveTargetSatisfactionConstraint(recipe runtimemodel.RuntimeVal
 		return runtimemodel.RuntimeProspectiveTargetSatisfactionConstraint{}, false
 	}
 	currentTargetRefs = normalizeShellStrings(currentTargetRefs)
-	// Managed validation executes in an isolated workspace copy. The built-in
-	// Go recipe therefore needs a root module declaration as well as an actual
-	// test input. The closed predicate vocabulary cannot express exact root-file
-	// equality for go.mod: path_suffix would also admit nested modules. Keep the
-	// surface non-actionable whenever that prerequisite is missing instead of
-	// publishing an all-of contract that is not sufficient for readiness.
+	clauses := make([]runtimemodel.RuntimeProspectiveTargetClause, 0, 2+len(packageRoots))
 	if !shellManifestHasGoModule(currentTargetRefs) {
-		return runtimemodel.RuntimeProspectiveTargetSatisfactionConstraint{}, false
-	}
-	predicates := make([]runtimemodel.RuntimeProspectiveTargetPredicate, 0, 6)
-	if !shellManifestHasApplicableGoTestTarget(currentTargetRefs) {
-		predicates = append(predicates, runtimemodel.RuntimeProspectiveTargetPredicate{
-			Kind: runtimemodel.RuntimeProspectiveTargetPredicatePathSuffix, Value: "_test.go",
+		clauses = append(clauses, runtimemodel.RuntimeProspectiveTargetClause{
+			ID: "go-module-root",
+			AllOf: []runtimemodel.RuntimeProspectiveTargetPredicate{{
+				Kind: runtimemodel.RuntimeProspectiveTargetPredicatePathExact, Value: "go.mod",
+			}},
 		})
+	}
+	if !shellManifestHasApplicableGoTestTarget(currentTargetRefs) {
+		predicates := []runtimemodel.RuntimeProspectiveTargetPredicate{{
+			Kind: runtimemodel.RuntimeProspectiveTargetPredicatePathSuffix, Value: "_test.go",
+		}}
 		for _, segment := range shellManifestExcludedPathSegments() {
 			predicates = append(predicates, runtimemodel.RuntimeProspectiveTargetPredicate{
 				Kind: runtimemodel.RuntimeProspectiveTargetPredicatePathSegmentNotEqual, Value: segment,
 			})
 		}
+		clauses = append(clauses, runtimemodel.RuntimeProspectiveTargetClause{ID: "go-test-input", AllOf: predicates})
 	}
-	missingRoots := make([]string, 0, len(packageRoots))
 	for _, root := range packageRoots {
 		if !shellManifestContainsPackageRoot(currentTargetRefs, root) {
-			missingRoots = append(missingRoots, root)
+			clauses = append(clauses, runtimemodel.RuntimeProspectiveTargetClause{
+				ID: "go-package-root:" + root,
+				AllOf: []runtimemodel.RuntimeProspectiveTargetPredicate{{
+					Kind: runtimemodel.RuntimeProspectiveTargetPredicatePathPrefix, Value: root,
+				}},
+			})
 		}
 	}
-	if prefix, expressible := shellSingleProspectivePackagePrefix(missingRoots); !expressible {
-		return runtimemodel.RuntimeProspectiveTargetSatisfactionConstraint{}, false
-	} else if prefix != "" {
-		predicates = append(predicates, runtimemodel.RuntimeProspectiveTargetPredicate{
-			Kind: runtimemodel.RuntimeProspectiveTargetPredicatePathPrefix, Value: prefix,
-		})
-	}
-	if len(predicates) == 0 {
+	if len(clauses) == 0 || len(clauses) > runtimemodel.RuntimeProspectiveTargetRefsMaxCount {
 		return runtimemodel.RuntimeProspectiveTargetSatisfactionConstraint{}, false
 	}
 	value := runtimemodel.RuntimeProspectiveTargetSatisfactionConstraint{
@@ -186,7 +182,7 @@ func shellProspectiveTargetSatisfactionConstraint(recipe runtimemodel.RuntimeVal
 		ValidationRecipeID:                 recipe.ID,
 		InputSchemaHash:                    shellValidationRecipeSchemaHash(recipe),
 		CatalogObservedRevision:            catalogObservedRevision,
-		AllOf:                              predicates,
+		AllOf:                              clauses,
 	}.Normalized()
 	if err := value.Validate(); err != nil {
 		return runtimemodel.RuntimeProspectiveTargetSatisfactionConstraint{}, false
@@ -306,25 +302,6 @@ func shellManifestContainsPackageRoot(targetRefs []string, root string) bool {
 		}
 	}
 	return false
-}
-
-func shellSingleProspectivePackagePrefix(roots []string) (string, bool) {
-	roots = normalizeShellStrings(roots)
-	if len(roots) == 0 {
-		return "", true
-	}
-	longest := roots[0]
-	for _, root := range roots[1:] {
-		if len(root) > len(longest) {
-			longest = root
-		}
-	}
-	for _, root := range roots {
-		if longest != root && !strings.HasPrefix(longest, strings.TrimSuffix(root, "/")+"/") {
-			return "", false
-		}
-	}
-	return strings.Trim(longest, "/") + "/", true
 }
 
 func shellManifestPathExcluded(ref string) bool {

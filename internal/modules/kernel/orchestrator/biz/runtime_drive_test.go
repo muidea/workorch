@@ -1002,7 +1002,7 @@ func TestRuntimeFileBackedEmptyWorkspaceCreationSelectionContinuesThroughCandida
 	t.Cleanup(func() { driveObserver.Unsubscribe(orchestratorevents.TopicOrchestratorDriveRuntime) })
 
 	completed, err := DriveRuntime(ctx, hub, orchestratorevents.DriveRuntimeCommand{WorkspaceID: "ws-v2", RunID: "run-v2"})
-	if err != nil || completed.Terminal == nil || completed.State != runtimecontract.ConvergenceStateComplete || candidateCalls != 3 {
+	if err != nil || completed.Terminal == nil || completed.State != runtimecontract.ConvergenceStateComplete || candidateCalls != 2 {
 		t.Fatalf("empty workspace creation completion=%+v terminal=%+v candidateCalls=%d err=%v", completed, completed.Terminal, candidateCalls, err)
 	}
 	content, err := os.ReadFile(filepath.Join(deliverable, "implementation.txt"))
@@ -1016,7 +1016,7 @@ func TestRuntimeFileBackedEmptyWorkspaceCreationSelectionContinuesThroughCandida
 	// proves the realized target.
 	if err != nil || persisted.RuntimeState == nil || initialSelection != runtimecontract.RuntimeTargetSelectionCreate ||
 		persisted.RuntimeState.Facts.Resources.TargetSelection == nil || persisted.RuntimeState.Facts.Resources.TargetSelection.Disposition != runtimecontract.RuntimeTargetSelectionUnsupported ||
-		len(persisted.RuntimeState.Facts.Resources.TargetSnapshots) != 0 || len(persisted.RuntimeState.OperationReceipts) != 2 {
+		len(persisted.RuntimeState.Facts.Resources.TargetSnapshots) != 0 || len(persisted.RuntimeState.OperationReceipts) != 1 {
 		if persisted != nil && persisted.RuntimeState != nil {
 			state := persisted.RuntimeState
 			t.Fatalf("empty workspace creation initialSelection=%s state=%s selection=%+v snapshots=%d receipts=%d err=%v", initialSelection, state.Decision.State, state.Facts.Resources.TargetSelection, len(state.Facts.Resources.TargetSnapshots), len(state.OperationReceipts), err)
@@ -1144,8 +1144,8 @@ func TestRuntimeFileBackedEmptyWorkspaceCreationReceiptCrashRestartDoesNotReplay
 			if err != nil || persisted.RuntimeState == nil || persisted.State != common.RunStateCompleted ||
 				persisted.RuntimeState.Decision.State != runtimecontract.ConvergenceStateComplete ||
 				persisted.RuntimeState.Facts.Resources.TargetSelection == nil || persisted.RuntimeState.Facts.Resources.TargetSelection.Disposition != runtimecontract.RuntimeTargetSelectionUnsupported ||
-				len(persisted.RuntimeState.Facts.Resources.TargetSnapshots) != 0 || len(persisted.RuntimeState.OperationReceipts) != 2 ||
-				len(persisted.RuntimeState.Facts.Evidence.Accepted) != 2 || candidateCalls != 3 {
+				len(persisted.RuntimeState.Facts.Resources.TargetSnapshots) != 0 || len(persisted.RuntimeState.OperationReceipts) != 1 ||
+				len(persisted.RuntimeState.Facts.Evidence.Accepted) != 1 || candidateCalls != 2 {
 				t.Fatalf("empty-workspace receipt restart authority=%+v candidateCalls=%d err=%v", persisted, candidateCalls, err)
 			}
 		})
@@ -1155,10 +1155,9 @@ func TestRuntimeFileBackedEmptyWorkspaceCreationReceiptCrashRestartDoesNotReplay
 // TestRuntimeFileBackedBoundedWorkspaceScopeAllowsNewDeliverable verifies
 // the owner-chain counterpart to empty-workspace creation. The bounded scope
 // remains File feasibility inventory during SM-2; the operations request sees
-// only the subsequently acquired exact create observation. Creation authority
-// comes from the explicitly sealed prospective target and the File owner's
-// admissible variant fact. The candidate therefore writes and validates that
-// exact prospective target in one owner-grounded sequence.
+// only the subsequently sealed prospective operation. Creation authority
+// comes from the explicitly sealed target and the File owner's admissible
+// variant fact.
 func TestRuntimeFileBackedBoundedWorkspaceScopeAllowsNewDeliverable(t *testing.T) {
 	ctx := context.Background()
 	hub := magicevent.NewHub(32)
@@ -1251,7 +1250,7 @@ func TestRuntimeFileBackedBoundedWorkspaceScopeAllowsNewDeliverable(t *testing.T
 	t.Cleanup(func() { driveObserver.Unsubscribe(orchestratorevents.TopicOrchestratorDriveRuntime) })
 
 	completed, err := DriveRuntime(ctx, hub, orchestratorevents.DriveRuntimeCommand{WorkspaceID: "ws-v2", RunID: "run-v2"})
-	if err != nil || completed.Terminal == nil || completed.State != runtimecontract.ConvergenceStateComplete || candidateCalls != 3 {
+	if err != nil || completed.Terminal == nil || completed.State != runtimecontract.ConvergenceStateComplete || candidateCalls != 2 {
 		t.Fatalf("bounded scope new-deliverable completion=%+v terminal=%+v candidateCalls=%d err=%v", completed, completed.Terminal, candidateCalls, err)
 	}
 	if content, err := os.ReadFile(filepath.Join(deliverable, "new-deliverable.txt")); err != nil || string(content) != "created\n" {
@@ -1261,7 +1260,7 @@ func TestRuntimeFileBackedBoundedWorkspaceScopeAllowsNewDeliverable(t *testing.T
 	if err != nil || persisted.RuntimeState == nil || initialSelection != runtimecontract.RuntimeTargetSelectionCreate || initialSelectionCount != 0 || initialSnapshots != 0 ||
 		persisted.RuntimeState.Facts.Resources.TargetSelection == nil || persisted.RuntimeState.Facts.Resources.TargetSelection.Disposition != runtimecontract.RuntimeTargetSelectionUnsupported ||
 		persisted.RuntimeState.Facts.Resources.TargetSelection.CandidateCount != 0 || len(persisted.RuntimeState.Facts.Resources.TargetSnapshots) != 0 ||
-		len(persisted.RuntimeState.OperationReceipts) != 2 || len(persisted.RuntimeState.Facts.Evidence.Accepted) != 2 || len(persisted.RuntimeState.Facts.Evidence.Rejected) != 0 ||
+		len(persisted.RuntimeState.OperationReceipts) != 1 || len(persisted.RuntimeState.Facts.Evidence.Accepted) != 1 || len(persisted.RuntimeState.Facts.Evidence.Rejected) != 0 ||
 		persisted.RuntimeState.Facts.Resources.FailureTarget != nil || (persisted.RuntimeState.Facts.RepairDirective != nil && len(persisted.RuntimeState.Facts.RepairDirective.TargetRefs) != 0) {
 		if persisted != nil && persisted.RuntimeState != nil {
 			state := persisted.RuntimeState
@@ -1443,9 +1442,8 @@ func runtimeTestDeclareProspectiveWorkspaceTarget(bootstrap *runtimecontract.Run
 			TargetDiscoverySources: []string{runtimecontract.RuntimeValidationDiscoverySourceWorkspaceManifest},
 			TargetSelectorRef:      "file/workspace_deliverable", TargetSelectorOwnerRef: runtimecontract.RuntimeModuleFile,
 			TargetSelectorSubjectRef: "deliverable", TargetSelectorCandidateRefs: []string{target}, RequireTargetGrounding: true,
-			RequiredEvidenceKinds: []string{runtimecontract.EvidenceKindStateChange, runtimecontract.EvidenceKindValidation},
-			AcceptedStepKinds:     []string{runtimecontract.StepKindFileWrite, runtimecontract.RuntimeBlockKindManagedValidationSession},
-			ValidationRecipeID:    "grounded-target-validation", RequiredCheckRefs: []string{"grounded-target-validation"},
+			RequiredEvidenceKinds: []string{runtimecontract.EvidenceKindStateChange},
+			AcceptedStepKinds:     []string{runtimecontract.StepKindFileWrite},
 		}},
 	}}
 	if len(bootstrap.DefinitionFocuses) != 0 {
@@ -1457,6 +1455,15 @@ func runtimeTestDeclareProspectiveWorkspaceTarget(bootstrap *runtimecontract.Run
 		focus.TargetSelectorSubjectRef = "deliverable"
 		focus.TargetSelectorCandidateRefs = []string{target}
 		focus.RequireTargetGrounding = true
+		focus.RequiredEvidenceKinds = []string{runtimecontract.EvidenceKindStateChange}
+	}
+	for index := range bootstrap.Slices {
+		for _, coverageID := range bootstrap.Slices[index].CoverageWorkItemIDs {
+			if coverageID == "cwi-v2" {
+				bootstrap.Slices[index].RequiredEvidenceKinds = []string{runtimecontract.EvidenceKindStateChange}
+				break
+			}
+		}
 	}
 }
 
@@ -5999,13 +6006,14 @@ func runtimeFileShellGitBootstrap() runtimecontract.RuntimeBootstrap {
 				TargetDiscoverySources: []string{runtimecontract.RuntimeValidationDiscoverySourceWorkspaceManifest},
 				TargetSelectorRef:      "file/workspace_deliverable", TargetSelectorOwnerRef: runtimecontract.RuntimeModuleFile, TargetSelectorSubjectRef: "main-deliverable",
 				TargetSelectorCandidateRefs: []string{"main.go"}, RequireTargetGrounding: true,
-				RequiredEvidenceKinds: []string{runtimecontract.EvidenceKindStateChange, runtimecontract.EvidenceKindValidation},
-				AcceptedStepKinds:     []string{runtimecontract.StepKindFileWrite, runtimecontract.RuntimeBlockKindManagedValidationSession},
-				ValidationRecipeID:    "fixture-main-go-created", RequiredCheckRefs: []string{"fixture-main-go-created"},
+				RequiredEvidenceKinds: []string{runtimecontract.EvidenceKindStateChange},
+				AcceptedStepKinds:     []string{runtimecontract.StepKindFileWrite},
 			},
 			{
 				ID: "cwi-edit", Scope: "test", TargetRole: "deliverable", TargetRefs: []string{"main.go"}, RequireTargetGrounding: true,
-				RequiredEvidenceKinds: []string{runtimecontract.EvidenceKindStateChange}, AcceptedStepKinds: []string{runtimecontract.StepKindFileEdit},
+				RequiredEvidenceKinds: []string{runtimecontract.EvidenceKindStateChange, runtimecontract.EvidenceKindValidation},
+				AcceptedStepKinds:     []string{runtimecontract.StepKindFileEdit, runtimecontract.RuntimeBlockKindManagedValidationSession},
+				ValidationRecipeID:    "fixture-main-go-created", RequiredCheckRefs: []string{"fixture-main-go-created"},
 			},
 			{
 				ID: "cwi-git", Scope: "test", TargetRole: "deliverable", TargetRefs: []string{"main.go"}, RequireTargetGrounding: true,
@@ -6016,17 +6024,17 @@ func runtimeFileShellGitBootstrap() runtimecontract.RuntimeBootstrap {
 	}}
 	bootstrap.DefinitionFocuses = []runtimecontract.RuntimeDefinitionFocus{
 		{
-			ID: "focus-file", SliceID: "slice-file", CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-file"}, RequiredEvidenceKinds: []string{runtimecontract.EvidenceKindStateChange, runtimecontract.EvidenceKindValidation},
+			ID: "focus-file", SliceID: "slice-file", CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-file"}, RequiredEvidenceKinds: []string{runtimecontract.EvidenceKindStateChange},
 			TargetRole: "deliverable", TargetDiscoverySources: []string{runtimecontract.RuntimeValidationDiscoverySourceWorkspaceManifest},
 			TargetSelectorRef: "file/workspace_deliverable", TargetSelectorOwnerRef: runtimecontract.RuntimeModuleFile,
 			TargetSelectorSubjectRef: "main-deliverable", TargetSelectorCandidateRefs: []string{"main.go"}, RequireTargetGrounding: true,
 		},
-		{ID: "focus-edit", SliceID: "slice-edit", CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-edit"}, RequiredEvidenceKinds: []string{runtimecontract.EvidenceKindStateChange}},
+		{ID: "focus-edit", SliceID: "slice-edit", CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-edit"}, RequiredEvidenceKinds: []string{runtimecontract.EvidenceKindStateChange, runtimecontract.EvidenceKindValidation}},
 		{ID: "focus-git", SliceID: "slice-git", CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-git"}, RequiredEvidenceKinds: []string{runtimecontract.EvidenceKindStateChange}, RequireAssessment: true},
 	}
 	bootstrap.Slices = []runtimecontract.RuntimeAcceptanceSlice{
-		{ID: "slice-file", Title: "file", Scope: "fixture", Priority: 1, CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-file"}, RequiredEvidenceKinds: []string{runtimecontract.EvidenceKindStateChange, runtimecontract.EvidenceKindValidation}, CompletionPolicy: runtimecontract.RuntimeAcceptanceSliceCompletionAll, ResultPolicy: runtimecontract.RuntimeAcceptanceSliceResultAllowed},
-		{ID: "slice-edit", Title: "edit", Scope: "fixture", Priority: 1, CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-edit"}, RequiredEvidenceKinds: []string{runtimecontract.EvidenceKindStateChange}, CompletionPolicy: runtimecontract.RuntimeAcceptanceSliceCompletionAll, ResultPolicy: runtimecontract.RuntimeAcceptanceSliceResultAllowed},
+		{ID: "slice-file", Title: "file", Scope: "fixture", Priority: 1, CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-file"}, RequiredEvidenceKinds: []string{runtimecontract.EvidenceKindStateChange}, CompletionPolicy: runtimecontract.RuntimeAcceptanceSliceCompletionAll, ResultPolicy: runtimecontract.RuntimeAcceptanceSliceResultAllowed},
+		{ID: "slice-edit", Title: "edit", Scope: "fixture", Priority: 1, CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-edit"}, RequiredEvidenceKinds: []string{runtimecontract.EvidenceKindStateChange, runtimecontract.EvidenceKindValidation}, CompletionPolicy: runtimecontract.RuntimeAcceptanceSliceCompletionAll, ResultPolicy: runtimecontract.RuntimeAcceptanceSliceResultAllowed},
 		{ID: "slice-git", Title: "git", Scope: "fixture", Priority: 1, CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-git"}, RequiredEvidenceKinds: []string{runtimecontract.EvidenceKindStateChange}, CompletionPolicy: runtimecontract.RuntimeAcceptanceSliceCompletionAll, ResultPolicy: runtimecontract.RuntimeAcceptanceSliceResultAllowed},
 	}
 	bootstrap.CoverageItems = []runtimecontract.RuntimeCoverageItem{
@@ -6178,11 +6186,11 @@ func runtimeFileShellGitSemanticProposals(coverageID common.CoverageWorkItemID) 
 	case "cwi-file":
 		return []runtimecontract.RuntimeSemanticProofProposal{
 			proposal(runtimecontract.RuntimeModuleFile, runtimecontract.StepKindFileEdit, "", runtimecontract.EvidenceKindStateChange, "", runtimecontract.RuntimeEffectWorkspaceDurable, exactTarget),
-			proposal(runtimecontract.RuntimeModuleShell, runtimecontract.RuntimeBlockKindManagedValidationSession, "", runtimecontract.EvidenceKindValidation, "fixture-main-go-created", runtimecontract.RuntimeEffectEphemeralSession, exactTarget),
 		}, nil
 	case "cwi-edit":
 		return []runtimecontract.RuntimeSemanticProofProposal{
 			proposal(runtimecontract.RuntimeModuleFile, runtimecontract.StepKindFileEdit, "", runtimecontract.EvidenceKindStateChange, "", runtimecontract.RuntimeEffectWorkspaceDurable, exactTarget),
+			proposal(runtimecontract.RuntimeModuleShell, runtimecontract.RuntimeBlockKindManagedValidationSession, "", runtimecontract.EvidenceKindValidation, "fixture-main-go-created", runtimecontract.RuntimeEffectEphemeralSession, exactTarget),
 		}, nil
 	case "cwi-git":
 		return []runtimecontract.RuntimeSemanticProofProposal{
@@ -6215,13 +6223,14 @@ func runtimeFileShellGitCandidate(command llmevents.RequestRuntimeCandidateComma
 		case runtimecontract.ConvergenceStateNeedStateChange:
 			target, content := "main.go", "package main\n"
 			return runtimecontract.RuntimeCandidate{StateChange: &runtimecontract.StateChangeCandidate{Operations: []runtimecontract.StateChangingOperation{{Operation: runtimecontract.RuntimeOperation{ID: "file-create", Kind: runtimecontract.StepKindFileWrite, CoverageWorkItemIDs: []common.CoverageWorkItemID{coverageID}, TargetRefs: []string{target}, Parameters: []runtimecontract.OperationParameter{{Name: "content", String: &content}}}}}}}, nil
-		case runtimecontract.ConvergenceStateNeedValidation:
-			return runtimeManagedShellValidationCandidate("validate-created", coverageID, "main.go", "fixture-main-go-created"), nil
 		}
 	case "cwi-edit":
-		if command.Decision.State == runtimecontract.ConvergenceStateNeedStateChange {
+		switch command.Decision.State {
+		case runtimecontract.ConvergenceStateNeedStateChange:
 			path, oldText, newText := "main.go", "package main\n", "package main\n// edited\n"
 			return runtimecontract.RuntimeCandidate{StateChange: &runtimecontract.StateChangeCandidate{Operations: []runtimecontract.StateChangingOperation{{Operation: runtimecontract.RuntimeOperation{ID: "file-edit", Kind: runtimecontract.StepKindFileEdit, CoverageWorkItemIDs: []common.CoverageWorkItemID{coverageID}, TargetRefs: []string{path}, Parameters: []runtimecontract.OperationParameter{{Name: "oldText", String: &oldText}, {Name: "newText", String: &newText}}}}}}}, nil
+		case runtimecontract.ConvergenceStateNeedValidation:
+			return runtimeManagedShellValidationCandidate("validate-created", coverageID, "main.go", "fixture-main-go-created"), nil
 		}
 	case "cwi-git":
 		switch command.Decision.State {

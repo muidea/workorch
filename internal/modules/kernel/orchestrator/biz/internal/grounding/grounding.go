@@ -55,7 +55,7 @@ func CatalogCoversFocusTargets(catalog runtimecontract.RuntimeOperationAdmissibi
 		variantsByKind[kind] = append(variantsByKind[kind], variant.VariantID)
 	}
 	policy := runtimecontract.RuntimeOperationTargetPolicyExistingOwnerScope
-	if strings.TrimSpace(focus.ProspectiveTargetRef) != "" {
+	if len(focus.ProspectiveTargetRefs) != 0 {
 		policy = runtimecontract.RuntimeOperationTargetPolicyProspectiveOwnerTarget
 	}
 	for _, rawKind := range focus.AcceptedStepKinds {

@@ -37,9 +37,16 @@ and converges through the same neutral Runtime owner model. It must not make leg
   remain executable in one dispatch;
 - build/test/lint and direct entrypoint checks produce matching validation receipts;
 - prospective validation preparation proves the profile-specific applicability split by publishing a provider-safe typed
-  `all_of` constraint derived from the exact default recipe. Schema/document admission accepts a matching target and rejects a
-  mismatching target with a typed `prospectiveTargetRef` violation before File/Shell probe; neither path creates a file, directory,
-  process/session, receipt or credit;
+  `all_of` clause set derived from the exact default recipe. The empty/source-only/module-only/ready workspace matrix must prove
+  that missing root `go.mod`, test input and declared package roots become mandatory clauses without `one_of`/`any_of` fallback.
+  Schema/document admission accepts one bounded 1–8-member `prospectiveTargetRefs` set only when every clause is covered and every
+  target contributes; empty/partial/extra/duplicate/mismatching sets produce a typed `prospectiveTargetRefs` violation before
+  File/Shell probe. File then checks the whole set against one manifest revision, including aggregate capacity, with zero writes;
+  Shell judges only the hypothetical resulting manifest. None of these paths creates a file, directory, process/session, receipt
+  or credit;
+- the SM-2 binding must preserve the whole prospective target set, and the SM-3 operations contract must require exactly one
+  ordered operation per target with an exact-singleton `TargetRef`; missing, additional, duplicate or out-of-order operations are
+  rejected before File effect. The singular semantic wire field is rejected rather than treated as a compatibility alias;
 - Shell dependency catalog/observation remains absent from provider C3/schema choices; File delta and Shell nested observation
   must both be exact-current at CAS and seal. Shell typed stale uses bounded refresh without consuming semantic correction.
   Persisted full-composite `would_not_satisfy` after a constraint-compatible proposal proves an owner contract contradiction and

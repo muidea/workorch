@@ -9,6 +9,7 @@ import (
 	resultbiz "github.com/muidea/workorch/internal/modules/blocks/result/biz"
 
 	magicevent "github.com/muidea/magicCommon/event"
+	resultcommon "github.com/muidea/workorch/internal/modules/blocks/result/pkg/common"
 	resultevents "github.com/muidea/workorch/internal/modules/blocks/result/pkg/events"
 
 	resultmodel "github.com/muidea/workorch/internal/modules/blocks/result/pkg/models"
@@ -181,6 +182,9 @@ func TestModuleManagesResultsAndArtifacts(t *testing.T) {
 	artifactRepo := memory.NewArtifactRepository()
 	result := validModuleTestResult()
 	artifact := validModuleTestArtifact(result.ID)
+	artifact.State = common.ArtifactStateAvailable
+	artifact.ArtifactType = resultcommon.ArtifactTypeText
+	artifact.URI = "workorch://workspaces/ws-result-test/artifacts/run-result-test/artifact.txt"
 	if err := resultRepo.Create(ctx, result); err != nil {
 		t.Fatal(err)
 	}
@@ -203,6 +207,12 @@ func TestModuleManagesResultsAndArtifacts(t *testing.T) {
 	artifacts := sendResultCommand[resultevents.ListArtifactsByResultResult](t, ctx, hub, resultevents.TopicArtifactCommandListByResult, resultevents.ListArtifactsByResultCommand{WorkspaceID: result.WorkspaceID, ResultID: result.ID}).Artifacts
 	if len(artifacts) != 1 || artifacts[0].ID != artifact.ID {
 		t.Fatalf("artifacts = %+v, want created artifact", artifacts)
+	}
+	content := sendResultCommand[resultevents.ReadArtifactContentResult](t, ctx, hub, resultevents.TopicArtifactCommandReadContent, resultevents.ReadArtifactContentCommand{
+		WorkspaceID: artifact.WorkspaceID, RunID: artifact.RunID, URI: artifact.URI,
+	})
+	if err := content.Validate(); err != nil || string(content.Content) != "artifact\n" {
+		t.Fatalf("artifact content = %+v/%q err=%v", content, content.Content, err)
 	}
 	if err := module.Stop(ctx); err != nil {
 		t.Fatalf("Teardown: %v", err)

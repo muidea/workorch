@@ -2,7 +2,6 @@ package workspacecore
 
 import (
 	"os"
-	"path/filepath"
 	"strings"
 
 	"github.com/muidea/workorch/internal/pkg/common"
@@ -30,11 +29,6 @@ func managedDirectoryLayoutPaths(layout DirectoryLayout) []string {
 	return []string{
 		layout.DeliverableDirectory,
 		layout.InternalDirectory,
-		filepath.Join(layout.InternalDirectory, "config"),
-		filepath.Join(layout.InternalDirectory, "runs"),
-		filepath.Join(layout.InternalDirectory, "artifacts"),
-		filepath.Join(layout.InternalDirectory, "events"),
-		filepath.Join(layout.InternalDirectory, "llm-calls"),
-		filepath.Join(layout.InternalDirectory, "indexes"),
+		SystemManagedConfigDirectory(layout.InternalDirectory),
 	}
 }

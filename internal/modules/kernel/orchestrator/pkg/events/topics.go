@@ -8,6 +8,8 @@ const (
 	TopicOrchestratorCommandConfirmWorkspaceRuntimeQuiescence = "/orchestrator/command/confirm-workspace-runtime-quiescence"
 	TopicOrchestratorCommandSealWorkspaceDeletion             = "/orchestrator/command/seal-workspace-deletion"
 	TopicOrchestratorCommandPurgeWorkspaceEvidence            = "/orchestrator/command/purge-workspace-evidence"
+	TopicOrchestratorCommandRecordDecisionEvidence            = "/orchestrator/command/record-decision-evidence"
+	TopicOrchestratorCommandRecordApprovalEvidence            = "/orchestrator/command/record-approval-evidence"
 	TopicOrchestratorCommandListToolCallsByRun                = "/orchestrator/command/list-tool-calls-by-run"
 	TopicOrchestratorCommandListPatchesByRun                  = "/orchestrator/command/list-patches-by-run"
 	TopicOrchestratorCommandListValidationResultsByRun        = "/orchestrator/command/list-validation-results-by-run"

@@ -10,13 +10,12 @@ import (
 
 	cd "github.com/muidea/magicCommon/def"
 	magicevent "github.com/muidea/magicCommon/event"
-	approvalevents "github.com/muidea/workorch/internal/modules/blocks/approval/pkg/events"
-	approvalmodel "github.com/muidea/workorch/internal/modules/blocks/approval/pkg/models"
 	decisionmodule "github.com/muidea/workorch/internal/modules/blocks/decision"
 	decisionbiz "github.com/muidea/workorch/internal/modules/blocks/decision/biz"
 	decisioncommon "github.com/muidea/workorch/internal/modules/blocks/decision/pkg/common"
 	decisionevents "github.com/muidea/workorch/internal/modules/blocks/decision/pkg/events"
 	runevents "github.com/muidea/workorch/internal/modules/blocks/run/pkg/events"
+	orchestratorevents "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/common"
 	memoryrepo "github.com/muidea/workorch/internal/pkg/repository/memory"
 	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
@@ -39,12 +38,12 @@ func TestWorkspacePreSealDefinitionResolutionSkipsRunScopedEvidenceAndReplaysAft
 	}
 	var evidenceCalls atomic.Int64
 	evidenceObserver := magicevent.NewSimpleObserver(ModuleID, hub)
-	evidenceObserver.Subscribe(decisionevents.TopicDecisionCommandRecordEvidence, func(event magicevent.Event, result magicevent.Result) {
+	evidenceObserver.Subscribe(orchestratorevents.TopicOrchestratorCommandRecordDecisionEvidence, func(event magicevent.Event, result magicevent.Result) {
 		evidenceCalls.Add(1)
 		orchestratorOwner.handleDecisionEvidenceCommand(event, result)
 	})
 	t.Cleanup(func() {
-		evidenceObserver.Unsubscribe(decisionevents.TopicDecisionCommandRecordEvidence)
+		evidenceObserver.Unsubscribe(orchestratorevents.TopicOrchestratorCommandRecordDecisionEvidence)
 		_ = orchestratorOwner.Stop(ctx)
 	})
 
@@ -198,7 +197,7 @@ func TestDecisionEvidenceCommandPersistsThroughOrchestratorConsumer(t *testing.T
 		deps.CommandHub.Terminate(ctx)
 	})
 
-	command := decisionevents.RecordDecisionEvidenceCommand{
+	command := orchestratorevents.RecordDecisionEvidenceCommand{
 		EvidenceRecordID: "evidence-decision-pairwise",
 		WorkspaceID:      "ws-pairwise-evidence",
 		RunID:            "run-pairwise-evidence",
@@ -269,7 +268,7 @@ func TestApprovalEvidenceCommandPersistsThroughOrchestratorConsumer(t *testing.T
 		deps.CommandHub.Terminate(ctx)
 	})
 
-	command := approvalevents.RecordApprovalEvidenceCommand{
+	command := orchestratorevents.RecordApprovalEvidenceCommand{
 		EvidenceRecordID: "evidence-approval-pairwise",
 		WorkspaceID:      "ws-pairwise-evidence",
 		RunID:            "run-pairwise-evidence",
@@ -277,8 +276,8 @@ func TestApprovalEvidenceCommandPersistsThroughOrchestratorConsumer(t *testing.T
 		ApprovalID:       "approval-pairwise-evidence",
 		ApprovalState:    common.ApprovalStateApproved,
 		ResolutionID:     "resolution-approval-pairwise-evidence",
-		Principal: approvalmodel.ApprovalResolutionPrincipal{
-			Kind: approvalmodel.ApprovalResolutionPrincipalHumanOperator, SubjectID: "tester",
+		Principal: orchestratorevents.GovernanceEvidencePrincipal{
+			Kind: "human_operator", SubjectID: "tester",
 		},
 		Reason: "need authorization",
 		Action: "continue runtime action",
@@ -342,12 +341,12 @@ func TestDecisionEvidenceCommandRejectsForgedSource(t *testing.T) {
 		deps.CommandHub.Terminate(ctx)
 	})
 
-	command := decisionevents.RecordDecisionEvidenceCommand{
+	command := orchestratorevents.RecordDecisionEvidenceCommand{
 		EvidenceRecordID: "evidence-forged-source", WorkspaceID: "ws-forged-source", RunID: "run-forged-source",
 		TicketID: "ticket-forged-source", ResolutionID: "resolution-forged-source",
 	}
 	event := magicevent.NewEventWithContext(
-		decisionevents.TopicDecisionCommandRecordEvidence,
+		orchestratorevents.TopicOrchestratorCommandRecordDecisionEvidence,
 		"application/workorchd",
 		ModuleID,
 		magicevent.NewHeader(),

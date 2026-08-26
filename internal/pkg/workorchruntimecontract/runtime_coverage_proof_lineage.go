@@ -30,7 +30,7 @@ type CoverageEvidenceProofIdentity struct {
 	TargetSelectorRef        string
 	TargetSelectorOwnerRef   string
 	TargetSelectorSubjectRef string
-	ProspectiveTargetRef     string
+	ProspectiveTargetRefs    []string
 	RequiredEffectScopes     []RuntimeEffectScope
 	DeclarationRef           string
 	ValidationRecipeID       string
@@ -62,7 +62,7 @@ func (i CoverageEvidenceProofIdentity) Normalized() CoverageEvidenceProofIdentit
 	i.TargetSelectorRef = strings.TrimSpace(i.TargetSelectorRef)
 	i.TargetSelectorOwnerRef = strings.TrimSpace(i.TargetSelectorOwnerRef)
 	i.TargetSelectorSubjectRef = strings.TrimSpace(i.TargetSelectorSubjectRef)
-	i.ProspectiveTargetRef = strings.TrimSpace(i.ProspectiveTargetRef)
+	i.ProspectiveTargetRefs = normalizeStrings(i.ProspectiveTargetRefs)
 	i.RequiredEffectScopes = NormalizeRuntimeEffectScopes(i.RequiredEffectScopes)
 	i.DeclarationRef = strings.TrimSpace(i.DeclarationRef)
 	i.ValidationRecipeID = strings.TrimSpace(i.ValidationRecipeID)
@@ -78,6 +78,7 @@ func (i CoverageEvidenceProofIdentity) Clone() CoverageEvidenceProofIdentity {
 	i.AllowedOperationKinds = append([]string(nil), i.AllowedOperationKinds...)
 	i.AllowedOperationVariants = append([]RuntimeOperationVariantRef(nil), i.AllowedOperationVariants...)
 	i.TargetRefs = append([]string(nil), i.TargetRefs...)
+	i.ProspectiveTargetRefs = append([]string(nil), i.ProspectiveTargetRefs...)
 	i.RequiredEffectScopes = append([]RuntimeEffectScope(nil), i.RequiredEffectScopes...)
 	i.RequiredCheckRefs = append([]string(nil), i.RequiredCheckRefs...)
 	i.MetricConstraints = append([]string(nil), i.MetricConstraints...)
@@ -109,18 +110,18 @@ func (i CoverageEvidenceProofIdentity) Validate() error {
 	}
 	switch i.TargetPolicy {
 	case CoverageEvidenceProofTargetPolicyExactTarget:
-		if len(i.TargetRefs) == 0 || i.TargetSelectorRef != "" || i.ProspectiveTargetRef != "" {
+		if len(i.TargetRefs) == 0 || i.TargetSelectorRef != "" || len(i.ProspectiveTargetRefs) != 0 {
 			return fmt.Errorf("exact-target proof identity requires only exact target refs")
 		}
 	case CoverageEvidenceProofTargetPolicyExistingOwnerScope:
-		if (len(i.TargetRefs) == 0 && i.TargetSelectorRef == "") || i.ProspectiveTargetRef != "" {
+		if (len(i.TargetRefs) == 0 && i.TargetSelectorRef == "") || len(i.ProspectiveTargetRefs) != 0 {
 			return fmt.Errorf("existing-owner-scope proof identity requires targets or selector without prospective target")
 		}
 		if i.TargetSelectorRef != "" && (i.TargetSelectorOwnerRef == "" || i.TargetSelectorSubjectRef == "") {
 			return fmt.Errorf("existing-owner-scope proof identity selector requires owner and subject")
 		}
 	case CoverageEvidenceProofTargetPolicyProspectiveOwnerTarget:
-		if len(i.TargetRefs) != 0 || i.TargetSelectorRef == "" || i.TargetSelectorOwnerRef == "" || i.TargetSelectorSubjectRef == "" || i.ProspectiveTargetRef == "" {
+		if len(i.TargetRefs) != 0 || i.TargetSelectorRef == "" || i.TargetSelectorOwnerRef == "" || i.TargetSelectorSubjectRef == "" || len(i.ProspectiveTargetRefs) == 0 {
 			return fmt.Errorf("prospective-owner-target proof identity requires selector owner, subject and prospective target")
 		}
 	default:
@@ -178,7 +179,7 @@ func DeriveCoverageEvidenceProofIdentity(binding CoverageEvidenceBinding, eviden
 		TargetSelectorRef:        binding.TargetSelectorRef,
 		TargetSelectorOwnerRef:   binding.TargetSelectorOwnerRef,
 		TargetSelectorSubjectRef: binding.TargetSelectorSubjectRef,
-		ProspectiveTargetRef:     binding.ProspectiveTargetRef,
+		ProspectiveTargetRefs:    binding.ProspectiveTargetRefs,
 		RequiredEffectScopes:     append([]RuntimeEffectScope(nil), proof.RequiredEffectScopes...),
 		DeclarationRef:           binding.DeclarationRef,
 		ValidationRecipeID:       proof.ValidationRecipeID,
@@ -195,7 +196,7 @@ func DeriveCoverageEvidenceProofIdentity(binding CoverageEvidenceBinding, eviden
 
 func coverageEvidenceProofTargetPolicyForBinding(binding CoverageEvidenceBinding) (CoverageEvidenceProofTargetPolicy, error) {
 	binding = binding.Normalized()
-	if binding.ProspectiveTargetRef != "" {
+	if len(binding.ProspectiveTargetRefs) != 0 {
 		if len(binding.TargetRefs) != 0 || binding.TargetSelectorRef == "" {
 			return "", fmt.Errorf("coverage binding %q has ambiguous prospective target policy", binding.ID)
 		}
@@ -231,7 +232,7 @@ func StableCoverageEvidenceProofIdentityHash(identity CoverageEvidenceProofIdent
 	writeHashString(h, identity.TargetSelectorRef)
 	writeHashString(h, identity.TargetSelectorOwnerRef)
 	writeHashString(h, identity.TargetSelectorSubjectRef)
-	writeHashString(h, identity.ProspectiveTargetRef)
+	writeHashStrings(h, identity.ProspectiveTargetRefs)
 	writeHashStrings(h, RuntimeEffectScopesAsStrings(identity.RequiredEffectScopes))
 	writeHashString(h, identity.DeclarationRef)
 	writeHashString(h, identity.ValidationRecipeID)
@@ -270,7 +271,7 @@ func FirstCoverageEvidenceProofIdentityDifference(left, right CoverageEvidencePr
 		return "target_policy"
 	case !sameStrings(left.TargetRefs, right.TargetRefs) || left.TargetSelectorRef != right.TargetSelectorRef ||
 		left.TargetSelectorOwnerRef != right.TargetSelectorOwnerRef || left.TargetSelectorSubjectRef != right.TargetSelectorSubjectRef ||
-		left.ProspectiveTargetRef != right.ProspectiveTargetRef:
+		!sameStrings(left.ProspectiveTargetRefs, right.ProspectiveTargetRefs):
 		return "target"
 	case !sameStrings(RuntimeEffectScopesAsStrings(left.RequiredEffectScopes), RuntimeEffectScopesAsStrings(right.RequiredEffectScopes)):
 		return "effect"

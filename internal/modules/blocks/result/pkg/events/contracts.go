@@ -17,6 +17,7 @@ func Contracts() []eventcontract.Contract {
 		TopicArtifactCommandListByWorkspace,
 		TopicArtifactCommandListByRun,
 		TopicArtifactCommandListByResult,
+		TopicArtifactCommandReadContent,
 	)...)
 	ret = append(ret, eventcontract.Build("result", eventcontract.CommandClassWrite, eventcontract.LanePolicyState,
 		TopicResultFactTerminalDelivery,

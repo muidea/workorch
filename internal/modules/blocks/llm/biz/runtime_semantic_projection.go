@@ -87,12 +87,17 @@ type runtimeSemanticOwnerFactAcquisitionProjection struct {
 // command and args used by Shell to derive the fact. Those remain dependency
 // facts and are not provider-selectable.
 type runtimeSemanticProspectiveTargetConstraintProjection struct {
-	SchemaVersion                      string                                                `json:"schemaVersion"`
-	OwnerModuleID                      string                                                `json:"ownerModuleId"`
-	ProspectiveSatisfactionContractRef string                                                `json:"prospectiveSatisfactionContractRef"`
-	InputSchemaHash                    string                                                `json:"inputSchemaHash"`
-	CatalogObservedRevision            string                                                `json:"catalogObservedRevision"`
-	AllOf                              []runtimeSemanticProspectiveTargetPredicateProjection `json:"allOf"`
+	SchemaVersion                      string                                             `json:"schemaVersion"`
+	OwnerModuleID                      string                                             `json:"ownerModuleId"`
+	ProspectiveSatisfactionContractRef string                                             `json:"prospectiveSatisfactionContractRef"`
+	InputSchemaHash                    string                                             `json:"inputSchemaHash"`
+	CatalogObservedRevision            string                                             `json:"catalogObservedRevision"`
+	AllOf                              []runtimeSemanticProspectiveTargetClauseProjection `json:"allOf"`
+}
+
+type runtimeSemanticProspectiveTargetClauseProjection struct {
+	ID    string                                                `json:"id"`
+	AllOf []runtimeSemanticProspectiveTargetPredicateProjection `json:"allOf"`
 }
 
 type runtimeSemanticProspectiveTargetPredicateProjection struct {
@@ -244,12 +249,18 @@ func runtimeSemanticProspectiveTargetConstraintForProvider(value *runtimecontrac
 		ProspectiveSatisfactionContractRef: constraint.ProspectiveSatisfactionContractRef,
 		InputSchemaHash:                    constraint.InputSchemaHash,
 		CatalogObservedRevision:            constraint.CatalogObservedRevision,
-		AllOf:                              make([]runtimeSemanticProspectiveTargetPredicateProjection, 0, len(constraint.AllOf)),
+		AllOf:                              make([]runtimeSemanticProspectiveTargetClauseProjection, 0, len(constraint.AllOf)),
 	}
-	for _, predicate := range constraint.AllOf {
-		projection.AllOf = append(projection.AllOf, runtimeSemanticProspectiveTargetPredicateProjection{
-			Kind: predicate.Kind, Value: predicate.Value,
-		})
+	for _, clause := range constraint.AllOf {
+		clauseProjection := runtimeSemanticProspectiveTargetClauseProjection{
+			ID: clause.ID, AllOf: make([]runtimeSemanticProspectiveTargetPredicateProjection, 0, len(clause.AllOf)),
+		}
+		for _, predicate := range clause.AllOf {
+			clauseProjection.AllOf = append(clauseProjection.AllOf, runtimeSemanticProspectiveTargetPredicateProjection{
+				Kind: predicate.Kind, Value: predicate.Value,
+			})
+		}
+		projection.AllOf = append(projection.AllOf, clauseProjection)
 	}
 	return projection, nil
 }

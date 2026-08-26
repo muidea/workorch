@@ -824,6 +824,7 @@ func (p RuntimeSemanticProofProposal) Clone() RuntimeSemanticProofProposal {
 
 func (p RuntimeSemanticProofProposal) Validate() error {
 	rawEvidenceKinds := append([]string(nil), p.RequiredEvidenceKinds...)
+	rawProspectiveTargetRefs := append([]string(nil), p.Target.ProspectiveTargetRefs...)
 	p = p.Normalized()
 	for _, value := range []struct {
 		field string
@@ -840,6 +841,9 @@ func (p RuntimeSemanticProofProposal) Validate() error {
 	}
 	if len(rawEvidenceKinds) != len(p.RequiredEvidenceKinds) || len(p.RequiredEvidenceKinds) != 1 {
 		return runtimeSemanticProposalConstraint("requiredEvidenceKinds", RuntimeSemanticConstraintRelational, strings.Join(p.RequiredEvidenceKinds, ","), []string{"exactly one evidence kind per proof"}, nil)
+	}
+	if p.Target.Policy == RuntimeOperationTargetPolicyProspectiveOwnerTarget && len(rawProspectiveTargetRefs) != len(p.Target.ProspectiveTargetRefs) {
+		return runtimeSemanticProposalConstraint("target.prospectiveTargetRefs", RuntimeSemanticConstraintRelational, "duplicate_or_empty_target", []string{"unique non-empty prospective target refs"}, nil)
 	}
 	if len(p.RequiredEffectScopes) == 0 {
 		return runtimeSemanticProposalConstraint("requiredEffectScopes", RuntimeSemanticConstraintNonEmpty, "empty_array", []string{"at least one effect scope"}, nil)
@@ -1348,7 +1352,7 @@ func (f RuntimeSemanticProofFeasibility) validateForProposal(manifest RuntimeSem
 				return fmt.Errorf("feasible runtime semantic observation target does not match owner scope proposal target")
 			}
 		case RuntimeOperationTargetPolicyProspectiveOwnerTarget:
-			if !sameStrings(f.TargetRefs, []string{target.ProspectiveTargetRef}) {
+			if !sameStrings(f.TargetRefs, RuntimeSemanticProposalTargetRefs(proposal)) {
 				return fmt.Errorf("feasible runtime semantic observation target does not match prospective proposal target")
 			}
 		}
@@ -2921,8 +2925,10 @@ func validateRuntimeSemanticProposalTarget(target RuntimeOperationTargetAuthoriz
 			return runtimeSemanticProposalConstraint("target.ownerSelectorRefs", RuntimeSemanticConstraintRelational, fmt.Sprintf("%d selectors", len(target.OwnerSelectorRefs)), []string{"at most one owner selector"}, nil)
 		}
 	case RuntimeOperationTargetPolicyProspectiveOwnerTarget:
-		if target.ProspectiveTargetRef == "" || len(target.ProspectiveConstraintRefs) == 0 || len(target.OwnerSelectorRefs) != 1 {
-			return runtimeSemanticProposalConstraint("target", RuntimeSemanticConstraintRelational, "incomplete_prospective_target", []string{"prospective target, constraints and one selector"}, nil)
+		prospectiveRefs := target.ProspectiveTargetRefs
+		if len(prospectiveRefs) == 0 || len(prospectiveRefs) > RuntimeProspectiveTargetRefsMaxCount ||
+			len(target.ProspectiveConstraintRefs) == 0 || len(target.OwnerSelectorRefs) != 1 {
+			return runtimeSemanticProposalConstraint("target", RuntimeSemanticConstraintRelational, "incomplete_prospective_target", []string{fmt.Sprintf("1..%d prospective targets, constraints and one selector", RuntimeProspectiveTargetRefsMaxCount)}, nil)
 		}
 	default:
 		return runtimeSemanticProposalConstraint("target.policy", RuntimeSemanticConstraintAllowedValue, string(target.Policy), nil, []string{string(RuntimeOperationTargetPolicyExactTarget), string(RuntimeOperationTargetPolicyExistingOwnerScope), string(RuntimeOperationTargetPolicyProspectiveOwnerTarget)})
@@ -2993,7 +2999,7 @@ func writeRuntimeSemanticTargetHash(h hashStringWriter, target RuntimeOperationT
 	writeHashStrings(h, target.OwnerScopeTargetRefs)
 	writeHashStrings(h, target.OwnerSelectorRefs)
 	writeHashStrings(h, target.ProspectiveConstraintRefs)
-	writeHashString(h, target.ProspectiveTargetRef)
+	writeHashStrings(h, target.ProspectiveTargetRefs)
 }
 
 func runtimeSemanticStringSet(values []string) map[string]struct{} {

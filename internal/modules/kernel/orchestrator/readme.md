@@ -144,6 +144,10 @@ contradiction 只通过 `semantic_binding_contradiction_observed` 私有事件�
   dispatch 的 preflight、claim/recovery、owner call 与 receipt projection 仍按原顺序运行，并共享唯一 CAS 与 recovery
   budget handoff。
 - 所有跨状态机推进都使用 persisted aggregate + typed EventHub command/result。
+- semantic acquisition 对 SM-2/SM-3/SM-4 的任何状态变化也必须先映射为 Orchestrator owner-private
+  `RuntimeInternalEvent`：SM-3 只封存 proposal/request/candidate transaction，SM-2 只封存 feasibility/binding/credit/
+  terminal，SM-4 只负责 drive/recovery/delivery。File、Shell、LLM 或 Application 的 concrete EventHub result 都是 participant fact，
+  不得携带 transition target、调用 reducer 或更新任何一个机器的 state。
 - SM-4 使用单一 persisted lifecycle-handoff 派生器穷举普通 Decision/Approval wait、Definition clarification wait、
   governance continuation 与 terminal。该派生器同时生成 Run opaque-record CAS 中的 `GovernanceFenceID` 和后续 Run-owner
   typed fact identity；pre-seal observation/dispatch 尚未绑定 owner request 时不授权 lifecycle transition。Run owner返回的
@@ -211,21 +215,27 @@ deployed run ID 只属于 archive regression evidence，不定义当前候选、
   `ProspectiveTargetSatisfactionConstraint`，只允许 `all_of`；同一值封存到 acquisition/manifest 并只在 C3 投影，dependency
   recipe identity/command 不进入 provider。Definition 只封存 declaration selector/candidate refs 与 acquisition closure，
   obligation/manifest 只追加 owner/kind/variant/policy/operation-selector/current constraints 与 exact contract ref，两者都不封存
-  prospective target；SM-3 proposal 必须在两者交集内提出 nonempty exact target。Orchestrator 不把
+  prospective target set。SM-3 只能提交一份 bounded semantic proposal，其 `ProspectiveTargetRefs` 必须是 1～8 个唯一
+  canonical exact target；集合中每项都必须在 declaration selector/candidate refs 与 current operation selector/owner
+  constraints 的交集内。required-owner constraint 由 mandatory `all_of` clauses 组成：每个 clause 至少被一个 target
+  完整满足，每个 target 也必须对至少一个 clause 有贡献；不存在 `one_of`/`any_of` 关系。current semantic
+  wire 不接受 singular `ProspectiveTargetRef` 或 alias。Orchestrator 不把
   non-ready Shell surface伪装为 provider 可选 operation。
 - SM-2 composite prospective probe 固定为 File outer feasibility + immutable
   `RuntimeProspectiveWorkspaceManifestDelta` + Shell nested
-  `RuntimeOwnerFactProspectiveSatisfactionObservation`。File delta 绑定 exact current workspace-tree revision，只描述
-  hypothetical resulting refs；Shell concrete typed query只消费 delta、activation-sealed recipes 与 exact Shell dependency
+  `RuntimeOwnerFactProspectiveSatisfactionObservation`。File 对整个 target set 使用同一 complete manifest revision 执行 path/
+  absence/parent/aggregate-capacity admission，delta 绑定 exact current workspace-tree revision 并只描述完整 hypothetical
+  resulting refs。Shell concrete typed query 只消费 delta、activation-sealed recipes 与 exact Shell dependency
   catalog/observation，并逐 recipe 校验 command/ordered args/timeout 对应的 surface schema identity。File 不创建 target，
-  Shell 不读 File/workspace、不启动 managed session，Orchestrator 不解释路径/recipe；三方都不得跨 owner 修改状态。
+  目录或文件；Shell 仅基于 resulting manifest 判定 recipe 是否 `would_satisfy`，不读 File/workspace、不启动
+  managed session；Orchestrator 不解释路径/recipe，三方都不得跨 owner 修改状态。
 - observation CAS 与 semantic seal 都必须重验 manifest/batch/request/contract ref、delta、File catalog/observation 和 Shell
   dependency catalog/observation。只有 nested `would_satisfy` seal-ready；nested typed stale保持 Shell-authored factual
   identity并进入既有 bounded prerequisite-refresh generation，不能重写为 File outer stale或即时 terminal。missing dependency
   在 Shell query 前退休 semantic generation。semantic schema/document admission 先验证 proposal target 同时满足
   candidate const/enum 与 sealed `all_of` constraint；mismatch 只产生普通完整 document correction，C4 仅引用
   manifest/CWI/field path 且不复制 C3 constraint，零 File/Shell probe。`would_not_satisfy` 必须先作为 full composite
-  observation 经 owner-private `semantic_feasibility_observed` 持久化；该 exact target 仍只是未封存的 semantic proposal，
+  observation 经 owner-private `semantic_feasibility_observed` 持久化；该 exact target set 仍只是未封存的 semantic proposal，
   不产生 binding。因为 admission 已证明 target 满足 published contract，exact-current full-composite
   `would_not_satisfy` 表示 owner contract contradiction；下一 drive 直接记录
   `prospective_satisfaction_contract_violated` 并形成 `semantic_contract_failed`，不得生成 replacement target、
@@ -380,11 +390,12 @@ deployed run ID 只属于 archive regression evidence，不定义当前候选、
 - File/Shell/Git/MCP owner 只能返回 factual observation：File 不从 Goal/DoD 猜 target，Shell 没有 CWI-specific checks
   时返回 `unverifiable`，Git repository revision 不等于 semantic proof，MCP surface readiness 没有 behavior probe 时
   返回 `unverifiable`。coverage credit 仍只由 SM-2 从 matching sealed receipt 派生。
-- 空 target scope 只是一条“当前无 existing target”的 owner observation，不能授权候选任意创建路径。prospective target
-  必须由 SM-3 document 作为 exact proposal 提出，同时匹配完整 declaration selector ref/owner/subject/candidate
-  refs 和 File owner catalog 的 operation selector/constraint/variant；非空 candidate refs 要求 exact member match。File/Shell
-  fact 只验证该 proposal，SM-2 sealed binding 才使其成为 authority；operation candidate 只引用该 binding，
-  dispatch 只从 binding 派生 target。
+- 空 target scope 只是一条“当前无 existing target”的 owner observation，不能授权候选任意创建路径。prospective
+  target set 必须由一份 SM-3 document 作为 exact proposal 提出，同时匹配完整 declaration selector
+  ref/owner/subject/candidate refs 和 File owner catalog 的 operation selector/constraint/variant；非空 candidate refs 对集合中
+  每项要求 exact member match。File/Shell fact 只验证该 proposal 与 resulting manifest，SM-2 sealed binding 才使整个集合
+  成为 authority。operation candidate 只引用该 binding，并必须完整满足每个 target 的 exact-singleton required
+  operation；dispatch 只从 binding 派生 target。
   ordinary Shell validation acquisition 所需 target vocabulary 仅由 Orchestrator 转交当前 persisted File owner inventory；
   prospective satisfaction pure query 只额外接收 File owner 从该 exact inventory 计算的 immutable hypothetical delta。
   File effect退休旧 observation 后仍重获 fresh inventory；Shell 只拥有 recipe/surface readiness 与 prospective satisfaction
@@ -427,7 +438,18 @@ deployed run ID 只属于 archive regression evidence，不定义当前候选、
   owner-target resource：
   candidate evaluator 在 seal 前拒绝重复 durable `(OwnerModuleID, TargetRef)`，普通 `DependsOn` 不能授权第二次同目标写入；
   provider 必须合并为一个 operation/receipt。唯一例外是 owner fact 封存的 exact `RequiredOperationSequence`，其每项必须
-  绑定不同 requirement ref/variant，并按声明依赖执行。
+  绑定不同 requirement ref/variant，并按声明依赖执行。prospective all-of binding 的 sequence 还必须与完整
+  `ProspectiveTargetRefs` 一一对应：每项封存一个 exact `TargetRef`，candidate operation 的 `targetRefs` 必须为该值的
+  singleton，所有 requirement 齐全且按 canonical dependency chain 有序执行。缺少、额外、重复或乱序项均在
+  owner effect 前拒绝，不允许“部分准备后先执行”。
+- prospective all-of 的 receipt completion 也是集合合同，而不是“首条成功即完成”。同一 sealed dispatch 的每个 target
+  operation 必须取得 owner-committed `Outcome=accepted` exact receipt；该 receipt 只有在 Orchestrator private evidence event
+  把 matching execution、receipt-derived evidence 与 processed-event identity 原子提交为 `evidence_committed` 后才成为
+  collective member。前 N-1 个 member 只保留 operation/evidence progress，`ActiveDispatch` 与 CWI unsatisfied/unsettled
+  状态不被首条 receipt 清除。rejected/stale/weak/mismatched/conflicting duplicate 不进入集合；exact duplicate 零 revision/
+  effect/credit，restart 只恢复同一 dispatch 的缺失 member，不跨 dispatch、repair 或 semantic generation 拼接 receipt。
+  全部 target 对每个 required evidence kind 齐全后，只有 SM-2 private event 可以 exactly-once 认可 collective proof，并在
+  其它 quality/effect/assessment gate 也满足时通过 aggregate CAS 授予 CWI credit/settlement；capability owner 只署名单项 receipt。
 - state-changing Shell receipt 必须使用 owner 实际观察到的 changed refs/resource changes；任意 `shell/command` 只允许
   workspace-durable、at-most-once shape，真实变化越出 sealed `TargetRefs` 时以 `undeclared_workspace_effect` 拒绝，
   不能通过额外 touch 一个声明目标取得 durable evidence。Shell managed validation 使用 owner 临时 workspace 副本，
@@ -465,8 +487,8 @@ deployed run ID 只属于 archive regression evidence，不定义当前候选、
   `prospective_owner_target` acquisition 的 pre-seal declaration、compiled obligation 与 provider projection还必须具有同一
   非空 `ProspectiveSatisfactionContractRef`；preexisting/existing-scope 禁止携带。required-owner dependency catalog不属于
   provider-selectable catalog，LLM 不能根据它选择 recipe readiness或 satisfaction outcome。pre-seal
-  declaration/obligation 不携带 exact prospective target；SM-3 proposal 提出该 target，File/Shell fact 验证，只有 SM-2 binding
-  seal 首次形成 authority。SM-2 只消费上述 composite
+  declaration/obligation 不携带 exact prospective target set；SM-3 proposal 提出 1～8 个 `ProspectiveTargetRefs`，File/Shell fact
+  验证完整 all-of set，只有 SM-2 binding seal 首次形成 authority。SM-2 只消费上述 composite
   File-delta/Shell-observation事实，并通过自己的 private event决定 refresh、typed terminal 或 seal；File/Shell result本身不带
   transition target。
   若历史/旧 generation 先执行了非 acquisition proof，assessment commit 可在同一 Orchestrator CAS 中提交 audit、把
@@ -529,7 +551,7 @@ deployed run ID 只属于 archive regression evidence，不定义当前候选、
 - LLM owner-private candidate response 不复制 sealed provider audit/typed error 已拥有的 `RequestID/Status`；usage audit 从 canonical audit/error 读取，不能以 response mirror 覆盖 provider outcome。
 - candidate request 携带从 persisted facts 和唯一 manifest 渲染的 typed `RuntimeCandidateContext`；当前 focus/evidence/failure 是 context，operation kind/parameter/target/effect/dependency 与 `BindingRef` 授权只来自 manifest。candidate 不得以 raw `coverageWorkItemIds` 自报 credit。C4 只投影 provider-safe failure/evidence/assessment/shape identity 与 attempt-1 的 typed rejection/directive；它不得携带 raw reason/summary/payload、owner feasibility 或 recovery/governance action。LLM block 不从 禁止的 map、raw reason 或临时上下文重建 authority。
 - Runtime dispatch 在执行前持久化 `SealedDispatch`、完整 transaction、candidate hash、sealed binding references 和 typed step input；execution evidence 只有在 snapshot、dispatch、operation、binding 与 owner receipt 一致时才能提交并触发下一次 reducer。
-- capability owner 的 validation receipt 必须持久化中立 quality/zero-work/check observation，并纳入 stable receipt hash；SM-3 在普通响应与 exact-fence restart recovery 两条路径执行同一质量裁决。receipt 只有实际匹配 sealed binding 的 target/effect/recipe/check（适用时 metric/artifact）才可令 SM-2 给 CWI credit；弱验证、非空 `PassedChecks` 或 owner exit code 0 只进入 rejected/diagnostic evidence。
+- capability owner 的 validation receipt 必须持久化中立 quality/zero-work/check observation，并纳入 stable receipt hash；SM-3 在普通响应与 exact-fence restart recovery 两条路径执行同一质量裁决。receipt 只有实际匹配 sealed binding 的 target/effect/recipe/check（适用时 metric/artifact）才可进入 SM-2 proof gate；multi-target prospective binding 必须再满足同一 dispatch 的完整 collective receipt set，单个 receipt 不授予 CWI credit。弱验证、非空 `PassedChecks` 或 owner exit code 0 只进入 rejected/diagnostic evidence。
 - Runtime aggregate 通过 Run owner 的 EventHub update 合同持久化；Orchestrator 使用
   `ExpectedRuntimeStateRevision` 执行语义 CAS，不直接访问 Run repository，也不把 aggregate 编码进
   `map[string]any`。Run owner 对同一 aggregate revision 上的无关 Run model/lifecycle 写入执行物理
@@ -871,13 +893,19 @@ deployed run ID 只属于 archive regression evidence，不定义当前候选、
   Definition `Order` 重排；proof-batch provider projection 只携带相关 coverage，C0～C5 stable prefix/context 分层保持不变。
 - [x] owner fact 的 missing、stale、duplicate、out-of-order、rollback/reappearance（ABA）、新 generation 与无关
   prerequisite 组合矩阵；semantic manifest hash 回滚重现仍由新 logical request 隔离。
-- [x] prospective owner-fact composite probe 的 File hypothetical delta + Shell dependency catalog/observation exact binding、
+- [x] prospective owner-fact composite probe 的 1～8 target-set File hypothetical delta + Shell dependency catalog/observation exact binding、
   dependency catalog provider 隔离、CAS/seal 双 freshness gate、nested typed stale bounded refresh 且零 correction 消耗，
-  required-owner provider-safe typed `all_of` constraint 的 acquisition/manifest/C3 seal、schema/admission pre-probe
-  rejection，以及 persisted full-composite `would_not_satisfy` 的
+  required-owner provider-safe typed `all_of` clause contract 的 acquisition/manifest/C3 seal、schema/admission pre-probe
+  对 singular/partial/extra/duplicate target set 的 rejection，完整 binding 向每个 exact singleton `TargetRef` required-operation
+  dependency chain 的编译，以及 persisted full-composite `would_not_satisfy` 的
   `prospective_satisfaction_contract_violated -> semantic_contract_failed` 矩阵；验证普通 document attempt-1 只在 C4
   引用违规 field、不复制 constraint，duplicate/restart 零重复 correction/terminal/probe，所有分支零 probe-time
   effect/ticket/governance/coverage。
+- [x] multi-target prospective all-of receipt-set 的 1..N cut-point、同 dispatch/binding/evidence-kind/execution-key/fence/
+  singleton-target exact match、partial accepted 零 settlement、最终 member exactly-once collective completion，以及
+  rejected/stale/weak/mismatched/conflicting duplicate、exact duplicate、partial crash/restart 和跨 dispatch/generation union
+  拒绝矩阵；aggregate invariant 拒绝 incomplete receipt set 已将 CWI 标记为 `satisfied/settled`，assessment-required 路径仍
+  必须通过独立 SM-2 assessment gate。
 - [x] validation discovery 回到 typed prerequisite 且局部 preflight 保留完整 pending graph；同 owner-target durable
   overlap 在 seal 前拒绝，Shell validation entry 不被提升为 failure target 且 Go diagnostic 只落入 manifest scope。
 - [x] `BenchmarkRuntimeAggregateInvariantValidation64CWI`、`BenchmarkRuntimeLongFocusQueueProjection64CWI`、

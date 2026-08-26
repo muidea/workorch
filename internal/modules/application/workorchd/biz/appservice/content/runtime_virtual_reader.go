@@ -12,27 +12,25 @@ func (r *Reader) readRuntimeCheckpointRaw(ctx context.Context, parsed RuntimeRaw
 	if r.eventHub == nil {
 		return RuntimeRawContent{}, common.ErrNotFound
 	}
-	readCtx := common.ContextWithRuntimeWorkspaceID(ctx, parsed.WorkspaceID)
-	item, err := ownerreadports.ReadRuntimeCheckpointByOwnerCommand(readCtx, r.eventHub, common.CheckpointID(parsed.ItemPath))
+	item, err := ownerreadports.ReadRuntimeCheckpointByOwnerCommand(ctx, r.eventHub, common.CheckpointID(parsed.ItemID))
 	if err != nil {
 		return RuntimeRawContent{}, err
 	}
 	if item.WorkspaceID != parsed.WorkspaceID || item.RunID != parsed.RunID {
 		return RuntimeRawContent{}, common.ErrNotFound
 	}
-	body, err := json.MarshalIndent(item.Data, "", "  ")
+	body, err := json.Marshal(item.Data)
 	if err != nil {
 		return RuntimeRawContent{}, err
 	}
-	return RuntimeRawContent{Ref: parsed.Ref, FileName: parsed.FileName, ContentType: RuntimeRawContentType(parsed.FileName), Content: body}, nil
+	return newRuntimeRawContent(parsed, body)
 }
 
 func (r *Reader) readResultRaw(ctx context.Context, parsed RuntimeRawRef) (RuntimeRawContent, error) {
 	if r.eventHub == nil {
 		return RuntimeRawContent{}, common.ErrNotFound
 	}
-	readCtx := common.ContextWithRuntimeWorkspaceID(ctx, parsed.WorkspaceID)
-	item, err := ownerreadports.ReadResultByOwnerCommand(readCtx, r.eventHub, common.ResultID(parsed.ItemPath))
+	item, err := ownerreadports.ReadResultByOwnerCommand(ctx, r.eventHub, common.ResultID(parsed.ItemID))
 	if err != nil {
 		return RuntimeRawContent{}, err
 	}
@@ -48,9 +46,9 @@ func (r *Reader) readResultRaw(ctx context.Context, parsed RuntimeRawRef) (Runti
 	default:
 		return RuntimeRawContent{}, common.ErrInvalidArgument
 	}
-	body, err := json.MarshalIndent(payload, "", "  ")
+	body, err := json.Marshal(payload)
 	if err != nil {
 		return RuntimeRawContent{}, err
 	}
-	return RuntimeRawContent{Ref: parsed.Ref, FileName: parsed.FileName, ContentType: RuntimeRawContentType(parsed.FileName), Content: body}, nil
+	return newRuntimeRawContent(parsed, body)
 }

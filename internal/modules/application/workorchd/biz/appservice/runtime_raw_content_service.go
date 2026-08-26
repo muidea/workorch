@@ -10,7 +10,7 @@ import (
 
 func ReadRuntimeRawContentWithSession(ctx context.Context, session *runtimecore.Session, ref string) (ret content.RuntimeRawContent, err error) {
 	return withCommandHubSession(ctx, session, func(ctx context.Context, hub magicevent.Hub) (content.RuntimeRawContent, error) {
-		reader := content.NewReader(hub, session.RepositoryBackend(), session.RepositoryDataDir())
+		reader := content.NewReader(hub)
 		return reader.ReadRuntimeRaw(ctx, ref)
 	})
 }

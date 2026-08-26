@@ -222,15 +222,15 @@ type RecordWidgetFactCommand struct { Data WidgetFact }
 	}
 }
 
-func TestVerifyAllowsExplicitApprovalChangedFactButStillRejectsTargetState(t *testing.T) {
+func TestVerifyAllowsExplicitApprovalResolutionFactButStillRejectsTargetState(t *testing.T) {
 	root := newEmptyVerificationRepository(t)
-	path := filepath.Join(root, "internal/modules/blocks/approval/pkg/events/messages.go")
+	path := filepath.Join(root, "internal/modules/blocks/eventstream/pkg/events/messages.go")
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(path, []byte(`package events
-type ApprovalChangedData struct { State string }
-type RecordApprovalResolutionCommand struct { Data ApprovalChangedData }
+type ApprovalResolutionFact struct { State string }
+type RecordApprovalResolutionCommand struct { Data ApprovalResolutionFact }
 `), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -239,8 +239,8 @@ type RecordApprovalResolutionCommand struct { Data ApprovalChangedData }
 	}
 
 	if err := os.WriteFile(path, []byte(`package events
-type ApprovalChangedData struct { State string; TargetState string }
-type RecordApprovalResolutionCommand struct { Data ApprovalChangedData }
+type ApprovalResolutionFact struct { State string; TargetState string }
+type RecordApprovalResolutionCommand struct { Data ApprovalResolutionFact }
 `), 0o644); err != nil {
 		t.Fatal(err)
 	}

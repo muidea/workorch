@@ -4,7 +4,7 @@ Status: normative
 
 Type: runtime-flow
 
-Last Verified: 2026-08-25
+Last Verified: 2026-08-26
 
 ## Purpose
 
@@ -52,7 +52,7 @@ A fresh bootstrap requires an admitted and activation-eligible startup input con
 - exact Workspace Template snapshot and every independently bound Profile/policy snapshot；current
   candidate→startup→admission binding chain 中，Template 与 Workspace `EvidencePolicies` 分别以 canonical
   `AdmissionPolicyBindings` ref/revision/hash 封存，promotion 前已拒绝其中任何退役的 `prospectiveTargetRef`，且这些
-  policy binding 不授予 exact prospective target authority；
+  policy binding 不授予 exact prospective target-set authority；
 - candidate-bound exact normalized typed Profile contract snapshot plus the matching startup-input Profile hash; every required
   Profile acceptance/deliverable CWI has an exact evidence requirement, nonempty supported evidence kinds and at least one typed
   owner-receipt proof operation;
@@ -97,6 +97,12 @@ For a fresh definition generation:
 3. capability owners return current typed feasibility/target observations;
 4. Orchestrator private internal event validates and seals `CoverageEvidenceBinding` plus reconciliation contract;
 5. only then may the candidate/sealed-dispatch path begin.
+
+For a prospective owner-fact acquisition, the single bounded SM-3 semantic proposal carries 1–8 unique canonical
+`ProspectiveTargetRefs`. It must cover every mandatory `all_of` clause and contain no unrelated target; `one_of`/`any_of` and a
+singular compatibility field are rejected before owner probing. File evaluates the whole set against one complete manifest and
+returns only a side-effect-free hypothetical delta; Shell judges only the resulting manifest. After the SM-2 private binding-seal
+event, SM-3 requires one exact-singleton, canonically ordered operation per target.
 
 LLM proposes; capability owners report feasibility; neither may change CWI/focus state. Application cannot pre-seal proof
 bindings in the bootstrap.

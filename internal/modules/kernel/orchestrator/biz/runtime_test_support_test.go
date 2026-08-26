@@ -1061,7 +1061,7 @@ func runtimeTestSemanticFixtureSpecs(t *testing.T, aggregate runtime.RuntimeAggr
 			source := sources[coverageID]
 			generationID := source.ID
 			generationTargetRefs := append([]string(nil), source.TargetRefs...)
-			generationProspectiveTargetRef := source.ProspectiveTargetRef
+			generationProspectiveTargetRefs := append([]string(nil), source.ProspectiveTargetRefs...)
 			generationAcceptedKinds := append([]string(nil), source.AcceptedStepKinds...)
 			generationAcceptedVariants := append([]runtimecontract.RuntimeOperationVariantRef(nil), source.AcceptedOperationVariants...)
 			generationValidationRecipeID := source.ValidationRecipeID
@@ -1071,7 +1071,7 @@ func runtimeTestSemanticFixtureSpecs(t *testing.T, aggregate runtime.RuntimeAggr
 				source.ID = generationID
 			}
 			source.TargetRefs = generationTargetRefs
-			source.ProspectiveTargetRef = generationProspectiveTargetRef
+			source.ProspectiveTargetRefs = generationProspectiveTargetRefs
 			source.AcceptedStepKinds = generationAcceptedKinds
 			source.AcceptedOperationVariants = generationAcceptedVariants
 			source.ValidationRecipeID = generationValidationRecipeID
@@ -1206,25 +1206,27 @@ func runtimeTestSemanticFixtureAcquisitionSpec(
 	case runtimecontract.RuntimeOperationTargetPolicyExistingOwnerScope:
 		target.OwnerSelectorRefs = append([]string(nil), selectorRefs...)
 	case runtimecontract.RuntimeOperationTargetPolicyProspectiveOwnerTarget:
-		prospectiveTarget := source.ProspectiveTargetRef
-		if prospectiveTarget == "" && len(source.TargetRefs) == 1 {
+		prospectiveTargets := append([]string(nil), source.ProspectiveTargetRefs...)
+		if len(prospectiveTargets) == 0 && len(source.TargetRefs) != 0 {
 			// TargetRefs here are the generation cursor retained before Definition
 			// overlay; they are not copied from the startup declaration.
-			prospectiveTarget = source.TargetRefs[0]
+			prospectiveTargets = append([]string(nil), source.TargetRefs...)
 		}
-		if prospectiveTarget == "" && len(source.TargetSelectorCandidateRefs) != 0 {
-			prospectiveTarget = source.TargetSelectorCandidateRefs[0]
+		if len(prospectiveTargets) == 0 && len(source.TargetSelectorCandidateRefs) != 0 {
+			prospectiveTargets = []string{source.TargetSelectorCandidateRefs[0]}
 		}
-		if prospectiveTarget == "" {
+		if len(prospectiveTargets) == 0 {
 			t.Fatalf("test semantic acquisition %q has neither generation target nor bounded selector candidate", coverageID)
 		}
-		if runtimeTestStringContains(catalog.TargetRefs, prospectiveTarget) {
-			t.Fatalf("test semantic acquisition %q prospective target %q already exists in owner catalog", coverageID, prospectiveTarget)
+		for _, prospectiveTarget := range prospectiveTargets {
+			if runtimeTestStringContains(catalog.TargetRefs, prospectiveTarget) {
+				t.Fatalf("test semantic acquisition %q prospective target %q already exists in owner catalog", coverageID, prospectiveTarget)
+			}
 		}
 		target.OwnerSelectorRefs = append([]string(nil), selectorRefs...)
 		target.ProspectiveConstraintRefs = append([]string(nil), constraints...)
-		target.ProspectiveTargetRef = prospectiveTarget
-		feasibilityRefs = []string{prospectiveTarget}
+		target.ProspectiveTargetRefs = append([]string(nil), prospectiveTargets...)
+		feasibilityRefs = append([]string(nil), prospectiveTargets...)
 		constraintRefs = append([]string(nil), constraints...)
 	default:
 		t.Fatalf("test semantic acquisition %q has unsupported target policy %q", coverageID, convergence.AcquisitionTargetPolicy)
@@ -1384,11 +1386,11 @@ func runtimeTestSemanticFixtureTarget(
 	if selector == "" {
 		selector = "test/fixture-owner-selector/" + string(coverageID)
 	}
-	prospectiveTargetRef := source.ProspectiveTargetRef
-	if prospectiveTargetRef == "" && len(targets) == 0 && len(source.TargetSelectorCandidateRefs) != 0 {
-		prospectiveTargetRef = source.TargetSelectorCandidateRefs[0]
+	prospectiveTargetRefs := append([]string(nil), source.ProspectiveTargetRefs...)
+	if len(prospectiveTargetRefs) == 0 && len(targets) == 0 && len(source.TargetSelectorCandidateRefs) != 0 {
+		prospectiveTargetRefs = []string{source.TargetSelectorCandidateRefs[0]}
 	}
-	if prospectiveTargetRef != "" && evidenceKind == runtimecontract.EvidenceKindStateChange {
+	if len(prospectiveTargetRefs) != 0 && evidenceKind == runtimecontract.EvidenceKindStateChange {
 		constraints := []string{"test/fixture-prospective-target/" + string(coverageID)}
 		if descriptor, found := runtimecontract.RuntimeOperationDescriptorForKind(operationKind); found && descriptor.OwnerModuleID == runtimecontract.RuntimeModuleFile {
 			// File is the owner of workspace-path creation semantics. Use its
@@ -1401,13 +1403,13 @@ func runtimeTestSemanticFixtureTarget(
 			Policy:                    runtimecontract.RuntimeOperationTargetPolicyProspectiveOwnerTarget,
 			OwnerSelectorRefs:         []string{selector},
 			ProspectiveConstraintRefs: constraints,
-			ProspectiveTargetRef:      prospectiveTargetRef,
-		}, []string{prospectiveTargetRef}, []string{selector}, constraints, nil
+			ProspectiveTargetRefs:     prospectiveTargetRefs,
+		}, prospectiveTargetRefs, []string{selector}, constraints, nil
 	}
-	if prospectiveTargetRef != "" && evidenceKind == runtimecontract.EvidenceKindValidation {
+	if len(prospectiveTargetRefs) != 0 && evidenceKind == runtimecontract.EvidenceKindValidation {
 		return runtimecontract.RuntimeOperationTargetAuthorization{
-			Policy: runtimecontract.RuntimeOperationTargetPolicyExactTarget, ExactTargetRefs: []string{prospectiveTargetRef},
-		}, []string{prospectiveTargetRef}, nil, nil, []string{prospectiveTargetRef}
+			Policy: runtimecontract.RuntimeOperationTargetPolicyExactTarget, ExactTargetRefs: prospectiveTargetRefs,
+		}, prospectiveTargetRefs, nil, nil, prospectiveTargetRefs
 	}
 	if len(targets) == 0 && source.TargetSelectorRef != "" {
 		return runtimecontract.RuntimeOperationTargetAuthorization{
@@ -1844,12 +1846,22 @@ func runtimeExpectedDocumentHash(expected *runtimecontract.RuntimeExpectedDocume
 // bindingRefs and raw CWI IDs remain a strict rejection.
 func bindRuntimeTestCandidateToManifest(manifest runtimecontract.RuntimeCandidateContractManifest, candidate runtimecontract.RuntimeCandidate) runtimecontract.RuntimeCandidate {
 	bind := func(operation *runtimecontract.RuntimeOperation) {
-		if operation == nil || len(operation.CoverageWorkItemIDs) == 0 || len(operation.BindingRefs) != 0 {
+		if operation == nil || len(operation.CoverageWorkItemIDs) == 0 {
+			return
+		}
+		// CoverageWorkItemIDs is only a local fixture hint used to select the
+		// receiver-sealed binding. It is forbidden on the provider wire.
+		coverageWorkItemIDs := append([]common.CoverageWorkItemID(nil), operation.CoverageWorkItemIDs...)
+		operation.CoverageWorkItemIDs = nil
+		if len(operation.BindingRefs) != 0 {
 			return
 		}
 		operationManifest, found := runtimeTestManifestOperationForKind(manifest, operation.Kind)
 		if !found {
 			return
+		}
+		if operation.RequiredOperationRef == "" && len(operationManifest.RequiredOperationReferences) == 1 {
+			operation.RequiredOperationRef = operationManifest.RequiredOperationReferences[0]
 		}
 		authorization, err := runtimecontract.RuntimeCandidateOperationBindingAuthorizationFor(operationManifest, *operation)
 		if err != nil {
@@ -1859,8 +1871,8 @@ func bindRuntimeTestCandidateToManifest(manifest runtimecontract.RuntimeCandidat
 		if len(allowed) == 0 {
 			return
 		}
-		refs := make([]string, 0, len(operation.CoverageWorkItemIDs))
-		for _, coverageID := range operation.CoverageWorkItemIDs {
+		refs := make([]string, 0, len(coverageWorkItemIDs))
+		for _, coverageID := range coverageWorkItemIDs {
 			for _, binding := range manifest.Bindings {
 				if binding.CoverageWorkItemID != coverageID || !runtimeTestStringIncluded(allowed, binding.ID) {
 					continue
@@ -1873,7 +1885,6 @@ func bindRuntimeTestCandidateToManifest(manifest runtimecontract.RuntimeCandidat
 			return
 		}
 		operation.BindingRefs = refs
-		operation.CoverageWorkItemIDs = nil
 	}
 	if candidate.StateChange != nil {
 		for idx := range candidate.StateChange.Operations {
@@ -2020,9 +2031,9 @@ func runtimeTestFactsWithReboundBindings(facts runtimecontract.RuntimeFacts, def
 			TargetRefs: append([]string(nil), focus.TargetRefs...), TargetSelectorRef: focus.TargetSelectorRef,
 			TargetSelectorOwnerRef: focus.TargetSelectorOwnerRef, TargetSelectorSubjectRef: focus.TargetSelectorSubjectRef,
 			TargetSelectorCandidateRefs: append([]string(nil), focus.TargetSelectorCandidateRefs...),
-			ProspectiveTargetRef:        focus.ProspectiveTargetRef, DeclarationRef: "test/runtime-fixture",
+			ProspectiveTargetRefs:       append([]string(nil), focus.ProspectiveTargetRefs...), DeclarationRef: "test/runtime-fixture",
 		}.Normalized()
-		if len(binding.TargetRefs) == 0 && binding.TargetSelectorRef == "" && binding.ProspectiveTargetRef == "" {
+		if len(binding.TargetRefs) == 0 && binding.TargetSelectorRef == "" && len(binding.ProspectiveTargetRefs) == 0 {
 			binding.TargetSelectorRef = "test/fixture-owner-selector"
 			binding.TargetSelectorOwnerRef = "test-fixture"
 			binding.TargetSelectorSubjectRef = focus.ID

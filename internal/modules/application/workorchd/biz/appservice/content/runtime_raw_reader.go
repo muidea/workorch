@@ -2,54 +2,86 @@ package content
 
 import (
 	"context"
-	"os"
-	"path/filepath"
-	"strings"
+	"encoding/json"
+	"fmt"
 
+	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/ownerreadports"
+	runtimeevidencemodel "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
+	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
 )
 
 func (r *Reader) ReadRuntimeRaw(ctx context.Context, ref string) (RuntimeRawContent, error) {
-	if r == nil || !strings.EqualFold(r.repositoryBackend, "file") || r.repositoryDataDir == "" {
+	if r == nil || r.eventHub == nil {
 		return RuntimeRawContent{}, common.ErrNotFound
 	}
 	parsed, err := ParseRuntimeRawRef(ref)
 	if err != nil {
+		return RuntimeRawContent{}, fmt.Errorf("parse runtime payload ref: %w", err)
+	}
+	readCtx, err := common.BindRuntimeWorkspaceContext(ctx, parsed.WorkspaceID)
+	if err != nil {
 		return RuntimeRawContent{}, err
 	}
 	switch parsed.Collection {
-	case "llm-calls", "steps", "tool-calls":
-		return r.readRuntimeRawFile(parsed)
+	case "steps":
+		return r.readStepPayload(readCtx, parsed)
+	case "tool-calls":
+		return r.readToolCallPayload(readCtx, parsed)
 	case "runtime-checkpoints":
-		return r.readRuntimeCheckpointRaw(ctx, parsed)
+		return r.readRuntimeCheckpointRaw(readCtx, parsed)
 	case "results":
-		return r.readResultRaw(ctx, parsed)
+		return r.readResultRaw(readCtx, parsed)
 	default:
 		return RuntimeRawContent{}, common.ErrInvalidArgument
 	}
 }
 
-func (r *Reader) readRuntimeRawFile(parsed RuntimeRawRef) (RuntimeRawContent, error) {
-	collectionRoot := filepath.Join(r.repositoryDataDir, "internal", "workspaces", string(parsed.WorkspaceID), "runs", string(parsed.RunID), parsed.Collection)
-	itemRoot, err := RuntimeRawItemRoot(collectionRoot, parsed.RunID, parsed.ItemPath)
+func (r *Reader) readStepPayload(ctx context.Context, parsed RuntimeRawRef) (RuntimeRawContent, error) {
+	item, err := ownerreadports.ReadStepByOwnerCommand(ctx, r.eventHub, common.StepID(parsed.ItemID))
 	if err != nil {
 		return RuntimeRawContent{}, err
 	}
-	cleanPath, err := SafeRuntimeRawContentPath(itemRoot, parsed.FileName)
-	if err != nil {
-		return RuntimeRawContent{}, err
+	if item == nil || item.RunID != parsed.RunID {
+		return RuntimeRawContent{}, common.ErrNotFound
 	}
-	body, err := os.ReadFile(cleanPath)
+	payload := item.Output
+	if parsed.FileName == "input.json" {
+		payload = item.Input
+	} else if parsed.FileName != "output.json" {
+		return RuntimeRawContent{}, common.ErrInvalidArgument
+	}
+	return runtimePayloadContent(parsed, payload)
+}
+
+func (r *Reader) readToolCallPayload(ctx context.Context, parsed RuntimeRawRef) (RuntimeRawContent, error) {
+	items, err := ownerreadports.ListToolCallsByRunOwnerCommand(ctx, r.eventHub, parsed.RunID)
 	if err != nil {
-		if os.IsNotExist(err) {
-			return RuntimeRawContent{}, common.ErrNotFound
+		return RuntimeRawContent{}, fmt.Errorf("read tool-call payload owner list: %w", err)
+	}
+	var item *runtimeevidencemodel.ToolCall
+	for _, candidate := range items {
+		if candidate != nil && candidate.ID == common.ToolCallID(parsed.ItemID) && candidate.WorkspaceID == parsed.WorkspaceID && candidate.RunID == parsed.RunID {
+			item = candidate
+			break
 		}
+	}
+	if item == nil {
+		return RuntimeRawContent{}, common.ErrNotFound
+	}
+	payload := item.Output
+	if parsed.FileName == "arguments.json" {
+		payload = item.Arguments
+	} else if parsed.FileName != "output.json" {
+		return RuntimeRawContent{}, common.ErrInvalidArgument
+	}
+	return runtimePayloadContent(parsed, payload)
+}
+
+func runtimePayloadContent(parsed RuntimeRawRef, payload workorcheventpayload.Payload) (RuntimeRawContent, error) {
+	body, err := json.Marshal(payload)
+	if err != nil {
 		return RuntimeRawContent{}, err
 	}
-	return RuntimeRawContent{
-		Ref:         parsed.Ref,
-		FileName:    parsed.FileName,
-		ContentType: RuntimeRawContentType(parsed.FileName),
-		Content:     body,
-	}, nil
+	return newRuntimeRawContent(parsed, body)
 }

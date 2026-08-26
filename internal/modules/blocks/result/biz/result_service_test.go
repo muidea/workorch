@@ -3,8 +3,10 @@ package result
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 
+	resultcommon "github.com/muidea/workorch/internal/modules/blocks/result/pkg/common"
 	resultmodel "github.com/muidea/workorch/internal/modules/blocks/result/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/repository/memory"
@@ -24,6 +26,50 @@ func TestServiceRejectsInvalidResultAndArtifact(t *testing.T) {
 	invalidCloseout.RuntimeCloseout = &runtimecontract.RuntimeResultCloseout{SchemaVersion: 2}
 	if err := service.CreateResult(ctx, invalidCloseout); err == nil {
 		t.Fatal("Result owner accepted unsupported Runtime closeout schema")
+	}
+}
+
+func TestServiceReadsBoundedArtifactContentFromOwnerState(t *testing.T) {
+	ctx := common.ContextWithRuntimeWorkspaceID(context.Background(), "ws-result-test")
+	service := newService(memory.NewResultRepository(), memory.NewArtifactRepository())
+	result := validTestResult()
+	if err := service.CreateResult(ctx, result); err != nil {
+		t.Fatal(err)
+	}
+	artifact := validTestArtifact(result.ID)
+	artifact.State = common.ArtifactStateAvailable
+	artifact.ArtifactType = resultcommon.ArtifactTypeReport
+	artifact.URI = "workorch://workspaces/ws-result-test/artifacts/run-result-test/report.txt"
+	artifact.ContentType = "text/markdown"
+	artifact.Summary = " owner content "
+	if err := service.CreateArtifact(ctx, artifact); err != nil {
+		t.Fatal(err)
+	}
+
+	content, err := service.ReadArtifactContent(ctx, artifact.WorkspaceID, artifact.RunID, artifact.URI)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := content.Validate(); err != nil {
+		t.Fatalf("content validation: %v", err)
+	}
+	if content.FileName != "report.txt" || content.ContentType != "text/markdown" || string(content.Content) != "owner content\n" {
+		t.Fatalf("content = %+v/%q", content, content.Content)
+	}
+	content.Content[0] = 'X'
+	reloaded, err := service.ReadArtifactContent(ctx, artifact.WorkspaceID, artifact.RunID, artifact.URI)
+	if err != nil || string(reloaded.Content) != "owner content\n" {
+		t.Fatalf("caller mutation leaked: %+v/%q err=%v", reloaded, reloaded.Content, err)
+	}
+
+	artifact.ID = "artifact-oversized"
+	artifact.URI = "workorch://workspaces/ws-result-test/artifacts/run-result-test/oversized.txt"
+	artifact.Summary = strings.Repeat("x", 1<<20)
+	if err := service.CreateArtifact(ctx, artifact); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.ReadArtifactContent(ctx, artifact.WorkspaceID, artifact.RunID, artifact.URI); !errors.Is(err, common.ErrConflict) {
+		t.Fatalf("oversized read err = %v, want conflict", err)
 	}
 }
 

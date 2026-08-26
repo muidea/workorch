@@ -452,7 +452,7 @@ func TestEvaluateCandidateAdmissionAllowsFiniteOwnerGroundedWorkspaceScopeThroug
 	aggregate.Facts.Focus.RequireTargetGrounding = true
 	aggregate.Facts.Focus.TargetRole = "deliverable"
 	aggregate.Facts.Focus.TargetSelectorRef = "file/workspace_deliverable"
-	aggregate.Facts.Focus.ProspectiveTargetRef = "new-deliverable.txt"
+	aggregate.Facts.Focus.ProspectiveTargetRefs = []string{"new-deliverable.txt"}
 	aggregate.Facts.Focus.TargetRefs = nil
 	selection := runtimecontract.RuntimeTargetSelection{
 		PrerequisiteID: "target-selection-scope", OwnerModuleID: runtimecontract.RuntimeModuleFile, TargetRole: "deliverable",
@@ -602,7 +602,7 @@ func TestEvaluateCandidateAdmissionCreationScopeRequiresConcreteDurableFileTarge
 	aggregate.Facts.Focus.RequireTargetGrounding = true
 	aggregate.Facts.Focus.TargetRole = "deliverable"
 	aggregate.Facts.Focus.TargetSelectorRef = "file/workspace_deliverable"
-	aggregate.Facts.Focus.ProspectiveTargetRef = "new-deliverable.txt"
+	aggregate.Facts.Focus.ProspectiveTargetRefs = []string{"new-deliverable.txt"}
 	aggregate.Facts.Focus.TargetRefs = nil
 	selection := runtimecontract.RuntimeTargetSelection{
 		PrerequisiteID: "target-selection-create", OwnerModuleID: runtimecontract.RuntimeModuleFile, TargetRole: "deliverable",

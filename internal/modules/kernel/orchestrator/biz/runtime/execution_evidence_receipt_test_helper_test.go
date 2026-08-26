@@ -221,10 +221,10 @@ func runtimeTestSealCurrentFocusBindings(t *testing.T, aggregate *RuntimeAggrega
 			TargetSelectorOwnerRef:      focus.TargetSelectorOwnerRef,
 			TargetSelectorSubjectRef:    focus.TargetSelectorSubjectRef,
 			TargetSelectorCandidateRefs: append([]string(nil), focus.TargetSelectorCandidateRefs...),
-			ProspectiveTargetRef:        focus.ProspectiveTargetRef,
+			ProspectiveTargetRefs:       append([]string(nil), focus.ProspectiveTargetRefs...),
 			DeclarationRef:              "test/runtime-reducer-fixture",
 		}.Normalized()
-		if len(binding.TargetRefs) == 0 && binding.TargetSelectorRef == "" && binding.ProspectiveTargetRef == "" {
+		if len(binding.TargetRefs) == 0 && binding.TargetSelectorRef == "" && len(binding.ProspectiveTargetRefs) == 0 {
 			binding.TargetSelectorRef = "test/runtime-owner-selector"
 			binding.TargetSelectorOwnerRef = "test-runtime"
 			binding.TargetSelectorSubjectRef = focus.ID
@@ -289,7 +289,7 @@ func runtimeTestAlignFocusTargetSurfaceFromBindings(focus runtimecontract.Covera
 	focus.TargetSelectorOwnerRef = binding.TargetSelectorOwnerRef
 	focus.TargetSelectorSubjectRef = binding.TargetSelectorSubjectRef
 	focus.TargetSelectorCandidateRefs = append([]string(nil), binding.TargetSelectorCandidateRefs...)
-	focus.ProspectiveTargetRef = binding.ProspectiveTargetRef
+	focus.ProspectiveTargetRefs = append([]string(nil), binding.ProspectiveTargetRefs...)
 	return focus.Normalized()
 }
 
@@ -555,13 +555,13 @@ func runtimeTestBuildSealedSemanticPlanning(aggregate RuntimeAggregate) (runtime
 				Policy:                    acquisition.AcquisitionTargetPolicy,
 				OwnerSelectorRefs:         []string{acquisition.AcquisitionTargetSelectorRef},
 				ProspectiveConstraintRefs: append([]string(nil), acquisition.AcquisitionConstraintRefs...),
-				ProspectiveTargetRef:      target,
+				ProspectiveTargetRefs:     []string{target},
 			}
 			proposal.RequiredEvidenceKinds = []string{runtimecontract.EvidenceKindStateChange}
 		}
 		feasibilityTargets := append([]string(nil), proposal.Target.ExactTargetRefs...)
-		if proposal.Target.ProspectiveTargetRef != "" {
-			feasibilityTargets = []string{proposal.Target.ProspectiveTargetRef}
+		if len(proposal.Target.ProspectiveTargetRefs) != 0 {
+			feasibilityTargets = append([]string(nil), proposal.Target.ProspectiveTargetRefs...)
 		}
 		document.Proposals = append(document.Proposals, proposal)
 		feasibility := runtimecontract.RuntimeSemanticProofFeasibility{
@@ -697,7 +697,7 @@ func runtimeTestSemanticSourceFocuses(facts runtimecontract.RuntimeFacts, seed r
 				break
 			}
 		}
-		if focus.ProspectiveTargetRef != "" {
+		if len(focus.ProspectiveTargetRefs) != 0 {
 			focus.RequireTargetGrounding = true
 			if focus.TargetRole == "" {
 				focus.TargetRole = "test_target"
@@ -719,7 +719,7 @@ func runtimeTestSemanticSourceFocuses(facts runtimecontract.RuntimeFacts, seed r
 			focus.AcceptedOperationVariants = nil
 			focus.ValidationRecipeID = ""
 			focus.RequiredCheckRefs = nil
-			if focus.ProspectiveTargetRef == "" {
+			if len(focus.ProspectiveTargetRefs) == 0 {
 				focus.TargetSelectorRef = ""
 				focus.TargetSelectorOwnerRef = ""
 				focus.TargetSelectorSubjectRef = ""
@@ -866,8 +866,8 @@ func runtimeTestSemanticTargets(facts runtimecontract.RuntimeFacts, seed runtime
 				continue
 			}
 			switch {
-			case focus.ProspectiveTargetRef != "":
-				byCoverage[coverageID] = focus.ProspectiveTargetRef
+			case len(focus.ProspectiveTargetRefs) != 0:
+				byCoverage[coverageID] = focus.ProspectiveTargetRefs[0]
 			case len(focus.TargetRefs) == 1:
 				byCoverage[coverageID] = focus.TargetRefs[0]
 			case len(focus.TargetSelectorCandidateRefs) != 0:
@@ -1198,8 +1198,16 @@ func runtimeTestBindingAuthorizesOperation(binding runtimecontract.CoverageEvide
 	if len(binding.TargetRefs) != 0 {
 		return sameRuntimeTargetRefs(binding.TargetRefs, operation.TargetRefs)
 	}
-	if binding.ProspectiveTargetRef != "" {
-		return sameRuntimeTargetRefs([]string{binding.ProspectiveTargetRef}, operation.TargetRefs)
+	if len(binding.ProspectiveTargetRefs) != 0 {
+		if len(operation.TargetRefs) != 1 {
+			return false
+		}
+		for _, targetRef := range binding.ProspectiveTargetRefs {
+			if targetRef == operation.TargetRefs[0] {
+				return true
+			}
+		}
+		return false
 	}
 	return binding.TargetSelectorRef != ""
 }

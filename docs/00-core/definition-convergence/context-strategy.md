@@ -4,7 +4,7 @@ Status: normative
 
 Type: core-contract-part
 
-Last Verified: 2026-08-25
+Last Verified: 2026-08-26
 
 ## Large Goal/DoD Context Strategy
 
@@ -44,12 +44,15 @@ prospective owner-fact composite probe 使用的 `OwnerFactDependencyCatalogs` �
 中参与 manifest/hash/freshness/CAS/seal，不能进入 C3、schema enum、correction directive 或任何 LLM-visible catalog dump。
 Template 与 Workspace 两侧的 evidence-policy snapshots 在 Definition admission 时分别形成 canonical
 `AdmissionPolicyBindings`，作为稳定 C2 policy authority；任一含有退役 `prospectiveTargetRef` 的 snapshot 在 promotion
-前即拒绝，binding 本身也不能向 C3/SM-3 注入 exact target。
+前即拒绝，binding 本身也不能向 C3/SM-3 注入 exact target set。
 pre-seal Definition/Profile authority 只声明 prospective target policy、declaration selector/candidate refs 与
 satisfaction contract；generation-specific semantic obligation/manifest 再与 current owner catalog 编译 operation
-selector/constraints，C3 只投影其 provider-visible bounded 部分。SM-3 semantic document 的 proposal 在两者交集内
-提出 exact target；File/Shell fact 对该 proposal 进行绑定观测，只有 SM-2 sealed binding 才形成 target
-authority。proposal、owner fact 或上一 generation target 均不得回写 C1/C2。
+selector/constraints，C3 只投影其 provider-visible bounded 部分。SM-3 semantic document 的一份 proposal 在两者交集内
+提出 1～8 个唯一 canonical `ProspectiveTargetRefs`；同一 C3 typed constraint 只表达 mandatory `all_of` clauses，每个 clause
+必须被覆盖且每个 target 必须有贡献，不接受 `one_of`/`any_of`、singular 字段或兼容 alias。File/Shell fact 对完整 proposal
+与 hypothetical resulting manifest 进行绑定观测，只有 SM-2 sealed binding 才形成 target-set authority。后续
+`RequiredOperationSequence` 为每个 target 封存 exact-singleton requirement 与 canonical order。proposal、owner fact 或上一
+generation target 均不得回写 C1/C2。
 
 “Goal/DoD 不压缩”和 stable-prefix 规则具体化为：
 

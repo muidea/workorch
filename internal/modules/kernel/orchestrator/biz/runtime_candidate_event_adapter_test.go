@@ -876,7 +876,7 @@ func eventTestCoverageFocus(binding runtimecontract.CoverageEvidenceBinding) run
 		RequiredEvidenceKinds: binding.EvidenceKinds(), TargetRefs: append([]string(nil), binding.TargetRefs...),
 		TargetSelectorRef: binding.TargetSelectorRef, TargetSelectorOwnerRef: binding.TargetSelectorOwnerRef,
 		TargetSelectorSubjectRef: binding.TargetSelectorSubjectRef, TargetSelectorCandidateRefs: append([]string(nil), binding.TargetSelectorCandidateRefs...),
-		ProspectiveTargetRef: binding.ProspectiveTargetRef,
+		ProspectiveTargetRefs: append([]string(nil), binding.ProspectiveTargetRefs...),
 	}
 }
 

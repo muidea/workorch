@@ -4,28 +4,28 @@ import (
 	"testing"
 
 	magicevent "github.com/muidea/magicCommon/event"
-	approvalevents "github.com/muidea/workorch/internal/modules/blocks/approval/pkg/events"
-	decisionevents "github.com/muidea/workorch/internal/modules/blocks/decision/pkg/events"
+	eventstreamevents "github.com/muidea/workorch/internal/modules/blocks/eventstream/pkg/events"
+	orchestratorevents "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/events"
 )
 
 func subscribeGovernanceEvidenceAcks(t *testing.T, rawHub magicevent.Hub) {
 	t.Helper()
-	observer := magicevent.NewSimpleObserver(decisionevents.EvidenceCommandDestination, rawHub)
-	observer.Subscribe(decisionevents.TopicDecisionCommandRecordEvidence, func(ev magicevent.Event, result magicevent.Result) {
-		command, ok := ev.Data().(decisionevents.RecordDecisionEvidenceCommand)
+	observer := magicevent.NewSimpleObserver(orchestratorevents.CommandDestination, rawHub)
+	observer.Subscribe(orchestratorevents.TopicOrchestratorCommandRecordDecisionEvidence, func(ev magicevent.Event, result magicevent.Result) {
+		command, ok := ev.Data().(orchestratorevents.RecordDecisionEvidenceCommand)
 		if !ok {
 			result.Set(nil, nil)
 			return
 		}
-		result.Set(decisionevents.RecordDecisionEvidenceResult{EvidenceRecordID: command.EvidenceRecordID}, nil)
+		result.Set(orchestratorevents.RecordDecisionEvidenceResult{EvidenceRecordID: command.EvidenceRecordID}, nil)
 	})
-	observer.Subscribe(approvalevents.TopicApprovalCommandRecordEvidence, func(ev magicevent.Event, result magicevent.Result) {
-		command, ok := ev.Data().(approvalevents.RecordApprovalEvidenceCommand)
+	observer.Subscribe(orchestratorevents.TopicOrchestratorCommandRecordApprovalEvidence, func(ev magicevent.Event, result magicevent.Result) {
+		command, ok := ev.Data().(orchestratorevents.RecordApprovalEvidenceCommand)
 		if !ok {
 			result.Set(nil, nil)
 			return
 		}
-		result.Set(approvalevents.RecordApprovalEvidenceResult{
+		result.Set(orchestratorevents.RecordApprovalEvidenceResult{
 			EvidenceRecordID: command.EvidenceRecordID,
 			WorkspaceID:      command.WorkspaceID,
 			RunID:            command.RunID,
@@ -34,22 +34,22 @@ func subscribeGovernanceEvidenceAcks(t *testing.T, rawHub magicevent.Hub) {
 			ApprovalState:    command.ApprovalState,
 		}, nil)
 	})
-	resolutionObserver := magicevent.NewSimpleObserver(approvalevents.ResolutionRecordCommandDestination, rawHub)
-	resolutionObserver.Subscribe(approvalevents.TopicApprovalCommandRecordResolution, func(ev magicevent.Event, result magicevent.Result) {
-		command, ok := ev.Data().(approvalevents.RecordApprovalResolutionCommand)
+	resolutionObserver := magicevent.NewSimpleObserver(eventstreamevents.CommandDestination, rawHub)
+	resolutionObserver.Subscribe(eventstreamevents.TopicEventStreamCommandRecordApprovalResolution, func(ev magicevent.Event, result magicevent.Result) {
+		command, ok := ev.Data().(eventstreamevents.RecordApprovalResolutionCommand)
 		if !ok {
 			result.Set(nil, nil)
 			return
 		}
 		data := command.Data
-		result.Set(approvalevents.RecordApprovalResolutionResult{
+		result.Set(eventstreamevents.RecordApprovalResolutionResult{
 			NotificationID: data.NotificationID, ResolutionID: data.ResolutionID, ApprovalID: data.ApprovalID,
 			WorkspaceID: data.WorkspaceID, RunID: data.RunID,
 		}, nil)
 	})
 	t.Cleanup(func() {
-		resolutionObserver.Unsubscribe(approvalevents.TopicApprovalCommandRecordResolution)
-		observer.Unsubscribe(approvalevents.TopicApprovalCommandRecordEvidence)
-		observer.Unsubscribe(decisionevents.TopicDecisionCommandRecordEvidence)
+		resolutionObserver.Unsubscribe(eventstreamevents.TopicEventStreamCommandRecordApprovalResolution)
+		observer.Unsubscribe(orchestratorevents.TopicOrchestratorCommandRecordApprovalEvidence)
+		observer.Unsubscribe(orchestratorevents.TopicOrchestratorCommandRecordDecisionEvidence)
 	})
 }

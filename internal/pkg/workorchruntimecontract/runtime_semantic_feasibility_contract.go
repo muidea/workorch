@@ -31,7 +31,7 @@ type RuntimeSemanticProofFeasibilityObservation struct {
 // remain the addressed capability owner's responsibility.
 func ValidateRuntimeSemanticProofFeasibilityRequest(command RuntimeSemanticProofFeasibilityRequest, ownerModuleID string) error {
 	manifest := command.Manifest.Normalized()
-	proposal := command.Proposal.Normalized()
+	proposal := command.Proposal
 	catalog := command.OwnerCatalog.Normalized()
 	if command.WorkspaceID == "" || command.RunID == "" || strings.TrimSpace(command.FeasibilityBatchID) == "" ||
 		strings.TrimSpace(command.WorkspaceDeliverableDirectory) == "" || strings.TrimSpace(ownerModuleID) == "" {
@@ -46,6 +46,7 @@ func ValidateRuntimeSemanticProofFeasibilityRequest(command RuntimeSemanticProof
 	if err := proposal.Validate(); err != nil {
 		return err
 	}
+	proposal = proposal.Normalized()
 	if proposal.OwnerModuleID != ownerModuleID {
 		return fmt.Errorf("runtime semantic feasibility proposal owner %q does not match receiver %q", proposal.OwnerModuleID, ownerModuleID)
 	}
@@ -149,8 +150,11 @@ func validateSemanticProposalAgainstOwnerCatalog(proposal RuntimeSemanticProofPr
 		if !allStringsContained(target.ProspectiveConstraintRefs, constraintRefs) {
 			return runtimeSemanticProposalConstraint("target.prospectiveConstraintRefs", RuntimeSemanticConstraintAllowedValue, strings.Join(target.ProspectiveConstraintRefs, ","), nil, constraintRefs)
 		}
-		if semanticContainsString(catalog.TargetRefs, target.ProspectiveTargetRef) {
-			return runtimeSemanticProposalConstraint("target.prospectiveTargetRef", RuntimeSemanticConstraintRelational, target.ProspectiveTargetRef, []string{"target absent from sealed existing target set"}, nil)
+		prospectiveRefs := RuntimeSemanticProposalTargetRefs(proposal)
+		for _, prospectiveRef := range prospectiveRefs {
+			if semanticContainsString(catalog.TargetRefs, prospectiveRef) {
+				return runtimeSemanticProposalConstraint("target.prospectiveTargetRefs", RuntimeSemanticConstraintRelational, prospectiveRef, []string{"every target absent from sealed existing target set"}, nil)
+			}
 		}
 	}
 	if proposal.ValidationRecipeID != "" {
@@ -366,10 +370,7 @@ func RuntimeSemanticProposalTargetRefs(proposal RuntimeSemanticProofProposal) []
 		// File owner feasibility must inspect the concrete prospective path for
 		// traversal, existence and regular-file conflicts. It is not a current
 		// catalog target, but it is still the exact owner-observed target fact.
-		if target.ProspectiveTargetRef == "" {
-			return nil
-		}
-		return []string{target.ProspectiveTargetRef}
+		return append([]string(nil), target.ProspectiveTargetRefs...)
 	}
 	return nil
 }

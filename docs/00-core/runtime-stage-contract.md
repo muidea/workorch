@@ -115,7 +115,7 @@ provider、candidate、semantic proof、capability operation、repair 与 recove
 - Definition admission 在 promotion 前分别无损编译 Template 与 Workspace 的 `EvidencePolicies`，拒绝空/重复 ID、
   invalid typed policy、normalize cardinality drift 及任何退役 `prospectiveTargetRef`，并把双方 exact policy
   ref/revision/snapshot hash 封存为 candidate 的 `AdmissionPolicyBindings`；final bootstrap 还 exact 比较 admitted
-  Workspace policy projection。这些 binding 是 immutable policy authority，不是 exact prospective target authority。
+  Workspace policy projection。这些 binding 是 immutable policy authority，不是 exact prospective target-set authority。
 - startup input 封存后允许执行期 LLM 基于 exact revision/hash 处理 semantic proof、candidate 或 bounded gap diagnostic；LLM
   不得改写输入、选择 Runtime action、授予 credit 或裁决 terminal。
 - owner-fact acquisition 是同一 CWI 的有界前置 transaction，不是 terminal proof：manifest 必须同时保留 Definition 的
@@ -125,14 +125,34 @@ provider、candidate、semantic proof、capability operation、repair 与 recove
 - prospective acquisition 还必须用 pre-seal exact contract ref 组合 acquisition-owner hypothetical delta 与 required-owner
   dependency observation。pre-seal Definition 只封存 target policy、declaration selector/candidate refs 与 acquisition
   closure；由其编译的 generation-specific obligation/manifest 再封存 operation selector 与 current owner
-  constraints，两者都不封存 exact prospective target。required owner catalog 必须发布 provider-safe、仅含
-  `all_of` 的 typed `ProspectiveTargetSatisfactionConstraint`，generation-specific acquisition/manifest 将其完整封存并
-  只在 C3 投影。SM-3 semantic proposal 必须在两者交集内提出一个具体 target，非空 candidate refs 还要求 exact
-  member match，并在 document schema/admission 阶段满足全部 owner predicate；不匹配只形成普通完整文档/schema
-  correction，且零 File/Shell probe。File/Shell 只返回绑定已通过 admission proposal 的 factual feasibility/satisfaction，
-  只有 SM-2 private event 封存的
-  `CoverageEvidenceBinding` 首次使该 target 成为 authoritative；operation candidate 只能引用 current binding，
-  dispatch 只从该 binding 派生并消费 exact target，不能重新选择。dependency catalog不进入LLM selectable surface。
+  constraints，两者都不封存 exact prospective target set。required owner catalog 必须发布 provider-safe、仅含
+  `all_of` 的 typed `ProspectiveTargetSatisfactionConstraint`：每个 clause 内的 predicate 全部合取，所有 clause 也全部必须
+  被覆盖，不存在 `one_of`/`any_of`/fallback relation。generation-specific acquisition/manifest 将该合同完整封存并
+  只在 C3 投影。SM-3 只能提交一份 bounded semantic proposal，其 typed `ProspectiveTargetRefs`（JSON
+  `prospectiveTargetRefs`）必须是 1～8 个唯一、规范化的 exact target ref；每个必需 clause 至少由一项满足，每个
+  target 也必须对至少一个 clause 有贡献。所有 target 都必须位于 declaration selector/candidate refs 与 current
+  operation selector/owner constraints 的交集；非空 candidate refs 对集合中每项都要求 exact member match。singular
+  `ProspectiveTargetRef` 不是 Runtime semantic wire 的兼容字段；出现时必须由 strict current decoder 拒绝。schema/document
+  admission 在 owner probe 前校验完整合取集合；缺项、多余 target、重复、越界或不满足 clause 只形成
+  普通完整文档/schema correction，且零 File/Shell probe。
+- File 对整个 target set 使用同一 complete manifest revision 执行 path/existence/parent/capacity admission，并只返回
+  bounded hypothetical resulting-manifest delta；该过程不创建文件或目录。Shell 只使用 delta 的 resulting manifest
+  判定 `would_satisfy | would_not_satisfy | stale`，不读 File/workspace、不启动 process/session。File/Shell 都只返回
+  factual feasibility/satisfaction；只有 Orchestrator SM-2 private internal event 可封存
+  `CoverageEvidenceBinding` 与这一完整 target set。封存后，SM-3 `RequiredOperationSequence` 必须为每个 target
+  编译一项 exact singleton `TargetRef`，按 canonical dependency chain 完整、有序执行；候选缺项、附加 target、同一
+  requirement 重复或顺序漂移均在 dispatch/effect 前拒绝。operation candidate 只引用 current binding，dispatch 不得重新
+  选择 target。dependency catalog 不进入 LLM selectable surface。
+- multi-target prospective all-of execution 的完成证明必须来自同一个 sealed dispatch。每个 required operation 都必须取得
+  owner-committed、`Outcome=accepted`、exact `ExecutionKey + Fence`、exact binding/evidence kind 且 singleton target 匹配的
+  receipt；`owner_committed` 只是必要 owner fact，只有 Orchestrator private evidence event 把对应 execution 与 evidence
+  原子提交为 `evidence_committed` 后，该 member 才能进入 collective completion proof。前 N-1 个 accepted member 只能形成
+  持久化 operation/evidence progress，不能令 CWI `satisfied/settled`、推进 focus 或关闭 all-of dispatch。rejected、stale、
+  weak/mismatched receipt 不属于完成集合；duplicate 不得重复计数、CAS、credit 或 effect；restart 只能从同一 dispatch 的
+  persisted execution/receipt/evidence ledger 继续缺失 member，不得跨 dispatch、repair 或 semantic generation 拼接集合。只有
+  全部 target member 对每个 required evidence kind 齐全时，Orchestrator SM-2 private event 才能 exactly-once 认可
+  collective proof；只有其它 quality/effect/assessment gate 也满足时，SM-2 才能通过 aggregate CAS 授予 CWI
+  credit/settlement。capability owner、LLM、Application 与 projection 均无此 authority。
   typed stale 只走 bounded fact refresh，不消耗 semantic correction。已通过 typed constraint 的 proposal 若仍得到
   exact-current full-composite `would_not_satisfy`，该事实表示 required-owner published contract 与 owner judgment 自相矛盾；
   Orchestrator 直接记录 `prospective_satisfaction_contract_violated` 并收口为 `semantic_contract_failed`，不得打开

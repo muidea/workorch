@@ -4,7 +4,7 @@ Status: normative
 
 Type: core-contract-part
 
-Last Verified: 2026-08-25
+Last Verified: 2026-08-26
 
 ## State-Machine Binding
 
@@ -47,12 +47,18 @@ join the acquisition owner and required owner facts. The semantic manifest keeps
 freshness, CAS and seal, but never appear as LLM-selectable operations/surfaces. File and Shell return only their own factual
 outer/nested observations. The required-owner catalog publishes one provider-safe typed
 `ProspectiveTargetSatisfactionConstraint` with `all_of` predicates; the generation-specific acquisition/manifest seals the same
-value and projects it only in C3. The pre-seal declaration and compiled obligation contain no exact prospective target. The SM-3
-semantic proposal supplies one concrete value at the intersection of the Definition declaration selector/candidate refs and the
-current semantic manifest's operation selector/owner constraints; non-empty candidate refs require an exact member match, and
-schema/document admission must satisfy every owner predicate before any File/Shell probe. Only
-the SM-2 binding seal makes that target authoritative. A later operation candidate may only reference that current binding, and
-dispatch derives and consumes the exact target from the binding rather than from provider output.
+value and projects it only in C3. Its clauses and every predicate within a clause are mandatory; it has no `one_of`, `any_of` or
+fallback relation. The pre-seal declaration and compiled obligation contain no exact prospective target set. One SM-3 semantic
+proposal supplies a bounded `ProspectiveTargetRefs` set of 1–8 unique canonical values at the intersection of the Definition
+declaration selector/candidate refs and the current semantic manifest's operation selector/owner constraints. Every mandatory
+clause must be covered by at least one set member, every member must contribute to a clause, and non-empty candidate refs require
+each member to be an exact match. Schema/document admission proves that whole contract before any File/Shell probe; the singular
+`ProspectiveTargetRef` field is not a current-wire compatibility alias. File validates the whole set against one complete manifest
+revision and returns only a bounded, side-effect-free hypothetical resulting-manifest delta. Shell judges `would_satisfy` only
+from that resulting manifest and its exact recipe/catalog identity. Only the SM-2 private binding-seal event makes the whole set
+authoritative. The later SM-3 operation manifest compiles one exact-singleton `TargetRef` requirement per target into a canonical
+dependency chain; a candidate must contain every required operation in order, and dispatch derives the targets from the binding
+rather than from new provider choices.
 Shell typed stale uses the existing bounded catalog-refresh transition and does not consume semantic correction. A
 target mismatch is an ordinary complete-document/schema rejection: attempt 1 reuses the same transaction, manifest, C0-C3 and
 stable prefix, while C4 references only the manifest/CWI/field violation and never copies the constraint; this path performs zero

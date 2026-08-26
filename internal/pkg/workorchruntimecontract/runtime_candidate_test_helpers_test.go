@@ -89,7 +89,7 @@ func runtimeCandidateTestDecisionWithBindings(t testing.TB, decision RuntimeDeci
 		decision.Focus.TargetSelectorOwnerRef = binding.TargetSelectorOwnerRef
 		decision.Focus.TargetSelectorSubjectRef = binding.TargetSelectorSubjectRef
 		decision.Focus.TargetSelectorCandidateRefs = append([]string(nil), binding.TargetSelectorCandidateRefs...)
-		decision.Focus.ProspectiveTargetRef = binding.ProspectiveTargetRef
+		decision.Focus.ProspectiveTargetRefs = append([]string(nil), binding.ProspectiveTargetRefs...)
 	}
 	return decision
 }

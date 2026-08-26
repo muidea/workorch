@@ -54,7 +54,7 @@ func (a *RuntimeAdapter) observeRuntimeReconciliationTargets(workspaceDirectory 
 }
 
 func invalidFileReconciliationProspectiveSelector(binding runtimecontract.RuntimeCWIReconciliationBindingRef, manifestRevision string) *fileRuntimeReconciliationTargetFact {
-	if binding.ProspectiveTargetRef == "" {
+	if len(binding.ProspectiveTargetRefs) == 0 {
 		return nil
 	}
 	var fact fileRuntimeReconciliationTargetFact
@@ -64,9 +64,13 @@ func invalidFileReconciliationProspectiveSelector(binding runtimecontract.Runtim
 	case runtimeFileTargetSelectorProfileCandidates:
 		if binding.TargetSelectorOwnerRef == "" || binding.TargetSelectorSubjectRef == "" || len(binding.TargetSelectorCandidateRefs) == 0 {
 			fact = unverifiableFileReconciliationFact(manifestRevision, "profile File target selector has no complete sealed owner scope", "target_selector_scope_incomplete", nil)
-		} else if !containsString(binding.TargetSelectorCandidateRefs, binding.ProspectiveTargetRef) {
-			fact = unverifiableFileReconciliationFact(manifestRevision, "sealed prospective File target is outside the declared selector candidates", "prospective_target_outside_selector", nil)
 		} else {
+			for _, targetRef := range binding.ProspectiveTargetRefs {
+				if !containsString(binding.TargetSelectorCandidateRefs, targetRef) {
+					fact = unverifiableFileReconciliationFact(manifestRevision, "sealed prospective File target is outside the declared selector candidates", "prospective_target_outside_selector", nil)
+					return &fact
+				}
+			}
 			return nil
 		}
 	default:
@@ -91,22 +95,22 @@ func observeSealedFileSelector(workspaceDirectory string, manifest runtimecontra
 }
 
 func observeWorkspaceRelativeNewFileSelector(workspaceDirectory, manifestRevision string, known map[string]struct{}, binding runtimecontract.RuntimeCWIReconciliationBindingRef) fileRuntimeReconciliationTargetFact {
-	if binding.ProspectiveTargetRef == "" {
+	if len(binding.ProspectiveTargetRefs) == 0 {
 		return unverifiableFileReconciliationFact(manifestRevision, "prospective File target selector has no sealed target path", "prospective_target_missing", nil)
 	}
-	return observeSealedFileTargets(workspaceDirectory, manifestRevision, known, []string{binding.ProspectiveTargetRef}, false)
+	return observeSealedFileTargets(workspaceDirectory, manifestRevision, known, binding.ProspectiveTargetRefs, false)
 }
 
 func observeUniqueWorkspaceEntrySelector(manifest runtimecontract.WorkspaceManifest, binding runtimecontract.RuntimeCWIReconciliationBindingRef) fileRuntimeReconciliationTargetFact {
-	if binding.ProspectiveTargetRef != "" {
+	if len(binding.ProspectiveTargetRefs) != 0 {
 		return unverifiableFileReconciliationFact(manifest.Revision, "unique workspace entry selector does not authorize a prospective target", "prospective_target_unsupported_for_selector", nil)
 	}
 	return observeFileSelectorCardinality(manifest.Revision, manifest.TargetRefs, false)
 }
 
 func observeWorkspaceDeliverableSelector(workspaceDirectory string, manifest runtimecontract.WorkspaceManifest, known map[string]struct{}, binding runtimecontract.RuntimeCWIReconciliationBindingRef) fileRuntimeReconciliationTargetFact {
-	if binding.ProspectiveTargetRef != "" {
-		prospective := observeSealedFileTargets(workspaceDirectory, manifest.Revision, known, []string{binding.ProspectiveTargetRef}, false)
+	if len(binding.ProspectiveTargetRefs) != 0 {
+		prospective := observeSealedFileTargets(workspaceDirectory, manifest.Revision, known, binding.ProspectiveTargetRefs, false)
 		if prospective.status != runtimecontract.RuntimeCWIReconciliationObservationSatisfied {
 			return prospective
 		}
@@ -137,11 +141,13 @@ func observeProfileDeclaredFileSelector(workspaceDirectory string, manifest runt
 	if len(candidates) > 1 {
 		return unverifiableFileReconciliationFact(manifest.Revision, "sealed File target selector resolves to multiple current workspace paths", "target_selection_ambiguous", nil)
 	}
-	if binding.ProspectiveTargetRef != "" {
-		if !containsString(binding.TargetSelectorCandidateRefs, binding.ProspectiveTargetRef) {
-			return unverifiableFileReconciliationFact(manifest.Revision, "sealed prospective File target is outside the declared selector candidates", "prospective_target_outside_selector", nil)
+	if len(binding.ProspectiveTargetRefs) != 0 {
+		for _, targetRef := range binding.ProspectiveTargetRefs {
+			if !containsString(binding.TargetSelectorCandidateRefs, targetRef) {
+				return unverifiableFileReconciliationFact(manifest.Revision, "sealed prospective File target is outside the declared selector candidates", "prospective_target_outside_selector", nil)
+			}
 		}
-		return observeSealedFileTargets(workspaceDirectory, manifest.Revision, known, []string{binding.ProspectiveTargetRef}, false)
+		return observeSealedFileTargets(workspaceDirectory, manifest.Revision, known, binding.ProspectiveTargetRefs, false)
 	}
 	return observeFileSelectorCardinality(manifest.Revision, candidates, false)
 }

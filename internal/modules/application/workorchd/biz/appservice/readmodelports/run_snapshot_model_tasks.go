@@ -15,7 +15,7 @@ func appendRunSnapshotObservabilityTasks(ctx context.Context, tasks []func() err
 		models.EventRecords, err = readers.EventRecords.List(ctx, runSnapshotEventRecordQuery(item.ID, loadMode))
 		return err
 	}))
-	// RVC-14: /run/llm_usage/recorded must hydrate Run snapshot summary on every formal
+	// RVC-14: /llm/usage/recorded must hydrate Run snapshot summary on every formal
 	// snapshot path (compact/detail/projection/observability). Payload query is bounded
 	// and topic-scoped; general event timeline remains metadata-only.
 	tasks = append(tasks, namedLoadTask("runSnapshot.llmUsageEventRecords", func() error {

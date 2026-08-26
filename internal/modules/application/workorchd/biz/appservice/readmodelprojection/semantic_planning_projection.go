@@ -208,9 +208,7 @@ func semanticPlanningProposalTargetRefs(proposal runtimecontract.RuntimeSemantic
 	case runtimecontract.RuntimeOperationTargetPolicyExistingOwnerScope:
 		return append([]string(nil), target.OwnerScopeTargetRefs...)
 	case runtimecontract.RuntimeOperationTargetPolicyProspectiveOwnerTarget:
-		if target.ProspectiveTargetRef != "" {
-			return []string{target.ProspectiveTargetRef}
-		}
+		return append([]string(nil), target.ProspectiveTargetRefs...)
 	}
 	return nil
 }

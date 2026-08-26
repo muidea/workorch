@@ -4,7 +4,7 @@ Status: normative
 
 Type: verification-contract
 
-Last Verified: 2026-08-25
+Last Verified: 2026-08-26
 
 ## Purpose
 
@@ -42,7 +42,7 @@ Last Verified: 2026-08-25
 | candidate owner-fact manifest differs from exact Profile snapshot derivation | `definition_profile_prerequisite_unresolved`；Application不能省略、替换或附加binding，Workspace pure compiler独立派生比较 |
 | required owner fact declares exact one-shot acquisition | candidate封存missing trigger、acquisition owner/kind/selector、reobserve owner/fact与max=1；promotion/startup hash稳定；semantic obligation 同时保留 terminal 与 current evidence kinds；missing 时只能封存该 exact acquisition；accepted operation 后 reobserve 仍缺失则零第二次 acquisition并 typed exhausted，reobserve ready则重开同一CWI并以fresh generation恢复terminal proof，acquisition零terminal credit |
 | prospective owner-fact convergence declaration | `prospective_owner_target` 恰有 nonempty Profile-derived `ProspectiveSatisfactionContractRef`；missing/extra/drift或其它policy携带ref均在promotion前`definition_profile_prerequisite_unresolved`，零Run/provider/capability work |
-| prospective target authority split | pre-seal candidate/Definition 无 exact prospective target，只保留 policy、declaration selector/candidate refs、acquisition closure与contract ref；compiled obligation/manifest 只追加 operation selector/current owner constraints；SM-3 schema要求每个prospective proposal在两者交集中提交nonempty exact target，非空candidate refs要求exact member match；File/Shell fact精确绑定proposal hash/target，只有SM-2 sealed binding形成authority；operation candidate只引用binding，dispatch只从binding派生target |
+| prospective target authority split | pre-seal candidate/Definition 无 exact prospective target set，只保留 policy、declaration selector/candidate refs、acquisition closure与contract ref；compiled obligation/manifest 只追加 operation selector/current owner constraints；SM-3 schema只接受一份proposal中1～8个唯一canonical `ProspectiveTargetRefs`，逐项位于两者交集，非空candidate refs要求逐项exact member match，并拒绝singular兼容字段；File/Shell fact精确绑定proposal hash/target set，只有SM-2 sealed binding形成authority；operation candidate只引用binding，并必须按每个target的exact-singleton `RequiredOperationSequence` 齐全、有序提交，dispatch只从binding派生target |
 | free text may imply an undeclared prerequisite | static compiler 不做领域猜测或伪报完备；执行期只能走 typed semantic-gap lane |
 | dangling/self dependency | fail-closed before Run creation |
 | hard/reopen cycle | exact typed cycle path；零 Runtime work |
@@ -104,7 +104,7 @@ Last Verified: 2026-08-25
 | Profile required owner fact closure omits operation selector/variant/policy | pre-seal `definition_profile_prerequisite_unresolved`；零 Run/provider/capability work |
 | Definition selector differs from capability operation selector | manifest 同时封存两份 identity；provider schema只允许 operation selector，返回 Definition selector时 attempt-0 typed correction、零 dispatch |
 | prospective dependency catalog provider isolation | required-owner `OwnerFactDependencyCatalogs` 进入 manifest/hash/freshness，但不进入 C3 owner catalog、allowed operation/surface、schema enum 或 correction allowed values；LLM 无法选择 Shell readiness/satisfaction |
-| prospective target typed constraint | required-owner catalog发布唯一provider-safe `ProspectiveTargetSatisfactionConstraint`，只允许`all_of`；同一值封存到acquisition/manifest/C3，dependency recipe identity/command不进入provider；candidate const/enum与全部predicate同时通过schema/document admission后才允许File/Shell probe |
+| prospective target typed constraint | required-owner catalog发布唯一provider-safe `ProspectiveTargetSatisfactionConstraint`，只允许`all_of` mandatory clauses与clause内合取predicate，不存在`one_of`/`any_of`；同一值封存到acquisition/manifest/C3，dependency recipe identity/command不进入provider；1～8个target覆盖全部clause、每个target至少贡献一个clause后才允许File/Shell probe |
 | assisted draft returns one-of | raw draft 只形成不可采用 diagnostic，UI/schema 不把它显示为合法 relation；只有用户另行显式提交的 admission candidate 才可保留 token 并进入 candidate-scoped ticket |
 | malformed/timeout context request | whole-document recovery或typed terminal；不扩 dependency/priority |
 
@@ -122,7 +122,7 @@ Last Verified: 2026-08-25
 | owner-fact acquisition reobserve missing | exact accepted attempt计入`MaxAcquisitionAttempts=1`并`owner_fact_convergence_exhausted`；零第二acquisition/reopen/provider escape |
 | prospective satisfaction would-satisfy | File outer feasibility生成base-revision-bound immutable delta；Shell只消费delta+exact recipe+dependency catalog/observation并返回nested observation；CAS与seal双重验后才可封存，probe全程零File/Shell effect |
 | prospective satisfaction dependency stale/missing | Shell typed stale保留为nested owner fact并只消费bounded refresh generation；不得伪造File outer stale或直接terminal；不改变semantic attempt/directive/rejection ledger，不消耗correction；probe前missing dependency退休generation且零Shell call；refresh后新manifest/request，duplicate/restart幂等 |
-| prospective target constraint mismatch | schema/document admission返回manifest/CWI/`prospectiveTargetRef` typed violation；允许一次普通完整文档/schema correction，复用transaction/manifest/C0～C3/stable-prefix且C4只引用违规field、不复制constraint；全程零File/Shell probe/binding/effect/coverage/ticket |
+| prospective target constraint mismatch | schema/document admission返回manifest/CWI/`prospectiveTargetRefs` typed violation；empty/partial/extra/duplicate/越界或未覆盖全部clause都允许一次普通完整文档/schema correction，复用transaction/manifest/C0～C3/stable-prefix且C4只引用违规field、不复制constraint；全程零File/Shell probe/binding/effect/coverage/ticket |
 | prospective satisfaction would-not-satisfy | 先持久化唯一exact-current File delta + Shell observation composite；因proposal已通过published `all_of` constraint，该结果只能形成`prospective_satisfaction_contract_violated -> semantic_contract_failed`，不得生成replacement target、Allowed、第二provider request或第二owner probe；duplicate/restart零重复terminal/probe，所有分支零ticket/governance/acquisition/operation/effect/coverage |
 | prospective observation CAS race | File tree、File catalog/observation、Shell dependency catalog/observation或recipe schema在probe→CAS/持久化→seal任一窗口漂移时，exact-current composite校验拒绝seal并有界刷新；零binding/dispatch/effect |
 | settled CWI unlocks next wave | SM-2重投影并继续正向推进 |

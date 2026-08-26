@@ -14,6 +14,7 @@ import (
 	decisioncommon "github.com/muidea/workorch/internal/modules/blocks/decision/pkg/common"
 	decisionevents "github.com/muidea/workorch/internal/modules/blocks/decision/pkg/events"
 	decisionmodel "github.com/muidea/workorch/internal/modules/blocks/decision/pkg/models"
+	orchestratorevents "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/repository/memory"
 	deletioncontract "github.com/muidea/workorch/internal/pkg/workorchdeletioncontract"
@@ -197,13 +198,13 @@ func TestDecisionDeletionSealLinearizesWithReconciliationDelivery(t *testing.T) 
 
 	rawHub := magicevent.NewHub(64)
 	probe := &decisionDeletionDeliveryProbe{
-		Hub: rawHub, blockTopic: decisionevents.TopicDecisionCommandRecordEvidence,
+		Hub: rawHub, blockTopic: orchestratorevents.TopicOrchestratorCommandRecordDecisionEvidence,
 		entered: make(chan struct{}), release: make(chan struct{}),
 	}
-	evidence := magicevent.NewSimpleObserver(decisionevents.EvidenceCommandDestination, rawHub)
-	evidence.Subscribe(decisionevents.TopicDecisionCommandRecordEvidence, func(event magicevent.Event, result magicevent.Result) {
-		command := event.Data().(decisionevents.RecordDecisionEvidenceCommand)
-		result.Set(decisionevents.RecordDecisionEvidenceResult{EvidenceRecordID: command.EvidenceRecordID}, nil)
+	evidence := magicevent.NewSimpleObserver(orchestratorevents.CommandDestination, rawHub)
+	evidence.Subscribe(orchestratorevents.TopicOrchestratorCommandRecordDecisionEvidence, func(event magicevent.Event, result magicevent.Result) {
+		command := event.Data().(orchestratorevents.RecordDecisionEvidenceCommand)
+		result.Set(orchestratorevents.RecordDecisionEvidenceResult{EvidenceRecordID: command.EvidenceRecordID}, nil)
 	})
 	owner, err := New(probe, nil, Dependencies{OwnerRepositories: decisionBizTestOwnerRepositories(
 		repositories.Tickets, repositories.Resolutions,
@@ -216,7 +217,7 @@ func TestDecisionDeletionSealLinearizesWithReconciliationDelivery(t *testing.T) 
 	}
 	t.Cleanup(func() {
 		owner.Teardown(context.Background())
-		evidence.Unsubscribe(decisionevents.TopicDecisionCommandRecordEvidence)
+		evidence.Unsubscribe(orchestratorevents.TopicOrchestratorCommandRecordDecisionEvidence)
 		rawHub.Terminate(context.Background())
 	})
 
@@ -235,7 +236,7 @@ func TestDecisionDeletionSealLinearizesWithReconciliationDelivery(t *testing.T) 
 	waitDecisionDeliveryResult(t, reconcileDone, "reconciliation")
 	waitDecisionDeliveryResult(t, sealDone, "deletion seal")
 
-	if sent, _ := probe.counts(decisionevents.TopicDecisionCommandRecordEvidence); sent != 1 {
+	if sent, _ := probe.counts(orchestratorevents.TopicOrchestratorCommandRecordDecisionEvidence); sent != 1 {
 		t.Fatalf("Decision evidence deliveries = %d, want exactly the pre-seal delivery", sent)
 	}
 	if _, posted := probe.counts(decisionevents.TopicTicketResolved); posted != 1 {
@@ -244,7 +245,7 @@ func TestDecisionDeletionSealLinearizesWithReconciliationDelivery(t *testing.T) 
 	if err := owner.ReconcileRuntimeGovernanceProposals(ctx); err != nil {
 		t.Fatalf("post-seal reconciliation: %v", err)
 	}
-	if sent, _ := probe.counts(decisionevents.TopicDecisionCommandRecordEvidence); sent != 1 {
+	if sent, _ := probe.counts(orchestratorevents.TopicOrchestratorCommandRecordDecisionEvidence); sent != 1 {
 		t.Fatalf("post-seal Decision evidence delivery count = %d, want 1", sent)
 	}
 	if _, posted := probe.counts(decisionevents.TopicTicketResolved); posted != 1 {
@@ -292,7 +293,7 @@ func TestDecisionRestartSkipsLateResolvedDeliveryAfterDeletionSeal(t *testing.T)
 	if err := restarted.ReconcileRuntimeGovernanceProposals(ctx); err != nil {
 		t.Fatalf("restarted reconciliation: %v", err)
 	}
-	if sent, _ := probe.counts(decisionevents.TopicDecisionCommandRecordEvidence); sent != 0 {
+	if sent, _ := probe.counts(orchestratorevents.TopicOrchestratorCommandRecordDecisionEvidence); sent != 0 {
 		t.Fatalf("restarted Decision evidence deliveries = %d, want 0", sent)
 	}
 	if _, posted := probe.counts(decisionevents.TopicTicketResolved); posted != 0 {

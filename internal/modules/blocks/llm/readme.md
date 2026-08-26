@@ -108,23 +108,29 @@ application、Web 与 orchestrator 不直接访问 ai-proxy。
     C3 通过同一个 derived evidence obligation 同时投影 immutable `terminalRequiredEvidenceKinds` 与本轮
     `currentRequiredEvidenceKinds`。`evidencePurpose=owner_fact_acquisition` 及其 `ownerFactAcquisition` 表示已经封存的当前
     前置 acquisition proof，不是尚待模型发现的 Definition 缺口：obligation 精确固定
-    owner/operation/variant/target policy/operation selector/constraints，但故意不携带 exact prospective target。对
-    `prospective_owner_target`，semantic-plan provider 必须在 Definition declaration selector/candidate refs 与
-    current operation selector/owner constraints 的交集内提出一个 nonempty exact target，非空 candidate refs 要求
-    exact member match；required owner 已发布 `ProspectiveTargetSatisfactionConstraint` 时，C3 还要投影其
-    surface/contract/input-schema/catalog-revision lineage 与完整 `allOf` predicate，并由同一 manifest 驱动的 JSON Schema
-    和本地 evaluator 在任何 File/Shell probe 前执行合取校验。projection 故意省略该 dependency surface 的
-    `ValidationRecipeID`，不得把它提升成 selectable validation recipe，也不得解释 owner reason 或引入 `any_of/one_of`。
-    proposal 只声明 `state_change` evidence。该值仍只是 proposal，File/Shell fact 只验证它，只有
-    SM-2 sealed binding 才形成 authority。后续 operations provider 只能选择 binding ref；target 不再是 provider
-    choice，由 candidate/dispatch 从 current binding 派生并校验。最终 validation surface/recipe 在
+    owner/operation/variant/target policy/operation selector/constraints，但故意不携带 exact prospective target set。对
+    `prospective_owner_target`，semantic-plan provider 必须在一份 proposal 的 `prospectiveTargetRefs` 中提交 1～8 个唯一
+    canonical exact target；集合中每项都必须位于 Definition declaration selector/candidate refs 与 current operation
+    selector/owner constraints 的交集，非空 candidate refs 要求逐项 exact member match。current schema 不接受 singular
+    `prospectiveTargetRef` 或兼容 alias。required owner 已发布 `ProspectiveTargetSatisfactionConstraint` 时，C3 还要投影其
+    surface/contract/input-schema/catalog-revision lineage 与完整 `allOf` mandatory clauses。同一 manifest 驱动的 JSON
+    Schema 和本地 evaluator 必须证明每个 clause 至少由一个 target 完整满足，且每个 target 对至少一个
+    clause 有贡献，再允许任何 File/Shell probe。projection 故意省略该 dependency surface 的 `ValidationRecipeID`，
+    不得把它提升成 selectable validation recipe，也不得解释 owner reason 或引入 `any_of/one_of`。
+    proposal 只声明 `state_change` evidence。该集合仍只是 proposal，File 只生成无副作用 hypothetical resulting
+    manifest，Shell 只基于该 resulting manifest 返回 satisfaction fact；只有 SM-2 sealed binding 才形成完整
+    target-set authority。后续 operations provider 只能选择 binding ref；manifest 为每个 target 投影一项带 exact
+    singleton `TargetRef` 的 `RequiredOperationSequence`，candidate 必须齐全并按 dependency order 提交，target 不再是
+    provider choice。完整 candidate 仍只是 dispatch proposal；LLM 不产生 owner receipt，不得把首项、partial sequence 或
+    自报 completion 解释为 collective credit/settled。该 proof 只可由 Orchestrator 基于同一 sealed dispatch 的全部 exact
+    accepted receipt/evidence members exactly-once 派生。最终 validation surface/recipe 在
     acquisition 与 owner re-observation 前暂不可选择是预期事实，不能单独据此输出 `undeclared_prerequisite`。acquisition
     receipt 只证明前置状态变化，不产生 terminal validation evidence/coverage credit；ticket、retry、Runtime state/action
     以及 re-observation 后的新 planning generation 仍完全由 Orchestrator owner 决定。
     prospective obligation只可回显pre-seal sealed `ProspectiveSatisfactionContractRef`及上述 owner-authored typed constraint
     作为 proposal 合同，不能回显 required-owner dependency catalog、recipe command 或让模型填写
     `would_satisfy|would_not_satisfy|stale`；这些 outcome 只来自 required owner typed result。
-    prospective target 不满足 sealed typed constraint 时，只形成普通完整 document/schema rejection；LLM attempt 1
+    prospective target set 不满足 sealed typed constraint 时，只形成普通完整 document/schema rejection；LLM attempt 1
     继续复用同一 transaction/manifest/C0～C3/stable prefix，并只在 C4 取得 manifest/CWI/field-path-bound typed
     violation，不复制第二份 constraint authority，也不取得 raw owner diagnostic/dependency catalog。通过 constraint 后的
     exact-current File+Shell full-composite `would_not_satisfy` 不再调用 LLM；它由 Orchestrator 直接归类为
@@ -181,7 +187,7 @@ application、Web 与 orchestrator 不直接访问 ai-proxy。
 - Runtime prerequisite/request：`/llm/runtime/acquire-provider-ceiling`、
   `/llm/runtime-prerequisite/acquire-capabilities`、`/llm/runtime-candidate/preflight`、
   `/llm/runtime-candidate/request`。
-- 审计通知：`/run/llm_usage/recorded`。这些 topic、Command、Result/Data 都由 LLM owner 的
+- 审计通知：`/llm/usage/recorded`。这些 topic、Command、Result/Data 都由 LLM owner 的
   `pkg/events` 定义；Orchestrator 只作为调用方消费 factual result。
 
 ## 交互合同完整性
@@ -226,8 +232,9 @@ application、Web 与 orchestrator 不直接访问 ai-proxy。
   未声明时省略 provider format，且任何 structured-output failure 都不触发第二次 provider call。
 - [x] C3 owner-fact acquisition 同时保留 terminal `validation` 与 current `state_change` obligation，投影 exact
   File/write selector，明确暂未 ready 的 validation surface 不构成 `undeclared_prerequisite`；该动态变化不改变 C0～C2 bytes/hash。
-- [x] prospective target 的 owner-authored `allOf` constraint 只进入 C3 volatile authority；provider schema 与本地 evaluator
-  在 owner probe 前执行同一合取合同，C4 只携带 typed violation 引用，且 dependency recipe identity/command 不进入 provider。
+- [x] prospective target 的 owner-authored `allOf` clause contract 只进入 C3 volatile authority；provider schema 与本地
+  evaluator 在 owner probe 前对 1～8 个 `prospectiveTargetRefs` 执行同一合取覆盖合同，拒绝 singular 字段、
+  partial/extra/duplicate target set；C4 只携带 typed violation 引用，且 dependency recipe identity/command 不进入 provider。
 - [x] candidate terminal framing 强制 `Stale | Feedback | DocumentOutcome` exactly-one；complete content 与 hash/bytes
   一致，所有非 complete outcome 拒绝 content-only/混合 envelope；显式 max-output stop 在零 final-document bytes、
   partial/prose 与 complete-looking payload 下均保持 incomplete fact，并只授权 whole-document recovery；streaming terminal

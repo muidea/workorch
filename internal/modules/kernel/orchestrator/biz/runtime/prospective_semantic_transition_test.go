@@ -73,7 +73,7 @@ func TestRuntimeProspectiveProposalPreProbeRejectsTargetOutsideSealedConstraint(
 	fixture := newProspectiveSemanticTransitionFixture(t)
 	ledger := fixture.aggregate.SemanticPlanning.Clone()
 	proposal := fixture.proposal.Clone()
-	proposal.Target.ProspectiveTargetRef = "Makefile"
+	proposal.Target.ProspectiveTargetRefs = []string{"Makefile"}
 	document, found := runtimeSemanticBatchDocument(ledger.BatchDocuments, ledger.ActiveBatchID)
 	if !found || len(document.Proposals) != 1 {
 		t.Fatalf("prospective pre-probe fixture has no active proposal: %+v", ledger)
@@ -82,7 +82,7 @@ func TestRuntimeProspectiveProposalPreProbeRejectsTargetOutsideSealedConstraint(
 	ledger.BatchDocuments[0] = document
 	acquisition := fixture.manifest.ProofObligations[0].OwnerFactAcquisition
 	if acquisition == nil || acquisition.ProspectiveTargetSatisfactionConstraint == nil ||
-		runtimecontract.RuntimeProspectiveTargetSatisfiesConstraint(proposal.Target.ProspectiveTargetRef, *acquisition.ProspectiveTargetSatisfactionConstraint) {
+		runtimecontract.RuntimeProspectiveTargetsSatisfyConstraint(proposal.Target.ProspectiveTargetRefs, *acquisition.ProspectiveTargetSatisfactionConstraint) {
 		t.Fatalf("fixture did not seal a rejecting all-of target constraint: %+v", acquisition)
 	}
 	if err := ValidateRuntimeSemanticProposalBeforeOwnerProbe(ledger, proposal); err == nil {
@@ -305,7 +305,9 @@ func newProspectiveSemanticTransitionFixture(t *testing.T) *prospectiveSemanticT
 			OwnerModuleID: runtimecontract.RuntimeModuleShell, ProspectiveSatisfactionContractRef: convergence.ProspectiveSatisfactionContractRef,
 			ValidationSurfaceID: recipe.ID, ValidationRecipeID: recipe.ID,
 			InputSchemaHash: "prospective-validation-schema-v1", CatalogObservedRevision: "shell-policy-v1",
-			AllOf: []runtimecontract.RuntimeProspectiveTargetPredicate{{Kind: runtimecontract.RuntimeProspectiveTargetPredicatePathSuffix, Value: ".txt"}},
+			AllOf: []runtimecontract.RuntimeProspectiveTargetClause{{
+				ID: "text-input", AllOf: []runtimecontract.RuntimeProspectiveTargetPredicate{{Kind: runtimecontract.RuntimeProspectiveTargetPredicatePathSuffix, Value: ".txt"}},
+			}},
 		},
 		CheckRefs: []string{"check/prospective-validation"}, ProofApplicability: runtimecontract.RuntimeValidationProofDirect,
 		EffectScope: runtimecontract.RuntimeEffectEphemeralSession, IdempotencyClass: runtimecontract.RuntimeOperationIdempotencyAtMostOnce,
@@ -360,7 +362,7 @@ func newProspectiveSemanticTransitionFixture(t *testing.T) *prospectiveSemanticT
 		Target: runtimecontract.RuntimeOperationTargetAuthorization{
 			Policy: acquisition.AcquisitionTargetPolicy, OwnerSelectorRefs: []string{acquisition.AcquisitionTargetSelectorRef},
 			ProspectiveConstraintRefs: append([]string(nil), acquisition.AcquisitionConstraintRefs...),
-			ProspectiveTargetRef:      prospectiveTarget,
+			ProspectiveTargetRefs:     []string{prospectiveTarget},
 		},
 		RequiredEvidenceKinds: []string{runtimecontract.EvidenceKindStateChange},
 		RequiredEffectScopes:  []runtimecontract.RuntimeEffectScope{runtimecontract.RuntimeEffectWorkspaceDurable},
@@ -448,7 +450,7 @@ func (f *prospectiveSemanticTransitionFixture) compositeObservationWithOutcome(t
 		FeasibilityBatchID: batchID, WorkspaceDeliverableDirectory: "/tmp/prospective-semantic-fixture",
 		Manifest: f.manifest, Proposal: f.proposal, OwnerCatalog: f.fileCatalog, CatalogObservation: &f.fileObservation,
 	}, runtimecontract.RuntimeSemanticFeasibilityFeasible, f.fileCatalog.ObservedRevision,
-		[]string{f.proposal.Target.ProspectiveTargetRef}, &f.delta, nil)
+		append([]string(nil), f.proposal.Target.ProspectiveTargetRefs...), &f.delta, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

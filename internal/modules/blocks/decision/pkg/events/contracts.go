@@ -21,7 +21,6 @@ func Contracts() []eventcontract.Contract {
 		TopicDecisionCommandEnsureResolved,
 		TopicDecisionCommandPurgeWorkspace,
 		TopicDecisionCommandSealWorkspaceDeletion,
-		TopicDecisionCommandRecordEvidence,
 		TopicOpenRuntimeGovernanceRequest,
 		TopicOpenWorkspaceDefinitionClarification,
 		TopicReconcileWorkspaceDefinitionClarificationCandidate,

@@ -10,6 +10,7 @@ import (
 	magicevent "github.com/muidea/magicCommon/event"
 	approvalevents "github.com/muidea/workorch/internal/modules/blocks/approval/pkg/events"
 	approvalmodel "github.com/muidea/workorch/internal/modules/blocks/approval/pkg/models"
+	eventstreamevents "github.com/muidea/workorch/internal/modules/blocks/eventstream/pkg/events"
 	orchestratorevents "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/repository/memory"
@@ -53,14 +54,14 @@ func approvalCommandError(hub magicevent.Hub, source, topic string, command any)
 
 func subscribeApprovalDeliveryResults(t *testing.T, hub magicevent.Hub, evidenceValid *atomic.Bool, resolutionValid *atomic.Bool) {
 	t.Helper()
-	observer := magicevent.NewSimpleObserver(approvalevents.EvidenceCommandDestination, hub)
-	observer.Subscribe(approvalevents.TopicApprovalCommandRecordEvidence, func(event magicevent.Event, result magicevent.Result) {
-		command, ok := event.Data().(approvalevents.RecordApprovalEvidenceCommand)
+	observer := magicevent.NewSimpleObserver(orchestratorevents.CommandDestination, hub)
+	observer.Subscribe(orchestratorevents.TopicOrchestratorCommandRecordApprovalEvidence, func(event magicevent.Event, result magicevent.Result) {
+		command, ok := event.Data().(orchestratorevents.RecordApprovalEvidenceCommand)
 		if !ok || !evidenceValid.Load() {
 			result.Set(struct{}{}, nil)
 			return
 		}
-		result.Set(approvalevents.RecordApprovalEvidenceResult{
+		result.Set(orchestratorevents.RecordApprovalEvidenceResult{
 			EvidenceRecordID: command.EvidenceRecordID,
 			WorkspaceID:      command.WorkspaceID,
 			RunID:            command.RunID,
@@ -69,21 +70,23 @@ func subscribeApprovalDeliveryResults(t *testing.T, hub magicevent.Hub, evidence
 			ApprovalState:    command.ApprovalState,
 		}, nil)
 	})
-	t.Cleanup(func() { observer.Unsubscribe(approvalevents.TopicApprovalCommandRecordEvidence) })
-	resolutionObserver := magicevent.NewSimpleObserver(approvalevents.ResolutionRecordCommandDestination, hub)
-	resolutionObserver.Subscribe(approvalevents.TopicApprovalCommandRecordResolution, func(event magicevent.Event, result magicevent.Result) {
-		command, ok := event.Data().(approvalevents.RecordApprovalResolutionCommand)
+	t.Cleanup(func() { observer.Unsubscribe(orchestratorevents.TopicOrchestratorCommandRecordApprovalEvidence) })
+	resolutionObserver := magicevent.NewSimpleObserver(eventstreamevents.CommandDestination, hub)
+	resolutionObserver.Subscribe(eventstreamevents.TopicEventStreamCommandRecordApprovalResolution, func(event magicevent.Event, result magicevent.Result) {
+		command, ok := event.Data().(eventstreamevents.RecordApprovalResolutionCommand)
 		if !ok || !resolutionValid.Load() {
 			result.Set(struct{}{}, nil)
 			return
 		}
 		data := command.Data
-		result.Set(approvalevents.RecordApprovalResolutionResult{
+		result.Set(eventstreamevents.RecordApprovalResolutionResult{
 			NotificationID: data.NotificationID, ResolutionID: data.ResolutionID, ApprovalID: data.ApprovalID,
 			WorkspaceID: data.WorkspaceID, RunID: data.RunID,
 		}, nil)
 	})
-	t.Cleanup(func() { resolutionObserver.Unsubscribe(approvalevents.TopicApprovalCommandRecordResolution) })
+	t.Cleanup(func() {
+		resolutionObserver.Unsubscribe(eventstreamevents.TopicEventStreamCommandRecordApprovalResolution)
+	})
 }
 
 func humanApprovalResolution(approvalID common.ApprovalID, workspaceID common.WorkspaceID, runID common.RunID) approvalevents.EnsureApprovedCommand {

@@ -3,6 +3,8 @@ package file
 import (
 	"context"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 
 	cd "github.com/muidea/magicCommon/def"
@@ -623,12 +625,10 @@ func (m *Biz) handleRuntimeSemanticProofFeasibility(event magicevent.Event, resu
 		}
 	}
 	if command.Proposal.Normalized().Target.Policy == runtimecontract.RuntimeOperationTargetPolicyProspectiveOwnerTarget {
-		selection, selectionErr := fileProspectiveSemanticTargetAdmission(command, manifestObservation)
-		if selectionErr != nil || selection.Disposition != runtimecontract.RuntimeTargetSelectionCreate || selection.ObservedRevision != manifest.Revision {
+		admissionErr := fileProspectiveSemanticTargetAdmission(command, manifestObservation)
+		if admissionErr != nil {
 			message := "runtime prospective File target is outside the owner create admission"
-			if selectionErr != nil {
-				message = selectionErr.Error()
-			}
+			message = admissionErr.Error()
 			m.setRuntimeSemanticProofFeasibility(result, command, runtimecontract.RuntimeSemanticFeasibilityInfeasible, manifest.Revision, targetRefs,
 				runtimecontract.RuntimeSemanticFeasibilityDiagnostic(ModuleID, "semantic_target_not_admissible", message, "", manifest.Revision, targetRefs))
 			return
@@ -649,29 +649,46 @@ func (m *Biz) handleRuntimeSemanticProofFeasibility(event magicevent.Event, resu
 
 // fileProspectiveSemanticTargetAdmission reuses the File owner's canonical
 // prospective selector against the exact manifest observation used by the
-// semantic probe. It is a pure SM-2 query: no directory/file is created and no
-// other capability owner is called.
-func fileProspectiveSemanticTargetAdmission(command fileevents.ProbeRuntimeSemanticProofFeasibilityCommand, observation workspaceManifestObservation) (runtimecontract.RuntimeTargetSelection, error) {
+// semantic probe. The whole bounded target set is checked against one base
+// observation and one aggregate capacity delta. It is a pure SM-2 query: no
+// directory/file is created and no other capability owner is called.
+func fileProspectiveSemanticTargetAdmission(command fileevents.ProbeRuntimeSemanticProofFeasibilityCommand, observation workspaceManifestObservation) error {
 	proposal := command.Proposal.Normalized()
 	if proposal.Target.Policy != runtimecontract.RuntimeOperationTargetPolicyProspectiveOwnerTarget ||
 		len(proposal.Target.OwnerSelectorRefs) != 1 ||
 		proposal.Target.OwnerSelectorRefs[0] != runtimeFileSelectorWorkspaceRelativeNewTarget {
-		return runtimecontract.RuntimeTargetSelection{}, common.ErrInvalidArgument
+		return common.ErrInvalidArgument
 	}
-	request, err := normalizeRuntimeTargetSelectionRequest(
-		command.WorkspaceDeliverableDirectory,
-		command.OwnerCatalog.PrerequisiteID,
-		proposal.DeclarationRef,
-		proposal.Target.OwnerSelectorRefs[0],
-		proposal.Target.ProspectiveTargetRef,
-		runtimecontract.RuntimeOwnerInventoryItemsMaxCount,
-		nil,
-	)
-	if err != nil {
-		return runtimecontract.RuntimeTargetSelection{}, err
+	targetRefs := runtimecontract.RuntimeSemanticProposalTargetRefs(proposal)
+	if len(targetRefs) == 0 || len(targetRefs) > runtimecontract.RuntimeProspectiveTargetRefsMaxCount {
+		return common.ErrInvalidArgument
 	}
-	request.manifestEntryCount = observation.entryCount
-	return acquireProspectiveRuntimeTargetSelection(request, observation.manifest)
+	for idx, targetRef := range targetRefs {
+		for _, otherTargetRef := range targetRefs[idx+1:] {
+			if strings.HasPrefix(otherTargetRef, targetRef+"/") || strings.HasPrefix(targetRef, otherTargetRef+"/") {
+				return common.ErrInvalidArgument
+			}
+		}
+	}
+	for _, targetRef := range targetRefs {
+		if containsString(observation.manifest.TargetRefs, targetRef) || strings.Contains(targetRef, "\\") || !runtimeFileDeliverableTargetEligible(targetRef) {
+			return common.ErrInvalidArgument
+		}
+		_, target, relative, err := guardedWorkspacePath(command.WorkspaceDeliverableDirectory, targetRef, false)
+		if err != nil || filepath.ToSlash(relative) != targetRef {
+			return common.ErrInvalidArgument
+		}
+		if _, statErr := os.Lstat(target); statErr == nil {
+			return common.ErrInvalidArgument
+		} else if !os.IsNotExist(statErr) {
+			return statErr
+		}
+	}
+	additional, err := runtimeFileProspectiveTargetRefsAdditionalEntries(command.WorkspaceDeliverableDirectory, targetRefs)
+	if err != nil || additional < len(targetRefs) || observation.entryCount+additional > defaultMaxEntries {
+		return common.ErrInvalidArgument
+	}
+	return nil
 }
 
 func (m *Biz) setRuntimeSemanticProofFeasibility(result magicevent.Result, command fileevents.ProbeRuntimeSemanticProofFeasibilityCommand, status runtimecontract.RuntimeSemanticFeasibilityStatus, revision string, targetRefs []string, diagnostic *runtimecontract.RuntimeOriginalDiagnostic) {

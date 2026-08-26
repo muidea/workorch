@@ -231,6 +231,13 @@ func runtimeTargetGroundingRequirements(facts runtimecontract.RuntimeFacts) []ru
 	// File owner may only make the neutral cardinality observation below; it
 	// must not infer an implementation role from paths, suffixes, or content.
 	if len(groundedTargets) == 0 {
+		// A semantic prospective target set has already passed the File owner's
+		// bounded feasibility probe and is fenced by the exact catalog snapshot
+		// in its SM-2 binding. Do not fan it back out into the older single-target
+		// selection prerequisite.
+		if len(focus.ProspectiveTargetRefs) != 0 && hasSemanticOwnerGroundedTargetScope(facts) {
+			goto selectionRequirementDone
+		}
 		selection := currentFocusTargetSelection(facts)
 		if selection == nil {
 			// A File-owned prospective selector is itself a sealed target
@@ -241,12 +248,12 @@ func runtimeTargetGroundingRequirements(facts runtimecontract.RuntimeFacts) []ru
 			// sole owner of existence/path-boundary facts; this branch only
 			// schedules its typed prerequisite.
 			if focus.TargetSelectorOwnerRef == runtimecontract.RuntimeModuleFile &&
-				focus.TargetSelectorRef != "" && focus.ProspectiveTargetRef != "" {
+				focus.TargetSelectorRef != "" && len(focus.ProspectiveTargetRefs) == 1 {
 				requirements = append(requirements, focusScopedRuntimeRequirement(facts, runtimecontract.RuntimeRequirement{
 					Kind: runtimecontract.PrerequisiteKindTargetSelection, OwnerModuleID: runtimecontract.RuntimeModuleFile,
 					SubjectRef: focus.TargetRole, TargetSelectorRef: focus.TargetSelectorRef,
 					TargetSelectorOwnerRef: focus.TargetSelectorOwnerRef, TargetSelectorSubjectRef: focus.TargetSelectorSubjectRef,
-					TargetSelectorCandidateRefs: focus.TargetSelectorCandidateRefs, ProspectiveTargetRef: focus.ProspectiveTargetRef,
+					TargetSelectorCandidateRefs: focus.TargetSelectorCandidateRefs, ProspectiveTargetRef: focus.ProspectiveTargetRefs[0],
 					Reason: "prospective File target requires owner target selection",
 				}))
 				goto selectionRequirementDone
@@ -256,7 +263,7 @@ func runtimeTargetGroundingRequirements(facts runtimecontract.RuntimeFacts) []ru
 				case runtimecontract.RuntimeValidationDiscoverySourceWorkspaceManifest, runtimecontract.RuntimeValidationDiscoverySourceProjectFiles:
 					requirements = append(requirements, focusScopedRuntimeRequirement(facts, runtimecontract.RuntimeRequirement{
 						Kind: runtimecontract.PrerequisiteKindTargetSelection, OwnerModuleID: runtimecontract.RuntimeModuleFile,
-						SubjectRef: focus.TargetRole, TargetSelectorRef: focus.TargetSelectorRef, TargetSelectorOwnerRef: focus.TargetSelectorOwnerRef, TargetSelectorSubjectRef: focus.TargetSelectorSubjectRef, TargetSelectorCandidateRefs: focus.TargetSelectorCandidateRefs, ProspectiveTargetRef: focus.ProspectiveTargetRef, Reason: "focus target grounding requires owner target selection",
+						SubjectRef: focus.TargetRole, TargetSelectorRef: focus.TargetSelectorRef, TargetSelectorOwnerRef: focus.TargetSelectorOwnerRef, TargetSelectorSubjectRef: focus.TargetSelectorSubjectRef, TargetSelectorCandidateRefs: focus.TargetSelectorCandidateRefs, Reason: "focus target grounding requires owner target selection",
 					}))
 					// One File-owner observation covers both file-backed source IDs.
 					goto selectionRequirementDone

@@ -135,7 +135,7 @@ func TestRunSnapshotProjectionUsesCompactEventTimeline(t *testing.T) {
 	}
 	var sawMetadata, sawUsage bool
 	for _, query := range events.queries {
-		if query.Topic == "/run/llm_usage/recorded" {
+		if query.Topic == "/llm/usage/recorded" {
 			sawUsage = true
 			if !query.IncludePayload {
 				t.Fatalf("usage query = %+v, want IncludePayload", query)

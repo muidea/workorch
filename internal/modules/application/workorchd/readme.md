@@ -14,6 +14,12 @@ Last Verified: 2026-08-26
 
 - framework 注入的 magicCommon `event.Hub` 只进入 `biz/` 子树：`biz.Biz` 内嵌 Base 并拥有顶层订阅生命周期，`workspaceCommandGateway`、CLI dispatcher、runtime event collector 和 focused Biz port 可以按职责保存 Hub/Base；module root 与生产 HTTP/SSE transport 不保存 Hub 或 runtime session。Biz 通过七组 concrete named `ApplicationPorts` 向 server 注入应用操作，禁止 callback type alias、通用 dispatcher 或 owner service/repository。包内测试基础设施可以构造 owner runtime，但不得扩展生产 `Service` API 或提供 exported Session-backed server constructor；生产默认构造器 fail-closed。
 - 对 Workspace、Orchestrator、Result、Decision、Approval、Memory、MCP Registry、Skill、Soul、Governance 和 Eventstream 的读写，以及对 Run 的读取，必须发送对应 owner `pkg/events` 定义的具体 command，并校验具体 result。execution mutation 只提交 Workspace owner；HTTP `RunPorts` 全部为只读端口。
+- content/read-model 路径同样不能直接打开 owner 的 file-backend 私有目录。Artifact 正文只通过 Result owner
+  `/artifact/command/read-content` 取得 1 MiB 内的 detached bytes/hash；Step input/output 通过 Run owner typed read，
+  ToolCall arguments/output 通过 Orchestrator owner typed list，RuntimeCheckpoint 通过 Run owner typed read，Result 摘要通过
+  Result owner typed read。`llm-calls` raw-file branch 因没有 LLM owner content-read 合同而不对外支持；Application 不得用
+  `dataRoot/backend` 路径推断、`os.ReadFile` 或兼容 fallback 绕过 owner。所有返回值都要校验 Workspace/Run/item scope
+  并在跨层前 deep clone；该读链不产生 Runtime 或资源状态迁移。
 - Workspace DELETE 是例外清晰的单 owner ingress，而不是 Application saga：HTTP body 只接收
   `requestId/purge/expectedRevision`，缺失 `requestId` 时按不可复用的 WorkspaceID 生成跨进程、与 mode 无关的 stable identity；
   mode 变化因此命中同一 request 并由 Workspace owner 判为 payload conflict。Application 只发送一个 concrete
@@ -65,7 +71,7 @@ Last Verified: 2026-08-26
   Workspace-owned immutable `DefinitionAdmissionCandidate`。Workspace owner 的 pure compiler 不调用 LLM/capability，只接受完整 `all_of`；
   Workorchd 在提交 candidate 前分别无损编译并递归校验 Template 与 Workspace 的 `EvidencePolicies`：每个 owner slice
   拒绝空/非字符串 ID、重复 ID、invalid typed policy、normalize cardinality drift 及退役 `prospectiveTargetRef`；双方每项 canonical policy ref/revision/hash 都编译为
-  `AdmissionPolicyBindings` 交给 Workspace owner 封存并纳入 `CandidateHash`，但不产生 exact prospective target 或默认值；
+  `AdmissionPolicyBindings` 交给 Workspace owner 封存并纳入 `CandidateHash`，但不产生 exact prospective target set 或默认值；
   final bootstrap gate 将 activation typed policies 与 admitted Workspace raw snapshot 的 typed projection exact 比较；
   candidate 同步封存完整 normalized typed Profile contract snapshot/hash、required owner-fact binding 及唯一 one-shot
   acquisition/reobserve closure；Application 使用 Workspace owner 的 pure manifest helper 组装输入，但 Workspace compiler 会从
@@ -82,9 +88,11 @@ Last Verified: 2026-08-26
   attempt）使用 reconcile-candidate；新 admitted revision严格执行 Workspace owner-selected pending promotion → Decision
   resolution → Workspace owner-selected eligible，之后仍需用户显式 Restart。
 - activation 可以把 profile 显式声明的 `targetSelectorOwnerRef`、`targetSelectorSubjectRef` 与
-  `targetSelectorCandidateRefs` 封存为 File declaration scope，但不封存 exact `ProspectiveTargetRef`。空 candidate
-  refs 只表示 profile 授权 SM-3 semantic proposal 在 current File operation selector/constraints 内提出一个具体
-  workspace-relative 创建目标；非空 refs 要求 exact member match。Workorchd 不从 Goal/DoD 或目录名猜路径，
+  `targetSelectorCandidateRefs` 封存为 File declaration scope，但不封存 exact prospective target set。空 candidate
+  refs 只表示 profile 授权一份 SM-3 semantic proposal 在 current File operation selector/constraints 内提出 1～8 个
+  workspace-relative canonical 创建目标；非空 refs 要求集合中每项 exact member match。proposal 仍必须满足 required-owner
+  mandatory `all_of` clauses 的完整覆盖且每个 target 有贡献，不接受 `one_of`/`any_of`、singular 字段或兼容 alias。
+  Workorchd 不从 Goal/DoD 或目录名猜路径，
   不把 proposal/owner fact 回写 bootstrap，也不绕过 File owner feasibility 或 SM-2 binding seal。
 - activation 将每个 DoD item 标记为需要 typed assessment，并按 profile contract 的 required acceptance dimension/deliverable expectation 追加稳定 focus；primary state-change 优先于 supplemental evidence，同一 `scope + id` 只生成一个 baseline item。
 - 每个 Profile-required acceptance/deliverable focus 在 pre-seal admission 时必须已有 exact `scope + id` proof declaration、非空
@@ -137,7 +145,7 @@ Last Verified: 2026-08-26
 | `kernel/orchestrator` | Application → Orchestrator | Runtime read/drive observation与受限 management query | 完整；不持有 drive/reducer/deletion phase |
 | `blocks/llm` | Application → LLM | active config、catalog、refresh、selection validation、通用 completion/embedding | 完整；不直连 ai-proxy |
 | Decision / Approval / Governance | 双向应用用例 | owner query/resolve 与 governance trace 展示 | 完整；resolve 不触发 Application Resume |
-| Result / Memory / MCP Registry / Soul | Application → owner | 各 owner 的具体 CRUD/query；MCP paged read 与一致 selection snapshot；activation 只封存 detached snapshot | 完整 |
+| Result / Memory / MCP Registry / Soul | Application → owner | 各 owner 的具体 CRUD/query；Result 拥有 bounded Artifact content read；MCP paged read 与一致 selection snapshot；activation 只封存 detached snapshot | 完整；Application 不直读任何 owner 私有存储 |
 | Skill Registry / SkillHub Catalog | Application → owner/catalog | Registry concrete create/get/bounded-list；SkillHub external catalog read；typed provenance + sealed activation budget | 完整；SkillHub 不是 Skill Block 正式状态 |
 | Eventstream / projection | 双向只读链路 | event list/high-watermark、appended/drive/execution observation | 完整；projection 不修复 owner，Application 不编排 purge |
 | File / Git / Shell / SSH / Web / MCP execution | 无直接执行 I/O | capability operation 只由 Orchestrator sealed dispatch 调用 | 完整 |
@@ -148,6 +156,8 @@ Last Verified: 2026-08-26
 - Workspace delete port 禁止重新引入跨 owner purge command、owner 列表、目录路径清理或 application-local deletion
   phase/retry journal；相同 HTTP URL 的响应丢失重试必须复用 normalized stable RequestID。
 - HTTP、CLI、TUI、execution-admission adapter 和 projection 不得直接访问 owner repository 或 service。
+- HTTP Artifact/runtime-raw content 只是 owner typed query 的 bounded 展示适配；不得恢复 owner-private path helper、
+  backend-specific file reader、raw LLM request/response 读取或从返回 JSON 反向重建 authority。
 - projection 只能读取和投影事件，不得修复 owner 状态或重建业务状态机。
 - 跨组件 command/data/result 必须使用具体类型，不得引入 Envelope、通用 map payload、JSON 类型桥、reflect 或双 Hub 兼容层。
 - repository builder、owner module fixture 和 repository 直写只能存在于 `biz/testkit` 或测试文件。
@@ -190,6 +200,9 @@ Last Verified: 2026-08-26
   same-request payload conflict关闭；静态扫描拒绝 Application 重新导入 owner purge orchestration。
 - [x] owner-lane 测试确认 HTTP/CLI/TUI execution ingress 的 owner admission 与 projection commit 共享 workspace-scoped Workorchd lane，并确认 execution gateway 投递 Workspace owner；聚合边界校验确认唯一 HTTP execution write route 为 workspace-scoped `execution-activations`，Run HTTP route 保持只读。
 - [x] 生产 transport AST 扫描确认 `service/server` 不导入或保存 EventHub、runtime Session、root appservice 兼容状态；聚合边界校验禁止 workorchd 生产代码直接导入 repository。
+- [x] content/read-model 通过 Result/Run/Orchestrator owner concrete read 合同返回 Artifact、Step、ToolCall、
+  RuntimeCheckpoint 与 Result 展示内容；覆盖 scope/hash/copy/nil-wrong-result 门禁，静态边界禁止直读 owner
+  私有 file-backend 目录，且退休不属于任何 owner 合同的 `llm-calls` raw 分支。
 - [x] activation Memory selection 执行 candidate/final item、type quota、byte/token hard limit；完整 selection evidence 深拷贝后进入 sealed Runtime activation，并与最终 Memory identity 精确匹配。
 - [x] Skill Registry 使用 concrete create/get/bounded-list result 并由 owner 签发 canonical provenance；SkillHub Catalog 保持独立来源，activation 在 LLM C3 前执行 Skill 数量、instruction/metadata byte budget 与 UTF-8 裁剪。
 - [x] Runtime execution-budget的source-ledger聚合、active wait/terminal projection分离与只读clone路径。

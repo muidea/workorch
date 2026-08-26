@@ -4,7 +4,7 @@ Status: normative
 
 Type: domain-model
 
-Last Verified: 2026-08-24
+Last Verified: 2026-08-26
 
 ## Ownership
 
@@ -45,7 +45,9 @@ Workspace 是长期业务容器。当前 owner model 包含：
 正常 TUI/Web 创建流程不要求用户手写 `ContextHints` 或 `EvidencePolicies`；它们通常来自模板或管理接口。
 Definition admission 会分别规范化 Template 与 Workspace 的 `EvidencePolicies` snapshots，并把双方 exact
 ref/revision/hash 封存到 candidate 的 `AdmissionPolicyBindings`。任一侧出现退役 `prospectiveTargetRef` 都在 promotion
-前拒绝；policy binding 不携带或预选 Runtime exact target。
+前拒绝；policy binding 不携带或预选 Runtime exact target set。运行期只有一份 bounded SM-3 semantic proposal 可以提交
+1～8 个唯一 canonical `ProspectiveTargetRefs`；File/Shell 只提供 whole-set hypothetical/resulting-manifest fact，只有
+Orchestrator SM-2 private event 可以封存 target-set authority。
 terminal release只接受`ActiveRunID == outcome.RunID`；空slot不能补写首次acknowledgement fence，只有已持久化同identity
 delivery的duplicate才能幂等返回。
 

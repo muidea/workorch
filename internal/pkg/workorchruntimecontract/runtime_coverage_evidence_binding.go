@@ -181,13 +181,13 @@ type CoverageEvidenceBinding struct {
 	// It is sealed with the binding so reconciliation can ask the owner to
 	// verify the same target surface after a process restart.
 	TargetSelectorCandidateRefs []string
-	// ProspectiveTargetRef is the concrete semantic-proposal target accepted by
-	// owner facts and sealed by SM-2. It is generation authority and is never a
+	// ProspectiveTargetRefs is the complete bounded target set accepted by owner
+	// facts and sealed by SM-2. It is generation authority and is never a
 	// pre-seal Definition/Profile declaration.
-	ProspectiveTargetRef string
-	DeclarationRef       string
-	PrerequisiteRefs     []string
-	Hash                 string
+	ProspectiveTargetRefs []string
+	DeclarationRef        string
+	PrerequisiteRefs      []string
+	Hash                  string
 }
 
 func (b CoverageEvidenceBinding) Normalized() CoverageEvidenceBinding {
@@ -201,7 +201,7 @@ func (b CoverageEvidenceBinding) Normalized() CoverageEvidenceBinding {
 	b.TargetSelectorOwnerRef = strings.TrimSpace(b.TargetSelectorOwnerRef)
 	b.TargetSelectorSubjectRef = strings.TrimSpace(b.TargetSelectorSubjectRef)
 	b.TargetSelectorCandidateRefs = normalizeStrings(b.TargetSelectorCandidateRefs)
-	b.ProspectiveTargetRef = strings.TrimSpace(b.ProspectiveTargetRef)
+	b.ProspectiveTargetRefs = normalizeStrings(b.ProspectiveTargetRefs)
 	b.DeclarationRef = strings.TrimSpace(b.DeclarationRef)
 	b.PrerequisiteRefs = normalizeStrings(b.PrerequisiteRefs)
 	b.Hash = strings.TrimSpace(b.Hash)
@@ -216,6 +216,7 @@ func (b CoverageEvidenceBinding) Clone() CoverageEvidenceBinding {
 	}
 	b.TargetRefs = append([]string(nil), b.TargetRefs...)
 	b.TargetSelectorCandidateRefs = append([]string(nil), b.TargetSelectorCandidateRefs...)
+	b.ProspectiveTargetRefs = append([]string(nil), b.ProspectiveTargetRefs...)
 	b.PrerequisiteRefs = append([]string(nil), b.PrerequisiteRefs...)
 	return b
 }
@@ -233,7 +234,7 @@ func (b CoverageEvidenceBinding) Validate() error {
 			return fmt.Errorf("coverage evidence binding %q: %w", b.ID, err)
 		}
 	}
-	if len(b.TargetRefs) == 0 && b.TargetSelectorRef == "" && b.ProspectiveTargetRef == "" {
+	if len(b.TargetRefs) == 0 && b.TargetSelectorRef == "" && len(b.ProspectiveTargetRefs) == 0 {
 		return fmt.Errorf("coverage evidence binding %q requires an exact target, selector or prospective target", b.ID)
 	}
 	if b.TargetSelectorRef != "" && (b.TargetSelectorOwnerRef == "" || b.TargetSelectorSubjectRef == "") {
@@ -242,12 +243,17 @@ func (b CoverageEvidenceBinding) Validate() error {
 	if len(b.TargetSelectorCandidateRefs) != 0 && b.TargetSelectorRef == "" {
 		return fmt.Errorf("coverage evidence binding %q selector candidates require a selector", b.ID)
 	}
-	if b.ProspectiveTargetRef != "" {
+	if len(b.ProspectiveTargetRefs) != 0 {
 		if len(b.TargetRefs) != 0 || b.TargetSelectorRef == "" || b.TargetSelectorOwnerRef == "" || b.TargetSelectorSubjectRef == "" {
-			return fmt.Errorf("coverage evidence binding %q prospective target requires only a complete selector target surface", b.ID)
+			return fmt.Errorf("coverage evidence binding %q prospective targets require only a complete selector target surface", b.ID)
 		}
-		if len(b.TargetSelectorCandidateRefs) != 0 && !containsString(b.TargetSelectorCandidateRefs, b.ProspectiveTargetRef) {
-			return fmt.Errorf("coverage evidence binding %q prospective target is outside selector candidates", b.ID)
+		if len(b.ProspectiveTargetRefs) > RuntimeProspectiveTargetRefsMaxCount {
+			return fmt.Errorf("coverage evidence binding %q prospective target set exceeds %d", b.ID, RuntimeProspectiveTargetRefsMaxCount)
+		}
+		for _, targetRef := range b.ProspectiveTargetRefs {
+			if len(b.TargetSelectorCandidateRefs) != 0 && !containsString(b.TargetSelectorCandidateRefs, targetRef) {
+				return fmt.Errorf("coverage evidence binding %q prospective target %q is outside selector candidates", b.ID, targetRef)
+			}
 		}
 	}
 	if b.Hash != "" && b.Hash != StableCoverageEvidenceBindingHash(b) {
@@ -284,7 +290,7 @@ func StableCoverageEvidenceBindingHash(binding CoverageEvidenceBinding) string {
 	writeHashString(h, binding.TargetSelectorOwnerRef)
 	writeHashString(h, binding.TargetSelectorSubjectRef)
 	writeHashStrings(h, binding.TargetSelectorCandidateRefs)
-	writeHashString(h, binding.ProspectiveTargetRef)
+	writeHashStrings(h, binding.ProspectiveTargetRefs)
 	writeHashString(h, binding.DeclarationRef)
 	writeHashStrings(h, binding.PrerequisiteRefs)
 	return hex.EncodeToString(h.Sum(nil))
@@ -350,7 +356,7 @@ func ValidateCoverageEvidenceBindingsForFocus(focus CoverageFocus, definitionRev
 			binding.TargetSelectorOwnerRef != focus.TargetSelectorOwnerRef ||
 			binding.TargetSelectorSubjectRef != focus.TargetSelectorSubjectRef ||
 			!sameStrings(binding.TargetSelectorCandidateRefs, focus.TargetSelectorCandidateRefs) ||
-			binding.ProspectiveTargetRef != focus.ProspectiveTargetRef {
+			!sameStrings(binding.ProspectiveTargetRefs, focus.ProspectiveTargetRefs) {
 			return fmt.Errorf("coverage binding %q target surface does not match focus authority", binding.ID)
 		}
 		if _, ok := expected[binding.CoverageWorkItemID]; !ok {
@@ -538,11 +544,11 @@ func MatchCoverageEvidenceBindingReceipt(binding CoverageEvidenceBinding, eviden
 	if len(binding.TargetRefs) != 0 && !sameStrings(binding.TargetRefs, receipt.TargetRefs) {
 		return fmt.Errorf("binding %q receipt targets do not match exact binding target", binding.ID)
 	}
-	if len(binding.TargetRefs) == 0 && binding.TargetSelectorRef == "" && binding.ProspectiveTargetRef == "" {
+	if len(binding.TargetRefs) == 0 && binding.TargetSelectorRef == "" && len(binding.ProspectiveTargetRefs) == 0 {
 		return fmt.Errorf("binding %q has no target authority", binding.ID)
 	}
-	if binding.ProspectiveTargetRef != "" && !sameStrings([]string{binding.ProspectiveTargetRef}, receipt.TargetRefs) {
-		return fmt.Errorf("binding %q receipt targets do not match prospective target", binding.ID)
+	if len(binding.ProspectiveTargetRefs) != 0 && (len(receipt.TargetRefs) != 1 || !containsString(binding.ProspectiveTargetRefs, receipt.TargetRefs[0])) {
+		return fmt.Errorf("binding %q receipt target is outside the prospective target set", binding.ID)
 	}
 	if evidenceKind == EvidenceKindValidation {
 		if receipt.Evidence.Validation == nil {

@@ -10,7 +10,7 @@ import (
 )
 
 const (
-	RuntimeProspectiveWorkspaceManifestDeltaSchemaCurrent        = "workorch.runtime.prospective-workspace-manifest-delta.v1"
+	RuntimeProspectiveWorkspaceManifestDeltaSchemaCurrent        = "workorch.runtime.prospective-workspace-manifest-delta.v2"
 	RuntimeOwnerFactProspectiveSatisfactionSchemaCurrent         = "workorch.runtime.owner-fact-prospective-satisfaction.v1"
 	RuntimeOwnerFactProspectiveSatisfactionRequestHashPrefix     = "runtime-owner-fact-prospective-satisfaction-request-"
 	RuntimeOwnerFactProspectiveSatisfactionObservationHashPrefix = "runtime-owner-fact-prospective-satisfaction-observation-"
@@ -20,7 +20,7 @@ const (
 
 // RuntimeProspectiveWorkspaceManifestDelta is the File owner's immutable,
 // side-effect-free statement of the exact bounded manifest that would result
-// from one prospective creation proposal. It is not a workspace mutation or
+// from one bounded prospective creation proposal. It is not a workspace mutation or
 // authority for another owner to execute the proposal.
 type RuntimeProspectiveWorkspaceManifestDelta struct {
 	SchemaVersion                      string
@@ -34,7 +34,7 @@ type RuntimeProspectiveWorkspaceManifestDelta struct {
 	CatalogSnapshotID                  string
 	ProspectiveSatisfactionContractRef string
 	BaseWorkspaceManifestRevision      string
-	ProspectiveTargetRef               string
+	ProspectiveTargetRefs              []string
 	ResultingTargetRefs                []string
 }
 
@@ -50,27 +50,30 @@ func (d RuntimeProspectiveWorkspaceManifestDelta) Normalized() RuntimeProspectiv
 	d.CatalogSnapshotID = strings.TrimSpace(d.CatalogSnapshotID)
 	d.ProspectiveSatisfactionContractRef = strings.TrimSpace(d.ProspectiveSatisfactionContractRef)
 	d.BaseWorkspaceManifestRevision = strings.TrimSpace(d.BaseWorkspaceManifestRevision)
-	d.ProspectiveTargetRef = strings.TrimSpace(d.ProspectiveTargetRef)
+	d.ProspectiveTargetRefs = normalizeStrings(d.ProspectiveTargetRefs)
 	d.ResultingTargetRefs = normalizeStrings(d.ResultingTargetRefs)
 	return d
 }
 
 func (d RuntimeProspectiveWorkspaceManifestDelta) Clone() RuntimeProspectiveWorkspaceManifestDelta {
 	d = d.Normalized()
+	d.ProspectiveTargetRefs = append([]string(nil), d.ProspectiveTargetRefs...)
 	d.ResultingTargetRefs = append([]string(nil), d.ResultingTargetRefs...)
 	return d
 }
 
 func (d RuntimeProspectiveWorkspaceManifestDelta) Validate() error {
+	rawProspectiveTargetRefs := append([]string(nil), d.ProspectiveTargetRefs...)
 	d = d.Normalized()
 	if d.SchemaVersion != RuntimeProspectiveWorkspaceManifestDeltaSchemaCurrent || d.WorkspaceID == "" || d.RunID == "" ||
 		d.ManifestHash == "" || d.DefinitionSeedHash == "" || d.CoverageWorkItemID == "" || d.ProposalHash == "" ||
 		d.OwnerModuleID != RuntimeModuleFile || d.CatalogSnapshotID == "" || d.ProspectiveSatisfactionContractRef == "" ||
-		d.BaseWorkspaceManifestRevision == "" || d.ProspectiveTargetRef == "" || len(d.ResultingTargetRefs) == 0 {
+		d.BaseWorkspaceManifestRevision == "" || len(rawProspectiveTargetRefs) != len(d.ProspectiveTargetRefs) || len(d.ProspectiveTargetRefs) == 0 ||
+		len(d.ProspectiveTargetRefs) > RuntimeProspectiveTargetRefsMaxCount || len(d.ResultingTargetRefs) == 0 {
 		return fmt.Errorf("runtime prospective workspace manifest delta requires File-owned scope, proposal, contract, catalog, revision and targets")
 	}
-	if !containsString(d.ResultingTargetRefs, d.ProspectiveTargetRef) {
-		return fmt.Errorf("runtime prospective workspace manifest delta does not contain its prospective target")
+	if !allStringsContained(d.ProspectiveTargetRefs, d.ResultingTargetRefs) {
+		return fmt.Errorf("runtime prospective workspace manifest delta does not contain every prospective target")
 	}
 	return nil
 }
@@ -106,9 +109,17 @@ func NewRuntimeProspectiveWorkspaceManifestDelta(manifest RuntimeSemanticPlanMan
 	if proposal.OwnerModuleID != RuntimeModuleFile || ownerCatalog.OwnerModuleID != RuntimeModuleFile ||
 		proposal.Target.Policy != RuntimeOperationTargetPolicyProspectiveOwnerTarget ||
 		ownerCatalog.SnapshotID == "" || ownerCatalog.ObservedRevision != current.Revision ||
-		proposal.Target.ProspectiveTargetRef == "" || containsString(current.TargetRefs, proposal.Target.ProspectiveTargetRef) ||
 		contractRef == "" || contractRef != acquisition.ProspectiveSatisfactionContractRef {
 		return RuntimeProspectiveWorkspaceManifestDelta{}, fmt.Errorf("runtime prospective workspace manifest delta input does not match a fresh File prospective proposal")
+	}
+	prospectiveTargetRefs := RuntimeSemanticProposalTargetRefs(proposal)
+	if len(prospectiveTargetRefs) == 0 || len(prospectiveTargetRefs) > RuntimeProspectiveTargetRefsMaxCount {
+		return RuntimeProspectiveWorkspaceManifestDelta{}, fmt.Errorf("runtime prospective workspace manifest delta input does not contain a bounded File prospective target set")
+	}
+	for _, targetRef := range prospectiveTargetRefs {
+		if containsString(current.TargetRefs, targetRef) {
+			return RuntimeProspectiveWorkspaceManifestDelta{}, fmt.Errorf("runtime prospective workspace manifest delta target %q already exists", targetRef)
+		}
 	}
 	value := RuntimeProspectiveWorkspaceManifestDelta{
 		SchemaVersion: RuntimeProspectiveWorkspaceManifestDeltaSchemaCurrent,
@@ -116,8 +127,8 @@ func NewRuntimeProspectiveWorkspaceManifestDelta(manifest RuntimeSemanticPlanMan
 		DefinitionSeedHash: manifest.DefinitionSeedHash, CoverageWorkItemID: proposal.CoverageWorkItemID,
 		ProposalHash: StableRuntimeSemanticProofProposalHash(proposal), OwnerModuleID: RuntimeModuleFile,
 		CatalogSnapshotID: ownerCatalog.SnapshotID, ProspectiveSatisfactionContractRef: contractRef,
-		BaseWorkspaceManifestRevision: current.Revision, ProspectiveTargetRef: proposal.Target.ProspectiveTargetRef,
-		ResultingTargetRefs: append(append([]string(nil), current.TargetRefs...), proposal.Target.ProspectiveTargetRef),
+		BaseWorkspaceManifestRevision: current.Revision, ProspectiveTargetRefs: prospectiveTargetRefs,
+		ResultingTargetRefs: append(append([]string(nil), current.TargetRefs...), prospectiveTargetRefs...),
 	}.Normalized()
 	return value, value.Validate()
 }
@@ -136,7 +147,7 @@ func StableRuntimeProspectiveWorkspaceManifestDeltaHash(value RuntimeProspective
 	writeHashString(h, value.CatalogSnapshotID)
 	writeHashString(h, value.ProspectiveSatisfactionContractRef)
 	writeHashString(h, value.BaseWorkspaceManifestRevision)
-	writeHashString(h, value.ProspectiveTargetRef)
+	writeHashStrings(h, value.ProspectiveTargetRefs)
 	writeHashStrings(h, value.ResultingTargetRefs)
 	return RuntimeProspectiveWorkspaceManifestDeltaHashPrefix + hex.EncodeToString(h.Sum(nil))[:20]
 }
@@ -300,10 +311,11 @@ func (r RuntimeOwnerFactProspectiveSatisfactionRequest) Clone() RuntimeOwnerFact
 
 func (r RuntimeOwnerFactProspectiveSatisfactionRequest) Validate() error {
 	rawRecipes := append([]RuntimeValidationRecipe(nil), r.ValidationRecipes...)
+	rawProspectiveTargetRefs := append([]string(nil), r.Proposal.Target.ProspectiveTargetRefs...)
 	r = r.Normalized()
 	if r.WorkspaceID == "" || r.RunID == "" || r.FeasibilityBatchID == "" ||
 		r.ProspectiveSatisfactionContractRef == "" || r.CatalogObservation == nil || len(r.ValidationRecipes) == 0 ||
-		len(rawRecipes) != len(r.ValidationRecipes) {
+		len(rawRecipes) != len(r.ValidationRecipes) || len(rawProspectiveTargetRefs) != len(r.Proposal.Target.ProspectiveTargetRefs) {
 		return fmt.Errorf("runtime owner-fact prospective satisfaction request requires scope, contract, catalog observation and validation recipes")
 	}
 	if err := r.Manifest.Validate(); err != nil {
@@ -628,7 +640,7 @@ func validateRuntimeProspectiveWorkspaceManifestDeltaForProposal(delta RuntimePr
 		delta.CatalogSnapshotID != acquisition.OwnerCatalogSnapshotID ||
 		delta.ProspectiveSatisfactionContractRef != acquisition.ProspectiveSatisfactionContractRef ||
 		delta.BaseWorkspaceManifestRevision != acquisition.OwnerCatalogObservedRevision ||
-		delta.ProspectiveTargetRef != proposal.Target.ProspectiveTargetRef {
+		!sameStrings(delta.ProspectiveTargetRefs, RuntimeSemanticProposalTargetRefs(proposal)) {
 		return fmt.Errorf("runtime prospective workspace manifest delta does not match sealed prospective proposal")
 	}
 	return nil

@@ -110,6 +110,7 @@ var exactToStateFields = map[string]bool{
 // evidence and must not become an escape hatch for nested transition intent.
 var observedStateCarrierTypes = map[string]bool{
 	"internal/modules/blocks/approval/pkg/events:ApprovalChangedData":       true,
+	"internal/modules/blocks/eventstream/pkg/events:ApprovalResolutionFact": true,
 	"internal/pkg/workorchdeletioncontract:WorkspaceRuntimeQuiescenceToken": true,
 	"internal/pkg/workorchruntimecontract:AuthorityTransaction":             true,
 	"internal/pkg/workorchruntimecontract:RuntimeCandidateContractManifest": true,
@@ -121,7 +122,7 @@ var observedStateCarrierEdges = map[string]bool{
 }
 
 var observedCommandStateFields = map[string]bool{
-	"internal/modules/blocks/approval/pkg/events:RecordApprovalEvidenceCommand|ApprovalState":                  true,
+	"internal/modules/kernel/orchestrator/pkg/events:RecordApprovalEvidenceCommand|ApprovalState":              true,
 	"internal/modules/blocks/memory/pkg/events:UpsertMemoryRecallTraceCommand|Stage":                           true,
 	"internal/modules/blocks/memory/pkg/events:UpsertMemoryRecallTraceCommand|Status":                          true,
 	"internal/modules/kernel/orchestrator/pkg/events:CommitRuntimeGovernanceApprovalResolutionCommand|Outcome": true,

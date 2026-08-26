@@ -36,27 +36,33 @@ raw diagnostic 留在 Shell-private adapter；receipt 只携带有界、脱敏�
   workspace 中必须同时观察到根 `go.mod` 与至少一个非排除 `*_test.go`。任一缺失都发布带稳定 prerequisite ref 的
   `prerequisite_required`，而不是声称 recipe ready 或丢失该 Owner fact。静态 executable/policy 不可用时发布
   `unavailable`。Shell 不读取 File service/repository，也不取得 workspace tree 所有权。
-- 当一个 `prerequisite_required` validation surface 能由单个 prospective target 的合取条件充分满足时，Shell 才同时发布
+- 当一个 `prerequisite_required` validation surface 的缺失输入能表达为 1～8 个必需 target clause 时，Shell 才同时发布
   `shell/selectable-validation-surface/prospective-workspace-manifest/v1` 及 typed immutable
   `RuntimeProspectiveTargetSatisfactionConstraint`。该事实绑定 owner、surface、activation-sealed recipe/schema 与 Shell catalog
-  revision，只包含 `AllOf` predicates，不包含 exact target、action、retry 或状态；不允许多个 surface 形成隐式
-  recipe `one_of`。当前 Go recipe 只有在根 `go.mod` 已存在时，才可为缺少 test input 发布
-  `target_ref_path_suffix=_test.go`、排除 `.git`/`.workorch-data`/`node_modules`/`vendor` segment，并在 `./pkg/...` 尚无
-  package input 时增加 `target_ref_path_prefix=pkg/`。现有 predicate vocabulary 不能精确表达根 `go.mod`，因此缺少
-  `go.mod` 时保持不可执行 prerequisite；若 `go.mod` 与 test input 同时缺失，或多个不相容 package root 不能由一个
-  target 同时补齐，也不发布 prospective contract。
-- Orchestrator 必须在 provider proposal 和 File probe 前使用 shared pure matcher 验证上述 typed `AllOf`，随后才可通过 Shell
-  owner 的 typed prospective-satisfaction query 转交 activation-sealed recipes 和 File owner 已计算的 immutable resulting
-  target refs。Shell 要求匹配 contract 的唯一 prerequisite surface 存在同 ID recipe，且 command、ordered args、timeout
+  revision；所有 clause 都是 `AllOf` 必需成员，每个 clause 内部也只包含合取 predicate。constraint 不包含 exact
+  target、action、retry 或状态，不允许多个 surface 形成隐式 recipe `one_of`，也没有 clause 级 `any_of`。
+  当前 Go recipe 缺根 module 时发布 `target_ref_path_exact=go.mod` 必需 clause；缺 test input 时发布
+  `target_ref_path_suffix=_test.go` 与 `.git`/`.workorch-data`/`node_modules`/`vendor` excluded-segment predicates 组成的
+  必需 clause；缺 declared package root 时再发布对应 `target_ref_path_prefix=<root>/` clause。因此空工作区可在
+  同一 bounded all-of proposal 中同时提交 `go.mod` 与 test target，而不是在两个可选分支中二选一。缺失 clause
+  超过 8 个时不发布 prospective contract，不截断或改成 alternative relation。
+- Orchestrator 必须在 provider proposal 和 File probe 前使用 shared pure matcher 验证上述 typed `AllOf`：一份 proposal
+  只携带 1～8 个唯一 canonical `ProspectiveTargetRefs`，每个 clause 至少由一项完整满足，每个 target 也必须对
+  至少一个 clause 有贡献，不允许 partial 或无关 extra target。验证通过后才可通过 Shell owner 的 typed
+  prospective-satisfaction query 转交 activation-sealed recipes 和 File owner 已计算的 immutable resulting manifest refs。Shell
+  要求匹配 contract 的唯一 prerequisite surface 存在同 ID recipe，且 command、ordered args、timeout
   计算的 owner schema hash 与 surface `InputSchemaHash` 完全一致，再复用 owner-private recipe applicability 规则返回
   `would_satisfy | would_not_satisfy`；若 exact Shell policy/catalog dependency 已漂移，则返回绑定 expected/observed
   revision 的 typed stale nested observation。该 dependency catalog只供 Runtime freshness/CAS/seal，不进入 provider-selectable
   catalog projection。任一 recipe 身份缺失或漂移均 typed fail-closed；该 query 不访问 File、不观察 workspace、不启动进程，
   也不改变 Shell/Runtime 状态。只有 Orchestrator private event可持久化 factual result并选择 fact refresh/seal/terminal。
-  exact target 来自 persisted SM-3 proposal，Shell 只通过 File delta 验证它，不选择 target；只有 SM-2 sealed binding 才形成
-  authority。typed stale 只刷新 dependency fact；在 proposal 已满足 sealed `AllOf` 后仍出现 `would_not_satisfy` 表示 owner
+  exact target set 来自 persisted SM-3 proposal，Shell 只使用 File delta 的完整 resulting manifest 验证已封存 recipe 是否可选，
+  不选择 target、不缩小 target set；只有 SM-2 sealed binding 才形成 authority。typed stale 只刷新 dependency fact；在
+  proposal 已满足 sealed `AllOf` 后仍出现 `would_not_satisfy` 表示 owner
   contract 与实际判断矛盾，Orchestrator 必须一次性收口为 `prospective_satisfaction_contract_violated`，不得再次调用 LLM、
   更换 target、创建治理 ticket 或进入 correction。Shell 始终只署名 satisfaction/stale fact 与 reason，不署名 terminal。
+  该 pre-effect `would_satisfy` 也不是任何 target 的 operation receipt，更不是 multi-target receipt-set completion 或 CWI
+  settlement；执行后的 collective proof 只能由 Orchestrator 从同一 sealed dispatch 的 exact owner receipts 派生。
 - workspace-sensitive Shell catalog 的 observation 必须依赖该 File manifest 的 exact workspace-tree revision；后续
   File receipt 改变该 revision 时，SM-2 仅按依赖交集退休并重获 catalog。该 freshness lineage 不允许 Shell 修改
   Manifest、CWI 或 Runtime 状态。
@@ -122,10 +128,11 @@ raw diagnostic 留在 Shell-private adapter；receipt 只携带有界、脱敏�
 ## 测试覆盖
 
 - 已覆盖 catalog 的 ready/prerequisite-required/unavailable、manifest freshness、空 confirmed recipe 与 owner selector。
-- 已覆盖 prospective contract 的 suffix/prefix/excluded-segment 合取、多个不相容 package root fail-closed、非匹配 target
-  在 owner probe 前拒绝，以及匹配 target 的 `would_satisfy`；同时覆盖错误 source/scope、typed stale Shell catalog、
-  duplicate request、唯一 contract surface 和 recipe command/args/timeout 身份漂移。测试确认 dependency catalog不进入
-  provider choice、不创建target、不执行命令且不改变owner状态。
+- 已覆盖 prospective contract 的 exact/suffix/prefix/excluded-segment clause 合取，空/source-only/module-only/ready
+  manifest 下 1～8 target set 对根 `go.mod`、test input 与 package-root clause 的完整覆盖，以及 partial/extra/
+  duplicate/nonmatching target 在 owner probe 前拒绝。同时覆盖 matching resulting manifest 的 `would_satisfy`、错误
+  source/scope、typed stale Shell catalog、duplicate request、唯一 contract surface 和 recipe command/args/timeout 身份漂移。测试
+  确认 dependency catalog 不进入 provider choice、不创建 target、不执行命令且不改变 owner 状态。
 - 已覆盖强调用 nil result、伪造 source、missing/wrong catalog、receipt query failure，以及 operation/recipe/scope/role/
   evidence-policy 或 execution-record catalog identity 任一漂移均在进程调用前拒绝。
 - 已覆盖 managed validation 临时副本、原 workspace/`.git` 隔离、外指 symlink、正常完成与 timeout 的进程组清理。

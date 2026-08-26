@@ -124,7 +124,7 @@ func TestRunEventRecordRepositoryQueries(t *testing.T) {
 	if llm.RunID != common.RunID("run-001") {
 		t.Fatalf("llm run id mismatch: %q", llm.RunID)
 	}
-	if llm.Topic != "/run/llm_usage/recorded" {
+	if llm.Topic != "/llm/usage/recorded" {
 		t.Fatalf("llm topic mismatch: %q", llm.Topic)
 	}
 	if llm.Limit != 5000 {
@@ -154,7 +154,7 @@ func TestWorkspaceEventRecordRepositoryQueries(t *testing.T) {
 	if llm.WorkspaceID != common.WorkspaceID("ws-001") {
 		t.Fatalf("llm workspace id mismatch: %q", llm.WorkspaceID)
 	}
-	if llm.Topic != "/run/llm_usage/recorded" {
+	if llm.Topic != "/llm/usage/recorded" {
 		t.Fatalf("llm topic mismatch: %q", llm.Topic)
 	}
 	if llm.Limit != 5000 {

@@ -5,7 +5,7 @@ import (
 	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
 )
 
-// LLMUsagePayloadData is the durable event payload for /run/llm_usage/recorded.
+// LLMUsagePayloadData is the durable event payload for /llm/usage/recorded.
 // It carries sealed provider/model target, revisions, budget and usage for one request.
 type LLMUsagePayloadData struct {
 	RequestID             string

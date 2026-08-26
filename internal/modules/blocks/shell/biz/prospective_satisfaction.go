@@ -89,8 +89,8 @@ func validateShellProspectiveValidationRecipeIdentities(request runtimecontract.
 			return fmt.Errorf("%w: prospective Shell validation surface %q recipe identity drift", common.ErrConflict, surface.ID)
 		}
 		if surface.ProspectiveTargetSatisfactionConstraint == nil ||
-			!runtimecontract.RuntimeProspectiveTargetSatisfiesConstraint(
-				request.ProspectiveWorkspaceManifestDelta.ProspectiveTargetRef,
+			!runtimecontract.RuntimeProspectiveTargetsSatisfyConstraint(
+				request.ProspectiveWorkspaceManifestDelta.ProspectiveTargetRefs,
 				*surface.ProspectiveTargetSatisfactionConstraint,
 			) {
 			return fmt.Errorf("%w: prospective Shell validation surface %q target violates its owner-authored all-of constraint", common.ErrConflict, surface.ID)

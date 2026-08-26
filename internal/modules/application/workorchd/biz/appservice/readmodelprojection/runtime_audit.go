@@ -117,7 +117,7 @@ func runtimeAuditCoverageBindings(values []runtimecontract.CoverageEvidenceBindi
 			ID: binding.ID, CoverageWorkItemID: string(binding.CoverageWorkItemID), FocusID: binding.FocusID,
 			DefinitionRevision: binding.DefinitionRevision, Hash: binding.Hash, TargetRefs: append([]string(nil), binding.TargetRefs...),
 			TargetSelectorRef: binding.TargetSelectorRef, TargetSelectorOwnerRef: binding.TargetSelectorOwnerRef,
-			TargetSelectorSubjectRef: binding.TargetSelectorSubjectRef, ProspectiveTargetRef: binding.ProspectiveTargetRef,
+			TargetSelectorSubjectRef: binding.TargetSelectorSubjectRef, ProspectiveTargetRefs: append([]string(nil), binding.ProspectiveTargetRefs...),
 			DeclarationRef: binding.DeclarationRef, PrerequisiteRefs: append([]string(nil), binding.PrerequisiteRefs...),
 		}
 		for _, rawProof := range binding.Proofs {

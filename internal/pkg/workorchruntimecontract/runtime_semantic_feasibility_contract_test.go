@@ -214,7 +214,7 @@ func semanticFeasibilityCommandFixture(t *testing.T) runtimecontract.RuntimeSema
 		CoverageWorkItemID: "cwi-1", OwnerModuleID: runtimecontract.RuntimeModuleFile, OperationKind: runtimecontract.StepKindFileWrite,
 		Target: runtimecontract.RuntimeOperationTargetAuthorization{
 			Policy: runtimecontract.RuntimeOperationTargetPolicyProspectiveOwnerTarget, OwnerSelectorRefs: []string{"workspace-relative-new-file-target"},
-			ProspectiveConstraintRefs: []string{"workspace-relative-path"}, ProspectiveTargetRef: "new-file.go",
+			ProspectiveConstraintRefs: []string{"workspace-relative-path"}, ProspectiveTargetRefs: []string{"new-file.go"},
 		},
 		RequiredEvidenceKinds: []string{runtimecontract.EvidenceKindStateChange}, RequiredEffectScopes: []runtimecontract.RuntimeEffectScope{runtimecontract.RuntimeEffectWorkspaceDurable}, DeclarationRef: "semantic/dod-1",
 	}

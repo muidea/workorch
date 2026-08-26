@@ -341,16 +341,22 @@ func TestShellOwnerAdmissibilityPublishesManifestPrerequisiteBeforeValidationIsR
 	missingModuleSurface, found := shellValidationSurfaceForTest(missingModule.ValidationSurfaces, recipe.ID)
 	if !found || missingModuleSurface.Readiness != runtimecontract.RuntimeValidationSurfacePrerequisiteRequired ||
 		missingModuleSurface.ReadinessReason != shellValidationApplicableInputRequiredReason || missingModuleSurface.PrerequisiteRef == "" ||
-		missingModuleSurface.ProspectiveSatisfactionContractRef != "" || missingModuleSurface.ProspectiveTargetSatisfactionConstraint != nil ||
+		missingModuleSurface.ProspectiveSatisfactionContractRef != modulecommon.ProspectiveSatisfactionContractRef || missingModuleSurface.ProspectiveTargetSatisfactionConstraint == nil ||
 		missingModuleSurface.InputBindingRef != "" || len(missingModule.ValidationRecipes) != 0 || len(missingModule.ValidationRecipeRefs) != 0 {
 		t.Fatalf("missing-module validation inventory = %+v surface=%+v found=%t", missingModule, missingModuleSurface, found)
+	}
+	if !runtimecontract.RuntimeProspectiveTargetsSatisfyConstraint([]string{"go.mod"}, *missingModuleSurface.ProspectiveTargetSatisfactionConstraint) {
+		t.Fatalf("missing-module prospective contract did not admit exact root module: %+v", missingModuleSurface.ProspectiveTargetSatisfactionConstraint)
 	}
 
 	multipleMissing := acquire("admissibility-shell-multiple-missing", "tree-without-module-or-tests", []string{"main.go"})
 	multipleMissingSurface, found := shellValidationSurfaceForTest(multipleMissing.ValidationSurfaces, recipe.ID)
 	if !found || multipleMissingSurface.Readiness != runtimecontract.RuntimeValidationSurfacePrerequisiteRequired ||
-		multipleMissingSurface.ProspectiveSatisfactionContractRef != "" || multipleMissingSurface.ProspectiveTargetSatisfactionConstraint != nil {
-		t.Fatalf("multi-gap validation inventory became actionable = %+v surface=%+v found=%t", multipleMissing, multipleMissingSurface, found)
+		multipleMissingSurface.ProspectiveSatisfactionContractRef != modulecommon.ProspectiveSatisfactionContractRef || multipleMissingSurface.ProspectiveTargetSatisfactionConstraint == nil {
+		t.Fatalf("multi-gap validation inventory did not publish a bounded all-of contract = %+v surface=%+v found=%t", multipleMissing, multipleMissingSurface, found)
+	}
+	if !runtimecontract.RuntimeProspectiveTargetsSatisfyConstraint([]string{"go.mod", "runtime_test.go"}, *multipleMissingSurface.ProspectiveTargetSatisfactionConstraint) {
+		t.Fatalf("multi-gap prospective contract did not close module and test clauses: %+v", multipleMissingSurface.ProspectiveTargetSatisfactionConstraint)
 	}
 
 	waiting := acquire("admissibility-shell-waiting", "tree-module-without-tests", []string{"go.mod", "main.go"})

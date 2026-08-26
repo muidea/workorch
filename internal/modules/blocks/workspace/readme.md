@@ -16,8 +16,9 @@ Workspace 还独占 immutable pre-seal `DefinitionAdmissionCandidate`、promoted
 candidate 还封存 required owner-fact binding 与唯一 acquisition/reobserve closure；Workspace 只持久化/校验该事实，
 不读取 capability catalog 或选择运行期动作。`CandidateHash` 覆盖 acquisition operation variant、operation target policy、
 operation selector 与 Definition declaration selector/candidate refs；owner ingress 不替 caller 重新计算 hash。pre-seal
-candidate/startup input 不携带 exact `ProspectiveTargetRef`；该值只能由运行期 SM-3 semantic proposal 在这份
-declaration 与 current owner constraints 的交集中提出，Workspace 不补默认值、不回写 proposal/owner fact/binding。
+candidate/startup input 不携带 exact prospective target set；运行期只有一份 SM-3 semantic proposal 可以在这份
+declaration 与 current owner constraints 的交集中提交 1～8 个唯一 canonical `ProspectiveTargetRefs`，Workspace 不补默认值、
+不接受 singular 兼容字段，也不回写 proposal/owner fact/binding。
 candidate 的 `AdmissionPolicyBindings` 分别保存 Template 与 Workspace 两侧每项 canonical evidence-policy
 ref/revision/snapshot hash，`CandidateHash` 覆盖这些 immutable bindings。任一 raw policy snapshot 含退役
 `prospectiveTargetRef`、空/非字符串 ID、同 owner 重复 ID、invalid typed policy 或 normalize cardinality drift 时必须在

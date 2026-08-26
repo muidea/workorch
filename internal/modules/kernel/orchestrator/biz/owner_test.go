@@ -16,7 +16,6 @@ import (
 	magicevent "github.com/muidea/magicCommon/event"
 	magictask "github.com/muidea/magicCommon/task"
 	decisioncommon "github.com/muidea/workorch/internal/modules/blocks/decision/pkg/common"
-	decisionevents "github.com/muidea/workorch/internal/modules/blocks/decision/pkg/events"
 	runmodule "github.com/muidea/workorch/internal/modules/blocks/run"
 	runevents "github.com/muidea/workorch/internal/modules/blocks/run/pkg/events"
 	runmodel "github.com/muidea/workorch/internal/modules/blocks/run/pkg/models"
@@ -504,12 +503,12 @@ func TestStopWaitsForQueuedDecisionEvidenceHandlerBeforeClearingDependencies(t *
 	module := newTestBiz(nil, hub, nil)
 	module.evidenceRecords = blocking
 	event := magicevent.NewEventWithContext(
-		decisionevents.TopicDecisionCommandRecordEvidence,
+		orchestratorevents.TopicOrchestratorCommandRecordDecisionEvidence,
 		decisioncommon.ModuleID,
 		ModuleID,
 		magicevent.NewHeader(),
 		context.Background(),
-		decisionevents.RecordDecisionEvidenceCommand{
+		orchestratorevents.RecordDecisionEvidenceCommand{
 			EvidenceRecordID: "evidence-lifecycle", WorkspaceID: "ws-lifecycle", RunID: "run-lifecycle",
 			TicketID: "ticket-lifecycle", ResolutionID: "resolution-lifecycle", ResolutionType: "continue",
 			DecisionKind: "runtime_governance", Reason: "test lifecycle lock",

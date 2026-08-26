@@ -247,6 +247,73 @@ EOF
   exit 1
 fi
 
+# Workorchd may render owner-owned Result/Run/Orchestrator content, but it must
+# obtain those values through the receiving owner's typed EventHub read
+# contract. The protocol/content adapter must never reconstruct a repository
+# path or read another owner's file/repository directly.
+workorchd_content_boundary_files=(
+  "internal/modules/application/workorchd/biz/appservice/content"
+  "internal/modules/application/workorchd/biz/appservice/ownerreadports"
+  "internal/modules/application/workorchd/biz/appservice/artifact_content_service.go"
+  "internal/modules/application/workorchd/biz/appservice/runtime_raw_content_service.go"
+)
+workorchd_private_content_read_matches="$({
+  find "${workorchd_content_boundary_files[@]}" -type f -name '*.go' ! -name '*_test.go' -print0 |
+    xargs -0 -r grep -Hn -E -- '"(os|path/filepath)"|os\.(ReadFile|Open)|filepath\.|internal/pkg/repository|workorchrepo|internal/modules/(blocks|kernel)/[^\"]+/(biz|service)(/|\")' || true
+} | sed '/^[[:space:]]*$/d')"
+if [[ -n "$workorchd_private_content_read_matches" ]]; then
+  cat >&2 <<EOF
+Boundary contract violation: Workorchd content access bypasses a Result, Run,
+or Orchestrator typed owner read and reaches private filesystem/repository or
+owner implementation state directly.
+
+$workorchd_private_content_read_matches
+EOF
+  exit 1
+fi
+workorchd_content_reader_contract="$(cat \
+  internal/modules/application/workorchd/biz/appservice/content/artifact_reader.go \
+  internal/modules/application/workorchd/biz/appservice/content/runtime_raw_reader.go \
+  internal/modules/application/workorchd/biz/appservice/content/runtime_virtual_reader.go)"
+for marker in \
+  'ReadArtifactContentByResultOwnerCommand' \
+  'ReadStepByOwnerCommand' \
+  'ListToolCallsByRunOwnerCommand' \
+  'ReadRuntimeCheckpointByOwnerCommand' \
+  'ReadResultByOwnerCommand'; do
+  if ! grep -q -F -- "$marker" <<<"$workorchd_content_reader_contract"; then
+    echo "boundary contract violation: Workorchd content reader lost typed owner read $marker" >&2
+    exit 1
+  fi
+done
+if ! grep -q -F -- 'resultevents.TopicArtifactCommandReadContent' internal/modules/application/workorchd/biz/appservice/ownerreadports/artifact_content_read.go ||
+   ! grep -q -F -- 'resultevents.TopicArtifactCommandReadContent,' internal/modules/blocks/result/biz/owner.go ||
+   ! grep -q -F -- 'runevents.TopicRunCommandGetStep' internal/modules/application/workorchd/biz/appservice/ownerreadports/run_step_reads.go ||
+   ! grep -q -F -- 'runevents.TopicRunCommandGetRuntimeCheckpoint' internal/modules/application/workorchd/biz/appservice/ownerreadports/run_checkpoint_reads.go ||
+   ! grep -q -F -- 'runevents.TopicRunCommandGetStep,' internal/modules/blocks/run/biz/command_router.go ||
+   ! grep -q -F -- 'runevents.TopicRunCommandGetRuntimeCheckpoint,' internal/modules/blocks/run/biz/command_router.go ||
+   ! grep -q -F -- 'orchestratorevents.TopicOrchestratorCommandListToolCallsByRun' internal/modules/application/workorchd/biz/appservice/ownerreadports/orchestrator_reads.go ||
+   ! grep -q -F -- 'orchestratorevents.TopicOrchestratorCommandListToolCallsByRun,' internal/modules/kernel/orchestrator/biz/owner.go; then
+  echo "boundary contract violation: Workorchd content reads are not wired to their receiving owner topics" >&2
+  exit 1
+fi
+if grep -R -q -E --include='*.go' --exclude='*_test.go' -- \
+  'func (runtimeRawContentPath|artifactContentPath|artifactPath|runtimeRawPath)\(' \
+  internal/modules/application/workorchd; then
+  echo "boundary contract violation: Workorchd restored a private owner content-path builder" >&2
+  exit 1
+fi
+for regression in \
+  'TestReadArtifactUsesResultOwnerContentCommandWithURIWorkspaceScope' \
+  'TestReadRuntimeRawContentUsesOwnerTypedReadsAcrossBackends' \
+  'TestReadRuntimeRawContentReturnsTypedCheckpointAndResultDetailsAcrossBackends' \
+  'TestReadArtifactContentByResultOwnerCommandValidatesScopeHashAndCopy'; do
+  if ! grep -R -q -F --include='*_test.go' -- "$regression" internal/modules/application/workorchd; then
+    echo "boundary contract violation: Workorchd typed content-read regression is missing ($regression)" >&2
+    exit 1
+  fi
+done
+
 workorchd_run_ports_shape="$(sed -n '/^type RunPorts struct {/,/^}/p' internal/modules/application/workorchd/service/server/application_ports.go)"
 workorchd_run_mutation_ports="$(grep -E '^[[:space:]]+[A-Z][A-Za-z0-9_]*[[:space:]]' <<<"$workorchd_run_ports_shape" | grep -v -E '^[[:space:]]+(Read|List)[A-Za-z0-9_]*[[:space:]]' || true)"
 if [[ -n "$workorchd_run_mutation_ports" ]]; then
@@ -1174,6 +1241,65 @@ or other mutable/I/O resources.
 
 $matches
 EOF
+  exit 1
+fi
+
+# Strong cross-owner commands are defined by the receiving state/resource
+# owner. Decision and Approval publish immutable governance facts into
+# Orchestrator; Approval asks Eventstream to persist its resolution audit.
+# None of those senders may retain a same-named command/topic alias.
+orchestrator_event_topics="internal/modules/kernel/orchestrator/pkg/events/topics.go"
+orchestrator_event_messages="internal/modules/kernel/orchestrator/pkg/events/messages.go"
+eventstream_event_topics="internal/modules/blocks/eventstream/pkg/events/topics.go"
+eventstream_event_messages="internal/modules/blocks/eventstream/pkg/events/messages.go"
+if ! grep -q -E -- 'TopicOrchestratorCommandRecordDecisionEvidence[[:space:]]*=[[:space:]]*"/orchestrator/command/record-decision-evidence"' "$orchestrator_event_topics" ||
+   ! grep -q -E -- 'TopicOrchestratorCommandRecordApprovalEvidence[[:space:]]*=[[:space:]]*"/orchestrator/command/record-approval-evidence"' "$orchestrator_event_topics" ||
+   ! grep -q -F -- 'CommandTopic[RecordDecisionEvidenceCommand, RecordDecisionEvidenceResult]("orchestrator"' "$orchestrator_event_messages" ||
+   ! grep -q -F -- 'CommandTopic[RecordApprovalEvidenceCommand, RecordApprovalEvidenceResult]("orchestrator"' "$orchestrator_event_messages" ||
+   ! grep -q -F -- 'TopicOrchestratorCommandRecordDecisionEvidence, m.handleDecisionEvidenceCommand' internal/modules/kernel/orchestrator/biz/owner.go ||
+   ! grep -q -F -- 'TopicOrchestratorCommandRecordApprovalEvidence, m.handleApprovalEvidenceCommand' internal/modules/kernel/orchestrator/biz/owner.go; then
+  echo "boundary contract violation: governance evidence commands are not fully defined and consumed by Orchestrator" >&2
+  exit 1
+fi
+if ! grep -q -E -- 'TopicEventStreamCommandRecordApprovalResolution[[:space:]]*=[[:space:]]*"/eventstream/command/record-approval-resolution"' "$eventstream_event_topics" ||
+   ! grep -q -F -- 'CommandTopic[RecordApprovalResolutionCommand, RecordApprovalResolutionResult]("eventstream"' "$eventstream_event_messages" ||
+   ! grep -q -F -- 'eventstreamevents.TopicEventStreamCommandRecordApprovalResolution,' internal/modules/blocks/eventstream/biz/event_stream_service.go ||
+   ! grep -q -F -- 'ev.Source() != approvalcommon.ModuleID' internal/modules/blocks/eventstream/biz/event_stream_service.go; then
+  echo "boundary contract violation: approval-resolution audit command is not fully owned and source-validated by Eventstream" >&2
+  exit 1
+fi
+legacy_sender_owned_command_contracts="$({
+  source_matches 'TopicDecisionCommandRecordEvidence|type RecordDecisionEvidence(Command|Result)|/decision/command/record-evidence' \
+    internal/modules/blocks/decision/pkg/events
+  source_matches 'TopicApprovalCommandRecord(Evidence|Resolution)|type RecordApproval(Evidence|Resolution)(Command|Result)|/(approval)/command/record-(evidence|resolution)' \
+    internal/modules/blocks/approval/pkg/events
+} | sed '/^[[:space:]]*$/d')"
+if [[ -n "$legacy_sender_owned_command_contracts" ]]; then
+  cat >&2 <<EOF
+Boundary contract violation: a governance sender regained a command contract
+owned by the receiving Orchestrator or Eventstream component.
+
+$legacy_sender_owned_command_contracts
+EOF
+  exit 1
+fi
+if ! grep -q -F -- 'orchestratorevents.TopicOrchestratorCommandRecordDecisionEvidence' internal/modules/blocks/decision/biz/evidence_event.go ||
+   ! grep -q -F -- 'orchestratorevents.TopicOrchestratorCommandRecordApprovalEvidence' internal/modules/blocks/approval/biz/evidence_event.go ||
+   ! grep -q -F -- 'eventstreamevents.TopicEventStreamCommandRecordApprovalResolution' internal/modules/blocks/approval/biz/approval_notification.go ||
+   ! grep -q -F -- 'TestGovernanceEvidenceCommandsAreOrchestratorOwned' internal/modules/kernel/orchestrator/pkg/events/governance_evidence_messages_test.go ||
+   ! grep -q -F -- 'TestApprovalResolutionRecordCommandIsEventstreamOwned' internal/modules/blocks/eventstream/pkg/events/messages_test.go; then
+  echo "boundary contract violation: receiver-owned governance event wiring or regressions are incomplete" >&2
+  exit 1
+fi
+
+# LLM usage is an owner-authored notification, not an Eventstream command.
+# Keep its unique event ID in the publishing owner namespace while Eventstream
+# remains only a subscriber/audit sink.
+if ! grep -q -E -- 'TopicLLMUsageRecorded[[:space:]]*=[[:space:]]*"/llm/usage/recorded"' internal/modules/blocks/llm/pkg/events/topics.go ||
+   ! grep -q -F -- 'llmevents.TopicLLMUsageRecorded' internal/modules/blocks/eventstream/biz/event_stream_service.go ||
+   ! grep -q -F -- 'TestLLMUsageRecordedTopicUsesOwnerNamespace' internal/modules/blocks/llm/pkg/events/runtime_provider_test.go ||
+   grep -R -q -E --include='*.go' --exclude='*_test.go' -- 'TopicLLMUsageRecorded[[:space:]]*=[[:space:]]*"/llm/usage"' internal; then
+  echo "boundary contract violation: LLM usage notification lost its unique owner-namespaced topic" >&2
   exit 1
 fi
 
@@ -3858,7 +3984,7 @@ append_preseal_target_shape RuntimeCoverageEvidenceRequirement internal/pkg/work
 append_preseal_target_shape RuntimeDefinitionFocus internal/pkg/workorchruntimecontract/runtime_definition_focus.go
 append_preseal_target_shape RuntimeSemanticProofObligation internal/pkg/workorchruntimecontract/runtime_semantic_obligation.go
 append_preseal_target_shape RuntimeSemanticOwnerFactAcquisition internal/pkg/workorchruntimecontract/runtime_semantic_obligation.go
-if grep -q -i -E -- '[[:space:]](Prospective)?TargetRef[[:space:]]|json:"[^"]*(prospective)?targetRef' <<<"$preseal_target_shapes"; then
+if grep -q -i -E -- '[[:space:]](ProspectiveTargetRefs?|TargetRef)[[:space:]]|json:"[^"]*(prospectiveTargetRefs?|targetRef)' <<<"$preseal_target_shapes"; then
 	echo "boundary contract violation: a pre-seal Definition/profile/semantic declaration regained an exact prospective target" >&2
 	exit 1
 fi
@@ -3878,7 +4004,7 @@ fi
 bootstrap_artifact_compiler_regression="$(sed -n '/^func TestCompileRuntimeCoverageFocusesPrependsMatchedBootstrapArtifactsInDependencyOrder(/,/^}/p' internal/modules/application/workorchd/biz/appservice/activationcore/runtime_focus_compiler_test.go)"
 for marker in \
 	'focus.TargetSelectorRef != "file/workspace_deliverable"' \
-	'focus.ProspectiveTargetRef != ""' \
+	'len(focus.ProspectiveTargetRefs) != 0' \
 	'len(focus.TargetSelectorCandidateRefs) != 0'; do
 	if ! grep -q -F "$marker" <<<"$bootstrap_artifact_compiler_regression"; then
 		echo "boundary contract violation: target-free bootstrap artifact compiler regression is missing ($marker)" >&2
@@ -4012,7 +4138,7 @@ for regression in \
 	fi
 done
 
-# SM-2 seals one exact target surface into both CoverageEvidenceBinding and its
+# SM-2 seals one exact bounded target surface into both CoverageEvidenceBinding and its
 # focus. Selector identity, candidate bounds, and the accepted prospective
 # target must all match; partial equality would let either value become a
 # shadow authority after restart.
@@ -4023,7 +4149,7 @@ for marker in \
 	'binding.TargetSelectorOwnerRef != focus.TargetSelectorOwnerRef' \
 	'binding.TargetSelectorSubjectRef != focus.TargetSelectorSubjectRef' \
 	'!sameStrings(binding.TargetSelectorCandidateRefs, focus.TargetSelectorCandidateRefs)' \
-	'binding.ProspectiveTargetRef != focus.ProspectiveTargetRef'; do
+	'!sameStrings(binding.ProspectiveTargetRefs, focus.ProspectiveTargetRefs)'; do
 	if ! grep -q -F "$marker" <<<"$coverage_binding_focus_validation"; then
 		echo "boundary contract violation: Coverage binding/focus exact target surface lost $marker" >&2
 		exit 1
@@ -4145,6 +4271,8 @@ done
 prospective_target_contract="$(cat internal/pkg/workorchruntimecontract/runtime_prospective_target_constraint.go)"
 for marker in \
 	'RuntimeProspectiveTargetSatisfiesConstraint' \
+	'RuntimeProspectiveTargetsSatisfyConstraint' \
+	'RuntimeProspectiveTargetClause' \
 	'ResolveRuntimeProspectiveTargetSatisfactionConstraint'; do
 	if ! grep -q -F "$marker" <<<"$prospective_target_contract"; then
 		echo "boundary contract violation: prospective all-of target contract lost $marker" >&2
@@ -4159,6 +4287,204 @@ if grep -q -E -- 'AnyOf|OneOf|Aggregation' <<<"$prospective_target_contract"; th
 	echo "boundary contract violation: prospective target contract regained alternative aggregation" >&2
 	exit 1
 fi
+if ! grep -q -E -- 'RuntimeProspectiveTargetRefsMaxCount[[:space:]]*=[[:space:]]*8' <<<"$prospective_target_contract"; then
+	echo "boundary contract violation: bounded prospective acquisition lost its one shared max=8 constant" >&2
+	exit 1
+fi
+for shared_bound_consumer in \
+	internal/pkg/workorchruntimecontract/runtime_owner_fact_prospective_satisfaction.go \
+	internal/pkg/workorchruntimecontract/runtime_semantic_contract.go \
+	internal/pkg/workorchruntimecontract/runtime_semantic_payload.go \
+	internal/pkg/workorchruntimecontract/runtime_coverage_evidence_binding.go \
+	internal/pkg/workorchruntimecontract/candidate_contract_manifest.go \
+	internal/modules/blocks/file/biz/owner.go \
+	internal/modules/blocks/file/biz/file_runtime_target.go \
+	internal/modules/blocks/shell/biz/shell_runtime_validation.go; do
+	if ! grep -q -F -- 'RuntimeProspectiveTargetRefsMaxCount' "$shared_bound_consumer"; then
+		echo "boundary contract violation: prospective acquisition does not consume the shared max=8 bound: $shared_bound_consumer" >&2
+		exit 1
+	fi
+done
+prospective_clause_shape="$(sed -n '/^type RuntimeProspectiveTargetClause struct {/,/^}/p' internal/pkg/workorchruntimecontract/runtime_prospective_target_constraint.go)"
+prospective_set_evaluator="$(sed -n '/^func RuntimeProspectiveTargetsSatisfyConstraint(/,/^}/p' internal/pkg/workorchruntimecontract/runtime_prospective_target_constraint.go)"
+if ! grep -q -E -- 'AllOf[[:space:]]+\[\]RuntimeProspectiveTargetPredicate' <<<"$prospective_clause_shape" ||
+	! grep -q -F -- 'clauseMatchCounts := make([]int, len(constraint.AllOf))' <<<"$prospective_set_evaluator" ||
+	! grep -q -F -- 'targetMatches := make([][]bool, len(targetRefs))' <<<"$prospective_set_evaluator" ||
+	! grep -q -F -- 'if count == 0' <<<"$prospective_set_evaluator" ||
+	! grep -q -F -- 'if !necessary' <<<"$prospective_set_evaluator"; then
+	echo "boundary contract violation: prospective target evaluator no longer requires every all-of clause and rejects unrelated target padding" >&2
+	exit 1
+fi
+for regression in \
+	'TestRuntimeProspectiveTargetSatisfactionConstraintMatchesBoundedAllOfTargetSet' \
+	'TestResolveRuntimeProspectiveTargetSatisfactionConstraintRejectsImplicitAnyOf' \
+	'TestRuntimeProspectiveTargetSatisfactionConstraintEnforcesSharedBoundAndRelevantTargets'; do
+	if ! grep -q -F -- "$regression" internal/pkg/workorchruntimecontract/runtime_prospective_target_constraint_test.go; then
+		echo "boundary contract violation: bounded all-of prospective constraint regression is missing ($regression)" >&2
+		exit 1
+	fi
+done
+
+# File admits the complete hypothetical target batch against one manifest
+# revision/capacity observation and never creates a directory or file during
+# semantic feasibility. Both successful replay and rejection matrices freeze
+# that zero-side-effect contract.
+file_prospective_batch_admission="$(sed -n '/^func fileProspectiveSemanticTargetAdmission(/,/^}/p' internal/modules/blocks/file/biz/owner.go)"
+for marker in \
+	'RuntimeSemanticProposalTargetRefs(proposal)' \
+	'RuntimeProspectiveTargetRefsMaxCount' \
+	'for _, targetRef := range targetRefs' \
+	'runtimeFileProspectiveTargetRefsAdditionalEntries' \
+	'observation.entryCount+additional > defaultMaxEntries'; do
+	if ! grep -q -F -- "$marker" <<<"$file_prospective_batch_admission"; then
+		echo "boundary contract violation: File bounded batch admission lost $marker" >&2
+		exit 1
+	fi
+done
+file_batch_zero_effect_test="$(sed -n '/^func TestFileOwnerSemanticFeasibilityPublishesBoundedBatchDeltaWithoutMutation(/,/^}/p' internal/modules/blocks/file/prospective_workspace_manifest_delta_test.go)"
+for marker in \
+	'[]string{"go.mod", "internal/example/runtime_test.go"}' \
+	'delta.ProspectiveTargetRefs' \
+	'os.Lstat' \
+	'reflect.DeepEqual(replayed, observation)'; do
+	if ! grep -q -F -- "$marker" <<<"$file_batch_zero_effect_test"; then
+		echo "boundary contract violation: File bounded batch zero-side-effect regression lost $marker" >&2
+		exit 1
+	fi
+done
+for regression in \
+	'TestFileOwnerSemanticFeasibilityDoesNotPublishProspectiveDeltaForNonFeasibleInput' \
+	'TestFileOwnerSemanticFeasibilityReusesCanonicalProspectiveAdmissionMatrixWithoutMutation'; do
+	if ! grep -q -F -- "$regression" internal/modules/blocks/file/prospective_workspace_manifest_delta_test.go; then
+		echo "boundary contract violation: File prospective admission/rejection zero-side-effect matrix is missing ($regression)" >&2
+		exit 1
+	fi
+done
+
+# Shell owns Go validation applicability. Freeze the four workspace readiness
+# classes (empty/source-only/module-only/ready), package-root handling and the
+# incomparable multi-root all-of case in its owner-local matrix.
+shell_prospective_matrix="$(sed -n '/^func TestShellProspectiveTargetConstraintPublishesSufficientGoTestAllOfTargetSet(/,/^}/p' internal/modules/blocks/shell/biz/prospective_target_constraint_test.go)"
+for marker in \
+	'empty workspace' \
+	'source only' \
+	'module only' \
+	'ready workspace' \
+	'missing package root' \
+	'existing package root' \
+	'incomparable package roots' \
+	'pkg/a/runtime_test.go' \
+	'pkg/b/runtime.go'; do
+	if ! grep -q -F -- "$marker" <<<"$shell_prospective_matrix"; then
+		echo "boundary contract violation: Shell prospective Go validation matrix lost $marker" >&2
+		exit 1
+	fi
+done
+if ! grep -q -F -- 'TestShellProspectiveTargetConstraintCoversMultipleGoWorkspaceGapsInOneBoundedSet' internal/modules/blocks/shell/biz/prospective_target_constraint_test.go ||
+	! grep -q -F -- 'TestShellOwnerProspectiveSatisfactionDuplicateIsPureValue' internal/modules/blocks/shell/biz/prospective_satisfaction_test.go ||
+	! grep -q -F -- 'TestShellOwnerProspectiveSatisfactionRejectsRecipeIdentityDriftWithoutEffects' internal/modules/blocks/shell/biz/prospective_satisfaction_test.go; then
+	echo "boundary contract violation: Shell bounded all-of, replay, or zero-effect prospective regressions are missing" >&2
+	exit 1
+fi
+
+# SM-2/SM-3 must turn every target in the sealed prospective binding into one
+# exact required operation. A candidate missing any target requirement, using
+# another target, or trying to bind several targets to one requirement fails
+# before dispatch; the provider schema carries the same exact singleton fence.
+prospective_required_sequence="$(sed -n '/^func requiredStateChangeOperationSequence(/,/^}/p' internal/modules/kernel/orchestrator/biz/runtime/reducer.go)"
+for marker in \
+	'for _, binding := range facts.Focus.Normalized().CoverageEvidenceBindings' \
+	'for index, targetRef := range binding.ProspectiveTargetRefs' \
+	'StableCoverageEvidenceBindingHash(binding)' \
+	'fmt.Sprintf("prospective-%s-target-%02d", bindingHash, index+1)' \
+	'previousProspectiveRequirement' \
+	'TargetRef: targetRef' \
+	'complete the sealed prospective all-of target transaction'; do
+	if ! grep -q -F -- "$marker" <<<"$prospective_required_sequence"; then
+		echo "boundary contract violation: Orchestrator per-target RequiredOperationSequence lost $marker" >&2
+		exit 1
+	fi
+done
+required_operation_binding="$(sed -n '/^func ValidateRequiredOperationBindings(/,/^}/p' internal/pkg/workorchruntimecontract/runtime_candidate.go)"
+if ! grep -q -F -- 'requirement.TargetRef != ""' <<<"$required_operation_binding" ||
+	! grep -q -F -- '!sameStrings(operation.TargetRefs, []string{requirement.TargetRef})' <<<"$required_operation_binding"; then
+	echo "boundary contract violation: candidate required-operation binding lost exact singleton target validation" >&2
+	exit 1
+fi
+required_operation_schema="$(sed -n '/^func runtimeCandidateSchemaForManifest(/,/^}/p' internal/modules/blocks/llm/biz/runtime_candidate_schema.go)"
+if ! grep -q -F -- 'for _, requirement := range manifest.RequiredOperationSequence' <<<"$required_operation_schema" ||
+	! grep -q -F -- '"items": map[string]any{"const": requirement.TargetRef}' <<<"$required_operation_schema"; then
+	echo "boundary contract violation: provider candidate schema lost exact per-target required operations" >&2
+	exit 1
+fi
+if ! grep -q -F -- 'TestRequiredStateChangeOperationSequenceSealsCompleteProspectiveAllOfTargets' internal/modules/kernel/orchestrator/biz/runtime/reducer_test.go ||
+	! grep -q -F -- 'TestValidateRequiredOperationBindingsRequiresExactProspectiveTarget' internal/pkg/workorchruntimecontract/runtime_operation_contract_test.go ||
+	! grep -q -F -- 'operations[:1]' internal/pkg/workorchruntimecontract/runtime_operation_contract_test.go ||
+	! grep -q -F -- 'partial prospective target set error' internal/pkg/workorchruntimecontract/runtime_operation_contract_test.go; then
+	echo "boundary contract violation: prospective per-target sequence or partial-candidate rejection regression is missing" >&2
+	exit 1
+fi
+
+# RequiredOperationSequence is sealed SM-3 authority, not a best-effort hint.
+# Reject duplicate identities/targets and malformed dependency graphs before
+# normalization can collapse ambiguity or a candidate can reach dispatch.
+required_operation_sequence_validation="$(sed -n '/^func validateRequiredOperationVariants(/,/^}/p' internal/pkg/workorchruntimecontract/canonical_runtime.go)"
+for marker in \
+	'duplicates requirement id' \
+	'duplicates exact target' \
+	'depends on unknown requirement' \
+	'duplicates dependency' \
+	'dependency cycle'; do
+	if ! grep -q -F -- "$marker" <<<"$required_operation_sequence_validation"; then
+		echo "boundary contract violation: RequiredOperationSequence fail-closed validation lost $marker" >&2
+		exit 1
+	fi
+done
+if ! grep -q -F -- 'TestRequiredOperationSequenceValidationFailsClosed' internal/pkg/workorchruntimecontract/runtime_operation_contract_test.go ||
+	! grep -q -F -- 'TestRuntimeCandidateSchemaBindsEachRequiredOperationToItsExactProspectiveTarget' internal/modules/blocks/llm/biz/runtime_candidate_provider_test.go; then
+	echo "boundary contract violation: RequiredOperationSequence graph or exact provider-schema regression is missing" >&2
+	exit 1
+fi
+
+# A multi-target prospective binding receives collective credit only after one
+# sealed dispatch contains an evidence_committed exact accepted receipt for
+# every target. Partial, rejected, stale, duplicate, or cross-dispatch members
+# remain audit facts and cannot settle the CWI.
+prospective_collective_matcher="$(sed -n '/^func MatchProspectiveCoverageReceiptSet(/,/^}/p' internal/modules/kernel/orchestrator/biz/internal/proof/prospective_receipt_set.go)"
+for marker in \
+	'OperationExecutionEvidenceCommitted' \
+	'MatchCoverageEvidenceBindingReceipt' \
+	'len(receipt.TargetRefs) != 1' \
+	'finding.MissingTargetRefs'; do
+	if ! grep -q -F -- "$marker" <<<"$prospective_collective_matcher"; then
+		echo "boundary contract violation: prospective collective receipt matcher lost $marker" >&2
+		exit 1
+	fi
+done
+prospective_collective_runtime="$(cat \
+	internal/modules/kernel/orchestrator/biz/runtime/prospective_receipt_set.go \
+	internal/modules/kernel/orchestrator/biz/runtime/authority_assessment_transition.go \
+	internal/modules/kernel/orchestrator/biz/runtime/aggregate_invariant.go)"
+for marker in \
+	'runtimeProspectiveCoverageKindComplete' \
+	'validateRuntimeProspectiveCoverageCollectiveCredit' \
+	'runtimeProspectiveCoverageReceiptSetFinding' \
+	'validateRuntimeProspectiveCoverageCollectiveCredit(a)'; do
+	if ! grep -q -F -- "$marker" <<<"$prospective_collective_runtime"; then
+		echo "boundary contract violation: Orchestrator collective receipt credit lost $marker" >&2
+		exit 1
+	fi
+done
+for regression in \
+	'TestMatchProspectiveCoverageReceiptSetRequiresCompleteAllOfOwnerEvidence' \
+	'TestProspectiveAllOfReceiptSetSettlesExactlyOnceAfterRestart' \
+	'TestProspectiveAllOfRejectedReceiptCannotSettleCWI' \
+	'TestProspectiveAllOfAssessmentClosureUsesCollectiveReceiptGate'; do
+	if ! grep -R -q -F --include='*_test.go' -- "$regression" internal/modules/kernel/orchestrator/biz; then
+		echo "boundary contract violation: prospective collective receipt regression is missing ($regression)" >&2
+		exit 1
+	fi
+done
 provider_target_projection="$(sed -n '/^type runtimeSemanticProspectiveTargetConstraintProjection struct {/,/^}/p' internal/modules/blocks/llm/biz/runtime_semantic_projection.go)"
 for marker in OwnerModuleID ProspectiveSatisfactionContractRef InputSchemaHash CatalogObservedRevision AllOf; do
 	if ! grep -q -F "$marker" <<<"$provider_target_projection"; then

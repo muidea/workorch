@@ -371,6 +371,39 @@ func runtimeFileProspectiveTargetAdditionalEntries(workspaceDirectory, prospecti
 	return additional, nil
 }
 
+// runtimeFileProspectiveTargetRefsAdditionalEntries counts the union of files
+// and missing parent directories that one bounded batch would add. Shared
+// parents are counted once, so admission is deterministic against the same
+// manifest observation regardless of target ordering.
+func runtimeFileProspectiveTargetRefsAdditionalEntries(workspaceDirectory string, prospectiveTargetRefs []string) (int, error) {
+	if len(prospectiveTargetRefs) == 0 || len(prospectiveTargetRefs) > runtimemodel.RuntimeProspectiveTargetRefsMaxCount {
+		return 0, common.ErrInvalidArgument
+	}
+	additionalEntries := make(map[string]struct{})
+	for _, prospectiveTargetRef := range prospectiveTargetRefs {
+		root, target, _, err := guardedWorkspacePath(workspaceDirectory, prospectiveTargetRef, false)
+		if err != nil {
+			return 0, err
+		}
+	targetPath:
+		for current := target; current != root; current = filepath.Dir(current) {
+			info, statErr := os.Lstat(current)
+			switch {
+			case statErr == nil:
+				if info.Mode()&os.ModeSymlink != 0 || current == target || !info.IsDir() {
+					return 0, fmt.Errorf("%w: prospective target %q has an invalid existing path component", common.ErrInvalidArgument, prospectiveTargetRef)
+				}
+				break targetPath
+			case os.IsNotExist(statErr):
+				additionalEntries[current] = struct{}{}
+			default:
+				return 0, statErr
+			}
+		}
+	}
+	return len(additionalEntries), nil
+}
+
 func normalizeRuntimeFileTargetRefs(values []string) []string {
 	seen := map[string]struct{}{}
 	ret := make([]string, 0, len(values))

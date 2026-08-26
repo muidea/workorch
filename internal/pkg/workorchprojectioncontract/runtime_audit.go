@@ -209,7 +209,7 @@ type RuntimeAuditCoverageBinding struct {
 	TargetSelectorRef        string                      `json:"targetSelectorRef,omitempty"`
 	TargetSelectorOwnerRef   string                      `json:"targetSelectorOwnerRef,omitempty"`
 	TargetSelectorSubjectRef string                      `json:"targetSelectorSubjectRef,omitempty"`
-	ProspectiveTargetRef     string                      `json:"prospectiveTargetRef,omitempty"`
+	ProspectiveTargetRefs    []string                    `json:"prospectiveTargetRefs,omitempty"`
 	DeclarationRef           string                      `json:"declarationRef,omitempty"`
 	PrerequisiteRefs         []string                    `json:"prerequisiteRefs,omitempty"`
 }

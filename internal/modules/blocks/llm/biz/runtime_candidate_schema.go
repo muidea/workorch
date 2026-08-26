@@ -148,11 +148,20 @@ func runtimeCandidateSchemaForManifest(manifest runtimecontract.RuntimeCandidate
 	if len(manifest.RequiredOperationSequence) > 0 {
 		requirements := make([]any, 0, len(manifest.RequiredOperationSequence))
 		for _, requirement := range manifest.RequiredOperationSequence {
+			properties := map[string]any{
+				"requiredOperationRef": map[string]any{"const": requirement.RequirementID},
+				"kind":                 map[string]any{"const": requirement.Kind},
+			}
+			required := []string{"requiredOperationRef", "kind"}
+			if requirement.TargetRef != "" {
+				properties["targetRefs"] = map[string]any{
+					"type": "array", "minItems": 1, "maxItems": 1,
+					"items": map[string]any{"const": requirement.TargetRef},
+				}
+				required = append(required, "targetRefs")
+			}
 			requirements = append(requirements, map[string]any{"contains": map[string]any{
-				"type": "object", "properties": map[string]any{
-					"requiredOperationRef": map[string]any{"const": requirement.RequirementID},
-					"kind":                 map[string]any{"const": requirement.Kind},
-				}, "required": []string{"requiredOperationRef", "kind"},
+				"type": "object", "properties": properties, "required": required,
 			}})
 		}
 		operations["allOf"] = requirements

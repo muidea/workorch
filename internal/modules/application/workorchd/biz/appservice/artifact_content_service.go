@@ -10,8 +10,8 @@ import (
 
 func ReadArtifactContentWithSession(ctx context.Context, session *runtimecore.Session, artifactURI string) (ret content.ArtifactContent, err error) {
 	return withCommandHubSession(ctx, session, func(ctx context.Context, hub magicevent.Hub) (content.ArtifactContent, error) {
-		reader := content.NewReader(hub, session.RepositoryBackend(), session.RepositoryDataDir())
-		return reader.ReadArtifact(ctx, artifactURI, nil)
+		reader := content.NewReader(hub)
+		return reader.ReadArtifact(ctx, artifactURI)
 	})
 }
 

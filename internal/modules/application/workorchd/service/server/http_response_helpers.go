@@ -412,6 +412,9 @@ func writeArtifactContent(w http.ResponseWriter, item content.ArtifactContent) {
 	w.Header().Set("Content-Type", contentType)
 	w.Header().Set("Content-Disposition", mime.FormatMediaType("attachment", map[string]string{"filename": fileName}))
 	w.Header().Set("X-Workorch-Artifact-URI", item.URI)
+	if item.ContentSHA256 != "" {
+		w.Header().Set("X-Workorch-Content-SHA256", item.ContentSHA256)
+	}
 	w.WriteHeader(http.StatusOK)
 	_, _ = w.Write(item.Content)
 }
@@ -428,6 +431,9 @@ func writeRuntimeRawContent(w http.ResponseWriter, item content.RuntimeRawConten
 	w.Header().Set("Content-Type", contentType)
 	w.Header().Set("Content-Disposition", mime.FormatMediaType("attachment", map[string]string{"filename": fileName}))
 	w.Header().Set("X-Workorch-Raw-Ref", item.Ref)
+	if item.ContentSHA256 != "" {
+		w.Header().Set("X-Workorch-Content-SHA256", item.ContentSHA256)
+	}
 	w.WriteHeader(http.StatusOK)
 	_, _ = w.Write(item.Content)
 }

@@ -14,7 +14,6 @@ import (
 
 const definitionPackage = "github.com/muidea/workorch/internal/modules/blocks/approval/pkg/events"
 const CommandDestination = modulecommon.ModuleID
-const ResolutionRecordCommandDestination = "blocks/eventstream"
 
 const (
 	DefaultListLimit = 100
@@ -137,16 +136,6 @@ func (d ApprovalChangedData) Validate() error {
 	return nil
 }
 
-type RecordApprovalResolutionCommand struct{ Data ApprovalChangedData }
-
-type RecordApprovalResolutionResult struct {
-	NotificationID string
-	ResolutionID   common.ResolutionID
-	ApprovalID     common.ApprovalID
-	WorkspaceID    common.WorkspaceID
-	RunID          common.RunID
-}
-
 type GetApprovalResult struct{ Approval *approvalmodel.Approval }
 type ListApprovalsResult struct {
 	Approvals  []*approvalmodel.Approval
@@ -208,8 +197,6 @@ func MessageContracts() []eventcontract.MessageContract {
 		eventcontract.CommandTopic[SealWorkspaceApprovalDeletionCommand, SealWorkspaceApprovalDeletionResult]("approval", definitionPackage, eventcontract.CommandClassWrite, eventcontract.LanePolicyState, TopicApprovalCommandSealWorkspaceDeletion).MessageContract(),
 		eventcontract.CommandTopic[EnsureApprovedCommand, EnsureApprovedResult]("approval", definitionPackage, eventcontract.CommandClassWrite, eventcontract.LanePolicyState, TopicApprovalCommandEnsureApproved).MessageContract(),
 		eventcontract.CommandTopic[EnsureRejectedCommand, EnsureRejectedResult]("approval", definitionPackage, eventcontract.CommandClassWrite, eventcontract.LanePolicyState, TopicApprovalCommandEnsureRejected).MessageContract(),
-		eventcontract.CommandTopic[RecordApprovalEvidenceCommand, RecordApprovalEvidenceResult]("approval", definitionPackage, eventcontract.CommandClassWrite, eventcontract.LanePolicyState, TopicApprovalCommandRecordEvidence).MessageContract(),
-		eventcontract.CommandTopic[RecordApprovalResolutionCommand, RecordApprovalResolutionResult]("approval", definitionPackage, eventcontract.CommandClassWrite, eventcontract.LanePolicyState, TopicApprovalCommandRecordResolution).MessageContract(),
 		eventcontract.CommandTopic[OpenRuntimeApprovalRequestCommand, OpenRuntimeApprovalRequestResult]("approval", definitionPackage, eventcontract.CommandClassWrite, eventcontract.LanePolicyState, TopicOpenRuntimeApprovalRequest).MessageContract(),
 	}
 	for _, topic := range []string{

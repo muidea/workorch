@@ -441,7 +441,7 @@ func stateChangeDecision(base runtimecontract.RuntimeDecision, facts runtimecont
 		CoverageWorkItemIDs:       facts.Focus.CoverageWorkItemIDs,
 		TargetRefs:                GroundedRepairTargets(facts),
 		RepairClosureID:           currentRepairClosureID(facts),
-		RequiredOperationSequence: requiredCapabilityStateSequence(facts, acceptedKinds),
+		RequiredOperationSequence: requiredStateChangeOperationSequence(facts, acceptedKinds),
 	}
 	return base, nil
 }
@@ -694,6 +694,59 @@ func requiredCapabilityStateSequence(facts runtimecontract.RuntimeFacts, accepte
 	return ret
 }
 
+// requiredStateChangeOperationSequence combines independent capability-owner
+// sequences with the target-complete sequence sealed in a semantic prospective
+// binding. The latter turns one owner-fact acquisition attempt into one bounded
+// candidate transaction: every target must have exactly one operation and the
+// deterministic dependency chain prevents partial parallel dispatch.
+func requiredStateChangeOperationSequence(facts runtimecontract.RuntimeFacts, acceptedKinds []string) []runtimecontract.RuntimeRequiredOperationVariant {
+	ret := requiredCapabilityStateSequence(facts, acceptedKinds)
+	accepted := make(map[string]struct{}, len(acceptedKinds))
+	for _, kind := range acceptedKinds {
+		accepted[runtimecontract.CanonicalRuntimeBlockKind(kind)] = struct{}{}
+	}
+	previousProspectiveRequirement := ""
+	for _, binding := range facts.Focus.Normalized().CoverageEvidenceBindings {
+		binding = binding.Normalized()
+		if len(binding.ProspectiveTargetRefs) == 0 {
+			continue
+		}
+		proof, found := runtimecontract.CoverageEvidenceProofForKind(binding, runtimecontract.EvidenceKindStateChange)
+		if !found || len(proof.AllowedOperationKinds) != 1 {
+			continue
+		}
+		kind := runtimecontract.CanonicalRuntimeBlockKind(proof.AllowedOperationKinds[0])
+		if _, found := accepted[kind]; !found {
+			continue
+		}
+		variantID := ""
+		if len(proof.AllowedOperationVariants) == 1 && runtimecontract.CanonicalRuntimeBlockKind(proof.AllowedOperationVariants[0].Kind) == kind {
+			variantID = proof.AllowedOperationVariants[0].VariantID
+		}
+		bindingHash := binding.Hash
+		if bindingHash == "" {
+			bindingHash = runtimecontract.StableCoverageEvidenceBindingHash(binding)
+		}
+		if len(bindingHash) > 12 {
+			bindingHash = bindingHash[:12]
+		}
+		for index, targetRef := range binding.ProspectiveTargetRefs {
+			requirementID := fmt.Sprintf("prospective-%s-target-%02d", bindingHash, index+1)
+			dependencies := []string(nil)
+			if previousProspectiveRequirement != "" {
+				dependencies = []string{previousProspectiveRequirement}
+			}
+			ret = append(ret, runtimecontract.RuntimeRequiredOperationVariant{
+				RequirementID: requirementID, Kind: kind, VariantID: variantID, TargetRef: targetRef,
+				DependsOnRequirementIDs: dependencies,
+				Reason:                  "complete the sealed prospective all-of target transaction",
+			})
+			previousProspectiveRequirement = requirementID
+		}
+	}
+	return ret
+}
+
 func validationDecision(base runtimecontract.RuntimeDecision, facts runtimecontract.RuntimeFacts, proofLineages ...[]runtimecontract.RuntimeCoverageProofLineage) (runtimecontract.RuntimeDecision, error) {
 	if decision, blocked, err := targetGroundingDecision(base, facts, true, proofLineages...); err != nil || blocked {
 		return decision, err
@@ -784,12 +837,12 @@ func hasSemanticOwnerGroundedTargetScope(facts runtimecontract.RuntimeFacts) boo
 			if _, sealed := prerequisites[catalog.SnapshotID]; !sealed {
 				continue
 			}
-			if focus.ProspectiveTargetRef == "" {
+			if len(focus.ProspectiveTargetRefs) == 0 {
 				return true
 			}
 			if len(focus.TargetRefs) != 0 ||
 				binding.TargetSelectorSubjectRef == "" || binding.TargetSelectorSubjectRef != focus.TargetSelectorSubjectRef ||
-				binding.ProspectiveTargetRef == "" || binding.ProspectiveTargetRef != focus.ProspectiveTargetRef || len(binding.TargetRefs) != 0 ||
+				len(binding.ProspectiveTargetRefs) == 0 || !runtimecontract.SameRuntimeTargetSelectorCandidateRefs(binding.ProspectiveTargetRefs, focus.ProspectiveTargetRefs) || len(binding.TargetRefs) != 0 ||
 				!runtimeBindingProspectiveOperationAllowed(catalog, binding) {
 				continue
 			}
@@ -826,7 +879,7 @@ func runtimeBindingProspectiveOperationAllowed(catalog runtimecontract.RuntimeOp
 
 func hasOwnerGroundedProspectiveCreationScope(facts runtimecontract.RuntimeFacts) bool {
 	return hasOwnerGroundedCreationScope(facts) ||
-		(facts.Focus.Normalized().ProspectiveTargetRef != "" && hasSemanticOwnerGroundedTargetScope(facts))
+		(len(facts.Focus.Normalized().ProspectiveTargetRefs) != 0 && hasSemanticOwnerGroundedTargetScope(facts))
 }
 
 func runtimeStringsContain(values []string, wanted string) bool {

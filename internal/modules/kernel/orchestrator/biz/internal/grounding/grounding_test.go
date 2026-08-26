@@ -151,14 +151,14 @@ func TestOwnerGroundedCreationAndWorkspaceScopeRemainBounded(t *testing.T) {
 	focus := runtimecontract.CoverageFocus{
 		ID: "focus-1", TargetRole: "deliverable", TargetSelectorRef: "file/workspace_deliverable",
 		TargetSelectorOwnerRef: "profile-1", TargetSelectorSubjectRef: "workspace-root",
-		TargetSelectorCandidateRefs: []string{"candidate-a"}, ProspectiveTargetRef: "new.go",
+		TargetSelectorCandidateRefs: []string{"candidate-a"}, ProspectiveTargetRefs: []string{"new.go"},
 	}
 	selection := runtimecontract.RuntimeTargetSelection{
 		PrerequisiteID: "target-selection-1", OwnerModuleID: runtimecontract.RuntimeModuleFile,
 		TargetRole: focus.TargetRole, SelectorRef: focus.TargetSelectorRef,
 		SelectorOwnerRef: focus.TargetSelectorOwnerRef, SelectorSubjectRef: focus.TargetSelectorSubjectRef,
 		SelectorCandidateRefs: focus.TargetSelectorCandidateRefs,
-		Disposition:           runtimecontract.RuntimeTargetSelectionCreate, ProspectiveTargetRef: focus.ProspectiveTargetRef,
+		Disposition:           runtimecontract.RuntimeTargetSelectionCreate, ProspectiveTargetRef: focus.ProspectiveTargetRefs[0],
 	}
 	facts := runtimecontract.RuntimeFacts{
 		WorkspaceID: "workspace-1", RunID: "run-1", DefinitionRevision: "definition-1", EvidenceRevision: "evidence-1",

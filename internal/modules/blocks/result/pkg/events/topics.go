@@ -17,6 +17,7 @@ const (
 	TopicArtifactCommandListByWorkspace = "/artifact/command/list-by-workspace"
 	TopicArtifactCommandListByRun       = "/artifact/command/list-by-run"
 	TopicArtifactCommandListByResult    = "/artifact/command/list-by-result"
+	TopicArtifactCommandReadContent     = "/artifact/command/read-content"
 
 	TopicResultCommandSealWorkspaceDeletion = "/result/command/seal-workspace-deletion"
 	TopicResultCommandPurgeWorkspace        = "/result/command/purge-workspace"

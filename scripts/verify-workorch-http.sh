@@ -39,9 +39,9 @@ trap cleanup EXIT
 mkdir -p "$TMP_DIR"
 
 curl_get "$BASE_URL/healthz" >"$TMP_DIR/healthz.json"
-grep '"status": "ok"' "$TMP_DIR/healthz.json" >/dev/null
+grep -E '"status"[[:space:]]*:[[:space:]]*"ok"' "$TMP_DIR/healthz.json" >/dev/null
 curl_get "$BASE_URL/readyz" >"$TMP_DIR/readyz.json"
-grep '"status": "ready"' "$TMP_DIR/readyz.json" >/dev/null
+grep -E '"status"[[:space:]]*:[[:space:]]*"ready"' "$TMP_DIR/readyz.json" >/dev/null
 curl_get "$BASE_URL/metrics" >"$TMP_DIR/metrics.txt"
 grep 'workorch_http_requests_total' "$TMP_DIR/metrics.txt" >/dev/null
 

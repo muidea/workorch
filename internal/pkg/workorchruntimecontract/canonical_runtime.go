@@ -48,11 +48,13 @@ type CoverageFocus struct {
 	// TargetSelectorRef is an opaque, profile-declared selector identity. The
 	// owning capability validates and applies it; Runtime only seals and
 	// compares the binding.
-	TargetSelectorRef                 string
-	TargetSelectorOwnerRef            string
-	TargetSelectorSubjectRef          string
-	TargetSelectorCandidateRefs       []string
-	ProspectiveTargetRef              string
+	TargetSelectorRef           string
+	TargetSelectorOwnerRef      string
+	TargetSelectorSubjectRef    string
+	TargetSelectorCandidateRefs []string
+	// ProspectiveTargetRefs is the complete bounded target set sealed from one
+	// semantic prospective proposal. It is empty for existing-target focuses.
+	ProspectiveTargetRefs             []string
 	RequireTargetGrounding            bool
 	AcceptedStepKinds                 []string
 	AcceptedOperationVariants         []RuntimeOperationVariantRef
@@ -1120,9 +1122,14 @@ const (
 )
 
 type RuntimeRequiredOperationVariant struct {
-	RequirementID           string
-	Kind                    string
-	VariantID               string
+	RequirementID string
+	Kind          string
+	VariantID     string
+	// TargetRef binds this required operation to one exact target. It remains
+	// empty for targetless owner sequences. A bounded prospective all-of
+	// acquisition uses one requirement per target so a partial candidate cannot
+	// consume the single acquisition transaction.
+	TargetRef               string
 	DependsOnRequirementIDs []string
 	Reason                  string
 }
@@ -1229,10 +1236,10 @@ type RuntimeTargetSelection struct {
 	Disposition           RuntimeTargetSelectionDisposition
 	TargetRefs            []string
 	CandidateTargetRefs   []string
-	// ProspectiveTargetRef is the concrete semantic-proposal target sealed by
-	// SM-2 binding for an empty-workspace durable create. The File owner only
-	// validates that it is a bounded workspace-relative absent path; it does not
-	// derive the value.
+	// ProspectiveTargetRef is the single concrete candidate used by the ordinary
+	// File-owner target-selection prerequisite. Bounded semantic acquisition is
+	// sealed separately as CoverageEvidenceBinding.ProspectiveTargetRefs and
+	// does not pass through this single-target discovery record.
 	ProspectiveTargetRef string
 	// CandidateCount is observed before the bounded candidate projection. It
 	// prevents a max-items=1 context from turning a multi-target workspace into
@@ -1543,6 +1550,11 @@ func (f RuntimeFacts) Normalized() RuntimeFacts {
 
 func (f RuntimeFacts) Validate() error {
 	raw := f
+	for _, snapshot := range raw.Resources.CapabilityStates {
+		if err := validateRequiredOperationVariants(snapshot.RequiredOperationSequence); err != nil {
+			return fmt.Errorf("runtime capability-state snapshot %q operation sequence: %w", strings.TrimSpace(snapshot.SnapshotID), err)
+		}
+	}
 	f = f.Normalized()
 	if f.WorkspaceID == "" || f.RunID == "" {
 		return fmt.Errorf("runtime facts require workspace and run scope")
@@ -1815,7 +1827,7 @@ func (f CoverageFocus) Normalized() CoverageFocus {
 	f.TargetSelectorOwnerRef = strings.TrimSpace(f.TargetSelectorOwnerRef)
 	f.TargetSelectorSubjectRef = strings.TrimSpace(f.TargetSelectorSubjectRef)
 	f.TargetSelectorCandidateRefs = normalizeStrings(f.TargetSelectorCandidateRefs)
-	f.ProspectiveTargetRef = strings.TrimSpace(f.ProspectiveTargetRef)
+	f.ProspectiveTargetRefs = normalizeStrings(f.ProspectiveTargetRefs)
 	f.RequiredOwnerFacts = NormalizeRuntimeOwnerFactRequirements(f.RequiredOwnerFacts)
 	f.OwnerFactConvergences = NormalizeRuntimeOwnerFactConvergences(f.OwnerFactConvergences)
 	f.ValidationRecipeID = strings.TrimSpace(f.ValidationRecipeID)
@@ -1973,7 +1985,9 @@ func StableRuntimeCapabilityStateHash(values []RuntimeCapabilityStateSnapshot) s
 		writeHashString(h, value.QueryReceiptRef)
 		for _, required := range value.RequiredOperationSequence {
 			writeHashString(h, required.RequirementID)
+			writeHashString(h, required.Kind)
 			writeHashString(h, required.VariantID)
+			writeHashString(h, required.TargetRef)
 			writeHashStrings(h, required.DependsOnRequirementIDs)
 		}
 	}
@@ -1995,26 +2009,22 @@ func StableRuntimeCapabilityStateSnapshotID(value RuntimeCapabilityStateSnapshot
 }
 
 func normalizeRequiredOperationVariants(values []RuntimeRequiredOperationVariant) []RuntimeRequiredOperationVariant {
-	byID := make(map[string]RuntimeRequiredOperationVariant, len(values))
+	ret := make([]RuntimeRequiredOperationVariant, 0, len(values))
 	for _, value := range values {
 		value.RequirementID = strings.TrimSpace(value.RequirementID)
 		value.Kind = CanonicalRuntimeBlockKind(value.Kind)
 		value.VariantID = strings.TrimSpace(value.VariantID)
-		value.DependsOnRequirementIDs = normalizeStrings(value.DependsOnRequirementIDs)
-		value.Reason = strings.TrimSpace(value.Reason)
-		if value.RequirementID != "" {
-			byID[value.RequirementID] = value
+		value.TargetRef = strings.TrimSpace(value.TargetRef)
+		dependencies := append([]string(nil), value.DependsOnRequirementIDs...)
+		for index := range dependencies {
+			dependencies[index] = strings.TrimSpace(dependencies[index])
 		}
+		sort.Strings(dependencies)
+		value.DependsOnRequirementIDs = nilIfEmpty(dependencies)
+		value.Reason = strings.TrimSpace(value.Reason)
+		ret = append(ret, value)
 	}
-	keys := make([]string, 0, len(byID))
-	for key := range byID {
-		keys = append(keys, key)
-	}
-	sort.Strings(keys)
-	ret := make([]RuntimeRequiredOperationVariant, 0, len(keys))
-	for _, key := range keys {
-		ret = append(ret, byID[key])
-	}
+	sort.SliceStable(ret, func(i, j int) bool { return ret[i].RequirementID < ret[j].RequirementID })
 	return nilIfEmpty(ret)
 }
 
@@ -2032,6 +2042,86 @@ func (c RequiredOutputContract) Normalized() RequiredOutputContract {
 	return c
 }
 func (c RequiredOutputContract) Validate() error {
+	return validateRequiredOperationVariants(c.RequiredOperationSequence)
+}
+
+// validateRequiredOperationVariants rejects malformed or ambiguous SM-3
+// sequence authority before normalization can hide it. Dependencies, rather
+// than slice order, define the transaction order.
+func validateRequiredOperationVariants(values []RuntimeRequiredOperationVariant) error {
+	if len(values) == 0 {
+		return nil
+	}
+	byID := make(map[string]RuntimeRequiredOperationVariant, len(values))
+	targetOwners := make(map[string]string, len(values))
+	for index, raw := range values {
+		value := raw
+		value.RequirementID = strings.TrimSpace(value.RequirementID)
+		value.Kind = CanonicalRuntimeBlockKind(value.Kind)
+		value.VariantID = strings.TrimSpace(value.VariantID)
+		value.TargetRef = strings.TrimSpace(value.TargetRef)
+		if value.RequirementID == "" || value.Kind == "" {
+			return fmt.Errorf("required operation sequence entry %d requires an id and kind", index)
+		}
+		if _, duplicate := byID[value.RequirementID]; duplicate {
+			return fmt.Errorf("required operation sequence duplicates requirement id %q", value.RequirementID)
+		}
+		if value.TargetRef != "" {
+			if strings.TrimSpace(raw.TargetRef) != raw.TargetRef {
+				return fmt.Errorf("required operation %q target ref is not canonical", value.RequirementID)
+			}
+			if owner, duplicate := targetOwners[value.TargetRef]; duplicate {
+				return fmt.Errorf("required operation %q duplicates exact target %q owned by %q", value.RequirementID, value.TargetRef, owner)
+			}
+			targetOwners[value.TargetRef] = value.RequirementID
+		}
+		byID[value.RequirementID] = value
+	}
+	for _, raw := range values {
+		id := strings.TrimSpace(raw.RequirementID)
+		seenDependencies := make(map[string]struct{}, len(raw.DependsOnRequirementIDs))
+		for _, dependency := range raw.DependsOnRequirementIDs {
+			dependency = strings.TrimSpace(dependency)
+			if dependency == "" {
+				return fmt.Errorf("required operation %q has an empty dependency", id)
+			}
+			if dependency == id {
+				return fmt.Errorf("required operation %q cannot depend on itself", id)
+			}
+			if _, duplicate := seenDependencies[dependency]; duplicate {
+				return fmt.Errorf("required operation %q duplicates dependency %q", id, dependency)
+			}
+			seenDependencies[dependency] = struct{}{}
+			if _, found := byID[dependency]; !found {
+				return fmt.Errorf("required operation %q depends on unknown requirement %q", id, dependency)
+			}
+		}
+	}
+	visiting := make(map[string]bool, len(byID))
+	visited := make(map[string]bool, len(byID))
+	var visit func(string) error
+	visit = func(id string) error {
+		if visiting[id] {
+			return fmt.Errorf("required operation sequence contains a dependency cycle at %q", id)
+		}
+		if visited[id] {
+			return nil
+		}
+		visiting[id] = true
+		for _, dependency := range byID[id].DependsOnRequirementIDs {
+			if err := visit(strings.TrimSpace(dependency)); err != nil {
+				return err
+			}
+		}
+		visiting[id] = false
+		visited[id] = true
+		return nil
+	}
+	for id := range byID {
+		if err := visit(id); err != nil {
+			return err
+		}
+	}
 	return nil
 }
 
@@ -2039,6 +2129,9 @@ func (c RequiredOutputContract) Validate() error {
 // single canonical SM-2 decision. RequiredOutputContract intentionally carries
 // constraints only: it does not duplicate a state or action discriminator.
 func ValidateRequiredOutputForState(state ConvergenceState, contract RequiredOutputContract) error {
+	if err := contract.Validate(); err != nil {
+		return err
+	}
 	contract = contract.Normalized()
 	empty := len(contract.AcceptedKinds)+len(contract.AcceptedOperationVariants)+len(contract.RequiredEvidenceKinds)+len(contract.CoverageWorkItemIDs)+len(contract.TargetRefs)+len(contract.PrerequisiteIDs)+len(contract.RequiredOperationSequence)+len(contract.AcceptedEffectScopes)+len(contract.RequiredEffectScopes) == 0 && contract.RepairClosureID == ""
 	switch state {
@@ -2103,6 +2196,7 @@ func StableRequiredOutputHash(contract RequiredOutputContract) string {
 		writeHashString(h, requirement.RequirementID)
 		writeHashString(h, requirement.Kind)
 		writeHashString(h, requirement.VariantID)
+		writeHashString(h, requirement.TargetRef)
 		writeHashStrings(h, requirement.DependsOnRequirementIDs)
 	}
 	return hex.EncodeToString(h.Sum(nil))
@@ -2111,6 +2205,9 @@ func StableRequiredOutputHash(contract RequiredOutputContract) string {
 func SealRuntimeDecision(facts RuntimeFacts, decision RuntimeDecision, attempt int) (RuntimeDecision, error) {
 	facts = facts.Normalized()
 	if err := facts.Validate(); err != nil {
+		return RuntimeDecision{}, err
+	}
+	if err := decision.RequiredOutput.Validate(); err != nil {
 		return RuntimeDecision{}, err
 	}
 	decision.Focus = decision.Focus.Normalized()
@@ -2146,6 +2243,9 @@ func SealRuntimeDecision(facts RuntimeFacts, decision RuntimeDecision, attempt i
 }
 
 func (d RuntimeDecision) Validate() error {
+	if err := d.RequiredOutput.Validate(); err != nil {
+		return err
+	}
 	d.Focus = d.Focus.Normalized()
 	d.RequiredOutput = d.RequiredOutput.Normalized()
 	if d.Focus.ID == "" {

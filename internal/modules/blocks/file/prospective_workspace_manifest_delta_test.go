@@ -52,7 +52,7 @@ func TestFileOwnerSemanticFeasibilityPublishesDeterministicProspectiveManifestDe
 		ProposalHash:       runtimecontract.StableRuntimeSemanticProofProposalHash(command.Proposal),
 		OwnerModuleID:      runtimecontract.RuntimeModuleFile, CatalogSnapshotID: command.OwnerCatalog.SnapshotID,
 		ProspectiveSatisfactionContractRef: fileProspectiveDeltaContractRef,
-		BaseWorkspaceManifestRevision:      before.Revision, ProspectiveTargetRef: targetRef,
+		BaseWorkspaceManifestRevision:      before.Revision, ProspectiveTargetRefs: []string{targetRef},
 		ResultingTargetRefs: []string{"a.txt", targetRef, "z.txt"},
 	}.Normalized()
 	if !reflect.DeepEqual(delta, want) {
@@ -90,7 +90,59 @@ func TestFileOwnerSemanticFeasibilityPublishesDeterministicProspectiveManifestDe
 	}
 }
 
+func TestFileOwnerSemanticFeasibilityPublishesBoundedBatchDeltaWithoutMutation(t *testing.T) {
+	ctx, hub := startFileProspectiveDeltaModule(t)
+	workspace := t.TempDir()
+	targetRefs := []string{"go.mod", "internal/example/runtime_test.go"}
+	command := fileProspectiveDeltaCommandForTargets(t, workspace, targetRefs, nil)
+
+	observation := sendFileProspectiveDeltaProbe(t, ctx, hub, command)
+	if observation.Observation.Status != runtimecontract.RuntimeSemanticFeasibilityFeasible || observation.Observation.ProspectiveWorkspaceManifestDelta == nil {
+		t.Fatalf("batch File owner feasibility = %+v", observation)
+	}
+	delta := observation.Observation.ProspectiveWorkspaceManifestDelta.Normalized()
+	if !reflect.DeepEqual(delta.ProspectiveTargetRefs, targetRefs) || !reflect.DeepEqual(delta.ResultingTargetRefs, targetRefs) {
+		t.Fatalf("batch prospective delta targets = %+v", delta)
+	}
+	for _, targetRef := range targetRefs {
+		if _, err := os.Lstat(filepath.Join(workspace, filepath.FromSlash(targetRef))); !os.IsNotExist(err) {
+			t.Fatalf("batch feasibility created %q: %v", targetRef, err)
+		}
+	}
+	replayed := sendFileProspectiveDeltaProbe(t, ctx, hub, command)
+	if !reflect.DeepEqual(replayed, observation) {
+		t.Fatalf("batch feasibility replay drifted: first=%+v replay=%+v", observation, replayed)
+	}
+}
+
 func TestFileOwnerSemanticFeasibilityDoesNotPublishProspectiveDeltaForNonFeasibleInput(t *testing.T) {
+	t.Run("ancestor descendant batch", func(t *testing.T) {
+		ctx, hub := startFileProspectiveDeltaModule(t)
+		workspace := t.TempDir()
+		command := fileProspectiveDeltaCommandForTargets(t, workspace, []string{"nested", "nested/runtime_test.go"}, nil)
+		observation := sendFileProspectiveDeltaProbe(t, ctx, hub, command)
+		assertFileProspectiveDeltaAbsent(t, observation, runtimecontract.RuntimeSemanticFeasibilityInfeasible)
+		if entries, err := os.ReadDir(workspace); err != nil || len(entries) != 0 {
+			t.Fatalf("ancestor-conflicting batch changed workspace: entries=%v err=%v", entries, err)
+		}
+	})
+
+	t.Run("aggregate batch capacity", func(t *testing.T) {
+		ctx, hub := startFileProspectiveDeltaModule(t)
+		workspace := t.TempDir()
+		for idx := 0; idx < 498; idx++ {
+			writeFileProspectiveDeltaFixtureFile(t, workspace, fmt.Sprintf("entry-%03d.txt", idx), "x\n")
+		}
+		command := fileProspectiveDeltaCommandForTargets(t, workspace, []string{"nested/one.go", "nested/two_test.go"}, nil)
+		observation := sendFileProspectiveDeltaProbe(t, ctx, hub, command)
+		assertFileProspectiveDeltaAbsent(t, observation, runtimecontract.RuntimeSemanticFeasibilityInfeasible)
+		for _, targetRef := range command.Proposal.Target.ProspectiveTargetRefs {
+			if _, err := os.Lstat(filepath.Join(workspace, filepath.FromSlash(targetRef))); !os.IsNotExist(err) {
+				t.Fatalf("capacity-rejected batch created %q: %v", targetRef, err)
+			}
+		}
+	})
+
 	t.Run("existing target", func(t *testing.T) {
 		ctx, hub := startFileProspectiveDeltaModule(t)
 		workspace := t.TempDir()
@@ -125,7 +177,7 @@ func TestFileOwnerSemanticFeasibilityDoesNotPublishProspectiveDeltaForNonFeasibl
 	t.Run("invalid target", func(t *testing.T) {
 		workspace := t.TempDir()
 		command := fileProspectiveDeltaCommand(t, workspace, "safe.txt", nil)
-		command.Proposal.Target.ProspectiveTargetRef = "../escape.txt"
+		command.Proposal.Target.ProspectiveTargetRefs = []string{"../escape.txt"}
 		if err := fileevents.ValidateRuntimeSemanticProofFeasibilityCommand(command, runtimecontract.RuntimeModuleFile); err == nil {
 			t.Fatal("unsafe prospective target reached the File owner probe boundary")
 		}
@@ -180,7 +232,7 @@ func TestFileOwnerSemanticFeasibilityReusesCanonicalProspectiveAdmissionMatrixWi
 			}
 			command := fileProspectiveDeltaCommand(t, workspace, commandTarget, nil)
 			if testCase.preProbe {
-				command.Proposal.Target.ProspectiveTargetRef = testCase.targetRef
+				command.Proposal.Target.ProspectiveTargetRefs = []string{testCase.targetRef}
 				if err := fileevents.ValidateRuntimeSemanticProofFeasibilityCommand(command, runtimecontract.RuntimeModuleFile); err == nil {
 					t.Fatalf("unsafe target %q reached the File owner probe boundary", testCase.targetRef)
 				}
@@ -323,7 +375,14 @@ func startFileProspectiveDeltaModule(t *testing.T) (context.Context, magicevent.
 }
 
 func fileProspectiveDeltaCommand(t *testing.T, workspace, targetRef string, catalogTargetRefs []string) fileevents.ProbeRuntimeSemanticProofFeasibilityCommand {
+	return fileProspectiveDeltaCommandForTargets(t, workspace, []string{targetRef}, catalogTargetRefs)
+}
+
+func fileProspectiveDeltaCommandForTargets(t *testing.T, workspace string, targetRefs, catalogTargetRefs []string) fileevents.ProbeRuntimeSemanticProofFeasibilityCommand {
 	t.Helper()
+	if len(targetRefs) == 0 {
+		t.Fatal("prospective delta fixture requires targets")
+	}
 	current, err := filebiz.NewRuntimeAdapter().AcquireWorkspaceManifest(workspace)
 	if err != nil {
 		t.Fatal(err)
@@ -361,14 +420,21 @@ func fileProspectiveDeltaCommand(t *testing.T, workspace, targetRef string, cata
 		ReobserveFactKind:      runtimecontract.RuntimeOwnerFactSelectableValidationSurface,
 		MaxAcquisitionAttempts: 1,
 	}
+	targetClauses := make([]runtimecontract.RuntimeProspectiveTargetClause, 0, len(targetRefs))
+	for index, targetRef := range targetRefs {
+		targetClauses = append(targetClauses, runtimecontract.RuntimeProspectiveTargetClause{
+			ID: fmt.Sprintf("required-target-%d", index),
+			AllOf: []runtimecontract.RuntimeProspectiveTargetPredicate{{
+				Kind: runtimecontract.RuntimeProspectiveTargetPredicatePathExact, Value: targetRef,
+			}},
+		})
+	}
 	prospectiveConstraint := runtimecontract.RuntimeProspectiveTargetSatisfactionConstraint{
 		SchemaVersion: runtimecontract.RuntimeProspectiveTargetSatisfactionConstraintSchemaCurrent,
 		OwnerModuleID: runtimecontract.RuntimeModuleShell, ProspectiveSatisfactionContractRef: fileProspectiveDeltaContractRef,
 		ValidationSurfaceID: "recipe/prospective", ValidationRecipeID: "recipe/prospective",
 		InputSchemaHash: "schema/prospective", CatalogObservedRevision: "shell-policy-prospective",
-		AllOf: []runtimecontract.RuntimeProspectiveTargetPredicate{{
-			Kind: runtimecontract.RuntimeProspectiveTargetPredicatePathSegmentNotEqual, Value: "__workorch_never_target_segment__",
-		}},
+		AllOf: targetClauses,
 	}
 	acquisition := runtimecontract.RuntimeSemanticOwnerFactAcquisition{
 		Requirement: requirement, ProspectiveSatisfactionContractRef: fileProspectiveDeltaContractRef,
@@ -425,7 +491,7 @@ func fileProspectiveDeltaCommand(t *testing.T, workspace, targetRef string, cata
 			DeclarationTargetSelectorRef:           convergence.TargetSelectorRef,
 			DeclarationTargetSelectorOwnerRef:      convergence.TargetSelectorOwnerRef,
 			DeclarationTargetSelectorSubjectRef:    convergence.TargetSelectorSubjectRef,
-			DeclarationTargetSelectorCandidateRefs: []string{targetRef},
+			DeclarationTargetSelectorCandidateRefs: append([]string(nil), targetRefs...),
 			RequireTargetGrounding:                 true,
 			RequiredOwnerFacts:                     []runtimecontract.RuntimeOwnerFactRequirement{requirement},
 			OwnerFactConvergences:                  []runtimecontract.RuntimeOwnerFactConvergence{convergence},
@@ -441,7 +507,7 @@ func fileProspectiveDeltaCommand(t *testing.T, workspace, targetRef string, cata
 		Target: runtimecontract.RuntimeOperationTargetAuthorization{
 			Policy:                    runtimecontract.RuntimeOperationTargetPolicyProspectiveOwnerTarget,
 			OwnerSelectorRefs:         []string{fileProspectiveDeltaSelector},
-			ProspectiveConstraintRefs: []string{fileProspectiveDeltaConstraint}, ProspectiveTargetRef: targetRef,
+			ProspectiveConstraintRefs: []string{fileProspectiveDeltaConstraint}, ProspectiveTargetRefs: append([]string(nil), targetRefs...),
 		},
 		RequiredEvidenceKinds: []string{runtimecontract.EvidenceKindStateChange},
 		RequiredEffectScopes:  []runtimecontract.RuntimeEffectScope{runtimecontract.RuntimeEffectWorkspaceDurable},

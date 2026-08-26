@@ -9,8 +9,7 @@ import (
 
 	cd "github.com/muidea/magicCommon/def"
 	magicevent "github.com/muidea/magicCommon/event"
-	approvalevents "github.com/muidea/workorch/internal/modules/blocks/approval/pkg/events"
-	decisionevents "github.com/muidea/workorch/internal/modules/blocks/decision/pkg/events"
+	orchestratorevents "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/repository"
 	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
@@ -19,27 +18,27 @@ import (
 
 func (m *Biz) handleDecisionEvidenceCommand(ev magicevent.Event, result magicevent.Result) {
 	if m == nil || ev == nil || ev.Source() != "blocks/decision" {
-		setDecisionEvidenceResult(result, decisionevents.RecordDecisionEvidenceResult{}, common.ErrInvalidArgument)
+		setDecisionEvidenceResult(result, orchestratorevents.RecordDecisionEvidenceResult{}, common.ErrInvalidArgument)
 		return
 	}
 	m.lifecycleMu.RLock()
 	defer m.lifecycleMu.RUnlock()
-	command, ok := ev.Data().(decisionevents.RecordDecisionEvidenceCommand)
+	command, ok := ev.Data().(orchestratorevents.RecordDecisionEvidenceCommand)
 	if !ok {
-		setDecisionEvidenceResult(result, decisionevents.RecordDecisionEvidenceResult{}, common.ErrInvalidArgument)
+		setDecisionEvidenceResult(result, orchestratorevents.RecordDecisionEvidenceResult{}, common.ErrInvalidArgument)
 		return
 	}
 	response, err := m.recordDecisionEvidence(ev.Context(), command)
 	setDecisionEvidenceResult(result, response, err)
 }
 
-func (m *Biz) recordDecisionEvidence(ctx context.Context, command decisionevents.RecordDecisionEvidenceCommand) (decisionevents.RecordDecisionEvidenceResult, error) {
+func (m *Biz) recordDecisionEvidence(ctx context.Context, command orchestratorevents.RecordDecisionEvidenceCommand) (orchestratorevents.RecordDecisionEvidenceResult, error) {
 	if m == nil || m.evidenceRecords == nil || command.EvidenceRecordID == "" || command.WorkspaceID == "" || command.RunID == "" || command.TicketID == "" || command.ResolutionID == "" {
-		return decisionevents.RecordDecisionEvidenceResult{}, common.ErrInvalidArgument
+		return orchestratorevents.RecordDecisionEvidenceResult{}, common.ErrInvalidArgument
 	}
 	payload, err := decisionEvidenceFieldsToPayload(command.ResolutionPayload)
 	if err != nil {
-		return decisionevents.RecordDecisionEvidenceResult{}, err
+		return orchestratorevents.RecordDecisionEvidenceResult{}, err
 	}
 	metadataFields := []workorcheventpayload.Field{
 		workorcheventpayload.StringField("ticketId", string(command.TicketID)),
@@ -82,17 +81,17 @@ func (m *Biz) recordDecisionEvidence(ctx context.Context, command decisionevents
 	}
 	ctx, err = common.BindRuntimeWorkspaceContext(ctx, command.WorkspaceID)
 	if err != nil {
-		return decisionevents.RecordDecisionEvidenceResult{}, err
+		return orchestratorevents.RecordDecisionEvidenceResult{}, err
 	}
 	if err := m.withOrchestratorEvidenceMutation(ctx, command.WorkspaceID, func(guarded context.Context) error {
 		return repository.CreateOrVerifyImmutableEvidenceRecord(guarded, m.evidenceRecords, record)
 	}); err != nil {
-		return decisionevents.RecordDecisionEvidenceResult{}, err
+		return orchestratorevents.RecordDecisionEvidenceResult{}, err
 	}
-	return decisionevents.RecordDecisionEvidenceResult{EvidenceRecordID: command.EvidenceRecordID}, nil
+	return orchestratorevents.RecordDecisionEvidenceResult{EvidenceRecordID: command.EvidenceRecordID}, nil
 }
 
-func setDecisionEvidenceResult(result magicevent.Result, response decisionevents.RecordDecisionEvidenceResult, err error) {
+func setDecisionEvidenceResult(result magicevent.Result, response orchestratorevents.RecordDecisionEvidenceResult, err error) {
 	if result == nil {
 		return
 	}
@@ -105,23 +104,23 @@ func setDecisionEvidenceResult(result magicevent.Result, response decisionevents
 
 func (m *Biz) handleApprovalEvidenceCommand(ev magicevent.Event, result magicevent.Result) {
 	if m == nil || ev == nil || ev.Source() != "blocks/approval" {
-		setApprovalEvidenceResult(result, approvalevents.RecordApprovalEvidenceResult{}, common.ErrInvalidArgument)
+		setApprovalEvidenceResult(result, orchestratorevents.RecordApprovalEvidenceResult{}, common.ErrInvalidArgument)
 		return
 	}
 	m.lifecycleMu.RLock()
 	defer m.lifecycleMu.RUnlock()
-	command, ok := ev.Data().(approvalevents.RecordApprovalEvidenceCommand)
+	command, ok := ev.Data().(orchestratorevents.RecordApprovalEvidenceCommand)
 	if !ok {
-		setApprovalEvidenceResult(result, approvalevents.RecordApprovalEvidenceResult{}, common.ErrInvalidArgument)
+		setApprovalEvidenceResult(result, orchestratorevents.RecordApprovalEvidenceResult{}, common.ErrInvalidArgument)
 		return
 	}
 	response, err := m.recordApprovalEvidence(ev.Context(), command)
 	setApprovalEvidenceResult(result, response, err)
 }
 
-func (m *Biz) recordApprovalEvidence(ctx context.Context, command approvalevents.RecordApprovalEvidenceCommand) (approvalevents.RecordApprovalEvidenceResult, error) {
+func (m *Biz) recordApprovalEvidence(ctx context.Context, command orchestratorevents.RecordApprovalEvidenceCommand) (orchestratorevents.RecordApprovalEvidenceResult, error) {
 	if m == nil || m.evidenceRecords == nil || command.EvidenceRecordID == "" || command.WorkspaceID == "" || command.RunID == "" || command.ApprovalID == "" || command.ResolutionID == "" || command.Principal.Validate() != nil {
-		return approvalevents.RecordApprovalEvidenceResult{}, common.ErrInvalidArgument
+		return orchestratorevents.RecordApprovalEvidenceResult{}, common.ErrInvalidArgument
 	}
 	status := ""
 	switch command.ApprovalState {
@@ -130,15 +129,15 @@ func (m *Biz) recordApprovalEvidence(ctx context.Context, command approvalevents
 	case common.ApprovalStateRejected:
 		status = orchestratormodel.EvidenceStatusRejected
 	default:
-		return approvalevents.RecordApprovalEvidenceResult{}, common.ErrInvalidArgument
+		return orchestratorevents.RecordApprovalEvidenceResult{}, common.ErrInvalidArgument
 	}
 	approvalContext, err := approvalEvidenceFieldsToPayload(command.Context)
 	if err != nil {
-		return approvalevents.RecordApprovalEvidenceResult{}, err
+		return orchestratorevents.RecordApprovalEvidenceResult{}, err
 	}
 	resolutionContext, err := approvalEvidenceFieldsToPayload(command.ResolutionContext)
 	if err != nil {
-		return approvalevents.RecordApprovalEvidenceResult{}, err
+		return orchestratorevents.RecordApprovalEvidenceResult{}, err
 	}
 	metadataFields := []workorcheventpayload.Field{
 		workorcheventpayload.StringField("approvalId", string(command.ApprovalID)),
@@ -176,20 +175,20 @@ func (m *Biz) recordApprovalEvidence(ctx context.Context, command approvalevents
 	}
 	ctx, err = common.BindRuntimeWorkspaceContext(ctx, command.WorkspaceID)
 	if err != nil {
-		return approvalevents.RecordApprovalEvidenceResult{}, err
+		return orchestratorevents.RecordApprovalEvidenceResult{}, err
 	}
 	if err := m.withOrchestratorEvidenceMutation(ctx, command.WorkspaceID, func(guarded context.Context) error {
 		return repository.CreateOrVerifyImmutableEvidenceRecord(guarded, m.evidenceRecords, record)
 	}); err != nil {
-		return approvalevents.RecordApprovalEvidenceResult{}, err
+		return orchestratorevents.RecordApprovalEvidenceResult{}, err
 	}
-	return approvalevents.RecordApprovalEvidenceResult{
+	return orchestratorevents.RecordApprovalEvidenceResult{
 		EvidenceRecordID: command.EvidenceRecordID, WorkspaceID: command.WorkspaceID, RunID: command.RunID,
 		ApprovalID: command.ApprovalID, ResolutionID: command.ResolutionID, ApprovalState: command.ApprovalState,
 	}, nil
 }
 
-func setApprovalEvidenceResult(result magicevent.Result, response approvalevents.RecordApprovalEvidenceResult, err error) {
+func setApprovalEvidenceResult(result magicevent.Result, response orchestratorevents.RecordApprovalEvidenceResult, err error) {
 	if result == nil {
 		return
 	}

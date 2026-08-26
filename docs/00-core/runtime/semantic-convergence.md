@@ -107,25 +107,30 @@ generation 的 current kinds 只能是 acquisition 所需的 `state_change`，�
 同一个非空 `ProspectiveSatisfactionContractRef`；preexisting 与 `existing_owner_scope` 禁止携带。pre-seal
 Definition 只封存 declaration selector/candidate refs 与 acquisition closure；compiled obligation/manifest 只追加
 acquisition owner/kind/variant/target-policy/operation-selector 与 current owner constraints，两者都不携带 exact
-prospective target。required owner catalog 发布 provider-safe typed `ProspectiveTargetSatisfactionConstraint`，只含
-`all_of` predicate；compiled acquisition/manifest 完整封存它并只在 C3 投影。SM-3 semantic proposal 必须在这两组权威
-的交集内提出一个 nonempty exact target；当 declaration candidate refs 非空时还必须精确命中其中一项，且 schema/document
-admission 必须在 owner probe 前验证全部 typed predicate。它在 SM-2 seal 前只是 proposal，不是
-Definition 或 operation authority。proposal 通过 File owner
-只读 feasibility 后，File 仅基于 current complete manifest 生成 exact base-revision-bound
-`RuntimeProspectiveWorkspaceManifestDelta`。Orchestrator 再把该 immutable delta、activation-sealed recipe declarations 和
+prospective target set。required owner catalog 发布 provider-safe typed `ProspectiveTargetSatisfactionConstraint`，只含
+`all_of` clause；每个 clause 内的 predicate 全部必须满足，全部 clause 都是必需条件，不存在替代分支。compiled
+acquisition/manifest 完整封存它并只在 C3 投影。SM-3 只能提交一份 bounded semantic proposal，其
+`ProspectiveTargetRefs` 包含 1～8 个唯一、规范化的 exact target ref；每个 clause 至少由集合中一项完整覆盖，
+每个 target 也必须覆盖至少一个 clause，不允许无关附加写入。集合中每项都必须在 Definition declaration
+selector/candidate refs 与 current operation selector/owner constraints 的交集内；declaration candidate refs 非空时，
+每项都必须 exact member match。current semantic wire 不接受 singular `ProspectiveTargetRef` 或兼容 alias。
+schema/document admission 必须在 owner probe 前验证整个 target set 的合取完整性。它在 SM-2 seal 前只是
+proposal，不是 Definition 或 operation authority。proposal 通过 File owner 只读 feasibility 后，File 对同一 current complete
+manifest 执行整组 path、absence、parent 与 aggregate capacity admission，仅生成 exact base-revision-bound
+`RuntimeProspectiveWorkspaceManifestDelta`；不创建任何文件或目录。Orchestrator 再把该 immutable delta、activation-sealed recipe declarations 和
 required-owner current dependency catalog/observation 交给 required owner 的 concrete typed pure query。semantic manifest
 必须把 provider-selectable `OwnerCatalogs` 与 `OwnerFactDependencyCatalogs` 分开：后者进入 manifest/hash/freshness/CAS/seal，
 但不进入 LLM C3 owner catalog、allowed operation/surface、schema enum 或 correction choice。required owner 逐项重验
 contract ref、recipe command/ordered args/timeout schema identity、catalog/observation 与 delta lineage，只返回 nested
 `would_satisfy | would_not_satisfy | typed stale` factual observation；它不访问 File/workspace、不执行 operation、不选择
 Runtime state。Orchestrator 必须在 owner-private observation CAS 与 semantic seal 前重验 File outer feasibility/delta、
-required-owner nested observation，以及 manifest/batch/request 和两组 catalog/observation identity。`would_satisfy` 才可加入
+required-owner nested observation，以及 manifest/batch/request 和两组 catalog/observation identity。required owner 只对 delta 中的
+resulting manifest 判定已封存 recipe 是否可选，不以任意单 target 代替完整 manifest。`would_satisfy` 才可加入
 final feasibility set；nested typed stale 不能伪装成 File outer stale或直接 terminal，只进入既有 bounded catalog refresh；
 missing dependency 在 query 前退休 generation并保持零 required-owner call。typed constraint 不匹配只产生普通完整
 document/schema correction，C4 引用 manifest/CWI/field path 且不复制 C3 constraint；该分支零 File/Shell probe。
 
-`would_not_satisfy` 必须先随 File delta 持久化为 exact-current full composite observation；该 target 仍未封存为 binding，
+`would_not_satisfy` 必须先随 File delta 持久化为 exact-current full composite observation；该 target set 仍未封存为 binding，
 且不产生 operation authority。由于 document admission 已证明 target 满足 published `all_of` contract，这个 owner result
 表示 required-owner contract contradiction。Orchestrator private drive 直接记录
 `prospective_satisfaction_contract_violated` 并形成 `semantic_contract_failed`，不得创建 replacement-target correction、
@@ -209,14 +214,15 @@ DefinitionFocus 检查 source declaration，不能把上一 generation 的 accep
 `RuntimeFocusSeedsFromDefinitionFocuses` 生成不含 target selector、owner-fact closure、resolved target、operation、recipe、
 check 或 binding 的 `CoverageFocus` seed。只有 SM-2 semantic seal 可以用 generation-specific `CoverageFocus` 替换该游标。
 Definition/activation 只封存 declaration selector identity、candidate refs 与 acquisition closure；它们不封存
-`ProspectiveTargetRef`。exact prospective target 首次出现在 SM-3 semantic proposal，File/Shell owner fact 只通过
-typed lineage 绑定该 proposal/target 并返回 factual feasibility/satisfaction；只有 SM-2 private event 封存的
-`CoverageEvidenceBinding` 才是 target authority，后续 operation
-candidate 只能引用该 binding，dispatch 只从 binding 派生 target。
+exact prospective target set。`ProspectiveTargetRefs` 首次出现在 SM-3 semantic proposal，File/Shell owner fact 只通过
+typed lineage 绑定该 proposal/target set 并返回 factual feasibility/satisfaction；只有 SM-2 private event 封存的
+`CoverageEvidenceBinding` 才是完整 target-set authority。后续 operations manifest 为每个 target 封存一项
+`RequiredOperationSequence`，每项的 `TargetRef` 要求 candidate `targetRefs` 为 exact singleton，并通过 requirement dependency
+按 canonical order 执行；candidate 必须完整提交全部项，dispatch 只从 binding 派生 target，不重新选择或允许部分执行。
 
 owner target scope 的空观察只证明当前不存在既有目标，不能授权任意新路径。prospective creation 必须同时具有
-SM-3 document 提出的 nonempty exact target、Definition 的完整 `selector ref + owner ref + subject ref`/candidate scope，以及同一
-capability owner catalog 发布的 matching operation selector/constraint/variant。缺 proposal target 由 strict schema/admission 拒绝；
+SM-3 document 提出的 bounded nonempty exact target set、Definition 的完整 `selector ref + owner ref + subject ref`/candidate scope，以及同一
+capability owner catalog 发布的 matching operation selector/constraint/variant。缺 proposal target set 由 strict schema/admission 拒绝；
 scope/catalog 不匹配由 pure evaluator 或 File feasibility 拒绝。全部 exact-current owner fact 通过后，SM-2 才封存 binding；
 之前始终零 candidate/dispatch/effect。
 ordinary Shell managed-validation catalog acquisition 需要 target vocabulary 时，Orchestrator 只可把已持久化的 File-owner

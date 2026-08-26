@@ -342,8 +342,13 @@ func TestServiceDurablyAcknowledgesExactApprovalResolutionReplay(t *testing.T) {
 	}
 	send := func(source string, value approvalevents.ApprovalChangedData) magicevent.Result {
 		return rawHub.Send(magicevent.NewEventWithContext(
-			approvalevents.TopicApprovalCommandRecordResolution, source, approvalevents.ResolutionRecordCommandDestination,
-			magicevent.NewHeader(), ctx, approvalevents.RecordApprovalResolutionCommand{Data: value},
+			eventstreamevents.TopicEventStreamCommandRecordApprovalResolution, source, eventstreamevents.CommandDestination,
+			magicevent.NewHeader(), ctx, eventstreamevents.RecordApprovalResolutionCommand{Data: eventstreamevents.ApprovalResolutionFact{
+				NotificationID: value.NotificationID, ResolutionID: value.ResolutionID, ApprovalID: value.ApprovalID,
+				WorkspaceID: value.WorkspaceID, RunID: value.RunID, StepID: value.StepID, Reason: value.Reason, Action: value.Action,
+				Context: value.Context, ResolutionContext: value.ResolutionContext, PrincipalKind: string(value.Principal.Kind),
+				PrincipalSubjectID: value.Principal.SubjectID, State: value.State,
+			}},
 		))
 	}
 	for attempt := 0; attempt < 2; attempt++ {
@@ -352,7 +357,7 @@ func TestServiceDurablyAcknowledgesExactApprovalResolutionReplay(t *testing.T) {
 			t.Fatalf("record attempt %d result = %+v", attempt+1, result)
 		}
 		value, resultErr := result.Get()
-		response, ok := value.(approvalevents.RecordApprovalResolutionResult)
+		response, ok := value.(eventstreamevents.RecordApprovalResolutionResult)
 		if resultErr != nil || !ok || response.NotificationID != data.NotificationID || response.ResolutionID != data.ResolutionID || response.ApprovalID != data.ApprovalID {
 			t.Fatalf("record attempt %d response = %#v err=%v", attempt+1, value, resultErr)
 		}

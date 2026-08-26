@@ -104,7 +104,7 @@ func TestFileModuleSemanticAndOperationFeasibilityShareExistingTargetPolicy(t *t
 		CoverageWorkItemID: "cwi-1", OwnerModuleID: runtimecontract.RuntimeModuleFile, OperationKind: runtimecontract.StepKindFileWrite,
 		Target: runtimecontract.RuntimeOperationTargetAuthorization{
 			Policy: runtimecontract.RuntimeOperationTargetPolicyProspectiveOwnerTarget, OwnerSelectorRefs: []string{"workspace-relative-new-file-target"},
-			ProspectiveConstraintRefs: []string{"workspace-relative-path"}, ProspectiveTargetRef: targetRef,
+			ProspectiveConstraintRefs: []string{"workspace-relative-path"}, ProspectiveTargetRefs: []string{targetRef},
 		},
 		RequiredEvidenceKinds: []string{runtimecontract.EvidenceKindStateChange}, RequiredEffectScopes: []runtimecontract.RuntimeEffectScope{runtimecontract.RuntimeEffectWorkspaceDurable}, DeclarationRef: "test/cwi-1",
 	}

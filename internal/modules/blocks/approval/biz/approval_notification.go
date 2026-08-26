@@ -8,9 +8,11 @@ import (
 	modulecommon "github.com/muidea/workorch/internal/modules/blocks/approval/pkg/common"
 	approvalevents "github.com/muidea/workorch/internal/modules/blocks/approval/pkg/events"
 	approvalmodel "github.com/muidea/workorch/internal/modules/blocks/approval/pkg/models"
+	eventstreamevents "github.com/muidea/workorch/internal/modules/blocks/eventstream/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/eventcontract"
 	workorchevents "github.com/muidea/workorch/internal/pkg/events"
+	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
 )
 
 func (m *Biz) deliverResolvedApproval(ctx context.Context, item *approvalmodel.Approval) error {
@@ -66,9 +68,15 @@ func (m *Biz) recordApprovalResolution(ctx context.Context, data approvalevents.
 		return common.ErrInvalidArgument
 	}
 	return m.withWorkspaceActiveDelivery(ctx, data.WorkspaceID, func(guarded context.Context) error {
-		topic := approvalevents.TopicApprovalCommandRecordResolution
-		event := magicevent.NewEventWithContext(topic, modulecommon.ModuleID, approvalevents.ResolutionRecordCommandDestination, magicevent.NewHeader(), guarded, approvalevents.RecordApprovalResolutionCommand{Data: data})
-		event.BindLaneKey(workorchevents.EventHubLaneKeyFor(approvalevents.Contracts(), topic, eventcontract.LaneScope{
+		topic := eventstreamevents.TopicEventStreamCommandRecordApprovalResolution
+		command := eventstreamevents.RecordApprovalResolutionCommand{Data: eventstreamevents.ApprovalResolutionFact{
+			NotificationID: data.NotificationID, ResolutionID: data.ResolutionID, ApprovalID: data.ApprovalID,
+			WorkspaceID: data.WorkspaceID, RunID: data.RunID, StepID: data.StepID, Reason: data.Reason, Action: data.Action,
+			Context: append([]workorcheventpayload.Field(nil), data.Context...), ResolutionContext: append([]workorcheventpayload.Field(nil), data.ResolutionContext...),
+			PrincipalKind: string(data.Principal.Kind), PrincipalSubjectID: data.Principal.SubjectID, State: data.State,
+		}}
+		event := magicevent.NewEventWithContext(topic, modulecommon.ModuleID, eventstreamevents.CommandDestination, magicevent.NewHeader(), guarded, command)
+		event.BindLaneKey(workorchevents.EventHubLaneKeyFor(eventstreamevents.Contracts(), topic, eventcontract.LaneScope{
 			SubjectType: "approval", SubjectID: string(data.ApprovalID), WorkspaceID: string(data.WorkspaceID), RunID: string(data.RunID), StepID: string(data.StepID),
 		}))
 		result := m.SendEvent(event)
@@ -88,7 +96,7 @@ func (m *Biz) recordApprovalResolution(ctx context.Context, data approvalevents.
 			}
 			return resultErr
 		}
-		response, ok := value.(approvalevents.RecordApprovalResolutionResult)
+		response, ok := value.(eventstreamevents.RecordApprovalResolutionResult)
 		if !ok || response.NotificationID != data.NotificationID || response.ResolutionID != data.ResolutionID || response.ApprovalID != data.ApprovalID ||
 			response.WorkspaceID != data.WorkspaceID || response.RunID != data.RunID {
 			return common.ErrInvalidArgument

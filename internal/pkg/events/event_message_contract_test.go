@@ -61,7 +61,7 @@ func TestOwnerEventContractsAreCompleteAndUnique(t *testing.T) {
 	// retirement adds Orchestrator Begin/Confirm quiescence and Run Finalize;
 	// each carries immutable facts while the respective owner-private reducer
 	// remains the sole transition authority.
-	const expectedProductionTopicCount = 282
+	const expectedProductionTopicCount = 283
 	if len(contracts) != expectedProductionTopicCount {
 		t.Fatalf("production EventHub topic inventory = %d, want %d; adjudicate additions/removals in the active component contract closure plan", len(contracts), expectedProductionTopicCount)
 	}

@@ -14,7 +14,7 @@ import (
 var (
 	runtimeSemanticTopLevelFields = []string{"batchCoverageWorkItemIds", "batchId", "batchSequence", "coverageOrder", "definitionSeedHash", "diagnosticMessage", "documentKind", "gapKind", "manifestHash", "offendingItemRefs", "planStep", "proposals", "resultKind", "schemaVersion"}
 	runtimeSemanticProposalFields = []string{"coverageWorkItemId", "declarationRef", "operationKind", "operationVariantId", "ownerModuleId", "requiredEvidenceKinds", "target", "validationRecipeId"}
-	runtimeSemanticTargetFields   = []string{"exactTargetRefs", "ownerScopeTargetRefs", "ownerSelectorRefs", "policy", "prospectiveConstraintRefs", "prospectiveTargetRef"}
+	runtimeSemanticTargetFields   = []string{"exactTargetRefs", "ownerScopeTargetRefs", "ownerSelectorRefs", "policy", "prospectiveConstraintRefs", "prospectiveTargetRefs"}
 )
 
 type runtimeSemanticPlanPayload struct {
@@ -47,7 +47,7 @@ type runtimeSemanticTargetPayload struct {
 	OwnerScopeTargetRefs      []string                     `json:"ownerScopeTargetRefs,omitempty"`
 	OwnerSelectorRefs         []string                     `json:"ownerSelectorRefs,omitempty"`
 	ProspectiveConstraintRefs []string                     `json:"prospectiveConstraintRefs,omitempty"`
-	ProspectiveTargetRef      string                       `json:"prospectiveTargetRef,omitempty"`
+	ProspectiveTargetRefs     []string                     `json:"prospectiveTargetRefs,omitempty"`
 }
 
 // deriveRuntimeSemanticProposalEffects compiles the internal proposal effect
@@ -133,7 +133,7 @@ func DecodeRuntimeSemanticPlanPayloadWithManifest(manifest RuntimeSemanticPlanMa
 			Target: RuntimeOperationTargetAuthorization{
 				Policy: value.Target.Policy, ExactTargetRefs: value.Target.ExactTargetRefs,
 				OwnerScopeTargetRefs: value.Target.OwnerScopeTargetRefs, OwnerSelectorRefs: value.Target.OwnerSelectorRefs,
-				ProspectiveConstraintRefs: value.Target.ProspectiveConstraintRefs, ProspectiveTargetRef: value.Target.ProspectiveTargetRef,
+				ProspectiveConstraintRefs: value.Target.ProspectiveConstraintRefs, ProspectiveTargetRefs: value.Target.ProspectiveTargetRefs,
 			},
 			RequiredEvidenceKinds: value.RequiredEvidenceKinds, RequiredEffectScopes: deriveRuntimeSemanticProposalEffects(manifest, value),
 			ValidationRecipeID: value.ValidationRecipeID,
@@ -194,7 +194,7 @@ func EncodeRuntimeSemanticPlanPayloadWithManifest(manifest RuntimeSemanticPlanMa
 			Target: runtimeSemanticTargetPayload{
 				Policy: value.Target.Policy, ExactTargetRefs: value.Target.ExactTargetRefs,
 				OwnerScopeTargetRefs: value.Target.OwnerScopeTargetRefs, OwnerSelectorRefs: value.Target.OwnerSelectorRefs,
-				ProspectiveConstraintRefs: value.Target.ProspectiveConstraintRefs, ProspectiveTargetRef: value.Target.ProspectiveTargetRef,
+				ProspectiveConstraintRefs: value.Target.ProspectiveConstraintRefs, ProspectiveTargetRefs: value.Target.ProspectiveTargetRefs,
 			},
 			RequiredEvidenceKinds: value.RequiredEvidenceKinds,
 			ValidationRecipeID:    value.ValidationRecipeID,
@@ -250,6 +250,21 @@ func validateRuntimeSemanticPayloadFields(payload []byte) error {
 		}
 		if err := validateRuntimeSemanticObjectFields(fmt.Sprintf("$.proposals[%d].target", idx), target, runtimeSemanticTargetFields, []string{"policy"}); err != nil {
 			return err
+		}
+		if rawRefs, found := target["prospectiveTargetRefs"]; found {
+			var refs []string
+			if err := json.Unmarshal(rawRefs, &refs); err != nil {
+				return &RuntimeCandidatePayloadDiagnostic{Path: fmt.Sprintf("$.proposals[%d].target.prospectiveTargetRefs", idx), Actual: "non_string_array", Allowed: []string{"bounded unique string array"}, Cause: err}
+			}
+			normalized := normalizeStrings(refs)
+			if len(refs) == 0 || len(refs) > RuntimeProspectiveTargetRefsMaxCount || len(normalized) != len(refs) {
+				return &RuntimeCandidatePayloadDiagnostic{Path: fmt.Sprintf("$.proposals[%d].target.prospectiveTargetRefs", idx), Actual: "empty_duplicate_or_out_of_bound", Allowed: []string{fmt.Sprintf("1..%d unique non-empty target refs", RuntimeProspectiveTargetRefsMaxCount)}, Cause: fmt.Errorf("runtime semantic prospective target set is invalid")}
+			}
+			for refIndex, ref := range refs {
+				if strings.TrimSpace(ref) != ref || !runtimeProspectiveTargetRefValid(ref) {
+					return &RuntimeCandidatePayloadDiagnostic{Path: fmt.Sprintf("$.proposals[%d].target.prospectiveTargetRefs[%d]", idx, refIndex), Actual: ref, Allowed: []string{"canonical workspace-relative target ref"}, Cause: fmt.Errorf("runtime semantic prospective target ref is invalid")}
+				}
+			}
 		}
 	}
 	return nil
@@ -363,7 +378,7 @@ func RuntimeSemanticPlanJSONSchema(manifest RuntimeSemanticPlanManifest) (string
 					"target": map[string]any{"type": "object", "additionalProperties": false, "required": []string{"policy"}, "properties": map[string]any{
 						"policy": map[string]any{"type": "string", "enum": policies}, "exactTargetRefs": stringEnumArraySchema(targetRefs),
 						"ownerScopeTargetRefs": stringEnumArraySchema(targetRefs), "ownerSelectorRefs": stringEnumArraySchema(selectorRefs),
-						"prospectiveConstraintRefs": stringEnumArraySchema(constraintRefs), "prospectiveTargetRef": map[string]any{"type": "string", "minLength": 1, "maxLength": 65536},
+						"prospectiveConstraintRefs": stringEnumArraySchema(constraintRefs), "prospectiveTargetRefs": map[string]any{"type": "array", "minItems": 1, "maxItems": RuntimeProspectiveTargetRefsMaxCount, "uniqueItems": true, "items": map[string]any{"type": "string", "minLength": 1, "maxLength": 65536}},
 					}},
 					"requiredEvidenceKinds": stringEnumArraySchemaWithMinimum([]string{EvidenceKindStateChange, EvidenceKindValidation}, 1),
 					"validationRecipeId":    stringEnumSchema(recipeIDs),
@@ -399,9 +414,9 @@ func RuntimeSemanticPlanJSONSchema(manifest RuntimeSemanticPlanManifest) (string
 				// A prospective target is intentionally not enum-bound to the
 				// current target catalog: it denotes the resource to be created
 				// under the sealed selector/constraint facts.
-				"prospectiveTargetRef": map[string]any{"type": "string", "minLength": 1},
+				"prospectiveTargetRefs": map[string]any{"type": "array", "minItems": 1, "maxItems": RuntimeProspectiveTargetRefsMaxCount, "uniqueItems": true, "items": map[string]any{"type": "string", "minLength": 1}},
 			},
-			"required": []string{"policy", "ownerSelectorRefs", "prospectiveConstraintRefs", "prospectiveTargetRef"},
+			"required": []string{"policy", "ownerSelectorRefs", "prospectiveConstraintRefs", "prospectiveTargetRefs"},
 		},
 	}
 	// Validation is an owner capability, not a global property. The owner
@@ -651,41 +666,55 @@ func attachRuntimeSemanticProofObligationSchema(items map[string]any, manifest R
 			"ownerSelectorRefs": exactStringArraySchema([]string{acquisition.AcquisitionTargetSelectorRef}),
 		}
 		if acquisition.AcquisitionTargetPolicy == RuntimeOperationTargetPolicyProspectiveOwnerTarget {
-			targetRequired = append(targetRequired, "prospectiveConstraintRefs", "prospectiveTargetRef")
+			targetRequired = append(targetRequired, "prospectiveConstraintRefs", "prospectiveTargetRefs")
 			targetProperties["prospectiveConstraintRefs"] = exactStringArraySchema(acquisition.AcquisitionConstraintRefs)
-			prospectiveTargetSchema := map[string]any{"type": "string", "minLength": 1, "maxLength": 65536}
+			prospectiveTargetItemSchema := map[string]any{"type": "string", "minLength": 1, "maxLength": 65536}
 			switch len(obligation.DeclarationTargetSelectorCandidateRefs) {
 			case 1:
-				prospectiveTargetSchema["const"] = obligation.DeclarationTargetSelectorCandidateRefs[0]
+				prospectiveTargetItemSchema["const"] = obligation.DeclarationTargetSelectorCandidateRefs[0]
 			default:
 				if len(obligation.DeclarationTargetSelectorCandidateRefs) > 1 {
-					prospectiveTargetSchema["enum"] = append([]string(nil), obligation.DeclarationTargetSelectorCandidateRefs...)
+					prospectiveTargetItemSchema["enum"] = append([]string(nil), obligation.DeclarationTargetSelectorCandidateRefs...)
 				}
 			}
 			constraint := acquisition.ProspectiveTargetSatisfactionConstraint
 			if constraint == nil {
 				return fmt.Errorf("runtime semantic proof-batch coverage %q has no typed prospective target constraint", coverageID)
 			}
-			constraintAllOf := []any{
+			prospectiveTargetItemAllOf := []any{
 				map[string]any{"not": map[string]any{"pattern": "^/"}},
 				map[string]any{"not": map[string]any{"pattern": `(^|/)\.(/|$)`}},
 				map[string]any{"not": map[string]any{"pattern": `(^|/)\.\.(/|$)`}},
 				map[string]any{"not": map[string]any{"pattern": `\\`}},
 			}
-			for _, predicate := range constraint.Normalized().AllOf {
-				switch predicate.Kind {
-				case RuntimeProspectiveTargetPredicatePathSuffix:
-					constraintAllOf = append(constraintAllOf, map[string]any{"pattern": regexp.QuoteMeta(predicate.Value) + "$"})
-				case RuntimeProspectiveTargetPredicatePathPrefix:
-					constraintAllOf = append(constraintAllOf, map[string]any{"pattern": "^" + regexp.QuoteMeta(predicate.Value)})
-				case RuntimeProspectiveTargetPredicatePathSegmentNotEqual:
-					constraintAllOf = append(constraintAllOf, map[string]any{"not": map[string]any{"pattern": "(^|/)" + regexp.QuoteMeta(predicate.Value) + "(/|$)"}})
-				default:
-					return fmt.Errorf("runtime semantic proof-batch coverage %q has unsupported prospective target predicate %q", coverageID, predicate.Kind)
-				}
+			prospectiveTargetItemSchema["allOf"] = prospectiveTargetItemAllOf
+			prospectiveTargetRefsSchema := map[string]any{
+				"type": "array", "minItems": 1, "maxItems": RuntimeProspectiveTargetRefsMaxCount,
+				"uniqueItems": true, "items": prospectiveTargetItemSchema,
 			}
-			prospectiveTargetSchema["allOf"] = constraintAllOf
-			targetProperties["prospectiveTargetRef"] = prospectiveTargetSchema
+			clauseCoverage := make([]any, 0, len(constraint.AllOf))
+			for _, clause := range constraint.Normalized().AllOf {
+				clausePredicates := make([]any, 0, len(clause.AllOf))
+				for _, predicate := range clause.AllOf {
+					switch predicate.Kind {
+					case RuntimeProspectiveTargetPredicatePathSuffix:
+						clausePredicates = append(clausePredicates, map[string]any{"pattern": regexp.QuoteMeta(predicate.Value) + "$"})
+					case RuntimeProspectiveTargetPredicatePathPrefix:
+						clausePredicates = append(clausePredicates, map[string]any{"pattern": "^" + regexp.QuoteMeta(predicate.Value)})
+					case RuntimeProspectiveTargetPredicatePathExact:
+						clausePredicates = append(clausePredicates, map[string]any{"const": predicate.Value})
+					case RuntimeProspectiveTargetPredicatePathSegmentNotEqual:
+						clausePredicates = append(clausePredicates, map[string]any{"not": map[string]any{"pattern": "(^|/)" + regexp.QuoteMeta(predicate.Value) + "(/|$)"}})
+					default:
+						return fmt.Errorf("runtime semantic proof-batch coverage %q has unsupported prospective target predicate %q", coverageID, predicate.Kind)
+					}
+				}
+				clauseCoverage = append(clauseCoverage, map[string]any{
+					"contains": map[string]any{"type": "string", "allOf": clausePredicates}, "minContains": 1,
+				})
+			}
+			prospectiveTargetRefsSchema["allOf"] = clauseCoverage
+			targetProperties["prospectiveTargetRefs"] = prospectiveTargetRefsSchema
 		}
 		proposalProperties := map[string]any{
 			"ownerModuleId":         map[string]any{"const": acquisition.AcquisitionOwnerModuleID},

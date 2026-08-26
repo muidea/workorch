@@ -7,8 +7,8 @@ import (
 
 	magicevent "github.com/muidea/magicCommon/event"
 	modulecommon "github.com/muidea/workorch/internal/modules/blocks/approval/pkg/common"
-	approvalevents "github.com/muidea/workorch/internal/modules/blocks/approval/pkg/events"
 	approvalmodel "github.com/muidea/workorch/internal/modules/blocks/approval/pkg/models"
+	orchestratorevents "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/eventcontract"
 	workorchevents "github.com/muidea/workorch/internal/pkg/events"
@@ -29,15 +29,17 @@ func (m *Biz) recordApprovalGovernanceEvidence(ctx context.Context, item *approv
 	if timestamp == "" {
 		return common.ErrConflict
 	}
-	command := approvalevents.RecordApprovalEvidenceCommand{
-		EvidenceRecordID:  orchestratormodel.StableEvidenceRecordID(fmt.Sprintf("%s/%s/%s", item.WorkspaceID, item.RunID, item.ID), "approval", "approval"),
-		WorkspaceID:       item.WorkspaceID,
-		RunID:             item.RunID,
-		StepID:            item.StepID,
-		ApprovalID:        item.ID,
-		ApprovalState:     item.State,
-		ResolutionID:      item.ResolutionID,
-		Principal:         item.ResolutionPrincipal.Normalized(),
+	command := orchestratorevents.RecordApprovalEvidenceCommand{
+		EvidenceRecordID: orchestratormodel.StableEvidenceRecordID(fmt.Sprintf("%s/%s/%s", item.WorkspaceID, item.RunID, item.ID), "approval", "approval"),
+		WorkspaceID:      item.WorkspaceID,
+		RunID:            item.RunID,
+		StepID:           item.StepID,
+		ApprovalID:       item.ID,
+		ApprovalState:    item.State,
+		ResolutionID:     item.ResolutionID,
+		Principal: orchestratorevents.GovernanceEvidencePrincipal{
+			Kind: string(item.ResolutionPrincipal.Kind), SubjectID: item.ResolutionPrincipal.SubjectID,
+		}.Normalized(),
 		Reason:            strings.TrimSpace(item.Reason),
 		Action:            strings.TrimSpace(item.Action),
 		Context:           item.Context.Clone().Fields,
@@ -46,14 +48,14 @@ func (m *Biz) recordApprovalGovernanceEvidence(ctx context.Context, item *approv
 	}
 	return m.withWorkspaceActiveDelivery(ctx, item.WorkspaceID, func(guarded context.Context) error {
 		ev := magicevent.NewEventWithContext(
-			approvalevents.TopicApprovalCommandRecordEvidence,
+			orchestratorevents.TopicOrchestratorCommandRecordApprovalEvidence,
 			modulecommon.ModuleID,
-			approvalevents.EvidenceCommandDestination,
+			orchestratorevents.CommandDestination,
 			magicevent.NewHeader(),
 			guarded,
 			command,
 		)
-		ev.BindLaneKey(workorchevents.EventHubLaneKeyFor(approvalevents.Contracts(), ev.ID(), eventcontract.LaneScope{
+		ev.BindLaneKey(workorchevents.EventHubLaneKeyFor(orchestratorevents.Contracts(), ev.ID(), eventcontract.LaneScope{
 			SubjectType: "approval",
 			SubjectID:   string(item.ID),
 			WorkspaceID: string(item.WorkspaceID),
@@ -77,7 +79,7 @@ func (m *Biz) recordApprovalGovernanceEvidence(ctx context.Context, item *approv
 			}
 			return resultErr
 		}
-		response, ok := data.(approvalevents.RecordApprovalEvidenceResult)
+		response, ok := data.(orchestratorevents.RecordApprovalEvidenceResult)
 		if !ok || response.EvidenceRecordID != command.EvidenceRecordID || response.WorkspaceID != command.WorkspaceID || response.RunID != command.RunID ||
 			response.ApprovalID != command.ApprovalID || response.ResolutionID != command.ResolutionID || response.ApprovalState != command.ApprovalState {
 			return fmt.Errorf("%w: approval evidence result type %T", common.ErrInvalidArgument, data)

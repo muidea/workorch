@@ -248,7 +248,7 @@ func TestRuntimeSemanticDriveUsesPersistedRequestSessionAndExcludesRetiredGenera
 				Target: runtimecontract.RuntimeOperationTargetAuthorization{
 					Policy:            runtimecontract.RuntimeOperationTargetPolicyProspectiveOwnerTarget,
 					OwnerSelectorRefs: []string{"workspace-relative-new-file-target"}, ProspectiveConstraintRefs: []string{"workspace-relative-path"},
-					ProspectiveTargetRef: "new-target.txt",
+					ProspectiveTargetRefs: []string{"new-target.txt"},
 				},
 				RequiredEvidenceKinds: []string{runtimecontract.EvidenceKindStateChange},
 				RequiredEffectScopes:  []runtimecontract.RuntimeEffectScope{runtimecontract.RuntimeEffectWorkspaceDurable},
@@ -267,7 +267,7 @@ func TestRuntimeSemanticDriveUsesPersistedRequestSessionAndExcludesRetiredGenera
 			return
 		}
 		if command.SemanticContext.PlanStep == runtimecontract.RuntimeSemanticPlanStepProofBatch && command.CandidateAttempt == 0 {
-			payload = []byte(strings.Replace(string(payload), `"prospectiveTargetRef":"new-target.txt"`, `"prospectiveTargetRef":"target.txt"`, 1))
+			payload = []byte(strings.Replace(string(payload), `"prospectiveTargetRefs":["new-target.txt"]`, `"prospectiveTargetRefs":["target.txt"]`, 1))
 		}
 		result.Set(runtimeProviderResultWithAuditForTest(command, llmevents.RequestRuntimeCandidateResult{
 			DocumentKind: command.DocumentKind, RequestIdentity: command.RequestIdentity,

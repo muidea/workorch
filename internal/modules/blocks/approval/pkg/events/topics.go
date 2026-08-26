@@ -13,8 +13,6 @@ const (
 	TopicApprovalCommandSealWorkspaceDeletion = "/approval/command/seal-workspace-deletion"
 	TopicApprovalCommandEnsureApproved        = "/approval/command/ensure-approved"
 	TopicApprovalCommandEnsureRejected        = "/approval/command/ensure-rejected"
-	TopicApprovalCommandRecordEvidence        = "/approval/command/record-evidence"
-	TopicApprovalCommandRecordResolution      = "/approval/command/record-resolution"
 	TopicOpenRuntimeApprovalRequest           = "/approval/runtime-governance/open-request"
 	TopicAcquireRuntimeCapabilities           = "/approval/runtime-prerequisite/acquire-capabilities"
 )

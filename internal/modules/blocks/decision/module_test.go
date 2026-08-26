@@ -255,16 +255,16 @@ func subscribeRuntimeGovernanceCommit(rawHub magicevent.Hub) func() {
 }
 
 func subscribeDecisionEvidenceAck(rawHub magicevent.Hub) func() {
-	observer := magicevent.NewSimpleObserver(decisionevents.EvidenceCommandDestination, rawHub)
-	observer.Subscribe(decisionevents.TopicDecisionCommandRecordEvidence, func(ev magicevent.Event, result magicevent.Result) {
-		command, ok := ev.Data().(decisionevents.RecordDecisionEvidenceCommand)
+	observer := magicevent.NewSimpleObserver(orchestratorevents.CommandDestination, rawHub)
+	observer.Subscribe(orchestratorevents.TopicOrchestratorCommandRecordDecisionEvidence, func(ev magicevent.Event, result magicevent.Result) {
+		command, ok := ev.Data().(orchestratorevents.RecordDecisionEvidenceCommand)
 		if !ok {
 			result.Set(nil, nil)
 			return
 		}
-		result.Set(decisionevents.RecordDecisionEvidenceResult{EvidenceRecordID: command.EvidenceRecordID}, nil)
+		result.Set(orchestratorevents.RecordDecisionEvidenceResult{EvidenceRecordID: command.EvidenceRecordID}, nil)
 	})
-	return func() { observer.Unsubscribe(decisionevents.TopicDecisionCommandRecordEvidence) }
+	return func() { observer.Unsubscribe(orchestratorevents.TopicOrchestratorCommandRecordDecisionEvidence) }
 }
 
 func TestModuleIdentityConfigureStartStopContract(t *testing.T) {
@@ -908,10 +908,10 @@ func TestRuntimeGovernanceEvidenceFailureRecoversAfterFinalize(t *testing.T) {
 	t.Cleanup(unsubCommit)
 	evidenceFails := true
 	evidenceCalls := 0
-	evidenceObserver := magicevent.NewSimpleObserver(decisionevents.EvidenceCommandDestination, rawHub)
-	evidenceObserver.Subscribe(decisionevents.TopicDecisionCommandRecordEvidence, func(event magicevent.Event, result magicevent.Result) {
+	evidenceObserver := magicevent.NewSimpleObserver(orchestratorevents.CommandDestination, rawHub)
+	evidenceObserver.Subscribe(orchestratorevents.TopicOrchestratorCommandRecordDecisionEvidence, func(event magicevent.Event, result magicevent.Result) {
 		evidenceCalls++
-		command, ok := event.Data().(decisionevents.RecordDecisionEvidenceCommand)
+		command, ok := event.Data().(orchestratorevents.RecordDecisionEvidenceCommand)
 		if !ok {
 			result.Set(nil, cd.NewError(cd.IllegalParam, "wrong evidence command"))
 			return
@@ -920,9 +920,11 @@ func TestRuntimeGovernanceEvidenceFailureRecoversAfterFinalize(t *testing.T) {
 			result.Set(nil, cd.NewError(cd.Unexpected, "injected evidence failure"))
 			return
 		}
-		result.Set(decisionevents.RecordDecisionEvidenceResult{EvidenceRecordID: command.EvidenceRecordID}, nil)
+		result.Set(orchestratorevents.RecordDecisionEvidenceResult{EvidenceRecordID: command.EvidenceRecordID}, nil)
 	})
-	t.Cleanup(func() { evidenceObserver.Unsubscribe(decisionevents.TopicDecisionCommandRecordEvidence) })
+	t.Cleanup(func() {
+		evidenceObserver.Unsubscribe(orchestratorevents.TopicOrchestratorCommandRecordDecisionEvidence)
+	})
 
 	command := runtimeGovernanceResolutionCommand(ticketID, workspaceID, runID)
 	if _, err := sendDecisionTestCommand[decisionevents.EnsureResolvedResult](ctx, rawHub, decisionevents.TopicDecisionCommandEnsureResolved, command); err == nil {

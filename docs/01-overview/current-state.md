@@ -49,7 +49,7 @@ this path without a parallel compatibility authority.
 - explicit `one_of`/`any_of`, threshold or unresolved required relation creates a blocking clarification ticket and cannot create a Run;
 - promotion seals exact Goal/DoD, Template/Profile snapshot, resolved directory and `StartupInputHash`; Definition admission
   additionally binds canonical Template/Workspace evidence-policy snapshots through `AdmissionPolicyBindings` and rejects any
-  legacy `prospectiveTargetRef` before promotion, so policy sealing cannot preselect a Runtime exact target;
+  legacy `prospectiveTargetRef` before promotion, so policy sealing cannot preselect a Runtime exact target set;
 - formal Workspace-owned DoD resource only has `ready`; pre-seal draft belongs to the admission candidate, while
   satisfied/unsatisfied/indeterminate are per-Run Orchestrator assessment facts and are never written back to the DoD definition;
 - every Start/Restart ingress requires `WorkspaceActivationAdmission=eligible`;
@@ -60,11 +60,15 @@ this path without a parallel compatibility authority.
   command/result；affected focus停止新operation，修正只通过新candidate + explicit Restart进入successor，predecessor不扩图。
 - every prospective owner-fact acquisition seals an exact `ProspectiveSatisfactionContractRef`; Runtime composes the acquisition
   owner's hypothetical delta with the required owner's non-selectable dependency observation. The dependency catalog never
-  becomes an LLM-selectable operation/surface. The required owner publishes one provider-safe typed `all_of` target constraint;
-  Runtime seals it into the acquisition/manifest and projects it only in C3. Definition/activation does not seal an exact
-  prospective target: SM-3 proposes it at the intersection of Definition declaration selector/candidate refs, current operation
-  selector/owner constraints and that typed constraint. A mismatch is rejected by document admission/schema correction with zero
-  File/Shell probe; only the SM-2 binding makes an admitted owner-validated target authoritative. An exact-current composite
+  becomes an LLM-selectable operation/surface. The required owner publishes one provider-safe typed mandatory-`all_of` clause
+  constraint; Runtime seals it into the acquisition/manifest and projects it only in C3. Definition/activation does not seal an
+  exact prospective target set: one SM-3 semantic proposal supplies 1–8 unique canonical `ProspectiveTargetRefs` at the intersection
+  of Definition declaration selector/candidate refs and current operation selector/owner constraints. Every clause must be
+  covered and every target must contribute; no `one_of`/`any_of` or singular compatibility field is accepted. File applies
+  path/absence/parent/aggregate-capacity admission to the entire set on one complete manifest and returns only a no-side-effect
+  hypothetical delta; Shell judges `would_satisfy` only from its resulting manifest. A mismatch is rejected by document
+  admission/schema correction with zero File/Shell probe; only the SM-2 binding makes the admitted owner-validated set
+  authoritative. SM-3 then requires one exact-singleton, canonically ordered operation per target. An exact-current composite
   `would_not_satisfy` contradicts the published contract and directly closes
   `prospective_satisfaction_contract_violated -> semantic_contract_failed`; stale only refreshes facts.
 

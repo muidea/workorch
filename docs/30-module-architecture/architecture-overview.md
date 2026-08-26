@@ -4,7 +4,7 @@ Status: normative
 
 Type: module-architecture
 
-Last Verified: 2026-08-25
+Last Verified: 2026-08-26
 
 ## Stable Layers
 
@@ -71,10 +71,13 @@ projection-to-owner repair, and application-to-Orchestrator service calls.
 - Runtime aggregate is typed, Orchestrator-owned semantically, and Run-owned only as opaque CAS storage;
 - core Runtime remains profile/domain neutral;
 - prospective owner-fact feasibility composes acquisition-owner delta and required-owner dependency observation through typed
-  queries; the exact target is an SM-3 proposal until SM-2 seals the owner-validated binding, operation candidate references that
-  binding and dispatch derives its target from it. The required owner publishes one provider-safe typed `all_of` constraint that
-  is sealed into acquisition/manifest/C3; mismatch is handled by document admission/schema correction before any capability
-  probe. Non-selectable dependency catalogs remain out of the LLM surface and no participant mutates a sibling owner. A complete
+  queries; one SM-3 semantic proposal carries 1–8 unique canonical exact target refs until SM-2 seals the owner-validated set,
+  operation candidate references that binding, and the required operation sequence binds one exact-singleton target per ordered
+  operation. The required owner publishes one provider-safe typed mandatory-`all_of` clause constraint that is sealed into
+  acquisition/manifest/C3; every clause must be covered and every target must contribute, with no `one_of`/`any_of` or singular
+  compatibility field. File applies whole-set hypothetical manifest admission with no side effect; Shell judges only the resulting
+  manifest. Mismatch is handled by document admission/schema correction before any capability probe. Non-selectable dependency
+  catalogs remain out of the LLM surface and no participant mutates a sibling owner. A complete
   `would_not_satisfy` is an owner-contract contradiction and directly closes
   `prospective_satisfaction_contract_violated -> semantic_contract_failed`; stale stays on fact refresh;
 - removed StagePacket, NextAction, DispatchNextStep, ExecutionContextPatch, graph dispatcher and application recovery queues are

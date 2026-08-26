@@ -64,7 +64,7 @@ func TestBuildRuntimeCandidateContractManifestNarrowsCreationScopeWithoutSecondF
 		t.Fatalf("file operation manifest did not preserve target/dependency contract: %+v", operation)
 	}
 	if operation.Target.Policy != RuntimeOperationTargetPolicyProspectiveOwnerTarget ||
-		operation.Target.ProspectiveTargetRef != "new-file.txt" ||
+		!reflect.DeepEqual(operation.Target.ProspectiveTargetRefs, []string{"new-file.txt"}) ||
 		len(operation.Target.ExactTargetRefs) != 0 {
 		t.Fatalf("create selection must seal prospective_owner_target: %+v", operation.Target)
 	}
@@ -73,6 +73,66 @@ func TestBuildRuntimeCandidateContractManifestNarrowsCreationScopeWithoutSecondF
 	missingTarget.ProspectiveTargetRef = ""
 	if _, err := BuildRuntimeCandidateContractManifest(decision, RuntimeCandidateManifestOwnerFacts{TargetSelection: &missingTarget, OperationAdmissibilities: []RuntimeOperationAdmissibility{inventory}}); err == nil || !strings.Contains(err.Error(), "requires a binding-derived prospective target") {
 		t.Fatalf("create selection rebuilt missing prospective target from required output: %v", err)
+	}
+}
+
+func TestBuildRuntimeCandidateContractManifestSealsCompleteProspectiveBindingTargetSetWithoutSelection(t *testing.T) {
+	decision := runtimeCandidateTestDecisionWithBindings(t, RuntimeDecision{
+		State: ConvergenceStateNeedStateChange,
+		RequiredOutput: RequiredOutputContract{
+			AcceptedKinds:         []string{StepKindFileWrite},
+			AcceptedEffectScopes:  []RuntimeEffectScope{RuntimeEffectWorkspaceDurable},
+			RequiredEffectScopes:  []RuntimeEffectScope{RuntimeEffectWorkspaceDurable},
+			RequiredEvidenceKinds: []string{EvidenceKindStateChange},
+			CoverageWorkItemIDs:   []common.CoverageWorkItemID{"cwi-1"},
+		},
+	})
+	targetRefs := []string{"go.mod", "internal/example/runtime_test.go"}
+	binding := decision.Focus.CoverageEvidenceBindings[0]
+	binding.TargetSelectorRef = "file/workspace-relative-create"
+	binding.TargetSelectorCandidateRefs = append([]string(nil), targetRefs...)
+	binding.ProspectiveTargetRefs = append([]string(nil), targetRefs...)
+	decision.Focus.TargetSelectorRef = binding.TargetSelectorRef
+	decision.Focus.TargetSelectorOwnerRef = binding.TargetSelectorOwnerRef
+	decision.Focus.TargetSelectorSubjectRef = binding.TargetSelectorSubjectRef
+	decision.Focus.TargetSelectorCandidateRefs = append([]string(nil), targetRefs...)
+	decision.Focus.ProspectiveTargetRefs = append([]string(nil), targetRefs...)
+	decision.Focus.CoverageEvidenceBindings = NormalizeCoverageEvidenceBindings([]CoverageEvidenceBinding{binding})
+
+	inventory := RuntimeOperationAdmissibility{
+		PrerequisiteID: "admissibility-file-create", OwnerModuleID: RuntimeModuleFile,
+		OperationKinds: []string{StepKindFileWrite}, SelectorRefs: []string{binding.TargetSelectorRef},
+		ConstraintRefs: []string{"workspace-relative-path"}, ObservedRevision: "workspace-empty-v1",
+		OperationVariants: []RuntimeOperationAdmissibilityVariant{{
+			Kind:                  StepKindFileWrite,
+			AllowedTargetPolicies: []RuntimeOperationTargetPolicy{RuntimeOperationTargetPolicyProspectiveOwnerTarget},
+			SelectorRefs:          []string{binding.TargetSelectorRef}, ConstraintRefs: []string{"workspace-relative-path"},
+		}},
+	}
+	inventory.SnapshotID = StableRuntimeOperationAdmissibilitySnapshotID(inventory)
+	manifest, err := BuildRuntimeCandidateContractManifest(decision, RuntimeCandidateManifestOwnerFacts{
+		OperationAdmissibilities: []RuntimeOperationAdmissibility{inventory},
+	})
+	if err != nil {
+		t.Fatalf("prospective binding target-set manifest: %v", err)
+	}
+	if len(manifest.Operations) != 1 {
+		t.Fatalf("prospective binding manifest operations = %+v", manifest.Operations)
+	}
+	target := manifest.Operations[0].Target
+	if target.Policy != RuntimeOperationTargetPolicyProspectiveOwnerTarget ||
+		!reflect.DeepEqual(target.ProspectiveTargetRefs, targetRefs) ||
+		!reflect.DeepEqual(target.OwnerSelectorRefs, []string{binding.TargetSelectorRef}) ||
+		!reflect.DeepEqual(target.ProspectiveConstraintRefs, []string{"workspace-relative-path"}) ||
+		!reflect.DeepEqual(target.AllowedTargetRefs(), targetRefs) ||
+		len(manifest.Operations[0].PrerequisiteSnapshotRefs) != 0 {
+		t.Fatalf("prospective binding target authorization = %+v", target)
+	}
+	withoutProspectivePolicy := inventory
+	withoutProspectivePolicy.OperationVariants[0].AllowedTargetPolicies = []RuntimeOperationTargetPolicy{RuntimeOperationTargetPolicyExactTarget}
+	withoutProspectivePolicy.SnapshotID = StableRuntimeOperationAdmissibilitySnapshotID(withoutProspectivePolicy)
+	if _, err := BuildRuntimeCandidateContractManifest(decision, RuntimeCandidateManifestOwnerFacts{OperationAdmissibilities: []RuntimeOperationAdmissibility{withoutProspectivePolicy}}); err == nil {
+		t.Fatal("prospective binding target set was sealed without matching owner admissibility")
 	}
 }
 
@@ -339,7 +399,7 @@ func TestBuildRuntimeCandidateContractManifestSealsThreeTargetPolicies(t *testin
 		}
 		operation := manifest.Operations[0]
 		if operation.Target.Policy != RuntimeOperationTargetPolicyProspectiveOwnerTarget ||
-			operation.Target.ProspectiveTargetRef != "created.go" ||
+			!reflect.DeepEqual(operation.Target.ProspectiveTargetRefs, []string{"created.go"}) ||
 			!reflect.DeepEqual(operation.Target.OwnerSelectorRefs, []string{"file/workspace_deliverable"}) ||
 			!reflect.DeepEqual(operation.Target.ProspectiveConstraintRefs, []string{"new-target-requires-owner-selector", "workspace-relative-path"}) ||
 			!reflect.DeepEqual(operation.Target.AllowedTargetRefs(), []string{"created.go"}) {
@@ -387,7 +447,7 @@ func TestBuildRuntimeCandidateContractManifestSealsThreeTargetPolicies(t *testin
 		}
 		operation := manifest.Operations[0]
 		if operation.Target.Policy != RuntimeOperationTargetPolicyProspectiveOwnerTarget ||
-			operation.Target.ProspectiveTargetRef != "created.go" ||
+			!reflect.DeepEqual(operation.Target.ProspectiveTargetRefs, []string{"created.go"}) ||
 			!reflect.DeepEqual(operation.Target.OwnerSelectorRefs, []string{"file/workspace_deliverable"}) ||
 			!reflect.DeepEqual(operation.PrerequisiteSnapshotRefs, []string{selection.SnapshotID}) ||
 			!operation.RequireTargetRefs ||

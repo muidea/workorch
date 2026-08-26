@@ -67,12 +67,12 @@ func TestRuntimeSemanticPlanRequestSchemaNarrowsOrderAndProofBatch(t *testing.T)
 	if alternatives, ok := target["oneOf"].([]any); !ok || len(alternatives) != 3 {
 		t.Fatalf("target schema does not expose the three canonical policies: %v", target)
 	}
-	prospectiveTarget := target["properties"].(map[string]any)["prospectiveTargetRef"].(map[string]any)
-	if prospectiveTarget["minLength"] != float64(1) {
-		t.Fatalf("prospective target schema must require a non-empty ref: %v", prospectiveTarget)
+	prospectiveTargets := target["properties"].(map[string]any)["prospectiveTargetRefs"].(map[string]any)
+	if prospectiveTargets["minItems"] != float64(1) || prospectiveTargets["maxItems"] != float64(RuntimeProspectiveTargetRefsMaxCount) || prospectiveTargets["uniqueItems"] != true {
+		t.Fatalf("prospective target schema must require a bounded unique set: %v", prospectiveTargets)
 	}
-	if _, enumBound := prospectiveTarget["enum"]; enumBound {
-		t.Fatalf("prospective target schema must not require an existing catalog ref: %v", prospectiveTarget)
+	if _, enumBound := prospectiveTargets["items"].(map[string]any)["enum"]; enumBound {
+		t.Fatalf("prospective target schema must not require an existing catalog ref: %v", prospectiveTargets)
 	}
 	if strings.Contains(proofSchema, `"enum":null`) || strings.Contains(proofSchema, `requiredEffectScopes`) {
 		t.Fatalf("semantic schema emitted an invalid null enum: %s", proofSchema)
@@ -97,9 +97,9 @@ func TestRuntimeSemanticOwnerFactAcquisitionSchemaUsesOperationSelectorNotDefini
 	if !strings.Contains(schema, `"const":"file/workspace-relative-create"`) {
 		t.Fatalf("owner-fact acquisition schema lost exact operation selector: %s", schema)
 	}
-	prospectiveTarget := runtimeSemanticProspectiveTargetConstraintForTest(t, schema)
-	if prospectiveTarget["const"] != "validation-readiness.sh" {
-		t.Fatalf("owner-fact acquisition schema did not bound the dynamic proposal to the single declared candidate: %v", prospectiveTarget)
+	prospectiveTargets := runtimeSemanticProspectiveTargetConstraintForTest(t, schema)
+	if prospectiveTargets["items"].(map[string]any)["const"] != "validation-readiness.sh" {
+		t.Fatalf("owner-fact acquisition schema did not bound the dynamic proposal to the single declared candidate: %v", prospectiveTargets)
 	}
 	if !strings.Contains(schema, `"requiredEvidenceKinds":{"items":{"const":"state_change"}`) {
 		t.Fatalf("owner-fact acquisition schema did not use the current evidence obligation: %s", schema)
@@ -145,11 +145,12 @@ func TestRuntimeSemanticOwnerFactAcquisitionSchemaBoundsProspectiveTargetByCandi
 				t.Fatal(err)
 			}
 			constraint := runtimeSemanticProspectiveTargetConstraintForTest(t, schema)
-			if constraint["minLength"] != float64(1) {
-				t.Fatalf("prospective target constraint permits an empty value: %v", constraint)
+			if constraint["minItems"] != float64(1) || constraint["maxItems"] != float64(RuntimeProspectiveTargetRefsMaxCount) {
+				t.Fatalf("prospective target constraint permits an empty or unbounded set: %v", constraint)
 			}
-			actualConst, hasConst := constraint["const"]
-			actualEnum, hasEnum := constraint["enum"]
+			items := constraint["items"].(map[string]any)
+			actualConst, hasConst := items["const"]
+			actualEnum, hasEnum := items["enum"]
 			switch {
 			case tc.wantConst != "":
 				if !hasConst || actualConst != tc.wantConst || hasEnum {
@@ -217,7 +218,7 @@ func runtimeSemanticProspectiveTargetConstraintForTest(t *testing.T, schema stri
 		if !ok {
 			continue
 		}
-		prospectiveTarget, ok := targetProperties["prospectiveTargetRef"].(map[string]any)
+		prospectiveTarget, ok := targetProperties["prospectiveTargetRefs"].(map[string]any)
 		if ok {
 			return prospectiveTarget
 		}
@@ -568,10 +569,10 @@ func TestRuntimeSemanticPlanRejectsExistingCatalogTargetLabeledProspective(t *te
 	if err != nil {
 		t.Fatal(err)
 	}
-	payload = []byte(strings.Replace(string(payload), `"prospectiveTargetRef":"new-file.go"`, `"prospectiveTargetRef":"main.go"`, 1))
+	payload = []byte(strings.Replace(string(payload), `"prospectiveTargetRefs":["new-file.go"]`, `"prospectiveTargetRefs":["main.go"]`, 1))
 	_, err = DecodeRuntimeSemanticPlanPayloadWithManifest(manifest, payload)
 	var diagnostic *RuntimeCandidatePayloadDiagnostic
-	if !errors.As(err, &diagnostic) || diagnostic.Path != "$.proposals[0].target.prospectiveTargetRef" || len(diagnostic.SemanticViolations) != 1 {
+	if !errors.As(err, &diagnostic) || diagnostic.Path != "$.proposals[0].target.prospectiveTargetRefs" || len(diagnostic.SemanticViolations) != 1 {
 		t.Fatalf("diagnostic = %+v err=%v", diagnostic, err)
 	}
 	violation := diagnostic.SemanticViolations[0]
@@ -678,7 +679,7 @@ func TestRuntimeSemanticPlanPayloadPreservesTypedDependencyOrderViolation(t *tes
 
 func TestRuntimeSemanticPlanPayloadRejectsDeletedEffectField(t *testing.T) {
 	manifest := semanticContractTestManifest(t)
-	payload := `{"documentKind":"semantic_plan","schemaVersion":"` + RuntimeSemanticPlanDocumentSchemaCurrent + `","manifestHash":"` + manifest.Hash + `","definitionSeedHash":"` + manifest.DefinitionSeedHash + `","planStep":"proof_batch","batchId":"batch-1","batchSequence":0,"batchCoverageWorkItemIds":["cwi-001"],"proposals":[{"coverageWorkItemId":"cwi-001","ownerModuleId":"blocks/file","operationKind":"file/write","target":{"policy":"prospective_owner_target","ownerSelectorRefs":["file/workspace-relative-create"],"prospectiveConstraintRefs":["workspace-relative-path"],"prospectiveTargetRef":"main.go"},"requiredEvidenceKinds":["state_change"],"requiredEffectScopes":[],"declarationRef":"dod/cwi-001"}]}`
+	payload := `{"documentKind":"semantic_plan","schemaVersion":"` + RuntimeSemanticPlanDocumentSchemaCurrent + `","manifestHash":"` + manifest.Hash + `","definitionSeedHash":"` + manifest.DefinitionSeedHash + `","planStep":"proof_batch","batchId":"batch-1","batchSequence":0,"batchCoverageWorkItemIds":["cwi-001"],"proposals":[{"coverageWorkItemId":"cwi-001","ownerModuleId":"blocks/file","operationKind":"file/write","target":{"policy":"prospective_owner_target","ownerSelectorRefs":["file/workspace-relative-create"],"prospectiveConstraintRefs":["workspace-relative-path"],"prospectiveTargetRefs":["main.go"]},"requiredEvidenceKinds":["state_change"],"requiredEffectScopes":[],"declarationRef":"dod/cwi-001"}]}`
 	_, err := DecodeRuntimeSemanticPlanPayloadWithManifest(manifest, []byte(payload))
 	var diagnostic *RuntimeCandidatePayloadDiagnostic
 	if !errors.As(err, &diagnostic) || diagnostic.Path != "$.proposals[0].requiredEffectScopes" || diagnostic.Actual != "unknown_field" {

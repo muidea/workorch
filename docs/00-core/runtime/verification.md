@@ -151,20 +151,37 @@ Cross-owner regression必须证明 concrete receiving-owner Command/Result、wor
   `ProspectiveSatisfactionContractRef`，其它 policy 禁止携带；manifest 分离 provider-selectable `OwnerCatalogs` 与
   `OwnerFactDependencyCatalogs`。dependency catalog参与hash/freshness/CAS/seal但必须从 C3、allowed operation/surface、
   schema enum、correction values中完全缺席。required owner catalog 还必须发布唯一 provider-safe typed
-  `ProspectiveTargetSatisfactionConstraint`，只能表达 `all_of`；同一 constraint 封存到 acquisition/manifest/C3，dependency
-  recipe identity/command 不进入 provider。
+  `ProspectiveTargetSatisfactionConstraint`，只能表达 `all_of` mandatory clauses，每个 clause 内也只有 conjunctive
+  predicates；同一 constraint 封存到 acquisition/manifest/C3，dependency recipe identity/command 不进入 provider，且不存在
+  `one_of`/`any_of`/fallback 分支。
 - composite prospective probe必须覆盖：File outer feasibility生成exact base-workspace-tree-revision-bound immutable delta且
-  零文件/目录写入；Shell只消费该delta、activation-sealed recipes和自身dependency catalog/observation，逐surface校验
-  recipe command/ordered args/timeout schema identity且零workspace read/process/session/effect；Orchestrator不解释path/recipe。
+  零文件/目录写入；同一 complete manifest revision 上 1～8 个 prospective refs 的规范化、去重、路径逃逸、已存在、
+  parent/child 冲突、excluded tree 和 aggregate capacity 任一违例都必须零 delta/零写入；Shell 只消费该 delta、
+  activation-sealed recipes 和自身 dependency catalog/observation，逐 surface 校验 recipe command/ordered args/timeout schema
+  identity，并只基于 resulting manifest 判定，全程零 workspace read/process/session/effect；Orchestrator 不解释 path/recipe。
 - observation CAS与semantic seal分别重验manifest/batch/request/contract ref、delta、File catalog/observation与Shell dependency
   catalog/observation；probe→CAS、persist→seal任一漂移均零binding/dispatch/effect。duplicate/restart使用full composite hash
   幂等，冲突payload拒绝。
-- pre-seal Definition 不携带 exact prospective target，compiled obligation/manifest 也不回填；SM-3
-  schema/admission要求 proposal 在 Definition declaration selector/candidate refs 与 current operation selector/owner
-  constraints 交集中提交 nonempty exact target，非空 candidate refs 要求 exact member match，并同时满足 owner `all_of`
-  predicate。mismatch 在 document admission/schema correction 阶段形成 typed field violation，零 File/Shell probe。File/Shell fact
-  绑定同一 proposal hash/target，只有 SM-2 sealed binding 形成 authority；operations schema 只把 binding ref
-  作为选择面，candidate/dispatch 只从 binding 派生并消费 target。
+- pre-seal Definition 不携带 exact prospective target set，compiled obligation/manifest 也不回填；SM-3
+  schema/admission 只接受一份 proposal 中 1～8 个唯一 canonical `ProspectiveTargetRefs`，不接受 singular
+  `ProspectiveTargetRef` 兼容字段。集合中每项都必须位于 Definition declaration selector/candidate refs 与 current
+  operation selector/owner constraints 交集；非空 candidate refs 要求逐项 exact member match。每个 owner `all_of` clause
+  至少由一项完整覆盖，且每个 target 至少覆盖一个 clause。partial/extra/duplicate/mismatch 在 document
+  admission/schema correction 阶段形成 typed field violation，零 File/Shell probe。File/Shell fact 绑定同一 proposal
+  hash/target set，只有 SM-2 sealed binding 形成 authority；operations schema 只把 binding ref 作为选择面，并为
+  每个 target 要求一个 `RequiredOperationSequence` member。每项必须带 exact singleton `TargetRef`，要求齐全、
+  无额外项并按 canonical dependency chain 执行；candidate/dispatch 只从 binding 派生并消费 target。
+- multi-target prospective receipt gate 必须逐 cut point 验证：第 1..N-1 个 operation 的 owner-committed accepted exact
+  receipt 与 matching `evidence_committed` execution 只增加同一 dispatch 的 persisted progress，`ActiveDispatch` 保留，CWI
+  仍为 unsatisfied/unsettled，focus/collective credit 不推进；第 N 个 matching member 才允许 Orchestrator private event 在同一
+  CAS 中 complete dispatch 并 exactly-once 认可 collective proof。无 assessment 要求且其它 gate 已满足时可在该 CAS 中
+  credit/settle CWI；assessment-required 路径必须继续等待独立 SM-2 assessment gate。每个 member 必须逐字段匹配 dispatch、
+  binding、evidence kind、operation、`ExecutionKey + Fence` 与 singleton target。
+- rejected/stale/weak/mismatched member、partial set、同 target 冲突 receipt 都不得产生 collective credit；exact duplicate
+  receipt/evidence event 必须零新增 member、revision、effect、credit 或 settlement。partial-receipt crash/reload 必须复用同一
+  sealed dispatch，已完成 operation 零重放，只执行缺失 member；来自不同 dispatch、repair/semantic generation 的 accepted
+  receipts 即使 target union 完整也不得拼接成 proof。aggregate invariant 必须拒绝任何“partial set + satisfied/settled CWI”
+  的持久化 current shape。
 - Shell typed stale必须作为nested owner-authored observation走一次bounded prerequisite refresh，不能伪装成File outer stale或
   直接terminal；missing dependency在Shell call前退休generation。stale 不改变 semantic attempt/correction
   directive/rejection ledger，duplicate/restart 不重复扣减 refresh，也不消耗 correction。

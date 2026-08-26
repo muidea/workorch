@@ -215,7 +215,7 @@ func TestWorkspaceSnapshotLoadsRunScopedLLMUsageOnlyForProjectionRun(t *testing.
 
 	var runScoped []common.RunID
 	for _, query := range reader.queries {
-		if query.RunID != "" && query.Topic == "/run/llm_usage/recorded" {
+		if query.RunID != "" && query.Topic == "/llm/usage/recorded" {
 			runScoped = append(runScoped, query.RunID)
 		}
 	}
@@ -268,7 +268,7 @@ func TestWorkspaceProjectionSnapshotSkipsLLMUsagePayloadQueries(t *testing.T) {
 	}
 
 	for _, query := range reader.queries {
-		if query.Topic == "/run/llm_usage/recorded" || query.IncludePayload {
+		if query.Topic == "/llm/usage/recorded" || query.IncludePayload {
 			t.Fatalf("projection snapshot event query = %+v, want no llm usage payload queries", query)
 		}
 	}
@@ -386,7 +386,7 @@ func (r *workspaceEventReaderByQuery) List(_ context.Context, query workorchquer
 	if query.RunID != "" {
 		return r.runRecords[query.RunID], nil
 	}
-	if query.WorkspaceID != "" && query.Topic == "/run/llm_usage/recorded" {
+	if query.WorkspaceID != "" && query.Topic == "/llm/usage/recorded" {
 		return r.workspaceRecords, nil
 	}
 	return nil, nil
@@ -420,7 +420,7 @@ func llmUsageEventRecord(t *testing.T, id string, workspaceID common.WorkspaceID
 	return &eventstreammodel.EventRecord{
 		ID:          common.EventRecordID(id),
 		Version:     "workorch.event",
-		Topic:       "/run/llm_usage/recorded",
+		Topic:       "/llm/usage/recorded",
 		WorkspaceID: workspaceID,
 		RunID:       runID,
 		StepID:      common.StepID(string(runID) + "/step-1"),

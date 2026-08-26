@@ -134,7 +134,7 @@ func TestRuntimeProspectiveSatisfactionOwnerAndFinalValidationStages(t *testing.
 		t.Fatal("prospective observation hash did not distinguish satisfaction from stale")
 	}
 
-	fact := semanticFeasibilityForTest(t, manifest, proposal, []string{proposal.Target.ProspectiveTargetRef}, "", nil)
+	fact := semanticFeasibilityForTest(t, manifest, proposal, RuntimeSemanticProposalTargetRefs(proposal), "", nil)
 	fact.ProspectiveWorkspaceManifestDelta = ptrRuntimeProspectiveWorkspaceManifestDelta(delta)
 	fact.OwnerFactProspectiveSatisfactionObservation = nil
 	if err := fact.ValidateOwnerForProposal(manifest, proposal); err != nil {
@@ -236,9 +236,9 @@ func runtimeProspectiveTargetConstraintForTest(surface RuntimeValidationSurface,
 		ValidationRecipeID:                 surface.ID,
 		InputSchemaHash:                    surface.InputSchemaHash,
 		CatalogObservedRevision:            catalogRevision,
-		AllOf: []RuntimeProspectiveTargetPredicate{{
+		AllOf: []RuntimeProspectiveTargetClause{{ID: "required-input", AllOf: []RuntimeProspectiveTargetPredicate{{
 			Kind: RuntimeProspectiveTargetPredicatePathSuffix, Value: suffix,
-		}},
+		}}}},
 	}.Normalized()
 }
 

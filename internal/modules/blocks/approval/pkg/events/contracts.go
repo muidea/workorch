@@ -19,8 +19,6 @@ func Contracts() []eventcontract.Contract {
 		TopicApprovalCommandSealWorkspaceDeletion,
 		TopicApprovalCommandEnsureApproved,
 		TopicApprovalCommandEnsureRejected,
-		TopicApprovalCommandRecordEvidence,
-		TopicApprovalCommandRecordResolution,
 		TopicOpenRuntimeApprovalRequest,
 	)...)
 	ret = eventcontract.Annotate(ret, eventcontract.RuntimeMetadata(eventcontract.CommandClassRead, eventcontract.StateMachineSM2, eventcontract.ScopePolicyWorkspaceRun, eventcontract.IdentityPolicyRuntimeAuthority, true), TopicAcquireRuntimeCapabilities)

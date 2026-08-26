@@ -196,7 +196,7 @@ func TestReduceRuntimeStateWithDirectiveReactivatesRetiredCanonicalPendingFocusP
 		TargetSelectorRef:        "workspace-relative-new-file-target",
 		TargetSelectorOwnerRef:   runtimecontract.RuntimeModuleFile,
 		TargetSelectorSubjectRef: "workspace_deliverable",
-		ProspectiveTargetRef:     "mcp-config.json",
+		ProspectiveTargetRefs:    []string{"mcp-config.json"},
 		RequireTargetGrounding:   true,
 	}
 	facts.Coverage[0].CWIConvergenceState = runtimecontract.RuntimeCWIConvergenceStateReopened
@@ -205,7 +205,7 @@ func TestReduceRuntimeStateWithDirectiveReactivatesRetiredCanonicalPendingFocusP
 		Kind: runtimecontract.PrerequisiteKindTargetSelection, OwnerModuleID: runtimecontract.RuntimeModuleFile,
 		SubjectRef: facts.Focus.TargetRole, TargetSelectorRef: facts.Focus.TargetSelectorRef,
 		TargetSelectorOwnerRef: facts.Focus.TargetSelectorOwnerRef, TargetSelectorSubjectRef: facts.Focus.TargetSelectorSubjectRef,
-		ProspectiveTargetRef: facts.Focus.ProspectiveTargetRef, Reason: "prospective File target requires owner target selection",
+		ProspectiveTargetRef: facts.Focus.ProspectiveTargetRefs[0], Reason: "prospective File target requires owner target selection",
 	})
 
 	prepared := PreflightRuntimeFacts(facts, []runtimecontract.RuntimeRequirement{requirement})
@@ -346,7 +346,7 @@ func TestReduceRuntimeStateWithDirectiveAcquiresProspectiveFileTargetWithoutDisc
 		TargetSelectorRef:        "workspace-relative-new-file-target",
 		TargetSelectorOwnerRef:   runtimecontract.RuntimeModuleFile,
 		TargetSelectorSubjectRef: "workspace_deliverable",
-		ProspectiveTargetRef:     "coverage-map.json",
+		ProspectiveTargetRefs:    []string{"coverage-map.json"},
 		RequireTargetGrounding:   true,
 	}
 	facts.Coverage = []runtimecontract.RuntimeCoverageItemFact{{ID: "cwi-prospective", State: runtimecontract.RuntimeCoverageItemStateOpen}}
@@ -415,7 +415,7 @@ func TestReduceRuntimeStateWithDirectiveAllowsOwnerGroundedEmptyWorkspaceCreatio
 	facts.Focus.TargetRole = "deliverable"
 	facts.Focus.TargetDiscoverySources = []string{runtimecontract.RuntimeValidationDiscoverySourceWorkspaceManifest}
 	facts.Focus.TargetSelectorRef = "file/workspace_deliverable"
-	facts.Focus.ProspectiveTargetRef = "initial-deliverable.txt"
+	facts.Focus.ProspectiveTargetRefs = []string{"initial-deliverable.txt"}
 	facts.Focus.RequiredEvidenceKinds = []string{runtimecontract.EvidenceKindStateChange}
 	facts.Focus.AcceptedStepKinds = []string{runtimecontract.StepKindFileWrite}
 	facts.Capabilities.StateChangeKinds = []string{runtimecontract.StepKindFileWrite}

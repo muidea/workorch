@@ -113,7 +113,7 @@ func TestCompileRuntimeCoverageCarriesProfileProspectiveTargetCandidates(t *test
 			break
 		}
 	}
-	if focus == nil || focus.ProspectiveTargetRef != "" || !runtimecontract.SameRuntimeTargetSelectorCandidateRefs(focus.TargetSelectorCandidateRefs, []string{"initial-deliverable.txt"}) {
+	if focus == nil || len(focus.ProspectiveTargetRefs) != 0 || !runtimecontract.SameRuntimeTargetSelectorCandidateRefs(focus.TargetSelectorCandidateRefs, []string{"initial-deliverable.txt"}) {
 		t.Fatalf("compiler did not preserve target-free bounded prospective selector: %+v", focuses)
 	}
 }
@@ -146,7 +146,7 @@ func TestCompileRuntimeCoverageCarriesProfileBoundEmptyWorkspaceScope(t *testing
 			break
 		}
 	}
-	if focus == nil || focus.TargetSelectorOwnerRef != "software-dev" || focus.TargetSelectorSubjectRef != "workspace_deliverable_create_scope" || focus.ProspectiveTargetRef != "" {
+	if focus == nil || focus.TargetSelectorOwnerRef != "software-dev" || focus.TargetSelectorSubjectRef != "workspace_deliverable_create_scope" || len(focus.ProspectiveTargetRefs) != 0 {
 		t.Fatalf("compiler lost profile-bound empty workspace scope: %+v", focuses)
 	}
 }
@@ -187,7 +187,7 @@ func TestCompileRuntimeCoverageFocusesPrependsMatchedBootstrapArtifactsInDepende
 	}
 	for idx, wantRole := range []string{"module_definition", "implementation", "test_source"} {
 		focus := focuses[idx]
-		if focus.TargetSelectorRef != "file/workspace_deliverable" || focus.ProspectiveTargetRef != "" ||
+		if focus.TargetSelectorRef != "file/workspace_deliverable" || len(focus.ProspectiveTargetRefs) != 0 ||
 			len(focus.TargetSelectorCandidateRefs) != 0 || focus.TargetRole != wantRole ||
 			len(focus.RequiredEvidenceKinds) != 1 || focus.RequiredEvidenceKinds[0] != runtimecontract.EvidenceKindStateChange ||
 			len(focus.AcceptedStepKinds) != 1 || focus.AcceptedStepKinds[0] != runtimecontract.StepKindFileWrite || !focus.RequireTargetGrounding || focus.RequireAssessment {
@@ -328,7 +328,7 @@ func TestCompileRuntimeCoverageCarriesProspectiveTargetCandidatesIntoLeadingDoDF
 	}
 	leading := focuses[0]
 	if leading.AssessmentScope != "dodItem" || leading.TargetSelectorRef != "file/workspace_deliverable" ||
-		leading.ProspectiveTargetRef != "" || !runtimecontract.SameRuntimeTargetSelectorCandidateRefs(leading.TargetSelectorCandidateRefs, []string{"workorch-deliverable.md"}) || !leading.RequireTargetGrounding {
+		len(leading.ProspectiveTargetRefs) != 0 || !runtimecontract.SameRuntimeTargetSelectorCandidateRefs(leading.TargetSelectorCandidateRefs, []string{"workorch-deliverable.md"}) || !leading.RequireTargetGrounding {
 		t.Fatalf("leading DoD focus lost profile creation declaration: %+v", leading)
 	}
 	hasFileWrite, hasPatchApply := false, false

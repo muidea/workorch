@@ -754,7 +754,7 @@ wait_mock
 wait_ready
 
 get_json "$BASE_URL/readyz" "$TMP_DIR/readyz.json"
-grep '"status": "ready"' "$TMP_DIR/readyz.json" >/dev/null
+grep -E '"status"[[:space:]]*:[[:space:]]*"ready"' "$TMP_DIR/readyz.json" >/dev/null
 get_json "$BASE_URL/api/v1/workorch/configuration" "$TMP_DIR/configuration.json"
 write_llm_update_payloads
 post_json "$BASE_URL/api/v1/workorch/configuration/llm/models/refresh" '{}' "$TMP_DIR/catalog-refreshed.json"

@@ -105,7 +105,7 @@ func TestRuntimeProspectiveDriveMissingDependencyObservationDoesNotCallShell(t *
 		}
 		ownerResult, err := fileevents.NewRuntimeSemanticProofFeasibilityOwnerResult(
 			command, runtimecontract.RuntimeSemanticFeasibilityFeasible, request.OwnerCatalog.ObservedRevision,
-			[]string{request.Proposal.Target.ProspectiveTargetRef}, &delta, nil,
+			append([]string(nil), request.Proposal.Target.ProspectiveTargetRefs...), &delta, nil,
 		)
 		if err != nil {
 			t.Errorf("File prospective result: %v", err)
@@ -185,7 +185,7 @@ func TestRuntimeProspectiveDriveTreatsConstraintValidOwnerRejectionAsContractVio
 		}
 		ownerResult, err := fileevents.NewRuntimeSemanticProofFeasibilityOwnerResult(
 			command, runtimecontract.RuntimeSemanticFeasibilityFeasible, request.OwnerCatalog.ObservedRevision,
-			[]string{request.Proposal.Target.ProspectiveTargetRef}, &delta, nil,
+			append([]string(nil), request.Proposal.Target.ProspectiveTargetRefs...), &delta, nil,
 		)
 		if err != nil {
 			t.Errorf("File prospective result: %v", err)
@@ -372,7 +372,9 @@ func prospectiveCompositeDriveAggregateWithCandidatesAndExisting(t *testing.T, c
 			OwnerModuleID: runtimecontract.RuntimeModuleShell, ProspectiveSatisfactionContractRef: convergence.ProspectiveSatisfactionContractRef,
 			ValidationSurfaceID: "test-prospective-validation-recipe", ValidationRecipeID: "test-prospective-validation-recipe",
 			InputSchemaHash: "prospective-validation-schema-v1", CatalogObservedRevision: "shell-policy-v1",
-			AllOf: []runtimecontract.RuntimeProspectiveTargetPredicate{{Kind: runtimecontract.RuntimeProspectiveTargetPredicatePathSuffix, Value: ".txt"}},
+			AllOf: []runtimecontract.RuntimeProspectiveTargetClause{{
+				ID: "text-input", AllOf: []runtimecontract.RuntimeProspectiveTargetPredicate{{Kind: runtimecontract.RuntimeProspectiveTargetPredicatePathSuffix, Value: ".txt"}},
+			}},
 		},
 		CheckRefs: []string{"check/prospective-validation"}, ProofApplicability: runtimecontract.RuntimeValidationProofDirect,
 		EffectScope: runtimecontract.RuntimeEffectEphemeralSession, IdempotencyClass: runtimecontract.RuntimeOperationIdempotencyAtMostOnce,
@@ -427,7 +429,7 @@ func prospectiveCompositeDriveAggregateWithCandidatesAndExisting(t *testing.T, c
 		Target: runtimecontract.RuntimeOperationTargetAuthorization{
 			Policy: acquisition.AcquisitionTargetPolicy, OwnerSelectorRefs: []string{acquisition.AcquisitionTargetSelectorRef},
 			ProspectiveConstraintRefs: append([]string(nil), acquisition.AcquisitionConstraintRefs...),
-			ProspectiveTargetRef:      prospectiveTarget,
+			ProspectiveTargetRefs:     []string{prospectiveTarget},
 		},
 		RequiredEvidenceKinds: []string{runtimecontract.EvidenceKindStateChange},
 		RequiredEffectScopes:  []runtimecontract.RuntimeEffectScope{runtimecontract.RuntimeEffectWorkspaceDurable},

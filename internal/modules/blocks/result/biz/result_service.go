@@ -2,7 +2,14 @@ package result
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"fmt"
+	"path"
+	"strings"
 
+	resultcommon "github.com/muidea/workorch/internal/modules/blocks/result/pkg/common"
+	resultevents "github.com/muidea/workorch/internal/modules/blocks/result/pkg/events"
 	resultmodel "github.com/muidea/workorch/internal/modules/blocks/result/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/repository"
@@ -117,6 +124,46 @@ func (s *service) ListArtifactsByResult(ctx context.Context, resultID common.Res
 		return nil, common.ErrInvalidArgument
 	}
 	return s.artifacts.ListByResult(ctx, resultID)
+}
+
+func (s *service) ReadArtifactContent(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, uri string) (resultevents.ReadArtifactContentResult, error) {
+	if s == nil || workspaceID == "" || runID == "" || strings.TrimSpace(uri) == "" {
+		return resultevents.ReadArtifactContentResult{}, common.ErrInvalidArgument
+	}
+	items, err := s.artifacts.ListByRun(ctx, runID)
+	if err != nil {
+		return resultevents.ReadArtifactContentResult{}, err
+	}
+	for _, item := range items {
+		if item == nil || item.WorkspaceID != workspaceID || item.RunID != runID || strings.TrimSpace(item.URI) != strings.TrimSpace(uri) {
+			continue
+		}
+		if item.State != common.ArtifactStateAvailable ||
+			(item.ArtifactType != resultcommon.ArtifactTypeText && item.ArtifactType != resultcommon.ArtifactTypeReport) ||
+			strings.TrimSpace(item.Summary) == "" {
+			return resultevents.ReadArtifactContentResult{}, common.ErrNotFound
+		}
+		content := []byte(strings.TrimSpace(item.Summary) + "\n")
+		if len(content) > resultevents.MaxArtifactContentBytes {
+			return resultevents.ReadArtifactContentResult{}, fmt.Errorf("%w: artifact content exceeds %d bytes", common.ErrConflict, resultevents.MaxArtifactContentBytes)
+		}
+		contentType := strings.TrimSpace(item.ContentType)
+		if contentType == "" {
+			contentType = "text/plain; charset=utf-8"
+		}
+		ret := resultevents.ReadArtifactContentResult{
+			ArtifactID: item.ID, WorkspaceID: item.WorkspaceID, RunID: item.RunID,
+			URI: strings.TrimSpace(item.URI), FileName: path.Base(strings.TrimSpace(item.URI)),
+			ContentType: contentType, Content: append([]byte(nil), content...),
+		}
+		hash := sha256.Sum256(ret.Content)
+		ret.ContentSHA256 = hex.EncodeToString(hash[:])
+		if err := ret.Validate(); err != nil {
+			return resultevents.ReadArtifactContentResult{}, err
+		}
+		return ret.Clone(), nil
+	}
+	return resultevents.ReadArtifactContentResult{}, common.ErrNotFound
 }
 
 func (s *service) UpdateArtifact(ctx context.Context, item *resultmodel.Artifact) error {

@@ -477,7 +477,7 @@ func prepareTerminalValidationOwnerFactAcquisitionAssessment(t *testing.T, retir
 	facts.Focus.TargetSelectorOwnerRef = convergence.TargetSelectorOwnerRef
 	facts.Focus.TargetSelectorSubjectRef = convergence.TargetSelectorSubjectRef
 	facts.Focus.TargetRole = "validation-input"
-	facts.Focus.ProspectiveTargetRef = "runtime-owner-fact-validation_test.go"
+	facts.Focus.ProspectiveTargetRefs = []string{"runtime-owner-fact-validation_test.go"}
 	facts.Focus.RequireTargetGrounding = true
 	fileCatalog := facts.Resources.OperationAdmissibilities[0]
 	fileCatalog.SelectorRefs = []string{convergence.AcquisitionTargetSelectorRef}
@@ -521,37 +521,25 @@ func prepareTerminalValidationOwnerFactAcquisitionAssessment(t *testing.T, retir
 	if err != nil {
 		t.Fatal(err)
 	}
-	if semantic.Decision.State != runtimecontract.ConvergenceStateNeedPrerequisite || len(semantic.Facts.Prerequisites.Pending) != 1 {
-		t.Fatalf("owner-fact acquisition did not request exact target grounding: %+v", semantic.Decision)
-	}
-	prerequisite := semantic.Facts.Prerequisites.Pending[0]
-	selection := runtimecontract.RuntimeTargetSelection{
-		PrerequisiteID: prerequisite.ID, OwnerModuleID: prerequisite.OwnerModuleID, TargetRole: prerequisite.SubjectRef,
-		SelectorRef: prerequisite.TargetSelectorRef, SelectorOwnerRef: prerequisite.TargetSelectorOwnerRef, SelectorSubjectRef: prerequisite.TargetSelectorSubjectRef,
-		SelectorCandidateRefs: append([]string(nil), prerequisite.TargetSelectorCandidateRefs...), Disposition: runtimecontract.RuntimeTargetSelectionCreate,
-		ProspectiveTargetRef: prerequisite.ProspectiveTargetRef, ObservedRevision: "workspace-tree-owner-fact-acquisition-v1",
-	}
-	selection.SnapshotID = runtimecontract.StableRuntimeTargetSelectionSnapshotID(selection)
-	grounded, err := controller.commitPrerequisite(context.Background(), "ws-v2", "run-v2", PrerequisiteResult{PrerequisiteID: prerequisite.ID, TargetSelection: &selection})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if grounded.Decision.State == runtimecontract.ConvergenceStateFailed {
-		t.Fatalf("owner-fact acquisition target grounding failed: terminal=%+v", grounded.Decision.Terminal)
+	if semantic.Decision.State != runtimecontract.ConvergenceStateNeedStateChange || len(semantic.Facts.Prerequisites.Pending) != 0 ||
+		len(semantic.Decision.RequiredOutput.RequiredOperationSequence) != 1 ||
+		semantic.Decision.RequiredOutput.RequiredOperationSequence[0].TargetRef != "runtime-owner-fact-validation_test.go" {
+		t.Fatalf("owner-fact acquisition did not seal the exact prospective target operation: %+v", semantic.Decision)
 	}
 	opened, err := controller.BeginCandidateAttemptForTest(context.Background(), "ws-v2", "run-v2", 0, "owner-fact-acquisition-prefix")
 	if err != nil {
 		t.Fatal(err)
 	}
-	target := opened.Facts.Focus.ProspectiveTargetRef
-	if target == "" {
+	if len(opened.Facts.Focus.ProspectiveTargetRefs) == 0 {
 		t.Fatalf("owner-fact acquisition focus has no prospective target: %+v", opened.Facts.Focus)
 	}
+	target := opened.Facts.Focus.ProspectiveTargetRefs[0]
+	requiredOperationRef := opened.Decision.RequiredOutput.RequiredOperationSequence[0].RequirementID
 	candidate := runtimeTestBindCandidateToCurrentFocus(t, opened, runtimecontract.RuntimeCandidate{
 		StateChange: &runtimecontract.StateChangeCandidate{Operations: []runtimecontract.StateChangingOperation{{
 			Operation: runtimecontract.RuntimeOperation{
 				ID: "write-owner-fact-acquisition", Kind: runtimecontract.StepKindFileWrite,
-				CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-v2"}, TargetRefs: []string{target}, Parameters: runtimeFileWriteParameters("validation surface"),
+				RequiredOperationRef: requiredOperationRef, CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-v2"}, TargetRefs: []string{target}, Parameters: runtimeFileWriteParameters("validation surface"),
 			},
 		}}},
 	})
@@ -586,6 +574,38 @@ func prepareTerminalValidationOwnerFactAcquisitionAssessment(t *testing.T, retir
 		}
 		for len(repository.aggregate.Facts.Prerequisites.Pending) != 0 {
 			prerequisite := repository.aggregate.Facts.Prerequisites.Pending[0]
+			if prerequisite.Kind == runtimecontract.PrerequisiteKindTargetSnapshot {
+				snapshot := runtimecontract.TargetSnapshot{
+					TargetRef: prerequisite.SubjectRef, Content: "validation surface", ContentHash: "owner-fact-acquisition-content-v2",
+					ContentState: runtimecontract.SnapshotContentStateComplete,
+				}
+				refreshed, refreshErr := controller.commitPrerequisite(context.Background(), "ws-v2", "run-v2", PrerequisiteResult{
+					PrerequisiteID: prerequisite.ID, TargetSnapshot: &snapshot,
+				})
+				if refreshErr != nil {
+					t.Fatalf("refresh owner-fact acquisition target snapshot %q: %v", prerequisite.ID, refreshErr)
+				}
+				committed.Aggregate = refreshed
+				continue
+			}
+			if prerequisite.Kind == runtimecontract.PrerequisiteKindTargetSelection {
+				selection := runtimecontract.RuntimeTargetSelection{
+					PrerequisiteID: prerequisite.ID, OwnerModuleID: prerequisite.OwnerModuleID, TargetRole: prerequisite.SubjectRef,
+					SelectorRef: prerequisite.TargetSelectorRef, SelectorOwnerRef: prerequisite.TargetSelectorOwnerRef, SelectorSubjectRef: prerequisite.TargetSelectorSubjectRef,
+					SelectorCandidateRefs: append([]string(nil), prerequisite.TargetSelectorCandidateRefs...), Disposition: runtimecontract.RuntimeTargetSelectionSelected,
+					TargetRefs: []string{prerequisite.ProspectiveTargetRef}, CandidateTargetRefs: []string{prerequisite.ProspectiveTargetRef}, CandidateCount: 1,
+					ProspectiveTargetRef: prerequisite.ProspectiveTargetRef, ObservedRevision: "workspace-tree-owner-fact-acquisition-v2",
+				}
+				selection.SnapshotID = runtimecontract.StableRuntimeTargetSelectionSnapshotID(selection)
+				refreshed, refreshErr := controller.commitPrerequisite(context.Background(), "ws-v2", "run-v2", PrerequisiteResult{
+					PrerequisiteID: prerequisite.ID, TargetSelection: &selection,
+				})
+				if refreshErr != nil {
+					t.Fatalf("refresh owner-fact acquisition target selection %q: %v", prerequisite.ID, refreshErr)
+				}
+				committed.Aggregate = refreshed
+				continue
+			}
 			catalog, found := runtimeTestAssessmentCatalogForPrerequisite(facts.Resources.OperationAdmissibilities, prerequisite.ID)
 			if !found {
 				t.Fatalf("no original catalog for refreshed prerequisite %+v", prerequisite)
@@ -773,7 +793,9 @@ func runtimeTestProspectiveValidationDependencyCatalog(t *testing.T, contractRef
 			OwnerModuleID: runtimecontract.RuntimeModuleShell, ProspectiveSatisfactionContractRef: contractRef,
 			ValidationSurfaceID: "recipe/owner-fact-prospective", ValidationRecipeID: "recipe/owner-fact-prospective",
 			InputSchemaHash: "schema/owner-fact-prospective-v1", CatalogObservedRevision: "shell-owner-fact-policy-v1",
-			AllOf: []runtimecontract.RuntimeProspectiveTargetPredicate{{Kind: runtimecontract.RuntimeProspectiveTargetPredicatePathSuffix, Value: "_test.go"}},
+			AllOf: []runtimecontract.RuntimeProspectiveTargetClause{{
+				ID: "go-test-input", AllOf: []runtimecontract.RuntimeProspectiveTargetPredicate{{Kind: runtimecontract.RuntimeProspectiveTargetPredicatePathSuffix, Value: "_test.go"}},
+			}},
 		},
 		CheckRefs: []string{"check/owner-fact-prospective"}, ProofApplicability: runtimecontract.RuntimeValidationProofDirect,
 		EffectScope: runtimecontract.RuntimeEffectEphemeralSession, IdempotencyClass: runtimecontract.RuntimeOperationIdempotencyAtMostOnce,

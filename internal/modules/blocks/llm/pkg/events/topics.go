@@ -13,9 +13,9 @@ const (
 	TopicRequestRuntimeCandidate               = "/llm/runtime-candidate/request"
 
 	// TopicLLMUsageRecorded is the durable request audit notification for one
-	// provider completion/embedding/candidate call. The path is historical and
-	// matches the read-model topic filter /run/llm_usage/recorded.
-	TopicLLMUsageRecorded = "/run/llm_usage/recorded"
+	// provider completion/embedding/candidate call. Its namespace is owned by
+	// the LLM Block and is also the read-model topic filter.
+	TopicLLMUsageRecorded = "/llm/usage/recorded"
 
 	// NotificationDestination is the EventHub destination pattern for LLM data events.
 	NotificationDestination = "/llm/consumers/#"

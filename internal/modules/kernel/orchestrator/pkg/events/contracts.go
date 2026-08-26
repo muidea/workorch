@@ -17,6 +17,8 @@ func Contracts() []eventcontract.Contract {
 		TopicOrchestratorCommandConfirmWorkspaceRuntimeQuiescence,
 		TopicOrchestratorCommandSealWorkspaceDeletion,
 		TopicOrchestratorCommandPurgeWorkspaceEvidence,
+		TopicOrchestratorCommandRecordDecisionEvidence,
+		TopicOrchestratorCommandRecordApprovalEvidence,
 		TopicOrchestratorCommitRuntimeGovernanceResolution,
 		TopicOrchestratorCommitRuntimeGovernanceApproval,
 		TopicOrchestratorCommitRuntimeGovernanceTicket,

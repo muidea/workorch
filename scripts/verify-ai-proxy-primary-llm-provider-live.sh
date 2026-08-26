@@ -481,8 +481,8 @@ if before_signature != after_signature:
 
 for events in (before_events, after_events):
     topics = [item.get("topic") for item in events.get("eventRecords") or []]
-    if topics.count("/run/llm_usage/recorded") != 2:
-        raise SystemExit(f"persisted LLM usage event count = {topics.count('/run/llm_usage/recorded')}, want two: {topics}")
+    if topics.count("/llm/usage/recorded") != 2:
+        raise SystemExit(f"persisted LLM usage event count = {topics.count('/llm/usage/recorded')}, want two: {topics}")
 
 second_traces = second_observability["observability"].get("llmUsageTraces") or []
 if len(second_traces) != 2:

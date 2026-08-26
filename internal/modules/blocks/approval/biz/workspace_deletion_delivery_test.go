@@ -13,6 +13,8 @@ import (
 	approvalcontracts "github.com/muidea/workorch/internal/modules/blocks/approval/biz/contracts"
 	approvalevents "github.com/muidea/workorch/internal/modules/blocks/approval/pkg/events"
 	approvalmodel "github.com/muidea/workorch/internal/modules/blocks/approval/pkg/models"
+	eventstreamevents "github.com/muidea/workorch/internal/modules/blocks/eventstream/pkg/events"
+	orchestratorevents "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/repository/memory"
 	deletioncontract "github.com/muidea/workorch/internal/pkg/workorchdeletioncontract"
@@ -195,22 +197,22 @@ func TestApprovalDeletionSealLinearizesWithReconciliationDeliveryWithoutDeadlock
 
 	rawHub := magicevent.NewHub(64)
 	probe := &approvalDeletionDeliveryProbe{
-		Hub: rawHub, blockTopic: approvalevents.TopicApprovalCommandRecordEvidence,
+		Hub: rawHub, blockTopic: orchestratorevents.TopicOrchestratorCommandRecordApprovalEvidence,
 		entered: make(chan struct{}), release: make(chan struct{}),
 	}
-	evidence := magicevent.NewSimpleObserver(approvalevents.EvidenceCommandDestination, rawHub)
-	evidence.Subscribe(approvalevents.TopicApprovalCommandRecordEvidence, func(event magicevent.Event, result magicevent.Result) {
-		command := event.Data().(approvalevents.RecordApprovalEvidenceCommand)
-		result.Set(approvalevents.RecordApprovalEvidenceResult{
+	evidence := magicevent.NewSimpleObserver(orchestratorevents.CommandDestination, rawHub)
+	evidence.Subscribe(orchestratorevents.TopicOrchestratorCommandRecordApprovalEvidence, func(event magicevent.Event, result magicevent.Result) {
+		command := event.Data().(orchestratorevents.RecordApprovalEvidenceCommand)
+		result.Set(orchestratorevents.RecordApprovalEvidenceResult{
 			EvidenceRecordID: command.EvidenceRecordID, WorkspaceID: command.WorkspaceID, RunID: command.RunID,
 			ApprovalID: command.ApprovalID, ResolutionID: command.ResolutionID, ApprovalState: command.ApprovalState,
 		}, nil)
 	})
-	resolutionRecord := magicevent.NewSimpleObserver(approvalevents.ResolutionRecordCommandDestination, rawHub)
-	resolutionRecord.Subscribe(approvalevents.TopicApprovalCommandRecordResolution, func(event magicevent.Event, result magicevent.Result) {
-		command := event.Data().(approvalevents.RecordApprovalResolutionCommand)
+	resolutionRecord := magicevent.NewSimpleObserver(eventstreamevents.CommandDestination, rawHub)
+	resolutionRecord.Subscribe(eventstreamevents.TopicEventStreamCommandRecordApprovalResolution, func(event magicevent.Event, result magicevent.Result) {
+		command := event.Data().(eventstreamevents.RecordApprovalResolutionCommand)
 		data := command.Data
-		result.Set(approvalevents.RecordApprovalResolutionResult{
+		result.Set(eventstreamevents.RecordApprovalResolutionResult{
 			NotificationID: data.NotificationID, ResolutionID: data.ResolutionID, ApprovalID: data.ApprovalID,
 			WorkspaceID: data.WorkspaceID, RunID: data.RunID,
 		}, nil)
@@ -225,8 +227,8 @@ func TestApprovalDeletionSealLinearizesWithReconciliationDeliveryWithoutDeadlock
 	}
 	t.Cleanup(func() {
 		owner.Teardown(context.Background())
-		evidence.Unsubscribe(approvalevents.TopicApprovalCommandRecordEvidence)
-		resolutionRecord.Unsubscribe(approvalevents.TopicApprovalCommandRecordResolution)
+		evidence.Unsubscribe(orchestratorevents.TopicOrchestratorCommandRecordApprovalEvidence)
+		resolutionRecord.Unsubscribe(eventstreamevents.TopicEventStreamCommandRecordApprovalResolution)
 		rawHub.Terminate(context.Background())
 	})
 
@@ -245,10 +247,10 @@ func TestApprovalDeletionSealLinearizesWithReconciliationDeliveryWithoutDeadlock
 	waitApprovalDeliveryResult(t, reconcileDone, "reconciliation")
 	waitApprovalDeliveryResult(t, sealDone, "deletion seal")
 
-	if sent, _ := probe.counts(approvalevents.TopicApprovalCommandRecordEvidence); sent != 1 {
+	if sent, _ := probe.counts(orchestratorevents.TopicOrchestratorCommandRecordApprovalEvidence); sent != 1 {
 		t.Fatalf("Approval evidence deliveries = %d, want exactly the pre-seal delivery", sent)
 	}
-	if sent, _ := probe.counts(approvalevents.TopicApprovalCommandRecordResolution); sent != 1 {
+	if sent, _ := probe.counts(eventstreamevents.TopicEventStreamCommandRecordApprovalResolution); sent != 1 {
 		t.Fatalf("Approval Eventstream records = %d, want exactly the pre-seal record", sent)
 	}
 	if _, posted := probe.counts(approvalevents.TopicApprovalResolved); posted != 1 {
@@ -257,10 +259,10 @@ func TestApprovalDeletionSealLinearizesWithReconciliationDeliveryWithoutDeadlock
 	if err := owner.ReconcileApprovalDeliveries(ctx); err != nil {
 		t.Fatalf("post-seal reconciliation: %v", err)
 	}
-	if sent, _ := probe.counts(approvalevents.TopicApprovalCommandRecordEvidence); sent != 1 {
+	if sent, _ := probe.counts(orchestratorevents.TopicOrchestratorCommandRecordApprovalEvidence); sent != 1 {
 		t.Fatalf("post-seal Approval evidence count = %d, want 1", sent)
 	}
-	if sent, _ := probe.counts(approvalevents.TopicApprovalCommandRecordResolution); sent != 1 {
+	if sent, _ := probe.counts(eventstreamevents.TopicEventStreamCommandRecordApprovalResolution); sent != 1 {
 		t.Fatalf("post-seal Approval Eventstream record count = %d, want 1", sent)
 	}
 	if _, posted := probe.counts(approvalevents.TopicApprovalResolved); posted != 1 {
@@ -306,10 +308,10 @@ func TestApprovalRestartSkipsLateResolvedDeliveryAfterDeletionSeal(t *testing.T)
 	if err := restarted.ReconcileApprovalDeliveries(ctx); err != nil {
 		t.Fatalf("restarted reconciliation: %v", err)
 	}
-	if sent, _ := probe.counts(approvalevents.TopicApprovalCommandRecordEvidence); sent != 0 {
+	if sent, _ := probe.counts(orchestratorevents.TopicOrchestratorCommandRecordApprovalEvidence); sent != 0 {
 		t.Fatalf("restarted Approval evidence deliveries = %d, want 0", sent)
 	}
-	if sent, _ := probe.counts(approvalevents.TopicApprovalCommandRecordResolution); sent != 0 {
+	if sent, _ := probe.counts(eventstreamevents.TopicEventStreamCommandRecordApprovalResolution); sent != 0 {
 		t.Fatalf("restarted Approval Eventstream records = %d, want 0", sent)
 	}
 	if _, posted := probe.counts(approvalevents.TopicApprovalResolved); posted != 0 {

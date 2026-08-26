@@ -15,8 +15,6 @@ import (
 	magicevent "github.com/muidea/magicCommon/event"
 	"github.com/muidea/magicCommon/task"
 	basebiz "github.com/muidea/workorch/internal/modules/base/biz"
-	approvalevents "github.com/muidea/workorch/internal/modules/blocks/approval/pkg/events"
-	decisionevents "github.com/muidea/workorch/internal/modules/blocks/decision/pkg/events"
 	runevents "github.com/muidea/workorch/internal/modules/blocks/run/pkg/events"
 	runtime "github.com/muidea/workorch/internal/modules/kernel/orchestrator/biz/runtime"
 	modulecommon "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/common"
@@ -186,8 +184,8 @@ func (m *Biz) Start() error {
 			orchestratorevents.TopicOrchestratorCommitRuntimeGovernanceTicket,
 			orchestratorevents.TopicOrchestratorCommitRuntimeGovernanceApproval,
 			orchestratorevents.TopicOrchestratorRequestRuntimeTermination,
-			decisionevents.TopicDecisionCommandRecordEvidence,
-			approvalevents.TopicApprovalCommandRecordEvidence,
+			orchestratorevents.TopicOrchestratorCommandRecordDecisionEvidence,
+			orchestratorevents.TopicOrchestratorCommandRecordApprovalEvidence,
 		)
 		m.SubscribeFunc(orchestratorevents.TopicOrchestratorDriveRuntime, m.handleRuntimeDrive)
 		m.SubscribeFunc(orchestratorevents.TopicOrchestratorQueryRuntimeOperationReceipt, m.handleRuntimeOperationReceipt)
@@ -195,8 +193,8 @@ func (m *Biz) Start() error {
 		m.SubscribeFunc(orchestratorevents.TopicOrchestratorCommitRuntimeGovernanceTicket, m.handleRuntimeGovernanceTicketResolution)
 		m.SubscribeFunc(orchestratorevents.TopicOrchestratorCommitRuntimeGovernanceApproval, m.handleRuntimeGovernanceApprovalResolution)
 		m.SubscribeFunc(orchestratorevents.TopicOrchestratorRequestRuntimeTermination, m.handleRuntimeTerminationRequest)
-		m.SubscribeFunc(decisionevents.TopicDecisionCommandRecordEvidence, m.handleDecisionEvidenceCommand)
-		m.SubscribeFunc(approvalevents.TopicApprovalCommandRecordEvidence, m.handleApprovalEvidenceCommand)
+		m.SubscribeFunc(orchestratorevents.TopicOrchestratorCommandRecordDecisionEvidence, m.handleDecisionEvidenceCommand)
+		m.SubscribeFunc(orchestratorevents.TopicOrchestratorCommandRecordApprovalEvidence, m.handleApprovalEvidenceCommand)
 		m.SubscribeMatchedFunc(ModuleID+"/run-drive", runevents.NotificationDestination, runevents.TopicRunStateChanged, m.handleRunStateChanged)
 		m.SubscribeMatchedFunc(ModuleID+"/run-drive", runevents.NotificationDestination, runevents.TopicRunContinuationRequested, m.handleRunContinuationRequested)
 		m.SubscribeMatchedFunc(ModuleID+"/run-drive", runevents.NotificationDestination, runevents.TopicRunRuntimeCommandsReady, m.handleRunRuntimeCommandsReady)

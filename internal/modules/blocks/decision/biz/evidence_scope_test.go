@@ -7,8 +7,8 @@ import (
 
 	cd "github.com/muidea/magicCommon/def"
 	magicevent "github.com/muidea/magicCommon/event"
-	decisionevents "github.com/muidea/workorch/internal/modules/blocks/decision/pkg/events"
 	decisionmodel "github.com/muidea/workorch/internal/modules/blocks/decision/pkg/models"
+	orchestratorevents "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/repository"
 	filerepository "github.com/muidea/workorch/internal/pkg/repository/file"
@@ -32,10 +32,10 @@ func TestDecisionEvidenceIdentityScopesSameResolutionAcrossBackends(t *testing.T
 			evidence := testCase.new(t)
 			hub := magicevent.NewHub(16)
 			t.Cleanup(func() { hub.Terminate(ctx) })
-			commands := make([]decisionevents.RecordDecisionEvidenceCommand, 0, 4)
-			observer := magicevent.NewSimpleObserver(decisionevents.EvidenceCommandDestination, hub)
-			observer.Subscribe(decisionevents.TopicDecisionCommandRecordEvidence, func(event magicevent.Event, result magicevent.Result) {
-				command, ok := event.Data().(decisionevents.RecordDecisionEvidenceCommand)
+			commands := make([]orchestratorevents.RecordDecisionEvidenceCommand, 0, 4)
+			observer := magicevent.NewSimpleObserver(orchestratorevents.CommandDestination, hub)
+			observer.Subscribe(orchestratorevents.TopicOrchestratorCommandRecordDecisionEvidence, func(event magicevent.Event, result magicevent.Result) {
+				command, ok := event.Data().(orchestratorevents.RecordDecisionEvidenceCommand)
 				if !ok {
 					result.Set(nil, &cd.Error{Code: cd.IllegalParam, Message: common.ErrInvalidArgument.Error(), Cause: common.ErrInvalidArgument})
 					return
@@ -53,9 +53,9 @@ func TestDecisionEvidenceIdentityScopesSameResolutionAcrossBackends(t *testing.T
 					result.Set(nil, &cd.Error{Code: cd.Unexpected, Message: err.Error(), Cause: err})
 					return
 				}
-				result.Set(decisionevents.RecordDecisionEvidenceResult{EvidenceRecordID: command.EvidenceRecordID}, nil)
+				result.Set(orchestratorevents.RecordDecisionEvidenceResult{EvidenceRecordID: command.EvidenceRecordID}, nil)
 			})
-			t.Cleanup(func() { observer.Unsubscribe(decisionevents.TopicDecisionCommandRecordEvidence) })
+			t.Cleanup(func() { observer.Unsubscribe(orchestratorevents.TopicOrchestratorCommandRecordDecisionEvidence) })
 
 			ownerSet := memory.NewDecisionOwnerRepositorySet()
 			owner, err := New(hub, nil, Dependencies{OwnerRepositories: ownerSet.OwnerRepositories(), EventHub: hub})
@@ -94,7 +94,7 @@ func TestDecisionEvidenceIdentityScopesSameResolutionAcrossBackends(t *testing.T
 			if commands[0].EvidenceRecordID == commands[2].EvidenceRecordID {
 				t.Fatalf("cross-workspace Decision evidence identity collided: %q", commands[0].EvidenceRecordID)
 			}
-			for _, command := range []decisionevents.RecordDecisionEvidenceCommand{commands[0], commands[2]} {
+			for _, command := range []orchestratorevents.RecordDecisionEvidenceCommand{commands[0], commands[2]} {
 				stored, err := evidence.Get(common.ContextWithRuntimeWorkspaceID(ctx, command.WorkspaceID), command.EvidenceRecordID)
 				if err != nil || stored.WorkspaceID != command.WorkspaceID || stored.RunID != command.RunID || stored.SubjectID != string(command.TicketID) {
 					t.Fatalf("stored scoped evidence = %+v err=%v command=%+v", stored, err, command)

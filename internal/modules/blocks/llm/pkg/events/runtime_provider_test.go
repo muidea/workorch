@@ -47,6 +47,12 @@ func TestLLMOwnerCommandContractsRemainTypedAndLocal(t *testing.T) {
 	}
 }
 
+func TestLLMUsageRecordedTopicUsesOwnerNamespace(t *testing.T) {
+	if TopicLLMUsageRecorded != "/llm/usage/recorded" {
+		t.Fatalf("LLM usage topic = %q, want owner namespace", TopicLLMUsageRecorded)
+	}
+}
+
 func TestRequestRuntimeCandidateResultRequiresExclusiveOwnerFact(t *testing.T) {
 	valid := validRuntimeCandidateResult()
 	if err := valid.Validate(); err != nil {

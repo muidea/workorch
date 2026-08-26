@@ -41,7 +41,7 @@ func TestShellOwnerProspectiveSatisfactionRejectsTargetOutsidePublishedAllOfBefo
 	command := shellProspectiveSatisfactionCommandFixture(t, owner.runtimeAdapter, workspace, "x_test.go")
 	request := runtimecontract.RuntimeOwnerFactProspectiveSatisfactionRequest(command)
 	proposal := request.Proposal.Clone()
-	proposal.Target.ProspectiveTargetRef = "scripts/validate.sh"
+	proposal.Target.ProspectiveTargetRefs = []string{"scripts/validate.sh"}
 	document := runtimecontract.RuntimeSemanticPlanDocument{
 		SchemaVersion:            runtimecontract.RuntimeSemanticPlanDocumentSchemaCurrent,
 		ManifestHash:             request.Manifest.Hash,
@@ -372,7 +372,7 @@ func shellProspectiveSatisfactionCommandWithRecipesFixture(t *testing.T, adapter
 		Target: runtimecontract.RuntimeOperationTargetAuthorization{
 			Policy:            runtimecontract.RuntimeOperationTargetPolicyProspectiveOwnerTarget,
 			OwnerSelectorRefs: []string{operationSelector}, ProspectiveConstraintRefs: []string{"workspace-relative-path"},
-			ProspectiveTargetRef: prospectiveTarget,
+			ProspectiveTargetRefs: []string{prospectiveTarget},
 		},
 		RequiredEvidenceKinds: []string{runtimecontract.EvidenceKindStateChange},
 		RequiredEffectScopes:  []runtimecontract.RuntimeEffectScope{runtimecontract.RuntimeEffectWorkspaceDurable},

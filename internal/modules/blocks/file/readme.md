@@ -4,7 +4,7 @@ Status: active
 
 Type: capability-block-contract
 
-Last Verified: 2026-08-25
+Last Verified: 2026-08-26
 
 ## 功能范围与边界
 
@@ -18,19 +18,27 @@ Last Verified: 2026-08-25
   `workspace-relative-new-file-target`）描述具体 capability admission。两者由 File owner 各自解释但不是 alias：File
   只对请求中的 exact selector 返回 factual selection/feasibility/receipt，不把声明 selector 改写成 operation selector，
   也不决定 CWI、重试、reopen 或 Runtime 状态。
-- prospective target 的创建前 admission 与创建后 reconciliation 是两条 File-private 只读语义：前者验证
-  SM-3 persisted proposal 提出的 exact path，对已存在
-  路径继续返回 `unsupported`，防止 create-only `file/write` 重放；reconciliation 只核验 sealed owner/path 的当前
-  manifest 事实，精确存在返回 `satisfied + concrete target/current revision`，缺失返回 `unsatisfied`，歧义、非规范
-  或越出 workspace/manifest 的路径返回 `unverifiable`。`file/workspace_deliverable` 表达完整 bounded manifest scope，
-  因此多文件返回 `satisfied + 全部 TargetRefs`；只有 unique/profile selector 的多匹配才是 ambiguous。该观察不返回
-  retain/reopen/CWI 状态。
-- 对 sealed owner-fact acquisition 的 prospective `file/write`，File feasibility 还必须基于 current complete
+- prospective target 的创建前 admission 与创建后 reconciliation 是两条 File-private 只读语义。普通
+  prospective proposal 仍校验单一 exact path；owner-fact acquisition 则校验同一 SM-3 semantic proposal 中
+  1～8 个唯一 canonical `ProspectiveTargetRefs` 的完整 all-of target set。File 使用同一 complete manifest revision
+  逐项校验 workspace-relative path、excluded tree、不存在性、parent/child 冲突与实际 filesystem parent，并按整组
+  文件及缺失父目录的 union 执行一次 aggregate manifest-capacity admission。任一失败都返回 factual
+  `unsupported/infeasible`，零文件、零父目录创建，不会缩小集合后部分通过。对已存在路径继续返回
+  `unsupported`，防止 create-only `file/write` 重放。reconciliation 只核验 sealed owner/target set 的当前 manifest
+  事实；全部精确存在才返回 `satisfied + concrete targets/current revision`，缺失返回 `unsatisfied`，歧义、
+  非规范或越出 workspace/manifest 的路径返回 `unverifiable`。`file/workspace_deliverable` 表达完整 bounded
+  manifest scope，因此多文件返回 `satisfied + 全部 TargetRefs`；只有 unique/profile selector 的多匹配才是
+  ambiguous。该观察不返回 retain/reopen/CWI 状态。
+- 对 sealed owner-fact acquisition 的 prospective `file/write`，File feasibility 还必须基于上述同一 current complete
   `WorkspaceManifest` 生成 immutable `RuntimeProspectiveWorkspaceManifestDelta`：它只包含 exact base revision、proposal/
-  catalog/contract identity 和归一化 resulting target refs，不写文件、不访问 Shell，也不判断 required owner fact。
+  catalog/contract identity、完整 `ProspectiveTargetRefs` 与归一化 resulting target refs，不写文件、不访问 Shell，
+  也不判断 required owner fact。delta 不是部分 target 的执行授权；集合必须作为一个 bounded transaction 保持完整。
   非 feasible、stale、existing-target 或普通 prospective proposal 不得携带该 delta。Orchestrator 只能把这份 File-owned
   value 交给 required-fact owner 的 concrete typed pure query；其他组件不得重建 File manifest 后果。
-- 对 profile 显式绑定的空工作区，File 可以返回不含具体路径的 `scope` selection；它只授权 LLM 提出一个具体 workspace-relative File target，并由同一 owner feasibility/admissibility gate 验证。File 不从 Goal、DoD、目录名或文件后缀推断路径；未绑定 profile 的空工作区仍返回 `absent`。
+- 对 profile 显式绑定的空工作区，File 可以返回不含具体路径的 `scope` selection；它只授权
+  LLM 在同一 sealed all-of constraint 下提出必需的 1～8 个 workspace-relative File target，并由同一 owner
+  feasibility/admissibility gate 验证整个集合。File 不从 Goal、DoD、目录名或文件后缀推断路径；未绑定 profile 的
+  空工作区仍返回 `absent`。
 - Runtime state-change/validation operation 以 `RuntimeOperationReceipt.Outcome` 为唯一结果，并携带本 owner
   stable factual category、完整安全 original diagnostic 与 evidence；不返回跨组件 Status 双权威或 map。
 - request 必须携带 workspace/run/authority/dispatch/operation identity 与 File-owned `SealedRuntimeOperation`；该值包含从已持久化 dispatch 复制的 typed operation 及其全量 payload hash。File 先核对精确 Orchestrator source、hash、operation ID、target/CWI scope，再在 owner 内解包 path/ref 和有界输入，不接收一份可与 seal 漂移的独立执行 `Data`；
@@ -46,9 +54,16 @@ Last Verified: 2026-08-25
   观测到的目标 revision；其中 `patch/apply file_write` 必须携带在执行时再次核对的 `baseHash`，
   `text_replace | unified_diff` 也必须通过对应的 owner preflight/replay 合同。
 - SM-3 在 seal 前要求同一 dispatch 的普通 durable `(OwnerModuleID, TargetRef)` 唯一；owner-sealed exact
-  `RequiredOperationSequence` 除外，而 File 当前不发布同目标 mutation sequence。同一文件的多段修改必须合并为一个
-  operation。File 仍在每次 effect 前独立核对 sealed revision/base hash：即使上游合同被绕过，前一 operation 已改变目标后，
-  后一 stale replay proof 也必须以原始 owner diagnostic rejected，不能被解释为成功、no-op 或 Orchestrator effect mismatch。
+  `RequiredOperationSequence` 除外，而 File 当前不发布同目标 mutation sequence。prospective all-of binding 为每个不同
+  target 编译一项 sequence requirement；每项 `TargetRef` 都强制 candidate `targetRefs` 为 exact singleton，并按 canonical
+  dependency chain 齐全、有序执行。同一文件的多段修改仍必须合并为一个 operation。File 仍在每次 effect 前独立核对
+  sealed revision/base hash：即使上游合同被绕过，前一 operation 已改变目标后，后一 stale replay proof 也必须以原始
+  owner diagnostic rejected，不能被解释为成功、no-op 或 Orchestrator effect mismatch。
+- File 对每个 sequence operation 只返回该 singleton target 的 owner-authored receipt，并按 exact `ExecutionKey + Fence`
+  幂等提交；它不返回 target-set completed/credit/settled 状态，也不把第一条 accepted receipt 扩大为整个 prospective
+  all-of proof。partial、rejected、stale 与 duplicate 的集合判断均属于 Orchestrator：只有同一 sealed dispatch 的全部
+  matching accepted receipts 经其 private evidence commit 后，才可形成 collective proof；CWI credit/settlement 仍只由
+  SM-2 在其余 evidence/assessment gate 满足时 exactly-once 派生。
 
 ## 交互合同完整性
 
@@ -79,12 +94,12 @@ Last Verified: 2026-08-25
   create admission；只有 Orchestrator SM-2 可以根据该事实与 sealed binding/receipt lineage 选择 retain 或 reopen。
 - prospective path 只能按 selector 自身的 canonical admission 能力解释：`workspace-relative-new-file-target`、
   `file/workspace_deliverable` 的完整 bounded owner scope，以及 `file/profile_declared_candidates` 中已声明的 candidate
-  可以复核。`workspace_deliverable` 可在非空清单上保留一个经 File 路径/manifest eligibility 校验的 absent prospective
-  target；它不会被当前 1/N 项替换。在 semantic feasibility 阶段，exact target 只来自 persisted SM-3
-  proposal；若 Definition 声明了 candidate refs，proposal 必须 exact-match 其中一项，并命中 current File
-  operation selector/constraints。File fact 不封存 target authority；后续 reconciliation、operation admission 与
-  dispatch 只能消费 SM-2 sealed binding 中的 target。已有其他 candidate match 时不得静默忽略 proposal；
-  尚未出现的另一目标返回 typed `unsupported`。
+  可以复核。`workspace_deliverable` 可在非空清单上保留经 File 路径/manifest eligibility 校验的 absent prospective
+  target；它不会被当前 1/N 项替换。在 semantic owner-fact acquisition 阶段，exact target set 只来自
+  persisted SM-3 proposal；若 Definition 声明了 candidate refs，proposal 集合中每项都必须 exact-match 其中一项，并命中
+  current File operation selector/constraints。File fact 不封存 target authority；后续 reconciliation、operation admission 与
+  dispatch 只能消费 SM-2 sealed binding 中的完整 target set。已有其他 candidate match 时不得静默忽略 proposal；
+  任一尚未出现、已存在或越界的目标都返回 typed `unsupported`，不会保留可行子集。
   required owner 的 provider-safe typed `all_of` constraint 必须先由 semantic schema/document admission 校验；mismatch
   只形成普通完整文档 correction，零 File probe。required owner 仍可对已通过 constraint 的 File delta 返回 nested
   `would_not_satisfy` fact；只有 Orchestrator 将其与 exact-current File outer fact 持久化为完整 composite 后，才以
@@ -97,7 +112,8 @@ Last Verified: 2026-08-25
   effect 前返回 typed `unsupported` 且零写，旧 binding 的 reconciliation 保持 factual `unverifiable`。所有 absent
   prospective path 还必须拒绝非 canonical `a/../x`、反斜杠、已有普通文件 parent 及 internal symlink parent alias；
   prospective admission 还必须按完整 500-entry File listing 预留 observation capacity；目录与文件都消费该上限，
-  嵌套目标同时预留目标文件及所有缺失父目录。容量不足时返回 typed `unsupported`，不得授权 effect 后必然无法
+  嵌套目标同时预留目标文件及所有缺失父目录。多 target proposal 必须对这些条目取 union 后一次核算，
+  不得按 target 分别通过而超过总容量。容量不足时返回 typed `unsupported`，不得授权 effect 后必然无法
   reconciliation 的第 501 项。File owner 在最终 create effect 前按 workspace 串行重读完整 inventory 并重算缺失
   条目；stale admission 或并发 create 只能在总 entry 数不超过 500 时提交，拒绝时连父目录也不得创建。
 
@@ -118,9 +134,10 @@ Last Verified: 2026-08-25
   inventory、越出 sealed candidates 等 0/1/N × prospective typed fail-closed/零写矩阵）、创建后
   exact reconciliation、重复查询、fresh-owner restart、资源删除后的当前 observation、四类 selector × 0/1/N
   cardinality × prospective post-effect matrix、ambiguous/out-of-workspace fail-closed 与 reconciliation 零二次写。
-- [x] prospective owner-fact feasibility 的 exact delta/hash、ordinary/stale/infeasible 分流、duplicate deterministic replay、
-  source/workspace scope gate、canonical/excluded/symlink-parent/capacity invalid matrix、manifest revision 与目标不存在性保持
-  不变，且全链零 File write/零 Shell I/O。
+- [x] prospective owner-fact feasibility 的 1～8 target-set exact delta/hash、ordinary/stale/infeasible 分流、duplicate
+  deterministic replay、source/workspace scope gate，以及 canonical/duplicate/partial/extra/excluded/symlink-parent/
+  parent-child/aggregate-capacity invalid matrix。验证使用同一 manifest revision、全部目标不存在，且全链零 File
+  write/零父目录创建/零 Shell I/O。
 - [x] snapshot 大文件、400 文件 manifest 与大文件 patch replay 均有 allocation benchmark；bounded read、文件与目录
   混合时恰好 500 个可纳入 entry 成功、第 501 个才 typed overflow、嵌套 create 为缺失父目录预留 capacity，以及
   replay 零二次写均由回归测试约束；被排除的 owner-internal/generated tree 不消费该 entry bound。

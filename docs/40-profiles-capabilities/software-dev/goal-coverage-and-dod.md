@@ -59,15 +59,20 @@ and reopens the same CWI for a fresh validation binding; it never grants DoD cre
 
 That one-shot closure uses the Profile-sealed
 `shell/selectable-validation-surface/prospective-workspace-manifest/v1` satisfaction contract. Before any File effect, File
-validates the exact target proposed by SM-3 at the intersection of the Definition declaration selector/candidate refs and the
-current File operation selector/constraints. Shell publishes a provider-safe typed `all_of` target constraint derived from the
-activation-sealed recipe applicability rule; the acquisition/manifest seals it into C3. For the default `go test -v ./...`
-recipe, current readiness requires both root `go.mod` and a non-excluded test input. Shell publishes the test-target constraint
-only when `go.mod` already exists and one target can satisfy every remaining predicate; missing module plus missing test remains
-a non-actionable prerequisite because one File target cannot establish both. A mismatching proposal is rejected by JSON
-Schema/document admission before File or Shell is called, and only an ordinary complete-document correction may replace it.
-File then returns an immutable current-tree-revision-bound hypothetical manifest delta, which Shell evaluates against its exact
-non-selectable dependency catalog/observation plus the activation-sealed recipe identity. A Shell `would_not_satisfy` result is
+validates the bounded 1–8 target set proposed by one SM-3 semantic document at the intersection of the Definition declaration
+selector/candidate refs and the current File operation selector/constraints. Shell publishes a provider-safe typed `all_of`
+target-clause constraint derived from the activation-sealed recipe applicability rule; every clause is mandatory and each clause's
+predicates are conjunctive. The acquisition/manifest seals it into C3; no clause or target has a `one_of`/`any_of` escape. For the
+default `go test -v ./...` recipe, current readiness requires both root `go.mod` and a non-excluded test input. If either is
+missing, Shell publishes a corresponding mandatory clause: root module uses exact path `go.mod`, test input uses `_test.go` plus
+the excluded-segment predicates, and a missing declared package root adds its exact path-prefix clause. At most eight clauses may
+be published. The proposal must cover every clause and every target must contribute, so an empty or source-only workspace can
+propose `go.mod` and a test input in the same bounded all-of transaction without authorizing unrelated files. A mismatching,
+partial, duplicate or extra-target proposal is rejected by JSON Schema/document admission before File or Shell is called, and
+only an ordinary complete-document correction may replace it. File validates every path, absence/parent relation and aggregate
+manifest capacity against one complete current-tree revision, then returns an immutable side-effect-free hypothetical manifest
+delta. Shell evaluates the resulting manifest against its exact non-selectable dependency catalog/observation plus the
+activation-sealed recipe identity. A Shell `would_not_satisfy` result is
 persisted with the File delta as one exact-current composite and never becomes a binding; because the proposal already satisfied
 the published constraint, it is an owner contract contradiction and directly reaches
 `prospective_satisfaction_contract_violated -> semantic_contract_failed`, with no replacement-target correction. Shell typed
@@ -90,9 +95,11 @@ the Runtime must not manufacture a generic CWI without an exact proof declaratio
 - `prospective_owner_target` validation preparation must carry the exact Profile-derived
   `ProspectiveSatisfactionContractRef`; Shell must publish one matching provider-safe typed `all_of` constraint, while the
   dependency catalog and recipe command remain freshness authority only and never LLM-selectable;
-- the Profile declaration does not carry an exact prospective target; SM-3 proposes one at the intersection of its declaration
-  selector/candidate refs and the current operation selector/owner constraints, File/Shell validate it, and only the SM-2 binding
-  authorizes the later operation candidate/dispatch;
+- the Profile declaration does not carry an exact prospective target set; one SM-3 proposal supplies 1–8
+  `ProspectiveTargetRefs` at the intersection of its declaration selector/candidate refs and the current operation
+  selector/owner constraints. File/Shell validate the whole all-of set, and only the SM-2 binding authorizes the later
+  operation candidate/dispatch. SM-3 then requires one ordered `file/write` operation with an exact singleton `TargetRef` for
+  every bound target; partial or additional operations are rejected before effect;
 - evidence from a predecessor or another Workspace cannot close the current Run;
 - partial assessment closes only explicitly satisfied work items and leaves the rest active;
 - no current-Run accepted evidence means a satisfied assessment is invalid.

@@ -71,7 +71,7 @@ type runtimeCandidateOperationTargetProjection struct {
 	OwnerScopeTargetRefs      []string                                     `json:"ownerScopeTargetRefs,omitempty"`
 	OwnerSelectorRefs         []string                                     `json:"ownerSelectorRefs,omitempty"`
 	ProspectiveConstraintRefs []string                                     `json:"prospectiveConstraintRefs,omitempty"`
-	ProspectiveTargetRef      string                                       `json:"prospectiveTargetRef,omitempty"`
+	ProspectiveTargetRefs     []string                                     `json:"prospectiveTargetRefs,omitempty"`
 	AllowedTargetRefs         []string                                     `json:"allowedTargetRefs,omitempty"`
 }
 
@@ -191,7 +191,7 @@ func runtimeCandidateOperationContractsForManifest(values []runtimecontract.Runt
 				OwnerScopeTargetRefs:      append([]string(nil), target.OwnerScopeTargetRefs...),
 				OwnerSelectorRefs:         append([]string(nil), target.OwnerSelectorRefs...),
 				ProspectiveConstraintRefs: append([]string(nil), target.ProspectiveConstraintRefs...),
-				ProspectiveTargetRef:      target.ProspectiveTargetRef,
+				ProspectiveTargetRefs:     append([]string(nil), target.ProspectiveTargetRefs...),
 				AllowedTargetRefs:         target.AllowedTargetRefs(),
 			},
 			PrerequisiteSnapshotRefs:  append([]string(nil), operation.PrerequisiteSnapshotRefs...),
@@ -265,7 +265,11 @@ func runtimeCandidateStructuredOutputInstruction(manifest runtimecontract.Runtim
 	if len(manifest.RequiredOperationSequence) > 0 {
 		refs := make([]string, 0, len(manifest.RequiredOperationSequence))
 		for _, requirement := range manifest.RequiredOperationSequence {
-			refs = append(refs, requirement.RequirementID+"="+requirement.Kind+"/"+requirement.VariantID)
+			value := requirement.RequirementID + "=" + requirement.Kind + "/" + requirement.VariantID
+			if requirement.TargetRef != "" {
+				value += "@" + requirement.TargetRef
+			}
+			refs = append(refs, value)
 		}
 		lines = append(lines, "Required operation sequence references: "+strings.Join(refs, ", ")+".")
 	}
@@ -301,8 +305,8 @@ func runtimeCandidateStructuredOutputInstruction(manifest runtimecontract.Runtim
 			if allowed := target.AllowedTargetRefs(); len(allowed) > 0 {
 				line += " Allowed targets: " + runtimeCandidateContractFieldList(allowed) + "."
 			}
-			if target.ProspectiveTargetRef != "" {
-				line += " Prospective target: " + target.ProspectiveTargetRef + "."
+			if len(target.ProspectiveTargetRefs) != 0 {
+				line += " Prospective targets: " + runtimeCandidateContractFieldList(target.ProspectiveTargetRefs) + "."
 			}
 			if len(target.OwnerSelectorRefs) > 0 {
 				line += " Owner selectors: " + runtimeCandidateContractFieldList(target.OwnerSelectorRefs) + "."

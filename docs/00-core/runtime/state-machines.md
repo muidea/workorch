@@ -91,6 +91,13 @@ load facts
   recipe/check/metric/artifact 门禁。SM-2 只能从 sealed dispatch 的 `BindingRef`、owner receipt 与 persisted binding
   逐字段匹配后派生 CWI coverage；candidate 的 raw `coverageWorkItemIds`、assessment claim、非空 `PassedChecks`、
   exit code 0、历史 summary、memory、projection 和前一 focus evidence 都不能关闭当前 coverage。
+- multi-target prospective all-of binding 还必须通过 collective receipt gate：同一个 sealed dispatch 中，每个 target
+  恰有一个 matching required operation、owner-committed `accepted` exact receipt 与 Orchestrator-committed
+  `evidence_committed` execution member。partial accepted set 仍保持 CWI unsatisfied/unsettled；rejected、stale、weak、
+  mismatched 或 conflicting duplicate 不计入完成集合。duplicate/restart 只能复用同一 execution/receipt/evidence lineage，
+  不能跨 dispatch、repair 或 semantic generation 合并 member。只有完整集合才允许 SM-2 private event exactly-once 认可
+  collective proof；CWI credit、settlement 与 focus advance 仍须同时通过其余 quality/effect/assessment gate，并只经 aggregate
+  CAS 提交。File/Shell/LLM result 不拥有该 transition。
 - repairable gap 保持同一 focus，必须持久化结构化缺口。有效新 evidence 不清零同 focus 总 repair
   budget；只有原子 focus advance 才开启新的 repair ledger。
 - LLM assessment 中的 disposition、缺失 evidence kind、目标和 reason 都只是 observation/original diagnostic，
@@ -135,19 +142,23 @@ load facts
   `CurrentBindingRef`。导致 owner-fact gap 的 accepted state-change operation shape 必须作为同一 CWI 的 anti-replay fact
   跨 successor semantic focus 保留；SM-2 不携带 predecessor repair attempt/gap/directive，SM-3 在 dispatch 前拒绝等价
   shape，因此新 binding generation 不能重置等价副作用的防重放边界。
-- prospective composite feasibility 的 pre-seal Definition 不携带 exact target；compiled obligation/manifest 也不补写。
-  required owner catalog 发布 provider-safe typed `ProspectiveTargetSatisfactionConstraint`，且只允许 `all_of`；同一值封存
-  到 acquisition/manifest 并在 C3 投影。SM-3 proposal 必须在 Definition declaration selector/candidate refs 与 current
-  operation selector/owner constraints 的交集内提出一个 nonempty exact target，非空 candidate refs 还要求 exact member
-  match，并在 schema/document admission 阶段满足全部 owner predicate；不匹配只使用普通完整文档 correction，零
-  File/Shell probe。只有在 File
-  delta、File catalog/observation、Shell dependency catalog/observation、activation-sealed exact recipe identity、
+- prospective composite feasibility 的 pre-seal Definition 不携带 exact target set；compiled obligation/manifest 也不补写。
+  required owner catalog 发布 provider-safe typed `ProspectiveTargetSatisfactionConstraint`，且只允许 mandatory `all_of`
+  clauses；同一值封存到 acquisition/manifest 并在 C3 投影。SM-3 只能提交一份 bounded semantic proposal，其中
+  `ProspectiveTargetRefs` 必须包含 1～8 个唯一 canonical exact target。每项都必须位于 Definition declaration
+  selector/candidate refs 与 current operation selector/owner constraints 的交集内，非空 candidate refs 还要求逐项 exact
+  member match；每个 clause 至少由一个 target 完整满足，每个 target 也必须对至少一个 clause 有贡献。不存在
+  `one_of`/`any_of` 关系，current wire 拒绝 singular `ProspectiveTargetRef` 及兼容 alias。schema/document admission
+  不匹配只使用普通完整文档 correction，零 File/Shell probe。File 必须基于同一 complete manifest 对完整集合执行 path、
+  absence、parent conflict 与 aggregate-capacity admission，只返回无副作用 hypothetical delta；Shell 只能基于该 delta 的
+  resulting manifest 判断 `would_satisfy`。只有在 File delta、File catalog/observation、Shell dependency
+  catalog/observation、activation-sealed exact recipe identity、
   manifest/batch/request/contract ref全部 current 且 nested outcome 为
   `would_satisfy` 时才 seal-ready。SM-2 在 observation CAS 与 semantic seal 前各重验一次；任一 lineage 漂移都保持零
   binding/operation/effect。Shell typed stale 保留在 nested observation 中，不能改写成 File outer stale或即时 terminal；
   它只通过既有 `semantic_contract_required` private transition消费 bounded refresh generation并退休 exact dependency。
   missing dependency 在 query 前退休 generation，零 Shell call。`would_not_satisfy` 必须先以
-  `semantic_feasibility_observed` 持久化完整 composite fact；该 target 仍是未封存的 proposal，不产生 binding。
+  `semantic_feasibility_observed` 持久化完整 composite fact；该 target set 仍是未封存的 proposal，不产生 binding。
   stale 只消耗独立 bounded refresh，不消耗 correction。由于 owner probe 之前的 admission 已证明 target 满足 published
   constraint，exact-current full-composite `would_not_satisfy` 是 owner contract contradiction；下一 owner-private drive
   记录 `prospective_satisfaction_contract_violated` 并统一收口为 `semantic_contract_failed`，不得生成 replacement-target
@@ -206,10 +217,16 @@ sealed authority + preflight ready
 - renderer、wire DTO、strict decoder、admission、owner feasibility 与 fixture 对同一
   `CandidateContractManifest` 给出一致解释；候选只能选择 manifest 已封存的 `bindingRefs`。未知字段、参数、
   target、effect、dependency、operation kind、未知 binding 或裸 `coverageWorkItemIds` 不得由第二解析路径静默放宽。
-- semantic-plan document 可以为 `prospective_owner_target` 提出 exact target，但在 File/Shell fact 完整且
-  SM-2 封存 binding 前不得生成 operations request/dispatch。operations document 只能选择 binding ref；
-  candidate evaluator 和 dispatch sealer 必须从 current binding 派生/校验 target，不得把 target 作为 provider
-  choice 或替换它。
+- semantic-plan document 可以为 `prospective_owner_target` 提出一份含 1～8 个 exact `ProspectiveTargetRefs` 的 bounded
+  all-of proposal，但在 File/Shell fact 完整且 SM-2 封存 binding 前不得生成 operations request/dispatch。operations
+  document 只能选择 binding ref；封存的 `RequiredOperationSequence` 必须为每个 target 编译一项 exact-singleton
+  `TargetRef` requirement，并以 canonical dependency chain 固定完整顺序。candidate evaluator 和 dispatch sealer 必须从
+  current binding 派生/校验 target；缺项、附加 target、重复或乱序均在 owner effect 前拒绝，provider 不得重新选择或替换。
+- required sequence 的每个 owner receipt 先独立落入 matching execution 的 `owner_committed` ledger；随后只有
+  Orchestrator owner-private evidence event 可以把该 execution、receipt-derived evidence 与 processed-event identity 在同一 CAS
+  中提交为 `evidence_committed`。前 N-1 项完成时 `ActiveDispatch` 仍保留并继续 canonical next operation；单项 receipt 不得
+  关闭 multi-target binding。rejected/stale 可以按既有 typed transaction route 结束或刷新 SM-3 工作，但不得被解释为
+  successful CWI settlement。duplicate 不推进 revision，fresh restart 不重放已有 effect，只恢复同一 sealed dispatch 的缺失项。
 - prospective `would_not_satisfy` 不属于 SM-3 correction ledger：它在 SM-2 作为 published constraint 与 owner judgment
   矛盾的 full-composite factual observation，直接形成 `prospective_satisfaction_contract_violated` terminal。SM-3 的
   attempt 1 只服务普通完整 document/schema rejection，继续复用 transaction/manifest/C0～C3/stable prefix；C4 只携带
@@ -227,7 +244,8 @@ sealed authority + preflight ready
   fact，缺失、半截或错用的 envelope 必须在 aggregate load 前拒绝。
 - 同一 dispatch 内 accepted receipt 造成的资源 revision 变化是内生事实：它可以使后续 SM-2 prerequisite
   observation 失效，但不得仅因此结束尚有 sealed operation 的 active dispatch。全部 operation 成功或任一
-  operation rejected/stale 后，SM-3 才结算 dispatch 并交回 SM-2 reduce。
+  operation rejected/stale 后，SM-3 才结算自身 transaction 并交回 SM-2 reduce；后两类 transaction 结算不等于 CWI
+  successful settlement，也不能提供 collective completion proof。
 - duplicate 结果幂等，stale 只进 diagnostic lineage。已存在 exact receipt 时重启只提交后续 evidence，
   不得重放副作用；未知、非安全重放的副作用进入 typed outcome-unknown/failure 路由。
 - effect/evidence 类型由 sealed `RequiredOutput`、sealed expected effect、sealed binding 与 owner observed effect

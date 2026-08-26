@@ -45,7 +45,7 @@ type RuntimeOperationTargetAuthorization struct {
 	OwnerScopeTargetRefs      []string
 	OwnerSelectorRefs         []string
 	ProspectiveConstraintRefs []string
-	ProspectiveTargetRef      string
+	ProspectiveTargetRefs     []string
 }
 
 // RuntimeCandidateContractManifest is an immutable-value projection of one
@@ -251,6 +251,9 @@ func (f RuntimeCandidateManifestOwnerFacts) Normalized() RuntimeCandidateManifes
 // prospective_owner_target membership. Incomplete/truncated inventory cannot
 // be sealed as scope.
 func BuildRuntimeCandidateContractManifest(decision RuntimeDecision, ownerFacts RuntimeCandidateManifestOwnerFacts) (RuntimeCandidateContractManifest, error) {
+	if err := decision.RequiredOutput.Validate(); err != nil {
+		return RuntimeCandidateContractManifest{}, fmt.Errorf("candidate manifest required operation sequence: %w", err)
+	}
 	ownerFacts = ownerFacts.Normalized()
 	required := decision.RequiredOutput.Normalized()
 	contractRevision := RuntimeOperationContractRevision()
@@ -456,17 +459,17 @@ func (t RuntimeOperationTargetAuthorization) Normalized() RuntimeOperationTarget
 	t.OwnerScopeTargetRefs = normalizeStrings(t.OwnerScopeTargetRefs)
 	t.OwnerSelectorRefs = normalizeStrings(t.OwnerSelectorRefs)
 	t.ProspectiveConstraintRefs = normalizeStrings(t.ProspectiveConstraintRefs)
-	t.ProspectiveTargetRef = strings.TrimSpace(t.ProspectiveTargetRef)
+	t.ProspectiveTargetRefs = normalizeStrings(t.ProspectiveTargetRefs)
 	switch t.Policy {
 	case RuntimeOperationTargetPolicyExactTarget:
 		t.OwnerScopeTargetRefs = nil
 		t.OwnerSelectorRefs = nil
 		t.ProspectiveConstraintRefs = nil
-		t.ProspectiveTargetRef = ""
+		t.ProspectiveTargetRefs = nil
 	case RuntimeOperationTargetPolicyExistingOwnerScope:
 		t.ExactTargetRefs = nil
 		t.ProspectiveConstraintRefs = nil
-		t.ProspectiveTargetRef = ""
+		t.ProspectiveTargetRefs = nil
 	case RuntimeOperationTargetPolicyProspectiveOwnerTarget:
 		t.ExactTargetRefs = nil
 		t.OwnerScopeTargetRefs = nil
@@ -476,7 +479,7 @@ func (t RuntimeOperationTargetAuthorization) Normalized() RuntimeOperationTarget
 		t.OwnerScopeTargetRefs = nil
 		t.OwnerSelectorRefs = nil
 		t.ProspectiveConstraintRefs = nil
-		t.ProspectiveTargetRef = ""
+		t.ProspectiveTargetRefs = nil
 	}
 	return t
 }
@@ -497,7 +500,7 @@ func (t RuntimeOperationTargetAuthorization) RequireTargets() bool {
 
 // AllowedTargetRefs returns the bounded membership set a pure evaluator may use
 // for target membership checks under the sealed TargetPolicy. Prospective
-// create only returns the SM-2 binding-sealed prospective target.
+// create only returns the complete SM-2 binding-sealed prospective target set.
 func (t RuntimeOperationTargetAuthorization) AllowedTargetRefs() []string {
 	t = t.Normalized()
 	switch t.Policy {
@@ -509,10 +512,7 @@ func (t RuntimeOperationTargetAuthorization) AllowedTargetRefs() []string {
 		}
 		return nil
 	case RuntimeOperationTargetPolicyProspectiveOwnerTarget:
-		if t.ProspectiveTargetRef == "" {
-			return nil
-		}
-		return []string{t.ProspectiveTargetRef}
+		return append([]string(nil), t.ProspectiveTargetRefs...)
 	default:
 		return nil
 	}
@@ -553,6 +553,7 @@ func StableRuntimeCandidateContractManifestHash(manifest RuntimeCandidateContrac
 		writeHashString(h, requirement.RequirementID)
 		writeHashString(h, requirement.Kind)
 		writeHashString(h, requirement.VariantID)
+		writeHashString(h, requirement.TargetRef)
 		writeHashStrings(h, requirement.DependsOnRequirementIDs)
 		writeHashString(h, requirement.Reason)
 	}
@@ -607,7 +608,7 @@ func StableRuntimeCandidateContractManifestHash(manifest RuntimeCandidateContrac
 		writeHashStrings(h, operation.Target.OwnerScopeTargetRefs)
 		writeHashStrings(h, operation.Target.OwnerSelectorRefs)
 		writeHashStrings(h, operation.Target.ProspectiveConstraintRefs)
-		writeHashString(h, operation.Target.ProspectiveTargetRef)
+		writeHashStrings(h, operation.Target.ProspectiveTargetRefs)
 		writeHashStrings(h, operation.PrerequisiteSnapshotRefs)
 		writeHashStrings(h, operation.AdmissibilitySnapshotRefs)
 		for _, recipe := range operation.ValidationRecipes {
@@ -681,7 +682,10 @@ func runtimeCandidateOperationManifestForKind(kind string, state ConvergenceStat
 	if runtimeRequiredOperationSequenceHasDependency(required.RequiredOperationSequence) {
 		fields = append(fields, "dependsOn")
 	}
-	target, prerequisiteRefs, admissibilityRefs, err := runtimeCandidateTargetAuthorizationForKind(descriptor, contract, required, ownerFacts)
+	allowedBindingRefs := runtimeOperationBindingAuthorizationRefs(bindingAuthorizations)
+	target, prerequisiteRefs, admissibilityRefs, err := runtimeCandidateTargetAuthorizationForKind(
+		descriptor, contract, required, ownerFacts, bindings, evidenceKind, allowedBindingRefs,
+	)
 	if err != nil {
 		return RuntimeCandidateOperationManifest{}, err
 	}
@@ -721,7 +725,7 @@ func runtimeCandidateOperationManifestForKind(kind string, state ConvergenceStat
 		Target:                      target,
 		PrerequisiteSnapshotRefs:    prerequisiteRefs,
 		AdmissibilitySnapshotRefs:   admissibilityRefs,
-		ValidationRecipes:           runtimeCandidateManifestValidationRecipes(contract.Kind, ownerFacts.ValidationRecipes, bindings, runtimeOperationBindingAuthorizationRefs(bindingAuthorizations)),
+		ValidationRecipes:           runtimeCandidateManifestValidationRecipes(contract.Kind, ownerFacts.ValidationRecipes, bindings, allowedBindingRefs),
 		OperationContractRevision:   contractRevision,
 	}.Normalized(), nil
 }
@@ -838,15 +842,57 @@ func runtimeCandidateManifestValidationRecipes(kind string, recipes []RuntimeVal
 // expand incomplete inventory into a scope.
 //
 // Compilation priority:
-//  1. decision-level exact TargetRefs when no create/scope owner fact applies;
-//  2. TargetSelection Create / Scope / Selected dispositions;
-//  3. matching OperationAdmissibility inventory for the kind's owner;
-//  4. exact_target with empty membership for kinds without target obligation.
+//  1. proof- and kind-matching sealed prospective binding target set;
+//  2. decision-level exact TargetRefs when no create/scope owner fact applies;
+//  3. TargetSelection Create / Scope / Selected dispositions;
+//  4. matching OperationAdmissibility inventory for the kind's owner;
+//  5. exact_target with empty membership for kinds without target obligation.
+func runtimeCandidateProspectiveBindingTargets(bindings []CoverageEvidenceBinding, allowedBindingRefs []string, kind, evidenceKind string) ([]string, string, bool, error) {
+	allowedBindingRefs = normalizeStrings(allowedBindingRefs)
+	if len(allowedBindingRefs) == 0 {
+		return nil, "", false, nil
+	}
+	allowed := make(map[string]struct{}, len(allowedBindingRefs))
+	for _, ref := range allowedBindingRefs {
+		allowed[ref] = struct{}{}
+	}
+	targetRefs := make([]string, 0)
+	selectorRef := ""
+	for _, binding := range NormalizeCoverageEvidenceBindings(bindings) {
+		if _, found := allowed[binding.ID]; !found || len(binding.ProspectiveTargetRefs) == 0 {
+			continue
+		}
+		proof, found := CoverageEvidenceProofForKind(binding, evidenceKind)
+		if !found || !runtimeOperationKindsContain(proof.AllowedOperationKinds, kind) {
+			continue
+		}
+		if binding.TargetSelectorRef == "" {
+			return nil, "", false, fmt.Errorf("candidate manifest prospective binding %q has no sealed owner selector", binding.ID)
+		}
+		if selectorRef != "" && selectorRef != binding.TargetSelectorRef {
+			return nil, "", false, fmt.Errorf("candidate manifest prospective bindings for %q have conflicting owner selectors", kind)
+		}
+		selectorRef = binding.TargetSelectorRef
+		targetRefs = append(targetRefs, binding.ProspectiveTargetRefs...)
+	}
+	targetRefs = normalizeStrings(targetRefs)
+	if len(targetRefs) == 0 {
+		return nil, "", false, nil
+	}
+	if len(targetRefs) > RuntimeProspectiveTargetRefsMaxCount {
+		return nil, "", false, fmt.Errorf("candidate manifest prospective binding target set for %q exceeds %d", kind, RuntimeProspectiveTargetRefsMaxCount)
+	}
+	return targetRefs, selectorRef, true, nil
+}
+
 func runtimeCandidateTargetAuthorizationForKind(
 	descriptor RuntimeOperationDescriptor,
 	contract RuntimeOperationContract,
 	required RequiredOutputContract,
 	ownerFacts RuntimeCandidateManifestOwnerFacts,
+	bindings []CoverageEvidenceBinding,
+	evidenceKind string,
+	allowedBindingRefs []string,
 ) (RuntimeOperationTargetAuthorization, []string, []string, error) {
 	ownerFacts = ownerFacts.Normalized()
 	exactRefs := normalizeStrings(required.TargetRefs)
@@ -859,6 +905,29 @@ func runtimeCandidateTargetAuthorizationForKind(
 		if admissibility.SnapshotID != "" {
 			admissibilityRefs = []string{admissibility.SnapshotID}
 		}
+	}
+	prospectiveBindingRefs, prospectiveBindingSelector, hasProspectiveBinding, bindingErr := runtimeCandidateProspectiveBindingTargets(
+		bindings, allowedBindingRefs, descriptor.Kind, evidenceKind,
+	)
+	if bindingErr != nil {
+		return RuntimeOperationTargetAuthorization{}, nil, nil, bindingErr
+	}
+	if hasProspectiveBinding {
+		allowsProspective, ownerSelectors, ownerConstraints := runtimeCandidateAdmissibilityAllowsProspective(required, contract, admissibility, hasAdmissibility)
+		if !allowsProspective || !containsString(ownerSelectors, prospectiveBindingSelector) || len(ownerConstraints) == 0 {
+			return RuntimeOperationTargetAuthorization{}, nil, nil, fmt.Errorf("candidate manifest prospective binding for %q is outside matching owner admissibility", descriptor.Kind)
+		}
+		for _, targetRef := range prospectiveBindingRefs {
+			if containsString(admissibility.TargetRefs, targetRef) {
+				return RuntimeOperationTargetAuthorization{}, nil, nil, fmt.Errorf("candidate manifest prospective binding target %q already belongs to owner inventory", targetRef)
+			}
+		}
+		return RuntimeOperationTargetAuthorization{
+			Policy:                    RuntimeOperationTargetPolicyProspectiveOwnerTarget,
+			OwnerSelectorRefs:         []string{prospectiveBindingSelector},
+			ProspectiveConstraintRefs: append([]string(nil), ownerConstraints...),
+			ProspectiveTargetRefs:     prospectiveBindingRefs,
+		}, nil, admissibilityRefs, nil
 	}
 
 	if ownerFacts.TargetSelection == nil {
@@ -904,7 +973,7 @@ func runtimeCandidateTargetAuthorizationForKind(
 			Policy:                    RuntimeOperationTargetPolicyProspectiveOwnerTarget,
 			OwnerSelectorRefs:         selectorRefs,
 			ProspectiveConstraintRefs: constraintRefs,
-			ProspectiveTargetRef:      prospectiveRef,
+			ProspectiveTargetRefs:     []string{prospectiveRef},
 		}, prerequisiteRefs, admissibilityRefs, nil
 	case RuntimeTargetSelectionScope:
 		if len(exactRefs) != 0 {
@@ -954,7 +1023,7 @@ func runtimeCandidateTargetAuthorizationForKind(
 					Policy:                    RuntimeOperationTargetPolicyProspectiveOwnerTarget,
 					OwnerSelectorRefs:         selectorRefs,
 					ProspectiveConstraintRefs: ownerConstraints,
-					ProspectiveTargetRef:      value.ProspectiveTargetRef,
+					ProspectiveTargetRefs:     []string{value.ProspectiveTargetRef},
 				}, prerequisiteRefs, admissibilityRefs, nil
 			}
 		}
@@ -1255,6 +1324,7 @@ func cloneRuntimeRequiredOperationVariants(values []RuntimeRequiredOperationVari
 		value.RequirementID = strings.TrimSpace(value.RequirementID)
 		value.Kind = CanonicalRuntimeBlockKind(value.Kind)
 		value.VariantID = strings.TrimSpace(value.VariantID)
+		value.TargetRef = strings.TrimSpace(value.TargetRef)
 		value.DependsOnRequirementIDs = normalizeStrings(value.DependsOnRequirementIDs)
 		value.Reason = strings.TrimSpace(value.Reason)
 		ret = append(ret, value)

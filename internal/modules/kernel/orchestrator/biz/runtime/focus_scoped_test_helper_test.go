@@ -61,7 +61,9 @@ func runtimeTestSealCurrentFocusBindingTargetSurface(facts *runtimecontract.Runt
 		binding.TargetSelectorOwnerRef = surface.SelectorOwnerRef
 		binding.TargetSelectorSubjectRef = surface.SelectorSubjectRef
 		binding.TargetSelectorCandidateRefs = append([]string(nil), surface.SelectorCandidateRefs...)
-		binding.ProspectiveTargetRef = surface.ProspectiveTargetRef
+		if surface.ProspectiveTargetRef != "" {
+			binding.ProspectiveTargetRefs = []string{surface.ProspectiveTargetRef}
+		}
 		binding.Hash = runtimecontract.StableCoverageEvidenceBindingHash(binding)
 		focus.CoverageEvidenceBindings[index] = binding
 	}

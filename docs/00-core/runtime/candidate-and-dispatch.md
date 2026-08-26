@@ -4,7 +4,7 @@ Status: normative
 
 Type: core-contract-part
 
-Last Verified: 2026-08-25
+Last Verified: 2026-08-26
 
 ## 规范化候选合同
 
@@ -31,7 +31,7 @@ fixture 都只能消费这份封存合同，不能再次解释原始 profile、�
 | --- | --- | --- |
 | `exact_target` | operation 的全部 target 必须属于封存的精确 target set | 空 target、越界 target、运行时猜测 target |
 | `existing_owner_scope` | operation 必须提供 concrete target，且每个 target 属于 owner 封存的既有资源 scope | 新建 target、截断/不完整 inventory、只命中部分 target |
-| `prospective_owner_target` | semantic proposal 经 owner fact 验证后由 SM-2 binding 封存 exact target；operation candidate 只引用该 binding，dispatch 从 binding 派生 target 并命中同一 create selector/constraint | 重新选择/替换 target、无 binding target、绕过 owner feasibility |
+| `prospective_owner_target` | 一份 bounded semantic proposal 的 1～8 个 exact target 经 owner fact 整体验证后由 SM-2 binding 封存；operation candidate 只引用该 binding，并按每个 target 的 required sequence 提交；dispatch 从 binding 派生 target set 并命中同一 create selector/constraint | 重新选择/替换/缩小 target set、无 binding target、部分 required sequence、绕过 owner feasibility |
 
 `TargetPolicy` 是 owner-neutral 的纯合同词汇。File、Git、Shell、MCP 或业务 profile 的具体语义仍由对应
 owner/profile 提供；Orchestrator 只编译和验证 typed receipt，不按文件名、命令或领域文本推断策略。
@@ -40,7 +40,17 @@ owner/profile 提供；Orchestrator 只编译和验证 typed receipt，不按文
 `(OwnerModuleID, TargetRef)`。两个普通 operation 即使存在 `DependsOn`，也不能先后修改同一 owner resource，因为它们的
 target snapshot/replay proof 都在第一个 effect 前封存；provider 必须把同一目标的完整变化合并为一个 operation 和一个
 receipt。唯一例外是 owner fact 明确封存的 exact `RequiredOperationSequence`：其中每项必须绑定不同 requirement ref/variant
-并按依赖执行。不同 owner/target 的 operation 仍可按 dependency graph 确定性执行，non-durable operation 不参与该约束。
+并按依赖执行。prospective all-of binding 的 sequence 必须与完整 target set 一一对应：每项携带不同 requirement ref、一个
+exact `TargetRef`，且 candidate `targetRefs` 必须为该值的 singleton；缺少、附加、重复或乱序均拒绝。不同 owner/target 的
+operation 仍可按 dependency graph 确定性执行，non-durable operation 不参与该约束。
+
+该 sequence 只有一份 collective completion proof：每个 target 的 operation 都必须在同一个 sealed dispatch 内产生
+owner-committed `accepted` exact receipt，并由 Orchestrator private evidence transition 将 matching execution 原子提交为
+`evidence_committed`。单个或 partial receipt 只证明自身 singleton target，不能 credit/settle 整个 binding；rejected、stale、
+weak/mismatched receipt 不计入集合。duplicate 只复用同一 `ExecutionKey + Fence` receipt，restart 只恢复同一 dispatch 的
+persisted members；不同 dispatch、repair 或 semantic generation 的 receipt 不得合并。仅完整集合可由 SM-2 exactly-once
+认可为 collective proof；CWI credit/settlement 还必须通过其余 quality/effect/assessment gate 和 aggregate CAS。任何
+capability result 都不能携带 collective/settled target state。
 
 owner inventory 与 provider context 是两个不同合同：
 
@@ -57,7 +67,7 @@ owner inventory 与 provider context 是两个不同合同：
 semantic-plan document 与 matching owner feasibility 编译出 deterministic、hashable 的
 `CoverageEvidenceBinding`，并封存其 binding set/hash。binding 是 DTO/合同，不是新的状态机：它至少含
 `BindingID`、exact CWI ID、definition/focus identity、required evidence kind/effect scope、允许 operation
-kind/variant、exact target 或 sealed selector、recipe/check、适用 metric/artifact 与 declaration/snapshot lineage。
+kind/variant、exact target set 或 sealed selector、recipe/check、适用 metric/artifact 与 declaration/snapshot lineage。
 当前 Runtime 对 validation proof 采用一 focus 一 CWI 的保守形状；共享 recipe 只有在每个 CWI 具有独立
 check/target 并编译为独立 focus/binding 时才允许。focus 级泛化 recipe/check 不得由一个 owner receipt 扇出关闭
 多个异构 CWI。缺 binding、binding 不能被 owner 独立验证或 binding set 与 current definition 不一致时，
@@ -79,20 +89,25 @@ Decision 或 Approval。
 当一个 sealed owner-fact acquisition 使用 `prospective_owner_target` 时，普通“File 可创建该 target”的 observation
 不足以证明 acquisition 后 required owner fact 会成立。pre-seal convergence declaration、semantic proof obligation 和
 provider projection 必须携带同一个非空 `ProspectiveSatisfactionContractRef`；其它 target policy 禁止携带该 ref。
-declaration/obligation/manifest 都不封存 exact target；SM-3 semantic proposal 在 Definition declaration
-selector/candidate refs 与 current operation selector/owner constraints 的交集中提出它。required owner catalog 同时发布
-provider-safe typed `ProspectiveTargetSatisfactionConstraint`，只允许 `all_of`；generation-specific acquisition/manifest
-完整封存并在 C3 投影该事实，dependency recipe identity/command 仍不可选择。
+declaration/obligation/manifest 都不封存 exact target set；SM-3 只能提交一份 bounded semantic proposal，其 typed
+`ProspectiveTargetRefs`（JSON `prospectiveTargetRefs`）包含 1～8 个唯一 canonical exact target。集合中每项都必须位于
+Definition declaration selector/candidate refs 与 current operation selector/owner constraints 的交集内，非空 candidate refs 要求逐项 exact member
+match。required owner catalog 同时发布 provider-safe typed `ProspectiveTargetSatisfactionConstraint`，只允许 mandatory
+`all_of` clauses；每个 clause 至少由集合中一项完整满足，每个 target 也必须对至少一个 clause 有贡献。不存在
+`one_of`/`any_of` 关系，singular `ProspectiveTargetRef` 与兼容 alias 均由 current decoder/schema 拒绝。
+generation-specific acquisition/manifest 完整封存并在 C3 投影该事实，dependency recipe identity/command 仍不可选择。
 
 SM-2 对每个 proposal 只接受以下 composite factual chain：
 
-1. acquisition owner（当前为 File）按 current complete workspace manifest、exact File catalog/observation 和 proposal
-   执行无副作用 feasibility，并生成 immutable、base-workspace-tree-revision-bound 的
-   `RuntimeProspectiveWorkspaceManifestDelta`；delta 只描述 hypothetical resulting target refs，不创建目录或文件；
+1. acquisition owner（当前为 File）按同一个 current complete workspace manifest、exact File catalog/observation 对完整 target
+   set 一次执行 path、absence、parent conflict 与 aggregate-capacity admission，并生成 immutable、
+   base-workspace-tree-revision-bound 的 `RuntimeProspectiveWorkspaceManifestDelta`；delta 只描述完整 hypothetical resulting
+   target refs，不创建目录或文件，也不返回可先执行的 partial subset；
 2. Orchestrator 把该 delta、activation-sealed exact recipe declarations，以及 required owner（当前为 Shell）的 exact
    dependency catalog/observation交给 required owner 自有 concrete typed pure query；
 3. required owner 独立验证 contract ref、recipe command/ordered args/timeout schema identity、catalog/observation 与 delta
-   lineage，并返回嵌套的 `would_satisfy | would_not_satisfy | typed stale` observation；它不读取 File/workspace、
+   lineage，并且只基于 delta 的 resulting manifest 返回嵌套的 `would_satisfy | would_not_satisfy | typed stale`
+   observation；它不读取 File/workspace、
    不执行 recipe、不开 session，也不选择 Runtime transition；
 4. Orchestrator 只在同一个 SM-2 private event/CAS 中提交完整 File outer feasibility、delta 与 required-owner nested
    observation，并在 CAS 和 semantic seal 两个边界重验 manifest/batch/request/delta 以及两组 catalog/observation freshness。
@@ -110,13 +125,14 @@ dependency catalog/observation并重获新 manifest/request。missing dependency
 generation，零 required-owner query。refresh 耗尽才以原始 diagnostic fail-closed。stale 只更新 owner
 fact freshness，不记录 failed target、不改变 semantic attempt，也不消耗 correction ledger。
 
-schema 与 document admission 使用同一 sealed constraint 在 owner probe 前校验 exact proposal target。candidate refs 的
-`const/enum` 与 owner `all_of` predicate 必须同时成立；不匹配形成 manifest/CWI/field-path-bound typed violation，并只可
+schema 与 document admission 使用同一 sealed constraint 在 owner probe 前校验完整 exact proposal target set。candidate refs
+的 `const/enum`、all-of clause coverage 与“每个 target 均有贡献”必须同时成立；empty/partial/extra/duplicate、越过 8 项或
+singular 字段形成 manifest/CWI/field-path-bound typed violation，并只可
 消费普通完整文档/schema 的 sole attempt-1 correction。C3 保留唯一 constraint authority，C4 只引用违规 field，不复制
 constraint；整个分支零 File/Shell query、binding、dispatch、effect、coverage 或 ticket。
 
 `would_not_satisfy` 不是 target replacement 信号。Orchestrator 仍先以 `semantic_feasibility_observed` 持久化 exact-current
-File delta + Shell observation；该 target 不产生 binding。由于 admission 已证明它满足 required owner 发布的 typed
+File delta + Shell observation；该 target set 不产生 binding。由于 admission 已证明它满足 required owner 发布的 typed
 constraint，完整 composite `would_not_satisfy` 表示 published contract 与 owner judgment 自相矛盾。下一 owner-private drive
 必须记录 `prospective_satisfaction_contract_violated` 并收口为 `semantic_contract_failed`，不得生成 `Allowed`、
 replacement proposal、第二 provider request 或第二次 owner probe。partial File delta、单独 Shell reason、
@@ -124,9 +140,10 @@ free-form diagnostic 与 stale 仍不得触发 terminal；typed stale 只走既�
 terminal 或同一 proposal query。
 
 `would_satisfy` 的 full composite fact 通过 SM-2 private event 后，只有 sealed `CoverageEvidenceBinding`
-对 exact target 具有 authority。后续 operations document 的 schema 只把 binding ref 作为选择面；target 由
-candidate evaluator、`SealedOperationAuthorization` 与 `SealedDispatch` 从 current binding 派生/校验。它们不直接
-消费 semantic proposal 或 File/Shell fact，也不产生第二份 target authority。
+对完整 exact target set 具有 authority。后续 operations document 的 schema 只把 binding ref 作为选择面；SM-3 将每个
+target 编译为 `RequiredOperationSequence` 中一个 exact-singleton `TargetRef` requirement，并用 canonical dependency chain
+固定完整顺序。candidate evaluator、`SealedOperationAuthorization` 与 `SealedDispatch` 从 current binding 派生/校验该
+sequence；它们不直接消费 semantic proposal 或 File/Shell fact，也不产生第二份 target authority。
 
 每次semantic-plan或operations provider call都必须使用SM-3 persisted request session形成purpose-bound invocation seal；
 seal不是另一份activation authority。对应call、correction、semantic generation和operation consumption必须引用

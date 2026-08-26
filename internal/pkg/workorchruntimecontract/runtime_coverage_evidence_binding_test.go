@@ -104,8 +104,8 @@ func TestCoverageEvidenceBindingProspectiveTargetRequiresBoundedSelectorSurface(
 			AllowedOperationKinds: []string{StepKindFileWrite},
 		}},
 		TargetSelectorRef: "file/workspace-relative-create", TargetSelectorOwnerRef: RuntimeModuleFile,
-		TargetSelectorSubjectRef: "deliverable", TargetSelectorCandidateRefs: []string{"README.md", "internal/main.go"},
-		ProspectiveTargetRef: "internal/main.go", DeclarationRef: "profile/prospective",
+		TargetSelectorSubjectRef: "deliverable", TargetSelectorCandidateRefs: []string{"README.md", "internal/main.go", "internal/main_test.go"},
+		ProspectiveTargetRefs: []string{"internal/main.go", "internal/main_test.go"}, DeclarationRef: "profile/prospective",
 	}.Normalized()
 	binding.Hash = StableCoverageEvidenceBindingHash(binding)
 	if err := binding.Validate(); err != nil {
@@ -117,7 +117,7 @@ func TestCoverageEvidenceBindingProspectiveTargetRequiresBoundedSelectorSurface(
 		"missing selector":                          func(value *CoverageEvidenceBinding) { value.TargetSelectorRef = "" },
 		"missing selector owner":                    func(value *CoverageEvidenceBinding) { value.TargetSelectorOwnerRef = "" },
 		"missing selector subject":                  func(value *CoverageEvidenceBinding) { value.TargetSelectorSubjectRef = "" },
-		"target outside candidates":                 func(value *CoverageEvidenceBinding) { value.ProspectiveTargetRef = "other.go" },
+		"target outside candidates":                 func(value *CoverageEvidenceBinding) { value.ProspectiveTargetRefs = []string{"other.go"} },
 	} {
 		t.Run(name, func(t *testing.T) {
 			invalid := binding.Clone()
@@ -143,7 +143,7 @@ func TestValidateCoverageEvidenceBindingsForFocusRequiresExactTargetSurface(t *t
 			RequiredEvidenceKinds: binding.EvidenceKinds(), CoverageEvidenceBindings: []CoverageEvidenceBinding{binding},
 			TargetRefs: binding.TargetRefs, TargetSelectorRef: binding.TargetSelectorRef,
 			TargetSelectorOwnerRef: binding.TargetSelectorOwnerRef, TargetSelectorSubjectRef: binding.TargetSelectorSubjectRef,
-			TargetSelectorCandidateRefs: binding.TargetSelectorCandidateRefs, ProspectiveTargetRef: binding.ProspectiveTargetRef,
+			TargetSelectorCandidateRefs: binding.TargetSelectorCandidateRefs, ProspectiveTargetRefs: binding.ProspectiveTargetRefs,
 		}
 	}
 
@@ -159,7 +159,7 @@ func TestValidateCoverageEvidenceBindingsForFocusRequiresExactTargetSurface(t *t
 		ID: "binding-prospective", CoverageWorkItemID: "cwi-prospective", FocusID: "focus-prospective", DefinitionRevision: "definition-target-surface",
 		Proofs: []CoverageEvidenceProof{proof}, TargetSelectorRef: "workspace-relative-new-file-target",
 		TargetSelectorOwnerRef: RuntimeModuleFile, TargetSelectorSubjectRef: "workspace_deliverable",
-		TargetSelectorCandidateRefs: []string{"README.md", "internal/main.go"}, ProspectiveTargetRef: "internal/main.go",
+		TargetSelectorCandidateRefs: []string{"README.md", "internal/main.go"}, ProspectiveTargetRefs: []string{"internal/main.go"},
 		DeclarationRef: "profile/prospective",
 	}
 	prospectiveFocus := validFocus(prospective)
@@ -176,7 +176,7 @@ func TestValidateCoverageEvidenceBindingsForFocusRequiresExactTargetSurface(t *t
 		{name: "selector owner", mutate: func(value *CoverageFocus) { value.TargetSelectorOwnerRef = "blocks/other" }},
 		{name: "selector subject", mutate: func(value *CoverageFocus) { value.TargetSelectorSubjectRef = "other-subject" }},
 		{name: "selector candidates", mutate: func(value *CoverageFocus) { value.TargetSelectorCandidateRefs = []string{"other.go"} }},
-		{name: "prospective target", mutate: func(value *CoverageFocus) { value.ProspectiveTargetRef = "other.go" }},
+		{name: "prospective target", mutate: func(value *CoverageFocus) { value.ProspectiveTargetRefs = []string{"other.go"} }},
 	} {
 		t.Run(testCase.name, func(t *testing.T) {
 			mismatched := prospectiveFocus

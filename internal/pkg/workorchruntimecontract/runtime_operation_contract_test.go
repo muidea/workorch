@@ -361,6 +361,82 @@ func TestValidateRequiredOperationBindings(t *testing.T) {
 	}
 }
 
+func TestValidateRequiredOperationBindingsRequiresExactProspectiveTarget(t *testing.T) {
+	content := "generated"
+	operations := []RuntimeOperation{
+		{ID: "module", Kind: StepKindFileWrite, RequiredOperationRef: "prospective-target-01", TargetRefs: []string{"go.mod"}, Parameters: []OperationParameter{{Name: "content", String: &content}}},
+		{ID: "test", Kind: StepKindFileWrite, RequiredOperationRef: "prospective-target-02", DependsOn: []string{"module"}, TargetRefs: []string{"workorch_test.go"}, Parameters: []OperationParameter{{Name: "content", String: &content}}},
+	}
+	requirements := []RuntimeRequiredOperationVariant{
+		{RequirementID: "prospective-target-01", Kind: StepKindFileWrite, TargetRef: "go.mod"},
+		{RequirementID: "prospective-target-02", Kind: StepKindFileWrite, TargetRef: "workorch_test.go", DependsOnRequirementIDs: []string{"prospective-target-01"}},
+	}
+	if err := ValidateRequiredOperationBindings(operations, requirements); err != nil {
+		t.Fatalf("valid target-complete all-of sequence: %v", err)
+	}
+	if err := ValidateRequiredOperationBindings(operations[:1], requirements); err == nil || !strings.Contains(err.Error(), `runtime candidate requires operation ref "prospective-target-02"`) {
+		t.Fatalf("partial prospective target set error = %v", err)
+	}
+
+	for name, mutate := range map[string]func([]RuntimeOperation) []RuntimeOperation{
+		"wrong target": func(values []RuntimeOperation) []RuntimeOperation {
+			values[1].TargetRefs = []string{"other_test.go"}
+			return values
+		},
+		"missing target": func(values []RuntimeOperation) []RuntimeOperation {
+			values[1].TargetRefs = nil
+			return values
+		},
+		"multiple targets": func(values []RuntimeOperation) []RuntimeOperation {
+			values[1].TargetRefs = []string{"other_test.go", "workorch_test.go"}
+			return values
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			changed := append([]RuntimeOperation(nil), operations...)
+			changed = mutate(changed)
+			if err := ValidateRequiredOperationBindings(changed, requirements); err == nil || !strings.Contains(err.Error(), `does not match required target "workorch_test.go"`) {
+				t.Fatalf("target mismatch error = %v", err)
+			}
+		})
+	}
+}
+
+func TestRequiredOperationSequenceValidationFailsClosed(t *testing.T) {
+	valid := []RuntimeRequiredOperationVariant{
+		{RequirementID: "create-module", Kind: StepKindFileWrite, TargetRef: "go.mod"},
+		{RequirementID: "create-test", Kind: StepKindFileWrite, TargetRef: "workorch_test.go", DependsOnRequirementIDs: []string{"create-module"}},
+	}
+	if err := (RequiredOutputContract{RequiredOperationSequence: valid}).Validate(); err != nil {
+		t.Fatalf("valid required operation sequence: %v", err)
+	}
+
+	tests := []struct {
+		name   string
+		values []RuntimeRequiredOperationVariant
+		want   string
+	}{
+		{name: "empty id", values: []RuntimeRequiredOperationVariant{{Kind: StepKindFileWrite}}, want: "requires an id and kind"},
+		{name: "duplicate id", values: append(append([]RuntimeRequiredOperationVariant(nil), valid...), valid[0]), want: "duplicates requirement id"},
+		{name: "unknown dependency", values: []RuntimeRequiredOperationVariant{{RequirementID: "write", Kind: StepKindFileWrite, DependsOnRequirementIDs: []string{"missing"}}}, want: "depends on unknown requirement"},
+		{name: "self dependency", values: []RuntimeRequiredOperationVariant{{RequirementID: "write", Kind: StepKindFileWrite, DependsOnRequirementIDs: []string{"write"}}}, want: "cannot depend on itself"},
+		{name: "duplicate dependency", values: []RuntimeRequiredOperationVariant{{RequirementID: "first", Kind: StepKindFileWrite}, {RequirementID: "second", Kind: StepKindFileWrite, DependsOnRequirementIDs: []string{"first", "first"}}}, want: "duplicates dependency"},
+		{name: "cycle", values: []RuntimeRequiredOperationVariant{{RequirementID: "first", Kind: StepKindFileWrite, DependsOnRequirementIDs: []string{"second"}}, {RequirementID: "second", Kind: StepKindFileWrite, DependsOnRequirementIDs: []string{"first"}}}, want: "dependency cycle"},
+		{name: "duplicate exact target", values: []RuntimeRequiredOperationVariant{{RequirementID: "first", Kind: StepKindFileWrite, TargetRef: "go.mod"}, {RequirementID: "second", Kind: StepKindFileWrite, TargetRef: "go.mod"}}, want: "duplicates exact target"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			contract := RequiredOutputContract{RequiredOperationSequence: test.values}
+			if err := contract.Validate(); err == nil || !strings.Contains(err.Error(), test.want) {
+				t.Fatalf("required operation sequence error = %v, want %q", err, test.want)
+			}
+			if err := contract.Normalized().Validate(); err == nil || !strings.Contains(err.Error(), test.want) {
+				t.Fatalf("normalized required operation sequence error = %v, want %q", err, test.want)
+			}
+		})
+	}
+}
+
 func patchOperationWithType(patchType string) RuntimeOperation {
 	return RuntimeOperation{Kind: RuntimeBlockKindPatchApply, Parameters: []OperationParameter{{Name: "patchType", String: &patchType}}}
 }

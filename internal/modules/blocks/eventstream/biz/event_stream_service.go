@@ -17,6 +17,7 @@ import (
 	basebiz "github.com/muidea/workorch/internal/modules/base/biz"
 	approvalcommon "github.com/muidea/workorch/internal/modules/blocks/approval/pkg/common"
 	approvalevents "github.com/muidea/workorch/internal/modules/blocks/approval/pkg/events"
+	approvalmodel "github.com/muidea/workorch/internal/modules/blocks/approval/pkg/models"
 	decisioncommon "github.com/muidea/workorch/internal/modules/blocks/decision/pkg/common"
 	decisionevents "github.com/muidea/workorch/internal/modules/blocks/decision/pkg/events"
 	modulecommon "github.com/muidea/workorch/internal/modules/blocks/eventstream/pkg/common"
@@ -137,7 +138,7 @@ func (s *Biz) Start() error {
 		eventstreamevents.TopicEventStreamCommandHighWatermarks,
 		eventstreamevents.TopicEventStreamCommandSealWorkspaceDeletion,
 		eventstreamevents.TopicEventStreamCommandPurgeWorkspace,
-		approvalevents.TopicApprovalCommandRecordResolution,
+		eventstreamevents.TopicEventStreamCommandRecordApprovalResolution,
 	}
 	for _, topic := range s.topics {
 		s.SubscribeFunc(topic, s.handleCommand)
@@ -152,7 +153,7 @@ func (s *Biz) handleCommand(ev magicevent.Event, result magicevent.Result) {
 	if result == nil {
 		return
 	}
-	if ev != nil && ev.ID() == approvalevents.TopicApprovalCommandRecordResolution {
+	if ev != nil && ev.ID() == eventstreamevents.TopicEventStreamCommandRecordApprovalResolution {
 		response, err := s.executeRecordApprovalResolution(ev)
 		if err != nil {
 			result.Set(nil, &cd.Error{Code: cd.Unexpected, Message: err.Error(), Cause: err})
@@ -169,26 +170,33 @@ func (s *Biz) handleCommand(ev magicevent.Event, result magicevent.Result) {
 	result.Set(response, nil)
 }
 
-func (s *Biz) executeRecordApprovalResolution(ev magicevent.Event) (approvalevents.RecordApprovalResolutionResult, error) {
+func (s *Biz) executeRecordApprovalResolution(ev magicevent.Event) (eventstreamevents.RecordApprovalResolutionResult, error) {
 	if s == nil || s.repo == nil || ev == nil || ev.Source() != approvalcommon.ModuleID {
-		return approvalevents.RecordApprovalResolutionResult{}, common.ErrInvalidArgument
+		return eventstreamevents.RecordApprovalResolutionResult{}, common.ErrInvalidArgument
 	}
-	command, ok := ev.Data().(approvalevents.RecordApprovalResolutionCommand)
+	command, ok := ev.Data().(eventstreamevents.RecordApprovalResolutionCommand)
 	if !ok || command.Data.Validate() != nil {
-		return approvalevents.RecordApprovalResolutionResult{}, common.ErrInvalidArgument
+		return eventstreamevents.RecordApprovalResolutionResult{}, common.ErrInvalidArgument
 	}
-	data := command.Data
+	fact := command.Data
+	data := approvalevents.ApprovalChangedData{
+		NotificationID: fact.NotificationID, ResolutionID: fact.ResolutionID, ApprovalID: fact.ApprovalID,
+		WorkspaceID: fact.WorkspaceID, RunID: fact.RunID, StepID: fact.StepID, Reason: fact.Reason, Action: fact.Action,
+		Context: append([]workorcheventpayload.Field(nil), fact.Context...), ResolutionContext: append([]workorcheventpayload.Field(nil), fact.ResolutionContext...),
+		Principal: approvalmodel.ApprovalResolutionPrincipal{Kind: approvalmodel.ApprovalResolutionPrincipalKind(fact.PrincipalKind), SubjectID: fact.PrincipalSubjectID},
+		State:     fact.State,
+	}
 	ctx, err := common.BindRuntimeWorkspaceContext(ev.Context(), data.WorkspaceID)
 	if err != nil {
-		return approvalevents.RecordApprovalResolutionResult{}, err
+		return eventstreamevents.RecordApprovalResolutionResult{}, err
 	}
 	record := approvalRecord(approvalevents.TopicApprovalResolved, data)
 	if err := s.appendRecord(ctx, record); err != nil {
 		if !errors.Is(err, common.ErrConflict) || !s.samePersistedApprovalResolution(ctx, record) {
-			return approvalevents.RecordApprovalResolutionResult{}, err
+			return eventstreamevents.RecordApprovalResolutionResult{}, err
 		}
 	}
-	return approvalevents.RecordApprovalResolutionResult{
+	return eventstreamevents.RecordApprovalResolutionResult{
 		NotificationID: data.NotificationID, ResolutionID: data.ResolutionID, ApprovalID: data.ApprovalID,
 		WorkspaceID: data.WorkspaceID, RunID: data.RunID,
 	}, nil

@@ -70,7 +70,7 @@ type RuntimeCWIReconciliationBindingRef struct {
 	TargetSelectorOwnerRef      string
 	TargetSelectorSubjectRef    string
 	TargetSelectorCandidateRefs []string
-	ProspectiveTargetRef        string
+	ProspectiveTargetRefs       []string
 	ValidationRecipeIDs         []string
 	RequiredCheckRefs           []string
 	MetricConstraints           []string
@@ -89,7 +89,7 @@ func (r RuntimeCWIReconciliationBindingRef) Normalized() RuntimeCWIReconciliatio
 	r.TargetSelectorOwnerRef = strings.TrimSpace(r.TargetSelectorOwnerRef)
 	r.TargetSelectorSubjectRef = strings.TrimSpace(r.TargetSelectorSubjectRef)
 	r.TargetSelectorCandidateRefs = normalizeStrings(r.TargetSelectorCandidateRefs)
-	r.ProspectiveTargetRef = strings.TrimSpace(r.ProspectiveTargetRef)
+	r.ProspectiveTargetRefs = normalizeStrings(r.ProspectiveTargetRefs)
 	r.ValidationRecipeIDs = normalizeStrings(r.ValidationRecipeIDs)
 	r.RequiredCheckRefs = normalizeStrings(r.RequiredCheckRefs)
 	r.MetricConstraints = normalizeStrings(r.MetricConstraints)
@@ -104,6 +104,7 @@ func (r RuntimeCWIReconciliationBindingRef) Clone() RuntimeCWIReconciliationBind
 	r.AllowedOperationKinds = append([]string(nil), r.AllowedOperationKinds...)
 	r.TargetRefs = append([]string(nil), r.TargetRefs...)
 	r.TargetSelectorCandidateRefs = append([]string(nil), r.TargetSelectorCandidateRefs...)
+	r.ProspectiveTargetRefs = append([]string(nil), r.ProspectiveTargetRefs...)
 	r.ValidationRecipeIDs = append([]string(nil), r.ValidationRecipeIDs...)
 	r.RequiredCheckRefs = append([]string(nil), r.RequiredCheckRefs...)
 	r.MetricConstraints = append([]string(nil), r.MetricConstraints...)
@@ -245,7 +246,7 @@ func CompileRuntimeCWIReconciliationContract(definitionRevision string, focuses 
 				TargetSelectorOwnerRef:      binding.TargetSelectorOwnerRef,
 				TargetSelectorSubjectRef:    binding.TargetSelectorSubjectRef,
 				TargetSelectorCandidateRefs: binding.TargetSelectorCandidateRefs,
-				ProspectiveTargetRef:        binding.ProspectiveTargetRef,
+				ProspectiveTargetRefs:       binding.ProspectiveTargetRefs,
 				ValidationRecipeIDs:         recipeIDs,
 				RequiredCheckRefs:           checkRefs,
 				MetricConstraints:           metricConstraints,
@@ -288,7 +289,7 @@ func StableRuntimeCWIReconciliationContractHash(contract RuntimeCWIReconciliatio
 		writeHashString(h, binding.TargetSelectorOwnerRef)
 		writeHashString(h, binding.TargetSelectorSubjectRef)
 		writeHashStrings(h, binding.TargetSelectorCandidateRefs)
-		writeHashString(h, binding.ProspectiveTargetRef)
+		writeHashStrings(h, binding.ProspectiveTargetRefs)
 		writeHashStrings(h, binding.ValidationRecipeIDs)
 		writeHashStrings(h, binding.RequiredCheckRefs)
 		writeHashStrings(h, binding.MetricConstraints)
@@ -1066,7 +1067,7 @@ func sameRuntimeCWIReconciliationBindingRefs(left, right []RuntimeCWIReconciliat
 			left[index].TargetSelectorOwnerRef != right[index].TargetSelectorOwnerRef ||
 			left[index].TargetSelectorSubjectRef != right[index].TargetSelectorSubjectRef ||
 			!sameStrings(left[index].TargetSelectorCandidateRefs, right[index].TargetSelectorCandidateRefs) ||
-			left[index].ProspectiveTargetRef != right[index].ProspectiveTargetRef ||
+			!sameStrings(left[index].ProspectiveTargetRefs, right[index].ProspectiveTargetRefs) ||
 			!sameStrings(left[index].ValidationRecipeIDs, right[index].ValidationRecipeIDs) ||
 			!sameStrings(left[index].RequiredCheckRefs, right[index].RequiredCheckRefs) ||
 			!sameStrings(left[index].MetricConstraints, right[index].MetricConstraints) ||

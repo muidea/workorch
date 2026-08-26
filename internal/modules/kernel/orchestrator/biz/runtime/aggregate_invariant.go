@@ -113,6 +113,9 @@ func validateRuntimeAggregateSM2Authority(a RuntimeAggregate) error {
 	if err := runtimecontract.ValidateRuntimeCWIBindingRetirementsAgainstExecution(a.Facts, active, completed, a.OperationReceipts); err != nil {
 		return err
 	}
+	if err := validateRuntimeProspectiveCoverageCollectiveCredit(a); err != nil {
+		return err
+	}
 	if err := a.Facts.Validate(); err != nil {
 		return err
 	}

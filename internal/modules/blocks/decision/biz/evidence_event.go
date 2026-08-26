@@ -7,8 +7,8 @@ import (
 
 	magicevent "github.com/muidea/magicCommon/event"
 	modulecommon "github.com/muidea/workorch/internal/modules/blocks/decision/pkg/common"
-	decisionevents "github.com/muidea/workorch/internal/modules/blocks/decision/pkg/events"
 	decisionmodel "github.com/muidea/workorch/internal/modules/blocks/decision/pkg/models"
+	orchestratorevents "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/eventcontract"
 	workorchevents "github.com/muidea/workorch/internal/pkg/events"
@@ -26,7 +26,7 @@ func (m *Biz) recordDecisionResolutionEvidence(ctx context.Context, ticket *deci
 	if timestamp == "" || timestamp != strings.TrimSpace(ticket.ResolvedAt) {
 		return common.ErrConflict
 	}
-	command := decisionevents.RecordDecisionEvidenceCommand{
+	command := orchestratorevents.RecordDecisionEvidenceCommand{
 		EvidenceRecordID:   orchestratormodel.StableEvidenceRecordID(fmt.Sprintf("%s/%s/%s/%s", ticket.WorkspaceID, ticket.RunID, ticket.ID, resolution.ID), "decision-resolution", "decision"),
 		WorkspaceID:        ticket.WorkspaceID,
 		RunID:              ticket.RunID,
@@ -45,14 +45,14 @@ func (m *Biz) recordDecisionResolutionEvidence(ctx context.Context, ticket *deci
 	}
 	return m.withWorkspaceActiveDelivery(ctx, ticket.WorkspaceID, func(guarded context.Context) error {
 		ev := magicevent.NewEventWithContext(
-			decisionevents.TopicDecisionCommandRecordEvidence,
+			orchestratorevents.TopicOrchestratorCommandRecordDecisionEvidence,
 			modulecommon.ModuleID,
-			decisionevents.EvidenceCommandDestination,
+			orchestratorevents.CommandDestination,
 			magicevent.NewHeader(),
 			guarded,
 			command,
 		)
-		ev.BindLaneKey(workorchevents.EventHubLaneKeyFor(decisionevents.Contracts(), ev.ID(), eventcontract.LaneScope{
+		ev.BindLaneKey(workorchevents.EventHubLaneKeyFor(orchestratorevents.Contracts(), ev.ID(), eventcontract.LaneScope{
 			SubjectType: "decision_ticket",
 			SubjectID:   string(ticket.ID),
 			WorkspaceID: string(ticket.WorkspaceID),
@@ -76,7 +76,7 @@ func (m *Biz) recordDecisionResolutionEvidence(ctx context.Context, ticket *deci
 			}
 			return resultErr
 		}
-		response, ok := data.(decisionevents.RecordDecisionEvidenceResult)
+		response, ok := data.(orchestratorevents.RecordDecisionEvidenceResult)
 		if !ok || response.EvidenceRecordID != command.EvidenceRecordID {
 			return fmt.Errorf("%w: decision evidence result type %T", common.ErrInvalidArgument, data)
 		}

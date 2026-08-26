@@ -3,6 +3,7 @@ package server
 import (
 	"bufio"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -2304,16 +2305,26 @@ func TestWorkspaceCreateEndpointDefaultsDeliverableDirectory(t *testing.T) {
 	for _, dir := range []string{
 		filepath.Join(filepath.Dir(dataRoot), ".workorch-workspaces", body.Workspace.ID),
 		filepath.Join(dataRoot, "internal", "workspaces", body.Workspace.ID),
-		filepath.Join(dataRoot, "internal", "workspaces", body.Workspace.ID, "artifacts"),
-		filepath.Join(dataRoot, "internal", "workspaces", body.Workspace.ID, "runs"),
+		filepath.Join(dataRoot, "internal", "workspaces", body.Workspace.ID, "config"),
 	} {
 		if info, err := os.Stat(dir); err != nil || !info.IsDir() {
 			t.Fatalf("workspace directory %q = %v/%v, want existing directory", dir, info, err)
 		}
 	}
+	for _, dir := range []string{
+		filepath.Join(dataRoot, "internal", "workspaces", body.Workspace.ID, "artifacts"),
+		filepath.Join(dataRoot, "internal", "workspaces", body.Workspace.ID, "runs"),
+		filepath.Join(dataRoot, "internal", "workspaces", body.Workspace.ID, "events"),
+		filepath.Join(dataRoot, "internal", "workspaces", body.Workspace.ID, "llm-calls"),
+		filepath.Join(dataRoot, "internal", "workspaces", body.Workspace.ID, "indexes"),
+	} {
+		if _, err := os.Stat(dir); !os.IsNotExist(err) {
+			t.Fatalf("owner-private directory %q stat err = %v, want not created by application", dir, err)
+		}
+	}
 }
 
-func TestArtifactContentEndpointReturnsStoredArtifactFile(t *testing.T) {
+func TestArtifactContentEndpointReturnsResultOwnerContent(t *testing.T) {
 	workspaceID := common.WorkspaceID("ws-http-artifact")
 	runID := common.RunID("run-http-artifact")
 	ctx := common.ContextWithRuntimeWorkspaceID(context.Background(), workspaceID)
@@ -2362,26 +2373,41 @@ func TestArtifactContentEndpointReturnsStoredArtifactFile(t *testing.T) {
 	if got := rec.Header().Get("X-Workorch-Artifact-URI"); got != artifactURI {
 		t.Fatalf("artifact uri header = %q, want %q", got, artifactURI)
 	}
+	if got := rec.Header().Get("X-Workorch-Content-SHA256"); len(got) != 64 {
+		t.Fatalf("artifact content hash = %q, want sha256", got)
+	}
 	if rec.Body.String() != "HTTP artifact payload\n" {
 		t.Fatalf("body = %q, want artifact payload", rec.Body.String())
 	}
 }
 
-func TestRuntimePayloadEndpointReturnsLLMRawRefContent(t *testing.T) {
+func TestRuntimePayloadEndpointReturnsRunOwnerStepPayload(t *testing.T) {
 	dataRoot := t.TempDir()
-	workspaceID := "ws-http-raw"
-	runID := "run-http-raw"
-	stepPath := "run-http-raw/llm-1"
-	rawDir := filepath.Join(dataRoot, "internal", "workspaces", workspaceID, "runs", runID, "llm-calls", filepath.FromSlash(stepPath))
-	if err := os.MkdirAll(rawDir, 0o755); err != nil {
-		t.Fatalf("mkdir raw dir: %v", err)
+	workspaceID := common.WorkspaceID("ws-http-raw")
+	runID := common.RunID("run-http-raw")
+	stepID := common.StepID("run-http-raw/step-1")
+	ctx := common.ContextWithRuntimeWorkspaceID(context.Background(), workspaceID)
+	session := newOwnerRuntimeSession(t, "file", dataRoot)
+	exports, err := testSessionExports(session)
+	if err != nil {
+		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(rawDir, "request.json"), []byte(`{"model":"test"}`), 0o600); err != nil {
-		t.Fatalf("write request.json: %v", err)
+	if err := exports.Repositories.Workspaces.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, Title: "http raw", State: common.WorkspaceStateActive}); err != nil {
+		t.Fatal(err)
+	}
+	if err := exports.Repositories.Runs.Create(ctx, &runmodel.Run{ID: runID, WorkspaceID: workspaceID, State: common.RunStateCompleted}); err != nil {
+		t.Fatal(err)
+	}
+	if err := exports.Repositories.Steps.Create(ctx, &runmodel.Step{ID: stepID, RunID: runID, Kind: "test", State: common.StepStateSucceeded, Input: workorcheventpayload.New(workorcheventpayload.StringField("model", "test"))}); err != nil {
+		t.Fatal(err)
+	}
+	if err := session.Close(ctx); err != nil {
+		t.Fatal(err)
 	}
 
 	handler := newTestMux(t, Config{Backend: "file", DataRoot: dataRoot})
-	ref := "workorch://workspaces/ws-http-raw/runs/run-http-raw/llm-calls/" + stepPath + "/request.json"
+	stepToken := base64.RawURLEncoding.EncodeToString([]byte(stepID))
+	ref := "workorch://workspaces/" + string(workspaceID) + "/runs/" + string(runID) + "/steps/" + stepToken + "/input.json"
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/workorch/runtime/payloads?ref="+url.QueryEscape(ref), nil)
 	rec := httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)
@@ -2395,8 +2421,23 @@ func TestRuntimePayloadEndpointReturnsLLMRawRefContent(t *testing.T) {
 	if got := rec.Header().Get("X-Workorch-Raw-Ref"); got != ref {
 		t.Fatalf("raw ref header = %q, want %q", got, ref)
 	}
+	if got := rec.Header().Get("X-Workorch-Content-SHA256"); len(got) != 64 {
+		t.Fatalf("runtime content hash = %q, want sha256", got)
+	}
 	if rec.Body.String() != `{"model":"test"}` {
-		t.Fatalf("body = %q, want raw request payload", rec.Body.String())
+		t.Fatalf("body = %q, want typed step input payload", rec.Body.String())
+	}
+}
+
+func TestRuntimePayloadEndpointRejectsUnownedLLMRawRef(t *testing.T) {
+	handler := newTestMux(t, Config{Backend: "file", DataRoot: t.TempDir()})
+	llmToken := base64.RawURLEncoding.EncodeToString([]byte("run-http-raw/llm-1"))
+	ref := "workorch://workspaces/ws-http-raw/runs/run-http-raw/llm-calls/" + llmToken + "/request.json"
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/workorch/runtime/payloads?ref="+url.QueryEscape(ref), nil)
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400, body=%s", rec.Code, rec.Body.String())
 	}
 }
 
@@ -3668,7 +3709,7 @@ func TestWorkspaceSnapshotEndpointReturnsCompactProjection(t *testing.T) {
 		if err := repos.EventRecords.Append(ctx, &eventstreammodel.EventRecord{
 			ID:          common.EventRecordID(fmt.Sprintf("usage-%02d", idx)),
 			Version:     recordpayload.WorkorchEventVersion,
-			Topic:       "/run/llm_usage/recorded",
+			Topic:       "/llm/usage/recorded",
 			OccurredAt:  fmt.Sprintf("2026-06-12T00:%02d:00Z", idx),
 			WorkspaceID: workspaceID,
 			RunID:       runID,

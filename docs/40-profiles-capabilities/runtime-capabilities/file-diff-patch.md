@@ -4,7 +4,7 @@ Status: normative
 
 Type: profile-capability
 
-Last Verified: 2026-08-25
+Last Verified: 2026-08-26
 
 ## Purpose
 
@@ -43,9 +43,11 @@ that latest catalog:
   `file/profile_declared_candidates` require a unique current match and report multiple matches as unverifiable;
 - a prospective path is valid only for `workspace-relative-new-file-target`, the complete bounded
   `file/workspace_deliverable` owner scope, or a path inside `file/profile_declared_candidates`. A non-empty
-  workspace-deliverable scope may admit one eligible absent path proposed by the SM-3 semantic document; it remains a proposal
-  until SM-2 seals the owner-validated binding and is never replaced by a current inventory member. A proposal using the profile
-  selector must belong to its sealed candidate refs when that set is non-empty,
+  workspace-deliverable scope may admit an eligible absent path for an ordinary single-target operation. For a sealed owner-fact
+  acquisition, one SM-3 semantic document instead supplies one bounded set of 1–8 unique canonical prospective refs; File admits
+  the whole set against the same complete manifest revision and never returns a partial subset. The set remains a proposal until
+  SM-2 seals the owner-validated binding and is never replaced by current inventory members. A proposal using the profile
+  selector must have every member in its sealed candidate refs when that set is non-empty,
   and another 1/N profile match cannot silently absorb an absent proposal. Prospective semantics cannot be granted to
   `file/unique_workspace_entry` or an unknown selector. Pre-effect `file/unique_workspace_entry` combined with any non-empty
   prospective path returns typed `unsupported` before operation admission for every current manifest cardinality (0/1/N),
@@ -53,7 +55,9 @@ that latest catalog:
 - manifest-excluded roots or nested segments (`.git`, `.workorch-data`, `node_modules`, `vendor`, `dist`, `build`) cannot be
   prospective deliverable targets. Every prospective-capable selector rejects them as typed `unsupported` before effect;
 - every absent prospective admission reserves capacity in the complete File listing: files and directories both consume the
-  500-entry bound, and a nested target reserves its file plus every missing parent directory. The File owner serializes create
+  500-entry bound, and a nested target reserves its file plus every missing parent directory. Multi-target owner-fact admission
+  computes the union of targets and missing parents before applying the aggregate bound; path collisions and parent/child target
+  conflicts fail the entire set. The File owner serializes create
   effects per workspace and recomputes that exact additional-entry count immediately before the write, so stale admission or
   concurrent owner creates cannot commit item 501 or leave capacity-rejected parent directories behind;
   reconciliation of an already sealed noncanonical binding remains a factual `unverifiable` observation;
@@ -64,11 +68,14 @@ that latest catalog:
 
 Capability owner reports feasibility/admissibility facts. Only Orchestrator SM-2 may seal/reopen CWI binding and only SM-3
 may admit the resulting candidate/dispatch. File reconciliation never returns retain/reopen/CWI state and never grants new
-credit. Pre-seal Definition/Profile policy contains selector/candidate refs but no exact prospective target; File validates the
-SM-3 proposal against those refs and its current operation selector/constraints. After SM-2 seals the binding, operation
-candidate only references it; dispatch and File execution admission consume the exact target derived from that binding.
-The required owner's provider-safe typed `all_of` constraint is checked by semantic schema/document admission before File is
-called. A mismatch may use the ordinary complete-document attempt-1 correction but produces zero File probe. If a matching target
+credit. Pre-seal Definition/Profile policy contains selector/candidate refs but no exact prospective target set; File validates
+the complete SM-3 proposal against those refs and its current operation selector/constraints. Its hypothetical delta is
+base-revision-bound, contains the complete resulting manifest refs, and performs no directory/file mutation. After SM-2 seals the
+binding, operation candidate only references it; the SM-3 required sequence binds each target to one exact-singleton `TargetRef`
+operation in canonical dependency order, and dispatch/File execution admission consume only those binding-derived targets.
+The required owner's provider-safe typed mandatory `all_of` clauses are checked by semantic schema/document admission before File
+is called: every clause must be covered and every target must contribute; no `one_of`/`any_of` or singular compatibility field is
+accepted. A mismatch may use the ordinary complete-document attempt-1 correction but produces zero File probe. If a matching set
 later receives a persisted full-composite `would_not_satisfy`, File neither selects a replacement nor opens correction; Orchestrator
 records `prospective_satisfaction_contract_violated` and terminates the semantic contract. Replay remains idempotent and read-only.
 
@@ -113,8 +120,9 @@ applicable. Technical file success is not business completion.
   remains absent/selected/ambiguous, while every prospective combination is typed unsupported and read-only;
 - replay duplicate reconciliation and reload a fresh File owner with zero workspace write; deletion must produce a current
   unsatisfied observation, while ambiguous/out-of-workspace scope remains unverifiable;
-- cover each File selector at zero/one/many current targets, with and without a prospective path; in particular, preserve
-  full bounded workspace scope, preserve an exact persisted SM-3 prospective proposal, and reject prospective unique-entry,
+- cover each File selector at zero/one/many current targets, with and without prospective paths; in particular, preserve
+  full bounded workspace scope, preserve the exact persisted 1–8-member SM-3 prospective proposal, and reject empty/partial/
+  extra/duplicate, parent-conflicting, capacity-overflow, prospective unique-entry,
   non-participating workspace-deliverable/profile, and outside-profile-candidate selection;
 - reject root and nested manifest-excluded prospective targets before effect for each prospective-capable selector, and
   keep missing or realized noncanonical bindings `unverifiable` without mutation;

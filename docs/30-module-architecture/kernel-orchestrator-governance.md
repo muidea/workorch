@@ -4,7 +4,7 @@ Status: normative
 
 Type: module-architecture
 
-Last Verified: 2026-08-25
+Last Verified: 2026-08-26
 
 ## Purpose
 
@@ -41,14 +41,17 @@ effect。SM-2 选择 canonical convergence state但不执行 operation；SM-3 �
 
 prospective owner-fact probe 也不放宽该边界：SM-2 组合 File-authored hypothetical delta 与 Shell-authored nested
 satisfaction observation，required-owner dependency catalog只进入 manifest freshness/CAS/seal，不进入 LLM selectable
-surface。required owner catalog 发布 provider-safe typed `all_of` target constraint，并由 acquisition/manifest/C3 封存；
-exact target 由 SM-3 在 Definition declaration selector/candidate refs、current operation selector/owner constraints 与该
-constraint 的交集中提出。mismatch 只走普通 document/schema correction，零 File/Shell probe；owner fact 只验证 admitted
-proposal，SM-2 binding 才首次形成authority，operation candidate只引用该binding，dispatch只从binding派生target。typed
-stale走bounded fact refresh且不消耗correction。`would_not_satisfy` 必须先持久化 full File+Shell composite，随后作为
+surface。required owner catalog 发布 provider-safe typed mandatory-`all_of` clauses，并由 acquisition/manifest/C3 封存；一份
+SM-3 semantic proposal 在 Definition declaration selector/candidate refs 与 current operation selector/owner constraints 的
+交集中提交 1～8 个唯一 canonical `ProspectiveTargetRefs`。每个 clause 必须被覆盖且每个 target 必须有贡献，不接受
+`one_of`/`any_of`、singular 字段或兼容 alias。File 对完整集合做无副作用 hypothetical manifest/path/capacity admission，
+Shell 只基于 resulting manifest 判断 `would_satisfy`。mismatch 只走普通 document/schema correction，零 File/Shell probe；
+owner fact 只验证 admitted proposal，SM-2 binding 才首次形成 authority。operation candidate 只引用该 binding，并按每个
+target 的 exact-singleton `RequiredOperationSequence` 完整、有序提交；dispatch 只从 binding 派生 target。typed stale 走
+bounded fact refresh 且不消耗 correction。`would_not_satisfy` 必须先持久化 full File+Shell composite，随后作为
 published constraint 与 owner judgment 的 contradiction 直接形成
 `prospective_satisfaction_contract_violated -> semantic_contract_failed`；不得生成 replacement target 或第二 provider request。
-所有状态变化仍只能由 Orchestrator private internal event提交；
+所有 SM-2/SM-3/SM-4 状态变化仍只能由 Orchestrator private internal event 提交；
 File/Shell 不选择 correction/terminal，也不修改兄弟 owner 状态。
 
 ## Governance Boundary

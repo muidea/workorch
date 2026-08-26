@@ -175,9 +175,9 @@ func TestRuntimeGovernanceResolutionCommitsThroughTypedEventHubCommand(t *testin
 	observer := magicevent.NewSimpleObserver(ModuleID, hub)
 	observer.Subscribe(orchestratorevents.TopicOrchestratorCommitRuntimeGovernanceResolution, module.handleRuntimeGovernanceResolution)
 	observer.Subscribe(orchestratorevents.TopicOrchestratorCommitRuntimeGovernanceTicket, module.handleRuntimeGovernanceTicketResolution)
-	observer.Subscribe(decisionevents.TopicDecisionCommandRecordEvidence, module.handleDecisionEvidenceCommand)
+	observer.Subscribe(orchestratorevents.TopicOrchestratorCommandRecordDecisionEvidence, module.handleDecisionEvidenceCommand)
 	t.Cleanup(func() {
-		observer.Unsubscribe(decisionevents.TopicDecisionCommandRecordEvidence)
+		observer.Unsubscribe(orchestratorevents.TopicOrchestratorCommandRecordDecisionEvidence)
 		observer.Unsubscribe(orchestratorevents.TopicOrchestratorCommitRuntimeGovernanceTicket)
 		observer.Unsubscribe(orchestratorevents.TopicOrchestratorCommitRuntimeGovernanceResolution)
 	})
@@ -300,7 +300,7 @@ func TestRuntimeGovernanceResolutionFileBackedRestartReplaysExactlyOnce(t *testi
 	observer := magicevent.NewSimpleObserver(ModuleID, hub)
 	observer.Subscribe(orchestratorevents.TopicOrchestratorCommitRuntimeGovernanceResolution, module.handleRuntimeGovernanceResolution)
 	observer.Subscribe(orchestratorevents.TopicOrchestratorCommitRuntimeGovernanceTicket, module.handleRuntimeGovernanceTicketResolution)
-	observer.Subscribe(decisionevents.TopicDecisionCommandRecordEvidence, module.handleDecisionEvidenceCommand)
+	observer.Subscribe(orchestratorevents.TopicOrchestratorCommandRecordDecisionEvidence, module.handleDecisionEvidenceCommand)
 
 	sealed, err := module.requestAndSealRuntimeCandidateWithRetry(ctx, initialized, "stable-prefix")
 	if err != nil || sealed.ActiveDispatch == nil || len(sealed.GovernanceRequests) != 1 {
@@ -335,7 +335,7 @@ func TestRuntimeGovernanceResolutionFileBackedRestartReplaysExactlyOnce(t *testi
 		t.Fatal(err)
 	}
 	llmObserver.Unsubscribe(llmevents.TopicRequestRuntimeCandidate)
-	observer.Unsubscribe(decisionevents.TopicDecisionCommandRecordEvidence)
+	observer.Unsubscribe(orchestratorevents.TopicOrchestratorCommandRecordDecisionEvidence)
 	observer.Unsubscribe(orchestratorevents.TopicOrchestratorCommitRuntimeGovernanceTicket)
 	observer.Unsubscribe(orchestratorevents.TopicOrchestratorCommitRuntimeGovernanceResolution)
 	hub.Terminate(ctx)
@@ -371,9 +371,9 @@ func TestRuntimeGovernanceResolutionFileBackedRestartReplaysExactlyOnce(t *testi
 	restartedObserver := magicevent.NewSimpleObserver(ModuleID, restartedHub)
 	restartedObserver.Subscribe(orchestratorevents.TopicOrchestratorCommitRuntimeGovernanceResolution, restartedModule.handleRuntimeGovernanceResolution)
 	restartedObserver.Subscribe(orchestratorevents.TopicOrchestratorCommitRuntimeGovernanceTicket, restartedModule.handleRuntimeGovernanceTicketResolution)
-	restartedObserver.Subscribe(decisionevents.TopicDecisionCommandRecordEvidence, restartedModule.handleDecisionEvidenceCommand)
+	restartedObserver.Subscribe(orchestratorevents.TopicOrchestratorCommandRecordDecisionEvidence, restartedModule.handleDecisionEvidenceCommand)
 	t.Cleanup(func() {
-		restartedObserver.Unsubscribe(decisionevents.TopicDecisionCommandRecordEvidence)
+		restartedObserver.Unsubscribe(orchestratorevents.TopicOrchestratorCommandRecordDecisionEvidence)
 		restartedObserver.Unsubscribe(orchestratorevents.TopicOrchestratorCommitRuntimeGovernanceTicket)
 		restartedObserver.Unsubscribe(orchestratorevents.TopicOrchestratorCommitRuntimeGovernanceResolution)
 		restartedHub.Terminate(ctx)

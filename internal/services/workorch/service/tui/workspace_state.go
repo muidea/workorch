@@ -1201,8 +1201,9 @@ func runtimeAuditCoverageBindingEqual(a, b projectioncontract.RuntimeAuditCovera
 	if a.ID != b.ID || a.CoverageWorkItemID != b.CoverageWorkItemID || a.FocusID != b.FocusID ||
 		a.DefinitionRevision != b.DefinitionRevision || a.Hash != b.Hash || a.TargetSelectorRef != b.TargetSelectorRef ||
 		a.TargetSelectorOwnerRef != b.TargetSelectorOwnerRef || a.TargetSelectorSubjectRef != b.TargetSelectorSubjectRef ||
-		a.ProspectiveTargetRef != b.ProspectiveTargetRef || a.DeclarationRef != b.DeclarationRef ||
+		a.DeclarationRef != b.DeclarationRef ||
 		!stringSliceEqualDisplay(a.TargetRefs, b.TargetRefs) || !stringSliceEqualDisplay(a.PrerequisiteRefs, b.PrerequisiteRefs) ||
+		!stringSliceEqualDisplay(a.ProspectiveTargetRefs, b.ProspectiveTargetRefs) ||
 		len(a.Proofs) != len(b.Proofs) {
 		return false
 	}

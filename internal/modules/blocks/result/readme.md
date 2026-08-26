@@ -39,6 +39,11 @@ Result 同 scope 的正式子实体。该 block 负责 identity、持久化状�
 
 - 每个 topic 都有独立 concrete result type；不存在同时承载 Result、Artifact、列表和删除计数的通用 result
   envelope，也不存在 generic entity create/update command。
+- Artifact 正文只能通过 Result owner 定义的 concrete typed `/artifact/command/read-content` 读取。command
+  必须携带 exact Workspace/Run scope 与 opaque logical URI；只有 Result owner 可以将 URI 解析为其 Artifact 子实体及
+  owner-private material。result 返回 detached `ArtifactID/URI/FileName/ContentType/Content/ContentSHA256`，内容上限
+  1 MiB，并在跨 EventHub 前验证 scope、文件名、长度与 SHA-256。该合同不返回 path、reader、repository 或
+  任何可变 owner handle，Application 也不得直读 Result 后端目录。
 - Workspace 删除只接受 `blocks/workspace` 的 concrete seal/purge command。Result owner 持久化自身 tombstone，并以 owner-private internal event 推进 `fenced → purged`；command adapter 只能提交 `purge_requested`，物理 Result/Artifact fixed-point sink 只能由同一 private dispatcher 调用，完成后再提交 `purge_completed` CAS。retain 隐藏公共 Result/Artifact 查询且不物理删除。所有 terminal delivery、recovery 及实体 mutation 都先核对同一 owner fence；file backend 与 tombstone 共用 path-global workspace 锁，memory production repository set 共用 guard。seal/purge ack 使用确定性的 `FenceID`、`PurgeID`、`Revision`、`AckHash`、`PurgeProofHash`，重放不以删除计数作为身份。
 - repository helper 与 Result/Artifact mutation method 均为 Biz 包内私有实现；Biz 不导出或嵌入可由其他组件取得的
   `Service` facade，跨组件写入只能进入 owner typed EventHub handler。
@@ -70,7 +75,7 @@ Result 同 scope 的正式子实体。该 block 负责 identity、持久化状�
 | 交互组件 | 方向 | 具体合同 | 当前结论 |
 | --- | --- | --- | --- |
 | `kernel/orchestrator` | Orchestrator → Result | sealed `RuntimeTerminalDeliveryFact` / `ResultLifecycleCommandResult` | 完整；Result owner 派生 identity/state，SM-4 只接收 owner ack |
-| `application/workorchd` | Application → Result | concrete scoped get/list command/result | 完整；Application 只读，Workspace owner 独占删除协调 ingress |
+| `application/workorchd` | Application → Result | concrete scoped get/list 与 bounded Artifact content-read command/result | 完整；Application 只读且不解析 owner-private path，Workspace owner 独占删除协调 ingress |
 | `blocks/workspace` | Workspace → Result | workspace-scoped seal/purge command/result | 完整；Result owner 私有 fence 与 fixed-point sink |
 | Eventstream / projection | Result → consumer | accepted/rejected `ResultChangedData` + stable `NotificationID` | 完整；Result durable replay、Eventstream 幂等去重，projection 不参与 Runtime authority |
 | Run / Workspace | 无 repository 直连 | 同一 sealed terminal outcome 的 Result → Workspace → Run delivery 顺序 | 完整；Result 不直接迁移 SM-1 或 Workspace lifecycle |
@@ -79,6 +84,8 @@ Result 同 scope 的正式子实体。该 block 负责 identity、持久化状�
 
 - 本 block 只访问 Result 与 Artifact repository，不得访问 Run、Workspace、Decision、EvidenceRecord repository 或
   其他 owner service。
+- 对外 Artifact content read 只是 bounded owner query，不创建第二份 Artifact 内容权威，不改变 Result/Artifact state，也不参与
+  Runtime evidence/closeout 重判。
 - Result owner 只按 sealed outcome identity 执行 owner-local transition，不读取 `ConvergenceState`、focus、repair 或
   error message 重新裁决；delivery feedback 保留 stable category 与安全 original diagnostic。
 - 如需新增 Artifact 写入，必须扩展只携带 immutable artifact material 的 typed terminal/owner contract，由 Result
@@ -90,6 +97,8 @@ Result 同 scope 的正式子实体。该 block 负责 identity、持久化状�
 - Result pending、Artifact 部分写入后的重启收敛，以及持久化 terminal Result 的启动通知重放。
 - Result/Artifact scope、父引用、Workspace retain/purge fixed point 与 file backend 跨 workspace ResultID 隔离。
 - concrete command/result 类型、默认/最大分页、cursor continuation/cycle guard 和 query clone 隔离。
+- bounded Artifact content-read 的 Workspace/Run/URI scope、Result-owned material 解析、1 MiB guard、SHA-256 完整性、
+  detached copy，nil/wrong result 与跨 scope/tampered payload 拒绝。
 - stable Eventstream dedupe、nested artifact reference closure、terminal material isolation 与 allocation benchmark。
 - formal closeout identity/hash、三轴 requirement outcome、accepted-evidence union、owner revision set 与 indeterminate-success 拒绝。
 - 1,024 组 unique evidence/artifact refs 的 normalization/hash、canonical child mapping、重排稳定性、输入隔离与
