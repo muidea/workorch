@@ -109,6 +109,9 @@ func applyRepairDirectiveAction(facts runtimecontract.RuntimeFacts, base runtime
 		decision, err := repairStateChangeDecision(base, facts, directive)
 		return decision, true, err
 	case runtimecontract.ConvergenceStateNeedValidation:
+		if validationOnlyRepairBudgetExhausted(facts) {
+			return terminalDecision(base, runtimecontract.ConvergenceStateFailed, "no_progress_exhausted", "validation-only repair budget exhausted"), true, nil
+		}
 		decision, err := repairValidationDecision(base, facts, directive)
 		return decision, true, err
 	default:

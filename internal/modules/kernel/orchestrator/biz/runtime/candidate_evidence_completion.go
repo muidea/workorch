@@ -31,7 +31,7 @@ func finalizeExecutionEvidence(aggregate *RuntimeAggregate, admission executionE
 		aggregate.ActiveDispatch = &dispatch
 		return false, nil
 	}
-	if err := completeEvidenceDispatch(aggregate, dispatch, dispatchInvalidated); err != nil {
+	if err := completeEvidenceDispatch(aggregate, dispatch, dispatchInvalidated, evidence.Status == ExecutionEvidenceStatusRejected); err != nil {
 		return false, err
 	}
 	return true, nil
@@ -48,7 +48,7 @@ func evidenceDispatchInvalidated(aggregate RuntimeAggregate, evidence ExecutionE
 	return effectUncommittable || refreshExhausted
 }
 
-func completeEvidenceDispatch(aggregate *RuntimeAggregate, dispatch SealedDispatch, invalidated bool) error {
+func completeEvidenceDispatch(aggregate *RuntimeAggregate, dispatch SealedDispatch, invalidated bool, rejectedExecution bool) error {
 	if invalidated {
 		dispatch.State = DispatchStateInvalidated
 	} else {
@@ -84,6 +84,12 @@ func completeEvidenceDispatch(aggregate *RuntimeAggregate, dispatch SealedDispat
 	if err != nil {
 		return err
 	}
+	// A rejected execution can authorize another same-focus validation only
+	// after the canonical SM-2 reduction above. Recording that authorization in
+	// this same CAS makes duplicate receipt delivery and restart replay free,
+	// while the initial validation (which has no rejected source fact) remains
+	// outside the validation-only retry budget.
+	facts = recordAuthorizedValidationOnlyRetry(facts, nextDecision, rejectedExecution)
 	aggregate.Facts = facts
 	aggregate.Decision = nextDecision
 	return nil

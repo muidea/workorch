@@ -439,6 +439,9 @@ func TestRejectedValidationScopeMemberDoesNotBecomeFailureTarget(t *testing.T) {
 	candidate := validationCandidate()
 	candidate.Validation.Operations[0].Operation.TargetRefs = []string{"implementation.go"}
 	sealed := sealCandidateForTest(t, repository, candidate)
+	if sealed.Facts.Repair.ValidationOnlyRetries != 0 {
+		t.Fatalf("initial validation consumed retry budget: %+v", sealed.Facts.Repair)
+	}
 	evidence := ExecutionEvidence{
 		EventID: "event-validation-scope-member-failed", WorkspaceID: "ws-1", RunID: "run-1",
 		DispatchID: sealed.ActiveDispatch.ID, AuthoritySnapshotID: sealed.ActiveDispatch.Transaction.AuthoritySnapshotID,
@@ -464,6 +467,29 @@ func TestRejectedValidationScopeMemberDoesNotBecomeFailureTarget(t *testing.T) {
 	}
 	if len(committed.Aggregate.Facts.Prerequisites.Pending) != 0 || len(committed.Aggregate.Facts.Resources.TargetSnapshots) != 0 {
 		t.Fatalf("scope was promoted into concrete target snapshots: prerequisites=%+v snapshots=%+v", committed.Aggregate.Facts.Prerequisites.Pending, committed.Aggregate.Facts.Resources.TargetSnapshots)
+	}
+	if committed.Aggregate.Facts.Repair.ValidationOnlyRetries != 1 {
+		t.Fatalf("canonical rejected-execution validation retry was not recorded: %+v", committed.Aggregate.Facts.Repair)
+	}
+	if len(committed.Aggregate.Facts.Repair.NoProgressOperationShapes) != 0 {
+		t.Fatalf("ordinary rejected validation entered accepted no-progress shape ledger: %+v", committed.Aggregate.Facts.Repair.NoProgressOperationShapes)
+	}
+
+	persistedRevision := committed.Aggregate.StateRevision
+	duplicate, err := coordinator.commitEvidence(context.Background(), evidence)
+	if err != nil || duplicate.Disposition != CommitDispositionDuplicate || duplicate.Aggregate.StateRevision != persistedRevision ||
+		duplicate.Aggregate.Facts.Repair.ValidationOnlyRetries != 1 {
+		t.Fatalf("duplicate rejected validation changed retry authority: result=%+v err=%v", duplicate, err)
+	}
+	reloaded, err := repository.Load(context.Background(), "ws-1", "run-1")
+	if err != nil || reloaded.Facts.Repair.ValidationOnlyRetries != 1 || len(reloaded.Facts.Repair.NoProgressOperationShapes) != 0 {
+		t.Fatalf("restart load changed validation retry ledger: aggregate=%+v err=%v", reloaded, err)
+	}
+	replay := candidate.Validation.Operations[0].Operation
+	replay.ID = "validate-retry-new-id"
+	admission := EvaluateCandidateAdmission(reloaded, runtimecontract.RuntimeCandidate{Validation: &runtimecontract.ValidationCandidate{Operations: []runtimecontract.ValidationOperation{{Operation: replay}}}})
+	if admission.Accepted() || admission.Failure == nil || admission.Failure.Code != candidateAdmissionCodeReplaysRejectedShape {
+		t.Fatalf("restart admitted same validation shape before owner call: %+v", admission)
 	}
 }
 

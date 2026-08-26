@@ -68,7 +68,7 @@ func TestRuntimeAdapterPreflightValidationRecipesFiltersWorkspaceInapplicableGoT
 	workspace := t.TempDir()
 	recipe := runtimemodel.RuntimeValidationRecipe{ID: "go-tests", Command: "go", Args: []string{"test", "-v", "./..."}}
 	withoutTests, err := NewRuntimeAdapter().PreflightRuntimeValidationRecipesForManifest(workspace, []runtimemodel.RuntimeValidationRecipe{recipe}, runtimemodel.WorkspaceManifest{
-		Revision: "tree-without-tests", TargetRefs: []string{"main.go"},
+		Revision: "tree-module-without-tests", TargetRefs: []string{"go.mod", "main.go"},
 	})
 	if err != nil {
 		t.Fatalf("preflight without tests: %v", err)
@@ -76,8 +76,17 @@ func TestRuntimeAdapterPreflightValidationRecipesFiltersWorkspaceInapplicableGoT
 	if len(withoutTests) != 0 {
 		t.Fatalf("workspace-inapplicable recipe was published: %+v", withoutTests)
 	}
+	withTestsWithoutModule, err := NewRuntimeAdapter().PreflightRuntimeValidationRecipesForManifest(workspace, []runtimemodel.RuntimeValidationRecipe{recipe}, runtimemodel.WorkspaceManifest{
+		Revision: "tree-tests-without-module", TargetRefs: []string{"main.go", "main_test.go"},
+	})
+	if err != nil {
+		t.Fatalf("preflight without go.mod: %v", err)
+	}
+	if len(withTestsWithoutModule) != 0 {
+		t.Fatalf("go test recipe was published without root go.mod: %+v", withTestsWithoutModule)
+	}
 	withTests, err := NewRuntimeAdapter().PreflightRuntimeValidationRecipesForManifest(workspace, []runtimemodel.RuntimeValidationRecipe{recipe}, runtimemodel.WorkspaceManifest{
-		Revision: "tree-with-tests", TargetRefs: []string{"main.go", "main_test.go"},
+		Revision: "tree-with-module-and-tests", TargetRefs: []string{"go.mod", "main.go", "main_test.go"},
 	})
 	if err != nil {
 		t.Fatalf("preflight with tests: %v", err)

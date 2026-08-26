@@ -2,6 +2,7 @@ package runtime
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	"github.com/muidea/workorch/internal/pkg/common"
@@ -202,6 +203,117 @@ func TestCommitAssessmentSettlesAcquisitionBeforeTerminalDefinitionProof(t *test
 	}
 }
 
+func TestAssessmentObservedUsesRetiredAcquisitionPurposeAfterReceiptResourceChange(t *testing.T) {
+	_, repository, bootstrapFacts, definition := prepareTerminalValidationOwnerFactAcquisitionAssessment(t, true)
+	before := *repository.aggregate
+	if before.SemanticPlanning.Phase != runtimecontract.RuntimeSemanticPlanningRequired || len(before.SemanticPlanning.History) != 1 {
+		t.Fatalf("resource change did not retire exactly one semantic generation: %+v", before.SemanticPlanning)
+	}
+	history := before.SemanticPlanning.History[0]
+	if history.Reason != runtimecontract.RuntimeSemanticPlanningRetirementResourceInvalidated || history.Snapshot.Manifest == nil ||
+		before.Facts.Coverage[0].CurrentBindingRef == nil ||
+		before.Facts.Coverage[0].CurrentBindingRef.SemanticManifestHash != history.Snapshot.Manifest.Hash {
+		t.Fatalf("current binding did not retain exact retired manifest lineage: history=%+v coverage=%+v", history, before.Facts.Coverage[0])
+	}
+	acquisition, found, err := currentRuntimeSemanticOwnerFactAcquisition(before)
+	if err != nil || !found || acquisition.AcquisitionOperationKind != runtimecontract.StepKindFileWrite {
+		t.Fatalf("retired acquisition purpose was not recovered: found=%t acquisition=%+v err=%v", found, acquisition, err)
+	}
+
+	// A stale binding hash with no active-sealed or immutable retired manifest
+	// cannot silently fall back to Definition proof.
+	stale := before
+	stale.SemanticPlanning = stale.SemanticPlanning.Clone()
+	stale.SemanticPlanning.History = nil
+	if _, _, staleErr := currentRuntimeSemanticOwnerFactAcquisition(stale); !errors.Is(staleErr, common.ErrConflict) {
+		t.Fatalf("missing retired acquisition lineage err=%v, want conflict", staleErr)
+	}
+	staleRepository := &controllerRepository{aggregate: &stale}
+	staleController, err := NewRuntimeController(staleRepository)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, staleErr := staleController.ApplyInternalEvent(context.Background(), RuntimeInternalEvent{
+		Kind:      RuntimeInternalEventAssessmentObserved,
+		Scope:     RuntimeInternalEventScope{WorkspaceID: "ws-v2", RunID: "run-v2"},
+		Authority: &RuntimeInternalAuthorityPayload{},
+	}); !errors.Is(staleErr, common.ErrConflict) {
+		t.Fatalf("stale AssessmentObserved err=%v, want conflict", staleErr)
+	}
+	if staleRepository.saves != 0 || staleRepository.aggregate.StateRevision != before.StateRevision || len(staleRepository.aggregate.Facts.Assessments) != 0 {
+		t.Fatalf("stale AssessmentObserved mutated authority: saves=%d aggregate=%+v", staleRepository.saves, staleRepository.aggregate)
+	}
+
+	// Fresh-process recovery must consume the same persisted current binding and
+	// retired generation; it cannot require an in-memory acquisition marker.
+	savesBeforeRestart := repository.saves
+	restarted, err := NewRuntimeController(repository)
+	if err != nil {
+		t.Fatal(err)
+	}
+	reloaded, err := restarted.initialize(context.Background(), bootstrapFacts, definition, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if repository.saves != savesBeforeRestart || reloaded.StateRevision != before.StateRevision || len(reloaded.SemanticPlanning.History) != 1 {
+		t.Fatalf("restart rewrote retired acquisition authority: saves=%d before=%d aggregate=%+v", repository.saves, savesBeforeRestart, reloaded)
+	}
+
+	result, err := restarted.ApplyInternalEvent(context.Background(), RuntimeInternalEvent{
+		Kind:      RuntimeInternalEventAssessmentObserved,
+		Scope:     RuntimeInternalEventScope{WorkspaceID: "ws-v2", RunID: "run-v2"},
+		Authority: &RuntimeInternalAuthorityPayload{},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	progressed := result.Aggregate
+	item := progressed.Facts.Coverage[0]
+	if progressed.Decision.State == runtimecontract.ConvergenceStateComplete || progressed.Decision.State == runtimecontract.ConvergenceStateFailed ||
+		item.State != runtimecontract.RuntimeCoverageItemStateOpen || item.CWIConvergenceState != runtimecontract.RuntimeCWIConvergenceStateReopened ||
+		item.CurrentBindingRef != nil || len(item.ReopenLineage) != 1 || item.ReopenLineage[0].Reason != runtimeCWIReopenReasonOwnerFactAcquisitionSettled {
+		t.Fatalf("retired acquisition state_change closed terminal CWI instead of reopening it: decision=%+v item=%+v", progressed.Decision, item)
+	}
+	if progressed.Facts.Focus.ID != "semantic-pending/cwi-v2" || len(progressed.Facts.Repair.NoProgressOperationShapes) != 1 ||
+		progressed.Facts.Repair.NoProgressOperationShapes[0].FailureCode != runtimeCWIReopenReasonOwnerFactAcquisitionSettled {
+		t.Fatalf("terminal validation successor or acquisition anti-replay lineage was not restored: focus=%+v repair=%+v", progressed.Facts.Focus, progressed.Facts.Repair)
+	}
+	successor, err := runtimecontract.CompileRuntimeSemanticPlanManifestForCoverage(
+		progressed.Facts.WorkspaceID,
+		progressed.Facts.RunID,
+		progressed.Definition,
+		progressed.Facts.DefinitionSeed,
+		progressed.Facts.DefinitionFocuses,
+		progressed.Facts.Activation.ExecutionContract,
+		progressed.Facts.Resources.OperationAdmissibilities,
+		runtimecontract.RuntimeCWIsEligibleForPlanning(progressed.Facts),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(successor.ProofObligations) != 1 || successor.ProofObligations[0].OwnerFactAcquisition != nil ||
+		len(successor.ProofObligations[0].RequiredEvidenceKinds) != 1 || successor.ProofObligations[0].RequiredEvidenceKinds[0] != runtimecontract.EvidenceKindValidation {
+		t.Fatalf("reopened successor did not restore terminal validation proof: %+v", successor.ProofObligations)
+	}
+	if err := progressed.Validate(); err != nil {
+		t.Fatalf("retired-acquisition successor aggregate is invalid: %v", err)
+	}
+
+	// The same owner-private fact is stale after the first commit. It must not
+	// append another assessment/reopen, consume another acquisition, or write CAS.
+	savesAfterCommit := repository.saves
+	if _, duplicateErr := restarted.ApplyInternalEvent(context.Background(), RuntimeInternalEvent{
+		Kind:      RuntimeInternalEventAssessmentObserved,
+		Scope:     RuntimeInternalEventScope{WorkspaceID: "ws-v2", RunID: "run-v2"},
+		Authority: &RuntimeInternalAuthorityPayload{},
+	}); !errors.Is(duplicateErr, common.ErrConflict) {
+		t.Fatalf("duplicate AssessmentObserved err=%v, want conflict", duplicateErr)
+	}
+	if repository.saves != savesAfterCommit || len(repository.aggregate.Facts.Coverage[0].ReopenLineage) != 1 || len(repository.aggregate.Facts.Assessments) != 1 {
+		t.Fatalf("duplicate AssessmentObserved mutated acquisition settlement: saves=%d before=%d aggregate=%+v", repository.saves, savesAfterCommit, repository.aggregate)
+	}
+}
+
 func TestCommitAssessmentFailsClosedAfterSingleSealedOwnerFactAcquisition(t *testing.T) {
 	controller, _, _ := prepareOwnerFactAssessment(t, false)
 	failed, err := controller.commitAssessment(context.Background(), "ws-v2", "run-v2")
@@ -345,8 +457,9 @@ func prepareOwnerFactAssessment(t *testing.T, ownerFactReady bool, operationKind
 	return controller, repository, bootstrapFacts
 }
 
-func prepareTerminalValidationOwnerFactAcquisitionAssessment(t *testing.T) (*RuntimeController, *controllerRepository, runtimecontract.RuntimeFacts, runtimecontract.RuntimeDefinitionContext) {
+func prepareTerminalValidationOwnerFactAcquisitionAssessment(t *testing.T, retireSemanticAfterReceipt ...bool) (*RuntimeController, *controllerRepository, runtimecontract.RuntimeFacts, runtimecontract.RuntimeDefinitionContext) {
 	t.Helper()
+	retireAfterReceipt := len(retireSemanticAfterReceipt) != 0 && retireSemanticAfterReceipt[0]
 	repository := &controllerRepository{}
 	controller, err := NewRuntimeController(repository)
 	if err != nil {
@@ -382,6 +495,19 @@ func prepareTerminalValidationOwnerFactAcquisitionAssessment(t *testing.T) (*Run
 	facts.Resources.OperationAdmissibilities = []runtimecontract.RuntimeOperationAdmissibility{
 		fileCatalog,
 		runtimeTestProspectiveValidationDependencyCatalog(t, convergence.ProspectiveSatisfactionContractRef),
+	}
+	if retireAfterReceipt {
+		for _, catalog := range facts.Resources.OperationAdmissibilities {
+			prerequisite := runtimecontract.RuntimePrerequisite{
+				ID: catalog.PrerequisiteID, Kind: runtimecontract.PrerequisiteKindOperationAdmissibility,
+				OwnerModuleID: catalog.OwnerModuleID, RequiredCapabilities: append([]string(nil), catalog.OperationKinds...),
+			}
+			facts.Prerequisites.Satisfied = append(facts.Prerequisites.Satisfied, prerequisite)
+			facts.Resources.PrerequisiteObservations = append(
+				facts.Resources.PrerequisiteObservations,
+				runtimeTestAssessmentSemanticCatalogObservation(catalog, "workspace-tree-owner-fact-acquisition-v1"),
+			)
+		}
 	}
 	facts.DefinitionFocuses = nil
 	facts.DefinitionFocuses = runtimeTestDefinitionFocuses(facts)
@@ -429,6 +555,11 @@ func prepareTerminalValidationOwnerFactAcquisitionAssessment(t *testing.T) (*Run
 			},
 		}}},
 	})
+	if retireAfterReceipt {
+		if err := RecordFixtureCandidateFeasibilities(context.Background(), controller, "ws-v2", "run-v2", 0, candidate); err != nil {
+			t.Fatal(err)
+		}
+	}
 	sealed, err := controller.AcceptCandidateAttempt(context.Background(), "ws-v2", "run-v2", 0, candidate)
 	if err != nil {
 		t.Fatal(err)
@@ -439,11 +570,55 @@ func prepareTerminalValidationOwnerFactAcquisitionAssessment(t *testing.T) (*Run
 		Kind: runtimecontract.EvidenceKindStateChange, Status: ExecutionEvidenceStatusAccepted,
 	}
 	attachRuntimeTestOwnerReceipt(t, repository.aggregate, &evidence)
+	if retireAfterReceipt {
+		runtimeTestAttachReceiptResourceChanges(t, repository.aggregate, &evidence, []runtimecontract.RuntimeResourceChange{{
+			Domain: runtimecontract.RuntimeResourceWorkspaceTree, OwnerModuleID: runtimecontract.RuntimeModuleFile,
+			SubjectRef: "workspace_deliverable", BeforeRevision: "workspace-tree-owner-fact-acquisition-v1", AfterRevision: "workspace-tree-owner-fact-acquisition-v2",
+		}})
+	}
 	committed, err := controller.commitEvidence(context.Background(), evidence)
-	if err != nil || committed.Aggregate.Decision.State != runtimecontract.ConvergenceStateNeedAssessment {
+	if err != nil {
+		t.Fatalf("owner-fact acquisition evidence commit: %v", err)
+	}
+	if retireAfterReceipt {
+		if committed.Aggregate.Decision.State != runtimecontract.ConvergenceStateNeedPrerequisite || len(committed.Aggregate.Facts.Prerequisites.Pending) == 0 {
+			t.Fatalf("owner-fact acquisition resource change did not require catalog refresh: %+v", committed.Aggregate)
+		}
+		for len(repository.aggregate.Facts.Prerequisites.Pending) != 0 {
+			prerequisite := repository.aggregate.Facts.Prerequisites.Pending[0]
+			catalog, found := runtimeTestAssessmentCatalogForPrerequisite(facts.Resources.OperationAdmissibilities, prerequisite.ID)
+			if !found {
+				t.Fatalf("no original catalog for refreshed prerequisite %+v", prerequisite)
+			}
+			if prerequisite.OwnerModuleID == runtimecontract.RuntimeModuleShell {
+				catalog = runtimeTestSelectableValidationCatalog(t)
+				catalog.PrerequisiteID = prerequisite.ID
+			} else {
+				catalog.ObservedRevision = "workspace-tree-owner-fact-acquisition-v2"
+			}
+			catalog.SnapshotID = runtimecontract.StableRuntimeOperationAdmissibilitySnapshotID(catalog)
+			observation := runtimeTestAssessmentSemanticCatalogObservation(catalog, "workspace-tree-owner-fact-acquisition-v2")
+			refreshed, refreshErr := controller.commitPrerequisite(context.Background(), "ws-v2", "run-v2", PrerequisiteResult{
+				PrerequisiteID: prerequisite.ID, OperationAdmissibility: &catalog, Observation: &observation,
+			})
+			if refreshErr != nil {
+				t.Fatalf("refresh owner-fact acquisition catalog %q: %v", prerequisite.ID, refreshErr)
+			}
+			committed.Aggregate = refreshed
+		}
+	}
+	if committed.Aggregate.Decision.State != runtimecontract.ConvergenceStateNeedAssessment {
 		t.Fatalf("owner-fact acquisition did not reach assessment: aggregate=%+v err=%v", committed.Aggregate, err)
 	}
-	if _, err := controller.BeginCandidateAttemptForTest(context.Background(), "ws-v2", "run-v2", 0, "owner-fact-acquisition-assessment-prefix"); err != nil {
+	if retireAfterReceipt {
+		if committed.Aggregate.SemanticPlanning.Phase != runtimecontract.RuntimeSemanticPlanningRequired || len(committed.Aggregate.SemanticPlanning.History) != 1 {
+			t.Fatalf("catalog refresh did not retire owner-fact acquisition semantic generation: %+v", committed.Aggregate.SemanticPlanning)
+		}
+		err = beginRuntimeAssessmentAttemptWithoutSemanticReseal(t, controller, "owner-fact-acquisition-assessment-prefix")
+	} else {
+		_, err = controller.BeginCandidateAttemptForTest(context.Background(), "ws-v2", "run-v2", 0, "owner-fact-acquisition-assessment-prefix")
+	}
+	if err != nil {
 		t.Fatal(err)
 	}
 	assessment := runtimecontract.RuntimeCandidate{Assessment: &runtimecontract.AssessmentCandidate{
@@ -454,6 +629,94 @@ func prepareTerminalValidationOwnerFactAcquisitionAssessment(t *testing.T) (*Run
 		t.Fatal(err)
 	}
 	return controller, repository, bootstrapFacts, definition
+}
+
+func beginRuntimeAssessmentAttemptWithoutSemanticReseal(t *testing.T, controller *RuntimeController, stablePrefixHash string) error {
+	t.Helper()
+	aggregate, err := controller.Load(context.Background(), "ws-v2", "run-v2")
+	if err != nil {
+		return err
+	}
+	manifest, err := runtimecontract.BuildRuntimeCandidateContractManifest(
+		aggregate.Decision,
+		runtimecontract.RuntimeCandidateManifestOwnerFactsFromContext(
+			runtimecontract.RuntimeCandidateContextForDecision(aggregate.Facts, aggregate.Decision, nil),
+		),
+	)
+	if err != nil {
+		return err
+	}
+	_, session, err := controller.ensureCandidateRequestSession(
+		context.Background(), "ws-v2", "run-v2", runtimecontract.RuntimeProviderDocumentOperations,
+		stablePrefixHash, manifest.Hash, "",
+	)
+	if err != nil {
+		return err
+	}
+	if session.State != runtimecontract.RuntimeCandidateRequestSessionDocumentComplete {
+		physicalCallID := runtimecontract.StableRuntimeCandidatePhysicalCallID(session.LogicalRequestID, session.NextSequence)
+		if _, err := controller.markCandidateRequestSubmitted(context.Background(), "ws-v2", "run-v2", session.LogicalRequestID, session.NextSequence, physicalCallID); err != nil {
+			return err
+		}
+		if _, err := controller.completeCandidateRequestDocument(context.Background(), "ws-v2", "run-v2", session.LogicalRequestID, physicalCallID); err != nil {
+			return err
+		}
+	}
+	_, err = controller.beginCandidateAttempt(context.Background(), "ws-v2", "run-v2", 0, stablePrefixHash, manifest, session.LogicalRequestID)
+	return err
+}
+
+func runtimeTestAssessmentCatalogForPrerequisite(catalogs []runtimecontract.RuntimeOperationAdmissibility, prerequisiteID string) (runtimecontract.RuntimeOperationAdmissibility, bool) {
+	for _, catalog := range catalogs {
+		catalog = catalog.Normalized()
+		if catalog.PrerequisiteID == prerequisiteID {
+			return catalog, true
+		}
+	}
+	return runtimecontract.RuntimeOperationAdmissibility{}, false
+}
+
+func runtimeTestAssessmentSemanticCatalogObservation(catalog runtimecontract.RuntimeOperationAdmissibility, workspaceRevision string) runtimecontract.RuntimePrerequisiteObservation {
+	catalog = catalog.Normalized()
+	dependencies := []runtimecontract.RuntimeFreshnessDependency{{
+		Domain: runtimecontract.RuntimeResourceWorkspaceTree, OwnerModuleID: runtimecontract.RuntimeModuleFile,
+		SubjectRef: "workspace_deliverable", Revision: workspaceRevision,
+	}}
+	if catalog.OwnerModuleID != runtimecontract.RuntimeModuleFile {
+		dependencies = append(dependencies, runtimecontract.RuntimeFreshnessDependency{
+			Domain: runtimecontract.RuntimeResourceOwnerCatalog, OwnerModuleID: catalog.OwnerModuleID,
+			SubjectRef: "owner-fact-validation-policy", Revision: catalog.ObservedRevision,
+		})
+	}
+	observation := runtimecontract.RuntimePrerequisiteObservation{
+		PrerequisiteID: catalog.PrerequisiteID, Kind: runtimecontract.PrerequisiteKindOperationAdmissibility,
+		OwnerModuleID: catalog.OwnerModuleID, ContentHash: catalog.SnapshotID, Dependencies: dependencies,
+	}
+	observation.ObservationID = runtimecontract.StableRuntimePrerequisiteObservationID(observation)
+	return observation
+}
+
+func runtimeTestAttachReceiptResourceChanges(t *testing.T, aggregate *RuntimeAggregate, evidence *ExecutionEvidence, changes []runtimecontract.RuntimeResourceChange) {
+	t.Helper()
+	if aggregate == nil || aggregate.ActiveDispatch == nil || evidence == nil || evidence.Receipt == nil {
+		t.Fatal("resource-change receipt fixture requires active dispatch and owner receipt")
+	}
+	receipt := evidence.Receipt.Clone()
+	receipt.ResourceChanges = append([]runtimecontract.RuntimeResourceChange(nil), changes...)
+	receipt = receipt.Normalized()
+	hash := runtimecontract.StableRuntimeOperationReceiptHash(receipt)
+	for index := range aggregate.OperationReceipts {
+		if aggregate.OperationReceipts[index].ExecutionKey == receipt.ExecutionKey && aggregate.OperationReceipts[index].Fence == receipt.Fence {
+			aggregate.OperationReceipts[index] = receipt
+		}
+	}
+	for index := range aggregate.ActiveDispatch.OperationExecutions {
+		if aggregate.ActiveDispatch.OperationExecutions[index].OperationID == receipt.OperationID {
+			aggregate.ActiveDispatch.OperationExecutions[index].OwnerReceiptHash = hash
+		}
+	}
+	evidence.Receipt = &receipt
+	evidence.OwnerReceiptHash = hash
 }
 
 func runtimeTestSelectableValidationOwnerFact() runtimecontract.RuntimeOwnerFactRequirement {

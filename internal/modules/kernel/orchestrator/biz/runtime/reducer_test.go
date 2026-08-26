@@ -1311,6 +1311,71 @@ func TestReduceRuntimeStateValidationOnlyCapTerminalsWithoutStateChange(t *testi
 	}
 }
 
+func TestReduceRuntimeStateValidationOnlyCapCoversSameFocusRepairEntries(t *testing.T) {
+	exhaustedRepairFacts := func() runtimecontract.RuntimeFacts {
+		facts := validationFacts()
+		facts.ConvergencePolicy.MaxValidationOnlyRetriesPerFocus = 1
+		facts.Repair = runtimecontract.RuntimeRepairLedger{
+			FocusID: facts.Focus.ID, RepairAttempts: 1, ValidationOnlyRetries: 1,
+			ActiveGap: &runtimecontract.RuntimeAssessmentGap{
+				CoverageWorkItemIDs:  append([]common.CoverageWorkItemID(nil), facts.Focus.CoverageWorkItemIDs...),
+				MissingEvidenceKinds: []string{runtimecontract.EvidenceKindValidation},
+			},
+		}
+		return facts
+	}
+
+	tests := []struct {
+		name  string
+		facts func() runtimecontract.RuntimeFacts
+	}{
+		{
+			name:  "ordinary missing validation after rejected execution",
+			facts: exhaustedRepairFacts,
+		},
+		{
+			name: "persisted validation repair directive",
+			facts: func() runtimecontract.RuntimeFacts {
+				facts := exhaustedRepairFacts()
+				facts.RepairDirective = &runtimecontract.RuntimeRepairDirective{
+					ID: "repair-validation-budget", FocusID: facts.Focus.ID,
+					Trigger: runtimecontract.RuntimeRepairTriggerExecutionRejected, RequiredState: runtimecontract.ConvergenceStateNeedValidation,
+					RequiredEffectScopes:  []runtimecontract.RuntimeEffectScope{runtimecontract.RuntimeEffectNone, runtimecontract.RuntimeEffectEphemeralSession},
+					RequiredEvidenceKinds: []string{runtimecontract.EvidenceKindValidation}, AllowedOperationKinds: []string{runtimecontract.RuntimeBlockKindManagedValidationSession},
+					CoverageWorkItemIDs: append([]common.CoverageWorkItemID(nil), facts.Focus.CoverageWorkItemIDs...),
+				}
+				return facts
+			},
+		},
+		{
+			name: "state-change no-op validation observation",
+			facts: func() runtimecontract.RuntimeFacts {
+				facts := exhaustedRepairFacts()
+				facts.Focus.RequiredEvidenceKinds = []string{runtimecontract.EvidenceKindStateChange}
+				facts.Repair.ActiveGap.MissingEvidenceKinds = []string{runtimecontract.EvidenceKindStateChange}
+				facts.Repair.NoProgressOperationShapes = []runtimecontract.RuntimeRejectedOperationShape{{
+					Operation:    patchApplyTestOperation("no-op-patch", "main.go"),
+					FailureClass: runtimecontract.FailureClassEffectMismatch,
+					FailureCode:  runtimeStateChangeNoOpWithoutProvenanceCode,
+				}}
+				return facts
+			},
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			decision, err := reduceRuntimeStateFixture(t, test.facts(), nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if decision.State != runtimecontract.ConvergenceStateFailed || decision.Terminal == nil || decision.Terminal.Code != "no_progress_exhausted" {
+				t.Fatalf("decision = %+v, want validation-only budget terminal", decision)
+			}
+		})
+	}
+}
+
 func TestReduceRuntimeStateGovernanceRequiredOpensGovernance(t *testing.T) {
 	facts := controllerFacts()
 	facts.Failure = &runtimecontract.FailureFact{

@@ -4,7 +4,7 @@ Status: normative
 
 Type: profile-capability
 
-Last Verified: 2026-08-25
+Last Verified: 2026-08-26
 
 ## Scope
 
@@ -61,8 +61,10 @@ That one-shot closure uses the Profile-sealed
 `shell/selectable-validation-surface/prospective-workspace-manifest/v1` satisfaction contract. Before any File effect, File
 validates the exact target proposed by SM-3 at the intersection of the Definition declaration selector/candidate refs and the
 current File operation selector/constraints. Shell publishes a provider-safe typed `all_of` target constraint derived from the
-activation-sealed recipe applicability rule; the acquisition/manifest seals it into C3. For the default Go recipe this generic
-constraint requires a target compatible with the recipe's test-input shape. A mismatching proposal is rejected by JSON
+activation-sealed recipe applicability rule; the acquisition/manifest seals it into C3. For the default `go test -v ./...`
+recipe, current readiness requires both root `go.mod` and a non-excluded test input. Shell publishes the test-target constraint
+only when `go.mod` already exists and one target can satisfy every remaining predicate; missing module plus missing test remains
+a non-actionable prerequisite because one File target cannot establish both. A mismatching proposal is rejected by JSON
 Schema/document admission before File or Shell is called, and only an ordinary complete-document correction may replace it.
 File then returns an immutable current-tree-revision-bound hypothetical manifest delta, which Shell evaluates against its exact
 non-selectable dependency catalog/observation plus the activation-sealed recipe identity. A Shell `would_not_satisfy` result is

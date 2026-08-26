@@ -18,34 +18,117 @@ const (
 // obligation sealed for the current binding. The immutable Definition proof
 // remains in DefinitionFocuses; this value only describes the current semantic
 // generation and therefore cannot grant terminal coverage.
+//
+// A durable receipt may retire the semantic generation before its assessment
+// is observed. In that case CurrentBindingRef remains the exact proof identity
+// for the already-accepted evidence, while the manifest moves to immutable
+// semantic history. A retired manifest is consulted here only to recover that
+// binding's purpose lineage. It is never returned as candidate, dispatch, or
+// operation authority.
 func currentRuntimeSemanticOwnerFactAcquisition(aggregate RuntimeAggregate) (runtimecontract.RuntimeSemanticOwnerFactAcquisition, bool, error) {
 	ledger := aggregate.SemanticPlanning.Normalized()
 	focus := aggregate.Facts.Focus.Normalized()
-	if ledger.Phase != runtimecontract.RuntimeSemanticPlanningSealed || ledger.Manifest == nil || len(focus.CoverageWorkItemIDs) != 1 {
-		return runtimecontract.RuntimeSemanticOwnerFactAcquisition{}, false, nil
+	if len(focus.CoverageWorkItemIDs) != 1 {
+		return runtimecontract.RuntimeSemanticOwnerFactAcquisition{}, false, fmt.Errorf("%w: assessment purpose resolution requires one current coverage item", common.ErrConflict)
 	}
 	coverageID := focus.CoverageWorkItemIDs[0]
 	index := runtimeCWICoverageIndex(aggregate.Facts.Coverage, coverageID)
 	if index < 0 || aggregate.Facts.Coverage[index].CurrentBindingRef == nil {
-		return runtimecontract.RuntimeSemanticOwnerFactAcquisition{}, false, nil
+		return runtimecontract.RuntimeSemanticOwnerFactAcquisition{}, false, fmt.Errorf("%w: current assessment CWI has no binding purpose lineage", common.ErrConflict)
 	}
-	if aggregate.Facts.Coverage[index].CurrentBindingRef.SemanticManifestHash != ledger.Manifest.Hash {
-		return runtimecontract.RuntimeSemanticOwnerFactAcquisition{}, false, fmt.Errorf("%w: current CWI binding does not belong to the sealed semantic manifest", common.ErrConflict)
+	ref := aggregate.Facts.Coverage[index].CurrentBindingRef.Clone()
+	if err := ref.Validate(); err != nil {
+		return runtimecontract.RuntimeSemanticOwnerFactAcquisition{}, false, fmt.Errorf("%w: current assessment CWI binding: %v", common.ErrConflict, err)
 	}
-	for _, obligation := range ledger.Manifest.ProofObligations {
-		if obligation.CoverageWorkItemID != coverageID || obligation.OwnerFactAcquisition == nil {
-			continue
+	if ref.FocusID != focus.ID {
+		return runtimecontract.RuntimeSemanticOwnerFactAcquisition{}, false, fmt.Errorf("%w: current assessment CWI binding focus does not match current focus", common.ErrConflict)
+	}
+	binding, bindingFound := coverageEvidenceBindingForCoverage(focus, coverageID)
+	if !bindingFound || binding.ID != ref.BindingID || binding.Hash != ref.BindingHash || binding.FocusID != ref.FocusID {
+		return runtimecontract.RuntimeSemanticOwnerFactAcquisition{}, false, fmt.Errorf("%w: current assessment CWI binding identity conflicts with the sealed focus binding", common.ErrConflict)
+	}
+
+	var (
+		resolvedPurpose runtimecontract.RuntimeSemanticEvidenceObligationPurpose
+		acquisition     runtimecontract.RuntimeSemanticOwnerFactAcquisition
+		manifestMatches int
+	)
+	resolveManifest := func(manifest runtimecontract.RuntimeSemanticPlanManifest) error {
+		manifest = manifest.Normalized()
+		if manifest.Hash != ref.SemanticManifestHash {
+			return nil
 		}
-		evidenceObligation, err := runtimecontract.ResolveRuntimeSemanticEvidenceObligation(obligation)
+		if err := manifest.Validate(); err != nil {
+			return fmt.Errorf("%w: current assessment binding manifest is invalid: %v", common.ErrConflict, err)
+		}
+		var matched *runtimecontract.RuntimeSemanticProofObligation
+		for obligationIndex := range manifest.ProofObligations {
+			obligation := manifest.ProofObligations[obligationIndex].Clone()
+			if obligation.CoverageWorkItemID != coverageID {
+				continue
+			}
+			if matched != nil {
+				return fmt.Errorf("%w: current assessment binding manifest has conflicting CWI proof obligations", common.ErrConflict)
+			}
+			matched = &obligation
+		}
+		if matched == nil {
+			return fmt.Errorf("%w: current assessment binding manifest has no CWI proof obligation", common.ErrConflict)
+		}
+		evidenceObligation, err := runtimecontract.ResolveRuntimeSemanticEvidenceObligation(*matched)
 		if err != nil {
+			return fmt.Errorf("%w: current assessment binding evidence obligation: %v", common.ErrConflict, err)
+		}
+		if manifestMatches != 0 && resolvedPurpose != evidenceObligation.Purpose {
+			return fmt.Errorf("%w: current assessment binding manifest purpose conflicts across semantic lineage", common.ErrConflict)
+		}
+		manifestMatches++
+		resolvedPurpose = evidenceObligation.Purpose
+		if evidenceObligation.Purpose == runtimecontract.RuntimeSemanticEvidenceObligationOwnerFactAcquisition {
+			if matched.OwnerFactAcquisition == nil {
+				return fmt.Errorf("%w: semantic owner-fact acquisition has no acquisition contract", common.ErrConflict)
+			}
+			acquisition = matched.OwnerFactAcquisition.Clone()
+		}
+		return nil
+	}
+
+	// Only a currently sealed manifest may contribute live purpose lineage.
+	// Other active phases are deliberately ignored even if a rollback happens
+	// to reproduce the same manifest hash.
+	if ledger.Phase == runtimecontract.RuntimeSemanticPlanningSealed && ledger.Manifest != nil {
+		if err := resolveManifest(*ledger.Manifest); err != nil {
 			return runtimecontract.RuntimeSemanticOwnerFactAcquisition{}, false, err
 		}
-		if evidenceObligation.Purpose != runtimecontract.RuntimeSemanticEvidenceObligationOwnerFactAcquisition {
-			return runtimecontract.RuntimeSemanticOwnerFactAcquisition{}, false, fmt.Errorf("%w: semantic owner-fact acquisition has no acquisition evidence obligation", common.ErrConflict)
-		}
-		return obligation.OwnerFactAcquisition.Clone(), true, nil
 	}
-	return runtimecontract.RuntimeSemanticOwnerFactAcquisition{}, false, nil
+	for _, generation := range ledger.History {
+		if generation.Snapshot.Manifest == nil || strings.TrimSpace(generation.Snapshot.Manifest.Hash) != ref.SemanticManifestHash {
+			continue
+		}
+		if err := generation.Validate(); err != nil {
+			return runtimecontract.RuntimeSemanticOwnerFactAcquisition{}, false, fmt.Errorf("%w: current assessment binding retired generation is invalid: %v", common.ErrConflict, err)
+		}
+		if generation.Snapshot.Phase != runtimecontract.RuntimeSemanticPlanningSealed {
+			return runtimecontract.RuntimeSemanticOwnerFactAcquisition{}, false, fmt.Errorf("%w: current assessment binding retired generation was not sealed", common.ErrConflict)
+		}
+		if err := resolveManifest(*generation.Snapshot.Manifest); err != nil {
+			return runtimecontract.RuntimeSemanticOwnerFactAcquisition{}, false, err
+		}
+	}
+	if manifestMatches == 0 {
+		return runtimecontract.RuntimeSemanticOwnerFactAcquisition{}, false, fmt.Errorf("%w: current assessment CWI binding manifest is absent from sealed semantic lineage", common.ErrConflict)
+	}
+	switch resolvedPurpose {
+	case runtimecontract.RuntimeSemanticEvidenceObligationDefinitionProof:
+		return runtimecontract.RuntimeSemanticOwnerFactAcquisition{}, false, nil
+	case runtimecontract.RuntimeSemanticEvidenceObligationOwnerFactAcquisition:
+		if err := acquisition.Validate(); err != nil {
+			return runtimecontract.RuntimeSemanticOwnerFactAcquisition{}, false, fmt.Errorf("%w: current assessment acquisition purpose: %v", common.ErrConflict, err)
+		}
+		return acquisition, true, nil
+	default:
+		return runtimecontract.RuntimeSemanticOwnerFactAcquisition{}, false, fmt.Errorf("%w: current assessment binding has unsupported evidence purpose %q", common.ErrConflict, resolvedPurpose)
+	}
 }
 
 // retainRuntimeOwnerFactAcquisitionCoverageOpen prevents current-generation

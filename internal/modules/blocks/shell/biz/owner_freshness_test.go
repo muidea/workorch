@@ -337,7 +337,23 @@ func TestShellOwnerAdmissibilityPublishesManifestPrerequisiteBeforeValidationIsR
 		return response.Acquisition.Admissibility
 	}
 
-	waiting := acquire("admissibility-shell-waiting", "tree-without-tests", []string{"main.go"})
+	missingModule := acquire("admissibility-shell-missing-module", "tree-test-without-module", []string{"main.go", "main_test.go"})
+	missingModuleSurface, found := shellValidationSurfaceForTest(missingModule.ValidationSurfaces, recipe.ID)
+	if !found || missingModuleSurface.Readiness != runtimecontract.RuntimeValidationSurfacePrerequisiteRequired ||
+		missingModuleSurface.ReadinessReason != shellValidationApplicableInputRequiredReason || missingModuleSurface.PrerequisiteRef == "" ||
+		missingModuleSurface.ProspectiveSatisfactionContractRef != "" || missingModuleSurface.ProspectiveTargetSatisfactionConstraint != nil ||
+		missingModuleSurface.InputBindingRef != "" || len(missingModule.ValidationRecipes) != 0 || len(missingModule.ValidationRecipeRefs) != 0 {
+		t.Fatalf("missing-module validation inventory = %+v surface=%+v found=%t", missingModule, missingModuleSurface, found)
+	}
+
+	multipleMissing := acquire("admissibility-shell-multiple-missing", "tree-without-module-or-tests", []string{"main.go"})
+	multipleMissingSurface, found := shellValidationSurfaceForTest(multipleMissing.ValidationSurfaces, recipe.ID)
+	if !found || multipleMissingSurface.Readiness != runtimecontract.RuntimeValidationSurfacePrerequisiteRequired ||
+		multipleMissingSurface.ProspectiveSatisfactionContractRef != "" || multipleMissingSurface.ProspectiveTargetSatisfactionConstraint != nil {
+		t.Fatalf("multi-gap validation inventory became actionable = %+v surface=%+v found=%t", multipleMissing, multipleMissingSurface, found)
+	}
+
+	waiting := acquire("admissibility-shell-waiting", "tree-module-without-tests", []string{"go.mod", "main.go"})
 	waitingSurface, found := shellValidationSurfaceForTest(waiting.ValidationSurfaces, recipe.ID)
 	if !found || waitingSurface.Readiness != runtimecontract.RuntimeValidationSurfacePrerequisiteRequired ||
 		waitingSurface.ReadinessReason != shellValidationApplicableInputRequiredReason || waitingSurface.PrerequisiteRef == "" ||
@@ -349,10 +365,10 @@ func TestShellOwnerAdmissibilityPublishesManifestPrerequisiteBeforeValidationIsR
 		t.Fatalf("manifest-prerequisite validation inventory = %+v surface=%+v found=%t", waiting, waitingSurface, found)
 	}
 
-	ready := acquire("admissibility-shell-ready", "tree-with-tests", []string{"main.go", "main_test.go"})
+	ready := acquire("admissibility-shell-ready", "tree-with-module-and-tests", []string{"go.mod", "main.go", "main_test.go"})
 	readySurface, found := shellValidationSurfaceForTest(ready.ValidationSurfaces, recipe.ID)
 	if !found || readySurface.Readiness != runtimecontract.RuntimeValidationSurfaceReady ||
-		!strings.Contains(readySurface.InputBindingRef, "tree-with-tests") || readySurface.PrerequisiteRef != "" ||
+		!strings.Contains(readySurface.InputBindingRef, "tree-with-module-and-tests") || readySurface.PrerequisiteRef != "" ||
 		readySurface.ProspectiveSatisfactionContractRef != "" ||
 		readySurface.ProspectiveTargetSatisfactionConstraint != nil ||
 		len(ready.ValidationRecipes) != 1 || len(ready.ValidationRecipeRefs) != 1 || ready.ValidationRecipeRefs[0] != recipe.ID {

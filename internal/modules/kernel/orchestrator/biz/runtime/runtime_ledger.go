@@ -81,6 +81,36 @@ func markValidationOnlyRetry(ledger runtimecontract.RuntimeRepairLedger) runtime
 	return ledger
 }
 
+// recordAuthorizedValidationOnlyRetry records a retry only after SM-2 has
+// actually selected a subsequent same-focus validation action. Callers supply
+// an owner-private source predicate (for example, rejected execution or a
+// canonical repairable assessment); an initial validation has no such source
+// and therefore does not consume this budget.
+func recordAuthorizedValidationOnlyRetry(facts runtimecontract.RuntimeFacts, decision runtimecontract.RuntimeDecision, authorized bool) runtimecontract.RuntimeFacts {
+	facts = facts.Normalized()
+	if !authorized || decision.State != runtimecontract.ConvergenceStateNeedValidation || !sameFocusValidationRepairActive(facts) {
+		return facts
+	}
+	facts.Repair = markValidationOnlyRetry(facts.Repair)
+	return facts
+}
+
+func sameFocusValidationRepairActive(facts runtimecontract.RuntimeFacts) bool {
+	ledger := facts.Repair.Normalized()
+	return ledger.FocusID != "" && ledger.FocusID == strings.TrimSpace(facts.Focus.ID) &&
+		(ledger.ActiveGap != nil || ledger.RepairAttempts > 0)
+}
+
+func validationOnlyRepairBudgetExhausted(facts runtimecontract.RuntimeFacts) bool {
+	if !sameFocusValidationRepairActive(facts) {
+		return false
+	}
+	policy := facts.ConvergencePolicy.Normalized()
+	ledger := facts.Repair.Normalized()
+	return policy.MaxValidationOnlyRetriesPerFocus > 0 &&
+		ledger.ValidationOnlyRetries >= policy.MaxValidationOnlyRetriesPerFocus
+}
+
 func noteRepairProgress(ledger runtimecontract.RuntimeRepairLedger, revision string) runtimecontract.RuntimeRepairLedger {
 	ledger = ledger.Normalized()
 	ledger.NoProgressCount = 0

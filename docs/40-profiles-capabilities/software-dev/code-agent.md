@@ -4,7 +4,7 @@ Status: normative
 
 Type: profile-capability
 
-Last Verified: 2026-08-25
+Last Verified: 2026-08-26
 
 ## Purpose
 
@@ -40,9 +40,12 @@ Only operations present in the activation-sealed capability contract and current
 
 For the built-in DoD validation-readiness closure, a prospective File create is eligible only when the sealed
 `ProspectiveSatisfactionContractRef` lets Shell prove from the File-authored hypothetical resulting manifest that an exact
-managed-validation recipe would become selectable. In the default Go recipe, adding a real `*_test.go` target can satisfy this
-applicability contract; adding only a generic `scripts/validate.sh` does not make `go test ./...` selectable. This is
-software-dev Profile/Shell policy, not an Orchestrator filename or language rule.
+managed-validation recipe would become selectable. The default `go test -v ./...` recipe requires a root `go.mod` and at least
+one non-excluded `*_test.go` in the isolated workspace manifest. When `go.mod` already exists, adding a real `*_test.go` target
+can satisfy the remaining all-of applicability contract; a test file alone in a workspace without `go.mod`, or a generic
+`scripts/validate.sh`, cannot make the recipe selectable. If module and test prerequisites are both missing, one File target
+cannot close both gaps and the Shell surface remains a non-actionable prerequisite. This is software-dev Profile/Shell policy,
+not an Orchestrator filename or language rule.
 
 ## Runtime Mapping
 

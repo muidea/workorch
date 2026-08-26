@@ -19,19 +19,23 @@ func TestShellProspectiveTargetConstraintPublishesSufficientGoTestAllOf(t *testi
 	}{
 		{
 			name: "recursive workspace", recipe: runtimecontract.RuntimeValidationRecipe{ID: "go-test", Command: "go", Args: []string{"test", "./..."}},
-			currentRefs: []string{"main.go"}, want: true, match: "runtime_test.go", reject: "vendor/runtime_test.go",
+			currentRefs: []string{"go.mod", "main.go"}, want: true, match: "runtime_test.go", reject: "vendor/runtime_test.go",
+		},
+		{
+			name: "test without root module", recipe: runtimecontract.RuntimeValidationRecipe{ID: "go-test-no-module", Command: "go", Args: []string{"test", "./..."}},
+			currentRefs: []string{"main.go", "runtime_test.go"}, want: false,
 		},
 		{
 			name: "missing package root", recipe: runtimecontract.RuntimeValidationRecipe{ID: "go-test-pkg", Command: "go", Args: []string{"test", "./internal/example/..."}},
-			currentRefs: []string{"main.go"}, want: true, match: "internal/example/runtime_test.go", reject: "runtime_test.go", wantPrefix: "internal/example/",
+			currentRefs: []string{"go.mod", "main.go"}, want: true, match: "internal/example/runtime_test.go", reject: "runtime_test.go", wantPrefix: "internal/example/",
 		},
 		{
 			name: "existing package root", recipe: runtimecontract.RuntimeValidationRecipe{ID: "go-test-pkg-existing", Command: "go", Args: []string{"test", "./internal/example/..."}},
-			currentRefs: []string{"internal/example/main.go"}, want: true, match: "runtime_test.go", reject: "runtime.go",
+			currentRefs: []string{"go.mod", "internal/example/main.go"}, want: true, match: "runtime_test.go", reject: "runtime.go",
 		},
 		{
 			name: "incomparable package roots", recipe: runtimecontract.RuntimeValidationRecipe{ID: "go-test-many", Command: "go", Args: []string{"test", "./pkg/a", "./pkg/b"}},
-			currentRefs: []string{"main.go"}, want: false,
+			currentRefs: []string{"go.mod", "main.go"}, want: false,
 		},
 		{
 			name: "non go recipe", recipe: runtimecontract.RuntimeValidationRecipe{ID: "shell-check", Command: "sh", Args: []string{"-c", "true"}},
@@ -79,6 +83,19 @@ func TestShellProspectiveTargetConstraintPublishesSufficientGoTestAllOf(t *testi
 				t.Fatalf("published constraint omitted package prefix %q: %+v", test.wantPrefix, constraint)
 			}
 		})
+	}
+}
+
+func TestShellProspectiveTargetConstraintKeepsMultipleGoWorkspaceGapsNonActionable(t *testing.T) {
+	recipe := runtimecontract.RuntimeValidationRecipe{ID: "go-test", Command: "go", Args: []string{"test", "-v", "./..."}}
+	currentRefs := []string{"main.go"}
+	if constraint, ok := shellProspectiveTargetSatisfactionConstraint(recipe, currentRefs, "shell-policy-test"); ok {
+		t.Fatalf("single-target contract published for missing go.mod and test input: %+v", constraint)
+	}
+	for _, target := range []string{"go.mod", "runtime_test.go"} {
+		if runtimeValidationRecipeApplicableToManifest(recipe, append(append([]string(nil), currentRefs...), target)) {
+			t.Fatalf("single target %q unexpectedly satisfied both module and test prerequisites", target)
+		}
 	}
 }
 

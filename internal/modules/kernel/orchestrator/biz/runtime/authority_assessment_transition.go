@@ -171,9 +171,11 @@ func (c *authorityComponent) commitAssessment(ctx context.Context, workspaceID c
 	// to an assessment candidate's claimed missing evidence kind. Increment
 	// after the budget fence selected the action so the next same-focus gap
 	// observes the persisted retry that was actually authorized.
-	if canonicalDisposition == runtimecontract.AssessmentDispositionRepairableGap && nextDecision.State == runtimecontract.ConvergenceStateNeedValidation {
-		facts.Repair = markValidationOnlyRetry(facts.Repair)
-	}
+	facts = recordAuthorizedValidationOnlyRetry(
+		facts,
+		nextDecision,
+		canonicalDisposition == runtimecontract.AssessmentDispositionRepairableGap,
+	)
 	aggregate.Facts = facts
 	aggregate.Decision = nextDecision
 	aggregate.StateRevision++

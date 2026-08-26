@@ -4,7 +4,7 @@ Status: normative
 
 Type: core-contract-part
 
-Last Verified: 2026-08-25
+Last Verified: 2026-08-26
 
 ## 四个协调状态机
 
@@ -100,7 +100,9 @@ load facts
   owner-grounded implementation/effect repair surface 时才可进入 state change；accepted repair state change 必须按同一
   closure 固定进入 validation。repair surface 缺失/陈旧只能进入 prerequisite；无合法 target 或 validation recipe 时形成
   typed terminal。validation command entry 不得自动晋升为 repair target，且 validation-only budget 只能在 SM-2 已
-  canonical 分类为 validation repair 后扣减。Shell 只能从 owner 支持的结构化工具诊断提取 manifest-bounded candidate
+  canonical 分类并实际再次授权同 focus validation 后扣减；初次 validation、duplicate receipt 与 restart 不重复计数。
+  rejected receipt 不获得 CWI credit，若其 CWI 列表为空，只能用已完成 dispatch 封存的 exact `FocusID` 判断当前 focus
+  防重放归属；operation ID 或 summary 变化不能改变 stable semantic shape。Shell 只能从 owner 支持的结构化工具诊断提取 manifest-bounded candidate
   target；无结构化位置时不得回填 command/input target，随后仍由 File owner confirmation 与 SM-2 freshness gate 封存
   failure target。原始 observation 必须完整保留，但不得反向选择 action、retry、ticket 或 terminal。
 - assessment evidence gate 只验证 current-run/focus、binding-matched owner receipt、effect、quality 与封存的
@@ -126,7 +128,10 @@ load facts
   reopen、request、effect 或预算扣减。重开 CWI 固定返回 `semantic-pending/<cwi>`；当新的 current-focus acquisition 与
   上一 generation 已退休 prerequisite 使用同一 canonical ID 时，SM-2 必须在排入 pending 前原子移出该 retired ID 及其
   旧 observation，且不得复用旧 observation。无关 retired lineage 必须保留，审计由 CWI reopen lineage 与 semantic
-  generation history 持续承载，active/retired 不相交 invariant 保持严格成立。历史 reopened/retired binding 不得再次成为
+  generation history 持续承载，active/retired 不相交 invariant 保持严格成立。current binding 的 proof purpose 必须由
+  exact `SemanticManifestHash + CWI ID` 从 active manifest 或 immutable generation history 唯一恢复；history 只解释
+  purpose lineage，不恢复 candidate/action authority。aggregate invariant 必须拒绝 acquisition purpose 的
+  `satisfied/settled` terminal credit。历史 reopened/retired binding 不得再次成为
   `CurrentBindingRef`。导致 owner-fact gap 的 accepted state-change operation shape 必须作为同一 CWI 的 anti-replay fact
   跨 successor semantic focus 保留；SM-2 不携带 predecessor repair attempt/gap/directive，SM-3 在 dispatch 前拒绝等价
   shape，因此新 binding generation 不能重置等价副作用的防重放边界。

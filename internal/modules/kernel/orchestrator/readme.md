@@ -443,7 +443,10 @@ deployed run ID 只属于 archive regression evidence，不定义当前候选、
   scope 内的 actual candidate target，无位置或越界时不发布 observation，不能回显 operation/input target。只有 focus exact target、仍新鲜的 owner-grounded failure target 或
   sealed owner selector/prospective constraint可以形成 repair authority。validation/evidence-quality gap保持
   `need_validation`，不得在 validation-only 重试后退化为无关 `need_state_change`；耗尽封存 validation
-  recipe/budget 时必须形成 typed terminal。
+  recipe/budget 时必须形成 typed terminal。普通 rejected validation receipt 不获得 CWI credit；其防重放归属只能来自
+  completed dispatch 中封存的 exact `FocusID`。stable operation shape 忽略 operation ID 与 summary 元数据，语义相同的
+  重试必须在 owner 调用前拒绝；只有同 focus reducer 实际再次授权 `need_validation` 时才递增
+  `ValidationOnlyRetries`，初次 validation、duplicate receipt 与 restart 均不得重复计数。
 - assessment gate 只消费 current-run accepted evidence、sealed binding/effect与 owner structured validation
   observation；只有 receipt 实际报告 binding 要求的 exact check/metric/artifact 才能给对应 CWI credit。非空
   `PassedChecks`、claim signal、assessment 文本、Goal/DoD、summary 与 operation/check name 的自由文本相似度
@@ -474,7 +477,10 @@ deployed run ID 只属于 archive regression evidence，不定义当前候选、
   reopen/CAS/request/effect。reobserve 已满足时，只有 `assessment_observed` private event 可在同一 CAS 中保留 exact
   acquisition attempt/audit、保持 CWI open、写入 `assessment_owner_fact_acquisition_settled` reopen lineage并退休当前
   generation；successor manifest 恢复原 terminal evidence obligation，acquisition evidence 不得关闭 CWI。若 sealed proof
-  本身仍缺失，则保持普通 evidence/repair 主线。CWI 重开后
+  本身仍缺失，则保持普通 evidence/repair 主线。`CurrentBindingRef.SemanticManifestHash + CWI ID` 必须从 active manifest
+  或 immutable generation history 唯一恢复 proof purpose；history 仅用于 purpose lineage，不得恢复 candidate/action
+  authority。SM-2 aggregate invariant 禁止 acquisition purpose 保留 `satisfied/settled` terminal credit，并要求该 focus
+  保持 assessment gate。CWI 重开后
   固定回到 `semantic-pending/<cwi>`；若该 current-focus prerequisite ID 已由上一 semantic generation 退休，SM-2 必须在
   重新排入 acquisition 前原子移出同 ID 的 retired prerequisite 及其旧 observation，只保留无关 retired lineage。旧
   observation 不得复用为当前 authority，审计继续由 CWI reopen lineage 与 semantic generation history 承载，且

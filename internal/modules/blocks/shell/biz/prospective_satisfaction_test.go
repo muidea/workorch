@@ -245,7 +245,7 @@ func shellProspectiveSatisfactionCommandWithRecipesFixture(t *testing.T, adapter
 	if err != nil {
 		t.Fatal(err)
 	}
-	shellCatalog.TargetRefs = []string{"main.go"}
+	shellCatalog.TargetRefs = []string{"go.mod", "main.go"}
 	shellCatalog.ValidationSurfaces = make([]runtimecontract.RuntimeValidationSurface, 0, len(recipes))
 	for _, recipe := range recipes {
 		surface := runtimecontract.RuntimeValidationSurface{
@@ -279,7 +279,7 @@ func shellProspectiveSatisfactionCommandWithRecipesFixture(t *testing.T, adapter
 		shellCatalog.PrerequisiteID,
 		shellCatalog,
 		shellCatalog.TargetRefs,
-		shellTestWorkspaceManifestBinding(baseRevision, []string{"main.go"}),
+		shellTestWorkspaceManifestBinding(baseRevision, []string{"go.mod", "main.go"}),
 	)
 
 	fileCatalog := runtimecontract.RuntimeOperationAdmissibility{
@@ -290,7 +290,7 @@ func shellProspectiveSatisfactionCommandWithRecipesFixture(t *testing.T, adapter
 			AllowedTargetPolicies: []runtimecontract.RuntimeOperationTargetPolicy{runtimecontract.RuntimeOperationTargetPolicyProspectiveOwnerTarget},
 			SelectorRefs:          []string{operationSelector}, ConstraintRefs: []string{"workspace-relative-path"},
 		}},
-		TargetRefs: []string{"main.go"}, SelectorRefs: []string{operationSelector}, ConstraintRefs: []string{"workspace-relative-path"},
+		TargetRefs: []string{"go.mod", "main.go"}, SelectorRefs: []string{operationSelector}, ConstraintRefs: []string{"workspace-relative-path"},
 		ObservedRevision: baseRevision,
 	}
 	fileCatalog.SnapshotID = runtimecontract.StableRuntimeOperationAdmissibilitySnapshotID(fileCatalog)
@@ -383,7 +383,7 @@ func shellProspectiveSatisfactionCommandWithRecipesFixture(t *testing.T, adapter
 		proposal,
 		modulecommon.ProspectiveSatisfactionContractRef,
 		fileCatalog,
-		runtimecontract.WorkspaceManifest{Revision: baseRevision, TargetRefs: []string{"main.go"}},
+		runtimecontract.WorkspaceManifest{Revision: baseRevision, TargetRefs: []string{"go.mod", "main.go"}},
 	)
 	if err != nil {
 		t.Fatalf("prospective delta: %v", err)

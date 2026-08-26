@@ -215,6 +215,9 @@ func reduce(facts runtimecontract.RuntimeFacts, proofLineage []runtimecontract.R
 		return stateChangeDecision(base, facts)
 	}
 	if contains(missing, runtimecontract.EvidenceKindValidation) {
+		if sameFocusValidationRepairActive(facts) {
+			return validationOnlyRepairDecision(base, facts, proofLineage)
+		}
 		return validationDecision(base, facts, proofLineage)
 	}
 	return terminalDecision(base, runtimecontract.ConvergenceStateFailed, "unsupported_evidence_gap", fmt.Sprintf("unsupported required evidence kinds: %s", strings.Join(missing, ","))), nil
@@ -258,7 +261,7 @@ func noOpWithoutProvenanceDecision(base runtimecontract.RuntimeDecision, facts r
 		return terminalDecision(base, runtimecontract.ConvergenceStateFailed,
 			"state_change_provenance_missing", "owner reported a no-op and no validation capability can observe the existing workspace state"), true, nil
 	}
-	decision, err := validationDecision(base, facts, proofLineage)
+	decision, err := validationOnlyRepairDecision(base, facts, proofLineage)
 	return decision, true, err
 }
 
@@ -1110,16 +1113,16 @@ func repairableAssessmentDecision(base runtimecontract.RuntimeDecision, facts ru
 		return terminalDecision(base, runtimecontract.ConvergenceStateFailed, "no_progress_exhausted", firstNonEmptyAssessmentSummary(assessment, "repair budget exhausted")), nil
 	}
 	if !hasAcceptedCurrentFocusValidationEvidence(facts, proofLineage) {
-		return validationOnlyRepairDecision(base, facts, policy, ledger, proofLineage)
+		return validationOnlyRepairDecision(base, facts, proofLineage)
 	}
 	if focusRequiresDurableStateChangeRepair(facts) {
 		return stateChangeDecision(base, facts)
 	}
-	return validationOnlyRepairDecision(base, facts, policy, ledger, proofLineage)
+	return validationOnlyRepairDecision(base, facts, proofLineage)
 }
 
-func validationOnlyRepairDecision(base runtimecontract.RuntimeDecision, facts runtimecontract.RuntimeFacts, policy runtimecontract.RuntimeConvergencePolicy, ledger runtimecontract.RuntimeRepairLedger, proofLineages ...[]runtimecontract.RuntimeCoverageProofLineage) (runtimecontract.RuntimeDecision, error) {
-	if policy.MaxValidationOnlyRetriesPerFocus > 0 && ledger.ValidationOnlyRetries >= policy.MaxValidationOnlyRetriesPerFocus {
+func validationOnlyRepairDecision(base runtimecontract.RuntimeDecision, facts runtimecontract.RuntimeFacts, proofLineages ...[]runtimecontract.RuntimeCoverageProofLineage) (runtimecontract.RuntimeDecision, error) {
+	if validationOnlyRepairBudgetExhausted(facts) {
 		return terminalDecision(base, runtimecontract.ConvergenceStateFailed, "no_progress_exhausted", "validation-only repair budget exhausted"), nil
 	}
 	return validationDecision(base, facts, proofLineages...)

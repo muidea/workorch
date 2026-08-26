@@ -19,6 +19,15 @@ func TestEvaluateCandidateAdmissionClassifiesFullAndPartialReplay(t *testing.T) 
 		t.Fatalf("active rejected shapes = %+v", shapes)
 	}
 
+	metadataOnly := candidate.StateChange.Operations[0].Operation
+	metadataOnly.ID = "patch-retry-with-new-id"
+	summary := "retry with different wording"
+	metadataOnly.Parameters = append(append([]runtimecontract.OperationParameter(nil), metadataOnly.Parameters...), runtimecontract.OperationParameter{Name: "summary", String: &summary})
+	metadataReplay := EvaluateCandidateAdmission(aggregate, runtimecontract.RuntimeCandidate{StateChange: &runtimecontract.StateChangeCandidate{Operations: []runtimecontract.StateChangingOperation{{Operation: metadataOnly}}}})
+	if metadataReplay.Disposition != CandidateAdmissionRejectedContract || metadataReplay.Failure == nil || metadataReplay.Failure.Code != candidateAdmissionCodeReplaysRejectedShape {
+		t.Fatalf("operation ID/summary-only replay admission = %+v", metadataReplay)
+	}
+
 	second := candidate.StateChange.Operations[0].Operation
 	second.ID = "patch-2"
 	content := "corrected\n"
@@ -42,6 +51,57 @@ func TestEvaluateCandidateAdmissionClassifiesFullAndPartialReplay(t *testing.T) 
 	}
 	if cleared := rejectCandidateReplay(aggregate, candidate); !cleared.Accepted() {
 		t.Fatalf("accepted repair must clear replay admission: %+v", cleared)
+	}
+}
+
+func TestActiveRejectedOperationShapesUsesCompletedDispatchFocusForNonCreditingReceipt(t *testing.T) {
+	aggregate, replayedCandidate := aggregateWithActiveRejectedCandidate(t)
+	aggregate.Facts.RemainingFocuses = []runtimecontract.CoverageFocus{{
+		ID: "focus-next", CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-next"},
+		RequiredEvidenceKinds: []string{runtimecontract.EvidenceKindValidation},
+	}}
+	// A rejected owner receipt is non-crediting by definition. Its immutable
+	// dispatch transaction, not a fabricated CWI, binds it to the active focus.
+	aggregate.Facts.Evidence.Rejected[0].CoverageWorkItemIDs = nil
+	aggregate.Facts.Evidence.Rejected[0].BindingRefs = []string{aggregate.Facts.Focus.CoverageEvidenceBindings[0].ID}
+
+	shapes := ActiveRejectedOperationShapes(aggregate)
+	if len(shapes) != 1 || shapes[0].Operation.ID != "patch-1" {
+		t.Fatalf("current-focus non-crediting rejected shape = %+v", shapes)
+	}
+	replayed := replayedCandidate.StateChange.Operations[0].Operation
+	replayed.ID = "patch-retry"
+	summary := "same operation with revised wording"
+	replayed.Parameters = append(append([]runtimecontract.OperationParameter(nil), replayed.Parameters...), runtimecontract.OperationParameter{Name: "summary", String: &summary})
+	if result := rejectCandidateReplay(aggregate, runtimecontract.RuntimeCandidate{StateChange: &runtimecontract.StateChangeCandidate{Operations: []runtimecontract.StateChangingOperation{{Operation: replayed}}}}); result.Accepted() || result.Failure == nil || result.Failure.Code != candidateAdmissionCodeReplaysRejectedShape {
+		t.Fatalf("current-focus replay was not rejected before owner call: %+v", result)
+	}
+
+	different := replayedCandidate.StateChange.Operations[0].Operation
+	different.ID = "patch-different-content"
+	content := "different execution semantics\n"
+	different.Parameters = patchApplyTestParameters("main.go")
+	different.Parameters[1].String = &content
+	if result := rejectCandidateReplay(aggregate, runtimecontract.RuntimeCandidate{StateChange: &runtimecontract.StateChangeCandidate{Operations: []runtimecontract.StateChangingOperation{{Operation: different}}}}); !result.Accepted() {
+		t.Fatalf("different operation shape was rejected: %+v", result)
+	}
+
+	otherFocus := aggregate
+	otherFocus.CompletedDispatches = append([]SealedDispatch(nil), aggregate.CompletedDispatches...)
+	otherFocus.CompletedDispatches[0].Transaction.FocusID = "focus-next"
+	if shapes := ActiveRejectedOperationShapes(otherFocus); len(shapes) != 0 {
+		t.Fatalf("other-focus dispatch leaked rejected shape into current focus: %+v", shapes)
+	}
+
+	newerAccepted := aggregate
+	newerAccepted.Facts.Evidence.Accepted = []runtimecontract.EvidenceFact{{
+		ID: "accepted-after-rejection", Kind: runtimecontract.EvidenceKindStateChange,
+		CoverageWorkItemIDs: append([]common.CoverageWorkItemID(nil), aggregate.Facts.Focus.CoverageWorkItemIDs...),
+		BindingRefs:         []string{aggregate.Facts.Focus.CoverageEvidenceBindings[0].ID},
+		Revision:            "runtime-evidence-00000000000000000002",
+	}}
+	if shapes := ActiveRejectedOperationShapes(newerAccepted); len(shapes) != 0 {
+		t.Fatalf("newer accepted current-focus evidence did not retire rejected shape: %+v", shapes)
 	}
 }
 

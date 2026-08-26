@@ -142,6 +142,15 @@ func shellProspectiveTargetSatisfactionConstraint(recipe runtimemodel.RuntimeVal
 		return runtimemodel.RuntimeProspectiveTargetSatisfactionConstraint{}, false
 	}
 	currentTargetRefs = normalizeShellStrings(currentTargetRefs)
+	// Managed validation executes in an isolated workspace copy. The built-in
+	// Go recipe therefore needs a root module declaration as well as an actual
+	// test input. The closed predicate vocabulary cannot express exact root-file
+	// equality for go.mod: path_suffix would also admit nested modules. Keep the
+	// surface non-actionable whenever that prerequisite is missing instead of
+	// publishing an all-of contract that is not sufficient for readiness.
+	if !shellManifestHasGoModule(currentTargetRefs) {
+		return runtimemodel.RuntimeProspectiveTargetSatisfactionConstraint{}, false
+	}
 	predicates := make([]runtimemodel.RuntimeProspectiveTargetPredicate, 0, 6)
 	if !shellManifestHasApplicableGoTestTarget(currentTargetRefs) {
 		predicates = append(predicates, runtimemodel.RuntimeProspectiveTargetPredicate{
@@ -225,6 +234,9 @@ func runtimeValidationRecipeApplicableToManifest(recipe runtimemodel.RuntimeVali
 		return true
 	}
 	allRefs := normalizeShellStrings(targetRefs)
+	if !shellManifestHasGoModule(allRefs) {
+		return false
+	}
 	if !shellManifestHasApplicableGoTestTarget(allRefs) {
 		return false
 	}
@@ -271,6 +283,15 @@ func shellManifestHasApplicableGoTestTarget(targetRefs []string) bool {
 	for _, ref := range normalizeShellStrings(targetRefs) {
 		clean := filepath.ToSlash(filepath.Clean(ref))
 		if clean != "." && !shellManifestPathExcluded(clean) && strings.HasSuffix(pathBase(clean), "_test.go") {
+			return true
+		}
+	}
+	return false
+}
+
+func shellManifestHasGoModule(targetRefs []string) bool {
+	for _, ref := range normalizeShellStrings(targetRefs) {
+		if filepath.ToSlash(filepath.Clean(ref)) == "go.mod" {
 			return true
 		}
 	}
@@ -434,6 +455,13 @@ func validateGoTestValidationPreflight(deliverableDirectory string, args []strin
 	if len(args) == 0 || strings.TrimSpace(args[0]) != "test" {
 		return nil
 	}
+	hasGoModule, err := workspaceContainsGoModule(deliverableDirectory)
+	if err != nil {
+		return err
+	}
+	if !hasGoModule {
+		return fmt.Errorf("%w: validation preflight failed: root go.mod not found for isolated go test workspace", common.ErrInvalidArgument)
+	}
 	if err := validateGoTestPackageTargets(deliverableDirectory, args); err != nil {
 		return err
 	}
@@ -449,6 +477,21 @@ func validateGoTestValidationPreflight(deliverableDirectory string, args []strin
 		return fmt.Errorf("%w: validation preflight failed: no *_test.go files found for go test; create tests first or choose an executable validation command", common.ErrInvalidArgument)
 	}
 	return nil
+}
+
+func workspaceContainsGoModule(root string) (bool, error) {
+	root = strings.TrimSpace(root)
+	if root == "" {
+		return false, common.ErrInvalidArgument
+	}
+	info, err := os.Stat(filepath.Join(root, "go.mod"))
+	if errors.Is(err, os.ErrNotExist) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	return info.Mode().IsRegular(), nil
 }
 
 func validateGoTestPackageTargets(deliverableDirectory string, args []string) error {

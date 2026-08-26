@@ -4,7 +4,7 @@ Status: normative
 
 Type: core-contract-part
 
-Last Verified: 2026-08-25
+Last Verified: 2026-08-26
 
 ## Runtime 生产主链
 
@@ -140,7 +140,10 @@ coverage。只有 `assessment_observed` owner-private event 可以在同一 CAS 
 operation anti-replay/attempt fact、将 CWI 保持为 open 并记为 `reopened`、以
 `assessment_owner_fact_acquisition_settled` lineage 退休当前 generation，然后回到 `semantic-pending/<cwi>`。successor
 manifest 必须移除 acquisition、恢复原 terminal evidence obligation；只有 successor binding 的 matching terminal receipt/
-assessment 可以 settle CWI。duplicate/restart 只从该 aggregate 幂等 re-drive，不能重复 effect、assessment、reopen 或 attempt。
+assessment 可以 settle CWI。当前 binding 的 purpose 必须由 exact `SemanticManifestHash + CWI ID` 从 active manifest 或
+immutable generation history 恢复；该历史只解释 purpose，不能授权候选、operation 或 transition。aggregate invariant
+必须拒绝 acquisition purpose 的 `satisfied/settled` 组合。duplicate/restart 只从该 aggregate 幂等 re-drive，不能重复
+effect、assessment、reopen 或 attempt。
 Shell 不选择 File 操作，File 不解释 Shell fact，kernel 不硬编码语言/测试框架。
 
 Definition-gap provider document 还必须通过 pure、manifest-bound admission 才能成为

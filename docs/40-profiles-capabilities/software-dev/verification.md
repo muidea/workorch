@@ -4,7 +4,7 @@ Status: normative
 
 Type: verification-contract
 
-Last Verified: 2026-08-25
+Last Verified: 2026-08-26
 
 ## Purpose
 
@@ -86,6 +86,7 @@ go test ./internal/pkg/workorchdefaults -count=1
 go test ./internal/modules/blocks/file/... -count=1
 go test ./internal/modules/blocks/git/... -count=1
 go test ./internal/modules/blocks/mcp/... -count=1
+go test ./internal/modules/blocks/shell/... -count=1
 go test ./internal/modules/kernel/orchestrator/... -count=1
 make verify-runtime-positive-convergence-file
 make verify-boundary-contract

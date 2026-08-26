@@ -130,6 +130,9 @@ func validateRuntimeAggregateSM2Authority(a RuntimeAggregate) error {
 			return fmt.Errorf("runtime aggregate semantic generation %d scope mismatch", idx)
 		}
 	}
+	if err := validateRuntimeSemanticBindingPurposeInvariant(a); err != nil {
+		return err
+	}
 	if a.SemanticPlanning.DefinitionSeed.Hash != a.Facts.DefinitionSeed.Hash {
 		return fmt.Errorf("runtime aggregate semantic planning seed does not match facts")
 	}
@@ -150,6 +153,98 @@ func validateRuntimeAggregateSM2Authority(a RuntimeAggregate) error {
 	}
 	if a.Decision.AuthoritySnapshot.WorkspaceID != a.Facts.WorkspaceID || a.Decision.AuthoritySnapshot.RunID != a.Facts.RunID {
 		return fmt.Errorf("runtime aggregate decision scope mismatch")
+	}
+	return nil
+}
+
+// validateRuntimeSemanticBindingPurposeInvariant prevents an intermediate
+// owner-fact acquisition proof from becoming terminal Definition credit.  A
+// current binding may refer to the active manifest retained while the next
+// proof batch is prepared, or to a sealed manifest moved into immutable
+// generation history after a resource refresh.  Those manifests are read here
+// only to recover the exact per-CWI purpose; they never authorize a candidate,
+// operation, dispatch, or transition.
+func validateRuntimeSemanticBindingPurposeInvariant(a RuntimeAggregate) error {
+	type bindingPurposeKey struct {
+		manifestHash string
+		coverageID   string
+	}
+
+	purposes := make(map[bindingPurposeKey]runtimecontract.RuntimeSemanticEvidenceObligationPurpose)
+	addManifest := func(manifest runtimecontract.RuntimeSemanticPlanManifest) error {
+		manifest = manifest.Normalized()
+		for _, obligation := range manifest.ProofObligations {
+			resolved, err := runtimecontract.ResolveRuntimeSemanticEvidenceObligation(obligation)
+			if err != nil {
+				return fmt.Errorf("runtime aggregate semantic binding purpose: %w", err)
+			}
+			key := bindingPurposeKey{manifestHash: manifest.Hash, coverageID: string(obligation.CoverageWorkItemID)}
+			if existing, found := purposes[key]; found && existing != resolved.Purpose {
+				return fmt.Errorf("runtime aggregate semantic binding purpose conflicts for manifest %q coverage %q", manifest.Hash, obligation.CoverageWorkItemID)
+			}
+			purposes[key] = resolved.Purpose
+		}
+		return nil
+	}
+
+	// The active manifest remains immutable lineage after one batch settles and
+	// the ledger returns to an order-accepted phase for the next batch.
+	if a.SemanticPlanning.Manifest != nil {
+		if err := addManifest(*a.SemanticPlanning.Manifest); err != nil {
+			return err
+		}
+	}
+	for _, generation := range a.SemanticPlanning.History {
+		// A generation can return to order-accepted while preparing its next
+		// batch, then be retired after an eligibility or catalog change.  Its
+		// exact manifest still explains an already-sealed binding; only that
+		// binding-purpose classification is consumed here.
+		if generation.Snapshot.Manifest == nil {
+			continue
+		}
+		if err := addManifest(*generation.Snapshot.Manifest); err != nil {
+			return err
+		}
+	}
+	// Activation/reducer-only aggregates have no semantic generation yet and
+	// therefore no purpose graph to cross-check.  Once any manifest lineage is
+	// present, every current binding must resolve exactly within that graph.
+	if len(purposes) == 0 {
+		return nil
+	}
+
+	focuses := make(map[string]runtimecontract.CoverageFocus, 1+len(a.Facts.RemainingFocuses)+len(a.Facts.CompletedFocuses))
+	for _, focus := range append(append([]runtimecontract.CoverageFocus{a.Facts.Focus}, a.Facts.RemainingFocuses...), a.Facts.CompletedFocuses...) {
+		focus = focus.Normalized()
+		focuses[focus.ID] = focus
+	}
+	for _, item := range a.Facts.Coverage {
+		if item.CurrentBindingRef == nil {
+			continue
+		}
+		ref := item.CurrentBindingRef.Normalized()
+		key := bindingPurposeKey{manifestHash: ref.SemanticManifestHash, coverageID: string(item.ID)}
+		purpose, found := purposes[key]
+		if !found {
+			activeManifestHash := ""
+			if a.SemanticPlanning.Manifest != nil {
+				activeManifestHash = a.SemanticPlanning.Manifest.Hash
+			}
+			return fmt.Errorf("runtime aggregate CWI %q current binding manifest %q has no exact semantic purpose lineage (active=%q history=%d)", item.ID, ref.SemanticManifestHash, activeManifestHash, len(a.SemanticPlanning.History))
+		}
+		if purpose != runtimecontract.RuntimeSemanticEvidenceObligationOwnerFactAcquisition {
+			continue
+		}
+		focus, found := focuses[ref.FocusID]
+		if !found {
+			return fmt.Errorf("runtime aggregate acquisition CWI %q has no bound focus", item.ID)
+		}
+		if !focus.RequireAssessment {
+			return fmt.Errorf("runtime aggregate acquisition CWI %q requires assessment before terminal credit", item.ID)
+		}
+		if item.State == runtimecontract.RuntimeCoverageItemStateSatisfied || item.CWIConvergenceState == runtimecontract.RuntimeCWIConvergenceStateSettled {
+			return fmt.Errorf("runtime aggregate acquisition CWI %q cannot retain terminal coverage credit", item.ID)
+		}
 	}
 	return nil
 }

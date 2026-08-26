@@ -13,6 +13,7 @@ import (
 
 func TestValidateGoTestValidationPreflightMissingTests(t *testing.T) {
 	dir := t.TempDir()
+	writeGoModuleForValidationTest(t, dir)
 	if err := os.WriteFile(filepath.Join(dir, "main.go"), []byte("package main\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -24,6 +25,7 @@ func TestValidateGoTestValidationPreflightMissingTests(t *testing.T) {
 
 func TestValidateGoTestValidationPreflightWithTests(t *testing.T) {
 	dir := t.TempDir()
+	writeGoModuleForValidationTest(t, dir)
 	if err := os.WriteFile(filepath.Join(dir, "main.go"), []byte("package main\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -35,8 +37,20 @@ func TestValidateGoTestValidationPreflightWithTests(t *testing.T) {
 	}
 }
 
+func TestValidateGoTestValidationPreflightRejectsTestsWithoutGoModule(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "main_test.go"), []byte("package main\nimport \"testing\"\nfunc TestHealthz(t *testing.T) {}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	err := validateGoTestValidationPreflight(dir, []string{"test", "-v", "./..."})
+	if err == nil || !strings.Contains(err.Error(), "root go.mod not found") {
+		t.Fatalf("expected missing go.mod preflight error, got %v", err)
+	}
+}
+
 func TestRuntimeAdapterSemanticValidationPreflightRejectsMissingTests(t *testing.T) {
 	workspace := t.TempDir()
+	writeGoModuleForValidationTest(t, workspace)
 	recipe := runtimemodel.RuntimeValidationRecipe{ID: "go-tests", Command: "go", Args: []string{"test", "./..."}}
 	err := NewRuntimeAdapter().PreflightRuntimeSemanticValidationRecipe(workspace, recipe, nil)
 	if err == nil || !strings.Contains(err.Error(), "no *_test.go files found") {
@@ -46,6 +60,7 @@ func TestRuntimeAdapterSemanticValidationPreflightRejectsMissingTests(t *testing
 
 func TestRuntimeAdapterSemanticValidationPreflightRejectsMissingSealedTarget(t *testing.T) {
 	workspace := t.TempDir()
+	writeGoModuleForValidationTest(t, workspace)
 	if err := os.WriteFile(filepath.Join(workspace, "existing_test.go"), []byte("package main\nimport \"testing\"\nfunc TestExisting(t *testing.T) {}\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -79,6 +94,7 @@ func TestValidateGoTestPackageTargetsRejectsMissingNestedRecursivePattern(t *tes
 
 func TestExecuteOperationValidationPreflightRejectsMissingDeclaredTarget(t *testing.T) {
 	dir := t.TempDir()
+	writeGoModuleForValidationTest(t, dir)
 	if err := os.WriteFile(filepath.Join(dir, "main_test.go"), []byte("package main\nimport \"testing\"\nfunc TestHealthz(t *testing.T) {}\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -96,6 +112,7 @@ func TestExecuteOperationValidationPreflightRejectsMissingDeclaredTarget(t *test
 
 func TestExecuteOperationValidationPreflightReturnsStructuredFailure(t *testing.T) {
 	dir := t.TempDir()
+	writeGoModuleForValidationTest(t, dir)
 	if err := os.WriteFile(filepath.Join(dir, "main.go"), []byte("package main\nfunc main() {}\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -122,6 +139,13 @@ func TestExecuteOperationValidationPreflightReturnsStructuredFailure(t *testing.
 		if !strings.Contains(strings.ToLower(err.Error()), "invalid") {
 			t.Fatalf("unexpected error class: %v", err)
 		}
+	}
+}
+
+func writeGoModuleForValidationTest(t *testing.T, directory string) {
+	t.Helper()
+	if err := os.WriteFile(filepath.Join(directory, "go.mod"), []byte("module example.com/workorch-shell-validation\n\ngo 1.26\n"), 0o644); err != nil {
+		t.Fatal(err)
 	}
 }
 

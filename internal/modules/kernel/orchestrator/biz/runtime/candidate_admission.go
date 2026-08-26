@@ -187,14 +187,14 @@ func ActiveRejectedOperationShapes(aggregate RuntimeAggregate) []workorchruntime
 	latestAcceptedRevision := latestAcceptedEvidenceRevision(facts, aggregate.CoverageProofLineage)
 	ret := make([]workorchruntimecontract.RuntimeRejectedOperationShape, 0, len(facts.Evidence.Rejected))
 	for _, evidence := range facts.Evidence.Rejected {
-		if !workorchruntimecontract.EvidenceAppliesToCurrentFocus(facts, evidence) {
+		dispatch, ok := dispatchByID[strings.TrimSpace(evidence.DispatchID)]
+		if !ok {
+			continue
+		}
+		if !rejectedEvidenceAppliesToCurrentFocus(facts, evidence, dispatch) {
 			continue
 		}
 		if latestAcceptedRevision != "" && !evidenceRevisionAfter(evidence.Revision, latestAcceptedRevision) {
-			continue
-		}
-		dispatch, ok := dispatchByID[strings.TrimSpace(evidence.DispatchID)]
-		if !ok {
 			continue
 		}
 		for _, operation := range candidateRuntimeOperations(dispatch.Candidate) {
@@ -213,6 +213,21 @@ func ActiveRejectedOperationShapes(aggregate RuntimeAggregate) []workorchruntime
 		}
 	}
 	return workorchruntimecontract.NormalizeRuntimeRejectedOperationShapes(ret)
+}
+
+// rejectedEvidenceAppliesToCurrentFocus keeps rejected receipt lineage local
+// to the SM-3 transaction that actually executed it. Rejected owner receipts
+// deliberately receive no CWI credit, so their EvidenceFact can have an empty
+// CoverageWorkItemIDs set even while later focuses remain queued. In that
+// shape the completed dispatch's immutable FocusID is the attribution fact;
+// evidence that already carries CWI lineage continues to use the shared pure
+// predicate. This is candidate-context attribution only and grants no proof.
+func rejectedEvidenceAppliesToCurrentFocus(facts workorchruntimecontract.RuntimeFacts, evidence workorchruntimecontract.EvidenceFact, dispatch SealedDispatch) bool {
+	if len(evidence.CoverageWorkItemIDs) != 0 {
+		return workorchruntimecontract.EvidenceAppliesToCurrentFocus(facts, evidence)
+	}
+	return strings.TrimSpace(dispatch.Transaction.FocusID) != "" &&
+		strings.TrimSpace(dispatch.Transaction.FocusID) == strings.TrimSpace(facts.Focus.ID)
 }
 
 func rejectCandidateReplay(aggregate RuntimeAggregate, candidate workorchruntimecontract.RuntimeCandidate) CandidateAdmissionResult {

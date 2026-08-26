@@ -32,16 +32,19 @@ raw diagnostic 留在 Shell-private adapter；receipt 只携带有界、脱敏�
 - 对 profile 明确声明的 managed-validation recipe，SM-2 只通过 typed request 转交 File owner 已持久化的
   `WorkspaceManifest + prerequisite observation`。Shell owner 在自己的 adapter 内判断 recipe 对该 manifest 是否当前
   可执行，并为每个声明 recipe 发布 `ready | prerequisite_required | unavailable` factual surface。只有确认后且可作为
-  直接证明的 recipe 才以 `ready + direct` 进入 provider-selectable catalog；例如 `go test` 在没有非排除
-  `*_test.go` 时发布带稳定 prerequisite ref 的 `prerequisite_required`，而不是丢失该 Owner fact。静态 executable/policy
-  不可用时发布 `unavailable`。Shell 不读取 File service/repository，也不取得 workspace tree 所有权。
+  直接证明的 recipe 才以 `ready + direct` 进入 provider-selectable catalog；内置 `go test -v ./...` 在 isolated
+  workspace 中必须同时观察到根 `go.mod` 与至少一个非排除 `*_test.go`。任一缺失都发布带稳定 prerequisite ref 的
+  `prerequisite_required`，而不是声称 recipe ready 或丢失该 Owner fact。静态 executable/policy 不可用时发布
+  `unavailable`。Shell 不读取 File service/repository，也不取得 workspace tree 所有权。
 - 当一个 `prerequisite_required` validation surface 能由单个 prospective target 的合取条件充分满足时，Shell 才同时发布
   `shell/selectable-validation-surface/prospective-workspace-manifest/v1` 及 typed immutable
   `RuntimeProspectiveTargetSatisfactionConstraint`。该事实绑定 owner、surface、activation-sealed recipe/schema 与 Shell catalog
   revision，只包含 `AllOf` predicates，不包含 exact target、action、retry 或状态；不允许多个 surface 形成隐式
-  recipe `one_of`。当前 Go recipe 发布 `target_ref_path_suffix=_test.go`、排除 `.git`/`.workorch-data`/`node_modules`/`vendor`
-  segment，并在 `./pkg/...` 尚无 package input 时增加 `target_ref_path_prefix=pkg/`。若一个 prospective target 无法同时满足
-  多个不相容 package root，Shell 保留普通 prerequisite surface，但不发布 prospective contract。
+  recipe `one_of`。当前 Go recipe 只有在根 `go.mod` 已存在时，才可为缺少 test input 发布
+  `target_ref_path_suffix=_test.go`、排除 `.git`/`.workorch-data`/`node_modules`/`vendor` segment，并在 `./pkg/...` 尚无
+  package input 时增加 `target_ref_path_prefix=pkg/`。现有 predicate vocabulary 不能精确表达根 `go.mod`，因此缺少
+  `go.mod` 时保持不可执行 prerequisite；若 `go.mod` 与 test input 同时缺失，或多个不相容 package root 不能由一个
+  target 同时补齐，也不发布 prospective contract。
 - Orchestrator 必须在 provider proposal 和 File probe 前使用 shared pure matcher 验证上述 typed `AllOf`，随后才可通过 Shell
   owner 的 typed prospective-satisfaction query 转交 activation-sealed recipes 和 File owner 已计算的 immutable resulting
   target refs。Shell 要求匹配 contract 的唯一 prerequisite surface 存在同 ID recipe，且 command、ordered args、timeout
