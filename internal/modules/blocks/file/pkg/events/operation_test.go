@@ -2,6 +2,7 @@ package events
 
 import (
 	"slices"
+	"strings"
 	"testing"
 
 	"github.com/muidea/workorch/internal/pkg/eventcontract"
@@ -116,10 +117,27 @@ func TestSealedRuntimeOperationBindsPayloadAndExecutionScope(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	context := runtimecontract.RuntimeOperationExecutionContext{OperationID: "write-1", TargetRefs: []string{"README.md"}}
+	context := runtimecontract.RuntimeOperationExecutionContext{
+		WorkspaceID: "ws", RunID: "run", DispatchID: "dispatch",
+		Execution: testExecutionEnvelope(operation, runtimecontract.RuntimeOperationExecutionEnvelope{
+			ExecutionKey: "exec/ws/run/dispatch/write-1", Fence: 1,
+			ExpectedEffectScope: runtimecontract.ResolveExpectedEffectScope(operation, nil),
+		}, nil),
+		OperationID: "write-1", TargetRefs: []string{"README.md"},
+	}
 	validated, err := sealed.ValidateForExecution(context, runtimecontract.StepKindFileWrite)
 	if err != nil || validated.ID != operation.ID || validated.TargetRefs[0] != "README.md" {
 		t.Fatalf("validated operation=%+v err=%v", validated, err)
+	}
+	idempotencyDrift := context
+	idempotencyDrift.Execution.IdempotencyClass = runtimecontract.RuntimeOperationIdempotencySafeToReplay
+	if _, err := sealed.ValidateForExecution(idempotencyDrift, runtimecontract.StepKindFileWrite); err == nil || !strings.Contains(err.Error(), "idempotency class mismatch") {
+		t.Fatalf("sealed File operation accepted idempotency drift: %v", err)
+	}
+	authorityDrift := context
+	authorityDrift.Execution.AuthorityHash = "forged"
+	if _, err := sealed.ValidateForExecution(authorityDrift, runtimecontract.StepKindFileWrite); err == nil || !strings.Contains(err.Error(), "authority hash mismatch") {
+		t.Fatalf("sealed File operation accepted authority hash drift: %v", err)
 	}
 
 	mutated := sealed

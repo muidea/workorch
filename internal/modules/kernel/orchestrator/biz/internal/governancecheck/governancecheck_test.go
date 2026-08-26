@@ -125,12 +125,15 @@ func TestEvaluateOperationSuspensionRequiresExactDurableReceipt(t *testing.T) {
 	}
 	receipt = receipt.Normalized()
 	execution := runtimecontract.RuntimeOperationExecutionRecord{
-		OperationID: "write-1", ExecutionKey: "execution-1", Fence: 3,
+		OperationID: "write-1", OperationHash: runtimecontract.StableRuntimeOperationHash(runtimecontract.RuntimeOperation{ID: "write-1", Kind: runtimecontract.StepKindFileWrite}), ExecutionKey: "execution-1", Fence: 3,
 		ExpectedEffectScope: runtimecontract.RuntimeEffectWorkspaceDurable,
+		IdempotencyClass:    runtimecontract.RuntimeOperationIdempotencyAtMostOnce,
 		State:               runtimecontract.OperationExecutionOwnerCommitted,
+		ClaimedAt:           runtimecontract.RuntimeOperationClaimMarkerInitial,
 		OwnerReceiptRef:     "runtime-receipt/execution-1",
 		OwnerReceiptHash:    runtimecontract.StableRuntimeOperationReceiptHash(receipt),
 	}
+	execution.AuthorityHash = runtimecontract.StableRuntimeOperationExecutionAuthorityHash(execution)
 	finding, err := EvaluateOperationSuspension(" dispatch-1 ", execution, receipt, receipt, requirement)
 	if err != nil {
 		t.Fatal(err)
@@ -142,6 +145,19 @@ func TestEvaluateOperationSuspensionRequiresExactDurableReceipt(t *testing.T) {
 	}
 	if !BindingMatchesExecution(finding.Binding, execution) || !BindingMatchesReceipt(finding.Binding, receipt) {
 		t.Fatal("suspension binding did not match its exact execution and receipt")
+	}
+	if finding.Binding.IdempotencyClass != runtimecontract.RuntimeOperationIdempotencyAtMostOnce {
+		t.Fatalf("suspension binding lost sealed idempotency: %+v", finding.Binding)
+	}
+	driftedScope := finding.Binding
+	driftedScope.ExpectedEffectScope = runtimecontract.RuntimeEffectRemoteDurable
+	if BindingMatchesExecution(driftedScope, execution) {
+		t.Fatal("suspension binding matched a different sealed effect scope")
+	}
+	driftedIdempotency := finding.Binding
+	driftedIdempotency.IdempotencyClass = runtimecontract.RuntimeOperationIdempotencySafeToReplay
+	if BindingMatchesExecution(driftedIdempotency, execution) {
+		t.Fatal("suspension binding matched a different sealed idempotency class")
 	}
 	bound := finding.Binding
 	bound.ApprovalID = "approval-1"
@@ -157,6 +173,7 @@ func TestEvaluateOperationSuspensionRequiresExactDurableReceipt(t *testing.T) {
 	}
 	resolution := runtimecontract.RuntimeGovernanceResolutionRecord{
 		ResolutionID: "resolution-1", ApprovalID: "approval-1", DispatchID: "governance-dispatch-1", AuthoritySnapshotID: "authority-1",
+		DependencyKind: "approval", SubjectRef: "target.txt",
 	}
 	if !ResolutionRecordMatchesRequest(resolution, request) || !ResolutionRecordMatchesDispatch(resolution, DispatchFacts{
 		DispatchID: "governance-dispatch-1", AuthoritySnapshotID: "authority-1", CandidateGovernance: true,
@@ -177,14 +194,22 @@ func TestEvaluateOperationSuspensionRequiresExactDurableReceipt(t *testing.T) {
 
 func TestGrantForExecutionReturnsDetachedExactResumeGrant(t *testing.T) {
 	grant := runtimecontract.RuntimeOperationGovernanceGrant{
-		ResolutionID: "resolution-1", TicketID: "ticket-1", ExecutionKey: "execution-1",
-		GovernanceFence: 2, ResumeFence: 3, DependencyKind: "approval", SubjectRef: "target.txt",
+		ResolutionID: "resolution-1", ResolutionHash: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", TicketID: "ticket-1", ExecutionKey: "execution-1",
+		GovernanceFence: 2, ResumeFence: 3, ResumeDispatchID: "resume-dispatch-1", DependencyKind: "approval", SubjectRef: "target.txt",
 		GovernanceReceiptHash: "receipt-hash", EvidenceRefs: []string{"decision://resolution-1"},
 	}
+	execution := runtimecontract.RuntimeOperationExecutionRecord{
+		OperationID: "write-1", OperationHash: runtimecontract.StableRuntimeOperationHash(runtimecontract.RuntimeOperation{ID: "write-1", Kind: runtimecontract.StepKindFileWrite}), ExecutionKey: "execution-1", Fence: 3,
+		ExpectedEffectScope: runtimecontract.RuntimeEffectWorkspaceDurable,
+		IdempotencyClass:    runtimecontract.RuntimeOperationIdempotencyAtMostOnce,
+	}
+	execution.AuthorityHash = runtimecontract.StableRuntimeOperationExecutionAuthorityHash(execution)
 	bindings := []runtimecontract.RuntimeOperationGovernanceBinding{{
-		ExecutionKey: "execution-1", State: runtimecontract.RuntimeOperationGovernanceBindingGranted, Grant: &grant,
+		OperationID: "write-1", ExecutionKey: "execution-1", ExpectedEffectScope: runtimecontract.RuntimeEffectWorkspaceDurable,
+		IdempotencyClass:       runtimecontract.RuntimeOperationIdempotencyAtMostOnce,
+		ExecutionAuthorityHash: execution.AuthorityHash,
+		State:                  runtimecontract.RuntimeOperationGovernanceBindingGranted, Grant: &grant,
 	}}
-	execution := runtimecontract.RuntimeOperationExecutionRecord{ExecutionKey: "execution-1", Fence: 3}
 	found := GrantForExecution(bindings, execution)
 	if found == nil || !SameGrant(*found, grant) {
 		t.Fatalf("grant = %+v", found)
@@ -192,6 +217,21 @@ func TestGrantForExecutionReturnsDetachedExactResumeGrant(t *testing.T) {
 	found.EvidenceRefs[0] = "mutated"
 	if bindings[0].Grant.EvidenceRefs[0] != "decision://resolution-1" {
 		t.Fatal("returned grant aliases persisted binding")
+	}
+	driftedOperation := execution
+	driftedOperation.OperationID = "write-2"
+	if GrantForExecution(bindings, driftedOperation) != nil {
+		t.Fatal("grant matched a different operation")
+	}
+	driftedScope := execution
+	driftedScope.ExpectedEffectScope = runtimecontract.RuntimeEffectRemoteDurable
+	if GrantForExecution(bindings, driftedScope) != nil {
+		t.Fatal("grant matched a different effect scope")
+	}
+	driftedIdempotency := execution
+	driftedIdempotency.IdempotencyClass = runtimecontract.RuntimeOperationIdempotencySafeToReplay
+	if GrantForExecution(bindings, driftedIdempotency) != nil {
+		t.Fatal("grant matched a different idempotency class")
 	}
 	execution.Fence = 4
 	if GrantForExecution(bindings, execution) != nil {

@@ -45,6 +45,9 @@ func SealRuntimeOperation(operation runtimecontract.RuntimeOperation) (SealedRun
 // ValidateForExecution returns a detached operation only when the payload and
 // owner-neutral execution context exactly match the Orchestrator seal.
 func (s SealedRuntimeOperation) ValidateForExecution(context runtimecontract.RuntimeOperationExecutionContext) (runtimecontract.RuntimeOperation, error) {
+	if err := runtimecontract.ValidateRuntimeOperationExecutionContextScope(context); err != nil {
+		return runtimecontract.RuntimeOperation{}, err
+	}
 	operation := s.Operation.Normalized()
 	if runtimecontract.RuntimeModuleForOperationKind(operation.Kind) != runtimecontract.RuntimeModuleGit {
 		return runtimecontract.RuntimeOperation{}, fmt.Errorf("sealed runtime operation is not owned by Git")
@@ -57,6 +60,9 @@ func (s SealedRuntimeOperation) ValidateForExecution(context runtimecontract.Run
 	}
 	if !sameExecutionStrings(operation.TargetRefs, context.TargetRefs) || !sameExecutionCoverage(operation.CoverageWorkItemIDs, context.CoverageWorkItemIDs) {
 		return runtimecontract.RuntimeOperation{}, fmt.Errorf("sealed Git operation scope mismatch")
+	}
+	if err := runtimecontract.ValidateRuntimeOperationExecutionAuthority(operation, context.Execution, nil); err != nil {
+		return runtimecontract.RuntimeOperation{}, fmt.Errorf("sealed Git execution authority: %w", err)
 	}
 	payload, err := json.Marshal(operation)
 	if err != nil {

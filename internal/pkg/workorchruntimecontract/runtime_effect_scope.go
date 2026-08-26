@@ -51,6 +51,22 @@ func NormalizeRuntimeEffectScope(scope RuntimeEffectScope) RuntimeEffectScope {
 	return scope
 }
 
+// validSealedRuntimeEffectScope reports whether an execution authority carries
+// one explicit, recognized and resolved effect. RuntimeEffectUnknown is useful
+// while acquiring owner policy, but it cannot survive into a sealed execution
+// record or an owner command envelope.
+func validSealedRuntimeEffectScope(scope RuntimeEffectScope) bool {
+	raw := string(scope)
+	normalized := NormalizeRuntimeEffectScope(scope)
+	return raw != "" && raw == string(normalized) && normalized != RuntimeEffectUnknown
+}
+
+func validSealedRuntimeOperationIdempotencyClass(value RuntimeOperationIdempotencyClass) bool {
+	raw := string(value)
+	normalized := NormalizeRuntimeOperationIdempotencyClass(value)
+	return raw != "" && raw == string(normalized) && normalized != RuntimeOperationIdempotencyUnknown
+}
+
 // RuntimeEffectIsDurable reports whether the scope is a durable state-changing effect.
 func RuntimeEffectIsDurable(scope RuntimeEffectScope) bool {
 	switch NormalizeRuntimeEffectScope(scope) {

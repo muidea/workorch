@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"reflect"
 	"strings"
 
 	"github.com/muidea/workorch/internal/pkg/common"
@@ -34,6 +35,11 @@ type RuntimeGovernanceResolution struct {
 }
 
 func (r RuntimeGovernanceResolution) Normalized() RuntimeGovernanceResolution {
+	r.ResolutionID = common.ResolutionID(strings.TrimSpace(string(r.ResolutionID)))
+	r.TicketID = common.TicketID(strings.TrimSpace(string(r.TicketID)))
+	r.ApprovalID = common.ApprovalID(strings.TrimSpace(string(r.ApprovalID)))
+	r.WorkspaceID = common.WorkspaceID(strings.TrimSpace(string(r.WorkspaceID)))
+	r.RunID = common.RunID(strings.TrimSpace(string(r.RunID)))
 	r.AuthoritySnapshotID = strings.TrimSpace(r.AuthoritySnapshotID)
 	r.DispatchID = strings.TrimSpace(r.DispatchID)
 	r.DependencyKind = strings.TrimSpace(r.DependencyKind)
@@ -65,13 +71,115 @@ func (r RuntimeGovernanceResolution) EventID() string {
 	return "governance-resolution:" + string(r.ResolutionID) + ":" + r.AuthoritySnapshotID
 }
 
+// StableRuntimeGovernanceResolutionHash seals the complete normalized owner
+// resolution. The hash is persisted independently by the resolution ledger,
+// the operation grant and the accepted governance evidence so recovery can
+// prove that all three projections came from exactly the same owner result.
+func StableRuntimeGovernanceResolutionHash(resolution RuntimeGovernanceResolution) string {
+	resolution = resolution.Normalized()
+	h := sha256.New()
+	writeHashString(h, "runtime-governance-resolution/v1")
+	writeHashString(h, string(resolution.ResolutionID))
+	writeHashString(h, string(resolution.TicketID))
+	writeHashString(h, string(resolution.ApprovalID))
+	writeHashString(h, string(resolution.WorkspaceID))
+	writeHashString(h, string(resolution.RunID))
+	writeHashString(h, resolution.AuthoritySnapshotID)
+	writeHashString(h, resolution.DispatchID)
+	writeHashString(h, resolution.DependencyKind)
+	writeHashString(h, resolution.SubjectRef)
+	writeHashString(h, string(resolution.Outcome))
+	writeHashString(h, resolution.Summary)
+	writeHashStrings(h, resolution.EvidenceRefs)
+	return hex.EncodeToString(h.Sum(nil))
+}
+
 type RuntimeGovernanceResolutionRecord struct {
 	ResolutionID        common.ResolutionID
 	TicketID            common.TicketID
 	ApprovalID          common.ApprovalID
+	WorkspaceID         common.WorkspaceID
+	RunID               common.RunID
 	AuthoritySnapshotID string
 	DispatchID          string
+	DependencyKind      string
+	SubjectRef          string
 	Outcome             RuntimeGovernanceResolutionOutcome
+	Summary             string
+	EvidenceRefs        []string
+	ResolutionHash      string
+}
+
+func RuntimeGovernanceResolutionRecordFromResolution(resolution RuntimeGovernanceResolution) RuntimeGovernanceResolutionRecord {
+	resolution = resolution.Normalized()
+	return RuntimeGovernanceResolutionRecord{
+		ResolutionID:        resolution.ResolutionID,
+		TicketID:            resolution.TicketID,
+		ApprovalID:          resolution.ApprovalID,
+		WorkspaceID:         resolution.WorkspaceID,
+		RunID:               resolution.RunID,
+		AuthoritySnapshotID: resolution.AuthoritySnapshotID,
+		DispatchID:          resolution.DispatchID,
+		DependencyKind:      resolution.DependencyKind,
+		SubjectRef:          resolution.SubjectRef,
+		Outcome:             resolution.Outcome,
+		Summary:             resolution.Summary,
+		EvidenceRefs:        append([]string(nil), resolution.EvidenceRefs...),
+		ResolutionHash:      StableRuntimeGovernanceResolutionHash(resolution),
+	}
+}
+
+func (r RuntimeGovernanceResolutionRecord) Resolution() RuntimeGovernanceResolution {
+	return RuntimeGovernanceResolution{
+		ResolutionID:        r.ResolutionID,
+		TicketID:            r.TicketID,
+		ApprovalID:          r.ApprovalID,
+		WorkspaceID:         r.WorkspaceID,
+		RunID:               r.RunID,
+		AuthoritySnapshotID: r.AuthoritySnapshotID,
+		DispatchID:          r.DispatchID,
+		DependencyKind:      r.DependencyKind,
+		SubjectRef:          r.SubjectRef,
+		Outcome:             r.Outcome,
+		Summary:             r.Summary,
+		EvidenceRefs:        append([]string(nil), r.EvidenceRefs...),
+	}.Normalized()
+}
+
+func (r RuntimeGovernanceResolutionRecord) Normalized() RuntimeGovernanceResolutionRecord {
+	resolutionHash := strings.TrimSpace(r.ResolutionHash)
+	ret := RuntimeGovernanceResolutionRecordFromResolution(r.Resolution())
+	ret.ResolutionHash = resolutionHash
+	return ret
+}
+
+// Clone deliberately preserves the raw persisted representation. Validation,
+// not cloning, rejects malformed or non-normalized recovery state.
+func (r RuntimeGovernanceResolutionRecord) Clone() RuntimeGovernanceResolutionRecord {
+	ret := r
+	ret.EvidenceRefs = append([]string(nil), r.EvidenceRefs...)
+	return ret
+}
+
+func CloneRuntimeGovernanceResolutionRecords(values []RuntimeGovernanceResolutionRecord) []RuntimeGovernanceResolutionRecord {
+	if len(values) == 0 {
+		return nil
+	}
+	ret := make([]RuntimeGovernanceResolutionRecord, len(values))
+	for idx := range values {
+		ret[idx] = values[idx].Clone()
+	}
+	return ret
+}
+
+func SameRuntimeGovernanceResolutionRecord(left, right RuntimeGovernanceResolutionRecord) bool {
+	left = left.Normalized()
+	right = right.Normalized()
+	return left.ResolutionID == right.ResolutionID && left.TicketID == right.TicketID && left.ApprovalID == right.ApprovalID &&
+		left.WorkspaceID == right.WorkspaceID && left.RunID == right.RunID && left.AuthoritySnapshotID == right.AuthoritySnapshotID &&
+		left.DispatchID == right.DispatchID && left.DependencyKind == right.DependencyKind && left.SubjectRef == right.SubjectRef &&
+		left.Outcome == right.Outcome && left.Summary == right.Summary && left.ResolutionHash == right.ResolutionHash &&
+		sameStrings(left.EvidenceRefs, right.EvidenceRefs)
 }
 
 type RuntimeGovernanceRequestRecord struct {
@@ -84,6 +192,23 @@ type RuntimeGovernanceRequestRecord struct {
 	RequestedAction     string
 	RiskLevel           string
 	AuthorizationHash   string
+}
+
+func (r RuntimeGovernanceRequestRecord) Normalized() RuntimeGovernanceRequestRecord {
+	r.TicketID = common.TicketID(strings.TrimSpace(string(r.TicketID)))
+	r.ApprovalID = common.ApprovalID(strings.TrimSpace(string(r.ApprovalID)))
+	r.AuthoritySnapshotID = strings.TrimSpace(r.AuthoritySnapshotID)
+	r.DispatchID = strings.TrimSpace(r.DispatchID)
+	r.DependencyKind = strings.TrimSpace(r.DependencyKind)
+	r.SubjectRef = strings.TrimSpace(r.SubjectRef)
+	r.RequestedAction = strings.TrimSpace(r.RequestedAction)
+	r.RiskLevel = strings.TrimSpace(r.RiskLevel)
+	r.AuthorizationHash = strings.TrimSpace(r.AuthorizationHash)
+	return r
+}
+
+func (r RuntimeGovernanceRequestRecord) Clone() RuntimeGovernanceRequestRecord {
+	return r.Normalized()
 }
 
 // RuntimeOperationGovernanceBinding preserves the identity of an operation that
@@ -100,32 +225,38 @@ const (
 )
 
 type RuntimeOperationGovernanceBinding struct {
-	TicketID              common.TicketID
-	ApprovalID            common.ApprovalID
-	GovernanceDispatchID  string
-	GovernanceSnapshotID  string
-	OperationDispatchID   string
-	OperationID           string
-	ExecutionKey          string
-	Fence                 uint64
-	ExpectedEffectScope   RuntimeEffectScope
-	DependencyKind        string
-	SubjectRef            string
-	RequestedAction       string
-	RiskLevel             string
-	AuthorizationHash     string
-	GovernanceReceiptHash string
-	State                 RuntimeOperationGovernanceBindingState
-	Grant                 *RuntimeOperationGovernanceGrant
+	TicketID               common.TicketID
+	ApprovalID             common.ApprovalID
+	GovernanceDispatchID   string
+	GovernanceSnapshotID   string
+	OperationDispatchID    string
+	OperationID            string
+	ExecutionKey           string
+	Fence                  uint64
+	ExpectedEffectScope    RuntimeEffectScope
+	IdempotencyClass       RuntimeOperationIdempotencyClass
+	ExecutionAuthorityHash string
+	DependencyKind         string
+	SubjectRef             string
+	RequestedAction        string
+	RiskLevel              string
+	AuthorizationHash      string
+	GovernanceReceiptHash  string
+	State                  RuntimeOperationGovernanceBindingState
+	Grant                  *RuntimeOperationGovernanceGrant
 }
 
 type RuntimeOperationGovernanceGrant struct {
-	ResolutionID          common.ResolutionID
-	TicketID              common.TicketID
-	ApprovalID            common.ApprovalID
-	ExecutionKey          string
-	GovernanceFence       uint64
-	ResumeFence           uint64
+	ResolutionID    common.ResolutionID
+	ResolutionHash  string
+	TicketID        common.TicketID
+	ApprovalID      common.ApprovalID
+	ExecutionKey    string
+	GovernanceFence uint64
+	ResumeFence     uint64
+	// ResumeDispatchID binds this grant to the one SM-3 continuation
+	// transaction created in the same Orchestrator CAS.
+	ResumeDispatchID      string
 	DependencyKind        string
 	SubjectRef            string
 	RequestedAction       string
@@ -136,7 +267,9 @@ type RuntimeOperationGovernanceGrant struct {
 }
 
 func (g RuntimeOperationGovernanceGrant) Normalized() RuntimeOperationGovernanceGrant {
+	g.ResolutionHash = strings.TrimSpace(g.ResolutionHash)
 	g.ExecutionKey = strings.TrimSpace(g.ExecutionKey)
+	g.ResumeDispatchID = strings.TrimSpace(g.ResumeDispatchID)
 	g.DependencyKind = strings.TrimSpace(g.DependencyKind)
 	g.SubjectRef = strings.TrimSpace(g.SubjectRef)
 	g.RequestedAction = strings.TrimSpace(g.RequestedAction)
@@ -148,10 +281,20 @@ func (g RuntimeOperationGovernanceGrant) Normalized() RuntimeOperationGovernance
 }
 
 func (g RuntimeOperationGovernanceGrant) Validate() error {
+	raw := g
 	g = g.Normalized()
-	if g.ResolutionID == "" || !validRuntimeGovernanceOwnerIdentity(g.TicketID, g.ApprovalID) || g.ExecutionKey == "" || g.GovernanceFence == 0 || g.ResumeFence == 0 ||
+	if !reflect.DeepEqual(raw, g) {
+		return fmt.Errorf("runtime operation governance grant requires canonical fields")
+	}
+	if g.ResolutionID == "" || !validRuntimeGovernanceOwnerIdentity(g.TicketID, g.ApprovalID) || g.ExecutionKey == "" || g.GovernanceFence == 0 || g.ResumeFence == 0 || g.ResumeDispatchID == "" ||
 		g.DependencyKind == "" || g.SubjectRef == "" || g.GovernanceReceiptHash == "" {
 		return fmt.Errorf("runtime operation governance grant requires identity, execution, dependency and receipt hash")
+	}
+	if len(g.ResolutionHash) != sha256.Size*2 {
+		return fmt.Errorf("runtime operation governance grant requires sha256 resolution hash")
+	}
+	if _, err := hex.DecodeString(g.ResolutionHash); err != nil {
+		return fmt.Errorf("runtime operation governance grant resolution hash: %w", err)
 	}
 	if g.ResumeFence != g.GovernanceFence+1 {
 		return fmt.Errorf("runtime operation governance grant resume fence must follow governance fence")
@@ -165,8 +308,8 @@ func (g RuntimeOperationGovernanceGrant) Validate() error {
 func SameRuntimeOperationGovernanceGrant(left RuntimeOperationGovernanceGrant, right RuntimeOperationGovernanceGrant) bool {
 	left = left.Normalized()
 	right = right.Normalized()
-	if left.ResolutionID != right.ResolutionID || left.TicketID != right.TicketID || left.ApprovalID != right.ApprovalID || left.ExecutionKey != right.ExecutionKey ||
-		left.GovernanceFence != right.GovernanceFence || left.ResumeFence != right.ResumeFence || left.DependencyKind != right.DependencyKind ||
+	if left.ResolutionID != right.ResolutionID || left.ResolutionHash != right.ResolutionHash || left.TicketID != right.TicketID || left.ApprovalID != right.ApprovalID || left.ExecutionKey != right.ExecutionKey ||
+		left.GovernanceFence != right.GovernanceFence || left.ResumeFence != right.ResumeFence || left.ResumeDispatchID != right.ResumeDispatchID || left.DependencyKind != right.DependencyKind ||
 		left.SubjectRef != right.SubjectRef || left.RequestedAction != right.RequestedAction || left.RiskLevel != right.RiskLevel ||
 		left.AuthorizationHash != right.AuthorizationHash || left.GovernanceReceiptHash != right.GovernanceReceiptHash || len(left.EvidenceRefs) != len(right.EvidenceRefs) {
 		return false
@@ -186,6 +329,8 @@ func (b RuntimeOperationGovernanceBinding) Normalized() RuntimeOperationGovernan
 	b.OperationID = strings.TrimSpace(b.OperationID)
 	b.ExecutionKey = strings.TrimSpace(b.ExecutionKey)
 	b.ExpectedEffectScope = NormalizeRuntimeEffectScope(b.ExpectedEffectScope)
+	b.IdempotencyClass = NormalizeRuntimeOperationIdempotencyClass(b.IdempotencyClass)
+	b.ExecutionAuthorityHash = strings.TrimSpace(b.ExecutionAuthorityHash)
 	b.DependencyKind = strings.TrimSpace(b.DependencyKind)
 	b.SubjectRef = strings.TrimSpace(b.SubjectRef)
 	b.RequestedAction = strings.TrimSpace(b.RequestedAction)
@@ -201,10 +346,10 @@ func (b RuntimeOperationGovernanceBinding) Normalized() RuntimeOperationGovernan
 }
 
 func (b RuntimeOperationGovernanceBinding) Clone() RuntimeOperationGovernanceBinding {
-	ret := b.Normalized()
-	if ret.Grant != nil {
-		grant := ret.Grant.Normalized()
-		grant.EvidenceRefs = append([]string(nil), grant.EvidenceRefs...)
+	ret := b
+	if b.Grant != nil {
+		grant := *b.Grant
+		grant.EvidenceRefs = append([]string(nil), b.Grant.EvidenceRefs...)
 		ret.Grant = &grant
 	}
 	return ret
@@ -215,8 +360,12 @@ func ValidateRuntimeOperationGovernanceBindings(values []RuntimeOperationGoverna
 	seenOwnerIdentity := map[string]struct{}{}
 	for _, raw := range values {
 		value := raw.Normalized()
+		if !reflect.DeepEqual(raw, value) {
+			return fmt.Errorf("operation governance binding requires canonical fields")
+		}
 		if value.OperationDispatchID == "" || value.OperationID == "" || value.ExecutionKey == "" || value.Fence == 0 ||
-			value.ExpectedEffectScope == RuntimeEffectUnknown || value.DependencyKind == "" || value.SubjectRef == "" || value.GovernanceReceiptHash == "" {
+			!validSealedRuntimeEffectScope(raw.ExpectedEffectScope) || !validSealedRuntimeOperationIdempotencyClass(raw.IdempotencyClass) ||
+			value.ExecutionAuthorityHash == "" || value.DependencyKind == "" || value.SubjectRef == "" || value.GovernanceReceiptHash == "" {
 			return fmt.Errorf("operation governance binding requires source operation execution identity and dependency")
 		}
 		if value.DependencyKind == string(GovernanceApproval) && (value.RequestedAction == "" || value.AuthorizationHash == "") {
@@ -269,17 +418,459 @@ func ValidateRuntimeOperationGovernanceBindings(values []RuntimeOperationGoverna
 	return nil
 }
 
+// ValidateRuntimeOperationGovernanceExecutionBindings proves the bidirectional
+// lineage between every granted governance binding and the one execution at its
+// resume fence. Callers pass executions from both active and completed
+// dispatches so a completed continuation remains valid while duplicates and
+// orphan governance markers fail closed.
+func ValidateRuntimeOperationGovernanceExecutionBindings(bindings []RuntimeOperationGovernanceBinding, executions []RuntimeOperationExecutionRecord) error {
+	byIdentity := make(map[string]RuntimeOperationExecutionRecord, len(executions))
+	for _, rawExecution := range executions {
+		execution := rawExecution.Normalized()
+		identity := fmt.Sprintf("%s|%s|%d", execution.OperationID, execution.ExecutionKey, execution.Fence)
+		if previous, found := byIdentity[identity]; found {
+			if !sameRuntimeOperationExecutionRecord(previous, execution) {
+				return fmt.Errorf("operation governance execution identity %q has inconsistent dispatch projections", identity)
+			}
+			continue
+		}
+		byIdentity[identity] = execution
+	}
+	for _, rawBinding := range bindings {
+		binding := rawBinding.Normalized()
+		if binding.State != RuntimeOperationGovernanceBindingGranted || binding.Grant == nil {
+			continue
+		}
+		grant := binding.Grant.Normalized()
+		identity := fmt.Sprintf("%s|%s|%d", binding.OperationID, binding.ExecutionKey, grant.ResumeFence)
+		execution, found := byIdentity[identity]
+		if !found {
+			return fmt.Errorf("operation governance grant has no resume execution")
+		}
+		if execution.ExpectedEffectScope != binding.ExpectedEffectScope || execution.IdempotencyClass != binding.IdempotencyClass ||
+			execution.AuthorityHash != binding.ExecutionAuthorityHash || !RuntimeOperationClaimMarkerIsGovernance(execution.ClaimedAt) {
+			return fmt.Errorf("operation governance resume execution does not match granted authority")
+		}
+	}
+	for _, execution := range byIdentity {
+		if !RuntimeOperationClaimMarkerIsGovernance(execution.ClaimedAt) {
+			continue
+		}
+		matched := 0
+		for _, rawBinding := range bindings {
+			binding := rawBinding.Normalized()
+			if binding.State != RuntimeOperationGovernanceBindingGranted || binding.Grant == nil {
+				continue
+			}
+			grant := binding.Grant.Normalized()
+			if binding.OperationID == execution.OperationID && binding.ExecutionKey == execution.ExecutionKey && grant.ResumeFence == execution.Fence &&
+				binding.ExpectedEffectScope == execution.ExpectedEffectScope && binding.IdempotencyClass == execution.IdempotencyClass &&
+				binding.ExecutionAuthorityHash == execution.AuthorityHash {
+				matched++
+			}
+		}
+		if matched != 1 {
+			return fmt.Errorf("operation governance claim marker requires exactly one granted binding, got %d", matched)
+		}
+	}
+	return nil
+}
+
+// ValidateRuntimeDispatchExecutionKeyLineage proves that every execution key
+// was minted by its current dispatch or was carried forward by one exact,
+// persisted governance-continuation lineage. Unlike the flattened governance
+// validator above, this check deliberately retains dispatch identity and
+// history order.
+type runtimeDispatchHistoryEntry struct {
+	dispatch  RuntimeDispatchRecord
+	completed bool
+}
+
+func ValidateRuntimeDispatchExecutionKeyLineage(
+	workspaceID common.WorkspaceID,
+	runID common.RunID,
+	active *RuntimeDispatchRecord,
+	completed []RuntimeDispatchRecord,
+	bindings []RuntimeOperationGovernanceBinding,
+) error {
+	history := make([]runtimeDispatchHistoryEntry, 0, len(completed)+1)
+	positions := make(map[string]int, len(completed)+1)
+	for idx, dispatch := range completed {
+		history = append(history, runtimeDispatchHistoryEntry{dispatch: dispatch, completed: true})
+		positions[dispatch.ID] = idx
+	}
+	if active != nil {
+		positions[active.ID] = len(history)
+		history = append(history, runtimeDispatchHistoryEntry{dispatch: *active})
+	}
+	matchedResumeBindings := make(map[int]int, len(bindings))
+	for dispatchIndex, entry := range history {
+		dispatch := entry.dispatch
+		resumeBindingIndexes := make([]int, 0, 1)
+		for bindingIndex, rawBinding := range bindings {
+			if runtimeGovernanceBindingResumesDispatch(rawBinding, dispatch, history, positions, dispatchIndex) {
+				resumeBindingIndexes = append(resumeBindingIndexes, bindingIndex)
+				matchedResumeBindings[bindingIndex]++
+			}
+		}
+		if len(resumeBindingIndexes) > 1 {
+			return fmt.Errorf("runtime dispatch %q matches multiple governance continuation grants", dispatch.ID)
+		}
+		for _, rawExecution := range dispatch.OperationExecutions {
+			execution := rawExecution.Normalized()
+			originID, err := RuntimeOperationExecutionKeyOrigin(workspaceID, runID, execution.ExecutionKey, execution.OperationID)
+			if err != nil {
+				return fmt.Errorf("runtime dispatch %q operation %q execution key: %w", dispatch.ID, execution.OperationID, err)
+			}
+			if originID == dispatch.ID {
+				if len(resumeBindingIndexes) == 1 {
+					binding := bindings[resumeBindingIndexes[0]].Normalized()
+					if execution.OperationID == binding.OperationID || !runtimeGovernancePendingSiblingRekeyMatches(binding, dispatch, execution, history, positions) {
+						return fmt.Errorf("runtime dispatch %q operation %q governance pending-sibling authority mismatch", dispatch.ID, execution.OperationID)
+					}
+				}
+				continue
+			}
+			originIndex, found := positions[originID]
+			if !found || originIndex >= dispatchIndex || !history[originIndex].completed {
+				return fmt.Errorf("runtime dispatch %q operation %q has no earlier canonical execution-key origin", dispatch.ID, execution.OperationID)
+			}
+			origin := history[originIndex].dispatch
+			originExecution, found := runtimeDispatchExecutionForOperation(origin, execution.OperationID)
+			if !found || originExecution.ExecutionKey != StableRuntimeOperationExecutionKey(workspaceID, runID, origin.ID, execution.OperationID) ||
+				originExecution.OperationHash != execution.OperationHash || originExecution.AuthorityHash != execution.AuthorityHash ||
+				origin.CandidateHash != dispatch.CandidateHash || stableRuntimeValidationRecipeSnapshotHash(origin.ValidationRecipes) != stableRuntimeValidationRecipeSnapshotHash(dispatch.ValidationRecipes) {
+				return fmt.Errorf("runtime dispatch %q operation %q execution-key origin authority mismatch", dispatch.ID, execution.OperationID)
+			}
+			if len(resumeBindingIndexes) != 1 {
+				return fmt.Errorf("runtime dispatch %q operation %q non-current execution key has no exact governance continuation dispatch", dispatch.ID, execution.OperationID)
+			}
+			binding := bindings[resumeBindingIndexes[0]].Normalized()
+			grant := binding.Grant.Normalized()
+			if binding.OperationID == execution.OperationID && binding.ExecutionKey == execution.ExecutionKey &&
+				grant.ResumeFence == execution.Fence && execution.ExpectedEffectScope == binding.ExpectedEffectScope &&
+				execution.IdempotencyClass == binding.IdempotencyClass && execution.AuthorityHash == binding.ExecutionAuthorityHash &&
+				RuntimeOperationClaimMarkerIsGovernance(execution.ClaimedAt) {
+				continue
+			}
+			// Once the destination itself is proven to be this exact continuation,
+			// an already-completed sibling may be projected unchanged.
+			if runtimeGovernanceCompletedSiblingCloneMatches(binding, dispatch, execution, history, positions) {
+				continue
+			}
+			return fmt.Errorf("runtime dispatch %q operation %q is neither the governance target nor an exact completed sibling clone", dispatch.ID, execution.OperationID)
+		}
+	}
+	for bindingIndex, rawBinding := range bindings {
+		binding := rawBinding.Normalized()
+		if binding.State == RuntimeOperationGovernanceBindingGranted && binding.Grant != nil && matchedResumeBindings[bindingIndex] != 1 {
+			return fmt.Errorf("operation governance grant requires exactly one resume dispatch, got %d", matchedResumeBindings[bindingIndex])
+		}
+	}
+	return nil
+}
+
+func runtimeGovernancePendingSiblingRekeyMatches(binding RuntimeOperationGovernanceBinding, dispatch RuntimeDispatchRecord, execution RuntimeOperationExecutionRecord, history []runtimeDispatchHistoryEntry, positions map[string]int) bool {
+	sourceIndex, found := positions[binding.OperationDispatchID]
+	if !found || sourceIndex < 0 || sourceIndex >= len(history) || !history[sourceIndex].completed || history[sourceIndex].dispatch.State != RuntimeDispatchStateCommitted {
+		return false
+	}
+	sourceExecution, found := runtimeDispatchExecutionForOperation(history[sourceIndex].dispatch, execution.OperationID)
+	if !found || sourceExecution.State != OperationExecutionSealed {
+		return false
+	}
+	expected := sourceExecution.Clone()
+	expected.ExecutionKey = StableRuntimeOperationExecutionKey(dispatch.WorkspaceID, dispatch.RunID, dispatch.ID, execution.OperationID)
+	expected.AuthorityHash = StableRuntimeOperationExecutionAuthorityHash(expected)
+	return sameRuntimeOperationExecutionImmutableAuthority(expected, execution)
+}
+
+func runtimeGovernanceBindingResumesDispatch(binding RuntimeOperationGovernanceBinding, dispatch RuntimeDispatchRecord, history []runtimeDispatchHistoryEntry, positions map[string]int, dispatchIndex int) bool {
+	binding = binding.Normalized()
+	if binding.State != RuntimeOperationGovernanceBindingGranted || binding.Grant == nil {
+		return false
+	}
+	grant := binding.Grant.Normalized()
+	if grant.ResumeDispatchID != dispatch.ID {
+		return false
+	}
+	sourceIndex, found := positions[binding.OperationDispatchID]
+	if !found || sourceIndex >= dispatchIndex || !history[sourceIndex].completed || history[sourceIndex].dispatch.State != RuntimeDispatchStateCommitted {
+		return false
+	}
+	governanceIndex, found := positions[binding.GovernanceDispatchID]
+	if !found || governanceIndex <= sourceIndex || governanceIndex >= dispatchIndex || !history[governanceIndex].completed {
+		return false
+	}
+	governanceDispatch := history[governanceIndex].dispatch
+	if governanceDispatch.ID != binding.GovernanceDispatchID || governanceDispatch.State != RuntimeDispatchStateCommitted ||
+		governanceDispatch.Candidate.Governance == nil || governanceDispatch.Transaction.AuthoritySnapshotID != binding.GovernanceSnapshotID {
+		return false
+	}
+	source := history[sourceIndex].dispatch
+	if source.CandidateHash != dispatch.CandidateHash || stableRuntimeValidationRecipeSnapshotHash(source.ValidationRecipes) != stableRuntimeValidationRecipeSnapshotHash(dispatch.ValidationRecipes) {
+		return false
+	}
+	sourceExecution, found := runtimeDispatchExecutionForOperation(source, binding.OperationID)
+	if !found || sourceExecution.ExecutionKey != binding.ExecutionKey || sourceExecution.Fence != binding.Fence ||
+		sourceExecution.ExpectedEffectScope != binding.ExpectedEffectScope || sourceExecution.IdempotencyClass != binding.IdempotencyClass ||
+		sourceExecution.AuthorityHash != binding.ExecutionAuthorityHash || sourceExecution.OwnerReceiptHash != binding.GovernanceReceiptHash ||
+		sourceExecution.State != OperationExecutionOwnerCommitted {
+		return false
+	}
+	resumeExecution, found := runtimeDispatchExecutionForOperation(dispatch, binding.OperationID)
+	return found && grant.ExecutionKey == resumeExecution.ExecutionKey && grant.ResumeFence == resumeExecution.Fence &&
+		resumeExecution.ExpectedEffectScope == binding.ExpectedEffectScope && resumeExecution.IdempotencyClass == binding.IdempotencyClass &&
+		resumeExecution.AuthorityHash == binding.ExecutionAuthorityHash && RuntimeOperationClaimMarkerIsGovernance(resumeExecution.ClaimedAt)
+}
+
+func runtimeDispatchExecutionForOperation(dispatch RuntimeDispatchRecord, operationID string) (RuntimeOperationExecutionRecord, bool) {
+	operationID = strings.TrimSpace(operationID)
+	for _, execution := range dispatch.OperationExecutions {
+		value := execution.Normalized()
+		if value.OperationID == operationID {
+			return value, true
+		}
+	}
+	return RuntimeOperationExecutionRecord{}, false
+}
+
+func runtimeGovernanceCompletedSiblingCloneMatches(binding RuntimeOperationGovernanceBinding, current RuntimeDispatchRecord, execution RuntimeOperationExecutionRecord, history []runtimeDispatchHistoryEntry, positions map[string]int) bool {
+	sourceIndex, found := positions[binding.OperationDispatchID]
+	if !found || sourceIndex < 0 || sourceIndex >= len(history) || !history[sourceIndex].completed || history[sourceIndex].dispatch.State != RuntimeDispatchStateCommitted {
+		return false
+	}
+	source := history[sourceIndex].dispatch
+	if source.CandidateHash != current.CandidateHash ||
+		stableRuntimeValidationRecipeSnapshotHash(source.ValidationRecipes) != stableRuntimeValidationRecipeSnapshotHash(current.ValidationRecipes) ||
+		!containsString(source.CompletedOperationIDs, execution.OperationID) {
+		return false
+	}
+	previous, found := runtimeDispatchExecutionForOperation(source, execution.OperationID)
+	return found && sameRuntimeOperationExecutionRecord(previous, execution)
+}
+
+// ValidateRuntimeOperationGovernanceGrantLineage binds physical execution
+// authority to the exact durable continue resolution and accepted governance
+// evidence that created it. A persisted grant cannot invent a resolution ID or
+// substitute its evidence references.
+func ValidateRuntimeOperationGovernanceGrantLineage(bindings []RuntimeOperationGovernanceBinding, resolutions []RuntimeGovernanceResolutionRecord, accepted, rejected []EvidenceFact) error {
+	for _, rawBinding := range bindings {
+		binding := rawBinding.Normalized()
+		if binding.State != RuntimeOperationGovernanceBindingGranted || binding.Grant == nil {
+			continue
+		}
+		grant := binding.Grant.Normalized()
+		resolutionMatches := 0
+		var matchedResolution RuntimeGovernanceResolutionRecord
+		for _, rawResolution := range resolutions {
+			resolution := rawResolution.Normalized()
+			if resolution.ResolutionID == grant.ResolutionID && resolution.TicketID == binding.TicketID && resolution.ApprovalID == binding.ApprovalID &&
+				resolution.AuthoritySnapshotID == binding.GovernanceSnapshotID && resolution.DispatchID == binding.GovernanceDispatchID &&
+				resolution.DependencyKind == binding.DependencyKind && resolution.SubjectRef == binding.SubjectRef &&
+				resolution.Outcome == RuntimeGovernanceResolutionOutcomeContinue && resolution.ResolutionHash == grant.ResolutionHash &&
+				sameStrings(resolution.EvidenceRefs, grant.EvidenceRefs) {
+				resolutionMatches++
+				matchedResolution = resolution
+			}
+		}
+		if resolutionMatches != 1 {
+			return fmt.Errorf("operation governance grant requires exactly one continue resolution, got %d", resolutionMatches)
+		}
+		wantEvidenceID := common.EvidenceRecordID("governance-resolution:" + string(grant.ResolutionID) + ":" + binding.GovernanceSnapshotID)
+		wantSource := "governance-resolution/" + string(grant.ResolutionID)
+		evidenceMatches := 0
+		for _, rawFact := range accepted {
+			fact, ok := normalizedRuntimeGovernanceEvidenceFact(rawFact)
+			if ok && fact.ID == wantEvidenceID && fact.SourceRef == wantSource &&
+				runtimeGovernanceEvidenceMatchesResolution(fact, matchedResolution) {
+				evidenceMatches++
+			}
+		}
+		if evidenceMatches != 1 {
+			return fmt.Errorf("operation governance grant requires exactly one accepted resolution evidence, got %d", evidenceMatches)
+		}
+	}
+	for _, rawResolution := range resolutions {
+		resolution := rawResolution.Normalized()
+		if resolution.Outcome == RuntimeGovernanceResolutionOutcomeFail {
+			rejectedMatches := 0
+			for _, rawFact := range rejected {
+				fact, ok := normalizedRuntimeGovernanceEvidenceFact(rawFact)
+				if ok && runtimeGovernanceRejectedEvidenceMatchesResolution(fact, resolution) {
+					rejectedMatches++
+				}
+			}
+			acceptedIdentityMatches := 0
+			for _, rawFact := range accepted {
+				fact, ok := normalizedRuntimeGovernanceEvidenceFact(rawFact)
+				if ok && runtimeGovernanceEvidenceHasResolutionIdentity(fact, resolution) {
+					acceptedIdentityMatches++
+				}
+			}
+			if rejectedMatches != 1 || acceptedIdentityMatches != 0 {
+				return fmt.Errorf("runtime governance fail resolution requires exactly one rejected and no accepted resolution evidence")
+			}
+			continue
+		}
+		if resolution.Outcome != RuntimeGovernanceResolutionOutcomeContinue {
+			continue
+		}
+		evidenceMatches := 0
+		for _, rawFact := range accepted {
+			fact, ok := normalizedRuntimeGovernanceEvidenceFact(rawFact)
+			if ok && runtimeGovernanceEvidenceMatchesResolution(fact, resolution) {
+				evidenceMatches++
+			}
+		}
+		if evidenceMatches != 1 {
+			return fmt.Errorf("runtime governance continue resolution requires exactly one accepted resolution evidence, got %d", evidenceMatches)
+		}
+		for _, rawFact := range rejected {
+			fact, ok := normalizedRuntimeGovernanceEvidenceFact(rawFact)
+			if ok && runtimeGovernanceEvidenceHasResolutionIdentity(fact, resolution) {
+				return fmt.Errorf("runtime governance continue resolution cannot have rejected resolution evidence")
+			}
+		}
+		operationBindings := 0
+		grantedMatches := 0
+		for _, rawBinding := range bindings {
+			binding := rawBinding.Normalized()
+			if binding.TicketID != resolution.TicketID || binding.ApprovalID != resolution.ApprovalID ||
+				binding.GovernanceSnapshotID != strings.TrimSpace(resolution.AuthoritySnapshotID) || binding.GovernanceDispatchID != strings.TrimSpace(resolution.DispatchID) {
+				continue
+			}
+			operationBindings++
+			if binding.State == RuntimeOperationGovernanceBindingGranted && binding.Grant != nil {
+				grant := binding.Grant.Normalized()
+				if grant.ResolutionID == resolution.ResolutionID && grant.ResolutionHash == resolution.ResolutionHash &&
+					grant.DependencyKind == resolution.DependencyKind && grant.SubjectRef == resolution.SubjectRef &&
+					sameStrings(grant.EvidenceRefs, resolution.EvidenceRefs) {
+					grantedMatches++
+				}
+			}
+		}
+		if operationBindings != 0 && (operationBindings != 1 || grantedMatches != 1) {
+			return fmt.Errorf("operation governance continue resolution requires exactly one granted binding")
+		}
+	}
+	for _, rawFact := range accepted {
+		fact, ok := normalizedRuntimeGovernanceEvidenceFact(rawFact)
+		if !ok {
+			if strings.TrimSpace(rawFact.Kind) == EvidenceKindGovernance {
+				return fmt.Errorf("accepted governance evidence is malformed")
+			}
+			continue
+		}
+		if fact.Kind != EvidenceKindGovernance {
+			continue
+		}
+		resolutionMatches := 0
+		for _, rawResolution := range resolutions {
+			resolution := rawResolution.Normalized()
+			if resolution.Outcome == RuntimeGovernanceResolutionOutcomeContinue && runtimeGovernanceEvidenceMatchesResolution(fact, resolution) {
+				resolutionMatches++
+			}
+		}
+		if resolutionMatches != 1 {
+			return fmt.Errorf("accepted governance evidence requires exactly one continue resolution, got %d", resolutionMatches)
+		}
+	}
+	for _, rawFact := range rejected {
+		fact, ok := normalizedRuntimeGovernanceEvidenceFact(rawFact)
+		if !ok {
+			if strings.TrimSpace(rawFact.Kind) == EvidenceKindGovernance {
+				return fmt.Errorf("rejected governance evidence is malformed")
+			}
+			continue
+		}
+		if fact.Kind != EvidenceKindGovernance {
+			continue
+		}
+		resolutionMatches := 0
+		for _, rawResolution := range resolutions {
+			resolution := rawResolution.Normalized()
+			if resolution.Outcome == RuntimeGovernanceResolutionOutcomeFail && runtimeGovernanceRejectedEvidenceMatchesResolution(fact, resolution) {
+				resolutionMatches++
+			}
+		}
+		if resolutionMatches != 1 {
+			return fmt.Errorf("rejected governance evidence requires exactly one fail resolution, got %d", resolutionMatches)
+		}
+	}
+	return nil
+}
+
+func normalizedRuntimeGovernanceEvidenceFact(raw EvidenceFact) (EvidenceFact, bool) {
+	values := normalizeEvidenceFacts([]EvidenceFact{raw})
+	if len(values) != 1 {
+		return EvidenceFact{}, false
+	}
+	return values[0], true
+}
+
+func runtimeGovernanceEvidenceMatchesResolution(fact EvidenceFact, resolution RuntimeGovernanceResolutionRecord) bool {
+	resolution = resolution.Normalized()
+	wantEvidenceID := common.EvidenceRecordID("governance-resolution:" + string(resolution.ResolutionID) + ":" + resolution.AuthoritySnapshotID)
+	wantSource := "governance-resolution/" + string(resolution.ResolutionID)
+	return fact.ID == wantEvidenceID && fact.Kind == EvidenceKindGovernance && fact.SubjectRef == resolution.SubjectRef && fact.SourceRef == wantSource &&
+		fact.AuthoritySnapshotID == resolution.AuthoritySnapshotID && fact.DispatchID == resolution.DispatchID && fact.FailureClass == "" &&
+		fact.FailureCode == "" && fact.FailureSignature == "" && fact.FailureMessage == "" && fact.Summary == resolution.Summary &&
+		fact.ContentHash == resolution.ResolutionHash && sameStrings(fact.EvidenceRefs, resolution.EvidenceRefs)
+}
+
+func runtimeGovernanceRejectedEvidenceMatchesResolution(fact EvidenceFact, resolution RuntimeGovernanceResolutionRecord) bool {
+	resolution = resolution.Normalized()
+	return runtimeGovernanceEvidenceHasResolutionIdentity(fact, resolution) && fact.FailureClass == FailureClassGovernanceRejected &&
+		fact.FailureCode == "" && fact.FailureSignature == "" && fact.FailureMessage == resolution.Summary &&
+		fact.Summary == resolution.Summary && fact.ContentHash == resolution.ResolutionHash && sameStrings(fact.EvidenceRefs, resolution.EvidenceRefs)
+}
+
+func runtimeGovernanceEvidenceHasResolutionIdentity(fact EvidenceFact, resolution RuntimeGovernanceResolutionRecord) bool {
+	resolution = resolution.Normalized()
+	wantEvidenceID := common.EvidenceRecordID("governance-resolution:" + string(resolution.ResolutionID) + ":" + resolution.AuthoritySnapshotID)
+	wantSource := "governance-resolution/" + string(resolution.ResolutionID)
+	return fact.ID == wantEvidenceID && fact.Kind == EvidenceKindGovernance && fact.SubjectRef == resolution.SubjectRef && fact.SourceRef == wantSource &&
+		fact.AuthoritySnapshotID == resolution.AuthoritySnapshotID && fact.DispatchID == resolution.DispatchID
+}
+
+func sameRuntimeOperationExecutionRecord(left, right RuntimeOperationExecutionRecord) bool {
+	left = left.Normalized()
+	right = right.Normalized()
+	if !sameRuntimeOperationExecutionImmutableAuthority(left, right) || left.State != right.State || left.Fence != right.Fence || left.OwnerReceiptRef != right.OwnerReceiptRef ||
+		left.OwnerReceiptHash != right.OwnerReceiptHash || left.ClaimedAt != right.ClaimedAt {
+		return false
+	}
+	return true
+}
+
+func sameRuntimeOperationExecutionImmutableAuthority(left, right RuntimeOperationExecutionRecord) bool {
+	left = left.Normalized()
+	right = right.Normalized()
+	if left.OperationID != right.OperationID || left.OperationHash != right.OperationHash || left.ExecutionKey != right.ExecutionKey || left.ExpectedEffectScope != right.ExpectedEffectScope ||
+		left.IdempotencyClass != right.IdempotencyClass || left.AuthorityHash != right.AuthorityHash ||
+		left.AdmissibilitySnapshotID != right.AdmissibilitySnapshotID || left.AcquisitionBinding != right.AcquisitionBinding {
+		return false
+	}
+	if left.ReplayProof == nil || right.ReplayProof == nil {
+		return left.ReplayProof == nil && right.ReplayProof == nil
+	}
+	leftProof := left.ReplayProof.Normalized()
+	rightProof := right.ReplayProof.Normalized()
+	return leftProof.OwnerModuleID == rightProof.OwnerModuleID && leftProof.OperationID == rightProof.OperationID &&
+		leftProof.BeforeHash == rightProof.BeforeHash && leftProof.AfterHash == rightProof.AfterHash &&
+		leftProof.AdmissibilitySnapshotID == rightProof.AdmissibilitySnapshotID && leftProof.AcquisitionBinding == rightProof.AcquisitionBinding &&
+		sameRuntimeStringSet(leftProof.TargetRefs, rightProof.TargetRefs)
+}
+
 func ValidateRuntimeGovernanceRequestRecords(values []RuntimeGovernanceRequestRecord) error {
 	seenOwnerIdentities := map[string]struct{}{}
 	seenDispatches := map[string]struct{}{}
-	for _, value := range values {
-		value.AuthoritySnapshotID = strings.TrimSpace(value.AuthoritySnapshotID)
-		value.DispatchID = strings.TrimSpace(value.DispatchID)
-		value.DependencyKind = strings.TrimSpace(value.DependencyKind)
-		value.SubjectRef = strings.TrimSpace(value.SubjectRef)
-		value.RequestedAction = strings.TrimSpace(value.RequestedAction)
-		value.RiskLevel = strings.TrimSpace(value.RiskLevel)
-		value.AuthorizationHash = strings.TrimSpace(value.AuthorizationHash)
+	for _, raw := range values {
+		value := raw.Normalized()
+		if !reflect.DeepEqual(raw, value) {
+			return fmt.Errorf("runtime governance request record requires canonical fields")
+		}
 		if !validRuntimeGovernanceOwnerIdentity(value.TicketID, value.ApprovalID) || value.AuthoritySnapshotID == "" || value.DispatchID == "" || value.DependencyKind == "" {
 			return fmt.Errorf("runtime governance request record requires owner identity, snapshot, dispatch and dependency")
 		}
@@ -300,15 +891,59 @@ func ValidateRuntimeGovernanceRequestRecords(values []RuntimeGovernanceRequestRe
 	return nil
 }
 
+// ValidateRuntimeGovernanceRequestDispatchLineage binds every persisted owner
+// request to the complete external dependency of one exact sealed governance
+// dispatch. Dispatch identity alone cannot authorize a drifted action, risk or
+// authorization context after restart.
+func ValidateRuntimeGovernanceRequestDispatchLineage(values []RuntimeGovernanceRequestRecord, active *RuntimeDispatchRecord, completed []RuntimeDispatchRecord) error {
+	if err := ValidateRuntimeGovernanceRequestRecords(values); err != nil {
+		return err
+	}
+	dispatches := make([]RuntimeDispatchRecord, 0, len(completed)+1)
+	dispatches = append(dispatches, completed...)
+	if active != nil {
+		dispatches = append(dispatches, *active)
+	}
+	for _, request := range values {
+		request = request.Normalized()
+		matched := 0
+		for _, dispatch := range dispatches {
+			if dispatch.ID != request.DispatchID || dispatch.Transaction.AuthoritySnapshotID != request.AuthoritySnapshotID {
+				continue
+			}
+			if dispatch.Candidate.Governance == nil {
+				return fmt.Errorf("runtime governance request dispatch %q has no governance candidate", request.DispatchID)
+			}
+			dependency := dispatch.Candidate.Governance.ExternalDependency.Normalized()
+			if dependency.Kind != request.DependencyKind || dependency.SubjectRef != request.SubjectRef ||
+				dependency.RequestedAction != request.RequestedAction || dependency.RiskLevel != request.RiskLevel ||
+				StableRuntimeAuthorizationContextHash(dependency.AuthorizationContext) != request.AuthorizationHash {
+				return fmt.Errorf("runtime governance request does not match sealed external dependency for dispatch %q", request.DispatchID)
+			}
+			matched++
+		}
+		if matched != 1 {
+			return fmt.Errorf("runtime governance request requires exactly one sealed dispatch, got %d", matched)
+		}
+	}
+	return nil
+}
+
 func ValidateRuntimeGovernanceResolutionRecords(values []RuntimeGovernanceResolutionRecord) error {
 	seen := map[string]struct{}{}
-	for _, value := range values {
-		key := string(value.ResolutionID) + "|" + strings.TrimSpace(value.AuthoritySnapshotID)
-		if value.ResolutionID == "" || !validRuntimeGovernanceOwnerIdentity(value.TicketID, value.ApprovalID) || strings.TrimSpace(value.AuthoritySnapshotID) == "" || strings.TrimSpace(value.DispatchID) == "" {
-			return fmt.Errorf("runtime governance resolution record requires identity, snapshot and dispatch")
+	for _, raw := range values {
+		value := raw.Normalized()
+		if !reflect.DeepEqual(raw, value) {
+			return fmt.Errorf("runtime governance resolution record requires canonical fields")
 		}
-		if value.Outcome != RuntimeGovernanceResolutionOutcomeContinue && value.Outcome != RuntimeGovernanceResolutionOutcomeFail {
-			return fmt.Errorf("runtime governance resolution record %s has invalid outcome %q", key, value.Outcome)
+		resolution := value.Resolution()
+		key := string(value.ResolutionID) + "|" + value.AuthoritySnapshotID
+		if err := resolution.Validate(); err != nil {
+			return fmt.Errorf("runtime governance resolution record %s: %w", key, err)
+		}
+		wantHash := StableRuntimeGovernanceResolutionHash(resolution)
+		if value.ResolutionHash == "" || value.ResolutionHash != wantHash {
+			return fmt.Errorf("runtime governance resolution record %s has invalid resolution hash", key)
 		}
 		if _, ok := seen[key]; ok {
 			return fmt.Errorf("runtime governance resolution record %s is duplicated", key)

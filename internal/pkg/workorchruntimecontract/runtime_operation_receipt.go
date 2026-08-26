@@ -22,6 +22,26 @@ const (
 	OperationExecutionOutcomeUnknown    RuntimeOperationExecutionState = "outcome_unknown"
 )
 
+const (
+	RuntimeOperationClaimMarkerInitial                 = "claimed"
+	RuntimeOperationClaimMarkerGovernanceGranted       = "governance_granted"
+	RuntimeOperationClaimMarkerGovernanceEffectStarted = "governance_effect_started"
+)
+
+func ValidRuntimeOperationClaimMarker(value string) bool {
+	switch strings.TrimSpace(value) {
+	case RuntimeOperationClaimMarkerInitial, RuntimeOperationClaimMarkerGovernanceGranted, RuntimeOperationClaimMarkerGovernanceEffectStarted:
+		return true
+	default:
+		return false
+	}
+}
+
+func RuntimeOperationClaimMarkerIsGovernance(value string) bool {
+	value = strings.TrimSpace(value)
+	return value == RuntimeOperationClaimMarkerGovernanceGranted || value == RuntimeOperationClaimMarkerGovernanceEffectStarted
+}
+
 // RuntimeOperationOutcome is the owner-reported terminal outcome for an execution key.
 type RuntimeOperationOutcome string
 
@@ -37,17 +57,24 @@ const (
 // inside a sealed dispatch. ExecutionKey must be stable for workspace/run/dispatch/operation.
 type RuntimeOperationExecutionRecord struct {
 	OperationID         string
+	OperationHash       string
 	ExecutionKey        string
 	ExpectedEffectScope RuntimeEffectScope
+	// IdempotencyClass is the replay policy resolved when SM-3 seals this
+	// execution. Recovery must never re-resolve it from a newer owner catalog.
+	IdempotencyClass RuntimeOperationIdempotencyClass
+	// AuthorityHash independently seals the immutable execution authority. Claim,
+	// receipt and evidence state may advance without changing this hash.
+	AuthorityHash string
 	// AdmissibilitySnapshotID/AcquisitionBinding persist the exact SM-2 owner
 	// catalog used by the side-effect-free feasibility gate. Capability execute
 	// producers may not substitute another current catalog during SM-3.
 	AdmissibilitySnapshotID string
 	AcquisitionBinding      string
 	// ReplayProof is an owner-authored, read-only preflight proof sealed before
-	// the operation is claimed. It is optional: only a claimed durable operation
-	// carrying a valid proof may be recovered after an owner side effect could
-	// have completed while its receipt CAS was lost.
+	// the operation is claimed. It is optional and can authorize recovery when
+	// the sealed idempotency class alone does not; both authorities are immutable
+	// after dispatch seal.
 	ReplayProof      *RuntimeOperationReplayProof
 	State            RuntimeOperationExecutionState
 	Fence            uint64
@@ -200,6 +227,25 @@ func StableRuntimeOperationExecutionKey(workspaceID common.WorkspaceID, runID co
 	return fmt.Sprintf("exec/%s/%s/%s/%s", workspaceID, runID, dispatchID, operationID)
 }
 
+// RuntimeOperationExecutionKeyOrigin validates the canonical execution-key
+// scope and returns the dispatch that originally minted the key. Governance
+// continuation may preserve that origin key, so callers must separately prove
+// whether a non-current origin is authorized by the aggregate history.
+func RuntimeOperationExecutionKeyOrigin(workspaceID common.WorkspaceID, runID common.RunID, executionKey, operationID string) (string, error) {
+	executionKey = strings.TrimSpace(executionKey)
+	operationID = strings.TrimSpace(operationID)
+	prefix := fmt.Sprintf("exec/%s/%s/", strings.TrimSpace(string(workspaceID)), strings.TrimSpace(string(runID)))
+	suffix := "/" + operationID
+	if operationID == "" || !strings.HasPrefix(executionKey, prefix) || !strings.HasSuffix(executionKey, suffix) {
+		return "", fmt.Errorf("operation execution key does not match workspace, run and operation scope")
+	}
+	origin := strings.TrimSuffix(strings.TrimPrefix(executionKey, prefix), suffix)
+	if origin == "" || strings.Contains(origin, "/") || executionKey != StableRuntimeOperationExecutionKey(workspaceID, runID, origin, operationID) {
+		return "", fmt.Errorf("operation execution key has invalid origin dispatch")
+	}
+	return origin, nil
+}
+
 func (s RuntimeOperationExecutionState) Normalized() RuntimeOperationExecutionState {
 	return RuntimeOperationExecutionState(strings.TrimSpace(string(s)))
 }
@@ -231,8 +277,11 @@ func ValidRuntimeOperationOutcome(outcome RuntimeOperationOutcome) bool {
 
 func (r RuntimeOperationExecutionRecord) Normalized() RuntimeOperationExecutionRecord {
 	r.OperationID = strings.TrimSpace(r.OperationID)
+	r.OperationHash = strings.TrimSpace(r.OperationHash)
 	r.ExecutionKey = strings.TrimSpace(r.ExecutionKey)
 	r.ExpectedEffectScope = NormalizeRuntimeEffectScope(r.ExpectedEffectScope)
+	r.IdempotencyClass = NormalizeRuntimeOperationIdempotencyClass(r.IdempotencyClass)
+	r.AuthorityHash = strings.TrimSpace(r.AuthorityHash)
 	r.AdmissibilitySnapshotID = strings.TrimSpace(r.AdmissibilitySnapshotID)
 	r.AcquisitionBinding = strings.TrimSpace(r.AcquisitionBinding)
 	if r.ReplayProof != nil {
@@ -247,15 +296,35 @@ func (r RuntimeOperationExecutionRecord) Normalized() RuntimeOperationExecutionR
 }
 
 func (r RuntimeOperationExecutionRecord) Validate() error {
+	raw := r
+	rawEffectScope := r.ExpectedEffectScope
 	r = r.Normalized()
-	if r.OperationID == "" || r.ExecutionKey == "" {
-		return fmt.Errorf("operation execution record requires operation id and execution key")
+	if raw.OperationID != r.OperationID || raw.OperationHash != r.OperationHash || raw.ExecutionKey != r.ExecutionKey ||
+		raw.State != r.State || raw.AuthorityHash != r.AuthorityHash || raw.AdmissibilitySnapshotID != r.AdmissibilitySnapshotID ||
+		raw.AcquisitionBinding != r.AcquisitionBinding || raw.OwnerReceiptRef != r.OwnerReceiptRef ||
+		raw.OwnerReceiptHash != r.OwnerReceiptHash || raw.ClaimedAt != r.ClaimedAt {
+		return fmt.Errorf("operation execution record requires canonical identity, state and receipt fields")
+	}
+	if raw.ReplayProof != nil && !canonicalRuntimeOperationReplayProof(*raw.ReplayProof) {
+		return fmt.Errorf("operation execution replay proof requires canonical fields")
+	}
+	if r.OperationID == "" || r.OperationHash == "" || r.ExecutionKey == "" {
+		return fmt.Errorf("operation execution record requires operation id, operation hash and execution key")
 	}
 	if !ValidRuntimeOperationExecutionState(r.State) {
 		return fmt.Errorf("operation execution record has invalid state %q", r.State)
 	}
-	if !ValidRuntimeEffectScope(r.ExpectedEffectScope) {
-		return fmt.Errorf("operation execution record has invalid expected effect scope %q", r.ExpectedEffectScope)
+	if !validSealedRuntimeEffectScope(rawEffectScope) {
+		return fmt.Errorf("operation execution record requires an explicit resolved expected effect scope")
+	}
+	if !validSealedRuntimeOperationIdempotencyClass(raw.IdempotencyClass) {
+		return fmt.Errorf("operation execution record requires an explicit valid idempotency class")
+	}
+	if r.AuthorityHash == "" || r.AuthorityHash != StableRuntimeOperationExecutionAuthorityHash(r) {
+		return fmt.Errorf("operation execution record authority hash mismatch")
+	}
+	if r.ClaimedAt != "" && !ValidRuntimeOperationClaimMarker(r.ClaimedAt) {
+		return fmt.Errorf("operation execution record has invalid claim marker %q", r.ClaimedAt)
 	}
 	if r.AdmissibilitySnapshotID == "" && r.AcquisitionBinding != "" {
 		return fmt.Errorf("operation execution record acquisition binding requires owner catalog snapshot")
@@ -267,35 +336,126 @@ func (r RuntimeOperationExecutionRecord) Validate() error {
 		if r.ReplayProof.OperationID != r.OperationID {
 			return fmt.Errorf("operation execution replay proof operation mismatch")
 		}
+		if r.ReplayProof.AdmissibilitySnapshotID != r.AdmissibilitySnapshotID || r.ReplayProof.AcquisitionBinding != r.AcquisitionBinding {
+			return fmt.Errorf("operation execution replay proof owner authority mismatch")
+		}
 	}
 	switch r.State {
 	case OperationExecutionSealed:
-		if r.Fence != 0 || r.OwnerReceiptRef != "" || r.OwnerReceiptHash != "" {
-			return fmt.Errorf("sealed operation execution cannot carry fence or receipt")
+		if r.Fence != 0 || r.OwnerReceiptRef != "" || r.OwnerReceiptHash != "" || r.ClaimedAt != "" {
+			return fmt.Errorf("sealed operation execution cannot carry fence, receipt or claim marker")
 		}
 	case OperationExecutionClaimed:
-		if r.Fence == 0 {
-			return fmt.Errorf("claimed operation execution requires fence")
+		if r.Fence == 0 || r.OwnerReceiptRef != "" || r.OwnerReceiptHash != "" {
+			return fmt.Errorf("claimed operation execution requires fence and cannot carry an owner receipt")
+		}
+		if !ValidRuntimeOperationClaimMarker(r.ClaimedAt) {
+			return fmt.Errorf("claimed operation execution requires a valid claim marker")
 		}
 	case OperationExecutionOwnerCommitted, OperationExecutionEvidenceCommitted:
+		if !ValidRuntimeOperationClaimMarker(r.ClaimedAt) || r.ClaimedAt == RuntimeOperationClaimMarkerGovernanceGranted {
+			return fmt.Errorf("committed operation execution requires a started claim marker")
+		}
 		if r.Fence == 0 || r.OwnerReceiptRef == "" || r.OwnerReceiptHash == "" {
 			return fmt.Errorf("committed operation execution requires fence and owner receipt ref/hash")
 		}
 	case OperationExecutionOutcomeUnknown:
-		if r.Fence == 0 {
-			return fmt.Errorf("outcome_unknown operation execution requires fence")
+		if !ValidRuntimeOperationClaimMarker(r.ClaimedAt) || r.ClaimedAt == RuntimeOperationClaimMarkerGovernanceGranted {
+			return fmt.Errorf("unknown operation execution requires a started claim marker")
+		}
+		if r.Fence == 0 || r.OwnerReceiptRef != "" || r.OwnerReceiptHash != "" {
+			return fmt.Errorf("outcome_unknown operation execution requires fence and cannot carry an owner receipt")
 		}
 	}
 	return nil
 }
 
-func (r RuntimeOperationExecutionRecord) Clone() RuntimeOperationExecutionRecord {
-	r = r.Normalized()
-	if r.ReplayProof != nil {
-		proof := r.ReplayProof.Clone()
-		r.ReplayProof = &proof
+func canonicalRuntimeOperationReplayProof(value RuntimeOperationReplayProof) bool {
+	normalized := value.Normalized()
+	return value.OwnerModuleID == normalized.OwnerModuleID && value.OperationID == normalized.OperationID &&
+		value.BeforeHash == normalized.BeforeHash && value.AfterHash == normalized.AfterHash &&
+		value.AdmissibilitySnapshotID == normalized.AdmissibilitySnapshotID && value.AcquisitionBinding == normalized.AcquisitionBinding &&
+		sameStrings(value.TargetRefs, normalized.TargetRefs)
+}
+
+// StableRuntimeOperationExecutionAuthorityHash seals only the immutable SM-3
+// owner authority. Mutable claim/fence/receipt/evidence fields are deliberately
+// excluded so normal transaction progress cannot rewrite the seal.
+func StableRuntimeOperationExecutionAuthorityHash(value RuntimeOperationExecutionRecord) string {
+	value = value.Normalized()
+	h := sha256.New()
+	writeHashString(h, "runtime-operation-execution-authority/v1")
+	writeHashString(h, value.OperationID)
+	writeHashString(h, value.OperationHash)
+	writeHashString(h, value.ExecutionKey)
+	writeHashString(h, string(value.ExpectedEffectScope))
+	writeHashString(h, string(value.IdempotencyClass))
+	writeHashString(h, value.AdmissibilitySnapshotID)
+	writeHashString(h, value.AcquisitionBinding)
+	if value.ReplayProof == nil {
+		writeHashString(h, "no-replay-proof")
+	} else {
+		proof := value.ReplayProof.Normalized()
+		writeHashString(h, "replay-proof")
+		writeHashString(h, proof.OwnerModuleID)
+		writeHashString(h, proof.OperationID)
+		writeHashStrings(h, proof.TargetRefs)
+		writeHashString(h, proof.BeforeHash)
+		writeHashString(h, proof.AfterHash)
+		writeHashString(h, proof.AdmissibilitySnapshotID)
+		writeHashString(h, proof.AcquisitionBinding)
 	}
-	return r
+	return hex.EncodeToString(h.Sum(nil))
+}
+
+// StableRuntimeOperationExecutionAuthoritiesHash seals the exact immutable
+// execution-authority set of a dispatch. Sorting by operation identity makes
+// the seal independent of storage order while the dispatch validator enforces
+// the candidate-to-ledger one-to-one relationship.
+func StableRuntimeOperationExecutionAuthoritiesHash(values []RuntimeOperationExecutionRecord) string {
+	if len(values) == 0 {
+		return ""
+	}
+	canonical := make([]RuntimeOperationExecutionRecord, len(values))
+	for idx := range values {
+		canonical[idx] = values[idx].Normalized()
+	}
+	sort.Slice(canonical, func(i, j int) bool {
+		if canonical[i].OperationID == canonical[j].OperationID {
+			return canonical[i].ExecutionKey < canonical[j].ExecutionKey
+		}
+		return canonical[i].OperationID < canonical[j].OperationID
+	})
+	h := sha256.New()
+	writeHashString(h, "runtime-operation-execution-authorities/v1")
+	writeHashString(h, fmt.Sprintf("%d", len(canonical)))
+	for _, value := range canonical {
+		writeHashString(h, value.OperationID)
+		writeHashString(h, value.ExecutionKey)
+		writeHashString(h, value.AuthorityHash)
+	}
+	return hex.EncodeToString(h.Sum(nil))
+}
+
+func (r RuntimeOperationExecutionRecord) Clone() RuntimeOperationExecutionRecord {
+	ret := r
+	if r.ReplayProof != nil {
+		proof := *r.ReplayProof
+		proof.TargetRefs = append([]string(nil), r.ReplayProof.TargetRefs...)
+		ret.ReplayProof = &proof
+	}
+	return ret
+}
+
+func CloneRuntimeOperationExecutionRecords(values []RuntimeOperationExecutionRecord) []RuntimeOperationExecutionRecord {
+	if values == nil {
+		return nil
+	}
+	ret := make([]RuntimeOperationExecutionRecord, len(values))
+	for idx := range values {
+		ret[idx] = values[idx].Clone()
+	}
+	return ret
 }
 
 func NormalizeRuntimeOperationExecutionRecords(values []RuntimeOperationExecutionRecord) []RuntimeOperationExecutionRecord {
@@ -326,13 +486,10 @@ func ValidateRuntimeOperationExecutionRecords(values []RuntimeOperationExecution
 	seenOps := map[string]struct{}{}
 	seenKeys := map[string]struct{}{}
 	for _, raw := range values {
-		value := raw.Normalized()
-		if value.OperationID == "" {
-			continue
-		}
-		if err := value.Validate(); err != nil {
+		if err := raw.Validate(); err != nil {
 			return err
 		}
+		value := raw.Normalized()
 		if _, ok := seenOps[value.OperationID]; ok {
 			return fmt.Errorf("operation execution operation id %s is duplicated", value.OperationID)
 		}

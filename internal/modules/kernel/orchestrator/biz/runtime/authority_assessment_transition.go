@@ -397,9 +397,13 @@ func sealedDispatchToRuntimeRecord(value SealedDispatch) runtimecontract.Runtime
 	return runtimecontract.RuntimeDispatchRecord{
 		ID: value.ID, WorkspaceID: value.WorkspaceID, RunID: value.RunID,
 		Transaction: value.Transaction, CandidateHash: value.CandidateHash, Candidate: value.Candidate,
-		ValidationRecipes: runtimecontract.NormalizeRuntimeValidationRecipes(value.ValidationRecipes),
-		State:             runtimecontract.RuntimeDispatchState(value.State), CompletedOperationIDs: append([]string(nil), value.CompletedOperationIDs...),
-		OperationExecutions: runtimecontract.NormalizeRuntimeOperationExecutionRecords(value.OperationExecutions),
+		ValidationRecipes:                  runtimecontract.CloneRuntimeValidationRecipes(value.ValidationRecipes),
+		OperationAdmissibilities:           runtimecontract.CloneRuntimeOperationAdmissibilities(value.OperationAdmissibilities),
+		OperationAdmissibilityObservations: runtimecontract.CloneRuntimePrerequisiteObservations(value.OperationAdmissibilityObservations),
+		OperationPolicies:                  runtimecontract.NormalizeRuntimeOperationPolicyFacts(value.OperationPolicies),
+		State:                              runtimecontract.RuntimeDispatchState(value.State), CompletedOperationIDs: append([]string(nil), value.CompletedOperationIDs...),
+		OperationExecutions: runtimecontract.CloneRuntimeOperationExecutionRecords(value.OperationExecutions), OperationAuthorityHash: value.OperationAuthorityHash,
+		DispatchAuthorityHash: value.DispatchAuthorityHash,
 	}
 }
 

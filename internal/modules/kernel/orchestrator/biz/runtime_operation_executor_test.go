@@ -92,11 +92,14 @@ func TestConcreteProducerCarriesSealedOwnerCatalogExecutionIdentity(t *testing.T
 	record := runtimecontract.RuntimeOperationExecutionRecord{
 		OperationID: "web-1", ExecutionKey: "exec/ws/run/dispatch/web-1", Fence: 3,
 		ExpectedEffectScope:     runtimecontract.RuntimeEffectNone,
+		IdempotencyClass:        runtimecontract.RuntimeOperationIdempotencyAtMostOnce,
 		AdmissibilitySnapshotID: "operation-admissibility-web-1",
 		AcquisitionBinding:      "capability-state/ws/run/web/0",
 	}
+	record.AuthorityHash = runtimecontract.StableRuntimeOperationExecutionAuthorityHash(record)
 	envelope := runtimeOperationExecutionEnvelope(record, nil)
-	if envelope.AdmissibilitySnapshotID != record.AdmissibilitySnapshotID || envelope.AcquisitionBinding != record.AcquisitionBinding {
+	if envelope.AdmissibilitySnapshotID != record.AdmissibilitySnapshotID || envelope.AcquisitionBinding != record.AcquisitionBinding ||
+		envelope.IdempotencyClass != record.IdempotencyClass || envelope.AuthorityHash != record.AuthorityHash {
 		t.Fatalf("concrete producer lost sealed owner catalog identity: record=%+v envelope=%+v", record, envelope)
 	}
 }

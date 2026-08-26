@@ -2,8 +2,6 @@ package runtime
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"fmt"
 	"sort"
 	"strings"
@@ -32,11 +30,21 @@ type SealedDispatch struct {
 	// ValidationRecipes is the immutable subset selected from the candidate
 	// manifest's Shell-owner-confirmed recipes.  Execution must never replace it
 	// with activation policy or a later admissibility inventory.
-	ValidationRecipes     []runtimecontract.RuntimeValidationRecipe
+	ValidationRecipes []runtimecontract.RuntimeValidationRecipe
+	// OperationAdmissibilities retain the complete owner catalog preimages used
+	// by feasibility and seal. Their matching observations are retained because
+	// capability owners validate the same freshness identity before transport.
+	OperationAdmissibilities           []runtimecontract.RuntimeOperationAdmissibility
+	OperationAdmissibilityObservations []runtimecontract.RuntimePrerequisiteObservation
+	// OperationPolicies are exact activation fallbacks for operations without a
+	// catalog snapshot. They are immutable SM-3 authority, not current policy.
+	OperationPolicies     []runtimecontract.RuntimeOperationPolicyFact
 	State                 DispatchState
 	CompletedOperationIDs []string
 	// OperationExecutions is the per-operation claim/fence ledger (RVC-R9/R10).
-	OperationExecutions []runtimecontract.RuntimeOperationExecutionRecord
+	OperationExecutions    []runtimecontract.RuntimeOperationExecutionRecord
+	OperationAuthorityHash string
+	DispatchAuthorityHash  string
 }
 
 type DispatchStepInput struct {
@@ -186,7 +194,7 @@ func SealDispatchWithActivation(decision runtimecontract.RuntimeDecision, candid
 // execution record. The proof is not inferred from operation kind or provider
 // text: absent feasibility proof means absent recovery authority.
 func SealDispatchWithActivationAndFeasibilities(decision runtimecontract.RuntimeDecision, candidate runtimecontract.RuntimeCandidate, activation runtimecontract.RuntimeActivationContext, feasibilities []runtimecontract.RuntimeCandidateFeasibilityRecord) (SealedDispatch, error) {
-	return sealDispatchWithActivationAndFeasibilities(decision, candidate, activation, nil, feasibilities)
+	return sealDispatchWithActivationAndFeasibilities(decision, candidate, activation, nil, feasibilities, nil, nil)
 }
 
 // SealDispatchWithManifestAndFeasibilities seals the exact owner-confirmed
@@ -194,46 +202,154 @@ func SealDispatchWithActivationAndFeasibilities(decision runtimecontract.Runtime
 // production SM-3 entry after manifest-bound admission; no execution path may
 // reconstruct this value from current facts.
 func SealDispatchWithManifestAndFeasibilities(decision runtimecontract.RuntimeDecision, candidate runtimecontract.RuntimeCandidate, activation runtimecontract.RuntimeActivationContext, manifest runtimecontract.RuntimeCandidateContractManifest, feasibilities []runtimecontract.RuntimeCandidateFeasibilityRecord) (SealedDispatch, error) {
+	return SealDispatchWithManifestAndOwnerAuthority(decision, candidate, activation, manifest, feasibilities, nil, nil)
+}
+
+// SealDispatchWithManifestAndOwnerAuthority is the production SM-3 seal. It
+// retains complete owner catalog/observation preimages so recovery and physical
+// owner execution do not depend on mutable current Runtime facts.
+func SealDispatchWithManifestAndOwnerAuthority(
+	decision runtimecontract.RuntimeDecision,
+	candidate runtimecontract.RuntimeCandidate,
+	activation runtimecontract.RuntimeActivationContext,
+	manifest runtimecontract.RuntimeCandidateContractManifest,
+	feasibilities []runtimecontract.RuntimeCandidateFeasibilityRecord,
+	catalogs []runtimecontract.RuntimeOperationAdmissibility,
+	observations []runtimecontract.RuntimePrerequisiteObservation,
+) (SealedDispatch, error) {
 	recipes, err := runtimecontract.RuntimeCandidateManagedValidationRecipeSnapshot(manifest, candidate)
 	if err != nil {
 		return SealedDispatch{}, err
 	}
-	return sealDispatchWithActivationAndFeasibilities(decision, candidate, activation, recipes, feasibilities)
+	return sealDispatchWithActivationAndFeasibilities(decision, candidate, activation, recipes, feasibilities, catalogs, observations)
 }
 
-func sealDispatchWithActivationAndFeasibilities(decision runtimecontract.RuntimeDecision, candidate runtimecontract.RuntimeCandidate, activation runtimecontract.RuntimeActivationContext, validationRecipes []runtimecontract.RuntimeValidationRecipe, feasibilities []runtimecontract.RuntimeCandidateFeasibilityRecord) (SealedDispatch, error) {
+func sealDispatchWithActivationAndFeasibilities(
+	decision runtimecontract.RuntimeDecision,
+	candidate runtimecontract.RuntimeCandidate,
+	activation runtimecontract.RuntimeActivationContext,
+	validationRecipes []runtimecontract.RuntimeValidationRecipe,
+	feasibilities []runtimecontract.RuntimeCandidateFeasibilityRecord,
+	catalogs []runtimecontract.RuntimeOperationAdmissibility,
+	observations []runtimecontract.RuntimePrerequisiteObservation,
+) (SealedDispatch, error) {
 	if err := decision.Validate(); err != nil {
+		return SealedDispatch{}, err
+	}
+	if err := runtimecontract.ValidateRuntimeCandidateRawShapeForSeal(candidate); err != nil {
 		return SealedDispatch{}, err
 	}
 	if err := candidate.ValidateWithActivation(decision, activation); err != nil {
 		return SealedDispatch{}, err
 	}
+	candidate = runtimecontract.CanonicalRuntimeCandidate(candidate)
 	if err := runtimecontract.ValidateRuntimeCandidateManagedValidationRecipeSnapshot(candidate, validationRecipes); err != nil {
 		return SealedDispatch{}, err
 	}
 	transaction := decision.AuthorityTransaction()
 	candidateHash := runtimecontract.StableRuntimeCandidateHash(candidate)
-	digest := sha256.Sum256([]byte(strings.Join([]string{transaction.AuthoritySnapshotID, transaction.RequiredOutputHash, candidateHash}, "|")))
-	dispatchID := "dispatch-" + hex.EncodeToString(digest[:])[:20]
+	dispatchID := runtimecontract.StableRuntimeDispatchID(transaction, candidateHash)
+	sealedCatalogs, sealedObservations, sealedPolicies, err := sealRuntimeDispatchOperationAuthority(candidate, activation, feasibilities, catalogs, observations)
+	if err != nil {
+		return SealedDispatch{}, err
+	}
+	sealedActivation := activation.Clone()
+	sealedActivation.OperationPolicies = runtimecontract.RuntimeDispatchSealedOperationPolicies(runtimecontract.RuntimeDispatchRecord{
+		OperationAdmissibilities: sealedCatalogs,
+		OperationPolicies:        sealedPolicies,
+	})
 	executions := sealOperationExecutionRecords(
 		decision.AuthoritySnapshot.WorkspaceID,
 		decision.AuthoritySnapshot.RunID,
 		dispatchID,
 		candidate,
-		activation,
+		sealedActivation,
 		feasibilities,
 	)
-	return SealedDispatch{
-		ID:                  dispatchID,
-		WorkspaceID:         decision.AuthoritySnapshot.WorkspaceID,
-		RunID:               decision.AuthoritySnapshot.RunID,
-		Transaction:         transaction,
-		CandidateHash:       candidateHash,
-		Candidate:           candidate,
-		ValidationRecipes:   runtimecontract.NormalizeRuntimeValidationRecipes(validationRecipes),
-		State:               DispatchStateSealed,
-		OperationExecutions: executions,
-	}, nil
+	dispatch := SealedDispatch{
+		ID:                                 dispatchID,
+		WorkspaceID:                        decision.AuthoritySnapshot.WorkspaceID,
+		RunID:                              decision.AuthoritySnapshot.RunID,
+		Transaction:                        transaction,
+		CandidateHash:                      candidateHash,
+		Candidate:                          candidate,
+		ValidationRecipes:                  runtimecontract.NormalizeRuntimeValidationRecipes(validationRecipes),
+		OperationAdmissibilities:           sealedCatalogs,
+		OperationAdmissibilityObservations: sealedObservations,
+		OperationPolicies:                  sealedPolicies,
+		State:                              DispatchStateSealed,
+		OperationExecutions:                executions,
+		OperationAuthorityHash:             runtimecontract.StableRuntimeOperationExecutionAuthoritiesHash(executions),
+	}
+	dispatch.DispatchAuthorityHash = runtimecontract.StableRuntimeDispatchAuthorityHash(sealedDispatchToRuntimeRecord(dispatch))
+	if err := dispatch.ValidateWithActivation(decision, activation); err != nil {
+		return SealedDispatch{}, err
+	}
+	return dispatch, nil
+}
+
+func sealRuntimeDispatchOperationAuthority(
+	candidate runtimecontract.RuntimeCandidate,
+	activation runtimecontract.RuntimeActivationContext,
+	feasibilities []runtimecontract.RuntimeCandidateFeasibilityRecord,
+	catalogs []runtimecontract.RuntimeOperationAdmissibility,
+	observations []runtimecontract.RuntimePrerequisiteObservation,
+) ([]runtimecontract.RuntimeOperationAdmissibility, []runtimecontract.RuntimePrerequisiteObservation, []runtimecontract.RuntimeOperationPolicyFact, error) {
+	var sealedCatalogs []runtimecontract.RuntimeOperationAdmissibility
+	var sealedObservations []runtimecontract.RuntimePrerequisiteObservation
+	var sealedPolicies []runtimecontract.RuntimeOperationPolicyFact
+	for _, operation := range candidateRuntimeOperations(candidate) {
+		operation = operation.Normalized()
+		var snapshotID, acquisitionBinding string
+		for _, feasibility := range feasibilities {
+			if feasibility.OperationID == operation.ID && feasibility.Observation != nil && feasibility.Observation.Outcome == runtimecontract.RuntimeOwnerFeasibilityFeasible {
+				snapshotID = feasibility.AdmissibilitySnapshotID
+				acquisitionBinding = feasibility.AcquisitionBinding
+				break
+			}
+		}
+		if snapshotID != "" {
+			catalog := runtimeSealedOwnerCatalogPreimage(catalogs, operation, snapshotID, acquisitionBinding)
+			if catalog == nil {
+				return nil, nil, nil, fmt.Errorf("runtime dispatch operation %q has no complete owner catalog preimage", operation.ID)
+			}
+			observation := runtimeOwnerCatalogObservationForOperation(observations, catalog)
+			sealedCatalogs = append(sealedCatalogs, *catalog)
+			if observation != nil {
+				sealedObservations = append(sealedObservations, *observation)
+			}
+			continue
+		}
+		if policy, found := runtimecontract.RuntimeOperationPolicyForOperation(operation, activation.OperationPolicies); found {
+			sealedPolicies = append(sealedPolicies, policy)
+		}
+	}
+	return runtimecontract.CloneRuntimeOperationAdmissibilities(sealedCatalogs),
+		runtimecontract.CloneRuntimePrerequisiteObservations(sealedObservations),
+		runtimecontract.NormalizeRuntimeOperationPolicyFacts(sealedPolicies), nil
+}
+
+func runtimeSealedOwnerCatalogPreimage(values []runtimecontract.RuntimeOperationAdmissibility, operation runtimecontract.RuntimeOperation, snapshotID, acquisitionBinding string) *runtimecontract.RuntimeOperationAdmissibility {
+	operation = operation.Normalized()
+	snapshotID = strings.TrimSpace(snapshotID)
+	acquisitionBinding = strings.TrimSpace(acquisitionBinding)
+	descriptor, known := runtimecontract.RuntimeOperationDescriptorForKind(operation.Kind)
+	if !known || snapshotID == "" {
+		return nil
+	}
+	for _, raw := range values {
+		catalog := raw.Normalized()
+		if catalog.SnapshotID != snapshotID || catalog.AcquisitionBinding != acquisitionBinding || catalog.OwnerModuleID != descriptor.OwnerModuleID || catalog.Validate() != nil {
+			continue
+		}
+		for _, kind := range catalog.OperationKinds {
+			if runtimecontract.CanonicalRuntimeBlockKind(kind) == operation.Kind {
+				value := catalog
+				return &value
+			}
+		}
+	}
+	return nil
 }
 
 func sealOperationExecutionRecords(
@@ -254,8 +370,10 @@ func sealOperationExecutionRecords(
 		scope := runtimecontract.ResolveExpectedEffectScope(operation, activation.OperationPolicies)
 		execution := runtimecontract.RuntimeOperationExecutionRecord{
 			OperationID:         operation.ID,
+			OperationHash:       runtimecontract.StableRuntimeOperationHash(operation),
 			ExecutionKey:        runtimecontract.StableRuntimeOperationExecutionKey(workspaceID, runID, dispatchID, operation.ID),
 			ExpectedEffectScope: scope,
+			IdempotencyClass:    runtimecontract.ResolveOperationIdempotencyClass(operation, activation.OperationPolicies),
 			State:               runtimecontract.OperationExecutionSealed,
 		}
 		for _, feasibility := range feasibilities {
@@ -270,6 +388,7 @@ func sealOperationExecutionRecords(
 			}
 			break
 		}
+		execution.AuthorityHash = runtimecontract.StableRuntimeOperationExecutionAuthorityHash(execution)
 		ret = append(ret, execution)
 	}
 	return runtimecontract.NormalizeRuntimeOperationExecutionRecords(ret)
@@ -280,38 +399,7 @@ func (d SealedDispatch) Validate(decision runtimecontract.RuntimeDecision) error
 }
 
 func (d SealedDispatch) ValidateWithActivation(decision runtimecontract.RuntimeDecision, activation runtimecontract.RuntimeActivationContext) error {
-	if strings.TrimSpace(d.ID) == "" || d.WorkspaceID == "" || d.RunID == "" || strings.TrimSpace(d.CandidateHash) == "" {
-		return fmt.Errorf("sealed dispatch requires id, scope and candidate hash")
-	}
-	if err := runtimecontract.ValidateAuthorityTransaction(decision, d.Transaction); err != nil {
-		return err
-	}
-	if d.WorkspaceID != decision.AuthoritySnapshot.WorkspaceID || d.RunID != decision.AuthoritySnapshot.RunID {
-		return fmt.Errorf("sealed dispatch scope mismatch")
-	}
-	if err := d.Candidate.ValidateWithActivation(decision, activation); err != nil {
-		return err
-	}
-	if d.CandidateHash != runtimecontract.StableRuntimeCandidateHash(d.Candidate) {
-		return fmt.Errorf("sealed dispatch candidate hash mismatch")
-	}
-	if d.State != DispatchStateSealed && d.State != DispatchStateCommitted && d.State != DispatchStateInvalidated {
-		return fmt.Errorf("sealed dispatch has invalid state %q", d.State)
-	}
-	for _, operationID := range d.CompletedOperationIDs {
-		if !candidateContainsOperation(d.Candidate, operationID) {
-			return fmt.Errorf("sealed dispatch completed operation %q is not present in candidate", operationID)
-		}
-	}
-	if err := runtimecontract.ValidateRuntimeOperationExecutionRecords(d.OperationExecutions); err != nil {
-		return err
-	}
-	for _, exec := range runtimecontract.NormalizeRuntimeOperationExecutionRecords(d.OperationExecutions) {
-		if !candidateContainsOperation(d.Candidate, exec.OperationID) {
-			return fmt.Errorf("sealed dispatch operation execution %q is not present in candidate", exec.OperationID)
-		}
-	}
-	return nil
+	return sealedDispatchToRuntimeRecord(d).ValidateWithActivation(decision, activation)
 }
 
 func isStateChangeNoOpWithoutProvenanceFailure(failure runtimecontract.FailureFact, receipt *runtimecontract.RuntimeOperationReceipt) bool {

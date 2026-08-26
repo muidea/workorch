@@ -52,9 +52,10 @@ func (f runtimeMCPRoundTripper) RoundTrip(request *http.Request) (*http.Response
 // can become implementation repair authority.
 //
 // The two subtests exercise the receipt boundary on both sides of the Run CAS:
-// a pre-commit interruption leaves no target/evidence fact, whereas a durable
-// receipt with a lost response is reused without another MCP call.  Neither
-// recovery path may manufacture a target from the validation entry.
+// a pre-commit interruption leaves no target/evidence fact and hands the exact
+// safe-to-replay execution to SM-4, whereas a durable receipt with a lost
+// response is reused without another MCP call. Neither recovery path may
+// manufacture a target from the validation entry.
 func TestRuntimeFileBackedMCPOwnerFailureTargetReceiptRestartMatrix(t *testing.T) {
 	patchVariants := []struct {
 		name      string
@@ -86,12 +87,12 @@ func TestRuntimeFileBackedMCPOwnerFailureTargetReceiptRestartMatrix(t *testing.T
 	}
 	for _, variant := range patchVariants {
 		for _, tc := range []struct {
-			name               string
-			crashAfterReceipt  bool
-			wantRestartFailure bool
-			wantMCPCalls       int
+			name                 string
+			crashAfterReceipt    bool
+			wantMCPCalls         int
+			wantRecoveryAttempts int
 		}{
-			{name: "before_receipt_cas", wantRestartFailure: true, wantMCPCalls: 1},
+			{name: "before_receipt_cas", wantMCPCalls: 2, wantRecoveryAttempts: 1},
 			{name: "after_receipt_cas_response_loss", crashAfterReceipt: true, wantMCPCalls: 1},
 		} {
 			t.Run(variant.name+"/"+tc.name, func(t *testing.T) {
@@ -284,11 +285,13 @@ func TestRuntimeFileBackedMCPOwnerFailureTargetReceiptRestartMatrix(t *testing.T
 					receiptObserver.Unsubscribe(orchestratorevents.TopicOrchestratorQueryRuntimeOperationReceipt)
 				})
 
+				var receiptCASFailure *failWhenRuntimeStateRepository
 				if !tc.crashAfterReceipt {
-					failing, newErr := runtime.NewRuntimeController(&failWhenRuntimeStateRepository{
+					receiptCASFailure = &failWhenRuntimeStateRepository{
 						RuntimeStateRepository: repository, err: errors.New("injected MCP receipt CAS failure"),
 						match: func(next runtime.RuntimeAggregate) bool { return len(next.OperationReceipts) == 1 },
-					})
+					}
+					failing, newErr := runtime.NewRuntimeController(receiptCASFailure)
 					if newErr != nil {
 						t.Fatal(newErr)
 					}
@@ -304,19 +307,40 @@ func TestRuntimeFileBackedMCPOwnerFailureTargetReceiptRestartMatrix(t *testing.T
 						_, _ = runtimeTestControllerExecuteDispatch(controller, ctx, "ws-v2", "run-v2", panicAfterOwnerReceiptExecutor{delegate: eventRuntimeOperationExecutor{hub: hub}})
 						t.Fatal("expected crash after durable MCP receipt")
 					}()
-				} else if _, err := runtimeTestControllerExecuteDispatch(controller, ctx, "ws-v2", "run-v2", eventRuntimeOperationExecutor{hub: hub}); err == nil {
-					t.Fatal("MCP execution unexpectedly acknowledged an interrupted receipt commit")
+				} else {
+					// Execute exactly one SM-3 step. The production coordinator must not
+					// consume SM-4 recovery budget inside the receipt observation event;
+					// a fresh owner-private event after restart owns that transition.
+					executionResult, executionErr := controller.ApplyInternalEvent(ctx, runtime.RuntimeInternalEvent{
+						Kind:  runtime.RuntimeInternalEventDispatchExecutionRequested,
+						Scope: runtime.RuntimeInternalEventScope{WorkspaceID: "ws-v2", RunID: "run-v2"},
+						Transaction: &runtime.RuntimeInternalTransactionPayload{
+							Executor: eventRuntimeOperationExecutor{hub: hub},
+						},
+					})
+					operationID, recoveryRequired := runtime.RuntimeOperationRecoveryBudgetRequired(executionErr)
+					if !recoveryRequired || operationID != candidate.Validation.Operations[0].Operation.ID ||
+						executionResult.Aggregate.Facts.Recovery.OperationRecoveryAttempts != 0 || !receiptCASFailure.failed || calls != 1 {
+						t.Fatalf("pre-receipt CAS interruption did not hand off exact recovery: operation=%q required=%v attempts=%d failedCAS=%v calls=%d err=%v",
+							operationID, recoveryRequired, executionResult.Aggregate.Facts.Recovery.OperationRecoveryAttempts, receiptCASFailure.failed, calls, executionErr)
+					}
 				}
 
 				beforeRestart, err := repository.Load(ctx, "ws-v2", "run-v2")
 				if err != nil {
 					t.Fatal(err)
 				}
+				if beforeRestart.Facts.Recovery.OperationRecoveryAttempts != 0 || beforeRestart.ActiveDispatch == nil || len(beforeRestart.ActiveDispatch.OperationExecutions) != 1 {
+					t.Fatalf("receipt boundary crossed SM-4 or dispatch scope before restart: %+v", beforeRestart)
+				}
+				beforeRestartExecution := beforeRestart.ActiveDispatch.OperationExecutions[0]
 				if tc.crashAfterReceipt {
-					if len(beforeRestart.OperationReceipts) != 1 || beforeRestart.Facts.Resources.FailureTarget != nil || len(beforeRestart.Facts.Evidence.Rejected) != 0 {
+					if len(beforeRestart.OperationReceipts) != 1 || beforeRestartExecution.State != runtimecontract.OperationExecutionOwnerCommitted ||
+						beforeRestart.Facts.Resources.FailureTarget != nil || len(beforeRestart.Facts.Evidence.Rejected) != 0 {
 						t.Fatalf("durable receipt response loss persisted wrong boundary: %+v", beforeRestart)
 					}
-				} else if len(beforeRestart.OperationReceipts) != 0 || beforeRestart.Facts.Failure != nil || beforeRestart.Facts.Resources.FailureTarget != nil || len(beforeRestart.Facts.Evidence.Rejected) != 0 {
+				} else if len(beforeRestart.OperationReceipts) != 0 || beforeRestart.Facts.Failure != nil || beforeRestart.Facts.Resources.FailureTarget != nil || len(beforeRestart.Facts.Evidence.Rejected) != 0 ||
+					beforeRestartExecution.State != runtimecontract.OperationExecutionClaimed || beforeRestartExecution.OperationID != candidate.Validation.Operations[0].Operation.ID {
 					t.Fatalf("pre-CAS interruption leaked MCP failure authority: %+v", beforeRestart)
 				}
 
@@ -326,20 +350,6 @@ func TestRuntimeFileBackedMCPOwnerFailureTargetReceiptRestartMatrix(t *testing.T
 				}
 				receiptController = restarted
 				_, restartErr := runtimeTestControllerExecuteDispatch(restarted, ctx, "ws-v2", "run-v2", eventRuntimeOperationExecutor{hub: hub})
-				if tc.wantRestartFailure {
-					if restartErr == nil || calls != tc.wantMCPCalls {
-						t.Fatalf("pre-receipt restart must preserve outcome-unknown safety: calls=%d err=%v", calls, restartErr)
-					}
-					reloaded, err := repository.Load(ctx, "ws-v2", "run-v2")
-					if err != nil || reloaded.Facts.Resources.FailureTarget != nil ||
-						runtimeFileBackedHasTargetSnapshot(reloaded.Facts.Resources.TargetSnapshots, "implementation.go") ||
-						!runtimeFileBackedHasTargetSnapshot(reloaded.Facts.Resources.TargetSnapshots, "validation-entry.go") ||
-						len(reloaded.OperationReceipts) != 0 || len(reloaded.Facts.Evidence.Rejected) != 0 {
-						t.Fatalf("outcome-unknown restart manufactured MCP repair authority: targetSnapshots=%+v receipts=%d rejected=%d failureTarget=%+v err=%v",
-							reloaded.Facts.Resources.TargetSnapshots, len(reloaded.OperationReceipts), len(reloaded.Facts.Evidence.Rejected), reloaded.Facts.Resources.FailureTarget, err)
-					}
-					return
-				}
 				if restartErr != nil {
 					t.Fatalf("restart MCP execution: %v", restartErr)
 				}
@@ -347,10 +357,12 @@ func TestRuntimeFileBackedMCPOwnerFailureTargetReceiptRestartMatrix(t *testing.T
 				if err != nil {
 					t.Fatal(err)
 				}
-				if calls != tc.wantMCPCalls || len(persisted.OperationReceipts) != 1 || len(persisted.Facts.Evidence.Rejected) != 1 ||
+				if calls != tc.wantMCPCalls || persisted.Facts.Recovery.OperationRecoveryAttempts != tc.wantRecoveryAttempts ||
+					len(persisted.OperationReceipts) != 1 || len(persisted.Facts.Evidence.Rejected) != 1 ||
 					persisted.Facts.Resources.FailureTarget == nil || persisted.Facts.Resources.FailureTarget.TargetObservation == nil ||
 					len(persisted.Facts.Resources.FailureTarget.TargetRefs) != 1 || persisted.Facts.Resources.FailureTarget.TargetRefs[0] != "implementation.go" ||
-					persisted.Decision.State != runtimecontract.ConvergenceStateNeedPrerequisite {
+					persisted.Decision.State != runtimecontract.ConvergenceStateNeedPrerequisite || persisted.ActiveDispatch != nil ||
+					runtimeFileBackedHasTargetSnapshot(persisted.Facts.Resources.TargetSnapshots, "implementation.go") {
 					t.Fatalf("restart did not bind the exact owner observation once: calls=%d aggregate=%+v", calls, persisted)
 				}
 				// Reconstructed duplicate delivery must query the committed MCP owner

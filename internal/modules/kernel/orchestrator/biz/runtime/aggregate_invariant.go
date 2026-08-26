@@ -11,6 +11,14 @@ import (
 // validators are ordered to preserve the historical fail-fast sequence while
 // making each state-machine responsibility reviewable in isolation.
 func (a RuntimeAggregate) Validate() error {
+	var active *runtimecontract.RuntimeDispatchRecord
+	if a.ActiveDispatch != nil {
+		value := sealedDispatchToRuntimeRecord(*a.ActiveDispatch)
+		active = &value
+	}
+	if err := runtimecontract.ValidateRuntimeDispatchHistoryShape(a.Facts.WorkspaceID, a.Facts.RunID, active, sealedDispatchesToRuntimeRecords(a.CompletedDispatches)); err != nil {
+		return fmt.Errorf("runtime aggregate dispatch history: %w", err)
+	}
 	if err := validateRuntimeAggregateSM2Authority(a); err != nil {
 		return err
 	}
@@ -185,7 +193,20 @@ func validateRuntimeAggregateSM3CandidateTransaction(a RuntimeAggregate) error {
 	if hasUnreducedCurrentCandidateRetryFailure(a.Decision, a.CandidateAttempts) {
 		return fmt.Errorf("current runtime authority retains a failed candidate attempt 1 without reducer transition")
 	}
-	return validateAcceptedCandidateDispatchBindings(a)
+	if err := validateAcceptedCandidateDispatchBindings(a); err != nil {
+		return err
+	}
+	var active *runtimecontract.RuntimeDispatchRecord
+	if a.ActiveDispatch != nil {
+		value := sealedDispatchToRuntimeRecord(*a.ActiveDispatch)
+		active = &value
+	}
+	return runtimecontract.ValidateRuntimeDispatchAdmissionLineage(
+		active,
+		sealedDispatchesToRuntimeRecords(a.CompletedDispatches),
+		a.CandidateAttempts,
+		a.OperationGovernanceBindings,
+	)
 }
 
 func validateRuntimeDefinitionClarificationAggregate(a RuntimeAggregate) error {
@@ -253,10 +274,13 @@ func validateAcceptedCandidateDispatchBindings(a RuntimeAggregate) error {
 		if attempt.State != runtimecontract.RuntimeCandidateAttemptStateAccepted {
 			continue
 		}
-		matched := a.ActiveDispatch != nil && a.ActiveDispatch.Transaction == attempt.Transaction
+		matched := a.ActiveDispatch != nil && a.ActiveDispatch.Transaction == attempt.Transaction &&
+			a.ActiveDispatch.ID == attempt.DispatchID && a.ActiveDispatch.CandidateHash == attempt.CandidateHash &&
+			a.ActiveDispatch.DispatchAuthorityHash == attempt.DispatchAuthorityHash
 		if !matched {
 			for _, dispatch := range a.CompletedDispatches {
-				if dispatch.Transaction == attempt.Transaction {
+				if dispatch.Transaction == attempt.Transaction && dispatch.ID == attempt.DispatchID &&
+					dispatch.CandidateHash == attempt.CandidateHash && dispatch.DispatchAuthorityHash == attempt.DispatchAuthorityHash {
 					matched = true
 					break
 				}
@@ -279,7 +303,15 @@ func validateRuntimeAggregateGovernanceLedgers(a RuntimeAggregate) error {
 	if err := runtimecontract.ValidateRuntimeOperationGovernanceBindings(a.OperationGovernanceBindings); err != nil {
 		return err
 	}
-	return runtimecontract.ValidateRuntimeOperationReceipts(a.OperationReceipts)
+	if err := runtimecontract.ValidateRuntimeOperationReceipts(a.OperationReceipts); err != nil {
+		return err
+	}
+	var active *runtimecontract.RuntimeDispatchRecord
+	if a.ActiveDispatch != nil {
+		value := sealedDispatchToRuntimeRecord(*a.ActiveDispatch)
+		active = &value
+	}
+	return runtimecontract.ValidateRuntimeOperationReceiptExecutionLineage(active, sealedDispatchesToRuntimeRecords(a.CompletedDispatches), a.OperationReceipts)
 }
 
 func validateRuntimeAggregateSM4DeliveryAcknowledgements(a RuntimeAggregate) error {
@@ -338,30 +370,29 @@ func validateRuntimeAggregateCrossMachineFences(a RuntimeAggregate) error {
 }
 
 func validateRuntimeGovernanceRequestDispatchBindings(a RuntimeAggregate) error {
-	for _, request := range a.GovernanceRequests {
-		matched := a.ActiveDispatch != nil && governancecheck.RequestDispatchMatches(request, governancecheck.DispatchFacts{
-			DispatchID: a.ActiveDispatch.ID, AuthoritySnapshotID: a.ActiveDispatch.Transaction.AuthoritySnapshotID,
-			CandidateGovernance: a.ActiveDispatch.Candidate.Governance != nil,
-		})
-		if !matched {
-			for _, dispatch := range a.CompletedDispatches {
-				if governancecheck.RequestDispatchMatches(request, governancecheck.DispatchFacts{
-					DispatchID: dispatch.ID, AuthoritySnapshotID: dispatch.Transaction.AuthoritySnapshotID,
-					CandidateGovernance: dispatch.Candidate.Governance != nil,
-				}) {
-					matched = true
-					break
-				}
-			}
-		}
-		if !matched {
-			return fmt.Errorf("runtime aggregate governance request has no governed dispatch")
-		}
+	var active *runtimecontract.RuntimeDispatchRecord
+	if a.ActiveDispatch != nil {
+		value := sealedDispatchToRuntimeRecord(*a.ActiveDispatch)
+		active = &value
 	}
-	return nil
+	return runtimecontract.ValidateRuntimeGovernanceRequestDispatchLineage(a.GovernanceRequests, active, sealedDispatchesToRuntimeRecords(a.CompletedDispatches))
 }
 
 func validateRuntimeOperationGovernanceBindingFences(a RuntimeAggregate) error {
+	var active *runtimecontract.RuntimeDispatchRecord
+	if a.ActiveDispatch != nil {
+		value := sealedDispatchToRuntimeRecord(*a.ActiveDispatch)
+		active = &value
+	}
+	if err := runtimecontract.ValidateRuntimeDispatchExecutionKeyLineage(
+		a.Facts.WorkspaceID,
+		a.Facts.RunID,
+		active,
+		sealedDispatchesToRuntimeRecords(a.CompletedDispatches),
+		a.OperationGovernanceBindings,
+	); err != nil {
+		return err
+	}
 	for _, rawBinding := range a.OperationGovernanceBindings {
 		binding := rawBinding.Normalized()
 		var source *SealedDispatch
@@ -372,7 +403,7 @@ func validateRuntimeOperationGovernanceBindingFences(a RuntimeAggregate) error {
 				break
 			}
 		}
-		if source == nil {
+		if source == nil || source.State != DispatchStateCommitted {
 			return fmt.Errorf("operation governance binding source dispatch %q is not completed", binding.OperationDispatchID)
 		}
 		execution, found := operationExecutionRecord(source.OperationExecutions, binding.OperationID)
@@ -397,11 +428,28 @@ func validateRuntimeOperationGovernanceBindingFences(a RuntimeAggregate) error {
 			return fmt.Errorf("operation governance binding has no matching ticket request")
 		}
 	}
+	governedExecutions := make([]runtimecontract.RuntimeOperationExecutionRecord, 0)
+	if a.ActiveDispatch != nil {
+		governedExecutions = append(governedExecutions, a.ActiveDispatch.OperationExecutions...)
+	}
+	for _, dispatch := range a.CompletedDispatches {
+		governedExecutions = append(governedExecutions, dispatch.OperationExecutions...)
+	}
+	if err := runtimecontract.ValidateRuntimeOperationGovernanceExecutionBindings(a.OperationGovernanceBindings, governedExecutions); err != nil {
+		return err
+	}
+	if err := runtimecontract.ValidateRuntimeOperationGovernanceGrantLineage(a.OperationGovernanceBindings, a.GovernanceResolutions, a.Facts.Evidence.Accepted, a.Facts.Evidence.Rejected); err != nil {
+		return err
+	}
 	return nil
 }
 
 func validateRuntimeGovernanceResolutionBindings(a RuntimeAggregate) error {
 	for _, resolution := range a.GovernanceResolutions {
+		resolution = resolution.Normalized()
+		if resolution.WorkspaceID != a.Facts.WorkspaceID || resolution.RunID != a.Facts.RunID {
+			return fmt.Errorf("runtime aggregate governance resolution scope mismatch")
+		}
 		matched := false
 		bound := false
 		for _, request := range a.GovernanceRequests {

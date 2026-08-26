@@ -130,10 +130,11 @@ func TestMCPOwnerEmitsStructuredFailureTargetObservationThroughTypedReceipt(t *t
 	sealed := sealMCPTestOperation(t, owner.runtimeAdapter, operation)
 	command := mcpevents.ExecuteOperationCommand{
 		RuntimeOperationExecutionContext: runtimecontract.RuntimeOperationExecutionContext{
-			Execution: runtimecontract.RuntimeOperationExecutionEnvelope{
+			Execution: mcpTestExecutionEnvelope(operation, runtimecontract.RuntimeOperationExecutionEnvelope{
 				ExecutionKey: "exec/ws-v2/run-v2/dispatch-1/validate-entry", Fence: 1,
-				ExpectedEffectScope: runtimecontract.RuntimeEffectNone,
-			},
+				ExpectedEffectScope: runtimecontract.RuntimeEffectNone, AdmissibilitySnapshotID: sealed.Authorization.CatalogSnapshotID,
+				AcquisitionBinding: sealed.Authorization.AcquisitionBinding,
+			}, sealed.Authorization.Policy),
 			WorkspaceID: "ws-v2", RunID: "run-v2", DispatchID: "dispatch-1",
 			Transaction: runtimecontract.AuthorityTransaction{AuthoritySnapshotID: "authority-1"},
 			OperationID: "validate-entry", CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-v2"}, TargetRefs: []string{"validation-entry.go"},
@@ -251,10 +252,11 @@ func TestMCPOwnerEmitsExactToolValidationObservationThroughTypedReceipt(t *testi
 	sealed := sealMCPTestOperation(t, owner.runtimeAdapter, operation)
 	command := mcpevents.ExecuteOperationCommand{
 		RuntimeOperationExecutionContext: runtimecontract.RuntimeOperationExecutionContext{
-			Execution: runtimecontract.RuntimeOperationExecutionEnvelope{
+			Execution: mcpTestExecutionEnvelope(operation, runtimecontract.RuntimeOperationExecutionEnvelope{
 				ExecutionKey: "exec/ws-v2/run-v2/dispatch-1/mcp-summary", Fence: 1,
-				ExpectedEffectScope: runtimecontract.RuntimeEffectNone,
-			},
+				ExpectedEffectScope: runtimecontract.RuntimeEffectNone, AdmissibilitySnapshotID: sealed.Authorization.CatalogSnapshotID,
+				AcquisitionBinding: sealed.Authorization.AcquisitionBinding,
+			}, sealed.Authorization.Policy),
 			WorkspaceID: "ws-v2", RunID: "run-v2", DispatchID: "dispatch-1",
 			Transaction: runtimecontract.AuthorityTransaction{AuthoritySnapshotID: "authority-1"},
 			OperationID: "mcp-summary", EvidenceKind: runtimecontract.EvidenceKindValidation, WorkspaceDeliverableDirectory: t.TempDir(), WorkspaceInternalDirectory: t.TempDir(),
@@ -349,4 +351,15 @@ func sealMCPTestOperation(t *testing.T, adapter *RuntimeAdapter, operation runti
 		t.Fatal(err)
 	}
 	return sealed
+}
+
+func mcpTestExecutionEnvelope(operation runtimecontract.RuntimeOperation, envelope runtimecontract.RuntimeOperationExecutionEnvelope, policy runtimecontract.RuntimeOperationPolicyFact) runtimecontract.RuntimeOperationExecutionEnvelope {
+	envelope.OperationHash = runtimecontract.StableRuntimeOperationHash(operation)
+	envelope.IdempotencyClass = runtimecontract.ResolveOperationIdempotencyClass(operation, []runtimecontract.RuntimeOperationPolicyFact{policy})
+	envelope.AuthorityHash = runtimecontract.StableRuntimeOperationExecutionAuthorityHash(runtimecontract.RuntimeOperationExecutionRecord{
+		OperationID: operation.ID, OperationHash: envelope.OperationHash, ExecutionKey: envelope.ExecutionKey, ExpectedEffectScope: envelope.ExpectedEffectScope,
+		IdempotencyClass: envelope.IdempotencyClass, AdmissibilitySnapshotID: envelope.AdmissibilitySnapshotID,
+		AcquisitionBinding: envelope.AcquisitionBinding, ReplayProof: envelope.ReplayProof,
+	})
+	return envelope
 }

@@ -464,29 +464,31 @@ func TestO5ProofAndGroundingComparisonsUseFocusedEntries(t *testing.T) {
 // TestO6GovernanceComparisonsUseFocusedEntries freezes the O6 split between
 // typed governance facts and the authorityComponent mutation transaction.
 // Ticket creation, binding mutation, evidence, resume dispatch and CAS remain
-// in Runtime; all reusable identity/outcome comparisons use governancecheck.
+// in Runtime; reusable identity/outcome comparisons use governancecheck while
+// the persisted bidirectional execution lineage remains a contract invariant.
 func TestO6GovernanceComparisonsUseFocusedEntries(t *testing.T) {
 	t.Parallel()
 	expected := map[string]int{
-		"governancecheck.SameRequestRecord":               1,
-		"governancecheck.RequestRecordConflicts":          1,
-		"governancecheck.SuspendedBindingMatchesRequest":  1,
-		"governancecheck.RequestBindsResolution":          1,
-		"governancecheck.BindingMatchesResolution":        1,
-		"governancecheck.BindingStateAllowsOutcome":       2,
-		"governancecheck.ExternalDependencyMatches":       1,
-		"governancecheck.GovernedDispatchMatches":         2,
-		"governancecheck.DependencyMatches":               2,
-		"governancecheck.GrantForExecution":               2,
-		"governancecheck.SameGrant":                       1,
-		"governancecheck.EvaluateOperationSuspension":     1,
-		"governancecheck.DependencyForFacts":              1,
-		"governancecheck.RequestDispatchMatches":          2,
-		"governancecheck.BindingMatchesExecution":         1,
-		"governancecheck.BindingMatchesReceipt":           1,
-		"governancecheck.BindingMatchesRequest":           1,
-		"governancecheck.ResolutionRecordMatchesRequest":  1,
-		"governancecheck.ResolutionRecordMatchesDispatch": 1,
+		"governancecheck.SameRequestRecord":                                   1,
+		"governancecheck.RequestRecordConflicts":                              1,
+		"governancecheck.SuspendedBindingMatchesRequest":                      1,
+		"governancecheck.RequestBindsResolution":                              1,
+		"governancecheck.BindingMatchesResolution":                            1,
+		"governancecheck.BindingStateAllowsOutcome":                           2,
+		"governancecheck.ExternalDependencyMatches":                           1,
+		"governancecheck.GovernedDispatchMatches":                             2,
+		"governancecheck.DependencyMatches":                                   2,
+		"governancecheck.GrantForExecution":                                   3,
+		"runtimecontract.ValidateRuntimeOperationGovernanceExecutionBindings": 1,
+		"governancecheck.SameGrant":                                           1,
+		"governancecheck.EvaluateOperationSuspension":                         1,
+		"governancecheck.DependencyForFacts":                                  1,
+		"runtimecontract.ValidateRuntimeGovernanceRequestDispatchLineage":     1,
+		"governancecheck.BindingMatchesExecution":                             2,
+		"governancecheck.BindingMatchesReceipt":                               1,
+		"governancecheck.BindingMatchesRequest":                               1,
+		"governancecheck.ResolutionRecordMatchesRequest":                      1,
+		"governancecheck.ResolutionRecordMatchesDispatch":                     1,
 	}
 	actual := make(map[string]int, len(expected))
 	recordSuspensionReceiver := ""

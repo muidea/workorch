@@ -47,19 +47,31 @@ func TestOwnerContractAndOperationMapper(t *testing.T) {
 		t.Fatal(err)
 	}
 	context := runtimecontract.RuntimeOperationExecutionContext{
-		Execution: runtimecontract.RuntimeOperationExecutionEnvelope{
+		WorkspaceID: "ws", RunID: "run", DispatchID: "dispatch",
+		Execution: testExecutionEnvelope(operation, runtimecontract.RuntimeOperationExecutionEnvelope{
+			ExecutionKey: "exec/ws/run/dispatch/ssh-1", Fence: 1,
 			ExpectedEffectScope:     runtimecontract.RuntimeEffectRemoteDurable,
 			AdmissibilitySnapshotID: catalog.SnapshotID, AcquisitionBinding: catalog.AcquisitionBinding,
-		},
+		}, []runtimecontract.RuntimeOperationPolicyFact{sealed.Authorization.Policy}),
 		OperationID: operation.ID, TargetRefs: []string{"target-a"},
 	}
 	if _, _, err := sealed.ValidateForExecution(context); err != nil {
 		t.Fatalf("validate sealed operation: %v", err)
 	}
+	idempotencyDrift := context
+	idempotencyDrift.Execution.IdempotencyClass = runtimecontract.RuntimeOperationIdempotencySafeToReplay
+	if _, _, err := sealed.ValidateForExecution(idempotencyDrift); err == nil || !strings.Contains(err.Error(), "idempotency class mismatch") {
+		t.Fatalf("sealed SSH operation accepted idempotency drift: %v", err)
+	}
+	authorityDrift := context
+	authorityDrift.Execution.AuthorityHash = "forged"
+	if _, _, err := sealed.ValidateForExecution(authorityDrift); err == nil || !strings.Contains(err.Error(), "authority hash mismatch") {
+		t.Fatalf("sealed SSH operation accepted authority hash drift: %v", err)
+	}
 	drifted := sealed
 	drifted.Operation.Parameters[0].String = ptrString("session-b")
-	if _, _, err := drifted.ValidateForExecution(context); err == nil || !strings.Contains(err.Error(), "payload hash") {
-		t.Fatalf("drifted sealed operation err = %v, want payload hash conflict", err)
+	if _, _, err := drifted.ValidateForExecution(context); err == nil || !strings.Contains(err.Error(), "operation hash mismatch") {
+		t.Fatalf("drifted sealed operation err = %v, want operation authority conflict", err)
 	}
 	wire, err := json.Marshal(ExecuteOperationCommand{RuntimeOperationExecutionContext: context, SealedOperation: sealed})
 	if err != nil {

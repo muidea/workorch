@@ -177,10 +177,7 @@ func TestShellOwnerObservedFailureTargetBindsThroughEventHubAndFileSnapshot(t *t
 	}
 	replayed := sendObservedShellExecution(t, ctx, hub, shellevents.ExecuteOperationCommand{
 		RuntimeOperationExecutionContext: runtimecontract.RuntimeOperationExecutionContext{
-			Execution: runtimecontract.RuntimeOperationExecutionEnvelope{
-				ExecutionKey: execution.ExecutionKey, Fence: execution.Fence, ExpectedEffectScope: execution.ExpectedEffectScope,
-				AdmissibilitySnapshotID: execution.AdmissibilitySnapshotID, AcquisitionBinding: execution.AcquisitionBinding,
-			},
+			Execution:   runtimeOperationExecutionEnvelopeForTest(execution, nil),
 			WorkspaceID: loaded.Facts.WorkspaceID, RunID: loaded.Facts.RunID, DispatchID: dispatch.ID, Transaction: dispatch.Transaction,
 			OperationID: operation.ID, CoverageWorkItemIDs: operation.CoverageWorkItemIDs, EvidenceKind: runtimecontract.EvidenceKindValidation,
 			WorkspaceDeliverableDirectory: workspaceDirectory, TargetRefs: operation.TargetRefs,
@@ -370,11 +367,7 @@ func (e runtimeObservedShellExecutor) ExecuteRuntimeOperation(ctx context.Contex
 		shellevents.TopicExecuteOperation, runtimecontract.RuntimeModuleOrchestrator, runtimecontract.RuntimeModuleShell,
 		magicevent.NewHeader(), ctx, shellevents.ExecuteOperationCommand{
 			RuntimeOperationExecutionContext: runtimecontract.RuntimeOperationExecutionContext{
-				Execution: runtimecontract.RuntimeOperationExecutionEnvelope{
-					ExecutionKey: request.Execution.ExecutionKey, Fence: request.Execution.Fence, ExpectedEffectScope: request.Execution.ExpectedEffectScope,
-					AdmissibilitySnapshotID: request.Execution.AdmissibilitySnapshotID, AcquisitionBinding: request.Execution.AcquisitionBinding,
-					GovernanceGrant: request.GovernanceGrant,
-				},
+				Execution:   runtimeOperationExecutionEnvelopeForTest(request.Execution, request.GovernanceGrant),
 				WorkspaceID: request.WorkspaceID, RunID: request.RunID, DispatchID: request.DispatchID, Transaction: request.Transaction,
 				OperationID: request.Operation.ID, CoverageWorkItemIDs: append([]common.CoverageWorkItemID(nil), request.Operation.CoverageWorkItemIDs...),
 				TargetRefs: append([]string(nil), request.Operation.TargetRefs...), EvidenceKind: request.EvidenceKind,

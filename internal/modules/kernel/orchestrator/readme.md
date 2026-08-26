@@ -401,7 +401,20 @@ deployed run ID 只属于 archive regression evidence，不定义当前候选、
   create 或跨 owner target policy。seal 前 `ValidateCandidateEffectCompatibility` 强制：canonical `need_state_change`
   至少一个 durable effect，`need_validation` 不得含 durable/unknown；owner 声明为 non-durable 的 operation 不能关闭
   durable state-change。
-- `SealedDispatch.OperationExecutions` 在 seal 时写入 per-operation `ExecutionKey` + `ExpectedEffectScope`；execute 前 claim fence，owner 返回后 `owner_committed`，evidence CAS 后 `evidence_committed`；owner error 记 `outcome_unknown`，禁止盲重放。
+- SM-3 seal 保存 canonical candidate、validation recipe body、完整 owner catalog/observation preimage、仅被选中的 activation
+  fallback policy 与 per-operation execution authority，并统一纳入 `DispatchAuthorityHash`。owner inventory、policy 或
+  prerequisite observation 在 seal 后演进，只影响后续 authority，不得改变 active/history dispatch；execution、restart 和
+  governance resume 都只能使用 dispatch 内的 sealed snapshot。
+- 每个 executable dispatch 必须恰好由一个 durable admission 产生：普通 dispatch 精确绑定 accepted candidate attempt 的
+  transaction/candidate/dispatch authority，resume dispatch 精确绑定 granted operation-governance binding 的
+  `ResumeDispatchID`，两种来源不得同时出现或同时缺失。自洽的 dispatch record 本身不是执行授权。
+- `SealedDispatch.OperationExecutions` 在 seal 时写入 per-operation `OperationHash + ExecutionKey + ExpectedEffectScope +
+  IdempotencyClass + owner snapshot binding`；execute 前 claim fence，owner 返回后 `owner_committed`，evidence CAS 后
+  `evidence_committed`；owner error 后先 query exact receipt，缺 receipt 且没有 sealed replay authority 时才记
+  `outcome_unknown`，禁止盲重放。
+- owner receipt ledger 与 dispatch execution projection 必须按 `ExecutionKey + fence + OperationID + receipt ref/hash`
+  双向完全匹配。committed execution 不得缺 receipt，receipt 不得成为无 committed execution 的孤儿；governance source 与
+  completed resume clone 只能共享完全相同的 receipt projection。
 - owner 已持久化 exact `ExecutionKey + Fence` receipt 但响应丢失时，executor 必须先重新加载 aggregate：存在 terminal receipt 则继续 governance/evidence commit，不得把 `owner_committed` 覆盖为 `outcome_unknown`。
 - claimed/no-receipt recovery 只允许 sealed idempotency=`safe_to_replay|owner_managed`，并先消耗独立 operation-recovery budget；`at_most_once|unknown` 一律转 `outcome_unknown`。每项 operation evidence 独立 CAS 持久化；只有最后一项成功或任一项 rejected/stale 时，才在该 evidence CAS 中原子 settle dispatch。
 - current-schema evidence commit 必须携带已持久化 owner receipt，并按 sealed expectation + `ObservedEffectScope` +
@@ -650,7 +663,8 @@ deployed run ID 只属于 archive regression evidence，不定义当前候选、
 - governed dispatch 对非 approval dependency 使用 `OpenRuntimeGovernanceRequestCommand/Result` 向 Decision owner
   创建确定性 ticket；`approval` dependency 使用 `OpenRuntimeApprovalRequestCommand/Result` 向 Approval owner 创建
   不可变授权请求。ticket/approval、snapshot、dispatch、dependency、requested action 与 authorization hash 的绑定
-  随 Runtime aggregate 持久化。
+  随 Runtime aggregate 持久化。request raw record 必须已经 canonical，且与 governance dispatch 中的完整 dependency
+  `kind + subject + requested action + risk + authorization hash` 精确一致；缺字段、重复 request 或任一漂移都 fail closed。
 - `DriveRuntimeCommand/Result` 是 Runtime 唯一同步推进合同；Orchestrator 在有界循环内依次处理 prerequisite、candidate、sealed dispatch、typed operation、evidence/reducer。Result 不保存第二个 disposition：`need_governance` 必须携带且只携带 `BlockingTicketID` 或 `BlockingApprovalID`，`complete|failed + Terminal` 表示 typed terminal，其它组合均是合同缺陷。重复调用和进程重启必须从 Run owner aggregate 幂等恢复。
 - drive 同时校验 persisted `StateRevision` 与 `RuntimeConvergenceProgressSignature`；signature 覆盖 semantic seed/request/attempt/document/owner batch/sealed binding、focus/evidence/canonical state/requiredOutput/repair/prerequisite/dispatch/governance/terminal，不包含派生 action、operation-candidate retry、snapshot attempt、SM-4 lease 或 revision bookkeeping。只增加 bookkeeping 的 transition 必须 fail-fast。
 - SM-4 delayed recovery 只由 aggregate 中的 `RuntimeDriveLease` 授权。lease 绑定 workspace/run、aggregate revision、recovery generation、stable reason/signature、due time 与 `scheduled|running`；timer 只能 claim exact due lease，不能自行决定 retry。进程内 workspace/run singleflight 与 timer map 仅合并该 persisted identity；重复 Start/Resume/governance continuation、startup recovery 和旧 timer 均不得建立第二条链。crash 后遗留 `running` lease 由 startup 重新封存为新 generation 的 scheduled lease；live worker 再次失败时也只能凭其 exact claimed generation 以单次 CAS 续排更晚 dueAt 的新 scheduled generation，旧 generation finish/release 不得删除该后继。旧 timer 的 parse/claim/not-claimed/adopt/schedule 任一退出都必须在同一 gate 临界区选择 authoritative newer lease 或 mount latch 并转交 timer，否则释放 gate；同/异 signature 的 resolution overwrite 均不得遗留 latch 或泄漏 gate。renewal CAS 失败后禁止 release running generation；owner-private recovery 也失败时保留 persisted running authority 与本地 gate，普通 ingress 不得建立 generation-zero drive。Stop 的首次 cancel 必须原子发布 lifecycle closing/epoch；BackgroundRoutine submission 外部调用期间不得持有 `driveMu` 或另一 Stop fence，已排队/已到期 callback 必须在 observe、claim 前重复核对 captured context 与 exact lifecycle epoch。cancel 点之后 handler 与旧 timer defer 均不得创建 context、提交 background timer或清理新 epoch gate，write fence 内再 cancel/clear 本地状态，fresh startup 只恢复唯一 generation。
@@ -759,7 +773,22 @@ deployed run ID 只属于 archive regression evidence，不定义当前候选、
 - governance continue 必须写入 accepted governance evidence、递增 evidence revision 并回到同一 reducer；governance fail 直接生成 `governance_rejected` terminal，stale resolution 只能进入 diagnostic lineage。
 - resolution 必须携带并匹配已绑定的唯一 ticket/approval identity；不存在绑定、同一 dispatch 绑定不同 owner
   identity、或 dependency/authorization target 漂移都必须返回 conflict。
-- operation-scoped governance continue 保持原 ExecutionKey，通过 CAS 将 governance fence `N` 推进到 resume fence `N+1`；typed grant 必须绑定唯一 ticket/approval、resolution、dependency、subject、requested action、authorization hash 与治理 receipt hash。各 concrete owner 在 receipt preflight 时验证 grant，禁止复用 `Receipt(K,N)=governance_required` 作为普通 evidence。
+- operation-scoped governance continue 只恢复 suspended binding 指向且未列入 source `CompletedOperationIDs` 的 exact
+  `owner_committed` governed execution。source dispatch 必须为 committed，且 history 顺序严格为
+  `source operation dispatch < committed governance dispatch < resume dispatch`；grant 只能授权唯一 `ResumeDispatchID`。
+  source `governance_required` receipt/history 保持不变；新 resume execution
+  原样继承 `ExecutionKey`、`ExpectedEffectScope`、sealed idempotency、`AdmissibilitySnapshotID`、`AcquisitionBinding` 与 `ReplayProof`，
+  清空 receipt ref/hash 后以 fence `N+1` 和 `governance_granted` marker 进入 claimed。completed sibling 必须在 source
+  `CompletedOperationIDs` 中且为 `evidence_committed`，其 key/fence/receipt/authority 完整保留并禁止重执行；pending
+  sibling 必须为 `sealed`，source candidate（包括 target/parameters/dependencies）保持不变，只生成新的 dispatch-scoped
+  `ExecutionKey`，并继承 effect scope/catalog/acquisition/replay authority。source execution 与 binding 不匹配或
+  execution/replay authority 自身不一致必须 fail-closed，禁止从 current facts/catalog 重建或替换 authority。
+  首次 owner call 前必须以独立 CAS 把 claim marker 推进为 `governance_effect_started`；该 marker 只表示 owner call
+  可能已尝试，CAS 失败时 owner call 必须为零。owner error/response loss 后先 query exact receipt；只有 receipt 缺失且
+  具备 sealed replay authority 时，任一再次 physical owner call 才须由独立 SM-4 event 先消费一次 operation-recovery
+  counter，并携带 exact OperationID/persisted attempt，否则进入 `outcome_unknown`。typed grant 必须绑定唯一
+  ticket/approval、resolution、dependency、subject、requested action、authorization hash 与治理 receipt hash；
+  各 concrete owner 在 receipt preflight 时验证 grant，禁止复用 `Receipt(K,N)=governance_required` 作为普通 evidence。
 - receipt query 对 persisted governance grant 执行严格 presence parity：调用方省略已持久化 grant、无 binding 时额外附加 grant、或任一字段
   漂移均 conflict，并在 capability side effect 前返回。
 - File/Git/MCP/Shell/SSH/Web execute Result 只返回 owner-persisted `RuntimeOperationReceipt`；Runtime EventID、

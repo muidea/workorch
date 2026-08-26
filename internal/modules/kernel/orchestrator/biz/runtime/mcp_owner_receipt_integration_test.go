@@ -526,10 +526,7 @@ func TestMCPOwnerObservedFailureTargetBindsThroughEventHubAndFileSnapshot(t *tes
 	}
 	replayed := sendObservedMCPExecution(t, ctx, hub, mcpevents.ExecuteOperationCommand{
 		RuntimeOperationExecutionContext: runtimecontract.RuntimeOperationExecutionContext{
-			Execution: runtimecontract.RuntimeOperationExecutionEnvelope{
-				ExecutionKey: execution.ExecutionKey, Fence: execution.Fence, ExpectedEffectScope: execution.ExpectedEffectScope,
-				AdmissibilitySnapshotID: execution.AdmissibilitySnapshotID, AcquisitionBinding: execution.AcquisitionBinding,
-			},
+			Execution:   runtimeOperationExecutionEnvelopeForTest(execution, nil),
 			WorkspaceID: persisted.Facts.WorkspaceID, RunID: persisted.Facts.RunID, DispatchID: dispatch.ID, Transaction: dispatch.Transaction,
 			OperationID: replayOperation.ID, CoverageWorkItemIDs: append([]common.CoverageWorkItemID(nil), replayOperation.CoverageWorkItemIDs...),
 			TargetRefs: append([]string(nil), replayOperation.TargetRefs...), EvidenceKind: runtimecontract.EvidenceKindValidation, WorkspaceDeliverableDirectory: t.TempDir(), WorkspaceInternalDirectory: t.TempDir(),
@@ -592,11 +589,7 @@ func (e runtimeObservedMCPExecutor) ExecuteRuntimeOperation(ctx context.Context,
 		mcpevents.TopicExecuteOperation, runtimecontract.RuntimeModuleOrchestrator, runtimecontract.RuntimeModuleMCP,
 		magicevent.NewHeader(), ctx, mcpevents.ExecuteOperationCommand{
 			RuntimeOperationExecutionContext: runtimecontract.RuntimeOperationExecutionContext{
-				Execution: runtimecontract.RuntimeOperationExecutionEnvelope{
-					ExecutionKey: request.Execution.ExecutionKey, Fence: request.Execution.Fence, ExpectedEffectScope: request.Execution.ExpectedEffectScope,
-					AdmissibilitySnapshotID: request.Execution.AdmissibilitySnapshotID, AcquisitionBinding: request.Execution.AcquisitionBinding,
-					GovernanceGrant: request.GovernanceGrant,
-				},
+				Execution:   runtimeOperationExecutionEnvelopeForTest(request.Execution, request.GovernanceGrant),
 				WorkspaceID: request.WorkspaceID, RunID: request.RunID, DispatchID: request.DispatchID, Transaction: request.Transaction,
 				OperationID: request.Operation.ID, CoverageWorkItemIDs: append([]common.CoverageWorkItemID(nil), request.Operation.CoverageWorkItemIDs...),
 				TargetRefs: append([]string(nil), request.Operation.TargetRefs...), EvidenceKind: request.EvidenceKind,
@@ -639,7 +632,7 @@ func (e runtimeObservedFilePatchExecutor) ExecuteRuntimeOperation(ctx context.Co
 		fileevents.TopicExecutePatchApplyOperation, runtimecontract.RuntimeModuleOrchestrator, runtimecontract.RuntimeModuleFile,
 		magicevent.NewHeader(), ctx, fileevents.ExecutePatchApplyOperationCommand{
 			RuntimeOperationExecutionContext: runtimecontract.RuntimeOperationExecutionContext{
-				Execution:                     runtimecontract.RuntimeOperationExecutionEnvelope{ExecutionKey: request.Execution.ExecutionKey, Fence: request.Execution.Fence, ExpectedEffectScope: request.Execution.ExpectedEffectScope, GovernanceGrant: request.GovernanceGrant},
+				Execution:                     runtimeOperationExecutionEnvelopeForTest(request.Execution, request.GovernanceGrant),
 				WorkspaceID:                   request.WorkspaceID,
 				RunID:                         request.RunID,
 				DispatchID:                    request.DispatchID,
@@ -964,10 +957,17 @@ func runtimeObservedCandidatePayload(request llmmodels.RuntimeCandidateRequest) 
 
 func runtimeObservedCandidateBindingRefsField(request llmmodels.RuntimeCandidateRequest, kind string) string {
 	refs := make([]string, 0)
+	seen := map[string]struct{}{}
 	for _, authorization := range request.CandidateManifest.Operations {
 		if runtimecontract.CanonicalRuntimeBlockKind(authorization.Kind) == runtimecontract.CanonicalRuntimeBlockKind(kind) {
 			for _, bindingAuthorization := range authorization.BindingAuthorizations {
-				refs = append(refs, bindingAuthorization.AllowedBindingRefs...)
+				for _, ref := range bindingAuthorization.AllowedBindingRefs {
+					if _, found := seen[ref]; found {
+						continue
+					}
+					seen[ref] = struct{}{}
+					refs = append(refs, ref)
+				}
 			}
 			break
 		}

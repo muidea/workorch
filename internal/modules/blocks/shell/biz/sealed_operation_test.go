@@ -56,5 +56,13 @@ func sealedShellTestCommand(t *testing.T, adapter *RuntimeAdapter, executionCont
 	}
 	executionContext.Execution.AdmissibilitySnapshotID = sealed.Authorization.CatalogSnapshotID
 	executionContext.Execution.AcquisitionBinding = sealed.Authorization.AcquisitionBinding
+	executionContext.Execution.OperationHash = runtimecontract.StableRuntimeOperationHash(operation)
+	executionContext.Execution.IdempotencyClass = runtimecontract.ResolveOperationIdempotencyClass(operation, []runtimecontract.RuntimeOperationPolicyFact{sealed.Authorization.Policy})
+	executionContext.Execution.AuthorityHash = runtimecontract.StableRuntimeOperationExecutionAuthorityHash(runtimecontract.RuntimeOperationExecutionRecord{
+		OperationID: operation.ID, OperationHash: executionContext.Execution.OperationHash, ExecutionKey: executionContext.Execution.ExecutionKey,
+		ExpectedEffectScope: executionContext.Execution.ExpectedEffectScope, IdempotencyClass: executionContext.Execution.IdempotencyClass,
+		AdmissibilitySnapshotID: executionContext.Execution.AdmissibilitySnapshotID, AcquisitionBinding: executionContext.Execution.AcquisitionBinding,
+		ReplayProof: executionContext.Execution.ReplayProof,
+	})
 	return shellevents.ExecuteOperationCommand{RuntimeOperationExecutionContext: executionContext, SealedOperation: sealed}
 }

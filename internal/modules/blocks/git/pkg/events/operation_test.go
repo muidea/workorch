@@ -2,6 +2,7 @@ package events
 
 import (
 	"slices"
+	"strings"
 	"testing"
 
 	"github.com/muidea/workorch/internal/pkg/eventcontract"
@@ -58,10 +59,27 @@ func TestSealedRuntimeOperationBindsPayloadAndExecutionScope(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	context := runtimecontract.RuntimeOperationExecutionContext{OperationID: operation.ID, TargetRefs: []string{"main.go"}}
+	context := runtimecontract.RuntimeOperationExecutionContext{
+		WorkspaceID: "ws", RunID: "run", DispatchID: "dispatch",
+		Execution: testExecutionEnvelope(operation, runtimecontract.RuntimeOperationExecutionEnvelope{
+			ExecutionKey: "exec/ws/run/dispatch/git-add", Fence: 1,
+			ExpectedEffectScope: runtimecontract.ResolveExpectedEffectScope(operation, nil),
+		}, nil),
+		OperationID: operation.ID, TargetRefs: []string{"main.go"},
+	}
 	validated, err := sealed.ValidateForExecution(context)
 	if err != nil || validated.ID != operation.ID || validated.TargetRefs[0] != "main.go" {
 		t.Fatalf("validated operation=%+v err=%v", validated, err)
+	}
+	idempotencyDrift := context
+	idempotencyDrift.Execution.IdempotencyClass = runtimecontract.RuntimeOperationIdempotencyAtMostOnce
+	if _, err := sealed.ValidateForExecution(idempotencyDrift); err == nil || !strings.Contains(err.Error(), "idempotency class mismatch") {
+		t.Fatalf("sealed Git operation accepted idempotency drift: %v", err)
+	}
+	authorityDrift := context
+	authorityDrift.Execution.AuthorityHash = "forged"
+	if _, err := sealed.ValidateForExecution(authorityDrift); err == nil || !strings.Contains(err.Error(), "authority hash mismatch") {
+		t.Fatalf("sealed Git operation accepted authority hash drift: %v", err)
 	}
 
 	mutated := sealed

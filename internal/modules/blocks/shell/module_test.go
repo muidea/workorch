@@ -144,14 +144,22 @@ func TestShellModuleExecutesConcreteEventHubContract(t *testing.T) {
 	if sealErr != nil {
 		t.Fatal(sealErr)
 	}
+	execution := runtimecontract.RuntimeOperationExecutionEnvelope{
+		ExecutionKey: "exec/ws-1/run-1/dispatch-1/shell-1", Fence: 1, ExpectedEffectScope: runtimecontract.RuntimeEffectWorkspaceDurable,
+		AdmissibilitySnapshotID: sealed.Authorization.CatalogSnapshotID, AcquisitionBinding: sealed.Authorization.AcquisitionBinding,
+	}
+	execution.OperationHash = runtimecontract.StableRuntimeOperationHash(operation)
+	execution.IdempotencyClass = runtimecontract.ResolveOperationIdempotencyClass(operation, []runtimecontract.RuntimeOperationPolicyFact{sealed.Authorization.Policy})
+	execution.AuthorityHash = runtimecontract.StableRuntimeOperationExecutionAuthorityHash(runtimecontract.RuntimeOperationExecutionRecord{
+		OperationID: operation.ID, OperationHash: execution.OperationHash, ExecutionKey: execution.ExecutionKey, ExpectedEffectScope: execution.ExpectedEffectScope,
+		IdempotencyClass: execution.IdempotencyClass, AdmissibilitySnapshotID: execution.AdmissibilitySnapshotID,
+		AcquisitionBinding: execution.AcquisitionBinding,
+	})
 	result := hub.Send(magicevent.NewEventWithContext(
 		shellevents.TopicExecuteOperation, runtimecontract.RuntimeModuleOrchestrator, ModuleID, magicevent.NewHeader(), ctx,
 		shellevents.ExecuteOperationCommand{
 			RuntimeOperationExecutionContext: runtimecontract.RuntimeOperationExecutionContext{
-				Execution: runtimecontract.RuntimeOperationExecutionEnvelope{
-					ExecutionKey: "exec/ws-1/run-1/dispatch-1/shell-1", Fence: 1, ExpectedEffectScope: runtimecontract.RuntimeEffectWorkspaceDurable,
-					AdmissibilitySnapshotID: sealed.Authorization.CatalogSnapshotID, AcquisitionBinding: sealed.Authorization.AcquisitionBinding,
-				},
+				Execution:   execution,
 				WorkspaceID: "ws-1", RunID: "run-1", DispatchID: "dispatch-1",
 				Transaction: runtimecontract.AuthorityTransaction{AuthoritySnapshotID: "authority-1", RequiredOutputHash: "output-1"},
 				OperationID: "shell-1", EvidenceKind: runtimecontract.EvidenceKindStateChange,

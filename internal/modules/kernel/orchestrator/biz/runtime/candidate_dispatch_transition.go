@@ -483,6 +483,9 @@ func (c *candidateDispatchComponent) admitAndSealCandidateAttempt(ctx context.Co
 	aggregate.CandidateAttempts[idx].State = runtimecontract.RuntimeCandidateAttemptStateAccepted
 	aggregate.CandidateAttempts[idx].Proposal = nil
 	aggregate.CandidateAttempts[idx].Feasibilities = nil
+	aggregate.CandidateAttempts[idx].CandidateHash = dispatch.CandidateHash
+	aggregate.CandidateAttempts[idx].DispatchID = dispatch.ID
+	aggregate.CandidateAttempts[idx].DispatchAuthorityHash = dispatch.DispatchAuthorityHash
 	aggregate.ActiveDispatch = &dispatch
 	aggregate.StateRevision++
 	if err := aggregate.Validate(); err != nil {
@@ -582,7 +585,15 @@ func admitRuntimeDispatch(aggregate RuntimeAggregate, manifest runtimecontract.R
 		}
 		feasibilities = attempt.Feasibilities
 	}
-	dispatch, err := SealDispatchWithManifestAndFeasibilities(aggregate.Decision, candidate, runtimecontract.RuntimeActivationForFacts(aggregate.Facts), manifest, feasibilities)
+	dispatch, err := SealDispatchWithManifestAndOwnerAuthority(
+		aggregate.Decision,
+		candidate,
+		runtimecontract.RuntimeActivationForFacts(aggregate.Facts),
+		manifest,
+		feasibilities,
+		aggregate.Facts.Resources.OperationAdmissibilities,
+		aggregate.Facts.Resources.PrerequisiteObservations,
+	)
 	if err != nil {
 		return SealedDispatch{}, runtimecontract.RuntimeCompleteAdmissionDecision{
 			Disposition: runtimecontract.RuntimeCompleteAdmissionTerminalContractFailure,
@@ -911,11 +922,14 @@ func acceptedCandidateAdmissionDuplicate(aggregate RuntimeAggregate, attempt int
 		if record.Attempt != attempt || record.ManifestHash != manifestHash || record.LogicalRequestID != logicalRequestID || record.State != runtimecontract.RuntimeCandidateAttemptStateAccepted {
 			continue
 		}
-		if aggregate.ActiveDispatch != nil && aggregate.ActiveDispatch.Transaction == record.Transaction && aggregate.ActiveDispatch.CandidateHash == wanted {
+		if aggregate.ActiveDispatch != nil && aggregate.ActiveDispatch.Transaction == record.Transaction &&
+			record.CandidateHash == wanted && aggregate.ActiveDispatch.ID == record.DispatchID &&
+			aggregate.ActiveDispatch.CandidateHash == record.CandidateHash && aggregate.ActiveDispatch.DispatchAuthorityHash == record.DispatchAuthorityHash {
 			return true
 		}
 		for _, dispatch := range aggregate.CompletedDispatches {
-			if dispatch.Transaction == record.Transaction && dispatch.CandidateHash == wanted {
+			if dispatch.Transaction == record.Transaction && record.CandidateHash == wanted && dispatch.ID == record.DispatchID &&
+				dispatch.CandidateHash == record.CandidateHash && dispatch.DispatchAuthorityHash == record.DispatchAuthorityHash {
 				return true
 			}
 		}

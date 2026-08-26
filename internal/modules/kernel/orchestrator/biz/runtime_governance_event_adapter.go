@@ -323,10 +323,9 @@ func persistedRuntimeGovernanceContinuationHandoff(
 		return runtimeGovernanceLifecycleHandoff{}, false, err
 	}
 	matchedRecord := false
+	wantRecord := runtimecontract.RuntimeGovernanceResolutionRecordFromResolution(resolution)
 	for _, record := range aggregate.GovernanceResolutions {
-		if record.ResolutionID == resolution.ResolutionID && record.TicketID == resolution.TicketID && record.ApprovalID == resolution.ApprovalID &&
-			record.AuthoritySnapshotID == resolution.AuthoritySnapshotID && record.DispatchID == resolution.DispatchID &&
-			record.Outcome == resolution.Outcome {
+		if runtimecontract.SameRuntimeGovernanceResolutionRecord(record, wantRecord) {
 			matchedRecord = true
 			break
 		}

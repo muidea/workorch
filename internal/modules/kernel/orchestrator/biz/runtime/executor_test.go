@@ -3,6 +3,7 @@ package runtime
 import (
 	"context"
 	"errors"
+	"reflect"
 	"testing"
 
 	"github.com/muidea/workorch/internal/pkg/common"
@@ -557,6 +558,76 @@ func TestRuntimeControllerTurnsClaimedWithoutReceiptIntoOutcomeUnknownWithoutRep
 	}
 }
 
+func TestMissingOperationExecutionLedgerFailsWithoutSaveOrBudgetMutation(t *testing.T) {
+	repository := &controllerRepository{}
+	controller, _ := NewRuntimeController(repository)
+	aggregate, err := controller.initialize(context.Background(), controllerFacts(), controllerDefinition(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sealed, err := beginAndAcceptCandidate(t, controller, aggregate, runtimecontract.RuntimeCandidate{StateChange: &runtimecontract.StateChangeCandidate{Operations: []runtimecontract.StateChangingOperation{{
+		Operation: runtimecontract.RuntimeOperation{ID: "write-1", Kind: runtimecontract.StepKindFileWrite, CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-v2"}, TargetRefs: []string{"target.txt"}, Parameters: runtimeFileWriteParameters("content")},
+	}}}})
+	if err != nil || sealed.ActiveDispatch == nil {
+		t.Fatalf("seal aggregate=%+v err=%v", sealed, err)
+	}
+	repository.aggregate.ActiveDispatch.OperationExecutions = nil
+	saves := repository.saves
+	budget := repository.aggregate.ExecutionBudget.Clone()
+	for name, invoke := range map[string]func() error{
+		"claim": func() error {
+			_, err := controller.claimOperationExecution(context.Background(), "ws-v2", "run-v2", "write-1")
+			return err
+		},
+		"outcome_unknown": func() error {
+			_, err := controller.candidateDispatch.markOperationExecutionOutcomeUnknown(context.Background(), "ws-v2", "run-v2", "write-1")
+			return err
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			if err := invoke(); !errors.Is(err, common.ErrConflict) {
+				t.Fatalf("missing execution ledger err=%v, want conflict", err)
+			}
+			if repository.saves != saves || len(repository.aggregate.ActiveDispatch.OperationExecutions) != 0 ||
+				!reflect.DeepEqual(repository.aggregate.ExecutionBudget, budget) {
+				t.Fatalf("missing execution ledger mutated persistence: saves=%d aggregate=%+v", repository.saves, repository.aggregate)
+			}
+		})
+	}
+}
+
+func TestRuntimeOperationReplayAuthorityUsesOnlySealedIdempotency(t *testing.T) {
+	execution := runtimecontract.RuntimeOperationExecutionRecord{
+		OperationID: "operation-1", ExecutionKey: "execution-1",
+		ExpectedEffectScope: runtimecontract.RuntimeEffectWorkspaceDurable,
+		IdempotencyClass:    runtimecontract.RuntimeOperationIdempotencyAtMostOnce,
+		State:               runtimecontract.OperationExecutionClaimed,
+		Fence:               1,
+		ClaimedAt:           runtimecontract.RuntimeOperationClaimMarkerInitial,
+	}
+	if runtimeOperationHasReplayAuthority(execution) {
+		t.Fatal("at-most-once sealed execution gained replay authority")
+	}
+	execution.IdempotencyClass = runtimecontract.RuntimeOperationIdempotencySafeToReplay
+	if !runtimeOperationHasReplayAuthority(execution) {
+		t.Fatal("safe-to-replay sealed execution lost replay authority")
+	}
+	execution.IdempotencyClass = runtimecontract.RuntimeOperationIdempotencyOwnerManaged
+	if !runtimeOperationHasReplayAuthority(execution) {
+		t.Fatal("owner-managed sealed execution lost replay authority")
+	}
+	execution.IdempotencyClass = runtimecontract.RuntimeOperationIdempotencyAtMostOnce
+	execution.AdmissibilitySnapshotID = "catalog-1"
+	execution.ReplayProof = &runtimecontract.RuntimeOperationReplayProof{
+		OwnerModuleID: runtimecontract.RuntimeModuleFile, OperationID: execution.OperationID,
+		TargetRefs: []string{"target.txt"}, BeforeHash: "before", AfterHash: "after",
+		AdmissibilitySnapshotID: "catalog-1",
+	}
+	if !runtimeOperationHasReplayAuthority(execution) {
+		t.Fatal("exact sealed replay proof did not authorize recovery")
+	}
+}
+
 func TestRuntimeControllerDoesNotReplayClaimedManagedValidationWithoutReplayProof(t *testing.T) {
 	repository := &controllerRepository{}
 	controller, _ := NewRuntimeController(repository)
@@ -601,18 +672,18 @@ func TestRuntimeControllerRecoversClaimedAtMostOnceOperationOnlyWithSealedReplay
 	repository := &controllerRepository{}
 	controller, _ := NewRuntimeController(repository)
 	facts := controllerFacts()
-	facts.Capabilities = runtimecontract.RuntimeCapabilities{StateChangeKinds: []string{runtimecontract.RuntimeBlockKindPatchApply}}
+	facts.Capabilities = runtimecontract.RuntimeCapabilities{StateChangeKinds: []string{runtimecontract.StepKindFileWrite}}
 	definition := controllerDefinition()
-	definition.CapabilityContract = []string{runtimecontract.RuntimeBlockKindPatchApply}
+	definition.CapabilityContract = []string{runtimecontract.StepKindFileWrite}
 	facts = runtimeTestFactsWithCurrentFocusBindings(t, facts, definition)
 	_, err := controller.initialize(context.Background(), facts, definition, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	patchType, target, content := "file_write", "target.txt", "after\n"
+	target, content := "target.txt", "after\n"
 	candidate := runtimecontract.RuntimeCandidate{StateChange: &runtimecontract.StateChangeCandidate{Operations: []runtimecontract.StateChangingOperation{{Operation: runtimecontract.RuntimeOperation{
-		ID: "patch-1", Kind: runtimecontract.RuntimeBlockKindPatchApply, CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-v2"}, TargetRefs: []string{target},
-		Parameters: []runtimecontract.OperationParameter{{Name: "patchType", String: &patchType}, {Name: "content", String: &content}},
+		ID: "write-1", Kind: runtimecontract.StepKindFileWrite, CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-v2"}, TargetRefs: []string{target},
+		Parameters: runtimeFileWriteParameters(content),
 	}}}}}
 	if _, err := controller.BeginCandidateAttemptForTest(context.Background(), "ws-v2", "run-v2", 0, "stable-prefix"); err != nil {
 		t.Fatal(err)
@@ -620,12 +691,17 @@ func TestRuntimeControllerRecoversClaimedAtMostOnceOperationOnlyWithSealedReplay
 	if _, err := controller.AdmitCandidateProposalForTest(context.Background(), "ws-v2", "run-v2", 0, candidate); err != nil {
 		t.Fatal(err)
 	}
+	loaded, err := controller.Load(context.Background(), "ws-v2", "run-v2")
+	if err != nil || len(loaded.Facts.Resources.OperationAdmissibilities) != 1 {
+		t.Fatalf("load sealed File catalog: aggregate=%+v err=%v", loaded, err)
+	}
+	catalog := loaded.Facts.Resources.OperationAdmissibilities[0].Normalized()
 	proof := runtimecontract.RuntimeOperationReplayProof{
-		OwnerModuleID: runtimecontract.RuntimeModuleFile, OperationID: "patch-1", TargetRefs: []string{target},
-		BeforeHash: "before", AfterHash: "after", AdmissibilitySnapshotID: "admissibility-1",
+		OwnerModuleID: runtimecontract.RuntimeModuleFile, OperationID: "write-1", TargetRefs: []string{target},
+		BeforeHash: "before", AfterHash: "after", AdmissibilitySnapshotID: catalog.SnapshotID, AcquisitionBinding: catalog.AcquisitionBinding,
 	}
 	if _, err := controller.recordCandidateFeasibility(context.Background(), "ws-v2", "run-v2", 0, runtimecontract.RuntimeCandidateFeasibilityRecord{
-		OperationID: "patch-1", AdmissibilitySnapshotID: "admissibility-1",
+		OperationID: "write-1", AdmissibilitySnapshotID: catalog.SnapshotID, AcquisitionBinding: catalog.AcquisitionBinding,
 		CandidateManifestHash: runtimeTestPendingCandidateManifestHash(t, controller, "ws-v2", "run-v2", 0), Observation: &runtimecontract.RuntimeOwnerFeasibilityObservation{Outcome: runtimecontract.RuntimeOwnerFeasibilityFeasible}, ReplayProof: &proof,
 	}); err != nil {
 		t.Fatal(err)
@@ -634,7 +710,7 @@ func TestRuntimeControllerRecoversClaimedAtMostOnceOperationOnlyWithSealedReplay
 	if err != nil || sealed.Aggregate.ActiveDispatch == nil {
 		t.Fatalf("seal replay-proof candidate aggregate=%+v err=%v", sealed.Aggregate, err)
 	}
-	execution, ok := operationExecutionRecord(sealed.Aggregate.ActiveDispatch.OperationExecutions, "patch-1")
+	execution, ok := operationExecutionRecord(sealed.Aggregate.ActiveDispatch.OperationExecutions, "write-1")
 	if !ok || execution.ReplayProof == nil || execution.ReplayProof.AfterHash != "after" {
 		t.Fatalf("sealed execution omitted replay proof: %+v", execution)
 	}
@@ -750,7 +826,7 @@ func TestRuntimeControllerRestartAtomicallyInvalidatesUncommittableOwnerReceipt(
 	}
 }
 
-func TestRuntimeControllerRestartMigratesPersistedMixedEffectDispatchWithoutReplay(t *testing.T) {
+func TestRuntimeControllerRestartRejectsPersistedMixedEffectDispatchWithoutReplay(t *testing.T) {
 	repository := &controllerRepository{}
 	controller, _ := NewRuntimeController(repository)
 	aggregate, err := controller.initialize(context.Background(), controllerFacts(), controllerDefinition(), nil)
@@ -763,9 +839,8 @@ func TestRuntimeControllerRestartMigratesPersistedMixedEffectDispatchWithoutRepl
 	if err != nil || sealed.ActiveDispatch == nil {
 		t.Fatalf("seal aggregate=%+v err=%v", sealed, err)
 	}
-	// Persist the exact pre-C1 shape: a non-durable Shell operation was sealed
-	// alongside a durable File operation under produce_state_change, and its
-	// accepted owner receipt was durable before the process restarted.
+	// Inject an obsolete mixed-effect shape. Current Runtime does not migrate
+	// persisted authority: restart must fail closed before any owner call.
 	falseFlag := false
 	command := "go"
 	shell := runtimecontract.RuntimeOperation{
@@ -793,14 +868,11 @@ func TestRuntimeControllerRestartMigratesPersistedMixedEffectDispatchWithoutRepl
 
 	restarted, _ := NewRuntimeController(repository)
 	executor := &failIfExecutedOperationExecutor{}
-	progressed, err := restarted.executeActiveDispatch(context.Background(), "ws-v2", "run-v2", executor)
-	if err != nil {
-		t.Fatal(err)
+	if _, err := restarted.executeActiveDispatch(context.Background(), "ws-v2", "run-v2", executor); err == nil {
+		t.Fatal("obsolete mixed-effect dispatch was accepted during restart")
 	}
-	if executor.called || progressed.ActiveDispatch != nil || len(progressed.CompletedDispatches) != 1 ||
-		progressed.CompletedDispatches[0].State != DispatchStateInvalidated || progressed.Facts.Failure == nil ||
-		progressed.Facts.Failure.Class != runtimecontract.FailureClassEffectMismatch {
-		t.Fatalf("persisted mixed-effect dispatch did not migrate atomically: %+v called=%v", progressed, executor.called)
+	if executor.called || repository.aggregate.ActiveDispatch == nil || len(repository.aggregate.CompletedDispatches) != 0 {
+		t.Fatalf("invalid persisted dispatch caused an owner call or migration: aggregate=%+v called=%v", repository.aggregate, executor.called)
 	}
 }
 

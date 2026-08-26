@@ -19,6 +19,12 @@ func ResolveExpectedEffectScope(operation RuntimeOperation, policies []RuntimeOp
 	if policy, found := RuntimeOperationPolicyForOperation(operation, policies); found {
 		return policy.EffectScope
 	}
+	if contract, found := RuntimeOperationContractForKind(kind); found && len(contract.Variants) > 0 {
+		variant, err := MatchRuntimeOperationVariant(operation, contract)
+		if err == nil {
+			return NormalizeRuntimeEffectScope(variant.EffectScope)
+		}
+	}
 	return NormalizeRuntimeEffectScope(descriptor.DefaultEffectScope)
 }
 
@@ -34,6 +40,12 @@ func ResolveOperationIdempotencyClass(operation RuntimeOperation, policies []Run
 	}
 	if policy, found := RuntimeOperationPolicyForOperation(operation, policies); found {
 		return policy.IdempotencyClass
+	}
+	if contract, found := RuntimeOperationContractForKind(kind); found && len(contract.Variants) > 0 {
+		variant, err := MatchRuntimeOperationVariant(operation, contract)
+		if err == nil {
+			return NormalizeRuntimeOperationIdempotencyClass(variant.IdempotencyClass)
+		}
 	}
 	return NormalizeRuntimeOperationIdempotencyClass(descriptor.IdempotencyClass)
 }

@@ -97,6 +97,16 @@ func TestShellSealCoversOperationRecipeScopeRoleAndEvidencePolicy(t *testing.T) 
 		len(authorization.ValidationRecipes) != 1 || authorization.ValidationRecipes[0].Command != "sh" {
 		t.Fatalf("valid Shell owner payload = %+v err=%v", authorization, err)
 	}
+	idempotencyDrift := executionContext
+	idempotencyDrift.Execution.IdempotencyClass = runtimecontract.RuntimeOperationIdempotencySafeToReplay
+	if _, _, err := sealed.ValidateForExecution(idempotencyDrift); err == nil || !strings.Contains(err.Error(), "idempotency class mismatch") {
+		t.Fatalf("sealed Shell operation accepted idempotency drift: %v", err)
+	}
+	authorityDrift := executionContext
+	authorityDrift.Execution.AuthorityHash = "forged"
+	if _, _, err := sealed.ValidateForExecution(authorityDrift); err == nil || !strings.Contains(err.Error(), "authority hash mismatch") {
+		t.Fatalf("sealed Shell operation accepted authority hash drift: %v", err)
+	}
 	_ = observation
 }
 
@@ -139,10 +149,12 @@ func shellSealFixture(t *testing.T) (runtimecontract.RuntimeOperation, runtimeco
 		EvidencePolicies: []runtimecontract.RuntimeEvidencePolicy{{ID: "managed-evidence", AppliesTo: runtimecontract.StepKindShellCommand, Description: "sealed"}},
 	}
 	executionContext := runtimecontract.RuntimeOperationExecutionContext{
-		Execution: runtimecontract.RuntimeOperationExecutionEnvelope{
+		WorkspaceID: "ws", RunID: "run", DispatchID: "dispatch",
+		Execution: testExecutionEnvelope(operation, runtimecontract.RuntimeOperationExecutionEnvelope{
+			ExecutionKey: "exec/ws/run/dispatch/validate-1", Fence: 1,
 			ExpectedEffectScope:     runtimecontract.RuntimeEffectEphemeralSession,
 			AdmissibilitySnapshotID: catalog.SnapshotID, AcquisitionBinding: catalog.AcquisitionBinding,
-		},
+		}, catalog.OperationPolicies),
 		OperationID: operation.ID, TargetRefs: operation.TargetRefs,
 	}
 	return operation, catalog, observation, input, executionContext

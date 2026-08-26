@@ -148,20 +148,100 @@ func TestRuntimeOperationExecutionRecordAndReceiptRoundTrip(t *testing.T) {
 	if key != "exec/ws-1/run-1/dispatch-1/op-1" {
 		t.Fatalf("execution key = %q", key)
 	}
+	content := "sealed content"
+	operation := RuntimeOperation{ID: "op-1", Kind: StepKindFileWrite, TargetRefs: []string{"target.txt"}, Parameters: []OperationParameter{{Name: "content", String: &content}}}
 	sealed := RuntimeOperationExecutionRecord{
-		OperationID: "op-1", ExecutionKey: key,
+		OperationID: "op-1", OperationHash: StableRuntimeOperationHash(operation), ExecutionKey: key,
 		ExpectedEffectScope:     RuntimeEffectWorkspaceDurable,
+		IdempotencyClass:        RuntimeOperationIdempotencyAtMostOnce,
 		AdmissibilitySnapshotID: "admissibility-1",
 		AcquisitionBinding:      "capability-state/ws-1/run-1/owner/0",
 		State:                   OperationExecutionSealed,
 	}
+	sealed.AuthorityHash = StableRuntimeOperationExecutionAuthorityHash(sealed)
 	if err := sealed.Validate(); err != nil {
 		t.Fatalf("sealed validate: %v", err)
+	}
+	for name, scope := range map[string]RuntimeEffectScope{
+		"missing": "",
+		"invalid": "future_effect",
+		"unknown": RuntimeEffectUnknown,
+	} {
+		t.Run("sealed effect scope "+name, func(t *testing.T) {
+			invalid := sealed
+			invalid.ExpectedEffectScope = scope
+			invalid.AuthorityHash = StableRuntimeOperationExecutionAuthorityHash(invalid)
+			if err := invalid.Validate(); err == nil {
+				t.Fatalf("execution record accepted unresolved effect scope %q", scope)
+			}
+		})
+	}
+	missingClassJSON, err := json.Marshal(sealed)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var missingClassObject map[string]any
+	if err := json.Unmarshal(missingClassJSON, &missingClassObject); err != nil {
+		t.Fatal(err)
+	}
+	delete(missingClassObject, "IdempotencyClass")
+	missingClassJSON, err = json.Marshal(missingClassObject)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var missingClass RuntimeOperationExecutionRecord
+	if err := json.Unmarshal(missingClassJSON, &missingClass); err != nil {
+		t.Fatal(err)
+	}
+	missingClass.AuthorityHash = StableRuntimeOperationExecutionAuthorityHash(missingClass)
+	if err := missingClass.Validate(); err == nil {
+		t.Fatal("execution record accepted JSON with missing idempotency class")
+	}
+	invalidClass := sealed
+	invalidClass.IdempotencyClass = "invalid"
+	invalidClass.AuthorityHash = StableRuntimeOperationExecutionAuthorityHash(invalidClass)
+	if err := invalidClass.Validate(); err == nil {
+		t.Fatal("execution record accepted an invalid idempotency class")
+	}
+	unknownClass := sealed
+	unknownClass.IdempotencyClass = RuntimeOperationIdempotencyUnknown
+	unknownClass.AuthorityHash = StableRuntimeOperationExecutionAuthorityHash(unknownClass)
+	if err := unknownClass.Validate(); err == nil {
+		t.Fatal("execution record accepted an unresolved idempotency class")
+	}
+	missingAuthorityHash := sealed
+	missingAuthorityHash.AuthorityHash = ""
+	if err := missingAuthorityHash.Validate(); err == nil {
+		t.Fatal("execution record accepted a missing authority hash")
+	}
+	driftedAuthority := sealed
+	driftedAuthority.IdempotencyClass = RuntimeOperationIdempotencySafeToReplay
+	if err := driftedAuthority.Validate(); err == nil {
+		t.Fatal("execution record accepted idempotency drift outside its authority hash")
 	}
 	unbound := sealed
 	unbound.AdmissibilitySnapshotID = ""
 	if err := unbound.Validate(); err == nil {
 		t.Fatal("execution record accepted acquisition binding without owner catalog snapshot")
+	}
+	proofed := sealed
+	proofed.ReplayProof = &RuntimeOperationReplayProof{
+		OwnerModuleID: RuntimeModuleFile, OperationID: sealed.OperationID, TargetRefs: []string{"target.txt"},
+		BeforeHash: "before", AfterHash: "after", AdmissibilitySnapshotID: sealed.AdmissibilitySnapshotID,
+		AcquisitionBinding: sealed.AcquisitionBinding,
+	}
+	proofed.AuthorityHash = StableRuntimeOperationExecutionAuthorityHash(proofed)
+	if err := proofed.Validate(); err != nil {
+		t.Fatalf("proofed execution validate: %v", err)
+	}
+	proofClone := proofed.Clone()
+	proofClone.ReplayProof.TargetRefs[0] = "other.txt"
+	if proofed.ReplayProof.TargetRefs[0] != "target.txt" {
+		t.Fatal("operation execution clone aliases replay proof targets")
+	}
+	proofed.ReplayProof.AdmissibilitySnapshotID = "other-admissibility"
+	if err := proofed.Validate(); err == nil {
+		t.Fatal("execution record accepted replay proof with substituted owner authority")
 	}
 	// claimed without fence fails
 	claimed := sealed
@@ -170,7 +250,11 @@ func TestRuntimeOperationExecutionRecordAndReceiptRoundTrip(t *testing.T) {
 		t.Fatal("claimed without fence must fail")
 	}
 	claimed.Fence = 1
-	claimed.ClaimedAt = "2026-07-17T00:00:00Z"
+	claimed.ClaimedAt = "unknown-claim-marker"
+	if err := claimed.Validate(); err == nil {
+		t.Fatal("claimed execution accepted an unknown claim marker")
+	}
+	claimed.ClaimedAt = RuntimeOperationClaimMarkerInitial
 	if err := claimed.Validate(); err != nil {
 		t.Fatalf("claimed validate: %v", err)
 	}

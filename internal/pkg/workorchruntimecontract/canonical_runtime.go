@@ -2228,21 +2228,30 @@ func validateAuthoritySnapshot(d RuntimeDecision) error {
 }
 
 func stableAuthoritySnapshotID(snapshot AuthoritySnapshot) string {
+	return StableAuthoritySnapshotIDForTransaction(snapshot.WorkspaceID, snapshot.RunID, AuthorityTransaction{
+		FocusID: snapshot.FocusID, State: snapshot.State, RequiredOutputHash: snapshot.RequiredOutputHash,
+		DefinitionRevision: snapshot.DefinitionRevision, EvidenceRevision: snapshot.EvidenceRevision,
+		CapabilityStateHash: snapshot.CapabilityStateHash, PrerequisiteFreshnessHash: snapshot.PrerequisiteFreshnessHash,
+		OperationContractRevision: snapshot.OperationContractRevision, AuthorityInputID: snapshot.AuthorityInputID, Attempt: snapshot.Attempt,
+	})
+}
+
+func StableAuthoritySnapshotIDForTransaction(workspaceID common.WorkspaceID, runID common.RunID, transaction AuthorityTransaction) string {
 	h := sha256.New()
-	writeHashString(h, string(snapshot.WorkspaceID))
-	writeHashString(h, string(snapshot.RunID))
-	writeHashString(h, string(snapshot.State))
-	writeHashString(h, snapshot.FocusID)
-	writeHashString(h, snapshot.RequiredOutputHash)
-	writeHashString(h, snapshot.DefinitionRevision)
-	writeHashString(h, snapshot.EvidenceRevision)
-	writeHashString(h, snapshot.CapabilityStateHash)
-	if snapshot.PrerequisiteFreshnessHash != "" {
-		writeHashString(h, snapshot.PrerequisiteFreshnessHash)
+	writeHashString(h, string(workspaceID))
+	writeHashString(h, string(runID))
+	writeHashString(h, string(transaction.State))
+	writeHashString(h, transaction.FocusID)
+	writeHashString(h, transaction.RequiredOutputHash)
+	writeHashString(h, transaction.DefinitionRevision)
+	writeHashString(h, transaction.EvidenceRevision)
+	writeHashString(h, transaction.CapabilityStateHash)
+	if transaction.PrerequisiteFreshnessHash != "" {
+		writeHashString(h, transaction.PrerequisiteFreshnessHash)
 	}
-	writeHashString(h, snapshot.OperationContractRevision)
-	writeHashString(h, snapshot.AuthorityInputID)
-	writeHashString(h, fmt.Sprintf("%d", snapshot.Attempt))
+	writeHashString(h, transaction.OperationContractRevision)
+	writeHashString(h, transaction.AuthorityInputID)
+	writeHashString(h, fmt.Sprintf("%d", transaction.Attempt))
 	return "authority-" + hex.EncodeToString(h.Sum(nil))[:20]
 }
 

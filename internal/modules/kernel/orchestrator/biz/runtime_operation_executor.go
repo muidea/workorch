@@ -332,7 +332,8 @@ func runtimeOperationFailureFromReceiptFeedback(receipt runtimecontract.RuntimeO
 func runtimeOperationExecutionEnvelope(execution runtimecontract.RuntimeOperationExecutionRecord, grant *runtimecontract.RuntimeOperationGovernanceGrant) runtimecontract.RuntimeOperationExecutionEnvelope {
 	execution = execution.Normalized()
 	ret := runtimecontract.RuntimeOperationExecutionEnvelope{
-		ExecutionKey: execution.ExecutionKey, Fence: execution.Fence, ExpectedEffectScope: execution.ExpectedEffectScope,
+		ExecutionKey: execution.ExecutionKey, Fence: execution.Fence, OperationHash: execution.OperationHash, ExpectedEffectScope: execution.ExpectedEffectScope,
+		IdempotencyClass: execution.IdempotencyClass, AuthorityHash: execution.AuthorityHash,
 		AdmissibilitySnapshotID: execution.AdmissibilitySnapshotID, AcquisitionBinding: execution.AcquisitionBinding,
 	}
 	if execution.ReplayProof != nil {

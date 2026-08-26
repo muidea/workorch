@@ -636,7 +636,8 @@ func TestAdmitCandidateProposalAtomicallyClosesReplayAttemptAndExhaustsSecondAtt
 	if err != nil {
 		t.Fatal(err)
 	}
-	if first.Admission.Failure == nil || first.Admission.Failure.Code != candidateAdmissionCodeReplaysRejectedShape || len(first.Aggregate.CandidateAttempts) != 1 || first.Aggregate.CandidateAttempts[0].State != runtimecontract.RuntimeCandidateAttemptStateFailed {
+	currentAttempt := first.Aggregate.CandidateAttempts[len(first.Aggregate.CandidateAttempts)-1]
+	if first.Admission.Failure == nil || first.Admission.Failure.Code != candidateAdmissionCodeReplaysRejectedShape || len(first.Aggregate.CandidateAttempts) != 2 || currentAttempt.State != runtimecontract.RuntimeCandidateAttemptStateFailed {
 		t.Fatalf("first rejected proposal = %+v", first)
 	}
 	if got, want := first.Aggregate.StateRevision, aggregate.StateRevision+5; got != want {
@@ -844,17 +845,25 @@ func aggregateWithActiveRejectedCandidate(t *testing.T) (RuntimeAggregate, runti
 	t.Helper()
 	aggregate := stateChangeAggregate(t)
 	candidate := stateChangeCandidate()
-	dispatch, err := SealDispatchWithActivation(aggregate.Decision, candidate, aggregate.Facts.Activation)
-	if err != nil {
-		t.Fatal(err)
-	}
+	repository := &durableRuntimeStateRepository{aggregate: aggregate}
+	aggregate = sealCandidateForTest(t, repository, candidate)
+	dispatch := *aggregate.ActiveDispatch
 	dispatch.State = DispatchStateCommitted
+	aggregate.ActiveDispatch = nil
 	aggregate.CompletedDispatches = []SealedDispatch{dispatch}
 	aggregate.Facts.Evidence.Rejected = []runtimecontract.EvidenceFact{{
 		ID: "rejected-patch", Kind: runtimecontract.EvidenceKindStateChange,
 		DispatchID: dispatch.ID, OperationID: "patch-1", CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-1"},
 		Revision: "runtime-evidence-00000000000000000001", FailureSignature: "rejected-patch",
 	}}
+	aggregate.Facts.EvidenceRevision = aggregate.Facts.Evidence.Rejected[0].Revision
+	decision, err := runtimecontract.SealRuntimeDecision(aggregate.Facts, runtimecontract.RuntimeDecision{
+		State: aggregate.Decision.State, Focus: aggregate.Decision.Focus, RequiredOutput: aggregate.Decision.RequiredOutput,
+	}, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	aggregate.Decision = decision
 	return aggregate, candidate
 }
 

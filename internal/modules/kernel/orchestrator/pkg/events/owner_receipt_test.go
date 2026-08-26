@@ -120,14 +120,20 @@ func TestCapabilityOperationResultCarriesOnlyReceiptIdentity(t *testing.T) {
 
 func TestRuntimeOperationExecutionEnvelopeValidatesGovernanceGrantIdentity(t *testing.T) {
 	grant := runtimecontract.RuntimeOperationGovernanceGrant{
-		ResolutionID: "resolution-1", ApprovalID: common.ApprovalID("approval-1"),
-		ExecutionKey: "exec/ws/run/dispatch/op", GovernanceFence: 1, ResumeFence: 2,
+		ResolutionID: "resolution-1", ResolutionHash: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", ApprovalID: common.ApprovalID("approval-1"),
+		ExecutionKey: "exec/ws/run/dispatch/op", GovernanceFence: 1, ResumeFence: 2, ResumeDispatchID: "dispatch",
 		DependencyKind: "approval", SubjectRef: "target.txt", RequestedAction: "file/write", AuthorizationHash: "authorization-hash", GovernanceReceiptHash: "receipt-hash",
 	}
 	envelope := runtimecontract.RuntimeOperationExecutionEnvelope{
 		ExecutionKey: grant.ExecutionKey, Fence: grant.ResumeFence,
-		ExpectedEffectScope: runtimecontract.RuntimeEffectWorkspaceDurable, GovernanceGrant: &grant,
+		OperationHash:       runtimecontract.StableRuntimeOperationHash(runtimecontract.RuntimeOperation{ID: "op", Kind: runtimecontract.StepKindFileWrite}),
+		ExpectedEffectScope: runtimecontract.RuntimeEffectWorkspaceDurable,
+		IdempotencyClass:    runtimecontract.RuntimeOperationIdempotencyAtMostOnce, GovernanceGrant: &grant,
 	}
+	envelope.AuthorityHash = runtimecontract.StableRuntimeOperationExecutionAuthorityHash(runtimecontract.RuntimeOperationExecutionRecord{
+		OperationID: "op", OperationHash: envelope.OperationHash, ExecutionKey: envelope.ExecutionKey,
+		ExpectedEffectScope: envelope.ExpectedEffectScope, IdempotencyClass: envelope.IdempotencyClass,
+	})
 	if err := envelope.Validate(); err != nil {
 		t.Fatalf("valid governance grant envelope: %v", err)
 	}
@@ -142,7 +148,8 @@ func TestRuntimeOperationExecutionEnvelopeValidatesGovernanceGrantIdentity(t *te
 func TestNewRuntimeOperationReceiptCarriesExecutionFence(t *testing.T) {
 	execution := runtimecontract.RuntimeOperationExecutionEnvelope{
 		ExecutionKey: "exec/ws/run/dispatch/op", Fence: 3,
-		ExpectedEffectScope: runtimecontract.RuntimeEffectWorkspaceDurable,
+		OperationHash:       runtimecontract.StableRuntimeOperationHash(runtimecontract.RuntimeOperation{ID: "op-1", Kind: runtimecontract.StepKindFileWrite}),
+		ExpectedEffectScope: runtimecontract.RuntimeEffectWorkspaceDurable, IdempotencyClass: runtimecontract.RuntimeOperationIdempotencyAtMostOnce,
 	}
 	receipt := NewRuntimeOperationReceipt(execution, runtimecontract.RuntimeModuleFile, "op-1", runtimecontract.RuntimeOperationExecutionStatusAccepted, nil,
 		runtimecontract.RuntimeOperationEvidence{Summary: "changed"}, nil, nil, "2026-07-20T00:00:00Z")
@@ -160,7 +167,9 @@ func TestAttachRuntimeOperationReceiptFeedbackPreservesOwnerDiagnostic(t *testin
 		Signature: "owner/signature", Message: "original owner message", TargetRefs: []string{"a", "b"},
 	}
 	receipt := NewRuntimeOperationReceipt(runtimecontract.RuntimeOperationExecutionEnvelope{
-		ExecutionKey: "exec/ws/run/dispatch/op", Fence: 1, ExpectedEffectScope: runtimecontract.RuntimeEffectNone,
+		ExecutionKey: "exec/ws/run/dispatch/op", Fence: 1,
+		OperationHash:       runtimecontract.StableRuntimeOperationHash(runtimecontract.RuntimeOperation{ID: "op-1", Kind: runtimecontract.StepKindFileRead}),
+		ExpectedEffectScope: runtimecontract.RuntimeEffectNone, IdempotencyClass: runtimecontract.RuntimeOperationIdempotencySafeToReplay,
 	}, runtimecontract.RuntimeModuleFile, "op-1", runtimecontract.RuntimeOperationExecutionStatusRejected, []string{"target.txt"}, runtimecontract.RuntimeOperationEvidence{}, failure, nil, "2026-07-20T00:00:00Z")
 	attached, err := AttachRuntimeOperationReceiptFeedback(receipt, runtimecontract.RuntimeFeedbackScope{
 		WorkspaceID: "ws", RunID: "run", AuthoritySnapshotID: "authority-1", DispatchID: "dispatch-1",

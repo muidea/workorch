@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"path/filepath"
+	"reflect"
 	"slices"
 	"sort"
 	"strings"
@@ -254,12 +255,36 @@ func StableRuntimeCandidateHash(candidate RuntimeCandidate) string {
 		writeHashString(h, "assessment")
 		value := candidate.Assessment.Normalized()
 		writeHashString(h, value.FocusID)
-		coverage := make([]string, 0, len(value.CoverageWorkItemIDs))
-		for _, id := range value.CoverageWorkItemIDs {
-			coverage = append(coverage, string(id))
-		}
-		writeHashStrings(h, coverage)
+		writeHashString(h, value.SliceID)
+		writeHashCoverageWorkItemIDs(h, value.CoverageWorkItemIDs)
 		writeHashString(h, string(value.Disposition))
+		writeHashString(h, fmt.Sprintf("%d", len(value.Items)))
+		for _, item := range value.Items {
+			item = item.Normalized()
+			writeHashString(h, string(item.CoverageWorkItemID))
+			writeHashString(h, fmt.Sprintf("%t", item.Satisfied))
+			writeHashString(h, item.Reason)
+			writeHashStrings(h, item.EvidenceRefs)
+			artifactRefs := make([]string, 0, len(item.ArtifactRefs))
+			for _, ref := range item.ArtifactRefs {
+				artifactRefs = append(artifactRefs, string(ref))
+			}
+			writeHashStrings(h, artifactRefs)
+		}
+		if value.Gap == nil {
+			writeHashString(h, "no-gap")
+		} else {
+			gap := value.Gap.Normalized()
+			writeHashString(h, "gap")
+			writeHashCoverageWorkItemIDs(h, gap.CoverageWorkItemIDs)
+			writeHashStrings(h, gap.MissingEvidenceKinds)
+			writeHashStrings(h, gap.TargetRefs)
+			writeHashStrings(h, gap.EvidenceRefs)
+			writeHashString(h, gap.Reason)
+			writeHashString(h, string(gap.FailureClass))
+			writeHashString(h, gap.FailureCode)
+			writeHashString(h, gap.FailureSignature)
+		}
 		writeHashString(h, value.Summary)
 		writeHashStrings(h, value.EvidenceRefs)
 		writeHashStrings(h, value.ArtifactRefs)
@@ -277,6 +302,17 @@ func StableRuntimeCandidateHash(candidate RuntimeCandidate) string {
 	return hex.EncodeToString(h.Sum(nil))
 }
 
+// StableRuntimeOperationHash is the complete normalized execution payload
+// identity for one sealed operation. It includes operation identity, ordering
+// dependencies, proof binding, targets and every typed parameter; display-only
+// anti-replay shape rules do not apply to execution authority.
+func StableRuntimeOperationHash(operation RuntimeOperation) string {
+	h := sha256.New()
+	writeHashString(h, "runtime-operation/v1")
+	writeCandidateOperations(h, []RuntimeOperation{operation})
+	return hex.EncodeToString(h.Sum(nil))
+}
+
 func writeCandidateOperations(h hashStringWriter, operations []RuntimeOperation) {
 	writeHashString(h, fmt.Sprintf("%d", len(operations)))
 	for _, value := range operations {
@@ -286,6 +322,7 @@ func writeCandidateOperations(h hashStringWriter, operations []RuntimeOperation)
 		writeHashString(h, operation.RequiredOperationRef)
 		writeHashStrings(h, operation.DependsOn)
 		writeHashStrings(h, operation.BindingRefs)
+		writeHashCoverageWorkItemIDs(h, operation.CoverageWorkItemIDs)
 		writeHashStrings(h, operation.TargetRefs)
 		writeHashString(h, fmt.Sprintf("%d", len(operation.Parameters)))
 		for _, parameter := range operation.Parameters {
@@ -308,6 +345,15 @@ func writeCandidateOperations(h hashStringWriter, operations []RuntimeOperation)
 			}
 		}
 	}
+}
+
+func writeHashCoverageWorkItemIDs(h hashStringWriter, values []common.CoverageWorkItemID) {
+	values = normalizeCoverageWorkItemIDs(values)
+	coverage := make([]string, 0, len(values))
+	for _, id := range values {
+		coverage = append(coverage, string(id))
+	}
+	writeHashStrings(h, coverage)
 }
 
 type OperationParameter struct {
@@ -441,6 +487,84 @@ type RuntimeCandidate struct {
 	Validation  *ValidationCandidate
 	Assessment  *AssessmentCandidate
 	Governance  *GovernanceCandidate
+}
+
+// CanonicalRuntimeCandidate returns the value-only shape persisted at the SM-3
+// seal boundary. Pre-seal provider documents may be normalized during
+// admission, but a sealed dispatch must never rely on normalization to hide
+// additional or ambiguous raw fields.
+func CanonicalRuntimeCandidate(candidate RuntimeCandidate) RuntimeCandidate {
+	return cloneRuntimeCandidate(candidate)
+}
+
+// ValidateSealedRuntimeCandidateShape rejects persisted candidate data that
+// would be dropped, reordered or otherwise changed by canonicalization. This
+// is intentionally stricter than pre-seal admission: recovery must fail closed
+// instead of silently repairing an already-sealed authority DTO.
+func ValidateSealedRuntimeCandidateShape(candidate RuntimeCandidate) error {
+	if !reflect.DeepEqual(candidate, CanonicalRuntimeCandidate(candidate)) {
+		return fmt.Errorf("sealed runtime candidate requires canonical raw shape")
+	}
+	return nil
+}
+
+// ValidateRuntimeCandidateRawShapeForSeal rejects only lossy or ambiguous raw
+// operation fields at the pre-seal boundary. Ordering is allowed here because
+// CanonicalRuntimeCandidate deterministically orders set-like fields before
+// persistence; empty, duplicate or whitespace-mutated identities are not.
+func ValidateRuntimeCandidateRawShapeForSeal(candidate RuntimeCandidate) error {
+	var operations []RuntimeOperation
+	if candidate.StateChange != nil {
+		operations = append(operations, stateChangingRuntimeOperations(candidate.StateChange.Operations)...)
+	}
+	if candidate.Validation != nil {
+		operations = append(operations, validationRuntimeOperations(candidate.Validation.Operations)...)
+	}
+	for _, operation := range operations {
+		if operation.ID == "" || operation.ID != strings.TrimSpace(operation.ID) || operation.Kind == "" || operation.Kind != strings.TrimSpace(operation.Kind) ||
+			operation.RequiredOperationRef != strings.TrimSpace(operation.RequiredOperationRef) {
+			return fmt.Errorf("runtime candidate operation requires canonical identity fields before seal")
+		}
+		for name, values := range map[string][]string{
+			"dependsOn": operation.DependsOn, "bindingRefs": operation.BindingRefs, "targetRefs": operation.TargetRefs,
+		} {
+			seen := make(map[string]struct{}, len(values))
+			for _, value := range values {
+				canonical := strings.TrimSpace(value)
+				if canonical == "" || canonical != value {
+					return fmt.Errorf("runtime candidate operation %q %s requires non-empty canonical values", operation.ID, name)
+				}
+				if _, duplicate := seen[canonical]; duplicate {
+					return fmt.Errorf("runtime candidate operation %q %s duplicates %q", operation.ID, name, canonical)
+				}
+				seen[canonical] = struct{}{}
+			}
+		}
+		seenParameters := make(map[string]struct{}, len(operation.Parameters))
+		for _, parameter := range operation.Parameters {
+			name := strings.TrimSpace(parameter.Name)
+			if name == "" || name != parameter.Name {
+				return fmt.Errorf("runtime candidate operation %q parameter requires canonical name", operation.ID)
+			}
+			if _, duplicate := seenParameters[name]; duplicate {
+				return fmt.Errorf("runtime candidate operation %q parameter %q is duplicated", operation.ID, name)
+			}
+			seenParameters[name] = struct{}{}
+			seenValues := map[string]struct{}{}
+			_, ordered := orderedStringListParameterNames()[name]
+			for _, rawValue := range parameter.StringList {
+				value := strings.TrimSpace(rawValue)
+				if value == "" || value != rawValue {
+					return fmt.Errorf("runtime candidate operation %q parameter %q requires non-empty canonical list values", operation.ID, name)
+				}
+				if _, duplicate := seenValues[value]; duplicate && !ordered {
+					return fmt.Errorf("runtime candidate operation %q parameter %q duplicates list value %q", operation.ID, name, value)
+				}
+				seenValues[value] = struct{}{}
+			}
+		}
+	}
+	return nil
 }
 
 func (c RuntimeCandidate) Validate(decision RuntimeDecision) error {

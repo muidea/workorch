@@ -47,14 +47,26 @@ func TestOwnerContractAndOperationMapper(t *testing.T) {
 		t.Fatal(err)
 	}
 	context := runtimecontract.RuntimeOperationExecutionContext{
-		Execution: runtimecontract.RuntimeOperationExecutionEnvelope{
+		WorkspaceID: "ws", RunID: "run", DispatchID: "dispatch",
+		Execution: testExecutionEnvelope(operation, runtimecontract.RuntimeOperationExecutionEnvelope{
+			ExecutionKey: "exec/ws/run/dispatch/web-1", Fence: 1,
 			ExpectedEffectScope:     runtimecontract.RuntimeEffectNone,
 			AdmissibilitySnapshotID: catalog.SnapshotID, AcquisitionBinding: catalog.AcquisitionBinding,
-		},
+		}, []runtimecontract.RuntimeOperationPolicyFact{sealed.Authorization.Policy}),
 		OperationID: operation.ID, TargetRefs: operation.TargetRefs,
 	}
 	if _, _, err := sealed.ValidateForExecution(context); err != nil {
 		t.Fatal(err)
+	}
+	idempotencyDrift := context
+	idempotencyDrift.Execution.IdempotencyClass = runtimecontract.RuntimeOperationIdempotencySafeToReplay
+	if _, _, err := sealed.ValidateForExecution(idempotencyDrift); err == nil || !strings.Contains(err.Error(), "idempotency class mismatch") {
+		t.Fatalf("sealed Web operation accepted idempotency drift: %v", err)
+	}
+	authorityDrift := context
+	authorityDrift.Execution.AuthorityHash = "forged"
+	if _, _, err := sealed.ValidateForExecution(authorityDrift); err == nil || !strings.Contains(err.Error(), "authority hash mismatch") {
+		t.Fatalf("sealed Web operation accepted authority hash drift: %v", err)
 	}
 	drifted := sealed
 	for index := range drifted.Operation.Parameters {
@@ -62,7 +74,7 @@ func TestOwnerContractAndOperationMapper(t *testing.T) {
 			drifted.Operation.Parameters[index].String = ptrWebString("changed")
 		}
 	}
-	if _, _, err := drifted.ValidateForExecution(context); err == nil || !strings.Contains(err.Error(), "payload hash") {
+	if _, _, err := drifted.ValidateForExecution(context); err == nil || !strings.Contains(err.Error(), "operation hash mismatch") {
 		t.Fatalf("drifted sealed operation err=%v", err)
 	}
 	wire, err := json.Marshal(ExecuteOperationCommand{RuntimeOperationExecutionContext: context, SealedOperation: sealed})

@@ -189,7 +189,7 @@ func TestFileModuleExecutesConcreteFileEditEventAndWritesState(t *testing.T) {
 	result := hub.Send(magicevent.NewEventWithContext(
 		fileevents.TopicExecuteFileEditOperation, "kernel/orchestrator", ModuleID, magicevent.NewHeader(), ctx,
 		fileevents.ExecuteFileEditOperationCommand{
-			RuntimeOperationExecutionContext: fileExecutionContext("exec/ws-1/run-1/dispatch-1/edit-1", "dispatch-1", "edit-1", transaction, runtimecontract.RuntimeEffectWorkspaceDurable, runtimecontract.EvidenceKindStateChange, workspace, "main.txt"),
+			RuntimeOperationExecutionContext: fileExecutionContext(operation, "exec/ws-1/run-1/dispatch-1/edit-1", "dispatch-1", transaction, runtimecontract.RuntimeEffectWorkspaceDurable, runtimecontract.EvidenceKindStateChange, workspace),
 			SealedOperation:                  mustSealFileOperation(t, operation),
 		},
 	))
@@ -232,7 +232,7 @@ func TestFileModuleSensitiveFileEditRequiresGovernanceBeforePrivateEffect(t *tes
 	result := hub.Send(magicevent.NewEventWithContext(
 		fileevents.TopicExecuteFileEditOperation, runtimecontract.RuntimeModuleOrchestrator, ModuleID, magicevent.NewHeader(), ctx,
 		fileevents.ExecuteFileEditOperationCommand{
-			RuntimeOperationExecutionContext: fileExecutionContext("exec/ws-1/run-1/dispatch-env/edit-env", "dispatch-env", "edit-env", runtimecontract.AuthorityTransaction{AuthoritySnapshotID: "authority-env"}, runtimecontract.RuntimeEffectWorkspaceDurable, runtimecontract.EvidenceKindStateChange, workspace, ".env"),
+			RuntimeOperationExecutionContext: fileExecutionContext(operation, "exec/ws-1/run-1/dispatch-env/edit-env", "dispatch-env", runtimecontract.AuthorityTransaction{AuthoritySnapshotID: "authority-env"}, runtimecontract.RuntimeEffectWorkspaceDurable, runtimecontract.EvidenceKindStateChange, workspace),
 			SealedOperation:                  mustSealFileOperation(t, operation),
 		},
 	))
@@ -277,7 +277,7 @@ func TestFileModuleRejectsDriftedSealedOperationBeforeEffect(t *testing.T) {
 	different := "forged"
 	drifted.Operation.Parameters[1].String = &different
 	command := fileevents.ExecuteFileEditOperationCommand{
-		RuntimeOperationExecutionContext: fileExecutionContext("exec/ws-1/run-1/dispatch-1/edit-1", "dispatch-1", "edit-1", runtimecontract.AuthorityTransaction{AuthoritySnapshotID: "authority-1"}, runtimecontract.RuntimeEffectWorkspaceDurable, runtimecontract.EvidenceKindStateChange, workspace, "main.txt"),
+		RuntimeOperationExecutionContext: fileExecutionContext(operation, "exec/ws-1/run-1/dispatch-1/edit-1", "dispatch-1", runtimecontract.AuthorityTransaction{AuthoritySnapshotID: "authority-1"}, runtimecontract.RuntimeEffectWorkspaceDurable, runtimecontract.EvidenceKindStateChange, workspace),
 		SealedOperation:                  drifted,
 	}
 	if _, err := hub.Send(magicevent.NewEventWithContext(fileevents.TopicExecuteFileEditOperation, runtimecontract.RuntimeModuleOrchestrator, ModuleID, magicevent.NewHeader(), ctx, command)).Get(); err == nil {
@@ -321,7 +321,7 @@ func TestFileModuleExecutesConcreteFileWriteEventAndWritesState(t *testing.T) {
 	result := hub.Send(magicevent.NewEventWithContext(
 		fileevents.TopicExecuteFileWriteOperation, "kernel/orchestrator", ModuleID, magicevent.NewHeader(), ctx,
 		fileevents.ExecuteFileWriteOperationCommand{
-			RuntimeOperationExecutionContext: fileExecutionContext("exec/ws-1/run-1/dispatch-1/write-1", "dispatch-1", "write-1", transaction, runtimecontract.RuntimeEffectWorkspaceDurable, runtimecontract.EvidenceKindStateChange, workspace, "README.md"),
+			RuntimeOperationExecutionContext: fileExecutionContext(operation, "exec/ws-1/run-1/dispatch-1/write-1", "dispatch-1", transaction, runtimecontract.RuntimeEffectWorkspaceDurable, runtimecontract.EvidenceKindStateChange, workspace),
 			SealedOperation:                  mustSealFileOperation(t, operation),
 		},
 	))
@@ -363,7 +363,7 @@ func TestFileModuleFileWriteRejectsExistingTargetWithoutChangingContent(t *testi
 	result := hub.Send(magicevent.NewEventWithContext(
 		fileevents.TopicExecuteFileWriteOperation, "kernel/orchestrator", ModuleID, magicevent.NewHeader(), ctx,
 		fileevents.ExecuteFileWriteOperationCommand{
-			RuntimeOperationExecutionContext: fileExecutionContext("exec/ws-1/run-1/dispatch-existing/write-main", "dispatch-existing", "write-main", transaction, runtimecontract.RuntimeEffectWorkspaceDurable, runtimecontract.EvidenceKindStateChange, workspace, "main.go"),
+			RuntimeOperationExecutionContext: fileExecutionContext(operation, "exec/ws-1/run-1/dispatch-existing/write-main", "dispatch-existing", transaction, runtimecontract.RuntimeEffectWorkspaceDurable, runtimecontract.EvidenceKindStateChange, workspace),
 			SealedOperation:                  mustSealFileOperation(t, operation),
 		},
 	))
@@ -442,9 +442,10 @@ func TestFileOwnerStateChangingReceiptReplaysWithoutSecondWrite(t *testing.T) {
 func fileWriteReceiptCommand(t *testing.T, workspace, content string) fileevents.ExecuteFileWriteOperationCommand {
 	t.Helper()
 	operation := runtimecontract.RuntimeOperation{ID: "write-readme", Kind: runtimecontract.StepKindFileWrite, TargetRefs: []string{"README.md"}, Parameters: []runtimecontract.OperationParameter{fileStringParameter("content", content)}}
+	execution := fileTestExecutionEnvelope(operation, runtimecontract.RuntimeOperationExecutionEnvelope{ExecutionKey: "exec/ws-file/run-file/dispatch-file/write-readme", Fence: 1, ExpectedEffectScope: runtimecontract.RuntimeEffectWorkspaceDurable})
 	return fileevents.ExecuteFileWriteOperationCommand{
 		RuntimeOperationExecutionContext: runtimecontract.RuntimeOperationExecutionContext{
-			Execution:   runtimecontract.RuntimeOperationExecutionEnvelope{ExecutionKey: "exec/ws-file/run-file/dispatch-file/write-readme", Fence: 1, ExpectedEffectScope: runtimecontract.RuntimeEffectWorkspaceDurable},
+			Execution:   execution,
 			WorkspaceID: "ws-file", RunID: "run-file", DispatchID: "dispatch-file",
 			Transaction: runtimecontract.AuthorityTransaction{AuthoritySnapshotID: "authority-file", RequiredOutputHash: "output-file"},
 			OperationID: "write-readme", TargetRefs: []string{"README.md"}, EvidenceKind: runtimecontract.EvidenceKindStateChange,
@@ -491,7 +492,7 @@ func TestFileModuleExecutesConcreteInspectionAndPreviewEvents(t *testing.T) {
 	listResult := hub.Send(magicevent.NewEventWithContext(
 		fileevents.TopicExecuteFileListOperation, "kernel/orchestrator", ModuleID, magicevent.NewHeader(), ctx,
 		fileevents.ExecuteFileListOperationCommand{
-			RuntimeOperationExecutionContext: fileExecutionContext("exec/ws-1/run-1/dispatch-1/list-1", "dispatch-1", "list-1", transaction, runtimecontract.RuntimeEffectNone, runtimecontract.EvidenceKindValidation, workspace),
+			RuntimeOperationExecutionContext: fileExecutionContext(listOperation, "exec/ws-1/run-1/dispatch-1/list-1", "dispatch-1", transaction, runtimecontract.RuntimeEffectNone, runtimecontract.EvidenceKindValidation, workspace),
 			SealedOperation:                  mustSealFileOperation(t, listOperation),
 		},
 	))
@@ -508,7 +509,7 @@ func TestFileModuleExecutesConcreteInspectionAndPreviewEvents(t *testing.T) {
 	readResult := hub.Send(magicevent.NewEventWithContext(
 		fileevents.TopicExecuteFileReadOperation, "kernel/orchestrator", ModuleID, magicevent.NewHeader(), ctx,
 		fileevents.ExecuteFileReadOperationCommand{
-			RuntimeOperationExecutionContext: fileExecutionContext("exec/ws-1/run-1/dispatch-1/read-1", "dispatch-1", "read-1", transaction, runtimecontract.RuntimeEffectNone, runtimecontract.EvidenceKindValidation, workspace, "main.txt"),
+			RuntimeOperationExecutionContext: fileExecutionContext(readOperation, "exec/ws-1/run-1/dispatch-1/read-1", "dispatch-1", transaction, runtimecontract.RuntimeEffectNone, runtimecontract.EvidenceKindValidation, workspace),
 			SealedOperation:                  mustSealFileOperation(t, readOperation),
 		},
 	))
@@ -525,7 +526,7 @@ func TestFileModuleExecutesConcreteInspectionAndPreviewEvents(t *testing.T) {
 	previewResult := hub.Send(magicevent.NewEventWithContext(
 		fileevents.TopicExecutePatchPreviewOperation, "kernel/orchestrator", ModuleID, magicevent.NewHeader(), ctx,
 		fileevents.ExecutePatchPreviewOperationCommand{
-			RuntimeOperationExecutionContext: fileExecutionContext("exec/ws-1/run-1/dispatch-1/preview-1", "dispatch-1", "preview-1", transaction, runtimecontract.RuntimeEffectNone, runtimecontract.EvidenceKindStateChange, workspace, "preview.txt"),
+			RuntimeOperationExecutionContext: fileExecutionContext(previewOperation, "exec/ws-1/run-1/dispatch-1/preview-1", "dispatch-1", transaction, runtimecontract.RuntimeEffectNone, runtimecontract.EvidenceKindStateChange, workspace),
 			SealedOperation:                  mustSealFileOperation(t, previewOperation),
 		},
 	))
@@ -567,7 +568,7 @@ func TestFileModulePatchFailureKeepsStableSignatureAcrossDispatches(t *testing.T
 		result := hub.Send(magicevent.NewEventWithContext(
 			fileevents.TopicExecutePatchApplyOperation, "kernel/orchestrator", ModuleID, magicevent.NewHeader(), ctx,
 			fileevents.ExecutePatchApplyOperationCommand{
-				RuntimeOperationExecutionContext: fileExecutionContext("exec/ws-1/run-1/"+dispatchID+"/patch-1", dispatchID, "patch-1", transaction, runtimecontract.RuntimeEffectWorkspaceDurable, runtimecontract.EvidenceKindStateChange, workspace, "main.txt"),
+				RuntimeOperationExecutionContext: fileExecutionContext(operation, "exec/ws-1/run-1/"+dispatchID+"/patch-1", dispatchID, transaction, runtimecontract.RuntimeEffectWorkspaceDurable, runtimecontract.EvidenceKindStateChange, workspace),
 				SealedOperation:                  mustSealFileOperation(t, operation),
 			},
 		))
@@ -605,7 +606,7 @@ func TestFileModuleExecutesConcretePatchApplyEvent(t *testing.T) {
 	result := hub.Send(magicevent.NewEventWithContext(
 		fileevents.TopicExecutePatchApplyOperation, "kernel/orchestrator", ModuleID, magicevent.NewHeader(), ctx,
 		fileevents.ExecutePatchApplyOperationCommand{
-			RuntimeOperationExecutionContext: fileExecutionContext("exec/ws-1/run-1/dispatch-1/patch-1", "dispatch-1", "patch-1", runtimecontract.AuthorityTransaction{AuthoritySnapshotID: "authority-1", RequiredOutputHash: "required-output-1"}, runtimecontract.RuntimeEffectWorkspaceDurable, runtimecontract.EvidenceKindStateChange, workspace, "README.md"),
+			RuntimeOperationExecutionContext: fileExecutionContext(operation, "exec/ws-1/run-1/dispatch-1/patch-1", "dispatch-1", runtimecontract.AuthorityTransaction{AuthoritySnapshotID: "authority-1", RequiredOutputHash: "required-output-1"}, runtimecontract.RuntimeEffectWorkspaceDurable, runtimecontract.EvidenceKindStateChange, workspace),
 			SealedOperation:                  mustSealFileOperation(t, operation),
 		},
 	))
@@ -623,12 +624,24 @@ func TestFileModuleExecutesConcretePatchApplyEvent(t *testing.T) {
 	}
 }
 
-func fileExecutionContext(executionKey, dispatchID, operationID string, transaction runtimecontract.AuthorityTransaction, effect runtimecontract.RuntimeEffectScope, evidenceKind, workspace string, targetRefs ...string) runtimecontract.RuntimeOperationExecutionContext {
+func fileExecutionContext(operation runtimecontract.RuntimeOperation, executionKey, dispatchID string, transaction runtimecontract.AuthorityTransaction, effect runtimecontract.RuntimeEffectScope, evidenceKind, workspace string) runtimecontract.RuntimeOperationExecutionContext {
+	execution := fileTestExecutionEnvelope(operation, runtimecontract.RuntimeOperationExecutionEnvelope{ExecutionKey: executionKey, Fence: 1, ExpectedEffectScope: effect})
 	return runtimecontract.RuntimeOperationExecutionContext{
-		Execution:   runtimecontract.RuntimeOperationExecutionEnvelope{ExecutionKey: executionKey, Fence: 1, ExpectedEffectScope: effect},
+		Execution:   execution,
 		WorkspaceID: "ws-1", RunID: "run-1", DispatchID: dispatchID, Transaction: transaction,
-		OperationID: operationID, TargetRefs: targetRefs, EvidenceKind: evidenceKind, WorkspaceDeliverableDirectory: workspace,
+		OperationID: operation.ID, TargetRefs: append([]string(nil), operation.TargetRefs...), EvidenceKind: evidenceKind, WorkspaceDeliverableDirectory: workspace,
 	}
+}
+
+func fileTestExecutionEnvelope(operation runtimecontract.RuntimeOperation, envelope runtimecontract.RuntimeOperationExecutionEnvelope) runtimecontract.RuntimeOperationExecutionEnvelope {
+	envelope.OperationHash = runtimecontract.StableRuntimeOperationHash(operation)
+	envelope.IdempotencyClass = runtimecontract.ResolveOperationIdempotencyClass(operation, nil)
+	envelope.AuthorityHash = runtimecontract.StableRuntimeOperationExecutionAuthorityHash(runtimecontract.RuntimeOperationExecutionRecord{
+		OperationID: operation.ID, OperationHash: envelope.OperationHash, ExecutionKey: envelope.ExecutionKey, ExpectedEffectScope: envelope.ExpectedEffectScope,
+		IdempotencyClass: envelope.IdempotencyClass, AdmissibilitySnapshotID: envelope.AdmissibilitySnapshotID,
+		AcquisitionBinding: envelope.AcquisitionBinding, ReplayProof: envelope.ReplayProof,
+	})
+	return envelope
 }
 
 func mustSealFileOperation(t *testing.T, operation runtimecontract.RuntimeOperation) fileevents.SealedRuntimeOperation {

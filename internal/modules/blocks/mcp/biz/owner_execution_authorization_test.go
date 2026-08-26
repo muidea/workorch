@@ -133,7 +133,7 @@ func TestMCPOwnerRequiresExactCapabilityApprovalBeforeTransport(t *testing.T) {
 
 	requirement := governanceReceipt.Governance.Normalized()
 	grant := runtimecontract.RuntimeOperationGovernanceGrant{
-		ResolutionID: "resolution-1", ApprovalID: "approval-1", ExecutionKey: first.Execution.ExecutionKey,
+		ResolutionID: "resolution-1", ResolutionHash: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", ApprovalID: "approval-1", ExecutionKey: first.Execution.ExecutionKey,
 		GovernanceFence: 1, ResumeFence: 2, DependencyKind: string(requirement.Kind), SubjectRef: requirement.SubjectRef,
 		RequestedAction: requirement.RequestedAction, RiskLevel: requirement.RiskLevel,
 		AuthorizationHash: runtimecontract.StableRuntimeAuthorizationContextHash(requirement.AuthorizationContext), GovernanceReceiptHash: "governance-receipt-1",
@@ -431,11 +431,14 @@ func testMCPExecutionCommand(t *testing.T, operation runtimecontract.RuntimeOper
 	if internalDirectory == "" {
 		internalDirectory = t.TempDir()
 	}
-	executionKey := runtimecontract.StableRuntimeOperationExecutionKey("ws-mcp", "run-mcp", "dispatch-mcp", operation.ID)
+	dispatchID := "dispatch-mcp"
+	executionKey := runtimecontract.StableRuntimeOperationExecutionKey("ws-mcp", "run-mcp", dispatchID, operation.ID)
 	if grant != nil {
 		value := grant.Normalized()
-		value.ExecutionKey = executionKey
+		dispatchID = "dispatch-mcp-resume"
+		executionKey = value.ExecutionKey
 		value.ResumeFence = fence
+		value.ResumeDispatchID = dispatchID
 		grant = &value
 	}
 	evidenceKind := runtimecontract.EvidenceKindValidation
@@ -444,12 +447,12 @@ func testMCPExecutionCommand(t *testing.T, operation runtimecontract.RuntimeOper
 	}
 	return mcpevents.ExecuteOperationCommand{
 		RuntimeOperationExecutionContext: runtimecontract.RuntimeOperationExecutionContext{
-			Execution: runtimecontract.RuntimeOperationExecutionEnvelope{
+			Execution: mcpTestExecutionEnvelope(operation, runtimecontract.RuntimeOperationExecutionEnvelope{
 				ExecutionKey: executionKey, Fence: fence, ExpectedEffectScope: effect,
 				AdmissibilitySnapshotID: sealed.Authorization.CatalogSnapshotID, AcquisitionBinding: sealed.Authorization.AcquisitionBinding,
 				GovernanceGrant: grant,
-			},
-			WorkspaceID: "ws-mcp", RunID: "run-mcp", DispatchID: "dispatch-mcp",
+			}, sealed.Authorization.Policy),
+			WorkspaceID: "ws-mcp", RunID: "run-mcp", DispatchID: dispatchID,
 			Transaction: runtimecontract.AuthorityTransaction{AuthoritySnapshotID: "authority-mcp"},
 			OperationID: operation.ID, CoverageWorkItemIDs: append([]common.CoverageWorkItemID(nil), operation.CoverageWorkItemIDs...),
 			TargetRefs: append([]string(nil), operation.TargetRefs...), EvidenceKind: evidenceKind,

@@ -50,7 +50,7 @@ func TestSSHOwnerRequiresExactApprovalBeforeNetworkAndCommitsObservedChange(t *t
 
 	requirement := sshApprovalRequirement(data)
 	grant := runtimecontract.RuntimeOperationGovernanceGrant{
-		ResolutionID: "resolution-1", ApprovalID: "approval-1", ExecutionKey: first.Execution.ExecutionKey,
+		ResolutionID: "resolution-1", ResolutionHash: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", ApprovalID: "approval-1", ExecutionKey: first.Execution.ExecutionKey,
 		GovernanceFence: 1, ResumeFence: 2, DependencyKind: string(runtimecontract.GovernanceApproval),
 		SubjectRef: requirement.SubjectRef, RequestedAction: requirement.RequestedAction, RiskLevel: requirement.RiskLevel,
 		AuthorizationHash: runtimecontract.StableRuntimeAuthorizationContextHash(requirement.AuthorizationContext), GovernanceReceiptHash: "governance-receipt-1",
@@ -145,7 +145,7 @@ func TestSSHOwnerFailsClosedForPostWrongSourceSealedDriftAndGrantDrift(t *testin
 
 	requirement := sshApprovalRequirement(data)
 	grant := runtimecontract.RuntimeOperationGovernanceGrant{
-		ResolutionID: "resolution-1", ApprovalID: "approval-1", ExecutionKey: command.Execution.ExecutionKey,
+		ResolutionID: "resolution-1", ResolutionHash: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", ApprovalID: "approval-1", ExecutionKey: command.Execution.ExecutionKey,
 		GovernanceFence: 1, ResumeFence: 2, DependencyKind: string(runtimecontract.GovernanceApproval),
 		SubjectRef: requirement.SubjectRef, RequestedAction: requirement.RequestedAction, RiskLevel: requirement.RiskLevel,
 		AuthorizationHash:     runtimecontract.StableRuntimeAuthorizationContextHash(workorcheventpayload.New(workorcheventpayload.StringField("targetRef", "other-target"))),
@@ -219,19 +219,30 @@ func testSSHRuntimeOperation(t *testing.T, adapter *RuntimeAdapter, command stri
 
 func testSSHExecuteCommand(t *testing.T, operation runtimecontract.RuntimeOperation, sealed sshevents.SealedRuntimeOperation, grant *runtimecontract.RuntimeOperationGovernanceGrant, fence uint64) sshevents.ExecuteOperationCommand {
 	t.Helper()
-	executionKey := "exec/ws-1/run-1/dispatch-1/ssh-1"
+	dispatchID := "dispatch-1"
+	executionKey := runtimecontract.StableRuntimeOperationExecutionKey("ws-1", "run-1", dispatchID, operation.ID)
 	if grant != nil {
-		grant.ExecutionKey = executionKey
+		dispatchID = "dispatch-2"
+		executionKey = grant.ExecutionKey
 		grant.ResumeFence = fence
+		grant.ResumeDispatchID = dispatchID
 	}
+	execution := runtimecontract.RuntimeOperationExecutionEnvelope{
+		ExecutionKey: executionKey, Fence: fence, ExpectedEffectScope: runtimecontract.RuntimeEffectRemoteDurable,
+		AdmissibilitySnapshotID: sealed.Authorization.CatalogSnapshotID, AcquisitionBinding: sealed.Authorization.AcquisitionBinding,
+		GovernanceGrant: grant,
+	}
+	execution.OperationHash = runtimecontract.StableRuntimeOperationHash(operation)
+	execution.IdempotencyClass = runtimecontract.ResolveOperationIdempotencyClass(operation, []runtimecontract.RuntimeOperationPolicyFact{sealed.Authorization.Policy})
+	execution.AuthorityHash = runtimecontract.StableRuntimeOperationExecutionAuthorityHash(runtimecontract.RuntimeOperationExecutionRecord{
+		OperationID: operation.ID, OperationHash: execution.OperationHash, ExecutionKey: execution.ExecutionKey, ExpectedEffectScope: execution.ExpectedEffectScope,
+		IdempotencyClass: execution.IdempotencyClass, AdmissibilitySnapshotID: execution.AdmissibilitySnapshotID,
+		AcquisitionBinding: execution.AcquisitionBinding, ReplayProof: execution.ReplayProof,
+	})
 	return sshevents.ExecuteOperationCommand{
 		RuntimeOperationExecutionContext: runtimecontract.RuntimeOperationExecutionContext{
-			Execution: runtimecontract.RuntimeOperationExecutionEnvelope{
-				ExecutionKey: executionKey, Fence: fence, ExpectedEffectScope: runtimecontract.RuntimeEffectRemoteDurable,
-				AdmissibilitySnapshotID: sealed.Authorization.CatalogSnapshotID, AcquisitionBinding: sealed.Authorization.AcquisitionBinding,
-				GovernanceGrant: grant,
-			},
-			WorkspaceID: "ws-1", RunID: "run-1", DispatchID: "dispatch-1", Transaction: runtimecontract.AuthorityTransaction{AuthoritySnapshotID: "authority-1"},
+			Execution:   execution,
+			WorkspaceID: "ws-1", RunID: "run-1", DispatchID: dispatchID, Transaction: runtimecontract.AuthorityTransaction{AuthoritySnapshotID: "authority-1"},
 			OperationID: operation.ID, TargetRefs: append([]string(nil), operation.TargetRefs...), EvidenceKind: runtimecontract.EvidenceKindStateChange, WorkspaceDeliverableDirectory: t.TempDir(),
 		},
 		SealedOperation: sealed,

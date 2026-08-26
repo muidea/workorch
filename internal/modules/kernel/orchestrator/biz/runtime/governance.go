@@ -158,6 +158,7 @@ func (c *authorityComponent) commitGovernanceResolutionWithContinuationLease(
 	if err := resolution.Validate(); err != nil {
 		return EvidenceCommitResult{}, err
 	}
+	resolutionHash := runtimecontract.StableRuntimeGovernanceResolutionHash(resolution)
 	leaseTemplate, err := validateGovernanceContinuationDriveLeaseTemplate(resolution, continuationLease)
 	if err != nil {
 		return EvidenceCommitResult{}, err
@@ -239,7 +240,7 @@ func (c *authorityComponent) commitGovernanceResolutionWithContinuationLease(
 			}
 			binding.State = runtimecontract.RuntimeOperationGovernanceBindingGranted
 			binding.Grant = &runtimecontract.RuntimeOperationGovernanceGrant{
-				ResolutionID: resolution.ResolutionID, TicketID: resolution.TicketID, ApprovalID: resolution.ApprovalID,
+				ResolutionID: resolution.ResolutionID, ResolutionHash: resolutionHash, TicketID: resolution.TicketID, ApprovalID: resolution.ApprovalID,
 				ExecutionKey: binding.ExecutionKey, GovernanceFence: binding.Fence, ResumeFence: binding.Fence + 1,
 				DependencyKind: binding.DependencyKind, SubjectRef: binding.SubjectRef,
 				RequestedAction: binding.RequestedAction, RiskLevel: binding.RiskLevel, AuthorizationHash: binding.AuthorizationHash,
@@ -261,7 +262,7 @@ func (c *authorityComponent) commitGovernanceResolutionWithContinuationLease(
 		ID: common.EvidenceRecordID(eventID), Kind: runtimecontract.EvidenceKindGovernance,
 		SubjectRef: resolution.SubjectRef, SourceRef: "governance-resolution/" + string(resolution.ResolutionID),
 		AuthoritySnapshotID: resolution.AuthoritySnapshotID, DispatchID: resolution.DispatchID,
-		Revision: aggregate.Facts.EvidenceRevision, Summary: resolution.Summary,
+		Revision: aggregate.Facts.EvidenceRevision, Summary: resolution.Summary, ContentHash: resolutionHash,
 		EvidenceRefs: append([]string(nil), resolution.EvidenceRefs...),
 	}
 	switch resolution.Outcome {
@@ -280,10 +281,7 @@ func (c *authorityComponent) commitGovernanceResolutionWithContinuationLease(
 	}
 	aggregate.Facts = aggregate.Facts.Normalized()
 	aggregate.ProcessedEventIDs = appendNormalizedString(aggregate.ProcessedEventIDs, eventID)
-	aggregate.GovernanceResolutions = append(aggregate.GovernanceResolutions, runtimecontract.RuntimeGovernanceResolutionRecord{
-		ResolutionID: resolution.ResolutionID, TicketID: resolution.TicketID, ApprovalID: resolution.ApprovalID, AuthoritySnapshotID: resolution.AuthoritySnapshotID,
-		DispatchID: resolution.DispatchID, Outcome: resolution.Outcome,
-	})
+	aggregate.GovernanceResolutions = append(aggregate.GovernanceResolutions, runtimecontract.RuntimeGovernanceResolutionRecordFromResolution(resolution))
 	dispatch := *aggregate.ActiveDispatch
 	dispatch.State = DispatchStateCommitted
 	aggregate.CompletedDispatches = append(aggregate.CompletedDispatches, dispatch)
@@ -307,6 +305,8 @@ func (c *authorityComponent) commitGovernanceResolutionWithContinuationLease(
 		if !found || resumeExecution.State != runtimecontract.OperationExecutionClaimed || resumeExecution.Fence != binding.Grant.ResumeFence {
 			return EvidenceCommitResult{}, fmt.Errorf("governance resume operation has no exact claimed execution")
 		}
+		binding.Grant.ResumeDispatchID = resume.ID
+		aggregate.OperationGovernanceBindings[grantedBindingIndex] = binding
 		// Governance continuation authorizes a new physical owner effect. Reserve
 		// its exact ExecutionKey/Fence budget in the same SM-3 CAS that publishes
 		// the resume dispatch; the prior governance-required receipt has already
@@ -343,11 +343,10 @@ func persistedRuntimeGovernanceResolutionDisposition(aggregate RuntimeAggregate,
 		return ""
 	}
 	matchedRequest := runtimeGovernanceRequestBindsResolution(aggregate.GovernanceRequests, resolution)
+	wantRecord := runtimecontract.RuntimeGovernanceResolutionRecordFromResolution(resolution)
 	matchedRecord := false
 	for _, record := range aggregate.GovernanceResolutions {
-		if record.ResolutionID == resolution.ResolutionID && record.TicketID == resolution.TicketID && record.ApprovalID == resolution.ApprovalID &&
-			strings.TrimSpace(record.AuthoritySnapshotID) == resolution.AuthoritySnapshotID && strings.TrimSpace(record.DispatchID) == resolution.DispatchID &&
-			record.Outcome == resolution.Outcome {
+		if runtimecontract.SameRuntimeGovernanceResolutionRecord(record, wantRecord) {
 			matchedRecord = true
 			break
 		}
@@ -384,10 +383,11 @@ func persistedRuntimeGovernanceResolutionEvidenceMatches(aggregate RuntimeAggreg
 	}
 	wantID := common.EvidenceRecordID(resolution.EventID())
 	wantSource := "governance-resolution/" + string(resolution.ResolutionID)
+	wantResolutionHash := runtimecontract.StableRuntimeGovernanceResolutionHash(resolution)
 	for _, fact := range values {
 		if fact.ID == wantID && fact.Kind == runtimecontract.EvidenceKindGovernance && fact.SubjectRef == resolution.SubjectRef &&
 			fact.SourceRef == wantSource && fact.AuthoritySnapshotID == resolution.AuthoritySnapshotID && fact.DispatchID == resolution.DispatchID &&
-			fact.Summary == resolution.Summary && fact.FailureClass == wantFailureClass && fact.FailureMessage == wantFailureMessage &&
+			fact.Summary == resolution.Summary && fact.ContentHash == wantResolutionHash && fact.FailureClass == wantFailureClass && fact.FailureMessage == wantFailureMessage &&
 			sameRuntimeStrings(fact.EvidenceRefs, resolution.EvidenceRefs) {
 			return true
 		}
@@ -442,38 +442,107 @@ func buildGovernanceResumeDispatch(aggregate RuntimeAggregate, binding runtimeco
 			break
 		}
 	}
-	if source == nil {
+	if source == nil || source.State != DispatchStateCommitted {
 		return SealedDispatch{}, fmt.Errorf("governance resume source dispatch %q is missing", binding.OperationDispatchID)
 	}
-	resume, err := sealDispatchWithActivationAndFeasibilities(aggregate.Decision, source.Candidate, aggregate.Facts.Activation, source.ValidationRecipes, nil)
+	sourceExecution, found := operationExecutionRecord(source.OperationExecutions, binding.OperationID)
+	if !found || !governancecheck.BindingMatchesExecution(binding, sourceExecution) {
+		return SealedDispatch{}, fmt.Errorf("governance resume source execution does not match granted binding")
+	}
+	if err := sourceExecution.Validate(); err != nil {
+		return SealedDispatch{}, fmt.Errorf("governance resume source execution: %w", err)
+	}
+	if containsString(source.CompletedOperationIDs, binding.OperationID) {
+		return SealedDispatch{}, fmt.Errorf("governance resume operation %q is already completed", binding.OperationID)
+	}
+	effectiveActivation := runtimecontract.RuntimeActivationForFacts(aggregate.Facts)
+	effectiveActivation.OperationPolicies = runtimecontract.RuntimeDispatchSealedOperationPolicies(sealedDispatchToRuntimeRecord(*source))
+	resume, err := sealDispatchWithActivationAndFeasibilities(
+		aggregate.Decision,
+		source.Candidate,
+		effectiveActivation,
+		source.ValidationRecipes,
+		governanceResumeAuthorityFeasibilities(*source),
+		source.OperationAdmissibilities,
+		source.OperationAdmissibilityObservations,
+	)
 	if err != nil {
 		return SealedDispatch{}, err
 	}
 	resume.CompletedOperationIDs = append([]string(nil), source.CompletedOperationIDs...)
-	found := false
+	found = false
 	for idx := range resume.OperationExecutions {
 		execution := &resume.OperationExecutions[idx]
-		if execution.OperationID != binding.OperationID {
-			if sourceExecution, ok := operationExecutionRecord(source.OperationExecutions, execution.OperationID); ok &&
-				containsString(source.CompletedOperationIDs, execution.OperationID) {
-				*execution = sourceExecution
-			}
+		sealedExecution := execution.Clone()
+		persistedExecution, ok := operationExecutionRecord(source.OperationExecutions, execution.OperationID)
+		if !ok {
+			return SealedDispatch{}, fmt.Errorf("governance resume operation %q has no source execution", execution.OperationID)
+		}
+		if err := persistedExecution.Validate(); err != nil {
+			return SealedDispatch{}, fmt.Errorf("governance resume operation %q source execution: %w", execution.OperationID, err)
+		}
+		if execution.OperationID == binding.OperationID {
+			found = true
+			// A governance continuation authorizes a new physical effect for the
+			// exact operation already sealed by SM-3. Preserve its SM-2 owner catalog,
+			// acquisition and replay authority; rebuilding any of them from current
+			// facts would silently substitute authority after the approval boundary.
+			*execution = persistedExecution.Clone()
+			execution.State = runtimecontract.OperationExecutionClaimed
+			execution.Fence = binding.Grant.ResumeFence
+			execution.OwnerReceiptRef = ""
+			execution.OwnerReceiptHash = ""
+			execution.ClaimedAt = runtimecontract.RuntimeOperationClaimMarkerGovernanceGranted
 			continue
 		}
-		found = true
-		execution.ExecutionKey = binding.ExecutionKey
-		execution.ExpectedEffectScope = binding.ExpectedEffectScope
-		execution.State = runtimecontract.OperationExecutionClaimed
-		execution.Fence = binding.Grant.ResumeFence
-		execution.OwnerReceiptRef = ""
-		execution.OwnerReceiptHash = ""
-		execution.ClaimedAt = "governance_granted"
+		if containsString(source.CompletedOperationIDs, execution.OperationID) {
+			if persistedExecution.State != runtimecontract.OperationExecutionEvidenceCommitted {
+				return SealedDispatch{}, fmt.Errorf("governance resume completed operation %q has no committed evidence", execution.OperationID)
+			}
+			*execution = persistedExecution.Clone()
+			continue
+		}
+		if persistedExecution.State != runtimecontract.OperationExecutionSealed ||
+			sealedExecution.ExpectedEffectScope != persistedExecution.ExpectedEffectScope ||
+			sealedExecution.IdempotencyClass != persistedExecution.IdempotencyClass {
+			return SealedDispatch{}, fmt.Errorf("governance resume pending operation %q source authority drifted", execution.OperationID)
+		}
+		// Pending siblings receive a new dispatch-scoped ExecutionKey, but their
+		// already-sealed owner authority is immutable across the governance pause.
+		*execution = persistedExecution.Clone()
+		execution.ExecutionKey = sealedExecution.ExecutionKey
+		execution.AuthorityHash = runtimecontract.StableRuntimeOperationExecutionAuthorityHash(*execution)
 	}
 	if !found {
 		return SealedDispatch{}, fmt.Errorf("governance resume operation %q is missing from source candidate", binding.OperationID)
 	}
-	if err := resume.ValidateWithActivation(aggregate.Decision, runtimecontract.RuntimeActivationForFacts(aggregate.Facts)); err != nil {
+	resume.OperationAuthorityHash = runtimecontract.StableRuntimeOperationExecutionAuthoritiesHash(resume.OperationExecutions)
+	resume.DispatchAuthorityHash = runtimecontract.StableRuntimeDispatchAuthorityHash(sealedDispatchToRuntimeRecord(resume))
+	if err := resume.ValidateWithActivation(aggregate.Decision, effectiveActivation); err != nil {
 		return SealedDispatch{}, err
 	}
 	return resume, nil
+}
+
+func governanceResumeAuthorityFeasibilities(source SealedDispatch) []runtimecontract.RuntimeCandidateFeasibilityRecord {
+	ret := make([]runtimecontract.RuntimeCandidateFeasibilityRecord, 0, len(source.OperationExecutions))
+	for _, execution := range source.OperationExecutions {
+		execution = execution.Normalized()
+		if execution.AdmissibilitySnapshotID == "" {
+			continue
+		}
+		observation := runtimecontract.RuntimeOwnerFeasibilityObservation{Outcome: runtimecontract.RuntimeOwnerFeasibilityFeasible}
+		value := runtimecontract.RuntimeCandidateFeasibilityRecord{
+			OperationID:             execution.OperationID,
+			AdmissibilitySnapshotID: execution.AdmissibilitySnapshotID,
+			AcquisitionBinding:      execution.AcquisitionBinding,
+			Observation:             &observation,
+		}
+		if execution.ReplayProof != nil {
+			proof := execution.ReplayProof.Clone()
+			value.ReplayProof = &proof
+		}
+		ret = append(ret, value)
+	}
+	return ret
 }

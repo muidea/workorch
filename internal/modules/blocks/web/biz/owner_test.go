@@ -347,12 +347,20 @@ func testWebSearchOperation(t *testing.T, adapter *RuntimeAdapter) (runtimecontr
 
 func testWebExecuteCommand(t *testing.T, operation runtimecontract.RuntimeOperation, sealed webevents.SealedRuntimeOperation) webevents.ExecuteOperationCommand {
 	t.Helper()
+	execution := runtimecontract.RuntimeOperationExecutionEnvelope{
+		ExecutionKey: runtimecontract.StableRuntimeOperationExecutionKey("ws-web", "run-web", "dispatch-web", operation.ID), Fence: 1, ExpectedEffectScope: runtimecontract.RuntimeEffectNone,
+		AdmissibilitySnapshotID: sealed.Authorization.CatalogSnapshotID, AcquisitionBinding: sealed.Authorization.AcquisitionBinding,
+	}
+	execution.OperationHash = runtimecontract.StableRuntimeOperationHash(operation)
+	execution.IdempotencyClass = runtimecontract.ResolveOperationIdempotencyClass(operation, []runtimecontract.RuntimeOperationPolicyFact{sealed.Authorization.Policy})
+	execution.AuthorityHash = runtimecontract.StableRuntimeOperationExecutionAuthorityHash(runtimecontract.RuntimeOperationExecutionRecord{
+		OperationID: operation.ID, OperationHash: execution.OperationHash, ExecutionKey: execution.ExecutionKey, ExpectedEffectScope: execution.ExpectedEffectScope,
+		IdempotencyClass: execution.IdempotencyClass, AdmissibilitySnapshotID: execution.AdmissibilitySnapshotID,
+		AcquisitionBinding: execution.AcquisitionBinding, ReplayProof: execution.ReplayProof,
+	})
 	return webevents.ExecuteOperationCommand{
 		RuntimeOperationExecutionContext: runtimecontract.RuntimeOperationExecutionContext{
-			Execution: runtimecontract.RuntimeOperationExecutionEnvelope{
-				ExecutionKey: "exec/web-search-1", Fence: 1, ExpectedEffectScope: runtimecontract.RuntimeEffectNone,
-				AdmissibilitySnapshotID: sealed.Authorization.CatalogSnapshotID, AcquisitionBinding: sealed.Authorization.AcquisitionBinding,
-			},
+			Execution:   execution,
 			WorkspaceID: "ws-web", RunID: "run-web", DispatchID: "dispatch-web", Transaction: runtimecontract.AuthorityTransaction{AuthoritySnapshotID: "authority-web"},
 			OperationID: operation.ID, TargetRefs: append([]string(nil), operation.TargetRefs...), EvidenceKind: runtimecontract.EvidenceKindValidation,
 			WorkspaceDeliverableDirectory: t.TempDir(), WorkspaceInternalDirectory: t.TempDir(),

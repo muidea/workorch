@@ -4,7 +4,7 @@ Status: normative
 
 Type: core-contract-part
 
-Last Verified: 2026-08-25
+Last Verified: 2026-08-26
 
 ## 跨状态机不变量
 
@@ -41,9 +41,29 @@ subordinate transaction，不能升级为第五个状态机。administrative ter
 `need_validation` 只能含 `none` 或显式允许的 `ephemeral_session` operation。assessment 只消费当前
 Run 的 accepted evidence；assessment-only focus 不执行 executable operation。
 
+每个 executable dispatch 必须恰好有一个 durable SM-3 admission 来源：普通 dispatch 对应 exact accepted
+`RuntimeCandidateAttemptRecord`，governance continuation 对应 exact granted binding 的 `ResumeDispatchID`，两者互斥。
+dispatch seal 必须纳入 canonical candidate、validation recipe body、完整 owner catalog/observation preimage、精确 fallback
+policy 与 per-operation execution authority；active execution、restart 和 governance resume 只能读取该 seal，不能用 current
+owner catalog、current activation policy 或 current prerequisite observation 重新解释历史 authority。
+
+owner receipt ledger 与 dispatch execution ledger 必须按 `ExecutionKey + fence + OperationID + receipt ref/hash` 双向完全匹配；
+`owner_committed|evidence_committed` execution 不得缺 receipt，receipt 也不得脱离 committed execution projection。governance
+source 与 completed resume clone 可以投影同一份未漂移 receipt，但不能复制或改写 owner 事实。
+
 operation-scoped governance必须保存恰好一个ticket/approval owner identity，以及resolution、dependency、subject、
-receipt hash、ExecutionKey与fence binding。continue以同一ExecutionKey的下一fence执行，owner必须preflight exact grant；
-persisted grant与query/caller grant必须同时缺失或逐字段完全一致，不能通过省略grant绕过治理。
+receipt hash、ExecutionKey、fence、effect与sealed idempotency binding。continue只恢复suspended binding指向且未列入source
+`CompletedOperationIDs`的exact `owner_committed` execution；保留source governance receipt/history，新resume execution
+继承原ExecutionKey、`ExpectedEffectScope`、sealed idempotency、`AdmissibilitySnapshotID`、`AcquisitionBinding`与`ReplayProof`，以fence
+`N+1`、空receipt ref/hash和`governance_granted` marker进入claimed。completed sibling必须为`evidence_committed`并完整
+保留；pending sibling必须为`sealed`，只替换dispatch-scoped ExecutionKey，其candidate与sealed owner authority不变。
+source execution/binding不匹配或execution/replay authority自身不一致必须fail-closed，禁止从current facts/catalog重建。
+source dispatch必须为committed，且history严格满足`source operation dispatch < committed governance dispatch < resume dispatch`；
+governance request必须是canonical raw record，并与治理dispatch的完整dependency kind/subject/action/risk/authorization hash一致。
+owner call前以独立CAS把marker推进为`governance_effect_started`，只表示call可能已尝试；若exact receipt缺失，只有具备
+sealed replay authority时，再次physical owner call才必须先由独立SM-4 event消费exact operation-recovery budget，否则
+进入`outcome_unknown`。owner必须preflight exact grant；persisted grant与query/caller grant必须同时缺失或逐字段完全一致，
+不能通过省略grant绕过治理。
 
 validation recipe identity与check identity必须分离。required check只有在owner receipt中真实passed，且不同时出现在
 failed/skipped时才能贡献credit；exit 0、recipe ID、非空PassedChecks或冲突outcome均不能替代matching check fact。

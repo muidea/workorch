@@ -330,6 +330,44 @@ PY
   return 1
 }
 
+wait_canonical_approval_blocker() {
+  local workspace_id="$1"
+  local run_id="$2"
+  local approval_id="$3"
+  local output="$4"
+  local status_url
+  status_url="$(run_api_url "$workspace_id" "$run_id" "status")"
+
+  # Approval owns request materialization, while Run owns the lifecycle
+  # blocker. They converge through separate typed owner events, so observing a
+  # pending Approval is not yet mutation authority. Wait for the exact Run
+  # blocker before exercising Application's fail-closed admission gate.
+  get_json "$status_url?waitState=blocked_on_approval&waitTimeoutMillis=120000&waitIntervalMillis=500" "$output"
+  python3 - "$output" "$workspace_id" "$run_id" "$approval_id" <<'PY'
+import json
+import sys
+
+data = json.load(open(sys.argv[1], encoding="utf-8"))
+status = data.get("status") or {}
+workspace_id, run_id, approval_id = sys.argv[2:]
+if data.get("waitMatched") is not True:
+    raise SystemExit(f"Run blocker wait did not match: {data.get('waitMatched')!r}")
+if status.get("id") != run_id or status.get("workspaceId") != workspace_id:
+    raise SystemExit(
+        f"Run blocker scope is {status.get('workspaceId')!r}/{status.get('id')!r}, "
+        f"want {workspace_id!r}/{run_id!r}"
+    )
+if status.get("state") != "blocked_on_approval":
+    raise SystemExit(f"run state is {status.get('state')!r}, want 'blocked_on_approval'")
+if status.get("blockingApprovalId") != approval_id:
+    raise SystemExit(
+        f"Run blocker is {status.get('blockingApprovalId')!r}, want pending approval {approval_id!r}"
+    )
+if status.get("blockingTicketId"):
+    raise SystemExit(f"Run has an unexpected simultaneous ticket blocker: {status.get('blockingTicketId')!r}")
+PY
+}
+
 upsert_json() {
   local collection_url="$1"
   local resource_url="$2"
@@ -773,6 +811,7 @@ run_id="$(wait_activation_run "$workspace_id" "$TMP_DIR/activation.json" "$TMP_D
 
 approval_id="$(wait_pending_approval "$workspace_id" "$run_id" "$TMP_DIR/approvals-pending.json")"
 [[ -n "$approval_id" ]]
+wait_canonical_approval_blocker "$workspace_id" "$run_id" "$approval_id" "$TMP_DIR/run-blocked-on-approval.json"
 post_json "$BASE_URL/api/v1/workorch/approvals/$approval_id/approve?workspaceId=$workspace_id" \
   '{}' \
   "$TMP_DIR/approval-approved.json"

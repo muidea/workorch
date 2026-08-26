@@ -50,7 +50,7 @@ func RuntimeConvergenceProgressSignature(aggregate RuntimeAggregate) string {
 		RequiredOutput: decision.RequiredOutput.Normalized(), Terminal: decision.Terminal,
 		SemanticPlanning:      aggregate.SemanticPlanning.Clone(),
 		GovernanceRequests:    append([]runtimecontract.RuntimeGovernanceRequestRecord(nil), aggregate.GovernanceRequests...),
-		GovernanceResolutions: append([]runtimecontract.RuntimeGovernanceResolutionRecord(nil), aggregate.GovernanceResolutions...),
+		GovernanceResolutions: runtimecontract.CloneRuntimeGovernanceResolutionRecords(aggregate.GovernanceResolutions),
 	}
 	if aggregate.ActiveDispatch != nil {
 		value := runtimeConvergenceDispatchProgressFrom(*aggregate.ActiveDispatch)

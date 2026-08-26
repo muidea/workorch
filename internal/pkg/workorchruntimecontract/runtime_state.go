@@ -31,11 +31,26 @@ type RuntimeDispatchRecord struct {
 	// ValidationRecipes is the exact manifest-selected, Shell-owner-confirmed
 	// recipe snapshot for this dispatch.  It is a sealed operation contract,
 	// not activation policy and not mutable current owner inventory.
-	ValidationRecipes     []RuntimeValidationRecipe
+	ValidationRecipes []RuntimeValidationRecipe
+	// OperationAdmissibilities and OperationAdmissibilityObservations are the
+	// complete owner-authored snapshot preimages selected by SM-3. Executions
+	// refer to them by SnapshotID/AcquisitionBinding; recovery and owner calls
+	// must never replace them with the mutable current Runtime facts.
+	OperationAdmissibilities           []RuntimeOperationAdmissibility
+	OperationAdmissibilityObservations []RuntimePrerequisiteObservation
+	// OperationPolicies contains only exact activation fallback policies used
+	// by operations that did not require an owner admissibility snapshot. Static
+	// operation-contract resolution is represented by the absence of both.
+	OperationPolicies     []RuntimeOperationPolicyFact
 	State                 RuntimeDispatchState
 	CompletedOperationIDs []string
 	// OperationExecutions is the required per-operation claim/fence ledger.
-	OperationExecutions []RuntimeOperationExecutionRecord
+	OperationExecutions    []RuntimeOperationExecutionRecord
+	OperationAuthorityHash string
+	// DispatchAuthorityHash is the immutable SM-3 seal over the authority
+	// transaction, complete candidate, selected recipe bodies and exact
+	// per-operation authority set. Mutable execution progress is excluded.
+	DispatchAuthorityHash string
 }
 
 type RuntimeDiagnosticRecord struct {
@@ -92,6 +107,11 @@ type RuntimeCandidateAttemptRecord struct {
 	ManifestHash     string
 	LogicalRequestID string
 	State            RuntimeCandidateAttemptState
+	// Accepted attempts retain the exact immutable dispatch seal they produced.
+	// Pending/failed/invalidated attempts must not carry these fields.
+	CandidateHash         string
+	DispatchID            string
+	DispatchAuthorityHash string
 	// Proposal is the schema-valid, unsealed candidate persisted after provider
 	// generation. It is replayed after restart into the read-only feasibility
 	// gate, never treated as a dispatch or execution record.
@@ -172,6 +192,9 @@ type RuntimeStateRecord struct {
 func (r RuntimeStateRecord) Validate() error {
 	if r.Facts.WorkspaceID == "" || r.Facts.RunID == "" {
 		return fmt.Errorf("runtime state requires workspace and run scope")
+	}
+	if err := ValidateRuntimeDispatchHistoryShape(r.Facts.WorkspaceID, r.Facts.RunID, r.ActiveDispatch, r.CompletedDispatches); err != nil {
+		return fmt.Errorf("runtime state dispatch history: %w", err)
 	}
 	if err := ValidateRuntimeDefinitionFocuses(r.Facts.DefinitionSeed, r.Facts.DefinitionFocuses); err != nil {
 		return fmt.Errorf("runtime state definition focuses: %w", err)
@@ -278,10 +301,22 @@ func (r RuntimeStateRecord) Validate() error {
 	if err := ValidateRuntimeGovernanceRequestRecords(r.GovernanceRequests); err != nil {
 		return err
 	}
+	if err := ValidateRuntimeGovernanceRequestDispatchLineage(r.GovernanceRequests, r.ActiveDispatch, r.CompletedDispatches); err != nil {
+		return err
+	}
 	if err := ValidateRuntimeOperationGovernanceBindings(r.OperationGovernanceBindings); err != nil {
 		return err
 	}
+	if err := ValidateRuntimeDispatchExecutionKeyLineage(r.Facts.WorkspaceID, r.Facts.RunID, r.ActiveDispatch, r.CompletedDispatches, r.OperationGovernanceBindings); err != nil {
+		return err
+	}
+	if err := ValidateRuntimeDispatchAdmissionLineage(r.ActiveDispatch, r.CompletedDispatches, r.CandidateAttempts, r.OperationGovernanceBindings); err != nil {
+		return err
+	}
 	if err := ValidateRuntimeOperationReceipts(r.OperationReceipts); err != nil {
+		return err
+	}
+	if err := ValidateRuntimeOperationReceiptExecutionLineage(r.ActiveDispatch, r.CompletedDispatches, r.OperationReceipts); err != nil {
 		return err
 	}
 	for _, invalidation := range r.PrerequisiteInvalidations {
@@ -305,21 +340,6 @@ func (r RuntimeStateRecord) Validate() error {
 			return fmt.Errorf("runtime state drive lease scope mismatch")
 		}
 	}
-	for _, request := range r.GovernanceRequests {
-		matched := r.ActiveDispatch != nil && r.ActiveDispatch.ID == request.DispatchID &&
-			r.ActiveDispatch.Transaction.AuthoritySnapshotID == request.AuthoritySnapshotID && r.ActiveDispatch.Candidate.Governance != nil
-		if !matched {
-			for _, dispatch := range r.CompletedDispatches {
-				if dispatch.ID == request.DispatchID && dispatch.Transaction.AuthoritySnapshotID == request.AuthoritySnapshotID && dispatch.Candidate.Governance != nil {
-					matched = true
-					break
-				}
-			}
-		}
-		if !matched {
-			return fmt.Errorf("runtime governance request has no governed dispatch")
-		}
-	}
 	for _, rawBinding := range r.OperationGovernanceBindings {
 		binding := rawBinding.Normalized()
 		var source *RuntimeDispatchRecord
@@ -330,7 +350,7 @@ func (r RuntimeStateRecord) Validate() error {
 				break
 			}
 		}
-		if source == nil {
+		if source == nil || source.State != RuntimeDispatchStateCommitted {
 			return fmt.Errorf("operation governance binding source dispatch %q is not completed", binding.OperationDispatchID)
 		}
 		var execution *RuntimeOperationExecutionRecord
@@ -342,6 +362,8 @@ func (r RuntimeStateRecord) Validate() error {
 			}
 		}
 		if execution == nil || execution.ExecutionKey != binding.ExecutionKey || execution.Fence != binding.Fence ||
+			execution.ExpectedEffectScope != binding.ExpectedEffectScope ||
+			execution.IdempotencyClass != binding.IdempotencyClass || execution.AuthorityHash != binding.ExecutionAuthorityHash ||
 			execution.OwnerReceiptHash != binding.GovernanceReceiptHash || execution.State != OperationExecutionOwnerCommitted {
 			return fmt.Errorf("operation governance binding source execution does not match sealed receipt")
 		}
@@ -365,14 +387,30 @@ func (r RuntimeStateRecord) Validate() error {
 			return fmt.Errorf("operation governance binding has no matching owner request")
 		}
 	}
+	governedExecutions := make([]RuntimeOperationExecutionRecord, 0)
+	if r.ActiveDispatch != nil {
+		governedExecutions = append(governedExecutions, r.ActiveDispatch.OperationExecutions...)
+	}
+	for _, dispatch := range r.CompletedDispatches {
+		governedExecutions = append(governedExecutions, dispatch.OperationExecutions...)
+	}
+	if err := ValidateRuntimeOperationGovernanceExecutionBindings(r.OperationGovernanceBindings, governedExecutions); err != nil {
+		return err
+	}
+	if err := ValidateRuntimeOperationGovernanceGrantLineage(r.OperationGovernanceBindings, r.GovernanceResolutions, r.Facts.Evidence.Accepted, r.Facts.Evidence.Rejected); err != nil {
+		return err
+	}
 	for _, attempt := range r.CandidateAttempts {
 		if attempt.State != RuntimeCandidateAttemptStateAccepted {
 			continue
 		}
-		matched := r.ActiveDispatch != nil && r.ActiveDispatch.Transaction == attempt.Transaction
+		matched := r.ActiveDispatch != nil && r.ActiveDispatch.Transaction == attempt.Transaction &&
+			r.ActiveDispatch.ID == attempt.DispatchID && r.ActiveDispatch.CandidateHash == attempt.CandidateHash &&
+			r.ActiveDispatch.DispatchAuthorityHash == attempt.DispatchAuthorityHash
 		if !matched {
 			for _, dispatch := range r.CompletedDispatches {
-				if dispatch.Transaction == attempt.Transaction {
+				if dispatch.Transaction == attempt.Transaction && dispatch.ID == attempt.DispatchID &&
+					dispatch.CandidateHash == attempt.CandidateHash && dispatch.DispatchAuthorityHash == attempt.DispatchAuthorityHash {
 					matched = true
 					break
 				}
@@ -383,10 +421,15 @@ func (r RuntimeStateRecord) Validate() error {
 		}
 	}
 	for _, resolution := range r.GovernanceResolutions {
+		resolution = resolution.Normalized()
+		if resolution.WorkspaceID != r.Facts.WorkspaceID || resolution.RunID != r.Facts.RunID {
+			return fmt.Errorf("runtime governance resolution scope mismatch")
+		}
 		matched := false
 		bound := false
 		for _, request := range r.GovernanceRequests {
-			if request.TicketID == resolution.TicketID && request.ApprovalID == resolution.ApprovalID && request.DispatchID == resolution.DispatchID && request.AuthoritySnapshotID == resolution.AuthoritySnapshotID {
+			if request.TicketID == resolution.TicketID && request.ApprovalID == resolution.ApprovalID && request.DispatchID == resolution.DispatchID && request.AuthoritySnapshotID == resolution.AuthoritySnapshotID &&
+				strings.TrimSpace(request.DependencyKind) == resolution.DependencyKind && strings.TrimSpace(request.SubjectRef) == resolution.SubjectRef {
 				bound = true
 				break
 			}
@@ -502,6 +545,13 @@ func ValidateRuntimeCandidateAttemptRecords(values []RuntimeCandidateAttemptReco
 			if value.State == RuntimeCandidateAttemptStateAccepted && len(value.Feasibilities) > 0 {
 				return fmt.Errorf("accepted runtime candidate attempt %s cannot retain unsealed feasibility records", key)
 			}
+			if value.State == RuntimeCandidateAttemptStateAccepted {
+				if strings.TrimSpace(value.CandidateHash) == "" || strings.TrimSpace(value.DispatchID) == "" || strings.TrimSpace(value.DispatchAuthorityHash) == "" {
+					return fmt.Errorf("accepted runtime candidate attempt %s requires candidate, dispatch and authority hashes", key)
+				}
+			} else if value.CandidateHash != "" || value.DispatchID != "" || value.DispatchAuthorityHash != "" {
+				return fmt.Errorf("pending runtime candidate attempt %s cannot carry dispatch authority", key)
+			}
 		case RuntimeCandidateAttemptStateFailed:
 			if value.Failure == nil || value.Failure.Class == "" || strings.TrimSpace(value.Failure.Reason) == "" {
 				return fmt.Errorf("failed runtime candidate attempt %s requires typed failure", key)
@@ -509,7 +559,13 @@ func ValidateRuntimeCandidateAttemptRecords(values []RuntimeCandidateAttemptReco
 			if value.Stale != nil || value.PrerequisiteRequest != nil || value.OwnerFeasibility != nil {
 				return fmt.Errorf("failed runtime candidate attempt %s cannot carry freshness stale", key)
 			}
+			if value.CandidateHash != "" || value.DispatchID != "" || value.DispatchAuthorityHash != "" {
+				return fmt.Errorf("failed runtime candidate attempt %s cannot carry dispatch authority", key)
+			}
 		case RuntimeCandidateAttemptStateInvalidated:
+			if value.CandidateHash != "" || value.DispatchID != "" || value.DispatchAuthorityHash != "" {
+				return fmt.Errorf("invalidated runtime candidate attempt %s cannot carry dispatch authority", key)
+			}
 			reasonCount := 0
 			if value.Stale != nil {
 				reasonCount++
@@ -764,7 +820,7 @@ func (r RuntimeStateRecord) Clone() RuntimeStateRecord {
 		ret.DefinitionClarification = &value
 	}
 	ret.GovernanceRequests = append([]RuntimeGovernanceRequestRecord(nil), r.GovernanceRequests...)
-	ret.GovernanceResolutions = append([]RuntimeGovernanceResolutionRecord(nil), r.GovernanceResolutions...)
+	ret.GovernanceResolutions = CloneRuntimeGovernanceResolutionRecords(r.GovernanceResolutions)
 	ret.OperationGovernanceBindings = make([]RuntimeOperationGovernanceBinding, len(r.OperationGovernanceBindings))
 	for idx := range r.OperationGovernanceBindings {
 		ret.OperationGovernanceBindings[idx] = r.OperationGovernanceBindings[idx].Clone()
@@ -822,20 +878,52 @@ func (d RuntimeDispatchRecord) Validate(decision RuntimeDecision) error {
 }
 
 func (d RuntimeDispatchRecord) ValidateWithActivation(decision RuntimeDecision, activation RuntimeActivationContext) error {
-	if strings.TrimSpace(d.ID) == "" || d.WorkspaceID == "" || d.RunID == "" || strings.TrimSpace(d.CandidateHash) == "" {
-		return fmt.Errorf("runtime dispatch requires id, scope and candidate hash")
-	}
 	if err := ValidateAuthorityTransaction(decision, d.Transaction); err != nil {
 		return err
 	}
 	if d.WorkspaceID != decision.AuthoritySnapshot.WorkspaceID || d.RunID != decision.AuthoritySnapshot.RunID {
 		return fmt.Errorf("runtime dispatch scope mismatch")
 	}
+	// Only non-policy startup activation fields are read from the current
+	// aggregate. Effect/replay semantics are immutable dispatch authority.
+	activation = activation.Clone()
+	activation.OperationPolicies = RuntimeDispatchSealedOperationPolicies(d)
 	if err := d.Candidate.ValidateWithActivation(decision, activation); err != nil {
+		return err
+	}
+	return d.ValidateIntrinsic()
+}
+
+// ValidateIntrinsic verifies the self-contained, immutable dispatch shape. It
+// is used for historical dispatches whose original RuntimeDecision is no longer
+// current; it deliberately does not attempt to rebuild that authority from
+// present facts.
+func (d RuntimeDispatchRecord) ValidateIntrinsic() error {
+	if strings.TrimSpace(d.ID) == "" || d.WorkspaceID == "" || d.RunID == "" || strings.TrimSpace(d.CandidateHash) == "" ||
+		strings.TrimSpace(d.Transaction.AuthoritySnapshotID) == "" || strings.TrimSpace(d.Transaction.FocusID) == "" ||
+		strings.TrimSpace(d.Transaction.RequiredOutputHash) == "" || strings.TrimSpace(d.Transaction.DefinitionRevision) == "" ||
+		strings.TrimSpace(d.Transaction.EvidenceRevision) == "" || strings.TrimSpace(d.Transaction.CapabilityStateHash) == "" ||
+		strings.TrimSpace(d.Transaction.PrerequisiteFreshnessHash) == "" || strings.TrimSpace(d.Transaction.OperationContractRevision) == "" ||
+		strings.TrimSpace(d.Transaction.AuthorityInputID) == "" || d.Transaction.Attempt < 0 {
+		return fmt.Errorf("runtime dispatch requires id, scope, authority and candidate hash")
+	}
+	if err := ValidateRuntimeOperationContractRevision(d.Transaction.OperationContractRevision); err != nil {
+		return fmt.Errorf("runtime dispatch operation contract revision: %w", err)
+	}
+	if d.Transaction.AuthoritySnapshotID != StableAuthoritySnapshotIDForTransaction(d.WorkspaceID, d.RunID, d.Transaction) {
+		return fmt.Errorf("runtime dispatch authority snapshot identity mismatch")
+	}
+	if err := ValidateSealedRuntimeCandidateShape(d.Candidate); err != nil {
+		return err
+	}
+	if err := validateRuntimeDispatchCandidateIntrinsic(d.Candidate, d.Transaction); err != nil {
 		return err
 	}
 	if d.CandidateHash != StableRuntimeCandidateHash(d.Candidate) {
 		return fmt.Errorf("runtime dispatch candidate hash mismatch")
+	}
+	if d.ID != StableRuntimeDispatchID(d.Transaction, d.CandidateHash) {
+		return fmt.Errorf("runtime dispatch identity mismatch")
 	}
 	if err := ValidateRuntimeCandidateManagedValidationRecipeSnapshot(d.Candidate, d.ValidationRecipes); err != nil {
 		return fmt.Errorf("runtime dispatch validation recipe snapshot: %w", err)
@@ -844,34 +932,209 @@ func (d RuntimeDispatchRecord) ValidateWithActivation(decision RuntimeDecision, 
 		return fmt.Errorf("runtime dispatch has invalid state %q", d.State)
 	}
 	available := runtimeCandidateOperationIDs(d.Candidate)
-	seen := map[string]struct{}{}
-	for _, operationID := range d.CompletedOperationIDs {
-		operationID = strings.TrimSpace(operationID)
+	completed := map[string]struct{}{}
+	for _, rawOperationID := range d.CompletedOperationIDs {
+		operationID := strings.TrimSpace(rawOperationID)
+		if operationID == "" || operationID != rawOperationID {
+			return fmt.Errorf("runtime dispatch completed operation id must be canonical")
+		}
 		if _, ok := available[operationID]; !ok {
 			return fmt.Errorf("runtime dispatch completed operation %q is not present in candidate", operationID)
 		}
-		if _, ok := seen[operationID]; ok {
+		if _, ok := completed[operationID]; ok {
 			return fmt.Errorf("runtime dispatch completed operation %q is duplicated", operationID)
 		}
-		seen[operationID] = struct{}{}
+		completed[operationID] = struct{}{}
 	}
 	if err := ValidateRuntimeOperationExecutionRecords(d.OperationExecutions); err != nil {
 		return err
+	}
+	if len(available) != len(d.OperationExecutions) {
+		return fmt.Errorf("runtime dispatch requires exactly one operation execution per candidate operation")
+	}
+	wantOperationAuthorityHash := StableRuntimeOperationExecutionAuthoritiesHash(d.OperationExecutions)
+	if d.OperationAuthorityHash != wantOperationAuthorityHash {
+		return fmt.Errorf("runtime dispatch operation authority hash mismatch")
 	}
 	for _, exec := range NormalizeRuntimeOperationExecutionRecords(d.OperationExecutions) {
 		if _, ok := available[exec.OperationID]; !ok {
 			return fmt.Errorf("runtime dispatch operation execution %q is not present in candidate", exec.OperationID)
 		}
+		originID, err := RuntimeOperationExecutionKeyOrigin(d.WorkspaceID, d.RunID, exec.ExecutionKey, exec.OperationID)
+		if err != nil {
+			return fmt.Errorf("runtime dispatch operation execution %q: %w", exec.OperationID, err)
+		}
+		if originID != d.ID && !RuntimeOperationClaimMarkerIsGovernance(exec.ClaimedAt) && exec.State != OperationExecutionEvidenceCommitted {
+			return fmt.Errorf("runtime dispatch operation execution %q has non-current execution-key origin without governance or completed-clone state", exec.OperationID)
+		}
+		operation, found := runtimeCandidateOperationForID(d.Candidate, exec.OperationID)
+		if !found || exec.OperationHash != StableRuntimeOperationHash(operation) {
+			return fmt.Errorf("runtime dispatch operation execution %q operation hash mismatch", exec.OperationID)
+		}
+		_, markedCompleted := completed[exec.OperationID]
+		if markedCompleted != (exec.State == OperationExecutionEvidenceCommitted) {
+			return fmt.Errorf("runtime dispatch operation %q completed marker/evidence state mismatch", exec.OperationID)
+		}
 		if exec.ReplayProof != nil {
-			operation, found := runtimeCandidateOperationForID(d.Candidate, exec.OperationID)
-			if !found {
-				return fmt.Errorf("runtime dispatch replay proof operation %q is not present in candidate", exec.OperationID)
-			}
 			descriptor, known := RuntimeOperationDescriptorForKind(operation.Kind)
 			proof := exec.ReplayProof.Normalized()
 			if !known || proof.OwnerModuleID != descriptor.OwnerModuleID || !sameRuntimeStringSet(proof.TargetRefs, operation.TargetRefs) {
 				return fmt.Errorf("runtime dispatch replay proof does not match sealed operation %q", exec.OperationID)
 			}
+		}
+	}
+	if err := ValidateRuntimeDispatchOperationAuthority(d); err != nil {
+		return err
+	}
+	if strings.TrimSpace(d.DispatchAuthorityHash) == "" || d.DispatchAuthorityHash != StableRuntimeDispatchAuthorityHash(d) {
+		return fmt.Errorf("runtime dispatch authority hash mismatch")
+	}
+	return nil
+}
+
+func StableRuntimeDispatchID(transaction AuthorityTransaction, candidateHash string) string {
+	digest := sha256.Sum256([]byte(strings.Join([]string{transaction.AuthoritySnapshotID, transaction.RequiredOutputHash, strings.TrimSpace(candidateHash)}, "|")))
+	return "dispatch-" + hex.EncodeToString(digest[:])[:20]
+}
+
+// StableRuntimeDispatchAuthorityHash is the single immutable SM-3 authority
+// seal. It binds fields that must move together across persistence and
+// governance resume without including mutable dispatch/execution progress.
+func StableRuntimeDispatchAuthorityHash(dispatch RuntimeDispatchRecord) string {
+	h := sha256.New()
+	writeHashString(h, "runtime-dispatch-authority/v1")
+	writeHashString(h, string(dispatch.WorkspaceID))
+	writeHashString(h, string(dispatch.RunID))
+	transaction := dispatch.Transaction
+	writeHashString(h, transaction.AuthoritySnapshotID)
+	writeHashString(h, transaction.FocusID)
+	writeHashString(h, string(transaction.State))
+	writeHashString(h, transaction.RequiredOutputHash)
+	writeHashString(h, transaction.DefinitionRevision)
+	writeHashString(h, transaction.EvidenceRevision)
+	writeHashString(h, transaction.CapabilityStateHash)
+	writeHashString(h, transaction.PrerequisiteFreshnessHash)
+	writeHashString(h, transaction.OperationContractRevision)
+	writeHashString(h, transaction.AuthorityInputID)
+	writeHashString(h, fmt.Sprintf("%d", transaction.Attempt))
+	writeHashString(h, StableRuntimeCandidateHash(dispatch.Candidate))
+	writeHashString(h, stableRuntimeValidationRecipeSnapshotHash(dispatch.ValidationRecipes))
+	writeHashString(h, StableRuntimeDispatchOperationAuthorityHash(dispatch))
+	writeHashString(h, StableRuntimeOperationExecutionAuthoritiesHash(dispatch.OperationExecutions))
+	return hex.EncodeToString(h.Sum(nil))
+}
+
+func stableRuntimeValidationRecipeSnapshotHash(values []RuntimeValidationRecipe) string {
+	recipes := NormalizeRuntimeValidationRecipes(values)
+	h := sha256.New()
+	writeHashString(h, "runtime-validation-recipe-snapshot/v1")
+	writeHashString(h, fmt.Sprintf("%d", len(recipes)))
+	for _, recipe := range recipes {
+		writeHashString(h, recipe.ID)
+		writeHashString(h, recipe.Command)
+		writeHashStrings(h, recipe.Args)
+		writeHashString(h, fmt.Sprintf("%d", recipe.TimeoutMillis))
+	}
+	return hex.EncodeToString(h.Sum(nil))
+}
+
+func validateRuntimeDispatchCandidateIntrinsic(candidate RuntimeCandidate, transaction AuthorityTransaction) error {
+	var operations []RuntimeOperation
+	switch transaction.State {
+	case ConvergenceStateNeedStateChange:
+		if candidate.StateChange == nil || candidate.Validation != nil || candidate.Assessment != nil || candidate.Governance != nil {
+			return fmt.Errorf("runtime dispatch state-change authority requires exactly one state-change candidate")
+		}
+		operations = stateChangingRuntimeOperations(candidate.StateChange.Operations)
+	case ConvergenceStateNeedValidation:
+		if candidate.Validation == nil || candidate.StateChange != nil || candidate.Assessment != nil || candidate.Governance != nil {
+			return fmt.Errorf("runtime dispatch validation authority requires exactly one validation candidate")
+		}
+		operations = validationRuntimeOperations(candidate.Validation.Operations)
+	case ConvergenceStateNeedAssessment:
+		if candidate.Assessment == nil || candidate.StateChange != nil || candidate.Validation != nil || candidate.Governance != nil {
+			return fmt.Errorf("runtime dispatch assessment authority requires exactly one assessment candidate")
+		}
+		assessment := candidate.Assessment.Normalized()
+		if assessment.FocusID != transaction.FocusID || assessment.Summary == "" || len(assessment.CoverageWorkItemIDs) == 0 {
+			return fmt.Errorf("runtime dispatch assessment candidate requires authority focus, coverage and summary")
+		}
+		if _, err := ValidateAssessmentDisposition(assessment.Disposition, assessment.Items, assessment.Gap); err != nil {
+			return err
+		}
+		return nil
+	case ConvergenceStateNeedGovernance:
+		if candidate.Governance == nil || candidate.StateChange != nil || candidate.Validation != nil || candidate.Assessment != nil {
+			return fmt.Errorf("runtime dispatch governance authority requires exactly one governance candidate")
+		}
+		return candidate.Governance.ExternalDependency.Validate()
+	default:
+		return fmt.Errorf("runtime dispatch transaction state %q cannot own a candidate", transaction.State)
+	}
+	if len(operations) == 0 {
+		return fmt.Errorf("runtime dispatch operation candidate requires at least one operation")
+	}
+	ids := make(map[string]struct{}, len(operations))
+	for _, raw := range operations {
+		operation := raw.Normalized()
+		if operation.ID == "" || operation.Kind == "" {
+			return fmt.Errorf("runtime dispatch operation requires id and kind")
+		}
+		if len(operation.CoverageWorkItemIDs) != 0 {
+			return fmt.Errorf("runtime dispatch operation %q cannot carry coverage work item ids", operation.ID)
+		}
+		if _, duplicate := ids[operation.ID]; duplicate {
+			return fmt.Errorf("runtime dispatch operation id %q is duplicated", operation.ID)
+		}
+		ids[operation.ID] = struct{}{}
+		descriptor, known := RuntimeOperationDescriptorForKind(operation.Kind)
+		if !known {
+			return fmt.Errorf("runtime dispatch operation %q has unknown kind %q", operation.ID, operation.Kind)
+		}
+		if !runtimeDescriptorAllowsState(descriptor, transaction.State) {
+			return fmt.Errorf("runtime dispatch operation %q kind %q is not allowed in convergence state %q", operation.ID, operation.Kind, transaction.State)
+		}
+		if err := validateOperationParameters(operation.Parameters); err != nil {
+			return fmt.Errorf("runtime dispatch operation %q: %w", operation.ID, err)
+		}
+		if err := ValidateRuntimeOperationContract(operation); err != nil {
+			return fmt.Errorf("runtime dispatch operation %q: %w", operation.ID, err)
+		}
+	}
+	dependencies := make(map[string][]string, len(operations))
+	for _, raw := range operations {
+		operation := raw.Normalized()
+		dependencies[operation.ID] = append([]string(nil), operation.DependsOn...)
+		for _, dependency := range operation.DependsOn {
+			if dependency == operation.ID {
+				return fmt.Errorf("runtime dispatch operation %q cannot depend on itself", operation.ID)
+			}
+			if _, found := ids[dependency]; !found {
+				return fmt.Errorf("runtime dispatch operation %q depends on unknown operation %q", operation.ID, dependency)
+			}
+		}
+	}
+	visitState := make(map[string]uint8, len(dependencies))
+	var visit func(string) error
+	visit = func(operationID string) error {
+		switch visitState[operationID] {
+		case 1:
+			return fmt.Errorf("runtime dispatch operation dependency cycle at %q", operationID)
+		case 2:
+			return nil
+		}
+		visitState[operationID] = 1
+		for _, dependency := range dependencies[operationID] {
+			if err := visit(dependency); err != nil {
+				return err
+			}
+		}
+		visitState[operationID] = 2
+		return nil
+	}
+	for operationID := range dependencies {
+		if err := visit(operationID); err != nil {
+			return err
 		}
 	}
 	return nil
@@ -880,17 +1143,55 @@ func (d RuntimeDispatchRecord) ValidateWithActivation(decision RuntimeDecision, 
 func (d RuntimeDispatchRecord) Clone() RuntimeDispatchRecord {
 	ret := d
 	ret.Candidate = cloneRuntimeCandidate(d.Candidate)
-	ret.ValidationRecipes = NormalizeRuntimeValidationRecipes(d.ValidationRecipes)
+	ret.ValidationRecipes = CloneRuntimeValidationRecipes(d.ValidationRecipes)
+	ret.OperationAdmissibilities = CloneRuntimeOperationAdmissibilities(d.OperationAdmissibilities)
+	ret.OperationAdmissibilityObservations = CloneRuntimePrerequisiteObservations(d.OperationAdmissibilityObservations)
+	ret.OperationPolicies = NormalizeRuntimeOperationPolicyFacts(d.OperationPolicies)
 	ret.CompletedOperationIDs = append([]string(nil), d.CompletedOperationIDs...)
-	ret.OperationExecutions = NormalizeRuntimeOperationExecutionRecords(d.OperationExecutions)
-	if len(ret.OperationExecutions) > 0 {
-		execs := make([]RuntimeOperationExecutionRecord, len(ret.OperationExecutions))
-		for idx := range ret.OperationExecutions {
-			execs[idx] = ret.OperationExecutions[idx].Clone()
+	if d.OperationExecutions != nil {
+		ret.OperationExecutions = make([]RuntimeOperationExecutionRecord, len(d.OperationExecutions))
+		for idx := range d.OperationExecutions {
+			ret.OperationExecutions[idx] = d.OperationExecutions[idx].Clone()
 		}
-		ret.OperationExecutions = execs
 	}
 	return ret
+}
+
+// ValidateRuntimeDispatchHistoryShape enforces the aggregate-level dispatch
+// partition without reconstructing historical decisions. Active contains only
+// the current sealed transaction; completed contains only closed transactions,
+// and identities cannot overlap or repeat.
+func ValidateRuntimeDispatchHistoryShape(workspaceID common.WorkspaceID, runID common.RunID, active *RuntimeDispatchRecord, completed []RuntimeDispatchRecord) error {
+	seen := make(map[string]struct{}, len(completed)+1)
+	if active != nil {
+		if active.WorkspaceID != workspaceID || active.RunID != runID {
+			return fmt.Errorf("active runtime dispatch scope mismatch")
+		}
+		if active.State != RuntimeDispatchStateSealed {
+			return fmt.Errorf("active runtime dispatch must be sealed")
+		}
+		if err := active.ValidateIntrinsic(); err != nil {
+			return fmt.Errorf("active runtime dispatch: %w", err)
+		}
+		seen[active.ID] = struct{}{}
+	}
+	for idx := range completed {
+		dispatch := completed[idx]
+		if dispatch.WorkspaceID != workspaceID || dispatch.RunID != runID {
+			return fmt.Errorf("completed runtime dispatch[%d] scope mismatch", idx)
+		}
+		if dispatch.State != RuntimeDispatchStateCommitted && dispatch.State != RuntimeDispatchStateInvalidated {
+			return fmt.Errorf("completed runtime dispatch[%d] must be committed or invalidated", idx)
+		}
+		if _, duplicate := seen[dispatch.ID]; duplicate {
+			return fmt.Errorf("runtime dispatch id %q is duplicated across active/completed history", dispatch.ID)
+		}
+		if err := dispatch.ValidateIntrinsic(); err != nil {
+			return fmt.Errorf("completed runtime dispatch[%d]: %w", idx, err)
+		}
+		seen[dispatch.ID] = struct{}{}
+	}
+	return nil
 }
 
 func cloneRuntimeCandidate(candidate RuntimeCandidate) RuntimeCandidate {
@@ -914,7 +1215,7 @@ func cloneRuntimeCandidate(candidate RuntimeCandidate) RuntimeCandidate {
 		ret.Assessment = &value
 	}
 	if candidate.Governance != nil {
-		value := *candidate.Governance
+		value := GovernanceCandidate{ExternalDependency: candidate.Governance.ExternalDependency.Normalized()}
 		ret.Governance = &value
 	}
 	return ret
@@ -922,8 +1223,9 @@ func cloneRuntimeCandidate(candidate RuntimeCandidate) RuntimeCandidate {
 
 func cloneRuntimeOperation(operation RuntimeOperation) RuntimeOperation {
 	ret := operation.Normalized()
-	ret.Parameters = make([]OperationParameter, len(operation.Parameters))
-	for idx, parameter := range operation.Parameters {
+	parameters := append([]OperationParameter(nil), ret.Parameters...)
+	ret.Parameters = make([]OperationParameter, len(parameters))
+	for idx, parameter := range parameters {
 		ret.Parameters[idx] = parameter
 		ret.Parameters[idx].StringList = append([]string(nil), parameter.StringList...)
 		if parameter.String != nil {

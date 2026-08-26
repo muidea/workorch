@@ -14,8 +14,8 @@ type activeDispatchOwnerCall struct {
 
 func (x *activeDispatchExecution) callOperationOwner(operation runtimecontract.RuntimeOperation, prepared preparedActiveDispatchOperation) (activeDispatchOwnerCall, error) {
 	ownerCatalog := runtimeOwnerCatalogForOperation(
-		x.aggregate.Facts.Resources.OperationAdmissibilities,
-		x.aggregate.Facts.Resources.PrerequisiteObservations,
+		x.dispatch.OperationAdmissibilities,
+		x.dispatch.OperationAdmissibilityObservations,
 		operation,
 		prepared.execution.AdmissibilitySnapshotID,
 		prepared.execution.AcquisitionBinding,
@@ -33,7 +33,7 @@ func (x *activeDispatchExecution) callOperationOwner(operation runtimecontract.R
 		WorkspaceTreeObservation:           runtimeWorkspaceManifestObservation(x.aggregate),
 		CompletedRequiredOperationReceipts: completedRequiredOperationReceiptBindings(*x.aggregate.ActiveDispatch, x.aggregate.OperationReceipts, x.completed),
 		OwnerCatalog:                       ownerCatalog,
-		OwnerCatalogObservation:            runtimeOwnerCatalogObservationForOperation(x.aggregate.Facts.Resources.PrerequisiteObservations, ownerCatalog),
+		OwnerCatalogObservation:            runtimeOwnerCatalogObservationForOperation(x.dispatch.OperationAdmissibilityObservations, ownerCatalog),
 	})
 	if err == nil {
 		return activeDispatchOwnerCall{result: result, flow: activeDispatchExecutionReady}, nil
@@ -50,12 +50,17 @@ func (x *activeDispatchExecution) callOperationOwner(operation runtimecontract.R
 		x.aggregate = recovered
 		return activeDispatchOwnerCall{flow: activeDispatchExecutionStop}, nil
 	}
-	if prepared.execution.ReplayProof != nil {
+	// The persisted claim is the pre-call write-ahead fence for both ordinary and
+	// governance-authorized execution. Only the replay class/proof sealed by SM-3
+	// may turn a missing receipt into a bounded SM-4 recovery handoff.
+	if runtimeOperationHasReplayAuthority(prepared.execution) {
 		// The re-drive reloads only persisted aggregate facts and hands recovery
 		// budget acquisition back to SM-4.
 		return activeDispatchOwnerCall{flow: activeDispatchExecutionRetry}, nil
 	}
-	_, _ = x.component.markOperationExecutionOutcomeUnknown(x.ctx, x.workspaceID, x.runID, operation.ID)
+	if _, markErr := x.component.markOperationExecutionOutcomeUnknown(x.ctx, x.workspaceID, x.runID, operation.ID); markErr != nil {
+		return activeDispatchOwnerCall{}, markErr
+	}
 	return activeDispatchOwnerCall{}, err
 }
 
@@ -102,9 +107,6 @@ func runtimeOwnerCatalogForOperation(values []runtimecontract.RuntimeOperationAd
 		catalog = catalog.Normalized()
 		if catalog.OwnerModuleID != owner || catalog.SnapshotID != requiredSnapshotID || catalog.AcquisitionBinding != requiredAcquisitionBinding ||
 			!runtimeCatalogContainsOperationKind(catalog, canonicalKind) || catalog.Validate() != nil {
-			continue
-		}
-		if _, found := runtimecontract.RuntimeOperationPolicyForOperation(operation, catalog.OperationPolicies); !found {
 			continue
 		}
 		if runtimeOwnerCatalogObservationForOperation(observations, &catalog) == nil {

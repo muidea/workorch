@@ -245,6 +245,58 @@ func runtimeStringPointer(value string) *string {
 	return &value
 }
 
+// recordAcceptedRuntimeDispatchAdmissionForTest keeps direct persistence
+// fixtures honest about the SM-3 entry that produced an executable dispatch.
+// The complete provider session is history only; execution authority remains
+// the exact accepted attempt bound to the immutable dispatch seal.
+func recordAcceptedRuntimeDispatchAdmissionForTest(
+	aggregate *runtime.RuntimeAggregate,
+	dispatch runtime.SealedDispatch,
+	manifestHash string,
+) {
+	stablePrefixHash := "fixture-accepted-dispatch"
+	correctionHash := "fixture-accepted-" + dispatch.ID
+	logicalRequestID := runtimecontract.StableRuntimeCandidateRequestSessionID(
+		runtimecontract.RuntimeProviderDocumentOperations,
+		aggregate.Facts.WorkspaceID,
+		aggregate.Facts.RunID,
+		dispatch.Transaction,
+		stablePrefixHash,
+		manifestHash,
+		correctionHash,
+	)
+	aggregate.CandidateRequestSessions = append(aggregate.CandidateRequestSessions, runtimecontract.RuntimeCandidateRequestSession{
+		LogicalRequestID: logicalRequestID,
+		DocumentKind:     runtimecontract.RuntimeProviderDocumentOperations,
+		Transaction:      dispatch.Transaction,
+		StablePrefixHash: stablePrefixHash,
+		ManifestHash:     manifestHash,
+		CorrectionHash:   correctionHash,
+		State:            runtimecontract.RuntimeCandidateRequestSessionDocumentComplete,
+		NextSequence:     1,
+		LastPhysicalCallID: runtimecontract.StableRuntimeCandidatePhysicalCallID(
+			logicalRequestID,
+			1,
+		),
+		ProviderSubmitted: true,
+		LastOutcome: runtimecontract.RuntimeCandidateRequestOutcome{
+			Class: runtimecontract.RuntimeCandidateRequestOutcomeDocumentComplete,
+		},
+	})
+	aggregate.CandidateAttempts = append(aggregate.CandidateAttempts, runtimecontract.RuntimeCandidateAttemptRecord{
+		AuthorityContractID:   runtimecontract.StableAuthorityContractID(aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, dispatch.Transaction),
+		Transaction:           dispatch.Transaction,
+		Attempt:               0,
+		StablePrefixHash:      stablePrefixHash,
+		ManifestHash:          manifestHash,
+		LogicalRequestID:      logicalRequestID,
+		State:                 runtimecontract.RuntimeCandidateAttemptStateAccepted,
+		CandidateHash:         dispatch.CandidateHash,
+		DispatchID:            dispatch.ID,
+		DispatchAuthorityHash: dispatch.DispatchAuthorityHash,
+	})
+}
+
 // startRuntimeFileBackedRunOwner creates an isolated process boundary around
 // the durable Run repository. Callers deliberately invoke the returned stop
 // function before constructing the next process: a new controller alone is
@@ -488,6 +540,7 @@ func TestRuntimeStateRepositoryRoundTripsSealedValidationRecipeSnapshot(t *testi
 	if err != nil {
 		t.Fatal(err)
 	}
+	recordAcceptedRuntimeDispatchAdmissionForTest(&aggregate, dispatch, manifest.Hash)
 	aggregate.ActiveDispatch = &dispatch
 	if err := aggregate.Validate(); err != nil {
 		t.Fatalf("fixture aggregate: %v", err)
@@ -3222,12 +3275,19 @@ func TestRuntimeOperationExecutorRoutesTypedCommandToCapabilityOwner(t *testing.
 	})
 	t.Cleanup(func() { fileObserver.Unsubscribe(fileevents.TopicExecuteFileEditOperation) })
 
+	operation := runtimecontract.RuntimeOperation{
+		ID: "write-1", Kind: runtimecontract.StepKindFileEdit, TargetRefs: []string{"target.txt"}, Parameters: runtimeFileEditParameters("target.txt"),
+	}
+	execution := runtimecontract.RuntimeOperationExecutionRecord{
+		OperationID: operation.ID, OperationHash: runtimecontract.StableRuntimeOperationHash(operation),
+		ExecutionKey: "exec/ws-v2/run-v2/dispatch-1/write-1", Fence: 1,
+		ExpectedEffectScope: runtimecontract.RuntimeEffectWorkspaceDurable, IdempotencyClass: runtimecontract.RuntimeOperationIdempotencyAtMostOnce,
+	}
+	execution.AuthorityHash = runtimecontract.StableRuntimeOperationExecutionAuthorityHash(execution)
 	response, err := (eventRuntimeOperationExecutor{hub: hub}).ExecuteRuntimeOperation(ctx, runtime.RuntimeOperationExecutionRequest{
 		WorkspaceID: "ws-v2", RunID: "run-v2", DispatchID: "dispatch-1",
 		Transaction: runtimecontract.AuthorityTransaction{AuthoritySnapshotID: "snapshot-1"},
-		Operation: runtimecontract.RuntimeOperation{
-			ID: "write-1", Kind: runtimecontract.StepKindFileEdit, TargetRefs: []string{"target.txt"}, Parameters: runtimeFileEditParameters("target.txt"),
-		},
+		Execution:   execution, Operation: operation,
 		EvidenceKind:     runtimecontract.EvidenceKindStateChange,
 		EvidencePolicies: []runtimecontract.RuntimeEvidencePolicy{{ID: "policy-1", AppliesTo: runtimecontract.StepKindFileEdit}},
 	})
@@ -3277,17 +3337,21 @@ func TestRuntimeOperationExecutorPassesFocusTargetRoleToMCPOwner(t *testing.T) {
 		}},
 	}
 	catalog.SnapshotID = runtimecontract.StableRuntimeOperationAdmissibilitySnapshotID(catalog)
+	operation := runtimecontract.RuntimeOperation{
+		ID: "mcp-1", Kind: runtimecontract.StepKindMCPToolCall, CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-v2"},
+		Parameters: []runtimecontract.OperationParameter{{Name: "serverId", String: &serverID}, {Name: "tool", String: &tool}},
+	}
+	execution := runtimecontract.RuntimeOperationExecutionRecord{
+		OperationID: operation.ID, OperationHash: runtimecontract.StableRuntimeOperationHash(operation),
+		ExecutionKey: "exec/ws-v2/run-v2/dispatch-1/mcp-1", Fence: 1,
+		ExpectedEffectScope: runtimecontract.RuntimeEffectNone, IdempotencyClass: runtimecontract.RuntimeOperationIdempotencySafeToReplay,
+		AdmissibilitySnapshotID: catalog.SnapshotID, AcquisitionBinding: catalog.AcquisitionBinding,
+	}
+	execution.AuthorityHash = runtimecontract.StableRuntimeOperationExecutionAuthorityHash(execution)
 	response, err := (eventRuntimeOperationExecutor{hub: hub}).ExecuteRuntimeOperation(ctx, runtime.RuntimeOperationExecutionRequest{
 		WorkspaceID: "ws-v2", RunID: "run-v2", DispatchID: "dispatch-1",
 		Transaction: runtimecontract.AuthorityTransaction{AuthoritySnapshotID: "snapshot-1"}, TargetRole: "implementation",
-		Execution: runtimecontract.RuntimeOperationExecutionRecord{
-			OperationID: "mcp-1", ExecutionKey: "exec/ws-v2/run-v2/dispatch-1/mcp-1", Fence: 1, ExpectedEffectScope: runtimecontract.RuntimeEffectNone,
-			AdmissibilitySnapshotID: catalog.SnapshotID, AcquisitionBinding: catalog.AcquisitionBinding,
-		},
-		Operation: runtimecontract.RuntimeOperation{
-			ID: "mcp-1", Kind: runtimecontract.StepKindMCPToolCall, CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-v2"},
-			Parameters: []runtimecontract.OperationParameter{{Name: "serverId", String: &serverID}, {Name: "tool", String: &tool}},
-		}, EvidenceKind: runtimecontract.EvidenceKindValidation, OwnerCatalog: &catalog,
+		Execution: execution, Operation: operation, EvidenceKind: runtimecontract.EvidenceKindValidation, OwnerCatalog: &catalog,
 	})
 	sealedOperation, sealedAuthorization, sealedErr := captured.SealedOperation.ValidateForExecution(captured.RuntimeOperationExecutionContext)
 	sealedData, dataErr := mcpevents.OperationDataFromRuntimeOperation(sealedOperation)
@@ -3961,18 +4025,29 @@ func TestRuntimeMainlinePartialReplayClosesAttemptThenSealsCorrectedRetry(t *tes
 		t.Fatal(err)
 	}
 	initialized := runtimeTestInitializeOperationFixture(t, ctx, biz, repository, runtimeAggregate(t, 1).Facts, runtimeDefinition(), nil)
+	if len(initialized.Facts.Focus.CoverageEvidenceBindings) != 1 {
+		t.Fatalf("partial replay fixture requires one sealed coverage binding: %+v", initialized.Facts.Focus)
+	}
 	replayedOperation := runtimecontract.RuntimeOperation{
 		ID: "replayed-edit", Kind: runtimecontract.StepKindFileEdit,
-		CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-v2"}, TargetRefs: []string{"target.txt"},
+		BindingRefs: []string{initialized.Facts.Focus.CoverageEvidenceBindings[0].ID}, TargetRefs: []string{"target.txt"},
 		Parameters: runtimeFileEditParameters("target.txt"),
 	}
 	rejectedCandidate := runtimecontract.RuntimeCandidate{StateChange: &runtimecontract.StateChangeCandidate{Operations: []runtimecontract.StateChangingOperation{{Operation: replayedOperation}}}}
+	previousManifest, err := runtimecontract.BuildRuntimeCandidateContractManifest(
+		initialized.Decision,
+		runtimecontract.RuntimeCandidateManifestOwnerFactsFromResources(initialized.Facts.Resources),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
 	previousDispatch, err := runtime.SealDispatchWithActivation(initialized.Decision, rejectedCandidate, initialized.Facts.Activation)
 	if err != nil {
 		t.Fatal(err)
 	}
 	previousDispatch.State = runtime.DispatchStateCommitted
 	seeded := initialized
+	recordAcceptedRuntimeDispatchAdmissionForTest(&seeded, previousDispatch, previousManifest.Hash)
 	seeded.CompletedDispatches = []runtime.SealedDispatch{previousDispatch}
 	seeded.Facts.Evidence.Rejected = []runtimecontract.EvidenceFact{{
 		ID: "rejected-edit", Kind: runtimecontract.EvidenceKindStateChange, DispatchID: previousDispatch.ID, OperationID: replayedOperation.ID,
@@ -4021,7 +4096,7 @@ func TestRuntimeMainlinePartialReplayClosesAttemptThenSealsCorrectedRetry(t *tes
 
 	module := newTestBiz(biz, hub, nil)
 	first, err := module.requestAndSealRuntimeCandidate(ctx, seeded, "partial-replay-prefix", 0)
-	if err != nil || len(requests) != 1 || len(first.CandidateAttempts) != 1 || first.CandidateAttempts[0].State != runtimecontract.RuntimeCandidateAttemptStateFailed || first.CandidateAttempts[0].Failure == nil || first.CandidateAttempts[0].Failure.Code != "candidate_partially_replays_rejected_shape" || first.Decision.State == runtimecontract.ConvergenceStateFailed {
+	if err != nil || len(requests) != 1 || len(first.CandidateAttempts) != 2 || first.CandidateAttempts[0].State != runtimecontract.RuntimeCandidateAttemptStateAccepted || first.CandidateAttempts[1].State != runtimecontract.RuntimeCandidateAttemptStateFailed || first.CandidateAttempts[1].Failure == nil || first.CandidateAttempts[1].Failure.Code != "candidate_partially_replays_rejected_shape" || first.Decision.State == runtimecontract.ConvergenceStateFailed {
 		t.Fatalf("partial replay did not atomically close attempt 0 before restart: aggregate=%+v err=%v requests=%+v", first, err, requests)
 	}
 	restarted, err := biz.loadRuntime(ctx, "ws-v2", "run-v2")
@@ -4032,10 +4107,11 @@ func TestRuntimeMainlinePartialReplayClosesAttemptThenSealsCorrectedRetry(t *tes
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(requests) != 2 || sealed.ActiveDispatch == nil || len(sealed.CandidateAttempts) != 2 ||
-		sealed.CandidateAttempts[0].State != runtimecontract.RuntimeCandidateAttemptStateFailed || sealed.CandidateAttempts[0].Failure == nil ||
-		sealed.CandidateAttempts[0].Failure.Code != "candidate_partially_replays_rejected_shape" ||
-		sealed.CandidateAttempts[1].State != runtimecontract.RuntimeCandidateAttemptStateAccepted || sealed.Decision.State == runtimecontract.ConvergenceStateFailed {
+	if len(requests) != 2 || sealed.ActiveDispatch == nil || len(sealed.CandidateAttempts) != 3 ||
+		sealed.CandidateAttempts[0].State != runtimecontract.RuntimeCandidateAttemptStateAccepted ||
+		sealed.CandidateAttempts[1].State != runtimecontract.RuntimeCandidateAttemptStateFailed || sealed.CandidateAttempts[1].Failure == nil ||
+		sealed.CandidateAttempts[1].Failure.Code != "candidate_partially_replays_rejected_shape" ||
+		sealed.CandidateAttempts[2].State != runtimecontract.RuntimeCandidateAttemptStateAccepted || sealed.Decision.State == runtimecontract.ConvergenceStateFailed {
 		t.Fatalf("partial replay did not converge through typed retry: requests=%+v aggregate=%+v", requests, sealed)
 	}
 	if requests[0].StablePrefixHash != requests[1].StablePrefixHash || requests[0].Transaction != requests[1].Transaction {

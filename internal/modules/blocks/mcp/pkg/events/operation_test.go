@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"slices"
+	"strings"
 	"testing"
 
 	"github.com/muidea/workorch/internal/pkg/common"
@@ -56,15 +57,26 @@ func TestSealedRuntimeOperationBindsOwnerCatalogAndExecutionScope(t *testing.T) 
 		t.Fatal(err)
 	}
 	context := runtimecontract.RuntimeOperationExecutionContext{
-		Execution: runtimecontract.RuntimeOperationExecutionEnvelope{
+		WorkspaceID: "ws", RunID: "run", DispatchID: "dispatch",
+		Execution: testExecutionEnvelope(operation, runtimecontract.RuntimeOperationExecutionEnvelope{
 			ExecutionKey: "exec/ws/run/dispatch/mcp-1", Fence: 1, ExpectedEffectScope: runtimecontract.RuntimeEffectNone,
 			AdmissibilitySnapshotID: catalog.SnapshotID, AcquisitionBinding: catalog.AcquisitionBinding,
-		},
+		}, []runtimecontract.RuntimeOperationPolicyFact{sealed.Authorization.Policy}),
 		OperationID: operation.ID, TargetRefs: append([]string(nil), operation.TargetRefs...), CoverageWorkItemIDs: append([]common.CoverageWorkItemID(nil), operation.CoverageWorkItemIDs...),
 	}
 	got, authorization, err := sealed.ValidateForExecution(context)
 	if err != nil || got.ID != operation.ID || authorization.Capability.ID != capabilityID || authorization.RegistryRevision != "registry-v1" {
 		t.Fatalf("operation=%+v authorization=%+v err=%v", got, authorization, err)
+	}
+	idempotencyDrift := context
+	idempotencyDrift.Execution.IdempotencyClass = runtimecontract.RuntimeOperationIdempotencyAtMostOnce
+	if _, _, err := sealed.ValidateForExecution(idempotencyDrift); err == nil || !strings.Contains(err.Error(), "idempotency class mismatch") {
+		t.Fatalf("sealed MCP operation accepted idempotency drift: %v", err)
+	}
+	authorityDrift := context
+	authorityDrift.Execution.AuthorityHash = "forged"
+	if _, _, err := sealed.ValidateForExecution(authorityDrift); err == nil || !strings.Contains(err.Error(), "authority hash mismatch") {
+		t.Fatalf("sealed MCP operation accepted authority hash drift: %v", err)
 	}
 	drifted := sealed
 	drifted.Authorization.Policy.EffectScope = runtimecontract.RuntimeEffectRemoteDurable

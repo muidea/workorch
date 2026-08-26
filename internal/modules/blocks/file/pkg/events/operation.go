@@ -47,6 +47,9 @@ func SealRuntimeOperation(operation runtimecontract.RuntimeOperation) (SealedRun
 // operation sealed for this command identity. The returned operation is a
 // detached normalized copy suitable for owner-local decoding.
 func (s SealedRuntimeOperation) ValidateForExecution(context runtimecontract.RuntimeOperationExecutionContext, expectedKind string) (runtimecontract.RuntimeOperation, error) {
+	if err := runtimecontract.ValidateRuntimeOperationExecutionContextScope(context); err != nil {
+		return runtimecontract.RuntimeOperation{}, err
+	}
 	operation := s.Operation.Normalized()
 	if operation.Kind != strings.TrimSpace(expectedKind) {
 		return runtimecontract.RuntimeOperation{}, fmt.Errorf("sealed File operation kind %q does not match %q", operation.Kind, expectedKind)
@@ -62,6 +65,9 @@ func (s SealedRuntimeOperation) ValidateForExecution(context runtimecontract.Run
 	}
 	if !sameExecutionStrings(operation.TargetRefs, context.TargetRefs) || !sameExecutionCoverage(operation.CoverageWorkItemIDs, context.CoverageWorkItemIDs) {
 		return runtimecontract.RuntimeOperation{}, fmt.Errorf("sealed File operation scope mismatch")
+	}
+	if err := runtimecontract.ValidateRuntimeOperationExecutionAuthority(operation, context.Execution, nil); err != nil {
+		return runtimecontract.RuntimeOperation{}, fmt.Errorf("sealed File execution authority: %w", err)
 	}
 	payload, err := json.Marshal(operation)
 	if err != nil {

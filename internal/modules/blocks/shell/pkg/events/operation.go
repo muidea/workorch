@@ -147,6 +147,9 @@ func SealRuntimeOperation(operation runtimecontract.RuntimeOperation, catalog ru
 }
 
 func (s SealedRuntimeOperation) ValidateForExecution(context runtimecontract.RuntimeOperationExecutionContext) (runtimecontract.RuntimeOperation, RuntimeExecutionAuthorization, error) {
+	if err := runtimecontract.ValidateRuntimeOperationExecutionContextScope(context); err != nil {
+		return runtimecontract.RuntimeOperation{}, RuntimeExecutionAuthorization{}, err
+	}
 	operation := s.Operation.Normalized()
 	authorization := s.Authorization.normalized()
 	if operation.Kind != runtimecontract.StepKindShellCommand && operation.Kind != runtimecontract.RuntimeBlockKindManagedValidationSession {
@@ -164,8 +167,8 @@ func (s SealedRuntimeOperation) ValidateForExecution(context runtimecontract.Run
 	if err := authorization.validateForOperation(operation); err != nil {
 		return runtimecontract.RuntimeOperation{}, RuntimeExecutionAuthorization{}, err
 	}
-	if context.Execution.ExpectedEffectScope != authorization.Policy.EffectScope {
-		return runtimecontract.RuntimeOperation{}, RuntimeExecutionAuthorization{}, fmt.Errorf("sealed Shell operation effect does not match claimed execution")
+	if err := runtimecontract.ValidateRuntimeOperationExecutionAuthority(operation, context.Execution, []runtimecontract.RuntimeOperationPolicyFact{authorization.Policy}); err != nil {
+		return runtimecontract.RuntimeOperation{}, RuntimeExecutionAuthorization{}, fmt.Errorf("sealed Shell execution authority: %w", err)
 	}
 	if strings.TrimSpace(context.Execution.AdmissibilitySnapshotID) != authorization.CatalogSnapshotID ||
 		strings.TrimSpace(context.Execution.AcquisitionBinding) != authorization.AcquisitionBinding {

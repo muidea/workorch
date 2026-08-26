@@ -1032,6 +1032,7 @@ func TestActiveDispatchPrerequisiteStaleInvalidatesWithoutRejectedEvidence(t *te
 	execution := &repository.aggregate.ActiveDispatch.OperationExecutions[0]
 	execution.Fence = 1
 	execution.State = runtimecontract.OperationExecutionOwnerCommitted
+	execution.ClaimedAt = runtimecontract.RuntimeOperationClaimMarkerInitial
 	stale := runtimecontract.RuntimePrerequisiteStale{
 		PrerequisiteID: prerequisite.ID, ObservationID: observation.ObservationID,
 		Domain: runtimecontract.RuntimeResourceWorkspaceTree, OwnerModuleID: runtimecontract.RuntimeModuleFile,
@@ -1046,6 +1047,7 @@ func TestActiveDispatchPrerequisiteStaleInvalidatesWithoutRejectedEvidence(t *te
 		Class: runtimecontract.FailureClassExecutionFailure, Code: "prerequisite_stale", Signature: "stale-file-tree", Message: "workspace changed",
 	})
 	receipt = receipt.Normalized()
+	execution.OwnerReceiptRef = "runtime-receipt/" + execution.ExecutionKey
 	execution.OwnerReceiptHash = runtimecontract.StableRuntimeOperationReceiptHash(receipt)
 	repository.aggregate.OperationReceipts = append(repository.aggregate.OperationReceipts, receipt)
 	controller, err := NewRuntimeController(repository)

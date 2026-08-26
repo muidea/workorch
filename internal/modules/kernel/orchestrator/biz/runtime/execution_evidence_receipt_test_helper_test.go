@@ -972,6 +972,23 @@ func reduceRuntimeStateFixture(t *testing.T, facts runtimecontract.RuntimeFacts,
 	return ReduceRuntimeState(facts, prior)
 }
 
+func runtimeOperationExecutionEnvelopeForTest(execution runtimecontract.RuntimeOperationExecutionRecord, grant *runtimecontract.RuntimeOperationGovernanceGrant) runtimecontract.RuntimeOperationExecutionEnvelope {
+	ret := runtimecontract.RuntimeOperationExecutionEnvelope{
+		ExecutionKey: execution.ExecutionKey, Fence: execution.Fence, OperationHash: execution.OperationHash, ExpectedEffectScope: execution.ExpectedEffectScope,
+		IdempotencyClass: execution.IdempotencyClass, AuthorityHash: execution.AuthorityHash,
+		AdmissibilitySnapshotID: execution.AdmissibilitySnapshotID, AcquisitionBinding: execution.AcquisitionBinding,
+	}
+	if execution.ReplayProof != nil {
+		proof := execution.ReplayProof.Clone()
+		ret.ReplayProof = &proof
+	}
+	if grant != nil {
+		value := grant.Normalized()
+		ret.GovernanceGrant = &value
+	}
+	return ret
+}
+
 func runtimeTestFactsWithCurrentFocusBindings(t *testing.T, facts runtimecontract.RuntimeFacts, definition runtimecontract.RuntimeDefinitionContext) runtimecontract.RuntimeFacts {
 	t.Helper()
 	runtimeTestSealCurrentPolicies(&facts)
@@ -1049,6 +1066,9 @@ func runtimeTestDefinitionFocuses(facts runtimecontract.RuntimeFacts) []runtimec
 func runtimeTestSealCurrentPolicies(facts *runtimecontract.RuntimeFacts) {
 	if facts == nil {
 		return
+	}
+	if facts.Activation.ExecutionContract.OperationContractRevision == "" {
+		facts.Activation.ExecutionContract.OperationContractRevision = runtimecontract.RuntimeOperationContractRevision()
 	}
 	if facts.Activation.ExecutionContract.StateChangePolicy == "" {
 		facts.Activation.ExecutionContract.StateChangePolicy = runtimecontract.RuntimeStateChangeAllowedButNotRequired
@@ -1270,6 +1290,9 @@ func attachRuntimeTestOwnerReceipt(t *testing.T, aggregate *RuntimeAggregate, ev
 	receipt = receipt.Normalized()
 	hash := runtimecontract.StableRuntimeOperationReceiptHash(receipt)
 	execution.State = runtimecontract.OperationExecutionOwnerCommitted
+	if execution.ClaimedAt == "" {
+		execution.ClaimedAt = runtimecontract.RuntimeOperationClaimMarkerInitial
+	}
 	execution.OwnerReceiptRef = "runtime-receipt/" + execution.ExecutionKey
 	execution.OwnerReceiptHash = hash
 	aggregate.OperationReceipts = append(aggregate.OperationReceipts, receipt)

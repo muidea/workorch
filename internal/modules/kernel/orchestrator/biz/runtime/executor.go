@@ -327,7 +327,7 @@ func (c *candidateDispatchComponent) claimOperationExecution(ctx context.Context
 			}
 			exec.State = runtimecontract.OperationExecutionClaimed
 			exec.Fence = nextFence
-			exec.ClaimedAt = "claimed"
+			exec.ClaimedAt = runtimecontract.RuntimeOperationClaimMarkerInitial
 		case runtimecontract.OperationExecutionClaimed:
 			return RuntimeAggregate{}, fmt.Errorf("operation %q is already claimed; query receipt before recovery", operationID)
 		case runtimecontract.OperationExecutionOwnerCommitted, runtimecontract.OperationExecutionEvidenceCommitted:
@@ -337,22 +337,7 @@ func (c *candidateDispatchComponent) claimOperationExecution(ctx context.Context
 		}
 	}
 	if !found {
-		// A persisted dispatch without an execution ledger is an invariant defect.
-		// Fence it as unknown so it can never be silently replayed.
-		scope := runtimecontract.RuntimeEffectUnknown
-		for _, operation := range candidateRuntimeOperations(aggregate.ActiveDispatch.Candidate) {
-			if operation.Normalized().ID == operationID {
-				scope = runtimecontract.ResolveExpectedEffectScope(operation, runtimecontract.RuntimeActivationForFacts(aggregate.Facts).OperationPolicies)
-				break
-			}
-		}
-		aggregate.ActiveDispatch.OperationExecutions = append(aggregate.ActiveDispatch.OperationExecutions, runtimecontract.RuntimeOperationExecutionRecord{
-			OperationID:         operationID,
-			ExecutionKey:        runtimecontract.StableRuntimeOperationExecutionKey(workspaceID, runID, aggregate.ActiveDispatch.ID, operationID),
-			ExpectedEffectScope: scope,
-			State:               runtimecontract.OperationExecutionOutcomeUnknown,
-			Fence:               1,
-		})
+		return RuntimeAggregate{}, fmt.Errorf("%w: operation %q execution ledger is missing", common.ErrConflict, operationID)
 	}
 	aggregate.StateRevision++
 	if err := aggregate.Validate(); err != nil {
@@ -361,10 +346,48 @@ func (c *candidateDispatchComponent) claimOperationExecution(ctx context.Context
 	if err := c.transitions.Commit(ctx, aggregate, expectedRevision); err != nil {
 		return RuntimeAggregate{}, err
 	}
-	if !found {
-		return RuntimeAggregate{}, fmt.Errorf("operation %q execution ledger is missing; outcome is unknown", operationID)
-	}
 	return aggregate, nil
+}
+
+// markGovernanceResumeExecutionStarted is the persisted pre-effect edge for a
+// governance continuation. The resolution CAS authorizes fence N+1; this CAS
+// proves that the one unbudgeted owner call for that grant has begun. Any later
+// re-drive therefore enters the ordinary SM-4 recovery-budget path.
+func (c *candidateDispatchComponent) markGovernanceResumeExecutionStarted(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, operationID string) (RuntimeAggregate, *runtimecontract.RuntimeOperationGovernanceGrant, error) {
+	aggregate, err := c.repository.Load(ctx, workspaceID, runID)
+	if err != nil {
+		return RuntimeAggregate{}, nil, err
+	}
+	if aggregate.ActiveDispatch == nil {
+		return RuntimeAggregate{}, nil, fmt.Errorf("%w: governance resume requires active dispatch", common.ErrConflict)
+	}
+	expectedRevision := aggregate.StateRevision
+	found := false
+	var grant *runtimecontract.RuntimeOperationGovernanceGrant
+	for idx := range aggregate.ActiveDispatch.OperationExecutions {
+		execution := &aggregate.ActiveDispatch.OperationExecutions[idx]
+		if execution.OperationID != operationID {
+			continue
+		}
+		found = true
+		grant = governancecheck.GrantForExecution(aggregate.OperationGovernanceBindings, *execution)
+		if execution.State != runtimecontract.OperationExecutionClaimed || execution.ClaimedAt != runtimecontract.RuntimeOperationClaimMarkerGovernanceGranted || grant == nil {
+			return RuntimeAggregate{}, nil, fmt.Errorf("%w: governance resume execution is not exactly granted", common.ErrConflict)
+		}
+		execution.ClaimedAt = runtimecontract.RuntimeOperationClaimMarkerGovernanceEffectStarted
+		break
+	}
+	if !found {
+		return RuntimeAggregate{}, nil, fmt.Errorf("%w: governance resume operation %q is missing", common.ErrConflict, operationID)
+	}
+	aggregate.StateRevision++
+	if err := aggregate.Validate(); err != nil {
+		return RuntimeAggregate{}, nil, err
+	}
+	if err := c.transitions.Commit(ctx, aggregate, expectedRevision); err != nil {
+		return RuntimeAggregate{}, nil, err
+	}
+	return aggregate, grant, nil
 }
 
 func (c *candidateDispatchComponent) markOperationExecutionOutcomeUnknown(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, operationID string) (RuntimeAggregate, error) {
@@ -396,17 +419,7 @@ func (c *candidateDispatchComponent) markOperationExecutionOutcomeUnknown(ctx co
 		}
 	}
 	if !found {
-		scope := runtimecontract.RuntimeEffectUnknown
-		for _, operation := range candidateRuntimeOperations(aggregate.ActiveDispatch.Candidate) {
-			if operation.Normalized().ID == operationID {
-				scope = runtimecontract.ResolveExpectedEffectScope(operation, runtimecontract.RuntimeActivationForFacts(aggregate.Facts).OperationPolicies)
-				break
-			}
-		}
-		aggregate.ActiveDispatch.OperationExecutions = append(aggregate.ActiveDispatch.OperationExecutions, runtimecontract.RuntimeOperationExecutionRecord{
-			OperationID: operationID, ExecutionKey: runtimecontract.StableRuntimeOperationExecutionKey(workspaceID, runID, aggregate.ActiveDispatch.ID, operationID),
-			ExpectedEffectScope: scope, State: runtimecontract.OperationExecutionOutcomeUnknown, Fence: 1,
-		})
+		return RuntimeAggregate{}, fmt.Errorf("%w: operation %q execution ledger is missing", common.ErrConflict, operationID)
 	}
 	aggregate.StateRevision++
 	if err := aggregate.Validate(); err != nil {

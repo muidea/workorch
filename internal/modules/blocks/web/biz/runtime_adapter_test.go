@@ -22,8 +22,8 @@ import (
 func runtimeWebGrant(requirement runtimecontract.RuntimeGovernanceRequirement) *runtimecontract.RuntimeOperationGovernanceGrant {
 	requirement = requirement.Normalized()
 	return &runtimecontract.RuntimeOperationGovernanceGrant{
-		ResolutionID: "resolution-web", ApprovalID: "approval-web", ExecutionKey: "execution-web",
-		GovernanceFence: 1, ResumeFence: 2, DependencyKind: string(requirement.Kind),
+		ResolutionID: "resolution-web", ResolutionHash: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", ApprovalID: "approval-web", ExecutionKey: "execution-web",
+		GovernanceFence: 1, ResumeFence: 2, ResumeDispatchID: "dispatch-web", DependencyKind: string(requirement.Kind),
 		SubjectRef: requirement.SubjectRef, RequestedAction: requirement.RequestedAction, RiskLevel: requirement.RiskLevel,
 		AuthorizationHash:     runtimecontract.StableRuntimeAuthorizationContextHash(requirement.AuthorizationContext),
 		GovernanceReceiptHash: "receipt-web",

@@ -1019,17 +1019,16 @@ func sealCandidateWithFeasibilitiesForTest(t *testing.T, repository *durableRunt
 	if err != nil {
 		t.Fatal(err)
 	}
-	var dispatch SealedDispatch
 	effectiveActivation := runtimecontract.RuntimeActivationForFacts(aggregate.Facts)
-	if runtimeCandidateHasManagedValidation(candidate) {
-		recipes, snapshotErr := runtimecontract.RuntimeCandidateManagedValidationRecipeSnapshot(manifest, candidate)
-		if snapshotErr != nil {
-			t.Fatal(snapshotErr)
-		}
-		dispatch, err = sealDispatchWithActivationAndFeasibilities(aggregate.Decision, candidate, effectiveActivation, recipes, feasibilities)
-	} else {
-		dispatch, err = SealDispatchWithActivationAndFeasibilities(aggregate.Decision, candidate, effectiveActivation, feasibilities)
-	}
+	dispatch, err := SealDispatchWithManifestAndOwnerAuthority(
+		aggregate.Decision,
+		candidate,
+		effectiveActivation,
+		manifest,
+		feasibilities,
+		aggregate.Facts.Resources.OperationAdmissibilities,
+		aggregate.Facts.Resources.PrerequisiteObservations,
+	)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1043,13 +1042,16 @@ func sealCandidateWithFeasibilitiesForTest(t *testing.T, repository *durableRunt
 		LastOutcome: runtimecontract.RuntimeCandidateRequestOutcome{Class: runtimecontract.RuntimeCandidateRequestOutcomeDocumentComplete},
 	})
 	aggregate.CandidateAttempts = append(aggregate.CandidateAttempts, runtimecontract.RuntimeCandidateAttemptRecord{
-		AuthorityContractID: runtimecontract.StableAuthorityContractID(aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, transaction),
-		Transaction:         transaction,
-		Attempt:             0,
-		StablePrefixHash:    stablePrefixHash,
-		ManifestHash:        manifest.Hash,
-		LogicalRequestID:    logicalRequestID,
-		State:               runtimecontract.RuntimeCandidateAttemptStateAccepted,
+		AuthorityContractID:   runtimecontract.StableAuthorityContractID(aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, transaction),
+		Transaction:           transaction,
+		Attempt:               0,
+		StablePrefixHash:      stablePrefixHash,
+		ManifestHash:          manifest.Hash,
+		LogicalRequestID:      logicalRequestID,
+		State:                 runtimecontract.RuntimeCandidateAttemptStateAccepted,
+		CandidateHash:         dispatch.CandidateHash,
+		DispatchID:            dispatch.ID,
+		DispatchAuthorityHash: dispatch.DispatchAuthorityHash,
 	})
 	aggregate.ActiveDispatch = &dispatch
 	aggregate.StateRevision++
@@ -1185,6 +1187,9 @@ func TestSealDispatchCreatesOperationExecutionRecords(t *testing.T) {
 	}
 	if dispatch.OperationExecutions[0].ExpectedEffectScope != runtimecontract.RuntimeEffectWorkspaceDurable {
 		t.Fatalf("expected scope = %s", dispatch.OperationExecutions[0].ExpectedEffectScope)
+	}
+	if dispatch.OperationExecutions[0].IdempotencyClass != runtimecontract.RuntimeOperationIdempotencyAtMostOnce {
+		t.Fatalf("sealed idempotency = %s", dispatch.OperationExecutions[0].IdempotencyClass)
 	}
 	if dispatch.OperationExecutions[0].ExecutionKey == "" {
 		t.Fatal("execution key required")

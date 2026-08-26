@@ -208,10 +208,10 @@ func gitStateChangingReceiptCommand(t *testing.T, workspace, pathspec string) gi
 	}
 	return gitevents.ExecuteOperationCommand{
 		RuntimeOperationExecutionContext: runtimecontract.RuntimeOperationExecutionContext{
-			Execution: runtimecontract.RuntimeOperationExecutionEnvelope{
+			Execution: gitTestExecutionEnvelope(operation, runtimecontract.RuntimeOperationExecutionEnvelope{
 				ExecutionKey: "exec/ws-git/run-git/dispatch-git/git-add", Fence: 1,
 				ExpectedEffectScope: runtimecontract.RuntimeEffectWorkspaceDurable,
-			},
+			}),
 			WorkspaceID: "ws-git", RunID: "run-git", DispatchID: "dispatch-git",
 			Transaction: runtimecontract.AuthorityTransaction{AuthoritySnapshotID: "authority-git", RequiredOutputHash: "output-git"},
 			OperationID: "git-add", EvidenceKind: runtimecontract.EvidenceKindStateChange,
@@ -604,10 +604,10 @@ func TestGitOwnerRechecksFileWorkspaceTreeBeforeFeasibilityAndExecution(t *testi
 	}
 	execute := gitevents.ExecuteOperationCommand{
 		RuntimeOperationExecutionContext: runtimecontract.RuntimeOperationExecutionContext{
-			Execution: runtimecontract.RuntimeOperationExecutionEnvelope{
+			Execution: gitTestExecutionEnvelope(operation, runtimecontract.RuntimeOperationExecutionEnvelope{
 				ExecutionKey: "exec/ws-tree/run-tree/dispatch-tree/git-add-tree", Fence: 1,
 				ExpectedEffectScope: runtimecontract.RuntimeEffectWorkspaceDurable,
-			},
+			}),
 			WorkspaceID: capabilityCommand.WorkspaceID, RunID: capabilityCommand.RunID, DispatchID: "dispatch-tree",
 			Transaction: runtimecontract.AuthorityTransaction{AuthoritySnapshotID: capabilityCommand.AuthoritySnapshotID, RequiredOutputHash: "output-tree"},
 			OperationID: operation.ID, EvidenceKind: runtimecontract.EvidenceKindStateChange,
@@ -621,6 +621,17 @@ func TestGitOwnerRechecksFileWorkspaceTreeBeforeFeasibilityAndExecution(t *testi
 		t.Fatalf("workspace-tree execution receipt = %+v", executeResult.Receipt)
 	}
 	assertGitIndexEmpty(t, workspace)
+}
+
+func gitTestExecutionEnvelope(operation runtimecontract.RuntimeOperation, envelope runtimecontract.RuntimeOperationExecutionEnvelope) runtimecontract.RuntimeOperationExecutionEnvelope {
+	envelope.OperationHash = runtimecontract.StableRuntimeOperationHash(operation)
+	envelope.IdempotencyClass = runtimecontract.ResolveOperationIdempotencyClass(operation, nil)
+	envelope.AuthorityHash = runtimecontract.StableRuntimeOperationExecutionAuthorityHash(runtimecontract.RuntimeOperationExecutionRecord{
+		OperationID: operation.ID, OperationHash: envelope.OperationHash, ExecutionKey: envelope.ExecutionKey, ExpectedEffectScope: envelope.ExpectedEffectScope,
+		IdempotencyClass: envelope.IdempotencyClass, AdmissibilitySnapshotID: envelope.AdmissibilitySnapshotID,
+		AcquisitionBinding: envelope.AcquisitionBinding, ReplayProof: envelope.ReplayProof,
+	})
+	return envelope
 }
 
 func TestRuntimeOperationAdmissibilityProbeUsesCurrentRepositorySnapshot(t *testing.T) {

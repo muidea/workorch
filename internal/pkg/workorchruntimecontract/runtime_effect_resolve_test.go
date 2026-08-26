@@ -74,12 +74,44 @@ func TestResolveExpectedEffectScopeUsesExactOwnerPolicy(t *testing.T) {
 	}
 }
 
-func TestResolveOperationIdempotencyClassUsesDescriptorAndExactOwnerPolicy(t *testing.T) {
+func TestResolveOperationIdempotencyClassUsesVariantDescriptorAndExactOwnerPolicy(t *testing.T) {
 	if got := ResolveOperationIdempotencyClass(RuntimeOperation{ID: "read-1", Kind: StepKindFileRead}, nil); got != RuntimeOperationIdempotencySafeToReplay {
 		t.Fatalf("file/read idempotency = %q", got)
 	}
 	if got := ResolveOperationIdempotencyClass(RuntimeOperation{ID: "write-1", Kind: StepKindFileWrite}, nil); got != RuntimeOperationIdempotencyAtMostOnce {
 		t.Fatalf("file/write idempotency = %q", got)
+	}
+	patchType := "file_write"
+	content := "updated"
+	patch := RuntimeOperation{ID: "patch-1", Kind: RuntimeBlockKindPatchApply, TargetRefs: []string{"target.txt"}, Parameters: []OperationParameter{
+		{Name: "patchType", String: &patchType}, {Name: "content", String: &content},
+	}}
+	if got := ResolveExpectedEffectScope(patch, nil); got != RuntimeEffectWorkspaceDurable {
+		t.Fatalf("patch/apply file_write effect = %q", got)
+	}
+	if got := ResolveOperationIdempotencyClass(patch, nil); got != RuntimeOperationIdempotencySafeToReplay {
+		t.Fatalf("patch/apply file_write idempotency = %q", got)
+	}
+	gitOperation := "commit"
+	message := "checkpoint"
+	commit := RuntimeOperation{ID: "commit-1", Kind: StepKindGitWrite, Parameters: []OperationParameter{
+		{Name: "operation", String: &gitOperation}, {Name: "message", String: &message},
+	}}
+	if got := ResolveOperationIdempotencyClass(commit, nil); got != RuntimeOperationIdempotencyAtMostOnce {
+		t.Fatalf("git/write commit idempotency = %q", got)
+	}
+	gitOperation = "add"
+	pathspecs := []string{"target.txt"}
+	add := RuntimeOperation{ID: "add-1", Kind: StepKindGitWrite, Parameters: []OperationParameter{
+		{Name: "operation", String: &gitOperation}, {Name: "pathspecs", StringList: pathspecs},
+	}}
+	if got := ResolveOperationIdempotencyClass(add, nil); got != RuntimeOperationIdempotencySafeToReplay {
+		t.Fatalf("git/write add idempotency = %q", got)
+	}
+	gitOperation = "init"
+	initOperation := RuntimeOperation{ID: "init-1", Kind: StepKindGitWrite, Parameters: []OperationParameter{{Name: "operation", String: &gitOperation}}}
+	if got := ResolveOperationIdempotencyClass(initOperation, nil); got != RuntimeOperationIdempotencyOwnerManaged {
+		t.Fatalf("git/write init idempotency = %q", got)
 	}
 	op := RuntimeOperation{ID: "tool-1", Kind: StepKindMCPToolCall, Parameters: []OperationParameter{
 		{Name: "serverId", String: strPtr("srv")}, {Name: "tool", String: strPtr("inspect")},

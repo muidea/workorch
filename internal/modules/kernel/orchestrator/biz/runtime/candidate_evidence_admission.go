@@ -62,7 +62,9 @@ func bindPersistedOwnerReceipt(aggregate RuntimeAggregate, evidence ExecutionEvi
 		return ExecutionEvidence{}, fmt.Errorf("execution evidence owner receipt is not persisted")
 	}
 	execution, found := operationExecutionRecord(aggregate.ActiveDispatch.OperationExecutions, evidence.OperationID)
-	if !found || execution.State != runtimecontract.OperationExecutionOwnerCommitted || execution.ExecutionKey != persisted.ExecutionKey {
+	if !found || execution.State != runtimecontract.OperationExecutionOwnerCommitted || execution.ExecutionKey != persisted.ExecutionKey ||
+		execution.Fence != persisted.Fence || execution.OwnerReceiptRef != "runtime-receipt/"+persisted.ExecutionKey ||
+		execution.OwnerReceiptHash != runtimecontract.StableRuntimeOperationReceiptHash(persisted) {
 		return ExecutionEvidence{}, fmt.Errorf("execution evidence requires owner_committed execution state")
 	}
 	// The persisted owner receipt is the sole evidence-fact source. The

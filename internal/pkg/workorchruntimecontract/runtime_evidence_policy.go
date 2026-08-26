@@ -2,6 +2,7 @@ package workorchruntimecontract
 
 import (
 	"fmt"
+	"reflect"
 	"sort"
 	"strings"
 )
@@ -255,6 +256,20 @@ func NormalizeRuntimeValidationRecipes(values []RuntimeValidationRecipe) []Runti
 // compare against activation policy: membership against the manifest is
 // checked when the snapshot is sealed.
 func ValidateRuntimeCandidateManagedValidationRecipeSnapshot(candidate RuntimeCandidate, values []RuntimeValidationRecipe) error {
+	seenRecipeIDs := make(map[string]struct{}, len(values))
+	for _, raw := range values {
+		if !reflect.DeepEqual(raw, raw.Normalized()) {
+			return fmt.Errorf("managed validation recipe snapshot requires canonical raw recipe fields")
+		}
+		if err := raw.Validate(); err != nil {
+			return fmt.Errorf("managed validation recipe snapshot: %w", err)
+		}
+		recipe := raw.Normalized()
+		if _, duplicate := seenRecipeIDs[recipe.ID]; duplicate {
+			return fmt.Errorf("managed validation recipe snapshot duplicates recipe %q", recipe.ID)
+		}
+		seenRecipeIDs[recipe.ID] = struct{}{}
+	}
 	selected := make(map[string]struct{})
 	collect := func(operations []RuntimeOperation) error {
 		for _, operation := range operations {
@@ -303,6 +318,18 @@ func ValidateRuntimeCandidateManagedValidationRecipeSnapshot(candidate RuntimeCa
 		}
 	}
 	return nil
+}
+
+func CloneRuntimeValidationRecipes(values []RuntimeValidationRecipe) []RuntimeValidationRecipe {
+	if values == nil {
+		return nil
+	}
+	ret := make([]RuntimeValidationRecipe, len(values))
+	for idx := range values {
+		ret[idx] = values[idx]
+		ret[idx].Args = append([]string(nil), values[idx].Args...)
+	}
+	return ret
 }
 
 func NormalizeRuntimeEvidencePolicies(values []RuntimeEvidencePolicy) []RuntimeEvidencePolicy {

@@ -1059,7 +1059,9 @@ func TestFileExecuteHandlerRejectsNilResultBeforePrivateEffect(t *testing.T) {
 	}
 	command := fileevents.ExecuteFileEditOperationCommand{
 		RuntimeOperationExecutionContext: runtimecontract.RuntimeOperationExecutionContext{
-			Execution:   runtimecontract.RuntimeOperationExecutionEnvelope{ExecutionKey: "exec/ws-1/run-1/dispatch-1/edit-1", Fence: 1, ExpectedEffectScope: runtimecontract.RuntimeEffectWorkspaceDurable},
+			Execution: fileBizTestExecutionEnvelope(operation, runtimecontract.RuntimeOperationExecutionEnvelope{
+				ExecutionKey: "exec/ws-1/run-1/dispatch-1/edit-1", Fence: 1, ExpectedEffectScope: runtimecontract.RuntimeEffectWorkspaceDurable,
+			}),
 			WorkspaceID: "ws-1", RunID: "run-1", DispatchID: "dispatch-1", Transaction: runtimecontract.AuthorityTransaction{AuthoritySnapshotID: "authority-1"},
 			OperationID: "edit-1", TargetRefs: []string{"main.txt"}, EvidenceKind: runtimecontract.EvidenceKindStateChange, WorkspaceDeliverableDirectory: workspace,
 		},
@@ -1074,9 +1076,15 @@ func TestFileExecuteHandlerRejectsNilResultBeforePrivateEffect(t *testing.T) {
 }
 
 func TestFileReceiptBoundaryRejectsMalformedCrossOwnerResults(t *testing.T) {
+	operationHash := runtimecontract.StableRuntimeOperationHash(runtimecontract.RuntimeOperation{ID: "op-1", Kind: runtimecontract.StepKindFileRead, TargetRefs: []string{"target.txt"}})
 	execution := runtimecontract.RuntimeOperationExecutionEnvelope{
 		ExecutionKey: "exec/ws-1/run-1/dispatch-1/op-1", Fence: 2, ExpectedEffectScope: runtimecontract.RuntimeEffectNone,
+		OperationHash: operationHash, IdempotencyClass: runtimecontract.RuntimeOperationIdempotencySafeToReplay,
 	}
+	execution.AuthorityHash = runtimecontract.StableRuntimeOperationExecutionAuthorityHash(runtimecontract.RuntimeOperationExecutionRecord{
+		OperationID: "op-1", OperationHash: execution.OperationHash, ExecutionKey: execution.ExecutionKey, ExpectedEffectScope: execution.ExpectedEffectScope,
+		IdempotencyClass: execution.IdempotencyClass,
+	})
 	valid := runtimecontract.RuntimeOperationReceipt{
 		ExecutionKey: execution.ExecutionKey, Fence: execution.Fence, OperationID: "op-1",
 		Outcome: runtimecontract.RuntimeOperationOutcomeNoOp, ObservedEffectScope: runtimecontract.RuntimeEffectNone,
@@ -1196,8 +1204,8 @@ func TestFileReceiptBoundaryRejectsMalformedCrossOwnerResults(t *testing.T) {
 func TestFileApprovalGrantMustMatchExactTargetAndAction(t *testing.T) {
 	requirement := fileApprovalRequirement(".env", "sensitive target", runtimecontract.StepKindFileEdit)
 	grant := runtimecontract.RuntimeOperationGovernanceGrant{
-		ResolutionID: "resolution-1", ApprovalID: "approval-1", ExecutionKey: "execution-1",
-		GovernanceFence: 1, ResumeFence: 2, DependencyKind: string(runtimecontract.GovernanceApproval),
+		ResolutionID: "resolution-1", ResolutionHash: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", ApprovalID: "approval-1", ExecutionKey: "execution-1",
+		GovernanceFence: 1, ResumeFence: 2, ResumeDispatchID: "dispatch-1", DependencyKind: string(runtimecontract.GovernanceApproval),
 		SubjectRef: ".env", RequestedAction: runtimecontract.StepKindFileEdit, RiskLevel: "high",
 		AuthorizationHash: runtimecontract.StableRuntimeAuthorizationContextHash(requirement.AuthorizationContext), GovernanceReceiptHash: "receipt-1",
 	}
@@ -2154,7 +2162,10 @@ func TestFileOwnerPatchApplyReplaysSealedWriteAfterReceiptCommitFailure(t *testi
 	}
 	command := fileevents.ExecutePatchApplyOperationCommand{
 		RuntimeOperationExecutionContext: runtimecontract.RuntimeOperationExecutionContext{
-			Execution:   runtimecontract.RuntimeOperationExecutionEnvelope{ExecutionKey: "exec/ws-1/run-1/dispatch-1/write-1", Fence: 1, ExpectedEffectScope: runtimecontract.RuntimeEffectWorkspaceDurable, ReplayProof: &proof},
+			Execution: fileBizTestExecutionEnvelope(operation, runtimecontract.RuntimeOperationExecutionEnvelope{
+				ExecutionKey: "exec/ws-1/run-1/dispatch-1/write-1", Fence: 1, ExpectedEffectScope: runtimecontract.RuntimeEffectWorkspaceDurable,
+				AdmissibilitySnapshotID: proof.AdmissibilitySnapshotID, ReplayProof: &proof,
+			}),
 			WorkspaceID: "ws-1", RunID: "run-1", DispatchID: "dispatch-1",
 			Transaction: runtimecontract.AuthorityTransaction{AuthoritySnapshotID: "authority-1"},
 			OperationID: "write-1", CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-1"}, TargetRefs: []string{"README.md"},
@@ -2199,6 +2210,17 @@ func TestFileOwnerPatchApplyReplaysSealedWriteAfterReceiptCommitFailure(t *testi
 	if err != nil || string(content) != "external-change\n" {
 		t.Fatalf("duplicate persisted receipt applied a second file effect: content=%q err=%v", content, err)
 	}
+}
+
+func fileBizTestExecutionEnvelope(operation runtimecontract.RuntimeOperation, envelope runtimecontract.RuntimeOperationExecutionEnvelope) runtimecontract.RuntimeOperationExecutionEnvelope {
+	envelope.OperationHash = runtimecontract.StableRuntimeOperationHash(operation)
+	envelope.IdempotencyClass = runtimecontract.ResolveOperationIdempotencyClass(operation, nil)
+	envelope.AuthorityHash = runtimecontract.StableRuntimeOperationExecutionAuthorityHash(runtimecontract.RuntimeOperationExecutionRecord{
+		OperationID: operation.ID, OperationHash: envelope.OperationHash, ExecutionKey: envelope.ExecutionKey, ExpectedEffectScope: envelope.ExpectedEffectScope,
+		IdempotencyClass: envelope.IdempotencyClass, AdmissibilitySnapshotID: envelope.AdmissibilitySnapshotID,
+		AcquisitionBinding: envelope.AcquisitionBinding, ReplayProof: envelope.ReplayProof,
+	})
+	return envelope
 }
 
 func TestRuntimeAdapterProbeRejectsUnverifiedFileWriteReplayBaseHash(t *testing.T) {

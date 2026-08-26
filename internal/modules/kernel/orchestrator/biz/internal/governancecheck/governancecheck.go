@@ -179,6 +179,8 @@ func BindingMatchesExecution(binding runtimecontract.RuntimeOperationGovernanceB
 	execution = execution.Normalized()
 	return execution.State == runtimecontract.OperationExecutionOwnerCommitted &&
 		execution.OperationID == binding.OperationID && execution.ExecutionKey == binding.ExecutionKey && execution.Fence == binding.Fence &&
+		execution.ExpectedEffectScope == binding.ExpectedEffectScope && execution.IdempotencyClass == binding.IdempotencyClass &&
+		execution.AuthorityHash == binding.ExecutionAuthorityHash &&
 		execution.OwnerReceiptHash == binding.GovernanceReceiptHash
 }
 
@@ -201,9 +203,11 @@ func BindingMatchesRequest(binding runtimecontract.RuntimeOperationGovernanceBin
 }
 
 func ResolutionRecordMatchesRequest(resolution runtimecontract.RuntimeGovernanceResolutionRecord, request runtimecontract.RuntimeGovernanceRequestRecord) bool {
+	resolution = resolution.Normalized()
 	return resolution.TicketID == request.TicketID && resolution.ApprovalID == request.ApprovalID &&
 		strings.TrimSpace(resolution.DispatchID) == strings.TrimSpace(request.DispatchID) &&
-		strings.TrimSpace(resolution.AuthoritySnapshotID) == strings.TrimSpace(request.AuthoritySnapshotID)
+		strings.TrimSpace(resolution.AuthoritySnapshotID) == strings.TrimSpace(request.AuthoritySnapshotID) &&
+		DependencyMatches(resolution.DependencyKind, resolution.SubjectRef, request.DependencyKind, request.SubjectRef)
 }
 
 func ResolutionRecordMatchesDispatch(resolution runtimecontract.RuntimeGovernanceResolutionRecord, facts DispatchFacts) bool {
@@ -217,7 +221,10 @@ func GrantForExecution(bindings []runtimecontract.RuntimeOperationGovernanceBind
 	execution = execution.Normalized()
 	for _, raw := range bindings {
 		binding := raw.Normalized()
-		if binding.State != runtimecontract.RuntimeOperationGovernanceBindingGranted || binding.Grant == nil || binding.ExecutionKey != execution.ExecutionKey {
+		if binding.State != runtimecontract.RuntimeOperationGovernanceBindingGranted || binding.Grant == nil ||
+			binding.OperationID != execution.OperationID || binding.ExecutionKey != execution.ExecutionKey ||
+			binding.ExpectedEffectScope != execution.ExpectedEffectScope || binding.IdempotencyClass != execution.IdempotencyClass ||
+			binding.ExecutionAuthorityHash != execution.AuthorityHash {
 			continue
 		}
 		grant := binding.Grant.Normalized()
@@ -228,6 +235,10 @@ func GrantForExecution(bindings []runtimecontract.RuntimeOperationGovernanceBind
 		return &grant
 	}
 	return nil
+}
+
+func ExecutionHasGrantedBinding(bindings []runtimecontract.RuntimeOperationGovernanceBinding, execution runtimecontract.RuntimeOperationExecutionRecord) bool {
+	return GrantForExecution(bindings, execution) != nil
 }
 
 func SameGrant(left, right runtimecontract.RuntimeOperationGovernanceGrant) bool {
@@ -284,18 +295,20 @@ func EvaluateOperationSuspension(
 	}
 	finding := OperationSuspensionFinding{
 		Binding: runtimecontract.RuntimeOperationGovernanceBinding{
-			OperationDispatchID:   dispatchID,
-			OperationID:           execution.OperationID,
-			ExecutionKey:          execution.ExecutionKey,
-			Fence:                 execution.Fence,
-			ExpectedEffectScope:   execution.ExpectedEffectScope,
-			DependencyKind:        string(requirement.Kind),
-			SubjectRef:            requirement.SubjectRef,
-			RequestedAction:       requirement.RequestedAction,
-			RiskLevel:             requirement.RiskLevel,
-			AuthorizationHash:     runtimecontract.StableRuntimeAuthorizationContextHash(requirement.AuthorizationContext),
-			GovernanceReceiptHash: receiptHash,
-			State:                 runtimecontract.RuntimeOperationGovernanceBindingSuspended,
+			OperationDispatchID:    dispatchID,
+			OperationID:            execution.OperationID,
+			ExecutionKey:           execution.ExecutionKey,
+			Fence:                  execution.Fence,
+			ExpectedEffectScope:    execution.ExpectedEffectScope,
+			IdempotencyClass:       execution.IdempotencyClass,
+			ExecutionAuthorityHash: execution.AuthorityHash,
+			DependencyKind:         string(requirement.Kind),
+			SubjectRef:             requirement.SubjectRef,
+			RequestedAction:        requirement.RequestedAction,
+			RiskLevel:              requirement.RiskLevel,
+			AuthorizationHash:      runtimecontract.StableRuntimeAuthorizationContextHash(requirement.AuthorizationContext),
+			GovernanceReceiptHash:  receiptHash,
+			State:                  runtimecontract.RuntimeOperationGovernanceBindingSuspended,
 		},
 		Dependency: runtimecontract.ExternalDependency{
 			Kind: string(requirement.Kind), SubjectRef: requirement.SubjectRef, Reason: requirement.Reason,
