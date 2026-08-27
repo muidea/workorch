@@ -124,8 +124,12 @@ load facts
   canonical 分类并实际再次授权同 focus validation 后扣减；初次 validation、duplicate receipt 与 restart 不重复计数。
   rejected receipt 不获得 CWI credit，若其 CWI 列表为空，只能用已完成 dispatch 封存的 exact `FocusID` 判断当前 focus
   防重放归属；operation ID 或 summary 变化不能改变 stable semantic shape。Shell 只能从 owner 支持的结构化工具诊断提取 manifest-bounded candidate
-  target；无结构化位置时不得回填 command/input target，随后仍由 File owner confirmation 与 SM-2 freshness gate 封存
-  failure target。原始 observation 必须完整保留，但不得反向选择 action、retry、ticket 或 terminal。
+  target；无结构化位置时不得回填 command/input target。结构化 observation 必须匹配 completed sealed dispatch 中不可变的
+  `FocusTargetRole + authority snapshot + operation + validation scope`，不得读取已经变化的 current `Focus.TargetRole`。
+  receipt commit 必须保留原 focus/binding，并在任何 semantic/candidate provider call 前由 File owner confirmation 与 SM-2
+  freshness gate 封存 failure target；此路径不得提前开启 semantic repair generation 或记一次 validation-only retry。
+  无 observation 时才可进入 Profile 已封存的 bounded `validation_failure_repair` fallback。原始 observation 必须完整保留，
+  但不得反向选择 action、retry、ticket 或 terminal。
 - assessment evidence gate 只验证 current-run/focus、binding-matched owner receipt、effect、quality 与封存的
   focus evidence policy；它不得把 assessment observation、claim signal 或 `PassedChecks` 非空解释为 CWI credit，
   也不得改写 observation 的 disposition、items、gap 或 refs。profile 的 observable validation recipe 只能约束候选

@@ -209,6 +209,28 @@ func TestRuntimeDispatchRecordValidateIntrinsicRejectsCoordinatedAuthoritySubsti
 	})
 }
 
+func TestRuntimeDispatchRecordSealsCanonicalFocusTargetRole(t *testing.T) {
+	dispatch := runtimeDispatchIntrinsicFixture(t, 0)
+	dispatch.FocusTargetRole = "implementation"
+	dispatch.DispatchAuthorityHash = StableRuntimeDispatchAuthorityHash(dispatch)
+	if err := dispatch.ValidateIntrinsic(); err != nil {
+		t.Fatalf("sealed focus target role: %v", err)
+	}
+
+	drifted := dispatch.Clone()
+	drifted.FocusTargetRole = "prospective_implementation"
+	if err := drifted.ValidateIntrinsic(); err == nil || !strings.Contains(err.Error(), "dispatch authority hash mismatch") {
+		t.Fatalf("focus target role drift error = %v", err)
+	}
+
+	nonCanonical := dispatch.Clone()
+	nonCanonical.FocusTargetRole = " implementation "
+	nonCanonical.DispatchAuthorityHash = StableRuntimeDispatchAuthorityHash(nonCanonical)
+	if err := nonCanonical.ValidateIntrinsic(); err == nil || !strings.Contains(err.Error(), "focus target role must be canonical") {
+		t.Fatalf("non-canonical focus target role error = %v", err)
+	}
+}
+
 func TestValidateRuntimeDispatchHistoryShapeEnforcesActiveCompletedPartition(t *testing.T) {
 	active := runtimeDispatchIntrinsicFixture(t, 0)
 	completed := runtimeDispatchIntrinsicFixture(t, 1)

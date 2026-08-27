@@ -537,7 +537,13 @@ func TestRuntimeStateRepositoryRoundTripsSealedValidationRecipeSnapshot(t *testi
 	}}
 	aggregate.Facts.Resources.OperationAdmissibilities = []runtimecontract.RuntimeOperationAdmissibility{inventory}
 	aggregate = runtimeTestAggregateWithSemanticPlanning(t, aggregate)
-	decision := aggregate.Decision
+	aggregate.Facts.Focus.TargetRole = "validation_input"
+	facts, decision, err := runtime.ReduceRuntimeStateWithDirective(aggregate.Facts, nil, aggregate.CoverageProofLineage)
+	if err != nil {
+		t.Fatal(err)
+	}
+	aggregate.Facts, aggregate.Decision = facts, decision
+	decision = aggregate.Decision
 	recipeID := recipe.ID
 	bindingRef := aggregate.Facts.Focus.CoverageEvidenceBindings[0].ID
 	candidate := runtimecontract.RuntimeCandidate{Validation: &runtimecontract.ValidationCandidate{Operations: []runtimecontract.ValidationOperation{{Operation: runtimecontract.RuntimeOperation{
@@ -567,7 +573,7 @@ func TestRuntimeStateRepositoryRoundTripsSealedValidationRecipeSnapshot(t *testi
 	if err != nil {
 		t.Fatal(err)
 	}
-	if reloaded.ActiveDispatch == nil || !reflect.DeepEqual(reloaded.ActiveDispatch.ValidationRecipes, []runtimecontract.RuntimeValidationRecipe{recipe}) {
+	if reloaded.ActiveDispatch == nil || reloaded.ActiveDispatch.FocusTargetRole != "validation_input" || !reflect.DeepEqual(reloaded.ActiveDispatch.ValidationRecipes, []runtimecontract.RuntimeValidationRecipe{recipe}) {
 		t.Fatalf("reloaded sealed validation recipes = %+v", reloaded.ActiveDispatch)
 	}
 	// Conversion must deep-copy the sealed snapshot just like other persisted

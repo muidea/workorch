@@ -11,9 +11,7 @@ import (
 )
 
 func TestRepairSurfaceConfirmationCreatesFreshStateChangeAuthority(t *testing.T) {
-	aggregate := validationAggregate(t)
-	aggregate.Facts.Focus.TargetRole = "implementation"
-	aggregate.Facts.Focus.RequireTargetGrounding = true
+	aggregate := validationRepairSurfaceAggregateForTest(t, true)
 	repository := &durableRuntimeStateRepository{aggregate: aggregate}
 	sealed := sealCandidateForTest(t, repository, validationCandidate())
 	sealed.ActiveDispatch.State = DispatchStateCommitted
@@ -63,8 +61,7 @@ func TestRepairSurfaceConfirmationCreatesFreshStateChangeAuthority(t *testing.T)
 }
 
 func TestRejectedRepairSurfaceFailsBeforeAnotherValidationCandidate(t *testing.T) {
-	aggregate := validationAggregate(t)
-	aggregate.Facts.Focus.TargetRole = "implementation"
+	aggregate := validationRepairSurfaceAggregateForTest(t, false)
 	repository := &durableRuntimeStateRepository{aggregate: aggregate}
 	sealed := sealCandidateForTest(t, repository, validationCandidate())
 	sealed.ActiveDispatch.State = DispatchStateCommitted
@@ -101,9 +98,7 @@ func TestRejectedRepairSurfaceFailsBeforeAnotherValidationCandidate(t *testing.T
 }
 
 func TestStaleRepairSurfaceReacquiresOwnerPrerequisiteWithoutTerminal(t *testing.T) {
-	aggregate := validationAggregate(t)
-	aggregate.Facts.Focus.TargetRole = "implementation"
-	aggregate.Facts.Focus.RequireTargetGrounding = true
+	aggregate := validationRepairSurfaceAggregateForTest(t, true)
 	repository := &durableRuntimeStateRepository{aggregate: aggregate}
 	sealed := sealCandidateForTest(t, repository, validationCandidate())
 	sealed.ActiveDispatch.State = DispatchStateCommitted
@@ -162,4 +157,22 @@ func TestStaleRepairSurfaceReacquiresOwnerPrerequisiteWithoutTerminal(t *testing
 	if !errors.Is(err, common.ErrConflict) {
 		t.Fatalf("conflicting stale confirmation was accepted: %v", err)
 	}
+}
+
+func validationRepairSurfaceAggregateForTest(t *testing.T, requireTargetGrounding bool) RuntimeAggregate {
+	t.Helper()
+	aggregate := validationAggregate(t)
+	aggregate.Facts.Focus.TargetRole = "implementation"
+	facts, decision, err := ReduceRuntimeStateWithDirective(aggregate.Facts, nil, aggregate.CoverageProofLineage)
+	if err != nil {
+		t.Fatalf("reduce repair-surface fixture: %v", err)
+	}
+	aggregate.Facts = facts
+	aggregate.Decision = decision
+	// These focused confirmation tests start immediately after validation and
+	// deliberately omit the pre-validation snapshot fixture. Add the grounding
+	// requirement only after sealing the role-consistent validation decision so
+	// the confirmation transition itself must acquire the fresh File snapshot.
+	aggregate.Facts.Focus.RequireTargetGrounding = requireTargetGrounding
+	return aggregate
 }

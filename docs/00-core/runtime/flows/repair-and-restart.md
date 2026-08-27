@@ -82,8 +82,13 @@ repair 在 Runtime 中不是独立 stage 对象，而是 **drive/reducer 在当�
   → C3 exposes only the typed failure signature/class and exact Profile repair vocabulary; no raw diagnostic or Runtime disposition
   → File confirms the complete prospective all-of target set without creating/snapshotting it, and SM-2 seals a generation binding
   → accepted repair state change retires that binding and requires fresh validation; it never grants terminal validation credit
-- Shell-recognized structured validation locations, including both files in the exact Go package-conflict diagnostic, remain
-  owner-authored factual failure targets; Shell does not choose the repair transition, and Orchestrator never derives targets from free text
+- Shell-recognized structured validation locations, including both files in the exact Go package-conflict diagnostic, are bounded
+  candidate surfaces rather than failure-target authority
+  → the rejected receipt retains the original focus/binding and the completed dispatch's sealed `FocusTargetRole`
+  → before any semantic/candidate provider call, File confirms the current surface through typed command/result and SM-2 internal events
+  → confirmed becomes an owner-grounded `FailureTarget`; stale reacquires owner prerequisites; rejected becomes typed infeasibility
+  → only a rejection without that structured observation may enter the Profile-declared semantic fallback above
+  Shell does not choose the repair transition, and Orchestrator never derives targets from free text or mutable current Focus
 - 需要外部信息 / 审批 / 依赖
   → sealed governance candidate → ticket → resolution commit
 - 存在owner-defined typed recovery/reconciliation合同的暂时不可用或consumption unknown

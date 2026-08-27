@@ -377,6 +377,9 @@ Cross-owner regression必须证明 concrete receiving-owner Command/Result、wor
   `file/edit`/`patch/apply`；重复 create-only write 在副作用前拒绝且不能形成无限 revision/等价操作循环。
 - profile verifier 必须证明 validation entry 只保留 recipe/receipt lineage：无 owner-supported 结构化位置时零 failure-target
   candidate；支持的工具诊断只能报告 fresh manifest scope 内的 actual target，越界目标丢弃且仍需 File owner confirmation。
+  回归还必须覆盖：dispatch seal/持久化保留 `FocusTargetRole`；current Focus role 漂移不改变 completed-dispatch causation；
+  observation receipt 到 File confirmation 之间零 CWI reopen、零 repair semantic input、零 validation-only retry 和零 provider call；
+  exact duplicate/restart 复用同一 observation，stale/rejected File disposition 分别只进入 prerequisite/typed terminal。
 
 ## Verification Entry
 

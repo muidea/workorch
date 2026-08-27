@@ -3,6 +3,8 @@ package runtime
 import (
 	"context"
 	"fmt"
+	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/muidea/workorch/internal/modules/kernel/orchestrator/biz/internal/semanticplan"
@@ -186,6 +188,93 @@ func TestRejectedTypedValidationWithoutFailureTargetOpensProfileRepairGeneration
 	reloadedInput, reloadedRequired, err := CurrentRuntimeValidationFailureRepairGenerationInput(reloaded)
 	if err != nil || !reloadedRequired || reloadedInput != input {
 		t.Fatalf("restart repair generation input = %+v required=%v err=%v", reloadedInput, reloadedRequired, err)
+	}
+}
+
+func TestRejectedValidationObservationWaitsForFileConfirmationBeforeSemanticRepair(t *testing.T) {
+	aggregate := runtimeValidationFailureRepairAggregateForTest(t, runtimeValidationFailureRepairConvergenceForTest(2))
+	aggregate.Facts.Focus.TargetRole = "semantic_proof_target"
+	facts, decision, err := ReduceRuntimeStateWithDirective(aggregate.Facts, nil, aggregate.CoverageProofLineage)
+	if err != nil {
+		t.Fatal(err)
+	}
+	aggregate.Facts, aggregate.Decision = facts, decision
+	originalFocus := aggregate.Facts.Focus.Normalized()
+	originalPlanning := aggregate.SemanticPlanning.Clone()
+	repository := &durableRuntimeStateRepository{aggregate: aggregate}
+	coordinator, err := NewDispatchCoordinator(repository)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sealed := sealCandidateForTest(t, repository, validationCandidate())
+	observation := runtimecontract.RuntimeValidationFailureObservation{
+		WorkspaceID: sealed.Facts.WorkspaceID, RunID: sealed.Facts.RunID,
+		AuthoritySnapshotID: sealed.ActiveDispatch.Transaction.AuthoritySnapshotID,
+		DispatchID:          sealed.ActiveDispatch.ID, OperationID: "validate-1",
+		FailureSignature: "validation-failure/owner-observation/1", TargetRole: "semantic_proof_target",
+		DiagnosticClass:     runtimecontract.ValidationDiagnosticBuildFailed,
+		CandidateTargetRefs: []string{"main.go"}, ValidationScopeTargetRefs: []string{"main.go"},
+		DiagnosticHash: strings.Repeat("d", 64),
+	}
+	evidence := runtimeRejectedValidationEvidenceForTest(sealed, "event-validation-owner-observation", runtimecontract.ValidationDiagnosticBuildFailed)
+	evidence.Failure.Signature = observation.FailureSignature
+	evidence.Failure.ValidationFailureObservation = &observation
+	attachRuntimeTestOwnerReceipt(t, &repository.aggregate, &evidence)
+	committed, err := coordinator.commitEvidence(context.Background(), evidence)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if committed.Aggregate.ActiveDispatch != nil || len(committed.Aggregate.CompletedDispatches) != 1 ||
+		committed.Aggregate.CompletedDispatches[0].FocusTargetRole != observation.TargetRole {
+		t.Fatalf("completed validation dispatch did not retain sealed focus role: %+v", committed.Aggregate)
+	}
+	if !reflect.DeepEqual(originalFocus, committed.Aggregate.Facts.Focus.Normalized()) {
+		t.Fatalf("owner observation reopened or replaced focus before File confirmation: before=%+v after=%+v", originalFocus, committed.Aggregate.Facts.Focus)
+	}
+	currentPlanning := committed.Aggregate.SemanticPlanning
+	if currentPlanning.Phase != originalPlanning.Phase || currentPlanning.Attempt != originalPlanning.Attempt ||
+		currentPlanning.LogicalRequestID != originalPlanning.LogicalRequestID || currentPlanning.DocumentHash != originalPlanning.DocumentHash ||
+		currentPlanning.SealedBindingSetHash != originalPlanning.SealedBindingSetHash || len(currentPlanning.Batches) != len(originalPlanning.Batches) ||
+		len(currentPlanning.History) != len(originalPlanning.History) {
+		t.Fatalf("owner observation opened semantic planning before File confirmation: before=%+v after=%+v", originalPlanning, committed.Aggregate.SemanticPlanning)
+	}
+	if committed.Aggregate.Facts.Repair.RepairAttempts != 1 || committed.Aggregate.Facts.Repair.ValidationOnlyRetries != 0 {
+		t.Fatalf("pending File confirmation created extra repair or validation-retry authority: %+v", committed.Aggregate.Facts.Repair)
+	}
+	if _, required, inputErr := CurrentRuntimeValidationFailureRepairGenerationInput(committed.Aggregate); inputErr != nil || required {
+		t.Fatalf("pending File confirmation exposed semantic repair input: required=%v err=%v", required, inputErr)
+	}
+	if committed.Aggregate.Decision.State != runtimecontract.ConvergenceStateNeedValidation || committed.Aggregate.Facts.Resources.FailureTarget != nil {
+		t.Fatalf("pending File confirmation selected premature repair authority: decision=%+v target=%+v", committed.Aggregate.Decision, committed.Aggregate.Facts.Resources.FailureTarget)
+	}
+
+	// A later focus projection cannot rewrite the completed validation's
+	// immutable diagnostic causation. This models the exact restart-era drift
+	// that previously compared the receipt against mutable current Focus.
+	drifted := committed.Aggregate
+	drifted.Facts.Focus.TargetRole = "prospective_implementation"
+	if !sealedValidationFailureObservationMatches(drifted, observation) {
+		t.Fatal("completed dispatch causation changed with mutable current focus")
+	}
+	forged := observation.Clone()
+	forged.TargetRole = drifted.Facts.Focus.TargetRole
+	if sealedValidationFailureObservationMatches(drifted, forged) {
+		t.Fatal("mutable current focus role was accepted as completed dispatch causation")
+	}
+
+	persistedRevision := committed.Aggregate.StateRevision
+	duplicate, err := coordinator.commitEvidence(context.Background(), evidence)
+	if err != nil || duplicate.Disposition != CommitDispositionDuplicate || duplicate.Aggregate.StateRevision != persistedRevision ||
+		duplicate.Aggregate.Facts.Repair.RepairAttempts != 1 || duplicate.Aggregate.Facts.Repair.ValidationOnlyRetries != 0 {
+		t.Fatalf("duplicate owner observation changed pending confirmation authority: result=%+v err=%v", duplicate, err)
+	}
+	reloaded, err := repository.Load(context.Background(), aggregate.Facts.WorkspaceID, aggregate.Facts.RunID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, required, inputErr := CurrentRuntimeValidationFailureRepairGenerationInput(reloaded); inputErr != nil || required ||
+		!sealedValidationFailureObservationMatches(reloaded, observation) {
+		t.Fatalf("restart changed pending File confirmation: required=%v err=%v aggregate=%+v", required, inputErr, reloaded)
 	}
 }
 

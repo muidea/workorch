@@ -11237,6 +11237,147 @@ func TestRuntimeDecisionReconcilesHistoricalAuthorityBeforeProvider(t *testing.T
 	}
 }
 
+func TestRuntimeDecisionConfirmsValidationRepairSurfaceBeforeProvider(t *testing.T) {
+	ctx := context.Background()
+	aggregate := runtimeAggregate(t, 1)
+	aggregate.Facts.Focus.RequiredEvidenceKinds = []string{runtimecontract.EvidenceKindValidation}
+	aggregate.Facts.Focus.AcceptedStepKinds = []string{runtimecontract.RuntimeBlockKindManagedValidationSession}
+	aggregate.Facts.Focus.ValidationRecipeID = "repair-surface-validation"
+	aggregate.Facts.Focus.TargetRefs = []string{"main.go"}
+	aggregate.Facts.Capabilities = runtimecontract.RuntimeCapabilities{
+		StateChangeKinds: []string{runtimecontract.StepKindFileEdit},
+		ValidationKinds:  []string{runtimecontract.RuntimeBlockKindManagedValidationSession},
+	}
+	recipe := runtimecontract.RuntimeValidationRecipe{ID: aggregate.Facts.Focus.ValidationRecipeID, Command: "true"}
+	inventory := runtimecontract.RuntimeOperationAdmissibility{
+		PrerequisiteID: "admissibility-shell-repair-surface", OwnerModuleID: runtimecontract.RuntimeModuleShell,
+		OperationKinds: []string{runtimecontract.RuntimeBlockKindManagedValidationSession}, ValidationRecipes: []runtimecontract.RuntimeValidationRecipe{recipe},
+		ObservedRevision: "shell-repair-surface-v1",
+	}
+	inventory.SnapshotID = runtimecontract.StableRuntimeOperationAdmissibilitySnapshotID(inventory)
+	aggregate.Facts.Prerequisites.Satisfied = []runtimecontract.RuntimePrerequisite{{
+		ID: inventory.PrerequisiteID, Kind: runtimecontract.PrerequisiteKindOperationAdmissibility,
+		OwnerModuleID: runtimecontract.RuntimeModuleShell, RequiredCapabilities: []string{runtimecontract.RuntimeBlockKindManagedValidationSession},
+	}}
+	aggregate.Facts.Resources.OperationAdmissibilities = []runtimecontract.RuntimeOperationAdmissibility{inventory}
+	aggregate = runtimeTestAggregateWithSemanticPlanning(t, aggregate)
+	aggregate.Facts.Focus.TargetRole = "semantic_proof_target"
+	facts, decision, err := runtime.ReduceRuntimeStateWithDirective(aggregate.Facts, nil, aggregate.CoverageProofLineage)
+	if err != nil {
+		t.Fatal(err)
+	}
+	aggregate.Facts, aggregate.Decision = facts, decision
+	if aggregate.Decision.State != runtimecontract.ConvergenceStateNeedValidation {
+		t.Fatalf("repair-surface fixture action = %s", aggregate.Decision.State)
+	}
+
+	recipeID := recipe.ID
+	bindingRef := aggregate.Facts.Focus.CoverageEvidenceBindings[0].ID
+	candidate := runtimecontract.RuntimeCandidate{Validation: &runtimecontract.ValidationCandidate{Operations: []runtimecontract.ValidationOperation{{Operation: runtimecontract.RuntimeOperation{
+		ID: "validate-repair-surface", Kind: runtimecontract.RuntimeBlockKindManagedValidationSession,
+		BindingRefs: []string{bindingRef}, TargetRefs: []string{"main.go"},
+		Parameters: []runtimecontract.OperationParameter{{Name: "recipeId", String: &recipeID}},
+	}}}}}
+	manifest, err := runtimecontract.BuildRuntimeCandidateContractManifest(aggregate.Decision, runtimecontract.RuntimeCandidateManifestOwnerFactsFromResources(aggregate.Facts.Resources))
+	if err != nil {
+		t.Fatal(err)
+	}
+	dispatch, err := runtime.SealDispatchWithManifestAndFeasibilities(aggregate.Decision, candidate, aggregate.Facts.Activation, manifest, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	recordAcceptedRuntimeDispatchAdmissionForTest(&aggregate, dispatch, manifest.Hash)
+	aggregate.ActiveDispatch = &dispatch
+	repository := &runtimeDriveRepository{aggregate: aggregate}
+	controller, err := runtime.NewRuntimeController(repository)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	failed, err := runtimeTestControllerExecuteDispatch(controller, ctx, aggregate.Facts.WorkspaceID, aggregate.Facts.RunID,
+		runtimeOperationExecutorFunc(func(ctx context.Context, request runtime.RuntimeOperationExecutionRequest) (runtime.RuntimeOperationExecutionResult, error) {
+			if request.TargetRole != dispatch.FocusTargetRole || request.TargetRole != "semantic_proof_target" {
+				return runtime.RuntimeOperationExecutionResult{}, fmt.Errorf("owner request target role = %q, sealed = %q", request.TargetRole, dispatch.FocusTargetRole)
+			}
+			observation := runtimecontract.RuntimeValidationFailureObservation{
+				WorkspaceID: request.WorkspaceID, RunID: request.RunID, AuthoritySnapshotID: request.Transaction.AuthoritySnapshotID,
+				DispatchID: request.DispatchID, OperationID: request.Operation.ID,
+				FailureSignature: "repair-surface-build-failure", TargetRole: request.TargetRole,
+				DiagnosticClass:     runtimecontract.ValidationDiagnosticBuildFailed,
+				CandidateTargetRefs: []string{"main.go"}, ValidationScopeTargetRefs: []string{"main.go"}, DiagnosticHash: strings.Repeat("e", 64),
+			}
+			failure := runtimecontract.FailureFact{
+				Class: runtimecontract.FailureClassBuildFailure, Code: "build_failed", Signature: observation.FailureSignature,
+				Message:                      "managed validation identified a bounded repair surface",
+				ValidationDiagnostic:         &runtimecontract.ValidationFailureDiagnostic{Class: observation.DiagnosticClass},
+				ValidationFailureObservation: &observation,
+			}
+			receipt := runtimecontract.RuntimeOperationReceipt{
+				ExecutionKey: request.Execution.ExecutionKey, OperationID: request.Operation.ID,
+				Outcome: runtimecontract.RuntimeOperationOutcomeRejected, ObservedEffectScope: runtimecontract.RuntimeEffectUnknown,
+				Evidence: runtimecontract.RuntimeOperationEvidence{Summary: "validation rejected"},
+			}
+			feedback, feedbackErr := runtimecontract.RuntimeFeedbackFromFailureFact(runtimecontract.RuntimeFeedbackScope{
+				WorkspaceID: request.WorkspaceID, RunID: request.RunID, AuthoritySnapshotID: request.Transaction.AuthoritySnapshotID, DispatchID: request.DispatchID,
+			}, runtimecontract.RuntimeFeedbackDomainOperation, runtimecontract.RuntimeFeedbackCategory(receipt.Outcome), runtimecontract.RuntimeModuleShell, failure)
+			if feedbackErr != nil {
+				return runtime.RuntimeOperationExecutionResult{}, feedbackErr
+			}
+			feedback.OriginalDiagnostic.OperationID = request.Operation.ID
+			receipt.Feedback = &feedback
+			_, committed, commitErr := runtimeTestControllerCommitOperationReceipt(controller, ctx, request.WorkspaceID, request.RunID, request.DispatchID, request.Execution.Fence, receipt)
+			if commitErr != nil {
+				return runtime.RuntimeOperationExecutionResult{}, commitErr
+			}
+			return runtime.RuntimeOperationExecutionResult{
+				EventID: "event-repair-surface-build-failure", OperationID: request.Operation.ID,
+				EvidenceKind: runtimecontract.EvidenceKindValidation, Status: runtime.ExecutionEvidenceStatusRejected,
+				Failure: &failure, Evidence: committed.Evidence, Receipt: committed,
+			}, nil
+		}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if failed.Facts.Failure == nil || failed.Facts.Failure.ValidationFailureObservation == nil || failed.Facts.Resources.FailureTarget != nil || runtimeSemanticAuthorityPending(failed) {
+		t.Fatalf("rejected receipt did not persist one pre-confirmation authority: %+v", failed)
+	}
+
+	hub := magicevent.NewHub(16)
+	t.Cleanup(func() { hub.Terminate(ctx) })
+	workspaceObserver := magicevent.NewSimpleObserver(workspaceevents.CommandDestination, hub)
+	workspaceObserver.Subscribe(workspaceevents.TopicWorkspaceCommandGet, func(_ magicevent.Event, result magicevent.Result) {
+		result.Set(workspaceevents.WorkspaceResult{Workspace: &workspaceevents.Workspace{ID: failed.Facts.WorkspaceID, DeliverableDirectory: t.TempDir()}}, nil)
+	})
+	t.Cleanup(func() { workspaceObserver.Unsubscribe(workspaceevents.TopicWorkspaceCommandGet) })
+	fileCalls := 0
+	fileObserver := magicevent.NewSimpleObserver(fileevents.PrerequisiteCommandDestination, hub)
+	fileObserver.Subscribe(fileevents.TopicConfirmRuntimeRepairSurface, func(event magicevent.Event, result magicevent.Result) {
+		fileCalls++
+		command := event.Data().(fileevents.ConfirmRuntimeRepairSurfaceCommand)
+		result.Set(fileevents.ConfirmRuntimeRepairSurfaceResult{Confirmation: runtimecontract.RuntimeRepairSurfaceConfirmation{
+			Observation: command.Observation, OwnerModuleID: runtimecontract.RuntimeModuleFile, SubjectRef: "workspace_deliverable",
+			Disposition: runtimecontract.RuntimeRepairSurfaceConfirmed, ConfirmedTargetRefs: []string{"main.go"}, ObservedRevision: "tree-confirmed-v1",
+		}}, nil)
+	})
+	t.Cleanup(func() { fileObserver.Unsubscribe(fileevents.TopicConfirmRuntimeRepairSurface) })
+	providerCalls := 0
+	providerObserver := magicevent.NewSimpleObserver(runtimecontract.RuntimeModuleLLM, hub)
+	providerObserver.Subscribe(llmevents.TopicRequestRuntimeCandidate, func(_ magicevent.Event, _ magicevent.Result) { providerCalls++ })
+	t.Cleanup(func() { providerObserver.Unsubscribe(llmevents.TopicRequestRuntimeCandidate) })
+	owner := newRuntimeTestOwner()
+	if err := owner.ConfigureRuntimeRepository(repository); err != nil {
+		t.Fatal(err)
+	}
+	next, err := newTestBiz(owner, hub, nil).driveRuntimeDecision(ctx, failed, "unused-prefix")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if providerCalls != 0 || fileCalls != 1 || next.Facts.Resources.FailureTarget == nil || len(next.RepairSurfaceConfirmations) != 1 ||
+		len(next.CandidateAttempts) != len(failed.CandidateAttempts) || runtimeSemanticAuthorityPending(next) {
+		t.Fatalf("pre-provider File confirmation result=%+v providerCalls=%d fileCalls=%d", next, providerCalls, fileCalls)
+	}
+}
+
 type runtimeDriveRepository struct {
 	aggregate runtime.RuntimeAggregate
 }

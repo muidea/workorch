@@ -138,9 +138,9 @@ func sealedValidationFailureObservationMatches(aggregate RuntimeAggregate, obser
 			value := operation.Operation.Normalized()
 			operations = append(operations, proof.SealedValidationOperation{
 				DispatchID: dispatch.ID, AuthoritySnapshotID: dispatch.Transaction.AuthoritySnapshotID,
-				OperationID: value.ID, TargetRefs: append([]string(nil), value.TargetRefs...),
+				OperationID: value.ID, TargetRole: dispatch.FocusTargetRole, TargetRefs: append([]string(nil), value.TargetRefs...),
 			})
 		}
 	}
-	return proof.ValidationFailureObservationMatchesSealedOperation(aggregate.Facts.Focus.TargetRole, operations, observation)
+	return proof.ValidationFailureObservationMatchesSealedOperation(operations, observation)
 }

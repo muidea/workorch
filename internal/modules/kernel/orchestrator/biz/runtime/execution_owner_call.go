@@ -25,7 +25,7 @@ func (x *activeDispatchExecution) callOperationOwner(operation runtimecontract.R
 		Transaction: x.dispatch.Transaction, Operation: operation, Execution: prepared.execution,
 		GovernanceGrant:                    prepared.governanceGrant,
 		EvidenceKind:                       evidenceKindForDecision(x.aggregate.Decision),
-		TargetRole:                         x.aggregate.Facts.Focus.TargetRole,
+		TargetRole:                         x.dispatch.FocusTargetRole,
 		EvidencePolicies:                   x.aggregate.Facts.Activation.EvidencePolicies,
 		ValidationRecipes:                  runtimecontract.NormalizeRuntimeValidationRecipes(x.dispatch.ValidationRecipes),
 		ValidationScopeTargetRefs:          runtimeValidationScopeTargetRefs(x.aggregate.Facts, operation),

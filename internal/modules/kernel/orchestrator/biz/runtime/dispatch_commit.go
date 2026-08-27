@@ -27,6 +27,10 @@ type SealedDispatch struct {
 	Transaction   runtimecontract.AuthorityTransaction
 	CandidateHash string
 	Candidate     runtimecontract.RuntimeCandidate
+	// FocusTargetRole is copied from the SM-2 decision at seal time. Owner
+	// execution and completed-dispatch causation checks must not consult a later
+	// mutable Focus projection for this value.
+	FocusTargetRole string
 	// ValidationRecipes is the immutable subset selected from the candidate
 	// manifest's Shell-owner-confirmed recipes.  Execution must never replace it
 	// with activation policy or a later admissibility inventory.
@@ -273,6 +277,7 @@ func sealDispatchWithActivationAndFeasibilities(
 		Transaction:                        transaction,
 		CandidateHash:                      candidateHash,
 		Candidate:                          candidate,
+		FocusTargetRole:                    decision.Focus.Normalized().TargetRole,
 		ValidationRecipes:                  runtimecontract.NormalizeRuntimeValidationRecipes(validationRecipes),
 		OperationAdmissibilities:           sealedCatalogs,
 		OperationAdmissibilityObservations: sealedObservations,

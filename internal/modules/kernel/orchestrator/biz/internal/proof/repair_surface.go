@@ -14,6 +14,7 @@ type SealedValidationOperation struct {
 	DispatchID          string
 	AuthoritySnapshotID string
 	OperationID         string
+	TargetRole          string
 	TargetRefs          []string
 }
 
@@ -46,15 +47,13 @@ func RepairSurfaceConfirmationIdentityConflict(records []runtimecontract.Runtime
 // ValidationFailureObservationMatchesSealedOperation binds diagnostic target
 // candidates to the completed validation operation that produced them. It
 // compares only typed immutable facts and does not consult a capability owner.
-func ValidationFailureObservationMatchesSealedOperation(targetRole string, operations []SealedValidationOperation, observation runtimecontract.RuntimeValidationFailureObservation) bool {
+func ValidationFailureObservationMatchesSealedOperation(operations []SealedValidationOperation, observation runtimecontract.RuntimeValidationFailureObservation) bool {
 	observation = observation.Normalized()
-	if observation.TargetRole != strings.TrimSpace(targetRole) {
-		return false
-	}
 	for _, operation := range operations {
 		if strings.TrimSpace(operation.DispatchID) != observation.DispatchID ||
 			strings.TrimSpace(operation.AuthoritySnapshotID) != observation.AuthoritySnapshotID ||
 			strings.TrimSpace(operation.OperationID) != observation.OperationID ||
+			strings.TrimSpace(operation.TargetRole) != observation.TargetRole ||
 			!grounding.SameTargetRefs(operation.TargetRefs, observation.ValidationScopeTargetRefs) {
 			continue
 		}

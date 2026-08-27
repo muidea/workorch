@@ -501,14 +501,19 @@ deployed run ID 只属于 archive regression evidence，不定义当前候选、
   `Facts.RepairDirective.RequiredState`。不得从 observation 的自由文本或其 claimed missing kind 直接进入
   `need_validation`、`need_state_change`、governance、retry 或 terminal。
 - validation entry 不是 state-change repair target；Shell 只可从 owner 支持的结构化工具诊断提取 fresh File-manifest
-  scope 内的 actual candidate target，无位置或越界时不发布 observation，不能回显 operation/input target。只有 focus exact target、仍新鲜的 owner-grounded failure target 或
-  sealed owner selector/prospective constraint可以形成 repair authority。validation/evidence-quality gap保持
+  scope 内的 actual candidate target，无位置或越界时不发布 observation，不能回显 operation/input target。该 observation
+  必须精确绑定 completed sealed dispatch 中封存的 `FocusTargetRole`、authority snapshot、operation 与 validation scope；
+  current mutable `Focus` 不得参与历史因果校验。带 observation 的 rejected receipt 在同一 CAS 中保留原 focus/binding，
+  不得 reopen CWI、开启 `validation_failure_repair` semantic generation 或增加 validation-only retry；下一次 drive 必须先通过
+  typed internal event 完成 File read-only confirmation，且在此之前为零 semantic/candidate provider call。File confirmed 才把
+  candidate surface 封存为 owner-grounded `FailureTarget`，stale 只重取 prerequisite，rejected 形成 typed infeasibility terminal。
+  只有 focus exact target、仍新鲜的 owner-grounded failure target 或 sealed owner selector/prospective constraint可以形成 repair authority。validation/evidence-quality gap保持
   `need_validation`，不得在 validation-only 重试后退化为无关 `need_state_change`；耗尽封存 validation
   recipe/budget 时必须形成 typed terminal。普通 rejected validation receipt 不获得 CWI credit；其防重放归属只能来自
   completed dispatch 中封存的 exact `FocusID`。stable operation shape 忽略 operation ID 与 summary 元数据，语义相同的
   重试必须在 owner 调用前拒绝；只有同 focus reducer 实际再次授权 `need_validation` 时才递增
   `ValidationOnlyRetries`，初次 validation、duplicate receipt 与 restart 均不得重复计数。
-- 无 actual target 的 rejected validation 也不得从命令、输出文本或 terminal selector 猜测 repair target。只有
+- 未携带结构化 validation observation 的 rejected validation 也不得从命令、输出文本或 terminal selector 猜测 repair target。只有
   RuntimeDefinitionFocus 已封存的单一 `ValidationFailureRepairConvergence` 精确匹配 trigger 时，SM-2 才可把该 failure
   转为同一 CWI 的 `validation_failure_repair` semantic purpose。manifest 将 terminal `validation` 与 current File
   `state_change` 分离，并绑定 failure/convergence/File catalog；File feasibility 确认 proposed target 后，普通

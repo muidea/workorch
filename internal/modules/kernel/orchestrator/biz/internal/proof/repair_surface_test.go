@@ -33,19 +33,24 @@ func TestRepairSurfaceFactsFenceExactReplayConflictAndCausation(t *testing.T) {
 	}
 
 	operations := []SealedValidationOperation{{
-		DispatchID: "dispatch-1", AuthoritySnapshotID: "authority-1", OperationID: "validate-1", TargetRefs: []string{"main.go"},
+		DispatchID: "dispatch-1", AuthoritySnapshotID: "authority-1", OperationID: "validate-1", TargetRole: "implementation", TargetRefs: []string{"main.go"},
 	}}
-	if !ValidationFailureObservationMatchesSealedOperation("implementation", operations, observation) {
+	if !ValidationFailureObservationMatchesSealedOperation(operations, observation) {
 		t.Fatal("exact completed validation operation did not bind the observation")
 	}
 	stale := observation.Clone()
 	stale.AuthoritySnapshotID = "authority-old"
-	if ValidationFailureObservationMatchesSealedOperation("implementation", operations, stale) {
+	if ValidationFailureObservationMatchesSealedOperation(operations, stale) {
 		t.Fatal("stale authority observation matched the completed operation")
 	}
 	forged := observation.Clone()
 	forged.ValidationScopeTargetRefs = []string{"other.go"}
-	if ValidationFailureObservationMatchesSealedOperation("implementation", operations, forged) {
+	if ValidationFailureObservationMatchesSealedOperation(operations, forged) {
 		t.Fatal("different validation scope matched the completed operation")
+	}
+	forged = observation.Clone()
+	forged.TargetRole = "prospective-implementation"
+	if ValidationFailureObservationMatchesSealedOperation(operations, forged) {
+		t.Fatal("different sealed focus target role matched the completed operation")
 	}
 }

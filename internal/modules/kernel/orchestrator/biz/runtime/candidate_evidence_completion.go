@@ -84,6 +84,9 @@ func completeEvidenceDispatch(aggregate *RuntimeAggregate, dispatch SealedDispat
 	}
 	aggregate.CompletedDispatches = append(aggregate.CompletedDispatches, dispatch)
 	aggregate.ActiveDispatch = nil
+	repairSurfaceConfirmationPending := !invalidated && admission.Evidence.Status == ExecutionEvidenceStatusRejected &&
+		fact.Kind == runtimecontract.EvidenceKindValidation &&
+		aggregate.Facts.Failure != nil && aggregate.Facts.Failure.ValidationFailureObservation != nil
 	if admission.Evidence.Status == ExecutionEvidenceStatusAccepted && !invalidated {
 		if repair, found, err := currentRuntimeSemanticValidationFailureRepair(*aggregate); err != nil {
 			return err
@@ -94,8 +97,15 @@ func completeEvidenceDispatch(aggregate *RuntimeAggregate, dispatch SealedDispat
 		}
 	}
 	if admission.Evidence.Status == ExecutionEvidenceStatusRejected && !invalidated {
-		if _, err := openRuntimeValidationFailureRepairGeneration(aggregate, fact, admission.Operation); err != nil {
-			return err
+		// A structured validation observation already carries one bounded Shell
+		// diagnostic surface. Preserve the completed dispatch/focus causation and
+		// let the next drive obtain File's read-only confirmation before any new
+		// semantic/provider work. Only a target-free typed failure may enter the
+		// Profile-declared prospective repair generation.
+		if !repairSurfaceConfirmationPending {
+			if _, err := openRuntimeValidationFailureRepairGeneration(aggregate, fact, admission.Operation); err != nil {
+				return err
+			}
 		}
 	}
 	if err := retireSemanticPlanningForCurrentReopenedCWIs(aggregate); err != nil {
@@ -131,7 +141,8 @@ func completeEvidenceDispatch(aggregate *RuntimeAggregate, dispatch SealedDispat
 	// this same CAS makes duplicate receipt delivery and restart replay free,
 	// while the initial validation (which has no rejected source fact) remains
 	// outside the validation-only retry budget.
-	facts = recordAuthorizedValidationOnlyRetry(facts, nextDecision, admission.Evidence.Status == ExecutionEvidenceStatusRejected)
+	facts = recordAuthorizedValidationOnlyRetry(facts, nextDecision,
+		admission.Evidence.Status == ExecutionEvidenceStatusRejected && !repairSurfaceConfirmationPending)
 	aggregate.Facts = facts
 	aggregate.Decision = nextDecision
 	return nil

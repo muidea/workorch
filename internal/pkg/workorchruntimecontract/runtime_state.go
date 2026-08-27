@@ -28,6 +28,10 @@ type RuntimeDispatchRecord struct {
 	Transaction   AuthorityTransaction
 	CandidateHash string
 	Candidate     RuntimeCandidate
+	// FocusTargetRole is the exact SM-2 focus role used when SM-3 sealed the
+	// dispatch. Capability requests and later diagnostic-causation checks use
+	// this immutable value rather than the mutable current focus projection.
+	FocusTargetRole string
 	// ValidationRecipes is the exact manifest-selected, Shell-owner-confirmed
 	// recipe snapshot for this dispatch.  It is a sealed operation contract,
 	// not activation policy and not mutable current owner inventory.
@@ -900,6 +904,9 @@ func (d RuntimeDispatchRecord) ValidateWithActivation(decision RuntimeDecision, 
 	if d.WorkspaceID != decision.AuthoritySnapshot.WorkspaceID || d.RunID != decision.AuthoritySnapshot.RunID {
 		return fmt.Errorf("runtime dispatch scope mismatch")
 	}
+	if d.FocusTargetRole != decision.Focus.Normalized().TargetRole {
+		return fmt.Errorf("runtime dispatch focus target role mismatch")
+	}
 	// Only non-policy startup activation fields are read from the current
 	// aggregate. Effect/replay semantics are immutable dispatch authority.
 	activation = activation.Clone()
@@ -925,6 +932,9 @@ func (d RuntimeDispatchRecord) ValidateIntrinsic() error {
 	}
 	if err := ValidateRuntimeOperationContractRevision(d.Transaction.OperationContractRevision); err != nil {
 		return fmt.Errorf("runtime dispatch operation contract revision: %w", err)
+	}
+	if d.FocusTargetRole != strings.TrimSpace(d.FocusTargetRole) {
+		return fmt.Errorf("runtime dispatch focus target role must be canonical")
 	}
 	if d.Transaction.AuthoritySnapshotID != StableAuthoritySnapshotIDForTransaction(d.WorkspaceID, d.RunID, d.Transaction) {
 		return fmt.Errorf("runtime dispatch authority snapshot identity mismatch")
@@ -1018,9 +1028,10 @@ func StableRuntimeDispatchID(transaction AuthorityTransaction, candidateHash str
 // governance resume without including mutable dispatch/execution progress.
 func StableRuntimeDispatchAuthorityHash(dispatch RuntimeDispatchRecord) string {
 	h := sha256.New()
-	writeHashString(h, "runtime-dispatch-authority/v1")
+	writeHashString(h, "runtime-dispatch-authority/v2")
 	writeHashString(h, string(dispatch.WorkspaceID))
 	writeHashString(h, string(dispatch.RunID))
+	writeHashString(h, strings.TrimSpace(dispatch.FocusTargetRole))
 	transaction := dispatch.Transaction
 	writeHashString(h, transaction.AuthoritySnapshotID)
 	writeHashString(h, transaction.FocusID)
