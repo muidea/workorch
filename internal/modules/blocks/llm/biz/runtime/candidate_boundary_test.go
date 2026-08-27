@@ -75,6 +75,65 @@ func TestRequestCandidateRejectsExpectedDocumentTokenMismatchBeforeProvider(t *t
 	}
 }
 
+func TestRequestCandidateRetryIdentityBindsDetachedCorrectionInputBeforeProvider(t *testing.T) {
+	request := candidateRequest(t, runtimecontract.ConvergenceStateNeedStateChange)
+	request.CandidateAttempt = 1
+	request.PreviousFailure = &runtimecontract.RuntimeCandidateFailure{
+		Class: runtimecontract.RuntimeCandidateFailureClassSchema, Code: "candidate_schema_invalid", Signature: "candidate-schema-invalid", Reason: "operations field was missing",
+		Diagnostic: &runtimecontract.RuntimeCandidateFailureDiagnostic{
+			Path: "$.operations", Actual: "missing_operations", Required: []string{"operations"}, ManifestHash: request.CandidateManifest.Hash,
+		},
+	}
+	request.CandidateCorrection = (&llmmodels.RuntimeCandidateCorrectionInput{
+		ManifestHash: request.CandidateManifest.Hash,
+		Objectives:   []runtimecontract.RuntimeCandidateCorrectionObjective{runtimecontract.RuntimeCandidateCorrectionSupplyRequiredField},
+		Witness: runtimecontract.RuntimeCandidateCorrectionWitness{
+			Dimension: runtimecontract.RuntimeCandidateCorrectionWitnessSchemaField,
+			Path:      "$.operations", RejectedValue: "field_absent", AlternativeValue: "field_present",
+		},
+	}).Clone()
+	correctionHash := request.CandidateCorrection.StableRequestCorrectionHash(request.PreviousFailure)
+	logicalRequestID := runtimecontract.StableRuntimeCandidateRequestSessionID(
+		request.DocumentKind, request.CandidateContext.WorkspaceID, request.CandidateContext.RunID,
+		request.Transaction, request.StablePrefixHash, request.CandidateManifest.Hash, correctionHash,
+	)
+	request.RequestIdentity = runtimecontract.RuntimeCandidateRequestIdentity{
+		LogicalRequestID: logicalRequestID, Sequence: 1,
+		PhysicalCallID: runtimecontract.StableRuntimeCandidatePhysicalCallID(logicalRequestID, 1),
+	}
+	expected := request.ExpectedDocument.Normalized()
+	expected.LogicalRequestID = logicalRequestID
+	expected.CorrectionAttempt = 1
+	expected.Hash = runtimecontract.StableRuntimeExpectedDocumentHash(expected)
+	request.ExpectedDocument = &expected
+
+	providerCalls := 0
+	provider := candidateProviderFunc(func(context.Context, llmmodels.RuntimeCandidateRequest) (llmmodels.RuntimeCandidateGenerationResult, error) {
+		providerCalls++
+		return generationResult([]byte(`{"operations":[]}`), nil)
+	})
+	if _, err := RequestCandidate(context.Background(), provider, request); err != nil || providerCalls != 1 {
+		t.Fatalf("valid detached correction input did not reach provider exactly once: calls=%d err=%v", providerCalls, err)
+	}
+
+	drift := request
+	drift.CandidateCorrection = request.CandidateCorrection.Clone()
+	drift.CandidateCorrection.Witness.AlternativeValue = "different_field_present"
+	if _, err := RequestCandidate(context.Background(), provider, drift); err == nil || !strings.Contains(err.Error(), "correction request identity is stale") || providerCalls != 1 {
+		t.Fatalf("drifted detached correction input reached provider: calls=%d err=%v", providerCalls, err)
+	}
+	missing := request
+	missing.CandidateCorrection = nil
+	if _, err := RequestCandidate(context.Background(), provider, missing); err == nil || !strings.Contains(err.Error(), "previous failure and correction") || providerCalls != 1 {
+		t.Fatalf("missing detached correction input reached provider: calls=%d err=%v", providerCalls, err)
+	}
+	initial := request
+	initial.CandidateAttempt = 0
+	if _, err := RequestCandidate(context.Background(), provider, initial); err == nil || !strings.Contains(err.Error(), "initial candidate attempt must not carry correction lineage") || providerCalls != 1 {
+		t.Fatalf("attempt 0 detached correction input reached provider: calls=%d err=%v", providerCalls, err)
+	}
+}
+
 func semanticBoundaryRequest(t *testing.T) llmmodels.RuntimeCandidateRequest {
 	t.Helper()
 	definition := runtimecontract.RuntimeDefinitionContext{StartupInputHash: "startup-input-test",

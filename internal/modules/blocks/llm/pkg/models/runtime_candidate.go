@@ -1,9 +1,57 @@
 package models
 
 import (
+	"fmt"
+	"strings"
+
 	"github.com/muidea/workorch/internal/pkg/llmaudit"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
+
+// RuntimeCandidateCorrectionInput is the LLM-owner input for an SM-3 retry.
+// It deliberately excludes the Orchestrator-owned disposition/terminal state;
+// only the manifest-bound concrete alternative needed to render C4 crosses
+// the owner boundary.
+type RuntimeCandidateCorrectionInput struct {
+	ManifestHash string
+	Objectives   []runtimecontract.RuntimeCandidateCorrectionObjective
+	Witness      runtimecontract.RuntimeCandidateCorrectionWitness
+}
+
+func (c RuntimeCandidateCorrectionInput) Normalized() RuntimeCandidateCorrectionInput {
+	c.ManifestHash = strings.TrimSpace(c.ManifestHash)
+	c.Objectives = append([]runtimecontract.RuntimeCandidateCorrectionObjective(nil), c.Objectives...)
+	c.Objectives = (&runtimecontract.RuntimeCandidateFailureDiagnostic{Objectives: c.Objectives}).Normalized().Objectives
+	c.Witness = c.Witness.Normalized()
+	return c
+}
+
+func (c RuntimeCandidateCorrectionInput) Validate(manifestHash string) error {
+	c = c.Normalized()
+	if c.ManifestHash == "" || c.ManifestHash != strings.TrimSpace(manifestHash) || len(c.Objectives) == 0 {
+		return fmt.Errorf("runtime candidate correction input requires manifest-bound objectives")
+	}
+	return c.Witness.Validate()
+}
+
+func (c *RuntimeCandidateCorrectionInput) Clone() *RuntimeCandidateCorrectionInput {
+	if c == nil {
+		return nil
+	}
+	value := c.Normalized()
+	return &value
+}
+
+// StableRequestCorrectionHash is the canonical identity shared by the
+// Orchestrator projection and the LLM owner's independent request fence. It
+// contains no Orchestrator disposition or terminal state.
+func (c *RuntimeCandidateCorrectionInput) StableRequestCorrectionHash(failure *runtimecontract.RuntimeCandidateFailure) string {
+	if c == nil {
+		return runtimecontract.StableRuntimeCandidateRequestCorrectionHash(failure, "", nil, nil)
+	}
+	value := c.Normalized()
+	return runtimecontract.StableRuntimeCandidateRequestCorrectionHash(failure, value.ManifestHash, value.Objectives, &value.Witness)
+}
 
 type RuntimeCandidateRequest struct {
 	DocumentKind                runtimecontract.RuntimeProviderDocumentKind
@@ -13,6 +61,7 @@ type RuntimeCandidateRequest struct {
 	Transaction                 runtimecontract.AuthorityTransaction
 	CandidateAttempt            int
 	PreviousFailure             *runtimecontract.RuntimeCandidateFailure
+	CandidateCorrection         *RuntimeCandidateCorrectionInput
 	StablePrefixHash            string
 	CandidateManifest           runtimecontract.RuntimeCandidateContractManifest
 	DefinitionContext           runtimecontract.RuntimeDefinitionContext

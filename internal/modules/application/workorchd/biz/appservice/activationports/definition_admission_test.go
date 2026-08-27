@@ -54,9 +54,249 @@ func TestBuiltinSoftwareDevProfilePassesDefinitionAdmissionBeforeRun(t *testing.
 	if err != nil {
 		t.Fatalf("compile builtin candidate inputs: %v", err)
 	}
+	var parsedRepair *runtimecontract.RuntimeValidationFailureRepairConvergence
+	for _, profile := range candidate.RuntimeProfileContracts {
+		if profile.ID != "software-dev" {
+			continue
+		}
+		for _, requirement := range profile.EvidenceRequirements {
+			if requirement.Scope == "dodItem" && requirement.ID == "*" {
+				parsedRepair = requirement.ValidationFailureRepairConvergence
+			}
+		}
+	}
+	if parsedRepair == nil || parsedRepair.TriggerOperationKind != runtimecontract.RuntimeBlockKindManagedValidationSession ||
+		parsedRepair.RepairOwnerModuleID != runtimecontract.RuntimeModuleFile || parsedRepair.RepairOperationTargetSelectorRef != "workspace-relative-new-file-target" ||
+		!parsedRepair.RequireFreshValidation || parsedRepair.MaxAttempts != 2 {
+		t.Fatalf("builtin software-dev repair convergence was not parsed into the admission candidate: %+v", parsedRepair)
+	}
 	result, err := definitionadmission.Compile(candidate)
 	if err != nil || result.Disposition != workspacemodel.DefinitionAdmissionAdmittedAllOf {
 		t.Fatalf("builtin software-dev admission = %+v err=%v", result, err)
+	}
+}
+
+func TestDefinitionAdmissionBlocksIncompleteValidationRepairContractBeforeRun(t *testing.T) {
+	newInputs := func(profile map[string]any) (*workspacemodel.Workspace, *workspacemodel.Goal, *workspacemodel.DoD, *workspacemodel.WorkspaceTemplate) {
+		hints, err := workorcheventpayload.FromMap(map[string]any{"profileContracts": map[string]any{"software-dev": profile}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		workspace := &workspacemodel.Workspace{ID: "workspace-repair-admission", DeliverableDirectory: "/workspace", TemplateID: "software-dev"}
+		goal := &workspacemodel.Goal{ID: "goal-repair-admission", WorkspaceID: workspace.ID, Text: "implement behavior", DefinitionRevision: "goal-r1"}
+		dod := &workspacemodel.DoD{ID: "dod-repair-admission", WorkspaceID: workspace.ID, Items: []string{"behavior passes validation"}, DefinitionRevision: "dod-r1"}
+		template := &workspacemodel.WorkspaceTemplate{ID: workspace.TemplateID, Name: "software dev", ContextHints: hints}
+		return workspace, goal, dod, template
+	}
+	newProfile := func() map[string]any {
+		return map[string]any{"evidenceRequirements": []any{map[string]any{
+			"id": "*", "scope": "dodItem", "requiredEvidenceKinds": []any{"validation"}, "acceptedStepKinds": []any{"validation/managed_session"},
+			"validationFailureRepairConvergence": map[string]any{
+				"id": "dod-validation-repair", "triggerOwnerModuleId": "blocks/shell", "triggerOperationKind": "validation/managed_session",
+				"triggerDiagnosticClasses": []any{"implementation_gap_detected", "validation_build_failed", "validation_test_failed"},
+				"repairEvidenceKind":       "state_change", "repairOwnerModuleId": "blocks/file", "repairOperationKinds": []any{"file/write", "patch/apply"},
+				"repairTargetPolicy": "prospective_owner_target", "repairTargetRole": "deliverable_implementation",
+				"repairDeclarationTargetSelectorRef": "file/workspace_deliverable", "repairDeclarationTargetSelectorOwnerRef": "software-dev",
+				"repairDeclarationTargetSelectorSubjectRef": "dodItem_repair", "repairOperationTargetSelectorRef": "workspace-relative-new-file-target",
+				"requireFreshValidation": true, "maxAttempts": 2,
+			},
+		}}}
+	}
+	validWorkspace, validGoal, validDoD, validTemplate := newInputs(newProfile())
+	validCandidate, err := definitionAdmissionCandidate(validWorkspace, validGoal, validDoD, validTemplate)
+	if err != nil {
+		t.Fatal(err)
+	}
+	admitted, err := definitionadmission.Compile(validCandidate)
+	if err != nil || admitted.Disposition != workspacemodel.DefinitionAdmissionAdmittedAllOf {
+		t.Fatalf("valid repair admission = %+v err=%v", admitted, err)
+	}
+
+	for _, tc := range []struct {
+		name string
+		edit func(map[string]any)
+	}{
+		{name: "missing diagnostic class", edit: func(v map[string]any) { delete(v, "triggerDiagnosticClasses") }},
+		{name: "unknown diagnostic class", edit: func(v map[string]any) { v["triggerDiagnosticClasses"] = []any{"free_form_failure"} }},
+		{name: "non validation trigger", edit: func(v map[string]any) {
+			v["triggerOwnerModuleId"] = "blocks/file"
+			v["triggerOperationKind"] = "file/write"
+		}},
+		{name: "non state change repair", edit: func(v map[string]any) { v["repairEvidenceKind"] = "validation" }},
+		{name: "cross owner repair kind", edit: func(v map[string]any) { v["repairOperationKinds"] = []any{"shell/command"} }},
+		{name: "non selector backed policy", edit: func(v map[string]any) { v["repairTargetPolicy"] = "exact_target" }},
+		{name: "missing operation selector", edit: func(v map[string]any) { delete(v, "repairOperationTargetSelectorRef") }},
+		{name: "aliased declaration and operation selectors", edit: func(v map[string]any) {
+			v["repairOperationTargetSelectorRef"] = v["repairDeclarationTargetSelectorRef"]
+		}},
+		{name: "fresh validation disabled", edit: func(v map[string]any) { v["requireFreshValidation"] = false }},
+		{name: "attempt budget zero", edit: func(v map[string]any) { v["maxAttempts"] = 0 }},
+		{name: "attempt budget overflow", edit: func(v map[string]any) { v["maxAttempts"] = runtimecontract.MaxRepairAttemptsPerFocusLimit + 1 }},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			profile := newProfile()
+			requirement := profile["evidenceRequirements"].([]any)[0].(map[string]any)
+			repair := requirement["validationFailureRepairConvergence"].(map[string]any)
+			tc.edit(repair)
+			workspace, goal, dod, template := newInputs(profile)
+			candidate, candidateErr := definitionAdmissionCandidate(workspace, goal, dod, template)
+			if candidateErr != nil {
+				t.Fatalf("candidate authoring err=%v", candidateErr)
+			}
+			blocked, compileErr := definitionadmission.Compile(candidate)
+			if compileErr != nil || blocked.Disposition != workspacemodel.DefinitionAdmissionClarificationRequired || blocked.ViolationCode != workspacemodel.DefinitionAdmissionProfileContractInvalid {
+				t.Fatalf("incomplete repair was not blocked before Run: result=%+v err=%v", blocked, compileErr)
+			}
+		})
+	}
+
+	conflictingProfile := newProfile()
+	wildcard := conflictingProfile["evidenceRequirements"].([]any)[0].(map[string]any)
+	exactRepair := make(map[string]any, len(wildcard["validationFailureRepairConvergence"].(map[string]any)))
+	for key, value := range wildcard["validationFailureRepairConvergence"].(map[string]any) {
+		exactRepair[key] = value
+	}
+	exactRepair["maxAttempts"] = 1
+	conflictingProfile["evidenceRequirements"] = append(conflictingProfile["evidenceRequirements"].([]any), map[string]any{
+		"id": "dod-001", "scope": "dodItem", "requiredEvidenceKinds": []any{"validation"}, "acceptedStepKinds": []any{"validation/managed_session"},
+		"validationFailureRepairConvergence": exactRepair,
+	})
+	workspace, goal, dod, template := newInputs(conflictingProfile)
+	candidate, candidateErr := definitionAdmissionCandidate(workspace, goal, dod, template)
+	if candidateErr != nil {
+		t.Fatalf("conflicting candidate authoring err=%v", candidateErr)
+	}
+	blocked, compileErr := definitionadmission.Compile(candidate)
+	if compileErr != nil || blocked.Disposition != workspacemodel.DefinitionAdmissionClarificationRequired || blocked.ViolationCode != workspacemodel.DefinitionAdmissionProfileContractInvalid {
+		t.Fatalf("conflicting exact/wildcard repair declarations were not blocked before Run: result=%+v err=%v", blocked, compileErr)
+	}
+}
+
+func TestDefinitionAdmissionRejectsValidationRepairNonObjectAlternativeAndDuplicateShapesBeforeRuntimeWork(t *testing.T) {
+	validRepair := func() map[string]any {
+		return map[string]any{
+			"id": "dod-validation-repair", "triggerOwnerModuleId": "blocks/shell", "triggerOperationKind": "validation/managed_session",
+			"triggerDiagnosticClasses": []any{"validation_test_failed"},
+			"repairEvidenceKind":       "state_change", "repairOwnerModuleId": "blocks/file", "repairOperationKinds": []any{"file/write"},
+			"repairTargetPolicy": "prospective_owner_target", "repairTargetRole": "deliverable_implementation",
+			"repairDeclarationTargetSelectorRef": "file/workspace_deliverable", "repairDeclarationTargetSelectorOwnerRef": "software-dev",
+			"repairDeclarationTargetSelectorSubjectRef": "dodItem_repair", "repairOperationTargetSelectorRef": "workspace-relative-new-file-target",
+			"requireFreshValidation": true, "maxAttempts": 2,
+		}
+	}
+	cloneMap := func(input map[string]any) map[string]any {
+		ret := make(map[string]any, len(input))
+		for key, value := range input {
+			ret[key] = value
+		}
+		return ret
+	}
+	compile := func(t *testing.T, requirements []any) workspacemodel.DefinitionAdmissionResult {
+		t.Helper()
+		hints, err := workorcheventpayload.FromMap(map[string]any{"profileContracts": map[string]any{"software-dev": map[string]any{
+			"evidenceRequirements": requirements,
+		}}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		workspace := &workspacemodel.Workspace{ID: "workspace-strict-repair-admission", DeliverableDirectory: "/workspace", TemplateID: "software-dev"}
+		goal := &workspacemodel.Goal{ID: "goal-strict-repair-admission", WorkspaceID: workspace.ID, Text: "implement behavior", DefinitionRevision: "goal-r1"}
+		dod := &workspacemodel.DoD{ID: "dod-strict-repair-admission", WorkspaceID: workspace.ID, Items: []string{"behavior passes validation"}, DefinitionRevision: "dod-r1"}
+		template := &workspacemodel.WorkspaceTemplate{ID: workspace.TemplateID, Name: "software dev", ContextHints: hints}
+		candidate, err := definitionAdmissionCandidate(workspace, goal, dod, template)
+		if err != nil {
+			t.Fatalf("candidate authoring must preserve malformed current input for typed admission: %v", err)
+		}
+		result, err := definitionadmission.Compile(candidate)
+		if err != nil {
+			t.Fatalf("compile malformed candidate: %v", err)
+		}
+		return result
+	}
+	newRequirement := func(repair any) map[string]any {
+		return map[string]any{
+			"id": "*", "scope": "dodItem", "requiredEvidenceKinds": []any{"validation"}, "acceptedStepKinds": []any{"validation/managed_session"},
+			"validationFailureRepairConvergence": repair,
+		}
+	}
+	withUnknown := func(key string, value any) map[string]any {
+		repair := cloneMap(validRepair())
+		repair[key] = value
+		return repair
+	}
+
+	for _, tc := range []struct {
+		name  string
+		value any
+	}{
+		{name: "array", value: []any{validRepair()}},
+		{name: "scalar", value: "validation-repair"},
+		{name: "null", value: nil},
+		{name: "empty object", value: map[string]any{}},
+		{name: "unknown key", value: withUnknown("unknownField", true)},
+		{name: "oneOf relation", value: withUnknown("oneOf", []any{validRepair()})},
+		{name: "anyOf relation", value: withUnknown("anyOf", []any{validRepair()})},
+		{name: "alternative relation", value: withUnknown("alternative", validRepair())},
+		{name: "legacy alias", value: withUnknown("repairTargetSelectorRef", "workspace-relative-new-file-target")},
+		{name: "fractional attempt budget", value: withUnknown("maxAttempts", 1.5)},
+		{name: "mixed diagnostic list", value: withUnknown("triggerDiagnosticClasses", []any{"validation_test_failed", 1})},
+		{name: "scalar optional selector candidates", value: withUnknown("repairDeclarationTargetSelectorCandidateRefs", "src/main.go")},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			result := compile(t, []any{newRequirement(tc.value)})
+			if result.Disposition != workspacemodel.DefinitionAdmissionClarificationRequired || result.ViolationCode != workspacemodel.DefinitionAdmissionProfileContractInvalid {
+				t.Fatalf("invalid repair shape escaped pre-seal admission: %+v", result)
+			}
+		})
+	}
+
+	t.Run("duplicate normalized scope and id", func(t *testing.T) {
+		first := newRequirement(validRepair())
+		second := newRequirement(validRepair())
+		second["id"] = " * "
+		second["scope"] = " dodItem "
+		result := compile(t, []any{first, second})
+		if result.Disposition != workspacemodel.DefinitionAdmissionClarificationRequired || result.ViolationCode != workspacemodel.DefinitionAdmissionProfileContractInvalid {
+			t.Fatalf("duplicate scope+id escaped pre-seal admission through last-wins normalization: %+v", result)
+		}
+	})
+}
+
+func TestDefinitionAdmissionSealsValidationRepairBudgetIntoStartupInputHash(t *testing.T) {
+	profile := func(maxAttempts int) map[string]any {
+		return map[string]any{"profileContracts": map[string]any{"software-dev": map[string]any{"evidenceRequirements": []any{map[string]any{
+			"id": "*", "scope": "dodItem", "requiredEvidenceKinds": []any{"validation"}, "acceptedStepKinds": []any{"validation/managed_session"},
+			"validationFailureRepairConvergence": map[string]any{
+				"id": "repair", "triggerOwnerModuleId": "blocks/shell", "triggerOperationKind": "validation/managed_session", "triggerDiagnosticClasses": []any{"validation_test_failed"},
+				"repairEvidenceKind": "state_change", "repairOwnerModuleId": "blocks/file", "repairOperationKinds": []any{"file/write"},
+				"repairTargetPolicy": "prospective_owner_target", "repairTargetRole": "implementation",
+				"repairDeclarationTargetSelectorRef": "file/workspace_deliverable", "repairDeclarationTargetSelectorOwnerRef": "software-dev", "repairDeclarationTargetSelectorSubjectRef": "dodItem_repair",
+				"repairOperationTargetSelectorRef": "workspace-relative-new-file-target", "requireFreshValidation": true, "maxAttempts": maxAttempts,
+			},
+		}}}}}
+	}
+	compile := func(maxAttempts int) workspacemodel.WorkspaceStartupInputContract {
+		hints, err := workorcheventpayload.FromMap(profile(maxAttempts))
+		if err != nil {
+			t.Fatal(err)
+		}
+		workspace := &workspacemodel.Workspace{ID: "workspace-repair-hash", DeliverableDirectory: "/workspace", TemplateID: "software-dev"}
+		goal := &workspacemodel.Goal{ID: "goal-repair-hash", WorkspaceID: workspace.ID, Text: "goal", DefinitionRevision: "goal-r1"}
+		dod := &workspacemodel.DoD{ID: "dod-repair-hash", WorkspaceID: workspace.ID, Items: []string{"done"}, DefinitionRevision: "dod-r1"}
+		template := &workspacemodel.WorkspaceTemplate{ID: workspace.TemplateID, Name: "software dev", ContextHints: hints}
+		candidate, err := definitionAdmissionCandidate(workspace, goal, dod, template)
+		if err != nil {
+			t.Fatal(err)
+		}
+		result, err := definitionadmission.Compile(candidate)
+		if err != nil || result.Disposition != workspacemodel.DefinitionAdmissionAdmittedAllOf {
+			t.Fatalf("repair hash admission = %+v err=%v", result, err)
+		}
+		return startupInputForActivationPortTest(candidate)
+	}
+	first, second := compile(1), compile(2)
+	if first.StartupInputHash == second.StartupInputHash {
+		t.Fatal("validation repair budget drift did not change StartupInputHash")
 	}
 }
 

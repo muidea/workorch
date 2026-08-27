@@ -1,6 +1,7 @@
 package llm
 
 import (
+	llmmodels "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
@@ -266,11 +267,12 @@ func buildRuntimeCandidateExecutionTailProjection(
 	attempt int,
 	previousFailure *runtimecontract.RuntimeCandidateFailure,
 	manifest runtimecontract.RuntimeCandidateContractManifest,
+	correction *llmmodels.RuntimeCandidateCorrectionInput,
 ) runtimeCandidateExecutionTailProjection {
 	context = context.Normalized()
 	return runtimeCandidateExecutionTailProjection{
 		Attempt:                   attempt,
-		Retry:                     runtimeCandidateRetryForManifest(attempt, previousFailure, manifest),
+		Retry:                     runtimeCandidateRetryForManifest(attempt, previousFailure, manifest, correction),
 		Failure:                   runtimeProviderSafeFailure(context.Failure),
 		AcceptedEvidence:          runtimeProviderSafeEvidence(latestRuntimeEvidence(context.Evidence.Accepted)),
 		RejectedEvidence:          runtimeProviderSafeEvidence(latestRuntimeEvidence(context.Evidence.Rejected)),

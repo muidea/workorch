@@ -340,7 +340,17 @@ func reduceDeterminedFailure(base runtimecontract.RuntimeDecision, facts runtime
 	case runtimecontract.FailureClassProviderSubmissionUnknown:
 		return terminalDecision(base, runtimecontract.ConvergenceStateFailed, "provider_submission_unknown", failure.Message), true, nil
 	case runtimecontract.FailureClassCandidateExhausted:
-		return terminalDecision(base, runtimecontract.ConvergenceStateFailed, "candidate_retry_exhausted", failure.Message), true, nil
+		// SM-3 has already sealed the total candidate disposition. Preserve only
+		// the two typed exhaustion outcomes; unknown codes fail closed instead of
+		// being reinterpreted from diagnostic text as a retry exhaustion.
+		switch strings.TrimSpace(failure.Code) {
+		case "candidate_authority_exhausted":
+			return terminalDecision(base, runtimecontract.ConvergenceStateFailed, "candidate_authority_exhausted", failure.Message), true, nil
+		case "candidate_retry_exhausted":
+			return terminalDecision(base, runtimecontract.ConvergenceStateFailed, "candidate_retry_exhausted", failure.Message), true, nil
+		default:
+			return terminalDecision(base, runtimecontract.ConvergenceStateFailed, "runtime_contract_defect", failure.Message), true, nil
+		}
 	case runtimecontract.FailureClassCandidateDocumentRecoveryExhausted:
 		return terminalDecision(base, runtimecontract.ConvergenceStateFailed, "candidate_document_recovery_exhausted", failure.Message), true, nil
 	case runtimecontract.FailureClassCandidateInfeasible:

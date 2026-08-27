@@ -43,8 +43,9 @@ type RuntimeSemanticOwnerFactAcquisition struct {
 type RuntimeSemanticEvidenceObligationPurpose string
 
 const (
-	RuntimeSemanticEvidenceObligationDefinitionProof      RuntimeSemanticEvidenceObligationPurpose = "definition_proof"
-	RuntimeSemanticEvidenceObligationOwnerFactAcquisition RuntimeSemanticEvidenceObligationPurpose = "owner_fact_acquisition"
+	RuntimeSemanticEvidenceObligationDefinitionProof         RuntimeSemanticEvidenceObligationPurpose = "definition_proof"
+	RuntimeSemanticEvidenceObligationOwnerFactAcquisition    RuntimeSemanticEvidenceObligationPurpose = "owner_fact_acquisition"
+	RuntimeSemanticEvidenceObligationValidationFailureRepair RuntimeSemanticEvidenceObligationPurpose = "validation_failure_repair"
 )
 
 // RuntimeSemanticEvidenceObligation is the single derived source of truth for
@@ -79,6 +80,10 @@ func ResolveRuntimeSemanticEvidenceObligation(obligation RuntimeSemanticProofObl
 	}
 	if obligation.OwnerFactAcquisition != nil {
 		ret.Purpose = RuntimeSemanticEvidenceObligationOwnerFactAcquisition
+		ret.CurrentRequiredEvidenceKinds = []string{EvidenceKindStateChange}
+	}
+	if obligation.ValidationFailureRepair != nil {
+		ret.Purpose = RuntimeSemanticEvidenceObligationValidationFailureRepair
 		ret.CurrentRequiredEvidenceKinds = []string{EvidenceKindStateChange}
 	}
 	return ret, nil
@@ -180,6 +185,7 @@ type RuntimeSemanticProofObligation struct {
 	MetricConstraints                      []string
 	ArtifactRefs                           []string
 	OwnerFactAcquisition                   *RuntimeSemanticOwnerFactAcquisition
+	ValidationFailureRepair                *RuntimeSemanticValidationFailureRepair
 }
 
 func (o RuntimeSemanticProofObligation) Normalized() RuntimeSemanticProofObligation {
@@ -199,6 +205,10 @@ func (o RuntimeSemanticProofObligation) Normalized() RuntimeSemanticProofObligat
 		value := o.OwnerFactAcquisition.Normalized()
 		o.OwnerFactAcquisition = &value
 	}
+	if o.ValidationFailureRepair != nil {
+		value := o.ValidationFailureRepair.Normalized()
+		o.ValidationFailureRepair = &value
+	}
 	return o
 }
 
@@ -215,6 +225,7 @@ func (o RuntimeSemanticProofObligation) Clone() RuntimeSemanticProofObligation {
 		value := o.OwnerFactAcquisition.Clone()
 		o.OwnerFactAcquisition = &value
 	}
+	o.ValidationFailureRepair = cloneRuntimeSemanticValidationFailureRepair(o.ValidationFailureRepair)
 	return o
 }
 
@@ -243,6 +254,17 @@ func (o RuntimeSemanticProofObligation) Validate() error {
 			o.OwnerFactAcquisition.DeclarationTargetSelectorOwnerRef != o.DeclarationTargetSelectorOwnerRef ||
 			o.OwnerFactAcquisition.DeclarationTargetSelectorSubjectRef != o.DeclarationTargetSelectorSubjectRef {
 			return fmt.Errorf("runtime semantic owner-fact acquisition declaration does not match proof obligation")
+		}
+	}
+	if o.OwnerFactAcquisition != nil && o.ValidationFailureRepair != nil {
+		return fmt.Errorf("runtime semantic proof obligation cannot acquire an owner fact and repair a validation failure in one generation")
+	}
+	if o.ValidationFailureRepair != nil {
+		if len(o.RequiredEvidenceKinds) != 1 || o.RequiredEvidenceKinds[0] != EvidenceKindValidation {
+			return fmt.Errorf("runtime semantic validation repair must preserve validation-only terminal evidence")
+		}
+		if err := o.ValidationFailureRepair.Validate(); err != nil {
+			return err
 		}
 	}
 	return nil
@@ -285,7 +307,8 @@ func sameRuntimeSemanticProofObligations(left, right []RuntimeSemanticProofOblig
 			!sameRuntimeOwnerFactRequirements(l.RequiredOwnerFacts, r.RequiredOwnerFacts) ||
 			!SameRuntimeOwnerFactConvergences(l.OwnerFactConvergences, r.OwnerFactConvergences) ||
 			!sameStrings(l.MetricConstraints, r.MetricConstraints) || !sameStrings(l.ArtifactRefs, r.ArtifactRefs) ||
-			!sameRuntimeSemanticOwnerFactAcquisition(l.OwnerFactAcquisition, r.OwnerFactAcquisition) {
+			!sameRuntimeSemanticOwnerFactAcquisition(l.OwnerFactAcquisition, r.OwnerFactAcquisition) ||
+			!sameRuntimeSemanticValidationFailureRepair(l.ValidationFailureRepair, r.ValidationFailureRepair) {
 			return false
 		}
 	}
@@ -323,9 +346,15 @@ func sameRuntimeProspectiveTargetSatisfactionConstraints(left, right *RuntimePro
 	return StableRuntimeProspectiveTargetSatisfactionConstraintHash(*left) == StableRuntimeProspectiveTargetSatisfactionConstraintHash(*right)
 }
 
-func runtimeSemanticProofObligationSourceFocus(o RuntimeSemanticProofObligation) CoverageFocus {
+func runtimeSemanticProofObligationDefinitionSource(o RuntimeSemanticProofObligation) RuntimeDefinitionFocus {
 	o = o.Normalized()
-	return CoverageFocus{
+	return RuntimeDefinitionFocus{
+		ID: func() string {
+			if o.ValidationFailureRepair == nil {
+				return ""
+			}
+			return o.ValidationFailureRepair.Normalized().FailedFocusID
+		}(),
 		CoverageWorkItemIDs:         []common.CoverageWorkItemID{o.CoverageWorkItemID},
 		RequiredEvidenceKinds:       append([]string(nil), o.RequiredEvidenceKinds...),
 		TargetRole:                  o.DeclarationTargetRole,
@@ -338,9 +367,33 @@ func runtimeSemanticProofObligationSourceFocus(o RuntimeSemanticProofObligation)
 		RequireAssessment:           o.RequireAssessment,
 		RequiredOwnerFacts:          append([]RuntimeOwnerFactRequirement(nil), o.RequiredOwnerFacts...),
 		OwnerFactConvergences:       CloneRuntimeOwnerFactConvergences(o.OwnerFactConvergences),
-		MetricConstraints:           append([]string(nil), o.MetricConstraints...),
-		ArtifactRefs:                append([]string(nil), o.ArtifactRefs...),
+		ValidationFailureRepairConvergence: func() *RuntimeValidationFailureRepairConvergence {
+			if o.ValidationFailureRepair == nil {
+				return nil
+			}
+			value := o.ValidationFailureRepair.convergence()
+			return &value
+		}(),
+		MetricConstraints: append([]string(nil), o.MetricConstraints...),
+		ArtifactRefs:      append([]string(nil), o.ArtifactRefs...),
 	}.Normalized()
+}
+
+func runtimeSemanticProofObligationSourceFocus(o RuntimeSemanticProofObligation) CoverageFocus {
+	o = o.Normalized()
+	focus := runtimeSemanticProofObligationDefinitionSource(o).CoverageFocusDeclaration()
+	if o.ValidationFailureRepair == nil {
+		return focus
+	}
+	repair := o.ValidationFailureRepair.Normalized()
+	focus.RequiredEvidenceKinds = []string{EvidenceKindStateChange}
+	focus.TargetRole = repair.RepairTargetRole
+	focus.TargetSelectorRef = repair.RepairDeclarationTargetSelectorRef
+	focus.TargetSelectorOwnerRef = repair.RepairDeclarationTargetSelectorOwnerRef
+	focus.TargetSelectorSubjectRef = repair.RepairDeclarationTargetSelectorSubjectRef
+	focus.TargetSelectorCandidateRefs = append([]string(nil), repair.RepairDeclarationTargetSelectorCandidateRefs...)
+	focus.AcceptedStepKinds = append([]string(nil), repair.RepairOperationKinds...)
+	return focus.Normalized()
 }
 
 func writeRuntimeSemanticProofObligationsHash(h hashStringWriter, values []RuntimeSemanticProofObligation) {
@@ -384,30 +437,35 @@ func writeRuntimeSemanticProofObligationsHash(h hashStringWriter, values []Runti
 		writeHashStrings(h, value.ArtifactRefs)
 		if value.OwnerFactAcquisition == nil {
 			writeHashString(h, "no-owner-fact-acquisition")
-			continue
-		}
-		acquisition := value.OwnerFactAcquisition.Normalized()
-		writeHashString(h, RuntimeOwnerFactRequirementRef(acquisition.Requirement))
-		writeHashString(h, acquisition.ProspectiveSatisfactionContractRef)
-		if acquisition.ProspectiveTargetSatisfactionConstraint == nil {
-			writeHashString(h, "no-prospective-target-satisfaction-constraint")
 		} else {
-			writeHashString(h, StableRuntimeProspectiveTargetSatisfactionConstraintHash(*acquisition.ProspectiveTargetSatisfactionConstraint))
+			acquisition := value.OwnerFactAcquisition.Normalized()
+			writeHashString(h, RuntimeOwnerFactRequirementRef(acquisition.Requirement))
+			writeHashString(h, acquisition.ProspectiveSatisfactionContractRef)
+			if acquisition.ProspectiveTargetSatisfactionConstraint == nil {
+				writeHashString(h, "no-prospective-target-satisfaction-constraint")
+			} else {
+				writeHashString(h, StableRuntimeProspectiveTargetSatisfactionConstraintHash(*acquisition.ProspectiveTargetSatisfactionConstraint))
+			}
+			writeHashString(h, acquisition.DeclarationTargetSelectorRef)
+			writeHashString(h, acquisition.DeclarationTargetSelectorOwnerRef)
+			writeHashString(h, acquisition.DeclarationTargetSelectorSubjectRef)
+			writeHashString(h, acquisition.AcquisitionOwnerModuleID)
+			writeHashString(h, acquisition.AcquisitionOperationKind)
+			writeHashString(h, acquisition.AcquisitionOperationVariantID)
+			writeHashString(h, string(acquisition.AcquisitionTargetPolicy))
+			writeHashString(h, acquisition.AcquisitionTargetSelectorRef)
+			writeHashStrings(h, acquisition.AcquisitionConstraintRefs)
+			writeHashString(h, acquisition.OwnerCatalogSnapshotID)
+			writeHashString(h, acquisition.OwnerCatalogObservedRevision)
+			writeHashString(h, acquisition.ReobserveOwnerModuleID)
+			writeHashString(h, string(acquisition.ReobserveFactKind))
+			writeHashString(h, strconv.Itoa(acquisition.MaxAcquisitionAttempts))
 		}
-		writeHashString(h, acquisition.DeclarationTargetSelectorRef)
-		writeHashString(h, acquisition.DeclarationTargetSelectorOwnerRef)
-		writeHashString(h, acquisition.DeclarationTargetSelectorSubjectRef)
-		writeHashString(h, acquisition.AcquisitionOwnerModuleID)
-		writeHashString(h, acquisition.AcquisitionOperationKind)
-		writeHashString(h, acquisition.AcquisitionOperationVariantID)
-		writeHashString(h, string(acquisition.AcquisitionTargetPolicy))
-		writeHashString(h, acquisition.AcquisitionTargetSelectorRef)
-		writeHashStrings(h, acquisition.AcquisitionConstraintRefs)
-		writeHashString(h, acquisition.OwnerCatalogSnapshotID)
-		writeHashString(h, acquisition.OwnerCatalogObservedRevision)
-		writeHashString(h, acquisition.ReobserveOwnerModuleID)
-		writeHashString(h, string(acquisition.ReobserveFactKind))
-		writeHashString(h, strconv.Itoa(acquisition.MaxAcquisitionAttempts))
+		if value.ValidationFailureRepair == nil {
+			writeHashString(h, "no-validation-failure-repair")
+		} else {
+			writeHashString(h, StableRuntimeSemanticValidationFailureRepairHash(*value.ValidationFailureRepair))
+		}
 	}
 }
 

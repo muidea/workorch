@@ -71,6 +71,14 @@ func (m *Biz) requestAndSealRuntimeCandidate(
 			Signature: "runtime-candidate-manifest-invalid", Message: manifestErr.Error(),
 		})
 	}
+	if candidateAttempt == 1 {
+		if err := runtime.ValidatePersistedCandidateCorrection(aggregate, manifest); err != nil {
+			return m.runtimeRecordFailure(ctx, aggregate, runtimecontract.FailureFact{
+				Class: runtimecontract.FailureClassCandidateExhausted, Code: "candidate_authority_exhausted",
+				Signature: "candidate-authority-exhausted", Message: err.Error(),
+			})
+		}
+	}
 	// This is the persisted-authority half of the P0/P2/P4 preflight. It runs
 	// before BeginRuntimeCandidateAttempt so an internally incomplete sealed
 	// context cannot spend the model correction budget. The LLM Block performs
@@ -100,11 +108,15 @@ func (m *Biz) requestAndSealRuntimeCandidate(
 			if previousErr != nil {
 				return runtime.RuntimeAggregate{}, previousErr
 			}
+			correctionDirective, correctionErr := runtimePreviousCandidateCorrection(aggregate, candidateAttempt)
+			if correctionErr != nil {
+				return runtime.RuntimeAggregate{}, correctionErr
+			}
 			preflight, preflightErr := PreflightRuntimeCandidate(ctx, m.EventHub(), llmevents.PreflightRuntimeCandidateCommand{
 				WorkspaceID: aggregate.Facts.WorkspaceID, RunID: aggregate.Facts.RunID,
 				DocumentKind: runtimecontract.RuntimeProviderDocumentOperations,
 				Decision:     aggregate.Decision, Transaction: aggregate.Decision.AuthorityTransaction(), CandidateAttempt: candidateAttempt,
-				PreviousFailure:  previousFailure,
+				PreviousFailure: previousFailure, CandidateCorrection: runtimeCandidateCorrectionInputFromDirective(correctionDirective),
 				StablePrefixHash: stablePrefixHash, CandidateManifest: manifest, DefinitionContext: aggregate.Definition, CandidateContext: candidateContext,
 			})
 			if preflightErr != nil {
@@ -185,7 +197,12 @@ func (m *Biz) requestRuntimeCandidateDocument(
 	if err := runtimecontract.ValidateRuntimeCandidateContractManifestForDecision(manifest, aggregate.Decision, runtimecontract.RuntimeCandidateManifestOwnerFactsFromContext(candidateContext)); err != nil {
 		return runtime.RuntimeAggregate{}, runtimecontract.RuntimeCandidate{}, false, err
 	}
-	correctionHash := runtimecontract.StableRuntimeCandidateRequestCorrectionHash(previousFailure)
+	correctionDirective, err := runtimePreviousCandidateCorrection(aggregate, candidateAttempt)
+	if err != nil {
+		return runtime.RuntimeAggregate{}, runtimecontract.RuntimeCandidate{}, false, err
+	}
+	correctionInput := runtimeCandidateCorrectionInputFromDirective(correctionDirective)
+	correctionHash := correctionInput.StableRequestCorrectionHash(previousFailure)
 	expected := runtimeOperationsExpectedDocument(aggregate, manifest.Hash, candidateAttempt)
 	ensured, session, err := m.runtimeEnsureCandidateRequestWithExpected(ctx, aggregate, runtimecontract.RuntimeProviderDocumentOperations, stablePrefixHash, manifest.Hash, correctionHash, expected)
 	if err != nil {
@@ -214,7 +231,8 @@ func (m *Biz) requestRuntimeCandidateDocument(
 		RequestIdentity:  requestIdentity,
 		ExpectedDocument: session.ExpectedDocument,
 		Decision:         aggregate.Decision, Transaction: aggregate.Decision.AuthorityTransaction(), CandidateAttempt: candidateAttempt,
-		PreviousFailure: previousFailure, StablePrefixHash: stablePrefixHash, CandidateManifest: manifest, DefinitionContext: aggregate.Definition,
+		PreviousFailure: previousFailure, CandidateCorrection: correctionInput,
+		StablePrefixHash: stablePrefixHash, CandidateManifest: manifest, DefinitionContext: aggregate.Definition,
 		CandidateContext: candidateContext,
 	})
 	if requestErr != nil {
@@ -743,6 +761,33 @@ func runtimePreviousCandidateFailure(aggregate runtime.RuntimeAggregate, candida
 	return nil, fmt.Errorf("runtime candidate retry has no first attempt failure")
 }
 
+func runtimePreviousCandidateAttemptRecord(aggregate runtime.RuntimeAggregate, candidateAttempt int) (runtimecontract.RuntimeCandidateAttemptRecord, error) {
+	if candidateAttempt != 1 {
+		return runtimecontract.RuntimeCandidateAttemptRecord{}, fmt.Errorf("runtime candidate correction record requires attempt 1")
+	}
+	contractID := runtimecontract.StableAuthorityContractID(aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, aggregate.Decision.AuthorityTransaction())
+	for _, record := range aggregate.CandidateAttempts {
+		if record.Attempt == 0 && runtimecontract.CandidateAttemptAuthorityContractID(aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, record) == contractID {
+			return record, nil
+		}
+	}
+	return runtimecontract.RuntimeCandidateAttemptRecord{}, fmt.Errorf("runtime candidate retry has no first attempt record")
+}
+
+func runtimePreviousCandidateCorrection(aggregate runtime.RuntimeAggregate, candidateAttempt int) (*runtimecontract.RuntimeCandidateCorrectionDirective, error) {
+	if candidateAttempt == 0 {
+		return nil, nil
+	}
+	record, err := runtimePreviousCandidateAttemptRecord(aggregate, candidateAttempt)
+	if err != nil {
+		return nil, err
+	}
+	if !runtime.CandidateAttemptIsCorrectableOnce(record) {
+		return nil, fmt.Errorf("runtime candidate retry has no valid persisted correction directive")
+	}
+	return record.Correction.Clone(), nil
+}
+
 // runtimeCandidateSchemaFailure preserves the decoder's provider-safe,
 // manifest-derived diagnostic for the persisted SM-3 attempt. The retry
 // policy remains in requestAndSealRuntimeCandidateWithRetry; this helper
@@ -805,28 +850,21 @@ func (m *Biz) requestAndSealRuntimeCandidateWithRetry(
 			return runtime.RuntimeAggregate{}, fmt.Errorf("%w: no candidate attempt is available for authority snapshot %s contract %s", common.ErrConflict, aggregate.Decision.AuthoritySnapshot.ID, runtimecontract.StableAuthorityContractID(aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, aggregate.Decision.AuthorityTransaction()))
 		}
 		if attempt == 1 {
-			failure, failureErr := runtimePreviousCandidateFailure(aggregate, attempt)
-			if failureErr != nil {
-				return runtime.RuntimeAggregate{}, failureErr
+			first, firstErr := runtimePreviousCandidateAttemptRecord(aggregate, attempt)
+			if firstErr != nil {
+				return runtime.RuntimeAggregate{}, firstErr
 			}
-			// N4: complete rejections are sealed as correctable_once or
-			// rejected_final. Missing objectives are runtime_contract_defect,
-			// never candidate_correction_undefined.
-			if !runtime.CandidateFailureIsCorrectableOnce(failure) {
-				sealed, directive, sealErr := runtime.SealCandidateRejection(failure, runtimecontract.RuntimeCandidateContractManifest{})
-				if sealErr != nil {
-					return runtime.RuntimeAggregate{}, sealErr
-				}
+			if !runtime.CandidateAttemptIsCorrectableOnce(first) {
 				code := "runtime_contract_defect"
-				message := "complete candidate rejection is not correctable under the sealed manifest"
-				if directive != nil && directive.TerminalCode != "" {
-					code = directive.TerminalCode
+				message := "complete candidate rejection has no manifest-bound correction witness"
+				if first.Correction != nil && first.Correction.TerminalCode != "" {
+					code = first.Correction.TerminalCode
 				}
-				if sealed != nil && strings.TrimSpace(sealed.Reason) != "" {
-					message = sealed.Reason
+				if first.Failure != nil && strings.TrimSpace(first.Failure.Reason) != "" {
+					message = first.Failure.Reason
 				}
 				class := runtimecontract.FailureClassRuntimeContractMisalignment
-				if code == "candidate_retry_exhausted" {
+				if code == "candidate_retry_exhausted" || code == "candidate_authority_exhausted" {
 					class = runtimecontract.FailureClassCandidateExhausted
 				}
 				return m.runtimeRecordFailure(ctx, aggregate, runtimecontract.FailureFact{

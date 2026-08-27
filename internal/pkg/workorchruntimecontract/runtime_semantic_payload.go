@@ -652,6 +652,42 @@ func attachRuntimeSemanticProofObligationSchema(items map[string]any, manifest R
 		if !found {
 			return fmt.Errorf("runtime semantic proof-batch coverage %q has no sealed proof obligation", coverageID)
 		}
+		if obligation.ValidationFailureRepair != nil {
+			repair := obligation.ValidationFailureRepair.Normalized()
+			targetRequired := []string{"policy", "ownerSelectorRefs"}
+			targetProperties := map[string]any{
+				"policy":            map[string]any{"const": string(repair.RepairTargetPolicy)},
+				"ownerSelectorRefs": exactStringArraySchema([]string{repair.RepairOperationTargetSelectorRef}),
+			}
+			if repair.RepairTargetPolicy == RuntimeOperationTargetPolicyProspectiveOwnerTarget {
+				targetRequired = append(targetRequired, "prospectiveConstraintRefs", "prospectiveTargetRefs")
+				targetProperties["prospectiveConstraintRefs"] = exactStringArraySchema(repair.RepairConstraintRefs)
+				itemSchema := map[string]any{"type": "string", "minLength": 1, "maxLength": 65536}
+				if len(repair.RepairDeclarationTargetSelectorCandidateRefs) == 1 {
+					itemSchema["const"] = repair.RepairDeclarationTargetSelectorCandidateRefs[0]
+				} else if len(repair.RepairDeclarationTargetSelectorCandidateRefs) > 1 {
+					itemSchema["enum"] = append([]string(nil), repair.RepairDeclarationTargetSelectorCandidateRefs...)
+				}
+				maxItems := RuntimeProspectiveTargetRefsMaxCount
+				if len(repair.RepairDeclarationTargetSelectorCandidateRefs) > 0 && len(repair.RepairDeclarationTargetSelectorCandidateRefs) < maxItems {
+					maxItems = len(repair.RepairDeclarationTargetSelectorCandidateRefs)
+				}
+				targetProperties["prospectiveTargetRefs"] = map[string]any{
+					"type": "array", "minItems": 1, "maxItems": maxItems, "uniqueItems": true, "items": itemSchema,
+				}
+			}
+			allOf = append(allOf, map[string]any{
+				"if": map[string]any{"properties": map[string]any{"coverageWorkItemId": map[string]any{"const": string(coverageID)}}},
+				"then": map[string]any{"properties": map[string]any{
+					"ownerModuleId":         map[string]any{"const": repair.RepairOwnerModuleID},
+					"operationKind":         map[string]any{"enum": repair.RepairOperationKinds},
+					"requiredEvidenceKinds": exactStringArraySchema([]string{EvidenceKindStateChange}),
+					"declarationRef":        map[string]any{"const": repair.ConvergenceID},
+					"target":                map[string]any{"required": targetRequired, "properties": targetProperties},
+				}},
+			})
+			continue
+		}
 		if obligation.OwnerFactAcquisition == nil {
 			continue
 		}

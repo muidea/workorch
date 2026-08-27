@@ -7,6 +7,18 @@ import (
 	"github.com/muidea/workorch/internal/pkg/common"
 )
 
+func runtimeCandidateAttemptCorrectableDirective(manifestHash string) *RuntimeCandidateCorrectionDirective {
+	return (&RuntimeCandidateCorrectionDirective{
+		Disposition:  RuntimeCandidateCorrectionCorrectableOnce,
+		Objectives:   []RuntimeCandidateCorrectionObjective{RuntimeCandidateCorrectionSupplyRequiredField},
+		ManifestHash: manifestHash,
+		Witness: &RuntimeCandidateCorrectionWitness{
+			Dimension: RuntimeCandidateCorrectionWitnessSchemaField,
+			Path:      "$.operations", RejectedValue: "field_absent", AlternativeValue: "field_present",
+		},
+	}).Clone()
+}
+
 func TestRuntimeCandidateAttemptScopeValidationRequiresExplicitContractAndRejectsDuplicate(t *testing.T) {
 	facts := testRuntimeFacts()
 	decision := validDecisionForState(ConvergenceStateNeedStateChange)
@@ -15,7 +27,7 @@ func TestRuntimeCandidateAttemptScopeValidationRequiresExplicitContractAndReject
 	contractID := StableAuthorityContractID(facts.WorkspaceID, facts.RunID, current)
 	failure := &RuntimeCandidateFailure{Class: RuntimeCandidateFailureClassContract, Reason: "invalid candidate"}
 	values := []RuntimeCandidateAttemptRecord{
-		{Transaction: resealed, Attempt: 0, StablePrefixHash: "stable-prefix", ManifestHash: "manifest-1", LogicalRequestID: "request-0", State: RuntimeCandidateAttemptStateFailed, Failure: failure},
+		{Transaction: resealed, Attempt: 0, StablePrefixHash: "stable-prefix", ManifestHash: "manifest-1", LogicalRequestID: "request-0", State: RuntimeCandidateAttemptStateFailed, Failure: failure, Correction: runtimeCandidateAttemptCorrectableDirective("manifest-1")},
 		{AuthorityContractID: contractID, Transaction: current, Attempt: 1, StablePrefixHash: "stable-prefix", ManifestHash: "manifest-1", LogicalRequestID: "request-1", State: RuntimeCandidateAttemptStatePending},
 	}
 	if err := ValidateRuntimeCandidateAttemptRecordsForScope(facts.WorkspaceID, facts.RunID, values); err == nil {
@@ -29,11 +41,35 @@ func TestRuntimeCandidateAttemptScopeValidationRequiresExplicitContractAndReject
 	duplicate.AuthoritySnapshotID = "duplicate-snapshot"
 	duplicate.Attempt = 1
 	values = []RuntimeCandidateAttemptRecord{
-		{AuthorityContractID: contractID, Transaction: current, Attempt: 0, StablePrefixHash: "stable-prefix", ManifestHash: "manifest-1", LogicalRequestID: "request-0", State: RuntimeCandidateAttemptStateFailed, Failure: failure},
-		{AuthorityContractID: contractID, Transaction: duplicate, Attempt: 0, StablePrefixHash: "stable-prefix", ManifestHash: "manifest-1", LogicalRequestID: "request-duplicate", State: RuntimeCandidateAttemptStateFailed, Failure: failure},
+		{AuthorityContractID: contractID, Transaction: current, Attempt: 0, StablePrefixHash: "stable-prefix", ManifestHash: "manifest-1", LogicalRequestID: "request-0", State: RuntimeCandidateAttemptStateFailed, Failure: failure, Correction: runtimeCandidateAttemptCorrectableDirective("manifest-1")},
+		{AuthorityContractID: contractID, Transaction: duplicate, Attempt: 0, StablePrefixHash: "stable-prefix", ManifestHash: "manifest-1", LogicalRequestID: "request-duplicate", State: RuntimeCandidateAttemptStateFailed, Failure: failure, Correction: runtimeCandidateAttemptCorrectableDirective("manifest-1")},
 	}
 	if err := ValidateRuntimeCandidateAttemptRecordsForScope(facts.WorkspaceID, facts.RunID, values); err == nil {
 		t.Fatal("new duplicate attempt 0 was accepted across snapshots")
+	}
+}
+
+func TestRuntimeCandidateAttemptFailedRequiresManifestBoundTotalCorrection(t *testing.T) {
+	facts := testRuntimeFacts()
+	transaction := validDecisionForState(ConvergenceStateNeedStateChange).AuthorityTransaction()
+	record := RuntimeCandidateAttemptRecord{
+		AuthorityContractID: StableAuthorityContractID(facts.WorkspaceID, facts.RunID, transaction), Transaction: transaction,
+		Attempt: 0, StablePrefixHash: "stable-prefix", ManifestHash: "manifest-1", LogicalRequestID: "request-0",
+		State:   RuntimeCandidateAttemptStateFailed,
+		Failure: &RuntimeCandidateFailure{Class: RuntimeCandidateFailureClassContract, Code: "candidate_schema_invalid", Reason: "missing operations"},
+	}
+	if err := ValidateRuntimeCandidateAttemptRecordsForScope(facts.WorkspaceID, facts.RunID, []RuntimeCandidateAttemptRecord{record}); err == nil || !strings.Contains(err.Error(), "total correction disposition") {
+		t.Fatalf("failed attempt without correction disposition err=%v", err)
+	}
+	record.Correction = runtimeCandidateAttemptCorrectableDirective(record.ManifestHash)
+	if err := ValidateRuntimeCandidateAttemptRecordsForScope(facts.WorkspaceID, facts.RunID, []RuntimeCandidateAttemptRecord{record}); err != nil {
+		t.Fatalf("manifest-bound correctable attempt rejected: %v", err)
+	}
+	state := RuntimeStateRecord{CandidateAttempts: []RuntimeCandidateAttemptRecord{record}}
+	clone := state.Clone()
+	record.Correction.Witness.AlternativeValue = "mutated"
+	if clone.CandidateAttempts[0].Correction == nil || clone.CandidateAttempts[0].Correction.Witness == nil || clone.CandidateAttempts[0].Correction.Witness.AlternativeValue != "field_present" {
+		t.Fatalf("candidate correction witness clone shares mutable state: %+v", clone.CandidateAttempts[0].Correction)
 	}
 }
 
@@ -97,7 +133,7 @@ func TestRuntimeCandidateAttemptScopeValidationRejectsRunawayAttempts(t *testing
 		resealed.Attempt = attempt
 		values = append(values, RuntimeCandidateAttemptRecord{
 			AuthorityContractID: contractID, Transaction: resealed, Attempt: 0, StablePrefixHash: "stable-prefix", ManifestHash: "manifest-1", LogicalRequestID: "request-runaway",
-			State: RuntimeCandidateAttemptStateFailed, Failure: failure,
+			State: RuntimeCandidateAttemptStateFailed, Failure: failure, Correction: runtimeCandidateAttemptCorrectableDirective("manifest-1"),
 		})
 	}
 	if err := ValidateRuntimeCandidateAttemptRecordsForScope(facts.WorkspaceID, facts.RunID, values); err == nil {

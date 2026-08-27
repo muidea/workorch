@@ -1078,9 +1078,12 @@ func TestReduceRuntimeStateDeterminedTerminalFailureOverridesPendingPrerequisite
 	for _, tt := range []struct {
 		name         string
 		failureClass runtimecontract.FailureClass
+		failureCode  string
 		terminalCode string
 	}{
-		{name: "candidate retry exhausted", failureClass: runtimecontract.FailureClassCandidateExhausted, terminalCode: "candidate_retry_exhausted"},
+		{name: "candidate retry exhausted", failureClass: runtimecontract.FailureClassCandidateExhausted, failureCode: "candidate_retry_exhausted", terminalCode: "candidate_retry_exhausted"},
+		{name: "candidate authority exhausted", failureClass: runtimecontract.FailureClassCandidateExhausted, failureCode: "candidate_authority_exhausted", terminalCode: "candidate_authority_exhausted"},
+		{name: "candidate exhaustion code is undeclared", failureClass: runtimecontract.FailureClassCandidateExhausted, failureCode: "candidate_other_exhaustion", terminalCode: "runtime_contract_defect"},
 		{name: "runtime contract defect", failureClass: runtimecontract.FailureClassRuntimeContractMisalignment, terminalCode: "runtime_contract_defect"},
 		{name: "governance rejected", failureClass: runtimecontract.FailureClassGovernanceRejected, terminalCode: "governance_rejected"},
 	} {
@@ -1090,8 +1093,12 @@ func TestReduceRuntimeStateDeterminedTerminalFailureOverridesPendingPrerequisite
 				ID: "manifest:blocks/file", Kind: runtimecontract.PrerequisiteKindManifest,
 				OwnerModuleID: runtimecontract.RuntimeModuleFile, Reason: "fresh manifest required",
 			}}
+			failureCode := tt.failureCode
+			if failureCode == "" {
+				failureCode = tt.terminalCode
+			}
 			facts.Failure = &runtimecontract.FailureFact{
-				Class: tt.failureClass, Code: tt.terminalCode, Signature: tt.terminalCode,
+				Class: tt.failureClass, Code: failureCode, Signature: failureCode,
 				Message: "determined failure must close the current authority",
 			}
 

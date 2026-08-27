@@ -297,6 +297,9 @@ func BuildRuntimeCandidateContractManifest(decision RuntimeDecision, ownerFacts 
 		return RuntimeCandidateContractManifest{}, fmt.Errorf("convergence state %q does not accept a candidate manifest", decision.State)
 	}
 	manifest = manifest.Normalized()
+	if err := ValidateRuntimeCandidateOperationCorrectionMetadata(manifest); err != nil {
+		return RuntimeCandidateContractManifest{}, err
+	}
 	manifest.Hash = StableRuntimeCandidateContractManifestHash(manifest)
 	return manifest, nil
 }
@@ -311,6 +314,9 @@ func ValidateRuntimeCandidateContractManifestForDecision(manifest RuntimeCandida
 	if manifest.Revision != RuntimeCandidateContractManifestRevision || manifest.Hash == "" ||
 		manifest.Hash != StableRuntimeCandidateContractManifestHash(manifest) {
 		return fmt.Errorf("runtime candidate contract manifest is invalid")
+	}
+	if err := ValidateRuntimeCandidateOperationCorrectionMetadata(manifest); err != nil {
+		return fmt.Errorf("runtime candidate contract manifest correction metadata: %w", err)
 	}
 	expected, err := BuildRuntimeCandidateContractManifest(decision, ownerFacts)
 	if err != nil {
@@ -566,6 +572,7 @@ func StableRuntimeCandidateContractManifestHash(manifest RuntimeCandidateContrac
 			writeHashString(h, parameter.Name)
 			writeHashString(h, string(parameter.Type))
 			writeHashString(h, fmt.Sprintf("%t", parameter.Required))
+			writeHashString(h, string(parameter.CorrectionRole))
 			writeHashString(h, parameter.Description)
 		}
 		writeHashStrings(h, operation.RequireOneOfParameters)
@@ -704,7 +711,7 @@ func runtimeCandidateOperationManifestForKind(kind string, state ConvergenceStat
 			requireTargetRefs = true
 		}
 	}
-	return RuntimeCandidateOperationManifest{
+	operationManifest := RuntimeCandidateOperationManifest{
 		Kind:                        contract.Kind,
 		OwnerModuleID:               descriptor.OwnerModuleID,
 		AllowedOperationFields:      fields,
@@ -727,7 +734,11 @@ func runtimeCandidateOperationManifestForKind(kind string, state ConvergenceStat
 		AdmissibilitySnapshotRefs:   admissibilityRefs,
 		ValidationRecipes:           runtimeCandidateManifestValidationRecipes(contract.Kind, ownerFacts.ValidationRecipes, bindings, allowedBindingRefs),
 		OperationContractRevision:   contractRevision,
-	}.Normalized(), nil
+	}.Normalized()
+	if _, err := RuntimeOperationCorrectionFields(operationManifest); err != nil {
+		return RuntimeCandidateOperationManifest{}, fmt.Errorf("candidate manifest operation kind %q correction metadata: %w", kind, err)
+	}
+	return operationManifest, nil
 }
 
 func runtimeCandidateOperationBindingAuthorizations(required RequiredOutputContract, contract RuntimeOperationContract, bindings []CoverageEvidenceBinding, evidenceKind string) []RuntimeOperationBindingAuthorization {

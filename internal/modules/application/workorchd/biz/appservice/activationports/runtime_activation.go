@@ -2,6 +2,7 @@ package activationports
 
 import (
 	"fmt"
+	"math"
 	"sort"
 	"strings"
 
@@ -308,6 +309,8 @@ func runtimeExecutionContract(input map[string]any) runtimecontract.RuntimeExecu
 			contract.BootstrapRecipes = append(contract.BootstrapRecipes, recipe)
 		}
 		for _, item := range runtimeMapSlice(profile["evidenceRequirements"]) {
+			requirementID := runtimeString(item["id"])
+			requirementScope := runtimeString(item["scope"])
 			acceptedVariants := make([]runtimecontract.RuntimeOperationVariantRef, 0)
 			for _, variant := range runtimeMapSlice(item["acceptedOperationVariants"]) {
 				acceptedVariants = append(acceptedVariants, runtimecontract.RuntimeOperationVariantRef{Kind: runtimeString(variant["kind"]), VariantID: runtimeString(variant["variantId"])})
@@ -349,23 +352,25 @@ func runtimeExecutionContract(input map[string]any) runtimecontract.RuntimeExecu
 					DependsOnRequirementRefs:           runtimeStrings(convergence["dependsOnRequirementRefs"]),
 				})
 			}
+			validationFailureRepairConvergence := runtimeValidationFailureRepairConvergence(item)
 			contract.EvidenceRequirements = append(contract.EvidenceRequirements, runtimecontract.RuntimeProfileEvidenceRequirement{
-				ID: runtimeString(item["id"]), Scope: runtimeString(item["scope"]), EvidenceRole: runtimeString(item["evidenceRole"]),
+				ID: requirementID, Scope: requirementScope, EvidenceRole: runtimeString(item["evidenceRole"]),
 				TargetRole: runtimeString(item["targetRole"]), TargetRefs: runtimeStrings(item["targetRefs"]),
 				TargetDiscoverySources: runtimeStrings(item["targetDiscoverySources"]), TargetSelectorRef: runtimeString(item["targetSelectorRef"]), TargetSelectorOwnerRef: runtimeString(item["targetSelectorOwnerRef"]), TargetSelectorSubjectRef: runtimeString(item["targetSelectorSubjectRef"]), TargetSelectorCandidateRefs: runtimeStrings(item["targetSelectorCandidateRefs"]), RequireTargetGrounding: runtimeBool(item["requireTargetGrounding"]),
 				RequiredEvidenceKinds: runtimeStrings(item["requiredEvidenceKinds"]),
 				RequireDirectEvidence: runtimeBool(item["requireDirectEvidence"]), RequireClaimEvidence: runtimeBool(item["requireClaimEvidence"]),
 				RequireExecutableBehaviorEvidence: runtimeBool(item["requireExecutableBehaviorEvidence"]), RequireCoverageTargets: runtimeBool(item["requireCoverageTargets"]),
-				AcceptedStepKinds:           runtimeStrings(item["acceptedStepKinds"]),
-				AcceptedOperationVariants:   acceptedVariants,
-				ValidationRecipeID:          runtimeString(item["validationRecipeId"]),
-				RequiredCheckRefs:           runtimeStrings(item["requiredCheckRefs"]),
-				MetricConstraints:           runtimeStrings(item["metricConstraints"]),
-				ArtifactRefs:                runtimeStrings(item["artifactRefs"]),
-				RequiredOwnerFacts:          ownerFacts,
-				OwnerFactConvergences:       ownerFactConvergences,
-				CapabilityStateRequirements: stateRequirements,
-				RejectedStepKinds:           runtimeStrings(item["rejectedStepKinds"]), Description: runtimeString(item["description"]),
+				AcceptedStepKinds:                  runtimeStrings(item["acceptedStepKinds"]),
+				AcceptedOperationVariants:          acceptedVariants,
+				ValidationRecipeID:                 runtimeString(item["validationRecipeId"]),
+				RequiredCheckRefs:                  runtimeStrings(item["requiredCheckRefs"]),
+				MetricConstraints:                  runtimeStrings(item["metricConstraints"]),
+				ArtifactRefs:                       runtimeStrings(item["artifactRefs"]),
+				RequiredOwnerFacts:                 ownerFacts,
+				OwnerFactConvergences:              ownerFactConvergences,
+				ValidationFailureRepairConvergence: validationFailureRepairConvergence,
+				CapabilityStateRequirements:        stateRequirements,
+				RejectedStepKinds:                  runtimeStrings(item["rejectedStepKinds"]), Description: runtimeString(item["description"]),
 			})
 		}
 		ret.ProfileContracts = append(ret.ProfileContracts, contract)
@@ -421,6 +426,105 @@ func runtimeExecutionContract(input map[string]any) runtimecontract.RuntimeExecu
 		ret.TemplateStagePolicy = &stagePolicy
 	}
 	return ret.Normalized()
+}
+
+func runtimeValidationFailureRepairConvergence(input map[string]any) *runtimecontract.RuntimeValidationFailureRepairConvergence {
+	rawValue, present := input["validationFailureRepairConvergence"]
+	if !present {
+		return nil
+	}
+	raw, object := rawValue.(map[string]any)
+	if !object || !runtimeValidationFailureRepairConvergenceHasExactShape(raw) {
+		// Keep malformed current input visible to the typed admission compiler.
+		// Treating null, a scalar, an array, an empty object, an unknown field or
+		// an alternative relation as absence would otherwise admit a lossy
+		// profile after normalization.
+		return &runtimecontract.RuntimeValidationFailureRepairConvergence{}
+	}
+	return &runtimecontract.RuntimeValidationFailureRepairConvergence{
+		ID:                                           runtimeString(raw["id"]),
+		TriggerOwnerModuleID:                         runtimeString(raw["triggerOwnerModuleId"]),
+		TriggerOperationKind:                         runtimeString(raw["triggerOperationKind"]),
+		TriggerDiagnosticClasses:                     runtimeStrings(raw["triggerDiagnosticClasses"]),
+		RepairEvidenceKind:                           runtimeString(raw["repairEvidenceKind"]),
+		RepairOwnerModuleID:                          runtimeString(raw["repairOwnerModuleId"]),
+		RepairOperationKinds:                         runtimeStrings(raw["repairOperationKinds"]),
+		RepairTargetPolicy:                           runtimecontract.RuntimeOperationTargetPolicy(runtimeString(raw["repairTargetPolicy"])),
+		RepairTargetRole:                             runtimeString(raw["repairTargetRole"]),
+		RepairDeclarationTargetSelectorRef:           runtimeString(raw["repairDeclarationTargetSelectorRef"]),
+		RepairDeclarationTargetSelectorOwnerRef:      runtimeString(raw["repairDeclarationTargetSelectorOwnerRef"]),
+		RepairDeclarationTargetSelectorSubjectRef:    runtimeString(raw["repairDeclarationTargetSelectorSubjectRef"]),
+		RepairDeclarationTargetSelectorCandidateRefs: runtimeStrings(raw["repairDeclarationTargetSelectorCandidateRefs"]),
+		RepairOperationTargetSelectorRef:             runtimeString(raw["repairOperationTargetSelectorRef"]),
+		RequireFreshValidation:                       runtimeBool(raw["requireFreshValidation"]),
+		MaxAttempts:                                  runtimeInt(raw["maxAttempts"]),
+	}
+}
+
+func runtimeValidationFailureRepairConvergenceHasExactShape(raw map[string]any) bool {
+	if len(raw) == 0 {
+		return false
+	}
+	for key, value := range raw {
+		switch key {
+		case "id",
+			"triggerOwnerModuleId",
+			"triggerOperationKind",
+			"repairEvidenceKind",
+			"repairOwnerModuleId",
+			"repairTargetPolicy",
+			"repairTargetRole",
+			"repairDeclarationTargetSelectorRef",
+			"repairDeclarationTargetSelectorOwnerRef",
+			"repairDeclarationTargetSelectorSubjectRef",
+			"repairOperationTargetSelectorRef":
+			if _, ok := value.(string); !ok {
+				return false
+			}
+		case "triggerDiagnosticClasses", "repairOperationKinds", "repairDeclarationTargetSelectorCandidateRefs":
+			if !runtimeStringListHasExactShape(value) {
+				return false
+			}
+		case "requireFreshValidation":
+			if _, ok := value.(bool); !ok {
+				return false
+			}
+		case "maxAttempts":
+			if !runtimeIntegerHasExactShape(value) {
+				return false
+			}
+		default:
+			return false
+		}
+	}
+	return true
+}
+
+func runtimeStringListHasExactShape(value any) bool {
+	switch typed := value.(type) {
+	case []string:
+		return true
+	case []any:
+		for _, item := range typed {
+			if _, ok := item.(string); !ok {
+				return false
+			}
+		}
+		return true
+	default:
+		return false
+	}
+}
+
+func runtimeIntegerHasExactShape(value any) bool {
+	switch typed := value.(type) {
+	case int, int64:
+		return true
+	case float64:
+		return !math.IsNaN(typed) && !math.IsInf(typed, 0) && typed == math.Trunc(typed)
+	default:
+		return false
+	}
 }
 
 func compileRuntimeEvidencePolicies(owner string, items []workorcheventpayload.Payload) ([]runtimecontract.RuntimeEvidencePolicy, error) {

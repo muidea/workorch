@@ -75,24 +75,16 @@ func TestR5FiveResultPersistenceMatrix(t *testing.T) {
 		if _, err := controller.BeginCandidateAttemptForTest(context.Background(), "ws-v2", "run-v2", 0, "stable-prefix"); err != nil {
 			t.Fatal(err)
 		}
-		failed, err := controller.failCandidateAttempt(context.Background(), "ws-v2", "run-v2", 0, runtimecontract.RuntimeCandidateFailure{
-			Class: runtimecontract.RuntimeCandidateFailureClassSchema, Code: "candidate_schema_invalid",
-			Signature: "candidate-schema-invalid", Reason: "unexpected EOF",
-			Diagnostic: &runtimecontract.RuntimeCandidateFailureDiagnostic{Path: "$.operations", Actual: "candidate_shape"},
-		})
+		failed, err := controller.failCandidateAttempt(context.Background(), "ws-v2", "run-v2", 0, runtimeCorrectableMissingOperationsFailure(runtimecontract.RuntimeCandidateFailureClassSchema))
 		if err != nil {
 			t.Fatal(err)
 		}
 		if failed.Decision.State == runtimecontract.ConvergenceStateFailed || failed.CandidateAttempts[0].Failure == nil ||
-			!CandidateFailureIsCorrectableOnce(failed.CandidateAttempts[0].Failure) {
+			!CandidateAttemptIsCorrectableOnce(failed.CandidateAttempts[0]) {
 			t.Fatalf("schema failure was not sealed correctable_once: %+v", failed)
 		}
 		// Duplicate fail on a closed attempt is conflict, not a second mutation.
-		if _, err := controller.failCandidateAttempt(context.Background(), "ws-v2", "run-v2", 0, runtimecontract.RuntimeCandidateFailure{
-			Class: runtimecontract.RuntimeCandidateFailureClassSchema, Code: "candidate_schema_invalid",
-			Signature: "candidate-schema-invalid", Reason: "unexpected EOF",
-			Diagnostic: &runtimecontract.RuntimeCandidateFailureDiagnostic{Path: "$.operations", Actual: "candidate_shape"},
-		}); !errors.Is(err, common.ErrConflict) {
+		if _, err := controller.failCandidateAttempt(context.Background(), "ws-v2", "run-v2", 0, runtimeCorrectableMissingOperationsFailure(runtimecontract.RuntimeCandidateFailureClassSchema)); !errors.Is(err, common.ErrConflict) {
 			t.Fatalf("duplicate fail err=%v, want conflict", err)
 		}
 		retried, err := controller.BeginCandidateAttemptForTest(context.Background(), "ws-v2", "run-v2", 1, "stable-prefix")
@@ -109,7 +101,7 @@ func TestR5FiveResultPersistenceMatrix(t *testing.T) {
 		}
 		loaded, err := restarted.Load(context.Background(), "ws-v2", "run-v2")
 		if err != nil || len(loaded.CandidateAttempts) != 2 || loaded.CandidateAttempts[0].Failure == nil ||
-			!CandidateFailureIsCorrectableOnce(loaded.CandidateAttempts[0].Failure) {
+			!CandidateAttemptIsCorrectableOnce(loaded.CandidateAttempts[0]) {
 			t.Fatalf("reload lost correctable fence: %+v err=%v", loaded, err)
 		}
 		terminal, err := restarted.failCandidateAttempt(context.Background(), "ws-v2", "run-v2", 1, runtimecontract.RuntimeCandidateFailure{

@@ -69,6 +69,9 @@ func cloneRuntimeCompleteAdmissionAttempt(value RuntimeCandidateAttemptRecord) R
 		}
 		ret.Failure = &failure
 	}
+	if value.Correction != nil {
+		ret.Correction = value.Correction.Clone()
+	}
 	if value.Stale != nil {
 		stale := value.Stale.Normalized()
 		ret.Stale = &stale

@@ -1174,9 +1174,7 @@ func TestRuntimeControllerCandidateRetryIsPersistedAndLimitedToTwoAttempts(t *te
 	if repository.saves != 6 {
 		t.Fatalf("pending replay performed another save: %d", repository.saves)
 	}
-	firstFailed, err := controller.failCandidateAttempt(context.Background(), "ws-v2", "run-v2", 0, runtimecontract.RuntimeCandidateFailure{
-		Class: runtimecontract.RuntimeCandidateFailureClassSchema, Reason: "invalid candidate schema",
-	})
+	firstFailed, err := controller.failCandidateAttempt(context.Background(), "ws-v2", "run-v2", 0, runtimeCorrectableMissingOperationsFailure(runtimecontract.RuntimeCandidateFailureClassSchema))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1215,9 +1213,7 @@ func TestRuntimeControllerCandidateRetryExhaustionClosesAtomically(t *testing.T)
 	if _, err := controller.BeginCandidateAttemptForTest(context.Background(), "ws-v2", "run-v2", 0, "stable-prefix"); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := controller.failCandidateAttempt(context.Background(), "ws-v2", "run-v2", 0, runtimecontract.RuntimeCandidateFailure{
-		Class: runtimecontract.RuntimeCandidateFailureClassSchema, Code: "candidate_schema_invalid", Signature: "candidate-schema-invalid", Reason: "unexpected EOF",
-	}); err != nil {
+	if _, err := controller.failCandidateAttempt(context.Background(), "ws-v2", "run-v2", 0, runtimeCorrectableMissingOperationsFailure(runtimecontract.RuntimeCandidateFailureClassSchema)); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := controller.BeginCandidateAttemptForTest(context.Background(), "ws-v2", "run-v2", 1, "stable-prefix"); err != nil {
@@ -1361,9 +1357,7 @@ func TestRuntimeControllerCandidateFailureDoesNotResealPreExistingExecutionFailu
 	if err != nil {
 		t.Fatal(err)
 	}
-	failed, err := controller.failCandidateAttempt(context.Background(), "ws-v2", "run-v2", 0, runtimecontract.RuntimeCandidateFailure{
-		Class: runtimecontract.RuntimeCandidateFailureClassContract, Reason: "candidate schema does not satisfy required output",
-	})
+	failed, err := controller.failCandidateAttempt(context.Background(), "ws-v2", "run-v2", 0, runtimeCorrectableMissingOperationsFailure(runtimecontract.RuntimeCandidateFailureClassContract))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1391,9 +1385,7 @@ func TestRuntimeControllerRejectsRetryWhenPersistedContractIDIsMissing(t *testin
 	if _, err := controller.BeginCandidateAttemptForTest(context.Background(), "ws-v2", "run-v2", 0, "stable-prefix"); err != nil {
 		t.Fatal(err)
 	}
-	failed, err := controller.failCandidateAttempt(context.Background(), "ws-v2", "run-v2", 0, runtimecontract.RuntimeCandidateFailure{
-		Class: runtimecontract.RuntimeCandidateFailureClassContract, Reason: "invalid candidate",
-	})
+	failed, err := controller.failCandidateAttempt(context.Background(), "ws-v2", "run-v2", 0, runtimeCorrectableMissingOperationsFailure(runtimecontract.RuntimeCandidateFailureClassContract))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1451,7 +1443,7 @@ func TestRuntimeControllerCandidateExhaustionWithoutGovernanceIsTerminal(t *test
 	if _, err := controller.BeginCandidateAttemptForTest(context.Background(), "ws-v2", "run-v2", 0, "stable-prefix"); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := controller.failCandidateAttempt(context.Background(), "ws-v2", "run-v2", 0, runtimecontract.RuntimeCandidateFailure{Class: runtimecontract.RuntimeCandidateFailureClassContract, Reason: "invalid operation"}); err != nil {
+	if _, err := controller.failCandidateAttempt(context.Background(), "ws-v2", "run-v2", 0, runtimeCorrectableMissingOperationsFailure(runtimecontract.RuntimeCandidateFailureClassContract)); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := controller.BeginCandidateAttemptForTest(context.Background(), "ws-v2", "run-v2", 1, "stable-prefix"); err != nil {
@@ -1507,9 +1499,7 @@ func TestFailInfeasibleValidationCandidateDoesNotFabricateStateChangeRepair(t *t
 	if _, err := controller.BeginCandidateAttemptForTest(context.Background(), facts.WorkspaceID, facts.RunID, 0, "validation-prefix"); err != nil {
 		t.Fatal(err)
 	}
-	continued, err := controller.failCandidateAttempt(context.Background(), facts.WorkspaceID, facts.RunID, 0, runtimecontract.RuntimeCandidateFailure{
-		Class: runtimecontract.RuntimeCandidateFailureClassContract, Code: "candidate_contract_invalid", Signature: "owner/target/missing", Reason: "validation target is unavailable",
-	})
+	continued, err := controller.failCandidateAttempt(context.Background(), facts.WorkspaceID, facts.RunID, 0, runtimeCorrectableMissingOperationsFailure(runtimecontract.RuntimeCandidateFailureClassContract))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1547,9 +1537,7 @@ func TestFailInfeasibleValidationCandidateDoesNotConsumeRepairBudget(t *testing.
 	if _, err := controller.BeginCandidateAttemptForTest(context.Background(), facts.WorkspaceID, facts.RunID, 0, "validation-prefix"); err != nil {
 		t.Fatal(err)
 	}
-	continued, err := controller.failCandidateAttempt(context.Background(), facts.WorkspaceID, facts.RunID, 0, runtimecontract.RuntimeCandidateFailure{
-		Class: runtimecontract.RuntimeCandidateFailureClassContract, Code: "candidate_contract_invalid", Signature: "owner/target/missing", Reason: "validation target is unavailable",
-	})
+	continued, err := controller.failCandidateAttempt(context.Background(), facts.WorkspaceID, facts.RunID, 0, runtimeCorrectableMissingOperationsFailure(runtimecontract.RuntimeCandidateFailureClassContract))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1581,9 +1569,7 @@ func TestFailInfeasibleValidationCandidateKeepsValidationWhenPolicyAllowsAlterna
 	if _, err := controller.BeginCandidateAttemptForTest(context.Background(), facts.WorkspaceID, facts.RunID, 0, "validation-prefix"); err != nil {
 		t.Fatal(err)
 	}
-	continued, err := controller.failCandidateAttempt(context.Background(), facts.WorkspaceID, facts.RunID, 0, runtimecontract.RuntimeCandidateFailure{
-		Class: runtimecontract.RuntimeCandidateFailureClassContract, Code: "candidate_contract_invalid", Reason: "validation target is unavailable",
-	})
+	continued, err := controller.failCandidateAttempt(context.Background(), facts.WorkspaceID, facts.RunID, 0, runtimeCorrectableMissingOperationsFailure(runtimecontract.RuntimeCandidateFailureClassContract))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1612,13 +1598,12 @@ func TestFailInfeasibleValidationCommandDiagnosticKeepsSameContractRetry(t *test
 	if _, err := controller.BeginCandidateAttemptForTest(context.Background(), facts.WorkspaceID, facts.RunID, 0, "validation-prefix"); err != nil {
 		t.Fatal(err)
 	}
-	continued, err := controller.failCandidateAttempt(context.Background(), facts.WorkspaceID, facts.RunID, 0, runtimecontract.RuntimeCandidateFailure{
-		Class: runtimecontract.RuntimeCandidateFailureClassContract, Code: "candidate_contract_invalid", Signature: "validation-target-missing", Reason: "package target is unavailable",
-		ValidationDiagnostic: &runtimecontract.ValidationFailureDiagnostic{
-			SchemaVersion: runtimecontract.ValidationFailureDiagnosticSchemaVersion,
-			Class:         runtimecontract.ValidationDiagnosticCommandInvalid, RecommendedEvidenceTargetType: runtimecontract.ValidationEvidenceTargetCommandContract,
-		},
-	})
+	failure := runtimeCorrectableMissingOperationsFailure(runtimecontract.RuntimeCandidateFailureClassContract)
+	failure.ValidationDiagnostic = &runtimecontract.ValidationFailureDiagnostic{
+		SchemaVersion: runtimecontract.ValidationFailureDiagnosticSchemaVersion,
+		Class:         runtimecontract.ValidationDiagnosticCommandInvalid, RecommendedEvidenceTargetType: runtimecontract.ValidationEvidenceTargetCommandContract,
+	}
+	continued, err := controller.failCandidateAttempt(context.Background(), facts.WorkspaceID, facts.RunID, 0, failure)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1649,13 +1634,12 @@ func TestFailInfeasibleValidationCommandDiagnosticDoesNotCreateImplementationRep
 	if _, err := controller.BeginCandidateAttemptForTest(context.Background(), facts.WorkspaceID, facts.RunID, 0, "validation-prefix"); err != nil {
 		t.Fatal(err)
 	}
-	continued, err := controller.failCandidateAttempt(context.Background(), facts.WorkspaceID, facts.RunID, 0, runtimecontract.RuntimeCandidateFailure{
-		Class: runtimecontract.RuntimeCandidateFailureClassContract, Code: "candidate_contract_invalid", Signature: "validation-target-missing", Reason: "declared validation command is unavailable",
-		ValidationDiagnostic: &runtimecontract.ValidationFailureDiagnostic{
-			SchemaVersion: runtimecontract.ValidationFailureDiagnosticSchemaVersion,
-			Class:         runtimecontract.ValidationDiagnosticCommandInvalid, RecommendedEvidenceTargetType: runtimecontract.ValidationEvidenceTargetCommandContract,
-		},
-	})
+	failure := runtimeCorrectableMissingOperationsFailure(runtimecontract.RuntimeCandidateFailureClassContract)
+	failure.ValidationDiagnostic = &runtimecontract.ValidationFailureDiagnostic{
+		SchemaVersion: runtimecontract.ValidationFailureDiagnosticSchemaVersion,
+		Class:         runtimecontract.ValidationDiagnosticCommandInvalid, RecommendedEvidenceTargetType: runtimecontract.ValidationEvidenceTargetCommandContract,
+	}
+	continued, err := controller.failCandidateAttempt(context.Background(), facts.WorkspaceID, facts.RunID, 0, failure)
 	if err != nil {
 		t.Fatal(err)
 	}

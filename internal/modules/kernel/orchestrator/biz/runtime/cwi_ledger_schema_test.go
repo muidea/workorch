@@ -118,6 +118,59 @@ func TestSemanticCWIFocusProjectionRebindsRepairAuthorityAcrossRetirementAndRese
 	}
 }
 
+func TestValidationFailureRepairSemanticRebindingClearsExecutionAuthorityThroughFocusReducer(t *testing.T) {
+	aggregate := stateChangeAggregate(t)
+	facts := aggregate.Facts
+	focus := facts.Focus.Normalized()
+	focus.TargetRefs = []string{"old-validation-target.go"}
+	focus.ProspectiveTargetRefs = []string{"old-repair-target.go"}
+	focus.TargetRole = "old-target-role"
+	focus.TargetDiscoverySources = []string{runtimecontract.RuntimeValidationDiscoverySourceWorkspaceManifest}
+	focus.TargetSelectorRef = "old-operation-selector"
+	focus.TargetSelectorOwnerRef = "old-owner"
+	focus.TargetSelectorSubjectRef = "old-subject"
+	focus.TargetSelectorCandidateRefs = []string{"old-repair-target.go"}
+	focus.AcceptedStepKinds = []string{runtimecontract.RuntimeBlockKindManagedValidationSession}
+	focus.AcceptedOperationVariants = []runtimecontract.RuntimeOperationVariantRef{{Kind: runtimecontract.RuntimeBlockKindManagedValidationSession, VariantID: "old-validation"}}
+	focus.ValidationRecipeID = "old-validation-recipe"
+	focus.RequiredCheckRefs = []string{"old-validation-check"}
+	convergence := runtimeValidationFailureRepairConvergenceForTest(1)
+	facts.Focus = focus
+	facts.DefinitionFocuses = runtimecontract.CompileRuntimeDefinitionFocuses([]runtimecontract.CoverageFocus{focus})
+	facts.DefinitionFocuses[0].ValidationFailureRepairConvergence = &convergence
+	facts.DefinitionFocuses = runtimecontract.NormalizeRuntimeDefinitionFocuses(facts.DefinitionFocuses)
+
+	if len(facts.Coverage) != 1 || facts.Coverage[0].CurrentBindingRef == nil {
+		t.Fatalf("test fixture has no current binding: %+v", facts.Coverage)
+	}
+	previous := facts.Coverage[0].CurrentBindingRef.Clone()
+	facts.Coverage[0].ReopenLineage = append(facts.Coverage[0].ReopenLineage, runtimecontract.RuntimeCWIReopenLineage{
+		PreviousBindingRef: previous,
+		TriggerRef:         "validation/rejected",
+		Reason:             runtimeCWIReopenReasonValidationFailureRepairRequired,
+	})
+	facts.Coverage[0].CurrentBindingRef = nil
+	facts.Coverage[0].CWIConvergenceState = runtimecontract.RuntimeCWIConvergenceStateReopened
+	facts.Coverage[0].State = runtimecontract.RuntimeCoverageItemStateOpen
+
+	projected, err := replaceRuntimeCWIFocusProjectionForSemanticRebinding(facts, []common.CoverageWorkItemID{"cwi-1"})
+	if err != nil {
+		t.Fatalf("project validation-failure semantic rebinding: %v", err)
+	}
+	got := projected.Focus
+	if got.ID != "semantic-pending/cwi-1" || len(got.CoverageEvidenceBindings) != 0 ||
+		len(got.TargetRefs) != 0 || len(got.ProspectiveTargetRefs) != 0 || got.TargetRole != "" || len(got.TargetDiscoverySources) != 0 ||
+		got.TargetSelectorRef != "" || got.TargetSelectorOwnerRef != "" || got.TargetSelectorSubjectRef != "" || len(got.TargetSelectorCandidateRefs) != 0 ||
+		len(got.AcceptedStepKinds) != 0 || len(got.AcceptedOperationVariants) != 0 || got.ValidationRecipeID != "" || len(got.RequiredCheckRefs) != 0 {
+		t.Fatalf("semantic rebinding retained predecessor execution authority: %+v", got)
+	}
+	if len(got.RequiredEvidenceKinds) == 0 || len(projected.DefinitionFocuses) != 1 ||
+		projected.DefinitionFocuses[0].ValidationFailureRepairConvergence == nil ||
+		projected.DefinitionFocuses[0].ValidationFailureRepairConvergence.ID != convergence.ID {
+		t.Fatalf("semantic rebinding changed immutable Definition/Profile declaration: focus=%+v definitions=%+v", got, projected.DefinitionFocuses)
+	}
+}
+
 func TestSemanticCWISealRejectsReactivationOfReopenedBinding(t *testing.T) {
 	aggregate := stateChangeAggregate(t)
 	facts := aggregate.Facts

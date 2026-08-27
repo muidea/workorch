@@ -53,7 +53,7 @@ func (c *candidateDispatchComponent) commitEvidence(ctx context.Context, evidenc
 	if err := applyExecutionEvidenceByStatus(&aggregate, admission, fact, finding); err != nil {
 		return EvidenceCommitResult{}, err
 	}
-	dispatchCompleted, err := finalizeExecutionEvidence(&aggregate, admission)
+	dispatchCompleted, err := finalizeExecutionEvidence(&aggregate, admission, fact)
 	if err != nil {
 		return EvidenceCommitResult{}, err
 	}

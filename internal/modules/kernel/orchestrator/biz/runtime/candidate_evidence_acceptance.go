@@ -11,6 +11,10 @@ func applyAcceptedExecutionEvidence(aggregate *RuntimeAggregate, admission execu
 	if aggregate == nil {
 		return common.ErrInvalidArgument
 	}
+	_, validationFailureRepair, err := currentRuntimeSemanticValidationFailureRepair(*aggregate)
+	if err != nil {
+		return err
+	}
 	evidence := admission.Evidence
 	aggregate.Facts.Evidence.Accepted = append(aggregate.Facts.Evidence.Accepted, fact)
 	if evidence.Receipt != nil {
@@ -18,18 +22,18 @@ func applyAcceptedExecutionEvidence(aggregate *RuntimeAggregate, admission execu
 			return err
 		}
 	}
-	if err := applyAcceptedEvidenceCoverageCredit(aggregate, fact, finding.Diagnostic); err != nil {
+	if err := applyAcceptedEvidenceCoverageCredit(aggregate, fact, finding.Diagnostic, validationFailureRepair); err != nil {
 		return err
 	}
 	if err := applyAcceptedEvidenceReopen(aggregate, fact); err != nil {
 		return err
 	}
 	applyAcceptedEvidenceStateChange(aggregate, fact)
-	applyAcceptedEvidenceProgress(aggregate, admission, fact)
+	applyAcceptedEvidenceProgress(aggregate, admission, fact, validationFailureRepair)
 	return nil
 }
 
-func applyAcceptedEvidenceCoverageCredit(aggregate *RuntimeAggregate, fact runtimecontract.EvidenceFact, bindingDiagnostic string) error {
+func applyAcceptedEvidenceCoverageCredit(aggregate *RuntimeAggregate, fact runtimecontract.EvidenceFact, bindingDiagnostic string, retainIntermediateProofOpen bool) error {
 	// A sealed binding can close coverage only through its exact owner proof.
 	// A completed mismatch is deterministic and cannot be repaired by another
 	// provider request for the same immutable dispatch.
@@ -38,6 +42,12 @@ func applyAcceptedEvidenceCoverageCredit(aggregate *RuntimeAggregate, fact runti
 		aggregate.Facts.Failure = &failure
 	}
 	if aggregate.Facts.Focus.RequireAssessment {
+		return nil
+	}
+	if retainIntermediateProofOpen {
+		// A validation-failure repair receipt proves only the current semantic
+		// generation's state-change operation. It is never terminal Definition
+		// credit, even when the terminal focus needs no later assessment.
 		return nil
 	}
 	aggregate.Facts.Coverage = closeCoverageForAcceptedEvidence(*aggregate)
@@ -79,14 +89,17 @@ func applyAcceptedEvidenceStateChange(aggregate *RuntimeAggregate, fact runtimec
 	aggregate.Facts.StateChange = applyAcceptedStateChangeEvidence(aggregate.Facts.StateChange, fact, currentCoverage)
 }
 
-func applyAcceptedEvidenceProgress(aggregate *RuntimeAggregate, admission executionEvidenceAdmission, fact runtimecontract.EvidenceFact) {
+func applyAcceptedEvidenceProgress(aggregate *RuntimeAggregate, admission executionEvidenceAdmission, fact runtimecontract.EvidenceFact, retainRepairCycle bool) {
 	if !runtimecontract.EvidenceAppliesToCurrentFocus(aggregate.Facts, fact) {
 		return
 	}
 	aggregate.Facts.Assessments = invalidateNonSatisfiedAssessmentsForFocus(aggregate.Facts.Assessments, aggregate.Facts.Focus.ID)
 	// Admission alone is not convergence progress. Only a durable changed state
 	// effect resets repair debt; validation awaits assessment satisfaction.
-	if runtimeEvidenceIsEffectiveProgress(aggregate.Facts, fact, admission.Evidence) {
+	if retainRepairCycle {
+		// The Profile convergence is ordered all-of. A repair receipt alone must
+		// not reset the cycle before its mandatory fresh validation.
+	} else if runtimeEvidenceIsEffectiveProgress(aggregate.Facts, fact, admission.Evidence) {
 		aggregate.Facts.Repair = noteRepairProgress(aggregate.Facts.Repair, fact.Revision)
 	} else if fact.Kind == runtimecontract.EvidenceKindValidation && aggregate.Facts.Repair.ActiveGap != nil {
 		aggregate.Facts.Repair = recordNoProgressOperationShape(aggregate.Facts.Repair, runtimecontract.RuntimeRejectedOperationShape{

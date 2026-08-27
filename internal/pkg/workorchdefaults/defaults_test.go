@@ -787,8 +787,8 @@ func assertSoftwareDevAcceptanceDimensions(t *testing.T, hints map[string]any) {
 			if role, _ := item["evidenceRole"].(string); role != "primary_state_change" {
 				t.Fatalf("source_change evidenceRole = %q, want primary_state_change", role)
 			}
-			if role, _ := item["targetRole"].(string); role != "deliverable_implementation" {
-				t.Fatalf("source_change targetRole = %q, want deliverable_implementation", role)
+			if role, _ := item["targetRole"].(string); role != "workspace_delivery_change" {
+				t.Fatalf("source_change targetRole = %q, want workspace_delivery_change", role)
 			}
 			if required, _ := item["requireTargetGrounding"].(bool); !required {
 				t.Fatalf("source_change requireTargetGrounding = false, want true")
@@ -920,6 +920,25 @@ func assertSoftwareDevAcceptanceDimensions(t *testing.T, hints map[string]any) {
 				}
 				assertStringListContains(t, accepted, "file/write")
 				if scope == "dodItem" {
+					repair, ok := item["validationFailureRepairConvergence"].(map[string]any)
+					if !ok {
+						t.Fatalf("dodItem validationFailureRepairConvergence = %+v, want object", item["validationFailureRepairConvergence"])
+					}
+					if repair["triggerOwnerModuleId"] != "blocks/shell" || repair["triggerOperationKind"] != "validation/managed_session" ||
+						repair["repairEvidenceKind"] != "state_change" || repair["repairOwnerModuleId"] != "blocks/file" ||
+						repair["repairTargetPolicy"] != "prospective_owner_target" || repair["repairTargetRole"] != "deliverable_implementation" ||
+						repair["repairDeclarationTargetSelectorRef"] != "file/workspace_deliverable" ||
+						repair["repairDeclarationTargetSelectorOwnerRef"] != "software-dev" ||
+						repair["repairDeclarationTargetSelectorSubjectRef"] != "dodItem_repair" ||
+						repair["repairOperationTargetSelectorRef"] != "workspace-relative-new-file-target" ||
+						repair["requireFreshValidation"] != true || repair["maxAttempts"] != float64(2) {
+						t.Fatalf("dodItem validation failure repair convergence = %+v", repair)
+					}
+					assertStringListContains(t, repair["triggerDiagnosticClasses"].([]any), "implementation_gap_detected")
+					assertStringListContains(t, repair["triggerDiagnosticClasses"].([]any), "validation_build_failed")
+					assertStringListContains(t, repair["triggerDiagnosticClasses"].([]any), "validation_test_failed")
+					assertStringListContains(t, repair["repairOperationKinds"].([]any), "file/write")
+					assertStringListContains(t, repair["repairOperationKinds"].([]any), "patch/apply")
 					ownerFacts, ok := item["requiredOwnerFacts"].([]any)
 					if !ok || len(ownerFacts) != 1 {
 						t.Fatalf("dodItem validation readiness owner facts = %+v, want one Shell postcondition", item["requiredOwnerFacts"])

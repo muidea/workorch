@@ -4,7 +4,7 @@ Status: active
 
 Type: stateful-block-contract
 
-Last Verified: 2026-08-26
+Last Verified: 2026-08-27
 
 ## 功能范围与边界
 
@@ -29,7 +29,11 @@ candidate 同时封存完整 normalized typed `RuntimeProfileContracts` snapshot
 独立派生 owner-fact/convergence manifest，并要求与 candidate bindings 逐项相等；每个 Profile-required acceptance/deliverable
 CWI 还必须有 exact `scope + id` evidence requirement、非空受支持 evidence kinds，以及至少一个能返回对应 typed owner receipt
 proof 的 accepted operation。wildcard policy 不能替代 exact Profile-owned CWI proof，也不能把无证明交付项降级为
-assessment-only Runtime focus。
+assessment-only Runtime focus。可选 validation-failure repair declaration 只能是一份 validation-triggered、`state_change`
+repair、fresh-validation、bounded-attempt、declaration/operation selector 分离的 all-of convergence；current input 中该字段的
+非 object/空 object、unknown/alternative/alias shape，以及同一 Profile 内重复 normalized `scope + id`，都必须在 promotion
+前返回 `definition_profile_contract_invalid`。pure compiler 不读取 live owner fact，不选择 repair target，也不产生 Run、provider
+或 capability 调用。
 
 pure compiler 位于 Workspace owner package，只做 immutable candidate 的静态计算。唯一
 `DefinitionAdmissionIntentCommand` 被映射为 Workspace-private event；该 reducer 在同一 CAS 路径生成 exact
@@ -222,6 +226,8 @@ internal directory。Eventstream 是最后 owner，使前序 owner purge evidenc
   current exact candidate 可正常进入 Run owner。
 - [x] Profile snapshot/hash 漂移、required CWI 缺 exact proof/evidence kind/owner receipt operation、重复 Profile source，以及
   snapshot-derived owner-fact manifest 缺失/附加/漂移均在 promotion 前 fail-closed，并映射到可执行的 Template/Profile 修订动作。
+- [x] strict-current validation-failure repair shape 与重复 normalized requirement ref 都映射为
+  `definition_profile_contract_invalid`；owner result 无 startup input/activation admission，Workspace 聚合零 Runtime promotion。
 - [x] 普通/治理/冲突 Run notification 与 `fresh_activation_required` 均不能释放 active slot；只有 matching terminal delivery 可释放。
 - [x] Template command、repository DTO、EventHub DTO 与 list mapping 对 slice/map/nested payload 的完整深拷贝。
 - [x] `ContextHints:null`、非对象 payload、未知/退役字段与空文件严格拒绝。

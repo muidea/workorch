@@ -147,6 +147,7 @@ type RequestRuntimeCandidateCommand struct {
 	Transaction                 runtimecontract.AuthorityTransaction
 	CandidateAttempt            int
 	PreviousFailure             *runtimecontract.RuntimeCandidateFailure
+	CandidateCorrection         *llmmodel.RuntimeCandidateCorrectionInput
 	StablePrefixHash            string
 	CandidateManifest           runtimecontract.RuntimeCandidateContractManifest
 	DefinitionContext           runtimecontract.RuntimeDefinitionContext
@@ -165,6 +166,7 @@ type PreflightRuntimeCandidateCommand struct {
 	Transaction                 runtimecontract.AuthorityTransaction
 	CandidateAttempt            int
 	PreviousFailure             *runtimecontract.RuntimeCandidateFailure
+	CandidateCorrection         *llmmodel.RuntimeCandidateCorrectionInput
 	StablePrefixHash            string
 	CandidateManifest           runtimecontract.RuntimeCandidateContractManifest
 	DefinitionContext           runtimecontract.RuntimeDefinitionContext

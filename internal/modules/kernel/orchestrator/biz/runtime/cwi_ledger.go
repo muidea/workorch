@@ -183,6 +183,28 @@ func runtimeCWIPendingFocus(source runtimecontract.CoverageFocus, coverageID com
 	return value.Normalized()
 }
 
+// runtimeCWISemanticRebindingPendingFocus removes execution authority from a
+// CWI whose current binding has been retired before a new semantic purpose is
+// sealed. Definition/Profile declarations remain in the aggregate; target,
+// operation and validation-recipe values must be projected again from the new
+// binding rather than inherited from the predecessor focus.
+func runtimeCWISemanticRebindingPendingFocus(source runtimecontract.CoverageFocus, coverageID common.CoverageWorkItemID) runtimecontract.CoverageFocus {
+	value := runtimeCWIPendingFocus(source, coverageID)
+	value.TargetRefs = nil
+	value.ProspectiveTargetRefs = nil
+	value.TargetRole = ""
+	value.TargetDiscoverySources = nil
+	value.TargetSelectorRef = ""
+	value.TargetSelectorOwnerRef = ""
+	value.TargetSelectorSubjectRef = ""
+	value.TargetSelectorCandidateRefs = nil
+	value.AcceptedStepKinds = nil
+	value.AcceptedOperationVariants = nil
+	value.ValidationRecipeID = ""
+	value.RequiredCheckRefs = nil
+	return value.Normalized()
+}
+
 func runtimeCWIWithCoverage(focus runtimecontract.CoverageFocus, coverageIDs []common.CoverageWorkItemID) runtimecontract.CoverageFocus {
 	allowed := make(map[common.CoverageWorkItemID]struct{}, len(coverageIDs))
 	for _, coverageID := range coverageIDs {
@@ -204,8 +226,28 @@ func runtimeCWIWithCoverage(focus runtimecontract.CoverageFocus, coverageIDs []c
 // stable pending projection. The local maps are invocation-scoped only; the
 // persisted authority remains the Coverage row and the focus queue.
 func replaceRuntimeCWIFocusProjection(facts runtimecontract.RuntimeFacts, replacements []common.CoverageWorkItemID) (runtimecontract.RuntimeFacts, error) {
+	return replaceRuntimeCWIFocusProjectionWithPending(facts, replacements, runtimeCWIPendingFocus)
+}
+
+// replaceRuntimeCWIFocusProjectionForSemanticRebinding is the typed SM-2
+// projection used when a private owner event retires one binding and requires
+// a new semantic generation. It keeps all canonical queue writes inside
+// installRuntimeCWIFocusProjection while selecting the target-free pending
+// projection above.
+func replaceRuntimeCWIFocusProjectionForSemanticRebinding(facts runtimecontract.RuntimeFacts, replacements []common.CoverageWorkItemID) (runtimecontract.RuntimeFacts, error) {
+	return replaceRuntimeCWIFocusProjectionWithPending(facts, replacements, runtimeCWISemanticRebindingPendingFocus)
+}
+
+func replaceRuntimeCWIFocusProjectionWithPending(
+	facts runtimecontract.RuntimeFacts,
+	replacements []common.CoverageWorkItemID,
+	pendingProjection func(runtimecontract.CoverageFocus, common.CoverageWorkItemID) runtimecontract.CoverageFocus,
+) (runtimecontract.RuntimeFacts, error) {
 	if len(replacements) == 0 {
 		return facts, nil
+	}
+	if pendingProjection == nil {
+		return runtimecontract.RuntimeFacts{}, common.ErrInvalidArgument
 	}
 	wanted := make(map[common.CoverageWorkItemID]struct{}, len(replacements))
 	for _, coverageID := range replacements {
@@ -223,7 +265,7 @@ func replaceRuntimeCWIFocusProjection(facts runtimecontract.RuntimeFacts, replac
 		pending := make([]runtimecontract.CoverageFocus, 0)
 		for _, coverageID := range focus.CoverageWorkItemIDs {
 			if _, replace := wanted[coverageID]; replace {
-				pending = append(pending, runtimeCWIPendingFocus(focus, coverageID))
+				pending = append(pending, pendingProjection(focus, coverageID))
 				continue
 			}
 			retainedIDs = append(retainedIDs, coverageID)

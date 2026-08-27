@@ -19,6 +19,31 @@ import (
 	"github.com/muidea/workorch/internal/pkg/workorchskillcontract"
 )
 
+func runtimeCandidateCorrectionInputForProviderTest(manifestHash, path, alternative string) *llmmodels.RuntimeCandidateCorrectionInput {
+	if alternative == "" {
+		alternative = "field_present"
+	}
+	witness := runtimecontract.RuntimeCandidateCorrectionWitness{
+		Dimension:        runtimecontract.RuntimeCandidateCorrectionWitnessSchemaField,
+		Path:             path,
+		RejectedValue:    "field_absent",
+		AlternativeValue: alternative,
+	}
+	if strings.Contains(path, "targetRefs") {
+		witness.Dimension = runtimecontract.RuntimeCandidateCorrectionWitnessTarget
+		witness.OperationKind = runtimecontract.RuntimeBlockKindPatchApply
+		witness.RejectedValue = "other.go"
+		witness.RejectedShapeHash = "candidate-shape-rejected"
+		witness.AlternativeShapeHash = "candidate-shape-alternative"
+	}
+	input := llmmodels.RuntimeCandidateCorrectionInput{
+		Objectives:   []runtimecontract.RuntimeCandidateCorrectionObjective{runtimecontract.RuntimeCandidateCorrectionChangeReplayedShape},
+		ManifestHash: manifestHash,
+		Witness:      witness,
+	}.Normalized()
+	return &input
+}
+
 func TestRuntimeCandidatePreflightAuditIsExplicitlyNonStreaming(t *testing.T) {
 	now := time.Now().UTC()
 	audit := sealedAuditFromRequest(llmmodels.RuntimeCandidateRequest{}, "preflight-1", nil, now, now, false, llmmodels.RuntimeCandidateStatusCompleted, "", 0)
@@ -1369,19 +1394,23 @@ func TestRuntimeProviderRequestPreservesStablePrefixAndTypedContext(t *testing.T
 			retryRequest, err := runtimeProviderRequest(llmmodels.RuntimeCandidateRequest{
 				DocumentKind: runtimecontract.RuntimeProviderDocumentOperations,
 				Decision:     decision, Transaction: decision.AuthorityTransaction(), CandidateAttempt: 1, PreviousFailure: &testCase.failure, StablePrefixHash: prefix,
-				CandidateManifest: manifest, DefinitionContext: definition, CandidateContext: candidateContext,
+				CandidateCorrection: runtimeCandidateCorrectionInputForProviderTest(manifest.Hash, "$.operations[0].targetRefs", "main.go"),
+				CandidateManifest:   manifest, DefinitionContext: definition, CandidateContext: candidateContext,
 			})
 			if err != nil {
 				t.Fatal(err)
 			}
 			retrySection := retryRequest.PromptContext.Sections[4].Content
-			for _, value := range append([]string{`"candidateAttempt":1`, `"previousFailure"`, "context.outputContract.structuredOutputInstruction", "sealed manifest hash"}, testCase.want...) {
+			for _, value := range append([]string{`"candidateAttempt":1`, `"previousFailure"`, `"correctionInput"`, `"path":"$.operations[0].targetRefs"`, `"alternativeValue":"main.go"`, "context.outputContract.structuredOutputInstruction", "sealed manifest hash"}, testCase.want...) {
 				if !strings.Contains(retrySection, value) {
 					t.Fatalf("provider retry lost correction %q: %s", value, retrySection)
 				}
 			}
 			if strings.Contains(retrySection, testCase.failure.Reason) {
 				t.Fatalf("provider retry leaked raw prior failure into C4: %s", retrySection)
+			}
+			if strings.Contains(retrySection, `"disposition"`) || strings.Contains(retrySection, `"terminalCode"`) {
+				t.Fatalf("provider retry rendered Orchestrator disposition state: %s", retrySection)
 			}
 			var tail struct {
 				Retry struct {
@@ -1395,6 +1424,11 @@ func TestRuntimeProviderRequestPreservesStablePrefixAndTypedContext(t *testing.T
 			}
 			if strings.Contains(retrySection, `"reason"`) {
 				t.Fatalf("provider retry serialized a previous-failure reason: %s", retrySection)
+			}
+			for _, forbidden := range []string{`"Disposition"`, `"Witness"`, `"TerminalCode"`} {
+				if strings.Contains(retrySection, forbidden) {
+					t.Fatalf("provider retry leaked persistence DTO field %s: %s", forbidden, retrySection)
+				}
 			}
 			if testCase.failure.Diagnostic != nil {
 				diagnostic := tail.Retry.PreviousFailure.Diagnostic
@@ -1498,21 +1532,23 @@ func TestRuntimeCandidateRetryExplainsOperationShapeReplayWithoutChangingStableP
 		Code:   "candidate_replays_rejected_shape",
 		Reason: "runtime candidate replays active rejected operation shape(s)",
 	}
-	retry := runtimeCandidateRetry(1, failure)
+	manifest := runtimecontract.RuntimeCandidateContractManifest{Hash: "manifest-retry-exact-alternative"}
+	directive := runtimeCandidateCorrectionInputForProviderTest(manifest.Hash, "$.operations[0].targetRefs", "support.go")
+	retry := runtimeCandidateRetryForManifest(1, failure, manifest, directive)
 	if retry == nil {
 		t.Fatal("retry projection is nil")
 	}
 	for _, want := range []string{
-		"context.rejectedOperationShapes", "context.noProgressOperationShapes", "materially different operation shape",
-		"changes its declared durable targets", "Changing only an operation ID",
+		"context.rejectedOperationShapes", "context.noProgressOperationShapes", "exact correction alternative",
+		`"support.go"`, "Changing only an operation ID",
 	} {
 		if !strings.Contains(retry.Instruction, want) {
 			t.Fatalf("retry instruction lost %q: %s", want, retry.Instruction)
 		}
 	}
-	if retry := runtimeCandidateRetry(1, &runtimecontract.RuntimeCandidateFailure{
+	if retry := runtimeCandidateRetryForManifest(1, &runtimecontract.RuntimeCandidateFailure{
 		Class: runtimecontract.RuntimeCandidateFailureClassContract, Code: "candidate_admission_invalid",
-	}); retry == nil || strings.Contains(retry.Instruction, "materially different operation shape") {
+	}, manifest, directive); retry == nil || strings.Contains(retry.Instruction, "rejected or no-progress operation shape") {
 		t.Fatalf("non-replay retry instruction = %+v, want no replay-specific correction", retry)
 	}
 }
@@ -1540,7 +1576,7 @@ func TestRuntimeCandidateExecutionTailOnlyRendersProviderSafeFacts(t *testing.T)
 		}},
 		Activation: runtimecontract.RuntimeActivationContext{Continuation: runtimecontract.RuntimeContinuationContext{}},
 	}
-	tail := buildRuntimeCandidateExecutionTailProjection(context, 0, nil, runtimecontract.RuntimeCandidateContractManifest{})
+	tail := buildRuntimeCandidateExecutionTailProjection(context, 0, nil, runtimecontract.RuntimeCandidateContractManifest{}, nil)
 	encoded, err := json.Marshal(tail)
 	if err != nil {
 		t.Fatal(err)
@@ -2248,7 +2284,8 @@ func TestRuntimeCandidateManifestDrivesSchemaInstructionAndRetryCorrection(t *te
 			if runtimeOperationSchemaHasProperty(t, string(output.Schema), "dependsOn") != testCase.dependsOn {
 				t.Fatalf("schema dependency exposure = %t, want %t: %s", runtimeOperationSchemaHasProperty(t, string(output.Schema), "dependsOn"), testCase.dependsOn, output.Schema)
 			}
-			retry := runtimeCandidateRetryForManifest(1, &runtimecontract.RuntimeCandidateFailure{Class: runtimecontract.RuntimeCandidateFailureClassContract, Reason: `arbitrary stale error text with parameter "summary"`}, manifest)
+			directive := runtimeCandidateCorrectionInputForProviderTest(manifest.Hash, "$.operations", "field_present")
+			retry := runtimeCandidateRetryForManifest(1, &runtimecontract.RuntimeCandidateFailure{Class: runtimecontract.RuntimeCandidateFailureClassContract, Reason: `arbitrary stale error text with parameter "summary"`}, manifest, directive)
 			if retry == nil || !strings.Contains(retry.Instruction, manifest.Hash) || !strings.Contains(retry.Instruction, "context.outputContract.structuredOutputInstruction") || strings.Contains(retry.Instruction, "arbitrary stale error text") {
 				t.Fatalf("retry correction was not manifest-derived: %+v", retry)
 			}
@@ -2420,11 +2457,13 @@ func TestRuntimeProviderRequestNarrowsFileScopeAcrossSchemaContextAndRetry(t *te
 			t.Fatalf("scope provider C3 widened operation contracts to %s: %s", forbidden, dynamic)
 		}
 	}
+	retryManifest := runtimeCandidateManifestForRequest(t, decision, runtimecontract.RuntimeCandidateContextForDecision(facts, decision, nil))
 	retryRequest, err := runtimeProviderRequest(llmmodels.RuntimeCandidateRequest{
 		DocumentKind: runtimecontract.RuntimeProviderDocumentOperations,
 		Decision:     decision, Transaction: decision.AuthorityTransaction(), CandidateAttempt: 1,
-		PreviousFailure:  &runtimecontract.RuntimeCandidateFailure{Class: runtimecontract.RuntimeCandidateFailureClassContract, Code: "candidate_target_outside_grounding", Reason: "owner-grounded workspace scope permits only a durable File operation with a concrete target"},
-		StablePrefixHash: prefix, CandidateManifest: runtimeCandidateManifestForRequest(t, decision, runtimecontract.RuntimeCandidateContextForDecision(facts, decision, nil)), DefinitionContext: definition, CandidateContext: runtimecontract.RuntimeCandidateContextForDecision(facts, decision, nil),
+		PreviousFailure:     &runtimecontract.RuntimeCandidateFailure{Class: runtimecontract.RuntimeCandidateFailureClassContract, Code: "candidate_target_outside_grounding", Reason: "owner-grounded workspace scope permits only a durable File operation with a concrete target"},
+		CandidateCorrection: runtimeCandidateCorrectionInputForProviderTest(retryManifest.Hash, "$.operations[0].targetRefs", "main.go"),
+		StablePrefixHash:    prefix, CandidateManifest: retryManifest, DefinitionContext: definition, CandidateContext: runtimecontract.RuntimeCandidateContextForDecision(facts, decision, nil),
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -2632,10 +2671,12 @@ func TestRuntimeAssessmentRequestPublishesCanonicalEvidenceRefContract(t *testin
 		}
 	}
 	retryFailure := runtimecontract.RuntimeCandidateFailure{Class: runtimecontract.RuntimeCandidateFailureClassSchema, Reason: "missing evidenceRefs"}
+	retryManifest := runtimeCandidateManifestForRequest(t, decision, context)
 	retry, err := runtimeProviderRequest(llmmodels.RuntimeCandidateRequest{
 		DocumentKind: runtimecontract.RuntimeProviderDocumentOperations,
 		Decision:     decision, Transaction: decision.AuthorityTransaction(), CandidateAttempt: 1, PreviousFailure: &retryFailure, StablePrefixHash: prefix,
-		CandidateManifest: runtimeCandidateManifestForRequest(t, decision, context), DefinitionContext: definition, CandidateContext: context,
+		CandidateCorrection: runtimeCandidateCorrectionInputForProviderTest(retryManifest.Hash, "$.evidenceRefs", "field_present"),
+		CandidateManifest:   retryManifest, DefinitionContext: definition, CandidateContext: context,
 	})
 	if err != nil {
 		t.Fatal(err)

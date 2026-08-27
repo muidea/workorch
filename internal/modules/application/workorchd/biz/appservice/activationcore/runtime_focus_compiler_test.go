@@ -11,6 +11,16 @@ import (
 )
 
 func TestCompileRuntimeCoverageFocusesAppliesDodItemWildcard(t *testing.T) {
+	repair := runtimecontract.RuntimeValidationFailureRepairConvergence{
+		ID: "dod-validation-repair", TriggerOwnerModuleID: runtimecontract.RuntimeModuleShell,
+		TriggerOperationKind:     runtimecontract.RuntimeBlockKindManagedValidationSession,
+		TriggerDiagnosticClasses: []string{runtimecontract.ValidationDiagnosticBuildFailed},
+		RepairEvidenceKind:       runtimecontract.EvidenceKindStateChange, RepairOwnerModuleID: runtimecontract.RuntimeModuleFile,
+		RepairOperationKinds: []string{runtimecontract.StepKindFileWrite}, RepairTargetPolicy: runtimecontract.RuntimeOperationTargetPolicyProspectiveOwnerTarget,
+		RepairTargetRole: "deliverable_implementation", RepairDeclarationTargetSelectorRef: "file/workspace_deliverable",
+		RepairDeclarationTargetSelectorOwnerRef: "software-dev", RepairDeclarationTargetSelectorSubjectRef: "dodItem_repair",
+		RepairOperationTargetSelectorRef: "workspace-relative-new-file-target", RequireFreshValidation: true, MaxAttempts: 2,
+	}
 	activation := runtimecontract.RuntimeActivationContext{
 		ProviderSelection: runtimecontract.ProviderInferenceSelection{Target: runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "gpt-4o"}},
 		ExecutionContract: runtimecontract.RuntimeExecutionContract{
@@ -19,18 +29,20 @@ func TestCompileRuntimeCoverageFocusesAppliesDodItemWildcard(t *testing.T) {
 				ID: "software-dev",
 				EvidenceRequirements: []runtimecontract.RuntimeProfileEvidenceRequirement{{
 					ID: "*", Scope: "dodItem",
-					TargetRole: "deliverable_implementation", TargetDiscoverySources: []string{
+					RequiredEvidenceKinds: []string{runtimecontract.EvidenceKindValidation},
+					TargetRole:            "deliverable_implementation", TargetDiscoverySources: []string{
 						runtimecontract.RuntimeValidationDiscoverySourceWorkspaceManifest,
 						runtimecontract.RuntimeValidationDiscoverySourceProjectFiles,
 					}, TargetSelectorRef: "file/unique_workspace_entry", RequireTargetGrounding: true,
 					RequireDirectEvidence: true, RequireClaimEvidence: true, RequireExecutableBehaviorEvidence: true,
-					AcceptedStepKinds: []string{"shell/command", "patch/apply", "mcp/tool_call"},
-					RejectedStepKinds: []string{"file/read", "file/list", "mcp/resource_read", "mcp/prompt_get"},
+					AcceptedStepKinds:                  []string{"shell/command", "patch/apply", "mcp/tool_call", runtimecontract.RuntimeBlockKindManagedValidationSession},
+					RejectedStepKinds:                  []string{"file/read", "file/list", "mcp/resource_read", "mcp/prompt_get"},
+					ValidationFailureRepairConvergence: &repair,
 				}},
 			}},
 		},
 	}
-	focuses, err := compileRuntimeCoverageFocuses(
+	compiled, err := compileRuntimeCoverage(
 		&workspacemodel.Goal{ID: "goal-1", WorkspaceID: "ws-1", Text: "deliver"},
 		&workspacemodel.DoD{ID: "dod-1", WorkspaceID: "ws-1", Items: []string{"行为一", "行为二"}},
 		activation,
@@ -38,14 +50,15 @@ func TestCompileRuntimeCoverageFocusesAppliesDodItemWildcard(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(focuses) != 2 {
-		t.Fatalf("focuses = %+v", focuses)
+	focuses := compiled.Focuses
+	if len(focuses) != 2 || len(compiled.DefinitionFocuses) != len(focuses) {
+		t.Fatalf("compiled coverage = %+v", compiled)
 	}
-	for _, focus := range focuses {
+	for index, focus := range focuses {
 		if focus.AssessmentScope != "dodItem" || focus.SliceID == "" || !focus.RequireDirectEvidence || !focus.RequireClaimEvidence || !focus.RequireExecutableBehaviorEvidence {
 			t.Fatalf("dod focus policy not applied: %+v", focus)
 		}
-		if len(focus.AcceptedStepKinds) != 3 || focus.AcceptedStepKinds[0] != "mcp/tool_call" || focus.AcceptedStepKinds[1] != "patch/apply" || focus.AcceptedStepKinds[2] != "shell/command" {
+		if len(focus.AcceptedStepKinds) != 4 || focus.AcceptedStepKinds[0] != "mcp/tool_call" || focus.AcceptedStepKinds[1] != "patch/apply" || focus.AcceptedStepKinds[2] != "shell/command" || focus.AcceptedStepKinds[3] != runtimecontract.RuntimeBlockKindManagedValidationSession {
 			t.Fatalf("accepted kinds = %v", focus.AcceptedStepKinds)
 		}
 		if len(focus.RejectedStepKinds) != 4 || focus.RejectedStepKinds[0] != "file/list" || focus.RejectedStepKinds[1] != "file/read" {
@@ -59,6 +72,34 @@ func TestCompileRuntimeCoverageFocusesAppliesDodItemWildcard(t *testing.T) {
 			len(focus.TargetRefs) != 0 || len(focus.TargetDiscoverySources) != 2 {
 			t.Fatalf("dod focus target contract not compiled: %+v", focus)
 		}
+		definition := compiled.DefinitionFocuses[index]
+		if definition.ValidationFailureRepairConvergence == nil || definition.ValidationFailureRepairConvergence.ID != repair.ID || definition.ValidationFailureRepairConvergence.MaxAttempts != 2 {
+			t.Fatalf("immutable Definition focus lost repair convergence: %+v", definition)
+		}
+	}
+}
+
+func TestResolveCoverageEvidencePolicyRejectsConflictingRepairConvergences(t *testing.T) {
+	base := runtimecontract.RuntimeValidationFailureRepairConvergence{
+		ID: "repair", TriggerOwnerModuleID: runtimecontract.RuntimeModuleShell, TriggerOperationKind: runtimecontract.RuntimeBlockKindManagedValidationSession,
+		TriggerDiagnosticClasses: []string{runtimecontract.ValidationDiagnosticTestFailed}, RepairEvidenceKind: runtimecontract.EvidenceKindStateChange,
+		RepairOwnerModuleID: runtimecontract.RuntimeModuleFile, RepairOperationKinds: []string{runtimecontract.StepKindFileWrite},
+		RepairTargetPolicy: runtimecontract.RuntimeOperationTargetPolicyProspectiveOwnerTarget, RepairTargetRole: "implementation",
+		RepairDeclarationTargetSelectorRef: "file/workspace_deliverable", RepairDeclarationTargetSelectorOwnerRef: "profile",
+		RepairDeclarationTargetSelectorSubjectRef: "repair", RepairOperationTargetSelectorRef: "workspace-relative-new-file-target",
+		RequireFreshValidation: true, MaxAttempts: 2,
+	}
+	changed := base.Clone()
+	changed.MaxAttempts = 3
+	activation := runtimecontract.RuntimeActivationContext{ExecutionContract: runtimecontract.RuntimeExecutionContract{ProfileContracts: []runtimecontract.RuntimeProfileContract{{
+		ID: "profile", EvidenceRequirements: []runtimecontract.RuntimeProfileEvidenceRequirement{
+			{ID: "item-1", Scope: "dodItem", RequiredEvidenceKinds: []string{runtimecontract.EvidenceKindValidation}, AcceptedStepKinds: []string{runtimecontract.RuntimeBlockKindManagedValidationSession}, ValidationFailureRepairConvergence: &changed},
+			{ID: "*", Scope: "dodItem", RequiredEvidenceKinds: []string{runtimecontract.EvidenceKindValidation}, AcceptedStepKinds: []string{runtimecontract.RuntimeBlockKindManagedValidationSession}, ValidationFailureRepairConvergence: &base},
+		},
+	}}}}
+	_, err := resolveCoverageEvidencePolicy("dodItem", "item-1", activation, false)
+	if err == nil || !strings.Contains(err.Error(), "conflicting validation failure repair convergence") {
+		t.Fatalf("conflicting repair convergence err=%v", err)
 	}
 }
 

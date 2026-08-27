@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strings"
 
+	llmmodels "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/models"
 	runtime "github.com/muidea/workorch/internal/modules/kernel/orchestrator/biz/runtime"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
@@ -20,6 +21,7 @@ func runtimeCandidateRequestIdentity(
 	manifest runtimecontract.RuntimeCandidateContractManifest,
 	previousFailure *runtimecontract.RuntimeCandidateFailure,
 	sequence int,
+	correctionInput *llmmodels.RuntimeCandidateCorrectionInput,
 ) (logicalRequestID, physicalCallID string, err error) {
 	if aggregate.Facts.WorkspaceID == "" || aggregate.Facts.RunID == "" || strings.TrimSpace(stablePrefixHash) == "" || sequence <= 0 {
 		return "", "", fmt.Errorf("runtime candidate request identity requires scope, stable prefix and sequence")
@@ -31,7 +33,7 @@ func runtimeCandidateRequestIdentity(
 	if err := runtimecontract.ValidateRuntimeCandidateContractManifestForDecision(manifest, aggregate.Decision, runtimecontract.RuntimeCandidateManifestOwnerFactsFromContext(candidateContext)); err != nil {
 		return "", "", err
 	}
-	correctionHash := runtimecontract.StableRuntimeCandidateRequestCorrectionHash(previousFailure)
+	correctionHash := correctionInput.StableRequestCorrectionHash(previousFailure)
 	logicalRequestID = runtimecontract.StableRuntimeCandidateRequestSessionID(
 		runtimecontract.RuntimeProviderDocumentOperations,
 		aggregate.Facts.WorkspaceID,

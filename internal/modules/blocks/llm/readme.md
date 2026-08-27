@@ -4,7 +4,7 @@ Status: active
 
 Type: capability-block-contract
 
-Last Verified: 2026-08-26
+Last Verified: 2026-08-27
 
 ## 功能范围与边界
 
@@ -57,7 +57,11 @@ application、Web 与 orchestrator 不直接访问 ai-proxy。
    必须与本次声明模式一致：non-stream/embedding 接受 JSON media type，stream 只接受 `text/event-stream`；mismatch
    只解析/处置当前物理响应并返回 typed protocol failure，禁止切换 parser 后发起第二次 provider call。
 8. Runtime candidate request 只消费 Orchestrator sealed canonical state、authority transaction、manifest、C0～C5
-   与可选 sealed correction；不从 action、raw reason、projection 或 provider response 重建 authority。
+   与可选 detached correction input；不从 action、raw reason、projection 或 provider response 重建 authority。attempt 0
+   不携带 correction；attempt 1 只接收 manifest-bound objectives 与一份 concrete correction witness。Orchestrator-owned
+   `Disposition`、`TerminalCode` 和 persisted directive 不跨入 LLM command/model/C4；LLM 不反向重建 directive。该输入在
+   provider call 前精确校验 manifest、field path、rejected/alternative value 与 shape hash，C4 只渲染这份 bounded witness；
+   缺失或漂移均零 provider invocation，且不能改变 C0～C3/stable prefix。
 9. incomplete `DocumentOutcome` 与 transient/authentication/configuration/protocol `Feedback` 只返回本边界 factual category
    与 safe original diagnostic；LLM Block 不创建 candidate attempt，也不选择 correction、retry、governance 或 terminal。
    LLM 产生的 closed category/class vocabulary 与穷尽映射只在 LLM `pkg/events` 维护；submitted marker 后无 durable outcome
@@ -237,6 +241,8 @@ application、Web 与 orchestrator 不直接访问 ai-proxy。
 - [x] prospective target 的 owner-authored `allOf` clause contract 只进入 C3 volatile authority；provider schema 与本地
   evaluator 在 owner probe 前对 1～8 个 `prospectiveTargetRefs` 执行同一合取覆盖合同，拒绝 singular 字段、
   partial/extra/duplicate target set；C4 只携带 typed violation 引用，且 dependency recipe identity/command 不进入 provider。
+- [x] candidate attempt 0 无 correction；attempt 1 的 detached correction input 绑定 manifest 与 concrete alternative witness，
+  missing/stale/shape drift 在 provider 前拒绝。LLM command/model/C4 不含 disposition/terminal，也无 persisted-directive rebuild。
 - [x] candidate terminal framing 强制 `Stale | Feedback | DocumentOutcome` exactly-one；complete content 与 hash/bytes
   一致，所有非 complete outcome 拒绝 content-only/混合 envelope；显式 max-output stop 在零 final-document bytes、
   partial/prose 与 complete-looking payload 下均保持 incomplete fact，并只授权 whole-document recovery；streaming terminal

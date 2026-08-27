@@ -134,6 +134,9 @@ func validateRuntimeSemanticPlanProofObligations(document RuntimeSemanticPlanDoc
 		if err := validateRuntimeSemanticOwnerFactAcquisition(proofSet, obligation.OwnerFactAcquisition, proposalIndex); err != nil {
 			return err
 		}
+		if err := validateRuntimeSemanticValidationFailureRepair(proofSet, obligation.ValidationFailureRepair, proposalIndex); err != nil {
+			return err
+		}
 	}
 	return nil
 }
@@ -300,6 +303,14 @@ func compileRuntimeSemanticFocus(manifest RuntimeSemanticPlanManifest, generatio
 	var selectorRef, declarationRef, selectorOwner string
 	var validationRecipeID string
 	validationChecks := make([]string, 0)
+	var validationRepair *RuntimeSemanticValidationFailureRepair
+	for _, obligation := range manifest.ProofObligations {
+		if obligation.CoverageWorkItemID == proofSet.CoverageWorkItemID && obligation.ValidationFailureRepair != nil {
+			value := obligation.ValidationFailureRepair.Clone()
+			validationRepair = &value
+			break
+		}
+	}
 	proofRequirementIndex := -1
 	if evidenceObligation.Purpose == RuntimeSemanticEvidenceObligationDefinitionProof {
 		var err error
@@ -322,6 +333,10 @@ func compileRuntimeSemanticFocus(manifest RuntimeSemanticPlanManifest, generatio
 		}
 		if err := fact.ValidateForProposal(manifest, rawProposal); err != nil {
 			return CoverageFocus{}, err
+		}
+		if validationRepair != nil && proposal.Target.Policy == RuntimeOperationTargetPolicyProspectiveOwnerTarget &&
+			!sameStrings(fact.TargetRefs, proposal.Target.ProspectiveTargetRefs) {
+			return CoverageFocus{}, fmt.Errorf("runtime semantic validation repair prospective target lacks exact capability-owner confirmation")
 		}
 		evidenceKind := proposal.RequiredEvidenceKinds[0]
 		proof := CoverageEvidenceProof{
@@ -382,6 +397,16 @@ func compileRuntimeSemanticFocus(manifest RuntimeSemanticPlanManifest, generatio
 		Proofs: proofs, TargetRefs: targetRefs, TargetSelectorRef: selectorRef, DeclarationRef: declarationRef,
 		ProspectiveTargetRefs: prospectiveTargetRefs, PrerequisiteRefs: prerequisiteRefs,
 	}
+	if validationRepair != nil {
+		repair := validationRepair.Normalized()
+		binding.PrerequisiteRefs = append(binding.PrerequisiteRefs,
+			"semantic-purpose/"+string(RuntimeSemanticEvidenceObligationValidationFailureRepair),
+			"validation-repair-convergence/"+repair.ConvergenceHash,
+			"validation-repair-failure/"+repair.FailureSignature,
+			"validation-repair-failed-focus/"+repair.FailedFocusID,
+			"validation-repair-owner-catalog/"+repair.OwnerCatalogSnapshotID,
+		)
+	}
 	if selectorRef != "" {
 		binding.TargetSelectorOwnerRef = selectorOwner
 		binding.TargetSelectorSubjectRef = "workspace_deliverable"
@@ -392,6 +417,12 @@ func compileRuntimeSemanticFocus(manifest RuntimeSemanticPlanManifest, generatio
 				binding.TargetSelectorSubjectRef = declaration.TargetSelectorSubjectRef
 				binding.TargetSelectorCandidateRefs = append([]string(nil), declaration.TargetSelectorCandidateRefs...)
 			}
+		}
+		if validationRepair != nil {
+			repair := validationRepair.Normalized()
+			binding.TargetSelectorOwnerRef = repair.RepairDeclarationTargetSelectorOwnerRef
+			binding.TargetSelectorSubjectRef = repair.RepairDeclarationTargetSelectorSubjectRef
+			binding.TargetSelectorCandidateRefs = append([]string(nil), repair.RepairDeclarationTargetSelectorCandidateRefs...)
 		}
 	}
 	binding = binding.Normalized()
@@ -415,6 +446,15 @@ func compileRuntimeSemanticFocus(manifest RuntimeSemanticPlanManifest, generatio
 		focus.OwnerFactConvergences = CloneRuntimeOwnerFactConvergences(declaration.OwnerFactConvergences)
 		focus.MetricConstraints = append([]string(nil), declaration.MetricConstraints...)
 		focus.ArtifactRefs = append([]string(nil), declaration.ArtifactRefs...)
+	}
+	if validationRepair != nil {
+		repair := validationRepair.Normalized()
+		focus.TargetRole = repair.RepairTargetRole
+		focus.TargetSelectorRef = repair.RepairOperationTargetSelectorRef
+		focus.TargetSelectorOwnerRef = repair.RepairDeclarationTargetSelectorOwnerRef
+		focus.TargetSelectorSubjectRef = repair.RepairDeclarationTargetSelectorSubjectRef
+		focus.TargetSelectorCandidateRefs = append([]string(nil), repair.RepairDeclarationTargetSelectorCandidateRefs...)
+		focus.RequireTargetGrounding = true
 	}
 	if source != nil {
 		declaration := source.Normalized()

@@ -8,6 +8,16 @@ import (
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
+func runtimeCorrectableMissingOperationsFailure(class runtimecontract.RuntimeCandidateFailureClass) runtimecontract.RuntimeCandidateFailure {
+	return runtimecontract.RuntimeCandidateFailure{
+		Class: class, Code: "candidate_schema_invalid", Signature: "candidate-schema-missing-operations",
+		Reason: "candidate document is missing the required operations field",
+		Diagnostic: &runtimecontract.RuntimeCandidateFailureDiagnostic{
+			Path: "$.operations", Actual: "missing_operations", Required: []string{"operations"},
+		},
+	}
+}
+
 // The helpers in this file deliberately construct the same persisted complete
 // session used by production. They keep focused reducer/controller fixtures
 // concise without retaining an unbound production admission API.
@@ -146,7 +156,7 @@ func (c *RuntimeController) EnsureSemanticContractSealedForOperationTest(ctx con
 	if err != nil {
 		return RuntimeAggregate{}, err
 	}
-	pending, err := semanticPendingFocuses(aggregate.Facts, ledger.PendingCoverageIDs, focuses)
+	pending, err := semanticPendingFocuses(aggregate.Facts, ledger.PendingCoverageIDs, focuses, *ledger.Manifest)
 	if err != nil {
 		return RuntimeAggregate{}, err
 	}

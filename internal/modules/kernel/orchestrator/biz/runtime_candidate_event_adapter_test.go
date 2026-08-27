@@ -442,8 +442,6 @@ func TestRequestRuntimeCandidateUsesTypedSealedEventHubContract(t *testing.T) {
 	}
 	retry := base
 	retry.CandidateAttempt = 1
-	retry.RequestIdentity.Sequence = 2
-	retry.RequestIdentity.PhysicalCallID = "physical-call-2"
 	retry.PreviousFailure = &runtimecontract.RuntimeCandidateFailure{
 		Class: runtimecontract.RuntimeCandidateFailureClassSchema, Code: "candidate_schema_invalid", Signature: "candidate-schema-invalid",
 		Reason: `json: unknown field "candidate"`,
@@ -451,6 +449,19 @@ func TestRequestRuntimeCandidateUsesTypedSealedEventHubContract(t *testing.T) {
 			Path: "$.unexpected", Actual: "unexpected", Allowed: []string{"operations"}, Forbidden: []string{"unexpected"},
 		},
 	}
+	retryDirective := (&runtimecontract.RuntimeCandidateCorrectionDirective{
+		Disposition:  runtimecontract.RuntimeCandidateCorrectionCorrectableOnce,
+		Objectives:   []runtimecontract.RuntimeCandidateCorrectionObjective{runtimecontract.RuntimeCandidateCorrectionRemoveForbiddenField},
+		ManifestHash: retry.CandidateManifest.Hash,
+		Witness: &runtimecontract.RuntimeCandidateCorrectionWitness{
+			Dimension: runtimecontract.RuntimeCandidateCorrectionWitnessSchemaField, Path: "$.unexpected",
+			RejectedValue: "unexpected", AlternativeValue: "field_absent",
+		},
+	}).Clone()
+	retry.CandidateCorrection = runtimeCandidateCorrectionInputFromDirective(retryDirective)
+	correctionHash := retry.CandidateCorrection.StableRequestCorrectionHash(retry.PreviousFailure)
+	logicalRequestID := runtimecontract.StableRuntimeCandidateRequestSessionID(retry.DocumentKind, retry.WorkspaceID, retry.RunID, retry.Transaction, retry.StablePrefixHash, retry.CandidateManifest.Hash, correctionHash)
+	retry.RequestIdentity = runtimecontract.RuntimeCandidateRequestIdentity{LogicalRequestID: logicalRequestID, Sequence: 1, PhysicalCallID: runtimecontract.StableRuntimeCandidatePhysicalCallID(logicalRequestID, 1)}
 	retry = withOperationsExpectedDocument(t, retry)
 	second, err := RequestRuntimeCandidate(ctx, hub, retry)
 	if err != nil {
@@ -465,11 +476,22 @@ func TestRequestRuntimeCandidateUsesTypedSealedEventHubContract(t *testing.T) {
 	if len(second.DocumentOutcome.Content) == 0 {
 		t.Fatal("complete correction candidate result did not carry the synchronous raw document")
 	}
-	if first.RequestIdentity.LogicalRequestID != base.RequestIdentity.LogicalRequestID || first.RequestIdentity.Sequence != 1 || first.RequestIdentity.PhysicalCallID != "physical-call-1" || second.RequestIdentity.LogicalRequestID != base.RequestIdentity.LogicalRequestID || second.RequestIdentity.Sequence != 2 || second.RequestIdentity.PhysicalCallID != "physical-call-2" {
+	if first.RequestIdentity.LogicalRequestID != base.RequestIdentity.LogicalRequestID || first.RequestIdentity.Sequence != 1 || first.RequestIdentity.PhysicalCallID != "physical-call-1" || second.RequestIdentity != retry.RequestIdentity || second.RequestIdentity.LogicalRequestID == base.RequestIdentity.LogicalRequestID {
 		t.Fatalf("candidate response identity was not preserved: first=%+v second=%+v", first, second)
 	}
-	if len(captured) != 2 || captured[0].RequestIdentity.LogicalRequestID != base.RequestIdentity.LogicalRequestID || captured[0].RequestIdentity.Sequence != 1 || captured[0].RequestIdentity.PhysicalCallID != "physical-call-1" || captured[1].RequestIdentity.LogicalRequestID != base.RequestIdentity.LogicalRequestID || captured[1].RequestIdentity.Sequence != 2 || captured[1].RequestIdentity.PhysicalCallID != "physical-call-2" || captured[0].CandidateAttempt != 0 || captured[0].PreviousFailure != nil || captured[1].CandidateAttempt != 1 || captured[1].PreviousFailure == nil || captured[1].PreviousFailure.Code != "candidate_schema_invalid" || captured[1].PreviousFailure.Diagnostic == nil || captured[1].PreviousFailure.Diagnostic.Path != "$.unexpected" || captured[0].Transaction != captured[1].Transaction || captured[0].StablePrefixHash != captured[1].StablePrefixHash || captured[0].CandidateManifest.Hash != base.CandidateManifest.Hash || captured[1].CandidateManifest.Hash != base.CandidateManifest.Hash || captured[0].Decision.AuthoritySnapshot.RequiredOutputHash != captured[1].Decision.AuthoritySnapshot.RequiredOutputHash {
+	if len(captured) != 2 || captured[0].RequestIdentity != base.RequestIdentity || captured[1].RequestIdentity != retry.RequestIdentity || captured[0].CandidateAttempt != 0 || captured[0].PreviousFailure != nil || captured[0].CandidateCorrection != nil || captured[1].CandidateAttempt != 1 || captured[1].PreviousFailure == nil || captured[1].PreviousFailure.Code != "candidate_schema_invalid" || captured[1].CandidateCorrection == nil || captured[1].CandidateCorrection.Witness.AlternativeValue != "field_absent" || captured[1].PreviousFailure.Diagnostic == nil || captured[1].PreviousFailure.Diagnostic.Path != "$.unexpected" || captured[0].Transaction != captured[1].Transaction || captured[0].StablePrefixHash != captured[1].StablePrefixHash || captured[0].CandidateManifest.Hash != base.CandidateManifest.Hash || captured[1].CandidateManifest.Hash != base.CandidateManifest.Hash || captured[0].Decision.AuthoritySnapshot.RequiredOutputHash != captured[1].Decision.AuthoritySnapshot.RequiredOutputHash {
 		t.Fatalf("candidate retries changed sealed contract: %+v", captured)
+	}
+	drift := retry
+	drift.CandidateCorrection = retry.CandidateCorrection.Clone()
+	drift.CandidateCorrection.Witness.AlternativeValue = "different-absent-value"
+	if _, err := RequestRuntimeCandidate(ctx, hub, drift); err == nil || !strings.Contains(err.Error(), "correction request identity is stale") || len(captured) != 2 {
+		t.Fatalf("drifted retry directive reached provider: err=%v captured=%d", err, len(captured))
+	}
+	initialWithCorrection := base
+	initialWithCorrection.CandidateCorrection = retry.CandidateCorrection.Clone()
+	if _, err := RequestRuntimeCandidate(ctx, hub, initialWithCorrection); err == nil || !strings.Contains(err.Error(), "initial runtime candidate attempt must not carry correction lineage") || len(captured) != 2 {
+		t.Fatalf("attempt 0 correction lineage reached provider: err=%v captured=%d", err, len(captured))
 	}
 }
 

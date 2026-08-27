@@ -24,6 +24,7 @@ func CandidateRejectionCodeDisposition(code string) (runtimecontract.RuntimeCand
 		"candidate_owner_target_effect_overlap":
 		return runtimecontract.RuntimeCandidateCorrectionCorrectableOnce, true
 	case "candidate_replays_rejected_candidate_shape",
+		"candidate_authority_exhausted",
 		"candidate_retry_exhausted",
 		"workspace_resolution_failed",
 		"operation_feasibility_probe_invalid",
@@ -48,6 +49,8 @@ func CandidateRejectionTerminalCode(code string) string {
 	switch strings.TrimSpace(code) {
 	case "candidate_replays_rejected_candidate_shape", "candidate_retry_exhausted":
 		return "candidate_retry_exhausted"
+	case "candidate_authority_exhausted":
+		return "candidate_authority_exhausted"
 	case "workspace_resolution_failed", "operation_feasibility_probe_invalid",
 		"provider", "provider_transient", "provider_authentication", "provider_configuration", "runtime_contract_defect":
 		return strings.TrimSpace(code)
@@ -125,6 +128,15 @@ func CandidateCorrectionObjectivesForFailure(failure *runtimecontract.RuntimeCan
 // terminal outcome. It does not mutate an aggregate; callers persist the
 // returned facts through the owner-local reducer/CAS transition.
 func SealCandidateRejection(failure *runtimecontract.RuntimeCandidateFailure, manifest runtimecontract.RuntimeCandidateContractManifest) (*runtimecontract.RuntimeCandidateFailure, *runtimecontract.RuntimeCandidateCorrectionDirective, error) {
+	return sealCandidateRejectionWithFrontier(failure, manifest, candidateCorrectionFrontier{})
+}
+
+// sealCandidateRejectionWithFrontier is the total SM-3 correction policy. A
+// nominally correctable rejection opens attempt 1 only when the manifest and
+// finite rejected-shape frontier yield one concrete legal difference witness.
+// Without that witness the same candidate authority is exhausted; an
+// objective by itself is never retry authority.
+func sealCandidateRejectionWithFrontier(failure *runtimecontract.RuntimeCandidateFailure, manifest runtimecontract.RuntimeCandidateContractManifest, frontier candidateCorrectionFrontier) (*runtimecontract.RuntimeCandidateFailure, *runtimecontract.RuntimeCandidateCorrectionDirective, error) {
 	if failure == nil {
 		return nil, nil, fmt.Errorf("runtime_contract_defect: complete rejection is missing")
 	}
@@ -163,10 +175,17 @@ func SealCandidateRejection(failure *runtimecontract.RuntimeCandidateFailure, ma
 			sealed.Diagnostic.ManifestHash = manifest.Hash
 		}
 		sealed.Diagnostic = sealed.Diagnostic.Clone()
+		witness := candidateCorrectionWitness(&sealed, manifest, frontier)
+		if witness == nil {
+			return &sealed, rejectedFinalDirective(manifest.Hash, "candidate_authority_exhausted"), nil
+		}
 		directive := runtimecontract.RuntimeCandidateCorrectionDirective{
 			Disposition: runtimecontract.RuntimeCandidateCorrectionCorrectableOnce,
-			Objectives:  objectives, ManifestHash: manifest.Hash,
+			Objectives:  objectives, ManifestHash: manifest.Hash, Witness: witness,
 		}.Normalized()
+		if err := directive.Validate(); err != nil {
+			return candidateRejectionContractDefect(sealed, "manifest-bound correction witness is invalid"), rejectedFinalDirective(manifest.Hash, "runtime_contract_defect"), nil
+		}
 		return &sealed, &directive, nil
 	case runtimecontract.RuntimeCandidateCorrectionRejectedFinal:
 		return &sealed, rejectedFinalDirective(manifest.Hash, CandidateRejectionTerminalCode(sealed.Code)), nil
@@ -195,14 +214,15 @@ func candidateRejectionContractDefect(source runtimecontract.RuntimeCandidateFai
 	}
 }
 
-// CandidateFailureIsCorrectableOnce reports whether persisted SM-3 failure may
-// open attempt 1. It never derives state from raw reason text.
-func CandidateFailureIsCorrectableOnce(failure *runtimecontract.RuntimeCandidateFailure) bool {
-	if failure == nil {
+// CandidateAttemptIsCorrectableOnce is the only persisted attempt-1 gate. It
+// requires the sealed directive and witness, not merely a failure code whose
+// nominal matrix row used to be correctable.
+func CandidateAttemptIsCorrectableOnce(record runtimecontract.RuntimeCandidateAttemptRecord) bool {
+	if record.Attempt != 0 || record.State != runtimecontract.RuntimeCandidateAttemptStateFailed || record.Failure == nil || record.Correction == nil || record.Correction.ManifestHash != record.ManifestHash {
 		return false
 	}
-	disposition, ok := CandidateRejectionCodeDisposition(failure.Code)
-	return ok && disposition == runtimecontract.RuntimeCandidateCorrectionCorrectableOnce && len(CandidateCorrectionObjectivesForFailure(failure)) != 0
+	directive := record.Correction.Normalized()
+	return directive.Disposition == runtimecontract.RuntimeCandidateCorrectionCorrectableOnce && directive.Validate() == nil
 }
 
 // CandidateFailureIsRejectedFinal reports whether a persisted SM-3 failure

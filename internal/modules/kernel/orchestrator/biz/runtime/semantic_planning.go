@@ -35,7 +35,11 @@ func validateSemanticManifestIdentity(aggregate RuntimeAggregate, manifest runti
 	if len(eligible) == 0 {
 		return fmt.Errorf("%w: runtime semantic manifest has no eligible CWI", common.ErrConflict)
 	}
-	return semanticplan.ValidateManifestIdentity(semanticplan.ManifestIdentity{
+	repairInput, repairRequired, err := CurrentRuntimeValidationFailureRepairGenerationInput(aggregate)
+	if err != nil {
+		return err
+	}
+	identity := semanticplan.ManifestIdentity{
 		WorkspaceID:       aggregate.Facts.WorkspaceID,
 		RunID:             aggregate.Facts.RunID,
 		Definition:        aggregate.Definition,
@@ -44,7 +48,12 @@ func validateSemanticManifestIdentity(aggregate RuntimeAggregate, manifest runti
 		Execution:         aggregate.Facts.Activation.ExecutionContract,
 		Admissibilities:   aggregate.Facts.Resources.OperationAdmissibilities,
 		EligibleCoverage:  eligible,
-	}, manifest)
+	}
+	if repairRequired {
+		identity.EligibleCoverage = []common.CoverageWorkItemID{repairInput.CoverageWorkItemID}
+		identity.ValidationFailureRepair = &repairInput
+	}
+	return semanticplan.ValidateManifestIdentity(identity, manifest)
 }
 
 // semanticCatalogInvalidationLineage binds a retired semantic generation to
@@ -1488,7 +1497,7 @@ func validateSemanticPlanCorrectionScope(ledger runtimecontract.RuntimeSemanticP
 // compiles binding/focus/reconciliation values from the persisted document and
 // complete owner batch inside the same CAS as the semantic ledger seal. No
 // caller may submit a binding hash or focus as external authority.
-func semanticPendingFocuses(facts runtimecontract.RuntimeFacts, pending []common.CoverageWorkItemID, sealed []runtimecontract.CoverageFocus) ([]runtimecontract.CoverageFocus, error) {
+func semanticPendingFocuses(facts runtimecontract.RuntimeFacts, pending []common.CoverageWorkItemID, sealed []runtimecontract.CoverageFocus, manifest runtimecontract.RuntimeSemanticPlanManifest) ([]runtimecontract.CoverageFocus, error) {
 	sealedCoverage := make(map[common.CoverageWorkItemID]struct{})
 	for _, focus := range sealed {
 		for _, id := range focus.CoverageWorkItemIDs {
@@ -1499,6 +1508,20 @@ func semanticPendingFocuses(facts runtimecontract.RuntimeFacts, pending []common
 	for _, id := range runtimecontract.RuntimeCWIsEligibleForPlanning(facts) {
 		eligible[id] = struct{}{}
 	}
+	// A validation-failure repair generation is deliberately CWI-local. Its
+	// manifest cannot absorb unrelated Definition proofs merely because they
+	// are concurrently eligible in the canonical queue. A normal cumulative
+	// multi-batch manifest may also retain an already-settled predecessor as
+	// immutable order/proof lineage, so scope by intersection rather than
+	// treating that audit row as stale current eligibility.
+	manifest = manifest.Normalized()
+	manifestCoverage := make(map[common.CoverageWorkItemID]struct{}, len(manifest.CoverageItems))
+	for _, item := range manifest.CoverageItems {
+		if _, current := eligible[item.ID]; current {
+			manifestCoverage[item.ID] = struct{}{}
+		}
+	}
+	eligible = manifestCoverage
 	sources := make(map[common.CoverageWorkItemID]runtimecontract.CoverageFocus)
 	for _, focus := range append(append([]runtimecontract.CoverageFocus{facts.Focus}, facts.RemainingFocuses...), facts.CompletedFocuses...) {
 		for _, id := range focus.CoverageWorkItemIDs {

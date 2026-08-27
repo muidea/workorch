@@ -4,7 +4,7 @@ Status: normative
 
 Type: runtime-flow
 
-Last Verified: 2026-08-25
+Last Verified: 2026-08-27
 
 ## Purpose
 
@@ -75,6 +75,10 @@ repair 在 Runtime 中不是独立 stage 对象，而是 **drive/reducer 在当�
   → typed operation feedback 进入 internal event；reducer 决定下一 canonical state
 - assessment 返回 repairable gap
   → 结构化 gap 进入 facts；按 missing evidence kind 回 state change / validation，不能直接 terminal
+- Profile-declared typed validation rejection without an exact failure target
+  → SM-2 reopens the same CWI for one `validation_failure_repair` semantic generation
+  → File confirms the proposed target and SM-2 seals a generation binding
+  → accepted repair state change retires that binding and requires fresh validation; it never grants terminal validation credit
 - 需要外部信息 / 审批 / 依赖
   → sealed governance candidate → ticket → resolution commit
 - 存在owner-defined typed recovery/reconciliation合同的暂时不可用或consumption unknown
@@ -92,6 +96,9 @@ repair 在 Runtime 中不是独立 stage 对象，而是 **drive/reducer 在当�
 
 - attempt 0 与 attempt 1 状态随 aggregate 持久化
 - attempt 1 必须复用相同 `AuthorityTransaction` 与 `StablePrefixHash`
+- attempt 0 只有在 sealed manifest 的有限 frontier 中存在具体 semantic witness 时才可持久化 `correctable_once`；ID、
+  summary 或 reason-only delta 无效。frontier 为空直接 `candidate_authority_exhausted`，且不创建 attempt 1/provider call
+- attempt 1 在 provider call 前重验 persisted manifest/witness，完整 document 必须实际使用该 alternative
 - 第二次 complete rejection 后生成 structured candidate exhaustion fact，由 SM-3 形成 typed candidate terminal；不得发起第三次 same-contract candidate。governance 只能来自独立的 typed external dependency
 - 进程重启不增加 attempt；只加载已有 `CandidateAttempts`
 

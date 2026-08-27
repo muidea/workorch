@@ -39,13 +39,20 @@ func TestRuntimeCandidateRequestIdentityIsTotalAndDeterministic(t *testing.T) {
 		t.Fatalf("physical call ID is not stable per logical request/sequence: %q", first)
 	}
 	base := &RuntimeCandidateFailure{Class: RuntimeCandidateFailureClassSchema, Code: "candidate_schema_invalid", Signature: "schema-v1", Reason: "volatile reason"}
-	if StableRuntimeCandidateRequestCorrectionHash(nil) != "" || StableRuntimeCandidateRequestCorrectionHash(base) == "" {
+	if StableRuntimeCandidateRequestCorrectionHash(nil, "", nil, nil) != "" || StableRuntimeCandidateRequestCorrectionHash(base, "", nil, nil) == "" {
 		t.Fatal("correction hash did not distinguish initial and correction request")
 	}
 	changedReason := *base
 	changedReason.Reason = "another volatile reason"
-	if StableRuntimeCandidateRequestCorrectionHash(base) != StableRuntimeCandidateRequestCorrectionHash(&changedReason) {
+	if StableRuntimeCandidateRequestCorrectionHash(base, "", nil, nil) != StableRuntimeCandidateRequestCorrectionHash(&changedReason, "", nil, nil) {
 		t.Fatal("correction hash must not depend on unstable reason text")
+	}
+	directive := runtimeCandidateAttemptCorrectableDirective("manifest-1")
+	boundHash := StableRuntimeCandidateRequestCorrectionHash(base, directive.ManifestHash, directive.Objectives, directive.Witness)
+	changedDirective := directive.Clone()
+	changedDirective.Witness.AlternativeValue = "different_field_present"
+	if boundHash == "" || boundHash == StableRuntimeCandidateRequestCorrectionHash(base, "", nil, nil) || boundHash == StableRuntimeCandidateRequestCorrectionHash(base, changedDirective.ManifestHash, changedDirective.Objectives, changedDirective.Witness) {
+		t.Fatal("correction hash did not bind the complete normalized witness")
 	}
 	normalized := (RuntimeCandidateRequestIdentity{LogicalRequestID: "  candidate-request-1 ", Sequence: 1, PhysicalCallID: " candidate-call-1  "}).Normalized()
 	want := RuntimeCandidateRequestIdentity{LogicalRequestID: "candidate-request-1", Sequence: 1, PhysicalCallID: "candidate-call-1"}

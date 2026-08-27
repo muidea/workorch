@@ -118,7 +118,11 @@ type RuntimeCandidateAttemptRecord struct {
 	Proposal      *RuntimeCandidate
 	Feasibilities []RuntimeCandidateFeasibilityRecord
 	Failure       *RuntimeCandidateFailure
-	Stale         *RuntimePrerequisiteStale
+	// Correction is the manifest-bound SM-3 disposition sealed together with a
+	// failed attempt. A correctable_once value must carry a concrete semantic
+	// witness; attempt 1 may never be inferred again from Failure reason text.
+	Correction *RuntimeCandidateCorrectionDirective
+	Stale      *RuntimePrerequisiteStale
 	// OwnerFeasibility is immutable owner fact lineage for an invalidated
 	// proposal. It is never a candidate failure and therefore cannot authorize
 	// attempt 1.
@@ -536,7 +540,7 @@ func ValidateRuntimeCandidateAttemptRecords(values []RuntimeCandidateAttemptReco
 		bySnapshot[value.Transaction.AuthoritySnapshotID] = append(bySnapshot[value.Transaction.AuthoritySnapshotID], value)
 		switch value.State {
 		case RuntimeCandidateAttemptStatePending, RuntimeCandidateAttemptStateAccepted:
-			if value.Failure != nil || value.Stale != nil || value.PrerequisiteRequest != nil || value.OwnerFeasibility != nil {
+			if value.Failure != nil || value.Correction != nil || value.Stale != nil || value.PrerequisiteRequest != nil || value.OwnerFeasibility != nil {
 				return fmt.Errorf("runtime candidate attempt %s state %s cannot carry failure", key, value.State)
 			}
 			if value.State == RuntimeCandidateAttemptStateAccepted && value.Proposal != nil {
@@ -553,14 +557,23 @@ func ValidateRuntimeCandidateAttemptRecords(values []RuntimeCandidateAttemptReco
 				return fmt.Errorf("pending runtime candidate attempt %s cannot carry dispatch authority", key)
 			}
 		case RuntimeCandidateAttemptStateFailed:
-			if value.Failure == nil || value.Failure.Class == "" || strings.TrimSpace(value.Failure.Reason) == "" {
-				return fmt.Errorf("failed runtime candidate attempt %s requires typed failure", key)
+			if value.Failure == nil || value.Failure.Class == "" || strings.TrimSpace(value.Failure.Reason) == "" || value.Correction == nil {
+				return fmt.Errorf("failed runtime candidate attempt %s requires typed failure and total correction disposition", key)
 			}
 			if value.Stale != nil || value.PrerequisiteRequest != nil || value.OwnerFeasibility != nil {
 				return fmt.Errorf("failed runtime candidate attempt %s cannot carry freshness stale", key)
 			}
 			if value.CandidateHash != "" || value.DispatchID != "" || value.DispatchAuthorityHash != "" {
 				return fmt.Errorf("failed runtime candidate attempt %s cannot carry dispatch authority", key)
+			}
+			if err := value.Correction.Validate(); err != nil {
+				return fmt.Errorf("failed runtime candidate attempt %s correction: %w", key, err)
+			}
+			if value.Correction.ManifestHash != value.ManifestHash {
+				return fmt.Errorf("failed runtime candidate attempt %s correction manifest mismatch", key)
+			}
+			if value.Attempt == 1 && value.Correction.Disposition == RuntimeCandidateCorrectionCorrectableOnce {
+				return fmt.Errorf("runtime candidate attempt %s cannot authorize a third candidate attempt", key)
 			}
 		case RuntimeCandidateAttemptStateInvalidated:
 			if value.CandidateHash != "" || value.DispatchID != "" || value.DispatchAuthorityHash != "" {
@@ -576,7 +589,7 @@ func ValidateRuntimeCandidateAttemptRecords(values []RuntimeCandidateAttemptReco
 			if value.OwnerFeasibility != nil {
 				reasonCount++
 			}
-			if value.Failure != nil || value.Proposal != nil || len(value.Feasibilities) != 0 || reasonCount != 1 {
+			if value.Failure != nil || value.Correction != nil || value.Proposal != nil || len(value.Feasibilities) != 0 || reasonCount != 1 {
 				return fmt.Errorf("invalidated runtime candidate attempt %s requires exactly one typed invalidation reason", key)
 			}
 			if value.Stale != nil {
@@ -607,7 +620,7 @@ func ValidateRuntimeCandidateAttemptRecords(values []RuntimeCandidateAttemptReco
 	for snapshotID, attempts := range bySnapshot {
 		first, hasFirst := runtimeCandidateAttemptByNumber(attempts, 0)
 		second, hasSecond := runtimeCandidateAttemptByNumber(attempts, 1)
-		if hasSecond && hasFirst && (first.State != RuntimeCandidateAttemptStateFailed || first.Transaction != second.Transaction || first.StablePrefixHash != second.StablePrefixHash || first.ManifestHash != second.ManifestHash) {
+		if hasSecond && hasFirst && (first.State != RuntimeCandidateAttemptStateFailed || first.Correction == nil || first.Correction.Disposition != RuntimeCandidateCorrectionCorrectableOnce || first.Transaction != second.Transaction || first.StablePrefixHash != second.StablePrefixHash || first.ManifestHash != second.ManifestHash) {
 			return fmt.Errorf("runtime candidate snapshot %s attempt 1 is not a same-contract retry", snapshotID)
 		}
 		if hasFirst && first.State == RuntimeCandidateAttemptStateAccepted && hasSecond {
@@ -687,7 +700,7 @@ func ValidateRuntimeCandidateAttemptRecordsForScope(workspaceID common.Workspace
 		}
 		first, hasFirst := runtimeCandidateAttemptByNumber(attempts, 0)
 		second, hasSecond := runtimeCandidateAttemptByNumber(attempts, 1)
-		if len(attempts) > 2 || attemptCounts[0] > 1 || attemptCounts[1] > 1 || (hasSecond && (!hasFirst || first.State != RuntimeCandidateAttemptStateFailed || !SameAuthorityContract(first.Transaction, second.Transaction) || first.StablePrefixHash != second.StablePrefixHash || first.ManifestHash != second.ManifestHash)) {
+		if len(attempts) > 2 || attemptCounts[0] > 1 || attemptCounts[1] > 1 || (hasSecond && (!hasFirst || first.State != RuntimeCandidateAttemptStateFailed || first.Correction == nil || first.Correction.Disposition != RuntimeCandidateCorrectionCorrectableOnce || !SameAuthorityContract(first.Transaction, second.Transaction) || first.StablePrefixHash != second.StablePrefixHash || first.ManifestHash != second.ManifestHash)) {
 			return fmt.Errorf("runtime candidate authority contract %s exceeds the sealed attempt 0/1 transaction", contractID)
 		}
 		if hasFirst && first.State == RuntimeCandidateAttemptStateAccepted && hasSecond {
@@ -792,6 +805,9 @@ func (r RuntimeStateRecord) Clone() RuntimeStateRecord {
 				failure.ValidationDiagnostic = &diagnostic
 			}
 			ret.CandidateAttempts[idx].Failure = &failure
+		}
+		if attempt.Correction != nil {
+			ret.CandidateAttempts[idx].Correction = attempt.Correction.Clone()
 		}
 		if attempt.Stale != nil {
 			stale := *attempt.Stale

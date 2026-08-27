@@ -45,7 +45,7 @@ func RuntimeBootstrap(goal *workspacemodel.Goal, dod *workspacemodel.DoD, defini
 	// proof fields; Orchestrator derives a non-authoritative queue cursor from it
 	// and may add generation authority only via semantic_contract_sealed.
 	compiledFocuses := compiled.Focuses
-	definitionFocuses := runtimecontract.CompileRuntimeDefinitionFocuses(compiledFocuses)
+	definitionFocuses := runtimecontract.CloneRuntimeDefinitionFocuses(compiled.DefinitionFocuses)
 	capabilityContract := []string{
 		runtimecontract.StepKindFileEdit,
 		runtimecontract.StepKindFileRead,

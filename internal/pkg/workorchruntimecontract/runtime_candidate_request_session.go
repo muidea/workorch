@@ -277,30 +277,52 @@ func StableRuntimeCandidateRequestContentID(logicalRequestID string) common.Arti
 
 // StableRuntimeCandidateRequestCorrectionHash differentiates a correction
 // document from an initial request without using a candidate-attempt ordinal.
-// Reason is deliberately excluded because it can contain unstable or verbose
-// provider text; the typed failure identity is the correction contract.
-func StableRuntimeCandidateRequestCorrectionHash(failure *RuntimeCandidateFailure) string {
-	if failure == nil {
+// It binds only the provider-bound detached correction identity: the prior
+// typed failure plus manifest, objectives and concrete witness. Orchestrator
+// disposition/terminal state never enters an LLM request. Reason is excluded
+// because it can contain unstable or verbose provider text.
+func StableRuntimeCandidateRequestCorrectionHash(failure *RuntimeCandidateFailure, manifestHash string, objectives []RuntimeCandidateCorrectionObjective, witness *RuntimeCandidateCorrectionWitness) string {
+	manifestHash = strings.TrimSpace(manifestHash)
+	objectives = (&RuntimeCandidateFailureDiagnostic{Objectives: append([]RuntimeCandidateCorrectionObjective(nil), objectives...)}).Normalized().Objectives
+	if failure == nil && manifestHash == "" && len(objectives) == 0 && witness == nil {
 		return ""
 	}
 	h := sha256.New()
 	writeHashString(h, "runtime-candidate-request-correction")
-	writeHashString(h, string(failure.Class))
-	writeHashString(h, strings.TrimSpace(failure.Code))
-	writeHashString(h, strings.TrimSpace(failure.Signature))
-	writeHashStrings(h, normalizeStrings(failure.TargetRefs))
-	if diagnostic := failure.Diagnostic; diagnostic != nil {
-		value := diagnostic.Normalized()
-		writeHashString(h, value.OperationID)
-		writeHashString(h, value.Path)
-		writeHashString(h, value.Actual)
-		writeHashStrings(h, value.Allowed)
-		writeHashStrings(h, value.Required)
-		writeHashStrings(h, value.Forbidden)
-		writeHashString(h, value.ManifestHash)
-		writeHashString(h, value.RejectedShapeHash)
-		for _, objective := range value.Objectives {
+	if failure != nil {
+		writeHashString(h, string(failure.Class))
+		writeHashString(h, strings.TrimSpace(failure.Code))
+		writeHashString(h, strings.TrimSpace(failure.Signature))
+		writeHashStrings(h, normalizeStrings(failure.TargetRefs))
+		if diagnostic := failure.Diagnostic; diagnostic != nil {
+			value := diagnostic.Normalized()
+			writeHashString(h, value.OperationID)
+			writeHashString(h, value.Path)
+			writeHashString(h, value.Actual)
+			writeHashStrings(h, value.Allowed)
+			writeHashStrings(h, value.Required)
+			writeHashStrings(h, value.Forbidden)
+			writeHashString(h, value.ManifestHash)
+			writeHashString(h, value.RejectedShapeHash)
+			for _, objective := range value.Objectives {
+				writeHashString(h, string(objective))
+			}
+		}
+	}
+	if manifestHash != "" || len(objectives) != 0 || witness != nil {
+		writeHashString(h, manifestHash)
+		for _, objective := range objectives {
 			writeHashString(h, string(objective))
+		}
+		if witness != nil {
+			value := witness.Normalized()
+			writeHashString(h, string(value.Dimension))
+			writeHashString(h, value.OperationKind)
+			writeHashString(h, value.Path)
+			writeHashString(h, value.RejectedValue)
+			writeHashString(h, value.AlternativeValue)
+			writeHashString(h, value.RejectedShapeHash)
+			writeHashString(h, value.AlternativeShapeHash)
 		}
 	}
 	return "candidate-correction-" + hex.EncodeToString(h.Sum(nil))[:20]

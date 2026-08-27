@@ -205,14 +205,16 @@ decode/validate 边界失败；不得补声明、推导旧状态、生成 compat
 Fresh activation 的 immutable `DefinitionFocuses` 与 SM-2 generation-specific
 `Focus/RemainingFocuses/CompletedFocuses` 必须分离。前者只包含 CWI、presentation slice、required
 evidence/assessment、声明式 metric/artifact obligation、owner-fact postcondition、target role 与可选 profile
-selector/candidate scope；不得携带 exact/resolved/prospective target、operation kind/variant、recipe/check 或 binding。后者可以随 owner resource revision
+selector/candidate scope，以及可选的单一 Profile `ValidationFailureRepairConvergence`；不得携带
+exact/resolved/prospective target、operation kind/variant、recipe/check 或 binding。后者可以随 owner resource revision
 退休、重开和重新 seal。semantic document admission、owner feasibility 与 final seal 都只能用 immutable
 DefinitionFocus 检查 source declaration，不能把上一 generation 的 accepted operation 当成下一 generation 声明。
 
 该分离必须由类型而非运行期字段清空实现：`RuntimeBootstrap.DefinitionFocuses` 与
 `RuntimeFacts.DefinitionFocuses` 使用 `RuntimeDefinitionFocus`；初始执行游标只能由
 `RuntimeFocusSeedsFromDefinitionFocuses` 生成不含 target selector、owner-fact closure、resolved target、operation、recipe、
-check 或 binding 的 `CoverageFocus` seed。只有 SM-2 semantic seal 可以用 generation-specific `CoverageFocus` 替换该游标。
+check、binding 或 `ValidationFailureRepairConvergence` 的 `CoverageFocus` seed。只有 SM-2 semantic seal 可以用
+generation-specific `CoverageFocus` 替换该游标。
 Definition/activation 只封存 declaration selector identity、candidate refs 与 acquisition closure；它们不封存
 exact prospective target set。`ProspectiveTargetRefs` 首次出现在 SM-3 semantic proposal，File/Shell owner fact 只通过
 typed lineage 绑定该 proposal/target set 并返回 factual feasibility/satisfaction；只有 SM-2 private event 封存的

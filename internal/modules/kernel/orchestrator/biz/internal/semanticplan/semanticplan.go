@@ -25,6 +25,10 @@ type ManifestIdentity struct {
 	Execution         runtimecontract.RuntimeExecutionContract
 	Admissibilities   []runtimecontract.RuntimeOperationAdmissibility
 	EligibleCoverage  []common.CoverageWorkItemID
+	// ValidationFailureRepair is present only after a private SM-2 CWI reopen
+	// persisted the exact typed rejection and Profile convergence. It selects
+	// the shared repair-purpose compiler; it is never synthesized here.
+	ValidationFailureRepair *runtimecontract.RuntimeValidationFailureRepairGenerationInput
 }
 
 // CompileManifest is the single focused-package entry for compiling a
@@ -32,6 +36,20 @@ type ManifestIdentity struct {
 // schema and hash; this wrapper keeps the Orchestrator's planning code free of
 // duplicate compilation paths.
 func CompileManifest(identity ManifestIdentity) (runtimecontract.RuntimeSemanticPlanManifest, error) {
+	if identity.ValidationFailureRepair != nil {
+		input := identity.ValidationFailureRepair.Normalized()
+		return runtimecontract.CompileRuntimeSemanticPlanManifestForCoverageWithValidationFailureRepair(
+			identity.WorkspaceID,
+			identity.RunID,
+			identity.Definition,
+			identity.DefinitionSeed,
+			identity.DefinitionFocuses,
+			identity.Execution,
+			identity.Admissibilities,
+			identity.EligibleCoverage,
+			input,
+		)
+	}
 	return runtimecontract.CompileRuntimeSemanticPlanManifestForCoverage(
 		identity.WorkspaceID,
 		identity.RunID,

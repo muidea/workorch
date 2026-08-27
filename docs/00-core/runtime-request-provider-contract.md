@@ -4,7 +4,7 @@ Status: normative
 
 Type: core-contract-part
 
-Last Verified: 2026-08-23
+Last Verified: 2026-08-27
 
 ## Typed Request Binding
 
@@ -133,9 +133,10 @@ LLM usage Eventstream/read projection 同样必须原样保留 `logicalRequestId
 `physicalCallId=requestId`。generic usage 与引入双层 identity 前的 persisted trace 可以两者都没有，但任何 consumer
 不得从 `RequestID`、request bytes 或 streaming 隐含/补造 logical identity。
 
-attempt 1 只允许改变 C4 中 provider-safe `CandidateRejection` 与 Orchestrator-sealed `CorrectionDirective`。若修正需要
-改变 operation authorization、target policy、allowed targets、manifest 或 C0～C3，则必须终止 current transaction，
-等待 SM-2 以新 owner fact 建立新 authority。
+attempt 1 只允许改变 C4 中 provider-safe `CandidateRejection` 与 Orchestrator persisted `CorrectionDirective` 的 detached
+`correctionInput` 投影。该投影只有 manifest、objectives 与 concrete witness；persisted `Disposition`/`TerminalCode` 不进入
+LLM command/model/C4，LLM 也不能反构 directive。若修正需要改变 operation authorization、target policy、allowed
+targets、manifest 或 C0～C3，则必须终止 current transaction，等待 SM-2 以新 owner fact 建立新 authority。
 
 prospective target 的 required-owner typed `all_of` constraint 只进入 C3 authority；document/schema mismatch 的普通
 attempt-1 correction 保持 C0～C3、manifest、semantic batch/order 与 stable prefix 不变，C4 只引用

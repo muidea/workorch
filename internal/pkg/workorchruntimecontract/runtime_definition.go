@@ -133,6 +133,12 @@ func StableRuntimeCandidatePrefixHashWithExecutionContract(definition RuntimeDef
 				writeHashString(h, fmt.Sprintf("%d", convergence.MaxAcquisitionAttempts))
 				writeHashStrings(h, convergence.DependsOnRequirementRefs)
 			}
+			if requirement.ValidationFailureRepairConvergence == nil {
+				writeHashString(h, "validation-failure-repair:absent")
+			} else {
+				writeHashString(h, "validation-failure-repair:present")
+				writeHashString(h, StableRuntimeValidationFailureRepairConvergenceHash(*requirement.ValidationFailureRepairConvergence))
+			}
 			writeHashStrings(h, requirement.RejectedStepKinds)
 			writeHashString(h, requirement.Description)
 		}

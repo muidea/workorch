@@ -11,6 +11,7 @@ paths=(
   "internal/modules/blocks/run"
   "internal/modules/blocks/llm"
   "internal/modules/blocks/mcp"
+  "internal/pkg/workorchruntimecontract"
   "web/workorch-console/src"
 )
 
@@ -1569,7 +1570,64 @@ if ! grep -q -F -- 'llmevents.TopicAcquireProviderCeiling' internal/modules/bloc
    ! grep -q -F -- 'llmevents.TopicPreflightRuntimeCandidate' internal/modules/blocks/llm/biz/owner.go ||
    ! grep -q -F -- 'llmevents.TopicRequestRuntimeCandidate' internal/modules/blocks/llm/biz/owner.go; then
   echo "boundary contract violation: LLM Biz does not consume all LLM owner Runtime provider topics" >&2
-  exit 1
+	exit 1
+fi
+
+# SM-3 owns the persisted candidate correction disposition/terminal state.
+# The LLM owner receives only a detached, manifest-bound witness needed to
+# render C4; neither its EventHub command/model nor C4 may mirror owner state,
+# and the adapter must not rebuild a persisted directive from that input.
+llm_candidate_command_shapes="$(sed -n \
+	-e '/^type RequestRuntimeCandidateCommand struct {/,/^}/p' \
+	-e '/^type PreflightRuntimeCandidateCommand struct {/,/^}/p' \
+	"$llm_contract_root/messages.go")"
+llm_candidate_correction_input_shape="$(sed -n '/^type RuntimeCandidateCorrectionInput struct {/,/^}/p' internal/modules/blocks/llm/pkg/models/runtime_candidate.go)"
+for marker in \
+	'CandidateCorrection[[:space:]]+\*llmmodel.RuntimeCandidateCorrectionInput' \
+	'ManifestHash[[:space:]]+string' \
+	'Objectives[[:space:]]+\[\]runtimecontract.RuntimeCandidateCorrectionObjective' \
+	'Witness[[:space:]]+runtimecontract.RuntimeCandidateCorrectionWitness'; do
+	if ! grep -q -E -- "$marker" <<<"$llm_candidate_command_shapes"$'\n'"$llm_candidate_correction_input_shape"; then
+		echo "boundary contract violation: detached LLM candidate correction input lost $marker" >&2
+		exit 1
+	fi
+done
+llm_candidate_correction_authority_shapes="$({
+	printf '%s\n' "$llm_candidate_command_shapes"
+	printf '%s\n' "$llm_candidate_correction_input_shape"
+	cat internal/modules/blocks/llm/biz/runtime_candidate_contract.go
+})"
+if grep -q -E -- '^[[:space:]]*(Disposition|TerminalCode)[[:space:]]|RuntimeCandidateCorrectionDirective' <<<"$llm_candidate_correction_authority_shapes"; then
+	echo "boundary contract violation: LLM command/model/C4 regained candidate correction disposition, terminal state or persisted directive" >&2
+	exit 1
+fi
+if grep -q -E -- 'runtimeCandidateCorrectionDirectiveFromInput|RuntimeCandidateCorrectionDirective[[:space:]]*\{' internal/modules/kernel/orchestrator/biz/runtime_candidate_event_adapter.go; then
+	echo "boundary contract violation: Orchestrator adapter rebuilds persisted candidate correction authority from detached LLM input" >&2
+	exit 1
+fi
+
+# The owner-neutral correction frontier may inspect only manifest-sealed typed
+# semantic roles. Capability parameter/wire spellings stay centralized in the
+# operation contract and must never become Orchestrator branching rules.
+candidate_correction_frontier='internal/modules/kernel/orchestrator/biz/runtime/candidate_correction_frontier.go'
+for marker in \
+	'RuntimeOperationCorrectionFieldForRole' \
+	'RuntimeOperationCorrectionFieldsForRole' \
+	'RuntimeOperationKindCorrectionField' \
+	'RuntimeOperationVariantCorrectionField'; do
+	if ! grep -q -F -- "$marker" "$candidate_correction_frontier"; then
+		echo "boundary contract violation: candidate correction frontier lost typed operation metadata API $marker" >&2
+		exit 1
+	fi
+done
+if grep -q -E -- 'recipeId|"path"|targetRef' "$candidate_correction_frontier"; then
+	echo "boundary contract violation: candidate correction frontier infers capability semantics from parameter or wire-field spelling" >&2
+	exit 1
+fi
+if grep -q -E -- 'TargetMirror|target_mirror|Retarget|retarget' \
+	"$candidate_correction_frontier" internal/pkg/workorchruntimecontract/runtime_operation_correction.go; then
+	echo "boundary contract violation: candidate correction contract regained an unused target-mirror/retarget authority role" >&2
+	exit 1
 fi
 
 provider_ceiling_result_shape="$(sed -n '/^type AcquireProviderCeilingResult struct {/,/^}/p' "$llm_contract_root/messages.go")"
@@ -3556,6 +3614,16 @@ fi
 # Runtime execution focus has one Orchestrator-owned field-writing reducer.
 # Other helpers may compute detached projections, but production code must not
 # select RemainingFocuses[0] or assign the canonical queue independently.
+if ! grep -q -F -- 'func replaceRuntimeCWIFocusProjectionForSemanticRebinding(' internal/modules/kernel/orchestrator/biz/runtime/cwi_ledger.go ||
+	! grep -q -F -- 'replaceRuntimeCWIFocusProjectionForSemanticRebinding(facts' internal/modules/kernel/orchestrator/biz/runtime/validation_failure_repair.go ||
+	grep -q -F -- 'sanitizeRuntimeValidationFailureRepairPendingFocus' internal/modules/kernel/orchestrator/biz/runtime/validation_failure_repair.go; then
+	echo "boundary contract violation: validation-failure semantic rebinding bypasses the CWI focus projection reducer" >&2
+	exit 1
+fi
+if ! grep -R -q -F --include='*_test.go' -- 'TestValidationFailureRepairSemanticRebindingClearsExecutionAuthorityThroughFocusReducer' internal/modules/kernel/orchestrator/biz/runtime; then
+	echo "boundary contract violation: validation-failure semantic rebinding focus transition regression is missing" >&2
+	exit 1
+fi
 runtime_focus_writes="$(
 	grep -R -Hn -E 'facts\.(Focus|RemainingFocuses|CompletedFocuses)[[:space:]]*=' \
 		internal/modules/kernel/orchestrator/biz/runtime --include='*.go' --exclude='*_test.go' |
@@ -3984,8 +4052,72 @@ append_preseal_target_shape RuntimeCoverageEvidenceRequirement internal/pkg/work
 append_preseal_target_shape RuntimeDefinitionFocus internal/pkg/workorchruntimecontract/runtime_definition_focus.go
 append_preseal_target_shape RuntimeSemanticProofObligation internal/pkg/workorchruntimecontract/runtime_semantic_obligation.go
 append_preseal_target_shape RuntimeSemanticOwnerFactAcquisition internal/pkg/workorchruntimecontract/runtime_semantic_obligation.go
+append_preseal_target_shape RuntimeValidationFailureRepairConvergence internal/pkg/workorchruntimecontract/runtime_validation_failure_repair_convergence.go
+append_preseal_target_shape RuntimeSemanticValidationFailureRepair internal/pkg/workorchruntimecontract/runtime_semantic_validation_failure_repair.go
 if grep -q -i -E -- '[[:space:]](ProspectiveTargetRefs?|TargetRef)[[:space:]]|json:"[^"]*(prospectiveTargetRefs?|targetRef)' <<<"$preseal_target_shapes"; then
 	echo "boundary contract violation: a pre-seal Definition/profile/semantic declaration regained an exact prospective target" >&2
+	exit 1
+fi
+validation_repair_preseal_shapes="$({
+	sed -n '/^type RuntimeValidationFailureRepairConvergence struct {/,/^}/p' internal/pkg/workorchruntimecontract/runtime_validation_failure_repair_convergence.go
+	sed -n '/^type RuntimeSemanticValidationFailureRepair struct {/,/^}/p' internal/pkg/workorchruntimecontract/runtime_semantic_validation_failure_repair.go
+})"
+if grep -q -E -- '^[[:space:]]+[A-Za-z0-9_]*(Prospective|Exact)?TargetRefs?[[:space:]]+' <<<"$validation_repair_preseal_shapes" ||
+	grep -q -E -- '^[[:space:]]*[A-Za-z0-9_]*(OneOf|AnyOf|Alternative|Quorum|Threshold|FirstSuccess)[A-Za-z0-9_]*[[:space:]]+' <<<"$validation_repair_preseal_shapes"; then
+	echo "boundary contract violation: validation-failure repair declaration regained an exact target or alternative relation" >&2
+	exit 1
+fi
+runtime_profile_requirement_shape="$(sed -n '/^type RuntimeProfileEvidenceRequirement struct {/,/^}/p' internal/pkg/workorchruntimecontract/runtime_profile_contract.go)"
+if ! grep -q -E -- 'ValidationFailureRepairConvergence[[:space:]]+\*RuntimeValidationFailureRepairConvergence' <<<"$runtime_profile_requirement_shape" ||
+	grep -q -E -- 'ValidationFailureRepairConvergences|\[\][[:space:]]*\*?RuntimeValidationFailureRepairConvergence' <<<"$runtime_profile_requirement_shape"; then
+	echo "boundary contract violation: Profile validation-failure repair must remain one optional all-of convergence object" >&2
+	exit 1
+fi
+runtime_coverage_focus_shape="$(sed -n '/^type CoverageFocus struct {/,/^}/p' internal/pkg/workorchruntimecontract/canonical_runtime.go)"
+if grep -q -F -- 'ValidationFailureRepairConvergence' <<<"$runtime_coverage_focus_shape"; then
+	echo "boundary contract violation: mutable CoverageFocus regained Profile validation-failure repair authority" >&2
+	exit 1
+fi
+if ! grep -R -q -F --include='*_test.go' -- 'TestRuntimeValidationFailureRepairConvergenceIsSealedAcrossProfileAndDefinitionSurfaces' internal/pkg/workorchruntimecontract; then
+	echo "boundary contract violation: immutable Definition/mutable CoverageFocus repair-convergence regression is missing" >&2
+	exit 1
+fi
+validation_repair_profile_parser="$({
+	sed -n '/^func runtimeValidationFailureRepairConvergence(/,/^}/p' internal/modules/application/workorchd/biz/appservice/activationports/runtime_activation.go
+	sed -n '/^func runtimeValidationFailureRepairConvergenceHasExactShape(/,/^}/p' internal/modules/application/workorchd/biz/appservice/activationports/runtime_activation.go
+})"
+for marker in \
+	'rawValue, present := input["validationFailureRepairConvergence"]' \
+	'!present' \
+	'!object' \
+	'len(raw) == 0' \
+	'default:' \
+	'return false'; do
+	if ! grep -q -F -- "$marker" <<<"$validation_repair_profile_parser"; then
+		echo "boundary contract violation: validation-failure repair strict-current object parser lost $marker" >&2
+		exit 1
+	fi
+done
+if grep -q -E -- '"(oneOf|anyOf|alternative|alias)"' <<<"$validation_repair_profile_parser"; then
+	echo "boundary contract violation: validation-failure repair strict-current whitelist accepts an alternative or alias field" >&2
+	exit 1
+fi
+runtime_profile_requirement_normalization="$({
+	sed -n '/^func ValidateRuntimeProfileContracts(/,/^}/p' internal/pkg/workorchruntimecontract/runtime_profile_contract.go
+	sed -n '/^func normalizeRuntimeProfileEvidenceRequirements(/,/^}/p' internal/pkg/workorchruntimecontract/runtime_profile_contract.go
+})"
+for marker in \
+	'duplicate evidence requirement scope+id' \
+	'make([]RuntimeProfileEvidenceRequirement, 0, len(values))' \
+	'ret = append(ret, value)' \
+	'sort.SliceStable'; do
+	if ! grep -q -F -- "$marker" <<<"$runtime_profile_requirement_normalization"; then
+		echo "boundary contract violation: Profile evidence normalization no longer preserves duplicate scope+id for fail-closed admission ($marker)" >&2
+		exit 1
+	fi
+done
+if grep -q -F -- 'byKey[value.Scope+"|"+value.ID] = value' <<<"$runtime_profile_requirement_normalization"; then
+	echo "boundary contract violation: Profile evidence normalization restored last-wins scope+id semantics" >&2
 	exit 1
 fi
 runtime_bootstrap_artifact_parser="$(sed -n '/^func runtimeExecutionContract(/,/^}/p' internal/modules/application/workorchd/biz/appservice/activationports/runtime_activation.go)"
@@ -4128,12 +4260,30 @@ for regression in \
 	'TestDefinitionAdmissionRejectsRemovedPresealExactTargetInEvidencePolicies' \
 	'TestDefinitionAdmissionRejectsLossyEvidencePolicyInputsPerOwner' \
 	'TestDefinitionAdmissionCandidateSealsWorkspaceEvidencePolicySnapshot' \
+	'TestDefinitionAdmissionBlocksIncompleteValidationRepairContractBeforeRun' \
+	'TestDefinitionAdmissionRejectsValidationRepairNonObjectAlternativeAndDuplicateShapesBeforeRuntimeWork' \
+	'TestDefinitionAdmissionProfileContractInvalidHasNoRuntimeAdmission' \
+	'TestRuntimeProfileEvidenceRequirementNormalizationPreservesCardinalityAndRejectsDuplicateScopeID' \
 	'TestRuntimeBootstrapStartupSealRejectsTemplateAndProfileDrift' \
 	'TestRuntimeActivationContextRejectsPresealExactProspectiveTarget' \
 	'TestRuntimeActivationContextRejectsBootstrapArtifactExactTarget' \
 	'post-binding bootstrap target uses open declaration selector'; do
 	if ! grep -R -q -F --include='*_test.go' -- "$regression" internal; then
 		echo "boundary contract violation: strict Definition/pre-seal policy regression is missing ($regression)" >&2
+		exit 1
+	fi
+done
+
+for regression in \
+	'TestCompileRuntimeSemanticValidationFailureRepairSealsOneFileProofAndFreshValidationLineage' \
+	'TestRejectedTypedValidationWithoutFailureTargetOpensProfileRepairGeneration' \
+	'TestValidationFailureRepairMultiTargetSettlementUsesOneCompletedAllOfDispatch' \
+	'TestRuntimeCandidateAttemptFailedRequiresManifestBoundTotalCorrection' \
+	'TestCandidateCorrectionFrontierExhaustsSingleTargetAndSealsConcreteAlternative' \
+	'TestRuntimeMainlineCandidateAuthorityExhaustionHasNoCorrectionProviderOrBudgetEffect' \
+	'TestRuntimeFileBackedSemanticCandidateReplayExhaustionSurvivesCASBoundaries'; do
+	if ! grep -R -q -F --include='*_test.go' -- "$regression" internal; then
+		echo "boundary contract violation: validation-repair/candidate-correction convergence regression is missing ($regression)" >&2
 		exit 1
 	fi
 done

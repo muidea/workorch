@@ -235,18 +235,27 @@ func validateRuntimeSemanticBindingPurposeInvariant(a RuntimeAggregate) error {
 			}
 			return fmt.Errorf("runtime aggregate CWI %q current binding manifest %q has no exact semantic purpose lineage (active=%q history=%d)", item.ID, ref.SemanticManifestHash, activeManifestHash, len(a.SemanticPlanning.History))
 		}
-		if purpose != runtimecontract.RuntimeSemanticEvidenceObligationOwnerFactAcquisition {
-			continue
-		}
 		focus, found := focuses[ref.FocusID]
 		if !found {
-			return fmt.Errorf("runtime aggregate acquisition CWI %q has no bound focus", item.ID)
+			return fmt.Errorf("runtime aggregate intermediate-purpose CWI %q has no bound focus", item.ID)
 		}
-		if !focus.RequireAssessment {
-			return fmt.Errorf("runtime aggregate acquisition CWI %q requires assessment before terminal credit", item.ID)
-		}
-		if item.State == runtimecontract.RuntimeCoverageItemStateSatisfied || item.CWIConvergenceState == runtimecontract.RuntimeCWIConvergenceStateSettled {
-			return fmt.Errorf("runtime aggregate acquisition CWI %q cannot retain terminal coverage credit", item.ID)
+		switch purpose {
+		case runtimecontract.RuntimeSemanticEvidenceObligationOwnerFactAcquisition:
+			if !focus.RequireAssessment {
+				return fmt.Errorf("runtime aggregate acquisition CWI %q requires assessment before terminal credit", item.ID)
+			}
+			if item.State == runtimecontract.RuntimeCoverageItemStateSatisfied || item.CWIConvergenceState == runtimecontract.RuntimeCWIConvergenceStateSettled {
+				return fmt.Errorf("runtime aggregate acquisition CWI %q cannot retain terminal coverage credit", item.ID)
+			}
+		case runtimecontract.RuntimeSemanticEvidenceObligationValidationFailureRepair:
+			binding, bindingFound := coverageEvidenceBindingForCoverage(focus, item.ID)
+			if !bindingFound || len(binding.ProspectiveTargetRefs) == 0 ||
+				a.Facts.RepairDirective == nil || a.Facts.RepairDirective.RequiredState != runtimecontract.ConvergenceStateNeedStateChange ||
+				a.Facts.RepairDirective.Closure == nil ||
+				!sameRuntimeTargetRefs(a.Facts.RepairDirective.TargetRefs, binding.ProspectiveTargetRefs) ||
+				item.State == runtimecontract.RuntimeCoverageItemStateSatisfied || item.CWIConvergenceState == runtimecontract.RuntimeCWIConvergenceStateSettled {
+				return fmt.Errorf("runtime aggregate validation-failure repair CWI %q gained terminal credit or lost its exact repair directive", item.ID)
+			}
 		}
 	}
 	return nil

@@ -68,7 +68,7 @@ func candidateAdmissionResultFromFailure(failure *workorchruntimecontract.Runtim
 	return CandidateAdmissionResult{Disposition: CandidateAdmissionRejectedContract, Failure: failure}
 }
 
-func sealCandidateAdmissionRejection(result CandidateAdmissionResult, manifest workorchruntimecontract.RuntimeCandidateContractManifest, candidate workorchruntimecontract.RuntimeCandidate) CandidateAdmissionResult {
+func sealCandidateAdmissionRejection(result CandidateAdmissionResult, manifest workorchruntimecontract.RuntimeCandidateContractManifest, candidate workorchruntimecontract.RuntimeCandidate, frontier candidateCorrectionFrontier) CandidateAdmissionResult {
 	if result.Accepted() || result.Failure == nil {
 		return result
 	}
@@ -78,7 +78,7 @@ func sealCandidateAdmissionRejection(result CandidateAdmissionResult, manifest w
 	if result.Failure.Diagnostic != nil && result.Failure.Diagnostic.ManifestHash == "" {
 		result.Failure.Diagnostic.ManifestHash = manifest.Hash
 	}
-	sealed, directive, err := SealCandidateRejection(result.Failure, manifest)
+	sealed, directive, err := sealCandidateRejectionWithFrontier(result.Failure, manifest, frontier)
 	if err != nil {
 		// SealCandidateRejection is owner-local and currently infallible for a
 		// non-nil failure; treat any error as a contract defect rather than an
@@ -110,12 +110,26 @@ func sealCandidateAdmissionRejection(result CandidateAdmissionResult, manifest w
 // invoke the reducer. The owner-local policy seals every complete rejection
 // with correctable_once or rejected_final.
 func EvaluateCandidateAdmissionWithManifest(aggregate RuntimeAggregate, manifest workorchruntimecontract.RuntimeCandidateContractManifest, candidate workorchruntimecontract.RuntimeCandidate) CandidateAdmissionResult {
-	failure := candidateadmission.Evaluate(candidateAdmissionEvaluationInput(aggregate, manifest, candidate))
+	input := candidateAdmissionEvaluationInput(aggregate, manifest, candidate)
+	var failure *workorchruntimecontract.RuntimeCandidateFailure
+	if err := validateAttemptCandidateCrossesPersistedWitness(aggregate, manifest, candidate); err != nil {
+		failure = &workorchruntimecontract.RuntimeCandidateFailure{
+			Class: workorchruntimecontract.RuntimeCandidateFailureClassContract,
+			Code:  candidateadmission.CodeRejectedCandidate, Signature: candidateadmission.SignatureRejectedCandidate,
+			Reason: err.Error(),
+			Diagnostic: &workorchruntimecontract.RuntimeCandidateFailureDiagnostic{
+				Path: "$.operations", Actual: "correction_witness_mismatch", ManifestHash: manifest.Hash,
+				RejectedShapeHash: workorchruntimecontract.StableRuntimeCandidateSemanticShape(candidate),
+			},
+		}
+	} else {
+		failure = candidateadmission.Evaluate(input)
+	}
 	if failure == nil {
 		return acceptedCandidateAdmission()
 	}
 	result := candidateAdmissionResultFromFailure(failure)
-	return sealCandidateAdmissionRejection(result, manifest, candidate)
+	return sealCandidateAdmissionRejection(result, manifest, candidate, candidateCorrectionFrontierForEvaluation(input))
 }
 
 // candidateAdmissionEvaluationInput is the only aggregate projection for the

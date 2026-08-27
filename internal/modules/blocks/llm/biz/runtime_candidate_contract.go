@@ -6,6 +6,7 @@ import (
 	"sort"
 	"strings"
 
+	llmmodels "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/models"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
@@ -94,7 +95,24 @@ type runtimeCandidateOperationVariantProjection struct {
 
 type runtimeCandidateRetryProjection struct {
 	PreviousFailure runtimeCandidateCorrectionFailureProjection `json:"previousFailure"`
+	CorrectionInput runtimeCandidateCorrectionInputProjection   `json:"correctionInput"`
 	Instruction     string                                      `json:"instruction"`
+}
+
+type runtimeCandidateCorrectionInputProjection struct {
+	Objectives   []runtimecontract.RuntimeCandidateCorrectionObjective `json:"objectives"`
+	ManifestHash string                                                `json:"manifestHash"`
+	Witness      runtimeCandidateCorrectionWitnessProjection           `json:"witness"`
+}
+
+type runtimeCandidateCorrectionWitnessProjection struct {
+	Dimension            runtimecontract.RuntimeCandidateCorrectionWitnessDimension `json:"dimension"`
+	OperationKind        string                                                     `json:"operationKind,omitempty"`
+	Path                 string                                                     `json:"path"`
+	RejectedValue        string                                                     `json:"rejectedValue,omitempty"`
+	AlternativeValue     string                                                     `json:"alternativeValue"`
+	RejectedShapeHash    string                                                     `json:"rejectedShapeHash,omitempty"`
+	AlternativeShapeHash string                                                     `json:"alternativeShapeHash,omitempty"`
 }
 
 // runtimeCandidateCorrectionFailureProjection is the only representation of
@@ -394,12 +412,11 @@ func runtimeCandidateContractFieldList(values []string) string {
 	return strings.Join(values, ", ")
 }
 
-func runtimeCandidateRetry(attempt int, failure *runtimecontract.RuntimeCandidateFailure) *runtimeCandidateRetryProjection {
-	return runtimeCandidateRetryForManifest(attempt, failure, runtimecontract.RuntimeCandidateContractManifest{})
-}
-
-func runtimeCandidateRetryForManifest(attempt int, failure *runtimecontract.RuntimeCandidateFailure, manifest runtimecontract.RuntimeCandidateContractManifest) *runtimeCandidateRetryProjection {
-	if attempt != 1 || failure == nil {
+func runtimeCandidateRetryForManifest(attempt int, failure *runtimecontract.RuntimeCandidateFailure, manifest runtimecontract.RuntimeCandidateContractManifest, correction *llmmodels.RuntimeCandidateCorrectionInput) *runtimeCandidateRetryProjection {
+	if attempt != 1 || failure == nil || correction == nil {
+		return nil
+	}
+	if correction.Validate(manifest.Hash) != nil {
 		return nil
 	}
 	previous := runtimeCandidateCorrectionFailureProjection{
@@ -425,9 +442,21 @@ func runtimeCandidateRetryForManifest(attempt int, failure *runtimecontract.Runt
 		instruction += " The previous candidate shape was rejected. Remove every field or value not permitted by that sealed manifest instead of adding a wrapper, narrative, summary, explanation or convenience parameter."
 	}
 	if runtimeCandidateFailureIsOperationShapeReplay(previous.Code) {
-		instruction += " The previous candidate replayed a rejected or no-progress operation shape. Inspect context.rejectedOperationShapes and context.noProgressOperationShapes, then choose a materially different operation shape that changes its declared durable targets. Changing only an operation ID, narrative, dependency list, or cosmetic parameter is not sufficient."
+		instruction += " The previous candidate replayed a rejected or no-progress operation shape. Inspect context.rejectedOperationShapes and context.noProgressOperationShapes. Changing only an operation ID, narrative, or cosmetic parameter is not sufficient."
 	}
-	return &runtimeCandidateRetryProjection{PreviousFailure: previous, Instruction: instruction}
+	input := correction.Normalized()
+	instruction += fmt.Sprintf(" Apply the exact correction alternative %q at %s (%s); an unrelated valid change does not satisfy this retry.", input.Witness.AlternativeValue, input.Witness.Path, input.Witness.Dimension)
+	witness := input.Witness.Normalized()
+	projection := runtimeCandidateCorrectionInputProjection{
+		Objectives:   append([]runtimecontract.RuntimeCandidateCorrectionObjective(nil), input.Objectives...),
+		ManifestHash: input.ManifestHash,
+		Witness: runtimeCandidateCorrectionWitnessProjection{
+			Dimension: witness.Dimension, OperationKind: witness.OperationKind, Path: witness.Path,
+			RejectedValue: witness.RejectedValue, AlternativeValue: witness.AlternativeValue,
+			RejectedShapeHash: witness.RejectedShapeHash, AlternativeShapeHash: witness.AlternativeShapeHash,
+		},
+	}
+	return &runtimeCandidateRetryProjection{PreviousFailure: previous, CorrectionInput: projection, Instruction: instruction}
 }
 
 func runtimeCandidateFailureIsOperationShapeReplay(code string) bool {

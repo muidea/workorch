@@ -27,6 +27,11 @@ func (c *candidateDispatchComponent) beginCandidateAttempt(ctx context.Context, 
 		return RuntimeAggregate{}, err
 	}
 	transaction := aggregate.Decision.AuthorityTransaction()
+	if attempt == 1 {
+		if err := validatePersistedCandidateCorrection(aggregate, manifest); err != nil {
+			return RuntimeAggregate{}, fmt.Errorf("%w: %v", common.ErrConflict, err)
+		}
+	}
 	contractID := runtimecontract.StableAuthorityContractID(workspaceID, runID, transaction)
 	current := candidateAttemptsForContract(aggregate.CandidateAttempts, workspaceID, runID, contractID)
 	plan, err := planCandidateAttemptBegin(aggregate, workspaceID, runID, attempt, stablePrefixHash, manifest.Hash, logicalRequestID, contractID, transaction, current)
@@ -108,7 +113,7 @@ func validateCandidateAttemptSequence(current []runtimecontract.RuntimeCandidate
 	if !ok || first.State != runtimecontract.RuntimeCandidateAttemptStateFailed || first.StablePrefixHash != stablePrefixHash || first.ManifestHash != manifestHash || !runtimecontract.SameAuthorityContract(first.Transaction, transaction) {
 		return fmt.Errorf("%w: candidate attempt 1 requires a failed same-contract attempt 0", common.ErrConflict)
 	}
-	if first.Failure == nil || !CandidateFailureIsCorrectableOnce(first.Failure) {
+	if !CandidateAttemptIsCorrectableOnce(first) {
 		return fmt.Errorf("%w: candidate attempt 1 requires a sealed correctable_once attempt 0 failure", common.ErrConflict)
 	}
 	return nil
@@ -141,6 +146,7 @@ func applyCandidateAttemptBegin(aggregate *RuntimeAggregate, plan candidateAttem
 	recycled.Proposal = nil
 	recycled.Feasibilities = nil
 	recycled.Failure = nil
+	recycled.Correction = nil
 	recycled.Stale = nil
 }
 
@@ -190,7 +196,14 @@ func (c *candidateDispatchComponent) rejectCompletedCandidateDocument(ctx contex
 		return RuntimeAggregate{}, err
 	}
 	expectedRevision := aggregate.StateRevision
-	if err := closeCandidateAttempt(&aggregate, idx, attempt, failure); err != nil {
+	sealedFailure, correction, sealErr := SealCandidateRejection(&failure, manifest)
+	if sealErr != nil {
+		return RuntimeAggregate{}, sealErr
+	}
+	if sealedFailure == nil || correction == nil {
+		return RuntimeAggregate{}, fmt.Errorf("%w: completed candidate rejection has no sealed disposition", common.ErrConflict)
+	}
+	if err := closeCandidateAttemptWithCorrection(&aggregate, idx, attempt, *sealedFailure, correction); err != nil {
 		return RuntimeAggregate{}, err
 	}
 	aggregate.StateRevision++
@@ -250,7 +263,7 @@ func validateCompletedDocumentAttemptSequence(current []runtimecontract.RuntimeC
 		return nil
 	}
 	first, ok := candidateAttemptRecord(current, 0)
-	if !ok || first.State != runtimecontract.RuntimeCandidateAttemptStateFailed || first.StablePrefixHash != stablePrefixHash || first.ManifestHash != manifestHash || !runtimecontract.SameAuthorityContract(first.Transaction, transaction) || first.Failure == nil || !CandidateFailureIsCorrectableOnce(first.Failure) {
+	if !ok || first.State != runtimecontract.RuntimeCandidateAttemptStateFailed || first.StablePrefixHash != stablePrefixHash || first.ManifestHash != manifestHash || !runtimecontract.SameAuthorityContract(first.Transaction, transaction) || !CandidateAttemptIsCorrectableOnce(first) {
 		return fmt.Errorf("%w: candidate attempt 1 requires a failed correctable same-contract attempt 0", common.ErrConflict)
 	}
 	return nil
@@ -298,7 +311,7 @@ func (c *candidateDispatchComponent) admitCandidateProposal(ctx context.Context,
 			proposal := candidate
 			aggregate.CandidateAttempts[idx].Proposal = &proposal
 		}
-		if err := closeCandidateAttempt(&aggregate, idx, attempt, *admission.Failure); err != nil {
+		if err := closeCandidateAttemptWithCorrection(&aggregate, idx, attempt, *admission.Failure, admission.Correction); err != nil {
 			return CandidateAdmissionCommitResult{}, err
 		}
 		aggregate.StateRevision++
@@ -454,7 +467,7 @@ func (c *candidateDispatchComponent) admitAndSealCandidateAttempt(ctx context.Co
 			proposal := candidate
 			aggregate.CandidateAttempts[idx].Proposal = &proposal
 		}
-		if err := closeCandidateAttempt(&aggregate, idx, attempt, *admission.Failure); err != nil {
+		if err := closeCandidateAttemptWithCorrection(&aggregate, idx, attempt, *admission.Failure, admission.Correction); err != nil {
 			return CandidateAdmissionCommitResult{}, err
 		}
 		aggregate.StateRevision++
@@ -712,14 +725,19 @@ func (c *candidateDispatchComponent) failCandidateAttempt(ctx context.Context, w
 // closeCandidateAttempt applies the only failed exit from a pending SM-3
 // candidate attempt. Its caller owns the aggregate CAS boundary.
 func closeCandidateAttempt(aggregate *RuntimeAggregate, idx, attempt int, failure runtimecontract.RuntimeCandidateFailure) error {
+	return closeCandidateAttemptWithCorrection(aggregate, idx, attempt, failure, nil)
+}
+
+func closeCandidateAttemptWithCorrection(aggregate *RuntimeAggregate, idx, attempt int, failure runtimecontract.RuntimeCandidateFailure, correction *runtimecontract.RuntimeCandidateCorrectionDirective) error {
 	if aggregate == nil || idx < 0 || idx >= len(aggregate.CandidateAttempts) || failure.Class == "" || strings.TrimSpace(failure.Reason) == "" {
 		return common.ErrInvalidArgument
 	}
-	failure = normalizeCandidateAttemptFailure(*aggregate, idx, attempt, failure)
+	failure, correction = normalizeCandidateAttemptFailure(*aggregate, idx, attempt, failure, correction)
 	aggregate.CandidateAttempts[idx].State = runtimecontract.RuntimeCandidateAttemptStateFailed
 	failureCopy := failure
 	aggregate.CandidateAttempts[idx].Failure = &failureCopy
-	fact := candidateAttemptTerminalFailureFact(attempt, failure)
+	aggregate.CandidateAttempts[idx].Correction = correction.Clone()
+	fact := candidateAttemptTerminalFailureFact(attempt, failure, correction)
 	if fact == nil {
 		return nil
 	}
@@ -733,7 +751,7 @@ func closeCandidateAttempt(aggregate *RuntimeAggregate, idx, attempt int, failur
 	return nil
 }
 
-func normalizeCandidateAttemptFailure(aggregate RuntimeAggregate, idx, attempt int, failure runtimecontract.RuntimeCandidateFailure) runtimecontract.RuntimeCandidateFailure {
+func normalizeCandidateAttemptFailure(aggregate RuntimeAggregate, idx, attempt int, failure runtimecontract.RuntimeCandidateFailure, correction *runtimecontract.RuntimeCandidateCorrectionDirective) (runtimecontract.RuntimeCandidateFailure, *runtimecontract.RuntimeCandidateCorrectionDirective) {
 	if failure.ValidationDiagnostic != nil {
 		diagnostic := failure.ValidationDiagnostic.Clone()
 		failure.ValidationDiagnostic = &diagnostic
@@ -745,32 +763,44 @@ func normalizeCandidateAttemptFailure(aggregate RuntimeAggregate, idx, attempt i
 		}
 		failure.Diagnostic = &diagnostic
 	}
-	// N4: every complete rejection is sealed as correctable_once or rejected_final
-	// before it is persisted on the attempt record. Bare Class/Reason fixtures are
-	// normalized to a matrix code first so attempt 0 schema/contract failures stay
-	// correctable instead of becoming an internal terminal defect.
+	// Every complete rejection is persisted together with one total correction
+	// disposition. Bare Class/Reason fixtures are normalized to a matrix code,
+	// but cannot become correctable without a manifest-bound witness.
 	if strings.TrimSpace(failure.Code) == "" {
 		failure.Code = defaultCandidateFailureCode(failure.Class)
 	}
 	if strings.TrimSpace(failure.Signature) == "" {
 		failure.Signature = failure.Code
 	}
-	manifest := runtimecontract.RuntimeCandidateContractManifest{Hash: aggregate.CandidateAttempts[idx].ManifestHash}
-	originalCode := strings.TrimSpace(failure.Code)
-	if sealed, _, sealErr := SealCandidateRejection(&failure, manifest); sealErr == nil && sealed != nil {
-		// Attempt 0 must keep the first-failure code stable for diagnostics and
-		// attempt-1 gating. Seal may rewrite an incomplete correctable into
-		// runtime_contract_defect; that rewrite is only forced onto the attempt
-		// record for attempt 1 / already-final codes. Attempt 0 still persists
-		// objectives (or the lack of them) so IsCorrectableOnce can refuse retry.
-		if attempt == 1 || sealed.Code == originalCode || originalCode == "runtime_contract_defect" ||
-			CandidateFailureIsRejectedFinal(&runtimecontract.RuntimeCandidateFailure{Code: originalCode}) {
-			failure = *sealed
-		} else {
-			failure.Diagnostic = sealed.Diagnostic
+	if correction == nil {
+		manifest, manifestErr := runtimecontract.BuildRuntimeCandidateContractManifest(
+			aggregate.Decision,
+			runtimecontract.RuntimeCandidateManifestOwnerFactsFromContext(
+				runtimecontract.RuntimeCandidateContextForDecision(aggregate.Facts, aggregate.Decision, nil),
+			),
+		)
+		if manifestErr == nil && manifest.Hash == aggregate.CandidateAttempts[idx].ManifestHash {
+			frontier := candidateCorrectionFrontier{}
+			if aggregate.CandidateAttempts[idx].Proposal != nil {
+				input := candidateAdmissionEvaluationInput(aggregate, manifest, *aggregate.CandidateAttempts[idx].Proposal)
+				frontier = candidateCorrectionFrontierForEvaluation(input)
+			}
+			if sealed, directive, sealErr := sealCandidateRejectionWithFrontier(&failure, manifest, frontier); sealErr == nil && sealed != nil && directive != nil {
+				failure = *sealed
+				correction = directive
+			}
 		}
+	} else {
+		correction = correction.Clone()
 	}
-	return failure
+	if correction == nil || correction.ManifestHash != aggregate.CandidateAttempts[idx].ManifestHash || correction.Validate() != nil {
+		failure = *candidateRejectionContractDefect(failure, "candidate rejection has no valid manifest-bound correction disposition")
+		correction = rejectedFinalDirective(aggregate.CandidateAttempts[idx].ManifestHash, "runtime_contract_defect")
+	}
+	if attempt == 1 && correction.Disposition == runtimecontract.RuntimeCandidateCorrectionCorrectableOnce {
+		correction = rejectedFinalDirective(aggregate.CandidateAttempts[idx].ManifestHash, "candidate_retry_exhausted")
+	}
+	return failure, correction
 }
 
 func defaultCandidateFailureCode(class runtimecontract.RuntimeCandidateFailureClass) string {
@@ -786,7 +816,7 @@ func defaultCandidateFailureCode(class runtimecontract.RuntimeCandidateFailureCl
 	}
 }
 
-func candidateAttemptTerminalFailureFact(attempt int, failure runtimecontract.RuntimeCandidateFailure) *runtimecontract.FailureFact {
+func candidateAttemptTerminalFailureFact(attempt int, failure runtimecontract.RuntimeCandidateFailure, correction *runtimecontract.RuntimeCandidateCorrectionDirective) *runtimecontract.FailureFact {
 	if failure.Class == runtimecontract.RuntimeCandidateFailureClassInternal {
 		return &runtimecontract.FailureFact{Class: runtimecontract.FailureClassRuntimeContractMisalignment, Signature: "candidate-internal", Message: failure.Reason}
 	}
@@ -796,12 +826,12 @@ func candidateAttemptTerminalFailureFact(attempt int, failure runtimecontract.Ru
 			Signature: "candidate-retry-exhausted", Message: failure.Reason,
 		}
 	}
-	if attempt == 0 && CandidateFailureIsRejectedFinal(&failure) {
+	if attempt == 0 && correction != nil && correction.Disposition == runtimecontract.RuntimeCandidateCorrectionRejectedFinal {
 		// N6: explicit rejected_final attempt 0 seals terminal in the same CAS.
 		// Attempt 0 may still have one sealed correction.  A validation candidate
 		// infeasibility never fabricates state-change repair authority; exhaustion
 		// is terminalized by the normal candidate pipeline.
-		code := CandidateRejectionTerminalCode(failure.Code)
+		code := strings.TrimSpace(correction.TerminalCode)
 		if code == "" {
 			code = "runtime_contract_defect"
 		}
@@ -810,7 +840,7 @@ func candidateAttemptTerminalFailureFact(attempt int, failure runtimecontract.Ru
 			message = "complete candidate rejection is rejected_final under the sealed manifest"
 		}
 		class := runtimecontract.FailureClassRuntimeContractMisalignment
-		if code == "candidate_retry_exhausted" {
+		if code == "candidate_retry_exhausted" || code == "candidate_authority_exhausted" {
 			class = runtimecontract.FailureClassCandidateExhausted
 		}
 		return &runtimecontract.FailureFact{
@@ -845,6 +875,11 @@ func closePendingCandidateAttemptsForTerminal(aggregate *RuntimeAggregate, fact 
 		failureCopy := failure
 		aggregate.CandidateAttempts[idx].State = runtimecontract.RuntimeCandidateAttemptStateFailed
 		aggregate.CandidateAttempts[idx].Failure = &failureCopy
+		terminalCode := strings.TrimSpace(fact.Code)
+		if terminalCode == "" {
+			terminalCode = "runtime_terminal_failure"
+		}
+		aggregate.CandidateAttempts[idx].Correction = rejectedFinalDirective(aggregate.CandidateAttempts[idx].ManifestHash, terminalCode)
 	}
 }
 
@@ -896,7 +931,11 @@ func duplicateRejectedCandidateAdmission(aggregate RuntimeAggregate, attempt int
 			continue
 		}
 		failure := *record.Failure
-		return CandidateAdmissionResult{Disposition: CandidateAdmissionRejectedContract, Failure: &failure}, true
+		var correction *runtimecontract.RuntimeCandidateCorrectionDirective
+		if record.Correction != nil {
+			correction = record.Correction.Clone()
+		}
+		return CandidateAdmissionResult{Disposition: CandidateAdmissionRejectedContract, Failure: &failure, Correction: correction}, true
 	}
 	return CandidateAdmissionResult{}, false
 }

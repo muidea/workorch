@@ -2,6 +2,25 @@ package workorchruntimecontract
 
 import "testing"
 
+func TestRuntimeProfileEvidenceRequirementNormalizationPreservesCardinalityAndRejectsDuplicateScopeID(t *testing.T) {
+	profile := RuntimeProfileContract{ID: "software-dev", EvidenceRequirements: []RuntimeProfileEvidenceRequirement{
+		{ID: " validation ", Scope: " dodItem ", Description: "first", RequiredEvidenceKinds: []string{EvidenceKindValidation}, AcceptedStepKinds: []string{RuntimeBlockKindManagedValidationSession}},
+		{ID: "source", Scope: "deliverable", Description: "other", RequiredEvidenceKinds: []string{EvidenceKindStateChange}, AcceptedStepKinds: []string{StepKindFileWrite}},
+		{ID: "validation", Scope: "dodItem", Description: "second", RequiredEvidenceKinds: []string{EvidenceKindValidation}, AcceptedStepKinds: []string{RuntimeBlockKindManagedValidationSession}},
+	}}
+	normalized := NormalizeRuntimeProfileContracts([]RuntimeProfileContract{profile})
+	if len(normalized) != 1 || len(normalized[0].EvidenceRequirements) != len(profile.EvidenceRequirements) {
+		t.Fatalf("normalization changed evidence requirement cardinality: %+v", normalized)
+	}
+	got := normalized[0].EvidenceRequirements
+	if got[0].Scope != "deliverable" || got[0].ID != "source" || got[1].Description != "first" || got[2].Description != "second" {
+		t.Fatalf("normalization did not stably order requirements while preserving duplicates: %+v", got)
+	}
+	if err := ValidateRuntimeProfileContracts(normalized); err == nil {
+		t.Fatal("duplicate normalized Profile evidence requirement scope+id was accepted")
+	}
+}
+
 func TestRuntimeProfileRequiredCWIsRequireExactOwnerReceiptProofClosure(t *testing.T) {
 	valid := RuntimeProfileContract{
 		ID: "software-dev",

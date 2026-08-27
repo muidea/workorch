@@ -10,9 +10,10 @@ import (
 )
 
 type compiledCoverage struct {
-	Focuses       []runtimecontract.CoverageFocus
-	Slices        []runtimecontract.RuntimeAcceptanceSlice
-	CoverageItems []runtimecontract.RuntimeCoverageItem
+	Focuses           []runtimecontract.CoverageFocus
+	DefinitionFocuses []runtimecontract.RuntimeDefinitionFocus
+	Slices            []runtimecontract.RuntimeAcceptanceSlice
+	CoverageItems     []runtimecontract.RuntimeCoverageItem
 }
 
 type workUnit struct {
@@ -41,33 +42,34 @@ type coverageSliceBucket struct {
 // compiledEvidencePolicy is the neutral merge result for one coverage focus.
 // Description is audit-only and never enters reducer authority.
 type compiledEvidencePolicy struct {
-	RequiredEvidenceKinds             []string
-	AcceptedStepKinds                 []string
-	AcceptedOperationVariants         []runtimecontract.RuntimeOperationVariantRef
-	RejectedStepKinds                 []string
-	EvidenceRole                      string
-	TargetRole                        string
-	TargetRefs                        []string
-	TargetDiscoverySources            []string
-	TargetSelectorRef                 string
-	TargetSelectorOwnerRef            string
-	TargetSelectorSubjectRef          string
-	TargetSelectorCandidateRefs       []string
-	RequireTargetGrounding            bool
-	RequireDirectEvidence             bool
-	RequireClaimEvidence              bool
-	RequireExecutableBehaviorEvidence bool
-	RequireCoverageTargets            bool
-	RequireAssessment                 bool
-	RequiredOwnerFacts                []runtimecontract.RuntimeOwnerFactRequirement
-	OwnerFactConvergences             []runtimecontract.RuntimeOwnerFactConvergence
-	ValidationRecipeID                string
-	RequiredCheckRefs                 []string
-	MetricConstraints                 []string
-	ArtifactRefs                      []string
-	DeclarationRef                    string
-	SemanticProofDeclarationRef       string
-	Description                       string
+	RequiredEvidenceKinds              []string
+	AcceptedStepKinds                  []string
+	AcceptedOperationVariants          []runtimecontract.RuntimeOperationVariantRef
+	RejectedStepKinds                  []string
+	EvidenceRole                       string
+	TargetRole                         string
+	TargetRefs                         []string
+	TargetDiscoverySources             []string
+	TargetSelectorRef                  string
+	TargetSelectorOwnerRef             string
+	TargetSelectorSubjectRef           string
+	TargetSelectorCandidateRefs        []string
+	RequireTargetGrounding             bool
+	RequireDirectEvidence              bool
+	RequireClaimEvidence               bool
+	RequireExecutableBehaviorEvidence  bool
+	RequireCoverageTargets             bool
+	RequireAssessment                  bool
+	RequiredOwnerFacts                 []runtimecontract.RuntimeOwnerFactRequirement
+	OwnerFactConvergences              []runtimecontract.RuntimeOwnerFactConvergence
+	ValidationFailureRepairConvergence *runtimecontract.RuntimeValidationFailureRepairConvergence
+	ValidationRecipeID                 string
+	RequiredCheckRefs                  []string
+	MetricConstraints                  []string
+	ArtifactRefs                       []string
+	DeclarationRef                     string
+	SemanticProofDeclarationRef        string
+	Description                        string
 }
 
 // compileRuntimeCoverageFocuses builds the deterministic focus queue for one activation.
@@ -293,6 +295,11 @@ func appendRuntimeCoverageChunk(compiled *compiledCoverage, bucket coverageSlice
 			return focusSeq, fmt.Errorf("compiled focus %s: %w", focus.ID, err)
 		}
 		compiled.Focuses = append(compiled.Focuses, focus)
+		definitionFocus, err := newCompiledRuntimeDefinitionFocus(focus, item.policy)
+		if err != nil {
+			return focusSeq, err
+		}
+		compiled.DefinitionFocuses = append(compiled.DefinitionFocuses, definitionFocus)
 	}
 	return focusSeq, nil
 }
@@ -307,6 +314,9 @@ func finalizeRuntimeCoverage(compiled compiledCoverage, allUnits []workUnit, pro
 	}
 	if len(compiled.Focuses) == 0 {
 		return compiledCoverage{}, fmt.Errorf("runtime coverage focus compiler produced no focuses")
+	}
+	if len(compiled.DefinitionFocuses) != len(compiled.Focuses) {
+		return compiledCoverage{}, fmt.Errorf("runtime coverage compiler produced mismatched mutable focus and immutable Definition declaration cardinality")
 	}
 	if len(compiled.Focuses) > maxFocuses {
 		return compiledCoverage{}, fmt.Errorf("runtime coverage focus compiler produced %d focuses, exceeding sealed policy limit %d; configure bounded acceptance slices", len(compiled.Focuses), maxFocuses)
@@ -346,6 +356,23 @@ func newCompiledCoverageFocus(id, sliceID, groupScope string, item resolvedCover
 		RequiredCheckRefs: policy.RequiredCheckRefs, MetricConstraints: policy.MetricConstraints, ArtifactRefs: policy.ArtifactRefs,
 		EvidenceDeclarationRef: policy.SemanticProofDeclarationRef,
 	}.Normalized()
+}
+
+// newCompiledRuntimeDefinitionFocus transfers Profile-owned declarations onto
+// the immutable activation surface while the mutable CoverageFocus remains a
+// generation cursor. In particular, validation-failure repair convergence is
+// never copied into mutable focus state.
+func newCompiledRuntimeDefinitionFocus(focus runtimecontract.CoverageFocus, policy compiledEvidencePolicy) (runtimecontract.RuntimeDefinitionFocus, error) {
+	compiled := runtimecontract.CompileRuntimeDefinitionFocuses([]runtimecontract.CoverageFocus{focus})
+	if len(compiled) != 1 {
+		return runtimecontract.RuntimeDefinitionFocus{}, fmt.Errorf("runtime Definition focus compiler requires exactly one focus")
+	}
+	definition := compiled[0]
+	if policy.ValidationFailureRepairConvergence != nil {
+		value := policy.ValidationFailureRepairConvergence.Clone()
+		definition.ValidationFailureRepairConvergence = &value
+	}
+	return definition.Normalized(), nil
 }
 
 // compileRuntimeBootstrapWorkUnits resolves a declarative profile recipe using
@@ -688,11 +715,21 @@ func resolveCoverageEvidencePolicy(scope, id string, activation runtimecontract.
 	// Within the same precedence tier, merge with stable union / first-non-empty rules.
 	exact := filterRequirementsByID(candidates, id)
 	wildcard := filterRequirementsByID(candidates, "*")
+	var err error
 	if id != "*" {
-		policy = mergeCompiledEvidencePolicy(policy, exact)
-		policy = mergeCompiledEvidencePolicy(policy, wildcard)
+		policy, err = mergeCompiledEvidencePolicy(policy, exact)
+		if err != nil {
+			return compiledEvidencePolicy{}, err
+		}
+		policy, err = mergeCompiledEvidencePolicy(policy, wildcard)
+		if err != nil {
+			return compiledEvidencePolicy{}, err
+		}
 	} else {
-		policy = mergeCompiledEvidencePolicy(policy, exact)
+		policy, err = mergeCompiledEvidencePolicy(policy, exact)
+		if err != nil {
+			return compiledEvidencePolicy{}, err
+		}
 	}
 	if len(policy.RequiredEvidenceKinds) == 0 {
 		policy.RequiredEvidenceKinds = defaultEvidenceKinds
@@ -730,7 +767,7 @@ func filterRequirementsByID(values []runtimecontract.RuntimeProfileEvidenceRequi
 	return ret
 }
 
-func mergeCompiledEvidencePolicy(base compiledEvidencePolicy, requirements []runtimecontract.RuntimeProfileEvidenceRequirement) compiledEvidencePolicy {
+func mergeCompiledEvidencePolicy(base compiledEvidencePolicy, requirements []runtimecontract.RuntimeProfileEvidenceRequirement) (compiledEvidencePolicy, error) {
 	for _, requirement := range requirements {
 		// Stable unique union for required evidence / rejected kinds.
 		base.RequiredEvidenceKinds = stableStringUnion(base.RequiredEvidenceKinds, requirement.RequiredEvidenceKinds)
@@ -777,12 +814,21 @@ func mergeCompiledEvidencePolicy(base compiledEvidencePolicy, requirements []run
 		base.ArtifactRefs = stableStringUnion(base.ArtifactRefs, requirement.ArtifactRefs)
 		base.RequiredOwnerFacts = runtimecontract.NormalizeRuntimeOwnerFactRequirements(append(base.RequiredOwnerFacts, requirement.RequiredOwnerFacts...))
 		base.OwnerFactConvergences = runtimecontract.NormalizeRuntimeOwnerFactConvergences(append(base.OwnerFactConvergences, requirement.OwnerFactConvergences...))
+		if requirement.ValidationFailureRepairConvergence != nil {
+			if base.ValidationFailureRepairConvergence != nil && !runtimecontract.SameRuntimeValidationFailureRepairConvergence(base.ValidationFailureRepairConvergence, requirement.ValidationFailureRepairConvergence) {
+				return compiledEvidencePolicy{}, fmt.Errorf("coverage evidence policy has conflicting validation failure repair convergence declarations")
+			}
+			if base.ValidationFailureRepairConvergence == nil {
+				clone := requirement.ValidationFailureRepairConvergence.Clone()
+				base.ValidationFailureRepairConvergence = &clone
+			}
+		}
 		// Profile explicit primary_state_change implies state-change evidence.
 		if requirement.EvidenceRole == "primary_state_change" || len(requirement.AcceptedOperationVariants) > 0 {
 			base.RequiredEvidenceKinds = stableStringUnion(base.RequiredEvidenceKinds, []string{runtimecontract.EvidenceKindStateChange})
 		}
 	}
-	return base
+	return base, nil
 }
 
 func applyCompiledEvidencePolicy(focus runtimecontract.CoverageFocus, policy compiledEvidencePolicy) runtimecontract.CoverageFocus {

@@ -73,6 +73,20 @@ func bindPersistedOwnerReceipt(aggregate RuntimeAggregate, evidence ExecutionEvi
 	evidence.Evidence = persisted.Evidence
 	evidence.ObservedEffectScope = persisted.ObservedEffectScope
 	evidence.NoOp = persisted.Outcome == runtimecontract.RuntimeOperationOutcomeNoOp
+	if persisted.Outcome == runtimecontract.RuntimeOperationOutcomeRejected {
+		if evidence.Status != ExecutionEvidenceStatusRejected {
+			return ExecutionEvidence{}, fmt.Errorf("rejected owner receipt cannot produce accepted execution evidence")
+		}
+		failure := failureFactFromOperationReceiptFeedback(persisted)
+		if failure == nil {
+			return ExecutionEvidence{}, fmt.Errorf("rejected owner receipt has no typed owner failure")
+		}
+		// The owner receipt is the sole diagnostic authority just as it is the
+		// sole effect/evidence authority above. The internal event's Failure copy
+		// is routing validation only and cannot erase typed OriginalDiagnostic or
+		// substitute an ungrounded target.
+		evidence.Failure = failure
+	}
 	return evidence, nil
 }
 

@@ -297,11 +297,15 @@ func (c *planningTransactionComponent) sealSemanticContract(ctx context.Context,
 	if aggregate.ActiveDispatch != nil {
 		return RuntimeAggregate{}, fmt.Errorf("%w: semantic contract cannot seal while a dispatch is active", common.ErrConflict)
 	}
+	repairContinuation, retainRepairContinuation, err := runtimeValidationFailureRepairContinuationForSemanticSeal(aggregate, *ledger.Manifest)
+	if err != nil {
+		return RuntimeAggregate{}, err
+	}
 	focuses, _, err := runtimecontract.CompileRuntimeSemanticBindings(*ledger.Manifest, ledger.LogicalRequestID, *ledger.Document, ledger.Feasibilities)
 	if err != nil {
 		return RuntimeAggregate{}, err
 	}
-	pendingFocuses, err := semanticPendingFocuses(aggregate.Facts, ledger.PendingCoverageIDs, focuses)
+	pendingFocuses, err := semanticPendingFocuses(aggregate.Facts, ledger.PendingCoverageIDs, focuses, *ledger.Manifest)
 	if err != nil {
 		return RuntimeAggregate{}, err
 	}
@@ -326,12 +330,20 @@ func (c *planningTransactionComponent) sealSemanticContract(ctx context.Context,
 	aggregate.Facts = sealedFacts
 	aggregate.Facts.Capabilities = runtimeCapabilitiesWithSemanticProofs(aggregate.Facts.Capabilities, focuses)
 	aggregate.Facts.ReconciliationContract = reconciliation
+	if retainRepairContinuation {
+		aggregate.Facts, err = applyRuntimeValidationFailureRepairSemanticSeal(aggregate.Facts, *ledger.Manifest, repairContinuation)
+		if err != nil {
+			return RuntimeAggregate{}, err
+		}
+	}
 	if _, err := supersedeActiveReconciliationForCurrentContract(&aggregate); err != nil {
 		return RuntimeAggregate{}, err
 	}
-	aggregate.Facts.RepairDirective = nil
 	aggregate.Facts.Feasibility = nil
-	aggregate.Facts.Failure = nil
+	if !retainRepairContinuation {
+		aggregate.Facts.RepairDirective = nil
+		aggregate.Facts.Failure = nil
+	}
 	aggregate.Facts = aggregate.Facts.Normalized()
 	if err := resolveCoverageProofLineageForFocus(&aggregate, aggregate.Facts.Focus); err != nil {
 		return RuntimeAggregate{}, err

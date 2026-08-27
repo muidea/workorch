@@ -4,7 +4,7 @@ Status: active
 
 Type: kernel-module-implementation-contract
 
-Last Verified: 2026-08-26
+Last Verified: 2026-08-27
 
 ## 功能范围与边界
 
@@ -273,7 +273,10 @@ deployed run ID 只属于 archive regression evidence，不定义当前候选、
 - rejection 只保存 evaluator 产生的完整、安全原始 diagnostic，不携带 correction、retry、terminal 或
   Runtime action。Orchestrator 将其提交为 SM-3 internal event 后，才根据 persisted manifest、attempt ledger、
   rejected shape 与 field violations 形成 `correctable_once` 或 `rejected_final` owner-local result；前者必须有
-  可仅用 manifest + rejection 验证的 `CorrectionDirective`，后者零 correction call。无法归类是
+  可仅用 manifest + rejection 验证的 `CorrectionDirective`，并封存 concrete legal semantic-difference witness；
+  ID/summary-only delta 不算 progress。attempt 1 在 provider 前重验 manifest/witness，并在 admission 时证明 proposal
+  使用 exact alternative。没有 legal frontier 的 attempt 0 形成 `candidate_authority_exhausted`，attempt 1 complete
+  rejection 才形成 `candidate_retry_exhausted`；两者都不调用额外 owner 或治理。后者零 correction call。无法归类是
   `runtime_contract_defect`，不能退化为无信息 governance ticket。
 - semantic-plan 的 `CorrectionDirective` 必须持久化 exact dependency edge、actual position、manifest/seed/prefix、
   plan step 与 source rejection hash；LLM command 只取得 detached fact 并仅在 C4 渲染，不能从 `OriginalMessage`
@@ -360,8 +363,9 @@ deployed run ID 只属于 archive regression evidence，不定义当前候选、
 - Activation 必须封存 Definition seed；fresh restart 缺 workspace-specific exact proof 时进入 persisted
   `semantic_contract_required`，不得由 application 终止或要求普通用户补 `contextHints/evidencePolicies` JSON。
 - activation declaration 与 generation authority 使用不同类型：`RuntimeDefinitionFocus` 只能携带 CWI、slice、evidence/
-  assessment、declarative selector/owner-fact/metric/artifact obligation；`RuntimeFocusSeedsFromDefinitionFocuses` 生成的初始
-  `CoverageFocus` cursor 不携带 selector closure 或任何 resolved target/operation/recipe/check/binding。只有 SM-2 semantic
+  assessment、declarative selector/owner-fact/metric/artifact obligation，以及可选的单一 Profile
+  `ValidationFailureRepairConvergence`；`RuntimeFocusSeedsFromDefinitionFocuses` 生成的初始 `CoverageFocus` cursor 不携带
+  selector closure、repair convergence 或任何 resolved target/operation/recipe/check/binding。只有 SM-2 semantic
   seal 可以写 generation-specific `CoverageFocus`；restart 不得从旧 focus queue 重建 Definition declaration。
 - semantic-plan document 使用 SM-3 现有 request session/evaluator/attempt 预算，但 accepted 只产生 internal fact。
   canonical owner feasibility 完整匹配后，SM-2 原子封存 `RuntimeCWIReconciliationContract`；每个 CWI/binding
@@ -469,6 +473,16 @@ deployed run ID 只属于 archive regression evidence，不定义当前候选、
   completed dispatch 中封存的 exact `FocusID`。stable operation shape 忽略 operation ID 与 summary 元数据，语义相同的
   重试必须在 owner 调用前拒绝；只有同 focus reducer 实际再次授权 `need_validation` 时才递增
   `ValidationOnlyRetries`，初次 validation、duplicate receipt 与 restart 均不得重复计数。
+- 无 actual target 的 rejected validation 也不得从命令、输出文本或 terminal selector 猜测 repair target。只有
+  RuntimeDefinitionFocus 已封存的单一 `ValidationFailureRepairConvergence` 精确匹配 trigger 时，SM-2 才可把该 failure
+  转为同一 CWI 的 `validation_failure_repair` semantic purpose。manifest 将 terminal `validation` 与 current File
+  `state_change` 分离，并绑定 failure/convergence/File catalog；File feasibility 确认 proposed target 后，普通
+  `CoverageEvidenceBinding` 才成为 exact repair authority。accepted repair receipt 不授予 CWI credit，而是在同一
+  owner-private CAS 中退休 repair binding、reopen 同一 CWI并要求 fresh validation。stale/duplicate/restart 与 cycle
+  budget 均从 aggregate 重验。缺失、歧义或非法 Profile declaration 在 pre-seal 打开 blocking Definition clarification
+  ticket 且不创建 Run；已封存合同的 owner catalog 漂移或无合法 repair surface 则 Runtime typed fail closed，不创建通用
+  Decision/Approval ticket。该 convergence 只存在于 immutable `RuntimeDefinitionFocus`；mutable `CoverageFocus` 不复制、
+  不修补该声明，generation 只能消费由 definition snapshot 编译并封存的 obligation。
 - assessment gate 只消费 current-run accepted evidence、sealed binding/effect与 owner structured validation
   observation；只有 receipt 实际报告 binding 要求的 exact check/metric/artifact 才能给对应 CWI credit。非空
   `PassedChecks`、claim signal、assessment 文本、Goal/DoD、summary 与 operation/check name 的自由文本相似度
@@ -549,7 +563,7 @@ deployed run ID 只属于 archive regression evidence，不定义当前候选、
 - `kernel/orchestrator/pkg/events` 只保存 typed command/result、receipt DTO 与确定性校验/构造；能力 Block 的 Biz 负责发送 receipt query/commit command，Orchestrator Biz 负责消费并持久化，任何 `pkg` 不得持有 Hub、执行 I/O 或推进状态。
 - Provider ceiling、candidate preflight 与 candidate request command/result 由 LLM owner 在 `blocks/llm/pkg/events` 定义；Orchestrator 的 SM-3 request session 封存完整 authority transaction，跨 Orchestrator → LLM → provider 的一次物理请求只携带 canonical `RuntimeCandidateRequestIdentity`，EventHub command/result 与 LLM request/response model 不得再次平铺 logical/sequence/physical 三字段。Orchestrator private session/internal event 可按 owner-local ledger 结构保存其状态字段，不构成跨 owner wire authority。LLM block 返回的 document 必须绑定同一 snapshot 和 request identity，transaction/identity 漂移不得进入执行。
 - LLM owner-private candidate response 不复制 sealed provider audit/typed error 已拥有的 `RequestID/Status`；usage audit 从 canonical audit/error 读取，不能以 response mirror 覆盖 provider outcome。
-- candidate request 携带从 persisted facts 和唯一 manifest 渲染的 typed `RuntimeCandidateContext`；当前 focus/evidence/failure 是 context，operation kind/parameter/target/effect/dependency 与 `BindingRef` 授权只来自 manifest。candidate 不得以 raw `coverageWorkItemIds` 自报 credit。C4 只投影 provider-safe failure/evidence/assessment/shape identity 与 attempt-1 的 typed rejection/directive；它不得携带 raw reason/summary/payload、owner feasibility 或 recovery/governance action。LLM block 不从 禁止的 map、raw reason 或临时上下文重建 authority。
+- candidate request 携带从 persisted facts 和唯一 manifest 渲染的 typed `RuntimeCandidateContext`；当前 focus/evidence/failure 是 context，operation kind/parameter/target/effect/dependency 与 `BindingRef` 授权只来自 manifest。candidate 不得以 raw `coverageWorkItemIds` 自报 credit。C4 只投影 provider-safe failure/evidence/assessment/shape identity 与 attempt-1 persisted directive 的 detached correction input（manifest/objectives/witness）；它不携带 `Disposition`/`TerminalCode`、raw reason/summary/payload、owner feasibility 或 recovery/governance action。LLM block 不从 禁止的 map、raw reason 或临时上下文重建 authority或 persisted directive。
 - Runtime dispatch 在执行前持久化 `SealedDispatch`、完整 transaction、candidate hash、sealed binding references 和 typed step input；execution evidence 只有在 snapshot、dispatch、operation、binding 与 owner receipt 一致时才能提交并触发下一次 reducer。
 - capability owner 的 validation receipt 必须持久化中立 quality/zero-work/check observation，并纳入 stable receipt hash；SM-3 在普通响应与 exact-fence restart recovery 两条路径执行同一质量裁决。receipt 只有实际匹配 sealed binding 的 target/effect/recipe/check（适用时 metric/artifact）才可进入 SM-2 proof gate；multi-target prospective binding 必须再满足同一 dispatch 的完整 collective receipt set，单个 receipt 不授予 CWI credit。弱验证、非空 `PassedChecks` 或 owner exit code 0 只进入 rejected/diagnostic evidence。
 - Runtime aggregate 通过 Run owner 的 EventHub update 合同持久化；Orchestrator 使用

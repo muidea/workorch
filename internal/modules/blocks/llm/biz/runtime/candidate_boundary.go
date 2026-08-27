@@ -367,11 +367,16 @@ func validateOperationsDocumentRequest(request llmmodels.RuntimeCandidateRequest
 	if request.SemanticManifest.Hash != "" || request.SemanticContext.WorkspaceID != "" || request.SemanticContext.RunID != "" || request.PreviousSemanticRejection != nil || request.SemanticCorrectionDirective != nil {
 		return fmt.Errorf("operations document request must not carry semantic plan fields")
 	}
-	if request.CandidateAttempt == 0 && request.PreviousFailure != nil {
-		return fmt.Errorf("initial candidate attempt must not carry a previous failure")
+	if request.CandidateAttempt == 0 && (request.PreviousFailure != nil || request.CandidateCorrection != nil) {
+		return fmt.Errorf("initial candidate attempt must not carry correction lineage")
 	}
-	if request.CandidateAttempt == 1 && (request.PreviousFailure == nil || request.PreviousFailure.Class == "" || strings.TrimSpace(request.PreviousFailure.Reason) == "") {
-		return fmt.Errorf("candidate retry requires the previous failure")
+	if request.CandidateAttempt == 1 {
+		if request.PreviousFailure == nil || request.PreviousFailure.Class == "" || strings.TrimSpace(request.PreviousFailure.Reason) == "" || request.CandidateCorrection == nil {
+			return fmt.Errorf("candidate retry requires previous failure and correction directive")
+		}
+		if err := request.CandidateCorrection.Validate(request.CandidateManifest.Hash); err != nil {
+			return err
+		}
 	}
 	if request.ExpectedDocument == nil || request.ExpectedDocument.Normalized().CorrectionAttempt != request.CandidateAttempt {
 		return fmt.Errorf("operations request requires a matching sealed expected document")
@@ -388,6 +393,21 @@ func validateOperationsDocumentRequest(request llmmodels.RuntimeCandidateRequest
 	if err := runtimecontract.ValidateAuthorityTransaction(request.Decision, request.Transaction); err != nil {
 		return err
 	}
+	if request.CandidateAttempt == 1 {
+		correctionHash := request.CandidateCorrection.StableRequestCorrectionHash(request.PreviousFailure)
+		logicalRequestID := runtimecontract.StableRuntimeCandidateRequestSessionID(
+			request.DocumentKind,
+			request.CandidateContext.WorkspaceID,
+			request.CandidateContext.RunID,
+			request.Transaction,
+			request.StablePrefixHash,
+			request.CandidateManifest.Hash,
+			correctionHash,
+		)
+		if request.RequestIdentity.LogicalRequestID != logicalRequestID {
+			return fmt.Errorf("candidate correction request identity is stale")
+		}
+	}
 	switch request.Decision.State {
 	case runtimecontract.ConvergenceStateNeedStateChange, runtimecontract.ConvergenceStateNeedValidation, runtimecontract.ConvergenceStateNeedAssessment, runtimecontract.ConvergenceStateNeedGovernance:
 		return nil
@@ -397,7 +417,7 @@ func validateOperationsDocumentRequest(request llmmodels.RuntimeCandidateRequest
 }
 
 func validateSemanticPlanDocumentRequest(request llmmodels.RuntimeCandidateRequest) error {
-	if request.CandidateManifest.Hash != "" || request.CandidateContext.WorkspaceID != "" || request.CandidateContext.RunID != "" || request.DefinitionContext.Revision != "" || request.PreviousFailure != nil {
+	if request.CandidateManifest.Hash != "" || request.CandidateContext.WorkspaceID != "" || request.CandidateContext.RunID != "" || request.DefinitionContext.Revision != "" || request.PreviousFailure != nil || request.CandidateCorrection != nil {
 		return fmt.Errorf("semantic plan document request must not carry operations fields")
 	}
 	if request.CandidateAttempt == 0 && (request.PreviousSemanticRejection != nil || request.SemanticCorrectionDirective != nil) {

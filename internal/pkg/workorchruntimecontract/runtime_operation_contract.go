@@ -51,7 +51,7 @@ func ValidateRuntimeOperationContractRevision(persistedRevision string) error {
 
 // RuntimeOperationContractRevision identifies the executable catalog compiled
 // into this binary. It intentionally excludes prose descriptions and Rules:
-// only fields consumed by matcher/effect/idempotency authority participate.
+// only fields consumed by matcher/effect/idempotency/correction authority participate.
 func RuntimeOperationContractRevision() string {
 	kinds := []string{StepKindFileList, StepKindFileRead, StepKindFileWrite, StepKindFileEdit, RuntimeBlockKindPatchApply, RuntimeBlockKindPatchPreview, StepKindShellCommand, RuntimeBlockKindManagedValidationSession, StepKindGitRead, StepKindGitWrite, StepKindMCPToolCall, StepKindMCPResourceRead, StepKindMCPPromptGet, StepKindSSHCommand, StepKindWebSearch, StepKindWebFetch}
 	h := sha256.New()
@@ -82,6 +82,7 @@ func RuntimeOperationContractRevision() string {
 			writeHashString(h, p.Name)
 			writeHashString(h, string(p.Type))
 			writeHashString(h, fmt.Sprintf("%t", p.Required))
+			writeHashString(h, string(p.CorrectionRole))
 		}
 		writeHashStrings(h, contract.RequireOneOfParameters)
 		writeHashString(h, fmt.Sprintf("%t", contract.RequireTargetRefs))
@@ -118,10 +119,11 @@ const (
 )
 
 type RuntimeOperationParameterContract struct {
-	Name        string
-	Type        RuntimeOperationParameterType
-	Required    bool
-	Description string
+	Name           string
+	Type           RuntimeOperationParameterType
+	Required       bool
+	CorrectionRole RuntimeOperationCorrectionRole
+	Description    string
 }
 
 // RuntimeOperationParameterPredicate selects a concrete operation variant from
@@ -231,7 +233,7 @@ func RuntimeOperationContractForKind(kind string) (RuntimeOperationContract, boo
 			Kind: StepKindFileList,
 			Parameters: []RuntimeOperationParameterContract{
 				{Name: "path", Type: RuntimeOperationParameterTypeString, Description: "workspace-relative directory path; defaults to workspace root"},
-				{Name: "recursive", Type: RuntimeOperationParameterTypeBoolean, Description: "recursively enumerate descendants"},
+				{Name: "recursive", Type: RuntimeOperationParameterTypeBoolean, CorrectionRole: RuntimeOperationCorrectionRoleClosedParameter, Description: "recursively enumerate descendants"},
 				{Name: "maxEntries", Type: RuntimeOperationParameterTypeInteger, Description: "bounded maximum entry count"},
 			},
 			ForbiddenParameters: []string{"input", "output", "payload"},
@@ -241,7 +243,7 @@ func RuntimeOperationContractForKind(kind string) (RuntimeOperationContract, boo
 		return RuntimeOperationContract{
 			Kind: StepKindFileRead,
 			Parameters: []RuntimeOperationParameterContract{
-				{Name: "optional", Type: RuntimeOperationParameterTypeBoolean, Description: "return exists=false when the target is absent"},
+				{Name: "optional", Type: RuntimeOperationParameterTypeBoolean, CorrectionRole: RuntimeOperationCorrectionRoleClosedParameter, Description: "return exists=false when the target is absent"},
 				{Name: "maxBytes", Type: RuntimeOperationParameterTypeInteger, Description: "bounded maximum returned content bytes"},
 				{Name: "startLine", Type: RuntimeOperationParameterTypeInteger, Description: "optional 1-based inclusive start line"},
 				{Name: "endLine", Type: RuntimeOperationParameterTypeInteger, Description: "optional 1-based inclusive end line"},
@@ -334,7 +336,7 @@ func RuntimeOperationContractForKind(kind string) (RuntimeOperationContract, boo
 		return RuntimeOperationContract{
 			Kind: RuntimeBlockKindManagedValidationSession,
 			Parameters: []RuntimeOperationParameterContract{
-				{Name: "recipeId", Type: RuntimeOperationParameterTypeString, Required: true, Description: "activation-sealed Shell validation recipe identity"},
+				{Name: "recipeId", Type: RuntimeOperationParameterTypeString, Required: true, CorrectionRole: RuntimeOperationCorrectionRoleValidationRecipe, Description: "activation-sealed Shell validation recipe identity"},
 			},
 			ForbiddenParameters: []string{"input", "output", "payload", "command", "args", "timeoutMillis", "stateChanging", "targetRef", "targetRefs", "verificationScope", "boundedReason", "validationScratchDir", "validationScratchAutoCleanup"},
 			Rules:               []string{"recipeId must select an activation-sealed owner-confirmed validation recipe"},
@@ -386,7 +388,7 @@ func RuntimeOperationContractForKind(kind string) (RuntimeOperationContract, boo
 				{Name: "prompt", Type: RuntimeOperationParameterTypeString, Description: "prompt name for mcp/prompt_get"},
 				{Name: "name", Type: RuntimeOperationParameterTypeString, Description: "prompt name alias"},
 				{Name: "summary", Type: RuntimeOperationParameterTypeString, Description: "bounded operation summary"},
-				{Name: "stream", Type: RuntimeOperationParameterTypeBoolean, Description: "requests streaming external protocol handling"},
+				{Name: "stream", Type: RuntimeOperationParameterTypeBoolean, CorrectionRole: RuntimeOperationCorrectionRoleClosedParameter, Description: "requests streaming external protocol handling"},
 			},
 			ForbiddenParameters: []string{"input", "arguments", "payload"},
 			Rules: []string{
@@ -418,7 +420,7 @@ func RuntimeOperationContractForKind(kind string) (RuntimeOperationContract, boo
 				{Name: "domains", Type: RuntimeOperationParameterTypeStringList, Description: "included domains"},
 				{Name: "excludeDomains", Type: RuntimeOperationParameterTypeStringList, Description: "excluded domains"},
 				{Name: "maxResults", Type: RuntimeOperationParameterTypeInteger, Description: "bounded search result count"},
-				{Name: "safeSearch", Type: RuntimeOperationParameterTypeBoolean, Description: "safe search policy"},
+				{Name: "safeSearch", Type: RuntimeOperationParameterTypeBoolean, CorrectionRole: RuntimeOperationCorrectionRoleClosedParameter, Description: "safe search policy"},
 			},
 			ForbiddenParameters: []string{"approvalId", "extractMode", "input", "maxBytes", "payload", "result", "url"},
 			Rules: []string{

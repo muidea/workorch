@@ -13,30 +13,31 @@ import (
 // prospective target is selected only by a bounded semantic proposal and does
 // not become Runtime authority until SM-2 seals its evidence binding.
 type RuntimeDefinitionFocus struct {
-	ID                                string
-	SliceID                           string
-	AssessmentScope                   string
-	AssessmentID                      string
-	AssessmentText                    string
-	CoverageWorkItemIDs               []common.CoverageWorkItemID
-	RequiredEvidenceKinds             []string
-	EvidenceRole                      string
-	TargetRole                        string
-	TargetDiscoverySources            []string
-	TargetSelectorRef                 string
-	TargetSelectorOwnerRef            string
-	TargetSelectorSubjectRef          string
-	TargetSelectorCandidateRefs       []string
-	RequireTargetGrounding            bool
-	RequireDirectEvidence             bool
-	RequireClaimEvidence              bool
-	RequireExecutableBehaviorEvidence bool
-	RequireCoverageTargets            bool
-	RequireAssessment                 bool
-	RequiredOwnerFacts                []RuntimeOwnerFactRequirement
-	OwnerFactConvergences             []RuntimeOwnerFactConvergence
-	MetricConstraints                 []string
-	ArtifactRefs                      []string
+	ID                                 string
+	SliceID                            string
+	AssessmentScope                    string
+	AssessmentID                       string
+	AssessmentText                     string
+	CoverageWorkItemIDs                []common.CoverageWorkItemID
+	RequiredEvidenceKinds              []string
+	EvidenceRole                       string
+	TargetRole                         string
+	TargetDiscoverySources             []string
+	TargetSelectorRef                  string
+	TargetSelectorOwnerRef             string
+	TargetSelectorSubjectRef           string
+	TargetSelectorCandidateRefs        []string
+	RequireTargetGrounding             bool
+	RequireDirectEvidence              bool
+	RequireClaimEvidence               bool
+	RequireExecutableBehaviorEvidence  bool
+	RequireCoverageTargets             bool
+	RequireAssessment                  bool
+	RequiredOwnerFacts                 []RuntimeOwnerFactRequirement
+	OwnerFactConvergences              []RuntimeOwnerFactConvergence
+	ValidationFailureRepairConvergence *RuntimeValidationFailureRepairConvergence
+	MetricConstraints                  []string
+	ArtifactRefs                       []string
 }
 
 func (f RuntimeDefinitionFocus) Normalized() RuntimeDefinitionFocus {
@@ -56,6 +57,7 @@ func (f RuntimeDefinitionFocus) Normalized() RuntimeDefinitionFocus {
 	f.TargetSelectorCandidateRefs = normalizeStrings(f.TargetSelectorCandidateRefs)
 	f.RequiredOwnerFacts = NormalizeRuntimeOwnerFactRequirements(f.RequiredOwnerFacts)
 	f.OwnerFactConvergences = NormalizeRuntimeOwnerFactConvergences(f.OwnerFactConvergences)
+	f.ValidationFailureRepairConvergence = cloneRuntimeValidationFailureRepairConvergence(f.ValidationFailureRepairConvergence)
 	f.MetricConstraints = normalizeStrings(f.MetricConstraints)
 	f.ArtifactRefs = normalizeStrings(f.ArtifactRefs)
 	return f
@@ -69,6 +71,7 @@ func (f RuntimeDefinitionFocus) Clone() RuntimeDefinitionFocus {
 	f.TargetSelectorCandidateRefs = append([]string(nil), f.TargetSelectorCandidateRefs...)
 	f.RequiredOwnerFacts = append([]RuntimeOwnerFactRequirement(nil), f.RequiredOwnerFacts...)
 	f.OwnerFactConvergences = CloneRuntimeOwnerFactConvergences(f.OwnerFactConvergences)
+	f.ValidationFailureRepairConvergence = cloneRuntimeValidationFailureRepairConvergence(f.ValidationFailureRepairConvergence)
 	f.MetricConstraints = append([]string(nil), f.MetricConstraints...)
 	f.ArtifactRefs = append([]string(nil), f.ArtifactRefs...)
 	return f
@@ -76,7 +79,8 @@ func (f RuntimeDefinitionFocus) Clone() RuntimeDefinitionFocus {
 
 // CoverageFocusDeclaration is a read-only adapter for pure helpers that were
 // intentionally written over CoverageFocus before the declaration/generation
-// type split. It never supplies generation-only fields.
+// type split. It never supplies generation-only fields or Profile convergence
+// declarations; those remain on this immutable Definition value.
 func (f RuntimeDefinitionFocus) CoverageFocusDeclaration() CoverageFocus {
 	f = f.Clone()
 	return CoverageFocus{
@@ -121,9 +125,11 @@ func (f RuntimeDefinitionFocus) RuntimeFocusSeed() CoverageFocus {
 	}.Normalized()
 }
 
-// CompileRuntimeDefinitionFocuses projects activation compiler output onto the
-// immutable declaration surface. Generation-specific authority has no field in
-// the returned type and therefore cannot leak into a fresh Runtime aggregate.
+// CompileRuntimeDefinitionFocuses projects focus-shaped activation output onto
+// the immutable declaration surface. Profile-only declarations that have no
+// mutable focus field are attached by the activation compiler directly to the
+// returned RuntimeDefinitionFocus. Generation-specific authority has no field
+// in this type and therefore cannot leak into a fresh Runtime aggregate.
 func CompileRuntimeDefinitionFocuses(values []CoverageFocus) []RuntimeDefinitionFocus {
 	ret := make([]RuntimeDefinitionFocus, 0, len(values))
 	for _, raw := range values {
@@ -244,6 +250,14 @@ func ValidateRuntimeDefinitionFocuses(seed RuntimeDefinitionSeed, focuses []Runt
 		if err := ValidateRuntimeOwnerFactConvergences(focus.RequiredOwnerFacts, focus.OwnerFactConvergences); err != nil {
 			return fmt.Errorf("runtime definition focus %q owner-fact convergence: %w", focus.ID, err)
 		}
+		if focus.ValidationFailureRepairConvergence != nil {
+			if focus.AssessmentScope != "dodItem" || len(focus.RequiredEvidenceKinds) != 1 || focus.RequiredEvidenceKinds[0] != EvidenceKindValidation {
+				return fmt.Errorf("runtime definition focus %q validation failure repair requires one validation-only dodItem CWI", focus.ID)
+			}
+			if err := focus.ValidationFailureRepairConvergence.Validate(); err != nil {
+				return fmt.Errorf("runtime definition focus %q: %w", focus.ID, err)
+			}
+		}
 		for _, convergence := range focus.OwnerFactConvergences {
 			if convergence.RequirePreexisting {
 				continue
@@ -276,5 +290,6 @@ func sameRuntimeDefinitionFocus(left, right RuntimeDefinitionFocus) bool {
 		left.RequireCoverageTargets == right.RequireCoverageTargets && left.RequireAssessment == right.RequireAssessment &&
 		sameRuntimeOwnerFactRequirements(left.RequiredOwnerFacts, right.RequiredOwnerFacts) &&
 		SameRuntimeOwnerFactConvergences(left.OwnerFactConvergences, right.OwnerFactConvergences) &&
+		SameRuntimeValidationFailureRepairConvergence(left.ValidationFailureRepairConvergence, right.ValidationFailureRepairConvergence) &&
 		sameStrings(left.MetricConstraints, right.MetricConstraints) && sameStrings(left.ArtifactRefs, right.ArtifactRefs)
 }

@@ -66,13 +66,24 @@ func (m *Biz) driveRuntimeSemanticRequired(ctx context.Context, aggregate runtim
 	if len(eligibleCoverage) == 0 {
 		return m.failRuntimeSemanticContract(ctx, aggregate, "semantic_no_eligible_cwi", "semantic planning was requested without an eligible canonical CWI", nil)
 	}
-	manifest, err := semanticplan.CompileManifest(semanticplan.ManifestIdentity{
+	repairInput, repairRequired, repairErr := runtime.CurrentRuntimeValidationFailureRepairGenerationInput(aggregate)
+	if repairErr != nil {
+		return m.failRuntimeSemanticContract(ctx, aggregate, "semantic_validation_failure_repair_invalid", repairErr.Error(), nil)
+	}
+	identity := semanticplan.ManifestIdentity{
 		WorkspaceID: aggregate.Facts.WorkspaceID, RunID: aggregate.Facts.RunID,
 		Definition: aggregate.Definition, DefinitionSeed: aggregate.Facts.DefinitionSeed,
 		DefinitionFocuses: aggregate.Facts.DefinitionFocuses,
 		Execution:         aggregate.Facts.Activation.ExecutionContract, Admissibilities: aggregate.Facts.Resources.OperationAdmissibilities,
 		EligibleCoverage: eligibleCoverage,
-	})
+	}
+	if repairRequired {
+		// A repair purpose is CWI-local and cannot replace unrelated eligible
+		// Definition proofs in the same generation.
+		identity.EligibleCoverage = []common.CoverageWorkItemID{repairInput.CoverageWorkItemID}
+		identity.ValidationFailureRepair = &repairInput
+	}
+	manifest, err := semanticplan.CompileManifest(identity)
 	if err != nil {
 		return m.failRuntimeSemanticContract(ctx, aggregate, "semantic_manifest_invalid", err.Error(), nil)
 	}

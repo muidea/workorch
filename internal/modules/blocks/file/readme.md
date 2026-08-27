@@ -4,7 +4,7 @@ Status: active
 
 Type: capability-block-contract
 
-Last Verified: 2026-08-26
+Last Verified: 2026-08-27
 
 ## 功能范围与边界
 
@@ -19,7 +19,7 @@ Last Verified: 2026-08-26
   只对请求中的 exact selector 返回 factual selection/feasibility/receipt，不把声明 selector 改写成 operation selector，
   也不决定 CWI、重试、reopen 或 Runtime 状态。
 - prospective target 的创建前 admission 与创建后 reconciliation 是两条 File-private 只读语义。普通
-  prospective proposal 仍校验单一 exact path；owner-fact acquisition 则校验同一 SM-3 semantic proposal 中
+  prospective proposal（包括 Profile 触发的 `validation_failure_repair`）仍校验完整 exact target set；owner-fact acquisition 也校验同一 SM-3 semantic proposal 中
   1～8 个唯一 canonical `ProspectiveTargetRefs` 的完整 all-of target set。File 使用同一 complete manifest revision
   逐项校验 workspace-relative path、excluded tree、不存在性、parent/child 冲突与实际 filesystem parent，并按整组
   文件及缺失父目录的 union 执行一次 aggregate manifest-capacity admission。任一失败都返回 factual
@@ -28,13 +28,15 @@ Last Verified: 2026-08-26
   事实；全部精确存在才返回 `satisfied + concrete targets/current revision`，缺失返回 `unsatisfied`，歧义、
   非规范或越出 workspace/manifest 的路径返回 `unverifiable`。`file/workspace_deliverable` 表达完整 bounded
   manifest scope，因此多文件返回 `satisfied + 全部 TargetRefs`；只有 unique/profile selector 的多匹配才是
-  ambiguous。该观察不返回 retain/reopen/CWI 状态。
+  ambiguous。该观察不返回 retain/reopen/CWI 状态。File 只验证 proposal 的整个 target set 并返回 factual feasible refs；
+  它不解释 validation diagnostic、repair purpose、fresh-validation lineage 或 terminal credit。
 - 对 sealed owner-fact acquisition 的 prospective `file/write`，File feasibility 还必须基于上述同一 current complete
   `WorkspaceManifest` 生成 immutable `RuntimeProspectiveWorkspaceManifestDelta`：它只包含 exact base revision、proposal/
   catalog/contract identity、完整 `ProspectiveTargetRefs` 与归一化 resulting target refs，不写文件、不访问 Shell，
   也不判断 required owner fact。delta 不是部分 target 的执行授权；集合必须作为一个 bounded transaction 保持完整。
   非 feasible、stale、existing-target 或普通 prospective proposal 不得携带该 delta。Orchestrator 只能把这份 File-owned
-  value 交给 required-fact owner 的 concrete typed pure query；其他组件不得重建 File manifest 后果。
+  value 交给 required-fact owner 的 concrete typed pure query；其他组件不得重建 File manifest 后果。validation-failure
+  repair 使用 generic semantic feasibility fact，不得生成或借用该 owner-fact-only delta。
 - 对 profile 显式绑定的空工作区，File 可以返回不含具体路径的 `scope` selection；它只授权
   LLM 在同一 sealed all-of constraint 下提出必需的 1～8 个 workspace-relative File target，并由同一 owner
   feasibility/admissibility gate 验证整个集合。File 不从 Goal、DoD、目录名或文件后缀推断路径；未绑定 profile 的
@@ -138,6 +140,8 @@ Last Verified: 2026-08-26
   deterministic replay、source/workspace scope gate，以及 canonical/duplicate/partial/extra/excluded/symlink-parent/
   parent-child/aggregate-capacity invalid matrix。验证使用同一 manifest revision、全部目标不存在，且全链零 File
   write/零父目录创建/零 Shell I/O。
+- [x] validation-failure repair 的多 target generic feasibility 复用同一 whole-set prospective admission，但不产生
+  `RuntimeProspectiveWorkspaceManifestDelta`，也不授予 repair settlement/fresh validation/terminal credit。
 - [x] snapshot 大文件、400 文件 manifest 与大文件 patch replay 均有 allocation benchmark；bounded read、文件与目录
   混合时恰好 500 个可纳入 entry 成功、第 501 个才 typed overflow、嵌套 create 为缺失父目录预留 capacity，以及
   replay 零二次写均由回归测试约束；被排除的 owner-internal/generated tree 不消费该 entry bound。

@@ -11,6 +11,7 @@ import (
 	"strings"
 	"testing"
 
+	cd "github.com/muidea/magicCommon/def"
 	runbiz "github.com/muidea/workorch/internal/modules/blocks/run/biz"
 
 	llmevents "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/events"
@@ -3074,7 +3075,7 @@ func TestRuntimeFileBackedSemanticCandidateReplayExhaustionSurvivesCASBoundaries
 			t.Fatalf("pre-CAS restart did not retain only pending correction: aggregate=%+v err=%v", loaded, err)
 		}
 		committed, err := admitRuntimeCandidateProposalForTest(ctx, restarted, "ws-v2", "run-v2", 1, equivalent)
-		if err != nil || committed.Admission.Failure == nil || committed.Admission.Failure.Code != "candidate_contract_invalid" ||
+		if err != nil || committed.Admission.Failure == nil || committed.Admission.Failure.Code != "candidate_replays_rejected_candidate_shape" ||
 			committed.Aggregate.Decision.Terminal == nil || committed.Aggregate.Decision.Terminal.Code != "candidate_retry_exhausted" || committed.Aggregate.ActiveDispatch != nil {
 			t.Fatalf("restarted semantic exhaustion = %+v err=%v", committed, err)
 		}
@@ -3295,16 +3296,107 @@ func TestRuntimeMainlineRetriesSameCandidateContractOnce(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if sealed.ActiveDispatch == nil || len(attempts) != 2 || attempts[0].CandidateAttempt != 0 || attempts[1].CandidateAttempt != 1 || attempts[0].PreviousFailure != nil || attempts[1].PreviousFailure == nil || attempts[1].PreviousFailure.Diagnostic == nil || attempts[1].PreviousFailure.Diagnostic.Path != "$.unexpected" || attempts[1].PreviousFailure.Diagnostic.ManifestHash != attempts[1].CandidateManifest.Hash ||
-		attempts[0].Transaction != attempts[1].Transaction || attempts[0].StablePrefixHash != attempts[1].StablePrefixHash {
+	if sealed.ActiveDispatch == nil || len(attempts) != 2 || attempts[0].CandidateAttempt != 0 || attempts[1].CandidateAttempt != 1 || attempts[0].PreviousFailure != nil || attempts[0].CandidateCorrection != nil || attempts[1].PreviousFailure == nil || attempts[1].CandidateCorrection == nil || attempts[1].CandidateCorrection.Witness.Path != "$.unexpected" || attempts[1].CandidateCorrection.Witness.AlternativeValue != "field_absent" || attempts[1].PreviousFailure.Diagnostic == nil || attempts[1].PreviousFailure.Diagnostic.Path != "$.unexpected" || attempts[1].PreviousFailure.Diagnostic.ManifestHash != attempts[1].CandidateManifest.Hash ||
+		attempts[0].Transaction != attempts[1].Transaction || attempts[0].StablePrefixHash != attempts[1].StablePrefixHash || attempts[0].RequestIdentity.LogicalRequestID == attempts[1].RequestIdentity.LogicalRequestID {
 		t.Fatalf("attempts=%+v sealed=%+v", attempts, sealed)
 	}
-	if len(sealed.CandidateAttempts) != 2 || sealed.CandidateAttempts[0].State != runtimecontract.RuntimeCandidateAttemptStateFailed || sealed.CandidateAttempts[0].Failure == nil || sealed.CandidateAttempts[0].Failure.Diagnostic == nil || sealed.CandidateAttempts[1].State != runtimecontract.RuntimeCandidateAttemptStateAccepted {
+	if len(sealed.CandidateAttempts) != 2 || sealed.CandidateAttempts[0].State != runtimecontract.RuntimeCandidateAttemptStateFailed || sealed.CandidateAttempts[0].Failure == nil || sealed.CandidateAttempts[0].Failure.Diagnostic == nil || sealed.CandidateAttempts[0].Correction == nil || !reflect.DeepEqual(runtimeCandidateCorrectionInputFromDirective(sealed.CandidateAttempts[0].Correction), attempts[1].CandidateCorrection) || sealed.CandidateAttempts[1].State != runtimecontract.RuntimeCandidateAttemptStateAccepted {
 		t.Fatalf("persisted attempts = %+v", sealed.CandidateAttempts)
+	}
+	wantCorrectionHash := attempts[1].CandidateCorrection.StableRequestCorrectionHash(attempts[1].PreviousFailure)
+	correctionSessionFound := false
+	for _, session := range sealed.CandidateRequestSessions {
+		if session.LogicalRequestID == attempts[1].RequestIdentity.LogicalRequestID {
+			correctionSessionFound = session.CorrectionHash == wantCorrectionHash
+		}
+	}
+	if !correctionSessionFound {
+		t.Fatalf("attempt 1 request session did not bind detached correction input hash %q: %+v", wantCorrectionHash, sealed.CandidateRequestSessions)
 	}
 	duplicate, err := module.requestAndSealRuntimeCandidateWithRetry(ctx, sealed, "stable-prefix-v2")
 	if err != nil || duplicate.ActiveDispatch == nil || len(attempts) != 2 || len(duplicate.CandidateAttempts) != 2 {
 		t.Fatalf("duplicate correction notification replayed provider: aggregate=%+v attempts=%+v err=%v", duplicate, attempts, err)
+	}
+}
+
+func TestRuntimeMainlineCandidateAuthorityExhaustionHasNoCorrectionProviderOrBudgetEffect(t *testing.T) {
+	ctx := context.Background()
+	hub := magicevent.NewHub(16)
+	t.Cleanup(func() { hub.Terminate(ctx) })
+	runs := memory.NewRunRepository()
+	if err := runs.Create(ctx, runtimeRunForTest(common.RunStateActive, runtimeDefinition())); err != nil {
+		t.Fatal(err)
+	}
+	runOwner := runmodule.New()
+	if err := runOwner.Configure(runbiz.Dependencies{Runs: runs, EventHub: hub}); err != nil {
+		t.Fatal(err)
+	}
+	if err := runOwner.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = runOwner.Stop(ctx) })
+
+	providerCalls := 0
+	llmObserver := magicevent.NewSimpleObserver(runtimecontract.RuntimeModuleLLM, hub)
+	llmObserver.Subscribe(llmevents.TopicRequestRuntimeCandidate, func(event magicevent.Event, result magicevent.Result) {
+		providerCalls++
+		command := event.Data().(llmevents.RequestRuntimeCandidateCommand)
+		candidate := bindRuntimeTestCandidateToManifest(command.CandidateManifest, runtimecontract.RuntimeCandidate{StateChange: &runtimecontract.StateChangeCandidate{Operations: []runtimecontract.StateChangingOperation{{Operation: runtimecontract.RuntimeOperation{
+			ID: "write-1", Kind: runtimecontract.StepKindFileEdit, CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-v2"},
+			TargetRefs: []string{"target.txt"}, Parameters: runtimeFileEditParameters("target.txt"),
+		}}}}})
+		document, encodeErr := runtimecontract.EncodeRuntimeCandidatePayloadWithManifest(command.CandidateManifest, candidate)
+		if encodeErr != nil {
+			result.Set(nil, &cd.Error{Code: cd.Unexpected, Message: encodeErr.Error(), Cause: encodeErr})
+			return
+		}
+		withoutID := strings.Replace(string(document), `"id":"write-1",`, "", 1)
+		if withoutID == string(document) {
+			result.Set(nil, cd.NewError(cd.Unexpected, "candidate fixture did not contain operation id"))
+			return
+		}
+		result.Set(runtimeProviderResultWithAuditForTest(command, llmevents.RequestRuntimeCandidateResult{
+			Transaction: command.Transaction, DocumentKind: command.DocumentKind, RequestIdentity: command.RequestIdentity,
+			ExpectedDocumentHash: runtimeExpectedDocumentHash(command.ExpectedDocument),
+			DocumentOutcome:      runtimeCompleteDocumentOutcome(command.ExpectedDocument, []byte(withoutID)),
+		}), nil)
+	})
+	t.Cleanup(func() { llmObserver.Unsubscribe(llmevents.TopicRequestRuntimeCandidate) })
+
+	biz := newRuntimeTestOwner()
+	runtimeRepository := runtimeStateRepository{hub: hub}
+	if err := biz.ConfigureRuntimeRepository(runtimeRepository); err != nil {
+		t.Fatal(err)
+	}
+	initialized := runtimeTestInitializeOperationFixture(t, ctx, biz, runtimeRepository, runtimeAggregate(t, 1).Facts, runtimeDefinition(), nil)
+	beforeCorrectionBudget, err := runtimecontract.RuntimeBudgetRemaining(initialized.ExecutionBudget, runtimecontract.RuntimeBudgetDimensionCandidateCorrection)
+	if err != nil {
+		t.Fatal(err)
+	}
+	module := newTestBiz(biz, hub, nil)
+	terminal, err := module.requestAndSealRuntimeCandidateWithRetry(ctx, initialized, "candidate-authority-prefix")
+	if err != nil {
+		t.Fatal(err)
+	}
+	afterCorrectionBudget, err := runtimecontract.RuntimeBudgetRemaining(terminal.ExecutionBudget, runtimecontract.RuntimeBudgetDimensionCandidateCorrection)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if providerCalls != 1 || beforeCorrectionBudget != afterCorrectionBudget || terminal.ActiveDispatch != nil || len(terminal.OperationReceipts) != 0 || len(terminal.CandidateRequestSessions) != 1 ||
+		terminal.Decision.State != runtimecontract.ConvergenceStateFailed || terminal.Decision.Terminal == nil || terminal.Decision.Terminal.Code != "candidate_authority_exhausted" ||
+		len(terminal.CandidateAttempts) != 1 || terminal.CandidateAttempts[0].Correction == nil || terminal.CandidateAttempts[0].Correction.Disposition != runtimecontract.RuntimeCandidateCorrectionRejectedFinal ||
+		terminal.CandidateAttempts[0].Correction.TerminalCode != "candidate_authority_exhausted" {
+		t.Fatalf("candidate authority exhaustion performed a correction effect: calls=%d budget=%d->%d aggregate=%+v", providerCalls, beforeCorrectionBudget, afterCorrectionBudget, terminal)
+	}
+
+	reloaded, err := biz.loadRuntime(ctx, "ws-v2", "run-v2")
+	if err != nil {
+		t.Fatal(err)
+	}
+	revision := reloaded.StateRevision
+	replayed, err := newTestBiz(biz, hub, nil).requestAndSealRuntimeCandidateWithRetry(ctx, reloaded, "candidate-authority-prefix")
+	if err != nil || providerCalls != 1 || replayed.StateRevision != revision || len(replayed.CandidateAttempts) != 1 {
+		t.Fatalf("restart/duplicate replayed exhausted candidate authority: calls=%d aggregate=%+v err=%v", providerCalls, replayed, err)
 	}
 }
 
@@ -3888,8 +3980,19 @@ func TestRuntimeMainlinePartialReplayClosesAttemptThenSealsCorrectedRetry(t *tes
 	ctx := context.Background()
 	hub := magicevent.NewHub(16)
 	t.Cleanup(func() { hub.Terminate(ctx) })
+	bootstrap := runtimeBootstrap()
+	bootstrap.Activation.ExecutionContract.ProfileContracts = []runtimecontract.RuntimeProfileContract{{
+		ID: "test-partial-replay-concrete-alternatives",
+		EvidenceRequirements: []runtimecontract.RuntimeProfileEvidenceRequirement{{
+			ID: "cwi-v2", Scope: "test", TargetRole: "deliverable",
+			TargetRefs:            []string{"replacement.txt", "target.txt"},
+			RequiredEvidenceKinds: []string{runtimecontract.EvidenceKindStateChange},
+			AcceptedStepKinds:     []string{runtimecontract.StepKindFileEdit},
+		}},
+	}}
+	bootstrap = runtimeTestBootstrapWithReboundBindings(bootstrap)
 	runs := memory.NewRunRepository()
-	if err := runs.Create(ctx, runtimeRunForTest(common.RunStateActive, runtimeDefinition())); err != nil {
+	if err := runs.Create(ctx, runtimeRunForTestBootstrap(common.RunStateActive, bootstrap)); err != nil {
 		t.Fatal(err)
 	}
 	runOwner := runmodule.New()
@@ -3900,13 +4003,50 @@ func TestRuntimeMainlinePartialReplayClosesAttemptThenSealsCorrectedRetry(t *tes
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = runOwner.Stop(ctx) })
+	workspaceObserver := magicevent.NewSimpleObserver(workspaceevents.CommandDestination, hub)
+	workspaceObserver.Subscribe(workspaceevents.TopicWorkspaceCommandGet, func(_ magicevent.Event, result magicevent.Result) {
+		result.Set(workspaceevents.WorkspaceResult{Workspace: &workspaceevents.Workspace{
+			ID: "ws-v2", DeliverableDirectory: t.TempDir(), InternalDirectory: t.TempDir(),
+		}}, nil)
+	})
+	t.Cleanup(func() { workspaceObserver.Unsubscribe(workspaceevents.TopicWorkspaceCommandGet) })
+	probeObserver := magicevent.NewSimpleObserver(runtimecontract.RuntimeModuleFile, hub)
+	probeObserver.Subscribe(fileevents.TopicProbeRuntimeOperationFeasibility, func(event magicevent.Event, result magicevent.Result) {
+		command := event.Data().(fileevents.ProbeRuntimeOperationFeasibilityCommand)
+		response, err := fileevents.NewProbeRuntimeOperationFeasibilityResult(command, "", nil, nil, nil, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		result.Set(response, nil)
+	})
+	t.Cleanup(func() { probeObserver.Unsubscribe(fileevents.TopicProbeRuntimeOperationFeasibility) })
 
 	biz := newRuntimeTestOwner()
 	repository := runtimeStateRepository{hub: hub}
 	if err := biz.ConfigureRuntimeRepository(repository); err != nil {
 		t.Fatal(err)
 	}
-	initialized := runtimeTestInitializeOperationFixture(t, ctx, biz, repository, runtimeAggregate(t, 1).Facts, runtimeDefinition(), nil)
+	facts, err := bootstrap.InitialFacts("ws-v2", "run-v2")
+	if err != nil {
+		t.Fatal(err)
+	}
+	fileCatalog := runtimecontract.RuntimeOperationAdmissibility{
+		PrerequisiteID: "test-semantic-" + runtimecontract.RuntimeModuleFile,
+		OwnerModuleID:  runtimecontract.RuntimeModuleFile,
+		OperationKinds: []string{runtimecontract.StepKindFileEdit},
+		OperationVariants: []runtimecontract.RuntimeOperationAdmissibilityVariant{{
+			Kind:                  runtimecontract.StepKindFileEdit,
+			AllowedTargetPolicies: []runtimecontract.RuntimeOperationTargetPolicy{runtimecontract.RuntimeOperationTargetPolicyExactTarget},
+		}},
+		TargetRefs:       []string{"replacement.txt", "target.txt"},
+		ObservedRevision: "test-semantic-revision-" + runtimecontract.RuntimeModuleFile,
+	}
+	fileCatalog.SnapshotID = runtimecontract.StableRuntimeOperationAdmissibilitySnapshotID(fileCatalog)
+	facts.Capabilities.StateChangeKinds = []string{runtimecontract.StepKindFileEdit}
+	facts.Resources.OperationAdmissibilities = []runtimecontract.RuntimeOperationAdmissibility{fileCatalog}
+	facts.Prerequisites.Satisfied = []runtimecontract.RuntimePrerequisite{runtimeOperationAdmissibilityPrerequisite(fileCatalog)}
+	facts.Resources.PrerequisiteObservations = []runtimecontract.RuntimePrerequisiteObservation{runtimeFileAdmissibilityObservation(fileCatalog)}
+	initialized := runtimeTestInitializeOperationFixture(t, ctx, biz, repository, facts, bootstrap.Definition, bootstrap.Requirements)
 	if len(initialized.Facts.Focus.CoverageEvidenceBindings) != 1 {
 		t.Fatalf("partial replay fixture requires one sealed coverage binding: %+v", initialized.Facts.Focus)
 	}
@@ -3954,12 +4094,12 @@ func TestRuntimeMainlinePartialReplayClosesAttemptThenSealsCorrectedRetry(t *tes
 		command := event.Data().(llmevents.RequestRuntimeCandidateCommand)
 		requests = append(requests, command)
 		candidate := runtimecontract.RuntimeCandidate{}
+		newOperation := replayedOperation
+		newOperation.ID = "new-edit"
+		newText := "corrected"
+		newOperation.Parameters = runtimeFileEditParameters("target.txt")
+		newOperation.Parameters[1].String = &newText
 		if command.CandidateAttempt == 0 {
-			newOperation := replayedOperation
-			newOperation.ID = "new-edit"
-			newText := "corrected"
-			newOperation.Parameters = runtimeFileEditParameters("target.txt")
-			newOperation.Parameters[1].String = &newText
 			candidate.StateChange = &runtimecontract.StateChangeCandidate{Operations: []runtimecontract.StateChangingOperation{{Operation: replayedOperation}, {Operation: newOperation}}}
 		} else {
 			if command.PreviousFailure == nil || command.PreviousFailure.Code != "candidate_partially_replays_rejected_shape" {
@@ -3967,10 +4107,9 @@ func TestRuntimeMainlinePartialReplayClosesAttemptThenSealsCorrectedRetry(t *tes
 			}
 			corrected := replayedOperation
 			corrected.ID = "corrected-edit"
-			newText := "corrected"
-			corrected.Parameters = runtimeFileEditParameters("target.txt")
-			corrected.Parameters[1].String = &newText
-			candidate.StateChange = &runtimecontract.StateChangeCandidate{Operations: []runtimecontract.StateChangingOperation{{Operation: corrected}}}
+			corrected.TargetRefs = []string{"replacement.txt"}
+			corrected.Parameters = runtimeFileEditParameters("replacement.txt")
+			candidate.StateChange = &runtimecontract.StateChangeCandidate{Operations: []runtimecontract.StateChangingOperation{{Operation: corrected}, {Operation: newOperation}}}
 		}
 		result.Set(runtimeCandidateResultForTest(t, command, candidate), nil)
 	})
@@ -3980,6 +4119,13 @@ func TestRuntimeMainlinePartialReplayClosesAttemptThenSealsCorrectedRetry(t *tes
 	first, err := module.requestAndSealRuntimeCandidate(ctx, seeded, "partial-replay-prefix", 0)
 	if err != nil || len(requests) != 1 || len(first.CandidateAttempts) != 2 || first.CandidateAttempts[0].State != runtimecontract.RuntimeCandidateAttemptStateAccepted || first.CandidateAttempts[1].State != runtimecontract.RuntimeCandidateAttemptStateFailed || first.CandidateAttempts[1].Failure == nil || first.CandidateAttempts[1].Failure.Code != "candidate_partially_replays_rejected_shape" || first.Decision.State == runtimecontract.ConvergenceStateFailed {
 		t.Fatalf("partial replay did not atomically close attempt 0 before restart: aggregate=%+v err=%v requests=%+v", first, err, requests)
+	}
+	correction := first.CandidateAttempts[1].Correction
+	if correction == nil || correction.Witness == nil ||
+		correction.Witness.Dimension != runtimecontract.RuntimeCandidateCorrectionWitnessTarget ||
+		correction.Witness.RejectedValue != "target.txt" || correction.Witness.AlternativeValue != "replacement.txt" ||
+		correction.Witness.RejectedShapeHash == correction.Witness.AlternativeShapeHash {
+		t.Fatalf("partial replay did not seal the manifest's concrete target alternative: %+v", correction)
 	}
 	restarted, err := biz.loadRuntime(ctx, "ws-v2", "run-v2")
 	if err != nil {
@@ -3994,7 +4140,15 @@ func TestRuntimeMainlinePartialReplayClosesAttemptThenSealsCorrectedRetry(t *tes
 		sealed.CandidateAttempts[1].State != runtimecontract.RuntimeCandidateAttemptStateFailed || sealed.CandidateAttempts[1].Failure == nil ||
 		sealed.CandidateAttempts[1].Failure.Code != "candidate_partially_replays_rejected_shape" ||
 		sealed.CandidateAttempts[2].State != runtimecontract.RuntimeCandidateAttemptStateAccepted || sealed.Decision.State == runtimecontract.ConvergenceStateFailed {
-		t.Fatalf("partial replay did not converge through typed retry: requests=%+v aggregate=%+v", requests, sealed)
+		var retry runtimecontract.RuntimeCandidateAttemptRecord
+		if len(sealed.CandidateAttempts) > 2 {
+			retry = sealed.CandidateAttempts[2]
+		}
+		var sealedCorrection *runtimecontract.RuntimeCandidateCorrectionDirective
+		if len(sealed.CandidateAttempts) > 1 {
+			sealedCorrection = sealed.CandidateAttempts[1].Correction
+		}
+		t.Fatalf("partial replay did not converge through typed retry: request-count=%d sealed-correction=%+v retry-state=%q failure=%+v correction=%+v proposal=%+v decision=%q", len(requests), sealedCorrection, retry.State, retry.Failure, retry.Correction, retry.Proposal, sealed.Decision.State)
 	}
 	if requests[0].StablePrefixHash != requests[1].StablePrefixHash || requests[0].Transaction != requests[1].Transaction {
 		t.Fatalf("partial replay retry drifted the sealed request contract: %+v", requests)
@@ -4410,7 +4564,7 @@ func runtimeCandidateRequestContentID(t *testing.T, aggregate runtime.RuntimeAgg
 	if err != nil {
 		t.Fatal(err)
 	}
-	logicalRequestID, _, err := runtimeCandidateRequestIdentity(aggregate, stablePrefixHash, context, manifest, previousFailure, 1)
+	logicalRequestID, _, err := runtimeCandidateRequestIdentity(aggregate, stablePrefixHash, context, manifest, previousFailure, 1, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

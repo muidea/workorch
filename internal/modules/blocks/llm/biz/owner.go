@@ -232,7 +232,7 @@ func (m *Biz) handleRuntimeCandidatePreflight(event magicevent.Event, result mag
 	request := llmmodels.RuntimeCandidateRequest{
 		DocumentKind: command.DocumentKind,
 		Decision:     command.Decision, Transaction: command.Transaction,
-		CandidateAttempt: command.CandidateAttempt, PreviousFailure: command.PreviousFailure,
+		CandidateAttempt: command.CandidateAttempt, PreviousFailure: command.PreviousFailure, CandidateCorrection: command.CandidateCorrection.Clone(),
 		StablePrefixHash: command.StablePrefixHash, DefinitionContext: command.DefinitionContext,
 		CandidateManifest: command.CandidateManifest, CandidateContext: command.CandidateContext,
 		SemanticManifest: command.SemanticManifest, SemanticContext: command.SemanticContext,
@@ -348,6 +348,7 @@ func (m *Biz) handleRuntimeCandidate(event magicevent.Event, result magicevent.R
 		Transaction:                 command.Transaction,
 		CandidateAttempt:            command.CandidateAttempt,
 		PreviousFailure:             command.PreviousFailure,
+		CandidateCorrection:         command.CandidateCorrection.Clone(),
 		StablePrefixHash:            command.StablePrefixHash,
 		CandidateManifest:           command.CandidateManifest,
 		DefinitionContext:           command.DefinitionContext,

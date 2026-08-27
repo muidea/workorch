@@ -298,8 +298,9 @@ func TestEvaluateCandidateAdmissionUsesSemanticContractNotOperationIdentityOrPar
 	}
 
 	for _, testCase := range []struct {
-		name   string
-		mutate func(*runtimecontract.RuntimeOperation)
+		name        string
+		correctable bool
+		mutate      func(*runtimecontract.RuntimeOperation)
 	}{
 		{
 			name: "kind outside sealed allowed set",
@@ -311,32 +312,32 @@ func TestEvaluateCandidateAdmissionUsesSemanticContractNotOperationIdentityOrPar
 			},
 		},
 		{
-			name: "target ref disagrees with operation target parameter",
+			name: "target ref disagrees with operation target parameter", correctable: true,
 			mutate: func(operation *runtimecontract.RuntimeOperation) {
 				operation.TargetRefs = []string{"other.go"}
 			},
 		},
 		{
-			name: "coverage outside sealed coverage",
+			name: "coverage outside sealed coverage", correctable: true,
 			mutate: func(operation *runtimecontract.RuntimeOperation) {
 				operation.CoverageWorkItemIDs = []common.CoverageWorkItemID{"cwi-other"}
 			},
 		},
 		{
-			name: "dependency outside candidate graph",
+			name: "dependency outside candidate graph", correctable: true,
 			mutate: func(operation *runtimecontract.RuntimeOperation) {
 				operation.DependsOn = []string{"missing-operation"}
 			},
 		},
 		{
-			name: "parameter outside sealed operation contract",
+			name: "parameter outside sealed operation contract", correctable: true,
 			mutate: func(operation *runtimecontract.RuntimeOperation) {
 				value := "unsupported"
 				operation.Parameters = append(operation.Parameters, runtimecontract.OperationParameter{Name: "notAllowed", String: &value})
 			},
 		},
 		{
-			name: "variant outside sealed operation contract",
+			name: "variant outside sealed operation contract", correctable: true,
 			mutate: func(operation *runtimecontract.RuntimeOperation) {
 				operation.Parameters = append([]runtimecontract.OperationParameter(nil), operation.Parameters...)
 				for index := range operation.Parameters {
@@ -356,9 +357,15 @@ func TestEvaluateCandidateAdmissionUsesSemanticContractNotOperationIdentityOrPar
 			result := EvaluateCandidateAdmission(aggregate, candidate)
 			if result.Disposition != CandidateAdmissionRejectedContract || result.Failure == nil || result.Failure.Diagnostic == nil || result.Failure.Diagnostic.Path == "" ||
 				result.Failure.Class != runtimecontract.RuntimeCandidateFailureClassContract ||
-				result.Failure.Code != candidateAdmissionCodeInvalid || result.Failure.Signature == "" || result.Failure.Reason == "" ||
-				result.Correction == nil || result.Correction.Disposition != runtimecontract.RuntimeCandidateCorrectionCorrectableOnce || len(result.Correction.Objectives) == 0 {
+				result.Failure.Code != candidateAdmissionCodeInvalid || result.Failure.Signature == "" || result.Failure.Reason == "" || result.Correction == nil {
 				t.Fatalf("semantic contract admission = %+v", result)
+			}
+			if testCase.correctable {
+				if result.Correction.Disposition != runtimecontract.RuntimeCandidateCorrectionCorrectableOnce || len(result.Correction.Objectives) == 0 || result.Correction.Witness == nil {
+					t.Fatalf("semantic contract correction has no concrete witness: %+v", result)
+				}
+			} else if result.Correction.Disposition != runtimecontract.RuntimeCandidateCorrectionRejectedFinal || result.Correction.TerminalCode != "candidate_authority_exhausted" {
+				t.Fatalf("non-total semantic correction did not exhaust authority: %+v", result)
 			}
 		})
 	}
@@ -682,7 +689,7 @@ func TestEvaluateCandidateAdmissionScopeCannotBypassOwnerFailureTarget(t *testin
 	}
 }
 
-func TestAdmitCandidateProposalAtomicallyClosesReplayAttemptAndExhaustsSecondAttempt(t *testing.T) {
+func TestAdmitCandidateProposalAtomicallyExhaustsSingleShapeFrontier(t *testing.T) {
 	aggregate, candidate := aggregateWithActiveRejectedCandidate(t)
 	repository := &controllerRepository{aggregate: &aggregate}
 	controller, err := NewRuntimeController(repository)
@@ -697,7 +704,9 @@ func TestAdmitCandidateProposalAtomicallyClosesReplayAttemptAndExhaustsSecondAtt
 		t.Fatal(err)
 	}
 	currentAttempt := first.Aggregate.CandidateAttempts[len(first.Aggregate.CandidateAttempts)-1]
-	if first.Admission.Failure == nil || first.Admission.Failure.Code != candidateAdmissionCodeReplaysRejectedShape || len(first.Aggregate.CandidateAttempts) != 2 || currentAttempt.State != runtimecontract.RuntimeCandidateAttemptStateFailed {
+	if first.Admission.Failure == nil || first.Admission.Failure.Code != candidateAdmissionCodeReplaysRejectedShape || len(first.Aggregate.CandidateAttempts) != 2 || currentAttempt.State != runtimecontract.RuntimeCandidateAttemptStateFailed ||
+		currentAttempt.Correction == nil || currentAttempt.Correction.Disposition != runtimecontract.RuntimeCandidateCorrectionRejectedFinal || currentAttempt.Correction.TerminalCode != "candidate_authority_exhausted" ||
+		first.Aggregate.Decision.State != runtimecontract.ConvergenceStateFailed || first.Aggregate.Decision.Terminal == nil || first.Aggregate.Decision.Terminal.Code != "candidate_authority_exhausted" {
 		t.Fatalf("first rejected proposal = %+v", first)
 	}
 	if got, want := first.Aggregate.StateRevision, aggregate.StateRevision+5; got != want {
@@ -709,22 +718,9 @@ func TestAdmitCandidateProposalAtomicallyClosesReplayAttemptAndExhaustsSecondAtt
 		duplicate.Aggregate.StateRevision != first.Aggregate.StateRevision || repository.saves != savesAfterFirst {
 		t.Fatalf("duplicate rejected proposal must be idempotent: result=%+v err=%v saves=%d", duplicate, err, repository.saves)
 	}
-	if _, err := controller.BeginCandidateAttemptForTest(context.Background(), aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, 1, "stable-prefix"); err != nil {
-		t.Fatal(err)
-	}
-	second, err := controller.AdmitCandidateProposalForTest(context.Background(), aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, 1, candidate)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if second.Admission.Failure == nil || second.Aggregate.Decision.State != runtimecontract.ConvergenceStateFailed || second.Aggregate.Decision.Terminal == nil ||
-		second.Aggregate.Decision.Terminal.Code != "candidate_retry_exhausted" || hasPendingCandidateAttempt(second.Aggregate.CandidateAttempts) {
-		t.Fatalf("second rejected proposal did not atomically exhaust: %+v", second.Aggregate)
-	}
 	savesAfterExhaustion := repository.saves
-	duplicateExhaustion, err := controller.AdmitCandidateProposalForTest(context.Background(), aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, 1, candidate)
-	if err != nil || duplicateExhaustion.Admission.Failure == nil || duplicateExhaustion.Admission.Failure.Code != candidateAdmissionCodeReplaysRejectedShape ||
-		duplicateExhaustion.Aggregate.StateRevision != second.Aggregate.StateRevision || repository.saves != savesAfterExhaustion {
-		t.Fatalf("terminal duplicate rejection must be idempotent: result=%+v err=%v saves=%d", duplicateExhaustion, err, repository.saves)
+	if _, err := controller.BeginCandidateAttemptForTest(context.Background(), aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, 1, "stable-prefix"); err == nil || repository.saves != savesAfterExhaustion {
+		t.Fatalf("exhausted single-shape frontier opened attempt 1: err=%v saves=%d", err, repository.saves)
 	}
 }
 

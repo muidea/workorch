@@ -263,6 +263,7 @@ func runtimeCandidateCommandFromRequest(request llmmodels.RuntimeCandidateReques
 		Transaction:                 request.Transaction,
 		CandidateAttempt:            request.CandidateAttempt,
 		PreviousFailure:             request.PreviousFailure,
+		CandidateCorrection:         request.CandidateCorrection,
 		StablePrefixHash:            request.StablePrefixHash,
 		CandidateManifest:           request.CandidateManifest,
 		DefinitionContext:           request.DefinitionContext,

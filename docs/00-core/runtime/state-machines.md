@@ -4,7 +4,7 @@ Status: normative
 
 Type: core-contract-part
 
-Last Verified: 2026-08-26
+Last Verified: 2026-08-27
 
 ## 四个协调状态机
 
@@ -100,6 +100,12 @@ load facts
   CAS 提交。File/Shell/LLM result 不拥有该 transition。
 - repairable gap 保持同一 focus，必须持久化结构化缺口。有效新 evidence 不清零同 focus 总 repair
   budget；只有原子 focus advance 才开启新的 repair ledger。
+- validation-only CWI 只有在 immutable Profile 已封存单一 `ValidationFailureRepairConvergence`、实际 rejected receipt
+  精确匹配 trigger owner/operation/diagnostic 且 repair cycle 未耗尽时，才可进入无 exact failure target 的 repair semantic
+  generation。该 generation 的 current evidence 是 File `state_change`，terminal evidence 仍是原 Definition 的
+  `validation`；它绑定原 failure、convergence hash 和 File catalog，但不在 pre-seal 或 reducer 中发明 target。File
+  feasibility 与 SM-2 binding 封存 exact prospective target 后才可进入 SM-3。accepted repair 必须在同一 SM-2 CAS 中退休
+  repair binding、重开同一 CWI并固定进入 fresh validation，不能授予 DoD credit、创建新 CWI 或选择替代 terminal。
 - LLM assessment 中的 disposition、缺失 evidence kind、目标和 reason 都只是 observation/original diagnostic，
   不是 Runtime action。SM-2 必须仅从已持久化的 current-focus coverage、accepted receipt/evidence quality、封存的
   focus/target policy、owner-grounded repair surface 及 freshness 生成唯一的 `RuntimeRepairDirective.RequiredState`。

@@ -2,12 +2,25 @@ package runtime
 
 import (
 	"context"
+	"fmt"
 
+	"github.com/muidea/workorch/internal/pkg/common"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
-func finalizeExecutionEvidence(aggregate *RuntimeAggregate, admission executionEvidenceAdmission) (bool, error) {
+func finalizeExecutionEvidence(aggregate *RuntimeAggregate, admission executionEvidenceAdmission, fact runtimecontract.EvidenceFact) (bool, error) {
 	evidence := admission.Evidence
+	if evidence.Status == ExecutionEvidenceStatusRejected {
+		// Rejection admission enriches the durable fact with the receipt-owned
+		// failure signature/class before appending it. Use that exact persisted
+		// value for subsequent private SM-2 transitions; the pre-adjudication
+		// local copy deliberately contains no diagnostic authority.
+		persisted, found := runtimeRejectedEvidenceFactForEvent(aggregate.Facts.Evidence.Rejected, evidence.EventID)
+		if !found {
+			return false, fmt.Errorf("%w: rejected execution fact was not persisted", common.ErrConflict)
+		}
+		fact = persisted
+	}
 	aggregate.EvidenceSequence++
 	aggregate.Facts.EvidenceRevision = nextEvidenceRevision(aggregate.EvidenceSequence)
 	aggregate.Facts = aggregate.Facts.Normalized()
@@ -31,10 +44,25 @@ func finalizeExecutionEvidence(aggregate *RuntimeAggregate, admission executionE
 		aggregate.ActiveDispatch = &dispatch
 		return false, nil
 	}
-	if err := completeEvidenceDispatch(aggregate, dispatch, dispatchInvalidated, evidence.Status == ExecutionEvidenceStatusRejected); err != nil {
+	if err := completeEvidenceDispatch(aggregate, dispatch, dispatchInvalidated, admission, fact); err != nil {
 		return false, err
 	}
 	return true, nil
+}
+
+func runtimeRejectedEvidenceFactForEvent(values []runtimecontract.EvidenceFact, eventID string) (runtimecontract.EvidenceFact, bool) {
+	var ret runtimecontract.EvidenceFact
+	found := false
+	for _, value := range values {
+		if string(value.ID) != eventID {
+			continue
+		}
+		if found {
+			return runtimecontract.EvidenceFact{}, false
+		}
+		ret, found = value, true
+	}
+	return ret, found
 }
 
 func evidenceDispatchInvalidated(aggregate RuntimeAggregate, evidence ExecutionEvidence, prerequisitesInvalidated bool) bool {
@@ -48,7 +76,7 @@ func evidenceDispatchInvalidated(aggregate RuntimeAggregate, evidence ExecutionE
 	return effectUncommittable || refreshExhausted
 }
 
-func completeEvidenceDispatch(aggregate *RuntimeAggregate, dispatch SealedDispatch, invalidated bool, rejectedExecution bool) error {
+func completeEvidenceDispatch(aggregate *RuntimeAggregate, dispatch SealedDispatch, invalidated bool, admission executionEvidenceAdmission, fact runtimecontract.EvidenceFact) error {
 	if invalidated {
 		dispatch.State = DispatchStateInvalidated
 	} else {
@@ -56,6 +84,20 @@ func completeEvidenceDispatch(aggregate *RuntimeAggregate, dispatch SealedDispat
 	}
 	aggregate.CompletedDispatches = append(aggregate.CompletedDispatches, dispatch)
 	aggregate.ActiveDispatch = nil
+	if admission.Evidence.Status == ExecutionEvidenceStatusAccepted && !invalidated {
+		if repair, found, err := currentRuntimeSemanticValidationFailureRepair(*aggregate); err != nil {
+			return err
+		} else if found {
+			if _, err := settleRuntimeValidationFailureRepair(aggregate, fact, repair); err != nil {
+				return err
+			}
+		}
+	}
+	if admission.Evidence.Status == ExecutionEvidenceStatusRejected && !invalidated {
+		if _, err := openRuntimeValidationFailureRepairGeneration(aggregate, fact, admission.Operation); err != nil {
+			return err
+		}
+	}
 	if err := retireSemanticPlanningForCurrentReopenedCWIs(aggregate); err != nil {
 		return err
 	}
@@ -89,7 +131,7 @@ func completeEvidenceDispatch(aggregate *RuntimeAggregate, dispatch SealedDispat
 	// this same CAS makes duplicate receipt delivery and restart replay free,
 	// while the initial validation (which has no rejected source fact) remains
 	// outside the validation-only retry budget.
-	facts = recordAuthorizedValidationOnlyRetry(facts, nextDecision, rejectedExecution)
+	facts = recordAuthorizedValidationOnlyRetry(facts, nextDecision, admission.Evidence.Status == ExecutionEvidenceStatusRejected)
 	aggregate.Facts = facts
 	aggregate.Decision = nextDecision
 	return nil

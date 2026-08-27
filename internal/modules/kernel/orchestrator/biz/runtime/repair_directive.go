@@ -28,6 +28,21 @@ func syncRepairDirective(facts runtimecontract.RuntimeFacts, decision runtimecon
 	if facts.RepairDirective != nil && facts.RepairDirective.FocusID != focusID {
 		facts.RepairDirective = nil
 	}
+	if runtimeValidationFailureRepairAwaitsSemanticBinding(facts) {
+		// This target-free directive is the persisted SM-2 marker that selects
+		// the repair-purpose semantic generation. Generic missing-evidence sync
+		// must not invent a closure or replace its typed rejection identity before
+		// Capability-owner feasibility seals exact prospective targets.
+		return facts
+	}
+	if runtimeValidationFailureRepairOwnsSealedDirective(facts) || runtimeValidationFailureRepairOwnsFreshValidationDirective(facts) {
+		// The repair-purpose binding and exact capability-owner-confirmed target already own
+		// the state-change continuation; its Definition-proof successor likewise
+		// owns the independently sealed validation action. Completing a target
+		// snapshot prerequisite must resume either directive instead of rebuilding
+		// it from the broader focus/capability inventory or closure targets.
+		return facts
+	}
 	// An accepted state-change repair has precedence over the ordinary
 	// assessment boundary. Keep the same closure and require validation before
 	// an assessment can clear it; otherwise SM-2 can lose the mandatory
@@ -350,11 +365,15 @@ func repairStateChangeDecision(base runtimecontract.RuntimeDecision, facts runti
 		AcceptedKinds:             acceptedKinds,
 		AcceptedOperationVariants: acceptedOperationVariantsForKinds(facts.Focus.AcceptedOperationVariants, acceptedKinds),
 		AcceptedEffectScopes:      directive.RequiredEffectScopes, RequiredEffectScopes: directive.RequiredEffectScopes,
-		RequiredEvidenceKinds:     []string{runtimecontract.EvidenceKindStateChange},
-		CoverageWorkItemIDs:       firstRepairCoverage(directive.CoverageWorkItemIDs, facts.Focus.CoverageWorkItemIDs),
-		TargetRefs:                firstRepairTargets(directive.TargetRefs, facts.Focus.TargetRefs),
-		RepairClosureID:           repairClosureID(directive),
-		RequiredOperationSequence: requiredCapabilityStateSequence(facts, acceptedKinds),
+		RequiredEvidenceKinds: []string{runtimecontract.EvidenceKindStateChange},
+		CoverageWorkItemIDs:   firstRepairCoverage(directive.CoverageWorkItemIDs, facts.Focus.CoverageWorkItemIDs),
+		TargetRefs:            firstRepairTargets(directive.TargetRefs, facts.Focus.TargetRefs),
+		RepairClosureID:       repairClosureID(directive),
+		// A repair-purpose prospective binding is the same target-complete all-of
+		// contract as any other prospective state-change binding. Reusing the
+		// canonical sequence compiler prevents the repair directive from silently
+		// degrading a multi-target binding into unrelated single operations.
+		RequiredOperationSequence: requiredStateChangeOperationSequence(facts, acceptedKinds),
 	}
 	return base, nil
 }

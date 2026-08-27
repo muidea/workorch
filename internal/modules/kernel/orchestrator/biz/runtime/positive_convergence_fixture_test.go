@@ -70,10 +70,7 @@ func TestPositiveConvergenceFixture_AttemptCorrectionPartialGapSameFocusRepair(t
 	if _, err := controller.BeginCandidateAttemptForTest(ctx, "ws-v2", "run-v2", 0, "stable-prefix"); err != nil {
 		t.Fatal(err)
 	}
-	failed0, err := controller.failCandidateAttempt(ctx, "ws-v2", "run-v2", 0, runtimecontract.RuntimeCandidateFailure{
-		Class:  runtimecontract.RuntimeCandidateFailureClassSchema,
-		Reason: "invalid operation parameters",
-	})
+	failed0, err := controller.failCandidateAttempt(ctx, "ws-v2", "run-v2", 0, runtimeCorrectableMissingOperationsFailure(runtimecontract.RuntimeCandidateFailureClassSchema))
 	if err != nil {
 		t.Fatal(err)
 	}

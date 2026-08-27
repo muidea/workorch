@@ -73,7 +73,7 @@ func runtimeOperationsProviderRequest(request llmmodels.RuntimeCandidateRequest)
 	if err != nil {
 		return llmmodels.ProviderRequest{}, err
 	}
-	executionTailJSON, err := json.Marshal(buildRuntimeCandidateExecutionTailProjection(candidateContext, request.CandidateAttempt, request.PreviousFailure, manifest))
+	executionTailJSON, err := json.Marshal(buildRuntimeCandidateExecutionTailProjection(candidateContext, request.CandidateAttempt, request.PreviousFailure, manifest, request.CandidateCorrection))
 	if err != nil {
 		return llmmodels.ProviderRequest{}, err
 	}

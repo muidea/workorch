@@ -4,7 +4,7 @@ Status: normative
 
 Type: profile-capability
 
-Last Verified: 2026-08-26
+Last Verified: 2026-08-27
 
 ## Scope
 
@@ -45,7 +45,7 @@ The built-in `software-dev` Profile declares only terminal work that has an exac
 
 | Source | Required evidence | Proof owner path |
 | --- | --- | --- |
-| `deliverable/source_change` | `state_change` | File/Patch owner receipt for the grounded workspace target |
+| `deliverable/source_change` | `state_change` | File/Patch owner receipt for the grounded `workspace_delivery_change` target role |
 | each `dodItem/*` | `validation` | managed-validation or MCP tool typed validation receipt for the sealed proof identity; generic shell/file success is not proof |
 | `deliverable/validation_report` | `validation` | Shell managed-validation receipt; generic shell success is not proof |
 | `deliverable/version_control_snapshot` | `state_change` | matching Git write/add/commit owner receipts |
@@ -106,9 +106,36 @@ the Runtime must not manufacture a generic CWI without an exact proof declaratio
 
 ## Repair And Restart
 
-An actionable validation/assessment gap returns to the same focus with structured missing evidence and target facts. Bounded
-repair may choose a different legal variant or target only within the sealed definition/binding contract. When the definition
-or clean baseline must change, the caller uses explicit Workspace `restart`; Run owner performs the replacement transaction.
+The built-in wildcard `dodItem/*` requirement seals exactly one
+`ValidationFailureRepairConvergence`. It is an ordered, conjunctive contract:
+
+```text
+Shell validation/managed_session rejected with a declared implementation/build/test diagnostic
+  -> one File-owned state_change repair generation
+  -> a fresh validation generation for the same CWI
+```
+
+The declaration is sealed only in the immutable `RuntimeDefinitionFocus`. Mutable generation `CoverageFocus` values never
+copy or override it; SM-2 consumes the manifest obligation compiled from that definition snapshot.
+
+The declaration binds the Shell trigger, accepted diagnostic classes, File repair owner, `file/write | patch/apply` operation
+vocabulary, `prospective_owner_target` policy, independent Definition selector
+`file/workspace_deliverable`, File operation selector `workspace-relative-new-file-target`, maximum repair cycles and mandatory
+fresh validation. The operation vocabulary is a bounded owner capability set; it is not a Goal/DoD `one_of` terminal relation.
+The CWI terminal requirement remains exactly `validation`, and an accepted repair receipt cannot itself satisfy the DoD item.
+
+The pre-seal declaration contains no exact repair path. After a matching typed validation rejection with no owner-grounded
+failure target, SM-2 may reopen only that CWI for a `validation_failure_repair` semantic generation. The generation is bound to
+the exact failure, Profile convergence hash and current File catalog. A semantic proposal supplies one bounded prospective
+target set within both independent selectors; File feasibility confirms every member, and only the resulting SM-2
+`CoverageEvidenceBinding` grants exact all-of operation authority. The complete same-dispatch repair receipt set atomically
+retires that repair binding and reopens the same CWI for fresh validation.
+
+Missing, ambiguous or invalid Profile convergence is a pre-seal Template/Profile defect: admission opens a blocking Definition
+clarification ticket and creates no Run until the declaration is corrected. By contrast, a sealed convergence whose current owner
+catalog has no legal repair surface fails typed and bounded at Runtime; it does not open a generic Decision/Approval ticket, invent
+a target, repeat validation indefinitely or weaken the startup input. When Goal/DoD or the clean baseline itself must change, the
+caller uses explicit Workspace `restart`; Run owner performs the replacement transaction.
 
 ## Result Requirements
 

@@ -997,6 +997,20 @@ func TestRuntimeAggregateRequiresReducerTransitionAfterCandidateAttemptOneFailur
 	}
 	bindRuntimeCandidateAttemptForTest(t, &aggregate, 0)
 	bindRuntimeCandidateAttemptForTest(t, &aggregate, 1)
+	aggregate.CandidateAttempts[0].Correction = (&runtimecontract.RuntimeCandidateCorrectionDirective{
+		Disposition:  runtimecontract.RuntimeCandidateCorrectionCorrectableOnce,
+		Objectives:   []runtimecontract.RuntimeCandidateCorrectionObjective{runtimecontract.RuntimeCandidateCorrectionChangeReplayedShape},
+		ManifestHash: aggregate.CandidateAttempts[0].ManifestHash,
+		Witness: &runtimecontract.RuntimeCandidateCorrectionWitness{
+			Dimension: runtimecontract.RuntimeCandidateCorrectionWitnessSchemaField,
+			Path:      "$.operations", RejectedValue: "replayed_shape", AlternativeValue: "different_shape",
+		},
+	}).Clone()
+	aggregate.CandidateAttempts[1].Correction = (&runtimecontract.RuntimeCandidateCorrectionDirective{
+		Disposition:  runtimecontract.RuntimeCandidateCorrectionRejectedFinal,
+		ManifestHash: aggregate.CandidateAttempts[1].ManifestHash,
+		TerminalCode: "candidate_retry_exhausted",
+	}).Clone()
 	if err := aggregate.Validate(); err == nil {
 		t.Fatal("same-authority attempt 1 failure was accepted without a reducer transition")
 	}

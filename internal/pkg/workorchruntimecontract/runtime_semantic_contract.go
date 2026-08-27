@@ -441,6 +441,71 @@ func CompileRuntimeSemanticPlanManifestForCoverage(workspaceID common.WorkspaceI
 	return manifest, nil
 }
 
+// CompileRuntimeSemanticPlanManifestForCoverageWithValidationFailureRepair
+// derives one generation-specific repair manifest from the same sealed
+// Definition and owner catalogs as normal semantic planning. The wrapper is
+// pure and deliberately requires exactly one rejected CWI; it does not reopen
+// that CWI, choose a repair, or mutate Runtime state.
+func CompileRuntimeSemanticPlanManifestForCoverageWithValidationFailureRepair(
+	workspaceID common.WorkspaceID,
+	runID common.RunID,
+	definition RuntimeDefinitionContext,
+	seed RuntimeDefinitionSeed,
+	definitionFocuses []RuntimeDefinitionFocus,
+	execution RuntimeExecutionContract,
+	admissibilities []RuntimeOperationAdmissibility,
+	coverageIDs []common.CoverageWorkItemID,
+	repairInput RuntimeValidationFailureRepairGenerationInput,
+) (RuntimeSemanticPlanManifest, error) {
+	coverageIDs = normalizeOrderedCoverageWorkItemIDs(coverageIDs)
+	repairInput = repairInput.Normalized()
+	if len(coverageIDs) != 1 || repairInput.CoverageWorkItemID != coverageIDs[0] {
+		return RuntimeSemanticPlanManifest{}, fmt.Errorf("validation failure repair semantic manifest requires exactly its rejected coverage item")
+	}
+	manifest, err := CompileRuntimeSemanticPlanManifestForCoverage(
+		workspaceID, runID, definition, seed, definitionFocuses, execution, admissibilities, coverageIDs,
+	)
+	if err != nil {
+		return RuntimeSemanticPlanManifest{}, err
+	}
+	sourceByCoverage, err := runtimeSemanticBindingSourceFocuses(definitionFocuses)
+	if err != nil {
+		return RuntimeSemanticPlanManifest{}, err
+	}
+	source, found := sourceByCoverage[repairInput.CoverageWorkItemID]
+	if !found {
+		return RuntimeSemanticPlanManifest{}, fmt.Errorf("validation failure repair coverage %q has no Definition focus", repairInput.CoverageWorkItemID)
+	}
+	var base RuntimeSemanticProofObligation
+	for _, obligation := range manifest.ProofObligations {
+		if obligation.CoverageWorkItemID == repairInput.CoverageWorkItemID {
+			base = obligation
+			break
+		}
+	}
+	if base.CoverageWorkItemID == "" || len(manifest.CoverageItems) != 1 {
+		return RuntimeSemanticPlanManifest{}, fmt.Errorf("validation failure repair manifest has no single base proof obligation")
+	}
+	active, repairCatalog, err := compileRuntimeSemanticValidationFailureRepairObligation(
+		base, source, manifest.CoverageItems[0], manifest.OwnerCatalogs, repairInput,
+	)
+	if err != nil {
+		return RuntimeSemanticPlanManifest{}, err
+	}
+	repair := active.ValidationFailureRepair.Normalized()
+	manifest.AllowedOwnerModuleIDs = []string{repair.RepairOwnerModuleID}
+	manifest.AllowedOperationKinds = append([]string(nil), repair.RepairOperationKinds...)
+	manifest.AllowedTargetPolicies = []RuntimeOperationTargetPolicy{repair.RepairTargetPolicy}
+	manifest.ProofObligations = []RuntimeSemanticProofObligation{active}
+	manifest.OwnerCatalogs = []RuntimeOperationAdmissibility{repairCatalog}
+	manifest.OwnerFactDependencyCatalogs = nil
+	manifest.Hash = StableRuntimeSemanticPlanManifestHash(manifest)
+	if err := manifest.Validate(); err != nil {
+		return RuntimeSemanticPlanManifest{}, err
+	}
+	return manifest, nil
+}
+
 func runtimeSemanticOperationCurrentlySelectable(kind string, catalog RuntimeOperationAdmissibility) bool {
 	kind = CanonicalRuntimeBlockKind(kind)
 	catalog = catalog.Normalized()
@@ -627,11 +692,37 @@ func (m RuntimeSemanticPlanManifest) Validate() error {
 		}
 		reproductionCatalogs := append([]RuntimeOperationAdmissibility(nil), m.OwnerCatalogs...)
 		reproductionCatalogs = append(reproductionCatalogs, m.OwnerFactDependencyCatalogs...)
-		recompiled, err := compileRuntimeSemanticProofObligations(
-			CompileRuntimeDefinitionFocuses([]CoverageFocus{runtimeSemanticProofObligationSourceFocus(obligation)}),
-			[]RuntimeCoverageItem{coverageItems[obligation.CoverageWorkItemID]},
-			reproductionCatalogs,
-		)
+		var recompiled []RuntimeSemanticProofObligation
+		var err error
+		if obligation.ValidationFailureRepair == nil {
+			recompiled, err = compileRuntimeSemanticProofObligations(
+				[]RuntimeDefinitionFocus{runtimeSemanticProofObligationDefinitionSource(obligation)},
+				[]RuntimeCoverageItem{coverageItems[obligation.CoverageWorkItemID]},
+				reproductionCatalogs,
+			)
+		} else {
+			repair := obligation.ValidationFailureRepair.Normalized()
+			base := obligation.Clone()
+			base.ValidationFailureRepair = nil
+			active, _, compileErr := compileRuntimeSemanticValidationFailureRepairObligation(
+				base,
+				runtimeSemanticProofObligationDefinitionSource(obligation),
+				coverageItems[obligation.CoverageWorkItemID],
+				reproductionCatalogs,
+				RuntimeValidationFailureRepairGenerationInput{
+					CoverageWorkItemID:     obligation.CoverageWorkItemID,
+					FailedFocusID:          repair.FailedFocusID,
+					FailureSignature:       repair.FailureSignature,
+					TriggerOwnerModuleID:   repair.TriggerOwnerModuleID,
+					TriggerOperationKind:   repair.TriggerOperationKind,
+					TriggerDiagnosticClass: repair.TriggerDiagnosticClass,
+				},
+			)
+			err = compileErr
+			if compileErr == nil {
+				recompiled = []RuntimeSemanticProofObligation{active}
+			}
+		}
 		if err != nil {
 			return fmt.Errorf("runtime semantic manifest obligation coverage %q is not reproducible from sealed owner facts: %w", obligation.CoverageWorkItemID, err)
 		}

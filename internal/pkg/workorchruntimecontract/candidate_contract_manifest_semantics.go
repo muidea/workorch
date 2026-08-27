@@ -84,6 +84,9 @@ func ValidateRuntimeCandidateAgainstManifest(manifest RuntimeCandidateContractMa
 	if manifest.EffectPolicy.State != manifest.State {
 		return &RuntimeCandidateContractDiagnostic{Path: "$.effectPolicy.state", Actual: string(manifest.EffectPolicy.State), Allowed: []string{string(manifest.State)}, Cause: fmt.Errorf("runtime candidate effect policy state does not match manifest")}
 	}
+	if err := ValidateRuntimeCandidateOperationCorrectionMetadata(manifest); err != nil {
+		return &RuntimeCandidateContractDiagnostic{Path: "$.operations", Actual: "invalid_correction_metadata", Cause: err}
+	}
 	if err := manifest.EffectPolicy.Validate(); err != nil {
 		return &RuntimeCandidateContractDiagnostic{Path: "$.effectPolicy", Actual: "invalid", Cause: err}
 	}

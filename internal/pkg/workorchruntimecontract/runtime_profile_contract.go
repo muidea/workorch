@@ -82,15 +82,20 @@ type RuntimeProfileEvidenceRequirement struct {
 	// ValidationRecipeID and RequiredCheckRefs are profile-owned proof
 	// declarations. Runtime only seals and compares these opaque identities;
 	// Shell remains the owner that observes executed/passed checks.
-	ValidationRecipeID          string
-	RequiredCheckRefs           []string
-	MetricConstraints           []string
-	ArtifactRefs                []string
-	RequiredOwnerFacts          []RuntimeOwnerFactRequirement
-	OwnerFactConvergences       []RuntimeOwnerFactConvergence
-	CapabilityStateRequirements []RuntimeProfileCapabilityStateRequirement
-	RejectedStepKinds           []string
-	Description                 string
+	ValidationRecipeID    string
+	RequiredCheckRefs     []string
+	MetricConstraints     []string
+	ArtifactRefs          []string
+	RequiredOwnerFacts    []RuntimeOwnerFactRequirement
+	OwnerFactConvergences []RuntimeOwnerFactConvergence
+	// ValidationFailureRepairConvergence declares the one ordered all-of
+	// recovery path for a typed rejected validation. It is separate from the
+	// terminal proof requirement and therefore cannot add state_change to the
+	// DoD terminal evidence kinds.
+	ValidationFailureRepairConvergence *RuntimeValidationFailureRepairConvergence
+	CapabilityStateRequirements        []RuntimeProfileCapabilityStateRequirement
+	RejectedStepKinds                  []string
+	Description                        string
 }
 
 type RuntimeProfileCapabilityStateRequirement struct {
@@ -287,6 +292,7 @@ func ValidateRuntimeProfileContracts(values []RuntimeProfileContract) error {
 		if profile.ID == "" {
 			return fmt.Errorf("runtime profile contract requires id")
 		}
+		seenEvidenceRequirementRefs := make(map[string]struct{}, len(profile.EvidenceRequirements))
 		for _, item := range profile.AcceptanceDimensions {
 			if item.ID == "" {
 				return fmt.Errorf("runtime acceptance dimension requires id")
@@ -301,6 +307,11 @@ func ValidateRuntimeProfileContracts(values []RuntimeProfileContract) error {
 			if item.ID == "" || item.Scope == "" {
 				return fmt.Errorf("runtime profile evidence requirement requires id and scope")
 			}
+			sourceRef := runtimeProfileSourceKey(item.Scope, item.ID)
+			if _, duplicate := seenEvidenceRequirementRefs[sourceRef]; duplicate {
+				return fmt.Errorf("runtime profile %q has duplicate evidence requirement scope+id %q", profile.ID, sourceRef)
+			}
+			seenEvidenceRequirementRefs[sourceRef] = struct{}{}
 			if err := ValidateRuntimeTargetGrounding(item.RequireTargetGrounding, item.TargetRole, item.TargetRefs, item.TargetDiscoverySources, item.TargetSelectorRef); err != nil {
 				return fmt.Errorf("runtime profile evidence requirement %q: %w", item.ID, err)
 			}
@@ -319,6 +330,17 @@ func ValidateRuntimeProfileContracts(values []RuntimeProfileContract) error {
 			}
 			if err := ValidateRuntimeOwnerFactConvergences(item.RequiredOwnerFacts, item.OwnerFactConvergences); err != nil {
 				return fmt.Errorf("runtime profile evidence requirement %q: %w", item.ID, err)
+			}
+			if item.ValidationFailureRepairConvergence != nil {
+				if item.Scope != "dodItem" {
+					return fmt.Errorf("runtime profile evidence requirement %q validation failure repair convergence is only valid for dodItem coverage", item.ID)
+				}
+				if len(item.RequiredEvidenceKinds) != 1 || item.RequiredEvidenceKinds[0] != EvidenceKindValidation {
+					return fmt.Errorf("runtime profile evidence requirement %q validation failure repair convergence requires validation-only terminal evidence", item.ID)
+				}
+				if err := item.ValidationFailureRepairConvergence.Validate(); err != nil {
+					return fmt.Errorf("runtime profile evidence requirement %q: %w", item.ID, err)
+				}
 			}
 			selectorRef, selectorOwnerRef, selectorSubjectRef := ResolveRuntimeProfileTargetSelectorIdentity(profile.ID, item)
 			for _, ownerFact := range item.RequiredOwnerFacts {
@@ -348,6 +370,20 @@ func ValidateRuntimeProfileContracts(values []RuntimeProfileContract) error {
 				}
 				if !runtimeProfileHasProofOperation(item.AcceptedStepKinds, evidenceKind) {
 					return fmt.Errorf("runtime profile evidence requirement %q has no owner receipt operation for evidence kind %q", item.ID, evidenceKind)
+				}
+			}
+		}
+		for leftIndex, left := range profile.EvidenceRequirements {
+			if left.ValidationFailureRepairConvergence == nil {
+				continue
+			}
+			for _, right := range profile.EvidenceRequirements[leftIndex+1:] {
+				if right.ValidationFailureRepairConvergence == nil || left.Scope != right.Scope ||
+					(left.ID != "*" && right.ID != "*" && left.ID != right.ID) {
+					continue
+				}
+				if !SameRuntimeValidationFailureRepairConvergence(left.ValidationFailureRepairConvergence, right.ValidationFailureRepairConvergence) {
+					return fmt.Errorf("runtime profile evidence requirements %q and %q declare conflicting validation failure repair convergence for scope %q", left.ID, right.ID, left.Scope)
 				}
 			}
 		}
@@ -572,7 +608,7 @@ func normalizeRuntimeDeliverableExpectations(values []RuntimeDeliverableExpectat
 }
 
 func normalizeRuntimeProfileEvidenceRequirements(values []RuntimeProfileEvidenceRequirement) []RuntimeProfileEvidenceRequirement {
-	byKey := map[string]RuntimeProfileEvidenceRequirement{}
+	ret := make([]RuntimeProfileEvidenceRequirement, 0, len(values))
 	for _, value := range values {
 		value.ID = strings.TrimSpace(value.ID)
 		value.Scope = strings.TrimSpace(value.Scope)
@@ -593,22 +629,15 @@ func normalizeRuntimeProfileEvidenceRequirements(values []RuntimeProfileEvidence
 		value.ArtifactRefs = normalizeStrings(value.ArtifactRefs)
 		value.RequiredOwnerFacts = NormalizeRuntimeOwnerFactRequirements(value.RequiredOwnerFacts)
 		value.OwnerFactConvergences = NormalizeRuntimeOwnerFactConvergences(value.OwnerFactConvergences)
+		value.ValidationFailureRepairConvergence = cloneRuntimeValidationFailureRepairConvergence(value.ValidationFailureRepairConvergence)
 		value.CapabilityStateRequirements = normalizeRuntimeProfileCapabilityStateRequirements(value.CapabilityStateRequirements)
 		value.RejectedStepKinds = normalizeStrings(value.RejectedStepKinds)
 		value.Description = strings.TrimSpace(value.Description)
-		if value.ID != "" && value.Scope != "" {
-			byKey[value.Scope+"|"+value.ID] = value
-		}
+		ret = append(ret, value)
 	}
-	keys := make([]string, 0, len(byKey))
-	for key := range byKey {
-		keys = append(keys, key)
-	}
-	sort.Strings(keys)
-	ret := make([]RuntimeProfileEvidenceRequirement, 0, len(keys))
-	for _, key := range keys {
-		ret = append(ret, byKey[key])
-	}
+	sort.SliceStable(ret, func(i, j int) bool {
+		return runtimeProfileSourceKey(ret[i].Scope, ret[i].ID) < runtimeProfileSourceKey(ret[j].Scope, ret[j].ID)
+	})
 	return nilIfEmpty(ret)
 }
 
@@ -669,7 +698,7 @@ func sameRuntimeProfileContract(left RuntimeProfileContract, right RuntimeProfil
 			!sameStrings(l.RequiredEvidenceKinds, r.RequiredEvidenceKinds) || l.RequireDirectEvidence != r.RequireDirectEvidence ||
 			l.RequireClaimEvidence != r.RequireClaimEvidence || l.RequireExecutableBehaviorEvidence != r.RequireExecutableBehaviorEvidence ||
 			l.RequireCoverageTargets != r.RequireCoverageTargets || l.ValidationRecipeID != r.ValidationRecipeID || l.Description != r.Description ||
-			!sameStrings(l.AcceptedStepKinds, r.AcceptedStepKinds) || !SameRuntimeOperationVariantRefs(l.AcceptedOperationVariants, r.AcceptedOperationVariants) || !sameStrings(l.RequiredCheckRefs, r.RequiredCheckRefs) || !sameStrings(l.MetricConstraints, r.MetricConstraints) || !sameStrings(l.ArtifactRefs, r.ArtifactRefs) || !sameRuntimeOwnerFactRequirements(l.RequiredOwnerFacts, r.RequiredOwnerFacts) || !SameRuntimeOwnerFactConvergences(l.OwnerFactConvergences, r.OwnerFactConvergences) || !sameStrings(l.RejectedStepKinds, r.RejectedStepKinds) {
+			!sameStrings(l.AcceptedStepKinds, r.AcceptedStepKinds) || !SameRuntimeOperationVariantRefs(l.AcceptedOperationVariants, r.AcceptedOperationVariants) || !sameStrings(l.RequiredCheckRefs, r.RequiredCheckRefs) || !sameStrings(l.MetricConstraints, r.MetricConstraints) || !sameStrings(l.ArtifactRefs, r.ArtifactRefs) || !sameRuntimeOwnerFactRequirements(l.RequiredOwnerFacts, r.RequiredOwnerFacts) || !SameRuntimeOwnerFactConvergences(l.OwnerFactConvergences, r.OwnerFactConvergences) || !SameRuntimeValidationFailureRepairConvergence(l.ValidationFailureRepairConvergence, r.ValidationFailureRepairConvergence) || !sameStrings(l.RejectedStepKinds, r.RejectedStepKinds) {
 			return false
 		}
 		if len(l.CapabilityStateRequirements) != len(r.CapabilityStateRequirements) {

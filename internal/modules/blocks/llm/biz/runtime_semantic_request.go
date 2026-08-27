@@ -18,7 +18,7 @@ type runtimeSemanticPreparedRequest struct {
 }
 
 func prepareRuntimeSemanticPlanRequest(request llmmodels.RuntimeCandidateRequest) (runtimeSemanticPreparedRequest, error) {
-	if request.CandidateManifest.Hash != "" || request.CandidateContext.WorkspaceID != "" || request.CandidateContext.RunID != "" || request.DefinitionContext.Revision != "" || request.PreviousFailure != nil {
+	if request.CandidateManifest.Hash != "" || request.CandidateContext.WorkspaceID != "" || request.CandidateContext.RunID != "" || request.DefinitionContext.Revision != "" || request.PreviousFailure != nil || request.CandidateCorrection != nil {
 		return runtimeSemanticPreparedRequest{}, fmt.Errorf("semantic plan provider request must not carry operations fields")
 	}
 	context := request.SemanticContext.Clone()

@@ -4,7 +4,7 @@ Status: normative
 
 Type: core-contract-part
 
-Last Verified: 2026-08-26
+Last Verified: 2026-08-27
 
 ## 规范化候选合同
 
@@ -194,12 +194,23 @@ manifest、attempt ledger、rejected shape 与 typed field violations 决定：
 
 | SM-3 owner-local result | 语义 | 唯一行为 |
 | --- | --- | --- |
-| `correctable_once` | 同一 manifest 内存在唯一、有界的结构修正，且尚未使用 correction attempt | seal 一个 `CorrectionDirective`，只允许 attempt 1 |
-| `rejected_final` | 没有安全同合同修正，或 correction attempt 已用尽 | 形成 typed candidate terminal，零额外 provider call |
+| `correctable_once` | 同一 manifest 的有限 frontier 中存在一个已封存的合法语义差异 witness，且尚未使用 correction attempt | 将 manifest hash、目标 delta 和 witness 随 attempt 0 持久化，只允许 attempt 1 |
+| `rejected_final` | 没有可证明的同合同语义差异，或 correction attempt 已用尽 | 形成 typed candidate terminal，零额外 provider call |
 
 `CorrectionDirective` 是 Orchestrator persisted state，不是 evaluator/LLM/capability feedback。它只描述 candidate
 delta，例如删除 forbidden field、补 required field、选择 allowed kind、替换为 allowed target、改变 rejected
-semantic shape；它不修改 authority，也不包含 raw provider/decoder/owner 错误文本。semantic coverage-order 的完整文档
+semantic shape；它不修改 authority，也不包含 raw provider/decoder/owner 错误文本。`correctable_once` 还必须携带
+`RuntimeCandidateCorrectionWitness`：维度、field path、rejected/alternative value、适用 operation kind，以及 decoded
+candidate 存在时的不同 semantic-shape hash。operation ID、wire order、display summary 或 reason 文本变化不构成 witness。
+attempt 1 在 provider call 前重验相同 manifest/witness；完整 candidate admission 还必须证明实际 proposal 使用封存的
+alternative。有限 allowed frontier 为空时，attempt 0 直接以 `candidate_authority_exhausted` 终止；attempt 1 再拒绝才是
+`candidate_retry_exhausted`。Orchestrator 只把该 directive 的 provider-safe detached projection 放入 attempt 1 的 C4
+retry tail；该 input 仅包含 manifest、objectives 与 witness，不含 persisted `Disposition`/`TerminalCode`。LLM Block 可以
+据此渲染 exact alternative，但不能选择、修改或持久化 correction。failure 与 detached input 共同参与
+correction/request-session identity，且不得改变 C0～C3 或 `stablePrefixHash`。duplicate/restart 复用 attempt 0 的 exact
+directive 并重新投影相同 input，不重新推导或重新分配预算。
+
+semantic coverage-order 的完整文档
 结构错误必须保存 manifest 全量 CWI identity 与 field path，使用 typed `coverage_order_document` violation；proof-batch
 保存 exact batch CWI identity 并使用 `proof_batch_document`。两者都只能由 SM-3 owner-private transition seal。
 

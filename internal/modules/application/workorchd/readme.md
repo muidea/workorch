@@ -4,7 +4,7 @@ Status: active
 
 Type: application-module-contract
 
-Last Verified: 2026-08-26
+Last Verified: 2026-08-27
 
 ## 功能范围与边界
 
@@ -76,6 +76,11 @@ Last Verified: 2026-08-26
   candidate 同步封存完整 normalized typed Profile contract snapshot/hash、required owner-fact binding 及唯一 one-shot
   acquisition/reobserve closure；Application 使用 Workspace owner 的 pure manifest helper 组装输入，但 Workspace compiler 会从
   exact Profile snapshot 独立派生并逐项比较，Application 无 admission outcome 或 manifest authority；
+  可选 `validationFailureRepairConvergence` 在 current schema 中只能是单个非空 object，并且只接受 typed contract 的
+  exact camelCase key；array、scalar、null、empty object、unknown key、`oneOf/anyOf/alternative` 或任何 alias 都保留为
+  invalid Profile input，由 pure admission 返回 `definition_profile_contract_invalid`。同一 Profile 内归一化后重复的
+  `scope + id` 会保留输入基数并作为隐式 alternative 拒绝，不允许 normalization last-wins。上述门禁发生在 Run、provider
+  或 capability 工作之前；Application 只解析、规范化和提交 snapshot，不生成 repair 语义或状态迁移；
   `one_of/any_of/quorum/threshold/first_success` 或其他 candidate-owned unresolved relation 使用
   `rewrite_definition_all_of` ticket；Profile proof closure 返回 `definition_profile_contract_invalid`，Profile-derived owner-fact
   closure/manifest mismatch 返回 `definition_profile_prerequisite_unresolved`，两者使用 `select_or_fix_template_profile` ticket。
@@ -192,6 +197,8 @@ Last Verified: 2026-08-26
 - [x] 大 DoD 的稳定语义排序、slice 分组、每 CWI 独立 focus 以及 focus 总数上限门禁。
 - [x] Profile-required source 的 exact proof closure、snapshot/hash 与 derived owner-fact manifest 防漂移门禁；默认 software-dev
   graph 不再为 preparation/coverage-map/generic-deliverable 创建不可证明 terminal CWI。
+- [x] validation-failure repair Profile 字段的 strict-current exact object shape、unknown/alternative/alias 拒绝，以及重复
+  normalized `scope + id` 保基数 fail-closed；均返回 `definition_profile_contract_invalid` 且零 Runtime admission/provider/capability。
 - [x] projection lag/high-watermark reconciliation、显式 rebuild、重启 generation 与“不得向 owner 回写修复”。
 - [x] projection lifecycle 合法/禁止迁移、stopped late-event noop、failed 经成功 owner mutation/显式 rebuild 恢复与
   未知 state/event 拒绝。

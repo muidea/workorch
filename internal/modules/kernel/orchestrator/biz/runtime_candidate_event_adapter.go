@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	llmevents "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/events"
+	llmmodels "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/models"
 
 	magicevent "github.com/muidea/magicCommon/event"
 	"github.com/muidea/workorch/internal/pkg/common"
@@ -261,18 +262,35 @@ func runtimeProviderRequestFailure(feedback runtimecontract.RuntimeFeedback) run
 	return failure
 }
 
-func validateRuntimeCandidateRetryContract(attempt int, previousFailure *runtimecontract.RuntimeCandidateFailure) error {
+func runtimeCandidateCorrectionInputFromDirective(directive *runtimecontract.RuntimeCandidateCorrectionDirective) *llmmodels.RuntimeCandidateCorrectionInput {
+	if directive == nil || directive.Witness == nil {
+		return nil
+	}
+	value := directive.Normalized()
+	return (&llmmodels.RuntimeCandidateCorrectionInput{
+		ManifestHash: value.ManifestHash, Objectives: append([]runtimecontract.RuntimeCandidateCorrectionObjective(nil), value.Objectives...),
+		Witness: *value.Witness.Clone(),
+	}).Clone()
+}
+
+func validateRuntimeCandidateRetryContract(attempt int, previousFailure *runtimecontract.RuntimeCandidateFailure, correction *llmmodels.RuntimeCandidateCorrectionInput, manifestHash string) error {
 	if attempt < 0 || attempt > 1 {
 		return fmt.Errorf("runtime candidate attempt must be 0 or 1")
 	}
 	if attempt == 0 {
-		if previousFailure != nil {
-			return fmt.Errorf("initial runtime candidate attempt must not carry a previous failure")
+		if previousFailure != nil || correction != nil {
+			return fmt.Errorf("initial runtime candidate attempt must not carry correction lineage")
 		}
 		return nil
 	}
 	if previousFailure == nil || previousFailure.Class == "" || strings.TrimSpace(previousFailure.Reason) == "" {
 		return fmt.Errorf("runtime candidate retry requires the previous failure")
+	}
+	if correction == nil {
+		return fmt.Errorf("runtime candidate retry requires concrete correction input")
+	}
+	if err := correction.Validate(manifestHash); err != nil {
+		return err
 	}
 	return nil
 }
@@ -301,9 +319,9 @@ func validateRuntimeCandidatePreflightCommand(command llmevents.PreflightRuntime
 		if err := runtimecontract.ValidateRuntimeCandidateContractManifestForDecision(command.CandidateManifest, command.Decision, runtimecontract.RuntimeCandidateManifestOwnerFactsFromContext(command.CandidateContext)); err != nil {
 			return err
 		}
-		return validateRuntimeCandidateRetryContract(command.CandidateAttempt, command.PreviousFailure)
+		return validateRuntimeCandidateRetryContract(command.CandidateAttempt, command.PreviousFailure, command.CandidateCorrection, command.CandidateManifest.Hash)
 	case runtimecontract.RuntimeProviderDocumentSemanticPlan:
-		if command.CandidateManifest.Hash != "" || command.CandidateContext.WorkspaceID != "" || command.CandidateContext.RunID != "" || command.DefinitionContext.Revision != "" || command.PreviousFailure != nil {
+		if command.CandidateManifest.Hash != "" || command.CandidateContext.WorkspaceID != "" || command.CandidateContext.RunID != "" || command.DefinitionContext.Revision != "" || command.PreviousFailure != nil || command.CandidateCorrection != nil {
 			return fmt.Errorf("semantic plan preflight must not carry operations fields")
 		}
 		if command.SemanticContext.WorkspaceID != command.WorkspaceID || command.SemanticContext.RunID != command.RunID {
@@ -322,7 +340,7 @@ func validateRuntimeCandidateCommand(command llmevents.RequestRuntimeCandidateCo
 	preflight := llmevents.PreflightRuntimeCandidateCommand{
 		WorkspaceID: command.WorkspaceID, RunID: command.RunID, DocumentKind: command.DocumentKind,
 		Decision: command.Decision, Transaction: command.Transaction, CandidateAttempt: command.CandidateAttempt,
-		PreviousFailure: command.PreviousFailure, StablePrefixHash: command.StablePrefixHash,
+		PreviousFailure: command.PreviousFailure, CandidateCorrection: command.CandidateCorrection, StablePrefixHash: command.StablePrefixHash,
 		CandidateManifest: command.CandidateManifest, DefinitionContext: command.DefinitionContext, CandidateContext: command.CandidateContext,
 		SemanticManifest: command.SemanticManifest, SemanticContext: command.SemanticContext, PreviousSemanticRejection: command.PreviousSemanticRejection, SemanticCorrectionDirective: command.SemanticCorrectionDirective,
 	}
@@ -341,6 +359,13 @@ func validateRuntimeCandidateCommand(command llmevents.RequestRuntimeCandidateCo
 		expected := command.ExpectedDocument.Normalized()
 		if err := expected.Validate(); err != nil || expected.LogicalRequestID != command.RequestIdentity.LogicalRequestID || expected.DocumentKind != command.DocumentKind || expected.ManifestHash != command.CandidateManifest.Hash || expected.StablePrefixHash != command.StablePrefixHash || expected.CorrectionAttempt != command.CandidateAttempt {
 			return fmt.Errorf("operations runtime candidate command has invalid expected document")
+		}
+		if command.CandidateAttempt == 1 {
+			correctionHash := command.CandidateCorrection.StableRequestCorrectionHash(command.PreviousFailure)
+			logicalRequestID := runtimecontract.StableRuntimeCandidateRequestSessionID(command.DocumentKind, command.WorkspaceID, command.RunID, command.Transaction, command.StablePrefixHash, command.CandidateManifest.Hash, correctionHash)
+			if command.RequestIdentity.LogicalRequestID != logicalRequestID {
+				return fmt.Errorf("operations runtime candidate correction request identity is stale")
+			}
 		}
 	}
 	return nil

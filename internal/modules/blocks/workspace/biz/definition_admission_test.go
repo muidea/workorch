@@ -220,6 +220,44 @@ func TestDefinitionAdmissionIntentKeepsUnsupportedAlternativePreseal(t *testing.
 	}
 }
 
+func TestDefinitionAdmissionProfileContractInvalidHasNoRuntimeAdmission(t *testing.T) {
+	ctx := context.Background()
+	repo := memoryrepo.NewWorkspaceRepository()
+	if err := repo.Create(ctx, &workspacemodel.Workspace{ID: "workspace-1", State: common.WorkspaceStateActive}); err != nil {
+		t.Fatal(err)
+	}
+	// This owner fixture intentionally has no Run repository, provider or
+	// capability dependency. An invalid typed Profile must be settled entirely
+	// by the Workspace pure compiler before any Runtime work can exist.
+	biz := &Biz{workspaces: repo}
+	invalidRepair := runtimecontract.RuntimeValidationFailureRepairConvergence{}
+	candidate := testAdmissionCandidate()
+	candidate.RuntimeProfileContracts = []runtimecontract.RuntimeProfileContract{{
+		ID: "software-dev",
+		EvidenceRequirements: []runtimecontract.RuntimeProfileEvidenceRequirement{{
+			ID: "*", Scope: "dodItem", RequiredEvidenceKinds: []string{runtimecontract.EvidenceKindValidation},
+			AcceptedStepKinds:                  []string{runtimecontract.RuntimeBlockKindManagedValidationSession},
+			ValidationFailureRepairConvergence: &invalidRepair,
+		}},
+	}}
+	candidate.RuntimeProfileContractsHash = runtimecontract.StableRuntimeProfileContractsHash(candidate.RuntimeProfileContracts)
+	candidate = candidate.WithHash()
+
+	result, err := biz.submitDefinitionAdmissionIntent(ctx, workspaceevents.DefinitionAdmissionIntentCommand{Candidate: candidate})
+	if err != nil {
+		t.Fatalf("submit invalid Profile candidate: %v", err)
+	}
+	if result.Disposition != workspaceevents.DefinitionAdmissionIntentClarificationRequired ||
+		result.AdmissionResult.ViolationCode != workspacemodel.DefinitionAdmissionProfileContractInvalid ||
+		result.StartupInput != nil || result.ActivationAdmission != nil {
+		t.Fatalf("invalid Profile created Runtime admission: %+v", result)
+	}
+	stored, err := repo.Get(ctx, candidate.WorkspaceID)
+	if err != nil || stored.StartupInput != nil || stored.ActivationAdmission != nil {
+		t.Fatalf("invalid Profile escaped pre-seal Workspace state: workspace=%+v err=%v", stored, err)
+	}
+}
+
 func TestDefinitionAdmissionIntentAloneSelectsTicketPromotionAndResolution(t *testing.T) {
 	ctx := context.Background()
 	repo := memoryrepo.NewWorkspaceRepository()
