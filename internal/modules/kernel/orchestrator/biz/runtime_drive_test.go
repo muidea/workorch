@@ -9638,6 +9638,80 @@ func TestDriveRuntimeCompleteSchemaFailureStopsAfterSameContractRetry(t *testing
 	}
 }
 
+func TestRequestAndSealRuntimeCandidateEmptyDocumentTerminatesWithoutWholeDocumentRecovery(t *testing.T) {
+	ctx := context.Background()
+	hub := magicevent.NewHub(16)
+	t.Cleanup(func() { hub.Terminate(ctx) })
+	facts := runtimeAggregate(t, 1).Facts
+	facts.Activation.ExecutionContract.CandidateDocumentRecovery = runtimecontract.RuntimeCandidateDocumentRecoveryPolicy{MaxAttempts: 2}
+	state := &inMemoryRuntimeStateRepository{}
+	controller, err := runtime.NewRuntimeController(state)
+	if err != nil {
+		t.Fatal(err)
+	}
+	initialized, err := runtimeTestControllerInitialize(controller, ctx, facts, runtimeDefinition(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	initialized = runtimeTestPersistSealedSemanticAuthority(t, ctx, state, initialized)
+	owner := newRuntimeTestOwnerWithEvidence(RuntimeEvidenceRepositories{ArtifactContinuations: memory.NewArtifactContinuationRepository()})
+	if err := owner.ConfigureRuntimeRepository(state); err != nil {
+		t.Fatal(err)
+	}
+	module := newTestBiz(owner, hub, nil)
+	prefix := runtimecontract.StableRuntimeCandidatePrefixHashWithExecutionContract(initialized.Definition, initialized.Facts.Activation.ExecutionContract)
+	providerCalls := 0
+	llmObserver := magicevent.NewSimpleObserver(runtimecontract.RuntimeModuleLLM, hub)
+	llmObserver.Subscribe(llmevents.TopicRequestRuntimeCandidate, func(event magicevent.Event, result magicevent.Result) {
+		providerCalls++
+		command := event.Data().(llmevents.RequestRuntimeCandidateCommand)
+		if command.DocumentKind != runtimecontract.RuntimeProviderDocumentOperations {
+			t.Errorf("operations empty-document request kind = %q", command.DocumentKind)
+		}
+		result.Set(runtimeProviderResultWithAuditForTest(command, llmevents.RequestRuntimeCandidateResult{
+			Transaction: command.Transaction, DocumentKind: command.DocumentKind, RequestIdentity: command.RequestIdentity,
+			ExpectedDocumentHash: runtimeExpectedDocumentHash(command.ExpectedDocument),
+			DocumentOutcome:      runtimeProviderFinalOutputMissingOutcome(command.ExpectedDocument),
+		}), nil)
+	})
+	t.Cleanup(func() { llmObserver.Unsubscribe(llmevents.TopicRequestRuntimeCandidate) })
+
+	terminal, err := module.requestAndSealRuntimeCandidateWithRetry(ctx, initialized, prefix)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if providerCalls != 1 || terminal.Decision.State != runtimecontract.ConvergenceStateFailed || terminal.Decision.Terminal == nil ||
+		terminal.Decision.Terminal.Code != "provider_protocol_failure" || terminal.Facts.Failure == nil ||
+		terminal.Facts.Failure.Class != runtimecontract.FailureClassProviderProtocol || terminal.Facts.Failure.Code != "provider_final_output_missing" ||
+		len(terminal.CandidateAttempts) != 0 || terminal.ActiveDispatch != nil || terminal.Facts.Repair.RepairAttempts != 0 ||
+		terminal.Facts.Recovery != initialized.Facts.Recovery || len(terminal.GovernanceRequests) != 0 {
+		t.Fatalf("operations empty document did not seal one terminal without recovery: calls=%d aggregate=%+v", providerCalls, terminal)
+	}
+	if len(terminal.CandidateRequestSessions) != 1 {
+		t.Fatalf("operations empty-document sessions = %+v", terminal.CandidateRequestSessions)
+	}
+	session := terminal.CandidateRequestSessions[0]
+	if session.State != runtimecontract.RuntimeCandidateRequestSessionTerminal || session.ProviderSubmitted ||
+		session.LastOutcome.Class != runtimecontract.RuntimeCandidateRequestOutcomeProviderProtocol ||
+		session.LastOutcome.Code != "provider_final_output_missing" || session.LastOutcome.Signature != "provider-final-output-missing" ||
+		session.IncompleteOutcomes != 0 || session.NextSequence != 1 || session.LastDocumentFraming != nil ||
+		session.ExpectedDocument == nil || session.ExpectedDocument.MaxRecoveryAttempts != 2 {
+		t.Fatalf("operations empty-document terminal session = %+v", session)
+	}
+
+	reloaded, err := state.Load(ctx, initialized.Facts.WorkspaceID, initialized.Facts.RunID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	replayed, err := module.requestAndSealRuntimeCandidateWithRetry(ctx, reloaded, prefix)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if providerCalls != 1 || replayed.StateRevision != terminal.StateRevision || replayed.Facts.Recovery != terminal.Facts.Recovery {
+		t.Fatalf("operations empty-document terminal replayed provider or entered recovery: calls=%d aggregate=%+v", providerCalls, replayed)
+	}
+}
+
 func TestRequestAndSealRuntimeCandidateRecoversProviderLimitedOutputWithCompleteDocument(t *testing.T) {
 	ctx := context.Background()
 	hub := magicevent.NewHub(16)

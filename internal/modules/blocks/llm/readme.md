@@ -80,9 +80,11 @@ application、Web 与 orchestrator 不直接访问 ai-proxy。
     `completed`、event 顶层没有 `incomplete_details`，且 `output_text.done`/terminal response 中提供的非空全文与累计
     delta 逐字一致时才接受 terminal；`response.incomplete/max_output_tokens` 也必须先封存为唯一 typed terminal 并继续
     消费至 EOF，以拒绝其后的第二个 terminal、late data event 或重复 `[DONE]`。缺失、未知或互相矛盾的 terminal
-    framing 一律是 typed protocol failure，不能发送 `done` 或保留 rejected payload/usage。completed 且 final output 为空仍为
-    `empty_document/provider_final_output_missing`。共享 Runtime package 只保留 owner-neutral framing DTO，不能把 framing
-    当成 Orchestrator durable authority。
+    framing 一律是 typed protocol failure，不能发送 `done` 或保留 rejected payload/usage。completed 且 final output 为空（包括
+    reasoning-only response）仍为 `empty_document/provider_final_output_missing`，不得把 reasoning 当作 content，并须保留
+    submitted/completed audit 与 provider-native usage。generic completion surface 仍返回 typed `final_output_missing` error；
+    只有 Runtime candidate owner boundary 将该 exact typed observation 转换为 empty document fact。共享 Runtime package 只保留
+    owner-neutral framing DTO，不能把 framing 当成 Orchestrator durable authority。
     audit-safe original diagnostic 与 provider-safe field-violation projection 分开生成，任一转换都不得覆盖另一份；
     raw provider body/prompt/credential/endpoint 不进入 eventstream、projection、memory 或后续 request。
 11. `Start()` 只读取一次 LLM configuration，并冻结为本 owner 的 active snapshot。配置文件 watcher 与 Web 保存
@@ -238,7 +240,9 @@ application、Web 与 orchestrator 不直接访问 ai-proxy。
 - [x] candidate terminal framing 强制 `Stale | Feedback | DocumentOutcome` exactly-one；complete content 与 hash/bytes
   一致，所有非 complete outcome 拒绝 content-only/混合 envelope；显式 max-output stop 在零 final-document bytes、
   partial/prose 与 complete-looking payload 下均保持 incomplete fact，并只授权 whole-document recovery；streaming terminal
-  另覆盖 `[DONE]` 前置、terminal 后事件、顶层/embedded incomplete 矛盾、未知状态，以及累计 delta 与 done/terminal 全文漂移。
+  另覆盖 `[DONE]` 前置、terminal 后事件、顶层/embedded incomplete 矛盾、未知状态，以及累计 delta 与 done/terminal 全文漂移；
+  stream/non-stream reasoning-only completed 均形成 empty document，保留 native usage/completed audit、零 content、零 replay，
+  同时 generic completion 保持 typed error 语义。
 - [x] completion/stream/embedding/preflight 的 physical response mode 在成功、transport failure 与 output-limit audit 中
   保真；pre-dispatch failure 保留 `non_streaming + submitted=false`，invalid audit publication 显式 fail-closed，并由
   Eventstream 无损持久化；durable payload 不含 raw body、prompt、credential 或 endpoint。

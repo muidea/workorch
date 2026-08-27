@@ -102,6 +102,32 @@ func (m *Biz) GenerateCandidate(ctx context.Context, request llmmodels.RuntimeCa
 				ReachedProviderLimit: true,
 			}, err
 		}
+		if runtimeProviderCompletedWithoutFinalOutput(err, completion, execution) {
+			if budgetSnapshot != nil {
+				budgetSnapshot.ProviderSubmitted = true
+				if completion.Usage != nil {
+					budgetSnapshot.ActualTokens = completion.Usage.TotalTokens
+				}
+			}
+			// A coherent Responses terminal with no final output is not a
+			// provider-protocol failure at the Runtime boundary. Preserve the
+			// completed physical audit and native usage; RequestCandidate owns the
+			// conversion to empty_document/provider_final_output_missing.
+			audit := sealedAuditFromRequest(request, requestID, budgetSnapshot, startedAt, completedAt, true, llmmodels.RuntimeCandidateStatusCompleted, "", completion.ResponseBytes)
+			audit.PhysicalResponseMode = canonicalProviderPhysicalResponseMode(execution)
+			audit.RequestBytes = providerAuditRequestBytes(completion.RequestBytes, budgetSnapshot)
+			var usage *llmaudit.ProviderUsage
+			if completion.Usage != nil {
+				cloned := *completion.Usage
+				usage = &cloned
+			}
+			return llmmodels.RuntimeCandidateGenerationResult{
+				RequestID: requestID,
+				Usage:     usage,
+				Audit:     audit,
+				Status:    llmmodels.RuntimeCandidateStatusCompleted,
+			}, nil
+		}
 		stale := m.providerCeilingConfigurationStale(request, err)
 		// The protocol adapter reports submission independently at the exact
 		// http.Client.Do boundary; neither request bytes nor error text may be
@@ -142,6 +168,18 @@ func (m *Biz) GenerateCandidate(ctx context.Context, request llmmodels.RuntimeCa
 		Audit:     audit,
 		Status:    llmmodels.RuntimeCandidateStatusCompleted,
 	}, nil
+}
+
+// runtimeProviderCompletedWithoutFinalOutput recognizes only the adapter's
+// exact typed observation after a real submitted Responses transaction. Error
+// text, request bytes, response mode, or an arbitrary empty payload cannot
+// manufacture this owner fact.
+func runtimeProviderCompletedWithoutFinalOutput(err error, completion llmmodels.ProviderCompletionResult, execution providerExecutionMetadata) bool {
+	if err == nil || !execution.Submitted || len(completion.Payload) != 0 {
+		return false
+	}
+	var protocolErr *ProviderProtocolError
+	return errors.As(err, &protocolErr) && protocolErr != nil && protocolErr.Code == providerFinalOutputMissingCode
 }
 
 // canonicalProviderPhysicalResponseMode keeps the sealed, explicit

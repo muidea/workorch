@@ -61,6 +61,82 @@ func TestRuntimeCandidatePhysicalModeUsesDispatchOnlyAfterSubmission(t *testing.
 	}
 }
 
+func TestRuntimeProviderCompletedWithoutFinalOutputRequiresExactSubmittedEmptyTypedObservation(t *testing.T) {
+	validCompletion := llmmodels.ProviderCompletionResult{
+		ProviderSubmitted:    true,
+		PhysicalResponseMode: llmaudit.PhysicalResponseModeNonStreaming,
+		Usage:                &llmaudit.ProviderUsage{InputTokens: 11, OutputTokens: 7, TotalTokens: 18},
+	}
+	validExecution := providerExecutionMetadata{
+		PhysicalResponseMode: llmaudit.PhysicalResponseModeNonStreaming,
+		Submitted:            true,
+	}
+	tests := []struct {
+		name       string
+		err        error
+		completion llmmodels.ProviderCompletionResult
+		execution  providerExecutionMetadata
+		want       bool
+	}{
+		{
+			name:       "submitted non-stream completed empty",
+			err:        &ProviderProtocolError{Code: providerFinalOutputMissingCode, ResponseBytes: 73},
+			completion: validCompletion,
+			execution:  validExecution,
+			want:       true,
+		},
+		{
+			name:       "nil error",
+			completion: validCompletion,
+			execution:  validExecution,
+		},
+		{
+			name:       "untyped matching text",
+			err:        errors.New("llm provider protocol error: " + providerFinalOutputMissingCode),
+			completion: validCompletion,
+			execution:  validExecution,
+		},
+		{
+			name:       "different typed code",
+			err:        &ProviderProtocolError{Code: "invalid_response_json", ResponseBytes: 73},
+			completion: validCompletion,
+			execution:  validExecution,
+		},
+		{
+			name:       "non-canonical typed code",
+			err:        &ProviderProtocolError{Code: " " + providerFinalOutputMissingCode + " ", ResponseBytes: 73},
+			completion: validCompletion,
+			execution:  validExecution,
+		},
+		{
+			name:       "unsubmitted",
+			err:        &ProviderProtocolError{Code: providerFinalOutputMissingCode, ResponseBytes: 73},
+			completion: validCompletion,
+			execution: providerExecutionMetadata{
+				PhysicalResponseMode: llmaudit.PhysicalResponseModeNonStreaming,
+			},
+		},
+		{
+			name: "non-empty payload",
+			err:  &ProviderProtocolError{Code: providerFinalOutputMissingCode, ResponseBytes: 73},
+			completion: llmmodels.ProviderCompletionResult{
+				Payload:              []byte("provider-private-fragment"),
+				ProviderSubmitted:    true,
+				PhysicalResponseMode: llmaudit.PhysicalResponseModeNonStreaming,
+				Usage:                validCompletion.Usage,
+			},
+			execution: validExecution,
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			if got := runtimeProviderCompletedWithoutFinalOutput(test.err, test.completion, test.execution); got != test.want {
+				t.Fatalf("completed-without-final-output = %v, want %v", got, test.want)
+			}
+		})
+	}
+}
+
 func TestRuntimeCandidateProviderClassifiesAuthenticationConfigurationAndTransientFailures(t *testing.T) {
 	if got := runtimeCandidateProviderFailureClass(&ProviderHTTPStatusError{StatusCode: 401, Body: "authentication_failed"}, true); got != runtimecontract.RuntimeCandidateFailureClassProviderAuthentication {
 		t.Fatalf("401 class = %s", got)

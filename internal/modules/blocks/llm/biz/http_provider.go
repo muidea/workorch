@@ -30,6 +30,7 @@ type providerStreamLimits struct {
 const (
 	providerResponseMediaTypeJSON        = "application/json"
 	providerResponseMediaTypeEventStream = "text/event-stream"
+	providerFinalOutputMissingCode       = "final_output_missing"
 )
 
 // ProviderHTTPStatusError preserves the provider status code across adapter
@@ -446,7 +447,12 @@ func (p *HTTPProvider) completeResponses(ctx context.Context, request llmmodels.
 		return result, &ProviderOutputLimitError{Payload: []byte(content), Usage: usage}
 	}
 	if strings.TrimSpace(content) == "" {
-		return result, providerProtocolError("final_output_missing", responseBytes)
+		// Preserve provider-native usage for the Runtime candidate owner. The
+		// generic completion surface still receives an error, while
+		// GenerateCandidate converts this exact typed terminal observation into
+		// the owner-defined empty_document fact.
+		result.Usage = usage
+		return result, providerProtocolError(providerFinalOutputMissingCode, responseBytes)
 	}
 	result.Payload = []byte(content)
 	result.Usage = usage
@@ -531,7 +537,7 @@ func (p *HTTPProvider) streamResponses(ctx context.Context, request llmmodels.Pr
 	}
 	content = providerCompletionContent(request, content)
 	if strings.TrimSpace(content) == "" {
-		return result, providerProtocolError("final_output_missing", result.ResponseBytes)
+		return result, providerProtocolError(providerFinalOutputMissingCode, result.ResponseBytes)
 	}
 	result.Payload = []byte(content)
 	return result, nil

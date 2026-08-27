@@ -1834,6 +1834,17 @@ func runtimeCompleteDocumentOutcome(expected *runtimecontract.RuntimeExpectedDoc
 	}
 }
 
+func runtimeProviderFinalOutputMissingOutcome(expected *runtimecontract.RuntimeExpectedDocumentContract) *llmevents.RuntimeProviderDocumentOutcome {
+	return &llmevents.RuntimeProviderDocumentOutcome{
+		Framing: runtimecontract.RuntimeProviderDocumentFraming{
+			Disposition:          runtimecontract.RuntimeProviderDocumentEmpty,
+			ExpectedDocumentHash: runtimeExpectedDocumentHash(expected),
+			Code:                 "provider_final_output_missing",
+			Signature:            "provider-final-output-missing",
+		},
+	}
+}
+
 func runtimeExpectedDocumentHash(expected *runtimecontract.RuntimeExpectedDocumentContract) string {
 	if expected == nil {
 		return ""

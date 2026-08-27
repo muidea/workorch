@@ -88,6 +88,10 @@ raw bytes/hash 保留原始 identity，任何 prose、其他语言标签、缺�
 - LLM EventHub result 必须是 `Stale | Feedback | DocumentOutcome` exactly-one。complete `DocumentOutcome` 才能携带
   与 framing hash/bytes 精确匹配的 opaque document content；incomplete/empty/invalid outcome 禁止携带 content，旧
   顶层 content fallback 不存在；
+- provider 返回 coherent `completed` terminal 但没有 final output 时，LLM owner 必须发布
+  `empty_document/provider_final_output_missing`，不得降格为 provider-protocol `Feedback`，也不得把 reasoning text
+  当作 document content。该 submitted transaction 的 provider-native usage 与 completed audit 必须原样保留，供
+  Orchestrator 精确结算；empty document 是 terminal document fact，不授权 whole-document recovery；
 - 每个 result 必须携带 LLM-owner sealed audit，并逐项匹配 workspace/run、logical request、physical call、document kind、
   target、stable prefix 与 context budget。`providerSubmitted` 只由 protocol adapter 在调用 physical client 的边界写入；
   `requestBytes` 只是序列化计量，不能推断 submission。`DocumentOutcome` 必须 submitted，stale 必须 unsubmitted，

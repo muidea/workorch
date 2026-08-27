@@ -120,6 +120,9 @@ Cross-owner regression必须证明 concrete receiving-owner Command/Result、wor
 - LLM request result 必须是 `Stale | Feedback | DocumentOutcome` exactly-one；complete content 与 framing hash/bytes
   精确一致，其他 disposition 零 content；physical response mode 是 `streaming | non_streaming` 唯一事实，布尔 streaming
   仅允许派生；
+- stream/non-stream 的 coherent `completed` + empty final output（包括 reasoning-only response）必须形成唯一
+  `empty_document/provider_final_output_missing`，零 content、零 `Feedback`、零第二次 provider call；验证 native usage、
+  completed audit 与一次 usage event 无损保留，且该 terminal fact 不消耗 whole-document recovery；
 - result audit 必须逐项匹配 workspace/run/logical/physical identity、target、kind、stable prefix 与 context budget；覆盖
   before-Do、Do error、response error、stream/non-stream/embed，并证明 request bytes 不推断 submission；DocumentOutcome、
   stale、transient/auth/config/protocol 的 submitted 矩阵与 unsubmitted 零 physical fact 必须穷尽；

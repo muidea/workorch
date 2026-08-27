@@ -3,6 +3,7 @@ package llm
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"sync/atomic"
@@ -10,6 +11,7 @@ import (
 	"time"
 
 	magicevent "github.com/muidea/magicCommon/event"
+	modulecommon "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/common"
 	llmevents "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/events"
 	llmmodels "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
@@ -239,6 +241,235 @@ func TestRuntimeCandidateReasoningOnlyOutputLimitPublishesSingleIncompleteDocume
 	select {
 	case audit := <-audits:
 		t.Fatalf("reasoning-only candidate published duplicate usage audit: %+v", audit)
+	case <-time.After(50 * time.Millisecond):
+	}
+}
+
+func TestRuntimeCandidateReasoningOnlyCompletedPublishesSingleEmptyDocumentFact(t *testing.T) {
+	ctx := context.Background()
+	var responseCalls atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/responses" {
+			http.NotFound(w, r)
+			return
+		}
+		responseCalls.Add(1)
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write([]byte("data: {\"type\":\"response.reasoning_summary_text.delta\",\"delta\":\"hidden reasoning consumed every output token\"}\n\n"))
+		_, _ = w.Write([]byte("data: {\"type\":\"response.completed\",\"response\":{\"status\":\"completed\",\"usage\":{\"input_tokens\":20,\"input_tokens_details\":{\"cached_tokens\":2},\"output_tokens\":8,\"output_tokens_details\":{\"reasoning_tokens\":8},\"total_tokens\":28}}}\n\n"))
+	}))
+	defer server.Close()
+
+	configured := workorchconfig.DefaultLLMConfig()
+	configured.AIProxy.BaseURL = server.URL
+	configured.AIProxy.APIKey = "test-key"
+	configured.DefaultChat = workorchconfig.ProviderModelTargetConfig{ProviderID: "ai-proxy", ModelID: "model-1"}
+
+	request := runtimeSemanticProviderTestRequest(t)
+	request.SemanticContext.ProviderCeiling.ConfigurationRevision = TargetConfigurationRevision(configured, request.SemanticContext.ProviderCeiling.Selection.Target)
+	expected := runtimecontract.RuntimeExpectedDocumentContract{
+		SchemaVersion:            runtimecontract.RuntimeExpectedDocumentSchemaCurrent,
+		DocumentKind:             request.DocumentKind,
+		PlanStep:                 request.SemanticContext.PlanStep,
+		ManifestHash:             request.SemanticManifest.Hash,
+		DefinitionSeedHash:       request.SemanticManifest.DefinitionSeedHash,
+		LogicalRequestID:         request.RequestIdentity.LogicalRequestID,
+		StablePrefixHash:         request.StablePrefixHash,
+		BatchID:                  request.SemanticContext.BatchID,
+		BatchSequence:            request.SemanticContext.BatchSequence,
+		BatchCoverageWorkItemIDs: append([]common.CoverageWorkItemID(nil), request.SemanticContext.BatchCoverageWorkItemIDs...),
+		CoverageOrderHash:        "coverage-order-test",
+		MaxOutputTokens:          request.SemanticContext.ProviderCeiling.EffectiveMaxOutputTokens,
+		MaxRecoveryAttempts:      2,
+	}
+	expected.Hash = runtimecontract.StableRuntimeExpectedDocumentHash(expected)
+	request.ExpectedDocument = &expected
+
+	hub := magicevent.NewHub(16)
+	t.Cleanup(func() { hub.Terminate(ctx) })
+	owner, err := New(hub, nil, Dependencies{LoadLLMConfig: func() (workorchconfig.LLMConfig, error) {
+		return configured, nil
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := owner.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { owner.Teardown(ctx) })
+
+	auditObserver := magicevent.NewSimpleObserver("/llm/consumers/reasoning-only-completed-test", hub)
+	audits := make(chan llmevents.LLMUsageRecordedData, 2)
+	auditObserver.Subscribe(llmevents.TopicLLMUsageRecorded, func(event magicevent.Event, _ magicevent.Result) {
+		if data, ok := event.Data().(llmevents.LLMUsageRecordedData); ok {
+			audits <- data
+		}
+	})
+	t.Cleanup(func() { auditObserver.Unsubscribe(llmevents.TopicLLMUsageRecorded) })
+
+	command := llmevents.RequestRuntimeCandidateCommand{
+		WorkspaceID: request.SemanticContext.WorkspaceID, RunID: request.SemanticContext.RunID,
+		DocumentKind: request.DocumentKind, RequestIdentity: request.RequestIdentity, ExpectedDocument: request.ExpectedDocument,
+		StablePrefixHash: request.StablePrefixHash, SemanticManifest: request.SemanticManifest, SemanticContext: request.SemanticContext,
+	}
+	magicResult := hub.Send(magicevent.NewEventWithContext(
+		llmevents.TopicRequestRuntimeCandidate, runtimecontract.RuntimeModuleOrchestrator, llmevents.CommandDestination,
+		magicevent.NewHeader(), ctx, command,
+	))
+	if magicResult == nil {
+		t.Fatal("runtime candidate command returned no result")
+	}
+	data, requestErr := magicResult.Get()
+	if requestErr != nil {
+		t.Fatalf("runtime candidate command: %v", requestErr)
+	}
+	response, ok := data.(llmevents.RequestRuntimeCandidateResult)
+	if !ok {
+		t.Fatalf("runtime candidate result type = %T", data)
+	}
+	if err := response.Validate(); err != nil {
+		t.Fatalf("runtime candidate result validation: %v", err)
+	}
+	if response.Feedback != nil || response.Stale != nil || response.DocumentOutcome == nil {
+		t.Fatalf("runtime candidate result is not one exclusive document fact: %+v", response)
+	}
+	framing := response.DocumentOutcome.Framing
+	if framing.Disposition != runtimecontract.RuntimeProviderDocumentEmpty ||
+		framing.Code != "provider_final_output_missing" || framing.Signature != "provider-final-output-missing" ||
+		framing.ResponseHash != "" || framing.ResponseBytes != 0 || response.DocumentOutcome.Content != nil {
+		t.Fatalf("reasoning-only completed document outcome = %+v", response.DocumentOutcome)
+	}
+	if response.Audit == nil || !response.Audit.ProviderSubmitted ||
+		response.Audit.Status != llmmodels.RuntimeCandidateStatusCompleted || response.Audit.FailureClass != "" ||
+		response.Audit.PhysicalResponseMode != llmaudit.PhysicalResponseModeStreaming || response.Audit.RequestBytes == 0 ||
+		response.Audit.ResponseBytes == 0 || response.Audit.ContextBudget.ActualTokens != 28 {
+		t.Fatalf("reasoning-only completed request audit = %+v", response.Audit)
+	}
+	if response.Usage == nil || response.Usage.InputTokens != 20 || response.Usage.OutputTokens != 8 || response.Usage.TotalTokens != 28 {
+		t.Fatalf("reasoning-only completed usage = %+v", response.Usage)
+	}
+	if responseCalls.Load() != 1 {
+		t.Fatalf("physical response calls = %d, want 1", responseCalls.Load())
+	}
+
+	select {
+	case audit := <-audits:
+		if !audit.ProviderSubmitted || audit.Status != llmmodels.RuntimeCandidateStatusCompleted || audit.FailureClass != "" ||
+			audit.PhysicalResponseMode != llmaudit.PhysicalResponseModeStreaming || audit.InputTokens != 20 ||
+			audit.OutputTokens != 8 || audit.TotalTokens != 28 || audit.ContextBudget.ActualTokens != 28 {
+			t.Fatalf("published reasoning-only completed usage audit = %+v", audit)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("reasoning-only completed candidate did not publish usage audit")
+	}
+	select {
+	case audit := <-audits:
+		t.Fatalf("reasoning-only completed candidate published duplicate usage audit: %+v", audit)
+	case <-time.After(50 * time.Millisecond):
+	}
+}
+
+func TestGenericProviderCompletionStreamingCompletedEmptyReturnsErrorAndPublishesSingleFailedAudit(t *testing.T) {
+	ctx := context.Background()
+	var responseCalls atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/v1/models":
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"object": "list",
+				"data": []map[string]any{{
+					"id": "chat-model", "supported_endpoints": []string{"/v1/responses"},
+					"contextWindowTokens": 8192, "maxOutputTokens": 1024,
+				}},
+			})
+		case "/v1/responses":
+			responseCalls.Add(1)
+			w.Header().Set("Content-Type", "text/event-stream")
+			_, _ = w.Write([]byte("data: {\"type\":\"response.reasoning_summary_text.delta\",\"delta\":\"reasoning is not final output\"}\n\n"))
+			_, _ = w.Write([]byte("data: {\"type\":\"response.completed\",\"response\":{\"status\":\"completed\",\"usage\":{\"input_tokens\":20,\"output_tokens\":8,\"total_tokens\":28}}}\n\n"))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	configured := workorchconfig.DefaultLLMConfig()
+	configured.AIProxy.BaseURL = server.URL
+	configured.AIProxy.APIKey = "test-key"
+	configured.DefaultChat = workorchconfig.ProviderModelTargetConfig{ProviderID: "ai-proxy", ModelID: "chat-model"}
+
+	hub := magicevent.NewHub(16)
+	t.Cleanup(func() { hub.Terminate(ctx) })
+	owner, err := New(hub, nil, Dependencies{LoadLLMConfig: func() (workorchconfig.LLMConfig, error) {
+		return configured, nil
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := owner.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { owner.Teardown(ctx) })
+
+	auditObserver := magicevent.NewSimpleObserver("/llm/consumers/generic-completed-empty-test", hub)
+	audits := make(chan llmevents.LLMUsageRecordedData, 2)
+	auditObserver.Subscribe(llmevents.TopicLLMUsageRecorded, func(event magicevent.Event, _ magicevent.Result) {
+		if data, ok := event.Data().(llmevents.LLMUsageRecordedData); ok {
+			audits <- data
+		}
+	})
+	t.Cleanup(func() { auditObserver.Unsubscribe(llmevents.TopicLLMUsageRecorded) })
+
+	request := llmProviderRequest()
+	request.WorkspaceID = ""
+	request.RunID = ""
+	request.StepID = ""
+	request.Kind = "provider_completion"
+	request.Model = "chat-model"
+	magicResult := hub.Send(magicevent.NewEventWithContext(
+		llmevents.TopicLLMCommandCompleteProvider, "application/workorchd", llmevents.CommandDestination,
+		magicevent.NewHeader(), ctx, llmevents.CompleteProviderCommand{Request: llmevents.ProviderRequestFromModel(request)},
+	))
+	if magicResult == nil {
+		t.Fatal("generic provider completion returned no result")
+	}
+	data, completionErr := magicResult.Get()
+	if completionErr == nil {
+		t.Fatalf("generic completed-empty result = %#v, want provider protocol error", data)
+	}
+	if data != nil {
+		t.Fatalf("generic completed-empty returned completion data on error: %#v", data)
+	}
+	var protocolErr *ProviderProtocolError
+	if !errors.As(completionErr, &protocolErr) || protocolErr == nil || protocolErr.Code != providerFinalOutputMissingCode {
+		t.Fatalf("generic completed-empty error = %v, want %s provider protocol error", completionErr, providerFinalOutputMissingCode)
+	}
+	if responseCalls.Load() != 1 {
+		t.Fatalf("physical response calls = %d, want 1", responseCalls.Load())
+	}
+
+	select {
+	case audit := <-audits:
+		if err := audit.Validate(); err != nil {
+			t.Fatalf("generic completed-empty usage audit validation: %v", err)
+		}
+		if !audit.ProviderSubmitted || audit.Status != llmmodels.RuntimeCandidateStatusFailed ||
+			audit.FailureClass != string(runtimecontract.RuntimeCandidateFailureClassProviderProtocol) ||
+			audit.PhysicalResponseMode != llmaudit.PhysicalResponseModeStreaming || audit.Kind != "provider_completion" ||
+			audit.RequestBytes == 0 || audit.ResponseBytes == 0 {
+			t.Fatalf("generic completed-empty usage audit = %+v", audit)
+		}
+		if audit.InputTokens != 20 || audit.OutputTokens != 8 || audit.TotalTokens != 28 ||
+			audit.Estimated || audit.UsageSource != modulecommon.UsageSourceProviderNative ||
+			audit.ContextBudget.ActualTokens != 28 {
+			t.Fatalf("generic completed-empty native usage = %+v", audit)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("generic completed-empty completion did not publish usage audit")
+	}
+	select {
+	case audit := <-audits:
+		t.Fatalf("generic completed-empty completion published duplicate usage audit: %+v", audit)
 	case <-time.After(50 * time.Millisecond):
 	}
 }

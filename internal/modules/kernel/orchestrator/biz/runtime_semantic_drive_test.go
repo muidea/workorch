@@ -386,6 +386,89 @@ func TestRuntimeSemanticDriveClosesProviderSessionBeforeSemanticTerminal(t *test
 	}
 }
 
+func TestRuntimeSemanticDriveEmptyDocumentTerminatesWithoutWholeDocumentRecovery(t *testing.T) {
+	ctx := context.Background()
+	hub := magicevent.NewHub(32)
+	t.Cleanup(func() { hub.Terminate(ctx) })
+	bootstrap := runtimeBootstrap()
+	facts, err := bootstrap.InitialFacts("ws-v2", "run-v2")
+	if err != nil {
+		t.Fatal(err)
+	}
+	repository := &runtimeDriveRepository{}
+	controller, err := runtime.NewRuntimeController(repository)
+	if err != nil {
+		t.Fatal(err)
+	}
+	aggregate, err := runtimeTestControllerInitialize(controller, ctx, facts, bootstrap.Definition, bootstrap.Requirements)
+	if err != nil {
+		t.Fatal(err)
+	}
+	aggregate.Facts.Resources.ProviderCeiling = &runtimecontract.ProviderCeiling{
+		Selection:           runtimecontract.ProviderInferenceSelection{Target: aggregate.Facts.Activation.ProviderSelection.Target},
+		ContextWindowTokens: 8192, ProviderMaxOutputTokens: 4096, EffectiveMaxOutputTokens: 2048,
+		MaxInputTokens: 4096, MaxBytes: 65536, CapabilityRevision: "cap-1", ConfigurationRevision: "config-1",
+	}
+	catalog := runtimecontract.RuntimeOperationAdmissibility{PrerequisiteID: "semantic-file", OwnerModuleID: runtimecontract.RuntimeModuleFile, OperationKinds: []string{runtimecontract.StepKindFileEdit}, TargetRefs: []string{"target.txt"}, ObservedRevision: "file-revision-1"}
+	catalog.SnapshotID = runtimecontract.StableRuntimeOperationAdmissibilitySnapshotID(catalog)
+	aggregate.Facts.Resources.OperationAdmissibilities = []runtimecontract.RuntimeOperationAdmissibility{catalog}
+	repository.aggregate = aggregate
+	module := newRuntimeGroundedTargetSequenceModule(t, hub, repository)
+	providerCalls := 0
+	llmObserver := magicevent.NewSimpleObserver(runtimecontract.RuntimeModuleLLM, hub)
+	llmObserver.Subscribe(llmevents.TopicRequestRuntimeCandidate, func(event magicevent.Event, result magicevent.Result) {
+		providerCalls++
+		command := event.Data().(llmevents.RequestRuntimeCandidateCommand)
+		if command.DocumentKind != runtimecontract.RuntimeProviderDocumentSemanticPlan {
+			t.Errorf("semantic empty-document request kind = %q", command.DocumentKind)
+		}
+		result.Set(runtimeProviderResultWithAuditForTest(command, llmevents.RequestRuntimeCandidateResult{
+			DocumentKind: command.DocumentKind, RequestIdentity: command.RequestIdentity,
+			ExpectedDocumentHash: command.ExpectedDocument.Hash,
+			DocumentOutcome:      runtimeProviderFinalOutputMissingOutcome(command.ExpectedDocument),
+		}), nil)
+	})
+	t.Cleanup(func() { llmObserver.Unsubscribe(llmevents.TopicRequestRuntimeCandidate) })
+
+	started, err := module.driveRuntimeSemanticPlanning(ctx, aggregate)
+	if err != nil {
+		t.Fatal(err)
+	}
+	failed, err := module.driveRuntimeSemanticPlanning(ctx, started)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if providerCalls != 1 || failed.SemanticPlanning.Phase != runtimecontract.RuntimeSemanticPlanningFailed ||
+		failed.Decision.State != runtimecontract.ConvergenceStateFailed || failed.Decision.Terminal == nil ||
+		failed.Decision.Terminal.Code != "semantic_contract_failed" || failed.Facts.Failure == nil ||
+		failed.Facts.Failure.OriginalDiagnostic == nil || failed.Facts.Failure.OriginalDiagnostic.OriginalCode != "provider_final_output_missing" ||
+		len(failed.CandidateAttempts) != 0 || failed.ActiveDispatch != nil || failed.Facts.Recovery != aggregate.Facts.Recovery {
+		t.Fatalf("semantic empty document did not seal one terminal without recovery: calls=%d aggregate=%+v", providerCalls, failed)
+	}
+	if len(failed.CandidateRequestSessions) != 1 {
+		t.Fatalf("semantic empty-document sessions = %+v", failed.CandidateRequestSessions)
+	}
+	session := failed.CandidateRequestSessions[0]
+	if session.State != runtimecontract.RuntimeCandidateRequestSessionTerminal || session.ProviderSubmitted ||
+		session.LastOutcome.Class != runtimecontract.RuntimeCandidateRequestOutcomeProviderProtocol ||
+		session.LastOutcome.Code != "provider_final_output_missing" || session.IncompleteOutcomes != 0 || session.NextSequence != 1 ||
+		session.LastDocumentFraming != nil || session.ExpectedDocument == nil || session.ExpectedDocument.MaxRecoveryAttempts <= 0 {
+		t.Fatalf("semantic empty-document terminal session = %+v", session)
+	}
+
+	reloaded, err := repository.Load(ctx, failed.Facts.WorkspaceID, failed.Facts.RunID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	replayed, err := newRuntimeGroundedTargetSequenceModule(t, hub, repository).driveRuntimeSemanticPlanning(ctx, reloaded)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if providerCalls != 1 || replayed.StateRevision != failed.StateRevision || replayed.Facts.Recovery != failed.Facts.Recovery {
+		t.Fatalf("semantic empty-document terminal replayed provider or entered recovery: calls=%d aggregate=%+v", providerCalls, replayed)
+	}
+}
+
 func TestRuntimeSemanticDriveBodyIdleExhaustionReloadsWithoutProviderReplay(t *testing.T) {
 	ctx := context.Background()
 	hub := magicevent.NewHub(32)

@@ -58,6 +58,38 @@ func TestHTTPProviderCompleteUsesAIProxyResponses(t *testing.T) {
 	}
 }
 
+func TestHTTPProviderNonStreamingCompletedEmptyPreservesUsageWithoutSecondCall(t *testing.T) {
+	var calls atomic.Int32
+	body := []byte(`{"status":"completed","usage":{"input_tokens":11,"input_tokens_details":{"cached_tokens":3},"output_tokens":7,"output_tokens_details":{"reasoning_tokens":7},"total_tokens":18}}`)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls.Add(1)
+		var got responsesRequest
+		if err := json.NewDecoder(r.Body).Decode(&got); err != nil {
+			t.Fatalf("decode request: %v", err)
+		}
+		if got.Stream || r.Header.Get("Accept") != "application/json" {
+			t.Fatalf("non-stream request = %+v accept=%q", got, r.Header.Get("Accept"))
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write(body)
+	}))
+	defer server.Close()
+
+	result, err := NewHTTPProvider(testAIProxyProviderConfig(server.URL+"/v1")).Complete(context.Background(), llmProviderRequest())
+	var protocolErr *ProviderProtocolError
+	if !errors.As(err, &protocolErr) || protocolErr.Code != providerFinalOutputMissingCode || protocolErr.ResponseBytes != len(body) {
+		t.Fatalf("completed-empty error = %#v (%v)", protocolErr, err)
+	}
+	if len(result.Payload) != 0 || result.Usage == nil || result.Usage.InputTokens != 11 ||
+		result.Usage.OutputTokens != 7 || result.Usage.TotalTokens != 18 || !result.ProviderSubmitted ||
+		result.PhysicalResponseMode != llmaudit.PhysicalResponseModeNonStreaming || result.ResponseBytes != len(body) {
+		t.Fatalf("completed-empty result = %+v", result)
+	}
+	if calls.Load() != 1 {
+		t.Fatalf("physical provider calls = %d, want 1", calls.Load())
+	}
+}
+
 func TestHTTPProviderStreamUsesAIProxyResponses(t *testing.T) {
 	var got responsesRequest
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
