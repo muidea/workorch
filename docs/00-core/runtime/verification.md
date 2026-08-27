@@ -4,7 +4,7 @@ Status: normative
 
 Type: verification
 
-Last Verified: 2026-08-26
+Last Verified: 2026-08-27
 
 ## Purpose
 
@@ -185,6 +185,11 @@ Cross-owner regression必须证明 concrete receiving-owner Command/Result、wor
 - observation CAS与semantic seal分别重验manifest/batch/request/contract ref、delta、File catalog/observation与Shell dependency
   catalog/observation；probe→CAS、persist→seal任一漂移均零binding/dispatch/effect。duplicate/restart使用full composite hash
   幂等，冲突payload拒绝。
+- semantic eligible-scope 矩阵必须覆盖：普通 generation 的全局 current eligible order；
+  `validation_failure_repair` 只含 exact current CWI；repair 期间无关 CWI 变为 eligible 不退休 manifest、零额外 CAS/request；
+  普通 generation 的真实新增 eligible member会退休 exact generation；accepted-order projection 与 focus-advance retirement
+  对同一 purpose 得到相同 closure。还必须覆盖 owner-private CAS 恰好退休 manifest 的 cut point，断言 caller 从 returned
+  aggregate 重新分派且不会读取旧/nil manifest、不会重复 provider/effect。
 - pre-seal Definition 不携带 exact prospective target set，compiled obligation/manifest 也不回填；SM-3
   schema/admission 只接受一份 proposal 中 1～8 个唯一 canonical `ProspectiveTargetRefs`，不接受 singular
   `ProspectiveTargetRef` 兼容字段。集合中每项都必须位于 Definition declaration selector/candidate refs 与 current
@@ -313,6 +318,11 @@ Cross-owner regression必须证明 concrete receiving-owner Command/Result、wor
 - component instance、Service、global/cache/background task 不保存未经 workspace scope 约束的“current workspace”；
 - 至少两个 workspace 并发 candidate、receipt、recovery、delivery 时不串 identity、diagnostic 或 singleflight；
 - CAS 前/后 crash、owner commit 前/后 crash、response 丢失、duplicate/stale/乱序均零重复副作用；
+- Orchestrator worker-exit fence 必须注入 drive body panic、panic 后 recovery-lease CAS 成功、CAS-before/CAS-after response
+  loss、recovery CAS 失败、timer registration/submission/mount 失败、persisted-lease preflight 的 load/recover/mount 失败、
+  duplicate ingress、Stop 与 fresh-process restart；证明 panic 只形成稳定 typed owner-local failure，
+  exact successor 至多一个，provider/owner durable effect 零重复，且任何 active nonterminal 退出都不会同时失去 gate、timer、
+  persisted wait/handoff 与 `RuntimeDriveLease`。panic 原文不得进入 authority identity。
 - bound governance request 已持久化、Run wait fact 尚未送达这一 cut point 重启后必须自动收敛到 exact blocked Run；不得
   依赖人工 Resume，且整个非终态 handoff 的 `TerminalDeliveryAttempts` 保持不变；
 - 任意非终态 aggregate 携带非零 `TerminalDeliveryAttempts` 或 terminal acknowledgement 必须以

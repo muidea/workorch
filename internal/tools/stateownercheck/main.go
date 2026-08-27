@@ -1,6 +1,7 @@
 // Command stateownercheck verifies the repository's exhaustive, verification-only
-// inventory of state-like string types. It is intentionally outside production
-// wiring: Runtime reducers must never consume this inventory as transition data.
+// inventory of state-like string types and explicitly audited bare state-like
+// fields in owner models. It is intentionally outside production wiring:
+// Runtime reducers must never consume this inventory as transition data.
 package main
 
 import (
@@ -21,7 +22,15 @@ type declaration struct {
 	File       string
 	PackageDir string
 	Name       string
+	Kind       declarationKind
 }
+
+type declarationKind string
+
+const (
+	declarationNamedStateType declarationKind = "named_state_type"
+	declarationBareStateField declarationKind = "bare_state_field"
+)
 
 type inventoryEntry struct {
 	Declaration    declaration
@@ -171,10 +180,22 @@ var classifications = map[string]bool{
 	"authoritative_state_machine": true,
 	"owner_private_state":         true,
 	"immutable_outcome":           true,
+	"immutable_trace":             true,
 	"pure_disposition":            true,
 	"derived_projection":          true,
 	"ephemeral_technical":         true,
 	"invariant_value":             true,
+}
+
+// A bare state-like string field, including a nullable *string, is never
+// transition authority. Owner models may retain one only when the manifest
+// explicitly records that the value is a completed outcome, a derived
+// projection, or immutable trace metadata. Any transition-bearing value must
+// instead use a named state type.
+var bareStateFieldClassifications = map[string]bool{
+	"immutable_outcome":  true,
+	"immutable_trace":    true,
+	"derived_projection": true,
 }
 
 func main() {
@@ -221,11 +242,15 @@ func verifyRepository(root, inventoryPath, transitionPath string, requirePrivile
 	}
 
 	for key, entry := range inventory {
-		if _, found := declarations[key]; !found {
+		discovered, found := declarations[key]
+		if !found {
 			return fmt.Errorf("state-model inventory row %d references a missing declaration: %s", entry.Line, key)
 		}
 		if !classifications[entry.Classification] {
 			return fmt.Errorf("state-model inventory row %d has unknown classification %q", entry.Line, entry.Classification)
+		}
+		if discovered.Kind == declarationBareStateField && !bareStateFieldClassifications[entry.Classification] {
+			return fmt.Errorf("state-model inventory row %d classifies bare state-like string field %s as %q; use a named state type for transition authority or classify the field as immutable_outcome, immutable_trace, or derived_projection", entry.Line, key, entry.Classification)
 		}
 		transitionBearing := entry.Classification == "authoritative_state_machine" || entry.Classification == "owner_private_state"
 		if transitionBearing && len(entry.TransitionIDs) == 0 {
@@ -1731,19 +1756,27 @@ func discoverDeclarations(root string) (map[string]declaration, map[string]int, 
 				}
 				for _, specification := range general.Specs {
 					typeSpec, ok := specification.(*ast.TypeSpec)
-					if !ok || typeSpec.Assign.IsValid() || !isStateLikeName(typeSpec.Name.Name) {
+					if !ok || typeSpec.Assign.IsValid() {
 						continue
 					}
-					underlying, ok := typeSpec.Type.(*ast.Ident)
-					if !ok || underlying.Name != "string" {
+					if underlying, ok := typeSpec.Type.(*ast.Ident); ok && underlying.Name == "string" && isStateLikeName(typeSpec.Name.Name) {
+						item := declaration{File: relative, PackageDir: packageDir, Name: typeSpec.Name.Name, Kind: declarationNamedStateType}
+						key := item.File + ":" + item.Name
+						if _, duplicate := ret[key]; duplicate {
+							return fmt.Errorf("duplicate state-like declaration %s", key)
+						}
+						ret[key] = item
+					}
+					if !isPersistentOwnerModelPackageDir(packageDir) {
 						continue
 					}
-					item := declaration{File: relative, PackageDir: packageDir, Name: typeSpec.Name.Name}
-					key := item.File + ":" + item.Name
-					if _, duplicate := ret[key]; duplicate {
-						return fmt.Errorf("duplicate state-like declaration %s", key)
+					structure, ok := typeSpec.Type.(*ast.StructType)
+					if !ok {
+						continue
 					}
-					ret[key] = item
+					if err := discoverBareStateFields(ret, relative, packageDir, typeSpec.Name.Name, structure); err != nil {
+						return err
+					}
 				}
 			}
 			return nil
@@ -1753,6 +1786,50 @@ func discoverDeclarations(root string) (map[string]declaration, map[string]int, 
 		}
 	}
 	return ret, typedConstantCounts, nil
+}
+
+func discoverBareStateFields(declarations map[string]declaration, file, packageDir, parentName string, structure *ast.StructType) error {
+	if structure == nil || structure.Fields == nil {
+		return nil
+	}
+	for _, field := range structure.Fields.List {
+		for _, name := range field.Names {
+			fieldName := parentName + "." + name.Name
+			if isStateLikeName(name.Name) && isBareStringExpression(field.Type) {
+				item := declaration{File: file, PackageDir: packageDir, Name: fieldName, Kind: declarationBareStateField}
+				key := item.File + ":" + item.Name
+				if _, duplicate := declarations[key]; duplicate {
+					return fmt.Errorf("duplicate state-like declaration %s", key)
+				}
+				declarations[key] = item
+			}
+			if nested, ok := field.Type.(*ast.StructType); ok {
+				if err := discoverBareStateFields(declarations, file, packageDir, fieldName, nested); err != nil {
+					return err
+				}
+			}
+		}
+	}
+	return nil
+}
+
+func isBareStringExpression(expression ast.Expr) bool {
+	switch value := expression.(type) {
+	case *ast.Ident:
+		return value.Name == "string"
+	case *ast.StarExpr:
+		return isBareStringExpression(value.X)
+	case *ast.ParenExpr:
+		return isBareStringExpression(value.X)
+	default:
+		return false
+	}
+}
+
+func isPersistentOwnerModelPackageDir(packageDir string) bool {
+	normalized := "/" + strings.Trim(filepath.ToSlash(packageDir), "/") + "/"
+	ownerPackage := strings.HasPrefix(normalized, "/internal/modules/blocks/") || strings.HasPrefix(normalized, "/internal/modules/kernel/")
+	return ownerPackage && strings.Contains(normalized, "/pkg/models/")
 }
 
 func isStateLikeName(name string) bool {

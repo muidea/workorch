@@ -250,8 +250,17 @@ type RunLineage struct {
 	PredecessorRunID    common.RunID
 	PredecessorResultID common.ResultID
 	SuccessorRunID      common.RunID
-	LineageState        string
+	LineageState        RunLineageState
 }
+
+// RunLineageState is selected only by the Run owner: run.creation initializes
+// an active lineage and SM-1 supersession closes it.
+type RunLineageState string
+
+const (
+	RunLineageStateActive     RunLineageState = "active"
+	RunLineageStateSuperseded RunLineageState = "superseded"
+)
 
 // WorkspaceRunID derives the public Run identity from the same durable
 // Workspace-scoped sequence used for WorkspaceRunGeneration. Repositories

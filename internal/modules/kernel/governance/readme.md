@@ -30,7 +30,7 @@ Governance 与 Orchestrator 没有直接 EventHub I/O。Governance 只向 Decisi
 - 幂等检查、每 Run budget 和 shared budget history 查询都必须同时携带 `WorkspaceID`；RunID 或 item ID 不能单独充当全局 scope。
 - owner mutation 前必须依次持久化 `evaluated` 和 `resolving`。任一 trace List / Upsert 失败都 fail-closed，不得继续调用 Decision / Approval owner。
 - worker 只提交 evaluated/escalated/resolution-started/blocked/completed immutable fact；唯一 Governance-private
-  dispatcher 选择 `evaluated | resolving | escalated | blocked | resolved` 并写 repository，worker 不能直接设置 status
+  dispatcher 选择命名的 `AutoGovernanceTraceState`（`evaluated | resolving | escalated | blocked | resolved`）并写 repository，worker 不能直接设置 status
   或调用 Upsert。当前 repository 没有 CAS，因此 dispatcher 使用 owner-local mutex 串行化 load/reduce/upsert；这不授予
   Governance 修改 Decision、Approval、Run 或 Runtime state 的权限。
 - owner ensure 成功后再把 `resolving` 提交为 `resolved`。若最终 trace 写入失败或进程崩溃，启动恢复从 Governance 全局未完成 trace inventory 读取 `evaluated` / `resolving`，先绑定每条 owner fact 的 Workspace，再查询 Decision / Approval 状态并幂等完成或阻塞 trace；不得重复已提交的 owner mutation。

@@ -1,17 +1,28 @@
-# declaration_file|type_name|classification|owner_root|transition_ids
+# declaration_file|type_or_struct_field|classification|owner_root|transition_ids
 #
 # This is an exhaustive verification inventory, never production transition
 # data. A transition-bearing type may name one or more coordinated transition
 # families only when every family has the same unique owner_root as the type.
 # Multiple IDs describe same-owner coordination, never shared or cross-owner
 # reducer authority. Immutable outcomes, pure dispositions, projections,
-# technical state and invariant values must keep transition_ids="-".
+# immutable traces, technical state and invariant values must keep
+# transition_ids="-". Bare state-like string or *string fields are allowed only
+# in owner pkg/models and only when explicitly classified as immutable_outcome,
+# immutable_trace or derived_projection; transition state must use a named type.
 internal/modules/blocks/approval/pkg/models/runtime_governance.go|ResolutionProposalState|owner_private_state|internal/modules/blocks/approval|approval.lifecycle
 internal/modules/blocks/decision/pkg/events/definition_clarification.go|DefinitionClarificationDisposition|immutable_outcome|internal/modules/blocks/decision|-
 internal/pkg/workorchdefinitioncontract/clarification.go|DefinitionClarificationDisposition|immutable_outcome|internal/modules/blocks/decision|-
 internal/modules/blocks/decision/pkg/models/runtime_governance_proposal.go|RuntimeGovernanceResolutionProposalState|owner_private_state|internal/modules/blocks/decision|decision.lifecycle
 internal/modules/blocks/llm/pkg/models/provider_model_catalog.go|ProviderCatalogState|derived_projection|internal/modules/blocks/llm|-
+internal/modules/blocks/llm/pkg/models/decision.go|ProviderAdapterCacheHint.Mode|derived_projection|internal/modules/blocks/llm|-
+internal/modules/blocks/llm/pkg/models/decision.go|ProviderContextBudget.ProfileMode|derived_projection|internal/modules/blocks/llm|-
+internal/modules/blocks/llm/pkg/models/decision.go|ProviderContextProfile.ProfileMode|derived_projection|internal/modules/blocks/llm|-
+internal/modules/blocks/llm/pkg/models/decision.go|ProviderObservedRequestShape.ProviderFacingMode|derived_projection|internal/modules/blocks/llm|-
+internal/modules/blocks/llm/pkg/models/runtime_candidate.go|ProviderRequestAudit.Status|immutable_trace|internal/modules/blocks/llm|-
+internal/modules/blocks/llm/pkg/models/runtime_candidate.go|RuntimeCandidateGenerationResult.Status|immutable_outcome|internal/modules/blocks/llm|-
 internal/modules/blocks/memory/pkg/events/messages.go|MemoryRecallTraceWriteDisposition|immutable_outcome|internal/modules/blocks/memory|-
+internal/modules/blocks/memory/pkg/models/memory_recall_trace.go|MemoryRecallTrace.Stage|immutable_trace|internal/modules/blocks/memory|-
+internal/modules/blocks/memory/pkg/models/memory_recall_trace.go|MemoryRecallTrace.Status|immutable_trace|internal/modules/blocks/memory|-
 internal/modules/blocks/memory/pkg/models/workspace_deletion.go|WorkspaceDeletionPhase|owner_private_state|internal/modules/blocks/memory|memory.workspace_deletion
 internal/modules/blocks/decision/pkg/models/workspace_deletion.go|WorkspaceDeletionPhase|owner_private_state|internal/modules/blocks/decision|decision.workspace_deletion
 internal/modules/blocks/approval/pkg/models/workspace_deletion.go|WorkspaceDeletionPhase|owner_private_state|internal/modules/blocks/approval|approval.workspace_deletion
@@ -20,6 +31,7 @@ internal/pkg/repository/file/event_record_purge_swap.go|eventRecordPurgeSwapPhas
 internal/modules/blocks/run/pkg/models/run.go|ReplacementIntentState|owner_private_state|internal/modules/blocks/run|run.replacement
 internal/modules/blocks/run/pkg/models/run.go|ReplacementRecoveryStage|owner_private_state|internal/modules/blocks/run|run.replacement
 internal/modules/blocks/run/pkg/models/run.go|ReplacementRecoveryState|owner_private_state|internal/modules/blocks/run|run.replacement
+internal/modules/blocks/run/pkg/models/run.go|RunLineageState|owner_private_state|internal/modules/blocks/run|run.creation,sm_1
 internal/modules/blocks/run/pkg/models/workspace_retirement.go|WorkspaceRetirementPhase|owner_private_state|internal/modules/blocks/run|run.workspace_retirement
 internal/pkg/workorchrepo/workspace_scoped_repositories.go|workspaceRunResourcePurgePhase|owner_private_state|internal/modules/blocks/run|run.workspace_retirement
 internal/pkg/workorchrepo/workspace_scoped_repositories.go|orchestratorEvidencePurgeJournalPhase|owner_private_state|internal/modules/kernel/orchestrator|orchestrator.workspace_deletion
@@ -28,6 +40,8 @@ internal/modules/blocks/workspace/pkg/events/messages.go|DefinitionAdmissionInte
 internal/modules/blocks/workspace/pkg/events/messages.go|DeleteWorkspaceDisposition|immutable_outcome|internal/modules/blocks/workspace|-
 internal/modules/blocks/workspace/pkg/models/definition_admission.go|DefinitionAdmissionDisposition|pure_disposition|internal/modules/blocks/workspace|-
 internal/modules/blocks/workspace/pkg/models/definition_admission.go|WorkspaceActivationAdmissionState|owner_private_state|internal/modules/blocks/workspace|workspace.definition_admission
+internal/modules/blocks/workspace/pkg/models/dod.go|DoD.LineageState|immutable_trace|internal/modules/blocks/workspace|-
+internal/modules/blocks/workspace/pkg/models/goal.go|Goal.LineageState|immutable_trace|internal/modules/blocks/workspace|-
 internal/modules/blocks/workspace/pkg/models/workspace_deletion.go|WorkspaceDeletionPhase|owner_private_state|internal/modules/blocks/workspace|workspace.deletion
 internal/modules/application/workorchd/biz/appservice/readmodelports/run_snapshot_models.go|runSnapshotLoadMode|ephemeral_technical|internal/modules/application/workorchd|-
 internal/modules/application/workorchd/biz/appservice/readmodelports/workspace_snapshot_load_mode.go|workspaceSnapshotLoadMode|ephemeral_technical|internal/modules/application/workorchd|-
@@ -39,6 +53,7 @@ internal/modules/kernel/orchestrator/biz/runtime/failure_policy.go|FailureDispos
 internal/modules/kernel/orchestrator/biz/runtime/execution_budget.go|RuntimeProviderBudgetSettlementStatus|immutable_outcome|internal/modules/kernel/orchestrator|-
 internal/modules/kernel/orchestrator/pkg/events/messages.go|RuntimeGovernanceResolutionDisposition|immutable_outcome|internal/modules/kernel/orchestrator|-
 internal/modules/kernel/orchestrator/pkg/models/workspace_deletion.go|WorkspaceDeletionPhase|owner_private_state|internal/modules/kernel/orchestrator|orchestrator.workspace_deletion
+internal/modules/kernel/governance/pkg/models/auto_governance_trace.go|AutoGovernanceTraceState|owner_private_state|internal/modules/kernel/governance|governance.trace
 internal/pkg/common/states.go|WorkspaceState|authoritative_state_machine|internal/modules/blocks/workspace|workspace.creation,workspace.lifecycle
 internal/pkg/common/states.go|DoDState|invariant_value|internal/modules/blocks/workspace|-
 internal/pkg/common/states.go|RunState|authoritative_state_machine|internal/modules/blocks/run|run.creation,sm_1

@@ -4,7 +4,7 @@ Status: normative
 
 Type: core-contract-part
 
-Last Verified: 2026-08-26
+Last Verified: 2026-08-27
 
 ## Runtime 生产主链
 
@@ -240,6 +240,18 @@ request/owner feasibility/SM-2 seal。`SemanticOperationAuthorityReady` 或 `sem
 其它已封存的 contract defect、budget exhaustion 或 owner failure terminal 必须保持原权威，不能被语义重规划覆盖。
 administrative termination 仍走独立 Run-owner intent/SM-4 handoff lane。该门禁不允许 operations request 穿过 binding-free 窗口，
 也不允许 capability owner、Application 或 projection 改写任何 Runtime state。
+
+semantic generation 的 eligible closure 必须由 generation purpose 唯一派生，并由 accepted-order projection、focus
+advance 与 retirement check 共用。普通 definition generation 使用当时全部尚未绑定且可规划的 current CWI；
+`validation_failure_repair` generation 只包含触发 repair 的 exact current CWI，不得把其它全局 eligible CWI 拼入该
+generation。因而无关 CWI 变为 eligible 不能退休 repair-local manifest，也不能制造新的 provider request；普通 generation
+中确有新的 eligible member、或 repair CWI/purpose/lineage 漂移时，才以 owner-private event 退休 exact generation 并重新
+规划。该 scope 是 SM-2 authority，不由 LLM document、capability result 或 SM-4 推断。
+
+每次 semantic owner-private event 完成 CAS 后，调用方必须仅从返回的 current aggregate 重新读取 phase、generation、
+manifest、accepted order 与 request identity。若该 event 已退休 generation 或清空 manifest，本轮 semantic transaction
+立即返回 aggregate 交给 owner drive 重新分派；不得继续使用 CAS 前的 manifest/hash/request 假设，也不得依赖 panic 或
+外部 watchdog 触发后继。
 
 当前 authority 同时绑定 capability-owner policy revision、equivalent-authority input、binding contradiction 和 opaque
 lifecycle fence。File 等 owner 的 semantic/operation feasibility 必须消费同一 owner policy；Orchestrator 只有在

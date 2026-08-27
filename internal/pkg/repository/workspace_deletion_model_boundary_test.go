@@ -38,7 +38,12 @@ func TestWorkspaceDeletionPersistenceModelsStayOwnerPrivate(t *testing.T) {
 			return walkErr
 		}
 		if entry.IsDir() {
-			if entry.Name() == ".git" || entry.Name() == "node_modules" {
+			// Runtime data and generated dependency trees are not repository
+			// source. In particular, an in-progress workspace may contain
+			// intentionally incomplete Go files and must never weaken or break
+			// this static owner-boundary scan.
+			if entry.Name() == ".git" || entry.Name() == "node_modules" ||
+				entry.Name() == ".workorch-data" || entry.Name() == ".workorch-workspaces" {
 				return filepath.SkipDir
 			}
 			return nil

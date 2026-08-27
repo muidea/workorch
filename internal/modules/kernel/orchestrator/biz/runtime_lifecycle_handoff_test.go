@@ -45,6 +45,78 @@ type blockingRuntimeTimerSubmissionBackground struct {
 	queued  func()
 }
 
+// scheduledDrivePanicRepository places a process panic on either side of the
+// first owner repository boundary. The one-shot fault lets the Orchestrator's
+// panic fence reload the surviving aggregate and persist the ordinary SM-4
+// DriveLease through the same repository immediately afterward.
+type scheduledDrivePanicRepository struct {
+	delegate           runtime.RuntimeStateRepository
+	panicOnFirstLoad   bool
+	panicAfterFirstCAS bool
+	loadPanicFired     bool
+	savePanicFired     bool
+	persistedRevision  uint64
+	marker             string
+}
+
+type failOnceRuntimeLoadRepository struct {
+	delegate runtime.RuntimeStateRepository
+	fired    bool
+}
+
+type panicOnceRuntimeTimerBackground struct {
+	recordingBackgroundRoutine
+	panicked          bool
+	successfulSubmits int
+}
+
+func (b *panicOnceRuntimeTimerBackground) AsyncFunction(function func()) error {
+	b.asyncFunctionCalls++
+	if !b.panicked {
+		b.panicked = true
+		panic("injected Runtime timer submission panic")
+	}
+	b.successfulSubmits++
+	b.lastAsyncFunction = function
+	return nil
+}
+
+func (r *failOnceRuntimeLoadRepository) Load(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID) (runtime.RuntimeAggregate, error) {
+	if !r.fired {
+		r.fired = true
+		return runtime.RuntimeAggregate{}, errors.New("injected persisted lease preflight load failure")
+	}
+	return r.delegate.Load(ctx, workspaceID, runID)
+}
+
+func (r *failOnceRuntimeLoadRepository) Save(ctx context.Context, aggregate runtime.RuntimeAggregate, expectedRevision uint64) error {
+	return r.delegate.Save(ctx, aggregate, expectedRevision)
+}
+
+func (r *scheduledDrivePanicRepository) Load(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID) (runtime.RuntimeAggregate, error) {
+	if r.panicOnFirstLoad && !r.loadPanicFired {
+		r.loadPanicFired = true
+		panic(r.marker)
+	}
+	return r.delegate.Load(ctx, workspaceID, runID)
+}
+
+func (r *scheduledDrivePanicRepository) Save(ctx context.Context, aggregate runtime.RuntimeAggregate, expectedRevision uint64) error {
+	if err := r.delegate.Save(ctx, aggregate, expectedRevision); err != nil {
+		return err
+	}
+	if r.panicAfterFirstCAS && !r.savePanicFired {
+		r.savePanicFired = true
+		r.persistedRevision = aggregate.StateRevision
+		panic(r.marker)
+	}
+	return nil
+}
+
+func (r *scheduledDrivePanicRepository) reachedConfiguredBoundaries() bool {
+	return (!r.panicOnFirstLoad || r.loadPanicFired) && (!r.panicAfterFirstCAS || r.savePanicFired)
+}
+
 func (b *blockingRuntimeTimerSubmissionBackground) AsyncFunction(function func()) error {
 	b.mu.Lock()
 	b.asyncFunctionCalls++
@@ -94,6 +166,315 @@ func (r *failRuntimeLeaseRenewalRepository) Save(ctx context.Context, aggregate 
 		return errors.New("injected drive lease renewal CAS failure")
 	}
 	return r.delegate.Save(ctx, aggregate, expectedRevision)
+}
+
+func TestScheduledRuntimeDrivePanicPersistsSingleOwnerSuccessorAndRestartMountsOnce(t *testing.T) {
+	for _, testCase := range []struct {
+		name          string
+		panicOnLoad   bool
+		panicAfterCAS bool
+		panicInFinish bool
+	}{
+		{name: "before aggregate CAS", panicOnLoad: true},
+		{name: "after aggregate CAS", panicAfterCAS: true},
+		{name: "during successor lease CAS", panicOnLoad: true, panicInFinish: true},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			ctx := context.Background()
+			aggregate := runtimeAggregate(t, 1)
+			baseRepository := &inMemoryRuntimeStateRepository{aggregate: &aggregate}
+			faultRepository := &scheduledDrivePanicRepository{
+				delegate: baseRepository, panicOnFirstLoad: testCase.panicOnLoad,
+				panicAfterFirstCAS: testCase.panicAfterCAS || testCase.panicInFinish, marker: "scheduled-drive-" + testCase.name,
+			}
+
+			hub := magicevent.NewHub(16)
+			t.Cleanup(func() { hub.Terminate(context.Background()) })
+			runs := memory.NewRunRepository()
+			if err := runs.Create(ctx, runtimeRunForTest(common.RunStateActive, aggregate.Definition)); err != nil {
+				t.Fatal(err)
+			}
+			runOwner := runmodule.New()
+			if err := runOwner.Configure(runbiz.Dependencies{Runs: runs, EventHub: hub}); err != nil {
+				t.Fatal(err)
+			}
+			if err := runOwner.Start(); err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() { _ = runOwner.Stop(context.Background()) })
+
+			owner := newRuntimeTestOwner()
+			if err := owner.ConfigureRuntimeRepository(faultRepository); err != nil {
+				t.Fatal(err)
+			}
+			background := &recordingBackgroundRoutine{}
+			module := newTestBiz(owner, hub, background)
+			key := runtimeDriveKey(aggregate.Facts.WorkspaceID, aggregate.Facts.RunID)
+			if !module.beginRuntimeDrive(key) {
+				t.Fatal("scheduled drive did not acquire its sole process gate")
+			}
+			request := scheduledRuntimeDriveRequest{
+				workspaceID: aggregate.Facts.WorkspaceID, runID: aggregate.Facts.RunID,
+				source: "panic_fence_test", driveKey: key,
+			}
+			// The panic must not escape to magicCommon's process-level routine
+			// recovery. The Orchestrator owner converts it into persisted SM-4
+			// successor authority before this call returns.
+			module.runScheduledRuntimeDrive(ctx, request)
+			if !faultRepository.reachedConfiguredBoundaries() {
+				t.Fatal("scheduled drive did not reach the injected panic boundary")
+			}
+
+			persisted, err := baseRepository.Load(ctx, aggregate.Facts.WorkspaceID, aggregate.Facts.RunID)
+			if err != nil || persisted.DriveLease == nil {
+				t.Fatalf("panic fence successor=%+v err=%v", persisted.DriveLease, err)
+			}
+			panicRevision := aggregate.StateRevision
+			if testCase.panicAfterCAS {
+				panicRevision = faultRepository.persistedRevision
+				if panicRevision <= aggregate.StateRevision {
+					t.Fatalf("after-CAS panic did not persist progress: revision=%d initial=%d", panicRevision, aggregate.StateRevision)
+				}
+			}
+			lease := persisted.DriveLease.Clone()
+			wantTimerCalls := 1
+			if lease.State != runtimecontract.RuntimeDriveLeaseScheduled ||
+				lease.Reason != runtimecontract.RuntimeDriveLeaseReasonPersistedPending ||
+				lease.FailureSignature != runtimeScheduledDrivePanicLeaseRequest("", panicRevision, true).FailureSignature ||
+				lease.AggregateRevision != persisted.StateRevision || background.asyncFunctionCalls != wantTimerCalls ||
+				(wantTimerCalls != 0 && background.lastAsyncFunction == nil) {
+				t.Fatalf("panic successor lease=%+v stateRevision=%d timers=%d", lease, persisted.StateRevision, background.asyncFunctionCalls)
+			}
+			if testCase.panicInFinish && persisted.StateRevision != faultRepository.persistedRevision {
+				// The lease CAS committed before its response was lost. The outer
+				// fence must mount that exact durable generation in-process without
+				// recursively retrying persistence.
+				t.Fatalf("finish panic recursively rewrote persisted successor: panicRevision=%d stateRevision=%d", faultRepository.persistedRevision, persisted.StateRevision)
+			}
+			if module.beginRuntimeDrive(key) {
+				t.Fatal("panic successor released the generation-zero gate")
+			}
+			if err := module.scheduleRuntimeDrive(ctx, aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, "duplicate_after_panic"); err != nil {
+				t.Fatal(err)
+			}
+			if background.asyncFunctionCalls != wantTimerCalls {
+				t.Fatalf("duplicate ingress mounted a second timer/drive: calls=%d", background.asyncFunctionCalls)
+			}
+
+			// Stop discards only local gate/timer machinery. A fresh owner must
+			// adopt the exact persisted generation once; duplicate restart ingress
+			// cannot create another worker or lease transition.
+			if err := module.Stop(ctx); err != nil {
+				t.Fatal(err)
+			}
+			restartedOwner := newRuntimeTestOwner()
+			if err := restartedOwner.ConfigureRuntimeRepository(baseRepository); err != nil {
+				t.Fatal(err)
+			}
+			restartedBackground := &recordingBackgroundRoutine{}
+			restarted := newTestBiz(restartedOwner, hub, restartedBackground)
+			t.Cleanup(func() { _ = restarted.Stop(context.Background()) })
+			if err := restarted.scheduleRuntimeDrive(ctx, aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, "restart_after_panic"); err != nil {
+				t.Fatal(err)
+			}
+			if restartedBackground.asyncFunctionCalls != 1 || restartedBackground.lastAsyncFunction == nil {
+				t.Fatalf("restart did not schedule one owner worker: calls=%d", restartedBackground.asyncFunctionCalls)
+			}
+			restartWorker := restartedBackground.lastAsyncFunction
+			restartWorker()
+			if restartedBackground.asyncFunctionCalls != 2 || restartedBackground.lastAsyncFunction == nil {
+				t.Fatalf("restart worker did not mount one persisted timer: calls=%d", restartedBackground.asyncFunctionCalls)
+			}
+			if err := restarted.scheduleRuntimeDrive(ctx, aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, "duplicate_restart_after_panic"); err != nil {
+				t.Fatal(err)
+			}
+			if restartedBackground.asyncFunctionCalls != 2 || restarted.beginRuntimeDrive(key) {
+				t.Fatalf("duplicate restart escaped singleflight: calls=%d", restartedBackground.asyncFunctionCalls)
+			}
+			afterRestart, err := baseRepository.Load(ctx, aggregate.Facts.WorkspaceID, aggregate.Facts.RunID)
+			if err != nil || afterRestart.StateRevision != persisted.StateRevision || afterRestart.DriveLease == nil ||
+				!runtimecontract.SameRuntimeDriveLeaseIdentity(*afterRestart.DriveLease, lease) {
+				t.Fatalf("restart rewrote panic successor: before=%+v after=%+v err=%v", lease, afterRestart.DriveLease, err)
+			}
+		})
+	}
+}
+
+func TestScheduledRuntimeDriveTimerSubmissionPanicClearsRegistrationAndRemountsExactLease(t *testing.T) {
+	ctx := context.Background()
+	aggregate := runtimeAggregate(t, 1)
+	baseRepository := &inMemoryRuntimeStateRepository{aggregate: &aggregate}
+	faultRepository := &scheduledDrivePanicRepository{
+		delegate: baseRepository, panicOnFirstLoad: true, marker: "drive-before-timer-submission",
+	}
+	owner := newRuntimeTestOwner()
+	if err := owner.ConfigureRuntimeRepository(faultRepository); err != nil {
+		t.Fatal(err)
+	}
+	hub := magicevent.NewHub(8)
+	t.Cleanup(func() { hub.Terminate(context.Background()) })
+	background := &panicOnceRuntimeTimerBackground{}
+	module := newTestBiz(owner, hub, background)
+	key := runtimeDriveKey(aggregate.Facts.WorkspaceID, aggregate.Facts.RunID)
+	if !module.beginRuntimeDrive(key) {
+		t.Fatal("timer submission panic fixture did not acquire gate")
+	}
+	module.runScheduledRuntimeDrive(ctx, scheduledRuntimeDriveRequest{
+		workspaceID: aggregate.Facts.WorkspaceID, runID: aggregate.Facts.RunID,
+		source: "timer_submission_panic", driveKey: key,
+	})
+	persisted, err := baseRepository.Load(ctx, aggregate.Facts.WorkspaceID, aggregate.Facts.RunID)
+	if err != nil || !faultRepository.loadPanicFired || persisted.DriveLease == nil ||
+		persisted.DriveLease.State != runtimecontract.RuntimeDriveLeaseScheduled ||
+		background.asyncFunctionCalls != 2 || !background.panicked || background.successfulSubmits != 1 || background.lastAsyncFunction == nil {
+		t.Fatalf("timer panic successor=%+v calls=%d successful=%d err=%v", persisted.DriveLease, background.asyncFunctionCalls, background.successfulSubmits, err)
+	}
+	lease := persisted.DriveLease.Clone()
+	module.driveMu.Lock()
+	registration, registered := module.retryLeaseTimers[key]
+	_, gateRetained := module.drivingRuns[key]
+	module.driveMu.Unlock()
+	if !registered || registration.Generation != lease.RecoveryGeneration || !gateRetained {
+		t.Fatalf("timer remount registration=%+v registered=%v gate=%v lease=%+v", registration, registered, gateRetained, lease)
+	}
+	if err := module.scheduleRuntimeDrive(ctx, aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, "duplicate_after_timer_submission_panic"); err != nil {
+		t.Fatal(err)
+	}
+	if background.asyncFunctionCalls != 2 || background.successfulSubmits != 1 {
+		t.Fatalf("duplicate ingress remounted timer: calls=%d successful=%d", background.asyncFunctionCalls, background.successfulSubmits)
+	}
+}
+
+func TestNormalDrivePersistedLeasePreflightFailureNeverReleasesActiveGate(t *testing.T) {
+	t.Run("load failure persists one retry successor", func(t *testing.T) {
+		ctx := context.Background()
+		aggregate := runtimeAggregate(t, 1)
+		baseRepository := &inMemoryRuntimeStateRepository{aggregate: &aggregate}
+		faultRepository := &failOnceRuntimeLoadRepository{delegate: baseRepository}
+		owner := newRuntimeTestOwner()
+		if err := owner.ConfigureRuntimeRepository(faultRepository); err != nil {
+			t.Fatal(err)
+		}
+		background := &recordingBackgroundRoutine{}
+		module := newTestBiz(owner, magicevent.NewHub(8), background)
+		t.Cleanup(func() { module.EventHub().Terminate(context.Background()) })
+		key := runtimeDriveKey(aggregate.Facts.WorkspaceID, aggregate.Facts.RunID)
+		if !module.beginRuntimeDrive(key) {
+			t.Fatal("preflight load fixture did not acquire gate")
+		}
+		module.runScheduledRuntimeDrive(ctx, scheduledRuntimeDriveRequest{
+			workspaceID: aggregate.Facts.WorkspaceID, runID: aggregate.Facts.RunID,
+			source: "preflight_load_failure", driveKey: key,
+		})
+		persisted, err := baseRepository.Load(ctx, aggregate.Facts.WorkspaceID, aggregate.Facts.RunID)
+		if err != nil || !faultRepository.fired || persisted.DriveLease == nil ||
+			persisted.DriveLease.State != runtimecontract.RuntimeDriveLeaseScheduled ||
+			persisted.DriveLease.Reason != runtimecontract.RuntimeDriveLeaseReasonScheduleRetry ||
+			persisted.DriveLease.FailureSignature != "persisted-lease-preflight/load" ||
+			background.asyncFunctionCalls != 1 || background.lastAsyncFunction == nil {
+			t.Fatalf("preflight load successor=%+v calls=%d fired=%v err=%v", persisted.DriveLease, background.asyncFunctionCalls, faultRepository.fired, err)
+		}
+		if module.beginRuntimeDrive(key) {
+			t.Fatal("preflight load failure released active gate")
+		}
+	})
+
+	t.Run("running recovery failure remounts exact authority", func(t *testing.T) {
+		ctx := context.Background()
+		aggregate := runtimeAggregate(t, 1)
+		baseRepository := &inMemoryRuntimeStateRepository{aggregate: &aggregate}
+		seedOwner := newRuntimeTestOwner()
+		if err := seedOwner.ConfigureRuntimeRepository(baseRepository); err != nil {
+			t.Fatal(err)
+		}
+		seedModule := newTestBiz(seedOwner, magicevent.NewHub(8), nil)
+		t.Cleanup(func() { seedModule.EventHub().Terminate(context.Background()) })
+		dueAt := time.Now().UTC().Add(-time.Second).Format(time.RFC3339Nano)
+		scheduled, _, err := seedModule.runtimeScheduleDriveLease(ctx, aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, runtimecontract.RuntimeDriveLease{
+			WorkspaceID: aggregate.Facts.WorkspaceID, RunID: aggregate.Facts.RunID,
+			Reason: runtimecontract.RuntimeDriveLeaseReasonPersistedPending, FailureSignature: "preflight-running-authority", DueAt: dueAt,
+		}, 0)
+		if err != nil {
+			t.Fatal(err)
+		}
+		running, claimed, err := seedModule.runtimeClaimDriveLease(ctx, scheduled, time.Now().UTC().Format(time.RFC3339Nano))
+		if err != nil || !claimed || running.State != runtimecontract.RuntimeDriveLeaseRunning {
+			t.Fatalf("seed running lease=%+v claimed=%v err=%v", running, claimed, err)
+		}
+
+		faultRepository := &failRuntimeLeaseRenewalRepository{delegate: baseRepository, remainingRenewalFailures: 1}
+		owner := newRuntimeTestOwner()
+		if err := owner.ConfigureRuntimeRepository(faultRepository); err != nil {
+			t.Fatal(err)
+		}
+		background := &recordingBackgroundRoutine{}
+		module := newTestBiz(owner, magicevent.NewHub(8), background)
+		t.Cleanup(func() { module.EventHub().Terminate(context.Background()) })
+		key := runtimeDriveKey(aggregate.Facts.WorkspaceID, aggregate.Facts.RunID)
+		if !module.beginRuntimeDrive(key) {
+			t.Fatal("running preflight fixture did not acquire gate")
+		}
+		module.runScheduledRuntimeDrive(ctx, scheduledRuntimeDriveRequest{
+			workspaceID: aggregate.Facts.WorkspaceID, runID: aggregate.Facts.RunID,
+			source: "preflight_running_recover_failure", driveKey: key,
+		})
+		persisted, err := baseRepository.Load(ctx, aggregate.Facts.WorkspaceID, aggregate.Facts.RunID)
+		if err != nil || faultRepository.renewalFailures != 1 || persisted.DriveLease == nil ||
+			persisted.DriveLease.State != runtimecontract.RuntimeDriveLeaseScheduled ||
+			persisted.DriveLease.RecoveryGeneration != running.RecoveryGeneration+1 ||
+			persisted.DriveLease.FailureSignature != running.FailureSignature ||
+			background.asyncFunctionCalls != 1 || background.lastAsyncFunction == nil {
+			t.Fatalf("running preflight recovery successor=%+v calls=%d failures=%d err=%v", persisted.DriveLease, background.asyncFunctionCalls, faultRepository.renewalFailures, err)
+		}
+		if module.beginRuntimeDrive(key) {
+			t.Fatal("running preflight recovery released active gate")
+		}
+	})
+
+	t.Run("scheduled mount rejection retains exact durable lease", func(t *testing.T) {
+		ctx := context.Background()
+		aggregate := runtimeAggregate(t, 1)
+		baseRepository := &inMemoryRuntimeStateRepository{aggregate: &aggregate}
+		seedOwner := newRuntimeTestOwner()
+		if err := seedOwner.ConfigureRuntimeRepository(baseRepository); err != nil {
+			t.Fatal(err)
+		}
+		seedHub := magicevent.NewHub(8)
+		t.Cleanup(func() { seedHub.Terminate(context.Background()) })
+		seedModule := newTestBiz(seedOwner, seedHub, nil)
+		lease, _, err := seedModule.runtimeScheduleDriveLease(ctx, aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, runtimecontract.RuntimeDriveLease{
+			WorkspaceID: aggregate.Facts.WorkspaceID, RunID: aggregate.Facts.RunID,
+			Reason: runtimecontract.RuntimeDriveLeaseReasonPersistedPending, FailureSignature: "preflight-scheduled-authority",
+			DueAt: time.Now().UTC().Add(time.Second).Format(time.RFC3339Nano),
+		}, 0)
+		if err != nil {
+			t.Fatal(err)
+		}
+		owner := newRuntimeTestOwner()
+		if err := owner.ConfigureRuntimeRepository(baseRepository); err != nil {
+			t.Fatal(err)
+		}
+		background := &recordingBackgroundRoutine{err: errors.New("injected timer mount rejection")}
+		hub := magicevent.NewHub(8)
+		t.Cleanup(func() { hub.Terminate(context.Background()) })
+		module := newTestBiz(owner, hub, background)
+		key := runtimeDriveKey(aggregate.Facts.WorkspaceID, aggregate.Facts.RunID)
+		if !module.beginRuntimeDrive(key) {
+			t.Fatal("scheduled preflight fixture did not acquire gate")
+		}
+		module.runScheduledRuntimeDrive(ctx, scheduledRuntimeDriveRequest{
+			workspaceID: aggregate.Facts.WorkspaceID, runID: aggregate.Facts.RunID,
+			source: "preflight_scheduled_mount_failure", driveKey: key,
+		})
+		persisted, err := baseRepository.Load(ctx, aggregate.Facts.WorkspaceID, aggregate.Facts.RunID)
+		if err != nil || persisted.StateRevision != lease.AggregateRevision || persisted.DriveLease == nil ||
+			!runtimecontract.SameRuntimeDriveLeaseIdentity(*persisted.DriveLease, lease) || background.asyncFunctionCalls != 2 {
+			t.Fatalf("scheduled mount failure rewrote authority: before=%+v after=%+v calls=%d err=%v", lease, persisted.DriveLease, background.asyncFunctionCalls, err)
+		}
+		if module.beginRuntimeDrive(key) {
+			t.Fatal("scheduled mount failure released active gate")
+		}
+	})
 }
 
 func runtimeBoundDefinitionClarificationAggregate(t *testing.T) runtime.RuntimeAggregate {
@@ -583,11 +964,11 @@ func TestRuntimeLifecycleOwnerDeliveryUsesPersistedLeaseWithoutTerminalBudget(t 
 		t.Fatal(err)
 	}
 	deliveryFailure := runtimeLifecycleOwnerDeliveryFailure(result, common.ErrConflict)
-	retry, fresh := module.handleScheduledRuntimeDriveFailure(ctx, scheduledRuntimeDriveRequest{
+	retry := module.handleScheduledRuntimeDriveFailure(ctx, scheduledRuntimeDriveRequest{
 		workspaceID: aggregate.Facts.WorkspaceID, runID: aggregate.Facts.RunID, source: "test", driveKey: runtimeDriveKey(aggregate.Facts.WorkspaceID, aggregate.Facts.RunID),
 	}, deliveryFailure)
-	if fresh || retry == nil || retry.Reason != runtimecontract.RuntimeDriveLeaseReasonDeliveryRetry {
-		t.Fatalf("lifecycle retry=%+v fresh=%v", retry, fresh)
+	if retry == nil || retry.Reason != runtimecontract.RuntimeDriveLeaseReasonDeliveryRetry {
+		t.Fatalf("lifecycle retry=%+v", retry)
 	}
 	if !module.scheduleRuntimeRecoveryLease(ctx, aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, *retry) {
 		t.Fatal("lifecycle retry lease was not persisted")
@@ -613,22 +994,21 @@ func TestRuntimeLifecycleOwnerDeliveryUsesPersistedLeaseWithoutTerminalBudget(t 
 	if err != nil || !claimedOK || claimed.State != runtimecontract.RuntimeDriveLeaseRunning {
 		t.Fatalf("claim lifecycle retry=%+v claimed=%v err=%v", claimed, claimedOK, err)
 	}
-	secondRetry, fresh := module.handleScheduledRuntimeDriveFailure(ctx, scheduledRuntimeDriveRequest{
+	secondRetry := module.handleScheduledRuntimeDriveFailure(ctx, scheduledRuntimeDriveRequest{
 		workspaceID: aggregate.Facts.WorkspaceID, runID: aggregate.Facts.RunID, source: "test", driveKey: runtimeDriveKey(aggregate.Facts.WorkspaceID, aggregate.Facts.RunID),
 		leaseGeneration: claimed.RecoveryGeneration,
 	}, deliveryFailure)
-	if fresh || secondRetry == nil {
-		t.Fatalf("second lifecycle retry=%+v fresh=%v", secondRetry, fresh)
+	if secondRetry == nil {
+		t.Fatalf("second lifecycle retry=%+v", secondRetry)
 	}
 	key := runtimeDriveKey(aggregate.Facts.WorkspaceID, aggregate.Facts.RunID)
 	if !module.beginRuntimeDrive(key) {
 		t.Fatal("second lifecycle retry did not acquire its drive gate")
 	}
-	freshActivationRequired := false
 	module.finishScheduledRuntimeDrive(ctx, scheduledRuntimeDriveRequest{
 		workspaceID: aggregate.Facts.WorkspaceID, runID: aggregate.Facts.RunID, source: "test", driveKey: key,
 		leaseGeneration: claimed.RecoveryGeneration,
-	}, &secondRetry, &freshActivationRequired)
+	}, &secondRetry)
 	renewed, err := owner.runtimeController.Load(ctx, aggregate.Facts.WorkspaceID, aggregate.Facts.RunID)
 	if err != nil || renewed.DriveLease == nil || renewed.DriveLease.State != runtimecontract.RuntimeDriveLeaseScheduled ||
 		renewed.DriveLease.RecoveryGeneration != claimed.RecoveryGeneration+1 || renewed.DriveLease.DueAt <= claimed.DueAt ||
@@ -684,10 +1064,9 @@ func TestRuntimeLifecycleLeasePersistedBehindDriveGateIsMountedByOwnerExit(t *te
 	// Model the old drive returning success. Its one exit path must retain the
 	// gate and mount the exact persisted generation before it can become free.
 	var retry *runtimeRecoveryLeaseRequest
-	freshActivationRequired := false
 	module.finishScheduledRuntimeDrive(ctx, scheduledRuntimeDriveRequest{
 		workspaceID: aggregate.Facts.WorkspaceID, runID: aggregate.Facts.RunID, source: "old_drive_success", driveKey: key,
-	}, &retry, &freshActivationRequired)
+	}, &retry)
 	if background.asyncFunctionCalls != 1 || background.lastAsyncFunction == nil {
 		t.Fatalf("gate owner did not mount persisted lease: calls=%d", background.asyncFunctionCalls)
 	}
@@ -781,10 +1160,9 @@ func TestRuntimeLifecycleLeaseSubmitterTakesGateWhenOldOwnerExitsBeforeLeaseCAS(
 	}()
 	<-repository.entered
 	var retry *runtimeRecoveryLeaseRequest
-	freshActivationRequired := false
 	module.finishScheduledRuntimeDrive(ctx, scheduledRuntimeDriveRequest{
 		workspaceID: aggregate.Facts.WorkspaceID, runID: aggregate.Facts.RunID, source: "old_drive_success_before_lease_cas", driveKey: key,
-	}, &retry, &freshActivationRequired)
+	}, &retry)
 	close(repository.release)
 	if err := <-done; err != nil {
 		t.Fatalf("lifecycle submitter did not take released gate: %v", err)
@@ -837,10 +1215,9 @@ func TestRuntimeLifecycleLeaseWinsWhenOldDriveAlsoRequestsRetry(t *testing.T) {
 		Reason: runtimecontract.RuntimeDriveLeaseReasonCASReload, FailureSignature: "old-drive/cas-retry",
 		Delay: time.Second, Source: "old_drive_retry",
 	}
-	freshActivationRequired := false
 	module.finishScheduledRuntimeDrive(ctx, scheduledRuntimeDriveRequest{
 		workspaceID: aggregate.Facts.WorkspaceID, runID: aggregate.Facts.RunID, source: "old_drive_retry", driveKey: key,
-	}, &oldDriveRetry, &freshActivationRequired)
+	}, &oldDriveRetry)
 	persisted, err := owner.runtimeController.Load(ctx, aggregate.Facts.WorkspaceID, aggregate.Facts.RunID)
 	if err != nil || persisted.DriveLease == nil || persisted.DriveLease.State != runtimecontract.RuntimeDriveLeaseScheduled ||
 		persisted.DriveLease.FailureSignature != lifecycleSignature || persisted.DriveLease.RecoveryGeneration != lifecycleGeneration ||
@@ -962,11 +1339,10 @@ func TestRuntimeDriveLeaseRenewalCASFailureCannotReleaseOrBypassRunningAuthority
 		Reason: runtimecontract.RuntimeDriveLeaseReasonDeliveryRetry, FailureSignature: "replacement-after-delivery-failure",
 		Delay: time.Second, Source: "renewal_fault",
 	}
-	freshActivationRequired := false
 	module.finishScheduledRuntimeDrive(ctx, scheduledRuntimeDriveRequest{
 		workspaceID: initial.Facts.WorkspaceID, runID: initial.Facts.RunID, source: "renewal_fault",
 		driveKey: key, leaseGeneration: running.RecoveryGeneration,
-	}, &retry, &freshActivationRequired)
+	}, &retry)
 	afterFailures, err := baseRepository.Load(ctx, initial.Facts.WorkspaceID, initial.Facts.RunID)
 	module.driveMu.Lock()
 	_, failedGateRetained := module.drivingRuns[key]
@@ -1488,10 +1864,9 @@ func TestRuntimeGovernanceContinuationSuccessHandoffRetainsDurableSingleSuccesso
 	lease = afterWrong.DriveLease.Clone()
 
 	var retry *runtimeRecoveryLeaseRequest
-	freshActivationRequired := false
 	module.finishScheduledRuntimeDrive(ctx, scheduledRuntimeDriveRequest{
 		workspaceID: facts.WorkspaceID, runID: facts.RunID, source: "old_wait_ack_success", driveKey: driveKey,
-	}, &retry, &freshActivationRequired)
+	}, &retry)
 	if background.asyncFunctionCalls != 1 || background.lastAsyncFunction == nil {
 		t.Fatalf("old gate exit did not mount the durable successor: calls=%d", background.asyncFunctionCalls)
 	}
@@ -1866,10 +2241,9 @@ func TestRuntimeGovernanceFailureUsesAtomicTerminalSuccessorAcrossPartialAckAndR
 	}
 
 	var retry *runtimeRecoveryLeaseRequest
-	freshActivationRequired := false
 	module.finishScheduledRuntimeDrive(ctx, scheduledRuntimeDriveRequest{
 		workspaceID: facts.WorkspaceID, runID: facts.RunID, source: "old_governance_wait_terminal", driveKey: driveKey,
-	}, &retry, &freshActivationRequired)
+	}, &retry)
 	if background.asyncFunctionCalls != 1 || background.lastAsyncFunction == nil {
 		t.Fatalf("old gate exit did not mount terminal successor: calls=%d", background.asyncFunctionCalls)
 	}

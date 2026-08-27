@@ -20,6 +20,63 @@ func TestStateLikeNameRequiresExplicitStateVocabularySuffix(t *testing.T) {
 	}
 }
 
+func TestVerifyRequiresInventoryForBareStateLikeStringFieldInOwnerModel(t *testing.T) {
+	root := writeBareOwnerModelFixture(t)
+	err := verify(root, "scripts/state-model-owners.manifest", "scripts/state-transition-owners.manifest")
+	if err == nil || !strings.Contains(err.Error(), "model.go:Snapshot.Status") {
+		t.Fatalf("verify error = %v, want uninventoried owner-model field rejection", err)
+	}
+}
+
+func TestVerifyRequiresInventoryForNullableBareStateLikeStringFieldInOwnerModel(t *testing.T) {
+	root := writeBareOwnerModelFixtureWithField(t, "Status *string")
+	err := verify(root, "scripts/state-model-owners.manifest", "scripts/state-transition-owners.manifest")
+	if err == nil || !strings.Contains(err.Error(), "model.go:Snapshot.Status") {
+		t.Fatalf("verify error = %v, want uninventoried nullable owner-model field rejection", err)
+	}
+}
+
+func TestVerifyAllowsOnlyExplicitNonAuthorityClassificationsForBareOwnerModelField(t *testing.T) {
+	for _, classification := range []string{"immutable_outcome", "immutable_trace", "derived_projection"} {
+		t.Run(classification, func(t *testing.T) {
+			root := writeBareOwnerModelFixture(t)
+			row := "internal/modules/blocks/demo/pkg/models/model.go|Snapshot.Status|" + classification + "|internal/modules/blocks/demo|-\n"
+			if err := os.WriteFile(filepath.Join(root, "scripts/state-model-owners.manifest"), []byte(row), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			if err := verify(root, "scripts/state-model-owners.manifest", "scripts/state-transition-owners.manifest"); err != nil {
+				t.Fatalf("explicit %s bare-field classification rejected: %v", classification, err)
+			}
+		})
+	}
+}
+
+func TestVerifyRequiresNamedTypeForTransitionBearingOwnerModelField(t *testing.T) {
+	root := writeBareOwnerModelFixture(t)
+	row := "internal/modules/blocks/demo/pkg/models/model.go|Snapshot.Status|owner_private_state|internal/modules/blocks/demo|-\n"
+	if err := os.WriteFile(filepath.Join(root, "scripts/state-model-owners.manifest"), []byte(row), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	err := verify(root, "scripts/state-model-owners.manifest", "scripts/state-transition-owners.manifest")
+	if err == nil || !strings.Contains(err.Error(), "use a named state type for transition authority") {
+		t.Fatalf("verify error = %v, want named transition-state type rejection", err)
+	}
+}
+
+func TestVerifyDoesNotInventoryBareStateFieldsOutsideOwnerModels(t *testing.T) {
+	root := newEmptyVerificationRepository(t)
+	path := filepath.Join(root, "internal/modules/blocks/demo/pkg/events/snapshot.go")
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte("package events\ntype Snapshot struct { Status string }\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := verify(root, "scripts/state-model-owners.manifest", "scripts/state-transition-owners.manifest"); err != nil {
+		t.Fatalf("non-owner-model observation must stay outside persistent inventory: %v", err)
+	}
+}
+
 func TestTargetStateFieldRequiresOwnerPrivateTransition(t *testing.T) {
 	for _, name := range []string{"State", "NextState", "TargetState", "DesiredState", "InitialState", "TransitionState", "RequestedTargetState"} {
 		if !isTargetStateField(name) {
@@ -825,6 +882,24 @@ func newEmptyVerificationRepository(t *testing.T) string {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(root, "scripts/state-transition-owners.manifest"), nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	return root
+}
+
+func writeBareOwnerModelFixture(t *testing.T) string {
+	t.Helper()
+	return writeBareOwnerModelFixtureWithField(t, "Status string")
+}
+
+func writeBareOwnerModelFixtureWithField(t *testing.T, field string) string {
+	t.Helper()
+	root := newEmptyVerificationRepository(t)
+	path := filepath.Join(root, "internal/modules/blocks/demo/pkg/models/model.go")
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte("package models\ntype Snapshot struct { "+field+" }\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	return root

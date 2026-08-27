@@ -184,7 +184,7 @@ func TestGovernanceRecoversOwnerCommitAfterFinalTraceWriteFailure(t *testing.T) 
 	}
 	traceID := autoGovernanceApprovalTraceID(fixture.workspaceID, fixture.runID, fixture.approvalID)
 	trace, err := inner.Get(fixture.context, traceID)
-	if err != nil || trace.Status != autoGovernanceStatusResolving {
+	if err != nil || trace.Status != governancemodel.AutoGovernanceTraceStateResolving {
 		t.Fatalf("trace before recovery = %+v, err=%v", trace, err)
 	}
 
@@ -192,7 +192,7 @@ func TestGovernanceRecoversOwnerCommitAfterFinalTraceWriteFailure(t *testing.T) 
 		t.Fatalf("reconcile incomplete traces: %v", err)
 	}
 	trace, err = inner.Get(fixture.context, traceID)
-	if err != nil || trace.Status != autoGovernanceStatusResolved || trace.Action != "approve" {
+	if err != nil || trace.Status != governancemodel.AutoGovernanceTraceStateResolved || trace.Action != "approve" {
 		t.Fatalf("trace after recovery = %+v, err=%v", trace, err)
 	}
 	if got := fixture.resolveCount.Load(); got != 1 {
@@ -233,7 +233,7 @@ func TestGovernanceKeepsApprovalTraceResolvingWhileOwnerDeliveryRecovers(t *test
 	if err != nil {
 		t.Fatal(err)
 	}
-	if trace.Status != autoGovernanceStatusResolving || trace.PolicyBlocked != "" {
+	if trace.Status != governancemodel.AutoGovernanceTraceStateResolving || trace.PolicyBlocked != "" {
 		t.Fatalf("trace during owner recovery = %+v, want resolving and open", trace)
 	}
 	closed, err := fixture.service.hasClosedApprovalTrace(fixture.context, fixture.workspaceID, fixture.runID, fixture.approvalID)
@@ -258,7 +258,7 @@ func TestGovernanceKeepsApprovalTraceResolvingWhileOwnerDeliveryRecovers(t *test
 		t.Fatalf("reconcile delivered approval trace: %v", err)
 	}
 	trace, err = inner.Get(fixture.context, traceID)
-	if err != nil || trace.Status != autoGovernanceStatusResolved || trace.Action != "approve" {
+	if err != nil || trace.Status != governancemodel.AutoGovernanceTraceStateResolved || trace.Action != "approve" {
 		t.Fatalf("recovered trace = %+v err=%v, want resolved approve", trace, err)
 	}
 }
@@ -281,12 +281,12 @@ func TestGovernanceTraceIdentityAndBudgetAreWorkspaceScoped(t *testing.T) {
 	mustNoErr(t, traces.Upsert(ctx, &governancemodel.AutoGovernanceTrace{
 		ID: ticketTraceID, WorkspaceID: workspaceA, RunID: runID,
 		ItemType: "ticket", ItemID: itemID, Action: "answer",
-		Status: autoGovernanceStatusResolved, OccurredAt: nowUTC(),
+		Status: governancemodel.AutoGovernanceTraceStateResolved, OccurredAt: nowUTC(),
 	}))
 	mustNoErr(t, traces.Upsert(ctx, &governancemodel.AutoGovernanceTrace{
 		ID: approvalTraceID, WorkspaceID: workspaceA, RunID: runID,
 		ItemType: "approval", ItemID: itemID, Action: "approve",
-		Status: autoGovernanceStatusResolved, OccurredAt: nowUTC(),
+		Status: governancemodel.AutoGovernanceTraceStateResolved, OccurredAt: nowUTC(),
 	}))
 
 	countA, err := service.countResolvedTicketTraces(ctx, workspaceA, runID)

@@ -85,8 +85,8 @@ func TestProviderCeilingTransientOpensPersistedWaitAndResumeCannotProbe(t *testi
 	if err != nil {
 		t.Fatal(err)
 	}
-	retry, fresh := module.handleScheduledRuntimeDriveFailure(ctx, scheduledRuntimeDriveRequest{workspaceID: waiting.Facts.WorkspaceID, runID: waiting.Facts.RunID, source: "test"}, &runtimeRecoverableWaitPendingError{Wait: view})
-	if fresh || retry == nil || retry.Reason != runtimecontract.RuntimeDriveLeaseReasonRecoverableWait || retry.FailureSignature != "recoverable-wait/"+view.WaitID || retry.Delay <= 0 || retry.Delay > time.Minute {
-		t.Fatalf("recoverable wait retry=%+v fresh=%v", retry, fresh)
+	retry := module.handleScheduledRuntimeDriveFailure(ctx, scheduledRuntimeDriveRequest{workspaceID: waiting.Facts.WorkspaceID, runID: waiting.Facts.RunID, source: "test"}, &runtimeRecoverableWaitPendingError{Wait: view})
+	if retry == nil || retry.Reason != runtimecontract.RuntimeDriveLeaseReasonRecoverableWait || retry.FailureSignature != "recoverable-wait/"+view.WaitID || retry.Delay <= 0 || retry.Delay > time.Minute {
+		t.Fatalf("recoverable wait retry=%+v", retry)
 	}
 }

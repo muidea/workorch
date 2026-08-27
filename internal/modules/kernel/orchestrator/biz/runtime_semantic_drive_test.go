@@ -17,6 +17,23 @@ import (
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
+type countingRuntimeSemanticDriveRepository struct {
+	delegate *runtimeDriveRepository
+	saves    int
+}
+
+func (r *countingRuntimeSemanticDriveRepository) Load(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID) (runtime.RuntimeAggregate, error) {
+	return r.delegate.Load(ctx, workspaceID, runID)
+}
+
+func (r *countingRuntimeSemanticDriveRepository) Save(ctx context.Context, aggregate runtime.RuntimeAggregate, expectedRevision uint64) error {
+	if err := r.delegate.Save(ctx, aggregate, expectedRevision); err != nil {
+		return err
+	}
+	r.saves++
+	return nil
+}
+
 func TestRuntimeSemanticPrerequisitePathUsesCapabilityStateBeforeAdmissibility(t *testing.T) {
 	pending := []runtimecontract.RuntimePrerequisite{
 		{ID: "git-admissibility", Kind: runtimecontract.PrerequisiteKindOperationAdmissibility, OwnerModuleID: runtimecontract.RuntimeModuleGit},
@@ -73,6 +90,388 @@ func TestRuntimeSemanticActiveFeasibilityDocumentUsesBoundedBatch(t *testing.T) 
 	})
 	if !found || document.PlanStep != runtimecontract.RuntimeSemanticPlanStepProofBatch || len(document.Proposals) != 1 || document.Proposals[0].CoverageWorkItemID != "cwi-001" {
 		t.Fatalf("active feasibility document = %+v found=%t, want bounded proof batch", document, found)
+	}
+}
+
+func TestRuntimeSemanticOrderAcceptedRetirementHandsRequiredPhaseBackToOuterDrive(t *testing.T) {
+	ctx := context.Background()
+	aggregate := runtimeAggregate(t, 1)
+	const dependentID common.CoverageWorkItemID = "cwi-dependent"
+	dependentFocus := aggregate.Facts.Focus.Normalized()
+	dependentFocus.ID = "focus-dependent"
+	dependentFocus.CoverageWorkItemIDs = []common.CoverageWorkItemID{dependentID}
+	dependentFocus.CoverageEvidenceBindings = nil
+	aggregate.Facts.RemainingFocuses = []runtimecontract.CoverageFocus{dependentFocus}
+	aggregate.Facts.Coverage = append(aggregate.Facts.Coverage, runtimecontract.RuntimeCoverageItemFact{
+		ID: dependentID, SliceID: dependentFocus.SliceID, SourceScope: "dodItem", SourceID: "dod-dependent",
+		TargetText: "deliver dependent coverage", State: runtimecontract.RuntimeCoverageItemStateOpen,
+		PrerequisiteCoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-v2"},
+	})
+	// Re-enter the test activation constructor so both CWI rows receive the
+	// same canonical initialization as production before the first manifest is
+	// sealed. The dependent is blocked and therefore absent from that manifest.
+	aggregate.Facts.CWILedgerSchemaVersion = ""
+	aggregate.SemanticPlanning = runtimecontract.RuntimeSemanticPlanningLedger{}
+	aggregate = runtimeTestAggregateWithSemanticPlanning(t, aggregate)
+	if aggregate.SemanticPlanning.Manifest == nil || len(aggregate.SemanticPlanning.Manifest.CoverageItems) != 1 ||
+		aggregate.SemanticPlanning.Manifest.CoverageItems[0].ID != "cwi-v2" || len(aggregate.Facts.RemainingFocuses) != 1 {
+		t.Fatalf("stale-order fixture did not seal only prerequisite CWI: ledger=%+v focuses=%+v", aggregate.SemanticPlanning, aggregate.Facts.RemainingFocuses)
+	}
+
+	sealedLedger := aggregate.SemanticPlanning.Clone()
+	order := sealedLedger.CoverageOrderDocument.Clone()
+	manifest := sealedLedger.Manifest.Clone()
+	orderLedger := runtimecontract.RuntimeSemanticPlanningLedger{
+		SchemaVersion: sealedLedger.SchemaVersion, Phase: runtimecontract.RuntimeSemanticPlanningOrderAccepted,
+		DefinitionSeed: sealedLedger.DefinitionSeed.Clone(), Manifest: &manifest,
+		StablePrefixHash: sealedLedger.StablePrefixHash, LogicalRequestID: "stale-order-request",
+		CoverageOrderDocument: &order, Document: &order,
+		DocumentHash:       runtimecontract.StableRuntimeSemanticPlanDocumentHash(order),
+		PendingCoverageIDs: append([]common.CoverageWorkItemID(nil), order.CoverageOrder...),
+	}
+	if err := orderLedger.Validate(); err != nil {
+		t.Fatalf("stale-order ledger fixture: %v", err)
+	}
+
+	// Model the owner-local cut point immediately before EligibleFocusProjected:
+	// the prerequisite binding is durably settled and the dependent is now the
+	// unbound current focus, while the previously accepted order is still the
+	// active semantic generation.
+	settledFocus := aggregate.Facts.Focus.Normalized()
+	dependentFocus = aggregate.Facts.RemainingFocuses[0].Normalized()
+	dependentFocus.ID = "semantic-pending/" + string(dependentID)
+	dependentFocus.CoverageEvidenceBindings = nil
+	aggregate.Facts.Focus = dependentFocus
+	aggregate.Facts.RemainingFocuses = nil
+	aggregate.Facts.CompletedFocuses = append(aggregate.Facts.CompletedFocuses, settledFocus)
+	for index := range aggregate.Facts.Coverage {
+		item := &aggregate.Facts.Coverage[index]
+		switch item.ID {
+		case "cwi-v2":
+			item.State = runtimecontract.RuntimeCoverageItemStateSatisfied
+			item.CWIConvergenceState = runtimecontract.RuntimeCWIConvergenceStateSettled
+		case dependentID:
+			item.FocusID = dependentFocus.ID
+			item.CWIConvergenceState = runtimecontract.RuntimeCWIConvergenceStatePlanning
+		}
+	}
+	aggregate.SemanticPlanning = orderLedger
+	facts, decision, err := runtime.ReduceRuntimeStateWithDirective(aggregate.Facts, nil, aggregate.CoverageProofLineage)
+	if err != nil {
+		t.Fatalf("reduce stale-order cut point: %v", err)
+	}
+	aggregate.Facts, aggregate.Decision = facts, decision
+	if err := aggregate.Validate(); err != nil {
+		t.Fatalf("stale-order cut point is invalid: %v", err)
+	}
+
+	repository := &runtimeDriveRepository{aggregate: aggregate}
+	owner := newRuntimeTestOwner()
+	if err := owner.ConfigureRuntimeRepository(repository); err != nil {
+		t.Fatal(err)
+	}
+	hub := magicevent.NewHub(8)
+	t.Cleanup(func() { hub.Terminate(ctx) })
+	module := newTestBiz(owner, hub, nil)
+
+	beforeRevision := aggregate.StateRevision
+	retired, err := module.driveRuntimeSemanticOrderAccepted(ctx, aggregate, orderLedger)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if retired.StateRevision != beforeRevision+1 || retired.SemanticPlanning.Phase != runtimecontract.RuntimeSemanticPlanningRequired ||
+		retired.SemanticPlanning.Manifest != nil || len(retired.SemanticPlanning.History) != 1 ||
+		retired.SemanticPlanning.History[0].Reason != runtimecontract.RuntimeSemanticPlanningRetirementEligibleClosureChanged ||
+		len(retired.SemanticPlanning.History[0].ChangedCoverageIDs) != 1 || retired.SemanticPlanning.History[0].ChangedCoverageIDs[0] != dependentID {
+		t.Fatalf("post-event semantic retirement was not handed to outer drive: %+v", retired.SemanticPlanning)
+	}
+
+	// A stale replay is rejected by the private event identity fence and cannot
+	// append a second retirement or mutate the persisted revision.
+	if _, err := module.driveRuntimeSemanticOrderAccepted(ctx, aggregate, orderLedger); err == nil || !strings.Contains(err.Error(), "stale") {
+		t.Fatalf("stale semantic order replay error = %v", err)
+	}
+	persisted, err := repository.Load(ctx, aggregate.Facts.WorkspaceID, aggregate.Facts.RunID)
+	if err != nil || persisted.StateRevision != retired.StateRevision || len(persisted.SemanticPlanning.History) != 1 {
+		t.Fatalf("stale replay mutated retired generation: aggregate=%+v err=%v", persisted.SemanticPlanning, err)
+	}
+}
+
+func TestRuntimeSemanticOrderAcceptedValidationRepairIgnoresUnrelatedEligibleClosureOnRedrive(t *testing.T) {
+	ctx := context.Background()
+	convergence := runtimecontract.RuntimeValidationFailureRepairConvergence{
+		ID:                                        "incident-validation-repair",
+		TriggerOwnerModuleID:                      runtimecontract.RuntimeModuleShell,
+		TriggerOperationKind:                      runtimecontract.RuntimeBlockKindManagedValidationSession,
+		TriggerDiagnosticClasses:                  []string{runtimecontract.ValidationDiagnosticBuildFailed},
+		RepairEvidenceKind:                        runtimecontract.EvidenceKindStateChange,
+		RepairOwnerModuleID:                       runtimecontract.RuntimeModuleFile,
+		RepairOperationKinds:                      []string{runtimecontract.StepKindFileWrite},
+		RepairTargetPolicy:                        runtimecontract.RuntimeOperationTargetPolicyProspectiveOwnerTarget,
+		RepairTargetRole:                          "implementation",
+		RepairDeclarationTargetSelectorRef:        "profile/workspace-deliverable",
+		RepairDeclarationTargetSelectorOwnerRef:   "incident-profile",
+		RepairDeclarationTargetSelectorSubjectRef: "dodItem/cwi-001",
+		RepairOperationTargetSelectorRef:          "file/workspace-relative-new-target",
+		RequireFreshValidation:                    true,
+		MaxAttempts:                               2,
+	}
+	if err := convergence.Validate(); err != nil {
+		t.Fatal(err)
+	}
+
+	bootstrap := runtimeBootstrap()
+	coverageIDs := []common.CoverageWorkItemID{"cwi-001", "cwi-002", "cwi-003", "cwi-004"}
+	bootstrap.Definition.CapabilityContract = []string{runtimecontract.StepKindFileWrite, runtimecontract.RuntimeBlockKindManagedValidationSession}
+	bootstrap.DefinitionFocuses = make([]runtimecontract.RuntimeDefinitionFocus, 0, len(coverageIDs))
+	bootstrap.CoverageItems = make([]runtimecontract.RuntimeCoverageItem, 0, len(coverageIDs))
+	bootstrap.Slices[0].CoverageWorkItemIDs = append([]common.CoverageWorkItemID(nil), coverageIDs...)
+	bootstrap.Slices[0].RequiredEvidenceKinds = []string{runtimecontract.EvidenceKindStateChange, runtimecontract.EvidenceKindValidation}
+	for index, coverageID := range coverageIDs {
+		focus := runtimecontract.RuntimeDefinitionFocus{
+			ID: "incident-focus-" + string(coverageID), SliceID: bootstrap.Slices[0].ID,
+			CoverageWorkItemIDs:   []common.CoverageWorkItemID{coverageID},
+			RequiredEvidenceKinds: []string{runtimecontract.EvidenceKindStateChange},
+		}
+		if index == 0 {
+			focus.RequiredEvidenceKinds = []string{runtimecontract.EvidenceKindValidation}
+			focus.AssessmentScope = "dodItem"
+			focus.AssessmentID = "dod/cwi-001"
+			focus.AssessmentText = "validation succeeds"
+			focus.ValidationFailureRepairConvergence = &convergence
+		}
+		bootstrap.DefinitionFocuses = append(bootstrap.DefinitionFocuses, focus)
+		bootstrap.CoverageItems = append(bootstrap.CoverageItems, runtimecontract.RuntimeCoverageItem{
+			ID: coverageID, SliceID: bootstrap.Slices[0].ID, SourceScope: "dodItem", SourceID: "dod/" + string(coverageID), Order: index + 1,
+		})
+	}
+	bootstrap.Requirements = nil
+	bootstrap = runtimeTestBootstrapWithBindings(bootstrap)
+	facts, err := bootstrap.InitialFacts("ws-repair-scope", "run-repair-scope")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	fileCatalog := runtimecontract.RuntimeOperationAdmissibility{
+		PrerequisiteID: "file-repair-catalog", OwnerModuleID: runtimecontract.RuntimeModuleFile,
+		OperationKinds: []string{runtimecontract.StepKindFileWrite},
+		SelectorRefs:   []string{"file/workspace-relative-new-target"},
+		ConstraintRefs: []string{"workspace-relative-path", "new-target-requires-owner-selector"},
+		OperationVariants: []runtimecontract.RuntimeOperationAdmissibilityVariant{{
+			Kind: runtimecontract.StepKindFileWrite,
+			AllowedTargetPolicies: []runtimecontract.RuntimeOperationTargetPolicy{
+				runtimecontract.RuntimeOperationTargetPolicyProspectiveOwnerTarget,
+			},
+			SelectorRefs: []string{"file/workspace-relative-new-target"}, ConstraintRefs: []string{"workspace-relative-path", "new-target-requires-owner-selector"},
+		}},
+		ObservedRevision: "file-repair-revision",
+	}
+	fileCatalog.SnapshotID = runtimecontract.StableRuntimeOperationAdmissibilitySnapshotID(fileCatalog)
+	shellCatalog := runtimecontract.RuntimeOperationAdmissibility{
+		PrerequisiteID: "shell-validation-catalog", OwnerModuleID: runtimecontract.RuntimeModuleShell,
+		OperationKinds: []string{runtimecontract.RuntimeBlockKindManagedValidationSession}, TargetRefs: []string{"main.go"},
+		ValidationRecipes: []runtimecontract.RuntimeValidationRecipe{{ID: "incident-managed-validation", Command: "true"}},
+		ValidationSurfaces: []runtimecontract.RuntimeValidationSurface{{
+			ID: "incident-managed-validation", OwnerModuleID: runtimecontract.RuntimeModuleShell,
+			OperationKind: runtimecontract.RuntimeBlockKindManagedValidationSession,
+			Readiness:     runtimecontract.RuntimeValidationSurfaceReady, InputSchemaHash: "incident-validation-input-v1",
+			InputBindingRef: "incident-validation-input", CheckRefs: []string{"check/incident-validation"},
+			ProofApplicability: runtimecontract.RuntimeValidationProofDirect, EffectScope: runtimecontract.RuntimeEffectEphemeralSession,
+			IdempotencyClass: runtimecontract.RuntimeOperationIdempotencySafeToReplay,
+		}},
+		ObservedRevision: "shell-validation-revision",
+	}
+	shellCatalog.SnapshotID = runtimecontract.StableRuntimeOperationAdmissibilitySnapshotID(shellCatalog)
+	facts.Resources.OperationAdmissibilities = []runtimecontract.RuntimeOperationAdmissibility{fileCatalog, shellCatalog}
+	facts.Capabilities.StateChangeKinds = []string{runtimecontract.StepKindFileWrite}
+	facts.Capabilities.ValidationKinds = []string{runtimecontract.RuntimeBlockKindManagedValidationSession}
+	facts.Resources.ProviderCeiling = &runtimecontract.ProviderCeiling{
+		Selection:           facts.Activation.ProviderSelection,
+		ContextWindowTokens: 32768, ProviderMaxOutputTokens: 8192, EffectiveMaxOutputTokens: 4096,
+		MaxInputTokens: 28672, MaxBytes: 128 * 1024, CapabilityRevision: "incident-capability-v1", ConfigurationRevision: "incident-config-v1",
+	}
+	facts.Prerequisites.Pending = nil
+	facts.Prerequisites.Satisfied = nil
+	facts.Resources.PrerequisiteObservations = nil
+	for _, catalog := range facts.Resources.OperationAdmissibilities {
+		prerequisite := runtimeOperationAdmissibilityPrerequisite(catalog)
+		observation := runtimecontract.RuntimePrerequisiteObservation{
+			PrerequisiteID: prerequisite.ID, Kind: prerequisite.Kind, OwnerModuleID: prerequisite.OwnerModuleID,
+			ContentHash: catalog.SnapshotID, Dependencies: []runtimecontract.RuntimeFreshnessDependency{{
+				Domain: runtimecontract.RuntimeResourceOwnerCatalog, OwnerModuleID: catalog.OwnerModuleID,
+				SubjectRef: catalog.PrerequisiteID, Revision: catalog.ObservedRevision,
+			}},
+		}
+		observation.ObservationID = runtimecontract.StableRuntimePrerequisiteObservationID(observation)
+		facts.Prerequisites.Satisfied = append(facts.Prerequisites.Satisfied, prerequisite)
+		facts.Resources.PrerequisiteObservations = append(facts.Resources.PrerequisiteObservations, observation)
+	}
+	facts = facts.Normalized()
+
+	baseRepository := &runtimeDriveRepository{}
+	controller, err := runtime.NewRuntimeController(baseRepository)
+	if err != nil {
+		t.Fatal(err)
+	}
+	aggregate, err := runtimeTestControllerInitialize(controller, ctx, facts, bootstrap.Definition, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	eligible := runtimecontract.RuntimeCWIsEligibleForPlanning(aggregate.Facts)
+	if len(eligible) != len(coverageIDs) {
+		t.Fatalf("incident fixture globally eligible CWI = %v, want %v", eligible, coverageIDs)
+	}
+	repairInput := runtimecontract.RuntimeValidationFailureRepairGenerationInput{
+		CoverageWorkItemID: "cwi-001", FailedFocusID: "incident-focus-cwi-001", FailureSignature: "incident-validation-failure",
+		TriggerOwnerModuleID: runtimecontract.RuntimeModuleShell, TriggerOperationKind: runtimecontract.RuntimeBlockKindManagedValidationSession,
+		TriggerDiagnosticClass: runtimecontract.ValidationDiagnosticBuildFailed,
+	}
+	manifest, err := runtimecontract.CompileRuntimeSemanticPlanManifestForCoverageWithValidationFailureRepair(
+		aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, aggregate.Definition, aggregate.Facts.DefinitionSeed,
+		aggregate.Facts.DefinitionFocuses, aggregate.Facts.Activation.ExecutionContract,
+		aggregate.Facts.Resources.OperationAdmissibilities, []common.CoverageWorkItemID{"cwi-001"}, repairInput,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	order := runtimecontract.RuntimeSemanticPlanDocument{
+		SchemaVersion: runtimecontract.RuntimeSemanticPlanDocumentSchemaCurrent,
+		ManifestHash:  manifest.Hash, DefinitionSeedHash: manifest.DefinitionSeedHash,
+		PlanStep: runtimecontract.RuntimeSemanticPlanStepCoverageOrder, CoverageOrder: []common.CoverageWorkItemID{"cwi-001"},
+	}
+	if err := order.ValidateAgainstManifest(manifest); err != nil {
+		t.Fatal(err)
+	}
+	orderLedger := aggregate.SemanticPlanning.Clone()
+	orderLedger.Phase = runtimecontract.RuntimeSemanticPlanningOrderAccepted
+	orderLedger.Manifest = &manifest
+	orderLedger.StablePrefixHash = "incident-repair-prefix"
+	orderLedger.LogicalRequestID = "incident-repair-order-request"
+	orderLedger.CoverageOrderDocument = &order
+	orderLedger.Document = &order
+	orderLedger.DocumentHash = runtimecontract.StableRuntimeSemanticPlanDocumentHash(order)
+	orderLedger.PendingCoverageIDs = append([]common.CoverageWorkItemID(nil), order.CoverageOrder...)
+	if err := orderLedger.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	aggregate.SemanticPlanning = orderLedger
+	if err := aggregate.Validate(); err != nil {
+		t.Fatalf("incident repair aggregate: %v", err)
+	}
+	baseRepository.aggregate = aggregate
+
+	countingRepository := &countingRuntimeSemanticDriveRepository{delegate: baseRepository}
+	owner := newRuntimeTestOwner()
+	if err := owner.ConfigureRuntimeRepository(countingRepository); err != nil {
+		t.Fatal(err)
+	}
+	hub := magicevent.NewHub(16)
+	t.Cleanup(func() { hub.Terminate(ctx) })
+	providerCalls := 0
+	providerObserver := magicevent.NewSimpleObserver(runtimecontract.RuntimeModuleLLM, hub)
+	providerObserver.Subscribe(llmevents.TopicRequestRuntimeCandidate, func(event magicevent.Event, result magicevent.Result) {
+		providerCalls++
+		command, ok := event.Data().(llmevents.RequestRuntimeCandidateCommand)
+		if !ok || command.DocumentKind != runtimecontract.RuntimeProviderDocumentSemanticPlan || command.SemanticContext.PlanStep != runtimecontract.RuntimeSemanticPlanStepProofBatch {
+			t.Errorf("unexpected repair provider command: %+v", event.Data())
+			result.Set(llmevents.RequestRuntimeCandidateResult{}, nil)
+			return
+		}
+		repair := command.SemanticManifest.ProofObligations[0].ValidationFailureRepair.Normalized()
+		document := runtimecontract.RuntimeSemanticPlanDocument{
+			SchemaVersion: runtimecontract.RuntimeSemanticPlanDocumentSchemaCurrent,
+			ManifestHash:  command.SemanticManifest.Hash, DefinitionSeedHash: command.SemanticManifest.DefinitionSeedHash,
+			PlanStep: runtimecontract.RuntimeSemanticPlanStepProofBatch,
+			BatchID:  command.SemanticContext.BatchID, BatchSequence: command.SemanticContext.BatchSequence,
+			BatchCoverageWorkItemIDs: append([]common.CoverageWorkItemID(nil), command.SemanticContext.BatchCoverageWorkItemIDs...),
+			Proposals: []runtimecontract.RuntimeSemanticProofProposal{{
+				CoverageWorkItemID: "cwi-001", OwnerModuleID: repair.RepairOwnerModuleID,
+				OperationKind: repair.RepairOperationKinds[0],
+				Target: runtimecontract.RuntimeOperationTargetAuthorization{
+					Policy: repair.RepairTargetPolicy, OwnerSelectorRefs: []string{repair.RepairOperationTargetSelectorRef},
+					ProspectiveConstraintRefs: append([]string(nil), repair.RepairConstraintRefs...), ProspectiveTargetRefs: []string{"main.go"},
+				},
+				RequiredEvidenceKinds: []string{runtimecontract.EvidenceKindStateChange},
+				RequiredEffectScopes:  []runtimecontract.RuntimeEffectScope{runtimecontract.RuntimeEffectWorkspaceDurable},
+				DeclarationRef:        repair.ConvergenceID,
+			}},
+		}
+		payload, encodeErr := runtimecontract.EncodeRuntimeSemanticPlanPayloadWithManifest(command.SemanticManifest, document)
+		if encodeErr != nil {
+			t.Errorf("encode repair semantic document: %v", encodeErr)
+			result.Set(llmevents.RequestRuntimeCandidateResult{}, nil)
+			return
+		}
+		result.Set(runtimeProviderResultWithAuditForTest(command, llmevents.RequestRuntimeCandidateResult{
+			DocumentKind: command.DocumentKind, RequestIdentity: command.RequestIdentity,
+			ExpectedDocumentHash: command.ExpectedDocument.Hash, DocumentOutcome: runtimeCompleteDocumentOutcome(command.ExpectedDocument, payload),
+		}), nil)
+	})
+	t.Cleanup(func() { providerObserver.Unsubscribe(llmevents.TopicRequestRuntimeCandidate) })
+	module := newTestBiz(owner, hub, nil)
+
+	initialGenerationID := runtimecontract.StableRuntimeSemanticGenerationID(manifest.Hash, orderLedger.LogicalRequestID)
+	projected, err := module.submitRuntimeInternalEvent(ctx, runtime.RuntimeInternalEvent{
+		Kind:  runtime.RuntimeInternalEventEligibleFocusProjected,
+		Scope: runtime.RuntimeInternalEventScope{WorkspaceID: aggregate.Facts.WorkspaceID, RunID: aggregate.Facts.RunID},
+		Authority: &runtime.RuntimeInternalAuthorityPayload{
+			SemanticOrderManifestHash: manifest.Hash,
+			SemanticCoverageOrder:     append([]common.CoverageWorkItemID(nil), order.CoverageOrder...),
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	projectedLedger := projected.Aggregate.SemanticPlanning.Clone()
+	if projected.Aggregate.StateRevision != aggregate.StateRevision || projectedLedger.Phase != runtimecontract.RuntimeSemanticPlanningOrderAccepted ||
+		projectedLedger.Manifest == nil || projectedLedger.Manifest.Hash != manifest.Hash || len(projectedLedger.History) != 0 ||
+		runtimecontract.StableRuntimeSemanticGenerationID(projectedLedger.Manifest.Hash, projectedLedger.LogicalRequestID) != initialGenerationID ||
+		countingRepository.saves != 0 {
+		t.Fatalf("repair eligible-focus projection changed generation: ledger=%+v saves=%d", projectedLedger, countingRepository.saves)
+	}
+
+	batched, err := module.driveRuntimeSemanticOrderAccepted(ctx, aggregate, orderLedger)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if batched.SemanticPlanning.Phase != runtimecontract.RuntimeSemanticPlanningProofBatchRequestOpen || batched.SemanticPlanning.Manifest == nil ||
+		batched.SemanticPlanning.Manifest.Hash != manifest.Hash || len(batched.SemanticPlanning.History) != 0 || len(batched.SemanticPlanning.Batches) != 1 ||
+		batched.SemanticPlanning.ActiveBatchID == "" || batched.SemanticPlanning.Batches[0].RequestLogicalID == "" ||
+		len(batched.SemanticPlanning.Batches[0].CoverageWorkItemIDs) != 1 || batched.SemanticPlanning.Batches[0].CoverageWorkItemIDs[0] != "cwi-001" ||
+		len(batched.CandidateRequestSessions) != 0 || providerCalls != 0 || countingRepository.saves != 1 || initialGenerationID == "" {
+		t.Fatalf("repair proof-batch transition drifted: ledger=%+v sessions=%d provider=%d saves=%d", batched.SemanticPlanning, len(batched.CandidateRequestSessions), providerCalls, countingRepository.saves)
+	}
+	batchID := batched.SemanticPlanning.ActiveBatchID
+	requestID := batched.SemanticPlanning.Batches[0].RequestLogicalID
+
+	requested, err := module.driveRuntimeSemanticPlanning(ctx, batched)
+	if err != nil {
+		t.Fatalf("request repair proof batch with decision=%+v: %v", batched.Decision, err)
+	}
+	if requested.SemanticPlanning.Phase != runtimecontract.RuntimeSemanticPlanningProofBatchDocumentAccepted || len(requested.SemanticPlanning.History) != 0 ||
+		len(requested.SemanticPlanning.Batches) != 1 || requested.SemanticPlanning.ActiveBatchID != batchID ||
+		requested.SemanticPlanning.Batches[0].RequestLogicalID != requestID || len(requested.CandidateRequestSessions) != 1 ||
+		requested.CandidateRequestSessions[0].LogicalRequestID != requestID || requested.CandidateRequestSessions[0].State != runtimecontract.RuntimeCandidateRequestSessionDocumentComplete ||
+		providerCalls != 1 || countingRepository.saves <= 1 {
+		t.Fatalf("repair proof-batch request was not completed exactly once: ledger=%+v sessions=%d provider=%d saves=%d", requested.SemanticPlanning, len(requested.CandidateRequestSessions), providerCalls, countingRepository.saves)
+	}
+	revision := requested.StateRevision
+	saves := countingRepository.saves
+
+	// A worker replay carrying the pre-CAS OrderAccepted aggregate must reload
+	// owner state. It observes the already compiled batch and returns without a
+	// second projection, batch, request session, provider call, or CAS.
+	for replay := 0; replay < 2; replay++ {
+		replayed, replayErr := module.driveRuntimeSemanticPlanning(ctx, aggregate)
+		if replayErr != nil {
+			t.Fatalf("repair order replay %d: %v", replay, replayErr)
+		}
+		if replayed.StateRevision != revision || replayed.SemanticPlanning.Phase != runtimecontract.RuntimeSemanticPlanningProofBatchDocumentAccepted ||
+			len(replayed.SemanticPlanning.History) != 0 || len(replayed.SemanticPlanning.Batches) != 1 ||
+			replayed.SemanticPlanning.ActiveBatchID != batchID || replayed.SemanticPlanning.Batches[0].RequestLogicalID != requestID ||
+			len(replayed.CandidateRequestSessions) != 1 || providerCalls != 1 || countingRepository.saves != saves {
+			t.Fatalf("repair order replay %d created duplicate work: ledger=%+v sessions=%d provider=%d saves=%d", replay, replayed.SemanticPlanning, len(replayed.CandidateRequestSessions), providerCalls, countingRepository.saves)
+		}
 	}
 }
 

@@ -846,7 +846,11 @@ func TestRuntimeFileBackedGroundedTargetStateSequenceRestartsAtCommittedBoundari
 							t.Fatalf("unexpected crash marker: %v", recovered)
 						}
 					}()
-					if err := crashingModule.scheduleRuntimeDrive(ctx, "ws-v2", "run-v2", crashMarker); err != nil {
+					// This fixture models a process crash below the SM-4 background
+					// worker fence. runScheduledRuntimeDrive now owns panic recovery and
+					// persists a successor lease, so inject directly into the fenced
+					// drive body to retain the crash-boundary assertion.
+					if err := crashingModule.driveAndProjectRuntimeLocked(ctx, "ws-v2", "run-v2"); err != nil {
 						t.Fatalf("drive before crash: %v", err)
 					}
 					t.Fatalf("expected crash %s %s CAS", phase, tc.name)
@@ -1123,7 +1127,9 @@ func TestRuntimeFileBackedEmptyWorkspaceCreationReceiptCrashRestartDoesNotReplay
 						t.Fatalf("unexpected empty-workspace receipt crash marker: %v", recovered)
 					}
 				}()
-				if err := crashing.scheduleRuntimeDrive(ctx, "ws-v2", "run-v2", marker); err != nil {
+				// This fixture intentionally exercises a process-level cut below
+				// runScheduledRuntimeDrive's owner panic/liveness fence.
+				if err := crashing.driveAndProjectRuntimeLocked(ctx, "ws-v2", "run-v2"); err != nil {
 					t.Fatalf("drive before empty-workspace receipt crash: %v", err)
 				}
 				t.Fatal("expected empty-workspace receipt crash")

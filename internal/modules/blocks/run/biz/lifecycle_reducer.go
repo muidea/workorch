@@ -204,7 +204,7 @@ func reduceTerminalDelivery(current *runmodel.Run, cmd runevents.RuntimeTerminal
 	if runStateIsTerminal(current.State) {
 		return lifecycleTransition{}, fmt.Errorf("%w: terminal Run lacks delivery fence", common.ErrConflict)
 	}
-	if target == common.RunStateSuperseded && strings.TrimSpace(current.Lineage.LineageState) != "active" {
+	if target == common.RunStateSuperseded && current.Lineage.LineageState != runmodel.RunLineageStateActive {
 		return lifecycleTransition{}, fmt.Errorf("%w: Run lineage is outside the current data contract", common.ErrConflict)
 	}
 	if err := validateSealedTerminalIdentity(current, cmd); err != nil {
@@ -305,8 +305,8 @@ func applyLifecycleTransition(current *runmodel.Run, transition lifecycleTransit
 	}
 	if transition.Target == common.RunStateSuperseded {
 		lineage := next.Lineage
-		if lineage.LineageState == "active" {
-			lineage.LineageState = "superseded"
+		if lineage.LineageState == runmodel.RunLineageStateActive {
+			lineage.LineageState = runmodel.RunLineageStateSuperseded
 			next.Lineage = lineage
 		}
 	}

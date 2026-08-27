@@ -60,7 +60,7 @@ terminal decision/delivery handoff 均由 Orchestrator 负责；Run 不承担跨
   与 activation-memory handoff 均为 Biz 私有值，不在 `pkg/events` 暴露伪 create command。
 - ordinary Run creation 与 replacement successor materialization 共用唯一 `run.creation` owner-private
   dispatcher。两个入口只提交 immutable creation fact，不携带 `State`/时间戳；Run owner 选择
-  initial SM-1 `pending`、initial lineage `active`、封存 `CreatedAt`，再调用唯一
+  initial SM-1 `pending`、命名 `RunLineageState` 的 initial lineage `active`、封存 `CreatedAt`，再调用唯一
   `CreateNextWorkspaceRun` persistence sink。repository 在共享 Workspace durable head 的同一临界区内原子分配
   `WorkspaceRunGeneration` 与同源 `RunID`；二者均不能由 caller 指定、不能从现存 row/时间戳推断，且 Run delete、
   runtime-directory purge、response loss 与进程重启均不复用。watermark 先于 Run row 持久化，因此写失败可以留下合法

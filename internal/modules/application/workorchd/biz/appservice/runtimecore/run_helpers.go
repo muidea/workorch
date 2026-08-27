@@ -71,7 +71,7 @@ func MapRun(item *runmodel.Run) appmodelcore.Run {
 			PredecessorRunID:    string(item.Lineage.PredecessorRunID),
 			PredecessorResultID: string(item.Lineage.PredecessorResultID),
 			SuccessorRunID:      string(item.Lineage.SuccessorRunID),
-			LineageState:        item.Lineage.LineageState,
+			LineageState:        string(item.Lineage.LineageState),
 		},
 		DefinitionRevision: item.DefinitionRevision,
 		InitialStepKind:    item.InitialStepKind,

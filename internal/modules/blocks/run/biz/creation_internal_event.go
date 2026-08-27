@@ -79,6 +79,6 @@ func createRunLineage(predecessorRunID common.RunID, predecessorResultID common.
 	return runmodel.RunLineage{
 		PredecessorRunID:    common.RunID(strings.TrimSpace(string(predecessorRunID))),
 		PredecessorResultID: common.ResultID(strings.TrimSpace(string(predecessorResultID))),
-		LineageState:        "active",
+		LineageState:        runmodel.RunLineageStateActive,
 	}
 }

@@ -283,7 +283,8 @@ func TestCurrentRuntimeCWIOrderFromSemanticLineageDropsOnlySettledPredecessor(t 
 		},
 	}
 
-	order, changed, err := currentRuntimeCWIOrderFromSemanticLineage(facts, "manifest-order", []common.CoverageWorkItemID{"cwi-settled", "cwi-next"})
+	manifest := runtimecontract.RuntimeSemanticPlanManifest{Hash: "manifest-order"}
+	order, changed, err := currentRuntimeCWIOrderFromSemanticLineage(facts, manifest, []common.CoverageWorkItemID{"cwi-settled", "cwi-next"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -291,12 +292,49 @@ func TestCurrentRuntimeCWIOrderFromSemanticLineageDropsOnlySettledPredecessor(t 
 		t.Fatalf("current semantic order = %+v, want only cwi-next", order)
 	}
 
-	if _, _, err := currentRuntimeCWIOrderFromSemanticLineage(facts, "manifest-order", []common.CoverageWorkItemID{"cwi-settled", "cwi-blocked", "cwi-next"}); err == nil || !strings.Contains(err.Error(), "non-settled ineligible") {
+	if _, _, err := currentRuntimeCWIOrderFromSemanticLineage(facts, manifest, []common.CoverageWorkItemID{"cwi-settled", "cwi-blocked", "cwi-next"}); err == nil || !strings.Contains(err.Error(), "non-settled ineligible") {
 		t.Fatalf("blocked historical order error = %v", err)
 	}
-	_, changed, err = currentRuntimeCWIOrderFromSemanticLineage(facts, "manifest-order", []common.CoverageWorkItemID{"cwi-settled"})
+	_, changed, err = currentRuntimeCWIOrderFromSemanticLineage(facts, manifest, []common.CoverageWorkItemID{"cwi-settled"})
 	if err != nil || len(changed) != 1 || changed[0] != "cwi-next" {
 		t.Fatalf("new eligible closure change = %+v, error = %v", changed, err)
+	}
+}
+
+func TestCurrentRuntimeCWIOrderFromSemanticLineageScopesValidationRepairGeneration(t *testing.T) {
+	facts := runtimecontract.RuntimeFacts{
+		DefinitionSeed: runtimecontract.RuntimeDefinitionSeed{CoverageItems: []runtimecontract.RuntimeCoverageItem{
+			{ID: "cwi-001", Order: 1}, {ID: "cwi-002", Order: 2}, {ID: "cwi-003", Order: 3},
+		}},
+		Coverage: []runtimecontract.RuntimeCoverageItemFact{
+			{ID: "cwi-001", State: runtimecontract.RuntimeCoverageItemStateOpen, CWIConvergenceState: runtimecontract.RuntimeCWIConvergenceStateReopened},
+			{ID: "cwi-002", State: runtimecontract.RuntimeCoverageItemStateOpen, CWIConvergenceState: runtimecontract.RuntimeCWIConvergenceStatePlanning},
+			{ID: "cwi-003", State: runtimecontract.RuntimeCoverageItemStateOpen, CWIConvergenceState: runtimecontract.RuntimeCWIConvergenceStatePlanning},
+		},
+	}
+	repairManifest := runtimecontract.RuntimeSemanticPlanManifest{
+		Hash:          "manifest-repair-cwi-001",
+		CoverageItems: []runtimecontract.RuntimeCoverageItem{{ID: "cwi-001"}},
+		ProofObligations: []runtimecontract.RuntimeSemanticProofObligation{{
+			CoverageWorkItemID: "cwi-001", ValidationFailureRepair: &runtimecontract.RuntimeSemanticValidationFailureRepair{FailureSignature: "validation-failure-001"},
+		}},
+	}
+	order, changed, err := currentRuntimeCWIOrderFromSemanticLineage(facts, repairManifest, []common.CoverageWorkItemID{"cwi-001"})
+	if err != nil || len(order) != 1 || order[0] != "cwi-001" || len(changed) != 0 {
+		t.Fatalf("repair generation closure = order=%v changed=%v err=%v", order, changed, err)
+	}
+
+	// The same single-CWI manifest shape without a repair obligation is a
+	// normal Definition generation. It must see concurrently eligible rows as
+	// a real closure change instead of silently narrowing global authority.
+	normalManifest := runtimecontract.RuntimeSemanticPlanManifest{Hash: "manifest-normal-cwi-001", CoverageItems: []runtimecontract.RuntimeCoverageItem{{ID: "cwi-001"}}}
+	_, changed, err = currentRuntimeCWIOrderFromSemanticLineage(facts, normalManifest, []common.CoverageWorkItemID{"cwi-001"})
+	if err != nil || !sameCoverageIDs(changed, []common.CoverageWorkItemID{"cwi-002", "cwi-003"}) {
+		t.Fatalf("normal generation closure change = %v err=%v", changed, err)
+	}
+
+	if _, _, err := currentRuntimeCWIOrderFromSemanticLineage(facts, repairManifest, []common.CoverageWorkItemID{"cwi-001", "cwi-001"}); err == nil || !strings.Contains(err.Error(), "duplicates coverage") {
+		t.Fatalf("duplicate repair semantic order error = %v", err)
 	}
 }
 
@@ -325,14 +363,15 @@ func TestCurrentRuntimeCWIOrderFromSemanticLineageRetainsCurrentGenerationBoundQ
 		},
 	}
 
-	order, changed, err := currentRuntimeCWIOrderFromSemanticLineage(facts, "manifest-current", []common.CoverageWorkItemID{"cwi-rebound"})
+	currentManifest := runtimecontract.RuntimeSemanticPlanManifest{Hash: "manifest-current"}
+	order, changed, err := currentRuntimeCWIOrderFromSemanticLineage(facts, currentManifest, []common.CoverageWorkItemID{"cwi-rebound"})
 	if err != nil || len(order) != 1 || order[0] != "cwi-rebound" || len(changed) != 0 {
 		t.Fatalf("current-generation bound lineage = %+v, changed=%+v, error=%v", order, changed, err)
 	}
 	if pending := runtimeCWIPlanningMembersOfSemanticOrder(facts, order); len(pending) != 0 {
 		t.Fatalf("already-bound semantic order leaked into planning projection: %+v", pending)
 	}
-	if _, _, err := currentRuntimeCWIOrderFromSemanticLineage(facts, "manifest-stale", []common.CoverageWorkItemID{"cwi-rebound"}); err == nil || !strings.Contains(err.Error(), "non-settled ineligible") {
+	if _, _, err := currentRuntimeCWIOrderFromSemanticLineage(facts, runtimecontract.RuntimeSemanticPlanManifest{Hash: "manifest-stale"}, []common.CoverageWorkItemID{"cwi-rebound"}); err == nil || !strings.Contains(err.Error(), "non-settled ineligible") {
 		t.Fatalf("stale bound semantic lineage error = %v", err)
 	}
 	drifted := facts
@@ -341,19 +380,19 @@ func TestCurrentRuntimeCWIOrderFromSemanticLineageRetainsCurrentGenerationBoundQ
 	driftedFocus.CoverageEvidenceBindings = append([]runtimecontract.CoverageEvidenceBinding(nil), driftedFocus.CoverageEvidenceBindings...)
 	driftedFocus.CoverageEvidenceBindings[0].TargetRefs = []string{"target-drift"}
 	drifted.RemainingFocuses[0] = driftedFocus
-	if _, _, err := currentRuntimeCWIOrderFromSemanticLineage(drifted, "manifest-current", []common.CoverageWorkItemID{"cwi-rebound"}); err == nil || !strings.Contains(err.Error(), "non-settled ineligible") {
+	if _, _, err := currentRuntimeCWIOrderFromSemanticLineage(drifted, currentManifest, []common.CoverageWorkItemID{"cwi-rebound"}); err == nil || !strings.Contains(err.Error(), "non-settled ineligible") {
 		t.Fatalf("drifted bound semantic lineage error = %v", err)
 	}
 	completed := facts
 	completed.RemainingFocuses = nil
 	completed.CompletedFocuses = []runtimecontract.CoverageFocus{facts.RemainingFocuses[0]}
-	if _, _, err := currentRuntimeCWIOrderFromSemanticLineage(completed, "manifest-current", []common.CoverageWorkItemID{"cwi-rebound"}); err == nil || !strings.Contains(err.Error(), "non-settled ineligible") {
+	if _, _, err := currentRuntimeCWIOrderFromSemanticLineage(completed, currentManifest, []common.CoverageWorkItemID{"cwi-rebound"}); err == nil || !strings.Contains(err.Error(), "non-settled ineligible") {
 		t.Fatalf("completed bound semantic lineage error = %v", err)
 	}
 	blocked := facts
 	blocked.Coverage = append([]runtimecontract.RuntimeCoverageItemFact(nil), facts.Coverage...)
 	blocked.Coverage[1].PrerequisiteCoverageWorkItemIDs = []common.CoverageWorkItemID{"cwi-current"}
-	if _, _, err := currentRuntimeCWIOrderFromSemanticLineage(blocked, "manifest-current", []common.CoverageWorkItemID{"cwi-rebound"}); err == nil || !strings.Contains(err.Error(), "non-settled ineligible") {
+	if _, _, err := currentRuntimeCWIOrderFromSemanticLineage(blocked, currentManifest, []common.CoverageWorkItemID{"cwi-rebound"}); err == nil || !strings.Contains(err.Error(), "non-settled ineligible") {
 		t.Fatalf("bound lineage with reopened prerequisite error = %v", err)
 	}
 }

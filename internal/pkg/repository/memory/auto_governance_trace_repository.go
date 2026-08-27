@@ -121,7 +121,7 @@ func autoGovernanceTraceMatches(item *governancemodel.AutoGovernanceTrace, query
 	if query.ItemID != "" && item.ItemID != query.ItemID {
 		return false
 	}
-	if query.Status != "" && !strings.EqualFold(item.Status, query.Status) {
+	if query.Status != "" && !strings.EqualFold(string(item.Status), query.Status) {
 		return false
 	}
 	return true

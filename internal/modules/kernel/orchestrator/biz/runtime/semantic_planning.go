@@ -1617,7 +1617,7 @@ func prepareSemanticPlanningForAdvancedFocus(aggregate *RuntimeAggregate) error 
 	// absent from the immutable manifest/order. Retire that generation inside
 	// the same owner-local CAS that advanced SM-2; a later projection event must
 	// never be required to repair already-stale semantic authority.
-	_, closureChanged, err := currentRuntimeCWIOrderFromSemanticLineage(aggregate.Facts, ledger.Manifest.Hash, ledger.CoverageOrderDocument.CoverageOrder)
+	_, closureChanged, err := currentRuntimeCWIOrderFromSemanticLineage(aggregate.Facts, *ledger.Manifest, ledger.CoverageOrderDocument.CoverageOrder)
 	if err != nil {
 		return err
 	}

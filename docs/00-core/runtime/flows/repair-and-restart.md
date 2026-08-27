@@ -78,6 +78,7 @@ repair 在 Runtime 中不是独立 stage 对象，而是 **drive/reducer 在当�
   → 结构化 gap 进入 facts；按 missing evidence kind 回 state change / validation，不能直接 terminal
 - Profile-declared typed validation rejection without an exact failure target
   → SM-2 reopens the same CWI for one `validation_failure_repair` semantic generation
+  → that generation's eligible closure is the exact current CWI; unrelated globally eligible CWIs remain outside it
   → File confirms the proposed target and SM-2 seals a generation binding
   → accepted repair state change retires that binding and requires fresh validation; it never grants terminal validation credit
 - 需要外部信息 / 审批 / 依赖

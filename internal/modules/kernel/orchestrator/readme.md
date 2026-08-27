@@ -507,6 +507,14 @@ deployed run ID 只属于 archive regression evidence，不定义当前候选、
   ticket 且不创建 Run；已封存合同的 owner catalog 漂移或无合法 repair surface 则 Runtime typed fail closed，不创建通用
   Decision/Approval ticket。该 convergence 只存在于 immutable `RuntimeDefinitionFocus`；mutable `CoverageFocus` 不复制、
   不修补该声明，generation 只能消费由 definition snapshot 编译并封存的 obligation。
+- semantic generation 的 eligible closure 由 purpose 唯一派生，accepted-order projection、focus advance 与 generation
+  retirement 必须调用同一纯规则。普通 definition generation 使用当时全部尚未绑定且可规划的 current CWI；
+  `validation_failure_repair` 只包含触发 repair 的 exact current CWI。无关的全局 eligible CWI 不得退休 repair-local
+  manifest、增加 CAS 或创建第二 provider request；普通 generation 的真实新增 eligible member，或 exact repair
+  CWI/purpose/lineage 漂移，才退休 current generation。
+- `eligible_focus_projected` 等 semantic owner-private event 完成 CAS 后，drive 必须从 returned aggregate 重新读取 phase、
+  generation、manifest、accepted order 与 logical request identity。event 已退休 generation/manifest 时立即把 aggregate
+  交回 outer drive 重新分派；不得解引用 CAS 前的 manifest/hash，也不得以 panic 充当隐式 continuation。
 - assessment gate 只消费 current-run accepted evidence、sealed binding/effect与 owner structured validation
   observation；只有 receipt 实际报告 binding 要求的 exact check/metric/artifact 才能给对应 CWI credit。非空
   `PassedChecks`、claim signal、assessment 文本、Goal/DoD、summary 与 operation/check name 的自由文本相似度
@@ -738,6 +746,12 @@ deployed run ID 只属于 archive regression evidence，不定义当前候选、
 - `DriveRuntimeCommand/Result` 是 Runtime 唯一同步推进合同；Orchestrator 在有界循环内依次处理 prerequisite、candidate、sealed dispatch、typed operation、evidence/reducer。Result 不保存第二个 disposition：`need_governance` 必须携带且只携带 `BlockingTicketID` 或 `BlockingApprovalID`，`complete|failed + Terminal` 表示 typed terminal，其它组合均是合同缺陷。重复调用和进程重启必须从 Run owner aggregate 幂等恢复。
 - drive 同时校验 persisted `StateRevision` 与 `RuntimeConvergenceProgressSignature`；signature 覆盖 semantic seed/request/attempt/document/owner batch/sealed binding、focus/evidence/canonical state/requiredOutput/repair/prerequisite/dispatch/governance/terminal，不包含派生 action、operation-candidate retry、snapshot attempt、SM-4 lease 或 revision bookkeeping。只增加 bookkeeping 的 transition 必须 fail-fast。
 - SM-4 delayed recovery 只由 aggregate 中的 `RuntimeDriveLease` 授权。lease 绑定 workspace/run、aggregate revision、recovery generation、stable reason/signature、due time 与 `scheduled|running`；timer 只能 claim exact due lease，不能自行决定 retry。进程内 workspace/run singleflight 与 timer map 仅合并该 persisted identity；重复 Start/Resume/governance continuation、startup recovery 和旧 timer 均不得建立第二条链。crash 后遗留 `running` lease 由 startup 重新封存为新 generation 的 scheduled lease；live worker 再次失败时也只能凭其 exact claimed generation 以单次 CAS 续排更晚 dueAt 的新 scheduled generation，旧 generation finish/release 不得删除该后继。旧 timer 的 parse/claim/not-claimed/adopt/schedule 任一退出都必须在同一 gate 临界区选择 authoritative newer lease 或 mount latch 并转交 timer，否则释放 gate；同/异 signature 的 resolution overwrite 均不得遗留 latch 或泄漏 gate。renewal CAS 失败后禁止 release running generation；owner-private recovery 也失败时保留 persisted running authority 与本地 gate，普通 ingress 不得建立 generation-zero drive。Stop 的首次 cancel 必须原子发布 lifecycle closing/epoch；BackgroundRoutine submission 外部调用期间不得持有 `driveMu` 或另一 Stop fence，已排队/已到期 callback 必须在 observe、claim 前重复核对 captured context 与 exact lifecycle epoch。cancel 点之后 handler 与旧 timer defer 均不得创建 context、提交 background timer或清理新 epoch gate，write fence 内再 cancel/clear 本地状态，fresh startup 只恢复唯一 generation。
+- 所有 Orchestrator drive worker（包括 generation zero 的同步 ingress）还必须满足统一退出 fence：退出时要么仍持
+  run-scoped gate 继续下一 owner-private transition，要么 aggregate 已处于 exact terminal/governance/recoverable wait/
+  lifecycle handoff，或 exact `RuntimeDriveLease` 已持久化并挂载。drive body panic 在 Orchestrator owner 边界被规范化为
+  稳定 owner-local failure，并复用既有 private lease transition；不保存 panic 原文，不让 Run/Application/projection
+  选择后继。lease CAS 或本地 timer mount 失败时保留 gate 与已有 scheduled/running authority，由 fresh startup 恢复 exact
+  generation；不得虚报 live timer，禁止 defer 以 `retry=nil` 释放成 active orphan。
 - 真实 `RuntimeCASConflictError` 是唯一进入 CAS reload ledger 的事实；semantic persistence rejection 不创建 CAS/retry lease。CAS ledger 耗尽停止计数增长但仍保留带退避的 persisted owner-local successor，避免 active aggregate CPU 空转或无后继静止。
 - reducer/aggregate 已进入 governed wait 或 terminal 后，后续 owner projection 失败只能记录 projection error 并等待幂等重试，不得把已确定的 complete/fail authority 改写成 `runtime_drive_failed`。
 - 普通 drive、governance resolution 与 drive-failure terminal 共用唯一 terminal delivery lane：先校验 persisted sealed aggregate，

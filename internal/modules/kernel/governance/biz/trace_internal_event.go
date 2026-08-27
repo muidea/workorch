@@ -151,34 +151,34 @@ func reduceGovernanceTraceEvaluated(current *governancemodel.AutoGovernanceTrace
 	if current != nil && !sameGovernanceTraceIdentity(current, &observed) {
 		return governanceTraceTransition{}, common.ErrConflict
 	}
-	if current != nil && (strings.EqualFold(current.Status, autoGovernanceStatusResolved) || strings.EqualFold(current.Status, autoGovernanceStatusBlocked)) {
+	if current != nil && (autoGovernanceTraceStateIs(current.Status, governancemodel.AutoGovernanceTraceStateResolved) || autoGovernanceTraceStateIs(current.Status, governancemodel.AutoGovernanceTraceStateBlocked)) {
 		return governanceTraceTransition{Next: governancemodel.CloneAutoGovernanceTrace(current), Noop: true}, nil
 	}
 	next := governancemodel.CloneAutoGovernanceTrace(&observed)
-	next.Status = autoGovernanceStatusEvaluated
+	next.Status = governancemodel.AutoGovernanceTraceStateEvaluated
 	return governanceTraceTransition{Next: next}, nil
 }
 
 func reduceGovernanceTraceEscalated(current *governancemodel.AutoGovernanceTrace, fact governanceTraceEscalatedFact) (governanceTraceTransition, error) {
-	if current == nil || (!strings.EqualFold(current.Status, autoGovernanceStatusEvaluated) && !strings.EqualFold(current.Status, autoGovernanceStatusEscalated)) {
+	if current == nil || (!autoGovernanceTraceStateIs(current.Status, governancemodel.AutoGovernanceTraceStateEvaluated) && !autoGovernanceTraceStateIs(current.Status, governancemodel.AutoGovernanceTraceStateEscalated)) {
 		return governanceTraceTransition{}, common.ErrConflict
 	}
-	if strings.EqualFold(current.Status, autoGovernanceStatusEscalated) && current.PolicyBlocked == fact.PolicyBlocked {
+	if autoGovernanceTraceStateIs(current.Status, governancemodel.AutoGovernanceTraceStateEscalated) && current.PolicyBlocked == fact.PolicyBlocked {
 		return governanceTraceTransition{Next: governancemodel.CloneAutoGovernanceTrace(current), Noop: true}, nil
 	}
 	next := governancemodel.CloneAutoGovernanceTrace(current)
-	next.Status = autoGovernanceStatusEscalated
+	next.Status = governancemodel.AutoGovernanceTraceStateEscalated
 	next.PolicyBlocked = fact.PolicyBlocked
 	next.OccurredAt = fact.OccurredAt
 	return governanceTraceTransition{Next: next}, nil
 }
 
 func reduceGovernanceTraceResolutionStarted(current *governancemodel.AutoGovernanceTrace, fact governanceTraceResolutionStartedFact) (governanceTraceTransition, error) {
-	if current == nil || (!strings.EqualFold(current.Status, autoGovernanceStatusEvaluated) && !strings.EqualFold(current.Status, autoGovernanceStatusResolving)) {
+	if current == nil || (!autoGovernanceTraceStateIs(current.Status, governancemodel.AutoGovernanceTraceStateEvaluated) && !autoGovernanceTraceStateIs(current.Status, governancemodel.AutoGovernanceTraceStateResolving)) {
 		return governanceTraceTransition{}, common.ErrConflict
 	}
 	next := governancemodel.CloneAutoGovernanceTrace(current)
-	next.Status = autoGovernanceStatusResolving
+	next.Status = governancemodel.AutoGovernanceTraceStateResolving
 	next.Action = fact.Action
 	next.PolicyMatched = fact.PolicyMatched
 	next.PolicyBlocked = ""
@@ -189,17 +189,17 @@ func reduceGovernanceTraceResolutionStarted(current *governancemodel.AutoGoverna
 }
 
 func reduceGovernanceTraceBlocked(current *governancemodel.AutoGovernanceTrace, fact governanceTraceBlockedFact) (governanceTraceTransition, error) {
-	if current == nil || strings.EqualFold(current.Status, autoGovernanceStatusResolved) {
+	if current == nil || autoGovernanceTraceStateIs(current.Status, governancemodel.AutoGovernanceTraceStateResolved) {
 		return governanceTraceTransition{}, common.ErrConflict
 	}
-	if strings.EqualFold(current.Status, autoGovernanceStatusBlocked) && current.PolicyBlocked == fact.PolicyBlocked && current.Reason == fact.Reason {
+	if autoGovernanceTraceStateIs(current.Status, governancemodel.AutoGovernanceTraceStateBlocked) && current.PolicyBlocked == fact.PolicyBlocked && current.Reason == fact.Reason {
 		return governanceTraceTransition{Next: governancemodel.CloneAutoGovernanceTrace(current), Noop: true}, nil
 	}
-	if !strings.EqualFold(current.Status, autoGovernanceStatusEvaluated) && !strings.EqualFold(current.Status, autoGovernanceStatusResolving) {
+	if !autoGovernanceTraceStateIs(current.Status, governancemodel.AutoGovernanceTraceStateEvaluated) && !autoGovernanceTraceStateIs(current.Status, governancemodel.AutoGovernanceTraceStateResolving) {
 		return governanceTraceTransition{}, common.ErrConflict
 	}
 	next := governancemodel.CloneAutoGovernanceTrace(current)
-	next.Status = autoGovernanceStatusBlocked
+	next.Status = governancemodel.AutoGovernanceTraceStateBlocked
 	next.Action = "escalate"
 	next.PolicyMatched = ""
 	next.PolicyBlocked = fact.PolicyBlocked
@@ -209,20 +209,20 @@ func reduceGovernanceTraceBlocked(current *governancemodel.AutoGovernanceTrace, 
 }
 
 func reduceGovernanceTraceResolved(current *governancemodel.AutoGovernanceTrace, fact governanceTraceResolvedFact) (governanceTraceTransition, error) {
-	if current == nil || strings.EqualFold(current.Status, autoGovernanceStatusBlocked) {
+	if current == nil || autoGovernanceTraceStateIs(current.Status, governancemodel.AutoGovernanceTraceStateBlocked) {
 		return governanceTraceTransition{}, common.ErrConflict
 	}
-	if strings.EqualFold(current.Status, autoGovernanceStatusResolved) {
+	if autoGovernanceTraceStateIs(current.Status, governancemodel.AutoGovernanceTraceStateResolved) {
 		if current.Action != fact.Action {
 			return governanceTraceTransition{}, common.ErrConflict
 		}
 		return governanceTraceTransition{Next: governancemodel.CloneAutoGovernanceTrace(current), Noop: true}, nil
 	}
-	if !strings.EqualFold(current.Status, autoGovernanceStatusEvaluated) && !strings.EqualFold(current.Status, autoGovernanceStatusResolving) {
+	if !autoGovernanceTraceStateIs(current.Status, governancemodel.AutoGovernanceTraceStateEvaluated) && !autoGovernanceTraceStateIs(current.Status, governancemodel.AutoGovernanceTraceStateResolving) {
 		return governanceTraceTransition{}, common.ErrConflict
 	}
 	next := governancemodel.CloneAutoGovernanceTrace(current)
-	next.Status = autoGovernanceStatusResolved
+	next.Status = governancemodel.AutoGovernanceTraceStateResolved
 	next.Action = fact.Action
 	next.PolicyBlocked = ""
 	if next.Reason == "" {

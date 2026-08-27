@@ -778,7 +778,6 @@ type scheduledRuntimeDriveRequest struct {
 
 func (m *Biz) runScheduledRuntimeDrive(ctx context.Context, request scheduledRuntimeDriveRequest) {
 	var retry *runtimeRecoveryLeaseRequest
-	freshActivationRequired := false
 	m.lifecycleMu.RLock()
 	if m.runtimeController == nil || m.EventHub() == nil {
 		m.lifecycleMu.RUnlock()
@@ -786,12 +785,53 @@ func (m *Biz) runScheduledRuntimeDrive(ctx context.Context, request scheduledRun
 		return
 	}
 	defer m.lifecycleMu.RUnlock()
+	// This outer fence covers panic inside the exit/lease-CAS machinery itself.
+	// It never recursively calls finish: after a safe load it mounts existing
+	// durable authority or makes at most one owner-private successor transition.
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			m.recoverScheduledRuntimeDriveExitPanic(ctx, request, recovered, retry)
+		}
+	}()
+	finishRequired := false
+	// Install the owner exit fence before even the persisted-lease preflight:
+	// repository/admission code is part of this background worker and can panic
+	// before the ordinary drive body begins. A successful persisted-lease adopt
+	// completes its own gate handoff and therefore leaves finishRequired false.
+	defer func() {
+		if finishRequired {
+			m.finishScheduledRuntimeDrive(ctx, request, &retry)
+		}
+	}()
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			panicFailure, _ := m.runtimeScheduledDrivePanicFailure(ctx, request, recovered)
+			retry = m.handleScheduledRuntimeDriveFailure(ctx, request, panicFailure)
+			if retry == nil {
+				// The panic branch is deliberately allocation-free apart from this
+				// value. Keep a stable fallback so a future classifier edit cannot
+				// accidentally turn a recovered panic into a generation-zero gate
+				// release without persisted successor authority.
+				retry = runtimeScheduledDrivePanicLeaseRequest(request.source, 0, false)
+			}
+			finishRequired = true
+		}
+	}()
 	if request.leaseGeneration == 0 {
 		// A Start/Resume notification is not authority to bypass an existing
 		// persisted lease. When a prior local scheduler disappeared (for example
 		// after a renewal-CAS or timer-acceptance failure), adopt that exact SM-4
 		// authority or fail closed before any provider/capability effect.
-		if handled := m.adoptPersistedRuntimeDriveLeaseForNormalDrive(ctx, request); handled {
+		handled, err := m.adoptPersistedRuntimeDriveLeaseForNormalDrive(ctx, request)
+		if err != nil {
+			retry = m.handleScheduledRuntimeDriveFailure(ctx, request, err)
+			if retry == nil {
+				retry = runtimePersistedLeasePreflightRequest(request.source, runtimePersistedLeasePreflightPointLoad)
+			}
+			finishRequired = true
+			return
+		}
+		if handled {
 			return
 		}
 	}
@@ -799,9 +839,7 @@ func (m *Biz) runScheduledRuntimeDrive(ctx context.Context, request scheduledRun
 		WorkspaceID: request.workspaceID, RunID: request.runID, Kind: orchestratorevents.RuntimeDriveObservationRunning,
 		RecoveryGeneration: request.leaseGeneration, LeaseState: runtimeDriveLeaseStateForGeneration(request.leaseGeneration), Source: request.source,
 	})
-	// Registered after lifecycle unlock so lease transitions finish while owner
-	// dependencies remain live.
-	defer m.finishScheduledRuntimeDrive(ctx, request, &retry, &freshActivationRequired)
+	finishRequired = true
 	err := m.driveAndProjectRuntimeLockedWithCommand(ctx, orchestratorevents.DriveRuntimeCommand{
 		WorkspaceID: request.workspaceID, RunID: request.runID,
 		RecoveryLeaseGeneration: request.leaseGeneration,
@@ -810,10 +848,10 @@ func (m *Biz) runScheduledRuntimeDrive(ctx context.Context, request scheduledRun
 	if err == nil || errors.Is(err, context.Canceled) {
 		return
 	}
-	retry, freshActivationRequired = m.handleScheduledRuntimeDriveFailure(ctx, request, err)
+	retry = m.handleScheduledRuntimeDriveFailure(ctx, request, err)
 }
 
-func (m *Biz) finishScheduledRuntimeDrive(ctx context.Context, request scheduledRuntimeDriveRequest, retry **runtimeRecoveryLeaseRequest, freshActivationRequired *bool) {
+func (m *Biz) finishScheduledRuntimeDrive(ctx context.Context, request scheduledRuntimeDriveRequest, retry **runtimeRecoveryLeaseRequest) {
 	retryPending := *retry != nil
 	if *retry != nil && request.leaseGeneration != 0 {
 		// Only the worker that claimed this exact generation may replace its
@@ -822,17 +860,18 @@ func (m *Biz) finishScheduledRuntimeDrive(ctx context.Context, request scheduled
 		// duplicate that is then released without a successor.
 		(*retry).FromRunningGeneration = request.leaseGeneration
 	}
-	if *retry != nil && m.scheduleRuntimeRecoveryLease(ctx, request.workspaceID, request.runID, **retry) {
+	if *retry != nil && !runtimeRetryUsesExistingPersistedLease(**retry) && m.scheduleRuntimeRecoveryLease(ctx, request.workspaceID, request.runID, **retry) {
 		return
 	}
-	if retryPending && request.leaseGeneration != 0 {
-		if !m.recoverAndMountRuntimeDriveLeaseAfterRenewalFailure(ctx, request) {
-			// Both the replacement CAS and the owner-private running->scheduled
-			// recovery CAS failed. Keep the process gate with the persisted running
-			// generation so no ordinary ingress can become a second drive. Stop may
-			// clear this local gate; fresh startup then recovers the durable running
-			// lease. With no persisted successor it is unsafe to release here.
-			slog.Warn("workorch Runtime retaining drive gate after lease renewal and recovery failure", "workspaceID", request.workspaceID, "runID", request.runID, "generation", request.leaseGeneration, "source", request.source)
+	if retryPending {
+		if !m.recoverAndMountRuntimeDriveLeaseAfterScheduleFailure(ctx, request) {
+			// A claimed generation retains its persisted running record; a
+			// generation-zero drive with no successful lease CAS retains only this
+			// process-local exclusion gate until Stop. In both cases fresh startup
+			// reclassifies the active aggregate. Releasing here would allow an
+			// ordinary ingress to become a concurrent second drive without a
+			// durable successor.
+			slog.Warn("workorch Runtime retaining drive gate after recovery lease persistence or mount failure", "workspaceID", request.workspaceID, "runID", request.runID, "generation", request.leaseGeneration, "source", request.source)
 		}
 		return
 	}
@@ -840,7 +879,7 @@ func (m *Biz) finishScheduledRuntimeDrive(ctx context.Context, request scheduled
 	// generation: that generation is the only durable recovery authority left.
 	// If persistence succeeded but the local timer was rejected, the replacement
 	// scheduled generation is likewise left intact for fresh-start recovery.
-	if !retryPending && !*freshActivationRequired && request.leaseGeneration != 0 {
+	if request.leaseGeneration != 0 {
 		if _, err := m.runtimeReleaseDriveLease(ctx, request.workspaceID, request.runID, request.leaseGeneration); err != nil && !errors.Is(err, context.Canceled) {
 			slog.Warn("workorch Runtime drive lease release failed", "workspaceID", request.workspaceID, "runID", request.runID, "generation", request.leaseGeneration, "err", err)
 		}
@@ -858,49 +897,49 @@ func (m *Biz) finishScheduledRuntimeDrive(ctx context.Context, request scheduled
 // worker, avoiding synchronous EventHub re-entry from RunStateChanged. A
 // scheduled lease is mounted as-is; a running lease with no process-local gate
 // owner is treated as interrupted and owner-locally recovered before mounting.
-func (m *Biz) adoptPersistedRuntimeDriveLeaseForNormalDrive(ctx context.Context, request scheduledRuntimeDriveRequest) bool {
+func (m *Biz) adoptPersistedRuntimeDriveLeaseForNormalDrive(ctx context.Context, request scheduledRuntimeDriveRequest) (bool, error) {
 	aggregate, err := m.runtimeController.Load(ctx, request.workspaceID, request.runID)
 	if err != nil {
 		if errors.Is(err, common.ErrNotFound) {
-			return false
+			return false, nil
 		}
 		slog.Warn("workorch Runtime normal drive preflight could not inspect persisted lease", "workspaceID", request.workspaceID, "runID", request.runID, "source", request.source, "err", err)
-		m.endRuntimeDrive(request.driveKey)
-		return true
+		return false, &runtimePersistedLeasePreflightError{Point: runtimePersistedLeasePreflightPointLoad, Cause: err}
 	}
 	if aggregate.DriveLease == nil {
-		return false
+		return false, nil
 	}
 	lease := aggregate.DriveLease.Clone()
 	if lease.State == runtimecontract.RuntimeDriveLeaseRunning {
 		lease, _, err = m.runtimeRecoverDriveLease(ctx, request.workspaceID, request.runID, time.Now().UTC().Format(time.RFC3339Nano))
 		if err != nil {
 			slog.Warn("workorch Runtime normal drive could not recover persisted running lease", "workspaceID", request.workspaceID, "runID", request.runID, "source", request.source, "generation", aggregate.DriveLease.RecoveryGeneration, "err", err)
-			m.endRuntimeDrive(request.driveKey)
-			return true
+			return false, &runtimePersistedLeasePreflightError{Point: runtimePersistedLeasePreflightPointRecover, Cause: err}
 		}
 	}
 	if lease.State != runtimecontract.RuntimeDriveLeaseScheduled || !m.enqueueRuntimeDriveLeaseTimer(ctx, lease, request.source+":persisted_lease_adopted") {
 		slog.Warn("workorch Runtime normal drive could not mount persisted lease", "workspaceID", request.workspaceID, "runID", request.runID, "source", request.source, "generation", lease.RecoveryGeneration, "state", lease.State)
-		m.endRuntimeDrive(request.driveKey)
-		return true
+		return false, &runtimePersistedLeasePreflightError{Point: runtimePersistedLeasePreflightPointMount, Cause: common.ErrConflict}
 	}
 	m.clearPersistedRuntimeDriveLeaseMount(request.driveKey, lease.RecoveryGeneration)
 	m.observeRuntimeDrive(ctx, orchestratorevents.RuntimeDriveObservedData{
 		WorkspaceID: lease.WorkspaceID, RunID: lease.RunID, Kind: orchestratorevents.RuntimeDriveObservationRetryTimerScheduled,
 		AggregateRevision: lease.AggregateRevision, RecoveryGeneration: lease.RecoveryGeneration, FailureCategory: string(lease.Reason), LeaseState: lease.State, Source: request.source + ":persisted_lease_adopted",
 	})
-	return true
+	return true, nil
 }
 
-// recoverAndMountRuntimeDriveLeaseAfterRenewalFailure preserves the claimed
-// generation when replacement persistence failed. Recovery is another
-// generation-fenced owner-private CAS; if it too fails, the running record is
-// deliberately retained for normal-drive preflight or fresh-start recovery.
-func (m *Biz) recoverAndMountRuntimeDriveLeaseAfterRenewalFailure(ctx context.Context, request scheduledRuntimeDriveRequest) bool {
+// recoverAndMountRuntimeDriveLeaseAfterScheduleFailure preserves whichever
+// successor is already durable when replacement persistence or local timer
+// mounting failed. For a claimed generation, recovery is another
+// generation-fenced owner-private CAS. For a generation-zero worker it adopts
+// an already scheduled lease without manufacturing another drive authority.
+// If neither is possible, the caller deliberately retains the process gate for
+// Stop/fresh-start recovery.
+func (m *Biz) recoverAndMountRuntimeDriveLeaseAfterScheduleFailure(ctx context.Context, request scheduledRuntimeDriveRequest) bool {
 	lease, _, err := m.runtimeRecoverDriveLease(ctx, request.workspaceID, request.runID, time.Now().UTC().Add(time.Second).Format(time.RFC3339Nano))
 	if err != nil {
-		slog.Warn("workorch Runtime running lease recovery after renewal failure failed", "workspaceID", request.workspaceID, "runID", request.runID, "generation", request.leaseGeneration, "source", request.source, "err", err)
+		slog.Warn("workorch Runtime lease recovery after schedule failure failed", "workspaceID", request.workspaceID, "runID", request.runID, "generation", request.leaseGeneration, "source", request.source, "err", err)
 		return false
 	}
 	if lease.State != runtimecontract.RuntimeDriveLeaseScheduled || !m.enqueueRuntimeDriveLeaseTimer(ctx, lease, request.source+":renewal_recovered") {
@@ -915,7 +954,183 @@ func (m *Biz) recoverAndMountRuntimeDriveLeaseAfterRenewalFailure(ctx context.Co
 	return true
 }
 
-func (m *Biz) handleScheduledRuntimeDriveFailure(ctx context.Context, request scheduledRuntimeDriveRequest, err error) (*runtimeRecoveryLeaseRequest, bool) {
+// runtimeScheduledDrivePanicError is owner-local and deliberately excludes the
+// recovered value. Panic text is neither stable identity nor Runtime authority;
+// the persisted aggregate revision is the only fact that may bind re-drive.
+type runtimeScheduledDrivePanicError struct {
+	PersistedRevision uint64
+	RevisionKnown     bool
+}
+
+func (e *runtimeScheduledDrivePanicError) Error() string {
+	if e == nil || !e.RevisionKnown {
+		return "Runtime scheduled drive panicked after an unknown persisted revision"
+	}
+	return fmt.Sprintf("Runtime scheduled drive panicked after persisted revision %d", e.PersistedRevision)
+}
+
+func (m *Biz) runtimeScheduledDrivePanicFailure(ctx context.Context, request scheduledRuntimeDriveRequest, recovered any) (*runtimeScheduledDrivePanicError, runtime.RuntimeAggregate) {
+	failure := &runtimeScheduledDrivePanicError{}
+	aggregate, err := m.loadRuntimeAggregateAfterScheduledDrivePanic(ctx, request.workspaceID, request.runID)
+	if err == nil {
+		failure.PersistedRevision = aggregate.StateRevision
+		failure.RevisionKnown = true
+	}
+	slog.Error("workorch Runtime scheduled drive panic recovered by owner", "source", request.source, "workspaceID", request.workspaceID, "runID", request.runID, "generation", request.leaseGeneration, "persistedRevision", failure.PersistedRevision, "revisionKnown", failure.RevisionKnown, "panicType", fmt.Sprintf("%T", recovered), "loadErr", err)
+	return failure, aggregate
+}
+
+// recoverScheduledRuntimeDriveExitPanic is the bounded outer exit fence. It is
+// intentionally non-recursive: one safe load, then either mount the exact
+// durable scheduled generation, recover the exact running authority through
+// the existing private event and mount it, or make at most one private schedule
+// attempt when no lease survived. Any secondary panic/failure retains the gate
+// and leaves the durable aggregate for startup recovery.
+func (m *Biz) recoverScheduledRuntimeDriveExitPanic(ctx context.Context, request scheduledRuntimeDriveRequest, recovered any, retry *runtimeRecoveryLeaseRequest) {
+	m.beginRuntimeDrive(request.driveKey)
+	defer func() {
+		if secondary := recover(); secondary != nil {
+			m.beginRuntimeDrive(request.driveKey)
+			slog.Error("workorch Runtime scheduled drive exit recovery panic retained owner gate", "source", request.source, "workspaceID", request.workspaceID, "runID", request.runID, "generation", request.leaseGeneration, "panicType", fmt.Sprintf("%T", secondary))
+		}
+	}()
+	failure, aggregate := m.runtimeScheduledDrivePanicFailure(ctx, request, recovered)
+	if failure.RevisionKnown && aggregate.DriveLease != nil {
+		lease := aggregate.DriveLease.Clone()
+		if lease.State == runtimecontract.RuntimeDriveLeaseRunning {
+			runningGeneration := lease.RecoveryGeneration
+			var err error
+			lease, _, err = m.runtimeRecoverDriveLease(ctx, request.workspaceID, request.runID, time.Now().UTC().Add(time.Second).Format(time.RFC3339Nano))
+			if err != nil {
+				slog.Warn("workorch Runtime exit panic could not recover exact running lease", "source", request.source, "workspaceID", request.workspaceID, "runID", request.runID, "generation", aggregate.DriveLease.RecoveryGeneration, "err", err)
+				return
+			}
+			if lease.State != runtimecontract.RuntimeDriveLeaseScheduled || lease.RecoveryGeneration != runningGeneration+1 {
+				slog.Warn("workorch Runtime exit panic running lease recovery lost exact generation", "source", request.source, "workspaceID", request.workspaceID, "runID", request.runID, "expectedGeneration", runningGeneration+1, "observedGeneration", lease.RecoveryGeneration, "state", lease.State)
+				return
+			}
+		}
+		m.mountScheduledRuntimeDriveLeaseAfterExitPanic(ctx, request, lease)
+		return
+	}
+	if retry == nil && failure.RevisionKnown &&
+		(runtimeTerminalDeliveryFullyAcknowledged(aggregate) || aggregate.Decision.State == runtimecontract.ConvergenceStateNeedGovernance) {
+		m.endRuntimeDrive(request.driveKey)
+		return
+	}
+	requestLease := retry
+	if requestLease == nil {
+		requestLease = runtimeScheduledDrivePanicLeaseRequest(request.source, failure.PersistedRevision, failure.RevisionKnown)
+	}
+	if requestLease == nil || requestLease.Reason == "" || requestLease.FailureSignature == "" {
+		return
+	}
+	lease, _, err := m.runtimeScheduleDriveLease(ctx, request.workspaceID, request.runID, runtimecontract.RuntimeDriveLease{
+		WorkspaceID: request.workspaceID, RunID: request.runID,
+		Reason: requestLease.Reason, FailureSignature: requestLease.FailureSignature,
+		DueAt: time.Now().UTC().Add(max(requestLease.Delay, time.Second)).Format(time.RFC3339Nano),
+	}, 0)
+	if err != nil {
+		slog.Warn("workorch Runtime exit panic bounded successor schedule failed", "source", request.source, "workspaceID", request.workspaceID, "runID", request.runID, "err", err)
+		return
+	}
+	m.mountScheduledRuntimeDriveLeaseAfterExitPanic(ctx, request, lease)
+}
+
+func (m *Biz) mountScheduledRuntimeDriveLeaseAfterExitPanic(ctx context.Context, request scheduledRuntimeDriveRequest, lease runtimecontract.RuntimeDriveLease) bool {
+	if lease.Validate() != nil || lease.WorkspaceID != request.workspaceID || lease.RunID != request.runID || lease.State != runtimecontract.RuntimeDriveLeaseScheduled {
+		return false
+	}
+	if !m.enqueueRuntimeDriveLeaseTimer(ctx, lease, request.source+":exit_panic_durable_successor") {
+		slog.Warn("workorch Runtime exit panic retained unmounted durable lease", "source", request.source, "workspaceID", request.workspaceID, "runID", request.runID, "generation", lease.RecoveryGeneration)
+		return false
+	}
+	m.clearPersistedRuntimeDriveLeaseMount(request.driveKey, lease.RecoveryGeneration)
+	m.observeRuntimeDrive(ctx, orchestratorevents.RuntimeDriveObservedData{
+		WorkspaceID: lease.WorkspaceID, RunID: lease.RunID, Kind: orchestratorevents.RuntimeDriveObservationRetryTimerScheduled,
+		AggregateRevision: lease.AggregateRevision, RecoveryGeneration: lease.RecoveryGeneration, FailureCategory: string(lease.Reason), LeaseState: lease.State, Source: request.source + ":exit_panic_durable_successor",
+	})
+	return true
+}
+
+// loadRuntimeAggregateAfterScheduledDrivePanic is itself panic-safe because a
+// repository fault may have caused the original panic. If the owner repository
+// remains unavailable, finishScheduledRuntimeDrive still receives a non-nil
+// retry and retains the gate when it cannot persist a successor.
+func (m *Biz) loadRuntimeAggregateAfterScheduledDrivePanic(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID) (aggregate runtime.RuntimeAggregate, err error) {
+	defer func() {
+		if recover() != nil {
+			aggregate = runtime.RuntimeAggregate{}
+			err = fmt.Errorf("Runtime aggregate repository panicked during scheduled-drive recovery")
+		}
+	}()
+	return m.runtimeController.Load(ctx, workspaceID, runID)
+}
+
+func runtimeScheduledDrivePanicLeaseRequest(source string, revision uint64, revisionKnown bool) *runtimeRecoveryLeaseRequest {
+	signature := "persisted-pending/unknown"
+	if revisionKnown {
+		signature = fmt.Sprintf("persisted-pending/%d", revision)
+	}
+	return &runtimeRecoveryLeaseRequest{
+		Reason:           runtimecontract.RuntimeDriveLeaseReasonPersistedPending,
+		FailureSignature: signature,
+		Delay:            time.Second,
+		Source:           source,
+	}
+}
+
+type runtimePersistedLeasePreflightPoint string
+
+const (
+	runtimePersistedLeasePreflightPointLoad    runtimePersistedLeasePreflightPoint = "load"
+	runtimePersistedLeasePreflightPointRecover runtimePersistedLeasePreflightPoint = "recover"
+	runtimePersistedLeasePreflightPointMount   runtimePersistedLeasePreflightPoint = "mount"
+)
+
+type runtimePersistedLeasePreflightError struct {
+	Point runtimePersistedLeasePreflightPoint
+	Cause error
+}
+
+func (e *runtimePersistedLeasePreflightError) Error() string {
+	if e == nil {
+		return "Runtime persisted lease preflight failed"
+	}
+	return fmt.Sprintf("Runtime persisted lease preflight %s failed", e.Point)
+}
+
+func (e *runtimePersistedLeasePreflightError) Unwrap() error {
+	if e == nil {
+		return nil
+	}
+	return e.Cause
+}
+
+func runtimePersistedLeasePreflightRequest(source string, point runtimePersistedLeasePreflightPoint) *runtimeRecoveryLeaseRequest {
+	if point == "" {
+		point = runtimePersistedLeasePreflightPointLoad
+	}
+	return &runtimeRecoveryLeaseRequest{
+		Reason: runtimecontract.RuntimeDriveLeaseReasonScheduleRetry, FailureSignature: "persisted-lease-preflight/" + string(point), Delay: time.Second, Source: source,
+	}
+}
+
+func runtimeRetryUsesExistingPersistedLease(request runtimeRecoveryLeaseRequest) bool {
+	return request.Reason == runtimecontract.RuntimeDriveLeaseReasonScheduleRetry &&
+		(request.FailureSignature == "persisted-lease-preflight/"+string(runtimePersistedLeasePreflightPointRecover) ||
+			request.FailureSignature == "persisted-lease-preflight/"+string(runtimePersistedLeasePreflightPointMount))
+}
+
+func (m *Biz) handleScheduledRuntimeDriveFailure(ctx context.Context, request scheduledRuntimeDriveRequest, err error) *runtimeRecoveryLeaseRequest {
+	var preflight *runtimePersistedLeasePreflightError
+	if errors.As(err, &preflight) {
+		return runtimePersistedLeasePreflightRequest(request.source, preflight.Point)
+	}
+	var panicFailure *runtimeScheduledDrivePanicError
+	if errors.As(err, &panicFailure) {
+		return runtimeScheduledDrivePanicLeaseRequest(request.source, panicFailure.PersistedRevision, panicFailure.RevisionKnown)
+	}
 	var recoverableWait *runtimeRecoverableWaitPendingError
 	if errors.As(err, &recoverableWait) {
 		delay := time.Second
@@ -930,28 +1145,28 @@ func (m *Biz) handleScheduledRuntimeDriveFailure(ctx context.Context, request sc
 			FailureSignature: "recoverable-wait/" + recoverableWait.Wait.WaitID,
 			Delay:            delay,
 			Source:           request.source,
-		}, false
+		}
 	}
 	var persisted *runtimePersistedDrivePendingError
 	if errors.As(err, &persisted) {
 		slog.Debug("workorch Runtime persisted bounded retry state", "source", request.source, "workspaceID", request.workspaceID, "runID", request.runID, "revision", persisted.Revision)
-		return &runtimeRecoveryLeaseRequest{Reason: runtimecontract.RuntimeDriveLeaseReasonPersistedPending, FailureSignature: fmt.Sprintf("persisted-pending/%d", persisted.Revision), Delay: time.Second, Source: request.source}, false
+		return &runtimeRecoveryLeaseRequest{Reason: runtimecontract.RuntimeDriveLeaseReasonPersistedPending, FailureSignature: fmt.Sprintf("persisted-pending/%d", persisted.Revision), Delay: time.Second, Source: request.source}
 	}
 	var lifecycleDeliveryErr *runtimeLifecycleOwnerDeliveryError
 	if errors.As(err, &lifecycleDeliveryErr) {
-		return m.handleRuntimeLifecycleOwnerDeliveryRetry(ctx, request, lifecycleDeliveryErr), false
+		return m.handleRuntimeLifecycleOwnerDeliveryRetry(ctx, request, lifecycleDeliveryErr)
 	}
 	var terminalDeliveryErr *runtimeTerminalDeliveryError
 	if errors.As(err, &terminalDeliveryErr) {
-		return m.handleRuntimeTerminalDeliveryRetry(ctx, request, err), false
+		return m.handleRuntimeTerminalDeliveryRetry(ctx, request, err)
 	}
 	slog.Warn("workorch Runtime drive failed", "source", request.source, "workspaceID", request.workspaceID, "runID", request.runID, "err", err)
 	failure := classifyRuntimeDriveFailure(err)
 	m.observeScheduledRuntimeDriveFailure(ctx, request, failure, err)
 	if !runtime.FailureClassIsBusinessTerminal(failure.Class) {
-		return m.handleRuntimeNonTerminalRetry(ctx, request, failure, err), false
+		return m.handleRuntimeNonTerminalRetry(ctx, request, failure, err)
 	}
-	return m.handleRuntimeBusinessTerminalFailure(ctx, request, failure), false
+	return m.handleRuntimeBusinessTerminalFailure(ctx, request, failure)
 }
 
 func (m *Biz) handleRuntimeLifecycleOwnerDeliveryRetry(ctx context.Context, request scheduledRuntimeDriveRequest, deliveryErr *runtimeLifecycleOwnerDeliveryError) *runtimeRecoveryLeaseRequest {
@@ -1246,10 +1461,20 @@ func (m *Biz) enqueueRuntimeDriveLeaseTimer(ctx context.Context, lease runtimeco
 	if !registered {
 		return true
 	}
+	launched := false
+	// BackgroundRoutine submission may reject or panic after the exact local
+	// generation was registered. Clear that registration on every non-success
+	// exit so the outer owner fence can remount the same durable lease instead of
+	// mistaking an orphaned registration for a live timer.
+	defer func() {
+		if !launched {
+			m.endRuntimeLeaseTimer(key, lease.RecoveryGeneration, epoch)
+		}
+	}()
 	if !m.launchRuntimeDriveLeaseTimer(ctx, lease, source, epoch) {
-		m.endRuntimeLeaseTimer(key, lease.RecoveryGeneration, epoch)
 		return false
 	}
+	launched = true
 	return true
 }
 

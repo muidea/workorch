@@ -25,7 +25,7 @@ func seedResolvedGovernanceTraces(t *testing.T, count int, itemType string, acti
 			ItemType:    itemType,
 			ItemID:      itemID,
 			Action:      action,
-			Status:      autoGovernanceStatusResolved,
+			Status:      governancemodel.AutoGovernanceTraceStateResolved,
 			OccurredAt:  "2026-08-21T00:00:0" + string(rune('0'+idx)) + "Z",
 		}))
 	}
@@ -143,18 +143,18 @@ func TestGovernanceSharedBudgetConsecutiveAndPromptMatrices(t *testing.T) {
 	for _, itemType := range []string{"ticket", "approval"} {
 		for _, test := range []struct {
 			name       string
-			statuses   []string
+			statuses   []governancemodel.AutoGovernanceTraceState
 			currentID  string
 			promptKeys []string
 			budget     workorchconfig.GovernanceBudgetConfig
 			wantReason string
 		}{
-			{name: "below consecutive threshold", statuses: []string{autoGovernanceStatusEscalated}, budget: workorchconfig.GovernanceBudgetConfig{MaxConsecutiveFailures: 2}},
-			{name: "at consecutive threshold", statuses: []string{autoGovernanceStatusEscalated, autoGovernanceStatusBlocked}, budget: workorchconfig.GovernanceBudgetConfig{MaxConsecutiveFailures: 2}, wantReason: "consecutive_failures_exhausted"},
-			{name: "resolved resets consecutive", statuses: []string{autoGovernanceStatusEscalated, autoGovernanceStatusBlocked, autoGovernanceStatusResolved, autoGovernanceStatusEscalated}, budget: workorchconfig.GovernanceBudgetConfig{MaxConsecutiveFailures: 2}},
-			{name: "current item excluded", statuses: []string{autoGovernanceStatusEscalated, autoGovernanceStatusBlocked}, currentID: itemType + "-history-1", budget: workorchconfig.GovernanceBudgetConfig{MaxConsecutiveFailures: 2}},
-			{name: "below repeated prompt threshold", statuses: []string{autoGovernanceStatusEscalated}, promptKeys: []string{"same"}, budget: workorchconfig.GovernanceBudgetConfig{MaxRepeatedSamePrompt: 2}},
-			{name: "at repeated prompt threshold", statuses: []string{autoGovernanceStatusEscalated, autoGovernanceStatusEscalated}, promptKeys: []string{"same", "same"}, budget: workorchconfig.GovernanceBudgetConfig{MaxRepeatedSamePrompt: 2}, wantReason: "repeated_prompt_exhausted"},
+			{name: "below consecutive threshold", statuses: []governancemodel.AutoGovernanceTraceState{governancemodel.AutoGovernanceTraceStateEscalated}, budget: workorchconfig.GovernanceBudgetConfig{MaxConsecutiveFailures: 2}},
+			{name: "at consecutive threshold", statuses: []governancemodel.AutoGovernanceTraceState{governancemodel.AutoGovernanceTraceStateEscalated, governancemodel.AutoGovernanceTraceStateBlocked}, budget: workorchconfig.GovernanceBudgetConfig{MaxConsecutiveFailures: 2}, wantReason: "consecutive_failures_exhausted"},
+			{name: "resolved resets consecutive", statuses: []governancemodel.AutoGovernanceTraceState{governancemodel.AutoGovernanceTraceStateEscalated, governancemodel.AutoGovernanceTraceStateBlocked, governancemodel.AutoGovernanceTraceStateResolved, governancemodel.AutoGovernanceTraceStateEscalated}, budget: workorchconfig.GovernanceBudgetConfig{MaxConsecutiveFailures: 2}},
+			{name: "current item excluded", statuses: []governancemodel.AutoGovernanceTraceState{governancemodel.AutoGovernanceTraceStateEscalated, governancemodel.AutoGovernanceTraceStateBlocked}, currentID: itemType + "-history-1", budget: workorchconfig.GovernanceBudgetConfig{MaxConsecutiveFailures: 2}},
+			{name: "below repeated prompt threshold", statuses: []governancemodel.AutoGovernanceTraceState{governancemodel.AutoGovernanceTraceStateEscalated}, promptKeys: []string{"same"}, budget: workorchconfig.GovernanceBudgetConfig{MaxRepeatedSamePrompt: 2}},
+			{name: "at repeated prompt threshold", statuses: []governancemodel.AutoGovernanceTraceState{governancemodel.AutoGovernanceTraceStateEscalated, governancemodel.AutoGovernanceTraceStateEscalated}, promptKeys: []string{"same", "same"}, budget: workorchconfig.GovernanceBudgetConfig{MaxRepeatedSamePrompt: 2}, wantReason: "repeated_prompt_exhausted"},
 		} {
 			t.Run(itemType+"/"+test.name, func(t *testing.T) {
 				items := make([]*governancemodel.AutoGovernanceTrace, 0, len(test.statuses))

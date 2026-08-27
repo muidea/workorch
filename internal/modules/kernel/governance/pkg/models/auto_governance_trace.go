@@ -2,6 +2,19 @@ package governance
 
 import "github.com/muidea/workorch/internal/pkg/common"
 
+// AutoGovernanceTraceState is the Governance-owned coordination state for one
+// automatic-governance trace. Only the Governance trace private reducer may
+// select or change these values.
+type AutoGovernanceTraceState string
+
+const (
+	AutoGovernanceTraceStateEvaluated AutoGovernanceTraceState = "evaluated"
+	AutoGovernanceTraceStateResolving AutoGovernanceTraceState = "resolving"
+	AutoGovernanceTraceStateResolved  AutoGovernanceTraceState = "resolved"
+	AutoGovernanceTraceStateEscalated AutoGovernanceTraceState = "escalated"
+	AutoGovernanceTraceStateBlocked   AutoGovernanceTraceState = "blocked"
+)
+
 type AutoGovernanceTrace struct {
 	ID                 common.AutoGovernanceTraceID
 	WorkspaceID        common.WorkspaceID
@@ -22,7 +35,7 @@ type AutoGovernanceTrace struct {
 	LLMProviderID      string
 	LLMModel           string
 	LLMDecisionPreview string
-	Status             string
+	Status             AutoGovernanceTraceState
 	OccurredAt         string
 }
 

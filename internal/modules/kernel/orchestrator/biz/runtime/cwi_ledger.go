@@ -764,6 +764,62 @@ func projectRuntimeCWIExecutionFocus(facts runtimecontract.RuntimeFacts, accepte
 		// effect lineage. Semantic order never replaces that transaction.
 		return facts.Normalized(), nil
 	}
+	return applyRuntimeCWIExecutionFocusProjection(facts, projection.OrderedEligibleCoverageIDs, completedCurrent)
+}
+
+// projectRuntimeCWIExecutionFocusForGeneration applies an accepted order whose
+// complete eligible closure was already derived from the active semantic
+// generation. It differs from the global contract helper only for a one-CWI
+// validation-repair generation; unrelated globally eligible Definition rows
+// remain in their existing queue order and cannot enter that generation.
+func projectRuntimeCWIExecutionFocusForGeneration(facts runtimecontract.RuntimeFacts, acceptedOrder, generationEligible []common.CoverageWorkItemID, completedCurrent *runtimecontract.CoverageFocus) (runtimecontract.RuntimeFacts, error) {
+	eligibleSet := make(map[common.CoverageWorkItemID]struct{}, len(generationEligible))
+	for _, id := range generationEligible {
+		if id == "" {
+			return runtimecontract.RuntimeFacts{}, fmt.Errorf("%w: semantic generation eligible closure contains an empty coverage identity", common.ErrConflict)
+		}
+		if _, duplicate := eligibleSet[id]; duplicate {
+			return runtimecontract.RuntimeFacts{}, fmt.Errorf("%w: semantic generation eligible closure duplicates coverage %q", common.ErrConflict, id)
+		}
+		eligibleSet[id] = struct{}{}
+	}
+	seen := make(map[common.CoverageWorkItemID]struct{}, len(acceptedOrder))
+	ordered := make([]common.CoverageWorkItemID, 0, len(acceptedOrder))
+	for _, raw := range acceptedOrder {
+		id := common.CoverageWorkItemID(strings.TrimSpace(string(raw)))
+		if id == "" {
+			return runtimecontract.RuntimeFacts{}, fmt.Errorf("%w: semantic generation order contains an empty coverage identity", common.ErrConflict)
+		}
+		if _, eligible := eligibleSet[id]; !eligible {
+			return runtimecontract.RuntimeFacts{}, fmt.Errorf("%w: semantic generation order contains out-of-scope coverage %q", common.ErrConflict, id)
+		}
+		if _, duplicate := seen[id]; duplicate {
+			return runtimecontract.RuntimeFacts{}, fmt.Errorf("%w: semantic generation order duplicates coverage %q", common.ErrConflict, id)
+		}
+		seen[id] = struct{}{}
+		ordered = append(ordered, id)
+	}
+	if len(seen) != len(eligibleSet) {
+		return runtimecontract.RuntimeFacts{}, fmt.Errorf("%w: semantic generation order is not a complete generation-scoped eligible closure", common.ErrConflict)
+	}
+	if len(ordered) == 0 || runtimeCWICurrentFocusHasBindingFence(facts) {
+		return facts.Normalized(), nil
+	}
+	return applyRuntimeCWIExecutionFocusProjection(facts, ordered, completedCurrent)
+}
+
+func runtimeCWICurrentFocusHasBindingFence(facts runtimecontract.RuntimeFacts) bool {
+	coverageRows := runtimeCoverageByID(facts.Coverage)
+	for _, id := range facts.Focus.Normalized().CoverageWorkItemIDs {
+		row, found := coverageRows[id]
+		if found && row.CWIConvergenceState == runtimecontract.RuntimeCWIConvergenceStateBound && row.CurrentBindingRef != nil {
+			return true
+		}
+	}
+	return false
+}
+
+func applyRuntimeCWIExecutionFocusProjection(facts runtimecontract.RuntimeFacts, orderedCoverageIDs []common.CoverageWorkItemID, completedCurrent *runtimecontract.CoverageFocus) (runtimecontract.RuntimeFacts, error) {
 	active := append([]runtimecontract.CoverageFocus{facts.Focus}, facts.RemainingFocuses...)
 	byCoverage := make(map[common.CoverageWorkItemID]runtimecontract.CoverageFocus, len(active))
 	coverageRows := make(map[common.CoverageWorkItemID]runtimecontract.RuntimeCoverageItemFact, len(facts.Coverage))
@@ -785,7 +841,7 @@ func projectRuntimeCWIExecutionFocus(facts runtimecontract.RuntimeFacts, accepte
 	}
 	ordered := make([]runtimecontract.CoverageFocus, 0, len(active))
 	used := make(map[common.CoverageWorkItemID]struct{}, len(active))
-	for _, id := range projection.OrderedEligibleCoverageIDs {
+	for _, id := range orderedCoverageIDs {
 		focus, found := byCoverage[id]
 		if !found {
 			continue
@@ -847,6 +903,8 @@ func (c *authorityComponent) projectEligibleRuntimeFocus(ctx context.Context, wo
 	}
 	manifestHash = strings.TrimSpace(manifestHash)
 	projectionOrder := append([]common.CoverageWorkItemID(nil), acceptedOrder...)
+	var generationEligible []common.CoverageWorkItemID
+	semanticGenerationProjection := false
 	if manifestHash != "" {
 		ledger := aggregate.SemanticPlanning.Clone()
 		if ledger.Manifest == nil || ledger.Manifest.Hash != manifestHash || ledger.CoverageOrderDocument == nil ||
@@ -854,7 +912,7 @@ func (c *authorityComponent) projectEligibleRuntimeFocus(ctx context.Context, wo
 			return RuntimeAggregate{}, fmt.Errorf("%w: eligible focus projection semantic order is stale", common.ErrConflict)
 		}
 		var closureChanged []common.CoverageWorkItemID
-		projectionOrder, closureChanged, err = currentRuntimeCWIOrderFromSemanticLineage(aggregate.Facts, manifestHash, acceptedOrder)
+		projectionOrder, closureChanged, err = currentRuntimeCWIOrderFromSemanticLineage(aggregate.Facts, *ledger.Manifest, acceptedOrder)
 		if err != nil {
 			return RuntimeAggregate{}, err
 		}
@@ -877,6 +935,11 @@ func (c *authorityComponent) projectEligibleRuntimeFocus(ctx context.Context, wo
 			}
 			return aggregate, nil
 		}
+		generationEligible, err = runtimeSemanticGenerationEligibleClosure(aggregate.Facts, *ledger.Manifest)
+		if err != nil {
+			return RuntimeAggregate{}, err
+		}
+		semanticGenerationProjection = true
 		// A duplicate/restarted projection may observe rows that this exact
 		// semantic generation has already bound behind an effect-fenced current
 		// focus. Their queue placement is already canonical; only rows that are
@@ -887,7 +950,12 @@ func (c *authorityComponent) projectEligibleRuntimeFocus(ctx context.Context, wo
 			return aggregate, nil
 		}
 	}
-	projected, err := projectRuntimeCWIExecutionFocus(aggregate.Facts, projectionOrder, nil)
+	var projected runtimecontract.RuntimeFacts
+	if semanticGenerationProjection && !sameCoverageIDs(generationEligible, runtimecontract.RuntimeCWIsEligibleForPlanning(aggregate.Facts)) {
+		projected, err = projectRuntimeCWIExecutionFocusForGeneration(aggregate.Facts, projectionOrder, generationEligible, nil)
+	} else {
+		projected, err = projectRuntimeCWIExecutionFocus(aggregate.Facts, projectionOrder, nil)
+	}
 	if err != nil {
 		return RuntimeAggregate{}, err
 	}
@@ -918,12 +986,16 @@ func (c *authorityComponent) projectEligibleRuntimeFocus(ctx context.Context, wo
 // lineage when an older effect-fenced focus keeps it in the remaining queue.
 // Every other eligibility change is stale authority and must start a fresh
 // semantic generation instead of being silently filtered.
-func currentRuntimeCWIOrderFromSemanticLineage(facts runtimecontract.RuntimeFacts, semanticManifestHash string, acceptedOrder []common.CoverageWorkItemID) ([]common.CoverageWorkItemID, []common.CoverageWorkItemID, error) {
-	semanticManifestHash = strings.TrimSpace(semanticManifestHash)
+func currentRuntimeCWIOrderFromSemanticLineage(facts runtimecontract.RuntimeFacts, manifest runtimecontract.RuntimeSemanticPlanManifest, acceptedOrder []common.CoverageWorkItemID) ([]common.CoverageWorkItemID, []common.CoverageWorkItemID, error) {
+	manifest = manifest.Normalized()
+	semanticManifestHash := strings.TrimSpace(manifest.Hash)
 	if semanticManifestHash == "" {
 		return nil, nil, fmt.Errorf("%w: semantic order lineage has no manifest identity", common.ErrConflict)
 	}
-	eligible := runtimecontract.RuntimeCWIsEligibleForPlanning(facts)
+	eligible, err := runtimeSemanticGenerationEligibleClosure(facts, manifest)
+	if err != nil {
+		return nil, nil, err
+	}
 	eligibleSet := make(map[common.CoverageWorkItemID]struct{}, len(eligible))
 	for _, id := range eligible {
 		eligibleSet[id] = struct{}{}
@@ -961,6 +1033,40 @@ func currentRuntimeCWIOrderFromSemanticLineage(facts runtimecontract.RuntimeFact
 		}
 	}
 	return ret, changed, nil
+}
+
+// runtimeSemanticGenerationEligibleClosure is the single owner-local scope
+// derivation used when an immutable semantic order is compared with current
+// SM-2 eligibility. Normal Definition generations own the complete currently
+// eligible closure, so a newly unlocked CWI retires their order. A validation
+// failure repair generation is deliberately one-CWI authority: unrelated
+// Definition CWIs may be eligible concurrently, but they cannot invalidate or
+// be absorbed into that repair generation.
+func runtimeSemanticGenerationEligibleClosure(facts runtimecontract.RuntimeFacts, manifest runtimecontract.RuntimeSemanticPlanManifest) ([]common.CoverageWorkItemID, error) {
+	manifest = manifest.Normalized()
+	eligible := runtimecontract.RuntimeCWIsEligibleForPlanning(facts)
+	var repairCoverageID common.CoverageWorkItemID
+	for _, obligation := range manifest.ProofObligations {
+		if obligation.ValidationFailureRepair == nil {
+			continue
+		}
+		if repairCoverageID != "" && repairCoverageID != obligation.CoverageWorkItemID {
+			return nil, fmt.Errorf("%w: validation failure repair semantic generation spans multiple CWI", common.ErrConflict)
+		}
+		repairCoverageID = obligation.CoverageWorkItemID
+	}
+	if repairCoverageID == "" {
+		return eligible, nil
+	}
+	if len(manifest.CoverageItems) != 1 || manifest.CoverageItems[0].ID != repairCoverageID || len(manifest.ProofObligations) != 1 {
+		return nil, fmt.Errorf("%w: validation failure repair semantic generation is not scoped to exactly one CWI", common.ErrConflict)
+	}
+	for _, coverageID := range eligible {
+		if coverageID == repairCoverageID {
+			return []common.CoverageWorkItemID{repairCoverageID}, nil
+		}
+	}
+	return nil, nil
 }
 
 // runtimeCWIBoundBySemanticLineage accepts only an exact current-generation

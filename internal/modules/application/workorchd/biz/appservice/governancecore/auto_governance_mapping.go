@@ -25,7 +25,7 @@ func MapAutoGovernanceSummary(item *governancemodel.AutoGovernanceTrace) *projec
 	ret := &projectioncontract.AutoGovernanceSummary{
 		TraceID:           string(item.ID),
 		Action:            item.Action,
-		Status:            item.Status,
+		Status:            string(item.Status),
 		RiskLevel:         item.RiskLevel,
 		PolicyMatched:     item.PolicyMatched,
 		PolicyBlocked:     item.PolicyBlocked,

@@ -14,12 +14,7 @@ import (
 )
 
 const (
-	autoGovernanceActor           = "auto_governance"
-	autoGovernanceStatusEvaluated = "evaluated"
-	autoGovernanceStatusResolving = "resolving"
-	autoGovernanceStatusResolved  = "resolved"
-	autoGovernanceStatusEscalated = "escalated"
-	autoGovernanceStatusBlocked   = "blocked"
+	autoGovernanceActor = "auto_governance"
 )
 
 func autoGovernanceTraceID(workspaceID common.WorkspaceID, itemType string, itemID string) common.AutoGovernanceTraceID {
@@ -54,6 +49,10 @@ func autoGovernanceResolutionID(workspaceID common.WorkspaceID, ticketID common.
 	return common.ResolutionID("auto-governance-resolution/" + hex.EncodeToString(sum[:]))
 }
 
+func autoGovernanceTraceStateIs(actual, expected governancemodel.AutoGovernanceTraceState) bool {
+	return strings.EqualFold(string(actual), string(expected))
+}
+
 func (s *Service) countResolvedTicketTraces(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID) (int, error) {
 	return s.countResolvedTraces(ctx, workspaceID, runID, "ticket", "answer")
 }
@@ -79,7 +78,7 @@ func (s *Service) countResolvedTraces(ctx context.Context, workspaceID common.Wo
 		if item == nil {
 			continue
 		}
-		if strings.EqualFold(item.Status, autoGovernanceStatusResolved) && strings.EqualFold(item.Action, action) {
+		if autoGovernanceTraceStateIs(item.Status, governancemodel.AutoGovernanceTraceStateResolved) && strings.EqualFold(item.Action, action) {
 			count++
 		}
 	}
@@ -102,10 +101,10 @@ func (s *Service) blockedBySharedBudgetPolicy(ctx context.Context, governanceCfg
 			if strings.TrimSpace(item.ItemID) == strings.TrimSpace(currentItemID) {
 				continue
 			}
-			if strings.EqualFold(item.Status, autoGovernanceStatusResolved) {
+			if autoGovernanceTraceStateIs(item.Status, governancemodel.AutoGovernanceTraceStateResolved) {
 				break
 			}
-			if strings.EqualFold(item.Status, autoGovernanceStatusEscalated) || strings.EqualFold(item.Status, autoGovernanceStatusBlocked) {
+			if autoGovernanceTraceStateIs(item.Status, governancemodel.AutoGovernanceTraceStateEscalated) || autoGovernanceTraceStateIs(item.Status, governancemodel.AutoGovernanceTraceStateBlocked) {
 				consecutive++
 				continue
 			}
@@ -180,7 +179,7 @@ func (s *Service) hasClosedTrace(ctx context.Context, workspaceID common.Workspa
 		if item == nil {
 			continue
 		}
-		if strings.EqualFold(item.Status, autoGovernanceStatusResolved) || strings.EqualFold(item.Status, autoGovernanceStatusBlocked) {
+		if autoGovernanceTraceStateIs(item.Status, governancemodel.AutoGovernanceTraceStateResolved) || autoGovernanceTraceStateIs(item.Status, governancemodel.AutoGovernanceTraceStateBlocked) {
 			return true, nil
 		}
 	}
@@ -204,7 +203,7 @@ func (s *Service) hasClosedApprovalTrace(ctx context.Context, workspaceID common
 		if item == nil {
 			continue
 		}
-		if strings.EqualFold(item.Status, autoGovernanceStatusResolved) || strings.EqualFold(item.Status, autoGovernanceStatusBlocked) {
+		if autoGovernanceTraceStateIs(item.Status, governancemodel.AutoGovernanceTraceStateResolved) || autoGovernanceTraceStateIs(item.Status, governancemodel.AutoGovernanceTraceStateBlocked) {
 			return true, nil
 		}
 	}

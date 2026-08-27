@@ -446,7 +446,7 @@ func isIncompleteGovernanceTrace(item *governancemodel.AutoGovernanceTrace) bool
 	if item == nil || item.WorkspaceID == "" || strings.TrimSpace(item.ItemType) == "" || strings.TrimSpace(item.ItemID) == "" {
 		return false
 	}
-	return strings.EqualFold(item.Status, autoGovernanceStatusEvaluated) || strings.EqualFold(item.Status, autoGovernanceStatusResolving)
+	return autoGovernanceTraceStateIs(item.Status, governancemodel.AutoGovernanceTraceStateEvaluated) || autoGovernanceTraceStateIs(item.Status, governancemodel.AutoGovernanceTraceStateResolving)
 }
 
 func (s *Service) reconcileIncompleteTrace(ctx context.Context, trace *governancemodel.AutoGovernanceTrace) error {
@@ -483,7 +483,7 @@ func (s *Service) reconcileTicketTrace(ctx context.Context, trace *governancemod
 	case common.DecisionTicketStateOpen:
 		return s.processPendingTicket(ctx, ticket.ID)
 	case common.DecisionTicketStateResolved:
-		if strings.EqualFold(trace.Status, autoGovernanceStatusResolving) || strings.EqualFold(ticket.ResolvedBy, autoGovernanceActor) {
+		if autoGovernanceTraceStateIs(trace.Status, governancemodel.AutoGovernanceTraceStateResolving) || strings.EqualFold(ticket.ResolvedBy, autoGovernanceActor) {
 			return s.finalizeRecoveredTrace(ctx, trace, "answer")
 		}
 		return s.blockIncompleteTrace(ctx, trace, "owner_resolved_externally")
@@ -503,7 +503,7 @@ func (s *Service) reconcileApprovalTrace(ctx context.Context, trace *governancem
 		if approvalResolutionRecoveryPending(approval) {
 			return nil
 		}
-		if strings.EqualFold(trace.Status, autoGovernanceStatusResolving) || approvalResolutionDeliveredByGovernance(approval) {
+		if autoGovernanceTraceStateIs(trace.Status, governancemodel.AutoGovernanceTraceStateResolving) || approvalResolutionDeliveredByGovernance(approval) {
 			return s.finalizeRecoveredTrace(ctx, trace, "approve")
 		}
 		return s.blockIncompleteTrace(ctx, trace, "owner_resolved_externally")

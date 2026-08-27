@@ -11,7 +11,7 @@ import (
 func TestGovernanceTraceInternalReducerOwnsMonotonicStatus(t *testing.T) {
 	observed := governancemodel.AutoGovernanceTrace{
 		ID: "trace-1", WorkspaceID: "ws-1", RunID: "run-1", ItemType: "ticket", ItemID: "ticket-1",
-		Status: autoGovernanceStatusResolved, OccurredAt: "2026-08-22T00:00:00Z",
+		Status: governancemodel.AutoGovernanceTraceStateResolved, OccurredAt: "2026-08-22T00:00:00Z",
 	}
 	event, err := normalizeGovernanceTraceInternalEvent(governanceTraceInternalEvent{
 		Kind: governanceTraceInternalEventEvaluated, WorkspaceID: observed.WorkspaceID, TraceID: observed.ID, Evaluated: &observed,
@@ -23,14 +23,14 @@ func TestGovernanceTraceInternalReducerOwnsMonotonicStatus(t *testing.T) {
 		t.Fatalf("caller-selected status survived normalization: %+v", event.Evaluated)
 	}
 	evaluated, err := reduceGovernanceTraceInternalEvent(nil, event)
-	if err != nil || evaluated.Next.Status != autoGovernanceStatusEvaluated {
+	if err != nil || evaluated.Next.Status != governancemodel.AutoGovernanceTraceStateEvaluated {
 		t.Fatalf("evaluated transition = %+v err=%v", evaluated, err)
 	}
 	resolving, err := reduceGovernanceTraceInternalEvent(evaluated.Next, governanceTraceInternalEvent{
 		Kind: governanceTraceInternalEventResolutionStarted, WorkspaceID: observed.WorkspaceID, TraceID: observed.ID,
 		ResolutionStarted: &governanceTraceResolutionStartedFact{Action: "answer", OccurredAt: "2026-08-22T00:00:01Z"},
 	})
-	if err != nil || resolving.Next.Status != autoGovernanceStatusResolving {
+	if err != nil || resolving.Next.Status != governancemodel.AutoGovernanceTraceStateResolving {
 		t.Fatalf("resolving transition = %+v err=%v", resolving, err)
 	}
 	resolvedEvent := governanceTraceInternalEvent{
@@ -38,11 +38,11 @@ func TestGovernanceTraceInternalReducerOwnsMonotonicStatus(t *testing.T) {
 		ResolutionCompleted: &governanceTraceResolvedFact{Action: "answer", OccurredAt: "2026-08-22T00:00:02Z"},
 	}
 	resolved, err := reduceGovernanceTraceInternalEvent(resolving.Next, resolvedEvent)
-	if err != nil || resolved.Next.Status != autoGovernanceStatusResolved {
+	if err != nil || resolved.Next.Status != governancemodel.AutoGovernanceTraceStateResolved {
 		t.Fatalf("resolved transition = %+v err=%v", resolved, err)
 	}
 	duplicate, err := reduceGovernanceTraceInternalEvent(resolved.Next, resolvedEvent)
-	if err != nil || !duplicate.Noop || duplicate.Next.Status != autoGovernanceStatusResolved {
+	if err != nil || !duplicate.Noop || duplicate.Next.Status != governancemodel.AutoGovernanceTraceStateResolved {
 		t.Fatalf("duplicate resolved transition = %+v err=%v", duplicate, err)
 	}
 	_, err = reduceGovernanceTraceInternalEvent(resolved.Next, governanceTraceInternalEvent{

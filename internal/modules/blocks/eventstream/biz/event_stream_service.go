@@ -567,7 +567,7 @@ func validDoDDefinedData(data workspaceevents.DoDDefinedData) bool {
 
 func validGovernanceData(data governanceevents.GovernanceData) bool {
 	trace := data.Trace
-	return trace.ID != "" && trace.WorkspaceID != "" && trace.RunID != "" && strings.TrimSpace(trace.ItemType) != "" && strings.TrimSpace(trace.ItemID) != "" && strings.TrimSpace(trace.Status) != ""
+	return trace.ID != "" && trace.WorkspaceID != "" && trace.RunID != "" && strings.TrimSpace(trace.ItemType) != "" && strings.TrimSpace(trace.ItemID) != "" && strings.TrimSpace(string(trace.Status)) != ""
 }
 
 func validTicketChangedData(data decisionevents.TicketChangedData) bool {
@@ -770,7 +770,7 @@ func governanceRecord(topic string, data governanceevents.GovernanceData) *event
 			RiskLevel: trace.RiskLevel, Confidence: trace.Confidence, PolicyMatched: trace.PolicyMatched, PolicyBlocked: trace.PolicyBlocked,
 			BudgetBefore: trace.BudgetBefore, BudgetAfter: trace.BudgetAfter, LLMProviderID: trace.LLMProviderID, LLMModel: trace.LLMModel,
 			LLMDecisionPreview: trace.LLMDecisionPreview, PromptFingerprint: trace.PromptFingerprint,
-			Status: trace.Status, Reason: trace.Reason, EscalationReason: data.EscalationReason,
+			Status: string(trace.Status), Reason: trace.Reason, EscalationReason: data.EscalationReason,
 		}).EventPayload(),
 	}
 }

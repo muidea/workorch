@@ -100,6 +100,14 @@ func (m *Biz) driveRuntimeSemanticRequired(ctx context.Context, aggregate runtim
 }
 
 func (m *Biz) driveRuntimeSemanticOrderAccepted(ctx context.Context, aggregate runtime.RuntimeAggregate, ledger runtimecontract.RuntimeSemanticPlanningLedger) (runtime.RuntimeAggregate, error) {
+	if ledger.Phase != runtimecontract.RuntimeSemanticPlanningOrderAccepted || ledger.Manifest == nil || ledger.CoverageOrderDocument == nil {
+		return runtime.RuntimeAggregate{}, fmt.Errorf("%w: semantic order-accepted drive requires complete generation identity", common.ErrConflict)
+	}
+	expectedGenerationID := runtimecontract.StableRuntimeSemanticGenerationID(ledger.Manifest.Hash, ledger.LogicalRequestID)
+	expectedOrderHash := runtimecontract.StableRuntimeSemanticPlanDocumentHash(*ledger.CoverageOrderDocument)
+	if expectedGenerationID == "" || expectedOrderHash == "" {
+		return runtime.RuntimeAggregate{}, fmt.Errorf("%w: semantic order-accepted drive has incomplete immutable lineage", common.ErrConflict)
+	}
 	projected, err := m.submitRuntimeInternalEvent(ctx, runtime.RuntimeInternalEvent{
 		Kind: runtime.RuntimeInternalEventEligibleFocusProjected, Scope: runtime.RuntimeInternalEventScope{WorkspaceID: aggregate.Facts.WorkspaceID, RunID: aggregate.Facts.RunID}, Authority: &runtime.RuntimeInternalAuthorityPayload{SemanticOrderManifestHash: ledger.Manifest.Hash, SemanticCoverageOrder: append([]common.CoverageWorkItemID(nil), ledger.CoverageOrderDocument.CoverageOrder...)},
 	})
@@ -108,6 +116,18 @@ func (m *Biz) driveRuntimeSemanticOrderAccepted(ctx context.Context, aggregate r
 	}
 	aggregate = projected.Aggregate
 	ledger = aggregate.SemanticPlanning.Clone()
+	// EligibleFocusProjected is an owner-private SM-2 event and may retire the
+	// generation when a normal Definition closure has changed. Hand that new
+	// phase back to the outer SM-4 drive immediately; never continue with the
+	// pre-event manifest/order snapshot (or dereference the retired nil values).
+	if ledger.Phase != runtimecontract.RuntimeSemanticPlanningOrderAccepted {
+		return aggregate, nil
+	}
+	if ledger.Manifest == nil || ledger.CoverageOrderDocument == nil ||
+		runtimecontract.StableRuntimeSemanticGenerationID(ledger.Manifest.Hash, ledger.LogicalRequestID) != expectedGenerationID ||
+		runtimecontract.StableRuntimeSemanticPlanDocumentHash(*ledger.CoverageOrderDocument) != expectedOrderHash {
+		return runtime.RuntimeAggregate{}, fmt.Errorf("%w: semantic generation changed during eligible focus projection", common.ErrConflict)
+	}
 	batchRequestKey := fmt.Sprintf("semantic-proof-batch-%d", ledger.NextBatchSequence)
 	logicalRequestID := runtimeSemanticLogicalRequestID(aggregate, ledger.StablePrefixHash, ledger.Manifest.Hash, batchRequestKey)
 	return m.compileRuntimeSemanticPlanBatch(ctx, aggregate, logicalRequestID, 4)

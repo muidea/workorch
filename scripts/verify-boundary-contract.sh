@@ -1003,9 +1003,10 @@ done < "$state_transition_owner_manifest"
 
 # The transition-file inventory above catches private dispatcher additions.
 # The AST inventory complements it by exhaustively classifying every named
-# string State/Status/Phase/Disposition, including values that are deliberately
-# immutable outcomes, pure dispositions, projections, or technical state and
-# therefore must not gain a business-state reducer.
+# string State/Status/Phase/Disposition and every bare state-like string field
+# in Block/Kernel owner pkg/models. Explicit immutable outcome/trace and derived
+# projection fields remain non-authoritative; transition values must use a named
+# state type and therefore cannot bypass the owner inventory.
 go run ./internal/tools/stateownercheck \
   -root . \
   -inventory "$state_model_owner_manifest" \

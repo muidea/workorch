@@ -106,6 +106,14 @@ load facts
   `validation`；它绑定原 failure、convergence hash 和 File catalog，但不在 pre-seal 或 reducer 中发明 target。File
   feasibility 与 SM-2 binding 封存 exact prospective target 后才可进入 SM-3。accepted repair 必须在同一 SM-2 CAS 中退休
   repair binding、重开同一 CWI并固定进入 fresh validation，不能授予 DoD credit、创建新 CWI 或选择替代 terminal。
+- semantic generation 的 eligible closure 只能由 generation purpose 派生一次，并由 accepted-order projection、focus
+  advance 与 retirement check 共用。普通 definition generation 使用当时全部尚未绑定且可规划的 current CWI；
+  `validation_failure_repair` generation 只使用触发 repair 的 exact current CWI。其它全局 eligible CWI 的出现不能退休
+  repair-local manifest 或触发第二个 provider request；普通 generation 的真实新增 eligible member，或 repair CWI、purpose、
+  lineage 漂移，才可由 SM-2 private event 退休 current generation。任何 LLM/capability result 都不能扩张该 closure。
+- semantic owner-private event 的 CAS 返回后，controller 必须从 returned aggregate 重新判定 phase、generation、manifest、
+  accepted order 与 request identity。若 event 已退休 generation/manifest，当前 transaction 立即结束并交回 SM-4 重新
+  drive；禁止继续使用 event 前的 manifest/hash，也禁止把 nil/stale manifest panic 当作 recovery signal。
 - LLM assessment 中的 disposition、缺失 evidence kind、目标和 reason 都只是 observation/original diagnostic，
   不是 Runtime action。SM-2 必须仅从已持久化的 current-focus coverage、accepted receipt/evidence quality、封存的
   focus/target policy、owner-grounded repair surface 及 freshness 生成唯一的 `RuntimeRepairDirective.RequiredState`。
@@ -275,6 +283,13 @@ sealed authority + preflight ready
   Run owner state notification 才能投递 Orchestrator 的内部 drive event。
 - 每个非等待、非终态 transition 必须持久化递增 `StateRevision`；无进展或超过 guard 必须 typed
   fail-fast，不能在进程内空转。
+- 每个 Orchestrator worker 的退出边界必须满足以下二选一：仍由当前 run-scoped gate 同步执行下一 owner-private transition；
+  或在释放 gate 前，aggregate 已具有 exact terminal/governance/recoverable-wait/lifecycle handoff，或已持久化并挂载 exact
+  `RuntimeDriveLease` successor。owner worker 的 panic 必须在 Orchestrator 边界恢复为稳定 owner-local failure，并沿既有
+  private event/lease 路径持久化 recovery successor；panic 文本不是 authority，Application、Run、projection 与外部 watchdog
+  均不得代为续驱。若 successor CAS 或本地 timer mount 基础设施失败，当前 gate 必须与已有 scheduled/running authority
+  一同保留，由 fresh startup 恢复 exact generation；此时不得虚报 live timer，也不能以 `retry=nil` 或 generation zero
+  释放为 active orphan。
 - singleflight key 必须包含 workspace/run。重复 Start、Resume 和 governance continuation 只合并到
   同一 drive。
 - recoverable runtime wait必须持久化exact wait identity、reason、recovery condition、next eligible drive/deadline、trigger
