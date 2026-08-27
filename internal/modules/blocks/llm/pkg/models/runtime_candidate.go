@@ -45,31 +45,31 @@ func (c *RuntimeCandidateCorrectionInput) Clone() *RuntimeCandidateCorrectionInp
 // StableRequestCorrectionHash is the canonical identity shared by the
 // Orchestrator projection and the LLM owner's independent request fence. It
 // contains no Orchestrator disposition or terminal state.
-func (c *RuntimeCandidateCorrectionInput) StableRequestCorrectionHash(failure *runtimecontract.RuntimeCandidateFailure) string {
+func (c *RuntimeCandidateCorrectionInput) StableRequestCorrectionHash(observation *runtimecontract.RuntimeCandidateCorrectionObservation) string {
 	if c == nil {
-		return runtimecontract.StableRuntimeCandidateRequestCorrectionHash(failure, "", nil, nil)
+		return runtimecontract.StableRuntimeCandidateRequestCorrectionHash(observation, "", nil, nil)
 	}
 	value := c.Normalized()
-	return runtimecontract.StableRuntimeCandidateRequestCorrectionHash(failure, value.ManifestHash, value.Objectives, &value.Witness)
+	return runtimecontract.StableRuntimeCandidateRequestCorrectionHash(observation, value.ManifestHash, value.Objectives, &value.Witness)
 }
 
 type RuntimeCandidateRequest struct {
-	DocumentKind                runtimecontract.RuntimeProviderDocumentKind
-	RequestIdentity             runtimecontract.RuntimeCandidateRequestIdentity
-	ExpectedDocument            *runtimecontract.RuntimeExpectedDocumentContract
-	Decision                    runtimecontract.RuntimeDecision
-	Transaction                 runtimecontract.AuthorityTransaction
-	CandidateAttempt            int
-	PreviousFailure             *runtimecontract.RuntimeCandidateFailure
-	CandidateCorrection         *RuntimeCandidateCorrectionInput
-	StablePrefixHash            string
-	CandidateManifest           runtimecontract.RuntimeCandidateContractManifest
-	DefinitionContext           runtimecontract.RuntimeDefinitionContext
-	CandidateContext            runtimecontract.RuntimeCandidateContext
-	SemanticManifest            runtimecontract.RuntimeSemanticPlanManifest
-	SemanticContext             runtimecontract.RuntimeSemanticPlanRequestContext
-	PreviousSemanticRejection   *runtimecontract.RuntimeOriginalDiagnostic
-	SemanticCorrectionDirective *runtimecontract.RuntimeSemanticCorrectionDirective
+	DocumentKind                   runtimecontract.RuntimeProviderDocumentKind
+	RequestIdentity                runtimecontract.RuntimeCandidateRequestIdentity
+	ExpectedDocument               *runtimecontract.RuntimeExpectedDocumentContract
+	Decision                       runtimecontract.RuntimeDecision
+	Transaction                    runtimecontract.AuthorityTransaction
+	CandidateAttempt               int
+	CandidateCorrectionObservation *runtimecontract.RuntimeCandidateCorrectionObservation
+	CandidateCorrection            *RuntimeCandidateCorrectionInput
+	StablePrefixHash               string
+	CandidateManifest              runtimecontract.RuntimeCandidateContractManifest
+	DefinitionContext              runtimecontract.RuntimeDefinitionContext
+	CandidateContext               runtimecontract.RuntimeCandidateContext
+	SemanticManifest               runtimecontract.RuntimeSemanticPlanManifest
+	SemanticContext                runtimecontract.RuntimeSemanticPlanRequestContext
+	SemanticCorrectionObservation  *runtimecontract.RuntimeSemanticCorrectionObservation
+	SemanticCorrectionDirective    *runtimecontract.RuntimeSemanticCorrectionDirective
 }
 
 // RuntimeCandidateGenerationResult is the typed provider outcome for a Runtime candidate

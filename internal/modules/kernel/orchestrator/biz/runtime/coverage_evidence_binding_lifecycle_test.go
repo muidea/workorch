@@ -37,11 +37,12 @@ func TestCoverageEvidenceBindingReceiptCrashRecoveryCreditsExactlyOnce(t *testin
 	if err != nil {
 		t.Fatal(err)
 	}
-	claimed, err := controller.claimOperationExecution(ctx, facts.WorkspaceID, facts.RunID, "write-c12-recovery")
+	operationID := runtimeTestActiveOperationID(t, sealed, 0)
+	claimed, err := controller.claimOperationExecution(ctx, facts.WorkspaceID, facts.RunID, operationID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	execution, found := operationExecutionRecord(claimed.ActiveDispatch.OperationExecutions, "write-c12-recovery")
+	execution, found := operationExecutionRecord(claimed.ActiveDispatch.OperationExecutions, operationID)
 	if !found {
 		t.Fatal("sealed operation execution is missing")
 	}
@@ -199,7 +200,7 @@ func TestCoverageEvidenceBindingMissingProofCannotBeClaimedOrGovernedAway(t *tes
 	}
 	evidence := ExecutionEvidence{
 		EventID: "evidence-c12-missing-proof", WorkspaceID: facts.WorkspaceID, RunID: facts.RunID, DispatchID: sealed.ActiveDispatch.ID,
-		AuthoritySnapshotID: sealed.ActiveDispatch.Transaction.AuthoritySnapshotID, OperationID: "validate-c12-missing-proof",
+		AuthoritySnapshotID: sealed.ActiveDispatch.Transaction.AuthoritySnapshotID, OperationID: runtimeTestActiveOperationID(t, sealed, 0),
 		Kind: runtimecontract.EvidenceKindValidation, Status: ExecutionEvidenceStatusAccepted,
 		Evidence: runtimecontract.RuntimeOperationEvidence{Validation: &runtimecontract.RuntimeValidationObservation{
 			RecipeID: runtimeManagedValidationEvidencePolicy().ID, ExecutedChecks: []string{"required-check"}, PassedChecks: nil,

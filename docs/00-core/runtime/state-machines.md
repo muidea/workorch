@@ -199,7 +199,8 @@ load facts
 ```text
 sealed authority + preflight ready
   -> persisted request session
-  -> complete document -> candidate attempt 0 -> optional attempt 1
+  -> typed document result -> strict local admission or document-conformance rejection
+  -> candidate attempt 0 -> optional attempt 1
   -> accepted candidate -> persist sealed dispatch
   -> claimed operation -> owner receipt -> evidence commit -> close dispatch
 ```
@@ -218,8 +219,9 @@ sealed authority + preflight ready
 - request session、authority transaction、canonical state/required output、`DocumentKind`、ExpectedDocument、provider
   ceiling、reasoning effort、budget和stable-prefix identity共同构成purpose-bound semantic invocation seal。它实现产品层
   semantic activation要求，但不是新owner、第五状态机或`RuntimeBootstrap.Activation`替代物。
-- 只有完整 document 才可创建 candidate attempt。attempt 0/1 必须使用同一 transaction 与 stable prefix；
-  第二次完整 schema/contract rejection 形成 typed `candidate_retry_exhausted`，不存在 attempt 2。
+- incomplete/transport/provider-terminal 不得创建 candidate attempt。coherent completed 的 empty/non-JSON document-conformance
+  rejection 与 complete document 的 schema/contract/semantic rejection 共用 attempt 0/1；attempt 0/1 必须使用同一
+  transaction 与 stable prefix，第二次任一可纠错 rejection 形成 typed `candidate_retry_exhausted`，不存在 attempt 2。
 - renderer、wire DTO、strict decoder、admission、owner feasibility 与 fixture 对同一
   `CandidateContractManifest` 给出一致解释；候选只能选择 manifest 已封存的 `bindingRefs`。未知字段、参数、
   target、effect、dependency、operation kind、未知 binding 或裸 `coverageWorkItemIds` 不得由第二解析路径静默放宽。

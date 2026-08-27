@@ -11,7 +11,6 @@ import (
 	"strings"
 	"testing"
 
-	cd "github.com/muidea/magicCommon/def"
 	runbiz "github.com/muidea/workorch/internal/modules/blocks/run/biz"
 
 	llmevents "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/events"
@@ -168,7 +167,7 @@ func executeRuntimeFreshValidationForAssessment(t *testing.T, ctx context.Contex
 	if proposed, err := admitRuntimeCandidateProposalForTest(ctx, controller, "ws-v2", "run-v2", 0, candidate); err != nil || !proposed.Admission.Accepted() {
 		t.Fatalf("fresh validation proposal=%+v err=%v", proposed, err)
 	}
-	recordRuntimeFileBackedManagedValidationFeasibility(t, ctx, controller, operationID)
+	recordRuntimeFileBackedManagedValidationFeasibility(t, ctx, controller)
 	sealed, err := admitAndSealRuntimeCandidateAttemptForTest(ctx, controller, "ws-v2", "run-v2", 0, candidate)
 	if err != nil || sealed.Aggregate.ActiveDispatch == nil {
 		t.Fatalf("fresh validation seal=%+v err=%v", sealed, err)
@@ -207,7 +206,7 @@ func executeRuntimeFreshValidationForAssessment(t *testing.T, ctx context.Contex
 // may use a managed validation recipe.  It deliberately happens after the
 // persisted candidate proposal and before seal, mirroring SM-3's production
 // order instead of letting a test executor imply feasibility retroactively.
-func recordRuntimeFileBackedManagedValidationFeasibility(t *testing.T, ctx context.Context, controller *runtime.RuntimeController, operationID string) {
+func recordRuntimeFileBackedManagedValidationFeasibility(t *testing.T, ctx context.Context, controller *runtime.RuntimeController) {
 	t.Helper()
 	aggregate, err := controller.Load(ctx, "ws-v2", "run-v2")
 	if err != nil {
@@ -231,6 +230,18 @@ func recordRuntimeFileBackedManagedValidationFeasibility(t *testing.T, ctx conte
 	}
 	if inventory == nil {
 		t.Fatalf("managed validation fixture has no Shell admissibility inventory: %+v", aggregate.Facts.Resources.OperationAdmissibilities)
+	}
+	operationID := ""
+	for _, attempt := range aggregate.CandidateAttempts {
+		if attempt.State != runtimecontract.RuntimeCandidateAttemptStatePending || attempt.Proposal == nil ||
+			attempt.Proposal.Validation == nil || len(attempt.Proposal.Validation.Operations) != 1 {
+			continue
+		}
+		operationID = attempt.Proposal.Validation.Operations[0].Operation.ID
+		break
+	}
+	if operationID == "" {
+		t.Fatalf("managed validation fixture has no owner-derived pending operation: %+v", aggregate.CandidateAttempts)
 	}
 	if _, err := runtimeTestControllerRecordCandidateFeasibility(controller, ctx, "ws-v2", "run-v2", 0, runtimecontract.RuntimeCandidateFeasibilityRecord{
 		OperationID: operationID, AdmissibilitySnapshotID: inventory.SnapshotID,
@@ -358,7 +369,8 @@ func TestRuntimeStateRepositoryPersistsAndLoadsThroughRunOwner(t *testing.T) {
 		State: runtimecontract.RuntimeCandidateRequestSessionRecoveryPending, NextSequence: 2, IncompleteOutcomes: 1,
 		LastPhysicalCallID: "physical-call-1", ProviderSubmitted: false,
 		LastOutcome: runtimecontract.RuntimeCandidateRequestOutcome{
-			Class: runtimecontract.RuntimeCandidateRequestOutcomeDocumentIncomplete, Code: "candidate_output_incomplete",
+			Class: runtimecontract.RuntimeCandidateRequestOutcomeDocumentIncomplete,
+			Code:  runtimecontract.RuntimeProviderDocumentCodeIncompleteJSON, Signature: runtimecontract.RuntimeProviderDocumentSignatureIncompleteJSON,
 		},
 	}
 	requestSession.LogicalRequestID = runtimecontract.StableRuntimeCandidateRequestSessionID(
@@ -374,7 +386,7 @@ func TestRuntimeStateRepositoryPersistsAndLoadsThroughRunOwner(t *testing.T) {
 	documentOutcome := runtimecontract.RuntimeProviderDocumentFraming{
 		Disposition: runtimecontract.RuntimeProviderDocumentIncomplete, ExpectedDocumentHash: expected.Hash,
 		ResponseHash: runtimecontract.StableRuntimeProviderResponseHash([]byte("partial")), ResponseBytes: 7,
-		Code: "candidate_output_incomplete", Signature: "candidate-output-incomplete",
+		Code: runtimecontract.RuntimeProviderDocumentCodeIncompleteJSON, Signature: runtimecontract.RuntimeProviderDocumentSignatureIncompleteJSON,
 	}
 	requestSession.LastDocumentFraming = &documentOutcome
 	aggregate.CandidateRequestSessions = []runtimecontract.RuntimeCandidateRequestSession{requestSession}
@@ -1787,8 +1799,9 @@ func TestRuntimeStateRepositoryCandidateProposalAndDispatchSealCrashRestartAreAt
 		if err != nil || loaded.ActiveDispatch != nil || len(loaded.CandidateAttempts) != 1 || loaded.CandidateAttempts[0].Proposal == nil {
 			t.Fatalf("restart did not retain committed proposal after response loss: aggregate=%+v err=%v", loaded, err)
 		}
+		persistedCandidateHash := runtimecontract.StableRuntimeCandidateHash(*loaded.CandidateAttempts[0].Proposal)
 		sealed, err := admitAndSealRuntimeCandidateAttemptForTest(ctx, restarted, "ws-v2", "run-v2", 0, candidate)
-		if err != nil || sealed.Aggregate.ActiveDispatch == nil || sealed.Aggregate.ActiveDispatch.CandidateHash != runtimecontract.StableRuntimeCandidateHash(candidate) {
+		if err != nil || sealed.Aggregate.ActiveDispatch == nil || sealed.Aggregate.ActiveDispatch.CandidateHash != persistedCandidateHash {
 			t.Fatalf("response-loss proposal did not seal the original candidate: sealed=%+v err=%v", sealed, err)
 		}
 	})
@@ -2053,11 +2066,15 @@ func TestRuntimeStateRepositoryOwnerFailureObservationReceiptCrashRestartIsAtomi
 	if proposed, err := admitRuntimeCandidateProposalForTest(ctx, controller, "ws-v2", "run-v2", 0, candidate); err != nil || !proposed.Admission.Accepted() {
 		t.Fatalf("failure-observation validation proposal=%+v err=%v", proposed, err)
 	}
-	recordRuntimeFileBackedManagedValidationFeasibility(t, ctx, controller, "failure-observation-read")
+	recordRuntimeFileBackedManagedValidationFeasibility(t, ctx, controller)
 	sealed, err := admitAndSealRuntimeCandidateAttemptForTest(ctx, controller, "ws-v2", "run-v2", 0, candidate)
 	if err != nil || !sealed.Admission.Accepted() || sealed.Aggregate.ActiveDispatch == nil {
 		t.Fatalf("validation candidate seal=%+v err=%v", sealed, err)
 	}
+	if sealed.Aggregate.ActiveDispatch.Candidate.Validation == nil || len(sealed.Aggregate.ActiveDispatch.Candidate.Validation.Operations) != 1 {
+		t.Fatalf("validation candidate sealed unexpected authority=%+v", sealed.Aggregate.ActiveDispatch.Candidate)
+	}
+	sealedOperationID := sealed.Aggregate.ActiveDispatch.Candidate.Validation.Operations[0].Operation.ID
 
 	observedFailure := runtimecontract.FailureFact{
 		Class: runtimecontract.FailureClassBuildFailure, Code: "implementation_check_failed",
@@ -2156,7 +2173,7 @@ func TestRuntimeStateRepositoryOwnerFailureObservationReceiptCrashRestartIsAtomi
 		len(persisted.Facts.Evidence.Rejected) != 0 || persisted.Facts.Failure != nil || persisted.Facts.Resources.FailureTarget != nil {
 		t.Fatalf("receipt-loss restart partially persisted failure authority: aggregate=%+v err=%v", persisted, err)
 	}
-	execution, found := runtimeDriveOperationExecutionRecord(persisted.ActiveDispatch.OperationExecutions, "failure-observation-read")
+	execution, found := runtimeDriveOperationExecutionRecord(persisted.ActiveDispatch.OperationExecutions, sealedOperationID)
 	if !found || execution.State != runtimecontract.OperationExecutionOutcomeUnknown {
 		t.Fatalf("receipt-loss restart execution=%+v found=%v", execution, found)
 	}
@@ -2378,6 +2395,10 @@ func TestRuntimeFileBackedRestartKeepsRejectedShapeAcrossOwnerRetarget(t *testin
 		t.Fatal(err)
 	}
 	newCandidate = bindRuntimeTestCandidateToManifest(manifest, newCandidate)
+	newCandidate, err = runtimecontract.DeriveRuntimeCandidateOperationAuthority(manifest, newCandidate)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if admission := evaluateRuntimeCandidateAdmissionForTest(resumed, newCandidate); !admission.Accepted() {
 		t.Fatalf("new owner-retargeted shape was not admissible after restart: %+v", admission)
 	}
@@ -2989,7 +3010,7 @@ func TestRuntimeMainlineRequestsAndSealsTypedCandidate(t *testing.T) {
 // cover the CAS-before and response-loss-after terminal boundaries without
 // involving a provider replay or a UI recovery path.
 func TestRuntimeFileBackedSemanticCandidateReplayExhaustionSurvivesCASBoundaries(t *testing.T) {
-	newBaseline := func(t *testing.T) (context.Context, runtime.RuntimeStateRepository, runtimecontract.RuntimeCandidate, runtimecontract.RuntimeCandidate) {
+	newBaseline := func(t *testing.T) (context.Context, runtime.RuntimeStateRepository, runtimecontract.RuntimeCandidate, runtimecontract.RuntimeCandidate, runtimecontract.RuntimeCandidateContractManifest, string) {
 		t.Helper()
 		ctx := context.Background()
 		hub := magicevent.NewHub(16)
@@ -3052,11 +3073,15 @@ func TestRuntimeFileBackedSemanticCandidateReplayExhaustionSurvivesCASBoundaries
 		if _, err := beginRuntimeCandidateAttemptForTest(ctx, controller, "ws-v2", "run-v2", 1, "semantic-replay-prefix"); err != nil {
 			t.Fatal(err)
 		}
-		return ctx, repository, wrong, equivalent
+		manifest, logicalRequestID, err := directRuntimeCandidateAttemptTestBinding(ctx, controller, "ws-v2", "run-v2", 1)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return ctx, repository, wrong, equivalent, manifest, logicalRequestID
 	}
 
 	t.Run("before terminal CAS", func(t *testing.T) {
-		ctx, repository, _, equivalent := newBaseline(t)
+		ctx, repository, _, equivalent, _, _ := newBaseline(t)
 		crashing, err := runtime.NewRuntimeController(&failOnceRuntimeStateRepository{
 			RuntimeStateRepository: repository, err: errors.New("injected semantic exhaustion CAS failure"),
 		})
@@ -3082,7 +3107,7 @@ func TestRuntimeFileBackedSemanticCandidateReplayExhaustionSurvivesCASBoundaries
 	})
 
 	t.Run("after terminal CAS response loss", func(t *testing.T) {
-		ctx, repository, _, equivalent := newBaseline(t)
+		ctx, repository, _, equivalent, manifest, logicalRequestID := newBaseline(t)
 		const marker = "semantic-exhaustion-response-loss"
 		responseLost, err := runtime.NewRuntimeController(&panicAfterRuntimeStateSaveRepository{
 			RuntimeStateRepository: repository, marker: marker,
@@ -3113,27 +3138,35 @@ func TestRuntimeFileBackedSemanticCandidateReplayExhaustionSurvivesCASBoundaries
 			t.Fatalf("post-CAS restart did not preserve terminal semantic exhaustion: aggregate=%+v err=%v", loaded, err)
 		}
 		revision := loaded.StateRevision
-		// A response can be re-rendered by a provider after the terminal CAS. The
-		// operation ID and parameter wire order are not authority, so this is the
-		// same rejected semantic shape without being the same byte-level proposal.
-		replayed := runtimecontract.RuntimeCandidate{StateChange: &runtimecontract.StateChangeCandidate{
-			Operations: append([]runtimecontract.StateChangingOperation(nil), equivalent.StateChange.Operations...),
-		}}
-		replayed.StateChange.Operations[0].Operation.ID = "provider-terminal-replay-id"
-		replayParameters := append([]runtimecontract.OperationParameter(nil), replayed.StateChange.Operations[0].Operation.Parameters...)
-		for left, right := 0, len(replayParameters)-1; left < right; left, right = left+1, right-1 {
-			replayParameters[left], replayParameters[right] = replayParameters[right], replayParameters[left]
-		}
-		replayed.StateChange.Operations[0].Operation.Parameters = replayParameters
 		persisted := loaded.CandidateAttempts[1].Proposal
-		if persisted == nil ||
-			runtimecontract.StableRuntimeCandidateHash(*persisted) == runtimecontract.StableRuntimeCandidateHash(replayed) ||
-			runtimecontract.StableRuntimeCandidateSemanticShape(*persisted) != runtimecontract.StableRuntimeCandidateSemanticShape(replayed) {
-			t.Fatalf("terminal replay fixture is not an ID/wire-only semantic equivalent: persisted=%+v replayed=%+v", persisted, replayed)
+		if persisted == nil {
+			t.Fatal("terminal response-loss fixture lost its durable rejected proposal")
 		}
-		duplicate, err := admitRuntimeCandidateProposalForTest(ctx, restarted, "ws-v2", "run-v2", 1, replayed)
+		duplicate, err := runtimeTestControllerAdmitCandidateProposal(restarted, ctx, "ws-v2", "run-v2", 1, manifest, logicalRequestID, *persisted)
 		if err != nil || duplicate.Admission.Failure == nil || duplicate.Admission.Failure.Code != loaded.CandidateAttempts[1].Failure.Code || duplicate.Aggregate.StateRevision != revision {
 			t.Fatalf("post-CAS duplicate changed terminal authority: result=%+v err=%v", duplicate, err)
+		}
+		operation := persisted.StateChange.Operations[0].Operation
+		operation.Parameters = append([]runtimecontract.OperationParameter(nil), operation.Parameters...)
+		for index := range operation.Parameters {
+			if operation.Parameters[index].Name == "newText" {
+				changed := "different terminal replay"
+				operation.Parameters[index].String = &changed
+			}
+		}
+		operation.ID = ""
+		operation.DependsOn = nil
+		different := runtimecontract.RuntimeCandidate{StateChange: &runtimecontract.StateChangeCandidate{Operations: []runtimecontract.StateChangingOperation{{Operation: operation}}}}
+		different, err = runtimecontract.DeriveRuntimeCandidateOperationAuthority(manifest, different)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := runtimeTestControllerAdmitCandidateProposal(restarted, ctx, "ws-v2", "run-v2", 1, manifest, logicalRequestID, different); !errors.Is(err, common.ErrConflict) {
+			t.Fatalf("post-terminal non-duplicate err=%v, want conflict", err)
+		}
+		afterDifferent, err := restarted.Load(ctx, "ws-v2", "run-v2")
+		if err != nil || afterDifferent.StateRevision != revision {
+			t.Fatalf("post-terminal non-duplicate changed authority: aggregate=%+v err=%v", afterDifferent, err)
 		}
 	})
 }
@@ -3296,14 +3329,14 @@ func TestRuntimeMainlineRetriesSameCandidateContractOnce(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if sealed.ActiveDispatch == nil || len(attempts) != 2 || attempts[0].CandidateAttempt != 0 || attempts[1].CandidateAttempt != 1 || attempts[0].PreviousFailure != nil || attempts[0].CandidateCorrection != nil || attempts[1].PreviousFailure == nil || attempts[1].CandidateCorrection == nil || attempts[1].CandidateCorrection.Witness.Path != "$.unexpected" || attempts[1].CandidateCorrection.Witness.AlternativeValue != "field_absent" || attempts[1].PreviousFailure.Diagnostic == nil || attempts[1].PreviousFailure.Diagnostic.Path != "$.unexpected" || attempts[1].PreviousFailure.Diagnostic.ManifestHash != attempts[1].CandidateManifest.Hash ||
+	if sealed.ActiveDispatch == nil || len(attempts) != 2 || attempts[0].CandidateAttempt != 0 || attempts[1].CandidateAttempt != 1 || attempts[0].CandidateCorrectionObservation != nil || attempts[0].CandidateCorrection != nil || attempts[1].CandidateCorrectionObservation == nil || attempts[1].CandidateCorrection == nil || attempts[1].CandidateCorrection.Witness.Path != "$.unexpected" || attempts[1].CandidateCorrection.Witness.AlternativeValue != "field_absent" || attempts[1].CandidateCorrectionObservation.Diagnostic == nil || attempts[1].CandidateCorrectionObservation.Diagnostic.Path != "$.unexpected" || attempts[1].CandidateCorrectionObservation.Diagnostic.ManifestHash != attempts[1].CandidateManifest.Hash ||
 		attempts[0].Transaction != attempts[1].Transaction || attempts[0].StablePrefixHash != attempts[1].StablePrefixHash || attempts[0].RequestIdentity.LogicalRequestID == attempts[1].RequestIdentity.LogicalRequestID {
 		t.Fatalf("attempts=%+v sealed=%+v", attempts, sealed)
 	}
 	if len(sealed.CandidateAttempts) != 2 || sealed.CandidateAttempts[0].State != runtimecontract.RuntimeCandidateAttemptStateFailed || sealed.CandidateAttempts[0].Failure == nil || sealed.CandidateAttempts[0].Failure.Diagnostic == nil || sealed.CandidateAttempts[0].Correction == nil || !reflect.DeepEqual(runtimeCandidateCorrectionInputFromDirective(sealed.CandidateAttempts[0].Correction), attempts[1].CandidateCorrection) || sealed.CandidateAttempts[1].State != runtimecontract.RuntimeCandidateAttemptStateAccepted {
 		t.Fatalf("persisted attempts = %+v", sealed.CandidateAttempts)
 	}
-	wantCorrectionHash := attempts[1].CandidateCorrection.StableRequestCorrectionHash(attempts[1].PreviousFailure)
+	wantCorrectionHash := attempts[1].CandidateCorrection.StableRequestCorrectionHash(attempts[1].CandidateCorrectionObservation)
 	correctionSessionFound := false
 	for _, session := range sealed.CandidateRequestSessions {
 		if session.LogicalRequestID == attempts[1].RequestIdentity.LogicalRequestID {
@@ -3336,45 +3369,67 @@ func TestRuntimeMainlineCandidateAuthorityExhaustionHasNoCorrectionProviderOrBud
 	}
 	t.Cleanup(func() { _ = runOwner.Stop(ctx) })
 
-	providerCalls := 0
-	llmObserver := magicevent.NewSimpleObserver(runtimecontract.RuntimeModuleLLM, hub)
-	llmObserver.Subscribe(llmevents.TopicRequestRuntimeCandidate, func(event magicevent.Event, result magicevent.Result) {
-		providerCalls++
-		command := event.Data().(llmevents.RequestRuntimeCandidateCommand)
-		candidate := bindRuntimeTestCandidateToManifest(command.CandidateManifest, runtimecontract.RuntimeCandidate{StateChange: &runtimecontract.StateChangeCandidate{Operations: []runtimecontract.StateChangingOperation{{Operation: runtimecontract.RuntimeOperation{
-			ID: "write-1", Kind: runtimecontract.StepKindFileEdit, CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-v2"},
-			TargetRefs: []string{"target.txt"}, Parameters: runtimeFileEditParameters("target.txt"),
-		}}}}})
-		document, encodeErr := runtimecontract.EncodeRuntimeCandidatePayloadWithManifest(command.CandidateManifest, candidate)
-		if encodeErr != nil {
-			result.Set(nil, &cd.Error{Code: cd.Unexpected, Message: encodeErr.Error(), Cause: encodeErr})
-			return
-		}
-		withoutID := strings.Replace(string(document), `"id":"write-1",`, "", 1)
-		if withoutID == string(document) {
-			result.Set(nil, cd.NewError(cd.Unexpected, "candidate fixture did not contain operation id"))
-			return
-		}
-		result.Set(runtimeProviderResultWithAuditForTest(command, llmevents.RequestRuntimeCandidateResult{
-			Transaction: command.Transaction, DocumentKind: command.DocumentKind, RequestIdentity: command.RequestIdentity,
-			ExpectedDocumentHash: runtimeExpectedDocumentHash(command.ExpectedDocument),
-			DocumentOutcome:      runtimeCompleteDocumentOutcome(command.ExpectedDocument, []byte(withoutID)),
-		}), nil)
-	})
-	t.Cleanup(func() { llmObserver.Unsubscribe(llmevents.TopicRequestRuntimeCandidate) })
-
 	biz := newRuntimeTestOwner()
 	runtimeRepository := runtimeStateRepository{hub: hub}
 	if err := biz.ConfigureRuntimeRepository(runtimeRepository); err != nil {
 		t.Fatal(err)
 	}
 	initialized := runtimeTestInitializeOperationFixture(t, ctx, biz, runtimeRepository, runtimeAggregate(t, 1).Facts, runtimeDefinition(), nil)
-	beforeCorrectionBudget, err := runtimecontract.RuntimeBudgetRemaining(initialized.ExecutionBudget, runtimecontract.RuntimeBudgetDimensionCandidateCorrection)
+	rawCandidate := runtimecontract.RuntimeCandidate{StateChange: &runtimecontract.StateChangeCandidate{Operations: []runtimecontract.StateChangingOperation{{Operation: runtimecontract.RuntimeOperation{
+		Kind: runtimecontract.StepKindFileEdit, CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-v2"},
+		TargetRefs: []string{"target.txt"}, Parameters: runtimeFileEditParameters("target.txt"),
+	}}}}}
+	manifest, err := runtimecontract.BuildRuntimeCandidateContractManifest(
+		initialized.Decision,
+		runtimecontract.RuntimeCandidateManifestOwnerFactsFromResources(initialized.Facts.Resources),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	replayedCandidate := bindRuntimeTestCandidateToManifest(manifest, rawCandidate)
+	replayedCandidate, err = runtimecontract.DeriveRuntimeCandidateOperationAuthority(manifest, replayedCandidate)
+	if err != nil {
+		t.Fatal(err)
+	}
+	previousDispatch, err := runtime.SealDispatchWithActivation(initialized.Decision, replayedCandidate, initialized.Facts.Activation)
+	if err != nil {
+		t.Fatal(err)
+	}
+	previousDispatch.State = runtime.DispatchStateCommitted
+	seeded := initialized
+	recordAcceptedRuntimeDispatchAdmissionForTest(&seeded, previousDispatch, manifest.Hash)
+	seeded.CompletedDispatches = []runtime.SealedDispatch{previousDispatch}
+	seeded.Facts.Evidence.Rejected = []runtimecontract.EvidenceFact{{
+		ID: "candidate-authority-rejected-shape", Kind: runtimecontract.EvidenceKindStateChange,
+		DispatchID: previousDispatch.ID, OperationID: replayedCandidate.StateChange.Operations[0].Operation.ID,
+		CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-v2"}, Revision: "runtime-evidence-00000000000000000001",
+		FailureClass: runtimecontract.FailureClassCandidateContractFailure, FailureCode: "single-shape-rejected", FailureSignature: "single-shape-rejected",
+	}}
+	seeded.Facts.EvidenceRevision = "runtime-evidence-00000000000000000001"
+	seeded.Facts, seeded.Decision, err = runtime.ReduceRuntimeStateWithDirective(seeded.Facts, &initialized.Decision.AuthoritySnapshot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	seeded.StateRevision++
+	if err := runtimeRepository.Save(ctx, seeded, initialized.StateRevision); err != nil {
+		t.Fatal(err)
+	}
+
+	providerCalls := 0
+	llmObserver := magicevent.NewSimpleObserver(runtimecontract.RuntimeModuleLLM, hub)
+	llmObserver.Subscribe(llmevents.TopicRequestRuntimeCandidate, func(event magicevent.Event, result magicevent.Result) {
+		providerCalls++
+		command := event.Data().(llmevents.RequestRuntimeCandidateCommand)
+		result.Set(runtimeCandidateResultForTest(t, command, rawCandidate), nil)
+	})
+	t.Cleanup(func() { llmObserver.Unsubscribe(llmevents.TopicRequestRuntimeCandidate) })
+
+	beforeCorrectionBudget, err := runtimecontract.RuntimeBudgetRemaining(seeded.ExecutionBudget, runtimecontract.RuntimeBudgetDimensionCandidateCorrection)
 	if err != nil {
 		t.Fatal(err)
 	}
 	module := newTestBiz(biz, hub, nil)
-	terminal, err := module.requestAndSealRuntimeCandidateWithRetry(ctx, initialized, "candidate-authority-prefix")
+	terminal, err := module.requestAndSealRuntimeCandidateWithRetry(ctx, seeded, "candidate-authority-prefix")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -3382,10 +3437,10 @@ func TestRuntimeMainlineCandidateAuthorityExhaustionHasNoCorrectionProviderOrBud
 	if err != nil {
 		t.Fatal(err)
 	}
-	if providerCalls != 1 || beforeCorrectionBudget != afterCorrectionBudget || terminal.ActiveDispatch != nil || len(terminal.OperationReceipts) != 0 || len(terminal.CandidateRequestSessions) != 1 ||
+	if providerCalls != 1 || beforeCorrectionBudget != afterCorrectionBudget || terminal.ActiveDispatch != nil || len(terminal.OperationReceipts) != 0 || len(terminal.CandidateRequestSessions) != 2 ||
 		terminal.Decision.State != runtimecontract.ConvergenceStateFailed || terminal.Decision.Terminal == nil || terminal.Decision.Terminal.Code != "candidate_authority_exhausted" ||
-		len(terminal.CandidateAttempts) != 1 || terminal.CandidateAttempts[0].Correction == nil || terminal.CandidateAttempts[0].Correction.Disposition != runtimecontract.RuntimeCandidateCorrectionRejectedFinal ||
-		terminal.CandidateAttempts[0].Correction.TerminalCode != "candidate_authority_exhausted" {
+		len(terminal.CandidateAttempts) != 2 || terminal.CandidateAttempts[1].Correction == nil || terminal.CandidateAttempts[1].Correction.Disposition != runtimecontract.RuntimeCandidateCorrectionRejectedFinal ||
+		terminal.CandidateAttempts[1].Correction.TerminalCode != "candidate_authority_exhausted" {
 		t.Fatalf("candidate authority exhaustion performed a correction effect: calls=%d budget=%d->%d aggregate=%+v", providerCalls, beforeCorrectionBudget, afterCorrectionBudget, terminal)
 	}
 
@@ -3395,7 +3450,7 @@ func TestRuntimeMainlineCandidateAuthorityExhaustionHasNoCorrectionProviderOrBud
 	}
 	revision := reloaded.StateRevision
 	replayed, err := newTestBiz(biz, hub, nil).requestAndSealRuntimeCandidateWithRetry(ctx, reloaded, "candidate-authority-prefix")
-	if err != nil || providerCalls != 1 || replayed.StateRevision != revision || len(replayed.CandidateAttempts) != 1 {
+	if err != nil || providerCalls != 1 || replayed.StateRevision != revision || len(replayed.CandidateAttempts) != 2 {
 		t.Fatalf("restart/duplicate replayed exhausted candidate authority: calls=%d aggregate=%+v err=%v", providerCalls, replayed, err)
 	}
 }
@@ -4102,8 +4157,8 @@ func TestRuntimeMainlinePartialReplayClosesAttemptThenSealsCorrectedRetry(t *tes
 		if command.CandidateAttempt == 0 {
 			candidate.StateChange = &runtimecontract.StateChangeCandidate{Operations: []runtimecontract.StateChangingOperation{{Operation: replayedOperation}, {Operation: newOperation}}}
 		} else {
-			if command.PreviousFailure == nil || command.PreviousFailure.Code != "candidate_partially_replays_rejected_shape" {
-				t.Errorf("retry missing typed partial replay failure: %+v", command.PreviousFailure)
+			if command.CandidateCorrectionObservation == nil || command.CandidateCorrectionObservation.Code != "candidate_partially_replays_rejected_shape" {
+				t.Errorf("retry missing typed partial replay observation: %+v", command.CandidateCorrectionObservation)
 			}
 			corrected := replayedOperation
 			corrected.ID = "corrected-edit"
@@ -4207,7 +4262,17 @@ func TestRuntimeMainlineRestartSkipsPersistedFeasibilityProbe(t *testing.T) {
 	if _, err := biz.RecordRuntimeCandidateProposal(ctx, "ws-v2", "run-v2", 0, candidate); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := biz.RecordRuntimeCandidateFeasibility(ctx, "ws-v2", "run-v2", 0, runtimecontract.RuntimeCandidateFeasibilityRecord{OperationID: "persisted-feasible-edit", AdmissibilitySnapshotID: inventory.SnapshotID, Observation: &runtimecontract.RuntimeOwnerFeasibilityObservation{Outcome: runtimecontract.RuntimeOwnerFeasibilityFeasible}}); err != nil {
+	manifest, _, err := runtimeCandidateAttemptTestBinding(ctx, biz, "ws-v2", "run-v2", 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	canonicalCandidate := bindRuntimeTestCandidateToManifest(manifest, candidate)
+	canonicalCandidate, err = runtimecontract.DeriveRuntimeCandidateOperationAuthority(manifest, canonicalCandidate)
+	if err != nil || canonicalCandidate.StateChange == nil || len(canonicalCandidate.StateChange.Operations) != 1 {
+		t.Fatalf("derive persisted feasibility candidate=%+v err=%v", canonicalCandidate, err)
+	}
+	operationID := canonicalCandidate.StateChange.Operations[0].Operation.ID
+	if _, err := biz.RecordRuntimeCandidateFeasibility(ctx, "ws-v2", "run-v2", 0, runtimecontract.RuntimeCandidateFeasibilityRecord{OperationID: operationID, AdmissibilitySnapshotID: inventory.SnapshotID, Observation: &runtimecontract.RuntimeOwnerFeasibilityObservation{Outcome: runtimecontract.RuntimeOwnerFeasibilityFeasible}}); err != nil {
 		t.Fatal(err)
 	}
 	restarted, err := biz.loadRuntime(ctx, "ws-v2", "run-v2")
@@ -4564,7 +4629,11 @@ func runtimeCandidateRequestContentID(t *testing.T, aggregate runtime.RuntimeAgg
 	if err != nil {
 		t.Fatal(err)
 	}
-	logicalRequestID, _, err := runtimeCandidateRequestIdentity(aggregate, stablePrefixHash, context, manifest, previousFailure, 1, nil)
+	previousCorrection, err := runtimePreviousCandidateCorrection(aggregate, attempt)
+	if err != nil {
+		t.Fatal(err)
+	}
+	logicalRequestID, _, err := runtimeCandidateRequestIdentity(aggregate, stablePrefixHash, context, manifest, previousFailure, previousCorrection, 1, runtimeCandidateCorrectionInputFromDirective(previousCorrection))
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -32,8 +32,8 @@ Provider-facing 第一段必须是连续的 C0→C1→C2。C3→C4→C5 只能�
   `RuntimeCandidateContractManifest` 渲染，不能从 profile、owner inventory 或错误文本拼第二份合同；
 - active rejected shape、failure lineage、current owner readiness 与 admissible operation set 属于 C3/C4，不得回写 C2；
 - C4 correction 只包含 provider-safe rejection 与 Orchestrator persisted `CorrectionDirective` 的 detached
-  `correctionInput` 投影。`correctable_once` 必须投影 manifest、objectives、concrete semantic witness 和 exact
-  alternative；correction/request-session identity 只绑定 failure 与该 detached input，不携带 persisted
+  `correctionInput` 投影。`correctable_once` 必须投影 manifest、objectives、concrete document-shape/schema/semantic
+  witness 和 exact alternative；correction/request-session identity 只绑定 failure 与该 detached input，不携带 persisted
   `Disposition`/`TerminalCode`。C4 不得包含 owner raw diagnostic、Run/repair/recovery action、governance continuation、raw
   evidence summary 或未封存 allowed value；
 - external capability receipt 只把 owner-normalized bounded summary/hash放入C4 evidence tail；raw payload只能作为

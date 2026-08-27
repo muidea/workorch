@@ -26,7 +26,7 @@ focused contract；本页不复制字段级正文。
 - provider-facing token 值只有 LLM owner 的 sealed `ProviderCeiling` 一个权威；submission 前任何不一致均零 physical call。
 - attempt 0 与 same-contract attempt 1 复用同一 C0～C3、authority transaction、manifest 与 `stablePrefixHash`。
 - operations attempt 1 的 C4 必须携带 attempt 0 persisted directive 的 provider-safe detached correction input：manifest、
-  objectives 与 concrete semantic witness；failure 与该 input 的 normalized identity 进入 correction/request-session hash，
+  objectives 与 concrete document-shape/schema/semantic witness；failure 与该 input 的 normalized identity 进入 correction/request-session hash，
   persisted `Disposition`/`TerminalCode` 不跨 owner。LLM 只渲染该 detached fact，不能重新选择 alternative。缺失、漂移或
   无法由相同 manifest 重验的 witness 在 physical provider call 前 fail-closed。
 - C0～C2 是连续稳定前缀；C3～C5 是 current/volatile tail。意外 stable-prefix 漂移属于 rendering defect。

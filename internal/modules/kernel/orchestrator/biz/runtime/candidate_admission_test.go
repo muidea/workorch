@@ -324,12 +324,6 @@ func TestEvaluateCandidateAdmissionUsesSemanticContractNotOperationIdentityOrPar
 			},
 		},
 		{
-			name: "dependency outside candidate graph", correctable: true,
-			mutate: func(operation *runtimecontract.RuntimeOperation) {
-				operation.DependsOn = []string{"missing-operation"}
-			},
-		},
-		{
 			name: "parameter outside sealed operation contract", correctable: true,
 			mutate: func(operation *runtimecontract.RuntimeOperation) {
 				value := "unsupported"
@@ -369,6 +363,15 @@ func TestEvaluateCandidateAdmissionUsesSemanticContractNotOperationIdentityOrPar
 			}
 		})
 	}
+
+	t.Run("dependency authority is manifest derived", func(t *testing.T) {
+		candidate := stateChangeCandidate()
+		candidate.StateChange.Operations[0].Operation.DependsOn = []string{"provider-authored-dependency"}
+		result := EvaluateCandidateAdmission(aggregate, candidate)
+		if !result.Accepted() {
+			t.Fatalf("manifest-derived dependency authority was not admitted: %+v", result)
+		}
+	})
 }
 
 func TestEvaluateCandidateAdmissionRejectsAcceptedNoProgressShape(t *testing.T) {
@@ -721,6 +724,44 @@ func TestAdmitCandidateProposalAtomicallyExhaustsSingleShapeFrontier(t *testing.
 	savesAfterExhaustion := repository.saves
 	if _, err := controller.BeginCandidateAttemptForTest(context.Background(), aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, 1, "stable-prefix"); err == nil || repository.saves != savesAfterExhaustion {
 		t.Fatalf("exhausted single-shape frontier opened attempt 1: err=%v saves=%d", err, repository.saves)
+	}
+}
+
+func TestAdmitCandidateProposalReturnsCommittedDuplicateAfterAdministrativeTermination(t *testing.T) {
+	aggregate := stateChangeAggregate(t)
+	repository := &controllerRepository{aggregate: &aggregate}
+	controller, err := NewRuntimeController(repository)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := controller.BeginCandidateAttemptForTest(context.Background(), aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, 0, "terminal-duplicate-prefix"); err != nil {
+		t.Fatal(err)
+	}
+	candidate := stateChangeCandidate()
+	candidate.StateChange.Operations[0].Operation.TargetRefs = []string{"other.go"}
+	first, err := controller.AdmitCandidateProposalForTest(context.Background(), aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, 0, candidate)
+	if err != nil || first.Admission.Failure == nil || first.Admission.Correction == nil ||
+		first.Admission.Correction.Disposition != runtimecontract.RuntimeCandidateCorrectionCorrectableOnce ||
+		first.Aggregate.Decision.State != runtimecontract.ConvergenceStateNeedStateChange {
+		t.Fatalf("correctable proposal setup=%+v err=%v", first, err)
+	}
+	terminated, err := controller.requestTermination(
+		context.Background(), aggregate.Facts.WorkspaceID, aggregate.Facts.RunID,
+		runtimecontract.RuntimeTerminationCancelled, "blocks/run", "test response-loss terminal fence",
+	)
+	if err != nil || terminated.Termination == nil {
+		t.Fatalf("administrative termination=%+v err=%v", terminated, err)
+	}
+	saves := repository.saves
+	duplicate, err := controller.AdmitCandidateProposalForTest(context.Background(), aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, 0, candidate)
+	if err != nil || duplicate.Admission.Failure == nil || duplicate.Admission.Failure.Code != first.Admission.Failure.Code ||
+		duplicate.Aggregate.StateRevision != terminated.StateRevision || repository.saves != saves {
+		t.Fatalf("terminated exact duplicate=%+v err=%v saves=%d", duplicate, err, repository.saves)
+	}
+	different := stateChangeCandidate()
+	different.StateChange.Operations[0].Operation.TargetRefs = []string{"different.go"}
+	if _, err := controller.AdmitCandidateProposalForTest(context.Background(), aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, 0, different); err == nil || repository.saves != saves {
+		t.Fatalf("terminated non-duplicate err=%v saves=%d, want conflict and no CAS", err, repository.saves)
 	}
 }
 

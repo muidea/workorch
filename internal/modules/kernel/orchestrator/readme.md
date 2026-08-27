@@ -98,8 +98,8 @@ contradiction 只通过 `semantic_binding_contradiction_observed` 私有事件�
 | --- | --- | --- |
 | SM-1 Run lifecycle | 不拥有；只消费 Run state notification 触发自身 SM-4 drive | Run owner 持久化 SM-1 state/lineage，并为 Orchestrator aggregate 提供 opaque RuntimeStateRecord CAS；Workspace owner 持久化 activeRun |
 | SM-2 authority/focus | reducer、focus/evidence/assessment/repair/governance/terminal 裁决；编译 sealed candidate manifest | application 只编译 typed bootstrap；owner 只返回 facts；Result 只存 outcome |
-| SM-3 candidate/dispatch | request session、单 evaluator、attempt 0/1、transaction、seal、typed operation、evidence commit | LLM 返回 exactly-one `Stale | Feedback | DocumentOutcome` fact；Orchestrator只从complete document解码/裁决candidate；capability block执行operation |
-| SM-4 drive/recovery/delivery ledger | bounded drive、singleflight、restart load、delivery acknowledgement/retry；不写 owner state | Result/Workspace/Run owner 各自完成资源迁移；projection store/read model 只保存派生状态 |
+| SM-3 candidate/dispatch | request session、document-conformance/单 evaluator、共享 attempt 0/1、transaction、local operation compile、seal、evidence commit | LLM 返回 exactly-one `Stale | Feedback | DocumentOutcome` fact；Orchestrator 对 empty/invalid 保存 typed shape rejection、对 complete 执行 strict local admission，并确定性派生 operation identity/dependencies；capability block执行operation |
+| SM-4 drive/recovery/delivery ledger | bounded drive、physical settlement、singleflight、restart load、delivery acknowledgement/retry；不写 owner state且不选择 candidate correction | Result/Workspace/Run owner 各自完成资源迁移；projection store/read model 只保存派生状态 |
 
 实现必须保持：
 
@@ -244,6 +244,12 @@ deployed run ID 只属于 archive regression evidence，不定义当前候选、
   coverage，duplicate/restart 不重复 terminal 或同一 File/Shell probe。
 - renderer、wire schema、strict decoder、candidate evaluator、owner feasibility command 与 fixture 只消费该
   manifest 及其 hash，不得从 profile、focus、raw reason 或临时 inventory 重建第二份允许集。
+- `JSONSchemaResponse` 只决定 LLM adapter 是否可发送 provider format，是可选 wire acceleration，不是 SM-3 authority。
+  format on/off、provider声称 schema accepted 或未声明 capability 的所有 complete output 都必须经过同一 strict local
+  decoder/schema/evaluator；structured-output failure 不授权 adapter fallback 或第二次 physical call。
+- operations provider schema/instruction/strict decoder 禁止 `id`、`dependsOn` 与 dependency graph。strict local compiler
+  把 proposal 唯一映射到 manifest authorization/required-sequence slot 后，按 authority transaction、manifest 与 canonical
+  slot/order 确定性派生 operation ID/dependencies；wire order、自造 identity/edge 或 ambiguous/duplicate slot 均零 owner call/dispatch。
 - complete document 只调用一个纯 `CandidateEvaluator`，并按 manifest identity → wire/field →
   kind/variant/parameter → target → binding → effect/dependency → replay → durable owner-target overlap 的固定顺序返回 `accepted` 或完整
   `CandidateRejection`。owner feasibility 是 capability owner 的独立 typed factual observation，不得伪装为
@@ -270,17 +276,22 @@ deployed run ID 只属于 archive regression evidence，不定义当前候选、
 - owner probe 前只允许用 kind 解析 manifest 中的 owner/authorization identity，该解析不做 admission；
   unknown kind 零 owner call，可解析 kind 只调用无副作用 probe。evaluator 仍优先返回顺序中更早的
   field/target 违例，owner observation 不得形成第二套 first-failure 路由。
-- rejection 只保存 evaluator 产生的完整、安全原始 diagnostic，不携带 correction、retry、terminal 或
+- rejection 只保存 LLM document-conformance observation、strict local schema 或 evaluator 产生的完整、安全 typed diagnostic，
+  不携带 correction、retry、terminal 或
   Runtime action。Orchestrator 将其提交为 SM-3 internal event 后，才根据 persisted manifest、attempt ledger、
   rejected shape 与 field violations 形成 `correctable_once` 或 `rejected_final` owner-local result；前者必须有
-  可仅用 manifest + rejection 验证的 `CorrectionDirective`，并封存 concrete legal semantic-difference witness；
-  ID/summary-only delta 不算 progress。attempt 1 在 provider 前重验 manifest/witness，并在 admission 时证明 proposal
-  使用 exact alternative。没有 legal frontier 的 attempt 0 形成 `candidate_authority_exhausted`，attempt 1 complete
-  rejection 才形成 `candidate_retry_exhausted`；两者都不调用额外 owner 或治理。后者零 correction call。无法归类是
+  可仅用 manifest + rejection 验证的 `CorrectionDirective`：empty/invalid 使用 closed `document_shape` witness，local schema
+  使用 manifest-bound field/rule witness，semantic rejection 才封存 concrete legal semantic-difference witness。
+  operation ID/dependencies 禁止出现在 provider wire并由本地派生，不能成为 correction field/progress；summary/reason-only
+  delta 同样无效。attempt 1 在 provider 前重验 manifest/witness，返回后重新走完整 strict local admission，并在 semantic
+  correction 时证明 proposal 使用 exact alternative。没有 legal frontier 的 attempt 0 形成 `candidate_authority_exhausted`，
+  attempt 1 的任意 document/schema/semantic rejection 都形成 `candidate_retry_exhausted`；两者都不调用额外 owner 或治理。
+  后者零 correction call。无法归类是
   `runtime_contract_defect`，不能退化为无信息 governance ticket。
 - semantic-plan 的 `CorrectionDirective` 必须持久化 exact dependency edge、actual position、manifest/seed/prefix、
-  plan step 与 source rejection hash；LLM command 只取得 detached fact 并仅在 C4 渲染，不能从 `OriginalMessage`
-  重建。coverage-order 缺 schema-required 空 `proposals`、覆盖不全、未知/重复 CWI 或其他 complete-document 结构错误，
+  plan step 与 bounded source observation hash；LLM command 只取得 Orchestrator 预先投影的 detached observation 并仅在
+  C4 验证/渲染，不能接收或从 `OriginalMessage` 重建。coverage-order 缺 schema-required 空 `proposals`、覆盖不全、
+  未知/重复 CWI 或其他 complete-document 结构错误，
   必须由 SM-3 绑定 manifest 的完整 CWI identity，形成 typed `coverage_order_document` violation；proof-batch 对应
   `proof_batch_document`。二者都只有 attempt 1，不得因无 typed delta 误报 `runtime_contract_defect`，也不得由 LLM 或
   application 选择 retry。correction lineage 只属于一个 sealed provider document；coverage-order attempt 1 即使 accepted，创建新的
@@ -288,10 +299,13 @@ deployed run ID 只属于 archive regression evidence，不定义当前候选、
   prospective target constraint mismatch 属于相同的普通 document/schema correction ledger：attempt 1 复用
   transaction/manifest/C0～C3/stable prefix，C4 只引用 typed field violation。feasibility 后的 full-composite
   `would_not_satisfy` 不进入该 ledger，而按 owner-contract contradiction 直接 terminal。
-- candidate pipeline 只接收 `request_recoverable`、`request_terminal`、`candidate_rejection`、`owner_feasibility` 和 `accepted`
-  factual result。attempt 0/1 与 correction policy 只由 SM-3 reducer 消费 persisted diagnostic；owner feasibility
+- candidate pipeline 只接收 `request_recoverable`、`request_terminal`、`document_conformance`、`candidate_rejection`、
+  `owner_feasibility` 和 `accepted` factual result。coherent completed empty/non-JSON 属于
+  `document_conformance`，不是 provider protocol failure，也不消费 incomplete/transport recovery；它与 complete local
+  schema/semantic rejection 共用唯一 attempt 0/1。attempt 0/1 与 correction policy 只由 SM-3 reducer 消费 persisted diagnostic；owner feasibility
   必须先成为 Orchestrator internal event，再由 SM-2 coordinator 选择 prerequisite、新 authority 或 typed
-  terminal，普通 operation owner feasibility 零 correction attempt。SM-4 只从 persisted result 恢复，不再解释
+  terminal，普通 operation owner feasibility 零 correction attempt。SM-4 只结算 physical call、调度并从 persisted result
+  幂等恢复，不解释 document failure 或选择 correction，也不得为 format/schema/semantic 各建预算。它不再解释
   raw failure。prospective satisfaction 的 exact-current full-composite `would_not_satisfy` 在 operation candidate 前
   属于 persisted semantic-plan factual rejection；它不进入本段普通 operation `owner_feasibility`，只按上述
   `prospective_satisfaction_contract_violated` terminal 处理，也不能借此为普通 owner feasibility 增加 correction。
@@ -322,6 +336,16 @@ deployed run ID 只属于 archive regression evidence，不定义当前候选、
   authentication/configuration/transient/protocol；它不得跨 EventHub 返回 `RuntimeCandidateFailure` 或完整文档的
   schema/contract 裁决。Orchestrator adapter 必须先穷举校验 scope、authority、owner、category/class 与
   typed document disposition/content/feedback/stale 互斥关系，再在 SM-3 owner-private 边界重建内部 failure fact。
+  coherent completed 的 `empty_document/provider_final_output_missing` 与
+  `invalid_provider_output/provider_final_output_invalid` 是零 content 的 document-conformance observation，禁止归并为
+  provider-protocol `Feedback`。其 disposition/code/signature 必须闭集匹配。唯一 raw-content crossing 是 coherent
+  `complete_document` 的同步、volatile、typed `DocumentOutcome.Content`：仅在 LLM→Orchestrator EventHub Result 的 nested
+  carrier 中存在并标记 `json:"-"`，供 SM-3 当次本地 decode；若为 crash recovery 持久化，只能进入 Orchestrator-private
+  restart-content carrier。它不得进入 EventHub JSON、audit、aggregate、C4 prompt、eventstream、projection 或 memory。
+  除此以外的 raw body/reasoning/decoder message 只允许留在其来源 owner 的 private audit
+  carrier，跨 owner 仅接收 bounded hash/bytes/ref。
+  Orchestrator 在一次 owner-private CAS 中结算 submitted call、关闭当前 request session 并由 SM-3 持久化 typed shape
+  rejection/correction result；SM-4 仅执行 settlement/re-drive，不选择 attempt。
   `incomplete_document` 只提交 primary-classified-as-SM-4 的 owner-private `provider_request_recovery_coordinated`
   fact；transport（包括 body-idle）与 incomplete recovery 都必须在同一 aggregate CAS 中结算本次 physical call 并推进
   persisted request-session physical sequence，使下一 physical call 使用新 `PhysicalCallID`，并从头请求同一 sealed
@@ -440,11 +464,11 @@ deployed run ID 只属于 archive regression evidence，不定义当前候选、
   退休后续 SM-2 observation，但不能仅因此清除 `ActiveDispatch`。SM-3 必须继续尚未完成且 dependency 已满足的
   sealed operation，直到全部成功或任一 operation rejected/stale 后再 settle/reduce。该规则只适用于不同 canonical
   owner-target resource：
-  candidate evaluator 在 seal 前拒绝重复 durable `(OwnerModuleID, TargetRef)`，普通 `DependsOn` 不能授权第二次同目标写入；
+  candidate evaluator 在 seal 前拒绝重复 durable `(OwnerModuleID, TargetRef)`，普通 manifest-derived dependency edge 不能授权第二次同目标写入；
   provider 必须合并为一个 operation/receipt。唯一例外是 owner fact 封存的 exact `RequiredOperationSequence`，其每项必须
-  绑定不同 requirement ref/variant，并按声明依赖执行。prospective all-of binding 的 sequence 还必须与完整
-  `ProspectiveTargetRefs` 一一对应：每项封存一个 exact `TargetRef`，candidate operation 的 `targetRefs` 必须为该值的
-  singleton，所有 requirement 齐全且按 canonical dependency chain 有序执行。缺少、额外、重复或乱序项均在
+  绑定不同 requirement ref/variant，并按本地派生依赖执行。prospective all-of binding 的 sequence 还必须与完整
+  `ProspectiveTargetRefs` 一一对应：每项封存一个 exact `TargetRef`，admitted proposal 的 `targetRefs` 必须为该值的
+  singleton，所有 requirement 齐全且可唯一映射到 canonical dependency chain。缺少、额外、重复或 ambiguous 项均在
   owner effect 前拒绝，不允许“部分准备后先执行”。
 - prospective all-of 的 receipt completion 也是集合合同，而不是“首条成功即完成”。同一 sealed dispatch 的每个 target
   operation 必须取得 owner-committed `Outcome=accepted` exact receipt；该 receipt 只有在 Orchestrator private evidence event
@@ -563,7 +587,7 @@ deployed run ID 只属于 archive regression evidence，不定义当前候选、
 - `kernel/orchestrator/pkg/events` 只保存 typed command/result、receipt DTO 与确定性校验/构造；能力 Block 的 Biz 负责发送 receipt query/commit command，Orchestrator Biz 负责消费并持久化，任何 `pkg` 不得持有 Hub、执行 I/O 或推进状态。
 - Provider ceiling、candidate preflight 与 candidate request command/result 由 LLM owner 在 `blocks/llm/pkg/events` 定义；Orchestrator 的 SM-3 request session 封存完整 authority transaction，跨 Orchestrator → LLM → provider 的一次物理请求只携带 canonical `RuntimeCandidateRequestIdentity`，EventHub command/result 与 LLM request/response model 不得再次平铺 logical/sequence/physical 三字段。Orchestrator private session/internal event 可按 owner-local ledger 结构保存其状态字段，不构成跨 owner wire authority。LLM block 返回的 document 必须绑定同一 snapshot 和 request identity，transaction/identity 漂移不得进入执行。
 - LLM owner-private candidate response 不复制 sealed provider audit/typed error 已拥有的 `RequestID/Status`；usage audit 从 canonical audit/error 读取，不能以 response mirror 覆盖 provider outcome。
-- candidate request 携带从 persisted facts 和唯一 manifest 渲染的 typed `RuntimeCandidateContext`；当前 focus/evidence/failure 是 context，operation kind/parameter/target/effect/dependency 与 `BindingRef` 授权只来自 manifest。candidate 不得以 raw `coverageWorkItemIds` 自报 credit。C4 只投影 provider-safe failure/evidence/assessment/shape identity 与 attempt-1 persisted directive 的 detached correction input（manifest/objectives/witness）；它不携带 `Disposition`/`TerminalCode`、raw reason/summary/payload、owner feasibility 或 recovery/governance action。LLM block 不从 禁止的 map、raw reason 或临时上下文重建 authority或 persisted directive。
+- candidate request 携带从 persisted facts 和唯一 manifest 渲染的 typed `RuntimeCandidateContext`；当前 focus/evidence/failure 是 context，operation kind/parameter/target/effect/dependency 与 `BindingRef` 授权只来自 manifest。provider wire 只允许 proposal 字段并明确禁止 operation `id`/`dependsOn`；identity/dependency 由 Orchestrator local compiler 派生。candidate 不得以 raw `coverageWorkItemIds` 自报 credit。C4 只投影 provider-safe failure/evidence/assessment/shape identity 与 attempt-1 persisted directive 的 detached correction input（manifest/objectives/witness）；它不携带 `Disposition`/`TerminalCode`、raw reason/summary/payload、owner feasibility 或 recovery/governance action。LLM block 不从 禁止的 map、raw reason 或临时上下文重建 authority或 persisted directive。
 - Runtime dispatch 在执行前持久化 `SealedDispatch`、完整 transaction、candidate hash、sealed binding references 和 typed step input；execution evidence 只有在 snapshot、dispatch、operation、binding 与 owner receipt 一致时才能提交并触发下一次 reducer。
 - capability owner 的 validation receipt 必须持久化中立 quality/zero-work/check observation，并纳入 stable receipt hash；SM-3 在普通响应与 exact-fence restart recovery 两条路径执行同一质量裁决。receipt 只有实际匹配 sealed binding 的 target/effect/recipe/check（适用时 metric/artifact）才可进入 SM-2 proof gate；multi-target prospective binding 必须再满足同一 dispatch 的完整 collective receipt set，单个 receipt 不授予 CWI credit。弱验证、非空 `PassedChecks` 或 owner exit code 0 只进入 rejected/diagnostic evidence。
 - Runtime aggregate 通过 Run owner 的 EventHub update 合同持久化；Orchestrator 使用
@@ -629,10 +653,11 @@ deployed run ID 只属于 archive regression evidence，不定义当前候选、
   code/recovery lineage。
 - CoverageFocus 可携带 evidence role、accepted/rejected step kinds 与 accepted operations；reducer 只在 owner 已确认的 capability kinds 中做中立交集/排除，并把结果封入 `RequiredOutputContract`。若声明 accepted operations，candidate 至少包含一个匹配的具体 operation 参数，不能用同 step kind 的其他动作替代。
 - provider request session（logical request ID、expected-document identity、physical-call recovery generation、transport
-  outcome）先于 candidate attempt 随 aggregate 持久化；未形成单次完整 candidate document 时不得创建/失败 attempt。
-  EOF/output limit 只能重提同一 expected document，不能拼接 raw output。complete rejection 先保存原始 diagnostic，再由
-  SM-3 owner-local reducer 决定 final 或唯一 same-step correction；只有 persisted `correctable_once` result 可在相同
-  transaction、manifest 和 stable prefix 下开启 attempt 1，attempt 1 再次 complete rejection 形成
+  outcome）先于 candidate attempt 随 aggregate 持久化。EOF/output limit 不能创建/失败 attempt，只能重提同一 expected
+  document且不能拼接 raw output；coherent empty/invalid 则在结算当前 session 后形成 SM-3 typed document-conformance attempt。
+  document-shape、complete schema 与 semantic rejection 先保存 typed diagnostic，再由 SM-3 owner-local reducer 决定 final
+  或唯一 same-step correction；只有 persisted `correctable_once` result 可在相同 transaction、manifest 和 stable prefix 下
+  开启 attempt 1，attempt 1 再次出现任一 rejection 形成
   `candidate_retry_exhausted`，不能创建第三次请求或无信息 governance ticket。
 - recoverable provider result 统一经 `NormalizeRuntimeProviderRequestRecovery` 形成一个 deterministic owner-private fact，
   operations 与 semantic-plan 不得分别推导恢复/耗尽语义。`provider_request_recovery_coordinated` 的 metadata primary class
@@ -661,12 +686,15 @@ deployed run ID 只属于 archive regression evidence，不定义当前候选、
   transaction 原子协调：CAS 写入前中断时 fresh load 只看到 submitted marker，必须确定性封存
   `provider_submission_unknown` 且不重调 provider；CAS 已写入但响应丢失时 fresh load 必须看到 exact terminal+failure，
   duplicate 只读返回。terminal session 若缺少 matching failure/semantic ledger 必须 fail closed，不能作为成功恢复旁路。
+  empty/invalid 明确不在该 request-terminal 集合；它们经 SM-3 document-conformance rejection 使用共享 attempt 0/1，
+  不应用 provider-protocol SM-2 failure，也不消费 SM-4 transport/whole-document recovery budget。
 - LLM provider feedback 的 stable category 只用于选择 SM-2/SM-3 路径；authentication/configuration/transient/protocol
   terminal failure 必须同时保存 LLM owner 提供的 exact `OriginalDiagnostic`。例如 canonical terminal 可保持
   `provider_protocol_failure`，但 nested original code 必须仍是实际 guard（如 `response_byte_limit_exceeded`），且
   aggregate reload、duplicate drive 与 projection clone 均不得将其泛化或覆盖。
 - candidate retry 预算按稳定且显式持久化的 `AuthorityContractID` 计算；identity 绑定 workspace/run、完整 `AuthoritySnapshotID`、focus、canonical convergence state、definition/evidence revision 与 requiredOutput hash。派生 action 不参与 identity。缺失或不匹配该字段属于 current-schema invariant violation；同一 contract 超过 attempt 0/1 必须 fail-fast，禁止再次请求 provider。
-- complete schema/contract failure 只记录统一 evaluator 生成的原始 typed rejection；correction/final 由 SM-3 internal event 决定。owner feasibility 的
+- coherent empty/invalid、complete local schema/contract failure 只记录 provider-safe typed rejection；correction/final 由
+  SM-3 internal event决定，三者共用 candidate attempt 0/1。owner feasibility 的
   `stale`、`prerequisite_required`、`infeasible` 必须作为独立 internal event 交给 SM-2，绝不进入
   correction policy 或占用 attempt。provider authentication/configuration、transient transport、incomplete
   document 与 unknown submission 走独立 dependency 或 request-session/recovery ledger。prerequisite stale
@@ -875,6 +903,20 @@ deployed run ID 只属于 archive regression evidence，不定义当前候选、
 - Soul 同样只来自 Run owner 的 activation snapshot：semantic-plan 在 C3 使用 planning guidance，operation candidate
   在 C3 使用当前 execution/validation/decision guidance 及已封存的 stage-filtered Skill/MCP context。Soul 不进入 C0～C2，
   不改变 sealed manifest，也不替代 capability owner 的 effect/risk/approval authority。
+
+## Document Conformance 验证要求
+
+- provider protocol `Feedback` 与 coherent empty/invalid `DocumentOutcome` 必须分别覆盖 stream/non-stream、scope/identity、
+  exact disposition/code/signature、submitted settlement、usage 与 raw-content isolation；任何 adapter/SM-4 reclassification 失败。
+- empty/invalid、strict local schema 与 semantic rejection 的全组合必须证明共享 attempt 0/1：attempt 0 最多持久化一个
+  directive，attempt 1 任意 rejection final，零 attempt 2，且 document correction不消费 transport/whole-document/repair budget。
+- duplicate/stale result、CAS-before/CAS-after response loss、fresh-process reload、普通 Resume 与 delayed SM-4 drive 必须复用
+  exact rejection/directive/request identity；不得重复 physical call、attempt、usage/token settlement 或 budget consumption。
+- JSON Schema capability on/off 必须得到相同 local admission；operations wire 必须拒绝 ID/dependencies，相同 admitted proposal
+  在 restart 前后必须派生相同 operation identity/graph，ambiguous/duplicate slot 零 owner call、seal、dispatch。
+- aggregate、C4、eventstream、projection 与 memory 必须证明不含 raw provider document/reasoning/decoder message；EventHub
+  只允许 coherent complete document 通过同步 typed `DocumentOutcome.Content` 的 `json:"-"` nested carrier 到达
+  Orchestrator，其余 raw 一律禁止。owner-private audit carrier 只以 bounded hash/bytes/ref 对外关联。
 
 ## 已覆盖回归
 

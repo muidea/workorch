@@ -6,26 +6,11 @@ import (
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
-type runtimeSemanticDiagnosticProjection struct {
-	OwnerModuleID    string                                  `json:"ownerModuleId"`
-	Class            string                                  `json:"class"`
-	Code             string                                  `json:"code"`
-	Signature        string                                  `json:"signature"`
-	OperationID      string                                  `json:"operationId,omitempty"`
-	TargetRefs       []string                                `json:"targetRefs,omitempty"`
-	ExpectedRevision string                                  `json:"expectedRevision,omitempty"`
-	ObservedRevision string                                  `json:"observedRevision,omitempty"`
-	FieldViolations  []runtimecontract.RuntimeFieldViolation `json:"fieldViolations,omitempty"`
-	OmittedReason    string                                  `json:"omittedReason,omitempty"`
-	Truncated        bool                                    `json:"truncated,omitempty"`
-	Redacted         bool                                    `json:"redacted,omitempty"`
-}
-
 type runtimeSemanticTailProjection struct {
-	Attempt             int                                                 `json:"attempt"`
-	PreviousRejection   *runtimeSemanticDiagnosticProjection                `json:"previousRejection,omitempty"`
-	CorrectionDirective *runtimecontract.RuntimeSemanticCorrectionDirective `json:"correctionDirective,omitempty"`
-	ExistingTarget      *runtimeSemanticExistingTargetProjection            `json:"existingTarget,omitempty"`
+	Attempt             int                                                   `json:"attempt"`
+	PreviousRejection   *runtimecontract.RuntimeSemanticCorrectionObservation `json:"previousRejection,omitempty"`
+	CorrectionDirective *runtimecontract.RuntimeSemanticCorrectionDirective   `json:"correctionDirective,omitempty"`
+	ExistingTarget      *runtimeSemanticExistingTargetProjection              `json:"existingTarget,omitempty"`
 }
 
 // runtimeSemanticExistingTargetProjection keeps the latest owner catalog and
@@ -51,25 +36,12 @@ type runtimeSemanticExistingTargetProjection struct {
 	ExistingTargetObserved    bool     `json:"existingTargetObserved"`
 }
 
-func runtimeProviderSafeSemanticDiagnostic(value *runtimecontract.RuntimeOriginalDiagnostic) *runtimeSemanticDiagnosticProjection {
-	if value == nil {
-		return nil
-	}
-	return &runtimeSemanticDiagnosticProjection{
-		OwnerModuleID: value.OwnerModuleID, Class: value.OriginalClass, Code: value.OriginalCode,
-		Signature: value.Signature, OperationID: value.OperationID,
-		TargetRefs: append([]string(nil), value.TargetRefs...), ExpectedRevision: value.ExpectedRevision,
-		ObservedRevision: value.ObservedRevision, FieldViolations: cloneRuntimeFieldViolations(value.FieldViolations),
-		OmittedReason: value.OmittedReason, Truncated: value.Truncated, Redacted: value.Redacted,
-	}
-}
-
-func runtimeSemanticExistingTargetForProvider(manifest runtimecontract.RuntimeSemanticPlanManifest, diagnostic *runtimecontract.RuntimeOriginalDiagnostic) *runtimeSemanticExistingTargetProjection {
-	if diagnostic == nil {
+func runtimeSemanticExistingTargetForProvider(manifest runtimecontract.RuntimeSemanticPlanManifest, observation *runtimecontract.RuntimeSemanticCorrectionObservation) *runtimeSemanticExistingTargetProjection {
+	if observation == nil {
 		return nil
 	}
 	manifest = manifest.Normalized()
-	owner := strings.TrimSpace(diagnostic.OwnerModuleID)
+	owner := strings.TrimSpace(observation.OwnerModuleID)
 	var catalog runtimecontract.RuntimeOperationAdmissibility
 	found := false
 	for _, value := range manifest.OwnerCatalogs {
@@ -83,10 +55,10 @@ func runtimeSemanticExistingTargetForProvider(manifest runtimecontract.RuntimeSe
 		return nil
 	}
 	projection := &runtimeSemanticExistingTargetProjection{
-		OwnerModuleID: owner, FailureClass: strings.TrimSpace(diagnostic.OriginalClass), FailureCode: strings.TrimSpace(diagnostic.OriginalCode), FailureSignature: strings.TrimSpace(diagnostic.Signature), OperationID: strings.TrimSpace(diagnostic.OperationID), TargetRefs: append([]string(nil), diagnostic.TargetRefs...), ExpectedRevision: strings.TrimSpace(diagnostic.ExpectedRevision), ObservedRevision: strings.TrimSpace(diagnostic.ObservedRevision), CatalogSnapshotID: catalog.SnapshotID, CatalogObservedRevision: catalog.ObservedRevision, CatalogTargetRefs: append([]string(nil), catalog.TargetRefs...), ConstraintRefs: append([]string(nil), catalog.ConstraintRefs...),
+		OwnerModuleID: owner, FailureClass: strings.TrimSpace(observation.Class), FailureCode: strings.TrimSpace(observation.Code), FailureSignature: strings.TrimSpace(observation.Signature), OperationID: strings.TrimSpace(observation.OperationID), TargetRefs: append([]string(nil), observation.TargetRefs...), ExpectedRevision: strings.TrimSpace(observation.ExpectedRevision), ObservedRevision: strings.TrimSpace(observation.ObservedRevision), CatalogSnapshotID: catalog.SnapshotID, CatalogObservedRevision: catalog.ObservedRevision, CatalogTargetRefs: append([]string(nil), catalog.TargetRefs...), ConstraintRefs: append([]string(nil), catalog.ConstraintRefs...),
 	}
-	if observation := diagnostic.TargetObservation; observation != nil {
-		observed := observation.Normalized()
+	if targetObservation := observation.TargetObservation; targetObservation != nil {
+		observed := targetObservation.Normalized()
 		projection.TargetRefs = appendUniqueStrings(projection.TargetRefs, observed.TargetRefs...)
 		if projection.ObservedRevision == "" {
 			projection.ObservedRevision = observed.ObservedRevision
@@ -146,18 +118,4 @@ func appendUniqueStrings(values []string, additions ...string) []string {
 		}
 	}
 	return values
-}
-
-func cloneRuntimeFieldViolations(values []runtimecontract.RuntimeFieldViolation) []runtimecontract.RuntimeFieldViolation {
-	if len(values) == 0 {
-		return nil
-	}
-	ret := make([]runtimecontract.RuntimeFieldViolation, len(values))
-	for idx, value := range values {
-		ret[idx] = runtimecontract.RuntimeFieldViolation{
-			Path: value.Path, Actual: value.Actual, Allowed: append([]string(nil), value.Allowed...),
-			Required: append([]string(nil), value.Required...), Forbidden: append([]string(nil), value.Forbidden...),
-		}
-	}
-	return ret
 }

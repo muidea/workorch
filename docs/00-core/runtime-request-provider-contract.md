@@ -44,6 +44,14 @@ identity/token；不得重读配置、提高预算或按 model name 建第二套
 provider ceiling 只约束模型可输出长度。manifest/schema 的数组、字符串、target、binding、content/effect 上限独立决定
 Runtime 可接受的文档，二者不能互相替代。
 
+`JSONSchemaResponse` 只是一项可选的 provider wire conformance 加速能力，不是 candidate authority、admission
+结果或正确性前提。只有 selected provider profile 显式封存 `JSONSchemaResponse=true` 时 adapter 才可发送 provider
+schema format；未声明或为 false 时必须省略。无论 provider 是否接受该 format，每个返回文档都必须通过同一份 sealed
+manifest 驱动的 strict local framing、decoder、schema 与 evaluator admission。adapter 不得因 structured-output
+unsupported/failure 自行 fallback 或发起第二次 physical call；只有 Orchestrator SM-3 在持久化 typed rejection 后才可
+对 coherent document-conformance、local schema 或 semantic rejection 使用共享 attempt 0/1 合同授权一次独立 correction；
+provider format unsupported/failure 本身不产生 correction authority。
+
 ## Mode-Specific Provider Response Guard
 
 response guard 只从已封存的 effective output-token ceiling 与 selected provider context profile 派生；它不是第二份
@@ -79,19 +87,33 @@ semantic-plan 与 operations 均要求 wire normalization 后的 canonical docum
 无 Markdown fence、解释、前后缀或重复输入；object `additionalProperties=false`，renderer、schema、strict decoder 与
 evaluator 共用同一 vocabulary、shape 和 sealed limit。
 
+operations provider wire 只包含 manifest 允许模型选择的 operation proposal 字段；`id`、`dependsOn`、dependency graph
+及其它执行 identity/ordering 字段一律禁止出现在 provider schema、instruction 与 response。strict local admission 先执行
+authority transaction exact-match gate；required proposal 唯一匹配 sealed manifest authorization 与 normalized
+required-sequence slot，auxiliary proposal 唯一匹配 canonical execution-semantic key。Orchestrator 只从 manifest hash 与上述
+manifest-owned slot/key 派生 operation ID，并从 required-sequence dependency refs 派生 dependencies。provider 数组顺序或下标、
+模型自造 identity 或 dependency 均不形成 authority；无法唯一匹配时形成 typed local rejection，零 dispatch。
+
 provider-facing instruction 仍严格要求裸 JSON。当前 wire normalization 最多只可移除一层完整、独占响应的精确 JSON code fence；
 raw bytes/hash 保留原始 identity，任何 prose、其他语言标签、缺失 closing fence、多 fence 或
 多 JSON value 都不得由该 normalization 放宽。
 
 - incomplete/EOF、output limit、timeout、429/5xx 与允许恢复的 transport failure 只进入 request-session recovery；
 - 401/403、configuration/protocol failure、submission-unknown 和 document recovery exhausted 形成 typed request fact；
+- provider API/envelope/SSE/media/framing 协议破损形成 `Feedback(provider_protocol)`；coherent completed response 的
+  empty final output 或 non-JSON final output 分别形成 `DocumentOutcome(empty_document | invalid_provider_output)`。
+  后两者是 model document-conformance observation，不得降格、改写或投影为 provider-protocol failure；
+- document disposition/code/signature 是闭集事实：empty 只能绑定
+  `provider_final_output_missing/provider-final-output-missing`，invalid 只能绑定
+  `provider_final_output_invalid/provider-final-output-invalid`；unknown/mixed pair 在 EventHub ingress fail-closed，
+  Orchestrator 不解析错误文本或 raw body 重新分类；
 - LLM EventHub result 必须是 `Stale | Feedback | DocumentOutcome` exactly-one。complete `DocumentOutcome` 才能携带
   与 framing hash/bytes 精确匹配的 opaque document content；incomplete/empty/invalid outcome 禁止携带 content，旧
   顶层 content fallback 不存在；
 - provider 返回 coherent `completed` terminal 但没有 final output 时，LLM owner 必须发布
   `empty_document/provider_final_output_missing`，不得降格为 provider-protocol `Feedback`，也不得把 reasoning text
   当作 document content。该 submitted transaction 的 provider-native usage 与 completed audit 必须原样保留，供
-  Orchestrator 精确结算；empty document 是 terminal document fact，不授权 whole-document recovery；
+  Orchestrator 精确结算；empty/invalid 不授权 whole-document recovery，也不自行决定 Runtime terminal；
 - 每个 result 必须携带 LLM-owner sealed audit，并逐项匹配 workspace/run、logical request、physical call、document kind、
   target、stable prefix 与 context budget。`providerSubmitted` 只由 protocol adapter 在调用 physical client 的边界写入；
   `requestBytes` 只是序列化计量，不能推断 submission。`DocumentOutcome` 必须 submitted，stale 必须 unsubmitted，
@@ -102,13 +124,24 @@ raw bytes/hash 保留原始 identity，任何 prose、其他语言标签、缺�
 - recoverable incomplete/transient observation 必须在一次 Orchestrator CAS 中同时完成 settlement、SM-3 session推进、
   必要的 SM-4 transport budget 消费与耗尽时的 SM-2 failure。body-idle 使用同一 transient path；只有 confirmed
   submission 可恢复，released/unknown 均不得进入 retry；
+- coherent empty/invalid observation 先在一个 Orchestrator owner-private CAS 中结算 confirmed physical call并关闭当前
+  request session；SM-3 再以一个可重入、幂等的 owner-private attempt CAS 保存 typed document-conformance rejection 与其
+  correction/final 结果。任一 CAS 后重启都只恢复缺失后继，不重调 provider、不重复结算。它与
+  complete JSON 的 strict local schema/contract rejection 共用 candidate attempt 0/1：attempt 0 最多封存一次
+  `correctable_once`，attempt 1 再次出现任何 document-conformance/schema/semantic rejection 即 final，禁止 attempt 2。
+  SM-4 只结算、幂等 re-drive 与恢复 persisted result，不选择 correction，不把 empty/invalid 计入 transport 或
+  whole-document recovery budget；
 - authentication/configuration/protocol/submission-unknown/document-recovery-exhausted 先归一为一个 Orchestrator owner-private
   terminal fact，再在同一次 aggregate CAS 中同时关闭 SM-3 request session 并应用其确定性的 SM-2 failure。CAS 写入前
   中断只留下 submitted marker，fresh reload 必须封存 submission-unknown 且零 provider replay；CAS 已写入但响应丢失时
   fresh reload 复用 exact terminal/failure，duplicate 零写入；
-- request failure 不创建 candidate attempt；不得跨 physical call 拼接 partial output 或把 raw suffix 注入下一次 prompt；
-- 每个 retry 使用新的 `PhysicalCallID`，但保持 logical request、ExpectedDocument、C0～C3、transaction、batch 与 stable prefix；
-- complete document 只进入一个 evaluator；candidate attempt 0/1 与 physical-call recovery 是独立预算。
+- provider request failure 与 incomplete recovery 不创建 candidate attempt；document-conformance rejection 只消费上述共享
+  candidate attempt，不得另建 format/schema retry budget。不得跨 physical call 拼接 partial output 或把 raw suffix 注入下一次 prompt；
+- 每个 request-session recovery retry 使用新的 `PhysicalCallID`，但保持 logical request、ExpectedDocument、C0～C3、
+  transaction、batch 与 stable prefix；SM-3 correction attempt 使用 correction hash 绑定的独立 logical/physical request identity，
+  同样保持 ExpectedDocument shape、C0～C3、transaction、manifest/batch 与 stable prefix；
+- complete document 必须通过 strict local admission 且只进入一个 evaluator；candidate attempt 0/1 与 physical-call recovery
+  是独立预算，但 empty/invalid、complete schema rejection 与 semantic rejection 共用同一个 attempt 0/1 上限。
 - provider call allocation、usage、unknown consumption和duplicate accounting遵守
   [Execution Budget](runtime/execution-budget.md)；physical retry不能重置或借用candidate/repair budget。
 
@@ -128,13 +161,23 @@ raw bytes/hash 保留原始 identity，任何 prose、其他语言标签、缺�
 raw request/response body、credential、endpoint 与未脱敏内容只记录允许的 hash、
 bytes、disposition 和 redacted/omitted metadata。
 
+LLM owner 如保留 raw request、非 complete body 或 provider-private framing，只能放在其 owner-private audit carrier，并以
+hash/ref 绑定上述公共 audit。唯一跨 owner raw-content 例外是 coherent complete document：它可通过同步、volatile、typed
+`DocumentOutcome.Content` nested EventHub Result（`json:"-"`）传给 Orchestrator 做当次 SM-3 decode；若为 crash recovery 持久化，
+只能进入 Orchestrator-private restart-content carrier。该 content 不得进入 EventHub JSON、durable audit、aggregate、eventstream、
+projection、memory 或 C4 prompt。其余 raw、reasoning、decoder message 或可逆片段一律不得跨 owner。empty/invalid 的 attempt-1
+C4 只可引用 sealed manifest/expected-document identity、source observation hash 与 `document_shape` typed witness；complete
+JSON 的 local schema rejection 只引用 field path/rule 等 provider-safe fact。
+
 LLM usage Eventstream/read projection 同样必须原样保留 `logicalRequestId`/`physicalCallId`（Runtime request）、
 `providerSubmitted` 与 `physicalResponseMode`；Runtime usage 的两级 identity 必须同时非空且
 `physicalCallId=requestId`。generic usage 与引入双层 identity 前的 persisted trace 可以两者都没有，但任何 consumer
 不得从 `RequestID`、request bytes 或 streaming 隐含/补造 logical identity。
 
 attempt 1 只允许改变 C4 中 provider-safe `CandidateRejection` 与 Orchestrator persisted `CorrectionDirective` 的 detached
-`correctionInput` 投影。该投影只有 manifest、objectives 与 concrete witness；persisted `Disposition`/`TerminalCode` 不进入
+`correctionInput` 投影。document-conformance witness 只表达 `$` 上的 `empty_document | invalid_provider_output ->
+one_complete_json_object`；schema witness 只表达 sealed local schema 的 field path/rule；semantic witness 才表达具体合法
+alternative。该投影只有 manifest、objectives 与 concrete witness；persisted `Disposition`/`TerminalCode` 不进入
 LLM command/model/C4，LLM 也不能反构 directive。若修正需要改变 operation authorization、target policy、allowed
 targets、manifest 或 C0～C3，则必须终止 current transaction，等待 SM-2 以新 owner fact 建立新 authority。
 
@@ -163,5 +206,6 @@ P0～P4 是当前决策必要上下文。budget、redaction 或 compaction 造�
 
 - Orchestrator 封存 request/session/context authority，并校验 result identity；它不解释 provider 私有 cache control。
 - LLM owner解释 provider/model/config ceiling并执行 transaction；它不选择 Runtime action、candidate correction 或 evidence credit。
-- provider adapter只能设置 provider 私有 cache key/control 和 wire mapping；动态 provider/model/baseURL 进入 audit/tail，不进入 stable prefix。
+- provider adapter只能设置 provider 私有 cache key/control、可选 JSON Schema format 和 wire mapping；它不能以 provider
+  schema acceptance 代替 strict local admission。动态 provider/model/baseURL 进入 audit/tail，不进入 stable prefix。
 - request-log 布局、raw ref 命名、config loader 与 provider capability table 属于实现层，不是 core authority。

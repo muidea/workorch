@@ -22,8 +22,9 @@ const (
 	RuntimeCandidateDocumentComplete   RuntimeCandidateDocumentDisposition = "complete_document"
 	RuntimeCandidateDocumentIncomplete RuntimeCandidateDocumentDisposition = "incomplete_document"
 	RuntimeCandidateDocumentEmpty      RuntimeCandidateDocumentDisposition = "empty_document"
-	// RuntimeCandidateDocumentInvalid is a non-JSON provider body. It is a
-	// provider-output protocol outcome, not a semantic candidate rejection.
+	// RuntimeCandidateDocumentInvalid is a coherent non-JSON provider body. It
+	// is a document-conformance observation, not a provider protocol failure;
+	// only the Orchestrator may bind it to the bounded SM-3 attempt policy.
 	RuntimeCandidateDocumentInvalid RuntimeCandidateDocumentDisposition = "invalid_document"
 )
 
@@ -50,7 +51,8 @@ func (e *RuntimeCandidatePayloadIncompleteError) Unwrap() error {
 }
 
 // RuntimeCandidatePayloadEmptyError is a successful provider response with no
-// candidate document. It is a provider/session outcome, never a schema retry.
+// candidate document. It is only a factual document-shape classification;
+// callers do not gain retry authority from this error by itself.
 type RuntimeCandidatePayloadEmptyError struct{}
 
 func (*RuntimeCandidatePayloadEmptyError) Error() string {
@@ -77,8 +79,9 @@ func RuntimeCandidateDocumentDispositionForError(err error) RuntimeCandidateDocu
 // InspectRuntimeCandidateDocumentFraming classifies provider bytes without
 // decoding a Runtime candidate. A syntactically complete JSON value remains a
 // complete document even when its schema is invalid: SM-3 must persist and
-// adjudicate it. A non-JSON body is a provider protocol outcome; only a first
-// JSON value cut off at EOF is eligible for whole-document recovery.
+// adjudicate it. A coherent non-JSON body is a document-conformance
+// observation, not a provider-protocol failure; only a first JSON value cut
+// off at EOF is eligible for whole-document recovery.
 func InspectRuntimeCandidateDocumentFraming(payload []byte) RuntimeCandidateDocumentDisposition {
 	if len(bytes.TrimSpace(payload)) == 0 {
 		return RuntimeCandidateDocumentEmpty
@@ -141,7 +144,7 @@ func DecodeRuntimeCandidatePayload(state ConvergenceState, payload []byte) (Runt
 			for _, param := range op.Parameters {
 				params = append(params, OperationParameter{Name: param.Name, String: param.String, Integer: param.Integer, Boolean: param.Boolean, StringList: param.StringList})
 			}
-			operations = append(operations, RuntimeOperation{ID: op.ID, Kind: op.Kind, RequiredOperationRef: op.RequiredOperationRef, DependsOn: op.DependsOn, BindingRefs: op.BindingRefs, TargetRefs: op.TargetRefs, Parameters: params})
+			operations = append(operations, RuntimeOperation{Kind: op.Kind, RequiredOperationRef: op.RequiredOperationRef, BindingRefs: op.BindingRefs, TargetRefs: op.TargetRefs, Parameters: params})
 		}
 		if state == ConvergenceStateNeedStateChange {
 			ret := make([]StateChangingOperation, 0, len(operations))
@@ -187,29 +190,39 @@ func DecodeRuntimeCandidatePayload(state ConvergenceState, payload []byte) (Runt
 // EncodeRuntimeCandidatePayloadWithManifest is the pure canonical wire encoder
 // used by deterministic fixtures. It deliberately accepts the sealed manifest
 // rather than a derived action so a fixture cannot produce JSON that the active
-// renderer/decoder contract would reject. Production never uses this helper to
-// reinterpret provider output.
+// renderer/decoder contract would reject. Operation ID and dependency values
+// on the input are replaced by the manifest-derived authority and never enter
+// the wire document. Production never uses this helper to reinterpret provider
+// output.
 func EncodeRuntimeCandidatePayloadWithManifest(manifest RuntimeCandidateContractManifest, candidate RuntimeCandidate) ([]byte, error) {
 	manifest = manifest.Normalized()
 	if manifest.Revision != RuntimeCandidateContractManifestRevision || manifest.Hash == "" ||
 		manifest.Hash != StableRuntimeCandidateContractManifestHash(manifest) {
 		return nil, fmt.Errorf("runtime candidate contract manifest is invalid")
 	}
-	if err := ValidateRuntimeCandidateAgainstManifest(manifest, candidate); err != nil {
+	canonicalCandidate := candidate
+	if manifest.State == ConvergenceStateNeedStateChange || manifest.State == ConvergenceStateNeedValidation {
+		var err error
+		canonicalCandidate, err = DeriveRuntimeCandidateOperationAuthority(manifest, candidate)
+		if err != nil {
+			return nil, err
+		}
+	}
+	if err := ValidateRuntimeCandidateAgainstManifest(manifest, canonicalCandidate); err != nil {
 		return nil, err
 	}
 	var payload any
 	switch manifest.State {
 	case ConvergenceStateNeedStateChange:
-		if candidate.StateChange == nil {
+		if canonicalCandidate.StateChange == nil {
 			return nil, fmt.Errorf("state-change candidate is missing its wire payload")
 		}
-		payload = runtimeCandidateOperationPayloadForCandidate(candidate.StateChange.Operations, nil)
+		payload = runtimeCandidateOperationPayloadForCandidate(canonicalCandidate.StateChange.Operations, nil)
 	case ConvergenceStateNeedValidation:
-		if candidate.Validation == nil {
+		if canonicalCandidate.Validation == nil {
 			return nil, fmt.Errorf("validation candidate is missing its wire payload")
 		}
-		payload = runtimeCandidateOperationPayloadForCandidate(nil, candidate.Validation.Operations)
+		payload = runtimeCandidateOperationPayloadForCandidate(nil, canonicalCandidate.Validation.Operations)
 	case ConvergenceStateNeedAssessment:
 		if candidate.Assessment == nil {
 			return nil, fmt.Errorf("assessment candidate is missing its wire payload")
@@ -236,7 +249,7 @@ func EncodeRuntimeCandidatePayloadWithManifest(manifest RuntimeCandidateContract
 	if err != nil {
 		return nil, err
 	}
-	if StableRuntimeCandidateHash(decoded) != StableRuntimeCandidateHash(candidate) {
+	if StableRuntimeCandidateHash(decoded) != StableRuntimeCandidateHash(canonicalCandidate) {
 		return nil, fmt.Errorf("canonical candidate payload changed candidate semantics")
 	}
 	return document, nil
@@ -252,9 +265,9 @@ func runtimeCandidateOperationPayloadForCandidate(stateChanges []StateChangingOp
 	}
 	payload := runtimeCandidateOperationPayload{Operations: make([]runtimeCandidateOperation, 0, len(operations))}
 	for _, operation := range operations {
-		value := runtimeCandidateOperation{ID: operation.ID, Kind: operation.Kind, RequiredOperationRef: operation.RequiredOperationRef,
-			DependsOn: append([]string(nil), operation.DependsOn...), BindingRefs: append([]string(nil), operation.BindingRefs...),
-			TargetRefs: append([]string(nil), operation.TargetRefs...), Parameters: make([]runtimeCandidateParameter, 0, len(operation.Parameters))}
+		value := runtimeCandidateOperation{Kind: operation.Kind, RequiredOperationRef: operation.RequiredOperationRef,
+			BindingRefs: append([]string(nil), operation.BindingRefs...),
+			TargetRefs:  append([]string(nil), operation.TargetRefs...), Parameters: make([]runtimeCandidateParameter, 0, len(operation.Parameters))}
 		for _, parameter := range operation.Parameters {
 			value.Parameters = append(value.Parameters, runtimeCandidateParameter{Name: parameter.Name, String: parameter.String, Integer: parameter.Integer, Boolean: parameter.Boolean, StringList: append([]string(nil), parameter.StringList...)})
 		}
@@ -302,10 +315,8 @@ type runtimeCandidateOperationPayload struct {
 	Operations []runtimeCandidateOperation `json:"operations"`
 }
 type runtimeCandidateOperation struct {
-	ID                   string                      `json:"id"`
 	Kind                 string                      `json:"kind"`
 	RequiredOperationRef string                      `json:"requiredOperationRef,omitempty"`
-	DependsOn            []string                    `json:"dependsOn,omitempty"`
 	BindingRefs          []string                    `json:"bindingRefs,omitempty"`
 	TargetRefs           []string                    `json:"targetRefs,omitempty"`
 	Parameters           []runtimeCandidateParameter `json:"parameters,omitempty"`

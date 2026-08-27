@@ -4,8 +4,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"reflect"
 	"testing"
 
+	"github.com/muidea/workorch/internal/modules/kernel/orchestrator/biz/internal/requestcontent"
 	"github.com/muidea/workorch/internal/modules/kernel/orchestrator/biz/internal/semanticplan"
 	"github.com/muidea/workorch/internal/pkg/common"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
@@ -1527,7 +1529,7 @@ func TestRuntimeSemanticCatalogInvalidationNeverRetiresActiveDispatch(t *testing
 	}
 }
 
-func TestRuntimeSemanticRetirementPreservesPriorProviderDocumentOutcome(t *testing.T) {
+func TestRuntimeSemanticRetirementClearsPriorProviderDocumentFraming(t *testing.T) {
 	ledger := runtimecontract.RuntimeSemanticPlanningLedger{}
 	// Build the sealed ledger through the package fixture so the retirement
 	// helper is tested against a complete generation, not a hand-written shape.
@@ -1561,12 +1563,66 @@ func TestRuntimeSemanticRetirementPreservesPriorProviderDocumentOutcome(t *testi
 	if err := retireSemanticPlanningGeneration(&aggregate, runtimecontract.RuntimeSemanticPlanningRetirementResourceInvalidated, []RuntimeSemanticCatalogFreshnessGap{{PrerequisiteID: prerequisite.ID}}); err != nil {
 		t.Fatal(err)
 	}
-	if got := aggregate.CandidateRequestSessions[0].LastDocumentFraming; got == nil || got.ResponseHash != outcome.ResponseHash || got.Code != outcome.Code {
-		t.Fatalf("retirement discarded prior provider document outcome: %+v", got)
+	if got := aggregate.CandidateRequestSessions[0].LastDocumentFraming; got != nil {
+		t.Fatalf("stale retirement retained live provider document framing: %+v", got)
 	}
 	if aggregate.CandidateRequestSessions[0].State != runtimecontract.RuntimeCandidateRequestSessionTerminal ||
 		aggregate.CandidateRequestSessions[0].LastOutcome.Class != runtimecontract.RuntimeCandidateRequestOutcomePrerequisiteStale {
 		t.Fatalf("retirement did not close the old provider session: %+v", aggregate.CandidateRequestSessions[0])
+	}
+}
+
+func TestRuntimeSemanticRetirementRejectsUnsettledSubmittedRequestWithoutMutation(t *testing.T) {
+	_, _, aggregate, _, prerequisite, _ := sealedSemanticPlanningAggregate(t)
+	ledger := aggregate.SemanticPlanning.Clone()
+	expected := runtimecontract.RuntimeExpectedDocumentContract{
+		SchemaVersion: runtimecontract.RuntimeExpectedDocumentSchemaCurrent,
+		DocumentKind:  runtimecontract.RuntimeProviderDocumentSemanticPlan,
+		PlanStep:      runtimecontract.RuntimeSemanticPlanStepProofBatch,
+		ManifestHash:  ledger.Manifest.Hash, DefinitionSeedHash: ledger.DefinitionSeed.Hash,
+		LogicalRequestID: "submitted-semantic-request", StablePrefixHash: "submitted-semantic-prefix",
+		BatchID: ledger.Document.BatchID, BatchSequence: ledger.Document.BatchSequence,
+		BatchCoverageWorkItemIDs: append([]common.CoverageWorkItemID(nil), ledger.Document.BatchCoverageWorkItemIDs...),
+		CoverageOrderHash:        runtimecontract.StableRuntimeSemanticPlanCoverageOrderHash(*ledger.CoverageOrderDocument),
+		MaxOutputTokens:          1024, MaxRecoveryAttempts: 1,
+	}
+	expected.Hash = runtimecontract.StableRuntimeExpectedDocumentHash(expected)
+	physicalCallID := runtimecontract.StableRuntimeCandidatePhysicalCallID(expected.LogicalRequestID, 1)
+	session := runtimecontract.RuntimeCandidateRequestSession{
+		LogicalRequestID: expected.LogicalRequestID, DocumentKind: expected.DocumentKind, ExpectedDocument: &expected,
+		Transaction:      runtimecontract.AuthorityTransaction{AuthoritySnapshotID: "submitted-semantic-authority"},
+		StablePrefixHash: expected.StablePrefixHash, ManifestHash: expected.ManifestHash,
+		State: runtimecontract.RuntimeCandidateRequestSessionPrepared, NextSequence: 1,
+		LastPhysicalCallID: physicalCallID, ProviderSubmitted: true,
+	}
+	if err := session.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	aggregate.CandidateRequestSessions = []runtimecontract.RuntimeCandidateRequestSession{session}
+	if err := reserveCandidateRequestExecutionBudget(&aggregate, session, 1, physicalCallID); err != nil {
+		t.Fatal(err)
+	}
+	beforeLedger := aggregate.SemanticPlanning.Clone()
+	beforeSession := aggregate.CandidateRequestSessions[0].Clone()
+	beforeBudget := aggregate.ExecutionBudget.Clone()
+	beforeRevision := aggregate.StateRevision
+
+	err := retireSemanticPlanningGeneration(&aggregate, runtimecontract.RuntimeSemanticPlanningRetirementResourceInvalidated, []RuntimeSemanticCatalogFreshnessGap{{PrerequisiteID: prerequisite.ID}})
+	if !errors.Is(err, common.ErrConflict) {
+		t.Fatalf("retirement err = %v, want unresolved-submission conflict", err)
+	}
+	if aggregate.StateRevision != beforeRevision || !reflect.DeepEqual(aggregate.SemanticPlanning, beforeLedger) ||
+		!reflect.DeepEqual(aggregate.CandidateRequestSessions[0], beforeSession) || !reflect.DeepEqual(aggregate.ExecutionBudget, beforeBudget) {
+		t.Fatalf("rejected retirement mutated owner state: semantic=%+v session=%+v budget=%+v", aggregate.SemanticPlanning, aggregate.CandidateRequestSessions[0], aggregate.ExecutionBudget)
+	}
+	// The persisted marker and reservation remain a valid restart boundary: a
+	// fresh owner can still classify this exact physical call rather than lose it
+	// behind a stale-generation terminal.
+	if err := aggregate.CandidateRequestSessions[0].Validate(); err != nil {
+		t.Fatalf("submitted session is not reloadable: %v", err)
+	}
+	if err := aggregate.ExecutionBudget.Validate(); err != nil {
+		t.Fatalf("submitted budget is not reloadable: %v", err)
 	}
 }
 
@@ -2345,10 +2401,18 @@ func TestRuntimeCapabilitiesWithSemanticProofsAddsValidationOperation(t *testing
 }
 
 func semanticPlanningCorrectionDirective(manifest runtimecontract.RuntimeSemanticPlanManifest, prefix string, step runtimecontract.RuntimeSemanticPlanStep, rejection runtimecontract.RuntimeOriginalDiagnostic) runtimecontract.RuntimeSemanticCorrectionDirective {
+	observation, err := requestcontent.ProjectRuntimeSemanticCorrectionObservation(&rejection)
+	if err != nil {
+		observation = &runtimecontract.RuntimeSemanticCorrectionObservation{
+			SchemaVersion: runtimecontract.RuntimeSemanticCorrectionObservationSchemaCurrent,
+			OwnerModuleID: rejection.OwnerModuleID, Class: rejection.OriginalClass, Code: rejection.OriginalCode,
+			Signature: rejection.Signature, SemanticViolations: append([]runtimecontract.RuntimeSemanticContractViolation(nil), rejection.SemanticViolations...),
+		}
+	}
 	directive := runtimecontract.RuntimeSemanticCorrectionDirective{
 		SchemaVersion: runtimecontract.RuntimeSemanticCorrectionDirectiveSchemaCurrent,
 		PlanStep:      step, ManifestHash: manifest.Hash, DefinitionSeedHash: manifest.DefinitionSeedHash,
-		StablePrefixHash: prefix, SourceRejectionHash: runtimecontract.StableRuntimeSemanticPlanCorrectionHash(rejection), Attempt: 1,
+		StablePrefixHash: prefix, SourceObservationHash: runtimecontract.StableRuntimeSemanticCorrectionObservationHash(*observation), Attempt: 1,
 		Violations: append([]runtimecontract.RuntimeSemanticContractViolation(nil), rejection.SemanticViolations...),
 	}
 	directive.Hash = runtimecontract.StableRuntimeSemanticCorrectionDirectiveHash(directive)

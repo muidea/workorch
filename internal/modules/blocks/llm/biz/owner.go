@@ -232,12 +232,12 @@ func (m *Biz) handleRuntimeCandidatePreflight(event magicevent.Event, result mag
 	request := llmmodels.RuntimeCandidateRequest{
 		DocumentKind: command.DocumentKind,
 		Decision:     command.Decision, Transaction: command.Transaction,
-		CandidateAttempt: command.CandidateAttempt, PreviousFailure: command.PreviousFailure, CandidateCorrection: command.CandidateCorrection.Clone(),
+		CandidateAttempt: command.CandidateAttempt, CandidateCorrectionObservation: cloneRuntimeCandidateCorrectionObservation(command.CandidateCorrectionObservation), CandidateCorrection: command.CandidateCorrection.Clone(),
 		StablePrefixHash: command.StablePrefixHash, DefinitionContext: command.DefinitionContext,
 		CandidateManifest: command.CandidateManifest, CandidateContext: command.CandidateContext,
 		SemanticManifest: command.SemanticManifest, SemanticContext: command.SemanticContext,
-		PreviousSemanticRejection:   cloneRuntimeOriginalDiagnostic(command.PreviousSemanticRejection),
-		SemanticCorrectionDirective: cloneRuntimeSemanticCorrectionDirective(command.SemanticCorrectionDirective),
+		SemanticCorrectionObservation: cloneRuntimeSemanticCorrectionObservation(command.SemanticCorrectionObservation),
+		SemanticCorrectionDirective:   cloneRuntimeSemanticCorrectionDirective(command.SemanticCorrectionDirective),
 	}
 	startedAt := time.Now().UTC()
 	providerRequest, preflightErr := runtimeProviderRequest(request)
@@ -341,22 +341,22 @@ func (m *Biz) handleRuntimeCandidate(event magicevent.Event, result magicevent.R
 	response, err := llmruntime.RequestCandidate(event.Context(), runtimePhysicalSubmissionGuardedProvider{
 		guard: m.physicalSubmissionGuard, delegate: m.candidateProvider,
 	}, llmmodels.RuntimeCandidateRequest{
-		DocumentKind:                command.DocumentKind,
-		RequestIdentity:             command.RequestIdentity,
-		ExpectedDocument:            command.ExpectedDocument,
-		Decision:                    command.Decision,
-		Transaction:                 command.Transaction,
-		CandidateAttempt:            command.CandidateAttempt,
-		PreviousFailure:             command.PreviousFailure,
-		CandidateCorrection:         command.CandidateCorrection.Clone(),
-		StablePrefixHash:            command.StablePrefixHash,
-		CandidateManifest:           command.CandidateManifest,
-		DefinitionContext:           command.DefinitionContext,
-		CandidateContext:            command.CandidateContext,
-		SemanticManifest:            command.SemanticManifest,
-		SemanticContext:             command.SemanticContext,
-		PreviousSemanticRejection:   cloneRuntimeOriginalDiagnostic(command.PreviousSemanticRejection),
-		SemanticCorrectionDirective: cloneRuntimeSemanticCorrectionDirective(command.SemanticCorrectionDirective),
+		DocumentKind:                   command.DocumentKind,
+		RequestIdentity:                command.RequestIdentity,
+		ExpectedDocument:               command.ExpectedDocument,
+		Decision:                       command.Decision,
+		Transaction:                    command.Transaction,
+		CandidateAttempt:               command.CandidateAttempt,
+		CandidateCorrectionObservation: cloneRuntimeCandidateCorrectionObservation(command.CandidateCorrectionObservation),
+		CandidateCorrection:            command.CandidateCorrection.Clone(),
+		StablePrefixHash:               command.StablePrefixHash,
+		CandidateManifest:              command.CandidateManifest,
+		DefinitionContext:              command.DefinitionContext,
+		CandidateContext:               command.CandidateContext,
+		SemanticManifest:               command.SemanticManifest,
+		SemanticContext:                command.SemanticContext,
+		SemanticCorrectionObservation:  cloneRuntimeSemanticCorrectionObservation(command.SemanticCorrectionObservation),
+		SemanticCorrectionDirective:    cloneRuntimeSemanticCorrectionDirective(command.SemanticCorrectionDirective),
 	})
 	if isRuntimePhysicalSubmissionGuardError(err) {
 		setPrerequisiteMagicError(result, err)
@@ -459,6 +459,22 @@ func (m *Biz) handleRuntimeCandidate(event magicevent.Event, result magicevent.R
 }
 
 func cloneRuntimeSemanticCorrectionDirective(value *runtimecontract.RuntimeSemanticCorrectionDirective) *runtimecontract.RuntimeSemanticCorrectionDirective {
+	if value == nil {
+		return nil
+	}
+	clone := value.Clone()
+	return &clone
+}
+
+func cloneRuntimeCandidateCorrectionObservation(value *runtimecontract.RuntimeCandidateCorrectionObservation) *runtimecontract.RuntimeCandidateCorrectionObservation {
+	if value == nil {
+		return nil
+	}
+	clone := value.Clone()
+	return &clone
+}
+
+func cloneRuntimeSemanticCorrectionObservation(value *runtimecontract.RuntimeSemanticCorrectionObservation) *runtimecontract.RuntimeSemanticCorrectionObservation {
 	if value == nil {
 		return nil
 	}

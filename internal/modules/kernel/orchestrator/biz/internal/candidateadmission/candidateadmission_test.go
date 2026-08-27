@@ -64,6 +64,10 @@ func TestEvaluateUsesOneStableStructuralThenReplayOrder(t *testing.T) {
 	invalid := candidate
 	invalid.StateChange = &runtimecontract.StateChangeCandidate{Operations: append([]runtimecontract.StateChangingOperation(nil), candidate.StateChange.Operations...)}
 	invalid.StateChange.Operations[0].Operation.TargetRefs = []string{"outside.go"}
+	invalid, err := runtimecontract.DeriveRuntimeCandidateOperationAuthority(manifest, invalid)
+	if err != nil {
+		t.Fatal(err)
+	}
 	input.Candidate = invalid
 	input.RejectedOperationShapes = []runtimecontract.RuntimeRejectedOperationShape{{Operation: invalid.StateChange.Operations[0].Operation}}
 	if failure := Evaluate(input); failure == nil || failure.Code != CodeInvalid || failure.Diagnostic == nil || failure.Diagnostic.Path == "" {
@@ -112,6 +116,10 @@ func TestEvaluateRepairClosurePrecedesReplay(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	candidate, err = runtimecontract.DeriveRuntimeCandidateOperationAuthority(manifest, candidate)
+	if err != nil {
+		t.Fatal(err)
+	}
 	failure := Evaluate(EvaluationInput{
 		Manifest: manifest, Decision: decision, Facts: facts, Candidate: candidate,
 		RejectedOperationShapes: []runtimecontract.RuntimeRejectedOperationShape{{Operation: candidate.StateChange.Operations[0].Operation}},
@@ -122,16 +130,28 @@ func TestEvaluateRepairClosurePrecedesReplay(t *testing.T) {
 	}
 }
 
-func TestEvaluateRejectsDependentDurableOperationsForSameOwnerTarget(t *testing.T) {
+func TestEvaluateRejectsDistinctDurableOperationsForSameOwnerTarget(t *testing.T) {
 	facts, decision, manifest, candidate := evaluatorFixture(t)
 	second := candidate.StateChange.Operations[0].Operation
-	second.ID = "patch-2"
-	second.DependsOn = []string{"patch-1"}
+	second.ID = ""
+	second.Parameters = append([]runtimecontract.OperationParameter(nil), second.Parameters...)
+	for index := range second.Parameters {
+		if second.Parameters[index].Name == "content" {
+			value := "second update\n"
+			second.Parameters[index].String = &value
+		}
+	}
 	candidate.StateChange.Operations = append(candidate.StateChange.Operations, runtimecontract.StateChangingOperation{Operation: second})
+	var err error
+	candidate, err = runtimecontract.DeriveRuntimeCandidateOperationAuthority(manifest, candidate)
+	if err != nil {
+		t.Fatal(err)
+	}
+	secondOperationID := candidate.StateChange.Operations[1].Operation.ID
 
 	failure := Evaluate(EvaluationInput{Manifest: manifest, Decision: decision, Facts: facts, Candidate: candidate})
 	if failure == nil || failure.Code != CodeOwnerTargetEffectOverlap || failure.Diagnostic == nil ||
-		failure.Diagnostic.OperationID != "patch-2" || failure.Diagnostic.Actual != runtimecontract.RuntimeModuleFile+"|main.go" ||
+		failure.Diagnostic.OperationID != secondOperationID || failure.Diagnostic.Actual != runtimecontract.RuntimeModuleFile+"|main.go" ||
 		!reflect.DeepEqual(failure.Diagnostic.Objectives, []runtimecontract.RuntimeCandidateCorrectionObjective{runtimecontract.RuntimeCandidateCorrectionChangeReplayedShape}) {
 		t.Fatalf("same owner/target durable overlap = %+v", failure)
 	}
@@ -262,5 +282,9 @@ func evaluatorFixture(t *testing.T) (runtimecontract.RuntimeFacts, runtimecontra
 		BindingRefs: []string{binding.ID}, TargetRefs: []string{"main.go"},
 		Parameters: []runtimecontract.OperationParameter{{Name: "patchType", String: &patchType}, {Name: "content", String: &content}},
 	}}}}}
+	candidate, err = runtimecontract.DeriveRuntimeCandidateOperationAuthority(manifest, candidate)
+	if err != nil {
+		t.Fatal(err)
+	}
 	return facts, decision, manifest, candidate
 }

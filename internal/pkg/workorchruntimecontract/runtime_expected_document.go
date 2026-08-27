@@ -131,6 +131,18 @@ const (
 	RuntimeProviderDocumentIncomplete RuntimeProviderDocumentDisposition = "incomplete_document"
 	RuntimeProviderDocumentEmpty      RuntimeProviderDocumentDisposition = "empty_document"
 	RuntimeProviderDocumentInvalid    RuntimeProviderDocumentDisposition = "invalid_provider_output"
+
+	// Runtime provider-document identities are a closed owner-neutral
+	// vocabulary.  The LLM owner reports only the observed framing fact; these
+	// values do not grant retry or terminal authority to the producer.
+	RuntimeProviderDocumentCodeOutputLimit         = "max_output_tokens"
+	RuntimeProviderDocumentSignatureOutputLimit    = "provider-output-limit"
+	RuntimeProviderDocumentCodeIncompleteJSON      = "incomplete_json_document"
+	RuntimeProviderDocumentSignatureIncompleteJSON = "provider-document-incomplete"
+	RuntimeProviderDocumentCodeFinalOutputMissing  = "provider_final_output_missing"
+	RuntimeProviderDocumentSignatureOutputMissing  = "provider-final-output-missing"
+	RuntimeProviderDocumentCodeFinalOutputInvalid  = "provider_final_output_invalid"
+	RuntimeProviderDocumentSignatureOutputInvalid  = "provider-final-output-invalid"
 )
 
 // RuntimeProviderDocumentFraming is an owner-neutral, pure DTO describing the
@@ -176,18 +188,22 @@ func (o RuntimeProviderDocumentFraming) Validate() error {
 			return common.ErrInvalidArgument
 		}
 	case RuntimeProviderDocumentIncomplete:
-		if o.Code == "" || o.Signature == "" {
+		outputLimit := o.Code == RuntimeProviderDocumentCodeOutputLimit && o.Signature == RuntimeProviderDocumentSignatureOutputLimit
+		truncatedJSON := o.Code == RuntimeProviderDocumentCodeIncompleteJSON && o.Signature == RuntimeProviderDocumentSignatureIncompleteJSON
+		if !outputLimit && !truncatedJSON {
 			return common.ErrInvalidArgument
 		}
-		if !hasResponse && (o.Code != "max_output_tokens" || o.Signature != "provider-output-limit") {
+		// A provider may spend its output budget entirely on hidden reasoning,
+		// but a structural EOF observation necessarily has response bytes.
+		if !hasResponse && !outputLimit {
 			return common.ErrInvalidArgument
 		}
 	case RuntimeProviderDocumentInvalid:
-		if !hasResponse || o.Code == "" || o.Signature == "" {
+		if !hasResponse || o.Code != RuntimeProviderDocumentCodeFinalOutputInvalid || o.Signature != RuntimeProviderDocumentSignatureOutputInvalid {
 			return common.ErrInvalidArgument
 		}
 	case RuntimeProviderDocumentEmpty:
-		if hasResponse || o.Code == "" || o.Signature == "" {
+		if hasResponse || o.Code != RuntimeProviderDocumentCodeFinalOutputMissing || o.Signature != RuntimeProviderDocumentSignatureOutputMissing {
 			return common.ErrInvalidArgument
 		}
 	default:

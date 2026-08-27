@@ -36,7 +36,7 @@ func TestRuntimeCandidateRequestSessionCASLifecycleDoesNotAllocateCandidateAttem
 	outcome := runtimecontract.RuntimeProviderDocumentFraming{
 		Disposition: runtimecontract.RuntimeProviderDocumentIncomplete, ExpectedDocumentHash: session.ExpectedDocument.Hash,
 		ResponseHash: runtimecontract.StableRuntimeProviderResponseHash(partial), ResponseBytes: int64(len(partial)),
-		Code: "provider_output_incomplete", Signature: "provider-output-incomplete",
+		Code: runtimecontract.RuntimeProviderDocumentCodeIncompleteJSON, Signature: runtimecontract.RuntimeProviderDocumentSignatureIncompleteJSON,
 	}
 	recovery := runtimeProviderDocumentRecoveryFactForTest(t, runtimecontract.RuntimeProviderDocumentOperations, outcome)
 	settlement := runtimeProviderConfirmedBudgetSettlementForTest(t, session.LogicalRequestID, "physical-1", nil)
@@ -71,11 +71,201 @@ func TestRuntimeCandidateRequestSessionCASLifecycleDoesNotAllocateCandidateAttem
 		t.Fatal(err)
 	}
 	stored = completed.CandidateRequestSessions[0]
-	if stored.State != runtimecontract.RuntimeCandidateRequestSessionDocumentComplete || stored.LastOutcome.Class != runtimecontract.RuntimeCandidateRequestOutcomeDocumentComplete || len(completed.CandidateAttempts) != 0 {
+	if stored.State != runtimecontract.RuntimeCandidateRequestSessionDocumentComplete || stored.LastOutcome.Class != runtimecontract.RuntimeCandidateRequestOutcomeDocumentComplete || stored.LastDocumentFraming != nil || len(completed.CandidateAttempts) != 0 {
 		t.Fatalf("complete document session = %+v aggregate=%+v", stored, completed)
 	}
 	if _, err := controller.coordinateProviderRequestRecovery(ctx, "ws-1", "run-1", session.LogicalRequestID, "physical-2", recovery, runtimeProviderConfirmedBudgetSettlementForTest(t, session.LogicalRequestID, "physical-2", nil)); !errors.Is(err, common.ErrConflict) {
 		t.Fatalf("incomplete outcome after complete err = %v, want conflict", err)
+	}
+}
+
+func TestRuntimeCandidateRequestSessionRestartClearsIncompleteFramingAcrossTransportAndComplete(t *testing.T) {
+	ctx := context.Background()
+	repository := &controllerRepository{aggregate: ptrRuntimeAggregate(stateChangeAggregate(t))}
+	controller, err := NewRuntimeController(repository)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, session, err := controller.ensureCandidateRequestSession(ctx, "ws-1", "run-1", runtimecontract.RuntimeProviderDocumentOperations, "framing-prefix", "manifest-v1", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := controller.markCandidateRequestSubmitted(ctx, "ws-1", "run-1", session.LogicalRequestID, 1, "physical-incomplete"); err != nil {
+		t.Fatal(err)
+	}
+	partial := []byte(`{"operations":[`)
+	framing := runtimecontract.RuntimeProviderDocumentFraming{
+		Disposition: runtimecontract.RuntimeProviderDocumentIncomplete, ExpectedDocumentHash: session.ExpectedDocument.Hash,
+		ResponseHash: runtimecontract.StableRuntimeProviderResponseHash(partial), ResponseBytes: int64(len(partial)),
+		Code: runtimecontract.RuntimeProviderDocumentCodeIncompleteJSON, Signature: runtimecontract.RuntimeProviderDocumentSignatureIncompleteJSON,
+	}
+	recovery := runtimeProviderDocumentRecoveryFactForTest(t, runtimecontract.RuntimeProviderDocumentOperations, framing)
+	if _, err := controller.coordinateProviderRequestRecovery(ctx, "ws-1", "run-1", session.LogicalRequestID, "physical-incomplete", recovery, runtimeProviderConfirmedBudgetSettlementForTest(t, session.LogicalRequestID, "physical-incomplete", nil)); err != nil {
+		t.Fatal(err)
+	}
+
+	// Reloading the owner between durable transitions must neither retain a
+	// framing fact in an incompatible state nor resend the earlier call.
+	restarted, err := NewRuntimeController(repository)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := restarted.markCandidateRequestSubmitted(ctx, "ws-1", "run-1", session.LogicalRequestID, 2, "physical-transient"); err != nil {
+		t.Fatal(err)
+	}
+	transient := runtimecontract.RuntimeCandidateRequestOutcome{Class: runtimecontract.RuntimeCandidateRequestOutcomeProviderTransient, Code: "provider_timeout", Signature: "provider-timeout"}
+	diagnostic := runtimecontract.RuntimeOriginalDiagnostic{
+		SchemaVersion: runtimecontract.RuntimeOriginalDiagnosticSchemaCurrent, OwnerModuleID: runtimecontract.RuntimeModuleLLM,
+		OriginalClass: string(runtimecontract.RuntimeCandidateFailureClassProviderTransient), OriginalCode: transient.Code,
+		OriginalMessage: "provider transport timed out", Signature: transient.Signature,
+	}
+	transport := runtimeProviderTransportRecoveryFactForTest(t, runtimecontract.RuntimeProviderDocumentOperations, transient, diagnostic.OriginalMessage, &diagnostic)
+	transportPending, err := restarted.coordinateProviderRequestRecovery(ctx, "ws-1", "run-1", session.LogicalRequestID, "physical-transient", transport, runtimeProviderConfirmedBudgetSettlementForTest(t, session.LogicalRequestID, "physical-transient", nil))
+	if err != nil {
+		t.Fatal(err)
+	}
+	stored := transportPending.CandidateRequestSessions[0]
+	if stored.State != runtimecontract.RuntimeCandidateRequestSessionTransportPending || stored.NextSequence != 3 || stored.LastDocumentFraming != nil {
+		t.Fatalf("transport successor retained stale incomplete framing: %+v", stored)
+	}
+
+	restartedAgain, err := NewRuntimeController(repository)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := restartedAgain.markCandidateRequestSubmitted(ctx, "ws-1", "run-1", session.LogicalRequestID, 3, "physical-complete"); err != nil {
+		t.Fatal(err)
+	}
+	completed, err := restartedAgain.completeCandidateRequestDocument(ctx, "ws-1", "run-1", session.LogicalRequestID, "physical-complete")
+	if err != nil {
+		t.Fatal(err)
+	}
+	stored = completed.CandidateRequestSessions[0]
+	if stored.State != runtimecontract.RuntimeCandidateRequestSessionDocumentComplete || stored.LastDocumentFraming != nil || stored.NextSequence != 3 {
+		t.Fatalf("complete successor retained stale framing after restart: %+v", stored)
+	}
+}
+
+func TestRuntimeCandidateRequestSessionNonDocumentTerminalClearsIncompleteFraming(t *testing.T) {
+	ctx := context.Background()
+	repository := &controllerRepository{aggregate: ptrRuntimeAggregate(stateChangeAggregate(t))}
+	controller, err := NewRuntimeController(repository)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, session, err := controller.ensureCandidateRequestSession(ctx, "ws-1", "run-1", runtimecontract.RuntimeProviderDocumentOperations, "terminal-framing-prefix", "manifest-v1", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := controller.markCandidateRequestSubmitted(ctx, "ws-1", "run-1", session.LogicalRequestID, 1, "physical-incomplete"); err != nil {
+		t.Fatal(err)
+	}
+	partial := []byte(`{"operations":[`)
+	framing := runtimecontract.RuntimeProviderDocumentFraming{
+		Disposition: runtimecontract.RuntimeProviderDocumentIncomplete, ExpectedDocumentHash: session.ExpectedDocument.Hash,
+		ResponseHash: runtimecontract.StableRuntimeProviderResponseHash(partial), ResponseBytes: int64(len(partial)),
+		Code: runtimecontract.RuntimeProviderDocumentCodeIncompleteJSON, Signature: runtimecontract.RuntimeProviderDocumentSignatureIncompleteJSON,
+	}
+	recovery := runtimeProviderDocumentRecoveryFactForTest(t, runtimecontract.RuntimeProviderDocumentOperations, framing)
+	if _, err := controller.coordinateProviderRequestRecovery(ctx, "ws-1", "run-1", session.LogicalRequestID, "physical-incomplete", recovery, runtimeProviderConfirmedBudgetSettlementForTest(t, session.LogicalRequestID, "physical-incomplete", nil)); err != nil {
+		t.Fatal(err)
+	}
+	fact, err := NormalizeRuntimeProviderRequestTerminal(RuntimeProviderRequestTerminalInput{
+		DocumentKind: runtimecontract.RuntimeProviderDocumentOperations,
+		OutcomeClass: runtimecontract.RuntimeCandidateRequestOutcomeProviderConfiguration,
+		TerminalCode: "provider_configuration", TerminalSignature: "provider-configuration",
+		Message: "provider configuration is unavailable",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	terminal, err := controller.planning.coordinateProviderRequestTerminal(ctx, "ws-1", "run-1", session.LogicalRequestID, fact)
+	if err != nil {
+		t.Fatal(err)
+	}
+	stored := terminal.CandidateRequestSessions[0]
+	if stored.State != runtimecontract.RuntimeCandidateRequestSessionTerminal || stored.LastOutcome.Class != runtimecontract.RuntimeCandidateRequestOutcomeProviderConfiguration || stored.LastDocumentFraming != nil {
+		t.Fatalf("non-document terminal retained stale incomplete framing: %+v", stored)
+	}
+}
+
+func TestRuntimeCandidateDocumentConformanceRestartClosesAttemptIdempotently(t *testing.T) {
+	ctx := context.Background()
+	repository := &controllerRepository{aggregate: ptrRuntimeAggregate(stateChangeAggregate(t))}
+	controller, err := NewRuntimeController(repository)
+	if err != nil {
+		t.Fatal(err)
+	}
+	aggregate, err := controller.EnsureSemanticContractSealedForOperationTest(ctx, "ws-1", "run-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	manifest, err := runtimecontract.BuildRuntimeCandidateContractManifest(
+		aggregate.Decision,
+		runtimecontract.RuntimeCandidateManifestOwnerFactsFromContext(runtimecontract.RuntimeCandidateContextForDecision(aggregate.Facts, aggregate.Decision, nil)),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	const stablePrefix = "document-conformance-prefix"
+	_, session, err := controller.ensureCandidateRequestSession(ctx, "ws-1", "run-1", runtimecontract.RuntimeProviderDocumentOperations, stablePrefix, manifest.Hash, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	physicalCallID := runtimecontract.StableRuntimeCandidatePhysicalCallID(session.LogicalRequestID, 1)
+	if _, err := controller.markCandidateRequestSubmitted(ctx, "ws-1", "run-1", session.LogicalRequestID, 1, physicalCallID); err != nil {
+		t.Fatal(err)
+	}
+	framing := runtimecontract.RuntimeProviderDocumentFraming{
+		Disposition: runtimecontract.RuntimeProviderDocumentEmpty, ExpectedDocumentHash: session.ExpectedDocument.Hash,
+		Code: runtimecontract.RuntimeProviderDocumentCodeFinalOutputMissing, Signature: runtimecontract.RuntimeProviderDocumentSignatureOutputMissing,
+	}
+	settlement := runtimeProviderConfirmedBudgetSettlementForTest(t, session.LogicalRequestID, physicalCallID, nil)
+	rejected, err := controller.planning.rejectCandidateRequestDocumentConformance(ctx, "ws-1", "run-1", session.LogicalRequestID, physicalCallID, framing, settlement)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rejected.CandidateAttempts) != 0 || rejected.CandidateRequestSessions[len(rejected.CandidateRequestSessions)-1].State != runtimecontract.RuntimeCandidateRequestSessionDocumentConformanceRejected {
+		t.Fatalf("durable session/attempt restart boundary = %+v", rejected)
+	}
+
+	failure := runtimecontract.RuntimeCandidateFailure{
+		Class: runtimecontract.RuntimeCandidateFailureClassSchema,
+		Code:  "candidate_document_nonconformant", Signature: "candidate-document-nonconformant/empty-document",
+		Reason: "provider response must contain exactly one manifest-conformant JSON document",
+		Diagnostic: &runtimecontract.RuntimeCandidateFailureDiagnostic{
+			Path: "$", Actual: runtimecontract.RuntimeCandidateDocumentShapeEmpty,
+			Required:   []string{runtimecontract.RuntimeCandidateDocumentShapeConformant},
+			Objectives: []runtimecontract.RuntimeCandidateCorrectionObjective{runtimecontract.RuntimeCandidateCorrectionConformExpectedDocument},
+		},
+	}
+	closed, err := controller.candidateDispatch.rejectCompletedCandidateDocument(ctx, "ws-1", "run-1", 0, stablePrefix, manifest, session.LogicalRequestID, failure)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(closed.CandidateAttempts) != 1 || !CandidateAttemptIsCorrectableOnce(closed.CandidateAttempts[0]) || closed.CandidateAttempts[0].Correction.Witness.Dimension != runtimecontract.RuntimeCandidateCorrectionWitnessDocumentShape {
+		t.Fatalf("restarted document rejection did not close attempt 0: %+v", closed.CandidateAttempts)
+	}
+	saves := repository.saves
+	duplicateSession, err := controller.planning.rejectCandidateRequestDocumentConformance(ctx, "ws-1", "run-1", session.LogicalRequestID, physicalCallID, framing, settlement)
+	if err != nil {
+		t.Fatal(err)
+	}
+	duplicateAttempt, err := controller.candidateDispatch.rejectCompletedCandidateDocument(ctx, "ws-1", "run-1", 0, stablePrefix, manifest, session.LogicalRequestID, failure)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if repository.saves != saves || duplicateSession.StateRevision != closed.StateRevision || duplicateAttempt.StateRevision != closed.StateRevision {
+		t.Fatalf("duplicate conformance result rewrote aggregate: saves=%d want=%d", repository.saves, saves)
+	}
+	invalidBody := []byte("provider prose")
+	conflicting := runtimecontract.RuntimeProviderDocumentFraming{
+		Disposition: runtimecontract.RuntimeProviderDocumentInvalid, ExpectedDocumentHash: session.ExpectedDocument.Hash,
+		ResponseHash: runtimecontract.StableRuntimeProviderResponseHash(invalidBody), ResponseBytes: int64(len(invalidBody)),
+		Code: runtimecontract.RuntimeProviderDocumentCodeFinalOutputInvalid, Signature: runtimecontract.RuntimeProviderDocumentSignatureOutputInvalid,
+	}
+	if _, err := controller.planning.rejectCandidateRequestDocumentConformance(ctx, "ws-1", "run-1", session.LogicalRequestID, physicalCallID, conflicting, settlement); !errors.Is(err, common.ErrConflict) {
+		t.Fatalf("conflicting duplicate document framing err=%v, want conflict", err)
 	}
 }
 
@@ -305,32 +495,29 @@ func TestRuntimeCandidateRequestSessionDocumentRecoveryExhaustedTerminalIsAttemp
 	documentOutcome := runtimecontract.RuntimeProviderDocumentFraming{
 		Disposition: runtimecontract.RuntimeProviderDocumentIncomplete, ExpectedDocumentHash: session.ExpectedDocument.Hash,
 		ResponseHash: runtimecontract.StableRuntimeProviderResponseHash(partial), ResponseBytes: int64(len(partial)),
-		Code: "provider_output_incomplete", Signature: "provider-output-incomplete",
+		Code: runtimecontract.RuntimeProviderDocumentCodeIncompleteJSON, Signature: runtimecontract.RuntimeProviderDocumentSignatureIncompleteJSON,
 	}
 	documentRecovery := runtimeProviderDocumentRecoveryFactForTest(t, runtimecontract.RuntimeProviderDocumentOperations, documentOutcome)
-	if _, err := controller.coordinateProviderRequestRecovery(ctx, "ws-1", "run-1", session.LogicalRequestID, "physical-1", documentRecovery, runtimeProviderConfirmedBudgetSettlementForTest(t, session.LogicalRequestID, "physical-1", nil)); err != nil {
-		t.Fatal(err)
-	}
-	fact, err := NormalizeRuntimeProviderRequestTerminal(RuntimeProviderRequestTerminalInput{
-		DocumentKind: runtimecontract.RuntimeProviderDocumentOperations,
-		OutcomeClass: runtimecontract.RuntimeCandidateRequestOutcomeDocumentRecoveryExhausted,
-		TerminalCode: "candidate_document_recovery_exhausted", TerminalSignature: "candidate-document-recovery-exhausted",
-		Message: "provider document recovery budget exhausted",
-	})
+	pending, err := controller.coordinateProviderRequestRecovery(ctx, "ws-1", "run-1", session.LogicalRequestID, "physical-1", documentRecovery, runtimeProviderConfirmedBudgetSettlementForTest(t, session.LogicalRequestID, "physical-1", nil))
 	if err != nil {
 		t.Fatal(err)
 	}
-	terminal, err := controller.planning.coordinateProviderRequestTerminal(ctx, "ws-1", "run-1", session.LogicalRequestID, fact)
+	current := pending.CandidateRequestSessions[0]
+	physicalCallID := runtimecontract.StableRuntimeCandidatePhysicalCallID(current.LogicalRequestID, current.NextSequence)
+	if _, err := controller.markCandidateRequestSubmitted(ctx, "ws-1", "run-1", current.LogicalRequestID, current.NextSequence, physicalCallID); err != nil {
+		t.Fatal(err)
+	}
+	terminal, err := controller.coordinateProviderRequestRecovery(ctx, "ws-1", "run-1", current.LogicalRequestID, physicalCallID, documentRecovery, runtimeProviderConfirmedBudgetSettlementForTest(t, current.LogicalRequestID, physicalCallID, nil))
 	if err != nil {
 		t.Fatal(err)
 	}
 	stored := terminal.CandidateRequestSessions[0]
-	if stored.State != runtimecontract.RuntimeCandidateRequestSessionTerminal || stored.LastOutcome != fact.RequestOutcome ||
-		stored.IncompleteOutcomes != 1 || len(terminal.CandidateAttempts) != 0 || terminal.ActiveDispatch != nil ||
+	if stored.State != runtimecontract.RuntimeCandidateRequestSessionTerminal || stored.LastOutcome.Class != runtimecontract.RuntimeCandidateRequestOutcomeDocumentRecoveryExhausted ||
+		stored.IncompleteOutcomes != 2 || stored.LastDocumentFraming == nil || len(terminal.CandidateAttempts) != 0 || terminal.ActiveDispatch != nil ||
 		terminal.Facts.Repair.RepairAttempts != 0 {
 		t.Fatalf("document recovery exhaustion terminal aggregate = %+v", terminal)
 	}
-	duplicate, err := controller.planning.coordinateProviderRequestTerminal(ctx, "ws-1", "run-1", session.LogicalRequestID, fact)
+	duplicate, err := controller.coordinateProviderRequestRecovery(ctx, "ws-1", "run-1", current.LogicalRequestID, physicalCallID, documentRecovery, runtimeProviderConfirmedBudgetSettlementForTest(t, current.LogicalRequestID, physicalCallID, nil))
 	if err != nil || duplicate.StateRevision != terminal.StateRevision {
 		t.Fatalf("duplicate document recovery exhaustion terminal = %+v err=%v", duplicate, err)
 	}

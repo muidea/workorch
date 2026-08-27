@@ -1170,12 +1170,18 @@ func RuntimeProviderBudgetAllocationSpecs(ledger RuntimeExecutionBudgetLedger, d
 	dimensions := []RuntimeBudgetDimension{RuntimeBudgetDimensionProviderCall, RuntimeBudgetDimensionProviderInputToken, RuntimeBudgetDimensionProviderOutputToken, RuntimeBudgetDimensionReasoningEffort}
 	switch documentKind {
 	case RuntimeProviderDocumentSemanticPlan:
-		dimensions = append(dimensions, RuntimeBudgetDimensionSemanticGeneration)
-		if correctionAttempt == 1 {
-			dimensions = append(dimensions, RuntimeBudgetDimensionSemanticCorrection)
+		// A whole-document recovery is another physical call for the same
+		// sealed logical document. It consumes provider/reasoning resources and
+		// the recovery dimension, but it must not count the same semantic
+		// generation or correction attempt again.
+		if sequence == 1 {
+			dimensions = append(dimensions, RuntimeBudgetDimensionSemanticGeneration)
+			if correctionAttempt == 1 {
+				dimensions = append(dimensions, RuntimeBudgetDimensionSemanticCorrection)
+			}
 		}
 	case RuntimeProviderDocumentOperations:
-		if correctionAttempt == 1 {
+		if correctionAttempt == 1 && sequence == 1 {
 			dimensions = append(dimensions, RuntimeBudgetDimensionCandidateCorrection)
 		}
 	default:

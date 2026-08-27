@@ -53,6 +53,10 @@ func TestRuntimeCWIBindingFenceRejectsCandidateStagesWithoutMutation(t *testing.
 		}
 		manifest, logicalRequestID := runtimeCWIPendingCandidateBindingForFenceTest(t, controller, pending)
 		candidate := runtimeTestBindCandidateToCurrentFocus(t, pending, stateChangeCandidate())
+		candidate, err = runtimecontract.DeriveRuntimeCandidateOperationAuthority(manifest, candidate)
+		if err != nil {
+			t.Fatal(err)
+		}
 		runtimeTestRemoveCurrentCWIBinding(t, repository.aggregate)
 		before := *repository.aggregate
 		saves := repository.saves
@@ -72,6 +76,10 @@ func TestRuntimeCWIBindingFenceRejectsCandidateStagesWithoutMutation(t *testing.
 		}
 		manifest, logicalRequestID := runtimeCWIPendingCandidateBindingForFenceTest(t, controller, pending)
 		candidate := runtimeTestBindCandidateToCurrentFocus(t, pending, stateChangeCandidate())
+		candidate, err = runtimecontract.DeriveRuntimeCandidateOperationAuthority(manifest, candidate)
+		if err != nil {
+			t.Fatal(err)
+		}
 		if _, err := controller.admitCandidateProposal(ctx, pending.Facts.WorkspaceID, pending.Facts.RunID, 0, manifest, logicalRequestID, candidate); err != nil {
 			t.Fatal(err)
 		}
@@ -120,11 +128,12 @@ func TestRuntimeCWIBindingFenceRejectsReceiptAndBlocksOwnerExecution(t *testing.
 
 	t.Run("receipt", func(t *testing.T) {
 		controller, repository, sealed := runtimeCWISealedDispatchForBindingFenceTest(t)
-		claimed, err := controller.claimOperationExecution(ctx, sealed.Facts.WorkspaceID, sealed.Facts.RunID, "patch-1")
+		operationID := runtimeTestActiveOperationID(t, sealed, 0)
+		claimed, err := controller.claimOperationExecution(ctx, sealed.Facts.WorkspaceID, sealed.Facts.RunID, operationID)
 		if err != nil {
 			t.Fatal(err)
 		}
-		execution, found := operationExecutionRecord(claimed.ActiveDispatch.OperationExecutions, "patch-1")
+		execution, found := operationExecutionRecord(claimed.ActiveDispatch.OperationExecutions, operationID)
 		if !found {
 			t.Fatal("claimed operation is missing")
 		}

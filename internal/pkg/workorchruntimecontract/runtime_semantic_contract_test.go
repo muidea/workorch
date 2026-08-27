@@ -561,16 +561,19 @@ func TestRuntimeSemanticProposalTargetRefsIncludesProspectiveIdentityForOwnerPro
 	}
 }
 
-func TestRuntimeSemanticCorrectionHashRetainsOriginalDiagnosticIdentity(t *testing.T) {
+func TestRuntimeSemanticCorrectionHashExcludesAuditMessage(t *testing.T) {
 	diagnostic := *semanticContractTestDiagnostic()
-	base := StableRuntimeSemanticPlanCorrectionHash(diagnostic)
+	violation := RuntimeSemanticContractViolation{Kind: RuntimeSemanticContractViolationCoverageOrderDocument, Path: "$.coverageOrder", RequiredCoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-001"}}
+	diagnostic.SemanticViolations = []RuntimeSemanticContractViolation{violation}
+	observation := semanticCorrectionObservationForTest(diagnostic)
+	base := StableRuntimeSemanticCorrectionObservationHash(observation)
 	if base == "" {
 		t.Fatal("semantic correction hash is empty")
 	}
 	changed := diagnostic
 	changed.OriginalMessage = "different original diagnostic"
-	if StableRuntimeSemanticPlanCorrectionHash(changed) == base {
-		t.Fatal("semantic correction hash ignored original diagnostic mutation")
+	if StableRuntimeSemanticCorrectionObservationHash(semanticCorrectionObservationForTest(changed)) != base {
+		t.Fatal("semantic correction hash depended on excluded audit message")
 	}
 }
 

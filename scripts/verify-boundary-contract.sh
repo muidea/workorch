@@ -1573,6 +1573,12 @@ if ! grep -q -F -- 'llmevents.TopicAcquireProviderCeiling' internal/modules/bloc
 	exit 1
 fi
 
+# Deployed verifier providers are executable acceptance contracts. Keep every
+# literal operation-producing branch under scripts/ on the same strict wire as
+# production: providers propose semantics only; Orchestrator derives identity,
+# dependency edges and coverage credit from the sealed manifest.
+python3 scripts/verify_runtime_candidate_wire_scripts.py --self-test
+
 # SM-3 owns the persisted candidate correction disposition/terminal state.
 # The LLM owner receives only a detached, manifest-bound witness needed to
 # render C4; neither its EventHub command/model nor C4 may mirror owner state,
@@ -1603,6 +1609,32 @@ if grep -q -E -- '^[[:space:]]*(Disposition|TerminalCode)[[:space:]]|RuntimeCand
 fi
 if grep -q -E -- 'runtimeCandidateCorrectionDirectiveFromInput|RuntimeCandidateCorrectionDirective[[:space:]]*\{' internal/modules/kernel/orchestrator/biz/runtime_candidate_event_adapter.go; then
 	echo "boundary contract violation: Orchestrator adapter rebuilds persisted candidate correction authority from detached LLM input" >&2
+	exit 1
+fi
+
+# Orchestrator must shrink persisted candidate/semantic failures before the
+# EventHub call. Commands and the LLM owner model consume only the shared
+# bounded observations; audit Reason/OriginalMessage and complete owner
+# diagnostics may not be reconstructed or filtered after crossing.
+llm_candidate_model_request_shape="$(sed -n '/^type RuntimeCandidateRequest struct {/,/^}/p' internal/modules/blocks/llm/pkg/models/runtime_candidate.go)"
+llm_candidate_observation_shape="$(sed -n '/^type RuntimeCandidateCorrectionObservation struct {/,/^}/p' internal/pkg/workorchruntimecontract/runtime_correction_observation.go)"
+llm_semantic_observation_shape="$(sed -n '/^type RuntimeSemanticCorrectionObservation struct {/,/^}/p' internal/pkg/workorchruntimecontract/runtime_correction_observation.go)"
+for observation_request_shape in "$llm_candidate_command_shapes" "$llm_candidate_model_request_shape"; do
+	for marker in \
+		'CandidateCorrectionObservation[[:space:]]+\*runtimecontract\.RuntimeCandidateCorrectionObservation' \
+		'SemanticCorrectionObservation[[:space:]]+\*runtimecontract\.RuntimeSemanticCorrectionObservation'; do
+		if ! grep -q -E -- "$marker" <<<"$observation_request_shape"; then
+			echo "boundary contract violation: Runtime LLM request lost bounded correction observation $marker" >&2
+			exit 1
+		fi
+	done
+	if grep -q -E -- '\*runtimecontract\.(RuntimeCandidateFailure|RuntimeOriginalDiagnostic)|(^|[[:space:]])(PreviousFailure|PreviousSemanticRejection|Reason|OriginalMessage)[[:space:]]+' <<<"$observation_request_shape"; then
+		echo "boundary contract violation: Runtime LLM request regained complete failure/audit diagnostic crossing" >&2
+		exit 1
+	fi
+done
+if grep -q -E -- '(^|[[:space:]])(Reason|ValidationDiagnostic|OriginalMessage|DetailsRef|DetailsHash|DetailsBytes|ContentType|OmittedReason|Truncated|Redacted|ValidationFailureObservation|GovernanceDependency)[[:space:]]+' <<<"$llm_candidate_observation_shape"$'\n'"$llm_semantic_observation_shape"; then
+	echo "boundary contract violation: bounded correction observation regained owner-private audit/raw/validation/governance fields" >&2
 	exit 1
 fi
 
@@ -2949,12 +2981,18 @@ fi
 # The LLM owner transports provider request facts only. Candidate rejection is
 # Orchestrator SM-3 authority and must never reappear on the EventHub Result.
 llm_candidate_result_shape="$(sed -n '/^type RequestRuntimeCandidateResult struct {/,/^}/p' internal/modules/blocks/llm/pkg/events/messages.go)"
+llm_document_outcome_shape="$(sed -n '/^type RuntimeProviderDocumentOutcome struct {/,/^}/p' internal/modules/blocks/llm/pkg/events/messages.go)"
 if ! grep -q -E -- 'Feedback[[:space:]]+\*runtimecontract\.RuntimeFeedback' <<<"$llm_candidate_result_shape" ||
    ! grep -q -E -- 'Stale[[:space:]]+\*runtimecontract\.RuntimePrerequisiteStale' <<<"$llm_candidate_result_shape" ||
    ! grep -q -E -- 'DocumentOutcome[[:space:]]+\*RuntimeProviderDocumentOutcome' <<<"$llm_candidate_result_shape" ||
    grep -q -E -- 'DocumentContent[[:space:]]+\[\]byte' <<<"$llm_candidate_result_shape" ||
    grep -q -E -- '(^|[[:space:]])(Failure[[:space:]]+\*runtimecontract\.RuntimeCandidateFailure|RequestID[[:space:]]+string|Status[[:space:]]+string)' <<<"$llm_candidate_result_shape"; then
   echo "boundary contract violation: LLM provider Result must be the concrete Stale|Feedback|DocumentOutcome union without content-only fallback, candidate failure, or duplicate audit authority" >&2
+  exit 1
+fi
+if ! grep -q -E -- 'Content[[:space:]]+\[\]byte[[:space:]]+`json:"-"`' <<<"$llm_document_outcome_shape" ||
+   grep -q -E -- 'Content[[:space:]]+\[\]byte' <<<"$llm_candidate_result_shape"; then
+  echo "boundary contract violation: complete provider document content must remain volatile and nested only in the typed DocumentOutcome with json exclusion" >&2
   exit 1
 fi
 if ! grep -q -F -- 'result requires exactly one of stale, feedback, or document outcome' internal/modules/blocks/llm/pkg/events/messages.go; then

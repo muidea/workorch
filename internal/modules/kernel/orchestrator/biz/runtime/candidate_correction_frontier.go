@@ -61,6 +61,9 @@ func candidateCorrectionWitness(
 	if strings.TrimSpace(manifest.Hash) == "" {
 		return nil
 	}
+	if witness := candidateDocumentShapeCorrectionWitness(failure); witness != nil {
+		return witness
+	}
 	if frontier.candidate != nil {
 		candidate := *frontier.candidate
 		operations := candidateadmission.Operations(candidate)
@@ -119,6 +122,25 @@ func candidateCorrectionWitness(
 	return candidateSchemaCorrectionWitness(failure.Diagnostic, manifest, frontier.candidate)
 }
 
+func candidateDocumentShapeCorrectionWitness(failure *runtimecontract.RuntimeCandidateFailure) *runtimecontract.RuntimeCandidateCorrectionWitness {
+	if failure == nil || strings.TrimSpace(failure.Code) != "candidate_document_nonconformant" || failure.Diagnostic == nil {
+		return nil
+	}
+	diagnostic := failure.Diagnostic.Normalized()
+	if diagnostic.Path != "$" {
+		return nil
+	}
+	witness := &runtimecontract.RuntimeCandidateCorrectionWitness{
+		Dimension: runtimecontract.RuntimeCandidateCorrectionWitnessDocumentShape,
+		Path:      "$", RejectedValue: diagnostic.Actual,
+		AlternativeValue: runtimecontract.RuntimeCandidateDocumentShapeConformant,
+	}
+	if witness.Validate() != nil {
+		return nil
+	}
+	return witness
+}
+
 // candidateCorrectionAllowsOperationWitness keeps a legal manifest mutation
 // tied to the rejection that authorized correction. Replay/no-progress
 // failures may choose any deterministic unblocked semantic shape; every other
@@ -152,11 +174,24 @@ func candidateSchemaCorrectionWitness(diagnostic *runtimecontract.RuntimeCandida
 	}
 	diagnostic = diagnostic.Clone()
 	path := strings.TrimSpace(diagnostic.Path)
-	if path == "" || candidateCorrectionPathIsDisplayOnly(path) {
+	if path == "" {
 		return nil
 	}
 	field := candidateCorrectionPathField(path)
-	if field == "" || field == "id" || field == "summary" {
+	if field == "" || field == "summary" {
+		return nil
+	}
+	// Operation identity/dependency fields are canonical manifest projections,
+	// not provider-authored authority. A strict wire diagnostic may therefore
+	// authorize only their removal; it must never ask attempt 1 to invent or
+	// mutate the canonical values derived after decoding.
+	if (field == "id" || field == "dependsOn") && strings.HasPrefix(path, "$.operations[") {
+		if candidateCorrectionDiagnosticForbids(diagnostic, field) {
+			return schemaCorrectionWitness(path, field, candidateCorrectionFieldAbsent)
+		}
+		return nil
+	}
+	if candidateCorrectionPathIsDisplayOnly(path) {
 		return nil
 	}
 	if strings.HasPrefix(path, "$.") && !strings.HasPrefix(path, "$.operations[") {
@@ -175,7 +210,14 @@ func candidateSchemaCorrectionWitness(diagnostic *runtimecontract.RuntimeCandida
 	if !found {
 		return nil
 	}
-	if !strings.Contains(path, ".parameters") || field == "summary" {
+	if !strings.Contains(path, ".parameters") {
+		if candidateCorrectionDiagnosticRequires(diagnostic, field) &&
+			containsCandidateCorrectionString(operationManifest.RequiredOperationFields, field) {
+			return schemaCorrectionWitness(path, candidateCorrectionFieldAbsent, candidateCorrectionFieldPresent)
+		}
+		return nil
+	}
+	if field == "summary" {
 		return nil
 	}
 	if candidateCorrectionDiagnosticRequires(diagnostic, field) && candidateCorrectionParameterDeclared(operationManifest, field) {
@@ -254,7 +296,11 @@ func candidateDecodedSchemaCorrectionWitness(diagnostic *runtimecontract.Runtime
 		return nil
 	}
 	updated, ok := candidateCorrectionReplaceOperation(*candidate, index, mutated)
-	if !ok || runtimecontract.ValidateRuntimeCandidateAgainstManifest(manifest, updated) != nil {
+	if !ok {
+		return nil
+	}
+	updated, err := runtimecontract.DeriveRuntimeCandidateOperationAuthority(manifest, updated)
+	if err != nil || runtimecontract.ValidateRuntimeCandidateAgainstManifest(manifest, updated) != nil {
 		return nil
 	}
 	witness := schemaCorrectionWitness(diagnostic.Path, diagnostic.Actual, alternative)
@@ -375,7 +421,11 @@ func candidateKindCorrectionWitness(manifest runtimecontract.RuntimeCandidateCon
 
 func candidateOperationMutationWitness(manifest runtimecontract.RuntimeCandidateContractManifest, candidate runtimecontract.RuntimeCandidate, index int, original, mutated runtimecontract.RuntimeOperation, field runtimecontract.RuntimeOperationCorrectionField, rejected, alternative, rejectedShape string, blocked map[string]struct{}) *runtimecontract.RuntimeCandidateCorrectionWitness {
 	updated, ok := candidateCorrectionReplaceOperation(candidate, index, mutated)
-	if !ok || runtimecontract.ValidateRuntimeCandidateAgainstManifest(manifest, updated) != nil {
+	if !ok {
+		return nil
+	}
+	updated, err := runtimecontract.DeriveRuntimeCandidateOperationAuthority(manifest, updated)
+	if err != nil || runtimecontract.ValidateRuntimeCandidateAgainstManifest(manifest, updated) != nil {
 		return nil
 	}
 	operationShape := runtimecontract.StableRuntimeOperationShape(mutated)
@@ -496,7 +546,10 @@ func candidateCorrectionParameterDeclared(manifest runtimecontract.RuntimeCandid
 func candidateCorrectionParameterRemovalAllowed(manifest runtimecontract.RuntimeCandidateOperationManifest, name string) bool {
 	for _, parameter := range manifest.Parameters {
 		if strings.TrimSpace(parameter.Name) == name {
-			return !parameter.Required
+			// Optional means the field may be absent; it does not mean the field is
+			// forbidden when present. Only an explicit sealed prohibition can
+			// authorize removing a declared parameter.
+			return containsCandidateCorrectionString(manifest.ForbiddenParameters, name)
 		}
 	}
 	return !manifest.AllowsDynamicParameters || !candidateCorrectionDynamicParameter(name, manifest.DynamicParameterPrefixes)
@@ -542,6 +595,17 @@ func candidateCorrectionPathField(path string) string {
 func candidateCorrectionPathIsDisplayOnly(path string) bool {
 	path = strings.ToLower(strings.TrimSpace(path))
 	return strings.Contains(path, "[name=summary]") || strings.HasSuffix(path, ".summary") || strings.HasSuffix(path, ".id")
+}
+
+func candidateCorrectionRemovesRawProviderIdentity(witness runtimecontract.RuntimeCandidateCorrectionWitness) bool {
+	witness = witness.Normalized()
+	if witness.Dimension != runtimecontract.RuntimeCandidateCorrectionWitnessSchemaField ||
+		witness.AlternativeValue != candidateCorrectionFieldAbsent {
+		return false
+	}
+	field := candidateCorrectionPathField(witness.Path)
+	return strings.HasPrefix(witness.Path, "$.operations[") &&
+		(field == "id" || field == "dependsOn") && witness.RejectedValue == field
 }
 
 func containsCandidateCorrectionString(values []string, wanted string) bool {
@@ -666,7 +730,7 @@ func validateAttemptCandidateCrossesPersistedWitness(aggregate RuntimeAggregate,
 
 func candidateCrossesCorrectionWitness(candidate runtimecontract.RuntimeCandidate, manifest runtimecontract.RuntimeCandidateContractManifest, witness runtimecontract.RuntimeCandidateCorrectionWitness) bool {
 	witness = witness.Normalized()
-	if witness.Validate() != nil || candidateCorrectionPathIsDisplayOnly(witness.Path) {
+	if witness.Validate() != nil || (candidateCorrectionPathIsDisplayOnly(witness.Path) && !candidateCorrectionRemovesRawProviderIdentity(witness)) {
 		return false
 	}
 	operations := candidateadmission.Operations(candidate)
@@ -679,6 +743,11 @@ func candidateCrossesCorrectionWitness(candidate runtimecontract.RuntimeCandidat
 		operation = operations[operationIndex].Normalized()
 	}
 	switch witness.Dimension {
+	case runtimecontract.RuntimeCandidateCorrectionWitnessDocumentShape:
+		// This function is reached only after strict decoding against the same
+		// sealed manifest. That admission boundary is the proof that attempt 1
+		// crossed from an empty/invalid/trailing body to one conformant document.
+		return witness.Path == "$" && witness.AlternativeValue == runtimecontract.RuntimeCandidateDocumentShapeConformant
 	case runtimecontract.RuntimeCandidateCorrectionWitnessOperationKind:
 		return hasOperationIndex && operation.Kind == runtimecontract.CanonicalRuntimeBlockKind(witness.AlternativeValue)
 	case runtimecontract.RuntimeCandidateCorrectionWitnessTarget:
@@ -750,7 +819,7 @@ func candidateCrossesCorrectionWitness(candidate runtimecontract.RuntimeCandidat
 
 func candidateCrossesSchemaFieldWitness(candidate runtimecontract.RuntimeCandidate, manifest runtimecontract.RuntimeCandidateContractManifest, operations []runtimecontract.RuntimeOperation, operation runtimecontract.RuntimeOperation, operationIndex int, hasOperationIndex bool, witness runtimecontract.RuntimeCandidateCorrectionWitness) bool {
 	field := candidateCorrectionPathField(witness.Path)
-	if field == "" || field == "id" || field == "summary" {
+	if field == "" || field == "summary" {
 		return false
 	}
 	if !hasOperationIndex {
@@ -770,6 +839,12 @@ func candidateCrossesSchemaFieldWitness(candidate runtimecontract.RuntimeCandida
 			// decoding, which proves the sealed field_absent alternative.
 			return witness.AlternativeValue == candidateCorrectionFieldAbsent
 		}
+	}
+	if (field == "id" || field == "dependsOn") && witness.RejectedValue == field && witness.AlternativeValue == candidateCorrectionFieldAbsent {
+		// Canonical IDs/edges are derived after the strict wire decoder. Their
+		// presence on the decoded candidate cannot disprove removal of the raw
+		// forbidden provider fields; successful strict decode already proves it.
+		return true
 	}
 	switch {
 	case strings.HasSuffix(witness.Path, ".kind"):

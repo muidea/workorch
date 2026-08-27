@@ -6,6 +6,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/muidea/workorch/internal/modules/kernel/orchestrator/biz/internal/requestcontent"
 	"github.com/muidea/workorch/internal/modules/kernel/orchestrator/biz/internal/semanticplan"
 	"github.com/muidea/workorch/internal/pkg/common"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
@@ -171,20 +172,41 @@ func retireSemanticPlanningGeneration(aggregate *RuntimeAggregate, reason runtim
 	if err := newLedger.Validate(); err != nil {
 		return err
 	}
-	retireSemanticPlanningRequestSessions(aggregate, ledger, "semantic_catalog_invalidated")
+	if err := retireSemanticPlanningRequestSessions(aggregate, ledger, "semantic_catalog_invalidated"); err != nil {
+		return err
+	}
 	aggregate.SemanticPlanning = newLedger
 	return nil
 }
 
-func retireSemanticPlanningRequestSessions(aggregate *RuntimeAggregate, ledger runtimecontract.RuntimeSemanticPlanningLedger, outcomeCode string) {
+func retireSemanticPlanningRequestSessions(aggregate *RuntimeAggregate, ledger runtimecontract.RuntimeSemanticPlanningLedger, outcomeCode string) error {
 	if aggregate == nil || ledger.Manifest == nil {
-		return
+		return common.ErrInvalidArgument
 	}
 	outcomeCode = strings.TrimSpace(outcomeCode)
 	if outcomeCode == "" {
 		outcomeCode = "semantic_generation_retired"
 	}
 	manifestHash := ledger.Manifest.Hash
+	// Retirement may close only sessions whose last physical call is already
+	// durably settled. A submitted prepared/recovery/transport request still
+	// owns reserved physical-call allocations; clearing its submission marker
+	// here would strand that budget and make startup recovery unable to classify
+	// the call as submission-unknown. Scan first so the failure is mutation-free.
+	for idx := range aggregate.CandidateRequestSessions {
+		session := aggregate.CandidateRequestSessions[idx].Clone()
+		if session.DocumentKind != runtimecontract.RuntimeProviderDocumentSemanticPlan || session.ManifestHash != manifestHash {
+			continue
+		}
+		if session.ProviderSubmitted {
+			switch session.State {
+			case runtimecontract.RuntimeCandidateRequestSessionPrepared,
+				runtimecontract.RuntimeCandidateRequestSessionRecoveryPending,
+				runtimecontract.RuntimeCandidateRequestSessionTransportPending:
+				return fmt.Errorf("%w: semantic generation cannot retire unresolved provider request %q", common.ErrConflict, session.LogicalRequestID)
+			}
+		}
+	}
 	for idx := range aggregate.CandidateRequestSessions {
 		session := &aggregate.CandidateRequestSessions[idx]
 		if session.DocumentKind != runtimecontract.RuntimeProviderDocumentSemanticPlan || session.State == runtimecontract.RuntimeCandidateRequestSessionTerminal {
@@ -199,15 +221,17 @@ func retireSemanticPlanningRequestSessions(aggregate *RuntimeAggregate, ledger r
 		}
 		session.State = runtimecontract.RuntimeCandidateRequestSessionTerminal
 		session.ProviderSubmitted = false
-		// Keep the last typed provider-document outcome as immutable audit
-		// lineage. Closing this old session must not erase an earlier incomplete
-		// result that explains what the provider actually returned.
+		// Framing describes only the active document/recovery state. A stale
+		// retirement is a distinct non-document terminal and keeps its immutable
+		// provider history in audit/settlement facts rather than this live slot.
+		session.LastDocumentFraming = nil
 		session.LastOutcome = runtimecontract.RuntimeCandidateRequestOutcome{
 			Class:     runtimecontract.RuntimeCandidateRequestOutcomePrerequisiteStale,
 			Code:      outcomeCode,
 			Signature: outcomeCode + "/" + manifestHash + "/" + strings.TrimSpace(session.LogicalRequestID),
 		}
 	}
+	return nil
 }
 
 // retireSemanticPlanningGenerationForCWIReopen starts a new semantic
@@ -283,7 +307,9 @@ func retireSemanticPlanningGenerationForCWIReopen(aggregate *RuntimeAggregate, r
 	if err := newLedger.Validate(); err != nil {
 		return err
 	}
-	retireSemanticPlanningRequestSessions(aggregate, ledger, "semantic_cwi_reopened")
+	if err := retireSemanticPlanningRequestSessions(aggregate, ledger, "semantic_cwi_reopened"); err != nil {
+		return err
+	}
 	aggregate.SemanticPlanning = newLedger
 	return nil
 }
@@ -332,7 +358,9 @@ func retireSemanticPlanningGenerationForBindingContradiction(aggregate *RuntimeA
 	if err := newLedger.Validate(); err != nil {
 		return err
 	}
-	retireSemanticPlanningRequestSessions(aggregate, ledger, "semantic_binding_contradiction")
+	if err := retireSemanticPlanningRequestSessions(aggregate, ledger, "semantic_binding_contradiction"); err != nil {
+		return err
+	}
 	aggregate.SemanticPlanning = newLedger
 	return nil
 }
@@ -421,7 +449,9 @@ func retireSemanticPlanningGenerationForEligibilityChange(aggregate *RuntimeAggr
 	if err := newLedger.Validate(); err != nil {
 		return err
 	}
-	retireSemanticPlanningRequestSessions(aggregate, ledger, "semantic_eligible_closure_changed")
+	if err := retireSemanticPlanningRequestSessions(aggregate, ledger, "semantic_eligible_closure_changed"); err != nil {
+		return err
+	}
 	aggregate.SemanticPlanning = newLedger
 	return nil
 }
@@ -1417,11 +1447,15 @@ func (c *planningTransactionComponent) requireSemanticPlanCorrection(ctx context
 		expected.CorrectionAttempt = 1
 		expected.LogicalRequestID = ""
 		expected.Hash = ""
-		directive, deriveErr := runtimecontract.DeriveRuntimeSemanticCorrectionDirective(*ledger.Manifest, expected, stablePrefixHash, rejection)
+		observation, observationErr := requestcontent.ProjectRuntimeSemanticCorrectionObservation(&rejection)
+		if observationErr != nil {
+			return false, observationErr
+		}
+		directive, deriveErr := runtimecontract.DeriveRuntimeSemanticCorrectionDirective(*ledger.Manifest, expected, stablePrefixHash, *observation)
 		if deriveErr != nil {
 			return false, deriveErr
 		}
-		if err := directive.ValidateAgainst(*ledger.Manifest, rejection); err != nil {
+		if err := directive.ValidateAgainstObservation(*ledger.Manifest, *observation); err != nil {
 			return false, err
 		}
 		if err := validateSemanticPlanCorrectionScope(*ledger, directive); err != nil {

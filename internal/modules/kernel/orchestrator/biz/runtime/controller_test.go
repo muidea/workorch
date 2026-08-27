@@ -865,10 +865,11 @@ func TestRuntimeControllerOwnsDispatchAndEvidenceCommit(t *testing.T) {
 	if err != nil {
 		t.Fatalf("AcceptCandidateAttempt: %v", err)
 	}
+	operationID := runtimeTestActiveOperationID(t, sealed, 0)
 	commitEvidence := ExecutionEvidence{
 		EventID: "event-1", WorkspaceID: "ws-v2", RunID: "run-v2",
 		DispatchID: sealed.ActiveDispatch.ID, AuthoritySnapshotID: sealed.ActiveDispatch.Transaction.AuthoritySnapshotID,
-		OperationID: "write-1", Kind: runtimecontract.EvidenceKindStateChange, Status: ExecutionEvidenceStatusAccepted,
+		OperationID: operationID, Kind: runtimecontract.EvidenceKindStateChange, Status: ExecutionEvidenceStatusAccepted,
 	}
 	attachRuntimeTestOwnerReceipt(t, repository.aggregate, &commitEvidence)
 	result, err := controller.commitEvidence(context.Background(), commitEvidence)
@@ -909,8 +910,9 @@ func TestRuntimeControllerRejectsExecutableSealWithoutPersistedOwnerFeasibility(
 	if _, err := controller.recordCandidateProposal(context.Background(), "ws-v2", "run-v2", 0, candidate); err != nil {
 		t.Fatal(err)
 	}
+	operationID := runtimeTestCandidateOperationID(t, *repository.aggregate.CandidateAttempts[len(repository.aggregate.CandidateAttempts)-1].Proposal, 0)
 	if _, err := controller.recordCandidateFeasibility(context.Background(), "ws-v2", "run-v2", 0, runtimecontract.RuntimeCandidateFeasibilityRecord{
-		OperationID: "write-1", AdmissibilitySnapshotID: inventory.SnapshotID,
+		OperationID: operationID, AdmissibilitySnapshotID: inventory.SnapshotID,
 		CandidateManifestHash: runtimeTestPendingCandidateManifestHash(t, controller, "ws-v2", "run-v2", 0), Observation: &runtimecontract.RuntimeOwnerFeasibilityObservation{Outcome: runtimecontract.RuntimeOwnerFeasibilityFeasible},
 	}); err != nil {
 		t.Fatal(err)
@@ -938,9 +940,10 @@ func TestRuntimeControllerCommitsTypedAssessmentBeforeCompletion(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	operationID := runtimeTestActiveOperationID(t, sealed, 0)
 	commitEvidence := ExecutionEvidence{
 		EventID: "event-1", WorkspaceID: "ws-v2", RunID: "run-v2", DispatchID: sealed.ActiveDispatch.ID,
-		AuthoritySnapshotID: sealed.ActiveDispatch.Transaction.AuthoritySnapshotID, OperationID: "write-1",
+		AuthoritySnapshotID: sealed.ActiveDispatch.Transaction.AuthoritySnapshotID, OperationID: operationID,
 		Kind: runtimecontract.EvidenceKindStateChange, Status: ExecutionEvidenceStatusAccepted,
 	}
 	attachRuntimeTestOwnerReceipt(t, repository.aggregate, &commitEvidence)
@@ -1010,9 +1013,10 @@ func TestRuntimeControllerAssessmentGapDeltaResetsWindowButRetainsRemainingGap(t
 	if err != nil {
 		t.Fatal(err)
 	}
+	operationID := runtimeTestActiveOperationID(t, sealed, 0)
 	evidence := ExecutionEvidence{
 		EventID: "event-state", WorkspaceID: "ws-v2", RunID: "run-v2", DispatchID: sealed.ActiveDispatch.ID,
-		AuthoritySnapshotID: sealed.ActiveDispatch.Transaction.AuthoritySnapshotID, OperationID: "write-both",
+		AuthoritySnapshotID: sealed.ActiveDispatch.Transaction.AuthoritySnapshotID, OperationID: operationID,
 		Kind: runtimecontract.EvidenceKindStateChange, Status: ExecutionEvidenceStatusAccepted,
 	}
 	attachRuntimeTestOwnerReceipt(t, repository.aggregate, &evidence)
@@ -1137,9 +1141,10 @@ func prepareAssessmentController(t *testing.T, assessment runtimecontract.Assess
 	if err != nil {
 		t.Fatal(err)
 	}
+	operationID := runtimeTestActiveOperationID(t, sealed, 0)
 	commitEvidence := ExecutionEvidence{
 		EventID: "event-1", WorkspaceID: "ws-v2", RunID: "run-v2", DispatchID: sealed.ActiveDispatch.ID,
-		AuthoritySnapshotID: sealed.ActiveDispatch.Transaction.AuthoritySnapshotID, OperationID: "write-1",
+		AuthoritySnapshotID: sealed.ActiveDispatch.Transaction.AuthoritySnapshotID, OperationID: operationID,
 		Kind: runtimecontract.EvidenceKindStateChange, Status: ExecutionEvidenceStatusAccepted,
 	}
 	attachRuntimeTestOwnerReceipt(t, repository.aggregate, &commitEvidence)

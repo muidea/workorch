@@ -932,7 +932,7 @@ func runtimeObservedCandidatePayload(request llmmodels.RuntimeCandidateRequest) 
 				break
 			}
 		}
-		return []byte(fmt.Sprintf(`{"operations":[{"id":"repair-implementation","kind":"patch/apply",%s"targetRefs":["implementation.go"],"parameters":[{"name":"patchType","string":"file_write"},{"name":"content","string":"package fixture\n// repaired\n"},{"name":"baseHash","string":%q}]}]}`, runtimeObservedCandidateBindingRefsField(request, runtimecontract.RuntimeBlockKindPatchApply), baseHash))
+		return []byte(fmt.Sprintf(`{"operations":[{"kind":"patch/apply",%s"targetRefs":["implementation.go"],"parameters":[{"name":"patchType","string":"file_write"},{"name":"content","string":"package fixture\n// repaired\n"},{"name":"baseHash","string":%q}]}]}`, runtimeObservedCandidateBindingRefsField(request, runtimecontract.RuntimeBlockKindPatchApply), baseHash))
 	case runtimecontract.ConvergenceStateNeedValidation:
 		// After an owner-observed FailureTarget is sealed, N1/N2 compile
 		// exact_target membership from that grounded set. Revalidation must
@@ -943,7 +943,7 @@ func runtimeObservedCandidatePayload(request llmmodels.RuntimeCandidateRequest) 
 		} else if request.CandidateContext.Resources.FailureTarget != nil && len(request.CandidateContext.Resources.FailureTarget.TargetRefs) == 1 {
 			target = request.CandidateContext.Resources.FailureTarget.TargetRefs[0]
 		}
-		return []byte(fmt.Sprintf(`{"operations":[{"id":"revalidate-implementation","kind":"mcp/tool_call",%s"targetRefs":[%q],"parameters":[{"name":"serverId","string":"mcp-observed-target"},{"name":"tool","string":"lookup.references"},{"name":"input.path","string":%q}]}]}`, runtimeObservedCandidateBindingRefsField(request, runtimecontract.StepKindMCPToolCall), target, target))
+		return []byte(fmt.Sprintf(`{"operations":[{"kind":"mcp/tool_call",%s"targetRefs":[%q],"parameters":[{"name":"serverId","string":"mcp-observed-target"},{"name":"tool","string":"lookup.references"},{"name":"input.path","string":%q}]}]}`, runtimeObservedCandidateBindingRefsField(request, runtimecontract.StepKindMCPToolCall), target, target))
 	case runtimecontract.ConvergenceStateNeedAssessment:
 		ref := ""
 		if accepted := request.CandidateContext.Evidence.Accepted; len(accepted) > 0 {

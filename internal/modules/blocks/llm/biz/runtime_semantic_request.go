@@ -18,7 +18,7 @@ type runtimeSemanticPreparedRequest struct {
 }
 
 func prepareRuntimeSemanticPlanRequest(request llmmodels.RuntimeCandidateRequest) (runtimeSemanticPreparedRequest, error) {
-	if request.CandidateManifest.Hash != "" || request.CandidateContext.WorkspaceID != "" || request.CandidateContext.RunID != "" || request.DefinitionContext.Revision != "" || request.PreviousFailure != nil || request.CandidateCorrection != nil {
+	if request.CandidateManifest.Hash != "" || request.CandidateContext.WorkspaceID != "" || request.CandidateContext.RunID != "" || request.DefinitionContext.Revision != "" || request.CandidateCorrectionObservation != nil || request.CandidateCorrection != nil {
 		return runtimeSemanticPreparedRequest{}, fmt.Errorf("semantic plan provider request must not carry operations fields")
 	}
 	context := request.SemanticContext.Clone()
@@ -54,18 +54,18 @@ func validateRuntimeSemanticAttempt(request llmmodels.RuntimeCandidateRequest, c
 		return fmt.Errorf("runtime semantic plan attempt must be 0 or 1")
 	}
 	if request.CandidateAttempt == 0 {
-		if request.PreviousSemanticRejection != nil || request.SemanticCorrectionDirective != nil {
+		if request.SemanticCorrectionObservation != nil || request.SemanticCorrectionDirective != nil {
 			return fmt.Errorf("initial runtime semantic plan request must not carry correction lineage")
 		}
 		return nil
 	}
-	if request.PreviousSemanticRejection == nil || request.SemanticCorrectionDirective == nil {
+	if request.SemanticCorrectionObservation == nil || request.SemanticCorrectionDirective == nil {
 		return fmt.Errorf("runtime semantic plan correction requires rejection and directive")
 	}
-	if err := request.PreviousSemanticRejection.Validate(); err != nil {
+	if err := request.SemanticCorrectionObservation.Validate(); err != nil {
 		return err
 	}
-	if err := request.SemanticCorrectionDirective.ValidateAgainst(manifest, *request.PreviousSemanticRejection); err != nil {
+	if err := request.SemanticCorrectionDirective.ValidateAgainstObservation(manifest, *request.SemanticCorrectionObservation); err != nil {
 		return err
 	}
 	if request.SemanticCorrectionDirective.PlanStep != context.PlanStep || request.SemanticCorrectionDirective.StablePrefixHash != strings.TrimSpace(request.StablePrefixHash) {
@@ -86,7 +86,7 @@ func finalizeRuntimeSemanticProviderRequest(request llmmodels.RuntimeCandidateRe
 		providerRequest.ContextBudget.CachePlan.StablePrefixHash = prepared.stablePrefix
 	}
 	populateRuntimeCandidateContextBudget(providerRequest.ContextBudget, providerRequest.PromptContext)
-	if err := validateRuntimeSemanticContextIntegrity(prepared.context, prepared.manifest, request.CandidateAttempt, request.PreviousSemanticRejection, request.SemanticCorrectionDirective, providerRequest.ContextBudget, providerRequest.PromptContext); err != nil {
+	if err := validateRuntimeSemanticContextIntegrity(prepared.context, prepared.manifest, request.CandidateAttempt, request.SemanticCorrectionObservation, request.SemanticCorrectionDirective, providerRequest.ContextBudget, providerRequest.PromptContext); err != nil {
 		providerRequest.ContextBudget.ContextGateAction = "fail_fast"
 		providerRequest.ContextBudget.ContextGateReason = "runtime_semantic_context_integrity_failed"
 		providerRequest.ContextBudget.BudgetFailureClass = "context_integrity"

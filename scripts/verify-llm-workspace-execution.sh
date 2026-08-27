@@ -652,7 +652,7 @@ def provider_request_parser_self_test():
     probe = provider_request_from_payload({"input": '{"runId":"probe","stepId":"probe"}'})
     probe_candidate = decision_payload(probe)
     probe_operation = (probe_candidate.get("operations") or [{}])[0]
-    if probe_operation.get("kind") != "file/read" or probe_operation.get("id") != "validate-probe":
+    if probe_operation.get("kind") != "file/read" or "id" in probe_operation or "dependsOn" in probe_operation:
         raise AssertionError("provider probe did not use its fixed no-side-effect response")
 
 def scenario_from_content(content):
@@ -687,7 +687,6 @@ def next_scenario(request):
 def validation_ops(request):
     # C12 permits validation coverage only through an owner-executed managed
     # recipe. file/read remains a non-credit diagnostic capability.
-    focus = request["focusId"]
     contract = select_operation_contract(request, "validation/managed_session")
     kind = object_value(contract, "kind", "Kind")
     target_ref = operation_target_ref(contract)
@@ -695,7 +694,6 @@ def validation_ops(request):
         raise ValueError("fixture has no supported sealed validation operation: %r" % kind)
     return {
         "operations": [{
-            "id": f"validate-{focus}",
             "kind": kind,
             "bindingRefs": operation_binding_refs(contract),
             "targetRefs": [target_ref],
@@ -713,9 +711,7 @@ def probe_validation_ops():
     # candidate requests, which must always consume C3's operation contract.
     return {
         "operations": [{
-            "id": "validate-probe",
             "kind": "file/read",
-            "coverageWorkItemIds": ["cwi-probe"],
             "targetRefs": ["runtime-validation-source.txt"],
             "parameters": [
                 {"name": "optional", "boolean": True},
@@ -747,7 +743,6 @@ def state_change_ops(request):
         raise ValueError("fixture has no supported sealed state-change operation: %r" % kind)
     return {
         "operations": [{
-            "id": f"state-{focus}",
             "kind": kind,
             "bindingRefs": operation_binding_refs(contract),
             "targetRefs": [target_ref],
@@ -809,7 +804,7 @@ def decision_payload(request):
         # nor infer a sealed operation contract.
         return probe_validation_ops()
 
-    # Schema-failure scenario intentionally returns non-JSON for assessment.
+    # Document-conformance scenario intentionally returns coherent non-JSON for assessment.
     if scenario == 7 and action == "produce_assessment":
         return "not-json"
 

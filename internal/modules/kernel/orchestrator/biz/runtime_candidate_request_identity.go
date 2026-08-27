@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	llmmodels "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/models"
+	"github.com/muidea/workorch/internal/modules/kernel/orchestrator/biz/internal/requestcontent"
 	runtime "github.com/muidea/workorch/internal/modules/kernel/orchestrator/biz/runtime"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
@@ -20,6 +21,7 @@ func runtimeCandidateRequestIdentity(
 	candidateContext runtimecontract.RuntimeCandidateContext,
 	manifest runtimecontract.RuntimeCandidateContractManifest,
 	previousFailure *runtimecontract.RuntimeCandidateFailure,
+	previousCorrection *runtimecontract.RuntimeCandidateCorrectionDirective,
 	sequence int,
 	correctionInput *llmmodels.RuntimeCandidateCorrectionInput,
 ) (logicalRequestID, physicalCallID string, err error) {
@@ -33,7 +35,11 @@ func runtimeCandidateRequestIdentity(
 	if err := runtimecontract.ValidateRuntimeCandidateContractManifestForDecision(manifest, aggregate.Decision, runtimecontract.RuntimeCandidateManifestOwnerFactsFromContext(candidateContext)); err != nil {
 		return "", "", err
 	}
-	correctionHash := correctionInput.StableRequestCorrectionHash(previousFailure)
+	observation, err := requestcontent.ProjectRuntimeCandidateCorrectionObservation(previousFailure, previousCorrection)
+	if err != nil {
+		return "", "", err
+	}
+	correctionHash := correctionInput.StableRequestCorrectionHash(observation)
 	logicalRequestID = runtimecontract.StableRuntimeCandidateRequestSessionID(
 		runtimecontract.RuntimeProviderDocumentOperations,
 		aggregate.Facts.WorkspaceID,

@@ -295,6 +295,9 @@ func (m *Biz) requestRuntimeSemanticPlanDocument(ctx context.Context, aggregate 
 	if session.State == runtimecontract.RuntimeCandidateRequestSessionDocumentComplete {
 		return m.admitRuntimeCompletedSemanticPlanDocument(ctx, aggregate, session)
 	}
+	if session.State == runtimecontract.RuntimeCandidateRequestSessionDocumentConformanceRejected {
+		return m.resumeRuntimeSemanticDocumentConformance(ctx, aggregate, session)
+	}
 	if session.State == runtimecontract.RuntimeCandidateRequestSessionTerminal {
 		if !runtime.ProviderRequestTerminalSessionApplied(aggregate, session) {
 			return runtime.RuntimeAggregate{}, fmt.Errorf("%w: semantic provider request is terminal without its coordinated SM-2 failure", common.ErrConflict)
@@ -324,6 +327,10 @@ func (m *Biz) requestRuntimeSemanticPlanDocument(ctx context.Context, aggregate 
 	if correctionErr != nil {
 		return m.failRuntimeSemanticContract(ctx, aggregate, "semantic_correction_lineage_invalid", correctionErr.Error(), nil)
 	}
+	correctionObservation, observationErr := requestcontent.ProjectRuntimeSemanticCorrectionObservation(previous)
+	if observationErr != nil {
+		return m.failRuntimeSemanticContract(ctx, aggregate, "semantic_correction_observation_invalid", observationErr.Error(), previous)
+	}
 	if _, contentErr := requestcontent.BuildSemanticPlanRequestContent(requestcontent.SemanticPlanRequestInput{
 		Manifest: manifest, StablePrefixHash: ledger.StablePrefixHash, Attempt: ledger.Attempt,
 		PreviousRejection: previous, CorrectionDirective: correction,
@@ -336,8 +343,8 @@ func (m *Biz) requestRuntimeSemanticPlanDocument(ctx context.Context, aggregate 
 		DocumentKind:     runtimecontract.RuntimeProviderDocumentSemanticPlan,
 		CandidateAttempt: ledger.Attempt, StablePrefixHash: ledger.StablePrefixHash,
 		SemanticManifest: manifest, SemanticContext: semanticContext,
-		PreviousSemanticRejection:   previous,
-		SemanticCorrectionDirective: correction,
+		SemanticCorrectionObservation: correctionObservation,
+		SemanticCorrectionDirective:   correction,
 	})
 	if err != nil {
 		return m.failRuntimeSemanticContract(ctx, aggregate, "semantic_context_integrity", err.Error(), nil)
@@ -360,8 +367,8 @@ func (m *Biz) requestRuntimeSemanticPlanDocument(ctx context.Context, aggregate 
 		ExpectedDocument: session.ExpectedDocument,
 		CandidateAttempt: ledger.Attempt, StablePrefixHash: ledger.StablePrefixHash,
 		SemanticManifest: manifest, SemanticContext: semanticContext,
-		PreviousSemanticRejection:   previous,
-		SemanticCorrectionDirective: correction,
+		SemanticCorrectionObservation: correctionObservation,
+		SemanticCorrectionDirective:   correction,
 	})
 	if err != nil {
 		settlement, settlementErr := runtimeProviderBudgetSettlement(string(aggregate.Facts.WorkspaceID), string(aggregate.Facts.RunID), session.LogicalRequestID, physicalCallID, nil, nil)
@@ -437,7 +444,15 @@ func (m *Biz) handleRuntimeSemanticDocumentOutcome(ctx context.Context, aggregat
 		}
 		return updated, nil
 	case runtimecontract.RuntimeProviderDocumentInvalid, runtimecontract.RuntimeProviderDocumentEmpty:
-		return m.failRuntimeSemanticContract(ctx, aggregate, framing.Code, "semantic provider did not return one complete authority document", nil, settlement)
+		rejected, rejectErr := m.runtimeRejectCandidateRequestDocumentConformance(ctx, aggregate, session.LogicalRequestID, physicalCallID, framing, settlement)
+		if rejectErr != nil {
+			return runtime.RuntimeAggregate{}, rejectErr
+		}
+		persisted, found := runtimeCandidateRequestSession(rejected, session.LogicalRequestID)
+		if !found {
+			return runtime.RuntimeAggregate{}, fmt.Errorf("semantic document-conformance session disappeared")
+		}
+		return m.resumeRuntimeSemanticDocumentConformance(ctx, rejected, persisted)
 	case runtimecontract.RuntimeProviderDocumentComplete:
 		if len(response.DocumentOutcome.Content) == 0 {
 			return m.failRuntimeSemanticContract(ctx, aggregate, "semantic_provider_document_missing", "complete semantic outcome did not carry its document", nil, settlement)
@@ -533,6 +548,9 @@ func (m *Biz) admitRuntimeCompletedSemanticPlanDocument(ctx context.Context, agg
 	}
 	semanticDocumentHash := runtimecontract.StableRuntimeProviderResponseHash(payload)
 	payload, _ = runtimecontract.NormalizeRuntimeCandidatePayloadDocument(payload)
+	if shape, nonconformant := runtimeCompletedCandidateDocumentShape(payload); nonconformant {
+		return m.handleRuntimeSemanticDocumentDiagnostic(ctx, aggregate, session, ledger, runtimeSemanticDocumentShapeDiagnostic(shape))
+	}
 	if runtimecontract.RuntimeSemanticPayloadIsDefinitionGap(payload) {
 		if session.ExpectedDocument == nil {
 			return m.failRuntimeSemanticContract(ctx, aggregate, "semantic_expected_document_missing", "Definition gap document has no sealed expected document", nil)
@@ -578,6 +596,32 @@ func (m *Biz) admitRuntimeCompletedSemanticPlanDocument(ctx context.Context, agg
 
 func (m *Biz) handleRuntimeSemanticDocumentDecodeFailure(ctx context.Context, aggregate runtime.RuntimeAggregate, session runtimecontract.RuntimeCandidateRequestSession, ledger runtimecontract.RuntimeSemanticPlanningLedger, decodeErr error) (runtime.RuntimeAggregate, error) {
 	diagnostic := runtimeSemanticPayloadDiagnostic(decodeErr)
+	return m.handleRuntimeSemanticDocumentDiagnostic(ctx, aggregate, session, ledger, diagnostic)
+}
+
+func (m *Biz) resumeRuntimeSemanticDocumentConformance(ctx context.Context, aggregate runtime.RuntimeAggregate, session runtimecontract.RuntimeCandidateRequestSession) (runtime.RuntimeAggregate, error) {
+	if session.LastDocumentFraming == nil {
+		return runtime.RuntimeAggregate{}, fmt.Errorf("%w: semantic document-conformance session has no framing fact", common.ErrConflict)
+	}
+	framing := session.LastDocumentFraming.Normalized()
+	return m.handleRuntimeSemanticDocumentDiagnostic(ctx, aggregate, session, aggregate.SemanticPlanning.Clone(), runtimeSemanticDocumentShapeDiagnostic(string(framing.Disposition)))
+}
+
+func runtimeSemanticDocumentShapeDiagnostic(shape string) runtimecontract.RuntimeOriginalDiagnostic {
+	shape = strings.TrimSpace(shape)
+	return runtimecontract.RuntimeOriginalDiagnostic{
+		SchemaVersion: runtimecontract.RuntimeOriginalDiagnosticSchemaCurrent,
+		OwnerModuleID: runtimecontract.RuntimeModuleOrchestrator,
+		OriginalClass: "semantic_plan_rejection", OriginalCode: "semantic_document_nonconformant",
+		OriginalMessage: "semantic provider response must contain exactly one manifest-conformant JSON document",
+		Signature:       "semantic-document-nonconformant/" + strings.ReplaceAll(shape, "_", "-"),
+		FieldViolations: []runtimecontract.RuntimeFieldViolation{{
+			Path: "$", Actual: shape, Required: []string{runtimecontract.RuntimeCandidateDocumentShapeConformant},
+		}},
+	}
+}
+
+func (m *Biz) handleRuntimeSemanticDocumentDiagnostic(ctx context.Context, aggregate runtime.RuntimeAggregate, session runtimecontract.RuntimeCandidateRequestSession, ledger runtimecontract.RuntimeSemanticPlanningLedger, diagnostic runtimecontract.RuntimeOriginalDiagnostic) (runtime.RuntimeAggregate, error) {
 	if ledger.Attempt >= 1 {
 		return m.failRuntimeSemanticContract(ctx, aggregate, "semantic_plan_retry_exhausted", diagnostic.OriginalMessage, &diagnostic)
 	}
@@ -595,7 +639,11 @@ func (m *Biz) handleRuntimeSemanticDocumentDecodeFailure(ctx context.Context, ag
 	if len(diagnostic.SemanticViolations) == 0 {
 		return m.failRuntimeSemanticContract(ctx, aggregate, "runtime_contract_defect", "semantic plan rejection has no sealed typed correction delta", &diagnostic)
 	}
-	directive, deriveErr := runtimecontract.DeriveRuntimeSemanticCorrectionDirective(*ledger.Manifest, expected, ledger.StablePrefixHash, diagnostic)
+	observation, observationErr := requestcontent.ProjectRuntimeSemanticCorrectionObservation(&diagnostic)
+	if observationErr != nil {
+		return m.failRuntimeSemanticContract(ctx, aggregate, "runtime_contract_defect", observationErr.Error(), &diagnostic)
+	}
+	directive, deriveErr := runtimecontract.DeriveRuntimeSemanticCorrectionDirective(*ledger.Manifest, expected, ledger.StablePrefixHash, *observation)
 	if deriveErr != nil {
 		return m.failRuntimeSemanticContract(ctx, aggregate, "runtime_contract_defect", deriveErr.Error(), &diagnostic)
 	}
@@ -921,7 +969,8 @@ func (m *Biz) failRuntimeSemanticContract(ctx context.Context, aggregate runtime
 	if logicalRequestID := strings.TrimSpace(aggregate.SemanticPlanning.LogicalRequestID); logicalRequestID != "" {
 		if session, found := runtimeCandidateRequestSession(aggregate, logicalRequestID); found {
 			switch session.State {
-			case runtimecontract.RuntimeCandidateRequestSessionDocumentComplete:
+			case runtimecontract.RuntimeCandidateRequestSessionDocumentComplete,
+				runtimecontract.RuntimeCandidateRequestSessionDocumentConformanceRejected:
 				// The provider transaction is complete; semantic decode/admission may
 				// still seal a semantic-contract failure through the ordinary SM-2 event.
 			case runtimecontract.RuntimeCandidateRequestSessionTerminal:

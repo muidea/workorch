@@ -69,10 +69,11 @@ func TestRuntimeExpectedDocumentHashIsOrderSensitiveAndCloneDetached(t *testing.
 func TestRuntimeProviderDocumentFramingIsOwnerNeutral(t *testing.T) {
 	cases := []RuntimeProviderDocumentFraming{
 		{Disposition: RuntimeProviderDocumentComplete, ExpectedDocumentHash: "expected-1", ResponseHash: "response-1", ResponseBytes: 32},
-		{Disposition: RuntimeProviderDocumentIncomplete, ExpectedDocumentHash: "expected-1", ResponseHash: "response-2", ResponseBytes: 16, Code: "max_output_tokens", Signature: "provider-output-limit"},
-		{Disposition: RuntimeProviderDocumentIncomplete, ExpectedDocumentHash: "expected-1", Code: "max_output_tokens", Signature: "provider-output-limit"},
-		{Disposition: RuntimeProviderDocumentInvalid, ExpectedDocumentHash: "expected-1", ResponseHash: "response-3", ResponseBytes: 8, Code: "multiple_json_values", Signature: "multiple-json-values"},
-		{Disposition: RuntimeProviderDocumentEmpty, ExpectedDocumentHash: "expected-1", Code: "final_output_missing", Signature: "final-output-missing"},
+		{Disposition: RuntimeProviderDocumentIncomplete, ExpectedDocumentHash: "expected-1", ResponseHash: "response-2", ResponseBytes: 16, Code: RuntimeProviderDocumentCodeOutputLimit, Signature: RuntimeProviderDocumentSignatureOutputLimit},
+		{Disposition: RuntimeProviderDocumentIncomplete, ExpectedDocumentHash: "expected-1", Code: RuntimeProviderDocumentCodeOutputLimit, Signature: RuntimeProviderDocumentSignatureOutputLimit},
+		{Disposition: RuntimeProviderDocumentIncomplete, ExpectedDocumentHash: "expected-1", ResponseHash: "response-3", ResponseBytes: 8, Code: RuntimeProviderDocumentCodeIncompleteJSON, Signature: RuntimeProviderDocumentSignatureIncompleteJSON},
+		{Disposition: RuntimeProviderDocumentInvalid, ExpectedDocumentHash: "expected-1", ResponseHash: "response-4", ResponseBytes: 8, Code: RuntimeProviderDocumentCodeFinalOutputInvalid, Signature: RuntimeProviderDocumentSignatureOutputInvalid},
+		{Disposition: RuntimeProviderDocumentEmpty, ExpectedDocumentHash: "expected-1", Code: RuntimeProviderDocumentCodeFinalOutputMissing, Signature: RuntimeProviderDocumentSignatureOutputMissing},
 	}
 	for _, outcome := range cases {
 		if err := outcome.Validate(); err != nil {
@@ -91,8 +92,10 @@ func TestRuntimeProviderDocumentFramingIsOwnerNeutral(t *testing.T) {
 		{Disposition: RuntimeProviderDocumentIncomplete, ExpectedDocumentHash: "expected-1", Code: "max_output_tokens", Signature: "wrong-signature"},
 		{Disposition: RuntimeProviderDocumentIncomplete, ExpectedDocumentHash: "expected-1", ResponseHash: "response-without-bytes", Code: "max_output_tokens", Signature: "provider-output-limit"},
 		{Disposition: RuntimeProviderDocumentIncomplete, ExpectedDocumentHash: "expected-1", ResponseBytes: 1, Code: "max_output_tokens", Signature: "provider-output-limit"},
-		{Disposition: RuntimeProviderDocumentInvalid, ExpectedDocumentHash: "expected-1", Code: "multiple_json_values", Signature: "multiple-json-values"},
-		{Disposition: RuntimeProviderDocumentEmpty, ExpectedDocumentHash: "expected-1", ResponseHash: "unexpected", Code: "final_output_missing", Signature: "final-output-missing"},
+		{Disposition: RuntimeProviderDocumentInvalid, ExpectedDocumentHash: "expected-1", ResponseHash: "response-3", ResponseBytes: 8, Code: "multiple_json_values", Signature: "multiple-json-values"},
+		{Disposition: RuntimeProviderDocumentInvalid, ExpectedDocumentHash: "expected-1", ResponseHash: "response-3", ResponseBytes: 8, Code: RuntimeProviderDocumentCodeFinalOutputInvalid, Signature: "wrong-signature"},
+		{Disposition: RuntimeProviderDocumentEmpty, ExpectedDocumentHash: "expected-1", ResponseHash: "unexpected", Code: RuntimeProviderDocumentCodeFinalOutputMissing, Signature: RuntimeProviderDocumentSignatureOutputMissing},
+		{Disposition: RuntimeProviderDocumentEmpty, ExpectedDocumentHash: "expected-1", Code: "final_output_missing", Signature: "final-output-missing"},
 	}
 	for _, outcome := range invalidCases {
 		if err := outcome.Validate(); err == nil {

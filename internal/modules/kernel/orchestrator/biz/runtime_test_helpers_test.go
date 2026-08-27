@@ -72,6 +72,10 @@ func (o *Biz) AdmitRuntimeCandidateProposalForTest(ctx context.Context, workspac
 		return runtime.CandidateAdmissionCommitResult{}, err
 	}
 	candidate = bindRuntimeTestCandidateToManifest(manifest, candidate)
+	candidate, err = runtimemodel.DeriveRuntimeCandidateOperationAuthority(manifest, candidate)
+	if err != nil {
+		return runtime.CandidateAdmissionCommitResult{}, err
+	}
 	return o.AdmitRuntimeCandidateProposal(ctx, workspaceID, runID, attempt, manifest, logicalRequestID, candidate)
 }
 
@@ -82,6 +86,10 @@ func (o *Biz) AdmitAndSealRuntimeCandidateAttemptForTest(ctx context.Context, wo
 		return runtime.CandidateAdmissionCommitResult{}, err
 	}
 	candidate = bindRuntimeTestCandidateToManifest(manifest, candidate)
+	candidate, err = runtimemodel.DeriveRuntimeCandidateOperationAuthority(manifest, candidate)
+	if err != nil {
+		return runtime.CandidateAdmissionCommitResult{}, err
+	}
 	aggregate, err := o.loadRuntime(ctx, workspaceID, runID)
 	if err != nil {
 		return runtime.CandidateAdmissionCommitResult{}, err
@@ -98,6 +106,10 @@ func (o *Biz) AdmitAndSealRuntimeCandidateAttemptForTest(ctx context.Context, wo
 			return runtime.CandidateAdmissionCommitResult{}, err
 		}
 		candidate = bindRuntimeTestCandidateToManifest(manifest, rawCandidate)
+		candidate, err = runtimemodel.DeriveRuntimeCandidateOperationAuthority(manifest, candidate)
+		if err != nil {
+			return runtime.CandidateAdmissionCommitResult{}, err
+		}
 	} else if pending && record.Proposal != nil {
 		candidate = *record.Proposal
 	}
@@ -182,6 +194,10 @@ func admitRuntimeCandidateProposalForTest(ctx context.Context, controller *runti
 		return runtime.CandidateAdmissionCommitResult{}, err
 	}
 	candidate = bindRuntimeTestCandidateToManifest(manifest, candidate)
+	candidate, err = runtimemodel.DeriveRuntimeCandidateOperationAuthority(manifest, candidate)
+	if err != nil {
+		return runtime.CandidateAdmissionCommitResult{}, err
+	}
 	return runtimeTestControllerAdmitCandidateProposal(controller, ctx, workspaceID, runID, attempt, manifest, logicalRequestID, candidate)
 }
 
@@ -192,6 +208,10 @@ func admitAndSealRuntimeCandidateAttemptForTest(ctx context.Context, controller 
 		return runtime.CandidateAdmissionCommitResult{}, err
 	}
 	candidate = bindRuntimeTestCandidateToManifest(manifest, candidate)
+	candidate, err = runtimemodel.DeriveRuntimeCandidateOperationAuthority(manifest, candidate)
+	if err != nil {
+		return runtime.CandidateAdmissionCommitResult{}, err
+	}
 	aggregate, err := controller.Load(ctx, workspaceID, runID)
 	if err != nil {
 		return runtime.CandidateAdmissionCommitResult{}, err
@@ -208,6 +228,10 @@ func admitAndSealRuntimeCandidateAttemptForTest(ctx context.Context, controller 
 			return runtime.CandidateAdmissionCommitResult{}, err
 		}
 		candidate = bindRuntimeTestCandidateToManifest(manifest, rawCandidate)
+		candidate, err = runtimemodel.DeriveRuntimeCandidateOperationAuthority(manifest, candidate)
+		if err != nil {
+			return runtime.CandidateAdmissionCommitResult{}, err
+		}
 	} else if pending && record.Proposal != nil {
 		candidate = *record.Proposal
 	}

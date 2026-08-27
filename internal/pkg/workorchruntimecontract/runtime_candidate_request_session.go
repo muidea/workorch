@@ -20,25 +20,31 @@ const (
 	RuntimeCandidateRequestSessionRecoveryPending  RuntimeCandidateRequestSessionState = "recovery_pending"
 	RuntimeCandidateRequestSessionTransportPending RuntimeCandidateRequestSessionState = "transport_retry_pending"
 	RuntimeCandidateRequestSessionDocumentComplete RuntimeCandidateRequestSessionState = "document_complete"
-	RuntimeCandidateRequestSessionTerminal         RuntimeCandidateRequestSessionState = "terminal"
+	// RuntimeCandidateRequestSessionDocumentConformanceRejected records a
+	// complete physical response whose framing cannot be admitted as the one
+	// expected document.  It is a settled SM-3 request fact; the Orchestrator
+	// may bind it to the existing candidate/semantic attempt 0/1 ledger.
+	RuntimeCandidateRequestSessionDocumentConformanceRejected RuntimeCandidateRequestSessionState = "document_conformance_rejected"
+	RuntimeCandidateRequestSessionTerminal                    RuntimeCandidateRequestSessionState = "terminal"
 )
 
 // RuntimeCandidateRequestOutcomeClass is the last durable provider/session
-// result. It is deliberately distinct from candidate schema/contract failure:
-// no value here may allocate or fail a candidate attempt.
+// result. It remains a factual request outcome: only the Orchestrator's SM-3
+// reducer may bind a conformance rejection to candidate/semantic attempt 0/1.
 type RuntimeCandidateRequestOutcomeClass string
 
 const (
-	RuntimeCandidateRequestOutcomeNone                      RuntimeCandidateRequestOutcomeClass = ""
-	RuntimeCandidateRequestOutcomeDocumentIncomplete        RuntimeCandidateRequestOutcomeClass = "document_incomplete"
-	RuntimeCandidateRequestOutcomeDocumentComplete          RuntimeCandidateRequestOutcomeClass = "document_complete"
-	RuntimeCandidateRequestOutcomeProviderTransient         RuntimeCandidateRequestOutcomeClass = "provider_transient"
-	RuntimeCandidateRequestOutcomeProviderAuthentication    RuntimeCandidateRequestOutcomeClass = "provider_authentication"
-	RuntimeCandidateRequestOutcomeProviderConfiguration     RuntimeCandidateRequestOutcomeClass = "provider_configuration"
-	RuntimeCandidateRequestOutcomeProviderProtocol          RuntimeCandidateRequestOutcomeClass = "provider_protocol"
-	RuntimeCandidateRequestOutcomeProviderSubmissionUnknown RuntimeCandidateRequestOutcomeClass = "provider_submission_unknown"
-	RuntimeCandidateRequestOutcomePrerequisiteStale         RuntimeCandidateRequestOutcomeClass = "prerequisite_stale"
-	RuntimeCandidateRequestOutcomeDocumentRecoveryExhausted RuntimeCandidateRequestOutcomeClass = "candidate_document_recovery_exhausted"
+	RuntimeCandidateRequestOutcomeNone                        RuntimeCandidateRequestOutcomeClass = ""
+	RuntimeCandidateRequestOutcomeDocumentIncomplete          RuntimeCandidateRequestOutcomeClass = "document_incomplete"
+	RuntimeCandidateRequestOutcomeDocumentComplete            RuntimeCandidateRequestOutcomeClass = "document_complete"
+	RuntimeCandidateRequestOutcomeDocumentConformanceRejected RuntimeCandidateRequestOutcomeClass = "document_conformance_rejected"
+	RuntimeCandidateRequestOutcomeProviderTransient           RuntimeCandidateRequestOutcomeClass = "provider_transient"
+	RuntimeCandidateRequestOutcomeProviderAuthentication      RuntimeCandidateRequestOutcomeClass = "provider_authentication"
+	RuntimeCandidateRequestOutcomeProviderConfiguration       RuntimeCandidateRequestOutcomeClass = "provider_configuration"
+	RuntimeCandidateRequestOutcomeProviderProtocol            RuntimeCandidateRequestOutcomeClass = "provider_protocol"
+	RuntimeCandidateRequestOutcomeProviderSubmissionUnknown   RuntimeCandidateRequestOutcomeClass = "provider_submission_unknown"
+	RuntimeCandidateRequestOutcomePrerequisiteStale           RuntimeCandidateRequestOutcomeClass = "prerequisite_stale"
+	RuntimeCandidateRequestOutcomeDocumentRecoveryExhausted   RuntimeCandidateRequestOutcomeClass = "candidate_document_recovery_exhausted"
 )
 
 // RuntimeCandidateRequestOutcome is bounded audit-safe metadata. It never
@@ -60,9 +66,17 @@ func (o RuntimeCandidateRequestOutcome) Validate() error {
 	o = o.Normalized()
 	switch o.Class {
 	case RuntimeCandidateRequestOutcomeNone:
+		if o.Code != "" || o.Signature != "" {
+			return common.ErrInvalidArgument
+		}
+		return nil
+	case RuntimeCandidateRequestOutcomeDocumentComplete:
+		if o.Code != "" || o.Signature != "" {
+			return common.ErrInvalidArgument
+		}
 		return nil
 	case RuntimeCandidateRequestOutcomeDocumentIncomplete,
-		RuntimeCandidateRequestOutcomeDocumentComplete,
+		RuntimeCandidateRequestOutcomeDocumentConformanceRejected,
 		RuntimeCandidateRequestOutcomeProviderTransient,
 		RuntimeCandidateRequestOutcomeProviderAuthentication,
 		RuntimeCandidateRequestOutcomeProviderConfiguration,
@@ -70,7 +84,7 @@ func (o RuntimeCandidateRequestOutcome) Validate() error {
 		RuntimeCandidateRequestOutcomeProviderSubmissionUnknown,
 		RuntimeCandidateRequestOutcomePrerequisiteStale,
 		RuntimeCandidateRequestOutcomeDocumentRecoveryExhausted:
-		if o.Class != RuntimeCandidateRequestOutcomeDocumentComplete && o.Code == "" {
+		if o.Code == "" || o.Signature == "" {
 			return common.ErrInvalidArgument
 		}
 		return nil
@@ -168,13 +182,26 @@ func (s RuntimeCandidateRequestSession) Validate() error {
 		if s.ExpectedDocument == nil {
 			return common.ErrInvalidArgument
 		}
-		if err := s.LastDocumentFraming.Validate(); err != nil || s.LastDocumentFraming.ExpectedDocumentHash != s.ExpectedDocument.Hash || s.LastDocumentFraming.Disposition != RuntimeProviderDocumentIncomplete {
+		if err := s.LastDocumentFraming.Validate(); err != nil || s.LastDocumentFraming.ExpectedDocumentHash != s.ExpectedDocument.Hash {
+			return common.ErrInvalidArgument
+		}
+		switch s.LastDocumentFraming.Disposition {
+		case RuntimeProviderDocumentIncomplete:
+			if s.State != RuntimeCandidateRequestSessionRecoveryPending && s.State != RuntimeCandidateRequestSessionTerminal {
+				return common.ErrInvalidArgument
+			}
+		case RuntimeProviderDocumentInvalid, RuntimeProviderDocumentEmpty:
+			if s.State != RuntimeCandidateRequestSessionDocumentConformanceRejected {
+				return common.ErrInvalidArgument
+			}
+		default:
 			return common.ErrInvalidArgument
 		}
 	}
 	switch s.State {
 	case RuntimeCandidateRequestSessionPrepared, RuntimeCandidateRequestSessionRecoveryPending,
 		RuntimeCandidateRequestSessionTransportPending, RuntimeCandidateRequestSessionDocumentComplete,
+		RuntimeCandidateRequestSessionDocumentConformanceRejected,
 		RuntimeCandidateRequestSessionTerminal:
 	default:
 		return common.ErrInvalidArgument
@@ -191,7 +218,8 @@ func (s RuntimeCandidateRequestSession) Validate() error {
 			return common.ErrInvalidArgument
 		}
 	case RuntimeCandidateRequestSessionRecoveryPending:
-		if s.LastOutcome.Class != RuntimeCandidateRequestOutcomeDocumentIncomplete || s.LastDocumentFraming == nil {
+		if s.LastOutcome.Class != RuntimeCandidateRequestOutcomeDocumentIncomplete || s.LastDocumentFraming == nil ||
+			s.LastOutcome.Code != s.LastDocumentFraming.Code || s.LastOutcome.Signature != s.LastDocumentFraming.Signature {
 			return common.ErrInvalidArgument
 		}
 	case RuntimeCandidateRequestSessionTransportPending:
@@ -200,6 +228,11 @@ func (s RuntimeCandidateRequestSession) Validate() error {
 		}
 	case RuntimeCandidateRequestSessionDocumentComplete:
 		if s.LastOutcome.Class != RuntimeCandidateRequestOutcomeDocumentComplete || !s.ProviderSubmitted {
+			return common.ErrInvalidArgument
+		}
+	case RuntimeCandidateRequestSessionDocumentConformanceRejected:
+		if s.LastOutcome.Class != RuntimeCandidateRequestOutcomeDocumentConformanceRejected || !s.ProviderSubmitted || s.LastDocumentFraming == nil ||
+			s.LastOutcome.Code != s.LastDocumentFraming.Code || s.LastOutcome.Signature != s.LastDocumentFraming.Signature {
 			return common.ErrInvalidArgument
 		}
 	case RuntimeCandidateRequestSessionTerminal:
@@ -212,6 +245,15 @@ func (s RuntimeCandidateRequestSession) Validate() error {
 			RuntimeCandidateRequestOutcomePrerequisiteStale,
 			RuntimeCandidateRequestOutcomeDocumentRecoveryExhausted:
 		default:
+			return common.ErrInvalidArgument
+		}
+		if s.LastOutcome.Class == RuntimeCandidateRequestOutcomeDocumentRecoveryExhausted {
+			if s.LastDocumentFraming == nil || s.ExpectedDocument == nil ||
+				s.LastDocumentFraming.Disposition != RuntimeProviderDocumentIncomplete ||
+				s.IncompleteOutcomes <= s.ExpectedDocument.MaxRecoveryAttempts {
+				return common.ErrInvalidArgument
+			}
+		} else if s.LastDocumentFraming != nil {
 			return common.ErrInvalidArgument
 		}
 	}
@@ -281,20 +323,22 @@ func StableRuntimeCandidateRequestContentID(logicalRequestID string) common.Arti
 // typed failure plus manifest, objectives and concrete witness. Orchestrator
 // disposition/terminal state never enters an LLM request. Reason is excluded
 // because it can contain unstable or verbose provider text.
-func StableRuntimeCandidateRequestCorrectionHash(failure *RuntimeCandidateFailure, manifestHash string, objectives []RuntimeCandidateCorrectionObjective, witness *RuntimeCandidateCorrectionWitness) string {
+func StableRuntimeCandidateRequestCorrectionHash(observation *RuntimeCandidateCorrectionObservation, manifestHash string, objectives []RuntimeCandidateCorrectionObjective, witness *RuntimeCandidateCorrectionWitness) string {
 	manifestHash = strings.TrimSpace(manifestHash)
 	objectives = (&RuntimeCandidateFailureDiagnostic{Objectives: append([]RuntimeCandidateCorrectionObjective(nil), objectives...)}).Normalized().Objectives
-	if failure == nil && manifestHash == "" && len(objectives) == 0 && witness == nil {
+	if observation == nil && manifestHash == "" && len(objectives) == 0 && witness == nil {
 		return ""
 	}
 	h := sha256.New()
 	writeHashString(h, "runtime-candidate-request-correction")
-	if failure != nil {
-		writeHashString(h, string(failure.Class))
-		writeHashString(h, strings.TrimSpace(failure.Code))
-		writeHashString(h, strings.TrimSpace(failure.Signature))
-		writeHashStrings(h, normalizeStrings(failure.TargetRefs))
-		if diagnostic := failure.Diagnostic; diagnostic != nil {
+	if observation != nil {
+		value := observation.Normalized()
+		writeHashString(h, string(value.Class))
+		writeHashString(h, value.Code)
+		writeHashString(h, value.Signature)
+		writeHashStrings(h, value.TargetRefs)
+		writeHashString(h, value.SealedCorrectionHash)
+		if diagnostic := value.Diagnostic; diagnostic != nil {
 			value := diagnostic.Normalized()
 			writeHashString(h, value.OperationID)
 			writeHashString(h, value.Path)

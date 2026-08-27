@@ -118,7 +118,7 @@ func TestEvaluateRuntimeCompleteAdmissionRejectsRetirementAfterAcceptedEffect(t 
 	dispatch.OperationExecutions[0].OwnerReceiptHash = "receipt-hash-1"
 	input.CompletedDispatches = []RuntimeDispatchRecord{*dispatch}
 	input.OperationReceipts = []RuntimeOperationReceipt{{
-		ExecutionKey: dispatch.OperationExecutions[0].ExecutionKey, Fence: 1, OperationID: "write-main",
+		ExecutionKey: dispatch.OperationExecutions[0].ExecutionKey, Fence: 1, OperationID: dispatch.OperationExecutions[0].OperationID,
 		Outcome: RuntimeOperationOutcomeAccepted, ObservedEffectScope: RuntimeEffectWorkspaceDurable, Changed: true, TargetRefs: []string{"main.go"},
 	}}
 	decision := EvaluateRuntimeCompleteAdmission(input)
@@ -196,7 +196,7 @@ func TestEvaluateRuntimeCompleteAdmissionOwnerIdentityMatrix(t *testing.T) {
 		{name: "replay proof owner mismatch", mutate: func(input *RuntimeCompleteAdmissionInput) {
 			inventory := input.Facts.Resources.OperationAdmissibilities[0]
 			input.Attempt.Feasibilities[0].ReplayProof = &RuntimeOperationReplayProof{
-				OwnerModuleID: RuntimeModuleShell, OperationID: "write-main", TargetRefs: []string{"main.go"}, BeforeHash: "before", AfterHash: "after",
+				OwnerModuleID: RuntimeModuleShell, OperationID: input.Attempt.Feasibilities[0].OperationID, TargetRefs: []string{"main.go"}, BeforeHash: "before", AfterHash: "after",
 				AdmissibilitySnapshotID: inventory.SnapshotID, AcquisitionBinding: inventory.AcquisitionBinding,
 			}
 		}, disposition: RuntimeCompleteAdmissionTerminalContractFailure, code: "owner_replay_proof_mismatch"},
@@ -313,6 +313,10 @@ func runtimeCompleteAdmissionFixture(t *testing.T) RuntimeCompleteAdmissionInput
 		ID: "write-main", Kind: StepKindFileWrite, BindingRefs: []string{binding.ID}, TargetRefs: []string{"main.go"},
 		Parameters: []OperationParameter{{Name: "content", String: &content}},
 	}}}}}
+	candidate, err = DeriveRuntimeCandidateOperationAuthority(manifest, candidate)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if err := ValidateRuntimeCandidateAgainstManifest(manifest, candidate); err != nil {
 		t.Fatal(err)
 	}
@@ -323,7 +327,7 @@ func runtimeCompleteAdmissionFixture(t *testing.T) RuntimeCompleteAdmissionInput
 		Attempt: 0, StablePrefixHash: "prefix-1", ManifestHash: manifest.Hash, LogicalRequestID: "request-1",
 		State: RuntimeCandidateAttemptStatePending, Proposal: &proposal,
 		Feasibilities: []RuntimeCandidateFeasibilityRecord{{
-			OperationID: "write-main", AdmissibilitySnapshotID: inventory.SnapshotID, AcquisitionBinding: inventory.AcquisitionBinding,
+			OperationID: candidate.StateChange.Operations[0].Operation.ID, AdmissibilitySnapshotID: inventory.SnapshotID, AcquisitionBinding: inventory.AcquisitionBinding,
 			CandidateManifestHash: manifest.Hash,
 			Observation:           &RuntimeOwnerFeasibilityObservation{Outcome: RuntimeOwnerFeasibilityFeasible},
 		}},
@@ -335,11 +339,12 @@ func runtimeCompleteAdmissionFixture(t *testing.T) RuntimeCompleteAdmissionInput
 
 func runtimeCompleteAdmissionDispatch(input *RuntimeCompleteAdmissionInput) *RuntimeDispatchRecord {
 	transaction := input.Decision.AuthorityTransaction()
+	operationID := input.Candidate.StateChange.Operations[0].Operation.ID
 	return &RuntimeDispatchRecord{
 		ID: "dispatch-1", WorkspaceID: input.Facts.WorkspaceID, RunID: input.Facts.RunID, Transaction: transaction,
 		CandidateHash: StableRuntimeCandidateHash(input.Candidate), Candidate: cloneRuntimeCandidate(input.Candidate), State: RuntimeDispatchStateSealed,
 		OperationExecutions: []RuntimeOperationExecutionRecord{{
-			OperationID: "write-main", ExecutionKey: StableRuntimeOperationExecutionKey(input.Facts.WorkspaceID, input.Facts.RunID, "dispatch-1", "write-main"),
+			OperationID: operationID, ExecutionKey: StableRuntimeOperationExecutionKey(input.Facts.WorkspaceID, input.Facts.RunID, "dispatch-1", operationID),
 			ExpectedEffectScope: RuntimeEffectWorkspaceDurable, State: OperationExecutionSealed,
 		}},
 	}

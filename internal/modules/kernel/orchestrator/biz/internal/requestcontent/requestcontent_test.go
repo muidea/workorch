@@ -17,7 +17,11 @@ func TestSemanticPlanRequestContentCarriesLatestCatalogFactsWithoutRawMessage(t 
 	}
 	violation := runtimecontract.RuntimeSemanticContractViolation{Kind: runtimecontract.RuntimeSemanticContractViolationProposalConstraint, Path: "$.proposals[0].target.policy", CoverageWorkItemID: "cwi-1", ProposalIndex: 0, Rule: runtimecontract.RuntimeSemanticConstraintAllowedValue, Actual: "prospective_owner_target", Allowed: []string{"exact_target"}}
 	diagnostic.SemanticViolations = []runtimecontract.RuntimeSemanticContractViolation{violation}
-	directive := runtimecontract.RuntimeSemanticCorrectionDirective{SchemaVersion: runtimecontract.RuntimeSemanticCorrectionDirectiveSchemaCurrent, PlanStep: runtimecontract.RuntimeSemanticPlanStepProofBatch, ManifestHash: manifest.Hash, DefinitionSeedHash: manifest.DefinitionSeedHash, StablePrefixHash: prefix, SourceRejectionHash: runtimecontract.StableRuntimeSemanticPlanCorrectionHash(*diagnostic), Attempt: 1, Violations: []runtimecontract.RuntimeSemanticContractViolation{violation}}
+	observation, err := ProjectRuntimeSemanticCorrectionObservation(diagnostic)
+	if err != nil {
+		t.Fatal(err)
+	}
+	directive := runtimecontract.RuntimeSemanticCorrectionDirective{SchemaVersion: runtimecontract.RuntimeSemanticCorrectionDirectiveSchemaCurrent, PlanStep: runtimecontract.RuntimeSemanticPlanStepProofBatch, ManifestHash: manifest.Hash, DefinitionSeedHash: manifest.DefinitionSeedHash, StablePrefixHash: prefix, SourceObservationHash: runtimecontract.StableRuntimeSemanticCorrectionObservationHash(*observation), Attempt: 1, Violations: []runtimecontract.RuntimeSemanticContractViolation{violation}}
 	directive.Hash = runtimecontract.StableRuntimeSemanticCorrectionDirectiveHash(directive)
 	content, err := BuildSemanticPlanRequestContent(SemanticPlanRequestInput{Manifest: manifest, StablePrefixHash: prefix, Attempt: 1, PreviousRejection: diagnostic, CorrectionDirective: &directive, RemainingRecoveryAttempt: 1})
 	if err != nil {

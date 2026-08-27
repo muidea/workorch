@@ -398,9 +398,7 @@ def candidate_payload(state: MockState, payload: dict[str, Any]) -> tuple[dict[s
         # authority. They are never submitted as candidates.
         return {
             "operations": [{
-                "id": "probe-read",
                 "kind": "file/read",
-                "coverageWorkItemIds": ["cwi-probe"],
                 "targetRefs": ["runtime-validation-source.txt"],
                 "parameters": [{"name": "optional", "boolean": True}, {"name": "maxBytes", "integer": 64}],
             }]
@@ -437,7 +435,6 @@ def candidate_payload(state: MockState, payload: dict[str, Any]) -> tuple[dict[s
             target_ref = contract_target(contract)
             return {
                 "operations": [{
-                    "id": "restart-shell-wait-" + focus_id,
                     "kind": "shell/command",
                     "bindingRefs": contract_binding_refs(contract),
                     "targetRefs": [target_ref],
@@ -466,7 +463,6 @@ def candidate_payload(state: MockState, payload: dict[str, Any]) -> tuple[dict[s
             parameters = [{"name": "content", "string": current}]
         return {
             "operations": [{
-                "id": "restart-state-" + focus_id,
                 "kind": kind,
                 "bindingRefs": contract_binding_refs(contract),
                 "targetRefs": [target_ref],
@@ -487,7 +483,6 @@ def candidate_payload(state: MockState, payload: dict[str, Any]) -> tuple[dict[s
             ]
         return {
             "operations": [{
-                "id": "restart-validation-" + focus_id,
                 "kind": kind,
                 "bindingRefs": contract_binding_refs(contract),
                 "targetRefs": [target_ref],

@@ -15,6 +15,7 @@ func CandidateRejectionCodeDisposition(code string) (runtimecontract.RuntimeCand
 	switch strings.TrimSpace(code) {
 	case "candidate_contract_invalid",
 		"candidate_schema_invalid",
+		"candidate_document_nonconformant",
 		"candidate_replays_rejected_shape",
 		"candidate_partially_replays_rejected_shape",
 		"candidate_replays_no_progress_shape",
@@ -70,10 +71,24 @@ func CandidateCorrectionObjectivesForFailure(failure *runtimecontract.RuntimeCan
 	if failure.Diagnostic != nil {
 		diagnostic = failure.Diagnostic.Normalized()
 	}
+	// Provider-authored operation identity is forbidden at the strict wire.
+	// Its only legal correction is removal: dependency satisfaction and every
+	// other identity mutation are owned by the manifest derivation boundary.
+	identityField := candidateCorrectionPathField(diagnostic.Path)
+	if (identityField == "id" || identityField == "dependsOn") &&
+		strings.HasPrefix(diagnostic.Path, "$.operations[") &&
+		candidateCorrectionDiagnosticForbids(&diagnostic, identityField) {
+		return []runtimecontract.RuntimeCandidateCorrectionObjective{runtimecontract.RuntimeCandidateCorrectionRemoveForbiddenField}
+	}
 	objectives := append([]runtimecontract.RuntimeCandidateCorrectionObjective(nil), diagnostic.Objectives...)
 	if len(diagnostic.Forbidden) != 0 {
 		objectives = append(objectives, runtimecontract.RuntimeCandidateCorrectionRemoveForbiddenField)
 	}
+	// id/dependsOn are forbidden only on the provider wire; the strict decoder
+	// subsequently derives their canonical values from the sealed manifest.
+	// Some strict unknown-field diagnostics carry Allowed rather than a copied
+	// operation-level Forbidden set, so recognize only these two exact paths and
+	// only when the typed diagnostic itself proves the field is forbidden.
 	if len(diagnostic.Required) != 0 {
 		objectives = append(objectives, runtimecontract.RuntimeCandidateCorrectionSupplyRequiredField)
 	}
@@ -102,6 +117,8 @@ func CandidateCorrectionObjectivesForFailure(failure *runtimecontract.RuntimeCan
 		}
 	}
 	switch strings.TrimSpace(failure.Code) {
+	case "candidate_document_nonconformant":
+		objectives = append(objectives, runtimecontract.RuntimeCandidateCorrectionConformExpectedDocument)
 	case "candidate_contract_invalid", "candidate_schema_invalid":
 		switch {
 		case diagnostic.Path == "", diagnostic.Path == "$", diagnostic.Path == "$.operations",

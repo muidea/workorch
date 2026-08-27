@@ -81,25 +81,30 @@ func TestInspectRuntimeCandidateDocumentFramingSeparatesNonJSONFromIncompleteJSO
 	}
 }
 
-func TestDecodeRuntimeCandidatePayloadAcceptsOperationDependencyOnly(t *testing.T) {
+func TestDecodeRuntimeCandidatePayloadRejectsProviderOperationAuthority(t *testing.T) {
 	candidate, err := DecodeRuntimeCandidatePayload(ConvergenceStateNeedStateChange, []byte(`{
 		"operations":[
-			{"id":"prepare","kind":"git/write","bindingRefs":["binding/test/cwi-1"]},
-			{"id":"commit","kind":"git/write","dependsOn":["prepare"],"bindingRefs":["binding/test/cwi-1"]}
+			{"kind":"git/write","bindingRefs":["binding/test/cwi-1"]},
+			{"kind":"git/write","bindingRefs":["binding/test/cwi-1"]}
 		]
 	}`))
 	if err != nil {
-		t.Fatalf("operation dependency candidate: %v", err)
+		t.Fatalf("operation candidate: %v", err)
 	}
-	if candidate.StateChange == nil || len(candidate.StateChange.Operations) != 2 || len(candidate.StateChange.Operations[1].Operation.DependsOn) != 1 || candidate.StateChange.Operations[1].Operation.DependsOn[0] != "prepare" {
-		t.Fatalf("dependency was not preserved: %+v", candidate)
+	if candidate.StateChange == nil || len(candidate.StateChange.Operations) != 2 || candidate.StateChange.Operations[0].Operation.ID != "" || len(candidate.StateChange.Operations[1].Operation.DependsOn) != 0 {
+		t.Fatalf("wire decoder invented operation authority: %+v", candidate)
 	}
 
-	_, err = DecodeRuntimeCandidatePayload(ConvergenceStateNeedStateChange, []byte(`{
-		"operations":[{"id":"write","kind":"file/write","bindingRefs":["binding/test/cwi-1"]}],
-		"dependsOn":["prepare"]
-	}`))
-	if err == nil || !strings.Contains(err.Error(), `unknown field "dependsOn"`) {
-		t.Fatalf("top-level dependency error = %v, want strict unknown-field rejection", err)
+	for name, payload := range map[string]string{
+		"id":        `{"operations":[{"id":"write","kind":"file/write"}]}`,
+		"dependsOn": `{"operations":[{"kind":"file/write","dependsOn":["prepare"]}]}`,
+		"top-level": `{"operations":[{"kind":"file/write"}],"dependsOn":["prepare"]}`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			_, err := DecodeRuntimeCandidatePayload(ConvergenceStateNeedStateChange, []byte(payload))
+			if err == nil || !strings.Contains(err.Error(), "unknown field") {
+				t.Fatalf("provider authority error = %v, want strict unknown-field rejection", err)
+			}
+		})
 	}
 }

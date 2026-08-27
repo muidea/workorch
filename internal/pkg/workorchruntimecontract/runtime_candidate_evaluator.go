@@ -36,6 +36,21 @@ const (
 	RuntimeCandidateCorrectionWitnessValidationRecipe RuntimeCandidateCorrectionWitnessDimension = "validation_recipe"
 	RuntimeCandidateCorrectionWitnessClosedParameter  RuntimeCandidateCorrectionWitnessDimension = "closed_semantic_parameter"
 	RuntimeCandidateCorrectionWitnessSchemaField      RuntimeCandidateCorrectionWitnessDimension = "schema_field"
+	RuntimeCandidateCorrectionWitnessDocumentShape    RuntimeCandidateCorrectionWitnessDimension = "document_shape"
+)
+
+// RuntimeCandidateCorrectionConformExpectedDocument is the bounded objective
+// for replacing an empty/invalid/trailing provider body with exactly one
+// manifest-conformant JSON document. It grants no operation authority.
+const RuntimeCandidateCorrectionConformExpectedDocument RuntimeCandidateCorrectionObjective = "conform_expected_document"
+
+const (
+	RuntimeCandidateDocumentShapeEmpty              = "empty_document"
+	RuntimeCandidateDocumentShapeInvalid            = "invalid_provider_output"
+	RuntimeCandidateDocumentShapeTrailingContent    = "trailing_content"
+	RuntimeCandidateDocumentShapeMultipleJSONValues = "multiple_json_values"
+	RuntimeCandidateDocumentShapeNonObjectJSONValue = "non_object_json_value"
+	RuntimeCandidateDocumentShapeConformant         = "single_manifest_conformant_json_object"
 )
 
 // RuntimeCandidateCorrectionWitness is the bounded proof carried by a
@@ -85,6 +100,20 @@ func (w RuntimeCandidateCorrectionWitness) Validate() error {
 		if (w.RejectedShapeHash == "") != (w.AlternativeShapeHash == "") ||
 			(w.RejectedShapeHash != "" && w.RejectedShapeHash == w.AlternativeShapeHash) {
 			return fmt.Errorf("schema-field candidate correction witness shape hashes must be absent together or present and distinct")
+		}
+	case RuntimeCandidateCorrectionWitnessDocumentShape:
+		if w.OperationKind != "" || w.Path != "$" || w.AlternativeValue != RuntimeCandidateDocumentShapeConformant ||
+			w.RejectedShapeHash != "" || w.AlternativeShapeHash != "" {
+			return fmt.Errorf("document-shape candidate correction witness requires only the root path and conformant-document alternative")
+		}
+		switch w.RejectedValue {
+		case RuntimeCandidateDocumentShapeEmpty,
+			RuntimeCandidateDocumentShapeInvalid,
+			RuntimeCandidateDocumentShapeTrailingContent,
+			RuntimeCandidateDocumentShapeMultipleJSONValues,
+			RuntimeCandidateDocumentShapeNonObjectJSONValue:
+		default:
+			return fmt.Errorf("document-shape candidate correction witness has undeclared rejected shape %q", w.RejectedValue)
 		}
 	default:
 		return fmt.Errorf("candidate correction witness dimension %q is not declared", w.Dimension)

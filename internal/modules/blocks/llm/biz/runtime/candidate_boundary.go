@@ -115,8 +115,8 @@ func providerDocumentResponse(request llmmodels.RuntimeCandidateRequest, generat
 	// recovery from the typed incomplete outcome.
 	if generation.ReachedProviderLimit {
 		outcome.Framing.Disposition = runtimecontract.RuntimeProviderDocumentIncomplete
-		outcome.Framing.Code = "max_output_tokens"
-		outcome.Framing.Signature = "provider-output-limit"
+		outcome.Framing.Code = runtimecontract.RuntimeProviderDocumentCodeOutputLimit
+		outcome.Framing.Signature = runtimecontract.RuntimeProviderDocumentSignatureOutputLimit
 		response.DocumentOutcome = &outcome
 		return response
 	}
@@ -128,20 +128,20 @@ func providerDocumentResponse(request llmmodels.RuntimeCandidateRequest, generat
 		outcome.Content = payload
 	case runtimecontract.RuntimeCandidateDocumentIncomplete:
 		outcome.Framing.Disposition = runtimecontract.RuntimeProviderDocumentIncomplete
-		outcome.Framing.Code = "incomplete_json_document"
-		outcome.Framing.Signature = "provider-document-incomplete"
+		outcome.Framing.Code = runtimecontract.RuntimeProviderDocumentCodeIncompleteJSON
+		outcome.Framing.Signature = runtimecontract.RuntimeProviderDocumentSignatureIncompleteJSON
 		if candidatePayloadReachedOutputLimit(generation, io.ErrUnexpectedEOF) {
-			outcome.Framing.Code = "max_output_tokens"
-			outcome.Framing.Signature = "provider-output-limit"
+			outcome.Framing.Code = runtimecontract.RuntimeProviderDocumentCodeOutputLimit
+			outcome.Framing.Signature = runtimecontract.RuntimeProviderDocumentSignatureOutputLimit
 		}
 	case runtimecontract.RuntimeCandidateDocumentEmpty:
 		outcome.Framing.Disposition = runtimecontract.RuntimeProviderDocumentEmpty
-		outcome.Framing.Code = "provider_final_output_missing"
-		outcome.Framing.Signature = "provider-final-output-missing"
+		outcome.Framing.Code = runtimecontract.RuntimeProviderDocumentCodeFinalOutputMissing
+		outcome.Framing.Signature = runtimecontract.RuntimeProviderDocumentSignatureOutputMissing
 	case runtimecontract.RuntimeCandidateDocumentInvalid:
 		outcome.Framing.Disposition = runtimecontract.RuntimeProviderDocumentInvalid
-		outcome.Framing.Code = "provider_final_output_invalid"
-		outcome.Framing.Signature = "provider-final-output-invalid"
+		outcome.Framing.Code = runtimecontract.RuntimeProviderDocumentCodeFinalOutputInvalid
+		outcome.Framing.Signature = runtimecontract.RuntimeProviderDocumentSignatureOutputInvalid
 	}
 	response.DocumentOutcome = &outcome
 	return response
@@ -364,17 +364,17 @@ func validateCandidateRequest(request llmmodels.RuntimeCandidateRequest) error {
 }
 
 func validateOperationsDocumentRequest(request llmmodels.RuntimeCandidateRequest) error {
-	if request.SemanticManifest.Hash != "" || request.SemanticContext.WorkspaceID != "" || request.SemanticContext.RunID != "" || request.PreviousSemanticRejection != nil || request.SemanticCorrectionDirective != nil {
+	if request.SemanticManifest.Hash != "" || request.SemanticContext.WorkspaceID != "" || request.SemanticContext.RunID != "" || request.SemanticCorrectionObservation != nil || request.SemanticCorrectionDirective != nil {
 		return fmt.Errorf("operations document request must not carry semantic plan fields")
 	}
-	if request.CandidateAttempt == 0 && (request.PreviousFailure != nil || request.CandidateCorrection != nil) {
+	if request.CandidateAttempt == 0 && (request.CandidateCorrectionObservation != nil || request.CandidateCorrection != nil) {
 		return fmt.Errorf("initial candidate attempt must not carry correction lineage")
 	}
 	if request.CandidateAttempt == 1 {
-		if request.PreviousFailure == nil || request.PreviousFailure.Class == "" || strings.TrimSpace(request.PreviousFailure.Reason) == "" || request.CandidateCorrection == nil {
+		if request.CandidateCorrectionObservation == nil || request.CandidateCorrection == nil {
 			return fmt.Errorf("candidate retry requires previous failure and correction directive")
 		}
-		if err := request.CandidateCorrection.Validate(request.CandidateManifest.Hash); err != nil {
+		if err := request.CandidateCorrection.ValidateAgainstObservation(request.CandidateManifest, *request.CandidateCorrectionObservation); err != nil {
 			return err
 		}
 	}
@@ -394,7 +394,7 @@ func validateOperationsDocumentRequest(request llmmodels.RuntimeCandidateRequest
 		return err
 	}
 	if request.CandidateAttempt == 1 {
-		correctionHash := request.CandidateCorrection.StableRequestCorrectionHash(request.PreviousFailure)
+		correctionHash := request.CandidateCorrection.StableRequestCorrectionHash(request.CandidateCorrectionObservation)
 		logicalRequestID := runtimecontract.StableRuntimeCandidateRequestSessionID(
 			request.DocumentKind,
 			request.CandidateContext.WorkspaceID,
@@ -417,20 +417,20 @@ func validateOperationsDocumentRequest(request llmmodels.RuntimeCandidateRequest
 }
 
 func validateSemanticPlanDocumentRequest(request llmmodels.RuntimeCandidateRequest) error {
-	if request.CandidateManifest.Hash != "" || request.CandidateContext.WorkspaceID != "" || request.CandidateContext.RunID != "" || request.DefinitionContext.Revision != "" || request.PreviousFailure != nil || request.CandidateCorrection != nil {
+	if request.CandidateManifest.Hash != "" || request.CandidateContext.WorkspaceID != "" || request.CandidateContext.RunID != "" || request.DefinitionContext.Revision != "" || request.CandidateCorrectionObservation != nil || request.CandidateCorrection != nil {
 		return fmt.Errorf("semantic plan document request must not carry operations fields")
 	}
-	if request.CandidateAttempt == 0 && (request.PreviousSemanticRejection != nil || request.SemanticCorrectionDirective != nil) {
+	if request.CandidateAttempt == 0 && (request.SemanticCorrectionObservation != nil || request.SemanticCorrectionDirective != nil) {
 		return fmt.Errorf("initial semantic plan attempt must not carry correction lineage")
 	}
 	if request.CandidateAttempt == 1 {
-		if request.PreviousSemanticRejection == nil || request.SemanticCorrectionDirective == nil {
+		if request.SemanticCorrectionObservation == nil || request.SemanticCorrectionDirective == nil {
 			return fmt.Errorf("semantic plan retry requires rejection and correction directive")
 		}
-		if err := request.PreviousSemanticRejection.Validate(); err != nil {
+		if err := request.SemanticCorrectionObservation.Validate(); err != nil {
 			return err
 		}
-		if err := request.SemanticCorrectionDirective.ValidateAgainst(request.SemanticManifest, *request.PreviousSemanticRejection); err != nil {
+		if err := request.SemanticCorrectionDirective.ValidateAgainstObservation(request.SemanticManifest, *request.SemanticCorrectionObservation); err != nil {
 			return err
 		}
 	}

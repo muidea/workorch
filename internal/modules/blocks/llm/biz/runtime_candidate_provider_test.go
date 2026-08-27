@@ -44,6 +44,84 @@ func runtimeCandidateCorrectionInputForProviderTest(manifestHash, path, alternat
 	return &input
 }
 
+func runtimeCandidateCorrectionObservationForProviderTest(failure runtimecontract.RuntimeCandidateFailure, path string) *runtimecontract.RuntimeCandidateCorrectionObservation {
+	diagnostic := failure.Diagnostic.Clone()
+	if diagnostic == nil {
+		diagnostic = &runtimecontract.RuntimeCandidateFailureDiagnostic{Path: path}
+	}
+	value := runtimecontract.RuntimeCandidateCorrectionObservation{
+		Class: failure.Class, Code: failure.Code, Signature: failure.Signature,
+		TargetRefs: append([]string(nil), failure.TargetRefs...), Diagnostic: diagnostic,
+	}.Clone()
+	return &value
+}
+
+func runtimeCandidateCorrectionPairForProviderTest(failure runtimecontract.RuntimeCandidateFailure, manifestHash, path, alternative string) (*runtimecontract.RuntimeCandidateCorrectionObservation, *llmmodels.RuntimeCandidateCorrectionInput) {
+	observation := runtimeCandidateCorrectionObservationForProviderTest(failure, path)
+	input := runtimeCandidateCorrectionInputForProviderTest(manifestHash, path, alternative)
+	if observation.Diagnostic == nil {
+		observation.Diagnostic = &runtimecontract.RuntimeCandidateFailureDiagnostic{Path: path}
+	}
+	observation.Diagnostic.ManifestHash = manifestHash
+	observation.Diagnostic.Objectives = append([]runtimecontract.RuntimeCandidateCorrectionObjective(nil), input.Objectives...)
+	if observation.Diagnostic.Actual == "" {
+		observation.Diagnostic.Actual = input.Witness.RejectedValue
+	}
+	if input.Witness.AlternativeValue == "field_absent" && observation.Diagnostic.Actual != "" {
+		input.Witness.RejectedValue = observation.Diagnostic.Actual
+	}
+	if input.Witness.RejectedShapeHash != "" && observation.Diagnostic.RejectedShapeHash == "" {
+		observation.Diagnostic.RejectedShapeHash = input.Witness.RejectedShapeHash
+	}
+	if observation.Diagnostic.RejectedShapeHash != "" && input.Witness.RejectedShapeHash != "" {
+		input.Witness.RejectedShapeHash = observation.Diagnostic.RejectedShapeHash
+		if input.Witness.AlternativeShapeHash == input.Witness.RejectedShapeHash {
+			input.Witness.AlternativeShapeHash += "-alternative"
+		}
+	}
+	if observation.Diagnostic.RejectedShapeHash != "" && input.Witness.RejectedShapeHash == "" {
+		input.Witness.RejectedShapeHash = observation.Diagnostic.RejectedShapeHash
+		input.Witness.AlternativeShapeHash = observation.Diagnostic.RejectedShapeHash + "-alternative"
+	}
+	field := runtimeCandidateCorrectionPathFieldForProviderTest(path)
+	if input.Witness.AlternativeValue == "field_present" && len(observation.Diagnostic.Required) == 0 {
+		observation.Diagnostic.Required = []string{field}
+	}
+	if input.Witness.AlternativeValue == "field_absent" && len(observation.Diagnostic.Forbidden) == 0 {
+		observation.Diagnostic.Forbidden = []string{field}
+	}
+	observation.SealedCorrectionHash = runtimecontract.StableRuntimeCandidateSealedCorrectionHash(input.ManifestHash, input.Objectives, &input.Witness)
+	value := observation.Clone()
+	return &value, input
+}
+
+func runtimeCandidateCorrectionPathFieldForProviderTest(path string) string {
+	path = strings.TrimSpace(path)
+	if dot := strings.LastIndex(path, "."); dot >= 0 && dot+1 < len(path) {
+		return path[dot+1:]
+	}
+	return path
+}
+
+func runtimeSemanticCorrectionObservationForProviderTest(diagnostic *runtimecontract.RuntimeOriginalDiagnostic) *runtimecontract.RuntimeSemanticCorrectionObservation {
+	if diagnostic == nil {
+		return nil
+	}
+	value := runtimecontract.RuntimeSemanticCorrectionObservation{
+		SchemaVersion: runtimecontract.RuntimeSemanticCorrectionObservationSchemaCurrent,
+		OwnerModuleID: diagnostic.OwnerModuleID, Class: diagnostic.OriginalClass, Code: diagnostic.OriginalCode,
+		Signature: diagnostic.Signature, OperationID: diagnostic.OperationID,
+		TargetRefs: append([]string(nil), diagnostic.TargetRefs...), ExpectedRevision: diagnostic.ExpectedRevision,
+		ObservedRevision: diagnostic.ObservedRevision, FieldViolations: runtimecontract.CloneRuntimeFieldViolations(diagnostic.FieldViolations),
+		SemanticViolations: append([]runtimecontract.RuntimeSemanticContractViolation(nil), diagnostic.SemanticViolations...),
+	}.Clone()
+	if diagnostic.TargetObservation != nil {
+		target := diagnostic.TargetObservation.Clone()
+		value.TargetObservation = &target
+	}
+	return &value
+}
+
 func TestRuntimeCandidatePreflightAuditIsExplicitlyNonStreaming(t *testing.T) {
 	now := time.Now().UTC()
 	audit := sealedAuditFromRequest(llmmodels.RuntimeCandidateRequest{}, "preflight-1", nil, now, now, false, llmmodels.RuntimeCandidateStatusCompleted, "", 0)
@@ -319,17 +397,18 @@ func TestRuntimeSemanticPlanProviderUsesSingleCachePipelineAndSafeCorrection(t *
 		TargetRefs: []string{"main.go"}, FieldViolations: []runtimecontract.RuntimeFieldViolation{{Path: "$.coverageOrder", Actual: "cwi-001 before cwi-000", Required: []string{"cwi-000 before cwi-001"}}},
 		SemanticViolations: []runtimecontract.RuntimeSemanticContractViolation{{Kind: runtimecontract.RuntimeSemanticContractViolationDependencyOrder, Path: "$.coverageOrder", RequiredBeforeID: "cwi-000", RequiredAfterID: "cwi-001", ActualBeforePosition: 1, ActualAfterPosition: 0}},
 	}
+	observation := runtimeSemanticCorrectionObservationForProviderTest(rejection)
 	directive := runtimecontract.RuntimeSemanticCorrectionDirective{
 		SchemaVersion: runtimecontract.RuntimeSemanticCorrectionDirectiveSchemaCurrent,
 		PlanStep:      runtimecontract.RuntimeSemanticPlanStepCoverageOrder, ManifestHash: base.SemanticManifest.Hash,
 		DefinitionSeedHash: base.SemanticManifest.DefinitionSeedHash, StablePrefixHash: base.StablePrefixHash,
-		SourceRejectionHash: runtimecontract.StableRuntimeSemanticPlanCorrectionHash(*rejection), Attempt: 1,
+		SourceObservationHash: runtimecontract.StableRuntimeSemanticCorrectionObservationHash(*observation), Attempt: 1,
 		Violations: append([]runtimecontract.RuntimeSemanticContractViolation(nil), rejection.SemanticViolations...),
 	}
 	directive.Hash = runtimecontract.StableRuntimeSemanticCorrectionDirectiveHash(directive)
 	retryRequest := base
 	retryRequest.CandidateAttempt = 1
-	retryRequest.PreviousSemanticRejection = rejection
+	retryRequest.SemanticCorrectionObservation = observation
 	retryRequest.SemanticCorrectionDirective = &directive
 	retry, err := runtimeProviderRequest(retryRequest)
 	if err != nil {
@@ -380,16 +459,17 @@ func TestRuntimeSemanticCoverageOrderCorrectionProjectsExactManifestCoverage(t *
 		FieldViolations:    []runtimecontract.RuntimeFieldViolation{{Path: "$.proposals", Actual: "missing_required"}},
 		SemanticViolations: []runtimecontract.RuntimeSemanticContractViolation{violation},
 	}
+	observation := runtimeSemanticCorrectionObservationForProviderTest(rejection)
 	directive := runtimecontract.RuntimeSemanticCorrectionDirective{
 		SchemaVersion: runtimecontract.RuntimeSemanticCorrectionDirectiveSchemaCurrent,
 		PlanStep:      runtimecontract.RuntimeSemanticPlanStepCoverageOrder, ManifestHash: request.SemanticManifest.Hash,
 		DefinitionSeedHash: request.SemanticManifest.DefinitionSeedHash, StablePrefixHash: request.StablePrefixHash,
-		SourceRejectionHash: runtimecontract.StableRuntimeSemanticPlanCorrectionHash(*rejection), Attempt: 1,
+		SourceObservationHash: runtimecontract.StableRuntimeSemanticCorrectionObservationHash(*observation), Attempt: 1,
 		Violations: []runtimecontract.RuntimeSemanticContractViolation{violation},
 	}
 	directive.Hash = runtimecontract.StableRuntimeSemanticCorrectionDirectiveHash(directive)
 	request.CandidateAttempt = 1
-	request.PreviousSemanticRejection = rejection
+	request.SemanticCorrectionObservation = observation
 	request.SemanticCorrectionDirective = &directive
 	providerRequest, err := runtimeProviderRequest(request)
 	if err != nil {
@@ -481,15 +561,16 @@ func TestRuntimeSemanticExistingTargetCorrectionCarriesOwnerRevisionAndReplaceme
 		Rule: runtimecontract.RuntimeSemanticConstraintAllowedValue, Actual: string(runtimecontract.RuntimeOperationTargetPolicyProspectiveOwnerTarget), Allowed: []string{string(runtimecontract.RuntimeOperationTargetPolicyExactTarget)},
 	}
 	diagnostic.SemanticViolations = []runtimecontract.RuntimeSemanticContractViolation{violation}
+	observation := runtimeSemanticCorrectionObservationForProviderTest(diagnostic)
 	directive := runtimecontract.RuntimeSemanticCorrectionDirective{
 		SchemaVersion: runtimecontract.RuntimeSemanticCorrectionDirectiveSchemaCurrent, PlanStep: request.SemanticContext.PlanStep,
 		ManifestHash: request.SemanticManifest.Hash, DefinitionSeedHash: request.SemanticManifest.DefinitionSeedHash,
-		StablePrefixHash: request.StablePrefixHash, SourceRejectionHash: runtimecontract.StableRuntimeSemanticPlanCorrectionHash(*diagnostic), Attempt: 1,
+		StablePrefixHash: request.StablePrefixHash, SourceObservationHash: runtimecontract.StableRuntimeSemanticCorrectionObservationHash(*observation), Attempt: 1,
 		Violations: []runtimecontract.RuntimeSemanticContractViolation{violation},
 	}
 	directive.Hash = runtimecontract.StableRuntimeSemanticCorrectionDirectiveHash(directive)
 	request.CandidateAttempt = 1
-	request.PreviousSemanticRejection = diagnostic
+	request.SemanticCorrectionObservation = observation
 	request.SemanticCorrectionDirective = &directive
 	providerRequest, err := runtimeProviderRequest(request)
 	if err != nil {
@@ -811,17 +892,18 @@ func TestRuntimeSemanticProviderProjectsDefinitionLineageAndExactAcquisitionSele
 		}},
 		SemanticViolations: append([]runtimecontract.RuntimeSemanticContractViolation(nil), diagnostic.SemanticViolations...),
 	}
+	observation := runtimeSemanticCorrectionObservationForProviderTest(rejection)
 	directive := runtimecontract.RuntimeSemanticCorrectionDirective{
 		SchemaVersion: runtimecontract.RuntimeSemanticCorrectionDirectiveSchemaCurrent,
 		PlanStep:      runtimecontract.RuntimeSemanticPlanStepProofBatch, ManifestHash: openSelectorRequest.SemanticManifest.Hash,
 		DefinitionSeedHash: openSelectorRequest.SemanticManifest.DefinitionSeedHash, StablePrefixHash: openSelectorRequest.StablePrefixHash,
-		SourceRejectionHash: runtimecontract.StableRuntimeSemanticPlanCorrectionHash(*rejection), Attempt: 1,
+		SourceObservationHash: runtimecontract.StableRuntimeSemanticCorrectionObservationHash(*observation), Attempt: 1,
 		Violations: append([]runtimecontract.RuntimeSemanticContractViolation(nil), rejection.SemanticViolations...),
 	}
 	directive.Hash = runtimecontract.StableRuntimeSemanticCorrectionDirectiveHash(directive)
 	retryRequest := openSelectorRequest
 	retryRequest.CandidateAttempt = 1
-	retryRequest.PreviousSemanticRejection = rejection
+	retryRequest.SemanticCorrectionObservation = observation
 	retryRequest.SemanticCorrectionDirective = &directive
 	retryProviderRequest, err := runtimeProviderRequest(retryRequest)
 	if err != nil {
@@ -1117,7 +1199,11 @@ func runtimeCandidateContextManifest(action runtimecontract.ConvergenceState, ki
 		operations = append(operations, runtimecontract.RuntimeCandidateOperationManifest{Kind: kind})
 	}
 	policy, _ := runtimecontract.RuntimeConvergenceEffectPolicyFor(action)
-	return runtimecontract.RuntimeCandidateContractManifest{State: action, EffectPolicy: policy, Operations: operations}
+	maxOperationCount := 0
+	if action == runtimecontract.ConvergenceStateNeedStateChange || action == runtimecontract.ConvergenceStateNeedValidation {
+		maxOperationCount = runtimecontract.RuntimeCandidateOperationMaxCount
+	}
+	return runtimecontract.RuntimeCandidateContractManifest{State: action, EffectPolicy: policy, MaxOperationCount: maxOperationCount, Operations: operations}
 }
 
 func sealRuntimeProviderTestPolicies(facts *runtimecontract.RuntimeFacts) {
@@ -1347,9 +1433,11 @@ func TestRuntimeProviderRequestPreservesStablePrefixAndTypedContext(t *testing.T
 		t.Fatalf("volatile or large content leaked into C3/C5: c3=%s c5=%s", dynamicSection, largeRefs)
 	}
 	for _, testCase := range []struct {
-		name    string
-		failure runtimecontract.RuntimeCandidateFailure
-		want    []string
+		name           string
+		failure        runtimecontract.RuntimeCandidateFailure
+		correctionPath string
+		alternative    string
+		want           []string
 	}{
 		{
 			name: "schema diagnostic",
@@ -1357,10 +1445,11 @@ func TestRuntimeProviderRequestPreservesStablePrefixAndTypedContext(t *testing.T
 				Class: runtimecontract.RuntimeCandidateFailureClassSchema, Code: "candidate_schema_invalid", Signature: "candidate-schema-invalid",
 				Reason: "raw decoder text must not be rendered: json: unknown field candidate",
 				Diagnostic: &runtimecontract.RuntimeCandidateFailureDiagnostic{
-					Path: "$.operations[0].parameters[0].name", Actual: "summary", Allowed: []string{"command", "args"}, Forbidden: []string{"summary"},
+					Path: "$.operations[0].parameters[name=summary]", Actual: "summary", Allowed: []string{"command", "args"}, Forbidden: []string{"summary"},
 				},
 			},
-			want: []string{`"class":"schema"`, `"code":"candidate_schema_invalid"`, `"path":"$.operations[0].parameters[0].name"`, `"actual":"summary"`},
+			correctionPath: "$.operations[0].parameters[name=summary]", alternative: "field_absent",
+			want: []string{`"class":"schema"`, `"code":"candidate_schema_invalid"`, `"path":"$.operations[0].parameters[name=summary]"`, `"actual":"summary"`},
 		},
 		{
 			name: "semantic manifest diagnostic",
@@ -1371,6 +1460,7 @@ func TestRuntimeProviderRequestPreservesStablePrefixAndTypedContext(t *testing.T
 					OperationID: "write", Path: "$.operations[0].targetRefs", Actual: "other.go", Required: []string{"main.go"},
 				},
 			},
+			correctionPath: "$.operations[0].targetRefs", alternative: "main.go",
 			want: []string{`"class":"contract"`, `"code":"candidate_contract_invalid"`, `"operationId":"write"`, `"path":"$.operations[0].targetRefs"`},
 		},
 		{
@@ -1379,6 +1469,7 @@ func TestRuntimeProviderRequestPreservesStablePrefixAndTypedContext(t *testing.T
 				Class: runtimecontract.RuntimeCandidateFailureClassContract, Code: "candidate_target_outside_grounding", Signature: "candidate-target-outside-grounding",
 				Reason: "raw owner explanation must not be rendered", TargetRefs: []string{"main.go"},
 			},
+			correctionPath: "$.operations[0].targetRefs", alternative: "main.go",
 			want: []string{`"code":"candidate_target_outside_grounding"`, `"targetRefs":["main.go"]`},
 		},
 	} {
@@ -1391,17 +1482,18 @@ func TestRuntimeProviderRequestPreservesStablePrefixAndTypedContext(t *testing.T
 					diagnostic.RejectedShapeHash = testCase.failure.Signature
 				}
 			}
+			observation, correction := runtimeCandidateCorrectionPairForProviderTest(testCase.failure, manifest.Hash, testCase.correctionPath, testCase.alternative)
 			retryRequest, err := runtimeProviderRequest(llmmodels.RuntimeCandidateRequest{
 				DocumentKind: runtimecontract.RuntimeProviderDocumentOperations,
-				Decision:     decision, Transaction: decision.AuthorityTransaction(), CandidateAttempt: 1, PreviousFailure: &testCase.failure, StablePrefixHash: prefix,
-				CandidateCorrection: runtimeCandidateCorrectionInputForProviderTest(manifest.Hash, "$.operations[0].targetRefs", "main.go"),
+				Decision:     decision, Transaction: decision.AuthorityTransaction(), CandidateAttempt: 1, CandidateCorrectionObservation: observation, StablePrefixHash: prefix,
+				CandidateCorrection: correction,
 				CandidateManifest:   manifest, DefinitionContext: definition, CandidateContext: candidateContext,
 			})
 			if err != nil {
 				t.Fatal(err)
 			}
 			retrySection := retryRequest.PromptContext.Sections[4].Content
-			for _, value := range append([]string{`"candidateAttempt":1`, `"previousFailure"`, `"correctionInput"`, `"path":"$.operations[0].targetRefs"`, `"alternativeValue":"main.go"`, "context.outputContract.structuredOutputInstruction", "sealed manifest hash"}, testCase.want...) {
+			for _, value := range append([]string{`"candidateAttempt":1`, `"previousFailure"`, `"correctionInput"`, `"path":"` + testCase.correctionPath + `"`, `"alternativeValue":"` + testCase.alternative + `"`, "context.outputContract.structuredOutputInstruction", "sealed manifest hash"}, testCase.want...) {
 				if !strings.Contains(retrySection, value) {
 					t.Fatalf("provider retry lost correction %q: %s", value, retrySection)
 				}
@@ -1432,7 +1524,7 @@ func TestRuntimeProviderRequestPreservesStablePrefixAndTypedContext(t *testing.T
 			}
 			if testCase.failure.Diagnostic != nil {
 				diagnostic := tail.Retry.PreviousFailure.Diagnostic
-				want := testCase.failure.Diagnostic.Normalized()
+				want := observation.Diagnostic.Normalized()
 				if diagnostic == nil || !reflect.DeepEqual(diagnostic.Normalized(), want) {
 					t.Fatalf("provider retry changed typed correction delta: got=%+v want=%+v", diagnostic, want)
 				}
@@ -1528,13 +1620,14 @@ func TestValidateRuntimeCandidateContextIntegrityRejectsProtectedContextLoss(t *
 
 func TestRuntimeCandidateRetryExplainsOperationShapeReplayWithoutChangingStablePrefix(t *testing.T) {
 	failure := &runtimecontract.RuntimeCandidateFailure{
-		Class:  runtimecontract.RuntimeCandidateFailureClassContract,
-		Code:   "candidate_replays_rejected_shape",
-		Reason: "runtime candidate replays active rejected operation shape(s)",
+		Class:     runtimecontract.RuntimeCandidateFailureClassContract,
+		Code:      "candidate_replays_rejected_shape",
+		Signature: "candidate-replays-rejected-shape",
+		Reason:    "runtime candidate replays active rejected operation shape(s)",
 	}
 	manifest := runtimecontract.RuntimeCandidateContractManifest{Hash: "manifest-retry-exact-alternative"}
-	directive := runtimeCandidateCorrectionInputForProviderTest(manifest.Hash, "$.operations[0].targetRefs", "support.go")
-	retry := runtimeCandidateRetryForManifest(1, failure, manifest, directive)
+	observation, directive := runtimeCandidateCorrectionPairForProviderTest(*failure, manifest.Hash, "$.operations[0].targetRefs", "support.go")
+	retry := runtimeCandidateRetryForManifest(1, observation, manifest, directive)
 	if retry == nil {
 		t.Fatal("retry projection is nil")
 	}
@@ -1546,9 +1639,10 @@ func TestRuntimeCandidateRetryExplainsOperationShapeReplayWithoutChangingStableP
 			t.Fatalf("retry instruction lost %q: %s", want, retry.Instruction)
 		}
 	}
-	if retry := runtimeCandidateRetryForManifest(1, &runtimecontract.RuntimeCandidateFailure{
-		Class: runtimecontract.RuntimeCandidateFailureClassContract, Code: "candidate_admission_invalid",
-	}, manifest, directive); retry == nil || strings.Contains(retry.Instruction, "rejected or no-progress operation shape") {
+	nonReplayObservation, nonReplayDirective := runtimeCandidateCorrectionPairForProviderTest(runtimecontract.RuntimeCandidateFailure{
+		Class: runtimecontract.RuntimeCandidateFailureClassContract, Code: "candidate_admission_invalid", Signature: "candidate-admission-invalid",
+	}, manifest.Hash, "$.operations[0].targetRefs", "support.go")
+	if retry := runtimeCandidateRetryForManifest(1, nonReplayObservation, manifest, nonReplayDirective); retry == nil || strings.Contains(retry.Instruction, "rejected or no-progress operation shape") {
 		t.Fatalf("non-replay retry instruction = %+v, want no replay-specific correction", retry)
 	}
 }
@@ -1745,27 +1839,55 @@ func TestRuntimeCandidateSchemasAreActionSpecific(t *testing.T) {
 	}
 }
 
-func TestRuntimeCandidateSchemaOnlyExposesDependenciesForSealedDependentSequence(t *testing.T) {
-	withoutDependency := runtimeCandidateSchemaForDecision(t, runtimecontract.RuntimeDecision{
-		State:          runtimecontract.ConvergenceStateNeedStateChange,
-		RequiredOutput: runtimecontract.RequiredOutputContract{AcceptedKinds: []string{runtimecontract.StepKindFileWrite}},
-	}, nil)
-	if runtimeOperationSchemaHasProperty(t, withoutDependency, "dependsOn") {
-		t.Fatalf("ordinary candidate schema exposed an unnecessary dependency field: %s", withoutDependency)
-	}
-
-	withDependency := runtimeCandidateSchemaForDecision(t, runtimecontract.RuntimeDecision{
-		State: runtimecontract.ConvergenceStateNeedStateChange,
-		RequiredOutput: runtimecontract.RequiredOutputContract{
-			AcceptedKinds: []string{runtimecontract.StepKindGitWrite},
-			RequiredOperationSequence: []runtimecontract.RuntimeRequiredOperationVariant{
-				{RequirementID: "init", Kind: runtimecontract.StepKindGitWrite, VariantID: "init"},
-				{RequirementID: "commit", Kind: runtimecontract.StepKindGitWrite, VariantID: "commit", DependsOnRequirementIDs: []string{"init"}},
+func TestRuntimeCandidateSchemaNeverExposesOwnerDerivedOperationAuthority(t *testing.T) {
+	testCases := []struct {
+		name     string
+		decision runtimecontract.RuntimeDecision
+	}{
+		{
+			name: "file",
+			decision: runtimecontract.RuntimeDecision{
+				State:          runtimecontract.ConvergenceStateNeedStateChange,
+				RequiredOutput: runtimecontract.RequiredOutputContract{AcceptedKinds: []string{runtimecontract.StepKindFileWrite}},
 			},
 		},
-	}, nil)
-	if !runtimeOperationSchemaHasProperty(t, withDependency, "dependsOn") {
-		t.Fatalf("dependent sequence schema omitted operation dependency field: %s", withDependency)
+		{
+			name: "git dependent sequence",
+			decision: runtimecontract.RuntimeDecision{
+				State: runtimecontract.ConvergenceStateNeedStateChange,
+				RequiredOutput: runtimecontract.RequiredOutputContract{
+					AcceptedKinds: []string{runtimecontract.StepKindGitWrite},
+					RequiredOperationSequence: []runtimecontract.RuntimeRequiredOperationVariant{
+						{RequirementID: "init", Kind: runtimecontract.StepKindGitWrite, VariantID: "init"},
+						{RequirementID: "commit", Kind: runtimecontract.StepKindGitWrite, VariantID: "commit", DependsOnRequirementIDs: []string{"init"}},
+					},
+				},
+			},
+		},
+		{
+			name: "shell",
+			decision: runtimecontract.RuntimeDecision{
+				State:          runtimecontract.ConvergenceStateNeedStateChange,
+				RequiredOutput: runtimecontract.RequiredOutputContract{AcceptedKinds: []string{runtimecontract.StepKindShellCommand}},
+			},
+		},
+		{
+			name: "mcp",
+			decision: runtimecontract.RuntimeDecision{
+				State:          runtimecontract.ConvergenceStateNeedValidation,
+				RequiredOutput: runtimecontract.RequiredOutputContract{AcceptedKinds: []string{runtimecontract.StepKindMCPToolCall}},
+			},
+		},
+	}
+	for _, testCase := range testCases {
+		t.Run(testCase.name, func(t *testing.T) {
+			schema := runtimeCandidateSchemaForDecision(t, testCase.decision, nil)
+			for _, property := range []string{"id", "dependsOn", "coverageWorkItemIds"} {
+				if runtimeOperationSchemaHasProperty(t, schema, property) {
+					t.Fatalf("candidate schema exposed owner-derived operation property %q: %s", property, schema)
+				}
+			}
+		})
 	}
 }
 
@@ -1831,18 +1953,78 @@ func TestRuntimeCandidateSchemaDerivesPatchTargetRequirementsFromOperationContra
 	}
 }
 
+func TestRuntimeCandidateOperationCardinalityIsEquivalentWithJSONSchemaResponseOnOrOff(t *testing.T) {
+	manifest := runtimeCandidateManifestForSchema(t, runtimecontract.RuntimeDecision{
+		State: runtimecontract.ConvergenceStateNeedStateChange,
+		RequiredOutput: runtimecontract.RequiredOutputContract{
+			AcceptedKinds: []string{runtimecontract.RuntimeBlockKindPatchApply},
+			TargetRefs:    []string{"main.go", "support.go"},
+		},
+	}, nil)
+	manifest.MaxOperationCount = 2
+	manifest.Hash = runtimecontract.StableRuntimeCandidateContractManifestHash(manifest)
+	schema := runtimeCandidateSchemaForManifest(manifest)
+	var document map[string]any
+	if err := json.Unmarshal([]byte(schema), &document); err != nil {
+		t.Fatal(err)
+	}
+	properties, _ := document["properties"].(map[string]any)
+	operationsSchema, _ := properties["operations"].(map[string]any)
+	if operationsSchema["maxItems"] != float64(manifest.MaxOperationCount) {
+		t.Fatalf("schema maxItems = %#v, want manifest maxOperationCount %d", operationsSchema["maxItems"], manifest.MaxOperationCount)
+	}
+
+	operationManifest := manifest.Operations[0]
+	bindingRefs := runtimeCandidateBindingAuthorizationRefs(operationManifest.BindingAuthorizations)
+	operation := func(target, content string) map[string]any {
+		value := map[string]any{
+			"kind":       runtimecontract.RuntimeBlockKindPatchApply,
+			"targetRefs": []string{target},
+			"parameters": []map[string]any{
+				{"name": "patchType", "string": "file_write"},
+				{"name": "content", "string": content},
+			},
+		}
+		if len(bindingRefs) != 0 {
+			value["bindingRefs"] = []string{bindingRefs[0]}
+		}
+		return value
+	}
+	payload, err := json.Marshal(map[string]any{"operations": []map[string]any{
+		operation("main.go", "package main"), operation("support.go", "package support"),
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	request := llmmodels.ProviderRequest{Schema: schema}
+	for _, enabled := range []bool{false, true} {
+		textConfig := responsesTextForRequest(llmmodels.ProviderCapabilities{JSONSchemaResponse: enabled}, request)
+		if enabled && (textConfig == nil || textConfig.Format == nil || !textConfig.Format.Strict) {
+			t.Fatalf("JSONSchemaResponse=true did not dispatch the manifest schema: %+v", textConfig)
+		}
+		if !enabled && textConfig != nil {
+			t.Fatalf("JSONSchemaResponse=false unexpectedly dispatched provider schema: %+v", textConfig)
+		}
+		candidate, decodeErr := runtimecontract.DecodeRuntimeCandidatePayloadWithManifest(manifest, payload)
+		if decodeErr != nil || candidate.StateChange == nil || len(candidate.StateChange.Operations) != 2 {
+			t.Fatalf("JSONSchemaResponse=%t local boundary result candidate=%+v err=%v", enabled, candidate, decodeErr)
+		}
+	}
+}
+
 func TestRuntimeCandidateSchemaRequiresExactlyOneSealedBindingForProofBearingKind(t *testing.T) {
 	policy, ok := runtimecontract.RuntimeConvergenceEffectPolicyFor(runtimecontract.ConvergenceStateNeedStateChange)
 	if !ok {
 		t.Fatal("missing state-change effect policy")
 	}
 	manifest := runtimecontract.RuntimeCandidateContractManifest{
-		State: runtimecontract.ConvergenceStateNeedStateChange, EffectPolicy: policy,
+		State: runtimecontract.ConvergenceStateNeedStateChange, EffectPolicy: policy, MaxOperationCount: runtimecontract.RuntimeCandidateOperationMaxCount,
 		RequiredTopLevelFields: []string{"operations"}, AllowedTopLevelFields: []string{"operations"},
 		Operations: []runtimecontract.RuntimeCandidateOperationManifest{{
 			Kind: runtimecontract.RuntimeBlockKindPatchApply, OwnerModuleID: runtimecontract.RuntimeModuleFile,
-			AllowedOperationFields: []string{"id", "kind", "bindingRefs", "parameters", "targetRefs"},
-			BindingAuthorizations:  []runtimecontract.RuntimeOperationBindingAuthorization{{VariantID: "apply", AllowedBindingRefs: []string{"binding/cwi-1"}}},
+			AllowedOperationFields:  []string{"kind", "bindingRefs", "parameters", "targetRefs"},
+			RequiredOperationFields: []string{"kind", "bindingRefs", "parameters", "targetRefs"},
+			BindingAuthorizations:   []runtimecontract.RuntimeOperationBindingAuthorization{{VariantID: "apply", AllowedBindingRefs: []string{"binding/cwi-1"}}},
 			Parameters: []runtimecontract.RuntimeOperationParameterContract{{
 				Name: "patchType", Type: runtimecontract.RuntimeOperationParameterTypeString, Required: true,
 			}},
@@ -1850,7 +2032,7 @@ func TestRuntimeCandidateSchemaRequiresExactlyOneSealedBindingForProofBearingKin
 		}},
 	}
 	schema := runtimeCandidateSchemaForManifest(manifest)
-	for _, want := range []string{`"bindingRefs"`, `"minItems":1`, `"maxItems":1`, `"required":["bindingRefs","parameters","targetRefs"]`} {
+	for _, want := range []string{`"bindingRefs"`, `"minItems":1`, `"maxItems":1`, `"required":["bindingRefs","kind","parameters","targetRefs"]`} {
 		if !strings.Contains(schema, want) {
 			t.Fatalf("proof-bearing schema lost %q: %s", want, schema)
 		}
@@ -2221,11 +2403,10 @@ func TestRuntimeCandidateRendererProjectsOnlyManagedValidationRecipeIDs(t *testi
 
 func TestRuntimeCandidateManifestDrivesSchemaInstructionAndRetryCorrection(t *testing.T) {
 	cases := []struct {
-		name      string
-		decision  runtimecontract.RuntimeDecision
-		contains  []string
-		omits     []string
-		dependsOn bool
+		name     string
+		decision runtimecontract.RuntimeDecision
+		contains []string
+		omits    []string
 	}{
 		{
 			name: "patch target and closed parameters",
@@ -2256,8 +2437,7 @@ func TestRuntimeCandidateManifestDrivesSchemaInstructionAndRetryCorrection(t *te
 					{RequirementID: "commit", Kind: runtimecontract.StepKindGitWrite, VariantID: "commit", DependsOnRequirementIDs: []string{"stage"}},
 				},
 			}},
-			contains:  []string{"git/write", "dependsOn", "requiredOperationRef", "stage=git/write/add", "commit=git/write/commit"},
-			dependsOn: true,
+			contains: []string{"git/write", "dependsOn", "requiredOperationRef", "stage=git/write/add", "commit=git/write/commit", "requires=stage"},
 		},
 	}
 	for _, testCase := range cases {
@@ -2281,11 +2461,13 @@ func TestRuntimeCandidateManifestDrivesSchemaInstructionAndRetryCorrection(t *te
 					t.Fatalf("manifest instruction admitted %q: %s", unwanted, instruction)
 				}
 			}
-			if runtimeOperationSchemaHasProperty(t, string(output.Schema), "dependsOn") != testCase.dependsOn {
-				t.Fatalf("schema dependency exposure = %t, want %t: %s", runtimeOperationSchemaHasProperty(t, string(output.Schema), "dependsOn"), testCase.dependsOn, output.Schema)
+			for _, property := range []string{"id", "dependsOn", "coverageWorkItemIds"} {
+				if runtimeOperationSchemaHasProperty(t, string(output.Schema), property) {
+					t.Fatalf("schema exposed owner-derived operation property %q: %s", property, output.Schema)
+				}
 			}
-			directive := runtimeCandidateCorrectionInputForProviderTest(manifest.Hash, "$.operations", "field_present")
-			retry := runtimeCandidateRetryForManifest(1, &runtimecontract.RuntimeCandidateFailure{Class: runtimecontract.RuntimeCandidateFailureClassContract, Reason: `arbitrary stale error text with parameter "summary"`}, manifest, directive)
+			observation, directive := runtimeCandidateCorrectionPairForProviderTest(runtimecontract.RuntimeCandidateFailure{Class: runtimecontract.RuntimeCandidateFailureClassContract, Code: "candidate_contract_invalid", Signature: "candidate-contract-invalid", Reason: `arbitrary stale error text with parameter "summary"`}, manifest.Hash, "$.operations", "field_present")
+			retry := runtimeCandidateRetryForManifest(1, observation, manifest, directive)
 			if retry == nil || !strings.Contains(retry.Instruction, manifest.Hash) || !strings.Contains(retry.Instruction, "context.outputContract.structuredOutputInstruction") || strings.Contains(retry.Instruction, "arbitrary stale error text") {
 				t.Fatalf("retry correction was not manifest-derived: %+v", retry)
 			}
@@ -2325,9 +2507,9 @@ func TestRuntimeCandidateSchemaBindsEachRequiredOperationToItsExactProspectiveTa
 		t.Fatal("missing state-change effect policy")
 	}
 	manifest := runtimecontract.RuntimeCandidateContractManifest{
-		State:               runtimecontract.ConvergenceStateNeedStateChange,
-		EffectPolicy:        policy,
-		DependenciesAllowed: true,
+		State:             runtimecontract.ConvergenceStateNeedStateChange,
+		EffectPolicy:      policy,
+		MaxOperationCount: runtimecontract.RuntimeCandidateOperationMaxCount,
 		RequiredOperationSequence: []runtimecontract.RuntimeRequiredOperationVariant{
 			{RequirementID: "create-module", Kind: runtimecontract.StepKindFileWrite, TargetRef: "go.mod"},
 			{RequirementID: "create-test", Kind: runtimecontract.StepKindFileWrite, TargetRef: "workorch_test.go", DependsOnRequirementIDs: []string{"create-module"}},
@@ -2335,8 +2517,9 @@ func TestRuntimeCandidateSchemaBindsEachRequiredOperationToItsExactProspectiveTa
 		Operations: []runtimecontract.RuntimeCandidateOperationManifest{{
 			Kind: runtimecontract.StepKindFileWrite,
 			AllowedOperationFields: []string{
-				"id", "kind", "requiredOperationRef", "dependsOn", "targetRefs", "parameters", "bindingRefs",
+				"kind", "requiredOperationRef", "targetRefs", "parameters", "bindingRefs",
 			},
+			RequiredOperationFields: []string{"kind", "requiredOperationRef", "targetRefs", "parameters"},
 			Parameters: []runtimecontract.RuntimeOperationParameterContract{{
 				Name: "content", Type: runtimecontract.RuntimeOperationParameterTypeString, Required: true,
 			}},
@@ -2458,12 +2641,13 @@ func TestRuntimeProviderRequestNarrowsFileScopeAcrossSchemaContextAndRetry(t *te
 		}
 	}
 	retryManifest := runtimeCandidateManifestForRequest(t, decision, runtimecontract.RuntimeCandidateContextForDecision(facts, decision, nil))
+	retryObservation, retryCorrection := runtimeCandidateCorrectionPairForProviderTest(runtimecontract.RuntimeCandidateFailure{Class: runtimecontract.RuntimeCandidateFailureClassContract, Code: "candidate_target_outside_grounding", Signature: "candidate-target-outside-grounding", Reason: "owner-grounded workspace scope permits only a durable File operation with a concrete target"}, retryManifest.Hash, "$.operations[0].targetRefs", "main.go")
 	retryRequest, err := runtimeProviderRequest(llmmodels.RuntimeCandidateRequest{
 		DocumentKind: runtimecontract.RuntimeProviderDocumentOperations,
 		Decision:     decision, Transaction: decision.AuthorityTransaction(), CandidateAttempt: 1,
-		PreviousFailure:     &runtimecontract.RuntimeCandidateFailure{Class: runtimecontract.RuntimeCandidateFailureClassContract, Code: "candidate_target_outside_grounding", Reason: "owner-grounded workspace scope permits only a durable File operation with a concrete target"},
-		CandidateCorrection: runtimeCandidateCorrectionInputForProviderTest(retryManifest.Hash, "$.operations[0].targetRefs", "main.go"),
-		StablePrefixHash:    prefix, CandidateManifest: retryManifest, DefinitionContext: definition, CandidateContext: runtimecontract.RuntimeCandidateContextForDecision(facts, decision, nil),
+		CandidateCorrectionObservation: retryObservation,
+		CandidateCorrection:            retryCorrection,
+		StablePrefixHash:               prefix, CandidateManifest: retryManifest, DefinitionContext: definition, CandidateContext: runtimecontract.RuntimeCandidateContextForDecision(facts, decision, nil),
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -2670,12 +2854,13 @@ func TestRuntimeAssessmentRequestPublishesCanonicalEvidenceRefContract(t *testin
 			t.Fatalf("assessment schema lost conditional evidence contract %q: %s", contract, schema)
 		}
 	}
-	retryFailure := runtimecontract.RuntimeCandidateFailure{Class: runtimecontract.RuntimeCandidateFailureClassSchema, Reason: "missing evidenceRefs"}
+	retryFailure := runtimecontract.RuntimeCandidateFailure{Class: runtimecontract.RuntimeCandidateFailureClassSchema, Code: "candidate_schema_invalid", Signature: "candidate-schema-invalid", Reason: "missing evidenceRefs"}
 	retryManifest := runtimeCandidateManifestForRequest(t, decision, context)
+	retryObservation, retryCorrection := runtimeCandidateCorrectionPairForProviderTest(retryFailure, retryManifest.Hash, "$.evidenceRefs", "field_present")
 	retry, err := runtimeProviderRequest(llmmodels.RuntimeCandidateRequest{
 		DocumentKind: runtimecontract.RuntimeProviderDocumentOperations,
-		Decision:     decision, Transaction: decision.AuthorityTransaction(), CandidateAttempt: 1, PreviousFailure: &retryFailure, StablePrefixHash: prefix,
-		CandidateCorrection: runtimeCandidateCorrectionInputForProviderTest(retryManifest.Hash, "$.evidenceRefs", "field_present"),
+		Decision:     decision, Transaction: decision.AuthorityTransaction(), CandidateAttempt: 1, CandidateCorrectionObservation: retryObservation, StablePrefixHash: prefix,
+		CandidateCorrection: retryCorrection,
 		CandidateManifest:   retryManifest, DefinitionContext: definition, CandidateContext: context,
 	})
 	if err != nil {

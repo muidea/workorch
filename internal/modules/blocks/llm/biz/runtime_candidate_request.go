@@ -21,7 +21,7 @@ func runtimeProviderRequest(request llmmodels.RuntimeCandidateRequest) (llmmodel
 }
 
 func runtimeOperationsProviderRequest(request llmmodels.RuntimeCandidateRequest) (llmmodels.ProviderRequest, error) {
-	if request.SemanticManifest.Hash != "" || request.SemanticContext.WorkspaceID != "" || request.SemanticContext.RunID != "" || request.PreviousSemanticRejection != nil || request.SemanticCorrectionDirective != nil {
+	if request.SemanticManifest.Hash != "" || request.SemanticContext.WorkspaceID != "" || request.SemanticContext.RunID != "" || request.SemanticCorrectionObservation != nil || request.SemanticCorrectionDirective != nil {
 		return llmmodels.ProviderRequest{}, fmt.Errorf("operations provider request must not carry semantic plan fields")
 	}
 	definitionContext := request.DefinitionContext.Normalized()
@@ -32,6 +32,21 @@ func runtimeOperationsProviderRequest(request llmmodels.RuntimeCandidateRequest)
 	manifest := request.CandidateManifest
 	if err := runtimecontract.ValidateRuntimeCandidateContractManifestForDecision(manifest, request.Decision, runtimecontract.RuntimeCandidateManifestOwnerFactsFromContext(candidateContext)); err != nil {
 		return llmmodels.ProviderRequest{}, fmt.Errorf("runtime candidate contract manifest: %w", err)
+	}
+	switch request.CandidateAttempt {
+	case 0:
+		if request.CandidateCorrectionObservation != nil || request.CandidateCorrection != nil {
+			return llmmodels.ProviderRequest{}, fmt.Errorf("initial runtime candidate request must not carry correction lineage")
+		}
+	case 1:
+		if request.CandidateCorrectionObservation == nil || request.CandidateCorrection == nil {
+			return llmmodels.ProviderRequest{}, fmt.Errorf("runtime candidate retry requires correction observation and input")
+		}
+		if err := request.CandidateCorrection.ValidateAgainstObservation(manifest, *request.CandidateCorrectionObservation); err != nil {
+			return llmmodels.ProviderRequest{}, fmt.Errorf("runtime candidate retry correction: %w", err)
+		}
+	default:
+		return llmmodels.ProviderRequest{}, fmt.Errorf("runtime candidate attempt must be 0 or 1")
 	}
 	wantPrefix := runtimecontract.StableRuntimeCandidatePrefixHashWithExecutionContract(definitionContext, candidateContext.Activation.ExecutionContract)
 	if strings.TrimSpace(request.StablePrefixHash) != wantPrefix {
@@ -73,7 +88,7 @@ func runtimeOperationsProviderRequest(request llmmodels.RuntimeCandidateRequest)
 	if err != nil {
 		return llmmodels.ProviderRequest{}, err
 	}
-	executionTailJSON, err := json.Marshal(buildRuntimeCandidateExecutionTailProjection(candidateContext, request.CandidateAttempt, request.PreviousFailure, manifest, request.CandidateCorrection))
+	executionTailJSON, err := json.Marshal(buildRuntimeCandidateExecutionTailProjection(candidateContext, request.CandidateAttempt, request.CandidateCorrectionObservation, manifest, request.CandidateCorrection))
 	if err != nil {
 		return llmmodels.ProviderRequest{}, err
 	}
@@ -116,7 +131,7 @@ func runtimeOperationsProviderRequest(request llmmodels.RuntimeCandidateRequest)
 		providerRequest.ContextBudget.CachePlan.StablePrefixHash = wantPrefix
 	}
 	populateRuntimeCandidateContextBudget(providerRequest.ContextBudget, providerRequest.PromptContext)
-	if err := validateRuntimeCandidateContextIntegrity(definitionContext, candidateContext, request.CandidateAttempt, request.PreviousFailure, providerRequest.ContextBudget, providerRequest.PromptContext); err != nil {
+	if err := validateRuntimeCandidateContextIntegrity(definitionContext, candidateContext, request.CandidateAttempt, request.CandidateCorrectionObservation, providerRequest.ContextBudget, providerRequest.PromptContext); err != nil {
 		providerRequest.ContextBudget.ContextGateAction = "fail_fast"
 		providerRequest.ContextBudget.ContextGateReason = "runtime_context_integrity_failed"
 		providerRequest.ContextBudget.BudgetFailureClass = "context_integrity"
@@ -145,7 +160,7 @@ func validateRuntimeCandidateContextIntegrity(
 	definition runtimecontract.RuntimeDefinitionContext,
 	context runtimecontract.RuntimeCandidateContext,
 	attempt int,
-	previousFailure *runtimecontract.RuntimeCandidateFailure,
+	previousFailure *runtimecontract.RuntimeCandidateCorrectionObservation,
 	budget *llmmodels.ProviderContextBudget,
 	prompt *llmmodels.PromptContext,
 ) error {

@@ -220,10 +220,23 @@ func TestRuntimeFileBackedMCPOwnerFailureTargetReceiptRestartMatrix(t *testing.T
 				if _, err := admitRuntimeCandidateProposalForTest(ctx, controller, "ws-v2", "run-v2", 0, candidate); err != nil {
 					t.Fatal(err)
 				}
+				proposalAggregate := controllerMustLoadRuntimeAggregate(t, controller)
+				manifest, err := runtimecontract.BuildRuntimeCandidateContractManifest(
+					proposalAggregate.Decision,
+					runtimecontract.RuntimeCandidateManifestOwnerFactsFromResources(proposalAggregate.Facts.Resources),
+				)
+				if err != nil {
+					t.Fatal(err)
+				}
+				candidate = bindRuntimeTestCandidateToManifest(manifest, candidate)
+				candidate, err = runtimecontract.DeriveRuntimeCandidateOperationAuthority(manifest, candidate)
+				if err != nil {
+					t.Fatal(err)
+				}
 				probeResult := hub.Send(magicevent.NewEventWithContext(
 					mcpevents.TopicProbeRuntimeOperationFeasibility, runtimecontract.RuntimeModuleOrchestrator, runtimecontract.RuntimeModuleMCP,
 					magicevent.NewHeader(), ctx, mcpevents.ProbeRuntimeOperationFeasibilityCommand{
-						WorkspaceID: "ws-v2", RunID: "run-v2", Transaction: controllerMustLoadRuntimeAggregate(t, controller).Decision.AuthorityTransaction(),
+						WorkspaceID: "ws-v2", RunID: "run-v2", Transaction: proposalAggregate.Decision.AuthorityTransaction(),
 						WorkspaceDeliverableDirectory: deliverable, Operation: candidate.Validation.Operations[0].Operation, Admissibility: inventory,
 						CapabilityStateBinding: inventory.AcquisitionBinding, Observation: &observation,
 						CandidateManifestHash: runtimePendingCandidateManifestHashForBizTest(t, ctx, controller, "ws-v2", "run-v2", 0), OperationAuthorization: mustRuntimeOperationAuthorizationIdentity(t, candidate.Validation.Operations[0].Operation.Kind),
@@ -459,6 +472,10 @@ func TestRuntimeFileBackedMCPOwnerFailureTargetReceiptRestartMatrix(t *testing.T
 				if err != nil || sealedPatch.ActiveDispatch == nil || candidateRequests != 1 || !contextBound {
 					t.Fatalf("MCP-grounded File patch seal=%+v err=%v", sealedPatch, err)
 				}
+				if sealedPatch.ActiveDispatch.Candidate.StateChange == nil || len(sealedPatch.ActiveDispatch.Candidate.StateChange.Operations) != 1 {
+					t.Fatalf("MCP-grounded File patch sealed unexpected candidate=%+v", sealedPatch.ActiveDispatch.Candidate)
+				}
+				sealedPatchOperationID := sealedPatch.ActiveDispatch.Candidate.StateChange.Operations[0].Operation.ID
 				failingPatchController, err := runtime.NewRuntimeController(&failWhenRuntimeStateRepository{
 					RuntimeStateRepository: repository, err: errors.New("injected grounded File receipt CAS failure"),
 					match: func(next runtime.RuntimeAggregate) bool {
@@ -485,7 +502,7 @@ func TestRuntimeFileBackedMCPOwnerFailureTargetReceiptRestartMatrix(t *testing.T
 				if err != nil || crashedPatch.ActiveDispatch == nil || len(crashedPatch.OperationReceipts) != 1 || len(crashedPatch.Facts.Evidence.Accepted) != 0 {
 					t.Fatalf("grounded File receipt-CAS crash persisted wrong aggregate=%+v err=%v", crashedPatch, err)
 				}
-				patchExecution, found := runtimeDriveOperationExecutionRecord(crashedPatch.ActiveDispatch.OperationExecutions, "mcp-grounded-patch")
+				patchExecution, found := runtimeDriveOperationExecutionRecord(crashedPatch.ActiveDispatch.OperationExecutions, sealedPatchOperationID)
 				if !found || patchExecution.ReplayProof == nil || patchExecution.ExecutionKey == "" || patchExecution.Fence == 0 {
 					t.Fatalf("grounded File crash lost sealed replay proof=%+v", patchExecution)
 				}

@@ -8,7 +8,7 @@ import (
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
-func validateRuntimeSemanticContextIntegrity(context runtimecontract.RuntimeSemanticPlanRequestContext, manifest runtimecontract.RuntimeSemanticPlanManifest, attempt int, previous *runtimecontract.RuntimeOriginalDiagnostic, directive *runtimecontract.RuntimeSemanticCorrectionDirective, budget *llmmodels.ProviderContextBudget, prompt *llmmodels.PromptContext) error {
+func validateRuntimeSemanticContextIntegrity(context runtimecontract.RuntimeSemanticPlanRequestContext, manifest runtimecontract.RuntimeSemanticPlanManifest, attempt int, previous *runtimecontract.RuntimeSemanticCorrectionObservation, directive *runtimecontract.RuntimeSemanticCorrectionDirective, budget *llmmodels.ProviderContextBudget, prompt *llmmodels.PromptContext) error {
 	if budget == nil || prompt == nil {
 		return fmt.Errorf("runtime semantic context integrity requires prompt and budget metadata")
 	}

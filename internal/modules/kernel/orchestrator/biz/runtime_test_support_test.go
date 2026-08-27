@@ -1845,6 +1845,17 @@ func runtimeProviderFinalOutputMissingOutcome(expected *runtimecontract.RuntimeE
 	}
 }
 
+func runtimeProviderInvalidDocumentOutcome(expected *runtimecontract.RuntimeExpectedDocumentContract, body []byte) *llmevents.RuntimeProviderDocumentOutcome {
+	return &llmevents.RuntimeProviderDocumentOutcome{
+		Framing: runtimecontract.RuntimeProviderDocumentFraming{
+			Disposition:          runtimecontract.RuntimeProviderDocumentInvalid,
+			ExpectedDocumentHash: runtimeExpectedDocumentHash(expected),
+			ResponseHash:         runtimecontract.StableRuntimeProviderResponseHash(body), ResponseBytes: int64(len(body)),
+			Code: runtimecontract.RuntimeProviderDocumentCodeFinalOutputInvalid, Signature: runtimecontract.RuntimeProviderDocumentSignatureOutputInvalid,
+		},
+	}
+}
+
 func runtimeExpectedDocumentHash(expected *runtimecontract.RuntimeExpectedDocumentContract) string {
 	if expected == nil {
 		return ""

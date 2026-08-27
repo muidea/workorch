@@ -3,6 +3,7 @@ package workorchruntimecontract
 import (
 	"encoding/json"
 	"errors"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -49,11 +50,11 @@ func TestDecodeRuntimeCandidatePayloadWithManifestReportsTypedDynamicDiagnostics
 		{
 			name: "missing operations", manifest: patchManifest,
 			payload: `{}`,
-			path:    "$", actual: "missing_operations", allowed: "operations", required: "operations",
+			path:    "$.operations", actual: "missing_operations", allowed: "operations", required: "operations",
 		},
 		{
 			name: "top level dependency", manifest: patchManifest,
-			payload: `{"operations":[{"id":"write","kind":"patch/apply","bindingRefs":["binding/test/cwi-1"],"targetRefs":["main.go"],"parameters":[{"name":"patchType","string":"file_write"},{"name":"content","string":"package main"}]}],"dependsOn":["prepare"]}`,
+			payload: `{"operations":[{"kind":"patch/apply","bindingRefs":["binding/test/cwi-1"],"targetRefs":["main.go"],"parameters":[{"name":"patchType","string":"file_write"},{"name":"content","string":"package main"}]}],"dependsOn":["prepare"]}`,
 			path:    "$.dependsOn", actual: "dependsOn", allowed: "operations",
 		},
 		{
@@ -63,37 +64,47 @@ func TestDecodeRuntimeCandidatePayloadWithManifestReportsTypedDynamicDiagnostics
 		},
 		{
 			name: "target refs must be array", manifest: patchManifest,
-			payload: `{"operations":[{"id":"write","kind":"patch/apply","bindingRefs":["binding/test/cwi-1"],"targetRefs":"main.go","parameters":[{"name":"patchType","string":"file_write"},{"name":"content","string":"package main"}]}]}`,
+			payload: `{"operations":[{"kind":"patch/apply","bindingRefs":["binding/test/cwi-1"],"targetRefs":"main.go","parameters":[{"name":"patchType","string":"file_write"},{"name":"content","string":"package main"}]}]}`,
 			path:    "$.operations[0].targetRefs", actual: "string", allowed: "array",
 		},
 		{
 			name: "managed validation summary parameter", manifest: shellManifest,
-			payload: `{"operations":[{"id":"check","kind":"validation/managed_session","bindingRefs":["binding/test/cwi-1"],"parameters":[{"name":"recipeId","string":"recipe/candidate-test"},{"name":"summary","string":"done"}]}]}`,
+			payload: `{"operations":[{"kind":"validation/managed_session","bindingRefs":["binding/test/cwi-1"],"parameters":[{"name":"recipeId","string":"recipe/candidate-test"},{"name":"summary","string":"done"}]}]}`,
 			path:    "$.operations[0].parameters[1].name", actual: "summary", allowed: "recipeId",
 		},
 		{
 			name: "parameter alias", manifest: patchManifest,
-			payload: `{"operations":[{"id":"write","kind":"patch/apply","bindingRefs":["binding/test/cwi-1"],"targetRefs":["main.go"],"parameters":[{"name":"filePath","string":"main.go"},{"name":"patchType","string":"file_write"},{"name":"content","string":"package main"}]}]}`,
+			payload: `{"operations":[{"kind":"patch/apply","bindingRefs":["binding/test/cwi-1"],"targetRefs":["main.go"],"parameters":[{"name":"filePath","string":"main.go"},{"name":"patchType","string":"file_write"},{"name":"content","string":"package main"}]}]}`,
 			path:    "$.operations[0].parameters[0].name", actual: "filePath", allowed: "patchType",
 		},
 		{
 			name: "missing target refs", manifest: patchManifest,
-			payload: `{"operations":[{"id":"write","kind":"patch/apply","bindingRefs":["binding/test/cwi-1"],"parameters":[{"name":"patchType","string":"file_write"},{"name":"content","string":"package main"}]}]}`,
+			payload: `{"operations":[{"kind":"patch/apply","bindingRefs":["binding/test/cwi-1"],"parameters":[{"name":"patchType","string":"file_write"},{"name":"content","string":"package main"}]}]}`,
 			path:    "$.operations[0].targetRefs", actual: "missing_targetRefs", allowed: "targetRefs", required: "targetRefs",
 		},
 		{
+			name: "missing operation parameters field", manifest: patchManifest,
+			payload: `{"operations":[{"kind":"patch/apply","bindingRefs":["binding/test/cwi-1"],"targetRefs":["main.go"]}]}`,
+			path:    "$.operations[0].parameters", actual: "missing_parameters", allowed: "parameters", required: "parameters",
+		},
+		{
+			name: "missing required operation parameter", manifest: patchManifest,
+			payload: `{"operations":[{"kind":"patch/apply","bindingRefs":["binding/test/cwi-1"],"targetRefs":["main.go"],"parameters":[{"name":"patchType","string":"file_write"}]}]}`,
+			path:    "$.operations[0].parameters[name=content]", actual: "missing_content", allowed: "file_write", required: "content",
+		},
+		{
 			name: "invalid required operation reference", manifest: gitManifest,
-			payload: `{"operations":[{"id":"commit","kind":"git/write","requiredOperationRef":"unknown","dependsOn":["stage"],"bindingRefs":["binding/test/cwi-1"],"parameters":[{"name":"operation","string":"commit"},{"name":"message","string":"commit"}]}]}`,
+			payload: `{"operations":[{"kind":"git/write","requiredOperationRef":"unknown","bindingRefs":["binding/test/cwi-1"],"parameters":[{"name":"operation","string":"commit"},{"name":"message","string":"commit"}]}]}`,
 			path:    "$.operations[0].requiredOperationRef", actual: "unknown", allowed: "commit",
 		},
 		{
 			name: "sealed variant mismatch", manifest: gitManifest,
-			payload: `{"operations":[{"id":"status","kind":"git/write","requiredOperationRef":"stage","bindingRefs":["binding/test/cwi-1"],"parameters":[{"name":"operation","string":"status"}]}]}`,
+			payload: `{"operations":[{"kind":"git/write","requiredOperationRef":"stage","bindingRefs":["binding/test/cwi-1"],"parameters":[{"name":"operation","string":"status"}]}]}`,
 			path:    "$.operations[0].parameters", actual: "unmatched_variant", allowed: "add",
 		},
 		{
 			name: "trailing json", manifest: patchManifest,
-			payload: `{"operations":[{"id":"write","kind":"patch/apply","bindingRefs":["binding/test/cwi-1"],"targetRefs":["main.go"],"parameters":[{"name":"patchType","string":"file_write"},{"name":"content","string":"package main"}]}]} {}`,
+			payload: `{"operations":[{"kind":"patch/apply","bindingRefs":["binding/test/cwi-1"],"targetRefs":["main.go"],"parameters":[{"name":"patchType","string":"file_write"},{"name":"content","string":"package main"}]}]} {}`,
 			path:    "$", actual: "candidate payload contains multiple JSON values",
 		},
 	}
@@ -119,12 +130,33 @@ func TestDecodeRuntimeCandidatePayloadWithManifestReportsTypedDynamicDiagnostics
 	}
 }
 
+func TestDecodeRuntimeCandidatePayloadWithManifestAllowsPresentEmptyStringWhenContractAllows(t *testing.T) {
+	t.Parallel()
+	manifest := mustRuntimeCandidatePayloadManifest(t, RuntimeDecision{
+		State: ConvergenceStateNeedStateChange,
+		RequiredOutput: RequiredOutputContract{
+			AcceptedKinds:        []string{RuntimeBlockKindPatchApply},
+			AcceptedEffectScopes: []RuntimeEffectScope{RuntimeEffectWorkspaceDurable}, RequiredEffectScopes: []RuntimeEffectScope{RuntimeEffectWorkspaceDurable},
+			CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-1"}, TargetRefs: []string{"main.go"},
+		},
+	})
+	payload := []byte(`{"operations":[{"kind":"patch/apply","bindingRefs":["binding/test/cwi-1"],"targetRefs":["main.go"],"parameters":[{"name":"patchType","string":"file_write"},{"name":"content","string":""}]}]}`)
+	candidate, err := DecodeRuntimeCandidatePayloadWithManifest(manifest, payload)
+	if err != nil {
+		t.Fatal(err)
+	}
+	operations, err := runtimeCandidatePayloadOperations(candidate)
+	if err != nil || len(operations) != 1 || operations[0].ID == "" {
+		t.Fatalf("empty-but-present content changed candidate authority: candidate=%+v err=%v", candidate, err)
+	}
+}
+
 func FuzzDecodeRuntimeCandidatePayloadWithManifestRejectsUnknownFieldsWithoutPanicking(f *testing.F) {
 	manifest := fuzzRuntimeCandidatePayloadManifest(f)
 	for _, payload := range []string{
-		`{"operations":[{"id":"write","kind":"patch/apply","bindingRefs":["binding/test/cwi-1"],"targetRefs":["main.go"],"parameters":[{"name":"patchType","string":"file_write"},{"name":"content","string":"package main"}]}]}`,
+		`{"operations":[{"kind":"patch/apply","bindingRefs":["binding/test/cwi-1"],"targetRefs":["main.go"],"parameters":[{"name":"patchType","string":"file_write"},{"name":"content","string":"package main"}]}]}`,
 		`{"operations":{}}`,
-		`{"operations":[{"id":"write","kind":"patch/apply","unknown":true}]}`,
+		`{"operations":[{"kind":"patch/apply","id":"write"}]}`,
 		`{"operations":[`,
 	} {
 		f.Add(payload)
@@ -205,7 +237,7 @@ func runtimeCandidatePayloadTestHasUnknownField(manifest RuntimeCandidateContrac
 	return false
 }
 
-func TestDecodeRuntimeCandidatePayloadWithManifestAcceptsOperationLocalDependency(t *testing.T) {
+func TestDecodeRuntimeCandidatePayloadWithManifestDerivesOperationAuthority(t *testing.T) {
 	manifest := mustRuntimeCandidatePayloadManifest(t, RuntimeDecision{
 		State: ConvergenceStateNeedStateChange,
 		RequiredOutput: RequiredOutputContract{
@@ -218,12 +250,256 @@ func TestDecodeRuntimeCandidatePayloadWithManifestAcceptsOperationLocalDependenc
 		},
 	})
 	candidate, err := DecodeRuntimeCandidatePayloadWithManifest(manifest, []byte(`{"operations":[
-		{"id":"stage","kind":"git/write","requiredOperationRef":"stage","bindingRefs":["binding/test/cwi-1"],"parameters":[{"name":"operation","string":"add"},{"name":"pathspecs","stringList":["."]}]},
-		{"id":"commit","kind":"git/write","requiredOperationRef":"commit","dependsOn":["stage"],"bindingRefs":["binding/test/cwi-1"],"parameters":[{"name":"operation","string":"commit"},{"name":"message","string":"commit"}]}
+		{"kind":"git/write","requiredOperationRef":"stage","bindingRefs":["binding/test/cwi-1"],"parameters":[{"name":"operation","string":"add"},{"name":"pathspecs","stringList":["."]}]},
+		{"kind":"git/write","requiredOperationRef":"commit","bindingRefs":["binding/test/cwi-1"],"parameters":[{"name":"operation","string":"commit"},{"name":"message","string":"commit"}]}
 	]}`))
 	if err != nil || candidate.StateChange == nil || len(candidate.StateChange.Operations) != 2 {
 		t.Fatalf("candidate=%+v err=%v", candidate, err)
 	}
+	stage := candidate.StateChange.Operations[0].Operation
+	commit := candidate.StateChange.Operations[1].Operation
+	if stage.ID == "" || commit.ID == "" || stage.ID == commit.ID || !reflect.DeepEqual(commit.DependsOn, []string{stage.ID}) {
+		t.Fatalf("derived operation authority = stage:%+v commit:%+v", stage, commit)
+	}
+}
+
+func TestDecodeRuntimeCandidatePayloadWithManifestRejectsProviderOperationAuthority(t *testing.T) {
+	manifest := mustRuntimeCandidatePayloadManifest(t, RuntimeDecision{
+		State: ConvergenceStateNeedStateChange,
+		RequiredOutput: RequiredOutputContract{
+			AcceptedKinds:        []string{RuntimeBlockKindPatchApply},
+			AcceptedEffectScopes: []RuntimeEffectScope{RuntimeEffectWorkspaceDurable}, RequiredEffectScopes: []RuntimeEffectScope{RuntimeEffectWorkspaceDurable},
+			CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-1"}, TargetRefs: []string{"main.go"},
+		},
+	})
+	for _, testCase := range []struct {
+		name    string
+		payload string
+		path    string
+	}{
+		{name: "id", payload: `{"operations":[{"id":"provider-id","kind":"patch/apply","bindingRefs":["binding/test/cwi-1"],"targetRefs":["main.go"],"parameters":[{"name":"patchType","string":"file_write"},{"name":"content","string":"package main"}]}]}`, path: "$.operations[0].id"},
+		{name: "dependsOn", payload: `{"operations":[{"kind":"patch/apply","dependsOn":["provider-id"],"bindingRefs":["binding/test/cwi-1"],"targetRefs":["main.go"],"parameters":[{"name":"patchType","string":"file_write"},{"name":"content","string":"package main"}]}]}`, path: "$.operations[0].dependsOn"},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			_, err := DecodeRuntimeCandidatePayloadWithManifest(manifest, []byte(testCase.payload))
+			var diagnostic *RuntimeCandidatePayloadDiagnostic
+			if !errors.As(err, &diagnostic) || diagnostic.Path != testCase.path {
+				t.Fatalf("provider authority diagnostic = %+v err=%v", diagnostic, err)
+			}
+		})
+	}
+}
+
+func TestDecodeRuntimeCandidatePayloadWithManifestRejectsManifestExposingOwnerCoverageAuthority(t *testing.T) {
+	manifest := mustRuntimeCandidatePayloadManifest(t, RuntimeDecision{
+		State: ConvergenceStateNeedStateChange,
+		RequiredOutput: RequiredOutputContract{
+			AcceptedKinds:        []string{RuntimeBlockKindPatchApply},
+			AcceptedEffectScopes: []RuntimeEffectScope{RuntimeEffectWorkspaceDurable}, RequiredEffectScopes: []RuntimeEffectScope{RuntimeEffectWorkspaceDurable},
+			CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-1"}, TargetRefs: []string{"main.go"},
+		},
+	})
+	manifest.Operations[0].AllowedOperationFields = append(manifest.Operations[0].AllowedOperationFields, "coverageWorkItemIds")
+	manifest = manifest.Normalized()
+	manifest.Hash = StableRuntimeCandidateContractManifestHash(manifest)
+
+	_, err := DecodeRuntimeCandidatePayloadWithManifest(manifest, []byte(`{"operations":[{"kind":"patch/apply","bindingRefs":["binding/test/cwi-1"],"targetRefs":["main.go"],"parameters":[{"name":"patchType","string":"file_write"},{"name":"content","string":"package main"}]}]}`))
+	var diagnostic *RuntimeCandidatePayloadDiagnostic
+	if !errors.As(err, &diagnostic) || diagnostic.Path != "$.operations" || diagnostic.Actual != "invalid_operation_fields" || !strings.Contains(err.Error(), "coverageWorkItemIds") {
+		t.Fatalf("owner coverage manifest field diagnostic = %+v err=%v", diagnostic, err)
+	}
+}
+
+func TestRuntimeCandidateOperationAuthorityIsManifestDerivedAndRestartStable(t *testing.T) {
+	manifest := mustRuntimeCandidatePayloadManifest(t, RuntimeDecision{
+		State: ConvergenceStateNeedStateChange,
+		RequiredOutput: RequiredOutputContract{
+			AcceptedKinds:        []string{StepKindGitWrite},
+			AcceptedEffectScopes: []RuntimeEffectScope{RuntimeEffectWorkspaceDurable}, RequiredEffectScopes: []RuntimeEffectScope{RuntimeEffectWorkspaceDurable},
+			CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-1"}, RequiredOperationSequence: []RuntimeRequiredOperationVariant{
+				{RequirementID: "stage", Kind: StepKindGitWrite, VariantID: "add"},
+				{RequirementID: "commit", Kind: StepKindGitWrite, VariantID: "commit", DependsOnRequirementIDs: []string{"stage"}},
+			},
+		},
+	})
+	stage := `{"kind":"git/write","requiredOperationRef":"stage","bindingRefs":["binding/test/cwi-1"],"parameters":[{"name":"operation","string":"add"},{"name":"pathspecs","stringList":["."]}]}`
+	commit := `{"kind":"git/write","requiredOperationRef":"commit","bindingRefs":["binding/test/cwi-1"],"parameters":[{"name":"operation","string":"commit"},{"name":"message","string":"commit"}]}`
+	decode := func(document string) RuntimeCandidate {
+		t.Helper()
+		candidate, err := DecodeRuntimeCandidatePayloadWithManifest(manifest, []byte(document))
+		if err != nil {
+			t.Fatal(err)
+		}
+		return candidate
+	}
+	first := decode(`{"operations":[` + stage + `,` + commit + `]}`)
+	restarted := decode(`{"operations":[` + stage + `,` + commit + `]}`)
+	reordered := decode(`{"operations":[` + commit + `,` + stage + `]}`)
+	byRef := func(candidate RuntimeCandidate) map[string]RuntimeOperation {
+		ret := make(map[string]RuntimeOperation)
+		for _, operation := range candidate.StateChange.Operations {
+			ret[operation.Operation.RequiredOperationRef] = operation.Operation.Normalized()
+		}
+		return ret
+	}
+	firstByRef, restartedByRef, reorderedByRef := byRef(first), byRef(restarted), byRef(reordered)
+	if firstByRef["stage"].ID == "" || firstByRef["commit"].ID == "" || firstByRef["stage"].ID == firstByRef["commit"].ID {
+		t.Fatalf("required IDs were not derived uniquely: %+v", firstByRef)
+	}
+	if firstByRef["stage"].ID != restartedByRef["stage"].ID || firstByRef["commit"].ID != restartedByRef["commit"].ID ||
+		firstByRef["stage"].ID != reorderedByRef["stage"].ID || firstByRef["commit"].ID != reorderedByRef["commit"].ID {
+		t.Fatalf("required IDs drifted across restart/order: first=%+v restarted=%+v reordered=%+v", firstByRef, restartedByRef, reorderedByRef)
+	}
+	if len(firstByRef["stage"].DependsOn) != 0 || !reflect.DeepEqual(firstByRef["commit"].DependsOn, []string{firstByRef["stage"].ID}) ||
+		!reflect.DeepEqual(reorderedByRef["commit"].DependsOn, []string{reorderedByRef["stage"].ID}) {
+		t.Fatalf("required dependency graph was not derived exactly: first=%+v reordered=%+v", firstByRef, reorderedByRef)
+	}
+
+	tampered := cloneRuntimeCandidate(first)
+	tampered.StateChange.Operations[0].Operation.ID = "attempt-local-id"
+	tampered.StateChange.Operations[1].Operation.DependsOn = nil
+	derived, err := DeriveRuntimeCandidateOperationAuthority(manifest, tampered)
+	if err != nil || StableRuntimeCandidateHash(derived) != StableRuntimeCandidateHash(first) {
+		t.Fatalf("attempt-local authority affected derivation: derived=%+v err=%v", derived, err)
+	}
+	if err := ValidateRuntimeCandidateAgainstManifest(manifest, tampered); err == nil {
+		t.Fatal("semantic admission accepted tampered operation authority")
+	}
+
+	document, err := EncodeRuntimeCandidatePayloadWithManifest(manifest, first)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(document), `"id"`) || strings.Contains(string(document), `"dependsOn"`) {
+		t.Fatalf("encoder leaked owner-derived authority: %s", document)
+	}
+	roundTrip := decode(string(document))
+	if StableRuntimeCandidateHash(roundTrip) != StableRuntimeCandidateHash(first) {
+		t.Fatalf("encoder roundtrip authority drifted: first=%+v roundTrip=%+v", first, roundTrip)
+	}
+}
+
+func TestRuntimeCandidateAuxiliaryOperationIDsUseCanonicalSemanticKey(t *testing.T) {
+	manifest := mustRuntimeCandidatePayloadManifest(t, RuntimeDecision{
+		State: ConvergenceStateNeedStateChange,
+		RequiredOutput: RequiredOutputContract{
+			AcceptedKinds:        []string{StepKindFileWrite, RuntimeBlockKindPatchApply},
+			AcceptedEffectScopes: []RuntimeEffectScope{RuntimeEffectWorkspaceDurable}, RequiredEffectScopes: []RuntimeEffectScope{RuntimeEffectWorkspaceDurable},
+			CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-1"}, TargetRefs: []string{"main.go"},
+		},
+	})
+	fileOperation := func(content string) string {
+		return `{"kind":"file/write","bindingRefs":["binding/test/cwi-1"],"targetRefs":["main.go"],"parameters":[{"name":"content","string":"` + content + `"}]}`
+	}
+	patchOperation := func(content string) string {
+		return `{"kind":"patch/apply","bindingRefs":["binding/test/cwi-1"],"targetRefs":["main.go"],"parameters":[{"name":"patchType","string":"file_write"},{"name":"content","string":"` + content + `"}]}`
+	}
+	decodeOperations := func(left, right string) map[string]RuntimeOperation {
+		t.Helper()
+		candidate, err := DecodeRuntimeCandidatePayloadWithManifest(manifest, []byte(`{"operations":[`+left+`,`+right+`]}`))
+		if err != nil {
+			t.Fatal(err)
+		}
+		ret := make(map[string]RuntimeOperation, 2)
+		for _, value := range candidate.StateChange.Operations {
+			operation := value.Operation.Normalized()
+			ret[StableRuntimeOperationShape(operation)] = operation
+		}
+		return ret
+	}
+	first := decodeOperations(fileOperation("first"), patchOperation("second"))
+	restarted := decodeOperations(fileOperation("first"), patchOperation("second"))
+	reordered := decodeOperations(patchOperation("second"), fileOperation("first"))
+	if len(first) != 2 || len(restarted) != 2 || len(reordered) != 2 {
+		t.Fatalf("auxiliary semantic slots = first:%+v restarted:%+v reordered:%+v", first, restarted, reordered)
+	}
+	for semanticKey, operation := range first {
+		if operation.ID == "" || restarted[semanticKey].ID != operation.ID || reordered[semanticKey].ID != operation.ID {
+			t.Fatalf("auxiliary semantic ID drifted for %s: first=%+v restarted=%+v reordered=%+v", semanticKey, operation, restarted[semanticKey], reordered[semanticKey])
+		}
+	}
+	changed := decodeOperations(fileOperation("changed"), patchOperation("second"))
+	fileKey := StableRuntimeOperationShape(firstOperationForKind(first, StepKindFileWrite))
+	changedFile := firstOperationForKind(changed, StepKindFileWrite)
+	if changedFile.ID == "" || changedFile.ID == first[fileKey].ID {
+		t.Fatalf("execution-semantic content change retained auxiliary ID: first=%+v changed=%+v", first[fileKey], changedFile)
+	}
+}
+
+func TestRuntimeCandidateAuxiliaryOperationSemanticSlotCollisionFailsClosed(t *testing.T) {
+	manifest := mustRuntimeCandidatePayloadManifest(t, RuntimeDecision{
+		State: ConvergenceStateNeedStateChange,
+		RequiredOutput: RequiredOutputContract{
+			AcceptedKinds:        []string{RuntimeBlockKindPatchApply},
+			AcceptedEffectScopes: []RuntimeEffectScope{RuntimeEffectWorkspaceDurable}, RequiredEffectScopes: []RuntimeEffectScope{RuntimeEffectWorkspaceDurable},
+			CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-1"}, TargetRefs: []string{"main.go"},
+		},
+	})
+	base := `{"kind":"patch/apply","bindingRefs":["binding/test/cwi-1"],"targetRefs":["main.go"],"parameters":[{"name":"patchType","string":"file_write"},{"name":"content","string":"package main"}]}`
+	summaryOnlyDifference := `{"kind":"patch/apply","bindingRefs":["binding/test/cwi-1"],"targetRefs":["main.go"],"parameters":[{"name":"patchType","string":"file_write"},{"name":"content","string":"package main"},{"name":"summary","string":"display only"}]}`
+	for _, testCase := range []struct {
+		name   string
+		second string
+	}{
+		{name: "exact duplicate", second: base},
+		{name: "canonical semantic collision", second: summaryOnlyDifference},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			_, err := DecodeRuntimeCandidatePayloadWithManifest(manifest, []byte(`{"operations":[`+base+`,`+testCase.second+`]}`))
+			var diagnostic *RuntimeCandidatePayloadDiagnostic
+			if !errors.As(err, &diagnostic) || diagnostic.Path != "$.operations[1]" || diagnostic.Actual != "duplicate_auxiliary_semantic_slot" {
+				t.Fatalf("semantic collision diagnostic = %+v err=%v", diagnostic, err)
+			}
+		})
+	}
+}
+
+func TestRuntimeCandidateOperationCardinalityUsesManifestSourceOfTruth(t *testing.T) {
+	manifest := mustRuntimeCandidatePayloadManifest(t, RuntimeDecision{
+		State: ConvergenceStateNeedStateChange,
+		RequiredOutput: RequiredOutputContract{
+			AcceptedKinds:        []string{RuntimeBlockKindPatchApply},
+			AcceptedEffectScopes: []RuntimeEffectScope{RuntimeEffectWorkspaceDurable}, RequiredEffectScopes: []RuntimeEffectScope{RuntimeEffectWorkspaceDurable},
+			CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-1"}, TargetRefs: []string{"main.go"},
+		},
+	})
+	if manifest.MaxOperationCount != RuntimeCandidateOperationMaxCount {
+		t.Fatalf("compiled maxOperationCount = %d, want %d", manifest.MaxOperationCount, RuntimeCandidateOperationMaxCount)
+	}
+	limited := manifest.Clone()
+	limited.MaxOperationCount = 1
+	limited.Hash = StableRuntimeCandidateContractManifestHash(limited)
+	if limited.Hash == manifest.Hash {
+		t.Fatal("maxOperationCount did not participate in manifest identity")
+	}
+	first := `{"kind":"patch/apply","bindingRefs":["binding/test/cwi-1"],"targetRefs":["main.go"],"parameters":[{"name":"patchType","string":"file_write"},{"name":"content","string":"first"}]}`
+	second := `{"kind":"patch/apply","bindingRefs":["binding/test/cwi-1"],"targetRefs":["main.go"],"parameters":[{"name":"patchType","string":"file_write"},{"name":"content","string":"second"}]}`
+	payload := []byte(`{"operations":[` + first + `,` + second + `]}`)
+	_, err := DecodeRuntimeCandidatePayloadWithManifest(limited, payload)
+	var payloadDiagnostic *RuntimeCandidatePayloadDiagnostic
+	if !errors.As(err, &payloadDiagnostic) || payloadDiagnostic.Path != "$.operations" || payloadDiagnostic.Actual != "operation_count_2" {
+		t.Fatalf("strict cardinality diagnostic = %+v err=%v", payloadDiagnostic, err)
+	}
+
+	allowed := limited.Clone()
+	allowed.MaxOperationCount = 2
+	allowed.Hash = StableRuntimeCandidateContractManifestHash(allowed)
+	candidate, err := DecodeRuntimeCandidatePayloadWithManifest(allowed, payload)
+	if err != nil {
+		t.Fatalf("same-kind multi-operation candidate rejected below sealed max: %v", err)
+	}
+	if err := ValidateRuntimeCandidateAgainstManifest(limited, candidate); err == nil || !strings.Contains(err.Error(), "operation_count_2") {
+		t.Fatalf("local evaluator did not enforce sealed maxOperationCount: %v", err)
+	}
+}
+
+func firstOperationForKind(values map[string]RuntimeOperation, kind string) RuntimeOperation {
+	for _, operation := range values {
+		if operation.Kind == kind {
+			return operation
+		}
+	}
+	return RuntimeOperation{}
 }
 
 func TestEncodeRuntimeCandidatePayloadWithManifestRoundTripsAllCandidateShapes(t *testing.T) {
@@ -284,7 +560,11 @@ func TestEncodeRuntimeCandidatePayloadWithManifestRoundTripsAllCandidateShapes(t
 			if err != nil {
 				t.Fatal(err)
 			}
-			if got, want := StableRuntimeCandidateHash(decoded), StableRuntimeCandidateHash(testCase.candidate); got != want {
+			wantCandidate, err := DeriveRuntimeCandidateOperationAuthority(testCase.manifest, testCase.candidate)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got, want := StableRuntimeCandidateHash(decoded), StableRuntimeCandidateHash(wantCandidate); got != want {
 				t.Fatalf("candidate semantic hash = %s, want %s; payload=%s", got, want, payload)
 			}
 		})

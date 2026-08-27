@@ -13,6 +13,14 @@ import (
 // second production admission API. Production callers must consume the typed
 // CandidateAdmissionCommitResult transitions directly.
 func (c *RuntimeController) recordCandidateProposal(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, attempt int, candidate runtimecontract.RuntimeCandidate) (RuntimeAggregate, error) {
+	aggregate, err := c.Load(ctx, workspaceID, runID)
+	if err != nil {
+		return RuntimeAggregate{}, err
+	}
+	candidate, err = runtimeTestDeriveCandidateAuthority(aggregate, candidate)
+	if err != nil {
+		return RuntimeAggregate{}, err
+	}
 	result, err := c.AdmitCandidateProposalForTest(ctx, workspaceID, runID, attempt, candidate)
 	if err != nil {
 		return RuntimeAggregate{}, err
@@ -24,6 +32,14 @@ func (c *RuntimeController) recordCandidateProposal(ctx context.Context, workspa
 }
 
 func (c *RuntimeController) AcceptCandidateAttempt(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, attempt int, candidate runtimecontract.RuntimeCandidate) (RuntimeAggregate, error) {
+	aggregate, err := c.Load(ctx, workspaceID, runID)
+	if err != nil {
+		return RuntimeAggregate{}, err
+	}
+	candidate, err = runtimeTestDeriveCandidateAuthority(aggregate, candidate)
+	if err != nil {
+		return RuntimeAggregate{}, err
+	}
 	result, err := c.AdmitAndSealCandidateAttemptForTest(ctx, workspaceID, runID, attempt, candidate)
 	if err != nil {
 		return RuntimeAggregate{}, err
@@ -32,6 +48,55 @@ func (c *RuntimeController) AcceptCandidateAttempt(ctx context.Context, workspac
 		return result.Aggregate, fmt.Errorf("%w: candidate admission rejected with %s: %s", common.ErrConflict, result.Admission.Failure.Code, result.Admission.Failure.Reason)
 	}
 	return result.Aggregate, nil
+}
+
+func runtimeTestDeriveCandidateAuthority(aggregate RuntimeAggregate, candidate runtimecontract.RuntimeCandidate) (runtimecontract.RuntimeCandidate, error) {
+	context := runtimecontract.RuntimeCandidateContextForDecision(aggregate.Facts, aggregate.Decision, nil)
+	manifest, err := runtimecontract.BuildRuntimeCandidateContractManifest(aggregate.Decision, runtimecontract.RuntimeCandidateManifestOwnerFactsFromResources(context.Resources))
+	if err != nil {
+		return runtimecontract.RuntimeCandidate{}, err
+	}
+	return runtimecontract.DeriveRuntimeCandidateOperationAuthority(manifest, candidate)
+}
+
+func runtimeTestMustDeriveCandidateAuthority(t *testing.T, aggregate RuntimeAggregate, candidate runtimecontract.RuntimeCandidate) runtimecontract.RuntimeCandidate {
+	t.Helper()
+	derived, err := runtimeTestDeriveCandidateAuthority(aggregate, candidate)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return derived
+}
+
+func runtimeTestMustDeriveCandidateForManifest(t *testing.T, manifest runtimecontract.RuntimeCandidateContractManifest, candidate runtimecontract.RuntimeCandidate) runtimecontract.RuntimeCandidate {
+	t.Helper()
+	derived, err := runtimecontract.DeriveRuntimeCandidateOperationAuthority(manifest, candidate)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return derived
+}
+
+func runtimeTestCandidateOperationID(t *testing.T, candidate runtimecontract.RuntimeCandidate, ordinal int) string {
+	t.Helper()
+	operations := candidateRuntimeOperations(candidate)
+	if ordinal < 0 || ordinal >= len(operations) || operations[ordinal].ID == "" {
+		t.Fatalf("fixture candidate operation ordinal %d is unavailable: %+v", ordinal, operations)
+	}
+	return operations[ordinal].ID
+}
+
+func runtimeTestDerivedOperationID(t *testing.T, aggregate RuntimeAggregate, candidate runtimecontract.RuntimeCandidate, ordinal int) string {
+	t.Helper()
+	return runtimeTestCandidateOperationID(t, runtimeTestMustDeriveCandidateAuthority(t, aggregate, candidate), ordinal)
+}
+
+func runtimeTestActiveOperationID(t *testing.T, aggregate RuntimeAggregate, ordinal int) string {
+	t.Helper()
+	if aggregate.ActiveDispatch == nil {
+		t.Fatal("fixture has no active dispatch")
+	}
+	return runtimeTestCandidateOperationID(t, aggregate.ActiveDispatch.Candidate, ordinal)
 }
 
 // RecordFixtureCandidateFeasibilities simulates only the already-completed
@@ -43,6 +108,10 @@ func RecordFixtureCandidateFeasibilities(ctx context.Context, c *RuntimeControll
 		return common.ErrInvalidArgument
 	}
 	aggregate, err := c.Load(ctx, workspaceID, runID)
+	if err != nil {
+		return err
+	}
+	candidate, err = runtimeTestDeriveCandidateAuthority(aggregate, candidate)
 	if err != nil {
 		return err
 	}

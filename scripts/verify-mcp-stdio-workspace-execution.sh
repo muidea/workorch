@@ -296,7 +296,10 @@ wait_pending_approval() {
   local run_id="$2"
   local output="$3"
   local approval_id=""
+  local run_status_output="${output%.json}-run-status.json"
+  local status_url
   local deadline=$((SECONDS + 120))
+  status_url="$(run_api_url "$workspace_id" "$run_id" "status")"
 
   while (( SECONDS <= deadline )); do
     get_json "$BASE_URL/api/v1/workorch/approvals?workspaceId=$workspace_id&runId=$run_id" "$output"
@@ -318,10 +321,36 @@ if len(matches) == 1:
     raise SystemExit(0)
 raise SystemExit(1)
 PY
-)" && {
+    )" && {
       echo "$approval_id"
       return 0
     }
+    if get_json "$status_url" "$run_status_output"; then
+      if python3 - "$run_status_output" <<'PY'
+import json
+import sys
+
+data = json.load(open(sys.argv[1], encoding="utf-8"))
+status = data.get("status") or {}
+state = status.get("state")
+if state not in {"completed", "failed", "cancelled", "superseded"}:
+    raise SystemExit(1)
+failure = status.get("failureReason") or ""
+convergence = status.get("convergenceStatus") or {}
+print(
+    "Run became terminal before pending approval: "
+    f"state={state!r} failure={failure!r} "
+    f"runtimeFailureCode={convergence.get('failureCode')!r} "
+    f"runtimeFailureSignature={convergence.get('failureSignature')!r}",
+    file=sys.stderr,
+)
+raise SystemExit(0)
+PY
+      then
+        cat "$run_status_output" >&2 || true
+        return 1
+      fi
+    fi
     sleep 0.5
   done
 
@@ -718,17 +747,43 @@ runtime = task_progress.get("runtime") or {}
 dod_evidence = snapshot.get("doDEvidence") or []
 selected_capabilities = snapshot.get("selectedCapabilities") or []
 used_capabilities = snapshot.get("usedCapabilities") or []
+audit = (snapshot.get("acceptance") or {}).get("audit") or {}
+
+mcp_operation_evidence_refs = set()
+for dispatch in audit.get("dispatches") or []:
+    dispatch_id = str(dispatch.get("id") or "").strip()
+    if not dispatch_id:
+        continue
+    for operation in dispatch.get("operations") or []:
+        operation_id = str(operation.get("id") or "").strip()
+        if operation.get("kind") == "mcp/tool_call" and operation_id:
+            mcp_operation_evidence_refs.add(
+                f"workorch://runtime-operations/{dispatch_id}/{operation_id}"
+            )
+
+task_progress_evidence_refs = set(task_progress.get("evidenceRefs") or [])
+used_capability_evidence_refs = {
+    str(ref)
+    for item in used_capabilities
+    if item.get("id") == capability_id
+    for ref in (item.get("evidenceRefs") or [])
+}
 
 errors = []
 if run.get("state") != "completed":
     errors.append(f"run state is {run.get('state')!r}, want completed: {run.get('failureReason', '')}")
-if not any("/mcp-stdio-call" in str(item) for item in (task_progress.get("evidenceRefs") or [])):
-    errors.append(f"task progress missing committed MCP operation evidence: {task_progress.get('evidenceRefs')}")
+if not mcp_operation_evidence_refs:
+    errors.append(f"Runtime audit has no sealed MCP operation identity: {audit.get('dispatches')}")
+elif not task_progress_evidence_refs.intersection(mcp_operation_evidence_refs):
+    errors.append(
+        "task progress missing dynamically owner-derived MCP operation evidence: "
+        f"progress={sorted(task_progress_evidence_refs)} operations={sorted(mcp_operation_evidence_refs)}"
+    )
 if not any(item.get("satisfied") is True and any((entry.get("evidenceStatus") == "linked") for entry in (item.get("items") or [])) for item in dod_evidence):
     errors.append(f"missing linked Runtime DoD assessment evidence: {dod_evidence}")
 if not any(item.get("id") == capability_id and item.get("displayName") == "仓库摘要能力 E2E" for item in selected_capabilities):
     errors.append(f"missing selected MCP capability metadata: {selected_capabilities}")
-if not any(item.get("id") == capability_id and item.get("useCount", 0) >= 1 and any("/mcp-stdio-call" in str(ref) for ref in (item.get("evidenceRefs") or [])) for item in used_capabilities):
+if not any(item.get("id") == capability_id and item.get("useCount", 0) >= 1 for item in used_capabilities) or not used_capability_evidence_refs.intersection(mcp_operation_evidence_refs):
     errors.append(f"missing used MCP capability evidence: {used_capabilities}")
 
 if errors:

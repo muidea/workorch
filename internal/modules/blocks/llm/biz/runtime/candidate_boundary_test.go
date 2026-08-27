@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"reflect"
 	"strings"
 	"testing"
 
@@ -78,8 +77,8 @@ func TestRequestCandidateRejectsExpectedDocumentTokenMismatchBeforeProvider(t *t
 func TestRequestCandidateRetryIdentityBindsDetachedCorrectionInputBeforeProvider(t *testing.T) {
 	request := candidateRequest(t, runtimecontract.ConvergenceStateNeedStateChange)
 	request.CandidateAttempt = 1
-	request.PreviousFailure = &runtimecontract.RuntimeCandidateFailure{
-		Class: runtimecontract.RuntimeCandidateFailureClassSchema, Code: "candidate_schema_invalid", Signature: "candidate-schema-invalid", Reason: "operations field was missing",
+	request.CandidateCorrectionObservation = &runtimecontract.RuntimeCandidateCorrectionObservation{
+		Class: runtimecontract.RuntimeCandidateFailureClassSchema, Code: "candidate_schema_invalid", Signature: "candidate-schema-invalid",
 		Diagnostic: &runtimecontract.RuntimeCandidateFailureDiagnostic{
 			Path: "$.operations", Actual: "missing_operations", Required: []string{"operations"}, ManifestHash: request.CandidateManifest.Hash,
 		},
@@ -92,7 +91,64 @@ func TestRequestCandidateRetryIdentityBindsDetachedCorrectionInputBeforeProvider
 			Path:      "$.operations", RejectedValue: "field_absent", AlternativeValue: "field_present",
 		},
 	}).Clone()
-	correctionHash := request.CandidateCorrection.StableRequestCorrectionHash(request.PreviousFailure)
+	request.CandidateCorrectionObservation.Diagnostic.Objectives = append([]runtimecontract.RuntimeCandidateCorrectionObjective(nil), request.CandidateCorrection.Objectives...)
+	request.CandidateCorrectionObservation.SealedCorrectionHash = runtimecontract.StableRuntimeCandidateSealedCorrectionHash(
+		request.CandidateCorrection.ManifestHash, request.CandidateCorrection.Objectives, &request.CandidateCorrection.Witness,
+	)
+	sealCandidateCorrectionRequestForBoundaryTest(&request)
+
+	providerCalls := 0
+	provider := candidateProviderFunc(func(context.Context, llmmodels.RuntimeCandidateRequest) (llmmodels.RuntimeCandidateGenerationResult, error) {
+		providerCalls++
+		return generationResult([]byte(`{"operations":[]}`), nil)
+	})
+	if _, err := RequestCandidate(context.Background(), provider, request); err != nil || providerCalls != 1 {
+		t.Fatalf("valid detached correction input did not reach provider exactly once: calls=%d err=%v", providerCalls, err)
+	}
+
+	for name, mutate := range map[string]func(*llmmodels.RuntimeCandidateRequest){
+		"witness": func(value *llmmodels.RuntimeCandidateRequest) {
+			value.CandidateCorrection.Witness.AlternativeValue = "different_field_present"
+		},
+		"objective": func(value *llmmodels.RuntimeCandidateRequest) {
+			value.CandidateCorrection.Objectives = []runtimecontract.RuntimeCandidateCorrectionObjective{runtimecontract.RuntimeCandidateCorrectionRemoveForbiddenField}
+		},
+		"manifest": func(value *llmmodels.RuntimeCandidateRequest) {
+			value.CandidateCorrection.ManifestHash = "stale-manifest"
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			drift := request
+			drift.CandidateCorrection = request.CandidateCorrection.Clone()
+			sealCandidateCorrectionRequestForBoundaryTest(&drift)
+			mutate(&drift)
+			// Re-seal the request/session identity around the tampered detached
+			// input. The pairwise observation fence, rather than a stale outer
+			// request ID, must still stop it before provider I/O.
+			sealCandidateCorrectionRequestForBoundaryTest(&drift)
+			if _, err := RequestCandidate(context.Background(), provider, drift); err == nil || providerCalls != 1 {
+				t.Fatalf("mismatched %s correction reached provider: calls=%d err=%v", name, providerCalls, err)
+			}
+		})
+	}
+
+	missing := request
+	missing.CandidateCorrection = nil
+	if _, err := RequestCandidate(context.Background(), provider, missing); err == nil || !strings.Contains(err.Error(), "previous failure and correction") || providerCalls != 1 {
+		t.Fatalf("missing detached correction input reached provider: calls=%d err=%v", providerCalls, err)
+	}
+	initial := request
+	initial.CandidateAttempt = 0
+	if _, err := RequestCandidate(context.Background(), provider, initial); err == nil || !strings.Contains(err.Error(), "initial candidate attempt must not carry correction lineage") || providerCalls != 1 {
+		t.Fatalf("attempt 0 detached correction input reached provider: calls=%d err=%v", providerCalls, err)
+	}
+}
+
+func sealCandidateCorrectionRequestForBoundaryTest(request *llmmodels.RuntimeCandidateRequest) {
+	if request == nil || request.CandidateCorrection == nil || request.CandidateCorrectionObservation == nil {
+		return
+	}
+	correctionHash := request.CandidateCorrection.StableRequestCorrectionHash(request.CandidateCorrectionObservation)
 	logicalRequestID := runtimecontract.StableRuntimeCandidateRequestSessionID(
 		request.DocumentKind, request.CandidateContext.WorkspaceID, request.CandidateContext.RunID,
 		request.Transaction, request.StablePrefixHash, request.CandidateManifest.Hash, correctionHash,
@@ -106,32 +162,6 @@ func TestRequestCandidateRetryIdentityBindsDetachedCorrectionInputBeforeProvider
 	expected.CorrectionAttempt = 1
 	expected.Hash = runtimecontract.StableRuntimeExpectedDocumentHash(expected)
 	request.ExpectedDocument = &expected
-
-	providerCalls := 0
-	provider := candidateProviderFunc(func(context.Context, llmmodels.RuntimeCandidateRequest) (llmmodels.RuntimeCandidateGenerationResult, error) {
-		providerCalls++
-		return generationResult([]byte(`{"operations":[]}`), nil)
-	})
-	if _, err := RequestCandidate(context.Background(), provider, request); err != nil || providerCalls != 1 {
-		t.Fatalf("valid detached correction input did not reach provider exactly once: calls=%d err=%v", providerCalls, err)
-	}
-
-	drift := request
-	drift.CandidateCorrection = request.CandidateCorrection.Clone()
-	drift.CandidateCorrection.Witness.AlternativeValue = "different_field_present"
-	if _, err := RequestCandidate(context.Background(), provider, drift); err == nil || !strings.Contains(err.Error(), "correction request identity is stale") || providerCalls != 1 {
-		t.Fatalf("drifted detached correction input reached provider: calls=%d err=%v", providerCalls, err)
-	}
-	missing := request
-	missing.CandidateCorrection = nil
-	if _, err := RequestCandidate(context.Background(), provider, missing); err == nil || !strings.Contains(err.Error(), "previous failure and correction") || providerCalls != 1 {
-		t.Fatalf("missing detached correction input reached provider: calls=%d err=%v", providerCalls, err)
-	}
-	initial := request
-	initial.CandidateAttempt = 0
-	if _, err := RequestCandidate(context.Background(), provider, initial); err == nil || !strings.Contains(err.Error(), "initial candidate attempt must not carry correction lineage") || providerCalls != 1 {
-		t.Fatalf("attempt 0 detached correction input reached provider: calls=%d err=%v", providerCalls, err)
-	}
 }
 
 func semanticBoundaryRequest(t *testing.T) llmmodels.RuntimeCandidateRequest {
@@ -191,21 +221,30 @@ func semanticBoundaryRequest(t *testing.T) llmmodels.RuntimeCandidateRequest {
 	return request
 }
 
-func TestDecodeCandidatePayloadRejectsAuthorityFields(t *testing.T) {
+func TestDecodeCandidatePayloadRejectsProviderOperationID(t *testing.T) {
 	_, err := runtimecontract.DecodeRuntimeCandidatePayload(runtimecontract.ConvergenceStateNeedStateChange, []byte(`{
-		"operations":[{"id":"op-1","kind":"patch/apply","bindingRefs":["binding/test/cwi-1"]}],
+		"operations":[{"id":"op-1","kind":"patch/apply","bindingRefs":["binding/test/cwi-1"]}]
+	}`))
+	if err == nil || !strings.Contains(err.Error(), `unknown field "id"`) {
+		t.Fatalf("candidate payload operation id was accepted: %v", err)
+	}
+}
+
+func TestDecodeCandidatePayloadRejectsConvergenceAuthorityField(t *testing.T) {
+	_, err := runtimecontract.DecodeRuntimeCandidatePayload(runtimecontract.ConvergenceStateNeedStateChange, []byte(`{
+		"operations":[{"kind":"patch/apply","bindingRefs":["binding/test/cwi-1"]}],
 		"convergenceState":"complete"
 	}`))
-	if err == nil {
-		t.Fatal("candidate payload changed convergence authority")
+	if err == nil || !strings.Contains(err.Error(), `unknown field "convergenceState"`) {
+		t.Fatalf("candidate payload convergence authority was accepted: %v", err)
 	}
 }
 
 func TestDecodeCandidatePayloadRejectsLegacyCandidateWrappers(t *testing.T) {
 	for name, payload := range map[string]string{
-		"candidate":      `{"candidate":{"operations":[{"id":"op-1","kind":"patch/apply","bindingRefs":["binding/test/cwi-1"]}]}}`,
-		"candidates":     `{"candidates":[{"operations":[{"id":"op-1","kind":"patch/apply","bindingRefs":["binding/test/cwi-1"]}]}]}`,
-		"executionGraph": `{"executionGraph":{"operations":[{"id":"op-1","kind":"patch/apply","bindingRefs":["binding/test/cwi-1"]}]}}`,
+		"candidate":      `{"candidate":{"operations":[{"kind":"patch/apply","bindingRefs":["binding/test/cwi-1"]}]}}`,
+		"candidates":     `{"candidates":[{"operations":[{"kind":"patch/apply","bindingRefs":["binding/test/cwi-1"]}]}]}`,
+		"executionGraph": `{"executionGraph":{"operations":[{"kind":"patch/apply","bindingRefs":["binding/test/cwi-1"]}]}}`,
 	} {
 		t.Run(name, func(t *testing.T) {
 			if _, err := runtimecontract.DecodeRuntimeCandidatePayload(runtimecontract.ConvergenceStateNeedStateChange, []byte(payload)); err == nil {
@@ -217,20 +256,18 @@ func TestDecodeCandidatePayloadRejectsLegacyCandidateWrappers(t *testing.T) {
 
 func TestDecodeCandidatePayloadRejectsRawCoverageWorkItemIDs(t *testing.T) {
 	_, err := runtimecontract.DecodeRuntimeCandidatePayload(runtimecontract.ConvergenceStateNeedStateChange, []byte(`{
-		"operations":[{"id":"op-1","kind":"patch/apply","coverageWorkItemIds":["cwi-1"]}]
+		"operations":[{"kind":"patch/apply","coverageWorkItemIds":["cwi-1"]}]
 	}`))
 	if err == nil || !strings.Contains(err.Error(), `unknown field "coverageWorkItemIds"`) {
 		t.Fatalf("raw candidate coverage was accepted: %v", err)
 	}
 }
 
-func TestDecodeCandidatePayloadPreservesRequiredOperationRef(t *testing.T) {
+func TestDecodeCandidatePayloadPreservesRequiredOperationRefWithoutInventingAuthority(t *testing.T) {
 	candidate, err := runtimecontract.DecodeRuntimeCandidatePayload(runtimecontract.ConvergenceStateNeedStateChange, []byte(`{
 		"operations":[{
-			"id":"git-init",
 			"kind":"git/write",
 			"requiredOperationRef":"repo-init",
-			"dependsOn":["workspace-init"],
 			"bindingRefs":["binding/test/cwi-1"],
 			"parameters":[{"name":"operation","string":"init"}]
 		}]
@@ -244,14 +281,14 @@ func TestDecodeCandidatePayloadPreservesRequiredOperationRef(t *testing.T) {
 	if got := candidate.StateChange.Operations[0].Operation.RequiredOperationRef; got != "repo-init" {
 		t.Fatalf("required operation ref = %q, want repo-init", got)
 	}
-	if got := candidate.StateChange.Operations[0].Operation.DependsOn; !reflect.DeepEqual(got, []string{"workspace-init"}) {
-		t.Fatalf("operation dependency = %#v, want workspace-init", got)
+	if operation := candidate.StateChange.Operations[0].Operation; operation.ID != "" || len(operation.DependsOn) != 0 {
+		t.Fatalf("wire decoder invented operation authority: %+v", operation)
 	}
 }
 
 func TestRequestCandidateForwardsCompleteFilePathAliasDocument(t *testing.T) {
 	request := candidateRequest(t, runtimecontract.ConvergenceStateNeedStateChange)
-	payload := []byte(`{"operations":[{"id":"patch-1","kind":"patch/apply","bindingRefs":["binding/test/cwi-1"],"targetRefs":["main.go"],"parameters":[{"name":"filePath","string":"main.go"},{"name":"patchType","string":"file_write"},{"name":"content","string":"package main\n"}]}]}`)
+	payload := []byte(`{"operations":[{"kind":"patch/apply","bindingRefs":["binding/test/cwi-1"],"targetRefs":["main.go"],"parameters":[{"name":"filePath","string":"main.go"},{"name":"patchType","string":"file_write"},{"name":"content","string":"package main\n"}]}]}`)
 	provider := candidateProviderFunc(func(context.Context, llmmodels.RuntimeCandidateRequest) (llmmodels.RuntimeCandidateGenerationResult, error) {
 		return generationResult(payload, nil)
 	})
@@ -263,7 +300,7 @@ func TestRequestCandidateForwardsCompleteFilePathAliasDocument(t *testing.T) {
 
 func TestRequestCandidateForwardsCompleteSchemaInvalidDocuments(t *testing.T) {
 	request := candidateRequest(t, runtimecontract.ConvergenceStateNeedStateChange)
-	validOperation := `{"id":"patch-1","kind":"patch/apply","bindingRefs":["binding/test/cwi-1"],"targetRefs":["main.go"],"parameters":[{"name":"patchType","string":"file_write"},{"name":"content","string":"package main\n"}]}`
+	validOperation := `{"kind":"patch/apply","bindingRefs":["binding/test/cwi-1"],"targetRefs":["main.go"],"parameters":[{"name":"patchType","string":"file_write"},{"name":"content","string":"package main\n"}]}`
 	cases := []struct {
 		name    string
 		payload string
@@ -271,9 +308,9 @@ func TestRequestCandidateForwardsCompleteSchemaInvalidDocuments(t *testing.T) {
 		{name: "unknown top level", payload: `{"operations":[` + validOperation + `],"unexpected":true}`},
 		{name: "missing required operations", payload: `{}`},
 		{name: "wrong operations container", payload: `{"operations":{}}`},
-		{name: "wrong target refs container", payload: `{"operations":[{"id":"patch-1","kind":"patch/apply","bindingRefs":["binding/test/cwi-1"],"targetRefs":"main.go","parameters":[{"name":"patchType","string":"file_write"},{"name":"content","string":"package main\n"}]}]}`},
+		{name: "wrong target refs container", payload: `{"operations":[{"kind":"patch/apply","bindingRefs":["binding/test/cwi-1"],"targetRefs":"main.go","parameters":[{"name":"patchType","string":"file_write"},{"name":"content","string":"package main\n"}]}]}`},
 		{name: "trailing json", payload: `{"operations":[` + validOperation + `]} {}`},
-		{name: "field alias", payload: `{"operations":[{"id":"patch-1","kind":"patch/apply","bindingRefs":["binding/test/cwi-1"],"targetRefs":["main.go"],"parameters":[{"name":"filePath","string":"main.go"},{"name":"patchType","string":"file_write"},{"name":"content","string":"package main\n"}]}]}`},
+		{name: "field alias", payload: `{"operations":[{"kind":"patch/apply","bindingRefs":["binding/test/cwi-1"],"targetRefs":["main.go"],"parameters":[{"name":"filePath","string":"main.go"},{"name":"patchType","string":"file_write"},{"name":"content","string":"package main\n"}]}]}`},
 	}
 	for _, testCase := range cases {
 		t.Run(testCase.name, func(t *testing.T) {
@@ -323,7 +360,7 @@ func TestRequestCandidateClassifiesOutputLimitSchemaTruncation(t *testing.T) {
 	request := candidateRequest(t, runtimecontract.ConvergenceStateNeedStateChange)
 	provider := candidateProviderFunc(func(context.Context, llmmodels.RuntimeCandidateRequest) (llmmodels.RuntimeCandidateGenerationResult, error) {
 		return llmmodels.RuntimeCandidateGenerationResult{
-			Payload: []byte(`{"operations":[{"id":"patch-1"`), Status: llmmodels.RuntimeCandidateStatusCompleted,
+			Payload: []byte(`{"operations":[{"kind":"patch/apply"`), Status: llmmodels.RuntimeCandidateStatusCompleted,
 			Usage: &llmaudit.ProviderUsage{OutputTokens: 4096, TotalTokens: 24000},
 			Audit: &llmmodels.ProviderRequestAudit{
 				Status: llmmodels.RuntimeCandidateStatusCompleted, ProviderSubmitted: true,
@@ -450,7 +487,7 @@ func TestRequestCandidateClassifiesMidTokenEOFAsIncompleteDocumentWithoutProvide
 	request := candidateRequest(t, runtimecontract.ConvergenceStateNeedStateChange)
 	provider := candidateProviderFunc(func(context.Context, llmmodels.RuntimeCandidateRequest) (llmmodels.RuntimeCandidateGenerationResult, error) {
 		return llmmodels.RuntimeCandidateGenerationResult{
-			Payload: []byte(`{"operations":[{"id":"patch-1"`), Status: llmmodels.RuntimeCandidateStatusCompleted,
+			Payload: []byte(`{"operations":[{"kind":"patch/app`), Status: llmmodels.RuntimeCandidateStatusCompleted,
 			Audit: &llmmodels.ProviderRequestAudit{Status: llmmodels.RuntimeCandidateStatusCompleted, ProviderSubmitted: true},
 		}, nil
 	})
@@ -547,7 +584,7 @@ func TestRequestCandidatePreservesTypedPrerequisiteStaleWithoutCandidateFailure(
 
 func TestRequestCandidateProviderReceivesOnlySealedTypedRequest(t *testing.T) {
 	request := candidateRequest(t, runtimecontract.ConvergenceStateNeedValidation)
-	wantDocument := []byte(`{"operations":[{"id":"validate-1","kind":"validation/managed_session","bindingRefs":["binding/test/cwi-1"],"parameters":[{"name":"recipeId","string":"test-managed-validation"}]}]}`)
+	wantDocument := []byte(`{"operations":[{"kind":"validation/managed_session","bindingRefs":["binding/test/cwi-1"],"parameters":[{"name":"recipeId","string":"test-managed-validation"}]}]}`)
 	provider := candidateProviderFunc(func(_ context.Context, got llmmodels.RuntimeCandidateRequest) (llmmodels.RuntimeCandidateGenerationResult, error) {
 		if got.Transaction != request.Transaction || got.Decision.AuthoritySnapshot.ID != request.Decision.AuthoritySnapshot.ID || got.Decision.State != runtimecontract.ConvergenceStateNeedValidation {
 			t.Fatalf("provider request changed sealed authority: %+v", got)

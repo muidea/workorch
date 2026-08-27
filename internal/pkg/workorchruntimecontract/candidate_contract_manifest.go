@@ -13,7 +13,14 @@ import (
 // correction renderer. It is deliberately separate from the executable
 // operation-contract revision: this value tracks the candidate wire shape,
 // while RuntimeOperationContractRevision tracks executable owner semantics.
-const RuntimeCandidateContractManifestRevision = "candidate-contract-manifest"
+const RuntimeCandidateContractManifestRevision = "candidate-contract-manifest/v2"
+
+// RuntimeCandidateOperationMaxCount is the compiler ceiling for one complete
+// provider candidate document. The compiled manifest copies this value into
+// MaxOperationCount; every schema, strict decoder and local evaluator must read
+// the sealed manifest field rather than infer cardinality from allowed kinds or
+// required-operation count.
+const RuntimeCandidateOperationMaxCount = 64
 
 // RuntimeOperationTargetPolicy is the only owner-neutral target authorization
 // vocabulary sealed into a candidate manifest. Concrete File/Git/Shell/MCP
@@ -68,12 +75,15 @@ type RuntimeCandidateContractManifest struct {
 	// this binary. It is also stored on every operation authorization so a
 	// consumer can verify one kind without re-deriving the whole inventory.
 	OperationContractRevision string
+	// MaxOperationCount is the single sealed cardinality source for an
+	// operation-bearing candidate document. It is zero for non-operation
+	// convergence states.
+	MaxOperationCount         int
 	RequiredTopLevelFields    []string
 	AllowedTopLevelFields     []string
 	ForbiddenTopLevelFields   []string
 	Bindings                  []CoverageEvidenceBinding
 	TargetRefs                []string
-	DependenciesAllowed       bool
 	RequiredOperationSequence []RuntimeRequiredOperationVariant
 	Operations                []RuntimeCandidateOperationManifest
 }
@@ -87,9 +97,14 @@ type RuntimeCandidateOperationManifest struct {
 	Kind                   string
 	OwnerModuleID          string
 	AllowedOperationFields []string
-	AllowedVariantIDs      []string
-	Parameters             []RuntimeOperationParameterContract
-	RequireOneOfParameters []string
+	// RequiredOperationFields is the single wire-level required-field source
+	// consumed by schema, prompt and strict payload validation. Authority fields
+	// such as operation ID and dependencies are deliberately absent: the
+	// contract owner derives them after the provider document is decoded.
+	RequiredOperationFields []string
+	AllowedVariantIDs       []string
+	Parameters              []RuntimeOperationParameterContract
+	RequireOneOfParameters  []string
 	// TargetCardinality is projected directly from the executable descriptor.
 	// It is the one wire-shape authority for outer targetRefs; parameters must
 	// never restate a target path.
@@ -269,6 +284,7 @@ func BuildRuntimeCandidateContractManifest(decision RuntimeDecision, ownerFacts 
 	manifest.RequiredTopLevelFields, manifest.AllowedTopLevelFields, manifest.ForbiddenTopLevelFields = runtimeCandidateEnvelopeFields(decision.State)
 	switch decision.State {
 	case ConvergenceStateNeedStateChange, ConvergenceStateNeedValidation:
+		manifest.MaxOperationCount = RuntimeCandidateOperationMaxCount
 		if len(required.CoverageWorkItemIDs) != 0 {
 			if err := ValidateCoverageEvidenceBindingsForFocus(decision.Focus, decision.AuthoritySnapshot.DefinitionRevision); err != nil {
 				return RuntimeCandidateContractManifest{}, fmt.Errorf("coverage_binding_unavailable: %w", err)
@@ -278,7 +294,6 @@ func BuildRuntimeCandidateContractManifest(decision RuntimeDecision, ownerFacts 
 		if err := ValidateRequiredOutputForState(decision.State, required); err != nil {
 			return RuntimeCandidateContractManifest{}, fmt.Errorf("candidate manifest state %q requires a sealed required output", decision.State)
 		}
-		manifest.DependenciesAllowed = runtimeRequiredOperationSequenceHasDependency(required.RequiredOperationSequence)
 		kinds := RuntimeCandidateAllowedOperationKinds(decision, ownerFacts.TargetSelection, ownerFacts.OperationAdmissibilities)
 		if len(kinds) == 0 {
 			return RuntimeCandidateContractManifest{}, fmt.Errorf("candidate manifest state %q has no allowed operation kinds", decision.State)
@@ -297,6 +312,12 @@ func BuildRuntimeCandidateContractManifest(decision RuntimeDecision, ownerFacts 
 		return RuntimeCandidateContractManifest{}, fmt.Errorf("convergence state %q does not accept a candidate manifest", decision.State)
 	}
 	manifest = manifest.Normalized()
+	if err := ValidateRuntimeCandidateManifestOperationCardinality(manifest); err != nil {
+		return RuntimeCandidateContractManifest{}, err
+	}
+	if err := validateRuntimeCandidateManifestOperationWireFields(manifest); err != nil {
+		return RuntimeCandidateContractManifest{}, err
+	}
 	if err := ValidateRuntimeCandidateOperationCorrectionMetadata(manifest); err != nil {
 		return RuntimeCandidateContractManifest{}, err
 	}
@@ -422,6 +443,7 @@ func (m RuntimeCandidateOperationManifest) Normalized() RuntimeCandidateOperatio
 	m.Kind = CanonicalRuntimeBlockKind(m.Kind)
 	m.OwnerModuleID = strings.TrimSpace(m.OwnerModuleID)
 	m.AllowedOperationFields = normalizeStrings(m.AllowedOperationFields)
+	m.RequiredOperationFields = normalizeStrings(m.RequiredOperationFields)
 	m.AllowedVariantIDs = normalizeStrings(m.AllowedVariantIDs)
 	m.Parameters = cloneRuntimeOperationParameterContracts(m.Parameters)
 	m.RequireOneOfParameters = cloneRuntimeCandidateContractStrings(m.RequireOneOfParameters)
@@ -528,6 +550,28 @@ func (m RuntimeCandidateContractManifest) Clone() RuntimeCandidateContractManife
 	return m.Normalized()
 }
 
+// ValidateRuntimeCandidateManifestOperationCardinality verifies the sealed
+// operation-document budget without deriving candidate content. Consumers use
+// MaxOperationCount after this check; the global compiler ceiling is only a
+// bound on manifests and is not a parallel per-consumer cardinality source.
+func ValidateRuntimeCandidateManifestOperationCardinality(manifest RuntimeCandidateContractManifest) error {
+	manifest = manifest.Normalized()
+	switch manifest.State {
+	case ConvergenceStateNeedStateChange, ConvergenceStateNeedValidation:
+		if manifest.MaxOperationCount < 1 || manifest.MaxOperationCount > RuntimeCandidateOperationMaxCount {
+			return fmt.Errorf("candidate manifest maxOperationCount must be in 1..%d", RuntimeCandidateOperationMaxCount)
+		}
+		if len(manifest.RequiredOperationSequence) > manifest.MaxOperationCount {
+			return fmt.Errorf("candidate manifest required operation sequence exceeds maxOperationCount %d", manifest.MaxOperationCount)
+		}
+	default:
+		if manifest.MaxOperationCount != 0 {
+			return fmt.Errorf("candidate manifest state %q does not accept maxOperationCount", manifest.State)
+		}
+	}
+	return nil
+}
+
 // StableRuntimeCandidateContractManifestHash excludes the Hash field itself
 // and uses only normalized typed values. It is safe to expose in request audit
 // metadata; it contains neither provider payload nor workspace content.
@@ -546,6 +590,7 @@ func StableRuntimeCandidateContractManifestHash(manifest RuntimeCandidateContrac
 		writeHashString(h, string(scope))
 	}
 	writeHashString(h, manifest.OperationContractRevision)
+	writeHashString(h, fmt.Sprintf("%d", manifest.MaxOperationCount))
 	writeHashStrings(h, manifest.RequiredTopLevelFields)
 	writeHashStrings(h, manifest.AllowedTopLevelFields)
 	writeHashStrings(h, manifest.ForbiddenTopLevelFields)
@@ -554,7 +599,6 @@ func StableRuntimeCandidateContractManifestHash(manifest RuntimeCandidateContrac
 		writeHashString(h, binding.Hash)
 	}
 	writeHashStrings(h, manifest.TargetRefs)
-	writeHashString(h, fmt.Sprintf("%t", manifest.DependenciesAllowed))
 	for _, requirement := range manifest.RequiredOperationSequence {
 		writeHashString(h, requirement.RequirementID)
 		writeHashString(h, requirement.Kind)
@@ -567,6 +611,7 @@ func StableRuntimeCandidateContractManifestHash(manifest RuntimeCandidateContrac
 		writeHashString(h, operation.Kind)
 		writeHashString(h, operation.OwnerModuleID)
 		writeHashStrings(h, operation.AllowedOperationFields)
+		writeHashStrings(h, operation.RequiredOperationFields)
 		writeHashStrings(h, operation.AllowedVariantIDs)
 		for _, parameter := range operation.Parameters {
 			writeHashString(h, parameter.Name)
@@ -671,7 +716,7 @@ func runtimeCandidateOperationManifestForKind(kind string, state ConvergenceStat
 			references = append(references, requirement.RequirementID)
 		}
 	}
-	fields := []string{"id", "kind", "targetRefs", "parameters"}
+	fields := []string{"kind", "targetRefs", "parameters"}
 	evidenceKind := ""
 	switch state {
 	case ConvergenceStateNeedStateChange:
@@ -685,9 +730,6 @@ func runtimeCandidateOperationManifestForKind(kind string, state ConvergenceStat
 	}
 	if len(references) != 0 {
 		fields = append(fields, "requiredOperationRef")
-	}
-	if runtimeRequiredOperationSequenceHasDependency(required.RequiredOperationSequence) {
-		fields = append(fields, "dependsOn")
 	}
 	allowedBindingRefs := runtimeOperationBindingAuthorizationRefs(bindingAuthorizations)
 	target, prerequisiteRefs, admissibilityRefs, err := runtimeCandidateTargetAuthorizationForKind(
@@ -735,6 +777,7 @@ func runtimeCandidateOperationManifestForKind(kind string, state ConvergenceStat
 		ValidationRecipes:           runtimeCandidateManifestValidationRecipes(contract.Kind, ownerFacts.ValidationRecipes, bindings, allowedBindingRefs),
 		OperationContractRevision:   contractRevision,
 	}.Normalized()
+	operationManifest.RequiredOperationFields = runtimeCandidateRequiredOperationFields(operationManifest)
 	if _, err := RuntimeOperationCorrectionFields(operationManifest); err != nil {
 		return RuntimeCandidateOperationManifest{}, fmt.Errorf("candidate manifest operation kind %q correction metadata: %w", kind, err)
 	}
@@ -1267,13 +1310,37 @@ func runtimeCandidateManifestVariants(contract RuntimeOperationContract, require
 	return variants, normalizeStrings(ids), nil
 }
 
-func runtimeRequiredOperationSequenceHasDependency(values []RuntimeRequiredOperationVariant) bool {
-	for _, value := range values {
-		if len(value.DependsOnRequirementIDs) != 0 {
-			return true
+func runtimeCandidateRequiredOperationFields(operation RuntimeCandidateOperationManifest) []string {
+	required := []string{"kind"}
+	if len(operation.RequiredOperationReferences) != 0 {
+		required = append(required, "requiredOperationRef")
+	}
+	if len(operation.BindingAuthorizations) != 0 {
+		allRequireCredit := true
+		for _, authorization := range operation.BindingAuthorizations {
+			if len(authorization.AllowedBindingRefs) == 0 {
+				allRequireCredit = false
+				break
+			}
+		}
+		if allRequireCredit {
+			required = append(required, "bindingRefs")
 		}
 	}
-	return false
+	if operation.RequireTargetRefs {
+		required = append(required, "targetRefs")
+	}
+	if len(operation.RequireOneOfParameters) != 0 || len(operation.Variants) != 0 {
+		required = append(required, "parameters")
+	} else {
+		for _, parameter := range operation.Parameters {
+			if parameter.Required {
+				required = append(required, "parameters")
+				break
+			}
+		}
+	}
+	return normalizeStrings(required)
 }
 
 func runtimeCandidateManifestAllowsDynamicParameters(kind string) bool {

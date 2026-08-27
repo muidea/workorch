@@ -164,10 +164,12 @@ func equivalentOwnerInfeasibilityExists(attempts []runtimecontract.RuntimeCandid
 	return false
 }
 
-// rejectCompletedCandidateDocument is the single SM-3 transition for a
-// complete document that cannot become an executable candidate. It creates
-// the attempt record and closes it in one aggregate CAS, so restart never
-// observes a newly allocated but semantically meaningless pending attempt.
+// rejectCompletedCandidateDocument is the single SM-3 attempt transition for
+// a settled document result that cannot become an executable candidate. For
+// empty/invalid framing, the request session is first closed by its own durable
+// owner-private CAS; a restart then re-enters this idempotent second step. This
+// step creates and closes the attempt in one aggregate CAS, so restart never
+// observes a semantically meaningless pending attempt.
 func (c *candidateDispatchComponent) rejectCompletedCandidateDocument(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, attempt int, stablePrefixHash string, manifest runtimecontract.RuntimeCandidateContractManifest, logicalRequestID string, failure runtimecontract.RuntimeCandidateFailure) (RuntimeAggregate, error) {
 	if c == nil || c.repository == nil || workspaceID == "" || runID == "" || (attempt != 0 && attempt != 1) || strings.TrimSpace(stablePrefixHash) == "" || strings.TrimSpace(logicalRequestID) == "" || failure.Class == "" || strings.TrimSpace(failure.Reason) == "" {
 		return RuntimeAggregate{}, common.ErrInvalidArgument
@@ -185,7 +187,7 @@ func (c *candidateDispatchComponent) rejectCompletedCandidateDocument(ctx contex
 	if duplicate {
 		return aggregate, nil
 	}
-	if err := validateCandidateAttemptSessionBinding(aggregate, stablePrefixHash, manifest, logicalRequestID); err != nil {
+	if err := validateCandidateAttemptRejectionSessionBinding(aggregate, stablePrefixHash, manifest, logicalRequestID); err != nil {
 		return RuntimeAggregate{}, err
 	}
 	if !runtimeDecisionAcceptsCandidateDocument(aggregate.Decision.State) {
@@ -280,15 +282,20 @@ func (c *candidateDispatchComponent) admitCandidateProposal(ctx context.Context,
 	if err != nil {
 		return CandidateAdmissionCommitResult{}, err
 	}
+	// A response-loss replay is an immutable query of the already committed
+	// SM-3 result, not Runtime progress. Prove that exact durable identity before
+	// the terminal fence so restart can return the original rejection without a
+	// second CAS. Any different delivery continues through the ordinary terminal
+	// and pending-attempt guards below and therefore cannot reopen authority.
+	if duplicate, found := duplicateRejectedCandidateAdmission(aggregate, attempt, manifest.Hash, logicalRequestID, candidate); found {
+		return CandidateAdmissionCommitResult{Aggregate: aggregate, Admission: duplicate}, nil
+	}
 	if err := rejectRuntimeProgressAfterTermination(aggregate); err != nil {
 		return CandidateAdmissionCommitResult{}, err
 	}
 	contractID := runtimecontract.StableAuthorityContractID(workspaceID, runID, aggregate.Decision.AuthorityTransaction())
 	idx, record, ok := pendingCandidateAttempt(aggregate.CandidateAttempts, workspaceID, runID, contractID, attempt)
 	if !ok {
-		if duplicate, found := duplicateRejectedCandidateAdmission(aggregate, attempt, manifest.Hash, logicalRequestID, candidate); found {
-			return CandidateAdmissionCommitResult{Aggregate: aggregate, Admission: duplicate}, nil
-		}
 		return CandidateAdmissionCommitResult{}, fmt.Errorf("%w: candidate attempt %d is not pending", common.ErrConflict, attempt)
 	}
 	if err := validateCandidateAttemptSessionBinding(aggregate, "", manifest, logicalRequestID); err != nil {

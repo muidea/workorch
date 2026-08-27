@@ -2249,7 +2249,7 @@ func (l RuntimeSemanticPlanningLedger) Validate() error {
 		if l.Attempt != 1 || len(l.Rejections) != 1 || l.Manifest == nil {
 			return fmt.Errorf("runtime semantic correction directive has no exact attempt-0 lineage")
 		}
-		if err := l.CorrectionDirective.ValidateAgainst(*l.Manifest, l.Rejections[0]); err != nil {
+		if err := l.CorrectionDirective.validateAgainstPersistedViolations(*l.Manifest, l.Rejections[0].SemanticViolations); err != nil {
 			return err
 		}
 		if l.CorrectionDirective.StablePrefixHash != l.StablePrefixHash {
@@ -2670,32 +2670,46 @@ func StableRuntimeSemanticFeasibilityBatchID(manifest RuntimeSemanticPlanManifes
 	return "runtime-semantic-feasibility-batch-" + hex.EncodeToString(h.Sum(nil))[:20]
 }
 
-// StableRuntimeSemanticPlanCorrectionHash binds the sole correction request to
-// the complete producer-authored rejection without turning its text into a
-// retry decision. SM-3 decides whether this hash may be used at all.
-func StableRuntimeSemanticPlanCorrectionHash(rejection RuntimeOriginalDiagnostic) string {
-	diagnostic := rejection.Normalized()
-	if diagnostic == nil {
+// StableRuntimeSemanticCorrectionObservationHash binds the sole correction
+// request to the bounded EventHub observation. Audit text and raw/detail
+// fields are structurally absent and therefore cannot perturb request identity.
+func StableRuntimeSemanticCorrectionObservationHash(observation RuntimeSemanticCorrectionObservation) string {
+	observation = observation.Normalized()
+	if observation.Validate() != nil {
 		return ""
 	}
 	h := sha256.New()
-	writeHashString(h, "runtime-semantic-plan-correction")
-	writeHashString(h, diagnostic.SchemaVersion)
-	writeHashString(h, diagnostic.OwnerModuleID)
-	writeHashString(h, diagnostic.OriginalClass)
-	writeHashString(h, diagnostic.OriginalCode)
-	writeHashString(h, diagnostic.OriginalMessage)
-	writeHashString(h, diagnostic.Signature)
-	writeHashString(h, diagnostic.OperationID)
-	writeHashStrings(h, diagnostic.TargetRefs)
-	for _, violation := range diagnostic.FieldViolations {
+	writeHashString(h, "runtime-semantic-correction-observation/v1")
+	writeHashString(h, observation.SchemaVersion)
+	writeHashString(h, observation.OwnerModuleID)
+	writeHashString(h, observation.Class)
+	writeHashString(h, observation.Code)
+	writeHashString(h, observation.Signature)
+	writeHashString(h, observation.OperationID)
+	writeHashStrings(h, observation.TargetRefs)
+	writeHashString(h, observation.ExpectedRevision)
+	writeHashString(h, observation.ObservedRevision)
+	for _, violation := range observation.FieldViolations {
 		writeHashString(h, violation.Path)
 		writeHashString(h, violation.Actual)
 		writeHashStrings(h, violation.Allowed)
 		writeHashStrings(h, violation.Required)
 		writeHashStrings(h, violation.Forbidden)
 	}
-	writeRuntimeSemanticContractViolationsHash(h, diagnostic.SemanticViolations)
+	writeRuntimeSemanticContractViolationsHash(h, observation.SemanticViolations)
+	if observation.TargetObservation == nil {
+		writeHashString(h, "no-target-observation")
+	} else {
+		target := observation.TargetObservation.Normalized()
+		writeHashString(h, target.OwnerModuleID)
+		writeHashString(h, target.SubjectRef)
+		writeHashString(h, target.TargetRole)
+		writeHashString(h, target.ObservedRevision)
+		writeHashStrings(h, target.TargetRefs)
+		writeHashString(h, target.DiagnosticClass)
+		writeHashStrings(h, target.EvidenceRefs)
+		writeHashString(h, target.ContentHash)
+	}
 	return "runtime-semantic-correction-" + hex.EncodeToString(h.Sum(nil))[:20]
 }
 

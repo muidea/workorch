@@ -43,3 +43,28 @@ func TestRuntimeCandidateCorrectionDirectiveValidate(t *testing.T) {
 		t.Fatal("rejected-final directive without sealed manifest identity accepted")
 	}
 }
+
+func TestRuntimeCandidateDocumentShapeWitnessIsClosed(t *testing.T) {
+	for _, rejected := range []string{
+		RuntimeCandidateDocumentShapeEmpty,
+		RuntimeCandidateDocumentShapeInvalid,
+		RuntimeCandidateDocumentShapeTrailingContent,
+		RuntimeCandidateDocumentShapeMultipleJSONValues,
+		RuntimeCandidateDocumentShapeNonObjectJSONValue,
+	} {
+		witness := RuntimeCandidateCorrectionWitness{
+			Dimension: RuntimeCandidateCorrectionWitnessDocumentShape,
+			Path:      "$", RejectedValue: rejected, AlternativeValue: RuntimeCandidateDocumentShapeConformant,
+		}
+		if err := witness.Validate(); err != nil {
+			t.Fatalf("document shape %q rejected: %v", rejected, err)
+		}
+	}
+	invalid := RuntimeCandidateCorrectionWitness{
+		Dimension: RuntimeCandidateCorrectionWitnessDocumentShape,
+		Path:      "$", RejectedValue: "provider prose", AlternativeValue: RuntimeCandidateDocumentShapeConformant,
+	}
+	if err := invalid.Validate(); err == nil {
+		t.Fatal("free-form document shape was accepted")
+	}
+}

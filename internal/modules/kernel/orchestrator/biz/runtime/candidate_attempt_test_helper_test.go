@@ -285,6 +285,14 @@ func (c *RuntimeController) AdmitCandidateProposalForTest(ctx context.Context, w
 		return CandidateAdmissionCommitResult{}, err
 	}
 	candidate = runtimeTestBindCandidateToFocusBindings(aggregate.Facts.Focus.CoverageEvidenceBindings, candidate)
+	if len(manifest.Operations) != 0 && len(candidateRuntimeOperations(candidate)) != 0 {
+		candidate, err = runtimecontract.DeriveRuntimeCandidateOperationAuthority(manifest, candidate)
+		if err != nil {
+			return CandidateAdmissionCommitResult{}, err
+		}
+	} else {
+		candidate = runtimeTestRestorePersistedCandidateAuthority(aggregate, candidate)
+	}
 	return c.admitCandidateProposal(ctx, workspaceID, runID, attempt, manifest, logicalRequestID, candidate)
 }
 
@@ -294,6 +302,16 @@ func (c *RuntimeController) AdmitAndSealCandidateAttemptForTest(ctx context.Cont
 		return CandidateAdmissionCommitResult{}, err
 	}
 	candidate = runtimeTestBindCandidateToFocusBindings(aggregate.Facts.Focus.CoverageEvidenceBindings, candidate)
+	if len(manifest.Operations) != 0 && len(candidateRuntimeOperations(candidate)) != 0 {
+		if len(candidateRuntimeOperations(candidate)) != 0 {
+			candidate, err = runtimecontract.DeriveRuntimeCandidateOperationAuthority(manifest, candidate)
+			if err != nil {
+				return CandidateAdmissionCommitResult{}, err
+			}
+		}
+	} else {
+		candidate = runtimeTestRestorePersistedCandidateAuthority(aggregate, candidate)
+	}
 	contractID := runtimecontract.StableAuthorityContractID(workspaceID, runID, aggregate.Decision.AuthorityTransaction())
 	_, record, pending := pendingCandidateAttempt(aggregate.CandidateAttempts, workspaceID, runID, contractID, attempt)
 	if pending && record.Proposal == nil {
@@ -306,8 +324,33 @@ func (c *RuntimeController) AdmitAndSealCandidateAttemptForTest(ctx context.Cont
 			return CandidateAdmissionCommitResult{}, err
 		}
 		candidate = runtimeTestBindCandidateToFocusBindings(aggregate.Facts.Focus.CoverageEvidenceBindings, candidate)
+		candidate, err = runtimecontract.DeriveRuntimeCandidateOperationAuthority(manifest, candidate)
+		if err != nil {
+			return CandidateAdmissionCommitResult{}, err
+		}
 	}
 	return c.admitAndSealCandidateAttempt(ctx, workspaceID, runID, attempt, manifest, logicalRequestID, candidate)
+}
+
+func runtimeTestRestorePersistedCandidateAuthority(aggregate RuntimeAggregate, candidate runtimecontract.RuntimeCandidate) runtimecontract.RuntimeCandidate {
+	if len(candidateRuntimeOperations(candidate)) == 0 {
+		return candidate
+	}
+	wantShape := runtimecontract.StableRuntimeCandidateSemanticShape(candidate)
+	for _, record := range aggregate.CandidateAttempts {
+		if record.Proposal != nil && runtimecontract.StableRuntimeCandidateSemanticShape(*record.Proposal) == wantShape {
+			return *record.Proposal
+		}
+	}
+	if aggregate.ActiveDispatch != nil && runtimecontract.StableRuntimeCandidateSemanticShape(aggregate.ActiveDispatch.Candidate) == wantShape {
+		return aggregate.ActiveDispatch.Candidate
+	}
+	for _, dispatch := range aggregate.CompletedDispatches {
+		if runtimecontract.StableRuntimeCandidateSemanticShape(dispatch.Candidate) == wantShape {
+			return dispatch.Candidate
+		}
+	}
+	return candidate
 }
 
 func candidateAttemptTestBinding(ctx context.Context, c *RuntimeController, workspaceID common.WorkspaceID, runID common.RunID, attempt int) (RuntimeAggregate, runtimecontract.RuntimeCandidateContractManifest, string, error) {
@@ -375,6 +418,10 @@ func EvaluateCandidateAdmission(aggregate RuntimeAggregate, candidate runtimecon
 	)
 	if err != nil {
 		return rejectedCandidateAdmission(candidateAdmissionCodeInvalid, candidateAdmissionInvalidSignature(candidate), fmt.Sprintf("runtime candidate manifest contract: %v", err))
+	}
+	candidate, err = runtimecontract.DeriveRuntimeCandidateOperationAuthority(manifest, candidate)
+	if err != nil {
+		return rejectedCandidateAdmission(candidateAdmissionCodeInvalid, candidateAdmissionInvalidSignature(candidate), fmt.Sprintf("runtime candidate operation authority: %v", err))
 	}
 	return EvaluateCandidateAdmissionWithManifest(aggregate, manifest, candidate)
 }

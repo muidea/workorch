@@ -264,7 +264,7 @@ func (c *planningTransactionComponent) coordinateProviderRequestTerminal(ctx con
 	if err := validateCurrentCandidateRequestSession(aggregate, session); err != nil {
 		return RuntimeAggregate{}, err
 	}
-	if session.State == runtimecontract.RuntimeCandidateRequestSessionDocumentComplete {
+	if session.State == runtimecontract.RuntimeCandidateRequestSessionDocumentComplete || session.State == runtimecontract.RuntimeCandidateRequestSessionDocumentConformanceRejected {
 		return RuntimeAggregate{}, fmt.Errorf("%w: complete provider request cannot accept a terminal failure", common.ErrConflict)
 	}
 	expectedRevision := aggregate.StateRevision
@@ -326,6 +326,9 @@ func applyProviderRequestTerminalToAggregate(aggregate RuntimeAggregate, session
 	aggregate.CandidateRequestSessions[sessionIndex].State = runtimecontract.RuntimeCandidateRequestSessionTerminal
 	aggregate.CandidateRequestSessions[sessionIndex].LastOutcome = fact.RequestOutcome
 	aggregate.CandidateRequestSessions[sessionIndex].ProviderSubmitted = false
+	if fact.RequestOutcome.Class != runtimecontract.RuntimeCandidateRequestOutcomeDocumentRecoveryExhausted {
+		aggregate.CandidateRequestSessions[sessionIndex].LastDocumentFraming = nil
+	}
 	if fact.DocumentKind == runtimecontract.RuntimeProviderDocumentSemanticPlan {
 		return applySemanticContractFailureToAggregate(aggregate, fact.TerminalCode, *fact.Failure.OriginalDiagnostic)
 	}

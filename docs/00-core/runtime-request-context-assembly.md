@@ -23,10 +23,11 @@ persisted RuntimeFacts + RuntimeDefinitionContext
        DefinitionContext
        CandidateContext
        StablePrefixHash
-       CandidateAttempt + optional PreviousFailure
+       CandidateAttempt + optional bounded correction observation/input
   -> LLM block renders provider-neutral sections (C0–C5)
   -> provider adapter maps cache plan (adapter-only private fields)
-  -> candidate response must echo same transaction
+  -> LLM result audit must bind the same canonical request identity;
+     the sealed transaction remains Orchestrator session-owned
 ```
 
 ## RuntimeCandidateContext
@@ -54,7 +55,7 @@ persisted RuntimeFacts + RuntimeDefinitionContext
 LLM block **不得**：
 
 - 从 禁止的 map 或临时上下文重建 authority
-- 在 candidate 响应中改写 transaction
+- 在 provider document/result 中复制、重建或改写 transaction authority
 - 把 provider/model/baseURL 动态绑定写回 facts
 
 ## Assembly Inputs（typed）
@@ -155,10 +156,11 @@ state-changing candidate 的 requiredOutput。
 - definition / evidence revision
 - authority snapshot id
 - candidate attempt index
-- previous failure（attempt 1）
+- bounded correction observation/input identity（attempt 1）
 - included context 的 scope（focus id、capability classes 等）
 
-详细 section hash 字段见 core cache note；本 flow 只要求 **hash 与 transaction 可审计**。
+详细 section hash 字段见 core cache note；本 flow 要求各 section hash 与完整 typed
+`AuthorityTransaction` **分别可审计**，不引入或暗示一份 synthetic transaction hash。
 
 ## Forbidden
 
@@ -171,7 +173,7 @@ state-changing candidate 的 requiredOutput。
 ## Key Flow Guarantees
 
 - candidate context 只来自 persisted facts + sealed definition，不来自 禁止的 map rebuild
-- authority transaction 在请求与响应之间不可漂移
+- authority transaction 由 request session 封存；result 只能以 canonical request identity 回绑，不能携带另一份 transaction authority
 - C0–C5 分层保证稳定 prefix 与易变尾部分离
 - 缺失资源走 prerequisite，不走伪造 LLM state-change
 - attempt 1 复用 stable prefix；第二次失败后离开 candidate 重试预算

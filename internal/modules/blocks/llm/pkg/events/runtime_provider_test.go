@@ -102,6 +102,46 @@ func TestRequestRuntimeCandidateResultRequiresExclusiveOwnerFact(t *testing.T) {
 	}
 }
 
+func TestRequestRuntimeCandidateResultRejectsDocumentFramingIdentityDrift(t *testing.T) {
+	tests := []struct {
+		name    string
+		outcome RuntimeProviderDocumentOutcome
+	}{
+		{
+			name: "empty with invalid identity",
+			outcome: RuntimeProviderDocumentOutcome{Framing: runtimecontract.RuntimeProviderDocumentFraming{
+				Disposition: runtimecontract.RuntimeProviderDocumentEmpty, ExpectedDocumentHash: "expected-1",
+				Code: runtimecontract.RuntimeProviderDocumentCodeFinalOutputInvalid, Signature: runtimecontract.RuntimeProviderDocumentSignatureOutputInvalid,
+			}},
+		},
+		{
+			name: "invalid with empty identity",
+			outcome: RuntimeProviderDocumentOutcome{Framing: runtimecontract.RuntimeProviderDocumentFraming{
+				Disposition: runtimecontract.RuntimeProviderDocumentInvalid, ExpectedDocumentHash: "expected-1",
+				ResponseHash: "provider-response-deadbeef", ResponseBytes: 8,
+				Code: runtimecontract.RuntimeProviderDocumentCodeFinalOutputMissing, Signature: runtimecontract.RuntimeProviderDocumentSignatureOutputMissing,
+			}},
+		},
+		{
+			name: "truncated with output limit signature",
+			outcome: RuntimeProviderDocumentOutcome{Framing: runtimecontract.RuntimeProviderDocumentFraming{
+				Disposition: runtimecontract.RuntimeProviderDocumentIncomplete, ExpectedDocumentHash: "expected-1",
+				ResponseHash: "provider-response-deadbeef", ResponseBytes: 8,
+				Code: runtimecontract.RuntimeProviderDocumentCodeIncompleteJSON, Signature: runtimecontract.RuntimeProviderDocumentSignatureOutputLimit,
+			}},
+		},
+	}
+	for _, testCase := range tests {
+		t.Run(testCase.name, func(t *testing.T) {
+			result := cloneRuntimeCandidateResult(validRuntimeCandidateResult())
+			result.DocumentOutcome = &testCase.outcome
+			if err := result.Validate(); err == nil {
+				t.Fatalf("drifted document framing was accepted: %+v", testCase.outcome.Framing)
+			}
+		})
+	}
+}
+
 func TestRequestRuntimeCandidateResultSubmissionMatrix(t *testing.T) {
 	tests := []struct {
 		name      string

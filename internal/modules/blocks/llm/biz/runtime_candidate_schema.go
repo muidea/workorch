@@ -84,6 +84,9 @@ func runtimeCandidateSchemaForManifest(manifest runtimecontract.RuntimeCandidate
 	if manifest.EffectPolicy.State != manifest.State || manifest.EffectPolicy.Validate() != nil {
 		return ""
 	}
+	if runtimecontract.ValidateRuntimeCandidateManifestOperationCardinality(manifest) != nil {
+		return ""
+	}
 	base := runtimeCandidateSchema(manifest.State)
 	if manifest.State != runtimecontract.ConvergenceStateNeedStateChange && manifest.State != runtimecontract.ConvergenceStateNeedValidation {
 		return base
@@ -105,14 +108,7 @@ func runtimeCandidateSchemaForManifest(manifest runtimecontract.RuntimeCandidate
 		return base
 	}
 	allowedKinds := make([]string, 0, len(manifest.Operations))
-	maxOperations := len(manifest.Operations)
-	if len(manifest.RequiredOperationSequence) > maxOperations {
-		maxOperations = len(manifest.RequiredOperationSequence)
-	}
-	if maxOperations < 1 {
-		maxOperations = 1
-	}
-	operations["maxItems"] = maxOperations
+	operations["maxItems"] = manifest.MaxOperationCount
 	allowsRequiredOperationRef := false
 	for _, operation := range manifest.Operations {
 		allowedKinds = append(allowedKinds, operation.Kind)
@@ -123,9 +119,6 @@ func runtimeCandidateSchemaForManifest(manifest runtimecontract.RuntimeCandidate
 	conditions := runtimeOperationSchemaConditionsForManifest(manifest.Operations)
 	if itemProperties, ok := items["properties"].(map[string]any); ok {
 		itemProperties["kind"] = map[string]any{"type": "string", "enum": allowedKinds}
-		if !manifest.DependenciesAllowed {
-			delete(itemProperties, "dependsOn")
-		}
 		if !allowsRequiredOperationRef {
 			delete(itemProperties, "requiredOperationRef")
 		}
@@ -140,7 +133,7 @@ func runtimeCandidateSchemaForManifest(manifest runtimecontract.RuntimeCandidate
 		} else {
 			itemProperties["bindingRefs"] = map[string]any{"type": "array", "minItems": 1, "maxItems": 1, "items": map[string]any{"type": "string", "enum": bindingRefs}}
 		}
-		items["required"] = []string{"id", "kind"}
+		items["required"] = runtimeCommonRequiredOperationFields(manifest.Operations)
 	}
 	if len(conditions) > 0 {
 		items["allOf"] = conditions
@@ -224,7 +217,7 @@ func runtimeOperationSchemaConditionsForManifest(operations []runtimecontract.Ru
 		}
 		thenProperties := map[string]any{"parameters": parameterSchema}
 		then := map[string]any{"properties": thenProperties}
-		requiredFields := make([]string, 0, 3)
+		requiredFields := append([]string(nil), operation.RequiredOperationFields...)
 		bindingConditions := make([]any, 0, len(operation.BindingAuthorizations))
 		for _, authorization := range operation.BindingAuthorizations {
 			authorization = authorization.Normalized()
@@ -258,14 +251,8 @@ func runtimeOperationSchemaConditionsForManifest(operations []runtimecontract.Ru
 			}
 			bindingConditions = append(bindingConditions, condition)
 		}
-		if len(parameterRequirements) > 0 || len(operation.Variants) > 0 {
-			requiredFields = append(requiredFields, "parameters")
-		}
 		allowedTargets := operation.Target.Normalized().AllowedTargetRefs()
 		if operation.RequireTargetRefs || len(allowedTargets) > 0 {
-			if operation.RequireTargetRefs {
-				requiredFields = append(requiredFields, "targetRefs")
-			}
 			targetItems := map[string]any{"type": "string"}
 			if len(allowedTargets) > 0 {
 				targetItems["enum"] = append([]string(nil), allowedTargets...)
@@ -286,7 +273,7 @@ func runtimeOperationSchemaConditionsForManifest(operations []runtimecontract.Ru
 			thenProperties["targetRefs"] = targetSchema
 		}
 		if len(requiredFields) != 0 {
-			then["required"] = requiredFields
+			then["required"] = runtimeSortedUniqueStrings(requiredFields)
 		}
 		if len(bindingConditions) != 0 {
 			then["allOf"] = bindingConditions
@@ -297,6 +284,24 @@ func runtimeOperationSchemaConditionsForManifest(operations []runtimecontract.Ru
 		})
 	}
 	return ret
+}
+
+func runtimeCommonRequiredOperationFields(operations []runtimecontract.RuntimeCandidateOperationManifest) []string {
+	if len(operations) == 0 {
+		return nil
+	}
+	common := append([]string(nil), operations[0].Normalized().RequiredOperationFields...)
+	for _, operation := range operations[1:] {
+		required := operation.Normalized().RequiredOperationFields
+		filtered := common[:0]
+		for _, field := range common {
+			if runtimeStringIn(required, field) {
+				filtered = append(filtered, field)
+			}
+		}
+		common = filtered
+	}
+	return runtimeSortedUniqueStrings(common)
 }
 
 func runtimeOperationParameterItemSchemaForManifest(operation runtimecontract.RuntimeCandidateOperationManifest) map[string]any {
@@ -472,11 +477,10 @@ func runtimeOperationCandidateSchema(id, title, description string) string {
 				"type": "array", "minItems": 1, "maxItems": runtimecontract.RuntimeCandidateContextItemsMaxCount,
 				"items": map[string]any{
 					"type": "object", "additionalProperties": false,
-					"required": []string{"id", "kind", "bindingRefs"},
+					"required": []string{"kind"},
 					"properties": map[string]any{
-						"id": map[string]any{"type": "string", "maxLength": runtimeProviderStringMaxLength}, "kind": map[string]any{"type": "string", "maxLength": runtimeProviderStringMaxLength},
+						"kind":                 map[string]any{"type": "string", "maxLength": runtimeProviderStringMaxLength},
 						"requiredOperationRef": map[string]any{"type": "string", "maxLength": runtimeProviderStringMaxLength},
-						"dependsOn":            map[string]any{"type": "array", "maxItems": runtimecontract.RuntimeCandidateContextItemsMaxCount, "items": map[string]any{"type": "string", "maxLength": runtimeProviderStringMaxLength}},
 						"bindingRefs":          map[string]any{"type": "array", "minItems": 1, "items": map[string]any{"type": "string"}},
 						"targetRefs":           map[string]any{"type": "array", "maxItems": runtimecontract.RuntimeCandidateContextItemsMaxCount, "items": map[string]any{"type": "string", "maxLength": runtimeProviderStringMaxLength}},
 						"parameters": map[string]any{"type": "array", "items": map[string]any{

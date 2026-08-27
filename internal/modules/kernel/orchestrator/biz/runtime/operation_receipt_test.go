@@ -52,18 +52,19 @@ func TestRuntimeControllerOperationReceiptFenceAndTerminalUniqueness(t *testing.
 	if err != nil {
 		t.Fatal(err)
 	}
-	sealedExecution, ok := operationExecutionRecord(sealed.ActiveDispatch.OperationExecutions, "write-1")
+	operationID := runtimeTestActiveOperationID(t, sealed, 0)
+	sealedExecution, ok := operationExecutionRecord(sealed.ActiveDispatch.OperationExecutions, operationID)
 	if !ok {
 		t.Fatal("sealed execution is missing")
 	}
-	if _, _, err := controller.QueryOperationReceipt(context.Background(), "ws-v2", "run-v2", sealed.ActiveDispatch.ID, "write-1", sealedExecution.ExecutionKey, 1, nil); !errors.Is(err, common.ErrConflict) {
+	if _, _, err := controller.QueryOperationReceipt(context.Background(), "ws-v2", "run-v2", sealed.ActiveDispatch.ID, operationID, sealedExecution.ExecutionKey, 1, nil); !errors.Is(err, common.ErrConflict) {
 		t.Fatalf("unclaimed receipt query err = %v, want conflict", err)
 	}
-	claimed, err := controller.claimOperationExecution(context.Background(), "ws-v2", "run-v2", "write-1")
+	claimed, err := controller.claimOperationExecution(context.Background(), "ws-v2", "run-v2", operationID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	execution, ok := operationExecutionRecord(claimed.ActiveDispatch.OperationExecutions, "write-1")
+	execution, ok := operationExecutionRecord(claimed.ActiveDispatch.OperationExecutions, operationID)
 	if !ok {
 		t.Fatal("claimed execution is missing")
 	}
@@ -72,13 +73,13 @@ func TestRuntimeControllerOperationReceiptFenceAndTerminalUniqueness(t *testing.
 		t.Fatal(err)
 	}
 	assertRuntimeExecutionDimension(t, claimedBudget, runtimecontract.RuntimeBudgetDimensionCapabilityOperation, 0, 1, 0)
-	if _, found, err := controller.QueryOperationReceipt(context.Background(), "ws-v2", "run-v2", claimed.ActiveDispatch.ID, "write-1", execution.ExecutionKey, execution.Fence, nil); err != nil || found {
+	if _, found, err := controller.QueryOperationReceipt(context.Background(), "ws-v2", "run-v2", claimed.ActiveDispatch.ID, operationID, execution.ExecutionKey, execution.Fence, nil); err != nil || found {
 		t.Fatalf("claimed receipt query found=%v err=%v, want authorized found=false", found, err)
 	}
-	if _, _, err := controller.QueryOperationReceipt(context.Background(), "ws-v2", "run-v2", "different-dispatch", "write-1", execution.ExecutionKey, execution.Fence, nil); !errors.Is(err, common.ErrConflict) {
+	if _, _, err := controller.QueryOperationReceipt(context.Background(), "ws-v2", "run-v2", "different-dispatch", operationID, execution.ExecutionKey, execution.Fence, nil); !errors.Is(err, common.ErrConflict) {
 		t.Fatalf("wrong dispatch receipt query err = %v, want conflict", err)
 	}
-	if _, _, err := controller.QueryOperationReceipt(context.Background(), "ws-v2", "run-v2", claimed.ActiveDispatch.ID, "write-1", execution.ExecutionKey+"-wrong", execution.Fence, nil); !errors.Is(err, common.ErrConflict) {
+	if _, _, err := controller.QueryOperationReceipt(context.Background(), "ws-v2", "run-v2", claimed.ActiveDispatch.ID, operationID, execution.ExecutionKey+"-wrong", execution.Fence, nil); !errors.Is(err, common.ErrConflict) {
 		t.Fatalf("wrong execution key receipt query err = %v, want conflict", err)
 	}
 	receipt := runtimecontract.RuntimeOperationReceipt{
@@ -98,7 +99,7 @@ func TestRuntimeControllerOperationReceiptFenceAndTerminalUniqueness(t *testing.
 		t.Fatal(err)
 	}
 	assertRuntimeExecutionDimension(t, committedBudget, runtimecontract.RuntimeBudgetDimensionCapabilityOperation, 1, 0, 0)
-	queried, found, err := controller.QueryOperationReceipt(context.Background(), "ws-v2", "run-v2", claimed.ActiveDispatch.ID, "write-1", execution.ExecutionKey, execution.Fence, nil)
+	queried, found, err := controller.QueryOperationReceipt(context.Background(), "ws-v2", "run-v2", claimed.ActiveDispatch.ID, operationID, execution.ExecutionKey, execution.Fence, nil)
 	if err != nil || !found || !runtimecontract.SameRuntimeOperationReceipt(first, queried) {
 		t.Fatalf("committed receipt query found=%v receipt=%+v err=%v", found, queried, err)
 	}

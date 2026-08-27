@@ -61,6 +61,29 @@ func TestCandidateCorrectionObjectivesRequireAllowedOperationKind(t *testing.T) 
 	}
 }
 
+func TestCandidateCorrectionObjectivesRemoveForbiddenProviderIdentityOnly(t *testing.T) {
+	t.Parallel()
+	for _, field := range []string{"id", "dependsOn"} {
+		t.Run(field, func(t *testing.T) {
+			failure := runtimecontract.RuntimeCandidateFailure{
+				Class: runtimecontract.RuntimeCandidateFailureClassSchema, Code: "candidate_schema_invalid", Signature: "candidate-schema-invalid",
+				Diagnostic: &runtimecontract.RuntimeCandidateFailureDiagnostic{
+					Path: "$.operations[0]." + field, Actual: field,
+					Allowed:    []string{"kind", "bindingRefs", "targetRefs", "parameters"},
+					Forbidden:  []string{field},
+					Required:   []string{"dependsOn"},
+					Objectives: []runtimecontract.RuntimeCandidateCorrectionObjective{runtimecontract.RuntimeCandidateCorrectionSatisfyDependency},
+				},
+			}
+			objectives := CandidateCorrectionObjectivesForFailure(&failure)
+			want := []runtimecontract.RuntimeCandidateCorrectionObjective{runtimecontract.RuntimeCandidateCorrectionRemoveForbiddenField}
+			if !reflect.DeepEqual(objectives, want) {
+				t.Fatalf("provider identity %s objectives = %+v, want %+v", field, objectives, want)
+			}
+		})
+	}
+}
+
 func TestSealCandidateRejectionCorrectableRequiresObjectives(t *testing.T) {
 	aggregate, candidate := aggregateWithActiveRejectedCandidate(t)
 	manifest, err := runtimecontract.BuildRuntimeCandidateContractManifest(
@@ -74,6 +97,7 @@ func TestSealCandidateRejectionCorrectableRequiresObjectives(t *testing.T) {
 	manifest.Hash = ""
 	manifest = manifest.Normalized()
 	manifest.Hash = runtimecontract.StableRuntimeCandidateContractManifestHash(manifest)
+	candidate = runtimeTestMustDeriveCandidateForManifest(t, manifest, candidate)
 	failure := &runtimecontract.RuntimeCandidateFailure{
 		Class: runtimecontract.RuntimeCandidateFailureClassContract, Code: candidateAdmissionCodeReplaysRejectedShape, Signature: "candidate-replay",
 		Diagnostic: &runtimecontract.RuntimeCandidateFailureDiagnostic{
@@ -148,6 +172,66 @@ func TestSealCandidateRejectionRequiresConcreteWitnessAndPreservesRequiredFieldC
 	if err != nil || correctable == nil || correctable.Disposition != runtimecontract.RuntimeCandidateCorrectionCorrectableOnce || correctable.Witness == nil ||
 		correctable.Witness.Dimension != runtimecontract.RuntimeCandidateCorrectionWitnessSchemaField || correctable.Witness.AlternativeValue != candidateCorrectionFieldPresent {
 		t.Fatalf("manifest-required schema field lost correction witness: directive=%+v err=%v", correctable, err)
+	}
+
+	manifest.Operations = []runtimecontract.RuntimeCandidateOperationManifest{{
+		Kind:                    runtimecontract.RuntimeBlockKindPatchApply,
+		AllowedOperationFields:  []string{"kind", "parameters", "targetRefs"},
+		RequiredOperationFields: []string{"kind", "parameters", "targetRefs"},
+		RequireTargetRefs:       true,
+		Parameters: []runtimecontract.RuntimeOperationParameterContract{{
+			Name: "content", Type: runtimecontract.RuntimeOperationParameterTypeString, Required: true,
+		}},
+	}}
+	for _, testCase := range []struct {
+		path     string
+		actual   string
+		required string
+	}{
+		{path: "$.operations[0].targetRefs", actual: "missing_targetRefs", required: "targetRefs"},
+		{path: "$.operations[0].parameters[name=content]", actual: "missing_content", required: "content"},
+	} {
+		failure := &runtimecontract.RuntimeCandidateFailure{
+			Class: runtimecontract.RuntimeCandidateFailureClassSchema, Code: "candidate_schema_invalid", Signature: "schema", Reason: "required candidate field is missing",
+			Diagnostic: &runtimecontract.RuntimeCandidateFailureDiagnostic{
+				Path: testCase.path, Actual: testCase.actual, Required: []string{testCase.required}, ManifestHash: manifest.Hash,
+			},
+		}
+		_, directive, err := SealCandidateRejection(failure, manifest)
+		if err != nil || directive == nil || directive.Disposition != runtimecontract.RuntimeCandidateCorrectionCorrectableOnce || directive.Witness == nil ||
+			directive.Witness.Path != testCase.path || directive.Witness.RejectedValue != candidateCorrectionFieldAbsent || directive.Witness.AlternativeValue != candidateCorrectionFieldPresent {
+			t.Fatalf("required field %s lost exact correction witness: directive=%+v err=%v", testCase.path, directive, err)
+		}
+	}
+}
+
+func TestSealCandidateRejectionUsesTypedDocumentAndRawRemovalWitnesses(t *testing.T) {
+	manifest := runtimecontract.RuntimeCandidateContractManifest{Hash: "manifest-hash"}
+	documentFailure := &runtimecontract.RuntimeCandidateFailure{
+		Class: runtimecontract.RuntimeCandidateFailureClassSchema, Code: "candidate_document_nonconformant", Signature: "document-shape", Reason: "one JSON object is required",
+		Diagnostic: &runtimecontract.RuntimeCandidateFailureDiagnostic{
+			Path: "$", Actual: runtimecontract.RuntimeCandidateDocumentShapeNonObjectJSONValue, ManifestHash: manifest.Hash,
+			Objectives: []runtimecontract.RuntimeCandidateCorrectionObjective{runtimecontract.RuntimeCandidateCorrectionConformExpectedDocument},
+		},
+	}
+	_, directive, err := SealCandidateRejection(documentFailure, manifest)
+	if err != nil || directive == nil || directive.Disposition != runtimecontract.RuntimeCandidateCorrectionCorrectableOnce || directive.Witness == nil ||
+		directive.Witness.Dimension != runtimecontract.RuntimeCandidateCorrectionWitnessDocumentShape || directive.Witness.RejectedValue != runtimecontract.RuntimeCandidateDocumentShapeNonObjectJSONValue {
+		t.Fatalf("document-shape directive=%+v err=%v", directive, err)
+	}
+
+	for _, field := range []string{"id", "dependsOn"} {
+		failure := &runtimecontract.RuntimeCandidateFailure{
+			Class: runtimecontract.RuntimeCandidateFailureClassSchema, Code: "candidate_schema_invalid", Signature: "raw-field", Reason: "raw canonical field is forbidden",
+			Diagnostic: &runtimecontract.RuntimeCandidateFailureDiagnostic{
+				Path: "$.operations[0]." + field, Actual: field, Forbidden: []string{field}, ManifestHash: manifest.Hash,
+			},
+		}
+		_, correction, err := SealCandidateRejection(failure, manifest)
+		if err != nil || correction == nil || correction.Disposition != runtimecontract.RuntimeCandidateCorrectionCorrectableOnce || correction.Witness == nil ||
+			correction.Witness.Dimension != runtimecontract.RuntimeCandidateCorrectionWitnessSchemaField || correction.Witness.AlternativeValue != candidateCorrectionFieldAbsent {
+			t.Fatalf("raw %s removal directive=%+v err=%v", field, correction, err)
+		}
 	}
 }
 

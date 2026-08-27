@@ -81,8 +81,14 @@ func ValidateRuntimeCandidateAgainstManifest(manifest RuntimeCandidateContractMa
 	if manifest.Revision != RuntimeCandidateContractManifestRevision || manifest.Hash == "" || manifest.Hash != StableRuntimeCandidateContractManifestHash(manifest) {
 		return &RuntimeCandidateContractDiagnostic{Path: "$", Actual: "unsealed_manifest", Cause: fmt.Errorf("runtime candidate contract manifest is invalid")}
 	}
+	if err := ValidateRuntimeCandidateManifestOperationCardinality(manifest); err != nil {
+		return &RuntimeCandidateContractDiagnostic{Path: "$.operations", Actual: "invalid_max_operation_count", Cause: err}
+	}
 	if manifest.EffectPolicy.State != manifest.State {
 		return &RuntimeCandidateContractDiagnostic{Path: "$.effectPolicy.state", Actual: string(manifest.EffectPolicy.State), Allowed: []string{string(manifest.State)}, Cause: fmt.Errorf("runtime candidate effect policy state does not match manifest")}
+	}
+	if err := validateRuntimeCandidateManifestOperationWireFields(manifest); err != nil {
+		return &RuntimeCandidateContractDiagnostic{Path: "$.operations", Actual: "invalid_operation_fields", Cause: err}
 	}
 	if err := ValidateRuntimeCandidateOperationCorrectionMetadata(manifest); err != nil {
 		return &RuntimeCandidateContractDiagnostic{Path: "$.operations", Actual: "invalid_correction_metadata", Cause: err}
@@ -96,6 +102,31 @@ func ValidateRuntimeCandidateAgainstManifest(manifest RuntimeCandidateContractMa
 	operations, err := runtimeCandidatePayloadOperations(candidate)
 	if err != nil {
 		return &RuntimeCandidateContractDiagnostic{Path: "$.operations", Actual: "candidate_shape", Cause: err}
+	}
+	if len(operations) > manifest.MaxOperationCount {
+		return &RuntimeCandidateContractDiagnostic{
+			Path: "$.operations", Actual: fmt.Sprintf("operation_count_%d", len(operations)),
+			Allowed: []string{fmt.Sprintf("0..%d operations", manifest.MaxOperationCount)},
+			Cause:   fmt.Errorf("candidate operation count exceeds sealed maxOperationCount"),
+		}
+	}
+	expectedCandidate, err := DeriveRuntimeCandidateOperationAuthority(manifest, candidate)
+	if err != nil {
+		return &RuntimeCandidateContractDiagnostic{Path: "$.operations", Actual: "operation_authority_derivation_failed", Cause: err}
+	}
+	expectedOperations, err := runtimeCandidatePayloadOperations(expectedCandidate)
+	if err != nil || len(expectedOperations) != len(operations) {
+		return &RuntimeCandidateContractDiagnostic{Path: "$.operations", Actual: "operation_authority_shape_mismatch", Cause: err}
+	}
+	for index, operation := range operations {
+		operation = operation.Normalized()
+		expected := expectedOperations[index].Normalized()
+		if operation.ID != expected.ID {
+			return runtimeCandidateContractDiagnostic(operation.ID, fmt.Sprintf("$.operations[%d].id", index), operation.ID, []string{expected.ID}, []string{"owner-derived id"}, nil, fmt.Errorf("operation id is not the manifest-derived identity"))
+		}
+		if !runtimeCandidateStringSlicesEqual(operation.DependsOn, expected.DependsOn) {
+			return runtimeCandidateContractDiagnostic(operation.ID, fmt.Sprintf("$.operations[%d].dependsOn", index), strings.Join(operation.DependsOn, ","), expected.DependsOn, []string{"owner-derived dependency graph"}, nil, fmt.Errorf("operation dependencies do not match the required operation graph"))
+		}
 	}
 	operationIDs := make(map[string]struct{}, len(operations))
 	for index, operation := range operations {
@@ -124,6 +155,38 @@ func ValidateRuntimeCandidateAgainstManifest(manifest RuntimeCandidateContractMa
 		}
 	}
 	return nil
+}
+
+func validateRuntimeCandidateManifestOperationWireFields(manifest RuntimeCandidateContractManifest) error {
+	for _, operation := range manifest.Operations {
+		operation = operation.Normalized()
+		for _, field := range []string{"id", "dependsOn", "coverageWorkItemIds"} {
+			if runtimeCandidatePayloadContains(operation.AllowedOperationFields, field) {
+				return fmt.Errorf("candidate manifest operation kind %q exposes owner-derived field %q", operation.Kind, field)
+			}
+		}
+		if !runtimeCandidatePayloadContains(operation.RequiredOperationFields, "kind") {
+			return fmt.Errorf("candidate manifest operation kind %q must require kind", operation.Kind)
+		}
+		for _, field := range operation.RequiredOperationFields {
+			if !runtimeCandidatePayloadContains(operation.AllowedOperationFields, field) {
+				return fmt.Errorf("candidate manifest operation kind %q requires non-allowed field %q", operation.Kind, field)
+			}
+		}
+	}
+	return nil
+}
+
+func runtimeCandidateStringSlicesEqual(left, right []string) bool {
+	if len(left) != len(right) {
+		return false
+	}
+	for index := range left {
+		if left[index] != right[index] {
+			return false
+		}
+	}
+	return true
 }
 
 func validateRuntimeCandidateOperationAgainstManifest(manifest RuntimeCandidateContractManifest, operation RuntimeOperation, index int) error {

@@ -414,7 +414,7 @@ func TestRuntimeSemanticExistingTargetPayloadAndCorrectionUseOwnerReplacementKin
 		MaxOutputTokens: 1024, MaxRecoveryAttempts: 1,
 	}
 	expected.Hash = StableRuntimeExpectedDocumentHash(expected)
-	directive, err := DeriveRuntimeSemanticCorrectionDirective(manifest, expected, expected.StablePrefixHash, rejection)
+	directive, err := DeriveRuntimeSemanticCorrectionDirective(manifest, expected, expected.StablePrefixHash, semanticCorrectionObservationForTest(rejection))
 	if err != nil {
 		t.Fatal(err)
 	}

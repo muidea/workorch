@@ -9,7 +9,7 @@ import (
 	"github.com/muidea/workorch/internal/pkg/common"
 )
 
-const RuntimeSemanticCorrectionDirectiveSchemaCurrent = "workorch.runtime_semantic_correction_directive"
+const RuntimeSemanticCorrectionDirectiveSchemaCurrent = "workorch.runtime_semantic_correction_directive.v2"
 
 type RuntimeSemanticContractViolationKind string
 
@@ -201,43 +201,40 @@ func normalizeRuntimeSemanticContractViolations(values []RuntimeSemanticContract
 // RuntimeSemanticCorrectionDirective is the sole persisted, actionable delta
 // for semantic attempt 1. SM-3 owns whether this value is created or consumed.
 type RuntimeSemanticCorrectionDirective struct {
-	SchemaVersion       string                             `json:"schemaVersion"`
-	Hash                string                             `json:"hash"`
-	PlanStep            RuntimeSemanticPlanStep            `json:"planStep"`
-	ManifestHash        string                             `json:"manifestHash"`
-	DefinitionSeedHash  string                             `json:"definitionSeedHash"`
-	StablePrefixHash    string                             `json:"stablePrefixHash"`
-	SourceRejectionHash string                             `json:"sourceRejectionHash"`
-	Attempt             int                                `json:"attempt"`
-	Violations          []RuntimeSemanticContractViolation `json:"violations"`
+	SchemaVersion         string                             `json:"schemaVersion"`
+	Hash                  string                             `json:"hash"`
+	PlanStep              RuntimeSemanticPlanStep            `json:"planStep"`
+	ManifestHash          string                             `json:"manifestHash"`
+	DefinitionSeedHash    string                             `json:"definitionSeedHash"`
+	StablePrefixHash      string                             `json:"stablePrefixHash"`
+	SourceObservationHash string                             `json:"sourceObservationHash"`
+	Attempt               int                                `json:"attempt"`
+	Violations            []RuntimeSemanticContractViolation `json:"violations"`
 }
 
 // DeriveRuntimeSemanticCorrectionDirective is the owner-neutral, deterministic
 // constructor used by the Orchestrator SM-3 reducer. It only packages already
-// persisted rejection facts; it never chooses whether a retry is allowed.
-func DeriveRuntimeSemanticCorrectionDirective(manifest RuntimeSemanticPlanManifest, expected RuntimeExpectedDocumentContract, stablePrefixHash string, rejection RuntimeOriginalDiagnostic) (RuntimeSemanticCorrectionDirective, error) {
+// projected rejection facts; it never chooses whether a retry is allowed.
+func DeriveRuntimeSemanticCorrectionDirective(manifest RuntimeSemanticPlanManifest, expected RuntimeExpectedDocumentContract, stablePrefixHash string, observation RuntimeSemanticCorrectionObservation) (RuntimeSemanticCorrectionDirective, error) {
 	manifest = manifest.Normalized()
 	expected = expected.Normalized()
 	if err := manifest.Validate(); err != nil {
 		return RuntimeSemanticCorrectionDirective{}, err
 	}
-	if err := rejection.Validate(); err != nil {
+	if err := observation.Validate(); err != nil {
 		return RuntimeSemanticCorrectionDirective{}, err
 	}
 	if strings.TrimSpace(stablePrefixHash) == "" || expected.DocumentKind != RuntimeProviderDocumentSemanticPlan || expected.ManifestHash != manifest.Hash || expected.DefinitionSeedHash != manifest.DefinitionSeedHash || expected.CorrectionAttempt != 1 {
 		return RuntimeSemanticCorrectionDirective{}, fmt.Errorf("runtime semantic correction derivation identity is invalid")
 	}
-	if len(rejection.SemanticViolations) == 0 {
-		return RuntimeSemanticCorrectionDirective{}, fmt.Errorf("runtime semantic correction derivation requires typed violations")
-	}
 	directive := RuntimeSemanticCorrectionDirective{
 		SchemaVersion: RuntimeSemanticCorrectionDirectiveSchemaCurrent,
 		PlanStep:      expected.PlanStep, ManifestHash: manifest.Hash, DefinitionSeedHash: manifest.DefinitionSeedHash,
-		StablePrefixHash: strings.TrimSpace(stablePrefixHash), SourceRejectionHash: StableRuntimeSemanticPlanCorrectionHash(rejection), Attempt: 1,
-		Violations: cloneRuntimeSemanticContractViolations(rejection.SemanticViolations),
+		StablePrefixHash: strings.TrimSpace(stablePrefixHash), SourceObservationHash: StableRuntimeSemanticCorrectionObservationHash(observation), Attempt: 1,
+		Violations: cloneRuntimeSemanticContractViolations(observation.SemanticViolations),
 	}
 	directive.Hash = StableRuntimeSemanticCorrectionDirectiveHash(directive)
-	if err := directive.ValidateAgainst(manifest, rejection); err != nil {
+	if err := directive.ValidateAgainstObservation(manifest, observation); err != nil {
 		return RuntimeSemanticCorrectionDirective{}, err
 	}
 	return directive, nil
@@ -250,7 +247,7 @@ func (d RuntimeSemanticCorrectionDirective) Normalized() RuntimeSemanticCorrecti
 	d.ManifestHash = strings.TrimSpace(d.ManifestHash)
 	d.DefinitionSeedHash = strings.TrimSpace(d.DefinitionSeedHash)
 	d.StablePrefixHash = strings.TrimSpace(d.StablePrefixHash)
-	d.SourceRejectionHash = strings.TrimSpace(d.SourceRejectionHash)
+	d.SourceObservationHash = strings.TrimSpace(d.SourceObservationHash)
 	d.Violations = normalizeRuntimeSemanticContractViolations(d.Violations)
 	return d
 }
@@ -265,7 +262,7 @@ func (d RuntimeSemanticCorrectionDirective) Validate() error {
 	d = d.Normalized()
 	if d.SchemaVersion != RuntimeSemanticCorrectionDirectiveSchemaCurrent || d.Hash == "" ||
 		d.PlanStep == "" || d.ManifestHash == "" || d.DefinitionSeedHash == "" ||
-		d.StablePrefixHash == "" || d.SourceRejectionHash == "" || d.Attempt != 1 ||
+		d.StablePrefixHash == "" || d.SourceObservationHash == "" || d.Attempt != 1 ||
 		len(d.Violations) == 0 || len(d.Violations) > 32 {
 		return fmt.Errorf("runtime semantic correction directive requires current bounded attempt-1 identity")
 	}
@@ -280,8 +277,11 @@ func (d RuntimeSemanticCorrectionDirective) Validate() error {
 	return nil
 }
 
-func (d RuntimeSemanticCorrectionDirective) ValidateAgainst(manifest RuntimeSemanticPlanManifest, rejection RuntimeOriginalDiagnostic) error {
+func (d RuntimeSemanticCorrectionDirective) ValidateAgainstObservation(manifest RuntimeSemanticPlanManifest, observation RuntimeSemanticCorrectionObservation) error {
 	if err := d.Validate(); err != nil {
+		return err
+	}
+	if err := observation.Validate(); err != nil {
 		return err
 	}
 	manifest = manifest.Normalized()
@@ -291,11 +291,11 @@ func (d RuntimeSemanticCorrectionDirective) ValidateAgainst(manifest RuntimeSema
 	if d.ManifestHash != manifest.Hash || d.DefinitionSeedHash != manifest.DefinitionSeedHash {
 		return fmt.Errorf("runtime semantic correction directive manifest identity is stale")
 	}
-	if d.SourceRejectionHash != StableRuntimeSemanticPlanCorrectionHash(rejection) {
+	if d.SourceObservationHash != StableRuntimeSemanticCorrectionObservationHash(observation) {
 		return fmt.Errorf("runtime semantic correction directive rejection identity is stale")
 	}
-	canonicalRejection := rejection.Normalized()
-	if canonicalRejection == nil || len(d.Violations) != len(canonicalRejection.SemanticViolations) {
+	canonicalObservation := observation.Normalized()
+	if len(d.Violations) != len(canonicalObservation.SemanticViolations) {
 		return fmt.Errorf("runtime semantic correction directive does not preserve rejection violations")
 	}
 	for idx := range d.Violations {
@@ -317,8 +317,34 @@ func (d RuntimeSemanticCorrectionDirective) ValidateAgainst(manifest RuntimeSema
 				return fmt.Errorf("runtime semantic proposal correction is outside proof-batch step")
 			}
 		}
-		if !runtimeSemanticContractViolationEqual(d.Violations[idx], canonicalRejection.SemanticViolations[idx]) {
+		if !runtimeSemanticContractViolationEqual(d.Violations[idx], canonicalObservation.SemanticViolations[idx]) {
 			return fmt.Errorf("runtime semantic correction directive violation %d differs from rejection", idx)
+		}
+		if err := d.Violations[idx].ValidateAgainstManifest(manifest); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// validateAgainstPersistedViolations keeps aggregate validation owner-neutral:
+// the Orchestrator validates SourceObservationHash against its projected
+// observation before persisting the directive, while the aggregate still
+// proves that the actionable violation delta exactly matches its audit record.
+func (d RuntimeSemanticCorrectionDirective) validateAgainstPersistedViolations(manifest RuntimeSemanticPlanManifest, violations []RuntimeSemanticContractViolation) error {
+	if err := d.Validate(); err != nil {
+		return err
+	}
+	manifest = manifest.Normalized()
+	if err := manifest.Validate(); err != nil {
+		return err
+	}
+	if d.ManifestHash != manifest.Hash || d.DefinitionSeedHash != manifest.DefinitionSeedHash || len(d.Violations) != len(violations) {
+		return fmt.Errorf("runtime semantic correction directive persisted lineage is stale")
+	}
+	for idx := range d.Violations {
+		if !runtimeSemanticContractViolationEqual(d.Violations[idx], violations[idx].Normalized()) {
+			return fmt.Errorf("runtime semantic correction directive violation %d differs from persisted rejection", idx)
 		}
 		if err := d.Violations[idx].ValidateAgainstManifest(manifest); err != nil {
 			return err
@@ -335,7 +361,7 @@ func StableRuntimeSemanticCorrectionDirectiveHash(directive RuntimeSemanticCorre
 	writeHashString(h, directive.ManifestHash)
 	writeHashString(h, directive.DefinitionSeedHash)
 	writeHashString(h, directive.StablePrefixHash)
-	writeHashString(h, directive.SourceRejectionHash)
+	writeHashString(h, directive.SourceObservationHash)
 	writeHashString(h, fmt.Sprintf("%d", directive.Attempt))
 	for _, violation := range directive.Violations {
 		writeHashString(h, string(violation.Kind))

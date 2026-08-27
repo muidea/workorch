@@ -189,6 +189,18 @@ func (m *Biz) runtimeCandidateSession(ctx context.Context, aggregate runtime.Run
 	return result.Aggregate, err
 }
 
+func (m *Biz) runtimeRejectCandidateRequestDocumentConformance(ctx context.Context, aggregate runtime.RuntimeAggregate, logicalRequestID, physicalCallID string, framing runtimecontract.RuntimeProviderDocumentFraming, budgetSettlement ...*runtime.RuntimeProviderBudgetSettlement) (runtime.RuntimeAggregate, error) {
+	result, err := m.submitRuntimeInternalEvent(ctx, runtime.RuntimeInternalEvent{
+		Kind:  runtime.RuntimeInternalEventCandidateDocumentObserved,
+		Scope: runtime.RuntimeInternalEventScope{WorkspaceID: aggregate.Facts.WorkspaceID, RunID: aggregate.Facts.RunID},
+		Transaction: &runtime.RuntimeInternalTransactionPayload{
+			LogicalRequestID: logicalRequestID, PhysicalCallID: physicalCallID,
+			ProviderDocumentFraming: &framing, ProviderBudgetSettlement: firstRuntimeProviderBudgetSettlement(budgetSettlement),
+		},
+	})
+	return result.Aggregate, err
+}
+
 func (m *Biz) runtimeCoordinateProviderRequestTerminal(ctx context.Context, aggregate runtime.RuntimeAggregate, logicalRequestID string, input runtime.RuntimeProviderRequestTerminalInput, budgetSettlement ...*runtime.RuntimeProviderBudgetSettlement) (runtime.RuntimeAggregate, error) {
 	fact, err := runtime.NormalizeRuntimeProviderRequestTerminal(input)
 	if err != nil {

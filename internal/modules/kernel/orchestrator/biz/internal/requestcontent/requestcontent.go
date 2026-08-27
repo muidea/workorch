@@ -80,7 +80,11 @@ func BuildSemanticPlanRequestContent(input SemanticPlanRequestInput) (SemanticPl
 		if err := input.PreviousRejection.Validate(); err != nil {
 			return SemanticPlanRequestContent{}, err
 		}
-		if err := input.CorrectionDirective.ValidateAgainst(manifest, *input.PreviousRejection); err != nil {
+		observation, observationErr := ProjectRuntimeSemanticCorrectionObservation(input.PreviousRejection)
+		if observationErr != nil {
+			return SemanticPlanRequestContent{}, observationErr
+		}
+		if err := input.CorrectionDirective.ValidateAgainstObservation(manifest, *observation); err != nil {
 			return SemanticPlanRequestContent{}, err
 		}
 		if input.CorrectionDirective.StablePrefixHash != strings.TrimSpace(input.StablePrefixHash) {

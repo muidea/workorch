@@ -385,12 +385,12 @@ func TestCurrentBindingManifestRejectsRawCoverageIDsAndUnknownBindingRefs(t *tes
 	}{
 		{
 			name:    "raw coverage is forbidden",
-			payload: `{"operations":[{"id":"write-main","kind":"file/write","coverageWorkItemIds":["cwi-main"],"targetRefs":["main.go"],"parameters":[{"name":"content","string":"package main"}]}]}`,
+			payload: `{"operations":[{"kind":"file/write","coverageWorkItemIds":["cwi-main"],"targetRefs":["main.go"],"parameters":[{"name":"content","string":"package main"}]}]}`,
 			path:    "$.operations[0].coverageWorkItemIds", actual: "coverageWorkItemIds",
 		},
 		{
 			name:    "unknown binding is forbidden",
-			payload: `{"operations":[{"id":"write-main","kind":"file/write","bindingRefs":["binding/unknown"],"targetRefs":["main.go"],"parameters":[{"name":"content","string":"package main"}]}]}`,
+			payload: `{"operations":[{"kind":"file/write","bindingRefs":["binding/unknown"],"targetRefs":["main.go"],"parameters":[{"name":"content","string":"package main"}]}]}`,
 			path:    "$.operations[0].bindingRefs", actual: "binding/unknown",
 		},
 	}
@@ -403,7 +403,7 @@ func TestCurrentBindingManifestRejectsRawCoverageIDsAndUnknownBindingRefs(t *tes
 			}
 		})
 	}
-	valid := []byte(`{"operations":[{"id":"write-main","kind":"file/write","bindingRefs":["binding/cwi-main"],"targetRefs":["main.go"],"parameters":[{"name":"content","string":"package main"}]}]}`)
+	valid := []byte(`{"operations":[{"kind":"file/write","bindingRefs":["binding/cwi-main"],"targetRefs":["main.go"],"parameters":[{"name":"content","string":"package main"}]}]}`)
 	if _, err := DecodeRuntimeCandidatePayloadWithManifest(manifest, valid); err != nil {
 		t.Fatalf("sealed binding reference rejected: %v", err)
 	}
@@ -435,6 +435,10 @@ func TestCurrentBindingManifestRejectsMultipleBindingRefsForOneOperation(t *test
 		ID: "write-main", Kind: StepKindFileWrite, BindingRefs: []string{first.ID, second.ID}, TargetRefs: []string{"main.go"},
 		Parameters: []OperationParameter{{Name: "content", String: stringPtr("package main")}},
 	}}}}}
+	candidate, err = DeriveRuntimeCandidateOperationAuthority(manifest, candidate)
+	if err != nil {
+		t.Fatal(err)
+	}
 	err = ValidateRuntimeCandidateAgainstManifest(manifest, candidate)
 	var diagnostic *RuntimeCandidateContractDiagnostic
 	if !errors.As(err, &diagnostic) || diagnostic.Path != "$.operations[0].bindingRefs" || !strings.Contains(diagnostic.Error(), "exactly one bindingRef") {

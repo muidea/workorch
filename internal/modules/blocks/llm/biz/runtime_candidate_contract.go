@@ -14,6 +14,7 @@ type runtimeCandidateOutputContractProjection struct {
 	State                       runtimecontract.ConvergenceState              `json:"state"`
 	EffectPolicy                runtimeCandidateEffectPolicyProjection        `json:"effectPolicy"`
 	ManifestHash                string                                        `json:"manifestHash,omitempty"`
+	MaxOperationCount           int                                           `json:"maxOperationCount,omitempty"`
 	Schema                      json.RawMessage                               `json:"schema"`
 	StructuredOutputInstruction string                                        `json:"structuredOutputInstruction"`
 	ForbiddenTopLevelFields     []string                                      `json:"forbiddenTopLevelFields"`
@@ -30,6 +31,7 @@ type runtimeCandidateOperationContractProjection struct {
 	Kind                        string                                            `json:"kind"`
 	OwnerModuleID               string                                            `json:"ownerModuleId,omitempty"`
 	AllowedOperationFields      []string                                          `json:"allowedOperationFields,omitempty"`
+	RequiredOperationFields     []string                                          `json:"requiredOperationFields,omitempty"`
 	AllowedVariantIDs           []string                                          `json:"allowedVariantIds,omitempty"`
 	Parameters                  []runtimeCandidateOperationParameterProjection    `json:"parameters"`
 	RequireOneOfParameters      []string                                          `json:"requireOneOfParameters,omitempty"`
@@ -94,9 +96,9 @@ type runtimeCandidateOperationVariantProjection struct {
 }
 
 type runtimeCandidateRetryProjection struct {
-	PreviousFailure runtimeCandidateCorrectionFailureProjection `json:"previousFailure"`
-	CorrectionInput runtimeCandidateCorrectionInputProjection   `json:"correctionInput"`
-	Instruction     string                                      `json:"instruction"`
+	PreviousFailure runtimecontract.RuntimeCandidateCorrectionObservation `json:"previousFailure"`
+	CorrectionInput runtimeCandidateCorrectionInputProjection             `json:"correctionInput"`
+	Instruction     string                                                `json:"instruction"`
 }
 
 type runtimeCandidateCorrectionInputProjection struct {
@@ -113,18 +115,6 @@ type runtimeCandidateCorrectionWitnessProjection struct {
 	AlternativeValue     string                                                     `json:"alternativeValue"`
 	RejectedShapeHash    string                                                     `json:"rejectedShapeHash,omitempty"`
 	AlternativeShapeHash string                                                     `json:"alternativeShapeHash,omitempty"`
-}
-
-// runtimeCandidateCorrectionFailureProjection is the only representation of
-// an earlier rejection allowed into C4. It intentionally has no Reason field:
-// raw provider/parser/owner text remains in persisted audit, never in the next
-// model prompt.
-type runtimeCandidateCorrectionFailureProjection struct {
-	Class      runtimecontract.RuntimeCandidateFailureClass       `json:"class"`
-	Code       string                                             `json:"code,omitempty"`
-	Signature  string                                             `json:"signature,omitempty"`
-	TargetRefs []string                                           `json:"targetRefs,omitempty"`
-	Diagnostic *runtimecontract.RuntimeCandidateFailureDiagnostic `json:"diagnostic,omitempty"`
 }
 
 // runtimeTargetSelectionInstruction converts the persisted File-owner
@@ -175,6 +165,7 @@ func runtimeCandidateOutputContractForManifest(manifest runtimecontract.RuntimeC
 			AllowedAcceptedReceiptEffects: append([]runtimecontract.RuntimeEffectScope(nil), manifest.EffectPolicy.AllowedAcceptedReceiptEffects...),
 		},
 		ManifestHash:                manifest.Hash,
+		MaxOperationCount:           manifest.MaxOperationCount,
 		Schema:                      json.RawMessage(runtimeCandidateSchemaForManifest(manifest)),
 		StructuredOutputInstruction: runtimeCandidateStructuredOutputInstruction(manifest),
 		ForbiddenTopLevelFields:     append([]string(nil), manifest.ForbiddenTopLevelFields...),
@@ -191,6 +182,7 @@ func runtimeCandidateOperationContractsForManifest(values []runtimecontract.Runt
 			Kind:                        operation.Kind,
 			OwnerModuleID:               operation.OwnerModuleID,
 			AllowedOperationFields:      append([]string(nil), operation.AllowedOperationFields...),
+			RequiredOperationFields:     append([]string(nil), operation.RequiredOperationFields...),
 			AllowedVariantIDs:           append([]string(nil), operation.AllowedVariantIDs...),
 			RequireOneOfParameters:      append([]string(nil), operation.RequireOneOfParameters...),
 			TargetCardinality:           operation.TargetCardinality,
@@ -277,6 +269,9 @@ func runtimeCandidateStructuredOutputInstruction(manifest runtimecontract.Runtim
 	if len(manifest.ForbiddenTopLevelFields) > 0 {
 		lines = append(lines, "Forbidden top-level fields: "+runtimeCandidateContractFieldList(manifest.ForbiddenTopLevelFields)+".")
 	}
+	if manifest.MaxOperationCount > 0 {
+		lines = append(lines, fmt.Sprintf("Emit at most %d operations in this complete candidate document.", manifest.MaxOperationCount))
+	}
 	if runtimeManifestHasAllowedBindingRefs(manifest) {
 		lines = append(lines, "Every operation kind with a sealed binding authorization must select exactly one bindingRefs value from that authorization; never emit coverageWorkItemIds. Operation kinds without binding authorization are non-crediting and must omit bindingRefs.")
 	}
@@ -287,13 +282,16 @@ func runtimeCandidateStructuredOutputInstruction(manifest runtimecontract.Runtim
 			if requirement.TargetRef != "" {
 				value += "@" + requirement.TargetRef
 			}
+			if len(requirement.DependsOnRequirementIDs) != 0 {
+				value += "[requires=" + strings.Join(requirement.DependsOnRequirementIDs, "+") + "]"
+			}
 			refs = append(refs, value)
 		}
 		lines = append(lines, "Required operation sequence references: "+strings.Join(refs, ", ")+".")
 	}
 	for _, operation := range manifest.Operations {
 		operation = operation.Normalized()
-		line := "Operation kind " + operation.Kind + " allows fields: " + runtimeCandidateContractFieldList(operation.AllowedOperationFields) + "."
+		line := "Operation kind " + operation.Kind + " allows fields: " + runtimeCandidateContractFieldList(operation.AllowedOperationFields) + ". Required fields: " + runtimeCandidateContractFieldList(operation.RequiredOperationFields) + "."
 		if len(operation.AllowedVariantIDs) > 0 {
 			line += " Allowed variants: " + runtimeCandidateContractFieldList(operation.AllowedVariantIDs) + "."
 		}
@@ -356,9 +354,7 @@ func runtimeCandidateStructuredOutputInstruction(manifest runtimecontract.Runtim
 		}
 		lines = append(lines, line)
 	}
-	if !manifest.DependenciesAllowed {
-		lines = append(lines, "dependsOn is not an allowed operation field for this sealed contract.")
-	}
+	lines = append(lines, "Operation id and dependsOn are derived by the Runtime candidate-contract owner from this manifest after decoding; never emit id or dependsOn.")
 	return strings.Join(lines, "\n")
 }
 
@@ -412,27 +408,14 @@ func runtimeCandidateContractFieldList(values []string) string {
 	return strings.Join(values, ", ")
 }
 
-func runtimeCandidateRetryForManifest(attempt int, failure *runtimecontract.RuntimeCandidateFailure, manifest runtimecontract.RuntimeCandidateContractManifest, correction *llmmodels.RuntimeCandidateCorrectionInput) *runtimeCandidateRetryProjection {
-	if attempt != 1 || failure == nil || correction == nil {
+func runtimeCandidateRetryForManifest(attempt int, observation *runtimecontract.RuntimeCandidateCorrectionObservation, manifest runtimecontract.RuntimeCandidateContractManifest, correction *llmmodels.RuntimeCandidateCorrectionInput) *runtimeCandidateRetryProjection {
+	if attempt != 1 || observation == nil || correction == nil {
 		return nil
 	}
-	if correction.Validate(manifest.Hash) != nil {
+	if observation.Validate() != nil || correction.Validate(manifest.Hash) != nil {
 		return nil
 	}
-	previous := runtimeCandidateCorrectionFailureProjection{
-		Class:      failure.Class,
-		Code:       strings.TrimSpace(failure.Code),
-		Signature:  strings.TrimSpace(failure.Signature),
-		TargetRefs: append([]string(nil), failure.TargetRefs...),
-	}
-	if diagnostic := failure.Diagnostic.Clone(); diagnostic != nil {
-		// P3-B2a has already sealed the complete diagnostic. C4 only projects
-		// that immutable, manifest-bound delta; it must not infer a missing hash,
-		// rejected shape, or correction objective from the failure text/signature.
-		// Attempt-1 eligibility belongs to SM-3 and is fenced before this LLM
-		// renderer is called.
-		previous.Diagnostic = diagnostic.Clone()
-	}
+	previous := observation.Clone()
 	instruction := "Retry the exact same sealed authority contract. Return only the legal top-level object for the requested action."
 	manifest = manifest.Normalized()
 	if manifest.Hash != "" {

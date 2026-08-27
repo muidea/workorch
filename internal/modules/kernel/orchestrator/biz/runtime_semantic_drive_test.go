@@ -235,7 +235,7 @@ func TestRuntimeSemanticDriveUsesPersistedRequestSessionAndExcludesRetiredGenera
 				proofManifestHash = command.SemanticManifest.Hash
 				proofStablePrefixHash = command.StablePrefixHash
 				proofBatchID = command.SemanticContext.BatchID
-			} else if command.CandidateAttempt != 1 || command.SemanticManifest.Hash != proofManifestHash || command.StablePrefixHash != proofStablePrefixHash || command.SemanticContext.BatchID != proofBatchID || command.SemanticCorrectionDirective == nil || command.PreviousSemanticRejection == nil {
+			} else if command.CandidateAttempt != 1 || command.SemanticManifest.Hash != proofManifestHash || command.StablePrefixHash != proofStablePrefixHash || command.SemanticContext.BatchID != proofBatchID || command.SemanticCorrectionDirective == nil || command.SemanticCorrectionObservation == nil {
 				t.Errorf("semantic correction changed immutable request identity or lost typed rejection: %+v", command)
 				return
 			}
@@ -386,7 +386,7 @@ func TestRuntimeSemanticDriveClosesProviderSessionBeforeSemanticTerminal(t *test
 	}
 }
 
-func TestRuntimeSemanticDriveEmptyDocumentTerminatesWithoutWholeDocumentRecovery(t *testing.T) {
+func TestRuntimeSemanticDriveEmptyDocumentUsesBoundedSemanticCorrection(t *testing.T) {
 	ctx := context.Background()
 	hub := magicevent.NewHub(32)
 	t.Cleanup(func() { hub.Terminate(ctx) })
@@ -422,10 +422,19 @@ func TestRuntimeSemanticDriveEmptyDocumentTerminatesWithoutWholeDocumentRecovery
 		if command.DocumentKind != runtimecontract.RuntimeProviderDocumentSemanticPlan {
 			t.Errorf("semantic empty-document request kind = %q", command.DocumentKind)
 		}
+		if providerCalls == 2 && (command.SemanticCorrectionObservation == nil || command.SemanticCorrectionDirective == nil ||
+			len(command.SemanticCorrectionObservation.FieldViolations) != 1 ||
+			command.SemanticCorrectionObservation.FieldViolations[0].Actual != string(runtimecontract.RuntimeProviderDocumentInvalid)) {
+			t.Errorf("semantic C4 correction lost bounded document failure: observation=%+v directive=%+v", command.SemanticCorrectionObservation, command.SemanticCorrectionDirective)
+		}
+		outcome := runtimeProviderFinalOutputMissingOutcome(command.ExpectedDocument)
+		if providerCalls == 1 {
+			outcome = runtimeProviderInvalidDocumentOutcome(command.ExpectedDocument, []byte("semantic prose"))
+		}
 		result.Set(runtimeProviderResultWithAuditForTest(command, llmevents.RequestRuntimeCandidateResult{
 			DocumentKind: command.DocumentKind, RequestIdentity: command.RequestIdentity,
 			ExpectedDocumentHash: command.ExpectedDocument.Hash,
-			DocumentOutcome:      runtimeProviderFinalOutputMissingOutcome(command.ExpectedDocument),
+			DocumentOutcome:      outcome,
 		}), nil)
 	})
 	t.Cleanup(func() { llmObserver.Unsubscribe(llmevents.TopicRequestRuntimeCandidate) })
@@ -434,26 +443,40 @@ func TestRuntimeSemanticDriveEmptyDocumentTerminatesWithoutWholeDocumentRecovery
 	if err != nil {
 		t.Fatal(err)
 	}
-	failed, err := module.driveRuntimeSemanticPlanning(ctx, started)
+	correcting, err := module.driveRuntimeSemanticPlanning(ctx, started)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if providerCalls != 1 || failed.SemanticPlanning.Phase != runtimecontract.RuntimeSemanticPlanningFailed ||
+	if providerCalls != 1 || correcting.SemanticPlanning.Phase != runtimecontract.RuntimeSemanticPlanningCorrectionRequired || correcting.SemanticPlanning.Attempt != 1 || correcting.SemanticPlanning.CorrectionDirective == nil || len(correcting.SemanticPlanning.Rejections) != 1 {
+		t.Fatalf("semantic empty document did not open exact attempt 1: calls=%d aggregate=%+v", providerCalls, correcting)
+	}
+	failed, err := module.driveRuntimeSemanticPlanning(ctx, correcting)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if providerCalls != 2 || failed.SemanticPlanning.Phase != runtimecontract.RuntimeSemanticPlanningFailed ||
 		failed.Decision.State != runtimecontract.ConvergenceStateFailed || failed.Decision.Terminal == nil ||
 		failed.Decision.Terminal.Code != "semantic_contract_failed" || failed.Facts.Failure == nil ||
-		failed.Facts.Failure.OriginalDiagnostic == nil || failed.Facts.Failure.OriginalDiagnostic.OriginalCode != "provider_final_output_missing" ||
+		failed.Facts.Failure.OriginalDiagnostic == nil || failed.Facts.Failure.OriginalDiagnostic.OriginalCode != "semantic_document_nonconformant" ||
 		len(failed.CandidateAttempts) != 0 || failed.ActiveDispatch != nil || failed.Facts.Recovery != aggregate.Facts.Recovery {
-		t.Fatalf("semantic empty document did not seal one terminal without recovery: calls=%d aggregate=%+v", providerCalls, failed)
+		t.Fatalf("semantic empty document did not exhaust bounded attempt 0/1: calls=%d aggregate=%+v", providerCalls, failed)
 	}
-	if len(failed.CandidateRequestSessions) != 1 {
+	if len(failed.CandidateRequestSessions) != 2 {
 		t.Fatalf("semantic empty-document sessions = %+v", failed.CandidateRequestSessions)
 	}
-	session := failed.CandidateRequestSessions[0]
-	if session.State != runtimecontract.RuntimeCandidateRequestSessionTerminal || session.ProviderSubmitted ||
-		session.LastOutcome.Class != runtimecontract.RuntimeCandidateRequestOutcomeProviderProtocol ||
-		session.LastOutcome.Code != "provider_final_output_missing" || session.IncompleteOutcomes != 0 || session.NextSequence != 1 ||
-		session.LastDocumentFraming != nil || session.ExpectedDocument == nil || session.ExpectedDocument.MaxRecoveryAttempts <= 0 {
-		t.Fatalf("semantic empty-document terminal session = %+v", session)
+	for index, session := range failed.CandidateRequestSessions {
+		expectedCode := runtimecontract.RuntimeProviderDocumentCodeFinalOutputMissing
+		expectedDisposition := runtimecontract.RuntimeProviderDocumentEmpty
+		if index == 0 {
+			expectedCode = runtimecontract.RuntimeProviderDocumentCodeFinalOutputInvalid
+			expectedDisposition = runtimecontract.RuntimeProviderDocumentInvalid
+		}
+		if session.State != runtimecontract.RuntimeCandidateRequestSessionDocumentConformanceRejected || !session.ProviderSubmitted ||
+			session.LastOutcome.Class != runtimecontract.RuntimeCandidateRequestOutcomeDocumentConformanceRejected ||
+			session.LastOutcome.Code != expectedCode || session.IncompleteOutcomes != 0 || session.NextSequence != 1 ||
+			session.LastDocumentFraming == nil || session.LastDocumentFraming.Disposition != expectedDisposition || session.ExpectedDocument == nil || session.ExpectedDocument.MaxRecoveryAttempts <= 0 {
+			t.Fatalf("semantic empty-document correction session = %+v", session)
+		}
 	}
 
 	reloaded, err := repository.Load(ctx, failed.Facts.WorkspaceID, failed.Facts.RunID)
@@ -464,7 +487,7 @@ func TestRuntimeSemanticDriveEmptyDocumentTerminatesWithoutWholeDocumentRecovery
 	if err != nil {
 		t.Fatal(err)
 	}
-	if providerCalls != 1 || replayed.StateRevision != failed.StateRevision || replayed.Facts.Recovery != failed.Facts.Recovery {
+	if providerCalls != 2 || replayed.StateRevision != failed.StateRevision || replayed.Facts.Recovery != failed.Facts.Recovery {
 		t.Fatalf("semantic empty-document terminal replayed provider or entered recovery: calls=%d aggregate=%+v", providerCalls, replayed)
 	}
 }

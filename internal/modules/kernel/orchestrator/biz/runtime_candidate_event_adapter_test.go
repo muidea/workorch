@@ -224,6 +224,20 @@ func withOperationsExpectedDocument(t *testing.T, command llmevents.RequestRunti
 	return command
 }
 
+func resealOperationsCorrectionCommand(t *testing.T, command llmevents.RequestRuntimeCandidateCommand) llmevents.RequestRuntimeCandidateCommand {
+	t.Helper()
+	correctionHash := command.CandidateCorrection.StableRequestCorrectionHash(command.CandidateCorrectionObservation)
+	logicalRequestID := runtimecontract.StableRuntimeCandidateRequestSessionID(
+		command.DocumentKind, command.WorkspaceID, command.RunID, command.Transaction,
+		command.StablePrefixHash, command.CandidateManifest.Hash, correctionHash,
+	)
+	command.RequestIdentity = runtimecontract.RuntimeCandidateRequestIdentity{
+		LogicalRequestID: logicalRequestID, Sequence: 1,
+		PhysicalCallID: runtimecontract.StableRuntimeCandidatePhysicalCallID(logicalRequestID, 1),
+	}
+	return withOperationsExpectedDocument(t, command)
+}
+
 func TestRequestRuntimeCandidateReturnsTypedProviderFailure(t *testing.T) {
 	ctx := context.Background()
 	hub := magicevent.NewHub(16)
@@ -409,7 +423,7 @@ func TestRequestRuntimeCandidateUsesTypedSealedEventHubContract(t *testing.T) {
 		LoadLLMConfig: testLLMConfigurationSnapshot,
 		CandidateProvider: eventCandidateProviderFunc(func(_ context.Context, request llmmodels.RuntimeCandidateRequest) (llmmodels.RuntimeCandidateGenerationResult, error) {
 			captured = append(captured, request)
-			return eventGenerationResult(request, []byte(`{"operations":[{"id":"op-1","kind":"patch/apply","bindingRefs":["binding/test/focus-1/cwi-1"],"targetRefs":["main.go"],"parameters":[{"name":"patchType","string":"file_write"},{"name":"content","string":"package main\n"}]}]}`), nil)
+			return eventGenerationResult(request, []byte(`{"operations":[{"kind":"patch/apply","bindingRefs":["binding/test/focus-1/cwi-1"],"targetRefs":["main.go"],"parameters":[{"name":"patchType","string":"file_write"},{"name":"content","string":"package main\n"}]}]}`), nil)
 		}),
 	}); err != nil {
 		t.Fatal(err)
@@ -442,9 +456,8 @@ func TestRequestRuntimeCandidateUsesTypedSealedEventHubContract(t *testing.T) {
 	}
 	retry := base
 	retry.CandidateAttempt = 1
-	retry.PreviousFailure = &runtimecontract.RuntimeCandidateFailure{
+	retry.CandidateCorrectionObservation = &runtimecontract.RuntimeCandidateCorrectionObservation{
 		Class: runtimecontract.RuntimeCandidateFailureClassSchema, Code: "candidate_schema_invalid", Signature: "candidate-schema-invalid",
-		Reason: `json: unknown field "candidate"`,
 		Diagnostic: &runtimecontract.RuntimeCandidateFailureDiagnostic{
 			Path: "$.unexpected", Actual: "unexpected", Allowed: []string{"operations"}, Forbidden: []string{"unexpected"},
 		},
@@ -459,10 +472,12 @@ func TestRequestRuntimeCandidateUsesTypedSealedEventHubContract(t *testing.T) {
 		},
 	}).Clone()
 	retry.CandidateCorrection = runtimeCandidateCorrectionInputFromDirective(retryDirective)
-	correctionHash := retry.CandidateCorrection.StableRequestCorrectionHash(retry.PreviousFailure)
-	logicalRequestID := runtimecontract.StableRuntimeCandidateRequestSessionID(retry.DocumentKind, retry.WorkspaceID, retry.RunID, retry.Transaction, retry.StablePrefixHash, retry.CandidateManifest.Hash, correctionHash)
-	retry.RequestIdentity = runtimecontract.RuntimeCandidateRequestIdentity{LogicalRequestID: logicalRequestID, Sequence: 1, PhysicalCallID: runtimecontract.StableRuntimeCandidatePhysicalCallID(logicalRequestID, 1)}
-	retry = withOperationsExpectedDocument(t, retry)
+	retry.CandidateCorrectionObservation.Diagnostic.ManifestHash = retry.CandidateManifest.Hash
+	retry.CandidateCorrectionObservation.Diagnostic.Objectives = append([]runtimecontract.RuntimeCandidateCorrectionObjective(nil), retry.CandidateCorrection.Objectives...)
+	retry.CandidateCorrectionObservation.SealedCorrectionHash = runtimecontract.StableRuntimeCandidateSealedCorrectionHash(
+		retry.CandidateCorrection.ManifestHash, retry.CandidateCorrection.Objectives, &retry.CandidateCorrection.Witness,
+	)
+	retry = resealOperationsCorrectionCommand(t, retry)
 	second, err := RequestRuntimeCandidate(ctx, hub, retry)
 	if err != nil {
 		t.Fatal(err)
@@ -479,14 +494,29 @@ func TestRequestRuntimeCandidateUsesTypedSealedEventHubContract(t *testing.T) {
 	if first.RequestIdentity.LogicalRequestID != base.RequestIdentity.LogicalRequestID || first.RequestIdentity.Sequence != 1 || first.RequestIdentity.PhysicalCallID != "physical-call-1" || second.RequestIdentity != retry.RequestIdentity || second.RequestIdentity.LogicalRequestID == base.RequestIdentity.LogicalRequestID {
 		t.Fatalf("candidate response identity was not preserved: first=%+v second=%+v", first, second)
 	}
-	if len(captured) != 2 || captured[0].RequestIdentity != base.RequestIdentity || captured[1].RequestIdentity != retry.RequestIdentity || captured[0].CandidateAttempt != 0 || captured[0].PreviousFailure != nil || captured[0].CandidateCorrection != nil || captured[1].CandidateAttempt != 1 || captured[1].PreviousFailure == nil || captured[1].PreviousFailure.Code != "candidate_schema_invalid" || captured[1].CandidateCorrection == nil || captured[1].CandidateCorrection.Witness.AlternativeValue != "field_absent" || captured[1].PreviousFailure.Diagnostic == nil || captured[1].PreviousFailure.Diagnostic.Path != "$.unexpected" || captured[0].Transaction != captured[1].Transaction || captured[0].StablePrefixHash != captured[1].StablePrefixHash || captured[0].CandidateManifest.Hash != base.CandidateManifest.Hash || captured[1].CandidateManifest.Hash != base.CandidateManifest.Hash || captured[0].Decision.AuthoritySnapshot.RequiredOutputHash != captured[1].Decision.AuthoritySnapshot.RequiredOutputHash {
+	if len(captured) != 2 || captured[0].RequestIdentity != base.RequestIdentity || captured[1].RequestIdentity != retry.RequestIdentity || captured[0].CandidateAttempt != 0 || captured[0].CandidateCorrectionObservation != nil || captured[0].CandidateCorrection != nil || captured[1].CandidateAttempt != 1 || captured[1].CandidateCorrectionObservation == nil || captured[1].CandidateCorrectionObservation.Code != "candidate_schema_invalid" || captured[1].CandidateCorrection == nil || captured[1].CandidateCorrection.Witness.AlternativeValue != "field_absent" || captured[1].CandidateCorrectionObservation.Diagnostic == nil || captured[1].CandidateCorrectionObservation.Diagnostic.Path != "$.unexpected" || captured[0].Transaction != captured[1].Transaction || captured[0].StablePrefixHash != captured[1].StablePrefixHash || captured[0].CandidateManifest.Hash != base.CandidateManifest.Hash || captured[1].CandidateManifest.Hash != base.CandidateManifest.Hash || captured[0].Decision.AuthoritySnapshot.RequiredOutputHash != captured[1].Decision.AuthoritySnapshot.RequiredOutputHash {
 		t.Fatalf("candidate retries changed sealed contract: %+v", captured)
 	}
-	drift := retry
-	drift.CandidateCorrection = retry.CandidateCorrection.Clone()
-	drift.CandidateCorrection.Witness.AlternativeValue = "different-absent-value"
-	if _, err := RequestRuntimeCandidate(ctx, hub, drift); err == nil || !strings.Contains(err.Error(), "correction request identity is stale") || len(captured) != 2 {
-		t.Fatalf("drifted retry directive reached provider: err=%v captured=%d", err, len(captured))
+	for name, mutate := range map[string]func(*llmmodels.RuntimeCandidateCorrectionInput){
+		"witness": func(input *llmmodels.RuntimeCandidateCorrectionInput) {
+			input.Witness.AlternativeValue = "different-absent-value"
+		},
+		"objective": func(input *llmmodels.RuntimeCandidateCorrectionInput) {
+			input.Objectives = []runtimecontract.RuntimeCandidateCorrectionObjective{runtimecontract.RuntimeCandidateCorrectionSupplyRequiredField}
+		},
+		"manifest": func(input *llmmodels.RuntimeCandidateCorrectionInput) { input.ManifestHash = "stale-manifest" },
+	} {
+		t.Run("pairwise "+name, func(t *testing.T) {
+			drift := retry
+			drift.CandidateCorrection = retry.CandidateCorrection.Clone()
+			mutate(drift.CandidateCorrection)
+			// Bind the outer request/session identity to the tampered input so
+			// only the observation/input pairwise fence can reject it.
+			drift = resealOperationsCorrectionCommand(t, drift)
+			if _, err := RequestRuntimeCandidate(ctx, hub, drift); err == nil || len(captured) != 2 {
+				t.Fatalf("mismatched %s retry reached provider: err=%v captured=%d", name, err, len(captured))
+			}
+		})
 	}
 	initialWithCorrection := base
 	initialWithCorrection.CandidateCorrection = retry.CandidateCorrection.Clone()
@@ -717,7 +747,7 @@ func TestRequestRuntimeCandidatePreservesSealedReadOnlyMCPMetadata(t *testing.T)
 		EventHub:      hub,
 		LoadLLMConfig: testLLMConfigurationSnapshot,
 		CandidateProvider: eventCandidateProviderFunc(func(_ context.Context, request llmmodels.RuntimeCandidateRequest) (llmmodels.RuntimeCandidateGenerationResult, error) {
-			return eventGenerationResult(request, []byte(`{"operations":[{"id":"mcp-read","kind":"mcp/tool_call","parameters":[{"name":"serverId","string":"mcp-1"},{"name":"tool","string":"repo.summary"},{"name":"input.path","string":"."}]}]}`), nil)
+			return eventGenerationResult(request, []byte(`{"operations":[{"kind":"mcp/tool_call","parameters":[{"name":"serverId","string":"mcp-1"},{"name":"tool","string":"repo.summary"},{"name":"input.path","string":"."}]}]}`), nil)
 		}),
 	}); err != nil {
 		t.Fatal(err)

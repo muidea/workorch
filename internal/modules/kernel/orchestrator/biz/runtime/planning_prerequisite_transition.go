@@ -29,19 +29,21 @@ func (c *planningTransactionComponent) invalidateCandidateRequestSessionForPrere
 	if err != nil {
 		return RuntimeAggregate{}, err
 	}
+	switch session.State {
+	case runtimecontract.RuntimeCandidateRequestSessionPrepared,
+		runtimecontract.RuntimeCandidateRequestSessionRecoveryPending,
+		runtimecontract.RuntimeCandidateRequestSessionTransportPending:
+	default:
+		return RuntimeAggregate{}, fmt.Errorf("%w: stale candidate response cannot overwrite closed request state %q", common.ErrConflict, session.State)
+	}
 	if !session.ProviderSubmitted {
 		return RuntimeAggregate{}, fmt.Errorf("%w: stale candidate response does not match a submitted physical call", common.ErrConflict)
 	}
 
 	expectedRevision := aggregate.StateRevision
-	var settlement *RuntimeProviderBudgetSettlement
-	if session.State != runtimecontract.RuntimeCandidateRequestSessionDocumentComplete {
-		settlement, err = candidateRequestBudgetSettlementForTransition(session, budgetSettlement...)
-		if err != nil {
-			return RuntimeAggregate{}, err
-		}
-	} else if firstRuntimeProviderBudgetSettlement(budgetSettlement) != nil {
-		return RuntimeAggregate{}, fmt.Errorf("%w: completed candidate request budget was already settled", common.ErrConflict)
+	settlement, err := candidateRequestBudgetSettlementForTransition(session, budgetSettlement...)
+	if err != nil {
+		return RuntimeAggregate{}, err
 	}
 	if _, err := applyCandidateRequestBudgetSettlement(&aggregate, settlement); err != nil {
 		return RuntimeAggregate{}, err
@@ -58,6 +60,7 @@ func (c *planningTransactionComponent) invalidateCandidateRequestSessionForPrere
 	staleCopy := stale
 	aggregate.CandidateRequestSessions[idx].State = runtimecontract.RuntimeCandidateRequestSessionTerminal
 	aggregate.CandidateRequestSessions[idx].ProviderSubmitted = false
+	aggregate.CandidateRequestSessions[idx].LastDocumentFraming = nil
 	aggregate.CandidateRequestSessions[idx].LastOutcome = runtimecontract.RuntimeCandidateRequestOutcome{
 		Class: runtimecontract.RuntimeCandidateRequestOutcomePrerequisiteStale,
 		Code:  "prerequisite_stale", Signature: runtimecontract.StableRuntimePrerequisiteStaleSignature(stale),

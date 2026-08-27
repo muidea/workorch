@@ -74,6 +74,41 @@ func TestCandidateProviderBudgetObservationMustMatchSubmittedPhysicalCall(t *tes
 	}
 }
 
+func TestCandidateCompleteDocumentDuplicateRequiresExactDurableBudgetSettlement(t *testing.T) {
+	ctx := context.Background()
+	aggregate := stateChangeAggregate(t)
+	repository := &controllerRepository{aggregate: &aggregate}
+	controller, err := NewRuntimeController(repository)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, session, err := controller.ensureCandidateRequestSession(ctx, aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, runtimecontract.RuntimeProviderDocumentOperations, "complete-duplicate-prefix", "complete-duplicate-manifest", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	physicalCallID := runtimecontract.StableRuntimeCandidatePhysicalCallID(session.LogicalRequestID, session.NextSequence)
+	if _, err := controller.markCandidateRequestSubmitted(ctx, aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, session.LogicalRequestID, session.NextSequence, physicalCallID); err != nil {
+		t.Fatal(err)
+	}
+	settlement := runtimeProviderConfirmedBudgetSettlementForTest(t, session.LogicalRequestID, physicalCallID, &llmaudit.ProviderUsage{InputTokens: 11, OutputTokens: 7, TotalTokens: 18})
+	completed, err := controller.planning.completeCandidateRequestDocument(ctx, aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, session.LogicalRequestID, physicalCallID, settlement)
+	if err != nil {
+		t.Fatal(err)
+	}
+	saves := repository.saves
+	duplicate, err := controller.planning.completeCandidateRequestDocument(ctx, aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, session.LogicalRequestID, physicalCallID, settlement)
+	if err != nil || duplicate.StateRevision != completed.StateRevision || repository.saves != saves {
+		t.Fatalf("exact complete duplicate = revision %d/%d saves %d/%d err=%v", duplicate.StateRevision, completed.StateRevision, repository.saves, saves, err)
+	}
+	drifted := runtimeProviderConfirmedBudgetSettlementForTest(t, session.LogicalRequestID, physicalCallID, &llmaudit.ProviderUsage{InputTokens: 12, OutputTokens: 7, TotalTokens: 19})
+	if _, err := controller.planning.completeCandidateRequestDocument(ctx, aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, session.LogicalRequestID, physicalCallID, drifted); !errors.Is(err, common.ErrConflict) {
+		t.Fatalf("complete duplicate with drifted settlement err=%v, want conflict", err)
+	}
+	if repository.saves != saves || repository.aggregate.StateRevision != completed.StateRevision {
+		t.Fatalf("drifted complete duplicate mutated aggregate: revision=%d/%d saves=%d/%d", repository.aggregate.StateRevision, completed.StateRevision, repository.saves, saves)
+	}
+}
+
 func TestProviderBudgetReleaseCoordinatesOperationsAndSemanticTerminalInOneCAS(t *testing.T) {
 	ctx := context.Background()
 	for _, kind := range []runtimecontract.RuntimeProviderDocumentKind{

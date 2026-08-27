@@ -436,7 +436,7 @@ func prepareOwnerFactAssessment(t *testing.T, ownerFactReady bool, operationKind
 	}
 	evidence := ExecutionEvidence{
 		EventID: "event-owner-fact", WorkspaceID: "ws-v2", RunID: "run-v2", DispatchID: sealed.ActiveDispatch.ID,
-		AuthoritySnapshotID: sealed.ActiveDispatch.Transaction.AuthoritySnapshotID, OperationID: "write-owner-fact",
+		AuthoritySnapshotID: sealed.ActiveDispatch.Transaction.AuthoritySnapshotID, OperationID: runtimeTestActiveOperationID(t, sealed, 0),
 		Kind: runtimecontract.EvidenceKindStateChange, Status: ExecutionEvidenceStatusAccepted,
 	}
 	attachRuntimeTestOwnerReceipt(t, repository.aggregate, &evidence)
@@ -554,7 +554,7 @@ func prepareTerminalValidationOwnerFactAcquisitionAssessment(t *testing.T, retir
 	}
 	evidence := ExecutionEvidence{
 		EventID: "event-owner-fact-acquisition", WorkspaceID: "ws-v2", RunID: "run-v2", DispatchID: sealed.ActiveDispatch.ID,
-		AuthoritySnapshotID: sealed.ActiveDispatch.Transaction.AuthoritySnapshotID, OperationID: "write-owner-fact-acquisition",
+		AuthoritySnapshotID: sealed.ActiveDispatch.Transaction.AuthoritySnapshotID, OperationID: runtimeTestActiveOperationID(t, sealed, 0),
 		Kind: runtimecontract.EvidenceKindStateChange, Status: ExecutionEvidenceStatusAccepted,
 	}
 	attachRuntimeTestOwnerReceipt(t, repository.aggregate, &evidence)

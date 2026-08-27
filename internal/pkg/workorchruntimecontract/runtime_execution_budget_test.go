@@ -65,6 +65,69 @@ func TestRuntimeProviderBudgetAllocationSpecsReserveJoinAndProject(t *testing.T)
 	assertRuntimeBudgetDimensionView(t, view, RuntimeBudgetDimensionProviderOutputToken, 9, 0, 0)
 }
 
+func TestRuntimeProviderBudgetAllocationSpecsDoNotRepeatLogicalAttemptDimensionsDuringRecovery(t *testing.T) {
+	ledger, err := NewRuntimeExecutionBudgetLedger(DefaultRuntimeExecutionBudgetPolicy())
+	if err != nil {
+		t.Fatal(err)
+	}
+	tests := []struct {
+		name     string
+		kind     RuntimeProviderDocumentKind
+		attempt  int
+		sequence int
+		included []RuntimeBudgetDimension
+		excluded []RuntimeBudgetDimension
+	}{
+		{
+			name: "operations correction first call", kind: RuntimeProviderDocumentOperations, attempt: 1, sequence: 1,
+			included: []RuntimeBudgetDimension{RuntimeBudgetDimensionCandidateCorrection},
+			excluded: []RuntimeBudgetDimension{RuntimeBudgetDimensionWholeDocumentRecovery},
+		},
+		{
+			name: "operations correction recovery", kind: RuntimeProviderDocumentOperations, attempt: 1, sequence: 2,
+			included: []RuntimeBudgetDimension{RuntimeBudgetDimensionWholeDocumentRecovery},
+			excluded: []RuntimeBudgetDimension{RuntimeBudgetDimensionCandidateCorrection},
+		},
+		{
+			name: "semantic initial recovery", kind: RuntimeProviderDocumentSemanticPlan, attempt: 0, sequence: 2,
+			included: []RuntimeBudgetDimension{RuntimeBudgetDimensionWholeDocumentRecovery},
+			excluded: []RuntimeBudgetDimension{RuntimeBudgetDimensionSemanticGeneration, RuntimeBudgetDimensionSemanticCorrection},
+		},
+		{
+			name: "semantic correction first call", kind: RuntimeProviderDocumentSemanticPlan, attempt: 1, sequence: 1,
+			included: []RuntimeBudgetDimension{RuntimeBudgetDimensionSemanticGeneration, RuntimeBudgetDimensionSemanticCorrection},
+			excluded: []RuntimeBudgetDimension{RuntimeBudgetDimensionWholeDocumentRecovery},
+		},
+		{
+			name: "semantic correction recovery", kind: RuntimeProviderDocumentSemanticPlan, attempt: 1, sequence: 2,
+			included: []RuntimeBudgetDimension{RuntimeBudgetDimensionWholeDocumentRecovery},
+			excluded: []RuntimeBudgetDimension{RuntimeBudgetDimensionSemanticGeneration, RuntimeBudgetDimensionSemanticCorrection},
+		},
+	}
+	for _, testCase := range tests {
+		t.Run(testCase.name, func(t *testing.T) {
+			specs, err := RuntimeProviderBudgetAllocationSpecs(ledger, testCase.kind, testCase.attempt, testCase.sequence, "logical-1", "physical-1")
+			if err != nil {
+				t.Fatal(err)
+			}
+			found := make(map[RuntimeBudgetDimension]bool, len(specs))
+			for _, spec := range specs {
+				found[spec.Dimension] = true
+			}
+			for _, dimension := range testCase.included {
+				if !found[dimension] {
+					t.Fatalf("budget specs = %+v, want dimension %q", specs, dimension)
+				}
+			}
+			for _, dimension := range testCase.excluded {
+				if found[dimension] {
+					t.Fatalf("budget specs = %+v, do not want repeated dimension %q", specs, dimension)
+				}
+			}
+		})
+	}
+}
+
 func TestRuntimeExecutionBudgetExhaustionIsTypedAndDoesNotMutateLedger(t *testing.T) {
 	policy := DefaultRuntimeExecutionBudgetPolicy()
 	for idx := range policy.Dimensions {

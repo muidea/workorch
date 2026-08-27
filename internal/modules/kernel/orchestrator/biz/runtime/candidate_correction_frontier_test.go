@@ -15,6 +15,7 @@ func TestCandidateCorrectionFrontierExhaustsSingleTargetAndSealsConcreteAlternat
 	if err != nil {
 		t.Fatal(err)
 	}
+	candidate = runtimeTestMustDeriveCandidateForManifest(t, manifest, candidate)
 	failure := &runtimecontract.RuntimeCandidateFailure{
 		Class: runtimecontract.RuntimeCandidateFailureClassContract,
 		Code:  candidateAdmissionCodeReplaysRejectedShape, Signature: "replay", Reason: "replays rejected target shape",
@@ -37,7 +38,10 @@ func TestCandidateCorrectionFrontierExhaustsSingleTargetAndSealsConcreteAlternat
 	withAlternative.Hash = ""
 	withAlternative = withAlternative.Normalized()
 	withAlternative.Hash = runtimecontract.StableRuntimeCandidateContractManifestHash(withAlternative)
+	candidate = runtimeTestMustDeriveCandidateForManifest(t, withAlternative, candidate)
 	failure.Diagnostic.ManifestHash = withAlternative.Hash
+	failure.Diagnostic.RejectedShapeHash = runtimecontract.StableRuntimeCandidateSemanticShape(candidate)
+	frontier = candidateCorrectionFrontier{candidate: &candidate, rejectedOperationShapes: ActiveRejectedOperationShapes(aggregate)}
 	_, correction, err := sealCandidateRejectionWithFrontier(failure, withAlternative, frontier)
 	targetField, targetFieldFound, targetFieldErr := runtimecontract.RuntimeOperationCorrectionFieldForRole(withAlternative.Operations[0], runtimecontract.RuntimeOperationCorrectionRoleTarget)
 	if err != nil || correction == nil || correction.Disposition != runtimecontract.RuntimeCandidateCorrectionCorrectableOnce || correction.Witness == nil ||
@@ -97,6 +101,19 @@ func TestCandidateCorrectionFrontierExhaustsSingleTargetAndSealsConcreteAlternat
 	}
 }
 
+func TestCandidateSchemaCorrectionDoesNotTreatDeclaredOptionalParameterAsForbidden(t *testing.T) {
+	manifest := runtimecontract.RuntimeCandidateOperationManifest{
+		Parameters: []runtimecontract.RuntimeOperationParameterContract{{Name: "optional", Required: false}},
+	}
+	if candidateCorrectionParameterRemovalAllowed(manifest, "optional") {
+		t.Fatal("declared optional parameter authorized a forbidden-field removal")
+	}
+	manifest.ForbiddenParameters = []string{"optional"}
+	if !candidateCorrectionParameterRemovalAllowed(manifest, "optional") {
+		t.Fatal("explicitly forbidden declared parameter did not authorize removal")
+	}
+}
+
 func TestCandidateCorrectionFrontierRequiresAlternativeManagedValidationRecipe(t *testing.T) {
 	aggregate := validationAggregate(t)
 	candidate := validationCandidate()
@@ -107,6 +124,7 @@ func TestCandidateCorrectionFrontierRequiresAlternativeManagedValidationRecipe(t
 	if err != nil {
 		t.Fatal(err)
 	}
+	candidate = runtimeTestMustDeriveCandidateForManifest(t, manifest, candidate)
 	currentOperation := candidate.Validation.Operations[0].Operation
 	frontier := candidateCorrectionFrontier{
 		candidate:               &candidate,
@@ -129,7 +147,10 @@ func TestCandidateCorrectionFrontierRequiresAlternativeManagedValidationRecipe(t
 	withAlternative.Hash = ""
 	withAlternative = withAlternative.Normalized()
 	withAlternative.Hash = runtimecontract.StableRuntimeCandidateContractManifestHash(withAlternative)
+	candidate = runtimeTestMustDeriveCandidateForManifest(t, withAlternative, candidate)
+	frontier.candidate = &candidate
 	failure.Diagnostic.ManifestHash = withAlternative.Hash
+	failure.Diagnostic.RejectedShapeHash = runtimecontract.StableRuntimeCandidateSemanticShape(candidate)
 	_, correction, err := sealCandidateRejectionWithFrontier(failure, withAlternative, frontier)
 	var managedValidation runtimecontract.RuntimeCandidateOperationManifest
 	for _, operation := range withAlternative.Operations {
@@ -146,8 +167,12 @@ func TestCandidateCorrectionFrontierRequiresAlternativeManagedValidationRecipe(t
 	}
 
 	singleRecipe := manifest.Clone()
+	singleRecipeCandidate := runtimeTestMustDeriveCandidateForManifest(t, singleRecipe, candidate)
+	singleRecipeFrontier := frontier
+	singleRecipeFrontier.candidate = &singleRecipeCandidate
 	failure.Diagnostic.ManifestHash = singleRecipe.Hash
-	_, exhausted, err := sealCandidateRejectionWithFrontier(failure, singleRecipe, frontier)
+	failure.Diagnostic.RejectedShapeHash = runtimecontract.StableRuntimeCandidateSemanticShape(singleRecipeCandidate)
+	_, exhausted, err := sealCandidateRejectionWithFrontier(failure, singleRecipe, singleRecipeFrontier)
 	if err != nil || exhausted == nil || exhausted.Disposition != runtimecontract.RuntimeCandidateCorrectionRejectedFinal || exhausted.TerminalCode != "candidate_authority_exhausted" {
 		t.Fatalf("single-recipe frontier did not exhaust: directive=%+v err=%v", exhausted, err)
 	}
@@ -171,6 +196,7 @@ func TestCandidateCorrectionFrontierSealsOperationKindFromTypedDimension(t *test
 	manifest.Hash = ""
 	manifest = manifest.Normalized()
 	manifest.Hash = runtimecontract.StableRuntimeCandidateContractManifestHash(manifest)
+	candidate = runtimeTestMustDeriveCandidateForManifest(t, manifest, candidate)
 
 	failure := &runtimecontract.RuntimeCandidateFailure{
 		Class: runtimecontract.RuntimeCandidateFailureClassContract,
@@ -227,6 +253,7 @@ func TestCandidateCorrectionFrontierSealsOnlyContractDeclaredClosedParameter(t *
 	fileListAuthorization.RequireOneOfParameters = contract.RequireOneOfParameters
 	fileListAuthorization.TargetCardinality = descriptor.TargetCardinality
 	fileListAuthorization.RequireTargetRefs = contract.RequireTargetRefs
+	fileListAuthorization.RequiredOperationFields = []string{"bindingRefs", "kind", "parameters"}
 	fileListAuthorization.ForbiddenParameters = contract.ForbiddenParameters
 	fileListAuthorization.Variants = contract.Variants
 	fileListAuthorization.ValidationRecipes = nil
@@ -241,6 +268,7 @@ func TestCandidateCorrectionFrontierSealsOnlyContractDeclaredClosedParameter(t *
 		BindingRefs: []string{"binding/test/runtime/focus-1/cwi-1"},
 		Parameters:  []runtimecontract.OperationParameter{{Name: "recursive", Boolean: &recursive}},
 	}}}}}
+	candidate = runtimeTestMustDeriveCandidateForManifest(t, manifest, candidate)
 	failure := &runtimecontract.RuntimeCandidateFailure{
 		Class: runtimecontract.RuntimeCandidateFailureClassContract,
 		Code:  candidateAdmissionCodeReplaysRejectedShape, Signature: "closed-parameter-replay", Reason: "replays rejected closed parameter",

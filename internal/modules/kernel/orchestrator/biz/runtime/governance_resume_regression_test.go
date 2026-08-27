@@ -10,12 +10,14 @@ import (
 )
 
 type catalogOnlyShellGovernanceFixture struct {
-	controller      *RuntimeController
-	repository      *controllerRepository
-	aggregate       RuntimeAggregate
-	firstBinding    runtimecontract.RuntimeOperationGovernanceBinding
-	firstResolution runtimecontract.RuntimeGovernanceResolution
-	policy          runtimecontract.RuntimeOperationPolicyFact
+	controller        *RuntimeController
+	repository        *controllerRepository
+	aggregate         RuntimeAggregate
+	firstBinding      runtimecontract.RuntimeOperationGovernanceBinding
+	firstResolution   runtimecontract.RuntimeGovernanceResolution
+	policy            runtimecontract.RuntimeOperationPolicyFact
+	firstOperationID  string
+	secondOperationID string
 }
 
 func newCatalogOnlyShellGovernanceFixture(t *testing.T) catalogOnlyShellGovernanceFixture {
@@ -73,14 +75,14 @@ func newCatalogOnlyShellGovernanceFixture(t *testing.T) catalogOnlyShellGovernan
 	argsB := []string{"-c", "printf b > b.txt"}
 	candidate := runtimecontract.RuntimeCandidate{StateChange: &runtimecontract.StateChangeCandidate{Operations: []runtimecontract.StateChangingOperation{
 		{Operation: runtimecontract.RuntimeOperation{
-			ID: "shell-1", Kind: runtimecontract.StepKindShellCommand,
+			Kind:                runtimecontract.StepKindShellCommand,
 			CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-v2"}, TargetRefs: []string{"a.txt"},
 			Parameters: []runtimecontract.OperationParameter{
 				{Name: "command", String: &command}, {Name: "args", StringList: argsA}, {Name: "stateChanging", Boolean: &stateChanging},
 			},
 		}},
 		{Operation: runtimecontract.RuntimeOperation{
-			ID: "shell-2", Kind: runtimecontract.StepKindShellCommand, DependsOn: []string{"shell-1"},
+			Kind:                runtimecontract.StepKindShellCommand,
 			CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-v2"}, TargetRefs: []string{"b.txt"},
 			Parameters: []runtimecontract.OperationParameter{
 				{Name: "command", String: &command}, {Name: "args", StringList: argsB}, {Name: "stateChanging", Boolean: &stateChanging},
@@ -91,11 +93,13 @@ func newCatalogOnlyShellGovernanceFixture(t *testing.T) catalogOnlyShellGovernan
 	if err != nil {
 		t.Fatal(err)
 	}
-	claimed, err := controller.claimOperationExecution(ctx, facts.WorkspaceID, facts.RunID, "shell-1")
+	firstOperationID := runtimeTestActiveOperationID(t, sealed, 0)
+	secondOperationID := runtimeTestActiveOperationID(t, sealed, 1)
+	claimed, err := controller.claimOperationExecution(ctx, facts.WorkspaceID, facts.RunID, firstOperationID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	execution, found := operationExecutionRecord(claimed.ActiveDispatch.OperationExecutions, "shell-1")
+	execution, found := operationExecutionRecord(claimed.ActiveDispatch.OperationExecutions, firstOperationID)
 	if !found {
 		t.Fatal("first Shell execution is missing")
 	}
@@ -113,8 +117,8 @@ func newCatalogOnlyShellGovernanceFixture(t *testing.T) catalogOnlyShellGovernan
 	if err != nil {
 		t.Fatal(err)
 	}
-	governanceAggregate, err := controller.candidateDispatch.recordOperationGovernanceRequired(ctx, facts.WorkspaceID, facts.RunID, "shell-1", RuntimeOperationExecutionResult{
-		EventID: "governance-shell-1", OperationID: "shell-1", Receipt: committed, Governance: &requirement,
+	governanceAggregate, err := controller.candidateDispatch.recordOperationGovernanceRequired(ctx, facts.WorkspaceID, facts.RunID, firstOperationID, RuntimeOperationExecutionResult{
+		EventID: "governance-shell-1", OperationID: firstOperationID, Receipt: committed, Governance: &requirement,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -161,6 +165,7 @@ func newCatalogOnlyShellGovernanceFixture(t *testing.T) catalogOnlyShellGovernan
 	return catalogOnlyShellGovernanceFixture{
 		controller: controller, repository: repository, aggregate: continued.Aggregate,
 		firstBinding: continued.Aggregate.OperationGovernanceBindings[0], firstResolution: resolution, policy: policy,
+		firstOperationID: firstOperationID, secondOperationID: secondOperationID,
 	}
 }
 
@@ -180,7 +185,7 @@ func TestGovernanceResumeUsesCatalogOnlyDynamicOwnerPolicyForPendingSibling(t *t
 	if err != nil {
 		t.Fatalf("catalog-only Shell policy was misclassified as pending sibling drift: %v", err)
 	}
-	pending, found := operationExecutionRecord(resume.OperationExecutions, "shell-2")
+	pending, found := operationExecutionRecord(resume.OperationExecutions, fixture.secondOperationID)
 	if !found || pending.ExpectedEffectScope != fixture.policy.EffectScope || pending.IdempotencyClass != fixture.policy.IdempotencyClass {
 		t.Fatalf("pending sibling lost catalog-only policy authority: %+v", pending)
 	}
@@ -190,17 +195,17 @@ func TestSequentialGovernanceResumePreservesCompletedGovernedExecution(t *testin
 	ctx := context.Background()
 	fixture := newCatalogOnlyShellGovernanceFixture(t)
 	firstResumeID := fixture.aggregate.ActiveDispatch.ID
-	firstExecution, found := operationExecutionRecord(fixture.aggregate.ActiveDispatch.OperationExecutions, "shell-1")
+	firstExecution, found := operationExecutionRecord(fixture.aggregate.ActiveDispatch.OperationExecutions, fixture.firstOperationID)
 	if !found {
 		t.Fatal("first governed execution is missing from its resume dispatch")
 	}
 	started, grant, err := fixture.controller.candidateDispatch.markGovernanceResumeExecutionStarted(
-		ctx, fixture.aggregate.Facts.WorkspaceID, fixture.aggregate.Facts.RunID, "shell-1",
+		ctx, fixture.aggregate.Facts.WorkspaceID, fixture.aggregate.Facts.RunID, fixture.firstOperationID,
 	)
 	if err != nil || grant == nil {
 		t.Fatalf("mark first governed execution started: grant=%+v err=%v", grant, err)
 	}
-	firstExecution, found = operationExecutionRecord(started.ActiveDispatch.OperationExecutions, "shell-1")
+	firstExecution, found = operationExecutionRecord(started.ActiveDispatch.OperationExecutions, fixture.firstOperationID)
 	if !found {
 		t.Fatal("started first governed execution is missing")
 	}
@@ -220,17 +225,17 @@ func TestSequentialGovernanceResumePreservesCompletedGovernedExecution(t *testin
 	// The receipt and execution budget use production transitions; only the
 	// already-judged evidence marker advances without crediting the CWI.
 	for idx := range ownerCommitted.ActiveDispatch.OperationExecutions {
-		if ownerCommitted.ActiveDispatch.OperationExecutions[idx].OperationID == "shell-1" {
+		if ownerCommitted.ActiveDispatch.OperationExecutions[idx].OperationID == fixture.firstOperationID {
 			ownerCommitted.ActiveDispatch.OperationExecutions[idx].State = runtimecontract.OperationExecutionEvidenceCommitted
 		}
 	}
-	ownerCommitted.ActiveDispatch.CompletedOperationIDs = appendNormalizedString(ownerCommitted.ActiveDispatch.CompletedOperationIDs, "shell-1")
+	ownerCommitted.ActiveDispatch.CompletedOperationIDs = appendNormalizedString(ownerCommitted.ActiveDispatch.CompletedOperationIDs, fixture.firstOperationID)
 	fixture.repository.aggregate = &ownerCommitted
-	claimed, err := fixture.controller.claimOperationExecution(ctx, ownerCommitted.Facts.WorkspaceID, ownerCommitted.Facts.RunID, "shell-2")
+	claimed, err := fixture.controller.claimOperationExecution(ctx, ownerCommitted.Facts.WorkspaceID, ownerCommitted.Facts.RunID, fixture.secondOperationID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	secondExecution, found := operationExecutionRecord(claimed.ActiveDispatch.OperationExecutions, "shell-2")
+	secondExecution, found := operationExecutionRecord(claimed.ActiveDispatch.OperationExecutions, fixture.secondOperationID)
 	if !found {
 		t.Fatal("second Shell execution is missing")
 	}
@@ -250,8 +255,8 @@ func TestSequentialGovernanceResumePreservesCompletedGovernedExecution(t *testin
 	if err != nil {
 		t.Fatal(err)
 	}
-	progressed, err := fixture.controller.candidateDispatch.recordOperationGovernanceRequired(ctx, claimed.Facts.WorkspaceID, claimed.Facts.RunID, "shell-2", RuntimeOperationExecutionResult{
-		EventID: "governance-shell-2", OperationID: "shell-2", Receipt: committed, Governance: &secondRequirement,
+	progressed, err := fixture.controller.candidateDispatch.recordOperationGovernanceRequired(ctx, claimed.Facts.WorkspaceID, claimed.Facts.RunID, fixture.secondOperationID, RuntimeOperationExecutionResult{
+		EventID: "governance-shell-2", OperationID: fixture.secondOperationID, Receipt: committed, Governance: &secondRequirement,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -270,7 +275,7 @@ func TestSequentialGovernanceResumePreservesCompletedGovernedExecution(t *testin
 	if source == nil {
 		t.Fatalf("first resume dispatch %q was not completed", firstResumeID)
 	}
-	firstCompleted, found := operationExecutionRecord(source.OperationExecutions, "shell-1")
+	firstCompleted, found := operationExecutionRecord(source.OperationExecutions, fixture.firstOperationID)
 	if !found || firstCompleted.State != runtimecontract.OperationExecutionEvidenceCommitted {
 		t.Fatalf("first governed execution did not commit evidence before second governance: %+v", firstCompleted)
 	}
@@ -315,7 +320,7 @@ func TestSequentialGovernanceResumePreservesCompletedGovernedExecution(t *testin
 	if continued.Aggregate.ActiveDispatch == nil {
 		t.Fatal("second governance continuation did not create an active resume dispatch")
 	}
-	cloned, found := operationExecutionRecord(continued.Aggregate.ActiveDispatch.OperationExecutions, "shell-1")
+	cloned, found := operationExecutionRecord(continued.Aggregate.ActiveDispatch.OperationExecutions, fixture.firstOperationID)
 	if !found || cloned.State != runtimecontract.OperationExecutionEvidenceCommitted ||
 		cloned.ExecutionKey != firstCompleted.ExecutionKey || cloned.Fence != firstCompleted.Fence ||
 		cloned.OwnerReceiptRef != firstCompleted.OwnerReceiptRef || cloned.OwnerReceiptHash != firstCompleted.OwnerReceiptHash ||
@@ -341,12 +346,12 @@ func TestSameOperationCanRequireGovernanceAgainAtNextFence(t *testing.T) {
 	}
 	firstResumeID := fixture.aggregate.ActiveDispatch.ID
 	started, startedGrant, err := fixture.controller.candidateDispatch.markGovernanceResumeExecutionStarted(
-		ctx, fixture.aggregate.Facts.WorkspaceID, fixture.aggregate.Facts.RunID, "shell-1",
+		ctx, fixture.aggregate.Facts.WorkspaceID, fixture.aggregate.Facts.RunID, fixture.firstOperationID,
 	)
 	if err != nil || startedGrant == nil || !runtimecontract.SameRuntimeOperationGovernanceGrant(*startedGrant, *firstGrant) {
 		t.Fatalf("mark first same-operation governance resume started: grant=%+v err=%v", startedGrant, err)
 	}
-	firstResumeExecution, found := operationExecutionRecord(started.ActiveDispatch.OperationExecutions, "shell-1")
+	firstResumeExecution, found := operationExecutionRecord(started.ActiveDispatch.OperationExecutions, fixture.firstOperationID)
 	if !found || firstResumeExecution.Fence != firstGrant.ResumeFence ||
 		firstResumeExecution.ClaimedAt != runtimecontract.RuntimeOperationClaimMarkerGovernanceEffectStarted {
 		t.Fatalf("first same-operation governance execution was not started exactly: %+v", firstResumeExecution)
@@ -369,8 +374,8 @@ func TestSameOperationCanRequireGovernanceAgainAtNextFence(t *testing.T) {
 		t.Fatal(err)
 	}
 	progressed, err := fixture.controller.candidateDispatch.recordOperationGovernanceRequired(
-		ctx, started.Facts.WorkspaceID, started.Facts.RunID, "shell-1", RuntimeOperationExecutionResult{
-			EventID: "governance-shell-1-again", OperationID: "shell-1", Receipt: committedReceipt, Governance: &secondRequirement,
+		ctx, started.Facts.WorkspaceID, started.Facts.RunID, fixture.firstOperationID, RuntimeOperationExecutionResult{
+			EventID: "governance-shell-1-again", OperationID: fixture.firstOperationID, Receipt: committedReceipt, Governance: &secondRequirement,
 		},
 	)
 	if err != nil {
@@ -435,7 +440,7 @@ func TestSameOperationCanRequireGovernanceAgainAtNextFence(t *testing.T) {
 		secondBinding.Grant.GovernanceFence != firstGrant.ResumeFence || secondBinding.Grant.ResumeFence != firstGrant.ResumeFence+1 {
 		t.Fatalf("second same-operation grant did not advance exactly one fence: %+v", secondBinding)
 	}
-	secondResumeExecution, found := operationExecutionRecord(continued.Aggregate.ActiveDispatch.OperationExecutions, "shell-1")
+	secondResumeExecution, found := operationExecutionRecord(continued.Aggregate.ActiveDispatch.OperationExecutions, fixture.firstOperationID)
 	if !found || secondResumeExecution.ExecutionKey != firstResumeExecution.ExecutionKey ||
 		secondResumeExecution.Fence != secondBinding.Grant.ResumeFence ||
 		secondResumeExecution.ClaimedAt != runtimecontract.RuntimeOperationClaimMarkerGovernanceGranted {

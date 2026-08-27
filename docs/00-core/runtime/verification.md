@@ -54,8 +54,8 @@ application-local execution queue/queued projection 的回归，以及 setup-dra
 | --- | --- | --- | --- |
 | SM-1 Run lifecycle | `blocks/run` | activation/continuation/typed terminal delivery 先成为 owner-local event，再执行 pending→active、blocked continuation 或 terminal；replacement 仅作为同 owner subordinate transaction 协调交接 | 外部指定目标 state、读取 Orchestrator action/focus 选择 lifecycle、SM-4 handoff record 直接改 Run、terminal→active |
 | SM-2 authority/focus | `kernel/orchestrator` | prerequisite/feasibility/receipt/assessment/governance fact→internal event→canonical decision；focus/evidence/repair 原子推进 | capability/adapter 选 decision、错误文本选 target、直接写 Run/Workspace/Result |
-| SM-3 candidate/dispatch | `kernel/orchestrator` | request session→complete document→single evaluator→persist diagnostic→final/唯一 correction；accepted→seal→execute | incomplete/transport 创建 attempt、attempt 2、adapter 选 correction/terminal、未 seal 执行 |
-| SM-4 drive/recovery/delivery | `kernel/orchestrator` | Run fact→run-scoped singleflight→load/re-drive；typed conflict/recovery；administrative `RuntimeTerminationRecord` handoff；Result→Workspace→Run acknowledgement | 重建 SM-2 authority、projection/application 反向驱动、重复 durable effect、把 handoff 当 SM-1 transition、写其他 owner state |
+| SM-3 candidate/dispatch | `kernel/orchestrator` | request session→typed document observation→strict local admission/single evaluator→persist diagnostic→final/唯一 correction；accepted→本地派生 operation identity/dependencies→seal→execute | incomplete/transport 创建 attempt、format/schema/semantic 分设预算、attempt 2、adapter/SM-4 选 correction/terminal、未 seal 执行 |
+| SM-4 drive/recovery/delivery | `kernel/orchestrator` | Run fact→run-scoped singleflight→load/re-drive；typed conflict/recovery/physical settlement；administrative `RuntimeTerminationRecord` handoff；Result→Workspace→Run acknowledgement | 重建 SM-2 authority、解释 document rejection或选择 attempt、projection/application 反向驱动、重复 durable effect、把 handoff 当 SM-1 transition、写其他 owner state |
 
 每次 Runtime 变更必须标出受影响 SM，并补：transition、invariant、restart/idempotency、stale/duplicate、
 budget/guard 以及适用的跨状态机合同测试。
@@ -112,6 +112,9 @@ Cross-owner regression必须证明 concrete receiving-owner Command/Result、wor
 
 ### Candidate And Request
 
+- `JSONSchemaResponse=true` 只允许 adapter 发送可选 provider format；false/未声明必须省略。两条路径返回相同文档时，
+  strict local decoder/schema/evaluator 结果必须完全相同；structured-output unsupported/failure 不得触发 adapter-local
+  fallback/second physical call，也不能跳过本地 admission或直接产生 correction authority；
 - incomplete document、fragment/EOF 与 transient transport 只使用 request-session recovery，不创建 attempt；
 - streaming `response.incomplete/max_output_tokens` 是唯一 terminal fact；必须继续校验剩余 wire framing，拒绝 late event、
   第二个 terminal 与重复 `[DONE]`，且 partial bytes 只进入 bounded framing/audit；
@@ -121,8 +124,10 @@ Cross-owner regression必须证明 concrete receiving-owner Command/Result、wor
   精确一致，其他 disposition 零 content；physical response mode 是 `streaming | non_streaming` 唯一事实，布尔 streaming
   仅允许派生；
 - stream/non-stream 的 coherent `completed` + empty final output（包括 reasoning-only response）必须形成唯一
-  `empty_document/provider_final_output_missing`，零 content、零 `Feedback`、零第二次 provider call；验证 native usage、
-  completed audit 与一次 usage event 无损保留，且该 terminal fact 不消耗 whole-document recovery；
+  `empty_document/provider_final_output_missing`；coherent non-JSON 必须形成
+  `invalid_provider_output/provider_final_output_invalid`。二者均零 content、零 `Feedback(provider_protocol)`，验证 native usage、
+  completed audit 与一次 usage event 无损保留，且不消耗 whole-document recovery。LLM owner/adapter 对本次 observation 零
+  fallback/replay；只有 SM-3 持久化 typed rejection 后才可用新 request/physical identity 授权唯一 attempt 1；
 - result audit 必须逐项匹配 workspace/run/logical/physical identity、target、kind、stable prefix 与 context budget；覆盖
   before-Do、Do error、response error、stream/non-stream/embed，并证明 request bytes 不推断 submission；DocumentOutcome、
   stale、transient/auth/config/protocol 的 submitted 矩阵与 unsubmitted 零 physical fact 必须穷尽；
@@ -136,13 +141,28 @@ Cross-owner regression必须证明 concrete receiving-owner Command/Result、wor
 - provider terminal 必须用一次 owner-private aggregate CAS 原子完成 SM-3 session close 与 exact SM-2 failure；验证
   normal、duplicate、stale、CAS-before、CAS-after response loss 与 fresh reload，并断言这些 terminal crash/reload 分支
   零 provider replay；允许恢复的 incomplete/transient 分支仍以新 `PhysicalCallID` 请求同一完整 document；
-- complete document 只进入一个 evaluator，first-failure 顺序稳定；
+- empty/invalid 的 submitted settlement、request-session close、typed document-shape rejection 与 correction/final 必须在
+  owner-private CAS 中保持一致；SM-4 只能 settlement/re-drive，不能把该 observation 改写为 protocol terminal 或选择 correction；
+- complete document 无论 provider 是否使用 JSON Schema 都必须经过 strict local admission 且只进入一个 evaluator，
+  first-failure 顺序稳定；
 - evaluator 只返回 accepted 或完整 typed rejection，不返回 correction/retry/terminal disposition；
 - evaluator 拒绝同一 candidate 内重复的 durable `(OwnerModuleID, TargetRef)`；普通依赖边不能豁免，只有 owner-sealed
   exact `RequiredOperationSequence` 可按 requirement ref/variant 执行，同时证明不同 target、non-durable operation 与该
   owner-required sequence 不被误伤；
 - SM-3 持久化 rejection 后才可形成 typed terminal 或唯一 `correctable_once` internal result；
-- attempt 1 复用 transaction、manifest、C0～C3 与 stable prefix；第二次 complete rejection terminal，零第三次请求；
+- empty/non-JSON document shape、complete schema 与 semantic rejection 共用 candidate attempt 0/1；attempt 1 复用
+  transaction、manifest、C0～C3 与 stable prefix，任意第二次 rejection terminal，零 attempt 2/第三次请求；
+- operations provider schema/instruction/decoder 必须禁止 `id`、`dependsOn` 与 dependency graph；transaction 先执行 exact-match
+  gate，strict local compiler 再从 manifest hash 与 manifest-owned authorization slot 确定性派生 identity/edges。required proposal
+  按 requirement ref 唯一匹配 normalized required-sequence slot，auxiliary proposal 按 canonical execution-semantic key 派生 identity；
+  provider 数组下标不参与 identity 或 dependency authority。任意重排、duplicate/restart 后派生结果必须稳定，provider 自造字段、
+  ambiguous/duplicate/missing slot 必须 fail-closed 且零 dispatch；
+- invalid/empty raw、reasoning、decoder message 与可逆片段不得进入 EventHub durable payload、aggregate、eventstream、projection、
+  memory 或 C4；只允许 owner-private audit carrier 与 bounded hash/bytes/ref。attempt-1 C4 仅包含 manifest-bound
+  document-shape/schema/semantic witness，不含 raw、Disposition、TerminalCode 或 retry 选择；
+- duplicate result、stale transaction、CAS-before/CAS-after response loss、fresh-process reload 与普通 Resume 必须覆盖 attempt0
+  rejection/directive/request identity 幂等：相同 observation 只结算一次，attempt1 最多提交一次，provider/attempt/token budget
+  不重复消费；document correction 不借用 whole-document/transport/repair/governance budget；
 - owner feasibility 不进入 candidate correction 或 attempt ledger。
 - request session + authority transaction + canonical state/RequiredOutput + DocumentKind/ExpectedDocument + provider
   ceiling/reasoning/budget/stable prefix构成唯一purpose-bound semantic invocation seal；不得出现独立SemanticActivation
@@ -192,8 +212,9 @@ Cross-owner regression必须证明 concrete receiving-owner Command/Result、wor
   partial/forged/stale/mismatched proposal hash/target 均不得 terminal。完整结果因与 admission 已验证的 published constraint
   矛盾，必须一次性记录 `prospective_satisfaction_contract_violated` 并形成 `semantic_contract_failed`；不得生成
   replacement target、`Allowed`、第二 provider request 或第二 owner probe。
-- attempt 1 仅验证普通完整 document/schema correction：复用 transaction/manifest/C0～C3/stable prefix，C4 只携带
-  manifest/CWI/field-path-bound typed violation，不复制 constraint；第二次 complete rejection 仍为
+- attempt 1 同时覆盖 document-shape、普通完整 document/schema 与 semantic correction：复用
+  transaction/manifest/C0～C3/stable prefix，C4 只携带 manifest/CWI/field-path-bound typed violation，不复制 constraint
+  或 raw provider content；第二次任意 rejection 仍为
   `candidate_retry_exhausted`。duplicate composite、CAS-before/CAS-after response loss 与 fresh-process reload 必须证明
   correction/terminal 只消耗一次，同 proposal 的 owner probe 不重放；全部分支零 ticket/governance/acquisition/
   operation/effect/coverage，File/Shell result 不含 SM-2/SM-3 target state。

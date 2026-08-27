@@ -138,43 +138,43 @@ type AcquireProviderCeilingResult struct {
 }
 
 type RequestRuntimeCandidateCommand struct {
-	WorkspaceID                 common.WorkspaceID
-	RunID                       common.RunID
-	DocumentKind                runtimecontract.RuntimeProviderDocumentKind
-	RequestIdentity             runtimecontract.RuntimeCandidateRequestIdentity
-	ExpectedDocument            *runtimecontract.RuntimeExpectedDocumentContract
-	Decision                    runtimecontract.RuntimeDecision
-	Transaction                 runtimecontract.AuthorityTransaction
-	CandidateAttempt            int
-	PreviousFailure             *runtimecontract.RuntimeCandidateFailure
-	CandidateCorrection         *llmmodel.RuntimeCandidateCorrectionInput
-	StablePrefixHash            string
-	CandidateManifest           runtimecontract.RuntimeCandidateContractManifest
-	DefinitionContext           runtimecontract.RuntimeDefinitionContext
-	CandidateContext            runtimecontract.RuntimeCandidateContext
-	SemanticManifest            runtimecontract.RuntimeSemanticPlanManifest
-	SemanticContext             runtimecontract.RuntimeSemanticPlanRequestContext
-	PreviousSemanticRejection   *runtimecontract.RuntimeOriginalDiagnostic
-	SemanticCorrectionDirective *runtimecontract.RuntimeSemanticCorrectionDirective
+	WorkspaceID                    common.WorkspaceID
+	RunID                          common.RunID
+	DocumentKind                   runtimecontract.RuntimeProviderDocumentKind
+	RequestIdentity                runtimecontract.RuntimeCandidateRequestIdentity
+	ExpectedDocument               *runtimecontract.RuntimeExpectedDocumentContract
+	Decision                       runtimecontract.RuntimeDecision
+	Transaction                    runtimecontract.AuthorityTransaction
+	CandidateAttempt               int
+	CandidateCorrectionObservation *runtimecontract.RuntimeCandidateCorrectionObservation
+	CandidateCorrection            *llmmodel.RuntimeCandidateCorrectionInput
+	StablePrefixHash               string
+	CandidateManifest              runtimecontract.RuntimeCandidateContractManifest
+	DefinitionContext              runtimecontract.RuntimeDefinitionContext
+	CandidateContext               runtimecontract.RuntimeCandidateContext
+	SemanticManifest               runtimecontract.RuntimeSemanticPlanManifest
+	SemanticContext                runtimecontract.RuntimeSemanticPlanRequestContext
+	SemanticCorrectionObservation  *runtimecontract.RuntimeSemanticCorrectionObservation
+	SemanticCorrectionDirective    *runtimecontract.RuntimeSemanticCorrectionDirective
 }
 
 type PreflightRuntimeCandidateCommand struct {
-	WorkspaceID                 common.WorkspaceID
-	RunID                       common.RunID
-	DocumentKind                runtimecontract.RuntimeProviderDocumentKind
-	Decision                    runtimecontract.RuntimeDecision
-	Transaction                 runtimecontract.AuthorityTransaction
-	CandidateAttempt            int
-	PreviousFailure             *runtimecontract.RuntimeCandidateFailure
-	CandidateCorrection         *llmmodel.RuntimeCandidateCorrectionInput
-	StablePrefixHash            string
-	CandidateManifest           runtimecontract.RuntimeCandidateContractManifest
-	DefinitionContext           runtimecontract.RuntimeDefinitionContext
-	CandidateContext            runtimecontract.RuntimeCandidateContext
-	SemanticManifest            runtimecontract.RuntimeSemanticPlanManifest
-	SemanticContext             runtimecontract.RuntimeSemanticPlanRequestContext
-	PreviousSemanticRejection   *runtimecontract.RuntimeOriginalDiagnostic
-	SemanticCorrectionDirective *runtimecontract.RuntimeSemanticCorrectionDirective
+	WorkspaceID                    common.WorkspaceID
+	RunID                          common.RunID
+	DocumentKind                   runtimecontract.RuntimeProviderDocumentKind
+	Decision                       runtimecontract.RuntimeDecision
+	Transaction                    runtimecontract.AuthorityTransaction
+	CandidateAttempt               int
+	CandidateCorrectionObservation *runtimecontract.RuntimeCandidateCorrectionObservation
+	CandidateCorrection            *llmmodel.RuntimeCandidateCorrectionInput
+	StablePrefixHash               string
+	CandidateManifest              runtimecontract.RuntimeCandidateContractManifest
+	DefinitionContext              runtimecontract.RuntimeDefinitionContext
+	CandidateContext               runtimecontract.RuntimeCandidateContext
+	SemanticManifest               runtimecontract.RuntimeSemanticPlanManifest
+	SemanticContext                runtimecontract.RuntimeSemanticPlanRequestContext
+	SemanticCorrectionObservation  *runtimecontract.RuntimeSemanticCorrectionObservation
+	SemanticCorrectionDirective    *runtimecontract.RuntimeSemanticCorrectionDirective
 }
 
 type PreflightRuntimeCandidateResult struct {

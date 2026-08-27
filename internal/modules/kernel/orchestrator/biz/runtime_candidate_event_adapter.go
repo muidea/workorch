@@ -273,23 +273,23 @@ func runtimeCandidateCorrectionInputFromDirective(directive *runtimecontract.Run
 	}).Clone()
 }
 
-func validateRuntimeCandidateRetryContract(attempt int, previousFailure *runtimecontract.RuntimeCandidateFailure, correction *llmmodels.RuntimeCandidateCorrectionInput, manifestHash string) error {
+func validateRuntimeCandidateRetryContract(attempt int, observation *runtimecontract.RuntimeCandidateCorrectionObservation, correction *llmmodels.RuntimeCandidateCorrectionInput, manifest runtimecontract.RuntimeCandidateContractManifest) error {
 	if attempt < 0 || attempt > 1 {
 		return fmt.Errorf("runtime candidate attempt must be 0 or 1")
 	}
 	if attempt == 0 {
-		if previousFailure != nil || correction != nil {
+		if observation != nil || correction != nil {
 			return fmt.Errorf("initial runtime candidate attempt must not carry correction lineage")
 		}
 		return nil
 	}
-	if previousFailure == nil || previousFailure.Class == "" || strings.TrimSpace(previousFailure.Reason) == "" {
+	if observation == nil {
 		return fmt.Errorf("runtime candidate retry requires the previous failure")
 	}
 	if correction == nil {
 		return fmt.Errorf("runtime candidate retry requires concrete correction input")
 	}
-	if err := correction.Validate(manifestHash); err != nil {
+	if err := correction.ValidateAgainstObservation(manifest, *observation); err != nil {
 		return err
 	}
 	return nil
@@ -298,7 +298,7 @@ func validateRuntimeCandidateRetryContract(attempt int, previousFailure *runtime
 func validateRuntimeCandidatePreflightCommand(command llmevents.PreflightRuntimeCandidateCommand) error {
 	switch command.DocumentKind {
 	case runtimecontract.RuntimeProviderDocumentOperations:
-		if command.SemanticManifest.Hash != "" || command.SemanticContext.WorkspaceID != "" || command.SemanticContext.RunID != "" || command.PreviousSemanticRejection != nil || command.SemanticCorrectionDirective != nil {
+		if command.SemanticManifest.Hash != "" || command.SemanticContext.WorkspaceID != "" || command.SemanticContext.RunID != "" || command.SemanticCorrectionObservation != nil || command.SemanticCorrectionDirective != nil {
 			return fmt.Errorf("operations candidate preflight must not carry semantic plan fields")
 		}
 		if command.Decision.AuthoritySnapshot.WorkspaceID != command.WorkspaceID || command.Decision.AuthoritySnapshot.RunID != command.RunID {
@@ -319,9 +319,9 @@ func validateRuntimeCandidatePreflightCommand(command llmevents.PreflightRuntime
 		if err := runtimecontract.ValidateRuntimeCandidateContractManifestForDecision(command.CandidateManifest, command.Decision, runtimecontract.RuntimeCandidateManifestOwnerFactsFromContext(command.CandidateContext)); err != nil {
 			return err
 		}
-		return validateRuntimeCandidateRetryContract(command.CandidateAttempt, command.PreviousFailure, command.CandidateCorrection, command.CandidateManifest.Hash)
+		return validateRuntimeCandidateRetryContract(command.CandidateAttempt, command.CandidateCorrectionObservation, command.CandidateCorrection, command.CandidateManifest)
 	case runtimecontract.RuntimeProviderDocumentSemanticPlan:
-		if command.CandidateManifest.Hash != "" || command.CandidateContext.WorkspaceID != "" || command.CandidateContext.RunID != "" || command.DefinitionContext.Revision != "" || command.PreviousFailure != nil || command.CandidateCorrection != nil {
+		if command.CandidateManifest.Hash != "" || command.CandidateContext.WorkspaceID != "" || command.CandidateContext.RunID != "" || command.DefinitionContext.Revision != "" || command.CandidateCorrectionObservation != nil || command.CandidateCorrection != nil {
 			return fmt.Errorf("semantic plan preflight must not carry operations fields")
 		}
 		if command.SemanticContext.WorkspaceID != command.WorkspaceID || command.SemanticContext.RunID != command.RunID {
@@ -330,7 +330,7 @@ func validateRuntimeCandidatePreflightCommand(command llmevents.PreflightRuntime
 		if err := command.SemanticContext.Validate(command.SemanticManifest); err != nil {
 			return err
 		}
-		return validateRuntimeSemanticRetryContract(command.CandidateAttempt, command.SemanticManifest, command.SemanticContext.PlanStep, command.StablePrefixHash, command.PreviousSemanticRejection, command.SemanticCorrectionDirective)
+		return validateRuntimeSemanticRetryContract(command.CandidateAttempt, command.SemanticManifest, command.SemanticContext.PlanStep, command.StablePrefixHash, command.SemanticCorrectionObservation, command.SemanticCorrectionDirective)
 	default:
 		return fmt.Errorf("runtime candidate preflight requires explicit document kind")
 	}
@@ -340,9 +340,9 @@ func validateRuntimeCandidateCommand(command llmevents.RequestRuntimeCandidateCo
 	preflight := llmevents.PreflightRuntimeCandidateCommand{
 		WorkspaceID: command.WorkspaceID, RunID: command.RunID, DocumentKind: command.DocumentKind,
 		Decision: command.Decision, Transaction: command.Transaction, CandidateAttempt: command.CandidateAttempt,
-		PreviousFailure: command.PreviousFailure, CandidateCorrection: command.CandidateCorrection, StablePrefixHash: command.StablePrefixHash,
+		CandidateCorrectionObservation: command.CandidateCorrectionObservation, CandidateCorrection: command.CandidateCorrection, StablePrefixHash: command.StablePrefixHash,
 		CandidateManifest: command.CandidateManifest, DefinitionContext: command.DefinitionContext, CandidateContext: command.CandidateContext,
-		SemanticManifest: command.SemanticManifest, SemanticContext: command.SemanticContext, PreviousSemanticRejection: command.PreviousSemanticRejection, SemanticCorrectionDirective: command.SemanticCorrectionDirective,
+		SemanticManifest: command.SemanticManifest, SemanticContext: command.SemanticContext, SemanticCorrectionObservation: command.SemanticCorrectionObservation, SemanticCorrectionDirective: command.SemanticCorrectionDirective,
 	}
 	if err := validateRuntimeCandidatePreflightCommand(preflight); err != nil {
 		return err
@@ -361,7 +361,7 @@ func validateRuntimeCandidateCommand(command llmevents.RequestRuntimeCandidateCo
 			return fmt.Errorf("operations runtime candidate command has invalid expected document")
 		}
 		if command.CandidateAttempt == 1 {
-			correctionHash := command.CandidateCorrection.StableRequestCorrectionHash(command.PreviousFailure)
+			correctionHash := command.CandidateCorrection.StableRequestCorrectionHash(command.CandidateCorrectionObservation)
 			logicalRequestID := runtimecontract.StableRuntimeCandidateRequestSessionID(command.DocumentKind, command.WorkspaceID, command.RunID, command.Transaction, command.StablePrefixHash, command.CandidateManifest.Hash, correctionHash)
 			if command.RequestIdentity.LogicalRequestID != logicalRequestID {
 				return fmt.Errorf("operations runtime candidate correction request identity is stale")
@@ -371,23 +371,23 @@ func validateRuntimeCandidateCommand(command llmevents.RequestRuntimeCandidateCo
 	return nil
 }
 
-func validateRuntimeSemanticRetryContract(attempt int, manifest runtimecontract.RuntimeSemanticPlanManifest, planStep runtimecontract.RuntimeSemanticPlanStep, stablePrefixHash string, rejection *runtimecontract.RuntimeOriginalDiagnostic, directive *runtimecontract.RuntimeSemanticCorrectionDirective) error {
+func validateRuntimeSemanticRetryContract(attempt int, manifest runtimecontract.RuntimeSemanticPlanManifest, planStep runtimecontract.RuntimeSemanticPlanStep, stablePrefixHash string, observation *runtimecontract.RuntimeSemanticCorrectionObservation, directive *runtimecontract.RuntimeSemanticCorrectionDirective) error {
 	if attempt < 0 || attempt > 1 {
 		return fmt.Errorf("runtime semantic plan attempt must be 0 or 1")
 	}
 	if attempt == 0 {
-		if rejection != nil || directive != nil {
+		if observation != nil || directive != nil {
 			return fmt.Errorf("initial runtime semantic plan attempt must not carry correction lineage")
 		}
 		return nil
 	}
-	if rejection == nil || directive == nil {
+	if observation == nil || directive == nil {
 		return fmt.Errorf("runtime semantic plan retry requires rejection and correction directive")
 	}
-	if err := rejection.Validate(); err != nil {
+	if err := observation.Validate(); err != nil {
 		return err
 	}
-	if err := directive.ValidateAgainst(manifest, *rejection); err != nil {
+	if err := directive.ValidateAgainstObservation(manifest, *observation); err != nil {
 		return err
 	}
 	if directive.PlanStep != planStep || directive.StablePrefixHash != strings.TrimSpace(stablePrefixHash) {

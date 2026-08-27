@@ -265,7 +265,7 @@ func runtimeCandidateAuthorityContextProjection(context runtimecontract.RuntimeC
 func buildRuntimeCandidateExecutionTailProjection(
 	context runtimecontract.RuntimeCandidateContext,
 	attempt int,
-	previousFailure *runtimecontract.RuntimeCandidateFailure,
+	previousFailure *runtimecontract.RuntimeCandidateCorrectionObservation,
 	manifest runtimecontract.RuntimeCandidateContractManifest,
 	correction *llmmodels.RuntimeCandidateCorrectionInput,
 ) runtimeCandidateExecutionTailProjection {

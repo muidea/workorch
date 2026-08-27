@@ -118,7 +118,7 @@ func TestCommitAssessmentAcceptsStructuredClaimEvidenceWithoutTextSimilarity(t *
 	}
 	commit := ExecutionEvidence{
 		EventID: "evidence-claim", WorkspaceID: "ws-v2", RunID: "run-v2", DispatchID: sealed.ActiveDispatch.ID,
-		AuthoritySnapshotID: sealed.ActiveDispatch.Transaction.AuthoritySnapshotID, OperationID: "validate-claim",
+		AuthoritySnapshotID: sealed.ActiveDispatch.Transaction.AuthoritySnapshotID, OperationID: runtimeTestActiveOperationID(t, sealed, 0),
 		Kind: runtimecontract.EvidenceKindValidation, Status: ExecutionEvidenceStatusAccepted,
 		Evidence: runtimecontract.RuntimeOperationEvidence{
 			Summary: "validation completed", Quality: common.EvidenceQualityValid,

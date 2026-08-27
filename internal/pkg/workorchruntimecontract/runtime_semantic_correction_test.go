@@ -6,6 +6,17 @@ import (
 	"github.com/muidea/workorch/internal/pkg/common"
 )
 
+func semanticCorrectionObservationForTest(rejection RuntimeOriginalDiagnostic) RuntimeSemanticCorrectionObservation {
+	return RuntimeSemanticCorrectionObservation{
+		SchemaVersion: RuntimeSemanticCorrectionObservationSchemaCurrent,
+		OwnerModuleID: rejection.OwnerModuleID, Class: rejection.OriginalClass, Code: rejection.OriginalCode,
+		Signature: rejection.Signature, OperationID: rejection.OperationID,
+		TargetRefs: append([]string(nil), rejection.TargetRefs...), ExpectedRevision: rejection.ExpectedRevision,
+		ObservedRevision: rejection.ObservedRevision, FieldViolations: CloneRuntimeFieldViolations(rejection.FieldViolations),
+		SemanticViolations: cloneRuntimeSemanticContractViolations(rejection.SemanticViolations), TargetObservation: rejection.TargetObservation,
+	}
+}
+
 func TestRuntimeSemanticCorrectionDirectiveIsManifestBoundAndDetached(t *testing.T) {
 	manifest := semanticContractTestManifest(t)
 	manifest.CoverageItems[0].PrerequisiteCoverageWorkItemIDs = []common.CoverageWorkItemID{"cwi-000"}
@@ -17,14 +28,15 @@ func TestRuntimeSemanticCorrectionDirectiveIsManifestBoundAndDetached(t *testing
 	}
 	rejection := *semanticContractTestDiagnostic()
 	rejection.SemanticViolations = []RuntimeSemanticContractViolation{violation}
+	observation := semanticCorrectionObservationForTest(rejection)
 	directive := RuntimeSemanticCorrectionDirective{
 		SchemaVersion: RuntimeSemanticCorrectionDirectiveSchemaCurrent,
 		PlanStep:      RuntimeSemanticPlanStepCoverageOrder, ManifestHash: manifest.Hash, DefinitionSeedHash: manifest.DefinitionSeedHash,
-		StablePrefixHash: "prefix-1", SourceRejectionHash: StableRuntimeSemanticPlanCorrectionHash(rejection), Attempt: 1,
+		StablePrefixHash: "prefix-1", SourceObservationHash: StableRuntimeSemanticCorrectionObservationHash(observation), Attempt: 1,
 		Violations: []RuntimeSemanticContractViolation{violation},
 	}
 	directive.Hash = StableRuntimeSemanticCorrectionDirectiveHash(directive)
-	if err := directive.ValidateAgainst(manifest, rejection); err != nil {
+	if err := directive.ValidateAgainstObservation(manifest, observation); err != nil {
 		t.Fatal(err)
 	}
 	clone := directive.Clone()
@@ -48,12 +60,13 @@ func TestRuntimeSemanticCorrectionDirectiveIsManifestBoundAndDetached(t *testing
 	}
 	staleManifest := manifest.Clone()
 	staleManifest.Hash = "stale-manifest"
-	if err := directive.ValidateAgainst(staleManifest, rejection); err == nil {
+	if err := directive.ValidateAgainstObservation(staleManifest, observation); err == nil {
 		t.Fatal("directive accepted stale manifest")
 	}
 	staleRejection := rejection
 	staleRejection.Signature = "different"
-	if err := directive.ValidateAgainst(manifest, staleRejection); err == nil {
+	staleObservation := semanticCorrectionObservationForTest(staleRejection)
+	if err := directive.ValidateAgainstObservation(manifest, staleObservation); err == nil {
 		t.Fatal("directive accepted stale source rejection")
 	}
 }
@@ -67,14 +80,15 @@ func TestRuntimeSemanticProofBatchCorrectionIsBoundToExactBatch(t *testing.T) {
 	rejection := *semanticContractTestDiagnostic()
 	rejection.FieldViolations = []RuntimeFieldViolation{{Path: "$.proposals", Actual: "missing_required"}}
 	rejection.SemanticViolations = []RuntimeSemanticContractViolation{violation}
+	observation := semanticCorrectionObservationForTest(rejection)
 	directive := RuntimeSemanticCorrectionDirective{
 		SchemaVersion: RuntimeSemanticCorrectionDirectiveSchemaCurrent,
 		PlanStep:      RuntimeSemanticPlanStepProofBatch, ManifestHash: manifest.Hash, DefinitionSeedHash: manifest.DefinitionSeedHash,
-		StablePrefixHash: "prefix-1", SourceRejectionHash: StableRuntimeSemanticPlanCorrectionHash(rejection), Attempt: 1,
+		StablePrefixHash: "prefix-1", SourceObservationHash: StableRuntimeSemanticCorrectionObservationHash(observation), Attempt: 1,
 		Violations: []RuntimeSemanticContractViolation{violation},
 	}
 	directive.Hash = StableRuntimeSemanticCorrectionDirectiveHash(directive)
-	if err := directive.ValidateAgainst(manifest, rejection); err != nil {
+	if err := directive.ValidateAgainstObservation(manifest, observation); err != nil {
 		t.Fatal(err)
 	}
 	clone := directive.Clone()
@@ -85,7 +99,7 @@ func TestRuntimeSemanticProofBatchCorrectionIsBoundToExactBatch(t *testing.T) {
 	wrongStep := directive.Clone()
 	wrongStep.PlanStep = RuntimeSemanticPlanStepCoverageOrder
 	wrongStep.Hash = StableRuntimeSemanticCorrectionDirectiveHash(wrongStep)
-	if err := wrongStep.ValidateAgainst(manifest, rejection); err == nil {
+	if err := wrongStep.ValidateAgainstObservation(manifest, observation); err == nil {
 		t.Fatal("proof-batch correction was accepted outside proof-batch step")
 	}
 }
@@ -98,14 +112,15 @@ func TestRuntimeSemanticCoverageOrderCorrectionIsBoundToExactManifest(t *testing
 	}
 	rejection := *semanticContractTestDiagnostic()
 	rejection.SemanticViolations = []RuntimeSemanticContractViolation{violation}
+	observation := semanticCorrectionObservationForTest(rejection)
 	directive := RuntimeSemanticCorrectionDirective{
 		SchemaVersion: RuntimeSemanticCorrectionDirectiveSchemaCurrent,
 		PlanStep:      RuntimeSemanticPlanStepCoverageOrder, ManifestHash: manifest.Hash, DefinitionSeedHash: manifest.DefinitionSeedHash,
-		StablePrefixHash: "prefix-1", SourceRejectionHash: StableRuntimeSemanticPlanCorrectionHash(rejection), Attempt: 1,
+		StablePrefixHash: "prefix-1", SourceObservationHash: StableRuntimeSemanticCorrectionObservationHash(observation), Attempt: 1,
 		Violations: []RuntimeSemanticContractViolation{violation},
 	}
 	directive.Hash = StableRuntimeSemanticCorrectionDirectiveHash(directive)
-	if err := directive.ValidateAgainst(manifest, rejection); err != nil {
+	if err := directive.ValidateAgainstObservation(manifest, observation); err != nil {
 		t.Fatal(err)
 	}
 
@@ -117,7 +132,7 @@ func TestRuntimeSemanticCoverageOrderCorrectionIsBoundToExactManifest(t *testing
 	wrongStep := directive.Clone()
 	wrongStep.PlanStep = RuntimeSemanticPlanStepProofBatch
 	wrongStep.Hash = StableRuntimeSemanticCorrectionDirectiveHash(wrongStep)
-	if err := wrongStep.ValidateAgainst(manifest, rejection); err == nil {
+	if err := wrongStep.ValidateAgainstObservation(manifest, observation); err == nil {
 		t.Fatal("coverage-order correction was accepted outside coverage-order step")
 	}
 }
@@ -131,14 +146,15 @@ func TestRuntimeSemanticProposalCorrectionPreservesExactFieldFact(t *testing.T) 
 	}
 	rejection := *semanticContractTestDiagnostic()
 	rejection.SemanticViolations = []RuntimeSemanticContractViolation{violation}
+	observation := semanticCorrectionObservationForTest(rejection)
 	directive := RuntimeSemanticCorrectionDirective{
 		SchemaVersion: RuntimeSemanticCorrectionDirectiveSchemaCurrent,
 		PlanStep:      RuntimeSemanticPlanStepProofBatch, ManifestHash: manifest.Hash, DefinitionSeedHash: manifest.DefinitionSeedHash,
-		StablePrefixHash: "prefix-1", SourceRejectionHash: StableRuntimeSemanticPlanCorrectionHash(rejection), Attempt: 1,
+		StablePrefixHash: "prefix-1", SourceObservationHash: StableRuntimeSemanticCorrectionObservationHash(observation), Attempt: 1,
 		Violations: []RuntimeSemanticContractViolation{violation},
 	}
 	directive.Hash = StableRuntimeSemanticCorrectionDirectiveHash(directive)
-	if err := directive.ValidateAgainst(manifest, rejection); err != nil {
+	if err := directive.ValidateAgainstObservation(manifest, observation); err != nil {
 		t.Fatal(err)
 	}
 	clone := directive.Clone()
@@ -162,14 +178,15 @@ func TestRuntimeSemanticProposalCorrectionAllowsEmptyCatalogValues(t *testing.T)
 	}
 	rejection := *semanticContractTestDiagnostic()
 	rejection.SemanticViolations = []RuntimeSemanticContractViolation{violation}
+	observation := semanticCorrectionObservationForTest(rejection)
 	directive := RuntimeSemanticCorrectionDirective{
 		SchemaVersion: RuntimeSemanticCorrectionDirectiveSchemaCurrent,
 		PlanStep:      RuntimeSemanticPlanStepProofBatch, ManifestHash: manifest.Hash, DefinitionSeedHash: manifest.DefinitionSeedHash,
-		StablePrefixHash: "prefix-1", SourceRejectionHash: StableRuntimeSemanticPlanCorrectionHash(rejection), Attempt: 1,
+		StablePrefixHash: "prefix-1", SourceObservationHash: StableRuntimeSemanticCorrectionObservationHash(observation), Attempt: 1,
 		Violations: []RuntimeSemanticContractViolation{violation},
 	}
 	directive.Hash = StableRuntimeSemanticCorrectionDirectiveHash(directive)
-	if err := directive.ValidateAgainst(manifest, rejection); err != nil {
+	if err := directive.ValidateAgainstObservation(manifest, observation); err != nil {
 		t.Fatalf("empty sealed catalog should remain a typed correction fact: %v", err)
 	}
 }

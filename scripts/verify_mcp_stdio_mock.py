@@ -277,7 +277,6 @@ def decision_payload(user_content: str, expected_server_id: str) -> dict[str, An
         binding_refs, server_id, tool = _mcp_recipe_from_sealed_binding(contract, bindings, expected_server_id)
         return {
             "operations": [{
-                "id": "mcp-stdio-call",
                 "kind": "mcp/tool_call",
                 "bindingRefs": binding_refs,
                 "parameters": [
@@ -365,7 +364,7 @@ def self_test() -> None:
 
     validation = decision_payload(_prompt(("C3.runtime-authority", _authority("need_validation"))), "mcp-test")
     operation = validation["operations"][0]
-    if operation.get("bindingRefs") != ["binding/cwi-test"] or "coverageWorkItemIds" in operation:
+    if operation.get("bindingRefs") != ["binding/cwi-test"] or set(operation) != {"kind", "bindingRefs", "parameters"}:
         raise AssertionError(f"MCP operation did not use C3 binding-only authorization: {validation}")
     if operation.get("targetRefs") is not None or operation["parameters"][0].get("string") != "mcp-test":
         raise AssertionError(f"MCP operation did not preserve selector-only target contract: {validation}")

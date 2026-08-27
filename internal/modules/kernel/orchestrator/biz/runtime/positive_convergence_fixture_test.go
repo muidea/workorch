@@ -104,7 +104,7 @@ func TestPositiveConvergenceFixture_AttemptCorrectionPartialGapSameFocusRepair(t
 		EventID: "event-sc-1", WorkspaceID: "ws-v2", RunID: "run-v2",
 		DispatchID:          sealedSC.ActiveDispatch.ID,
 		AuthoritySnapshotID: sealedSC.ActiveDispatch.Transaction.AuthoritySnapshotID,
-		OperationID:         "write-1",
+		OperationID:         runtimeTestActiveOperationID(t, sealedSC, 0),
 		Kind:                runtimecontract.EvidenceKindStateChange,
 		Status:              ExecutionEvidenceStatusAccepted,
 	})
@@ -139,7 +139,7 @@ func TestPositiveConvergenceFixture_AttemptCorrectionPartialGapSameFocusRepair(t
 			EventID: "event-val-1", WorkspaceID: "ws-v2", RunID: "run-v2",
 			DispatchID:          sealedVal.ActiveDispatch.ID,
 			AuthoritySnapshotID: sealedVal.ActiveDispatch.Transaction.AuthoritySnapshotID,
-			OperationID:         "validate-1",
+			OperationID:         runtimeTestActiveOperationID(t, sealedVal, 0),
 			Kind:                runtimecontract.EvidenceKindValidation,
 			Status:              ExecutionEvidenceStatusAccepted,
 			Evidence: runtimecontract.RuntimeOperationEvidence{Validation: &runtimecontract.RuntimeValidationObservation{
@@ -252,7 +252,7 @@ func TestPositiveConvergenceFixture_AttemptCorrectionPartialGapSameFocusRepair(t
 			EventID: "event-sc-repair", WorkspaceID: "ws-v2", RunID: "run-v2",
 			DispatchID:          sealedRepair.ActiveDispatch.ID,
 			AuthoritySnapshotID: sealedRepair.ActiveDispatch.Transaction.AuthoritySnapshotID,
-			OperationID:         "write-repair",
+			OperationID:         runtimeTestActiveOperationID(t, sealedRepair, 0),
 			Kind:                runtimecontract.EvidenceKindStateChange,
 			Status:              ExecutionEvidenceStatusAccepted,
 		})
@@ -287,7 +287,7 @@ func TestPositiveConvergenceFixture_AttemptCorrectionPartialGapSameFocusRepair(t
 			EventID: "event-val-repair", WorkspaceID: "ws-v2", RunID: "run-v2",
 			DispatchID:          sealedVal2.ActiveDispatch.ID,
 			AuthoritySnapshotID: sealedVal2.ActiveDispatch.Transaction.AuthoritySnapshotID,
-			OperationID:         "validate-repair",
+			OperationID:         runtimeTestActiveOperationID(t, sealedVal2, 0),
 			Kind:                runtimecontract.EvidenceKindValidation,
 			Status:              ExecutionEvidenceStatusAccepted,
 			Evidence: runtimecontract.RuntimeOperationEvidence{Validation: &runtimecontract.RuntimeValidationObservation{
@@ -403,7 +403,7 @@ func TestPositiveConvergenceFixture_BudgetExhaustionTerminal(t *testing.T) {
 	afterSC, err := controller.commitEvidence(ctx, ExecutionEvidence{
 		EventID: "ev-1", WorkspaceID: "ws-v2", RunID: "run-v2",
 		DispatchID: sealed.ActiveDispatch.ID, AuthoritySnapshotID: sealed.ActiveDispatch.Transaction.AuthoritySnapshotID,
-		OperationID: "write-1", Kind: runtimecontract.EvidenceKindStateChange, Status: ExecutionEvidenceStatusAccepted,
+		OperationID: runtimeTestActiveOperationID(t, sealed, 0), Kind: runtimecontract.EvidenceKindStateChange, Status: ExecutionEvidenceStatusAccepted,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -430,7 +430,7 @@ func TestPositiveConvergenceFixture_BudgetExhaustionTerminal(t *testing.T) {
 			ev, err := controller.commitEvidence(ctx, ExecutionEvidence{
 				EventID: "ev-v", WorkspaceID: "ws-v2", RunID: "run-v2",
 				DispatchID: sv.ActiveDispatch.ID, AuthoritySnapshotID: sv.ActiveDispatch.Transaction.AuthoritySnapshotID,
-				OperationID: "v1", Kind: runtimecontract.EvidenceKindValidation, Status: ExecutionEvidenceStatusAccepted,
+				OperationID: runtimeTestActiveOperationID(t, sv, 0), Kind: runtimecontract.EvidenceKindValidation, Status: ExecutionEvidenceStatusAccepted,
 				Evidence: runtimecontract.RuntimeOperationEvidence{Validation: &runtimecontract.RuntimeValidationObservation{
 					RecipeID:       runtimeManagedValidationEvidencePolicy().ID,
 					ExecutedChecks: []string{"repair-verification"}, PassedChecks: []string{"repair-verification"},
@@ -494,7 +494,7 @@ func TestPositiveConvergenceFixture_BudgetExhaustionTerminal(t *testing.T) {
 		er, err := controller.commitEvidence(ctx, ExecutionEvidence{
 			EventID: "ev-r", WorkspaceID: "ws-v2", RunID: "run-v2",
 			DispatchID: sr.ActiveDispatch.ID, AuthoritySnapshotID: sr.ActiveDispatch.Transaction.AuthoritySnapshotID,
-			OperationID: "wr", Kind: runtimecontract.EvidenceKindStateChange, Status: ExecutionEvidenceStatusAccepted,
+			OperationID: runtimeTestActiveOperationID(t, sr, 0), Kind: runtimecontract.EvidenceKindStateChange, Status: ExecutionEvidenceStatusAccepted,
 		})
 		if err != nil {
 			t.Fatal(err)
@@ -525,7 +525,7 @@ func TestPositiveConvergenceFixture_BudgetExhaustionTerminal(t *testing.T) {
 			ev, err := controller.commitEvidence(ctx, ExecutionEvidence{
 				EventID: "ev-v2", WorkspaceID: "ws-v2", RunID: "run-v2",
 				DispatchID: sv.ActiveDispatch.ID, AuthoritySnapshotID: sv.ActiveDispatch.Transaction.AuthoritySnapshotID,
-				OperationID: "v2", Kind: runtimecontract.EvidenceKindValidation, Status: ExecutionEvidenceStatusAccepted,
+				OperationID: runtimeTestActiveOperationID(t, sv, 0), Kind: runtimecontract.EvidenceKindValidation, Status: ExecutionEvidenceStatusAccepted,
 				Evidence: runtimecontract.RuntimeOperationEvidence{Validation: &runtimecontract.RuntimeValidationObservation{
 					ExecutedChecks: []string{"budget-repair"}, FailedChecks: []string{"budget-repair"},
 				}},
@@ -673,7 +673,7 @@ func TestPositiveConvergenceFixture_FocusAdvanceAfterSatisfiedAssessment(t *test
 	afterSC, err := controller.commitEvidence(ctx, ExecutionEvidence{
 		EventID: "ev-1", WorkspaceID: "ws-v2", RunID: "run-v2",
 		DispatchID: sealed.ActiveDispatch.ID, AuthoritySnapshotID: sealed.ActiveDispatch.Transaction.AuthoritySnapshotID,
-		OperationID: "write-1", Kind: runtimecontract.EvidenceKindStateChange, Status: ExecutionEvidenceStatusAccepted,
+		OperationID: runtimeTestActiveOperationID(t, sealed, 0), Kind: runtimecontract.EvidenceKindStateChange, Status: ExecutionEvidenceStatusAccepted,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -701,7 +701,7 @@ func TestPositiveConvergenceFixture_FocusAdvanceAfterSatisfiedAssessment(t *test
 			ev, err := controller.commitEvidence(ctx, ExecutionEvidence{
 				EventID: "ev-v", WorkspaceID: "ws-v2", RunID: "run-v2",
 				DispatchID: sv.ActiveDispatch.ID, AuthoritySnapshotID: sv.ActiveDispatch.Transaction.AuthoritySnapshotID,
-				OperationID: "v1", Kind: runtimecontract.EvidenceKindValidation, Status: ExecutionEvidenceStatusAccepted,
+				OperationID: runtimeTestActiveOperationID(t, sv, 0), Kind: runtimecontract.EvidenceKindValidation, Status: ExecutionEvidenceStatusAccepted,
 			})
 			if err != nil {
 				t.Fatal(err)

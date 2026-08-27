@@ -192,7 +192,7 @@ func (c *planningTransactionComponent) coordinateProviderRequestRecovery(ctx con
 	if err := validateCurrentCandidateRequestSession(aggregate, session); err != nil {
 		return RuntimeAggregate{}, err
 	}
-	if session.State == runtimecontract.RuntimeCandidateRequestSessionDocumentComplete {
+	if session.State == runtimecontract.RuntimeCandidateRequestSessionDocumentComplete || session.State == runtimecontract.RuntimeCandidateRequestSessionDocumentConformanceRejected {
 		return RuntimeAggregate{}, fmt.Errorf("%w: complete provider request cannot accept recovery", common.ErrConflict)
 	}
 	if !session.ProviderSubmitted || session.LastPhysicalCallID != physicalCallID {
@@ -213,6 +213,7 @@ func (c *planningTransactionComponent) coordinateProviderRequestRecovery(ctx con
 	if fact.TransportOutcome != nil {
 		updated.State = runtimecontract.RuntimeCandidateRequestSessionTransportPending
 		updated.LastOutcome = fact.TransportOutcome.Normalized()
+		updated.LastDocumentFraming = nil
 		updated.NextSequence++
 		updated.TransportOutcomes++
 		ledger, consumed, consumeErr := consumeRecoveryBudget(aggregate.Facts.Recovery, runtimecontract.RuntimeRecoveryBudgetProviderTransport, aggregate.Facts.RecoveryPolicy)
@@ -271,7 +272,8 @@ func providerRequestBudgetSettlementApplied(aggregate RuntimeAggregate, settleme
 			if fact.Status == RuntimeProviderBudgetSettlementUnknown || ((allocation.Dimension == runtimecontract.RuntimeBudgetDimensionProviderInputToken || allocation.Dimension == runtimecontract.RuntimeBudgetDimensionProviderOutputToken) && fact.Usage == nil) {
 				wantState = runtimecontract.RuntimeBudgetAllocationUnknown
 			}
-			if allocation.State != wantState || allocation.OwnerFactRef != fact.OwnerFactRef {
+			if allocation.State != wantState || allocation.OwnerFactRef != fact.OwnerFactRef ||
+				!providerRequestBudgetConsumptionMatches(aggregate.ExecutionBudget.Consumptions, allocation, fact) {
 				return false
 			}
 		default:
@@ -279,6 +281,42 @@ func providerRequestBudgetSettlementApplied(aggregate RuntimeAggregate, settleme
 		}
 	}
 	return matched > 0
+}
+
+func providerRequestBudgetConsumptionMatches(values []runtimecontract.RuntimeBudgetConsumptionFact, allocation runtimecontract.RuntimeBudgetAllocation, settlement RuntimeProviderBudgetSettlement) bool {
+	confirmed, unknown := int64(1), int64(0)
+	if settlement.Status == RuntimeProviderBudgetSettlementUnknown {
+		confirmed, unknown = 0, allocation.ReservedAmount
+	} else {
+		switch allocation.Dimension {
+		case runtimecontract.RuntimeBudgetDimensionProviderInputToken:
+			if settlement.Usage == nil {
+				confirmed, unknown = 0, allocation.ReservedAmount
+			} else {
+				confirmed = int64(settlement.Usage.InputTokens)
+			}
+		case runtimecontract.RuntimeBudgetDimensionProviderOutputToken:
+			if settlement.Usage == nil {
+				confirmed, unknown = 0, allocation.ReservedAmount
+			} else {
+				confirmed = int64(settlement.Usage.OutputTokens)
+			}
+		}
+	}
+	matched := 0
+	for _, consumption := range values {
+		consumption = consumption.Normalized()
+		if consumption.AllocationID != allocation.AllocationID {
+			continue
+		}
+		matched++
+		if consumption.Owner != runtimecontract.RuntimeModuleLLM || consumption.LogicalConsumptionID != settlement.LogicalRequestID ||
+			consumption.PhysicalConsumptionID != settlement.PhysicalCallID || consumption.ConfirmedAmount != confirmed || consumption.UnknownAmount != unknown ||
+			consumption.OwnerResultRef != settlement.OwnerFactRef || consumption.OwnerResultHash != settlement.OwnerFactHash {
+			return false
+		}
+	}
+	return matched == 1
 }
 
 func providerRequestRecoveryDuplicateApplied(aggregate RuntimeAggregate, session runtimecontract.RuntimeCandidateRequestSession, physicalCallID string, fact RuntimeProviderRequestRecoveryFact) bool {

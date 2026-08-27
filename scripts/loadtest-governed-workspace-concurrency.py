@@ -273,7 +273,6 @@ class MockLLMServer:
             return {
                 "operations": [
                     {
-                        "id": "loadtest-tool",
                         "kind": "mcp/tool_call",
                         "bindingRefs": [binding_ref],
                         "parameters": [
@@ -313,7 +312,6 @@ class MockLLMServer:
         return {
             "operations": [
                 {
-                    "id": "loadtest-tool",
                     "kind": "mcp/tool_call",
                     "bindingRefs": [binding_ref],
                     "parameters": [

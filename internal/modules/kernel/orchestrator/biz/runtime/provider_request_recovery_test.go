@@ -122,7 +122,7 @@ func TestProviderRequestIncompleteRecoveryCoordinatesPendingAndExhaustedTerminal
 		t.Fatal(err)
 	}
 
-	firstFraming := providerIncompleteFramingForTest(session, []byte(`{"operations":[`), "provider_output_incomplete")
+	firstFraming := providerIncompleteFramingForTest(session, []byte(`{"operations":[`), runtimecontract.RuntimeProviderDocumentCodeIncompleteJSON)
 	firstFact := runtimeProviderDocumentRecoveryFactForTest(t, session.DocumentKind, firstFraming)
 	firstSettlement := runtimeProviderConfirmedBudgetSettlementForTest(t, session.LogicalRequestID, session.LastPhysicalCallID, nil)
 	pending, err := controller.coordinateProviderRequestRecovery(ctx, aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, session.LogicalRequestID, session.LastPhysicalCallID, firstFact, firstSettlement)
@@ -146,7 +146,7 @@ func TestProviderRequestIncompleteRecoveryCoordinatesPendingAndExhaustedTerminal
 	if err != nil {
 		t.Fatal(err)
 	}
-	secondFraming := providerIncompleteFramingForTest(current, []byte(`{"operations":[{"id":`), "max_output_tokens")
+	secondFraming := providerIncompleteFramingForTest(current, []byte(`{"operations":[{"id":`), runtimecontract.RuntimeProviderDocumentCodeOutputLimit)
 	secondFact := runtimeProviderDocumentRecoveryFactForTest(t, current.DocumentKind, secondFraming)
 	beforeSaves := repository.saves
 	secondSettlement := runtimeProviderConfirmedBudgetSettlementForTest(t, current.LogicalRequestID, physicalCallID, nil)
@@ -241,7 +241,7 @@ func TestProviderRequestIncompleteRecoveryCASCutPointsNeverReplayProvider(t *tes
 			if err != nil {
 				t.Fatal(err)
 			}
-			firstFraming := providerIncompleteFramingForTest(session, []byte(`{"operations":[`), "provider_output_incomplete")
+			firstFraming := providerIncompleteFramingForTest(session, []byte(`{"operations":[`), runtimecontract.RuntimeProviderDocumentCodeIncompleteJSON)
 			firstFact := runtimeProviderDocumentRecoveryFactForTest(t, session.DocumentKind, firstFraming)
 			firstSettlement := runtimeProviderConfirmedBudgetSettlementForTest(t, session.LogicalRequestID, session.LastPhysicalCallID, nil)
 			pending, err := controller.coordinateProviderRequestRecovery(ctx, aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, session.LogicalRequestID, session.LastPhysicalCallID, firstFact, firstSettlement)
@@ -254,7 +254,7 @@ func TestProviderRequestIncompleteRecoveryCASCutPointsNeverReplayProvider(t *tes
 			if err != nil {
 				t.Fatal(err)
 			}
-			framing := providerIncompleteFramingForTest(current, []byte(`{"operations":[{"id":`), "max_output_tokens")
+			framing := providerIncompleteFramingForTest(current, []byte(`{"operations":[{"id":`), runtimecontract.RuntimeProviderDocumentCodeOutputLimit)
 			fact := runtimeProviderDocumentRecoveryFactForTest(t, current.DocumentKind, framing)
 			settlement := runtimeProviderConfirmedBudgetSettlementForTest(t, current.LogicalRequestID, physicalCallID, nil)
 			repository.mode = mode
@@ -386,7 +386,7 @@ func TestProviderRequestSemanticRecoveryCoordinatesTransportAndIncompleteTermina
 				outcome := runtimecontract.RuntimeCandidateRequestOutcome{Class: runtimecontract.RuntimeCandidateRequestOutcomeProviderTransient, Code: diagnostic.OriginalCode, Signature: diagnostic.Signature}
 				fact = runtimeProviderTransportRecoveryFactForTest(t, session.DocumentKind, outcome, diagnostic.OriginalMessage, &diagnostic)
 			} else {
-				firstFraming := providerIncompleteFramingForTest(session, []byte(`{"coverageOrder":[`), "provider_output_incomplete")
+				firstFraming := providerIncompleteFramingForTest(session, []byte(`{"coverageOrder":[`), runtimecontract.RuntimeProviderDocumentCodeIncompleteJSON)
 				firstFact := runtimeProviderDocumentRecoveryFactForTest(t, session.DocumentKind, firstFraming)
 				pending, err := controller.coordinateProviderRequestRecovery(ctx, aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, session.LogicalRequestID, physicalCallID, firstFact, runtimeProviderConfirmedBudgetSettlementForTest(t, session.LogicalRequestID, physicalCallID, nil))
 				if err != nil {
@@ -397,7 +397,7 @@ func TestProviderRequestSemanticRecoveryCoordinatesTransportAndIncompleteTermina
 				if _, err := controller.markCandidateRequestSubmitted(ctx, pending.Facts.WorkspaceID, pending.Facts.RunID, current.LogicalRequestID, current.NextSequence, physicalCallID); err != nil {
 					t.Fatal(err)
 				}
-				framing := providerIncompleteFramingForTest(current, []byte(`{"coverageOrder":["cwi`), "max_output_tokens")
+				framing := providerIncompleteFramingForTest(current, []byte(`{"coverageOrder":["cwi`), runtimecontract.RuntimeProviderDocumentCodeOutputLimit)
 				fact = runtimeProviderDocumentRecoveryFactForTest(t, current.DocumentKind, framing)
 			}
 			before := repository.aggregate.StateRevision
@@ -418,11 +418,15 @@ func TestProviderRequestSemanticRecoveryCoordinatesTransportAndIncompleteTermina
 }
 
 func providerIncompleteFramingForTest(session runtimecontract.RuntimeCandidateRequestSession, content []byte, code string) runtimecontract.RuntimeProviderDocumentFraming {
+	signature := runtimecontract.RuntimeProviderDocumentSignatureIncompleteJSON
+	if code == runtimecontract.RuntimeProviderDocumentCodeOutputLimit {
+		signature = runtimecontract.RuntimeProviderDocumentSignatureOutputLimit
+	}
 	return runtimecontract.RuntimeProviderDocumentFraming{
 		Disposition:          runtimecontract.RuntimeProviderDocumentIncomplete,
 		ExpectedDocumentHash: session.ExpectedDocument.Hash,
 		ResponseHash:         runtimecontract.StableRuntimeProviderResponseHash(content),
-		ResponseBytes:        int64(len(content)), Code: code, Signature: code + "/exact",
+		ResponseBytes:        int64(len(content)), Code: code, Signature: signature,
 	}
 }
 
@@ -434,7 +438,7 @@ func TestProviderRequestRecoveryRejectsStaleAndConflictingFactsWithoutCAS(t *tes
 	if err != nil {
 		t.Fatal(err)
 	}
-	framing := providerIncompleteFramingForTest(session, []byte(`{"operations":[`), "provider_output_incomplete")
+	framing := providerIncompleteFramingForTest(session, []byte(`{"operations":[`), runtimecontract.RuntimeProviderDocumentCodeIncompleteJSON)
 	fact := runtimeProviderDocumentRecoveryFactForTest(t, session.DocumentKind, framing)
 	settlement := runtimeProviderConfirmedBudgetSettlementForTest(t, session.LogicalRequestID, session.LastPhysicalCallID, nil)
 	if _, err := controller.coordinateProviderRequestRecovery(ctx, aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, "stale-logical-request", session.LastPhysicalCallID, fact, settlement); !errors.Is(err, common.ErrNotFound) {
@@ -462,7 +466,7 @@ func TestProviderRequestRecoveryRejectsReleasedOrUnknownPhysicalSubmissionWithou
 			if err != nil {
 				t.Fatal(err)
 			}
-			framing := providerIncompleteFramingForTest(session, []byte(`{"operations":[`), "provider_output_incomplete")
+			framing := providerIncompleteFramingForTest(session, []byte(`{"operations":[`), runtimecontract.RuntimeProviderDocumentCodeIncompleteJSON)
 			fact := runtimeProviderDocumentRecoveryFactForTest(t, session.DocumentKind, framing)
 			var settlement RuntimeProviderBudgetSettlement
 			if status == RuntimeProviderBudgetSettlementUnknown {

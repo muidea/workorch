@@ -443,10 +443,12 @@ func TestFeasibilityPrerequisiteInvalidatesAttemptWithoutRetryOrRepairDebt(t *te
 	if _, err := controller.BeginCandidateAttemptForTest(ctx, "ws-v2", "run-v2", 0, "stable-prefix"); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := controller.recordCandidateProposal(ctx, "ws-v2", "run-v2", 0, candidate); err != nil {
+	proposed, err := controller.recordCandidateProposal(ctx, "ws-v2", "run-v2", 0, candidate)
+	if err != nil {
 		t.Fatal(err)
 	}
-	request := runtimecontract.RuntimeOperationPrerequisiteRequest{OperationID: "replace-target", Kind: runtimecontract.PrerequisiteKindTargetSnapshot, OwnerModuleID: runtimecontract.RuntimeModuleFile, SubjectRef: "target.txt", Reason: "content-bound file operation requires a current owner target snapshot"}
+	operationID := runtimeTestCandidateOperationID(t, *proposed.CandidateAttempts[len(proposed.CandidateAttempts)-1].Proposal, 0)
+	request := runtimecontract.RuntimeOperationPrerequisiteRequest{OperationID: operationID, Kind: runtimecontract.PrerequisiteKindTargetSnapshot, OwnerModuleID: runtimecontract.RuntimeModuleFile, SubjectRef: "target.txt", Reason: "content-bound file operation requires a current owner target snapshot"}
 	failure := runtimecontract.FailureFact{Class: runtimecontract.FailureClassCandidateContractFailure, Code: "operation_replay_proof_unavailable", Signature: "file-preview-content-conflict", Message: "current target content cannot prove the proposed patch", TargetRefs: []string{"target.txt"}}
 	feedback, err := runtimecontract.RuntimeFeedbackFromFailureFact(runtimecontract.RuntimeFeedbackScope{WorkspaceID: "ws-v2", RunID: "run-v2"}, runtimecontract.RuntimeFeedbackDomainFeasibility, runtimecontract.RuntimeFeedbackCategory(runtimecontract.RuntimeOwnerFeasibilityCategoryResourceAbsent), runtimecontract.RuntimeModuleFile, failure)
 	if err != nil {
@@ -457,7 +459,7 @@ func TestFeasibilityPrerequisiteInvalidatesAttemptWithoutRetryOrRepairDebt(t *te
 		t.Fatal(err)
 	}
 	if _, err := controller.recordCandidateFeasibility(ctx, "ws-v2", "run-v2", 0, runtimecontract.RuntimeCandidateFeasibilityRecord{
-		OperationID: "replace-target", AdmissibilitySnapshotID: inventory.SnapshotID,
+		OperationID: operationID, AdmissibilitySnapshotID: inventory.SnapshotID,
 		CandidateManifestHash: runtimeTestPendingCandidateManifestHash(t, controller, "ws-v2", "run-v2", 0), Observation: &ownerObservation,
 	}); err != nil {
 		t.Fatal(err)
@@ -531,9 +533,11 @@ func TestOwnerInfeasibilityInvalidatesAttemptAndFormsNewAuthorityWithoutCorrecti
 	if _, err := controller.BeginCandidateAttemptForTest(ctx, facts.WorkspaceID, facts.RunID, 0, "owner-infeasible-prefix"); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := controller.recordCandidateProposal(ctx, facts.WorkspaceID, facts.RunID, 0, candidate); err != nil {
+	proposed, err := controller.recordCandidateProposal(ctx, facts.WorkspaceID, facts.RunID, 0, candidate)
+	if err != nil {
 		t.Fatal(err)
 	}
+	operationID := runtimeTestCandidateOperationID(t, *proposed.CandidateAttempts[len(proposed.CandidateAttempts)-1].Proposal, 0)
 	failure := runtimecontract.FailureFact{Class: runtimecontract.FailureClassCandidateContractFailure, Code: "operation_replay_proof_unavailable", Signature: "file/replay-proof-unavailable", Message: "patch preview did not prove a durable change", TargetRefs: []string{"target.txt"}}
 	feedback, err := runtimecontract.RuntimeFeedbackFromFailureFact(runtimecontract.RuntimeFeedbackScope{
 		WorkspaceID: facts.WorkspaceID, RunID: facts.RunID, AuthoritySnapshotID: beforeAuthority,
@@ -541,7 +545,7 @@ func TestOwnerInfeasibilityInvalidatesAttemptAndFormsNewAuthorityWithoutCorrecti
 	if err != nil {
 		t.Fatal(err)
 	}
-	feedback.OriginalDiagnostic.OperationID = "write-target"
+	feedback.OriginalDiagnostic.OperationID = operationID
 	feedback.OriginalDiagnostic.TargetRefs = []string{"target.txt", "target.txt", "secondary.txt"}
 	feedback.OriginalDiagnostic.ExpectedRevision = "workspace-v1"
 	feedback.OriginalDiagnostic.ObservedRevision = "workspace-v2"
@@ -561,7 +565,7 @@ func TestOwnerInfeasibilityInvalidatesAttemptAndFormsNewAuthorityWithoutCorrecti
 		OwnerPolicy: runtimecontract.RuntimeOwnerPolicyIdentity{OwnerModuleID: runtimecontract.RuntimeModuleFile, PolicyRevision: "file-owner-feasibility", CatalogSnapshotID: inventory.SnapshotID},
 	}
 	if _, err := controller.recordCandidateFeasibility(ctx, facts.WorkspaceID, facts.RunID, 0, runtimecontract.RuntimeCandidateFeasibilityRecord{
-		OperationID: "write-target", AdmissibilitySnapshotID: inventory.SnapshotID,
+		OperationID: operationID, AdmissibilitySnapshotID: inventory.SnapshotID,
 		CandidateManifestHash: runtimeTestPendingCandidateManifestHash(t, controller, facts.WorkspaceID, facts.RunID, 0), Observation: &ownerObservation,
 	}); err != nil {
 		t.Fatal(err)
@@ -716,9 +720,11 @@ func TestOwnerBindingContradictionRetiresExactBindingWithoutEffectAndIsRestartId
 	candidate := runtimecontract.RuntimeCandidate{StateChange: &runtimecontract.StateChangeCandidate{Operations: []runtimecontract.StateChangingOperation{{Operation: runtimecontract.RuntimeOperation{
 		ID: "write-target", Kind: runtimecontract.StepKindFileWrite, BindingRefs: []string{binding.BindingID}, TargetRefs: []string{"target.txt"}, Parameters: runtimeFileWriteParameters("state"),
 	}}}}}
-	if _, err := controller.recordCandidateProposal(ctx, facts.WorkspaceID, facts.RunID, 0, candidate); err != nil {
+	proposed, err := controller.recordCandidateProposal(ctx, facts.WorkspaceID, facts.RunID, 0, candidate)
+	if err != nil {
 		t.Fatal(err)
 	}
+	operationID := runtimeTestCandidateOperationID(t, *proposed.CandidateAttempts[len(proposed.CandidateAttempts)-1].Proposal, 0)
 	failure := runtimecontract.FailureFact{Class: runtimecontract.FailureClassCandidateContractFailure, Code: "operation_target_exists", Signature: "file/target-exists", Message: "file/write is create-only", TargetRefs: []string{"target.txt"}}
 	feedback, err := runtimecontract.RuntimeFeedbackFromFailureFact(runtimecontract.RuntimeFeedbackScope{
 		WorkspaceID: facts.WorkspaceID, RunID: facts.RunID, AuthoritySnapshotID: begun.Decision.AuthoritySnapshot.ID,
@@ -726,7 +732,7 @@ func TestOwnerBindingContradictionRetiresExactBindingWithoutEffectAndIsRestartId
 	if err != nil {
 		t.Fatal(err)
 	}
-	feedback.OriginalDiagnostic.OperationID = "write-target"
+	feedback.OriginalDiagnostic.OperationID = operationID
 	feedback.OriginalDiagnostic.ObservedRevision = "tree-v1"
 	ownerObservation := runtimecontract.RuntimeOwnerFeasibilityObservation{
 		Outcome: runtimecontract.RuntimeOwnerFeasibilityInfeasible, Feedback: &feedback,
@@ -734,7 +740,7 @@ func TestOwnerBindingContradictionRetiresExactBindingWithoutEffectAndIsRestartId
 		ConstraintImpact: runtimecontract.RuntimeOwnerFeasibilityConstraintImpactSealedTargetAuthorizationContradicted,
 	}
 	if _, err := controller.recordCandidateFeasibility(ctx, facts.WorkspaceID, facts.RunID, 0, runtimecontract.RuntimeCandidateFeasibilityRecord{
-		OperationID: "write-target", AdmissibilitySnapshotID: inventory.SnapshotID,
+		OperationID: operationID, AdmissibilitySnapshotID: inventory.SnapshotID,
 		CandidateManifestHash: runtimeTestPendingCandidateManifestHash(t, controller, facts.WorkspaceID, facts.RunID, 0), Observation: &ownerObservation,
 	}); err != nil {
 		t.Fatal(err)
@@ -911,9 +917,11 @@ func TestOwnerContractDefectFailsFastWithoutCorrectionOrEffect(t *testing.T) {
 	if _, err := controller.BeginCandidateAttemptForTest(ctx, initialized.Facts.WorkspaceID, initialized.Facts.RunID, 0, "owner-contract-defect-prefix"); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := controller.recordCandidateProposal(ctx, initialized.Facts.WorkspaceID, initialized.Facts.RunID, 0, candidate); err != nil {
+	proposed, err := controller.recordCandidateProposal(ctx, initialized.Facts.WorkspaceID, initialized.Facts.RunID, 0, candidate)
+	if err != nil {
 		t.Fatal(err)
 	}
+	operationID := runtimeTestCandidateOperationID(t, *proposed.CandidateAttempts[len(proposed.CandidateAttempts)-1].Proposal, 0)
 	original := runtimecontract.FailureFact{
 		Class: runtimecontract.FailureClassCandidateContractFailure, Code: "file_new_unmapped_code",
 		Signature: "file/owner-contract-defect", Message: "file owner emitted an unregistered feasibility code", TargetRefs: []string{"target.txt"},
@@ -924,13 +932,13 @@ func TestOwnerContractDefectFailsFastWithoutCorrectionOrEffect(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	feedback.OriginalDiagnostic.OperationID = "write-target"
+	feedback.OriginalDiagnostic.OperationID = operationID
 	ownerObservation, err := runtimecontract.RuntimeOwnerFeasibilityObservationFromOutcome(runtimecontract.RuntimeOwnerFeasibilityContractDefect, &feedback, nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if _, err := controller.recordCandidateFeasibility(ctx, initialized.Facts.WorkspaceID, initialized.Facts.RunID, 0, runtimecontract.RuntimeCandidateFeasibilityRecord{
-		OperationID: "write-target", AdmissibilitySnapshotID: "inventory-file",
+		OperationID: operationID, AdmissibilitySnapshotID: "inventory-file",
 		CandidateManifestHash: runtimeTestPendingCandidateManifestHash(t, controller, initialized.Facts.WorkspaceID, initialized.Facts.RunID, 0), Observation: &ownerObservation,
 	}); err != nil {
 		t.Fatal(err)
@@ -1771,6 +1779,97 @@ func TestWorkspaceTreeChangeInvalidatesOwnerTargetSelectionOnce(t *testing.T) {
 	duplicate, duplicatePrerequisites, duplicateObservations, _, err := invalidatePrerequisiteObservationsForChanges(updated, changes)
 	if err != nil || duplicate.Resources.TargetSelection != nil || len(duplicatePrerequisites) != 0 || len(duplicateObservations) != 0 || len(duplicate.Prerequisites.Pending) != 1 {
 		t.Fatalf("duplicate target selection invalidation was not idempotent: facts=%+v prerequisites=%v observations=%v err=%v", duplicate, duplicatePrerequisites, duplicateObservations, err)
+	}
+}
+
+func TestCandidateRequestRecoveryStaleTerminalClearsFramingAcrossRestartAndIsIdempotent(t *testing.T) {
+	ctx := context.Background()
+	aggregate := stateChangeAggregate(t)
+	prerequisite, observation := addFreshFileAdmissibilityObservation(t, &aggregate)
+	repository := &controllerRepository{aggregate: &aggregate}
+	controller, err := NewRuntimeController(repository)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, session, err := controller.ensureCandidateRequestSession(ctx, "ws-1", "run-1", runtimecontract.RuntimeProviderDocumentOperations, "stale-framing-prefix", "manifest-v1", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := controller.markCandidateRequestSubmitted(ctx, "ws-1", "run-1", session.LogicalRequestID, 1, "physical-incomplete"); err != nil {
+		t.Fatal(err)
+	}
+	partial := []byte(`{"operations":[`)
+	framing := runtimecontract.RuntimeProviderDocumentFraming{
+		Disposition: runtimecontract.RuntimeProviderDocumentIncomplete, ExpectedDocumentHash: session.ExpectedDocument.Hash,
+		ResponseHash: runtimecontract.StableRuntimeProviderResponseHash(partial), ResponseBytes: int64(len(partial)),
+		Code: runtimecontract.RuntimeProviderDocumentCodeIncompleteJSON, Signature: runtimecontract.RuntimeProviderDocumentSignatureIncompleteJSON,
+	}
+	recovery := runtimeProviderDocumentRecoveryFactForTest(t, runtimecontract.RuntimeProviderDocumentOperations, framing)
+	if _, err := controller.coordinateProviderRequestRecovery(ctx, "ws-1", "run-1", session.LogicalRequestID, "physical-incomplete", recovery, runtimeProviderConfirmedBudgetSettlementForTest(t, session.LogicalRequestID, "physical-incomplete", nil)); err != nil {
+		t.Fatal(err)
+	}
+	restarted, err := NewRuntimeController(repository)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := restarted.markCandidateRequestSubmitted(ctx, "ws-1", "run-1", session.LogicalRequestID, 2, "physical-stale"); err != nil {
+		t.Fatal(err)
+	}
+	stale := runtimecontract.RuntimePrerequisiteStale{
+		PrerequisiteID: prerequisite.ID, ObservationID: observation.ObservationID,
+		Domain: runtimecontract.RuntimeResourceWorkspaceTree, OwnerModuleID: runtimecontract.RuntimeModuleFile,
+		SubjectRef: "workspace_deliverable", ExpectedRevision: "tree-v1", ObservedRevision: "tree-v2", Reason: "workspace tree changed",
+	}
+	terminal, err := restarted.planning.invalidateCandidateRequestSessionForPrerequisiteStale(ctx, "ws-1", "run-1", session.LogicalRequestID, stale, runtimeProviderConfirmedBudgetSettlementForTest(t, session.LogicalRequestID, "physical-stale", nil))
+	if err != nil {
+		t.Fatal(err)
+	}
+	stored := terminal.CandidateRequestSessions[0]
+	if stored.State != runtimecontract.RuntimeCandidateRequestSessionTerminal || stored.LastOutcome.Class != runtimecontract.RuntimeCandidateRequestOutcomePrerequisiteStale || stored.LastDocumentFraming != nil || stored.ProviderSubmitted {
+		t.Fatalf("stale terminal retained incompatible document state: %+v", stored)
+	}
+	revision := terminal.StateRevision
+	duplicate, err := restarted.planning.invalidateCandidateRequestSessionForPrerequisiteStale(ctx, "ws-1", "run-1", session.LogicalRequestID, stale)
+	if err != nil || duplicate.StateRevision != revision {
+		t.Fatalf("duplicate stale invalidation mutated state: revision=%d err=%v", duplicate.StateRevision, err)
+	}
+}
+
+func TestCandidateRequestClosedDocumentStateRejectsStaleWithoutCAS(t *testing.T) {
+	ctx := context.Background()
+	aggregate := stateChangeAggregate(t)
+	prerequisite, observation := addFreshFileAdmissibilityObservation(t, &aggregate)
+	repository := &controllerRepository{aggregate: &aggregate}
+	controller, err := NewRuntimeController(repository)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, session, err := controller.ensureCandidateRequestSession(ctx, "ws-1", "run-1", runtimecontract.RuntimeProviderDocumentOperations, "closed-stale-prefix", "manifest-v1", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := controller.markCandidateRequestSubmitted(ctx, "ws-1", "run-1", session.LogicalRequestID, 1, "physical-empty"); err != nil {
+		t.Fatal(err)
+	}
+	framing := runtimecontract.RuntimeProviderDocumentFraming{
+		Disposition: runtimecontract.RuntimeProviderDocumentEmpty, ExpectedDocumentHash: session.ExpectedDocument.Hash,
+		Code: runtimecontract.RuntimeProviderDocumentCodeFinalOutputMissing, Signature: runtimecontract.RuntimeProviderDocumentSignatureOutputMissing,
+	}
+	if _, err := controller.planning.rejectCandidateRequestDocumentConformance(ctx, "ws-1", "run-1", session.LogicalRequestID, "physical-empty", framing, runtimeProviderConfirmedBudgetSettlementForTest(t, session.LogicalRequestID, "physical-empty", nil)); err != nil {
+		t.Fatal(err)
+	}
+	saves := repository.saves
+	revision := repository.aggregate.StateRevision
+	stale := runtimecontract.RuntimePrerequisiteStale{
+		PrerequisiteID: prerequisite.ID, ObservationID: observation.ObservationID,
+		Domain: runtimecontract.RuntimeResourceWorkspaceTree, OwnerModuleID: runtimecontract.RuntimeModuleFile,
+		SubjectRef: "workspace_deliverable", ExpectedRevision: "tree-v1", ObservedRevision: "tree-v2", Reason: "workspace tree changed",
+	}
+	if _, err := controller.planning.invalidateCandidateRequestSessionForPrerequisiteStale(ctx, "ws-1", "run-1", session.LogicalRequestID, stale); !errors.Is(err, common.ErrConflict) {
+		t.Fatalf("closed conformance session stale err=%v, want conflict", err)
+	}
+	if repository.saves != saves || repository.aggregate.StateRevision != revision {
+		t.Fatalf("closed stale result performed CAS: saves=%d revision=%d", repository.saves, repository.aggregate.StateRevision)
 	}
 }
 

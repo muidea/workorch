@@ -1,6 +1,8 @@
 package workorchruntimecontract
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -80,11 +82,17 @@ func DecodeRuntimeCandidatePayloadWithManifest(manifest RuntimeCandidateContract
 		manifest.Hash != StableRuntimeCandidateContractManifestHash(manifest) {
 		return RuntimeCandidate{}, &RuntimeCandidatePayloadDiagnostic{Path: "$", Actual: "unsealed_manifest", Cause: fmt.Errorf("runtime candidate contract manifest is invalid")}
 	}
+	if err := ValidateRuntimeCandidateManifestOperationCardinality(manifest); err != nil {
+		return RuntimeCandidate{}, &RuntimeCandidatePayloadDiagnostic{Path: "$.operations", Actual: "invalid_max_operation_count", Cause: err}
+	}
 	if manifest.EffectPolicy.State != manifest.State {
 		return RuntimeCandidate{}, &RuntimeCandidatePayloadDiagnostic{Path: "$.effectPolicy.state", Actual: string(manifest.EffectPolicy.State), Allowed: []string{string(manifest.State)}, Cause: fmt.Errorf("runtime candidate effect policy state does not match manifest")}
 	}
 	if err := manifest.EffectPolicy.Validate(); err != nil {
 		return RuntimeCandidate{}, &RuntimeCandidatePayloadDiagnostic{Path: "$.effectPolicy", Actual: "invalid", Cause: err}
+	}
+	if err := validateRuntimeCandidateManifestOperationWireFields(manifest); err != nil {
+		return RuntimeCandidate{}, &RuntimeCandidatePayloadDiagnostic{Path: "$.operations", Actual: "invalid_operation_fields", Cause: err}
 	}
 	candidate, err := DecodeRuntimeCandidatePayload(manifest.State, payload)
 	if err != nil {
@@ -93,7 +101,204 @@ func DecodeRuntimeCandidatePayloadWithManifest(manifest RuntimeCandidateContract
 	if err := validateRuntimeCandidatePayloadManifest(manifest, payload, candidate); err != nil {
 		return RuntimeCandidate{}, err
 	}
-	return candidate, nil
+	return DeriveRuntimeCandidateOperationAuthority(manifest, candidate)
+}
+
+// DeriveRuntimeCandidateOperationAuthority deterministically assigns the
+// operation identity and dependency graph owned by the sealed candidate
+// transaction. Provider documents contribute only operation content and
+// requiredOperationRef. Required operations use their normalized manifest
+// sequence slot; auxiliary operations use their canonical execution-semantic
+// key. Provider array order is never identity authority.
+// Existing ID and DependsOn values on an in-process candidate are ignored.
+func DeriveRuntimeCandidateOperationAuthority(manifest RuntimeCandidateContractManifest, candidate RuntimeCandidate) (RuntimeCandidate, error) {
+	manifest = manifest.Normalized()
+	if manifest.Revision != RuntimeCandidateContractManifestRevision || manifest.Hash == "" ||
+		manifest.Hash != StableRuntimeCandidateContractManifestHash(manifest) {
+		return RuntimeCandidate{}, &RuntimeCandidatePayloadDiagnostic{Path: "$", Actual: "unsealed_manifest", Cause: fmt.Errorf("runtime candidate contract manifest is invalid")}
+	}
+	if err := ValidateRuntimeCandidateManifestOperationCardinality(manifest); err != nil {
+		return RuntimeCandidate{}, &RuntimeCandidatePayloadDiagnostic{Path: "$.operations", Actual: "invalid_max_operation_count", Cause: err}
+	}
+	if err := validateRuntimeCandidateManifestOperationWireFields(manifest); err != nil {
+		return RuntimeCandidate{}, &RuntimeCandidatePayloadDiagnostic{Path: "$.operations", Actual: "invalid_operation_fields", Cause: err}
+	}
+	if err := validateRequiredOperationVariants(manifest.RequiredOperationSequence); err != nil {
+		return RuntimeCandidate{}, &RuntimeCandidatePayloadDiagnostic{Path: "$.operations", Actual: "invalid_required_operation_sequence", Cause: err}
+	}
+	if manifest.State != ConvergenceStateNeedStateChange && manifest.State != ConvergenceStateNeedValidation {
+		return cloneRuntimeCandidate(candidate), nil
+	}
+	if manifest.State == ConvergenceStateNeedStateChange && candidate.StateChange == nil {
+		return RuntimeCandidate{}, &RuntimeCandidatePayloadDiagnostic{Path: "$.operations", Actual: "missing_state_change_operations", Required: []string{"operations"}}
+	}
+	if manifest.State == ConvergenceStateNeedValidation && candidate.Validation == nil {
+		return RuntimeCandidate{}, &RuntimeCandidatePayloadDiagnostic{Path: "$.operations", Actual: "missing_validation_operations", Required: []string{"operations"}}
+	}
+
+	ret := cloneRuntimeCandidate(candidate)
+	operations, err := runtimeCandidatePayloadOperations(ret)
+	if err != nil {
+		return RuntimeCandidate{}, err
+	}
+	if err := validateRuntimeCandidateOperationCount(manifest, len(operations)); err != nil {
+		return RuntimeCandidate{}, err
+	}
+	type requiredSlot struct {
+		requirement RuntimeRequiredOperationVariant
+		operationID string
+	}
+	requiredByRef := make(map[string]requiredSlot, len(manifest.RequiredOperationSequence))
+	for ordinal, requirement := range manifest.RequiredOperationSequence {
+		requiredByRef[requirement.RequirementID] = requiredSlot{
+			requirement: requirement,
+			operationID: stableRuntimeCandidateOperationID(manifest.Hash, ordinal, "required", requirement.RequirementID),
+		}
+	}
+	seenRequired := make(map[string]int, len(requiredByRef))
+	for index := range operations {
+		operation := operations[index].Normalized()
+		operation.ID = ""
+		operation.DependsOn = nil
+		if operation.RequiredOperationRef == "" {
+			operations[index] = operation
+			continue
+		}
+		slot, found := requiredByRef[operation.RequiredOperationRef]
+		if !found {
+			return RuntimeCandidate{}, &RuntimeCandidatePayloadDiagnostic{
+				Path: fmt.Sprintf("$.operations[%d].requiredOperationRef", index), Actual: operation.RequiredOperationRef,
+				Allowed: runtimeCandidateRequiredOperationRefs(manifest.RequiredOperationSequence),
+			}
+		}
+		if previous, duplicate := seenRequired[operation.RequiredOperationRef]; duplicate {
+			return RuntimeCandidate{}, &RuntimeCandidatePayloadDiagnostic{
+				Path: fmt.Sprintf("$.operations[%d].requiredOperationRef", index), Actual: operation.RequiredOperationRef,
+				Cause: fmt.Errorf("required operation reference duplicates operations[%d]", previous),
+			}
+		}
+		seenRequired[operation.RequiredOperationRef] = index
+		operation.ID = slot.operationID
+		operations[index] = operation
+	}
+	for _, requirement := range manifest.RequiredOperationSequence {
+		if _, found := seenRequired[requirement.RequirementID]; !found {
+			return RuntimeCandidate{}, &RuntimeCandidatePayloadDiagnostic{
+				Path: "$.operations", Actual: "missing_required_operation_" + requirement.RequirementID,
+				Required: runtimeCandidateRequiredOperationRefs(manifest.RequiredOperationSequence),
+			}
+		}
+	}
+	semanticSlots := make(map[string]int, len(operations))
+	// Required sequence slots are manifest authority and may intentionally carry
+	// the same execution shape. They reserve their semantic keys so a provider
+	// cannot smuggle the same execution a second time as an auxiliary operation.
+	for index, operation := range operations {
+		if operation.RequiredOperationRef == "" {
+			continue
+		}
+		key := StableRuntimeOperationShape(operation)
+		if _, found := semanticSlots[key]; !found {
+			semanticSlots[key] = index
+		}
+	}
+	for index := range operations {
+		operation := operations[index]
+		if operation.RequiredOperationRef != "" {
+			continue
+		}
+		semanticKey := StableRuntimeOperationShape(operation)
+		if previous, duplicate := semanticSlots[semanticKey]; duplicate {
+			return RuntimeCandidate{}, &RuntimeCandidatePayloadDiagnostic{
+				Path: fmt.Sprintf("$.operations[%d]", index), Actual: "duplicate_auxiliary_semantic_slot",
+				Allowed: []string{"unique execution-semantic operation"},
+				Cause:   fmt.Errorf("auxiliary operation duplicates operations[%d]", previous),
+			}
+		}
+		semanticSlots[semanticKey] = index
+		operation.ID = stableRuntimeCandidateAuxiliaryOperationID(manifest.Hash, semanticKey)
+		operations[index] = operation
+	}
+	seenOperationIDs := make(map[string]int, len(operations))
+	for index, operation := range operations {
+		if previous, collision := seenOperationIDs[operation.ID]; collision {
+			return RuntimeCandidate{}, &RuntimeCandidatePayloadDiagnostic{
+				Path: fmt.Sprintf("$.operations[%d]", index), Actual: "operation_identity_collision_" + operation.ID,
+				Allowed: []string{"unique manifest-derived operation identity"},
+				Cause:   fmt.Errorf("derived operation identity collides with operations[%d]", previous),
+			}
+		}
+		seenOperationIDs[operation.ID] = index
+	}
+	for index := range operations {
+		operation := operations[index].Normalized()
+		if operation.RequiredOperationRef != "" {
+			slot := requiredByRef[operation.RequiredOperationRef]
+			operation.DependsOn = make([]string, 0, len(slot.requirement.DependsOnRequirementIDs))
+			for _, dependencyRef := range slot.requirement.DependsOnRequirementIDs {
+				operation.DependsOn = append(operation.DependsOn, requiredByRef[dependencyRef].operationID)
+			}
+			operation = operation.Normalized()
+		}
+		operations[index] = operation
+	}
+	return runtimeCandidateWithOperations(ret, operations), nil
+}
+
+func stableRuntimeCandidateAuxiliaryOperationID(manifestHash, semanticKey string) string {
+	hash := sha256.New()
+	writeHashString(hash, "runtime-candidate-auxiliary-operation-id/v2")
+	writeHashString(hash, manifestHash)
+	writeHashString(hash, semanticKey)
+	digest := hash.Sum(nil)
+	return "op-aux-" + hex.EncodeToString(digest[:10])
+}
+
+func stableRuntimeCandidateOperationID(manifestHash string, ordinal int, slotClass, slotKey string) string {
+	hash := sha256.New()
+	writeHashString(hash, "runtime-candidate-operation-id/v1")
+	writeHashString(hash, manifestHash)
+	writeHashString(hash, slotClass)
+	writeHashString(hash, fmt.Sprintf("%d", ordinal))
+	writeHashString(hash, slotKey)
+	digest := hash.Sum(nil)
+	return fmt.Sprintf("op-%04d-%s", ordinal+1, hex.EncodeToString(digest[:10]))
+}
+
+func validateRuntimeCandidateOperationCount(manifest RuntimeCandidateContractManifest, count int) error {
+	if count <= manifest.MaxOperationCount {
+		return nil
+	}
+	return &RuntimeCandidatePayloadDiagnostic{
+		Path: "$.operations", Actual: fmt.Sprintf("operation_count_%d", count),
+		Allowed: []string{fmt.Sprintf("0..%d operations", manifest.MaxOperationCount)},
+		Cause:   fmt.Errorf("candidate operation count exceeds sealed maxOperationCount"),
+	}
+}
+
+func runtimeCandidateRequiredOperationRefs(values []RuntimeRequiredOperationVariant) []string {
+	ret := make([]string, 0, len(values))
+	for _, value := range values {
+		ret = append(ret, value.RequirementID)
+	}
+	return normalizeStrings(ret)
+}
+
+func runtimeCandidateWithOperations(candidate RuntimeCandidate, operations []RuntimeOperation) RuntimeCandidate {
+	if candidate.StateChange != nil {
+		candidate.StateChange.Operations = make([]StateChangingOperation, len(operations))
+		for index, operation := range operations {
+			candidate.StateChange.Operations[index] = StateChangingOperation{Operation: cloneRuntimeOperation(operation)}
+		}
+		return candidate
+	}
+	if candidate.Validation != nil {
+		candidate.Validation.Operations = make([]ValidationOperation, len(operations))
+		for index, operation := range operations {
+			candidate.Validation.Operations[index] = ValidationOperation{Operation: cloneRuntimeOperation(operation)}
+		}
+	}
+	return candidate
 }
 
 func runtimeCandidatePayloadDecodeDiagnostic(manifest RuntimeCandidateContractManifest, payload []byte, cause error) error {
@@ -302,7 +507,7 @@ func validateRuntimeCandidatePayloadManifest(manifest RuntimeCandidateContractMa
 	}
 	for _, field := range manifest.RequiredTopLevelFields {
 		if _, found := envelope[field]; !found {
-			return &RuntimeCandidatePayloadDiagnostic{Path: "$", Actual: "missing_" + field, Required: manifest.RequiredTopLevelFields, Allowed: manifest.AllowedTopLevelFields}
+			return &RuntimeCandidatePayloadDiagnostic{Path: "$." + field, Actual: "missing_" + field, Required: manifest.RequiredTopLevelFields, Allowed: manifest.AllowedTopLevelFields}
 		}
 	}
 	for field := range envelope {
@@ -320,6 +525,9 @@ func validateRuntimeCandidatePayloadManifest(manifest RuntimeCandidateContractMa
 	var rawOperations []map[string]json.RawMessage
 	if err := json.Unmarshal(envelope["operations"], &rawOperations); err != nil {
 		return &RuntimeCandidatePayloadDiagnostic{Path: "$.operations", Actual: "not_array", Cause: err}
+	}
+	if err := validateRuntimeCandidateOperationCount(manifest, len(rawOperations)); err != nil {
+		return err
 	}
 	if len(rawOperations) != len(operations) {
 		return &RuntimeCandidatePayloadDiagnostic{Path: "$.operations", Actual: "decode_length_mismatch", Cause: fmt.Errorf("decoded operations do not match payload")}
@@ -361,9 +569,10 @@ func validateRuntimeCandidatePayloadOperation(manifest RuntimeCandidateContractM
 			return &RuntimeCandidatePayloadDiagnostic{Path: path + "." + field, Actual: field, Allowed: operationManifest.AllowedOperationFields}
 		}
 	}
-	for _, required := range []string{"id", "kind"} {
-		if strings.TrimSpace(runtimeCandidatePayloadRawString(raw[required])) == "" {
-			return &RuntimeCandidatePayloadDiagnostic{Path: path + "." + required, Actual: "missing_" + required, Required: []string{required}, Allowed: operationManifest.AllowedOperationFields}
+	for _, required := range operationManifest.RequiredOperationFields {
+		value, present := raw[required]
+		if !present || (required == "kind" && strings.TrimSpace(runtimeCandidatePayloadRawString(value)) == "") {
+			return &RuntimeCandidatePayloadDiagnostic{Path: path + "." + required, Actual: "missing_" + required, Required: operationManifest.RequiredOperationFields, Allowed: operationManifest.AllowedOperationFields}
 		}
 	}
 	if operationManifest.RequireTargetRefs && len(operation.TargetRefs) == 0 {
@@ -389,11 +598,6 @@ func validateRuntimeCandidatePayloadOperation(manifest RuntimeCandidateContractM
 					return &RuntimeCandidatePayloadDiagnostic{Path: path + ".targetRefs", Actual: targetRef, Allowed: allowedTargets}
 				}
 			}
-		}
-	}
-	if !runtimeCandidatePayloadContains(operationManifest.AllowedOperationFields, "dependsOn") {
-		if _, found := raw["dependsOn"]; found {
-			return &RuntimeCandidatePayloadDiagnostic{Path: path + ".dependsOn", Actual: "dependsOn", Allowed: operationManifest.AllowedOperationFields}
 		}
 	}
 	if _, present := raw["requiredOperationRef"]; present {
@@ -430,6 +634,7 @@ func validateRuntimeCandidatePayloadParameters(operationManifest RuntimeCandidat
 		allowed = append(allowed, name)
 	}
 	allowed = normalizeStrings(allowed)
+	present := make(map[string]OperationParameter, len(parameters))
 	for index, parameter := range parameters {
 		name := strings.TrimSpace(parameter.Name)
 		expected, found := known[name]
@@ -448,6 +653,28 @@ func validateRuntimeCandidatePayloadParameters(operationManifest RuntimeCandidat
 		}
 		if runtimeCandidatePayloadContains(operationManifest.ForbiddenParameters, name) {
 			return &RuntimeCandidatePayloadDiagnostic{Path: fmt.Sprintf("%s.parameters[%d].name", path, index), Actual: name, Allowed: allowed, Forbidden: operationManifest.ForbiddenParameters}
+		}
+		present[name] = parameter
+	}
+	for _, parameter := range operationManifest.Parameters {
+		if !parameter.Required {
+			continue
+		}
+		_, found := present[parameter.Name]
+		if !found {
+			return &RuntimeCandidatePayloadDiagnostic{Path: path + ".parameters[name=" + parameter.Name + "]", Actual: "missing_" + parameter.Name, Required: []string{parameter.Name}, Allowed: allowed}
+		}
+	}
+	if len(operationManifest.RequireOneOfParameters) != 0 {
+		found := false
+		for _, name := range operationManifest.RequireOneOfParameters {
+			if value, exists := present[name]; exists && runtimeCandidatePayloadParameterHasValue(value) {
+				found = true
+				break
+			}
+		}
+		if !found {
+			return &RuntimeCandidatePayloadDiagnostic{Path: path + ".parameters", Actual: "missing_one_of_parameters", Required: operationManifest.RequireOneOfParameters, Allowed: allowed}
 		}
 	}
 	return nil
@@ -473,17 +700,17 @@ func validateRuntimeCandidatePayloadVariant(operationManifest RuntimeCandidateOp
 	variant := matches[0]
 	for _, name := range variant.RequiredParameters {
 		if _, found := values[name]; !found {
-			return &RuntimeCandidatePayloadDiagnostic{Path: path + ".parameters", Actual: "missing_" + name, Required: []string{name}, Allowed: operationManifest.AllowedVariantIDs}
+			return &RuntimeCandidatePayloadDiagnostic{Path: path + ".parameters[name=" + name + "]", Actual: "missing_" + name, Required: []string{name}, Allowed: operationManifest.AllowedVariantIDs}
 		}
 	}
 	for _, name := range variant.RequiredNonEmpty {
 		if value, found := values[name]; !found || !runtimeCandidatePayloadParameterHasValue(value) {
-			return &RuntimeCandidatePayloadDiagnostic{Path: path + ".parameters", Actual: "empty_" + name, Required: []string{name}, Allowed: operationManifest.AllowedVariantIDs}
+			return &RuntimeCandidatePayloadDiagnostic{Path: path + ".parameters[name=" + name + "]", Actual: "empty_" + name, Required: []string{name}, Allowed: operationManifest.AllowedVariantIDs}
 		}
 	}
 	for _, name := range variant.ForbiddenParameters {
 		if _, found := values[name]; found {
-			return &RuntimeCandidatePayloadDiagnostic{Path: path + ".parameters", Actual: name, Forbidden: []string{name}, Allowed: operationManifest.AllowedVariantIDs}
+			return &RuntimeCandidatePayloadDiagnostic{Path: path + ".parameters[name=" + name + "]", Actual: name, Forbidden: []string{name}, Allowed: operationManifest.AllowedVariantIDs}
 		}
 	}
 	return nil

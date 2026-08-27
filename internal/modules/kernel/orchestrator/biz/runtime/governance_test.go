@@ -368,6 +368,20 @@ func TestRecordOperationGovernanceRequiredDoesNotUseExecutionRepair(t *testing.T
 	repository := &controllerRepository{}
 	controller, _ := NewRuntimeController(repository)
 	facts := multiOperationFixtureFacts(t)
+	sequence := runtimecontract.RuntimeCapabilityStateSnapshot{
+		RequirementID: "governance-file-sequence", OwnerModuleID: runtimecontract.RuntimeModuleFile,
+		CapabilityStateKind: "test_operation_sequence", SubjectRef: "workspace_deliverable",
+		ObservedRevision: "governance-file-sequence-v1", ContentHash: "governance-file-sequence-content-v1",
+		AcquisitionKey: "governance-file-sequence-acquisition-v1", QueryReceiptRef: "governance-file-sequence-receipt-v1",
+		Disposition: runtimecontract.RuntimeCapabilityStateSequenceRequired,
+		RequiredOperationSequence: []runtimecontract.RuntimeRequiredOperationVariant{
+			{RequirementID: "predecessor", Kind: runtimecontract.StepKindFileWrite, TargetRef: "before.txt"},
+			{RequirementID: "governed", Kind: runtimecontract.StepKindFileWrite, TargetRef: "a.txt", DependsOnRequirementIDs: []string{"predecessor"}},
+			{RequirementID: "sibling", Kind: runtimecontract.StepKindFileWrite, TargetRef: "b.txt", DependsOnRequirementIDs: []string{"governed"}},
+		},
+	}
+	sequence.SnapshotID = runtimecontract.StableRuntimeCapabilityStateSnapshotID(sequence)
+	facts.Resources.CapabilityStates = append(facts.Resources.CapabilityStates, sequence)
 	facts.Capabilities.GovernanceKinds = []string{runtimecontract.RuntimeBlockKindApprovalRequest}
 	if len(facts.Resources.OperationAdmissibilities) != 1 {
 		t.Fatalf("expected one File owner catalog: %+v", facts.Resources.OperationAdmissibilities)
@@ -403,13 +417,13 @@ func TestRecordOperationGovernanceRequiredDoesNotUseExecutionRepair(t *testing.T
 	}
 	candidate := runtimecontract.RuntimeCandidate{StateChange: &runtimecontract.StateChangeCandidate{Operations: []runtimecontract.StateChangingOperation{
 		{Operation: runtimecontract.RuntimeOperation{
-			ID: "write-0", Kind: "file/write", CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-v2"}, TargetRefs: []string{"before.txt"}, Parameters: runtimeFileWriteParameters("completed-predecessor"),
+			Kind: "file/write", RequiredOperationRef: "predecessor", CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-v2"}, TargetRefs: []string{"before.txt"}, Parameters: runtimeFileWriteParameters("completed-predecessor"),
 		}},
 		{Operation: runtimecontract.RuntimeOperation{
-			ID: "write-1", Kind: "file/write", DependsOn: []string{"write-0"}, CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-v2"}, TargetRefs: []string{"a.txt"}, Parameters: runtimeFileWriteParameters("governed"),
+			Kind: "file/write", RequiredOperationRef: "governed", CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-v2"}, TargetRefs: []string{"a.txt"}, Parameters: runtimeFileWriteParameters("governed"),
 		}},
 		{Operation: runtimecontract.RuntimeOperation{
-			ID: "write-2", Kind: "file/write", DependsOn: []string{"write-1"}, CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-v2"}, TargetRefs: []string{"b.txt"}, Parameters: runtimeFileWriteParameters("governed-sibling"),
+			Kind: "file/write", RequiredOperationRef: "sibling", CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-v2"}, TargetRefs: []string{"b.txt"}, Parameters: runtimeFileWriteParameters("governed-sibling"),
 		}},
 	}}}
 	if err := RecordFixtureCandidateFeasibilities(context.Background(), controller, "ws-v2", "run-v2", 0, candidate); err != nil {
@@ -422,20 +436,23 @@ func TestRecordOperationGovernanceRequiredDoesNotUseExecutionRepair(t *testing.T
 	if sealed.ActiveDispatch == nil {
 		t.Fatal("expected active dispatch")
 	}
+	predecessorOperationID := runtimeTestActiveOperationID(t, sealed, 0)
+	governedOperationID := runtimeTestActiveOperationID(t, sealed, 1)
+	siblingOperationID := runtimeTestActiveOperationID(t, sealed, 2)
 	sealedCatalogSnapshotID := ownerCatalog.SnapshotID
 	sealedAcquisitionBinding := ownerCatalog.AcquisitionBinding
 	sealedReplayProof := runtimecontract.RuntimeOperationReplayProof{
-		OwnerModuleID: runtimecontract.RuntimeModuleFile, OperationID: "write-1", TargetRefs: []string{"a.txt"},
+		OwnerModuleID: runtimecontract.RuntimeModuleFile, OperationID: governedOperationID, TargetRefs: []string{"a.txt"},
 		BeforeHash: "before-governance", AfterHash: "after-governance",
 		AdmissibilitySnapshotID: sealedCatalogSnapshotID, AcquisitionBinding: sealedAcquisitionBinding,
 	}
 	completedReplayProof := runtimecontract.RuntimeOperationReplayProof{
-		OwnerModuleID: runtimecontract.RuntimeModuleFile, OperationID: "write-0", TargetRefs: []string{"before.txt"},
+		OwnerModuleID: runtimecontract.RuntimeModuleFile, OperationID: predecessorOperationID, TargetRefs: []string{"before.txt"},
 		BeforeHash: "before-completed", AfterHash: "after-completed",
 		AdmissibilitySnapshotID: sealedCatalogSnapshotID, AcquisitionBinding: sealedAcquisitionBinding,
 	}
 	siblingReplayProof := runtimecontract.RuntimeOperationReplayProof{
-		OwnerModuleID: runtimecontract.RuntimeModuleFile, OperationID: "write-2", TargetRefs: []string{"b.txt"},
+		OwnerModuleID: runtimecontract.RuntimeModuleFile, OperationID: siblingOperationID, TargetRefs: []string{"b.txt"},
 		BeforeHash: "before-governance-sibling", AfterHash: "after-governance-sibling",
 		AdmissibilitySnapshotID: sealedCatalogSnapshotID, AcquisitionBinding: sealedAcquisitionBinding,
 	}
@@ -444,11 +461,11 @@ func TestRecordOperationGovernanceRequiredDoesNotUseExecutionRepair(t *testing.T
 		execution.AdmissibilitySnapshotID = sealedCatalogSnapshotID
 		execution.AcquisitionBinding = sealedAcquisitionBinding
 		switch execution.OperationID {
-		case "write-0":
+		case predecessorOperationID:
 			execution.ReplayProof = &completedReplayProof
-		case "write-1":
+		case governedOperationID:
 			execution.ReplayProof = &sealedReplayProof
-		case "write-2":
+		case siblingOperationID:
 			execution.ReplayProof = &siblingReplayProof
 		}
 		execution.AuthorityHash = runtimecontract.StableRuntimeOperationExecutionAuthorityHash(*execution)
@@ -465,11 +482,11 @@ func TestRecordOperationGovernanceRequiredDoesNotUseExecutionRepair(t *testing.T
 			attempt.DispatchAuthorityHash = repository.aggregate.ActiveDispatch.DispatchAuthorityHash
 		}
 	}
-	claimedPredecessor, err := controller.claimOperationExecution(context.Background(), "ws-v2", "run-v2", "write-0")
+	claimedPredecessor, err := controller.claimOperationExecution(context.Background(), "ws-v2", "run-v2", predecessorOperationID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	predecessorExecution, ok := operationExecutionRecord(claimedPredecessor.ActiveDispatch.OperationExecutions, "write-0")
+	predecessorExecution, ok := operationExecutionRecord(claimedPredecessor.ActiveDispatch.OperationExecutions, predecessorOperationID)
 	if !ok {
 		t.Fatal("expected claimed predecessor operation execution")
 	}
@@ -491,32 +508,32 @@ func TestRecordOperationGovernanceRequiredDoesNotUseExecutionRepair(t *testing.T
 	// advances only the already-judged evidence marker and completed-operation
 	// index before the governed operation is claimed.
 	for idx := range predecessorReceiptAggregate.ActiveDispatch.OperationExecutions {
-		if predecessorReceiptAggregate.ActiveDispatch.OperationExecutions[idx].OperationID == "write-0" {
+		if predecessorReceiptAggregate.ActiveDispatch.OperationExecutions[idx].OperationID == predecessorOperationID {
 			predecessorReceiptAggregate.ActiveDispatch.OperationExecutions[idx].State = runtimecontract.OperationExecutionEvidenceCommitted
 		}
 	}
 	predecessorReceiptAggregate.ActiveDispatch.CompletedOperationIDs = appendNormalizedString(
 		predecessorReceiptAggregate.ActiveDispatch.CompletedOperationIDs,
-		"write-0",
+		predecessorOperationID,
 	)
 	repository.aggregate = &predecessorReceiptAggregate
 	if predecessorReceiptAggregate.ActiveDispatch == nil ||
-		!containsString(predecessorReceiptAggregate.ActiveDispatch.CompletedOperationIDs, "write-0") {
+		!containsString(predecessorReceiptAggregate.ActiveDispatch.CompletedOperationIDs, predecessorOperationID) {
 		t.Fatalf("predecessor did not commit before governance: %+v", predecessorReceiptAggregate.ActiveDispatch)
 	}
-	sourceCompleted, ok := operationExecutionRecord(predecessorReceiptAggregate.ActiveDispatch.OperationExecutions, "write-0")
+	sourceCompleted, ok := operationExecutionRecord(predecessorReceiptAggregate.ActiveDispatch.OperationExecutions, predecessorOperationID)
 	if !ok || sourceCompleted.State != runtimecontract.OperationExecutionEvidenceCommitted {
 		t.Fatalf("completed predecessor execution = %+v", sourceCompleted)
 	}
-	sourceSibling, ok := operationExecutionRecord(repository.aggregate.ActiveDispatch.OperationExecutions, "write-2")
+	sourceSibling, ok := operationExecutionRecord(repository.aggregate.ActiveDispatch.OperationExecutions, siblingOperationID)
 	if !ok {
 		t.Fatal("expected sealed sibling operation execution")
 	}
-	claimed, err := controller.claimOperationExecution(context.Background(), "ws-v2", "run-v2", "write-1")
+	claimed, err := controller.claimOperationExecution(context.Background(), "ws-v2", "run-v2", governedOperationID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	execution, ok := operationExecutionRecord(claimed.ActiveDispatch.OperationExecutions, "write-1")
+	execution, ok := operationExecutionRecord(claimed.ActiveDispatch.OperationExecutions, governedOperationID)
 	if !ok {
 		t.Fatal("expected claimed operation execution")
 	}
@@ -534,8 +551,8 @@ func TestRecordOperationGovernanceRequiredDoesNotUseExecutionRepair(t *testing.T
 	if err != nil {
 		t.Fatal(err)
 	}
-	next, err := controller.candidateDispatch.recordOperationGovernanceRequired(context.Background(), "ws-v2", "run-v2", "write-1", RuntimeOperationExecutionResult{
-		EventID: "gov-event-1", OperationID: "write-1", Receipt: committed, Governance: &requirement,
+	next, err := controller.candidateDispatch.recordOperationGovernanceRequired(context.Background(), "ws-v2", "run-v2", governedOperationID, RuntimeOperationExecutionResult{
+		EventID: "gov-event-1", OperationID: governedOperationID, Receipt: committed, Governance: &requirement,
 	})
 	if err != nil {
 		t.Fatalf("recordOperationGovernanceRequired: %v", err)
@@ -549,9 +566,9 @@ func TestRecordOperationGovernanceRequiredDoesNotUseExecutionRepair(t *testing.T
 	if next.Decision.State != runtimecontract.ConvergenceStateNeedGovernance {
 		t.Fatalf("decision action = %s, want request_governance", next.Decision.State)
 	}
-	closedExecution, closedExecutionFound := operationExecutionRecord(next.CompletedDispatches[0].OperationExecutions, "write-1")
+	closedExecution, closedExecutionFound := operationExecutionRecord(next.CompletedDispatches[0].OperationExecutions, governedOperationID)
 	if len(next.CompletedDispatches) != 1 || len(next.CompletedDispatches[0].OperationExecutions) != 3 ||
-		!containsString(next.CompletedDispatches[0].CompletedOperationIDs, "write-0") || !closedExecutionFound ||
+		!containsString(next.CompletedDispatches[0].CompletedOperationIDs, predecessorOperationID) || !closedExecutionFound ||
 		closedExecution.OwnerReceiptHash != runtimecontract.StableRuntimeOperationReceiptHash(committed) {
 		t.Fatalf("governance closeout lost owner receipt authority: %+v", next.CompletedDispatches)
 	}
@@ -614,7 +631,7 @@ func TestRecordOperationGovernanceRequiredDoesNotUseExecutionRepair(t *testing.T
 		duplicate.Aggregate.ActiveDispatch.ID != continued.Aggregate.ActiveDispatch.ID {
 		t.Fatalf("duplicate operation governance resolution = %+v err=%v", duplicate, err)
 	}
-	resumeExecution, ok := operationExecutionRecord(continued.Aggregate.ActiveDispatch.OperationExecutions, "write-1")
+	resumeExecution, ok := operationExecutionRecord(continued.Aggregate.ActiveDispatch.OperationExecutions, governedOperationID)
 	if !ok || resumeExecution.ExecutionKey != execution.ExecutionKey || resumeExecution.Fence != execution.Fence+1 || resumeExecution.State != runtimecontract.OperationExecutionClaimed {
 		t.Fatalf("resume execution = %+v", resumeExecution)
 	}
@@ -623,15 +640,15 @@ func TestRecordOperationGovernanceRequiredDoesNotUseExecutionRepair(t *testing.T
 		resumeExecution.ReplayProof.AfterHash != sealedReplayProof.AfterHash {
 		t.Fatalf("governance resume lost sealed execution authority: %+v", resumeExecution)
 	}
-	resumeCompleted, ok := operationExecutionRecord(continued.Aggregate.ActiveDispatch.OperationExecutions, "write-0")
+	resumeCompleted, ok := operationExecutionRecord(continued.Aggregate.ActiveDispatch.OperationExecutions, predecessorOperationID)
 	if !ok || resumeCompleted.State != runtimecontract.OperationExecutionEvidenceCommitted ||
 		resumeCompleted.ExecutionKey != sourceCompleted.ExecutionKey || resumeCompleted.Fence != sourceCompleted.Fence ||
 		resumeCompleted.OwnerReceiptRef != sourceCompleted.OwnerReceiptRef || resumeCompleted.OwnerReceiptHash != sourceCompleted.OwnerReceiptHash ||
 		resumeCompleted.AuthorityHash != sourceCompleted.AuthorityHash || resumeCompleted.IdempotencyClass != sourceCompleted.IdempotencyClass ||
-		!containsString(continued.Aggregate.ActiveDispatch.CompletedOperationIDs, "write-0") {
+		!containsString(continued.Aggregate.ActiveDispatch.CompletedOperationIDs, predecessorOperationID) {
 		t.Fatalf("governance resume lost completed sibling authority: source=%+v resume=%+v", sourceCompleted, resumeCompleted)
 	}
-	resumeSibling, ok := operationExecutionRecord(continued.Aggregate.ActiveDispatch.OperationExecutions, "write-2")
+	resumeSibling, ok := operationExecutionRecord(continued.Aggregate.ActiveDispatch.OperationExecutions, siblingOperationID)
 	if !ok || resumeSibling.State != runtimecontract.OperationExecutionSealed || resumeSibling.Fence != 0 ||
 		resumeSibling.ExecutionKey == sourceSibling.ExecutionKey || resumeSibling.AdmissibilitySnapshotID != sourceSibling.AdmissibilitySnapshotID ||
 		resumeSibling.AcquisitionBinding != sourceSibling.AcquisitionBinding || resumeSibling.ReplayProof == nil ||
@@ -744,7 +761,7 @@ func TestRecordOperationGovernanceRequiredDoesNotUseExecutionRepair(t *testing.T
 			tamperedPending.CompletedDispatches[dispatchIndex].OperationExecutions[executionIndex] =
 				continued.Aggregate.CompletedDispatches[dispatchIndex].OperationExecutions[executionIndex].Clone()
 			pending := &tamperedPending.CompletedDispatches[dispatchIndex].OperationExecutions[executionIndex]
-			if pending.OperationID == "write-2" {
+			if pending.OperationID == siblingOperationID {
 				pending.IdempotencyClass = runtimecontract.RuntimeOperationIdempotencySafeToReplay
 				pending.AuthorityHash = runtimecontract.StableRuntimeOperationExecutionAuthorityHash(*pending)
 			}
@@ -762,17 +779,17 @@ func TestRecordOperationGovernanceRequiredDoesNotUseExecutionRepair(t *testing.T
 		t.Fatalf("governance grant = %+v", grant)
 	}
 	if _, found, err := controller.QueryOperationReceipt(context.Background(), "ws-v2", "run-v2", continued.Aggregate.ActiveDispatch.ID,
-		"write-1", execution.ExecutionKey, execution.Fence+1, grant); err != nil || found {
+		governedOperationID, execution.ExecutionKey, execution.Fence+1, grant); err != nil || found {
 		t.Fatalf("authorized resume receipt preflight found=%v err=%v", found, err)
 	}
 	if _, _, err := controller.QueryOperationReceipt(context.Background(), "ws-v2", "run-v2", continued.Aggregate.ActiveDispatch.ID,
-		"write-1", execution.ExecutionKey, execution.Fence+1, nil); !errors.Is(err, common.ErrConflict) {
+		governedOperationID, execution.ExecutionKey, execution.Fence+1, nil); !errors.Is(err, common.ErrConflict) {
 		t.Fatalf("omitted persisted governance grant err=%v, want conflict", err)
 	}
 	driftedGrant := grant.Normalized()
 	driftedGrant.SubjectRef = "other.txt"
 	if _, _, err := controller.QueryOperationReceipt(context.Background(), "ws-v2", "run-v2", continued.Aggregate.ActiveDispatch.ID,
-		"write-1", execution.ExecutionKey, execution.Fence+1, &driftedGrant); !errors.Is(err, common.ErrConflict) {
+		governedOperationID, execution.ExecutionKey, execution.Fence+1, &driftedGrant); !errors.Is(err, common.ErrConflict) {
 		t.Fatalf("drifted governance grant err=%v, want conflict", err)
 	}
 	restarted, err := NewRuntimeController(repository)
@@ -800,7 +817,7 @@ func TestRecordOperationGovernanceRequiredDoesNotUseExecutionRepair(t *testing.T
 	if !errors.Is(casErr, common.ErrConflict) || casExecutor.called {
 		t.Fatalf("failed governance effect-start CAS reached owner: called=%v err=%v", casExecutor.called, casErr)
 	}
-	casPersistedExecution, ok := operationExecutionRecord(casRepository.aggregate.ActiveDispatch.OperationExecutions, "write-1")
+	casPersistedExecution, ok := operationExecutionRecord(casRepository.aggregate.ActiveDispatch.OperationExecutions, governedOperationID)
 	if !ok || casPersistedExecution.ClaimedAt != runtimecontract.RuntimeOperationClaimMarkerGovernanceGranted {
 		t.Fatalf("failed governance effect-start CAS leaked an uncommitted marker: %+v", casPersistedExecution)
 	}
@@ -810,14 +827,14 @@ func TestRecordOperationGovernanceRequiredDoesNotUseExecutionRepair(t *testing.T
 		Scope:       RuntimeInternalEventScope{WorkspaceID: "ws-v2", RunID: "run-v2"},
 		Transaction: &RuntimeInternalTransactionPayload{Executor: executor},
 	})
-	if operationID, required := RuntimeOperationRecoveryBudgetRequired(firstDriveErr); !required || operationID != "write-1" || len(executor.requests) != 1 {
+	if operationID, required := RuntimeOperationRecoveryBudgetRequired(firstDriveErr); !required || operationID != governedOperationID || len(executor.requests) != 1 {
 		t.Fatalf("governance owner error bypassed recovery handoff: operation=%q required=%v requests=%d err=%v", operationID, required, len(executor.requests), firstDriveErr)
 	}
 	afterFirstDrive, err := restarted.Load(context.Background(), "ws-v2", "run-v2")
 	if err != nil {
 		t.Fatal(err)
 	}
-	startedExecution, ok := operationExecutionRecord(afterFirstDrive.ActiveDispatch.OperationExecutions, "write-1")
+	startedExecution, ok := operationExecutionRecord(afterFirstDrive.ActiveDispatch.OperationExecutions, governedOperationID)
 	if !ok || startedExecution.ClaimedAt != runtimecontract.RuntimeOperationClaimMarkerGovernanceEffectStarted ||
 		afterFirstDrive.Facts.Recovery.OperationRecoveryAttempts != 0 {
 		t.Fatalf("governance first-effect edge was not persisted before retry: execution=%+v recovery=%+v", startedExecution, afterFirstDrive.Facts.Recovery)
@@ -846,7 +863,7 @@ func TestRecordOperationGovernanceRequiredDoesNotUseExecutionRepair(t *testing.T
 	if err != nil {
 		t.Fatal(err)
 	}
-	exhaustedExecution, ok := operationExecutionRecord(exhaustedState.ActiveDispatch.OperationExecutions, "write-1")
+	exhaustedExecution, ok := operationExecutionRecord(exhaustedState.ActiveDispatch.OperationExecutions, governedOperationID)
 	if !ok || exhaustedExecution.State != runtimecontract.OperationExecutionOutcomeUnknown {
 		t.Fatalf("exhausted governance recovery did not fail closed: %+v", exhaustedExecution)
 	}
@@ -869,7 +886,7 @@ func TestRecordOperationGovernanceRequiredDoesNotUseExecutionRepair(t *testing.T
 	if !errors.Is(outcomeCASErr, common.ErrConflict) || outcomeCASExecutor.called {
 		t.Fatalf("failed outcome_unknown CAS was hidden: called=%v err=%v", outcomeCASExecutor.called, outcomeCASErr)
 	}
-	outcomeCASExecution, ok := operationExecutionRecord(outcomeCASRepository.aggregate.ActiveDispatch.OperationExecutions, "write-1")
+	outcomeCASExecution, ok := operationExecutionRecord(outcomeCASRepository.aggregate.ActiveDispatch.OperationExecutions, governedOperationID)
 	if !ok || outcomeCASExecution.State != runtimecontract.OperationExecutionClaimed ||
 		outcomeCASExecution.ClaimedAt != runtimecontract.RuntimeOperationClaimMarkerGovernanceEffectStarted {
 		t.Fatalf("failed outcome_unknown CAS leaked an uncommitted state: %+v", outcomeCASExecution)
@@ -879,7 +896,7 @@ func TestRecordOperationGovernanceRequiredDoesNotUseExecutionRepair(t *testing.T
 		duplicateAfterStart.Aggregate.StateRevision != afterFirstDrive.StateRevision {
 		t.Fatalf("duplicate resolution changed started governance resume: %+v err=%v", duplicateAfterStart, err)
 	}
-	duplicateExecution, ok := operationExecutionRecord(duplicateAfterStart.Aggregate.ActiveDispatch.OperationExecutions, "write-1")
+	duplicateExecution, ok := operationExecutionRecord(duplicateAfterStart.Aggregate.ActiveDispatch.OperationExecutions, governedOperationID)
 	if !ok || duplicateExecution.ClaimedAt != runtimecontract.RuntimeOperationClaimMarkerGovernanceEffectStarted {
 		t.Fatalf("duplicate resolution reset governance effect-start marker: %+v", duplicateExecution)
 	}
@@ -895,7 +912,7 @@ func TestRecordOperationGovernanceRequiredDoesNotUseExecutionRepair(t *testing.T
 	if len(executor.requests) != 3 || executor.requests[0].GovernanceGrant == nil || executor.requests[1].GovernanceGrant == nil ||
 		!runtimecontract.SameRuntimeOperationGovernanceGrant(*executor.requests[0].GovernanceGrant, *grant) ||
 		!runtimecontract.SameRuntimeOperationGovernanceGrant(*executor.requests[1].GovernanceGrant, *grant) ||
-		executor.requests[2].Operation.ID != "write-2" || executor.requests[2].GovernanceGrant != nil {
+		executor.requests[2].Operation.ID != siblingOperationID || executor.requests[2].GovernanceGrant != nil {
 		t.Fatalf("resume executor requests = %+v", executor.requests)
 	}
 	if executor.requests[1].Execution.AdmissibilitySnapshotID != sealedCatalogSnapshotID ||

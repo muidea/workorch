@@ -279,22 +279,26 @@ func (e *recordingOperationExecutor) ExecuteRuntimeOperation(ctx context.Context
 func TestRuntimeControllerExecutesDependencyOrderedOperationsAndCommitsEvidence(t *testing.T) {
 	repository := &controllerRepository{}
 	controller, _ := NewRuntimeController(repository)
-	facts := multiOperationFixtureFacts(t)
+	facts := multiOperationDependencyFixtureFacts(t)
 	facts.Activation.EvidencePolicies = []runtimecontract.RuntimeEvidencePolicy{{ID: "policy-1", AppliesTo: runtimecontract.StepKindFileEdit}}
 	aggregate, err := controller.initialize(context.Background(), facts, controllerDefinition(), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	candidate := multiOperationCandidate()
-	if _, err := beginAndAcceptCandidate(t, controller, aggregate, candidate); err != nil {
+	sealed, err := beginAndAcceptCandidate(t, controller, aggregate, candidate)
+	if err != nil {
 		t.Fatal(err)
 	}
+	firstOperationID := runtimeTestActiveOperationIDForTarget(t, sealed, "a.txt")
+	secondOperationID := runtimeTestActiveOperationIDForTarget(t, sealed, "b.txt")
 	executor := &recordingOperationExecutor{owner: controller}
 	completed, err := controller.executeActiveDispatch(context.Background(), "ws-v2", "run-v2", executor)
 	if err != nil {
 		t.Fatalf("executeActiveDispatch: %v", err)
 	}
-	if len(executor.requests) != 2 || executor.requests[0].Operation.ID != "write-a" || executor.requests[1].Operation.ID != "write-b" {
+	if len(executor.requests) != 2 || executor.requests[0].Operation.ID != firstOperationID || executor.requests[1].Operation.ID != secondOperationID ||
+		executor.requests[0].Operation.TargetRefs[0] != "a.txt" || executor.requests[1].Operation.TargetRefs[0] != "b.txt" {
 		t.Fatalf("execution order = %+v", executor.requests)
 	}
 	if len(executor.requests[0].EvidencePolicies) != 1 || executor.requests[0].EvidencePolicies[0].ID != "policy-1" {
@@ -315,7 +319,7 @@ func TestTerminatedRuntimeCannotClaimOrExecuteSealedDispatch(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	facts := multiOperationFixtureFacts(t)
+	facts := multiOperationDependencyFixtureFacts(t)
 	aggregate, err := controller.initialize(ctx, facts, controllerDefinition(), nil)
 	if err != nil {
 		t.Fatal(err)
@@ -420,15 +424,16 @@ func TestRuntimeControllerStopsDispatchAfterRejectedOperation(t *testing.T) {
 	repository := &controllerRepository{}
 	controller, _ := NewRuntimeController(repository)
 	// This test stops a rejected operation before it can close coverage.
-	facts := multiOperationFixtureFacts(t)
+	facts := multiOperationDependencyFixtureFacts(t)
 	aggregate, err := controller.initialize(context.Background(), facts, controllerDefinition(), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := beginAndAcceptCandidate(t, controller, aggregate, multiOperationCandidate()); err != nil {
+	sealed, err := beginAndAcceptCandidate(t, controller, aggregate, multiOperationCandidate())
+	if err != nil {
 		t.Fatal(err)
 	}
-	executor := &recordingOperationExecutor{rejectID: "write-a", owner: controller}
+	executor := &recordingOperationExecutor{rejectID: runtimeTestActiveOperationIDForTarget(t, sealed, "a.txt"), owner: controller}
 	failed, err := controller.executeActiveDispatch(context.Background(), "ws-v2", "run-v2", executor)
 	if err != nil {
 		t.Fatalf("executeActiveDispatch: %v", err)
@@ -454,16 +459,17 @@ func TestRuntimeControllerRecoversOwnerCommittedReceiptWithoutReplayingSideEffec
 	if err != nil {
 		t.Fatal(err)
 	}
-	claimed, err := controller.claimOperationExecution(context.Background(), "ws-v2", "run-v2", "write-1")
+	operationID := runtimeTestActiveOperationID(t, sealed, 0)
+	claimed, err := controller.claimOperationExecution(context.Background(), "ws-v2", "run-v2", operationID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	execution, ok := operationExecutionRecord(claimed.ActiveDispatch.OperationExecutions, "write-1")
+	execution, ok := operationExecutionRecord(claimed.ActiveDispatch.OperationExecutions, operationID)
 	if !ok {
 		t.Fatal("claimed execution is missing")
 	}
 	receipt := runtimecontract.RuntimeOperationReceipt{
-		ExecutionKey: execution.ExecutionKey, OperationID: "write-1", Outcome: runtimecontract.RuntimeOperationOutcomeAccepted,
+		ExecutionKey: execution.ExecutionKey, OperationID: operationID, Outcome: runtimecontract.RuntimeOperationOutcomeAccepted,
 		ObservedEffectScope: runtimecontract.RuntimeEffectWorkspaceDurable, Changed: true,
 		TargetRefs: []string{"target.txt"},
 		Evidence:   runtimecontract.RuntimeOperationEvidence{Summary: "owner committed before crash", EvidenceRefs: []string{"file://target.txt"}},
@@ -534,12 +540,14 @@ func TestRuntimeControllerTurnsClaimedWithoutReceiptIntoOutcomeUnknownWithoutRep
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := beginAndAcceptCandidate(t, controller, aggregate, runtimecontract.RuntimeCandidate{StateChange: &runtimecontract.StateChangeCandidate{Operations: []runtimecontract.StateChangingOperation{{
+	sealed, err := beginAndAcceptCandidate(t, controller, aggregate, runtimecontract.RuntimeCandidate{StateChange: &runtimecontract.StateChangeCandidate{Operations: []runtimecontract.StateChangingOperation{{
 		Operation: runtimecontract.RuntimeOperation{ID: "write-1", Kind: runtimecontract.StepKindFileWrite, CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-v2"}, TargetRefs: []string{"target.txt"}, Parameters: runtimeFileWriteParameters("unknown")},
-	}}}}); err != nil {
+	}}}})
+	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := controller.claimOperationExecution(context.Background(), "ws-v2", "run-v2", "write-1"); err != nil {
+	operationID := runtimeTestActiveOperationID(t, sealed, 0)
+	if _, err := controller.claimOperationExecution(context.Background(), "ws-v2", "run-v2", operationID); err != nil {
 		t.Fatal(err)
 	}
 	executor := &failIfExecutedOperationExecutor{}
@@ -552,7 +560,7 @@ func TestRuntimeControllerTurnsClaimedWithoutReceiptIntoOutcomeUnknownWithoutRep
 		t.Fatal("claimed operation without receipt was blindly replayed")
 	}
 	loaded, _ := controller.Load(context.Background(), "ws-v2", "run-v2")
-	execution, ok := operationExecutionRecord(loaded.ActiveDispatch.OperationExecutions, "write-1")
+	execution, ok := operationExecutionRecord(loaded.ActiveDispatch.OperationExecutions, operationID)
 	if !ok || execution.State != runtimecontract.OperationExecutionOutcomeUnknown || len(loaded.OperationReceipts) != 0 || len(loaded.Facts.Evidence.Accepted) != 0 {
 		t.Fatalf("unknown recovery state = %+v aggregate=%+v", execution, loaded)
 	}
@@ -644,7 +652,8 @@ func TestRuntimeControllerDoesNotReplayClaimedManagedValidationWithoutReplayProo
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := controller.claimOperationExecution(context.Background(), "ws-v2", "run-v2", "read-1"); err != nil {
+	operationID := runtimeTestActiveOperationID(t, sealed, 0)
+	if _, err := controller.claimOperationExecution(context.Background(), "ws-v2", "run-v2", operationID); err != nil {
 		t.Fatal(err)
 	}
 	restarted, _ := NewRuntimeController(repository)
@@ -661,7 +670,7 @@ func TestRuntimeControllerDoesNotReplayClaimedManagedValidationWithoutReplayProo
 	if loadErr != nil {
 		t.Fatal(loadErr)
 	}
-	execution, ok := operationExecutionRecord(loaded.ActiveDispatch.OperationExecutions, "read-1")
+	execution, ok := operationExecutionRecord(loaded.ActiveDispatch.OperationExecutions, operationID)
 	if !ok || execution.State != runtimecontract.OperationExecutionOutcomeUnknown ||
 		loaded.Facts.Recovery.OperationRecoveryAttempts != 0 || len(loaded.OperationReceipts) != 0 || len(loaded.Facts.Evidence.Accepted) != 0 {
 		t.Fatalf("managed validation recovery sealed=%+v loaded=%+v execution=%+v", sealed, loaded, execution)
@@ -695,13 +704,14 @@ func TestRuntimeControllerRecoversClaimedAtMostOnceOperationOnlyWithSealedReplay
 	if err != nil || len(loaded.Facts.Resources.OperationAdmissibilities) != 1 {
 		t.Fatalf("load sealed File catalog: aggregate=%+v err=%v", loaded, err)
 	}
+	operationID := runtimeTestCandidateOperationID(t, *loaded.CandidateAttempts[len(loaded.CandidateAttempts)-1].Proposal, 0)
 	catalog := loaded.Facts.Resources.OperationAdmissibilities[0].Normalized()
 	proof := runtimecontract.RuntimeOperationReplayProof{
-		OwnerModuleID: runtimecontract.RuntimeModuleFile, OperationID: "write-1", TargetRefs: []string{target},
+		OwnerModuleID: runtimecontract.RuntimeModuleFile, OperationID: operationID, TargetRefs: []string{target},
 		BeforeHash: "before", AfterHash: "after", AdmissibilitySnapshotID: catalog.SnapshotID, AcquisitionBinding: catalog.AcquisitionBinding,
 	}
 	if _, err := controller.recordCandidateFeasibility(context.Background(), "ws-v2", "run-v2", 0, runtimecontract.RuntimeCandidateFeasibilityRecord{
-		OperationID: "write-1", AdmissibilitySnapshotID: catalog.SnapshotID, AcquisitionBinding: catalog.AcquisitionBinding,
+		OperationID: operationID, AdmissibilitySnapshotID: catalog.SnapshotID, AcquisitionBinding: catalog.AcquisitionBinding,
 		CandidateManifestHash: runtimeTestPendingCandidateManifestHash(t, controller, "ws-v2", "run-v2", 0), Observation: &runtimecontract.RuntimeOwnerFeasibilityObservation{Outcome: runtimecontract.RuntimeOwnerFeasibilityFeasible}, ReplayProof: &proof,
 	}); err != nil {
 		t.Fatal(err)
@@ -710,7 +720,7 @@ func TestRuntimeControllerRecoversClaimedAtMostOnceOperationOnlyWithSealedReplay
 	if err != nil || sealed.Aggregate.ActiveDispatch == nil {
 		t.Fatalf("seal replay-proof candidate aggregate=%+v err=%v", sealed.Aggregate, err)
 	}
-	execution, ok := operationExecutionRecord(sealed.Aggregate.ActiveDispatch.OperationExecutions, "write-1")
+	execution, ok := operationExecutionRecord(sealed.Aggregate.ActiveDispatch.OperationExecutions, operationID)
 	if !ok || execution.ReplayProof == nil || execution.ReplayProof.AfterHash != "after" {
 		t.Fatalf("sealed execution omitted replay proof: %+v", execution)
 	}
@@ -792,11 +802,12 @@ func TestRuntimeControllerRestartAtomicallyInvalidatesUncommittableOwnerReceipt(
 	if err != nil {
 		t.Fatal(err)
 	}
-	claimed, err := controller.claimOperationExecution(context.Background(), "ws-v2", "run-v2", "write-1")
+	operationID := runtimeTestActiveOperationID(t, sealed, 0)
+	claimed, err := controller.claimOperationExecution(context.Background(), "ws-v2", "run-v2", operationID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	execution, ok := operationExecutionRecord(claimed.ActiveDispatch.OperationExecutions, "write-1")
+	execution, ok := operationExecutionRecord(claimed.ActiveDispatch.OperationExecutions, operationID)
 	if !ok {
 		t.Fatal("claimed execution is missing")
 	}
@@ -977,16 +988,17 @@ func TestRuntimeControllerRestartRejectsPersistedInconclusiveValidationReceiptWi
 	if err != nil {
 		t.Fatal(err)
 	}
-	claimed, err := controller.claimOperationExecution(context.Background(), "ws-v2", "run-v2", "validate-zero-work")
+	operationID := runtimeTestActiveOperationID(t, sealed, 0)
+	claimed, err := controller.claimOperationExecution(context.Background(), "ws-v2", "run-v2", operationID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	execution, ok := operationExecutionRecord(claimed.ActiveDispatch.OperationExecutions, "validate-zero-work")
+	execution, ok := operationExecutionRecord(claimed.ActiveDispatch.OperationExecutions, operationID)
 	if !ok {
 		t.Fatal("claimed validation execution is missing")
 	}
 	receipt := runtimecontract.RuntimeOperationReceipt{
-		ExecutionKey: execution.ExecutionKey, OperationID: "validate-zero-work",
+		ExecutionKey: execution.ExecutionKey, OperationID: operationID,
 		Outcome: runtimecontract.RuntimeOperationOutcomeAccepted, ObservedEffectScope: runtimecontract.RuntimeEffectNone,
 		Evidence: runtimecontract.RuntimeOperationEvidence{
 			Summary: "command completed", Quality: common.EvidenceQualityInconclusive, ZeroWork: true,
@@ -1061,8 +1073,8 @@ func multiOperationCandidate() runtimecontract.RuntimeCandidate {
 	contentA := "a"
 	contentB := "b"
 	return runtimecontract.RuntimeCandidate{StateChange: &runtimecontract.StateChangeCandidate{Operations: []runtimecontract.StateChangingOperation{
-		{Operation: runtimecontract.RuntimeOperation{ID: "write-b", Kind: "file/write", DependsOn: []string{"write-a"}, CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-v2"}, TargetRefs: []string{"b.txt"}, Parameters: []runtimecontract.OperationParameter{{Name: "content", String: &contentB}}}},
-		{Operation: runtimecontract.RuntimeOperation{ID: "write-a", Kind: "file/write", CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-v2"}, TargetRefs: []string{"a.txt"}, Parameters: []runtimecontract.OperationParameter{{Name: "content", String: &contentA}}}},
+		{Operation: runtimecontract.RuntimeOperation{ID: "write-b", Kind: "file/write", RequiredOperationRef: "write-b", DependsOn: []string{"write-a"}, CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-v2"}, TargetRefs: []string{"b.txt"}, Parameters: []runtimecontract.OperationParameter{{Name: "content", String: &contentB}}}},
+		{Operation: runtimecontract.RuntimeOperation{ID: "write-a", Kind: "file/write", RequiredOperationRef: "write-a", CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-v2"}, TargetRefs: []string{"a.txt"}, Parameters: []runtimecontract.OperationParameter{{Name: "content", String: &contentA}}}},
 	}}}
 }
 
@@ -1082,6 +1094,39 @@ func multiOperationFixtureFacts(t *testing.T) runtimecontract.RuntimeFacts {
 	catalog.SnapshotID = runtimecontract.StableRuntimeOperationAdmissibilitySnapshotID(catalog)
 	facts.Resources.OperationAdmissibilities = []runtimecontract.RuntimeOperationAdmissibility{catalog}
 	return runtimeTestFactsWithCurrentFocusBindings(t, facts, controllerDefinition())
+}
+
+func multiOperationDependencyFixtureFacts(t *testing.T) runtimecontract.RuntimeFacts {
+	t.Helper()
+	facts := multiOperationFixtureFacts(t)
+	sequence := runtimecontract.RuntimeCapabilityStateSnapshot{
+		RequirementID: "file-sequence", OwnerModuleID: runtimecontract.RuntimeModuleFile,
+		CapabilityStateKind: "test_operation_sequence", SubjectRef: "workspace_deliverable",
+		ObservedRevision: "file-sequence-v1", ContentHash: "file-sequence-content-v1",
+		AcquisitionKey: "file-sequence-acquisition-v1", QueryReceiptRef: "file-sequence-receipt-v1",
+		Disposition: runtimecontract.RuntimeCapabilityStateSequenceRequired,
+		RequiredOperationSequence: []runtimecontract.RuntimeRequiredOperationVariant{
+			{RequirementID: "write-a", Kind: runtimecontract.StepKindFileWrite, TargetRef: "a.txt"},
+			{RequirementID: "write-b", Kind: runtimecontract.StepKindFileWrite, TargetRef: "b.txt", DependsOnRequirementIDs: []string{"write-a"}},
+		},
+	}
+	sequence.SnapshotID = runtimecontract.StableRuntimeCapabilityStateSnapshotID(sequence)
+	facts.Resources.CapabilityStates = append(facts.Resources.CapabilityStates, sequence)
+	return facts
+}
+
+func runtimeTestActiveOperationIDForTarget(t *testing.T, aggregate RuntimeAggregate, target string) string {
+	t.Helper()
+	if aggregate.ActiveDispatch == nil {
+		t.Fatal("fixture has no active dispatch")
+	}
+	for _, operation := range candidateRuntimeOperations(aggregate.ActiveDispatch.Candidate) {
+		if reflect.DeepEqual(operation.TargetRefs, []string{target}) {
+			return operation.ID
+		}
+	}
+	t.Fatalf("fixture has no active operation for target %q: %+v", target, aggregate.ActiveDispatch.Candidate)
+	return ""
 }
 
 func validationQualityFacts(t *testing.T) runtimecontract.RuntimeFacts {

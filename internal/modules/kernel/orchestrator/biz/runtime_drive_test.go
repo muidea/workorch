@@ -1923,6 +1923,7 @@ func TestRuntimeFileBackedGitRestartAfterInitEvidenceCommitContinuesSequence(t *
 	if err != nil || aggregate.ActiveDispatch == nil {
 		t.Fatal(err)
 	}
+	initOperationID := runtimeCandidateRequiredOperationID(t, aggregate.ActiveDispatch.Candidate, "repo-init")
 	baseRepository := runtimeStateRepository{hub: hub}
 	crashRepository := &runtimeSaveCrashRepository{
 		delegate: baseRepository, after: true, marker: "git-init-evidence",
@@ -1932,7 +1933,7 @@ func TestRuntimeFileBackedGitRestartAfterInitEvidenceCommitContinuesSequence(t *
 				len(current.ActiveDispatch.CompletedOperationIDs) != 1 {
 				return false
 			}
-			return current.ActiveDispatch.CompletedOperationIDs[0] == "git-repo-init"
+			return current.ActiveDispatch.CompletedOperationIDs[0] == initOperationID
 		},
 	}
 	crashingController, err := runtime.NewRuntimeController(crashRepository)
@@ -1953,7 +1954,7 @@ func TestRuntimeFileBackedGitRestartAfterInitEvidenceCommitContinuesSequence(t *
 		t.Fatalf("crashed run=%+v err=%v", crashed, err)
 	}
 	initReceipt := crashed.RuntimeState.OperationReceipts[0]
-	if initReceipt.OperationID != "git-repo-init" {
+	if initReceipt.OperationID != initOperationID {
 		t.Fatalf("first receipt=%+v", initReceipt)
 	}
 
@@ -1981,7 +1982,7 @@ func TestRuntimeFileBackedGitRestartAfterInitEvidenceCommitContinuesSequence(t *
 	}
 	countInit := 0
 	for _, receipt := range persisted.RuntimeState.OperationReceipts {
-		if receipt.OperationID == "git-repo-init" {
+		if receipt.OperationID == initOperationID {
 			countInit++
 			if receipt.ExecutionKey != initReceipt.ExecutionKey || receipt.Fence != initReceipt.Fence {
 				t.Fatalf("init receipt was replaced: before=%+v after=%+v", initReceipt, receipt)
@@ -6357,9 +6358,11 @@ func runRuntimeFileBackedGitStaleRefreshCrashRestart(t *testing.T, crashAfterCAS
 	if err := recordRuntimeDriveFixtureCandidateFeasibilities(ctx, module, aggregate, 0, initialCandidate); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := module.AcceptRuntimeCandidateAttempt(ctx, "ws-v2", "run-v2", 0, initialCandidate); err != nil {
+	sealed, err := module.AcceptRuntimeCandidateAttempt(ctx, "ws-v2", "run-v2", 0, initialCandidate)
+	if err != nil || sealed.ActiveDispatch == nil {
 		t.Fatal(err)
 	}
+	initOperationID := runtimeCandidateRequiredOperationID(t, sealed.ActiveDispatch.Candidate, "repo-init")
 
 	// External owner state changes after the sealed absent-repository snapshot
 	// and before the first operation. The old init must become a typed stale
@@ -6472,7 +6475,7 @@ func runRuntimeFileBackedGitStaleRefreshCrashRestart(t *testing.T, crashAfterCAS
 	}
 	initReceipts := 0
 	for _, receipt := range persisted.RuntimeState.OperationReceipts {
-		if receipt.OperationID == "git-repo-init" {
+		if receipt.OperationID == initOperationID {
 			initReceipts++
 			if receipt.Outcome != runtimecontract.RuntimeOperationOutcomeRejected || receipt.PrerequisiteStale == nil {
 				t.Fatalf("old init was replayed or reclassified: %+v", receipt)
@@ -6578,9 +6581,11 @@ func runRuntimeFileBackedGitReceiptResourceChangeRefreshCrashRestart(t *testing.
 	if err := recordRuntimeDriveFixtureCandidateFeasibilities(ctx, module, aggregate, 0, initialCandidate); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := module.AcceptRuntimeCandidateAttempt(ctx, "ws-v2", "run-v2", 0, initialCandidate); err != nil {
+	sealed, err := module.AcceptRuntimeCandidateAttempt(ctx, "ws-v2", "run-v2", 0, initialCandidate)
+	if err != nil || sealed.ActiveDispatch == nil {
 		t.Fatal(err)
 	}
+	initOperationID := runtimeCandidateRequiredOperationID(t, sealed.ActiveDispatch.Candidate, "repo-init")
 
 	baseRepository := runtimeStateRepository{hub: hub}
 	crashMarker := "git-receipt-resource-change-refresh-before-cas"
@@ -6690,7 +6695,7 @@ func runRuntimeFileBackedGitReceiptResourceChangeRefreshCrashRestart(t *testing.
 	}
 	initReceipts := 0
 	for _, receipt := range persisted.RuntimeState.OperationReceipts {
-		if receipt.OperationID != "git-repo-init" {
+		if receipt.OperationID != initOperationID {
 			continue
 		}
 		initReceipts++
@@ -6992,6 +6997,33 @@ func runtimeGitStateCandidate(requirementRefs []string) runtimecontract.RuntimeC
 	return runtimecontract.RuntimeCandidate{StateChange: &runtimecontract.StateChangeCandidate{Operations: operations}}
 }
 
+func runtimeCandidateRequiredOperationID(t *testing.T, candidate runtimecontract.RuntimeCandidate, requirementRef string) string {
+	t.Helper()
+	find := func(operation runtimecontract.RuntimeOperation) string {
+		operation = operation.Normalized()
+		if operation.RequiredOperationRef == requirementRef {
+			return operation.ID
+		}
+		return ""
+	}
+	if candidate.StateChange != nil {
+		for _, value := range candidate.StateChange.Operations {
+			if id := find(value.Operation); id != "" {
+				return id
+			}
+		}
+	}
+	if candidate.Validation != nil {
+		for _, value := range candidate.Validation.Operations {
+			if id := find(value.Operation); id != "" {
+				return id
+			}
+		}
+	}
+	t.Fatalf("candidate has no owner-derived operation for required ref %q: %+v", requirementRef, candidate)
+	return ""
+}
+
 func runtimeGitCandidateForDecision(command llmevents.RequestRuntimeCandidateCommand) runtimecontract.RuntimeCandidate {
 	if command.Decision.State != runtimecontract.ConvergenceStateNeedAssessment {
 		return runtimeGitStateCandidate(requiredOperationRefs(command.Decision.RequiredOutput.RequiredOperationSequence))
@@ -7053,7 +7085,20 @@ func recordRuntimeDriveFixtureCandidateFeasibilities(ctx context.Context, module
 	if module == nil || candidate.StateChange == nil {
 		return common.ErrInvalidArgument
 	}
-	if _, err := module.AdmitRuntimeCandidateProposalForTest(ctx, aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, attempt, candidate); err != nil {
+	admission, err := module.AdmitRuntimeCandidateProposalForTest(ctx, aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, attempt, candidate)
+	if err != nil {
+		return err
+	}
+	if !admission.Admission.Accepted() {
+		return fmt.Errorf("fixture candidate proposal was rejected: %+v", admission.Admission.Failure)
+	}
+	manifest, _, err := runtimeCandidateAttemptTestBinding(ctx, module, aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, attempt)
+	if err != nil {
+		return err
+	}
+	candidate = bindRuntimeTestCandidateToManifest(manifest, candidate)
+	candidate, err = runtimecontract.DeriveRuntimeCandidateOperationAuthority(manifest, candidate)
+	if err != nil {
 		return err
 	}
 	for _, candidateOperation := range candidate.StateChange.Operations {
@@ -7435,6 +7480,10 @@ func testRuntimeFileBackedPatchReplayProofRestartsAfterOwnerReceiptCASFailure(t 
 	if err != nil || aggregate.ActiveDispatch == nil {
 		t.Fatalf("seal replay-proof dispatch aggregate=%+v err=%v", aggregate, err)
 	}
+	if aggregate.ActiveDispatch.Candidate.StateChange == nil || len(aggregate.ActiveDispatch.Candidate.StateChange.Operations) != 1 {
+		t.Fatalf("patch replay-proof fixture sealed unexpected candidate: %+v", aggregate.ActiveDispatch.Candidate)
+	}
+	operationID = aggregate.ActiveDispatch.Candidate.StateChange.Operations[0].Operation.ID
 	sealedDispatchID := aggregate.ActiveDispatch.ID
 	sealedExecution, found := runtimeDriveOperationExecutionRecord(aggregate.ActiveDispatch.OperationExecutions, operationID)
 	if !found || sealedExecution.ReplayProof == nil {
@@ -8198,9 +8247,20 @@ func TestRuntimeFileBackedClaimEvidenceAndDispatchCloseCrashMatrix(t *testing.T)
 				// The direct controller fixture bypasses the normal mainline owner
 				// probe.  Persist the same scoped Shell feasibility fact before
 				// sealing; the record is not a File-read compatibility shortcut.
-				if _, err := module.AdmitRuntimeCandidateProposalForTest(ctx, "ws-v2", "run-v2", 0, candidate); err != nil {
+				admission, err := module.AdmitRuntimeCandidateProposalForTest(ctx, "ws-v2", "run-v2", 0, candidate)
+				if err != nil || !admission.Admission.Accepted() {
 					t.Fatal(err)
 				}
+				manifest, _, err := runtimeCandidateAttemptTestBinding(ctx, module, "ws-v2", "run-v2", 0)
+				if err != nil {
+					t.Fatal(err)
+				}
+				canonicalCandidate := bindRuntimeTestCandidateToManifest(manifest, candidate)
+				canonicalCandidate, err = runtimecontract.DeriveRuntimeCandidateOperationAuthority(manifest, canonicalCandidate)
+				if err != nil || canonicalCandidate.Validation == nil || len(canonicalCandidate.Validation.Operations) != 1 {
+					t.Fatalf("derive managed-validation fixture candidate=%+v err=%v", canonicalCandidate, err)
+				}
+				validationOperationID := canonicalCandidate.Validation.Operations[0].Operation.ID
 				var shellInventory runtimecontract.RuntimeOperationAdmissibility
 				for _, inventory := range aggregate.Facts.Resources.OperationAdmissibilities {
 					if inventory.OwnerModuleID == runtimecontract.RuntimeModuleShell {
@@ -8212,7 +8272,7 @@ func TestRuntimeFileBackedClaimEvidenceAndDispatchCloseCrashMatrix(t *testing.T)
 					t.Fatal("managed validation fixture is missing Shell admissibility inventory")
 				}
 				if _, err := module.RecordRuntimeCandidateFeasibility(ctx, "ws-v2", "run-v2", 0, runtimecontract.RuntimeCandidateFeasibilityRecord{
-					OperationID: "validate-1", AdmissibilitySnapshotID: shellInventory.SnapshotID, Observation: &runtimecontract.RuntimeOwnerFeasibilityObservation{Outcome: runtimecontract.RuntimeOwnerFeasibilityFeasible},
+					OperationID: validationOperationID, AdmissibilitySnapshotID: shellInventory.SnapshotID, Observation: &runtimecontract.RuntimeOwnerFeasibilityObservation{Outcome: runtimecontract.RuntimeOwnerFeasibilityFeasible},
 				}); err != nil {
 					t.Fatal(err)
 				}
@@ -8220,6 +8280,18 @@ func TestRuntimeFileBackedClaimEvidenceAndDispatchCloseCrashMatrix(t *testing.T)
 			sealed, err := module.AcceptRuntimeCandidateAttempt(ctx, "ws-v2", "run-v2", 0, candidate)
 			if err != nil || sealed.ActiveDispatch == nil {
 				t.Fatalf("sealed aggregate=%+v err=%v", sealed, err)
+			}
+			sealedOperationID := ""
+			if testCase.validation {
+				if sealed.ActiveDispatch.Candidate.Validation == nil || len(sealed.ActiveDispatch.Candidate.Validation.Operations) != 1 {
+					t.Fatalf("sealed managed-validation candidate=%+v", sealed.ActiveDispatch.Candidate)
+				}
+				sealedOperationID = sealed.ActiveDispatch.Candidate.Validation.Operations[0].Operation.ID
+			} else {
+				if sealed.ActiveDispatch.Candidate.StateChange == nil || len(sealed.ActiveDispatch.Candidate.StateChange.Operations) != 1 {
+					t.Fatalf("sealed state-change candidate=%+v", sealed.ActiveDispatch.Candidate)
+				}
+				sealedOperationID = sealed.ActiveDispatch.Candidate.StateChange.Operations[0].Operation.ID
 			}
 			baseRepository := runtimeStateRepository{hub: hub}
 			crashRepository := &runtimeSaveCrashRepository{delegate: baseRepository, match: testCase.match, after: testCase.after, marker: testCase.name}
@@ -8308,7 +8380,7 @@ func TestRuntimeFileBackedClaimEvidenceAndDispatchCloseCrashMatrix(t *testing.T)
 				if loaded.ActiveDispatch == nil {
 					t.Fatalf("outcome-unknown managed validation lost active dispatch: %+v", loaded)
 				}
-				execution, found := runtimeDriveOperationExecutionRecord(loaded.ActiveDispatch.OperationExecutions, "validate-1")
+				execution, found := runtimeDriveOperationExecutionRecord(loaded.ActiveDispatch.OperationExecutions, sealedOperationID)
 				if !found || execution.State != runtimecontract.OperationExecutionOutcomeUnknown ||
 					len(loaded.OperationReceipts) != 0 || len(loaded.Facts.Evidence.Accepted) != 0 || loaded.Facts.Recovery.OperationRecoveryAttempts != 0 {
 					t.Fatalf("persisted managed-validation claim was not fenced: aggregate=%+v execution=%+v", loaded, execution)
@@ -8746,6 +8818,11 @@ func TestRuntimeFileBackedOperationGovernanceGrantFreshProcessCrashRestart(t *te
 				stopProcess(first)
 				t.Fatalf("governed write seal=%+v err=%v", sealed, err)
 			}
+			if sealed.Aggregate.ActiveDispatch.Candidate.StateChange == nil || len(sealed.Aggregate.ActiveDispatch.Candidate.StateChange.Operations) != 1 {
+				stopProcess(first)
+				t.Fatalf("governed write sealed unexpected candidate=%+v", sealed.Aggregate.ActiveDispatch.Candidate)
+			}
+			governedOperationID := sealed.Aggregate.ActiveDispatch.Candidate.StateChange.Operations[0].Operation.ID
 			executor := &countingRuntimeOperationExecutor{delegate: eventRuntimeOperationExecutor{hub: first.hub}}
 			waiting, err := runtimeTestControllerExecuteDispatch(first.controller, ctx, "ws-v2", "run-v2", executor)
 			if err != nil || waiting.ActiveDispatch != nil || waiting.Decision.State != runtimecontract.ConvergenceStateNeedGovernance || len(waiting.OperationGovernanceBindings) != 1 || len(executor.requests) != 1 {
@@ -8837,11 +8914,11 @@ func TestRuntimeFileBackedOperationGovernanceGrantFreshProcessCrashRestart(t *te
 				grantBinding.ExecutionKey != binding.ExecutionKey || grantBinding.Grant.GovernanceFence != binding.Fence || grantBinding.Grant.ResumeFence != binding.Fence+1 {
 				t.Fatalf("persisted governance grant=%+v initial binding=%+v", grantBinding, binding)
 			}
-			resumeExecution, found := runtimeOperationExecution(continued.Aggregate.ActiveDispatch.OperationExecutions, "write-governed")
+			resumeExecution, found := runtimeOperationExecution(continued.Aggregate.ActiveDispatch.OperationExecutions, governedOperationID)
 			if !found || resumeExecution.ExecutionKey != binding.ExecutionKey || resumeExecution.Fence != binding.Fence+1 || resumeExecution.State != runtimecontract.OperationExecutionClaimed {
 				t.Fatalf("fresh-process resume execution=%+v binding=%+v", resumeExecution, binding)
 			}
-			if _, _, err := second.controller.QueryOperationReceipt(ctx, "ws-v2", "run-v2", continued.Aggregate.ActiveDispatch.ID, "write-governed", binding.ExecutionKey, binding.Fence, grantBinding.Grant); !errors.Is(err, common.ErrConflict) {
+			if _, _, err := second.controller.QueryOperationReceipt(ctx, "ws-v2", "run-v2", continued.Aggregate.ActiveDispatch.ID, governedOperationID, binding.ExecutionKey, binding.Fence, grantBinding.Grant); !errors.Is(err, common.ErrConflict) {
 				t.Fatalf("old fence must not consume the resume grant: %v", err)
 			}
 			stale := resolution
@@ -9615,7 +9692,7 @@ func TestDriveRuntimeCompleteSchemaFailureStopsAfterSameContractRetry(t *testing
 		result.Set(runtimeProviderResultWithAuditForTest(command, llmevents.RequestRuntimeCandidateResult{
 			Transaction: command.Transaction, DocumentKind: command.DocumentKind, RequestIdentity: command.RequestIdentity,
 			ExpectedDocumentHash: runtimeExpectedDocumentHash(command.ExpectedDocument),
-			DocumentOutcome:      runtimeCompleteDocumentOutcome(command.ExpectedDocument, []byte(`{"unexpected":true}`)),
+			DocumentOutcome:      runtimeCompleteDocumentOutcome(command.ExpectedDocument, []byte(`{}`)),
 		}), nil)
 	})
 	t.Cleanup(func() { llmObserver.Unsubscribe(llmevents.TopicRequestRuntimeCandidate) })
@@ -9631,14 +9708,16 @@ func TestDriveRuntimeCompleteSchemaFailureStopsAfterSameContractRetry(t *testing
 	if requestCount != 2 || completed.State != runtimecontract.ConvergenceStateFailed || completed.Terminal == nil || completed.Terminal.Code != "candidate_retry_exhausted" {
 		t.Fatalf("completed=%+v requestCount=%d, want bounded terminal after two requests", completed, requestCount)
 	}
-	if len(requests) != 2 || requests[0].PreviousFailure != nil || requests[1].PreviousFailure == nil ||
-		requests[1].PreviousFailure.Class != runtimecontract.RuntimeCandidateFailureClassSchema || requests[1].PreviousFailure.Code != "candidate_schema_invalid" ||
-		requests[1].PreviousFailure.Signature != "candidate-schema-invalid" || requests[1].PreviousFailure.Reason == "" {
+	if len(requests) != 2 || requests[0].CandidateCorrectionObservation != nil || requests[1].CandidateCorrectionObservation == nil ||
+		requests[1].CandidateCorrectionObservation.Class != runtimecontract.RuntimeCandidateFailureClassSchema || requests[1].CandidateCorrectionObservation.Code != "candidate_schema_invalid" ||
+		requests[1].CandidateCorrectionObservation.Signature != "candidate-schema-invalid" || requests[1].CandidateCorrectionObservation.Diagnostic == nil ||
+		requests[1].CandidateCorrectionObservation.Diagnostic.Path != "$.operations" || requests[1].CandidateCorrection == nil ||
+		requests[1].CandidateCorrection.Witness.Path != "$.operations" || requests[1].CandidateCorrection.Witness.AlternativeValue != "field_present" {
 		t.Fatalf("candidate retry did not carry the persisted first failure: %+v", requests)
 	}
 }
 
-func TestRequestAndSealRuntimeCandidateEmptyDocumentTerminatesWithoutWholeDocumentRecovery(t *testing.T) {
+func TestRequestAndSealRuntimeCandidateEmptyDocumentUsesBoundedDocumentCorrection(t *testing.T) {
 	ctx := context.Background()
 	hub := magicevent.NewHub(16)
 	t.Cleanup(func() { hub.Terminate(ctx) })
@@ -9668,10 +9747,18 @@ func TestRequestAndSealRuntimeCandidateEmptyDocumentTerminatesWithoutWholeDocume
 		if command.DocumentKind != runtimecontract.RuntimeProviderDocumentOperations {
 			t.Errorf("operations empty-document request kind = %q", command.DocumentKind)
 		}
+		if providerCalls == 2 && (command.CandidateCorrectionObservation == nil || command.CandidateCorrection == nil ||
+			command.CandidateCorrection.Witness.Dimension != runtimecontract.RuntimeCandidateCorrectionWitnessDocumentShape) {
+			t.Errorf("operations C4 correction lost bounded document failure: observation=%+v correction=%+v", command.CandidateCorrectionObservation, command.CandidateCorrection)
+		}
+		outcome := runtimeProviderFinalOutputMissingOutcome(command.ExpectedDocument)
+		if providerCalls == 1 {
+			outcome = runtimeProviderInvalidDocumentOutcome(command.ExpectedDocument, []byte("provider prose"))
+		}
 		result.Set(runtimeProviderResultWithAuditForTest(command, llmevents.RequestRuntimeCandidateResult{
 			Transaction: command.Transaction, DocumentKind: command.DocumentKind, RequestIdentity: command.RequestIdentity,
 			ExpectedDocumentHash: runtimeExpectedDocumentHash(command.ExpectedDocument),
-			DocumentOutcome:      runtimeProviderFinalOutputMissingOutcome(command.ExpectedDocument),
+			DocumentOutcome:      outcome,
 		}), nil)
 	})
 	t.Cleanup(func() { llmObserver.Unsubscribe(llmevents.TopicRequestRuntimeCandidate) })
@@ -9680,23 +9767,39 @@ func TestRequestAndSealRuntimeCandidateEmptyDocumentTerminatesWithoutWholeDocume
 	if err != nil {
 		t.Fatal(err)
 	}
-	if providerCalls != 1 || terminal.Decision.State != runtimecontract.ConvergenceStateFailed || terminal.Decision.Terminal == nil ||
-		terminal.Decision.Terminal.Code != "provider_protocol_failure" || terminal.Facts.Failure == nil ||
-		terminal.Facts.Failure.Class != runtimecontract.FailureClassProviderProtocol || terminal.Facts.Failure.Code != "provider_final_output_missing" ||
-		len(terminal.CandidateAttempts) != 0 || terminal.ActiveDispatch != nil || terminal.Facts.Repair.RepairAttempts != 0 ||
+	if providerCalls != 2 || terminal.Decision.State != runtimecontract.ConvergenceStateFailed || terminal.Decision.Terminal == nil ||
+		terminal.Decision.Terminal.Code != "candidate_retry_exhausted" || terminal.Facts.Failure == nil ||
+		terminal.Facts.Failure.Class != runtimecontract.FailureClassCandidateExhausted || terminal.Facts.Failure.Code != "candidate_retry_exhausted" ||
+		len(terminal.CandidateAttempts) != 2 || terminal.ActiveDispatch != nil || terminal.Facts.Repair.RepairAttempts != 0 ||
 		terminal.Facts.Recovery != initialized.Facts.Recovery || len(terminal.GovernanceRequests) != 0 {
-		t.Fatalf("operations empty document did not seal one terminal without recovery: calls=%d aggregate=%+v", providerCalls, terminal)
+		t.Fatalf("operations empty document did not use bounded attempt 0/1 correction: calls=%d aggregate=%+v", providerCalls, terminal)
 	}
-	if len(terminal.CandidateRequestSessions) != 1 {
+	first := terminal.CandidateAttempts[0]
+	second := terminal.CandidateAttempts[1]
+	if first.State != runtimecontract.RuntimeCandidateAttemptStateFailed || first.Failure == nil || first.Failure.Code != "candidate_document_nonconformant" ||
+		first.Correction == nil || first.Correction.Disposition != runtimecontract.RuntimeCandidateCorrectionCorrectableOnce || first.Correction.Witness == nil ||
+		first.Correction.Witness.Dimension != runtimecontract.RuntimeCandidateCorrectionWitnessDocumentShape || first.Correction.Witness.RejectedValue != runtimecontract.RuntimeCandidateDocumentShapeInvalid ||
+		second.State != runtimecontract.RuntimeCandidateAttemptStateFailed || second.Correction == nil || second.Correction.Disposition != runtimecontract.RuntimeCandidateCorrectionRejectedFinal || second.Correction.TerminalCode != "candidate_retry_exhausted" {
+		t.Fatalf("operations document-conformance attempts = %+v", terminal.CandidateAttempts)
+	}
+	if len(terminal.CandidateRequestSessions) != 2 {
 		t.Fatalf("operations empty-document sessions = %+v", terminal.CandidateRequestSessions)
 	}
-	session := terminal.CandidateRequestSessions[0]
-	if session.State != runtimecontract.RuntimeCandidateRequestSessionTerminal || session.ProviderSubmitted ||
-		session.LastOutcome.Class != runtimecontract.RuntimeCandidateRequestOutcomeProviderProtocol ||
-		session.LastOutcome.Code != "provider_final_output_missing" || session.LastOutcome.Signature != "provider-final-output-missing" ||
-		session.IncompleteOutcomes != 0 || session.NextSequence != 1 || session.LastDocumentFraming != nil ||
-		session.ExpectedDocument == nil || session.ExpectedDocument.MaxRecoveryAttempts != 2 {
-		t.Fatalf("operations empty-document terminal session = %+v", session)
+	for index, session := range terminal.CandidateRequestSessions {
+		expectedCode := runtimecontract.RuntimeProviderDocumentCodeFinalOutputMissing
+		expectedDisposition := runtimecontract.RuntimeProviderDocumentEmpty
+		if index == 0 {
+			expectedCode = runtimecontract.RuntimeProviderDocumentCodeFinalOutputInvalid
+			expectedDisposition = runtimecontract.RuntimeProviderDocumentInvalid
+		}
+		if session.State != runtimecontract.RuntimeCandidateRequestSessionDocumentConformanceRejected || !session.ProviderSubmitted ||
+			session.LastOutcome.Class != runtimecontract.RuntimeCandidateRequestOutcomeDocumentConformanceRejected ||
+			session.LastOutcome.Code != expectedCode ||
+			session.IncompleteOutcomes != 0 || session.NextSequence != 1 || session.LastDocumentFraming == nil ||
+			session.LastDocumentFraming.Disposition != expectedDisposition ||
+			session.ExpectedDocument == nil || session.ExpectedDocument.MaxRecoveryAttempts != 2 {
+			t.Fatalf("operations empty-document correction session = %+v", session)
+		}
 	}
 
 	reloaded, err := state.Load(ctx, initialized.Facts.WorkspaceID, initialized.Facts.RunID)
@@ -9707,8 +9810,73 @@ func TestRequestAndSealRuntimeCandidateEmptyDocumentTerminatesWithoutWholeDocume
 	if err != nil {
 		t.Fatal(err)
 	}
-	if providerCalls != 1 || replayed.StateRevision != terminal.StateRevision || replayed.Facts.Recovery != terminal.Facts.Recovery {
+	if providerCalls != 2 || replayed.StateRevision != terminal.StateRevision || replayed.Facts.Recovery != terminal.Facts.Recovery {
 		t.Fatalf("operations empty-document terminal replayed provider or entered recovery: calls=%d aggregate=%+v", providerCalls, replayed)
+	}
+}
+
+func TestRequestAndSealRuntimeCandidateRemovesForbiddenRawIDOnAttemptOne(t *testing.T) {
+	ctx := context.Background()
+	hub := magicevent.NewHub(16)
+	t.Cleanup(func() { hub.Terminate(ctx) })
+	facts := runtimeAggregate(t, 1).Facts
+	state := &inMemoryRuntimeStateRepository{}
+	controller, err := runtime.NewRuntimeController(state)
+	if err != nil {
+		t.Fatal(err)
+	}
+	initialized, err := runtimeTestControllerInitialize(controller, ctx, facts, runtimeDefinition(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	initialized = runtimeTestPersistSealedSemanticAuthority(t, ctx, state, initialized)
+	owner := newRuntimeTestOwnerWithEvidence(RuntimeEvidenceRepositories{ArtifactContinuations: memory.NewArtifactContinuationRepository()})
+	if err := owner.ConfigureRuntimeRepository(state); err != nil {
+		t.Fatal(err)
+	}
+	module := newTestBiz(owner, hub, nil)
+	prefix := runtimecontract.StableRuntimeCandidatePrefixHashWithExecutionContract(initialized.Definition, initialized.Facts.Activation.ExecutionContract)
+	bindingID := initialized.Facts.Focus.CoverageEvidenceBindings[0].ID
+	conformant := []byte(`{"operations":[{"kind":"file/edit","bindingRefs":["` + bindingID + `"],"targetRefs":["target.txt"],"parameters":[{"name":"oldText","string":"old"},{"name":"newText","string":"new"}]}]}`)
+	forbiddenID := []byte(strings.Replace(string(conformant), `{"kind":`, `{"id":"provider-authored","kind":`, 1))
+	providerCalls := 0
+	llmObserver := magicevent.NewSimpleObserver(runtimecontract.RuntimeModuleLLM, hub)
+	llmObserver.Subscribe(llmevents.TopicRequestRuntimeCandidate, func(event magicevent.Event, result magicevent.Result) {
+		providerCalls++
+		command := event.Data().(llmevents.RequestRuntimeCandidateCommand)
+		document := forbiddenID
+		if providerCalls == 2 {
+			document = conformant
+			if command.CandidateCorrectionObservation == nil || command.CandidateCorrectionObservation.Diagnostic == nil ||
+				command.CandidateCorrectionObservation.Diagnostic.Path != "$.operations[0].id" || command.CandidateCorrection == nil ||
+				command.CandidateCorrection.Witness.Dimension != runtimecontract.RuntimeCandidateCorrectionWitnessSchemaField ||
+				command.CandidateCorrection.Witness.RejectedValue != "id" || command.CandidateCorrection.Witness.AlternativeValue != "field_absent" {
+				t.Errorf("attempt 1 did not receive exact raw-id removal lineage: observation=%+v correction=%+v", command.CandidateCorrectionObservation, command.CandidateCorrection)
+			}
+		}
+		result.Set(runtimeProviderResultWithAuditForTest(command, llmevents.RequestRuntimeCandidateResult{
+			Transaction: command.Transaction, DocumentKind: command.DocumentKind, RequestIdentity: command.RequestIdentity,
+			ExpectedDocumentHash: runtimeExpectedDocumentHash(command.ExpectedDocument),
+			DocumentOutcome:      runtimeCompleteDocumentOutcome(command.ExpectedDocument, document),
+		}), nil)
+	})
+	t.Cleanup(func() { llmObserver.Unsubscribe(llmevents.TopicRequestRuntimeCandidate) })
+
+	sealed, err := module.requestAndSealRuntimeCandidateWithRetry(ctx, initialized, prefix)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if providerCalls != 2 || sealed.ActiveDispatch == nil || len(sealed.CandidateAttempts) != 2 ||
+		sealed.CandidateAttempts[0].State != runtimecontract.RuntimeCandidateAttemptStateFailed ||
+		sealed.CandidateAttempts[0].Correction == nil || sealed.CandidateAttempts[0].Correction.Witness == nil ||
+		sealed.CandidateAttempts[0].Correction.Witness.Path != "$.operations[0].id" ||
+		sealed.CandidateAttempts[1].State != runtimecontract.RuntimeCandidateAttemptStateAccepted {
+		t.Fatalf("forbidden raw id did not converge through exactly one correction: calls=%d aggregate=%+v", providerCalls, sealed)
+	}
+	for _, session := range sealed.CandidateRequestSessions {
+		if session.State != runtimecontract.RuntimeCandidateRequestSessionDocumentComplete || session.LastDocumentFraming != nil {
+			t.Fatalf("raw-id correction retained stale framing: %+v", session)
+		}
 	}
 }
 
@@ -9738,7 +9906,7 @@ func TestRequestAndSealRuntimeCandidateRecoversProviderLimitedOutputWithComplete
 	}
 	module := newTestBiz(owner, hub, nil)
 	prefix := runtimecontract.StableRuntimeCandidatePrefixHashWithExecutionContract(initialized.Definition, initialized.Facts.Activation.ExecutionContract)
-	first := fmt.Sprintf(`{"operations":[{"id":"op-1","kind":"file/edit","bindingRefs":[%q],`, initialized.Facts.Focus.CoverageEvidenceBindings[0].ID)
+	first := fmt.Sprintf(`{"operations":[{"kind":"file/edit","bindingRefs":[%q],`, initialized.Facts.Focus.CoverageEvidenceBindings[0].ID)
 	second := `"targetRefs":["target.txt"],"parameters":[{"name":"oldText","string":"old"},{"name":"newText","string":"new"}]}]}`
 	calls := 0
 	llmObserver := magicevent.NewSimpleObserver(runtimecontract.RuntimeModuleLLM, hub)
@@ -9805,7 +9973,7 @@ func TestRequestAndSealRuntimeCandidateCommitsSessionBeforeProviderAndAttemptAft
 	module := newTestBiz(owner, hub, nil)
 	prefix := runtimecontract.StableRuntimeCandidatePrefixHashWithExecutionContract(initialized.Definition, initialized.Facts.Activation.ExecutionContract)
 	bindingID := initialized.Facts.Focus.CoverageEvidenceBindings[0].ID
-	document := []byte("```json\n{\"operations\":[{\"id\":\"op-1\",\"kind\":\"file/edit\",\"bindingRefs\":[\"" + bindingID + "\"],\"targetRefs\":[\"target.txt\"],\"parameters\":[{\"name\":\"oldText\",\"string\":\"old\"},{\"name\":\"newText\",\"string\":\"new\"}]}]}\n```")
+	document := []byte("```json\n{\"operations\":[{\"kind\":\"file/edit\",\"bindingRefs\":[\"" + bindingID + "\"],\"targetRefs\":[\"target.txt\"],\"parameters\":[{\"name\":\"oldText\",\"string\":\"old\"},{\"name\":\"newText\",\"string\":\"new\"}]}]}\n```")
 	providerCalls := 0
 	llmObserver := magicevent.NewSimpleObserver(runtimecontract.RuntimeModuleLLM, hub)
 	llmObserver.Subscribe(llmevents.TopicRequestRuntimeCandidate, func(event magicevent.Event, result magicevent.Result) {
@@ -9855,7 +10023,7 @@ func TestRequestAndSealRuntimeCandidateRetriesTransportWithoutCandidateAttempt(t
 	module := newTestBiz(owner, hub, nil)
 	prefix := runtimecontract.StableRuntimeCandidatePrefixHashWithExecutionContract(initialized.Definition, initialized.Facts.Activation.ExecutionContract)
 	bindingID := initialized.Facts.Focus.CoverageEvidenceBindings[0].ID
-	document := []byte(`{"operations":[{"id":"op-1","kind":"file/edit","bindingRefs":["` + bindingID + `"],"targetRefs":["target.txt"],"parameters":[{"name":"oldText","string":"old"},{"name":"newText","string":"new"}]}]}`)
+	document := []byte(`{"operations":[{"kind":"file/edit","bindingRefs":["` + bindingID + `"],"targetRefs":["target.txt"],"parameters":[{"name":"oldText","string":"old"},{"name":"newText","string":"new"}]}]}`)
 	var calls []llmevents.RequestRuntimeCandidateCommand
 	llmObserver := magicevent.NewSimpleObserver(runtimecontract.RuntimeModuleLLM, hub)
 	llmObserver.Subscribe(llmevents.TopicRequestRuntimeCandidate, func(event magicevent.Event, result magicevent.Result) {
@@ -9988,7 +10156,7 @@ func TestRequestAndSealRuntimeCandidateRestartsFromPersistedIncompleteOutcome(t 
 		t.Fatal(err)
 	}
 	bindingID := initialized.Facts.Focus.CoverageEvidenceBindings[0].ID
-	first := `{"operations":[{"id":"op-1","kind":"file/edit","bindingRefs":["` + bindingID + `"],`
+	first := `{"operations":[{"kind":"file/edit","bindingRefs":["` + bindingID + `"],`
 	firstPhysicalID := runtimecontract.StableRuntimeCandidatePhysicalCallID(session.LogicalRequestID, 1)
 	submitted, err := owner.MarkRuntimeCandidateRequestSubmitted(ctx, prepared.Facts.WorkspaceID, prepared.Facts.RunID, session.LogicalRequestID, 1, firstPhysicalID)
 	if err != nil {
@@ -10342,10 +10510,11 @@ func TestRuntimeFileBackedSubmittedCandidateRestartDoesNotReplayProvider(t *test
 	}
 }
 
-// P3-B3 stale boundary: even when C4 has durably marked a document complete,
-// a typed prerequisite invalidation wins over C5 admission. Restart must keep
-// the old document as terminal audit lineage and return to SM-2 acquisition.
-func TestRuntimeFileBackedStaleCompleteSessionInvalidatesBeforeCandidateReuse(t *testing.T) {
+// P3-B3 closed-session boundary: once C4 has durably marked a document
+// complete, a late stale response cannot overwrite that settled request
+// session. Any current prerequisite invalidation must enter through its owner
+// transition instead of mutating closed provider-response authority.
+func TestRuntimeFileBackedStaleResultCannotOverwriteCompleteSession(t *testing.T) {
 	ctx := context.Background()
 	hub := magicevent.NewHub(16)
 	t.Cleanup(func() { hub.Terminate(ctx) })
@@ -10430,15 +10599,18 @@ func TestRuntimeFileBackedStaleCompleteSessionInvalidatesBeforeCandidateReuse(t 
 		SubjectRef: string(ceiling.Selection.Target.ProviderID) + "/" + string(ceiling.Selection.Target.ModelID), ExpectedRevision: "config-v1", ObservedRevision: "config-v2",
 		Reason: "provider configuration changed",
 	}
-	invalidated, err := firstOwner.InvalidateRuntimeCandidateRequestSessionForPrerequisiteStale(ctx, completed.Facts.WorkspaceID, completed.Facts.RunID, session.LogicalRequestID, stale)
+	if _, err := firstOwner.InvalidateRuntimeCandidateRequestSessionForPrerequisiteStale(ctx, completed.Facts.WorkspaceID, completed.Facts.RunID, session.LogicalRequestID, stale); !errors.Is(err, common.ErrConflict) {
+		t.Fatalf("late stale result err=%v, want closed-session conflict", err)
+	}
+	unchanged, err := firstOwner.loadRuntime(ctx, initialized.Facts.WorkspaceID, initialized.Facts.RunID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if invalidated.Decision.State != runtimecontract.ConvergenceStateNeedPrerequisite || len(invalidated.CandidateAttempts) != 0 ||
-		invalidated.Facts.Resources.ProviderCeiling != nil || len(invalidated.Facts.Prerequisites.Pending) != 1 ||
-		len(invalidated.CandidateRequestSessions) != 1 || invalidated.CandidateRequestSessions[0].State != runtimecontract.RuntimeCandidateRequestSessionTerminal ||
-		invalidated.CandidateRequestSessions[0].LastOutcome.Class != runtimecontract.RuntimeCandidateRequestOutcomePrerequisiteStale {
-		t.Fatalf("complete session stale was not invalidated before admission: %+v", invalidated)
+	if unchanged.StateRevision != completed.StateRevision || unchanged.Decision.State != completed.Decision.State ||
+		unchanged.Facts.Resources.ProviderCeiling == nil || len(unchanged.Facts.Prerequisites.Pending) != 0 ||
+		len(unchanged.CandidateRequestSessions) != 1 || unchanged.CandidateRequestSessions[0].State != runtimecontract.RuntimeCandidateRequestSessionDocumentComplete ||
+		len(unchanged.CandidateAttempts) != 0 || unchanged.ActiveDispatch != nil {
+		t.Fatalf("late stale result mutated completed request authority: before=%+v after=%+v", completed, unchanged)
 	}
 
 	if err := runOwner.Stop(ctx); err != nil {
@@ -10463,18 +10635,11 @@ func TestRuntimeFileBackedStaleCompleteSessionInvalidatesBeforeCandidateReuse(t 
 	if err != nil {
 		t.Fatal(err)
 	}
-	providerCalls := 0
-	llmObserver := magicevent.NewSimpleObserver(runtimecontract.RuntimeModuleLLM, hub)
-	llmObserver.Subscribe(llmevents.TopicRequestRuntimeCandidate, func(_ magicevent.Event, _ magicevent.Result) { providerCalls++ })
-	t.Cleanup(func() { llmObserver.Unsubscribe(llmevents.TopicRequestRuntimeCandidate) })
-	resumed, err := newTestBiz(restartedOwner, hub, nil).requestAndSealRuntimeCandidateWithRetry(ctx, reloaded, prefix)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if providerCalls != 0 || resumed.Decision.State != runtimecontract.ConvergenceStateNeedPrerequisite || len(resumed.CandidateAttempts) != 0 ||
-		resumed.ActiveDispatch != nil || len(resumed.GovernanceRequests) != 0 || resumed.Facts.Repair.RepairAttempts != 0 ||
-		resumed.Facts.Recovery.ProviderTransportAttempts != 0 {
-		t.Fatalf("stale complete session reused candidate content: providerCalls=%d aggregate=%+v", providerCalls, resumed)
+	if reloaded.StateRevision != completed.StateRevision || reloaded.Decision.State != completed.Decision.State ||
+		reloaded.Facts.Resources.ProviderCeiling == nil || len(reloaded.Facts.Prerequisites.Pending) != 0 ||
+		len(reloaded.CandidateRequestSessions) != 1 || reloaded.CandidateRequestSessions[0].State != runtimecontract.RuntimeCandidateRequestSessionDocumentComplete ||
+		len(reloaded.CandidateAttempts) != 0 || reloaded.ActiveDispatch != nil {
+		t.Fatalf("restart did not preserve completed request after rejected stale result: %+v", reloaded)
 	}
 }
 

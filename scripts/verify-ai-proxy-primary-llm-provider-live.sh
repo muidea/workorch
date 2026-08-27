@@ -144,12 +144,9 @@ def runtime_candidate_response(payload):
     coverage = focus["coverageWorkItemIds"]
     if required_state == "need_validation":
         return {"operations": [{
-            "id": "live-validation",
             "kind": "file/read",
-            "coverageWorkItemIds": coverage,
             "targetRefs": ["live-validation-probe.txt"],
             "parameters": [
-                {"name": "path", "string": "live-validation-probe.txt"},
                 {"name": "optional", "boolean": True},
                 {"name": "maxBytes", "integer": 1024},
             ],
