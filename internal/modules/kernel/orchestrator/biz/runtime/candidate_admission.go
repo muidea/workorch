@@ -4,7 +4,6 @@ import (
 	"strings"
 
 	candidateadmission "github.com/muidea/workorch/internal/modules/kernel/orchestrator/biz/internal/candidateadmission"
-	"github.com/muidea/workorch/internal/modules/kernel/orchestrator/biz/internal/grounding"
 	"github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
@@ -182,7 +181,7 @@ func rejectCandidateOutsideGroundedTargets(facts workorchruntimecontract.Runtime
 // admission and prerequisite re-acquisition consume the same set so a
 // resource-change refresh cannot silently return to a superseded focus target.
 func GroundedRepairTargets(facts workorchruntimecontract.RuntimeFacts) []string {
-	return grounding.RepairTargets(facts)
+	return runtimeTargetAuthorityPlanForFacts(facts).targets()
 }
 
 func candidateAdmissionInvalidSignature(candidate workorchruntimecontract.RuntimeCandidate) string {

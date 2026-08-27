@@ -474,7 +474,7 @@ func TestValidationFailureRepairProductionReceiptReopensFreshValidationAndProfil
 		t.Fatalf("last allowed Profile repair was rejected: %+v", opened.Aggregate.Facts.Repair)
 	}
 
-	repairTargets := []string{"repair-a.go", "repair-b.go"}
+	repairTargets := []string{"docs/lsp_tools.md", "lsp_tools.go"}
 	repairManifest, repairProposal, repairFeasibility := runtimeValidationFailureRepairProofForTest(t, opened.Aggregate, repairTargets)
 	sealedRepairSemantic := runtimeSealValidationFailureRepairSemanticProofForTest(t, repository, repairManifest, repairProposal, repairFeasibility)
 	binding, found := coverageEvidenceBindingForCoverage(sealedRepairSemantic.Facts.Focus, "cwi-1")
@@ -489,31 +489,14 @@ func TestValidationFailureRepairProductionReceiptReopensFreshValidationAndProfil
 		!sameRuntimeTargetRefs(sealedRepairSemantic.Facts.RepairDirective.TargetRefs, repairTargets) {
 		t.Fatalf("repair semantic seal did not install exact directive: %+v", sealedRepairSemantic.Facts.RepairDirective)
 	}
-	repairController, err := NewRuntimeController(repository)
-	if err != nil {
-		t.Fatal(err)
+	targetAuthority := runtimeTargetAuthorityPlanForFacts(sealedRepairSemantic.Facts)
+	if !targetAuthority.hasProspectiveTargets() || len(targetAuthority.existingTargets()) != 0 ||
+		!sameRuntimeTargetRefs(targetAuthority.prospectiveTargets(), repairTargets) {
+		t.Fatalf("repair semantic targets were not classified as prospective: plan=%+v focus=%+v binding=%+v", targetAuthority, sealedRepairSemantic.Facts.Focus, binding)
 	}
-	for sealedRepairSemantic.Decision.State == runtimecontract.ConvergenceStateNeedPrerequisite {
-		var snapshotPrerequisite *runtimecontract.RuntimePrerequisite
-		for index := range sealedRepairSemantic.Facts.Prerequisites.Pending {
-			candidate := sealedRepairSemantic.Facts.Prerequisites.Pending[index]
-			if candidate.Kind == runtimecontract.PrerequisiteKindTargetSnapshot && contains(repairTargets, candidate.SubjectRef) {
-				snapshotPrerequisite = &candidate
-				break
-			}
-		}
-		if snapshotPrerequisite == nil {
-			t.Fatalf("repair target prerequisite is not a typed File snapshot: %+v", sealedRepairSemantic.Facts.Prerequisites.Pending)
-		}
-		sealedRepairSemantic, err = repairController.commitPrerequisite(context.Background(), sealedRepairSemantic.Facts.WorkspaceID, sealedRepairSemantic.Facts.RunID, PrerequisiteResult{
-			PrerequisiteID: snapshotPrerequisite.ID,
-			TargetSnapshot: &runtimecontract.TargetSnapshot{
-				TargetRef: snapshotPrerequisite.SubjectRef, Content: "package repair\n",
-				ContentHash: "repair-before/" + snapshotPrerequisite.SubjectRef, ContentState: runtimecontract.SnapshotContentStateComplete,
-			},
-		})
-		if err != nil {
-			t.Fatal(err)
+	for _, prerequisite := range sealedRepairSemantic.Facts.Prerequisites.Pending {
+		if prerequisite.Kind == runtimecontract.PrerequisiteKindTargetSnapshot && contains(repairTargets, prerequisite.SubjectRef) {
+			t.Fatalf("binding-sealed prospective repair target requested a pre-create snapshot: %+v", prerequisite)
 		}
 	}
 	if sealedRepairSemantic.Decision.State != runtimecontract.ConvergenceStateNeedStateChange {

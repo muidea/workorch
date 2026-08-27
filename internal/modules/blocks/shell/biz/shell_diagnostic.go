@@ -136,7 +136,14 @@ func defaultShellValidationDiagnosticTargetType(class string) string {
 	}
 }
 
-var shellGoDiagnosticTargetPattern = regexp.MustCompile(`(?:^|[[:space:]])((?:\./)?[[:alnum:]_./-]+\.go):[0-9]+(?::[0-9]+)?:`)
+var (
+	shellGoDiagnosticTargetPattern = regexp.MustCompile(`(?:^|[[:space:]])((?:\./)?[[:alnum:]_./-]+\.go):[0-9]+(?::[0-9]+)?:`)
+	// go test/go list report a package-name conflict without line/column
+	// locations. The two parenthesized file names and the directory are still
+	// structured tool output and can be safely intersected with the File-owner
+	// manifest scope; arbitrary parenthesized text is intentionally ignored.
+	shellGoPackageConflictPattern = regexp.MustCompile(`(?m)^found packages [^()\r\n]+ \(([^()\r\n]+\.go)\) and [^()\r\n]+ \(([^()\r\n]+\.go)\) in ([^\r\n]+)$`)
+)
 
 // shellValidationDiagnosticTargetRefs is an owner-private diagnostic adapter.
 // It recognizes only bounded Go compiler/test locations from a managed Go
@@ -174,6 +181,29 @@ func shellValidationDiagnosticTargetRefs(output RuntimeCommandResult, request Ru
 			return nil
 		}
 	}
+	for _, match := range shellGoPackageConflictPattern.FindAllStringSubmatch(output.Stdout+"\n"+output.Stderr, -1) {
+		if len(match) != 4 {
+			continue
+		}
+		directory := strings.TrimSpace(match[3])
+		for _, fileName := range match[1:3] {
+			candidate := strings.TrimSpace(fileName)
+			if directory != "" {
+				candidate = filepath.Join(directory, candidate)
+			}
+			value, ok := normalizeShellDiagnosticTargetRef(candidate, output.WorkingDirectory)
+			if !ok {
+				continue
+			}
+			if _, allowed := scope[value]; !allowed {
+				continue
+			}
+			seen[value] = struct{}{}
+			if len(seen) > shellFailureTargetObservationMaxRefs {
+				return nil
+			}
+		}
+	}
 	ret := make([]string, 0, len(seen))
 	for value := range seen {
 		ret = append(ret, value)
@@ -188,7 +218,11 @@ func normalizeShellDiagnosticTargetRef(value, workingDirectory string) (string, 
 		return "", false
 	}
 	if filepath.IsAbs(value) {
-		root, err := filepath.Abs(strings.TrimSpace(workingDirectory))
+		workingDirectory = strings.TrimSpace(workingDirectory)
+		if workingDirectory == "" {
+			return "", false
+		}
+		root, err := filepath.Abs(workingDirectory)
 		if err != nil || root == "" {
 			return "", false
 		}

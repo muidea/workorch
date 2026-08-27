@@ -920,6 +920,172 @@ func TestRuntimeSemanticProviderProjectsDefinitionLineageAndExactAcquisitionSele
 	}
 }
 
+func TestRuntimeSemanticProviderProjectsTypedValidationFailureRepairOnlyInC3(t *testing.T) {
+	request := runtimeSemanticProviderTestRequest(t)
+	definition := request.SemanticContext.Definition
+	definition.CapabilityContract = []string{
+		runtimecontract.StepKindFileWrite,
+		runtimecontract.RuntimeBlockKindManagedValidationSession,
+	}
+	items := append([]runtimecontract.RuntimeCoverageItem(nil), request.SemanticManifest.CoverageItems...)
+	acceptanceSlices := []runtimecontract.RuntimeAcceptanceSlice{{
+		ID: "slice-1", CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-001"},
+	}}
+	seed, err := runtimecontract.CompileRuntimeDefinitionSeed(definition, request.SemanticContext.Activation, items, acceptanceSlices)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	convergence := runtimecontract.RuntimeValidationFailureRepairConvergence{
+		ID:                                           "dod-validation-repair",
+		TriggerOwnerModuleID:                         runtimecontract.RuntimeModuleShell,
+		TriggerOperationKind:                         runtimecontract.RuntimeBlockKindManagedValidationSession,
+		TriggerDiagnosticClasses:                     []string{runtimecontract.ValidationDiagnosticBuildFailed},
+		RepairEvidenceKind:                           runtimecontract.EvidenceKindStateChange,
+		RepairOwnerModuleID:                          runtimecontract.RuntimeModuleFile,
+		RepairOperationKinds:                         []string{runtimecontract.StepKindFileWrite},
+		RepairTargetPolicy:                           runtimecontract.RuntimeOperationTargetPolicyProspectiveOwnerTarget,
+		RepairTargetRole:                             "deliverable_implementation",
+		RepairDeclarationTargetSelectorRef:           "file/workspace_deliverable",
+		RepairDeclarationTargetSelectorOwnerRef:      "software-dev",
+		RepairDeclarationTargetSelectorSubjectRef:    "dodItem_repair",
+		RepairDeclarationTargetSelectorCandidateRefs: []string{"docs/lsp_tools.md", "lsp_tools.go"},
+		RepairOperationTargetSelectorRef:             "workspace-relative-new-file-target",
+		RequireFreshValidation:                       true,
+		MaxAttempts:                                  2,
+	}
+	focuses := runtimecontract.CompileRuntimeDefinitionFocuses([]runtimecontract.CoverageFocus{{
+		ID: "focus-repair", SliceID: "slice-1", AssessmentScope: "dodItem", AssessmentID: "dod-001",
+		CoverageWorkItemIDs:   []common.CoverageWorkItemID{"cwi-001"},
+		RequiredEvidenceKinds: []string{runtimecontract.EvidenceKindValidation},
+		TargetRole:            "deliverable_implementation", TargetSelectorRef: "file/workspace_deliverable",
+		TargetSelectorOwnerRef: "software-dev", TargetSelectorSubjectRef: "dodItem",
+		TargetSelectorCandidateRefs: []string{"docs/lsp_tools.md", "lsp_tools.go"}, RequireTargetGrounding: true,
+		AcceptedStepKinds: []string{runtimecontract.StepKindFileWrite, runtimecontract.RuntimeBlockKindManagedValidationSession},
+		RequireAssessment: true,
+	}})
+	focuses[0].ValidationFailureRepairConvergence = &convergence
+	focuses = runtimecontract.NormalizeRuntimeDefinitionFocuses(focuses)
+
+	fileCatalog := runtimecontract.RuntimeOperationAdmissibility{
+		PrerequisiteID: "file-repair-catalog", OwnerModuleID: runtimecontract.RuntimeModuleFile,
+		OperationKinds: []string{runtimecontract.StepKindFileWrite},
+		SelectorRefs:   []string{"workspace-relative-new-file-target"},
+		ConstraintRefs: []string{"workspace-relative-path", "new-target-requires-owner-selector"},
+		OperationVariants: []runtimecontract.RuntimeOperationAdmissibilityVariant{{
+			Kind:                  runtimecontract.StepKindFileWrite,
+			AllowedTargetPolicies: []runtimecontract.RuntimeOperationTargetPolicy{runtimecontract.RuntimeOperationTargetPolicyProspectiveOwnerTarget},
+			SelectorRefs:          []string{"workspace-relative-new-file-target"},
+			ConstraintRefs:        []string{"workspace-relative-path", "new-target-requires-owner-selector"},
+		}},
+		ObservedRevision: "file-repair-revision",
+	}
+	fileCatalog.SnapshotID = runtimecontract.StableRuntimeOperationAdmissibilitySnapshotID(fileCatalog)
+	shellCatalog := runtimecontract.RuntimeOperationAdmissibility{
+		PrerequisiteID: "shell-validation-catalog", OwnerModuleID: runtimecontract.RuntimeModuleShell,
+		OperationKinds: []string{runtimecontract.RuntimeBlockKindManagedValidationSession},
+		ValidationRecipes: []runtimecontract.RuntimeValidationRecipe{{
+			ID: "recipe/go-test", Command: "go", Args: []string{"test", "./..."},
+		}},
+		ObservedRevision: "shell-validation-revision",
+	}
+	shellCatalog.SnapshotID = runtimecontract.StableRuntimeOperationAdmissibilitySnapshotID(shellCatalog)
+	catalogs := []runtimecontract.RuntimeOperationAdmissibility{fileCatalog, shellCatalog}
+	baselineManifest, err := runtimecontract.CompileRuntimeSemanticPlanManifestForCoverage(
+		"ws-1", "run-1", definition, seed, focuses, request.SemanticContext.Activation.ExecutionContract,
+		catalogs, []common.CoverageWorkItemID{"cwi-001"},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	repairManifest, err := runtimecontract.CompileRuntimeSemanticPlanManifestForCoverageWithValidationFailureRepair(
+		"ws-1", "run-1", definition, seed, focuses, request.SemanticContext.Activation.ExecutionContract,
+		catalogs, []common.CoverageWorkItemID{"cwi-001"}, runtimecontract.RuntimeValidationFailureRepairGenerationInput{
+			CoverageWorkItemID: "cwi-001", FailedFocusID: "focus-repair",
+			FailureSignature:       "validation-failure/package-conflict/1",
+			TriggerOwnerModuleID:   runtimecontract.RuntimeModuleShell,
+			TriggerOperationKind:   runtimecontract.RuntimeBlockKindManagedValidationSession,
+			TriggerDiagnosticClass: runtimecontract.ValidationDiagnosticBuildFailed,
+		},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	request.SemanticContext.Definition = definition
+	request.SemanticContext.DefinitionSeed = seed
+	request.StablePrefixHash = runtimecontract.StableRuntimeCandidatePrefixHashWithExecutionContract(
+		definition, request.SemanticContext.Activation.ExecutionContract,
+	)
+	baselineRequest := request
+	baselineRequest.SemanticManifest = baselineManifest
+	baseline, err := runtimeProviderRequest(baselineRequest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	repairRequest := request
+	repairRequest.SemanticManifest = repairManifest
+	providerRequest, err := runtimeProviderRequest(repairRequest)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	authority := providerRequest.PromptContext.Sections[3].Content
+	var projection runtimeSemanticAuthorityProjection
+	if err := json.Unmarshal([]byte(authority), &projection); err != nil {
+		t.Fatal(err)
+	}
+	if len(projection.Manifest.ProofObligations) != 1 || projection.Manifest.ProofObligations[0].ValidationFailureRepair == nil {
+		t.Fatalf("provider projection lost validation-failure repair: %+v", projection.Manifest.ProofObligations)
+	}
+	obligation := projection.Manifest.ProofObligations[0]
+	repair := obligation.ValidationFailureRepair
+	if obligation.EvidencePurpose != runtimecontract.RuntimeSemanticEvidenceObligationValidationFailureRepair ||
+		obligation.OwnerFactAcquisition != nil ||
+		!slices.Equal(obligation.TerminalRequiredEvidenceKinds, []string{runtimecontract.EvidenceKindValidation}) ||
+		!slices.Equal(obligation.CurrentRequiredEvidenceKinds, []string{runtimecontract.EvidenceKindStateChange}) ||
+		repair.FailedFocusID != "focus-repair" || repair.ConvergenceID != convergence.ID ||
+		repair.FailureSignature != "validation-failure/package-conflict/1" ||
+		repair.TriggerDiagnosticClass != runtimecontract.ValidationDiagnosticBuildFailed ||
+		repair.RepairOwnerModuleID != runtimecontract.RuntimeModuleFile ||
+		!slices.Equal(repair.RepairOperationKinds, []string{runtimecontract.StepKindFileWrite}) ||
+		repair.RepairTargetPolicy != runtimecontract.RuntimeOperationTargetPolicyProspectiveOwnerTarget ||
+		repair.RepairOperationTargetSelectorRef != "workspace-relative-new-file-target" ||
+		!slices.Equal(repair.RepairConstraintRefs, []string{"new-target-requires-owner-selector", "workspace-relative-path"}) ||
+		!repair.RequireFreshValidation || repair.MaxAttempts != 2 {
+		t.Fatalf("provider projection weakened typed repair authority: obligation=%+v repair=%+v", obligation, repair)
+	}
+	for _, required := range []string{
+		"validation-failure repair", "every proposed target must contribute", "unrelated artifact is invalid",
+		"only an SM-2 private event may seal it", "grants no terminal validation evidence or coverage credit",
+	} {
+		if !strings.Contains(projection.OutputInstruction, required) {
+			t.Fatalf("provider repair instruction lost %q: %s", required, projection.OutputInstruction)
+		}
+	}
+	if strings.Contains(baseline.PromptContext.Sections[3].Content, "Specialized validation-failure repair rule") {
+		t.Fatalf("ordinary semantic generation received irrelevant repair instructions: %s", baseline.PromptContext.Sections[3].Content)
+	}
+	for _, forbidden := range []string{"originalMessage", "rawDiagnostic", "receipt", "runtimeAction", "terminalState", "retryDecision"} {
+		if strings.Contains(authority, forbidden) {
+			t.Fatalf("provider repair projection leaked non-proposal authority %q: %s", forbidden, authority)
+		}
+	}
+	for index := 0; index < 3; index++ {
+		if baseline.PromptContext.Sections[index].Content != providerRequest.PromptContext.Sections[index].Content {
+			t.Fatalf("validation-failure repair changed stable section C%d", index)
+		}
+	}
+	baselinePlan := baseline.ContextBudget.CachePlan
+	repairPlan := providerRequest.ContextBudget.CachePlan
+	if baselinePlan.StablePrefixHash != repairPlan.StablePrefixHash ||
+		baselinePlan.RenderedStablePrefixHash != repairPlan.RenderedStablePrefixHash ||
+		baselinePlan.WorkspaceDefinitionHash != repairPlan.WorkspaceDefinitionHash ||
+		baselinePlan.CapabilityContractHash != repairPlan.CapabilityContractHash {
+		t.Fatalf("validation-failure repair changed C0-C2 cache identity: baseline=%+v repair=%+v", baselinePlan, repairPlan)
+	}
+}
+
 func runtimeSemanticProviderProspectiveTargetSchemaForTest(t *testing.T, schema string) map[string]any {
 	t.Helper()
 	var decoded map[string]any

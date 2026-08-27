@@ -30,6 +30,9 @@ Last Verified: 2026-08-27
   manifest scope，因此多文件返回 `satisfied + 全部 TargetRefs`；只有 unique/profile selector 的多匹配才是
   ambiguous。该观察不返回 retain/reopen/CWI 状态。File 只验证 proposal 的整个 target set 并返回 factual feasible refs；
   它不解释 validation diagnostic、repair purpose、fresh-validation lineage 或 terminal credit。
+  File-feasible 且随后由 SM-2 binding 封存的 absent prospective refs 在创建前不是 snapshot target；Orchestrator 只能对
+  当前 existing refs 请求 `target_snapshot`。File 不为 absent path 合成空 snapshot，也不通过 snapshot failure 触发
+  Runtime transition；nested prospective path 的 feasibility 必须保持零文件、零父目录创建。
 - 对 sealed owner-fact acquisition 的 prospective `file/write`，File feasibility 还必须基于上述同一 current complete
   `WorkspaceManifest` 生成 immutable `RuntimeProspectiveWorkspaceManifestDelta`：它只包含 exact base revision、proposal/
   catalog/contract identity、完整 `ProspectiveTargetRefs` 与归一化 resulting target refs，不写文件、不访问 Shell，
@@ -141,7 +144,8 @@ Last Verified: 2026-08-27
   parent-child/aggregate-capacity invalid matrix。验证使用同一 manifest revision、全部目标不存在，且全链零 File
   write/零父目录创建/零 Shell I/O。
 - [x] validation-failure repair 的多 target generic feasibility 复用同一 whole-set prospective admission，但不产生
-  `RuntimeProspectiveWorkspaceManifestDelta`，也不授予 repair settlement/fresh validation/terminal credit。
+  `RuntimeProspectiveWorkspaceManifestDelta`，也不授予 repair settlement/fresh validation/terminal credit；nested missing
+  target set 保持零文件/零父目录创建，且任一 target 已存在时整组 fail-closed。
 - [x] snapshot 大文件、400 文件 manifest 与大文件 patch replay 均有 allocation benchmark；bounded read、文件与目录
   混合时恰好 500 个可纳入 entry 成功、第 501 个才 typed overflow、嵌套 create 为缺失父目录预留 capacity，以及
   replay 零二次写均由回归测试约束；被排除的 owner-internal/generated tree 不消费该 entry bound。

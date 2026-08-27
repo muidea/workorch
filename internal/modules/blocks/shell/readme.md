@@ -67,8 +67,10 @@ raw diagnostic 留在 Shell-private adapter；receipt 只携带有界、脱敏�
   File receipt 改变该 revision 时，SM-2 仅按依赖交集退休并重获 catalog。该 freshness lineage 不允许 Shell 修改
   Manifest、CWI 或 Runtime 状态。
 - managed-validation sealed authorization 还绑定 fresh File manifest 的 bounded target scope。Shell 只在 owner-private
-  adapter 中解析明确支持的结构化工具位置；当前 Go recipe 仅接受 `*.go:line[:column]:` 位置，归一后必须属于该 manifest
-  scope 且最多八项。validation entry、operation input target、coverage hint 和无结构化 stderr/stdout 都不能自动成为
+  adapter 中解析明确支持的结构化工具位置；当前 Go recipe 接受 `*.go:line[:column]:`，以及 `go test/go list` 的 exact
+  `found packages <pkg> (<file.go>) and <pkg> (<file.go>) in <directory>` package-conflict 结构。后者必须同时解析两个文件，
+  按 reported directory/working directory 规范化，再与同一 manifest scope 取交集；任何越界成员不得进入 observation。
+  结果最多八项。validation entry、operation input target、coverage hint 和其它无结构化 stderr/stdout 都不能自动成为
   failure target；Shell 只发布 candidate observation，File confirmation 与 Orchestrator SM-2 才能封存 repair surface。
 - rejected managed-validation receipt 只发布 closed typed diagnostic class 与 owner-observed candidate target；Profile 中
   matching all-of convergence 和 Orchestrator SM-2 才能据 exact receipt lineage 打开 `validation_failure_repair` semantic
@@ -145,8 +147,8 @@ raw diagnostic 留在 Shell-private adapter；receipt 只携带有界、脱敏�
 - 已覆盖 durable Shell 的零变化、未声明 effect、多目标合法 effect、receipt exact replay 与 claimed/no-receipt
   at-most-once recovery。
 - 已覆盖输出截断、脱敏 diagnostic、timeout、非法/危险命令和 managed resource cleanup。
-- 已覆盖 validation entry 不晋升 failure target、无结构化输出零 candidate，以及 managed Go diagnostic 仅报告实际
-  manifest-scoped source target 并拒绝越界位置。
+- 已覆盖 validation entry 不晋升 failure target、无结构化输出零 candidate，以及 managed Go line diagnostic 与 exact
+  package-conflict diagnostic 仅报告实际 manifest-scoped source target；package conflict 返回两个受限文件并拒绝越界成员。
 - 已覆盖 rejected managed-validation 的 closed diagnostic/failure-target observation；Shell 不发布 repair directive、CWI reopen、
   retry/budget 或 terminal disposition。
 

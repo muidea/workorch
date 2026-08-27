@@ -57,6 +57,33 @@ type runtimeSemanticProofObligationProjection struct {
 	DeclarationTargetSelectorSubjectRef string                                                   `json:"declarationTargetSelectorSubjectRef,omitempty"`
 	DeclarationTargetSelectorCandidates []string                                                 `json:"declarationTargetSelectorCandidateRefs,omitempty"`
 	OwnerFactAcquisition                *runtimeSemanticOwnerFactAcquisitionProjection           `json:"ownerFactAcquisition,omitempty"`
+	ValidationFailureRepair             *runtimeSemanticValidationFailureRepairProjection        `json:"validationFailureRepair,omitempty"`
+}
+
+// runtimeSemanticValidationFailureRepairProjection is the provider-safe C3
+// view of one Profile-sealed repair generation. It exposes the typed failure
+// identity and exact repair vocabulary needed to propose a relevant proof, but
+// carries no raw diagnostic, Runtime action, retry, terminal, receipt or owner
+// observation.
+type runtimeSemanticValidationFailureRepairProjection struct {
+	FailedFocusID                                string                                       `json:"failedFocusId"`
+	ConvergenceID                                string                                       `json:"convergenceId"`
+	FailureSignature                             string                                       `json:"failureSignature"`
+	TriggerOwnerModuleID                         string                                       `json:"triggerOwnerModuleId"`
+	TriggerOperationKind                         string                                       `json:"triggerOperationKind"`
+	TriggerDiagnosticClass                       string                                       `json:"triggerDiagnosticClass"`
+	RepairOwnerModuleID                          string                                       `json:"repairOwnerModuleId"`
+	RepairOperationKinds                         []string                                     `json:"repairOperationKinds"`
+	RepairTargetPolicy                           runtimecontract.RuntimeOperationTargetPolicy `json:"repairTargetPolicy"`
+	RepairTargetRole                             string                                       `json:"repairTargetRole"`
+	RepairDeclarationTargetSelectorRef           string                                       `json:"repairDeclarationTargetSelectorRef"`
+	RepairDeclarationTargetSelectorOwnerRef      string                                       `json:"repairDeclarationTargetSelectorOwnerRef"`
+	RepairDeclarationTargetSelectorSubjectRef    string                                       `json:"repairDeclarationTargetSelectorSubjectRef"`
+	RepairDeclarationTargetSelectorCandidateRefs []string                                     `json:"repairDeclarationTargetSelectorCandidateRefs,omitempty"`
+	RepairOperationTargetSelectorRef             string                                       `json:"repairOperationTargetSelectorRef"`
+	RepairConstraintRefs                         []string                                     `json:"repairConstraintRefs,omitempty"`
+	RequireFreshValidation                       bool                                         `json:"requireFreshValidation"`
+	MaxAttempts                                  int                                          `json:"maxAttempts"`
 }
 
 type runtimeSemanticOwnerFactAcquisitionProjection struct {
@@ -225,6 +252,29 @@ func runtimeSemanticProofObligationsForProvider(values []runtimecontract.Runtime
 				ReobserveOwnerModuleID:             acquisition.ReobserveOwnerModuleID,
 				ReobserveFactKind:                  acquisition.ReobserveFactKind,
 				MaxAcquisitionAttempts:             acquisition.MaxAcquisitionAttempts,
+			}
+		}
+		if value.ValidationFailureRepair != nil {
+			repair := value.ValidationFailureRepair.Normalized()
+			projection.ValidationFailureRepair = &runtimeSemanticValidationFailureRepairProjection{
+				FailedFocusID:                                repair.FailedFocusID,
+				ConvergenceID:                                repair.ConvergenceID,
+				FailureSignature:                             repair.FailureSignature,
+				TriggerOwnerModuleID:                         repair.TriggerOwnerModuleID,
+				TriggerOperationKind:                         repair.TriggerOperationKind,
+				TriggerDiagnosticClass:                       repair.TriggerDiagnosticClass,
+				RepairOwnerModuleID:                          repair.RepairOwnerModuleID,
+				RepairOperationKinds:                         append([]string(nil), repair.RepairOperationKinds...),
+				RepairTargetPolicy:                           repair.RepairTargetPolicy,
+				RepairTargetRole:                             repair.RepairTargetRole,
+				RepairDeclarationTargetSelectorRef:           repair.RepairDeclarationTargetSelectorRef,
+				RepairDeclarationTargetSelectorOwnerRef:      repair.RepairDeclarationTargetSelectorOwnerRef,
+				RepairDeclarationTargetSelectorSubjectRef:    repair.RepairDeclarationTargetSelectorSubjectRef,
+				RepairDeclarationTargetSelectorCandidateRefs: append([]string(nil), repair.RepairDeclarationTargetSelectorCandidateRefs...),
+				RepairOperationTargetSelectorRef:             repair.RepairOperationTargetSelectorRef,
+				RepairConstraintRefs:                         append([]string(nil), repair.RepairConstraintRefs...),
+				RequireFreshValidation:                       repair.RequireFreshValidation,
+				MaxAttempts:                                  repair.MaxAttempts,
 			}
 		}
 		ret = append(ret, projection)

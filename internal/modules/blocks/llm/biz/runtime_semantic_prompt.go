@@ -44,7 +44,7 @@ func buildRuntimeSemanticPrompt(request llmmodels.RuntimeCandidateRequest, prepa
 		DefinitionSeed:    runtimeSemanticDefinitionSeedForProvider(prepared.context.DefinitionSeed),
 		Manifest:          manifestProjection,
 		Schema:            json.RawMessage(compactSemanticPlanPromptSchema([]byte(prepared.schema))),
-		OutputInstruction: runtimeSemanticOutputInstruction(prepared.context),
+		OutputInstruction: runtimeSemanticOutputInstruction(prepared.context, prepared.manifest),
 		PlanStep:          prepared.context.PlanStep,
 		BatchID:           prepared.context.BatchID,
 		BatchSequence:     runtimeSemanticBatchSequence(prepared.context),

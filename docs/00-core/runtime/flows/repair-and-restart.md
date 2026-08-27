@@ -65,7 +65,7 @@ failure / missing prerequisite / document-conformance or complete candidate reje
 
 repair 在 Runtime 中不是独立 stage 对象，而是 **drive/reducer 在当前 authority 与 focus 上的再推进**：
 
-- 缺失 manifest / target snapshot / capability / validation scratch / provider ceiling
+- 缺失 manifest / existing-target snapshot / capability / validation scratch / provider ceiling
   → `need_prerequisite`（确定性，非 LLM）
 - coherent completed empty/non-JSON observation，或 complete candidate schema / contract rejection
   → SM-3 先持久化 provider-safe document-shape/field/semantic diagnostic，再决定 typed terminal 或同一 authority 上唯一
@@ -79,8 +79,11 @@ repair 在 Runtime 中不是独立 stage 对象，而是 **drive/reducer 在当�
 - Profile-declared typed validation rejection without an exact failure target
   → SM-2 reopens the same CWI for one `validation_failure_repair` semantic generation
   → that generation's eligible closure is the exact current CWI; unrelated globally eligible CWIs remain outside it
-  → File confirms the proposed target and SM-2 seals a generation binding
+  → C3 exposes only the typed failure signature/class and exact Profile repair vocabulary; no raw diagnostic or Runtime disposition
+  → File confirms the complete prospective all-of target set without creating/snapshotting it, and SM-2 seals a generation binding
   → accepted repair state change retires that binding and requires fresh validation; it never grants terminal validation credit
+- Shell-recognized structured validation locations, including both files in the exact Go package-conflict diagnostic, remain
+  owner-authored factual failure targets; Shell does not choose the repair transition, and Orchestrator never derives targets from free text
 - 需要外部信息 / 审批 / 依赖
   → sealed governance candidate → ticket → resolution commit
 - 存在owner-defined typed recovery/reconciliation合同的暂时不可用或consumption unknown

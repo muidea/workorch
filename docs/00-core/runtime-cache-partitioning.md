@@ -65,6 +65,11 @@ semantic owner 的 `stale|prerequisite_required` original diagnostic 只进入 a
 revision fence 的 stale 可触发 SM-2 有界重获；当前无 owner-defined acquisition contract 的 prerequisite-required
 必须保留事实并 fail-closed，不能伪装为 refresh。generation history 与完整 owner diagnostic 不进入 C0～C5。
 
+`validation_failure_repair` 的 failed-focus identity、stable failure signature、closed trigger diagnostic class、Profile-sealed
+convergence 与 exact repair vocabulary 属于 C3。它不得进入 C2，也不得携带 raw diagnostic、receipt、Runtime action、retry
+或 terminal disposition。专用 provider instruction 只在 current proof batch 含 repair obligation 时出现；相同 Definition
+下普通 generation 与 repair generation 的 C0～C2 bytes/hash、`StablePrefixHash` 必须一致。
+
 ## Canonical Rendering
 
 - section 顺序与 section ID heading 固定；

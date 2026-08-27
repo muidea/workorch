@@ -202,8 +202,10 @@ func runtimeRequirementsWithCapabilityPrerequisiteFacts(facts runtimecontract.Ru
 
 // runtimeTargetGroundingRequirements translates a sealed focus declaration
 // into owner acquisitions. It never chooses a target from workspace content:
-// explicit refs require File snapshots, while discovery source IDs only assert
-// the owner facts that the profile declared as a bounded basis.
+// existing refs require File snapshots, while a binding-sealed prospective
+// target already has File feasibility authority and must not be read before
+// creation. Discovery source IDs only assert the owner facts that the profile
+// declared as a bounded basis.
 func runtimeTargetGroundingRequirements(facts runtimecontract.RuntimeFacts) []runtimecontract.RuntimeRequirement {
 	facts = facts.Normalized()
 	focus := facts.Focus
@@ -211,17 +213,11 @@ func runtimeTargetGroundingRequirements(facts runtimecontract.RuntimeFacts) []ru
 		return nil
 	}
 	requirements := make([]runtimecontract.RuntimeRequirement, 0, len(focus.TargetRefs)+len(focus.TargetDiscoverySources)+1)
-	// Use the same retarget precedence as SM-3 candidate admission. A newly
-	// committed owner failure observation must acquire snapshots for its repair
-	// targets, never silently reuse an older explicit Focus target.
-	groundedTargets := GroundedRepairTargets(facts)
-	for _, target := range groundedTargets {
-		if ownerGroundedCreationTarget(facts, target) {
-			// An empty-workspace create target is a sealed absent path.  It is
-			// concrete operation authority, but cannot and must not be read as a
-			// File snapshot before the durable create has occurred.
-			continue
-		}
+	// Use the same owner-private target classification as SM-2 grounding and
+	// SM-3 candidate admission. Only targets classified as currently existing
+	// may produce a snapshot prerequisite.
+	targetAuthority := runtimeTargetAuthorityPlanForFacts(facts)
+	for _, target := range targetAuthority.existingTargets() {
 		requirements = append(requirements, focusScopedRuntimeRequirement(facts, runtimecontract.RuntimeRequirement{
 			Kind: runtimecontract.PrerequisiteKindTargetSnapshot, OwnerModuleID: runtimecontract.RuntimeModuleFile,
 			SubjectRef: target, Reason: "grounded repair target requires owner snapshot",
@@ -230,14 +226,7 @@ func runtimeTargetGroundingRequirements(facts runtimecontract.RuntimeFacts) []ru
 	// A failure target is already an owner-selected repair surface. Otherwise a
 	// File owner may only make the neutral cardinality observation below; it
 	// must not infer an implementation role from paths, suffixes, or content.
-	if len(groundedTargets) == 0 {
-		// A semantic prospective target set has already passed the File owner's
-		// bounded feasibility probe and is fenced by the exact catalog snapshot
-		// in its SM-2 binding. Do not fan it back out into the older single-target
-		// selection prerequisite.
-		if len(focus.ProspectiveTargetRefs) != 0 && hasSemanticOwnerGroundedTargetScope(facts) {
-			goto selectionRequirementDone
-		}
+	if len(targetAuthority.targetRefs) == 0 && !targetAuthority.hasProspectiveTargets() {
 		selection := currentFocusTargetSelection(facts)
 		if selection == nil {
 			// A File-owned prospective selector is itself a sealed target
@@ -297,12 +286,6 @@ selectionRequirementDone:
 		}
 	}
 	return normalizeRuntimeRequirements(requirements)
-}
-
-func ownerGroundedCreationTarget(facts runtimecontract.RuntimeFacts, target string) bool {
-	selection := currentFocusTargetSelection(facts)
-	return hasOwnerGroundedCreationScope(facts) && selection != nil &&
-		strings.TrimSpace(selection.ProspectiveTargetRef) == strings.TrimSpace(target)
 }
 
 // currentFocusTargetSelection returns only an owner selection committed as a

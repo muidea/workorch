@@ -242,6 +242,12 @@ deployed run ID 只属于 archive regression evidence，不定义当前候选、
   `Allowed` 或第二 provider request。Shell 仍只拥有 persisted satisfaction/reason，terminal 由 Orchestrator
   private event 署名和提交。typed stale 只走 bounded fact refresh；零 ticket/governance/acquisition/operation/effect/
   coverage，duplicate/restart 不重复 terminal 或同一 File/Shell probe。
+- `validation_failure_repair` semantic manifest 的 provider-safe C3 projection 必须同时携带 failed focus、stable failure
+  signature、typed trigger owner/operation/diagnostic class、Profile-sealed convergence ID，以及 exact repair
+  owner/operation vocabulary/target policy/declaration candidates/operation selector/constraints/fresh-validation bound。
+  它不得携带 raw diagnostic、receipt、Runtime action、retry 或 terminal disposition。LLM 只据此提出与 typed failure
+  相关的一份 `state_change` proposal；File 对完整 prospective all-of target set 返回 factual feasibility，只有 SM-2
+  private internal event 可以封存 binding。该 volatile repair generation 不得改变 C0～C2 或 stable-prefix identity。
 - renderer、wire schema、strict decoder、candidate evaluator、owner feasibility command 与 fixture 只消费该
   manifest 及其 hash，不得从 profile、focus、raw reason 或临时 inventory 重建第二份允许集。
 - `JSONSchemaResponse` 只决定 LLM adapter 是否可发送 provider format，是可选 wire acceleration，不是 SM-3 authority。
@@ -261,7 +267,12 @@ deployed run ID 只属于 archive regression evidence，不定义当前候选、
 - 当前唯一结构 evaluator 是 `biz/internal/candidateadmission.Evaluate`；`biz/runtime/candidate_admission.go`
   只投影当前 authority/attempt/evidence lineage、调用该 evaluator 一次，并在返回后执行 SM-3 owner-local
   rejection seal。repair closure、validation-only gap 与 owner-grounded target scope 都在 replay 前由同一 evaluator
-  判定；`biz/internal/grounding` 提供 target-selection/repair-target 的唯一纯比较实现。focused package 不读取
+  判定；`biz/internal/grounding` 提供 target-selection/repair-target 的唯一纯比较实现，
+  `biz/runtime/target_authority.go` 再以唯一 owner-private projection 把同一集合分类为 existing 或
+  binding-sealed prospective，供 SM-2 grounding 与 SM-3 prerequisite/candidate admission 共同消费。只有 existing target
+  可以请求 File snapshot；File-feasible prospective target 在创建前不得被重新解释为 existing target。Definition/Profile
+  的 `TargetSelectorOwnerRef` 只是声明 lineage，capability owner 必须从 sealed proof operation descriptor 推导并与对应
+  owner catalog 精确匹配，不能把两种 owner identity 当作同一个 matcher。focused package 不读取
   aggregate repository、不调用 EventHub、不探测 capability owner，也不返回 correction、retry、terminal 或 next action。
 - `biz/internal/proof` 是 SM-2/SM-3 事实比较的唯一纯入口：它承载 reconciliation batch/owner observation
   重放、repair-surface confirmation 与 validation causation、current-CWI/binding lineage、owner receipt/binding

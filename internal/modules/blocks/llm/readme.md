@@ -156,6 +156,14 @@ application、Web 与 orchestrator 不直接访问 ai-proxy。
     violation，不复制第二份 constraint authority，也不取得 raw owner diagnostic/dependency catalog。通过 constraint 后的
     exact-current File+Shell full-composite `would_not_satisfy` 不再调用 LLM；它由 Orchestrator 直接归类为
     `prospective_satisfaction_contract_violated -> semantic_contract_failed`。typed stale 只使 Orchestrator 刷新 owner fact。
+    `evidencePurpose=validation_failure_repair` 使用另一份 generation-specific C3 projection：它投影 failed focus、stable
+    failure signature、typed trigger owner/operation/diagnostic class、Profile convergence ID，以及 exact repair
+    owner/operation vocabulary/target policy/declaration candidates/operation selector/constraints/fresh-validation bound。
+    provider instruction 必须把这些字段逐项映射为唯一 `state_change` proposal，并要求每个 proposed target 对消除该
+    typed failure 有贡献；raw diagnostic、owner message、receipt、Runtime action、retry、terminal 与 coverage credit
+    均不得进入 projection。proposal 仍由 File 对完整 all-of target set 做 factual feasibility，只有 SM-2 private event
+    可以 seal；该 repair projection 只改变 C3，不能改变 C0～C2 bytes/hash 或 stable-prefix identity。普通 semantic
+    generation 不渲染这段专用 instruction，避免把无关 repair vocabulary 加入 provider context。
 14. Skill 只从 Run owner 的 sealed activation 进入 volatile C3。每项携带 WorkOrch Registry 或 SkillHub typed
     provenance、original/truncated instruction identity 与 activation-time byte budget；LLM 不读取 Skill repository/catalog、
     不重新选择或裁剪 Skill，也不把 Skill material 移入 C0～C2。缺失/漂移的 provenance 或 budget 在 Runtime
@@ -258,6 +266,9 @@ application、Web 与 orchestrator 不直接访问 ai-proxy。
 - [x] prospective target 的 owner-authored `allOf` clause contract 只进入 C3 volatile authority；provider schema 与本地
   evaluator 在 owner probe 前对 1～8 个 `prospectiveTargetRefs` 执行同一合取覆盖合同，拒绝 singular 字段、
   partial/extra/duplicate target set；C4 只携带 typed violation 引用，且 dependency recipe identity/command 不进入 provider。
+- [x] validation-failure repair 的 typed failure/convergence/repair vocabulary 与 exact declaration/operation selector 只投影到
+  C3；专用 instruction 仅在 repair batch 出现，普通 generation 不携带。相同 Definition 下 repair/non-repair 请求的
+  C0～C2 bytes/hash 与 stable-prefix identity 完全一致，projection 不含 raw diagnostic、receipt 或 Runtime disposition。
 - [x] candidate attempt 0 无 correction；attempt 1 的 detached correction input 绑定 manifest 与 concrete alternative witness，
   missing/stale/shape drift 在 provider 前拒绝。LLM command/model/C4 不含 disposition/terminal，也无 persisted-directive rebuild。
 - [x] candidate terminal framing 强制 `Stale | Feedback | DocumentOutcome` exactly-one；complete content 与 hash/bytes

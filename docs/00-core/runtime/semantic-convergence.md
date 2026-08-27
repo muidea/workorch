@@ -227,6 +227,14 @@ SM-3 document 提出的 bounded nonempty exact target set、Definition 的完整
 capability owner catalog 发布的 matching operation selector/constraint/variant。缺 proposal target set 由 strict schema/admission 拒绝；
 scope/catalog 不匹配由 pure evaluator 或 File feasibility 拒绝。全部 exact-current owner fact 通过后，SM-2 才封存 binding；
 之前始终零 candidate/dispatch/effect。
+
+Orchestrator 必须用一份 owner-private target-authority projection 统一 SM-2 grounding 与 SM-3 prerequisite/candidate
+admission：先从 current repair/focus facts 得到 exact target set，再依据 current SM-2 binding + owner feasibility lineage
+将其分类为 existing 或 prospective。只有 existing target 可以产生 File `target_snapshot` prerequisite；已经通过 File
+feasibility 并由 binding 封存的 absent prospective set 在 create 前不得再次进入 snapshot/lstat 路径。Definition/Profile
+的 selector owner ref 仅表示声明 lineage；capability owner 必须由 sealed proof operation descriptor 推导，并与匹配的
+owner catalog snapshot 校验，不能把 declaration owner 与 operation owner 合并为同一身份。该 projection 是纯派生事实，
+不持久化新状态、不新增状态机，也不允许 File/LLM/Shell 触发 Orchestrator transition。
 ordinary Shell managed-validation catalog acquisition 需要 target vocabulary 时，Orchestrator 只可把已持久化的 File-owner
 target inventory 作为 typed input 转交 Shell；prospective-satisfaction pure query 只额外接收 File owner 从该 inventory
 计算的 immutable hypothetical delta/resulting refs。File effect 使旧目录失效后，新一代 acquisition 仍使用 fresh File
@@ -247,6 +255,15 @@ advance 与 retirement check 共用。普通 definition generation 使用当时�
 generation。因而无关 CWI 变为 eligible 不能退休 repair-local manifest，也不能制造新的 provider request；普通 generation
 中确有新的 eligible member、或 repair CWI/purpose/lineage 漂移时，才以 owner-private event 退休 exact generation 并重新
 规划。该 scope 是 SM-2 authority，不由 LLM document、capability result 或 SM-4 推断。
+
+该 repair generation 的 provider C3 必须投影 sealed `ValidationFailureRepair` 的 failed focus、stable failure signature、
+typed trigger owner/operation/diagnostic class、convergence ID、repair owner/operation vocabulary、target policy、declaration
+candidate scope、operation selector/constraints 与 fresh-validation bound。不得投影 raw diagnostic、owner message、receipt、
+Runtime action、retry 或 terminal disposition。provider 只能提出一份结构匹配且与 typed failure 相关的 `state_change`
+proposal；每个 prospective target 都必须对修复该 failure 有贡献。File 只判断完整 target set 的 factual feasibility，
+只有 SM-2 private internal event 可以 seal binding；`RequireFreshValidation` 保证 repair receipt 不授予 terminal validation
+credit。该内容只属于 C3 volatile authority，相同 Definition 的普通/repair generation 必须保持 C0～C2 与 stable prefix
+完全一致。
 
 每次 semantic owner-private event 完成 CAS 后，调用方必须仅从返回的 current aggregate 重新读取 phase、generation、
 manifest、accepted order 与 request identity。若该 event 已退休 generation 或清空 manifest，本轮 semantic transaction

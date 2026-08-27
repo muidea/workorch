@@ -179,6 +179,35 @@ func TestShellManagedGoDiagnosticReportsActualManifestScopedFailureTarget(t *tes
 	}
 }
 
+func TestShellManagedGoPackageConflictReportsBothManifestScopedTargets(t *testing.T) {
+	workingDirectory := "/tmp/workorch-shell-validation/workspace"
+	request := RuntimeCommandRequest{
+		ManagedValidation: runtimecontract.RuntimeManagedValidation{RuntimeManaged: true, Kind: runtimecontract.RuntimeBlockKindManagedValidationSession},
+		ValidationScopeTargetRefs: []string{
+			"main.go",
+			"semantic_test.go",
+			"unrelated.go",
+		},
+	}
+	output := RuntimeCommandResult{
+		WorkingDirectory: workingDirectory,
+		Stderr:           "found packages main (main.go) and semantic (semantic_test.go) in " + workingDirectory + "\n",
+	}
+	if targets := shellValidationDiagnosticTargetRefs(output, request, "go"); !reflect.DeepEqual(targets, []string{"main.go", "semantic_test.go"}) {
+		t.Fatalf("managed Go package-conflict targets = %v", targets)
+	}
+
+	output.Stderr = "found packages main (main.go) and semantic (outside_test.go) in " + workingDirectory + "\n"
+	if targets := shellValidationDiagnosticTargetRefs(output, request, "go"); !reflect.DeepEqual(targets, []string{"main.go"}) {
+		t.Fatalf("package-conflict target escaped manifest scope: %v", targets)
+	}
+
+	output.WorkingDirectory = ""
+	if targets := shellValidationDiagnosticTargetRefs(output, request, "go"); len(targets) != 0 {
+		t.Fatalf("absolute package-conflict targets were accepted without a working-directory boundary: %v", targets)
+	}
+}
+
 func TestShellOwnerEmitsOnlyContentBoundStructuredFailureTarget(t *testing.T) {
 	ctx := context.Background()
 	hub := magicevent.NewHub(16)

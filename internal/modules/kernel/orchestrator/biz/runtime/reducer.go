@@ -546,11 +546,12 @@ func runtimeStringIncluded(values []string, wanted string) bool {
 // becoming authority for unrelated owner side effects, while still allowing
 // the target owner to publish one concrete creation operation variant.
 func creationScopeAdmissibleOperationKinds(facts runtimecontract.RuntimeFacts, acceptedKinds []string) []string {
-	ownerModuleID := facts.Focus.Normalized().TargetSelectorOwnerRef
+	selectionOwnerModuleID := ""
 	if selection := currentFocusTargetSelection(facts); selection != nil && selection.OwnerModuleID != "" {
-		ownerModuleID = selection.OwnerModuleID
+		selectionOwnerModuleID = selection.OwnerModuleID
 	}
-	if ownerModuleID == "" {
+	semanticScope := selectionOwnerModuleID == "" && hasSemanticOwnerGroundedTargetScope(facts)
+	if selectionOwnerModuleID == "" && !semanticScope {
 		return nil
 	}
 	accepted := make(map[string]struct{}, len(acceptedKinds))
@@ -560,7 +561,7 @@ func creationScopeAdmissibleOperationKinds(facts runtimecontract.RuntimeFacts, a
 	admissible := make(map[string]struct{}, len(acceptedKinds))
 	for _, inventory := range facts.Resources.OperationAdmissibilities {
 		inventory = inventory.Normalized()
-		if inventory.OwnerModuleID != ownerModuleID {
+		if selectionOwnerModuleID != "" && inventory.OwnerModuleID != selectionOwnerModuleID {
 			continue
 		}
 		for _, kind := range inventory.OperationKinds {
@@ -569,11 +570,14 @@ func creationScopeAdmissibleOperationKinds(facts runtimecontract.RuntimeFacts, a
 				continue
 			}
 			descriptor, known := runtimecontract.RuntimeOperationDescriptorForKind(kind)
-			if !known || descriptor.OwnerModuleID != ownerModuleID || !runtimecontract.RuntimeEffectIsDurable(descriptor.DefaultEffectScope) {
+			if !known || descriptor.OwnerModuleID != inventory.OwnerModuleID || !runtimecontract.RuntimeEffectIsDurable(descriptor.DefaultEffectScope) {
 				continue
 			}
 			variantIDs := creationScopeOperationVariantIDs(facts, kind)
 			if !creationScopeOperationVariantsAreDurable(kind, variantIDs) {
+				continue
+			}
+			if semanticScope && !runtimeSemanticBindingAllowsProspectiveOperation(facts, inventory, kind, variantIDs) {
 				continue
 			}
 			allowed, _, _, _, err := runtimecontract.RuntimeOperationAdmissibilityAllowsTargetPolicyForVariants(
@@ -800,7 +804,7 @@ func currentRepairClosureID(facts runtimecontract.RuntimeFacts) string {
 // always closes this path with a typed terminal. Capability owners and the
 // shared contract package only carry observations; SM-2 owns the terminal.
 func targetGroundingDecision(base runtimecontract.RuntimeDecision, facts runtimecontract.RuntimeFacts, allowAcceptedStateChangeLineage bool, proofLineages ...[]runtimecontract.RuntimeCoverageProofLineage) (runtimecontract.RuntimeDecision, bool, error) {
-	if !facts.Focus.RequireTargetGrounding || len(GroundedRepairTargets(facts)) != 0 || hasOwnerGroundedProspectiveCreationScope(facts) || hasOwnerGroundedTargetScope(facts) || hasSemanticOwnerGroundedTargetScope(facts) ||
+	if !facts.Focus.RequireTargetGrounding || runtimeTargetAuthorityPlanForFacts(facts).grounded() ||
 		(allowAcceptedStateChangeLineage && hasCurrentFocusTargetBoundStateChangeEvidence(facts, proofLineages...)) {
 		return runtimecontract.RuntimeDecision{}, false, nil
 	}
@@ -810,9 +814,12 @@ func targetGroundingDecision(base runtimecontract.RuntimeDecision, facts runtime
 
 // hasSemanticOwnerGroundedTargetScope recognizes a capability scope only when
 // the current SM-2-sealed binding carries the exact owner catalog snapshot,
-// selector and semantic-feasibility lineage. The provider-authored selector
-// alone is insufficient: the matching persisted owner inventory is the
-// grounding fact.
+// operation selector and semantic-feasibility lineage. TargetSelectorOwnerRef
+// is the Profile/Definition declaration owner and is deliberately not used as
+// the capability owner; the latter is derived from each sealed proof operation
+// kind and must match the catalog owner. The provider-authored selector alone
+// is insufficient: the matching persisted owner inventory is the grounding
+// fact.
 //
 // Prospective targets are deliberately stricter than existing owner scopes.
 // An empty scope is grounded only when the sealed binding and current owner
@@ -828,23 +835,12 @@ func hasSemanticOwnerGroundedTargetScope(facts runtimecontract.RuntimeFacts) boo
 		if binding.TargetSelectorOwnerRef != focus.TargetSelectorOwnerRef || binding.TargetSelectorRef != focus.TargetSelectorRef {
 			continue
 		}
-		prerequisites := make(map[string]struct{}, len(binding.PrerequisiteRefs))
-		hasSemanticFeasibility := false
-		for _, ref := range binding.PrerequisiteRefs {
-			prerequisites[ref] = struct{}{}
-			if strings.HasPrefix(ref, "semantic-feasibility/") && strings.TrimPrefix(ref, "semantic-feasibility/") != "" {
-				hasSemanticFeasibility = true
-			}
-		}
-		if !hasSemanticFeasibility {
-			continue
-		}
 		for _, catalog := range facts.Resources.OperationAdmissibilities {
 			catalog = catalog.Normalized()
-			if catalog.OwnerModuleID != focus.TargetSelectorOwnerRef || !runtimeStringsContain(catalog.SelectorRefs, focus.TargetSelectorRef) {
+			if !runtimeStringsContain(catalog.SelectorRefs, focus.TargetSelectorRef) {
 				continue
 			}
-			if _, sealed := prerequisites[catalog.SnapshotID]; !sealed {
+			if !runtimeBindingSealsSemanticCatalog(binding, catalog) || !runtimeBindingHasCatalogOwnedOperation(binding, catalog) {
 				continue
 			}
 			if len(focus.ProspectiveTargetRefs) == 0 {
@@ -862,6 +858,34 @@ func hasSemanticOwnerGroundedTargetScope(facts runtimecontract.RuntimeFacts) boo
 	return false
 }
 
+func runtimeBindingSealsSemanticCatalog(binding runtimecontract.CoverageEvidenceBinding, catalog runtimecontract.RuntimeOperationAdmissibility) bool {
+	hasCatalogSnapshot := false
+	hasSemanticFeasibility := false
+	for _, ref := range binding.Normalized().PrerequisiteRefs {
+		if ref == catalog.SnapshotID {
+			hasCatalogSnapshot = true
+		}
+		if strings.HasPrefix(ref, "semantic-feasibility/") && strings.TrimPrefix(ref, "semantic-feasibility/") != "" {
+			hasSemanticFeasibility = true
+		}
+	}
+	return hasCatalogSnapshot && hasSemanticFeasibility
+}
+
+func runtimeBindingHasCatalogOwnedOperation(binding runtimecontract.CoverageEvidenceBinding, catalog runtimecontract.RuntimeOperationAdmissibility) bool {
+	catalog = catalog.Normalized()
+	for _, proof := range binding.Normalized().Proofs {
+		for _, kind := range proof.AllowedOperationKinds {
+			kind = runtimecontract.CanonicalRuntimeBlockKind(kind)
+			descriptor, found := runtimecontract.RuntimeOperationDescriptorForKind(kind)
+			if found && descriptor.OwnerModuleID == catalog.OwnerModuleID && runtimeStringsContain(catalog.OperationKinds, kind) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 func runtimeBindingProspectiveOperationAllowed(catalog runtimecontract.RuntimeOperationAdmissibility, binding runtimecontract.CoverageEvidenceBinding) bool {
 	for _, proof := range binding.Proofs {
 		proof = proof.Normalized()
@@ -870,16 +894,17 @@ func runtimeBindingProspectiveOperationAllowed(catalog runtimecontract.RuntimeOp
 		}
 		for _, kind := range proof.AllowedOperationKinds {
 			kind = runtimecontract.CanonicalRuntimeBlockKind(kind)
+			descriptor, found := runtimecontract.RuntimeOperationDescriptorForKind(kind)
+			if !found || descriptor.OwnerModuleID != catalog.OwnerModuleID {
+				continue
+			}
 			variantIDs := make([]string, 0)
 			for _, ref := range proof.AllowedOperationVariants {
 				if runtimecontract.CanonicalRuntimeBlockKind(ref.Kind) == kind && strings.TrimSpace(ref.VariantID) != "" {
 					variantIDs = append(variantIDs, strings.TrimSpace(ref.VariantID))
 				}
 			}
-			allowed, selectors, constraints, _, err := runtimecontract.RuntimeOperationAdmissibilityAllowsTargetPolicyForVariants(
-				catalog, kind, variantIDs, runtimecontract.RuntimeOperationTargetPolicyProspectiveOwnerTarget,
-			)
-			if err == nil && allowed && runtimeStringsContain(selectors, binding.TargetSelectorRef) && len(constraints) != 0 {
+			if runtimeBindingProofAllowsProspectiveOperation(catalog, binding, kind, variantIDs) {
 				return true
 			}
 		}
@@ -887,9 +912,63 @@ func runtimeBindingProspectiveOperationAllowed(catalog runtimecontract.RuntimeOp
 	return false
 }
 
+func runtimeSemanticBindingAllowsProspectiveOperation(facts runtimecontract.RuntimeFacts, catalog runtimecontract.RuntimeOperationAdmissibility, kind string, variantIDs []string) bool {
+	focus := facts.Focus.Normalized()
+	for _, binding := range focus.CoverageEvidenceBindings {
+		binding = binding.Normalized()
+		if binding.TargetSelectorOwnerRef != focus.TargetSelectorOwnerRef || binding.TargetSelectorRef != focus.TargetSelectorRef ||
+			binding.TargetSelectorSubjectRef == "" || binding.TargetSelectorSubjectRef != focus.TargetSelectorSubjectRef ||
+			len(binding.TargetRefs) != 0 || len(binding.ProspectiveTargetRefs) == 0 ||
+			!runtimecontract.SameRuntimeTargetSelectorCandidateRefs(binding.ProspectiveTargetRefs, focus.ProspectiveTargetRefs) ||
+			!runtimeBindingSealsSemanticCatalog(binding, catalog) {
+			continue
+		}
+		for _, proof := range binding.Proofs {
+			proof = proof.Normalized()
+			if proof.EvidenceKind != runtimecontract.EvidenceKindStateChange || !runtimeStringsContain(proof.AllowedOperationKinds, kind) ||
+				!runtimeProofAllowsOperationVariants(proof, kind, variantIDs) {
+				continue
+			}
+			if runtimeBindingProofAllowsProspectiveOperation(catalog, binding, kind, variantIDs) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func runtimeBindingProofAllowsProspectiveOperation(catalog runtimecontract.RuntimeOperationAdmissibility, binding runtimecontract.CoverageEvidenceBinding, kind string, variantIDs []string) bool {
+	kind = runtimecontract.CanonicalRuntimeBlockKind(kind)
+	descriptor, found := runtimecontract.RuntimeOperationDescriptorForKind(kind)
+	if !found || descriptor.OwnerModuleID != catalog.OwnerModuleID || !runtimeStringsContain(catalog.OperationKinds, kind) {
+		return false
+	}
+	allowed, selectors, constraints, _, err := runtimecontract.RuntimeOperationAdmissibilityAllowsTargetPolicyForVariants(
+		catalog, kind, variantIDs, runtimecontract.RuntimeOperationTargetPolicyProspectiveOwnerTarget,
+	)
+	return err == nil && allowed && runtimeStringsContain(selectors, binding.TargetSelectorRef) && len(constraints) != 0
+}
+
+func runtimeProofAllowsOperationVariants(proof runtimecontract.CoverageEvidenceProof, kind string, variantIDs []string) bool {
+	allowedVariants := make(map[string]struct{})
+	for _, ref := range proof.Normalized().AllowedOperationVariants {
+		if runtimecontract.CanonicalRuntimeBlockKind(ref.Kind) == kind {
+			allowedVariants[ref.VariantID] = struct{}{}
+		}
+	}
+	if len(allowedVariants) == 0 {
+		return true
+	}
+	for _, variantID := range variantIDs {
+		if _, allowed := allowedVariants[strings.TrimSpace(variantID)]; !allowed {
+			return false
+		}
+	}
+	return len(variantIDs) != 0
+}
+
 func hasOwnerGroundedProspectiveCreationScope(facts runtimecontract.RuntimeFacts) bool {
-	return hasOwnerGroundedCreationScope(facts) ||
-		(len(facts.Focus.Normalized().ProspectiveTargetRefs) != 0 && hasSemanticOwnerGroundedTargetScope(facts))
+	return runtimeTargetAuthorityPlanForFacts(facts).hasProspectiveTargets()
 }
 
 func runtimeStringsContain(values []string, wanted string) bool {

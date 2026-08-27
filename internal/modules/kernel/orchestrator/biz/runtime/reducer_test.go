@@ -394,11 +394,15 @@ func TestSemanticOwnerGroundedTargetScopeRequiresMatchingSealedCatalog(t *testin
 	catalog.SnapshotID = runtimecontract.StableRuntimeOperationAdmissibilitySnapshotID(catalog)
 	facts := runtimecontract.RuntimeFacts{
 		Focus: runtimecontract.CoverageFocus{
-			TargetSelectorOwnerRef: runtimecontract.RuntimeModuleMCP, TargetSelectorRef: "mcp-server",
+			TargetSelectorOwnerRef: "software-dev", TargetSelectorRef: "mcp-server",
 			CoverageEvidenceBindings: []runtimecontract.CoverageEvidenceBinding{{
 				ID:                     "semantic-binding-mcp",
-				TargetSelectorOwnerRef: runtimecontract.RuntimeModuleMCP, TargetSelectorRef: "mcp-server",
+				TargetSelectorOwnerRef: "software-dev", TargetSelectorRef: "mcp-server",
 				PrerequisiteRefs: []string{catalog.SnapshotID, "semantic-feasibility/owner-fact"},
+				Proofs: []runtimecontract.CoverageEvidenceProof{{
+					EvidenceKind: runtimecontract.EvidenceKindValidation, RequiredEffectScopes: []runtimecontract.RuntimeEffectScope{runtimecontract.RuntimeEffectNone},
+					AllowedOperationKinds: []string{runtimecontract.StepKindMCPToolCall}, ValidationRecipeID: "mcp/tool_call/mcp-server/inspect",
+				}},
 			}},
 		},
 		Resources: runtimecontract.RuntimeResourceFacts{OperationAdmissibilities: []runtimecontract.RuntimeOperationAdmissibility{catalog}},
@@ -406,9 +410,18 @@ func TestSemanticOwnerGroundedTargetScopeRequiresMatchingSealedCatalog(t *testin
 	if !hasSemanticOwnerGroundedTargetScope(facts) {
 		t.Fatal("matching SM-2-sealed MCP catalog was not recognized as owner-grounded scope")
 	}
+	targetAuthority := runtimeTargetAuthorityPlanForFacts(facts)
+	if !targetAuthority.grounded() || targetAuthority.hasProspectiveTargets() || len(targetAuthority.targets()) != 0 {
+		t.Fatalf("semantic existing-owner scope was not preserved by unified target authority: %+v", targetAuthority)
+	}
 	facts.Focus.CoverageEvidenceBindings[0].PrerequisiteRefs[0] = "operation-admissibility-forged"
 	if hasSemanticOwnerGroundedTargetScope(facts) {
 		t.Fatal("forged MCP catalog snapshot was accepted as owner-grounded scope")
+	}
+	facts.Focus.CoverageEvidenceBindings[0].PrerequisiteRefs[0] = catalog.SnapshotID
+	facts.Focus.CoverageEvidenceBindings[0].Proofs[0].AllowedOperationKinds = []string{runtimecontract.StepKindShellCommand}
+	if hasSemanticOwnerGroundedTargetScope(facts) {
+		t.Fatal("MCP catalog accepted semantic scope from a Shell-owned proof operation")
 	}
 }
 
@@ -417,7 +430,9 @@ func TestSemanticFileProspectiveTargetScopeRequiresMatchingSealedOwnerFacts(t *t
 		facts := validationFacts()
 		facts.Focus.RequiredEvidenceKinds = []string{runtimecontract.EvidenceKindStateChange}
 		facts.Focus.AcceptedStepKinds = []string{runtimecontract.StepKindFileWrite}
-		facts.Focus.TargetSelectorOwnerRef = runtimecontract.RuntimeModuleFile
+		// The declaration owner is Profile lineage, not the File capability
+		// owner. Capability ownership must be derived from the sealed proof kind.
+		facts.Focus.TargetSelectorOwnerRef = "software-dev"
 		facts.Focus.TargetSelectorRef = "workspace-relative-new-file-target"
 		facts.Focus.TargetSelectorSubjectRef = "workspace_deliverable"
 		facts.Focus.ProspectiveTargetRefs = []string{"runtime-validation-source.txt"}
@@ -452,6 +467,16 @@ func TestSemanticFileProspectiveTargetScopeRequiresMatchingSealedOwnerFacts(t *t
 		facts := newFacts()
 		if !hasSemanticOwnerGroundedTargetScope(facts) || !hasOwnerGroundedProspectiveCreationScope(facts) {
 			t.Fatal("matching SM-2-sealed File prospective scope was not recognized")
+		}
+		targetAuthority := runtimeTargetAuthorityPlanForFacts(facts)
+		if !targetAuthority.hasProspectiveTargets() || len(targetAuthority.existingTargets()) != 0 ||
+			!sameRuntimeTargetRefs(targetAuthority.prospectiveTargets(), facts.Focus.ProspectiveTargetRefs) {
+			t.Fatalf("semantic target authority conflated Profile declaration owner with File capability owner: %+v", targetAuthority)
+		}
+		for _, requirement := range runtimeTargetGroundingRequirements(facts) {
+			if requirement.Kind == runtimecontract.PrerequisiteKindTargetSnapshot {
+				t.Fatalf("binding-sealed prospective target requested a pre-create snapshot: %+v", requirement)
+			}
 		}
 		decision, err := ReduceRuntimeState(facts, nil)
 		if err != nil {
@@ -508,6 +533,12 @@ func TestSemanticFileProspectiveTargetScopeRequiresMatchingSealedOwnerFacts(t *t
 			binding.Hash = runtimecontract.StableCoverageEvidenceBindingHash(binding)
 			facts.Focus.CoverageEvidenceBindings[0] = binding
 		}},
+		{name: "proof operation belongs to another capability owner", mutate: func(facts *runtimecontract.RuntimeFacts) {
+			binding := facts.Focus.CoverageEvidenceBindings[0]
+			binding.Proofs[0].AllowedOperationKinds = []string{runtimecontract.StepKindShellCommand}
+			binding.Hash = runtimecontract.StableCoverageEvidenceBindingHash(binding)
+			facts.Focus.CoverageEvidenceBindings[0] = binding
+		}},
 		{name: "missing semantic feasibility lineage", mutate: func(facts *runtimecontract.RuntimeFacts) {
 			binding := facts.Focus.CoverageEvidenceBindings[0]
 			binding.PrerequisiteRefs = binding.PrerequisiteRefs[:1]
@@ -518,6 +549,12 @@ func TestSemanticFileProspectiveTargetScopeRequiresMatchingSealedOwnerFacts(t *t
 		t.Run(test.name, func(t *testing.T) {
 			facts := newFacts()
 			test.mutate(&facts)
+			if test.name == "proof operation belongs to another capability owner" {
+				if hasSemanticOwnerGroundedTargetScope(facts) {
+					t.Fatal("File catalog accepted prospective authority from a proof operation owned by Shell")
+				}
+				return
+			}
 			if test.name == "prospective target mismatch" {
 				if err := runtimecontract.ValidateCoverageEvidenceBindingsForFocus(facts.Focus, facts.DefinitionRevision); err == nil || !strings.Contains(err.Error(), "target surface") {
 					t.Fatalf("mismatched binding escaped the sealed target-surface contract: %v", err)
