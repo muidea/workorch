@@ -1628,7 +1628,7 @@ for observation_request_shape in "$llm_candidate_command_shapes" "$llm_candidate
 			echo "boundary contract violation: Runtime LLM request lost bounded correction observation $marker" >&2
 			exit 1
 		fi
-	done
+done
 	if grep -q -E -- '\*runtimecontract\.(RuntimeCandidateFailure|RuntimeOriginalDiagnostic)|(^|[[:space:]])(PreviousFailure|PreviousSemanticRejection|Reason|OriginalMessage)[[:space:]]+' <<<"$observation_request_shape"; then
 		echo "boundary contract violation: Runtime LLM request regained complete failure/audit diagnostic crossing" >&2
 		exit 1
@@ -4346,6 +4346,84 @@ for marker in \
 done
 if ! grep -q -F 'TestValidateCoverageEvidenceBindingsForFocusRequiresExactTargetSurface' internal/pkg/workorchruntimecontract/runtime_coverage_evidence_binding_test.go; then
 	echo "boundary contract violation: Coverage binding/focus exact target surface regression is missing" >&2
+	exit 1
+fi
+
+# Candidate decode/admission, owner feasibility, dispatch seal/load and receipt
+# credit must interpret the three sealed target policies through one pure
+# matcher. An exact binding is a bounded membership set; only the receipt and
+# its sealed operation are compared for exact equality. Prospective all-of
+# completion remains frozen by the separate collective gate below.
+candidate_payload_target_matcher="$(sed -n '/^func validateRuntimeCandidatePayloadOperation(/,/^}/p' internal/pkg/workorchruntimecontract/runtime_candidate_payload_manifest.go)"
+candidate_semantic_target_matcher="$(sed -n '/^func validateRuntimeCandidateOperationAgainstManifest(/,/^}/p' internal/pkg/workorchruntimecontract/candidate_contract_manifest_semantics.go)"
+operation_feasibility_target_matcher="$(sed -n '/^func ValidateRuntimeOperationFeasibilityRequest(/,/^}/p' internal/pkg/workorchruntimecontract/runtime_operation_admissibility_acquisition.go)"
+dispatch_target_matcher="$(sed -n '/^func ValidateRuntimeDispatchOperationTargetAuthorizations(/,/^}/p' internal/pkg/workorchruntimecontract/runtime_dispatch_target_authorization.go)"
+receipt_target_matcher="$(sed -n '/^func MatchCoverageEvidenceBindingReceipt(/,/^}/p' internal/pkg/workorchruntimecontract/runtime_coverage_evidence_binding.go)"
+for matcher_name in \
+	candidate_payload_target_matcher \
+	candidate_semantic_target_matcher \
+	operation_feasibility_target_matcher \
+	dispatch_target_matcher \
+	receipt_target_matcher; do
+	matcher_body="${!matcher_name}"
+	matcher_calls="$(grep -c -F -- 'ValidateRuntimeOperationTargetsAgainstAuthorization' <<<"$matcher_body" || true)"
+	if [[ "$matcher_calls" -ne 1 ]]; then
+		echo "boundary contract violation: $matcher_name must call the canonical operation target matcher exactly once" >&2
+		exit 1
+	fi
+done
+for marker in \
+	'RuntimeOperationTargetAuthorizationFromCoverageEvidenceBinding(binding)' \
+	'!sameStrings(operation.TargetRefs, receipt.TargetRefs)'; do
+	if ! grep -q -F -- "$marker" <<<"$receipt_target_matcher"; then
+		echo "boundary contract violation: receipt target matching lost $marker" >&2
+		exit 1
+	fi
+done
+if grep -q -E -- 'binding\.(TargetRefs|ProspectiveTargetRefs)' <<<"$receipt_target_matcher"; then
+	echo "boundary contract violation: receipt matching regained direct binding-set equality instead of canonical membership" >&2
+	exit 1
+fi
+dispatch_manifest_target_seal="$(sed -n '/^func SealDispatchWithManifestAndOwnerAuthority(/,/^}/p' internal/modules/kernel/orchestrator/biz/runtime/dispatch_commit.go)"
+dispatch_fresh_load_target_validation="$(sed -n '/^func (d RuntimeDispatchRecord) ValidateIntrinsic(/,/^}/p' internal/pkg/workorchruntimecontract/runtime_state.go)"
+dispatch_authority_hash="$(sed -n '/^func StableRuntimeDispatchAuthorityHash(/,/^}/p' internal/pkg/workorchruntimecontract/runtime_state.go)"
+if [[ "$(grep -c -F -- 'RuntimeDispatchOperationTargetAuthorizationsFromManifest(manifest, candidate)' <<<"$dispatch_manifest_target_seal" || true)" -ne 1 ]] ||
+	! grep -q -F -- 'ValidateRuntimeDispatchOperationTargetAuthorizations' <<<"$dispatch_fresh_load_target_validation" ||
+	! grep -q -F -- 'StableRuntimeDispatchOperationTargetAuthorizationsHash(dispatch.OperationTargetAuthorizations)' <<<"$dispatch_authority_hash"; then
+	echo "boundary contract violation: final dispatch seal, fresh-load or authority hash lost sealed target authorization" >&2
+	exit 1
+fi
+dispatch_target_snapshot_production_calls="$({
+	source_matches 'RuntimeDispatchOperationTargetAuthorizationsFromManifest\(' internal
+} | grep -v -F -- 'internal/pkg/workorchruntimecontract/runtime_dispatch_target_authorization.go:' | sed '/^[[:space:]]*$/d' || true)"
+if [[ "$(wc -l <<<"$dispatch_target_snapshot_production_calls" | tr -d ' ')" -ne 1 ]] ||
+	! grep -q -F -- 'internal/modules/kernel/orchestrator/biz/runtime/dispatch_commit.go:' <<<"$dispatch_target_snapshot_production_calls"; then
+	echo "boundary contract violation: dispatch target snapshot must be created only by the final SM-3 manifest seal" >&2
+	echo "$dispatch_target_snapshot_production_calls" >&2
+	exit 1
+fi
+for regression in \
+	'TestValidateRuntimeOperationTargetsAgainstAuthorizationTruthTable' \
+	'TestCandidateTargetValidatorsShareExactTargetMembership' \
+	'TestValidateRuntimeOperationFeasibilityRequestUsesSealedTargetAuthorization' \
+	'TestCoverageEvidenceBindingReceiptUsesOperationTargetSubset' \
+	'TestCoverageEvidenceBindingProspectiveReceiptRemainsPerOperationSingleton' \
+	'TestRuntimeOperationTargetAuthorizationProofProjectionDoesNotInventConstraint' \
+	'TestSealDispatchWithManifestRejectsTargetDriftAtFinalBoundary' \
+	'TestRuntimeDispatchTargetAuthorizationFreshLoadRejectsTamper' \
+	'TestCoverageEvidenceBindingMultiTargetExactRejectsReceiptOperationTargetDrift'; do
+	if ! grep -R -q -F --include='*_test.go' -- "$regression" internal; then
+		echo "boundary contract violation: canonical target authorization regression is missing ($regression)" >&2
+		exit 1
+	fi
+done
+
+production_test_target_authority="$({
+	source_matches 'RuntimeOperationAuthorizationIdentity|identity-only-owner-feasibility' internal
+} | sed '/^[[:space:]]*$/d')"
+if [[ -n "$production_test_target_authority" ]]; then
+	echo "boundary contract violation: production source regained fixture-only target authority" >&2
+	echo "$production_test_target_authority" >&2
 	exit 1
 fi
 

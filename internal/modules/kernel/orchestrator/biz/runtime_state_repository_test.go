@@ -253,6 +253,71 @@ func recordRuntimeFileBackedManagedValidationFeasibility(t *testing.T, ctx conte
 	}
 }
 
+// recordRuntimeFileEditFeasibility supplies the persisted File-owner probe
+// required when a candidate manifest is bound to a fresh admissibility
+// observation. The record uses the manifest-derived operation ID retained by
+// the pending proposal; no test-local operation identity is inferred.
+func recordRuntimeFileEditFeasibility(t *testing.T, ctx context.Context, controller *runtime.RuntimeController) {
+	t.Helper()
+	aggregate, err := controller.Load(ctx, "ws-v2", "run-v2")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var inventory *runtimecontract.RuntimeOperationAdmissibility
+	for index := range aggregate.Facts.Resources.OperationAdmissibilities {
+		candidate := aggregate.Facts.Resources.OperationAdmissibilities[index]
+		if candidate.OwnerModuleID != runtimecontract.RuntimeModuleFile {
+			continue
+		}
+		for _, kind := range candidate.OperationKinds {
+			if runtimecontract.CanonicalRuntimeBlockKind(kind) == runtimecontract.StepKindFileEdit {
+				inventory = &candidate
+				break
+			}
+		}
+		if inventory != nil {
+			break
+		}
+	}
+	if inventory == nil {
+		t.Fatalf("File edit fixture has no owner admissibility inventory: %+v", aggregate.Facts.Resources.OperationAdmissibilities)
+	}
+	operationID := ""
+	for _, attempt := range aggregate.CandidateAttempts {
+		if attempt.State != runtimecontract.RuntimeCandidateAttemptStatePending || attempt.Proposal == nil ||
+			attempt.Proposal.StateChange == nil || len(attempt.Proposal.StateChange.Operations) != 1 {
+			continue
+		}
+		operationID = attempt.Proposal.StateChange.Operations[0].Operation.ID
+		break
+	}
+	if operationID == "" {
+		t.Fatalf("File edit fixture has no owner-derived pending operation: %+v", aggregate.CandidateAttempts)
+	}
+	if _, err := runtimeTestControllerRecordCandidateFeasibility(controller, ctx, "ws-v2", "run-v2", 0, runtimecontract.RuntimeCandidateFeasibilityRecord{
+		OperationID: operationID, AdmissibilitySnapshotID: inventory.SnapshotID,
+		AcquisitionBinding:    inventory.AcquisitionBinding,
+		CandidateManifestHash: runtimePendingCandidateManifestHashForBizTest(t, ctx, controller, "ws-v2", "run-v2", 0),
+		Observation:           &runtimecontract.RuntimeOwnerFeasibilityObservation{Outcome: runtimecontract.RuntimeOwnerFeasibilityFeasible},
+	}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func assertRuntimeFileEditDispatchTargetPreimage(t *testing.T, aggregate runtime.RuntimeAggregate) {
+	t.Helper()
+	if aggregate.ActiveDispatch == nil || aggregate.ActiveDispatch.Candidate.StateChange == nil ||
+		len(aggregate.ActiveDispatch.Candidate.StateChange.Operations) != 1 || len(aggregate.ActiveDispatch.OperationTargetAuthorizations) != 1 {
+		t.Fatalf("sealed File edit dispatch has no singleton target preimage: %+v", aggregate.ActiveDispatch)
+	}
+	operation := aggregate.ActiveDispatch.Candidate.StateChange.Operations[0].Operation.Normalized()
+	authorization := aggregate.ActiveDispatch.OperationTargetAuthorizations[0].Normalized()
+	if aggregate.ActiveDispatch.CandidateManifestHash == "" || authorization.OperationID != operation.ID ||
+		authorization.OperationHash != runtimecontract.StableRuntimeOperationHash(operation) {
+		t.Fatalf("sealed File edit dispatch target preimage drifted: operation=%+v authorization=%+v manifest=%q", operation, authorization, aggregate.ActiveDispatch.CandidateManifestHash)
+	}
+}
+
 func runtimeStringPointer(value string) *string {
 	return &value
 }
@@ -523,11 +588,15 @@ func TestRuntimeStateRepositoryRoundTripsSealedValidationRecipeSnapshot(t *testi
 	aggregate.Facts.Focus.RequiredEvidenceKinds = []string{runtimecontract.EvidenceKindValidation}
 	aggregate.Facts.Focus.AcceptedStepKinds = []string{runtimecontract.RuntimeBlockKindManagedValidationSession}
 	aggregate.Facts.Focus.ValidationRecipeID = "sealed"
+	aggregate.Facts.Focus.TargetRefs = []string{"target.txt"}
 	aggregate.Facts.Capabilities = runtimecontract.RuntimeCapabilities{ValidationKinds: []string{runtimecontract.RuntimeBlockKindManagedValidationSession}}
 	recipe := runtimecontract.RuntimeValidationRecipe{ID: "sealed", Command: "sh", Args: []string{"-c", "true"}}
 	inventory := runtimecontract.RuntimeOperationAdmissibility{
 		PrerequisiteID: "admissibility-shell", OwnerModuleID: runtimecontract.RuntimeModuleShell,
-		OperationKinds: []string{runtimecontract.RuntimeBlockKindManagedValidationSession}, ValidationRecipes: []runtimecontract.RuntimeValidationRecipe{recipe},
+		OperationKinds: []string{runtimecontract.RuntimeBlockKindManagedValidationSession}, TargetRefs: []string{"target.txt"}, ValidationRecipes: []runtimecontract.RuntimeValidationRecipe{recipe},
+		OperationVariants: []runtimecontract.RuntimeOperationAdmissibilityVariant{{
+			Kind: runtimecontract.RuntimeBlockKindManagedValidationSession, AllowedTargetPolicies: []runtimecontract.RuntimeOperationTargetPolicy{runtimecontract.RuntimeOperationTargetPolicyExactTarget},
+		}},
 		ObservedRevision: "shell-policy-v1",
 	}
 	inventory.SnapshotID = runtimecontract.StableRuntimeOperationAdmissibilitySnapshotID(inventory)
@@ -555,6 +624,10 @@ func TestRuntimeStateRepositoryRoundTripsSealedValidationRecipeSnapshot(t *testi
 	if err != nil {
 		t.Fatal(err)
 	}
+	candidate, err = runtimecontract.DeriveRuntimeCandidateOperationAuthority(manifest, candidate)
+	if err != nil {
+		t.Fatal(err)
+	}
 	dispatch, err := runtime.SealDispatchWithManifestAndFeasibilities(decision, candidate, aggregate.Facts.Activation, manifest, nil)
 	if err != nil {
 		t.Fatal(err)
@@ -575,6 +648,16 @@ func TestRuntimeStateRepositoryRoundTripsSealedValidationRecipeSnapshot(t *testi
 	}
 	if reloaded.ActiveDispatch == nil || reloaded.ActiveDispatch.FocusTargetRole != "validation_input" || !reflect.DeepEqual(reloaded.ActiveDispatch.ValidationRecipes, []runtimecontract.RuntimeValidationRecipe{recipe}) {
 		t.Fatalf("reloaded sealed validation recipes = %+v", reloaded.ActiveDispatch)
+	}
+	if reloaded.ActiveDispatch.CandidateManifestHash != manifest.Hash || len(reloaded.ActiveDispatch.OperationTargetAuthorizations) != 1 ||
+		reloaded.ActiveDispatch.Candidate.Validation == nil || len(reloaded.ActiveDispatch.Candidate.Validation.Operations) != 1 {
+		t.Fatalf("reloaded validation dispatch lost manifest-bound target authority: %+v", reloaded.ActiveDispatch)
+	}
+	operation := reloaded.ActiveDispatch.Candidate.Validation.Operations[0].Operation.Normalized()
+	authorization := reloaded.ActiveDispatch.OperationTargetAuthorizations[0].Normalized()
+	if authorization.OperationID != operation.ID || authorization.OperationHash != runtimecontract.StableRuntimeOperationHash(operation) ||
+		authorization.Target.Policy != runtimecontract.RuntimeOperationTargetPolicyExactTarget || !reflect.DeepEqual(authorization.Target.ExactTargetRefs, []string{"target.txt"}) {
+		t.Fatalf("reloaded validation target authority drifted: operation=%+v authorization=%+v", operation, authorization)
 	}
 	// Conversion must deep-copy the sealed snapshot just like other persisted
 	// contract fields; a later resource refresh cannot mutate an old dispatch.
@@ -1676,7 +1759,7 @@ func TestRuntimeStateRepositoryCandidateProposalAndDispatchSealCrashRestartAreAt
 		if err != nil {
 			t.Fatal(err)
 		}
-		initialized, err := runtimeTestControllerInitialize(controller, ctx, runtimeAggregate(t, 1).Facts, runtimeDefinition(), nil)
+		initialized, err := runtimeTestControllerInitialize(controller, ctx, runtimeCandidateSealFileEditFacts(t), runtimeDefinition(), nil)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -1734,6 +1817,7 @@ func TestRuntimeStateRepositoryCandidateProposalAndDispatchSealCrashRestartAreAt
 		if err != nil || !proposal.Admission.Accepted() || proposal.Aggregate.CandidateAttempts[0].Proposal == nil {
 			t.Fatalf("proposal setup=%+v err=%v", proposal, err)
 		}
+		recordRuntimeFileEditFeasibility(t, ctx, controller)
 		beforeCommit, err := runtime.NewRuntimeController(&failOnceRuntimeStateRepository{
 			RuntimeStateRepository: repository,
 			err:                    errors.New("injected dispatch seal CAS failure"),
@@ -1764,6 +1848,7 @@ func TestRuntimeStateRepositoryCandidateProposalAndDispatchSealCrashRestartAreAt
 			sealed.Aggregate.CandidateAttempts[0].Proposal != nil {
 			t.Fatalf("dispatch-seal retry=%+v err=%v", sealed, err)
 		}
+		assertRuntimeFileEditDispatchTargetPreimage(t, sealed.Aggregate)
 		persisted, err := restarted.Load(ctx, "ws-v2", "run-v2")
 		if err != nil || persisted.ActiveDispatch == nil ||
 			persisted.CandidateAttempts[0].State != runtimecontract.RuntimeCandidateAttemptStateAccepted {
@@ -1806,6 +1891,7 @@ func TestRuntimeStateRepositoryCandidateProposalAndDispatchSealCrashRestartAreAt
 			t.Fatalf("restart did not retain committed proposal after response loss: aggregate=%+v err=%v", loaded, err)
 		}
 		persistedCandidateHash := runtimecontract.StableRuntimeCandidateHash(*loaded.CandidateAttempts[0].Proposal)
+		recordRuntimeFileEditFeasibility(t, ctx, restarted)
 		sealed, err := admitAndSealRuntimeCandidateAttemptForTest(ctx, restarted, "ws-v2", "run-v2", 0, candidate)
 		if err != nil || sealed.Aggregate.ActiveDispatch == nil || sealed.Aggregate.ActiveDispatch.CandidateHash != persistedCandidateHash {
 			t.Fatalf("response-loss proposal did not seal the original candidate: sealed=%+v err=%v", sealed, err)
@@ -1817,6 +1903,7 @@ func TestRuntimeStateRepositoryCandidateProposalAndDispatchSealCrashRestartAreAt
 		if _, err := admitRuntimeCandidateProposalForTest(ctx, controller, "ws-v2", "run-v2", 0, candidate); err != nil {
 			t.Fatal(err)
 		}
+		recordRuntimeFileEditFeasibility(t, ctx, controller)
 		responseLossRepository := &panicAfterRuntimeStateSaveRepository{
 			RuntimeStateRepository: repository, marker: "dispatch-seal-response-loss",
 			match: func(aggregate runtime.RuntimeAggregate) bool {
@@ -1850,6 +1937,7 @@ func TestRuntimeStateRepositoryCandidateProposalAndDispatchSealCrashRestartAreAt
 			loaded.CandidateAttempts[0].State != runtimecontract.RuntimeCandidateAttemptStateAccepted || loaded.CandidateAttempts[0].Proposal != nil {
 			t.Fatalf("restart did not retain sealed dispatch after response loss: aggregate=%+v err=%v", loaded, err)
 		}
+		assertRuntimeFileEditDispatchTargetPreimage(t, loaded)
 		replayed, err := admitAndSealRuntimeCandidateAttemptForTest(ctx, restarted, "ws-v2", "run-v2", 0, candidate)
 		if err != nil || replayed.Aggregate.StateRevision != loaded.StateRevision || replayed.Aggregate.ActiveDispatch == nil ||
 			replayed.Aggregate.ActiveDispatch.ID != loaded.ActiveDispatch.ID || len(replayed.Aggregate.CompletedDispatches) != len(loaded.CompletedDispatches) {
@@ -1882,7 +1970,7 @@ func TestRuntimeStateRepositoryDispatchSealFreshProcessCrashRestart(t *testing.T
 			stop()
 			t.Fatal(err)
 		}
-		initialized, err := runtimeTestControllerInitialize(controller, ctx, runtimeAggregate(t, 1).Facts, runtimeDefinition(), nil)
+		initialized, err := runtimeTestControllerInitialize(controller, ctx, runtimeCandidateSealFileEditFacts(t), runtimeDefinition(), nil)
 		if err != nil {
 			stop()
 			t.Fatal(err)
@@ -1896,6 +1984,7 @@ func TestRuntimeStateRepositoryDispatchSealFreshProcessCrashRestart(t *testing.T
 			stop()
 			t.Fatalf("proposal setup=%+v err=%v", proposal, err)
 		}
+		recordRuntimeFileEditFeasibility(t, ctx, controller)
 		return ctx, runs, repository, controller, stop
 	}
 
@@ -1927,6 +2016,7 @@ func TestRuntimeStateRepositoryDispatchSealFreshProcessCrashRestart(t *testing.T
 		if err != nil || sealed.Aggregate.ActiveDispatch == nil || sealed.Aggregate.CandidateAttempts[0].State != runtimecontract.RuntimeCandidateAttemptStateAccepted {
 			t.Fatalf("fresh process did not seal persisted proposal: aggregate=%+v err=%v", sealed, err)
 		}
+		assertRuntimeFileEditDispatchTargetPreimage(t, sealed.Aggregate)
 	})
 
 	t.Run("after_seal_cas_response_loss", func(t *testing.T) {
@@ -1967,6 +2057,7 @@ func TestRuntimeStateRepositoryDispatchSealFreshProcessCrashRestart(t *testing.T
 			persisted.CandidateAttempts[0].State != runtimecontract.RuntimeCandidateAttemptStateAccepted || persisted.CandidateAttempts[0].Proposal != nil {
 			t.Fatalf("post-CAS fresh process did not retain one sealed dispatch: aggregate=%+v err=%v", persisted, err)
 		}
+		assertRuntimeFileEditDispatchTargetPreimage(t, persisted)
 		revision, dispatchID := persisted.StateRevision, persisted.ActiveDispatch.ID
 		duplicate, err := admitAndSealRuntimeCandidateAttemptForTest(ctx, restarted, "ws-v2", "run-v2", 0, candidate)
 		if err != nil || duplicate.Aggregate.StateRevision != revision || duplicate.Aggregate.ActiveDispatch == nil || duplicate.Aggregate.ActiveDispatch.ID != dispatchID ||
@@ -2430,6 +2521,8 @@ func TestRuntimeStateRepositoryAssessmentCommitCrashRestartIsAtomic(t *testing.T
 	}
 	facts := runtimeAggregate(t, 1).Facts
 	facts.Focus.RequireAssessment = true
+	target := "target.txt"
+	facts.Focus.TargetRefs = []string{target}
 	initialized, err := runtimeTestControllerInitialize(controller, ctx, facts, runtimeDefinition(), nil)
 	if err != nil {
 		t.Fatal(err)
@@ -2440,8 +2533,8 @@ func TestRuntimeStateRepositoryAssessmentCommitCrashRestartIsAtomic(t *testing.T
 	}
 	candidate := runtimecontract.RuntimeCandidate{StateChange: &runtimecontract.StateChangeCandidate{Operations: []runtimecontract.StateChangingOperation{{Operation: runtimecontract.RuntimeOperation{
 		ID: "assessment-write", Kind: runtimecontract.StepKindFileEdit,
-		CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-v2"}, TargetRefs: []string{"target.txt"},
-		Parameters: runtimeFileEditParameters("target.txt"),
+		CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-v2"}, TargetRefs: []string{target},
+		Parameters: runtimeFileEditParameters(target),
 	}}}}}
 	sealed, err := admitAndSealRuntimeCandidateAttemptForTest(ctx, controller, "ws-v2", "run-v2", 0, candidate)
 	if err != nil || !sealed.Admission.Accepted() || sealed.Aggregate.ActiveDispatch == nil {
@@ -2947,6 +3040,7 @@ func TestRuntimeMainlineRequestsAndSealsTypedCandidate(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = runOwner.Stop(ctx) })
 	startRuntimeReceiptTestOwner(t, hub)
+	startRuntimeCandidateFileEditAdmissionOwners(t, hub)
 
 	var requestedDefinition runtimecontract.RuntimeDefinitionContext
 	llmObserver := magicevent.NewSimpleObserver(runtimecontract.RuntimeModuleLLM, hub)
@@ -2960,11 +3054,6 @@ func TestRuntimeMainlineRequestsAndSealsTypedCandidate(t *testing.T) {
 		result.Set(runtimeCandidateResultForTest(t, command, candidate), nil)
 	})
 	t.Cleanup(func() { llmObserver.Unsubscribe(llmevents.TopicRequestRuntimeCandidate) })
-	workspaceObserver := magicevent.NewSimpleObserver(workspaceevents.CommandDestination, hub)
-	workspaceObserver.Subscribe(workspaceevents.TopicWorkspaceCommandGet, func(_ magicevent.Event, result magicevent.Result) {
-		result.Set(workspaceevents.WorkspaceResult{Workspace: &workspaceevents.Workspace{ID: "ws-v2", DeliverableDirectory: "/tmp/workspace"}}, nil)
-	})
-	t.Cleanup(func() { workspaceObserver.Unsubscribe(workspaceevents.TopicWorkspaceCommandGet) })
 	fileObserver := magicevent.NewSimpleObserver(runtimecontract.RuntimeModuleFile, hub)
 	fileObserver.Subscribe(fileevents.TopicExecuteFileEditOperation, func(event magicevent.Event, result magicevent.Result) {
 		command := event.Data().(fileevents.ExecuteFileEditOperationCommand)
@@ -2985,7 +3074,7 @@ func TestRuntimeMainlineRequestsAndSealsTypedCandidate(t *testing.T) {
 	if err := biz.ConfigureRuntimeRepository(runtimeRepository); err != nil {
 		t.Fatal(err)
 	}
-	initialized := runtimeTestInitializeOperationFixture(t, ctx, biz, runtimeRepository, runtimeAggregate(t, 1).Facts, runtimeDefinition(), nil)
+	initialized := runtimeTestInitializeOperationFixture(t, ctx, biz, runtimeRepository, runtimeCandidateSealFileEditFacts(t), runtimeDefinition(), nil)
 	module := newTestBiz(biz, hub, nil)
 	sealed, err := module.requestAndSealRuntimeCandidate(ctx, initialized, "stable-prefix-v2", 0)
 	if err != nil {
@@ -3288,6 +3377,7 @@ func TestRuntimeMainlineRetriesSameCandidateContractOnce(t *testing.T) {
 	ctx := context.Background()
 	hub := magicevent.NewHub(16)
 	t.Cleanup(func() { hub.Terminate(ctx) })
+	startRuntimeCandidateFileEditAdmissionOwners(t, hub)
 	runs := memory.NewRunRepository()
 	if err := runs.Create(ctx, runtimeRunForTest(common.RunStateActive, runtimeDefinition())); err != nil {
 		t.Fatal(err)
@@ -3329,7 +3419,7 @@ func TestRuntimeMainlineRetriesSameCandidateContractOnce(t *testing.T) {
 	if err := biz.ConfigureRuntimeRepository(runtimeRepository); err != nil {
 		t.Fatal(err)
 	}
-	initialized := runtimeTestInitializeOperationFixture(t, ctx, biz, runtimeRepository, runtimeAggregate(t, 1).Facts, runtimeDefinition(), nil)
+	initialized := runtimeTestInitializeOperationFixture(t, ctx, biz, runtimeRepository, runtimeCandidateSealFileEditFacts(t), runtimeDefinition(), nil)
 	module := newTestBiz(biz, hub, nil)
 	sealed, err := module.requestAndSealRuntimeCandidateWithRetry(ctx, initialized, "stable-prefix-v2")
 	if err != nil {
@@ -3380,7 +3470,23 @@ func TestRuntimeMainlineCandidateAuthorityExhaustionHasNoCorrectionProviderOrBud
 	if err := biz.ConfigureRuntimeRepository(runtimeRepository); err != nil {
 		t.Fatal(err)
 	}
-	initialized := runtimeTestInitializeOperationFixture(t, ctx, biz, runtimeRepository, runtimeAggregate(t, 1).Facts, runtimeDefinition(), nil)
+	facts := runtimeAggregate(t, 1).Facts
+	selectorRef := facts.Focus.TargetSelectorRef
+	if selectorRef == "" {
+		selectorRef = "test/fixture-owner-selector"
+	}
+	ownerCatalog := runtimecontract.RuntimeOperationAdmissibility{
+		PrerequisiteID: "test-candidate-authority-file-edit", OwnerModuleID: runtimecontract.RuntimeModuleFile,
+		OperationKinds: []string{runtimecontract.StepKindFileEdit}, SelectorRefs: []string{selectorRef},
+		OperationVariants: []runtimecontract.RuntimeOperationAdmissibilityVariant{{
+			Kind: runtimecontract.StepKindFileEdit, AllowedTargetPolicies: []runtimecontract.RuntimeOperationTargetPolicy{runtimecontract.RuntimeOperationTargetPolicyExistingOwnerScope},
+			SelectorRefs: []string{selectorRef},
+		}},
+		ObservedRevision: "test-candidate-authority-file-edit-v1",
+	}
+	ownerCatalog.SnapshotID = runtimecontract.StableRuntimeOperationAdmissibilitySnapshotID(ownerCatalog)
+	facts.Resources.OperationAdmissibilities = []runtimecontract.RuntimeOperationAdmissibility{ownerCatalog}
+	initialized := runtimeTestInitializeOperationFixture(t, ctx, biz, runtimeRepository, facts, runtimeDefinition(), nil)
 	rawCandidate := runtimecontract.RuntimeCandidate{StateChange: &runtimecontract.StateChangeCandidate{Operations: []runtimecontract.StateChangingOperation{{Operation: runtimecontract.RuntimeOperation{
 		Kind: runtimecontract.StepKindFileEdit, CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-v2"},
 		TargetRefs: []string{"target.txt"}, Parameters: runtimeFileEditParameters("target.txt"),
@@ -3397,7 +3503,15 @@ func TestRuntimeMainlineCandidateAuthorityExhaustionHasNoCorrectionProviderOrBud
 	if err != nil {
 		t.Fatal(err)
 	}
-	previousDispatch, err := runtime.SealDispatchWithActivation(initialized.Decision, replayedCandidate, initialized.Facts.Activation)
+	previousDispatch, err := runtime.SealDispatchWithManifestAndOwnerAuthority(
+		initialized.Decision,
+		replayedCandidate,
+		initialized.Facts.Activation,
+		manifest,
+		nil,
+		initialized.Facts.Resources.OperationAdmissibilities,
+		initialized.Facts.Resources.PrerequisiteObservations,
+	)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -4007,7 +4121,7 @@ func TestRuntimeMainlineRestartsFromPersistedCandidateProposalWithoutProviderRep
 	if err := biz.ConfigureRuntimeRepository(runtimeRepository); err != nil {
 		t.Fatal(err)
 	}
-	runtimeTestInitializeOperationFixture(t, ctx, biz, runtimeRepository, runtimeAggregate(t, 1).Facts, runtimeDefinition(), nil)
+	runtimeTestInitializeOperationFixture(t, ctx, biz, runtimeRepository, runtimeCandidateSealExactFileEditFacts(t, "target.txt"), runtimeDefinition(), nil)
 	const prefix = "persisted-proposal-prefix"
 	pending, err := biz.BeginRuntimeCandidateAttemptForTest(ctx, "ws-v2", "run-v2", 0, prefix)
 	if err != nil {
@@ -4027,6 +4141,7 @@ func TestRuntimeMainlineRestartsFromPersistedCandidateProposalWithoutProviderRep
 	if err != nil {
 		t.Fatal(err)
 	}
+	startRuntimeCandidateFileEditAdmissionOwners(t, hub)
 	module := newTestBiz(biz, hub, nil)
 	sealed, err := module.requestAndSealRuntimeCandidate(ctx, restarted, prefix, 0)
 	if err != nil {
@@ -4124,7 +4239,20 @@ func TestRuntimeMainlinePartialReplayClosesAttemptThenSealsCorrectedRetry(t *tes
 	if err != nil {
 		t.Fatal(err)
 	}
-	previousDispatch, err := runtime.SealDispatchWithActivation(initialized.Decision, rejectedCandidate, initialized.Facts.Activation)
+	rejectedCandidate, err = runtimecontract.DeriveRuntimeCandidateOperationAuthority(previousManifest, rejectedCandidate)
+	if err != nil {
+		t.Fatal(err)
+	}
+	replayedOperation = rejectedCandidate.StateChange.Operations[0].Operation
+	previousDispatch, err := runtime.SealDispatchWithManifestAndOwnerAuthority(
+		initialized.Decision,
+		rejectedCandidate,
+		initialized.Facts.Activation,
+		previousManifest,
+		nil,
+		initialized.Facts.Resources.OperationAdmissibilities,
+		initialized.Facts.Resources.PrerequisiteObservations,
+	)
 	if err != nil {
 		t.Fatal(err)
 	}

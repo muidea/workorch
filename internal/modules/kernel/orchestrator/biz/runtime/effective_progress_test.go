@@ -29,7 +29,7 @@ func TestAcceptedValidationEvidenceInvalidatesAssessmentWithoutResettingRepairLe
 	evidence := ExecutionEvidence{
 		EventID: "event-validation-valid", WorkspaceID: "ws-1", RunID: "run-1",
 		DispatchID: sealed.ActiveDispatch.ID, AuthoritySnapshotID: sealed.ActiveDispatch.Transaction.AuthoritySnapshotID,
-		OperationID: "validate-1", Kind: runtimecontract.EvidenceKindValidation, Status: ExecutionEvidenceStatusAccepted,
+		OperationID: runtimeTestActiveOperationID(t, sealed, 0), Kind: runtimecontract.EvidenceKindValidation, Status: ExecutionEvidenceStatusAccepted,
 		Evidence: runtimecontract.RuntimeOperationEvidence{Quality: common.EvidenceQualityValid, Validation: &runtimecontract.RuntimeValidationObservation{
 			ExecutedChecks: []string{"check-1"}, PassedChecks: []string{"check-1"},
 		}},
@@ -64,7 +64,7 @@ func TestAcceptedDurableStateChangeResetsRepairProgressWindow(t *testing.T) {
 	evidence := ExecutionEvidence{
 		EventID: "event-state-progress", WorkspaceID: "ws-1", RunID: "run-1",
 		DispatchID: sealed.ActiveDispatch.ID, AuthoritySnapshotID: sealed.ActiveDispatch.Transaction.AuthoritySnapshotID,
-		OperationID: "patch-1", Kind: runtimecontract.EvidenceKindStateChange, Status: ExecutionEvidenceStatusAccepted,
+		OperationID: runtimeTestActiveOperationID(t, sealed, 0), Kind: runtimecontract.EvidenceKindStateChange, Status: ExecutionEvidenceStatusAccepted,
 	}
 	attachRuntimeTestOwnerReceipt(t, &repository.aggregate, &evidence)
 	committed, err := coordinator.commitEvidence(context.Background(), evidence)
@@ -99,7 +99,7 @@ func TestAcceptedDurableStateChangeRequiringAssessmentDoesNotResetRepairProgress
 	evidence := ExecutionEvidence{
 		EventID: "event-state-await-assessment", WorkspaceID: "ws-1", RunID: "run-1",
 		DispatchID: sealed.ActiveDispatch.ID, AuthoritySnapshotID: sealed.ActiveDispatch.Transaction.AuthoritySnapshotID,
-		OperationID: "patch-1", Kind: runtimecontract.EvidenceKindStateChange, Status: ExecutionEvidenceStatusAccepted,
+		OperationID: runtimeTestActiveOperationID(t, sealed, 0), Kind: runtimecontract.EvidenceKindStateChange, Status: ExecutionEvidenceStatusAccepted,
 	}
 	attachRuntimeTestOwnerReceipt(t, &repository.aggregate, &evidence)
 	committed, err := coordinator.commitEvidence(context.Background(), evidence)
@@ -112,8 +112,43 @@ func TestAcceptedDurableStateChangeRequiringAssessmentDoesNotResetRepairProgress
 	}
 }
 
-func TestAcceptedDurableStateChangeOutsideFailureTargetDoesNotResetRepairProgressWindow(t *testing.T) {
+func effectiveProgressOwnerScopeAggregate(t *testing.T, targetRefs []string) RuntimeAggregate {
+	t.Helper()
 	aggregate := stateChangeAggregate(t)
+	aggregate.Facts.Focus.TargetRefs = nil
+	aggregate.Facts.Focus.RequireTargetGrounding = true
+	aggregate.Facts.Focus.TargetRole = "deliverable"
+	selection := runtimecontract.RuntimeTargetSelection{
+		PrerequisiteID: "target-selection:effective-progress-owner-scope", OwnerModuleID: runtimecontract.RuntimeModuleFile,
+		TargetRole: "deliverable", SelectorRef: "file/workspace_deliverable",
+		Disposition: runtimecontract.RuntimeTargetSelectionScope,
+		TargetRefs:  append([]string(nil), targetRefs...), CandidateTargetRefs: append([]string(nil), targetRefs...),
+		CandidateCount: len(targetRefs), ObservedRevision: "tree-v1",
+	}
+	selection.SnapshotID = runtimecontract.StableRuntimeTargetSelectionSnapshotID(selection)
+	aggregate.Facts.Resources.TargetSelection = &selection
+	runtimeTestSealCurrentFocusBindingTargetSurface(&aggregate.Facts, runtimeTestBindingTargetSurface{
+		SelectorRef: selection.SelectorRef, SelectorOwnerRef: selection.OwnerModuleID, SelectorSubjectRef: selection.TargetRole,
+	})
+	bindCurrentFocusTargetSelection(&aggregate.Facts)
+	addCandidateAdmissionTargetPolicyFixture(
+		&aggregate.Facts,
+		runtimecontract.RuntimeModuleFile,
+		runtimecontract.RuntimeBlockKindPatchApply,
+		"file_write",
+		runtimecontract.RuntimeOperationTargetPolicyExistingOwnerScope,
+		targetRefs,
+	)
+	decision, err := ReduceRuntimeState(aggregate.Facts, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	aggregate.Decision = decision
+	return aggregate
+}
+
+func TestAcceptedDurableStateChangeOutsideFailureTargetDoesNotResetRepairProgressWindow(t *testing.T) {
+	aggregate := effectiveProgressOwnerScopeAggregate(t, []string{"implementation.go", "validation_entry.go"})
 	aggregate.Facts.Failure = &runtimecontract.FailureFact{
 		Class: runtimecontract.FailureClassExecutionFailure, Signature: "failed-validation",
 		Message: "validation still fails", TargetRefs: []string{"implementation.go"},
@@ -138,7 +173,7 @@ func TestAcceptedDurableStateChangeOutsideFailureTargetDoesNotResetRepairProgres
 	evidence := ExecutionEvidence{
 		EventID: "event-state-unrelated", WorkspaceID: "ws-1", RunID: "run-1",
 		DispatchID: sealed.ActiveDispatch.ID, AuthoritySnapshotID: sealed.ActiveDispatch.Transaction.AuthoritySnapshotID,
-		OperationID: "patch-1", Kind: runtimecontract.EvidenceKindStateChange, Status: ExecutionEvidenceStatusAccepted,
+		OperationID: runtimeTestActiveOperationID(t, sealed, 0), Kind: runtimecontract.EvidenceKindStateChange, Status: ExecutionEvidenceStatusAccepted,
 	}
 	attachRuntimeTestOwnerReceipt(t, &repository.aggregate, &evidence)
 	committed, err := coordinator.commitEvidence(context.Background(), evidence)
@@ -152,23 +187,20 @@ func TestAcceptedDurableStateChangeOutsideFailureTargetDoesNotResetRepairProgres
 }
 
 func TestAcceptedDurableStateChangeOutsideSelectedTargetDoesNotResetRepairProgressWindow(t *testing.T) {
-	aggregate := stateChangeAggregate(t)
-	aggregate.Facts.Focus.TargetRefs = nil
-	aggregate.Facts.Focus.RequireTargetGrounding = true
-	aggregate.Facts.Focus.TargetRole = "deliverable"
-	aggregate.Facts.Focus.TargetSelectorRef = "file/unique_workspace_entry"
-	selection := runtimecontract.RuntimeTargetSelection{
-		PrerequisiteID: "target_selection:blocks/file:deliverable:file/unique_workspace_entry:::0", OwnerModuleID: runtimecontract.RuntimeModuleFile, TargetRole: "deliverable", SelectorRef: "file/unique_workspace_entry",
-		Disposition: runtimecontract.RuntimeTargetSelectionSelected, TargetRefs: []string{"implementation.go"}, CandidateTargetRefs: []string{"implementation.go"}, CandidateCount: 1, ObservedRevision: "tree-v1",
+	aggregate := effectiveProgressOwnerScopeAggregate(t, []string{"implementation.go", "validation-entry.go"})
+	aggregate.Facts.RepairDirective = &runtimecontract.RuntimeRepairDirective{
+		ID: "repair-selected-implementation", FocusID: aggregate.Facts.Focus.ID,
+		Trigger: runtimecontract.RuntimeRepairTriggerAssessmentGap, RequiredState: runtimecontract.ConvergenceStateNeedStateChange,
+		RequiredEffectScopes:  []runtimecontract.RuntimeEffectScope{runtimecontract.RuntimeEffectWorkspaceDurable},
+		RequiredEvidenceKinds: []string{runtimecontract.EvidenceKindStateChange},
+		AllowedOperationKinds: []string{runtimecontract.RuntimeBlockKindPatchApply},
+		CoverageWorkItemIDs:   append([]common.CoverageWorkItemID(nil), aggregate.Facts.Focus.CoverageWorkItemIDs...),
+		TargetRefs:            []string{"implementation.go"},
 	}
-	selection.SnapshotID = runtimecontract.StableRuntimeTargetSelectionSnapshotID(selection)
-	aggregate.Facts.Resources.TargetSelection = &selection
-	runtimeTestSealCurrentFocusBindingTargetSurface(&aggregate.Facts, runtimeTestBindingTargetSurface{TargetRefs: selection.TargetRefs})
-	bindCurrentFocusTargetSelection(&aggregate.Facts)
 	aggregate.Facts.Repair = runtimecontract.RuntimeRepairLedger{
 		FocusID: aggregate.Facts.Focus.ID, SliceID: aggregate.Facts.Focus.SliceID,
 		RepairAttempts: 2, ValidationOnlyRetries: 1, LastCycleID: "repair-cycle-2",
-		ActiveGap: &runtimecontract.RuntimeAssessmentGap{Reason: "repair"},
+		ActiveGap: &runtimecontract.RuntimeAssessmentGap{Reason: "repair", TargetRefs: []string{"implementation.go"}},
 	}
 	repository := &durableRuntimeStateRepository{aggregate: aggregate}
 	coordinator, err := NewDispatchCoordinator(repository)
@@ -182,7 +214,7 @@ func TestAcceptedDurableStateChangeOutsideSelectedTargetDoesNotResetRepairProgre
 	evidence := ExecutionEvidence{
 		EventID: "event-state-outside-selected-target", WorkspaceID: "ws-1", RunID: "run-1",
 		DispatchID: sealed.ActiveDispatch.ID, AuthoritySnapshotID: sealed.ActiveDispatch.Transaction.AuthoritySnapshotID,
-		OperationID: "patch-1", Kind: runtimecontract.EvidenceKindStateChange, Status: ExecutionEvidenceStatusAccepted,
+		OperationID: runtimeTestActiveOperationID(t, sealed, 0), Kind: runtimecontract.EvidenceKindStateChange, Status: ExecutionEvidenceStatusAccepted,
 	}
 	attachRuntimeTestOwnerReceipt(t, &repository.aggregate, &evidence)
 	committed, err := coordinator.commitEvidence(context.Background(), evidence)

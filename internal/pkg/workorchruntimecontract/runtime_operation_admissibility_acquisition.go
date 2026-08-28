@@ -177,16 +177,6 @@ type RuntimeOperationFeasibilityObservation struct {
 	PrerequisiteRequest     *RuntimeOperationPrerequisiteRequest
 }
 
-// RuntimeOperationAuthorizationIdentity builds a minimal sealed authorization
-// identity for tests and identity-only fixtures.
-func RuntimeOperationAuthorizationIdentity(kind string) (RuntimeCandidateOperationManifest, error) {
-	descriptor, ok := RuntimeOperationDescriptorForKind(kind)
-	if !ok {
-		return RuntimeCandidateOperationManifest{}, fmt.Errorf("unknown runtime operation kind %q", kind)
-	}
-	return RuntimeCandidateOperationManifest{Kind: descriptor.Kind, OwnerModuleID: descriptor.OwnerModuleID, OperationContractRevision: RuntimeOperationContractRevision()}.Normalized(), nil
-}
-
 // ValidateRuntimeOperationFeasibilityRequest performs only pure schema,
 // identity, and sealed-authorization checks.
 func ValidateRuntimeOperationFeasibilityRequest(request RuntimeOperationFeasibilityRequest, ownerModuleID string) error {
@@ -220,6 +210,9 @@ func ValidateRuntimeOperationFeasibilityRequest(request RuntimeOperationFeasibil
 		if err := ValidateRuntimeOperationContractRevision(authorization.OperationContractRevision); err != nil {
 			return err
 		}
+	}
+	if err := ValidateRuntimeOperationTargetsAgainstAuthorization(authorization.Target, operation.TargetRefs, authorization.RequireTargetRefs); err != nil {
+		return fmt.Errorf("runtime operation feasibility target authorization: %w", err)
 	}
 	if len(authorization.AdmissibilitySnapshotRefs) != 0 {
 		found := false

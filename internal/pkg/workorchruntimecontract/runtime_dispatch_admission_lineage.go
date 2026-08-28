@@ -25,6 +25,7 @@ func ValidateRuntimeDispatchAdmissionLineage(
 		for _, attempt := range attempts {
 			if attempt.State == RuntimeCandidateAttemptStateAccepted && attempt.Transaction == dispatch.Transaction &&
 				attempt.DispatchID == dispatch.ID && attempt.CandidateHash == dispatch.CandidateHash &&
+				attempt.ManifestHash == dispatch.CandidateManifestHash &&
 				attempt.DispatchAuthorityHash == dispatch.DispatchAuthorityHash {
 				acceptedMatches++
 			}

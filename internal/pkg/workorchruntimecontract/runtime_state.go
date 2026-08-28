@@ -28,6 +28,13 @@ type RuntimeDispatchRecord struct {
 	Transaction   AuthorityTransaction
 	CandidateHash string
 	Candidate     RuntimeCandidate
+	// CandidateManifestHash is the exact SM-3 manifest identity whose target
+	// authority was projected into OperationTargetAuthorizations. It is retained
+	// across recovery/governance continuation and never rebuilt from current facts.
+	CandidateManifestHash string
+	// OperationTargetAuthorizations is the minimal per-operation target-policy
+	// snapshot derived at final manifest-bound seal.
+	OperationTargetAuthorizations []RuntimeDispatchOperationTargetAuthorization
 	// FocusTargetRole is the exact SM-2 focus role used when SM-3 sealed the
 	// dispatch. Capability requests and later diagnostic-causation checks use
 	// this immutable value rather than the mutable current focus projection.
@@ -414,11 +421,13 @@ func (r RuntimeStateRecord) Validate() error {
 		}
 		matched := r.ActiveDispatch != nil && r.ActiveDispatch.Transaction == attempt.Transaction &&
 			r.ActiveDispatch.ID == attempt.DispatchID && r.ActiveDispatch.CandidateHash == attempt.CandidateHash &&
+			r.ActiveDispatch.CandidateManifestHash == attempt.ManifestHash &&
 			r.ActiveDispatch.DispatchAuthorityHash == attempt.DispatchAuthorityHash
 		if !matched {
 			for _, dispatch := range r.CompletedDispatches {
 				if dispatch.Transaction == attempt.Transaction && dispatch.ID == attempt.DispatchID &&
-					dispatch.CandidateHash == attempt.CandidateHash && dispatch.DispatchAuthorityHash == attempt.DispatchAuthorityHash {
+					dispatch.CandidateHash == attempt.CandidateHash && dispatch.CandidateManifestHash == attempt.ManifestHash &&
+					dispatch.DispatchAuthorityHash == attempt.DispatchAuthorityHash {
 					matched = true
 					break
 				}
@@ -923,6 +932,7 @@ func (d RuntimeDispatchRecord) ValidateWithActivation(decision RuntimeDecision, 
 // present facts.
 func (d RuntimeDispatchRecord) ValidateIntrinsic() error {
 	if strings.TrimSpace(d.ID) == "" || d.WorkspaceID == "" || d.RunID == "" || strings.TrimSpace(d.CandidateHash) == "" ||
+		strings.TrimSpace(d.CandidateManifestHash) == "" ||
 		strings.TrimSpace(d.Transaction.AuthoritySnapshotID) == "" || strings.TrimSpace(d.Transaction.FocusID) == "" ||
 		strings.TrimSpace(d.Transaction.RequiredOutputHash) == "" || strings.TrimSpace(d.Transaction.DefinitionRevision) == "" ||
 		strings.TrimSpace(d.Transaction.EvidenceRevision) == "" || strings.TrimSpace(d.Transaction.CapabilityStateHash) == "" ||
@@ -947,6 +957,9 @@ func (d RuntimeDispatchRecord) ValidateIntrinsic() error {
 	}
 	if d.CandidateHash != StableRuntimeCandidateHash(d.Candidate) {
 		return fmt.Errorf("runtime dispatch candidate hash mismatch")
+	}
+	if err := ValidateRuntimeDispatchOperationTargetAuthorizations(d.Candidate, d.OperationTargetAuthorizations); err != nil {
+		return err
 	}
 	if d.ID != StableRuntimeDispatchID(d.Transaction, d.CandidateHash) {
 		return fmt.Errorf("runtime dispatch identity mismatch")
@@ -1028,7 +1041,7 @@ func StableRuntimeDispatchID(transaction AuthorityTransaction, candidateHash str
 // governance resume without including mutable dispatch/execution progress.
 func StableRuntimeDispatchAuthorityHash(dispatch RuntimeDispatchRecord) string {
 	h := sha256.New()
-	writeHashString(h, "runtime-dispatch-authority/v2")
+	writeHashString(h, "runtime-dispatch-authority/v3")
 	writeHashString(h, string(dispatch.WorkspaceID))
 	writeHashString(h, string(dispatch.RunID))
 	writeHashString(h, strings.TrimSpace(dispatch.FocusTargetRole))
@@ -1045,6 +1058,8 @@ func StableRuntimeDispatchAuthorityHash(dispatch RuntimeDispatchRecord) string {
 	writeHashString(h, transaction.AuthorityInputID)
 	writeHashString(h, fmt.Sprintf("%d", transaction.Attempt))
 	writeHashString(h, StableRuntimeCandidateHash(dispatch.Candidate))
+	writeHashString(h, strings.TrimSpace(dispatch.CandidateManifestHash))
+	writeHashString(h, StableRuntimeDispatchOperationTargetAuthorizationsHash(dispatch.OperationTargetAuthorizations))
 	writeHashString(h, stableRuntimeValidationRecipeSnapshotHash(dispatch.ValidationRecipes))
 	writeHashString(h, StableRuntimeDispatchOperationAuthorityHash(dispatch))
 	writeHashString(h, StableRuntimeOperationExecutionAuthoritiesHash(dispatch.OperationExecutions))
@@ -1170,6 +1185,7 @@ func validateRuntimeDispatchCandidateIntrinsic(candidate RuntimeCandidate, trans
 func (d RuntimeDispatchRecord) Clone() RuntimeDispatchRecord {
 	ret := d
 	ret.Candidate = cloneRuntimeCandidate(d.Candidate)
+	ret.OperationTargetAuthorizations = CloneRuntimeDispatchOperationTargetAuthorizations(d.OperationTargetAuthorizations)
 	ret.ValidationRecipes = CloneRuntimeValidationRecipes(d.ValidationRecipes)
 	ret.OperationAdmissibilities = CloneRuntimeOperationAdmissibilities(d.OperationAdmissibilities)
 	ret.OperationAdmissibilityObservations = CloneRuntimePrerequisiteObservations(d.OperationAdmissibilityObservations)

@@ -334,8 +334,17 @@ func TestDriveRuntimeFileBackedRunExecutesDurableFileOwnerAndRestarts(t *testing
 	})
 	t.Cleanup(func() { llmObserver.Unsubscribe(llmevents.TopicRequestRuntimeCandidate) })
 
-	runtimeTestPersistBootstrappedOperationFixture(t, ctx, hub, "ws-v2", "run-v2", bootstrap)
 	module := newRuntimeDriveTestModule(t, hub)
+	run, err := runs.GetByWorkspaceID(ctx, "ws-v2", "run-v2")
+	if err != nil {
+		t.Fatal(err)
+	}
+	aggregate, err := module.initializeRuntimeFromRun(ctx, run)
+	if err != nil {
+		t.Fatal(err)
+	}
+	aggregate.Facts.Focus.TargetRefs = []string{"target.txt"}
+	aggregate = runtimeTestPersistSealedSemanticAuthority(t, ctx, runtimeStateRepository{hub: hub}, aggregate)
 	driveObserver := magicevent.NewSimpleObserver(ModuleID, hub)
 	driveObserver.Subscribe(orchestratorevents.TopicOrchestratorDriveRuntime, module.handleRuntimeDrive)
 	command := orchestratorevents.DriveRuntimeCommand{WorkspaceID: "ws-v2", RunID: "run-v2"}
@@ -8012,6 +8021,7 @@ func TestDriveRuntimeFileBackedRestartRecoversCrashAfterOwnerReceipt(t *testing.
 	if err != nil {
 		t.Fatal(err)
 	}
+	aggregate.Facts.Focus.TargetRefs = []string{"target.txt"}
 	aggregate = runtimeTestPersistSealedSemanticAuthority(t, ctx, runtimeStateRepository{hub: hub}, aggregate)
 	aggregate, err = module.prepareRuntimePrerequisites(ctx, aggregate)
 	if err != nil {
@@ -8230,6 +8240,8 @@ func TestRuntimeFileBackedClaimEvidenceAndDispatchCloseCrashMatrix(t *testing.T)
 			if err != nil {
 				t.Fatal(err)
 			}
+			target := "target.txt"
+			aggregate.Facts.Focus.TargetRefs = []string{target}
 			aggregate = runtimeTestPersistSealedSemanticAuthority(t, ctx, runtimeStateRepository{hub: hub}, aggregate)
 			aggregate, err = module.prepareRuntimePrerequisites(ctx, aggregate)
 			if err != nil {
@@ -8239,7 +8251,6 @@ func TestRuntimeFileBackedClaimEvidenceAndDispatchCloseCrashMatrix(t *testing.T)
 			if _, err := module.BeginRuntimeCandidateAttemptForTest(ctx, "ws-v2", "run-v2", 0, prefix); err != nil {
 				t.Fatal(err)
 			}
-			target := "target.txt"
 			candidate := runtimecontract.RuntimeCandidate{}
 			if testCase.validation {
 				candidate = runtimeManagedShellValidationCandidate("validate-1", "cwi-v2", target, "claim-crash-validation")
@@ -8535,6 +8546,11 @@ func TestRuntimeFileBackedEvidenceCoverageFocusAdvanceCrashRestart(t *testing.T)
 			if err != nil {
 				t.Fatal(err)
 			}
+			target := "one.txt"
+			aggregate.Facts.Focus.TargetRefs = []string{target}
+			for index := range aggregate.Facts.RemainingFocuses {
+				aggregate.Facts.RemainingFocuses[index].TargetRefs = []string{"two.txt"}
+			}
 			aggregate = runtimeTestPersistSealedSemanticAuthority(t, ctx, runtimeStateRepository{hub: first.hub}, aggregate)
 			aggregate, err = module.prepareRuntimePrerequisites(ctx, aggregate)
 			if err != nil {
@@ -8544,7 +8560,6 @@ func TestRuntimeFileBackedEvidenceCoverageFocusAdvanceCrashRestart(t *testing.T)
 			if _, err := module.BeginRuntimeCandidateAttemptForTest(ctx, "ws-v2", "run-v2", 0, prefix); err != nil {
 				t.Fatal(err)
 			}
-			target := "one.txt"
 			sealed, err := module.AcceptRuntimeCandidateAttempt(ctx, "ws-v2", "run-v2", 0, runtimecontract.RuntimeCandidate{StateChange: &runtimecontract.StateChangeCandidate{Operations: []runtimecontract.StateChangingOperation{{Operation: runtimecontract.RuntimeOperation{
 				ID: "write-focus-1", Kind: runtimecontract.StepKindFileEdit, CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-1"}, TargetRefs: []string{target}, Parameters: runtimeFileEditParameters(target),
 			}}}}})
@@ -9466,7 +9481,18 @@ func TestDriveRuntimeCompletesTypedPathAndIsRestartIdempotent(t *testing.T) {
 		fileObserver.Unsubscribe(fileevents.TopicExecuteFileEditOperation)
 		fileObserver.Unsubscribe(fileevents.TopicAcquireRuntimeCapabilities)
 	})
-	runtimeTestPersistBootstrappedOperationFixture(t, ctx, hub, "ws-v2", "run-v2", bootstrap)
+	target := "target.txt"
+	module := newRuntimeDriveTestModule(t, hub)
+	run, err := runs.GetByWorkspaceID(ctx, "ws-v2", "run-v2")
+	if err != nil {
+		t.Fatal(err)
+	}
+	aggregate, err := module.initializeRuntimeFromRun(ctx, run)
+	if err != nil {
+		t.Fatal(err)
+	}
+	aggregate.Facts.Focus.TargetRefs = []string{target}
+	aggregate = runtimeTestPersistSealedSemanticAuthority(t, ctx, runtimeStateRepository{hub: hub}, aggregate)
 
 	candidateCount := 0
 	llmObserver := magicevent.NewSimpleObserver(runtimecontract.RuntimeModuleLLM, hub)
@@ -9479,14 +9505,13 @@ func TestDriveRuntimeCompletesTypedPathAndIsRestartIdempotent(t *testing.T) {
 		}
 		candidate := runtimecontract.RuntimeCandidate{StateChange: &runtimecontract.StateChangeCandidate{Operations: []runtimecontract.StateChangingOperation{{Operation: runtimecontract.RuntimeOperation{
 			ID: "write-1", Kind: runtimecontract.StepKindFileEdit,
-			CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-v2"}, TargetRefs: []string{"target.txt"},
-			Parameters: runtimeFileEditParameters("target.txt"),
+			CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-v2"}, TargetRefs: []string{target},
+			Parameters: runtimeFileEditParameters(target),
 		}}}}}
 		result.Set(runtimeCandidateResultForTest(t, command, candidate), nil)
 	})
 	t.Cleanup(func() { llmObserver.Unsubscribe(llmevents.TopicRequestRuntimeCandidate) })
 
-	module := newRuntimeDriveTestModule(t, hub)
 	driveObserver := magicevent.NewSimpleObserver(ModuleID, hub)
 	driveObserver.Subscribe(orchestratorevents.TopicOrchestratorDriveRuntime, module.handleRuntimeDrive)
 
@@ -9825,7 +9850,8 @@ func TestRequestAndSealRuntimeCandidateRemovesForbiddenRawIDOnAttemptOne(t *test
 	ctx := context.Background()
 	hub := magicevent.NewHub(16)
 	t.Cleanup(func() { hub.Terminate(ctx) })
-	facts := runtimeAggregate(t, 1).Facts
+	startRuntimeCandidateFileEditAdmissionOwners(t, hub)
+	facts := runtimeCandidateSealFileEditFacts(t)
 	state := &inMemoryRuntimeStateRepository{}
 	controller, err := runtime.NewRuntimeController(state)
 	if err != nil {
@@ -9890,7 +9916,8 @@ func TestRequestAndSealRuntimeCandidateRecoversProviderLimitedOutputWithComplete
 	ctx := context.Background()
 	hub := magicevent.NewHub(16)
 	t.Cleanup(func() { hub.Terminate(ctx) })
-	facts := runtimeAggregate(t, 1).Facts
+	startRuntimeCandidateFileEditAdmissionOwners(t, hub)
+	facts := runtimeCandidateSealFileEditFacts(t)
 	facts.Activation.ExecutionContract.CandidateDocumentRecovery = runtimecontract.RuntimeCandidateDocumentRecoveryPolicy{MaxAttempts: 2}
 	repository := &inMemoryRuntimeStateRepository{}
 	controller, err := runtime.NewRuntimeController(repository)
@@ -9961,7 +9988,8 @@ func TestRequestAndSealRuntimeCandidateCommitsSessionBeforeProviderAndAttemptAft
 	ctx := context.Background()
 	hub := magicevent.NewHub(16)
 	t.Cleanup(func() { hub.Terminate(ctx) })
-	facts := runtimeAggregate(t, 1).Facts
+	startRuntimeCandidateFileEditAdmissionOwners(t, hub)
+	facts := runtimeCandidateSealFileEditFacts(t)
 	state := &inMemoryRuntimeStateRepository{}
 	controller, err := runtime.NewRuntimeController(state)
 	if err != nil {
@@ -10011,7 +10039,8 @@ func TestRequestAndSealRuntimeCandidateRetriesTransportWithoutCandidateAttempt(t
 	ctx := context.Background()
 	hub := magicevent.NewHub(16)
 	t.Cleanup(func() { hub.Terminate(ctx) })
-	facts := runtimeAggregate(t, 1).Facts
+	startRuntimeCandidateFileEditAdmissionOwners(t, hub)
+	facts := runtimeCandidateSealFileEditFacts(t)
 	state := &inMemoryRuntimeStateRepository{}
 	controller, err := runtime.NewRuntimeController(state)
 	if err != nil {
@@ -10134,7 +10163,27 @@ func TestRequestAndSealRuntimeCandidateRestartsFromPersistedIncompleteOutcome(t 
 	ctx := context.Background()
 	hub := magicevent.NewHub(16)
 	t.Cleanup(func() { hub.Terminate(ctx) })
-	facts := runtimeAggregate(t, 1).Facts
+	deliverableDirectory, internalDirectory := t.TempDir(), t.TempDir()
+	workspaceObserver := magicevent.NewSimpleObserver(workspaceevents.CommandDestination, hub)
+	workspaceObserver.Subscribe(workspaceevents.TopicWorkspaceCommandGet, func(_ magicevent.Event, result magicevent.Result) {
+		result.Set(workspaceevents.WorkspaceResult{Workspace: &workspaceevents.Workspace{
+			ID: "ws-v2", DeliverableDirectory: deliverableDirectory, InternalDirectory: internalDirectory,
+		}}, nil)
+	})
+	t.Cleanup(func() { workspaceObserver.Unsubscribe(workspaceevents.TopicWorkspaceCommandGet) })
+	probeObserver := magicevent.NewSimpleObserver(runtimecontract.RuntimeModuleFile, hub)
+	probeObserver.Subscribe(fileevents.TopicProbeRuntimeOperationFeasibility, func(event magicevent.Event, result magicevent.Result) {
+		command := event.Data().(fileevents.ProbeRuntimeOperationFeasibilityCommand)
+		response, responseErr := fileevents.NewProbeRuntimeOperationFeasibilityResult(command, "", nil, nil, nil, nil)
+		if responseErr != nil {
+			t.Errorf("build File owner feasibility result: %v", responseErr)
+			result.Set(nil, runtimeOperationMagicFailure(responseErr))
+			return
+		}
+		result.Set(response, nil)
+	})
+	t.Cleanup(func() { probeObserver.Unsubscribe(fileevents.TopicProbeRuntimeOperationFeasibility) })
+	facts := runtimeCandidateSealFileEditFacts(t)
 	facts.Activation.ExecutionContract.CandidateDocumentRecovery = runtimecontract.RuntimeCandidateDocumentRecoveryPolicy{MaxAttempts: 2}
 	state := &inMemoryRuntimeStateRepository{}
 	controller, err := runtime.NewRuntimeController(state)
@@ -10213,6 +10262,12 @@ func TestRequestAndSealRuntimeCandidateRestartsFromPersistedIncompleteOutcome(t 
 		}
 		t.Fatalf("restart continuation completion: decision=%+v terminal=%+v factsFailure=%+v attemptFailure=%+v activeDispatch=%+v calls=%d", completed.Decision, completed.Decision.Terminal, completed.Facts.Failure, attemptFailure, completed.ActiveDispatch, calls)
 	}
+	sealedOperation := completed.ActiveDispatch.Candidate.StateChange.Operations[0].Operation.Normalized()
+	if completed.ActiveDispatch.CandidateManifestHash != manifest.Hash || len(completed.ActiveDispatch.OperationTargetAuthorizations) != 1 ||
+		completed.ActiveDispatch.OperationTargetAuthorizations[0].OperationID != sealedOperation.ID ||
+		completed.ActiveDispatch.OperationTargetAuthorizations[0].OperationHash != runtimecontract.StableRuntimeOperationHash(sealedOperation) {
+		t.Fatalf("restart continuation lost manifest-bound target preimage: manifest=%q dispatch=%+v", manifest.Hash, completed.ActiveDispatch)
+	}
 }
 
 // P3-B3: a complete C4 document is durable before C5 allocates attempt 0.
@@ -10248,7 +10303,7 @@ func TestRuntimeFileBackedCompleteDocumentRestartAdmitsWithoutProviderReplay(t *
 	if err := firstOwner.ConfigureRuntimeRepository(runtimeRepository); err != nil {
 		t.Fatal(err)
 	}
-	initialized := runtimeTestInitializeOperationFixture(t, ctx, firstOwner, runtimeRepository, runtimeAggregate(t, 1).Facts, runtimeDefinition(), nil)
+	initialized := runtimeTestInitializeOperationFixture(t, ctx, firstOwner, runtimeRepository, runtimeCandidateSealExactFileEditFacts(t, "target.txt"), runtimeDefinition(), nil)
 	prefix := runtimecontract.StableRuntimeCandidatePrefixHashWithExecutionContract(initialized.Definition, initialized.Facts.Activation.ExecutionContract)
 	candidateContext := runtimecontract.RuntimeCandidateContextForDecision(initialized.Facts, initialized.Decision, nil)
 	manifest, err := runtimecontract.BuildRuntimeCandidateContractManifest(initialized.Decision, runtimecontract.RuntimeCandidateManifestOwnerFactsFromResources(candidateContext.Resources))
@@ -10304,6 +10359,7 @@ func TestRuntimeFileBackedCompleteDocumentRestartAdmitsWithoutProviderReplay(t *
 	if err != nil {
 		t.Fatal(err)
 	}
+	startRuntimeCandidateFileEditAdmissionOwners(t, hub)
 	providerCalls := 0
 	llmObserver := magicevent.NewSimpleObserver(runtimecontract.RuntimeModuleLLM, hub)
 	llmObserver.Subscribe(llmevents.TopicRequestRuntimeCandidate, func(_ magicevent.Event, _ magicevent.Result) {
@@ -10359,7 +10415,7 @@ func TestRuntimeFileBackedPrepareRestartSubmitsOnce(t *testing.T) {
 	if err := firstOwner.ConfigureRuntimeRepository(runtimeRepository); err != nil {
 		t.Fatal(err)
 	}
-	initialized := runtimeTestInitializeOperationFixture(t, ctx, firstOwner, runtimeRepository, runtimeAggregate(t, 1).Facts, runtimeDefinition(), nil)
+	initialized := runtimeTestInitializeOperationFixture(t, ctx, firstOwner, runtimeRepository, runtimeCandidateSealFileEditFacts(t), runtimeDefinition(), nil)
 	prefix := runtimecontract.StableRuntimeCandidatePrefixHashWithExecutionContract(initialized.Definition, initialized.Facts.Activation.ExecutionContract)
 	candidateContext := runtimecontract.RuntimeCandidateContextForDecision(initialized.Facts, initialized.Decision, nil)
 	manifest, err := runtimecontract.BuildRuntimeCandidateContractManifest(initialized.Decision, runtimecontract.RuntimeCandidateManifestOwnerFactsFromResources(candidateContext.Resources))
@@ -10398,8 +10454,35 @@ func TestRuntimeFileBackedPrepareRestartSubmitsOnce(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	restarted := newTestBiz(restartedOwner, hub, nil)
+	deliverableDirectory, internalDirectory := t.TempDir(), t.TempDir()
+	workspaceObserver := magicevent.NewSimpleObserver(workspaceevents.CommandDestination, hub)
+	workspaceObserver.Subscribe(workspaceevents.TopicWorkspaceCommandGet, func(_ magicevent.Event, result magicevent.Result) {
+		result.Set(workspaceevents.WorkspaceResult{Workspace: &workspaceevents.Workspace{
+			ID: "ws-v2", DeliverableDirectory: deliverableDirectory, InternalDirectory: internalDirectory,
+		}}, nil)
+	})
+	t.Cleanup(func() { workspaceObserver.Unsubscribe(workspaceevents.TopicWorkspaceCommandGet) })
+	probeObserver := magicevent.NewSimpleObserver(runtimecontract.RuntimeModuleFile, hub)
+	probeObserver.Subscribe(fileevents.TopicProbeRuntimeOperationFeasibility, func(event magicevent.Event, result magicevent.Result) {
+		command := event.Data().(fileevents.ProbeRuntimeOperationFeasibilityCommand)
+		response, responseErr := fileevents.NewProbeRuntimeOperationFeasibilityResult(command, "", nil, nil, nil, nil)
+		if responseErr != nil {
+			result.Set(nil, runtimeOperationMagicFailure(responseErr))
+			return
+		}
+		result.Set(response, nil)
+	})
+	t.Cleanup(func() { probeObserver.Unsubscribe(fileevents.TopicProbeRuntimeOperationFeasibility) })
 	providerCalls := 0
 	llmObserver := magicevent.NewSimpleObserver(runtimecontract.RuntimeModuleLLM, hub)
+	llmObserver.Subscribe(llmevents.TopicPreflightRuntimeCandidate, func(event magicevent.Event, result magicevent.Result) {
+		command := event.Data().(llmevents.PreflightRuntimeCandidateCommand)
+		result.Set(llmevents.PreflightRuntimeCandidateResult{
+			Transaction: command.Transaction, DocumentKind: command.DocumentKind,
+			Feedback: runtimePreflightFeedbackForTest(t, command, ""),
+		}, nil)
+	})
 	llmObserver.Subscribe(llmevents.TopicRequestRuntimeCandidate, func(event magicevent.Event, result magicevent.Result) {
 		providerCalls++
 		command := event.Data().(llmevents.RequestRuntimeCandidateCommand)
@@ -10416,8 +10499,11 @@ func TestRuntimeFileBackedPrepareRestartSubmitsOnce(t *testing.T) {
 			DocumentOutcome:      runtimeCompleteDocumentOutcome(command.ExpectedDocument, document),
 		}), nil)
 	})
-	t.Cleanup(func() { llmObserver.Unsubscribe(llmevents.TopicRequestRuntimeCandidate) })
-	sealed, err := newTestBiz(restartedOwner, hub, nil).requestAndSealRuntimeCandidateWithRetry(ctx, reloaded, prefix)
+	t.Cleanup(func() {
+		llmObserver.Unsubscribe(llmevents.TopicRequestRuntimeCandidate)
+		llmObserver.Unsubscribe(llmevents.TopicPreflightRuntimeCandidate)
+	})
+	sealed, err := restarted.requestAndSealRuntimeCandidateWithRetry(ctx, reloaded, prefix)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -10524,6 +10610,7 @@ func TestRuntimeFileBackedStaleResultCannotOverwriteCompleteSession(t *testing.T
 	ctx := context.Background()
 	hub := magicevent.NewHub(16)
 	t.Cleanup(func() { hub.Terminate(ctx) })
+	startRuntimeCandidateFileEditAdmissionOwners(t, hub)
 	root := t.TempDir()
 	runs := filerepository.NewRunRepository(filepath.Join(root, "runs.json"))
 	bootstrap := runtimeBootstrap()
@@ -10542,7 +10629,7 @@ func TestRuntimeFileBackedStaleResultCannotOverwriteCompleteSession(t *testing.T
 	}
 	t.Cleanup(func() { _ = runOwner.Stop(ctx) })
 
-	facts := runtimeAggregate(t, 1).Facts
+	facts := runtimeCandidateSealFileEditFacts(t)
 	ceiling := runtimecontract.ProviderCeiling{
 		Selection: runtimecontract.ProviderInferenceSelection{Target: facts.Activation.ProviderSelection.Target}, ContextWindowTokens: 128000, ProviderMaxOutputTokens: 16384,
 		EffectiveMaxOutputTokens: 4096, MaxInputTokens: 92928, MaxBytes: 96 * 1024,
@@ -10561,8 +10648,8 @@ func TestRuntimeFileBackedStaleResultCannotOverwriteCompleteSession(t *testing.T
 	}
 	observation.ObservationID = runtimecontract.StableRuntimePrerequisiteObservationID(observation)
 	facts.Resources.ProviderCeiling = &ceiling
-	facts.Prerequisites.Satisfied = []runtimecontract.RuntimePrerequisite{prerequisite}
-	facts.Resources.PrerequisiteObservations = []runtimecontract.RuntimePrerequisiteObservation{observation}
+	facts.Prerequisites.Satisfied = append(facts.Prerequisites.Satisfied, prerequisite)
+	facts.Resources.PrerequisiteObservations = append(facts.Resources.PrerequisiteObservations, observation)
 
 	contentsRoot := filepath.Join(root, "candidate-contents")
 	firstOwner := newRuntimeTestOwnerWithEvidence(RuntimeEvidenceRepositories{
@@ -11279,6 +11366,10 @@ func TestRuntimeDecisionConfirmsValidationRepairSurfaceBeforeProvider(t *testing
 		Parameters: []runtimecontract.OperationParameter{{Name: "recipeId", String: &recipeID}},
 	}}}}}
 	manifest, err := runtimecontract.BuildRuntimeCandidateContractManifest(aggregate.Decision, runtimecontract.RuntimeCandidateManifestOwnerFactsFromResources(aggregate.Facts.Resources))
+	if err != nil {
+		t.Fatal(err)
+	}
+	candidate, err = runtimecontract.DeriveRuntimeCandidateOperationAuthority(manifest, candidate)
 	if err != nil {
 		t.Fatal(err)
 	}

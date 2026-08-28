@@ -32,11 +32,18 @@ import (
 
 func mustRuntimeOperationAuthorizationIdentity(t *testing.T, kind string) runtimecontract.RuntimeCandidateOperationManifest {
 	t.Helper()
-	authorization, err := runtimecontract.RuntimeOperationAuthorizationIdentity(kind)
-	if err != nil {
-		t.Fatalf("runtime operation authorization identity for %q: %v", kind, err)
+	descriptor, ok := runtimecontract.RuntimeOperationDescriptorForKind(kind)
+	if !ok {
+		t.Fatalf("runtime operation authorization identity has unknown kind %q", kind)
 	}
-	return authorization
+	return runtimecontract.RuntimeCandidateOperationManifest{
+		Kind: descriptor.Kind, OwnerModuleID: descriptor.OwnerModuleID,
+		OperationContractRevision: runtimecontract.RuntimeOperationContractRevision(),
+		Target: runtimecontract.RuntimeOperationTargetAuthorization{
+			Policy:            runtimecontract.RuntimeOperationTargetPolicyExistingOwnerScope,
+			OwnerSelectorRefs: []string{"test/owner-feasibility"},
+		},
+	}.Normalized()
 }
 
 func sendRuntimeOperationFeasibilityProbeForTest(ctx context.Context, hub magicevent.Hub, request runtimecontract.RuntimeOperationFeasibilityRequest) (runtimecontract.RuntimeOperationFeasibilityObservation, error) {
@@ -217,8 +224,22 @@ func TestMCPOwnerObservedFailureTargetBindsThroughEventHubAndFileSnapshot(t *tes
 			{Name: "input.path", String: runtimeStringPointer("validation-entry.go")},
 		},
 	}}}}}
+	validationManifest, err := runtimecontract.BuildRuntimeCandidateContractManifest(
+		aggregate.Decision,
+		runtimecontract.RuntimeCandidateManifestOwnerFactsFromContext(
+			runtimecontract.RuntimeCandidateContextForDecision(aggregate.Facts, aggregate.Decision, nil),
+		),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	candidate, err = runtimecontract.DeriveRuntimeCandidateOperationAuthority(validationManifest, candidate)
+	if err != nil {
+		t.Fatal(err)
+	}
+	canonicalOperation := candidate.Validation.Operations[0].Operation
 	sealCandidateWithFeasibilitiesForTest(t, repository, candidate, []runtimecontract.RuntimeCandidateFeasibilityRecord{{
-		OperationID: candidate.Validation.Operations[0].Operation.ID, AdmissibilitySnapshotID: mcpCatalog.SnapshotID,
+		OperationID: canonicalOperation.ID, AdmissibilitySnapshotID: mcpCatalog.SnapshotID,
 		AcquisitionBinding: mcpCatalog.AcquisitionBinding,
 		Observation:        &runtimecontract.RuntimeOwnerFeasibilityObservation{Outcome: runtimecontract.RuntimeOwnerFeasibilityFeasible},
 	}})
@@ -501,23 +522,29 @@ func TestMCPOwnerObservedFailureTargetBindsThroughEventHubAndFileSnapshot(t *tes
 	if readErr != nil || string(content) != "package fixture\n// repaired\n" {
 		t.Fatalf("File owner did not apply sealed target-bound patch: content=%q err=%v", content, readErr)
 	}
-	dispatch := persisted.CompletedDispatches[0]
-	execution := dispatch.OperationExecutions[0]
+	var dispatch SealedDispatch
 	var replayOperation runtimecontract.RuntimeOperation
-	for _, candidateOperation := range candidateRuntimeOperations(dispatch.Candidate) {
-		if candidateOperation.ID == "mcp-validate" {
-			replayOperation = candidateOperation
+	for _, completed := range persisted.CompletedDispatches {
+		for _, candidateOperation := range candidateRuntimeOperations(completed.Candidate) {
+			if candidateOperation.ID == canonicalOperation.ID {
+				dispatch = completed
+				replayOperation = candidateOperation
+				break
+			}
+		}
+		if replayOperation.ID != "" {
 			break
 		}
 	}
+	execution, executionFound := operationExecutionRecord(dispatch.OperationExecutions, replayOperation.ID)
 	replayCatalog := runtimeOwnerCatalogForOperation(
-		persisted.Facts.Resources.OperationAdmissibilities,
-		persisted.Facts.Resources.PrerequisiteObservations,
+		dispatch.OperationAdmissibilities,
+		dispatch.OperationAdmissibilityObservations,
 		replayOperation,
 		execution.AdmissibilitySnapshotID,
 		execution.AcquisitionBinding,
 	)
-	if replayOperation.ID == "" || replayCatalog == nil {
+	if replayOperation.ID == "" || !executionFound || replayCatalog == nil {
 		t.Fatal("persisted MCP operation or owner catalog is missing")
 	}
 	replaySealed, err := mcpevents.SealRuntimeOperation(replayOperation, *replayCatalog)

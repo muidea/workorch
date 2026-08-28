@@ -19,10 +19,11 @@ func TestRepairSurfaceConfirmationCreatesFreshStateChangeAuthority(t *testing.T)
 	sealed.ActiveDispatch = nil
 	repository.aggregate = sealed
 	aggregate = sealed
+	operationID := runtimeTestCandidateOperationID(t, aggregate.CompletedDispatches[0].Candidate, 0)
 	oldAuthority := aggregate.Decision.AuthoritySnapshot.ID
 	observation := runtimecontract.RuntimeValidationFailureObservation{
 		WorkspaceID: aggregate.Facts.WorkspaceID, RunID: aggregate.Facts.RunID, AuthoritySnapshotID: oldAuthority,
-		DispatchID: aggregate.CompletedDispatches[0].ID, OperationID: "validate-1", FailureSignature: "build-failure", TargetRole: "implementation",
+		DispatchID: aggregate.CompletedDispatches[0].ID, OperationID: operationID, FailureSignature: "build-failure", TargetRole: "implementation",
 		DiagnosticClass: runtimecontract.ValidationDiagnosticBuildFailed, CandidateTargetRefs: []string{"main.go"}, ValidationScopeTargetRefs: []string{"main.go"}, DiagnosticHash: strings.Repeat("a", 64),
 	}
 	aggregate.Facts.Failure = &runtimecontract.FailureFact{Class: runtimecontract.FailureClassBuildFailure, Code: "build_failed", Signature: observation.FailureSignature, Message: "implementation does not compile", ValidationFailureObservation: &observation}
@@ -69,7 +70,8 @@ func TestRejectedRepairSurfaceFailsBeforeAnotherValidationCandidate(t *testing.T
 	sealed.ActiveDispatch = nil
 	repository.aggregate = sealed
 	aggregate = sealed
-	observation := runtimecontract.RuntimeValidationFailureObservation{WorkspaceID: aggregate.Facts.WorkspaceID, RunID: aggregate.Facts.RunID, AuthoritySnapshotID: aggregate.Decision.AuthoritySnapshot.ID, DispatchID: aggregate.CompletedDispatches[0].ID, OperationID: "validate-1", FailureSignature: "build-failure", TargetRole: "implementation", DiagnosticClass: runtimecontract.ValidationDiagnosticBuildFailed, CandidateTargetRefs: []string{"main.go"}, ValidationScopeTargetRefs: []string{"main.go"}, DiagnosticHash: strings.Repeat("b", 64)}
+	operationID := runtimeTestCandidateOperationID(t, aggregate.CompletedDispatches[0].Candidate, 0)
+	observation := runtimecontract.RuntimeValidationFailureObservation{WorkspaceID: aggregate.Facts.WorkspaceID, RunID: aggregate.Facts.RunID, AuthoritySnapshotID: aggregate.Decision.AuthoritySnapshot.ID, DispatchID: aggregate.CompletedDispatches[0].ID, OperationID: operationID, FailureSignature: "build-failure", TargetRole: "implementation", DiagnosticClass: runtimecontract.ValidationDiagnosticBuildFailed, CandidateTargetRefs: []string{"main.go"}, ValidationScopeTargetRefs: []string{"main.go"}, DiagnosticHash: strings.Repeat("b", 64)}
 	aggregate.Facts.Failure = &runtimecontract.FailureFact{Class: runtimecontract.FailureClassBuildFailure, Code: "build_failed", Signature: observation.FailureSignature, Message: "implementation does not compile", ValidationFailureObservation: &observation}
 	repository.aggregate = aggregate
 	controller, err := NewRuntimeController(repository)
@@ -105,10 +107,11 @@ func TestStaleRepairSurfaceReacquiresOwnerPrerequisiteWithoutTerminal(t *testing
 	sealed.CompletedDispatches = append(sealed.CompletedDispatches, *sealed.ActiveDispatch)
 	sealed.ActiveDispatch = nil
 	aggregate = sealed
+	operationID := runtimeTestCandidateOperationID(t, aggregate.CompletedDispatches[0].Candidate, 0)
 	observation := runtimecontract.RuntimeValidationFailureObservation{
 		WorkspaceID: aggregate.Facts.WorkspaceID, RunID: aggregate.Facts.RunID,
 		AuthoritySnapshotID: aggregate.Decision.AuthoritySnapshot.ID, DispatchID: aggregate.CompletedDispatches[0].ID,
-		OperationID: "validate-1", FailureSignature: "build-failure", TargetRole: "implementation",
+		OperationID: operationID, FailureSignature: "build-failure", TargetRole: "implementation",
 		DiagnosticClass: runtimecontract.ValidationDiagnosticBuildFailed, CandidateTargetRefs: []string{"main.go"},
 		ValidationScopeTargetRefs: []string{"main.go"}, DiagnosticHash: strings.Repeat("c", 64),
 	}

@@ -183,8 +183,12 @@ func TestOwnerGroundedCreationAndWorkspaceScopeRemainBounded(t *testing.T) {
 	if !HasOwnerGroundedTargetScope(facts) || !OwnerGroundedTargetScopeMaySelectNewTarget(facts) {
 		t.Fatalf("bounded workspace scope was not recognized: %+v", facts.Resources.TargetSelection)
 	}
-	if !TargetRefsAllWithin([]string{"go.sum"}, WorkspaceScopeTargets(&selection)) ||
-		TargetRefsAllWithin([]string{"go.sum", "outside.go"}, WorkspaceScopeTargets(&selection)) {
+	authorization := runtimecontract.RuntimeOperationTargetAuthorization{
+		Policy:               runtimecontract.RuntimeOperationTargetPolicyExistingOwnerScope,
+		OwnerScopeTargetRefs: WorkspaceScopeTargets(&selection),
+	}
+	if runtimecontract.ValidateRuntimeOperationTargetsAgainstAuthorization(authorization, []string{"go.sum"}, true) != nil ||
+		runtimecontract.ValidateRuntimeOperationTargetsAgainstAuthorization(authorization, []string{"go.sum", "outside.go"}, true) == nil {
 		t.Fatal("workspace scope membership was not exact")
 	}
 	facts.Failure = &runtimecontract.FailureFact{TargetRefs: []string{"go.mod"}}

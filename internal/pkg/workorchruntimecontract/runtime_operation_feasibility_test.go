@@ -1,11 +1,28 @@
 package workorchruntimecontract_test
 
 import (
+	"errors"
 	"strings"
 	"testing"
 
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
+
+func mustRuntimeOperationAuthorizationIdentity(t *testing.T, kind string) runtimecontract.RuntimeCandidateOperationManifest {
+	t.Helper()
+	descriptor, ok := runtimecontract.RuntimeOperationDescriptorForKind(kind)
+	if !ok {
+		t.Fatalf("runtime operation authorization identity has unknown kind %q", kind)
+	}
+	return runtimecontract.RuntimeCandidateOperationManifest{
+		Kind: descriptor.Kind, OwnerModuleID: descriptor.OwnerModuleID,
+		OperationContractRevision: runtimecontract.RuntimeOperationContractRevision(),
+		Target: runtimecontract.RuntimeOperationTargetAuthorization{
+			Policy:            runtimecontract.RuntimeOperationTargetPolicyExistingOwnerScope,
+			OwnerSelectorRefs: []string{"test/owner-feasibility"},
+		},
+	}.Normalized()
+}
 
 func TestValidateRuntimeOperationFeasibilityRequestRequiresSealedIdentity(t *testing.T) {
 	inventory, err := runtimecontract.NewRuntimeOperationAdmissibility(
@@ -14,10 +31,7 @@ func TestValidateRuntimeOperationFeasibilityRequestRequiresSealedIdentity(t *tes
 	if err != nil {
 		t.Fatal(err)
 	}
-	authorization, err := runtimecontract.RuntimeOperationAuthorizationIdentity(runtimecontract.StepKindFileEdit)
-	if err != nil {
-		t.Fatal(err)
-	}
+	authorization := mustRuntimeOperationAuthorizationIdentity(t, runtimecontract.StepKindFileEdit)
 	oldText, newText := "old", "new"
 	base := runtimecontract.RuntimeOperationFeasibilityRequest{
 		WorkspaceID: "ws-v2", RunID: "run-v2", Transaction: runtimecontract.AuthorityTransaction{AuthoritySnapshotID: "snapshot-v2"},
@@ -42,10 +56,87 @@ func TestValidateRuntimeOperationFeasibilityRequestRequiresSealedIdentity(t *tes
 	if err := runtimecontract.ValidateRuntimeOperationFeasibilityRequest(missingAuth, runtimecontract.RuntimeModuleFile); err == nil || !strings.Contains(err.Error(), "operation authorization") {
 		t.Fatalf("missing authorization error = %v", err)
 	}
+	missingTargetAuthorization := base
+	missingTargetAuthorization.OperationAuthorization.Target = runtimecontract.RuntimeOperationTargetAuthorization{}
+	if err := runtimecontract.ValidateRuntimeOperationFeasibilityRequest(missingTargetAuthorization, runtimecontract.RuntimeModuleFile); err == nil || !strings.Contains(err.Error(), "target authorization") {
+		t.Fatalf("missing target authorization error = %v", err)
+	}
 
 	wrongOwner := base
 	if err := runtimecontract.ValidateRuntimeOperationFeasibilityRequest(wrongOwner, runtimecontract.RuntimeModuleShell); err == nil {
 		t.Fatal("wrong owner receiver accepted sealed file command")
+	}
+}
+
+func TestValidateRuntimeOperationFeasibilityRequestUsesSealedTargetAuthorization(t *testing.T) {
+	exactInventory, err := runtimecontract.NewRuntimeOperationAdmissibility(
+		"admissibility-file-exact", runtimecontract.RuntimeModuleFile, []string{runtimecontract.StepKindFileEdit},
+		[]string{"go.mod", "main.go", "semantic_test.go"}, nil, nil, "revision-exact",
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	exactAuthorization := mustRuntimeOperationAuthorizationIdentity(t, runtimecontract.StepKindFileEdit)
+	exactAuthorization.RequireTargetRefs = true
+	exactAuthorization.Target = runtimecontract.RuntimeOperationTargetAuthorization{
+		Policy:          runtimecontract.RuntimeOperationTargetPolicyExactTarget,
+		ExactTargetRefs: []string{"go.mod", "main.go", "semantic_test.go"},
+	}
+	request := runtimecontract.RuntimeOperationFeasibilityRequest{
+		WorkspaceID: "ws-target-auth", RunID: "run-target-auth",
+		Transaction:                   runtimecontract.AuthorityTransaction{AuthoritySnapshotID: "snapshot-target-auth"},
+		WorkspaceDeliverableDirectory: t.TempDir(),
+		Operation: runtimecontract.RuntimeOperation{
+			ID: "edit-main", Kind: runtimecontract.StepKindFileEdit, TargetRefs: []string{"main.go"},
+		},
+		Admissibility: exactInventory, CandidateManifestHash: "manifest-target-auth", OperationAuthorization: exactAuthorization,
+	}
+	if err := runtimecontract.ValidateRuntimeOperationFeasibilityRequest(request, runtimecontract.RuntimeModuleFile); err != nil {
+		t.Fatalf("exact multi-target authorization rejected legal singleton subset: %v", err)
+	}
+
+	outside := request
+	outside.Operation.TargetRefs = []string{"outside.go"}
+	err = runtimecontract.ValidateRuntimeOperationFeasibilityRequest(outside, runtimecontract.RuntimeModuleFile)
+	var outsideFinding *runtimecontract.RuntimeOperationTargetAuthorizationError
+	if !errors.As(err, &outsideFinding) || outsideFinding.Actual != "outside.go" {
+		t.Fatalf("outside feasibility target finding=%+v err=%v", outsideFinding, err)
+	}
+
+	empty := request
+	empty.Operation.TargetRefs = nil
+	err = runtimecontract.ValidateRuntimeOperationFeasibilityRequest(empty, runtimecontract.RuntimeModuleFile)
+	var emptyFinding *runtimecontract.RuntimeOperationTargetAuthorizationError
+	if !errors.As(err, &emptyFinding) || emptyFinding.Actual != "missing_targetRefs" {
+		t.Fatalf("empty feasibility target finding=%+v err=%v", emptyFinding, err)
+	}
+
+	prospectiveInventory, err := runtimecontract.NewRuntimeOperationAdmissibility(
+		"admissibility-file-prospective", runtimecontract.RuntimeModuleFile, []string{runtimecontract.StepKindFileWrite},
+		nil, []string{"workspace-relative-create"}, []string{"workspace-relative-path"}, "revision-prospective",
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	prospectiveAuthorization := mustRuntimeOperationAuthorizationIdentity(t, runtimecontract.StepKindFileWrite)
+	prospectiveAuthorization.RequireTargetRefs = true
+	prospectiveAuthorization.Target = runtimecontract.RuntimeOperationTargetAuthorization{
+		Policy:            runtimecontract.RuntimeOperationTargetPolicyProspectiveOwnerTarget,
+		OwnerSelectorRefs: []string{"workspace-relative-create"}, ProspectiveConstraintRefs: []string{"workspace-relative-path"},
+		ProspectiveTargetRefs: []string{"main.go", "semantic_test.go"},
+	}
+	prospective := request
+	prospective.Operation = runtimecontract.RuntimeOperation{ID: "write-main", Kind: runtimecontract.StepKindFileWrite, TargetRefs: []string{"main.go"}}
+	prospective.Admissibility = prospectiveInventory
+	prospective.OperationAuthorization = prospectiveAuthorization
+	if err := runtimecontract.ValidateRuntimeOperationFeasibilityRequest(prospective, runtimecontract.RuntimeModuleFile); err != nil {
+		t.Fatalf("prospective singleton feasibility target rejected: %v", err)
+	}
+	prospective.Operation.TargetRefs = []string{"main.go", "semantic_test.go"}
+	err = runtimecontract.ValidateRuntimeOperationFeasibilityRequest(prospective, runtimecontract.RuntimeModuleFile)
+	var singletonFinding *runtimecontract.RuntimeOperationTargetAuthorizationError
+	if !errors.As(err, &singletonFinding) || !strings.Contains(singletonFinding.Error(), "prospective_exact_singleton_required") {
+		t.Fatalf("prospective non-singleton finding=%+v err=%v", singletonFinding, err)
 	}
 }
 
@@ -56,10 +147,7 @@ func TestNewRuntimeOperationFeasibilityObservationEnforcesOuterXOR(t *testing.T)
 	if err != nil {
 		t.Fatal(err)
 	}
-	authorization, err := runtimecontract.RuntimeOperationAuthorizationIdentity(runtimecontract.StepKindFileEdit)
-	if err != nil {
-		t.Fatal(err)
-	}
+	authorization := mustRuntimeOperationAuthorizationIdentity(t, runtimecontract.StepKindFileEdit)
 	path := "target.txt"
 	command := runtimecontract.RuntimeOperationFeasibilityRequest{
 		WorkspaceID: "ws-v2", RunID: "run-v2", Transaction: runtimecontract.AuthorityTransaction{AuthoritySnapshotID: "snapshot-v2"},

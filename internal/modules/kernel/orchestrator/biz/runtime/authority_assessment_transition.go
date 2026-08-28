@@ -418,6 +418,8 @@ func sealedDispatchToRuntimeRecord(value SealedDispatch) runtimecontract.Runtime
 	return runtimecontract.RuntimeDispatchRecord{
 		ID: value.ID, WorkspaceID: value.WorkspaceID, RunID: value.RunID,
 		Transaction: value.Transaction, CandidateHash: value.CandidateHash, Candidate: value.Candidate,
+		CandidateManifestHash:              value.CandidateManifestHash,
+		OperationTargetAuthorizations:      runtimecontract.CloneRuntimeDispatchOperationTargetAuthorizations(value.OperationTargetAuthorizations),
 		FocusTargetRole:                    value.FocusTargetRole,
 		ValidationRecipes:                  runtimecontract.CloneRuntimeValidationRecipes(value.ValidationRecipes),
 		OperationAdmissibilities:           runtimecontract.CloneRuntimeOperationAdmissibilities(value.OperationAdmissibilities),

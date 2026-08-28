@@ -1086,6 +1086,9 @@ func TestActiveDispatchPrerequisiteStaleInvalidatesWithoutRejectedEvidence(t *te
 func TestAcceptedReceiptResourceChangeRetiresPrerequisitesButKeepsRemainingDispatch(t *testing.T) {
 	ctx := context.Background()
 	aggregate := stateChangeAggregate(t)
+	runtimeTestSealCurrentFocusBindingTargetSurface(&aggregate.Facts, runtimeTestBindingTargetSurface{
+		TargetRefs: []string{"main.go", "other.go"},
+	})
 	_, _ = addFreshFileAdmissibilityObservation(t, &aggregate)
 	repository := &durableRuntimeStateRepository{aggregate: aggregate}
 	coordinator, err := NewDispatchCoordinator(repository)
@@ -1096,17 +1099,32 @@ func TestAcceptedReceiptResourceChangeRetiresPrerequisitesButKeepsRemainingDispa
 		{Operation: patchApplyTestOperation("write-1", "main.go")},
 		{Operation: func() runtimecontract.RuntimeOperation {
 			operation := patchApplyTestOperation("write-2", "other.go")
-			// Only write-1 is bound to the main.go CWI. The second write exists to
-			// exercise continuation after invalidation, not to claim coverage.
-			operation.BindingRefs = nil
-			operation.DependsOn = []string{"write-1"}
+			// Both proof-bearing operations select the same sealed binding, but use
+			// distinct manifest-authorized targets/shapes. The second write exists to
+			// exercise continuation after invalidation; CWI credit remains idempotent.
 			return operation
 		}()},
 	}}}
+	candidate = runtimeTestBindCandidateToCurrentFocus(t, aggregate, candidate)
+	manifest, err := runtimecontract.BuildRuntimeCandidateContractManifest(
+		aggregate.Decision,
+		runtimecontract.RuntimeCandidateManifestOwnerFactsFromContext(
+			runtimecontract.RuntimeCandidateContextForDecision(aggregate.Facts, aggregate.Decision, nil),
+		),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	candidate, err = runtimecontract.DeriveRuntimeCandidateOperationAuthority(manifest, candidate)
+	if err != nil {
+		t.Fatal(err)
+	}
+	firstOperationID := candidate.StateChange.Operations[0].Operation.ID
+	secondOperationID := candidate.StateChange.Operations[1].Operation.ID
 	sealed := sealCandidateForTest(t, repository, candidate)
 	evidence := ExecutionEvidence{
 		EventID: "event-freshness-resource-change", WorkspaceID: "ws-1", RunID: "run-1", DispatchID: sealed.ActiveDispatch.ID,
-		AuthoritySnapshotID: sealed.ActiveDispatch.Transaction.AuthoritySnapshotID, OperationID: "write-1",
+		AuthoritySnapshotID: sealed.ActiveDispatch.Transaction.AuthoritySnapshotID, OperationID: firstOperationID,
 		Kind: runtimecontract.EvidenceKindStateChange, Status: ExecutionEvidenceStatusAccepted,
 	}
 	attachRuntimeTestOwnerReceipt(t, &repository.aggregate, &evidence)
@@ -1135,7 +1153,7 @@ func TestAcceptedReceiptResourceChangeRetiresPrerequisitesButKeepsRemainingDispa
 	}
 	if committed.DispatchCompleted || committed.Aggregate.ActiveDispatch == nil || len(committed.Aggregate.CompletedDispatches) != 0 ||
 		committed.Aggregate.ActiveDispatch.ID != sealed.ActiveDispatch.ID ||
-		len(committed.Aggregate.ActiveDispatch.CompletedOperationIDs) != 1 || committed.Aggregate.ActiveDispatch.CompletedOperationIDs[0] != "write-1" ||
+		len(committed.Aggregate.ActiveDispatch.CompletedOperationIDs) != 1 || committed.Aggregate.ActiveDispatch.CompletedOperationIDs[0] != firstOperationID ||
 		len(committed.Aggregate.Facts.Evidence.Accepted) != 1 || len(committed.Aggregate.Facts.Evidence.Rejected) != 0 ||
 		committed.Aggregate.Facts.Repair.RepairAttempts != 0 || committed.Aggregate.Facts.Recovery.PrerequisiteRefreshes != 0 ||
 		committed.Aggregate.Decision.State != runtimecontract.ConvergenceStateNeedStateChange {
@@ -1151,7 +1169,7 @@ func TestAcceptedReceiptResourceChangeRetiresPrerequisitesButKeepsRemainingDispa
 	}
 	secondEvidence := ExecutionEvidence{
 		EventID: "event-freshness-resource-change-second", WorkspaceID: "ws-1", RunID: "run-1", DispatchID: sealed.ActiveDispatch.ID,
-		AuthoritySnapshotID: sealed.ActiveDispatch.Transaction.AuthoritySnapshotID, OperationID: "write-2",
+		AuthoritySnapshotID: sealed.ActiveDispatch.Transaction.AuthoritySnapshotID, OperationID: secondOperationID,
 		Kind: runtimecontract.EvidenceKindStateChange, Status: ExecutionEvidenceStatusAccepted,
 	}
 	attachRuntimeTestOwnerReceipt(t, &repository.aggregate, &secondEvidence)

@@ -40,6 +40,7 @@ func (r *evidenceCommitCountingRepository) resetCounts() {
 func TestCommitEvidenceKeepsOneLoadAndOneTransitionCAS(t *testing.T) {
 	seed := &durableRuntimeStateRepository{aggregate: stateChangeAggregate(t)}
 	sealed := sealCandidateForTest(t, seed, stateChangeCandidate())
+	operationID := runtimeTestActiveOperationID(t, sealed, 0)
 	repository := &evidenceCommitCountingRepository{aggregate: seed.aggregate}
 	coordinator, err := NewDispatchCoordinator(repository)
 	if err != nil {
@@ -48,7 +49,7 @@ func TestCommitEvidenceKeepsOneLoadAndOneTransitionCAS(t *testing.T) {
 	evidence := ExecutionEvidence{
 		EventID: "event-transaction-count", WorkspaceID: "ws-1", RunID: "run-1",
 		DispatchID: sealed.ActiveDispatch.ID, AuthoritySnapshotID: sealed.ActiveDispatch.Transaction.AuthoritySnapshotID,
-		OperationID: "patch-1", Kind: runtimecontract.EvidenceKindStateChange, Status: ExecutionEvidenceStatusAccepted,
+		OperationID: operationID, Kind: runtimecontract.EvidenceKindStateChange, Status: ExecutionEvidenceStatusAccepted,
 	}
 	attachRuntimeTestOwnerReceipt(t, &repository.aggregate, &evidence)
 
@@ -73,7 +74,7 @@ func TestCommitEvidenceKeepsOneLoadAndOneTransitionCAS(t *testing.T) {
 	stale, err := coordinator.commitEvidence(context.Background(), ExecutionEvidence{
 		EventID: "event-transaction-stale", WorkspaceID: "ws-1", RunID: "run-1",
 		DispatchID: sealed.ActiveDispatch.ID, AuthoritySnapshotID: "authority-stale",
-		OperationID: "patch-1", Kind: runtimecontract.EvidenceKindStateChange, Status: ExecutionEvidenceStatusAccepted,
+		OperationID: operationID, Kind: runtimecontract.EvidenceKindStateChange, Status: ExecutionEvidenceStatusAccepted,
 	})
 	if err != nil || stale.Disposition != CommitDispositionStale {
 		t.Fatalf("stale evidence = %+v err=%v", stale, err)

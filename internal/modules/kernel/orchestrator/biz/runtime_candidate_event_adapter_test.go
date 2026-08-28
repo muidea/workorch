@@ -907,6 +907,7 @@ func sealedCandidateTestDecision(t *testing.T) runtimecontract.RuntimeDecision {
 			AcceptedEffectScopes: []runtimecontract.RuntimeEffectScope{runtimecontract.RuntimeEffectWorkspaceDurable, runtimecontract.RuntimeEffectRemoteDurable},
 			RequiredEffectScopes: []runtimecontract.RuntimeEffectScope{runtimecontract.RuntimeEffectWorkspaceDurable, runtimecontract.RuntimeEffectRemoteDurable},
 			CoverageWorkItemIDs:  []common.CoverageWorkItemID{"cwi-1"},
+			TargetRefs:           append([]string(nil), binding.TargetRefs...),
 		},
 	}, 0)
 	if err != nil {

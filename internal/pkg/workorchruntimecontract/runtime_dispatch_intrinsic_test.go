@@ -195,7 +195,7 @@ func TestRuntimeDispatchRecordValidateIntrinsicRejectsCoordinatedAuthoritySubsti
 		dispatch.OperationExecutions[0].ExecutionKey = StableRuntimeOperationExecutionKey(dispatch.WorkspaceID, dispatch.RunID, dispatch.ID, "op-1")
 		dispatch.OperationExecutions[0].AuthorityHash = StableRuntimeOperationExecutionAuthorityHash(dispatch.OperationExecutions[0])
 		dispatch.OperationAuthorityHash = StableRuntimeOperationExecutionAuthoritiesHash(dispatch.OperationExecutions)
-		if err := dispatch.ValidateIntrinsic(); err == nil || !strings.Contains(err.Error(), "dispatch authority hash mismatch") {
+		if err := dispatch.ValidateIntrinsic(); err == nil || !strings.Contains(err.Error(), "target authorization hash mismatch") {
 			t.Fatalf("coordinated candidate substitution error = %v", err)
 		}
 	})
@@ -295,6 +295,7 @@ func runtimeDispatchIntrinsicFixture(t *testing.T, attempt int) RuntimeDispatchR
 		TargetRefs: []string{"target.txt"},
 		Parameters: []OperationParameter{{Name: "content", String: &content}},
 	}}}}}
+	operation := candidate.StateChange.Operations[0].Operation
 	candidateHash := StableRuntimeCandidateHash(candidate)
 	dispatchID := StableRuntimeDispatchID(transaction, candidateHash)
 	execution := RuntimeOperationExecutionRecord{
@@ -307,12 +308,17 @@ func runtimeDispatchIntrinsicFixture(t *testing.T, attempt int) RuntimeDispatchR
 	}
 	execution.AuthorityHash = StableRuntimeOperationExecutionAuthorityHash(execution)
 	dispatch := RuntimeDispatchRecord{
-		ID:                     dispatchID,
-		WorkspaceID:            workspaceID,
-		RunID:                  runID,
-		Transaction:            transaction,
-		CandidateHash:          candidateHash,
-		Candidate:              candidate,
+		ID:                    dispatchID,
+		WorkspaceID:           workspaceID,
+		RunID:                 runID,
+		Transaction:           transaction,
+		CandidateHash:         candidateHash,
+		Candidate:             candidate,
+		CandidateManifestHash: "manifest-dispatch-intrinsic",
+		OperationTargetAuthorizations: []RuntimeDispatchOperationTargetAuthorization{{
+			OperationID: operation.ID, OperationHash: StableRuntimeOperationHash(operation), RequireTargets: true,
+			Target: RuntimeOperationTargetAuthorization{Policy: RuntimeOperationTargetPolicyExactTarget, ExactTargetRefs: []string{"target.txt"}},
+		}},
 		State:                  RuntimeDispatchStateSealed,
 		OperationExecutions:    []RuntimeOperationExecutionRecord{execution},
 		OperationAuthorityHash: StableRuntimeOperationExecutionAuthoritiesHash([]RuntimeOperationExecutionRecord{execution}),
@@ -336,6 +342,10 @@ func runtimeManagedValidationDispatchIntrinsicFixture(t *testing.T) RuntimeDispa
 		Parameters: []OperationParameter{{Name: "recipeId", String: &recipeID}},
 	}
 	dispatch.Candidate = RuntimeCandidate{Validation: &ValidationCandidate{Operations: []ValidationOperation{{Operation: operation}}}}
+	dispatch.OperationTargetAuthorizations = []RuntimeDispatchOperationTargetAuthorization{{
+		OperationID: operation.ID, OperationHash: StableRuntimeOperationHash(operation), RequireTargets: true,
+		Target: RuntimeOperationTargetAuthorization{Policy: RuntimeOperationTargetPolicyExactTarget, ExactTargetRefs: []string{"target.txt"}},
+	}}
 	dispatch.ValidationRecipes = []RuntimeValidationRecipe{{ID: recipeID, Command: "sh", Args: []string{"-c", "true"}, TimeoutMillis: 5000}}
 	dispatch.CandidateHash = StableRuntimeCandidateHash(dispatch.Candidate)
 	dispatch.ID = StableRuntimeDispatchID(dispatch.Transaction, dispatch.CandidateHash)

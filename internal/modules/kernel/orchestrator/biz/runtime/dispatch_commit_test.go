@@ -37,7 +37,7 @@ func TestDispatchCommitAdvancesEvidenceAndReducerExactlyOnce(t *testing.T) {
 	}
 	candidate := stateChangeCandidate()
 	sealed := sealCandidateForTest(t, repository, candidate)
-	if sealed.ActiveDispatch == nil || sealed.ActiveDispatch.Transaction != repository.aggregate.Decision.AuthorityTransaction() || sealed.ActiveDispatch.CandidateHash != runtimecontract.StableRuntimeCandidateHash(candidate) {
+	if sealed.ActiveDispatch == nil || sealed.ActiveDispatch.Transaction != repository.aggregate.Decision.AuthorityTransaction() || sealed.ActiveDispatch.CandidateHash != runtimecontract.StableRuntimeCandidateHash(sealed.ActiveDispatch.Candidate) {
 		t.Fatalf("sealed dispatch = %+v", sealed.ActiveDispatch)
 	}
 	stepInput := sealed.ActiveDispatch.StepInput()
@@ -47,7 +47,7 @@ func TestDispatchCommitAdvancesEvidenceAndReducerExactlyOnce(t *testing.T) {
 	evidence := ExecutionEvidence{
 		EventID: "event-state-change-1", WorkspaceID: "ws-1", RunID: "run-1",
 		DispatchID: sealed.ActiveDispatch.ID, AuthoritySnapshotID: sealed.ActiveDispatch.Transaction.AuthoritySnapshotID,
-		OperationID: "patch-1", Kind: runtimecontract.EvidenceKindStateChange, Status: ExecutionEvidenceStatusAccepted, SourceRef: "patch/1",
+		OperationID: runtimeTestActiveOperationID(t, sealed, 0), Kind: runtimecontract.EvidenceKindStateChange, Status: ExecutionEvidenceStatusAccepted, SourceRef: "patch/1",
 	}
 	attachRuntimeTestOwnerReceipt(t, &repository.aggregate, &evidence)
 	committed, err := coordinator.commitEvidence(context.Background(), evidence)
@@ -149,7 +149,7 @@ func TestDispatchCommitUsesPersistedReceiptEvidenceRatherThanEventCopy(t *testin
 	sealed := sealCandidateForTest(t, repository, runtimeTestBindCandidateToCurrentFocus(t, aggregate, stateChangeCandidate()))
 	evidence := ExecutionEvidence{
 		EventID: "event-receipt-is-authority", WorkspaceID: "ws-1", RunID: "run-1", DispatchID: sealed.ActiveDispatch.ID,
-		AuthoritySnapshotID: sealed.ActiveDispatch.Transaction.AuthoritySnapshotID, OperationID: "patch-1",
+		AuthoritySnapshotID: sealed.ActiveDispatch.Transaction.AuthoritySnapshotID, OperationID: runtimeTestActiveOperationID(t, sealed, 0),
 		Kind: runtimecontract.EvidenceKindStateChange, Status: ExecutionEvidenceStatusAccepted,
 		Evidence: runtimecontract.RuntimeOperationEvidence{Summary: "owner receipt evidence", Quality: common.EvidenceQualityValid},
 	}
@@ -329,7 +329,7 @@ func TestDispatchCommitAtomicallyReopensAndRequeuesCompletedDependency(t *testin
 	}
 	candidate := runtimeTestBindCandidateToCurrentFocus(t, aggregate, stateChangeCandidate())
 	sealed := sealCandidateForTest(t, repository, candidate)
-	evidence := ExecutionEvidence{EventID: "event-source-after-validation", WorkspaceID: "ws-1", RunID: "run-1", DispatchID: sealed.ActiveDispatch.ID, AuthoritySnapshotID: sealed.ActiveDispatch.Transaction.AuthoritySnapshotID, OperationID: "patch-1", Kind: runtimecontract.EvidenceKindStateChange, Status: ExecutionEvidenceStatusAccepted, SourceRef: "patch/1"}
+	evidence := ExecutionEvidence{EventID: "event-source-after-validation", WorkspaceID: "ws-1", RunID: "run-1", DispatchID: sealed.ActiveDispatch.ID, AuthoritySnapshotID: sealed.ActiveDispatch.Transaction.AuthoritySnapshotID, OperationID: runtimeTestActiveOperationID(t, sealed, 0), Kind: runtimecontract.EvidenceKindStateChange, Status: ExecutionEvidenceStatusAccepted, SourceRef: "patch/1"}
 	attachRuntimeTestOwnerReceipt(t, &repository.aggregate, &evidence)
 	committed, err := coordinator.commitEvidence(context.Background(), evidence)
 	if err != nil {
@@ -363,7 +363,7 @@ func TestRejectedValidationEvidenceAtomicallyReturnsToStateChange(t *testing.T) 
 	commitEvidence := ExecutionEvidence{
 		EventID: "event-validation-failed", WorkspaceID: "ws-1", RunID: "run-1",
 		DispatchID: sealed.ActiveDispatch.ID, AuthoritySnapshotID: sealed.ActiveDispatch.Transaction.AuthoritySnapshotID,
-		OperationID: "validate-1", Kind: runtimecontract.EvidenceKindValidation, Status: ExecutionEvidenceStatusRejected,
+		OperationID: runtimeTestActiveOperationID(t, sealed, 0), Kind: runtimecontract.EvidenceKindValidation, Status: ExecutionEvidenceStatusRejected,
 		Failure: &runtimecontract.FailureFact{Class: runtimecontract.FailureClassBuildFailure, Signature: "build-failed", Message: "main redeclared", TargetRefs: []string{"main.go"}},
 	}
 	attachRuntimeTestOwnerReceipt(t, &repository.aggregate, &commitEvidence)
@@ -395,12 +395,12 @@ func TestRejectedValidationEntryDoesNotBootstrapUngroundedFailureTarget(t *testi
 	repository := &durableRuntimeStateRepository{aggregate: aggregate}
 	coordinator, _ := NewDispatchCoordinator(repository)
 	candidate := validationCandidate()
-	candidate.Validation.Operations[0].Operation.TargetRefs = []string{"validation-entry.go"}
+	candidate.Validation.Operations[0].Operation.TargetRefs = []string{"main.go"}
 	sealed := sealCandidateForTest(t, repository, candidate)
 	evidence := ExecutionEvidence{
 		EventID: "event-validation-entry-failed", WorkspaceID: "ws-1", RunID: "run-1",
 		DispatchID: sealed.ActiveDispatch.ID, AuthoritySnapshotID: sealed.ActiveDispatch.Transaction.AuthoritySnapshotID,
-		OperationID: "validate-1", Kind: runtimecontract.EvidenceKindValidation, Status: ExecutionEvidenceStatusRejected,
+		OperationID: runtimeTestActiveOperationID(t, sealed, 0), Kind: runtimecontract.EvidenceKindValidation, Status: ExecutionEvidenceStatusRejected,
 		Failure: &runtimecontract.FailureFact{Class: runtimecontract.FailureClassBuildFailure, Signature: "validation-entry-failed", Message: "check failed", TargetRefs: []string{"validation-entry.go"}},
 	}
 	attachRuntimeTestOwnerReceipt(t, &repository.aggregate, &evidence)
@@ -430,14 +430,42 @@ func TestRejectedValidationScopeMemberDoesNotBecomeFailureTarget(t *testing.T) {
 	}
 	selection.SnapshotID = runtimecontract.StableRuntimeTargetSelectionSnapshotID(selection)
 	aggregate.Facts.Resources.TargetSelection = &selection
+	shellCatalogFound := false
+	for index := range aggregate.Facts.Resources.OperationAdmissibilities {
+		catalog := aggregate.Facts.Resources.OperationAdmissibilities[index]
+		if catalog.OwnerModuleID != runtimecontract.RuntimeModuleShell || !containsString(catalog.OperationKinds, runtimecontract.RuntimeBlockKindManagedValidationSession) {
+			continue
+		}
+		catalog.TargetRefs = append([]string(nil), selection.TargetRefs...)
+		catalog.SelectorRefs = []string{selection.SelectorRef}
+		catalog.OperationVariants = []runtimecontract.RuntimeOperationAdmissibilityVariant{{
+			Kind:                  runtimecontract.RuntimeBlockKindManagedValidationSession,
+			AllowedTargetPolicies: []runtimecontract.RuntimeOperationTargetPolicy{runtimecontract.RuntimeOperationTargetPolicyExistingOwnerScope},
+			SelectorRefs:          []string{selection.SelectorRef},
+		}}
+		catalog.SnapshotID = runtimecontract.StableRuntimeOperationAdmissibilitySnapshotID(catalog)
+		aggregate.Facts.Resources.OperationAdmissibilities[index] = catalog
+		shellCatalogFound = true
+		break
+	}
+	if !shellCatalogFound {
+		t.Fatal("validation fixture requires the Shell managed-validation owner catalog")
+	}
 	runtimeTestSealCurrentFocusBindingTargetSurface(&aggregate.Facts, runtimeTestBindingTargetSurface{
 		SelectorRef: selection.SelectorRef, SelectorOwnerRef: selection.OwnerModuleID, SelectorSubjectRef: selection.TargetRole,
 	})
 	bindCurrentFocusTargetSelection(&aggregate.Facts)
+	decision, err := ReduceRuntimeState(aggregate.Facts, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	aggregate.Decision = decision
 	repository := &durableRuntimeStateRepository{aggregate: aggregate}
 	coordinator, _ := NewDispatchCoordinator(repository)
 	candidate := validationCandidate()
 	candidate.Validation.Operations[0].Operation.TargetRefs = []string{"implementation.go"}
+	candidate = runtimeTestMustDeriveCandidateAuthority(t, aggregate, candidate)
+	operationID := candidate.Validation.Operations[0].Operation.ID
 	sealed := sealCandidateForTest(t, repository, candidate)
 	if sealed.Facts.Repair.ValidationOnlyRetries != 0 {
 		t.Fatalf("initial validation consumed retry budget: %+v", sealed.Facts.Repair)
@@ -445,7 +473,7 @@ func TestRejectedValidationScopeMemberDoesNotBecomeFailureTarget(t *testing.T) {
 	evidence := ExecutionEvidence{
 		EventID: "event-validation-scope-member-failed", WorkspaceID: "ws-1", RunID: "run-1",
 		DispatchID: sealed.ActiveDispatch.ID, AuthoritySnapshotID: sealed.ActiveDispatch.Transaction.AuthoritySnapshotID,
-		OperationID: "validate-1", Kind: runtimecontract.EvidenceKindValidation, Status: ExecutionEvidenceStatusRejected,
+		OperationID: operationID, Kind: runtimecontract.EvidenceKindValidation, Status: ExecutionEvidenceStatusRejected,
 		Failure: &runtimecontract.FailureFact{Class: runtimecontract.FailureClassBuildFailure, Signature: "validation-scope-member-failed", Message: "check failed", TargetRefs: []string{"implementation.go"}},
 	}
 	attachRuntimeTestOwnerReceipt(t, &repository.aggregate, &evidence)
@@ -506,12 +534,12 @@ func TestRejectedValidationOwnerObservationBindsCompatibleTarget(t *testing.T) {
 	repository := &durableRuntimeStateRepository{aggregate: aggregate}
 	coordinator, _ := NewDispatchCoordinator(repository)
 	candidate := validationCandidate()
-	candidate.Validation.Operations[0].Operation.TargetRefs = []string{"validation-entry.go"}
+	candidate.Validation.Operations[0].Operation.TargetRefs = []string{"main.go"}
 	sealed := sealCandidateForTest(t, repository, candidate)
 	evidence := ExecutionEvidence{
 		EventID: "event-observed-target-failed", WorkspaceID: "ws-1", RunID: "run-1",
 		DispatchID: sealed.ActiveDispatch.ID, AuthoritySnapshotID: sealed.ActiveDispatch.Transaction.AuthoritySnapshotID,
-		OperationID: "validate-1", Kind: runtimecontract.EvidenceKindValidation, Status: ExecutionEvidenceStatusRejected,
+		OperationID: runtimeTestActiveOperationID(t, sealed, 0), Kind: runtimecontract.EvidenceKindValidation, Status: ExecutionEvidenceStatusRejected,
 		Failure: &runtimecontract.FailureFact{
 			Class: runtimecontract.FailureClassBuildFailure, Signature: "mcp-observed-failure", Message: "capability observed failure",
 			TargetRefs: []string{"implementation.go"},
@@ -581,7 +609,7 @@ func TestOwnerFailureObservationRetargetsExplicitFocusAfterSnapshotRestart(t *te
 	oldAuthority := sealed.Decision.AuthoritySnapshot.ID
 	evidence := ExecutionEvidence{
 		EventID: "event-owner-retarget", WorkspaceID: "ws-1", RunID: "run-1", DispatchID: sealed.ActiveDispatch.ID,
-		AuthoritySnapshotID: sealed.ActiveDispatch.Transaction.AuthoritySnapshotID, OperationID: "validate-1",
+		AuthoritySnapshotID: sealed.ActiveDispatch.Transaction.AuthoritySnapshotID, OperationID: runtimeTestActiveOperationID(t, sealed, 0),
 		Kind: runtimecontract.EvidenceKindValidation, Status: ExecutionEvidenceStatusRejected,
 		Failure: &runtimecontract.FailureFact{
 			Class: runtimecontract.FailureClassBuildFailure, Signature: "observed-implementation-failure", Message: "owner observed implementation repair target",
@@ -735,12 +763,12 @@ func TestRejectedValidationOwnerObservationRejectsMismatchedRole(t *testing.T) {
 	repository := &durableRuntimeStateRepository{aggregate: aggregate}
 	coordinator, _ := NewDispatchCoordinator(repository)
 	candidate := validationCandidate()
-	candidate.Validation.Operations[0].Operation.TargetRefs = []string{"validation-entry.go"}
+	candidate.Validation.Operations[0].Operation.TargetRefs = []string{"main.go"}
 	sealed := sealCandidateForTest(t, repository, candidate)
 	evidence := ExecutionEvidence{
 		EventID: "event-observed-target-role-mismatch", WorkspaceID: "ws-1", RunID: "run-1",
 		DispatchID: sealed.ActiveDispatch.ID, AuthoritySnapshotID: sealed.ActiveDispatch.Transaction.AuthoritySnapshotID,
-		OperationID: "validate-1", Kind: runtimecontract.EvidenceKindValidation, Status: ExecutionEvidenceStatusRejected,
+		OperationID: runtimeTestActiveOperationID(t, sealed, 0), Kind: runtimecontract.EvidenceKindValidation, Status: ExecutionEvidenceStatusRejected,
 		Failure: &runtimecontract.FailureFact{
 			Class: runtimecontract.FailureClassBuildFailure, Signature: "mcp-observed-role-mismatch", Message: "capability observed failure",
 			TargetRefs: []string{"implementation.go"},
@@ -793,7 +821,7 @@ func TestRejectedTextReplaceConsumesRepairBudgetAndRequiresFreshTargetSnapshot(t
 	evidence := ExecutionEvidence{
 		EventID: "event-patch-conflict", WorkspaceID: "ws-1", RunID: "run-1",
 		DispatchID: sealed.ActiveDispatch.ID, AuthoritySnapshotID: sealed.ActiveDispatch.Transaction.AuthoritySnapshotID,
-		OperationID: "patch-1", Kind: runtimecontract.EvidenceKindStateChange, Status: ExecutionEvidenceStatusRejected,
+		OperationID: runtimeTestActiveOperationID(t, sealed, 0), Kind: runtimecontract.EvidenceKindStateChange, Status: ExecutionEvidenceStatusRejected,
 		Failure: &runtimecontract.FailureFact{
 			Class: runtimecontract.FailureClassExecutionFailure, Code: "text_replace_not_found",
 			Signature: "patch-text-replace-not-found", Message: "oldText not found", TargetRefs: []string{"main.go"},
@@ -848,7 +876,7 @@ func TestCoordinatorRestartRecoversPersistedDispatchWithoutProcessState(t *testi
 	commitEvidence := ExecutionEvidence{
 		EventID: "event-after-restart", WorkspaceID: "ws-1", RunID: "run-1",
 		DispatchID: sealed.ActiveDispatch.ID, AuthoritySnapshotID: sealed.ActiveDispatch.Transaction.AuthoritySnapshotID,
-		OperationID: "patch-1", Kind: runtimecontract.EvidenceKindStateChange, Status: ExecutionEvidenceStatusAccepted,
+		OperationID: runtimeTestActiveOperationID(t, sealed, 0), Kind: runtimecontract.EvidenceKindStateChange, Status: ExecutionEvidenceStatusAccepted,
 	}
 	attachRuntimeTestOwnerReceipt(t, &repository.aggregate, &commitEvidence)
 	result, err := second.commitEvidence(context.Background(), commitEvidence)
@@ -870,17 +898,24 @@ func TestDispatchCoordinatorCommitsMultiOperationDispatchOnlyAfterAllOperations(
 	candidate := runtimecontract.RuntimeCandidate{StateChange: &runtimecontract.StateChangeCandidate{Operations: []runtimecontract.StateChangingOperation{
 		{Operation: patchApplyTestOperation("write-1", "main.go")},
 		{Operation: func() runtimecontract.RuntimeOperation {
-			operation := patchApplyTestOperation("write-2", "other.go")
-			// The exact main.go binding must never be reused by unrelated work.
-			operation.BindingRefs = nil
-			operation.DependsOn = []string{"write-1"}
+			operation := patchApplyTestOperation("write-2", "main.go")
+			// Give the second sealed operation a distinct execution shape while
+			// retaining the exact proof binding required by the manifest.
+			otherContent := "second update\n"
+			for index := range operation.Parameters {
+				if operation.Parameters[index].Name == "content" {
+					operation.Parameters[index].String = &otherContent
+				}
+			}
 			return operation
 		}()},
 	}}}
 	sealed := sealCandidateForTest(t, repository, candidate)
+	firstOperationID := runtimeTestActiveOperationID(t, sealed, 0)
+	secondOperationID := runtimeTestActiveOperationID(t, sealed, 1)
 	firstEvidence := ExecutionEvidence{
 		EventID: "event-write-1", WorkspaceID: "ws-1", RunID: "run-1", DispatchID: sealed.ActiveDispatch.ID,
-		AuthoritySnapshotID: sealed.ActiveDispatch.Transaction.AuthoritySnapshotID, OperationID: "write-1",
+		AuthoritySnapshotID: sealed.ActiveDispatch.Transaction.AuthoritySnapshotID, OperationID: firstOperationID,
 		Kind: runtimecontract.EvidenceKindStateChange, Status: ExecutionEvidenceStatusAccepted,
 	}
 	attachRuntimeTestOwnerReceipt(t, &repository.aggregate, &firstEvidence)
@@ -904,7 +939,7 @@ func TestDispatchCoordinatorCommitsMultiOperationDispatchOnlyAfterAllOperations(
 	}
 	secondEvidence := ExecutionEvidence{
 		EventID: "event-write-2", WorkspaceID: "ws-1", RunID: "run-1", DispatchID: sealed.ActiveDispatch.ID,
-		AuthoritySnapshotID: sealed.ActiveDispatch.Transaction.AuthoritySnapshotID, OperationID: "write-2",
+		AuthoritySnapshotID: sealed.ActiveDispatch.Transaction.AuthoritySnapshotID, OperationID: secondOperationID,
 		Kind: runtimecontract.EvidenceKindStateChange, Status: ExecutionEvidenceStatusAccepted,
 	}
 	attachRuntimeTestOwnerReceipt(t, &repository.aggregate, &secondEvidence)
@@ -939,7 +974,7 @@ func TestDispatchCommitAdvancesToNextCoverageFocusDeterministically(t *testing.T
 	commitEvidence := ExecutionEvidence{
 		EventID: "event-focus-1", WorkspaceID: "ws-1", RunID: "run-1",
 		DispatchID: sealed.ActiveDispatch.ID, AuthoritySnapshotID: sealed.ActiveDispatch.Transaction.AuthoritySnapshotID,
-		OperationID: "patch-1", Kind: runtimecontract.EvidenceKindStateChange, Status: ExecutionEvidenceStatusAccepted,
+		OperationID: runtimeTestActiveOperationID(t, sealed, 0), Kind: runtimecontract.EvidenceKindStateChange, Status: ExecutionEvidenceStatusAccepted,
 	}
 	attachRuntimeTestOwnerReceipt(t, &repository.aggregate, &commitEvidence)
 	result, err := coordinator.commitEvidence(context.Background(), commitEvidence)
@@ -1056,6 +1091,10 @@ func sealCandidateWithFeasibilitiesForTest(t *testing.T, repository *durableRunt
 			runtimecontract.RuntimeCandidateContextForDecision(aggregate.Facts, aggregate.Decision, nil),
 		),
 	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	candidate, err = runtimecontract.DeriveRuntimeCandidateOperationAuthority(manifest, candidate)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1215,7 +1254,28 @@ func TestSealDispatchCreatesOperationExecutionRecords(t *testing.T) {
 			ID: "write-1", Kind: "file/write", BindingRefs: []string{"binding/test/runtime/focus-v2/cwi-v2"}, TargetRefs: []string{"target.txt"}, Parameters: runtimeFileWriteParameters("state"),
 		},
 	}}}}
-	dispatch, err := SealDispatchWithActivation(decision, candidate, facts.Activation)
+	manifest, err := runtimecontract.BuildRuntimeCandidateContractManifest(
+		decision,
+		runtimecontract.RuntimeCandidateManifestOwnerFactsFromContext(
+			runtimecontract.RuntimeCandidateContextForDecision(facts, decision, nil),
+		),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	candidate, err = runtimecontract.DeriveRuntimeCandidateOperationAuthority(manifest, candidate)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dispatch, err := SealDispatchWithManifestAndOwnerAuthority(
+		decision,
+		candidate,
+		runtimecontract.RuntimeActivationForFacts(facts),
+		manifest,
+		nil,
+		facts.Resources.OperationAdmissibilities,
+		facts.Resources.PrerequisiteObservations,
+	)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -96,11 +96,25 @@ func TestShellOwnerObservedFailureTargetBindsThroughEventHubAndFileSnapshot(t *t
 	recipeID := policy.ID
 	candidate := runtimecontract.RuntimeCandidate{Validation: &runtimecontract.ValidationCandidate{Operations: []runtimecontract.ValidationOperation{{Operation: runtimecontract.RuntimeOperation{
 		ID: "validate-with-observed-target", Kind: runtimecontract.RuntimeBlockKindManagedValidationSession,
-		CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-1"}, TargetRefs: []string{"validation-entry.sh"},
-		Parameters: []runtimecontract.OperationParameter{{Name: "recipeId", String: &recipeID}},
+		CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-1"},
+		Parameters:          []runtimecontract.OperationParameter{{Name: "recipeId", String: &recipeID}},
 	}}}}}
+	manifest, err := runtimecontract.BuildRuntimeCandidateContractManifest(
+		aggregate.Decision,
+		runtimecontract.RuntimeCandidateManifestOwnerFactsFromContext(
+			runtimecontract.RuntimeCandidateContextForDecision(aggregate.Facts, aggregate.Decision, nil),
+		),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	candidate, err = runtimecontract.DeriveRuntimeCandidateOperationAuthority(manifest, candidate)
+	if err != nil {
+		t.Fatal(err)
+	}
+	canonicalOperation := candidate.Validation.Operations[0].Operation
 	sealedAggregate := sealCandidateWithFeasibilitiesForTest(t, repository, candidate, []runtimecontract.RuntimeCandidateFeasibilityRecord{{
-		OperationID: candidate.Validation.Operations[0].Operation.ID, AdmissibilitySnapshotID: shellCatalog.SnapshotID,
+		OperationID: canonicalOperation.ID, AdmissibilitySnapshotID: shellCatalog.SnapshotID,
 		AcquisitionBinding: shellCatalog.AcquisitionBinding,
 		Observation:        &runtimecontract.RuntimeOwnerFeasibilityObservation{Outcome: runtimecontract.RuntimeOwnerFeasibilityFeasible},
 	}})

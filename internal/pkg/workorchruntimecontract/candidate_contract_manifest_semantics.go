@@ -202,18 +202,9 @@ func validateRuntimeCandidateOperationAgainstManifest(manifest RuntimeCandidateC
 	if err := validateRuntimeCandidateManifestTargetCardinality(operation, operationManifest.TargetCardinality); err != nil {
 		return runtimeCandidateContractDiagnostic(operation.ID, path+".targetRefs", runtimeCandidateManifestTargetCardinalityActual(operation.TargetRefs), operationManifest.AllowedOperationFields, []string{string(operationManifest.TargetCardinality)}, nil, err)
 	}
-	// All finite target sets are enforced at the candidate boundary. A
-	// selector-only existing_owner_scope intentionally has no finite membership
-	// set and remains subject to owner feasibility.
-	switch operationManifest.Target.Normalized().Policy {
-	case RuntimeOperationTargetPolicyExactTarget, RuntimeOperationTargetPolicyProspectiveOwnerTarget, RuntimeOperationTargetPolicyExistingOwnerScope:
-		if allowedTargets := operationManifest.Target.AllowedTargetRefs(); len(allowedTargets) != 0 {
-			for _, targetRef := range operation.TargetRefs {
-				if !runtimeCandidatePayloadContains(allowedTargets, targetRef) {
-					return runtimeCandidateContractDiagnostic(operation.ID, path+".targetRefs", targetRef, allowedTargets, nil, nil, nil)
-				}
-			}
-		}
+	if err := ValidateRuntimeOperationTargetsAgainstAuthorization(operationManifest.Target, operation.TargetRefs, operationManifest.RequireTargetRefs); err != nil {
+		actual, allowed, required := runtimeOperationTargetAuthorizationDiagnostic(err)
+		return runtimeCandidateContractDiagnostic(operation.ID, path+".targetRefs", actual, allowed, required, nil, err)
 	}
 	// Whether the renderer emits the optional dependsOn field is a wire-schema
 	// concern. The decoded graph is instead checked by ValidateWithActivation,

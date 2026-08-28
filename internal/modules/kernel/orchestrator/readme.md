@@ -4,7 +4,7 @@ Status: active
 
 Type: kernel-module-implementation-contract
 
-Last Verified: 2026-08-27
+Last Verified: 2026-08-28
 
 ## 功能范围与边界
 
@@ -250,6 +250,15 @@ deployed run ID 只属于 archive regression evidence，不定义当前候选、
   private internal event 可以封存 binding。该 volatile repair generation 不得改变 C0～C2 或 stable-prefix identity。
 - renderer、wire schema、strict decoder、candidate evaluator、owner feasibility command 与 fixture 只消费该
   manifest 及其 hash，不得从 profile、focus、raw reason 或临时 inventory 重建第二份允许集。
+- operation target authorization 只由 `workorchruntimecontract` 的 owner-neutral 纯 matcher 解释，manifest strict decoder、
+  candidate evaluator、owner feasibility preflight、dispatch seal/fresh-load 与 `biz/internal/proof` receipt credit 必须复用同一结果。receipt target 必须与
+  sealed operation 精确相等；`exact_target` operation 只要求其全部 target 属于 sealed bounded set，不要求每条 receipt
+  等于 binding 的完整 target set。完整集合完成义务只由 sealed required-sequence/collective receipt-set 或 CWI
+  `all_of` 表达，禁止在 SM-2 credit 阶段另建 full-set equality 分支。
+- final manifest seal 把 `CandidateManifestHash` 与每项 operation 的最小 `OperationTargetAuthorizations` preimage 一并纳入
+  `DispatchAuthorityHash`。该值只在 final seal 创建；Run 只 opaque 持久化、governance resume 只复制、fresh-load 只调用
+  canonical matcher 重验。禁止从 mutable current facts 重编译或增量更新；它是同一 SM-3 dispatch authority 的 sealed
+  preimage，不是第二 target owner。缺字段的旧 operation dispatch fail-closed，不增加兼容读取分支。
 - `JSONSchemaResponse` 只决定 LLM adapter 是否可发送 provider format，是可选 wire acceleration，不是 SM-3 authority。
   format on/off、provider声称 schema accepted 或未声明 capability 的所有 complete output 都必须经过同一 strict local
   decoder/schema/evaluator；structured-output failure 不授权 adapter fallback 或第二次 physical call。

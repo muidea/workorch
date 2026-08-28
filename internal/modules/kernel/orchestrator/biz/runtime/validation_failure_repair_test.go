@@ -127,11 +127,13 @@ func runtimeValidationFailureRepairShellCatalogForTest() runtimecontract.Runtime
 	return catalog
 }
 
-func runtimeRejectedValidationEvidenceForTest(sealed RuntimeAggregate, eventID string, diagnosticClass string) ExecutionEvidence {
+func runtimeRejectedValidationEvidenceForTest(t *testing.T, sealed RuntimeAggregate, eventID string, diagnosticClass string) ExecutionEvidence {
+	t.Helper()
+	operationID := runtimeTestCandidateOperationID(t, sealed.ActiveDispatch.Candidate, 0)
 	return ExecutionEvidence{
 		EventID: eventID, WorkspaceID: sealed.Facts.WorkspaceID, RunID: sealed.Facts.RunID,
 		DispatchID: sealed.ActiveDispatch.ID, AuthoritySnapshotID: sealed.ActiveDispatch.Transaction.AuthoritySnapshotID,
-		OperationID: "validate-1", Kind: runtimecontract.EvidenceKindValidation, Status: ExecutionEvidenceStatusRejected,
+		OperationID: operationID, Kind: runtimecontract.EvidenceKindValidation, Status: ExecutionEvidenceStatusRejected,
 		Failure: &runtimecontract.FailureFact{
 			Class: runtimecontract.FailureClassBuildFailure, Code: "validation_failed", Signature: "validation-failure/typed/1", Message: "typed validation failed",
 			ValidationDiagnostic: &runtimecontract.ValidationFailureDiagnostic{Class: diagnosticClass},
@@ -147,7 +149,7 @@ func TestRejectedTypedValidationWithoutFailureTargetOpensProfileRepairGeneration
 		t.Fatal(err)
 	}
 	sealed := sealCandidateForTest(t, repository, validationCandidate())
-	evidence := runtimeRejectedValidationEvidenceForTest(sealed, "event-validation-profile-repair", runtimecontract.ValidationDiagnosticBuildFailed)
+	evidence := runtimeRejectedValidationEvidenceForTest(t, sealed, "event-validation-profile-repair", runtimecontract.ValidationDiagnosticBuildFailed)
 	attachRuntimeTestOwnerReceipt(t, &repository.aggregate, &evidence)
 	committed, err := coordinator.commitEvidence(context.Background(), evidence)
 	if err != nil {
@@ -210,13 +212,14 @@ func TestRejectedValidationObservationWaitsForFileConfirmationBeforeSemanticRepa
 	observation := runtimecontract.RuntimeValidationFailureObservation{
 		WorkspaceID: sealed.Facts.WorkspaceID, RunID: sealed.Facts.RunID,
 		AuthoritySnapshotID: sealed.ActiveDispatch.Transaction.AuthoritySnapshotID,
-		DispatchID:          sealed.ActiveDispatch.ID, OperationID: "validate-1",
-		FailureSignature: "validation-failure/owner-observation/1", TargetRole: "semantic_proof_target",
+		DispatchID:          sealed.ActiveDispatch.ID,
+		OperationID:         runtimeTestCandidateOperationID(t, sealed.ActiveDispatch.Candidate, 0),
+		FailureSignature:    "validation-failure/owner-observation/1", TargetRole: "semantic_proof_target",
 		DiagnosticClass:     runtimecontract.ValidationDiagnosticBuildFailed,
 		CandidateTargetRefs: []string{"main.go"}, ValidationScopeTargetRefs: []string{"main.go"},
 		DiagnosticHash: strings.Repeat("d", 64),
 	}
-	evidence := runtimeRejectedValidationEvidenceForTest(sealed, "event-validation-owner-observation", runtimecontract.ValidationDiagnosticBuildFailed)
+	evidence := runtimeRejectedValidationEvidenceForTest(t, sealed, "event-validation-owner-observation", runtimecontract.ValidationDiagnosticBuildFailed)
 	evidence.Failure.Signature = observation.FailureSignature
 	evidence.Failure.ValidationFailureObservation = &observation
 	attachRuntimeTestOwnerReceipt(t, &repository.aggregate, &evidence)
@@ -495,7 +498,7 @@ func TestValidationFailureRepairManifestIdentityIsRepairAwareAndFailClosed(t *te
 		t.Fatal(err)
 	}
 	sealed := sealCandidateForTest(t, repository, validationCandidate())
-	evidence := runtimeRejectedValidationEvidenceForTest(sealed, "event-validation-repair-identity", runtimecontract.ValidationDiagnosticBuildFailed)
+	evidence := runtimeRejectedValidationEvidenceForTest(t, sealed, "event-validation-repair-identity", runtimecontract.ValidationDiagnosticBuildFailed)
 	attachRuntimeTestOwnerReceipt(t, &repository.aggregate, &evidence)
 	opened, err := coordinator.commitEvidence(context.Background(), evidence)
 	if err != nil {
@@ -553,7 +556,7 @@ func TestValidationFailureRepairProductionReceiptReopensFreshValidationAndProfil
 		t.Fatal(err)
 	}
 	sealedValidation := sealCandidateForTest(t, repository, validationCandidate())
-	firstRejection := runtimeRejectedValidationEvidenceForTest(sealedValidation, "event-validation-repair-cycle-1", runtimecontract.ValidationDiagnosticBuildFailed)
+	firstRejection := runtimeRejectedValidationEvidenceForTest(t, sealedValidation, "event-validation-repair-cycle-1", runtimecontract.ValidationDiagnosticBuildFailed)
 	attachRuntimeTestOwnerReceipt(t, &repository.aggregate, &firstRejection)
 	opened, err := coordinator.commitEvidence(context.Background(), firstRejection)
 	if err != nil {
@@ -621,6 +624,10 @@ func TestValidationFailureRepairProductionReceiptReopensFreshValidationAndProfil
 		})
 	}
 	sealedRepairDispatch := sealCandidateWithFeasibilitiesForTest(t, repository, repairCandidate, repairFeasibilities)
+	repairOperations = candidateRuntimeOperations(sealedRepairDispatch.ActiveDispatch.Candidate)
+	if len(repairOperations) != len(requiredSequence) {
+		t.Fatalf("sealed repair operation count = %d, want %d", len(repairOperations), len(requiredSequence))
+	}
 	repairEvidence := func(operation runtimecontract.RuntimeOperation, eventID string) ExecutionEvidence {
 		return ExecutionEvidence{
 			EventID: eventID, WorkspaceID: sealedRepairDispatch.Facts.WorkspaceID, RunID: sealedRepairDispatch.Facts.RunID,
@@ -753,8 +760,7 @@ func TestValidationFailureRepairProductionReceiptReopensFreshValidationAndProfil
 		Parameters: []runtimecontract.OperationParameter{{Name: "recipeId", String: &recipeID}},
 	}}}}}
 	sealedSecondValidation := sealCandidateForTest(t, repository, secondValidationCandidate)
-	secondRejection := runtimeRejectedValidationEvidenceForTest(sealedSecondValidation, "event-validation-repair-cycle-2", runtimecontract.ValidationDiagnosticBuildFailed)
-	secondRejection.OperationID = "validate-repair-cycle-2"
+	secondRejection := runtimeRejectedValidationEvidenceForTest(t, sealedSecondValidation, "event-validation-repair-cycle-2", runtimecontract.ValidationDiagnosticBuildFailed)
 	attachRuntimeTestOwnerReceipt(t, &repository.aggregate, &secondRejection)
 	historyCount := len(repository.aggregate.SemanticPlanning.History)
 	sessionCount := len(repository.aggregate.CandidateRequestSessions)

@@ -285,7 +285,12 @@ func GroundedTargetFailure(facts runtimecontract.RuntimeFacts, decision runtimec
 			if descriptor.OwnerModuleID == selection.OwnerModuleID && len(operation.TargetRefs) != 0 {
 				continue
 			}
-			if operationAllowsTargetPolicy(facts, operation, runtimecontract.RuntimeOperationTargetPolicyExistingOwnerScope) && grounding.TargetRefsAllWithin(operation.TargetRefs, allowedTargets) {
+			targetAuthorization := runtimecontract.RuntimeOperationTargetAuthorization{
+				Policy:               runtimecontract.RuntimeOperationTargetPolicyExistingOwnerScope,
+				OwnerScopeTargetRefs: allowedTargets,
+			}
+			if operationAllowsTargetPolicy(facts, operation, runtimecontract.RuntimeOperationTargetPolicyExistingOwnerScope) &&
+				runtimecontract.ValidateRuntimeOperationTargetsAgainstAuthorization(targetAuthorization, operation.TargetRefs, true) == nil {
 				continue
 			}
 			return allowedTargetsFailure(

@@ -2,13 +2,178 @@ package runtime
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"sync"
 	"testing"
 
+	"github.com/muidea/workorch/internal/modules/kernel/orchestrator/biz/internal/semanticplan"
 	"github.com/muidea/workorch/internal/pkg/common"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
+
+// C12/T30: an exact-target binding is a bounded authorization set, not a
+// requirement that every individual operation and receipt repeat the complete
+// set. This exercises the production semantic compiler, SM-3 manifest/
+// candidate compiler and sealed dispatch before SM-2 derives credit from the
+// two singleton owner receipts.
+func TestCoverageEvidenceBindingMultiTargetExactOperationsCreditAndRecoverExactlyOnce(t *testing.T) {
+	ctx := context.Background()
+	targets := []string{"go.mod", "main.go", "semantic_test.go"}
+	controller, repository, aggregate := sealMultiTargetExactBindingForTest(t, targets)
+	binding := aggregate.Facts.Focus.CoverageEvidenceBindings[0]
+	if !sameRuntimeTargetRefs(binding.TargetRefs, targets) || len(binding.ProspectiveTargetRefs) != 0 {
+		t.Fatalf("semantic compiler did not seal the exact target set: %+v", binding)
+	}
+
+	candidate := multiTargetExactCandidate(binding.ID, "main.go", "semantic_test.go")
+	sealed, err := beginAndAcceptCandidate(t, controller, aggregate, candidate)
+	if err != nil {
+		t.Fatal(err)
+	}
+	mainOperationID := runtimeTestActiveOperationIDForTarget(t, sealed, "main.go")
+	semanticOperationID := runtimeTestActiveOperationIDForTarget(t, sealed, "semantic_test.go")
+	if mainOperationID == semanticOperationID {
+		t.Fatalf("distinct singleton targets shared operation identity %q", mainOperationID)
+	}
+	for _, operation := range candidateRuntimeOperations(sealed.ActiveDispatch.Candidate) {
+		if len(operation.TargetRefs) != 1 || len(operation.BindingRefs) != 1 || operation.BindingRefs[0] != binding.ID || operation.TargetRefs[0] == "go.mod" {
+			t.Fatalf("SM-3 did not seal a binding-authorized proper subset operation: %+v", operation)
+		}
+	}
+
+	// The first owner effect and receipt are durable, then the process is lost
+	// before SM-3 can project the receipt into SM-2 evidence.
+	claimed, err := controller.claimOperationExecution(ctx, aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, mainOperationID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	execution, found := operationExecutionRecord(claimed.ActiveDispatch.OperationExecutions, mainOperationID)
+	if !found {
+		t.Fatal("claimed exact-target execution is missing")
+	}
+	firstReceipt := runtimecontract.RuntimeOperationReceipt{
+		ExecutionKey: execution.ExecutionKey, OperationID: execution.OperationID,
+		Outcome: runtimecontract.RuntimeOperationOutcomeAccepted, ObservedEffectScope: runtimecontract.RuntimeEffectWorkspaceDurable,
+		Changed: true, TargetRefs: []string{"main.go"},
+		Evidence: runtimecontract.RuntimeOperationEvidence{Summary: "main.go owner effect committed"},
+	}
+	if _, _, err := controller.commitOperationReceipt(ctx, aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, sealed.ActiveDispatch.ID, execution.Fence, firstReceipt); err != nil {
+		t.Fatal(err)
+	}
+
+	restarted, err := NewRuntimeController(repository)
+	if err != nil {
+		t.Fatal(err)
+	}
+	executor := &recordingOperationExecutor{owner: restarted}
+	completed, err := restarted.executeActiveDispatch(ctx, aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, executor)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(executor.requests) != 1 || executor.requests[0].Operation.ID != semanticOperationID ||
+		!sameRuntimeTargetRefs(executor.requests[0].Operation.TargetRefs, []string{"semantic_test.go"}) {
+		t.Fatalf("fresh owner replayed the first effect or lost the remaining singleton: %+v", executor.requests)
+	}
+	if completed.ActiveDispatch != nil || len(completed.CompletedDispatches) != 1 ||
+		completed.Decision.State != runtimecontract.ConvergenceStateNeedAssessment || completed.Decision.Terminal != nil {
+		t.Fatalf("multi-target exact dispatch did not converge: %+v", completed)
+	}
+	if len(completed.OperationReceipts) != 2 || len(completed.Facts.Evidence.Accepted) != 2 || completed.EvidenceSequence != 2 {
+		t.Fatalf("multi-target exact receipt/evidence ledger = receipts=%d accepted=%d sequence=%d", len(completed.OperationReceipts), len(completed.Facts.Evidence.Accepted), completed.EvidenceSequence)
+	}
+	for _, evidence := range completed.Facts.Evidence.Accepted {
+		if len(evidence.BindingRefs) != 1 || evidence.BindingRefs[0] != binding.ID ||
+			len(evidence.CoverageWorkItemIDs) != 1 || evidence.CoverageWorkItemIDs[0] != binding.CoverageWorkItemID ||
+			len(evidence.TargetRefs) != 1 {
+			t.Fatalf("singleton receipt did not receive exact binding-derived credit: %+v", evidence)
+		}
+	}
+	if len(completed.Facts.Coverage) != 1 || completed.Facts.Coverage[0].State == runtimecontract.RuntimeCoverageItemStateSatisfied {
+		t.Fatalf("receipt credit bypassed the separately owned assessment gate: %+v", completed.Facts.Coverage)
+	}
+
+	// A second fresh process cannot replay either effect, and replaying the
+	// already-committed evidence identity cannot add credit or advance CAS.
+	stateRevision := completed.StateRevision
+	saves := repository.saves
+	secondRestart, err := NewRuntimeController(repository)
+	if err != nil {
+		t.Fatal(err)
+	}
+	noReplay := &failIfExecutedOperationExecutor{}
+	if _, err := secondRestart.executeActiveDispatch(ctx, aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, noReplay); err == nil || !errors.Is(err, common.ErrConflict) {
+		t.Fatalf("completed dispatch reload err = %v, want conflict", err)
+	}
+	if noReplay.called || repository.aggregate.StateRevision != stateRevision || repository.saves != saves {
+		t.Fatalf("completed dispatch reload replayed effect or state: called=%t revision=%d saves=%d", noReplay.called, repository.aggregate.StateRevision, repository.saves)
+	}
+	firstEvidence := completed.Facts.Evidence.Accepted[0]
+	duplicate, err := secondRestart.commitEvidence(ctx, ExecutionEvidence{
+		EventID: string(firstEvidence.ID), WorkspaceID: aggregate.Facts.WorkspaceID, RunID: aggregate.Facts.RunID,
+		DispatchID: firstEvidence.DispatchID, AuthoritySnapshotID: firstEvidence.AuthoritySnapshotID, OperationID: firstEvidence.OperationID,
+		Kind: firstEvidence.Kind, Status: ExecutionEvidenceStatusAccepted, SourceRef: firstEvidence.SourceRef,
+	})
+	if err != nil || duplicate.Disposition != CommitDispositionDuplicate || duplicate.Aggregate.StateRevision != stateRevision ||
+		duplicate.Aggregate.EvidenceSequence != 2 || repository.saves != saves {
+		t.Fatalf("multi-target exact evidence replay = %+v err=%v saves=%d", duplicate, err, repository.saves)
+	}
+}
+
+// C12/T31: membership in the same exact binding set does not let an owner
+// receipt drift from the singleton operation that was actually sealed. The
+// durable owner fact is retained, but SM-2 must reject coverage credit and
+// close the deterministic contract defect without replaying the effect.
+func TestCoverageEvidenceBindingMultiTargetExactRejectsReceiptOperationTargetDrift(t *testing.T) {
+	ctx := context.Background()
+	controller, repository, aggregate := sealMultiTargetExactBindingForTest(t, []string{"go.mod", "main.go", "semantic_test.go"})
+	binding := aggregate.Facts.Focus.CoverageEvidenceBindings[0]
+	sealed, err := beginAndAcceptCandidate(t, controller, aggregate, multiTargetExactCandidate(binding.ID, "main.go"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	operationID := runtimeTestActiveOperationIDForTarget(t, sealed, "main.go")
+	claimed, err := controller.claimOperationExecution(ctx, aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, operationID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	execution, found := operationExecutionRecord(claimed.ActiveDispatch.OperationExecutions, operationID)
+	if !found {
+		t.Fatal("claimed drift fixture execution is missing")
+	}
+	driftedReceipt := runtimecontract.RuntimeOperationReceipt{
+		ExecutionKey: execution.ExecutionKey, OperationID: execution.OperationID,
+		Outcome: runtimecontract.RuntimeOperationOutcomeAccepted, ObservedEffectScope: runtimecontract.RuntimeEffectWorkspaceDurable,
+		Changed: true, TargetRefs: []string{"semantic_test.go"},
+		Evidence: runtimecontract.RuntimeOperationEvidence{Summary: "owner reported the wrong exact target"},
+	}
+	if _, _, err := controller.commitOperationReceipt(ctx, aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, sealed.ActiveDispatch.ID, execution.Fence, driftedReceipt); err != nil {
+		t.Fatal(err)
+	}
+
+	restarted, err := NewRuntimeController(repository)
+	if err != nil {
+		t.Fatal(err)
+	}
+	noReplay := &failIfExecutedOperationExecutor{}
+	failed, err := restarted.executeActiveDispatch(ctx, aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, noReplay)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if noReplay.called {
+		t.Fatal("receipt target drift replayed an already durable owner effect")
+	}
+	if failed.Decision.State != runtimecontract.ConvergenceStateFailed || failed.Decision.Terminal == nil ||
+		failed.Decision.Terminal.Code != "runtime_contract_defect" || failed.Facts.Failure == nil ||
+		failed.Facts.Failure.Code != coverageBindingMismatchFailureCode {
+		t.Fatalf("receipt/operation target drift did not fail closed: %+v", failed)
+	}
+	if len(failed.Facts.Evidence.Accepted) != 1 || len(failed.Facts.Evidence.Accepted[0].CoverageWorkItemIDs) != 0 ||
+		!strings.Contains(failed.Facts.Evidence.Accepted[0].EvidenceReason, coverageBindingMismatchFailureCode) ||
+		len(failed.Facts.Coverage) != 1 || failed.Facts.Coverage[0].State == runtimecontract.RuntimeCoverageItemStateSatisfied {
+		t.Fatalf("receipt/operation target drift received coverage credit: %+v", failed)
+	}
+}
 
 // C12/T27: an owner receipt is already durable before the evidence CAS. A
 // fresh controller therefore commits the same binding-derived evidence exactly
@@ -236,6 +401,180 @@ func TestCoverageEvidenceBindingMissingProofCannotBeClaimedOrGovernedAway(t *tes
 	if repository.aggregate.StateRevision != stateRevision || len(repository.aggregate.GovernanceRequests) != 0 {
 		t.Fatalf("terminal binding mismatch mutated after rejected retry: %+v", repository.aggregate)
 	}
+}
+
+// sealMultiTargetExactBindingForTest deliberately enters through the same
+// semantic manifest/document/feasibility/internal-event chain as production.
+// It must not install a hand-written binding because this regression protects
+// the exact authorization semantics shared by semantic seal and dispatch.
+func sealMultiTargetExactBindingForTest(t *testing.T, targets []string) (*RuntimeController, *controllerRepository, RuntimeAggregate) {
+	t.Helper()
+	ctx := context.Background()
+	repository := &controllerRepository{}
+	controller, err := NewRuntimeController(repository)
+	if err != nil {
+		t.Fatal(err)
+	}
+	facts := controllerFacts()
+	facts.Focus.TargetRefs = append([]string(nil), targets...)
+	facts.DefinitionFocuses = nil
+	catalog := runtimecontract.RuntimeOperationAdmissibility{
+		PrerequisiteID: "semantic-multi-target-file", OwnerModuleID: runtimecontract.RuntimeModuleFile,
+		OperationKinds: []string{runtimecontract.StepKindFileWrite}, TargetRefs: append([]string(nil), targets...),
+		ObservedRevision: "file-multi-target-revision-1",
+	}
+	catalog.SnapshotID = runtimecontract.StableRuntimeOperationAdmissibilitySnapshotID(catalog)
+	prerequisite := runtimecontract.RuntimePrerequisite{
+		ID: catalog.PrerequisiteID, Kind: runtimecontract.PrerequisiteKindOperationAdmissibility,
+		OwnerModuleID: runtimecontract.RuntimeModuleFile, RequiredCapabilities: []string{runtimecontract.StepKindFileWrite},
+	}
+	observation := runtimecontract.RuntimePrerequisiteObservation{
+		PrerequisiteID: prerequisite.ID, Kind: prerequisite.Kind, OwnerModuleID: prerequisite.OwnerModuleID,
+		ContentHash: catalog.SnapshotID,
+		Dependencies: []runtimecontract.RuntimeFreshnessDependency{{
+			Domain: runtimecontract.RuntimeResourceWorkspaceTree, OwnerModuleID: runtimecontract.RuntimeModuleFile,
+			SubjectRef: "workspace_deliverable", Revision: catalog.ObservedRevision,
+		}},
+	}
+	observation.ObservationID = runtimecontract.StableRuntimePrerequisiteObservationID(observation)
+	facts.Resources.OperationAdmissibilities = []runtimecontract.RuntimeOperationAdmissibility{catalog}
+	facts.Resources.PrerequisiteObservations = []runtimecontract.RuntimePrerequisiteObservation{observation}
+	facts.Prerequisites.Satisfied = []runtimecontract.RuntimePrerequisite{prerequisite}
+	facts.DefinitionFocuses = runtimeTestDefinitionFocuses(facts)
+	aggregate, err := controller.initialize(ctx, facts, controllerDefinition(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	manifest, err := runtimecontract.CompileRuntimeSemanticPlanManifestForCoverage(
+		aggregate.Facts.WorkspaceID,
+		aggregate.Facts.RunID,
+		aggregate.Definition,
+		aggregate.Facts.DefinitionSeed,
+		aggregate.Facts.DefinitionFocuses,
+		aggregate.Facts.Activation.ExecutionContract,
+		aggregate.Facts.Resources.OperationAdmissibilities,
+		runtimecontract.RuntimeCWIsEligibleForPlanning(aggregate.Facts),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	order := runtimecontract.RuntimeSemanticPlanDocument{
+		SchemaVersion: runtimecontract.RuntimeSemanticPlanDocumentSchemaCurrent,
+		ManifestHash:  manifest.Hash, DefinitionSeedHash: manifest.DefinitionSeedHash,
+		PlanStep:      runtimecontract.RuntimeSemanticPlanStepCoverageOrder,
+		CoverageOrder: []common.CoverageWorkItemID{manifest.CoverageItems[0].ID},
+	}
+	if err := order.ValidateAgainstManifest(manifest); err != nil {
+		t.Fatal(err)
+	}
+	proposal := runtimecontract.RuntimeSemanticProofProposal{
+		CoverageWorkItemID: manifest.CoverageItems[0].ID, OwnerModuleID: runtimecontract.RuntimeModuleFile,
+		OperationKind: runtimecontract.StepKindFileWrite,
+		Target: runtimecontract.RuntimeOperationTargetAuthorization{
+			Policy: runtimecontract.RuntimeOperationTargetPolicyExactTarget, ExactTargetRefs: append([]string(nil), targets...),
+		},
+		RequiredEvidenceKinds: []string{runtimecontract.EvidenceKindStateChange},
+		RequiredEffectScopes:  []runtimecontract.RuntimeEffectScope{runtimecontract.RuntimeEffectWorkspaceDurable},
+		DeclarationRef:        "semantic/multi-target-exact/" + string(manifest.CoverageItems[0].ID),
+	}
+	apply := func(event RuntimeInternalEvent) {
+		t.Helper()
+		event.Scope.WorkspaceID, event.Scope.RunID = aggregate.Facts.WorkspaceID, aggregate.Facts.RunID
+		result, applyErr := controller.ApplyInternalEvent(ctx, event)
+		if applyErr != nil {
+			t.Fatalf("apply %s: %v", event.Kind, applyErr)
+		}
+		aggregate = result.Aggregate
+	}
+	apply(RuntimeInternalEvent{Kind: RuntimeInternalEventSemanticPlanRequestStarted, Transaction: &RuntimeInternalTransactionPayload{
+		SemanticManifest: &manifest, StablePrefixHash: "semantic-multi-target-prefix", LogicalRequestID: "semantic-multi-target-request",
+	}})
+	apply(RuntimeInternalEvent{Kind: RuntimeInternalEventSemanticPlanEvaluated, Transaction: &RuntimeInternalTransactionPayload{
+		SemanticDocument: &order, LogicalRequestID: "semantic-multi-target-request",
+	}})
+	batch, err := semanticplan.CompileFocusBatch(
+		manifest, order, 0, "semantic-multi-target-proof-request", aggregate.Facts.Focus.CoverageWorkItemIDs,
+		aggregate.SemanticPlanning.PendingCoverageIDs, 1,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	aggregate, err = controller.compileSemanticPlanBatch(ctx, aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, batch)
+	if err != nil {
+		t.Fatal(err)
+	}
+	proof := runtimecontract.RuntimeSemanticPlanDocument{
+		SchemaVersion: runtimecontract.RuntimeSemanticPlanDocumentSchemaCurrent,
+		ManifestHash:  manifest.Hash, DefinitionSeedHash: manifest.DefinitionSeedHash,
+		PlanStep: runtimecontract.RuntimeSemanticPlanStepProofBatch,
+		BatchID:  batch.BatchID, BatchSequence: batch.Sequence,
+		BatchCoverageWorkItemIDs: append([]common.CoverageWorkItemID(nil), batch.CoverageWorkItemIDs...),
+		Proposals:                []runtimecontract.RuntimeSemanticProofProposal{proposal},
+	}
+	if err := proof.ValidateAgainstManifest(manifest); err != nil {
+		t.Fatal(err)
+	}
+	apply(RuntimeInternalEvent{Kind: RuntimeInternalEventSemanticPlanEvaluated, Transaction: &RuntimeInternalTransactionPayload{
+		SemanticDocument: &proof, LogicalRequestID: batch.RequestLogicalID,
+	}})
+	apply(RuntimeInternalEvent{Kind: RuntimeInternalEventSemanticFeasibilityRequired, Authority: &RuntimeInternalAuthorityPayload{}})
+	feasibility := runtimecontract.RuntimeSemanticProofFeasibility{
+		SchemaVersion: runtimecontract.RuntimeSemanticFeasibilitySchemaCurrent,
+		ManifestHash:  manifest.Hash, DefinitionSeedHash: manifest.DefinitionSeedHash,
+		CoverageWorkItemID: proposal.CoverageWorkItemID,
+		ProposalHash:       runtimecontract.StableRuntimeSemanticProofProposalHash(proposal),
+		OwnerModuleID:      proposal.OwnerModuleID, CatalogSnapshotID: catalog.SnapshotID,
+		CatalogObservationID: observation.ObservationID, Status: runtimecontract.RuntimeSemanticFeasibilityFeasible,
+		ObservedRevision: catalog.ObservedRevision, TargetRefs: append([]string(nil), targets...),
+	}
+	apply(RuntimeInternalEvent{Kind: RuntimeInternalEventSemanticFeasibilityObserved, Authority: &RuntimeInternalAuthorityPayload{
+		SemanticBatchID: aggregate.SemanticPlanning.FeasibilityBatchID, SemanticFeasibility: &feasibility,
+	}})
+	accepted := aggregate.SemanticPlanning.Batches[0]
+	merged, err := runtimecontract.MergeRuntimeSemanticPlanFocusBatchDocument(manifest, accepted, proof)
+	if err != nil {
+		t.Fatal(err)
+	}
+	apply(RuntimeInternalEvent{Kind: RuntimeInternalEventSemanticPlanBatchDocumentsMerged, Transaction: &RuntimeInternalTransactionPayload{
+		SemanticPlanMergedDocument: &merged,
+	}})
+	apply(RuntimeInternalEvent{Kind: RuntimeInternalEventSemanticContractSealed, Authority: &RuntimeInternalAuthorityPayload{}})
+	if len(aggregate.Facts.Focus.CoverageEvidenceBindings) != 1 {
+		t.Fatalf("semantic contract did not seal one exact binding: %+v", aggregate.Facts.Focus)
+	}
+	for _, pending := range append([]runtimecontract.RuntimePrerequisite(nil), aggregate.Facts.Prerequisites.Pending...) {
+		if pending.Kind != runtimecontract.PrerequisiteKindTargetSnapshot {
+			t.Fatalf("multi-target exact seal requested an unexpected prerequisite: %+v", pending)
+		}
+		content := "current content for " + pending.SubjectRef
+		snapshot := runtimecontract.TargetSnapshot{
+			TargetRef: pending.SubjectRef, Content: content, ContentHash: "snapshot/" + pending.SubjectRef,
+			ContentState: runtimecontract.SnapshotContentStateComplete,
+		}
+		aggregate, err = controller.commitPrerequisite(ctx, aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, PrerequisiteResult{
+			PrerequisiteID: pending.ID, TargetSnapshot: &snapshot,
+		})
+		if err != nil {
+			t.Fatalf("commit exact target snapshot %q: %v", pending.SubjectRef, err)
+		}
+	}
+	if aggregate.Decision.State != runtimecontract.ConvergenceStateNeedStateChange || len(aggregate.Facts.Prerequisites.Pending) != 0 {
+		t.Fatalf("multi-target exact prerequisite closure = decision=%+v pending=%+v", aggregate.Decision, aggregate.Facts.Prerequisites.Pending)
+	}
+	return controller, repository, aggregate
+}
+
+func multiTargetExactCandidate(bindingRef string, targets ...string) runtimecontract.RuntimeCandidate {
+	operations := make([]runtimecontract.StateChangingOperation, 0, len(targets))
+	for index, target := range targets {
+		operations = append(operations, runtimecontract.StateChangingOperation{Operation: runtimecontract.RuntimeOperation{
+			ID: "write-exact-" + target, Kind: runtimecontract.StepKindFileWrite,
+			BindingRefs: []string{bindingRef}, TargetRefs: []string{target},
+			Parameters: runtimeFileWriteParameters("exact target content " + string(rune('a'+index))),
+		}})
+	}
+	return runtimecontract.RuntimeCandidate{StateChange: &runtimecontract.StateChangeCandidate{Operations: operations}}
 }
 
 func assertSingleBindingCredit(t *testing.T, aggregate RuntimeAggregate, bindingRef string, coverageID common.CoverageWorkItemID) {

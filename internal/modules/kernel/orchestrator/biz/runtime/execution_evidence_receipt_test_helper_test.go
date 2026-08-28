@@ -1195,21 +1195,13 @@ func runtimeTestBindingAuthorizesOperation(binding runtimecontract.CoverageEvide
 	if !proofCapable {
 		return false
 	}
-	if len(binding.TargetRefs) != 0 {
-		return sameRuntimeTargetRefs(binding.TargetRefs, operation.TargetRefs)
-	}
-	if len(binding.ProspectiveTargetRefs) != 0 {
-		if len(operation.TargetRefs) != 1 {
-			return false
-		}
-		for _, targetRef := range binding.ProspectiveTargetRefs {
-			if targetRef == operation.TargetRefs[0] {
-				return true
-			}
-		}
+	authorization, err := runtimecontract.RuntimeOperationTargetAuthorizationFromCoverageEvidenceBinding(binding)
+	if err != nil {
 		return false
 	}
-	return binding.TargetSelectorRef != ""
+	requireTargets := authorization.Policy != runtimecontract.RuntimeOperationTargetPolicyExistingOwnerScope ||
+		len(authorization.OwnerScopeTargetRefs) != 0
+	return runtimecontract.ValidateRuntimeOperationTargetsAgainstAuthorization(authorization, operation.TargetRefs, requireTargets) == nil
 }
 
 func runtimeTestNormalizeBindingRefs(values []string) []string {

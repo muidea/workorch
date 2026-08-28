@@ -282,6 +282,8 @@ func runtimeDispatchRecordFromAggregate(dispatch runtime.SealedDispatch) runtime
 	return runtimecontract.RuntimeDispatchRecord{
 		ID: dispatch.ID, WorkspaceID: dispatch.WorkspaceID, RunID: dispatch.RunID,
 		Transaction: dispatch.Transaction, CandidateHash: dispatch.CandidateHash, Candidate: dispatch.Candidate,
+		CandidateManifestHash:              dispatch.CandidateManifestHash,
+		OperationTargetAuthorizations:      runtimecontract.CloneRuntimeDispatchOperationTargetAuthorizations(dispatch.OperationTargetAuthorizations),
 		FocusTargetRole:                    dispatch.FocusTargetRole,
 		ValidationRecipes:                  runtimecontract.CloneRuntimeValidationRecipes(dispatch.ValidationRecipes),
 		OperationAdmissibilities:           runtimecontract.CloneRuntimeOperationAdmissibilities(dispatch.OperationAdmissibilities),
@@ -297,6 +299,8 @@ func runtimeDispatchFromRecord(dispatch runtimecontract.RuntimeDispatchRecord) r
 	return runtime.SealedDispatch{
 		ID: dispatch.ID, WorkspaceID: dispatch.WorkspaceID, RunID: dispatch.RunID,
 		Transaction: dispatch.Transaction, CandidateHash: dispatch.CandidateHash, Candidate: dispatch.Candidate,
+		CandidateManifestHash:              dispatch.CandidateManifestHash,
+		OperationTargetAuthorizations:      runtimecontract.CloneRuntimeDispatchOperationTargetAuthorizations(dispatch.OperationTargetAuthorizations),
 		FocusTargetRole:                    dispatch.FocusTargetRole,
 		ValidationRecipes:                  runtimecontract.CloneRuntimeValidationRecipes(dispatch.ValidationRecipes),
 		OperationAdmissibilities:           runtimecontract.CloneRuntimeOperationAdmissibilities(dispatch.OperationAdmissibilities),

@@ -4,7 +4,7 @@ Status: normative
 
 Type: core-contract-part
 
-Last Verified: 2026-08-27
+Last Verified: 2026-08-28
 
 ## 规范化候选合同
 
@@ -43,6 +43,18 @@ missing、duplicate 或越界 slot/key 只形成 typed rejection，零 feasibili
 
 `TargetPolicy` 是 owner-neutral 的纯合同词汇。File、Git、Shell、MCP 或业务 profile 的具体语义仍由对应
 owner/profile 提供；Orchestrator 只编译和验证 typed receipt，不按文件名、命令或领域文本推断策略。
+
+三种策略的 operation target 校验必须只有一份 owner-neutral 纯实现，并由 manifest strict decode、candidate
+admission、owner feasibility preflight、dispatch seal/fresh-load 与 receipt credit 共同调用。owner receipt 的 `TargetRefs` 必须先与其 sealed
+operation 的 `TargetRefs` 精确相等，再用同一策略验证该 operation 是否处于 binding/manifest 授权范围内。对于
+`exact_target`，封存集合是 bounded membership set；一个合法 singleton operation/receipt 不需要等于整个集合，也不构成
+`one_of`/`any_of` terminal 关系。若一项义务要求完整 target set 全部完成，必须由 sealed required sequence/collective
+receipt-set 或独立 CWI `all_of` 明确表达，禁止只在 receipt 阶段把 membership 偷换为 full-set equality。
+
+final SM-3 seal 必须把 candidate manifest hash 与每项 operation 的最小 target-policy preimage 一并封入
+`DispatchAuthorityHash`。该 preimage 只可由 final manifest seal 生成；Run 只 opaque 持久化，governance resume 只复制，
+fresh-load 只重验，任何路径都不得从 mutable current facts 重编译、增量修改或把它提升为第二 target owner。缺少该 sealed
+preimage 的 operation dispatch 直接按无效当前合同拒绝，不保留旧 record 兼容分支。
 
 同一 locally compiled candidate/dispatch 内，每个 durable operation 必须独占 canonical
 `(OwnerModuleID, TargetRef)`。两个普通 operation 即使由 manifest 派生出 dependency edge，也不能先后修改同一 owner resource，因为它们的

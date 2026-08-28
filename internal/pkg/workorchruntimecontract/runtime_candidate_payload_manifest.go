@@ -575,30 +575,9 @@ func validateRuntimeCandidatePayloadOperation(manifest RuntimeCandidateContractM
 			return &RuntimeCandidatePayloadDiagnostic{Path: path + "." + required, Actual: "missing_" + required, Required: operationManifest.RequiredOperationFields, Allowed: operationManifest.AllowedOperationFields}
 		}
 	}
-	if operationManifest.RequireTargetRefs && len(operation.TargetRefs) == 0 {
-		return &RuntimeCandidatePayloadDiagnostic{Path: path + ".targetRefs", Actual: "missing_targetRefs", Required: []string{"targetRefs"}, Allowed: operationManifest.AllowedOperationFields}
-	}
-	switch operationManifest.Target.Normalized().Policy {
-	case RuntimeOperationTargetPolicyExactTarget, RuntimeOperationTargetPolicyProspectiveOwnerTarget:
-		if allowedTargets := operationManifest.Target.AllowedTargetRefs(); len(allowedTargets) != 0 {
-			for _, targetRef := range operation.TargetRefs {
-				if !runtimeCandidatePayloadContains(allowedTargets, targetRef) {
-					return &RuntimeCandidatePayloadDiagnostic{Path: path + ".targetRefs", Actual: targetRef, Allowed: allowedTargets}
-				}
-			}
-		}
-	case RuntimeOperationTargetPolicyExistingOwnerScope:
-		// A finite owner scope is still a membership contract. Selector-only
-		// scopes intentionally leave the final target resolution to the owner
-		// feasibility probe, but a bounded scope must reject arbitrary targets at
-		// the candidate boundary.
-		if allowedTargets := operationManifest.Target.AllowedTargetRefs(); len(allowedTargets) != 0 {
-			for _, targetRef := range operation.TargetRefs {
-				if !runtimeCandidatePayloadContains(allowedTargets, targetRef) {
-					return &RuntimeCandidatePayloadDiagnostic{Path: path + ".targetRefs", Actual: targetRef, Allowed: allowedTargets}
-				}
-			}
-		}
+	if err := ValidateRuntimeOperationTargetsAgainstAuthorization(operationManifest.Target, operation.TargetRefs, operationManifest.RequireTargetRefs); err != nil {
+		actual, allowed, required := runtimeOperationTargetAuthorizationDiagnostic(err)
+		return &RuntimeCandidatePayloadDiagnostic{Path: path + ".targetRefs", Actual: actual, Allowed: allowed, Required: required, Cause: err}
 	}
 	if _, present := raw["requiredOperationRef"]; present {
 		ref := strings.TrimSpace(operation.RequiredOperationRef)

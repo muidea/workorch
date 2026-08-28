@@ -538,17 +538,20 @@ func MatchCoverageEvidenceBindingReceipt(binding CoverageEvidenceBinding, eviden
 	if !runtimeEffectScopeIncluded(proof.RequiredEffectScopes, receipt.ObservedEffectScope) {
 		return fmt.Errorf("binding %q proof %q requires effect %v, receipt observed %q", binding.ID, evidenceKind, proof.RequiredEffectScopes, receipt.ObservedEffectScope)
 	}
+	targetAuthorization, err := RuntimeOperationTargetAuthorizationFromCoverageEvidenceBinding(binding)
+	if err != nil {
+		return fmt.Errorf("binding %q target authorization: %w", binding.ID, err)
+	}
+	// A binding with a finite target surface proves a concrete owner target;
+	// selector-only existing scope is the sole shape whose membership remains
+	// an owner-feasibility fact. prospective_owner_target is always singleton
+	// per operation, while dispatch-level proof separately requires every member.
+	requireOperationTargets := targetAuthorization.Policy != RuntimeOperationTargetPolicyExistingOwnerScope || len(targetAuthorization.OwnerScopeTargetRefs) != 0
+	if err := ValidateRuntimeOperationTargetsAgainstAuthorization(targetAuthorization, operation.TargetRefs, requireOperationTargets); err != nil {
+		return fmt.Errorf("binding %q sealed operation targets are unauthorized: %w", binding.ID, err)
+	}
 	if !sameStrings(operation.TargetRefs, receipt.TargetRefs) {
 		return fmt.Errorf("binding %q receipt targets do not match sealed operation", binding.ID)
-	}
-	if len(binding.TargetRefs) != 0 && !sameStrings(binding.TargetRefs, receipt.TargetRefs) {
-		return fmt.Errorf("binding %q receipt targets do not match exact binding target", binding.ID)
-	}
-	if len(binding.TargetRefs) == 0 && binding.TargetSelectorRef == "" && len(binding.ProspectiveTargetRefs) == 0 {
-		return fmt.Errorf("binding %q has no target authority", binding.ID)
-	}
-	if len(binding.ProspectiveTargetRefs) != 0 && (len(receipt.TargetRefs) != 1 || !containsString(binding.ProspectiveTargetRefs, receipt.TargetRefs[0])) {
-		return fmt.Errorf("binding %q receipt target is outside the prospective target set", binding.ID)
 	}
 	if evidenceKind == EvidenceKindValidation {
 		if receipt.Evidence.Validation == nil {

@@ -8,12 +8,14 @@ import (
 	"testing"
 
 	cd "github.com/muidea/magicCommon/def"
+	fileevents "github.com/muidea/workorch/internal/modules/blocks/file/pkg/events"
 	llmevents "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/events"
 
 	magicevent "github.com/muidea/magicCommon/event"
 	magictask "github.com/muidea/magicCommon/task"
 	basebiz "github.com/muidea/workorch/internal/modules/base/biz"
 	runevents "github.com/muidea/workorch/internal/modules/blocks/run/pkg/events"
+	workspaceevents "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/events"
 	workspacemodel "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/models"
 	"github.com/muidea/workorch/internal/modules/kernel/orchestrator/biz/internal/semanticplan"
 	runtime "github.com/muidea/workorch/internal/modules/kernel/orchestrator/biz/runtime"
@@ -647,6 +649,98 @@ func runtimeTestInitializeOperationFixture(
 		t.Fatalf("initialize runtime operation fixture: %v", err)
 	}
 	return runtimeTestPersistSealedSemanticAuthority(t, ctx, repository, initialized)
+}
+
+// runtimeCandidateSealFileEditFacts retains the File owner's selector-scoped
+// admissibility preimage used by the synthetic semantic fixture. Candidate
+// admission and final seal still compile the manifest and per-operation target
+// snapshot through the production path.
+func runtimeCandidateSealFileEditFacts(t *testing.T) runtimecontract.RuntimeFacts {
+	t.Helper()
+	facts := runtimeAggregate(t, 1).Facts
+	if len(facts.Focus.CoverageWorkItemIDs) != 1 {
+		t.Fatalf("candidate seal fixture requires one coverage item: %+v", facts.Focus)
+	}
+	selectorRef := "test/fixture-owner-selector/" + string(facts.Focus.CoverageWorkItemIDs[0])
+	catalog := runtimecontract.RuntimeOperationAdmissibility{
+		PrerequisiteID:   "test-semantic-" + runtimecontract.RuntimeModuleFile,
+		OwnerModuleID:    runtimecontract.RuntimeModuleFile,
+		OperationKinds:   []string{runtimecontract.StepKindFileEdit},
+		SelectorRefs:     []string{selectorRef},
+		ObservedRevision: "test-semantic-revision-" + runtimecontract.RuntimeModuleFile,
+		OperationVariants: []runtimecontract.RuntimeOperationAdmissibilityVariant{{
+			Kind:                  runtimecontract.StepKindFileEdit,
+			AllowedTargetPolicies: []runtimecontract.RuntimeOperationTargetPolicy{runtimecontract.RuntimeOperationTargetPolicyExistingOwnerScope},
+			SelectorRefs:          []string{selectorRef},
+		}},
+	}
+	catalog.SnapshotID = runtimecontract.StableRuntimeOperationAdmissibilitySnapshotID(catalog)
+	if err := catalog.Validate(); err != nil {
+		t.Fatalf("candidate seal fixture File owner catalog: %v", err)
+	}
+	facts.Resources.OperationAdmissibilities = []runtimecontract.RuntimeOperationAdmissibility{catalog}
+	facts.Prerequisites.Satisfied = append(facts.Prerequisites.Satisfied, runtimeOperationAdmissibilityPrerequisite(catalog))
+	facts.Resources.PrerequisiteObservations = append(facts.Resources.PrerequisiteObservations, runtimeFileAdmissibilityObservation(catalog))
+	return facts
+}
+
+// runtimeCandidateSealExactFileEditFacts supplies one finite File-owned target
+// together with the catalog snapshot and freshness observation that authorized
+// it. Restart fixtures use this when the durable proposal/document itself names
+// a concrete target; selector-only authority would make that persisted input
+// invalid before the restart boundary under test is reached.
+func runtimeCandidateSealExactFileEditFacts(t *testing.T, targetRef string) runtimecontract.RuntimeFacts {
+	t.Helper()
+	if targetRef == "" {
+		t.Fatal("candidate seal exact File edit fixture requires a target")
+	}
+	facts := runtimeCandidateSealFileEditFacts(t)
+	facts.Focus.TargetRefs = []string{targetRef}
+	catalog := facts.Resources.OperationAdmissibilities[0]
+	catalog.TargetRefs = []string{targetRef}
+	catalog.SelectorRefs = nil
+	for index := range catalog.OperationVariants {
+		catalog.OperationVariants[index].AllowedTargetPolicies = []runtimecontract.RuntimeOperationTargetPolicy{runtimecontract.RuntimeOperationTargetPolicyExactTarget}
+		catalog.OperationVariants[index].SelectorRefs = nil
+	}
+	catalog.SnapshotID = runtimecontract.StableRuntimeOperationAdmissibilitySnapshotID(catalog)
+	if err := catalog.Validate(); err != nil {
+		t.Fatalf("candidate seal exact File owner catalog: %v", err)
+	}
+	facts.Resources.OperationAdmissibilities = []runtimecontract.RuntimeOperationAdmissibility{catalog}
+	facts.Prerequisites.Satisfied = []runtimecontract.RuntimePrerequisite{runtimeOperationAdmissibilityPrerequisite(catalog)}
+	facts.Resources.PrerequisiteObservations = []runtimecontract.RuntimePrerequisiteObservation{runtimeFileAdmissibilityObservation(catalog)}
+	return facts
+}
+
+// startRuntimeCandidateFileEditAdmissionOwners supplies the two typed owner
+// facts needed after the File edit catalog is compiled into an
+// existing_owner_scope candidate manifest. The Workspace owner resolves that
+// scope, while the File owner returns the operation-scoped feasibility fact;
+// neither observer manufactures or bypasses candidate authority.
+func startRuntimeCandidateFileEditAdmissionOwners(t *testing.T, hub magicevent.Hub) {
+	t.Helper()
+	deliverableDirectory, internalDirectory := t.TempDir(), t.TempDir()
+	workspaceObserver := magicevent.NewSimpleObserver(workspaceevents.CommandDestination, hub)
+	workspaceObserver.Subscribe(workspaceevents.TopicWorkspaceCommandGet, func(_ magicevent.Event, result magicevent.Result) {
+		result.Set(workspaceevents.WorkspaceResult{Workspace: &workspaceevents.Workspace{
+			ID: "ws-v2", DeliverableDirectory: deliverableDirectory, InternalDirectory: internalDirectory,
+		}}, nil)
+	})
+	t.Cleanup(func() { workspaceObserver.Unsubscribe(workspaceevents.TopicWorkspaceCommandGet) })
+
+	probeObserver := magicevent.NewSimpleObserver(runtimecontract.RuntimeModuleFile, hub)
+	probeObserver.Subscribe(fileevents.TopicProbeRuntimeOperationFeasibility, func(event magicevent.Event, result magicevent.Result) {
+		command := event.Data().(fileevents.ProbeRuntimeOperationFeasibilityCommand)
+		response, responseErr := fileevents.NewProbeRuntimeOperationFeasibilityResult(command, "", nil, nil, nil, nil)
+		if responseErr != nil {
+			t.Errorf("build File owner feasibility result: %v", responseErr)
+			result.Set(nil, runtimeOperationMagicFailure(responseErr))
+			return
+		}
+		result.Set(response, nil)
+	})
+	t.Cleanup(func() { probeObserver.Unsubscribe(fileevents.TopicProbeRuntimeOperationFeasibility) })
 }
 
 // runtimeTestPersistBootstrappedOperationFixture prepares a Run-backed test

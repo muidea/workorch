@@ -21,11 +21,18 @@ import (
 
 func mustRuntimeOperationAuthorizationIdentity(t *testing.T, kind string) runtimecontract.RuntimeCandidateOperationManifest {
 	t.Helper()
-	authorization, err := runtimecontract.RuntimeOperationAuthorizationIdentity(kind)
-	if err != nil {
-		t.Fatalf("runtime operation authorization identity for %q: %v", kind, err)
+	descriptor, ok := runtimecontract.RuntimeOperationDescriptorForKind(kind)
+	if !ok {
+		t.Fatalf("runtime operation authorization identity has unknown kind %q", kind)
 	}
-	return authorization
+	return runtimecontract.RuntimeCandidateOperationManifest{
+		Kind: descriptor.Kind, OwnerModuleID: descriptor.OwnerModuleID,
+		OperationContractRevision: runtimecontract.RuntimeOperationContractRevision(),
+		Target: runtimecontract.RuntimeOperationTargetAuthorization{
+			Policy:            runtimecontract.RuntimeOperationTargetPolicyExistingOwnerScope,
+			OwnerSelectorRefs: []string{"test/owner-feasibility"},
+		},
+	}.Normalized()
 }
 
 func TestWebAdmissibilityObservationReturnsTypedConfigurationStale(t *testing.T) {

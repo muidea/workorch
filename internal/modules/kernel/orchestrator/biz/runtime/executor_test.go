@@ -358,6 +358,7 @@ func TestTerminatedRuntimeCannotClaimOrExecuteSealedDispatch(t *testing.T) {
 func TestRuntimeControllerRestartContinuesSealedDispatchAfterResourceChangingReceipt(t *testing.T) {
 	ctx := context.Background()
 	aggregate := stateChangeAggregate(t)
+	runtimeTestSealCurrentFocusBindingTargetSurface(&aggregate.Facts, runtimeTestBindingTargetSurface{TargetRefs: []string{"main.go", "other.go"}})
 	_, _ = addFreshFileAdmissibilityObservation(t, &aggregate)
 	repository := &durableRuntimeStateRepository{aggregate: aggregate}
 	controller, err := NewRuntimeController(repository)
@@ -368,24 +369,22 @@ func TestRuntimeControllerRestartContinuesSealedDispatchAfterResourceChangingRec
 		{Operation: patchApplyTestOperation("write-1", "main.go")},
 		{Operation: func() runtimecontract.RuntimeOperation {
 			operation := patchApplyTestOperation("write-2", "other.go")
-			// The exact main.go binding belongs only to write-1. This second
-			// operation is intentionally non-crediting dispatch work.
-			operation.BindingRefs = nil
-			operation.DependsOn = []string{"write-1"}
 			return operation
 		}()},
 	}}}
 	sealed := sealCandidateForTest(t, repository, candidate)
-	claimed, err := controller.claimOperationExecution(ctx, "ws-1", "run-1", "write-1")
+	firstOperationID := runtimeTestActiveOperationIDForTarget(t, sealed, "main.go")
+	secondOperationID := runtimeTestActiveOperationIDForTarget(t, sealed, "other.go")
+	claimed, err := controller.claimOperationExecution(ctx, "ws-1", "run-1", firstOperationID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	execution, ok := operationExecutionRecord(claimed.ActiveDispatch.OperationExecutions, "write-1")
+	execution, ok := operationExecutionRecord(claimed.ActiveDispatch.OperationExecutions, firstOperationID)
 	if !ok {
 		t.Fatal("first operation execution was not claimed")
 	}
 	receipt := runtimecontract.RuntimeOperationReceipt{
-		ExecutionKey: execution.ExecutionKey, OperationID: "write-1", Outcome: runtimecontract.RuntimeOperationOutcomeAccepted,
+		ExecutionKey: execution.ExecutionKey, OperationID: firstOperationID, Outcome: runtimecontract.RuntimeOperationOutcomeAccepted,
 		ObservedEffectScope: runtimecontract.RuntimeEffectWorkspaceDurable, Changed: true,
 		TargetRefs: []string{"main.go"},
 		Evidence:   runtimecontract.RuntimeOperationEvidence{Summary: "first durable effect"},
@@ -411,7 +410,7 @@ func TestRuntimeControllerRestartContinuesSealedDispatchAfterResourceChangingRec
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(executor.requests) != 1 || executor.requests[0].Operation.ID != "write-2" ||
+	if len(executor.requests) != 1 || executor.requests[0].Operation.ID != secondOperationID ||
 		completed.ActiveDispatch != nil || len(completed.CompletedDispatches) != 1 ||
 		completed.CompletedDispatches[0].State != DispatchStateCommitted ||
 		completed.Decision.State != runtimecontract.ConvergenceStateNeedPrerequisite ||

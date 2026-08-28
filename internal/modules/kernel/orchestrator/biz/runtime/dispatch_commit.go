@@ -27,6 +27,10 @@ type SealedDispatch struct {
 	Transaction   runtimecontract.AuthorityTransaction
 	CandidateHash string
 	Candidate     runtimecontract.RuntimeCandidate
+	// CandidateManifestHash and OperationTargetAuthorizations are the exact
+	// immutable manifest identity/target projection used by final SM-3 seal.
+	CandidateManifestHash         string
+	OperationTargetAuthorizations []runtimecontract.RuntimeDispatchOperationTargetAuthorization
 	// FocusTargetRole is copied from the SM-2 decision at seal time. Owner
 	// execution and completed-dispatch causation checks must not consult a later
 	// mutable Focus projection for this value.
@@ -183,24 +187,6 @@ func newDispatchCoordinator(repository RuntimeStateRepository, transitions *Runt
 	return &DispatchCoordinator{candidateDispatchComponent: component}, nil
 }
 
-func SealDispatch(decision runtimecontract.RuntimeDecision, candidate runtimecontract.RuntimeCandidate) (SealedDispatch, error) {
-	return SealDispatchWithActivation(decision, candidate, runtimecontract.RuntimeActivationContext{})
-}
-
-// SealDispatchWithActivation seals a candidate using owner-published generic
-// operation policies for effect and replay gating.
-func SealDispatchWithActivation(decision runtimecontract.RuntimeDecision, candidate runtimecontract.RuntimeCandidate, activation runtimecontract.RuntimeActivationContext) (SealedDispatch, error) {
-	return SealDispatchWithActivationAndFeasibilities(decision, candidate, activation, nil)
-}
-
-// SealDispatchWithActivationAndFeasibilities seals the optional, owner-authored
-// replay proof from a persisted read-only feasibility ledger into its matching
-// execution record. The proof is not inferred from operation kind or provider
-// text: absent feasibility proof means absent recovery authority.
-func SealDispatchWithActivationAndFeasibilities(decision runtimecontract.RuntimeDecision, candidate runtimecontract.RuntimeCandidate, activation runtimecontract.RuntimeActivationContext, feasibilities []runtimecontract.RuntimeCandidateFeasibilityRecord) (SealedDispatch, error) {
-	return sealDispatchWithActivationAndFeasibilities(decision, candidate, activation, nil, feasibilities, nil, nil)
-}
-
 // SealDispatchWithManifestAndFeasibilities seals the exact owner-confirmed
 // managed-validation recipe selection alongside the candidate.  It is the
 // production SM-3 entry after manifest-bound admission; no execution path may
@@ -221,17 +207,33 @@ func SealDispatchWithManifestAndOwnerAuthority(
 	catalogs []runtimecontract.RuntimeOperationAdmissibility,
 	observations []runtimecontract.RuntimePrerequisiteObservation,
 ) (SealedDispatch, error) {
+	targetAuthorizations, err := runtimecontract.RuntimeDispatchOperationTargetAuthorizationsFromManifest(manifest, candidate)
+	if err != nil {
+		return SealedDispatch{}, err
+	}
 	recipes, err := runtimecontract.RuntimeCandidateManagedValidationRecipeSnapshot(manifest, candidate)
 	if err != nil {
 		return SealedDispatch{}, err
 	}
-	return sealDispatchWithActivationAndFeasibilities(decision, candidate, activation, recipes, feasibilities, catalogs, observations)
+	return sealDispatchWithActivationAndFeasibilities(
+		decision,
+		candidate,
+		activation,
+		manifest.Normalized().Hash,
+		targetAuthorizations,
+		recipes,
+		feasibilities,
+		catalogs,
+		observations,
+	)
 }
 
 func sealDispatchWithActivationAndFeasibilities(
 	decision runtimecontract.RuntimeDecision,
 	candidate runtimecontract.RuntimeCandidate,
 	activation runtimecontract.RuntimeActivationContext,
+	candidateManifestHash string,
+	operationTargetAuthorizations []runtimecontract.RuntimeDispatchOperationTargetAuthorization,
 	validationRecipes []runtimecontract.RuntimeValidationRecipe,
 	feasibilities []runtimecontract.RuntimeCandidateFeasibilityRecord,
 	catalogs []runtimecontract.RuntimeOperationAdmissibility,
@@ -247,6 +249,12 @@ func sealDispatchWithActivationAndFeasibilities(
 		return SealedDispatch{}, err
 	}
 	candidate = runtimecontract.CanonicalRuntimeCandidate(candidate)
+	if strings.TrimSpace(candidateManifestHash) == "" {
+		return SealedDispatch{}, fmt.Errorf("runtime dispatch requires candidate manifest hash")
+	}
+	if err := runtimecontract.ValidateRuntimeDispatchOperationTargetAuthorizations(candidate, operationTargetAuthorizations); err != nil {
+		return SealedDispatch{}, err
+	}
 	if err := runtimecontract.ValidateRuntimeCandidateManagedValidationRecipeSnapshot(candidate, validationRecipes); err != nil {
 		return SealedDispatch{}, err
 	}
@@ -277,6 +285,8 @@ func sealDispatchWithActivationAndFeasibilities(
 		Transaction:                        transaction,
 		CandidateHash:                      candidateHash,
 		Candidate:                          candidate,
+		CandidateManifestHash:              strings.TrimSpace(candidateManifestHash),
+		OperationTargetAuthorizations:      runtimecontract.CloneRuntimeDispatchOperationTargetAuthorizations(operationTargetAuthorizations),
 		FocusTargetRole:                    decision.Focus.Normalized().TargetRole,
 		ValidationRecipes:                  runtimecontract.NormalizeRuntimeValidationRecipes(validationRecipes),
 		OperationAdmissibilities:           sealedCatalogs,

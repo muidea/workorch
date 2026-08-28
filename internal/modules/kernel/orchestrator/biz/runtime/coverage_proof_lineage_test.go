@@ -22,7 +22,7 @@ func TestDispatchCommitRecordsCoverageProofLineageExactlyOnce(t *testing.T) {
 		RunID:               sealed.Facts.RunID,
 		DispatchID:          sealed.ActiveDispatch.ID,
 		AuthoritySnapshotID: sealed.ActiveDispatch.Transaction.AuthoritySnapshotID,
-		OperationID:         "patch-1",
+		OperationID:         runtimeTestActiveOperationID(t, sealed, 0),
 		Kind:                runtimecontract.EvidenceKindStateChange,
 		Status:              ExecutionEvidenceStatusAccepted,
 		SourceRef:           "patch/lineage-source",

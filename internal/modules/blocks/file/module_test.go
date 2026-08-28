@@ -16,6 +16,22 @@ import (
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
+func mustRuntimeOperationAuthorizationIdentity(t *testing.T, kind string) runtimecontract.RuntimeCandidateOperationManifest {
+	t.Helper()
+	descriptor, ok := runtimecontract.RuntimeOperationDescriptorForKind(kind)
+	if !ok {
+		t.Fatalf("runtime operation authorization identity has unknown kind %q", kind)
+	}
+	return runtimecontract.RuntimeCandidateOperationManifest{
+		Kind: descriptor.Kind, OwnerModuleID: descriptor.OwnerModuleID,
+		OperationContractRevision: runtimecontract.RuntimeOperationContractRevision(),
+		Target: runtimecontract.RuntimeOperationTargetAuthorization{
+			Policy:            runtimecontract.RuntimeOperationTargetPolicyExistingOwnerScope,
+			OwnerSelectorRefs: []string{"test/owner-feasibility"},
+		},
+	}.Normalized()
+}
+
 func TestFileModuleIdentityConfigureStartStopContract(t *testing.T) {
 	ctx := context.Background()
 	rawHub := magicevent.NewHub(16)
@@ -134,10 +150,7 @@ func TestFileModuleSemanticAndOperationFeasibilityShareExistingTargetPolicy(t *t
 	}
 	semantic := runtimecontract.RuntimeSemanticProofFeasibilityObservation(semanticData.(fileevents.ProbeRuntimeSemanticProofFeasibilityResult))
 
-	authorization, err := runtimecontract.RuntimeOperationAuthorizationIdentity(runtimecontract.StepKindFileWrite)
-	if err != nil {
-		t.Fatal(err)
-	}
+	authorization := mustRuntimeOperationAuthorizationIdentity(t, runtimecontract.StepKindFileWrite)
 	content := "new\n"
 	operationResult := hub.Send(magicevent.NewEventWithContext(
 		fileevents.TopicProbeRuntimeOperationFeasibility, "kernel/orchestrator", ModuleID, magicevent.NewHeader(), ctx,

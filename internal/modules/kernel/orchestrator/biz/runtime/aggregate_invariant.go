@@ -392,11 +392,13 @@ func validateAcceptedCandidateDispatchBindings(a RuntimeAggregate) error {
 		}
 		matched := a.ActiveDispatch != nil && a.ActiveDispatch.Transaction == attempt.Transaction &&
 			a.ActiveDispatch.ID == attempt.DispatchID && a.ActiveDispatch.CandidateHash == attempt.CandidateHash &&
+			a.ActiveDispatch.CandidateManifestHash == attempt.ManifestHash &&
 			a.ActiveDispatch.DispatchAuthorityHash == attempt.DispatchAuthorityHash
 		if !matched {
 			for _, dispatch := range a.CompletedDispatches {
 				if dispatch.Transaction == attempt.Transaction && dispatch.ID == attempt.DispatchID &&
-					dispatch.CandidateHash == attempt.CandidateHash && dispatch.DispatchAuthorityHash == attempt.DispatchAuthorityHash {
+					dispatch.CandidateHash == attempt.CandidateHash && dispatch.CandidateManifestHash == attempt.ManifestHash &&
+					dispatch.DispatchAuthorityHash == attempt.DispatchAuthorityHash {
 					matched = true
 					break
 				}

@@ -461,6 +461,8 @@ func buildGovernanceResumeDispatch(aggregate RuntimeAggregate, binding runtimeco
 		aggregate.Decision,
 		source.Candidate,
 		effectiveActivation,
+		source.CandidateManifestHash,
+		source.OperationTargetAuthorizations,
 		source.ValidationRecipes,
 		governanceResumeAuthorityFeasibilities(*source),
 		source.OperationAdmissibilities,

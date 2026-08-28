@@ -148,33 +148,6 @@ func WorkspaceScopeTargets(selection *runtimecontract.RuntimeTargetSelection) []
 	return append([]string(nil), value.CandidateTargetRefs...)
 }
 
-// TargetRefsAllWithin requires a non-empty submitted target set whose every
-// member belongs to the non-empty allowed set.
-func TargetRefsAllWithin(targetRefs, allowedTargets []string) bool {
-	if len(targetRefs) == 0 || len(allowedTargets) == 0 {
-		return false
-	}
-	allowed := make(map[string]struct{}, len(allowedTargets))
-	for _, target := range allowedTargets {
-		if target = strings.TrimSpace(target); target != "" {
-			allowed[target] = struct{}{}
-		}
-	}
-	if len(allowed) == 0 {
-		return false
-	}
-	for _, target := range targetRefs {
-		target = strings.TrimSpace(target)
-		if target == "" {
-			return false
-		}
-		if _, found := allowed[target]; !found {
-			return false
-		}
-	}
-	return true
-}
-
 // TargetRefsIntersect reports exact normalized membership intersection.
 func TargetRefsIntersect(left, right []string) bool {
 	seen := make(map[string]struct{}, len(left))

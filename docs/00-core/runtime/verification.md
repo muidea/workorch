@@ -4,7 +4,7 @@ Status: normative
 
 Type: verification
 
-Last Verified: 2026-08-27
+Last Verified: 2026-08-28
 
 ## Purpose
 
@@ -157,6 +157,12 @@ Cross-owner regression必须证明 concrete receiving-owner Command/Result、wor
   按 requirement ref 唯一匹配 normalized required-sequence slot，auxiliary proposal 按 canonical execution-semantic key 派生 identity；
   provider 数组下标不参与 identity 或 dependency authority。任意重排、duplicate/restart 后派生结果必须稳定，provider 自造字段、
   ambiguous/duplicate/missing slot 必须 fail-closed 且零 dispatch；
+- target authorization 必须覆盖同一纯 matcher 的纵向一致性：multi-target `exact_target` binding 中，不同 singleton
+  operation 及其 exact matching receipt 均可通过 membership gate；空 target、越界 target、receipt/operation target 漂移必须
+  分别在 candidate/dispatch 前或 receipt credit 时拒绝。dispatch seal 与 fresh-load invariant 必须重验同一规则，不能等到
+  owner effect 后才发现 admission/credit 解释冲突；测试还必须覆盖 manifest hash、per-operation sealed preimage、operation
+  hash 与 `DispatchAuthorityHash` 的 missing/tamper/JSON round-trip/restart fence。`prospective_owner_target` 仍须额外通过完整同-dispatch collective
+  receipt-set，不能因共享 matcher 而退化为首条 receipt credit；
 - invalid/empty raw、reasoning、decoder message 与可逆片段不得进入 EventHub durable payload、aggregate、eventstream、projection、
   memory 或 C4；只允许 owner-private audit carrier 与 bounded hash/bytes/ref。attempt-1 C4 仅包含 manifest-bound
   document-shape/schema/semantic witness，不含 raw、Disposition、TerminalCode 或 retry 选择；

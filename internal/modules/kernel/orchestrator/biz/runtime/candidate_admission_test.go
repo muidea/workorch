@@ -66,7 +66,7 @@ func TestActiveRejectedOperationShapesUsesCompletedDispatchFocusForNonCreditingR
 	aggregate.Facts.Evidence.Rejected[0].BindingRefs = []string{aggregate.Facts.Focus.CoverageEvidenceBindings[0].ID}
 
 	shapes := ActiveRejectedOperationShapes(aggregate)
-	if len(shapes) != 1 || shapes[0].Operation.ID != "patch-1" {
+	if len(shapes) != 1 || shapes[0].Operation.ID != runtimeTestCandidateOperationID(t, replayedCandidate, 0) {
 		t.Fatalf("current-focus non-crediting rejected shape = %+v", shapes)
 	}
 	replayed := replayedCandidate.StateChange.Operations[0].Operation
@@ -945,12 +945,14 @@ func aggregateWithActiveRejectedCandidate(t *testing.T) (RuntimeAggregate, runti
 	repository := &durableRuntimeStateRepository{aggregate: aggregate}
 	aggregate = sealCandidateForTest(t, repository, candidate)
 	dispatch := *aggregate.ActiveDispatch
+	candidate = dispatch.Candidate
+	operationID := runtimeTestCandidateOperationID(t, candidate, 0)
 	dispatch.State = DispatchStateCommitted
 	aggregate.ActiveDispatch = nil
 	aggregate.CompletedDispatches = []SealedDispatch{dispatch}
 	aggregate.Facts.Evidence.Rejected = []runtimecontract.EvidenceFact{{
 		ID: "rejected-patch", Kind: runtimecontract.EvidenceKindStateChange,
-		DispatchID: dispatch.ID, OperationID: "patch-1", CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-1"},
+		DispatchID: dispatch.ID, OperationID: operationID, CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-1"},
 		Revision: "runtime-evidence-00000000000000000001", FailureSignature: "rejected-patch",
 	}}
 	aggregate.Facts.EvidenceRevision = aggregate.Facts.Evidence.Rejected[0].Revision
