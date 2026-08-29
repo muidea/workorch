@@ -198,7 +198,7 @@ func equivalentOwnerInfeasibilityExists(attempts []runtimecontract.RuntimeCandid
 // owner-private CAS; a restart then re-enters this idempotent second step. This
 // step creates and closes the attempt in one aggregate CAS, so restart never
 // observes a semantically meaningless pending attempt.
-func (c *candidateDispatchComponent) rejectCompletedCandidateDocument(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, attempt int, stablePrefixHash string, manifest runtimecontract.RuntimeCandidateContractManifest, logicalRequestID string, failure runtimecontract.RuntimeCandidateFailure) (RuntimeAggregate, error) {
+func (c *candidateDispatchComponent) rejectCompletedCandidateDocument(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, attempt int, stablePrefixHash string, manifest runtimecontract.RuntimeCandidateContractManifest, logicalRequestID string, rejectedCandidate *runtimecontract.RuntimeCandidate, failure runtimecontract.RuntimeCandidateFailure) (RuntimeAggregate, error) {
 	if c == nil || c.repository == nil || workspaceID == "" || runID == "" || (attempt != 0 && attempt != 1) || strings.TrimSpace(stablePrefixHash) == "" || strings.TrimSpace(logicalRequestID) == "" || failure.Class == "" || strings.TrimSpace(failure.Reason) == "" {
 		return RuntimeAggregate{}, common.ErrInvalidArgument
 	}
@@ -226,12 +226,21 @@ func (c *candidateDispatchComponent) rejectCompletedCandidateDocument(ctx contex
 		return RuntimeAggregate{}, err
 	}
 	expectedRevision := aggregate.StateRevision
-	sealedFailure, correction, sealErr := SealCandidateRejection(&failure, manifest)
+	frontier := candidateCorrectionFrontier{}
+	if rejectedCandidate != nil {
+		candidateCopy := *rejectedCandidate
+		frontier = candidateCorrectionFrontierForEvaluation(candidateAdmissionEvaluationInput(aggregate, manifest, candidateCopy))
+	}
+	sealedFailure, correction, sealErr := sealCandidateRejectionWithFrontier(&failure, manifest, frontier)
 	if sealErr != nil {
 		return RuntimeAggregate{}, sealErr
 	}
 	if sealedFailure == nil || correction == nil {
 		return RuntimeAggregate{}, fmt.Errorf("%w: completed candidate rejection has no sealed disposition", common.ErrConflict)
+	}
+	if rejectedCandidate != nil {
+		candidateCopy := *rejectedCandidate
+		aggregate.CandidateAttempts[idx].Proposal = &candidateCopy
 	}
 	if err := closeCandidateAttemptWithCorrection(&aggregate, idx, attempt, *sealedFailure, correction); err != nil {
 		return RuntimeAggregate{}, err

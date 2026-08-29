@@ -4,7 +4,7 @@ Status: active
 
 Type: stateful-block-contract
 
-Last Verified: 2026-08-26
+Last Verified: 2026-08-29
 
 ## 组件类型
 
@@ -164,11 +164,16 @@ terminal decision/delivery handoff 均由 Orchestrator 负责；Run 不承担跨
   上 CAS 持久化 immutable `ReplacementIntent`；只有
   predecessor 的 `Result -> Workspace -> Run` terminal delivery 完成后，Run-private reducer 才幂等创建并激活
   successor。相同 RequestID 只有在完整 sealed activation payload 相同的情况下才是 duplicate；否则 fail-closed。
+  Workspace 已无 non-terminal Run 时，同一 Restart 根据 Run-owned `WorkspaceRunGeneration` 选择最新 terminal predecessor；
+  它必须已有 exact `TerminalDelivery` 与由 Result acknowledgement 封存的 `TerminalResultID`。同一 replacement transaction
+  直接从 `termination_acknowledged/successor_materialization` 继续，禁止 terminal→active 或重复 terminal delivery。
   request fact 不携带 `State` 或 mutable progress；唯一 private-event dispatcher 根据 clarification binding 选择
   `pending` 或 `pending_clarification_resolution`，termination claim/ack/failure、resolution acknowledgement、successor
   materialization 与 lineage/activation 全部经同一 CAS reducer 推进，禁止 generic mutate callback。
-  successor create、predecessor lineage CAS 和 successor activation 是可独立重放的持久化切点；任一切点后重启都只
-  收敛到同一 successor。无法按当前结构读取的 predecessor 在 admission 前失败，且不持久化 replacement intent。
+  successor create、predecessor lineage CAS 和 successor activation 是可独立重放的持久化切点；successor 必须同时封存
+  `PredecessorRunID + PredecessorResultID`，predecessor 必须先 CAS 封存 matching `SuccessorRunID` 与 superseded lineage，
+  才能激活 successor。任一切点后重启都只收敛到同一 successor。无法按当前结构读取的 predecessor 在 admission 前失败，
+  且不持久化 replacement intent。
   Run owner 以 Workspace-scoped private mutex 串行 restart admission 与 successor materialization；任何未完成
   replacement transaction 对该 Workspace 独占，同 RequestID 只做 exact replay，不同 RequestID fail-closed。repository
   在相同 Workspace identity 临界区内再原子拒绝第二个 non-terminal Run，形成 owner workflow 与 persistence 双 fence。
@@ -212,7 +217,7 @@ terminal decision/delivery handoff 均由 Orchestrator 负责；Run 不承担跨
 
 ## 回归覆盖
 
-已覆盖：SM-1 全状态合法/非法边矩阵（含 administrative cancel/supersede、终态反向迁移与未知状态拒绝）；Run creation/replacement successor 共用 private dispatcher、caller-selected initial state 与直达 repository Create 拒绝；durable Workspace head 的并发分配、watermark-first gap、delete/purge/reopen 后 RunID/generation 不复用、独立 repository set 串行与 single-live guard；ticket/approval
+已覆盖：SM-1 全状态合法/非法边矩阵（含 administrative cancel/supersede、终态反向迁移与未知状态拒绝）；Run creation/replacement successor 共用 private dispatcher、caller-selected initial state 与直达 repository Create 拒绝；durable Workspace head 的并发分配、watermark-first gap、delete/purge/reopen 后 RunID/generation 不复用、独立 repository set 串行与 single-live guard；terminal predecessor 按 owner generation 选择、terminal Result lineage 必填、零 lifecycle reopen/重复 delivery；ticket/approval
 两类 wait/continuation、terminal stale/duplicate、fresh-activation；restart RequestID sealed-payload 冲突、intent 先持久化、
 runtime clarification 同 seal/仅单项 lineage 变化的 typed 零写入拒绝、两项均变化的 acknowledgement gate，以及
 terminal→successor create→lineage CAS→activation 各持久化切点的崩溃恢复与

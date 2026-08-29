@@ -130,6 +130,31 @@ func TestDecodeRuntimeCandidatePayloadWithManifestReportsTypedDynamicDiagnostics
 	}
 }
 
+func TestDecodeRuntimeCandidatePayloadWithManifestReturnsRejectedBindingFrontier(t *testing.T) {
+	manifest := mustRuntimeCandidatePayloadManifest(t, RuntimeDecision{
+		State: ConvergenceStateNeedStateChange,
+		RequiredOutput: RequiredOutputContract{
+			AcceptedKinds:        []string{RuntimeBlockKindPatchApply},
+			AcceptedEffectScopes: []RuntimeEffectScope{RuntimeEffectWorkspaceDurable}, RequiredEffectScopes: []RuntimeEffectScope{RuntimeEffectWorkspaceDurable},
+			CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-1"}, TargetRefs: []string{"main.go"},
+		},
+	})
+	payload := []byte(`{"operations":[{"kind":"patch/apply","bindingRefs":["binding/wrong"],"targetRefs":["main.go"],"parameters":[{"name":"patchType","string":"file_write"},{"name":"content","string":"package main"}]}]}`)
+	candidate, err := DecodeRuntimeCandidatePayloadWithManifest(manifest, payload)
+	var diagnostic *RuntimeCandidatePayloadDiagnostic
+	if !errors.As(err, &diagnostic) || diagnostic.Path != "$.operations[0].bindingRefs" || diagnostic.Actual != "binding/wrong" || len(diagnostic.Allowed) != 1 {
+		t.Fatalf("binding diagnostic=%+v err=%v", diagnostic, err)
+	}
+	operations, operationErr := runtimeCandidatePayloadOperations(candidate)
+	if operationErr != nil || len(operations) != 1 || !reflect.DeepEqual(operations[0].BindingRefs, []string{"binding/wrong"}) {
+		t.Fatalf("strictly decoded rejection frontier=%+v err=%v", candidate, operationErr)
+	}
+	projected := RuntimeCandidateFailureDiagnosticFromPayloadDiagnostic(diagnostic)
+	if projected == nil || projected.Path != diagnostic.Path || !reflect.DeepEqual(projected.Allowed, diagnostic.Allowed) {
+		t.Fatalf("provider-safe binding diagnostic projection=%+v", projected)
+	}
+}
+
 func TestDecodeRuntimeCandidatePayloadWithManifestAllowsPresentEmptyStringWhenContractAllows(t *testing.T) {
 	t.Parallel()
 	manifest := mustRuntimeCandidatePayloadManifest(t, RuntimeDecision{

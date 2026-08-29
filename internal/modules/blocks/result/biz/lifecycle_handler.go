@@ -401,6 +401,7 @@ func resultTerminalDeliveryAck(
 	ack := runtimecontract.RuntimeDeliveryAcknowledgement{
 		WorkspaceID:         item.WorkspaceID,
 		RunID:               item.RunID,
+		ResultID:            item.ID,
 		TerminalDeliveryID:  cmd.TerminalDeliveryID,
 		Owner:               runtimecontract.RuntimeDeliveryOwnerResult,
 		AcknowledgedState:   state,

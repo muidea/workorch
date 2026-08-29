@@ -4,7 +4,7 @@ Status: normative
 
 Type: core-contract-part
 
-Last Verified: 2026-08-28
+Last Verified: 2026-08-29
 
 ## 四个协调状态机
 
@@ -27,6 +27,11 @@ active -> completed | failed | cancelled | superseded
   `fresh_activation_required`、replacement、terminal 或治理 fact。部署者清理数据后重新创建的 current Run 才能进入 activation。
   `fresh_activation_required` 仅适用于可读 current Run 缺失 sealed bootstrap。current Run 的显式 Restart 才能持久化
   Run-owned replacement intent，经 SM-4 `Result -> Workspace -> Run` delivery 释放 Workspace 后创建唯一 successor并保存lineage。
+- 显式 Restart 若没有 non-terminal current Run，Run owner 只按自身 `WorkspaceRunGeneration` 选择最新 terminal
+  predecessor。该 predecessor 必须已有 exact `TerminalDelivery + TerminalResultID`；Run owner 在相同
+  `run.replacement` 私有 reducer中从 `termination_acknowledged/successor_materialization` 继续，不把 terminal 改回 active、
+  不重复 delivery。successor 同时保存 `PredecessorRunID + PredecessorResultID`，且 predecessor lineage CAS 必须先于
+  successor activation；重复/重启只收敛到同一 successor。
 - blocked 回 active 必须有匹配的 persisted governance resolution。
 - completed/failed 的 authority source 只能是 SM-2 sealed terminal decision；cancelled/superseded 的 intent source 只能是
   Run SM-1。两类 terminal 都经 SM-4 exact delivery handoff，最终 Run state 只由 Run private SM-1 event 迁移。
@@ -441,7 +446,9 @@ sealed authority + preflight ready
 - inventory pagination必须有cursor visited-set、page/item hard limit并拒绝`A -> B -> A`循环；duplicate commands-ready只释放
   同一owner-local handoff一次，不能重复drive或跳过inventory completeness。
 - reducer terminal 已 sealed 后，SM-4 仅重试已持久化 terminal delivery request，等待 Result、Workspace、Run
-  owner acknowledgement。projection health 不参与 reducer，也不是 runtime blocker。
+  owner acknowledgement。Result owner acknowledgement 必须携带其按 sealed material 派生并已持久化的 exact `ResultID`；
+  SM-4 只把该 fact 原样交给最终 Run delivery，Run owner将其封存为 `TerminalResultID`，不得自行派生或查询 Result。
+  Workspace/Run acknowledgement 禁止携带 `ResultID`。projection health 不参与 reducer，也不是 runtime blocker。
 - catalog retirement 后若旧 no-effect binding 仍为 current binding，SM-4 必须先投递 typed `CWIBindingRetired` fact，由
   SM-2 唯一 reducer 退休 exact catalog lineage 并 reopen CWI；事件完成前旧 binding 不可作为 operation authority，也不能把
   provisional `target_grounding_unresolved` 交付。CWI 真正 binding-free 后，SM-4 把新 semantic generation 视为更高优先级的
@@ -452,7 +459,8 @@ sealed authority + preflight ready
   stage/generation lease。clarification resolution、administrative termination intent、SM-4 delivery handoff acknowledgement、
   successor materialization 每一步都先由 Run private event claim，再由 exact result/ack 推进；SM-4 可保存并重投
   `RuntimeTerminationRecord` handoff，但 Run terminal 仍只由 private SM-1 delivery event迁移。process-local task 只唤醒 lease，
-  失败/重启不能退化为 application/Orchestrator 第二份 scheduler。
+  失败/重启不能退化为 application/Orchestrator 第二份 scheduler。already-terminal predecessor 复用这份 transaction，
+  只跳过已经完成的 termination/delivery stages；它仍必须由 Run-private claim/materialize/lineage CAS/activation 顺序收敛。
 
 禁止：重启重新 initialize 已有 aggregate、watcher/projection/TUI/Web 驱动 reducer、无 revision 进展的循环、
 projection failure 覆盖既有 terminal、重放已知 provider/durable effect。

@@ -4,7 +4,7 @@ Status: active
 
 Type: kernel-module-implementation-contract
 
-Last Verified: 2026-08-28
+Last Verified: 2026-08-29
 
 ## 功能范围与边界
 
@@ -85,6 +85,9 @@ invalid-data fact 或 replacement intent。数据清理后创建的 current Run 
 `run.replacement` subordinate transaction 与 owner-private reducer 管理。administrative cancellation/supersede intent 属于
 Run SM-1；Orchestrator 只在 SM-4 private event 中把 `RuntimeTerminationRecord` CAS 保存为 exact delivery handoff，驱动
 `Result -> Workspace -> Run`，但不选择或执行 Run terminal transition。最终 terminal 只由 Run-private SM-1 delivery event迁移。
+Result owner 的 matching acknowledgement 必须携带已持久化的 exact owner-derived `ResultID`；SM-4 只把它加入最终 Run
+delivery fact，使 Run owner 封存 `TerminalResultID`。Orchestrator 不派生、不查询、不覆盖该 identity，Workspace/Run ack 也
+不得携带它。terminal Restart 的 successor lineage继续由 Run owner 的同一 replacement transaction独占管理。
 
 当前 baseline 为每个 authority 封存不含 request/lease/CAS bookkeeping 的 `AuthorityInputID`。相同 Definition、focus/binding、
 evidence、capability/catalog、freshness 与 owner observation lineage 不能创建第二个 AuthoritySnapshot；精确 owner binding
@@ -348,6 +351,11 @@ deployed run ID 只属于 archive regression evidence，不定义当前候选、
   rejected shape 与 field violations 形成 `correctable_once` 或 `rejected_final` owner-local result；前者必须有
   可仅用 manifest + rejection 验证的 `CorrectionDirective`：empty/invalid 使用 closed `document_shape` witness，local schema
   使用 manifest-bound field/rule witness，semantic rejection 才封存 concrete legal semantic-difference witness。
+  strict decoder 已形成 current typed candidate、但 manifest semantic admission 拒绝时，该 candidate 只可随 failed attempt
+  保存在 owner-private frontier，不能成为 accepted proposal/feasibility/dispatch authority；raw/framing/schema-invalid body
+  不得补建该值。manifest-declared operation `bindingRefs` 违例只有在 exact slot 存在不同 allowed member 时，才可封存
+  `evidence_binding` witness和 `select_allowed_evidence_binding` objective；alternative 必须修改 exact field、产生不同 semantic
+  shape并重新通过相同 manifest，否则 frontier 为空并 final。
   operation ID/dependencies 禁止出现在 provider wire并由本地派生，不能成为 correction field/progress；summary/reason-only
   delta 同样无效。attempt 1 在 provider 前重验 manifest/witness，返回后重新走完整 strict local admission，并在 semantic
   correction 时证明 proposal 使用 exact alternative。没有 legal frontier 的 attempt 0 形成 `candidate_authority_exhausted`，

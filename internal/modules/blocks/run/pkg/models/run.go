@@ -133,11 +133,23 @@ func (i ReplacementIntent) ValidFor(predecessor *Run) bool {
 			return false
 		}
 	case ReplacementIntentTerminationAcknowledged:
-		return clarificationBound && predecessor.State == common.RunStateSuperseded && predecessor.TerminalDelivery != nil && predecessor.TerminalDelivery.TerminalDeliveryID == i.TerminalDeliveryID && i.Recovery.Stage == ReplacementRecoverySuccessorMaterialization && replacementRecoveryOpen(i.Recovery.State) && i.SuccessorRunID == "" && strings.TrimSpace(i.TerminalDeliveryID) != "" && i.RuntimeStateRevision > 0 && strings.TrimSpace(i.AcknowledgedAt) == ""
+		return clarificationBound && runHasTerminalResult(predecessor) && predecessor.TerminalDelivery.TerminalDeliveryID == i.TerminalDeliveryID && i.Recovery.Stage == ReplacementRecoverySuccessorMaterialization && replacementRecoveryOpen(i.Recovery.State) && i.SuccessorRunID == "" && predecessor.Lineage.SuccessorRunID == "" && strings.TrimSpace(i.TerminalDeliveryID) != "" && i.RuntimeStateRevision > 0 && strings.TrimSpace(i.AcknowledgedAt) == ""
 	case ReplacementIntentSuccessorCreated:
-		return clarificationBound && predecessor.State == common.RunStateSuperseded && predecessor.TerminalDelivery != nil && predecessor.TerminalDelivery.TerminalDeliveryID == i.TerminalDeliveryID && i.Recovery.Stage == ReplacementRecoverySuccessorMaterialization && replacementRecoveryOpen(i.Recovery.State) && i.SuccessorRunID != "" && strings.TrimSpace(i.TerminalDeliveryID) != "" && i.RuntimeStateRevision > 0 && strings.TrimSpace(i.AcknowledgedAt) == ""
+		return clarificationBound && runHasTerminalResult(predecessor) && predecessor.TerminalDelivery.TerminalDeliveryID == i.TerminalDeliveryID && i.Recovery.Stage == ReplacementRecoverySuccessorMaterialization && replacementRecoveryOpen(i.Recovery.State) && i.SuccessorRunID != "" && predecessor.Lineage.SuccessorRunID == i.SuccessorRunID && predecessor.Lineage.LineageState == RunLineageStateSuperseded && strings.TrimSpace(i.TerminalDeliveryID) != "" && i.RuntimeStateRevision > 0 && strings.TrimSpace(i.AcknowledgedAt) == ""
 	case ReplacementIntentCompleted:
-		return clarificationBound && predecessor.State == common.RunStateSuperseded && predecessor.TerminalDelivery != nil && predecessor.TerminalDelivery.TerminalDeliveryID == i.TerminalDeliveryID && i.Recovery.Stage == ReplacementRecoverySuccessorMaterialization && i.Recovery.State == ReplacementRecoveryCompleted && i.SuccessorRunID != "" && strings.TrimSpace(i.TerminalDeliveryID) != "" && i.RuntimeStateRevision > 0 && strings.TrimSpace(i.AcknowledgedAt) != "" && predecessor.Lineage.SuccessorRunID == i.SuccessorRunID
+		return clarificationBound && runHasTerminalResult(predecessor) && predecessor.TerminalDelivery.TerminalDeliveryID == i.TerminalDeliveryID && i.Recovery.Stage == ReplacementRecoverySuccessorMaterialization && i.Recovery.State == ReplacementRecoveryCompleted && i.SuccessorRunID != "" && strings.TrimSpace(i.TerminalDeliveryID) != "" && i.RuntimeStateRevision > 0 && strings.TrimSpace(i.AcknowledgedAt) != "" && predecessor.Lineage.SuccessorRunID == i.SuccessorRunID && predecessor.Lineage.LineageState == RunLineageStateSuperseded
+	default:
+		return false
+	}
+}
+
+func runHasTerminalResult(item *Run) bool {
+	if item == nil || item.TerminalDelivery == nil || item.TerminalResultID == "" {
+		return false
+	}
+	switch item.State {
+	case common.RunStateCompleted, common.RunStateFailed, common.RunStateCancelled, common.RunStateSuperseded:
+		return true
 	default:
 		return false
 	}
@@ -244,6 +256,10 @@ type Run struct {
 	EndedAt               string
 	// TerminalDelivery is the Run owner's immutable SM-1 terminal fence.
 	TerminalDelivery *runtimecontract.RuntimeTerminalDeliveryIdentity
+	// TerminalResultID is the exact Result-owner identity carried by the final
+	// ordered SM-4 delivery. It is immutable after the terminal SM-1 transition
+	// and becomes successor PredecessorResultID on Restart.
+	TerminalResultID common.ResultID
 }
 
 type RunLineage struct {

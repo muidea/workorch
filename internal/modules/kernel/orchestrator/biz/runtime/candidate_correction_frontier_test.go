@@ -1,6 +1,7 @@
 package runtime
 
 import (
+	"reflect"
 	"testing"
 
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
@@ -98,6 +99,90 @@ func TestCandidateCorrectionFrontierExhaustsSingleTargetAndSealsConcreteAlternat
 	staleManifest.Hash = runtimecontract.StableRuntimeCandidateContractManifestHash(staleManifest)
 	if err := validatePersistedCandidateCorrection(aggregate, staleManifest); err == nil {
 		t.Fatal("restart accepted a correction witness after its manifest alternative was removed")
+	}
+}
+
+func TestCandidateCorrectionFrontierSealsExactEvidenceBindingAlternative(t *testing.T) {
+	aggregate, candidate := aggregateWithActiveRejectedCandidate(t)
+	manifest, err := runtimecontract.BuildRuntimeCandidateContractManifest(
+		aggregate.Decision,
+		runtimecontract.RuntimeCandidateManifestOwnerFactsFromContext(runtimecontract.RuntimeCandidateContextForDecision(aggregate.Facts, aggregate.Decision, nil)),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	candidate = runtimeTestMustDeriveCandidateForManifest(t, manifest, candidate)
+	if candidate.StateChange == nil || len(candidate.StateChange.Operations) != 1 {
+		t.Fatalf("unexpected candidate=%+v", candidate)
+	}
+	operation := candidate.StateChange.Operations[0].Operation
+	operationManifest, found := candidateCorrectionOperationManifest(manifest, operation.Kind)
+	if !found {
+		t.Fatal("operation manifest missing")
+	}
+	authorization, err := runtimecontract.RuntimeCandidateOperationBindingAuthorizationFor(operationManifest, operation)
+	if err != nil || len(authorization.AllowedBindingRefs) != 1 {
+		t.Fatalf("binding authorization=%+v err=%v", authorization, err)
+	}
+	allowed := authorization.AllowedBindingRefs[0]
+	wrong := candidate
+	wrong.StateChange = &runtimecontract.StateChangeCandidate{Operations: append([]runtimecontract.StateChangingOperation(nil), candidate.StateChange.Operations...)}
+	wrong.StateChange.Operations[0].Operation.BindingRefs = []string{"binding/wrong"}
+	failure := &runtimecontract.RuntimeCandidateFailure{
+		Class: runtimecontract.RuntimeCandidateFailureClassSchema,
+		Code:  "candidate_schema_invalid", Signature: "candidate-schema-invalid", Reason: "binding is outside sealed manifest",
+		Diagnostic: &runtimecontract.RuntimeCandidateFailureDiagnostic{
+			Path: "$.operations[0].bindingRefs", Actual: "binding/wrong", Allowed: []string{allowed}, ManifestHash: manifest.Hash,
+		},
+	}
+	frontier := candidateCorrectionFrontier{candidate: &wrong}
+	sealed, correction, err := sealCandidateRejectionWithFrontier(failure, manifest, frontier)
+	bindingField, bindingFound, bindingErr := runtimecontract.RuntimeOperationCorrectionFieldForRole(operationManifest, runtimecontract.RuntimeOperationCorrectionRoleEvidenceBinding)
+	if err != nil || sealed == nil || correction == nil || correction.Disposition != runtimecontract.RuntimeCandidateCorrectionCorrectableOnce || correction.Witness == nil ||
+		correction.Witness.Dimension != runtimecontract.RuntimeCandidateCorrectionWitnessEvidenceBinding || correction.Witness.AlternativeValue != allowed ||
+		bindingErr != nil || !bindingFound || correction.Witness.Path != bindingField.CandidatePath(0) ||
+		correction.Witness.RejectedShapeHash == correction.Witness.AlternativeShapeHash ||
+		!reflect.DeepEqual(correction.Objectives, []runtimecontract.RuntimeCandidateCorrectionObjective{runtimecontract.RuntimeCandidateCorrectionSelectEvidenceBinding}) {
+		t.Fatalf("evidence-binding correction sealed=%+v directive=%+v err=%v", sealed, correction, err)
+	}
+	if !candidateCrossesCorrectionWitness(candidate, manifest, *correction.Witness) {
+		t.Fatal("exact allowed binding did not cross its sealed witness")
+	}
+	if candidateCrossesCorrectionWitness(wrong, manifest, *correction.Witness) {
+		t.Fatal("rejected binding crossed its sealed witness")
+	}
+	sameFailure := *failure
+	sameDiagnostic := *failure.Diagnostic
+	sameDiagnostic.Actual = allowed
+	sameFailure.Diagnostic = &sameDiagnostic
+	final, noAlternative, err := sealCandidateRejectionWithFrontier(&sameFailure, manifest, candidateCorrectionFrontier{candidate: &candidate})
+	if err != nil || final == nil || noAlternative == nil || noAlternative.Disposition != runtimecontract.RuntimeCandidateCorrectionRejectedFinal || noAlternative.TerminalCode != "candidate_authority_exhausted" {
+		t.Fatalf("same binding incorrectly opened correction frontier: final=%+v correction=%+v err=%v", final, noAlternative, err)
+	}
+
+	transaction := aggregate.Decision.AuthorityTransaction()
+	contractID := runtimecontract.StableAuthorityContractID(aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, transaction)
+	failureCopy := *sealed
+	proposal := wrong
+	// This fixture was originally built from a previously rejected operation.
+	// Binding correction itself must be tested against an otherwise empty
+	// rejected-operation frontier so the exact allowed binding remains legal on
+	// restart.
+	aggregate.Facts.Evidence.Rejected = nil
+	aggregate.CompletedDispatches = nil
+	aggregate.CandidateAttempts = []runtimecontract.RuntimeCandidateAttemptRecord{
+		{
+			AuthorityContractID: contractID, Transaction: transaction, Attempt: 0, StablePrefixHash: "binding-prefix",
+			ManifestHash: manifest.Hash, LogicalRequestID: "binding-attempt-0", State: runtimecontract.RuntimeCandidateAttemptStateFailed,
+			Proposal: &proposal, Failure: &failureCopy, Correction: correction.Clone(),
+		},
+		{
+			AuthorityContractID: contractID, Transaction: transaction, Attempt: 1, StablePrefixHash: "binding-prefix",
+			ManifestHash: manifest.Hash, LogicalRequestID: "binding-attempt-1", State: runtimecontract.RuntimeCandidateAttemptStatePending,
+		},
+	}
+	if err := validateAttemptCandidateCrossesPersistedWitness(aggregate, manifest, candidate); err != nil {
+		t.Fatalf("attempt 1 exact binding rejected: %v", err)
 	}
 }
 

@@ -20,7 +20,7 @@ func terminalDeliveryTestCommand(identity runtimecontract.RuntimeTerminalDeliver
 		RuntimeTerminalDeliveryIdentity: identity,
 		SourceOwner:                     "kernel/orchestrator",
 		CausationID:                     causationID,
-	}}
+	}, ResultID: common.ResultID(string(identity.RunID) + "/result")}
 }
 
 func newLifecycleTestBiz(t *testing.T) (*Biz, *memory.RunRepository, magicevent.Hub) {
@@ -273,6 +273,24 @@ func TestReduceTerminalDeliveryIdentityMismatch(t *testing.T) {
 	_, err := reduceTerminalDelivery(current, terminalDeliveryTestCommand(runtimecontract.RuntimeTerminalDeliveryIdentity{WorkspaceID: "ws-1", RunID: "run-1", TerminalDeliveryID: "td-1", AuthoritySnapshotID: "auth-other", DefinitionRevision: "def-1", EvidenceRevision: "evidence-1", DispatchID: "dispatch-1", Outcome: runtimecontract.TerminalOutcome{Kind: runtimecontract.TerminalOutcomeKindCompleted, Code: "completed", Summary: "done"}}, "terminal-delivery/td-1"))
 	if !errors.Is(err, common.ErrConflict) {
 		t.Fatalf("err=%v", err)
+	}
+}
+
+func TestReduceTerminalDeliveryRejectsResultIdentityDrift(t *testing.T) {
+	identity := runtimecontract.RuntimeTerminalDeliveryIdentity{
+		WorkspaceID: "ws-1", RunID: "run-1", TerminalDeliveryID: "td-1", AuthoritySnapshotID: "auth-1",
+		DefinitionRevision: "def-1", EvidenceRevision: "evidence-1", DispatchID: "dispatch-1",
+		Outcome: runtimecontract.TerminalOutcome{Kind: runtimecontract.TerminalOutcomeKindCompleted, Code: "completed", Summary: "done"},
+	}
+	current := &runmodel.Run{
+		ID: "run-1", WorkspaceID: "ws-1", State: common.RunStateCompleted,
+		TerminalDelivery: &identity, TerminalResultID: "run-1/result-original",
+	}
+	command := terminalDeliveryTestCommand(identity, "terminal-delivery/td-1")
+	command.ResultID = "run-1/result-conflict"
+	transition, err := reduceTerminalDelivery(current, command)
+	if !errors.Is(err, common.ErrConflict) || transition.Noop {
+		t.Fatalf("Result identity drift transition=%+v err=%v, want conflict", transition, err)
 	}
 }
 

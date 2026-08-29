@@ -4,7 +4,7 @@ Status: active
 
 Type: stateful-block-contract
 
-Last Verified: 2026-08-26
+Last Verified: 2026-08-29
 
 ## 功能范围与边界
 
@@ -20,6 +20,9 @@ Result 同 scope 的正式子实体。该 block 负责 identity、持久化状�
 - Result owner 按 `<workspace-id>/<run-id>/result/dod-assessment` 派生 canonical Result ID，并对完整规范化 material
   计算 `result-material-sha256:*`。相同 terminal identity、相同 material 是幂等重放；相同 Result ID 下 identity 或
   material 任一漂移均为 conflict，不能创建第二条 Result。
+- Result owner 的 terminal delivery acknowledgement 必须携带上述已持久化、owner-derived exact `ResultID`。该字段只是一项
+  immutable fact，供 SM-4 原样交给最终 Run delivery并形成 successor lineage；Orchestrator、Run、Workspace 均不得自行派生、
+  覆盖或通过 Result repository反查它，Result owner也不因此获得 Run lifecycle authority。
 - Result 状态转换矩阵为：同状态幂等；`draft -> accepted | rejected`；`accepted | rejected -> superseded`。其中
   `draft` 只用于需要先物化 Artifact 子实体的 owner-private pending 状态；无 Artifact 的 terminal delivery 直接单次
   持久化最终状态。Runtime 的 failed/cancelled/superseded terminal outcome 均形成 rejected Result，不开放外围状态
@@ -74,7 +77,7 @@ Result 同 scope 的正式子实体。该 block 负责 identity、持久化状�
 
 | 交互组件 | 方向 | 具体合同 | 当前结论 |
 | --- | --- | --- | --- |
-| `kernel/orchestrator` | Orchestrator → Result | sealed `RuntimeTerminalDeliveryFact` / `ResultLifecycleCommandResult` | 完整；Result owner 派生 identity/state，SM-4 只接收 owner ack |
+| `kernel/orchestrator` | Orchestrator → Result | sealed `RuntimeTerminalDeliveryFact` / `ResultLifecycleCommandResult` | 完整；Result owner 派生 identity/state 并在 ack 返回 exact ResultID，SM-4 只转交该 fact |
 | `application/workorchd` | Application → Result | concrete scoped get/list 与 bounded Artifact content-read command/result | 完整；Application 只读且不解析 owner-private path，Workspace owner 独占删除协调 ingress |
 | `blocks/workspace` | Workspace → Result | workspace-scoped seal/purge command/result | 完整；Result owner 私有 fence 与 fixed-point sink |
 | Eventstream / projection | Result → consumer | accepted/rejected `ResultChangedData` + stable `NotificationID` | 完整；Result durable replay、Eventstream 幂等去重，projection 不参与 Runtime authority |

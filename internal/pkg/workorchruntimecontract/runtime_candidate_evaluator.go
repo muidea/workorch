@@ -35,6 +35,7 @@ const (
 	RuntimeCandidateCorrectionWitnessVariant          RuntimeCandidateCorrectionWitnessDimension = "variant"
 	RuntimeCandidateCorrectionWitnessValidationRecipe RuntimeCandidateCorrectionWitnessDimension = "validation_recipe"
 	RuntimeCandidateCorrectionWitnessClosedParameter  RuntimeCandidateCorrectionWitnessDimension = "closed_semantic_parameter"
+	RuntimeCandidateCorrectionWitnessEvidenceBinding  RuntimeCandidateCorrectionWitnessDimension = "evidence_binding"
 	RuntimeCandidateCorrectionWitnessSchemaField      RuntimeCandidateCorrectionWitnessDimension = "schema_field"
 	RuntimeCandidateCorrectionWitnessDocumentShape    RuntimeCandidateCorrectionWitnessDimension = "document_shape"
 )
@@ -86,7 +87,8 @@ func (w RuntimeCandidateCorrectionWitness) Validate() error {
 		RuntimeCandidateCorrectionWitnessTarget,
 		RuntimeCandidateCorrectionWitnessVariant,
 		RuntimeCandidateCorrectionWitnessValidationRecipe,
-		RuntimeCandidateCorrectionWitnessClosedParameter:
+		RuntimeCandidateCorrectionWitnessClosedParameter,
+		RuntimeCandidateCorrectionWitnessEvidenceBinding:
 		if w.OperationKind == "" || w.Path == "" || w.AlternativeValue == "" || w.RejectedValue == w.AlternativeValue {
 			return fmt.Errorf("semantic candidate correction witness requires kind, path and a concrete different alternative")
 		}

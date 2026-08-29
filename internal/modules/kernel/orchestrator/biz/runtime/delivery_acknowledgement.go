@@ -112,6 +112,7 @@ func sameDeliveryAcknowledgementIdentity(left, right runtimecontract.RuntimeDeli
 	left, right = left.Normalized(), right.Normalized()
 	return left.WorkspaceID == right.WorkspaceID &&
 		left.RunID == right.RunID &&
+		left.ResultID == right.ResultID &&
 		left.TerminalDeliveryID == right.TerminalDeliveryID &&
 		left.Owner == right.Owner &&
 		left.AuthoritySnapshotID == right.AuthoritySnapshotID &&

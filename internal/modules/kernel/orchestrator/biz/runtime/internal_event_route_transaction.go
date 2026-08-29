@@ -172,7 +172,7 @@ func (c *RuntimeController) applyCandidateDispatchTransactionInternalEvent(ctx c
 		if event.Transaction.Manifest == nil || event.Transaction.CandidateFailure == nil {
 			return result, common.ErrInvalidArgument
 		}
-		aggregate, err := c.candidateDispatch.rejectCompletedCandidateDocument(ctx, event.Scope.WorkspaceID, event.Scope.RunID, event.Transaction.Attempt, event.Transaction.StablePrefixHash, *event.Transaction.Manifest, event.Transaction.LogicalRequestID, *event.Transaction.CandidateFailure)
+		aggregate, err := c.candidateDispatch.rejectCompletedCandidateDocument(ctx, event.Scope.WorkspaceID, event.Scope.RunID, event.Transaction.Attempt, event.Transaction.StablePrefixHash, *event.Transaction.Manifest, event.Transaction.LogicalRequestID, event.Transaction.Candidate, *event.Transaction.CandidateFailure)
 		result.Aggregate = aggregate
 		return result, err
 	case RuntimeInternalEventCandidateProposalObserved:

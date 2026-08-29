@@ -47,6 +47,17 @@ func TestRuntimeOperationCorrectionMetadataIsDescriptorAndContractDeclared(t *te
 	if err != nil || !found || recipe.Source != RuntimeOperationCorrectionFieldParameter || recipe.WitnessDimension() != RuntimeCandidateCorrectionWitnessValidationRecipe || recipe.CandidatePath(1) != "$.operations[1].parameters[name=recipeId]" {
 		t.Fatalf("contract-declared recipe metadata=%+v found=%v", recipe, found)
 	}
+
+	bindingManifest := RuntimeCandidateOperationManifest{
+		Kind: StepKindFileRead,
+		BindingAuthorizations: []RuntimeOperationBindingAuthorization{{
+			AllowedBindingRefs: []string{"binding/test/cwi-1"},
+		}},
+	}
+	binding, found, err := RuntimeOperationCorrectionFieldForRole(bindingManifest, RuntimeOperationCorrectionRoleEvidenceBinding)
+	if err != nil || !found || binding.Source != RuntimeOperationCorrectionFieldOperation || binding.WitnessDimension() != RuntimeCandidateCorrectionWitnessEvidenceBinding || binding.CandidatePath(2) != "$.operations[2].bindingRefs" {
+		t.Fatalf("manifest-declared evidence-binding metadata=%+v found=%v err=%v", binding, found, err)
+	}
 }
 
 func TestRuntimeOperationCorrectionMetadataRejectsAmbiguousOrIllTypedRoles(t *testing.T) {

@@ -239,7 +239,7 @@ func TestRuntimeCandidateDocumentConformanceRestartClosesAttemptIdempotently(t *
 			Objectives: []runtimecontract.RuntimeCandidateCorrectionObjective{runtimecontract.RuntimeCandidateCorrectionConformExpectedDocument},
 		},
 	}
-	closed, err := controller.candidateDispatch.rejectCompletedCandidateDocument(ctx, "ws-1", "run-1", 0, stablePrefix, manifest, session.LogicalRequestID, failure)
+	closed, err := controller.candidateDispatch.rejectCompletedCandidateDocument(ctx, "ws-1", "run-1", 0, stablePrefix, manifest, session.LogicalRequestID, nil, failure)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -251,7 +251,7 @@ func TestRuntimeCandidateDocumentConformanceRestartClosesAttemptIdempotently(t *
 	if err != nil {
 		t.Fatal(err)
 	}
-	duplicateAttempt, err := controller.candidateDispatch.rejectCompletedCandidateDocument(ctx, "ws-1", "run-1", 0, stablePrefix, manifest, session.LogicalRequestID, failure)
+	duplicateAttempt, err := controller.candidateDispatch.rejectCompletedCandidateDocument(ctx, "ws-1", "run-1", 0, stablePrefix, manifest, session.LogicalRequestID, nil, failure)
 	if err != nil {
 		t.Fatal(err)
 	}

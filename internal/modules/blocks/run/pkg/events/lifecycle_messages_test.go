@@ -66,12 +66,14 @@ func TestRuntimeContinuationEligibleFactValidate(t *testing.T) {
 func TestRuntimeTerminalDeliveryFactValidate(t *testing.T) {
 	cmd := RuntimeTerminalDeliveryFact{
 		RuntimeTerminalDeliveryFact: runtimecontract.RuntimeTerminalDeliveryFact{RuntimeTerminalDeliveryIdentity: runtimecontract.RuntimeTerminalDeliveryIdentity{WorkspaceID: "ws-1", RunID: "run-1", TerminalDeliveryID: "td-1", AuthoritySnapshotID: "auth-1", DefinitionRevision: "def-1", EvidenceRevision: "evidence-1", DispatchID: "dispatch-1", Outcome: runtimecontract.TerminalOutcome{Kind: runtimecontract.TerminalOutcomeKindCompleted, Code: "completed", Summary: "done"}}, SourceOwner: "kernel/orchestrator", CausationID: "terminal-delivery/td-1"},
+		ResultID:                    "result-1",
 	}
 	if err := cmd.Validate(); err != nil {
 		t.Fatalf("valid terminal: %v", err)
 	}
 	admin := RuntimeTerminalDeliveryFact{
 		RuntimeTerminalDeliveryFact: runtimecontract.RuntimeTerminalDeliveryFact{RuntimeTerminalDeliveryIdentity: runtimecontract.RuntimeTerminalDeliveryIdentity{WorkspaceID: "ws-1", RunID: "run-1", TerminalDeliveryID: "td-2", AuthoritySnapshotID: "auth-1", DefinitionRevision: "def-1", EvidenceRevision: "evidence-1", DispatchID: "dispatch-1", Outcome: runtimecontract.TerminalOutcome{Kind: runtimecontract.TerminalOutcomeKindCancelled, Code: "administrative_cancelled", Summary: "operator cancel"}}, SourceOwner: "kernel/orchestrator", CausationID: "terminal-delivery/td-2"},
+		ResultID:                    "result-2",
 	}
 	if err := admin.Validate(); err != nil {
 		t.Fatalf("valid administrative terminal: %v", err)
@@ -79,5 +81,9 @@ func TestRuntimeTerminalDeliveryFactValidate(t *testing.T) {
 	id := cmd.Identity()
 	if err := id.Validate(); err != nil {
 		t.Fatalf("identity: %v", err)
+	}
+	cmd.ResultID = ""
+	if err := cmd.Validate(); err == nil {
+		t.Fatal("terminal delivery without Result identity was accepted")
 	}
 }

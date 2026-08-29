@@ -4,7 +4,7 @@ Status: normative
 
 Type: verification
 
-Last Verified: 2026-08-28
+Last Verified: 2026-08-29
 
 ## Purpose
 
@@ -88,6 +88,10 @@ Cross-owner regression必须证明 concrete receiving-owner Command/Result、wor
 - completed/failed 只来自 sealed SM-2 terminal；cancelled/superseded 只来自 Run SM-1 typed administrative intent，且
   `RuntimeTerminationRecord` 仅可作为 SM-4 exact handoff，不能直接改变 Run state；
 - terminal delivery identity/acknowledgement 不保留 action 或第二份 administrative kind；
+- Result owner acknowledgement 必须携带 exact owner-derived `ResultID`，Workspace/Run acknowledgement 必须拒绝该字段；
+  最终 Run terminal fact/record exact 保存同一 `TerminalResultID`。terminal Restart 必须按 Run-owned generation选择 predecessor，
+  从相同 replacement transaction materialize successor并保存 Run/Result 双 lineage，覆盖 duplicate、CAS cut、fresh reload、
+  Result identity drift、terminal 不重开且不重复 delivery；
 - target-grounding 0/1/N matrix 必须证明 semantic provider 前先取得 focus-scoped File-owner TargetSelection：exact current
   selection + freshness 为 absent/ambiguous/unsupported，或无 bounded Definition candidates 的 empty-scope 时，零
   semantic/candidate provider call并交付
@@ -155,6 +159,10 @@ Cross-owner regression必须证明 concrete receiving-owner Command/Result、wor
   exact `RequiredOperationSequence` 可按 requirement ref/variant 执行，同时证明不同 target、non-durable operation 与该
   owner-required sequence 不被误伤；
 - SM-3 持久化 rejection 后才可形成 typed terminal 或唯一 `correctable_once` internal result；
+- manifest semantic rejection 若保留严格解码 candidate，必须只存在于 failed attempt 的 private correction frontier；验证它不进入
+  feasibility/accepted attempt/dispatch/authority。`bindingRefs` matrix 必须覆盖 exact operation slot/path、wrong binding、唯一
+  allowed alternative、不同 semantic-shape hash、attempt-1/restart重验、无 alternative直接 authority exhausted，以及 framing/
+  closed-schema rejection 保持零 persisted candidate；
 - empty/non-JSON document shape、complete schema 与 semantic rejection 共用 candidate attempt 0/1；attempt 1 复用
   transaction、manifest、C0～C3 与 stable prefix，任意第二次 rejection terminal，零 attempt 2/第三次请求；
 - operations provider schema/instruction/decoder 必须禁止 `id`、`dependsOn` 与 dependency graph；transaction 先执行 exact-match

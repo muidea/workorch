@@ -2188,7 +2188,7 @@ func TestRuntimeGovernanceFailureUsesAtomicTerminalSuccessorAcrossPartialAckAndR
 		identity := command.Identity()
 		ack := runtimecontract.RuntimeDeliveryAcknowledgement{
 			WorkspaceID: identity.WorkspaceID, RunID: identity.RunID, TerminalDeliveryID: identity.TerminalDeliveryID,
-			Owner: runtimecontract.RuntimeDeliveryOwnerResult, AcknowledgedState: runtimecontract.RuntimeDeliveryAcknowledgedResultRecorded,
+			Owner: runtimecontract.RuntimeDeliveryOwnerResult, ResultID: common.ResultID(string(identity.WorkspaceID) + "/" + string(identity.RunID) + "/result/dod-assessment"), AcknowledgedState: runtimecontract.RuntimeDeliveryAcknowledgedResultRecorded,
 			AuthoritySnapshotID: identity.AuthoritySnapshotID, CausationID: command.CausationID, Outcome: identity.Outcome,
 		}
 		result.Set(resultevents.ResultLifecycleCommandResult{DeliveryAck: &ack}, nil)

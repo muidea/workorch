@@ -4,7 +4,7 @@ Status: normative
 
 Type: runtime-flow
 
-Last Verified: 2026-08-28
+Last Verified: 2026-08-29
 
 ## Purpose
 
@@ -223,25 +223,33 @@ Runtime/Orchestrator **不自动创建** replan successor Run；HTTP/TUI 也不�
 operator
   -> Workspace execution intent=restart + fresh RuntimeBootstrap
   -> Workspace owner validates current definition/scope
-  -> Run owner persists predecessor ReplacementIntent and claims termination intent
-  -> Orchestrator SM-4 persists RuntimeTerminationRecord delivery handoff
-  -> Result owner ack -> Workspace owner releases active slot -> Run owner private SM-1 terminal event
-  -> Run-private reducer creates/links/activates one successor
+  -> Run owner selects the sole non-terminal predecessor, otherwise latest terminal predecessor by owner generation
+  -> Run owner persists predecessor ReplacementIntent
+       non-terminal: claim termination -> Orchestrator SM-4 delivery handoff
+                     -> Result owner ack(ResultID) -> Workspace release -> Run private SM-1 terminal event
+       terminal: require existing TerminalDelivery + TerminalResultID and continue at successor materialization
+  -> Run-private reducer materializes successor with PredecessorRunID + PredecessorResultID
+  -> predecessor lineage CAS records the successor before successor activation
   -> successor independently enters DriveRuntime
 ```
 
 约束：
 
 - application、Workspace、Orchestrator 和 projection 都不能提前创建或链接 successor；
+- terminal predecessor 不得重开 lifecycle、重投 terminal delivery 或丢弃 Result lineage；Run ID/时间戳不得代替
+  `WorkspaceRunGeneration` 选择 latest predecessor；
 - predecessor 的 active focus、stale snapshot、attempt/receipt/evidence 不复制为 successor authority；
 - fresh bootstrap 可以携带有界 definition-change/governance history，但其内容是显式 typed contract；
 - `Resume` 不能通过 patch 或 loaded Run 改写定义；
 - 无法按当前结构读取或校验的 predecessor 在 repository/owner load 边界失败，不进入 Restart admission，也不持久化 replacement intent；
-- 相同 request/intent/terminal delivery 重放只能得到同一 successor。
+- 相同 request/intent/terminal delivery/terminal Result 重放只能得到同一 successor；Result identity 漂移必须 conflict。
 
 ### 5. Restart Recovery
 
 - 服务重启只加载 Run owner 中的 `RuntimeStateRecord` aggregate
+- replacement recovery 只加载 Run owner 的 `ReplacementIntent.Recovery` 与 terminal lineage；already-terminal predecessor
+  从 successor-materialization lease继续，不重新请求 Orchestrator delivery，且 successor 的 predecessor Run/Result 双引用
+  必须与 owner record exact-match
 - active/completed dispatch 必须原样恢复 per-operation `OperationTargetAuthorizations`、operation hash 与
   `DispatchAuthorityHash`；validation failure causation 只从 matching sealed authorization 恢复 full scope，不从
   `Facts.Resources.Manifest`、current `Focus` 或 fresh owner inventory 重建

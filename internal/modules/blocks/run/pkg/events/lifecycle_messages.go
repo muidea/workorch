@@ -185,16 +185,21 @@ func (c RuntimeContinuationEligibleFact) Validate() error {
 // caller-chosen State beyond the sealed action / administrative kind.
 type RuntimeTerminalDeliveryFact struct {
 	runtimecontract.RuntimeTerminalDeliveryFact
+	// ResultID is the exact Result-owner identity already acknowledged and
+	// persisted by SM-4 before final Run delivery. Run records it as immutable
+	// lineage input; it never queries or mutates Result owner state.
+	ResultID common.ResultID
 }
 
 func (c RuntimeTerminalDeliveryFact) Normalized() RuntimeTerminalDeliveryFact {
 	c.RuntimeTerminalDeliveryFact = c.RuntimeTerminalDeliveryFact.Normalized()
+	c.ResultID = common.ResultID(strings.TrimSpace(string(c.ResultID)))
 	return c
 }
 
 func (c RuntimeTerminalDeliveryFact) Validate() error {
 	c = c.Normalized()
-	if c.SourceOwner != runtimeLifecycleSourceOwner {
+	if c.SourceOwner != runtimeLifecycleSourceOwner || c.ResultID == "" {
 		return fmt.Errorf("%w: terminal delivery requires workspace, run, source owner and causation", common.ErrInvalidArgument)
 	}
 	if err := c.RuntimeTerminalDeliveryFact.Validate(); err != nil {

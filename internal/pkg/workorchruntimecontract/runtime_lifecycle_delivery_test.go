@@ -52,6 +52,7 @@ func TestRuntimeDeliveryAcknowledgementValidate(t *testing.T) {
 	ack := RuntimeDeliveryAcknowledgement{
 		WorkspaceID:         "ws-1",
 		RunID:               "run-1",
+		ResultID:            "result-1",
 		TerminalDeliveryID:  "td-1",
 		AuthoritySnapshotID: "auth-1",
 		CausationID:         "terminal-delivery/td-1",
@@ -65,6 +66,16 @@ func TestRuntimeDeliveryAcknowledgementValidate(t *testing.T) {
 	ack.Owner = RuntimeDeliveryOwner("other")
 	if err := ack.Validate(); err == nil {
 		t.Fatal("expected invalid owner")
+	}
+	ack.Owner = RuntimeDeliveryOwnerResult
+	ack.ResultID = ""
+	if err := ack.Validate(); err == nil {
+		t.Fatal("expected result owner identity")
+	}
+	ack.Owner = RuntimeDeliveryOwnerWorkspace
+	ack.ResultID = "result-1"
+	if err := ack.Validate(); err == nil {
+		t.Fatal("expected non-Result owner identity rejection")
 	}
 }
 

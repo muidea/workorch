@@ -54,7 +54,7 @@ func TestReplacementRecoveryPersistsTerminationAndSuccessorStages(t *testing.T) 
 		t.Fatalf("replacement recovery did not complete: %+v", stored.ReplacementIntent)
 	}
 	successor, err := runs.GetByWorkspaceID(ctx, stored.WorkspaceID, stored.ReplacementIntent.SuccessorRunID)
-	if err != nil || successor.State != common.RunStateActive || successor.Lineage.PredecessorRunID != stored.ID {
+	if err != nil || successor.State != common.RunStateActive || successor.Lineage.PredecessorRunID != stored.ID || successor.Lineage.PredecessorResultID != stored.TerminalResultID {
 		t.Fatalf("successor = %+v err=%v", successor, err)
 	}
 
@@ -265,6 +265,7 @@ func observeReplacementTermination(t *testing.T, hub magicevent.Hub, runs *memor
 			next.TerminalDelivery = &runtimecontract.RuntimeTerminalDeliveryIdentity{
 				WorkspaceID: workspaceID, RunID: runID, TerminalDeliveryID: terminalDeliveryID,
 			}
+			next.TerminalResultID = common.ResultID(string(workspaceID) + "/" + string(runID) + "/result/dod-assessment")
 			if err := runs.CompareAndSwap(ctx, next, current.Revision); err == nil {
 				result.Set(orchestratorevents.RequestRuntimeTerminationResult{TerminalDeliveryID: terminalDeliveryID, WorkspaceReleased: true, StateRevision: stateRevision}, nil)
 				return

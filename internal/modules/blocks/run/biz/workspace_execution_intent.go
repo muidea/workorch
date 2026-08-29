@@ -202,14 +202,27 @@ func (m *Biz) restartWorkspaceExecutionIntent(ctx context.Context, cmd runevents
 		}
 	}
 	var predecessor *runmodel.Run
+	var terminalPredecessor *runmodel.Run
 	for _, item := range items {
-		if item == nil || runStateIsTerminal(item.State) {
+		if item == nil {
+			continue
+		}
+		if runStateIsTerminal(item.State) {
+			if item.WorkspaceRunGeneration == 0 {
+				return runevents.WorkspaceExecutionIntentResult{}, fmt.Errorf("%w: terminal Run lacks owner generation", common.ErrConflict)
+			}
+			if terminalPredecessor == nil || item.WorkspaceRunGeneration > terminalPredecessor.WorkspaceRunGeneration {
+				terminalPredecessor = item
+			}
 			continue
 		}
 		if predecessor != nil && predecessor.ID != item.ID {
 			return runevents.WorkspaceExecutionIntentResult{}, fmt.Errorf("%w: more than one non-terminal Run belongs to Workspace", common.ErrConflict)
 		}
 		predecessor = item
+	}
+	if predecessor == nil {
+		predecessor = terminalPredecessor
 	}
 	if predecessor == nil {
 		created, err := m.createWorkspaceExecutionReplacement(ctx, requestedIntent, "")
@@ -228,10 +241,16 @@ func (m *Biz) restartWorkspaceExecutionIntent(ctx context.Context, cmd runevents
 	if err := m.persistReplacementIntent(ctx, predecessor, requestedIntent); err != nil {
 		return runevents.WorkspaceExecutionIntentResult{}, err
 	}
-	// The predecessor owns the durable request. No successor record exists
-	// until SM-4 has persisted Result, Workspace and final Run delivery.
+	// The predecessor owns the durable request. A non-terminal predecessor must
+	// first complete ordered SM-4 delivery; an already-terminal predecessor
+	// starts at the same transaction's successor-materialization stage. No
+	// successor is activated before the Run-private lineage CAS.
 	m.scheduleReplacementRecovery(predecessor.WorkspaceID, predecessor.ID)
-	return runExecutionIntentResult(cmd, predecessor.ID, runtimecontract.RuntimeExecutionIntentReplacementPending, runtimecontract.RuntimeExecutionIntentReasonPredecessorSupersedeRequested), nil
+	reason := runtimecontract.RuntimeExecutionIntentReasonPredecessorSupersedeRequested
+	if runStateIsTerminal(predecessor.State) {
+		reason = runtimecontract.RuntimeExecutionIntentReasonTerminalPredecessorSuccessorRequested
+	}
+	return runExecutionIntentResult(cmd, predecessor.ID, runtimecontract.RuntimeExecutionIntentReplacementPending, reason), nil
 }
 
 // replacementIntentForPredecessor derives the immutable clarification
@@ -351,11 +370,25 @@ func (m *Biz) createWorkspaceExecutionReplacement(ctx context.Context, intent ru
 			return nil, common.ErrConflict
 		}
 	}
+	var predecessorResultID common.ResultID
+	if predecessorID != "" {
+		var predecessor *runmodel.Run
+		for _, item := range items {
+			if item != nil && item.ID == predecessorID {
+				predecessor = item
+				break
+			}
+		}
+		if predecessor == nil || !runStateIsTerminal(predecessor.State) || predecessor.TerminalDelivery == nil || predecessor.TerminalResultID == "" {
+			return nil, fmt.Errorf("%w: replacement predecessor lacks terminal Result lineage", common.ErrConflict)
+		}
+		predecessorResultID = predecessor.TerminalResultID
+	}
 	item, err := submitRunCreationInternalEvent(ctx, m.runs, runCreationInternalEvent{
 		Kind: runCreationInternalEventRequested,
 		Requested: &runCreationRequestedFact{
 			WorkspaceID: intent.WorkspaceID, GoalID: intent.GoalID, DoDID: intent.DoDID,
-			PredecessorRunID:   predecessorID,
+			PredecessorRunID: predecessorID, PredecessorResultID: predecessorResultID,
 			DefinitionRevision: intent.DefinitionRevision, StartupInputHash: intent.StartupInputHash,
 			InitialStepKind: llmcommon.StepKindWorkspaceExecution, RuntimeBootstrap: &bootstrap,
 			ActivationRequestID: intent.RequestID, ReconciliationScope: intent.ReconciliationScope,

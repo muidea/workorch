@@ -21,6 +21,7 @@ type lifecycleTransition struct {
 	StartedAt               string
 	EndedAt                 string
 	TerminalDelivery        *runtimecontract.RuntimeTerminalDeliveryIdentity
+	TerminalResultID        common.ResultID
 	ReconciliationRequestID string
 	// Noop means the input was accepted without rewriting owner state
 	// (duplicate, already-terminal, or already-converged).
@@ -193,7 +194,7 @@ func reduceTerminalDelivery(current *runmodel.Run, cmd runevents.RuntimeTerminal
 	}
 	identity := cmd.Identity().Normalized()
 	if current.TerminalDelivery != nil {
-		if sameRunTerminalDelivery(current.TerminalDelivery, &identity) {
+		if sameRunTerminalDelivery(current.TerminalDelivery, &identity) && current.TerminalResultID == cmd.ResultID {
 			return lifecycleTransition{Noop: true, Diagnostic: "run terminal delivery already applied"}, nil
 		}
 		return lifecycleTransition{}, fmt.Errorf("%w: conflicting run terminal delivery", common.ErrConflict)
@@ -222,6 +223,7 @@ func reduceTerminalDelivery(current *runmodel.Run, cmd runevents.RuntimeTerminal
 		FailureReason:    reason,
 		EndedAt:          endedAt,
 		TerminalDelivery: &identity,
+		TerminalResultID: cmd.ResultID,
 	}, nil
 }
 
@@ -299,6 +301,7 @@ func applyLifecycleTransition(current *runmodel.Run, transition lifecycleTransit
 	if transition.TerminalDelivery != nil {
 		identity := transition.TerminalDelivery.Normalized()
 		next.TerminalDelivery = &identity
+		next.TerminalResultID = transition.TerminalResultID
 	}
 	if transition.ReconciliationRequestID != "" {
 		next.ReconciliationRequestID = strings.TrimSpace(transition.ReconciliationRequestID)

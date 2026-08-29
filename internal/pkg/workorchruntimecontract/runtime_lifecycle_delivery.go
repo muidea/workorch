@@ -108,8 +108,12 @@ func StableTerminalDeliveryID(workspaceID common.WorkspaceID, runID common.RunID
 // applying a terminal delivery request. Orchestrator SM-4 may only record it in
 // the delivery ledger; it must not rewrite SM-2 terminal.
 type RuntimeDeliveryAcknowledgement struct {
-	WorkspaceID         common.WorkspaceID
-	RunID               common.RunID
+	WorkspaceID common.WorkspaceID
+	RunID       common.RunID
+	// ResultID is present only on the Result-owner acknowledgement. It is the
+	// exact owner-derived terminal Result identity that SM-4 may relay to the Run
+	// owner as immutable lineage input; it grants no Result mutation authority.
+	ResultID            common.ResultID
 	TerminalDeliveryID  string
 	Owner               RuntimeDeliveryOwner
 	AcknowledgedState   RuntimeDeliveryAcknowledgedState
@@ -119,6 +123,7 @@ type RuntimeDeliveryAcknowledgement struct {
 }
 
 func (a RuntimeDeliveryAcknowledgement) Normalized() RuntimeDeliveryAcknowledgement {
+	a.ResultID = common.ResultID(strings.TrimSpace(string(a.ResultID)))
 	a.TerminalDeliveryID = strings.TrimSpace(a.TerminalDeliveryID)
 	a.Owner = RuntimeDeliveryOwner(strings.TrimSpace(string(a.Owner)))
 	a.AcknowledgedState = RuntimeDeliveryAcknowledgedState(strings.TrimSpace(string(a.AcknowledgedState)))
@@ -140,7 +145,14 @@ func (a RuntimeDeliveryAcknowledgement) Validate() error {
 		return fmt.Errorf("delivery acknowledgement outcome: %w", err)
 	}
 	switch a.Owner {
-	case RuntimeDeliveryOwnerResult, RuntimeDeliveryOwnerWorkspace, RuntimeDeliveryOwnerRun:
+	case RuntimeDeliveryOwnerResult:
+		if a.ResultID == "" {
+			return fmt.Errorf("result delivery acknowledgement requires result identity")
+		}
+	case RuntimeDeliveryOwnerWorkspace, RuntimeDeliveryOwnerRun:
+		if a.ResultID != "" {
+			return fmt.Errorf("non-result delivery acknowledgement cannot carry result identity")
+		}
 	default:
 		return fmt.Errorf("delivery acknowledgement has invalid owner %q", a.Owner)
 	}

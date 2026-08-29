@@ -123,6 +123,7 @@ func (o RuntimeCandidateCorrectionObservation) Validate() error {
 			RuntimeCandidateCorrectionChangeReplayedShape,
 			RuntimeCandidateCorrectionSatisfyCoverage,
 			RuntimeCandidateCorrectionSatisfyDependency,
+			RuntimeCandidateCorrectionSelectEvidenceBinding,
 			RuntimeCandidateCorrectionConformExpectedDocument:
 		default:
 			return fmt.Errorf("runtime candidate correction observation has unsupported objective %q", objective)

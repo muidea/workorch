@@ -200,11 +200,11 @@ func (c *RuntimeController) completeCandidateRequestDocument(ctx context.Context
 	return c.planning.completeCandidateRequestDocument(ctx, workspaceID, runID, logicalRequestID, physicalCallID)
 }
 
-func (c *RuntimeController) rejectCompletedCandidateDocument(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, attempt int, stablePrefixHash string, manifest runtimecontract.RuntimeCandidateContractManifest, logicalRequestID string, failure runtimecontract.RuntimeCandidateFailure) (RuntimeAggregate, error) {
+func (c *RuntimeController) rejectCompletedCandidateDocument(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, attempt int, stablePrefixHash string, manifest runtimecontract.RuntimeCandidateContractManifest, logicalRequestID string, rejectedCandidate *runtimecontract.RuntimeCandidate, failure runtimecontract.RuntimeCandidateFailure) (RuntimeAggregate, error) {
 	if c == nil || c.candidateDispatch == nil {
 		return RuntimeAggregate{}, common.ErrInvalidArgument
 	}
-	return c.candidateDispatch.rejectCompletedCandidateDocument(ctx, workspaceID, runID, attempt, stablePrefixHash, manifest, logicalRequestID, failure)
+	return c.candidateDispatch.rejectCompletedCandidateDocument(ctx, workspaceID, runID, attempt, stablePrefixHash, manifest, logicalRequestID, rejectedCandidate, failure)
 }
 
 func (c *RuntimeController) admitCandidateProposal(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, attempt int, manifest runtimecontract.RuntimeCandidateContractManifest, logicalRequestID string, candidate runtimecontract.RuntimeCandidate) (CandidateAdmissionCommitResult, error) {

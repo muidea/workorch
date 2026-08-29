@@ -17,6 +17,7 @@ const (
 	RuntimeOperationCorrectionRoleVariant          RuntimeOperationCorrectionRole = "variant"
 	RuntimeOperationCorrectionRoleValidationRecipe RuntimeOperationCorrectionRole = "validation_recipe"
 	RuntimeOperationCorrectionRoleClosedParameter  RuntimeOperationCorrectionRole = "closed_semantic_parameter"
+	RuntimeOperationCorrectionRoleEvidenceBinding  RuntimeOperationCorrectionRole = "evidence_binding"
 )
 
 // RuntimeOperationCorrectionFieldSource distinguishes a Runtime operation
@@ -41,6 +42,7 @@ const (
 	runtimeOperationCorrectionKindFieldName    = "kind"
 	runtimeOperationCorrectionTargetFieldName  = "targetRefs"
 	runtimeOperationCorrectionVariantFieldName = "parameters"
+	runtimeOperationCorrectionBindingFieldName = "bindingRefs"
 )
 
 func RuntimeOperationKindCorrectionField() RuntimeOperationCorrectionField {
@@ -63,7 +65,13 @@ func RuntimeOperationVariantCorrectionField() RuntimeOperationCorrectionField {
 // contract. No owner, operation kind, or parameter spelling is interpreted.
 func RuntimeOperationCorrectionFields(manifest RuntimeCandidateOperationManifest) ([]RuntimeOperationCorrectionField, error) {
 	manifest = manifest.Normalized()
-	ret := make([]RuntimeOperationCorrectionField, 0, len(manifest.Parameters)+1)
+	ret := make([]RuntimeOperationCorrectionField, 0, len(manifest.Parameters)+2)
+	if len(manifest.BindingAuthorizations) != 0 {
+		ret = append(ret, RuntimeOperationCorrectionField{
+			Role: RuntimeOperationCorrectionRoleEvidenceBinding, Source: RuntimeOperationCorrectionFieldOperation,
+			Name: runtimeOperationCorrectionBindingFieldName,
+		})
+	}
 	switch manifest.TargetCardinality {
 	case RuntimeOperationTargetCardinalityOne, RuntimeOperationTargetCardinalityMany:
 		ret = append(ret, RuntimeOperationCorrectionField{
@@ -180,6 +188,8 @@ func (f RuntimeOperationCorrectionField) WitnessDimension() RuntimeCandidateCorr
 		return RuntimeCandidateCorrectionWitnessValidationRecipe
 	case RuntimeOperationCorrectionRoleClosedParameter:
 		return RuntimeCandidateCorrectionWitnessClosedParameter
+	case RuntimeOperationCorrectionRoleEvidenceBinding:
+		return RuntimeCandidateCorrectionWitnessEvidenceBinding
 	default:
 		return ""
 	}

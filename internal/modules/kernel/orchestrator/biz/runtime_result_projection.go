@@ -52,7 +52,11 @@ func (m *Biz) deliverRuntimeTerminal(ctx context.Context, aggregate runtime.Runt
 		}
 	}
 	if !m.persistedDeliveryAcknowledged(ctx, aggregate, request.TerminalDeliveryID, runtimecontract.RuntimeDeliveryOwnerRun) {
-		return m.deliverRuntimeRun(ctx, request)
+		resultID, found := m.persistedTerminalDeliveryResultID(ctx, aggregate, request.TerminalDeliveryID)
+		if !found {
+			return fmt.Errorf("%w: terminal Run delivery has no persisted Result-owner identity", common.ErrConflict)
+		}
+		return m.deliverRuntimeRun(ctx, request, resultID)
 	}
 	return nil
 }
@@ -82,6 +86,23 @@ func (m *Biz) persistedDeliveryAcknowledged(ctx context.Context, aggregate runti
 	}
 	loaded, err := m.runtimeController.Load(ctx, aggregate.Facts.WorkspaceID, aggregate.Facts.RunID)
 	return err == nil && deliveryAcknowledged(loaded, deliveryID, owner)
+}
+
+func (m *Biz) persistedTerminalDeliveryResultID(ctx context.Context, aggregate runtime.RuntimeAggregate, deliveryID string) (common.ResultID, bool) {
+	if m == nil || m.runtimeController == nil {
+		return "", false
+	}
+	loaded, err := m.runtimeController.Load(ctx, aggregate.Facts.WorkspaceID, aggregate.Facts.RunID)
+	if err != nil {
+		return "", false
+	}
+	for _, acknowledgement := range loaded.DeliveryAcknowledgements {
+		acknowledgement = acknowledgement.Normalized()
+		if acknowledgement.TerminalDeliveryID == deliveryID && acknowledgement.Owner == runtimecontract.RuntimeDeliveryOwnerResult && acknowledgement.ResultID != "" {
+			return acknowledgement.ResultID, true
+		}
+	}
+	return "", false
 }
 
 func terminalDeliveryRequest(aggregate runtime.RuntimeAggregate) (orchestratorevents.RuntimeTerminalDeliveryRequestData, error) {
@@ -166,8 +187,11 @@ func (m *Biz) deliverRuntimeWorkspace(ctx context.Context, request orchestratore
 	return m.recordRuntimeDeliveryAcknowledgement(ctx, ownerResult.DeliveryAck)
 }
 
-func (m *Biz) deliverRuntimeRun(ctx context.Context, request orchestratorevents.RuntimeTerminalDeliveryRequestData) error {
-	command := runevents.RuntimeTerminalDeliveryFact{RuntimeTerminalDeliveryFact: runtimecontract.RuntimeTerminalDeliveryFact{RuntimeTerminalDeliveryIdentity: request.Identity(), SourceOwner: ModuleID, CausationID: request.CausationID}}
+func (m *Biz) deliverRuntimeRun(ctx context.Context, request orchestratorevents.RuntimeTerminalDeliveryRequestData, resultID common.ResultID) error {
+	command := runevents.RuntimeTerminalDeliveryFact{
+		RuntimeTerminalDeliveryFact: runtimecontract.RuntimeTerminalDeliveryFact{RuntimeTerminalDeliveryIdentity: request.Identity(), SourceOwner: ModuleID, CausationID: request.CausationID},
+		ResultID:                    resultID,
+	}
 	event := magicevent.NewEventWithContext(runevents.TopicRunFactTerminalDelivery, ModuleID, runevents.CommandDestination, magicevent.NewHeader(), ctx, command)
 	bindOwnerCommandLane(event, runevents.Contracts(), runevents.TopicRunFactTerminalDelivery, "run", string(request.RunID), request.WorkspaceID, request.RunID)
 	response := m.EventHub().Send(event)

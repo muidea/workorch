@@ -509,6 +509,7 @@ func adversarialTerminalRun(t *testing.T, fullyAcknowledged bool) (runtime.Runti
 	item.RuntimeLifecycleFence = mustRuntimeLifecycleFence(t, item)
 	identity := request.RuntimeTerminalDeliveryIdentity
 	item.TerminalDelivery = &identity
+	item.TerminalResultID = common.ResultID(string(request.WorkspaceID) + "/" + string(request.RunID) + "/result/dod-assessment")
 	return aggregate, request, item
 }
 
@@ -573,16 +574,18 @@ func adversarialQuiescenceIntent(fence runmodel.WorkspaceRetirementFence) deleti
 
 func adversarialTerminalAcknowledgement(request orchestratorevents.RuntimeTerminalDeliveryRequestData, owner runtimecontract.RuntimeDeliveryOwner) runtimecontract.RuntimeDeliveryAcknowledgement {
 	state := runtimecontract.RuntimeDeliveryAcknowledgedNoop
+	var resultID common.ResultID
 	switch owner {
 	case runtimecontract.RuntimeDeliveryOwnerResult:
 		state = runtimecontract.RuntimeDeliveryAcknowledgedResultRecorded
+		resultID = common.ResultID(string(request.WorkspaceID) + "/" + string(request.RunID) + "/result/dod-assessment")
 	case runtimecontract.RuntimeDeliveryOwnerWorkspace:
 		state = runtimecontract.RuntimeDeliveryAcknowledgedWorkspaceReleased
 	case runtimecontract.RuntimeDeliveryOwnerRun:
 		state = runtimecontract.RuntimeDeliveryAcknowledgedRunTerminal
 	}
 	return runtimecontract.RuntimeDeliveryAcknowledgement{
-		WorkspaceID: request.WorkspaceID, RunID: request.RunID, TerminalDeliveryID: request.TerminalDeliveryID,
+		WorkspaceID: request.WorkspaceID, RunID: request.RunID, ResultID: resultID, TerminalDeliveryID: request.TerminalDeliveryID,
 		Owner: owner, AcknowledgedState: state, AuthoritySnapshotID: request.AuthoritySnapshotID,
 		CausationID: request.CausationID, Outcome: request.Outcome,
 	}

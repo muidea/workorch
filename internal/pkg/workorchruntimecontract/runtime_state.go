@@ -166,9 +166,10 @@ type RuntimeCandidateAttemptRecord struct {
 	RepairCommitmentHash      string
 	AdmissionRepairCommitment *RuntimeDispatchRepairCommitment
 	DispatchAuthorityHash     string
-	// Proposal is the schema-valid, unsealed candidate persisted after provider
-	// generation. It is replayed after restart into the read-only feasibility
-	// gate, never treated as a dispatch or execution record.
+	// Proposal is the strictly decoded, unsealed candidate persisted after
+	// provider generation. A failed attempt may retain a manifest-rejected value
+	// solely as its finite correction frontier; only a pending proposal may be
+	// replayed into feasibility, and neither form is dispatch authority.
 	Proposal      *RuntimeCandidate
 	Feasibilities []RuntimeCandidateFeasibilityRecord
 	Failure       *RuntimeCandidateFailure

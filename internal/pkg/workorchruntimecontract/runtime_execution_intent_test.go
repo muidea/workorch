@@ -52,6 +52,7 @@ func TestRuntimeExecutionIntentAdmissionIsExhaustiveAndPreservesReason(t *testin
 		{RuntimeExecutionIntentReconciliationRequested, RuntimeExecutionIntentReasonNewRunActivated},
 		{RuntimeExecutionIntentReplacementPending, RuntimeExecutionIntentReasonDuplicateRestart},
 		{RuntimeExecutionIntentReplacementPending, RuntimeExecutionIntentReasonPredecessorSupersedeRequested},
+		{RuntimeExecutionIntentReplacementPending, RuntimeExecutionIntentReasonTerminalPredecessorSuccessorRequested},
 		{RuntimeExecutionIntentRestartRequired, RuntimeExecutionIntentReasonWorkspaceActiveRunAbsent},
 		{RuntimeExecutionIntentRestartRequired, RuntimeExecutionIntentReasonSelectedRunAbsent},
 		{RuntimeExecutionIntentRestartRequired, RuntimeExecutionIntentReasonSelectedRunTerminal},

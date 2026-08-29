@@ -4,7 +4,7 @@ Status: normative
 
 Type: core-contract-part
 
-Last Verified: 2026-08-28
+Last Verified: 2026-08-29
 
 ## 规范化候选合同
 
@@ -239,6 +239,12 @@ kind 层拒绝；可解析的 operation 可调用无副作用 owner probe，owne
 allowed/required/forbidden、manifest hash、rejected shape hash 与完整 scope/lineage。它是 evaluator 的事实输出，
 不得携带 retry、terminal、governance、Runtime action 或 `CorrectionDisposition`。
 
+strict decoder 若已得到 current wire 的完整 typed candidate、但同一次 manifest semantic admission 拒绝它，可以把该
+detached typed value随 failed `CandidateAttempt` 保存为 correction frontier 的前像。该值只服务于同 owner 的有限差异证明，
+不得进入 accepted proposal、owner feasibility、sealed dispatch、projection 或任何 authority hash；framing/closed-schema
+尚未形成 current typed candidate 时必须保持为空。fresh-load 只能重验这份 persisted failed-attempt preimage，不能从 raw
+provider body、diagnostic 或 mutable manifest 重建。
+
 SM-3 在收到 rejection 后，必须先把它转换为 owner-local internal event 并持久化；随后只能根据 current
 manifest、attempt ledger、rejected shape 与 typed field violations 决定：
 
@@ -249,10 +255,14 @@ manifest、attempt ledger、rejected shape 与 typed field violations 决定：
 
 `CorrectionDirective` 是 Orchestrator persisted state，不是 evaluator/LLM/capability feedback。它只描述 candidate
 delta，例如把 `$` 上的 empty/invalid shape 修正为 one complete JSON object、删除 forbidden field、补 provider wire 的
-required proposal field、选择 allowed kind、替换为 allowed target或改变 rejected semantic shape；它不修改 authority，也不
+required proposal field、选择 allowed kind、为 exact operation slot 选择 allowed evidence binding、替换为 allowed target或改变 rejected semantic shape；它不修改 authority，也不
 包含 raw provider/decoder/owner 错误文本。`correctable_once` 还必须携带 `RuntimeCandidateCorrectionWitness`：
 document-shape witness 只携带 path、closed rejected shape 与 required complete shape；schema witness 携带 manifest-bound
 field/rule；semantic witness 才要求 rejected/alternative value、适用 operation kind 与不同 semantic-shape hash。
+其中 `evidence_binding` witness 必须绑定 exact `$.operations[i].bindingRefs[j]`、operation kind/slot、当前 rejected binding、
+manifest 授权的一个不同 binding，以及 rejected/alternative 两个不同 semantic-shape hash；attempt 1 仍须用同一 manifest
+重新严格验证完整 candidate。allowed binding 无不同 member、field path/slot 漂移或替换后仍不通过同一 manifest 时，frontier
+为空并立即 final。
 operation ID/dependencies 本就由本地 manifest 确定性派生且禁止出现在 wire，不能成为 correction field 或 progress witness；
 wire order、display summary 或 reason 文本变化同样不构成 semantic witness。attempt 1 在 provider call 前重验相同
 manifest/witness；返回结果必须重新执行完整 strict local admission，semantic alternative 还必须证明实际 proposal 使用

@@ -4,7 +4,7 @@ Status: normative
 
 Type: domain-model
 
-Last Verified: 2026-08-18
+Last Verified: 2026-08-29
 
 ## Purpose And Authority
 
@@ -142,6 +142,11 @@ rejected closeout 仍必须逐项保存已满足、未满足、未判定和stale
 
 `RequirementOutcomes[]`、refs、limitations和operation outcomes canonical排序后计算`CloseoutHash`。same `CloseoutID`的duplicate
 delivery只有在`CloseoutHash`一致时幂等成功；hash不同必须fail-closed。Result owner不得补默认值使无效successful closeout通过。
+
+Result owner 成功持久化 terminal material 后，其 delivery acknowledgement 必须返回 exact owner-derived `ResultID`。SM-4 仅把
+该 immutable fact 转交 Run owner，由后者随 terminal lifecycle封存为 `TerminalResultID`。显式 Restart 创建 successor 时，
+`PredecessorRunID + PredecessorResultID` 必须来自 predecessor 的 Run-owned terminal record，且 predecessor lineage CAS先于
+successor activation；任何层都不得从 canonical ID 规则重新猜测或从 projection 反向补齐 lineage。
 
 ## Projection Contract
 

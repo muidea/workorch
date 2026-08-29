@@ -264,7 +264,15 @@ func reduceReplacementInternalEvent(current *runmodel.Run, event replacementInte
 func reduceReplacementRequested(current *runmodel.Run, requested runmodel.ReplacementIntent, requestedAt string) (replacementTransition, error) {
 	requested.State = runmodel.ReplacementIntentPending
 	stage := runmodel.ReplacementRecoveryAdministrativeTermination
-	if requested.ClarificationTicketID != "" {
+	if runStateIsTerminal(current.State) {
+		if requested.ClarificationTicketID != "" || current.TerminalDelivery == nil || current.TerminalResultID == "" || current.RuntimeState == nil || current.RuntimeState.StateRevision == 0 {
+			return replacementTransition{}, common.ErrConflict
+		}
+		requested.State = runmodel.ReplacementIntentTerminationAcknowledged
+		requested.TerminalDeliveryID = strings.TrimSpace(current.TerminalDelivery.TerminalDeliveryID)
+		requested.RuntimeStateRevision = current.RuntimeState.StateRevision
+		stage = runmodel.ReplacementRecoverySuccessorMaterialization
+	} else if requested.ClarificationTicketID != "" {
 		requested.State = runmodel.ReplacementIntentPendingClarificationResolution
 		stage = runmodel.ReplacementRecoveryClarificationResolution
 	}
@@ -288,9 +296,6 @@ func reduceReplacementRequested(current *runmodel.Run, requested runmodel.Replac
 				return replacementTransition{}, common.ErrConflict
 			}
 		}
-	}
-	if runStateIsTerminal(current.State) {
-		return replacementTransition{}, common.ErrConflict
 	}
 	next := runmodel.CloneRun(current)
 	if next.ReplacementIntent != nil {
@@ -432,6 +437,7 @@ func reduceReplacementSuccessorMaterialized(current *runmodel.Run, fact replacem
 	next.ReplacementIntent.SuccessorRunID = fact.SuccessorRunID
 	next.ReplacementIntent.TerminalDeliveryID = fact.TerminalDeliveryID
 	next.Lineage.SuccessorRunID = fact.SuccessorRunID
+	next.Lineage.LineageState = runmodel.RunLineageStateSuperseded
 	if !next.ReplacementIntent.ValidFor(next) {
 		return replacementTransition{}, common.ErrConflict
 	}

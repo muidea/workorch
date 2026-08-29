@@ -102,6 +102,63 @@ func TestWorkspaceExecutionRestartReplaysFromFilePersistenceAfterOwnerRestart(t 
 	}
 }
 
+func TestWorkspaceExecutionRestartContinuesLatestTerminalLineage(t *testing.T) {
+	workspaceID := common.WorkspaceID("ws-terminal-restart")
+	ctx := common.ContextWithRuntimeWorkspaceID(context.Background(), workspaceID)
+	runs := memory.NewRunRepository()
+	predecessor := &runmodel.Run{
+		WorkspaceID: workspaceID, GoalID: "goal-old", DoDID: "dod-old", State: common.RunStateCompleted,
+		Lineage: runmodel.RunLineage{LineageState: runmodel.RunLineageStateActive},
+		TerminalDelivery: &runtimecontract.RuntimeTerminalDeliveryIdentity{
+			WorkspaceID: workspaceID, RunID: "pending-owner-id", TerminalDeliveryID: "terminal-completed",
+		},
+		TerminalResultID: "ws-terminal-restart/run-001/result/dod-assessment",
+		RuntimeState:     &runtimecontract.RuntimeStateRecord{StateRevision: 9},
+	}
+	if err := runs.CreateNextWorkspaceRun(ctx, predecessor); err != nil {
+		t.Fatal(err)
+	}
+	predecessor.TerminalDelivery.RunID = predecessor.ID
+	if err := runs.Update(ctx, predecessor); err != nil {
+		t.Fatal(err)
+	}
+	bootstrap := restartTestBootstrap(t, workspaceID)
+	command := runevents.WorkspaceExecutionIntentCommand{
+		WorkspaceID: workspaceID, RequestID: "restart-terminal", Kind: runtimecontract.RuntimeExecutionIntentRestart,
+		GoalID: "goal-1", DoDID: "dod-1", DefinitionRevision: "def-1", StartupInputHash: "startup-input-test", Bootstrap: &bootstrap,
+	}
+	biz := &Biz{runs: runs}
+	admission, err := biz.restartWorkspaceExecutionIntent(ctx, command)
+	if err != nil || admission.RunID != predecessor.ID || admission.Outcome != runtimecontract.RuntimeExecutionIntentReplacementPending || admission.Reason != runtimecontract.RuntimeExecutionIntentReasonTerminalPredecessorSuccessorRequested {
+		t.Fatalf("terminal restart admission=%+v err=%v", admission, err)
+	}
+	stored, err := runs.GetByWorkspaceID(ctx, workspaceID, predecessor.ID)
+	if err != nil || stored.ReplacementIntent == nil || stored.ReplacementIntent.State != runmodel.ReplacementIntentTerminationAcknowledged || stored.ReplacementIntent.TerminalDeliveryID != predecessor.TerminalDelivery.TerminalDeliveryID || stored.ReplacementIntent.Recovery.Stage != runmodel.ReplacementRecoverySuccessorMaterialization {
+		t.Fatalf("terminal predecessor replacement intent=%+v err=%v", stored, err)
+	}
+	generation := stored.ReplacementIntent.Recovery.Generation
+	claimedAt := stored.ReplacementIntent.Recovery.DueAt
+	if _, err := biz.submitReplacementInternalEvent(ctx, runs, replacementInternalEvent{
+		Kind: replacementInternalEventRecoveryClaimed, WorkspaceID: workspaceID, RunID: predecessor.ID, OccurredAt: claimedAt,
+		RecoveryClaimed: &replacementRecoveryClaimedFact{RequestID: command.RequestID, Generation: generation, ClaimedAt: claimedAt},
+	}); err != nil {
+		t.Fatalf("claim terminal successor materialization: %v", err)
+	}
+	successor, err := biz.materializeReplacementAfterTerminalDelivery(ctx, stored, predecessor.TerminalDelivery.TerminalDeliveryID, generation)
+	if err != nil {
+		t.Fatalf("materialize terminal successor: %v", err)
+	}
+	successor, err = runs.GetByWorkspaceID(ctx, workspaceID, successor.ID)
+	if err != nil {
+		t.Fatalf("reload terminal successor: %v", err)
+	}
+	stored, err = runs.GetByWorkspaceID(ctx, workspaceID, predecessor.ID)
+	if err != nil || stored.Lineage.LineageState != runmodel.RunLineageStateSuperseded || stored.Lineage.SuccessorRunID != successor.ID ||
+		successor.Lineage.PredecessorRunID != predecessor.ID || successor.Lineage.PredecessorResultID != predecessor.TerminalResultID || successor.State != common.RunStateActive {
+		t.Fatalf("terminal restart lineage predecessor=%+v successor=%+v err=%v", stored, successor, err)
+	}
+}
+
 func TestConcurrentDifferentRestartsPersistAtMostOneCurrentRun(t *testing.T) {
 	runs := memory.NewRunRepository()
 	biz := &Biz{runs: runs}
@@ -345,7 +402,8 @@ func TestReplacementMaterializationSerializesDifferentRestartAndKeepsOneCurrentR
 	predecessor := &runmodel.Run{
 		ID: "historical-predecessor", WorkspaceID: workspaceID, State: common.RunStateSuperseded,
 		GoalID: "goal-old", DoDID: "dod-old", DefinitionRevision: "def-old", StartupInputHash: "startup-old",
-		Lineage: runmodel.RunLineage{LineageState: "superseded"}, TerminalDelivery: &terminal, ReplacementIntent: &intent,
+		Lineage: runmodel.RunLineage{LineageState: "superseded"}, TerminalDelivery: &terminal,
+		TerminalResultID: common.ResultID(string(workspaceID) + "/historical-predecessor/result/dod-assessment"), ReplacementIntent: &intent,
 	}
 	if err := base.Create(ctx, predecessor); err != nil {
 		t.Fatal(err)

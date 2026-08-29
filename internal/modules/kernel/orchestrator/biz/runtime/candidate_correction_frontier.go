@@ -81,6 +81,15 @@ func candidateCorrectionWitness(
 			if !found {
 				continue
 			}
+			bindingField, hasBindingField, fieldErr := runtimecontract.RuntimeOperationCorrectionFieldForRole(operationManifest, runtimecontract.RuntimeOperationCorrectionRoleEvidenceBinding)
+			if fieldErr != nil {
+				return nil
+			}
+			if hasBindingField && candidateCorrectionAllowsOperationWitness(failure, index, bindingField) {
+				if witness := candidateEvidenceBindingCorrectionWitness(manifest, candidate, index, operation, operationManifest, bindingField, rejectedShape, blocked); witness != nil {
+					return witness
+				}
+			}
 			targetField, hasTargetField, fieldErr := runtimecontract.RuntimeOperationCorrectionFieldForRole(operationManifest, runtimecontract.RuntimeOperationCorrectionRoleTarget)
 			if fieldErr != nil {
 				return nil
@@ -343,6 +352,25 @@ func candidateTargetCorrectionWitness(manifest runtimecontract.RuntimeCandidateC
 		default:
 			continue
 		}
+		if witness := candidateOperationMutationWitness(manifest, candidate, index, operation, mutated, field, current, alternative, rejectedShape, blocked); witness != nil {
+			return witness
+		}
+	}
+	return nil
+}
+
+func candidateEvidenceBindingCorrectionWitness(manifest runtimecontract.RuntimeCandidateContractManifest, candidate runtimecontract.RuntimeCandidate, index int, operation runtimecontract.RuntimeOperation, operationManifest runtimecontract.RuntimeCandidateOperationManifest, field runtimecontract.RuntimeOperationCorrectionField, rejectedShape string, blocked map[string]struct{}) *runtimecontract.RuntimeCandidateCorrectionWitness {
+	authorization, err := runtimecontract.RuntimeCandidateOperationBindingAuthorizationFor(operationManifest, operation)
+	if err != nil || len(authorization.AllowedBindingRefs) == 0 {
+		return nil
+	}
+	current := strings.Join(operation.BindingRefs, ",")
+	for _, alternative := range authorization.AllowedBindingRefs {
+		if alternative == "" || containsCandidateCorrectionString(operation.BindingRefs, alternative) {
+			continue
+		}
+		mutated := operation
+		mutated.BindingRefs = []string{alternative}
 		if witness := candidateOperationMutationWitness(manifest, candidate, index, operation, mutated, field, current, alternative, rejectedShape, blocked); witness != nil {
 			return witness
 		}
@@ -760,6 +788,21 @@ func candidateCrossesCorrectionWitness(candidate runtimecontract.RuntimeCandidat
 		}
 		field, found, err := runtimecontract.RuntimeOperationCorrectionFieldForRole(authorization, runtimecontract.RuntimeOperationCorrectionRoleTarget)
 		return err == nil && found && witness.Path == field.CandidatePath(operationIndex) && containsCandidateCorrectionString(operation.TargetRefs, witness.AlternativeValue)
+	case runtimecontract.RuntimeCandidateCorrectionWitnessEvidenceBinding:
+		if !hasOperationIndex || operation.Kind != runtimecontract.CanonicalRuntimeBlockKind(witness.OperationKind) {
+			return false
+		}
+		operationManifest, found := candidateCorrectionOperationManifest(manifest, operation.Kind)
+		if !found {
+			return false
+		}
+		field, found, err := runtimecontract.RuntimeOperationCorrectionFieldForRole(operationManifest, runtimecontract.RuntimeOperationCorrectionRoleEvidenceBinding)
+		if err != nil || !found || witness.Path != field.CandidatePath(operationIndex) {
+			return false
+		}
+		authorization, err := runtimecontract.RuntimeCandidateOperationBindingAuthorizationFor(operationManifest, operation)
+		return err == nil && containsCandidateCorrectionString(authorization.AllowedBindingRefs, witness.AlternativeValue) &&
+			len(operation.BindingRefs) == 1 && operation.BindingRefs[0] == witness.AlternativeValue
 	case runtimecontract.RuntimeCandidateCorrectionWitnessValidationRecipe:
 		if !hasOperationIndex || operation.Kind != runtimecontract.CanonicalRuntimeBlockKind(witness.OperationKind) {
 			return false

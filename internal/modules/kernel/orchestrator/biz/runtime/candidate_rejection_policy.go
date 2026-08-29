@@ -98,6 +98,9 @@ func CandidateCorrectionObjectivesForFailure(failure *runtimecontract.RuntimeCan
 	if strings.HasSuffix(diagnostic.Path, ".kind") && len(diagnostic.Allowed) != 0 {
 		objectives = append(objectives, runtimecontract.RuntimeCandidateCorrectionSelectOperationKind)
 	}
+	if identityField == "bindingRefs" && strings.HasPrefix(diagnostic.Path, "$.operations[") && len(diagnostic.Allowed) != 0 {
+		objectives = append(objectives, runtimecontract.RuntimeCandidateCorrectionSelectEvidenceBinding)
+	}
 	if strings.Contains(diagnostic.Path, "coverage") {
 		objectives = append(objectives, runtimecontract.RuntimeCandidateCorrectionSatisfyCoverage)
 	}

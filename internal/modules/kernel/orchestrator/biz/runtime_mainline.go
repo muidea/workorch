@@ -463,17 +463,23 @@ func (m *Biz) admitRuntimeCompletedCandidateDocument(ctx context.Context, aggreg
 	candidate, decodeErr := runtimecontract.DecodeRuntimeCandidatePayloadWithManifest(manifest, decodedDocument)
 	if decodeErr != nil {
 		failure := *runtimeCandidateSchemaFailure(decodeErr)
+		var rejectedCandidate *runtimecontract.RuntimeCandidate
+		if runtimeCandidateHasDecodedDocument(candidate) {
+			candidateCopy := candidate
+			rejectedCandidate = &candidateCopy
+		}
 		if shape, nonconformant := runtimeCompletedCandidateDocumentShape(decodedDocument); nonconformant {
 			failure = runtimeCandidateDocumentConformanceFailure(shape)
+			rejectedCandidate = nil
 		}
-		failed, failureErr := m.runtimeCandidateDocument(ctx, aggregate, runtime.RuntimeInternalEventCandidateDocumentRejected, candidateAttempt, session.StablePrefixHash, manifest, session.LogicalRequestID, nil, &failure)
+		failed, failureErr := m.runtimeCandidateDocument(ctx, aggregate, runtime.RuntimeInternalEventCandidateDocumentRejected, candidateAttempt, session.StablePrefixHash, manifest, session.LogicalRequestID, rejectedCandidate, &failure)
 		return failed.Aggregate, runtimecontract.RuntimeCandidate{}, false, failureErr
 	}
 	if validateErr := candidate.ValidateWithActivation(aggregate.Decision, candidateContext.Activation); validateErr != nil {
 		failure := runtimecontract.RuntimeCandidateFailure{
 			Class: runtimecontract.RuntimeCandidateFailureClassContract, Code: "candidate_contract_invalid", Signature: "candidate-contract-invalid", Reason: validateErr.Error(),
 		}
-		failed, failureErr := m.runtimeCandidateDocument(ctx, aggregate, runtime.RuntimeInternalEventCandidateDocumentRejected, candidateAttempt, session.StablePrefixHash, manifest, session.LogicalRequestID, nil, &failure)
+		failed, failureErr := m.runtimeCandidateDocument(ctx, aggregate, runtime.RuntimeInternalEventCandidateDocumentRejected, candidateAttempt, session.StablePrefixHash, manifest, session.LogicalRequestID, &candidate, &failure)
 		return failed.Aggregate, runtimecontract.RuntimeCandidate{}, false, failureErr
 	}
 	pendingEvent, err := m.runtimeCandidateDocument(ctx, aggregate, runtime.RuntimeInternalEventCandidateAttemptBegun, candidateAttempt, session.StablePrefixHash, manifest, session.LogicalRequestID, nil, nil)
@@ -493,6 +499,16 @@ func (m *Biz) admitRuntimeCompletedCandidateDocument(ctx context.Context, aggreg
 		return runtime.RuntimeAggregate{}, runtimecontract.RuntimeCandidate{}, false, fmt.Errorf("persisted runtime candidate proposal is missing")
 	}
 	return proposal.Aggregate, persisted, true, nil
+}
+
+func runtimeCandidateHasDecodedDocument(candidate runtimecontract.RuntimeCandidate) bool {
+	count := 0
+	for _, present := range []bool{candidate.StateChange != nil, candidate.Validation != nil, candidate.Assessment != nil, candidate.Governance != nil} {
+		if present {
+			count++
+		}
+	}
+	return count == 1
 }
 
 func runtimeCandidateRequestSession(aggregate runtime.RuntimeAggregate, logicalRequestID string) (runtimecontract.RuntimeCandidateRequestSession, bool) {

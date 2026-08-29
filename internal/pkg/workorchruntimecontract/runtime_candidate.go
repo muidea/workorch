@@ -198,14 +198,15 @@ type RuntimeCandidateFailureDiagnostic struct {
 type RuntimeCandidateCorrectionObjective string
 
 const (
-	RuntimeCandidateCorrectionRemoveForbiddenField RuntimeCandidateCorrectionObjective = "remove_forbidden_field"
-	RuntimeCandidateCorrectionSupplyRequiredField  RuntimeCandidateCorrectionObjective = "supply_required_field"
-	RuntimeCandidateCorrectionReplaceTarget        RuntimeCandidateCorrectionObjective = "replace_target_with_allowed_target"
-	RuntimeCandidateCorrectionSelectOperationKind  RuntimeCandidateCorrectionObjective = "select_allowed_operation_kind"
-	RuntimeCandidateCorrectionSelectDurableEffect  RuntimeCandidateCorrectionObjective = "select_durable_effect"
-	RuntimeCandidateCorrectionChangeReplayedShape  RuntimeCandidateCorrectionObjective = "change_replayed_shape"
-	RuntimeCandidateCorrectionSatisfyCoverage      RuntimeCandidateCorrectionObjective = "satisfy_required_coverage"
-	RuntimeCandidateCorrectionSatisfyDependency    RuntimeCandidateCorrectionObjective = "satisfy_dependency_binding"
+	RuntimeCandidateCorrectionRemoveForbiddenField  RuntimeCandidateCorrectionObjective = "remove_forbidden_field"
+	RuntimeCandidateCorrectionSupplyRequiredField   RuntimeCandidateCorrectionObjective = "supply_required_field"
+	RuntimeCandidateCorrectionReplaceTarget         RuntimeCandidateCorrectionObjective = "replace_target_with_allowed_target"
+	RuntimeCandidateCorrectionSelectOperationKind   RuntimeCandidateCorrectionObjective = "select_allowed_operation_kind"
+	RuntimeCandidateCorrectionSelectDurableEffect   RuntimeCandidateCorrectionObjective = "select_durable_effect"
+	RuntimeCandidateCorrectionChangeReplayedShape   RuntimeCandidateCorrectionObjective = "change_replayed_shape"
+	RuntimeCandidateCorrectionSatisfyCoverage       RuntimeCandidateCorrectionObjective = "satisfy_required_coverage"
+	RuntimeCandidateCorrectionSatisfyDependency     RuntimeCandidateCorrectionObjective = "satisfy_dependency_binding"
+	RuntimeCandidateCorrectionSelectEvidenceBinding RuntimeCandidateCorrectionObjective = "select_allowed_evidence_binding"
 )
 
 func (d *RuntimeCandidateFailureDiagnostic) Clone() *RuntimeCandidateFailureDiagnostic {

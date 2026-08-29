@@ -303,7 +303,7 @@ func TestDeliverRuntimeTerminalCreatesResultAndProjectsOwnersIdempotently(t *tes
 		t.Fatalf("result = %+v err=%v", item, err)
 	}
 	run, err := runs.Get(ctx, "run-v2")
-	if err != nil || run.State != common.RunStateFailed {
+	if err != nil || run.State != common.RunStateFailed || run.TerminalResultID != item.ID {
 		t.Fatalf("run = %+v err=%v", run, err)
 	}
 	workspace, err := workspaces.Get(ctx, "ws-v2")
@@ -330,7 +330,7 @@ func TestAdministrativeTerminationDeliveryRequestUsesSealedFailureIdentity(t *te
 func TestRecordRuntimeDeliveryAcknowledgementRejectsMissingRuntimeController(t *testing.T) {
 	acknowledgement := &runtimecontract.RuntimeDeliveryAcknowledgement{
 		WorkspaceID: "ws-v2", RunID: "run-v2", TerminalDeliveryID: "delivery-v2",
-		Owner: runtimecontract.RuntimeDeliveryOwnerResult,
+		Owner: runtimecontract.RuntimeDeliveryOwnerResult, ResultID: "ws-v2/run-v2/result/dod-assessment",
 	}
 	module := newRuntimeTestOwner()
 	if err := module.recordRuntimeDeliveryAcknowledgement(context.Background(), acknowledgement); !errors.Is(err, common.ErrInvalidArgument) {
@@ -419,7 +419,7 @@ func TestDeliverRuntimeTerminalUsesTypedOwnerEventContracts(t *testing.T) {
 		t.Fatalf("Result owner delivery=%+v err=%v", items, err)
 	}
 	run, err := runs.GetByWorkspaceID(ctx, "ws-v2", "run-v2")
-	if err != nil || run.State != common.RunStateFailed {
+	if err != nil || run.State != common.RunStateFailed || run.TerminalResultID != items[0].ID {
 		t.Fatalf("Run owner terminal projection=%+v err=%v", run, err)
 	}
 	workspace, err := workspaces.Get(ctx, "ws-v2")

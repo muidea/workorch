@@ -104,7 +104,9 @@ func TestClarificationReplacementIntentRequiresResolutionThroughTerminalStates(t
 	completed.Recovery = replacementRecoveryFixture(completed, ReplacementRecoverySuccessorMaterialization, ReplacementRecoveryCompleted)
 	predecessor.State = common.RunStateSuperseded
 	predecessor.TerminalDelivery = &runtimecontract.RuntimeTerminalDeliveryIdentity{WorkspaceID: predecessor.WorkspaceID, RunID: predecessor.ID, TerminalDeliveryID: completed.TerminalDeliveryID}
+	predecessor.TerminalResultID = "ws-1/run-001/result/dod-assessment"
 	predecessor.Lineage.SuccessorRunID = completed.SuccessorRunID
+	predecessor.Lineage.LineageState = RunLineageStateSuperseded
 	if !completed.ValidFor(predecessor) {
 		t.Fatalf("valid completed clarification intent rejected: %+v", completed)
 	}

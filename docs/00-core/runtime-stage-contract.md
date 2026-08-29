@@ -4,7 +4,7 @@ Status: normative
 
 Type: core-contract-index
 
-Last Verified: 2026-08-26
+Last Verified: 2026-08-29
 
 ## Purpose
 
@@ -44,7 +44,7 @@ Workspace owner seals admitted startup input
   -> SM-3 requests/evaluates candidate and seals dispatch
   -> capability owner returns factual result/receipt
   -> SM-2 credits evidence, settles/reopens CWI or seals terminal
-  -> SM-4 delivers Result -> Workspace -> Run
+  -> SM-4 delivers Result -> Workspace -> Run; Result acknowledgement relays the exact owner-derived ResultID
 ```
 
 administrative cancellation/replacement 使用独立但同方向的交接链：
@@ -55,6 +55,13 @@ Run SM-1 administrative termination intent
   -> SM-4 delivers Result -> Workspace -> Run
   -> Run private SM-1 terminal-delivery event applies cancelled/superseded
 ```
+
+显式 Restart 复用同一个 Run-owner `run.replacement` transaction。若 predecessor 尚未终态，先走上述交接链；若
+Workspace 已没有 non-terminal Run，则 Run owner 按 `WorkspaceRunGeneration` 选择最新 terminal predecessor，验证其 exact
+terminal delivery 与 owner-derived `TerminalResultID`，直接把 replacement 私有 stage 封存在 successor materialization，
+不得重开 terminal、重投 terminal delivery 或创建第二套状态机。successor 必须同时封存 `PredecessorRunID +
+PredecessorResultID`；predecessor 的 `SuccessorRunID/LineageState=superseded` 必须先由 Run-private CAS 落地，才允许激活
+successor。
 
 Recovery is idempotent re-drive from the Run-owned opaque aggregate. Projection、Eventstream、provider text、process-local cache
 和历史 event sequence 都不能重建或替代 authority。
@@ -135,6 +142,12 @@ provider、candidate、semantic proof、capability operation、repair 与 recove
   `ProspectiveTargetRef` 不是 Runtime semantic wire 的兼容字段；出现时必须由 strict current decoder 拒绝。schema/document
   admission 在 owner probe 前校验完整合取集合；缺项、多余 target、重复、越界或不满足 clause 只形成
   普通完整文档/schema correction，且零 File/Shell probe。
+- strict decoder 已得到 current wire 的完整 typed operation document、但 manifest semantic admission 因 exact
+  `bindingRefs` 等字段失败时，SM-3 只可把该 typed value 保存在 failed `CandidateAttempt` 的 owner-private correction
+  frontier；它从不成为 accepted candidate、feasibility input、dispatch 或 authority。manifest 为 exact operation slot 声明
+  非空 allowed evidence binding 时，attempt 0 可封存一次 `evidence_binding` witness，并要求 attempt 1 在原 field path
+  选择不同且 exact allowed binding；没有合法 alternative 直接 `candidate_authority_exhausted`，attempt 1 任意再拒绝直接
+  `candidate_retry_exhausted`。framing 不完整、非 current wire 或无法严格解码的 document 不得保存候选值。
 - File 对整个 target set 使用同一 complete manifest revision 执行 path/existence/parent/capacity admission，并只返回
   bounded hypothetical resulting-manifest delta；该过程不创建文件或目录。Shell 只使用 delta 的 resulting manifest
   判定 `would_satisfy | would_not_satisfy | stale`，不读 File/workspace、不启动 process/session。File/Shell 都只返回

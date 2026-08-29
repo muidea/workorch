@@ -193,6 +193,7 @@ func TestMaterializeReplacementRequiresTerminalPredecessorAndIsIdempotent(t *tes
 	predecessor.State = common.RunStateSuperseded
 	terminal := runtimecontract.RuntimeTerminalDeliveryIdentity{WorkspaceID: predecessor.WorkspaceID, RunID: predecessor.ID, TerminalDeliveryID: "terminal-1"}
 	predecessor.TerminalDelivery = &terminal
+	predecessor.TerminalResultID = "ws-restart/run-001/result/dod-assessment"
 	predecessor.Lineage.LineageState = "superseded"
 	predecessor.ReplacementIntent.State = runmodel.ReplacementIntentTerminationAcknowledged
 	predecessor.ReplacementIntent.TerminalDeliveryID = terminal.TerminalDeliveryID
@@ -208,7 +209,7 @@ func TestMaterializeReplacementRequiresTerminalPredecessorAndIsIdempotent(t *tes
 		t.Fatalf("materialize successor: %v", err)
 	}
 	created, err = runs.GetByWorkspaceID(ctx, predecessor.WorkspaceID, created.ID)
-	if err != nil || created.State != common.RunStateActive || created.Lineage.PredecessorRunID != predecessor.ID || created.ActivationRequestID != intent.RequestID {
+	if err != nil || created.State != common.RunStateActive || created.Lineage.PredecessorRunID != predecessor.ID || created.Lineage.PredecessorResultID != predecessor.TerminalResultID || created.ActivationRequestID != intent.RequestID {
 		t.Fatalf("created successor = %+v", created)
 	}
 	if created.RuntimeState != nil || created.ReconciliationRequestID != "" ||

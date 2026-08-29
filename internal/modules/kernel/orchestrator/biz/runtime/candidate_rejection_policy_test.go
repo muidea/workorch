@@ -61,6 +61,21 @@ func TestCandidateCorrectionObjectivesRequireAllowedOperationKind(t *testing.T) 
 	}
 }
 
+func TestCandidateCorrectionObjectivesRequireAllowedEvidenceBinding(t *testing.T) {
+	t.Parallel()
+	failure := runtimecontract.RuntimeCandidateFailure{
+		Class: runtimecontract.RuntimeCandidateFailureClassSchema, Code: "candidate_schema_invalid", Signature: "candidate-schema-invalid",
+		Reason: "provider selected a binding outside the sealed manifest",
+		Diagnostic: &runtimecontract.RuntimeCandidateFailureDiagnostic{
+			Path: "$.operations[0].bindingRefs", Actual: "binding/wrong", Allowed: []string{"binding/allowed"},
+		},
+	}
+	objectives := CandidateCorrectionObjectivesForFailure(&failure)
+	if !reflect.DeepEqual(objectives, []runtimecontract.RuntimeCandidateCorrectionObjective{runtimecontract.RuntimeCandidateCorrectionSelectEvidenceBinding}) {
+		t.Fatalf("objectives = %+v, want select allowed evidence binding", objectives)
+	}
+}
+
 func TestCandidateCorrectionObjectivesRemoveForbiddenProviderIdentityOnly(t *testing.T) {
 	t.Parallel()
 	for _, field := range []string{"id", "dependsOn"} {

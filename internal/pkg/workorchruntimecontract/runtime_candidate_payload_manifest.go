@@ -99,9 +99,17 @@ func DecodeRuntimeCandidatePayloadWithManifest(manifest RuntimeCandidateContract
 		return RuntimeCandidate{}, runtimeCandidatePayloadDecodeDiagnostic(manifest, payload, err)
 	}
 	if err := validateRuntimeCandidatePayloadManifest(manifest, payload, candidate); err != nil {
-		return RuntimeCandidate{}, err
+		// The strictly decoded value is returned together with the manifest
+		// diagnostic. Orchestrator may persist it only as a failed-attempt
+		// correction frontier; it is never admitted as proposal or dispatch
+		// authority until a later document passes this same boundary.
+		return candidate, err
 	}
-	return DeriveRuntimeCandidateOperationAuthority(manifest, candidate)
+	derived, err := DeriveRuntimeCandidateOperationAuthority(manifest, candidate)
+	if err != nil {
+		return candidate, err
+	}
+	return derived, nil
 }
 
 // DeriveRuntimeCandidateOperationAuthority deterministically assigns the

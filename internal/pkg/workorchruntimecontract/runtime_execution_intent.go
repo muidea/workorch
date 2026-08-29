@@ -35,21 +35,22 @@ const (
 type RuntimeExecutionIntentReason string
 
 const (
-	RuntimeExecutionIntentReasonWorkspaceActiveRunAbsent       RuntimeExecutionIntentReason = "workspace_active_run_absent"
-	RuntimeExecutionIntentReasonSelectedRunAbsent              RuntimeExecutionIntentReason = "selected_run_absent"
-	RuntimeExecutionIntentReasonSelectedRunTerminal            RuntimeExecutionIntentReason = "selected_run_terminal"
-	RuntimeExecutionIntentReasonDefinitionChanged              RuntimeExecutionIntentReason = "definition_changed"
-	RuntimeExecutionIntentReasonRuntimeBootstrapMissing        RuntimeExecutionIntentReason = "runtime_bootstrap_missing"
-	RuntimeExecutionIntentReasonCurrentRunContinuationAccepted RuntimeExecutionIntentReason = "current_run_continuation_accepted"
-	RuntimeExecutionIntentReasonPendingRunActivated            RuntimeExecutionIntentReason = "pending_run_activated"
-	RuntimeExecutionIntentReasonGovernancePending              RuntimeExecutionIntentReason = "governance_pending"
-	RuntimeExecutionIntentReasonRunNotResumable                RuntimeExecutionIntentReason = "run_not_resumable"
-	RuntimeExecutionIntentReasonDuplicateRestart               RuntimeExecutionIntentReason = "duplicate_restart"
-	RuntimeExecutionIntentReasonNewRunActivated                RuntimeExecutionIntentReason = "new_run_activated"
-	RuntimeExecutionIntentReasonPredecessorSupersedeRequested  RuntimeExecutionIntentReason = "predecessor_supersede_requested"
-	RuntimeExecutionIntentReasonDefinitionAdmissionMissing     RuntimeExecutionIntentReason = "definition_admission_missing"
-	RuntimeExecutionIntentReasonDefinitionAdmissionMismatch    RuntimeExecutionIntentReason = "definition_admission_mismatch"
-	RuntimeExecutionIntentReasonDefinitionClarificationPending RuntimeExecutionIntentReason = "definition_clarification_pending"
+	RuntimeExecutionIntentReasonWorkspaceActiveRunAbsent              RuntimeExecutionIntentReason = "workspace_active_run_absent"
+	RuntimeExecutionIntentReasonSelectedRunAbsent                     RuntimeExecutionIntentReason = "selected_run_absent"
+	RuntimeExecutionIntentReasonSelectedRunTerminal                   RuntimeExecutionIntentReason = "selected_run_terminal"
+	RuntimeExecutionIntentReasonDefinitionChanged                     RuntimeExecutionIntentReason = "definition_changed"
+	RuntimeExecutionIntentReasonRuntimeBootstrapMissing               RuntimeExecutionIntentReason = "runtime_bootstrap_missing"
+	RuntimeExecutionIntentReasonCurrentRunContinuationAccepted        RuntimeExecutionIntentReason = "current_run_continuation_accepted"
+	RuntimeExecutionIntentReasonPendingRunActivated                   RuntimeExecutionIntentReason = "pending_run_activated"
+	RuntimeExecutionIntentReasonGovernancePending                     RuntimeExecutionIntentReason = "governance_pending"
+	RuntimeExecutionIntentReasonRunNotResumable                       RuntimeExecutionIntentReason = "run_not_resumable"
+	RuntimeExecutionIntentReasonDuplicateRestart                      RuntimeExecutionIntentReason = "duplicate_restart"
+	RuntimeExecutionIntentReasonNewRunActivated                       RuntimeExecutionIntentReason = "new_run_activated"
+	RuntimeExecutionIntentReasonPredecessorSupersedeRequested         RuntimeExecutionIntentReason = "predecessor_supersede_requested"
+	RuntimeExecutionIntentReasonTerminalPredecessorSuccessorRequested RuntimeExecutionIntentReason = "terminal_predecessor_successor_requested"
+	RuntimeExecutionIntentReasonDefinitionAdmissionMissing            RuntimeExecutionIntentReason = "definition_admission_missing"
+	RuntimeExecutionIntentReasonDefinitionAdmissionMismatch           RuntimeExecutionIntentReason = "definition_admission_mismatch"
+	RuntimeExecutionIntentReasonDefinitionClarificationPending        RuntimeExecutionIntentReason = "definition_clarification_pending"
 )
 
 // RuntimeExecutionIntentAdmission is the immutable, owner-neutral admission
@@ -97,7 +98,7 @@ func ValidateRuntimeExecutionIntentAdmission(outcome RuntimeExecutionIntentOutco
 			valid = true
 		}
 	case RuntimeExecutionIntentReplacementPending:
-		valid = reason == RuntimeExecutionIntentReasonDuplicateRestart || reason == RuntimeExecutionIntentReasonPredecessorSupersedeRequested
+		valid = reason == RuntimeExecutionIntentReasonDuplicateRestart || reason == RuntimeExecutionIntentReasonPredecessorSupersedeRequested || reason == RuntimeExecutionIntentReasonTerminalPredecessorSuccessorRequested
 	case RuntimeExecutionIntentRestartRequired:
 		switch reason {
 		case RuntimeExecutionIntentReasonWorkspaceActiveRunAbsent,
@@ -147,6 +148,8 @@ func RuntimeExecutionIntentReasonSummary(reason RuntimeExecutionIntentReason) st
 		return "new Workspace Run activated"
 	case RuntimeExecutionIntentReasonPredecessorSupersedeRequested:
 		return "predecessor supersede requested"
+	case RuntimeExecutionIntentReasonTerminalPredecessorSuccessorRequested:
+		return "terminal predecessor successor requested"
 	case RuntimeExecutionIntentReasonDefinitionAdmissionMissing:
 		return "Workspace definition has not completed pre-seal admission"
 	case RuntimeExecutionIntentReasonDefinitionAdmissionMismatch:
