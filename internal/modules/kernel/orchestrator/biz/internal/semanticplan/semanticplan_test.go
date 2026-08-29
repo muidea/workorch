@@ -84,7 +84,7 @@ func TestValidateManifestIdentityUsesCanonicalCompilation(t *testing.T) {
 	catalog.OperationVariants = []runtimecontract.RuntimeOperationAdmissibilityVariant{{Kind: runtimecontract.StepKindFileWrite, AllowedTargetPolicies: []runtimecontract.RuntimeOperationTargetPolicy{runtimecontract.RuntimeOperationTargetPolicyProspectiveOwnerTarget}, SelectorRefs: []string{"new-target"}, ConstraintRefs: []string{"path"}}}
 	catalog.SnapshotID = runtimecontract.StableRuntimeOperationAdmissibilitySnapshotID(catalog)
 	focuses := runtimecontract.CompileRuntimeDefinitionFocuses([]runtimecontract.CoverageFocus{{
-		ID: "focus-1", SliceID: "slice-1", AssessmentScope: "dodItem", AssessmentID: "dod-1",
+		ID: "focus-1", SliceID: "slice-1", AssessmentScope: "dodItem", AssessmentID: "dod-1", AssessmentText: "change",
 		CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-1"}, RequiredEvidenceKinds: []string{runtimecontract.EvidenceKindStateChange}, RequireAssessment: true,
 	}})
 	identity := ManifestIdentity{WorkspaceID: "ws-1", RunID: "run-1", Definition: definition, DefinitionSeed: seed, DefinitionFocuses: focuses, Execution: activation.ExecutionContract, Admissibilities: []runtimecontract.RuntimeOperationAdmissibility{catalog}, EligibleCoverage: []common.CoverageWorkItemID{"cwi-1"}}

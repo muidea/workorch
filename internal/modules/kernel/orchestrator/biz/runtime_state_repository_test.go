@@ -106,6 +106,7 @@ const (
 // substitute for either of these facts.
 func runtimeFactsWithFileBackedManagedValidationContract(facts runtimecontract.RuntimeFacts) runtimecontract.RuntimeFacts {
 	policy := runtimeFileBackedManagedValidationEvidencePolicy()
+	const targetRef = "target.txt"
 	prerequisite := runtimecontract.RuntimePrerequisite{
 		ID:                   "operation-admissibility-shell-file-backed-validation",
 		Kind:                 runtimecontract.PrerequisiteKindOperationAdmissibility,
@@ -117,15 +118,32 @@ func runtimeFactsWithFileBackedManagedValidationContract(facts runtimecontract.R
 		PrerequisiteID: prerequisite.ID,
 		OwnerModuleID:  runtimecontract.RuntimeModuleShell,
 		OperationKinds: []string{runtimecontract.RuntimeBlockKindManagedValidationSession},
+		OperationVariants: []runtimecontract.RuntimeOperationAdmissibilityVariant{{
+			Kind: runtimecontract.RuntimeBlockKindManagedValidationSession,
+			AllowedTargetPolicies: []runtimecontract.RuntimeOperationTargetPolicy{
+				runtimecontract.RuntimeOperationTargetPolicyExactTarget,
+			},
+		}},
+		TargetRefs:           []string{targetRef},
+		ValidationRecipeRefs: []string{runtimeFileBackedValidationRecipeID},
 		ValidationRecipes: runtimecontract.RuntimeValidationRecipeDeclarationsFromEvidencePolicies(
 			[]runtimecontract.RuntimeEvidencePolicy{policy},
 		),
+		ValidationSurfaces: []runtimecontract.RuntimeValidationSurface{{
+			ID: runtimeFileBackedValidationRecipeID, OwnerModuleID: runtimecontract.RuntimeModuleShell,
+			OperationKind: runtimecontract.RuntimeBlockKindManagedValidationSession,
+			Readiness:     runtimecontract.RuntimeValidationSurfaceReady, InputSchemaHash: "file-backed-validation-input-v1",
+			InputBindingRef: "file-backed-validation-input", CheckRefs: []string{runtimeFileBackedValidationCheck},
+			ProofApplicability: runtimecontract.RuntimeValidationProofDirect, EffectScope: runtimecontract.RuntimeEffectEphemeralSession,
+			IdempotencyClass: runtimecontract.RuntimeOperationIdempotencySafeToReplay,
+		}},
 		ObservedRevision: "shell-policy-file-backed-v1",
 	}
 	inventory.SnapshotID = runtimecontract.StableRuntimeOperationAdmissibilitySnapshotID(inventory)
 	facts.Activation.EvidencePolicies = append(facts.Activation.EvidencePolicies, policy)
 	facts.Prerequisites.Satisfied = append(facts.Prerequisites.Satisfied, prerequisite)
 	facts.Resources.OperationAdmissibilities = append(facts.Resources.OperationAdmissibilities, inventory)
+	facts.Resources.PrerequisiteObservations = append(facts.Resources.PrerequisiteObservations, runtimeFileAdmissibilityObservation(inventory))
 	return facts
 }
 
@@ -144,6 +162,44 @@ func commitRuntimeAssessmentForTest(ctx context.Context, controller *runtime.Run
 		Kind: runtime.RuntimeInternalEventAssessmentObserved, Scope: runtime.RuntimeInternalEventScope{WorkspaceID: workspaceID, RunID: runID}, Authority: &runtime.RuntimeInternalAuthorityPayload{},
 	})
 	return result.Aggregate, err
+}
+
+// commitRuntimeAssessmentTargetSnapshotForTest closes the File-owned target
+// grounding prerequisite produced by the canonical semantic compiler. The
+// assessment persistence fixtures used to inherit an impossible post-compile
+// focus overlay that disabled grounding; keeping this acquisition explicit
+// makes their pre-assessment operation lineage match production.
+func commitRuntimeAssessmentTargetSnapshotForTest(t *testing.T, ctx context.Context, controller *runtime.RuntimeController, aggregate runtime.RuntimeAggregate, targetRef string) runtime.RuntimeAggregate {
+	t.Helper()
+	var prerequisite runtimecontract.RuntimePrerequisite
+	for _, pending := range aggregate.Facts.Prerequisites.Pending {
+		if pending.Kind == runtimecontract.PrerequisiteKindTargetSnapshot && pending.OwnerModuleID == runtimecontract.RuntimeModuleFile && pending.SubjectRef == targetRef {
+			prerequisite = pending
+			break
+		}
+	}
+	if prerequisite.ID == "" {
+		t.Fatalf("assessment fixture has no File target-snapshot prerequisite for %q: %+v", targetRef, aggregate.Facts.Prerequisites.Pending)
+	}
+	snapshot := runtimecontract.TargetSnapshot{
+		TargetRef: targetRef, ContentHash: "assessment-target-current-v1", ContentState: runtimecontract.SnapshotContentStateComplete,
+	}
+	observation := runtimecontract.RuntimePrerequisiteObservation{
+		PrerequisiteID: prerequisite.ID, Kind: prerequisite.Kind, OwnerModuleID: prerequisite.OwnerModuleID,
+		ContentHash: snapshot.ContentHash,
+		Dependencies: []runtimecontract.RuntimeFreshnessDependency{{
+			Domain: runtimecontract.RuntimeResourceWorkspaceTarget, OwnerModuleID: runtimecontract.RuntimeModuleFile,
+			SubjectRef: targetRef, Revision: snapshot.ContentHash,
+		}},
+	}
+	observation.ObservationID = runtimecontract.StableRuntimePrerequisiteObservationID(observation)
+	grounded, err := runtimeTestControllerCommitPrerequisite(controller, ctx, aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, runtime.PrerequisiteResult{
+		PrerequisiteID: prerequisite.ID, TargetSnapshot: &snapshot, Observation: &observation,
+	})
+	if err != nil {
+		t.Fatalf("commit assessment fixture target snapshot %q: %v", targetRef, err)
+	}
+	return grounded
 }
 
 // executeRuntimeFreshValidationForAssessment closes the mandatory C9 repair
@@ -304,6 +360,107 @@ func recordRuntimeFileEditFeasibility(t *testing.T, ctx context.Context, control
 	}
 }
 
+// executeRejectedRuntimeFileEditForRepositoryTest persists the complete SM-3
+// transaction and File-owner receipt lineage used by restart/replay fixtures.
+// A content-bound edit rejection makes its target snapshot stale; refresh that
+// owner prerequisite before returning so the next candidate request starts
+// from a real current authority rather than a hand-written EvidenceFact.
+func executeRejectedRuntimeFileEditForRepositoryTest(
+	t *testing.T,
+	ctx context.Context,
+	controller *runtime.RuntimeController,
+	stablePrefixHash string,
+	candidate runtimecontract.RuntimeCandidate,
+	eventID string,
+	failure runtimecontract.FailureFact,
+) runtime.RuntimeAggregate {
+	t.Helper()
+	if _, err := beginRuntimeCandidateAttemptForTest(ctx, controller, "ws-v2", "run-v2", 0, stablePrefixHash); err != nil {
+		t.Fatalf("begin rejected File edit attempt: %v", err)
+	}
+	proposed, err := admitRuntimeCandidateProposalForTest(ctx, controller, "ws-v2", "run-v2", 0, candidate)
+	if err != nil || !proposed.Admission.Accepted() {
+		t.Fatalf("admit rejected File edit proposal: result=%+v err=%v", proposed, err)
+	}
+	recordRuntimeFileEditFeasibility(t, ctx, controller)
+	sealed, err := admitAndSealRuntimeCandidateAttemptForTest(ctx, controller, "ws-v2", "run-v2", 0, candidate)
+	if err != nil || !sealed.Admission.Accepted() || sealed.Aggregate.ActiveDispatch == nil {
+		t.Fatalf("seal rejected File edit: result=%+v err=%v", sealed, err)
+	}
+	observed, err := runtimeTestControllerExecuteDispatch(controller, ctx, "ws-v2", "run-v2", runtimeOperationExecutorFunc(func(ctx context.Context, request runtime.RuntimeOperationExecutionRequest) (runtime.RuntimeOperationExecutionResult, error) {
+		receipt := runtimecontract.RuntimeOperationReceipt{
+			ExecutionKey:        request.Execution.ExecutionKey,
+			OperationID:         request.Operation.ID,
+			Outcome:             runtimecontract.RuntimeOperationOutcomeRejected,
+			ObservedEffectScope: runtimecontract.RuntimeEffectWorkspaceDurable,
+			Evidence: runtimecontract.RuntimeOperationEvidence{
+				Summary: failure.Message,
+			},
+		}
+		feedback, feedbackErr := runtimecontract.RuntimeFeedbackFromFailureFact(runtimecontract.RuntimeFeedbackScope{
+			WorkspaceID: request.WorkspaceID, RunID: request.RunID,
+			AuthoritySnapshotID: request.Transaction.AuthoritySnapshotID, DispatchID: request.DispatchID,
+		}, runtimecontract.RuntimeFeedbackDomainOperation, runtimecontract.RuntimeFeedbackCategory(receipt.Outcome), runtimecontract.RuntimeModuleFile, failure)
+		if feedbackErr != nil {
+			return runtime.RuntimeOperationExecutionResult{}, feedbackErr
+		}
+		feedback.OriginalDiagnostic.OperationID = request.Operation.ID
+		receipt.Feedback = &feedback
+		_, committed, commitErr := runtimeTestControllerCommitOperationReceipt(controller, ctx, request.WorkspaceID, request.RunID, request.DispatchID, request.Execution.Fence, receipt)
+		if commitErr != nil {
+			return runtime.RuntimeOperationExecutionResult{}, commitErr
+		}
+		return runtime.RuntimeOperationExecutionResult{
+			EventID: eventID, OperationID: request.Operation.ID,
+			EvidenceKind: runtimecontract.EvidenceKindStateChange,
+			Status:       runtime.ExecutionEvidenceStatusRejected,
+			SourceRef:    "workorch://file/rejected-edit/" + eventID,
+			Failure:      &failure, Evidence: committed.Evidence, Receipt: committed,
+		}, nil
+	}))
+	if err != nil {
+		t.Fatalf("execute rejected File edit: %v", err)
+	}
+	if observed.Decision.State == runtimecontract.ConvergenceStateNeedPrerequisite {
+		var prerequisite runtimecontract.RuntimePrerequisite
+		for _, pending := range observed.Facts.Prerequisites.Pending {
+			if pending.Kind == runtimecontract.PrerequisiteKindTargetSnapshot && pending.OwnerModuleID == runtimecontract.RuntimeModuleFile {
+				prerequisite = pending
+				break
+			}
+		}
+		if prerequisite.ID == "" {
+			t.Fatalf("rejected File edit requested no exact target snapshot: %+v", observed.Facts.Prerequisites.Pending)
+		}
+		revision := "repository-rejected-refresh-" + eventID
+		snapshot := runtimecontract.TargetSnapshot{
+			TargetRef: prerequisite.SubjectRef, Content: "old", ContentHash: revision,
+			ContentState: runtimecontract.SnapshotContentStateComplete,
+		}
+		observation := runtimecontract.RuntimePrerequisiteObservation{
+			PrerequisiteID: prerequisite.ID, Kind: prerequisite.Kind, OwnerModuleID: prerequisite.OwnerModuleID,
+			ContentHash: snapshot.ContentHash,
+			Dependencies: []runtimecontract.RuntimeFreshnessDependency{{
+				Domain: runtimecontract.RuntimeResourceWorkspaceTarget, OwnerModuleID: runtimecontract.RuntimeModuleFile,
+				SubjectRef: snapshot.TargetRef, Revision: snapshot.ContentHash,
+			}},
+		}
+		observation.ObservationID = runtimecontract.StableRuntimePrerequisiteObservationID(observation)
+		observed, err = runtimeTestControllerCommitPrerequisite(controller, ctx, "ws-v2", "run-v2", runtime.PrerequisiteResult{
+			PrerequisiteID: prerequisite.ID, TargetSnapshot: &snapshot, Observation: &observation,
+		})
+		if err != nil {
+			t.Fatalf("refresh rejected File edit target snapshot: %v", err)
+		}
+	}
+	if len(observed.CompletedDispatches) != 1 || len(observed.OperationReceipts) != 1 ||
+		len(observed.Facts.Evidence.Rejected) != 1 || observed.EvidenceSequence != 1 ||
+		len(runtime.ActiveRejectedOperationShapes(observed)) != 1 {
+		t.Fatalf("rejected File edit did not retain complete receipt/evidence lineage: %+v", observed)
+	}
+	return observed
+}
+
 func assertRuntimeFileEditDispatchTargetPreimage(t *testing.T, aggregate runtime.RuntimeAggregate) {
 	t.Helper()
 	if aggregate.ActiveDispatch == nil || aggregate.ActiveDispatch.Candidate.StateChange == nil ||
@@ -327,10 +484,20 @@ func runtimeStringPointer(value string) *string {
 // The complete provider session is history only; execution authority remains
 // the exact accepted attempt bound to the immutable dispatch seal.
 func recordAcceptedRuntimeDispatchAdmissionForTest(
+	t *testing.T,
 	aggregate *runtime.RuntimeAggregate,
 	dispatch runtime.SealedDispatch,
-	manifestHash string,
+	manifest runtimecontract.RuntimeCandidateContractManifest,
 ) {
+	t.Helper()
+	admissionTargetAuthorizations, err := runtimecontract.RuntimeDispatchOperationTargetAuthorizationsFromManifest(manifest, dispatch.Candidate)
+	if err != nil {
+		t.Fatal(err)
+	}
+	admissionValidationRecipes, err := runtimecontract.RuntimeCandidateManagedValidationRecipeSnapshot(manifest, dispatch.Candidate)
+	if err != nil {
+		t.Fatal(err)
+	}
 	stablePrefixHash := "fixture-accepted-dispatch"
 	correctionHash := "fixture-accepted-" + dispatch.ID
 	logicalRequestID := runtimecontract.StableRuntimeCandidateRequestSessionID(
@@ -339,18 +506,20 @@ func recordAcceptedRuntimeDispatchAdmissionForTest(
 		aggregate.Facts.RunID,
 		dispatch.Transaction,
 		stablePrefixHash,
-		manifestHash,
+		manifest.Hash,
 		correctionHash,
 	)
+	manifestBody := manifest.Clone()
 	aggregate.CandidateRequestSessions = append(aggregate.CandidateRequestSessions, runtimecontract.RuntimeCandidateRequestSession{
-		LogicalRequestID: logicalRequestID,
-		DocumentKind:     runtimecontract.RuntimeProviderDocumentOperations,
-		Transaction:      dispatch.Transaction,
-		StablePrefixHash: stablePrefixHash,
-		ManifestHash:     manifestHash,
-		CorrectionHash:   correctionHash,
-		State:            runtimecontract.RuntimeCandidateRequestSessionDocumentComplete,
-		NextSequence:     1,
+		LogicalRequestID:  logicalRequestID,
+		DocumentKind:      runtimecontract.RuntimeProviderDocumentOperations,
+		Transaction:       dispatch.Transaction,
+		StablePrefixHash:  stablePrefixHash,
+		ManifestHash:      manifest.Hash,
+		CandidateManifest: &manifestBody,
+		CorrectionHash:    correctionHash,
+		State:             runtimecontract.RuntimeCandidateRequestSessionDocumentComplete,
+		NextSequence:      1,
 		LastPhysicalCallID: runtimecontract.StableRuntimeCandidatePhysicalCallID(
 			logicalRequestID,
 			1,
@@ -360,18 +529,33 @@ func recordAcceptedRuntimeDispatchAdmissionForTest(
 			Class: runtimecontract.RuntimeCandidateRequestOutcomeDocumentComplete,
 		},
 	})
-	aggregate.CandidateAttempts = append(aggregate.CandidateAttempts, runtimecontract.RuntimeCandidateAttemptRecord{
-		AuthorityContractID:   runtimecontract.StableAuthorityContractID(aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, dispatch.Transaction),
-		Transaction:           dispatch.Transaction,
-		Attempt:               0,
-		StablePrefixHash:      stablePrefixHash,
-		ManifestHash:          manifestHash,
-		LogicalRequestID:      logicalRequestID,
-		State:                 runtimecontract.RuntimeCandidateAttemptStateAccepted,
-		CandidateHash:         dispatch.CandidateHash,
-		DispatchID:            dispatch.ID,
+	attempt := runtimecontract.RuntimeCandidateAttemptRecord{
+		AuthorityContractID: runtimecontract.StableAuthorityContractID(aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, dispatch.Transaction),
+		Transaction:         dispatch.Transaction,
+		Attempt:             0,
+		StablePrefixHash:    stablePrefixHash,
+		ManifestHash:        manifest.Hash,
+		LogicalRequestID:    logicalRequestID,
+		State:               runtimecontract.RuntimeCandidateAttemptStateAccepted,
+		CandidateHash:       dispatch.CandidateHash,
+		DispatchID:          dispatch.ID,
+		AdmissionTargetAuthorizations: runtimecontract.CloneRuntimeDispatchOperationTargetAuthorizations(
+			admissionTargetAuthorizations,
+		),
+		TargetAuthorizationHash: runtimecontract.StableRuntimeDispatchOperationTargetAuthorizationsHash(
+			admissionTargetAuthorizations,
+		),
+		AdmissionValidationRecipes: runtimecontract.CloneRuntimeValidationRecipes(admissionValidationRecipes),
+		AdmissionCoverageBindings:  runtimecontract.CloneCoverageEvidenceBindings(dispatch.CoverageBindings),
+		AdmissionCoverageBindingHash: runtimecontract.StableRuntimeCoverageEvidenceBindingSnapshotHash(
+			dispatch.CoverageBindings,
+		),
 		DispatchAuthorityHash: dispatch.DispatchAuthorityHash,
-	})
+	}
+	if len(admissionValidationRecipes) > 0 {
+		attempt.ValidationRecipeHash = runtimecontract.StableRuntimeValidationRecipeSnapshotHash(admissionValidationRecipes)
+	}
+	aggregate.CandidateAttempts = append(aggregate.CandidateAttempts, attempt)
 }
 
 // startRuntimeFileBackedRunOwner creates an isolated process boundary around
@@ -586,16 +770,27 @@ func TestRuntimeStateRepositoryRoundTripsSealedValidationRecipeSnapshot(t *testi
 
 	aggregate := runtimeAggregate(t, 1)
 	aggregate.Facts.Focus.RequiredEvidenceKinds = []string{runtimecontract.EvidenceKindValidation}
+	aggregate.Facts.DefinitionFocuses[0].TargetRole = "validation_input"
+	aggregate.Facts.Focus.TargetRole = "validation_input"
 	aggregate.Facts.Focus.AcceptedStepKinds = []string{runtimecontract.RuntimeBlockKindManagedValidationSession}
 	aggregate.Facts.Focus.ValidationRecipeID = "sealed"
 	aggregate.Facts.Focus.TargetRefs = []string{"target.txt"}
 	aggregate.Facts.Capabilities = runtimecontract.RuntimeCapabilities{ValidationKinds: []string{runtimecontract.RuntimeBlockKindManagedValidationSession}}
 	recipe := runtimecontract.RuntimeValidationRecipe{ID: "sealed", Command: "sh", Args: []string{"-c", "true"}}
+	const checkRef = "check/sealed-validation"
+	aggregate.Facts.Focus.RequiredCheckRefs = []string{checkRef}
 	inventory := runtimecontract.RuntimeOperationAdmissibility{
 		PrerequisiteID: "admissibility-shell", OwnerModuleID: runtimecontract.RuntimeModuleShell,
-		OperationKinds: []string{runtimecontract.RuntimeBlockKindManagedValidationSession}, TargetRefs: []string{"target.txt"}, ValidationRecipes: []runtimecontract.RuntimeValidationRecipe{recipe},
+		OperationKinds: []string{runtimecontract.RuntimeBlockKindManagedValidationSession}, TargetRefs: []string{"target.txt"},
+		ValidationRecipeRefs: []string{recipe.ID}, ValidationRecipes: []runtimecontract.RuntimeValidationRecipe{recipe},
 		OperationVariants: []runtimecontract.RuntimeOperationAdmissibilityVariant{{
 			Kind: runtimecontract.RuntimeBlockKindManagedValidationSession, AllowedTargetPolicies: []runtimecontract.RuntimeOperationTargetPolicy{runtimecontract.RuntimeOperationTargetPolicyExactTarget},
+		}},
+		ValidationSurfaces: []runtimecontract.RuntimeValidationSurface{{
+			ID: recipe.ID, OwnerModuleID: runtimecontract.RuntimeModuleShell, OperationKind: runtimecontract.RuntimeBlockKindManagedValidationSession,
+			Readiness: runtimecontract.RuntimeValidationSurfaceReady, InputSchemaHash: "sealed-validation-input-v1", InputBindingRef: "sealed-validation-input",
+			CheckRefs: []string{checkRef}, ProofApplicability: runtimecontract.RuntimeValidationProofDirect,
+			EffectScope: runtimecontract.RuntimeEffectEphemeralSession, IdempotencyClass: runtimecontract.RuntimeOperationIdempotencySafeToReplay,
 		}},
 		ObservedRevision: "shell-policy-v1",
 	}
@@ -605,8 +800,10 @@ func TestRuntimeStateRepositoryRoundTripsSealedValidationRecipeSnapshot(t *testi
 		OwnerModuleID: runtimecontract.RuntimeModuleShell, RequiredCapabilities: []string{runtimecontract.RuntimeBlockKindManagedValidationSession},
 	}}
 	aggregate.Facts.Resources.OperationAdmissibilities = []runtimecontract.RuntimeOperationAdmissibility{inventory}
+	aggregate.Facts.Resources.TargetSnapshots = []runtimecontract.TargetSnapshot{{
+		TargetRef: "target.txt", ContentHash: "sealed-validation-target-v1", ContentState: runtimecontract.SnapshotContentStateComplete,
+	}}
 	aggregate = runtimeTestAggregateWithSemanticPlanning(t, aggregate)
-	aggregate.Facts.Focus.TargetRole = "validation_input"
 	facts, decision, err := runtime.ReduceRuntimeStateWithDirective(aggregate.Facts, nil, aggregate.CoverageProofLineage)
 	if err != nil {
 		t.Fatal(err)
@@ -632,7 +829,7 @@ func TestRuntimeStateRepositoryRoundTripsSealedValidationRecipeSnapshot(t *testi
 	if err != nil {
 		t.Fatal(err)
 	}
-	recordAcceptedRuntimeDispatchAdmissionForTest(&aggregate, dispatch, manifest.Hash)
+	recordAcceptedRuntimeDispatchAdmissionForTest(t, &aggregate, dispatch, manifest)
 	aggregate.ActiveDispatch = &dispatch
 	if err := aggregate.Validate(); err != nil {
 		t.Fatalf("fixture aggregate: %v", err)
@@ -653,6 +850,24 @@ func TestRuntimeStateRepositoryRoundTripsSealedValidationRecipeSnapshot(t *testi
 		reloaded.ActiveDispatch.Candidate.Validation == nil || len(reloaded.ActiveDispatch.Candidate.Validation.Operations) != 1 {
 		t.Fatalf("reloaded validation dispatch lost manifest-bound target authority: %+v", reloaded.ActiveDispatch)
 	}
+	if len(reloaded.CandidateAttempts) != 1 ||
+		!runtimecontract.RuntimeDispatchOperationTargetAuthorizationProjectionsEqual(
+			reloaded.CandidateAttempts[0].AdmissionTargetAuthorizations,
+			reloaded.ActiveDispatch.OperationTargetAuthorizations,
+		) ||
+		reloaded.CandidateAttempts[0].TargetAuthorizationHash != runtimecontract.StableRuntimeDispatchOperationTargetAuthorizationsHash(
+			reloaded.CandidateAttempts[0].AdmissionTargetAuthorizations,
+		) {
+		t.Fatalf("reloaded accepted admission lost independent target projection: %+v", reloaded.CandidateAttempts)
+	}
+	if !runtimecontract.RuntimeValidationRecipeProjectionsEqual(
+		reloaded.CandidateAttempts[0].AdmissionValidationRecipes,
+		reloaded.ActiveDispatch.ValidationRecipes,
+	) || reloaded.CandidateAttempts[0].ValidationRecipeHash != runtimecontract.StableRuntimeValidationRecipeSnapshotHash(
+		reloaded.CandidateAttempts[0].AdmissionValidationRecipes,
+	) {
+		t.Fatalf("reloaded accepted admission lost independent validation-recipe projection: %+v", reloaded.CandidateAttempts)
+	}
 	operation := reloaded.ActiveDispatch.Candidate.Validation.Operations[0].Operation.Normalized()
 	authorization := reloaded.ActiveDispatch.OperationTargetAuthorizations[0].Normalized()
 	if authorization.OperationID != operation.ID || authorization.OperationHash != runtimecontract.StableRuntimeOperationHash(operation) ||
@@ -664,6 +879,14 @@ func TestRuntimeStateRepositoryRoundTripsSealedValidationRecipeSnapshot(t *testi
 	reloaded.ActiveDispatch.ValidationRecipes[0].Args[1] = "false"
 	if aggregate.ActiveDispatch.ValidationRecipes[0].Args[1] != "true" {
 		t.Fatalf("persistence conversion aliased sealed recipe arguments: %+v", aggregate.ActiveDispatch.ValidationRecipes)
+	}
+	reloaded.CandidateAttempts[0].AdmissionValidationRecipes[0].Args[1] = "attempt-false"
+	if aggregate.CandidateAttempts[0].AdmissionValidationRecipes[0].Args[1] != "true" {
+		t.Fatalf("persistence conversion aliased accepted admission recipe arguments: %+v", aggregate.CandidateAttempts[0].AdmissionValidationRecipes)
+	}
+	reloaded.CandidateAttempts[0].AdmissionTargetAuthorizations[0].Target.ExactTargetRefs[0] = "mutated.txt"
+	if aggregate.CandidateAttempts[0].AdmissionTargetAuthorizations[0].Target.ExactTargetRefs[0] != "target.txt" {
+		t.Fatalf("persistence conversion aliased accepted admission target projection: %+v", aggregate.CandidateAttempts[0].AdmissionTargetAuthorizations)
 	}
 }
 
@@ -811,7 +1034,7 @@ func TestRuntimeStateRepositoryTreatsRuntimeDefinitionAsOpaque(t *testing.T) {
 // controller fixture repository: after a process restart the stale target must
 // not be reconstructed from the persisted failure or a prior candidate
 // attempt.
-func TestRuntimeStateRepositoryRestartDoesNotReuseStaleMCPOwnerFailureTarget(t *testing.T) {
+func TestRuntimeStateRepositoryRestartPersistsMCPOwnerCatalogStaleCandidateInvalidation(t *testing.T) {
 	ctx := context.Background()
 	hub := magicevent.NewHub(16)
 	t.Cleanup(func() { hub.Terminate(ctx) })
@@ -828,7 +1051,10 @@ func TestRuntimeStateRepositoryRestartDoesNotReuseStaleMCPOwnerFailureTarget(t *
 	}
 	t.Cleanup(func() { _ = runOwner.Stop(ctx) })
 
-	facts := runtimeAggregate(t, 1).Facts
+	// Keep the File catalog that owns the semantic state-change proof, then add
+	// the independent MCP catalog whose stale/reacquire lifecycle is under test.
+	// Both facts exist before the one semantic seal; neither is overlaid later.
+	facts := runtimeCandidateSealFileEditFacts(t)
 	facts.RecoveryPolicy.MaxPrerequisiteRefreshes = 2
 	facts.Focus.TargetRole = "implementation"
 	inventory := runtimecontract.RuntimeOperationAdmissibility{
@@ -848,20 +1074,9 @@ func TestRuntimeStateRepositoryRestartDoesNotReuseStaleMCPOwnerFailureTarget(t *
 		}},
 	}
 	observation.ObservationID = runtimecontract.StableRuntimePrerequisiteObservationID(observation)
-	targetObservation := &runtimecontract.RuntimeFailureTargetObservation{
-		OwnerModuleID: runtimecontract.RuntimeModuleMCP, SubjectRef: "server-a", TargetRole: "implementation",
-		ObservedRevision: "mcp-catalog-v1", TargetRefs: []string{"implementation.go"},
-	}
-	facts.Failure = &runtimecontract.FailureFact{
-		Class: runtimecontract.FailureClassBuildFailure, Signature: "mcp-failure", Message: "owner observed failure",
-		TargetRefs: []string{"implementation.go"}, TargetObservation: targetObservation,
-	}
-	facts.Resources.FailureTarget = &runtimecontract.FailureTarget{
-		Signature: "mcp-failure", TargetRefs: []string{"implementation.go"}, TargetObservation: targetObservation,
-	}
-	facts.Resources.OperationAdmissibilities = []runtimecontract.RuntimeOperationAdmissibility{inventory}
-	facts.Resources.PrerequisiteObservations = []runtimecontract.RuntimePrerequisiteObservation{observation}
-	facts.Prerequisites.Satisfied = []runtimecontract.RuntimePrerequisite{prerequisite}
+	facts.Resources.OperationAdmissibilities = append(facts.Resources.OperationAdmissibilities, inventory)
+	facts.Resources.PrerequisiteObservations = append(facts.Resources.PrerequisiteObservations, observation)
+	facts.Prerequisites.Satisfied = append(facts.Prerequisites.Satisfied, prerequisite)
 
 	repository := runtimeStateRepository{hub: hub}
 	controller, err := runtime.NewRuntimeController(repository)
@@ -873,18 +1088,6 @@ func TestRuntimeStateRepositoryRestartDoesNotReuseStaleMCPOwnerFailureTarget(t *
 		t.Fatal(err)
 	}
 	initialized = runtimeTestPersistSealedSemanticAuthority(t, ctx, repository, initialized)
-	initialized.Facts.Failure = facts.Failure
-	initialized.Facts.Resources.FailureTarget = facts.Resources.FailureTarget
-	initialized.Facts.Resources.OperationAdmissibilities = facts.Resources.OperationAdmissibilities
-	initialized.Facts.Resources.PrerequisiteObservations = facts.Resources.PrerequisiteObservations
-	initialized.Facts.Prerequisites.Satisfied = facts.Prerequisites.Satisfied
-	initialized.StateRevision++
-	if err := initialized.Validate(); err != nil {
-		t.Fatalf("seal owner-observed MCP failure fixture: %v", err)
-	}
-	if err := repository.Save(ctx, initialized, initialized.StateRevision-1); err != nil {
-		t.Fatalf("persist owner-observed MCP failure fixture: %v", err)
-	}
 	if initialized, err = beginRuntimeCandidateAttemptForTest(ctx, controller, "ws-v2", "run-v2", 0, "mcp-owner-catalog-prefix"); err != nil {
 		t.Fatal(err)
 	}
@@ -911,8 +1114,7 @@ func TestRuntimeStateRepositoryRestartDoesNotReuseStaleMCPOwnerFailureTarget(t *
 	if err != nil {
 		t.Fatal(err)
 	}
-	if beforeCommit.Facts.Resources.FailureTarget == nil || beforeCommit.Facts.Failure == nil ||
-		beforeCommit.Facts.Failure.TargetObservation == nil || len(beforeCommit.Facts.Prerequisites.Pending) != 0 ||
+	if len(beforeCommit.Facts.Prerequisites.Pending) != 0 ||
 		len(beforeCommit.CandidateAttempts) != 1 || beforeCommit.CandidateAttempts[0].State != runtimecontract.RuntimeCandidateAttemptStatePending ||
 		beforeCommit.Facts.Recovery.PrerequisiteRefreshes != 0 {
 		t.Fatalf("pre-commit failure left a partially invalidated aggregate: %+v", beforeCommit)
@@ -920,10 +1122,13 @@ func TestRuntimeStateRepositoryRestartDoesNotReuseStaleMCPOwnerFailureTarget(t *
 	responseLossRepository := &panicAfterRuntimeStateSaveRepository{
 		RuntimeStateRepository: repository, marker: "mcp-owner-catalog-stale-response-loss",
 		match: func(aggregate runtime.RuntimeAggregate) bool {
-			return aggregate.Facts.Resources.FailureTarget == nil && aggregate.Facts.Failure != nil &&
-				len(aggregate.Facts.Failure.TargetRefs) == 0 && aggregate.Facts.Failure.TargetObservation == nil &&
-				len(aggregate.Facts.Prerequisites.Pending) == 1 && len(aggregate.CandidateAttempts) == 1 &&
-				aggregate.CandidateAttempts[0].State == runtimecontract.RuntimeCandidateAttemptStateInvalidated
+			mcpRetired, fileRetained := true, false
+			for _, catalog := range aggregate.Facts.Resources.OperationAdmissibilities {
+				mcpRetired = mcpRetired && catalog.OwnerModuleID != runtimecontract.RuntimeModuleMCP
+				fileRetained = fileRetained || catalog.OwnerModuleID == runtimecontract.RuntimeModuleFile
+			}
+			return mcpRetired && fileRetained && len(aggregate.Facts.Prerequisites.Pending) == 1 &&
+				len(aggregate.CandidateAttempts) == 1 && aggregate.CandidateAttempts[0].State == runtimecontract.RuntimeCandidateAttemptStateInvalidated
 		},
 	}
 	responseLost, err := runtime.NewRuntimeController(responseLossRepository)
@@ -953,8 +1158,8 @@ func TestRuntimeStateRepositoryRestartDoesNotReuseStaleMCPOwnerFailureTarget(t *
 	if err != nil {
 		t.Fatal(err)
 	}
-	if loaded.StateRevision <= beforeCommit.StateRevision || loaded.Facts.Resources.FailureTarget != nil ||
-		loaded.Facts.Failure == nil || len(loaded.Facts.Failure.TargetRefs) != 0 || loaded.Facts.Failure.TargetObservation != nil ||
+	if loaded.StateRevision <= beforeCommit.StateRevision || len(loaded.Facts.Resources.OperationAdmissibilities) != 1 ||
+		loaded.Facts.Resources.OperationAdmissibilities[0].OwnerModuleID != runtimecontract.RuntimeModuleFile ||
 		loaded.Facts.RepairDirective != nil || len(loaded.Facts.Prerequisites.Pending) != 1 ||
 		loaded.Facts.Prerequisites.Pending[0].ID != prerequisite.ID || len(loaded.CandidateAttempts) != 1 ||
 		loaded.CandidateAttempts[0].State != runtimecontract.RuntimeCandidateAttemptStateInvalidated {
@@ -969,9 +1174,9 @@ func TestRuntimeStateRepositoryRestartDoesNotReuseStaleMCPOwnerFailureTarget(t *
 	}
 
 	// Reacquisition is a new owner fact, not a resurrection of the stale
-	// observation. Persist the catalog-v2 inventory and prove a subsequent
-	// restart retains only that revision while the old failure target remains
-	// unavailable until a new owner receipt establishes it.
+	// catalog. Persist the catalog-v2 inventory and prove a subsequent restart
+	// retains only that revision. Direct failure-target retirement is exercised
+	// separately through the real MCP receipt/evidence matrix.
 	refreshedInventory := inventory
 	refreshedInventory.ObservedRevision = "mcp-catalog-v2"
 	refreshedInventory.SnapshotID = runtimecontract.StableRuntimeOperationAdmissibilitySnapshotID(refreshedInventory)
@@ -982,9 +1187,8 @@ func TestRuntimeStateRepositoryRestartDoesNotReuseStaleMCPOwnerFailureTarget(t *
 	reacquired, err := runtimeTestControllerCommitPrerequisite(restarted, ctx, "ws-v2", "run-v2", runtime.PrerequisiteResult{
 		PrerequisiteID: prerequisite.ID, OperationAdmissibility: &refreshedInventory, Observation: &refreshedObservation,
 	})
-	if err != nil || len(reacquired.Facts.Prerequisites.Pending) != 0 || len(reacquired.Facts.Resources.OperationAdmissibilities) != 1 ||
-		reacquired.Facts.Resources.OperationAdmissibilities[0].ObservedRevision != "mcp-catalog-v2" || reacquired.Facts.Resources.FailureTarget != nil ||
-		reacquired.Facts.Failure == nil || len(reacquired.Facts.Failure.TargetRefs) != 0 || reacquired.Facts.Failure.TargetObservation != nil {
+	if err != nil || len(reacquired.Facts.Prerequisites.Pending) != 0 || len(reacquired.Facts.Resources.OperationAdmissibilities) != 2 ||
+		!runtimeRepositoryHasOwnerCatalogRevision(reacquired.Facts.Resources.OperationAdmissibilities, runtimecontract.RuntimeModuleMCP, "mcp-catalog-v2") {
 		t.Fatalf("stale reacquisition did not replace only the owner catalog fact: aggregate=%+v err=%v", reacquired, err)
 	}
 	restartedAfterReacquire, err := runtime.NewRuntimeController(repository)
@@ -992,9 +1196,10 @@ func TestRuntimeStateRepositoryRestartDoesNotReuseStaleMCPOwnerFailureTarget(t *
 		t.Fatal(err)
 	}
 	reloaded, err := restartedAfterReacquire.Load(ctx, "ws-v2", "run-v2")
-	if err != nil || reloaded.StateRevision != reacquired.StateRevision || len(reloaded.Facts.Resources.OperationAdmissibilities) != 1 ||
-		reloaded.Facts.Resources.OperationAdmissibilities[0].ObservedRevision != "mcp-catalog-v2" || len(reloaded.Facts.Resources.PrerequisiteObservations) != 1 ||
-		reloaded.Facts.Resources.PrerequisiteObservations[0].Dependencies[0].Revision != "mcp-catalog-v2" || reloaded.Facts.Resources.FailureTarget != nil {
+	if err != nil || reloaded.StateRevision != reacquired.StateRevision || len(reloaded.Facts.Resources.OperationAdmissibilities) != 2 ||
+		!runtimeRepositoryHasOwnerCatalogRevision(reloaded.Facts.Resources.OperationAdmissibilities, runtimecontract.RuntimeModuleMCP, "mcp-catalog-v2") ||
+		!runtimeRepositoryHasOwnerCatalogObservationRevision(reloaded.Facts.Resources.PrerequisiteObservations, runtimecontract.RuntimeModuleMCP, "mcp-catalog-v2") ||
+		reloaded.Facts.Resources.FailureTarget != nil {
 		t.Fatalf("restart did not retain only reacquired owner revision: aggregate=%+v err=%v", reloaded, err)
 	}
 	if _, err := runtimeTestControllerCommitPrerequisite(restartedAfterReacquire, ctx, "ws-v2", "run-v2", runtime.PrerequisiteResult{
@@ -1126,125 +1331,6 @@ func TestRuntimeStateRepositoryPrerequisiteCommitCrashRestartIsAtomic(t *testing
 // same Run-owner CAS boundary as an external owner receipt. A failed save must
 // not expose the mapping; a lost response after the save must not derive it a
 // second time or start any candidate/side-effect work after reload.
-func TestRuntimeStateRepositoryFailureTargetCommitCrashRestartIsAtomic(t *testing.T) {
-	ctx := context.Background()
-	hub := magicevent.NewHub(16)
-	t.Cleanup(func() { hub.Terminate(ctx) })
-	runs := filerepository.NewRunRepository(filepath.Join(t.TempDir(), "runs.json"))
-	if err := runs.Create(ctx, runtimeRunForTest(common.RunStateActive, runtimeDefinition())); err != nil {
-		t.Fatal(err)
-	}
-	runOwner := runmodule.New()
-	if err := runOwner.Configure(runbiz.Dependencies{Runs: runs, EventHub: hub}); err != nil {
-		t.Fatal(err)
-	}
-	if err := runOwner.Start(); err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = runOwner.Stop(ctx) })
-
-	repository := runtimeStateRepository{hub: hub}
-	facts := runtimeAggregate(t, 1).Facts
-	facts.Failure = &runtimecontract.FailureFact{Signature: "failure-target-v1", TargetRefs: []string{"implementation.go"}}
-	controller, err := runtime.NewRuntimeController(repository)
-	if err != nil {
-		t.Fatal(err)
-	}
-	initialized, err := runtimeTestControllerInitialize(controller, ctx, facts, runtimeDefinition(), []runtimecontract.RuntimeRequirement{{
-		Kind: runtimecontract.PrerequisiteKindFailureTarget, OwnerModuleID: runtimecontract.RuntimeModuleOrchestrator,
-		Reason: "typed failure repair surface",
-	}})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if initialized.Decision.State != runtimecontract.ConvergenceStateNeedPrerequisite || len(initialized.Facts.Prerequisites.Pending) != 1 {
-		t.Fatalf("initialized aggregate = %+v", initialized)
-	}
-	prerequisiteID := initialized.Facts.Prerequisites.Pending[0].ID
-	result := runtime.PrerequisiteResult{PrerequisiteID: prerequisiteID, FailureTarget: &runtimecontract.FailureTarget{
-		Signature: "failure-target-v1", TargetRefs: []string{"implementation.go"},
-	}}
-
-	beforeCommitRepository := &failOnceRuntimeStateRepository{
-		RuntimeStateRepository: repository,
-		err:                    errors.New("injected failure target CAS failure"),
-	}
-	beforeCommitController, err := runtime.NewRuntimeController(beforeCommitRepository)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := runtimeTestControllerCommitPrerequisite(beforeCommitController, ctx, "ws-v2", "run-v2", result); err == nil {
-		t.Fatal("failure target commit unexpectedly persisted despite injected Run-owner CAS failure")
-	}
-
-	restartedBeforeCommit, err := runtime.NewRuntimeController(repository)
-	if err != nil {
-		t.Fatal(err)
-	}
-	loadedBeforeCommit, err := restartedBeforeCommit.Load(ctx, "ws-v2", "run-v2")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if loadedBeforeCommit.StateRevision != initialized.StateRevision || loadedBeforeCommit.Facts.Resources.FailureTarget != nil ||
-		len(loadedBeforeCommit.Facts.Resources.PrerequisiteObservations) != 0 || len(loadedBeforeCommit.Facts.Prerequisites.Pending) != 1 ||
-		loadedBeforeCommit.Facts.Prerequisites.Pending[0].ID != prerequisiteID {
-		t.Fatalf("failed failure-target CAS partially persisted aggregate: %+v", loadedBeforeCommit)
-	}
-
-	responseLossRepository := &panicAfterRuntimeStateSaveRepository{
-		RuntimeStateRepository: repository, marker: "failure-target-response-loss",
-		match: func(aggregate runtime.RuntimeAggregate) bool {
-			target := aggregate.Facts.Resources.FailureTarget
-			return target != nil && target.Signature == "failure-target-v1" && len(target.TargetRefs) == 1 &&
-				target.TargetRefs[0] == "implementation.go" && len(aggregate.Facts.Prerequisites.Pending) == 0
-		},
-	}
-	responseLost, err := runtime.NewRuntimeController(responseLossRepository)
-	if err != nil {
-		t.Fatal(err)
-	}
-	func() {
-		defer func() {
-			if recovered := recover(); recovered != "failure-target-response-loss" {
-				t.Fatalf("unexpected failure-target response-loss marker: %v", recovered)
-			}
-		}()
-		_, _ = runtimeTestControllerCommitPrerequisite(responseLost, ctx, "ws-v2", "run-v2", result)
-		t.Fatal("expected failure-target response loss after durable CAS")
-	}()
-	if !responseLossRepository.fired {
-		t.Fatal("failure-target response-loss CAS point was not reached")
-	}
-
-	restartedAfterCommit, err := runtime.NewRuntimeController(repository)
-	if err != nil {
-		t.Fatal(err)
-	}
-	loadedAfterCommit, err := restartedAfterCommit.Load(ctx, "ws-v2", "run-v2")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if loadedAfterCommit.StateRevision <= initialized.StateRevision || loadedAfterCommit.Facts.Resources.FailureTarget == nil ||
-		loadedAfterCommit.Facts.Resources.FailureTarget.Signature != "failure-target-v1" ||
-		len(loadedAfterCommit.Facts.Resources.FailureTarget.TargetRefs) != 1 || loadedAfterCommit.Facts.Resources.FailureTarget.TargetRefs[0] != "implementation.go" ||
-		len(loadedAfterCommit.Facts.Resources.PrerequisiteObservations) != 0 || len(loadedAfterCommit.Facts.Prerequisites.Pending) != 0 ||
-		len(loadedAfterCommit.CandidateRequestSessions) != 0 || len(loadedAfterCommit.CandidateAttempts) != 0 ||
-		loadedAfterCommit.ActiveDispatch != nil || len(loadedAfterCommit.GovernanceRequests) != 0 || len(loadedAfterCommit.OperationReceipts) != 0 {
-		t.Fatalf("restart did not retain only committed failure-target mapping: %+v", loadedAfterCommit)
-	}
-	if _, err := runtimeTestControllerCommitPrerequisite(restartedAfterCommit, ctx, "ws-v2", "run-v2", result); err == nil {
-		t.Fatal("duplicate failure-target result unexpectedly mutated committed aggregate")
-	}
-	final, err := controller.Load(ctx, "ws-v2", "run-v2")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if final.StateRevision != loadedAfterCommit.StateRevision || final.Facts.Resources.FailureTarget == nil ||
-		final.Facts.Resources.FailureTarget.Signature != "failure-target-v1" {
-		t.Fatalf("duplicate failure target changed persisted aggregate: %+v", final)
-	}
-}
-
 func TestRuntimeStateRepositoryValidationScratchStaleInvalidationIsAtomic(t *testing.T) {
 	ctx := context.Background()
 	hub := magicevent.NewHub(16)
@@ -2067,14 +2153,15 @@ func TestRuntimeStateRepositoryDispatchSealFreshProcessCrashRestart(t *testing.T
 	})
 }
 
-// An owner-observed validation failure becomes FailureFact, FailureTarget,
-// rejected evidence and a fresh target prerequisite in one authority commit.
-// Exercise that transition through the production Run-owner repository: a
-// crash before the receipt CAS must not leak any of those facts. Managed
+// A scope-bound validation failure observation first becomes an owner receipt;
+// it cannot become repair authority until the later File-confirmation SM-2
+// transition. Exercise the first boundary through the production Run-owner
+// repository: a crash before the receipt CAS must not leak any failure fact or
+// observation. Managed
 // validation is at-most-once: after its claim is durable, restart must preserve
 // atomicity by fencing the ambiguous owner call as outcome_unknown rather than
 // replaying it.
-func TestRuntimeStateRepositoryOwnerFailureObservationReceiptCrashRestartIsAtomic(t *testing.T) {
+func TestRuntimeStateRepositoryValidationFailureObservationReceiptCrashRestartIsAtomic(t *testing.T) {
 	ctx := context.Background()
 	hub := magicevent.NewHub(16)
 	t.Cleanup(func() { hub.Terminate(ctx) })
@@ -2107,38 +2194,40 @@ func TestRuntimeStateRepositoryOwnerFailureObservationReceiptCrashRestartIsAtomi
 		ValidationKinds:  []string{runtimecontract.RuntimeBlockKindManagedValidationSession},
 	}
 	validationRecipe := runtimecontract.RuntimeValidationRecipe{ID: facts.Focus.ValidationRecipeID, Command: "true"}
+	const validationCheck = "check/failure-observation"
+	facts.Focus.RequiredCheckRefs = []string{validationCheck}
 	validationInventory := runtimecontract.RuntimeOperationAdmissibility{
-		PrerequisiteID:    "operation-admissibility-shell-failure-observation",
-		OwnerModuleID:     runtimecontract.RuntimeModuleShell,
-		OperationKinds:    []string{runtimecontract.RuntimeBlockKindManagedValidationSession},
-		ValidationRecipes: []runtimecontract.RuntimeValidationRecipe{validationRecipe},
-		ObservedRevision:  "shell-policy-failure-observation-v1",
+		PrerequisiteID: "operation-admissibility-shell-failure-observation",
+		OwnerModuleID:  runtimecontract.RuntimeModuleShell,
+		OperationKinds: []string{runtimecontract.RuntimeBlockKindManagedValidationSession},
+		OperationVariants: []runtimecontract.RuntimeOperationAdmissibilityVariant{{
+			Kind: runtimecontract.RuntimeBlockKindManagedValidationSession,
+			AllowedTargetPolicies: []runtimecontract.RuntimeOperationTargetPolicy{
+				runtimecontract.RuntimeOperationTargetPolicyExactTarget,
+			},
+		}},
+		TargetRefs:           []string{"validation-entry.txt"},
+		ValidationRecipeRefs: []string{validationRecipe.ID},
+		ValidationRecipes:    []runtimecontract.RuntimeValidationRecipe{validationRecipe},
+		ValidationSurfaces: []runtimecontract.RuntimeValidationSurface{{
+			ID: validationRecipe.ID, OwnerModuleID: runtimecontract.RuntimeModuleShell, OperationKind: runtimecontract.RuntimeBlockKindManagedValidationSession,
+			Readiness: runtimecontract.RuntimeValidationSurfaceReady, InputSchemaHash: "failure-observation-input-v1", InputBindingRef: "failure-observation-input",
+			CheckRefs: []string{validationCheck}, ProofApplicability: runtimecontract.RuntimeValidationProofDirect,
+			EffectScope: runtimecontract.RuntimeEffectEphemeralSession, IdempotencyClass: runtimecontract.RuntimeOperationIdempotencySafeToReplay,
+		}},
+		ObservedRevision: "shell-policy-failure-observation-v1",
 	}
 	validationInventory.SnapshotID = runtimecontract.StableRuntimeOperationAdmissibilitySnapshotID(validationInventory)
 	facts.Resources.TargetSnapshots = []runtimecontract.TargetSnapshot{{
 		TargetRef: "validation-entry.txt", ContentHash: "validation-entry-v1", ContentState: runtimecontract.SnapshotContentStateComplete,
 	}}
-	catalogObservation := runtimecontract.RuntimePrerequisiteObservation{
-		PrerequisiteID: "capability:blocks/mcp:failure-observer",
-		Kind:           runtimecontract.PrerequisiteKindCapability,
-		OwnerModuleID:  runtimecontract.RuntimeModuleMCP,
-		ContentHash:    "mcp-catalog-v1",
-		Dependencies: []runtimecontract.RuntimeFreshnessDependency{{
-			Domain: runtimecontract.RuntimeResourceOwnerCatalog, OwnerModuleID: runtimecontract.RuntimeModuleMCP,
-			SubjectRef: "mcp_server_catalog", Revision: "mcp-catalog-v1",
-		}},
-	}
-	catalogObservation.ObservationID = runtimecontract.StableRuntimePrerequisiteObservationID(catalogObservation)
 	facts.Prerequisites.Satisfied = []runtimecontract.RuntimePrerequisite{{
-		ID: catalogObservation.PrerequisiteID, Kind: catalogObservation.Kind, OwnerModuleID: catalogObservation.OwnerModuleID,
-		RequiredCapabilities: []string{runtimecontract.StepKindMCPToolCall}, Reason: "failure observer catalog",
-	}, {
 		ID: validationInventory.PrerequisiteID, Kind: runtimecontract.PrerequisiteKindOperationAdmissibility,
 		OwnerModuleID:        runtimecontract.RuntimeModuleShell,
 		RequiredCapabilities: []string{runtimecontract.RuntimeBlockKindManagedValidationSession}, Reason: "Shell validation inventory",
 	}}
 	facts.Resources.OperationAdmissibilities = []runtimecontract.RuntimeOperationAdmissibility{validationInventory}
-	facts.Resources.PrerequisiteObservations = []runtimecontract.RuntimePrerequisiteObservation{catalogObservation}
+	facts.Resources.PrerequisiteObservations = nil
 
 	repository := runtimeStateRepository{hub: hub}
 	controller, err := runtime.NewRuntimeController(repository)
@@ -2173,17 +2262,25 @@ func TestRuntimeStateRepositoryOwnerFailureObservationReceiptCrashRestartIsAtomi
 	}
 	sealedOperationID := sealed.Aggregate.ActiveDispatch.Candidate.Validation.Operations[0].Operation.ID
 
-	observedFailure := runtimecontract.FailureFact{
-		Class: runtimecontract.FailureClassBuildFailure, Code: "implementation_check_failed",
-		Signature: "implementation-check-failed", Message: "capability observed implementation failure",
-		TargetRefs: []string{"implementation.go"},
-		TargetObservation: &runtimecontract.RuntimeFailureTargetObservation{
-			OwnerModuleID: runtimecontract.RuntimeModuleMCP, SubjectRef: "server-a", TargetRole: "implementation",
-			ObservedRevision: "mcp-catalog-v1", TargetRefs: []string{"implementation.go"},
-		},
-	}
 	newExecutor := func(owner *runtime.RuntimeController, crashOnReceiptError bool) runtime.RuntimeOperationExecutor {
 		return runtimeOperationExecutorFunc(func(ctx context.Context, request runtime.RuntimeOperationExecutionRequest) (runtime.RuntimeOperationExecutionResult, error) {
+			if len(request.ValidationScopeTargetRefs) == 0 {
+				return runtime.RuntimeOperationExecutionResult{}, errors.New("sealed validation scope is required")
+			}
+			observation := runtimecontract.RuntimeValidationFailureObservation{
+				WorkspaceID: request.WorkspaceID, RunID: request.RunID,
+				AuthoritySnapshotID: request.Transaction.AuthoritySnapshotID, DispatchID: request.DispatchID, OperationID: request.Operation.ID,
+				FailureSignature: "implementation-check-failed", TargetRole: request.TargetRole,
+				DiagnosticClass:     runtimecontract.ValidationDiagnosticBuildFailed,
+				CandidateTargetRefs: []string{path}, ValidationScopeTargetRefs: append([]string(nil), request.ValidationScopeTargetRefs...),
+				DiagnosticHash: strings.Repeat("f", 64),
+			}
+			observedFailure := runtimecontract.FailureFact{
+				Class: runtimecontract.FailureClassBuildFailure, Code: "implementation_check_failed",
+				Signature: observation.FailureSignature, Message: "capability observed implementation failure",
+				ValidationDiagnostic:         &runtimecontract.ValidationFailureDiagnostic{Class: runtimecontract.ValidationDiagnosticBuildFailed, TargetRefs: append([]string(nil), observation.CandidateTargetRefs...)},
+				ValidationFailureObservation: &observation,
+			}
 			receipt := runtimecontract.RuntimeOperationReceipt{
 				ExecutionKey: request.Execution.ExecutionKey, OperationID: request.Operation.ID,
 				Outcome: runtimecontract.RuntimeOperationOutcomeRejected, ObservedEffectScope: runtimecontract.RuntimeEffectEphemeralSession,
@@ -2276,14 +2373,11 @@ func TestRuntimeStateRepositoryOwnerFailureObservationReceiptCrashRestartIsAtomi
 	}
 }
 
-// A same-focus rejected operation shape remains diagnostic lineage until
-// durable progress closes it.  An owner-grounded retarget is the narrow legal
-// way to repair that same gap: after a real process restart the old shape must
-// still be rejected, while the newly observed target receives a fresh
-// authority and a distinct admissible shape.  This intentionally drives only
-// typed receipt/prerequisite contracts; neither the test nor the runtime
-// reconstructs a target from provider text.
-func TestRuntimeFileBackedRestartKeepsRejectedShapeAcrossOwnerRetarget(t *testing.T) {
+// A receipt may carry only observations authored by the sealed operation
+// owner. Prove that a File operation cannot smuggle an MCP target observation
+// through the production Run-owner persistence boundary, and that restart sees
+// neither a receipt nor any derived SM-2 repair authority.
+func TestRuntimeFileBackedRestartRejectsCrossOwnerTargetObservationAtomically(t *testing.T) {
 	ctx := context.Background()
 	runs := filerepository.NewRunRepository(filepath.Join(t.TempDir(), "runs.json"))
 	if err := runs.Create(ctx, runtimeRunForTest(common.RunStateActive, runtimeDefinition())); err != nil {
@@ -2301,30 +2395,12 @@ func TestRuntimeFileBackedRestartKeepsRejectedShapeAcrossOwnerRetarget(t *testin
 	}
 	t.Cleanup(func() { _ = firstRunOwner.Stop(ctx) })
 
-	facts := runtimeAggregate(t, 1).Facts
-	facts.Focus.TargetRefs = []string{"main.go"}
+	facts := runtimeCandidateSealExactFileEditFacts(t, "main.go")
 	facts.Focus.TargetRole = "implementation"
 	facts.Focus.RequireTargetGrounding = true
 	facts.Resources.TargetSnapshots = []runtimecontract.TargetSnapshot{{
 		TargetRef: "main.go", ContentHash: "main-v1", ContentState: runtimecontract.SnapshotContentStateComplete,
 	}}
-	// A failure target is only authoritative when its owning catalog revision is
-	// already persisted in prerequisite freshness.  This is deliberately an MCP
-	// observation because that owner is allowed to report explicit failureTargets.
-	catalog := runtimecontract.RuntimePrerequisiteObservation{
-		PrerequisiteID: "capability:blocks/mcp:failure-observer", Kind: runtimecontract.PrerequisiteKindCapability,
-		OwnerModuleID: runtimecontract.RuntimeModuleMCP, ContentHash: "mcp-catalog-v1",
-		Dependencies: []runtimecontract.RuntimeFreshnessDependency{{
-			Domain: runtimecontract.RuntimeResourceOwnerCatalog, OwnerModuleID: runtimecontract.RuntimeModuleMCP,
-			SubjectRef: "mcp_server_catalog", Revision: "mcp-catalog-v1",
-		}},
-	}
-	catalog.ObservationID = runtimecontract.StableRuntimePrerequisiteObservationID(catalog)
-	facts.Prerequisites.Satisfied = append(facts.Prerequisites.Satisfied, runtimecontract.RuntimePrerequisite{
-		ID: catalog.PrerequisiteID, Kind: catalog.Kind, OwnerModuleID: catalog.OwnerModuleID,
-		RequiredCapabilities: []string{runtimecontract.StepKindMCPToolCall}, Reason: "failure target owner catalog",
-	})
-	facts.Resources.PrerequisiteObservations = append(facts.Resources.PrerequisiteObservations, catalog)
 
 	firstRepository := runtimeStateRepository{hub: firstHub}
 	firstController, err := runtime.NewRuntimeController(firstRepository)
@@ -2333,26 +2409,30 @@ func TestRuntimeFileBackedRestartKeepsRejectedShapeAcrossOwnerRetarget(t *testin
 	}
 	initialized, err := runtimeTestControllerInitialize(firstController, ctx, facts, runtimeDefinition(), nil)
 	if err != nil || initialized.Decision.State != runtimecontract.ConvergenceStateNeedStateChange {
-		t.Fatalf("initial retarget aggregate=%+v err=%v", initialized, err)
+		t.Fatalf("initial cross-owner aggregate=%+v err=%v", initialized, err)
 	}
 	initialized = runtimeTestPersistSealedSemanticAuthority(t, ctx, firstRepository, initialized)
-	if _, err := beginRuntimeCandidateAttemptForTest(ctx, firstController, "ws-v2", "run-v2", 0, "retarget-shape-prefix"); err != nil {
+	if _, err := beginRuntimeCandidateAttemptForTest(ctx, firstController, "ws-v2", "run-v2", 0, "cross-owner-receipt-prefix"); err != nil {
 		t.Fatal(err)
 	}
 	mainTarget := "main.go"
-	oldCandidate := runtimecontract.RuntimeCandidate{StateChange: &runtimecontract.StateChangeCandidate{Operations: []runtimecontract.StateChangingOperation{{Operation: runtimecontract.RuntimeOperation{
-		ID: "rejected-main-edit", Kind: runtimecontract.StepKindFileEdit,
+	candidate := runtimecontract.RuntimeCandidate{StateChange: &runtimecontract.StateChangeCandidate{Operations: []runtimecontract.StateChangingOperation{{Operation: runtimecontract.RuntimeOperation{
+		ID: "cross-owner-file-edit", Kind: runtimecontract.StepKindFileEdit,
 		CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-v2"}, TargetRefs: []string{mainTarget},
 		Parameters: runtimeFileEditParameters(mainTarget),
 	}}}}}
-	sealed, err := admitAndSealRuntimeCandidateAttemptForTest(ctx, firstController, "ws-v2", "run-v2", 0, oldCandidate)
+	if proposed, proposalErr := admitRuntimeCandidateProposalForTest(ctx, firstController, "ws-v2", "run-v2", 0, candidate); proposalErr != nil || !proposed.Admission.Accepted() {
+		t.Fatalf("cross-owner candidate proposal=%+v err=%v", proposed, proposalErr)
+	}
+	recordRuntimeFileEditFeasibility(t, ctx, firstController)
+	sealed, err := admitAndSealRuntimeCandidateAttemptForTest(ctx, firstController, "ws-v2", "run-v2", 0, candidate)
 	if err != nil || !sealed.Admission.Accepted() || sealed.Aggregate.ActiveDispatch == nil {
-		t.Fatalf("old candidate seal=%+v err=%v", sealed, err)
+		t.Fatalf("cross-owner candidate seal=%+v err=%v", sealed, err)
 	}
 
 	ownerFailure := runtimecontract.FailureFact{
-		Class: runtimecontract.FailureClassExecutionFailure, Code: "implementation_targeted_failure",
-		Signature: "same-gap-owner-retarget", Message: "owner observed a different implementation target",
+		Class: runtimecontract.FailureClassExecutionFailure, Code: "cross_owner_target_observation",
+		Signature: "cross-owner-target-observation", Message: "File receipt carried MCP target authority",
 		TargetRefs: []string{"implementation.go"},
 		TargetObservation: &runtimecontract.RuntimeFailureTargetObservation{
 			OwnerModuleID: runtimecontract.RuntimeModuleMCP, SubjectRef: "server-a", TargetRole: "implementation",
@@ -2362,11 +2442,8 @@ func TestRuntimeFileBackedRestartKeepsRejectedShapeAcrossOwnerRetarget(t *testin
 	executor := runtimeOperationExecutorFunc(func(ctx context.Context, request runtime.RuntimeOperationExecutionRequest) (runtime.RuntimeOperationExecutionResult, error) {
 		receipt := runtimecontract.RuntimeOperationReceipt{
 			ExecutionKey: request.Execution.ExecutionKey, OperationID: request.Operation.ID,
-			// The owner rejected the requested semantic outcome after a durable
-			// attempt. Preserve the expected scope so the executor does not replace
-			// the owner-authored failure target with a generic effect mismatch.
 			Outcome: runtimecontract.RuntimeOperationOutcomeRejected, ObservedEffectScope: runtimecontract.RuntimeEffectWorkspaceDurable,
-			Evidence: runtimecontract.RuntimeOperationEvidence{Summary: "owner observed implementation failure"},
+			Evidence: runtimecontract.RuntimeOperationEvidence{Summary: "invalid cross-owner observation"},
 		}
 		descriptor, found := runtimecontract.RuntimeOperationDescriptorForKind(request.Operation.Kind)
 		if !found {
@@ -2380,40 +2457,20 @@ func TestRuntimeFileBackedRestartKeepsRejectedShapeAcrossOwnerRetarget(t *testin
 		}
 		feedback.OriginalDiagnostic.OperationID = request.Operation.ID
 		receipt.Feedback = &feedback
-		_, committed, err := runtimeTestControllerCommitOperationReceipt(firstController, ctx, request.WorkspaceID, request.RunID, request.DispatchID, request.Execution.Fence, receipt)
-		if err != nil {
-			return runtime.RuntimeOperationExecutionResult{}, err
-		}
-		return runtime.RuntimeOperationExecutionResult{
-			EventID: "same-gap-owner-retarget", OperationID: request.Operation.ID, EvidenceKind: runtimecontract.EvidenceKindStateChange,
-			Status: runtime.ExecutionEvidenceStatusRejected, SourceRef: "workorch://mcp/failure-target",
-			Failure: &ownerFailure, Evidence: committed.Evidence, Receipt: committed,
-		}, nil
+		_, _, err = runtimeTestControllerCommitOperationReceipt(firstController, ctx, request.WorkspaceID, request.RunID, request.DispatchID, request.Execution.Fence, receipt)
+		return runtime.RuntimeOperationExecutionResult{}, err
 	})
-	afterFailure, err := runtimeTestControllerExecuteDispatch(firstController, ctx, "ws-v2", "run-v2", executor)
-	if err != nil || afterFailure.Decision.State != runtimecontract.ConvergenceStateNeedPrerequisite || afterFailure.Facts.Resources.FailureTarget == nil ||
-		len(afterFailure.Facts.Resources.FailureTarget.TargetRefs) != 1 || afterFailure.Facts.Resources.FailureTarget.TargetRefs[0] != "implementation.go" {
-		t.Fatalf("owner retarget was not committed as prerequisite authority: aggregate=%+v err=%v", afterFailure, err)
+	if _, err := runtimeTestControllerExecuteDispatch(firstController, ctx, "ws-v2", "run-v2", executor); err == nil ||
+		!strings.Contains(err.Error(), "operation descriptor does not admit direct target observations") {
+		t.Fatalf("cross-owner File receipt error = %v", err)
 	}
-	if shapes := runtime.ActiveRejectedOperationShapes(afterFailure); len(shapes) != 1 ||
-		shapes[0].Hash != runtimecontract.StableRuntimeOperationShape(oldCandidate.StateChange.Operations[0].Operation) ||
-		len(shapes[0].Operation.TargetRefs) != 1 || shapes[0].Operation.TargetRefs[0] != "main.go" {
-		t.Fatalf("same-gap rejected shape was not persisted before restart: %+v", shapes)
-	}
-	var rejectedTargetSnapshot runtimecontract.RuntimePrerequisite
-	for _, prerequisite := range afterFailure.Facts.Prerequisites.Pending {
-		if prerequisite.Kind == runtimecontract.PrerequisiteKindTargetSnapshot && prerequisite.SubjectRef == "main.go" {
-			rejectedTargetSnapshot = prerequisite
-			break
-		}
-	}
-	if rejectedTargetSnapshot.ID == "" {
-		t.Fatalf("rejected durable operation did not request its required freshness snapshot: %+v", afterFailure.Facts.Prerequisites.Pending)
+	beforeRestart, err := firstController.Load(ctx, "ws-v2", "run-v2")
+	if err != nil || beforeRestart.ActiveDispatch == nil || len(beforeRestart.OperationReceipts) != 0 ||
+		beforeRestart.Facts.Failure != nil || beforeRestart.Facts.Resources.FailureTarget != nil ||
+		len(beforeRestart.Facts.Evidence.Rejected) != 0 || len(runtime.ActiveRejectedOperationShapes(beforeRestart)) != 0 {
+		t.Fatalf("cross-owner receipt partially persisted before restart: aggregate=%+v err=%v", beforeRestart, err)
 	}
 
-	// Reconstruct the production Run owner against the same file-backed state.
-	// No process-local controller, dispatch or rejected-shape cache crosses this
-	// boundary.
 	if err := firstRunOwner.Stop(ctx); err != nil {
 		t.Fatal(err)
 	}
@@ -2434,70 +2491,10 @@ func TestRuntimeFileBackedRestartKeepsRejectedShapeAcrossOwnerRetarget(t *testin
 		t.Fatal(err)
 	}
 	loaded, err := restarted.Load(ctx, "ws-v2", "run-v2")
-	if err != nil || loaded.Decision.State != runtimecontract.ConvergenceStateNeedPrerequisite || loaded.Facts.Resources.FailureTarget == nil {
-		t.Fatalf("file-backed restart lost retarget authority: aggregate=%+v err=%v", loaded, err)
-	}
-	if shapes := runtime.ActiveRejectedOperationShapes(loaded); len(shapes) != 1 ||
-		shapes[0].Hash != runtimecontract.StableRuntimeOperationShape(oldCandidate.StateChange.Operations[0].Operation) {
-		t.Fatalf("file-backed restart lost old rejected shape: %+v", shapes)
-	}
-
-	afterRejectedTargetRefresh, err := runtimeTestControllerCommitPrerequisite(restarted, ctx, "ws-v2", "run-v2", runtime.PrerequisiteResult{
-		PrerequisiteID: rejectedTargetSnapshot.ID,
-		TargetSnapshot: &runtimecontract.TargetSnapshot{TargetRef: "main.go", ContentHash: "main-v2", ContentState: runtimecontract.SnapshotContentStateComplete},
-	})
-	if err != nil || afterRejectedTargetRefresh.Decision.State != runtimecontract.ConvergenceStateNeedPrerequisite {
-		t.Fatalf("original target refresh did not preserve owner retarget precedence: aggregate=%+v err=%v", afterRejectedTargetRefresh, err)
-	}
-	var retargetSnapshot runtimecontract.RuntimePrerequisite
-	for _, prerequisite := range afterRejectedTargetRefresh.Facts.Prerequisites.Pending {
-		if prerequisite.Kind == runtimecontract.PrerequisiteKindTargetSnapshot && prerequisite.SubjectRef == "implementation.go" {
-			retargetSnapshot = prerequisite
-			break
-		}
-	}
-	if retargetSnapshot.ID == "" {
-		t.Fatalf("owner retarget did not request its own snapshot after rejected-target refresh: %+v", afterRejectedTargetRefresh.Facts.Prerequisites.Pending)
-	}
-	resumed, err := runtimeTestControllerCommitPrerequisite(restarted, ctx, "ws-v2", "run-v2", runtime.PrerequisiteResult{
-		PrerequisiteID: retargetSnapshot.ID,
-		TargetSnapshot: &runtimecontract.TargetSnapshot{TargetRef: "implementation.go", ContentHash: "implementation-v1", ContentState: runtimecontract.SnapshotContentStateComplete},
-	})
-	if err != nil || resumed.Decision.State != runtimecontract.ConvergenceStateNeedStateChange ||
-		len(resumed.Decision.RequiredOutput.TargetRefs) != 1 || resumed.Decision.RequiredOutput.TargetRefs[0] != "implementation.go" ||
-		resumed.Decision.AuthoritySnapshot.ID == sealed.Aggregate.Decision.AuthoritySnapshot.ID || resumed.Decision.AuthoritySnapshot.Attempt != 0 {
-		t.Fatalf("restart did not create fresh retarget authority: aggregate=%+v err=%v", resumed, err)
-	}
-	// After owner retarget, Decision seals exact_target to implementation.go.
-	// Plan §7 first-failure therefore rejects main.go at target policy before
-	// semantic replay. The old rejected shape remains retained for same-target
-	// replays; either rejection proves the old candidate is still inadmissible.
-	if admission := evaluateRuntimeCandidateAdmissionForTest(resumed, oldCandidate); admission.Accepted() || admission.Failure == nil ||
-		(admission.Failure.Code != "candidate_replays_rejected_shape" &&
-			admission.Failure.Code != "candidate_contract_invalid" &&
-			admission.Failure.Code != "candidate_target_outside_grounding") {
-		t.Fatalf("old same-gap shape became admissible after retarget restart: %+v", admission)
-	}
-	implementationTarget := "implementation.go"
-	newCandidate := runtimecontract.RuntimeCandidate{StateChange: &runtimecontract.StateChangeCandidate{Operations: []runtimecontract.StateChangingOperation{{Operation: runtimecontract.RuntimeOperation{
-		ID: "retargeted-implementation-edit", Kind: runtimecontract.StepKindFileEdit,
-		CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-v2"}, TargetRefs: []string{implementationTarget},
-		Parameters: runtimeFileEditParameters(implementationTarget),
-	}}}}}
-	manifest, err := runtimecontract.BuildRuntimeCandidateContractManifest(
-		resumed.Decision,
-		runtimecontract.RuntimeCandidateManifestOwnerFactsFromResources(resumed.Facts.Resources),
-	)
-	if err != nil {
-		t.Fatal(err)
-	}
-	newCandidate = bindRuntimeTestCandidateToManifest(manifest, newCandidate)
-	newCandidate, err = runtimecontract.DeriveRuntimeCandidateOperationAuthority(manifest, newCandidate)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if admission := evaluateRuntimeCandidateAdmissionForTest(resumed, newCandidate); !admission.Accepted() {
-		t.Fatalf("new owner-retargeted shape was not admissible after restart: %+v", admission)
+	if err != nil || loaded.ActiveDispatch == nil || len(loaded.OperationReceipts) != 0 ||
+		loaded.Facts.Failure != nil || loaded.Facts.Resources.FailureTarget != nil ||
+		len(loaded.Facts.Evidence.Rejected) != 0 || len(runtime.ActiveRejectedOperationShapes(loaded)) != 0 {
+		t.Fatalf("file-backed restart recovered cross-owner authority: aggregate=%+v err=%v", loaded, err)
 	}
 }
 
@@ -2519,8 +2516,9 @@ func TestRuntimeStateRepositoryAssessmentCommitCrashRestartIsAtomic(t *testing.T
 	if err != nil {
 		t.Fatal(err)
 	}
-	facts := runtimeAggregate(t, 1).Facts
+	facts := runtimeCandidateSealExactFileEditFacts(t, "target.txt")
 	facts.Focus.RequireAssessment = true
+	facts.DefinitionFocuses[0].RequireAssessment = true
 	target := "target.txt"
 	facts.Focus.TargetRefs = []string{target}
 	initialized, err := runtimeTestControllerInitialize(controller, ctx, facts, runtimeDefinition(), nil)
@@ -2528,14 +2526,19 @@ func TestRuntimeStateRepositoryAssessmentCommitCrashRestartIsAtomic(t *testing.T
 		t.Fatal(err)
 	}
 	initialized = runtimeTestPersistSealedSemanticAuthority(t, ctx, repository, initialized)
+	initialized = commitRuntimeAssessmentTargetSnapshotForTest(t, ctx, controller, initialized, target)
 	if _, err := beginRuntimeCandidateAttemptForTest(ctx, controller, "ws-v2", "run-v2", 0, "assessment-state-change-prefix"); err != nil {
-		t.Fatal(err)
+		t.Fatalf("begin assessment state-change attempt: %v aggregate=%+v", err, initialized)
 	}
 	candidate := runtimecontract.RuntimeCandidate{StateChange: &runtimecontract.StateChangeCandidate{Operations: []runtimecontract.StateChangingOperation{{Operation: runtimecontract.RuntimeOperation{
 		ID: "assessment-write", Kind: runtimecontract.StepKindFileEdit,
 		CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-v2"}, TargetRefs: []string{target},
 		Parameters: runtimeFileEditParameters(target),
 	}}}}}
+	if proposed, proposalErr := admitRuntimeCandidateProposalForTest(ctx, controller, "ws-v2", "run-v2", 0, candidate); proposalErr != nil || !proposed.Admission.Accepted() {
+		t.Fatalf("assessment state-change proposal=%+v err=%v", proposed, proposalErr)
+	}
+	recordRuntimeFileEditFeasibility(t, ctx, controller)
 	sealed, err := admitAndSealRuntimeCandidateAttemptForTest(ctx, controller, "ws-v2", "run-v2", 0, candidate)
 	if err != nil || !sealed.Admission.Accepted() || sealed.Aggregate.ActiveDispatch == nil {
 		t.Fatalf("state-change seal=%+v err=%v", sealed, err)
@@ -2775,27 +2778,35 @@ func TestRuntimeStateRepositoryClaimedSameGapAssessmentCrashRestartUsesCanonical
 	if err != nil {
 		t.Fatal(err)
 	}
-	facts := runtimeAggregate(t, 1).Facts
-	facts.Activation = bootstrap.Activation
+	facts, err := bootstrap.InitialFacts("ws-v2", "run-v2")
+	if err != nil {
+		t.Fatal(err)
+	}
 	facts.Focus.RequireAssessment = true
 	facts.Focus.RequiredEvidenceKinds = []string{runtimecontract.EvidenceKindStateChange, runtimecontract.EvidenceKindValidation}
 	facts.Focus.AcceptedStepKinds = []string{runtimecontract.StepKindFileEdit, runtimecontract.RuntimeBlockKindManagedValidationSession}
 	facts.Focus.ValidationRecipeID = runtimeFileBackedValidationRecipeID
 	facts.Focus.RequiredCheckRefs = []string{runtimeFileBackedValidationCheck}
+	facts.Capabilities.StateChangeKinds = []string{runtimecontract.StepKindFileEdit}
 	facts.Capabilities.ValidationKinds = []string{runtimecontract.RuntimeBlockKindManagedValidationSession}
 	facts.Repair = runtimecontract.RuntimeRepairLedger{
 		FocusID: facts.Focus.ID, SliceID: facts.Focus.SliceID, RepairAttempts: 2, NoProgressCount: 1,
 		ActiveGap: &runtimecontract.RuntimeAssessmentGap{CoverageWorkItemIDs: append([]common.CoverageWorkItemID(nil), facts.Focus.CoverageWorkItemIDs...), Reason: "same gap"},
 	}
+	fileOwnerFacts := runtimeCandidateSealExactFileEditFacts(t, "target.txt")
+	facts.Prerequisites.Satisfied = append(facts.Prerequisites.Satisfied, fileOwnerFacts.Prerequisites.Satisfied...)
+	facts.Resources.OperationAdmissibilities = append(facts.Resources.OperationAdmissibilities, fileOwnerFacts.Resources.OperationAdmissibilities...)
+	facts.Resources.PrerequisiteObservations = append(facts.Resources.PrerequisiteObservations, fileOwnerFacts.Resources.PrerequisiteObservations...)
 	facts = runtimeFactsWithFileBackedManagedValidationContract(facts)
 	initialized, err := runtimeTestControllerInitialize(controller, ctx, facts, runtimeDefinition(), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	initialized = runtimeTestPersistSealedSemanticAuthority(t, ctx, repository, initialized)
+	initialized = commitRuntimeAssessmentTargetSnapshotForTest(t, ctx, controller, initialized, "target.txt")
 	begun, err := beginRuntimeCandidateAttemptForTest(ctx, controller, "ws-v2", "run-v2", 0, "same-gap-state-prefix")
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("begin same-gap state-change attempt: %v aggregate=%+v", err, initialized)
 	}
 	if begun.Facts.RepairDirective != nil || begun.Decision.RequiredOutput.RepairClosureID != "" {
 		t.Fatalf("superseded same-gap repair closure leaked into canonical candidate authority: aggregate=%+v", begun)
@@ -2803,6 +2814,10 @@ func TestRuntimeStateRepositoryClaimedSameGapAssessmentCrashRestartUsesCanonical
 	stateCandidate := runtimecontract.RuntimeCandidate{StateChange: &runtimecontract.StateChangeCandidate{Operations: []runtimecontract.StateChangingOperation{{Operation: runtimecontract.RuntimeOperation{
 		ID: "same-gap-write", Kind: runtimecontract.StepKindFileEdit, CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-v2"}, TargetRefs: []string{"target.txt"}, Parameters: runtimeFileEditParameters("target.txt"),
 	}}}}}
+	if proposed, proposalErr := admitRuntimeCandidateProposalForTest(ctx, controller, "ws-v2", "run-v2", 0, stateCandidate); proposalErr != nil || !proposed.Admission.Accepted() {
+		t.Fatalf("same-gap state candidate proposal=%+v err=%v", proposed, proposalErr)
+	}
+	recordRuntimeFileEditFeasibility(t, ctx, controller)
 	sealed, err := admitAndSealRuntimeCandidateAttemptForTest(ctx, controller, "ws-v2", "run-v2", 0, stateCandidate)
 	if err != nil || sealed.Aggregate.ActiveDispatch == nil {
 		t.Fatalf("same-gap state candidate seal=%+v err=%v", sealed, err)
@@ -3125,12 +3140,9 @@ func TestRuntimeFileBackedSemanticCandidateReplayExhaustionSurvivesCASBoundaries
 
 		repository := runtimeStateRepository{hub: hub}
 		aggregate := runtimeAggregate(t, 1)
+		aggregate.Facts = runtimeCandidateSealExactFileEditFacts(t, "implementation.go")
 		aggregate.Facts.Focus.RequireTargetGrounding = true
 		aggregate.Facts.Focus.TargetRole = "implementation"
-		aggregate.Facts.Focus.TargetRefs = nil
-		aggregate.Facts.Resources.FailureTarget = &runtimecontract.FailureTarget{
-			Signature: "owner-observed-failure", TargetRefs: []string{"implementation.go"},
-		}
 		aggregate.Facts.Resources.TargetSnapshots = []runtimecontract.TargetSnapshot{{
 			TargetRef: "implementation.go", ContentHash: "implementation-v1", ContentState: runtimecontract.SnapshotContentStateComplete,
 		}}
@@ -3486,54 +3498,15 @@ func TestRuntimeMainlineCandidateAuthorityExhaustionHasNoCorrectionProviderOrBud
 	}
 	ownerCatalog.SnapshotID = runtimecontract.StableRuntimeOperationAdmissibilitySnapshotID(ownerCatalog)
 	facts.Resources.OperationAdmissibilities = []runtimecontract.RuntimeOperationAdmissibility{ownerCatalog}
-	initialized := runtimeTestInitializeOperationFixture(t, ctx, biz, runtimeRepository, facts, runtimeDefinition(), nil)
+	runtimeTestInitializeOperationFixture(t, ctx, biz, runtimeRepository, facts, runtimeDefinition(), nil)
 	rawCandidate := runtimecontract.RuntimeCandidate{StateChange: &runtimecontract.StateChangeCandidate{Operations: []runtimecontract.StateChangingOperation{{Operation: runtimecontract.RuntimeOperation{
 		Kind: runtimecontract.StepKindFileEdit, CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-v2"},
 		TargetRefs: []string{"target.txt"}, Parameters: runtimeFileEditParameters("target.txt"),
 	}}}}}
-	manifest, err := runtimecontract.BuildRuntimeCandidateContractManifest(
-		initialized.Decision,
-		runtimecontract.RuntimeCandidateManifestOwnerFactsFromResources(initialized.Facts.Resources),
-	)
-	if err != nil {
-		t.Fatal(err)
-	}
-	replayedCandidate := bindRuntimeTestCandidateToManifest(manifest, rawCandidate)
-	replayedCandidate, err = runtimecontract.DeriveRuntimeCandidateOperationAuthority(manifest, replayedCandidate)
-	if err != nil {
-		t.Fatal(err)
-	}
-	previousDispatch, err := runtime.SealDispatchWithManifestAndOwnerAuthority(
-		initialized.Decision,
-		replayedCandidate,
-		initialized.Facts.Activation,
-		manifest,
-		nil,
-		initialized.Facts.Resources.OperationAdmissibilities,
-		initialized.Facts.Resources.PrerequisiteObservations,
-	)
-	if err != nil {
-		t.Fatal(err)
-	}
-	previousDispatch.State = runtime.DispatchStateCommitted
-	seeded := initialized
-	recordAcceptedRuntimeDispatchAdmissionForTest(&seeded, previousDispatch, manifest.Hash)
-	seeded.CompletedDispatches = []runtime.SealedDispatch{previousDispatch}
-	seeded.Facts.Evidence.Rejected = []runtimecontract.EvidenceFact{{
-		ID: "candidate-authority-rejected-shape", Kind: runtimecontract.EvidenceKindStateChange,
-		DispatchID: previousDispatch.ID, OperationID: replayedCandidate.StateChange.Operations[0].Operation.ID,
-		CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-v2"}, Revision: "runtime-evidence-00000000000000000001",
-		FailureClass: runtimecontract.FailureClassCandidateContractFailure, FailureCode: "single-shape-rejected", FailureSignature: "single-shape-rejected",
-	}}
-	seeded.Facts.EvidenceRevision = "runtime-evidence-00000000000000000001"
-	seeded.Facts, seeded.Decision, err = runtime.ReduceRuntimeStateWithDirective(seeded.Facts, &initialized.Decision.AuthoritySnapshot)
-	if err != nil {
-		t.Fatal(err)
-	}
-	seeded.StateRevision++
-	if err := runtimeRepository.Save(ctx, seeded, initialized.StateRevision); err != nil {
-		t.Fatal(err)
-	}
+	seeded := executeRejectedRuntimeFileEditForRepositoryTest(t, ctx, biz.runtimeController, "candidate-authority-seed-prefix", rawCandidate, "candidate-authority-rejected-shape", runtimecontract.FailureFact{
+		Class: runtimecontract.FailureClassCandidateContractFailure, Code: "single-shape-rejected",
+		Signature: "single-shape-rejected", Message: "the only candidate operation shape was rejected by File",
+	})
 
 	providerCalls := 0
 	llmObserver := magicevent.NewSimpleObserver(runtimecontract.RuntimeModuleLLM, hub)
@@ -3557,7 +3530,7 @@ func TestRuntimeMainlineCandidateAuthorityExhaustionHasNoCorrectionProviderOrBud
 	if err != nil {
 		t.Fatal(err)
 	}
-	if providerCalls != 1 || beforeCorrectionBudget != afterCorrectionBudget || terminal.ActiveDispatch != nil || len(terminal.OperationReceipts) != 0 || len(terminal.CandidateRequestSessions) != 2 ||
+	if providerCalls != 1 || beforeCorrectionBudget != afterCorrectionBudget || terminal.ActiveDispatch != nil || len(terminal.OperationReceipts) != 1 || len(terminal.CandidateRequestSessions) != 2 ||
 		terminal.Decision.State != runtimecontract.ConvergenceStateFailed || terminal.Decision.Terminal == nil || terminal.Decision.Terminal.Code != "candidate_authority_exhausted" ||
 		len(terminal.CandidateAttempts) != 2 || terminal.CandidateAttempts[1].Correction == nil || terminal.CandidateAttempts[1].Correction.Disposition != runtimecontract.RuntimeCandidateCorrectionRejectedFinal ||
 		terminal.CandidateAttempts[1].Correction.TerminalCode != "candidate_authority_exhausted" {
@@ -3611,7 +3584,7 @@ func TestRuntimeMainlineRenderedPreflightStopsBeforeCandidateAttempt(t *testing.
 		llmObserver.Unsubscribe(llmevents.TopicRequestRuntimeCandidate)
 	})
 
-	facts := runtimeAggregate(t, 1).Facts
+	facts := runtimeCandidateSealFileEditFacts(t)
 	facts.Resources.ProviderCeiling = &runtimecontract.ProviderCeiling{
 		Selection:                runtimecontract.ProviderInferenceSelection{Target: runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "gpt-4o"}},
 		ContextWindowTokens:      128000,
@@ -3794,7 +3767,15 @@ func TestRuntimeMainlineRecordsInfeasibleCandidateBeforeDispatchSeal(t *testing.
 	facts.Focus.TargetRefs = nil
 	inventory := runtimecontract.RuntimeOperationAdmissibility{
 		PrerequisiteID: "operation_admissibility:blocks/file", OwnerModuleID: runtimecontract.RuntimeModuleFile,
-		OperationKinds: []string{runtimecontract.StepKindFileEdit}, TargetRefs: []string{"."}, ObservedRevision: "test-revision",
+		OperationKinds: []string{runtimecontract.StepKindFileEdit}, TargetRefs: []string{"."},
+		OperationVariants: []runtimecontract.RuntimeOperationAdmissibilityVariant{{
+			Kind: runtimecontract.StepKindFileEdit,
+			AllowedTargetPolicies: []runtimecontract.RuntimeOperationTargetPolicy{
+				runtimecontract.RuntimeOperationTargetPolicyExactTarget,
+				runtimecontract.RuntimeOperationTargetPolicyExistingOwnerScope,
+			},
+		}},
+		ObservedRevision: "test-revision",
 	}
 	inventory.SnapshotID = runtimecontract.StableRuntimeOperationAdmissibilitySnapshotID(inventory)
 	facts.Resources.OperationAdmissibilities = []runtimecontract.RuntimeOperationAdmissibility{inventory}
@@ -3804,6 +3785,7 @@ func TestRuntimeMainlineRecordsInfeasibleCandidateBeforeDispatchSeal(t *testing.
 	facts.Resources.PrerequisiteObservations = []runtimecontract.RuntimePrerequisiteObservation{
 		runtimeFileAdmissibilityObservation(inventory),
 	}
+	facts.Resources.TargetSnapshots = []runtimecontract.TargetSnapshot{{TargetRef: ".", ContentHash: "directory-target-v1", ContentState: runtimecontract.SnapshotContentStateComplete}}
 	biz := newRuntimeTestOwner()
 	runtimeRepository := runtimeStateRepository{hub: hub}
 	if err := biz.ConfigureRuntimeRepository(runtimeRepository); err != nil {
@@ -3895,7 +3877,18 @@ func TestRuntimeFileBackedOwnerInfeasibilityDoesNotRequestCorrection(t *testing.
 
 	facts := runtimeAggregate(t, 1).Facts
 	facts.Focus.TargetRefs = nil
-	inventory := runtimecontract.RuntimeOperationAdmissibility{PrerequisiteID: "operation_admissibility:blocks/file", OwnerModuleID: runtimecontract.RuntimeModuleFile, OperationKinds: []string{runtimecontract.StepKindFileEdit}, TargetRefs: []string{".", "target.txt"}, ObservedRevision: "test-revision"}
+	inventory := runtimecontract.RuntimeOperationAdmissibility{
+		PrerequisiteID: "operation_admissibility:blocks/file", OwnerModuleID: runtimecontract.RuntimeModuleFile,
+		OperationKinds: []string{runtimecontract.StepKindFileEdit}, TargetRefs: []string{".", "target.txt"},
+		OperationVariants: []runtimecontract.RuntimeOperationAdmissibilityVariant{{
+			Kind: runtimecontract.StepKindFileEdit,
+			AllowedTargetPolicies: []runtimecontract.RuntimeOperationTargetPolicy{
+				runtimecontract.RuntimeOperationTargetPolicyExactTarget,
+				runtimecontract.RuntimeOperationTargetPolicyExistingOwnerScope,
+			},
+		}},
+		ObservedRevision: "test-revision",
+	}
 	inventory.SnapshotID = runtimecontract.StableRuntimeOperationAdmissibilitySnapshotID(inventory)
 	facts.Resources.OperationAdmissibilities = []runtimecontract.RuntimeOperationAdmissibility{inventory}
 	facts.Prerequisites.Satisfied = []runtimecontract.RuntimePrerequisite{
@@ -3903,6 +3896,10 @@ func TestRuntimeFileBackedOwnerInfeasibilityDoesNotRequestCorrection(t *testing.
 	}
 	facts.Resources.PrerequisiteObservations = []runtimecontract.RuntimePrerequisiteObservation{
 		runtimeFileAdmissibilityObservation(inventory),
+	}
+	facts.Resources.TargetSnapshots = []runtimecontract.TargetSnapshot{
+		{TargetRef: ".", ContentHash: "directory-target-v1", ContentState: runtimecontract.SnapshotContentStateComplete},
+		{TargetRef: "target.txt", ContentHash: "target-v1", ContentState: runtimecontract.SnapshotContentStateComplete},
 	}
 	biz := newRuntimeTestOwner()
 	runtimeRepository := runtimeStateRepository{hub: hub}
@@ -3966,13 +3963,28 @@ func TestRuntimeFileBackedOwnerInfeasibilityPersistsWithoutCorrection(t *testing
 
 	facts := runtimeAggregate(t, 1).Facts
 	facts.Focus.TargetRefs = nil
-	inventory := runtimecontract.RuntimeOperationAdmissibility{PrerequisiteID: "operation_admissibility:blocks/file", OwnerModuleID: runtimecontract.RuntimeModuleFile, OperationKinds: []string{runtimecontract.StepKindFileEdit}, TargetRefs: []string{".", "target.txt"}, ObservedRevision: "test-revision"}
+	inventory := runtimecontract.RuntimeOperationAdmissibility{
+		PrerequisiteID: "operation_admissibility:blocks/file", OwnerModuleID: runtimecontract.RuntimeModuleFile,
+		OperationKinds: []string{runtimecontract.StepKindFileEdit}, TargetRefs: []string{".", "target.txt"},
+		OperationVariants: []runtimecontract.RuntimeOperationAdmissibilityVariant{{
+			Kind: runtimecontract.StepKindFileEdit,
+			AllowedTargetPolicies: []runtimecontract.RuntimeOperationTargetPolicy{
+				runtimecontract.RuntimeOperationTargetPolicyExactTarget,
+				runtimecontract.RuntimeOperationTargetPolicyExistingOwnerScope,
+			},
+		}},
+		ObservedRevision: "test-revision",
+	}
 	inventory.SnapshotID = runtimecontract.StableRuntimeOperationAdmissibilitySnapshotID(inventory)
 	facts.Resources.OperationAdmissibilities = []runtimecontract.RuntimeOperationAdmissibility{inventory}
 	facts.Prerequisites.Satisfied = []runtimecontract.RuntimePrerequisite{runtimeOperationAdmissibilityPrerequisite(inventory)}
 	// Keep the prerequisite observation in the file-backed aggregate: correction
 	// admission must use this same owner inventory after restart.
 	facts.Resources.PrerequisiteObservations = []runtimecontract.RuntimePrerequisiteObservation{runtimeFileAdmissibilityObservation(inventory)}
+	facts.Resources.TargetSnapshots = []runtimecontract.TargetSnapshot{
+		{TargetRef: ".", ContentHash: "directory-target-v1", ContentState: runtimecontract.SnapshotContentStateComplete},
+		{TargetRef: "target.txt", ContentHash: "target-v1", ContentState: runtimecontract.SnapshotContentStateComplete},
+	}
 
 	contentsRoot := filepath.Join(root, "candidate-contents")
 	firstOwner := newRuntimeTestOwnerWithEvidence(RuntimeEvidenceRepositories{
@@ -4065,7 +4077,18 @@ func TestRuntimeMainlineExhaustsTwoInfeasibleCandidatesWithoutDispatch(t *testin
 	// Attempt 1 deliberately reuses the rejected shape to prove bounded
 	// exhaustion rather than the B2b no-objective terminal fence.
 	facts.Focus.TargetRefs = nil
-	inventory := runtimecontract.RuntimeOperationAdmissibility{PrerequisiteID: "operation_admissibility:blocks/file", OwnerModuleID: runtimecontract.RuntimeModuleFile, OperationKinds: []string{runtimecontract.StepKindFileEdit}, TargetRefs: []string{"target.txt", "replacement.txt"}, ObservedRevision: "test-revision"}
+	inventory := runtimecontract.RuntimeOperationAdmissibility{
+		PrerequisiteID: "operation_admissibility:blocks/file", OwnerModuleID: runtimecontract.RuntimeModuleFile,
+		OperationKinds: []string{runtimecontract.StepKindFileEdit}, TargetRefs: []string{"target.txt", "replacement.txt"},
+		OperationVariants: []runtimecontract.RuntimeOperationAdmissibilityVariant{{
+			Kind: runtimecontract.StepKindFileEdit,
+			AllowedTargetPolicies: []runtimecontract.RuntimeOperationTargetPolicy{
+				runtimecontract.RuntimeOperationTargetPolicyExactTarget,
+				runtimecontract.RuntimeOperationTargetPolicyExistingOwnerScope,
+			},
+		}},
+		ObservedRevision: "test-revision",
+	}
 	inventory.SnapshotID = runtimecontract.StableRuntimeOperationAdmissibilitySnapshotID(inventory)
 	facts.Resources.OperationAdmissibilities = []runtimecontract.RuntimeOperationAdmissibility{inventory}
 	facts.Prerequisites.Satisfied = []runtimecontract.RuntimePrerequisite{
@@ -4073,6 +4096,10 @@ func TestRuntimeMainlineExhaustsTwoInfeasibleCandidatesWithoutDispatch(t *testin
 	}
 	facts.Resources.PrerequisiteObservations = []runtimecontract.RuntimePrerequisiteObservation{
 		runtimeFileAdmissibilityObservation(inventory),
+	}
+	facts.Resources.TargetSnapshots = []runtimecontract.TargetSnapshot{
+		{TargetRef: "target.txt", ContentHash: "target-v1", ContentState: runtimecontract.SnapshotContentStateComplete},
+		{TargetRef: "replacement.txt", ContentHash: "replacement-v1", ContentState: runtimecontract.SnapshotContentStateComplete},
 	}
 	biz := newRuntimeTestOwner()
 	runtimeRepository := runtimeStateRepository{hub: hub}
@@ -4121,7 +4148,11 @@ func TestRuntimeMainlineRestartsFromPersistedCandidateProposalWithoutProviderRep
 	if err := biz.ConfigureRuntimeRepository(runtimeRepository); err != nil {
 		t.Fatal(err)
 	}
-	runtimeTestInitializeOperationFixture(t, ctx, biz, runtimeRepository, runtimeCandidateSealExactFileEditFacts(t, "target.txt"), runtimeDefinition(), nil)
+	operationFacts := runtimeCandidateSealExactFileEditFacts(t, "target.txt")
+	operationFacts.Resources.TargetSnapshots = []runtimecontract.TargetSnapshot{{
+		TargetRef: "target.txt", ContentHash: "persisted-proposal-target-v1", ContentState: runtimecontract.SnapshotContentStateComplete,
+	}}
+	runtimeTestInitializeOperationFixture(t, ctx, biz, runtimeRepository, operationFacts, runtimeDefinition(), nil)
 	const prefix = "persisted-proposal-prefix"
 	pending, err := biz.BeginRuntimeCandidateAttemptForTest(ctx, "ws-v2", "run-v2", 0, prefix)
 	if err != nil {
@@ -4222,6 +4253,10 @@ func TestRuntimeMainlinePartialReplayClosesAttemptThenSealsCorrectedRetry(t *tes
 	facts.Resources.OperationAdmissibilities = []runtimecontract.RuntimeOperationAdmissibility{fileCatalog}
 	facts.Prerequisites.Satisfied = []runtimecontract.RuntimePrerequisite{runtimeOperationAdmissibilityPrerequisite(fileCatalog)}
 	facts.Resources.PrerequisiteObservations = []runtimecontract.RuntimePrerequisiteObservation{runtimeFileAdmissibilityObservation(fileCatalog)}
+	facts.Resources.TargetSnapshots = []runtimecontract.TargetSnapshot{
+		{TargetRef: "target.txt", ContentHash: "partial-replay-target-v1", ContentState: runtimecontract.SnapshotContentStateComplete},
+		{TargetRef: "replacement.txt", ContentHash: "partial-replay-replacement-v1", ContentState: runtimecontract.SnapshotContentStateComplete},
+	}
 	initialized := runtimeTestInitializeOperationFixture(t, ctx, biz, repository, facts, bootstrap.Definition, bootstrap.Requirements)
 	if len(initialized.Facts.Focus.CoverageEvidenceBindings) != 1 {
 		t.Fatalf("partial replay fixture requires one sealed coverage binding: %+v", initialized.Facts.Focus)
@@ -4232,50 +4267,15 @@ func TestRuntimeMainlinePartialReplayClosesAttemptThenSealsCorrectedRetry(t *tes
 		Parameters: runtimeFileEditParameters("target.txt"),
 	}
 	rejectedCandidate := runtimecontract.RuntimeCandidate{StateChange: &runtimecontract.StateChangeCandidate{Operations: []runtimecontract.StateChangingOperation{{Operation: replayedOperation}}}}
-	previousManifest, err := runtimecontract.BuildRuntimeCandidateContractManifest(
-		initialized.Decision,
-		runtimecontract.RuntimeCandidateManifestOwnerFactsFromResources(initialized.Facts.Resources),
-	)
-	if err != nil {
-		t.Fatal(err)
+	seeded := executeRejectedRuntimeFileEditForRepositoryTest(t, ctx, biz.runtimeController, "partial-replay-seed-prefix", rejectedCandidate, "rejected-edit", runtimecontract.FailureFact{
+		Class: runtimecontract.FailureClassCandidateContractFailure, Code: "base_mismatch",
+		Signature: "rejected-edit", Message: "the File base content changed before edit",
+	})
+	if len(seeded.CompletedDispatches) != 1 || seeded.CompletedDispatches[0].Candidate.StateChange == nil ||
+		len(seeded.CompletedDispatches[0].Candidate.StateChange.Operations) != 1 {
+		t.Fatalf("partial replay seed lost committed File operation: %+v", seeded.CompletedDispatches)
 	}
-	rejectedCandidate, err = runtimecontract.DeriveRuntimeCandidateOperationAuthority(previousManifest, rejectedCandidate)
-	if err != nil {
-		t.Fatal(err)
-	}
-	replayedOperation = rejectedCandidate.StateChange.Operations[0].Operation
-	previousDispatch, err := runtime.SealDispatchWithManifestAndOwnerAuthority(
-		initialized.Decision,
-		rejectedCandidate,
-		initialized.Facts.Activation,
-		previousManifest,
-		nil,
-		initialized.Facts.Resources.OperationAdmissibilities,
-		initialized.Facts.Resources.PrerequisiteObservations,
-	)
-	if err != nil {
-		t.Fatal(err)
-	}
-	previousDispatch.State = runtime.DispatchStateCommitted
-	seeded := initialized
-	recordAcceptedRuntimeDispatchAdmissionForTest(&seeded, previousDispatch, previousManifest.Hash)
-	seeded.CompletedDispatches = []runtime.SealedDispatch{previousDispatch}
-	seeded.Facts.Evidence.Rejected = []runtimecontract.EvidenceFact{{
-		ID: "rejected-edit", Kind: runtimecontract.EvidenceKindStateChange, DispatchID: previousDispatch.ID, OperationID: replayedOperation.ID,
-		CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-v2"}, Revision: "runtime-evidence-00000000000000000001",
-		FailureClass: runtimecontract.FailureClassCandidateContractFailure, FailureCode: "base_mismatch", FailureSignature: "rejected-edit",
-	}}
-	seeded.Facts.EvidenceRevision = "runtime-evidence-00000000000000000001"
-	// The current authority must be sealed against the updated evidence lineage;
-	// the rejected dispatch itself remains history, never an active candidate.
-	seeded.Facts, seeded.Decision, err = runtime.ReduceRuntimeStateWithDirective(seeded.Facts, &initialized.Decision.AuthoritySnapshot)
-	if err != nil {
-		t.Fatal(err)
-	}
-	seeded.StateRevision++
-	if err := repository.Save(ctx, seeded, initialized.StateRevision); err != nil {
-		t.Fatal(err)
-	}
+	replayedOperation = seeded.CompletedDispatches[0].Candidate.StateChange.Operations[0].Operation
 
 	var requests []llmevents.RequestRuntimeCandidateCommand
 	llmObserver := magicevent.NewSimpleObserver(runtimecontract.RuntimeModuleLLM, hub)
@@ -4377,9 +4377,25 @@ func TestRuntimeMainlineRestartSkipsPersistedFeasibilityProbe(t *testing.T) {
 	})
 
 	facts := runtimeAggregate(t, 1).Facts
-	inventory := runtimecontract.RuntimeOperationAdmissibility{PrerequisiteID: "operation_admissibility:blocks/file", OwnerModuleID: runtimecontract.RuntimeModuleFile, OperationKinds: []string{runtimecontract.StepKindFileEdit}, TargetRefs: []string{"target.txt"}, ObservedRevision: "test-revision"}
+	inventory := runtimecontract.RuntimeOperationAdmissibility{
+		PrerequisiteID: "operation_admissibility:blocks/file", OwnerModuleID: runtimecontract.RuntimeModuleFile,
+		OperationKinds: []string{runtimecontract.StepKindFileEdit}, TargetRefs: []string{"target.txt"},
+		OperationVariants: []runtimecontract.RuntimeOperationAdmissibilityVariant{{
+			Kind: runtimecontract.StepKindFileEdit,
+			AllowedTargetPolicies: []runtimecontract.RuntimeOperationTargetPolicy{
+				runtimecontract.RuntimeOperationTargetPolicyExactTarget,
+				runtimecontract.RuntimeOperationTargetPolicyExistingOwnerScope,
+			},
+		}},
+		ObservedRevision: "test-revision",
+	}
 	inventory.SnapshotID = runtimecontract.StableRuntimeOperationAdmissibilitySnapshotID(inventory)
 	facts.Resources.OperationAdmissibilities = []runtimecontract.RuntimeOperationAdmissibility{inventory}
+	facts.Prerequisites.Satisfied = []runtimecontract.RuntimePrerequisite{runtimeOperationAdmissibilityPrerequisite(inventory)}
+	facts.Resources.PrerequisiteObservations = []runtimecontract.RuntimePrerequisiteObservation{runtimeFileAdmissibilityObservation(inventory)}
+	facts.Resources.TargetSnapshots = []runtimecontract.TargetSnapshot{{
+		TargetRef: "target.txt", ContentHash: "persisted-feasibility-target-v1", ContentState: runtimecontract.SnapshotContentStateComplete,
+	}}
 	biz := newRuntimeTestOwner()
 	runtimeRepository := runtimeStateRepository{hub: hub}
 	if err := biz.ConfigureRuntimeRepository(runtimeRepository); err != nil {
@@ -4464,7 +4480,7 @@ func TestRuntimeMainlinePreservesProviderProtocolDiagnosticWithoutCandidateAttem
 	if err := biz.ConfigureRuntimeRepository(runtimeRepository); err != nil {
 		t.Fatal(err)
 	}
-	initialized := runtimeTestInitializeOperationFixture(t, ctx, biz, runtimeRepository, runtimeAggregate(t, 1).Facts, runtimeDefinition(), nil)
+	initialized := runtimeTestInitializeOperationFixture(t, ctx, biz, runtimeRepository, runtimeCandidateSealFileEditFacts(t), runtimeDefinition(), nil)
 	terminal, err := newTestBiz(biz, hub, nil).requestAndSealRuntimeCandidateWithRetry(ctx, initialized, "stable-prefix-v2")
 	if err != nil {
 		t.Fatal(err)
@@ -4606,26 +4622,173 @@ func TestRuntimeStateRecordPreservesCoverageProofLineageAcrossOpaqueReload(t *te
 }
 
 func TestRuntimeStateRecordPreservesRepairSurfaceConfirmationFenceAcrossOpaqueReload(t *testing.T) {
+	ctx := context.Background()
 	aggregate := runtimeAggregate(t, 7)
-	confirmation := runtimecontract.RuntimeRepairSurfaceConfirmation{
-		Observation: runtimecontract.RuntimeValidationFailureObservation{
-			WorkspaceID: aggregate.Facts.WorkspaceID, RunID: aggregate.Facts.RunID,
-			AuthoritySnapshotID: aggregate.Decision.AuthoritySnapshot.ID, DispatchID: "dispatch-1", OperationID: "validate-1",
-			FailureSignature: "build-failure", TargetRole: "implementation", DiagnosticClass: runtimecontract.ValidationDiagnosticBuildFailed,
-			CandidateTargetRefs: []string{"main.go"}, ValidationScopeTargetRefs: []string{"main.go"}, DiagnosticHash: strings.Repeat("d", 64),
-		},
-		OwnerModuleID: runtimecontract.RuntimeModuleFile, SubjectRef: "workspace_deliverable",
-		Disposition: runtimecontract.RuntimeRepairSurfaceStale, ObservedRevision: "tree-v2", Reason: "changed",
+	aggregate.Facts.Focus.RequiredEvidenceKinds = []string{runtimecontract.EvidenceKindValidation}
+	aggregate.Facts.Focus.AcceptedStepKinds = []string{runtimecontract.RuntimeBlockKindManagedValidationSession}
+	aggregate.Facts.Focus.ValidationRecipeID = "repair-surface-reload"
+	const repairSurfaceCheck = "check/repair-surface-reload"
+	aggregate.Facts.Focus.RequiredCheckRefs = []string{repairSurfaceCheck}
+	aggregate.Facts.Focus.TargetRefs = []string{"main.go"}
+	aggregate.Facts.Focus.TargetRole = "implementation"
+	aggregate.Facts.Capabilities = runtimecontract.RuntimeCapabilities{ValidationKinds: []string{runtimecontract.RuntimeBlockKindManagedValidationSession}}
+	recipe := runtimecontract.RuntimeValidationRecipe{ID: "repair-surface-reload", Command: "sh", Args: []string{"-c", "true"}}
+	inventory := runtimecontract.RuntimeOperationAdmissibility{
+		PrerequisiteID: "admissibility-shell-repair-surface-reload", OwnerModuleID: runtimecontract.RuntimeModuleShell,
+		OperationKinds: []string{runtimecontract.RuntimeBlockKindManagedValidationSession}, TargetRefs: []string{"main.go"},
+		ValidationRecipeRefs: []string{recipe.ID}, ValidationRecipes: []runtimecontract.RuntimeValidationRecipe{recipe},
+		OperationVariants: []runtimecontract.RuntimeOperationAdmissibilityVariant{{
+			Kind: runtimecontract.RuntimeBlockKindManagedValidationSession, AllowedTargetPolicies: []runtimecontract.RuntimeOperationTargetPolicy{runtimecontract.RuntimeOperationTargetPolicyExactTarget},
+		}},
+		ValidationSurfaces: []runtimecontract.RuntimeValidationSurface{{
+			ID: recipe.ID, OwnerModuleID: runtimecontract.RuntimeModuleShell, OperationKind: runtimecontract.RuntimeBlockKindManagedValidationSession,
+			Readiness: runtimecontract.RuntimeValidationSurfaceReady, InputSchemaHash: "repair-surface-reload-input-v1", InputBindingRef: "repair-surface-reload-input",
+			CheckRefs: []string{repairSurfaceCheck}, ProofApplicability: runtimecontract.RuntimeValidationProofDirect,
+			EffectScope: runtimecontract.RuntimeEffectEphemeralSession, IdempotencyClass: runtimecontract.RuntimeOperationIdempotencySafeToReplay,
+		}},
+		ObservedRevision: "shell-repair-surface-reload-v1",
 	}
-	record, err := runtimecontract.NewRuntimeRepairSurfaceConfirmationRecord(confirmation)
+	inventory.SnapshotID = runtimecontract.StableRuntimeOperationAdmissibilitySnapshotID(inventory)
+	aggregate.Facts.Prerequisites.Satisfied = []runtimecontract.RuntimePrerequisite{{
+		ID: inventory.PrerequisiteID, Kind: runtimecontract.PrerequisiteKindOperationAdmissibility,
+		OwnerModuleID: runtimecontract.RuntimeModuleShell, RequiredCapabilities: []string{runtimecontract.RuntimeBlockKindManagedValidationSession},
+	}}
+	aggregate.Facts.Resources.OperationAdmissibilities = []runtimecontract.RuntimeOperationAdmissibility{inventory}
+	aggregate = runtimeTestAggregateWithSemanticPlanning(t, aggregate)
+	repository := &runtimeDriveRepository{aggregate: aggregate}
+	controller, err := runtime.NewRuntimeController(repository)
 	if err != nil {
 		t.Fatal(err)
 	}
-	aggregate.RepairSurfaceConfirmations = []runtimecontract.RuntimeRepairSurfaceConfirmationRecord{record}
+	var snapshotPrerequisite runtimecontract.RuntimePrerequisite
+	for _, pending := range aggregate.Facts.Prerequisites.Pending {
+		if pending.Kind == runtimecontract.PrerequisiteKindTargetSnapshot && pending.OwnerModuleID == runtimecontract.RuntimeModuleFile && pending.SubjectRef == "main.go" {
+			snapshotPrerequisite = pending
+			break
+		}
+	}
+	if snapshotPrerequisite.ID == "" {
+		t.Fatalf("repair-surface reload fixture has no File target-snapshot prerequisite: %+v", aggregate.Facts.Prerequisites.Pending)
+	}
+	snapshot := runtimecontract.TargetSnapshot{TargetRef: "main.go", ContentHash: "repair-surface-main-v1", ContentState: runtimecontract.SnapshotContentStateComplete}
+	observation := runtimecontract.RuntimePrerequisiteObservation{
+		PrerequisiteID: snapshotPrerequisite.ID, Kind: snapshotPrerequisite.Kind, OwnerModuleID: snapshotPrerequisite.OwnerModuleID,
+		ContentHash: snapshot.ContentHash,
+		Dependencies: []runtimecontract.RuntimeFreshnessDependency{{
+			Domain: runtimecontract.RuntimeResourceWorkspaceTarget, OwnerModuleID: runtimecontract.RuntimeModuleFile,
+			SubjectRef: snapshot.TargetRef, Revision: snapshot.ContentHash,
+		}},
+	}
+	observation.ObservationID = runtimecontract.StableRuntimePrerequisiteObservationID(observation)
+	aggregate, err = runtimeTestControllerCommitPrerequisite(controller, ctx, aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, runtime.PrerequisiteResult{
+		PrerequisiteID: snapshotPrerequisite.ID, TargetSnapshot: &snapshot, Observation: &observation,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if aggregate.Decision.State != runtimecontract.ConvergenceStateNeedValidation {
+		t.Fatalf("repair-surface reload fixture action = %s, want need_validation", aggregate.Decision.State)
+	}
+	bindingRef := aggregate.Facts.Focus.CoverageEvidenceBindings[0].ID
+	recipeID := recipe.ID
+	candidate := runtimecontract.RuntimeCandidate{Validation: &runtimecontract.ValidationCandidate{Operations: []runtimecontract.ValidationOperation{{Operation: runtimecontract.RuntimeOperation{
+		ID: "validate-repair-surface-reload", Kind: runtimecontract.RuntimeBlockKindManagedValidationSession,
+		BindingRefs: []string{bindingRef}, TargetRefs: []string{"main.go"},
+		Parameters: []runtimecontract.OperationParameter{{Name: "recipeId", String: &recipeID}},
+	}}}}}
+	manifest, err := runtimecontract.BuildRuntimeCandidateContractManifest(
+		aggregate.Decision,
+		runtimecontract.RuntimeCandidateManifestOwnerFactsFromResources(aggregate.Facts.Resources),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	candidate, err = runtimecontract.DeriveRuntimeCandidateOperationAuthority(manifest, candidate)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dispatch, err := runtime.SealDispatchWithManifestAndFeasibilities(
+		aggregate.Decision,
+		candidate,
+		aggregate.Facts.Activation,
+		manifest,
+		nil,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	recordAcceptedRuntimeDispatchAdmissionForTest(t, &aggregate, dispatch, manifest)
+	aggregate.ActiveDispatch = &dispatch
 	if err := aggregate.Validate(); err != nil {
+		t.Fatalf("sealed repair-surface reload fixture invalid before execution: %v", err)
+	}
+	repository.aggregate = aggregate
+	failed, err := runtimeTestControllerExecuteDispatch(controller, ctx, aggregate.Facts.WorkspaceID, aggregate.Facts.RunID,
+		runtimeOperationExecutorFunc(func(ctx context.Context, request runtime.RuntimeOperationExecutionRequest) (runtime.RuntimeOperationExecutionResult, error) {
+			validationObservation := runtimecontract.RuntimeValidationFailureObservation{
+				WorkspaceID: request.WorkspaceID, RunID: request.RunID, AuthoritySnapshotID: request.Transaction.AuthoritySnapshotID,
+				DispatchID: request.DispatchID, OperationID: request.Operation.ID,
+				FailureSignature: "build-failure", TargetRole: request.TargetRole, DiagnosticClass: runtimecontract.ValidationDiagnosticBuildFailed,
+				CandidateTargetRefs: []string{"main.go"}, ValidationScopeTargetRefs: []string{"main.go"}, DiagnosticHash: strings.Repeat("d", 64),
+			}
+			failure := runtimecontract.FailureFact{
+				Class: runtimecontract.FailureClassBuildFailure, Code: "build_failed", Signature: validationObservation.FailureSignature,
+				Message: "managed validation failed",
+				ValidationDiagnostic: &runtimecontract.ValidationFailureDiagnostic{
+					Class: validationObservation.DiagnosticClass, TargetRefs: append([]string(nil), validationObservation.CandidateTargetRefs...),
+				},
+				ValidationFailureObservation: &validationObservation,
+			}
+			receipt := runtimecontract.RuntimeOperationReceipt{
+				ExecutionKey: request.Execution.ExecutionKey, OperationID: request.Operation.ID,
+				Outcome: runtimecontract.RuntimeOperationOutcomeRejected, ObservedEffectScope: runtimecontract.RuntimeEffectUnknown,
+				Evidence: runtimecontract.RuntimeOperationEvidence{Summary: "managed validation rejected"},
+			}
+			feedback, feedbackErr := runtimecontract.RuntimeFeedbackFromFailureFact(runtimecontract.RuntimeFeedbackScope{
+				WorkspaceID: request.WorkspaceID, RunID: request.RunID, AuthoritySnapshotID: request.Transaction.AuthoritySnapshotID, DispatchID: request.DispatchID,
+			}, runtimecontract.RuntimeFeedbackDomainOperation, runtimecontract.RuntimeFeedbackCategory(receipt.Outcome), runtimecontract.RuntimeModuleShell, failure)
+			if feedbackErr != nil {
+				return runtime.RuntimeOperationExecutionResult{}, feedbackErr
+			}
+			feedback.OriginalDiagnostic.OperationID = request.Operation.ID
+			receipt.Feedback = &feedback
+			_, committed, commitErr := runtimeTestControllerCommitOperationReceipt(controller, ctx, request.WorkspaceID, request.RunID, request.DispatchID, request.Execution.Fence, receipt)
+			if commitErr != nil {
+				return runtime.RuntimeOperationExecutionResult{}, commitErr
+			}
+			return runtime.RuntimeOperationExecutionResult{
+				EventID: "event-repair-surface-reload", OperationID: request.Operation.ID,
+				EvidenceKind: runtimecontract.EvidenceKindValidation, Status: runtime.ExecutionEvidenceStatusRejected,
+				Failure: &failure, Evidence: committed.Evidence, Receipt: committed,
+			}, nil
+		}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if failed.Facts.Failure == nil || failed.Facts.Failure.ValidationFailureObservation == nil {
+		t.Fatalf("rejected managed validation did not persist a validation observation: %+v", failed.Facts.Failure)
+	}
+	confirmation := runtimecontract.RuntimeRepairSurfaceConfirmation{
+		Observation:   *failed.Facts.Failure.ValidationFailureObservation,
+		OwnerModuleID: runtimecontract.RuntimeModuleFile, SubjectRef: "workspace_deliverable",
+		Disposition: runtimecontract.RuntimeRepairSurfaceStale, ObservedRevision: "tree-v2", Reason: "changed",
+	}
+	confirmedEvent, err := controller.ApplyInternalEvent(ctx, runtime.RuntimeInternalEvent{
+		Kind:      runtime.RuntimeInternalEventRepairSurfaceConfirmationObserved,
+		Scope:     runtime.RuntimeInternalEventScope{WorkspaceID: failed.Facts.WorkspaceID, RunID: failed.Facts.RunID},
+		Authority: &runtime.RuntimeInternalAuthorityPayload{RepairSurfaceConfirmation: &confirmation},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	confirmed := confirmedEvent.Aggregate
+	if err := confirmed.Validate(); err != nil {
 		t.Fatalf("aggregate with confirmation fence: %v", err)
 	}
-	persisted := runtimeStateRecordFromAggregate(aggregate)
+	persisted := runtimeStateRecordFromAggregate(confirmed)
+	if err := persisted.Validate(); err != nil {
+		t.Fatalf("persisted confirmation fence: %v", err)
+	}
 	reloaded := runtimeAggregateFromRecord(persisted.Clone())
 	if err := reloaded.Validate(); err != nil {
 		t.Fatalf("reloaded aggregate with confirmation fence: %v", err)
@@ -4755,7 +4918,7 @@ func runtimeCoverageProofLineageForRepositoryTest(t *testing.T, aggregate runtim
 func runtimeCandidateRequestContentID(t *testing.T, aggregate runtime.RuntimeAggregate, stablePrefixHash string, attempt int) common.ArtifactContinuationID {
 	t.Helper()
 	context := runtimecontract.RuntimeCandidateContextForDecision(aggregate.Facts, aggregate.Decision, runtime.ActiveRejectedOperationShapes(aggregate))
-	manifest, manifestErr := runtimecontract.BuildRuntimeCandidateContractManifest(aggregate.Decision, runtimecontract.RuntimeCandidateManifestOwnerFactsFromResources(context.Resources))
+	manifest, manifestErr := runtime.BuildRuntimeCandidateContractManifestForAggregate(aggregate)
 	if manifestErr != nil {
 		t.Fatal(manifestErr)
 	}
@@ -4790,6 +4953,29 @@ func runtimeFileAdmissibilityObservation(inventory runtimecontract.RuntimeOperat
 	}
 	observation.ObservationID = runtimecontract.StableRuntimePrerequisiteObservationID(observation)
 	return observation
+}
+
+func runtimeRepositoryHasOwnerCatalogRevision(values []runtimecontract.RuntimeOperationAdmissibility, ownerModuleID, revision string) bool {
+	for _, value := range values {
+		if value.OwnerModuleID == ownerModuleID && value.ObservedRevision == revision {
+			return true
+		}
+	}
+	return false
+}
+
+func runtimeRepositoryHasOwnerCatalogObservationRevision(values []runtimecontract.RuntimePrerequisiteObservation, ownerModuleID, revision string) bool {
+	for _, value := range values {
+		if value.OwnerModuleID != ownerModuleID {
+			continue
+		}
+		for _, dependency := range value.Dependencies {
+			if dependency.OwnerModuleID == ownerModuleID && dependency.Revision == revision {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func runtimeOperationAdmissibilityPrerequisite(inventory runtimecontract.RuntimeOperationAdmissibility) runtimecontract.RuntimePrerequisite {

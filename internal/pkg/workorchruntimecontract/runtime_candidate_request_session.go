@@ -97,17 +97,27 @@ func (o RuntimeCandidateRequestOutcome) Validate() error {
 // correction after a complete candidate rejection creates a distinct session
 // fingerprint; whole-document recovery keeps the same ID.
 type RuntimeCandidateRequestSession struct {
-	LogicalRequestID   string
-	DocumentKind       RuntimeProviderDocumentKind
-	ExpectedDocument   *RuntimeExpectedDocumentContract
-	Transaction        AuthorityTransaction
-	StablePrefixHash   string
-	ManifestHash       string
-	CorrectionHash     string
-	State              RuntimeCandidateRequestSessionState
-	NextSequence       int
-	IncompleteOutcomes int
-	TransportOutcomes  int
+	LogicalRequestID string
+	DocumentKind     RuntimeProviderDocumentKind
+	ExpectedDocument *RuntimeExpectedDocumentContract
+	Transaction      AuthorityTransaction
+	StablePrefixHash string
+	ManifestHash     string
+	// CandidateManifest is the complete operations manifest persisted before a
+	// candidate attempt begins.  Accepted dispatch authority is re-derived from
+	// this earlier CAS instead of trusting coordinated attempt/dispatch copies.
+	// Semantic-plan sessions use their separate typed manifest ledger.
+	CandidateManifest *RuntimeCandidateContractManifest
+	// RepairCommitment is persisted with a schema-valid proposal before owner
+	// feasibility and final dispatch seal. This pre-seal copy keeps confirmed
+	// repair purpose mandatory after mutable confirmation/directive retirement.
+	RepairCommitmentHash string
+	RepairCommitment     *RuntimeDispatchRepairCommitment
+	CorrectionHash       string
+	State                RuntimeCandidateRequestSessionState
+	NextSequence         int
+	IncompleteOutcomes   int
+	TransportOutcomes    int
 	// LastDocumentFraming stores only owner-neutral response framing. The
 	// authoritative physical-response fact is emitted by the LLM owner.
 	LastDocumentFraming *RuntimeProviderDocumentFraming
@@ -149,6 +159,15 @@ func (s RuntimeCandidateRequestSession) Normalized() RuntimeCandidateRequestSess
 	s.DocumentKind = RuntimeProviderDocumentKind(strings.TrimSpace(string(s.DocumentKind)))
 	s.StablePrefixHash = strings.TrimSpace(s.StablePrefixHash)
 	s.ManifestHash = strings.TrimSpace(s.ManifestHash)
+	if s.CandidateManifest != nil {
+		value := s.CandidateManifest.Clone()
+		s.CandidateManifest = &value
+	}
+	s.RepairCommitmentHash = strings.TrimSpace(s.RepairCommitmentHash)
+	if s.RepairCommitment != nil {
+		value := s.RepairCommitment.Normalized()
+		s.RepairCommitment = &value
+	}
 	s.CorrectionHash = strings.TrimSpace(s.CorrectionHash)
 	s.State = RuntimeCandidateRequestSessionState(strings.TrimSpace(string(s.State)))
 	s.LastPhysicalCallID = strings.TrimSpace(s.LastPhysicalCallID)
@@ -165,6 +184,14 @@ func (s RuntimeCandidateRequestSession) Normalized() RuntimeCandidateRequestSess
 }
 
 func (s RuntimeCandidateRequestSession) Validate() error {
+	if s.CandidateManifest != nil {
+		if err := ValidateRuntimeCandidateContractManifestRawCanonical(*s.CandidateManifest); err != nil {
+			return fmt.Errorf("runtime candidate request session persisted operations manifest: %w", err)
+		}
+	}
+	if err := ValidateRuntimeDispatchRepairCommitmentProjection(s.RepairCommitmentHash, s.RepairCommitment); err != nil {
+		return fmt.Errorf("runtime candidate request session repair commitment: %w", err)
+	}
 	s = s.Normalized()
 	if s.LogicalRequestID == "" || (s.DocumentKind != RuntimeProviderDocumentSemanticPlan && s.DocumentKind != RuntimeProviderDocumentOperations) || s.StablePrefixHash == "" || s.ManifestHash == "" ||
 		strings.TrimSpace(s.Transaction.AuthoritySnapshotID) == "" || s.NextSequence <= 0 || s.IncompleteOutcomes < 0 || s.TransportOutcomes < 0 {
@@ -176,6 +203,12 @@ func (s RuntimeCandidateRequestSession) Validate() error {
 	if s.ExpectedDocument != nil {
 		if err := s.ExpectedDocument.Validate(); err != nil || s.ExpectedDocument.DocumentKind != s.DocumentKind || s.ExpectedDocument.LogicalRequestID != s.LogicalRequestID || s.ExpectedDocument.ManifestHash != s.ManifestHash || s.ExpectedDocument.StablePrefixHash != s.StablePrefixHash {
 			return common.ErrInvalidArgument
+		}
+	}
+	if s.CandidateManifest != nil {
+		if s.DocumentKind != RuntimeProviderDocumentOperations || s.CandidateManifest.Hash != s.ManifestHash ||
+			s.CandidateManifest.Hash != StableRuntimeCandidateContractManifestHash(*s.CandidateManifest) {
+			return fmt.Errorf("runtime candidate request session has invalid persisted operations manifest")
 		}
 	}
 	if s.LastDocumentFraming != nil {
@@ -265,6 +298,14 @@ func (s RuntimeCandidateRequestSession) Validate() error {
 
 func (s RuntimeCandidateRequestSession) Clone() RuntimeCandidateRequestSession {
 	s = s.Normalized()
+	if s.CandidateManifest != nil {
+		value := s.CandidateManifest.Clone()
+		s.CandidateManifest = &value
+	}
+	if s.RepairCommitment != nil {
+		value := s.RepairCommitment.Clone()
+		s.RepairCommitment = &value
+	}
 	if s.ExpectedDocument != nil {
 		value := s.ExpectedDocument.Clone()
 		s.ExpectedDocument = &value
@@ -375,10 +416,12 @@ func StableRuntimeCandidateRequestCorrectionHash(observation *RuntimeCandidateCo
 func ValidateRuntimeCandidateRequestSessions(values []RuntimeCandidateRequestSession) error {
 	seen := map[string]struct{}{}
 	for _, value := range values {
-		value = value.Normalized()
+		// Validate the exact persisted DTO before normalization. Session.Validate
+		// contains the raw-canonical manifest and repair-commitment fences.
 		if err := value.Validate(); err != nil {
 			return fmt.Errorf("runtime candidate request session: %w", err)
 		}
+		value = value.Normalized()
 		if _, found := seen[value.LogicalRequestID]; found {
 			return fmt.Errorf("runtime candidate request session %q is duplicated", value.LogicalRequestID)
 		}

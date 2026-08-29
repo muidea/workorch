@@ -15,7 +15,9 @@ type SealedValidationOperation struct {
 	AuthoritySnapshotID string
 	OperationID         string
 	TargetRole          string
-	TargetRefs          []string
+	OperationTargetRefs []string
+	RequireTargets      bool
+	TargetAuthorization runtimecontract.RuntimeOperationTargetAuthorization
 }
 
 // RepairSurfaceConfirmationExists recognizes an exact persisted owner reply.
@@ -49,12 +51,18 @@ func RepairSurfaceConfirmationIdentityConflict(records []runtimecontract.Runtime
 // compares only typed immutable facts and does not consult a capability owner.
 func ValidationFailureObservationMatchesSealedOperation(operations []SealedValidationOperation, observation runtimecontract.RuntimeValidationFailureObservation) bool {
 	observation = observation.Normalized()
+	if observation.Validate() != nil {
+		return false
+	}
 	for _, operation := range operations {
+		validationScopeTargetRefs := operation.TargetAuthorization.AllowedTargetRefs()
 		if strings.TrimSpace(operation.DispatchID) != observation.DispatchID ||
 			strings.TrimSpace(operation.AuthoritySnapshotID) != observation.AuthoritySnapshotID ||
 			strings.TrimSpace(operation.OperationID) != observation.OperationID ||
 			strings.TrimSpace(operation.TargetRole) != observation.TargetRole ||
-			!grounding.SameTargetRefs(operation.TargetRefs, observation.ValidationScopeTargetRefs) {
+			len(validationScopeTargetRefs) == 0 ||
+			runtimecontract.ValidateRuntimeOperationTargetsAgainstAuthorization(operation.TargetAuthorization, operation.OperationTargetRefs, operation.RequireTargets) != nil ||
+			!grounding.SameTargetRefs(validationScopeTargetRefs, observation.ValidationScopeTargetRefs) {
 			continue
 		}
 		return true

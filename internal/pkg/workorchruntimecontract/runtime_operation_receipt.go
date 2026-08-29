@@ -80,6 +80,14 @@ type RuntimeOperationExecutionRecord struct {
 	Fence            uint64
 	OwnerReceiptRef  string
 	OwnerReceiptHash string
+	// EvidenceFactID/EvidenceFactHash are the mutable SM-3 commit projection
+	// written only when the matching owner receipt is promoted into one exact
+	// Orchestrator-owned EvidenceFact. They deliberately remain outside
+	// AuthorityHash: evidence progress cannot rewrite immutable dispatch
+	// authority, while fresh-load validation can still reverse-prove the exact
+	// persisted fact instead of re-deriving it from mutable current bindings.
+	EvidenceFactID   common.EvidenceRecordID
+	EvidenceFactHash string
 	ClaimedAt        string
 }
 
@@ -291,6 +299,8 @@ func (r RuntimeOperationExecutionRecord) Normalized() RuntimeOperationExecutionR
 	r.State = r.State.Normalized()
 	r.OwnerReceiptRef = strings.TrimSpace(r.OwnerReceiptRef)
 	r.OwnerReceiptHash = strings.TrimSpace(r.OwnerReceiptHash)
+	r.EvidenceFactID = common.EvidenceRecordID(strings.TrimSpace(string(r.EvidenceFactID)))
+	r.EvidenceFactHash = strings.TrimSpace(r.EvidenceFactHash)
 	r.ClaimedAt = strings.TrimSpace(r.ClaimedAt)
 	return r
 }
@@ -302,7 +312,8 @@ func (r RuntimeOperationExecutionRecord) Validate() error {
 	if raw.OperationID != r.OperationID || raw.OperationHash != r.OperationHash || raw.ExecutionKey != r.ExecutionKey ||
 		raw.State != r.State || raw.AuthorityHash != r.AuthorityHash || raw.AdmissibilitySnapshotID != r.AdmissibilitySnapshotID ||
 		raw.AcquisitionBinding != r.AcquisitionBinding || raw.OwnerReceiptRef != r.OwnerReceiptRef ||
-		raw.OwnerReceiptHash != r.OwnerReceiptHash || raw.ClaimedAt != r.ClaimedAt {
+		raw.OwnerReceiptHash != r.OwnerReceiptHash || raw.EvidenceFactID != r.EvidenceFactID ||
+		raw.EvidenceFactHash != r.EvidenceFactHash || raw.ClaimedAt != r.ClaimedAt {
 		return fmt.Errorf("operation execution record requires canonical identity, state and receipt fields")
 	}
 	if raw.ReplayProof != nil && !canonicalRuntimeOperationReplayProof(*raw.ReplayProof) {
@@ -342,12 +353,12 @@ func (r RuntimeOperationExecutionRecord) Validate() error {
 	}
 	switch r.State {
 	case OperationExecutionSealed:
-		if r.Fence != 0 || r.OwnerReceiptRef != "" || r.OwnerReceiptHash != "" || r.ClaimedAt != "" {
-			return fmt.Errorf("sealed operation execution cannot carry fence, receipt or claim marker")
+		if r.Fence != 0 || r.OwnerReceiptRef != "" || r.OwnerReceiptHash != "" || r.EvidenceFactID != "" || r.EvidenceFactHash != "" || r.ClaimedAt != "" {
+			return fmt.Errorf("sealed operation execution cannot carry fence, receipt, evidence or claim marker")
 		}
 	case OperationExecutionClaimed:
-		if r.Fence == 0 || r.OwnerReceiptRef != "" || r.OwnerReceiptHash != "" {
-			return fmt.Errorf("claimed operation execution requires fence and cannot carry an owner receipt")
+		if r.Fence == 0 || r.OwnerReceiptRef != "" || r.OwnerReceiptHash != "" || r.EvidenceFactID != "" || r.EvidenceFactHash != "" {
+			return fmt.Errorf("claimed operation execution requires fence and cannot carry an owner receipt or evidence")
 		}
 		if !ValidRuntimeOperationClaimMarker(r.ClaimedAt) {
 			return fmt.Errorf("claimed operation execution requires a valid claim marker")
@@ -359,12 +370,18 @@ func (r RuntimeOperationExecutionRecord) Validate() error {
 		if r.Fence == 0 || r.OwnerReceiptRef == "" || r.OwnerReceiptHash == "" {
 			return fmt.Errorf("committed operation execution requires fence and owner receipt ref/hash")
 		}
+		if r.State == OperationExecutionOwnerCommitted && (r.EvidenceFactID != "" || r.EvidenceFactHash != "") {
+			return fmt.Errorf("owner_committed operation execution cannot carry evidence fact identity")
+		}
+		if r.State == OperationExecutionEvidenceCommitted && (r.EvidenceFactID == "" || r.EvidenceFactHash == "") {
+			return fmt.Errorf("evidence_committed operation execution requires evidence fact id/hash")
+		}
 	case OperationExecutionOutcomeUnknown:
 		if !ValidRuntimeOperationClaimMarker(r.ClaimedAt) || r.ClaimedAt == RuntimeOperationClaimMarkerGovernanceGranted {
 			return fmt.Errorf("unknown operation execution requires a started claim marker")
 		}
-		if r.Fence == 0 || r.OwnerReceiptRef != "" || r.OwnerReceiptHash != "" {
-			return fmt.Errorf("outcome_unknown operation execution requires fence and cannot carry an owner receipt")
+		if r.Fence == 0 || r.OwnerReceiptRef != "" || r.OwnerReceiptHash != "" || r.EvidenceFactID != "" || r.EvidenceFactHash != "" {
+			return fmt.Errorf("outcome_unknown operation execution requires fence and cannot carry an owner receipt or evidence")
 		}
 	}
 	return nil
@@ -526,6 +543,10 @@ func (r RuntimeOperationReceipt) Normalized() RuntimeOperationReceipt {
 	r.AfterHash = strings.TrimSpace(r.AfterHash)
 	r.Evidence.Summary = strings.TrimSpace(r.Evidence.Summary)
 	r.Evidence.ContentHash = strings.TrimSpace(r.Evidence.ContentHash)
+	if r.Evidence.ContentAddress != nil {
+		address := r.Evidence.ContentAddress.Clone()
+		r.Evidence.ContentAddress = &address
+	}
 	r.Evidence.EvidenceRefs = normalizeStrings(r.Evidence.EvidenceRefs)
 	r.Evidence.Quality = common.EvidenceQuality(strings.TrimSpace(string(r.Evidence.Quality)))
 	r.Evidence.EvidenceReason = strings.TrimSpace(r.Evidence.EvidenceReason)
@@ -561,6 +582,14 @@ func (r RuntimeOperationReceipt) Validate() error {
 	}
 	if !ValidRuntimeEffectScope(r.ObservedEffectScope) {
 		return fmt.Errorf("operation receipt has invalid observed effect scope %q", r.ObservedEffectScope)
+	}
+	if r.Evidence.ContentAddress != nil {
+		if err := r.Evidence.ContentAddress.Validate(); err != nil {
+			return err
+		}
+		if r.Evidence.ContentHash != r.Evidence.ContentAddress.Digest || !containsString(r.Evidence.EvidenceRefs, r.Evidence.ContentAddress.Ref) {
+			return fmt.Errorf("operation receipt evidence content address does not match content hash and evidence refs")
+		}
 	}
 	if r.Outcome != RuntimeOperationOutcomeRejected && r.Feedback != nil {
 		return fmt.Errorf("only rejected operation receipts can carry diagnostic feedback")
@@ -731,6 +760,14 @@ func StableRuntimeOperationReceiptHash(receipt RuntimeOperationReceipt) string {
 	writeHashString(h, receipt.AfterHash)
 	writeHashString(h, receipt.Evidence.Summary)
 	writeHashString(h, receipt.Evidence.ContentHash)
+	if receipt.Evidence.ContentAddress == nil {
+		writeHashString(h, "content-address:nil")
+	} else {
+		address := receipt.Evidence.ContentAddress.Normalized()
+		writeHashString(h, string(address.Algorithm))
+		writeHashString(h, address.Digest)
+		writeHashString(h, address.Ref)
+	}
 	writeHashStrings(h, receipt.Evidence.EvidenceRefs)
 	writeHashString(h, string(receipt.Evidence.Quality))
 	writeHashString(h, fmt.Sprintf("%t", receipt.Evidence.ZeroWork))
@@ -740,6 +777,7 @@ func StableRuntimeOperationReceiptHash(receipt RuntimeOperationReceipt) string {
 		writeHashString(h, "validation:nil")
 	} else {
 		observation := receipt.Evidence.Validation.Normalized()
+		writeHashString(h, observation.RecipeID)
 		writeHashStrings(h, observation.ExecutedChecks)
 		writeHashStrings(h, observation.PassedChecks)
 		writeHashStrings(h, observation.FailedChecks)

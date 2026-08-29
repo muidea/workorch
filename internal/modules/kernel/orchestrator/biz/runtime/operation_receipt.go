@@ -162,6 +162,14 @@ func validateOperationReceiptFeedback(aggregate RuntimeAggregate, workspaceID co
 	if dispatch == nil || dispatch.ID != strings.TrimSpace(dispatchID) {
 		return fmt.Errorf("%w: receipt feedback dispatch is not active", common.ErrConflict)
 	}
+	return validateOperationReceiptFeedbackAgainstDispatch(aggregate, *dispatch, workspaceID, runID, receipt)
+}
+
+func validateOperationReceiptFeedbackAgainstDispatch(aggregate RuntimeAggregate, dispatch SealedDispatch, workspaceID common.WorkspaceID, runID common.RunID, receipt runtimecontract.RuntimeOperationReceipt) error {
+	feedback := receipt.Feedback.Normalized()
+	if feedback.WorkspaceID != workspaceID || feedback.RunID != runID || feedback.DispatchID != dispatch.ID {
+		return fmt.Errorf("operation receipt feedback does not match receipt scope")
+	}
 	operation, found := candidateOperationByID(dispatch.Candidate, receipt.OperationID)
 	if !found {
 		return fmt.Errorf("%w: receipt feedback operation is not sealed", common.ErrConflict)
@@ -169,6 +177,132 @@ func validateOperationReceiptFeedback(aggregate RuntimeAggregate, workspaceID co
 	descriptor, found := runtimecontract.RuntimeOperationDescriptorForKind(operation.Kind)
 	if !found || feedback.OriginalDiagnostic.OwnerModuleID != descriptor.OwnerModuleID || feedback.AuthoritySnapshotID != dispatch.Transaction.AuthoritySnapshotID {
 		return fmt.Errorf("operation receipt feedback does not match sealed owner or authority")
+	}
+	if err := validateOperationReceiptDiagnosticOwner(aggregate, dispatch, operation, *feedback.OriginalDiagnostic); err != nil {
+		return err
+	}
+	if feedback.OriginalDiagnostic.TargetObservation != nil {
+		if err := validateReceiptEvidenceTargetObservation(descriptor, receipt.Evidence, *feedback.OriginalDiagnostic.TargetObservation); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// validateOperationReceiptDiagnosticOwner closes the nested owner and sealed
+// causation boundary. The outer feedback owner alone is insufficient because
+// authority-shaped nested facts could otherwise claim another capability
+// owner's observation or a different dispatch's target authorization.
+func validateOperationReceiptDiagnosticOwner(aggregate RuntimeAggregate, dispatch SealedDispatch, operation runtimecontract.RuntimeOperation, diagnostic runtimecontract.RuntimeOriginalDiagnostic) error {
+	descriptor, found := runtimecontract.RuntimeOperationDescriptorForKind(operation.Kind)
+	if !found {
+		return fmt.Errorf("operation receipt diagnostic has no sealed operation descriptor")
+	}
+	normalized := diagnostic.Normalized()
+	if normalized == nil || normalized.OwnerModuleID != descriptor.OwnerModuleID {
+		return fmt.Errorf("operation receipt diagnostic owner does not match sealed operation owner")
+	}
+	switch descriptor.FailureTargetProtocol {
+	case runtimecontract.RuntimeFailureTargetProtocolNone:
+		if normalized.TargetObservation != nil || normalized.ValidationFailureObservation != nil || len(normalized.TargetRefs) != 0 {
+			return fmt.Errorf("operation descriptor does not admit failure target authority")
+		}
+		return nil
+	case runtimecontract.RuntimeFailureTargetProtocolSealedOperation:
+		if normalized.TargetObservation != nil {
+			return fmt.Errorf("operation descriptor does not admit direct target observations")
+		}
+		if normalized.ValidationFailureObservation != nil {
+			return fmt.Errorf("operation descriptor does not admit validation failure candidates")
+		}
+		if len(normalized.TargetRefs) != 0 && !runtimeTargetRefsWithin(normalized.TargetRefs, operation.TargetRefs) {
+			return fmt.Errorf("operation receipt diagnostic targets exceed the sealed operation targets")
+		}
+		return nil
+	case runtimecontract.RuntimeFailureTargetProtocolReceiptEvidence:
+		if normalized.ValidationFailureObservation != nil {
+			return fmt.Errorf("operation descriptor does not admit validation failure candidates")
+		}
+		if normalized.TargetObservation == nil {
+			if len(normalized.TargetRefs) != 0 {
+				return fmt.Errorf("receipt-evidence target protocol requires an explicit target observation")
+			}
+			return nil
+		}
+		observation := normalized.TargetObservation.Normalized()
+		if observation.OwnerModuleID != descriptor.OwnerModuleID {
+			return fmt.Errorf("operation receipt target observation owner does not match sealed operation owner")
+		}
+		if !sameRuntimeTargetRefs(normalized.TargetRefs, observation.TargetRefs) {
+			return fmt.Errorf("operation receipt target observation does not match diagnostic targets")
+		}
+		return nil
+	case runtimecontract.RuntimeFailureTargetProtocolValidationCandidates:
+		// Continue with the VFO-specific sealed scope checks below.
+	default:
+		return fmt.Errorf("operation descriptor has unsupported failure target protocol %q", descriptor.FailureTargetProtocol)
+	}
+	if normalized.TargetObservation != nil {
+		return fmt.Errorf("validation-candidate receipt cannot carry a direct target observation")
+	}
+	// A validation owner's top-level TargetRefs would be interpreted as immediate
+	// repair authority by rejected-evidence admission. Managed validation must
+	// keep candidates solely inside RuntimeValidationFailureObservation until a
+	// File-owner confirmation is committed through the SM-2 transition.
+	if len(normalized.TargetRefs) != 0 {
+		return fmt.Errorf("managed-validation receipt cannot carry direct diagnostic target refs")
+	}
+	observation := normalized.ValidationFailureObservation
+	if observation == nil {
+		return nil
+	}
+	if normalized.ValidationDiagnostic == nil {
+		return fmt.Errorf("managed-validation failure observation requires a validation diagnostic")
+	}
+	validationDiagnostic := normalized.ValidationDiagnostic.Normalized()
+	if validationDiagnostic.Class != observation.DiagnosticClass || !sameRuntimeTargetRefs(validationDiagnostic.TargetRefs, observation.CandidateTargetRefs) {
+		return fmt.Errorf("managed-validation failure observation does not match its diagnostic candidates")
+	}
+	if observation.WorkspaceID != aggregate.Facts.WorkspaceID || observation.RunID != aggregate.Facts.RunID {
+		return fmt.Errorf("managed-validation failure observation does not match receipt scope")
+	}
+	if !sealedValidationFailureObservationMatchesDispatch(dispatch, *observation) {
+		return fmt.Errorf("managed-validation failure observation does not match sealed dispatch authorization")
+	}
+	return nil
+}
+
+// validateReceiptEvidenceTargetObservation binds a descriptor-authorized
+// discovered target to the exact normalized evidence persisted before the
+// receipt was built. It is shared by commit and fresh-load validation.
+func validateReceiptEvidenceTargetObservation(descriptor runtimecontract.RuntimeOperationDescriptor, evidence runtimecontract.RuntimeOperationEvidence, observation runtimecontract.RuntimeFailureTargetObservation) error {
+	observation = observation.Normalized()
+	if err := observation.Validate(); err != nil {
+		return fmt.Errorf("receipt-evidence target observation: %w", err)
+	}
+	if descriptor.FailureTargetProtocol != runtimecontract.RuntimeFailureTargetProtocolReceiptEvidence || observation.OwnerModuleID != descriptor.OwnerModuleID {
+		return fmt.Errorf("receipt-evidence target observation does not match the sealed descriptor owner policy")
+	}
+	dependency := observation.CatalogDependency
+	if dependency == nil || dependency.Validate() != nil || dependency.Domain != runtimecontract.RuntimeResourceOwnerCatalog ||
+		dependency.OwnerModuleID != descriptor.OwnerModuleID || dependency.Revision != observation.ObservedRevision {
+		return fmt.Errorf("receipt-evidence target observation has no exact owner-catalog dependency")
+	}
+	if observation.DiagnosticClass != runtimecontract.RuntimeFailureTargetDiagnosticReceiptEvidence {
+		return fmt.Errorf("receipt-evidence target observation has invalid diagnostic class")
+	}
+	contentHash := strings.TrimSpace(evidence.ContentHash)
+	if contentHash == "" || evidence.ContentAddress == nil {
+		return fmt.Errorf("receipt-evidence target observation does not match receipt evidence")
+	}
+	contentAddress := evidence.ContentAddress.Normalized()
+	if contentAddress.Validate() != nil || contentAddress.Digest != contentHash || !containsString(evidence.EvidenceRefs, contentAddress.Ref) ||
+		len(evidence.EvidenceRefs) == 0 || observation.ContentHash != contentHash ||
+		!sameRuntimeTargetRefs(observation.EvidenceRefs, evidence.EvidenceRefs) {
+		return fmt.Errorf("receipt-evidence target observation does not match receipt evidence")
+	}
+	if !containsString(observation.EvidenceRefs, contentAddress.Ref) {
+		return fmt.Errorf("receipt-evidence target observation has no owner content-addressed evidence ref")
 	}
 	return nil
 }

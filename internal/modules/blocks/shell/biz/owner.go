@@ -345,30 +345,37 @@ func (m *Biz) handleShellOperation(event magicevent.Event, result magicevent.Res
 	var failure *runtimecontract.FailureFact
 	if executeErr != nil {
 		status = runtimecontract.RuntimeOperationExecutionStatusRejected
-		observation := shellFailureTargetObservation(operationResult, authorization.TargetRole, currentRevision)
-		targetRefs := []string(nil)
-		if observation != nil {
-			targetRefs = append([]string(nil), observation.TargetRefs...)
-		}
-		// Only the closed stdout record above can create a related target. The
-		// command target, validation entry, stderr and LLM summary stay receipt
-		// lineage/diagnostics and cannot become repair authority.
-		failure = orchestratorevents.RuntimeOperationFailureWithTargetObservation(command.Transaction, runtimecontract.StepKindShellCommand, operationResult.FailureCode, operationResult.FailureMessage, targetRefs, observation)
+		// Managed validation has one failure-surface protocol. Even the closed
+		// WORKORCH_FAILURE_TARGET marker is only a bounded diagnostic candidate;
+		// it cannot create RuntimeFailureTargetObservation authority directly.
+		// The candidate must fit the SM-3 sealed validation scope, then pass the
+		// RuntimeValidationFailureObservation + File confirmation path below.
+		failure = orchestratorevents.RuntimeOperationFailureWithTargetObservation(command.Transaction, runtimecontract.StepKindShellCommand, operationResult.FailureCode, operationResult.FailureMessage, nil, nil)
 		if operationResult.ValidationFailureDiagnostic != nil {
 			diagnostic := operationResult.ValidationFailureDiagnostic.Clone()
+			candidateTargetRefs, candidateValid := shellFailureTargetCandidateUnion(operationResult, authorization.TargetRole, authorization.ValidationScopeTargetRefs)
+			// Diagnostic text/class remains factual even when target extraction
+			// fails closed.  Candidate refs do not: a malformed, out-of-scope or
+			// over-bound marker invalidates the complete marker+tool union and
+			// cannot silently fall back to only parser-derived locations.
+			diagnostic.TargetRefs = nil
+			if candidateValid {
+				diagnostic.TargetRefs = candidateTargetRefs
+			}
 			failure.ValidationDiagnostic = &diagnostic
-			if observation := shellValidationFailureObservation(command.RuntimeOperationExecutionContext, authorization, diagnostic); observation != nil {
-				observation.FailureSignature = failure.Signature
-				failure.ValidationFailureObservation = observation
+			if candidateValid {
+				if observation := shellValidationFailureObservation(command.RuntimeOperationExecutionContext, authorization, diagnostic); observation != nil {
+					observation.FailureSignature = failure.Signature
+					failure.ValidationFailureObservation = observation
+				}
 			}
 		}
 	} else if undeclared := shellUndeclaredWorkspaceTargets(operationResult.WorkspaceObservedTargetChanges, data.TargetRefs); len(undeclared) > 0 {
 		status = runtimecontract.RuntimeOperationExecutionStatusRejected
 		failure = &runtimecontract.FailureFact{
 			Class: runtimecontract.FailureClassEffectMismatch, Code: "undeclared_workspace_effect",
-			Signature:  "undeclared-workspace-effect/" + command.OperationID,
-			Message:    "state-changing shell command changed workspace target(s) outside sealed TargetRefs",
-			TargetRefs: undeclared,
+			Signature: "undeclared-workspace-effect/" + command.OperationID,
+			Message:   "state-changing shell command changed workspace target(s) outside sealed TargetRefs",
 		}
 	}
 	observation := shellMutationReceiptObservation(data.StateChanging, shellInputHasManagedValidation(runtimeRequest), status, operationResult)
@@ -512,7 +519,7 @@ func validationRecipeUnavailableResult(request RuntimeCommandRequest, err error)
 // carry a Runtime action; the File owner must independently confirm it.
 func shellValidationFailureObservation(context runtimecontract.RuntimeOperationExecutionContext, authorization shellevents.RuntimeExecutionAuthorization, diagnostic runtimecontract.ValidationFailureDiagnostic) *runtimecontract.RuntimeValidationFailureObservation {
 	diagnostic = diagnostic.Normalized()
-	if !shellValidationDiagnosticMayIdentifyImplementationEffect(diagnostic.Class) || context.WorkspaceID == "" || context.RunID == "" || context.Transaction.AuthoritySnapshotID == "" || strings.TrimSpace(context.DispatchID) == "" || strings.TrimSpace(context.OperationID) == "" || strings.TrimSpace(authorization.TargetRole) == "" || strings.TrimSpace(diagnostic.Class) == "" || len(diagnostic.TargetRefs) == 0 || len(authorization.ValidationScopeTargetRefs) == 0 {
+	if !shellValidationDiagnosticMayIdentifyImplementationEffect(diagnostic.Class) || context.WorkspaceID == "" || context.RunID == "" || context.Transaction.AuthoritySnapshotID == "" || strings.TrimSpace(context.DispatchID) == "" || strings.TrimSpace(context.OperationID) == "" || strings.TrimSpace(authorization.TargetRole) == "" || strings.TrimSpace(diagnostic.Class) == "" || len(diagnostic.TargetRefs) == 0 || len(diagnostic.TargetRefs) > shellValidationDiagnosticMaxTargetRefs || len(authorization.ValidationScopeTargetRefs) == 0 {
 		return nil
 	}
 	if !shellTargetRefsSubset(diagnostic.TargetRefs, authorization.ValidationScopeTargetRefs) {
@@ -575,9 +582,6 @@ func shellMutationReceiptObservation(stateChanging, managedValidation bool, stat
 		return observation
 	}
 	observation.ObservedEffectScope = runtimecontract.RuntimeEffectUnknown
-	if status != runtimecontract.RuntimeOperationExecutionStatusAccepted {
-		return observation
-	}
 	changes := make([]runtimecontract.RuntimeResourceChange, 0, len(result.WorkspaceObservedTargetChanges)+1)
 	for _, change := range result.WorkspaceObservedTargetChanges {
 		targetRef := strings.TrimSpace(change.TargetRef)
@@ -597,9 +601,15 @@ func shellMutationReceiptObservation(stateChanging, managedValidation bool, stat
 		})
 	}
 	if len(changes) == 0 {
-		observation.NoOp = true
+		// A rejected operation with no observed mutation remains an unknown-effect
+		// failure. Only an accepted state-changing delivery can claim a no-op.
+		observation.NoOp = status == runtimecontract.RuntimeOperationExecutionStatusAccepted
 		return observation
 	}
+	// ResourceChanges are immutable owner audit facts, including changes observed
+	// on a rejected command. They never authorize those subjects as repair
+	// targets; failure TargetRefs remain empty unless the sealed failure-target
+	// protocol independently admits them.
 	observation.ObservedEffectScope = runtimecontract.RuntimeEffectWorkspaceDurable
 	observation.Changed = true
 	observation.ResourceChanges = changes

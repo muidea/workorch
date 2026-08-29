@@ -32,7 +32,7 @@ func runtimeCandidateRequestIdentity(
 	if err := runtimecontract.ValidateAuthorityTransaction(aggregate.Decision, transaction); err != nil {
 		return "", "", err
 	}
-	if err := runtimecontract.ValidateRuntimeCandidateContractManifestForDecision(manifest, aggregate.Decision, runtimecontract.RuntimeCandidateManifestOwnerFactsFromContext(candidateContext)); err != nil {
+	if err := runtime.ValidateRuntimeCandidateContractManifestForAggregate(aggregate, manifest); err != nil {
 		return "", "", err
 	}
 	observation, err := requestcontent.ProjectRuntimeCandidateCorrectionObservation(previousFailure, previousCorrection)

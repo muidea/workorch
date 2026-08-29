@@ -98,19 +98,28 @@ func TestCommitAssessmentAcceptsStructuredClaimEvidenceWithoutTextSimilarity(t *
 	facts.Focus.RequireExecutableBehaviorEvidence = true
 	facts.Coverage[0].TargetText = "complete LSP tool implementation"
 	facts.ConvergencePolicy.MaxValidationOnlyRetriesPerFocus = 2
-	facts.Focus.CoverageEvidenceBindings = []runtimecontract.CoverageEvidenceBinding{assessmentTestBinding(
-		"binding/cwi-v2", "cwi-v2", facts.Focus.ID, facts.DefinitionRevision,
-		[]string{runtimecontract.EvidenceKindValidation}, []runtimecontract.RuntimeEffectScope{runtimecontract.RuntimeEffectEphemeralSession},
-		[]string{runtimecontract.RuntimeBlockKindManagedValidationSession}, []string{"target.txt"},
-		runtimeManagedValidationEvidencePolicy().ID, []string{"TestLSPToolExistence"},
-	)}
-	facts = runtimeTestFactsWithCanonicalCWIProjection(t, facts)
-	aggregate, err := controller.initialize(context.Background(), facts, controllerDefinition(), nil)
-	if err != nil {
-		t.Fatal(err)
+	facts.Focus.ValidationRecipeID = runtimeManagedValidationEvidencePolicy().ID
+	facts.Focus.RequiredCheckRefs = []string{"TestLSPToolExistence"}
+	for catalogIndex := range facts.Resources.OperationAdmissibilities {
+		catalog := &facts.Resources.OperationAdmissibilities[catalogIndex]
+		if catalog.OwnerModuleID != runtimecontract.RuntimeModuleShell {
+			continue
+		}
+		for surfaceIndex := range catalog.ValidationSurfaces {
+			surface := &catalog.ValidationSurfaces[surfaceIndex]
+			if surface.ID == runtimeManagedValidationEvidencePolicy().ID {
+				surface.CheckRefs = []string{"TestLSPToolExistence"}
+			}
+		}
+		catalog.SnapshotID = runtimecontract.StableRuntimeOperationAdmissibilitySnapshotID(*catalog)
+	}
+	aggregate := runtimeTestInitializeAndSealSemanticContract(t, context.Background(), controller, facts, controllerDefinition(), nil)
+	binding, found := coverageBindingForRuntimeCWI(aggregate.Facts.Focus, "cwi-v2")
+	if !found {
+		t.Fatalf("sealed assessment fixture has no current CWI binding: %+v", aggregate.Facts.Focus)
 	}
 	candidate := managedValidationCandidate("validate-claim")
-	candidate.Validation.Operations[0].Operation.BindingRefs = []string{"binding/cwi-v2"}
+	candidate.Validation.Operations[0].Operation.BindingRefs = []string{binding.ID}
 	candidate.Validation.Operations[0].Operation.CoverageWorkItemIDs = nil
 	sealed, err := beginAndAcceptCandidate(t, controller, aggregate, candidate)
 	if err != nil {
@@ -136,7 +145,7 @@ func TestCommitAssessmentAcceptsStructuredClaimEvidenceWithoutTextSimilarity(t *
 		t.Fatal(err)
 	}
 	if _, err := controller.AcceptCandidateAttempt(context.Background(), "ws-v2", "run-v2", 0, runtimecontract.RuntimeCandidate{Assessment: &runtimecontract.AssessmentCandidate{
-		FocusID: "focus-v2", CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-v2"},
+		FocusID: evidence.Aggregate.Facts.Focus.ID, CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-v2"},
 		Disposition: runtimecontract.AssessmentDispositionSatisfied, Summary: "claim is satisfied", EvidenceRefs: []string{"evidence-claim"},
 		Items: []runtimecontract.RuntimeAssessmentItemFact{{CoverageWorkItemID: "cwi-v2", Satisfied: true, EvidenceRefs: []string{"evidence-claim"}}},
 	}}); err != nil {

@@ -956,6 +956,7 @@ func TestRuntimeSemanticProviderProjectsTypedValidationFailureRepairOnlyInC3(t *
 	}
 	focuses := runtimecontract.CompileRuntimeDefinitionFocuses([]runtimecontract.CoverageFocus{{
 		ID: "focus-repair", SliceID: "slice-1", AssessmentScope: "dodItem", AssessmentID: "dod-001",
+		AssessmentText:        "the artifact works",
 		CoverageWorkItemIDs:   []common.CoverageWorkItemID{"cwi-001"},
 		RequiredEvidenceKinds: []string{runtimecontract.EvidenceKindValidation},
 		TargetRole:            "deliverable_implementation", TargetSelectorRef: "file/workspace_deliverable",
@@ -1268,7 +1269,12 @@ func TestRuntimeProviderRequestRejectsUnsealedManifestBeforeProviderConfiguratio
 func runtimeCandidateManifestForRequest(t *testing.T, decision runtimecontract.RuntimeDecision, context runtimecontract.RuntimeCandidateContext) runtimecontract.RuntimeCandidateContractManifest {
 	t.Helper()
 	decision = runtimeCandidateDecisionForSchemaTest(decision)
-	manifest, err := runtimecontract.BuildRuntimeCandidateContractManifest(decision, runtimecontract.RuntimeCandidateManifestOwnerFactsFromResources(context.Resources))
+	ownerFacts := runtimecontract.RuntimeCandidateManifestOwnerFactsFromResources(context.Resources)
+	if decision.State == runtimecontract.ConvergenceStateNeedAssessment {
+		ownerFacts.AssessmentPurpose = runtimecontract.RuntimeAssessmentPurposeDefinitionProof
+		ownerFacts.AssessmentPurposeManifestHash = "semantic-manifest/llm-provider-request-test"
+	}
+	manifest, err := runtimecontract.BuildRuntimeCandidateContractManifest(decision, ownerFacts)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1285,6 +1291,10 @@ func runtimeCandidateManifestForSchema(t *testing.T, decision runtimecontract.Ru
 	ownerFacts := runtimecontract.RuntimeCandidateManifestOwnerFacts{TargetSelection: selection}
 	if selection != nil {
 		ownerFacts.OperationAdmissibilities = runtimeCandidateScopeOwnerFactsForTest()
+	}
+	if decision.State == runtimecontract.ConvergenceStateNeedAssessment {
+		ownerFacts.AssessmentPurpose = runtimecontract.RuntimeAssessmentPurposeDefinitionProof
+		ownerFacts.AssessmentPurposeManifestHash = "semantic-manifest/llm-schema-test"
 	}
 	manifest, err := runtimecontract.BuildRuntimeCandidateContractManifest(decision, ownerFacts)
 	if err != nil {
@@ -1344,6 +1354,36 @@ func runtimeCandidateDecisionForSchemaTest(decision runtimecontract.RuntimeDecis
 		if len(contract.CoverageWorkItemIDs) == 0 {
 			contract.CoverageWorkItemIDs = []common.CoverageWorkItemID{"cwi-schema"}
 		}
+		if len(decision.Focus.CoverageEvidenceBindings) != 0 {
+			break
+		}
+		if decision.AuthoritySnapshot.DefinitionRevision == "" {
+			decision.AuthoritySnapshot.DefinitionRevision = "definition-llm-schema-test"
+		}
+		if decision.Focus.ID == "" {
+			decision.Focus.ID = "focus-llm-schema-test"
+		}
+		decision.Focus.CoverageWorkItemIDs = append([]common.CoverageWorkItemID(nil), contract.CoverageWorkItemIDs...)
+		decision.Focus.RequiredEvidenceKinds = []string{runtimecontract.EvidenceKindValidation}
+		decision.Focus.TargetSelectorRef = "selector/llm-schema-test"
+		decision.Focus.TargetSelectorOwnerRef = runtimecontract.RuntimeModuleShell
+		decision.Focus.TargetSelectorSubjectRef = "validation/managed-session"
+		bindings := make([]runtimecontract.CoverageEvidenceBinding, 0, len(contract.CoverageWorkItemIDs))
+		for _, coverageID := range contract.CoverageWorkItemIDs {
+			binding := runtimecontract.CoverageEvidenceBinding{
+				ID: "binding/llm-schema-test/" + string(coverageID), CoverageWorkItemID: coverageID,
+				FocusID: decision.Focus.ID, DefinitionRevision: decision.AuthoritySnapshot.DefinitionRevision,
+				Proofs: []runtimecontract.CoverageEvidenceProof{{
+					EvidenceKind: runtimecontract.EvidenceKindValidation, AllowedOperationKinds: []string{runtimecontract.RuntimeBlockKindManagedValidationSession},
+					RequiredEffectScopes: []runtimecontract.RuntimeEffectScope{runtimecontract.RuntimeEffectNone}, ValidationRecipeID: "recipe/llm-schema-test",
+				}},
+				TargetSelectorRef: decision.Focus.TargetSelectorRef, TargetSelectorOwnerRef: decision.Focus.TargetSelectorOwnerRef,
+				TargetSelectorSubjectRef: decision.Focus.TargetSelectorSubjectRef, DeclarationRef: "definition/llm-schema-test/" + string(coverageID),
+			}
+			binding.Hash = runtimecontract.StableCoverageEvidenceBindingHash(binding)
+			bindings = append(bindings, binding)
+		}
+		decision.Focus.CoverageEvidenceBindings = runtimecontract.NormalizeCoverageEvidenceBindings(bindings)
 	}
 	decision.RequiredOutput = contract
 	return decision
@@ -2982,6 +3022,23 @@ func TestRuntimeAssessmentRequestPublishesCanonicalEvidenceRefContract(t *testin
 		}},
 	}
 	sealRuntimeProviderTestPolicies(&facts)
+	facts.Focus.TargetSelectorRef = "selector/assessment-evidence-ref-test"
+	facts.Focus.TargetSelectorOwnerRef = runtimecontract.RuntimeModuleFile
+	facts.Focus.TargetSelectorSubjectRef = "workspace"
+	binding := runtimecontract.CoverageEvidenceBinding{
+		ID: "binding/assessment-evidence-ref-test", CoverageWorkItemID: "cwi-1", FocusID: facts.Focus.ID,
+		DefinitionRevision: facts.DefinitionRevision,
+		Proofs: []runtimecontract.CoverageEvidenceProof{{
+			EvidenceKind: runtimecontract.EvidenceKindStateChange, AllowedOperationKinds: []string{runtimecontract.StepKindFileWrite},
+			RequiredEffectScopes: []runtimecontract.RuntimeEffectScope{runtimecontract.RuntimeEffectWorkspaceDurable},
+		}},
+		TargetSelectorRef: facts.Focus.TargetSelectorRef, TargetSelectorOwnerRef: facts.Focus.TargetSelectorOwnerRef,
+		TargetSelectorSubjectRef: facts.Focus.TargetSelectorSubjectRef, DeclarationRef: "definition/assessment-evidence-ref-test",
+	}
+	binding.Hash = runtimecontract.StableCoverageEvidenceBindingHash(binding)
+	facts.Focus.CoverageEvidenceBindings = []runtimecontract.CoverageEvidenceBinding{binding}
+	facts.Evidence.Accepted[0].FocusID = facts.Focus.ID
+	facts.Evidence.Accepted[0].BindingRefs = []string{binding.ID}
 	facts = facts.Normalized()
 	decision, err := runtimecontract.SealRuntimeDecision(facts, runtimecontract.RuntimeDecision{
 		State: runtimecontract.ConvergenceStateNeedAssessment, Focus: facts.Focus,

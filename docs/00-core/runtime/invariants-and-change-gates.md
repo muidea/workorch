@@ -4,7 +4,7 @@ Status: normative
 
 Type: core-contract-part
 
-Last Verified: 2026-08-26
+Last Verified: 2026-08-28
 
 ## 跨状态机不变量
 
@@ -43,6 +43,15 @@ Run 的 accepted evidence；assessment-only focus 不执行 executable operation
 
 每个 executable dispatch 必须恰好有一个 durable SM-3 admission 来源：普通 dispatch 对应 exact accepted
 `RuntimeCandidateAttemptRecord`，governance continuation 对应 exact granted binding 的 `ResumeDispatchID`，两者互斥。
+accepted attempt 必须在构造 dispatch 前，直接从同一 manifest + candidate 前像独立封存 operation target authorization
+projection/hash；含 managed validation 时还必须独立封存完整 recipe body projection/hash。fresh-load 必须同时验证这两份
+admission commitment 与 dispatch 完全一致，不能用协调改写 dispatch projection/self-seal 的方式回写 admission lineage；
+非 managed candidate 不得携带 recipe commitment。governance continuation 必须从 immediate source 逐跳继承两份 commitment。
+accepted operations attempt 还必须反证到更早持久化的 raw-canonical request-session `CandidateManifest` body；manifest 与 persisted
+candidate 是 target/coverage/recipe projection 的共同 preimage，不能只依赖 attempt/dispatch 两份可协调改写副本及 self-hash。
+typed confirmed-File repair manifest 使 `RuntimeDispatchRepairCommitment` 成为必填 admission projection；commitment 必须绑定 origin
+dispatch、confirmation、rejected source receipt/evidence 与 closure，并在 governance resume 逐 hop exact 继承。fresh-load 不能因
+confirmation、directive 或 commitment 被删除而把该 transaction 归类为普通 dispatch。
 dispatch seal 必须纳入 canonical candidate、validation recipe body、完整 owner catalog/observation preimage、精确 fallback
 policy 与 per-operation execution authority；active execution、restart 和 governance resume 只能读取该 seal，不能用 current
 owner catalog、current activation policy 或 current prerequisite observation 重新解释历史 authority。
@@ -50,6 +59,27 @@ owner catalog、current activation policy 或 current prerequisite observation �
 owner receipt ledger 与 dispatch execution ledger 必须按 `ExecutionKey + fence + OperationID + receipt ref/hash` 双向完全匹配；
 `owner_committed|evidence_committed` execution 不得缺 receipt，receipt 也不得脱离 committed execution projection。governance
 source 与 completed resume clone 可以投影同一份未漂移 receipt，但不能复制或改写 owner 事实。
+`evidence_committed` execution 还必须保存 exact `EvidenceFactID + EvidenceFactHash`；hash 覆盖完整 persisted fact，但不进入
+immutable dispatch authority hash。fresh-load/recovery 必须由该 commitment 精确反证 evidence 的 kind、revision、binding/CWI、
+failure/reason、receipt 与 operation lineage，不能只凭 receipt hash 或 processed-event fence 猜测 evidence body。
+
+`EvidenceSequence` 是 Orchestrator 唯一的全局 evidence chronology；ordinary accepted/rejected fact、governance resolution/fact
+与 assessment fact 共享连续的 `evidence/<n>` revision，不允许各子账本自行计数。顺序只从 completed dispatch 的持久化顺序及
+可选 active dispatch replay；每个 typed fact/resolution/assessment 必须被其 owning dispatch 恰消费一次，governance-resume
+clone 只引用已由 source dispatch 消费的原 fact，不能再次推进 sequence。aggregate 的 `Facts.EvidenceRevision` 必须等于最终
+sequence revision。orphan、duplicate、gap、跨 accepted/rejected 重复、普通 fact 冒充 assessment/governance、或协调改写
+revision/sequence 均在 fresh-load fail closed。
+
+assessment 另有 pre/post-seal 双门禁：`RuntimeAssessmentAuthorityInput` 必须 raw-canonical 且精确反证 Definition seed source、
+purpose、Focus/bindings 与 owner admissibility catalog，其 hash 是 dispatch authority。purpose 必须先存在于 request-session
+`CandidateManifest`，并由更早 persisted semantic provider/owner batch独立重放；同步改写 manifest/attempt/dispatch/self-hash
+仍必须失败。commit-time
+`RuntimeAssessmentAdjudication` 则由 persisted evidence/dispatch/coverage proof lineage 重放，并与
+`RuntimeAssessmentFact.AdjudicationHash` 双记账。两者不能互相替代，post-seal adjudication 不进入 immutable dispatch hash。
+
+所有 dispatch authority（assessment input、repair commitment、target/recipe/catalog、operation execution；governance continuation
+还包括 source/grant 派生的 completed/claimed execution 与 fence/key）必须在一次 typed pre-seal builder 中完成，然后仅计算一次
+最终 authority hash并 Validate。builder 返回后补写 authority 或为补写内容重算 hash均属 SM-3 边界违规。
 
 operation-scoped governance必须保存恰好一个ticket/approval owner identity，以及resolution、dependency、subject、
 receipt hash、ExecutionKey、fence、effect与sealed idempotency binding。continue只恢复suspended binding指向且未列入source

@@ -124,7 +124,9 @@ func workspaceExecutionIntentBootstrap(t *testing.T, workspaceID common.Workspac
 		ProviderSelection: runtimecontract.ProviderInferenceSelection{Target: runtimecontract.ProviderModelTarget{ProviderID: "provider-1", ModelID: "model-1"}},
 		ExecutionContract: runtimecontract.RuntimeExecutionContract{StateChangePolicy: runtimecontract.RuntimeStateChangeAllowedButNotRequired},
 	}
-	coverageItems := []runtimecontract.RuntimeCoverageItem{{ID: "cwi-1", SliceID: "slice-1", SourceScope: "dodItem", SourceID: string(dod.ID), Order: 1}}
+	coverageItems := []runtimecontract.RuntimeCoverageItem{{
+		ID: "cwi-1", SliceID: "slice-1", SourceScope: "dodItem", SourceID: string(dod.ID), TargetText: dod.Items[0], Order: 1,
+	}}
 	slices := []runtimecontract.RuntimeAcceptanceSlice{{ID: "slice-1", CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-1"}, CompletionPolicy: runtimecontract.RuntimeAcceptanceSliceCompletionAll, ResultPolicy: runtimecontract.RuntimeAcceptanceSliceResultAllowed}}
 	seed, err := runtimecontract.CompileRuntimeDefinitionSeed(definition, activation, coverageItems, slices)
 	if err != nil {
@@ -132,8 +134,11 @@ func workspaceExecutionIntentBootstrap(t *testing.T, workspaceID common.Workspac
 	}
 	bootstrap := runtimecontract.RuntimeBootstrap{
 		Definition: definition, Activation: activation, DefinitionSeed: seed,
-		DefinitionFocuses: []runtimecontract.RuntimeDefinitionFocus{{ID: "focus-1", SliceID: "slice-1", CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-1"}, RequireAssessment: true}},
-		Slices:            slices, CoverageItems: coverageItems,
+		DefinitionFocuses: []runtimecontract.RuntimeDefinitionFocus{{
+			ID: "focus-1", SliceID: "slice-1", AssessmentScope: "dodItem", AssessmentID: string(dod.ID), AssessmentText: dod.Items[0],
+			CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-1"}, RequireAssessment: true,
+		}},
+		Slices: slices, CoverageItems: coverageItems,
 		ConvergencePolicy: runtimecontract.DefaultRuntimeConvergencePolicy(), RecoveryPolicy: runtimecontract.DefaultRuntimeRecoveryPolicy(),
 	}
 	bootstrap.ExecutionBudgetPolicy = runtimecontract.RuntimeExecutionBudgetPolicyForRuntimePolicies(bootstrap.ConvergencePolicy, bootstrap.RecoveryPolicy)

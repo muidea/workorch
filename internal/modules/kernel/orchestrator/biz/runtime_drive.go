@@ -396,7 +396,16 @@ func runtimeTerminalDeliveryReady(aggregate runtime.RuntimeAggregate) bool {
 		aggregate.SemanticPlanning.Phase == runtimecontract.RuntimeSemanticPlanningFailed {
 		return true
 	}
-	return runtime.SemanticOperationAuthorityReady(aggregate)
+	// A changed capability-owner catalog can retire the semantic generation
+	// while its no-effect CWI binding still awaits the explicit owner-local SM-2
+	// retirement event.  The binding-free target view is provisional until that
+	// event reopens the CWI; an unrelated current target-selection observation
+	// must not turn it into an SM-4 terminal first.
+	if runtime.RuntimeCWIBindingRetirementPending(aggregate) {
+		return false
+	}
+	return runtime.CurrentFocusTargetSelectionConfirmsUnresolved(aggregate.Facts) ||
+		runtime.SemanticOperationAuthorityReady(aggregate)
 }
 
 func terminalRuntimeDriveTransition(aggregate runtime.RuntimeAggregate) runtimeDriveTransitionOutcome {

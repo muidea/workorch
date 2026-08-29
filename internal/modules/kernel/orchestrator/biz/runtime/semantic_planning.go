@@ -660,6 +660,14 @@ func SemanticPlanActiveCoverageIDsForDrive(facts runtimecontract.RuntimeFacts, o
 // owner transaction must finish validation/assessment before a later eligible
 // CWI may start a new semantic generation.
 func SemanticOperationAuthorityReady(aggregate RuntimeAggregate) bool {
+	// A retired owner catalog generation can temporarily coexist with its exact
+	// no-effect binding until SM-4 delivers the typed CWIBindingRetired event.
+	// That binding is immutable audit lineage, not reusable operation authority.
+	// Let the existing SM-2 retirement reducer reopen the CWI before any
+	// operations request or terminal projection consumes the old snapshot.
+	if RuntimeCWIBindingRetirementPending(aggregate) {
+		return false
+	}
 	if aggregate.SemanticPlanning.Phase == runtimecontract.RuntimeSemanticPlanningSealed {
 		return true
 	}
@@ -673,6 +681,23 @@ func SemanticOperationAuthorityReady(aggregate RuntimeAggregate) bool {
 		return true
 	}
 	return currentRuntimeCWIBindingExecutionLocked(aggregate)
+}
+
+// SemanticPlanningPrerequisitesPending is the single typed pre-provider gate
+// for mutable owner facts consumed by a semantic generation. TargetSelection
+// is included so a fresh Definition selector is resolved by its owner before
+// any provider document may propose a target.
+func SemanticPlanningPrerequisitesPending(values []runtimecontract.RuntimePrerequisite) bool {
+	for _, value := range values {
+		switch value.Kind {
+		case runtimecontract.PrerequisiteKindProviderCeiling,
+			runtimecontract.PrerequisiteKindCapabilityState,
+			runtimecontract.PrerequisiteKindOperationAdmissibility,
+			runtimecontract.PrerequisiteKindTargetSelection:
+			return true
+		}
+	}
+	return false
 }
 
 func currentRuntimeCWIBindingExecutionLocked(aggregate RuntimeAggregate) bool {

@@ -101,6 +101,9 @@ func TestRuntimeSemanticOrderAcceptedRetirementHandsRequiredPhaseBackToOuterDriv
 	dependentFocus.ID = "focus-dependent"
 	dependentFocus.CoverageWorkItemIDs = []common.CoverageWorkItemID{dependentID}
 	dependentFocus.CoverageEvidenceBindings = nil
+	dependentFocus.AssessmentScope = "dodItem"
+	dependentFocus.AssessmentID = "dod-dependent"
+	dependentFocus.AssessmentText = "deliver dependent coverage"
 	aggregate.Facts.RemainingFocuses = []runtimecontract.CoverageFocus{dependentFocus}
 	aggregate.Facts.Coverage = append(aggregate.Facts.Coverage, runtimecontract.RuntimeCoverageItemFact{
 		ID: dependentID, SliceID: dependentFocus.SliceID, SourceScope: "dodItem", SourceID: "dod-dependent",
@@ -121,13 +124,23 @@ func TestRuntimeSemanticOrderAcceptedRetirementHandsRequiredPhaseBackToOuterDriv
 	sealedLedger := aggregate.SemanticPlanning.Clone()
 	order := sealedLedger.CoverageOrderDocument.Clone()
 	manifest := sealedLedger.Manifest.Clone()
+	batchFeasibility := runtimecontract.RuntimeSemanticPlanBatchFeasibilityResult{
+		BatchID: sealedLedger.Batches[0].BatchID, BatchHash: sealedLedger.Batches[0].Hash,
+		DocumentHash:  sealedLedger.Batches[0].DocumentHash,
+		Feasibilities: append([]runtimecontract.RuntimeSemanticProofFeasibility(nil), sealedLedger.Feasibilities...),
+	}
+	batchFeasibility.Hash = runtimecontract.StableRuntimeSemanticPlanBatchFeasibilityResultHash(batchFeasibility)
 	orderLedger := runtimecontract.RuntimeSemanticPlanningLedger{
 		SchemaVersion: sealedLedger.SchemaVersion, Phase: runtimecontract.RuntimeSemanticPlanningOrderAccepted,
 		DefinitionSeed: sealedLedger.DefinitionSeed.Clone(), Manifest: &manifest,
 		StablePrefixHash: sealedLedger.StablePrefixHash, LogicalRequestID: "stale-order-request",
 		CoverageOrderDocument: &order, Document: &order,
-		DocumentHash:       runtimecontract.StableRuntimeSemanticPlanDocumentHash(order),
-		PendingCoverageIDs: append([]common.CoverageWorkItemID(nil), order.CoverageOrder...),
+		DocumentHash:            runtimecontract.StableRuntimeSemanticPlanDocumentHash(order),
+		Batches:                 append([]runtimecontract.RuntimeSemanticPlanBatch(nil), sealedLedger.Batches...),
+		NextBatchSequence:       sealedLedger.NextBatchSequence,
+		CompletedBatchIDs:       append([]string(nil), sealedLedger.CompletedBatchIDs...),
+		BatchFeasibilityResults: []runtimecontract.RuntimeSemanticPlanBatchFeasibilityResult{batchFeasibility},
+		BatchDocuments:          append([]runtimecontract.RuntimeSemanticPlanDocument(nil), sealedLedger.BatchDocuments...),
 	}
 	if err := orderLedger.Validate(); err != nil {
 		t.Fatalf("stale-order ledger fixture: %v", err)
@@ -566,7 +579,13 @@ func TestRuntimeSemanticDriveUsesPersistedRequestSessionAndExcludesRetiredGenera
 		ObservedRevision: "file-revision-1",
 	}
 	catalog.SnapshotID = runtimecontract.StableRuntimeOperationAdmissibilitySnapshotID(catalog)
+	aggregate.Facts.Focus.TargetRefs = []string{"target.txt"}
 	aggregate.Facts.Resources.OperationAdmissibilities = []runtimecontract.RuntimeOperationAdmissibility{catalog}
+	aggregate.Facts.Prerequisites.Satisfied = []runtimecontract.RuntimePrerequisite{runtimeOperationAdmissibilityPrerequisite(catalog)}
+	aggregate.Facts.Resources.PrerequisiteObservations = []runtimecontract.RuntimePrerequisiteObservation{runtimeFileAdmissibilityObservation(catalog)}
+	aggregate.Facts.Resources.TargetSnapshots = []runtimecontract.TargetSnapshot{{
+		TargetRef: "target.txt", ContentHash: "semantic-session-target-v1", ContentState: runtimecontract.SnapshotContentStateComplete,
+	}}
 	const retiredHistorySentinel = "retired-semantic-history-must-not-reach-provider"
 	// The retired generation is test-only history. Detach its facts before the
 	// semantic projection mutates CWI rows so active authority remains intact.

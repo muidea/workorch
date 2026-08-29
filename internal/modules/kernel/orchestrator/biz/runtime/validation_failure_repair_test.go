@@ -43,6 +43,7 @@ func runtimeValidationFailureRepairAggregateForTest(t *testing.T, convergence ru
 	declaration.SliceID = aggregate.Facts.DefinitionSeed.CoverageItems[0].SliceID
 	declaration.AssessmentScope = "dodItem"
 	declaration.AssessmentID = "dod-item-1"
+	declaration.AssessmentText = aggregate.Facts.DefinitionSeed.CoverageItems[0].TargetText
 	declaration.AssessmentText = "validation succeeds"
 	declaration.RequiredEvidenceKinds = []string{runtimecontract.EvidenceKindValidation}
 	aggregate.Facts.DefinitionFocuses = runtimecontract.CompileRuntimeDefinitionFocuses([]runtimecontract.CoverageFocus{declaration})
@@ -221,14 +222,21 @@ func TestRejectedValidationObservationWaitsForFileConfirmationBeforeSemanticRepa
 	}
 	evidence := runtimeRejectedValidationEvidenceForTest(t, sealed, "event-validation-owner-observation", runtimecontract.ValidationDiagnosticBuildFailed)
 	evidence.Failure.Signature = observation.FailureSignature
+	evidence.Failure.ValidationDiagnostic.TargetRefs = append([]string(nil), observation.CandidateTargetRefs...)
 	evidence.Failure.ValidationFailureObservation = &observation
 	attachRuntimeTestOwnerReceipt(t, &repository.aggregate, &evidence)
 	committed, err := coordinator.commitEvidence(context.Background(), evidence)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if committed.Aggregate.ActiveDispatch != nil || len(committed.Aggregate.CompletedDispatches) != 1 ||
-		committed.Aggregate.CompletedDispatches[0].FocusTargetRole != observation.TargetRole {
+	var validationDispatch *SealedDispatch
+	for index := range committed.Aggregate.CompletedDispatches {
+		if committed.Aggregate.CompletedDispatches[index].ID == sealed.ActiveDispatch.ID {
+			validationDispatch = &committed.Aggregate.CompletedDispatches[index]
+			break
+		}
+	}
+	if committed.Aggregate.ActiveDispatch != nil || validationDispatch == nil || validationDispatch.FocusTargetRole != observation.TargetRole {
 		t.Fatalf("completed validation dispatch did not retain sealed focus role: %+v", committed.Aggregate)
 	}
 	if !reflect.DeepEqual(originalFocus, committed.Aggregate.Facts.Focus.Normalized()) {
@@ -247,8 +255,8 @@ func TestRejectedValidationObservationWaitsForFileConfirmationBeforeSemanticRepa
 	if _, required, inputErr := CurrentRuntimeValidationFailureRepairGenerationInput(committed.Aggregate); inputErr != nil || required {
 		t.Fatalf("pending File confirmation exposed semantic repair input: required=%v err=%v", required, inputErr)
 	}
-	if committed.Aggregate.Decision.State != runtimecontract.ConvergenceStateNeedValidation || committed.Aggregate.Facts.Resources.FailureTarget != nil {
-		t.Fatalf("pending File confirmation selected premature repair authority: decision=%+v target=%+v", committed.Aggregate.Decision, committed.Aggregate.Facts.Resources.FailureTarget)
+	if committed.Aggregate.Decision.State != runtimecontract.ConvergenceStateNeedValidation || committed.Aggregate.Facts.Resources.FailureTarget != nil || committed.Aggregate.Facts.RepairDirective != nil {
+		t.Fatalf("pending File confirmation selected premature repair authority: decision=%+v target=%+v directive=%+v", committed.Aggregate.Decision, committed.Aggregate.Facts.Resources.FailureTarget, committed.Aggregate.Facts.RepairDirective)
 	}
 
 	// A later focus projection cannot rewrite the completed validation's

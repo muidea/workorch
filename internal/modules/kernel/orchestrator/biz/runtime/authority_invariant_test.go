@@ -19,13 +19,13 @@ func TestInspectRuntimeAuthorityInvariantsReportsHistoricalSelectionAsFirstBadRe
 	}
 	selection.SnapshotID = runtimecontract.StableRuntimeTargetSelectionSnapshotID(selection)
 	invalid.Facts.Resources.TargetSelection = &selection
-	invalid.Facts.Prerequisites.Satisfied = []runtimecontract.RuntimePrerequisite{{
+	invalid.Facts.Prerequisites.Satisfied = append(invalid.Facts.Prerequisites.Satisfied, runtimecontract.RuntimePrerequisite{
 		ID: selection.PrerequisiteID, Kind: runtimecontract.PrerequisiteKindTargetSelection,
 		Scope: runtimecontract.RuntimePrerequisiteScopeFocus, FocusID: "focus-old", OwnerModuleID: runtimecontract.RuntimeModuleFile,
-	}}
+	})
 
 	report := InspectRuntimeAuthorityInvariants(invalid)
-	if report.FocusID != "focus-1" || report.TargetSelectionPrerequisiteID != "selection-old" ||
+	if report.FocusID != invalid.Facts.Focus.ID || report.TargetSelectionPrerequisiteID != "selection-old" ||
 		len(report.Violations) != 2 || report.Violations[0].Code != RuntimeAuthorityInvariantActiveFocusScope ||
 		report.Violations[1].Code != RuntimeAuthorityInvariantSelectionBinding {
 		t.Fatalf("authority invariant report = %+v", report)
@@ -56,7 +56,7 @@ func TestInspectRuntimeAuthorityInvariantsSeparatesRetiredObservationFromActiveF
 
 	report := InspectRuntimeAuthorityInvariants(aggregate)
 	if len(report.Violations) != 0 || len(report.RetiredPrerequisiteIDs) != 1 || len(report.RetiredObservationIDs) != 1 ||
-		len(report.ActivePrerequisiteIDs) != 0 || len(report.ActivePrerequisiteObservationIDs) != 0 {
+		len(report.ActivePrerequisiteObservationIDs) != len(aggregate.Facts.Resources.PrerequisiteObservations) {
 		t.Fatalf("retired authority report = %+v", report)
 	}
 }

@@ -87,6 +87,16 @@ func NextRuntimeCWIBindingRetirementFact(aggregate RuntimeAggregate) (RuntimeCWI
 	return RuntimeCWIBindingRetirementFact{}, false
 }
 
+// RuntimeCWIBindingRetirementPending reports whether SM-4 must deliver the
+// already-derived owner-local retirement fact before it can treat the current
+// reducer decision as terminal.  The fact remains the sole input to the SM-2
+// retirement reducer below; this predicate neither clears the binding nor
+// creates a successor semantic generation.
+func RuntimeCWIBindingRetirementPending(aggregate RuntimeAggregate) bool {
+	_, pending := NextRuntimeCWIBindingRetirementFact(aggregate)
+	return pending
+}
+
 // runtimeCWIReopenTrigger is an Orchestrator-private reduction input. It is
 // created only after an accepted receipt or a typed reconciliation batch has
 // passed its own owner contract checks.

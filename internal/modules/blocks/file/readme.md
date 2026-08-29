@@ -4,7 +4,7 @@ Status: active
 
 Type: capability-block-contract
 
-Last Verified: 2026-08-27
+Last Verified: 2026-08-28
 
 ## 功能范围与边界
 
@@ -14,6 +14,22 @@ Last Verified: 2026-08-27
 
 - `kernel/orchestrator` 通过 File owner 在 `blocks/file/pkg/events` 定义的具体 command/result 同步投递文件操作；本组件直接订阅 EventHub，不启动通用 runtime executor，也不发布第二套执行通知。
 - Runtime target snapshot、workspace manifest 与 capability preflight 均使用 File owner 定义的 typed EventHub command/result；结果只表达 owner 观测，manifest revision 对文件路径和内容变化敏感。
+- `ConfirmRuntimeRepairSurfaceCommand/Result` 是 File owner 的 read-only current-resource confirmation。请求中的
+  `RuntimeValidationFailureObservation` 必须已由 Orchestrator 绑定 completed sealed validation dispatch；File 只按 current
+  regular workspace manifest 核对其 candidate refs 的存在性/新鲜性，返回 `confirmed | rejected` factual
+  disposition。File 不重建、扩大或缩小 observation 中的 sealed full validation scope，不构造 Runtime action；只有
+  Orchestrator SM-2 private event 可将 confirmed candidate 封存为 `FailureTarget`。该 result 的 owner 必须恒为 `blocks/file`；
+  ingress、confirmation ledger 与 fresh-load 都拒绝其它 owner。promoted File `TargetObservation`/`FailureTarget` 必须反向匹配
+  exact confirmation record 与产生 observation 的 exact evidence-committed Shell receipt。同一 VFO 可因 manifest freshness 产生
+  多条 stale revision，但 confirmed/rejected 是该 observation 序列的唯一终端 response；其后的延迟结果必须冲突，Runtime 只从
+  latest valid confirmation 派生当前 repair authority。
+- File repair operation 仍只返回 owner-local factual receipt，不管理 Runtime continuation。accepted target-bound durable receipt
+  必须逐项报告 exact operation target change，并仅报告一条 current workspace-tree revision edge；多 operation repair 的后续
+  receipt 必须以前一已提交 edge 的 after revision 为 before revision。Orchestrator 用该 receipt chain 证明同一 sealed all-of
+  transaction 并在 final accepted 后要求 fresh validation。首个 changed receipt 退休 confirmed revision 后，Orchestrator 的
+  partial aggregate 也只能保留 active sealed dispatch 与 immutable receipt/evidence/invalidation lineage，不能恢复旧
+  `FailureTarget` 或旧 `need_state_change RepairDirective`；File 自身不保留 Runtime target、directive、partial state 或 operation
+  顺序状态。
 - Definition selector（例如 `file/workspace_deliverable`）描述声明侧 subject/scope；File operation selector（例如
   `workspace-relative-new-file-target`）描述具体 capability admission。两者由 File owner 各自解释但不是 alias：File
   只对请求中的 exact selector 返回 factual selection/feasibility/receipt，不把声明 selector 改写成 operation selector，
@@ -74,7 +90,7 @@ Last Verified: 2026-08-27
 
 | 交互组件 | 方向 | 具体合同 | 当前结论 |
 | --- | --- | --- | --- |
-| `kernel/orchestrator` | 双向 | capability/admissibility/feasibility/prospective manifest delta/snapshot/manifest/reconciliation/execute；receipt query/commit | 完整；所有合同均为 concrete typed command/result |
+| `kernel/orchestrator` | 双向 | capability/admissibility/feasibility/prospective manifest delta/snapshot/manifest/repair-surface confirmation/reconciliation/execute；receipt query/commit | 完整；所有合同均为 concrete typed command/result |
 | Workspace filesystem | File-private adapter | scoped list/read/create/edit/patch 与 owner observation | 完整；adapter 不拥有 Runtime 状态 |
 | 其他 owner | 无直接 I/O | 只经 Orchestrator sealed request/fact 协作 | 完整；无跨 owner service/repository |
 
@@ -135,6 +151,8 @@ Last Verified: 2026-08-27
 - [x] 注入 walk、entry-info、content-hash 错误时，manifest 与 unique/prospective selection 全部 fail-closed 且零写，
   不把不完整 inventory 伪装成完整 cardinality。
 - [x] File 唯一消费的跨 owner result（receipt query/commit）覆盖 wrong type、owner error、Found/Receipt 不一致、invalid/stale identity 与 payload drift；prerequisite/reconciliation 是 File 生产、Orchestrator 消费的 concrete result，不在 File 内反向解码。
+- [x] repair-surface confirmation 只确认 current regular manifest 中的 exact candidate refs；missing/out-of-scope 返回 factual
+  rejection，零文件副作用、零 Runtime transition，不改写 sealed observation scope。
 - [x] prospective create 前 admission（含 unique selector，以及 workspace-deliverable/profile 的 excluded、未参与当前
   inventory、越出 sealed candidates 等 0/1/N × prospective typed fail-closed/零写矩阵）、创建后
   exact reconciliation、重复查询、fresh-owner restart、资源删除后的当前 observation、四类 selector × 0/1/N

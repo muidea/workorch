@@ -229,6 +229,9 @@ func TestR5FiveResultPersistenceMatrix(t *testing.T) {
 				},
 			}},
 		}}
+		if err := RecordFixtureCandidateFeasibilities(context.Background(), controller, "ws-v2", "run-v2", 0, candidate); err != nil {
+			t.Fatal(err)
+		}
 		// Prefer Accept path used by controller unit tests when available.
 		accepted, err := controller.AcceptCandidateAttempt(context.Background(), "ws-v2", "run-v2", 0, candidate)
 		if err != nil {

@@ -609,8 +609,8 @@ func TestRequestCandidateProviderReceivesOnlySealedTypedRequest(t *testing.T) {
 
 func TestDecodeTypedAssessmentCandidate(t *testing.T) {
 	request := candidateRequest(t, runtimecontract.ConvergenceStateNeedAssessment)
-	candidate, err := runtimecontract.DecodeRuntimeCandidatePayload(request.Decision.State, []byte(`{
-		"focusId":"focus-1",
+	payload := fmt.Sprintf(`{
+		"focusId":%q,
 		"coverageWorkItemIds":["cwi-1"],
 		"disposition":"satisfied",
 		"items":[{
@@ -620,14 +620,15 @@ func TestDecodeTypedAssessmentCandidate(t *testing.T) {
 		}],
 		"summary":"current focus is satisfied",
 		"evidenceRefs":["evidence-1"]
-	}`))
+	}`, request.Decision.Focus.ID)
+	candidate, err := runtimecontract.DecodeRuntimeCandidatePayload(request.Decision.State, []byte(payload))
 	if err != nil {
 		t.Fatal(err)
 	}
 	if err := candidate.Validate(request.Decision); err != nil {
 		t.Fatal(err)
 	}
-	if candidate.Assessment == nil || candidate.Assessment.Disposition != runtimecontract.AssessmentDispositionSatisfied || candidate.Assessment.FocusID != "focus-1" {
+	if candidate.Assessment == nil || candidate.Assessment.Disposition != runtimecontract.AssessmentDispositionSatisfied || candidate.Assessment.FocusID != request.Decision.Focus.ID {
 		t.Fatalf("assessment candidate = %+v", candidate)
 	}
 	if len(candidate.Assessment.Items) != 1 || candidate.Assessment.Items[0].CoverageWorkItemID != "cwi-1" || !candidate.Assessment.Items[0].Satisfied || len(candidate.Assessment.Items[0].EvidenceRefs) != 1 || candidate.Assessment.Items[0].EvidenceRefs[0] != "evidence-1" {
@@ -702,6 +703,10 @@ func candidateRequest(t *testing.T, state runtimecontract.ConvergenceState) llmm
 			}},
 		},
 	}
+	assessmentPurpose := runtimecontract.RuntimeAssessmentPurposePreimage{}
+	if state == runtimecontract.ConvergenceStateNeedAssessment {
+		facts.Focus, assessmentPurpose = candidateRequestAssessmentSemanticPreimage(t)
+	}
 	facts.ConvergencePolicy = runtimecontract.DefaultRuntimeConvergencePolicy()
 	facts.RecoveryPolicy = runtimecontract.DefaultRuntimeRecoveryPolicy()
 	facts.ExecutionBudgetPolicy = runtimecontract.DefaultRuntimeExecutionBudgetPolicy()
@@ -746,7 +751,12 @@ func candidateRequest(t *testing.T, state runtimecontract.ConvergenceState) llmm
 		t.Fatal(err)
 	}
 	context := runtimecontract.RuntimeCandidateContextForDecision(facts, sealed, nil)
-	manifest, err := runtimecontract.BuildRuntimeCandidateContractManifest(sealed, runtimecontract.RuntimeCandidateManifestOwnerFactsFromContext(context))
+	ownerFacts := runtimecontract.RuntimeCandidateManifestOwnerFactsFromContext(context)
+	if state == runtimecontract.ConvergenceStateNeedAssessment {
+		ownerFacts.AssessmentPurpose = assessmentPurpose.Purpose
+		ownerFacts.AssessmentPurposeManifestHash = assessmentPurpose.SemanticManifestHash
+	}
+	manifest, err := runtimecontract.BuildRuntimeCandidateContractManifest(sealed, ownerFacts)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -768,6 +778,87 @@ func candidateRequest(t *testing.T, state runtimecontract.ConvergenceState) llmm
 	expected.Hash = runtimecontract.StableRuntimeExpectedDocumentHash(expected)
 	request.ExpectedDocument = &expected
 	return request
+}
+
+// candidateRequestAssessmentSemanticPreimage builds the assessment binding
+// through the same semantic document + owner feasibility replay used by the
+// production purpose resolver. The assessment manifest therefore cites an
+// earlier immutable semantic manifest, rather than a test-only purpose label.
+func candidateRequestAssessmentSemanticPreimage(t *testing.T) (runtimecontract.CoverageFocus, runtimecontract.RuntimeAssessmentPurposePreimage) {
+	t.Helper()
+	semanticRequest := semanticBoundaryRequest(t)
+	manifest := semanticRequest.SemanticManifest.Clone()
+	fileCatalog := manifest.OwnerCatalogs[0].Normalized()
+	fileCatalog.OperationVariants = []runtimecontract.RuntimeOperationAdmissibilityVariant{{
+		Kind: runtimecontract.StepKindFileWrite,
+		AllowedTargetPolicies: []runtimecontract.RuntimeOperationTargetPolicy{
+			runtimecontract.RuntimeOperationTargetPolicyProspectiveOwnerTarget,
+		},
+		SelectorRefs: []string{"workspace-relative-new-file-target"}, ConstraintRefs: []string{"workspace-relative-path"},
+	}}
+	fileCatalog.SnapshotID = runtimecontract.StableRuntimeOperationAdmissibilitySnapshotID(fileCatalog)
+	manifest.OwnerCatalogs = []runtimecontract.RuntimeOperationAdmissibility{fileCatalog}
+	manifest.Hash = runtimecontract.StableRuntimeSemanticPlanManifestHash(manifest)
+	proposal := runtimecontract.RuntimeSemanticProofProposal{
+		CoverageWorkItemID: "cwi-1", OwnerModuleID: runtimecontract.RuntimeModuleFile,
+		OperationKind: runtimecontract.StepKindFileWrite,
+		Target: runtimecontract.RuntimeOperationTargetAuthorization{
+			Policy:                    runtimecontract.RuntimeOperationTargetPolicyProspectiveOwnerTarget,
+			OwnerSelectorRefs:         []string{"workspace-relative-new-file-target"},
+			ProspectiveConstraintRefs: []string{"workspace-relative-path"}, ProspectiveTargetRefs: []string{"assessment-target.go"},
+		},
+		RequiredEvidenceKinds: []string{runtimecontract.EvidenceKindStateChange},
+		RequiredEffectScopes:  []runtimecontract.RuntimeEffectScope{runtimecontract.RuntimeEffectWorkspaceDurable},
+		DeclarationRef:        "semantic-plan/dod-1",
+	}
+	document := runtimecontract.RuntimeSemanticPlanDocument{
+		SchemaVersion: runtimecontract.RuntimeSemanticPlanDocumentSchemaCurrent,
+		ManifestHash:  manifest.Hash, DefinitionSeedHash: manifest.DefinitionSeedHash,
+		PlanStep: runtimecontract.RuntimeSemanticPlanStepProofBatch,
+		BatchID:  "assessment-semantic-batch", BatchSequence: 0,
+		BatchCoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-1"},
+		Proposals:                []runtimecontract.RuntimeSemanticProofProposal{proposal},
+	}
+	catalog := manifest.OwnerCatalogs[0]
+	fact := runtimecontract.RuntimeSemanticProofFeasibility{
+		SchemaVersion: runtimecontract.RuntimeSemanticFeasibilitySchemaCurrent,
+		ManifestHash:  manifest.Hash, DefinitionSeedHash: manifest.DefinitionSeedHash,
+		CoverageWorkItemID: proposal.CoverageWorkItemID,
+		ProposalHash:       runtimecontract.StableRuntimeSemanticProofProposalHash(proposal),
+		OwnerModuleID:      proposal.OwnerModuleID, CatalogSnapshotID: catalog.SnapshotID,
+		Status: runtimecontract.RuntimeSemanticFeasibilityFeasible, ObservedRevision: catalog.ObservedRevision,
+		TargetRefs: runtimecontract.RuntimeSemanticProposalTargetRefs(proposal),
+	}
+	const requestID = "assessment-semantic-request"
+	focuses, _, err := runtimecontract.CompileRuntimeSemanticBindings(manifest, requestID, document, []runtimecontract.RuntimeSemanticProofFeasibility{fact})
+	if err != nil || len(focuses) != 1 {
+		t.Fatalf("compile assessment semantic preimage: focuses=%+v err=%v", focuses, err)
+	}
+	batch := runtimecontract.RuntimeSemanticPlanBatch{
+		BatchID: document.BatchID, ManifestHash: manifest.Hash, DefinitionSeedHash: manifest.DefinitionSeedHash,
+		CoverageOrderHash: "assessment-semantic-order", Sequence: document.BatchSequence,
+		CoverageWorkItemIDs: append([]common.CoverageWorkItemID(nil), document.BatchCoverageWorkItemIDs...),
+		RequestLogicalID:    requestID, DocumentHash: runtimecontract.StableRuntimeSemanticPlanDocumentHash(document),
+		State: runtimecontract.RuntimeSemanticPlanBatchAccepted,
+	}
+	batch.Hash = runtimecontract.StableRuntimeSemanticPlanBatchHash(batch)
+	result := runtimecontract.RuntimeSemanticPlanBatchFeasibilityResult{
+		BatchID: batch.BatchID, BatchHash: batch.Hash, DocumentHash: batch.DocumentHash,
+		Feasibilities: []runtimecontract.RuntimeSemanticProofFeasibility{fact},
+	}
+	result.Hash = runtimecontract.StableRuntimeSemanticPlanBatchFeasibilityResultHash(result)
+	ledger := runtimecontract.RuntimeSemanticPlanningLedger{
+		SchemaVersion: runtimecontract.RuntimeSemanticPlanningLedgerSchemaCurrent,
+		Phase:         runtimecontract.RuntimeSemanticPlanningSealed,
+		Manifest:      &manifest, Batches: []runtimecontract.RuntimeSemanticPlanBatch{batch},
+		BatchDocuments:          []runtimecontract.RuntimeSemanticPlanDocument{document},
+		BatchFeasibilityResults: []runtimecontract.RuntimeSemanticPlanBatchFeasibilityResult{result},
+	}
+	preimage, err := runtimecontract.ResolveRuntimeAssessmentPurposePreimage(ledger, focuses[0].CoverageEvidenceBindings)
+	if err != nil || preimage.Purpose != runtimecontract.RuntimeAssessmentPurposeDefinitionProof || preimage.SemanticManifestHash != manifest.Hash {
+		t.Fatalf("resolve assessment semantic preimage: preimage=%+v err=%v", preimage, err)
+	}
+	return focuses[0], preimage
 }
 
 func candidateRequestCoverageBinding(evidenceKind string) runtimecontract.CoverageEvidenceBinding {

@@ -162,7 +162,7 @@ func TestRuntimeFileBackedMCPOwnerFailureTargetReceiptRestartMatrix(t *testing.T
 				}
 				t.Cleanup(func() { mcpOwner.Teardown(ctx) })
 
-				inventory, observation := acquireFileBackedMCPAdmissibility(t, ctx, hub)
+				inventory, observation := acquireFileBackedMCPAdmissibility(t, ctx, hub, deliverable, "validation-entry.go")
 				fileInventory, fileObservation := acquireFileBackedFileAdmissibility(t, ctx, hub, deliverable)
 				aggregate := runtimeFileBackedMCPFailureAggregate(t, inventory, observation, fileInventory, fileObservation)
 				runs := filerepository.NewRunRepository(filepath.Join(root, "runs.json"))
@@ -457,7 +457,7 @@ func TestRuntimeFileBackedMCPOwnerFailureTargetReceiptRestartMatrix(t *testing.T
 						resources.FailureTarget != nil && resources.FailureTarget.TargetObservation != nil &&
 						len(resources.FailureTarget.TargetRefs) == 1 && resources.FailureTarget.TargetRefs[0] == target &&
 						runtimeFileBackedHasCompleteTargetSnapshot(resources.TargetSnapshots, target, snapshot.Snapshot.ContentHash) &&
-						command.CandidateContext.Focus.TargetRole == "semantic_proof_target" {
+						command.CandidateContext.Focus.TargetRole == persisted.Facts.Focus.TargetRole {
 						contextBound = true
 					}
 					result.Set(runtimeCandidateResultForTest(t, command, fileCandidate), nil)
@@ -470,7 +470,8 @@ func TestRuntimeFileBackedMCPOwnerFailureTargetReceiptRestartMatrix(t *testing.T
 				patchModule := newTestBiz(patchOwner, hub, nil)
 				sealedPatch, err := patchModule.requestAndSealRuntimeCandidateWithRetry(ctx, persisted, filePrefix)
 				if err != nil || sealedPatch.ActiveDispatch == nil || candidateRequests != 1 || !contextBound {
-					t.Fatalf("MCP-grounded File patch seal=%+v err=%v", sealedPatch, err)
+					t.Fatalf("MCP-grounded File patch seal: active=%t requests=%d contextBound=%t decision=%s err=%v",
+						sealedPatch.ActiveDispatch != nil, candidateRequests, contextBound, sealedPatch.Decision.State, err)
 				}
 				if sealedPatch.ActiveDispatch.Candidate.StateChange == nil || len(sealedPatch.ActiveDispatch.Candidate.StateChange.Operations) != 1 {
 					t.Fatalf("MCP-grounded File patch sealed unexpected candidate=%+v", sealedPatch.ActiveDispatch.Candidate)
@@ -819,14 +820,14 @@ func (g runtimeFileBackedMCPServerGetter) RegistrySnapshot(context.Context) (*mc
 	return &mcpmodel.RegistrySnapshot{Servers: mcpmodel.CloneServers([]*mcpmodel.Server{g.server}), Capabilities: capabilities}, "test-mcp-registry-" + string(g.server.ID), nil
 }
 
-func acquireFileBackedMCPAdmissibility(t *testing.T, ctx context.Context, hub magicevent.Hub) (runtimecontract.RuntimeOperationAdmissibility, runtimecontract.RuntimePrerequisiteObservation) {
+func acquireFileBackedMCPAdmissibility(t *testing.T, ctx context.Context, hub magicevent.Hub, deliverable string, targetRefs ...string) (runtimecontract.RuntimeOperationAdmissibility, runtimecontract.RuntimePrerequisiteObservation) {
 	t.Helper()
 	result := hub.Send(magicevent.NewEventWithContext(
 		mcpevents.TopicAcquireRuntimeOperationAdmissibility, runtimecontract.RuntimeModuleOrchestrator, runtimecontract.RuntimeModuleMCP,
 		magicevent.NewHeader(), ctx, mcpevents.AcquireRuntimeOperationAdmissibilityCommand{
 			WorkspaceID: "ws-v2", RunID: "run-v2", AuthoritySnapshotID: "authority-mcp-grounding", PrerequisiteID: "operation-admissibility:mcp-grounding",
-			WorkspaceDeliverableDirectory: t.TempDir(), OwnerModuleID: runtimecontract.RuntimeModuleMCP,
-			RequiredKinds: []string{runtimecontract.StepKindMCPToolCall}, MaxItems: 4,
+			WorkspaceDeliverableDirectory: deliverable, OwnerModuleID: runtimecontract.RuntimeModuleMCP,
+			RequiredKinds: []string{runtimecontract.StepKindMCPToolCall}, RequiredTargetRefs: append([]string(nil), targetRefs...), MaxItems: 4,
 		},
 	))
 	if result == nil {
@@ -840,7 +841,24 @@ func acquireFileBackedMCPAdmissibility(t *testing.T, ctx context.Context, hub ma
 	if !ok || response.Acquisition.Observation.ObservationID == "" || response.Acquisition.Admissibility.ObservedRevision == "" {
 		t.Fatalf("MCP admissibility response = %#v", data)
 	}
-	return response.Acquisition.Admissibility, response.Acquisition.Observation
+	// The capability catalog is selector-scoped, while this restart matrix also
+	// carries one File-observed validation input. Seal that acquisition-request
+	// target into the pre-semantic test catalog and reissue the matching owner
+	// observation identity; no target is invented after semantic seal.
+	inventory := response.Acquisition.Admissibility.Normalized()
+	inventory.TargetRefs = append([]string(nil), targetRefs...)
+	inventory = inventory.Normalized()
+	inventory.SnapshotID = runtimecontract.StableRuntimeOperationAdmissibilitySnapshotID(inventory)
+	if err := inventory.Validate(); err != nil {
+		t.Fatalf("MCP target-scoped admissibility fixture: %v", err)
+	}
+	observation := response.Acquisition.Observation.Normalized()
+	observation.ContentHash = inventory.SnapshotID
+	observation.ObservationID = runtimecontract.StableRuntimePrerequisiteObservationID(observation)
+	if err := observation.Validate(); err != nil {
+		t.Fatalf("MCP target-scoped admissibility observation: %v", err)
+	}
+	return inventory, observation
 }
 
 func acquireFileBackedFileAdmissibility(t *testing.T, ctx context.Context, hub magicevent.Hub, deliverable string) (runtimecontract.RuntimeOperationAdmissibility, runtimecontract.RuntimePrerequisiteObservation) {
@@ -850,7 +868,7 @@ func acquireFileBackedFileAdmissibility(t *testing.T, ctx context.Context, hub m
 		magicevent.NewHeader(), ctx, fileevents.AcquireRuntimeOperationAdmissibilityCommand{
 			WorkspaceID: "ws-v2", RunID: "run-v2", AuthoritySnapshotID: "authority-file-grounding", PrerequisiteID: "operation-admissibility:file-grounding",
 			WorkspaceDeliverableDirectory: deliverable, OwnerModuleID: runtimecontract.RuntimeModuleFile,
-			RequiredKinds: []string{runtimecontract.RuntimeBlockKindPatchApply}, RequiredTargetRefs: []string{"implementation.go"}, MaxItems: 4,
+			RequiredKinds: []string{runtimecontract.RuntimeBlockKindPatchApply}, RequiredTargetRefs: []string{"implementation.go", "validation-entry.go"}, MaxItems: 4,
 		},
 	))
 	if result == nil {

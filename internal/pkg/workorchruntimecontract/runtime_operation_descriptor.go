@@ -11,24 +11,55 @@ import (
 type RuntimeOperationTargetCardinality string
 
 const (
+	RuntimeFailureTargetProtocolNone      RuntimeFailureTargetProtocol      = "none"
 	RuntimeOperationTargetCardinalityZero RuntimeOperationTargetCardinality = "zero"
 	RuntimeOperationTargetCardinalityOne  RuntimeOperationTargetCardinality = "one"
 	RuntimeOperationTargetCardinalityMany RuntimeOperationTargetCardinality = "many"
 )
+
+// RuntimeFailureTargetProtocol declares how a capability operation may report
+// repair targets in a rejected owner receipt. The Orchestrator consumes only
+// this technical policy; it does not branch on a concrete capability owner.
+type RuntimeFailureTargetProtocol string
+
+const (
+	// RuntimeFailureTargetProtocolSealedOperation permits only a canonical
+	// subset of the operation targets already sealed by SM-3. It cannot discover
+	// a new repair target.
+	RuntimeFailureTargetProtocolSealedOperation RuntimeFailureTargetProtocol = "sealed_operation_targets"
+	// RuntimeFailureTargetProtocolReceiptEvidence permits a bounded discovered
+	// target observation bound to the exact receipt evidence and the current
+	// owner-catalog revision.
+	RuntimeFailureTargetProtocolReceiptEvidence RuntimeFailureTargetProtocol = "receipt_evidence_observation"
+	// RuntimeFailureTargetProtocolValidationCandidates keeps managed-validation
+	// target candidates non-authoritative until the File confirmation route.
+	RuntimeFailureTargetProtocolValidationCandidates RuntimeFailureTargetProtocol = "validation_failure_candidates"
+)
+
+func RuntimeFailureTargetProtocolSupported(protocol RuntimeFailureTargetProtocol) bool {
+	switch RuntimeFailureTargetProtocol(strings.TrimSpace(string(protocol))) {
+	case RuntimeFailureTargetProtocolNone, RuntimeFailureTargetProtocolSealedOperation,
+		RuntimeFailureTargetProtocolReceiptEvidence, RuntimeFailureTargetProtocolValidationCandidates:
+		return true
+	default:
+		return false
+	}
+}
 
 // RuntimeOperationDescriptor is the single shared technical contract for a concrete operation kind.
 // It does not register executors and does not restore a generic RuntimeAdapter registry.
 // DefaultEffectScope is the conservative kind-level default; concrete
 // ExpectedEffectScope may be replaced only by a capability-owner policy fact.
 type RuntimeOperationDescriptor struct {
-	Kind                 string
-	OwnerModuleID        string
-	DefaultEffectScope   RuntimeEffectScope
-	AllowedStates        []ConvergenceState
-	CapabilityClass      RuntimeCapabilityClass
-	IdempotencyClass     RuntimeOperationIdempotencyClass
-	RequiresOwnerReceipt bool
-	TargetCardinality    RuntimeOperationTargetCardinality
+	Kind                  string
+	OwnerModuleID         string
+	DefaultEffectScope    RuntimeEffectScope
+	AllowedStates         []ConvergenceState
+	CapabilityClass       RuntimeCapabilityClass
+	IdempotencyClass      RuntimeOperationIdempotencyClass
+	RequiresOwnerReceipt  bool
+	TargetCardinality     RuntimeOperationTargetCardinality
+	FailureTargetProtocol RuntimeFailureTargetProtocol
 }
 
 // RuntimeOperationDescriptors returns the complete normalized, stably sorted descriptor inventory.
@@ -194,6 +225,10 @@ func cloneRuntimeOperationDescriptor(value RuntimeOperationDescriptor) RuntimeOp
 	value.CapabilityClass = RuntimeCapabilityClass(strings.TrimSpace(string(value.CapabilityClass)))
 	value.IdempotencyClass = NormalizeRuntimeOperationIdempotencyClass(value.IdempotencyClass)
 	value.TargetCardinality = RuntimeOperationTargetCardinality(strings.TrimSpace(string(value.TargetCardinality)))
+	value.FailureTargetProtocol = RuntimeFailureTargetProtocol(strings.TrimSpace(string(value.FailureTargetProtocol)))
+	if value.FailureTargetProtocol == "" {
+		value.FailureTargetProtocol = RuntimeFailureTargetProtocolNone
+	}
 	if len(value.AllowedStates) > 0 {
 		value.AllowedStates = append([]ConvergenceState(nil), value.AllowedStates...)
 	}
@@ -213,56 +248,56 @@ func init() {
 			Kind: StepKindFileList, OwnerModuleID: RuntimeModuleFile,
 			DefaultEffectScope: RuntimeEffectNone, IdempotencyClass: RuntimeOperationIdempotencySafeToReplay,
 			AllowedStates: []ConvergenceState{ConvergenceStateNeedValidation}, CapabilityClass: RuntimeCapabilityClassValidation,
-			RequiresOwnerReceipt: true,
+			RequiresOwnerReceipt: true, FailureTargetProtocol: RuntimeFailureTargetProtocolSealedOperation,
 		},
 		{
 			Kind: StepKindFileRead, OwnerModuleID: RuntimeModuleFile,
 			DefaultEffectScope: RuntimeEffectNone, IdempotencyClass: RuntimeOperationIdempotencySafeToReplay,
 			AllowedStates: []ConvergenceState{ConvergenceStateNeedValidation}, CapabilityClass: RuntimeCapabilityClassValidation,
-			RequiresOwnerReceipt: true, TargetCardinality: RuntimeOperationTargetCardinalityOne,
+			RequiresOwnerReceipt: true, TargetCardinality: RuntimeOperationTargetCardinalityOne, FailureTargetProtocol: RuntimeFailureTargetProtocolSealedOperation,
 		},
 		{
 			Kind: StepKindFileEdit, OwnerModuleID: RuntimeModuleFile,
 			DefaultEffectScope: RuntimeEffectWorkspaceDurable, IdempotencyClass: RuntimeOperationIdempotencyAtMostOnce,
 			AllowedStates: []ConvergenceState{ConvergenceStateNeedStateChange}, CapabilityClass: RuntimeCapabilityClassStateChange,
-			RequiresOwnerReceipt: true, TargetCardinality: RuntimeOperationTargetCardinalityOne,
+			RequiresOwnerReceipt: true, TargetCardinality: RuntimeOperationTargetCardinalityOne, FailureTargetProtocol: RuntimeFailureTargetProtocolSealedOperation,
 		},
 		{
 			// Historical durable file mutation kind used by fixtures/capability contracts.
 			Kind: StepKindFileWrite, OwnerModuleID: RuntimeModuleFile,
 			DefaultEffectScope: RuntimeEffectWorkspaceDurable, IdempotencyClass: RuntimeOperationIdempotencyAtMostOnce,
 			AllowedStates: []ConvergenceState{ConvergenceStateNeedStateChange}, CapabilityClass: RuntimeCapabilityClassStateChange,
-			RequiresOwnerReceipt: true, TargetCardinality: RuntimeOperationTargetCardinalityOne,
+			RequiresOwnerReceipt: true, TargetCardinality: RuntimeOperationTargetCardinalityOne, FailureTargetProtocol: RuntimeFailureTargetProtocolSealedOperation,
 		},
 		{
 			Kind: RuntimeBlockKindPatchApply, OwnerModuleID: RuntimeModuleFile,
 			DefaultEffectScope: RuntimeEffectWorkspaceDurable, IdempotencyClass: RuntimeOperationIdempotencyAtMostOnce,
 			AllowedStates: []ConvergenceState{ConvergenceStateNeedStateChange}, CapabilityClass: RuntimeCapabilityClassStateChange,
-			RequiresOwnerReceipt: true, TargetCardinality: RuntimeOperationTargetCardinalityOne,
+			RequiresOwnerReceipt: true, TargetCardinality: RuntimeOperationTargetCardinalityOne, FailureTargetProtocol: RuntimeFailureTargetProtocolSealedOperation,
 		},
 		{
 			Kind: RuntimeBlockKindPatchPreview, OwnerModuleID: RuntimeModuleFile,
 			DefaultEffectScope: RuntimeEffectNone, IdempotencyClass: RuntimeOperationIdempotencySafeToReplay,
 			AllowedStates: []ConvergenceState{ConvergenceStateNeedValidation}, CapabilityClass: RuntimeCapabilityClassValidation,
-			RequiresOwnerReceipt: true, TargetCardinality: RuntimeOperationTargetCardinalityOne,
+			RequiresOwnerReceipt: true, TargetCardinality: RuntimeOperationTargetCardinalityOne, FailureTargetProtocol: RuntimeFailureTargetProtocolSealedOperation,
 		},
 		{
 			Kind: RuntimeBlockKindPatchRevert, OwnerModuleID: RuntimeModuleFile,
 			DefaultEffectScope: RuntimeEffectWorkspaceDurable, IdempotencyClass: RuntimeOperationIdempotencyAtMostOnce,
 			AllowedStates: []ConvergenceState{ConvergenceStateNeedStateChange}, CapabilityClass: RuntimeCapabilityClassStateChange,
-			RequiresOwnerReceipt: true,
+			RequiresOwnerReceipt: true, FailureTargetProtocol: RuntimeFailureTargetProtocolSealedOperation,
 		},
 		{
 			Kind: StepKindGitRead, OwnerModuleID: RuntimeModuleGit,
 			DefaultEffectScope: RuntimeEffectNone, IdempotencyClass: RuntimeOperationIdempotencySafeToReplay,
 			AllowedStates: []ConvergenceState{ConvergenceStateNeedValidation}, CapabilityClass: RuntimeCapabilityClassValidation,
-			RequiresOwnerReceipt: true,
+			RequiresOwnerReceipt: true, FailureTargetProtocol: RuntimeFailureTargetProtocolSealedOperation,
 		},
 		{
 			Kind: StepKindGitWrite, OwnerModuleID: RuntimeModuleGit,
 			DefaultEffectScope: RuntimeEffectWorkspaceDurable, IdempotencyClass: RuntimeOperationIdempotencyAtMostOnce,
 			AllowedStates: []ConvergenceState{ConvergenceStateNeedStateChange}, CapabilityClass: RuntimeCapabilityClassStateChange,
-			RequiresOwnerReceipt: true,
+			RequiresOwnerReceipt: true, FailureTargetProtocol: RuntimeFailureTargetProtocolSealedOperation,
 		},
 		{
 			// Arbitrary Shell commands are durable-only. Non-mutating validation is
@@ -271,7 +306,8 @@ func init() {
 			DefaultEffectScope: RuntimeEffectWorkspaceDurable, IdempotencyClass: RuntimeOperationIdempotencyUnknown,
 			AllowedStates:   []ConvergenceState{ConvergenceStateNeedStateChange},
 			CapabilityClass: RuntimeCapabilityClassStateChange, RequiresOwnerReceipt: true,
-			TargetCardinality: RuntimeOperationTargetCardinalityMany,
+			TargetCardinality:     RuntimeOperationTargetCardinalityMany,
+			FailureTargetProtocol: RuntimeFailureTargetProtocolSealedOperation,
 		},
 		{
 			// Managed validation is Shell-owned, owner-isolated ephemeral execution.
@@ -280,14 +316,15 @@ func init() {
 			Kind: RuntimeBlockKindManagedValidationSession, OwnerModuleID: RuntimeModuleShell,
 			DefaultEffectScope: RuntimeEffectEphemeralSession, IdempotencyClass: RuntimeOperationIdempotencyAtMostOnce,
 			AllowedStates: []ConvergenceState{ConvergenceStateNeedValidation}, CapabilityClass: RuntimeCapabilityClassValidation,
-			RequiresOwnerReceipt: true,
+			RequiresOwnerReceipt: true, FailureTargetProtocol: RuntimeFailureTargetProtocolValidationCandidates,
 		},
 		{
 			Kind: StepKindSSHCommand, OwnerModuleID: RuntimeModuleSSH,
 			DefaultEffectScope: RuntimeEffectRemoteDurable, IdempotencyClass: RuntimeOperationIdempotencyAtMostOnce,
 			AllowedStates:   []ConvergenceState{ConvergenceStateNeedStateChange},
 			CapabilityClass: RuntimeCapabilityClassStateChange, RequiresOwnerReceipt: true,
-			TargetCardinality: RuntimeOperationTargetCardinalityOne,
+			TargetCardinality:     RuntimeOperationTargetCardinalityOne,
+			FailureTargetProtocol: RuntimeFailureTargetProtocolSealedOperation,
 		},
 		{
 			// Dynamic tool calls remain unknown until an owner policy fact
@@ -296,30 +333,31 @@ func init() {
 			DefaultEffectScope: RuntimeEffectUnknown, IdempotencyClass: RuntimeOperationIdempotencyUnknown,
 			AllowedStates:   []ConvergenceState{ConvergenceStateNeedStateChange, ConvergenceStateNeedValidation},
 			CapabilityClass: RuntimeCapabilityClassStateChange, RequiresOwnerReceipt: true,
+			FailureTargetProtocol: RuntimeFailureTargetProtocolReceiptEvidence,
 		},
 		{
 			Kind: StepKindMCPResourceRead, OwnerModuleID: RuntimeModuleMCP,
 			DefaultEffectScope: RuntimeEffectNone, IdempotencyClass: RuntimeOperationIdempotencySafeToReplay,
 			AllowedStates: []ConvergenceState{ConvergenceStateNeedValidation}, CapabilityClass: RuntimeCapabilityClassValidation,
-			RequiresOwnerReceipt: true,
+			RequiresOwnerReceipt: true, FailureTargetProtocol: RuntimeFailureTargetProtocolReceiptEvidence,
 		},
 		{
 			Kind: StepKindMCPPromptGet, OwnerModuleID: RuntimeModuleMCP,
 			DefaultEffectScope: RuntimeEffectNone, IdempotencyClass: RuntimeOperationIdempotencySafeToReplay,
 			AllowedStates: []ConvergenceState{ConvergenceStateNeedValidation}, CapabilityClass: RuntimeCapabilityClassValidation,
-			RequiresOwnerReceipt: true,
+			RequiresOwnerReceipt: true, FailureTargetProtocol: RuntimeFailureTargetProtocolReceiptEvidence,
 		},
 		{
 			Kind: StepKindWebSearch, OwnerModuleID: RuntimeModuleWeb,
 			DefaultEffectScope: RuntimeEffectNone, IdempotencyClass: RuntimeOperationIdempotencyAtMostOnce,
 			AllowedStates: []ConvergenceState{ConvergenceStateNeedValidation}, CapabilityClass: RuntimeCapabilityClassValidation,
-			RequiresOwnerReceipt: true,
+			RequiresOwnerReceipt: true, FailureTargetProtocol: RuntimeFailureTargetProtocolSealedOperation,
 		},
 		{
 			Kind: StepKindWebFetch, OwnerModuleID: RuntimeModuleWeb,
 			DefaultEffectScope: RuntimeEffectNone, IdempotencyClass: RuntimeOperationIdempotencyAtMostOnce,
 			AllowedStates: []ConvergenceState{ConvergenceStateNeedValidation}, CapabilityClass: RuntimeCapabilityClassValidation,
-			RequiresOwnerReceipt: true,
+			RequiresOwnerReceipt: true, FailureTargetProtocol: RuntimeFailureTargetProtocolSealedOperation,
 		},
 		{
 			// Governance / assessment kinds are not capability-block operations. They remain
@@ -345,14 +383,23 @@ func init() {
 			Kind: RuntimeBlockKindMemoryWrite, OwnerModuleID: RuntimeModuleOrchestrator,
 			DefaultEffectScope: RuntimeEffectWorkspaceDurable, IdempotencyClass: RuntimeOperationIdempotencyAtMostOnce,
 			AllowedStates: []ConvergenceState{ConvergenceStateNeedStateChange}, CapabilityClass: RuntimeCapabilityClassStateChange,
-			RequiresOwnerReceipt: true,
+			RequiresOwnerReceipt: true, FailureTargetProtocol: RuntimeFailureTargetProtocolSealedOperation,
 		},
+	}
+	for idx := range inventory {
+		inventory[idx] = cloneRuntimeOperationDescriptor(inventory[idx])
 	}
 	sort.SliceStable(inventory, func(i, j int) bool {
 		return inventory[i].Kind < inventory[j].Kind
 	})
 	byKind := make(map[string]RuntimeOperationDescriptor, len(inventory))
 	for _, descriptor := range inventory {
+		if !RuntimeFailureTargetProtocolSupported(descriptor.FailureTargetProtocol) {
+			panic("unsupported runtime failure target protocol: " + string(descriptor.FailureTargetProtocol))
+		}
+		if descriptor.RequiresOwnerReceipt && descriptor.FailureTargetProtocol == RuntimeFailureTargetProtocolNone {
+			panic("owner-receipt runtime descriptor requires an explicit failure target protocol: " + descriptor.Kind)
+		}
 		if _, exists := byKind[descriptor.Kind]; exists {
 			panic("duplicate runtime operation descriptor kind: " + descriptor.Kind)
 		}

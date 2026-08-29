@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"reflect"
 	"sort"
 	"strings"
 
@@ -316,6 +317,52 @@ func NormalizeCoverageEvidenceBindings(values []CoverageEvidenceBinding) []Cover
 		ret = append(ret, byID[id].Clone())
 	}
 	return nilIfEmpty(ret)
+}
+
+// CloneCoverageEvidenceBindings detaches the complete immutable binding
+// projection selected by one SM-3 admission/dispatch seal.
+func CloneCoverageEvidenceBindings(values []CoverageEvidenceBinding) []CoverageEvidenceBinding {
+	return NormalizeCoverageEvidenceBindings(values)
+}
+
+// ValidateCoverageEvidenceBindingProjection requires the persisted projection
+// to already be canonical. Recovery must not normalize duplicate, reordered or
+// hash-drifted binding authority into a different valid value.
+func ValidateCoverageEvidenceBindingProjection(values []CoverageEvidenceBinding) error {
+	normalized := NormalizeCoverageEvidenceBindings(values)
+	if !reflect.DeepEqual(values, normalized) {
+		return fmt.Errorf("coverage evidence binding projection is not canonical")
+	}
+	seen := make(map[string]struct{}, len(values))
+	for _, binding := range values {
+		if _, duplicate := seen[binding.ID]; duplicate {
+			return fmt.Errorf("coverage evidence binding projection duplicates %q", binding.ID)
+		}
+		seen[binding.ID] = struct{}{}
+		if err := binding.Validate(); err != nil {
+			return fmt.Errorf("coverage evidence binding projection %q: %w", binding.ID, err)
+		}
+	}
+	return nil
+}
+
+// StableRuntimeCoverageEvidenceBindingSnapshotHash commits the complete
+// canonical binding bodies. Individual binding hashes are included as audit
+// identities, while every body field is already committed by that hash.
+func StableRuntimeCoverageEvidenceBindingSnapshotHash(values []CoverageEvidenceBinding) string {
+	bindings := NormalizeCoverageEvidenceBindings(values)
+	h := sha256.New()
+	writeHashString(h, "runtime-coverage-evidence-binding-snapshot/v1")
+	writeHashString(h, fmt.Sprintf("%d", len(bindings)))
+	for _, binding := range bindings {
+		writeHashString(h, binding.ID)
+		writeHashString(h, binding.Hash)
+	}
+	return "runtime-coverage-binding-snapshot-" + hex.EncodeToString(h.Sum(nil))
+}
+
+func RuntimeCoverageEvidenceBindingProjectionsEqual(left, right []CoverageEvidenceBinding) bool {
+	return reflect.DeepEqual(NormalizeCoverageEvidenceBindings(left), NormalizeCoverageEvidenceBindings(right))
 }
 
 // ValidateCoverageEvidenceBindingsForFocus verifies the static declaration

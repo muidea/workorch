@@ -15,7 +15,7 @@ func runtimeCandidateTestDecisionWithBindings(t testing.TB, decision RuntimeDeci
 	t.Helper()
 	required := decision.RequiredOutput.Normalized()
 	if len(required.CoverageWorkItemIDs) == 0 ||
-		(decision.State != ConvergenceStateNeedStateChange && decision.State != ConvergenceStateNeedValidation) ||
+		(decision.State != ConvergenceStateNeedStateChange && decision.State != ConvergenceStateNeedValidation && decision.State != ConvergenceStateNeedAssessment) ||
 		len(decision.Focus.CoverageEvidenceBindings) != 0 {
 		return decision
 	}
@@ -35,18 +35,24 @@ func runtimeCandidateTestDecisionWithBindings(t testing.TB, decision RuntimeDeci
 			decision.Focus.RequiredEvidenceKinds = []string{EvidenceKindStateChange}
 		case ConvergenceStateNeedValidation:
 			decision.Focus.RequiredEvidenceKinds = []string{EvidenceKindValidation}
+		case ConvergenceStateNeedAssessment:
+			decision.Focus.RequiredEvidenceKinds = []string{EvidenceKindValidation}
 		}
+	}
+	acceptedKinds := append([]string(nil), required.AcceptedKinds...)
+	if decision.State == ConvergenceStateNeedAssessment {
+		acceptedKinds = []string{RuntimeBlockKindManagedValidationSession}
 	}
 	proofs := make([]CoverageEvidenceProof, 0, len(decision.Focus.RequiredEvidenceKinds))
 	for _, evidenceKind := range decision.Focus.RequiredEvidenceKinds {
 		proof := CoverageEvidenceProof{EvidenceKind: evidenceKind}
-		for _, kind := range required.AcceptedKinds {
+		for _, kind := range acceptedKinds {
 			if RuntimeOperationKindSupportsCoverageEvidence(kind, evidenceKind) {
 				proof.AllowedOperationKinds = append(proof.AllowedOperationKinds, kind)
 			}
 		}
 		if len(proof.AllowedOperationKinds) == 0 {
-			t.Fatalf("test fixture has no owner-verifiable %s proof operation in %v", evidenceKind, required.AcceptedKinds)
+			t.Fatalf("test fixture has no owner-verifiable %s proof operation in %v", evidenceKind, acceptedKinds)
 		}
 		switch evidenceKind {
 		case EvidenceKindStateChange:

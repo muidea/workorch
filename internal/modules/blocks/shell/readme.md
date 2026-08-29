@@ -4,7 +4,7 @@ Status: active
 
 Type: capability-block-contract
 
-Last Verified: 2026-08-27
+Last Verified: 2026-08-28
 
 ## 功能范围与边界
 
@@ -23,7 +23,7 @@ raw diagnostic 留在 Shell-private adapter；receipt 只携带有界、脱敏�
 - `kernel/orchestrator` 通过 Shell owner 在 `blocks/shell/pkg/events` 定义的 `ExecuteOperationCommand/Result` 同步投递
   Shell 操作；execute command 只有 `RuntimeOperationExecutionContext + SealedRuntimeOperation`。后者的 hash 同时覆盖完整
   `RuntimeOperation`、exact Shell owner catalog/policy/observation revision，以及会影响执行或诊断归属的 confirmed recipes、
-  target role、managed-validation scope 与 evidence policies。execute 是强调用；nil result、非 Orchestrator source、缺失/错误
+  target role、matching per-operation sealed `Target.AllowedTargetRefs()` managed-validation scope 与 evidence policies。execute 是强调用；nil result、非 Orchestrator source、缺失/错误
   owner catalog、payload 任一字段漂移或 receipt query 失败均在启动进程前 fail-closed。execution envelope 的
   `AdmissibilitySnapshotID + AcquisitionBinding` 还必须与 seal 内 catalog identity 精确相等，不能用同 execution key/fence
   替换另一份 owner authorization。本组件直接订阅 EventHub，不启动通用 runtime executor 或第二套执行通知。
@@ -66,16 +66,31 @@ raw diagnostic 留在 Shell-private adapter；receipt 只携带有界、脱敏�
 - workspace-sensitive Shell catalog 的 observation 必须依赖该 File manifest 的 exact workspace-tree revision；后续
   File receipt 改变该 revision 时，SM-2 仅按依赖交集退休并重获 catalog。该 freshness lineage 不允许 Shell 修改
   Manifest、CWI 或 Runtime 状态。
-- managed-validation sealed authorization 还绑定 fresh File manifest 的 bounded target scope。Shell 只在 owner-private
+- managed-validation sealed authorization 还绑定 exact dispatch per-operation authorization 的 canonical
+  `Target.AllowedTargetRefs()` bounded target scope。该 authorization 在 SM-3 seal 时来自 matching candidate manifest/owner fact，
+  但执行、receipt causation、duplicate 与 restart 均不得再从 current File manifest、focus 或 owner inventory 重建。Shell 只在 owner-private
   adapter 中解析明确支持的结构化工具位置；当前 Go recipe 接受 `*.go:line[:column]:`，以及 `go test/go list` 的 exact
   `found packages <pkg> (<file.go>) and <pkg> (<file.go>) in <directory>` package-conflict 结构。后者必须同时解析两个文件，
-  按 reported directory/working directory 规范化，再与同一 manifest scope 取交集；任何越界成员不得进入 observation。
-  结果最多八项。validation entry、operation input target、coverage hint 和其它无结构化 stderr/stdout 都不能自动成为
-  failure target；Shell 只发布 candidate observation，File confirmation 与 Orchestrator SM-2 才能封存 repair surface。
-- rejected managed-validation receipt 只发布 closed typed diagnostic class 与 owner-observed candidate target；Profile 中
-  matching all-of convergence 和 Orchestrator SM-2 才能据 exact receipt lineage 打开 `validation_failure_repair` semantic
-  generation。无 target、free-form output 或普通 validation failure 都不能使 Shell 选择 repair target、重开 CWI、消费
+  按 reported directory/working directory 规范化，再与上述 sealed finite scope 取交集；任何越界成员不得进入 observation。
+  closed marker 是可选输入：marker 缺失时允许使用 owner parser diagnostic；marker 一旦出现，就与 parser diagnostic 构成一个
+  不可拆分的 candidate transaction。marker JSON/schema/role/class 非法、包含空 target、marker 记录自身超过八项、任一 marker
+  target 越出 matching sealed scope、owner parser 自身观察到超过八个 distinct candidates，或合并、canonicalize、去重后的最终
+  union 超过八项时，整组 candidate 必须 fail-closed 为零 observation；不能把非法/overflow 一侧当作“缺失”，也不能静默回退到
+  另一侧子集、截断或选择子集。validation entry、
+  operation input target、coverage hint 和其它无结构化 stderr/stdout 都不能自动成为
+  failure target；Shell 只发布 `RuntimeValidationFailureObservation` candidate observation，File current-manifest confirmation 与
+  Orchestrator SM-2 才能封存 repair surface。selector-only authorization 没有 finite `AllowedTargetRefs`；operation 仍可按
+  sealed `RequireTargets` 与 owner feasibility 执行，但 Shell 必须返回零 scope-bound observation，不能用 current manifest 补 scope。
+- rejected managed-validation receipt 只发布 closed typed diagnostic class 与 sealed-scope-bounded candidate target。closed
+  `WORKORCH_FAILURE_TARGET` marker 也只是 candidate refs，不得构造或发布 receipt `RuntimeFailureTargetObservation`/
+  `TargetObservation` authority；有 finite scope 时它只能进入同一 `RuntimeValidationFailureObservation` → File confirmation
+  → SM-2 路径。零 observation 时，只有 Profile 中 matching all-of convergence 与 Orchestrator SM-2 才能据 exact
+  receipt lineage 打开 `validation_failure_repair` semantic generation。无 target、free-form output 或普通 validation failure 都不能使 Shell 选择 repair target、重开 CWI、消费
   Profile budget或决定 fresh-validation/terminal 状态；这些转换只能由 Orchestrator private internal event 触发。
+  `receipt.TargetRefs` 只保留 execution/entry lineage；`OriginalDiagnostic.TargetRefs` 必须为空。VFO candidates 只存在于 nested
+  `ValidationFailureObservation`，并由 Orchestrator 对 exact receipt scope、actual dispatch、authority、operation、signature、typed
+  diagnostic 与 sealed per-operation scope 复核；只有 completed/committed dispatch 中 evidence-committed execution 的 exact
+  key/fence/ref/hash receipt 可进入 File confirmation，owner-committed-only 与 generic failure ingress 不能提前晋升。
 - Shell 发布的 `ready + direct` validation surface 同时声明 `ephemeral_session + at_most_once`，并包含由 recipe identity
   确定性派生、与 recipe ID 不同的 aggregate proof check。tool-native check 继续作为 audit fact；只有 recipe 真实执行了
   至少一个无冲突 pass，aggregate proof check 才进入 receipt。该 surface 只是当前 Owner fact；它不关闭 profile 的
@@ -148,8 +163,10 @@ raw diagnostic 留在 Shell-private adapter；receipt 只携带有界、脱敏�
   at-most-once recovery。
 - 已覆盖输出截断、脱敏 diagnostic、timeout、非法/危险命令和 managed resource cleanup。
 - 已覆盖 validation entry 不晋升 failure target、无结构化输出零 candidate，以及 managed Go line diagnostic 与 exact
-  package-conflict diagnostic 仅报告实际 manifest-scoped source target；package conflict 返回两个受限文件并拒绝越界成员。
-- 已覆盖 rejected managed-validation 的 closed diagnostic/failure-target observation；Shell 不发布 repair directive、CWI reopen、
+  package-conflict diagnostic 仅报告实际 sealed-scope source target；package conflict 返回两个受限文件并拒绝越界成员。
+- 已覆盖 rejected managed-validation 的 scope-bound `RuntimeValidationFailureObservation`、finite-scope marker 与
+  selector-only marker 零 observation，以及真实 owner/EventHub receipt 中 marker 缺失/合法 union、malformed、越界和 marker
+  自身超限矩阵；任一非法 marker 都使 parser candidate 联合整体失效。receipt 不直接发布 `TargetObservation`，Shell 不发布 repair directive、CWI reopen、
   retry/budget 或 terminal disposition。
 
 非阻断增强项：增加大型 workspace copy/observation benchmark，以及在更多 Unix 平台运行进程组清理兼容性矩阵。

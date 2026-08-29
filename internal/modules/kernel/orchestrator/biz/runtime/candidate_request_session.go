@@ -328,13 +328,17 @@ func candidateRequestSessionActionAllowed(aggregate RuntimeAggregate, documentKi
 		return fmt.Errorf("%w: current runtime authority does not accept a candidate request", common.ErrConflict)
 	}
 	if documentKind == runtimecontract.RuntimeProviderDocumentSemanticPlan {
+		if SemanticPlanningPrerequisitesPending(aggregate.Facts.Prerequisites.Pending) {
+			return fmt.Errorf("%w: semantic plan request requires settled owner prerequisites", common.ErrConflict)
+		}
 		// Catalog retirement can make the binding-free reducer view terminal
 		// before the next semantic generation has sealed the current CWI. That
 		// provisional SM-2 view is not an SM-4 terminal and may open only a
 		// semantic-plan request. If an execution-locked binding still makes
 		// operation authority usable, the terminal is already authoritative.
 		if isTerminalConvergenceState(aggregate.Decision.State) {
-			if aggregate.Decision.Terminal == nil || aggregate.Decision.Terminal.Code != "target_grounding_unresolved" || SemanticOperationAuthorityReady(aggregate) {
+			if aggregate.Decision.Terminal == nil || aggregate.Decision.Terminal.Code != "target_grounding_unresolved" ||
+				CurrentFocusTargetSelectionConfirmsUnresolved(aggregate.Facts) || SemanticOperationAuthorityReady(aggregate) {
 				return fmt.Errorf("%w: current runtime authority does not accept a candidate request", common.ErrConflict)
 			}
 		}
@@ -372,8 +376,12 @@ func validateCandidateAttemptRejectionSessionBinding(aggregate RuntimeAggregate,
 }
 
 func validateCandidateAttemptSessionBindingState(aggregate RuntimeAggregate, stablePrefixHash string, manifest runtimecontract.RuntimeCandidateContractManifest, logicalRequestID string, allowConformanceRejected bool) error {
-	if err := runtimecontract.ValidateRuntimeCandidateContractManifestForDecision(manifest, aggregate.Decision, runtimecontract.RuntimeCandidateManifestOwnerFactsFromContext(runtimecontract.RuntimeCandidateContextForDecision(aggregate.Facts, aggregate.Decision, nil))); err != nil {
-		return fmt.Errorf("%w: candidate manifest does not match current sealed authority: %v", common.ErrConflict, err)
+	expectedManifest, buildErr := BuildRuntimeCandidateContractManifestForAggregate(aggregate)
+	if buildErr != nil {
+		return fmt.Errorf("%w: candidate manifest preimage is unavailable: %v", common.ErrConflict, buildErr)
+	}
+	if expectedManifest.Hash != manifest.Hash {
+		return fmt.Errorf("%w: candidate manifest does not match current sealed authority", common.ErrConflict)
 	}
 	_, session, found := runtimeCandidateRequestSessionByID(aggregate.CandidateRequestSessions, logicalRequestID)
 	if !found {

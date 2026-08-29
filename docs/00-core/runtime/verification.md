@@ -88,10 +88,15 @@ Cross-owner regression必须证明 concrete receiving-owner Command/Result、wor
 - completed/failed 只来自 sealed SM-2 terminal；cancelled/superseded 只来自 Run SM-1 typed administrative intent，且
   `RuntimeTerminationRecord` 仅可作为 SM-4 exact handoff，不能直接改变 Run state；
 - terminal delivery identity/acknowledgement 不保留 action 或第二份 administrative kind；
-- semantic catalog retirement 后，由 binding-free target 缺口产生的 `target_grounding_unresolved` view 不得生成 SM-4 drive
-  result、startup terminal classification 或 delivery request；只允许 semantic-plan request。semantic seal/semantic failure
-  后才可交付该 convergence terminal，operations request 在该窗口始终拒绝；其它 contract/budget/owner terminal 必须原样
-  交付，administrative termination 继续使用独立 lane；
+- target-grounding 0/1/N matrix 必须证明 semantic provider 前先取得 focus-scoped File-owner TargetSelection：exact current
+  selection + freshness 为 absent/ambiguous/unsupported，或无 bounded Definition candidates 的 empty-scope 时，零
+  semantic/candidate provider call并交付
+  `target_grounding_unresolved`；无 selection/observation、wrong focus/declaration/revision 仍为 transient；selected，或带
+  bounded Definition candidates 的 empty scope，才继续 prospective semantic。catalog retirement 后若旧 no-effect binding 尚未由
+  typed `CWIBindingRetired` event 退休，该 provisional
+  terminal 不得生成 SM-4 drive result、startup classification 或 delivery request，旧 binding 也不得执行；restart/duplicate
+  必须只退休一次并使 CWI 重新 eligible。已有 effect credit 的 binding 不得被 catalog refresh 退休；其它
+  contract/budget/owner terminal 必须原样交付，administrative termination 继续使用独立 lane；
 - Run/Workspace/Result 不解释 Orchestrator decision，只执行各自 owner-local typed outcome transition。
 
 ### Feedback Preservation
@@ -161,8 +166,98 @@ Cross-owner regression必须证明 concrete receiving-owner Command/Result、wor
   operation 及其 exact matching receipt 均可通过 membership gate；空 target、越界 target、receipt/operation target 漂移必须
   分别在 candidate/dispatch 前或 receipt credit 时拒绝。dispatch seal 与 fresh-load invariant 必须重验同一规则，不能等到
   owner effect 后才发现 admission/credit 解释冲突；测试还必须覆盖 manifest hash、per-operation sealed preimage、operation
-  hash 与 `DispatchAuthorityHash` 的 missing/tamper/JSON round-trip/restart fence。`prospective_owner_target` 仍须额外通过完整同-dispatch collective
+  hash、accepted-attempt independent projection commitment 与 `DispatchAuthorityHash` 的 missing/tamper/JSON round-trip/restart
+  fence，包括 `{A}`→`{A,B}` 后协调重算 dispatch/attempt self-seal仍被 admission commitment 拒绝，以及 governance resume
+  逐 hop exact 继承。`prospective_owner_target` 仍须额外通过完整同-dispatch collective
   receipt-set，不能因共享 matcher 而退化为首条 receipt credit；
+- structured validation repair 必须独立验证三类 target。normal case 至少覆盖 validation operation entry `A`、matching
+  `CompletedDispatch.OperationTargetAuthorizations` 的 canonical `Target.AllowedTargetRefs()={A,B}`、structured diagnostic
+  candidate `B`：在 `existing_owner_scope` case 中该 finite set 同时等于 canonical `OwnerScopeTargetRefs`；entry 与 candidate
+  分别是 full scope 的子集，observation `ValidationScopeTargetRefs` 与该 sealed full
+  scope exact-match；candidate 与 entry 不相等、甚至不相交仍须通过 causation 并进入 File confirmation。expected scope 必须按
+  exact `OperationID` + operation hash 从 completed dispatch 读取 `Target.AllowedTargetRefs()`，不得从 mutable manifest、current
+  focus、owner inventory 或 operation entry 重建；
+- operation entry cardinality 必须分别覆盖 sealed per-operation `RequireTargets=true|false`：前者 empty entry 在 owner call 前拒绝，
+  后者不因 empty entry 单独失败；finite allowed set 存在时，任何非空 entry member 都必须属于该 set。structured validation
+  negative matrix 还必须覆盖：observation scope 缺项/附加项，entry/candidate 任一越界或 candidate 为空，
+  missing/duplicate target authorization，wrong operation hash，wrong dispatch/authority/operation/`FocusTargetRole`，以及 persisted
+  authorization/observation tamper。所有分支在 File query、provider call、repair transition、budget consumption 前 fail closed；
+- accepted admission projection matrix 必须覆盖 target authorization 与 managed-validation recipe 两份独立 commitment：真实
+  admission/duplicate/restart 正向，missing/hash mismatch，协调改写 dispatch projection + self-seal，以及 recipe ID、command、
+  ordered args、timeout 漂移；governance multi-hop 必须逐跳 exact 继承。非 managed File/MCP candidate 必须保持空 recipe
+  projection/hash；
+- Shell `WORKORCH_FAILURE_TARGET` matrix 必须证明 closed/role/class/scope-bounded marker 只贡献 diagnostic candidate refs，receipt
+  的 direct `RuntimeFailureTargetObservation`/`TargetObservation` authority 保持为空；只有 matching finite scope 才能形成
+  `RuntimeValidationFailureObservation`，且必须继续等待 File confirmation 与 SM-2 transition。missing/multiple/unknown-field、
+  role/class mismatch、越界 marker 均不能形成 candidate authority；tool diagnostic 与 marker 的 canonical union 必须仍为
+  1～8 项，`8+1`/`8+8` 越界 union 整组失效；
+- managed-validation receipt matrix 必须在 commit 与 fresh-load 同时拒绝 direct diagnostic `TargetRefs`（即使它等于 current
+  focus、operation entry 或 sealed scope member）、direct/cross-owner `TargetObservation`、出现在 File/MCP/durable Shell receipt
+  中的 VFO，以及 workspace/run/actual dispatch/authority/operation/signature/role/class/candidate/scope 任一漂移。顶层与 nested
+  observation/typed diagnostic 必须覆盖 presence 缺失与 canonical drift。合法 VFO 必须回指 completed/committed dispatch 中
+  completed operation 的 `evidence_committed` execution，并 exact-match key/fence/ref/hash Shell receipt；owner-committed-only、
+  invalidated dispatch、generic FailureObserved/DriveFailureObserved 与 governance-resume origin/current dispatch 混淆均须在
+  commit/fresh-load 原子拒绝。pending VFO 保持零 concrete `RepairDirective`、零 `FailureTarget`。File confirmation 必须在
+  ingress 与 reload 都拒绝非 File owner；任何 promoted File target authority 必须反向匹配 exact confirmed record，generic
+  failure ingress 与协调修改 receipt hash 不得旁路；
+- descriptor-authorized receipt-evidence direct-target matrix 必须使用真实 capability owner/EventHub receipt 保留合法非 VFO
+  正向路径（当前 concrete fixture 为 MCP），并在 commit、JSON round-trip 与
+  fresh-load 同时证明 promoted/nested observation exact parity，completed committed dispatch/operation、`evidence_committed`
+  execution、exact key/fence/ref/hash rejected receipt、唯一 `runtime-receipt|<receipt-hash>` rejected evidence 与 processed-event
+  fence，以及 sealed/current exact catalog snapshot/acquisition/revision、subject selector 和 satisfied prerequisite observation。
+  negative matrix 至少覆盖 generic ingress、owner-committed-only、missing/duplicate evidence、missing/duplicate processed fence、
+  receipt ref/hash或 diagnostic drift、descriptor policy/owner/target-role drift、catalog dependency
+  domain/owner/subject/revision drift、stale restart 与 coordinated tamper；所有分支均
+  不得由 File snapshot、current manifest 或 terminal projection 补建 authority；
+- evidence-commit reverse-proof matrix 必须证明每个 `evidence_committed` execution 都唯一绑定 exact
+  `EvidenceFactID + EvidenceFactHash`，覆盖 accepted/rejected、active/completed、JSON round-trip、restart/duplicate，以及
+  kind、revision、binding refs、CWI refs、failure/reason、receipt/operation lineage 的单字段和协调篡改；ledger commitment 不得
+  进入 immutable dispatch authority hash，owner-committed execution 不得提前携带它；
+- global evidence chronology matrix 必须覆盖 ordinary accepted/rejected、governance resolution/fact、assessment fact 在同一
+  `EvidenceSequence` 中按 persisted completed-dispatch order 连续消费；active dispatch、governance-resume source-fact clone、
+  JSON round-trip/restart 均不得重复推进。negative matrix 必须拒绝 revision gap/倒序/协调重写、orphan/duplicate、跨
+  accepted/rejected 重复、assessment kind 混入 ordinary ledger、governance credit pollution，以及最终 sequence/
+  `Facts.EvidenceRevision` 漂移；
+- semantic provider/owner preimage matrix 必须从 active/history accepted batch 的 exact manifest、logical request、document 与
+  archived/retained feasibility facts重放 `CompileRuntimeSemanticBindings`，并覆盖 multi-batch merge、response loss、settled-CWI
+  generation history。negative matrix 必须分别及协调改写 Focus/binding、CWI current/history refs、reconciliation、session
+  manifest bindings、accepted-attempt bindings 与 active/completed dispatch bindings；同步重算下游 hash 仍须因上游 preimage
+  不匹配而 fail closed；
+- assessment authority/adjudication matrix 必须覆盖 DefinitionFocus 对 seed source 的 exact projection、pre-seal raw-canonical
+  `RuntimeAssessmentAuthorityInput`（definition proof/owner-fact acquisition、Focus/binding/catalog）、post-seal deterministic
+  adjudication 与 `RuntimeAssessmentFact` hash 双记账、repairable→satisfied / satisfied→repairable 协调改写、proof/fact hash
+  drift、raw whitespace/order/duplicate/nil-empty、JSON/raw clone 与 fresh restart；post-seal adjudication不得进入 immutable
+  dispatch authority hash；
+- operations request-session manifest matrix 必须覆盖完整 raw-canonical CandidateManifest body 的 positive restart/duplicate，
+  nil/empty、顺序、duplicate、whitespace、missing/duplicate session、body/hash drift，以及 attempt+dispatch target/coverage/recipe
+  projection 协调改写；confirmed File repair 还必须覆盖 typed purpose/closure 与三份 RepairCommitment exact inheritance，删除
+  commitment/confirmation/directive及其协调删除、source receipt/evidence/fence/hash drift、governance resume 与 partial/rejected/
+  completed restart；
+- descriptor policy matrix 还必须证明 `sealed_operation_targets` 的无 observation refs 只能是 sealed operation target 子集，
+  `validation_failure_candidates` 不能携带 direct refs/observation，`none` 全拒绝，并拒绝通过删除 observation、同步改写
+  failure message/signature/refs 或注入已退役 prerequisite 来降级 receipt-evidence authority；
+- File confirmation sequence matrix 必须覆盖 stale(v1)→confirmed(v2)、confirmed(v1)→late rejected/stale(v2)、rejected→late
+  confirmed、exact response-loss replay 与 fresh-load coordinated append。允许 stale refresh，但 confirmed/rejected 是同一 VFO
+  的终端 response；Runtime current failure/target 必须只匹配 latest valid record，不能从任意历史 confirmed record恢复 authority；
+- confirmed File repair transaction matrix 必须覆盖单项与多项 all-of：accepted durable changed receipt 的每个 operation target、
+  target resource change、sealed target authorization 与 confirmed surface exact binding；workspace-tree revision chain 从
+  confirmation revision 唯一连续推进，禁止按 operation ID 排序。首项 partial CAS、fresh-process reload、首/末 receipt duplicate 与
+  final accepted→fresh-validation 都必须保留 closure 且不重复 effect；首项 partial CAS 后 mutable `FailureTarget` 与旧
+  `need_state_change RepairDirective` 必须同时为空，current pending prerequisite 必须精确等于该 dispatch invalidation 的 prerequisite
+  union。negative matrix 至少覆盖恢复旧 target/directive、额外/缺失 pending prerequisite、恢复 invalidated observation、第二 receipt
+  复用原 revision、branch/detached chain、missing/duplicate accepted evidence 或 processed fence、payload/hash drift、partial member
+  rejected、refresh-exhausted/dispatch invalidation，以及把 `need_validation` partial dispatch 误识别为 repair transaction；所有失败
+  均不得恢复 stale File authority；
+- confirmed File governance matrix 必须覆盖 single/multi-operation、首项 accepted 后 pause、未完成首项直接 pause、
+  `continue|fail`、fresh-process reload 与 resolution/receipt duplicate。continue 只能从 origin accepted admission、confirmation、
+  source dispatch/candidate seal、completed receipt chain 与 exact binding/grant 生成同一 candidate 的 next-fence resume；不得重新请求
+  candidate、增加/替换 operation、恢复旧 target/directive 或让 File 写 Runtime state。accepted receipt、governance resolution 与后续
+  receipt 必须消费同一全局连续 evidence revision；测试需协调更新 execution fact hash 后单独漂移 revision，并同时证明 aggregate
+  ledger 与 File transaction reverse proof 都 fail closed，不能依赖某个 validator 的先后次序或 diagnostic 文本；
+- selector-only managed-validation authorization 的 canonical `Target.AllowedTargetRefs()` 为空；operation 可按 sealed
+  `RequireTargets` 与 owner feasibility 执行，但必须向 owner 传递空 `ValidationScopeTargetRefs` 且零 scope-bound structured repair
+  observation。manifest/current focus 漂移不得把它补成 finite scope，无 observation 的 rejected validation 只走 Profile 已封存的
+  matching semantic fallback；fallback 缺失时 typed fail closed；
 - invalid/empty raw、reasoning、decoder message 与可逆片段不得进入 EventHub durable payload、aggregate、eventstream、projection、
   memory 或 C4；只允许 owner-private audit carrier 与 bounded hash/bytes/ref。attempt-1 C4 仅包含 manifest-bound
   document-shape/schema/semantic witness，不含 raw、Disposition、TerminalCode 或 retry 选择；
@@ -205,6 +300,10 @@ Cross-owner regression必须证明 concrete receiving-owner Command/Result、wor
   hash/target set，只有 SM-2 sealed binding 形成 authority；operations schema 只把 binding ref 作为选择面，并为
   每个 target 要求一个 `RequiredOperationSequence` member。每项必须带 exact singleton `TargetRef`，要求齐全、
   无额外项并按 canonical dependency chain 执行；candidate/dispatch 只从 binding 派生并消费 target。
+- semantic target-policy matrix 必须对 `exact_target | existing_owner_scope | prospective_owner_target` 使用同一纯 admission
+  intersection：proposal 既不能越过 Definition selector/candidate declaration，也不能越过 current operation
+  selector/catalog surface。Definition selector 不能被当成 operation selector；任一 policy 的 selector、candidate、target 或
+  owner scope drift 都必须产生 typed proposal violation，并保持零 binding/dispatch/effect。
 - multi-target prospective receipt gate 必须逐 cut point 验证：第 1..N-1 个 operation 的 owner-committed accepted exact
   receipt 与 matching `evidence_committed` execution 只增加同一 dispatch 的 persisted progress，`ActiveDispatch` 保留，CWI
   仍为 unsatisfied/unsettled，focus/collective credit 不推进；第 N 个 matching member 才允许 Orchestrator private event 在同一
@@ -382,10 +481,19 @@ Cross-owner regression必须证明 concrete receiving-owner Command/Result、wor
 - 首次 `file/write` 创建成功后若同 CWI reopen，latest owner catalog 必须使 correction 选择 revision-bound
   `file/edit`/`patch/apply`；重复 create-only write 在副作用前拒绝且不能形成无限 revision/等价操作循环。
 - profile verifier 必须证明 validation entry 只保留 recipe/receipt lineage：无 owner-supported 结构化位置时零 failure-target
-  candidate；支持的工具诊断只能报告 fresh manifest scope 内的 actual target，越界目标丢弃且仍需 File owner confirmation。
-  回归还必须覆盖：dispatch seal/持久化保留 `FocusTargetRole`；current Focus role 漂移不改变 completed-dispatch causation；
-  observation receipt 到 File confirmation 之间零 CWI reopen、零 repair semantic input、零 validation-only retry 和零 provider call；
-  exact duplicate/restart 复用同一 observation，stale/rejected File disposition 分别只进入 prerequisite/typed terminal。
+  candidate；支持的工具诊断只能报告 sealed validation scope 内的 actual target，越界目标丢弃且仍需 File owner confirmation。
+  `WORKORCH_FAILURE_TARGET` marker 只能进入同一 bounded diagnostic-candidate path，不能直接产生
+  `RuntimeFailureTargetObservation` authority。
+  File 的 current regular manifest 只确认 candidate freshness，不重定义 completed-dispatch full scope。回归还必须覆盖：dispatch
+  seal/持久化保留 `FocusTargetRole`、per-operation target authorization 与 operation hash；current Focus/manifest 漂移不改变
+  completed-dispatch causation；observation receipt 到 File confirmation 之间零 CWI reopen、零 repair semantic input、零
+  validation-only retry 和零 provider call；
+- duplicate/restart matrix 必须覆盖 observation persist 前后、File query 前后、confirmation CAS 前后与 response loss。exact
+  duplicate 只能复用同一 operation entry、sealed full scope、candidate、diagnostic/causation identity；已持久化 confirmation 的
+  replay 为零 CAS，pending confirmation 只能重发相同 read-only query。fresh load 必须从 completed dispatch matching
+  authorization 恢复 scope 并重验 subset/exact invariants，不能读取 current manifest 补 scope；payload 漂移 conflict 且零
+  repair/provider/effect/budget。stale/rejected File disposition 分别只进入 prerequisite/typed terminal，confirmed 只由 SM-2
+  private event 封存 `FailureTarget`。
 
 ## Verification Entry
 

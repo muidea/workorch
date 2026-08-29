@@ -4384,7 +4384,7 @@ if grep -q -E -- 'binding\.(TargetRefs|ProspectiveTargetRefs)' <<<"$receipt_targ
 	echo "boundary contract violation: receipt matching regained direct binding-set equality instead of canonical membership" >&2
 	exit 1
 fi
-dispatch_manifest_target_seal="$(sed -n '/^func SealDispatchWithManifestAndOwnerAuthority(/,/^}/p' internal/modules/kernel/orchestrator/biz/runtime/dispatch_commit.go)"
+dispatch_manifest_target_seal="$(sed -n '/^func SealDispatchWithManifestAndPreSealAuthority(/,/^}/p' internal/modules/kernel/orchestrator/biz/runtime/dispatch_commit.go)"
 dispatch_fresh_load_target_validation="$(sed -n '/^func (d RuntimeDispatchRecord) ValidateIntrinsic(/,/^}/p' internal/pkg/workorchruntimecontract/runtime_state.go)"
 dispatch_authority_hash="$(sed -n '/^func StableRuntimeDispatchAuthorityHash(/,/^}/p' internal/pkg/workorchruntimecontract/runtime_state.go)"
 if [[ "$(grep -c -F -- 'RuntimeDispatchOperationTargetAuthorizationsFromManifest(manifest, candidate)' <<<"$dispatch_manifest_target_seal" || true)" -ne 1 ]] ||

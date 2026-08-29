@@ -51,8 +51,7 @@ func (c *RuntimeController) AcceptCandidateAttempt(ctx context.Context, workspac
 }
 
 func runtimeTestDeriveCandidateAuthority(aggregate RuntimeAggregate, candidate runtimecontract.RuntimeCandidate) (runtimecontract.RuntimeCandidate, error) {
-	context := runtimecontract.RuntimeCandidateContextForDecision(aggregate.Facts, aggregate.Decision, nil)
-	manifest, err := runtimecontract.BuildRuntimeCandidateContractManifest(aggregate.Decision, runtimecontract.RuntimeCandidateManifestOwnerFactsFromResources(context.Resources))
+	manifest, err := BuildRuntimeCandidateContractManifestForAggregate(aggregate)
 	if err != nil {
 		return runtimecontract.RuntimeCandidate{}, err
 	}
@@ -156,6 +155,49 @@ func RecordFixtureCandidateFeasibilities(ctx context.Context, c *RuntimeControll
 		}
 	}
 	return nil
+}
+
+// runtimeTestCurrentCandidateFeasibilities projects the read-only feasible
+// owner results that a direct seal fixture would already have persisted before
+// entering SM-3. The projection is rooted in the current typed owner catalogs
+// and the exact pre-seal candidate manifest; it never invents an owner,
+// snapshot, acquisition binding or operation identity.
+func runtimeTestCurrentCandidateFeasibilities(t *testing.T, aggregate RuntimeAggregate, manifest runtimecontract.RuntimeCandidateContractManifest, candidate runtimecontract.RuntimeCandidate) []runtimecontract.RuntimeCandidateFeasibilityRecord {
+	t.Helper()
+	candidate, err := runtimecontract.DeriveRuntimeCandidateOperationAuthority(manifest, candidate)
+	if err != nil {
+		t.Fatalf("derive candidate authority for fixture feasibility: %v", err)
+	}
+	ret := make([]runtimecontract.RuntimeCandidateFeasibilityRecord, 0)
+	for _, operation := range candidateRuntimeOperations(candidate) {
+		operation = operation.Normalized()
+		descriptor, known := runtimecontract.RuntimeOperationDescriptorForKind(operation.Kind)
+		if !known || descriptor.OwnerModuleID == "" {
+			t.Fatalf("fixture operation %q has no canonical owner", operation.Kind)
+		}
+		if !runtimeOperationAdmissibilityRequiredForOperation(
+			aggregate.Facts.Prerequisites, descriptor.OwnerModuleID, operation.Kind,
+		) {
+			continue
+		}
+		inventory, found := runtimeOperationAdmissibilityForKind(
+			aggregate.Facts.Resources.OperationAdmissibilities,
+			descriptor.OwnerModuleID,
+			operation.Kind,
+		)
+		if !found {
+			t.Fatalf("fixture operation %q has no current persisted owner catalog", operation.ID)
+		}
+		ret = append(ret, runtimecontract.RuntimeCandidateFeasibilityRecord{
+			OperationID: operation.ID, AdmissibilitySnapshotID: inventory.SnapshotID,
+			AcquisitionBinding: inventory.AcquisitionBinding, CandidateManifestHash: manifest.Hash,
+			Observation: &runtimecontract.RuntimeOwnerFeasibilityObservation{Outcome: runtimecontract.RuntimeOwnerFeasibilityFeasible},
+		})
+	}
+	if err := runtimecontract.ValidateRuntimeCandidateFeasibilityRecords(ret); err != nil {
+		t.Fatalf("fixture candidate feasibility projection: %v", err)
+	}
+	return ret
 }
 
 func runtimeTestPendingCandidateManifestHash(t *testing.T, c *RuntimeController, workspaceID common.WorkspaceID, runID common.RunID, attempt int) string {

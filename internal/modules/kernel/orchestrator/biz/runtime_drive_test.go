@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"sort"
 	"strings"
 	"testing"
@@ -246,6 +247,8 @@ func TestDriveRuntimeFileBackedRunExecutesDurableFileOwnerAndRestarts(t *testing
 	root := t.TempDir()
 	runs := filerepository.NewRunRepository(filepath.Join(root, "runs.json"))
 	bootstrap := runtimeBootstrap()
+	runtimeTestDeclareExistingWorkspaceTarget(&bootstrap, "target.txt")
+	bootstrap = runtimeTestBootstrapWithReboundBindings(bootstrap)
 	if err := runs.Create(ctx, &runmodel.Run{
 		ID: "run-v2", WorkspaceID: "ws-v2", GoalID: "goal-v2", DoDID: "dod-v2",
 		DefinitionRevision: "definition-v2", RuntimeBootstrap: &bootstrap, ReconciliationScope: runtimecontract.RuntimeCWIReconciliationScopeCurrentRun, State: common.RunStateActive,
@@ -343,7 +346,10 @@ func TestDriveRuntimeFileBackedRunExecutesDurableFileOwnerAndRestarts(t *testing
 	if err != nil {
 		t.Fatal(err)
 	}
-	aggregate.Facts.Focus.TargetRefs = []string{"target.txt"}
+	aggregate, err = module.prepareRuntimePrerequisites(ctx, aggregate)
+	if err != nil {
+		t.Fatal(err)
+	}
 	aggregate = runtimeTestPersistSealedSemanticAuthority(t, ctx, runtimeStateRepository{hub: hub}, aggregate)
 	driveObserver := magicevent.NewSimpleObserver(ModuleID, hub)
 	driveObserver.Subscribe(orchestratorevents.TopicOrchestratorDriveRuntime, module.handleRuntimeDrive)
@@ -354,7 +360,7 @@ func TestDriveRuntimeFileBackedRunExecutesDurableFileOwnerAndRestarts(t *testing
 	}
 	content, readErr := os.ReadFile(filepath.Join(deliverable, "target.txt"))
 	if readErr != nil || string(content) != "new\n" {
-		t.Fatalf("durable file content = %q err=%v", string(content), readErr)
+		t.Fatalf("durable file content = %q result=%+v terminal=%+v candidates=%d err=%v", string(content), completed, completed.Terminal, candidateCount, readErr)
 	}
 	persisted, err := runs.GetByWorkspaceID(ctx, "ws-v2", "run-v2")
 	if err != nil || persisted.RuntimeState == nil || len(persisted.RuntimeState.OperationReceipts) != 1 {
@@ -706,21 +712,16 @@ func TestRuntimeFileBackedFocusScopedTargetsStayRetiredAcrossDurableWrites(t *te
 // R3-3 / H5-C: each subtest interrupts the same owner-grounded sequence both
 // immediately before and immediately after one Run-owner CAS. A fresh
 // Orchestrator Biz then has no choice but to load that file-backed aggregate
-// and continue through the regular typed EventHub owners. Target selection is
-// intentionally the File owner's bounded complete workspace scope; neither
-// the fixture nor the Orchestrator synthesizes an implementation path from a
-// path hint.
+// and continue through the regular typed EventHub owners. Existing scope is
+// sealed from the File owner's exact catalog TargetRefs and snapshot lineage;
+// it therefore has no independent target-selection CAS boundary. Prospective
+// creation selection is covered by the dedicated EmptyWorkspaceCreationReceipt
+// and CreationSelectionCommit crash/restart matrices below.
 func TestRuntimeFileBackedGroundedTargetStateSequenceRestartsAtCommittedBoundaries(t *testing.T) {
 	boundaries := []struct {
 		name  string
 		match func(runtime.RuntimeAggregate) bool
 	}{
-		{
-			name: "target_selection",
-			match: func(aggregate runtime.RuntimeAggregate) bool {
-				return aggregate.Facts.Resources.TargetSelection != nil
-			},
-		},
 		{
 			name: "candidate_proposal",
 			match: func(aggregate runtime.RuntimeAggregate) bool {
@@ -843,12 +844,12 @@ func TestRuntimeFileBackedGroundedTargetStateSequenceRestartsAtCommittedBoundari
 				})
 				t.Cleanup(func() { llmObserver.Unsubscribe(llmevents.TopicRequestRuntimeCandidate) })
 
-				runtimeTestPersistBootstrappedOperationFixture(t, ctx, hub, "ws-v2", "run-v2", bootstrap)
 				crashMarker := "grounded-sequence-" + tc.name + "-" + phase
 				crashRepository := &runtimeSaveCrashRepository{
 					delegate: runtimeStateRepository{hub: hub}, match: tc.match, after: after, marker: crashMarker,
 				}
 				crashingModule := newRuntimeGroundedTargetSequenceModule(t, hub, crashRepository, candidateRequestContents)
+				runtimeTestPersistBootstrappedOperationFixture(t, ctx, hub, "ws-v2", "run-v2", bootstrap)
 				func() {
 					defer func() {
 						if recovered := recover(); recovered != crashMarker {
@@ -889,8 +890,7 @@ func TestRuntimeFileBackedGroundedTargetStateSequenceRestartsAtCommittedBoundari
 				}
 				state := persisted.RuntimeState
 				if state.Decision.State != runtimecontract.ConvergenceStateComplete || state.Decision.Terminal == nil ||
-					state.Facts.Resources.TargetSelection == nil || state.Facts.Resources.TargetSelection.Disposition != runtimecontract.RuntimeTargetSelectionScope ||
-					len(state.Facts.Resources.TargetSnapshots) != 0 ||
+					state.Facts.Resources.TargetSelection != nil || len(state.Facts.Resources.TargetSnapshots) != 2 ||
 					len(state.OperationReceipts) != 2 || len(state.Facts.Evidence.Accepted) != 2 || len(state.Facts.Assessments) != 1 {
 					t.Fatalf("restart state sequence did not converge exactly once: %+v", state)
 				}
@@ -1027,8 +1027,9 @@ func TestRuntimeFileBackedEmptyWorkspaceCreationSelectionContinuesThroughCandida
 	// File effect. That prevents a second create authorization; the accepted
 	// receipt plus owner reconciliation, rather than a rewritten Selected fact,
 	// proves the realized target.
-	if err != nil || persisted.RuntimeState == nil || initialSelection != runtimecontract.RuntimeTargetSelectionCreate ||
+	if err != nil || persisted.RuntimeState == nil || initialSelection != "" ||
 		persisted.RuntimeState.Facts.Resources.TargetSelection == nil || persisted.RuntimeState.Facts.Resources.TargetSelection.Disposition != runtimecontract.RuntimeTargetSelectionUnsupported ||
+		!runtimeFactsHaveProspectiveTarget(persisted.RuntimeState.Facts, "implementation.txt") ||
 		len(persisted.RuntimeState.Facts.Resources.TargetSnapshots) != 0 || len(persisted.RuntimeState.OperationReceipts) != 1 {
 		if persisted != nil && persisted.RuntimeState != nil {
 			state := persisted.RuntimeState
@@ -1272,9 +1273,10 @@ func TestRuntimeFileBackedBoundedWorkspaceScopeAllowsNewDeliverable(t *testing.T
 		t.Fatalf("canonical repair did not produce the owner-admitted target: content=%q err=%v", content, err)
 	}
 	persisted, err := runs.GetByWorkspaceID(ctx, "ws-v2", "run-v2")
-	if err != nil || persisted.RuntimeState == nil || initialSelection != runtimecontract.RuntimeTargetSelectionCreate || initialSelectionCount != 0 || initialSnapshots != 0 ||
+	if err != nil || persisted.RuntimeState == nil || initialSelection != "" || initialSelectionCount != 0 || initialSnapshots != 0 ||
 		persisted.RuntimeState.Facts.Resources.TargetSelection == nil || persisted.RuntimeState.Facts.Resources.TargetSelection.Disposition != runtimecontract.RuntimeTargetSelectionUnsupported ||
 		persisted.RuntimeState.Facts.Resources.TargetSelection.CandidateCount != 0 || len(persisted.RuntimeState.Facts.Resources.TargetSnapshots) != 0 ||
+		!runtimeFactsHaveProspectiveTarget(persisted.RuntimeState.Facts, "new-deliverable.txt") ||
 		len(persisted.RuntimeState.OperationReceipts) != 1 || len(persisted.RuntimeState.Facts.Evidence.Accepted) != 1 || len(persisted.RuntimeState.Facts.Evidence.Rejected) != 0 ||
 		persisted.RuntimeState.Facts.Resources.FailureTarget != nil || (persisted.RuntimeState.Facts.RepairDirective != nil && len(persisted.RuntimeState.Facts.RepairDirective.TargetRefs) != 0) {
 		if persisted != nil && persisted.RuntimeState != nil {
@@ -1314,6 +1316,10 @@ func TestRuntimeFileBackedWorkspaceScopeExecutesTargetBoundShellOperation(t *tes
 	bootstrap.Requirements = []runtimecontract.RuntimeRequirement{
 		{Kind: runtimecontract.PrerequisiteKindCapability, OwnerModuleID: runtimecontract.RuntimeModuleShell, CapabilityClass: runtimecontract.RuntimeCapabilityClassStateChange, RequiredCapabilities: []string{runtimecontract.StepKindShellCommand}, Reason: "Shell state-change capability"},
 		{Kind: runtimecontract.PrerequisiteKindCapability, OwnerModuleID: runtimecontract.RuntimeModuleShell, CapabilityClass: runtimecontract.RuntimeCapabilityClassValidation, RequiredCapabilities: []string{runtimecontract.RuntimeBlockKindManagedValidationSession}, Reason: "Shell validation capability"},
+		// Shell does not own workspace-target discovery.  Persist File's exact
+		// workspace catalog first so the Shell inventory and semantic binding can
+		// inherit the same bounded existing scope without a synthetic selector.
+		{Kind: runtimecontract.PrerequisiteKindOperationAdmissibility, OwnerModuleID: runtimecontract.RuntimeModuleFile, RequiredCapabilities: []string{runtimecontract.StepKindFileRead}, Reason: "File workspace target catalog"},
 		{Kind: runtimecontract.PrerequisiteKindOperationAdmissibility, OwnerModuleID: runtimecontract.RuntimeModuleShell, RequiredCapabilities: []string{runtimecontract.StepKindShellCommand, runtimecontract.RuntimeBlockKindManagedValidationSession}, Reason: "Shell owner inventory"},
 	}
 	bootstrap = runtimeTestBootstrapWithReboundBindings(bootstrap)
@@ -1402,7 +1408,7 @@ func TestRuntimeFileBackedWorkspaceScopeExecutesTargetBoundShellOperation(t *tes
 	}
 	persisted, err := runs.GetByWorkspaceID(ctx, "ws-v2", "run-v2")
 	if err != nil || persisted.RuntimeState == nil || persisted.RuntimeState.Decision.State != runtimecontract.ConvergenceStateComplete ||
-		persisted.RuntimeState.Facts.Resources.TargetSelection == nil || persisted.RuntimeState.Facts.Resources.TargetSelection.Disposition != runtimecontract.RuntimeTargetSelectionScope ||
+		persisted.RuntimeState.Facts.Resources.TargetSelection != nil || !containsRuntimeString(persisted.RuntimeState.Facts.Focus.TargetRefs, "go.sum") ||
 		len(persisted.RuntimeState.OperationReceipts) != 2 || len(persisted.RuntimeState.Facts.Evidence.Accepted) != 2 {
 		state := persisted.RuntimeState
 		if state == nil {
@@ -1501,6 +1507,14 @@ func runtimeTestDeclareExistingWorkspaceTarget(bootstrap *runtimecontract.Runtim
 
 func testRuntimeFileBackedUnresolvedTargetSelectionFailsWithoutProvider(t *testing.T, bootstrap runtimecontract.RuntimeBootstrap, disposition runtimecontract.RuntimeTargetSelectionDisposition, files map[string]string) {
 	t.Helper()
+	// This is a fresh semantic-drive fixture. Unlike post-semantic operation
+	// fixtures it must acquire the provider ceiling through the typed LLM owner
+	// before it can prove that File's target observation blocks planning. The
+	// ceiling is configuration authority, not a candidate/provider call.
+	bootstrap.Requirements = append(bootstrap.Requirements, runtimecontract.RuntimeRequirement{
+		Kind: runtimecontract.PrerequisiteKindProviderCeiling, OwnerModuleID: runtimecontract.RuntimeModuleLLM,
+		MinimumBytes: 64 * 1024, Reason: "semantic planning provider ceiling",
+	})
 	ctx := context.Background()
 	hub := magicevent.NewHub(32)
 	t.Cleanup(func() { hub.Terminate(ctx) })
@@ -1546,6 +1560,7 @@ func testRuntimeFileBackedUnresolvedTargetSelectionFailsWithoutProvider(t *testi
 	}
 	t.Cleanup(func() { _ = fileOwner.Stop(ctx) })
 	startRuntimeManagedValidationTestOwner(t, hub)
+	startRuntimeProviderCeilingTestOwner(t, hub)
 
 	providerCalls := 0
 	llmObserver := magicevent.NewSimpleObserver(runtimecontract.RuntimeModuleLLM, hub)
@@ -1566,7 +1581,7 @@ func testRuntimeFileBackedUnresolvedTargetSelectionFailsWithoutProvider(t *testi
 	t.Cleanup(func() {
 		governanceObserver.Unsubscribe(decisionevents.TopicOpenRuntimeGovernanceRequest)
 	})
-	runtimeTestPersistBootstrappedOperationFixture(t, ctx, hub, "ws-v2", "run-v2", bootstrap)
+	runtimeTestPersistBootstrappedPreSemanticFixture(t, ctx, hub, "ws-v2", "run-v2", bootstrap)
 	module := newRuntimeGroundedTargetSequenceModule(t, hub, runtimeStateRepository{hub: hub})
 	driveObserver := magicevent.NewSimpleObserver(ModuleID, hub)
 	driveObserver.Subscribe(orchestratorevents.TopicOrchestratorDriveRuntime, module.handleRuntimeDrive)
@@ -1921,11 +1936,11 @@ func TestRuntimeFileBackedGitRestartAfterInitEvidenceCommitContinuesSequence(t *
 	if err != nil {
 		t.Fatal(err)
 	}
-	aggregate = runtimeTestPersistSealedSemanticAuthority(t, ctx, runtimeStateRepository{hub: hub}, aggregate)
 	aggregate, err = module.prepareRuntimePrerequisites(ctx, aggregate)
 	if err != nil {
 		t.Fatal(err)
 	}
+	aggregate = runtimeTestPersistSealedSemanticAuthority(t, ctx, runtimeStateRepository{hub: hub}, aggregate)
 	prefix := runtimecontract.StableRuntimeCandidatePrefixHashWithExecutionContract(aggregate.Definition, aggregate.Facts.Activation.ExecutionContract)
 	candidate := runtimeGitStateCandidate([]string{"create-commit", "repo-init", "stage-changes"})
 	initialLLM := magicevent.NewSimpleObserver(runtimecontract.RuntimeModuleLLM, hub)
@@ -2077,7 +2092,6 @@ func TestRuntimeFileBackedGitQueryReceiptCrashBeforePrerequisiteCommitReusesSnap
 	if err != nil {
 		t.Fatal(err)
 	}
-	aggregate = runtimeTestPersistSealedSemanticAuthority(t, ctx, crashRepository, aggregate)
 	func() {
 		defer func() {
 			if recovered := recover(); recovered != "git-query-before-prerequisite-commit" {
@@ -2174,6 +2188,15 @@ func TestRuntimeFileBackedGitQueryReceiptCrashBeforePrerequisiteCommitReusesSnap
 	})
 	t.Cleanup(func() { llmObserver.Unsubscribe(llmevents.TopicRequestRuntimeCandidate) })
 	restarted := newRuntimeDriveTestModule(t, restartedHub)
+	recovered, err := restarted.loadRuntime(ctx, "ws-v2", "run-v2")
+	if err != nil {
+		t.Fatal(err)
+	}
+	recovered, err = restarted.prepareRuntimePrerequisites(ctx, recovered)
+	if err != nil {
+		t.Fatal(err)
+	}
+	runtimeTestPersistSealedSemanticAuthority(t, ctx, runtimeStateRepository{hub: restartedHub}, recovered)
 	driveObserver := magicevent.NewSimpleObserver(ModuleID, restartedHub)
 	driveObserver.Subscribe(orchestratorevents.TopicOrchestratorDriveRuntime, restarted.handleRuntimeDrive)
 	t.Cleanup(func() { driveObserver.Unsubscribe(orchestratorevents.TopicOrchestratorDriveRuntime) })
@@ -2297,7 +2320,6 @@ func runRuntimeFileBackedManifestCommitCrashRestart(t *testing.T, crashAfterCAS 
 	if err != nil {
 		t.Fatal(err)
 	}
-	aggregate = runtimeTestPersistSealedSemanticAuthority(t, ctx, crashRepository, aggregate)
 	func() {
 		defer func() {
 			if recovered := recover(); recovered != crashMarker {
@@ -2484,7 +2506,6 @@ func TestRuntimeFileBackedProviderCeilingCommitCrashRestart(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			aggregate = runtimeTestPersistSealedSemanticAuthorityWithoutProviderCeiling(t, ctx, crashRepository, aggregate)
 			func() {
 				defer func() {
 					if recovered := recover(); recovered != marker {
@@ -2683,7 +2704,6 @@ func TestRuntimeFileBackedFileCapabilityCommitCrashRestart(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			aggregate = runtimeTestPersistSealedSemanticAuthority(t, ctx, crashRepository, aggregate)
 			func() {
 				defer func() {
 					if recovered := recover(); recovered != marker {
@@ -2865,7 +2885,6 @@ func TestRuntimeFileBackedGitCapabilityCommitCrashRestart(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			aggregate = runtimeTestPersistSealedSemanticAuthority(t, ctx, crashRepository, aggregate)
 			func() {
 				defer func() {
 					if recovered := recover(); recovered != marker {
@@ -3038,7 +3057,6 @@ func TestRuntimeFileBackedShellCapabilityCommitCrashRestart(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			aggregate = runtimeTestPersistSealedSemanticAuthority(t, ctx, crashRepository, aggregate)
 			func() {
 				defer func() {
 					if recovered := recover(); recovered != marker {
@@ -3193,7 +3211,6 @@ func TestRuntimeFileBackedValidationScratchCommitCrashRestart(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			aggregate = runtimeTestPersistSealedSemanticAuthority(t, ctx, crashRepository, aggregate)
 			func() {
 				defer func() {
 					if recovered := recover(); recovered != marker {
@@ -3285,11 +3302,15 @@ func runRuntimeFileBackedValidationScratchStaleInvalidationCrashRestart(t *testi
 			if err := os.MkdirAll(deliverable, 0o755); err != nil {
 				t.Fatal(err)
 			}
+			if err := os.WriteFile(filepath.Join(deliverable, "target.txt"), []byte("stable\n"), 0o644); err != nil {
+				t.Fatal(err)
+			}
 			if err := os.MkdirAll(internalDirectory, 0o755); err != nil {
 				t.Fatal(err)
 			}
 			runsPath := filepath.Join(root, "runs.json")
 			bootstrap := runtimeBootstrap()
+			runtimeTestDeclareExistingWorkspaceTarget(&bootstrap, "target.txt")
 			bootstrap.Requirements = []runtimecontract.RuntimeRequirement{
 				{
 					Kind: runtimecontract.PrerequisiteKindValidationScratch, OwnerModuleID: runtimecontract.RuntimeModuleOrchestrator,
@@ -3300,10 +3321,15 @@ func runRuntimeFileBackedValidationScratchStaleInvalidationCrashRestart(t *testi
 					CapabilityClass:      runtimecontract.RuntimeCapabilityClassStateChange,
 					RequiredCapabilities: []string{runtimecontract.StepKindFileEdit},
 				},
+				{
+					Kind: runtimecontract.PrerequisiteKindOperationAdmissibility, OwnerModuleID: runtimecontract.RuntimeModuleFile,
+					RequiredCapabilities: []string{runtimecontract.StepKindFileEdit}, Reason: "stable File target catalog",
+				},
 			}
 			if maxStaleRefreshes > 0 {
 				bootstrap.RecoveryPolicy.MaxPrerequisiteRefreshes = maxStaleRefreshes
 			}
+			bootstrap = runtimeTestBootstrapWithReboundBindings(bootstrap)
 			if err := filerepository.NewRunRepository(runsPath).Create(ctx, &runmodel.Run{
 				ID: "run-v2", WorkspaceID: "ws-v2", GoalID: bootstrap.Definition.GoalID, DoDID: bootstrap.Definition.DoDID,
 				DefinitionRevision: bootstrap.Definition.Revision, RuntimeBootstrap: &bootstrap, ReconciliationScope: runtimecontract.RuntimeCWIReconciliationScopeCurrentRun, State: common.RunStateActive,
@@ -3357,10 +3383,14 @@ func runRuntimeFileBackedValidationScratchStaleInvalidationCrashRestart(t *testi
 			if err != nil {
 				t.Fatal(err)
 			}
-			aggregate = runtimeTestPersistSealedSemanticAuthority(t, ctx, runtimeStateRepository{hub: hub}, aggregate)
 			aggregate, err = first.prepareRuntimePrerequisites(ctx, aggregate)
 			if err != nil || aggregate.Facts.Resources.ValidationScratch == nil {
 				t.Fatalf("initial scratch acquisition aggregate=%+v err=%v", aggregate, err)
+			}
+			aggregate = runtimeTestPersistSealedSemanticAuthority(t, ctx, runtimeStateRepository{hub: hub}, aggregate)
+			aggregate, err = first.prepareRuntimePrerequisites(ctx, aggregate)
+			if err != nil || len(aggregate.Facts.Resources.TargetSnapshots) != 1 {
+				t.Fatalf("post-semantic stable target acquisition aggregate=%+v err=%v", aggregate, err)
 			}
 			committedScratch := *aggregate.Facts.Resources.ValidationScratch
 			if err := os.RemoveAll(committedScratch.Reference); err != nil {
@@ -3528,148 +3558,6 @@ func runRuntimeFileBackedValidationScratchStaleInvalidationCrashRestart(t *testi
 // persisted SM-2 prerequisite. Rebuild every process actor around the
 // Run-owner file store to prove an uncommitted mapping is derived again while
 // an after-CAS response loss is reused without another authority transition.
-func TestRuntimeFileBackedFailureTargetCommitCrashRestart(t *testing.T) {
-	for _, crashAfterCAS := range []bool{false, true} {
-		phase := "before_cas_rederives_local_mapping"
-		if crashAfterCAS {
-			phase = "after_cas_reuses_local_mapping"
-		}
-		t.Run(phase, func(t *testing.T) {
-			ctx := context.Background()
-			root := t.TempDir()
-			deliverable := filepath.Join(root, "workspace")
-			if err := os.MkdirAll(deliverable, 0o755); err != nil {
-				t.Fatal(err)
-			}
-			runsPath := filepath.Join(root, "runs.json")
-			bootstrap := runtimeBootstrap()
-			if err := filerepository.NewRunRepository(runsPath).Create(ctx, &runmodel.Run{
-				ID: "run-v2", WorkspaceID: "ws-v2", GoalID: bootstrap.Definition.GoalID, DoDID: bootstrap.Definition.DoDID,
-				DefinitionRevision: bootstrap.Definition.Revision, RuntimeBootstrap: &bootstrap, ReconciliationScope: runtimecontract.RuntimeCWIReconciliationScopeCurrentRun, State: common.RunStateActive,
-			}); err != nil {
-				t.Fatal(err)
-			}
-
-			startProcess := func(t *testing.T) (magicevent.Hub, *filerepository.RunRepository, *runmodule.Module, magicevent.SimpleObserver) {
-				t.Helper()
-				hub := magicevent.NewHub(16)
-				processRuns := filerepository.NewRunRepository(runsPath)
-				runOwner := runmodule.New()
-				if err := runOwner.Configure(runbiz.Dependencies{Runs: processRuns, EventHub: hub}); err != nil {
-					hub.Terminate(ctx)
-					t.Fatal(err)
-				}
-				if err := runOwner.Start(); err != nil {
-					hub.Terminate(ctx)
-					t.Fatal(err)
-				}
-				workspaceObserver := magicevent.NewSimpleObserver(workspaceevents.CommandDestination, hub)
-				workspaceObserver.Subscribe(workspaceevents.TopicWorkspaceCommandGet, func(_ magicevent.Event, result magicevent.Result) {
-					result.Set(workspaceevents.WorkspaceResult{Workspace: &workspaceevents.Workspace{ID: "ws-v2", DeliverableDirectory: deliverable}}, nil)
-				})
-				return hub, processRuns, runOwner, workspaceObserver
-			}
-			stopProcess := func(hub magicevent.Hub, runOwner *runmodule.Module, workspaceObserver magicevent.SimpleObserver) {
-				if workspaceObserver != nil {
-					workspaceObserver.Unsubscribe(workspaceevents.TopicWorkspaceCommandGet)
-				}
-				if runOwner != nil {
-					_ = runOwner.Stop(ctx)
-				}
-				if hub != nil {
-					hub.Terminate(ctx)
-				}
-			}
-
-			hub, processRuns, runOwner, workspaceObserver := startProcess(t)
-			baseRepository := runtimeStateRepository{hub: hub}
-			marker := "failure-target-before-cas"
-			if crashAfterCAS {
-				marker = "failure-target-after-cas"
-			}
-			crashRepository := &runtimeSaveCrashRepository{
-				delegate: baseRepository, after: crashAfterCAS, marker: marker,
-				match: func(current runtime.RuntimeAggregate) bool {
-					target := current.Facts.Resources.FailureTarget
-					return target != nil && target.Signature == "failure-target-v1" && len(target.TargetRefs) == 1 && target.TargetRefs[0] == "implementation.go"
-				},
-			}
-			crashingOwner := newRuntimeTestOwner()
-			if err := crashingOwner.ConfigureRuntimeRepository(crashRepository); err != nil {
-				t.Fatal(err)
-			}
-			crashing := newTestBiz(crashingOwner, hub, nil)
-			facts := runtimeAggregate(t, 1).Facts
-			facts.Failure = &runtimecontract.FailureFact{Signature: "failure-target-v1", TargetRefs: []string{"implementation.go"}}
-			aggregate, err := crashing.InitializeRuntime(ctx, facts, runtimeDefinition(), []runtimecontract.RuntimeRequirement{{
-				Kind: runtimecontract.PrerequisiteKindFailureTarget, OwnerModuleID: runtimecontract.RuntimeModuleOrchestrator,
-				Reason: "typed failure repair surface",
-			}})
-			if err != nil {
-				t.Fatal(err)
-			}
-			if aggregate.Decision.State != runtimecontract.ConvergenceStateNeedPrerequisite {
-				t.Fatalf("failure-target bootstrap action=%s, aggregate=%+v", aggregate.Decision.State, aggregate)
-			}
-			initialRevision := aggregate.StateRevision
-			func() {
-				defer func() {
-					if recovered := recover(); recovered != marker {
-						t.Fatalf("unexpected failure-target crash marker: %v", recovered)
-					}
-				}()
-				_, _ = crashing.prepareRuntimePrerequisites(ctx, aggregate)
-				t.Fatal("expected failure-target commit crash")
-			}()
-			if !crashRepository.fired {
-				t.Fatal("failure-target CAS crash point was not reached")
-			}
-			crashed, err := processRuns.GetByWorkspaceID(ctx, "ws-v2", "run-v2")
-			if err != nil || crashed.RuntimeState == nil {
-				t.Fatalf("failure-target crash state=%+v err=%v", crashed, err)
-			}
-			if crashAfterCAS {
-				if crashed.RuntimeState.Facts.Resources.FailureTarget == nil || crashed.RuntimeState.Facts.Resources.FailureTarget.Signature != "failure-target-v1" {
-					t.Fatalf("after-CAS failure target was not persisted: %+v", crashed.RuntimeState)
-				}
-			} else if crashed.RuntimeState.Facts.Resources.FailureTarget != nil {
-				t.Fatalf("before-CAS failure target leaked into persisted aggregate: %+v", crashed.RuntimeState)
-			}
-			if len(crashed.RuntimeState.Facts.Resources.PrerequisiteObservations) != 0 || len(crashed.RuntimeState.CandidateRequestSessions) != 0 ||
-				len(crashed.RuntimeState.CandidateAttempts) != 0 || crashed.RuntimeState.ActiveDispatch != nil || len(crashed.RuntimeState.GovernanceRequests) != 0 ||
-				len(crashed.RuntimeState.OperationReceipts) != 0 {
-				t.Fatalf("failure-target acquisition entered an external path: %+v", crashed.RuntimeState)
-			}
-			stopProcess(hub, runOwner, workspaceObserver)
-
-			hub, _, runOwner, workspaceObserver = startProcess(t)
-			defer stopProcess(hub, runOwner, workspaceObserver)
-			restarted := newRuntimeDriveTestModule(t, hub)
-			loaded, err := restarted.loadRuntime(ctx, "ws-v2", "run-v2")
-			if err != nil {
-				t.Fatal(err)
-			}
-			resumed, err := restarted.prepareRuntimePrerequisites(ctx, loaded)
-			if err != nil {
-				t.Fatal(err)
-			}
-			if resumed.Facts.Resources.FailureTarget == nil || resumed.Facts.Resources.FailureTarget.Signature != "failure-target-v1" ||
-				len(resumed.Facts.Resources.FailureTarget.TargetRefs) != 1 || resumed.Facts.Resources.FailureTarget.TargetRefs[0] != "implementation.go" ||
-				len(resumed.Facts.Prerequisites.Pending) != 0 || len(resumed.Facts.Resources.PrerequisiteObservations) != 0 ||
-				len(resumed.CandidateRequestSessions) != 0 || len(resumed.CandidateAttempts) != 0 || resumed.ActiveDispatch != nil ||
-				len(resumed.GovernanceRequests) != 0 || len(resumed.OperationReceipts) != 0 {
-				t.Fatalf("failure-target restart entered unexpected path: %+v", resumed)
-			}
-			if crashAfterCAS && resumed.StateRevision != crashed.RuntimeState.StateRevision {
-				t.Fatalf("after-CAS restart rederived committed local mapping: got revision=%d want=%d", resumed.StateRevision, crashed.RuntimeState.StateRevision)
-			}
-			if !crashAfterCAS && resumed.StateRevision != initialRevision+1 {
-				t.Fatalf("before-CAS restart did not commit exactly one local mapping: got revision=%d want=%d", resumed.StateRevision, initialRevision+1)
-			}
-		})
-	}
-}
-
 // A creation selection is a File-owned prerequisite.  The controller-only
 // state-repository test proves its local CAS behavior, but it cannot prove
 // that a new process re-queries an uncommitted File observation exactly once
@@ -3692,7 +3580,12 @@ func TestRuntimeFileBackedCreationSelectionCommitCrashRestart(t *testing.T) {
 			runsPath := filepath.Join(root, "runs.json")
 			bootstrap := runtimeGroundedTargetSequenceBootstrap()
 			bootstrap.Definition.CapabilityContract = []string{runtimecontract.StepKindFileWrite}
-			bootstrap.Requirements = nil
+			bootstrap.Requirements = []runtimecontract.RuntimeRequirement{
+				{Kind: runtimecontract.PrerequisiteKindCapability, OwnerModuleID: runtimecontract.RuntimeModuleFile,
+					CapabilityClass: runtimecontract.RuntimeCapabilityClassStateChange, RequiredCapabilities: []string{runtimecontract.StepKindFileWrite}, Reason: "File creation capability"},
+				{Kind: runtimecontract.PrerequisiteKindOperationAdmissibility, OwnerModuleID: runtimecontract.RuntimeModuleFile,
+					RequiredCapabilities: []string{runtimecontract.StepKindFileWrite}, Reason: "File creation inventory"},
+			}
 			bootstrap.DefinitionFocuses[0].RequiredEvidenceKinds = []string{runtimecontract.EvidenceKindStateChange}
 			bootstrap.DefinitionFocuses[0].TargetSelectorRef = "file/workspace_deliverable"
 			runtimeTestDeclareProspectiveWorkspaceTarget(&bootstrap, "initial-deliverable.txt")
@@ -3776,23 +3669,28 @@ func TestRuntimeFileBackedCreationSelectionCommitCrashRestart(t *testing.T) {
 				delegate: baseRepository, after: crashAfterCAS, marker: marker,
 				match: func(current runtime.RuntimeAggregate) bool {
 					selection := current.Facts.Resources.TargetSelection
-					return selection != nil && selection.Disposition == runtimecontract.RuntimeTargetSelectionCreate && selection.ProspectiveTargetRef == "initial-deliverable.txt"
+					return selection != nil && selection.Disposition == runtimecontract.RuntimeTargetSelectionScope && selection.CandidateCount == 0 &&
+						runtimecontract.SameRuntimeTargetSelectorCandidateRefs(selection.SelectorCandidateRefs, []string{"initial-deliverable.txt"})
 				},
+			}
+			// The immutable Definition selector produces one pre-semantic, bounded
+			// empty File-owner scope carrying the declared creation candidate.  It
+			// is the real crashable owner event; prospective creation itself belongs
+			// to the later semantic feasibility/binding transaction, so this fixture
+			// must neither pre-seal nor manufacture a second selection.
+			run, err := processRuns.GetByWorkspaceID(ctx, "ws-v2", "run-v2")
+			if err != nil {
+				t.Fatal(err)
 			}
 			crashingBiz := newRuntimeTestOwner()
 			if err := crashingBiz.ConfigureRuntimeRepository(crashRepository); err != nil {
 				t.Fatal(err)
 			}
 			crashingModule := newTestBiz(crashingBiz, hub, nil)
-			run, err := processRuns.GetByWorkspaceID(ctx, "ws-v2", "run-v2")
-			if err != nil {
-				t.Fatal(err)
-			}
 			aggregate, err := crashingBiz.initializeRuntimeFromRun(ctx, run)
 			if err != nil {
 				t.Fatal(err)
 			}
-			aggregate = runtimeTestPersistSealedSemanticAuthority(t, ctx, crashRepository, aggregate)
 			func() {
 				defer func() {
 					if recovered := recover(); recovered != marker {
@@ -3810,7 +3708,7 @@ func TestRuntimeFileBackedCreationSelectionCommitCrashRestart(t *testing.T) {
 				t.Fatalf("crashed creation selection state=%+v err=%v", crashed, err)
 			}
 			if crashAfterCAS {
-				if crashed.RuntimeState.Facts.Resources.TargetSelection == nil || crashed.RuntimeState.Facts.Resources.TargetSelection.Disposition != runtimecontract.RuntimeTargetSelectionCreate {
+				if crashed.RuntimeState.Facts.Resources.TargetSelection == nil || crashed.RuntimeState.Facts.Resources.TargetSelection.Disposition != runtimecontract.RuntimeTargetSelectionScope {
 					t.Fatalf("after-CAS creation selection was not persisted: %+v", crashed.RuntimeState)
 				}
 			} else if crashed.RuntimeState.Facts.Resources.TargetSelection != nil {
@@ -3835,10 +3733,14 @@ func TestRuntimeFileBackedCreationSelectionCommitCrashRestart(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if resumed.Facts.Resources.TargetSelection == nil || resumed.Facts.Resources.TargetSelection.Disposition != runtimecontract.RuntimeTargetSelectionCreate ||
-				resumed.Facts.Resources.TargetSelection.SelectorRef != "workspace-relative-new-file-target" || resumed.Facts.Resources.TargetSelection.ProspectiveTargetRef != "initial-deliverable.txt" ||
-				len(resumed.Facts.Resources.PrerequisiteObservations) != 1 || len(resumed.CandidateAttempts) != 0 || resumed.ActiveDispatch != nil {
-				t.Fatalf("restart creation selection aggregate=%+v", resumed)
+			if resumed.Facts.Resources.TargetSelection == nil || resumed.Facts.Resources.TargetSelection.Disposition != runtimecontract.RuntimeTargetSelectionScope ||
+				resumed.Facts.Resources.TargetSelection.SelectorRef != "file/workspace_deliverable" || resumed.Facts.Resources.TargetSelection.ProspectiveTargetRef != "" ||
+				!runtimecontract.SameRuntimeTargetSelectorCandidateRefs(resumed.Facts.Resources.TargetSelection.SelectorCandidateRefs, []string{"initial-deliverable.txt"}) ||
+				len(resumed.Facts.Resources.PrerequisiteObservations) != 4 ||
+				len(resumed.CandidateAttempts) != 0 || resumed.ActiveDispatch != nil {
+				t.Fatalf("restart creation selection=%+v observations=%d state=%s terminal=%+v attempts=%d dispatch=%+v",
+					resumed.Facts.Resources.TargetSelection, len(resumed.Facts.Resources.PrerequisiteObservations), resumed.Decision.State,
+					resumed.Decision.Terminal, len(resumed.CandidateAttempts), resumed.ActiveDispatch)
 			}
 			if want := 1; !crashAfterCAS && *restartedSelectionCalls != want {
 				t.Fatalf("before-CAS restart File selection calls=%d, want %d", *restartedSelectionCalls, want)
@@ -3944,26 +3846,29 @@ func TestRuntimeFileBackedTargetSnapshotCommitCrashRestart(t *testing.T) {
 			if crashAfterCAS {
 				marker = "target-snapshot-after-cas"
 			}
+			baseRepository := runtimeStateRepository{hub: hub}
 			crashRepository := &runtimeSaveCrashRepository{
-				delegate: runtimeStateRepository{hub: hub}, after: crashAfterCAS, marker: marker,
+				delegate: baseRepository, after: crashAfterCAS, marker: marker,
 				match: func(current runtime.RuntimeAggregate) bool {
 					return len(current.Facts.Resources.TargetSnapshots) == 1 && current.Facts.Resources.TargetSnapshots[0].TargetRef == "target.txt"
 				},
+			}
+			// An exact existing target is selected and snapshotted before semantic
+			// planning.  The selection commits first; this repository therefore
+			// crashes at the following real File snapshot event/CAS boundary.
+			run, err := processRuns.GetByWorkspaceID(ctx, "ws-v2", "run-v2")
+			if err != nil {
+				t.Fatal(err)
 			}
 			crashingBiz := newRuntimeTestOwner()
 			if err := crashingBiz.ConfigureRuntimeRepository(crashRepository); err != nil {
 				t.Fatal(err)
 			}
 			crashingModule := newTestBiz(crashingBiz, hub, nil)
-			run, err := processRuns.GetByWorkspaceID(ctx, "ws-v2", "run-v2")
-			if err != nil {
-				t.Fatal(err)
-			}
 			aggregate, err := crashingBiz.initializeRuntimeFromRun(ctx, run)
 			if err != nil {
 				t.Fatal(err)
 			}
-			aggregate = runtimeTestPersistSealedSemanticAuthority(t, ctx, crashRepository, aggregate)
 			func() {
 				defer func() {
 					if recovered := recover(); recovered != marker {
@@ -4005,7 +3910,7 @@ func TestRuntimeFileBackedTargetSnapshotCommitCrashRestart(t *testing.T) {
 				t.Fatal(err)
 			}
 			if len(resumed.Facts.Resources.TargetSnapshots) != 1 || resumed.Facts.Resources.TargetSnapshots[0].TargetRef != "target.txt" ||
-				!resumed.Facts.Resources.TargetSnapshots[0].Complete() || len(resumed.Facts.Resources.PrerequisiteObservations) != 2 ||
+				!resumed.Facts.Resources.TargetSnapshots[0].Complete() || len(resumed.Facts.Resources.PrerequisiteObservations) != 4 ||
 				len(resumed.CandidateAttempts) != 0 || resumed.ActiveDispatch != nil {
 				t.Fatalf("restart target snapshot aggregate=%+v", resumed)
 			}
@@ -4059,24 +3964,10 @@ func TestRuntimeFileBackedTargetSnapshotCommitCrashRestart(t *testing.T) {
 			}
 
 			// A typed read-only stale receipt must retire just this File snapshot.
-			// Persist a request-session marker to exercise the session-first stale
-			// route (without allocating an attempt), then reconstruct a third process
-			// and prove the new File owner read is the sole replacement authority.
+			// Route it through the owner-authority stale event directly: this fixture
+			// is still pre-semantic and therefore must not manufacture an operations
+			// candidate request session merely to invalidate an owner fact.
 			if err := os.WriteFile(filepath.Join(deliverable, "target.txt"), []byte("after\n"), 0o644); err != nil {
-				t.Fatal(err)
-			}
-			candidateContext := runtimecontract.RuntimeCandidateContextForDecision(final.Facts, final.Decision, nil)
-			manifest, err := runtimecontract.BuildRuntimeCandidateContractManifest(final.Decision, runtimecontract.RuntimeCandidateManifestOwnerFactsFromResources(candidateContext.Resources))
-			if err != nil {
-				t.Fatal(err)
-			}
-			prefix := runtimecontract.StableRuntimeCandidatePrefixHashWithExecutionContract(final.Definition, final.Facts.Activation.ExecutionContract)
-			_, session, err := restartedBiz.EnsureRuntimeCandidateRequestSession(ctx, "ws-v2", "run-v2", prefix, manifest.Hash, "")
-			if err != nil {
-				t.Fatal(err)
-			}
-			physicalCallID := runtimecontract.StableRuntimeCandidatePhysicalCallID(session.LogicalRequestID, session.NextSequence)
-			if _, err := restartedBiz.MarkRuntimeCandidateRequestSubmitted(ctx, "ws-v2", "run-v2", session.LogicalRequestID, session.NextSequence, physicalCallID); err != nil {
 				t.Fatal(err)
 			}
 			var snapshotObservation runtimecontract.RuntimePrerequisiteObservation
@@ -4095,15 +3986,14 @@ func TestRuntimeFileBackedTargetSnapshotCommitCrashRestart(t *testing.T) {
 				SubjectRef: "target.txt", ExpectedRevision: final.Facts.Resources.TargetSnapshots[0].ContentHash,
 				ObservedRevision: "target-v2", Reason: "File owner observed a newer target revision",
 			}
-			invalidated, err := restartedBiz.InvalidateRuntimeCandidateRequestSessionForPrerequisiteStale(ctx, "ws-v2", "run-v2", session.LogicalRequestID, stale)
+			invalidated, err := restartedBiz.InvalidateRuntimePrerequisitesForReadOnlyStale(ctx, "ws-v2", "run-v2", stale)
 			if err != nil {
 				t.Fatal(err)
 			}
 			if invalidated.Decision.State != runtimecontract.ConvergenceStateNeedPrerequisite || len(invalidated.Facts.Resources.TargetSnapshots) != 0 ||
-				len(invalidated.Facts.Resources.PrerequisiteObservations) != 1 || len(invalidated.Facts.Prerequisites.Pending) != 1 ||
+				len(invalidated.Facts.Resources.PrerequisiteObservations) != 3 || len(invalidated.Facts.Prerequisites.Pending) != 1 ||
 				invalidated.Facts.Prerequisites.Pending[0].ID != committedPrerequisite.ID || invalidated.Facts.Recovery.PrerequisiteRefreshes != 1 || len(invalidated.CandidateAttempts) != 0 || invalidated.ActiveDispatch != nil ||
-				len(invalidated.CandidateRequestSessions) != 1 || invalidated.CandidateRequestSessions[0].State != runtimecontract.RuntimeCandidateRequestSessionTerminal ||
-				invalidated.CandidateRequestSessions[0].LastOutcome.Class != runtimecontract.RuntimeCandidateRequestOutcomePrerequisiteStale {
+				len(invalidated.CandidateRequestSessions) != 0 {
 				t.Fatalf("target snapshot stale did not isolate owner fact: %+v", invalidated)
 			}
 
@@ -4124,7 +4014,7 @@ func TestRuntimeFileBackedTargetSnapshotCommitCrashRestart(t *testing.T) {
 				t.Fatal(err)
 			}
 			if *staleReacquireCalls != 1 || len(reacquired.Facts.Resources.TargetSnapshots) != 1 ||
-				reacquired.Facts.Resources.TargetSnapshots[0].Content != "after\n" || len(reacquired.Facts.Resources.PrerequisiteObservations) != 2 ||
+				reacquired.Facts.Resources.TargetSnapshots[0].Content != "after\n" || len(reacquired.Facts.Resources.PrerequisiteObservations) != 4 ||
 				reacquired.Facts.Recovery.PrerequisiteRefreshes != 1 ||
 				len(reacquired.CandidateAttempts) != 0 || reacquired.ActiveDispatch != nil {
 				t.Fatalf("fresh-process target snapshot stale reacquisition=%+v calls=%d", reacquired, *staleReacquireCalls)
@@ -4257,7 +4147,6 @@ func TestRuntimeFileBackedFileAdmissibilityCommitCrashRestart(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			aggregate = runtimeTestPersistSealedSemanticAuthority(t, ctx, crashRepository, aggregate)
 			func() {
 				defer func() {
 					if recovered := recover(); recovered != marker {
@@ -4327,6 +4216,14 @@ func TestRuntimeFileBackedFileAdmissibilityCommitCrashRestart(t *testing.T) {
 					resumedObservation.ContentHash != persistedObservation.ContentHash {
 					t.Fatalf("after-CAS restart did not reuse the exact File owner inventory: persisted=%+v resumed=%+v", persistedInventory, resumedInventory)
 				}
+			}
+			// The crash/restart subject above is a pre-semantic File owner
+			// transaction. Candidate-session stale handling below is post-semantic,
+			// so seal it from this exact persisted/reacquired catalog only now.
+			resumed = runtimeTestPersistSealedSemanticAuthority(t, ctx, runtimeStateRepository{hub: hub}, resumed)
+			resumed, err = restartedModule.prepareRuntimePrerequisites(ctx, resumed)
+			if err != nil {
+				t.Fatal(err)
 			}
 
 			// A delayed inventory response cannot become a second admissibility
@@ -4408,7 +4305,7 @@ func TestRuntimeFileBackedFileAdmissibilityCommitCrashRestart(t *testing.T) {
 				t.Fatal(err)
 			}
 			if invalidated.Decision.State != runtimecontract.ConvergenceStateNeedPrerequisite || len(invalidated.Facts.Resources.OperationAdmissibilities) != 0 ||
-				len(invalidated.Facts.Resources.PrerequisiteObservations) != 1 || len(invalidated.Facts.Prerequisites.Pending) != 1 ||
+				len(invalidated.Facts.Resources.TargetSnapshots) != 1 || len(invalidated.Facts.Resources.PrerequisiteObservations) != 2 || len(invalidated.Facts.Prerequisites.Pending) != 1 ||
 				invalidated.Facts.Prerequisites.Pending[0].ID != inventory.PrerequisiteID || invalidated.Facts.Recovery.PrerequisiteRefreshes != 1 || len(invalidated.CandidateAttempts) != 0 || invalidated.ActiveDispatch != nil ||
 				len(invalidated.CandidateRequestSessions) != 1 || invalidated.CandidateRequestSessions[0].State != runtimecontract.RuntimeCandidateRequestSessionTerminal ||
 				invalidated.CandidateRequestSessions[0].LastOutcome.Class != runtimecontract.RuntimeCandidateRequestOutcomePrerequisiteStale {
@@ -4433,7 +4330,7 @@ func TestRuntimeFileBackedFileAdmissibilityCommitCrashRestart(t *testing.T) {
 			}
 			if *staleReacquireCalls != 1 || len(reacquired.Facts.Resources.OperationAdmissibilities) != 1 ||
 				reacquired.Facts.Resources.OperationAdmissibilities[0].ObservedRevision == inventory.ObservedRevision ||
-				len(reacquired.Facts.Resources.PrerequisiteObservations) != 2 || reacquired.Facts.Recovery.PrerequisiteRefreshes != 1 || len(reacquired.CandidateAttempts) != 0 || reacquired.ActiveDispatch != nil {
+				len(reacquired.Facts.Resources.PrerequisiteObservations) != 3 || reacquired.Facts.Recovery.PrerequisiteRefreshes != 1 || len(reacquired.CandidateAttempts) != 0 || reacquired.ActiveDispatch != nil {
 				t.Fatalf("fresh-process File inventory stale reacquisition=%+v calls=%d", reacquired, *staleReacquireCalls)
 			}
 			if _, err := processRuns.GetByWorkspaceID(ctx, "ws-v2", "run-v2"); err != nil {
@@ -4580,7 +4477,6 @@ func TestRuntimeFileBackedGitAdmissibilityCommitCrashRestart(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			aggregate = runtimeTestPersistSealedSemanticAuthority(t, ctx, crashRepository, aggregate)
 			func() {
 				defer func() {
 					if recovered := recover(); recovered != marker {
@@ -4651,6 +4547,9 @@ func TestRuntimeFileBackedGitAdmissibilityCommitCrashRestart(t *testing.T) {
 					t.Fatalf("after-CAS restart did not reuse exact Git inventory: persisted=%+v resumed=%+v", persistedInventory, resumedInventory)
 				}
 			}
+			// Use the restarted Git owner catalog as the semantic provider preimage;
+			// the acquisition CAS itself remains a pre-semantic transaction.
+			resumed = runtimeTestPersistSealedSemanticAuthority(t, ctx, runtimeStateRepository{hub: hub}, resumed)
 
 			inventory := resumed.Facts.Resources.OperationAdmissibilities[0]
 			var committedPrerequisite runtimecontract.RuntimePrerequisite
@@ -4799,9 +4698,16 @@ func TestRuntimeFileBackedShellAdmissibilityCommitCrashRestart(t *testing.T) {
 			bootstrap.DefinitionFocuses[0].RequiredEvidenceKinds = []string{runtimecontract.EvidenceKindValidation}
 			bootstrap.Slices[0].RequiredEvidenceKinds = []string{runtimecontract.EvidenceKindValidation}
 			runtimeTestDeclareExistingWorkspaceTarget(&bootstrap, "target.txt")
+			bootstrap.Activation.EvidencePolicies = append(bootstrap.Activation.EvidencePolicies, runtimeFileBackedManagedValidationEvidencePolicy())
 			bootstrap.Requirements = []runtimecontract.RuntimeRequirement{
 				{Kind: runtimecontract.PrerequisiteKindCapability, OwnerModuleID: runtimecontract.RuntimeModuleShell,
 					CapabilityClass: runtimecontract.RuntimeCapabilityClassValidation, RequiredCapabilities: []string{runtimecontract.RuntimeBlockKindManagedValidationSession}, Reason: "Shell capability"},
+				// Shell can only publish an exact managed-validation target from the
+				// File owner's already persisted workspace catalog.  This prerequisite
+				// is acquired first by the production owner ordering; no synthetic path
+				// is injected into the Shell observation.
+				{Kind: runtimecontract.PrerequisiteKindOperationAdmissibility, OwnerModuleID: runtimecontract.RuntimeModuleFile,
+					RequiredCapabilities: []string{runtimecontract.StepKindFileRead}, Reason: "File workspace target catalog"},
 				{Kind: runtimecontract.PrerequisiteKindOperationAdmissibility, OwnerModuleID: runtimecontract.RuntimeModuleShell,
 					RequiredCapabilities: []string{runtimecontract.RuntimeBlockKindManagedValidationSession}, Reason: "Shell owner inventory"},
 			}
@@ -4908,7 +4814,12 @@ func TestRuntimeFileBackedShellAdmissibilityCommitCrashRestart(t *testing.T) {
 			crashRepository := &runtimeSaveCrashRepository{
 				delegate: runtimeStateRepository{hub: hub}, after: crashAfterCAS, marker: marker,
 				match: func(current runtime.RuntimeAggregate) bool {
-					return len(current.Facts.Resources.OperationAdmissibilities) == 1 && current.Facts.Resources.OperationAdmissibilities[0].OwnerModuleID == runtimecontract.RuntimeModuleShell
+					for _, inventory := range current.Facts.Resources.OperationAdmissibilities {
+						if inventory.OwnerModuleID == runtimecontract.RuntimeModuleShell {
+							return true
+						}
+					}
+					return false
 				},
 			}
 			crashingBiz := newRuntimeTestOwner()
@@ -4924,7 +4835,6 @@ func TestRuntimeFileBackedShellAdmissibilityCommitCrashRestart(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			aggregate = runtimeTestPersistSealedSemanticAuthority(t, ctx, crashRepository, aggregate)
 			func() {
 				defer func() {
 					if recovered := recover(); recovered != marker {
@@ -4942,10 +4852,10 @@ func TestRuntimeFileBackedShellAdmissibilityCommitCrashRestart(t *testing.T) {
 				t.Fatalf("crashed Shell admissibility state=%+v err=%v", crashed, err)
 			}
 			if crashAfterCAS {
-				if len(crashed.RuntimeState.Facts.Resources.OperationAdmissibilities) != 1 || len(crashed.RuntimeState.Facts.Resources.PrerequisiteObservations) != 3 {
+				if len(crashed.RuntimeState.Facts.Resources.OperationAdmissibilities) != 2 || len(crashed.RuntimeState.Facts.Resources.PrerequisiteObservations) != 4 {
 					t.Fatalf("after-CAS Shell inventory was not persisted: %+v", crashed.RuntimeState)
 				}
-			} else if len(crashed.RuntimeState.Facts.Resources.OperationAdmissibilities) != 0 || len(crashed.RuntimeState.Facts.Resources.PrerequisiteObservations) != 2 {
+			} else if len(crashed.RuntimeState.Facts.Resources.OperationAdmissibilities) != 1 || len(crashed.RuntimeState.Facts.Resources.PrerequisiteObservations) != 3 {
 				t.Fatalf("before-CAS Shell inventory leaked into persisted state: %+v", crashed.RuntimeState)
 			}
 
@@ -4965,9 +4875,10 @@ func TestRuntimeFileBackedShellAdmissibilityCommitCrashRestart(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if len(resumed.Facts.Resources.OperationAdmissibilities) != 1 || resumed.Facts.Resources.OperationAdmissibilities[0].OwnerModuleID != runtimecontract.RuntimeModuleShell ||
-				resumed.Facts.Resources.OperationAdmissibilities[0].SnapshotID == "" || resumed.Facts.Resources.OperationAdmissibilities[0].ObservedRevision == "" ||
-				len(resumed.Facts.Resources.PrerequisiteObservations) != 4 || len(resumed.CandidateRequestSessions) != 0 || len(resumed.CandidateAttempts) != 0 ||
+			inventory := runtimeTestSemanticFixtureCatalogForOwner(t, resumed.Facts.Resources.OperationAdmissibilities, runtimecontract.RuntimeModuleShell)
+			if len(resumed.Facts.Resources.OperationAdmissibilities) != 2 || inventory.SnapshotID == "" || inventory.ObservedRevision == "" ||
+				resumed.Facts.Resources.TargetSelection == nil || len(resumed.Facts.Resources.TargetSnapshots) != 1 ||
+				len(resumed.Facts.Resources.PrerequisiteObservations) != 6 || len(resumed.CandidateRequestSessions) != 0 || len(resumed.CandidateAttempts) != 0 ||
 				resumed.ActiveDispatch != nil || len(resumed.CompletedDispatches) != 0 || len(resumed.GovernanceRequests) != 0 || len(resumed.OperationReceipts) != 0 ||
 				len(resumed.Facts.Evidence.Accepted) != 0 || len(resumed.Facts.Evidence.Rejected) != 0 {
 				t.Fatalf("restart Shell admissibility aggregate=%+v", resumed)
@@ -4977,19 +4888,32 @@ func TestRuntimeFileBackedShellAdmissibilityCommitCrashRestart(t *testing.T) {
 			} else if crashAfterCAS && *restartedInventoryCalls != 0 {
 				t.Fatalf("after-CAS restart re-queried committed Shell inventory: calls=%d", *restartedInventoryCalls)
 			}
-			inventory := resumed.Facts.Resources.OperationAdmissibilities[0]
 			inventoryObservation, found := runtimecontract.RuntimePrerequisiteObservationForID(resumed.Facts.Resources.PrerequisiteObservations, inventory.PrerequisiteID)
 			if !found {
 				t.Fatalf("restart Shell inventory observation is missing: %+v", resumed.Facts.Resources.PrerequisiteObservations)
 			}
 			if crashAfterCAS {
-				persistedInventory := crashed.RuntimeState.Facts.Resources.OperationAdmissibilities[0]
+				persistedInventory := runtimeTestSemanticFixtureCatalogForOwner(t, crashed.RuntimeState.Facts.Resources.OperationAdmissibilities, runtimecontract.RuntimeModuleShell)
 				persistedObservation, found := runtimecontract.RuntimePrerequisiteObservationForID(crashed.RuntimeState.Facts.Resources.PrerequisiteObservations, persistedInventory.PrerequisiteID)
 				if !found || inventory.SnapshotID != persistedInventory.SnapshotID || inventory.ObservedRevision != persistedInventory.ObservedRevision ||
 					inventory.AcquisitionBinding != persistedInventory.AcquisitionBinding || inventoryObservation.ObservationID != persistedObservation.ObservationID ||
 					inventoryObservation.ContentHash != persistedObservation.ContentHash {
 					t.Fatalf("after-CAS restart did not reuse exact Shell inventory: persisted=%+v resumed=%+v", persistedInventory, inventory)
 				}
+			}
+
+			// The acquisition CAS above remains pre-semantic. Seal from both exact
+			// owner catalogs, then let File commit the target snapshot required by
+			// the resulting exact validation binding before opening a candidate.
+			resumed = runtimeTestPersistSealedSemanticAuthority(t, ctx, runtimeStateRepository{hub: hub}, resumed)
+			resumed, err = restartedModule.prepareRuntimePrerequisites(ctx, resumed)
+			if err != nil {
+				t.Fatal(err)
+			}
+			inventory = runtimeTestSemanticFixtureCatalogForOwner(t, resumed.Facts.Resources.OperationAdmissibilities, runtimecontract.RuntimeModuleShell)
+			inventoryObservation, found = runtimecontract.RuntimePrerequisiteObservationForID(resumed.Facts.Resources.PrerequisiteObservations, inventory.PrerequisiteID)
+			if !found || len(resumed.Facts.Resources.TargetSnapshots) != 1 {
+				t.Fatalf("post-semantic Shell target prerequisites are incomplete: %+v", resumed)
 			}
 
 			var committedPrerequisite runtimecontract.RuntimePrerequisite
@@ -5024,8 +4948,9 @@ func TestRuntimeFileBackedShellAdmissibilityCommitCrashRestart(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if final.StateRevision != resumed.StateRevision || len(final.Facts.Resources.OperationAdmissibilities) != 1 ||
-				final.Facts.Resources.OperationAdmissibilities[0].SnapshotID != inventory.SnapshotID || len(final.Facts.Resources.PrerequisiteObservations) != len(resumed.Facts.Resources.PrerequisiteObservations) ||
+			finalInventory := runtimeTestSemanticFixtureCatalogForOwner(t, final.Facts.Resources.OperationAdmissibilities, runtimecontract.RuntimeModuleShell)
+			if final.StateRevision != resumed.StateRevision || len(final.Facts.Resources.OperationAdmissibilities) != 2 ||
+				finalInventory.SnapshotID != inventory.SnapshotID || len(final.Facts.Resources.PrerequisiteObservations) != len(resumed.Facts.Resources.PrerequisiteObservations) ||
 				len(final.PrerequisiteInvalidations) != len(resumed.PrerequisiteInvalidations) || final.Facts.Recovery != resumed.Facts.Recovery ||
 				len(final.CandidateRequestSessions) != 0 || len(final.CandidateAttempts) != 0 || final.ActiveDispatch != nil {
 				t.Fatalf("delayed duplicate Shell inventory changed persisted aggregate: before=%+v after=%+v", resumed, final)
@@ -5067,13 +4992,16 @@ func TestRuntimeFileBackedShellAdmissibilityCommitCrashRestart(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if invalidated.Decision.State != runtimecontract.ConvergenceStateNeedPrerequisite || len(invalidated.Facts.Resources.OperationAdmissibilities) != 0 || len(invalidated.Facts.Resources.TargetSnapshots) != 0 ||
-				len(invalidated.Facts.Resources.PrerequisiteObservations) != 2 || len(invalidated.Facts.Prerequisites.Pending) != 2 ||
-				invalidated.Facts.Prerequisites.Pending[0].ID != inventory.PrerequisiteID || invalidated.Facts.Prerequisites.Pending[1].Kind != runtimecontract.PrerequisiteKindTargetSnapshot ||
+			if invalidated.Decision.State != runtimecontract.ConvergenceStateNeedPrerequisite || len(invalidated.Facts.Resources.OperationAdmissibilities) != 1 || len(invalidated.Facts.Resources.TargetSnapshots) != 1 ||
+				len(invalidated.Facts.Resources.PrerequisiteObservations) != 3 || len(invalidated.Facts.Prerequisites.Pending) != 1 ||
+				invalidated.Facts.Prerequisites.Pending[0].ID != inventory.PrerequisiteID ||
 				invalidated.Facts.Recovery.PrerequisiteRefreshes != 1 || len(invalidated.CandidateAttempts) != 0 || invalidated.ActiveDispatch != nil ||
 				len(invalidated.CandidateRequestSessions) != 1 || invalidated.CandidateRequestSessions[0].State != runtimecontract.RuntimeCandidateRequestSessionTerminal ||
 				invalidated.CandidateRequestSessions[0].LastOutcome.Class != runtimecontract.RuntimeCandidateRequestOutcomePrerequisiteStale {
-				t.Fatalf("Shell target stale did not isolate Shell inventory: %+v", invalidated)
+				t.Fatalf("Shell target stale state=%s inventories=%d snapshots=%d observations=%d pending=%+v refreshes=%d sessions=%+v",
+					invalidated.Decision.State, len(invalidated.Facts.Resources.OperationAdmissibilities), len(invalidated.Facts.Resources.TargetSnapshots),
+					len(invalidated.Facts.Resources.PrerequisiteObservations), invalidated.Facts.Prerequisites.Pending,
+					invalidated.Facts.Recovery.PrerequisiteRefreshes, invalidated.CandidateRequestSessions)
 			}
 
 			stopProcess(hub, runOwner, fileOwner, shellOwner, workspaceObserver, inventoryObserver)
@@ -5092,9 +5020,9 @@ func TestRuntimeFileBackedShellAdmissibilityCommitCrashRestart(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			reacquiredInventory := reacquired.Facts.Resources.OperationAdmissibilities[0]
+			reacquiredInventory := runtimeTestSemanticFixtureCatalogForOwner(t, reacquired.Facts.Resources.OperationAdmissibilities, runtimecontract.RuntimeModuleShell)
 			reacquiredObservation, found := runtimecontract.RuntimePrerequisiteObservationForID(reacquired.Facts.Resources.PrerequisiteObservations, reacquiredInventory.PrerequisiteID)
-			if !found || *staleReacquireCalls != 1 || len(reacquired.Facts.Resources.OperationAdmissibilities) != 1 ||
+			if !found || *staleReacquireCalls != 1 || len(reacquired.Facts.Resources.OperationAdmissibilities) != 2 ||
 				len(reacquired.Facts.Resources.PrerequisiteObservations) != 4 || reacquired.Facts.Recovery.PrerequisiteRefreshes != 1 || reacquiredObservation.ObservationID == inventoryObservation.ObservationID ||
 				len(reacquired.CandidateAttempts) != 0 || reacquired.ActiveDispatch != nil {
 				t.Fatalf("fresh-process Shell inventory stale reacquisition=%+v calls=%d", reacquired, *staleReacquireCalls)
@@ -5132,7 +5060,7 @@ func TestRuntimeFileBackedShellAdmissibilityCommitCrashRestart(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if policyInvalidated.Decision.State != runtimecontract.ConvergenceStateNeedPrerequisite || len(policyInvalidated.Facts.Resources.OperationAdmissibilities) != 0 ||
+			if policyInvalidated.Decision.State != runtimecontract.ConvergenceStateNeedPrerequisite || len(policyInvalidated.Facts.Resources.OperationAdmissibilities) != 1 ||
 				len(policyInvalidated.Facts.Resources.PrerequisiteObservations) != 3 || len(policyInvalidated.Facts.Prerequisites.Pending) != 1 ||
 				policyInvalidated.Facts.Prerequisites.Pending[0].ID != reacquiredInventory.PrerequisiteID || policyInvalidated.Facts.Recovery.PrerequisiteRefreshes != 2 || len(policyInvalidated.CandidateAttempts) != 0 || policyInvalidated.ActiveDispatch != nil {
 				t.Fatalf("Shell policy stale did not isolate Shell inventory: %+v", policyInvalidated)
@@ -5158,9 +5086,9 @@ func TestRuntimeFileBackedShellAdmissibilityCommitCrashRestart(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			policyInventory := reacquiredPolicy.Facts.Resources.OperationAdmissibilities[0]
+			policyInventory := runtimeTestSemanticFixtureCatalogForOwner(t, reacquiredPolicy.Facts.Resources.OperationAdmissibilities, runtimecontract.RuntimeModuleShell)
 			policyObservation, found := runtimecontract.RuntimePrerequisiteObservationForID(reacquiredPolicy.Facts.Resources.PrerequisiteObservations, policyInventory.PrerequisiteID)
-			if !found || *policyReacquireCalls != 1 || len(reacquiredPolicy.Facts.Resources.OperationAdmissibilities) != 1 ||
+			if !found || *policyReacquireCalls != 1 || len(reacquiredPolicy.Facts.Resources.OperationAdmissibilities) != 2 ||
 				len(reacquiredPolicy.Facts.Resources.PrerequisiteObservations) != 4 || reacquiredPolicy.Facts.Recovery.PrerequisiteRefreshes != 2 || policyInventory.ObservedRevision == reacquiredInventory.ObservedRevision ||
 				policyObservation.ObservationID == reacquiredObservation.ObservationID || len(reacquiredPolicy.CandidateAttempts) != 0 || reacquiredPolicy.ActiveDispatch != nil {
 				t.Fatalf("fresh-process Shell policy stale reacquisition=%+v calls=%d", reacquiredPolicy, *policyReacquireCalls)
@@ -5347,8 +5275,6 @@ func runRuntimeFileBackedAdmissibilityThreeOwnerRestart(t *testing.T, staleCase 
 	if err != nil {
 		t.Fatal(err)
 	}
-	aggregate = runtimeTestPersistSealedSemanticAuthority(t, ctx, runtimeStateRepository{hub: value.hub}, aggregate)
-
 	// Establish capabilities, manifest and the Git repository-state binding
 	// first. They are prerequisites for the three owner inventories but are not
 	// the subject of this merge proof.
@@ -5493,13 +5419,17 @@ func runRuntimeFileBackedAdmissibilityThreeOwnerRestart(t *testing.T, staleCase 
 	var wantRetired []string
 	switch staleCase {
 	case "file_target":
-		observation := findObservation(aggregate, findInventory(aggregate, runtimecontract.RuntimeModuleFile).PrerequisiteID)
+		// File's inventory is a workspace-tree catalog and does not claim file
+		// content freshness. Shell is the consumer that persisted the exact
+		// File-owned target revision, so its observation is the only authority
+		// retired by a content change.
+		observation := findObservation(aggregate, findInventory(aggregate, runtimecontract.RuntimeModuleShell).PrerequisiteID)
 		dependency := findDependency(observation, runtimecontract.RuntimeResourceWorkspaceTarget, runtimecontract.RuntimeModuleFile)
 		if err := os.WriteFile(filepath.Join(deliverable, dependency.SubjectRef), []byte("package main\n// changed before prerequisite refresh\n"), 0o644); err != nil {
 			t.Fatal(err)
 		}
 		stale = runtimecontract.RuntimePrerequisiteStale{PrerequisiteID: observation.PrerequisiteID, ObservationID: observation.ObservationID, Domain: dependency.Domain, OwnerModuleID: dependency.OwnerModuleID, SubjectRef: dependency.SubjectRef, ExpectedRevision: dependency.Revision, ObservedRevision: "file-target-changed", Reason: "file target changed"}
-		wantRetired = []string{runtimecontract.RuntimeModuleFile, runtimecontract.RuntimeModuleShell}
+		wantRetired = []string{runtimecontract.RuntimeModuleShell}
 	case "git_repository":
 		observation := findObservation(aggregate, findInventory(aggregate, runtimecontract.RuntimeModuleGit).PrerequisiteID)
 		dependency := findDependency(observation, runtimecontract.RuntimeResourceRepositoryState, runtimecontract.RuntimeModuleGit)
@@ -5694,7 +5624,6 @@ func TestRuntimeFileBackedGitSnapshotCommitResponseLossRestartReusesCommittedSna
 	if err != nil {
 		t.Fatal(err)
 	}
-	aggregate = runtimeTestPersistSealedSemanticAuthority(t, ctx, runtimeStateRepository{hub: hub}, aggregate)
 	baseRepository := runtimeStateRepository{hub: hub}
 	crashRepository := &runtimeSaveCrashRepository{
 		delegate: baseRepository, after: true, marker: "git-snapshot-response-loss",
@@ -5791,8 +5720,18 @@ func TestRuntimeFileBackedGitSnapshotCommitResponseLossRestartReusesCommittedSna
 		}
 	})
 	t.Cleanup(func() { llmObserver.Unsubscribe(llmevents.TopicRequestRuntimeCandidate) })
+	restarted := newRuntimeDriveTestModule(t, restartedHub)
+	recovered, err := restarted.loadRuntime(ctx, "ws-v2", "run-v2")
+	if err != nil {
+		t.Fatal(err)
+	}
+	recovered, err = restarted.prepareRuntimePrerequisites(ctx, recovered)
+	if err != nil {
+		t.Fatal(err)
+	}
+	runtimeTestPersistSealedSemanticAuthority(t, ctx, runtimeStateRepository{hub: restartedHub}, recovered)
 	driveObserver := magicevent.NewSimpleObserver(ModuleID, restartedHub)
-	driveObserver.Subscribe(orchestratorevents.TopicOrchestratorDriveRuntime, newRuntimeDriveTestModule(t, restartedHub).handleRuntimeDrive)
+	driveObserver.Subscribe(orchestratorevents.TopicOrchestratorDriveRuntime, restarted.handleRuntimeDrive)
 	t.Cleanup(func() { driveObserver.Unsubscribe(orchestratorevents.TopicOrchestratorDriveRuntime) })
 	completed, err := DriveRuntime(ctx, restartedHub, orchestratorevents.DriveRuntimeCommand{WorkspaceID: "ws-v2", RunID: "run-v2"})
 	if err != nil || completed.State != runtimecontract.ConvergenceStateComplete || candidateCalls != 1 || !firstCandidateReusedSnapshot {
@@ -6360,11 +6299,11 @@ func runRuntimeFileBackedGitStaleRefreshCrashRestart(t *testing.T, crashAfterCAS
 	if err != nil {
 		t.Fatal(err)
 	}
-	aggregate = runtimeTestPersistSealedSemanticAuthority(t, ctx, runtimeStateRepository{hub: hub}, aggregate)
 	aggregate, err = module.prepareRuntimePrerequisites(ctx, aggregate)
 	if err != nil {
 		t.Fatal(err)
 	}
+	aggregate = runtimeTestPersistSealedSemanticAuthority(t, ctx, runtimeStateRepository{hub: hub}, aggregate)
 	prefix := runtimecontract.StableRuntimeCandidatePrefixHashWithExecutionContract(aggregate.Definition, aggregate.Facts.Activation.ExecutionContract)
 	if _, err := module.BeginRuntimeCandidateAttemptForTest(ctx, "ws-v2", "run-v2", 0, prefix); err != nil {
 		t.Fatal(err)
@@ -6462,10 +6401,43 @@ func runRuntimeFileBackedGitStaleRefreshCrashRestart(t *testing.T, crashAfterCAS
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = restartedGitOwner.Stop(ctx) })
+	restartedModule := newRuntimeDriveTestModule(t, restartedHub)
+	recovered, err := restartedModule.loadRuntime(ctx, "ws-v2", "run-v2")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if recovered.ActiveDispatch != nil {
+		controller, controllerErr := runtime.NewRuntimeController(runtimeStateRepository{hub: restartedHub})
+		if controllerErr != nil {
+			t.Fatal(controllerErr)
+		}
+		recovered, err = runtimeTestControllerExecuteDispatch(controller, ctx, "ws-v2", "run-v2", eventRuntimeOperationExecutor{hub: restartedHub})
+		if err != nil {
+			t.Fatalf("replay stale Git receipt after pre-CAS crash: %v", err)
+		}
+	}
+	recovered, err = restartedModule.prepareRuntimePrerequisites(ctx, recovered)
+	if err != nil {
+		t.Fatalf("reacquire Git owner facts after stale receipt: %v", err)
+	}
 	candidateCalls := 0
 	llmObserver := magicevent.NewSimpleObserver(runtimecontract.RuntimeModuleLLM, restartedHub)
 	llmObserver.Subscribe(llmevents.TopicRequestRuntimeCandidate, func(event magicevent.Event, result magicevent.Result) {
 		command := event.Data().(llmevents.RequestRuntimeCandidateCommand)
+		if command.DocumentKind == runtimecontract.RuntimeProviderDocumentSemanticPlan {
+			response, responseErr := runtimeGitSemanticResult(command)
+			if responseErr != nil {
+				t.Errorf("rebuild Git semantic authority: %v", responseErr)
+				result.Set(runtimeProviderResultWithAuditForTest(command, llmevents.RequestRuntimeCandidateResult{
+					Feedback: runtimeProviderFeedbackForTest(t, command, runtimecontract.RuntimeCandidateFailure{
+						Class: runtimecontract.RuntimeCandidateFailureClassContract, Code: "git_semantic_fixture_invalid", Reason: responseErr.Error(),
+					}),
+				}), nil)
+				return
+			}
+			result.Set(runtimeProviderResultWithAuditForTest(command, response), nil)
+			return
+		}
 		if command.Decision.State == runtimecontract.ConvergenceStateNeedStateChange {
 			candidateCalls++
 			refs := requiredOperationRefs(command.Decision.RequiredOutput.RequiredOperationSequence)
@@ -6478,11 +6450,11 @@ func runRuntimeFileBackedGitStaleRefreshCrashRestart(t *testing.T, crashAfterCAS
 	})
 	t.Cleanup(func() { llmObserver.Unsubscribe(llmevents.TopicRequestRuntimeCandidate) })
 	driveObserver := magicevent.NewSimpleObserver(ModuleID, restartedHub)
-	driveObserver.Subscribe(orchestratorevents.TopicOrchestratorDriveRuntime, newRuntimeDriveTestModule(t, restartedHub).handleRuntimeDrive)
+	driveObserver.Subscribe(orchestratorevents.TopicOrchestratorDriveRuntime, restartedModule.handleRuntimeDrive)
 	t.Cleanup(func() { driveObserver.Unsubscribe(orchestratorevents.TopicOrchestratorDriveRuntime) })
 	completed, err := DriveRuntime(ctx, restartedHub, orchestratorevents.DriveRuntimeCommand{WorkspaceID: "ws-v2", RunID: "run-v2"})
 	if err != nil || completed.State != runtimecontract.ConvergenceStateComplete || candidateCalls != 1 {
-		t.Fatalf("stale refresh restart completed=%+v candidateCalls=%d err=%v", completed, candidateCalls, err)
+		t.Fatalf("stale refresh restart completed=%+v terminal=%+v candidateCalls=%d err=%v", completed, completed.Terminal, candidateCalls, err)
 	}
 	persisted, err := restartedRuns.GetByWorkspaceID(ctx, "ws-v2", "run-v2")
 	if err != nil || persisted.RuntimeState == nil || len(persisted.RuntimeState.OperationReceipts) != 3 {
@@ -6583,11 +6555,11 @@ func runRuntimeFileBackedGitReceiptResourceChangeRefreshCrashRestart(t *testing.
 	if err != nil {
 		t.Fatal(err)
 	}
-	aggregate = runtimeTestPersistSealedSemanticAuthority(t, ctx, runtimeStateRepository{hub: hub}, aggregate)
 	aggregate, err = module.prepareRuntimePrerequisites(ctx, aggregate)
 	if err != nil {
 		t.Fatal(err)
 	}
+	aggregate = runtimeTestPersistSealedSemanticAuthority(t, ctx, runtimeStateRepository{hub: hub}, aggregate)
 	prefix := runtimecontract.StableRuntimeCandidatePrefixHashWithExecutionContract(aggregate.Definition, aggregate.Facts.Activation.ExecutionContract)
 	if _, err := module.BeginRuntimeCandidateAttemptForTest(ctx, "ws-v2", "run-v2", 0, prefix); err != nil {
 		t.Fatal(err)
@@ -6838,11 +6810,11 @@ func TestRuntimeFileBackedMixedOwnerReceiptThenLocalScratchStaleCrashRestart(t *
 			if err != nil {
 				t.Fatal(err)
 			}
-			aggregate = runtimeTestPersistSealedSemanticAuthority(t, ctx, runtimeStateRepository{hub: first.hub}, aggregate)
 			aggregate, err = owner.prepareRuntimePrerequisites(ctx, aggregate)
 			if err != nil || aggregate.Facts.Resources.ValidationScratch == nil {
 				t.Fatalf("initial mixed prerequisites aggregate=%+v err=%v", aggregate, err)
 			}
+			aggregate = runtimeTestPersistSealedSemanticAuthority(t, ctx, runtimeStateRepository{hub: first.hub}, aggregate)
 			committedScratch := *aggregate.Facts.Resources.ValidationScratch
 			prefix := runtimecontract.StableRuntimeCandidatePrefixHashWithExecutionContract(aggregate.Definition, aggregate.Facts.Activation.ExecutionContract)
 			if _, err := owner.BeginRuntimeCandidateAttemptForTest(ctx, "ws-v2", "run-v2", 0, prefix); err != nil {
@@ -6979,6 +6951,59 @@ func runtimeGitCapabilityStateBootstrap() runtimecontract.RuntimeBootstrap {
 		{Kind: runtimecontract.PrerequisiteKindOperationAdmissibility, OwnerModuleID: runtimecontract.RuntimeModuleGit, RequiredCapabilities: []string{runtimecontract.StepKindGitWrite}, Reason: "git owner inventory"},
 	}
 	return runtimeTestBootstrapWithBindings(bootstrap)
+}
+
+func runtimeGitSemanticResult(command llmevents.RequestRuntimeCandidateCommand) (llmevents.RequestRuntimeCandidateResult, error) {
+	document := runtimecontract.RuntimeSemanticPlanDocument{
+		SchemaVersion: runtimecontract.RuntimeSemanticPlanDocumentSchemaCurrent,
+		ManifestHash:  command.SemanticManifest.Hash, DefinitionSeedHash: command.SemanticManifest.DefinitionSeedHash,
+		PlanStep: command.SemanticContext.PlanStep,
+	}
+	switch command.SemanticContext.PlanStep {
+	case runtimecontract.RuntimeSemanticPlanStepCoverageOrder:
+		for _, item := range command.SemanticManifest.CoverageItems {
+			document.CoverageOrder = append(document.CoverageOrder, item.ID)
+		}
+	case runtimecontract.RuntimeSemanticPlanStepProofBatch:
+		document.BatchID = command.SemanticContext.BatchID
+		document.BatchSequence = command.SemanticContext.BatchSequence
+		document.BatchCoverageWorkItemIDs = append([]common.CoverageWorkItemID(nil), command.SemanticContext.BatchCoverageWorkItemIDs...)
+		var catalog runtimecontract.RuntimeOperationAdmissibility
+		for _, value := range command.SemanticManifest.OwnerCatalogs {
+			if value.OwnerModuleID == runtimecontract.RuntimeModuleGit {
+				catalog = value.Normalized()
+				break
+			}
+		}
+		if catalog.SnapshotID == "" {
+			return llmevents.RequestRuntimeCandidateResult{}, fmt.Errorf("semantic Git manifest has no owner catalog")
+		}
+		for _, coverageID := range document.BatchCoverageWorkItemIDs {
+			document.Proposals = append(document.Proposals, runtimecontract.RuntimeSemanticProofProposal{
+				CoverageWorkItemID: coverageID, OwnerModuleID: runtimecontract.RuntimeModuleGit,
+				OperationKind: runtimecontract.StepKindGitWrite, OperationVariantID: "commit",
+				Target: runtimecontract.RuntimeOperationTargetAuthorization{
+					Policy:               runtimecontract.RuntimeOperationTargetPolicyExistingOwnerScope,
+					OwnerScopeTargetRefs: append([]string(nil), catalog.TargetRefs...),
+					OwnerSelectorRefs:    append([]string(nil), catalog.SelectorRefs...),
+				},
+				RequiredEvidenceKinds: []string{runtimecontract.EvidenceKindStateChange},
+				RequiredEffectScopes:  []runtimecontract.RuntimeEffectScope{runtimecontract.RuntimeEffectWorkspaceDurable},
+				DeclarationRef:        "git-semantic/" + string(coverageID),
+			})
+		}
+	default:
+		return llmevents.RequestRuntimeCandidateResult{}, fmt.Errorf("unexpected Git semantic step %q", command.SemanticContext.PlanStep)
+	}
+	payload, err := runtimecontract.EncodeRuntimeSemanticPlanPayloadWithManifest(command.SemanticManifest, document)
+	if err != nil {
+		return llmevents.RequestRuntimeCandidateResult{}, err
+	}
+	return llmevents.RequestRuntimeCandidateResult{
+		DocumentKind: command.DocumentKind, RequestIdentity: command.RequestIdentity,
+		ExpectedDocumentHash: runtimeExpectedDocumentHash(command.ExpectedDocument),
+		DocumentOutcome:      runtimeCompleteDocumentOutcome(command.ExpectedDocument, payload),
+	}, nil
 }
 
 func runtimeGitStateCandidate(requirementRefs []string) runtimecontract.RuntimeCandidate {
@@ -7155,6 +7180,19 @@ func containsRuntimeString(values []string, want string) bool {
 	for _, value := range values {
 		if value == want {
 			return true
+		}
+	}
+	return false
+}
+
+func runtimeFactsHaveProspectiveTarget(facts runtimecontract.RuntimeFacts, target string) bool {
+	focuses := append([]runtimecontract.CoverageFocus{facts.Focus}, facts.RemainingFocuses...)
+	focuses = append(focuses, facts.CompletedFocuses...)
+	for _, focus := range focuses {
+		for _, binding := range focus.CoverageEvidenceBindings {
+			if containsRuntimeString(binding.ProspectiveTargetRefs, target) {
+				return true
+			}
 		}
 	}
 	return false
@@ -7460,10 +7498,14 @@ func testRuntimeFileBackedPatchReplayProofRestartsAfterOwnerReceiptCASFailure(t 
 	if err != nil {
 		t.Fatal(err)
 	}
-	aggregate = runtimeTestPersistSealedSemanticAuthority(t, ctx, baseRepository, aggregate)
 	aggregate, err = crashingModule.prepareRuntimePrerequisites(ctx, aggregate)
 	if err != nil {
 		t.Fatal(err)
+	}
+	aggregate = runtimeTestPersistSealedSemanticAuthority(t, ctx, baseRepository, aggregate)
+	aggregate, err = crashingModule.prepareRuntimePrerequisites(ctx, aggregate)
+	if err != nil {
+		t.Fatalf("prepare replay-proof post-semantic target authority: %v", err)
 	}
 	candidate := candidateForTarget(target)
 	providerCalls := 0
@@ -7602,7 +7644,7 @@ func testRuntimeFileBackedPatchReplayProofRestartsAfterOwnerReceiptCASFailure(t 
 		restartedReceiptObserver.Unsubscribe(orchestratorevents.TopicOrchestratorCommitRuntimeOperationReceipt)
 	})
 	completed, err := restartedBiz.ExecuteRuntimeDispatch(ctx, "ws-v2", "run-v2", eventRuntimeOperationExecutor{hub: restartedHub})
-	if err != nil || completed.ActiveDispatch != nil || completed.Decision.State != runtimecontract.ConvergenceStateNeedPrerequisite || completed.Facts.Recovery.OperationRecoveryAttempts != 1 || len(completed.OperationReceipts) != 1 || len(completed.Facts.Evidence.Accepted) != 1 {
+	if err != nil || completed.ActiveDispatch != nil || completed.Decision.State != runtimecontract.ConvergenceStateNeedAssessment || completed.Facts.Recovery.OperationRecoveryAttempts != 1 || len(completed.OperationReceipts) != 1 || len(completed.Facts.Evidence.Accepted) != 1 {
 		t.Fatalf("restart did not recover proof-bound receipt exactly once aggregate=%+v err=%v", completed, err)
 	}
 	receipt := completed.OperationReceipts[0]
@@ -7887,10 +7929,14 @@ func TestRuntimeFileBackedPatchVariantRestartAfterOwnerReceipt(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			aggregate = runtimeTestPersistSealedSemanticAuthority(t, ctx, runtimeStateRepository{hub: hub}, aggregate)
 			aggregate, err = module.prepareRuntimePrerequisites(ctx, aggregate)
 			if err != nil {
 				t.Fatal(err)
+			}
+			aggregate = runtimeTestPersistSealedSemanticAuthority(t, ctx, runtimeStateRepository{hub: hub}, aggregate)
+			aggregate, err = module.prepareRuntimePrerequisites(ctx, aggregate)
+			if err != nil {
+				t.Fatalf("prepare patch variant post-semantic target authority: %v", err)
 			}
 			prefix := runtimecontract.StableRuntimeCandidatePrefixHashWithExecutionContract(aggregate.Definition, aggregate.Facts.Activation.ExecutionContract)
 			aggregate, err = module.requestAndSealRuntimeCandidateWithRetry(ctx, aggregate, prefix)
@@ -7953,6 +7999,12 @@ func TestDriveRuntimeFileBackedRestartRecoversCrashAfterOwnerReceipt(t *testing.
 	root := t.TempDir()
 	runs := filerepository.NewRunRepository(filepath.Join(root, "runs.json"))
 	bootstrap := runtimeBootstrap()
+	runtimeTestDeclareExistingWorkspaceTarget(&bootstrap, "target.txt")
+	bootstrap.Requirements = append(bootstrap.Requirements, runtimecontract.RuntimeRequirement{
+		Kind: runtimecontract.PrerequisiteKindOperationAdmissibility, OwnerModuleID: runtimecontract.RuntimeModuleFile,
+		RequiredCapabilities: []string{runtimecontract.StepKindFileEdit}, Reason: "File owner inventory",
+	})
+	bootstrap = runtimeTestBootstrapWithReboundBindings(bootstrap)
 	if err := runs.Create(ctx, &runmodel.Run{
 		ID: "run-v2", WorkspaceID: "ws-v2", GoalID: "goal-v2", DoDID: "dod-v2",
 		DefinitionRevision: "definition-v2", RuntimeBootstrap: &bootstrap, ReconciliationScope: runtimecontract.RuntimeCWIReconciliationScopeCurrentRun, State: common.RunStateActive,
@@ -8021,7 +8073,10 @@ func TestDriveRuntimeFileBackedRestartRecoversCrashAfterOwnerReceipt(t *testing.
 	if err != nil {
 		t.Fatal(err)
 	}
-	aggregate.Facts.Focus.TargetRefs = []string{"target.txt"}
+	aggregate, err = module.prepareRuntimePrerequisites(ctx, aggregate)
+	if err != nil {
+		t.Fatal(err)
+	}
 	aggregate = runtimeTestPersistSealedSemanticAuthority(t, ctx, runtimeStateRepository{hub: hub}, aggregate)
 	aggregate, err = module.prepareRuntimePrerequisites(ctx, aggregate)
 	if err != nil {
@@ -8171,6 +8226,7 @@ func TestRuntimeFileBackedClaimEvidenceAndDispatchCloseCrashMatrix(t *testing.T)
 			root := t.TempDir()
 			runs := filerepository.NewRunRepository(filepath.Join(root, "runs.json"))
 			bootstrap := runtimeBootstrap()
+			runtimeTestDeclareExistingWorkspaceTarget(&bootstrap, "target.txt")
 			if testCase.validation {
 				bootstrap.Definition.CapabilityContract = []string{runtimecontract.RuntimeBlockKindManagedValidationSession}
 				bootstrap.Activation.EvidencePolicies = []runtimecontract.RuntimeEvidencePolicy{{
@@ -8182,9 +8238,17 @@ func TestRuntimeFileBackedClaimEvidenceAndDispatchCloseCrashMatrix(t *testing.T)
 					Kind: runtimecontract.PrerequisiteKindCapability, OwnerModuleID: runtimecontract.RuntimeModuleShell,
 					CapabilityClass: runtimecontract.RuntimeCapabilityClassValidation, RequiredCapabilities: []string{runtimecontract.RuntimeBlockKindManagedValidationSession},
 				}, {
+					Kind: runtimecontract.PrerequisiteKindOperationAdmissibility, OwnerModuleID: runtimecontract.RuntimeModuleFile,
+					RequiredCapabilities: []string{runtimecontract.StepKindFileRead}, Reason: "File workspace target catalog",
+				}, {
 					Kind: runtimecontract.PrerequisiteKindOperationAdmissibility, OwnerModuleID: runtimecontract.RuntimeModuleShell,
 					RequiredCapabilities: []string{runtimecontract.RuntimeBlockKindManagedValidationSession}, Reason: "Shell validation inventory",
 				}}
+			} else {
+				bootstrap.Requirements = append(bootstrap.Requirements, runtimecontract.RuntimeRequirement{
+					Kind: runtimecontract.PrerequisiteKindOperationAdmissibility, OwnerModuleID: runtimecontract.RuntimeModuleFile,
+					RequiredCapabilities: []string{runtimecontract.StepKindFileEdit}, Reason: "File owner inventory",
+				})
 			}
 			bootstrap = runtimeTestBootstrapWithReboundBindings(bootstrap)
 			if err := runs.Create(ctx, &runmodel.Run{
@@ -8241,7 +8305,10 @@ func TestRuntimeFileBackedClaimEvidenceAndDispatchCloseCrashMatrix(t *testing.T)
 				t.Fatal(err)
 			}
 			target := "target.txt"
-			aggregate.Facts.Focus.TargetRefs = []string{target}
+			aggregate, err = module.prepareRuntimePrerequisites(ctx, aggregate)
+			if err != nil {
+				t.Fatal(err)
+			}
 			aggregate = runtimeTestPersistSealedSemanticAuthority(t, ctx, runtimeStateRepository{hub: hub}, aggregate)
 			aggregate, err = module.prepareRuntimePrerequisites(ctx, aggregate)
 			if err != nil {
@@ -8293,6 +8360,8 @@ func TestRuntimeFileBackedClaimEvidenceAndDispatchCloseCrashMatrix(t *testing.T)
 				}); err != nil {
 					t.Fatal(err)
 				}
+			} else if err := recordRuntimeDriveFixtureCandidateFeasibilities(ctx, module, aggregate, 0, candidate); err != nil {
+				t.Fatal(err)
 			}
 			sealed, err := module.AcceptRuntimeCandidateAttempt(ctx, "ws-v2", "run-v2", 0, candidate)
 			if err != nil || sealed.ActiveDispatch == nil {
@@ -8408,6 +8477,13 @@ func TestRuntimeFileBackedClaimEvidenceAndDispatchCloseCrashMatrix(t *testing.T)
 				}
 				return
 			}
+			if loaded.Decision.State == runtimecontract.ConvergenceStateNeedPrerequisite {
+				restartedModule := newRuntimeDriveTestModule(t, restartedHub)
+				loaded, err = restartedModule.prepareRuntimePrerequisites(ctx, loaded)
+				if err != nil {
+					t.Fatalf("reacquire owner facts after recovered receipt: %v", err)
+				}
+			}
 			if loaded.Decision.State == runtimecontract.ConvergenceStateNeedAssessment {
 				if _, err := beginRuntimeCandidateAttemptForTest(ctx, restarted, "ws-v2", "run-v2", 0, "crash-recovery-assessment"); err != nil {
 					t.Fatal(err)
@@ -8463,6 +8539,11 @@ func TestRuntimeFileBackedEvidenceCoverageFocusAdvanceCrashRestart(t *testing.T)
 			if err := os.MkdirAll(deliverable, 0o755); err != nil {
 				t.Fatal(err)
 			}
+			for _, target := range []string{"one.txt", "two.txt"} {
+				if err := os.WriteFile(filepath.Join(deliverable, target), []byte("old\n"), 0o644); err != nil {
+					t.Fatal(err)
+				}
+			}
 			bootstrap := runtimeBootstrap()
 			bootstrap.DefinitionFocuses = []runtimecontract.RuntimeDefinitionFocus{
 				{ID: "focus-1", SliceID: "slice-1", CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-1"}, RequiredEvidenceKinds: []string{runtimecontract.EvidenceKindStateChange}},
@@ -8473,6 +8554,27 @@ func TestRuntimeFileBackedEvidenceCoverageFocusAdvanceCrashRestart(t *testing.T)
 				{ID: "slice-2", Title: "two", Scope: "fixture", Priority: 2, CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-2"}, RequiredEvidenceKinds: []string{runtimecontract.EvidenceKindStateChange}, CompletionPolicy: runtimecontract.RuntimeAcceptanceSliceCompletionAll, ResultPolicy: runtimecontract.RuntimeAcceptanceSliceResultAllowed},
 			}
 			bootstrap.CoverageItems = []runtimecontract.RuntimeCoverageItem{{ID: "cwi-1", SliceID: "slice-1"}, {ID: "cwi-2", SliceID: "slice-2"}}
+			bootstrap.Activation.ExecutionContract.ProfileContracts = []runtimecontract.RuntimeProfileContract{{
+				ID: "test-focus-advance-targets",
+				EvidenceRequirements: []runtimecontract.RuntimeProfileEvidenceRequirement{
+					{ID: "cwi-1", Scope: "fixture", TargetRole: "deliverable", TargetRefs: []string{"one.txt"}, RequireTargetGrounding: true},
+					{ID: "cwi-2", Scope: "fixture", TargetRole: "deliverable", TargetRefs: []string{"two.txt"}, RequireTargetGrounding: true},
+				},
+			}}
+			for index, target := range []string{"one.txt", "two.txt"} {
+				focus := &bootstrap.DefinitionFocuses[index]
+				focus.TargetRole = "deliverable"
+				focus.TargetDiscoverySources = []string{runtimecontract.RuntimeValidationDiscoverySourceWorkspaceManifest}
+				focus.TargetSelectorRef = "file/profile_declared_candidates"
+				focus.TargetSelectorOwnerRef = "test-profile"
+				focus.TargetSelectorSubjectRef = string(focus.CoverageWorkItemIDs[0])
+				focus.TargetSelectorCandidateRefs = []string{target}
+				focus.RequireTargetGrounding = true
+			}
+			bootstrap.Requirements = append(bootstrap.Requirements, runtimecontract.RuntimeRequirement{
+				Kind: runtimecontract.PrerequisiteKindOperationAdmissibility, OwnerModuleID: runtimecontract.RuntimeModuleFile,
+				RequiredCapabilities: []string{runtimecontract.StepKindFileEdit}, Reason: "File owner inventory",
+			})
 			bootstrap = runtimeTestBootstrapWithBindings(bootstrap)
 			if err := filerepository.NewRunRepository(runsPath).Create(ctx, &runmodel.Run{
 				ID: "run-v2", WorkspaceID: "ws-v2", GoalID: bootstrap.Definition.GoalID, DoDID: bootstrap.Definition.DoDID,
@@ -8547,9 +8649,9 @@ func TestRuntimeFileBackedEvidenceCoverageFocusAdvanceCrashRestart(t *testing.T)
 				t.Fatal(err)
 			}
 			target := "one.txt"
-			aggregate.Facts.Focus.TargetRefs = []string{target}
-			for index := range aggregate.Facts.RemainingFocuses {
-				aggregate.Facts.RemainingFocuses[index].TargetRefs = []string{"two.txt"}
+			aggregate, err = module.prepareRuntimePrerequisites(ctx, aggregate)
+			if err != nil {
+				t.Fatal(err)
 			}
 			aggregate = runtimeTestPersistSealedSemanticAuthority(t, ctx, runtimeStateRepository{hub: first.hub}, aggregate)
 			aggregate, err = module.prepareRuntimePrerequisites(ctx, aggregate)
@@ -8560,9 +8662,13 @@ func TestRuntimeFileBackedEvidenceCoverageFocusAdvanceCrashRestart(t *testing.T)
 			if _, err := module.BeginRuntimeCandidateAttemptForTest(ctx, "ws-v2", "run-v2", 0, prefix); err != nil {
 				t.Fatal(err)
 			}
-			sealed, err := module.AcceptRuntimeCandidateAttempt(ctx, "ws-v2", "run-v2", 0, runtimecontract.RuntimeCandidate{StateChange: &runtimecontract.StateChangeCandidate{Operations: []runtimecontract.StateChangingOperation{{Operation: runtimecontract.RuntimeOperation{
+			candidate := runtimecontract.RuntimeCandidate{StateChange: &runtimecontract.StateChangeCandidate{Operations: []runtimecontract.StateChangingOperation{{Operation: runtimecontract.RuntimeOperation{
 				ID: "write-focus-1", Kind: runtimecontract.StepKindFileEdit, CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-1"}, TargetRefs: []string{target}, Parameters: runtimeFileEditParameters(target),
-			}}}}})
+			}}}}}
+			if err := recordRuntimeDriveFixtureCandidateFeasibilities(ctx, module, aggregate, 0, candidate); err != nil {
+				t.Fatal(err)
+			}
+			sealed, err := module.AcceptRuntimeCandidateAttempt(ctx, "ws-v2", "run-v2", 0, candidate)
 			if err != nil || sealed.ActiveDispatch == nil {
 				t.Fatalf("sealed focus-one dispatch=%+v err=%v", sealed, err)
 			}
@@ -8706,10 +8812,12 @@ func TestRuntimeFileBackedOperationGovernanceGrantFreshProcessCrashRestart(t *te
 			runs := filerepository.NewRunRepository(filepath.Join(root, "runs.json"))
 			approvals := filerepository.NewApprovalRepository(filepath.Join(root, "approvals.json"))
 			bootstrap := runtimeBootstrap()
+			runtimeTestDeclareProspectiveWorkspaceTarget(&bootstrap, ".env")
 			bootstrap.Definition.CapabilityContract = []string{runtimecontract.StepKindFileWrite, runtimecontract.RuntimeBlockKindApprovalRequest}
 			bootstrap.Requirements = []runtimecontract.RuntimeRequirement{
 				{Kind: runtimecontract.PrerequisiteKindCapability, OwnerModuleID: runtimecontract.RuntimeModuleFile, CapabilityClass: runtimecontract.RuntimeCapabilityClassStateChange, RequiredCapabilities: []string{runtimecontract.StepKindFileWrite}},
 				{Kind: runtimecontract.PrerequisiteKindCapability, OwnerModuleID: runtimecontract.RuntimeModuleApproval, CapabilityClass: runtimecontract.RuntimeCapabilityClassGovernance, RequiredCapabilities: []string{runtimecontract.RuntimeBlockKindApprovalRequest}},
+				{Kind: runtimecontract.PrerequisiteKindOperationAdmissibility, OwnerModuleID: runtimecontract.RuntimeModuleFile, RequiredCapabilities: []string{runtimecontract.StepKindFileWrite}, Reason: "File owner inventory"},
 			}
 			bootstrap = runtimeTestBootstrapWithReboundBindings(bootstrap)
 			if err := runs.Create(ctx, &runmodel.Run{
@@ -8811,20 +8919,27 @@ func TestRuntimeFileBackedOperationGovernanceGrantFreshProcessCrashRestart(t *te
 			}
 
 			first := startProcess(t)
-			facts := runtimeAggregate(t, 1).Facts
-			facts.Focus.TargetRefs = []string{".env"}
-			facts.Focus.AcceptedStepKinds = []string{runtimecontract.StepKindFileWrite}
-			facts.Capabilities = runtimecontract.RuntimeCapabilities{
-				StateChangeKinds: []string{runtimecontract.StepKindFileWrite},
-				GovernanceKinds:  []string{runtimecontract.RuntimeBlockKindApprovalRequest},
+			run, err := runs.GetByWorkspaceID(ctx, "ws-v2", "run-v2")
+			if err != nil {
+				stopProcess(first)
+				t.Fatal(err)
 			}
-			definition := bootstrap.Definition
-			initialized, err := runtimeTestControllerInitialize(first.controller, ctx, facts, definition, nil)
+			initialized, err := first.module.initializeRuntimeFromRun(ctx, run)
+			if err != nil {
+				stopProcess(first)
+				t.Fatal(err)
+			}
+			initialized, err = first.module.prepareRuntimePrerequisites(ctx, initialized)
+			if err != nil {
+				stopProcess(first)
+				t.Fatal(err)
+			}
+			initialized = runtimeTestPersistSealedSemanticAuthority(t, ctx, runtimeStateRepository{hub: first.hub}, initialized)
+			initialized, err = first.module.prepareRuntimePrerequisites(ctx, initialized)
 			if err != nil || initialized.Decision.State != runtimecontract.ConvergenceStateNeedStateChange {
 				stopProcess(first)
 				t.Fatalf("governance fixture initialization=%+v err=%v", initialized, err)
 			}
-			initialized = runtimeTestPersistSealedSemanticAuthority(t, ctx, runtimeStateRepository{hub: first.hub}, initialized)
 			if _, err := beginRuntimeCandidateAttemptForTest(ctx, first.controller, "ws-v2", "run-v2", 0, "governance-grant-prefix"); err != nil {
 				stopProcess(first)
 				t.Fatal(err)
@@ -8834,6 +8949,10 @@ func TestRuntimeFileBackedOperationGovernanceGrantFreshProcessCrashRestart(t *te
 				ID: "write-governed", Kind: runtimecontract.StepKindFileWrite, CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-v2"}, TargetRefs: []string{target},
 				Parameters: []runtimecontract.OperationParameter{{Name: "content", String: &content}},
 			}}}}}
+			if err := recordRuntimeDriveFixtureCandidateFeasibilities(ctx, first.module, initialized, 0, candidate); err != nil {
+				stopProcess(first)
+				t.Fatal(err)
+			}
 			sealed, err := admitAndSealRuntimeCandidateAttemptForTest(ctx, first.controller, "ws-v2", "run-v2", 0, candidate)
 			if err != nil || sealed.Aggregate.ActiveDispatch == nil {
 				stopProcess(first)
@@ -9002,6 +9121,11 @@ func runtimeFocusCovers(focus runtimecontract.CoverageFocus, coverageID common.C
 	return false
 }
 
+func runtimeShellManagedValidationCheckRefForTest(recipeID string) string {
+	digest := sha256.Sum256([]byte("shell-managed-validation-check\x00" + strings.TrimSpace(recipeID)))
+	return fmt.Sprintf("shell-validation-check-%x", digest)[:43]
+}
+
 func TestDriveRuntimeFileBackedTwoFocusStateValidationAssessmentAndRestart(t *testing.T) {
 	ctx := context.Background()
 	hub := magicevent.NewHub(32)
@@ -9027,7 +9151,7 @@ func TestDriveRuntimeFileBackedTwoFocusStateValidationAssessmentAndRestart(t *te
 				ID: "cwi-1", Scope: "test", TargetRole: "deliverable", TargetRefs: []string{"focus-1.txt"}, RequireTargetGrounding: true,
 				RequiredEvidenceKinds: []string{runtimecontract.EvidenceKindStateChange, runtimecontract.EvidenceKindValidation},
 				AcceptedStepKinds:     []string{runtimecontract.StepKindFileEdit, runtimecontract.RuntimeBlockKindManagedValidationSession},
-				ValidationRecipeID:    "two-focus-validation-1", RequiredCheckRefs: []string{"two-focus-validation-1"},
+				ValidationRecipeID:    "two-focus-validation-1", RequiredCheckRefs: []string{runtimeShellManagedValidationCheckRefForTest("two-focus-validation-1")},
 			},
 			{
 				ID: "cwi-2", Scope: "test", TargetRole: "deliverable", TargetRefs: []string{"focus-1.txt"}, RequireTargetGrounding: true,
@@ -9036,7 +9160,7 @@ func TestDriveRuntimeFileBackedTwoFocusStateValidationAssessmentAndRestart(t *te
 				AcceptedOperationVariants: []runtimecontract.RuntimeOperationVariantRef{{
 					Kind: runtimecontract.RuntimeBlockKindPatchApply, VariantID: "file_write",
 				}},
-				ValidationRecipeID: "two-focus-validation-2", RequiredCheckRefs: []string{"two-focus-validation-2"},
+				ValidationRecipeID: "two-focus-validation-2", RequiredCheckRefs: []string{runtimeShellManagedValidationCheckRefForTest("two-focus-validation-2")},
 			},
 		},
 	}}
@@ -9374,7 +9498,7 @@ func runtimeTwoFocusSemanticResult(command llmevents.RequestRuntimeCandidateComm
 					},
 					RequiredEvidenceKinds: []string{runtimecontract.EvidenceKindValidation},
 					RequiredEffectScopes:  []runtimecontract.RuntimeEffectScope{runtimecontract.RuntimeEffectEphemeralSession},
-					ValidationRecipeID:    "two-focus-validation-2", RequiredCheckRefs: []string{"two-focus-validation-2"},
+					ValidationRecipeID:    "two-focus-validation-2", RequiredCheckRefs: []string{runtimeShellManagedValidationCheckRefForTest("two-focus-validation-2")},
 					DeclarationRef: "two-focus/cwi-2",
 				},
 			)
@@ -9428,7 +9552,18 @@ func TestDriveRuntimeCompletesTypedPathAndIsRestartIdempotent(t *testing.T) {
 	hub := magicevent.NewHub(32)
 	t.Cleanup(func() { hub.Terminate(ctx) })
 	runs := memory.NewRunRepository()
+	deliverable, internalDirectory := t.TempDir(), t.TempDir()
+	target := "target.txt"
+	if err := os.WriteFile(filepath.Join(deliverable, target), []byte("old\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
 	bootstrap := runtimeBootstrap()
+	runtimeTestDeclareExistingWorkspaceTarget(&bootstrap, target)
+	bootstrap.Requirements = append(bootstrap.Requirements, runtimecontract.RuntimeRequirement{
+		Kind: runtimecontract.PrerequisiteKindOperationAdmissibility, OwnerModuleID: runtimecontract.RuntimeModuleFile,
+		RequiredCapabilities: []string{runtimecontract.StepKindFileEdit}, Reason: "File owner inventory",
+	})
+	bootstrap = runtimeTestBootstrapWithReboundBindings(bootstrap)
 	if err := runs.Create(ctx, &runmodel.Run{
 		ID: "run-v2", WorkspaceID: "ws-v2", GoalID: "goal-v2", DoDID: "dod-v2",
 		DefinitionRevision: "definition-v2", RuntimeBootstrap: &bootstrap, ReconciliationScope: runtimecontract.RuntimeCWIReconciliationScopeCurrentRun, State: common.RunStateActive,
@@ -9448,40 +9583,19 @@ func TestDriveRuntimeCompletesTypedPathAndIsRestartIdempotent(t *testing.T) {
 	workspaceObserver := magicevent.NewSimpleObserver(workspaceevents.CommandDestination, hub)
 	workspaceObserver.Subscribe(workspaceevents.TopicWorkspaceCommandGet, func(_ magicevent.Event, result magicevent.Result) {
 		result.Set(workspaceevents.WorkspaceResult{Workspace: &workspaceevents.Workspace{
-			ID: "ws-v2", DeliverableDirectory: t.TempDir(), InternalDirectory: t.TempDir(),
+			ID: "ws-v2", DeliverableDirectory: deliverable, InternalDirectory: internalDirectory,
 		}}, nil)
 	})
 	t.Cleanup(func() { workspaceObserver.Unsubscribe(workspaceevents.TopicWorkspaceCommandGet) })
 
-	fileObserver := magicevent.NewSimpleObserver(runtimecontract.RuntimeModuleFile, hub)
-	fileObserver.Subscribe(fileevents.TopicAcquireRuntimeCapabilities, func(event magicevent.Event, result magicevent.Result) {
-		command := event.Data().(fileevents.AcquireRuntimeCapabilitiesCommand)
-		response, err := fileevents.ResolveRuntimeCapabilities(command, runtimecontract.RuntimeModuleFile, runtimecontract.StepKindFileEdit)
-		if err != nil {
-			t.Errorf("resolve capabilities: %v", err)
-			return
-		}
-		result.Set(response, nil)
-	})
-	operationCount := 0
-	fileObserver.Subscribe(fileevents.TopicExecuteFileEditOperation, func(event magicevent.Event, result magicevent.Result) {
-		operationCount++
-		command := event.Data().(fileevents.ExecuteFileEditOperationCommand)
-		receipt := orchestratorevents.NewRuntimeOperationReceipt(command.Execution, runtimecontract.RuntimeModuleFile, command.OperationID, runtimecontract.RuntimeOperationExecutionStatusAccepted, command.TargetRefs, runtimecontract.RuntimeOperationEvidence{Summary: "状态变更已完成"}, nil, nil, "2026-07-20T00:00:00Z")
-		committed, err := commitRuntimeOperationReceiptForTest(event.Context(), hub, runtimecontract.RuntimeModuleFile, command.WorkspaceID, command.RunID, command.DispatchID, command.Execution, receipt)
-		if err != nil {
-			t.Errorf("commit owner receipt: %v", err)
-			return
-		}
-		result.Set(fileevents.ExecuteOperationResult{
-			Receipt: committed,
-		}, nil)
-	})
-	t.Cleanup(func() {
-		fileObserver.Unsubscribe(fileevents.TopicExecuteFileEditOperation)
-		fileObserver.Unsubscribe(fileevents.TopicAcquireRuntimeCapabilities)
-	})
-	target := "target.txt"
+	fileOwner := filemodule.New()
+	if err := fileOwner.Configure(filebiz.Dependencies{EventHub: hub}); err != nil {
+		t.Fatal(err)
+	}
+	if err := fileOwner.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = fileOwner.Stop(ctx) })
 	module := newRuntimeDriveTestModule(t, hub)
 	run, err := runs.GetByWorkspaceID(ctx, "ws-v2", "run-v2")
 	if err != nil {
@@ -9491,8 +9605,14 @@ func TestDriveRuntimeCompletesTypedPathAndIsRestartIdempotent(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	aggregate.Facts.Focus.TargetRefs = []string{target}
+	aggregate, err = module.prepareRuntimePrerequisites(ctx, aggregate)
+	if err != nil {
+		t.Fatal(err)
+	}
 	aggregate = runtimeTestPersistSealedSemanticAuthority(t, ctx, runtimeStateRepository{hub: hub}, aggregate)
+	if _, err = module.prepareRuntimePrerequisites(ctx, aggregate); err != nil {
+		t.Fatal(err)
+	}
 
 	candidateCount := 0
 	llmObserver := magicevent.NewSimpleObserver(runtimecontract.RuntimeModuleLLM, hub)
@@ -9523,16 +9643,20 @@ func TestDriveRuntimeCompletesTypedPathAndIsRestartIdempotent(t *testing.T) {
 	if completed.State != runtimecontract.ConvergenceStateComplete || completed.Terminal == nil {
 		t.Fatalf("completed drive result = %+v", completed)
 	}
-	if candidateCount != 2 || operationCount != 1 {
-		t.Fatalf("candidateCount=%d operationCount=%d, want 2/1", candidateCount, operationCount)
+	persisted, err := runs.GetByWorkspaceID(ctx, "ws-v2", "run-v2")
+	if err != nil || persisted.RuntimeState == nil || len(persisted.RuntimeState.OperationReceipts) != 1 {
+		t.Fatalf("candidateCount=%d persisted=%+v err=%v", candidateCount, persisted, err)
+	}
+	if content, readErr := os.ReadFile(filepath.Join(deliverable, target)); readErr != nil || string(content) != "new\n" {
+		t.Fatalf("typed File owner content=%q err=%v", string(content), readErr)
 	}
 
 	replayed, err := DriveRuntime(ctx, hub, command)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if replayed.StateRevision != completed.StateRevision || replayed.AuthoritySnapshotID != completed.AuthoritySnapshotID || candidateCount != 2 || operationCount != 1 {
-		t.Fatalf("replayed=%+v completed=%+v counts=%d/%d", replayed, completed, candidateCount, operationCount)
+	if replayed.StateRevision != completed.StateRevision || replayed.AuthoritySnapshotID != completed.AuthoritySnapshotID || candidateCount != 2 {
+		t.Fatalf("replayed=%+v completed=%+v candidates=%d", replayed, completed, candidateCount)
 	}
 
 	driveObserver.Unsubscribe(orchestratorevents.TopicOrchestratorDriveRuntime)
@@ -9544,8 +9668,8 @@ func TestDriveRuntimeCompletesTypedPathAndIsRestartIdempotent(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if recovered.StateRevision != completed.StateRevision || recovered.AuthoritySnapshotID != completed.AuthoritySnapshotID || candidateCount != 2 || operationCount != 1 {
-		t.Fatalf("recovered=%+v completed=%+v counts=%d/%d", recovered, completed, candidateCount, operationCount)
+	if recovered.StateRevision != completed.StateRevision || recovered.AuthoritySnapshotID != completed.AuthoritySnapshotID || candidateCount != 2 {
+		t.Fatalf("recovered=%+v completed=%+v candidates=%d", recovered, completed, candidateCount)
 	}
 }
 
@@ -9555,7 +9679,17 @@ func TestDriveRuntimeReturnsPersistedGovernedWait(t *testing.T) {
 	t.Cleanup(func() { hub.Terminate(ctx) })
 	runs := memory.NewRunRepository()
 	bootstrap := runtimeBootstrap()
+	deliverable, internalDirectory := t.TempDir(), t.TempDir()
+	if err := os.WriteFile(filepath.Join(deliverable, "target.txt"), []byte("old\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runtimeTestDeclareExistingWorkspaceTarget(&bootstrap, "target.txt")
 	bootstrap.Definition.CapabilityContract = append(bootstrap.Definition.CapabilityContract, runtimecontract.RuntimeBlockKindDecisionRequest)
+	bootstrap.Requirements = append(bootstrap.Requirements,
+		runtimecontract.RuntimeRequirement{Kind: runtimecontract.PrerequisiteKindCapability, OwnerModuleID: runtimecontract.RuntimeModuleDecision, CapabilityClass: runtimecontract.RuntimeCapabilityClassGovernance, RequiredCapabilities: []string{runtimecontract.RuntimeBlockKindDecisionRequest}},
+		runtimecontract.RuntimeRequirement{Kind: runtimecontract.PrerequisiteKindOperationAdmissibility, OwnerModuleID: runtimecontract.RuntimeModuleFile, RequiredCapabilities: []string{runtimecontract.StepKindFileEdit}, Reason: "File owner inventory"},
+	)
+	bootstrap = runtimeTestBootstrapWithReboundBindings(bootstrap)
 	if err := runs.Create(ctx, &runmodel.Run{
 		ID: "run-v2", WorkspaceID: "ws-v2", GoalID: "goal-v2", DoDID: "dod-v2",
 		DefinitionRevision: "definition-v2", RuntimeBootstrap: &bootstrap, ReconciliationScope: runtimecontract.RuntimeCWIReconciliationScopeCurrentRun, State: common.RunStateActive,
@@ -9580,19 +9714,42 @@ func TestDriveRuntimeReturnsPersistedGovernedWait(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = decisionOwner.Stop(ctx) })
+	workspaceObserver := magicevent.NewSimpleObserver(workspaceevents.CommandDestination, hub)
+	workspaceObserver.Subscribe(workspaceevents.TopicWorkspaceCommandGet, func(_ magicevent.Event, result magicevent.Result) {
+		result.Set(workspaceevents.WorkspaceResult{Workspace: &workspaceevents.Workspace{ID: "ws-v2", DeliverableDirectory: deliverable, InternalDirectory: internalDirectory}}, nil)
+	})
+	t.Cleanup(func() { workspaceObserver.Unsubscribe(workspaceevents.TopicWorkspaceCommandGet) })
+	fileOwner := filemodule.New()
+	if err := fileOwner.Configure(filebiz.Dependencies{EventHub: hub}); err != nil {
+		t.Fatal(err)
+	}
+	if err := fileOwner.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = fileOwner.Stop(ctx) })
 
 	module := newRuntimeDriveTestModule(t, hub)
-	facts := runtimeAggregate(t, 1).Facts
-	facts.Capabilities.GovernanceKinds = []string{runtimecontract.RuntimeBlockKindDecisionRequest}
 	governanceFailure := runtimecontract.FailureFact{
 		Class: runtimecontract.FailureClassGovernanceDependency, Signature: "external-approval", Message: "需要外部裁决",
 		GovernanceDependency: &runtimecontract.ExternalDependency{Kind: "external-approval", SubjectRef: "subject-1", Reason: "需要外部裁决"},
 	}
-	initialized, err := module.InitializeRuntime(ctx, facts, bootstrap.Definition, nil)
+	run, err := runs.GetByWorkspaceID(ctx, "ws-v2", "run-v2")
+	if err != nil {
+		t.Fatal(err)
+	}
+	initialized, err := module.initializeRuntimeFromRun(ctx, run)
+	if err != nil {
+		t.Fatal(err)
+	}
+	initialized, err = module.prepareRuntimePrerequisites(ctx, initialized)
 	if err != nil {
 		t.Fatal(err)
 	}
 	initialized = runtimeTestPersistSealedSemanticAuthority(t, ctx, runtimeStateRepository{hub: hub}, initialized)
+	initialized, err = module.prepareRuntimePrerequisites(ctx, initialized)
+	if err != nil {
+		t.Fatal(err)
+	}
 	initialized, err = module.runtimeRecordFailure(ctx, initialized, governanceFailure)
 	if err != nil || initialized.Decision.State != runtimecontract.ConvergenceStateNeedGovernance {
 		t.Fatalf("persist governance dependency aggregate=%+v err=%v", initialized, err)
@@ -9702,7 +9859,7 @@ func TestDriveRuntimeCompleteSchemaFailureStopsAfterSameContractRetry(t *testing
 	t.Cleanup(func() { _ = runOwner.Stop(ctx) })
 
 	module := newRuntimeDriveTestModule(t, hub)
-	facts := runtimeAggregate(t, 1).Facts
+	facts := runtimeCandidateSealFileEditFacts(t)
 	facts.Capabilities.GovernanceKinds = []string{runtimecontract.RuntimeBlockKindDecisionRequest}
 	// A later candidate contract consumes its bounded attempt 0/1 budget. Any
 	// resource freshness work is represented by canonical persisted prerequisite
@@ -9752,7 +9909,7 @@ func TestRequestAndSealRuntimeCandidateEmptyDocumentUsesBoundedDocumentCorrectio
 	ctx := context.Background()
 	hub := magicevent.NewHub(16)
 	t.Cleanup(func() { hub.Terminate(ctx) })
-	facts := runtimeAggregate(t, 1).Facts
+	facts := runtimeCandidateSealFileEditFacts(t)
 	facts.Activation.ExecutionContract.CandidateDocumentRecovery = runtimecontract.RuntimeCandidateDocumentRecoveryPolicy{MaxAttempts: 2}
 	state := &inMemoryRuntimeStateRepository{}
 	controller, err := runtime.NewRuntimeController(state)
@@ -10096,7 +10253,7 @@ func TestRequestAndSealRuntimeCandidateBodyIdleExhaustionReloadsWithoutProviderR
 	ctx := context.Background()
 	hub := magicevent.NewHub(16)
 	t.Cleanup(func() { hub.Terminate(ctx) })
-	facts := runtimeAggregate(t, 1).Facts
+	facts := runtimeCandidateSealFileEditFacts(t)
 	facts.RecoveryPolicy.MaxProviderTransportAttempts = 1
 	state := &inMemoryRuntimeStateRepository{}
 	controller, err := runtime.NewRuntimeController(state)
@@ -10201,8 +10358,7 @@ func TestRequestAndSealRuntimeCandidateRestartsFromPersistedIncompleteOutcome(t 
 		t.Fatal(err)
 	}
 	prefix := runtimecontract.StableRuntimeCandidatePrefixHashWithExecutionContract(initialized.Definition, initialized.Facts.Activation.ExecutionContract)
-	candidateContext := runtimecontract.RuntimeCandidateContextForDecision(initialized.Facts, initialized.Decision, nil)
-	manifest, err := runtimecontract.BuildRuntimeCandidateContractManifest(initialized.Decision, runtimecontract.RuntimeCandidateManifestOwnerFactsFromResources(candidateContext.Resources))
+	manifest, err := runtime.BuildRuntimeCandidateContractManifestForAggregate(initialized)
 	if err != nil {
 		t.Fatalf("build resumed candidate manifest: decision=%+v terminal=%+v failure=%+v err=%v", initialized.Decision, initialized.Decision.Terminal, initialized.Facts.Failure, err)
 	}
@@ -10303,10 +10459,9 @@ func TestRuntimeFileBackedCompleteDocumentRestartAdmitsWithoutProviderReplay(t *
 	if err := firstOwner.ConfigureRuntimeRepository(runtimeRepository); err != nil {
 		t.Fatal(err)
 	}
-	initialized := runtimeTestInitializeOperationFixture(t, ctx, firstOwner, runtimeRepository, runtimeCandidateSealExactFileEditFacts(t, "target.txt"), runtimeDefinition(), nil)
+	initialized := runtimeTestInitializeOperationFixture(t, ctx, firstOwner, runtimeRepository, runtimeCandidateSealFileEditFacts(t), runtimeDefinition(), nil)
 	prefix := runtimecontract.StableRuntimeCandidatePrefixHashWithExecutionContract(initialized.Definition, initialized.Facts.Activation.ExecutionContract)
-	candidateContext := runtimecontract.RuntimeCandidateContextForDecision(initialized.Facts, initialized.Decision, nil)
-	manifest, err := runtimecontract.BuildRuntimeCandidateContractManifest(initialized.Decision, runtimecontract.RuntimeCandidateManifestOwnerFactsFromResources(candidateContext.Resources))
+	manifest, err := runtime.BuildRuntimeCandidateContractManifestForAggregate(initialized)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -10417,8 +10572,7 @@ func TestRuntimeFileBackedPrepareRestartSubmitsOnce(t *testing.T) {
 	}
 	initialized := runtimeTestInitializeOperationFixture(t, ctx, firstOwner, runtimeRepository, runtimeCandidateSealFileEditFacts(t), runtimeDefinition(), nil)
 	prefix := runtimecontract.StableRuntimeCandidatePrefixHashWithExecutionContract(initialized.Definition, initialized.Facts.Activation.ExecutionContract)
-	candidateContext := runtimecontract.RuntimeCandidateContextForDecision(initialized.Facts, initialized.Decision, nil)
-	manifest, err := runtimecontract.BuildRuntimeCandidateContractManifest(initialized.Decision, runtimecontract.RuntimeCandidateManifestOwnerFactsFromResources(candidateContext.Resources))
+	manifest, err := runtime.BuildRuntimeCandidateContractManifestForAggregate(initialized)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -10548,10 +10702,9 @@ func TestRuntimeFileBackedSubmittedCandidateRestartDoesNotReplayProvider(t *test
 	if err := firstOwner.ConfigureRuntimeRepository(runtimeRepository); err != nil {
 		t.Fatal(err)
 	}
-	initialized := runtimeTestInitializeOperationFixture(t, ctx, firstOwner, runtimeRepository, runtimeAggregate(t, 1).Facts, runtimeDefinition(), nil)
+	initialized := runtimeTestInitializeOperationFixture(t, ctx, firstOwner, runtimeRepository, runtimeCandidateSealFileEditFacts(t), runtimeDefinition(), nil)
 	prefix := runtimecontract.StableRuntimeCandidatePrefixHashWithExecutionContract(initialized.Definition, initialized.Facts.Activation.ExecutionContract)
-	context := runtimecontract.RuntimeCandidateContextForDecision(initialized.Facts, initialized.Decision, nil)
-	manifest, err := runtimecontract.BuildRuntimeCandidateContractManifest(initialized.Decision, runtimecontract.RuntimeCandidateManifestOwnerFactsFromResources(context.Resources))
+	manifest, err := runtime.BuildRuntimeCandidateContractManifestForAggregate(initialized)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -10661,8 +10814,7 @@ func TestRuntimeFileBackedStaleResultCannotOverwriteCompleteSession(t *testing.T
 	}
 	initialized := runtimeTestInitializeOperationFixture(t, ctx, firstOwner, runtimeRepository, facts, runtimeDefinition(), nil)
 	prefix := runtimecontract.StableRuntimeCandidatePrefixHashWithExecutionContract(initialized.Definition, initialized.Facts.Activation.ExecutionContract)
-	candidateContext := runtimecontract.RuntimeCandidateContextForDecision(initialized.Facts, initialized.Decision, nil)
-	manifest, err := runtimecontract.BuildRuntimeCandidateContractManifest(initialized.Decision, runtimecontract.RuntimeCandidateManifestOwnerFactsFromResources(candidateContext.Resources))
+	manifest, err := runtime.BuildRuntimeCandidateContractManifestForAggregate(initialized)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -10740,7 +10892,7 @@ func TestRequestAndSealRuntimeCandidateFailsWhenDocumentRecoveryBudgetExhausted(
 	ctx := context.Background()
 	hub := magicevent.NewHub(16)
 	t.Cleanup(func() { hub.Terminate(ctx) })
-	facts := runtimeAggregate(t, 1).Facts
+	facts := runtimeCandidateSealFileEditFacts(t)
 	facts.Activation.ExecutionContract.CandidateDocumentRecovery = runtimecontract.RuntimeCandidateDocumentRecoveryPolicy{MaxAttempts: 1}
 	state := &inMemoryRuntimeStateRepository{}
 	controller, err := runtime.NewRuntimeController(state)
@@ -10820,7 +10972,7 @@ func TestRequestAndSealRuntimeCandidateTerminatesUnknownSubmittedRequestWithoutC
 	if err != nil {
 		t.Fatal(err)
 	}
-	initialized, err := runtimeTestControllerInitialize(controller, ctx, runtimeAggregate(t, 1).Facts, runtimeDefinition(), nil)
+	initialized, err := runtimeTestControllerInitialize(controller, ctx, runtimeCandidateSealFileEditFacts(t), runtimeDefinition(), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -10830,8 +10982,7 @@ func TestRequestAndSealRuntimeCandidateTerminatesUnknownSubmittedRequestWithoutC
 		t.Fatal(err)
 	}
 	prefix := runtimecontract.StableRuntimeCandidatePrefixHashWithExecutionContract(initialized.Definition, initialized.Facts.Activation.ExecutionContract)
-	context := runtimecontract.RuntimeCandidateContextForDecision(initialized.Facts, initialized.Decision, nil)
-	manifest, err := runtimecontract.BuildRuntimeCandidateContractManifest(initialized.Decision, runtimecontract.RuntimeCandidateManifestOwnerFactsFromResources(context.Resources))
+	manifest, err := runtime.BuildRuntimeCandidateContractManifestForAggregate(initialized)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -10873,7 +11024,7 @@ func TestRequestAndSealRuntimeCandidateFailsCompleteDocumentContentDefectWithout
 	if err != nil {
 		t.Fatal(err)
 	}
-	initialized, err := runtimeTestControllerInitialize(controller, ctx, runtimeAggregate(t, 1).Facts, runtimeDefinition(), nil)
+	initialized, err := runtimeTestControllerInitialize(controller, ctx, runtimeCandidateSealFileEditFacts(t), runtimeDefinition(), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -10884,8 +11035,7 @@ func TestRequestAndSealRuntimeCandidateFailsCompleteDocumentContentDefectWithout
 		t.Fatal(err)
 	}
 	prefix := runtimecontract.StableRuntimeCandidatePrefixHashWithExecutionContract(initialized.Definition, initialized.Facts.Activation.ExecutionContract)
-	candidateContext := runtimecontract.RuntimeCandidateContextForDecision(initialized.Facts, initialized.Decision, nil)
-	manifest, err := runtimecontract.BuildRuntimeCandidateContractManifest(initialized.Decision, runtimecontract.RuntimeCandidateManifestOwnerFactsFromResources(candidateContext.Resources))
+	manifest, err := runtime.BuildRuntimeCandidateContractManifestForAggregate(initialized)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -10921,7 +11071,7 @@ func TestRequestAndSealRuntimeCandidateReacquiresProviderCeilingAfterTypedStale(
 	ctx := context.Background()
 	hub := magicevent.NewHub(16)
 	t.Cleanup(func() { hub.Terminate(ctx) })
-	facts := runtimeAggregate(t, 1).Facts
+	facts := runtimeCandidateSealFileEditFacts(t)
 	ceiling := runtimecontract.ProviderCeiling{
 		Selection:                runtimecontract.ProviderInferenceSelection{Target: runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "gpt-4o"}},
 		ContextWindowTokens:      128000,
@@ -10946,8 +11096,8 @@ func TestRequestAndSealRuntimeCandidateReacquiresProviderCeilingAfterTypedStale(
 	}
 	observation.ObservationID = runtimecontract.StableRuntimePrerequisiteObservationID(observation)
 	facts.Resources.ProviderCeiling = &ceiling
-	facts.Resources.PrerequisiteObservations = []runtimecontract.RuntimePrerequisiteObservation{observation}
-	facts.Prerequisites.Satisfied = []runtimecontract.RuntimePrerequisite{prerequisite}
+	facts.Resources.PrerequisiteObservations = append(facts.Resources.PrerequisiteObservations, observation)
+	facts.Prerequisites.Satisfied = append(facts.Prerequisites.Satisfied, prerequisite)
 	repository := &inMemoryRuntimeStateRepository{}
 	controller, err := runtime.NewRuntimeController(repository)
 	if err != nil {
@@ -11066,6 +11216,35 @@ func newRuntimeDriveTestModule(t *testing.T, hub magicevent.Hub) *Biz {
 	return newTestBiz(biz, hub, nil)
 }
 
+func runtimeDriveCommitTargetSnapshotsForFixture(t *testing.T, aggregate runtime.RuntimeAggregate) runtime.RuntimeAggregate {
+	t.Helper()
+	for len(aggregate.Facts.Prerequisites.Pending) != 0 {
+		prerequisite := aggregate.Facts.Prerequisites.Pending[0]
+		if prerequisite.Kind != runtimecontract.PrerequisiteKindTargetSnapshot {
+			t.Fatalf("semantic operation fixture has unexpected prerequisite %+v", prerequisite)
+		}
+		facts, err := runtime.CommitPrerequisiteResult(aggregate.Facts, runtime.PrerequisiteResult{
+			PrerequisiteID: prerequisite.ID,
+			TargetSnapshot: &runtimecontract.TargetSnapshot{
+				TargetRef: prerequisite.SubjectRef, Content: "package fixture", ContentHash: "snapshot-" + prerequisite.SubjectRef,
+				ContentState: runtimecontract.SnapshotContentStateComplete,
+			},
+		})
+		if err != nil {
+			t.Fatalf("commit semantic fixture target snapshot %q: %v", prerequisite.SubjectRef, err)
+		}
+		facts, decision, err := runtime.ReduceRuntimeStateWithDirective(facts, &aggregate.Decision.AuthoritySnapshot, aggregate.CoverageProofLineage)
+		if err != nil {
+			t.Fatalf("reduce semantic fixture target snapshot %q: %v", prerequisite.SubjectRef, err)
+		}
+		aggregate.Facts, aggregate.Decision = facts, decision
+	}
+	if err := aggregate.Validate(); err != nil {
+		t.Fatalf("semantic fixture with target snapshots: %v", err)
+	}
+	return aggregate
+}
+
 func TestRuntimeEnsureCandidateFeasibleBlocksProviderWithoutKinds(t *testing.T) {
 	aggregate := runtime.RuntimeAggregate{
 		Decision: runtimecontract.RuntimeDecision{
@@ -11104,11 +11283,17 @@ func TestRuntimeDecisionPersistsFeasibilityWithoutCallingProvider(t *testing.T) 
 		// current owner facts do not provide an executable recipe, before any
 		// provider request is sent.
 		Focus: runtimecontract.CoverageFocus{
-			ID: "focus-v2", CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-v2"},
+			ID: "focus-v2", AssessmentScope: "dodItem", AssessmentID: "dod-validation-v2",
+			AssessmentText:        "the managed validation recipe must be executable",
+			CoverageWorkItemIDs:   []common.CoverageWorkItemID{"cwi-v2"},
 			RequiredEvidenceKinds: []string{runtimecontract.EvidenceKindValidation},
 			AcceptedStepKinds:     []string{runtimecontract.RuntimeBlockKindManagedValidationSession},
+			TargetRefs:            []string{"validation-entry.go"},
 		},
-		Coverage:     []runtimecontract.RuntimeCoverageItemFact{{ID: "cwi-v2", State: runtimecontract.RuntimeCoverageItemStateOpen}},
+		Coverage: []runtimecontract.RuntimeCoverageItemFact{{
+			ID: "cwi-v2", SourceScope: "dodItem", SourceID: "dod-validation-v2",
+			TargetText: "the managed validation recipe must be executable", State: runtimecontract.RuntimeCoverageItemStateOpen,
+		}},
 		Capabilities: runtimecontract.RuntimeCapabilities{ValidationKinds: []string{runtimecontract.RuntimeBlockKindManagedValidationSession}},
 	}
 	facts.ConvergencePolicy = runtimecontract.DefaultRuntimeConvergencePolicy()
@@ -11119,7 +11304,9 @@ func TestRuntimeDecisionPersistsFeasibilityWithoutCallingProvider(t *testing.T) 
 	if err != nil {
 		t.Fatal(err)
 	}
-	repository := &runtimeDriveRepository{aggregate: runtimeTestAggregateWithSemanticPlanning(t, runtime.RuntimeAggregate{StateRevision: 1, Definition: runtimeDefinition(), Facts: facts.Normalized(), Decision: decision})}
+	aggregate := runtimeTestAggregateWithSemanticPlanning(t, runtime.RuntimeAggregate{StateRevision: 1, Definition: runtimeDefinition(), Facts: facts.Normalized(), Decision: decision})
+	aggregate = runtimeDriveCommitTargetSnapshotsForFixture(t, aggregate)
+	repository := &runtimeDriveRepository{aggregate: aggregate}
 	biz := newRuntimeTestOwner()
 	if err := biz.ConfigureRuntimeRepository(repository); err != nil {
 		t.Fatal(err)
@@ -11147,14 +11334,34 @@ func TestRuntimeDecisionTerminatesBeforeProviderWhenShellConfirmsNoValidationRec
 		Activation:  runtimecontract.RuntimeActivationContext{ProviderSelection: runtimecontract.ProviderInferenceSelection{Target: runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "gpt-4o"}}},
 		WorkspaceID: "ws-v2", RunID: "run-v2", DefinitionRevision: "definition-v2", EvidenceRevision: runtimecontract.InitialRuntimeEvidenceRevision,
 		Focus: runtimecontract.CoverageFocus{
-			ID: "focus-v2", CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-v2"},
+			ID: "focus-v2", AssessmentScope: "dodItem", AssessmentID: "dod-validation-v2",
+			AssessmentText:        "the Shell owner must expose an executable validation recipe",
+			CoverageWorkItemIDs:   []common.CoverageWorkItemID{"cwi-v2"},
 			RequiredEvidenceKinds: []string{runtimecontract.EvidenceKindValidation}, AcceptedStepKinds: []string{runtimecontract.RuntimeBlockKindManagedValidationSession},
+			TargetRefs: []string{"validation-entry.go"},
 		},
-		Coverage:     []runtimecontract.RuntimeCoverageItemFact{{ID: "cwi-v2", State: runtimecontract.RuntimeCoverageItemStateOpen}},
+		Coverage: []runtimecontract.RuntimeCoverageItemFact{{
+			ID: "cwi-v2", SourceScope: "dodItem", SourceID: "dod-validation-v2",
+			TargetText: "the Shell owner must expose an executable validation recipe", State: runtimecontract.RuntimeCoverageItemStateOpen,
+		}},
 		Capabilities: runtimecontract.RuntimeCapabilities{ValidationKinds: []string{runtimecontract.RuntimeBlockKindManagedValidationSession}},
 		Resources: runtimecontract.RuntimeResourceFacts{OperationAdmissibilities: []runtimecontract.RuntimeOperationAdmissibility{{
 			PrerequisiteID: "admissibility-shell", OwnerModuleID: runtimecontract.RuntimeModuleShell,
-			OperationKinds: []string{runtimecontract.RuntimeBlockKindManagedValidationSession}, ObservedRevision: "shell-policy-v1",
+			OperationKinds: []string{runtimecontract.RuntimeBlockKindManagedValidationSession}, TargetRefs: []string{"validation-entry.go"}, ObservedRevision: "shell-policy-v1",
+			ValidationRecipeRefs: []string{"test-runtime-validation-recipe"},
+			ValidationSurfaces: []runtimecontract.RuntimeValidationSurface{{
+				ID: "test-runtime-validation-recipe", OwnerModuleID: runtimecontract.RuntimeModuleShell,
+				OperationKind: runtimecontract.RuntimeBlockKindManagedValidationSession,
+				Readiness:     runtimecontract.RuntimeValidationSurfaceReady, InputSchemaHash: "shell-validation-input-v1",
+				InputBindingRef:    "shell-validation-input/test-runtime-validation-recipe",
+				CheckRefs:          []string{runtimeShellManagedValidationCheckRefForTest("test-runtime-validation-recipe")},
+				ProofApplicability: runtimecontract.RuntimeValidationProofDirect,
+				EffectScope:        runtimecontract.RuntimeEffectEphemeralSession, IdempotencyClass: runtimecontract.RuntimeOperationIdempotencyAtMostOnce,
+			}},
+			OperationVariants: []runtimecontract.RuntimeOperationAdmissibilityVariant{{
+				Kind:                  runtimecontract.RuntimeBlockKindManagedValidationSession,
+				AllowedTargetPolicies: []runtimecontract.RuntimeOperationTargetPolicy{runtimecontract.RuntimeOperationTargetPolicyExactTarget},
+			}},
 		}}},
 	}
 	facts.ConvergencePolicy = runtimecontract.DefaultRuntimeConvergencePolicy()
@@ -11166,7 +11373,9 @@ func TestRuntimeDecisionTerminatesBeforeProviderWhenShellConfirmsNoValidationRec
 	if err != nil {
 		t.Fatal(err)
 	}
-	repository := &runtimeDriveRepository{aggregate: runtimeTestAggregateWithSemanticPlanning(t, runtime.RuntimeAggregate{StateRevision: 1, Definition: runtimeDefinition(), Facts: facts.Normalized(), Decision: decision})}
+	aggregate := runtimeTestAggregateWithSemanticPlanning(t, runtime.RuntimeAggregate{StateRevision: 1, Definition: runtimeDefinition(), Facts: facts.Normalized(), Decision: decision})
+	aggregate = runtimeDriveCommitTargetSnapshotsForFixture(t, aggregate)
+	repository := &runtimeDriveRepository{aggregate: aggregate}
 	biz := newRuntimeTestOwner()
 	if err := biz.ConfigureRuntimeRepository(repository); err != nil {
 		t.Fatal(err)
@@ -11203,14 +11412,19 @@ func TestRuntimeDecisionReconcilesHistoricalAuthorityBeforeProvider(t *testing.T
 		DefinitionRevision: "definition-v2",
 		EvidenceRevision:   runtimecontract.InitialRuntimeEvidenceRevision,
 		Focus: runtimecontract.CoverageFocus{
-			ID: "focus-manager", CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-v2"},
+			ID: "focus-manager", AssessmentScope: "dodItem", AssessmentID: "dod-manager-v2",
+			AssessmentText:        "the manager implementation must remain grounded in the current workspace",
+			CoverageWorkItemIDs:   []common.CoverageWorkItemID{"cwi-v2"},
 			RequiredEvidenceKinds: []string{runtimecontract.EvidenceKindStateChange}, TargetRole: "implementation",
 			TargetDiscoverySources: []string{runtimecontract.RuntimeValidationDiscoverySourceWorkspaceManifest},
 			TargetSelectorRef:      "file/profile_declared_candidates", TargetSelectorOwnerRef: "profile-bootstrap",
 			TargetSelectorSubjectRef: "manager", TargetSelectorCandidateRefs: []string{"internal/lsp/manager.go"},
 			RequireTargetGrounding: true,
 		},
-		Coverage:     []runtimecontract.RuntimeCoverageItemFact{{ID: "cwi-v2", State: runtimecontract.RuntimeCoverageItemStateOpen}},
+		Coverage: []runtimecontract.RuntimeCoverageItemFact{{
+			ID: "cwi-v2", SourceScope: "dodItem", SourceID: "dod-manager-v2",
+			TargetText: "the manager implementation must remain grounded in the current workspace", State: runtimecontract.RuntimeCoverageItemStateOpen,
+		}},
 		Capabilities: runtimecontract.RuntimeCapabilities{StateChangeKinds: []string{runtimecontract.StepKindFileWrite}},
 	}
 	facts.ConvergencePolicy = runtimecontract.DefaultRuntimeConvergencePolicy()
@@ -11330,7 +11544,7 @@ func TestRuntimeDecisionConfirmsValidationRepairSurfaceBeforeProvider(t *testing
 	aggregate.Facts.Focus.RequiredEvidenceKinds = []string{runtimecontract.EvidenceKindValidation}
 	aggregate.Facts.Focus.AcceptedStepKinds = []string{runtimecontract.RuntimeBlockKindManagedValidationSession}
 	aggregate.Facts.Focus.ValidationRecipeID = "repair-surface-validation"
-	aggregate.Facts.Focus.TargetRefs = []string{"main.go"}
+	aggregate.Facts.Focus.TargetRefs = []string{"validation-entry.go", "implementation.go"}
 	aggregate.Facts.Capabilities = runtimecontract.RuntimeCapabilities{
 		StateChangeKinds: []string{runtimecontract.StepKindFileEdit},
 		ValidationKinds:  []string{runtimecontract.RuntimeBlockKindManagedValidationSession},
@@ -11339,7 +11553,20 @@ func TestRuntimeDecisionConfirmsValidationRepairSurfaceBeforeProvider(t *testing
 	inventory := runtimecontract.RuntimeOperationAdmissibility{
 		PrerequisiteID: "admissibility-shell-repair-surface", OwnerModuleID: runtimecontract.RuntimeModuleShell,
 		OperationKinds: []string{runtimecontract.RuntimeBlockKindManagedValidationSession}, ValidationRecipes: []runtimecontract.RuntimeValidationRecipe{recipe},
-		ObservedRevision: "shell-repair-surface-v1",
+		TargetRefs: []string{"validation-entry.go", "implementation.go"}, ObservedRevision: "shell-repair-surface-v1",
+		ValidationSurfaces: []runtimecontract.RuntimeValidationSurface{{
+			ID: recipe.ID, OwnerModuleID: runtimecontract.RuntimeModuleShell,
+			OperationKind: runtimecontract.RuntimeBlockKindManagedValidationSession,
+			Readiness:     runtimecontract.RuntimeValidationSurfaceReady, InputSchemaHash: "repair-surface-validation-input-v1",
+			InputBindingRef:    "repair-surface-validation-input/" + recipe.ID,
+			CheckRefs:          []string{runtimeShellManagedValidationCheckRefForTest(recipe.ID)},
+			ProofApplicability: runtimecontract.RuntimeValidationProofDirect,
+			EffectScope:        runtimecontract.RuntimeEffectEphemeralSession, IdempotencyClass: runtimecontract.RuntimeOperationIdempotencyAtMostOnce,
+		}},
+		OperationVariants: []runtimecontract.RuntimeOperationAdmissibilityVariant{{
+			Kind:                  runtimecontract.RuntimeBlockKindManagedValidationSession,
+			AllowedTargetPolicies: []runtimecontract.RuntimeOperationTargetPolicy{runtimecontract.RuntimeOperationTargetPolicyExactTarget},
+		}},
 	}
 	inventory.SnapshotID = runtimecontract.StableRuntimeOperationAdmissibilitySnapshotID(inventory)
 	aggregate.Facts.Prerequisites.Satisfied = []runtimecontract.RuntimePrerequisite{{
@@ -11348,6 +11575,7 @@ func TestRuntimeDecisionConfirmsValidationRepairSurfaceBeforeProvider(t *testing
 	}}
 	aggregate.Facts.Resources.OperationAdmissibilities = []runtimecontract.RuntimeOperationAdmissibility{inventory}
 	aggregate = runtimeTestAggregateWithSemanticPlanning(t, aggregate)
+	aggregate = runtimeDriveCommitTargetSnapshotsForFixture(t, aggregate)
 	aggregate.Facts.Focus.TargetRole = "semantic_proof_target"
 	facts, decision, err := runtime.ReduceRuntimeStateWithDirective(aggregate.Facts, nil, aggregate.CoverageProofLineage)
 	if err != nil {
@@ -11362,7 +11590,7 @@ func TestRuntimeDecisionConfirmsValidationRepairSurfaceBeforeProvider(t *testing
 	bindingRef := aggregate.Facts.Focus.CoverageEvidenceBindings[0].ID
 	candidate := runtimecontract.RuntimeCandidate{Validation: &runtimecontract.ValidationCandidate{Operations: []runtimecontract.ValidationOperation{{Operation: runtimecontract.RuntimeOperation{
 		ID: "validate-repair-surface", Kind: runtimecontract.RuntimeBlockKindManagedValidationSession,
-		BindingRefs: []string{bindingRef}, TargetRefs: []string{"main.go"},
+		BindingRefs: []string{bindingRef}, TargetRefs: []string{"validation-entry.go"},
 		Parameters: []runtimecontract.OperationParameter{{Name: "recipeId", String: &recipeID}},
 	}}}}}
 	manifest, err := runtimecontract.BuildRuntimeCandidateContractManifest(aggregate.Decision, runtimecontract.RuntimeCandidateManifestOwnerFactsFromResources(aggregate.Facts.Resources))
@@ -11377,7 +11605,7 @@ func TestRuntimeDecisionConfirmsValidationRepairSurfaceBeforeProvider(t *testing
 	if err != nil {
 		t.Fatal(err)
 	}
-	recordAcceptedRuntimeDispatchAdmissionForTest(&aggregate, dispatch, manifest.Hash)
+	recordAcceptedRuntimeDispatchAdmissionForTest(t, &aggregate, dispatch, manifest)
 	aggregate.ActiveDispatch = &dispatch
 	repository := &runtimeDriveRepository{aggregate: aggregate}
 	controller, err := runtime.NewRuntimeController(repository)
@@ -11394,13 +11622,14 @@ func TestRuntimeDecisionConfirmsValidationRepairSurfaceBeforeProvider(t *testing
 				WorkspaceID: request.WorkspaceID, RunID: request.RunID, AuthoritySnapshotID: request.Transaction.AuthoritySnapshotID,
 				DispatchID: request.DispatchID, OperationID: request.Operation.ID,
 				FailureSignature: "repair-surface-build-failure", TargetRole: request.TargetRole,
-				DiagnosticClass:     runtimecontract.ValidationDiagnosticBuildFailed,
-				CandidateTargetRefs: []string{"main.go"}, ValidationScopeTargetRefs: []string{"main.go"}, DiagnosticHash: strings.Repeat("e", 64),
+				DiagnosticClass:           runtimecontract.ValidationDiagnosticBuildFailed,
+				CandidateTargetRefs:       []string{"implementation.go"},
+				ValidationScopeTargetRefs: []string{"validation-entry.go", "implementation.go"}, DiagnosticHash: strings.Repeat("e", 64),
 			}
 			failure := runtimecontract.FailureFact{
 				Class: runtimecontract.FailureClassBuildFailure, Code: "build_failed", Signature: observation.FailureSignature,
 				Message:                      "managed validation identified a bounded repair surface",
-				ValidationDiagnostic:         &runtimecontract.ValidationFailureDiagnostic{Class: observation.DiagnosticClass},
+				ValidationDiagnostic:         &runtimecontract.ValidationFailureDiagnostic{Class: observation.DiagnosticClass, TargetRefs: append([]string(nil), observation.CandidateTargetRefs...)},
 				ValidationFailureObservation: &observation,
 			}
 			receipt := runtimecontract.RuntimeOperationReceipt{
@@ -11441,13 +11670,18 @@ func TestRuntimeDecisionConfirmsValidationRepairSurfaceBeforeProvider(t *testing
 	})
 	t.Cleanup(func() { workspaceObserver.Unsubscribe(workspaceevents.TopicWorkspaceCommandGet) })
 	fileCalls := 0
+	fileObservationMismatch := false
 	fileObserver := magicevent.NewSimpleObserver(fileevents.PrerequisiteCommandDestination, hub)
 	fileObserver.Subscribe(fileevents.TopicConfirmRuntimeRepairSurface, func(event magicevent.Event, result magicevent.Result) {
 		fileCalls++
 		command := event.Data().(fileevents.ConfirmRuntimeRepairSurfaceCommand)
+		if !reflect.DeepEqual(command.Observation.CandidateTargetRefs, []string{"implementation.go"}) ||
+			!reflect.DeepEqual(command.Observation.ValidationScopeTargetRefs, []string{"implementation.go", "validation-entry.go"}) {
+			fileObservationMismatch = true
+		}
 		result.Set(fileevents.ConfirmRuntimeRepairSurfaceResult{Confirmation: runtimecontract.RuntimeRepairSurfaceConfirmation{
 			Observation: command.Observation, OwnerModuleID: runtimecontract.RuntimeModuleFile, SubjectRef: "workspace_deliverable",
-			Disposition: runtimecontract.RuntimeRepairSurfaceConfirmed, ConfirmedTargetRefs: []string{"main.go"}, ObservedRevision: "tree-confirmed-v1",
+			Disposition: runtimecontract.RuntimeRepairSurfaceConfirmed, ConfirmedTargetRefs: []string{"implementation.go"}, ObservedRevision: "tree-confirmed-v1",
 		}}, nil)
 	})
 	t.Cleanup(func() { fileObserver.Unsubscribe(fileevents.TopicConfirmRuntimeRepairSurface) })
@@ -11459,13 +11693,36 @@ func TestRuntimeDecisionConfirmsValidationRepairSurfaceBeforeProvider(t *testing
 	if err := owner.ConfigureRuntimeRepository(repository); err != nil {
 		t.Fatal(err)
 	}
+	tampered := failed
+	tamperedFailure := failed.Facts.Failure.Clone()
+	tamperedObservation := tamperedFailure.ValidationFailureObservation.Clone()
+	tamperedObservation.ValidationScopeTargetRefs = append(tamperedObservation.ValidationScopeTargetRefs, "outside-sealed-scope.go")
+	tamperedFailure.ValidationFailureObservation = &tamperedObservation
+	if tamperedFailure.OriginalDiagnostic == nil {
+		t.Fatal("persisted validation failure lost original diagnostic")
+	}
+	tamperedFailure.OriginalDiagnostic.ValidationFailureObservation = &tamperedObservation
+	tampered.Facts.Failure = &tamperedFailure
+	if invariantErr := tampered.Validate(); invariantErr == nil || !strings.Contains(invariantErr.Error(), "does not match a sealed completed dispatch") {
+		t.Fatalf("fresh-load invariant accepted tampered validation scope: %v", invariantErr)
+	}
+	repository.aggregate = tampered
+	if _, tamperErr := newTestBiz(owner, hub, nil).driveRuntimeDecision(ctx, tampered, "unused-prefix"); tamperErr == nil ||
+		fileCalls != 0 || providerCalls != 0 || repository.aggregate.StateRevision != failed.StateRevision ||
+		repository.aggregate.Facts.Repair.RepairAttempts != failed.Facts.Repair.RepairAttempts {
+		t.Fatalf("tampered validation scope crossed the pre-owner fence: err=%v fileCalls=%d providerCalls=%d aggregate=%+v", tamperErr, fileCalls, providerCalls, repository.aggregate)
+	}
+	repository.aggregate = failed
 	next, err := newTestBiz(owner, hub, nil).driveRuntimeDecision(ctx, failed, "unused-prefix")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if providerCalls != 0 || fileCalls != 1 || next.Facts.Resources.FailureTarget == nil || len(next.RepairSurfaceConfirmations) != 1 ||
+	if providerCalls != 0 || fileCalls != 1 || fileObservationMismatch || next.Facts.Resources.FailureTarget == nil || len(next.RepairSurfaceConfirmations) != 1 ||
 		len(next.CandidateAttempts) != len(failed.CandidateAttempts) || runtimeSemanticAuthorityPending(next) {
 		t.Fatalf("pre-provider File confirmation result=%+v providerCalls=%d fileCalls=%d", next, providerCalls, fileCalls)
+	}
+	if !reflect.DeepEqual(next.Facts.Resources.FailureTarget.TargetRefs, []string{"implementation.go"}) {
+		t.Fatalf("File confirmation did not seal only the diagnostic candidate: %+v", next.Facts.Resources.FailureTarget)
 	}
 }
 

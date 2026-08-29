@@ -13,6 +13,10 @@ type activeDispatchOwnerCall struct {
 }
 
 func (x *activeDispatchExecution) callOperationOwner(operation runtimecontract.RuntimeOperation, prepared preparedActiveDispatchOperation) (activeDispatchOwnerCall, error) {
+	validationScopeTargetRefs, err := runtimeValidationScopeTargetRefs(x.dispatch, operation)
+	if err != nil {
+		return activeDispatchOwnerCall{}, err
+	}
 	ownerCatalog := runtimeOwnerCatalogForOperation(
 		x.dispatch.OperationAdmissibilities,
 		x.dispatch.OperationAdmissibilityObservations,
@@ -28,7 +32,7 @@ func (x *activeDispatchExecution) callOperationOwner(operation runtimecontract.R
 		TargetRole:                         x.dispatch.FocusTargetRole,
 		EvidencePolicies:                   x.aggregate.Facts.Activation.EvidencePolicies,
 		ValidationRecipes:                  runtimecontract.NormalizeRuntimeValidationRecipes(x.dispatch.ValidationRecipes),
-		ValidationScopeTargetRefs:          runtimeValidationScopeTargetRefs(x.aggregate.Facts, operation),
+		ValidationScopeTargetRefs:          validationScopeTargetRefs,
 		CapabilityStates:                   append([]runtimecontract.RuntimeCapabilityStateSnapshot(nil), x.aggregate.Facts.Resources.CapabilityStates...),
 		WorkspaceTreeObservation:           runtimeWorkspaceManifestObservation(x.aggregate),
 		CompletedRequiredOperationReceipts: completedRequiredOperationReceiptBindings(*x.aggregate.ActiveDispatch, x.aggregate.OperationReceipts, x.completed),
@@ -79,17 +83,6 @@ func runtimeOwnerCatalogObservationForOperation(values []runtimecontract.Runtime
 		return &observation
 	}
 	return nil
-}
-
-func runtimeValidationScopeTargetRefs(facts runtimecontract.RuntimeFacts, operation runtimecontract.RuntimeOperation) []string {
-	if runtimecontract.CanonicalRuntimeBlockKind(operation.Kind) != runtimecontract.RuntimeBlockKindManagedValidationSession {
-		return nil
-	}
-	facts = facts.Normalized()
-	if facts.Resources.Manifest == nil {
-		return nil
-	}
-	return append([]string(nil), facts.Resources.Manifest.TargetRefs...)
 }
 
 func runtimeOwnerCatalogForOperation(values []runtimecontract.RuntimeOperationAdmissibility, observations []runtimecontract.RuntimePrerequisiteObservation, operation runtimecontract.RuntimeOperation, requiredSnapshotID, requiredAcquisitionBinding string) *runtimecontract.RuntimeOperationAdmissibility {

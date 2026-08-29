@@ -4,7 +4,7 @@ Status: normative
 
 Type: core-contract-part
 
-Last Verified: 2026-08-27
+Last Verified: 2026-08-28
 
 ## 四个协调状态机
 
@@ -55,6 +55,12 @@ load facts
   semantic-plan document；sealed semantic contract、operation manifest、selection、snapshot、failure target、capability、
   validation scratch、provider ceiling 等未完成前不得请求 operation candidate。全部 prerequisite 必须通过 typed
   acquisition 获得并持久化。
+- immutable DefinitionFocus 要求 target grounding 时，focus-scoped File-owner `TargetSelection` 及其 exact workspace-tree
+  freshness observation 也是 semantic provider 前置条件。`absent | ambiguous | unsupported`，以及无 bounded Definition
+  candidate 的 empty scope，只有在 selection、
+  prerequisite、observation 与 current Definition selector/owner/subject/candidate declaration 全部一致时，才能零 LLM
+  fail-closed 为 `target_grounding_unresolved`；无 selection 的 binding-free view 继续 pending，selected 或带 bounded
+  Definition candidates 的 empty scope 作为合法 prospective creation 进入 semantic request。
 - `need_validation` candidate 前，profile 声明的 validation discovery source 必须由 fresh owner resource 与 matching prerequisite observation 同时证明。
   缺失 `workspace_manifest | project_files | declared_commands | available_capabilities` 是 SM-2 prerequisite debt，不是
   capability unavailable feasibility：SM-2 必须用既有 typed requirement 返回 `need_prerequisite` 并重获 owner fact。
@@ -100,6 +106,10 @@ load facts
   CAS 提交。File/Shell/LLM result 不拥有该 transition。
 - repairable gap 保持同一 focus，必须持久化结构化缺口。有效新 evidence 不清零同 focus 总 repair
   budget；只有原子 focus advance 才开启新的 repair ledger。
+- mandatory assessment 尚未 adjudicate 时，accepted durable state receipt 不得提前清除 same-gap repair debt、active gap、
+  cycle 或 no-progress provenance。若且仅若该 receipt 具有 exact current-binding CWI credit、真实 changed workspace-durable
+  effect、命中 active repair directive 的 owner-grounded target，且 ordered all-of 仍缺声明内 validation，SM-2 可将
+  `ValidationOnlyRetries` 重开为 `0` 以执行 fresh validation；无 credit、错 target 或无需 validation 的 receipt 保持原窗口。
 - validation-only CWI 只有在 immutable Profile 已封存单一 `ValidationFailureRepairConvergence`、实际 rejected receipt
   精确匹配 trigger owner/operation/diagnostic 且 repair cycle 未耗尽时，才可进入无 exact failure target 的 repair semantic
   generation。该 generation 的 current evidence 是 File `state_change`，terminal evidence 仍是原 Definition 的
@@ -123,18 +133,77 @@ load facts
   typed terminal。validation command entry 不得自动晋升为 repair target，且 validation-only budget 只能在 SM-2 已
   canonical 分类并实际再次授权同 focus validation 后扣减；初次 validation、duplicate receipt 与 restart 不重复计数。
   rejected receipt 不获得 CWI credit，若其 CWI 列表为空，只能用已完成 dispatch 封存的 exact `FocusID` 判断当前 focus
-  防重放归属；operation ID 或 summary 变化不能改变 stable semantic shape。Shell 只能从 owner 支持的结构化工具诊断提取 manifest-bounded candidate
-  target；无结构化位置时不得回填 command/input target。结构化 observation 必须匹配 completed sealed dispatch 中不可变的
-  `FocusTargetRole + authority snapshot + operation + validation scope`，不得读取已经变化的 current `Focus.TargetRole`。
+  防重放归属；operation ID 或 summary 变化不能改变 stable semantic shape。Shell 只能从 owner 支持的结构化工具诊断提取
+  sealed-scope-bounded candidate target；无结构化位置时不得回填 command/input target。结构化 observation 必须匹配
+  completed sealed dispatch 中不可变的 `FocusTargetRole + authority snapshot + operation + validation scope`，不得读取已经变化的
+  current `Focus.TargetRole`。
   receipt commit 必须保留原 focus/binding，并在任何 semantic/candidate provider call 前由 File owner confirmation 与 SM-2
   freshness gate 封存 failure target；此路径不得提前开启 semantic repair generation 或记一次 validation-only retry。
   无 observation 时才可进入 Profile 已封存的 bounded `validation_failure_repair` fallback。原始 observation 必须完整保留，
   但不得反向选择 action、retry、ticket 或 terminal。
+  canonical managed-validation rejected receipt 的 `receipt.TargetRefs` 仅保留 execution/entry lineage；
+  `OriginalDiagnostic.TargetRefs` 与 `TargetObservation` 必须为空，candidate 只能位于最多八项的
+  `ValidationFailureObservation.CandidateTargetRefs`。该 nested observation 只允许出现在 Shell-owned
+  `validation/managed_session` receipt，并须与 receipt 的 workspace/run/actual dispatch/authority/operation/signature、typed
+  diagnostic class/candidates 及 matching sealed per-operation scope 完整一致；顶层 reducer copy 与 nested owner-diagnostic copy
+  必须同时存在并 canonical exact-match。commit 与 fresh-load 使用同一校验，且只有 `committed` dispatch 中已标记完成、
+  execution 为 `evidence_committed`、`ExecutionKey + Fence + receipt ref/hash` exact-match 的 receipt 才形成 SM-2 fact；
+  `owner_committed`、invalidated dispatch 或 generic failure event 均不得提前交接。等待 File
+  confirmation 时不得保留或重建带 target 的 `RepairDirective`。confirmation 只能是 File owner fact；反向不变量同时要求任何
+  已出现的 File `TargetObservation`、`FailureTarget` 或 validation-derived concrete target 均能回指 exact confirmed record 与
+  exact Shell receipt，generic failure ingress 不得旁路该事务。
+  同一 VFO 的 File confirmation 可在不同 revision 上形成零到多条 `stale`，但首条 `confirmed | rejected` 是该序列的终端
+  response；其后的延迟/冲突响应必须 fail closed。concrete target authority 只认该 VFO 的 latest valid confirmation，不能从
+  任意历史 confirmed record 恢复。
+
+非 VFO direct-target 使用 descriptor-authorized owner-fact 路径。只有 descriptor 声明 `receipt_evidence_observation` 时，
+rejected owner receipt 才可保留 response 显式观察到的 bounded
+`RuntimeFailureTargetObservation`，但不得从 operation target、request 或 manifest 推断；promoted failure copy 与 nested
+`OriginalDiagnostic` copy 必须同时存在且 canonical exact-match。该 observation 只有反向匹配 completed committed dispatch、
+completed operation、`evidence_committed` execution、exact key/fence/ref/hash rejected owner receipt、唯一 receipt-derived rejected
+evidence 与 processed-event fence，以及 sealed/current exact owner catalog snapshot、acquisition、revision、subject selector 和
+satisfied prerequisite observation 时，才是 current `FailureTarget` authority。`owner_committed`、generic failure ingress、任一
+receipt/evidence/catalog 漂移或 stale 均 fail closed；后续 File target snapshot 只提供 workspace grounding，不能重建原 owner authority。
+
+descriptor 的三种 target 协议互斥：`sealed_operation_targets` 只允许无 observation 的 diagnostic refs 且必须是 sealed operation
+targets 的子集；`receipt_evidence_observation` 允许上述完整 evidence/catalog 反向证明的 discovered target；
+`validation_failure_candidates` 只允许 VFO candidates 并等待 File confirmation。`none` 不允许任何 authority-shaped target。
+该 policy 是 operation descriptor hash 的一部分，receipt commit 与 fresh-load 必须执行同一校验。
+
+validation failure 因果中的三类 target 是相互独立的 immutable fact：
+
+| Target | 唯一来源 | 约束 |
+| --- | --- | --- |
+| validation operation entry `TargetRefs` | completed dispatch 中 exact validation operation | 是本次 recipe/validation entry，不是 full scope；只有 matching sealed per-operation authorization 的 `RequireTargets=true` 时才强制非空。finite `Target.AllowedTargetRefs()` 存在时，每个 entry member 必须属于该集合 |
+| finite full validation scope | `CompletedDispatch.OperationTargetAuthorizations` 中 matching `OperationID`/operation hash 的 sealed per-operation authorization 的 canonical `Target.AllowedTargetRefs()` | 只有 `existing_owner_scope` policy 时才等于 canonical `OwnerScopeTargetRefs`；structured observation 的 `ValidationScopeTargetRefs` 必须与该 finite set canonical exact-match。execution、receipt causation 与 restart 均不得从 mutable manifest、current focus 或 owner inventory 重建 |
+| structured diagnostic candidate targets | validation owner 支持的结构化诊断位置 | observation 存在时必须是 full validation scope 的 1～8 项子集，随后仍由 File owner 按 current regular manifest 独立确认 |
+
+在 finite scope 的 structured-observation 路径中，operation entry 与 diagnostic candidate 各自只需满足其 scope-subset
+invariant；二者不要求相等或相交。因而不得以
+operation entry 覆写 diagnostic candidate，operation entry 也不得被自动晋升为 `FailureTarget`。current manifest 只参与后续 File
+freshness confirmation，不能改写 completed dispatch 已封存的 validation scope 或历史 observation causation。
+Shell 的 closed `WORKORCH_FAILURE_TARGET` marker 也只是 owner-supported bounded diagnostic candidate；它不得直接填充或生成
+`RuntimeFailureTargetObservation` authority，只能在通过 sealed finite scope gate 后进入 `RuntimeValidationFailureObservation`，再由
+File confirmation 与 SM-2 private event 封存真实 repair surface。selector-only authorization 的
+`Target.AllowedTargetRefs()` 为空，没有 finite diagnostic scope；无论 operation 是否因 `RequireTargets`/owner feasibility 而可执行，
+Shell 都必须保持零 scope-bound structured observation。失败只可进入已封存的 Profile semantic fallback，任何组件都不得用
+current manifest 临时补全 scope；没有 matching sealed fallback 时按 typed contract fail closed。
 - assessment evidence gate 只验证 current-run/focus、binding-matched owner receipt、effect、quality 与封存的
   focus evidence policy；它不得把 assessment observation、claim signal 或 `PassedChecks` 非空解释为 CWI credit，
   也不得改写 observation 的 disposition、items、gap 或 refs。profile 的 observable validation recipe 只能约束候选
   选择该命令时的必要参数；只有 receipt 实际报告 binding 要求的 exact check/metric/artifact 才可满足该 binding，
   不得用 Goal/DoD、summary、operation ID 或检查名之间的自由文本相似度裁决 coverage。
+- 每个 assessment focus 的 `AssessmentScope + AssessmentID + AssessmentText` 必须逐字段等于 Definition seed 对应 slice 的
+  `SourceScope + SourceID + TargetText`；active/completed assessment authority 都必须反证到该 immutable seed source。SM-3
+  在 dispatch seal 前持久化 raw-canonical `RuntimeAssessmentAuthorityInput`，完整绑定
+  `definition_proof | owner_fact_acquisition` purpose、source slice/source 字段、Focus、CoverageEvidenceBindings 与 exact owner
+  admissibility catalog；其 hash 进入 immutable dispatch authority。LLM assessment document 与 mutable current facts 均不能
+  替换该 pre-seal classifier input。
+- assessment dispatch commit 时，SM-2 只能从上述 pre-seal input、current accepted evidence facts、completed dispatch receipts
+  与 `CoverageProofLineage` 确定性重放 `RuntimeAssessmentAdjudication`。adjudication/hash 必须与 `RuntimeAssessmentFact` 的
+  `AdjudicationHash` 在同一 CAS 双记账；post-seal adjudication 不进入 immutable dispatch authority hash。fresh-load 必须重放
+  classification 并 exact-match disposition、逐 CWI proof、`EvidenceFactID + EvidenceFactHash` 与两侧 hash；raw normalization
+  laundering、seed/source 漂移、proof 删除/替换或协调改写 disposition/fact/hash 均 fail closed。
 - assessment 必须先独立证明 sealed binding 的其余 evidence/effect/quality 条件，再检查 current owner-fact postcondition。
   只有“其余 proof 全部成立、owner fact 是唯一缺口”时，SM-2 才能在提交 assessment dispatch 的同一 CAS 中把 current
   bound CWI 记为 `reopened`、清除 current binding、更新 reconciliation contract，并以 typed reopen lineage 退休当前
@@ -256,7 +325,10 @@ sealed authority + preflight ready
   变更合并为一个 operation/receipt；普通 `DependsOn` 不能放宽，因为所有 replay proof 均在首个 effect 前封存。只有
   owner fact 明确封存、逐项绑定 exact requirement ref/variant 的 `RequiredOperationSequence` 可在同一 owner-target 上执行；
   不同目标与 non-durable operation 不受该唯一性约束。
-- accepted candidate 必须在执行前持久化 `SealedDispatch`。operation 依 sealed dependency order 执行，
+- accepted candidate 必须在执行前持久化 `SealedDispatch`，并在 accepted attempt 中另存 canonical
+  `OperationTargetAuthorizations` projection commitment。fresh-load 必须同时匹配该 admission-owned commitment 与 dispatch
+  self-seal；仅协调扩大 target scope 并重算 `DispatchAuthorityHash` 仍须失败。governance resume 逐 hop exact 继承 source
+  commitment，最终可追溯到唯一 accepted attempt。operation 依 sealed dependency order 执行，
   每项使用稳定的 `ExecutionKey + Fence`；owner receipt 是 evidence 的唯一副作用回执。
 - claimed operation 在没有 receipt 时，只能由 SM-3 返回一个只读的 recovery-budget handoff；SM-3 不得直接修改
   SM-4 的 recovery ledger。后续 `recovery_budget_consumed` private event 由 SM-4 独立 CAS 提交预算，并以
@@ -266,6 +338,15 @@ sealed authority + preflight ready
   observation 失效，但不得仅因此结束尚有 sealed operation 的 active dispatch。全部 operation 成功或任一
   operation rejected/stale 后，SM-3 才结算自身 transaction 并交回 SM-2 reduce；后两类 transaction 结算不等于 CWI
   successful settlement，也不能提供 collective completion proof。
+- exact File-confirmed validation repair 是上述规则的窄化事务：accepted File receipt 必须是 target-bound durable change，
+  每个 operation target 属于 confirmed surface，并携带 exact target resource changes 与唯一 workspace-tree
+  `beforeRevision -> afterRevision` edge。多 operation all-of 的 partial CAS 只可继续同一 active sealed dispatch；generic
+  freshness 退休 confirmed revision 后，原 `FailureTarget` 与 `need_state_change RepairDirective` 必须保持为空。fresh-load 必须由
+  confirmed record、completed `evidence_committed` executions、exact receipts、accepted evidence/processed fences、freshness
+  invalidation 与 current pending prerequisite 的 exact union 重新证明，不能把 partial 变成新 owner fact 或第二状态机。
+  workspace-tree edges 必须从 confirmation revision 形成唯一连续链，operation ID 排序没有 revision authority。最后一项
+  accepted 时，SM-2 在同一 CAS 从 immutable Shell receipt + File confirmation + sealed Decision/dispatch 重算 closure，并生成新的
+  target-free fresh-validation directive；任一 rejected/dispatch-invalidated member 均禁止恢复 stale target/directive。
 - duplicate 结果幂等，stale 只进 diagnostic lineage。已存在 exact receipt 时重启只提交后续 evidence，
   不得重放副作用；未知、非安全重放的副作用进入 typed outcome-unknown/failure 路由。
 - effect/evidence 类型由 sealed `RequiredOutput`、sealed expected effect、sealed binding 与 owner observed effect
@@ -277,6 +358,11 @@ sealed authority + preflight ready
 - exact `ExecutionKey + Fence` receipt 重放只复用既有 receipt；no-op 的 current-run provenance 与普通无
   provenance no-op 必须分流。后者只留下 rejected/no-progress lineage，不能被重放、target 变化或文本修改伪装成
   新的 durable evidence。
+- confirmed File all-of 的 operation-scoped governance continue 由 SM-3 在同一 owner-private CAS 证明 origin admission、
+  source sealed dispatch、completed receipt chain 与 exact granted binding，再把 exact resolution/binding/source seal 作为
+  `governance_resolution_observed` 输入交给 SM-2 唯一 `ReduceRuntimeStateWithDirective`。只有该 reducer 可派生
+  continuation decision；SM-3 只据此封存 next-fence resume dispatch，transition 不得在 reducer 返回后手工覆盖或重封
+  Decision。旧 `FailureTarget`/`RepairDirective` 保持退休，restart 直接恢复已持久化 decision/dispatch lineage。
 
 禁止：未持久化 request session 请求 provider、未完整 document 消耗 attempt、accepted candidate 不 seal
 直接执行、executor/owner 选择下一 action、owner 直接终态化 Run/Result、依错误文本猜 target 或创建 ticket。
@@ -356,11 +442,12 @@ sealed authority + preflight ready
   同一owner-local handoff一次，不能重复drive或跳过inventory completeness。
 - reducer terminal 已 sealed 后，SM-4 仅重试已持久化 terminal delivery request，等待 Result、Workspace、Run
   owner acknowledgement。projection health 不参与 reducer，也不是 runtime blocker。
-- catalog retirement 后若 current eligible CWI 尚无 sealed binding，SM-4 必须把 semantic generation 视为更高优先级的
-  owner-local 待办；该窗口中由缺少 binding 产生的 `target_grounding_unresolved` view 不能生成 drive result、startup
-  terminal-delivery classification 或 Result delivery request。current semantic operation authority ready 或 semantic
-  transaction 自身 failed 后才满足该 convergence terminal 的 delivery readiness。其它 sealed terminal 不得被重规划覆盖；
-  administrative termination 走独立 lane。此例外只允许 `semantic_plan` request；operations request 继续 fail-closed。
+- catalog retirement 后若旧 no-effect binding 仍为 current binding，SM-4 必须先投递 typed `CWIBindingRetired` fact，由
+  SM-2 唯一 reducer 退休 exact catalog lineage 并 reopen CWI；事件完成前旧 binding 不可作为 operation authority，也不能把
+  provisional `target_grounding_unresolved` 交付。CWI 真正 binding-free 后，SM-4 把新 semantic generation 视为更高优先级的
+  owner-local 待办；只有 exact current File-owner TargetSelection 已证明 unresolved，或 semantic transaction 自身 failed，才可
+  交付对应 terminal。已有 effect credit 的 binding 不得由 catalog refresh 自动退休。其它 sealed terminal 不得被重规划覆盖；
+  administrative termination 走独立 lane。transient 窗口只允许 `semantic_plan` request，operations request 继续 fail-closed。
 - current-baseline Restart 的 `run.replacement` 是 Run SM-1 subordinate transaction，使用 Run-owned persisted
   stage/generation lease。clarification resolution、administrative termination intent、SM-4 delivery handoff acknowledgement、
   successor materialization 每一步都先由 Run private event claim，再由 exact result/ack 推进；SM-4 可保存并重投

@@ -250,25 +250,43 @@ func NormalizeRuntimeValidationRecipes(values []RuntimeValidationRecipe) []Runti
 	return nilIfEmpty(ret)
 }
 
+// ValidateRuntimeValidationRecipeProjection verifies the canonical recipe
+// values in an immutable admission or dispatch projection without deciding
+// which recipes a candidate is allowed to select. Candidate membership is a
+// separate SM-3 admission check.
+func ValidateRuntimeValidationRecipeProjection(values []RuntimeValidationRecipe) error {
+	seenRecipeIDs := make(map[string]struct{}, len(values))
+	for _, raw := range values {
+		if !reflect.DeepEqual(raw, raw.Normalized()) {
+			return fmt.Errorf("validation recipe projection requires canonical raw recipe fields")
+		}
+		if err := raw.Validate(); err != nil {
+			return fmt.Errorf("validation recipe projection: %w", err)
+		}
+		recipe := raw.Normalized()
+		if _, duplicate := seenRecipeIDs[recipe.ID]; duplicate {
+			return fmt.Errorf("validation recipe projection duplicates recipe %q", recipe.ID)
+		}
+		seenRecipeIDs[recipe.ID] = struct{}{}
+	}
+	return nil
+}
+
+// RuntimeValidationRecipeProjectionsEqual compares complete immutable recipe
+// bodies while treating their collection as an ID-keyed projection. Argument
+// order within each recipe remains significant.
+func RuntimeValidationRecipeProjectionsEqual(left, right []RuntimeValidationRecipe) bool {
+	return reflect.DeepEqual(NormalizeRuntimeValidationRecipes(left), NormalizeRuntimeValidationRecipes(right))
+}
+
 // ValidateRuntimeCandidateManagedValidationRecipeSnapshot verifies that a
 // persisted dispatch snapshot contains one valid recipe for every managed
 // validation operation and no unselected recipe.  It intentionally does not
 // compare against activation policy: membership against the manifest is
 // checked when the snapshot is sealed.
 func ValidateRuntimeCandidateManagedValidationRecipeSnapshot(candidate RuntimeCandidate, values []RuntimeValidationRecipe) error {
-	seenRecipeIDs := make(map[string]struct{}, len(values))
-	for _, raw := range values {
-		if !reflect.DeepEqual(raw, raw.Normalized()) {
-			return fmt.Errorf("managed validation recipe snapshot requires canonical raw recipe fields")
-		}
-		if err := raw.Validate(); err != nil {
-			return fmt.Errorf("managed validation recipe snapshot: %w", err)
-		}
-		recipe := raw.Normalized()
-		if _, duplicate := seenRecipeIDs[recipe.ID]; duplicate {
-			return fmt.Errorf("managed validation recipe snapshot duplicates recipe %q", recipe.ID)
-		}
-		seenRecipeIDs[recipe.ID] = struct{}{}
+	if err := ValidateRuntimeValidationRecipeProjection(values); err != nil {
+		return fmt.Errorf("managed validation recipe snapshot: %w", err)
 	}
 	selected := make(map[string]struct{})
 	collect := func(operations []RuntimeOperation) error {

@@ -59,12 +59,11 @@ func TestPositiveConvergenceFixture_AttemptCorrectionPartialGapSameFocusRepair(t
 	facts.Focus.AcceptedStepKinds = []string{runtimecontract.StepKindFileWrite, runtimecontract.RuntimeBlockKindManagedValidationSession}
 	facts.Focus.ValidationRecipeID = runtimeManagedValidationEvidencePolicy().ID
 	facts.Focus.RequiredCheckRefs = []string{"repair-verification"}
-	facts.Focus.CoverageEvidenceBindings = []runtimecontract.CoverageEvidenceBinding{runtimePositiveConvergenceBinding(facts)}
 	facts.Capabilities.ValidationKinds = []string{runtimecontract.RuntimeBlockKindManagedValidationSession}
-	facts = runtimeTestFactsWithCanonicalCWIProjection(t, facts)
-	if _, err := controller.initialize(ctx, facts, controllerDefinition(), nil); err != nil {
-		t.Fatal(err)
-	}
+	initialized := runtimeTestInitializeAndSealSemanticContract(t, ctx, rawController, facts, controllerDefinition(), nil)
+	facts = initialized.Facts
+	focusID := facts.Focus.ID
+	validationRecipeID, validationCheckRefs := runtimePositiveConvergenceValidationProof(t, facts)
 
 	// --- 1) attempt 0: schema/contract failure ---
 	if _, err := controller.BeginCandidateAttemptForTest(ctx, "ws-v2", "run-v2", 0, "stable-prefix"); err != nil {
@@ -86,9 +85,9 @@ func TestPositiveConvergenceFixture_AttemptCorrectionPartialGapSameFocusRepair(t
 		StateChange: &runtimecontract.StateChangeCandidate{Operations: []runtimecontract.StateChangingOperation{{
 			Operation: runtimecontract.RuntimeOperation{
 				ID: "write-1", Kind: "file/write",
-				BindingRefs: []string{"binding/cwi-v2-positive"},
-				TargetRefs:  []string{"target.txt"},
-				Parameters:  runtimeFileWriteParameters("state"),
+				CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-v2"},
+				TargetRefs:          []string{"target.txt"},
+				Parameters:          runtimeFileWriteParameters("state"),
 			},
 		}}},
 	})
@@ -127,7 +126,7 @@ func TestPositiveConvergenceFixture_AttemptCorrectionPartialGapSameFocusRepair(t
 			Validation: &runtimecontract.ValidationCandidate{Operations: []runtimecontract.ValidationOperation{{
 				Operation: runtimecontract.RuntimeOperation{
 					ID: "validate-1", Kind: runtimecontract.RuntimeBlockKindManagedValidationSession,
-					BindingRefs: []string{"binding/cwi-v2-positive"}, TargetRefs: []string{"target.txt"},
+					CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-v2"}, TargetRefs: []string{"target.txt"},
 					Parameters: runtimeManagedValidationParameters(),
 				},
 			}}},
@@ -143,8 +142,8 @@ func TestPositiveConvergenceFixture_AttemptCorrectionPartialGapSameFocusRepair(t
 			Kind:                runtimecontract.EvidenceKindValidation,
 			Status:              ExecutionEvidenceStatusAccepted,
 			Evidence: runtimecontract.RuntimeOperationEvidence{Validation: &runtimecontract.RuntimeValidationObservation{
-				RecipeID:       runtimeManagedValidationEvidencePolicy().ID,
-				ExecutedChecks: []string{"repair-verification"}, PassedChecks: []string{"repair-verification"},
+				RecipeID:       validationRecipeID,
+				ExecutedChecks: append([]string(nil), validationCheckRefs...), PassedChecks: append([]string(nil), validationCheckRefs...),
 			}},
 		})
 		if err != nil {
@@ -166,7 +165,7 @@ func TestPositiveConvergenceFixture_AttemptCorrectionPartialGapSameFocusRepair(t
 	}
 	if _, err := controller.AcceptCandidateAttempt(ctx, "ws-v2", "run-v2", 0, runtimecontract.RuntimeCandidate{
 		Assessment: &runtimecontract.AssessmentCandidate{
-			FocusID:             "focus-v2",
+			FocusID:             focusID,
 			CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-v2"},
 			Disposition:         runtimecontract.AssessmentDispositionRepairableGap,
 			Summary:             "implementation incomplete for cwi-v2",
@@ -239,9 +238,9 @@ func TestPositiveConvergenceFixture_AttemptCorrectionPartialGapSameFocusRepair(t
 			StateChange: &runtimecontract.StateChangeCandidate{Operations: []runtimecontract.StateChangingOperation{{
 				Operation: runtimecontract.RuntimeOperation{
 					ID: "write-repair", Kind: "file/write",
-					BindingRefs: []string{"binding/cwi-v2-positive"},
-					TargetRefs:  []string{"target.txt"},
-					Parameters:  runtimeFileWriteParameters("repair"),
+					CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-v2"},
+					TargetRefs:          []string{"target.txt"},
+					Parameters:          runtimeFileWriteParameters("repair"),
 				},
 			}}},
 		})
@@ -274,9 +273,9 @@ func TestPositiveConvergenceFixture_AttemptCorrectionPartialGapSameFocusRepair(t
 			Validation: &runtimecontract.ValidationCandidate{Operations: []runtimecontract.ValidationOperation{{
 				Operation: runtimecontract.RuntimeOperation{
 					ID: "validate-repair", Kind: runtimecontract.RuntimeBlockKindManagedValidationSession,
-					BindingRefs: []string{"binding/cwi-v2-positive"},
-					TargetRefs:  []string{"target.txt"},
-					Parameters:  runtimeManagedValidationParameters(),
+					CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-v2"},
+					TargetRefs:          []string{"target.txt"},
+					Parameters:          runtimeManagedValidationParameters(),
 				},
 			}}},
 		})
@@ -291,7 +290,7 @@ func TestPositiveConvergenceFixture_AttemptCorrectionPartialGapSameFocusRepair(t
 			Kind:                runtimecontract.EvidenceKindValidation,
 			Status:              ExecutionEvidenceStatusAccepted,
 			Evidence: runtimecontract.RuntimeOperationEvidence{Validation: &runtimecontract.RuntimeValidationObservation{
-				RecipeID: runtimeManagedValidationEvidencePolicy().ID, ExecutedChecks: []string{"repair-verification"}, PassedChecks: []string{"repair-verification"},
+				RecipeID: validationRecipeID, ExecutedChecks: append([]string(nil), validationCheckRefs...), PassedChecks: append([]string(nil), validationCheckRefs...),
 			}},
 		})
 		if err != nil {
@@ -309,7 +308,7 @@ func TestPositiveConvergenceFixture_AttemptCorrectionPartialGapSameFocusRepair(t
 	}
 	if _, err := controller.AcceptCandidateAttempt(ctx, "ws-v2", "run-v2", 0, runtimecontract.RuntimeCandidate{
 		Assessment: &runtimecontract.AssessmentCandidate{
-			FocusID:             "focus-v2",
+			FocusID:             focusID,
 			CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-v2"},
 			Disposition:         runtimecontract.AssessmentDispositionSatisfied,
 			Summary:             "all coverage items satisfied after repair",
@@ -347,17 +346,18 @@ func TestPositiveConvergenceFixture_AttemptCorrectionPartialGapSameFocusRepair(t
 	}
 }
 
-func runtimePositiveConvergenceBinding(facts runtimecontract.RuntimeFacts) runtimecontract.CoverageEvidenceBinding {
-	binding := runtimecontract.CoverageEvidenceBinding{
-		ID: "binding/cwi-v2-positive", CoverageWorkItemID: "cwi-v2", FocusID: facts.Focus.ID, DefinitionRevision: facts.DefinitionRevision,
-		Proofs: []runtimecontract.CoverageEvidenceProof{
-			{EvidenceKind: runtimecontract.EvidenceKindStateChange, RequiredEffectScopes: []runtimecontract.RuntimeEffectScope{runtimecontract.RuntimeEffectWorkspaceDurable}, AllowedOperationKinds: []string{runtimecontract.StepKindFileWrite}},
-			{EvidenceKind: runtimecontract.EvidenceKindValidation, RequiredEffectScopes: []runtimecontract.RuntimeEffectScope{runtimecontract.RuntimeEffectNone, runtimecontract.RuntimeEffectEphemeralSession}, AllowedOperationKinds: []string{runtimecontract.RuntimeBlockKindManagedValidationSession}, ValidationRecipeID: runtimeManagedValidationEvidencePolicy().ID, RequiredCheckRefs: []string{"repair-verification"}},
-		},
-		TargetRefs: []string{"target.txt"}, DeclarationRef: "test/positive-convergence",
-	}.Normalized()
-	binding.Hash = runtimecontract.StableCoverageEvidenceBindingHash(binding)
-	return binding
+func runtimePositiveConvergenceValidationProof(t *testing.T, facts runtimecontract.RuntimeFacts) (string, []string) {
+	t.Helper()
+	if len(facts.Focus.CoverageEvidenceBindings) != 1 {
+		t.Fatalf("positive convergence focus has no unique semantic binding: %+v", facts.Focus.CoverageEvidenceBindings)
+	}
+	proof, found := runtimecontract.CoverageEvidenceProofForKind(
+		facts.Focus.CoverageEvidenceBindings[0], runtimecontract.EvidenceKindValidation,
+	)
+	if !found || proof.ValidationRecipeID == "" || len(proof.RequiredCheckRefs) == 0 {
+		t.Fatalf("positive convergence binding has no complete validation proof: %+v", facts.Focus.CoverageEvidenceBindings[0])
+	}
+	return proof.ValidationRecipeID, append([]string(nil), proof.RequiredCheckRefs...)
 }
 
 // RVC-17: budget exhaustion produces typed terminal, not infinite repair.
@@ -368,21 +368,19 @@ func TestPositiveConvergenceFixture_BudgetExhaustionTerminal(t *testing.T) {
 	rawController, _ := NewRuntimeController(repository)
 	controller := &receiptAwarePositiveConvergenceController{RuntimeController: rawController, repository: repository, t: t}
 
-	facts := runtimeFactsWithManagedValidationRecipe(controllerFacts())
+	facts := controllerFacts()
 	facts.Focus.RequireAssessment = true
-	facts.Focus.RequiredEvidenceKinds = []string{runtimecontract.EvidenceKindStateChange, runtimecontract.EvidenceKindValidation}
+	facts.Focus.RequiredEvidenceKinds = []string{runtimecontract.EvidenceKindStateChange}
 	facts.Focus.RequireExecutableBehaviorEvidence = true
-	facts.Focus.AcceptedStepKinds = []string{runtimecontract.StepKindFileWrite, runtimecontract.RuntimeBlockKindManagedValidationSession}
-	facts.Capabilities.ValidationKinds = []string{runtimecontract.RuntimeBlockKindManagedValidationSession}
+	facts.Focus.AcceptedStepKinds = []string{runtimecontract.StepKindFileWrite}
 	// Tight repair budget.
 	facts.ConvergencePolicy = runtimecontract.RuntimeConvergencePolicy{
 		MaxRepairAttemptsPerFocus:        1,
 		MaxValidationOnlyRetriesPerFocus: 1,
 	}
-	facts = runtimeTestFactsWithCurrentFocusBindings(t, facts, controllerDefinition())
-	if _, err := controller.initialize(ctx, facts, controllerDefinition(), nil); err != nil {
-		t.Fatal(err)
-	}
+	initialized := runtimeTestInitializeAndSealSemanticContract(t, ctx, rawController, facts, controllerDefinition(), nil)
+	facts = initialized.Facts
+	focusID := facts.Focus.ID
 
 	// Seed accepted state-change so assessment is required.
 	if _, err := controller.BeginCandidateAttemptForTest(ctx, "ws-v2", "run-v2", 0, "sc"); err != nil {
@@ -409,43 +407,8 @@ func TestPositiveConvergenceFixture_BudgetExhaustionTerminal(t *testing.T) {
 		t.Fatal(err)
 	}
 	agg := afterSC.Aggregate
-	// Drive to assessment if needed.
-	for step := 0; step < 4 && agg.Decision.State != runtimecontract.ConvergenceStateNeedAssessment; step++ {
-		switch agg.Decision.State {
-		case runtimecontract.ConvergenceStateNeedValidation:
-			if _, err := controller.BeginCandidateAttemptForTest(ctx, "ws-v2", "run-v2", 0, "val-"+string(rune('a'+step))); err != nil {
-				t.Fatal(err)
-			}
-			sv, err := controller.AcceptCandidateAttempt(ctx, "ws-v2", "run-v2", 0, runtimecontract.RuntimeCandidate{
-				Validation: &runtimecontract.ValidationCandidate{Operations: []runtimecontract.ValidationOperation{{
-					Operation: runtimecontract.RuntimeOperation{
-						ID: "v1", Kind: runtimecontract.RuntimeBlockKindManagedValidationSession,
-						BindingRefs: []string{"binding/test/runtime/focus-v2/cwi-v2"}, TargetRefs: []string{"target.txt"}, Parameters: runtimeManagedValidationParameters(),
-					},
-				}}},
-			})
-			if err != nil {
-				t.Fatal(err)
-			}
-			ev, err := controller.commitEvidence(ctx, ExecutionEvidence{
-				EventID: "ev-v", WorkspaceID: "ws-v2", RunID: "run-v2",
-				DispatchID: sv.ActiveDispatch.ID, AuthoritySnapshotID: sv.ActiveDispatch.Transaction.AuthoritySnapshotID,
-				OperationID: runtimeTestActiveOperationID(t, sv, 0), Kind: runtimecontract.EvidenceKindValidation, Status: ExecutionEvidenceStatusAccepted,
-				Evidence: runtimecontract.RuntimeOperationEvidence{Validation: &runtimecontract.RuntimeValidationObservation{
-					RecipeID:       runtimeManagedValidationEvidencePolicy().ID,
-					ExecutedChecks: []string{"repair-verification"}, PassedChecks: []string{"repair-verification"},
-				}},
-			})
-			if err != nil {
-				t.Fatal(err)
-			}
-			agg = ev.Aggregate
-		default:
-			t.Fatalf("unexpected action while seeking assessment: %s", agg.Decision.State)
-		}
-	}
 	if agg.Decision.State != runtimecontract.ConvergenceStateNeedAssessment {
-		t.Fatalf("want assessment, got %s", agg.Decision.State)
+		t.Fatalf("non-executable state-change proof did not require canonical assessment, got %s", agg.Decision.State)
 	}
 
 	// First repairable assessment opens a repair cycle.
@@ -454,10 +417,13 @@ func TestPositiveConvergenceFixture_BudgetExhaustionTerminal(t *testing.T) {
 	}
 	if _, err := controller.AcceptCandidateAttempt(ctx, "ws-v2", "run-v2", 0, runtimecontract.RuntimeCandidate{
 		Assessment: &runtimecontract.AssessmentCandidate{
-			FocusID: "focus-v2", CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-v2"},
+			FocusID: focusID, CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-v2"},
 			Disposition: runtimecontract.AssessmentDispositionRepairableGap,
 			Summary:     "still broken",
-			Gap:         &runtimecontract.RuntimeAssessmentGap{CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-v2"}, Reason: "still broken"},
+			Items: []runtimecontract.RuntimeAssessmentItemFact{{
+				CoverageWorkItemID: "cwi-v2", Satisfied: false, Reason: "still broken",
+			}},
+			Gap: &runtimecontract.RuntimeAssessmentGap{CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-v2"}, Reason: "still broken"},
 		},
 	}); err != nil {
 		t.Fatal(err)
@@ -503,41 +469,6 @@ func TestPositiveConvergenceFixture_BudgetExhaustionTerminal(t *testing.T) {
 	} else {
 		agg = after1
 	}
-	// Reach assessment again.
-	for step := 0; step < 4 && agg.Decision.State != runtimecontract.ConvergenceStateNeedAssessment && agg.Decision.State != runtimecontract.ConvergenceStateFailed; step++ {
-		if agg.Decision.State == runtimecontract.ConvergenceStateNeedValidation {
-			if _, err := controller.BeginCandidateAttemptForTest(ctx, "ws-v2", "run-v2", 0, "val2"); err != nil {
-				t.Fatal(err)
-			}
-			sv, err := controller.AcceptCandidateAttempt(ctx, "ws-v2", "run-v2", 0, runtimecontract.RuntimeCandidate{
-				Validation: &runtimecontract.ValidationCandidate{Operations: []runtimecontract.ValidationOperation{{
-					Operation: runtimecontract.RuntimeOperation{
-						ID: "v2", Kind: runtimecontract.RuntimeBlockKindManagedValidationSession,
-						CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-v2"},
-						TargetRefs:          []string{"target.txt"},
-						Parameters:          runtimeManagedValidationParameters(),
-					},
-				}}},
-			})
-			if err != nil {
-				t.Fatal(err)
-			}
-			ev, err := controller.commitEvidence(ctx, ExecutionEvidence{
-				EventID: "ev-v2", WorkspaceID: "ws-v2", RunID: "run-v2",
-				DispatchID: sv.ActiveDispatch.ID, AuthoritySnapshotID: sv.ActiveDispatch.Transaction.AuthoritySnapshotID,
-				OperationID: runtimeTestActiveOperationID(t, sv, 0), Kind: runtimecontract.EvidenceKindValidation, Status: ExecutionEvidenceStatusAccepted,
-				Evidence: runtimecontract.RuntimeOperationEvidence{Validation: &runtimecontract.RuntimeValidationObservation{
-					ExecutedChecks: []string{"budget-repair"}, FailedChecks: []string{"budget-repair"},
-				}},
-			})
-			if err != nil {
-				t.Fatal(err)
-			}
-			agg = ev.Aggregate
-			continue
-		}
-		break
-	}
 	if agg.Decision.State == runtimecontract.ConvergenceStateFailed {
 		return
 	}
@@ -549,10 +480,13 @@ func TestPositiveConvergenceFixture_BudgetExhaustionTerminal(t *testing.T) {
 	}
 	if _, err := controller.AcceptCandidateAttempt(ctx, "ws-v2", "run-v2", 0, runtimecontract.RuntimeCandidate{
 		Assessment: &runtimecontract.AssessmentCandidate{
-			FocusID: "focus-v2", CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-v2"},
+			FocusID: focusID, CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-v2"},
 			Disposition: runtimecontract.AssessmentDispositionRepairableGap,
 			Summary:     "still broken after repair",
-			Gap:         &runtimecontract.RuntimeAssessmentGap{CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-v2"}, Reason: "still broken"},
+			Items: []runtimecontract.RuntimeAssessmentItemFact{{
+				CoverageWorkItemID: "cwi-v2", Satisfied: false, Reason: "still broken after repair",
+			}},
+			Gap: &runtimecontract.RuntimeAssessmentGap{CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-v2"}, Reason: "still broken"},
 		},
 	}); err != nil {
 		t.Fatal(err)
@@ -574,46 +508,17 @@ func TestPositiveConvergenceFixture_BudgetExhaustionTerminal(t *testing.T) {
 
 func TestPositiveConvergenceFixture_RepairableAssessmentPersistsAcrossControllerRestart(t *testing.T) {
 	ctx := context.Background()
-	repository := &controllerRepository{}
-	first, _ := NewRuntimeController(repository)
-	facts := controllerFacts()
-	facts.Focus = runtimecontract.CoverageFocus{
-		ID: "focus-v2", SliceID: "slice-v2", CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-1"},
-		RequiredEvidenceKinds: []string{runtimecontract.EvidenceKindValidation}, RequireAssessment: true,
-	}
-	facts.Coverage = []runtimecontract.RuntimeCoverageItemFact{{ID: "cwi-1", SliceID: "slice-v2", State: runtimecontract.RuntimeCoverageItemStateOpen}}
-	facts.Evidence = runtimecontract.EvidenceLedger{Accepted: []runtimecontract.EvidenceFact{{
-		ID: "validation-1", Kind: runtimecontract.EvidenceKindValidation, CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-1"}, Revision: "runtime-evidence-00000000000000000001",
-	}}}
-	facts.EvidenceRevision = "runtime-evidence-00000000000000000001"
-	// This fixture intentionally leaves one validation-only repair after the
-	// assessment. The sealed budget must permit that recipe; zero means
-	// no validation retry is authorized and is correctly terminal elsewhere.
-	facts.ConvergencePolicy = runtimecontract.RuntimeConvergencePolicy{MaxValidationOnlyRetriesPerFocus: 2}
-	facts.Capabilities.ValidationKinds = []string{runtimecontract.RuntimeBlockKindManagedValidationSession}
-	facts = runtimeTestFactsWithCurrentFocusBindings(t, facts, controllerDefinition())
-	if _, err := first.initialize(ctx, facts, controllerDefinition(), nil); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := first.BeginCandidateAttemptForTest(ctx, "ws-v2", "run-v2", 0, "assessment-prefix"); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := first.AcceptCandidateAttempt(ctx, "ws-v2", "run-v2", 0, runtimecontract.RuntimeCandidate{Assessment: &runtimecontract.AssessmentCandidate{
-		FocusID: "focus-v2", SliceID: "slice-v2", CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-1"},
-		Disposition: runtimecontract.AssessmentDispositionRepairableGap, Summary: "validation is insufficient",
-		Items: []runtimecontract.RuntimeAssessmentItemFact{{
-			CoverageWorkItemID: "cwi-1", Satisfied: false, EvidenceRefs: []string{"validation-1"}, Reason: "validation is insufficient",
-		}},
-		Gap: &runtimecontract.RuntimeAssessmentGap{CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-1"}, MissingEvidenceKinds: []string{runtimecontract.EvidenceKindValidation}, Reason: "validation is insufficient"},
-	}}); err != nil {
-		t.Fatal(err)
-	}
+	first, repository, _ := prepareOwnerFactAssessment(t, false, runtimecontract.RuntimeBlockKindPatchApply)
 	partial, err := first.commitAssessment(ctx, "ws-v2", "run-v2")
 	if err != nil {
 		t.Fatal(err)
 	}
 	if partial.Decision.State == runtimecontract.ConvergenceStateComplete || partial.Decision.State == runtimecontract.ConvergenceStateFailed {
-		t.Fatalf("repairable assessment terminalized: %+v", partial.Decision)
+		t.Fatalf("repairable assessment terminalized: decision=%+v terminal=%+v failure=%+v repair=%+v", partial.Decision, partial.Decision.Terminal, partial.Facts.Failure, partial.Facts.Repair)
+	}
+	if len(partial.Facts.Assessments) == 0 ||
+		partial.Facts.Assessments[len(partial.Facts.Assessments)-1].Disposition != runtimecontract.AssessmentDispositionRepairableGap {
+		t.Fatalf("owner-derived repairable assessment was not persisted: %+v", partial.Facts.Assessments)
 	}
 	second, _ := NewRuntimeController(repository)
 	reloaded, err := second.Load(ctx, "ws-v2", "run-v2")
@@ -624,7 +529,8 @@ func TestPositiveConvergenceFixture_RepairableAssessmentPersistsAcrossController
 	for _, item := range reloaded.Facts.Coverage {
 		states[item.ID] = item.State
 	}
-	if states["cwi-1"] != runtimecontract.RuntimeCoverageItemStateUnsatisfied || reloaded.StateRevision != partial.StateRevision {
+	if states["cwi-v2"] == runtimecontract.RuntimeCoverageItemStateSatisfied ||
+		reloaded.StateRevision != partial.StateRevision || len(reloaded.Facts.Assessments) != len(partial.Facts.Assessments) {
 		t.Fatalf("reloaded repairable assessment = %+v", reloaded.Facts.Coverage)
 	}
 }
@@ -642,17 +548,30 @@ func TestPositiveConvergenceFixture_FocusAdvanceAfterSatisfiedAssessment(t *test
 	// Remaining queue after current focus so satisfaction advances.
 	facts.RemainingFocuses = []runtimecontract.CoverageFocus{
 		{
-			ID: "focus-v2-next", CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-v2-next"},
+			ID: "focus-v2-next", SliceID: "slice-v2-next", CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-v2-next"},
 			RequiredEvidenceKinds: []string{runtimecontract.EvidenceKindStateChange},
 			TargetRefs:            []string{"next.txt"},
 			RequireAssessment:     true,
 		},
 	}
-	facts.Coverage = append(facts.Coverage, runtimecontract.RuntimeCoverageItemFact{ID: "cwi-v2-next", State: runtimecontract.RuntimeCoverageItemStateOpen})
-	facts = runtimeTestFactsWithCurrentFocusBindings(t, facts, controllerDefinition())
-	if _, err := controller.initialize(ctx, facts, controllerDefinition(), nil); err != nil {
-		t.Fatal(err)
-	}
+	facts.Coverage = append(facts.Coverage, runtimecontract.RuntimeCoverageItemFact{
+		ID: "cwi-v2-next", SliceID: "slice-v2-next", State: runtimecontract.RuntimeCoverageItemStateOpen,
+		PrerequisiteCoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-v2"},
+	})
+	facts.Slices = append(facts.Slices, runtimecontract.RuntimeAcceptanceSlice{
+		ID: "slice-v2-next", CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-v2-next"},
+	})
+	facts.DefinitionSeed.CoverageItems = append(facts.DefinitionSeed.CoverageItems, runtimecontract.RuntimeCoverageItem{
+		ID: "cwi-v2-next", SliceID: "slice-v2-next", SourceScope: "dodItem", SourceID: "dod-v2-next", TargetText: "deliver next",
+		PrerequisiteCoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-v2"},
+	})
+	facts.DefinitionSeed.Slices = append(facts.DefinitionSeed.Slices, runtimecontract.RuntimeAcceptanceSlice{
+		ID: "slice-v2-next", CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-v2-next"},
+	})
+	facts.DefinitionSeed.Hash = runtimecontract.StableRuntimeDefinitionSeedHash(facts.DefinitionSeed)
+	initialized := runtimeTestInitializeAndSealSemanticContract(t, ctx, rawController, facts, controllerDefinition(), nil)
+	facts = initialized.Facts
+	initialFocusID := facts.Focus.ID
 
 	// Satisfy first focus via state-change + assessment.
 	if _, err := controller.BeginCandidateAttemptForTest(ctx, "ws-v2", "run-v2", 0, "sc"); err != nil {
@@ -722,7 +641,7 @@ func TestPositiveConvergenceFixture_FocusAdvanceAfterSatisfiedAssessment(t *test
 	}
 	if _, err := controller.AcceptCandidateAttempt(ctx, "ws-v2", "run-v2", 0, runtimecontract.RuntimeCandidate{
 		Assessment: &runtimecontract.AssessmentCandidate{
-			FocusID: "focus-v2", CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-v2"},
+			FocusID: initialFocusID, CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-v2"},
 			Disposition:  runtimecontract.AssessmentDispositionSatisfied,
 			Summary:      "focus-v2 done",
 			Items:        []runtimecontract.RuntimeAssessmentItemFact{{CoverageWorkItemID: "cwi-v2", Satisfied: true}},
@@ -740,11 +659,12 @@ func TestPositiveConvergenceFixture_FocusAdvanceAfterSatisfiedAssessment(t *test
 		t.Log("single-focus completion path (queue may have been collapsed)")
 		return
 	}
-	if advanced.Facts.Focus.ID == "focus-v2" && advanced.Decision.State == runtimecontract.ConvergenceStateNeedAssessment {
+	if advanced.Facts.Focus.ID == initialFocusID && advanced.Decision.State == runtimecontract.ConvergenceStateNeedAssessment {
 		t.Fatalf("did not leave satisfied focus: %+v", advanced.Facts.Focus)
 	}
 	// Preferred: next focus opened.
-	if advanced.Facts.Focus.ID == "focus-v2-next" || advanced.Decision.State == runtimecontract.ConvergenceStateNeedStateChange {
+	if coverageIDsIntersect(advanced.Facts.Focus.CoverageWorkItemIDs, []common.CoverageWorkItemID{"cwi-v2-next"}) ||
+		advanced.Decision.State == runtimecontract.ConvergenceStateNeedStateChange {
 		return
 	}
 	t.Logf("focus after advance: id=%s action=%s", advanced.Facts.Focus.ID, advanced.Decision.State)

@@ -28,6 +28,13 @@ func syncRepairDirective(facts runtimecontract.RuntimeFacts, decision runtimecon
 	if facts.RepairDirective != nil && facts.RepairDirective.FocusID != focusID {
 		facts.RepairDirective = nil
 	}
+	if runtimeValidationFailureObservationAwaitsFileConfirmation(facts) {
+		// A Shell observation is not yet a repair continuation. File must first
+		// confirm the exact current resource surface; retaining or rebuilding a
+		// directive here would expose focus/gap targets as premature authority.
+		facts.RepairDirective = nil
+		return facts
+	}
 	if runtimeValidationFailureRepairAwaitsSemanticBinding(facts) {
 		// This target-free directive is the persisted SM-2 marker that selects
 		// the repair-purpose semantic generation. Generic missing-evidence sync
@@ -35,7 +42,8 @@ func syncRepairDirective(facts runtimecontract.RuntimeFacts, decision runtimecon
 		// Capability-owner feasibility seals exact prospective targets.
 		return facts
 	}
-	if runtimeValidationFailureRepairOwnsSealedDirective(facts) || runtimeValidationFailureRepairOwnsFreshValidationDirective(facts) {
+	if runtimeValidationFailureRepairOwnsSealedDirective(facts) || runtimeValidationFailureRepairOwnsFreshValidationDirective(facts) ||
+		runtimeConfirmedFileRepairOwnsFreshValidationDirective(facts) {
 		// The repair-purpose binding and exact capability-owner-confirmed target already own
 		// the state-change continuation; its Definition-proof successor likewise
 		// owns the independently sealed validation action. Completing a target
@@ -95,6 +103,14 @@ func syncRepairDirective(facts runtimecontract.RuntimeFacts, decision runtimecon
 	return facts
 }
 
+func runtimeValidationFailureObservationAwaitsFileConfirmation(facts runtimecontract.RuntimeFacts) bool {
+	facts = facts.Normalized()
+	if facts.Failure == nil || facts.Failure.ValidationFailureObservation == nil {
+		return false
+	}
+	return len(facts.Failure.TargetRefs) == 0 && facts.Failure.TargetObservation == nil && facts.Resources.FailureTarget == nil
+}
+
 // repairDirectiveRequired distinguishes a normal evidence-producing action
 // from a same-focus repair continuation. A normal state-change must not gain a
 // repair directive merely because it is state-changing; otherwise its accepted
@@ -151,9 +167,7 @@ func repairDirectiveEvidenceSatisfied(facts runtimecontract.RuntimeFacts, direct
 	baseline := strings.TrimSpace(directive.SupersedesEvidenceRevision)
 	for _, evidence := range facts.Evidence.Accepted {
 		if len(evidence.CoverageWorkItemIDs) == 0 {
-			if !runtimecontract.EvidenceAppliesToCurrentFocus(facts, evidence) {
-				continue
-			}
+			continue
 		} else if len(directive.CoverageWorkItemIDs) != 0 {
 			if !runtimeEvidenceAppliesToCoverageIDsWithLineage(facts, evidence, directive.CoverageWorkItemIDs, proofLineage) {
 				continue
@@ -218,6 +232,9 @@ func buildRepairDirective(facts runtimecontract.RuntimeFacts, decision runtimeco
 		TargetRefs:            repairDirectiveTargets(facts, required.TargetRefs),
 		RepairAttempt:         attempt,
 	}
+	if decision.State == runtimecontract.ConvergenceStateNeedStateChange && confirmedFileRepairDirectivePurpose(facts) {
+		directive.Purpose = runtimecontract.RuntimeDispatchRepairPurposeConfirmedFileValidation
+	}
 	if facts.Failure != nil {
 		failure := *facts.Failure
 		directive.CurrentFailure = &failure
@@ -257,6 +274,22 @@ func buildRepairDirective(facts runtimecontract.RuntimeFacts, decision runtimeco
 		directive.CoverageWorkItemIDs = append([]common.CoverageWorkItemID(nil), closure.CoverageWorkItemIDs...)
 	}
 	return directive.Normalized()
+}
+
+func confirmedFileRepairDirectivePurpose(facts runtimecontract.RuntimeFacts) bool {
+	if facts.Failure == nil || facts.Failure.ValidationFailureObservation == nil ||
+		facts.Resources.FailureTarget == nil || facts.Resources.FailureTarget.TargetObservation == nil {
+		return false
+	}
+	failure := facts.Failure.Normalized()
+	observation := failure.ValidationFailureObservation.Normalized()
+	target := facts.Resources.FailureTarget
+	ownerObservation := target.TargetObservation.Normalized()
+	return ownerObservation.OwnerModuleID == runtimecontract.RuntimeModuleFile &&
+		failure.Signature == observation.FailureSignature && target.Signature == observation.FailureSignature &&
+		ownerObservation.TargetRole == observation.TargetRole &&
+		sameRuntimeTargetRefs(ownerObservation.TargetRefs, observation.CandidateTargetRefs) &&
+		sameRuntimeTargetRefs(target.TargetRefs, observation.CandidateTargetRefs)
 }
 
 // repairClosureRequiredEvidenceKinds is canonical SM-2 repair sequencing. It
@@ -369,6 +402,7 @@ func repairStateChangeDecision(base runtimecontract.RuntimeDecision, facts runti
 		CoverageWorkItemIDs:   firstRepairCoverage(directive.CoverageWorkItemIDs, facts.Focus.CoverageWorkItemIDs),
 		TargetRefs:            firstRepairTargets(directive.TargetRefs, facts.Focus.TargetRefs),
 		RepairClosureID:       repairClosureID(directive),
+		RepairPurpose:         directive.Purpose,
 		// A repair-purpose prospective binding is the same target-complete all-of
 		// contract as any other prospective state-change binding. Reusing the
 		// canonical sequence compiler prevents the repair directive from silently
@@ -402,6 +436,7 @@ func repairValidationDecision(base runtimecontract.RuntimeDecision, facts runtim
 		CoverageWorkItemIDs: firstRepairCoverage(directive.CoverageWorkItemIDs, facts.Focus.CoverageWorkItemIDs),
 		TargetRefs:          firstRepairTargets(directive.TargetRefs, facts.Focus.TargetRefs),
 		RepairClosureID:     repairClosureID(directive),
+		RepairPurpose:       directive.Purpose,
 	}
 	return base, nil
 }

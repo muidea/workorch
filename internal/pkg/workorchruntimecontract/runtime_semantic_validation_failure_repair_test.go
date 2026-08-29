@@ -24,7 +24,7 @@ func TestCompileRuntimeSemanticValidationFailureRepairSealsOneFileProofAndFreshV
 	convergence := testValidationFailureRepairConvergence()
 	convergence.RepairDeclarationTargetSelectorCandidateRefs = []string{"internal/main.go", "main.go"}
 	definitionFocuses := CompileRuntimeDefinitionFocuses([]CoverageFocus{{
-		ID: "definition-focus-repair", SliceID: "slice-repair", AssessmentScope: "dodItem", AssessmentID: "dod-item-repair",
+		ID: "definition-focus-repair", SliceID: "slice-repair", AssessmentScope: "dodItem", AssessmentID: "dod-item-repair", AssessmentText: "behavior passes validation",
 		CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-repair"}, RequiredEvidenceKinds: []string{EvidenceKindValidation},
 		TargetRole: "deliverable_implementation", TargetSelectorRef: "file/workspace_deliverable",
 		TargetSelectorOwnerRef: "software-dev", TargetSelectorSubjectRef: "dodItem", RequireTargetGrounding: true,

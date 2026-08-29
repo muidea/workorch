@@ -4,7 +4,7 @@ Status: normative
 
 Type: runtime-flow
 
-Last Verified: 2026-08-24
+Last Verified: 2026-08-28
 
 ## Purpose
 
@@ -68,6 +68,10 @@ evidence commit 必须同时满足：
    current observation逐项匹配，无关owner变化不得扩大stale范围
 8. **Outcome-first 一致**：live/recovery 不得形成两套 receipt 判断；rejected owner diagnostic 不得被后续 effect/quality
    检查改写，accepted/no-op 则不能绕过这些检查
+9. **Fact 双记账**：每个 `evidence_committed` execution 保存 exact `EvidenceFactID + EvidenceFactHash`，并反证完整 fact body、
+   receipt、operation、binding/CWI 与 focus lineage；该 mutable commit projection 不进入 immutable dispatch authority hash
+10. **全局序列一致**：ordinary accepted/rejected fact、governance resolution/fact 与 assessment fact 共同消费唯一连续
+    `EvidenceSequence`/`evidence/<n>` revision；每个 typed entry 由 owning dispatch 恰消费一次，resume clone 不重复消费
 
 Orchestrator 判定 evidence quality、coverage binding 与 next action；block 输出不能自封 accepted。
 
@@ -104,6 +108,17 @@ Runtime 正式状态是 `RuntimeStateRecord`，经 Run owner EventHub update 合
 - `ProcessedEventIDs` / `Diagnostics`
 - `StateRevision` / `EvidenceSequence`
 - execution-budget sub-ledgers、recoverable-wait record与applicable owner revision set/hash
+
+fresh-load 以 completed dispatch persisted order、随后可选 active dispatch 为唯一 chronology replay 全局 evidence sequence；
+projection、eventstream 时间、slice 当前排序或每类 ledger 的局部计数均不是顺序 authority。最终 replay count 必须等于
+`EvidenceSequence`，最终 revision 必须等于 `Facts.EvidenceRevision`。orphan/duplicate/gap、跨 ledger 重复、assessment kind
+混入 ordinary evidence，以及 governance-resume 对 source fact 的二次消费全部 fail closed。
+
+assessment dispatch 还保存两种互斥时点的 proof：pre-seal raw-canonical `RuntimeAssessmentAuthorityInput` 精确绑定 Definition
+seed source、purpose、Focus/bindings 与 owner admissibility catalog，并进入 dispatch authority hash；post-seal
+`RuntimeAssessmentAdjudication` 只在 commit-time 从 accepted evidence、completed dispatch 与 coverage proof lineage 重放，和
+`RuntimeAssessmentFact.AdjudicationHash` 在同一 CAS 双记账。后者不回写 immutable dispatch authority，restart 必须重放并
+逐字段匹配，不能以模型 disposition 或两份协调 self-hash 替代 classifier proof。
 
 ## Result Path
 

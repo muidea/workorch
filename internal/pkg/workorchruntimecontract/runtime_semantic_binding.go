@@ -236,18 +236,8 @@ func validateRuntimeSemanticProofSetSourceWithEvidenceKinds(proofSet RuntimeSema
 	}
 	for proposalIndex, proposal := range proofSet.Proposals {
 		proposal = proposal.Normalized()
-		if proposal.Target.Policy == RuntimeOperationTargetPolicyProspectiveOwnerTarget && len(declaration.TargetSelectorCandidateRefs) != 0 &&
-			!runtimeSemanticStringsWithin(proposal.Target.ProspectiveTargetRefs, declaration.TargetSelectorCandidateRefs) {
-			return runtimeSemanticProposalViolation(
-				proposal,
-				proposalIndex,
-				"target.prospectiveTargetRefs",
-				RuntimeSemanticConstraintAllowedValue,
-				strings.Join(proposal.Target.ProspectiveTargetRefs, ","),
-				nil,
-				declaration.TargetSelectorCandidateRefs,
-				fmt.Errorf("runtime semantic proof for coverage %q prospective targets are outside source selector candidates", proofSet.CoverageWorkItemID),
-			)
+		if err := validateRuntimeSemanticProposalDeclarationTargetSurface(proofSet.CoverageWorkItemID, proposal, proposalIndex, declaration); err != nil {
+			return err
 		}
 		if len(declaration.AcceptedStepKinds) != 0 && !runtimeOperationKindsContain(declaration.AcceptedStepKinds, proposal.OperationKind) {
 			return fmt.Errorf("runtime semantic proof for coverage %q operation kind %q is outside source declaration", proofSet.CoverageWorkItemID, proposal.OperationKind)
@@ -278,6 +268,61 @@ func validateRuntimeSemanticProofSetSourceWithEvidenceKinds(proofSet RuntimeSema
 		}
 	}
 	return nil
+}
+
+// validateRuntimeSemanticProposalDeclarationTargetSurface prevents an LLM
+// proposal from widening the immutable Profile/Definition selector candidates.
+// Capability operation selectors remain independent owner identities; a
+// selector-only existing scope therefore cannot prove membership in a finite
+// declaration candidate set and must supply its bounded owner-scope targets.
+func validateRuntimeSemanticProposalDeclarationTargetSurface(coverageID common.CoverageWorkItemID, proposal RuntimeSemanticProofProposal, proposalIndex int, declaration CoverageFocus) error {
+	proposal = proposal.Normalized()
+	declaration = declaration.Normalized()
+	allowed := declaration.TargetSelectorCandidateRefs
+	if len(allowed) == 0 {
+		return nil
+	}
+
+	field := ""
+	var targetRefs []string
+	switch proposal.Target.Policy {
+	case RuntimeOperationTargetPolicyExactTarget:
+		field = "target.exactTargetRefs"
+		targetRefs = proposal.Target.ExactTargetRefs
+	case RuntimeOperationTargetPolicyExistingOwnerScope:
+		field = "target.ownerScopeTargetRefs"
+		targetRefs = proposal.Target.OwnerScopeTargetRefs
+		if len(targetRefs) == 0 {
+			return runtimeSemanticProposalViolation(
+				proposal,
+				proposalIndex,
+				field,
+				RuntimeSemanticConstraintAllowedValue,
+				"empty_array",
+				[]string{"finite owner-scope target refs within source selector candidates"},
+				allowed,
+				fmt.Errorf("runtime semantic proof for coverage %q selector-only existing scope cannot prove source selector candidate membership", coverageID),
+			)
+		}
+	case RuntimeOperationTargetPolicyProspectiveOwnerTarget:
+		field = "target.prospectiveTargetRefs"
+		targetRefs = proposal.Target.ProspectiveTargetRefs
+	default:
+		return nil
+	}
+	if runtimeSemanticStringsWithin(targetRefs, allowed) {
+		return nil
+	}
+	return runtimeSemanticProposalViolation(
+		proposal,
+		proposalIndex,
+		field,
+		RuntimeSemanticConstraintAllowedValue,
+		strings.Join(targetRefs, ","),
+		nil,
+		allowed,
+		fmt.Errorf("runtime semantic proof for coverage %q targets are outside source selector candidates", coverageID),
+	)
 }
 
 func compileRuntimeSemanticFocus(manifest RuntimeSemanticPlanManifest, generationID string, item RuntimeCoverageItem, proofSet RuntimeSemanticCWIProofSet, facts map[string]RuntimeSemanticProofFeasibility, source *CoverageFocus, evidenceObligation RuntimeSemanticEvidenceObligation) (CoverageFocus, error) {
@@ -442,6 +487,15 @@ func compileRuntimeSemanticFocus(manifest RuntimeSemanticPlanManifest, generatio
 	}
 	if source != nil {
 		declaration := source.Normalized()
+		focus.EvidenceRole = declaration.EvidenceRole
+		if declaration.TargetRole != "" {
+			focus.TargetRole = declaration.TargetRole
+		}
+		focus.RequireDirectEvidence = focus.RequireDirectEvidence || declaration.RequireDirectEvidence
+		focus.RequireClaimEvidence = declaration.RequireClaimEvidence
+		focus.RequireExecutableBehaviorEvidence = declaration.RequireExecutableBehaviorEvidence
+		focus.RequireCoverageTargets = declaration.RequireCoverageTargets
+		focus.RequireAssessment = focus.RequireAssessment || declaration.RequireAssessment
 		focus.RequiredOwnerFacts = append([]RuntimeOwnerFactRequirement(nil), declaration.RequiredOwnerFacts...)
 		focus.OwnerFactConvergences = CloneRuntimeOwnerFactConvergences(declaration.OwnerFactConvergences)
 		focus.MetricConstraints = append([]string(nil), declaration.MetricConstraints...)

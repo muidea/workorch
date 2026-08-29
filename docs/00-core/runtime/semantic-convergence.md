@@ -228,6 +228,11 @@ capability owner catalog 发布的 matching operation selector/constraint/varian
 scope/catalog 不匹配由 pure evaluator 或 File feasibility 拒绝。全部 exact-current owner fact 通过后，SM-2 才封存 binding；
 之前始终零 candidate/dispatch/effect。
 
+`exact_target | existing_owner_scope | prospective_owner_target` 三种 policy 共用同一 pure admission intersection：semantic
+proposal 必须同时落在 immutable Definition selector/candidate declaration 与 current operation selector/catalog surface 内。
+Definition selector 只提供 declaration lineage，不能冒充 operation selector；任何 selector、candidate、target 或 owner-scope
+漂移都形成 typed proposal violation，不能进入 binding、dispatch 或 effect。
+
 Orchestrator 必须用一份 owner-private target-authority projection 统一 SM-2 grounding 与 SM-3 prerequisite/candidate
 admission：先从 current repair/focus facts 得到 exact target set，再依据 current SM-2 binding + owner feasibility lineage
 将其分类为 existing 或 prospective。只有 existing target 可以产生 File `target_snapshot` prerequisite；已经通过 File
@@ -241,13 +246,23 @@ target inventory 作为 typed input 转交 Shell；prospective-satisfaction pure
 observation。Shell 独立决定 recipe/surface readiness 与 prospective satisfaction judgment，Orchestrator 不扩张路径，
 Shell 也不成为 File target owner。
 
-catalog retirement 可以在同一 Orchestrator owner-local CAS 中打开新的 semantic generation，而当前 binding-free CWI 的
-SM-2 reducer view 尚未获得 target/binding。仅当该窗口形成的 terminal code 是 `target_grounding_unresolved` 时，它不具备
-SM-4 delivery authority：drive、candidate request guard 与 fresh-start recovery 必须先完成 `semantic_plan`
-request/owner feasibility/SM-2 seal。`SemanticOperationAuthorityReady` 或 `semantic_contract_failed` 成立后才可交付该终态；
-其它已封存的 contract defect、budget exhaustion 或 owner failure terminal 必须保持原权威，不能被语义重规划覆盖。
-administrative termination 仍走独立 Run-owner intent/SM-4 handoff lane。该门禁不允许 operations request 穿过 binding-free 窗口，
-也不允许 capability owner、Application 或 projection 改写任何 Runtime state。
+要求 target grounding 的 immutable DefinitionFocus 必须在 semantic provider request 前形成 focus-scoped typed
+`TargetSelection` prerequisite，并由 File owner 返回 exact selection 与 workspace-tree freshness observation。只有该 observation
+逐字段匹配 current focus、Definition selector/owner/subject/candidate declaration，且 disposition 为
+`absent | ambiguous | unsupported`，或“empty scope 且 Definition 无 bounded selector candidates”时，
+`target_grounding_unresolved` 才是可交付的 owner-grounded terminal，整个
+路径保持零 semantic/candidate provider call。缺少 selection、observation 或 current lineage 的 binding-free view 仍是 transient，
+不得提前交付；`selected`，以及“empty scope 但 Definition 有 bounded selector candidates”的合法 prospective creation 则继续
+semantic planning。
+
+catalog retirement 可以在同一 Orchestrator owner-local CAS 中打开新的 semantic generation。若旧 generation 的 no-effect
+binding 尚为 current binding，SM-4 必须先投递既有 typed `CWIBindingRetired` internal fact，由 SM-2 唯一 reducer 退休旧
+catalog lineage 并 reopen CWI；在该事件完成前，旧 binding 既不是 operation authority，也不能使 provisional
+`target_grounding_unresolved` 具备 delivery authority。随后 drive、candidate request guard 与 fresh-start recovery 才能完成新的
+`semantic_plan` request/owner feasibility/SM-2 seal。已有 effect credit 的 binding 不得因 catalog refresh 自动退休；其它已封存的
+contract defect、budget exhaustion 或 owner failure terminal 也必须保持原权威，不能被语义重规划覆盖。administrative
+termination 仍走独立 Run-owner intent/SM-4 handoff lane。该门禁不允许 operations request 穿过 transient 窗口，也不允许
+capability owner、Application 或 projection 改写任何 Runtime state。
 
 semantic generation 的 eligible closure 必须由 generation purpose 唯一派生，并由 accepted-order projection、focus
 advance 与 retirement check 共用。普通 definition generation 使用当时全部尚未绑定且可规划的 current CWI；

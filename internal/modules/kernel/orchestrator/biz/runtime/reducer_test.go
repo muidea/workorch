@@ -66,7 +66,7 @@ func TestReduceRuntimeStateLiveFailureFixtures(t *testing.T) {
 				},
 				Coverage: []runtimecontract.RuntimeCoverageItemFact{{ID: "cwi-036", State: runtimecontract.RuntimeCoverageItemStateOpen}},
 				Evidence: runtimecontract.EvidenceLedger{
-					Accepted: []runtimecontract.EvidenceFact{{ID: "e-state", Kind: runtimecontract.EvidenceKindStateChange}},
+					Accepted: []runtimecontract.EvidenceFact{{ID: "e-state", Kind: runtimecontract.EvidenceKindStateChange, CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-036"}}},
 					Rejected: []runtimecontract.EvidenceFact{{ID: "e-vet", Kind: runtimecontract.EvidenceKindValidation, FailureClass: runtimecontract.FailureClassBuildFailure, FailureMessage: "server.go:29:6: main redeclared in this block"}},
 				},
 				Capabilities: runtimecontract.RuntimeCapabilities{
@@ -140,8 +140,10 @@ func TestReduceRuntimeStateUsesSealedRepairBudgetForRepeatedStableFailure(t *tes
 	facts := validationFacts()
 	facts.Focus.RequiredEvidenceKinds = []string{runtimecontract.EvidenceKindStateChange}
 	facts.Capabilities.StateChangeKinds = []string{runtimecontract.RuntimeBlockKindPatchApply}
+	facts.ConvergencePolicy.MaxRepairAttemptsPerFocus = 3
+	facts = runtimeTestFactsWithCurrentFocusBindings(t, facts, runtimecontract.RuntimeDefinitionContext{StartupInputHash: "startup-input-test", Revision: facts.DefinitionRevision})
 	facts.Failure = &runtimecontract.FailureFact{
-		Class: runtimecontract.FailureClassExecutionFailure, Signature: "stable-patch-failure", Message: "patch input remains invalid", TargetRefs: []string{"main.go"},
+		Class: runtimecontract.FailureClassExecutionFailure, Signature: "stable-patch-failure", Message: "patch input remains invalid", TargetRefs: append([]string(nil), facts.Focus.TargetRefs...),
 	}
 	facts.Evidence.Accepted = []runtimecontract.EvidenceFact{{ID: "accepted-unrelated", Kind: runtimecontract.EvidenceKindValidation, Revision: "runtime-evidence-00000000000000000001"}}
 	for idx := 0; idx < 2; idx++ {
@@ -152,7 +154,7 @@ func TestReduceRuntimeStateUsesSealedRepairBudgetForRepeatedStableFailure(t *tes
 			CoverageWorkItemIDs: facts.Focus.CoverageWorkItemIDs,
 		})
 	}
-	decision, err := reduceRuntimeStateFixture(t, facts, nil)
+	decision, err := ReduceRuntimeState(facts, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -167,16 +169,15 @@ func TestReduceRuntimeStateUsesSealedRepairBudgetForRepeatedStableFailure(t *tes
 	})
 	// Rejected evidence count is diagnostic only; the sealed repair ledger is
 	// the single budget authority.
-	decision, err = reduceRuntimeStateFixture(t, facts, &decision.AuthoritySnapshot)
+	decision, err = ReduceRuntimeState(facts, &decision.AuthoritySnapshot)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if decision.State != runtimecontract.ConvergenceStateNeedStateChange {
 		t.Fatalf("rejected count bypassed repair ledger: %+v", decision)
 	}
-	facts.ConvergencePolicy = runtimecontract.RuntimeConvergencePolicy{MaxRepairAttemptsPerFocus: 3}
 	facts.Repair = runtimecontract.RuntimeRepairLedger{FocusID: facts.Focus.ID, RepairAttempts: 3}
-	decision, err = reduceRuntimeStateFixture(t, facts, &decision.AuthoritySnapshot)
+	decision, err = ReduceRuntimeState(facts, &decision.AuthoritySnapshot)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -196,9 +197,9 @@ func TestReduceRuntimeStateProgression(t *testing.T) {
 			f.Prerequisites.Pending = []runtimecontract.RuntimePrerequisite{{ID: "snapshot", Kind: "target_snapshot"}}
 		}, state: runtimecontract.ConvergenceStateNeedPrerequisite, action: runtimecontract.ConvergenceStateNeedPrerequisite},
 		{name: "validation", state: runtimecontract.ConvergenceStateNeedValidation, action: runtimecontract.ConvergenceStateNeedValidation},
-		{name: "complete", mutate: func(f *runtimecontract.RuntimeFacts) {
-			f.Evidence.Accepted = []runtimecontract.EvidenceFact{{ID: "e-validation", Kind: runtimecontract.EvidenceKindValidation}}
-		}, state: runtimecontract.ConvergenceStateComplete, action: runtimecontract.ConvergenceStateComplete},
+		{name: "assessment after accepted evidence", mutate: func(f *runtimecontract.RuntimeFacts) {
+			f.Evidence.Accepted = []runtimecontract.EvidenceFact{{ID: "e-validation", Kind: runtimecontract.EvidenceKindValidation, CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-1"}}}
+		}, state: runtimecontract.ConvergenceStateNeedAssessment, action: runtimecontract.ConvergenceStateNeedAssessment},
 		{name: "governance", mutate: func(f *runtimecontract.RuntimeFacts) {
 			f.Failure = &runtimecontract.FailureFact{Class: runtimecontract.FailureClassGovernanceDependency, GovernanceDependency: &runtimecontract.ExternalDependency{
 				Kind: "external-approval", SubjectRef: "subject-1", Reason: "external approval required",
@@ -277,15 +278,31 @@ func TestReduceRuntimeStateCreationScopeRequiresAdmissibleDurableFileOperation(t
 		}
 		selection.SnapshotID = runtimecontract.StableRuntimeTargetSelectionSnapshotID(selection)
 		facts.Resources.TargetSelection = &selection
+		inventory := runtimecontract.RuntimeOperationAdmissibility{
+			PrerequisiteID: "admissibility-file", OwnerModuleID: runtimecontract.RuntimeModuleFile,
+			OperationKinds: []string{runtimecontract.StepKindFileWrite, runtimecontract.RuntimeBlockKindPatchApply},
+			SelectorRefs:   []string{facts.Focus.TargetSelectorRef}, ConstraintRefs: []string{"new-target-requires-owner-selector", "workspace-relative-path"},
+			ObservedRevision: "workspace-empty-v1",
+			OperationVariants: []runtimecontract.RuntimeOperationAdmissibilityVariant{
+				{Kind: runtimecontract.StepKindFileWrite, AllowedTargetPolicies: []runtimecontract.RuntimeOperationTargetPolicy{runtimecontract.RuntimeOperationTargetPolicyExactTarget, runtimecontract.RuntimeOperationTargetPolicyExistingOwnerScope, runtimecontract.RuntimeOperationTargetPolicyProspectiveOwnerTarget}, SelectorRefs: []string{facts.Focus.TargetSelectorRef}, ConstraintRefs: []string{"new-target-requires-owner-selector", "workspace-relative-path"}},
+				{Kind: runtimecontract.RuntimeBlockKindPatchApply, VariantID: "file_write", AllowedTargetPolicies: []runtimecontract.RuntimeOperationTargetPolicy{runtimecontract.RuntimeOperationTargetPolicyExactTarget, runtimecontract.RuntimeOperationTargetPolicyExistingOwnerScope, runtimecontract.RuntimeOperationTargetPolicyProspectiveOwnerTarget}, SelectorRefs: []string{facts.Focus.TargetSelectorRef}, ConstraintRefs: []string{"new-target-requires-owner-selector", "workspace-relative-path"}},
+				{Kind: runtimecontract.RuntimeBlockKindPatchApply, VariantID: "text_replace", AllowedTargetPolicies: []runtimecontract.RuntimeOperationTargetPolicy{runtimecontract.RuntimeOperationTargetPolicyExactTarget, runtimecontract.RuntimeOperationTargetPolicyExistingOwnerScope}},
+				{Kind: runtimecontract.RuntimeBlockKindPatchApply, VariantID: "unified_diff", AllowedTargetPolicies: []runtimecontract.RuntimeOperationTargetPolicy{runtimecontract.RuntimeOperationTargetPolicyExactTarget, runtimecontract.RuntimeOperationTargetPolicyExistingOwnerScope, runtimecontract.RuntimeOperationTargetPolicyProspectiveOwnerTarget}, SelectorRefs: []string{facts.Focus.TargetSelectorRef}, ConstraintRefs: []string{"new-target-requires-owner-selector", "workspace-relative-path"}},
+			},
+		}
+		inventory.SnapshotID = runtimecontract.StableRuntimeOperationAdmissibilitySnapshotID(inventory)
+		facts.Resources.OperationAdmissibilities = append(facts.Resources.OperationAdmissibilities, inventory)
 		bindCurrentFocusTargetSelection(&facts)
 		return facts
 	}
 
 	t.Run("fails before provider when only non-file durable capability is sealed", func(t *testing.T) {
-		facts := newCreationFacts()
+		facts := runtimeTestFactsWithCurrentFocusBindings(t, newCreationFacts(), runtimecontract.RuntimeDefinitionContext{StartupInputHash: "startup-input-test", Revision: "definition-1"})
 		facts.Focus.AcceptedStepKinds = []string{runtimecontract.StepKindGitWrite}
+		facts.Focus.AcceptedOperationVariants = nil
 		facts.Capabilities.StateChangeKinds = []string{runtimecontract.StepKindGitWrite}
-		decision, err := reduceRuntimeStateFixture(t, facts, nil)
+		facts = runtimeTestFactsWithCanonicalCWIProjection(t, facts)
+		decision, err := ReduceRuntimeState(facts, nil)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -298,19 +315,6 @@ func TestReduceRuntimeStateCreationScopeRequiresAdmissibleDurableFileOperation(t
 		facts := newCreationFacts()
 		facts.Focus.AcceptedStepKinds = []string{runtimecontract.StepKindFileWrite, runtimecontract.RuntimeBlockKindPatchApply}
 		facts.Capabilities.StateChangeKinds = []string{runtimecontract.StepKindFileWrite, runtimecontract.RuntimeBlockKindPatchApply}
-		inventory := runtimecontract.RuntimeOperationAdmissibility{
-			PrerequisiteID: "admissibility-file", OwnerModuleID: runtimecontract.RuntimeModuleFile,
-			OperationKinds: []string{runtimecontract.StepKindFileWrite, runtimecontract.RuntimeBlockKindPatchApply}, SelectorRefs: []string{"owner-new-target-selector"},
-			ConstraintRefs: []string{"new-target-requires-owner-selector"}, ObservedRevision: "workspace-empty-v1",
-			OperationVariants: []runtimecontract.RuntimeOperationAdmissibilityVariant{
-				{Kind: runtimecontract.StepKindFileWrite, AllowedTargetPolicies: []runtimecontract.RuntimeOperationTargetPolicy{runtimecontract.RuntimeOperationTargetPolicyExactTarget, runtimecontract.RuntimeOperationTargetPolicyExistingOwnerScope, runtimecontract.RuntimeOperationTargetPolicyProspectiveOwnerTarget}, SelectorRefs: []string{"owner-new-target-selector"}, ConstraintRefs: []string{"new-target-requires-owner-selector"}},
-				{Kind: runtimecontract.RuntimeBlockKindPatchApply, VariantID: "file_write", AllowedTargetPolicies: []runtimecontract.RuntimeOperationTargetPolicy{runtimecontract.RuntimeOperationTargetPolicyExactTarget, runtimecontract.RuntimeOperationTargetPolicyExistingOwnerScope, runtimecontract.RuntimeOperationTargetPolicyProspectiveOwnerTarget}, SelectorRefs: []string{"owner-new-target-selector"}, ConstraintRefs: []string{"new-target-requires-owner-selector"}},
-				{Kind: runtimecontract.RuntimeBlockKindPatchApply, VariantID: "text_replace", AllowedTargetPolicies: []runtimecontract.RuntimeOperationTargetPolicy{runtimecontract.RuntimeOperationTargetPolicyExactTarget, runtimecontract.RuntimeOperationTargetPolicyExistingOwnerScope}},
-				{Kind: runtimecontract.RuntimeBlockKindPatchApply, VariantID: "unified_diff", AllowedTargetPolicies: []runtimecontract.RuntimeOperationTargetPolicy{runtimecontract.RuntimeOperationTargetPolicyExactTarget, runtimecontract.RuntimeOperationTargetPolicyExistingOwnerScope, runtimecontract.RuntimeOperationTargetPolicyProspectiveOwnerTarget}, SelectorRefs: []string{"owner-new-target-selector"}, ConstraintRefs: []string{"new-target-requires-owner-selector"}},
-			},
-		}
-		inventory.SnapshotID = runtimecontract.StableRuntimeOperationAdmissibilitySnapshotID(inventory)
-		facts.Resources.OperationAdmissibilities = []runtimecontract.RuntimeOperationAdmissibility{inventory}
 		decision, err := reduceRuntimeStateFixture(t, facts, nil)
 		if err != nil {
 			t.Fatal(err)
@@ -322,27 +326,12 @@ func TestReduceRuntimeStateCreationScopeRequiresAdmissibleDurableFileOperation(t
 
 	t.Run("create precedes ordinary validation until durable target evidence exists", func(t *testing.T) {
 		facts := newCreationFacts()
-		facts.Focus.RequiredEvidenceKinds = []string{runtimecontract.EvidenceKindValidation}
+		facts.Focus.RequiredEvidenceKinds = []string{runtimecontract.EvidenceKindStateChange, runtimecontract.EvidenceKindValidation}
 		facts.Focus.AcceptedStepKinds = []string{runtimecontract.StepKindFileWrite, runtimecontract.RuntimeBlockKindManagedValidationSession}
 		facts.Capabilities.StateChangeKinds = []string{runtimecontract.StepKindFileWrite}
 		facts.Capabilities.ValidationKinds = []string{runtimecontract.RuntimeBlockKindManagedValidationSession}
-		inventory := runtimecontract.RuntimeOperationAdmissibility{
-			PrerequisiteID: "admissibility-file", OwnerModuleID: runtimecontract.RuntimeModuleFile,
-			OperationKinds: []string{runtimecontract.StepKindFileWrite}, SelectorRefs: []string{"owner-new-target-selector"},
-			ConstraintRefs: []string{"new-target-requires-owner-selector"}, ObservedRevision: "workspace-empty-v1",
-			OperationVariants: []runtimecontract.RuntimeOperationAdmissibilityVariant{{
-				Kind: runtimecontract.StepKindFileWrite,
-				AllowedTargetPolicies: []runtimecontract.RuntimeOperationTargetPolicy{
-					runtimecontract.RuntimeOperationTargetPolicyExactTarget,
-					runtimecontract.RuntimeOperationTargetPolicyExistingOwnerScope,
-					runtimecontract.RuntimeOperationTargetPolicyProspectiveOwnerTarget,
-				},
-				SelectorRefs: []string{"owner-new-target-selector"}, ConstraintRefs: []string{"new-target-requires-owner-selector"},
-			}},
-		}
-		inventory.SnapshotID = runtimecontract.StableRuntimeOperationAdmissibilitySnapshotID(inventory)
-		facts.Resources.OperationAdmissibilities = []runtimecontract.RuntimeOperationAdmissibility{inventory}
-		decision, err := reduceRuntimeStateFixture(t, facts, nil)
+		facts = runtimeTestFactsWithCurrentFocusBindings(t, facts, runtimecontract.RuntimeDefinitionContext{StartupInputHash: "startup-input-test", Revision: facts.DefinitionRevision})
+		decision, err := ReduceRuntimeState(facts, nil)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -353,7 +342,9 @@ func TestReduceRuntimeStateCreationScopeRequiresAdmissibleDurableFileOperation(t
 		facts.Evidence.Accepted = []runtimecontract.EvidenceFact{{
 			ID: "created", Kind: runtimecontract.EvidenceKindStateChange, TargetRefs: []string{"initial-deliverable.txt"},
 			CoverageWorkItemIDs: facts.Focus.CoverageWorkItemIDs, Revision: "runtime-evidence-00000000000000000001",
+			FocusID: facts.Focus.ID, BindingRefs: []string{facts.Focus.CoverageEvidenceBindings[0].ID},
 		}}
+		facts.EvidenceRevision = "runtime-evidence-00000000000000000001"
 		facts.Resources.TargetSelection = &runtimecontract.RuntimeTargetSelection{
 			PrerequisiteID: "selection-1", OwnerModuleID: runtimecontract.RuntimeModuleFile, TargetRole: facts.Focus.TargetRole,
 			SelectorRef: facts.Focus.TargetSelectorRef, SelectorOwnerRef: facts.Focus.TargetSelectorOwnerRef, SelectorSubjectRef: facts.Focus.TargetSelectorSubjectRef,
@@ -362,7 +353,7 @@ func TestReduceRuntimeStateCreationScopeRequiresAdmissibleDurableFileOperation(t
 		}
 		facts.Resources.TargetSelection.SnapshotID = runtimecontract.StableRuntimeTargetSelectionSnapshotID(*facts.Resources.TargetSelection)
 		bindCurrentFocusTargetSelection(&facts)
-		decision, err = reduceRuntimeStateFixture(t, facts, nil)
+		decision, err = ReduceRuntimeState(facts, nil)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -371,16 +362,18 @@ func TestReduceRuntimeStateCreationScopeRequiresAdmissibleDurableFileOperation(t
 		}
 	})
 
-	t.Run("rejects create observation that does not match the sealed declaration", func(t *testing.T) {
-		facts := newCreationFacts()
+	t.Run("mismatched create observation cannot rewrite the sealed declaration", func(t *testing.T) {
+		facts := runtimeTestFactsWithCurrentFocusBindings(t, newCreationFacts(), runtimecontract.RuntimeDefinitionContext{StartupInputHash: "startup-input-test", Revision: "definition-1"})
 		facts.Resources.TargetSelection.ProspectiveTargetRef = "unsealed-target.txt"
 		facts.Resources.TargetSelection.SnapshotID = runtimecontract.StableRuntimeTargetSelectionSnapshotID(*facts.Resources.TargetSelection)
-		decision, err := reduceRuntimeStateFixture(t, facts, nil)
+		bindCurrentFocusTargetSelection(&facts)
+		decision, err := ReduceRuntimeState(facts, nil)
 		if err != nil {
 			t.Fatal(err)
 		}
-		if decision.State != runtimecontract.ConvergenceStateFailed || decision.Terminal == nil || decision.Terminal.Code != "target_grounding_unresolved" {
-			t.Fatalf("unsealed creation selection decision = %+v", decision)
+		if decision.State != runtimecontract.ConvergenceStateNeedStateChange || len(decision.RequiredOutput.TargetRefs) != 1 ||
+			decision.RequiredOutput.TargetRefs[0] != "initial-deliverable.txt" || runtimeStringsContain(decision.RequiredOutput.TargetRefs, "unsealed-target.txt") {
+			t.Fatalf("mismatched owner observation rewrote sealed prospective authority: %+v", decision)
 		}
 	})
 }
@@ -438,10 +431,8 @@ func TestSemanticFileProspectiveTargetScopeRequiresMatchingSealedOwnerFacts(t *t
 		facts.Focus.ProspectiveTargetRefs = []string{"runtime-validation-source.txt"}
 		facts.Focus.RequireTargetGrounding = true
 		facts.Capabilities.StateChangeKinds = []string{runtimecontract.StepKindFileWrite}
-		facts = runtimeTestFactsWithCurrentFocusBindings(t, facts, runtimecontract.RuntimeDefinitionContext{StartupInputHash: "startup-input-test", Revision: facts.DefinitionRevision})
-
 		catalog := runtimecontract.RuntimeOperationAdmissibility{
-			PrerequisiteID: "file-catalog", OwnerModuleID: runtimecontract.RuntimeModuleFile,
+			PrerequisiteID: "test-semantic-file", OwnerModuleID: runtimecontract.RuntimeModuleFile,
 			OperationKinds: []string{runtimecontract.StepKindFileWrite}, SelectorRefs: []string{facts.Focus.TargetSelectorRef},
 			ConstraintRefs: []string{"new-target-requires-owner-selector", "workspace-relative-path"}, ObservedRevision: "workspace-empty-v1",
 			OperationVariants: []runtimecontract.RuntimeOperationAdmissibilityVariant{{
@@ -455,11 +446,8 @@ func TestSemanticFileProspectiveTargetScopeRequiresMatchingSealedOwnerFacts(t *t
 			}},
 		}
 		catalog.SnapshotID = runtimecontract.StableRuntimeOperationAdmissibilitySnapshotID(catalog)
-		binding := facts.Focus.CoverageEvidenceBindings[0]
-		binding.PrerequisiteRefs = []string{catalog.SnapshotID, "semantic-feasibility/file-owner-fact"}
-		binding.Hash = runtimecontract.StableCoverageEvidenceBindingHash(binding)
-		facts.Focus.CoverageEvidenceBindings = []runtimecontract.CoverageEvidenceBinding{binding}
-		facts.Resources.OperationAdmissibilities = []runtimecontract.RuntimeOperationAdmissibility{catalog}
+		facts.Resources.OperationAdmissibilities = append(facts.Resources.OperationAdmissibilities, catalog)
+		facts = runtimeTestFactsWithCurrentFocusBindings(t, facts, runtimecontract.RuntimeDefinitionContext{StartupInputHash: "startup-input-test", Revision: facts.DefinitionRevision})
 		return runtimeTestFactsWithCanonicalCWIProjection(t, facts)
 	}
 
@@ -486,6 +474,14 @@ func TestSemanticFileProspectiveTargetScopeRequiresMatchingSealedOwnerFacts(t *t
 			t.Fatalf("semantic File prospective decision = %+v", decision)
 		}
 	})
+	fileCatalogIndex := func(facts *runtimecontract.RuntimeFacts) int {
+		for index := range facts.Resources.OperationAdmissibilities {
+			if facts.Resources.OperationAdmissibilities[index].OwnerModuleID == runtimecontract.RuntimeModuleFile {
+				return index
+			}
+		}
+		return -1
+	}
 
 	for _, test := range []struct {
 		name   string
@@ -498,7 +494,11 @@ func TestSemanticFileProspectiveTargetScopeRequiresMatchingSealedOwnerFacts(t *t
 			facts.Focus.CoverageEvidenceBindings[0] = binding
 		}},
 		{name: "missing owner selector", mutate: func(facts *runtimecontract.RuntimeFacts) {
-			catalog := facts.Resources.OperationAdmissibilities[0]
+			index := fileCatalogIndex(facts)
+			if index < 0 {
+				return
+			}
+			catalog := facts.Resources.OperationAdmissibilities[index]
 			catalog.SelectorRefs = nil
 			catalog.OperationVariants[0].AllowedTargetPolicies = []runtimecontract.RuntimeOperationTargetPolicy{
 				runtimecontract.RuntimeOperationTargetPolicyExactTarget,
@@ -506,14 +506,18 @@ func TestSemanticFileProspectiveTargetScopeRequiresMatchingSealedOwnerFacts(t *t
 			}
 			catalog.OperationVariants[0].SelectorRefs = nil
 			catalog.SnapshotID = runtimecontract.StableRuntimeOperationAdmissibilitySnapshotID(catalog)
-			facts.Resources.OperationAdmissibilities[0] = catalog
+			facts.Resources.OperationAdmissibilities[index] = catalog
 			binding := facts.Focus.CoverageEvidenceBindings[0]
 			binding.PrerequisiteRefs[0] = catalog.SnapshotID
 			binding.Hash = runtimecontract.StableCoverageEvidenceBindingHash(binding)
 			facts.Focus.CoverageEvidenceBindings[0] = binding
 		}},
 		{name: "missing prospective constraint", mutate: func(facts *runtimecontract.RuntimeFacts) {
-			catalog := facts.Resources.OperationAdmissibilities[0]
+			index := fileCatalogIndex(facts)
+			if index < 0 {
+				return
+			}
+			catalog := facts.Resources.OperationAdmissibilities[index]
 			catalog.ConstraintRefs = []string{"workspace-relative-path"}
 			catalog.OperationVariants[0].AllowedTargetPolicies = []runtimecontract.RuntimeOperationTargetPolicy{
 				runtimecontract.RuntimeOperationTargetPolicyExactTarget,
@@ -521,7 +525,7 @@ func TestSemanticFileProspectiveTargetScopeRequiresMatchingSealedOwnerFacts(t *t
 			}
 			catalog.OperationVariants[0].ConstraintRefs = []string{"workspace-relative-path"}
 			catalog.SnapshotID = runtimecontract.StableRuntimeOperationAdmissibilitySnapshotID(catalog)
-			facts.Resources.OperationAdmissibilities[0] = catalog
+			facts.Resources.OperationAdmissibilities[index] = catalog
 			binding := facts.Focus.CoverageEvidenceBindings[0]
 			binding.PrerequisiteRefs[0] = catalog.SnapshotID
 			binding.Hash = runtimecontract.StableCoverageEvidenceBindingHash(binding)
@@ -584,8 +588,51 @@ func TestAdvanceSatisfiedCoverageFocusDropsPriorFocusTargetFacts(t *testing.T) {
 		TargetRole: "implementation", TargetDiscoverySources: []string{runtimecontract.RuntimeValidationDiscoverySourceWorkspaceManifest}, TargetSelectorRef: "file/profile_declared_candidates",
 		TargetSelectorOwnerRef: "software-dev", TargetSelectorSubjectRef: "go-lsp/source", TargetSelectorCandidateRefs: []string{"internal/lsp/manager.go"}, ProspectiveTargetRefs: []string{"internal/lsp/manager.go"}, RequireTargetGrounding: true,
 	}}
-	facts.Coverage = []runtimecontract.RuntimeCoverageItemFact{{ID: "cwi-module", State: runtimecontract.RuntimeCoverageItemStateSatisfied}, {ID: "cwi-source", State: runtimecontract.RuntimeCoverageItemStateOpen}}
-	facts.Evidence.Accepted = []runtimecontract.EvidenceFact{{ID: "module-created", Kind: runtimecontract.EvidenceKindStateChange, CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-module"}}}
+	facts.Coverage = []runtimecontract.RuntimeCoverageItemFact{
+		{ID: "cwi-module", SliceID: "bootstrap", SourceScope: "dodItem", SourceID: "dod-module", TargetText: "create module", State: runtimecontract.RuntimeCoverageItemStateOpen},
+		{ID: "cwi-source", SliceID: "bootstrap", SourceScope: "dodItem", SourceID: "dod-source", TargetText: "create source", State: runtimecontract.RuntimeCoverageItemStateOpen},
+	}
+	facts.Slices = []runtimecontract.RuntimeAcceptanceSlice{{ID: "bootstrap", CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-module", "cwi-source"}}}
+	facts.ConvergencePolicy.MaxAcceptanceSliceWorkItems = 2
+	facts.DefinitionSeed = runtimecontract.RuntimeDefinitionSeed{
+		SchemaVersion: runtimecontract.RuntimeDefinitionSeedSchemaCurrent, DefinitionRevision: facts.DefinitionRevision, PolicyHash: "bootstrap-policy",
+		CoverageItems: []runtimecontract.RuntimeCoverageItem{
+			{ID: "cwi-module", SliceID: "bootstrap", SourceScope: "dodItem", SourceID: "dod-module", TargetText: "create module", Order: 0},
+			{ID: "cwi-source", SliceID: "bootstrap", SourceScope: "dodItem", SourceID: "dod-source", TargetText: "create source", Order: 1},
+		},
+		Slices: facts.Slices,
+	}
+	facts.DefinitionSeed.Hash = runtimecontract.StableRuntimeDefinitionSeedHash(facts.DefinitionSeed)
+	fileCatalog := runtimecontract.RuntimeOperationAdmissibility{
+		PrerequisiteID: "test-semantic-file", OwnerModuleID: runtimecontract.RuntimeModuleFile,
+		OperationKinds: []string{runtimecontract.StepKindFileWrite}, TargetRefs: []string{"go.mod"},
+		SelectorRefs: []string{"file/profile_declared_candidates"}, ConstraintRefs: []string{"new-target-requires-owner-selector", "workspace-relative-path"},
+		OperationVariants: []runtimecontract.RuntimeOperationAdmissibilityVariant{{
+			Kind:                  runtimecontract.StepKindFileWrite,
+			AllowedTargetPolicies: []runtimecontract.RuntimeOperationTargetPolicy{runtimecontract.RuntimeOperationTargetPolicyExactTarget, runtimecontract.RuntimeOperationTargetPolicyProspectiveOwnerTarget},
+			SelectorRefs:          []string{"file/profile_declared_candidates"}, ConstraintRefs: []string{"new-target-requires-owner-selector", "workspace-relative-path"},
+		}},
+		ObservedRevision: "tree-module",
+	}
+	fileCatalog.SnapshotID = runtimecontract.StableRuntimeOperationAdmissibilitySnapshotID(fileCatalog)
+	facts.Resources.OperationAdmissibilities = append(facts.Resources.OperationAdmissibilities, fileCatalog)
+	facts = runtimeTestFactsWithCurrentFocusBindings(t, facts, runtimecontract.RuntimeDefinitionContext{StartupInputHash: "startup-input-test", Revision: facts.DefinitionRevision})
+	for index := range facts.Coverage {
+		if facts.Coverage[index].ID == "cwi-module" {
+			facts.Coverage[index].State = runtimecontract.RuntimeCoverageItemStateSatisfied
+		}
+	}
+	binding, found := coverageBindingForRuntimeCWI(facts.Focus, "cwi-module")
+	if !found {
+		t.Fatal("sealed module focus has no exact CWI binding")
+	}
+	facts.EvidenceRevision = "runtime-evidence-00000000000000000001"
+	facts.Evidence.Accepted = []runtimecontract.EvidenceFact{{
+		ID: "module-created", Kind: runtimecontract.EvidenceKindStateChange, FocusID: facts.Focus.ID,
+		CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-module"}, BindingRefs: []string{binding.ID},
+		TargetRefs: append([]string(nil), binding.TargetRefs...), Revision: facts.EvidenceRevision,
+		DispatchID: "dispatch/module-created", OperationID: "operation/module-created",
+	}}
 	selection := runtimecontract.RuntimeTargetSelection{
 		PrerequisiteID: "selection-module", OwnerModuleID: runtimecontract.RuntimeModuleFile, TargetRole: "module_definition", SelectorRef: "file/profile_declared_candidates",
 		Disposition: runtimecontract.RuntimeTargetSelectionSelected, TargetRefs: []string{"go.mod"}, CandidateTargetRefs: []string{"go.mod"}, CandidateCount: 1, ObservedRevision: "tree-module",
@@ -610,7 +657,7 @@ func TestAdvanceSatisfiedCoverageFocusDropsPriorFocusTargetFacts(t *testing.T) {
 	observation.ObservationID = runtimecontract.StableRuntimePrerequisiteObservationID(observation)
 	facts.Prerequisites.Satisfied = []runtimecontract.RuntimePrerequisite{prerequisite}
 	facts.Resources.PrerequisiteObservations = []runtimecontract.RuntimePrerequisiteObservation{observation}
-	facts = runtimeTestFactsWithCurrentFocusBindings(t, facts, runtimecontract.RuntimeDefinitionContext{StartupInputHash: "startup-input-test", Revision: facts.DefinitionRevision})
+	facts = runtimeTestFactsWithCanonicalCWIProjection(t, facts)
 
 	advanced, err := advanceSatisfiedCoverageFocus(facts)
 	if err != nil {
@@ -638,14 +685,14 @@ func TestAdvanceSatisfiedCoverageFocusDropsPriorFocusTargetFacts(t *testing.T) {
 	if err != nil || decision.State != runtimecontract.ConvergenceStateNeedPrerequisite || len(updated.Prerequisites.Pending) != 2 {
 		t.Fatalf("next bootstrap focus did not acquire a fresh target selection: facts=%+v decision=%+v err=%v", updated, decision, err)
 	}
-	found := false
+	selectionFound := false
 	for _, prerequisite := range updated.Prerequisites.Pending {
 		if prerequisite.Kind == runtimecontract.PrerequisiteKindTargetSelection && sameRuntimeTargetRefs(prerequisite.TargetSelectorCandidateRefs, []string{"internal/lsp/manager.go"}) &&
 			prerequisite.Scope == runtimecontract.RuntimePrerequisiteScopeFocus && prerequisite.FocusID == "bootstrap-source" {
-			found = true
+			selectionFound = true
 		}
 	}
-	if !found {
+	if !selectionFound {
 		t.Fatalf("next bootstrap focus selection prerequisite = %+v", updated.Prerequisites.Pending)
 	}
 }
@@ -685,19 +732,26 @@ func TestRuntimeFactsRejectsHistoricalFocusScopedPrerequisiteAsCurrentAuthority(
 func TestReduceRuntimeStateUnsupportedTargetSelectorFailsWithoutProviderAuthority(t *testing.T) {
 	facts := validationFacts()
 	facts.Focus.RequiredEvidenceKinds = []string{runtimecontract.EvidenceKindStateChange}
+	facts = runtimeTestFactsWithCurrentFocusBindings(t, facts, runtimecontract.RuntimeDefinitionContext{StartupInputHash: "startup-input-test", Revision: facts.DefinitionRevision})
 	facts.Focus.RequireTargetGrounding = true
 	facts.Focus.TargetRole = "deliverable"
 	facts.Focus.TargetDiscoverySources = []string{runtimecontract.RuntimeValidationDiscoverySourceWorkspaceManifest}
 	facts.Focus.TargetSelectorRef = "profile/semantic_owner_selector"
+	facts.Focus.TargetSelectorOwnerRef = "profile-owner"
+	facts.Focus.TargetSelectorSubjectRef = facts.Focus.TargetRole
+	runtimeTestSealCurrentFocusBindingTargetSurface(&facts, runtimeTestBindingTargetSurface{
+		SelectorRef: facts.Focus.TargetSelectorRef, SelectorOwnerRef: facts.Focus.TargetSelectorOwnerRef, SelectorSubjectRef: facts.Focus.TargetSelectorSubjectRef,
+	})
 	selection := runtimecontract.RuntimeTargetSelection{
 		PrerequisiteID: "selection-unsupported", OwnerModuleID: runtimecontract.RuntimeModuleFile, TargetRole: facts.Focus.TargetRole,
-		SelectorRef: facts.Focus.TargetSelectorRef, Disposition: runtimecontract.RuntimeTargetSelectionUnsupported, ObservedRevision: "unsupported-selector:profile/semantic_owner_selector",
+		SelectorRef: facts.Focus.TargetSelectorRef, SelectorOwnerRef: facts.Focus.TargetSelectorOwnerRef, SelectorSubjectRef: facts.Focus.TargetSelectorSubjectRef,
+		Disposition: runtimecontract.RuntimeTargetSelectionUnsupported, ObservedRevision: "unsupported-selector:profile/semantic_owner_selector",
 	}
 	selection.SnapshotID = runtimecontract.StableRuntimeTargetSelectionSnapshotID(selection)
 	facts.Resources.TargetSelection = &selection
-	facts.Prerequisites = runtimecontract.PrerequisiteState{}
 	bindCurrentFocusTargetSelection(&facts)
-	decision, err := reduceRuntimeStateFixture(t, facts, nil)
+	facts = runtimeTestFactsWithCanonicalCWIProjection(t, facts)
+	decision, err := ReduceRuntimeState(facts, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -758,12 +812,14 @@ func TestReduceRuntimeStatePrerequisiteProgressResetsAttempt(t *testing.T) {
 func TestReduceRuntimeStateFiltersCapabilitiesByFocusContract(t *testing.T) {
 	facts := validationFacts()
 	facts.Focus.RequiredEvidenceKinds = []string{runtimecontract.EvidenceKindStateChange}
+	facts.Capabilities.StateChangeKinds = []string{"patch/apply", "git/write", "file/edit"}
+	facts = runtimeTestFactsWithCurrentFocusBindings(t, facts, runtimecontract.RuntimeDefinitionContext{StartupInputHash: "startup-input-test", Revision: facts.DefinitionRevision})
 	facts.Focus.EvidenceRole = "supplemental_evidence"
 	facts.Focus.AcceptedStepKinds = []string{"git/write"}
 	facts.Focus.AcceptedOperationVariants = []runtimecontract.RuntimeOperationVariantRef{{Kind: "git/write", VariantID: "commit"}}
 	facts.Focus.RejectedStepKinds = []string{"patch/apply"}
-	facts.Capabilities.StateChangeKinds = []string{"patch/apply", "git/write", "file/edit"}
-	decision, err := reduceRuntimeStateFixture(t, facts, nil)
+	facts = runtimeTestFactsWithCanonicalCWIProjection(t, facts)
+	decision, err := ReduceRuntimeState(facts, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -807,7 +863,6 @@ func TestReduceRuntimeStateFiltersAcceptedVariantsByCurrentActionKinds(t *testin
 func TestReduceRuntimeStateDoesNotApplyGitSequenceToFileOnlyFocus(t *testing.T) {
 	facts := validationFacts()
 	facts.Focus.RequiredEvidenceKinds = []string{runtimecontract.EvidenceKindStateChange}
-	facts.Focus.AcceptedStepKinds = []string{runtimecontract.StepKindFileEdit}
 	facts.Capabilities.StateChangeKinds = []string{runtimecontract.StepKindFileEdit, runtimecontract.StepKindGitWrite}
 	facts.Resources.CapabilityStates = []runtimecontract.RuntimeCapabilityStateSnapshot{{
 		RequirementID: "git-state", OwnerModuleID: runtimecontract.RuntimeModuleGit,
@@ -816,7 +871,11 @@ func TestReduceRuntimeStateDoesNotApplyGitSequenceToFileOnlyFocus(t *testing.T) 
 		Disposition:               runtimecontract.RuntimeCapabilityStateSequenceRequired,
 		RequiredOperationSequence: []runtimecontract.RuntimeRequiredOperationVariant{{RequirementID: "repo-init", Kind: runtimecontract.StepKindGitWrite, VariantID: "init"}},
 	}}
-	decision, err := reduceRuntimeStateFixture(t, facts, nil)
+	facts = runtimeTestFactsWithCurrentFocusBindings(t, facts, runtimecontract.RuntimeDefinitionContext{StartupInputHash: "startup-input-test", Revision: facts.DefinitionRevision})
+	facts.Focus.AcceptedStepKinds = []string{runtimecontract.StepKindFileEdit}
+	facts.Focus.AcceptedOperationVariants = nil
+	facts = runtimeTestFactsWithCanonicalCWIProjection(t, facts)
+	decision, err := ReduceRuntimeState(facts, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -826,7 +885,8 @@ func TestReduceRuntimeStateDoesNotApplyGitSequenceToFileOnlyFocus(t *testing.T) 
 	}
 
 	facts.Focus.AcceptedStepKinds = []string{runtimecontract.StepKindGitWrite}
-	decision, err = reduceRuntimeStateFixture(t, facts, nil)
+	facts = runtimeTestFactsWithCanonicalCWIProjection(t, facts)
+	decision, err = ReduceRuntimeState(facts, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -893,7 +953,7 @@ func TestReduceRuntimeStateKeepsValidationGapAsValidationWithoutOwnerTarget(t *t
 	}}
 	facts.Focus.RequiredEvidenceKinds = []string{runtimecontract.EvidenceKindStateChange, runtimecontract.EvidenceKindValidation}
 	facts.Capabilities.StateChangeKinds = []string{runtimecontract.RuntimeBlockKindPatchApply}
-	facts.Capabilities.ValidationKinds = []string{runtimecontract.StepKindFileRead}
+	facts.Capabilities.ValidationKinds = []string{runtimecontract.RuntimeBlockKindManagedValidationSession}
 	facts.Evidence.Accepted = []runtimecontract.EvidenceFact{{
 		ID: "accepted-state", Kind: runtimecontract.EvidenceKindStateChange, Revision: "runtime-evidence-00000000000000000001", CoverageWorkItemIDs: facts.Focus.CoverageWorkItemIDs,
 	}}
@@ -909,8 +969,9 @@ func TestReduceRuntimeStateKeepsValidationGapAsValidationWithoutOwnerTarget(t *t
 	if decision.State != runtimecontract.ConvergenceStateNeedValidation {
 		t.Fatalf("ungrounded validation failure decision = %+v", decision)
 	}
-	if len(decision.RequiredOutput.TargetRefs) != 0 {
-		t.Fatalf("validation command entry became repair target: %+v", decision.RequiredOutput)
+	if !reflect.DeepEqual(decision.RequiredOutput.TargetRefs, decision.Focus.TargetRefs) ||
+		contains(decision.RequiredOutput.TargetRefs, "validation-entry") {
+		t.Fatalf("validation command entry replaced the semantic validation target: output=%+v focus=%+v", decision.RequiredOutput, decision.Focus)
 	}
 }
 
@@ -1044,7 +1105,7 @@ func TestReduceRuntimeStateAllowsValidationAfterAcceptedRepair(t *testing.T) {
 		},
 		Capabilities: runtimecontract.RuntimeCapabilities{
 			StateChangeKinds: []string{runtimecontract.RuntimeBlockKindPatchApply},
-			ValidationKinds:  []string{runtimecontract.StepKindShellCommand},
+			ValidationKinds:  []string{runtimecontract.RuntimeBlockKindManagedValidationSession},
 		},
 	}
 	got, err := reduceRuntimeStateFixture(t, facts, nil)
@@ -1078,7 +1139,7 @@ func TestReduceRuntimeStateRejectedValidationWithoutOwnerTargetRemainsValidation
 		},
 		Capabilities: runtimecontract.RuntimeCapabilities{
 			StateChangeKinds: []string{runtimecontract.RuntimeBlockKindPatchApply},
-			ValidationKinds:  []string{runtimecontract.StepKindShellCommand},
+			ValidationKinds:  []string{runtimecontract.RuntimeBlockKindManagedValidationSession},
 		},
 	}
 	got, err := reduceRuntimeStateFixture(t, facts, nil)
@@ -1175,22 +1236,23 @@ func validationFacts() runtimecontract.RuntimeFacts {
 	facts.ConvergencePolicy = runtimecontract.DefaultRuntimeConvergencePolicy()
 	facts.RecoveryPolicy = runtimecontract.DefaultRuntimeRecoveryPolicy()
 	facts.ExecutionBudgetPolicy = runtimecontract.DefaultRuntimeExecutionBudgetPolicy()
-	return facts
+	return runtimeTestFactsWithManagedValidationOwnerPreflight(facts)
 }
 
 func TestReduceRuntimeStateRequiresRunLevelStateChangeBeforeComplete(t *testing.T) {
 	facts := validationFacts()
-	facts.Focus.RequireAssessment = false
+	facts.Focus.RequiredEvidenceKinds = []string{runtimecontract.EvidenceKindStateChange, runtimecontract.EvidenceKindValidation}
 	facts.RemainingFocuses = nil
 	facts.Evidence.Accepted = []runtimecontract.EvidenceFact{{
 		ID: "val-1", Kind: runtimecontract.EvidenceKindValidation, CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-1"},
-		Revision: facts.EvidenceRevision,
+		Revision: "runtime-evidence-00000000000000000001",
 	}}
 	facts.StateChange = runtimecontract.NewRuntimeStateChangeLedger(runtimecontract.RuntimeRunStateChangeRequirement{
 		Required: true, CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-1"},
 	})
-	facts = facts.Normalized()
-	decision, err := reduceRuntimeStateFixture(t, facts, nil)
+	facts.EvidenceRevision = "runtime-evidence-00000000000000000001"
+	facts = runtimeTestFactsWithCurrentFocusBindings(t, facts.Normalized(), runtimecontract.RuntimeDefinitionContext{StartupInputHash: "startup-input-test", Revision: facts.DefinitionRevision})
+	decision, err := ReduceRuntimeState(facts, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1199,11 +1261,22 @@ func TestReduceRuntimeStateRequiresRunLevelStateChangeBeforeComplete(t *testing.
 	}
 
 	// satisfy ledger then complete
-	facts.StateChange = applyAcceptedStateChangeEvidence(facts.StateChange, runtimecontract.EvidenceFact{
+	stateEvidence := runtimecontract.EvidenceFact{
 		ID: "state-1", Kind: runtimecontract.EvidenceKindStateChange, CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-1"},
-		Revision: "runtime-evidence-00000000000000000002",
-	}, []common.CoverageWorkItemID{"cwi-1"})
-	decision, err = reduceRuntimeStateFixture(t, facts, nil)
+		Revision: "runtime-evidence-00000000000000000002", FocusID: facts.Focus.ID,
+		BindingRefs: []string{facts.Focus.CoverageEvidenceBindings[0].ID}, TargetRefs: append([]string(nil), facts.Focus.TargetRefs...),
+	}
+	facts.Evidence.Accepted = append(facts.Evidence.Accepted, stateEvidence)
+	facts.StateChange = applyAcceptedStateChangeEvidence(facts.StateChange, stateEvidence, facts.Focus.CoverageWorkItemIDs)
+	facts.Assessments = []runtimecontract.RuntimeAssessmentFact{{
+		ID: "assessment-run-state-change", Revision: "runtime-evidence-00000000000000000003", FocusID: facts.Focus.ID,
+		CoverageWorkItemIDs: append([]common.CoverageWorkItemID(nil), facts.Focus.CoverageWorkItemIDs...),
+		Disposition:         runtimecontract.AssessmentDispositionSatisfied, Summary: "coverage satisfied", EvidenceRefs: []string{"val-1", "state-1"},
+	}}
+	facts.Coverage = []runtimecontract.RuntimeCoverageItemFact{{ID: "cwi-1", State: runtimecontract.RuntimeCoverageItemStateSatisfied, EvidenceRefs: []string{"val-1", "state-1"}}}
+	facts.EvidenceRevision = "runtime-evidence-00000000000000000003"
+	facts = runtimeTestFactsWithCanonicalCWIProjection(t, facts.Normalized())
+	decision, err = ReduceRuntimeState(facts, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1221,7 +1294,7 @@ func TestReduceRuntimeStateRepairableAssessmentDoesNotTerminal(t *testing.T) {
 		{ID: "val-1", Kind: runtimecontract.EvidenceKindValidation, CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-1"}, Revision: facts.EvidenceRevision},
 	}
 	facts.Assessments = []runtimecontract.RuntimeAssessmentFact{{
-		ID: "assessment-repairable", FocusID: facts.Focus.ID, CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-1"},
+		ID: "assessment-repairable", Revision: "runtime-evidence-00000000000000000001", FocusID: facts.Focus.ID, CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-1"},
 		Disposition: runtimecontract.AssessmentDispositionRepairableGap,
 		Summary:     "implementation incomplete",
 		Gap: &runtimecontract.RuntimeAssessmentGap{
@@ -1253,7 +1326,7 @@ func TestReduceRuntimeStateTerminalAssessmentWithoutPersistedGovernanceRejection
 		Revision: facts.EvidenceRevision,
 	}}
 	facts.Assessments = []runtimecontract.RuntimeAssessmentFact{{
-		ID: "assessment-terminal", FocusID: facts.Focus.ID, CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-1"},
+		ID: "assessment-terminal", Revision: "runtime-evidence-00000000000000000001", FocusID: facts.Focus.ID, CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-1"},
 		Disposition: runtimecontract.AssessmentDispositionTerminalRejection,
 		Summary:     "irrecoverable acceptance failure",
 		Gap: &runtimecontract.RuntimeAssessmentGap{
@@ -1285,8 +1358,9 @@ func TestReduceRuntimeStateSameFocusRepairThenReassess(t *testing.T) {
 		{ID: "val-1", Kind: runtimecontract.EvidenceKindValidation, CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-1"}, Revision: "runtime-evidence-00000000000000000002"},
 	}
 	// No assessment present (invalidated after repair evidence) => produce_assessment.
-	facts = facts.Normalized()
-	decision, err := reduceRuntimeStateFixture(t, facts, nil)
+	facts.EvidenceRevision = "runtime-evidence-00000000000000000002"
+	facts = runtimeTestFactsWithCurrentFocusBindings(t, facts.Normalized(), runtimecontract.RuntimeDefinitionContext{StartupInputHash: "startup-input-test", Revision: facts.DefinitionRevision})
+	decision, err := ReduceRuntimeState(facts, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1296,14 +1370,15 @@ func TestReduceRuntimeStateSameFocusRepairThenReassess(t *testing.T) {
 
 	// Satisfied assessment then completes.
 	facts.Assessments = []runtimecontract.RuntimeAssessmentFact{{
-		ID: "assessment-1", FocusID: facts.Focus.ID, CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-1"},
+		ID: "assessment-1", Revision: "runtime-evidence-00000000000000000003", FocusID: facts.Focus.ID, CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-1"},
 		Disposition: runtimecontract.AssessmentDispositionSatisfied,
 		Summary:     "coverage satisfied", EvidenceRefs: []string{"val-1"},
 	}}
 	facts.StateChange = runtimecontract.NewRuntimeStateChangeLedger(runtimecontract.RuntimeRunStateChangeRequirement{Required: false})
 	facts.Coverage = []runtimecontract.RuntimeCoverageItemFact{{ID: "cwi-1", State: runtimecontract.RuntimeCoverageItemStateSatisfied, EvidenceRefs: []string{"val-1"}}}
-	facts = facts.Normalized()
-	decision, err = reduceRuntimeStateFixture(t, facts, nil)
+	facts.EvidenceRevision = "runtime-evidence-00000000000000000003"
+	facts = runtimeTestFactsWithCanonicalCWIProjection(t, facts.Normalized())
+	decision, err = ReduceRuntimeState(facts, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1312,18 +1387,41 @@ func TestReduceRuntimeStateSameFocusRepairThenReassess(t *testing.T) {
 	}
 }
 
-func TestInvalidateNonSatisfiedAssessmentsForFocus(t *testing.T) {
-	values := []runtimecontract.RuntimeAssessmentFact{
-		{ID: "assessment-gap", FocusID: "focus-1", Disposition: runtimecontract.AssessmentDispositionRepairableGap, Summary: "gap"},
-		{ID: "assessment-ok", FocusID: "focus-1", Disposition: runtimecontract.AssessmentDispositionSatisfied, Summary: "ok"},
-		{ID: "assessment-other", FocusID: "focus-2", Disposition: runtimecontract.AssessmentDispositionRepairableGap, Summary: "other"},
+func TestAssessmentForCurrentFocusRetainsAuditAndUsesRevisionFreshness(t *testing.T) {
+	facts := validationFacts()
+	facts.Assessments = []runtimecontract.RuntimeAssessmentFact{
+		{ID: "assessment-gap", Revision: "runtime-evidence-00000000000000000001", FocusID: facts.Focus.ID, Disposition: runtimecontract.AssessmentDispositionRepairableGap, Summary: "gap"},
+		{ID: "assessment-ok", Revision: "runtime-evidence-00000000000000000002", FocusID: facts.Focus.ID, Disposition: runtimecontract.AssessmentDispositionSatisfied, Summary: "ok"},
+		{ID: "assessment-other", Revision: "runtime-evidence-00000000000000000003", FocusID: "focus-2", Disposition: runtimecontract.AssessmentDispositionRepairableGap, Summary: "other"},
 	}
-	got := invalidateNonSatisfiedAssessmentsForFocus(values, "focus-1")
-	if len(got) != 2 {
-		t.Fatalf("got = %+v, want satisfied focus-1 and focus-2 retained", got)
+	got, found := assessmentForCurrentFocus(facts)
+	if !found || got.ID != "assessment-ok" || len(facts.Assessments) != 3 {
+		t.Fatalf("latest assessment = %+v found=%t audit=%+v", got, found, facts.Assessments)
 	}
-	if got[0].Disposition != runtimecontract.AssessmentDispositionSatisfied || got[1].FocusID != "focus-2" {
-		t.Fatalf("got = %+v", got)
+
+	facts = runtimeTestFactsWithCurrentFocusBindings(t, facts, runtimecontract.RuntimeDefinitionContext{
+		StartupInputHash: "startup-input-test",
+		Revision:         facts.DefinitionRevision,
+	})
+	bindingRef := facts.Focus.CoverageEvidenceBindings[0].ID
+	facts.Evidence.Accepted = []runtimecontract.EvidenceFact{{
+		ID: "validation-new", Kind: runtimecontract.EvidenceKindValidation,
+		Revision:    "runtime-evidence-00000000000000000004",
+		BindingRefs: []string{bindingRef},
+	}}
+	if current, ok := assessmentForCurrentFocus(facts); !ok || current.ID != "assessment-ok" {
+		t.Fatalf("empty-credit diagnostic evidence invalidated assessment: current=%+v found=%t", current, ok)
+	}
+	facts.Evidence.Accepted[0].CoverageWorkItemIDs = append([]common.CoverageWorkItemID(nil), facts.Focus.CoverageWorkItemIDs...)
+	if stale, ok := assessmentForCurrentFocus(facts); ok {
+		t.Fatalf("assessment older than accepted evidence remained current: %+v", stale)
+	}
+	facts.Assessments = append(facts.Assessments, runtimecontract.RuntimeAssessmentFact{
+		ID: "assessment-fresh", Revision: "runtime-evidence-00000000000000000005", FocusID: facts.Focus.ID,
+		Disposition: runtimecontract.AssessmentDispositionSatisfied, Summary: "fresh",
+	})
+	if fresh, ok := assessmentForCurrentFocus(facts); !ok || fresh.ID != "assessment-fresh" {
+		t.Fatalf("fresh assessment = %+v found=%t", fresh, ok)
 	}
 }
 
@@ -1331,13 +1429,15 @@ func TestReduceRuntimeStateRepairBudgetExhausted(t *testing.T) {
 	facts := validationFacts()
 	facts.Focus.RequireAssessment = true
 	facts.ConvergencePolicy = runtimecontract.RuntimeConvergencePolicy{MaxRepairAttemptsPerFocus: 2, MaxValidationOnlyRetriesPerFocus: 1}
+	facts = runtimeTestFactsWithCurrentFocusBindings(t, facts, runtimecontract.RuntimeDefinitionContext{StartupInputHash: "startup-input-test", Revision: facts.DefinitionRevision})
+	bindingRef := facts.Focus.CoverageEvidenceBindings[0].ID
 	facts.Repair = runtimecontract.RuntimeRepairLedger{FocusID: facts.Focus.ID, RepairAttempts: 2, Exhausted: false}
 	facts.Evidence.Accepted = []runtimecontract.EvidenceFact{{
 		ID: "val-1", Kind: runtimecontract.EvidenceKindValidation, CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-1"},
-		Revision: facts.EvidenceRevision,
+		Revision: "runtime-evidence-00000000000000000001", FocusID: facts.Focus.ID, BindingRefs: []string{bindingRef},
 	}}
 	facts.Assessments = []runtimecontract.RuntimeAssessmentFact{{
-		ID: "assessment-exhausted", FocusID: facts.Focus.ID, CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-1"},
+		ID: "assessment-exhausted", Revision: "runtime-evidence-00000000000000000002", FocusID: facts.Focus.ID, CoverageWorkItemIDs: append([]common.CoverageWorkItemID(nil), facts.Focus.CoverageWorkItemIDs...),
 		Disposition: runtimecontract.AssessmentDispositionRepairableGap,
 		Summary:     "still broken",
 		Gap: &runtimecontract.RuntimeAssessmentGap{
@@ -1346,8 +1446,9 @@ func TestReduceRuntimeStateRepairBudgetExhausted(t *testing.T) {
 			Reason:               "still broken",
 		},
 	}}
+	facts.EvidenceRevision = "runtime-evidence-00000000000000000002"
 	facts = facts.Normalized()
-	decision, err := reduceRuntimeStateFixture(t, facts, nil)
+	decision, err := ReduceRuntimeState(facts, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1365,13 +1466,15 @@ func TestReduceRuntimeStateValidationOnlyCapTerminalsWithoutStateChange(t *testi
 	facts.Capabilities.StateChangeKinds = []string{"patch/apply"}
 	facts.Capabilities.ValidationKinds = []string{"validation/managed_session"}
 	facts.ConvergencePolicy = runtimecontract.RuntimeConvergencePolicy{MaxRepairAttemptsPerFocus: 10, MaxValidationOnlyRetriesPerFocus: 1}
+	facts = runtimeTestFactsWithCurrentFocusBindings(t, facts, runtimecontract.RuntimeDefinitionContext{StartupInputHash: "startup-input-test", Revision: facts.DefinitionRevision})
+	bindingRef := facts.Focus.CoverageEvidenceBindings[0].ID
 	facts.Repair = runtimecontract.RuntimeRepairLedger{FocusID: facts.Focus.ID, RepairAttempts: 1, ValidationOnlyRetries: 1}
 	facts.Evidence.Accepted = []runtimecontract.EvidenceFact{{
 		ID: "val-1", Kind: runtimecontract.EvidenceKindValidation, CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-1"},
-		Revision: facts.EvidenceRevision,
+		Revision: "runtime-evidence-00000000000000000001", FocusID: facts.Focus.ID, BindingRefs: []string{bindingRef},
 	}}
 	facts.Assessments = []runtimecontract.RuntimeAssessmentFact{{
-		ID: "assessment-validation-cap", FocusID: facts.Focus.ID, CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-1"},
+		ID: "assessment-validation-cap", Revision: "runtime-evidence-00000000000000000002", FocusID: facts.Focus.ID, CoverageWorkItemIDs: append([]common.CoverageWorkItemID(nil), facts.Focus.CoverageWorkItemIDs...),
 		Disposition: runtimecontract.AssessmentDispositionRepairableGap,
 		Summary:     "validation still failing",
 		Gap: &runtimecontract.RuntimeAssessmentGap{
@@ -1380,8 +1483,9 @@ func TestReduceRuntimeStateValidationOnlyCapTerminalsWithoutStateChange(t *testi
 			Reason:               "validation still failing",
 		},
 	}}
+	facts.EvidenceRevision = "runtime-evidence-00000000000000000002"
 	facts = facts.Normalized()
-	decision, err := reduceRuntimeStateFixture(t, facts, nil)
+	decision, err := ReduceRuntimeState(facts, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1430,7 +1534,7 @@ func TestReduceRuntimeStateValidationOnlyCapCoversSameFocusRepairEntries(t *test
 			name: "state-change no-op validation observation",
 			facts: func() runtimecontract.RuntimeFacts {
 				facts := exhaustedRepairFacts()
-				facts.Focus.RequiredEvidenceKinds = []string{runtimecontract.EvidenceKindStateChange}
+				facts.Focus.RequiredEvidenceKinds = []string{runtimecontract.EvidenceKindStateChange, runtimecontract.EvidenceKindValidation}
 				facts.Repair.ActiveGap.MissingEvidenceKinds = []string{runtimecontract.EvidenceKindStateChange}
 				facts.Repair.NoProgressOperationShapes = []runtimecontract.RuntimeRejectedOperationShape{{
 					Operation:    patchApplyTestOperation("no-op-patch", "main.go"),
@@ -1444,7 +1548,16 @@ func TestReduceRuntimeStateValidationOnlyCapCoversSameFocusRepairEntries(t *test
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			decision, err := reduceRuntimeStateFixture(t, test.facts(), nil)
+			raw := test.facts()
+			facts := runtimeTestFactsWithCurrentFocusBindings(t, raw, runtimecontract.RuntimeDefinitionContext{StartupInputHash: "startup-input-test", Revision: "definition-1"})
+			facts.Repair = raw.Repair
+			facts.Repair.FocusID = facts.Focus.ID
+			if raw.RepairDirective != nil {
+				directive := raw.RepairDirective.Normalized()
+				directive.FocusID = facts.Focus.ID
+				facts.RepairDirective = &directive
+			}
+			decision, err := ReduceRuntimeState(facts, nil)
 			if err != nil {
 				t.Fatal(err)
 			}

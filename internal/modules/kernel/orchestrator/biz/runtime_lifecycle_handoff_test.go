@@ -479,8 +479,22 @@ func TestNormalDrivePersistedLeasePreflightFailureNeverReleasesActiveGate(t *tes
 
 func runtimeBoundDefinitionClarificationAggregate(t *testing.T) runtime.RuntimeAggregate {
 	t.Helper()
-	ctx := context.Background()
 	aggregate := runtimeAggregate(t, 1)
+	bound := runtimeBindDefinitionClarificationAggregate(t, aggregate)
+	// This helper returns one pre-existing owner snapshot, not the sequence of
+	// private reducer commits used to build it. Seed that snapshot through the
+	// Run owner's initial opaque CAS at revision 1; all behavior under test then
+	// advances it through ordinary typed internal events.
+	bound.StateRevision = 1
+	if err := bound.Validate(); err != nil {
+		t.Fatalf("normalize Definition clarification fixture revision: %v", err)
+	}
+	return bound
+}
+
+func runtimeBindDefinitionClarificationAggregate(t *testing.T, aggregate runtime.RuntimeAggregate) runtime.RuntimeAggregate {
+	t.Helper()
+	ctx := context.Background()
 	expected := runtimecontract.RuntimeExpectedDocumentContract{
 		SchemaVersion: runtimecontract.RuntimeExpectedDocumentSchemaCurrent,
 		DocumentKind:  runtimecontract.RuntimeProviderDocumentSemanticPlan,
@@ -544,14 +558,6 @@ func runtimeBoundDefinitionClarificationAggregate(t *testing.T) runtime.RuntimeA
 	})
 	if err != nil {
 		t.Fatalf("bind Definition clarification request: %v", err)
-	}
-	// This helper returns one pre-existing owner snapshot, not the sequence of
-	// private reducer commits used to build it. Seed that snapshot through the
-	// Run owner's initial opaque CAS at revision 1; all behavior under test then
-	// advances it through ordinary typed internal events.
-	bound.Aggregate.StateRevision = 1
-	if err := bound.Aggregate.Validate(); err != nil {
-		t.Fatalf("normalize Definition clarification fixture revision: %v", err)
 	}
 	return bound.Aggregate
 }
@@ -1944,11 +1950,11 @@ func TestRuntimeGovernanceContinuationHistoricalDuplicateDoesNotReplayAcrossLate
 	definition := runtimeDefinition()
 	definition.CapabilityContract = append(definition.CapabilityContract, "decision/resolution")
 
-	// Build a real committed continuation ledger first. The second fixture below
-	// grafts the immutable historical request/dispatch/resolution records into a
-	// later, independently persisted blocker. This is the response-loss cut after
-	// the old successor was consumed and released: only history remains, while
-	// the current Runtime/Run fence belongs to the new blocker.
+	// Build a real committed continuation ledger first, then create the later
+	// blocker from that same aggregate. This is the response-loss cut after the
+	// old successor was consumed and released: the historical resolution remains
+	// in the one global evidence sequence, while the current Runtime/Run fence is
+	// sealed by a later owner-internal Definition-clarification transition.
 	historyRepository := &inMemoryRuntimeStateRepository{}
 	historyOwner := newRuntimeTestOwner()
 	if err := historyOwner.ConfigureRuntimeRepository(historyRepository); err != nil {
@@ -2004,14 +2010,12 @@ func TestRuntimeGovernanceContinuationHistoricalDuplicateDoesNotReplayAcrossLate
 		t.Fatalf("commit historical continuation=%+v err=%v", historyCommit, err)
 	}
 
-	later := runtimeBoundDefinitionClarificationAggregate(t)
-	later.GovernanceRequests = append(later.GovernanceRequests, historyCommit.Aggregate.GovernanceRequests...)
-	later.GovernanceResolutions = append(later.GovernanceResolutions, historyCommit.Aggregate.GovernanceResolutions...)
-	later.CompletedDispatches = append(later.CompletedDispatches, historyCommit.Aggregate.CompletedDispatches...)
-	later.Facts.Evidence.Accepted = append(later.Facts.Evidence.Accepted, historyCommit.Aggregate.Facts.Evidence.Accepted...)
-	later.Facts = later.Facts.Normalized()
-	later.ProcessedEventIDs = append(later.ProcessedEventIDs, historicalResolution.EventID())
+	later := runtimeBindDefinitionClarificationAggregate(t, historyCommit.Aggregate)
 	later.DriveLease = nil
+	// Persist the fully built owner snapshot through Run's initial opaque-state
+	// CAS. Runtime revision is storage-local; the evidence sequence and its
+	// completed-dispatch chronology remain the real values produced above.
+	later.StateRevision = 1
 	if err := later.Validate(); err != nil {
 		t.Fatalf("later blocker with historical continuation is invalid: %v", err)
 	}

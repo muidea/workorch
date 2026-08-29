@@ -207,15 +207,7 @@ func runtimeSemanticBatchDocument(values []runtimecontract.RuntimeSemanticPlanDo
 }
 
 func runtimeSemanticPrerequisitesPending(values []runtimecontract.RuntimePrerequisite) bool {
-	for _, value := range values {
-		switch value.Kind {
-		case runtimecontract.PrerequisiteKindProviderCeiling,
-			runtimecontract.PrerequisiteKindCapabilityState,
-			runtimecontract.PrerequisiteKindOperationAdmissibility:
-			return true
-		}
-	}
-	return false
+	return runtime.SemanticPlanningPrerequisitesPending(values)
 }
 
 func runtimeSemanticLogicalRequestID(aggregate runtime.RuntimeAggregate, stablePrefixHash, manifestHash, correctionHash string) string {

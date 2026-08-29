@@ -669,7 +669,12 @@ func currentRuntimeSemanticValidationFailureRepair(aggregate RuntimeAggregate) (
 // dispatch is complete but inside the same evidence CAS. It withholds terminal
 // credit, retires the repair binding and opens the original Definition proof
 // for a fresh validation. The accepted receipt remains audit/proof lineage.
-func settleRuntimeValidationFailureRepair(aggregate *RuntimeAggregate, fact runtimecontract.EvidenceFact, repair runtimecontract.RuntimeSemanticValidationFailureRepair) (bool, error) {
+func settleRuntimeValidationFailureRepair(
+	aggregate *RuntimeAggregate,
+	fact runtimecontract.EvidenceFact,
+	repair runtimecontract.RuntimeSemanticValidationFailureRepair,
+	sourceDirectives ...*runtimecontract.RuntimeRepairDirective,
+) (bool, error) {
 	if aggregate == nil || aggregate.ActiveDispatch != nil {
 		return false, common.ErrInvalidArgument
 	}
@@ -716,10 +721,21 @@ func settleRuntimeValidationFailureRepair(aggregate *RuntimeAggregate, fact runt
 	if !found || !contains(repair.RepairOperationKinds, runtimecontract.CanonicalRuntimeBlockKind(operation.Kind)) {
 		return false, fmt.Errorf("%w: validation failure repair receipt operation is outside sealed repair kinds", common.ErrConflict)
 	}
-	if facts.RepairDirective == nil || facts.RepairDirective.Trigger != runtimecontract.RuntimeRepairTriggerRejectedValidation ||
-		facts.RepairDirective.RequiredState != runtimecontract.ConvergenceStateNeedStateChange || facts.RepairDirective.Closure == nil ||
-		!sameRuntimeTargetRefs(facts.RepairDirective.TargetRefs, binding.ProspectiveTargetRefs) {
+	if len(sourceDirectives) > 1 {
+		return false, common.ErrInvalidArgument
+	}
+	sourceDirective := facts.RepairDirective
+	if len(sourceDirectives) == 1 && sourceDirectives[0] != nil {
+		value := sourceDirectives[0].Clone()
+		sourceDirective = &value
+	}
+	if sourceDirective == nil || sourceDirective.Trigger != runtimecontract.RuntimeRepairTriggerRejectedValidation ||
+		sourceDirective.RequiredState != runtimecontract.ConvergenceStateNeedStateChange || sourceDirective.Closure == nil ||
+		!sameRuntimeTargetRefs(sourceDirective.TargetRefs, binding.ProspectiveTargetRefs) {
 		return false, fmt.Errorf("%w: validation failure repair receipt has no exact persisted directive", common.ErrConflict)
+	}
+	if err := sourceDirective.Validate(); err != nil {
+		return false, fmt.Errorf("%w: validation failure repair source directive: %v", common.ErrConflict, err)
 	}
 
 	item := &facts.Coverage[index]
@@ -740,7 +756,7 @@ func settleRuntimeValidationFailureRepair(aggregate *RuntimeAggregate, fact runt
 
 	previousFocusID := facts.Focus.ID
 	carriedRepair := facts.Repair.Normalized()
-	carriedDirective := facts.RepairDirective.Clone()
+	carriedDirective := sourceDirective.Clone()
 	var carriedFailure *runtimecontract.FailureFact
 	if facts.Failure != nil {
 		value := facts.Failure.Clone()
@@ -761,6 +777,14 @@ func settleRuntimeValidationFailureRepair(aggregate *RuntimeAggregate, fact runt
 	updated.Failure = carriedFailure
 	carriedRepair.FocusID = updated.Focus.ID
 	carriedRepair.SliceID = updated.Focus.SliceID
+	// The repair effect has closed the retired semantic generation, but it has
+	// not yet proved the successor validation contract.  Do not carry the old
+	// generation's progress watermark into that fresh-validation boundary: it
+	// would let restart/accounting treat pre-repair evidence as successor
+	// progress.  Repair attempts and no-progress history remain bounded on the
+	// same cycle; only the generation-local progress marker is reset.
+	carriedRepair.LastProgressRevision = ""
+	carriedRepair.LastProgressAt = ""
 	updated.Repair = carriedRepair.Normalized()
 	carriedDirective.ID = fmt.Sprintf("validation-failure-repair/%s/%d/fresh-validation", updated.Focus.ID, updated.Repair.RepairAttempts)
 	carriedDirective.FocusID = updated.Focus.ID

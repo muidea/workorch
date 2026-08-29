@@ -27,6 +27,13 @@ func bindCurrentFocusTargetSelection(facts *runtimecontract.RuntimeFacts) {
 		}
 	}
 	facts.Prerequisites.Pending = keptPending
+	keptRetired := facts.Prerequisites.Retired[:0]
+	for _, value := range facts.Prerequisites.Retired {
+		if value.ID != prerequisite.ID {
+			keptRetired = append(keptRetired, value)
+		}
+	}
+	facts.Prerequisites.Retired = keptRetired
 	for index := range facts.Prerequisites.Satisfied {
 		if facts.Prerequisites.Satisfied[index].ID == prerequisite.ID {
 			facts.Prerequisites.Satisfied[index] = prerequisite

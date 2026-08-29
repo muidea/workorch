@@ -14,7 +14,6 @@ type PrerequisiteResult struct {
 	Manifest               *runtimecontract.WorkspaceManifest
 	TargetSnapshot         *runtimecontract.TargetSnapshot
 	TargetSelection        *runtimecontract.RuntimeTargetSelection
-	FailureTarget          *runtimecontract.FailureTarget
 	Capabilities           *runtimecontract.RuntimeCapabilities
 	ValidationScratch      *runtimecontract.ValidationScratch
 	ProviderCeiling        *runtimecontract.ProviderCeiling
@@ -77,16 +76,6 @@ func PreflightRuntimeFacts(facts runtimecontract.RuntimeFacts, requirements []ru
 			observations = append(observations, observation)
 		}
 		facts.Resources.PrerequisiteObservations = observations
-		// A FailureTarget is local current-failure authority rather than audit
-		// history. If the same prerequisite identity must be reacquired because
-		// the typed signature/target set changed, retaining its old resource
-		// pointer would leave two contradictory repair surfaces in SM-2.
-		for _, prerequisite := range pending {
-			if prerequisite.Kind == runtimecontract.PrerequisiteKindFailureTarget {
-				facts.Resources.FailureTarget = nil
-				break
-			}
-		}
 		facts = reactivateReopenedPendingFocusPrerequisites(facts, reacquiring)
 	}
 	facts.Prerequisites.Pending = pending
@@ -208,8 +197,8 @@ func runtimeRequirementsWithCapabilityPrerequisiteFacts(facts runtimecontract.Ru
 // declared as a bounded basis.
 func runtimeTargetGroundingRequirements(facts runtimecontract.RuntimeFacts) []runtimecontract.RuntimeRequirement {
 	facts = facts.Normalized()
-	focus := facts.Focus
-	if !focus.RequireTargetGrounding {
+	focus, required := runtimeCurrentTargetGroundingFocus(facts)
+	if !required {
 		return nil
 	}
 	requirements := make([]runtimecontract.RuntimeRequirement, 0, len(focus.TargetRefs)+len(focus.TargetDiscoverySources)+1)
@@ -381,8 +370,6 @@ func applyPrerequisiteResult(facts *runtimecontract.RuntimeFacts, prerequisite r
 		return applyTargetSnapshotPrerequisiteResult(facts, prerequisite, result)
 	case runtimecontract.PrerequisiteKindTargetSelection:
 		return applyTargetSelectionPrerequisiteResult(facts, prerequisite, result)
-	case runtimecontract.PrerequisiteKindFailureTarget:
-		return applyFailureTargetPrerequisiteResult(facts, result)
 	case runtimecontract.PrerequisiteKindCapability:
 		return applyCapabilityPrerequisiteResult(facts, prerequisite, result)
 	case runtimecontract.PrerequisiteKindCapabilityState:
@@ -418,8 +405,6 @@ func runtimeRequirementSatisfied(facts runtimecontract.RuntimeFacts, requirement
 		return runtimeTargetSnapshotRequirementSatisfied(facts, requirement)
 	case runtimecontract.PrerequisiteKindTargetSelection:
 		return runtimeTargetSelectionRequirementSatisfied(facts, requirement)
-	case runtimecontract.PrerequisiteKindFailureTarget:
-		return runtimeFailureTargetRequirementSatisfied(facts)
 	case runtimecontract.PrerequisiteKindCapability:
 		return capabilitiesSatisfy(facts.Capabilities, requirement.CapabilityClass, requirement.RequiredCapabilities)
 	case runtimecontract.PrerequisiteKindCapabilityState:
@@ -453,16 +438,6 @@ func runtimeTargetSelectionRequirementSatisfied(facts runtimecontract.RuntimeFac
 		return true
 	}
 	return currentFocusTargetSelection(facts) != nil
-}
-
-func runtimeFailureTargetRequirementSatisfied(facts runtimecontract.RuntimeFacts) bool {
-	if facts.Failure == nil || facts.Resources.FailureTarget == nil || strings.TrimSpace(facts.Failure.Signature) == "" || len(facts.Failure.TargetRefs) == 0 {
-		return false
-	}
-	target := *facts.Resources.FailureTarget
-	target.Signature = strings.TrimSpace(target.Signature)
-	failure := facts.Failure.Normalized()
-	return target.Signature == failure.Signature && sameRuntimeTargetRefs(target.TargetRefs, failure.TargetRefs)
 }
 
 func runtimeCapabilityStateRequirementSatisfied(facts runtimecontract.RuntimeFacts, requirement runtimecontract.RuntimeRequirement) bool {

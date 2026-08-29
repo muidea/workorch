@@ -127,6 +127,9 @@ func (c *authorityComponent) commitFailureFact(ctx context.Context, workspaceID 
 	if c == nil || c.repository == nil || workspaceID == "" || runID == "" || fact.Class == "" || strings.TrimSpace(fact.Message) == "" {
 		return RuntimeAggregate{}, common.ErrInvalidArgument
 	}
+	if runtimeGenericFailureCarriesOwnerAuthority(fact) {
+		return RuntimeAggregate{}, fmt.Errorf("%w: generic failure ingress cannot carry capability-owner authority", common.ErrInvalidArgument)
+	}
 	aggregate, err := c.repository.Load(ctx, workspaceID, runID)
 	if err != nil {
 		return RuntimeAggregate{}, err
@@ -147,6 +150,23 @@ func (c *authorityComponent) commitFailureFact(ctx context.Context, workspaceID 
 		return RuntimeAggregate{}, err
 	}
 	return aggregate, nil
+}
+
+// runtimeGenericFailureCarriesOwnerAuthority keeps the generic SM-2/SM-4
+// defect path separate from receipt admission. Validation observations and
+// concrete target observations are capability-owner facts: they may enter the
+// aggregate only through the exact receipt/evidence transaction and the File
+// confirmation transition respectively.
+func runtimeGenericFailureCarriesOwnerAuthority(fact runtimecontract.FailureFact) bool {
+	fact = fact.Normalized()
+	if fact.ValidationFailureObservation != nil || fact.TargetObservation != nil {
+		return true
+	}
+	if fact.OriginalDiagnostic == nil {
+		return false
+	}
+	diagnostic := fact.OriginalDiagnostic.Normalized()
+	return diagnostic != nil && (diagnostic.ValidationFailureObservation != nil || diagnostic.TargetObservation != nil)
 }
 
 // applyFailureFactToAggregate is the pure SM-2 half of failure persistence.
@@ -170,14 +190,12 @@ func applyFailureFactToAggregate(aggregate RuntimeAggregate, fact runtimecontrac
 		aggregate.ActiveDispatch = nil
 	}
 	aggregate.Facts.Failure = &fact
-	// A persisted FailureTarget is scoped to the current typed failure identity.
-	// Re-recording a failure with a different signature/target set must return to
-	// the existing local prerequisite, never leave the former mapping as an
-	// implicit repair surface until a later drive happens to preflight it.
+	// FailureTarget authority is created only by an admitted owner receipt or a
+	// File repair-surface confirmation. A new local/administrative failure fact
+	// must not inherit a target resource from the preceding failure merely
+	// because mutable signature or refs happen to overlap.
+	aggregate.Facts.Resources.FailureTarget = nil
 	facts := aggregate.Facts
-	if requirements := activeFailureTargetRequirements(facts); len(requirements) != 0 {
-		facts = preflightRuntimeFactsPreservingPending(facts, requirements)
-	}
 	facts, decision, err := ReduceRuntimeStateWithDirective(facts, &aggregate.Decision.AuthoritySnapshot, aggregate.CoverageProofLineage)
 	if err != nil {
 		return RuntimeAggregate{}, err
@@ -186,29 +204,6 @@ func applyFailureFactToAggregate(aggregate RuntimeAggregate, fact runtimecontrac
 	aggregate.Decision = decision
 	closePendingCandidateAttemptsForTerminal(&aggregate, fact)
 	return aggregate, nil
-}
-
-func activeFailureTargetRequirements(facts runtimecontract.RuntimeFacts) []runtimecontract.RuntimeRequirement {
-	facts = facts.Normalized()
-	values := make([]runtimecontract.RuntimeRequirement, 0, 1)
-	seen := make(map[string]struct{})
-	for _, prerequisite := range append(append([]runtimecontract.RuntimePrerequisite(nil), facts.Prerequisites.Pending...), facts.Prerequisites.Satisfied...) {
-		if prerequisite.Kind != runtimecontract.PrerequisiteKindFailureTarget {
-			continue
-		}
-		requirement := runtimecontract.RuntimeRequirement{
-			Kind: prerequisite.Kind, Scope: prerequisite.Scope, FocusID: prerequisite.FocusID,
-			OwnerModuleID: prerequisite.OwnerModuleID, SubjectRef: prerequisite.SubjectRef,
-			Reason: prerequisite.Reason,
-		}
-		key := runtimePrerequisiteID(requirement)
-		if _, exists := seen[key]; exists {
-			continue
-		}
-		seen[key] = struct{}{}
-		values = append(values, requirement)
-	}
-	return normalizeRuntimeRequirements(values)
 }
 
 // requestTermination CAS-persists an administrative termination record on an active V2

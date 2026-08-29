@@ -243,6 +243,7 @@ type RuntimeRepairDirective struct {
 	ID                        string
 	FocusID                   string
 	Trigger                   RuntimeRepairTrigger
+	Purpose                   RuntimeDispatchRepairPurpose
 	CurrentFailure            *FailureFact
 	RequiredState             ConvergenceState
 	RequiredEffectScopes      []RuntimeEffectScope
@@ -278,6 +279,7 @@ func (d RuntimeRepairDirective) Normalized() RuntimeRepairDirective {
 	d.ID = strings.TrimSpace(d.ID)
 	d.FocusID = strings.TrimSpace(d.FocusID)
 	d.Trigger = d.Trigger.Normalized()
+	d.Purpose = RuntimeDispatchRepairPurpose(strings.TrimSpace(string(d.Purpose)))
 	if d.CurrentFailure != nil {
 		failure := d.CurrentFailure.Normalized()
 		d.CurrentFailure = &failure
@@ -305,6 +307,9 @@ func (d RuntimeRepairDirective) Validate() error {
 	}
 	if !ValidRuntimeRepairTrigger(d.Trigger) {
 		return fmt.Errorf("repair directive has invalid trigger %q", d.Trigger)
+	}
+	if d.Purpose != "" && d.Purpose != RuntimeDispatchRepairPurposeConfirmedFileValidation {
+		return fmt.Errorf("repair directive has invalid purpose %q", d.Purpose)
 	}
 	switch d.RequiredState {
 	case ConvergenceStateNeedStateChange, ConvergenceStateNeedValidation, ConvergenceStateNeedGovernance:
@@ -336,6 +341,9 @@ func (d RuntimeRepairDirective) Validate() error {
 		if len(d.TargetRefs) > 0 && !sameStrings(d.TargetRefs, d.Closure.GroundedTargetRefs) {
 			return fmt.Errorf("repair directive targets do not match repair closure")
 		}
+	}
+	if d.Purpose != "" && d.Closure == nil {
+		return fmt.Errorf("repair directive purpose requires a closure")
 	}
 	return nil
 }
@@ -372,7 +380,7 @@ func SameRuntimeRepairDirective(left *RuntimeRepairDirective, right *RuntimeRepa
 	}
 	l := left.Normalized()
 	r := right.Normalized()
-	if l.ID != r.ID || l.FocusID != r.FocusID || l.Trigger != r.Trigger || l.RequiredState != r.RequiredState ||
+	if l.ID != r.ID || l.FocusID != r.FocusID || l.Trigger != r.Trigger || l.Purpose != r.Purpose || l.RequiredState != r.RequiredState ||
 		l.SupersedesEvidenceRevision != r.SupersedesEvidenceRevision || l.RepairAttempt != r.RepairAttempt {
 		return false
 	}
@@ -437,6 +445,10 @@ func sameRuntimeFailureTargetObservation(left *RuntimeFailureTargetObservation, 
 	}
 	l := left.Normalized()
 	r := right.Normalized()
+	if (l.CatalogDependency == nil) != (r.CatalogDependency == nil) ||
+		(l.CatalogDependency != nil && l.CatalogDependency.Normalized() != r.CatalogDependency.Normalized()) {
+		return false
+	}
 	return l.OwnerModuleID == r.OwnerModuleID && l.SubjectRef == r.SubjectRef &&
 		l.TargetRole == r.TargetRole && l.ObservedRevision == r.ObservedRevision &&
 		l.DiagnosticClass == r.DiagnosticClass && l.ContentHash == r.ContentHash &&

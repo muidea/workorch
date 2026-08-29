@@ -16,11 +16,15 @@ func TestRuntimeOperationDescriptorsAreStableCompleteAndUnique(t *testing.T) {
 	kinds := make([]string, 0, len(descriptors))
 	seen := map[string]struct{}{}
 	for _, descriptor := range descriptors {
-		if descriptor.Kind == "" || descriptor.OwnerModuleID == "" || descriptor.DefaultEffectScope == "" || descriptor.CapabilityClass == "" {
+		if descriptor.Kind == "" || descriptor.OwnerModuleID == "" || descriptor.DefaultEffectScope == "" || descriptor.CapabilityClass == "" || descriptor.FailureTargetProtocol == "" {
 			t.Fatalf("descriptor incomplete: %+v", descriptor)
 		}
 		if len(descriptor.AllowedStates) == 0 {
 			t.Fatalf("descriptor %q requires allowed states", descriptor.Kind)
+		}
+		if !RuntimeFailureTargetProtocolSupported(descriptor.FailureTargetProtocol) ||
+			(descriptor.RequiresOwnerReceipt && descriptor.FailureTargetProtocol == RuntimeFailureTargetProtocolNone) {
+			t.Fatalf("descriptor %q has invalid failure target protocol %q", descriptor.Kind, descriptor.FailureTargetProtocol)
 		}
 		if _, ok := seen[descriptor.Kind]; ok {
 			t.Fatalf("duplicate descriptor kind %q", descriptor.Kind)

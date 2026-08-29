@@ -17,7 +17,7 @@ func TestProspectiveAllOfReceiptSetSettlesExactlyOnceAfterRestart(t *testing.T) 
 	if err != nil {
 		t.Fatal(err)
 	}
-	assertProspectiveCWIState(t, partial.Aggregate, runtimecontract.RuntimeCoverageItemStateUnsatisfied, runtimecontract.RuntimeCWIConvergenceStateBound)
+	assertProspectiveCWIState(t, partial.Aggregate, runtimecontract.RuntimeCoverageItemStateOpen, runtimecontract.RuntimeCWIConvergenceStateBound)
 	if partial.DispatchCompleted || partial.Aggregate.ActiveDispatch == nil || len(partial.Aggregate.Facts.Evidence.Accepted) != 1 || len(partial.Aggregate.OperationReceipts) != 1 || len(partial.Aggregate.CoverageProofLineage) != 1 {
 		t.Fatalf("partial prospective receipt did not remain auditable and open: %+v", partial.Aggregate)
 	}
@@ -49,20 +49,27 @@ func TestProspectiveAllOfReceiptSetSettlesExactlyOnceAfterRestart(t *testing.T) 
 	if err != nil || stale.Disposition != CommitDispositionStale {
 		t.Fatalf("stale prospective evidence = %+v err=%v", stale, err)
 	}
-	assertProspectiveCWIState(t, stale.Aggregate, runtimecontract.RuntimeCoverageItemStateUnsatisfied, runtimecontract.RuntimeCWIConvergenceStateBound)
+	assertProspectiveCWIState(t, stale.Aggregate, runtimecontract.RuntimeCoverageItemStateOpen, runtimecontract.RuntimeCWIConvergenceStateBound)
 
 	secondEvidence := prospectiveAllOfEvidence(repository.aggregate, operations[1], "prospective-second", ExecutionEvidenceStatusAccepted, nil)
 	attachRuntimeTestOwnerReceipt(t, &repository.aggregate, &secondEvidence)
-	completed, err := restarted.commitEvidence(context.Background(), secondEvidence)
+	receiptComplete, err := restarted.commitEvidence(context.Background(), secondEvidence)
 	if err != nil {
 		t.Fatal(err)
 	}
-	assertProspectiveCWIState(t, completed.Aggregate, runtimecontract.RuntimeCoverageItemStateSatisfied, runtimecontract.RuntimeCWIConvergenceStateSettled)
-	if !completed.DispatchCompleted || completed.Aggregate.ActiveDispatch != nil || len(completed.Aggregate.CompletedDispatches) != 1 ||
-		len(completed.Aggregate.Facts.Evidence.Accepted) != 2 || len(completed.Aggregate.OperationReceipts) != 2 || len(completed.Aggregate.CoverageProofLineage) != 2 {
-		t.Fatalf("complete prospective receipt set did not settle once with full audit lineage: %+v", completed.Aggregate)
+	assertProspectiveCWIState(t, receiptComplete.Aggregate, runtimecontract.RuntimeCoverageItemStateOpen, runtimecontract.RuntimeCWIConvergenceStateBound)
+	if !receiptComplete.DispatchCompleted || receiptComplete.Aggregate.ActiveDispatch != nil || len(receiptComplete.Aggregate.CompletedDispatches) != 1 ||
+		receiptComplete.Aggregate.Decision.State != runtimecontract.ConvergenceStateNeedAssessment ||
+		len(receiptComplete.Aggregate.Facts.Evidence.Accepted) != 2 || len(receiptComplete.Aggregate.OperationReceipts) != 2 || len(receiptComplete.Aggregate.CoverageProofLineage) != 2 {
+		t.Fatalf("complete prospective receipt set did not reach assessment with full audit lineage: %+v", receiptComplete.Aggregate)
 	}
-	revisionAfterCompletion := completed.Aggregate.StateRevision
+	refs, satisfied := canonicalAssessmentEvidenceForCoverage(receiptComplete.Aggregate, "cwi-1")
+	if !satisfied || len(refs) != 2 {
+		t.Fatalf("complete prospective receipt set did not establish assessment proof: refs=%v satisfied=%t", refs, satisfied)
+	}
+	completed := commitProspectiveSatisfiedAssessment(t, repository, refs)
+	assertProspectiveCWIState(t, completed, runtimecontract.RuntimeCoverageItemStateSatisfied, runtimecontract.RuntimeCWIConvergenceStateSettled)
+	revisionAfterCompletion := completed.StateRevision
 	completedDuplicate, err := restarted.commitEvidence(context.Background(), secondEvidence)
 	if err != nil || completedDuplicate.Disposition != CommitDispositionDuplicate || completedDuplicate.Aggregate.StateRevision != revisionAfterCompletion ||
 		len(completedDuplicate.Aggregate.Facts.Evidence.Accepted) != 2 || len(completedDuplicate.Aggregate.CoverageProofLineage) != 2 {
@@ -89,7 +96,7 @@ func TestProspectiveAllOfRejectedReceiptCannotSettleCWI(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	assertProspectiveCWIState(t, rejected.Aggregate, runtimecontract.RuntimeCoverageItemStateUnsatisfied, runtimecontract.RuntimeCWIConvergenceStateBound)
+	assertProspectiveCWIState(t, rejected.Aggregate, runtimecontract.RuntimeCoverageItemStateOpen, runtimecontract.RuntimeCWIConvergenceStateBound)
 	if !rejected.DispatchCompleted || rejected.Aggregate.ActiveDispatch != nil || len(rejected.Aggregate.Facts.Evidence.Accepted) != 1 ||
 		len(rejected.Aggregate.Facts.Evidence.Rejected) != 1 || len(rejected.Aggregate.OperationReceipts) != 2 || len(rejected.Aggregate.CoverageProofLineage) != 1 {
 		t.Fatalf("rejected prospective member changed collective CWI credit or lost audit: %+v", rejected.Aggregate)
@@ -121,26 +128,7 @@ func TestProspectiveAllOfAssessmentClosureUsesCollectiveReceiptGate(t *testing.T
 	if !satisfied || len(refs) != 2 {
 		t.Fatalf("complete prospective receipt set did not pass assessment gate: refs=%v satisfied=%t", refs, satisfied)
 	}
-
-	controller, err := NewRuntimeController(repository)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := controller.BeginCandidateAttemptForTest(context.Background(), repository.aggregate.Facts.WorkspaceID, repository.aggregate.Facts.RunID, 0, "prospective-assessment-prefix"); err != nil {
-		t.Fatal(err)
-	}
-	assessment := runtimecontract.RuntimeCandidate{Assessment: &runtimecontract.AssessmentCandidate{
-		FocusID: repository.aggregate.Facts.Focus.ID, CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-1"},
-		Disposition: runtimecontract.AssessmentDispositionSatisfied, Summary: "all prospective targets are proven", EvidenceRefs: refs,
-		Items: []runtimecontract.RuntimeAssessmentItemFact{{CoverageWorkItemID: "cwi-1", Satisfied: true, EvidenceRefs: refs}},
-	}}
-	if _, err := controller.AcceptCandidateAttempt(context.Background(), repository.aggregate.Facts.WorkspaceID, repository.aggregate.Facts.RunID, 0, assessment); err != nil {
-		t.Fatal(err)
-	}
-	closed, err := controller.commitAssessment(context.Background(), repository.aggregate.Facts.WorkspaceID, repository.aggregate.Facts.RunID)
-	if err != nil {
-		t.Fatal(err)
-	}
+	closed := commitProspectiveSatisfiedAssessment(t, repository, refs)
 	assertProspectiveCWIState(t, closed, runtimecontract.RuntimeCoverageItemStateSatisfied, runtimecontract.RuntimeCWIConvergenceStateSettled)
 	if closed.Decision.State != runtimecontract.ConvergenceStateComplete || closed.Decision.Terminal == nil {
 		t.Fatalf("collective assessment did not close exactly once: %+v", closed.Decision)
@@ -150,6 +138,11 @@ func TestProspectiveAllOfAssessmentClosureUsesCollectiveReceiptGate(t *testing.T
 func prospectiveAllOfDispatchFixture(t *testing.T, requireAssessment bool) (*durableRuntimeStateRepository, *DispatchCoordinator, []runtimecontract.RuntimeOperation) {
 	t.Helper()
 	facts := baseDispatchFacts()
+	facts.Focus.SliceID = "slice-prospective"
+	facts.Coverage[0].SourceScope = "dodItem"
+	facts.Coverage[0].SourceID = "dod-1"
+	facts.Coverage[0].TargetText = "deliver the complete prospective target set"
+	facts.Coverage[0].SliceID = facts.Focus.SliceID
 	facts.Focus.RequiredEvidenceKinds = []string{runtimecontract.EvidenceKindStateChange}
 	facts.Focus.RequireAssessment = requireAssessment
 	facts.Focus.TargetRefs = nil
@@ -159,19 +152,22 @@ func prospectiveAllOfDispatchFixture(t *testing.T, requireAssessment bool) (*dur
 	facts.Focus.TargetSelectorSubjectRef = "workspace_deliverable"
 	facts.Focus.TargetSelectorCandidateRefs = []string{"go.mod", "workorch_test.go"}
 	facts.Focus.ProspectiveTargetRefs = []string{"go.mod", "workorch_test.go"}
+	facts.Focus.RequireTargetGrounding = true
+	facts.Slices = []runtimecontract.RuntimeAcceptanceSlice{{ID: facts.Focus.SliceID, CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-1"}}}
+	facts.DefinitionSeed = runtimecontract.RuntimeDefinitionSeed{
+		SchemaVersion: runtimecontract.RuntimeDefinitionSeedSchemaCurrent, DefinitionRevision: facts.DefinitionRevision,
+		PolicyHash: "policy-test",
+		CoverageItems: []runtimecontract.RuntimeCoverageItem{{
+			ID: "cwi-1", SliceID: facts.Focus.SliceID, SourceScope: facts.Coverage[0].SourceScope,
+			SourceID: facts.Coverage[0].SourceID, TargetText: facts.Coverage[0].TargetText,
+		}},
+		Slices: facts.Slices,
+	}
+	facts.DefinitionSeed.Hash = runtimecontract.StableRuntimeDefinitionSeedHash(facts.DefinitionSeed)
+	facts.DefinitionFocuses = runtimeTestDefinitionFocuses(facts)
 	aggregate := RuntimeAggregate{StateRevision: 1, Definition: dispatchDefinition(), Facts: facts}
 	addCandidateAdmissionTargetPolicyFixture(&aggregate.Facts, runtimecontract.RuntimeModuleFile, runtimecontract.RuntimeBlockKindPatchApply, "file_write", runtimecontract.RuntimeOperationTargetPolicyProspectiveOwnerTarget, nil)
 	runtimeTestEnsureCurrentFocusBindings(t, &aggregate)
-	// Production prospective semantic seal narrows the acquisition proof to one
-	// exact owner kind/variant. The generic test binding helper intentionally
-	// advertises every state-change kind, so narrow this fixture before deriving
-	// the required all-of operation sequence.
-	binding := aggregate.Facts.Focus.CoverageEvidenceBindings[0].Clone()
-	binding.Proofs[0].AllowedOperationKinds = []string{runtimecontract.RuntimeBlockKindPatchApply}
-	binding.Proofs[0].AllowedOperationVariants = []runtimecontract.RuntimeOperationVariantRef{{Kind: runtimecontract.RuntimeBlockKindPatchApply, VariantID: "file_write"}}
-	binding.Hash = runtimecontract.StableCoverageEvidenceBindingHash(binding)
-	aggregate.Facts.Focus.CoverageEvidenceBindings = []runtimecontract.CoverageEvidenceBinding{binding}
-	runtimeTestSynchronizeCanonicalCWILedger(t, &aggregate)
 	decision, err := ReduceRuntimeState(aggregate.Facts, nil)
 	if err != nil {
 		t.Fatal(err)
@@ -213,6 +209,32 @@ func prospectiveAllOfDispatchFixture(t *testing.T, requireAssessment bool) (*dur
 		t.Fatal(err)
 	}
 	return repository, coordinator, candidateRuntimeOperations(sealed.ActiveDispatch.Candidate)
+}
+
+func commitProspectiveSatisfiedAssessment(t *testing.T, repository *durableRuntimeStateRepository, evidenceRefs []string) RuntimeAggregate {
+	t.Helper()
+	controller, err := NewRuntimeController(repository)
+	if err != nil {
+		t.Fatal(err)
+	}
+	workspaceID := repository.aggregate.Facts.WorkspaceID
+	runID := repository.aggregate.Facts.RunID
+	if _, err := controller.BeginCandidateAttemptForTest(context.Background(), workspaceID, runID, 0, "prospective-assessment-prefix"); err != nil {
+		t.Fatal(err)
+	}
+	assessment := runtimecontract.RuntimeCandidate{Assessment: &runtimecontract.AssessmentCandidate{
+		FocusID: repository.aggregate.Facts.Focus.ID, CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-1"},
+		Disposition: runtimecontract.AssessmentDispositionSatisfied, Summary: "all prospective targets are proven", EvidenceRefs: append([]string(nil), evidenceRefs...),
+		Items: []runtimecontract.RuntimeAssessmentItemFact{{CoverageWorkItemID: "cwi-1", Satisfied: true, EvidenceRefs: append([]string(nil), evidenceRefs...)}},
+	}}
+	if _, err := controller.AcceptCandidateAttempt(context.Background(), workspaceID, runID, 0, assessment); err != nil {
+		t.Fatal(err)
+	}
+	closed, err := controller.commitAssessment(context.Background(), workspaceID, runID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return closed
 }
 
 func prospectiveAllOfEvidence(aggregate RuntimeAggregate, operation runtimecontract.RuntimeOperation, eventID string, status runtimecontract.RuntimeOperationExecutionStatus, failure *runtimecontract.FailureFact) ExecutionEvidence {

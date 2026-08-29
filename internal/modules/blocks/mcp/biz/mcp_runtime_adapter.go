@@ -45,10 +45,6 @@ const (
 	sessionPolicyLongLived = "long_lived"
 
 	defaultLongLivedStdioSessionIdleTimeout = 5 * time.Minute
-
-	// maxMCPObservedFailureTargets bounds a capability owner's structured
-	// failure observation before it crosses the typed runtime receipt boundary.
-	maxMCPObservedFailureTargets = 16
 )
 
 type operationSpec struct {

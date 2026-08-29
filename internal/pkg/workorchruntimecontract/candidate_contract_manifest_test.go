@@ -79,6 +79,42 @@ func TestBuildRuntimeCandidateContractManifestNarrowsCreationScopeWithoutSecondF
 	}
 }
 
+func TestBuildRuntimeCandidateContractManifestSealsAssessmentBindingProjection(t *testing.T) {
+	decision := runtimeCandidateTestDecisionWithBindings(t, RuntimeDecision{
+		State: ConvergenceStateNeedStateChange,
+		RequiredOutput: RequiredOutputContract{
+			AcceptedKinds:         []string{StepKindFileWrite},
+			AcceptedEffectScopes:  []RuntimeEffectScope{RuntimeEffectWorkspaceDurable},
+			RequiredEffectScopes:  []RuntimeEffectScope{RuntimeEffectWorkspaceDurable},
+			RequiredEvidenceKinds: []string{EvidenceKindStateChange},
+			CoverageWorkItemIDs:   []common.CoverageWorkItemID{"cwi-assessment"},
+		},
+	})
+	decision.State = ConvergenceStateNeedAssessment
+	decision.RequiredOutput = RequiredOutputContract{}
+
+	ownerFacts := RuntimeCandidateManifestOwnerFacts{
+		AssessmentPurpose:             RuntimeAssessmentPurposeDefinitionProof,
+		AssessmentPurposeManifestHash: "semantic-manifest/assessment-binding",
+	}
+	manifest, err := BuildRuntimeCandidateContractManifest(decision, ownerFacts)
+	if err != nil {
+		t.Fatalf("assessment candidate manifest: %v", err)
+	}
+	if manifest.State != ConvergenceStateNeedAssessment || len(manifest.Operations) != 0 || manifest.MaxOperationCount != 0 ||
+		!RuntimeCoverageEvidenceBindingProjectionsEqual(manifest.Bindings, decision.Focus.CoverageEvidenceBindings) {
+		t.Fatalf("assessment binding projection = %+v, focus=%+v", manifest, decision.Focus.CoverageEvidenceBindings)
+	}
+
+	drifted := decision
+	drifted.Focus = decision.Focus.Normalized()
+	drifted.Focus.CoverageEvidenceBindings[0].Hash = "coordinated-but-invalid"
+	if _, err := BuildRuntimeCandidateContractManifest(drifted, ownerFacts); err == nil ||
+		!strings.Contains(err.Error(), "coverage_binding_unavailable") {
+		t.Fatalf("assessment manifest accepted invalid binding projection: %v", err)
+	}
+}
+
 func TestBuildRuntimeCandidateContractManifestSealsCompleteProspectiveBindingTargetSetWithoutSelection(t *testing.T) {
 	decision := runtimeCandidateTestDecisionWithBindings(t, RuntimeDecision{
 		State: ConvergenceStateNeedStateChange,

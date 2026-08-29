@@ -3,6 +3,7 @@ package runtime
 import (
 	"context"
 	"fmt"
+	"testing"
 
 	"github.com/muidea/workorch/internal/pkg/common"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
@@ -34,12 +35,7 @@ func (c *RuntimeController) BeginCandidateAttemptForTest(ctx context.Context, wo
 	default:
 		return RuntimeAggregate{}, fmt.Errorf("%w: current runtime action %q does not request a candidate (prerequisites=%+v)", common.ErrConflict, aggregate.Decision.State, aggregate.Decision.Prerequisites)
 	}
-	manifest, err := runtimecontract.BuildRuntimeCandidateContractManifest(
-		aggregate.Decision,
-		runtimecontract.RuntimeCandidateManifestOwnerFactsFromContext(
-			runtimecontract.RuntimeCandidateContextForDecision(aggregate.Facts, aggregate.Decision, nil),
-		),
-	)
+	manifest, err := BuildRuntimeCandidateContractManifestForAggregate(aggregate)
 	if err != nil {
 		return RuntimeAggregate{}, err
 	}
@@ -106,6 +102,75 @@ func runtimeTestOperationsExpectedDocument(aggregate RuntimeAggregate, manifestH
 	}
 }
 
+// runtimeTestPrepareUnboundActivationFacts completes only the immutable
+// activation-side test declarations. It deliberately rejects every SM-2
+// semantic projection: a CoverageEvidenceBinding, reconciliation row, or CWI
+// binding can exist only after the initialized aggregate passes through the
+// semantic compiler/seal transition below.
+func runtimeTestPrepareUnboundActivationFacts(t *testing.T, facts runtimecontract.RuntimeFacts) runtimecontract.RuntimeFacts {
+	t.Helper()
+	assertUnbound := func(label string, focus runtimecontract.CoverageFocus) {
+		if len(focus.CoverageEvidenceBindings) != 0 || focus.EvidenceDeclarationRef != "" {
+			t.Fatalf("%s carries pre-seal semantic authority: %+v", label, focus)
+		}
+	}
+	assertUnbound("activation focus", facts.Focus)
+	for index, focus := range facts.RemainingFocuses {
+		assertUnbound(fmt.Sprintf("remaining activation focus[%d]", index), focus)
+	}
+	for index, focus := range facts.CompletedFocuses {
+		assertUnbound(fmt.Sprintf("completed activation focus[%d]", index), focus)
+	}
+	if facts.ReconciliationContract.BindingSetHash != "" || len(facts.ReconciliationContract.Bindings) != 0 {
+		t.Fatalf("activation facts carry a pre-seal reconciliation contract: %+v", facts.ReconciliationContract)
+	}
+	for _, item := range facts.Coverage {
+		if item.CurrentBindingRef != nil || len(item.BindingLineage) != 0 || len(item.BindingRetirementLineage) != 0 || item.FocusID != "" {
+			t.Fatalf("activation CWI %q carries pre-seal semantic lineage: %+v", item.ID, item)
+		}
+	}
+	runtimeTestSealCurrentPolicies(&facts)
+	// Targeted fixtures describe their activation declaration through the
+	// unbound Focus queue. Recompile the immutable per-CWI projection from that
+	// queue so a stale generic controllerFacts declaration cannot erase a gate
+	// the fixture just set.
+	facts.DefinitionFocuses = nil
+	facts.DefinitionFocuses = runtimeTestDefinitionFocuses(facts)
+	return facts
+}
+
+// runtimeTestInitializeAndSealSemanticContract follows the production test
+// lifecycle exactly: persist unbound activation input first, then ask SM-2's
+// semantic compiler/owner ledger helper to seal and persist the complete
+// generation. Callers must use the returned aggregate (and its Facts) for
+// candidate binding; the activation input is not post-seal authority.
+func runtimeTestInitializeAndSealSemanticContract(
+	t *testing.T,
+	ctx context.Context,
+	controller *RuntimeController,
+	facts runtimecontract.RuntimeFacts,
+	definition runtimecontract.RuntimeDefinitionContext,
+	requirements []runtimecontract.RuntimeRequirement,
+) RuntimeAggregate {
+	t.Helper()
+	if controller == nil {
+		t.Fatal("semantic lifecycle fixture has no controller")
+	}
+	facts = runtimeTestPrepareUnboundActivationFacts(t, facts)
+	if _, err := controller.initialize(ctx, facts, definition, requirements); err != nil {
+		t.Fatalf("initialize unbound semantic lifecycle fixture: %v", err)
+	}
+	sealed, err := controller.EnsureSemanticContractSealedForOperationTest(ctx, facts.WorkspaceID, facts.RunID)
+	if err != nil {
+		t.Fatalf("seal semantic lifecycle fixture: %v", err)
+	}
+	if sealed.SemanticPlanning.Phase != runtimecontract.RuntimeSemanticPlanningSealed ||
+		sealed.SemanticPlanning.Manifest == nil || sealed.SemanticPlanning.SealedBindingSetHash == "" {
+		t.Fatalf("semantic lifecycle fixture did not persist a complete seal: %+v", sealed.SemanticPlanning)
+	}
+	return sealed
+}
+
 func (c *RuntimeController) EnsureSemanticContractSealedForOperationTest(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID) (RuntimeAggregate, error) {
 	aggregate, err := c.repository.Load(ctx, workspaceID, runID)
 	if err != nil {
@@ -118,66 +183,36 @@ func (c *RuntimeController) EnsureSemanticContractSealedForOperationTest(ctx con
 	if err != nil {
 		return RuntimeAggregate{}, err
 	}
-	if runtimeTestFactsAlreadyHaveCurrentCWIBindings(aggregate.Facts) {
-		// Some focused reducer fixtures explicitly project a post-semantic
-		// authority before entering this helper. Keep that tested binding rather
-		// than creating a second semantic generation over the same CWI.
-		facts, rebindErr := runtimeTestBindCurrentCWIRowsToSemanticManifest(aggregate.Facts, ledger.Manifest.Hash)
-		if rebindErr != nil {
-			return RuntimeAggregate{}, rebindErr
-		}
-		aggregate.Facts = facts
-		ledger.SealedBindingSetHash = aggregate.Facts.ReconciliationContract.BindingSetHash
-		if len(ledger.SealedLineageRefs) == 0 {
-			return RuntimeAggregate{}, fmt.Errorf("test semantic ledger has no seal lineage")
-		}
-		ledger.SealedLineageRefs[len(ledger.SealedLineageRefs)-1] = ledger.SealedBindingSetHash
-		if err := ledger.Validate(); err != nil {
-			return RuntimeAggregate{}, err
-		}
-		facts, decision, reduceErr := ReduceRuntimeStateWithDirective(aggregate.Facts, nil, aggregate.CoverageProofLineage)
-		if reduceErr != nil {
-			return RuntimeAggregate{}, reduceErr
-		}
-		expectedRevision := aggregate.StateRevision
-		aggregate.SemanticPlanning = ledger
-		aggregate.Facts = facts
-		aggregate.Decision = decision
-		aggregate.StateRevision++
-		if err := aggregate.Validate(); err != nil {
-			return RuntimeAggregate{}, err
-		}
-		if err := c.transitions.Commit(ctx, aggregate, expectedRevision); err != nil {
-			return RuntimeAggregate{}, err
-		}
-		return aggregate, nil
+	// Catalog refresh retires the complete prior semantic generation before a
+	// replacement is requested. Preserve that immutable history in the focused
+	// provider fixture so historical candidate sessions remain reverse-bound to
+	// their original provider/owner preimage instead of being laundered through
+	// the replacement generation.
+	previousPlanning := aggregate.SemanticPlanning.Clone()
+	ledger.History = make([]runtimecontract.RuntimeSemanticPlanningGeneration, len(previousPlanning.History))
+	for index := range previousPlanning.History {
+		ledger.History[index] = previousPlanning.History[index].Clone()
 	}
-	focuses, _, err := runtimecontract.CompileRuntimeSemanticBindings(*ledger.Manifest, ledger.LogicalRequestID, *ledger.Document, ledger.Feasibilities)
+	ledger.CatalogRefreshAttempts = previousPlanning.CatalogRefreshAttempts
+	ledger.FeasibilityGaps = append([]runtimecontract.RuntimeSemanticFeasibilityGap(nil), previousPlanning.FeasibilityGaps...)
+	// Focused fixtures may enter with a handwritten reducer binding. Reproject
+	// every such row from the exact compiler output of this ledger instead of
+	// preserving an authority that has no provider/owner preimage.
+	aggregate.SemanticPlanning = ledger
+	aggregate.Facts = runtimeTestProjectSemanticOwnerCatalogFacts(aggregate.Facts, ledger)
+	facts, focuses, err := runtimeTestProjectSemanticBindingPreimageFacts(aggregate)
 	if err != nil {
 		return RuntimeAggregate{}, err
 	}
-	pending, err := semanticPendingFocuses(aggregate.Facts, ledger.PendingCoverageIDs, focuses, *ledger.Manifest)
-	if err != nil {
-		return RuntimeAggregate{}, err
-	}
-	facts, err := sealRuntimeCWIBindings(aggregate.Facts, ledger.Manifest.Hash, focuses, pending)
-	if err != nil {
-		return RuntimeAggregate{}, err
-	}
-	reconciliation, err := canonicalRuntimeCWIReconciliationContract(facts)
-	if err != nil {
-		return RuntimeAggregate{}, err
-	}
-	ledger.SealedBindingSetHash = reconciliation.BindingSetHash
+	ledger.SealedBindingSetHash = facts.ReconciliationContract.BindingSetHash
 	if len(ledger.SealedLineageRefs) == 0 {
 		return RuntimeAggregate{}, fmt.Errorf("test semantic ledger has no seal lineage")
 	}
-	ledger.SealedLineageRefs[len(ledger.SealedLineageRefs)-1] = reconciliation.BindingSetHash
+	ledger.SealedLineageRefs[len(ledger.SealedLineageRefs)-1] = ledger.SealedBindingSetHash
 	if err := ledger.Validate(); err != nil {
 		return RuntimeAggregate{}, err
 	}
 	facts.Capabilities = runtimeCapabilitiesWithSemanticProofs(facts.Capabilities, focuses)
-	facts.ReconciliationContract = reconciliation
 	// Production acquires target snapshots through the File owner before an
 	// operation request. Focused operation tests deliberately bypass that
 	// EventHub round-trip, so seed the same owner fact here rather than letting
@@ -367,12 +402,7 @@ func candidateAttemptTestBinding(ctx context.Context, c *RuntimeController, work
 			continue
 		}
 		if record.Transaction == aggregate.Decision.AuthorityTransaction() {
-			manifest, manifestErr := runtimecontract.BuildRuntimeCandidateContractManifest(
-				aggregate.Decision,
-				runtimecontract.RuntimeCandidateManifestOwnerFactsFromContext(
-					runtimecontract.RuntimeCandidateContextForDecision(aggregate.Facts, aggregate.Decision, nil),
-				),
-			)
+			manifest, manifestErr := BuildRuntimeCandidateContractManifestForAggregate(aggregate)
 			if manifestErr != nil {
 				// Terminal duplicate delivery does not recompile authority: the
 				// persisted record/session hash is its complete identity.
@@ -410,12 +440,7 @@ func EvaluateCandidateAdmission(aggregate RuntimeAggregate, candidate runtimecon
 			aggregate.Decision = decision
 		}
 	}
-	manifest, err := runtimecontract.BuildRuntimeCandidateContractManifest(
-		aggregate.Decision,
-		runtimecontract.RuntimeCandidateManifestOwnerFactsFromContext(
-			runtimecontract.RuntimeCandidateContextForDecision(aggregate.Facts, aggregate.Decision, nil),
-		),
-	)
+	manifest, err := BuildRuntimeCandidateContractManifestForAggregate(aggregate)
 	if err != nil {
 		return rejectedCandidateAdmission(candidateAdmissionCodeInvalid, candidateAdmissionInvalidSignature(candidate), fmt.Sprintf("runtime candidate manifest contract: %v", err))
 	}
@@ -445,12 +470,7 @@ func bindRuntimeCandidateAttemptForTest(t interface {
 	if aggregate == nil || index < 0 || index >= len(aggregate.CandidateAttempts) {
 		t.Fatal("candidate attempt test binding index is invalid")
 	}
-	manifest, err := runtimecontract.BuildRuntimeCandidateContractManifest(
-		aggregate.Decision,
-		runtimecontract.RuntimeCandidateManifestOwnerFactsFromContext(
-			runtimecontract.RuntimeCandidateContextForDecision(aggregate.Facts, aggregate.Decision, nil),
-		),
-	)
+	manifest, err := BuildRuntimeCandidateContractManifestForAggregate(*aggregate)
 	if err != nil {
 		t.Fatal(err)
 	}

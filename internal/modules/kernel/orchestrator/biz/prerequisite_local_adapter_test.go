@@ -23,31 +23,21 @@ func TestLocalPrerequisiteAdaptersCommitOwnerFacts(t *testing.T) {
 		DefinitionRevision: "definition-1",
 		EvidenceRevision:   "evidence-1",
 		Focus:              runtimecontract.CoverageFocus{ID: "cwi-1"},
-		Failure: &runtimecontract.FailureFact{
-			Signature:  "build-failure",
-			TargetRefs: []string{"main.go"},
-		},
 	}
 	internalDirectory := t.TempDir()
 	requirements := []runtimecontract.RuntimeRequirement{
-		{Kind: runtimecontract.PrerequisiteKindFailureTarget},
 		{Kind: runtimecontract.PrerequisiteKindValidationScratch},
 	}
 	facts = runtime.PreflightRuntimeFacts(facts, requirements)
 	for _, item := range append([]runtimecontract.RuntimePrerequisite(nil), facts.Prerequisites.Pending...) {
 		var err error
 		switch item.Kind {
-		case runtimecontract.PrerequisiteKindFailureTarget:
-			facts, err = ResolveFailureTargetPrerequisite(facts, item.ID)
 		case runtimecontract.PrerequisiteKindValidationScratch:
 			facts, err = AcquireValidationScratchPrerequisite(facts, internalDirectory, item.ID)
 		}
 		if err != nil {
 			t.Fatalf("resolve %s: %v", item.Kind, err)
 		}
-	}
-	if facts.Resources.FailureTarget == nil || len(facts.Resources.FailureTarget.TargetRefs) != 1 {
-		t.Fatalf("failure target = %+v", facts.Resources.FailureTarget)
 	}
 	if facts.Resources.ValidationScratch == nil || !strings.Contains(facts.Resources.ValidationScratch.Reference, "validation-scratch") {
 		t.Fatalf("validation scratch = %+v", facts.Resources.ValidationScratch)
@@ -122,22 +112,6 @@ func TestAcquireValidationScratchPrerequisiteRejectsMissingWorkspaceInternalDire
 	}
 }
 
-func TestResolveFailureTargetPrerequisiteRejectsMissingTypedIdentity(t *testing.T) {
-	for _, failure := range []*runtimecontract.FailureFact{
-		nil,
-		{TargetRefs: []string{"main.go"}},
-		{Signature: "failure-without-target"},
-	} {
-		facts := runtime.PreflightRuntimeFacts(runtimecontract.RuntimeFacts{
-			WorkspaceID: "ws-1", RunID: "run-1", DefinitionRevision: "definition-1", EvidenceRevision: "evidence-1",
-			Failure: failure,
-		}, []runtimecontract.RuntimeRequirement{{Kind: runtimecontract.PrerequisiteKindFailureTarget}})
-		if _, err := ResolveFailureTargetPrerequisite(facts, facts.Prerequisites.Pending[0].ID); err == nil {
-			t.Fatalf("failure target mapping accepted incomplete failure: %+v", failure)
-		}
-	}
-}
-
 func TestInspectValidationScratchPrerequisiteReportsDeletedScopedResource(t *testing.T) {
 	facts := runtime.PreflightRuntimeFacts(runtimecontract.RuntimeFacts{
 		WorkspaceID: "ws-1", RunID: "run-1", DefinitionRevision: "definition-1", EvidenceRevision: "evidence-1",
@@ -188,7 +162,7 @@ func TestRuntimePrerequisiteResolverClassificationCoversContractKinds(t *testing
 			t.Fatalf("%s resolver class=%s, want external owner", kind, got)
 		}
 	}
-	for _, kind := range []runtimecontract.PrerequisiteKind{runtimecontract.PrerequisiteKindFailureTarget, runtimecontract.PrerequisiteKindValidationScratch} {
+	for _, kind := range []runtimecontract.PrerequisiteKind{runtimecontract.PrerequisiteKindValidationScratch} {
 		if got := runtimePrerequisiteResolverClassification(kind); got != runtimePrerequisiteResolverLocal {
 			t.Fatalf("%s resolver class=%s, want local", kind, got)
 		}
@@ -328,18 +302,9 @@ func TestRuntimePrerequisiteResolverInventoryUsesProductionRequirementSources(t 
 	}
 	seen[runtimecontract.PrerequisiteKindTargetSnapshot] = struct{}{}
 
-	failureFacts := facts
-	failureFacts.Failure = &runtimecontract.FailureFact{Signature: "failure-v1", TargetRefs: []string{"implementation.go"}}
-	failureFacts = runtime.PreflightRuntimeFacts(failureFacts, []runtimecontract.RuntimeRequirement{{Kind: runtimecontract.PrerequisiteKindFailureTarget, OwnerModuleID: runtimecontract.RuntimeModuleOrchestrator}})
-	if len(failureFacts.Prerequisites.Pending) != 1 || failureFacts.Prerequisites.Pending[0].Kind != runtimecontract.PrerequisiteKindFailureTarget ||
-		runtimePrerequisiteResolverClassification(failureFacts.Prerequisites.Pending[0].Kind) != runtimePrerequisiteResolverLocal {
-		t.Fatalf("failure target local prerequisite=%+v", failureFacts.Prerequisites.Pending)
-	}
-	seen[runtimecontract.PrerequisiteKindFailureTarget] = struct{}{}
-
 	want := []runtimecontract.PrerequisiteKind{
 		runtimecontract.PrerequisiteKindManifest, runtimecontract.PrerequisiteKindTargetSelection, runtimecontract.PrerequisiteKindTargetSnapshot,
-		runtimecontract.PrerequisiteKindFailureTarget, runtimecontract.PrerequisiteKindCapability, runtimecontract.PrerequisiteKindCapabilityState,
+		runtimecontract.PrerequisiteKindCapability, runtimecontract.PrerequisiteKindCapabilityState,
 		runtimecontract.PrerequisiteKindValidationScratch, runtimecontract.PrerequisiteKindProviderCeiling, runtimecontract.PrerequisiteKindOperationAdmissibility,
 	}
 	for _, kind := range want {

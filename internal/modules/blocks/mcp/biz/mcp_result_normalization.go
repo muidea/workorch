@@ -241,8 +241,9 @@ func observedMCPFailureTargets(payload MCPResponsePayload) []string {
 }
 
 func normalizeMCPTargetRefs(values []string) []string {
-	seen := make(map[string]struct{}, len(values))
-	targets := make([]string, 0, min(len(values), maxMCPObservedFailureTargets))
+	limit := runtimecontract.RuntimeFailureTargetObservationMaxTargetRefs
+	seen := make(map[string]struct{}, min(len(values), limit+1))
+	targets := make([]string, 0, min(len(values), limit+1))
 	for _, value := range values {
 		value = normalizedCapabilityInputTarget(value)
 		if value == "" {
@@ -253,8 +254,11 @@ func normalizeMCPTargetRefs(values []string) []string {
 		}
 		seen[value] = struct{}{}
 		targets = append(targets, value)
-		if len(targets) == maxMCPObservedFailureTargets {
-			break
+		if len(targets) > limit {
+			// Never truncate a capability response into an apparently valid
+			// authority subset. The rejected operation may retain its generic
+			// diagnostic, but it has no direct target observation.
+			return nil
 		}
 	}
 	return targets

@@ -245,16 +245,15 @@ func runtimeEvidenceAppliesToCoverageIDsWithLineage(
 	return proof.EvidenceAppliesToCoverageIDsWithLineage(facts, evidence, coverageIDs, lineage)
 }
 
-// runtimeAcceptedEvidenceAppliesToCurrentFocusWithLineage retains the narrow
-// non-credit current-state observation path while requiring binding-aware
-// attribution for evidence that names a CWI. Callers that require actual CWI
-// proof, such as target grounding, use the stricter current-coverage helper.
-func runtimeAcceptedEvidenceAppliesToCurrentFocusWithLineage(
+// runtimeAcceptedEvidenceCreditsCurrentFocusWithLineage is the common
+// binding-aware credit gate for accepted ordinary evidence. Diagnostic facts
+// with no CWI projection deliberately return false.
+func runtimeAcceptedEvidenceCreditsCurrentFocusWithLineage(
 	facts runtimecontract.RuntimeFacts,
 	evidence runtimecontract.EvidenceFact,
 	lineage []runtimecontract.RuntimeCoverageProofLineage,
 ) bool {
-	return proof.AcceptedEvidenceAppliesToCurrentFocusWithLineage(facts, evidence, lineage)
+	return proof.AcceptedEvidenceCreditsCurrentFocusWithLineage(facts, evidence, lineage)
 }
 
 func runtimeCoverageProofLineageArgument(values [][]runtimecontract.RuntimeCoverageProofLineage) []runtimecontract.RuntimeCoverageProofLineage {

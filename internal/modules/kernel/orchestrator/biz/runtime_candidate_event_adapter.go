@@ -316,7 +316,7 @@ func validateRuntimeCandidatePreflightCommand(command llmevents.PreflightRuntime
 		if err := command.CandidateContext.Validate(command.Decision); err != nil {
 			return err
 		}
-		if err := runtimecontract.ValidateRuntimeCandidateContractManifestForDecision(command.CandidateManifest, command.Decision, runtimecontract.RuntimeCandidateManifestOwnerFactsFromContext(command.CandidateContext)); err != nil {
+		if err := runtimecontract.ValidateRuntimeCandidateContractManifestForSealedDecision(command.CandidateManifest, command.Decision); err != nil {
 			return err
 		}
 		return validateRuntimeCandidateRetryContract(command.CandidateAttempt, command.CandidateCorrectionObservation, command.CandidateCorrection, command.CandidateManifest)

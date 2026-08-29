@@ -1122,15 +1122,115 @@ func TestRuntimeSemanticCatalogReacquisitionRetiresOnlyCurrentGeneration(t *test
 	}
 }
 
+func TestRuntimeCatalogStaleBindingRetirementPreemptsOperationAuthorityAcrossRestart(t *testing.T) {
+	ctx := context.Background()
+	controller, repository, aggregate, catalog, prerequisite, observation := sealedSemanticPlanningAggregate(t)
+	coverageID := aggregate.Facts.Coverage[0].ID
+	oldBinding := aggregate.Facts.Coverage[0].CurrentBindingRef.Clone()
+	oldFocusTargetRefs := append([]string(nil), aggregate.Facts.Focus.TargetRefs...)
+	oldTargetSelection := aggregate.Facts.Resources.TargetSelection
+
+	changed, err := applyReceiptResourceChangeInvalidation(&aggregate, "dispatch-owner-catalog-stale", "operation-owner-catalog-stale", runtimecontract.RuntimeOperationReceipt{
+		ExecutionKey: "execution/owner-catalog-stale", Fence: 1, OperationID: "operation-owner-catalog-stale",
+		ResourceChanges: []runtimecontract.RuntimeResourceChange{{
+			Domain: runtimecontract.RuntimeResourceWorkspaceTree, OwnerModuleID: runtimecontract.RuntimeModuleFile,
+			SubjectRef: "workspace_deliverable", BeforeRevision: catalog.ObservedRevision, AfterRevision: "file-revision-stale-successor",
+		}},
+	})
+	if err != nil || !changed || !semanticCatalogPrerequisitePending(aggregate, prerequisite.ID) {
+		t.Fatalf("owner stale fact did not reopen catalog acquisition: changed=%t err=%v aggregate=%+v", changed, err, aggregate)
+	}
+	facts, decision, err := ReduceRuntimeStateWithDirective(aggregate.Facts, nil, aggregate.CoverageProofLineage)
+	if err != nil {
+		t.Fatal(err)
+	}
+	aggregate.Facts, aggregate.Decision = facts, decision
+	aggregate.StateRevision++
+	if err := aggregate.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	repository.aggregate = &aggregate
+
+	freshCatalog := catalog.Normalized()
+	freshCatalog.ObservedRevision = "file-revision-stale-successor"
+	freshCatalog.SnapshotID = runtimecontract.StableRuntimeOperationAdmissibilitySnapshotID(freshCatalog)
+	freshObservation := observation.Normalized()
+	freshObservation.ContentHash = freshCatalog.SnapshotID
+	freshObservation.Dependencies = append([]runtimecontract.RuntimeFreshnessDependency(nil), freshObservation.Dependencies...)
+	freshObservation.Dependencies[0].Revision = freshCatalog.ObservedRevision
+	freshObservation.ObservationID = runtimecontract.StableRuntimePrerequisiteObservationID(freshObservation)
+	reacquired, err := controller.commitPrerequisite(ctx, aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, PrerequisiteResult{
+		PrerequisiteID: prerequisite.ID, OperationAdmissibility: &freshCatalog, Observation: &freshObservation,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if reacquired.SemanticPlanning.Phase != runtimecontract.RuntimeSemanticPlanningRequired ||
+		len(reacquired.SemanticPlanning.History) != 1 || reacquired.SemanticPlanning.Manifest != nil ||
+		!RuntimeCWIBindingRetirementPending(reacquired) || SemanticOperationAuthorityReady(reacquired) {
+		t.Fatalf("retired catalog generation remained usable before explicit binding retirement: %+v", reacquired.SemanticPlanning)
+	}
+	item := runtimeCoverageByID(reacquired.Facts.Coverage)[coverageID]
+	if item.CurrentBindingRef == nil || !runtimecontract.SameRuntimeCWIBindingRef(*item.CurrentBindingRef, oldBinding) ||
+		len(runtimecontract.RuntimeCWIsEligibleForPlanning(reacquired.Facts)) != 0 {
+		t.Fatalf("catalog retirement implicitly rewrote its bound CWI: %+v", item)
+	}
+
+	savesBeforeRestart := repository.saves
+	restarted, err := NewRuntimeController(repository)
+	if err != nil {
+		t.Fatal(err)
+	}
+	reloaded, err := restarted.Load(ctx, reacquired.Facts.WorkspaceID, reacquired.Facts.RunID)
+	if err != nil || repository.saves != savesBeforeRestart || !RuntimeCWIBindingRetirementPending(reloaded) || SemanticOperationAuthorityReady(reloaded) {
+		t.Fatalf("restart changed the pending stale-binding fence: aggregate=%+v saves=%d/%d err=%v", reloaded, repository.saves, savesBeforeRestart, err)
+	}
+	retirement, found := NextRuntimeCWIBindingRetirementFact(reloaded)
+	if !found || !runtimecontract.SameRuntimeCWIBindingRef(retirement.CurrentBindingRef, oldBinding) {
+		t.Fatalf("restart lost the typed owner-local binding retirement: fact=%+v found=%t", retirement, found)
+	}
+	committed, err := restarted.ApplyInternalEvent(ctx, RuntimeInternalEvent{
+		Kind:      RuntimeInternalEventCWIBindingRetired,
+		Scope:     RuntimeInternalEventScope{WorkspaceID: reloaded.Facts.WorkspaceID, RunID: reloaded.Facts.RunID},
+		Authority: &RuntimeInternalAuthorityPayload{CWIBindingRetirement: &retirement},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	retired := committed.Aggregate
+	item = runtimeCoverageByID(retired.Facts.Coverage)[coverageID]
+	eligible := runtimecontract.RuntimeCWIsEligibleForPlanning(retired.Facts)
+	if item.CWIConvergenceState != runtimecontract.RuntimeCWIConvergenceStatePlanning || item.CurrentBindingRef != nil ||
+		len(item.BindingRetirementLineage) != 1 || len(eligible) != 1 || eligible[0] != item.ID ||
+		RuntimeCWIBindingRetirementPending(retired) || SemanticOperationAuthorityReady(retired) ||
+		retired.SemanticPlanning.Phase != runtimecontract.RuntimeSemanticPlanningRequired || retired.SemanticPlanning.Manifest != nil ||
+		len(retired.SemanticPlanning.History) != 1 || retired.ActiveDispatch != nil ||
+		len(retired.Facts.Focus.CoverageEvidenceBindings) != 0 || !sameRuntimeTargetRefs(retired.Facts.Focus.TargetRefs, oldFocusTargetRefs) ||
+		!reflect.DeepEqual(retired.Facts.Resources.TargetSelection, oldTargetSelection) {
+		t.Fatalf("typed retirement did not reopen exactly one CWI without reseal/target synthesis: item=%+v eligible=%v aggregate=%+v", item, eligible, retired)
+	}
+	if err := retired.Validate(); err != nil {
+		t.Fatalf("reopened stale-binding aggregate violates fresh-load invariant: %v", err)
+	}
+
+	revision, saves := retired.StateRevision, repository.saves
+	duplicate, err := restarted.ApplyInternalEvent(ctx, RuntimeInternalEvent{
+		Kind:      RuntimeInternalEventCWIBindingRetired,
+		Scope:     RuntimeInternalEventScope{WorkspaceID: retired.Facts.WorkspaceID, RunID: retired.Facts.RunID},
+		Authority: &RuntimeInternalAuthorityPayload{CWIBindingRetirement: &retirement},
+	})
+	if err != nil || duplicate.Aggregate.StateRevision != revision || repository.saves != saves {
+		t.Fatalf("duplicate stale-binding retirement changed authority: aggregate=%+v saves=%d/%d err=%v", duplicate.Aggregate, repository.saves, saves, err)
+	}
+}
+
 func TestRuntimeSemanticCatalogReacquisitionKeepsAcceptedEffectBindingLocked(t *testing.T) {
 	ctx := context.Background()
 	controller, repository, aggregate, catalog, prerequisite, observation := sealedSemanticPlanningAggregate(t)
 	oldBinding := aggregate.Facts.Focus.CoverageEvidenceBindings[0].Clone()
-	aggregate.Facts.Evidence.Accepted = append(aggregate.Facts.Evidence.Accepted, runtimecontract.EvidenceFact{
-		ID: "evidence-semantic-lineage-source", Kind: runtimecontract.EvidenceKindStateChange,
-		BindingRefs: []string{oldBinding.ID}, CoverageWorkItemIDs: []common.CoverageWorkItemID{oldBinding.CoverageWorkItemID},
-		Quality: common.EvidenceQualityValid,
-	})
+	if err := runtimeTestCommitSemanticStateChangeReceipt(t, repository, &aggregate); err != nil {
+		t.Fatal(err)
+	}
 
 	changed, err := applyReceiptResourceChangeInvalidation(&aggregate, "dispatch-lineage-lock", "operation-lineage-lock", runtimecontract.RuntimeOperationReceipt{
 		ExecutionKey: "execution/lineage-lock", Fence: 1, OperationID: "operation-lineage-lock",
@@ -1181,13 +1281,10 @@ func TestRuntimeSemanticCatalogReacquisitionKeepsAcceptedEffectBindingLocked(t *
 }
 
 func TestSemanticOperationAuthorityKeepsLockedCurrentCWIAheadOfLaterPlanning(t *testing.T) {
-	_, _, aggregate, _, _, _ := sealedSemanticPlanningAggregate(t)
-	binding := aggregate.Facts.Focus.CoverageEvidenceBindings[0].Clone()
-	aggregate.Facts.Evidence.Accepted = append(aggregate.Facts.Evidence.Accepted, runtimecontract.EvidenceFact{
-		ID: "evidence-current-binding-lock", Kind: runtimecontract.EvidenceKindStateChange,
-		BindingRefs: []string{binding.ID}, CoverageWorkItemIDs: []common.CoverageWorkItemID{binding.CoverageWorkItemID},
-		Quality: common.EvidenceQualityValid,
-	})
+	_, repository, aggregate, _, _, _ := sealedSemanticPlanningAggregate(t)
+	if err := runtimeTestCommitSemanticStateChangeReceipt(t, repository, &aggregate); err != nil {
+		t.Fatal(err)
+	}
 	aggregate.Facts.Coverage = append(aggregate.Facts.Coverage, runtimecontract.RuntimeCoverageItemFact{
 		ID: "cwi-later", SliceID: "slice-later",
 		State:               runtimecontract.RuntimeCoverageItemStateOpen,
@@ -1206,6 +1303,8 @@ func TestSemanticOperationAuthorityKeepsLockedCurrentCWIAheadOfLaterPlanning(t *
 	}
 
 	aggregate.Facts.Evidence.Accepted = nil
+	aggregate.CompletedDispatches = nil
+	aggregate.OperationReceipts = nil
 	if SemanticOperationAuthorityReady(aggregate) {
 		t.Fatal("unlocked current binding bypassed required semantic planning")
 	}
@@ -1459,10 +1558,9 @@ func TestRuntimeSemanticCatalogInvalidationCannotRetireEffectBearingBinding(t *t
 	controller, repository, aggregate, _, _, _ := sealedSemanticPlanningAggregate(t)
 	coverageID := aggregate.Facts.Coverage[0].ID
 	binding := aggregate.Facts.Coverage[0].CurrentBindingRef.Clone()
-	aggregate.Facts.Evidence.Accepted = append(aggregate.Facts.Evidence.Accepted, runtimecontract.EvidenceFact{
-		ID: "evidence-effect-bearing", Kind: runtimecontract.EvidenceKindStateChange,
-		BindingRefs: []string{binding.BindingID}, CoverageWorkItemIDs: []common.CoverageWorkItemID{coverageID},
-	})
+	if err := runtimeTestCommitSemanticStateChangeReceipt(t, repository, &aggregate); err != nil {
+		t.Fatal(err)
+	}
 	manifestHash := aggregate.SemanticPlanning.Manifest.Hash
 	logicalRequestID := aggregate.SemanticPlanning.LogicalRequestID
 	aggregate.Facts.Resources.PrerequisiteObservations = nil
@@ -1831,6 +1929,24 @@ func TestRuntimeSemanticMultiBatchFeasibilityMergeRecoversAfterResponseLoss(t *t
 		}
 		aggregate = result.Aggregate
 	}
+	archiveActiveBatchFeasibility := func() {
+		t.Helper()
+		batch, found := runtimeSemanticBatch(aggregate.SemanticPlanning.Batches, aggregate.SemanticPlanning.ActiveBatchID)
+		if !found || batch.State != runtimecontract.RuntimeSemanticPlanBatchAccepted {
+			t.Fatalf("semantic batch was not accepted before feasibility archive: %+v", aggregate.SemanticPlanning)
+		}
+		document, found := runtimeSemanticBatchDocument(aggregate.SemanticPlanning.BatchDocuments, batch.BatchID)
+		if !found {
+			t.Fatalf("accepted semantic batch %q has no exact document", batch.BatchID)
+		}
+		result := runtimecontract.RuntimeSemanticPlanBatchFeasibilityResult{
+			BatchID: batch.BatchID, BatchHash: batch.Hash,
+			DocumentHash:  runtimecontract.StableRuntimeSemanticPlanDocumentHash(document),
+			Feasibilities: append([]runtimecontract.RuntimeSemanticProofFeasibility(nil), aggregate.SemanticPlanning.Feasibilities...),
+		}
+		result.Hash = runtimecontract.StableRuntimeSemanticPlanBatchFeasibilityResultHash(result)
+		apply(RuntimeInternalEvent{Kind: RuntimeInternalEventSemanticPlanBatchFeasibilityObserved, Transaction: &RuntimeInternalTransactionPayload{SemanticPlanBatchFeasibilityResult: &result}})
+	}
 	apply(RuntimeInternalEvent{Kind: RuntimeInternalEventSemanticPlanRequestStarted, Transaction: &RuntimeInternalTransactionPayload{SemanticManifest: &manifest, StablePrefixHash: "multi-batch-prefix", LogicalRequestID: "order-request"}})
 	apply(RuntimeInternalEvent{Kind: RuntimeInternalEventSemanticPlanEvaluated, Transaction: &RuntimeInternalTransactionPayload{SemanticDocument: &order, LogicalRequestID: "order-request"}})
 	// First transaction is scoped to the active focus only. The second CWI is
@@ -1856,6 +1972,7 @@ func TestRuntimeSemanticMultiBatchFeasibilityMergeRecoversAfterResponseLoss(t *t
 	apply(RuntimeInternalEvent{Kind: RuntimeInternalEventSemanticPlanEvaluated, Transaction: &RuntimeInternalTransactionPayload{SemanticDocument: &firstDocument, LogicalRequestID: firstBatch.RequestLogicalID}})
 	apply(RuntimeInternalEvent{Kind: RuntimeInternalEventSemanticFeasibilityRequired, Authority: &RuntimeInternalAuthorityPayload{}})
 	apply(RuntimeInternalEvent{Kind: RuntimeInternalEventSemanticFeasibilityObserved, Authority: &RuntimeInternalAuthorityPayload{SemanticBatchID: aggregate.SemanticPlanning.FeasibilityBatchID, SemanticFeasibility: &feasibilities[0]}})
+	archiveActiveBatchFeasibility()
 	firstAccepted := aggregate.SemanticPlanning.Batches[0]
 	firstMerged, err := runtimecontract.MergeRuntimeSemanticPlanFocusBatchDocument(manifest, firstAccepted, firstDocument)
 	if err != nil {
@@ -1907,6 +2024,7 @@ func TestRuntimeSemanticMultiBatchFeasibilityMergeRecoversAfterResponseLoss(t *t
 	apply(RuntimeInternalEvent{Kind: RuntimeInternalEventSemanticPlanEvaluated, Transaction: &RuntimeInternalTransactionPayload{SemanticDocument: &secondDocument, LogicalRequestID: secondBatch.RequestLogicalID}})
 	apply(RuntimeInternalEvent{Kind: RuntimeInternalEventSemanticFeasibilityRequired, Authority: &RuntimeInternalAuthorityPayload{}})
 	apply(RuntimeInternalEvent{Kind: RuntimeInternalEventSemanticFeasibilityObserved, Authority: &RuntimeInternalAuthorityPayload{SemanticBatchID: aggregate.SemanticPlanning.FeasibilityBatchID, SemanticFeasibility: &feasibilities[1]}})
+	archiveActiveBatchFeasibility()
 	secondAccepted := aggregate.SemanticPlanning.Batches[1]
 	secondMerged, err := runtimecontract.MergeRuntimeSemanticPlanFocusBatchDocument(manifest, secondAccepted, secondDocument)
 	if err != nil {
@@ -2169,6 +2287,17 @@ func sealFirstTwoItemSemanticBatch(
 	apply(RuntimeInternalEvent{Kind: RuntimeInternalEventSemanticFeasibilityRequired, Authority: &RuntimeInternalAuthorityPayload{}})
 	apply(RuntimeInternalEvent{Kind: RuntimeInternalEventSemanticFeasibilityObserved, Authority: &RuntimeInternalAuthorityPayload{SemanticBatchID: aggregate.SemanticPlanning.FeasibilityBatchID, SemanticFeasibility: &feasibilities[0]}})
 	accepted := aggregate.SemanticPlanning.Batches[0]
+	acceptedDocument, found := runtimeSemanticBatchDocument(aggregate.SemanticPlanning.BatchDocuments, accepted.BatchID)
+	if !found {
+		t.Fatalf("accepted semantic batch %q has no exact document", accepted.BatchID)
+	}
+	batchResult := runtimecontract.RuntimeSemanticPlanBatchFeasibilityResult{
+		BatchID: accepted.BatchID, BatchHash: accepted.Hash,
+		DocumentHash:  runtimecontract.StableRuntimeSemanticPlanDocumentHash(acceptedDocument),
+		Feasibilities: append([]runtimecontract.RuntimeSemanticProofFeasibility(nil), aggregate.SemanticPlanning.Feasibilities...),
+	}
+	batchResult.Hash = runtimecontract.StableRuntimeSemanticPlanBatchFeasibilityResultHash(batchResult)
+	apply(RuntimeInternalEvent{Kind: RuntimeInternalEventSemanticPlanBatchFeasibilityObserved, Transaction: &RuntimeInternalTransactionPayload{SemanticPlanBatchFeasibilityResult: &batchResult}})
 	merged, err := runtimecontract.MergeRuntimeSemanticPlanFocusBatchDocument(manifest, accepted, document)
 	if err != nil {
 		t.Fatal(err)
@@ -2431,64 +2560,119 @@ func sameOrderedSemanticCoverageIDs(left, right []common.CoverageWorkItemID) boo
 	return true
 }
 
-// runtimeTestAdvanceSemanticFocus models the Orchestrator-owned SM-4 evidence
-// commit that closes the current focus and opens the next focus-local semantic
-// transaction.  It intentionally uses only typed aggregate facts; no provider
-// document or capability-owner state is used to choose the next focus.
-func runtimeTestAdvanceSemanticFocus(t *testing.T, repository *controllerRepository, aggregate *RuntimeAggregate) error {
+// runtimeTestCommitSemanticStateChangeReceipt records an effect-bearing
+// semantic proof through a real sealed operation, owner receipt and SM-3
+// evidence commit. It deliberately stops before assessment so tests can prove
+// that the accepted effect locks its owning binding.
+func runtimeTestCommitSemanticStateChangeReceipt(t *testing.T, repository *controllerRepository, aggregate *RuntimeAggregate) error {
 	t.Helper()
 	if repository == nil || aggregate == nil {
 		return common.ErrInvalidArgument
+	}
+	if aggregate.Decision.State == runtimecontract.ConvergenceStateNeedPrerequisite {
+		controller, err := NewRuntimeController(repository)
+		if err != nil {
+			return err
+		}
+		for _, prerequisite := range aggregate.Facts.Prerequisites.Pending {
+			if prerequisite.Kind != runtimecontract.PrerequisiteKindTargetSnapshot {
+				continue
+			}
+			snapshot := runtimecontract.TargetSnapshot{
+				TargetRef: prerequisite.SubjectRef, Content: "semantic test target",
+				ContentHash: "semantic-test-snapshot/" + prerequisite.SubjectRef, ContentState: runtimecontract.SnapshotContentStateComplete,
+			}
+			observation := runtimecontract.RuntimePrerequisiteObservation{
+				PrerequisiteID: prerequisite.ID, Kind: prerequisite.Kind, OwnerModuleID: prerequisite.OwnerModuleID, ContentHash: snapshot.ContentHash,
+				Dependencies: []runtimecontract.RuntimeFreshnessDependency{{
+					Domain: runtimecontract.RuntimeResourceWorkspaceTarget, OwnerModuleID: runtimecontract.RuntimeModuleFile,
+					SubjectRef: snapshot.TargetRef, Revision: snapshot.ContentHash,
+				}},
+			}
+			observation.ObservationID = runtimecontract.StableRuntimePrerequisiteObservationID(observation)
+			resumed, commitErr := controller.commitPrerequisite(context.Background(), aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, PrerequisiteResult{
+				PrerequisiteID: prerequisite.ID, TargetSnapshot: &snapshot, Observation: &observation,
+			})
+			if commitErr != nil {
+				return commitErr
+			}
+			*aggregate = resumed
+		}
 	}
 	if len(aggregate.Facts.Focus.CoverageWorkItemIDs) == 0 || len(aggregate.Facts.Focus.CoverageEvidenceBindings) == 0 {
 		return fmt.Errorf("semantic focus fixture has no current binding")
 	}
 	focus := aggregate.Facts.Focus.Normalized()
-	bindingRefs := make([]string, 0, len(focus.CoverageEvidenceBindings))
-	for _, binding := range focus.CoverageEvidenceBindings {
-		bindingRefs = append(bindingRefs, binding.ID)
-	}
-	evidenceID := common.EvidenceRecordID("semantic-focus-advance")
-	fact := runtimecontract.EvidenceFact{
-		ID: evidenceID, Kind: runtimecontract.EvidenceKindStateChange,
-		SubjectRef: "semantic-test-operation", AuthoritySnapshotID: aggregate.Decision.AuthoritySnapshot.ID,
-		DispatchID: "semantic-test-dispatch", OperationID: "semantic-test-operation",
-		Revision: nextEvidenceRevision(aggregate.EvidenceSequence + 1), Summary: "semantic focus proof committed",
-		TargetRefs: append([]string(nil), focus.TargetRefs...), BindingRefs: bindingRefs,
-		CoverageWorkItemIDs: append([]common.CoverageWorkItemID(nil), focus.CoverageWorkItemIDs...),
-		Quality:             common.EvidenceQualityValid,
-	}
-	aggregate.Facts.Evidence.Accepted = append(aggregate.Facts.Evidence.Accepted, fact)
-	aggregate.EvidenceSequence++
-	aggregate.Facts.EvidenceRevision = nextEvidenceRevision(aggregate.EvidenceSequence)
-	for idx := range aggregate.Facts.Coverage {
-		for _, coverageID := range focus.CoverageWorkItemIDs {
-			if aggregate.Facts.Coverage[idx].ID == coverageID {
-				aggregate.Facts.Coverage[idx].State = runtimecontract.RuntimeCoverageItemStateSatisfied
-			}
+	targetRefs := append([]string(nil), focus.TargetRefs...)
+	if len(targetRefs) == 0 {
+		for _, binding := range focus.CoverageEvidenceBindings {
+			targetRefs = append(targetRefs, binding.TargetRefs...)
 		}
 	}
-	advanced, err := advanceRuntimeCWIFocus(aggregate.Facts)
+	operation := runtimecontract.RuntimeOperation{
+		ID: "semantic-test-operation-" + fmt.Sprintf("%d", aggregate.StateRevision), Kind: runtimecontract.StepKindFileWrite,
+		CoverageWorkItemIDs: append([]common.CoverageWorkItemID(nil), focus.CoverageWorkItemIDs...),
+		TargetRefs:          targetRefs,
+		Parameters:          runtimeFileWriteParameters("semantic focus proof committed"),
+	}
+	candidate := runtimecontract.RuntimeCandidate{StateChange: &runtimecontract.StateChangeCandidate{Operations: []runtimecontract.StateChangingOperation{{Operation: operation}}}}
+	durable := &durableRuntimeStateRepository{aggregate: *aggregate}
+	sealed := sealCandidateForTest(t, durable, candidate)
+	operationID := runtimeTestActiveOperationID(t, sealed, 0)
+	evidence := ExecutionEvidence{
+		EventID:     "semantic-test-owner-receipt-" + sealed.ActiveDispatch.ID,
+		WorkspaceID: sealed.Facts.WorkspaceID, RunID: sealed.Facts.RunID,
+		DispatchID: sealed.ActiveDispatch.ID, AuthoritySnapshotID: sealed.ActiveDispatch.Transaction.AuthoritySnapshotID,
+		OperationID: operationID, Kind: runtimecontract.EvidenceKindStateChange, Status: ExecutionEvidenceStatusAccepted,
+	}
+	attachRuntimeTestOwnerReceipt(t, &durable.aggregate, &evidence)
+	coordinator, err := NewDispatchCoordinator(durable)
 	if err != nil {
 		return err
 	}
-	aggregate.Facts = advanced
-	if err := prepareSemanticPlanningForAdvancedFocus(aggregate); err != nil {
-		return err
-	}
-	previousSnapshot := aggregate.Decision.AuthoritySnapshot
-	facts, decision, err := ReduceRuntimeStateWithDirective(aggregate.Facts, &previousSnapshot)
+	committed, err := coordinator.commitEvidence(context.Background(), evidence)
 	if err != nil {
 		return err
 	}
-	aggregate.Facts, aggregate.Decision = facts, decision
-	expectedRevision := aggregate.StateRevision
-	aggregate.StateRevision++
-	if err := aggregate.Validate(); err != nil {
+	*aggregate = committed.Aggregate
+	value := *aggregate
+	repository.aggregate = &value
+	return nil
+}
+
+// runtimeTestAdvanceSemanticFocus completes the assessment after the real
+// receipt above. The production reducer then owns CWI settlement and focus
+// advancement; the test never injects an orphan EvidenceFact or directly
+// edits convergence state.
+func runtimeTestAdvanceSemanticFocus(t *testing.T, repository *controllerRepository, aggregate *RuntimeAggregate) error {
+	t.Helper()
+	if err := runtimeTestCommitSemanticStateChangeReceipt(t, repository, aggregate); err != nil {
 		return err
 	}
-	if err := repository.Save(context.Background(), *aggregate, expectedRevision); err != nil {
-		return err
+	if aggregate.Decision.State == runtimecontract.ConvergenceStateNeedAssessment {
+		controller, controllerErr := NewRuntimeController(repository)
+		if controllerErr != nil {
+			return controllerErr
+		}
+		prefix := "semantic-test-assessment-" + fmt.Sprintf("%d", aggregate.StateRevision)
+		if _, beginErr := controller.BeginCandidateAttemptForTest(context.Background(), aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, 0, prefix); beginErr != nil {
+			return beginErr
+		}
+		assessment := runtimecontract.RuntimeCandidate{Assessment: &runtimecontract.AssessmentCandidate{
+			FocusID: aggregate.Facts.Focus.ID, CoverageWorkItemIDs: append([]common.CoverageWorkItemID(nil), aggregate.Facts.Focus.CoverageWorkItemIDs...),
+			Disposition: runtimecontract.AssessmentDispositionSatisfied, Summary: "semantic focus proof satisfied",
+			EvidenceRefs: runtimecontract.AcceptedEvidenceRefsForFocus(aggregate.Facts),
+		}}
+		if _, acceptErr := controller.AcceptCandidateAttempt(context.Background(), aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, 0, assessment); acceptErr != nil {
+			return acceptErr
+		}
+		assessed, assessmentErr := controller.commitAssessment(context.Background(), aggregate.Facts.WorkspaceID, aggregate.Facts.RunID)
+		if assessmentErr != nil {
+			return assessmentErr
+		}
+		*aggregate = assessed
 	}
+	value := *aggregate
+	repository.aggregate = &value
 	return nil
 }

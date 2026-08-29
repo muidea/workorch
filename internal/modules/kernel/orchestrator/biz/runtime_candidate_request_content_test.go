@@ -5,6 +5,7 @@ import (
 	"errors"
 	"testing"
 
+	runtime "github.com/muidea/workorch/internal/modules/kernel/orchestrator/biz/runtime"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/repository/memory"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
@@ -87,14 +88,54 @@ func TestCandidateContentInternalEventRequiresExactlyOneFact(t *testing.T) {
 func TestRuntimeCandidateRequestContentBridgeCompletesDocumentWithoutCandidateAttempt(t *testing.T) {
 	ctx := context.Background()
 	contents := memory.NewArtifactContinuationRepository()
-	initial := runtimeTestAggregateWithSemanticPlanning(t, runtimeAggregate(t, 1))
-	state := &inMemoryRuntimeStateRepository{aggregate: &initial}
+	state := &inMemoryRuntimeStateRepository{}
 	owner := newRuntimeTestOwnerWithEvidence(RuntimeEvidenceRepositories{ArtifactContinuations: contents})
 	if err := owner.ConfigureRuntimeRepository(state); err != nil {
 		t.Fatal(err)
 	}
+	initialized, err := owner.InitializeRuntime(ctx, runtimeCandidateSealExactFileEditFacts(t, "target.txt"), runtimeDefinition(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	initial := runtimeTestPersistSealedSemanticAuthority(t, ctx, state, initialized)
+	var snapshotPrerequisite runtimecontract.RuntimePrerequisite
+	for _, pending := range initial.Facts.Prerequisites.Pending {
+		if pending.Kind == runtimecontract.PrerequisiteKindTargetSnapshot && pending.OwnerModuleID == runtimecontract.RuntimeModuleFile && pending.SubjectRef == "target.txt" {
+			snapshotPrerequisite = pending
+			break
+		}
+	}
+	if snapshotPrerequisite.ID == "" {
+		t.Fatalf("candidate request fixture has no File target-snapshot prerequisite: %+v", initial.Facts.Prerequisites.Pending)
+	}
+	snapshot := runtimecontract.TargetSnapshot{TargetRef: "target.txt", ContentHash: "candidate-request-target-v1", ContentState: runtimecontract.SnapshotContentStateComplete}
+	observation := runtimecontract.RuntimePrerequisiteObservation{
+		PrerequisiteID: snapshotPrerequisite.ID, Kind: snapshotPrerequisite.Kind, OwnerModuleID: snapshotPrerequisite.OwnerModuleID,
+		ContentHash: snapshot.ContentHash,
+		Dependencies: []runtimecontract.RuntimeFreshnessDependency{{
+			Domain: runtimecontract.RuntimeResourceWorkspaceTarget, OwnerModuleID: runtimecontract.RuntimeModuleFile,
+			SubjectRef: snapshot.TargetRef, Revision: snapshot.ContentHash,
+		}},
+	}
+	observation.ObservationID = runtimecontract.StableRuntimePrerequisiteObservationID(observation)
+	initial, err = owner.CommitRuntimePrerequisite(ctx, initial.Facts.WorkspaceID, initial.Facts.RunID, runtime.PrerequisiteResult{
+		PrerequisiteID: snapshotPrerequisite.ID, TargetSnapshot: &snapshot, Observation: &observation,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	manifest, err := runtimecontract.BuildRuntimeCandidateContractManifest(
+		initial.Decision,
+		runtimecontract.RuntimeCandidateManifestOwnerFactsFromResources(initial.Facts.Resources),
+	)
+	if err != nil {
+		if initial.Decision.Terminal != nil {
+			t.Fatalf("build candidate request manifest: %v (terminal=%+v)", err, *initial.Decision.Terminal)
+		}
+		t.Fatal(err)
+	}
 	module := newTestBiz(owner, nil, nil)
-	prepared, session, err := owner.EnsureRuntimeCandidateRequestSession(ctx, initial.Facts.WorkspaceID, initial.Facts.RunID, "stable-prefix", "manifest-v1", "")
+	prepared, session, err := owner.EnsureRuntimeCandidateRequestSession(ctx, initial.Facts.WorkspaceID, initial.Facts.RunID, "stable-prefix", manifest.Hash, "")
 	if err != nil {
 		t.Fatal(err)
 	}

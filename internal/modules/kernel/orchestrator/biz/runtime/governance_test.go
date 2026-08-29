@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/muidea/workorch/internal/pkg/common"
@@ -394,6 +395,7 @@ func TestRecordOperationGovernanceRequiredDoesNotUseExecutionRepair(t *testing.T
 	}}
 	ownerCatalog.SnapshotID = runtimecontract.StableRuntimeOperationAdmissibilitySnapshotID(ownerCatalog)
 	facts.Resources.OperationAdmissibilities = []runtimecontract.RuntimeOperationAdmissibility{ownerCatalog}
+	facts.Focus.TargetRefs = []string{"before.txt", "a.txt", "b.txt"}
 	ownerCatalogObservation := runtimecontract.RuntimePrerequisiteObservation{
 		PrerequisiteID: ownerCatalog.PrerequisiteID, Kind: runtimecontract.PrerequisiteKindOperationAdmissibility,
 		OwnerModuleID: ownerCatalog.OwnerModuleID, ContentHash: ownerCatalog.SnapshotID,
@@ -408,9 +410,8 @@ func TestRecordOperationGovernanceRequiredDoesNotUseExecutionRepair(t *testing.T
 		ID: ownerCatalog.PrerequisiteID, Kind: runtimecontract.PrerequisiteKindOperationAdmissibility,
 		OwnerModuleID: ownerCatalog.OwnerModuleID, RequiredCapabilities: append([]string(nil), ownerCatalog.OperationKinds...),
 	})
-	if _, err := controller.initialize(context.Background(), facts, controllerDefinition(), nil); err != nil {
-		t.Fatal(err)
-	}
+	initialized := runtimeTestInitializeAndSealSemanticContract(t, context.Background(), controller, facts, controllerDefinition(), nil)
+	facts = initialized.Facts
 	// Seed an active sealed dispatch with operation execution ledger.
 	if _, err := controller.BeginCandidateAttemptForTest(context.Background(), "ws-v2", "run-v2", 0, "stable-prefix"); err != nil {
 		t.Fatal(err)
@@ -439,8 +440,12 @@ func TestRecordOperationGovernanceRequiredDoesNotUseExecutionRepair(t *testing.T
 	predecessorOperationID := runtimeTestActiveOperationID(t, sealed, 0)
 	governedOperationID := runtimeTestActiveOperationID(t, sealed, 1)
 	siblingOperationID := runtimeTestActiveOperationID(t, sealed, 2)
-	sealedCatalogSnapshotID := ownerCatalog.SnapshotID
-	sealedAcquisitionBinding := ownerCatalog.AcquisitionBinding
+	sealedExecution, found := operationExecutionRecord(sealed.ActiveDispatch.OperationExecutions, predecessorOperationID)
+	if !found {
+		t.Fatal("expected sealed predecessor operation execution")
+	}
+	sealedCatalogSnapshotID := sealedExecution.AdmissibilitySnapshotID
+	sealedAcquisitionBinding := sealedExecution.AcquisitionBinding
 	sealedReplayProof := runtimecontract.RuntimeOperationReplayProof{
 		OwnerModuleID: runtimecontract.RuntimeModuleFile, OperationID: governedOperationID, TargetRefs: []string{"a.txt"},
 		BeforeHash: "before-governance", AfterHash: "after-governance",
@@ -458,8 +463,6 @@ func TestRecordOperationGovernanceRequiredDoesNotUseExecutionRepair(t *testing.T
 	}
 	for idx := range repository.aggregate.ActiveDispatch.OperationExecutions {
 		execution := &repository.aggregate.ActiveDispatch.OperationExecutions[idx]
-		execution.AdmissibilitySnapshotID = sealedCatalogSnapshotID
-		execution.AcquisitionBinding = sealedAcquisitionBinding
 		switch execution.OperationID {
 		case predecessorOperationID:
 			execution.ReplayProof = &completedReplayProof
@@ -493,8 +496,8 @@ func TestRecordOperationGovernanceRequiredDoesNotUseExecutionRepair(t *testing.T
 	predecessorReceipt := runtimecontract.RuntimeOperationReceipt{
 		ExecutionKey: predecessorExecution.ExecutionKey, OperationID: predecessorExecution.OperationID,
 		Outcome: runtimecontract.RuntimeOperationOutcomeAccepted, ObservedEffectScope: runtimecontract.RuntimeEffectWorkspaceDurable,
-		Changed: true, TargetRefs: []string{"before.txt"},
-		Evidence: runtimecontract.RuntimeOperationEvidence{Summary: "completed predecessor", ContentHash: "completed-predecessor-hash"},
+		Changed: false, TargetRefs: []string{"before.txt"},
+		Evidence: runtimecontract.RuntimeOperationEvidence{Summary: "completed non-credit predecessor", ContentHash: "completed-predecessor-hash"},
 	}
 	predecessorReceiptAggregate, _, err := controller.commitOperationReceipt(
 		context.Background(), "ws-v2", "run-v2", claimedPredecessor.ActiveDispatch.ID, predecessorExecution.Fence, predecessorReceipt,
@@ -507,15 +510,7 @@ func TestRecordOperationGovernanceRequiredDoesNotUseExecutionRepair(t *testing.T
 	// budget were committed through production transitions above; this fixture
 	// advances only the already-judged evidence marker and completed-operation
 	// index before the governed operation is claimed.
-	for idx := range predecessorReceiptAggregate.ActiveDispatch.OperationExecutions {
-		if predecessorReceiptAggregate.ActiveDispatch.OperationExecutions[idx].OperationID == predecessorOperationID {
-			predecessorReceiptAggregate.ActiveDispatch.OperationExecutions[idx].State = runtimecontract.OperationExecutionEvidenceCommitted
-		}
-	}
-	predecessorReceiptAggregate.ActiveDispatch.CompletedOperationIDs = appendNormalizedString(
-		predecessorReceiptAggregate.ActiveDispatch.CompletedOperationIDs,
-		predecessorOperationID,
-	)
+	runtimeTestCommitAcceptedReceiptEvidence(t, &predecessorReceiptAggregate, predecessorOperationID)
 	repository.aggregate = &predecessorReceiptAggregate
 	if predecessorReceiptAggregate.ActiveDispatch == nil ||
 		!containsString(predecessorReceiptAggregate.ActiveDispatch.CompletedOperationIDs, predecessorOperationID) {
@@ -654,6 +649,27 @@ func TestRecordOperationGovernanceRequiredDoesNotUseExecutionRepair(t *testing.T
 		resumeSibling.AcquisitionBinding != sourceSibling.AcquisitionBinding || resumeSibling.ReplayProof == nil ||
 		resumeSibling.ReplayProof.AfterHash != siblingReplayProof.AfterHash {
 		t.Fatalf("governance resume lost pending sibling authority: source=%+v resume=%+v", sourceSibling, resumeSibling)
+	}
+	driftedTargetResume := continued.Aggregate
+	driftedTargetActive := *continued.Aggregate.ActiveDispatch
+	driftedTargetActive.OperationTargetAuthorizations = runtimecontract.CloneRuntimeDispatchOperationTargetAuthorizations(
+		continued.Aggregate.ActiveDispatch.OperationTargetAuthorizations,
+	)
+	for idx := range driftedTargetActive.OperationTargetAuthorizations {
+		authorization := &driftedTargetActive.OperationTargetAuthorizations[idx]
+		if authorization.OperationID != governedOperationID {
+			continue
+		}
+		authorization.Target.Policy = runtimecontract.RuntimeOperationTargetPolicyExistingOwnerScope
+		authorization.Target.ExactTargetRefs = nil
+		authorization.Target.OwnerScopeTargetRefs = []string{"a.txt", "expanded.txt"}
+	}
+	driftedTargetActive.DispatchAuthorityHash = runtimecontract.StableRuntimeDispatchAuthorityHash(
+		sealedDispatchToRuntimeRecord(driftedTargetActive),
+	)
+	driftedTargetResume.ActiveDispatch = &driftedTargetActive
+	if err := driftedTargetResume.Validate(); err == nil || !strings.Contains(err.Error(), "accepted-attempt or operation governance-resume admission") {
+		t.Fatalf("governance resume target commitment drift error = %v", err)
 	}
 	driftedResume := continued.Aggregate
 	driftedActive := *continued.Aggregate.ActiveDispatch

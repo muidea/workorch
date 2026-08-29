@@ -116,7 +116,7 @@ func TestCandidateSchemaCorrectionDoesNotTreatDeclaredOptionalParameterAsForbidd
 
 func TestCandidateCorrectionFrontierRequiresAlternativeManagedValidationRecipe(t *testing.T) {
 	aggregate := validationAggregate(t)
-	candidate := validationCandidate()
+	candidate := runtimeTestBindCandidateToCurrentFocus(t, aggregate, validationCandidate())
 	manifest, err := runtimecontract.BuildRuntimeCandidateContractManifest(
 		aggregate.Decision,
 		runtimecontract.RuntimeCandidateManifestOwnerFactsFromContext(runtimecontract.RuntimeCandidateContextForDecision(aggregate.Facts, aggregate.Decision, nil)),
@@ -148,6 +148,18 @@ func TestCandidateCorrectionFrontierRequiresAlternativeManagedValidationRecipe(t
 	withAlternative = withAlternative.Normalized()
 	withAlternative.Hash = runtimecontract.StableRuntimeCandidateContractManifestHash(withAlternative)
 	candidate = runtimeTestMustDeriveCandidateForManifest(t, withAlternative, candidate)
+	alternativeCandidate := candidate
+	alternativeCandidate.Validation = &runtimecontract.ValidationCandidate{Operations: append([]runtimecontract.ValidationOperation(nil), candidate.Validation.Operations...)}
+	alternativeCandidate.Validation.Operations[0].Operation.Parameters = candidateCorrectionSetStringParameter(
+		alternativeCandidate.Validation.Operations[0].Operation.Parameters, "recipeId", "test-managed-validation-alternative-witness",
+	)
+	alternativeCandidate, deriveErr := runtimecontract.DeriveRuntimeCandidateOperationAuthority(withAlternative, alternativeCandidate)
+	if deriveErr != nil {
+		t.Fatalf("derive alternative validation recipe candidate: %v", deriveErr)
+	}
+	if validateErr := runtimecontract.ValidateRuntimeCandidateAgainstManifest(withAlternative, alternativeCandidate); validateErr != nil {
+		t.Fatalf("validate alternative validation recipe candidate: %v", validateErr)
+	}
 	frontier.candidate = &candidate
 	failure.Diagnostic.ManifestHash = withAlternative.Hash
 	failure.Diagnostic.RejectedShapeHash = runtimecontract.StableRuntimeCandidateSemanticShape(candidate)
@@ -253,7 +265,8 @@ func TestCandidateCorrectionFrontierSealsOnlyContractDeclaredClosedParameter(t *
 	fileListAuthorization.RequireOneOfParameters = contract.RequireOneOfParameters
 	fileListAuthorization.TargetCardinality = descriptor.TargetCardinality
 	fileListAuthorization.RequireTargetRefs = contract.RequireTargetRefs
-	fileListAuthorization.RequiredOperationFields = []string{"bindingRefs", "kind", "parameters"}
+	fileListAuthorization.RequiredOperationFields = []string{"kind", "parameters"}
+	fileListAuthorization.BindingAuthorizations = []runtimecontract.RuntimeOperationBindingAuthorization{{}}
 	fileListAuthorization.ForbiddenParameters = contract.ForbiddenParameters
 	fileListAuthorization.Variants = contract.Variants
 	fileListAuthorization.ValidationRecipes = nil
@@ -265,10 +278,21 @@ func TestCandidateCorrectionFrontierSealsOnlyContractDeclaredClosedParameter(t *
 	recursive := false
 	candidate := runtimecontract.RuntimeCandidate{Validation: &runtimecontract.ValidationCandidate{Operations: []runtimecontract.ValidationOperation{{Operation: runtimecontract.RuntimeOperation{
 		ID: "list-workspace", Kind: runtimecontract.StepKindFileList,
-		BindingRefs: []string{"binding/test/runtime/focus-1/cwi-1"},
-		Parameters:  []runtimecontract.OperationParameter{{Name: "recursive", Boolean: &recursive}},
+		Parameters: []runtimecontract.OperationParameter{{Name: "recursive", Boolean: &recursive}},
 	}}}}}
 	candidate = runtimeTestMustDeriveCandidateForManifest(t, manifest, candidate)
+	alternativeCandidate := candidate
+	alternativeCandidate.Validation = &runtimecontract.ValidationCandidate{Operations: append([]runtimecontract.ValidationOperation(nil), candidate.Validation.Operations...)}
+	alternativeCandidate.Validation.Operations[0].Operation.Parameters = candidateCorrectionSetBooleanParameter(
+		alternativeCandidate.Validation.Operations[0].Operation.Parameters, "recursive", true,
+	)
+	alternativeCandidate, deriveErr := runtimecontract.DeriveRuntimeCandidateOperationAuthority(manifest, alternativeCandidate)
+	if deriveErr != nil {
+		t.Fatalf("derive closed-parameter alternative candidate: %v", deriveErr)
+	}
+	if validateErr := runtimecontract.ValidateRuntimeCandidateAgainstManifest(manifest, alternativeCandidate); validateErr != nil {
+		t.Fatalf("validate closed-parameter alternative candidate: %v", validateErr)
+	}
 	failure := &runtimecontract.RuntimeCandidateFailure{
 		Class: runtimecontract.RuntimeCandidateFailureClassContract,
 		Code:  candidateAdmissionCodeReplaysRejectedShape, Signature: "closed-parameter-replay", Reason: "replays rejected closed parameter",

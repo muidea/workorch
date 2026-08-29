@@ -3,8 +3,6 @@ package workorchruntimecontract
 import (
 	"encoding/json"
 	"testing"
-
-	"github.com/muidea/workorch/internal/pkg/common"
 )
 
 func TestValidateRuntimeOperationGovernanceExecutionBindingsRequiresExactResumeProjection(t *testing.T) {
@@ -240,16 +238,9 @@ func runtimeOperationGovernanceLineageFixture(t *testing.T) (RuntimeOperationGov
 		t.Fatalf("governance binding fixture: %v", err)
 	}
 
-	evidence := EvidenceFact{
-		ID:                  common.EvidenceRecordID("governance-resolution:" + string(grant.ResolutionID) + ":" + binding.GovernanceSnapshotID),
-		Kind:                EvidenceKindGovernance,
-		SubjectRef:          binding.SubjectRef,
-		SourceRef:           "governance-resolution/" + string(grant.ResolutionID),
-		AuthoritySnapshotID: binding.GovernanceSnapshotID,
-		DispatchID:          binding.GovernanceDispatchID,
-		Summary:             resolution.Summary,
-		ContentHash:         resolution.ResolutionHash,
-		EvidenceRefs:        append([]string(nil), grant.EvidenceRefs...),
+	evidence, err := RuntimeGovernanceEvidenceFactForResolution(ownerResolution, "runtime-evidence-00000000000000000001")
+	if err != nil {
+		t.Fatalf("governance evidence fixture: %v", err)
 	}
 	return binding, execution, resolution, evidence
 }

@@ -173,19 +173,6 @@ func TestReduceRuntimeStateWithDirectiveRetiresHistoricalSelectionBeforeCurrentF
 	}
 }
 
-func TestPreflightRuntimeFactsReacquiresFailureTargetWhenTypedFailureChanges(t *testing.T) {
-	requirement := runtimecontract.RuntimeRequirement{Kind: runtimecontract.PrerequisiteKindFailureTarget, Scope: runtimecontract.RuntimePrerequisiteScopeGlobal, OwnerModuleID: runtimecontract.RuntimeModuleOrchestrator}
-	facts := runtimecontract.RuntimeFacts{
-		Failure:       &runtimecontract.FailureFact{Signature: "failure-v2", TargetRefs: []string{"next.go"}},
-		Resources:     runtimecontract.RuntimeResourceFacts{FailureTarget: &runtimecontract.FailureTarget{Signature: "failure-v1", TargetRefs: []string{"old.go"}}},
-		Prerequisites: runtimecontract.PrerequisiteState{Satisfied: []runtimecontract.RuntimePrerequisite{{ID: runtimePrerequisiteID(requirement), Kind: runtimecontract.PrerequisiteKindFailureTarget, OwnerModuleID: runtimecontract.RuntimeModuleOrchestrator}}},
-	}
-	prepared := PreflightRuntimeFacts(facts, []runtimecontract.RuntimeRequirement{requirement})
-	if len(prepared.Prerequisites.Pending) != 1 || prepared.Prerequisites.Pending[0].Kind != runtimecontract.PrerequisiteKindFailureTarget || len(prepared.Prerequisites.Satisfied) != 0 {
-		t.Fatalf("changed failure target did not re-enter acquisition: %+v", prepared.Prerequisites)
-	}
-}
-
 func TestReduceRuntimeStateWithDirectiveReactivatesRetiredCanonicalPendingFocusPrerequisite(t *testing.T) {
 	facts := validationFacts()
 	facts.Focus = runtimecontract.CoverageFocus{
@@ -280,20 +267,6 @@ func TestReduceRuntimeStateWithDirectiveReactivatesRetiredCanonicalPendingFocusP
 	}
 	if _, _, err := ReduceRuntimeStateWithDirective(malformed, nil); err == nil {
 		t.Fatal("malformed retired prerequisite was hidden by canonical pending reactivation")
-	}
-}
-
-func TestCommitPrerequisiteResultRejectsFailureTargetOutsideCurrentTypedFailure(t *testing.T) {
-	requirement := runtimecontract.RuntimeRequirement{Kind: runtimecontract.PrerequisiteKindFailureTarget, Scope: runtimecontract.RuntimePrerequisiteScopeGlobal, OwnerModuleID: runtimecontract.RuntimeModuleOrchestrator}
-	facts := runtimecontract.RuntimeFacts{
-		Failure:       &runtimecontract.FailureFact{Signature: "failure-v2", TargetRefs: []string{"next.go"}},
-		Prerequisites: runtimecontract.PrerequisiteState{Pending: []runtimecontract.RuntimePrerequisite{{ID: runtimePrerequisiteID(requirement), Kind: requirement.Kind, Scope: requirement.Scope, OwnerModuleID: requirement.OwnerModuleID}}},
-	}
-	if _, err := CommitPrerequisiteResult(facts, PrerequisiteResult{PrerequisiteID: runtimePrerequisiteID(requirement), FailureTarget: &runtimecontract.FailureTarget{Signature: "failure-v1", TargetRefs: []string{"old.go"}}}); err == nil {
-		t.Fatal("failure target with a different typed failure identity was accepted")
-	}
-	if facts.Resources.FailureTarget != nil || len(facts.Prerequisites.Pending) != 1 {
-		t.Fatalf("rejected local mapping mutated source facts: %+v", facts)
 	}
 }
 
@@ -627,7 +600,6 @@ func TestPreflightRuntimeFactsChecksAllRuntimeManagedPrerequisites(t *testing.T)
 	facts.Failure = &runtimecontract.FailureFact{Signature: "failure-1", TargetRefs: []string{"main.go"}}
 	requirements := []runtimecontract.RuntimeRequirement{
 		{Kind: runtimecontract.PrerequisiteKindManifest},
-		{Kind: runtimecontract.PrerequisiteKindFailureTarget},
 		{Kind: runtimecontract.PrerequisiteKindCapability, CapabilityClass: runtimecontract.RuntimeCapabilityClassValidation, RequiredCapabilities: []string{"shell/command"}},
 		{Kind: runtimecontract.PrerequisiteKindValidationScratch},
 		{Kind: runtimecontract.PrerequisiteKindProviderCeiling, MinimumBytes: 96 * 1024},
@@ -641,8 +613,6 @@ func TestPreflightRuntimeFactsChecksAllRuntimeManagedPrerequisites(t *testing.T)
 		switch prerequisite.Kind {
 		case runtimecontract.PrerequisiteKindManifest:
 			result.Manifest = &runtimecontract.WorkspaceManifest{Revision: "manifest-1"}
-		case runtimecontract.PrerequisiteKindFailureTarget:
-			result.FailureTarget = &runtimecontract.FailureTarget{Signature: "failure-1", TargetRefs: []string{"main.go"}}
 		case runtimecontract.PrerequisiteKindCapability:
 			result.Capabilities = &runtimecontract.RuntimeCapabilities{StateChangeKinds: []string{"patch/apply"}, ValidationKinds: []string{"shell/command"}}
 		case runtimecontract.PrerequisiteKindValidationScratch:

@@ -92,6 +92,8 @@ func TestRuntimeDispatchRecordValidateIntrinsicRejectsDuplicateCompletedOperatio
 		dispatch.OperationExecutions[0].ClaimedAt = RuntimeOperationClaimMarkerInitial
 		dispatch.OperationExecutions[0].OwnerReceiptRef = "receipt://op-1"
 		dispatch.OperationExecutions[0].OwnerReceiptHash = "receipt-hash-1"
+		dispatch.OperationExecutions[0].EvidenceFactID = "evidence-op-1"
+		dispatch.OperationExecutions[0].EvidenceFactHash = "evidence-hash-1"
 		if err := dispatch.ValidateIntrinsic(); err == nil || !strings.Contains(err.Error(), "completed marker/evidence state mismatch") {
 			t.Fatalf("unmarked evidence commit error = %v", err)
 		}
@@ -320,6 +322,7 @@ func runtimeDispatchIntrinsicFixture(t *testing.T, attempt int) RuntimeDispatchR
 			Target: RuntimeOperationTargetAuthorization{Policy: RuntimeOperationTargetPolicyExactTarget, ExactTargetRefs: []string{"target.txt"}},
 		}},
 		State:                  RuntimeDispatchStateSealed,
+		CoverageBindingHash:    StableRuntimeCoverageEvidenceBindingSnapshotHash(nil),
 		OperationExecutions:    []RuntimeOperationExecutionRecord{execution},
 		OperationAuthorityHash: StableRuntimeOperationExecutionAuthoritiesHash([]RuntimeOperationExecutionRecord{execution}),
 	}
@@ -342,6 +345,18 @@ func runtimeManagedValidationDispatchIntrinsicFixture(t *testing.T) RuntimeDispa
 		Parameters: []OperationParameter{{Name: "recipeId", String: &recipeID}},
 	}
 	dispatch.Candidate = RuntimeCandidate{Validation: &ValidationCandidate{Operations: []ValidationOperation{{Operation: operation}}}}
+	binding := CoverageEvidenceBinding{
+		ID: "binding-1", CoverageWorkItemID: "cwi-1", FocusID: dispatch.Transaction.FocusID,
+		DefinitionRevision: dispatch.Transaction.DefinitionRevision,
+		Proofs: []CoverageEvidenceProof{{
+			EvidenceKind: EvidenceKindValidation, RequiredEffectScopes: []RuntimeEffectScope{RuntimeEffectEphemeralSession},
+			AllowedOperationKinds: []string{RuntimeBlockKindManagedValidationSession}, ValidationRecipeID: recipeID,
+		}},
+		TargetRefs: []string{"target.txt"}, DeclarationRef: "test/runtime-dispatch-intrinsic",
+	}.Normalized()
+	binding.Hash = StableCoverageEvidenceBindingHash(binding)
+	dispatch.CoverageBindings = []CoverageEvidenceBinding{binding}
+	dispatch.CoverageBindingHash = StableRuntimeCoverageEvidenceBindingSnapshotHash(dispatch.CoverageBindings)
 	dispatch.OperationTargetAuthorizations = []RuntimeDispatchOperationTargetAuthorization{{
 		OperationID: operation.ID, OperationHash: StableRuntimeOperationHash(operation), RequireTargets: true,
 		Target: RuntimeOperationTargetAuthorization{Policy: RuntimeOperationTargetPolicyExactTarget, ExactTargetRefs: []string{"target.txt"}},
@@ -371,5 +386,7 @@ func runtimeDispatchMarkCommittedForTest(dispatch *RuntimeDispatchRecord) {
 	dispatch.OperationExecutions[0].Fence = 1
 	dispatch.OperationExecutions[0].OwnerReceiptRef = "receipt://op-1"
 	dispatch.OperationExecutions[0].OwnerReceiptHash = "receipt-hash-1"
+	dispatch.OperationExecutions[0].EvidenceFactID = "evidence-op-1"
+	dispatch.OperationExecutions[0].EvidenceFactHash = "evidence-hash-1"
 	dispatch.OperationExecutions[0].ClaimedAt = RuntimeOperationClaimMarkerInitial
 }

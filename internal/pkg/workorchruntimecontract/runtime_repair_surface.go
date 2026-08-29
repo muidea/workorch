@@ -10,6 +10,8 @@ import (
 	"github.com/muidea/workorch/internal/pkg/common"
 )
 
+const RuntimeValidationFailureObservationMaxCandidateTargetRefs = 8
+
 // RuntimeValidationFailureObservation is the bounded fact emitted by a
 // validation capability.  CandidateTargetRefs are deliberately only a
 // candidate repair surface: they do not grant an operation or a Runtime
@@ -43,7 +45,7 @@ func (o RuntimeValidationFailureObservation) Normalized() RuntimeValidationFailu
 
 func (o RuntimeValidationFailureObservation) Validate() error {
 	o = o.Normalized()
-	if o.WorkspaceID == "" || o.RunID == "" || o.AuthoritySnapshotID == "" || o.DispatchID == "" || o.OperationID == "" || o.FailureSignature == "" || o.TargetRole == "" || o.DiagnosticClass == "" || len(o.CandidateTargetRefs) == 0 || len(o.ValidationScopeTargetRefs) == 0 || o.DiagnosticHash == "" {
+	if o.WorkspaceID == "" || o.RunID == "" || o.AuthoritySnapshotID == "" || o.DispatchID == "" || o.OperationID == "" || o.FailureSignature == "" || o.TargetRole == "" || o.DiagnosticClass == "" || len(o.CandidateTargetRefs) == 0 || len(o.CandidateTargetRefs) > RuntimeValidationFailureObservationMaxCandidateTargetRefs || len(o.ValidationScopeTargetRefs) == 0 || o.DiagnosticHash == "" {
 		return fmt.Errorf("validation failure observation requires scope, causation, role, diagnostic and bounded targets")
 	}
 	if !runtimeTargetRefsSubset(o.CandidateTargetRefs, o.ValidationScopeTargetRefs) {
@@ -144,6 +146,8 @@ func (r RuntimeRepairSurfaceConfirmationRecord) Clone() RuntimeRepairSurfaceConf
 func ValidateRuntimeRepairSurfaceConfirmationRecords(values []RuntimeRepairSurfaceConfirmationRecord) error {
 	exact := make(map[string]struct{}, len(values))
 	identity := make(map[string]struct{}, len(values))
+	sequenceSubjects := make(map[string]string, len(values))
+	terminalSequence := make(map[string]int, len(values))
 	for idx, record := range values {
 		if err := record.Validate(); err != nil {
 			return fmt.Errorf("runtime repair surface confirmation %d: %w", idx, err)
@@ -155,10 +159,27 @@ func ValidateRuntimeRepairSurfaceConfirmationRecords(values []RuntimeRepairSurfa
 		if _, duplicate := identity[record.IdentitySignature]; duplicate {
 			return fmt.Errorf("runtime repair surface confirmations conflict for owner observation %q", record.IdentitySignature)
 		}
+		sequenceKey := runtimeRepairSurfaceObservationSequenceKey(record.Confirmation.Observation)
+		if subject, found := sequenceSubjects[sequenceKey]; found && subject != record.Confirmation.SubjectRef {
+			return fmt.Errorf("runtime repair surface confirmation %d changes subject within one validation observation", idx)
+		}
+		if terminalAt, found := terminalSequence[sequenceKey]; found {
+			return fmt.Errorf("runtime repair surface confirmation %d follows terminal response %d for one validation observation", idx, terminalAt)
+		}
+		sequenceSubjects[sequenceKey] = record.Confirmation.SubjectRef
+		if record.Confirmation.Disposition == RuntimeRepairSurfaceConfirmed || record.Confirmation.Disposition == RuntimeRepairSurfaceRejected {
+			terminalSequence[sequenceKey] = idx
+		}
 		exact[record.Signature] = struct{}{}
 		identity[record.IdentitySignature] = struct{}{}
 	}
 	return nil
+}
+
+func runtimeRepairSurfaceObservationSequenceKey(value RuntimeValidationFailureObservation) string {
+	encoded, _ := json.Marshal(value.Normalized())
+	digest := sha256.Sum256(encoded)
+	return hex.EncodeToString(digest[:])
 }
 
 // StableRuntimeRepairSurfaceConfirmationHash returns the exact confirmation
@@ -231,8 +252,8 @@ func (c RuntimeRepairSurfaceConfirmation) Validate() error {
 	if err := c.Observation.Validate(); err != nil {
 		return err
 	}
-	if c.OwnerModuleID == "" || c.SubjectRef == "" || c.Disposition == "" || c.ObservedRevision == "" {
-		return fmt.Errorf("repair surface confirmation requires owner, subject, disposition and revision")
+	if c.OwnerModuleID != RuntimeModuleFile || c.SubjectRef == "" || c.Disposition == "" || c.ObservedRevision == "" {
+		return fmt.Errorf("repair surface confirmation requires File owner, subject, disposition and revision")
 	}
 	switch c.Disposition {
 	case RuntimeRepairSurfaceConfirmed:

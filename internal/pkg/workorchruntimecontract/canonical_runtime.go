@@ -81,7 +81,15 @@ type EvidenceLedger struct {
 }
 
 type RuntimeAssessmentFact struct {
-	ID                  string
+	ID string
+	// Revision is the one global Runtime evidence-ledger position consumed by
+	// this committed assessment dispatch.  Assessments remain their own typed
+	// SM-2 ledger; this field only makes their ordering share the same
+	// restart-verifiable sequence as operation and governance evidence.
+	Revision string
+	// AdjudicationHash is the fact side of the committed assessment dispatch's
+	// post-seal canonical classification proof.
+	AdjudicationHash    string
 	FocusID             string
 	SliceID             string
 	Scope               string
@@ -103,8 +111,12 @@ type RuntimeAssessmentFact struct {
 }
 
 type EvidenceFact struct {
-	ID                  common.EvidenceRecordID
-	Kind                string
+	ID   common.EvidenceRecordID
+	Kind string
+	// FocusID is the reducer-derived immutable SM-2 focus identity of an
+	// ordinary operation receipt fact. It is copied from the owning sealed
+	// dispatch and never inferred from the mutable current-focus projection.
+	FocusID             string
 	SubjectRef          string
 	SourceRef           string
 	AuthoritySnapshotID string
@@ -117,6 +129,7 @@ type EvidenceFact struct {
 	FailureMessage      string
 	Summary             string
 	ContentHash         string
+	ContentAddress      *RuntimeEvidenceContentAddress
 	ExitCode            *int64
 	EvidenceRefs        []string
 	// TargetRefs are the sealed operation targets that produced this fact. They
@@ -137,6 +150,7 @@ type EvidenceFact struct {
 type RuntimeOperationEvidence struct {
 	Summary        string
 	ContentHash    string
+	ContentAddress *RuntimeEvidenceContentAddress
 	ExitCode       *int64
 	EvidenceRefs   []string
 	Quality        common.EvidenceQuality
@@ -145,6 +159,39 @@ type RuntimeOperationEvidence struct {
 	EvidenceTags   []string
 	Validation     *RuntimeValidationObservation
 }
+
+type RuntimeEvidenceDigestAlgorithm string
+
+const RuntimeEvidenceDigestSHA256 RuntimeEvidenceDigestAlgorithm = "sha256"
+
+// RuntimeEvidenceContentAddress binds a normalized evidence digest to the
+// capability owner's opaque retrieval reference. Runtime validates the typed
+// digest/ref relation and never parses an owner-specific URI scheme.
+type RuntimeEvidenceContentAddress struct {
+	Algorithm RuntimeEvidenceDigestAlgorithm
+	Digest    string
+	Ref       string
+}
+
+func (a RuntimeEvidenceContentAddress) Normalized() RuntimeEvidenceContentAddress {
+	a.Algorithm = RuntimeEvidenceDigestAlgorithm(strings.TrimSpace(string(a.Algorithm)))
+	a.Digest = strings.ToLower(strings.TrimSpace(a.Digest))
+	a.Ref = strings.TrimSpace(a.Ref)
+	return a
+}
+
+func (a RuntimeEvidenceContentAddress) Validate() error {
+	a = a.Normalized()
+	if a.Algorithm != RuntimeEvidenceDigestSHA256 || len(a.Digest) != sha256.Size*2 || a.Ref == "" {
+		return fmt.Errorf("runtime evidence content address requires sha256 digest and opaque ref")
+	}
+	if _, err := hex.DecodeString(a.Digest); err != nil {
+		return fmt.Errorf("runtime evidence content address digest must be lowercase hex: %w", err)
+	}
+	return nil
+}
+
+func (a RuntimeEvidenceContentAddress) Clone() RuntimeEvidenceContentAddress { return a.Normalized() }
 
 // RuntimeValidationObservation is an owner-reported, domain-neutral summary of
 // validation work. Capability owners may derive it from tool-specific output,
@@ -331,6 +378,20 @@ func ValidateRuntimeFailureGovernanceDependency(failure FailureFact) error {
 	return nil
 }
 
+const (
+	// RuntimeFailureTargetObservationMaxTargetRefs is the shared hard bound for
+	// direct owner-authored target observations. Producers and ingresses must
+	// reject an overflow; truncation would turn an unvalidated subset into
+	// repair authority.
+	RuntimeFailureTargetObservationMaxTargetRefs = 16
+
+	// RuntimeFailureTargetDiagnosticReceiptEvidence identifies the generic
+	// descriptor-authorized direct target-observation protocol. The observation
+	// remains a capability-owner fact and must bind the exact persisted evidence
+	// carried by the same receipt.
+	RuntimeFailureTargetDiagnosticReceiptEvidence = "receipt_evidence_failure_target"
+)
+
 // RuntimeFailureTargetObservation is a bounded, owner-authored observation of
 // the repair target behind an execution failure. It is data only: the
 // Orchestrator decides whether it is compatible with the current Focus and
@@ -341,6 +402,11 @@ type RuntimeFailureTargetObservation struct {
 	TargetRole       string   `json:"targetRole"`
 	ObservedRevision string   `json:"observedRevision"`
 	TargetRefs       []string `json:"targetRefs"`
+	// CatalogDependency is required by the descriptor-authorized
+	// receipt-evidence protocol and binds the observation to one exact owner
+	// catalog dependency. File-confirmed observations use their separate typed
+	// confirmation lineage and leave this nil.
+	CatalogDependency *RuntimeFreshnessDependency `json:"catalogDependency,omitempty"`
 	// Structured observations bind a target claim to the tool output from
 	// which its owner derived it. Capability-specific admission decides whether
 	// these fields are mandatory for a particular owner protocol.
@@ -355,6 +421,10 @@ func (o RuntimeFailureTargetObservation) Normalized() RuntimeFailureTargetObserv
 	o.TargetRole = strings.TrimSpace(o.TargetRole)
 	o.ObservedRevision = strings.TrimSpace(o.ObservedRevision)
 	o.TargetRefs = normalizeStrings(o.TargetRefs)
+	if o.CatalogDependency != nil {
+		dependency := o.CatalogDependency.Normalized()
+		o.CatalogDependency = &dependency
+	}
 	o.DiagnosticClass = strings.TrimSpace(o.DiagnosticClass)
 	o.EvidenceRefs = normalizeStrings(o.EvidenceRefs)
 	o.ContentHash = strings.TrimSpace(o.ContentHash)
@@ -363,8 +433,8 @@ func (o RuntimeFailureTargetObservation) Normalized() RuntimeFailureTargetObserv
 
 func (o RuntimeFailureTargetObservation) Validate() error {
 	o = o.Normalized()
-	if o.OwnerModuleID == "" || o.SubjectRef == "" || o.TargetRole == "" || o.ObservedRevision == "" || len(o.TargetRefs) == 0 {
-		return fmt.Errorf("runtime failure target observation requires owner, subject, role, revision and targets")
+	if o.OwnerModuleID == "" || o.SubjectRef == "" || o.TargetRole == "" || o.ObservedRevision == "" || len(o.TargetRefs) == 0 || len(o.TargetRefs) > RuntimeFailureTargetObservationMaxTargetRefs {
+		return fmt.Errorf("runtime failure target observation requires owner, subject, role, revision and 1..%d bounded targets", RuntimeFailureTargetObservationMaxTargetRefs)
 	}
 	structured := o.DiagnosticClass != "" || len(o.EvidenceRefs) != 0 || o.ContentHash != ""
 	if structured && (o.DiagnosticClass == "" || len(o.EvidenceRefs) == 0 || len(o.ContentHash) != sha256.Size*2) {
@@ -375,6 +445,11 @@ func (o RuntimeFailureTargetObservation) Validate() error {
 			return fmt.Errorf("runtime failure target observation content hash must be hex: %w", err)
 		}
 	}
+	if o.CatalogDependency != nil {
+		if err := o.CatalogDependency.Validate(); err != nil {
+			return fmt.Errorf("runtime failure target catalog dependency: %w", err)
+		}
+	}
 	return nil
 }
 
@@ -382,6 +457,10 @@ func (o RuntimeFailureTargetObservation) Clone() RuntimeFailureTargetObservation
 	o = o.Normalized()
 	o.TargetRefs = append([]string(nil), o.TargetRefs...)
 	o.EvidenceRefs = append([]string(nil), o.EvidenceRefs...)
+	if o.CatalogDependency != nil {
+		dependency := o.CatalogDependency.Normalized()
+		o.CatalogDependency = &dependency
+	}
 	return o
 }
 
@@ -420,7 +499,6 @@ const (
 	PrerequisiteKindManifest          PrerequisiteKind = "manifest"
 	PrerequisiteKindTargetSnapshot    PrerequisiteKind = "target_snapshot"
 	PrerequisiteKindTargetSelection   PrerequisiteKind = "target_selection"
-	PrerequisiteKindFailureTarget     PrerequisiteKind = "failure_target"
 	PrerequisiteKindCapability        PrerequisiteKind = "capability"
 	PrerequisiteKindCapabilityState   PrerequisiteKind = "capability_state"
 	PrerequisiteKindValidationScratch PrerequisiteKind = "validation_scratch"
@@ -430,6 +508,20 @@ const (
 	// a candidate or an execution receipt.
 	PrerequisiteKindOperationAdmissibility PrerequisiteKind = "operation_admissibility"
 )
+
+// RuntimePrerequisiteKindSupported is the closed production prerequisite
+// inventory. Unknown and retired kinds are rejected instead of being decoded
+// into a dormant resolver path.
+func RuntimePrerequisiteKindSupported(kind PrerequisiteKind) bool {
+	switch PrerequisiteKind(strings.TrimSpace(string(kind))) {
+	case PrerequisiteKindManifest, PrerequisiteKindTargetSnapshot, PrerequisiteKindTargetSelection,
+		PrerequisiteKindCapability, PrerequisiteKindCapabilityState, PrerequisiteKindValidationScratch,
+		PrerequisiteKindProviderCeiling, PrerequisiteKindOperationAdmissibility:
+		return true
+	default:
+		return false
+	}
+}
 
 type RuntimePrerequisite struct {
 	ID                          string
@@ -1422,7 +1514,11 @@ type RequiredOutputContract struct {
 	TargetRefs            []string
 	// RepairClosureID binds this action-level output to the persisted SM-2
 	// repair objective. It is empty for ordinary, non-repair decisions.
-	RepairClosureID           string
+	RepairClosureID string
+	// RepairPurpose is the typed SM-2 purpose copied into the pre-seal
+	// candidate manifest. It makes an admission-time repair commitment
+	// mandatory without consulting a later mutable directive.
+	RepairPurpose             RuntimeDispatchRepairPurpose
 	PrerequisiteIDs           []string
 	RequiredOperationSequence []RuntimeRequiredOperationVariant
 }
@@ -1703,6 +1799,9 @@ func (f RuntimeFacts) Validate() error {
 	activePrerequisites := append(append([]RuntimePrerequisite(nil), f.Prerequisites.Pending...), f.Prerequisites.Satisfied...)
 	activeIDs := make(map[string]struct{}, len(activePrerequisites))
 	for _, prerequisite := range activePrerequisites {
+		if !RuntimePrerequisiteKindSupported(prerequisite.Kind) {
+			return fmt.Errorf("runtime prerequisite %q has unsupported kind %q", prerequisite.ID, prerequisite.Kind)
+		}
 		if prerequisite.Scope == RuntimePrerequisiteScopeFocus && prerequisite.FocusID != f.Focus.ID {
 			return fmt.Errorf("runtime active focus-scoped prerequisite %q is bound to focus %q instead of current focus %q", prerequisite.ID, prerequisite.FocusID, f.Focus.ID)
 		}
@@ -1710,6 +1809,9 @@ func (f RuntimeFacts) Validate() error {
 	}
 	retiredIDs := make(map[string]RuntimePrerequisite, len(f.Prerequisites.Retired))
 	for _, prerequisite := range f.Prerequisites.Retired {
+		if !RuntimePrerequisiteKindSupported(prerequisite.Kind) {
+			return fmt.Errorf("runtime retired prerequisite %q has unsupported kind %q", prerequisite.ID, prerequisite.Kind)
+		}
 		if _, active := activeIDs[prerequisite.ID]; active {
 			return fmt.Errorf("runtime prerequisite %q cannot be both active and retired", prerequisite.ID)
 		}
@@ -1778,8 +1880,8 @@ func (f RuntimeFacts) Validate() error {
 		}
 	}
 	for _, assessment := range f.Assessments {
-		if assessment.ID == "" || assessment.FocusID == "" {
-			return fmt.Errorf("runtime assessment fact requires identity and focus")
+		if assessment.ID == "" || assessment.Revision == "" || assessment.FocusID == "" {
+			return fmt.Errorf("runtime assessment fact requires identity, revision and focus")
 		}
 		if err := assessment.Disposition.Validate(); err != nil {
 			return fmt.Errorf("runtime assessment fact %s canonical disposition: %w", assessment.ID, err)
@@ -1800,7 +1902,14 @@ func AcceptedEvidenceRefsForFocus(facts RuntimeFacts) []string {
 	facts = facts.Normalized()
 	ret := []string{}
 	for _, evidence := range facts.Evidence.Accepted {
-		if len(facts.Focus.RequiredEvidenceKinds) > 0 && !EvidenceAppliesToCurrentFocus(facts, evidence) {
+		credited := false
+		for _, coverageID := range facts.Focus.CoverageWorkItemIDs {
+			if EvidenceAppliesToCoverageWorkItem(facts.Focus, evidence, coverageID) {
+				credited = true
+				break
+			}
+		}
+		if len(facts.Focus.RequiredEvidenceKinds) > 0 && !credited {
 			continue
 		}
 		ret = append(ret, string(evidence.ID), evidence.SourceRef)
@@ -2037,11 +2146,17 @@ func (c RequiredOutputContract) Normalized() RequiredOutputContract {
 	c.CoverageWorkItemIDs = normalizeCoverageWorkItemIDs(c.CoverageWorkItemIDs)
 	c.TargetRefs = normalizeStrings(c.TargetRefs)
 	c.RepairClosureID = strings.TrimSpace(c.RepairClosureID)
+	c.RepairPurpose = RuntimeDispatchRepairPurpose(strings.TrimSpace(string(c.RepairPurpose)))
 	c.PrerequisiteIDs = normalizeStrings(c.PrerequisiteIDs)
 	c.RequiredOperationSequence = normalizeRequiredOperationVariants(c.RequiredOperationSequence)
 	return c
 }
 func (c RequiredOutputContract) Validate() error {
+	if c.RepairPurpose != "" {
+		if c.RepairPurpose != RuntimeDispatchRepairPurposeConfirmedFileValidation || strings.TrimSpace(c.RepairClosureID) == "" {
+			return fmt.Errorf("required output has invalid repair purpose %q", c.RepairPurpose)
+		}
+	}
 	return validateRequiredOperationVariants(c.RequiredOperationSequence)
 }
 
@@ -2133,7 +2248,7 @@ func ValidateRequiredOutputForState(state ConvergenceState, contract RequiredOut
 		return err
 	}
 	contract = contract.Normalized()
-	empty := len(contract.AcceptedKinds)+len(contract.AcceptedOperationVariants)+len(contract.RequiredEvidenceKinds)+len(contract.CoverageWorkItemIDs)+len(contract.TargetRefs)+len(contract.PrerequisiteIDs)+len(contract.RequiredOperationSequence)+len(contract.AcceptedEffectScopes)+len(contract.RequiredEffectScopes) == 0 && contract.RepairClosureID == ""
+	empty := len(contract.AcceptedKinds)+len(contract.AcceptedOperationVariants)+len(contract.RequiredEvidenceKinds)+len(contract.CoverageWorkItemIDs)+len(contract.TargetRefs)+len(contract.PrerequisiteIDs)+len(contract.RequiredOperationSequence)+len(contract.AcceptedEffectScopes)+len(contract.RequiredEffectScopes) == 0 && contract.RepairClosureID == "" && contract.RepairPurpose == ""
 	switch state {
 	case ConvergenceStateComplete, ConvergenceStateFailed:
 		if !empty {
@@ -2191,6 +2306,7 @@ func StableRequiredOutputHash(contract RequiredOutputContract) string {
 	writeHashStrings(h, coverageIDs)
 	writeHashStrings(h, contract.TargetRefs)
 	writeHashString(h, contract.RepairClosureID)
+	writeHashString(h, string(contract.RepairPurpose))
 	writeHashStrings(h, contract.PrerequisiteIDs)
 	for _, requirement := range contract.RequiredOperationSequence {
 		writeHashString(h, requirement.RequirementID)
@@ -2357,22 +2473,6 @@ func StableAuthoritySnapshotIDForTransaction(workspaceID common.WorkspaceID, run
 
 func runtimeEquivalentAuthorityInput(facts RuntimeFacts) RuntimeEquivalentAuthorityInputIdentity {
 	facts = facts.Normalized()
-	focusHash := sha256.New()
-	writeHashString(focusHash, facts.Focus.ID)
-	writeHashString(focusHash, facts.Focus.SliceID)
-	for _, id := range facts.Focus.CoverageWorkItemIDs {
-		writeHashString(focusHash, string(id))
-	}
-	for _, binding := range facts.Focus.CoverageEvidenceBindings {
-		writeHashString(focusHash, binding.ID)
-		writeHashString(focusHash, binding.Hash)
-	}
-	catalogHash := sha256.New()
-	for _, inventory := range facts.Resources.OperationAdmissibilities {
-		writeHashString(catalogHash, inventory.OwnerModuleID)
-		writeHashString(catalogHash, inventory.SnapshotID)
-		writeHashString(catalogHash, inventory.ObservedRevision)
-	}
 	observationHash := sha256.New()
 	for _, observation := range facts.Resources.PrerequisiteObservations {
 		writeHashString(observationHash, observation.ObservationID)
@@ -2380,14 +2480,47 @@ func runtimeEquivalentAuthorityInput(facts RuntimeFacts) RuntimeEquivalentAuthor
 	}
 	return RuntimeEquivalentAuthorityInputIdentity{
 		DefinitionRevision:        facts.DefinitionRevision,
-		FocusHash:                 "focus-" + hex.EncodeToString(focusHash.Sum(nil))[:20],
+		FocusHash:                 StableRuntimeAuthorityFocusHash(facts.Focus),
 		BindingSetHash:            facts.ReconciliationContract.BindingSetHash,
 		EvidenceRevision:          facts.EvidenceRevision,
 		CapabilityStateHash:       StableRuntimeCapabilityStateHash(facts.Resources.CapabilityStates),
-		CatalogRevisionHash:       "catalog-" + hex.EncodeToString(catalogHash.Sum(nil))[:20],
+		CatalogRevisionHash:       StableRuntimeOperationAdmissibilityCatalogRevisionHash(facts.Resources.OperationAdmissibilities),
 		PrerequisiteFreshnessHash: StableRuntimePrerequisiteFreshnessHash(facts.Resources.PrerequisiteObservations),
 		OwnerObservationHash:      "owner-observation-" + hex.EncodeToString(observationHash.Sum(nil))[:20],
 	}.Normalized()
+}
+
+// StableRuntimeAuthorityFocusHash is the exact focus identity used by a
+// sealed authority input. It intentionally covers only the historical fields
+// that have always participated in RuntimeEquivalentAuthorityInputIdentity.
+func StableRuntimeAuthorityFocusHash(focus CoverageFocus) string {
+	focus = focus.Normalized()
+	h := sha256.New()
+	writeHashString(h, focus.ID)
+	writeHashString(h, focus.SliceID)
+	for _, id := range focus.CoverageWorkItemIDs {
+		writeHashString(h, string(id))
+	}
+	for _, binding := range focus.CoverageEvidenceBindings {
+		writeHashString(h, binding.ID)
+		writeHashString(h, binding.Hash)
+	}
+	return "focus-" + hex.EncodeToString(h.Sum(nil))[:20]
+}
+
+// StableRuntimeOperationAdmissibilityCatalogRevisionHash is the catalog
+// identity embedded in the authority input. Keeping the preimage algorithm
+// public lets historical assessment adjudication prove owner-fact state
+// without consulting mutable current resources.
+func StableRuntimeOperationAdmissibilityCatalogRevisionHash(values []RuntimeOperationAdmissibility) string {
+	values = NormalizeRuntimeOperationAdmissibilities(values)
+	h := sha256.New()
+	for _, inventory := range values {
+		writeHashString(h, inventory.OwnerModuleID)
+		writeHashString(h, inventory.SnapshotID)
+		writeHashString(h, inventory.ObservedRevision)
+	}
+	return "catalog-" + hex.EncodeToString(h.Sum(nil))[:20]
 }
 
 type hashStringWriter interface {
@@ -2554,6 +2687,7 @@ func normalizeEvidenceFacts(values []EvidenceFact) []EvidenceFact {
 	seen := map[common.EvidenceRecordID]struct{}{}
 	for _, value := range values {
 		value.Kind = strings.TrimSpace(value.Kind)
+		value.FocusID = strings.TrimSpace(value.FocusID)
 		value.SubjectRef = strings.TrimSpace(value.SubjectRef)
 		value.SourceRef = strings.TrimSpace(value.SourceRef)
 		value.AuthoritySnapshotID = strings.TrimSpace(value.AuthoritySnapshotID)
@@ -2566,6 +2700,10 @@ func normalizeEvidenceFacts(values []EvidenceFact) []EvidenceFact {
 		value.FailureMessage = strings.TrimSpace(value.FailureMessage)
 		value.Summary = strings.TrimSpace(value.Summary)
 		value.ContentHash = strings.TrimSpace(value.ContentHash)
+		if value.ContentAddress != nil {
+			address := value.ContentAddress.Clone()
+			value.ContentAddress = &address
+		}
 		value.EvidenceRefs = normalizeStrings(value.EvidenceRefs)
 		value.TargetRefs = normalizeStrings(value.TargetRefs)
 		value.BindingRefs = normalizeStrings(value.BindingRefs)
@@ -2602,6 +2740,8 @@ func normalizeRuntimeAssessmentFacts(values []RuntimeAssessmentFact) []RuntimeAs
 	seen := map[string]struct{}{}
 	for _, value := range values {
 		value.ID = strings.TrimSpace(value.ID)
+		value.Revision = strings.TrimSpace(value.Revision)
+		value.AdjudicationHash = strings.TrimSpace(value.AdjudicationHash)
 		value.FocusID = strings.TrimSpace(value.FocusID)
 		value.SliceID = strings.TrimSpace(value.SliceID)
 		value.Scope = strings.TrimSpace(value.Scope)
@@ -2640,5 +2780,11 @@ func normalizeRuntimeAssessmentFacts(values []RuntimeAssessmentFact) []RuntimeAs
 		seen[key] = struct{}{}
 		ret = append(ret, value)
 	}
+	sort.Slice(ret, func(i, j int) bool {
+		if ret[i].Revision != ret[j].Revision {
+			return ret[i].Revision < ret[j].Revision
+		}
+		return ret[i].ID < ret[j].ID
+	})
 	return nilIfEmpty(ret)
 }

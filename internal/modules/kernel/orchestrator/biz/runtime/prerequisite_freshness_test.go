@@ -5,6 +5,7 @@ import (
 	"errors"
 	"reflect"
 	"strconv"
+	"strings"
 	"testing"
 
 	"github.com/muidea/workorch/internal/pkg/common"
@@ -21,6 +22,33 @@ func sameFreshnessStrings(got, want []string) bool {
 		}
 	}
 	return true
+}
+
+func runtimeTestPrerequisitePresent(values []runtimecontract.RuntimePrerequisite, id string) bool {
+	for _, value := range values {
+		if value.ID == id {
+			return true
+		}
+	}
+	return false
+}
+
+func runtimeTestPrerequisiteObservationPresent(values []runtimecontract.RuntimePrerequisiteObservation, id string) bool {
+	for _, value := range values {
+		if value.ObservationID == id {
+			return true
+		}
+	}
+	return false
+}
+
+func runtimeTestOperationAdmissibilityPresent(values []runtimecontract.RuntimeOperationAdmissibility, prerequisiteID string) bool {
+	for _, value := range values {
+		if value.PrerequisiteID == prerequisiteID {
+			return true
+		}
+	}
+	return false
 }
 
 func TestRuntimeSemanticCatalogScopeGapRespectsTypedTargetPolicy(t *testing.T) {
@@ -86,7 +114,7 @@ func TestPrerequisiteStaleInvalidatesProposalAndReacquiresWithoutCandidateDebt(t
 	facts.ConvergencePolicy = runtimecontract.DefaultRuntimeConvergencePolicy()
 	facts.RecoveryPolicy.MaxPrerequisiteRefreshes = 2
 	inventory := runtimecontract.RuntimeOperationAdmissibility{
-		PrerequisiteID: "operation_admissibility:file", OwnerModuleID: runtimecontract.RuntimeModuleFile,
+		PrerequisiteID: "test-semantic-file", OwnerModuleID: runtimecontract.RuntimeModuleFile,
 		OperationKinds: []string{runtimecontract.StepKindFileWrite}, TargetRefs: []string{"target.txt"}, ObservedRevision: "tree-v1",
 	}
 	inventory.SnapshotID = runtimecontract.StableRuntimeOperationAdmissibilitySnapshotID(inventory)
@@ -106,9 +134,23 @@ func TestPrerequisiteStaleInvalidatesProposalAndReacquiresWithoutCandidateDebt(t
 	facts.Resources.OperationAdmissibilities = []runtimecontract.RuntimeOperationAdmissibility{inventory}
 	facts.Resources.PrerequisiteObservations = []runtimecontract.RuntimePrerequisiteObservation{observation}
 	facts.Prerequisites.Satisfied = []runtimecontract.RuntimePrerequisite{prerequisite}
-	initialized, err := controller.initialize(ctx, facts, controllerDefinition(), nil)
-	if err != nil {
-		t.Fatal(err)
+	initialized := runtimeTestInitializeAndSealSemanticContract(t, ctx, controller, facts, controllerDefinition(), nil)
+	inventory, found := runtimeOperationAdmissibilityForKind(
+		initialized.Facts.Resources.OperationAdmissibilities,
+		runtimecontract.RuntimeModuleFile,
+		runtimecontract.StepKindFileWrite,
+	)
+	if !found {
+		t.Fatal("sealed semantic fixture has no File admissibility")
+	}
+	observation, found = CurrentSemanticCatalogObservation(initialized, inventory)
+	if !found {
+		t.Fatal("sealed semantic fixture has no File catalog observation")
+	}
+	prerequisite = runtimecontract.RuntimePrerequisite{
+		ID: inventory.PrerequisiteID, Kind: runtimecontract.PrerequisiteKindOperationAdmissibility,
+		Scope: runtimecontract.RuntimePrerequisiteScopeGlobal, OwnerModuleID: runtimecontract.RuntimeModuleFile,
+		RequiredCapabilities: append([]string(nil), inventory.OperationKinds...),
 	}
 	initialFreshnessHash := initialized.Decision.AuthoritySnapshot.PrerequisiteFreshnessHash
 	if initialFreshnessHash == "" {
@@ -333,10 +375,7 @@ func TestTargetSnapshotReadOnlyStaleReacquiresOnlyFileSnapshot(t *testing.T) {
 	facts.Resources.PrerequisiteObservations = []runtimecontract.RuntimePrerequisiteObservation{observation}
 	facts.Prerequisites.Satisfied = []runtimecontract.RuntimePrerequisite{prerequisite}
 
-	initialized, err := controller.initialize(ctx, facts, controllerDefinition(), nil)
-	if err != nil {
-		t.Fatal(err)
-	}
+	initialized := runtimeTestInitializeAndSealSemanticContract(t, ctx, controller, facts, controllerDefinition(), nil)
 	if initialized.Decision.State != runtimecontract.ConvergenceStateNeedStateChange || len(initialized.Facts.Prerequisites.Pending) != 0 {
 		t.Fatalf("fresh target snapshot did not satisfy grounding prerequisite: %+v", initialized)
 	}
@@ -354,9 +393,10 @@ func TestTargetSnapshotReadOnlyStaleReacquiresOnlyFileSnapshot(t *testing.T) {
 		t.Fatal(err)
 	}
 	if invalidated.Decision.State != runtimecontract.ConvergenceStateNeedPrerequisite ||
-		len(invalidated.Facts.Resources.TargetSnapshots) != 0 || len(invalidated.Facts.Resources.PrerequisiteObservations) != 0 ||
-		len(invalidated.Facts.Prerequisites.Satisfied) != 0 || len(invalidated.Facts.Prerequisites.Pending) != 1 ||
-		invalidated.Facts.Prerequisites.Pending[0].ID != prerequisite.ID ||
+		len(invalidated.Facts.Resources.TargetSnapshots) != 0 ||
+		runtimeTestPrerequisiteObservationPresent(invalidated.Facts.Resources.PrerequisiteObservations, observation.ObservationID) ||
+		runtimeTestPrerequisitePresent(invalidated.Facts.Prerequisites.Satisfied, prerequisite.ID) ||
+		!runtimeTestPrerequisitePresent(invalidated.Facts.Prerequisites.Pending, prerequisite.ID) ||
 		invalidated.Facts.Recovery.PrerequisiteRefreshes != 1 ||
 		invalidated.Facts.Repair.RepairAttempts != 0 || invalidated.Facts.Recovery.ProviderTransportAttempts != 0 || invalidated.ActiveDispatch != nil {
 		t.Fatalf("target snapshot stale did not isolate prerequisite freshness: %+v", invalidated)
@@ -392,8 +432,8 @@ func TestTargetSnapshotReadOnlyStaleReacquiresOnlyFileSnapshot(t *testing.T) {
 		t.Fatal(err)
 	}
 	if reacquired.Decision.State != runtimecontract.ConvergenceStateNeedStateChange || len(reacquired.Facts.Resources.TargetSnapshots) != 1 ||
-		reacquired.Facts.Resources.TargetSnapshots[0].ContentHash != "target-v2" || len(reacquired.Facts.Resources.PrerequisiteObservations) != 1 ||
-		reacquired.Facts.Resources.PrerequisiteObservations[0].ObservationID != freshObservation.ObservationID ||
+		reacquired.Facts.Resources.TargetSnapshots[0].ContentHash != "target-v2" ||
+		!runtimeTestPrerequisiteObservationPresent(reacquired.Facts.Resources.PrerequisiteObservations, freshObservation.ObservationID) ||
 		reacquired.Facts.Recovery.PrerequisiteRefreshes != 1 {
 		t.Fatalf("fresh target snapshot did not replace stale owner fact: %+v", reacquired)
 	}
@@ -407,15 +447,16 @@ func TestFeasibilityPrerequisiteInvalidatesAttemptWithoutRetryOrRepairDebt(t *te
 		t.Fatal(err)
 	}
 	facts := controllerFacts()
-	facts.Capabilities.StateChangeKinds = []string{runtimecontract.RuntimeBlockKindPatchApply}
+	facts.Capabilities.StateChangeKinds = []string{runtimecontract.StepKindFileEdit}
 	inventory := runtimecontract.RuntimeOperationAdmissibility{
-		PrerequisiteID: "operation_admissibility:file", OwnerModuleID: runtimecontract.RuntimeModuleFile,
-		OperationKinds: []string{runtimecontract.RuntimeBlockKindPatchApply}, TargetRefs: []string{"target.txt"}, ObservedRevision: "tree-v1",
+		PrerequisiteID: "test-semantic-file", OwnerModuleID: runtimecontract.RuntimeModuleFile,
+		OperationKinds: []string{runtimecontract.StepKindFileEdit},
+		TargetRefs:     []string{"target.txt"}, ObservedRevision: "tree-v1",
 	}
 	inventory.SnapshotID = runtimecontract.StableRuntimeOperationAdmissibilitySnapshotID(inventory)
 	admissibility := runtimecontract.RuntimePrerequisite{
 		ID: inventory.PrerequisiteID, Kind: runtimecontract.PrerequisiteKindOperationAdmissibility,
-		OwnerModuleID: runtimecontract.RuntimeModuleFile, RequiredCapabilities: []string{runtimecontract.RuntimeBlockKindPatchApply},
+		OwnerModuleID: runtimecontract.RuntimeModuleFile, RequiredCapabilities: []string{runtimecontract.StepKindFileEdit},
 	}
 	observation := runtimecontract.RuntimePrerequisiteObservation{
 		PrerequisiteID: admissibility.ID, Kind: admissibility.Kind, OwnerModuleID: admissibility.OwnerModuleID, ContentHash: inventory.SnapshotID,
@@ -425,20 +466,23 @@ func TestFeasibilityPrerequisiteInvalidatesAttemptWithoutRetryOrRepairDebt(t *te
 	facts.Prerequisites.Satisfied = []runtimecontract.RuntimePrerequisite{admissibility}
 	facts.Resources.OperationAdmissibilities = []runtimecontract.RuntimeOperationAdmissibility{inventory}
 	facts.Resources.PrerequisiteObservations = []runtimecontract.RuntimePrerequisiteObservation{observation}
-	gap := runtimecontract.RuntimeAssessmentGap{CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-v2"}, MissingEvidenceKinds: []string{runtimecontract.EvidenceKindValidation}, Reason: "validation build failed"}
-	facts.Repair = runtimecontract.RuntimeRepairLedger{FocusID: facts.Focus.ID, RepairAttempts: 1, ActiveGap: &gap}
-	facts = runtimeTestFactsWithCurrentFocusBindings(t, facts, controllerDefinition())
-	initialized, err := controller.initialize(ctx, facts, controllerDefinition(), nil)
-	if err != nil {
-		t.Fatal(err)
+	initialized := runtimeTestInitializeAndSealSemanticContract(t, ctx, controller, facts, controllerDefinition(), nil)
+	beforeRepairAttempts := initialized.Facts.Repair.RepairAttempts
+	inventory, found := runtimeOperationAdmissibilityForKind(
+		initialized.Facts.Resources.OperationAdmissibilities,
+		runtimecontract.RuntimeModuleFile,
+		runtimecontract.StepKindFileEdit,
+	)
+	if !found {
+		t.Fatal("sealed semantic fixture has no file/edit admissibility")
 	}
 	if initialized.Decision.State != runtimecontract.ConvergenceStateNeedStateChange {
 		t.Fatalf("initial decision = %+v", initialized.Decision)
 	}
-	targetRef, patchType, oldText, newText := "target.txt", "text_replace", "old", "new"
+	targetRef, oldText, newText := "target.txt", "old", "new"
 	candidate := runtimecontract.RuntimeCandidate{StateChange: &runtimecontract.StateChangeCandidate{Operations: []runtimecontract.StateChangingOperation{{Operation: runtimecontract.RuntimeOperation{
-		ID: "replace-target", Kind: runtimecontract.RuntimeBlockKindPatchApply, CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-v2"}, TargetRefs: []string{targetRef},
-		Parameters: []runtimecontract.OperationParameter{{Name: "patchType", String: &patchType}, {Name: "oldText", String: &oldText}, {Name: "newText", String: &newText}},
+		ID: "replace-target", Kind: runtimecontract.StepKindFileEdit, CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-v2"}, TargetRefs: []string{targetRef},
+		Parameters: []runtimecontract.OperationParameter{{Name: "oldText", String: &oldText}, {Name: "newText", String: &newText}},
 	}}}}}
 	if _, err := controller.BeginCandidateAttemptForTest(ctx, "ws-v2", "run-v2", 0, "stable-prefix"); err != nil {
 		t.Fatal(err)
@@ -471,7 +515,7 @@ func TestFeasibilityPrerequisiteInvalidatesAttemptWithoutRetryOrRepairDebt(t *te
 	if invalidated.Decision.State != runtimecontract.ConvergenceStateNeedPrerequisite || len(invalidated.Facts.Prerequisites.Pending) != 1 || invalidated.Facts.Prerequisites.Pending[0].Kind != runtimecontract.PrerequisiteKindTargetSnapshot {
 		t.Fatalf("feasibility prerequisite did not enter acquire state: %+v", invalidated)
 	}
-	if invalidated.CandidateAttempts[0].State != runtimecontract.RuntimeCandidateAttemptStateInvalidated || invalidated.CandidateAttempts[0].PrerequisiteRequest == nil || invalidated.Facts.Repair.RepairAttempts != 1 || invalidated.Facts.Recovery.PrerequisiteRefreshes != 0 {
+	if invalidated.CandidateAttempts[0].State != runtimecontract.RuntimeCandidateAttemptStateInvalidated || invalidated.CandidateAttempts[0].PrerequisiteRequest == nil || invalidated.Facts.Repair.RepairAttempts != beforeRepairAttempts || invalidated.Facts.Recovery.PrerequisiteRefreshes != 0 {
 		t.Fatalf("feasibility prerequisite consumed retry, repair, or stale budget: %+v", invalidated)
 	}
 	beforeAuthority := initialized.Decision.AuthoritySnapshot.ID
@@ -486,7 +530,7 @@ func TestFeasibilityPrerequisiteInvalidatesAttemptWithoutRetryOrRepairDebt(t *te
 	if err != nil {
 		t.Fatal(err)
 	}
-	if resumed.Decision.State != runtimecontract.ConvergenceStateNeedStateChange || resumed.Decision.AuthoritySnapshot.ID == beforeAuthority || len(resumed.Facts.Resources.TargetSnapshots) != 1 || resumed.Facts.Repair.RepairAttempts != 1 {
+	if resumed.Decision.State != runtimecontract.ConvergenceStateNeedStateChange || resumed.Decision.AuthoritySnapshot.ID == beforeAuthority || len(resumed.Facts.Resources.TargetSnapshots) != 1 || resumed.Facts.Repair.RepairAttempts != beforeRepairAttempts {
 		t.Fatalf("snapshot commit did not seal new state-change authority while retaining repair cycle: %+v", resumed)
 	}
 	saves := repository.saves
@@ -998,36 +1042,12 @@ func TestMCPOwnerCatalogStaleRestartDoesNotReuseFailureTarget(t *testing.T) {
 	facts.Resources.OperationAdmissibilities = []runtimecontract.RuntimeOperationAdmissibility{inventory}
 	facts.Resources.PrerequisiteObservations = []runtimecontract.RuntimePrerequisiteObservation{observation}
 	facts.Prerequisites.Satisfied = []runtimecontract.RuntimePrerequisite{prerequisite}
-	initialized, err := controller.initialize(ctx, facts, controllerDefinition(), nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if initialized.Decision.AuthoritySnapshot.PrerequisiteFreshnessHash == "" {
-		t.Fatal("MCP owner-catalog observation was not sealed into authority")
-	}
-	// The failure above is fixture input for the catalog-freshness path, not an
-	// already-persisted repair continuation. It predates the semantic focus
-	// projection, so discard the placeholder-focus directive before the helper
-	// seals the canonical binding and derives a current-focus directive.
-	repository.aggregate.Facts.RepairDirective = nil
-	if _, err := controller.BeginCandidateAttemptForTest(ctx, "ws-v2", "run-v2", 0, "stable-prefix"); err != nil {
-		t.Fatal(err)
-	}
-	stale := runtimecontract.RuntimePrerequisiteStale{PrerequisiteID: prerequisite.ID, ObservationID: observation.ObservationID, Domain: runtimecontract.RuntimeResourceOwnerCatalog, OwnerModuleID: runtimecontract.RuntimeModuleMCP, SubjectRef: "mcp_server_catalog", ExpectedRevision: "mcp-catalog-v1", ObservedRevision: "mcp-catalog-v2", Reason: "mcp catalog changed"}
-	invalidated, err := controller.invalidateCandidateAttemptForPrerequisiteStale(ctx, "ws-v2", "run-v2", 0, stale)
-	if err != nil {
-		t.Fatal(err)
-	}
-	restarted, err := NewRuntimeController(repository)
-	if err != nil {
-		t.Fatal(err)
-	}
-	loaded, err := restarted.Load(ctx, "ws-v2", "run-v2")
-	if err != nil || loaded.StateRevision != invalidated.StateRevision || loaded.Facts.Resources.FailureTarget != nil || loaded.Facts.Failure == nil || len(loaded.Facts.Failure.TargetRefs) != 0 ||
-		len(loaded.Facts.Prerequisites.Pending) != 1 || loaded.Facts.Prerequisites.Pending[0].ID != prerequisite.ID || loaded.Facts.RepairDirective != nil ||
-		!sameRuntimeTargetRefs(GroundedRepairTargets(loaded.Facts), []string{"target.txt"}) ||
-		len(invalidated.CandidateAttempts) != 1 || invalidated.CandidateAttempts[0].State != runtimecontract.RuntimeCandidateAttemptStateInvalidated {
-		t.Fatalf("restart retained stale MCP failure authority: loaded=%+v invalidated=%+v err=%v", loaded, invalidated, err)
+	// This is deliberately the forbidden direct-injection fixture. Without an
+	// exact rejected receipt/evidence transaction, top-only MCP authority fails
+	// at the initial aggregate boundary and is never persisted for later cleanup.
+	if _, err := controller.initialize(ctx, facts, controllerDefinition(), nil); err == nil ||
+		!strings.Contains(err.Error(), "receipt-evidence target observation copies must both be present and identical") {
+		t.Fatalf("direct-injected MCP failure target initialization error = %v", err)
 	}
 }
 
@@ -1085,9 +1105,19 @@ func TestActiveDispatchPrerequisiteStaleInvalidatesWithoutRejectedEvidence(t *te
 
 func TestAcceptedReceiptResourceChangeRetiresPrerequisitesButKeepsRemainingDispatch(t *testing.T) {
 	ctx := context.Background()
-	aggregate := stateChangeAggregate(t)
-	runtimeTestSealCurrentFocusBindingTargetSurface(&aggregate.Facts, runtimeTestBindingTargetSurface{
-		TargetRefs: []string{"main.go", "other.go"},
+	aggregate := stateChangeAggregateWithPreparation(t, func(aggregate *RuntimeAggregate) {
+		aggregate.Facts.Focus.TargetRefs = []string{"main.go", "other.go"}
+		catalog := runtimecontract.RuntimeOperationAdmissibility{
+			PrerequisiteID: "test-semantic-file", OwnerModuleID: runtimecontract.RuntimeModuleFile,
+			OperationKinds: []string{runtimecontract.RuntimeBlockKindPatchApply},
+			OperationVariants: []runtimecontract.RuntimeOperationAdmissibilityVariant{{
+				Kind: runtimecontract.RuntimeBlockKindPatchApply, VariantID: "file_write",
+				AllowedTargetPolicies: []runtimecontract.RuntimeOperationTargetPolicy{runtimecontract.RuntimeOperationTargetPolicyExactTarget},
+			}},
+			TargetRefs: []string{"main.go", "other.go"}, ObservedRevision: "tree-v1",
+		}
+		catalog.SnapshotID = runtimecontract.StableRuntimeOperationAdmissibilitySnapshotID(catalog)
+		aggregate.Facts.Resources.OperationAdmissibilities = []runtimecontract.RuntimeOperationAdmissibility{catalog}
 	})
 	_, _ = addFreshFileAdmissibilityObservation(t, &aggregate)
 	repository := &durableRuntimeStateRepository{aggregate: aggregate}
@@ -1362,7 +1392,7 @@ func commitFreshnessInvalidationForTest(t *testing.T, aggregate *RuntimeAggregat
 
 func TestFileTargetChangeInvalidatesShellValidationObservation(t *testing.T) {
 	fileInventory := runtimecontract.RuntimeOperationAdmissibility{
-		PrerequisiteID: "operation_admissibility:file", OwnerModuleID: runtimecontract.RuntimeModuleFile,
+		PrerequisiteID: "test-semantic-file", OwnerModuleID: runtimecontract.RuntimeModuleFile,
 		OperationKinds: []string{runtimecontract.StepKindFileWrite}, TargetRefs: []string{"main.go"}, ObservedRevision: "tree-v1",
 	}
 	fileInventory.SnapshotID = runtimecontract.StableRuntimeOperationAdmissibilitySnapshotID(fileInventory)
@@ -1512,8 +1542,40 @@ func TestGitAdmissibilityReadOnlyStaleRetiresOnlyGitInventory(t *testing.T) {
 	facts.Prerequisites.Satisfied = []runtimecontract.RuntimePrerequisite{filePrerequisite, gitPrerequisite}
 	facts.Resources.OperationAdmissibilities = []runtimecontract.RuntimeOperationAdmissibility{fileInventory, gitInventory}
 	facts.Resources.PrerequisiteObservations = []runtimecontract.RuntimePrerequisiteObservation{fileObservation, gitObservation}
-	if _, err := controller.initialize(ctx, facts, controllerDefinition(), nil); err != nil {
-		t.Fatal(err)
+	initialized := runtimeTestInitializeAndSealSemanticContract(t, ctx, controller, facts, controllerDefinition(), nil)
+	gitInventory, found := runtimeOperationAdmissibilityForKind(
+		initialized.Facts.Resources.OperationAdmissibilities,
+		runtimecontract.RuntimeModuleGit,
+		runtimecontract.StepKindGitWrite,
+	)
+	if !found {
+		t.Fatal("sealed semantic fixture has no Git admissibility")
+	}
+	gitObservation, found = CurrentSemanticCatalogObservation(initialized, gitInventory)
+	if !found {
+		t.Fatal("sealed semantic fixture has no Git catalog observation")
+	}
+	gitPrerequisite = runtimecontract.RuntimePrerequisite{
+		ID: gitInventory.PrerequisiteID, Kind: runtimecontract.PrerequisiteKindOperationAdmissibility,
+		Scope: runtimecontract.RuntimePrerequisiteScopeGlobal, OwnerModuleID: runtimecontract.RuntimeModuleGit,
+		RequiredCapabilities: append([]string(nil), gitInventory.OperationKinds...),
+	}
+	fileInventory, found = runtimeOperationAdmissibilityForKind(
+		initialized.Facts.Resources.OperationAdmissibilities,
+		runtimecontract.RuntimeModuleFile,
+		runtimecontract.StepKindFileWrite,
+	)
+	if !found {
+		t.Fatal("sealed semantic fixture has no File admissibility")
+	}
+	fileObservation, found = CurrentSemanticCatalogObservation(initialized, fileInventory)
+	if !found {
+		t.Fatal("sealed semantic fixture has no File catalog observation")
+	}
+	filePrerequisite = runtimecontract.RuntimePrerequisite{
+		ID: fileInventory.PrerequisiteID, Kind: runtimecontract.PrerequisiteKindOperationAdmissibility,
+		Scope: runtimecontract.RuntimePrerequisiteScopeGlobal, OwnerModuleID: runtimecontract.RuntimeModuleFile,
+		RequiredCapabilities: append([]string(nil), fileInventory.OperationKinds...),
 	}
 	if _, err := controller.BeginCandidateAttemptForTest(ctx, "ws-v2", "run-v2", 0, "git-admissibility-stale-prefix"); err != nil {
 		t.Fatal(err)
@@ -1529,10 +1591,13 @@ func TestGitAdmissibilityReadOnlyStaleRetiresOnlyGitInventory(t *testing.T) {
 		t.Fatal(err)
 	}
 	if invalidated.Decision.State != runtimecontract.ConvergenceStateNeedPrerequisite ||
-		len(invalidated.Facts.Resources.OperationAdmissibilities) != 1 || invalidated.Facts.Resources.OperationAdmissibilities[0].PrerequisiteID != filePrerequisite.ID ||
-		len(invalidated.Facts.Resources.PrerequisiteObservations) != 1 || invalidated.Facts.Resources.PrerequisiteObservations[0].PrerequisiteID != filePrerequisite.ID ||
-		len(invalidated.Facts.Prerequisites.Pending) != 1 || invalidated.Facts.Prerequisites.Pending[0].ID != gitPrerequisite.ID ||
-		len(invalidated.Facts.Prerequisites.Satisfied) != 1 || invalidated.Facts.Prerequisites.Satisfied[0].ID != filePrerequisite.ID ||
+		!runtimeTestOperationAdmissibilityPresent(invalidated.Facts.Resources.OperationAdmissibilities, filePrerequisite.ID) ||
+		runtimeTestOperationAdmissibilityPresent(invalidated.Facts.Resources.OperationAdmissibilities, gitPrerequisite.ID) ||
+		!runtimeTestPrerequisiteObservationPresent(invalidated.Facts.Resources.PrerequisiteObservations, fileObservation.ObservationID) ||
+		runtimeTestPrerequisiteObservationPresent(invalidated.Facts.Resources.PrerequisiteObservations, gitObservation.ObservationID) ||
+		!runtimeTestPrerequisitePresent(invalidated.Facts.Prerequisites.Pending, gitPrerequisite.ID) ||
+		runtimeTestPrerequisitePresent(invalidated.Facts.Prerequisites.Satisfied, gitPrerequisite.ID) ||
+		!runtimeTestPrerequisitePresent(invalidated.Facts.Prerequisites.Satisfied, filePrerequisite.ID) ||
 		invalidated.Facts.Recovery.PrerequisiteRefreshes != 1 ||
 		len(invalidated.CandidateAttempts) != 1 || invalidated.CandidateAttempts[0].State != runtimecontract.RuntimeCandidateAttemptStateInvalidated ||
 		invalidated.ActiveDispatch != nil || len(invalidated.GovernanceRequests) != 0 {
@@ -1710,6 +1775,10 @@ func TestThreeOwnerAdmissibilityStaleIntersection(t *testing.T) {
 }
 
 func TestOwnerCatalogChangeInvalidatesBoundFailureTargetObservation(t *testing.T) {
+	catalogDependency := runtimecontract.RuntimeFreshnessDependency{
+		Domain: runtimecontract.RuntimeResourceOwnerCatalog, OwnerModuleID: runtimecontract.RuntimeModuleMCP,
+		SubjectRef: "mcp_server_catalog", Revision: "mcp-server-v1",
+	}
 	inventory := runtimecontract.RuntimeOperationAdmissibility{
 		PrerequisiteID: "operation_admissibility:mcp", OwnerModuleID: runtimecontract.RuntimeModuleMCP,
 		OperationKinds: []string{runtimecontract.StepKindMCPToolCall}, SelectorRefs: []string{"server-a"}, ObservedRevision: "mcp-server-v1",
@@ -1721,13 +1790,12 @@ func TestOwnerCatalogChangeInvalidatesBoundFailureTargetObservation(t *testing.T
 	}
 	prerequisiteObservation := runtimecontract.RuntimePrerequisiteObservation{
 		PrerequisiteID: prerequisite.ID, Kind: prerequisite.Kind, OwnerModuleID: prerequisite.OwnerModuleID, ContentHash: inventory.SnapshotID,
-		Dependencies: []runtimecontract.RuntimeFreshnessDependency{{
-			Domain: runtimecontract.RuntimeResourceOwnerCatalog, OwnerModuleID: runtimecontract.RuntimeModuleMCP, SubjectRef: "mcp_server_catalog", Revision: "mcp-server-v1",
-		}},
+		Dependencies: []runtimecontract.RuntimeFreshnessDependency{catalogDependency},
 	}
 	prerequisiteObservation.ObservationID = runtimecontract.StableRuntimePrerequisiteObservationID(prerequisiteObservation)
 	targetObservation := &runtimecontract.RuntimeFailureTargetObservation{
 		OwnerModuleID: runtimecontract.RuntimeModuleMCP, SubjectRef: "server-a", TargetRole: "implementation", ObservedRevision: "mcp-server-v1", TargetRefs: []string{"implementation.go"},
+		CatalogDependency: &catalogDependency,
 	}
 	failure := &runtimecontract.FailureFact{
 		Class: runtimecontract.FailureClassBuildFailure, Signature: "mcp-failure", Message: "observed failure", TargetRefs: []string{"implementation.go"}, TargetObservation: targetObservation,
@@ -1764,6 +1832,43 @@ func TestOwnerCatalogChangeInvalidatesBoundFailureTargetObservation(t *testing.T
 	if err != nil || len(duplicatePrerequisites) != 0 || len(duplicateObservations) != 0 || len(duplicate.Prerequisites.Pending) != 1 ||
 		duplicate.Resources.FailureTarget != nil || duplicate.RepairDirective != nil {
 		t.Fatalf("duplicate owner catalog invalidation was not idempotent: facts=%+v prerequisites=%v observations=%v err=%v", duplicate, duplicatePrerequisites, duplicateObservations, err)
+	}
+}
+
+func TestFailureTargetObservationFreshnessRequiresExactCatalogDependency(t *testing.T) {
+	exact := runtimecontract.RuntimeFreshnessDependency{
+		Domain: runtimecontract.RuntimeResourceOwnerCatalog, OwnerModuleID: runtimecontract.RuntimeModuleMCP,
+		SubjectRef: "owner-catalog-a", Revision: "catalog-v1",
+	}
+	target := runtimecontract.RuntimeFailureTargetObservation{
+		OwnerModuleID: runtimecontract.RuntimeModuleMCP, SubjectRef: "operation-subject", TargetRole: "implementation",
+		ObservedRevision: exact.Revision, TargetRefs: []string{"implementation.go"}, CatalogDependency: &exact,
+	}
+	for _, test := range []struct {
+		name       string
+		dependency runtimecontract.RuntimeFreshnessDependency
+		want       bool
+	}{
+		{name: "exact identity", dependency: exact, want: true},
+		{name: "different domain", dependency: runtimecontract.RuntimeFreshnessDependency{Domain: runtimecontract.RuntimeResourceRemoteResource, OwnerModuleID: exact.OwnerModuleID, SubjectRef: exact.SubjectRef, Revision: exact.Revision}},
+		{name: "different owner", dependency: runtimecontract.RuntimeFreshnessDependency{Domain: exact.Domain, OwnerModuleID: runtimecontract.RuntimeModuleShell, SubjectRef: exact.SubjectRef, Revision: exact.Revision}},
+		{name: "different subject", dependency: runtimecontract.RuntimeFreshnessDependency{Domain: exact.Domain, OwnerModuleID: exact.OwnerModuleID, SubjectRef: "owner-catalog-b", Revision: exact.Revision}},
+		{name: "different revision", dependency: runtimecontract.RuntimeFreshnessDependency{Domain: exact.Domain, OwnerModuleID: exact.OwnerModuleID, SubjectRef: exact.SubjectRef, Revision: "catalog-v2"}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			invalidated := map[string]runtimecontract.RuntimePrerequisiteObservation{
+				"prerequisite": {Dependencies: []runtimecontract.RuntimeFreshnessDependency{test.dependency}},
+			}
+			if got := failureTargetObservationDependsOnInvalidatedOwnerRevision(target, invalidated); got != test.want {
+				t.Fatalf("exact catalog dependency match = %t, want %t: target=%+v invalidated=%+v", got, test.want, target.CatalogDependency, test.dependency)
+			}
+		})
+	}
+	target.CatalogDependency = nil
+	if failureTargetObservationDependsOnInvalidatedOwnerRevision(target, map[string]runtimecontract.RuntimePrerequisiteObservation{
+		"prerequisite": {Dependencies: []runtimecontract.RuntimeFreshnessDependency{exact}},
+	}) {
+		t.Fatal("failure target without a catalog dependency was retired by owner/revision coincidence")
 	}
 }
 

@@ -75,10 +75,15 @@ func (c *authorityComponent) commitAssessment(ctx context.Context, workspaceID c
 	}
 	aggregate.Facts = settledCoverage
 	expectedRevision := aggregate.StateRevision
+	assessmentRevision := nextEvidenceRevision(aggregate.EvidenceSequence + 1)
+	assessmentSource, err := runtimecontract.RuntimeAssessmentSourceProjection(aggregate.Facts, assessment.FocusID, assessment.CoverageWorkItemIDs)
+	if err != nil {
+		return RuntimeAggregate{}, err
+	}
 	fact := runtimecontract.RuntimeAssessmentFact{
-		ID: aggregate.ActiveDispatch.ID, FocusID: assessment.FocusID, SliceID: firstNonEmpty(assessment.SliceID, aggregate.Facts.Focus.SliceID),
-		Scope: aggregate.Facts.Focus.AssessmentScope, RequirementID: aggregate.Facts.Focus.AssessmentID,
-		RequirementText: aggregate.Facts.Focus.AssessmentText, CoverageWorkItemIDs: assessment.CoverageWorkItemIDs,
+		ID: aggregate.ActiveDispatch.ID, Revision: assessmentRevision, FocusID: assessment.FocusID, SliceID: firstNonEmpty(assessment.SliceID, assessmentSource.SliceID),
+		Scope: assessmentSource.AssessmentScope, RequirementID: assessmentSource.AssessmentID,
+		RequirementText: assessmentSource.AssessmentText, CoverageWorkItemIDs: assessment.CoverageWorkItemIDs,
 		ClaimedDisposition: assessment.Disposition, Disposition: canonicalDisposition, Items: append([]runtimecontract.RuntimeAssessmentItemFact(nil), assessment.Items...),
 		Summary: assessment.Summary, EvidenceRefs: assessment.EvidenceRefs, ArtifactRefs: assessment.ArtifactRefs,
 	}
@@ -86,6 +91,24 @@ func (c *authorityComponent) commitAssessment(ctx context.Context, workspaceID c
 		gap := assessment.Gap.Normalized()
 		fact.Gap = &gap
 	}
+	dispatch := *aggregate.ActiveDispatch
+	dispatch.State = DispatchStateCommitted
+	dispatchRecord := sealedDispatchToRuntimeRecord(dispatch)
+	adjudication, err := runtimecontract.DeriveRuntimeAssessmentAdjudication(
+		dispatchRecord,
+		aggregate.Facts,
+		sealedDispatchesToRuntimeRecords(aggregate.CompletedDispatches),
+		aggregate.CoverageProofLineage,
+	)
+	if err != nil {
+		return RuntimeAggregate{}, err
+	}
+	if adjudication.Disposition != canonicalDisposition {
+		return RuntimeAggregate{}, fmt.Errorf("%w: assessment classifier %q disagrees with immutable adjudication proof %q", common.ErrConflict, canonicalDisposition, adjudication.Disposition)
+	}
+	dispatch.AssessmentAdjudication = &adjudication
+	dispatch.AssessmentAdjudicationHash = runtimecontract.StableRuntimeAssessmentAdjudicationHash(adjudication)
+	fact.AdjudicationHash = dispatch.AssessmentAdjudicationHash
 	aggregate.Facts.Assessments = append(aggregate.Facts.Assessments, fact)
 	if canonicalDisposition == runtimecontract.AssessmentDispositionRepairableGap && !ownerFactOnlyGap {
 		priorGap := aggregate.Facts.Repair.ActiveGap
@@ -130,9 +153,7 @@ func (c *authorityComponent) commitAssessment(ctx context.Context, workspaceID c
 		}
 	}
 	aggregate.EvidenceSequence++
-	aggregate.Facts.EvidenceRevision = nextEvidenceRevision(aggregate.EvidenceSequence)
-	dispatch := *aggregate.ActiveDispatch
-	dispatch.State = DispatchStateCommitted
+	aggregate.Facts.EvidenceRevision = assessmentRevision
 	aggregate.CompletedDispatches = append(aggregate.CompletedDispatches, dispatch)
 	aggregate.ActiveDispatch = nil
 	previousFocusID := aggregate.Facts.Focus.ID
@@ -415,20 +436,28 @@ func sealedDispatchesToRuntimeRecords(values []SealedDispatch) []runtimecontract
 }
 
 func sealedDispatchToRuntimeRecord(value SealedDispatch) runtimecontract.RuntimeDispatchRecord {
-	return runtimecontract.RuntimeDispatchRecord{
+	return runtimecontract.CloneRuntimeDispatchRecordRaw(runtimecontract.RuntimeDispatchRecord{
 		ID: value.ID, WorkspaceID: value.WorkspaceID, RunID: value.RunID,
 		Transaction: value.Transaction, CandidateHash: value.CandidateHash, Candidate: value.Candidate,
 		CandidateManifestHash:              value.CandidateManifestHash,
-		OperationTargetAuthorizations:      runtimecontract.CloneRuntimeDispatchOperationTargetAuthorizations(value.OperationTargetAuthorizations),
+		CoverageBindingHash:                value.CoverageBindingHash,
+		CoverageBindings:                   value.CoverageBindings,
+		OperationTargetAuthorizations:      value.OperationTargetAuthorizations,
 		FocusTargetRole:                    value.FocusTargetRole,
-		ValidationRecipes:                  runtimecontract.CloneRuntimeValidationRecipes(value.ValidationRecipes),
-		OperationAdmissibilities:           runtimecontract.CloneRuntimeOperationAdmissibilities(value.OperationAdmissibilities),
-		OperationAdmissibilityObservations: runtimecontract.CloneRuntimePrerequisiteObservations(value.OperationAdmissibilityObservations),
-		OperationPolicies:                  runtimecontract.NormalizeRuntimeOperationPolicyFacts(value.OperationPolicies),
-		State:                              runtimecontract.RuntimeDispatchState(value.State), CompletedOperationIDs: append([]string(nil), value.CompletedOperationIDs...),
-		OperationExecutions: runtimecontract.CloneRuntimeOperationExecutionRecords(value.OperationExecutions), OperationAuthorityHash: value.OperationAuthorityHash,
+		ValidationRecipes:                  value.ValidationRecipes,
+		RepairCommitmentHash:               value.RepairCommitmentHash,
+		RepairCommitment:                   value.RepairCommitment,
+		AssessmentAuthorityInputHash:       value.AssessmentAuthorityInputHash,
+		AssessmentAuthorityInput:           value.AssessmentAuthorityInput,
+		AssessmentAdjudicationHash:         value.AssessmentAdjudicationHash,
+		AssessmentAdjudication:             value.AssessmentAdjudication,
+		OperationAdmissibilities:           value.OperationAdmissibilities,
+		OperationAdmissibilityObservations: value.OperationAdmissibilityObservations,
+		OperationPolicies:                  value.OperationPolicies,
+		State:                              runtimecontract.RuntimeDispatchState(value.State), CompletedOperationIDs: value.CompletedOperationIDs,
+		OperationExecutions: value.OperationExecutions, OperationAuthorityHash: value.OperationAuthorityHash,
 		DispatchAuthorityHash: value.DispatchAuthorityHash,
-	}
+	})
 }
 
 func firstNonEmpty(values ...string) string {

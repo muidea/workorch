@@ -10,7 +10,6 @@ import (
 
 func TestDispatchCommitRecordsCoverageProofLineageExactlyOnce(t *testing.T) {
 	repository := &durableRuntimeStateRepository{aggregate: stateChangeAggregate(t)}
-	coverageProofLineageRestrictStateProofToPatchApply(t, &repository.aggregate)
 	coordinator, err := NewDispatchCoordinator(repository)
 	if err != nil {
 		t.Fatal(err)
@@ -31,6 +30,7 @@ func TestDispatchCommitRecordsCoverageProofLineageExactlyOnce(t *testing.T) {
 		},
 	}
 	attachRuntimeTestOwnerReceipt(t, &repository.aggregate, &evidence)
+	canonicalEvidenceID := common.EvidenceRecordID("runtime-receipt|" + runtimecontract.StableRuntimeOperationReceiptHash(*evidence.Receipt))
 	committed, err := coordinator.commitEvidence(context.Background(), evidence)
 	if err != nil {
 		t.Fatalf("commit accepted receipt: %v", err)
@@ -40,7 +40,7 @@ func TestDispatchCommitRecordsCoverageProofLineageExactlyOnce(t *testing.T) {
 	}
 	source := committed.Aggregate.CoverageProofLineage[0]
 	if source.Kind != runtimecontract.RuntimeCoverageProofLineageKindSource ||
-		source.SourceEvidenceID != common.EvidenceRecordID(evidence.EventID) ||
+		source.SourceEvidenceID != canonicalEvidenceID ||
 		source.SourceDispatchID != evidence.DispatchID || source.SourceOperationID != evidence.OperationID ||
 		source.SourceReceiptHash == "" || source.SourceProofIdentity.Hash == "" {
 		t.Fatalf("source lineage = %+v", source)
@@ -334,6 +334,7 @@ func TestCoverageProofLineageCandidateAdmissionRequiresEquivalentCurrentCredit(t
 		coverageProofLineageSynchronizeLedger(t, &aggregate)
 		aggregate.Facts.Evidence.Rejected = []runtimecontract.EvidenceFact{{
 			ID: "rejected-state", Kind: runtimecontract.EvidenceKindStateChange,
+			FocusID:             aggregate.Facts.Focus.ID,
 			CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-lineage"}, Revision: "runtime-evidence-00000000000000000002",
 		}}
 		if err := resolveCoverageProofLineageForFocus(&aggregate, aggregate.Facts.Focus); err != nil {
@@ -459,27 +460,4 @@ func coverageProofLineageTestSelectorBinding(id, target string) runtimecontract.
 	binding = binding.Normalized()
 	binding.Hash = runtimecontract.StableCoverageEvidenceBindingHash(binding)
 	return binding
-}
-
-func coverageProofLineageRestrictStateProofToPatchApply(t *testing.T, aggregate *RuntimeAggregate) {
-	t.Helper()
-	if aggregate == nil || len(aggregate.Facts.Focus.CoverageEvidenceBindings) != 1 {
-		t.Fatalf("lineage fixture has no single current binding: %+v", aggregate)
-	}
-	binding := aggregate.Facts.Focus.CoverageEvidenceBindings[0].Clone()
-	for index := range binding.Proofs {
-		if binding.Proofs[index].EvidenceKind == runtimecontract.EvidenceKindStateChange {
-			binding.Proofs[index].AllowedOperationKinds = []string{runtimecontract.RuntimeBlockKindPatchApply}
-			binding.Proofs[index].AllowedOperationVariants = nil
-		}
-	}
-	binding = binding.Normalized()
-	binding.Hash = runtimecontract.StableCoverageEvidenceBindingHash(binding)
-	aggregate.Facts.Focus.CoverageEvidenceBindings = []runtimecontract.CoverageEvidenceBinding{binding}
-	runtimeTestSynchronizeCanonicalCWILedger(t, aggregate)
-	decision, err := ReduceRuntimeState(aggregate.Facts, nil)
-	if err != nil {
-		t.Fatalf("reduce narrowed lineage fixture: %v", err)
-	}
-	aggregate.Decision = decision
 }

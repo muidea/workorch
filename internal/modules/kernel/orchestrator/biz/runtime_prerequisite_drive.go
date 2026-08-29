@@ -158,12 +158,6 @@ func (m *Biz) resolveRuntimePrerequisite(
 		}
 		selection := result.Selection
 		return runtime.PrerequisiteResult{PrerequisiteID: prerequisite.ID, TargetSelection: &selection, Observation: &result.Observation}, nil
-	case runtimecontract.PrerequisiteKindFailureTarget:
-		facts, err := ResolveFailureTargetPrerequisite(aggregate.Facts, prerequisite.ID)
-		if err != nil {
-			return runtime.PrerequisiteResult{}, err
-		}
-		return runtime.PrerequisiteResult{PrerequisiteID: prerequisite.ID, FailureTarget: facts.Resources.FailureTarget}, nil
 	case runtimecontract.PrerequisiteKindValidationScratch:
 		facts, err := AcquireValidationScratchPrerequisite(aggregate.Facts, workspaceInternalDirectory, prerequisite.ID)
 		if err != nil {

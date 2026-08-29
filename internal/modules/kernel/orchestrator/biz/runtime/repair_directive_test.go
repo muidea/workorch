@@ -3,6 +3,7 @@ package runtime
 import (
 	"testing"
 
+	"github.com/muidea/workorch/internal/pkg/common"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
@@ -64,10 +65,38 @@ func TestRepairDirectiveSurvivesPrerequisiteReacquisition(t *testing.T) {
 	}
 }
 
+func TestRepairDirectiveRequiresExactCreditedEvidence(t *testing.T) {
+	facts := validationFacts()
+	facts = runtimeTestFactsWithCurrentFocusBindings(t, facts, runtimecontract.RuntimeDefinitionContext{
+		StartupInputHash: "startup-input-test",
+		Revision:         facts.DefinitionRevision,
+	})
+	directive := runtimecontract.RuntimeRepairDirective{
+		ID: "repair-validation-credit", FocusID: facts.Focus.ID,
+		RequiredState:         runtimecontract.ConvergenceStateNeedValidation,
+		RequiredEvidenceKinds: []string{runtimecontract.EvidenceKindValidation},
+		CoverageWorkItemIDs:   append([]common.CoverageWorkItemID(nil), facts.Focus.CoverageWorkItemIDs...),
+	}
+	fact := runtimecontract.EvidenceFact{
+		ID: "accepted-diagnostic-validation", Kind: runtimecontract.EvidenceKindValidation,
+		Revision:    "runtime-evidence-00000000000000000001",
+		BindingRefs: []string{facts.Focus.CoverageEvidenceBindings[0].ID},
+	}
+	facts.Evidence.Accepted = []runtimecontract.EvidenceFact{fact}
+	if repairDirectiveEvidenceSatisfied(facts, directive) {
+		t.Fatal("empty-credit accepted diagnostic closed the repair directive")
+	}
+	facts.Evidence.Accepted[0].CoverageWorkItemIDs = append([]common.CoverageWorkItemID(nil), facts.Focus.CoverageWorkItemIDs...)
+	if !repairDirectiveEvidenceSatisfied(facts, directive) {
+		t.Fatal("exact binding-derived CWI evidence did not close the repair directive")
+	}
+}
+
 func TestRepairDirectiveFlipsToValidationAfterAcceptedStateChangeEvenWhenAssessmentIsRequired(t *testing.T) {
 	facts := validationFacts()
 	facts.Focus.RequireAssessment = true
 	facts.Focus.RequiredEvidenceKinds = []string{runtimecontract.EvidenceKindStateChange, runtimecontract.EvidenceKindValidation}
+	facts = runtimeTestFactsWithCurrentFocusBindings(t, facts, runtimecontract.RuntimeDefinitionContext{StartupInputHash: "startup-input-test", Revision: facts.DefinitionRevision})
 	facts.RepairDirective = &runtimecontract.RuntimeRepairDirective{
 		ID: "repair-cwi-1-produce_state_change-0", FocusID: facts.Focus.ID,
 		Trigger:                    runtimecontract.RuntimeRepairTriggerCandidateInfeasible,
@@ -83,9 +112,9 @@ func TestRepairDirectiveFlipsToValidationAfterAcceptedStateChangeEvenWhenAssessm
 		ID: "rejected-patch", Kind: runtimecontract.EvidenceKindStateChange,
 		Revision: "runtime-evidence-00000000000000000003", FailureClass: runtimecontract.FailureClassEffectMismatch,
 		FailureMessage: "hunk context mismatch", CoverageWorkItemIDs: facts.Focus.CoverageWorkItemIDs,
+		FocusID: facts.Focus.ID, BindingRefs: []string{facts.Focus.CoverageEvidenceBindings[0].ID}, TargetRefs: append([]string(nil), facts.Focus.TargetRefs...),
 	}}
 	facts.EvidenceRevision = "runtime-evidence-00000000000000000003"
-	facts = runtimeTestFactsWithCurrentFocusBindings(t, facts, runtimecontract.RuntimeDefinitionContext{StartupInputHash: "startup-input-test", Revision: facts.DefinitionRevision})
 	facts, decision, err := ReduceRuntimeStateWithDirective(facts, nil)
 	if err != nil {
 		t.Fatal(err)
@@ -97,9 +126,9 @@ func TestRepairDirectiveFlipsToValidationAfterAcceptedStateChangeEvenWhenAssessm
 	facts.Evidence.Accepted = append(facts.Evidence.Accepted, runtimecontract.EvidenceFact{
 		ID: "accepted-repair", Kind: runtimecontract.EvidenceKindStateChange,
 		Revision: "runtime-evidence-00000000000000000004", CoverageWorkItemIDs: facts.Focus.CoverageWorkItemIDs,
+		FocusID: facts.Focus.ID, BindingRefs: []string{facts.Focus.CoverageEvidenceBindings[0].ID}, TargetRefs: append([]string(nil), facts.Focus.TargetRefs...),
 	})
 	facts.EvidenceRevision = "runtime-evidence-00000000000000000004"
-	facts = runtimeTestFactsWithCurrentFocusBindings(t, facts, runtimecontract.RuntimeDefinitionContext{StartupInputHash: "startup-input-test", Revision: facts.DefinitionRevision})
 	facts, decision, err = ReduceRuntimeStateWithDirective(facts, &decision.AuthoritySnapshot)
 	if err != nil {
 		t.Fatal(err)
@@ -137,6 +166,8 @@ func TestRepairValidationDirectiveWithoutRecipeProducesTypedTerminal(t *testing.
 func TestRepairDirectiveDoesNotFlipForAcceptedStateChangeOutsideGroundedTarget(t *testing.T) {
 	facts := validationFacts()
 	facts.Focus.RequiredEvidenceKinds = []string{runtimecontract.EvidenceKindStateChange, runtimecontract.EvidenceKindValidation}
+	facts.Focus.TargetRefs = []string{"implementation.go"}
+	facts = runtimeTestFactsWithCurrentFocusBindings(t, facts, runtimecontract.RuntimeDefinitionContext{StartupInputHash: "startup-input-test", Revision: facts.DefinitionRevision})
 	facts.RepairDirective = &runtimecontract.RuntimeRepairDirective{
 		ID: "repair-cwi-1-produce_state_change-0", FocusID: facts.Focus.ID,
 		Trigger:               runtimecontract.RuntimeRepairTriggerRejectedValidation,
@@ -148,9 +179,9 @@ func TestRepairDirectiveDoesNotFlipForAcceptedStateChangeOutsideGroundedTarget(t
 	facts.Evidence.Accepted = []runtimecontract.EvidenceFact{{
 		ID: "accepted-validation-entry-edit", Kind: runtimecontract.EvidenceKindStateChange,
 		Revision: "runtime-evidence-00000000000000000003", TargetRefs: []string{"entry_test.go"}, CoverageWorkItemIDs: facts.Focus.CoverageWorkItemIDs,
+		FocusID: facts.Focus.ID, BindingRefs: []string{facts.Focus.CoverageEvidenceBindings[0].ID},
 	}}
 	facts.EvidenceRevision = "runtime-evidence-00000000000000000003"
-	facts = runtimeTestFactsWithCurrentFocusBindings(t, facts, runtimecontract.RuntimeDefinitionContext{StartupInputHash: "startup-input-test", Revision: facts.DefinitionRevision})
 	facts, decision, err := ReduceRuntimeStateWithDirective(facts, nil)
 	if err != nil {
 		t.Fatal(err)
@@ -162,9 +193,9 @@ func TestRepairDirectiveDoesNotFlipForAcceptedStateChangeOutsideGroundedTarget(t
 	facts.Evidence.Accepted = append(facts.Evidence.Accepted, runtimecontract.EvidenceFact{
 		ID: "accepted-implementation-edit", Kind: runtimecontract.EvidenceKindStateChange,
 		Revision: "runtime-evidence-00000000000000000004", TargetRefs: []string{"implementation.go"}, CoverageWorkItemIDs: facts.Focus.CoverageWorkItemIDs,
+		FocusID: facts.Focus.ID, BindingRefs: []string{facts.Focus.CoverageEvidenceBindings[0].ID},
 	})
 	facts.EvidenceRevision = "runtime-evidence-00000000000000000004"
-	facts = runtimeTestFactsWithCurrentFocusBindings(t, facts, runtimecontract.RuntimeDefinitionContext{StartupInputHash: "startup-input-test", Revision: facts.DefinitionRevision})
 	facts, decision, err = ReduceRuntimeStateWithDirective(facts, &decision.AuthoritySnapshot)
 	if err != nil {
 		t.Fatal(err)

@@ -478,7 +478,7 @@ func TestDeliverRuntimeTerminalRestartsAfterOwnerProjectionAcknowledgementLoss(t
 			baseWorkspaces := filerepository.NewWorkspaceRepository(root + "/workspaces.json")
 			results := filerepository.NewResultRepository(root + "/results.json")
 			firstRuns, firstWorkspaces, fired := tc.wrap(baseRuns, baseWorkspaces)
-			aggregate := runtimeOwnerGroundedTerminalAggregate(t)
+			aggregate := runtimeFocusGroundedTerminalAggregate(t)
 			if tc.administrative {
 				// RequestTermination must be the only source of an administrative
 				// terminal record.  Start from a valid, non-terminal aggregate and
@@ -617,7 +617,7 @@ func TestDeliverRuntimeTerminalRestartsAfterOwnerProjectionAcknowledgementLoss(t
 			if tc.administrative {
 				assertAdministrativeSupersedeAuthority(t, restartedAggregate)
 			} else {
-				assertOwnerGroundedTerminalAuthority(t, restartedAggregate)
+				assertFocusGroundedTerminalAuthority(t, restartedAggregate)
 			}
 			terminalRevision := restartedAggregate.StateRevision
 			restartedOrchestrator := New()
@@ -665,13 +665,13 @@ func TestDeliverRuntimeTerminalRestartsAfterOwnerProjectionAcknowledgementLoss(t
 			if tc.administrative {
 				assertAdministrativeSupersedeAuthority(t, projectedAggregate)
 			} else {
-				assertOwnerGroundedTerminalAuthority(t, projectedAggregate)
+				assertFocusGroundedTerminalAuthority(t, projectedAggregate)
 			}
 
 			// A delayed owner-catalog stale result belongs to the old candidate
 			// transaction. Once terminal authority is persisted there is no
 			// pending candidate to invalidate: SM-4 must reject it rather than
-			// reopen prerequisite acquisition or erase the sealed observation.
+			// reopen prerequisite acquisition or erase the focus-grounded target.
 			lateController, err := runtime.NewRuntimeController(runtimeStateRepository{hub: restartedHub})
 			if err != nil {
 				t.Fatal(err)
@@ -696,7 +696,7 @@ func TestDeliverRuntimeTerminalRestartsAfterOwnerProjectionAcknowledgementLoss(t
 			if tc.administrative {
 				assertAdministrativeSupersedeAuthority(t, unchangedAggregate)
 			} else {
-				assertOwnerGroundedTerminalAuthority(t, unchangedAggregate)
+				assertFocusGroundedTerminalAuthority(t, unchangedAggregate)
 			}
 		})
 	}
@@ -737,7 +737,7 @@ func TestDeliverRuntimeTerminalReplaysSameIdentityAfterOwnerCASConflict(t *testi
 			baseRuns := memory.NewRunRepository()
 			baseWorkspaces := memory.NewWorkspaceRepository()
 			results, runs, workspaces, fired := tc.wrap(baseResults, baseRuns, baseWorkspaces)
-			aggregate := runtimeOwnerGroundedTerminalAggregate(t)
+			aggregate := runtimeFocusGroundedTerminalAggregate(t)
 			record := runtimeStateRecordFromAggregate(aggregate)
 			runFixture := runtimeRunForTest(common.RunStateActive, aggregate.Definition)
 			runFixture.RuntimeState = &record
@@ -801,7 +801,7 @@ func TestDeliverRuntimeTerminalReplaysSameIdentityAfterOwnerCASConflict(t *testi
 			if err := projected.Validate(); err != nil || len(projected.DeliveryAcknowledgements) != 3 {
 				t.Fatalf("CAS replay changed terminal authority or acknowledgement ledger: aggregate=%+v err=%v", projected, err)
 			}
-			assertOwnerGroundedTerminalAuthority(t, projected)
+			assertFocusGroundedTerminalAuthority(t, projected)
 		})
 	}
 }
@@ -824,46 +824,95 @@ func runtimeTerminalAggregate(t *testing.T) runtime.RuntimeAggregate {
 	return aggregate
 }
 
-// runtimeOwnerGroundedTerminalAggregate models a terminal that already
-// contains a compatible capability-owner observation. Terminal delivery must
-// only project this committed authority; Result, Workspace and Run owners may
-// not clear, reinterpret or rebuild it after an acknowledgement loss.
-func runtimeOwnerGroundedTerminalAggregate(t *testing.T) runtime.RuntimeAggregate {
+// runtimeFocusGroundedTerminalAggregate models a terminal produced by one
+// rejected File-owner operation. The target has no discovered-target
+// observation, so its authority is the exact sealed operation -> receipt ->
+// rejected-evidence lineage. Terminal delivery must only project this committed
+// authority; Result, Workspace and Run owners may not clear, reinterpret or
+// rebuild it after an acknowledgement loss.
+func runtimeFocusGroundedTerminalAggregate(t *testing.T) runtime.RuntimeAggregate {
 	t.Helper()
-	aggregate := runtimeTerminalAggregate(t)
-	observation := &runtimecontract.RuntimeFailureTargetObservation{
-		OwnerModuleID:    runtimecontract.RuntimeModuleMCP,
-		SubjectRef:       "mcp-terminal-owner",
-		TargetRole:       "implementation",
-		ObservedRevision: "mcp-catalog-terminal-v1",
-		TargetRefs:       []string{"implementation.go"},
-	}
-	aggregate.Facts.Failure.TargetRefs = []string{"implementation.go"}
-	aggregate.Facts.Failure.TargetObservation = observation
-	aggregate.Facts.Resources.FailureTarget = &runtimecontract.FailureTarget{
-		Signature:         aggregate.Facts.Failure.Signature,
-		TargetRefs:        []string{"implementation.go"},
-		TargetObservation: observation,
-	}
-	decision, err := runtime.ReduceRuntimeState(aggregate.Facts, &aggregate.Decision.AuthoritySnapshot)
+	ctx := context.Background()
+	aggregate := runtimeAggregate(t, 1)
+	aggregate.Facts = runtimeCandidateSealExactFileEditFacts(t, "implementation.go")
+	aggregate.Facts.Resources.TargetSnapshots = []runtimecontract.TargetSnapshot{{
+		TargetRef: "implementation.go", Content: "terminal projection fixture", ContentHash: "terminal-projection-implementation-v1",
+		ContentState: runtimecontract.SnapshotContentStateComplete,
+	}}
+	repository := &inMemoryRuntimeStateRepository{aggregate: &aggregate}
+	controller, err := runtime.NewRuntimeController(repository)
 	if err != nil {
 		t.Fatal(err)
 	}
-	aggregate.Decision = decision
-	if err := aggregate.Validate(); err != nil {
-		t.Fatalf("owner-grounded terminal aggregate: %v", err)
+	aggregate = runtimeTestPersistSealedSemanticAuthority(t, ctx, repository, aggregate)
+	if aggregate.Decision.State != runtimecontract.ConvergenceStateNeedStateChange {
+		t.Fatalf("terminal receipt fixture did not reach candidate authority: state=%s pending=%+v resources=%+v", aggregate.Decision.State, aggregate.Facts.Prerequisites.Pending, aggregate.Facts.Resources)
 	}
-	return aggregate
+	if _, err := beginRuntimeCandidateAttemptForTest(ctx, controller, aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, 0, "terminal-receipt-lineage"); err != nil {
+		t.Fatal(err)
+	}
+	target := "implementation.go"
+	candidate := runtimecontract.RuntimeCandidate{StateChange: &runtimecontract.StateChangeCandidate{Operations: []runtimecontract.StateChangingOperation{{Operation: runtimecontract.RuntimeOperation{
+		ID: "terminal-file-edit", Kind: runtimecontract.StepKindFileEdit,
+		CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-v2"}, TargetRefs: []string{target}, Parameters: runtimeFileEditParameters(target),
+	}}}}}
+	proposal, err := admitRuntimeCandidateProposalForTest(ctx, controller, aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, 0, candidate)
+	if err != nil || !proposal.Admission.Accepted() {
+		t.Fatalf("admit terminal receipt proposal=%+v err=%v", proposal, err)
+	}
+	recordRuntimeFileEditFeasibility(t, ctx, controller)
+	sealed, err := admitAndSealRuntimeCandidateAttemptForTest(ctx, controller, aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, 0, candidate)
+	if err != nil || !sealed.Admission.Accepted() || sealed.Aggregate.ActiveDispatch == nil {
+		t.Fatalf("seal terminal receipt dispatch=%+v err=%v", sealed, err)
+	}
+
+	terminal, err := runtimeTestControllerExecuteDispatch(controller, ctx, aggregate.Facts.WorkspaceID, aggregate.Facts.RunID,
+		runtimeOperationExecutorFunc(func(ctx context.Context, request runtime.RuntimeOperationExecutionRequest) (runtime.RuntimeOperationExecutionResult, error) {
+			failure := runtimecontract.FailureFact{
+				Class: runtimecontract.FailureClassRuntimeContractMisalignment, Code: "runtime_contract_defect",
+				Signature: "contract-defect", Message: "sealed contract mismatch", TargetRefs: []string{target},
+			}
+			receipt := runtimecontract.RuntimeOperationReceipt{
+				ExecutionKey: request.Execution.ExecutionKey, OperationID: request.Operation.ID,
+				Outcome: runtimecontract.RuntimeOperationOutcomeRejected, ObservedEffectScope: runtimecontract.RuntimeEffectUnknown,
+				Evidence: runtimecontract.RuntimeOperationEvidence{Summary: "File owner rejected the sealed operation"},
+			}
+			feedback, feedbackErr := runtimecontract.RuntimeFeedbackFromFailureFact(runtimecontract.RuntimeFeedbackScope{
+				WorkspaceID: request.WorkspaceID, RunID: request.RunID, AuthoritySnapshotID: request.Transaction.AuthoritySnapshotID, DispatchID: request.DispatchID,
+			}, runtimecontract.RuntimeFeedbackDomainOperation, runtimecontract.RuntimeFeedbackCategory(receipt.Outcome), runtimecontract.RuntimeModuleFile, failure)
+			if feedbackErr != nil {
+				return runtime.RuntimeOperationExecutionResult{}, feedbackErr
+			}
+			feedback.OriginalDiagnostic.OperationID = request.Operation.ID
+			receipt.Feedback = &feedback
+			_, committed, commitErr := runtimeTestControllerCommitOperationReceipt(controller, ctx, request.WorkspaceID, request.RunID, request.DispatchID, request.Execution.Fence, receipt)
+			if commitErr != nil {
+				return runtime.RuntimeOperationExecutionResult{}, commitErr
+			}
+			return runtime.RuntimeOperationExecutionResult{
+				EventID: "event-terminal-file-rejection", OperationID: request.Operation.ID,
+				EvidenceKind: runtimecontract.EvidenceKindStateChange, Status: runtime.ExecutionEvidenceStatusRejected,
+				SourceRef: "runtime://terminal-file-rejection", Failure: &failure, Evidence: committed.Evidence, Receipt: committed,
+			}, nil
+		}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := terminal.Validate(); err != nil {
+		t.Fatalf("focus-grounded terminal aggregate: %v", err)
+	}
+	return terminal
 }
 
-func assertOwnerGroundedTerminalAuthority(t *testing.T, aggregate runtime.RuntimeAggregate) {
+func assertFocusGroundedTerminalAuthority(t *testing.T, aggregate runtime.RuntimeAggregate) {
 	t.Helper()
 	target := aggregate.Facts.Resources.FailureTarget
-	if aggregate.Decision.Terminal == nil || aggregate.Facts.Failure == nil || target == nil || target.TargetObservation == nil ||
+	if aggregate.Decision.Terminal == nil || aggregate.Facts.Failure == nil || target == nil || target.TargetObservation != nil ||
 		target.Signature != aggregate.Facts.Failure.Signature || len(target.TargetRefs) != 1 || target.TargetRefs[0] != "implementation.go" ||
-		target.TargetObservation.OwnerModuleID != runtimecontract.RuntimeModuleMCP || target.TargetObservation.SubjectRef != "mcp-terminal-owner" ||
-		target.TargetObservation.TargetRole != "implementation" || target.TargetObservation.ObservedRevision != "mcp-catalog-terminal-v1" {
-		t.Fatalf("terminal projection lost owner-grounded authority: aggregate=%+v", aggregate)
+		len(aggregate.Facts.Focus.TargetRefs) != 1 || aggregate.Facts.Focus.TargetRefs[0] != "implementation.go" ||
+		len(aggregate.Facts.Failure.TargetRefs) != 1 || aggregate.Facts.Failure.TargetRefs[0] != "implementation.go" || aggregate.Facts.Failure.TargetObservation != nil ||
+		len(aggregate.CompletedDispatches) != 1 || len(aggregate.OperationReceipts) != 1 || len(aggregate.Facts.Evidence.Rejected) != 1 || aggregate.EvidenceSequence != 1 {
+		t.Fatalf("terminal projection lost focus-grounded authority: aggregate=%+v", aggregate)
 	}
 }
 

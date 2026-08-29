@@ -49,6 +49,152 @@ func TestRuntimeCandidateAttemptScopeValidationRequiresExplicitContractAndReject
 	}
 }
 
+func TestRuntimeCandidateAttemptAcceptedRequiresIndependentTargetAuthorizationCommitment(t *testing.T) {
+	facts := testRuntimeFacts()
+	transaction := validDecisionForState(ConvergenceStateNeedStateChange).AuthorityTransaction()
+	projection := []RuntimeDispatchOperationTargetAuthorization{{
+		OperationID: "op-1", OperationHash: "operation-hash-1", RequireTargets: true,
+		Target: RuntimeOperationTargetAuthorization{Policy: RuntimeOperationTargetPolicyExactTarget, ExactTargetRefs: []string{"target.txt"}},
+	}}
+	record := RuntimeCandidateAttemptRecord{
+		AuthorityContractID: StableAuthorityContractID(facts.WorkspaceID, facts.RunID, transaction),
+		Transaction:         transaction, Attempt: 0, StablePrefixHash: "stable-prefix", ManifestHash: "manifest-1",
+		LogicalRequestID: "request-0", State: RuntimeCandidateAttemptStateAccepted,
+		CandidateHash: "candidate-1", DispatchID: "dispatch-1",
+		AdmissionTargetAuthorizations: projection,
+		TargetAuthorizationHash:       StableRuntimeDispatchOperationTargetAuthorizationsHash(projection),
+		AdmissionCoverageBindingHash:  StableRuntimeCoverageEvidenceBindingSnapshotHash(nil),
+		DispatchAuthorityHash:         "dispatch-authority-1",
+	}
+	if err := ValidateRuntimeCandidateAttemptRecordsForScope(facts.WorkspaceID, facts.RunID, []RuntimeCandidateAttemptRecord{record}); err != nil {
+		t.Fatalf("accepted attempt target commitment rejected: %v", err)
+	}
+
+	missing := record
+	missing.TargetAuthorizationHash = ""
+	if err := ValidateRuntimeCandidateAttemptRecordsForScope(facts.WorkspaceID, facts.RunID, []RuntimeCandidateAttemptRecord{missing}); err == nil ||
+		!strings.Contains(err.Error(), "target-authorization") {
+		t.Fatalf("accepted attempt missing target commitment error = %v", err)
+	}
+
+	pending := record
+	pending.State = RuntimeCandidateAttemptStatePending
+	pending.CandidateHash = ""
+	pending.DispatchID = ""
+	pending.DispatchAuthorityHash = ""
+	if err := ValidateRuntimeCandidateAttemptRecordsForScope(facts.WorkspaceID, facts.RunID, []RuntimeCandidateAttemptRecord{pending}); err == nil ||
+		!strings.Contains(err.Error(), "cannot carry dispatch authority") {
+		t.Fatalf("pending attempt retained target commitment error = %v", err)
+	}
+	pendingProjectionOnly := pending
+	pendingProjectionOnly.TargetAuthorizationHash = ""
+	if err := ValidateRuntimeCandidateAttemptRecordsForScope(facts.WorkspaceID, facts.RunID, []RuntimeCandidateAttemptRecord{pendingProjectionOnly}); err == nil ||
+		!strings.Contains(err.Error(), "cannot carry dispatch authority") {
+		t.Fatalf("pending attempt retained admission projection error = %v", err)
+	}
+
+	failedProjectionOnly := record.Clone()
+	failedProjectionOnly.State = RuntimeCandidateAttemptStateFailed
+	failedProjectionOnly.CandidateHash = ""
+	failedProjectionOnly.DispatchID = ""
+	failedProjectionOnly.TargetAuthorizationHash = ""
+	failedProjectionOnly.DispatchAuthorityHash = ""
+	failedProjectionOnly.Failure = &RuntimeCandidateFailure{Class: RuntimeCandidateFailureClassContract, Reason: "invalid candidate"}
+	failedProjectionOnly.Correction = runtimeCandidateAttemptCorrectableDirective(record.ManifestHash)
+	if err := ValidateRuntimeCandidateAttemptRecordsForScope(facts.WorkspaceID, facts.RunID, []RuntimeCandidateAttemptRecord{failedProjectionOnly}); err == nil ||
+		!strings.Contains(err.Error(), "cannot carry dispatch authority") {
+		t.Fatalf("failed attempt retained admission projection error = %v", err)
+	}
+
+	invalidatedProjectionOnly := record.Clone()
+	invalidatedProjectionOnly.State = RuntimeCandidateAttemptStateInvalidated
+	invalidatedProjectionOnly.CandidateHash = ""
+	invalidatedProjectionOnly.DispatchID = ""
+	invalidatedProjectionOnly.TargetAuthorizationHash = ""
+	invalidatedProjectionOnly.DispatchAuthorityHash = ""
+	invalidatedProjectionOnly.Stale = &RuntimePrerequisiteStale{
+		PrerequisiteID: "target-snapshot", ObservationID: "observation-1",
+		Domain: RuntimeResourceWorkspaceTree, OwnerModuleID: RuntimeModuleFile,
+		SubjectRef: "workspace", ExpectedRevision: "tree-v1", ObservedRevision: "tree-v2", Reason: "workspace changed",
+	}
+	if err := ValidateRuntimeCandidateAttemptRecordsForScope(facts.WorkspaceID, facts.RunID, []RuntimeCandidateAttemptRecord{invalidatedProjectionOnly}); err == nil ||
+		!strings.Contains(err.Error(), "cannot carry dispatch authority") {
+		t.Fatalf("invalidated attempt retained admission projection error = %v", err)
+	}
+
+	tampered := record.Clone()
+	tampered.AdmissionTargetAuthorizations[0].Target.ExactTargetRefs = []string{"other.txt"}
+	if err := ValidateRuntimeCandidateAttemptRecordsForScope(facts.WorkspaceID, facts.RunID, []RuntimeCandidateAttemptRecord{tampered}); err == nil ||
+		!strings.Contains(err.Error(), "does not match admission projection") {
+		t.Fatalf("accepted attempt projection/hash mismatch error = %v", err)
+	}
+
+	cloned := record.Clone()
+	cloned.AdmissionTargetAuthorizations[0].Target.ExactTargetRefs[0] = "clone.txt"
+	if record.AdmissionTargetAuthorizations[0].Target.ExactTargetRefs[0] != "target.txt" {
+		t.Fatal("candidate attempt clone aliased admission target projection")
+	}
+}
+
+func TestRuntimeCandidateAttemptAcceptedManagedValidationRequiresIndependentRecipeCommitment(t *testing.T) {
+	facts := testRuntimeFacts()
+	transaction := validDecisionForState(ConvergenceStateNeedValidation).AuthorityTransaction()
+	targetProjection := []RuntimeDispatchOperationTargetAuthorization{{
+		OperationID: "validate-1", OperationHash: "operation-hash-1", RequireTargets: true,
+		Target: RuntimeOperationTargetAuthorization{Policy: RuntimeOperationTargetPolicyExactTarget, ExactTargetRefs: []string{"target.txt"}},
+	}}
+	recipeProjection := []RuntimeValidationRecipe{{
+		ID: "recipe-1", Command: "go", Args: []string{"test", "./..."}, TimeoutMillis: 5000,
+	}}
+	record := RuntimeCandidateAttemptRecord{
+		AuthorityContractID: StableAuthorityContractID(facts.WorkspaceID, facts.RunID, transaction),
+		Transaction:         transaction, Attempt: 0, StablePrefixHash: "stable-prefix", ManifestHash: "manifest-1",
+		LogicalRequestID: "request-0", State: RuntimeCandidateAttemptStateAccepted,
+		CandidateHash: "candidate-1", DispatchID: "dispatch-1",
+		AdmissionTargetAuthorizations: targetProjection,
+		TargetAuthorizationHash:       StableRuntimeDispatchOperationTargetAuthorizationsHash(targetProjection),
+		AdmissionCoverageBindingHash:  StableRuntimeCoverageEvidenceBindingSnapshotHash(nil),
+		AdmissionValidationRecipes:    recipeProjection,
+		ValidationRecipeHash:          StableRuntimeValidationRecipeSnapshotHash(recipeProjection),
+		DispatchAuthorityHash:         "dispatch-authority-1",
+	}
+	if err := ValidateRuntimeCandidateAttemptRecordsForScope(facts.WorkspaceID, facts.RunID, []RuntimeCandidateAttemptRecord{record}); err != nil {
+		t.Fatalf("accepted attempt validation-recipe commitment rejected: %v", err)
+	}
+
+	missingHash := record.Clone()
+	missingHash.ValidationRecipeHash = ""
+	if err := ValidateRuntimeCandidateAttemptRecordsForScope(facts.WorkspaceID, facts.RunID, []RuntimeCandidateAttemptRecord{missingHash}); err == nil ||
+		!strings.Contains(err.Error(), "validation-recipe hash") {
+		t.Fatalf("accepted attempt missing validation-recipe commitment error = %v", err)
+	}
+
+	tampered := record.Clone()
+	tampered.AdmissionValidationRecipes[0].Args = []string{"test", "./changed/..."}
+	if err := ValidateRuntimeCandidateAttemptRecordsForScope(facts.WorkspaceID, facts.RunID, []RuntimeCandidateAttemptRecord{tampered}); err == nil ||
+		!strings.Contains(err.Error(), "validation-recipe hash does not match") {
+		t.Fatalf("accepted attempt recipe projection/hash mismatch error = %v", err)
+	}
+
+	pending := record.Clone()
+	pending.State = RuntimeCandidateAttemptStatePending
+	pending.CandidateHash = ""
+	pending.DispatchID = ""
+	pending.AdmissionTargetAuthorizations = nil
+	pending.TargetAuthorizationHash = ""
+	pending.DispatchAuthorityHash = ""
+	if err := ValidateRuntimeCandidateAttemptRecordsForScope(facts.WorkspaceID, facts.RunID, []RuntimeCandidateAttemptRecord{pending}); err == nil ||
+		!strings.Contains(err.Error(), "cannot carry dispatch authority") {
+		t.Fatalf("pending attempt retained validation-recipe commitment error = %v", err)
+	}
+
+	cloned := record.Clone()
+	cloned.AdmissionValidationRecipes[0].Args[0] = "changed"
+	if record.AdmissionValidationRecipes[0].Args[0] != "test" {
+		t.Fatal("candidate attempt clone aliased admission validation-recipe projection")
+	}
+}
+
 func TestRuntimeCandidateAttemptFailedRequiresManifestBoundTotalCorrection(t *testing.T) {
 	facts := testRuntimeFacts()
 	transaction := validDecisionForState(ConvergenceStateNeedStateChange).AuthorityTransaction()
@@ -172,6 +318,7 @@ func TestRuntimeCandidateFeasibilityRecordValidationRejectsAmbiguousOrAcceptedLe
 
 func TestRuntimeStateRecordRejectsTerminalDecisionWithPendingCandidateAttempt(t *testing.T) {
 	facts := testRuntimeFacts()
+	facts.EvidenceRevision = InitialRuntimeEvidenceRevision
 	binding := CoverageEvidenceBinding{
 		ID: "binding/cwi-1", CoverageWorkItemID: "cwi-1", FocusID: facts.Focus.ID, DefinitionRevision: facts.DefinitionRevision,
 		Proofs:     []CoverageEvidenceProof{{EvidenceKind: EvidenceKindStateChange, RequiredEffectScopes: []RuntimeEffectScope{RuntimeEffectWorkspaceDurable}, AllowedOperationKinds: []string{RuntimeBlockKindPatchApply}}},
@@ -199,7 +346,7 @@ func TestRuntimeStateRecordRejectsTerminalDecisionWithPendingCandidateAttempt(t 
 	}
 	facts.DefinitionSeed.Hash = StableRuntimeDefinitionSeedHash(facts.DefinitionSeed)
 	facts.DefinitionFocuses = []RuntimeDefinitionFocus{{
-		ID: facts.Focus.ID, SliceID: "slice-1", CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-1"},
+		ID: facts.Focus.ID, SliceID: "slice-1", AssessmentScope: "dodItem", AssessmentID: "dod-1", AssessmentText: "deliver", CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-1"},
 		RequiredEvidenceKinds: []string{EvidenceKindStateChange},
 	}}
 	reconciliation, err := CompileRuntimeCWIReconciliationContract(facts.DefinitionRevision, []CoverageFocus{facts.Focus})

@@ -3,6 +3,8 @@ package workorchruntimecontract
 import (
 	"strings"
 	"testing"
+
+	"github.com/muidea/workorch/internal/pkg/common"
 )
 
 func TestValidateRuntimeOperationReceiptExecutionLineageAcceptsExactBidirectionalProjection(t *testing.T) {
@@ -12,6 +14,8 @@ func TestValidateRuntimeOperationReceiptExecutionLineageAcceptsExactBidirectiona
 
 	completedClone := execution.Clone()
 	completedClone.State = OperationExecutionEvidenceCommitted
+	completedClone.EvidenceFactID = "evidence-op-1"
+	completedClone.EvidenceFactHash = "evidence-hash-1"
 	completed := []RuntimeDispatchRecord{{ID: "dispatch-source", OperationExecutions: []RuntimeOperationExecutionRecord{completedClone}}}
 	if err := ValidateRuntimeOperationReceiptExecutionLineage(&active, completed, []RuntimeOperationReceipt{receipt}); err != nil {
 		t.Fatalf("validate exact receipt lineage: %v", err)
@@ -122,6 +126,10 @@ func runtimeOperationReceiptLineageExecution(receipt RuntimeOperationReceipt, st
 		OwnerReceiptRef:     "runtime-receipt/" + receipt.ExecutionKey,
 		OwnerReceiptHash:    StableRuntimeOperationReceiptHash(receipt),
 		ClaimedAt:           RuntimeOperationClaimMarkerInitial,
+	}
+	if state == OperationExecutionEvidenceCommitted {
+		execution.EvidenceFactID = common.EvidenceRecordID("evidence-" + receipt.OperationID)
+		execution.EvidenceFactHash = "evidence-hash-" + receipt.OperationID
 	}
 	execution.AuthorityHash = StableRuntimeOperationExecutionAuthorityHash(execution)
 	return execution

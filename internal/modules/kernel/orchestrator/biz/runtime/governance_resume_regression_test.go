@@ -2,6 +2,8 @@ package runtime
 
 import (
 	"context"
+	"encoding/json"
+	"strings"
 	"testing"
 
 	"github.com/muidea/workorch/internal/pkg/common"
@@ -52,24 +54,24 @@ func newCatalogOnlyShellGovernanceFixture(t *testing.T) catalogOnlyShellGovernan
 	}
 
 	facts := controllerFacts()
-	facts.Focus.TargetRefs = nil
+	facts.Focus.TargetRefs = []string{"a.txt", "b.txt"}
+	facts.Focus.AcceptedStepKinds = []string{runtimecontract.StepKindShellCommand}
 	facts.Capabilities.StateChangeKinds = []string{runtimecontract.StepKindShellCommand}
 	facts.Capabilities.GovernanceKinds = []string{runtimecontract.RuntimeBlockKindApprovalRequest}
 	facts.Activation.OperationPolicies = nil
 	facts.Resources.OperationAdmissibilities = []runtimecontract.RuntimeOperationAdmissibility{catalog}
 	facts.Resources.PrerequisiteObservations = []runtimecontract.RuntimePrerequisiteObservation{observation}
 	facts.Prerequisites.Satisfied = []runtimecontract.RuntimePrerequisite{prerequisite}
-	facts = runtimeTestFactsWithCurrentFocusBindings(t, facts, controllerDefinition())
 
 	repository := &controllerRepository{}
 	controller, err := NewRuntimeController(repository)
 	if err != nil {
 		t.Fatal(err)
 	}
-	initialized, err := controller.initialize(ctx, facts, controllerDefinition(), nil)
-	if err != nil {
-		t.Fatal(err)
-	}
+	definition := controllerDefinition()
+	definition.CapabilityContract = []string{runtimecontract.StepKindShellCommand}
+	initialized := runtimeTestInitializeAndSealSemanticContract(t, ctx, controller, facts, definition, nil)
+	facts = initialized.Facts
 	command := "sh"
 	argsA := []string{"-c", "printf a > a.txt"}
 	argsB := []string{"-c", "printf b > b.txt"}
@@ -169,6 +171,168 @@ func newCatalogOnlyShellGovernanceFixture(t *testing.T) catalogOnlyShellGovernan
 	}
 }
 
+func TestRejectedGovernanceResumeReceiptBindsResumeDispatchAcrossFreshLoad(t *testing.T) {
+	ctx := context.Background()
+	fixture := newCatalogOnlyShellGovernanceFixture(t)
+	resume, execution, receipt := rejectedGovernanceResumeReceiptForTest(t, &fixture)
+
+	originDispatchID, err := runtimecontract.RuntimeOperationExecutionKeyOrigin(
+		fixture.aggregate.Facts.WorkspaceID,
+		fixture.aggregate.Facts.RunID,
+		execution.ExecutionKey,
+		execution.OperationID,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if originDispatchID == resume.ID || receipt.Feedback == nil || receipt.Feedback.DispatchID != resume.ID {
+		t.Fatalf("governance-resume regression fixture lost origin/current split: origin=%q resume=%q feedback=%+v", originDispatchID, resume.ID, receipt.Feedback)
+	}
+
+	committed, persisted, err := fixture.controller.commitOperationReceipt(
+		ctx,
+		fixture.aggregate.Facts.WorkspaceID,
+		fixture.aggregate.Facts.RunID,
+		resume.ID,
+		execution.Fence,
+		receipt,
+	)
+	if err != nil {
+		t.Fatalf("commit rejected governance-resume receipt: %v", err)
+	}
+	committedExecution, found := operationExecutionRecord(committed.ActiveDispatch.OperationExecutions, execution.OperationID)
+	if !found || committedExecution.State != runtimecontract.OperationExecutionOwnerCommitted ||
+		committedExecution.ExecutionKey != execution.ExecutionKey || committedExecution.Fence != execution.Fence ||
+		committedExecution.OwnerReceiptRef != "runtime-receipt/"+execution.ExecutionKey ||
+		committedExecution.OwnerReceiptHash != runtimecontract.StableRuntimeOperationReceiptHash(persisted) {
+		t.Fatalf("rejected governance-resume receipt projection = %+v", committedExecution)
+	}
+
+	reloaded := governanceResumeAggregateJSONRoundTrip(t, committed)
+	if err := reloaded.Validate(); err != nil {
+		t.Fatalf("fresh-load rejected governance-resume receipt: %v", err)
+	}
+}
+
+func TestRejectedGovernanceResumeReceiptRejectsOriginOrUnknownFeedbackDispatch(t *testing.T) {
+	for _, test := range []struct {
+		name          string
+		feedbackScope func(originDispatchID string) string
+	}{
+		{name: "execution-key origin", feedbackScope: func(originDispatchID string) string { return originDispatchID }},
+		{name: "unknown dispatch", feedbackScope: func(string) string { return "dispatch-other" }},
+	} {
+		t.Run(test.name+" at commit", func(t *testing.T) {
+			fixture := newCatalogOnlyShellGovernanceFixture(t)
+			resume, execution, receipt := rejectedGovernanceResumeReceiptForTest(t, &fixture)
+			originDispatchID, err := runtimecontract.RuntimeOperationExecutionKeyOrigin(
+				fixture.aggregate.Facts.WorkspaceID,
+				fixture.aggregate.Facts.RunID,
+				execution.ExecutionKey,
+				execution.OperationID,
+			)
+			if err != nil {
+				t.Fatal(err)
+			}
+			receipt.Feedback.DispatchID = test.feedbackScope(originDispatchID)
+			revision, saves, receiptCount := fixture.aggregate.StateRevision, fixture.repository.saves, len(fixture.aggregate.OperationReceipts)
+			if _, _, err := fixture.controller.commitOperationReceipt(
+				context.Background(), fixture.aggregate.Facts.WorkspaceID, fixture.aggregate.Facts.RunID,
+				resume.ID, execution.Fence, receipt,
+			); err == nil || !strings.Contains(err.Error(), "operation receipt feedback does not match receipt identity") {
+				t.Fatalf("feedback dispatch %q commit error = %v", receipt.Feedback.DispatchID, err)
+			}
+			if fixture.repository.aggregate.StateRevision != revision || fixture.repository.saves != saves || len(fixture.repository.aggregate.OperationReceipts) != receiptCount {
+				t.Fatalf("drifted governance-resume receipt changed aggregate: revision=%d saves=%d receipts=%d", fixture.repository.aggregate.StateRevision, fixture.repository.saves, len(fixture.repository.aggregate.OperationReceipts))
+			}
+		})
+
+		t.Run(test.name+" at fresh load", func(t *testing.T) {
+			fixture := newCatalogOnlyShellGovernanceFixture(t)
+			resume, execution, receipt := rejectedGovernanceResumeReceiptForTest(t, &fixture)
+			originDispatchID, err := runtimecontract.RuntimeOperationExecutionKeyOrigin(
+				fixture.aggregate.Facts.WorkspaceID,
+				fixture.aggregate.Facts.RunID,
+				execution.ExecutionKey,
+				execution.OperationID,
+			)
+			if err != nil {
+				t.Fatal(err)
+			}
+			committed, _, err := fixture.controller.commitOperationReceipt(
+				context.Background(), fixture.aggregate.Facts.WorkspaceID, fixture.aggregate.Facts.RunID,
+				resume.ID, execution.Fence, receipt,
+			)
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			badReceipt := receipt.Clone()
+			badReceipt.Fence = execution.Fence
+			badReceipt.Feedback.DispatchID = test.feedbackScope(originDispatchID)
+			badReceipt = badReceipt.Normalized()
+			for index := range committed.OperationReceipts {
+				if committed.OperationReceipts[index].ExecutionKey == badReceipt.ExecutionKey && committed.OperationReceipts[index].Fence == badReceipt.Fence {
+					committed.OperationReceipts[index] = badReceipt
+				}
+			}
+			for index := range committed.ActiveDispatch.OperationExecutions {
+				projection := &committed.ActiveDispatch.OperationExecutions[index]
+				if projection.ExecutionKey == badReceipt.ExecutionKey && projection.Fence == badReceipt.Fence && projection.OperationID == badReceipt.OperationID {
+					projection.OwnerReceiptHash = runtimecontract.StableRuntimeOperationReceiptHash(badReceipt)
+				}
+			}
+			reloaded := governanceResumeAggregateJSONRoundTrip(t, committed)
+			if err := reloaded.Validate(); err == nil || !strings.Contains(err.Error(), "does not match an exact committed execution projection") {
+				t.Fatalf("feedback dispatch %q fresh-load error = %v", badReceipt.Feedback.DispatchID, err)
+			}
+		})
+	}
+}
+
+func rejectedGovernanceResumeReceiptForTest(t *testing.T, fixture *catalogOnlyShellGovernanceFixture) (SealedDispatch, runtimecontract.RuntimeOperationExecutionRecord, runtimecontract.RuntimeOperationReceipt) {
+	t.Helper()
+	if fixture.aggregate.ActiveDispatch == nil {
+		t.Fatal("governance continuation has no resume dispatch")
+	}
+	started, grant, err := fixture.controller.candidateDispatch.markGovernanceResumeExecutionStarted(
+		context.Background(), fixture.aggregate.Facts.WorkspaceID, fixture.aggregate.Facts.RunID, fixture.firstOperationID,
+	)
+	if err != nil || grant == nil {
+		t.Fatalf("mark rejected governance-resume execution started: grant=%+v err=%v", grant, err)
+	}
+	fixture.aggregate = started
+	resume := *started.ActiveDispatch
+	execution, found := operationExecutionRecord(resume.OperationExecutions, fixture.firstOperationID)
+	if !found || execution.State != runtimecontract.OperationExecutionClaimed || execution.Fence == 0 ||
+		execution.ClaimedAt != runtimecontract.RuntimeOperationClaimMarkerGovernanceEffectStarted {
+		t.Fatalf("governance resume execution = %+v", execution)
+	}
+	failure := runtimecontract.FailureFact{
+		Class: runtimecontract.FailureClassExecutionRejected, Code: "governed_owner_rejected",
+		Signature: "governed-owner-rejected", Message: "governed owner rejected the resumed operation",
+	}
+	receipt := runtimecontract.RuntimeOperationReceipt{
+		ExecutionKey: execution.ExecutionKey, Fence: execution.Fence, OperationID: execution.OperationID,
+		Outcome: runtimecontract.RuntimeOperationOutcomeRejected, ObservedEffectScope: execution.ExpectedEffectScope,
+		Feedback: runtimeOperationFeedbackForTest(t, fixture.aggregate, execution.OperationID, failure),
+	}
+	return resume, execution, receipt
+}
+
+func governanceResumeAggregateJSONRoundTrip(t *testing.T, aggregate RuntimeAggregate) RuntimeAggregate {
+	t.Helper()
+	payload, err := json.Marshal(aggregate)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var reloaded RuntimeAggregate
+	if err := json.Unmarshal(payload, &reloaded); err != nil {
+		t.Fatal(err)
+	}
+	return reloaded
+}
+
 func TestGovernanceResumeUsesCatalogOnlyDynamicOwnerPolicyForPendingSibling(t *testing.T) {
 	fixture := newCatalogOnlyShellGovernanceFixture(t)
 	if _, found := runtimecontract.RuntimeOperationPolicyForOperation(
@@ -212,8 +376,8 @@ func TestSequentialGovernanceResumePreservesCompletedGovernedExecution(t *testin
 	firstReceipt := runtimecontract.RuntimeOperationReceipt{
 		ExecutionKey: firstExecution.ExecutionKey, Fence: firstExecution.Fence, OperationID: firstExecution.OperationID,
 		Outcome: runtimecontract.RuntimeOperationOutcomeAccepted, ObservedEffectScope: firstExecution.ExpectedEffectScope,
-		Changed: true, TargetRefs: []string{"a.txt"},
-		Evidence: runtimecontract.RuntimeOperationEvidence{Summary: "first governed shell mutation committed"},
+		Changed: false, TargetRefs: []string{"a.txt"},
+		Evidence: runtimecontract.RuntimeOperationEvidence{Summary: "first governed shell operation completed without CWI credit"},
 	}
 	ownerCommitted, _, err := fixture.controller.commitOperationReceipt(
 		ctx, started.Facts.WorkspaceID, started.Facts.RunID, firstResumeID, firstExecution.Fence, firstReceipt,
@@ -224,12 +388,7 @@ func TestSequentialGovernanceResumePreservesCompletedGovernedExecution(t *testin
 	// Keep the CWI open so this fixture can exercise a second governance edge.
 	// The receipt and execution budget use production transitions; only the
 	// already-judged evidence marker advances without crediting the CWI.
-	for idx := range ownerCommitted.ActiveDispatch.OperationExecutions {
-		if ownerCommitted.ActiveDispatch.OperationExecutions[idx].OperationID == fixture.firstOperationID {
-			ownerCommitted.ActiveDispatch.OperationExecutions[idx].State = runtimecontract.OperationExecutionEvidenceCommitted
-		}
-	}
-	ownerCommitted.ActiveDispatch.CompletedOperationIDs = appendNormalizedString(ownerCommitted.ActiveDispatch.CompletedOperationIDs, fixture.firstOperationID)
+	runtimeTestCommitAcceptedReceiptEvidence(t, &ownerCommitted, fixture.firstOperationID)
 	fixture.repository.aggregate = &ownerCommitted
 	claimed, err := fixture.controller.claimOperationExecution(ctx, ownerCommitted.Facts.WorkspaceID, ownerCommitted.Facts.RunID, fixture.secondOperationID)
 	if err != nil {

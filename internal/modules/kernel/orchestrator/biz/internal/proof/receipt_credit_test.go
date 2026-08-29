@@ -31,7 +31,7 @@ func TestMatchCoverageReceiptRequiresOneExactBinding(t *testing.T) {
 			RecipeID: "recipe-1", ExecutedChecks: []string{"check-1"}, PassedChecks: []string{"check-1"},
 		}},
 	}
-	finding := MatchCoverageReceipt(facts, operation, runtimecontract.EvidenceKindValidation, receipt)
+	finding := MatchCoverageReceipt(facts.Focus.CoverageEvidenceBindings, operation, runtimecontract.EvidenceKindValidation, receipt)
 	if finding.Diagnostic != "" || len(finding.CoverageWorkItemIDs) != 1 || finding.CoverageWorkItemIDs[0] != "cwi-1" {
 		t.Fatalf("exact receipt finding = %+v", finding)
 	}
@@ -39,17 +39,17 @@ func TestMatchCoverageReceiptRequiresOneExactBinding(t *testing.T) {
 	conflictingObservation := receipt.Evidence.Validation.Clone()
 	conflictingObservation.FailedChecks = []string{"check-1"}
 	conflicting.Evidence.Validation = &conflictingObservation
-	finding = MatchCoverageReceipt(facts, operation, runtimecontract.EvidenceKindValidation, &conflicting)
+	finding = MatchCoverageReceipt(facts.Focus.CoverageEvidenceBindings, operation, runtimecontract.EvidenceKindValidation, &conflicting)
 	if len(finding.CoverageWorkItemIDs) != 0 || !strings.Contains(finding.Diagnostic, "passed check") {
 		t.Fatalf("conflicting check received coverage credit: %+v", finding)
 	}
 	operation.BindingRefs = []string{binding.ID, "binding-2"}
-	finding = MatchCoverageReceipt(facts, operation, runtimecontract.EvidenceKindValidation, receipt)
+	finding = MatchCoverageReceipt(facts.Focus.CoverageEvidenceBindings, operation, runtimecontract.EvidenceKindValidation, receipt)
 	if len(finding.CoverageWorkItemIDs) != 0 || !strings.Contains(finding.Diagnostic, "exactly one") {
 		t.Fatalf("multi-binding receipt finding = %+v", finding)
 	}
 	operation.BindingRefs = []string{binding.ID}
-	finding = MatchCoverageReceipt(facts, operation, runtimecontract.EvidenceKindValidation, nil)
+	finding = MatchCoverageReceipt(facts.Focus.CoverageEvidenceBindings, operation, runtimecontract.EvidenceKindValidation, nil)
 	if !strings.Contains(finding.Diagnostic, "missing persisted owner receipt") {
 		t.Fatalf("nil receipt finding = %+v", finding)
 	}

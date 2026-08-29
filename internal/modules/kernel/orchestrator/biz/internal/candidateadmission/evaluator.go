@@ -55,10 +55,7 @@ type EvaluationInput struct {
 // structurally accepted. It does not consume an attempt, choose correction or
 // terminal state, probe an owner, seal a dispatch, or mutate Runtime state.
 func Evaluate(input EvaluationInput) *runtimecontract.RuntimeCandidateFailure {
-	ownerFacts := runtimecontract.RuntimeCandidateManifestOwnerFactsFromContext(
-		runtimecontract.RuntimeCandidateContextForDecision(input.Facts, input.Decision, nil),
-	)
-	if err := runtimecontract.ValidateRuntimeCandidateContractManifestForDecision(input.Manifest, input.Decision, ownerFacts); err != nil {
+	if err := runtimecontract.ValidateRuntimeCandidateContractManifestForSealedDecision(input.Manifest, input.Decision); err != nil {
 		return completeCandidateFailure(input.Manifest, input.Candidate, contractFailure(CodeInvalid, InvalidSignature(input.Candidate), fmt.Sprintf("runtime candidate manifest contract: %v", err)))
 	}
 	if err := runtimecontract.ValidateRuntimeCandidateAgainstManifest(input.Manifest, input.Candidate); err != nil {

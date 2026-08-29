@@ -22,7 +22,7 @@ func semanticDefinitionFocuses(items []RuntimeCoverageItem) []RuntimeDefinitionF
 	for _, item := range items {
 		ret = append(ret, CoverageFocus{
 			ID: "definition-focus-" + string(item.ID), SliceID: item.SliceID,
-			AssessmentScope: item.SourceScope, AssessmentID: item.SourceID,
+			AssessmentScope: item.SourceScope, AssessmentID: item.SourceID, AssessmentText: item.TargetText,
 			CoverageWorkItemIDs:   []common.CoverageWorkItemID{item.ID},
 			RequiredEvidenceKinds: []string{EvidenceKindStateChange}, RequireAssessment: true,
 		})

@@ -220,6 +220,9 @@ func ValidateRuntimeDefinitionFocuses(seed RuntimeDefinitionSeed, focuses []Runt
 		if !found || item.SliceID != focus.SliceID {
 			return fmt.Errorf("runtime definition focus %q references mismatched coverage %q", focus.ID, coverageID)
 		}
+		if focus.AssessmentScope != item.SourceScope || focus.AssessmentID != item.SourceID || focus.AssessmentText != item.TargetText {
+			return fmt.Errorf("runtime definition focus %q assessment source does not exactly match definition seed coverage %q", focus.ID, coverageID)
+		}
 		if _, duplicate := seenCoverage[coverageID]; duplicate {
 			return fmt.Errorf("runtime definition focuses duplicate coverage %q", coverageID)
 		}

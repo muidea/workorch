@@ -197,12 +197,24 @@ func TestShellOwnerRejectsWorkspaceEffectOutsideSealedTargets(t *testing.T) {
 	diagnostic := response.Receipt.Feedback.OriginalDiagnostic
 	if response.Receipt.Outcome != runtimecontract.RuntimeOperationOutcomeRejected || diagnostic == nil ||
 		diagnostic.OriginalClass != string(runtimecontract.FailureClassEffectMismatch) || diagnostic.OriginalCode != "undeclared_workspace_effect" ||
-		response.Receipt.Changed ||
-		response.Receipt.ObservedEffectScope != runtimecontract.RuntimeEffectUnknown {
+		!response.Receipt.Changed ||
+		response.Receipt.ObservedEffectScope != runtimecontract.RuntimeEffectWorkspaceDurable {
 		t.Fatalf("undeclared workspace effect was accepted: %+v", response)
 	}
-	if len(diagnostic.TargetRefs) != 1 || diagnostic.TargetRefs[0] != "rogue.txt" {
-		t.Fatalf("undeclared target lineage = %+v", diagnostic)
+	if len(diagnostic.TargetRefs) != 0 || diagnostic.TargetObservation != nil || diagnostic.ValidationFailureObservation != nil {
+		t.Fatalf("undeclared audit subject became failure-target authority: %+v", diagnostic)
+	}
+	if len(response.Receipt.TargetRefs) != 1 || response.Receipt.TargetRefs[0] != "generated.txt" {
+		t.Fatalf("rejected receipt targets escaped sealed operation: %+v", response.Receipt.TargetRefs)
+	}
+	changedTargets := map[string]bool{}
+	for _, change := range response.Receipt.ResourceChanges {
+		if change.Domain == runtimecontract.RuntimeResourceWorkspaceTarget && change.OwnerModuleID == runtimecontract.RuntimeModuleFile {
+			changedTargets[change.SubjectRef] = true
+		}
+	}
+	if !changedTargets["generated.txt"] || !changedTargets["rogue.txt"] {
+		t.Fatalf("undeclared workspace effect audit was lost: %+v", response.Receipt.ResourceChanges)
 	}
 }
 

@@ -258,7 +258,53 @@ deployed run ID 只属于 archive regression evidence，不定义当前候选、
 - final manifest seal 把 `CandidateManifestHash` 与每项 operation 的最小 `OperationTargetAuthorizations` preimage 一并纳入
   `DispatchAuthorityHash`。该值只在 final seal 创建；Run 只 opaque 持久化、governance resume 只复制、fresh-load 只调用
   canonical matcher 重验。禁止从 mutable current facts 重编译或增量更新；它是同一 SM-3 dispatch authority 的 sealed
-  preimage，不是第二 target owner。缺字段的旧 operation dispatch fail-closed，不增加兼容读取分支。
+  preimage，不是第二 target owner。accepted attempt 还必须在 dispatch 构造前从 exact manifest + candidate 独立派生并持久化完整
+  `AdmissionTargetAuthorizations`，`TargetAuthorizationHash` 只对该 admission projection 求 hash，禁止从 dispatch 回抄；fresh-load
+  同时 exact 匹配 admission projection、dispatch projection 与 dispatch self-seal，因此协调扩大 scope 并重算两份 hash 也不能改写 admission。governance resume
+  逐 hop exact 继承 source commitment并最终回指 accepted attempt。缺字段的旧 operation dispatch fail-closed，不增加兼容读取分支。
+  accepted seal 还必须反证到 request session 中 pre-seal 持久化的完整 raw-canonical `CandidateManifest` body，并从该 body 与
+  persisted candidate 重派生 target authorization、coverage binding 和 managed-validation recipe；normalization laundering、
+  missing/duplicate session、body/hash drift 或 attempt+dispatch projection 协调改写均 fail closed。duplicate admission 使用同一
+  reverse proof，不能只比较 candidate/dispatch self-hash。assessment manifest 还必须在该 pre-seal body 中封存
+  `AssessmentPurpose + AssessmentPurposeManifestHash`：Definition source 从 immutable seed/focus 投影反证，purpose 则从更早
+  persisted semantic provider document + owner feasibility batch 唯一重放。EventHub adapter、LLM owner 与 pure evaluator 只做
+  manifest intrinsic/decision 校验，不从不完整 `CandidateContext.Resources` 重编译这份 SM-3 authority。
+- semantic binding fresh-load 使用 invocation-local replay inventory，逐个读取 active/history accepted batch 的 persisted
+  manifest、`RequestLogicalID`、provider document 与同 batch archived/retained owner feasibility facts，并调用
+  `CompileRuntimeSemanticBindings` 重编译唯一 Focus/binding。current/remaining/completed Focus、CWI current/history binding refs、
+  reconciliation contract、request-session manifest bindings、accepted-attempt admission bindings 与 active/completed dispatch
+  bindings 必须全部 exact-match 该 provider/owner preimage。该 inventory 不持久化、不选择 action、不调用 owner；缺失/重复
+  preimage 或协调改写下游 projection/self-hash 一律在 fresh-load fail closed。
+- managed validation 的 finite full validation scope 只能来自 active/completed dispatch 中按 exact `OperationID` 与 operation hash
+  匹配的 per-operation `OperationTargetAuthorizations` member 的 canonical `Target.AllowedTargetRefs()`；只有 policy 为
+  `existing_owner_scope` 时，该 finite set 才等于 canonical `OwnerScopeTargetRefs`。validation operation entry `TargetRefs` 只是
+  recipe/entry selection：仅 sealed `RequireTargets=true` 时强制非空；finite allowed set 存在时，每个 entry member 必须属于该
+  set。Shell structured diagnostic candidate targets 是该 finite scope 的另一个非空子集。observation
+  `ValidationScopeTargetRefs` 必须与 sealed full scope canonical exact-match，而 entry 与 candidate 之间不要求相等或相交。
+  execution、receipt causation、duplicate 与 fresh-load 均复用这一 sealed scope，不得从 `Facts.Resources.Manifest`、current focus
+  或 owner inventory 重建；current File manifest 只在后续 repair-surface confirmation 中判定 candidate freshness。
+  selector-only authorization 的 `Target.AllowedTargetRefs()` 为空；operation 仍按 sealed `RequireTargets` 与 owner feasibility
+  admission，但向 Shell 传递空 scope、保持零 scope-bound structured observation。失败只可走 Profile 已封存的 fallback，不得从
+  mutable facts 补全 scope；没有 matching sealed fallback 时 typed fail closed。
+- confirmed File repair 的 state-change receipt 必须同时证明 exact sealed operation、confirmed target subset、target resource
+  changes 与 workspace-tree revision edge。多 operation all-of 的 partial commit 只允许继续原 active sealed dispatch；首个
+  changed receipt 触发 generic freshness 后，旧 confirmed `FailureTarget` 与旧 `need_state_change RepairDirective` 必须保持为空。
+  fresh-load 从 confirmation、completed evidence-committed receipt chain、accepted evidence/processed fence、freshness invalidation 与
+  current pending prerequisite exact union 重验。revision order 只由从 confirmation revision 开始的唯一 `before -> after` chain
+  决定。final accepted 才在同一 CAS 从 immutable lineage 重算 closure，并生成新的 target-free fresh-validation directive；rejected
+  或 invalidated transaction 不恢复旧 authority。该 derived transaction 不是新 DTO、owner 或第五状态机。
+  manifest 的 typed repair purpose/closure 使 pre-seal `RuntimeDispatchRepairCommitment` 成为 state-change admission 必填项：proposal
+  CAS 先绑定 exact confirmation、source rejected receipt/evidence 与 origin dispatch，再由 accepted attempt/dispatch 和 governance
+  resume 逐 hop exact 继承并纳入 authority hash。fresh-load 必须 commitment-first 识别 transaction，然后反向要求 confirmation、
+  source、receipt/evidence 与 closure；删除或协调删除 commitment、confirmation、directive 不能使 mandatory fresh validation 消失。
+  此外以 same-focus exact rejected managed-validation receipt/evidence、structured candidate surface 与 all-File state-change seal 作
+  independent mandatory detector；manifest purpose 与 commitment copies 同时被清空仍必须 fail closed。
+- confirmed File all-of transaction 的 operation-scoped governance pause/continue 仍完全属于 Orchestrator SM-2/SM-3：
+  `governance_resolution_observed` private CAS 只从 origin accepted admission、confirmation、source candidate/dispatch seal、completed
+  receipt chain 与 exact binding/grant 形成 typed owner-private reducer input；SM-2 唯一
+  `ReduceRuntimeStateWithDirective` 从 immutable source seal 派生 continuation decision，SM-3 再封存同一 candidate 的
+  next-fence resume dispatch。transition 不得在 reducer 返回后覆盖 Decision。该路径不选择新 action、不调用 LLM，
+  不恢复 mutable target/directive，也不让 File 或 governance owner 写 Runtime aggregate；`fail` 不产生 resume/fresh-validation authority。
 - `JSONSchemaResponse` 只决定 LLM adapter 是否可发送 provider format，是可选 wire acceleration，不是 SM-3 authority。
   format on/off、provider声称 schema accepted 或未声明 capability 的所有 complete output 都必须经过同一 strict local
   decoder/schema/evaluator；structured-output failure 不授权 adapter fallback 或第二次 physical call。
@@ -467,6 +513,10 @@ deployed run ID 只属于 archive regression evidence，不定义当前候选、
 - 每个 executable dispatch 必须恰好由一个 durable admission 产生：普通 dispatch 精确绑定 accepted candidate attempt 的
   transaction/candidate/dispatch authority，resume dispatch 精确绑定 granted operation-governance binding 的
   `ResumeDispatchID`，两种来源不得同时出现或同时缺失。自洽的 dispatch record 本身不是执行授权。
+- accepted attempt 在 dispatch 构造前必须从 exact manifest + candidate 独立封存 target authorization projection/hash；含
+  managed validation 时还必须独立封存完整 recipe body projection/hash。fresh-load/duplicate 必须逐字段匹配 admission 与
+  dispatch，不能通过同步改写 dispatch projection/self-seal 回写 admission。非 managed operation 不携带 recipe commitment；
+  governance resume 只可从 immediate source 逐跳继承这些 commitment。
 - `SealedDispatch.OperationExecutions` 在 seal 时写入 per-operation `OperationHash + ExecutionKey + ExpectedEffectScope +
   IdempotencyClass + owner snapshot binding`；execute 前 claim fence，owner 返回后 `owner_committed`，evidence CAS 后
   `evidence_committed`；owner error 后先 query exact receipt，缺 receipt 且没有 sealed replay authority 时才记
@@ -474,6 +524,18 @@ deployed run ID 只属于 archive regression evidence，不定义当前候选、
 - owner receipt ledger 与 dispatch execution projection 必须按 `ExecutionKey + fence + OperationID + receipt ref/hash`
   双向完全匹配。committed execution 不得缺 receipt，receipt 不得成为无 committed execution 的孤儿；governance source 与
   completed resume clone 只能共享完全相同的 receipt projection。
+- `evidence_committed` execution 额外保存 exact `EvidenceFactID + EvidenceFactHash`；该 mutable commit 不进入
+  `DispatchAuthorityHash`，但 fresh-load/recovery 必须用它精确反证完整 evidence fact，禁止只校验 receipt 子集后接受被协调
+  改写的 kind/revision/binding/CWI/reason。
+- ordinary accepted/rejected fact、governance resolution/fact 与 assessment fact 共用唯一全局 `EvidenceSequence` 及连续
+  `evidence/<n>` revision。fresh-load 只按 completed dispatch persisted order、随后可选 active dispatch replay；每个 typed
+  entry 必须由 owning dispatch 恰消费一次，governance-resume clone 不重复推进。最终 sequence/revision 必须分别等于 aggregate
+  `EvidenceSequence` 与 `Facts.EvidenceRevision`；orphan、duplicate、gap、跨 ledger 重复及协调改写均 fail closed。
+- 普通 operation receipt 的 `EvidenceFact` 必须保存 owning dispatch 的 exact `FocusID`，并纳入
+  `EvidenceFactHash`；live/recovery 均统一为 `runtime-receipt|<receipt-hash>` 与
+  `runtime-receipt/<execution-key>`。诊断归属只可比较该不可变 FocusID，禁止从“当前/最后 focus”位置猜测；只有同时具有
+  reducer 派生 CWI、sealed binding 与 proof lineage 的 accepted fact 才能满足 evidence kind、推进/完成 CWI、关闭 repair
+  或使 assessment 失效。
 - owner 已持久化 exact `ExecutionKey + Fence` receipt 但响应丢失时，executor 必须先重新加载 aggregate：存在 terminal receipt 则继续 governance/evidence commit，不得把 `owner_committed` 覆盖为 `outcome_unknown`。
 - claimed/no-receipt recovery 只允许 sealed idempotency=`safe_to_replay|owner_managed`，并先消耗独立 operation-recovery budget；`at_most_once|unknown` 一律转 `outcome_unknown`。每项 operation evidence 独立 CAS 持久化；只有最后一项成功或任一项 rejected/stale 时，才在该 evidence CAS 中原子 settle dispatch。
 - current-schema evidence commit 必须携带已持久化 owner receipt，并按 sealed expectation + `ObservedEffectScope` +
@@ -509,13 +571,43 @@ deployed run ID 只属于 archive regression evidence，不定义当前候选、
   quality、focus policy、owner-grounded repair surface 与 freshness 分类，并在同一 owner-local transition 中写入唯一
   `Facts.RepairDirective.RequiredState`。不得从 observation 的自由文本或其 claimed missing kind 直接进入
   `need_validation`、`need_state_change`、governance、retry 或 terminal。
-- validation entry 不是 state-change repair target；Shell 只可从 owner 支持的结构化工具诊断提取 fresh File-manifest
-  scope 内的 actual candidate target，无位置或越界时不发布 observation，不能回显 operation/input target。该 observation
-  必须精确绑定 completed sealed dispatch 中封存的 `FocusTargetRole`、authority snapshot、operation 与 validation scope；
-  current mutable `Focus` 不得参与历史因果校验。带 observation 的 rejected receipt 在同一 CAS 中保留原 focus/binding，
+- validation entry 不是 state-change repair target；Shell 只可从 owner 支持的结构化工具诊断提取 sealed full validation
+  scope 内的 actual candidate target，无位置或越界时不发布 observation，不能回显 operation/input target。Orchestrator 必须
+  从 completed sealed dispatch 中按 `OperationID`/operation hash 取得 exact `OperationTargetAuthorizations` member，并验证：
+  full scope 是 matching authorization 的 canonical `Target.AllowedTargetRefs()`，只有 `existing_owner_scope` 才映射为
+  `OwnerScopeTargetRefs`；operation entry 的非空性只由 sealed `RequireTargets` 决定，finite scope 存在时 entry 是其子集；
+  structured diagnostic candidate 必须是该 scope 的非空子集，observation scope 与该 full scope exact-match。
+  candidate 不要求等于 operation entry。该 observation 还必须精确绑定封存的 `FocusTargetRole`、authority snapshot 与 operation；
+  current mutable `Focus`/manifest 不得参与历史因果校验。带 observation 的 rejected receipt 在同一 CAS 中保留原 focus/binding，
   不得 reopen CWI、开启 `validation_failure_repair` semantic generation 或增加 validation-only retry；下一次 drive 必须先通过
   typed internal event 完成 File read-only confirmation，且在此之前为零 semantic/candidate provider call。File confirmed 才把
   candidate surface 封存为 owner-grounded `FailureTarget`，stale 只重取 prerequisite，rejected 形成 typed infeasibility terminal。
+  managed-validation receipt 的 `receipt.TargetRefs` 仅是 entry execution lineage；`OriginalDiagnostic.TargetRefs` 与
+  `TargetObservation` 必须为空。VFO 只允许嵌套在 exact Shell managed-validation receipt 中，最多八项，并与 receipt
+  workspace/run/actual dispatch/authority/operation/signature、typed diagnostic class/candidates 及 sealed authorization 完整绑定；
+  reducer copy 与 nested owner-diagnostic copy 必须同时存在且 canonical exact-match。只有 completed/committed dispatch 中 completed
+  operation 的 `evidence_committed` execution 及 exact `ExecutionKey + Fence + receipt ref/hash` 才可形成该 fact；
+  owner-committed-only、invalidated dispatch、generic failure ingress 与 governance-resume origin/current 混淆均 fail closed。
+  非 managed operation 携带 VFO 一律在 receipt commit/fresh-load 失败。pending VFO 不得产生 concrete `RepairDirective`。
+  confirmation 只接受 File owner；任何 validation-derived File `TargetObservation`/`FailureTarget` 必须反向匹配 exact confirmed
+  record 与 exact Shell receipt，`FailureObserved` 等 generic ingress 不能形成旁路。同一 VFO 可有多条 stale revision，但第一条
+  confirmed/rejected 终止 confirmation 序列；延迟 owner reply 不能覆盖当前 authority，fresh-load 只认 latest valid record。
+  Shell `WORKORCH_FAILURE_TARGET` closed marker 只是 bounded diagnostic candidate；owner-private adapter 不得把它解析为
+  `RuntimeFailureTargetObservation` DTO，也不得把它作为 receipt `TargetObservation` 或 direct repair authority 发布。marker
+  只有在 finite sealed scope 内才能贡献 candidate refs，并且只能经 `RuntimeValidationFailureObservation` → File confirmation →
+  SM-2 private event 形成 owner-grounded failure target。selector-only scope 为空时 marker 必须被忽略，不能从 current manifest
+  补 scope。
+- 非 VFO direct-target 是 descriptor-authorized owner-fact 路径：只有 operation descriptor 声明
+  `receipt_evidence_observation` 时，capability owner 才可在 rejected receipt 中保留 response 显式观察到的 bounded、
+  content-addressed、catalog-bound
+  `RuntimeFailureTargetObservation`，不得从 operation target、request 或 manifest 推断。SM-2 promoted failure 与 nested
+  `OriginalDiagnostic` copy 必须 exact parity，并反向匹配 completed committed dispatch/operation、`evidence_committed` execution、
+  exact key/fence/ref/hash rejected receipt、唯一 receipt-derived rejected evidence/processed-event fence，以及 sealed/current exact
+  owner catalog snapshot、acquisition、revision、subject selector 与 satisfied prerequisite observation，才可形成 current
+  `FailureTarget`。`owner_committed`、generic failure ingress、receipt/evidence/catalog drift 或 stale 均 fail closed；File target
+  snapshot 只负责后续 workspace grounding，不能补建原 owner authority。duplicate/restart 只能复用同一 receipt-derived identity。
+  core 只按 descriptor policy 分支，不得按 MCP 或其它具体 owner 名称分支。`sealed_operation_targets` 只允许 sealed operation
+  targets 子集，`validation_failure_candidates` 只进入 VFO/File confirmation，`none` 不允许 target authority。
   只有 focus exact target、仍新鲜的 owner-grounded failure target 或 sealed owner selector/prospective constraint可以形成 repair authority。validation/evidence-quality gap保持
   `need_validation`，不得在 validation-only 重试后退化为无关 `need_state_change`；耗尽封存 validation
   recipe/budget 时必须形成 typed terminal。普通 rejected validation receipt 不获得 CWI credit；其防重放归属只能来自
@@ -544,6 +636,16 @@ deployed run ID 只属于 archive regression evidence，不定义当前候选、
   observation；只有 receipt 实际报告 binding 要求的 exact check/metric/artifact 才能给对应 CWI credit。非空
   `PassedChecks`、claim signal、assessment 文本、Goal/DoD、summary 与 operation/check name 的自由文本相似度
   都不能作为覆盖裁决；profile 封存 recipe 只约束候选选择该命令时的必要参数。
+- `RuntimeDefinitionFocus.AssessmentScope/AssessmentID/AssessmentText` 必须逐字段来自 Definition seed item 的
+  `SourceScope/SourceID/TargetText`；active/completed assessment dispatch 都反证该 seed-rooted source projection。SM-3 pre-seal
+  `RuntimeAssessmentAuthorityInput` raw-canonical 封存 purpose、source slice/source、Focus/bindings 与 exact owner admissibility
+  catalog，其 hash 进入 `DispatchAuthorityHash`。它与 optional `RuntimeDispatchRepairCommitment` 必须作为一次性 typed seal input，
+  在首次且唯一的 dispatch authority hash/Validate 前完整写入；seal 返回后禁止补字段再重算 hash。governance resume 同样先从
+  exact committed source+grant 投影 completed/claimed execution、fence/ExecutionKey 和 inherited repair commitment，再执行唯一
+  final seal。SM-2 commit-time 只从该 input、accepted evidence facts、completed dispatches 与
+  `CoverageProofLineage` 重放 `RuntimeAssessmentAdjudication`；adjudication/hash 与
+  `RuntimeAssessmentFact.AdjudicationHash` 同一 CAS 双记账，且 post-seal hash 不进入 immutable dispatch authority。fresh-load
+  重放 disposition/逐 CWI proof/fact ID+hash，拒绝 raw normalization laundering、seed/source 漂移和协调改写。
 - profile-declared `RuntimeOwnerFactRequirement` 是 immutable focus postcondition，不是 capability target state。
   Workorchd 只编译声明，Shell/MCP 等 owner 只通过 current typed admissibility catalog 发布事实；SM-2 assessment gate
   在 sealed binding 的其余 proof 全部成立后，才检查指定 owner/operation 是否存在匹配的 `ready + direct` selectable
@@ -589,11 +691,18 @@ deployed run ID 只属于 archive regression evidence，不定义当前候选、
 - active Runtime Cancel/Supersede 必须来自 Run SM-1 typed administrative intent；Orchestrator SM-4 先 CAS 持久化
   `RuntimeTerminationRecord` handoff 并执行 ordered delivery，Run owner 再由 private SM-1 event 持久化 terminal。
   handoff record 不是 SM-1 state，Orchestrator 不得“投影”或代写 Run lifecycle。
-- semantic owner catalog 退休后，若 current eligible CWI 尚无 binding，SM-4 drive/startup recovery 必须先推进新的 semantic
-  generation；该窗口中因 binding 缺失产生的 `target_grounding_unresolved` decision 不得进入 Result/Workspace/Run
-  delivery。`candidateRequestSessionActionAllowed` 只为这一精确窗口放行 `semantic_plan`，operations request 继续拒绝。
-  current semantic operation authority ready 或 semantic transaction failed 后才满足该 convergence terminal 的 delivery
-  readiness；其它 sealed terminal 不得被语义重规划覆盖，administrative termination 走独立 Run-owner lane。
+- immutable DefinitionFocus 要求 target grounding 时，semantic provider 前必须先取得 focus-scoped File-owner
+  TargetSelection 与 exact workspace-tree freshness。只有 selection、prerequisite、observation 和 current Definition
+  selector/owner/subject/candidate declaration 全部匹配，且 disposition 为 absent/ambiguous/unsupported，或 empty-scope 且
+  Definition 无 bounded selector candidates，才以零 LLM call 交付 `target_grounding_unresolved`；缺少 owner fact 的
+  binding-free view 仍为 transient，selected 或带 bounded Definition candidates 的 empty scope 继续 prospective semantic
+  planning。
+- semantic owner catalog 退休后若旧 no-effect binding 仍为 current binding，SM-4 必须先投递 typed
+  `CWIBindingRetired` internal fact，由 SM-2 reducer 唯一退休 exact lineage 并 reopen CWI。该事件前旧 binding 不可执行，
+  provisional `target_grounding_unresolved` 也不得进入 Result/Workspace/Run delivery；已有 effect credit 的 binding 不得因
+  catalog refresh 自动退休。binding 真正释放后，`candidateRequestSessionActionAllowed` 只为 transient 窗口放行
+  `semantic_plan`，operations request 继续拒绝。其它 sealed terminal 不得被语义重规划覆盖，administrative termination
+  走独立 Run-owner lane。
 - aggregate invariant 要求非终态 Decision 且无 administrative termination 时
   `TerminalDeliveryAttempts=0` 且无 terminal acknowledgement。不满足时由当前 invariant 校验在 owner load 边界
   直接失败；不得形成兼容分类、升级或 data-reset 状态，不得由 projection 修复、归零或隐藏。清理数据后
@@ -802,7 +911,7 @@ deployed run ID 只属于 archive regression evidence，不定义当前候选、
   reducer 负责各自迁移。不得借此创建 禁止的 Step 或经过 禁止的 Result/DoD completion gate。
 - SM-4 对 owner-local delivery acknowledgement 做有界重试：重复 fact 必须幂等，单边成功不得重写，缺失 ack
   只保留 delivery pending，避免单边成功后永久悬挂。
-- repair ledger 的 `RepairAttempts` 是同 focus 总预算；有效新 evidence 只重置 failure-signature、validation-only 与 no-progress 窗口，不清零总预算。只有原子 focus advance 才创建下一 focus 的全新 repair ledger。
+- repair ledger 的 `RepairAttempts` 是同 focus 总预算；有效新 evidence 只重置 failure-signature、validation-only 与 no-progress 窗口，不清零总预算。要求 assessment 的 focus 在 adjudication 前不得清除 same-gap debt、active gap、cycle 或 no-progress provenance；但 exact current-binding、owner-grounded 且真实 changed 的 durable state receipt 若仍缺声明内的 validation，必须把 `ValidationOnlyRetries` 重新开放为 `0`，以允许 ordered all-of 的 fresh validation 执行。无 CWI credit、落在 repair directive 选定 target 外或无需 validation 的 receipt 不得触发该重开。只有原子 focus advance 才创建下一 focus 的全新 repair ledger。
 - owner 报告 state-changing no-op 时，SM-3 只持久化 rejected/no-progress shape，绝不写入 state-change evidence。
   SM-2 对要求 assessment 且有可观测 validation 的 focus 只能按 `validation -> assessment` 验证已有状态；否则以
   typed current-run provenance gap 终态化，禁止通过无关文件修改制造 durable delta。exact receipt replay 保持原
@@ -879,7 +988,10 @@ deployed run ID 只属于 archive regression evidence，不定义当前候选、
   只能来自 reducer decision 与 Result/Workspace/Run 各自的 typed owner-local delivery。
 - 禁止的 `EnableEventDrivenDispatch`、`DispatchStepRequested`、通用 runtime executor 与 runtime-gap recovery command 已删除；组件执行不得形成第二条 dispatch owner。
 - 禁止的 `StagePacket`、`NextAction`、RuntimeStep Accepted/Progress/Completed/Failed 通用事件结构已删除；不得以历史合同重新包装 Runtime facts、candidate 或 operation evidence。
-- governance continue 必须写入 accepted governance evidence、递增 evidence revision 并回到同一 reducer；governance fail 直接生成 `governance_rejected` terminal，stale resolution 只能进入 diagnostic lineage。
+- governance continue 必须写入 accepted governance evidence、递增 evidence revision，并把 exact resolution、granted binding 与
+  source sealed dispatch 作为 `governance_resolution_observed` owner-private fact 交给唯一
+  `ReduceRuntimeStateWithDirective`；只有该 reducer 可从 immutable source seal 派生 continuation decision。transition 不得在
+  reducer 返回后覆盖/重封 `RuntimeDecision`。governance fail 直接生成 `governance_rejected` terminal，stale resolution 只能进入 diagnostic lineage。
 - resolution 必须携带并匹配已绑定的唯一 ticket/approval identity；不存在绑定、同一 dispatch 绑定不同 owner
   identity、或 dependency/authorization target 漂移都必须返回 conflict。
 - operation-scoped governance continue 只恢复 suspended binding 指向且未列入 source `CompletedOperationIDs` 的 exact

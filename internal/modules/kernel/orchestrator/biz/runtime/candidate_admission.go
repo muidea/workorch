@@ -232,15 +232,15 @@ func ActiveRejectedOperationShapes(aggregate RuntimeAggregate) []workorchruntime
 // to the SM-3 transaction that actually executed it. Rejected owner receipts
 // deliberately receive no CWI credit, so their EvidenceFact can have an empty
 // CoverageWorkItemIDs set even while later focuses remain queued. In that
-// shape the completed dispatch's immutable FocusID is the attribution fact;
-// evidence that already carries CWI lineage continues to use the shared pure
-// predicate. This is candidate-context attribution only and grants no proof.
+// shape the completed dispatch's immutable FocusID is the attribution fact.
+// The persisted fact must name that same focus independently so a coordinated
+// current-focus rewrite cannot reactivate an earlier rejected shape. This is
+// candidate-context attribution only and grants no proof.
 func rejectedEvidenceAppliesToCurrentFocus(facts workorchruntimecontract.RuntimeFacts, evidence workorchruntimecontract.EvidenceFact, dispatch SealedDispatch) bool {
-	if len(evidence.CoverageWorkItemIDs) != 0 {
-		return workorchruntimecontract.EvidenceAppliesToCurrentFocus(facts, evidence)
-	}
-	return strings.TrimSpace(dispatch.Transaction.FocusID) != "" &&
-		strings.TrimSpace(dispatch.Transaction.FocusID) == strings.TrimSpace(facts.Focus.ID)
+	dispatchFocusID := strings.TrimSpace(dispatch.Transaction.FocusID)
+	return dispatchFocusID != "" &&
+		dispatchFocusID == strings.TrimSpace(evidence.FocusID) &&
+		workorchruntimecontract.EvidenceBelongsToCurrentFocusForDiagnosticLineage(facts, evidence)
 }
 
 func rejectCandidateReplay(aggregate RuntimeAggregate, candidate workorchruntimecontract.RuntimeCandidate) CandidateAdmissionResult {
@@ -299,7 +299,7 @@ func latestAcceptedEvidenceRevision(facts workorchruntimecontract.RuntimeFacts, 
 	proofLineage := runtimeCoverageProofLineageArgument(proofLineages)
 	latest := ""
 	for _, evidence := range facts.Evidence.Accepted {
-		if !runtimeAcceptedEvidenceAppliesToCurrentFocusWithLineage(facts, evidence, proofLineage) {
+		if !runtimeAcceptedEvidenceCreditsCurrentFocusWithLineage(facts, evidence, proofLineage) {
 			continue
 		}
 		if latest == "" || evidenceRevisionAfter(evidence.Revision, latest) {
@@ -313,7 +313,7 @@ func latestFocusFailureIsStateChange(facts workorchruntimecontract.RuntimeFacts)
 	latestRevision := ""
 	isStateChange := false
 	for _, evidence := range facts.Evidence.Rejected {
-		if !workorchruntimecontract.EvidenceAppliesToCurrentFocus(facts, evidence) || evidence.Kind != workorchruntimecontract.EvidenceKindStateChange {
+		if !workorchruntimecontract.EvidenceBelongsToCurrentFocusForDiagnosticLineage(facts, evidence) || evidence.Kind != workorchruntimecontract.EvidenceKindStateChange {
 			continue
 		}
 		if latestRevision == "" || evidenceRevisionAfter(evidence.Revision, latestRevision) {
@@ -322,7 +322,7 @@ func latestFocusFailureIsStateChange(facts workorchruntimecontract.RuntimeFacts)
 		}
 	}
 	for _, evidence := range facts.Evidence.Rejected {
-		if !workorchruntimecontract.EvidenceAppliesToCurrentFocus(facts, evidence) || evidence.Kind != workorchruntimecontract.EvidenceKindValidation {
+		if !workorchruntimecontract.EvidenceBelongsToCurrentFocusForDiagnosticLineage(facts, evidence) || evidence.Kind != workorchruntimecontract.EvidenceKindValidation {
 			continue
 		}
 		if latestRevision == "" || evidenceRevisionAfter(evidence.Revision, latestRevision) {

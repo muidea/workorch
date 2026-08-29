@@ -18,8 +18,8 @@ func TestRuntimeBootstrapCloneAndEqualityPreserveTypedContract(t *testing.T) {
 			MaxRepairAttemptsPerFocus: 7, ValidationPolicies: []RuntimeValidationPolicy{{ID: "validation", Scope: "workspace_profile", AppliesToEvidenceKinds: []string{EvidenceKindValidation}, MaxValidationOnlyRetriesPerFocus: 2}},
 		}},
 		DefinitionFocuses: []RuntimeDefinitionFocus{
-			{ID: "focus-1", SliceID: "slice-1", CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-1"}, RequiredEvidenceKinds: []string{EvidenceKindStateChange}},
-			{ID: "focus-0", SliceID: "slice-1", CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-0"}, RequiredEvidenceKinds: []string{EvidenceKindStateChange}},
+			{ID: "focus-1", SliceID: "slice-1", AssessmentScope: "dodItem", AssessmentID: "dod-001", CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-1"}, RequiredEvidenceKinds: []string{EvidenceKindStateChange}},
+			{ID: "focus-0", SliceID: "slice-1", AssessmentScope: "dodItem", AssessmentID: "dod-000", CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-0"}, RequiredEvidenceKinds: []string{EvidenceKindStateChange}},
 		},
 		Slices: []RuntimeAcceptanceSlice{{ID: "slice-1", CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-1", "cwi-0"}, CompletionPolicy: RuntimeAcceptanceSliceCompletionAll, ResultPolicy: RuntimeAcceptanceSliceResultAllowed}},
 		CoverageItems: []RuntimeCoverageItem{
@@ -82,6 +82,11 @@ func TestRuntimeBootstrapCloneAndEqualityPreserveTypedContract(t *testing.T) {
 	})
 	if err := presealedTarget.Validate(); err == nil {
 		t.Fatal("bootstrap requirement accepted a pre-seal prospective target")
+	}
+	retiredFailureTarget := bootstrap.Clone()
+	retiredFailureTarget.Requirements = append(retiredFailureTarget.Requirements, RuntimeRequirement{Kind: PrerequisiteKind("failure_target")})
+	if err := retiredFailureTarget.Validate(); err == nil {
+		t.Fatal("bootstrap accepted the retired failure_target prerequisite")
 	}
 }
 
@@ -162,7 +167,7 @@ func TestRuntimeDefinitionFocusPreservesDeclarationWithoutGenerationAuthority(t 
 	seed.Hash = StableRuntimeDefinitionSeedHash(seed)
 
 	compiled := CompileRuntimeDefinitionFocuses([]CoverageFocus{{
-		ID: "focus-1", SliceID: "slice-1", CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-1"},
+		ID: "focus-1", SliceID: "slice-1", AssessmentScope: "dodItem", AssessmentID: "dod-1", CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-1"},
 		RequiredEvidenceKinds: []string{EvidenceKindValidation}, TargetRole: "verification_target",
 		TargetRefs: []string{"declared-but-not-owner-resolved.txt"}, TargetSelectorRef: "file/workspace-deliverable",
 		TargetSelectorOwnerRef: "profile/test", TargetSelectorSubjectRef: "verification_target",

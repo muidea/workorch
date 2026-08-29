@@ -2,9 +2,11 @@ package shell
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 
 	magicevent "github.com/muidea/magicCommon/event"
@@ -208,7 +210,7 @@ func TestShellManagedGoPackageConflictReportsBothManifestScopedTargets(t *testin
 	}
 }
 
-func TestShellOwnerEmitsOnlyContentBoundStructuredFailureTarget(t *testing.T) {
+func TestShellOwnerEmitsOnlySealedScopeValidationFailureObservation(t *testing.T) {
 	ctx := context.Background()
 	hub := magicevent.NewHub(16)
 	t.Cleanup(func() { hub.Terminate(ctx) })
@@ -252,7 +254,7 @@ func TestShellOwnerEmitsOnlyContentBoundStructuredFailureTarget(t *testing.T) {
 		ValidationRecipeID: recipe.ID,
 		ValidationEvidence: runtimecontract.RuntimeValidationEvidence{DiagnosticClass: runtimecontract.ValidationDiagnosticBuildFailed},
 		ManagedValidation:  runtimecontract.RuntimeManagedValidation{RuntimeManaged: true, Kind: runtimecontract.RuntimeBlockKindManagedValidationSession},
-	}, "implementation", []runtimecontract.RuntimeValidationRecipe{recipe}, nil)
+	}, "implementation", []runtimecontract.RuntimeValidationRecipe{recipe}, []string{"implementation.go"})
 	result := hub.Send(magicevent.NewEventWithContext(shellevents.TopicExecuteOperation, runtimecontract.RuntimeModuleOrchestrator, modulecommon.ModuleID, magicevent.NewHeader(), ctx, command))
 	data, err := result.Get()
 	if err != nil {
@@ -260,21 +262,225 @@ func TestShellOwnerEmitsOnlyContentBoundStructuredFailureTarget(t *testing.T) {
 	}
 	response, ok := data.(shellevents.ExecuteOperationResult)
 	diagnostic := response.Receipt.Feedback.OriginalDiagnostic
-	if !ok || diagnostic == nil || diagnostic.TargetObservation == nil {
+	if !ok || diagnostic == nil || diagnostic.TargetObservation != nil || diagnostic.ValidationFailureObservation == nil {
 		t.Fatalf("structured shell failure = %#v", data)
 	}
-	observation := diagnostic.TargetObservation
-	if observation.OwnerModuleID != ModuleID || observation.SubjectRef != shellFailureTargetObservationSubject || observation.TargetRole != "implementation" ||
-		len(observation.TargetRefs) != 1 || observation.TargetRefs[0] != "implementation.go" || observation.DiagnosticClass != runtimecontract.ValidationDiagnosticBuildFailed ||
-		len(observation.EvidenceRefs) != 1 || len(observation.ContentHash) != 64 {
+	observation := diagnostic.ValidationFailureObservation
+	if observation.TargetRole != "implementation" || len(observation.CandidateTargetRefs) != 1 || observation.CandidateTargetRefs[0] != "implementation.go" ||
+		len(observation.ValidationScopeTargetRefs) != 1 || observation.ValidationScopeTargetRefs[0] != "implementation.go" ||
+		observation.DiagnosticClass != runtimecontract.ValidationDiagnosticBuildFailed || len(observation.DiagnosticHash) != 64 {
 		t.Fatalf("structured failure observation = %+v", observation)
 	}
-	if !reflect.DeepEqual(diagnostic.TargetRefs, observation.TargetRefs) || !reflect.DeepEqual(response.Receipt.Feedback.OriginalDiagnostic.TargetObservation, observation) {
+	if len(diagnostic.TargetRefs) != 0 || response.Receipt.Feedback.OriginalDiagnostic.TargetObservation != nil ||
+		!reflect.DeepEqual(response.Receipt.Feedback.OriginalDiagnostic.ValidationFailureObservation, observation) {
 		t.Fatalf("structured receipt lost target binding: response=%+v receipt=%+v", diagnostic, response.Receipt)
 	}
 }
 
-func TestShellFailureTargetObservationRejectsUnstructuredOrMismatchedRecords(t *testing.T) {
+func TestShellOwnerFailureTargetMarkerAndParserCandidateUnionFailsClosed(t *testing.T) {
+	ctx := context.Background()
+	hub := magicevent.NewHub(32)
+	t.Cleanup(func() { hub.Terminate(ctx) })
+	receipts := map[string]runtimecontract.RuntimeOperationReceipt{}
+	receiptOwner := magicevent.NewSimpleObserver(orchestratorevents.CommandDestination, hub)
+	receiptOwner.Subscribe(orchestratorevents.TopicOrchestratorQueryRuntimeOperationReceipt, func(event magicevent.Event, result magicevent.Result) {
+		command := event.Data().(orchestratorevents.QueryRuntimeOperationReceiptCommand)
+		receipt, found := receipts[command.ExecutionKey]
+		response := orchestratorevents.QueryRuntimeOperationReceiptResult{Found: found}
+		if found {
+			response.Receipt = &receipt
+		}
+		result.Set(response, nil)
+	})
+	receiptOwner.Subscribe(orchestratorevents.TopicOrchestratorCommitRuntimeOperationReceipt, func(event magicevent.Event, result magicevent.Result) {
+		command := event.Data().(orchestratorevents.CommitRuntimeOperationReceiptCommand)
+		receipts[command.Receipt.ExecutionKey] = command.Receipt
+		result.Set(orchestratorevents.CommitRuntimeOperationReceiptResult{Receipt: command.Receipt}, nil)
+	})
+	t.Cleanup(func() {
+		receiptOwner.Unsubscribe(orchestratorevents.TopicOrchestratorCommitRuntimeOperationReceipt)
+		receiptOwner.Unsubscribe(orchestratorevents.TopicOrchestratorQueryRuntimeOperationReceipt)
+	})
+
+	owner := &Biz{Base: basebiz.New(modulecommon.ModuleID, hub, nil), runtimeAdapter: NewRuntimeAdapter()}
+	if err := owner.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { owner.Teardown(ctx) })
+
+	overflowMarkerRefs := make([]string, 0, shellValidationDiagnosticMaxTargetRefs+1)
+	for index := 0; index <= shellValidationDiagnosticMaxTargetRefs; index++ {
+		overflowMarkerRefs = append(overflowMarkerRefs, fmt.Sprintf("marker-%02d.go", index))
+	}
+	overflowMarker := fmt.Sprintf(`WORKORCH_FAILURE_TARGET={"schemaVersion":"workorch.shell.failure_target","targetRole":"implementation","targetRefs":[%s],"diagnosticClass":"validation_build_failed"}`,
+		quotedShellTestStrings(overflowMarkerRefs))
+	for index, test := range []struct {
+		name              string
+		marker            string
+		markerScope       []string
+		wantCandidateRefs []string
+	}{
+		{name: "marker absent keeps parser candidate", wantCandidateRefs: []string{"parser.go"}},
+		{
+			name:        "valid marker unions with parser candidate",
+			marker:      `WORKORCH_FAILURE_TARGET={"schemaVersion":"workorch.shell.failure_target","targetRole":"implementation","targetRefs":["marker.go"],"diagnosticClass":"validation_build_failed"}`,
+			markerScope: []string{"marker.go"}, wantCandidateRefs: []string{"marker.go", "parser.go"},
+		},
+		{name: "malformed marker invalidates parser candidate", marker: `WORKORCH_FAILURE_TARGET={not-json`},
+		{name: "out of scope marker invalidates parser candidate", marker: `WORKORCH_FAILURE_TARGET={"schemaVersion":"workorch.shell.failure_target","targetRole":"implementation","targetRefs":["outside.go"],"diagnosticClass":"validation_build_failed"}`},
+		{name: "over bound marker invalidates parser candidate", marker: overflowMarker, markerScope: overflowMarkerRefs},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			workspace := t.TempDir()
+			source := fmt.Sprintf(`package main
+
+import (
+	"fmt"
+	"os"
+)
+
+func main() {
+	fmt.Println(%q)
+	fmt.Fprintln(os.Stderr, "parser.go:1:1: synthetic managed-validation diagnostic")
+	os.Exit(7)
+}
+`, test.marker)
+			for name, content := range map[string]string{
+				"main.go":   source,
+				"parser.go": "package main\n",
+			} {
+				if err := os.WriteFile(filepath.Join(workspace, name), []byte(content), 0o644); err != nil {
+					t.Fatal(err)
+				}
+			}
+			for _, targetRef := range test.markerScope {
+				if err := os.WriteFile(filepath.Join(workspace, targetRef), []byte("package main\n"), 0o644); err != nil {
+					t.Fatal(err)
+				}
+			}
+
+			recipe := runtimecontract.RuntimeValidationRecipe{
+				ID: fmt.Sprintf("marker-parser-%d", index), Command: "go", Args: []string{"run", "main.go"}, TimeoutMillis: 60_000,
+			}
+			operationID := fmt.Sprintf("marker-parser-%d", index)
+			dispatchID := "dispatch-shell-" + operationID
+			executionContext := runtimecontract.RuntimeOperationExecutionContext{
+				Execution: runtimecontract.RuntimeOperationExecutionEnvelope{
+					ExecutionKey: fmt.Sprintf("exec/ws-shell/run-shell/%s/%s", dispatchID, operationID), Fence: 1,
+					ExpectedEffectScope: runtimecontract.RuntimeEffectEphemeralSession,
+				},
+				WorkspaceID: "ws-shell", RunID: "run-shell", DispatchID: dispatchID,
+				Transaction: runtimecontract.AuthorityTransaction{AuthoritySnapshotID: "authority-shell", RequiredOutputHash: "output-shell"},
+				OperationID: operationID, EvidenceKind: runtimecontract.EvidenceKindValidation,
+				WorkspaceDeliverableDirectory: workspace, TargetRefs: []string{"main.go"},
+			}
+			validationScope := append([]string{"main.go", "parser.go"}, test.markerScope...)
+			command := sealedShellTestCommand(t, owner.runtimeAdapter, executionContext, runtimecontract.RuntimeBlockKindManagedValidationSession, shellevents.OperationData{
+				ValidationRecipeID: recipe.ID,
+				ValidationEvidence: runtimecontract.RuntimeValidationEvidence{DiagnosticClass: runtimecontract.ValidationDiagnosticBuildFailed},
+				ManagedValidation:  runtimecontract.RuntimeManagedValidation{RuntimeManaged: true, Kind: runtimecontract.RuntimeBlockKindManagedValidationSession},
+			}, "implementation", []runtimecontract.RuntimeValidationRecipe{recipe}, validationScope)
+			result := hub.Send(magicevent.NewEventWithContext(
+				shellevents.TopicExecuteOperation, runtimecontract.RuntimeModuleOrchestrator, modulecommon.ModuleID,
+				magicevent.NewHeader(), ctx, command,
+			))
+			data, resultErr := result.Get()
+			if resultErr != nil {
+				t.Fatal(resultErr)
+			}
+			response, ok := data.(shellevents.ExecuteOperationResult)
+			if !ok || response.Receipt.Outcome != runtimecontract.RuntimeOperationOutcomeRejected || response.Receipt.Feedback == nil ||
+				response.Receipt.Feedback.OriginalDiagnostic == nil {
+				t.Fatalf("Shell owner rejected receipt = %#v", data)
+			}
+			diagnostic := response.Receipt.Feedback.OriginalDiagnostic
+			if diagnostic.TargetObservation != nil || len(diagnostic.TargetRefs) != 0 || diagnostic.ValidationDiagnostic == nil {
+				t.Fatalf("Shell owner leaked direct target authority: %+v", diagnostic)
+			}
+			observation := diagnostic.ValidationFailureObservation
+			if len(test.wantCandidateRefs) == 0 {
+				if observation != nil || len(diagnostic.ValidationDiagnostic.TargetRefs) != 0 {
+					t.Fatalf("invalid marker fell back to parser candidate: diagnostic=%+v observation=%+v", diagnostic.ValidationDiagnostic, observation)
+				}
+			} else if observation == nil || !reflect.DeepEqual(observation.CandidateTargetRefs, test.wantCandidateRefs) ||
+				!reflect.DeepEqual(diagnostic.ValidationDiagnostic.TargetRefs, test.wantCandidateRefs) ||
+				!reflect.DeepEqual(observation.ValidationScopeTargetRefs, canonicalShellFailureTargetRefs(validationScope)) {
+				t.Fatalf("bounded marker/parser candidate union = diagnostic=%+v observation=%+v", diagnostic.ValidationDiagnostic, observation)
+			}
+
+			duplicateResult := hub.Send(magicevent.NewEventWithContext(
+				shellevents.TopicExecuteOperation, runtimecontract.RuntimeModuleOrchestrator, modulecommon.ModuleID,
+				magicevent.NewHeader(), ctx, command,
+			))
+			duplicateData, duplicateErr := duplicateResult.Get()
+			if duplicateErr != nil {
+				t.Fatal(duplicateErr)
+			}
+			duplicate, ok := duplicateData.(shellevents.ExecuteOperationResult)
+			if !ok || !runtimecontract.SameRuntimeOperationReceipt(duplicate.Receipt, response.Receipt) {
+				t.Fatalf("duplicate marker/parser receipt drifted: first=%+v duplicate=%+v", response.Receipt, duplicate)
+			}
+		})
+	}
+}
+
+func quotedShellTestStrings(values []string) string {
+	quoted := make([]string, 0, len(values))
+	for _, value := range values {
+		quoted = append(quoted, fmt.Sprintf("%q", value))
+	}
+	return strings.Join(quoted, ",")
+}
+
+func TestShellOwnerSelectorOnlyMarkerDoesNotCreateRepairAuthority(t *testing.T) {
+	result := RuntimeCommandResult{
+		Stdout:                      `WORKORCH_FAILURE_TARGET={"schemaVersion":"workorch.shell.failure_target","targetRole":"implementation","targetRefs":["implementation.go"],"diagnosticClass":"validation_build_failed"}`,
+		ValidationFailureDiagnostic: &runtimecontract.ValidationFailureDiagnostic{Class: runtimecontract.ValidationDiagnosticBuildFailed},
+	}
+	executionContext := runtimecontract.RuntimeOperationExecutionContext{
+		WorkspaceID: "ws-shell", RunID: "run-shell", DispatchID: "dispatch-shell",
+		Transaction: runtimecontract.AuthorityTransaction{AuthoritySnapshotID: "authority-shell"}, OperationID: "validate-entry",
+	}
+	authorization := shellevents.RuntimeExecutionAuthorization{TargetRole: "implementation"}
+	diagnostic := result.ValidationFailureDiagnostic.Clone()
+	targetRefs, valid := shellFailureTargetCandidateUnion(result, authorization.TargetRole, authorization.ValidationScopeTargetRefs)
+	if valid {
+		diagnostic.TargetRefs = targetRefs
+	} else {
+		diagnostic.TargetRefs = nil
+	}
+	if observation := shellValidationFailureObservation(executionContext, authorization, diagnostic); valid || observation != nil || len(diagnostic.TargetRefs) != 0 {
+		t.Fatalf("selector-only marker created repair authority: diagnostic=%+v observation=%+v", diagnostic, observation)
+	}
+}
+
+func TestShellFailureTargetMarkerOutsideSealedScopeIsRejected(t *testing.T) {
+	result := RuntimeCommandResult{
+		Stdout:                      `WORKORCH_FAILURE_TARGET={"schemaVersion":"workorch.shell.failure_target","targetRole":"implementation","targetRefs":["outside.go"],"diagnosticClass":"validation_build_failed"}`,
+		ValidationFailureDiagnostic: &runtimecontract.ValidationFailureDiagnostic{Class: runtimecontract.ValidationDiagnosticBuildFailed},
+	}
+	executionContext := runtimecontract.RuntimeOperationExecutionContext{
+		WorkspaceID: "ws-shell", RunID: "run-shell", DispatchID: "dispatch-shell",
+		Transaction: runtimecontract.AuthorityTransaction{AuthoritySnapshotID: "authority-shell"}, OperationID: "validate-entry",
+	}
+	authorization := shellevents.RuntimeExecutionAuthorization{TargetRole: "implementation", ValidationScopeTargetRefs: []string{"entry.go", "implementation.go"}}
+	diagnostic := result.ValidationFailureDiagnostic.Clone()
+	marker := decodeShellFailureTargetMarkerCandidate(result, authorization.TargetRole)
+	if !marker.Present || !marker.Valid {
+		t.Fatal("closed marker fixture was not decoded")
+	}
+	targetRefs, valid := shellFailureTargetCandidateUnion(result, authorization.TargetRole, authorization.ValidationScopeTargetRefs)
+	if valid {
+		diagnostic.TargetRefs = targetRefs
+	} else {
+		diagnostic.TargetRefs = nil
+	}
+	if observation := shellValidationFailureObservation(executionContext, authorization, diagnostic); valid || observation != nil || len(diagnostic.TargetRefs) != 0 {
+		t.Fatalf("out-of-scope marker created a repair observation: diagnostic=%+v observation=%+v", diagnostic, observation)
+	}
+}
+
+func TestShellFailureTargetMarkerRejectsUnstructuredOrMismatchedRecords(t *testing.T) {
 	base := RuntimeCommandResult{
 		ValidationFailureDiagnostic: &runtimecontract.ValidationFailureDiagnostic{Class: runtimecontract.ValidationDiagnosticBuildFailed},
 	}
@@ -294,10 +500,61 @@ func TestShellFailureTargetObservationRejectsUnstructuredOrMismatchedRecords(t *
 		t.Run(name, func(t *testing.T) {
 			result := base
 			result.Stdout = test.stdout
-			got := shellFailureTargetObservation(result, test.role, "shell-policy-v1")
-			if (got != nil) != test.want {
-				t.Fatalf("shellFailureTargetObservation() = %+v, want present=%t", got, test.want)
+			got := decodeShellFailureTargetMarkerCandidate(result, test.role)
+			if got.Valid != test.want || (name == "missing" && got.Present) || (name != "missing" && !got.Present) {
+				t.Fatalf("decodeShellFailureTargetMarkerCandidate() = %+v, want present=%t", got, test.want)
 			}
 		})
+	}
+}
+
+func TestShellFailureCandidateMergeRejectsCombinedBoundOverflow(t *testing.T) {
+	diagnosticRefs := make([]string, 0, shellValidationDiagnosticMaxTargetRefs)
+	markerRefs := make([]string, 0, shellValidationDiagnosticMaxTargetRefs)
+	for index := 0; index < shellValidationDiagnosticMaxTargetRefs; index++ {
+		diagnosticRefs = append(diagnosticRefs, fmt.Sprintf("diagnostic-%d.go", index))
+		markerRefs = append(markerRefs, fmt.Sprintf("marker-%d.go", index))
+	}
+	for _, test := range []struct {
+		name   string
+		marker []string
+	}{
+		{name: "eight plus one", marker: markerRefs[:1]},
+		{name: "eight plus eight", marker: markerRefs},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			if refs, valid := shellMergeFailureTargetCandidateRefs(diagnosticRefs, test.marker); valid || len(refs) != 0 {
+				t.Fatalf("overflow candidate union was partially admitted: %v", refs)
+			}
+		})
+	}
+	if refs, valid := shellMergeFailureTargetCandidateRefs(diagnosticRefs, diagnosticRefs); !valid || !reflect.DeepEqual(refs, diagnosticRefs) {
+		t.Fatalf("deduplicated bounded candidate union = %v, want %v", refs, diagnosticRefs)
+	}
+}
+
+func TestShellFailureCandidateUnionRejectsParserOverflowEvenWithValidMarker(t *testing.T) {
+	scope := make([]string, 0, shellValidationDiagnosticMaxTargetRefs+1)
+	var stderr strings.Builder
+	for index := 0; index <= shellValidationDiagnosticMaxTargetRefs; index++ {
+		ref := fmt.Sprintf("candidate-%d.go", index)
+		scope = append(scope, ref)
+		fmt.Fprintf(&stderr, "%s:1:1: compile failure\n", ref)
+	}
+	request := RuntimeCommandRequest{
+		ManagedValidation:         runtimecontract.RuntimeManagedValidation{RuntimeManaged: true, Kind: runtimecontract.RuntimeBlockKindManagedValidationSession},
+		ValidationScopeTargetRefs: scope,
+	}
+	result := RuntimeCommandResult{
+		ExitCode: 1,
+		Stderr:   stderr.String(),
+		Stdout:   `WORKORCH_FAILURE_TARGET={"schemaVersion":"workorch.shell.failure_target","targetRole":"implementation","targetRefs":["candidate-0.go"],"diagnosticClass":"validation_build_failed"}`,
+	}
+	attachShellValidationFailureDiagnostic(&result, request, "go", 1, false, false, fmt.Errorf("exit status 1"))
+	if !result.validationFailureTargetCandidatesInvalid || result.ValidationFailureDiagnostic == nil {
+		t.Fatalf("parser overflow was not retained as a fail-closed candidate transaction: %+v", result)
+	}
+	if refs, valid := shellFailureTargetCandidateUnion(result, "implementation", scope); valid || len(refs) != 0 {
+		t.Fatalf("valid marker revived over-bounded parser candidates: refs=%v valid=%t", refs, valid)
 	}
 }

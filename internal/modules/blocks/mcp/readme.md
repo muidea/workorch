@@ -4,7 +4,7 @@ Status: active
 
 Type: capability-block-contract
 
-Last Verified: 2026-08-26
+Last Verified: 2026-08-28
 
 ## 功能范围与边界
 
@@ -30,6 +30,17 @@ Last Verified: 2026-08-26
 - receipt query 的 `Found=false` 只有 Orchestrator 已证明当前 execution 仍为 active+claimed 且 grant parity 精确匹配时
   才是执行许可；MCP owner 不把普通“未找到 receipt”解释为授权。已提交的 exact receipt 重放只返回既有事实；query 的
   Found/Receipt 一致性与 identity、commit 的完整 receipt equality 由 capability owners 共享的 typed validator fail-closed 校验。
+- MCP direct failure target 是 descriptor 声明 `receipt_evidence_observation` 后的 concrete owner 实现；是否允许 direct
+  observation 由共享 descriptor policy 决定，Runtime core 不按 MCP 名称特判。只有 rejected MCP response 显式给出不超过 16 个的
+  `failureTargets`，且 Server subject、target role 与当前 Registry/catalog revision 齐全时，owner 才可在 exact receipt 的
+  `OriginalDiagnostic.TargetObservation` 中返回该观察；第 17 个 canonical target 使完整 observation 失效，不得截断后形成
+  authority，也不得从 operation `TargetRefs`、request input、自由文本或 current workspace manifest 推断。
+- MCP direct observation 的 `DiagnosticClass` 固定为 `receipt_evidence_failure_target`，其 `ContentHash`、`EvidenceRefs` 必须与同一
+  receipt 中实际 `buildMCPOperationEvidence` 持久化的 owner response evidence 精确一致，并包含对应
+  `workorch://mcp/evidence/<content-hash>` content-addressed ref。evidence 持久化失败时 receipt 只能保留 generic rejection，
+  `OriginalDiagnostic.TargetRefs` 与 `TargetObservation` 均为空；receipt 自身的 operation `TargetRefs` 仍只保留 sealed execution
+  lineage。MCP receipt 不得携带 `RuntimeValidationFailureObservation`，也不创建
+  `FailureTarget` 或 `RepairDirective`。
 - approval policy 来自 exact Capability（缺失时使用同一 Server snapshot 的 default）；typed requirement 绑定 capability、
   operation payload hash、catalog/Registry/capability revision、effect 与 idempotency。MCP owner 不创建或解决 Approval。
 
@@ -44,6 +55,12 @@ Last Verified: 2026-08-26
 - non-durable capability 只能返回无 changed fact。durable capability 必须在 response 的 `workorchEffect` 中提供与 sealed
   effect 一致的 `changed`、before/after revision 及 bounded remote resource changes；真实 no-op 返回相同 revision。
   缺失、冲突或伪造 observation 产生 rejected receipt，不能按声明盲报 `Changed=true`。
+- Orchestrator 在 commit 与 fresh-load 使用同一 ingress invariant，先精确比较 observation 的 class/content hash/evidence refs 与
+  owner receipt evidence；只有在该 rejected receipt 已属于 completed committed dispatch、matching operation execution 已
+  `evidence_committed`、key/fence/ref/hash 与唯一 receipt-derived rejected evidence/processed-event fence 精确一致，且 sealed 与
+  current MCP catalog snapshot/acquisition/revision、subject selector 和 owner-catalog prerequisite observation 均保持新鲜时，
+  才能把 direct observation 作为 current failure/target authority。`owner_committed`、generic failure ingress、receipt/evidence
+  漂移或 catalog stale 均 fail-closed；后续 File target snapshot 只负责 workspace grounding，不能反向创建 MCP observation。
 - provider side effect 已发生但 receipt 尚未持久化时，恢复严格服从 sealed replay class：`at_most_once | unknown`
   进入 `outcome_unknown`，不得重发；已有 exact receipt 的响应丢失只重放该 receipt/evidence transaction。
 
@@ -71,6 +88,11 @@ Last Verified: 2026-08-26
 - [x] Post、错误 producer、scope/fence、sealed payload、execution-record catalog identity、Capability/allowlist/schema/policy/
   revision 与 approval grant 漂移，且前述 ingress 漂移均为零 provider transport。
 - [x] tool/resource/prompt exact Capability 选择及 non-durable、durable changed、durable no-op、缺失 effect observation。
+- [x] explicit MCP failure target 的真实 EventHub receipt、evidence commit、File snapshot、duplicate/restart 正向链，以及
+  generic ingress、owner-committed-only、缺失/重复 evidence、缺失 processed fence、receipt/catalog revision 漂移的
+  commit/reload 拒绝。
+- [x] direct observation 非 MCP owner 拒绝、response evidence persist 失败零 authority、17 项 overflow 不截断，以及
+  diagnostic class/content hash/evidence refs 协同漂移的 commit/fresh-load 拒绝。
 - [x] HTTP/stdio byte/event guard、安全 diagnostic、private raw ref/hash、credential/environment reference 隔离。
 - [x] receipt commit 前后崩溃、response loss、duplicate/restart 与 stale catalog 的 at-most-once/replay 收敛。
 

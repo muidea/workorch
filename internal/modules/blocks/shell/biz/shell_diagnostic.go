@@ -38,6 +38,8 @@ func attachShellValidationFailureDiagnostic(output *RuntimeCommandResult, reques
 	if class == "" {
 		return
 	}
+	targetRefs, targetCandidatesValid := shellValidationDiagnosticTargetCandidates(*output, request, execCommand)
+	output.validationFailureTargetCandidatesInvalid = !targetCandidatesValid
 	diagnostic := &runtimemodel.ValidationFailureDiagnostic{
 		SchemaVersion:                 runtimemodel.ValidationFailureDiagnosticSchemaVersion,
 		Class:                         class,
@@ -48,7 +50,7 @@ func attachShellValidationFailureDiagnostic(output *RuntimeCommandResult, reques
 		CommandKind:                   strings.TrimSpace(filepath.Base(execCommand)),
 		ExitCode:                      exitCode, TimedOut: timedOut, CommandPolicyViolation: policyViolation,
 		UnavailableCommand: output.UnavailableCommand,
-		TargetRefs:         shellValidationDiagnosticTargetRefs(*output, request, execCommand),
+		TargetRefs:         targetRefs,
 		ObservationType:    firstNonEmptyShellString(request.ValidationEvidence.ObservationType, request.ValidationEvidence.Observation),
 		EvidenceMode:       request.ValidationEvidence.Mode,
 		StdoutPreview:      shellPreview(output.Stdout, 2048),
@@ -152,8 +154,17 @@ var (
 // promoted: when output has no supported location, the result is deliberately
 // empty and no repair-surface observation is emitted.
 func shellValidationDiagnosticTargetRefs(output RuntimeCommandResult, request RuntimeCommandRequest, execCommand string) []string {
+	refs, _ := shellValidationDiagnosticTargetCandidates(output, request, execCommand)
+	return refs
+}
+
+// shellValidationDiagnosticTargetCandidates distinguishes an empty valid
+// parser result from a bounded-protocol overflow. The caller carries that bit
+// alongside the owner-private command result so a valid marker cannot revive a
+// transaction whose structured-output half already exceeded the bound.
+func shellValidationDiagnosticTargetCandidates(output RuntimeCommandResult, request RuntimeCommandRequest, execCommand string) ([]string, bool) {
 	if !shellInputHasManagedValidation(request) || strings.TrimSpace(filepath.Base(execCommand)) != "go" || len(request.ValidationScopeTargetRefs) == 0 {
-		return nil
+		return nil, true
 	}
 	scope := make(map[string]struct{}, len(request.ValidationScopeTargetRefs))
 	for _, value := range request.ValidationScopeTargetRefs {
@@ -162,7 +173,7 @@ func shellValidationDiagnosticTargetRefs(output RuntimeCommandResult, request Ru
 		}
 	}
 	if len(scope) == 0 {
-		return nil
+		return nil, true
 	}
 	seen := make(map[string]struct{})
 	for _, match := range shellGoDiagnosticTargetPattern.FindAllStringSubmatch(output.Stdout+"\n"+output.Stderr, -1) {
@@ -177,8 +188,8 @@ func shellValidationDiagnosticTargetRefs(output RuntimeCommandResult, request Ru
 			continue
 		}
 		seen[value] = struct{}{}
-		if len(seen) > shellFailureTargetObservationMaxRefs {
-			return nil
+		if len(seen) > shellValidationDiagnosticMaxTargetRefs {
+			return nil, false
 		}
 	}
 	for _, match := range shellGoPackageConflictPattern.FindAllStringSubmatch(output.Stdout+"\n"+output.Stderr, -1) {
@@ -199,8 +210,8 @@ func shellValidationDiagnosticTargetRefs(output RuntimeCommandResult, request Ru
 				continue
 			}
 			seen[value] = struct{}{}
-			if len(seen) > shellFailureTargetObservationMaxRefs {
-				return nil
+			if len(seen) > shellValidationDiagnosticMaxTargetRefs {
+				return nil, false
 			}
 		}
 	}
@@ -209,7 +220,7 @@ func shellValidationDiagnosticTargetRefs(output RuntimeCommandResult, request Ru
 		ret = append(ret, value)
 	}
 	sort.Strings(ret)
-	return ret
+	return ret, true
 }
 
 func normalizeShellDiagnosticTargetRef(value, workingDirectory string) (string, bool) {

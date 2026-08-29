@@ -3,6 +3,7 @@ package runtime
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/muidea/workorch/internal/pkg/common"
@@ -112,5 +113,267 @@ func TestRuntimeControllerOperationReceiptFenceAndTerminalUniqueness(t *testing.
 	conflict.Evidence.Summary = "different terminal outcome"
 	if _, _, err := controller.commitOperationReceipt(context.Background(), "ws-v2", "run-v2", sealed.ActiveDispatch.ID, execution.Fence, conflict); !errors.Is(err, common.ErrConflict) {
 		t.Fatalf("different receipt for same execution key err = %v, want conflict", err)
+	}
+}
+
+func TestManagedValidationReceiptRejectsForeignOrMismatchedValidationFailureObservation(t *testing.T) {
+	t.Run("non-managed owners", func(t *testing.T) {
+		for _, kind := range []string{runtimecontract.RuntimeBlockKindPatchApply, runtimecontract.StepKindMCPResourceRead, runtimecontract.StepKindShellCommand} {
+			descriptor, found := runtimecontract.RuntimeOperationDescriptorForKind(kind)
+			if !found {
+				t.Fatalf("descriptor %q is missing", kind)
+			}
+			observation := runtimecontract.RuntimeValidationFailureObservation{
+				WorkspaceID: "ws-1", RunID: "run-1", AuthoritySnapshotID: "authority-1", DispatchID: "dispatch-1", OperationID: "operation-1",
+				FailureSignature: "failure-1", TargetRole: "implementation", DiagnosticClass: runtimecontract.ValidationDiagnosticBuildFailed,
+				CandidateTargetRefs: []string{"main.go"}, ValidationScopeTargetRefs: []string{"main.go"}, DiagnosticHash: strings.Repeat("a", 64),
+			}
+			diagnostic := runtimecontract.RuntimeOriginalDiagnostic{
+				SchemaVersion: runtimecontract.RuntimeOriginalDiagnosticSchemaCurrent, OwnerModuleID: descriptor.OwnerModuleID,
+				OriginalClass: string(runtimecontract.FailureClassBuildFailure), OriginalCode: "failed", OriginalMessage: "operation failed", Signature: observation.FailureSignature,
+				OperationID: observation.OperationID, ValidationFailureObservation: &observation,
+			}
+			if err := validateOperationReceiptDiagnosticOwner(RuntimeAggregate{Facts: runtimecontract.RuntimeFacts{WorkspaceID: "ws-1", RunID: "run-1"}}, SealedDispatch{}, runtimecontract.RuntimeOperation{ID: observation.OperationID, Kind: kind}, diagnostic); err == nil ||
+				!strings.Contains(err.Error(), "does not admit validation failure candidates") {
+				t.Fatalf("kind %q foreign observation error = %v", kind, err)
+			}
+		}
+	})
+
+	for _, test := range []struct {
+		name   string
+		mutate func(*runtimecontract.RuntimeValidationFailureObservation, *runtimecontract.ValidationFailureDiagnostic)
+	}{
+		{name: "workspace", mutate: func(value *runtimecontract.RuntimeValidationFailureObservation, _ *runtimecontract.ValidationFailureDiagnostic) {
+			value.WorkspaceID = "ws-other"
+		}},
+		{name: "run", mutate: func(value *runtimecontract.RuntimeValidationFailureObservation, _ *runtimecontract.ValidationFailureDiagnostic) {
+			value.RunID = "run-other"
+		}},
+		{name: "authority", mutate: func(value *runtimecontract.RuntimeValidationFailureObservation, _ *runtimecontract.ValidationFailureDiagnostic) {
+			value.AuthoritySnapshotID = "authority-other"
+		}},
+		{name: "dispatch", mutate: func(value *runtimecontract.RuntimeValidationFailureObservation, _ *runtimecontract.ValidationFailureDiagnostic) {
+			value.DispatchID = "dispatch-other"
+		}},
+		{name: "operation", mutate: func(value *runtimecontract.RuntimeValidationFailureObservation, _ *runtimecontract.ValidationFailureDiagnostic) {
+			value.OperationID = "operation-other"
+		}},
+		{name: "role", mutate: func(value *runtimecontract.RuntimeValidationFailureObservation, _ *runtimecontract.ValidationFailureDiagnostic) {
+			value.TargetRole = "validation-entry"
+		}},
+		{name: "class", mutate: func(value *runtimecontract.RuntimeValidationFailureObservation, _ *runtimecontract.ValidationFailureDiagnostic) {
+			value.DiagnosticClass = runtimecontract.ValidationDiagnosticTestFailed
+		}},
+		{name: "candidate", mutate: func(value *runtimecontract.RuntimeValidationFailureObservation, _ *runtimecontract.ValidationFailureDiagnostic) {
+			value.CandidateTargetRefs = []string{"support.go"}
+			value.ValidationScopeTargetRefs = []string{"main.go", "support.go"}
+		}},
+		{name: "scope", mutate: func(value *runtimecontract.RuntimeValidationFailureObservation, diagnostic *runtimecontract.ValidationFailureDiagnostic) {
+			value.ValidationScopeTargetRefs = []string{"main.go", "support.go"}
+			diagnostic.TargetRefs = append([]string(nil), value.CandidateTargetRefs...)
+		}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			repository, controller, claimed, execution, receipt := claimedManagedValidationReceiptForTest(t)
+			beforeReceiptCount := len(repository.aggregate.OperationReceipts)
+			test.mutate(receipt.Feedback.OriginalDiagnostic.ValidationFailureObservation, receipt.Feedback.OriginalDiagnostic.ValidationDiagnostic)
+			if _, _, err := controller.commitOperationReceipt(context.Background(), claimed.Facts.WorkspaceID, claimed.Facts.RunID, claimed.ActiveDispatch.ID, execution.Fence, receipt); err == nil {
+				t.Fatal("mismatched observation was accepted at receipt commit")
+			}
+			if len(repository.aggregate.OperationReceipts) != beforeReceiptCount {
+				t.Fatalf("mismatched receipt was partially persisted: %+v", repository.aggregate.OperationReceipts)
+			}
+
+			invalid := repository.aggregate
+			receipt.Fence = execution.Fence
+			receipt = receipt.Normalized()
+			for index := range invalid.ActiveDispatch.OperationExecutions {
+				if invalid.ActiveDispatch.OperationExecutions[index].OperationID != receipt.OperationID {
+					continue
+				}
+				invalid.ActiveDispatch.OperationExecutions[index].State = runtimecontract.OperationExecutionOwnerCommitted
+				invalid.ActiveDispatch.OperationExecutions[index].OwnerReceiptRef = "runtime-receipt/" + receipt.ExecutionKey
+				invalid.ActiveDispatch.OperationExecutions[index].OwnerReceiptHash = runtimecontract.StableRuntimeOperationReceiptHash(receipt)
+			}
+			invalid.OperationReceipts = append(invalid.OperationReceipts, receipt)
+			if err := invalid.Validate(); err == nil {
+				t.Fatal("mismatched observation was accepted at fresh load")
+			}
+		})
+	}
+}
+
+func TestDirectTargetObservationReceiptIngressIsDescriptorAuthorizedAndEvidenceBound(t *testing.T) {
+	for _, kind := range []string{
+		runtimecontract.StepKindFileEdit,
+		runtimecontract.StepKindGitRead,
+		runtimecontract.StepKindShellCommand,
+		runtimecontract.StepKindSSHCommand,
+		runtimecontract.StepKindWebSearch,
+	} {
+		t.Run(kind, func(t *testing.T) {
+			descriptor, found := runtimecontract.RuntimeOperationDescriptorForKind(kind)
+			if !found {
+				t.Fatalf("descriptor %q is missing", kind)
+			}
+			observation := runtimecontract.RuntimeFailureTargetObservation{
+				OwnerModuleID: descriptor.OwnerModuleID, SubjectRef: "owner-subject", TargetRole: "implementation",
+				ObservedRevision: "owner-revision-1", TargetRefs: []string{"implementation.go"},
+			}
+			diagnostic := runtimecontract.RuntimeOriginalDiagnostic{
+				SchemaVersion: runtimecontract.RuntimeOriginalDiagnosticSchemaCurrent, OwnerModuleID: descriptor.OwnerModuleID,
+				OriginalClass: string(runtimecontract.FailureClassExecutionFailure), OriginalCode: "failed", OriginalMessage: "failed",
+				Signature: "failure-1", OperationID: "operation-1", TargetRefs: observation.TargetRefs, TargetObservation: &observation,
+			}
+			err := validateOperationReceiptDiagnosticOwner(
+				RuntimeAggregate{}, SealedDispatch{}, runtimecontract.RuntimeOperation{ID: "operation-1", Kind: kind}, diagnostic,
+			)
+			if err == nil || !strings.Contains(err.Error(), "does not admit direct target observations") {
+				t.Fatalf("owner %q direct observation error = %v", descriptor.OwnerModuleID, err)
+			}
+		})
+	}
+
+	evidenceHash := strings.Repeat("a", 64)
+	evidence := runtimecontract.RuntimeOperationEvidence{
+		ContentHash:    evidenceHash,
+		ContentAddress: &runtimecontract.RuntimeEvidenceContentAddress{Algorithm: runtimecontract.RuntimeEvidenceDigestSHA256, Digest: evidenceHash, Ref: "workorch://mcp/evidence/" + evidenceHash},
+		EvidenceRefs:   []string{"workorch://mcp/capability/server-a/revision-1", "workorch://mcp/evidence/" + evidenceHash},
+	}
+	observation := runtimecontract.RuntimeFailureTargetObservation{
+		OwnerModuleID: runtimecontract.RuntimeModuleMCP, SubjectRef: "server-a", TargetRole: "implementation",
+		ObservedRevision: "registry-1", TargetRefs: []string{"implementation.go"},
+		CatalogDependency: &runtimecontract.RuntimeFreshnessDependency{Domain: runtimecontract.RuntimeResourceOwnerCatalog, OwnerModuleID: runtimecontract.RuntimeModuleMCP, SubjectRef: "mcp_server_catalog", Revision: "registry-1"},
+		DiagnosticClass:   runtimecontract.RuntimeFailureTargetDiagnosticReceiptEvidence,
+		EvidenceRefs:      append([]string(nil), evidence.EvidenceRefs...), ContentHash: evidence.ContentHash,
+	}
+	diagnostic := runtimecontract.RuntimeOriginalDiagnostic{
+		SchemaVersion: runtimecontract.RuntimeOriginalDiagnosticSchemaCurrent, OwnerModuleID: runtimecontract.RuntimeModuleMCP,
+		OriginalClass: string(runtimecontract.FailureClassExecutionFailure), OriginalCode: "failed", OriginalMessage: "failed",
+		Signature: "failure-1", OperationID: "operation-1", TargetRefs: observation.TargetRefs, TargetObservation: &observation,
+	}
+	if err := validateOperationReceiptDiagnosticOwner(RuntimeAggregate{}, SealedDispatch{}, runtimecontract.RuntimeOperation{ID: "operation-1", Kind: runtimecontract.StepKindMCPToolCall}, diagnostic); err != nil {
+		t.Fatalf("valid MCP owner observation rejected: %v", err)
+	}
+	descriptor, _ := runtimecontract.RuntimeOperationDescriptorForKind(runtimecontract.StepKindMCPToolCall)
+	if err := validateReceiptEvidenceTargetObservation(descriptor, evidence, observation); err != nil {
+		t.Fatalf("valid MCP response evidence binding rejected: %v", err)
+	}
+
+	for _, test := range []struct {
+		name   string
+		mutate func(*runtimecontract.RuntimeOperationEvidence, *runtimecontract.RuntimeFailureTargetObservation)
+	}{
+		{name: "diagnostic class", mutate: func(_ *runtimecontract.RuntimeOperationEvidence, value *runtimecontract.RuntimeFailureTargetObservation) {
+			value.DiagnosticClass = "untyped_failure"
+		}},
+		{name: "content hash", mutate: func(_ *runtimecontract.RuntimeOperationEvidence, value *runtimecontract.RuntimeFailureTargetObservation) {
+			value.ContentHash = strings.Repeat("b", 64)
+		}},
+		{name: "evidence refs", mutate: func(_ *runtimecontract.RuntimeOperationEvidence, value *runtimecontract.RuntimeFailureTargetObservation) {
+			value.EvidenceRefs = append(value.EvidenceRefs, "workorch://mcp/evidence/extra")
+		}},
+		{name: "receipt evidence", mutate: func(value *runtimecontract.RuntimeOperationEvidence, _ *runtimecontract.RuntimeFailureTargetObservation) {
+			value.ContentHash = strings.Repeat("b", 64)
+		}},
+		{name: "missing persisted evidence", mutate: func(value *runtimecontract.RuntimeOperationEvidence, _ *runtimecontract.RuntimeFailureTargetObservation) {
+			value.ContentHash = ""
+			value.EvidenceRefs = nil
+		}},
+		{name: "coordinated non content addressed refs", mutate: func(value *runtimecontract.RuntimeOperationEvidence, observation *runtimecontract.RuntimeFailureTargetObservation) {
+			refs := []string{"workorch://mcp/capability/server-a/revision-1", "workorch://mcp/opaque/response"}
+			value.EvidenceRefs = append([]string(nil), refs...)
+			observation.EvidenceRefs = append([]string(nil), refs...)
+		}},
+	} {
+		t.Run("MCP/"+test.name, func(t *testing.T) {
+			driftedEvidence := evidence
+			driftedEvidence.EvidenceRefs = append([]string(nil), evidence.EvidenceRefs...)
+			driftedObservation := observation.Clone()
+			test.mutate(&driftedEvidence, &driftedObservation)
+			if err := validateReceiptEvidenceTargetObservation(descriptor, driftedEvidence, driftedObservation); err == nil {
+				t.Fatalf("drifted MCP response evidence binding validated: evidence=%+v observation=%+v", driftedEvidence, driftedObservation)
+			}
+		})
+	}
+}
+
+func TestOperationReceiptFeedbackScopeRejectsDriftAtCommitAndFreshLoad(t *testing.T) {
+	for _, test := range []struct {
+		name   string
+		mutate func(*runtimecontract.RuntimeFeedback)
+	}{
+		{name: "workspace", mutate: func(value *runtimecontract.RuntimeFeedback) { value.WorkspaceID = "ws-other" }},
+		{name: "run", mutate: func(value *runtimecontract.RuntimeFeedback) { value.RunID = "run-other" }},
+		{name: "authority", mutate: func(value *runtimecontract.RuntimeFeedback) { value.AuthoritySnapshotID = "authority-other" }},
+		{name: "dispatch", mutate: func(value *runtimecontract.RuntimeFeedback) { value.DispatchID = "dispatch-other" }},
+		{name: "diagnostic operation", mutate: func(value *runtimecontract.RuntimeFeedback) { value.OriginalDiagnostic.OperationID = "operation-other" }},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			repository, controller, claimed, execution, receipt := claimedManagedValidationReceiptForTest(t)
+			beforeReceiptCount := len(repository.aggregate.OperationReceipts)
+			test.mutate(receipt.Feedback)
+			if _, _, err := controller.commitOperationReceipt(context.Background(), claimed.Facts.WorkspaceID, claimed.Facts.RunID, claimed.ActiveDispatch.ID, execution.Fence, receipt); err == nil {
+				t.Fatal("drifted feedback scope was accepted at receipt commit")
+			}
+			if len(repository.aggregate.OperationReceipts) != beforeReceiptCount {
+				t.Fatalf("drifted receipt was partially persisted: %+v", repository.aggregate.OperationReceipts)
+			}
+
+			invalid := repository.aggregate
+			receipt.Fence = execution.Fence
+			receipt = receipt.Normalized()
+			for index := range invalid.ActiveDispatch.OperationExecutions {
+				if invalid.ActiveDispatch.OperationExecutions[index].OperationID != receipt.OperationID {
+					continue
+				}
+				invalid.ActiveDispatch.OperationExecutions[index].State = runtimecontract.OperationExecutionOwnerCommitted
+				invalid.ActiveDispatch.OperationExecutions[index].OwnerReceiptRef = "runtime-receipt/" + receipt.ExecutionKey
+				invalid.ActiveDispatch.OperationExecutions[index].OwnerReceiptHash = runtimecontract.StableRuntimeOperationReceiptHash(receipt)
+			}
+			invalid.OperationReceipts = append(invalid.OperationReceipts, receipt)
+			if err := invalid.Validate(); err == nil {
+				t.Fatal("drifted feedback scope was accepted at fresh load")
+			}
+		})
+	}
+}
+
+func claimedManagedValidationReceiptForTest(t *testing.T) (*durableRuntimeStateRepository, *RuntimeController, RuntimeAggregate, runtimecontract.RuntimeOperationExecutionRecord, runtimecontract.RuntimeOperationReceipt) {
+	t.Helper()
+	repository := &durableRuntimeStateRepository{aggregate: validationRepairSurfaceAggregateForTest(t, true)}
+	sealed := sealCandidateForTest(t, repository, validationCandidate())
+	controller, err := NewRuntimeController(repository)
+	if err != nil {
+		t.Fatal(err)
+	}
+	operationID := runtimeTestActiveOperationID(t, sealed, 0)
+	claimed, err := controller.claimOperationExecution(context.Background(), sealed.Facts.WorkspaceID, sealed.Facts.RunID, operationID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	execution, found := operationExecutionRecord(claimed.ActiveDispatch.OperationExecutions, operationID)
+	if !found {
+		t.Fatal("claimed managed-validation execution is missing")
+	}
+	observation := runtimecontract.RuntimeValidationFailureObservation{
+		WorkspaceID: claimed.Facts.WorkspaceID, RunID: claimed.Facts.RunID,
+		AuthoritySnapshotID: claimed.ActiveDispatch.Transaction.AuthoritySnapshotID,
+		DispatchID:          claimed.ActiveDispatch.ID, OperationID: operationID,
+		FailureSignature: "managed-validation-failure", TargetRole: claimed.ActiveDispatch.FocusTargetRole,
+		DiagnosticClass:     runtimecontract.ValidationDiagnosticBuildFailed,
+		CandidateTargetRefs: []string{"main.go"}, ValidationScopeTargetRefs: []string{"main.go"}, DiagnosticHash: strings.Repeat("b", 64),
+	}
+	failure := runtimecontract.FailureFact{
+		Class: runtimecontract.FailureClassBuildFailure, Code: "managed_validation_failed",
+		Signature: observation.FailureSignature, Message: "managed validation failed",
+		ValidationDiagnostic:         &runtimecontract.ValidationFailureDiagnostic{Class: observation.DiagnosticClass, TargetRefs: append([]string(nil), observation.CandidateTargetRefs...)},
+		ValidationFailureObservation: &observation,
+	}
+	return repository, controller, claimed, execution, runtimecontract.RuntimeOperationReceipt{
+		ExecutionKey: execution.ExecutionKey, OperationID: operationID,
+		Outcome: runtimecontract.RuntimeOperationOutcomeRejected, ObservedEffectScope: runtimecontract.RuntimeEffectEphemeralSession,
+		Feedback: runtimeOperationFeedbackForTest(t, claimed, operationID, failure),
 	}
 }

@@ -41,7 +41,7 @@ func usedRuntimeCapabilities(snapshot readmodelcore.RunSnapshotState, run *runmo
 				if _, exists := used[identity.ID]; !exists {
 					order = append(order, identity.ID)
 				}
-				evidenceRef := "workorch://runtime-operations/" + strings.TrimSpace(dispatch.ID) + "/" + strings.TrimSpace(operation.ID)
+				evidenceRef := orchestratorRuntimeOperationEvidenceRef(dispatch.ID, operation.ID)
 				used[identity.ID] = mergeUsedRuntimeCapability(used[identity.ID], identity, catalog, selected, evidenceRef, dispatch.Transaction.AuthoritySnapshotID)
 			}
 		}

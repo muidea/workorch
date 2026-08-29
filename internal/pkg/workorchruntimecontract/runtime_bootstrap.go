@@ -67,6 +67,9 @@ func (b RuntimeBootstrap) Validate() error {
 		return err
 	}
 	for _, requirement := range b.Requirements {
+		if !RuntimePrerequisiteKindSupported(requirement.Kind) {
+			return fmt.Errorf("runtime bootstrap has unsupported prerequisite kind %q", requirement.Kind)
+		}
 		if requirement.ProspectiveTargetRef != "" {
 			return fmt.Errorf("runtime bootstrap requirement cannot carry a prospective target before semantic binding")
 		}

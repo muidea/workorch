@@ -32,6 +32,11 @@ type RuntimeDispatchRecord struct {
 	// authority was projected into OperationTargetAuthorizations. It is retained
 	// across recovery/governance continuation and never rebuilt from current facts.
 	CandidateManifestHash string
+	// CoverageBindings is the complete immutable binding projection selected by
+	// the exact candidate manifest.  Evidence adjudication and recovery consume
+	// this dispatch-local snapshot, never mutable current Focus state.
+	CoverageBindingHash string
+	CoverageBindings    []CoverageEvidenceBinding
 	// OperationTargetAuthorizations is the minimal per-operation target-policy
 	// snapshot derived at final manifest-bound seal.
 	OperationTargetAuthorizations []RuntimeDispatchOperationTargetAuthorization
@@ -43,6 +48,18 @@ type RuntimeDispatchRecord struct {
 	// recipe snapshot for this dispatch.  It is a sealed operation contract,
 	// not activation policy and not mutable current owner inventory.
 	ValidationRecipes []RuntimeValidationRecipe
+	// RepairCommitment is present only when the accepted candidate was admitted
+	// as the exact File repair of a confirmed rejected-validation surface.  It is
+	// immutable across execution progress and governance resume.
+	RepairCommitmentHash string
+	RepairCommitment     *RuntimeDispatchRepairCommitment
+	// AssessmentAuthorityInput is the assessment-only pre-seal classifier
+	// input. AssessmentAdjudication is its post-seal, commit-time proof and is
+	// deliberately excluded from DispatchAuthorityHash.
+	AssessmentAuthorityInputHash string
+	AssessmentAuthorityInput     *RuntimeAssessmentAuthorityInput
+	AssessmentAdjudicationHash   string
+	AssessmentAdjudication       *RuntimeAssessmentAdjudication
 	// OperationAdmissibilities and OperationAdmissibilityObservations are the
 	// complete owner-authored snapshot preimages selected by SM-3. Executions
 	// refer to them by SnapshotID/AcquisitionBinding; recovery and owner calls
@@ -120,9 +137,35 @@ type RuntimeCandidateAttemptRecord struct {
 	State            RuntimeCandidateAttemptState
 	// Accepted attempts retain the exact immutable dispatch seal they produced.
 	// Pending/failed/invalidated attempts must not carry these fields.
-	CandidateHash         string
-	DispatchID            string
-	DispatchAuthorityHash string
+	CandidateHash string
+	DispatchID    string
+	// TargetAuthorizationHash is the accepted admission's independent
+	// commitment to AdmissionTargetAuthorizations. The projection is derived
+	// directly from the exact manifest and candidate before dispatch
+	// construction; it is never copied back from a persisted dispatch. This
+	// keeps fresh-load admission lineage independent from a coordinated rewrite
+	// of the dispatch projection and its self-seal.
+	TargetAuthorizationHash       string
+	AdmissionTargetAuthorizations []RuntimeDispatchOperationTargetAuthorization
+	// AdmissionCoverageBindings is the independently persisted pre-dispatch
+	// commitment derived from the exact candidate manifest.  It prevents a
+	// coordinated rewrite of a dispatch binding snapshot and its self hash.
+	AdmissionCoverageBindingHash string
+	AdmissionCoverageBindings    []CoverageEvidenceBinding
+	// ValidationRecipeHash is the accepted admission's independent commitment
+	// to AdmissionValidationRecipes. Managed-validation recipes are projected
+	// directly from the exact manifest and candidate before dispatch
+	// construction; a coordinated dispatch recipe/self-seal rewrite therefore
+	// cannot rewrite its admission lineage. Non-managed candidates carry neither
+	// field.
+	ValidationRecipeHash       string
+	AdmissionValidationRecipes []RuntimeValidationRecipe
+	// AdmissionRepairCommitment is the accepted admission's independent copy of
+	// the dispatch repair purpose.  It cannot be reconstructed from a later
+	// mutable FailureTarget, RepairDirective or confirmation scan.
+	RepairCommitmentHash      string
+	AdmissionRepairCommitment *RuntimeDispatchRepairCommitment
+	DispatchAuthorityHash     string
 	// Proposal is the schema-valid, unsealed candidate persisted after provider
 	// generation. It is replayed after restart into the read-only feasibility
 	// gate, never treated as a dispatch or execution record.
@@ -144,6 +187,82 @@ type RuntimeCandidateAttemptRecord struct {
 	// PrerequisiteRequest records why this unsealed attempt was invalidated for
 	// owner fact acquisition, making duplicate delivery/restart deterministic.
 	PrerequisiteRequest *RuntimeOperationPrerequisiteRequest
+}
+
+// Normalized returns the canonical scalar identity and accepted admission
+// target/validation-recipe projections. It deliberately does not reinterpret
+// candidate or owner facts: their dedicated clone/validation contracts remain
+// authoritative.
+func (r RuntimeCandidateAttemptRecord) Normalized() RuntimeCandidateAttemptRecord {
+	r.AuthorityContractID = strings.TrimSpace(r.AuthorityContractID)
+	r.StablePrefixHash = strings.TrimSpace(r.StablePrefixHash)
+	r.ManifestHash = strings.TrimSpace(r.ManifestHash)
+	r.LogicalRequestID = strings.TrimSpace(r.LogicalRequestID)
+	r.State = RuntimeCandidateAttemptState(strings.TrimSpace(string(r.State)))
+	r.CandidateHash = strings.TrimSpace(r.CandidateHash)
+	r.DispatchID = strings.TrimSpace(r.DispatchID)
+	r.TargetAuthorizationHash = strings.TrimSpace(r.TargetAuthorizationHash)
+	r.AdmissionTargetAuthorizations = NormalizeRuntimeDispatchOperationTargetAuthorizations(r.AdmissionTargetAuthorizations)
+	r.AdmissionCoverageBindingHash = strings.TrimSpace(r.AdmissionCoverageBindingHash)
+	r.AdmissionCoverageBindings = NormalizeCoverageEvidenceBindings(r.AdmissionCoverageBindings)
+	r.ValidationRecipeHash = strings.TrimSpace(r.ValidationRecipeHash)
+	r.AdmissionValidationRecipes = NormalizeRuntimeValidationRecipes(r.AdmissionValidationRecipes)
+	r.RepairCommitmentHash = strings.TrimSpace(r.RepairCommitmentHash)
+	if r.AdmissionRepairCommitment != nil {
+		value := r.AdmissionRepairCommitment.Normalized()
+		r.AdmissionRepairCommitment = &value
+	}
+	r.DispatchAuthorityHash = strings.TrimSpace(r.DispatchAuthorityHash)
+	return r
+}
+
+// Clone detaches every nested candidate-attempt value, including the
+// accepted-only target and validation-recipe admission projections used during
+// fresh load.
+func (r RuntimeCandidateAttemptRecord) Clone() RuntimeCandidateAttemptRecord {
+	r = r.Normalized()
+	r.AdmissionTargetAuthorizations = CloneRuntimeDispatchOperationTargetAuthorizations(r.AdmissionTargetAuthorizations)
+	r.AdmissionCoverageBindings = CloneCoverageEvidenceBindings(r.AdmissionCoverageBindings)
+	r.AdmissionValidationRecipes = CloneRuntimeValidationRecipes(r.AdmissionValidationRecipes)
+	if r.AdmissionRepairCommitment != nil {
+		value := r.AdmissionRepairCommitment.Clone()
+		r.AdmissionRepairCommitment = &value
+	}
+	if r.Proposal != nil {
+		proposal := cloneRuntimeCandidate(*r.Proposal)
+		r.Proposal = &proposal
+	}
+	r.Feasibilities = cloneRuntimeCandidateFeasibilities(r.Feasibilities)
+	if r.Failure != nil {
+		failure := *r.Failure
+		failure.TargetRefs = append([]string(nil), r.Failure.TargetRefs...)
+		failure.Diagnostic = r.Failure.Diagnostic.Clone()
+		if r.Failure.ValidationDiagnostic != nil {
+			diagnostic := r.Failure.ValidationDiagnostic.Clone()
+			failure.ValidationDiagnostic = &diagnostic
+		}
+		r.Failure = &failure
+	}
+	if r.Correction != nil {
+		r.Correction = r.Correction.Clone()
+	}
+	if r.Stale != nil {
+		stale := r.Stale.Normalized()
+		r.Stale = &stale
+	}
+	if r.PrerequisiteRequest != nil {
+		request := r.PrerequisiteRequest.Normalized()
+		r.PrerequisiteRequest = &request
+	}
+	if r.OwnerFeasibility != nil {
+		observation := r.OwnerFeasibility.Clone()
+		r.OwnerFeasibility = &observation
+	}
+	if r.BindingContradiction != nil {
+		identity := r.BindingContradiction.Normalized()
+		r.BindingContradiction = &identity
+	}
+	return r
 }
 
 // RuntimeStateRecord 是 Runtime 在 Run owner 中持久化的唯一正式状态。
@@ -210,6 +329,15 @@ func (r RuntimeStateRecord) Validate() error {
 	}
 	if err := ValidateRuntimeDispatchHistoryShape(r.Facts.WorkspaceID, r.Facts.RunID, r.ActiveDispatch, r.CompletedDispatches); err != nil {
 		return fmt.Errorf("runtime state dispatch history: %w", err)
+	}
+	if err := ValidateRuntimeEvidenceLedgerSequence(r.EvidenceSequence, r.Facts, r.ActiveDispatch, r.CompletedDispatches, r.GovernanceResolutions); err != nil {
+		return fmt.Errorf("runtime state evidence ledger: %w", err)
+	}
+	if err := ValidateRuntimeAssessmentAuthoritySources(r.Facts, r.ActiveDispatch, r.CompletedDispatches); err != nil {
+		return fmt.Errorf("runtime state assessment authority: %w", err)
+	}
+	if err := ValidateRuntimeAssessmentAdjudications(r.Facts, r.CompletedDispatches, r.CoverageProofLineage); err != nil {
+		return fmt.Errorf("runtime state assessment adjudication: %w", err)
 	}
 	if err := ValidateRuntimeDefinitionFocuses(r.Facts.DefinitionSeed, r.Facts.DefinitionFocuses); err != nil {
 		return fmt.Errorf("runtime state definition focuses: %w", err)
@@ -328,6 +456,12 @@ func (r RuntimeStateRecord) Validate() error {
 	if err := ValidateRuntimeDispatchAdmissionLineage(r.ActiveDispatch, r.CompletedDispatches, r.CandidateAttempts, r.OperationGovernanceBindings); err != nil {
 		return err
 	}
+	if err := ValidateRuntimeAcceptedCandidateManifestLineage(r.ActiveDispatch, r.CompletedDispatches, r.CandidateAttempts, r.CandidateRequestSessions); err != nil {
+		return err
+	}
+	if err := ValidateRuntimeAcceptedAssessmentPurposePreimages(r.SemanticPlanning, r.ActiveDispatch, r.CompletedDispatches, r.CandidateAttempts, r.CandidateRequestSessions); err != nil {
+		return err
+	}
 	if err := ValidateRuntimeOperationReceipts(r.OperationReceipts); err != nil {
 		return err
 	}
@@ -419,22 +553,17 @@ func (r RuntimeStateRecord) Validate() error {
 		if attempt.State != RuntimeCandidateAttemptStateAccepted {
 			continue
 		}
-		matched := r.ActiveDispatch != nil && r.ActiveDispatch.Transaction == attempt.Transaction &&
-			r.ActiveDispatch.ID == attempt.DispatchID && r.ActiveDispatch.CandidateHash == attempt.CandidateHash &&
-			r.ActiveDispatch.CandidateManifestHash == attempt.ManifestHash &&
-			r.ActiveDispatch.DispatchAuthorityHash == attempt.DispatchAuthorityHash
+		matched := r.ActiveDispatch != nil && RuntimeAcceptedCandidateAttemptMatchesDispatch(attempt, *r.ActiveDispatch)
 		if !matched {
 			for _, dispatch := range r.CompletedDispatches {
-				if dispatch.Transaction == attempt.Transaction && dispatch.ID == attempt.DispatchID &&
-					dispatch.CandidateHash == attempt.CandidateHash && dispatch.CandidateManifestHash == attempt.ManifestHash &&
-					dispatch.DispatchAuthorityHash == attempt.DispatchAuthorityHash {
+				if RuntimeAcceptedCandidateAttemptMatchesDispatch(attempt, dispatch) {
 					matched = true
 					break
 				}
 			}
 		}
 		if !matched {
-			return fmt.Errorf("accepted runtime candidate attempt has no sealed dispatch")
+			return fmt.Errorf("accepted runtime candidate attempt has no exact sealed dispatch target/validation-recipe authority projection")
 		}
 	}
 	for _, resolution := range r.GovernanceResolutions {
@@ -563,10 +692,38 @@ func ValidateRuntimeCandidateAttemptRecords(values []RuntimeCandidateAttemptReco
 				return fmt.Errorf("accepted runtime candidate attempt %s cannot retain unsealed feasibility records", key)
 			}
 			if value.State == RuntimeCandidateAttemptStateAccepted {
-				if strings.TrimSpace(value.CandidateHash) == "" || strings.TrimSpace(value.DispatchID) == "" || strings.TrimSpace(value.DispatchAuthorityHash) == "" {
-					return fmt.Errorf("accepted runtime candidate attempt %s requires candidate, dispatch and authority hashes", key)
+				if strings.TrimSpace(value.CandidateHash) == "" || strings.TrimSpace(value.DispatchID) == "" ||
+					strings.TrimSpace(value.TargetAuthorizationHash) == "" || strings.TrimSpace(value.AdmissionCoverageBindingHash) == "" || strings.TrimSpace(value.DispatchAuthorityHash) == "" {
+					return fmt.Errorf("accepted runtime candidate attempt %s requires candidate, dispatch, target-authorization, coverage-binding and authority hashes", key)
 				}
-			} else if value.CandidateHash != "" || value.DispatchID != "" || value.DispatchAuthorityHash != "" {
+				if err := ValidateRuntimeDispatchOperationTargetAuthorizationProjection(value.AdmissionTargetAuthorizations); err != nil {
+					return fmt.Errorf("accepted runtime candidate attempt %s admission target projection: %w", key, err)
+				}
+				if value.TargetAuthorizationHash != StableRuntimeDispatchOperationTargetAuthorizationsHash(value.AdmissionTargetAuthorizations) {
+					return fmt.Errorf("accepted runtime candidate attempt %s target-authorization hash does not match admission projection", key)
+				}
+				if err := ValidateCoverageEvidenceBindingProjection(value.AdmissionCoverageBindings); err != nil {
+					return fmt.Errorf("accepted runtime candidate attempt %s admission coverage-binding projection: %w", key, err)
+				}
+				if value.AdmissionCoverageBindingHash != StableRuntimeCoverageEvidenceBindingSnapshotHash(value.AdmissionCoverageBindings) {
+					return fmt.Errorf("accepted runtime candidate attempt %s coverage-binding hash does not match admission projection", key)
+				}
+				if len(value.AdmissionValidationRecipes) == 0 {
+					if strings.TrimSpace(value.ValidationRecipeHash) != "" {
+						return fmt.Errorf("accepted runtime candidate attempt %s validation-recipe hash requires an admission projection", key)
+					}
+				} else {
+					if err := ValidateRuntimeValidationRecipeProjection(value.AdmissionValidationRecipes); err != nil {
+						return fmt.Errorf("accepted runtime candidate attempt %s admission validation-recipe projection: %w", key, err)
+					}
+					if value.ValidationRecipeHash != StableRuntimeValidationRecipeSnapshotHash(value.AdmissionValidationRecipes) {
+						return fmt.Errorf("accepted runtime candidate attempt %s validation-recipe hash does not match admission projection", key)
+					}
+				}
+				if err := ValidateRuntimeDispatchRepairCommitmentProjection(value.RepairCommitmentHash, value.AdmissionRepairCommitment); err != nil {
+					return fmt.Errorf("accepted runtime candidate attempt %s repair commitment: %w", key, err)
+				}
+			} else if value.CandidateHash != "" || value.DispatchID != "" || value.TargetAuthorizationHash != "" || len(value.AdmissionTargetAuthorizations) != 0 || value.AdmissionCoverageBindingHash != "" || len(value.AdmissionCoverageBindings) != 0 || value.ValidationRecipeHash != "" || len(value.AdmissionValidationRecipes) != 0 || value.RepairCommitmentHash != "" || value.AdmissionRepairCommitment != nil || value.DispatchAuthorityHash != "" {
 				return fmt.Errorf("pending runtime candidate attempt %s cannot carry dispatch authority", key)
 			}
 		case RuntimeCandidateAttemptStateFailed:
@@ -576,7 +733,7 @@ func ValidateRuntimeCandidateAttemptRecords(values []RuntimeCandidateAttemptReco
 			if value.Stale != nil || value.PrerequisiteRequest != nil || value.OwnerFeasibility != nil {
 				return fmt.Errorf("failed runtime candidate attempt %s cannot carry freshness stale", key)
 			}
-			if value.CandidateHash != "" || value.DispatchID != "" || value.DispatchAuthorityHash != "" {
+			if value.CandidateHash != "" || value.DispatchID != "" || value.TargetAuthorizationHash != "" || len(value.AdmissionTargetAuthorizations) != 0 || value.AdmissionCoverageBindingHash != "" || len(value.AdmissionCoverageBindings) != 0 || value.ValidationRecipeHash != "" || len(value.AdmissionValidationRecipes) != 0 || value.RepairCommitmentHash != "" || value.AdmissionRepairCommitment != nil || value.DispatchAuthorityHash != "" {
 				return fmt.Errorf("failed runtime candidate attempt %s cannot carry dispatch authority", key)
 			}
 			if err := value.Correction.Validate(); err != nil {
@@ -589,7 +746,7 @@ func ValidateRuntimeCandidateAttemptRecords(values []RuntimeCandidateAttemptReco
 				return fmt.Errorf("runtime candidate attempt %s cannot authorize a third candidate attempt", key)
 			}
 		case RuntimeCandidateAttemptStateInvalidated:
-			if value.CandidateHash != "" || value.DispatchID != "" || value.DispatchAuthorityHash != "" {
+			if value.CandidateHash != "" || value.DispatchID != "" || value.TargetAuthorizationHash != "" || len(value.AdmissionTargetAuthorizations) != 0 || value.AdmissionCoverageBindingHash != "" || len(value.AdmissionCoverageBindings) != 0 || value.ValidationRecipeHash != "" || len(value.AdmissionValidationRecipes) != 0 || value.RepairCommitmentHash != "" || value.AdmissionRepairCommitment != nil || value.DispatchAuthorityHash != "" {
 				return fmt.Errorf("invalidated runtime candidate attempt %s cannot carry dispatch authority", key)
 			}
 			reasonCount := 0
@@ -775,97 +932,7 @@ func runtimeCandidateAttemptByNumber(values []RuntimeCandidateAttemptRecord, att
 }
 
 func (r RuntimeStateRecord) Clone() RuntimeStateRecord {
-	ret := r
-	ret.Definition = r.Definition.Clone()
-	ret.Facts = r.Facts.Normalized()
-	ret.Facts.DefinitionFocuses = CloneRuntimeDefinitionFocuses(r.Facts.DefinitionFocuses)
-	ret.SemanticPlanning = r.SemanticPlanning.Clone()
-	ret.Reconciliation = r.Reconciliation.Clone()
-	ret.CoverageProofLineage = NormalizeRuntimeCoverageProofLineage(r.CoverageProofLineage)
-	ret.Decision = cloneRuntimeDecision(r.Decision)
-	if r.ActiveDispatch != nil {
-		value := r.ActiveDispatch.Clone()
-		ret.ActiveDispatch = &value
-	}
-	ret.CompletedDispatches = make([]RuntimeDispatchRecord, len(r.CompletedDispatches))
-	for idx := range r.CompletedDispatches {
-		ret.CompletedDispatches[idx] = r.CompletedDispatches[idx].Clone()
-	}
-	ret.ProcessedEventIDs = append([]string(nil), r.ProcessedEventIDs...)
-	ret.RepairSurfaceConfirmations = make([]RuntimeRepairSurfaceConfirmationRecord, len(r.RepairSurfaceConfirmations))
-	for idx := range r.RepairSurfaceConfirmations {
-		ret.RepairSurfaceConfirmations[idx] = r.RepairSurfaceConfirmations[idx].Clone()
-	}
-	ret.Diagnostics = append([]RuntimeDiagnosticRecord(nil), r.Diagnostics...)
-	ret.CandidateRequestSessions = make([]RuntimeCandidateRequestSession, len(r.CandidateRequestSessions))
-	for idx := range r.CandidateRequestSessions {
-		ret.CandidateRequestSessions[idx] = r.CandidateRequestSessions[idx].Clone()
-	}
-	ret.CandidateAttempts = make([]RuntimeCandidateAttemptRecord, len(r.CandidateAttempts))
-	for idx, attempt := range r.CandidateAttempts {
-		ret.CandidateAttempts[idx] = attempt
-		if attempt.Proposal != nil {
-			proposal := cloneRuntimeCandidate(*attempt.Proposal)
-			ret.CandidateAttempts[idx].Proposal = &proposal
-		}
-		ret.CandidateAttempts[idx].Feasibilities = cloneRuntimeCandidateFeasibilities(attempt.Feasibilities)
-		if attempt.Failure != nil {
-			failure := *attempt.Failure
-			failure.TargetRefs = append([]string(nil), attempt.Failure.TargetRefs...)
-			failure.Diagnostic = attempt.Failure.Diagnostic.Clone()
-			if attempt.Failure.ValidationDiagnostic != nil {
-				diagnostic := attempt.Failure.ValidationDiagnostic.Clone()
-				failure.ValidationDiagnostic = &diagnostic
-			}
-			ret.CandidateAttempts[idx].Failure = &failure
-		}
-		if attempt.Correction != nil {
-			ret.CandidateAttempts[idx].Correction = attempt.Correction.Clone()
-		}
-		if attempt.Stale != nil {
-			stale := *attempt.Stale
-			ret.CandidateAttempts[idx].Stale = &stale
-		}
-		if attempt.PrerequisiteRequest != nil {
-			request := attempt.PrerequisiteRequest.Normalized()
-			ret.CandidateAttempts[idx].PrerequisiteRequest = &request
-		}
-		if attempt.OwnerFeasibility != nil {
-			observation := attempt.OwnerFeasibility.Clone()
-			ret.CandidateAttempts[idx].OwnerFeasibility = &observation
-		}
-		if attempt.BindingContradiction != nil {
-			identity := attempt.BindingContradiction.Normalized()
-			ret.CandidateAttempts[idx].BindingContradiction = &identity
-		}
-	}
-	ret.ExecutionBudget = r.ExecutionBudget.Clone()
-	ret.RecoverableWaits = append([]RuntimeRecoverableWaitRecord(nil), r.RecoverableWaits...)
-	for idx := range ret.RecoverableWaits {
-		ret.RecoverableWaits[idx] = ret.RecoverableWaits[idx].Clone()
-	}
-	if r.DefinitionClarification != nil {
-		value := r.DefinitionClarification.Clone()
-		ret.DefinitionClarification = &value
-	}
-	ret.GovernanceRequests = append([]RuntimeGovernanceRequestRecord(nil), r.GovernanceRequests...)
-	ret.GovernanceResolutions = CloneRuntimeGovernanceResolutionRecords(r.GovernanceResolutions)
-	ret.OperationGovernanceBindings = make([]RuntimeOperationGovernanceBinding, len(r.OperationGovernanceBindings))
-	for idx := range r.OperationGovernanceBindings {
-		ret.OperationGovernanceBindings[idx] = r.OperationGovernanceBindings[idx].Clone()
-	}
-	ret.OperationReceipts = NormalizeRuntimeOperationReceipts(r.OperationReceipts)
-	ret.DeliveryAcknowledgements = append([]RuntimeDeliveryAcknowledgement(nil), r.DeliveryAcknowledgements...)
-	ret.PrerequisiteInvalidations = NormalizeRuntimePrerequisiteInvalidations(r.PrerequisiteInvalidations)
-	if r.DriveLease != nil {
-		lease := r.DriveLease.Clone()
-		ret.DriveLease = &lease
-	}
-	if r.Termination != nil {
-		term := r.Termination.Clone()
-		ret.Termination = &term
-	}
-	return ret
+	return cloneRuntimeStateRecordRaw(r)
 }
 
 func cloneRuntimeCandidateFeasibilities(values []RuntimeCandidateFeasibilityRecord) []RuntimeCandidateFeasibilityRecord {
@@ -958,6 +1025,22 @@ func (d RuntimeDispatchRecord) ValidateIntrinsic() error {
 	if d.CandidateHash != StableRuntimeCandidateHash(d.Candidate) {
 		return fmt.Errorf("runtime dispatch candidate hash mismatch")
 	}
+	if strings.TrimSpace(d.CoverageBindingHash) == "" {
+		return fmt.Errorf("runtime dispatch requires an immutable coverage-binding hash")
+	}
+	if err := ValidateCoverageEvidenceBindingProjection(d.CoverageBindings); err != nil {
+		return fmt.Errorf("runtime dispatch coverage-binding projection: %w", err)
+	}
+	if d.CoverageBindingHash != StableRuntimeCoverageEvidenceBindingSnapshotHash(d.CoverageBindings) {
+		return fmt.Errorf("runtime dispatch coverage-binding hash mismatch")
+	}
+	for _, operation := range runtimeCandidateAdmissionOperations(d.Candidate) {
+		for _, ref := range operation.BindingRefs {
+			if _, found := CoverageEvidenceBindingForRef(d.CoverageBindings, ref); !found {
+				return fmt.Errorf("runtime dispatch operation %q binding %q is absent from its immutable snapshot", operation.ID, ref)
+			}
+		}
+	}
 	if err := ValidateRuntimeDispatchOperationTargetAuthorizations(d.Candidate, d.OperationTargetAuthorizations); err != nil {
 		return err
 	}
@@ -966,6 +1049,30 @@ func (d RuntimeDispatchRecord) ValidateIntrinsic() error {
 	}
 	if err := ValidateRuntimeCandidateManagedValidationRecipeSnapshot(d.Candidate, d.ValidationRecipes); err != nil {
 		return fmt.Errorf("runtime dispatch validation recipe snapshot: %w", err)
+	}
+	if err := ValidateRuntimeDispatchRepairCommitmentProjection(d.RepairCommitmentHash, d.RepairCommitment); err != nil {
+		return fmt.Errorf("runtime dispatch repair commitment: %w", err)
+	}
+	if d.Candidate.Assessment != nil {
+		if d.AssessmentAuthorityInput == nil || d.AssessmentAuthorityInputHash == "" ||
+			d.AssessmentAuthorityInputHash != StableRuntimeAssessmentAuthorityInputHash(*d.AssessmentAuthorityInput) {
+			return fmt.Errorf("runtime assessment dispatch requires immutable authority input")
+		}
+		if err := d.AssessmentAuthorityInput.Validate(d.Transaction, d.CoverageBindings); err != nil {
+			return err
+		}
+	} else if d.AssessmentAuthorityInput != nil || d.AssessmentAuthorityInputHash != "" || d.AssessmentAdjudication != nil || d.AssessmentAdjudicationHash != "" {
+		return fmt.Errorf("non-assessment runtime dispatch cannot carry assessment authority or adjudication")
+	}
+	if d.State == RuntimeDispatchStateCommitted && d.Candidate.Assessment != nil {
+		if d.AssessmentAdjudication == nil || d.AssessmentAdjudicationHash == "" {
+			return fmt.Errorf("committed runtime assessment dispatch requires adjudication")
+		}
+		if err := d.AssessmentAdjudication.ValidateRaw(); err != nil {
+			return err
+		}
+	} else if d.AssessmentAdjudication != nil || d.AssessmentAdjudicationHash != "" {
+		return fmt.Errorf("non-committed runtime assessment dispatch cannot carry adjudication")
 	}
 	if d.State != RuntimeDispatchStateSealed && d.State != RuntimeDispatchStateCommitted && d.State != RuntimeDispatchStateInvalidated {
 		return fmt.Errorf("runtime dispatch has invalid state %q", d.State)
@@ -1041,7 +1148,7 @@ func StableRuntimeDispatchID(transaction AuthorityTransaction, candidateHash str
 // governance resume without including mutable dispatch/execution progress.
 func StableRuntimeDispatchAuthorityHash(dispatch RuntimeDispatchRecord) string {
 	h := sha256.New()
-	writeHashString(h, "runtime-dispatch-authority/v3")
+	writeHashString(h, "runtime-dispatch-authority/v5")
 	writeHashString(h, string(dispatch.WorkspaceID))
 	writeHashString(h, string(dispatch.RunID))
 	writeHashString(h, strings.TrimSpace(dispatch.FocusTargetRole))
@@ -1059,14 +1166,19 @@ func StableRuntimeDispatchAuthorityHash(dispatch RuntimeDispatchRecord) string {
 	writeHashString(h, fmt.Sprintf("%d", transaction.Attempt))
 	writeHashString(h, StableRuntimeCandidateHash(dispatch.Candidate))
 	writeHashString(h, strings.TrimSpace(dispatch.CandidateManifestHash))
+	writeHashString(h, StableRuntimeCoverageEvidenceBindingSnapshotHash(dispatch.CoverageBindings))
 	writeHashString(h, StableRuntimeDispatchOperationTargetAuthorizationsHash(dispatch.OperationTargetAuthorizations))
-	writeHashString(h, stableRuntimeValidationRecipeSnapshotHash(dispatch.ValidationRecipes))
+	writeHashString(h, StableRuntimeValidationRecipeSnapshotHash(dispatch.ValidationRecipes))
+	writeHashString(h, strings.TrimSpace(dispatch.RepairCommitmentHash))
+	writeHashString(h, strings.TrimSpace(dispatch.AssessmentAuthorityInputHash))
 	writeHashString(h, StableRuntimeDispatchOperationAuthorityHash(dispatch))
 	writeHashString(h, StableRuntimeOperationExecutionAuthoritiesHash(dispatch.OperationExecutions))
 	return hex.EncodeToString(h.Sum(nil))
 }
 
-func stableRuntimeValidationRecipeSnapshotHash(values []RuntimeValidationRecipe) string {
+// StableRuntimeValidationRecipeSnapshotHash commits the complete canonical
+// managed-validation recipe projection, including ordered arguments.
+func StableRuntimeValidationRecipeSnapshotHash(values []RuntimeValidationRecipe) string {
 	recipes := NormalizeRuntimeValidationRecipes(values)
 	h := sha256.New()
 	writeHashString(h, "runtime-validation-recipe-snapshot/v1")
@@ -1185,8 +1297,21 @@ func validateRuntimeDispatchCandidateIntrinsic(candidate RuntimeCandidate, trans
 func (d RuntimeDispatchRecord) Clone() RuntimeDispatchRecord {
 	ret := d
 	ret.Candidate = cloneRuntimeCandidate(d.Candidate)
+	ret.CoverageBindings = CloneCoverageEvidenceBindings(d.CoverageBindings)
 	ret.OperationTargetAuthorizations = CloneRuntimeDispatchOperationTargetAuthorizations(d.OperationTargetAuthorizations)
 	ret.ValidationRecipes = CloneRuntimeValidationRecipes(d.ValidationRecipes)
+	if d.RepairCommitment != nil {
+		value := d.RepairCommitment.Clone()
+		ret.RepairCommitment = &value
+	}
+	if d.AssessmentAuthorityInput != nil {
+		value := d.AssessmentAuthorityInput.Clone()
+		ret.AssessmentAuthorityInput = &value
+	}
+	if d.AssessmentAdjudication != nil {
+		value := d.AssessmentAdjudication.Clone()
+		ret.AssessmentAdjudication = &value
+	}
 	ret.OperationAdmissibilities = CloneRuntimeOperationAdmissibilities(d.OperationAdmissibilities)
 	ret.OperationAdmissibilityObservations = CloneRuntimePrerequisiteObservations(d.OperationAdmissibilityObservations)
 	ret.OperationPolicies = NormalizeRuntimeOperationPolicyFacts(d.OperationPolicies)

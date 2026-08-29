@@ -30,6 +30,9 @@ func TestRunSnapshotProjectsUsedCapabilityFromCommittedRuntimeMCPDispatch(t *tes
 		Transaction:           runtimecontract.AuthorityTransaction{AuthoritySnapshotID: "authority-runtime-mcp"},
 		Candidate:             runtimecontract.RuntimeCandidate{StateChange: &runtimecontract.StateChangeCandidate{Operations: []runtimecontract.StateChangingOperation{{Operation: operation}}}},
 		CompletedOperationIDs: []string{operationID},
+		OperationExecutions: []runtimecontract.RuntimeOperationExecutionRecord{{
+			OperationID: operationID, State: runtimecontract.OperationExecutionEvidenceCommitted,
+		}},
 	}
 	run := &runmodel.Run{
 		ID: runID, WorkspaceID: workspaceID, State: common.RunStateCompleted,
@@ -55,4 +58,16 @@ func TestRunSnapshotProjectsUsedCapabilityFromCommittedRuntimeMCPDispatch(t *tes
 	if len(used.EvidenceRefs) != 2 || used.EvidenceRefs[0] != wantEvidence || used.EvidenceRefs[1] != "authority-runtime-mcp" {
 		t.Fatalf("used capability evidence = %+v, want %q and authority", used.EvidenceRefs, wantEvidence)
 	}
+	if !containsProjectionString(snapshot.TaskProgress.EvidenceRefs, wantEvidence) {
+		t.Fatalf("task progress evidence = %+v, want completed Runtime operation %q", snapshot.TaskProgress.EvidenceRefs, wantEvidence)
+	}
+}
+
+func containsProjectionString(values []string, expected string) bool {
+	for _, value := range values {
+		if value == expected {
+			return true
+		}
+	}
+	return false
 }

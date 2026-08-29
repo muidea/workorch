@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"reflect"
 	"sort"
 	"strings"
 )
@@ -48,11 +49,79 @@ func CloneRuntimeDispatchOperationTargetAuthorizations(values []RuntimeDispatchO
 	return NormalizeRuntimeDispatchOperationTargetAuthorizations(values)
 }
 
+// ValidateRuntimeDispatchOperationTargetAuthorizationProjection validates the
+// accepted admission's standalone projection before a dispatch is considered.
+// Candidate bijection is checked separately when that admission is matched to
+// its dispatch; this fence ensures the independently persisted preimage is
+// canonical and cannot hide duplicate or incomplete target policy entries.
+func ValidateRuntimeDispatchOperationTargetAuthorizationProjection(values []RuntimeDispatchOperationTargetAuthorization) error {
+	normalized := NormalizeRuntimeDispatchOperationTargetAuthorizations(values)
+	if !reflect.DeepEqual(values, normalized) {
+		return fmt.Errorf("runtime admission target authorization projection is not canonical")
+	}
+	seen := make(map[string]struct{}, len(normalized))
+	for _, authorization := range normalized {
+		if authorization.OperationID == "" || authorization.OperationHash == "" {
+			return fmt.Errorf("runtime admission target authorization requires operation id and hash")
+		}
+		if _, duplicate := seen[authorization.OperationID]; duplicate {
+			return fmt.Errorf("runtime admission target authorization for operation %q is duplicated", authorization.OperationID)
+		}
+		seen[authorization.OperationID] = struct{}{}
+		target := authorization.Target
+		switch target.Policy {
+		case RuntimeOperationTargetPolicyExactTarget:
+			if authorization.RequireTargets && len(target.ExactTargetRefs) == 0 {
+				return fmt.Errorf("runtime admission target authorization for operation %q requires a non-empty exact target set", authorization.OperationID)
+			}
+		case RuntimeOperationTargetPolicyExistingOwnerScope:
+			if len(target.OwnerScopeTargetRefs) == 0 && len(target.OwnerSelectorRefs) == 0 {
+				return fmt.Errorf("runtime admission target authorization for operation %q requires owner scope or selector refs", authorization.OperationID)
+			}
+		case RuntimeOperationTargetPolicyProspectiveOwnerTarget:
+			if len(target.OwnerSelectorRefs) == 0 || len(target.ProspectiveTargetRefs) == 0 {
+				return fmt.Errorf("runtime admission target authorization for operation %q requires prospective selector and target refs", authorization.OperationID)
+			}
+		default:
+			return fmt.Errorf("runtime admission target authorization for operation %q has unsupported target policy %q", authorization.OperationID, target.Policy)
+		}
+	}
+	return nil
+}
+
+// RuntimeDispatchOperationTargetAuthorizationProjectionsEqual compares the
+// full canonical preimages, not only their hashes.
+func RuntimeDispatchOperationTargetAuthorizationProjectionsEqual(left, right []RuntimeDispatchOperationTargetAuthorization) bool {
+	return reflect.DeepEqual(
+		NormalizeRuntimeDispatchOperationTargetAuthorizations(left),
+		NormalizeRuntimeDispatchOperationTargetAuthorizations(right),
+	)
+}
+
+// RuntimeCandidateAdmissionTargetAuthorizationsFromManifest derives the
+// accepted admission's standalone target projection from its exact
+// manifest/candidate preimage. It intentionally does not consume a dispatch:
+// the accepted attempt remains an independent fence against a coordinated
+// rewrite of dispatch authority during persistence or recovery.
+func RuntimeCandidateAdmissionTargetAuthorizationsFromManifest(
+	manifest RuntimeCandidateContractManifest,
+	candidate RuntimeCandidate,
+) ([]RuntimeDispatchOperationTargetAuthorization, error) {
+	return runtimeOperationTargetAuthorizationsFromManifest(manifest, candidate)
+}
+
 // RuntimeDispatchOperationTargetAuthorizationsFromManifest derives the
 // dispatch-local target authority from the exact sealed manifest preimage. The
 // manifest is validated against the candidate again at this final SM-3 seal
 // boundary so a caller cannot pass a candidate admitted under another shape.
 func RuntimeDispatchOperationTargetAuthorizationsFromManifest(
+	manifest RuntimeCandidateContractManifest,
+	candidate RuntimeCandidate,
+) ([]RuntimeDispatchOperationTargetAuthorization, error) {
+	return runtimeOperationTargetAuthorizationsFromManifest(manifest, candidate)
+}
+
+func runtimeOperationTargetAuthorizationsFromManifest(
 	manifest RuntimeCandidateContractManifest,
 	candidate RuntimeCandidate,
 ) ([]RuntimeDispatchOperationTargetAuthorization, error) {
@@ -97,6 +166,9 @@ func ValidateRuntimeDispatchOperationTargetAuthorizations(
 	candidate RuntimeCandidate,
 	values []RuntimeDispatchOperationTargetAuthorization,
 ) error {
+	if err := ValidateRuntimeDispatchOperationTargetAuthorizationProjection(values); err != nil {
+		return err
+	}
 	candidateKindCount := 0
 	for _, present := range []bool{
 		candidate.StateChange != nil,
@@ -149,6 +221,52 @@ func ValidateRuntimeDispatchOperationTargetAuthorizations(
 		}
 	}
 	return nil
+}
+
+// RuntimeDispatchOperationTargetAuthorizationForOperation resolves one
+// operation's immutable target authority from a complete sealed dispatch
+// preimage. It first validates the candidate/authorization bijection, then
+// requires the supplied operation to be the exact candidate operation rather
+// than an ID-only substitute. Callers therefore cannot rebuild target scope
+// from mutable owner facts or accidentally apply another operation's scope.
+func RuntimeDispatchOperationTargetAuthorizationForOperation(
+	candidate RuntimeCandidate,
+	values []RuntimeDispatchOperationTargetAuthorization,
+	operation RuntimeOperation,
+) (RuntimeDispatchOperationTargetAuthorization, error) {
+	if err := ValidateRuntimeDispatchOperationTargetAuthorizations(candidate, values); err != nil {
+		return RuntimeDispatchOperationTargetAuthorization{}, err
+	}
+	operation = operation.Normalized()
+	if operation.ID == "" {
+		return RuntimeDispatchOperationTargetAuthorization{}, fmt.Errorf("runtime dispatch target authorization lookup requires operation id")
+	}
+	operations, err := runtimeCandidatePayloadOperations(candidate)
+	if err != nil {
+		return RuntimeDispatchOperationTargetAuthorization{}, err
+	}
+	foundOperation := false
+	for _, rawCandidateOperation := range operations {
+		candidateOperation := rawCandidateOperation.Normalized()
+		if candidateOperation.ID != operation.ID {
+			continue
+		}
+		if StableRuntimeOperationHash(candidateOperation) != StableRuntimeOperationHash(operation) {
+			return RuntimeDispatchOperationTargetAuthorization{}, fmt.Errorf("runtime dispatch operation %q does not match sealed candidate operation", operation.ID)
+		}
+		foundOperation = true
+		break
+	}
+	if !foundOperation {
+		return RuntimeDispatchOperationTargetAuthorization{}, fmt.Errorf("runtime dispatch operation %q is not present in sealed candidate", operation.ID)
+	}
+	for _, rawAuthorization := range values {
+		authorization := rawAuthorization.Normalized()
+		if authorization.OperationID == operation.ID {
+			return authorization.Clone(), nil
+		}
+	}
+	return RuntimeDispatchOperationTargetAuthorization{}, fmt.Errorf("runtime dispatch operation %q has no target authorization", operation.ID)
 }
 
 // StableRuntimeDispatchOperationTargetAuthorizationsHash seals the canonical

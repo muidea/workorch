@@ -347,6 +347,15 @@ func writeRuntimeOriginalDiagnosticTypedFactsHash(h interface{ Write([]byte) (in
 		writeHashString(h, value.TargetRole)
 		writeHashString(h, value.ObservedRevision)
 		writeHashStrings(h, value.TargetRefs)
+		if value.CatalogDependency == nil {
+			writeHashString(h, "catalog-dependency:nil")
+		} else {
+			dependency := value.CatalogDependency.Normalized()
+			writeHashString(h, string(dependency.Domain))
+			writeHashString(h, dependency.OwnerModuleID)
+			writeHashString(h, dependency.SubjectRef)
+			writeHashString(h, dependency.Revision)
+		}
 		writeHashString(h, value.DiagnosticClass)
 		writeHashStrings(h, value.EvidenceRefs)
 		writeHashString(h, value.ContentHash)

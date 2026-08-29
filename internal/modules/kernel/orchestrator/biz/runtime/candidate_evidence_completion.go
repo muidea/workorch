@@ -8,7 +8,11 @@ import (
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
-func finalizeExecutionEvidence(aggregate *RuntimeAggregate, admission executionEvidenceAdmission, fact runtimecontract.EvidenceFact) (bool, error) {
+func finalizeExecutionEvidence(
+	aggregate *RuntimeAggregate,
+	admission executionEvidenceAdmission,
+	fact runtimecontract.EvidenceFact,
+) (bool, error) {
 	evidence := admission.Evidence
 	if evidence.Status == ExecutionEvidenceStatusRejected {
 		// Rejection admission enriches the durable fact with the receipt-owned
@@ -27,15 +31,27 @@ func finalizeExecutionEvidence(aggregate *RuntimeAggregate, admission executionE
 	aggregate.ProcessedEventIDs = appendNormalizedString(aggregate.ProcessedEventIDs, evidence.EventID)
 	dispatch := *aggregate.ActiveDispatch
 	dispatch.CompletedOperationIDs = appendNormalizedString(dispatch.CompletedOperationIDs, evidence.OperationID)
+	repairTransaction, err := currentConfirmedFileRepairTransaction(*aggregate, admission, fact)
+	if err != nil {
+		return false, err
+	}
 
 	prerequisitesInvalidated := false
-	var err error
 	if evidence.Status == ExecutionEvidenceStatusAccepted && evidence.Receipt != nil {
 		// Changed owner facts affect the next SM-2 authority, not the immutable
 		// operation set already sealed by this SM-3 transaction.
 		prerequisitesInvalidated, err = applyReceiptResourceChangeInvalidation(aggregate, evidence.DispatchID, evidence.OperationID, *evidence.Receipt)
 		if err != nil {
 			return false, err
+		}
+		// Once an accepted File receipt has been admitted to an exact confirmed
+		// repair transaction, the pre-change target and directive are superseded
+		// regardless of whether their mutable catalog observations happen to
+		// intersect the receipt's prerequisite invalidation set. Remaining all-of
+		// members execute only under the immutable dispatch seal.
+		if repairTransaction != nil {
+			aggregate.Facts.Resources.FailureTarget = nil
+			aggregate.Facts.RepairDirective = nil
 		}
 	}
 	dispatchInvalidated := evidenceDispatchInvalidated(*aggregate, evidence, prerequisitesInvalidated)
@@ -44,7 +60,7 @@ func finalizeExecutionEvidence(aggregate *RuntimeAggregate, admission executionE
 		aggregate.ActiveDispatch = &dispatch
 		return false, nil
 	}
-	if err := completeEvidenceDispatch(aggregate, dispatch, dispatchInvalidated, admission, fact); err != nil {
+	if err := completeEvidenceDispatch(aggregate, dispatch, dispatchInvalidated, admission, fact, repairTransaction); err != nil {
 		return false, err
 	}
 	return true, nil
@@ -76,7 +92,14 @@ func evidenceDispatchInvalidated(aggregate RuntimeAggregate, evidence ExecutionE
 	return effectUncommittable || refreshExhausted
 }
 
-func completeEvidenceDispatch(aggregate *RuntimeAggregate, dispatch SealedDispatch, invalidated bool, admission executionEvidenceAdmission, fact runtimecontract.EvidenceFact) error {
+func completeEvidenceDispatch(
+	aggregate *RuntimeAggregate,
+	dispatch SealedDispatch,
+	invalidated bool,
+	admission executionEvidenceAdmission,
+	fact runtimecontract.EvidenceFact,
+	repairTransaction *confirmedFileRepairTransaction,
+) error {
 	if invalidated {
 		dispatch.State = DispatchStateInvalidated
 	} else {
@@ -91,7 +114,16 @@ func completeEvidenceDispatch(aggregate *RuntimeAggregate, dispatch SealedDispat
 		if repair, found, err := currentRuntimeSemanticValidationFailureRepair(*aggregate); err != nil {
 			return err
 		} else if found {
-			if _, err := settleRuntimeValidationFailureRepair(aggregate, fact, repair); err != nil {
+			var sourceDirective *runtimecontract.RuntimeRepairDirective
+			if repairTransaction != nil {
+				value := repairTransaction.stateChangeDirective(aggregate.Facts, aggregate.Decision)
+				sourceDirective = &value
+			}
+			if _, err := settleRuntimeValidationFailureRepair(aggregate, fact, repair, sourceDirective); err != nil {
+				return err
+			}
+		} else if repairTransaction != nil {
+			if _, err := settleConfirmedFileDefinitionRepair(aggregate, fact, *repairTransaction); err != nil {
 				return err
 			}
 		}

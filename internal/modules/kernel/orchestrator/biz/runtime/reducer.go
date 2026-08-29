@@ -6,17 +6,46 @@ import (
 	"strings"
 
 	"github.com/muidea/workorch/internal/modules/kernel/orchestrator/biz/internal/grounding"
+	"github.com/muidea/workorch/internal/pkg/common"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
 func ReduceRuntimeState(facts runtimecontract.RuntimeFacts, previous *runtimecontract.AuthoritySnapshot, proofLineages ...[]runtimecontract.RuntimeCoverageProofLineage) (runtimecontract.RuntimeDecision, error) {
+	decision, _, err := reduceAndSealRuntimeState(facts, previous, nil, runtimeCoverageProofLineageArgument(proofLineages))
+	return decision, err
+}
+
+// runtimeOwnerInternalReductionEvent is the typed, invocation-local fact that
+// lets the sole SM-2 reducer consume an already-proven owner-private event.
+// It is never persisted and carries no requested decision or RequiredOutput:
+// the reducer derives those from the immutable source dispatch and the exact
+// governance result/binding lineage.
+type runtimeOwnerInternalReductionEvent struct {
+	Kind                 RuntimeInternalEventKind
+	GovernanceResolution runtimecontract.RuntimeGovernanceResolution
+	SourceDispatch       SealedDispatch
+	OperationBinding     runtimecontract.RuntimeOperationGovernanceBinding
+}
+
+func reduceAndSealRuntimeState(
+	facts runtimecontract.RuntimeFacts,
+	previous *runtimecontract.AuthoritySnapshot,
+	ownerEvent *runtimeOwnerInternalReductionEvent,
+	proofLineage []runtimecontract.RuntimeCoverageProofLineage,
+) (runtimecontract.RuntimeDecision, bool, error) {
 	facts = facts.Normalized()
 	if err := facts.Validate(); err != nil {
-		return runtimecontract.RuntimeDecision{}, err
+		return runtimecontract.RuntimeDecision{}, false, err
 	}
-	decision, err := reduce(facts, runtimeCoverageProofLineageArgument(proofLineages))
+	decision, eventHandled, err := reduceOwnerInternalEvent(facts, ownerEvent)
 	if err != nil {
-		return runtimecontract.RuntimeDecision{}, err
+		return runtimecontract.RuntimeDecision{}, false, err
+	}
+	if !eventHandled {
+		decision, err = reduce(facts, proofLineage)
+		if err != nil {
+			return runtimecontract.RuntimeDecision{}, false, err
+		}
 	}
 	attempt := 0
 	if previous != nil && previous.ID != "" &&
@@ -27,12 +56,30 @@ func ReduceRuntimeState(facts runtimecontract.RuntimeFacts, previous *runtimecon
 		previous.RequiredOutputHash == runtimecontract.StableRequiredOutputHash(decision.RequiredOutput) {
 		attempt = previous.Attempt + 1
 	}
-	return runtimecontract.SealRuntimeDecision(facts, decision, attempt)
+	sealed, err := runtimecontract.SealRuntimeDecision(facts, decision, attempt)
+	return sealed, eventHandled, err
 }
 
 // ReduceRuntimeStateWithDirective reduces facts and returns the decision plus facts
 // with RepairDirective synchronized to the sealed decision (INV-05).
-func ReduceRuntimeStateWithDirective(facts runtimecontract.RuntimeFacts, previous *runtimecontract.AuthoritySnapshot, proofLineages ...[]runtimecontract.RuntimeCoverageProofLineage) (runtimecontract.RuntimeFacts, runtimecontract.RuntimeDecision, error) {
+func ReduceRuntimeStateWithDirective(
+	facts runtimecontract.RuntimeFacts,
+	previous *runtimecontract.AuthoritySnapshot,
+	proofLineages ...[]runtimecontract.RuntimeCoverageProofLineage,
+) (runtimecontract.RuntimeFacts, runtimecontract.RuntimeDecision, error) {
+	return reduceRuntimeStateWithDirectiveAndOwnerEvent(facts, previous, nil, proofLineages...)
+}
+
+// reduceRuntimeStateWithDirectiveAndOwnerEvent is package-private so only an
+// Orchestrator owner-private transition can provide an event input. Ordinary
+// callers retain the facts-only reducer contract above; both paths share the
+// exact same reducer/seal implementation.
+func reduceRuntimeStateWithDirectiveAndOwnerEvent(
+	facts runtimecontract.RuntimeFacts,
+	previous *runtimecontract.AuthoritySnapshot,
+	ownerEvent *runtimeOwnerInternalReductionEvent,
+	proofLineages ...[]runtimecontract.RuntimeCoverageProofLineage,
+) (runtimecontract.RuntimeFacts, runtimecontract.RuntimeDecision, error) {
 	facts = facts.Normalized()
 	// Every SM-2 reduction is a defensive repair-ledger boundary. Focus changes
 	// normally reset this state atomically, while semantic re-seal, retirement,
@@ -62,9 +109,15 @@ func ReduceRuntimeStateWithDirective(facts runtimecontract.RuntimeFacts, previou
 	if len(facts.Prerequisites.Pending) == 0 {
 		facts = preflightRuntimeFactsPreservingPending(facts, runtimeTargetGroundingRequirements(facts))
 	}
-	decision, err := ReduceRuntimeState(facts, previous, proofLineages...)
+	decision, eventHandled, err := reduceAndSealRuntimeState(facts, previous, ownerEvent, runtimeCoverageProofLineageArgument(proofLineages))
 	if err != nil {
 		return facts, runtimecontract.RuntimeDecision{}, err
+	}
+	if eventHandled {
+		// A sealed-dispatch continuation is authorized by its immutable source
+		// transaction. It must not recreate the superseded mutable repair target
+		// or directive merely to keep the remaining physical operation runnable.
+		return facts, decision, nil
 	}
 	facts = syncRepairDirective(facts, decision, proofLineages...)
 	// Creating a repair closure or advancing an accepted repair state-change to
@@ -74,7 +127,8 @@ func ReduceRuntimeStateWithDirective(facts runtimecontract.RuntimeFacts, previou
 	// decision produced before syncRepairDirective updated the closure.
 	if facts.RepairDirective != nil && facts.RepairDirective.Closure != nil &&
 		(facts.RepairDirective.RequiredState == runtimecontract.ConvergenceStateNeedStateChange || facts.RepairDirective.RequiredState == runtimecontract.ConvergenceStateNeedValidation) &&
-		(decision.State != facts.RepairDirective.RequiredState || decision.RequiredOutput.RepairClosureID != facts.RepairDirective.Closure.ID) {
+		(decision.State != facts.RepairDirective.RequiredState || decision.RequiredOutput.RepairClosureID != facts.RepairDirective.Closure.ID ||
+			decision.RequiredOutput.RepairPurpose != facts.RepairDirective.Purpose) {
 		decision, err = ReduceRuntimeState(facts, previous, proofLineages...)
 		if err != nil {
 			return facts, runtimecontract.RuntimeDecision{}, err
@@ -82,6 +136,171 @@ func ReduceRuntimeStateWithDirective(facts runtimecontract.RuntimeFacts, previou
 		facts = syncRepairDirective(facts, decision, proofLineages...)
 	}
 	return facts, decision, nil
+}
+
+func reduceOwnerInternalEvent(
+	facts runtimecontract.RuntimeFacts,
+	event *runtimeOwnerInternalReductionEvent,
+) (runtimecontract.RuntimeDecision, bool, error) {
+	if event == nil {
+		return runtimecontract.RuntimeDecision{}, false, nil
+	}
+	if event.Kind != RuntimeInternalEventGovernanceResolutionObserved {
+		return runtimecontract.RuntimeDecision{}, false, fmt.Errorf("%w: reducer does not support owner-internal event %q", common.ErrInvalidArgument, event.Kind)
+	}
+	resolution := event.GovernanceResolution.Normalized()
+	if err := resolution.Validate(); err != nil {
+		return runtimecontract.RuntimeDecision{}, false, err
+	}
+	if resolution.Outcome != runtimecontract.RuntimeGovernanceResolutionOutcomeContinue {
+		return runtimecontract.RuntimeDecision{}, false, fmt.Errorf("%w: only an accepted governance continuation can carry sealed operation authority", common.ErrConflict)
+	}
+	binding := event.OperationBinding.Normalized()
+	if binding.State != runtimecontract.RuntimeOperationGovernanceBindingGranted || binding.Grant == nil {
+		return runtimecontract.RuntimeDecision{}, false, fmt.Errorf("%w: governance continuation reducer input has no exact granted binding", common.ErrConflict)
+	}
+	grant := binding.Grant.Normalized()
+	if grant.ResumeDispatchID != "" || grant.ResolutionID != resolution.ResolutionID ||
+		grant.ResolutionHash != runtimecontract.StableRuntimeGovernanceResolutionHash(resolution) ||
+		grant.TicketID != resolution.TicketID || grant.ApprovalID != resolution.ApprovalID ||
+		binding.GovernanceDispatchID != resolution.DispatchID || binding.GovernanceSnapshotID != resolution.AuthoritySnapshotID ||
+		binding.DependencyKind != resolution.DependencyKind || binding.SubjectRef != resolution.SubjectRef {
+		return runtimecontract.RuntimeDecision{}, false, fmt.Errorf("%w: governance continuation reducer input does not match its owner result", common.ErrConflict)
+	}
+	matchingFacts := 0
+	for _, fact := range facts.Evidence.Accepted {
+		if fact.Revision == facts.EvidenceRevision && runtimecontract.RuntimeGovernanceEvidenceFactMatchesResolution(fact, resolution) {
+			matchingFacts++
+		}
+	}
+	if matchingFacts != 1 {
+		return runtimecontract.RuntimeDecision{}, false, fmt.Errorf("%w: governance continuation reducer input has no unique current evidence fact", common.ErrConflict)
+	}
+
+	source := event.SourceDispatch
+	if source.WorkspaceID != facts.WorkspaceID || source.RunID != facts.RunID ||
+		source.ID != binding.OperationDispatchID || source.State != DispatchStateCommitted ||
+		source.Transaction.FocusID != facts.Focus.ID || source.Transaction.State != runtimecontract.ConvergenceStateNeedStateChange {
+		return runtimecontract.RuntimeDecision{}, false, fmt.Errorf("%w: governance continuation source dispatch does not match current authority", common.ErrConflict)
+	}
+	if err := sealedDispatchToRuntimeRecord(source).ValidateIntrinsic(); err != nil {
+		return runtimecontract.RuntimeDecision{}, false, fmt.Errorf("%w: governance continuation source dispatch: %v", common.ErrConflict, err)
+	}
+	operation, found := candidateOperationByID(source.Candidate, binding.OperationID)
+	if !found || containsString(source.CompletedOperationIDs, binding.OperationID) ||
+		len(source.CompletedOperationIDs) >= candidateOperationCount(source.Candidate) {
+		return runtimecontract.RuntimeDecision{}, false, fmt.Errorf("%w: governance continuation has no pending granted operation", common.ErrConflict)
+	}
+	execution, found := operationExecutionRecord(source.OperationExecutions, binding.OperationID)
+	if !found || execution.OperationHash != runtimecontract.StableRuntimeOperationHash(operation) ||
+		execution.ExecutionKey != binding.ExecutionKey || execution.Fence != binding.Fence ||
+		grant.ExecutionKey != binding.ExecutionKey || grant.GovernanceFence != binding.Fence || grant.ResumeFence != binding.Fence+1 {
+		return runtimecontract.RuntimeDecision{}, false, fmt.Errorf("%w: governance continuation granted operation has no exact sealed execution", common.ErrConflict)
+	}
+
+	operations := candidateRuntimeOperations(source.Candidate)
+	if len(operations) == 0 || len(operations) != candidateOperationCount(source.Candidate) {
+		return runtimecontract.RuntimeDecision{}, false, fmt.Errorf("%w: governance continuation source is not an operation dispatch", common.ErrConflict)
+	}
+	operationKinds := make([]string, 0, len(operations))
+	effectScopes := make([]runtimecontract.RuntimeEffectScope, 0, len(operations))
+	targetRefs := make([]string, 0, len(operations))
+	for _, rawOperation := range operations {
+		operation := rawOperation.Normalized()
+		execution, found := operationExecutionRecord(source.OperationExecutions, operation.ID)
+		if !found || execution.OperationHash != runtimecontract.StableRuntimeOperationHash(operation) ||
+			!runtimecontract.RuntimeEffectIsDurable(execution.ExpectedEffectScope) || len(operation.TargetRefs) == 0 {
+			return runtimecontract.RuntimeDecision{}, false, fmt.Errorf("%w: governance continuation source has incomplete sealed operation authority", common.ErrConflict)
+		}
+		operationKinds = append(operationKinds, operation.Kind)
+		effectScopes = append(effectScopes, execution.ExpectedEffectScope)
+		targetRefs = append(targetRefs, operation.TargetRefs...)
+	}
+	targetRefs = normalizeRuntimeTargetRefs(targetRefs)
+	requiredSequence, err := sealedDispatchRequiredOperationSequence(source)
+	if err != nil {
+		return runtimecontract.RuntimeDecision{}, false, err
+	}
+	closureID := ""
+	purpose := runtimecontract.RuntimeDispatchRepairPurpose("")
+	if source.RepairCommitment != nil {
+		commitment := source.RepairCommitment.Normalized()
+		if commitment.FocusID != facts.Focus.ID || !sameCoverageIDs(commitment.Closure.CoverageWorkItemIDs, facts.Focus.CoverageWorkItemIDs) {
+			return runtimecontract.RuntimeDecision{}, false, fmt.Errorf("%w: governance continuation repair commitment does not match current focus", common.ErrConflict)
+		}
+		closureID = commitment.Closure.ID
+		purpose = commitment.Purpose
+	}
+	return runtimecontract.RuntimeDecision{
+		State: runtimecontract.ConvergenceStateNeedStateChange,
+		Focus: facts.Focus,
+		RequiredOutput: runtimecontract.RequiredOutputContract{
+			AcceptedKinds:             operationKinds,
+			AcceptedOperationVariants: acceptedOperationVariantsForKinds(facts.Focus.AcceptedOperationVariants, operationKinds),
+			AcceptedEffectScopes:      effectScopes,
+			RequiredEffectScopes:      effectScopes,
+			RequiredEvidenceKinds:     []string{runtimecontract.EvidenceKindStateChange},
+			CoverageWorkItemIDs:       append([]common.CoverageWorkItemID(nil), facts.Focus.CoverageWorkItemIDs...),
+			TargetRefs:                targetRefs,
+			RepairClosureID:           closureID,
+			RepairPurpose:             purpose,
+			RequiredOperationSequence: requiredSequence,
+		},
+	}, true, nil
+}
+
+func sealedDispatchRequiredOperationSequence(dispatch SealedDispatch) ([]runtimecontract.RuntimeRequiredOperationVariant, error) {
+	operations, err := orderedCandidateOperations(dispatch.Candidate)
+	if err != nil {
+		return nil, err
+	}
+	requirementByOperation := make(map[string]string, len(operations))
+	hasRequirement := false
+	for _, operation := range operations {
+		operation = operation.Normalized()
+		if operation.RequiredOperationRef != "" {
+			hasRequirement = true
+			requirementByOperation[operation.ID] = operation.RequiredOperationRef
+		}
+	}
+	if !hasRequirement {
+		return nil, nil
+	}
+	if len(requirementByOperation) != len(operations) {
+		return nil, fmt.Errorf("%w: sealed continuation has a partial required-operation projection", common.ErrConflict)
+	}
+	ret := make([]runtimecontract.RuntimeRequiredOperationVariant, 0, len(operations))
+	for _, operation := range operations {
+		operation = operation.Normalized()
+		contract, found := runtimecontract.RuntimeOperationContractForKind(operation.Kind)
+		if !found {
+			return nil, fmt.Errorf("%w: sealed continuation operation %q has no contract", common.ErrConflict, operation.Kind)
+		}
+		variant, err := runtimecontract.MatchRuntimeOperationVariant(operation, contract)
+		if err != nil {
+			return nil, err
+		}
+		dependencies := make([]string, 0, len(operation.DependsOn))
+		for _, dependencyID := range operation.DependsOn {
+			dependency, found := requirementByOperation[dependencyID]
+			if !found {
+				return nil, fmt.Errorf("%w: sealed continuation dependency has no requirement identity", common.ErrConflict)
+			}
+			dependencies = append(dependencies, dependency)
+		}
+		targetRef := ""
+		if len(operation.TargetRefs) == 1 {
+			targetRef = operation.TargetRefs[0]
+		}
+		ret = append(ret, runtimecontract.RuntimeRequiredOperationVariant{
+			RequirementID:           operation.RequiredOperationRef,
+			Kind:                    operation.Kind,
+			VariantID:               variant.ID,
+			TargetRef:               targetRef,
+			DependsOnRequirementIDs: dependencies,
+		})
+	}
+	return ret, nil
 }
 
 // retireNonCurrentFocusScopedPrerequisites is the defensive half of the
@@ -198,7 +417,7 @@ func reduce(facts runtimecontract.RuntimeFacts, proofLineage []runtimecontract.R
 		if !facts.Focus.RequireAssessment {
 			return completeOrAdvanceDecision(base, facts, "current coverage focus is satisfied")
 		}
-		assessment, ok := assessmentForCurrentFocus(facts)
+		assessment, ok := assessmentForCurrentFocus(facts, proofLineage)
 		if !ok {
 			return assessmentDecision(base, facts), nil
 		}
@@ -240,7 +459,7 @@ func noOpWithoutProvenanceDecision(base runtimecontract.RuntimeDecision, facts r
 	}
 	if hasAcceptedCurrentFocusValidationEvidence(facts, proofLineage) {
 		if facts.Focus.RequireAssessment {
-			if assessment, found := assessmentForCurrentFocus(facts); found {
+			if assessment, found := assessmentForCurrentFocus(facts, proofLineage); found {
 				if currentFocusCoverageSatisfied(facts, proofLineage) {
 					if facts.StateChange.Required && !facts.StateChange.Satisfied {
 						return terminalDecision(base, runtimecontract.ConvergenceStateFailed,
@@ -275,15 +494,14 @@ func hasStateChangeNoOpWithoutProvenance(facts runtimecontract.RuntimeFacts) boo
 }
 
 func hasAcceptedCurrentFocusValidationEvidence(facts runtimecontract.RuntimeFacts, proofLineages ...[]runtimecontract.RuntimeCoverageProofLineage) bool {
-	proofLineage := runtimeCoverageProofLineageArgument(proofLineages)
 	for _, evidence := range facts.Evidence.Accepted {
 		if evidence.Kind != runtimecontract.EvidenceKindValidation || weakRuntimeEvidence(evidence) {
 			continue
 		}
-		if len(evidence.CoverageWorkItemIDs) == 0 && runtimecontract.EvidenceAppliesToCurrentFocus(facts, evidence) {
-			return true
-		}
-		if runtimeEvidenceAppliesToCurrentCoverageWithLineage(facts, evidence, proofLineage) {
+		// This predicate is used only by the state-change no-op provenance
+		// terminal. An exact FocusID-bound validation observation proves the
+		// diagnostic was made for this focus, but does not grant CWI credit.
+		if runtimecontract.EvidenceBelongsToCurrentFocusForDiagnosticLineage(facts, evidence) {
 			return true
 		}
 	}
@@ -451,6 +669,7 @@ func stateChangeDecision(base runtimecontract.RuntimeDecision, facts runtimecont
 		CoverageWorkItemIDs:       facts.Focus.CoverageWorkItemIDs,
 		TargetRefs:                GroundedRepairTargets(facts),
 		RepairClosureID:           currentRepairClosureID(facts),
+		RepairPurpose:             currentRepairPurpose(facts),
 		RequiredOperationSequence: requiredStateChangeOperationSequence(facts, acceptedKinds),
 	}
 	return base, nil
@@ -779,6 +998,7 @@ func validationDecision(base runtimecontract.RuntimeDecision, facts runtimecontr
 		CoverageWorkItemIDs:       facts.Focus.CoverageWorkItemIDs,
 		TargetRefs:                GroundedRepairTargets(facts),
 		RepairClosureID:           currentRepairClosureID(facts),
+		RepairPurpose:             currentRepairPurpose(facts),
 	}
 	return base, nil
 }
@@ -788,6 +1008,13 @@ func currentRepairClosureID(facts runtimecontract.RuntimeFacts) string {
 		return ""
 	}
 	return facts.RepairDirective.Closure.ID
+}
+
+func currentRepairPurpose(facts runtimecontract.RuntimeFacts) runtimecontract.RuntimeDispatchRepairPurpose {
+	if facts.RepairDirective == nil || facts.RepairDirective.FocusID != facts.Focus.ID || facts.RepairDirective.Closure == nil {
+		return ""
+	}
+	return facts.RepairDirective.Normalized().Purpose
 }
 
 // targetGroundingDecision is the common SM-2 pre-provider fence for executable
@@ -804,7 +1031,8 @@ func currentRepairClosureID(facts runtimecontract.RuntimeFacts) string {
 // always closes this path with a typed terminal. Capability owners and the
 // shared contract package only carry observations; SM-2 owns the terminal.
 func targetGroundingDecision(base runtimecontract.RuntimeDecision, facts runtimecontract.RuntimeFacts, allowAcceptedStateChangeLineage bool, proofLineages ...[]runtimecontract.RuntimeCoverageProofLineage) (runtimecontract.RuntimeDecision, bool, error) {
-	if !facts.Focus.RequireTargetGrounding || runtimeTargetAuthorityPlanForFacts(facts).grounded() ||
+	_, groundingRequired := runtimeCurrentTargetGroundingFocus(facts)
+	if !groundingRequired || runtimeTargetAuthorityPlanForFacts(facts).grounded() ||
 		(allowAcceptedStateChangeLineage && hasCurrentFocusTargetBoundStateChangeEvidence(facts, proofLineages...)) {
 		return runtimecontract.RuntimeDecision{}, false, nil
 	}
@@ -1124,10 +1352,7 @@ func runtimeCurrentFocusHasEvidenceKindWithLineage(facts runtimecontract.Runtime
 		if strings.TrimSpace(evidence.Kind) != evidenceKind {
 			continue
 		}
-		if len(evidence.CoverageWorkItemIDs) == 0 && runtimecontract.EvidenceAppliesToCurrentFocus(facts, evidence) {
-			return true
-		}
-		if runtimeEvidenceAppliesToCurrentCoverageWithLineage(facts, evidence, proofLineage) {
+		if runtimeAcceptedEvidenceCreditsCurrentFocusWithLineage(facts, evidence, proofLineage) {
 			return true
 		}
 	}
@@ -1293,16 +1518,36 @@ func firstNonEmptyAssessmentSummary(assessment runtimecontract.RuntimeAssessment
 	return fallback
 }
 
-func assessmentForCurrentFocus(facts runtimecontract.RuntimeFacts) (runtimecontract.RuntimeAssessmentFact, bool) {
-	// Prefer the latest assessment for the current focus so repair cycles can supersede older facts.
+func assessmentForCurrentFocus(facts runtimecontract.RuntimeFacts, proofLineages ...[]runtimecontract.RuntimeCoverageProofLineage) (runtimecontract.RuntimeAssessmentFact, bool) {
+	// Assessments are immutable audit facts. A later accepted ordinary owner
+	// receipt for this focus makes every assessment at or before its revision
+	// stale, while a subsequent assessment supersedes earlier assessments by the
+	// same global evidence sequence used across operation and governance facts.
+	proofLineage := runtimeCoverageProofLineageArgument(proofLineages)
+	latestAcceptedRevision := ""
+	for _, evidence := range facts.Evidence.Accepted {
+		if evidence.Kind == runtimecontract.EvidenceKindGovernance ||
+			!runtimeAcceptedEvidenceCreditsCurrentFocusWithLineage(facts, evidence, proofLineage) {
+			continue
+		}
+		if latestAcceptedRevision == "" || runtimecontract.EvidenceRevisionAfter(evidence.Revision, latestAcceptedRevision) {
+			latestAcceptedRevision = evidence.Revision
+		}
+	}
 	found := false
 	var latest runtimecontract.RuntimeAssessmentFact
 	for _, assessment := range facts.Assessments {
 		if assessment.FocusID != facts.Focus.ID {
 			continue
 		}
-		latest = assessment
-		found = true
+		if latestAcceptedRevision != "" && !runtimecontract.EvidenceRevisionAfter(assessment.Revision, latestAcceptedRevision) {
+			continue
+		}
+		if !found || runtimecontract.EvidenceRevisionAfter(assessment.Revision, latest.Revision) ||
+			(assessment.Revision == latest.Revision && assessment.ID > latest.ID) {
+			latest = assessment
+			found = true
+		}
 	}
 	if !found {
 		return runtimecontract.RuntimeAssessmentFact{}, false

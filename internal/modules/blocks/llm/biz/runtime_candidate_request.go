@@ -30,7 +30,7 @@ func runtimeOperationsProviderRequest(request llmmodels.RuntimeCandidateRequest)
 	// persistence. The renderer consumes that exact value; it must not rebuild
 	// field/parameter rules from a parallel descriptor path.
 	manifest := request.CandidateManifest
-	if err := runtimecontract.ValidateRuntimeCandidateContractManifestForDecision(manifest, request.Decision, runtimecontract.RuntimeCandidateManifestOwnerFactsFromContext(candidateContext)); err != nil {
+	if err := runtimecontract.ValidateRuntimeCandidateContractManifestForSealedDecision(manifest, request.Decision); err != nil {
 		return llmmodels.ProviderRequest{}, fmt.Errorf("runtime candidate contract manifest: %w", err)
 	}
 	switch request.CandidateAttempt {

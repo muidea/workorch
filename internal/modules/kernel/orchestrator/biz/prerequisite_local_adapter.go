@@ -19,23 +19,6 @@ import (
 
 const validationScratchRevisionFile = ".workorch-runtime-revision"
 
-func ResolveFailureTargetPrerequisite(facts runtimecontract.RuntimeFacts, prerequisiteID string) (runtimecontract.RuntimeFacts, error) {
-	prerequisite, err := pendingPrerequisite(facts, prerequisiteID, runtimecontract.PrerequisiteKindFailureTarget)
-	if err != nil {
-		return runtimecontract.RuntimeFacts{}, err
-	}
-	if facts.Failure == nil || strings.TrimSpace(facts.Failure.Signature) == "" || len(facts.Failure.TargetRefs) == 0 {
-		return runtimecontract.RuntimeFacts{}, fmt.Errorf("failure target prerequisite %q has no typed failure targets", prerequisite.ID)
-	}
-	return runtime.CommitPrerequisiteResult(facts, runtime.PrerequisiteResult{
-		PrerequisiteID: prerequisite.ID,
-		FailureTarget: &runtimecontract.FailureTarget{
-			Signature:  facts.Failure.Signature,
-			TargetRefs: facts.Failure.TargetRefs,
-		},
-	})
-}
-
 // AcquireValidationScratchPrerequisite derives a process-independent scratch
 // reference below the Workspace owner's persisted internal directory. Scratch
 // is a local SM-2 prerequisite, never a process-global temp directory or a

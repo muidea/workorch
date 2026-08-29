@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"reflect"
 	"sort"
 	"strings"
 )
@@ -13,7 +14,7 @@ import (
 // correction renderer. It is deliberately separate from the executable
 // operation-contract revision: this value tracks the candidate wire shape,
 // while RuntimeOperationContractRevision tracks executable owner semantics.
-const RuntimeCandidateContractManifestRevision = "candidate-contract-manifest/v2"
+const RuntimeCandidateContractManifestRevision = "candidate-contract-manifest/v4"
 
 // RuntimeCandidateOperationMaxCount is the compiler ceiling for one complete
 // provider candidate document. The compiled manifest copies this value into
@@ -78,14 +79,21 @@ type RuntimeCandidateContractManifest struct {
 	// MaxOperationCount is the single sealed cardinality source for an
 	// operation-bearing candidate document. It is zero for non-operation
 	// convergence states.
-	MaxOperationCount         int
-	RequiredTopLevelFields    []string
-	AllowedTopLevelFields     []string
-	ForbiddenTopLevelFields   []string
-	Bindings                  []CoverageEvidenceBinding
-	TargetRefs                []string
-	RequiredOperationSequence []RuntimeRequiredOperationVariant
-	Operations                []RuntimeCandidateOperationManifest
+	MaxOperationCount       int
+	RequiredTopLevelFields  []string
+	AllowedTopLevelFields   []string
+	ForbiddenTopLevelFields []string
+	Bindings                []CoverageEvidenceBinding
+	TargetRefs              []string
+	RepairClosureID         string
+	RepairPurpose           RuntimeDispatchRepairPurpose
+	// AssessmentPurpose is rooted in the earlier semantic provider/owner batch
+	// named by AssessmentPurposeManifestHash. Both fields are empty outside an
+	// assessment transaction.
+	AssessmentPurpose             RuntimeAssessmentPurpose
+	AssessmentPurposeManifestHash string
+	RequiredOperationSequence     []RuntimeRequiredOperationVariant
+	Operations                    []RuntimeCandidateOperationManifest
 }
 
 // RuntimeCandidateOperationManifest is the sealed operation authorization for
@@ -162,9 +170,11 @@ func (a RuntimeOperationBindingAuthorization) Normalized() RuntimeOperationBindi
 // values: the compiler never reacquires inventory, never expands truncated
 // lists, and never invents domain paths.
 type RuntimeCandidateManifestOwnerFacts struct {
-	TargetSelection          *RuntimeTargetSelection
-	OperationAdmissibilities []RuntimeOperationAdmissibility
-	ValidationRecipes        []RuntimeValidationRecipe
+	TargetSelection               *RuntimeTargetSelection
+	OperationAdmissibilities      []RuntimeOperationAdmissibility
+	ValidationRecipes             []RuntimeValidationRecipe
+	AssessmentPurpose             RuntimeAssessmentPurpose
+	AssessmentPurposeManifestHash string
 }
 
 // RuntimeCandidateManifestOwnerFactsFromResources projects the sealed resource
@@ -256,6 +266,8 @@ func (f RuntimeCandidateManifestOwnerFacts) Normalized() RuntimeCandidateManifes
 	}
 	f.OperationAdmissibilities = NormalizeRuntimeOperationAdmissibilities(f.OperationAdmissibilities)
 	f.ValidationRecipes = NormalizeRuntimeValidationRecipes(f.ValidationRecipes)
+	f.AssessmentPurpose = RuntimeAssessmentPurpose(strings.TrimSpace(string(f.AssessmentPurpose)))
+	f.AssessmentPurposeManifestHash = strings.TrimSpace(f.AssessmentPurposeManifestHash)
 	return f
 }
 
@@ -278,6 +290,8 @@ func BuildRuntimeCandidateContractManifest(decision RuntimeDecision, ownerFacts 
 		EffectPolicy:              mustRuntimeConvergenceEffectPolicy(decision.State),
 		OperationContractRevision: contractRevision,
 		TargetRefs:                append([]string(nil), required.TargetRefs...),
+		RepairClosureID:           required.RepairClosureID,
+		RepairPurpose:             required.RepairPurpose,
 		RequiredOperationSequence: cloneRuntimeRequiredOperationVariants(required.RequiredOperationSequence),
 	}
 	bindings := NormalizeCoverageEvidenceBindings(decision.Focus.CoverageEvidenceBindings)
@@ -305,9 +319,33 @@ func BuildRuntimeCandidateContractManifest(decision RuntimeDecision, ownerFacts 
 			}
 			manifest.Operations = append(manifest.Operations, operation)
 		}
-	case ConvergenceStateNeedAssessment, ConvergenceStateNeedGovernance:
-		// These actions have a closed non-operation envelope. The renderer still
-		// consumes the manifest so its top-level field rules are not duplicated.
+	case ConvergenceStateNeedAssessment:
+		// Assessment has a closed non-operation envelope, but its post-seal
+		// adjudication is still scoped to the exact semantic proof bindings of the
+		// current focus. Persist that projection in the pre-seal manifest so the
+		// dispatch assessment input cannot reconstruct it from mutable facts.
+		if len(bindings) == 0 {
+			return RuntimeCandidateContractManifest{}, fmt.Errorf("coverage_binding_unavailable: assessment manifest requires one semantic binding preimage")
+		}
+		if err := ValidateCoverageEvidenceBindingProjection(decision.Focus.CoverageEvidenceBindings); err != nil {
+			return RuntimeCandidateContractManifest{}, fmt.Errorf("coverage_binding_unavailable: %w", err)
+		}
+		if err := ValidateCoverageEvidenceBindingsForFocus(decision.Focus, decision.AuthoritySnapshot.DefinitionRevision); err != nil {
+			return RuntimeCandidateContractManifest{}, fmt.Errorf("coverage_binding_unavailable: %w", err)
+		}
+		manifest.Bindings = bindings
+		if ownerFacts.AssessmentPurpose != RuntimeAssessmentPurposeDefinitionProof &&
+			ownerFacts.AssessmentPurpose != RuntimeAssessmentPurposeOwnerFactAcquisition {
+			return RuntimeCandidateContractManifest{}, fmt.Errorf("assessment_purpose_unavailable: assessment manifest requires an exact semantic purpose")
+		}
+		if ownerFacts.AssessmentPurposeManifestHash == "" {
+			return RuntimeCandidateContractManifest{}, fmt.Errorf("assessment_purpose_unavailable: assessment manifest requires an exact semantic manifest preimage")
+		}
+		manifest.AssessmentPurpose = ownerFacts.AssessmentPurpose
+		manifest.AssessmentPurposeManifestHash = ownerFacts.AssessmentPurposeManifestHash
+	case ConvergenceStateNeedGovernance:
+		// Governance has a closed non-operation envelope and carries no semantic
+		// proof projection of its own.
 	default:
 		return RuntimeCandidateContractManifest{}, fmt.Errorf("convergence state %q does not accept a candidate manifest", decision.State)
 	}
@@ -347,6 +385,58 @@ func ValidateRuntimeCandidateContractManifestForDecision(manifest RuntimeCandida
 		return fmt.Errorf("runtime candidate contract manifest does not match sealed authority")
 	}
 	return nil
+}
+
+// ValidateRuntimeCandidateContractManifestForSealedDecision validates an
+// already-sealed manifest at a downstream owner boundary. It deliberately
+// does not recompile target/catalog or assessment-purpose authority from a
+// partial CandidateContext: only the Orchestrator aggregate can replay those
+// persisted SM-2 preimages. Downstream renderers/evaluators consume the exact
+// manifest body after this intrinsic decision fence succeeds.
+func ValidateRuntimeCandidateContractManifestForSealedDecision(manifest RuntimeCandidateContractManifest, decision RuntimeDecision) error {
+	if err := ValidateRuntimeCandidateContractManifestRawCanonical(manifest); err != nil {
+		return err
+	}
+	if err := decision.Validate(); err != nil {
+		return err
+	}
+	required := decision.RequiredOutput.Normalized()
+	if manifest.State != decision.State || manifest.OperationContractRevision != RuntimeOperationContractRevision() ||
+		!reflect.DeepEqual(manifest.EffectPolicy, mustRuntimeConvergenceEffectPolicy(decision.State)) ||
+		!sameStrings(manifest.TargetRefs, required.TargetRefs) || manifest.RepairClosureID != required.RepairClosureID ||
+		manifest.RepairPurpose != required.RepairPurpose ||
+		!reflect.DeepEqual(manifest.RequiredOperationSequence, cloneRuntimeRequiredOperationVariants(required.RequiredOperationSequence)) {
+		return fmt.Errorf("runtime candidate contract manifest does not match sealed authority decision projection")
+	}
+	requiredFields, allowedFields, forbiddenFields := runtimeCandidateEnvelopeFields(decision.State)
+	if !sameStrings(manifest.RequiredTopLevelFields, normalizeStrings(requiredFields)) || !sameStrings(manifest.AllowedTopLevelFields, normalizeStrings(allowedFields)) ||
+		!sameStrings(manifest.ForbiddenTopLevelFields, normalizeStrings(forbiddenFields)) {
+		return fmt.Errorf("runtime candidate contract manifest envelope does not match sealed decision")
+	}
+	switch decision.State {
+	case ConvergenceStateNeedStateChange, ConvergenceStateNeedValidation:
+		if manifest.MaxOperationCount != RuntimeCandidateOperationMaxCount {
+			return fmt.Errorf("runtime operation candidate manifest has invalid cardinality ceiling")
+		}
+	case ConvergenceStateNeedAssessment:
+		if manifest.MaxOperationCount != 0 ||
+			!RuntimeCoverageEvidenceBindingProjectionsEqual(manifest.Bindings, decision.Focus.CoverageEvidenceBindings) {
+			return fmt.Errorf("runtime assessment candidate manifest binding projection mismatch")
+		}
+	case ConvergenceStateNeedGovernance:
+		if manifest.MaxOperationCount != 0 {
+			return fmt.Errorf("runtime governance candidate manifest cannot carry operation cardinality")
+		}
+	default:
+		return fmt.Errorf("convergence state %q does not accept a candidate manifest", decision.State)
+	}
+	if err := ValidateRuntimeCandidateManifestOperationCardinality(manifest); err != nil {
+		return err
+	}
+	if err := validateRuntimeCandidateManifestOperationWireFields(manifest); err != nil {
+		return err
+	}
+	return ValidateRuntimeCandidateOperationCorrectionMetadata(manifest)
 }
 
 // RuntimeCandidateAllowedOperationKinds is the owner-neutral C3 narrowing
@@ -420,6 +510,10 @@ func (m RuntimeCandidateContractManifest) Normalized() RuntimeCandidateContractM
 	m.ForbiddenTopLevelFields = normalizeStrings(m.ForbiddenTopLevelFields)
 	m.Bindings = NormalizeCoverageEvidenceBindings(m.Bindings)
 	m.TargetRefs = normalizeStrings(m.TargetRefs)
+	m.RepairClosureID = strings.TrimSpace(m.RepairClosureID)
+	m.RepairPurpose = RuntimeDispatchRepairPurpose(strings.TrimSpace(string(m.RepairPurpose)))
+	m.AssessmentPurpose = RuntimeAssessmentPurpose(strings.TrimSpace(string(m.AssessmentPurpose)))
+	m.AssessmentPurposeManifestHash = strings.TrimSpace(m.AssessmentPurposeManifestHash)
 	m.RequiredOperationSequence = cloneRuntimeRequiredOperationVariants(normalizeRequiredOperationVariants(m.RequiredOperationSequence))
 	operations := make([]RuntimeCandidateOperationManifest, 0, len(m.Operations))
 	seen := make(map[string]struct{}, len(m.Operations))
@@ -550,6 +644,35 @@ func (m RuntimeCandidateContractManifest) Clone() RuntimeCandidateContractManife
 	return m.Normalized()
 }
 
+// ValidateRuntimeCandidateContractManifestRawCanonical rejects persistence
+// shapes that would be changed by Normalized. A manifest is an immutable
+// pre-seal authority body, so duplicate entries, ordering drift, surrounding
+// whitespace and nil/empty substitutions must not be silently repaired while
+// loading the aggregate. Stable hashes deliberately operate on normalized
+// values and therefore cannot provide this raw-shape fence on their own.
+func ValidateRuntimeCandidateContractManifestRawCanonical(manifest RuntimeCandidateContractManifest) error {
+	canonical := manifest.Normalized()
+	if !reflect.DeepEqual(manifest, canonical) {
+		return fmt.Errorf("runtime candidate contract manifest is not raw-canonical")
+	}
+	if manifest.RepairPurpose != "" &&
+		(manifest.RepairPurpose != RuntimeDispatchRepairPurposeConfirmedFileValidation || manifest.RepairClosureID == "") {
+		return fmt.Errorf("runtime candidate contract manifest has invalid repair purpose %q", manifest.RepairPurpose)
+	}
+	if manifest.State == ConvergenceStateNeedAssessment {
+		if (manifest.AssessmentPurpose != RuntimeAssessmentPurposeDefinitionProof && manifest.AssessmentPurpose != RuntimeAssessmentPurposeOwnerFactAcquisition) ||
+			manifest.AssessmentPurposeManifestHash == "" || len(manifest.Bindings) == 0 {
+			return fmt.Errorf("runtime candidate contract manifest has invalid assessment purpose preimage")
+		}
+	} else if manifest.AssessmentPurpose != "" || manifest.AssessmentPurposeManifestHash != "" {
+		return fmt.Errorf("non-assessment runtime candidate contract manifest carries assessment purpose")
+	}
+	if manifest.Hash == "" || manifest.Hash != StableRuntimeCandidateContractManifestHash(manifest) {
+		return fmt.Errorf("runtime candidate contract manifest hash mismatch")
+	}
+	return nil
+}
+
 // ValidateRuntimeCandidateManifestOperationCardinality verifies the sealed
 // operation-document budget without deriving candidate content. Consumers use
 // MaxOperationCount after this check; the global compiler ceiling is only a
@@ -599,6 +722,10 @@ func StableRuntimeCandidateContractManifestHash(manifest RuntimeCandidateContrac
 		writeHashString(h, binding.Hash)
 	}
 	writeHashStrings(h, manifest.TargetRefs)
+	writeHashString(h, manifest.RepairClosureID)
+	writeHashString(h, string(manifest.RepairPurpose))
+	writeHashString(h, string(manifest.AssessmentPurpose))
+	writeHashString(h, manifest.AssessmentPurposeManifestHash)
 	for _, requirement := range manifest.RequiredOperationSequence {
 		writeHashString(h, requirement.RequirementID)
 		writeHashString(h, requirement.Kind)

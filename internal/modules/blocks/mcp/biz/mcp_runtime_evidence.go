@@ -106,7 +106,13 @@ func buildMCPOperationEvidence(internalDirectory string, operationKind string, a
 	sort.Strings(refs)
 	summary := fmt.Sprintf("MCP %s owner evidence captured; capability=%s responseBytes=%d streamEvents=%d", runtimecontract.CanonicalRuntimeBlockKind(operationKind), authorization.Capability.ID, len(result.Response.JSON)+len(result.Response.Text), len(result.StreamEvents))
 	return runtimecontract.RuntimeOperationEvidence{
-		Summary: summary, ContentHash: hash, EvidenceRefs: refs,
+		Summary: summary, ContentHash: hash,
+		ContentAddress: &runtimecontract.RuntimeEvidenceContentAddress{
+			Algorithm: runtimecontract.RuntimeEvidenceDigestSHA256,
+			Digest:    hash,
+			Ref:       "workorch://mcp/evidence/" + hash,
+		},
+		EvidenceRefs: refs,
 		EvidenceTags: []string{"mcp", runtimecontract.CanonicalRuntimeBlockKind(operationKind), "owner_normalized"},
 	}, nil
 }

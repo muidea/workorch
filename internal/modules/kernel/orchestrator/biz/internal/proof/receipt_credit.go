@@ -19,9 +19,9 @@ type CoverageReceiptFinding struct {
 
 // MatchCoverageReceipt performs the single exact binding/receipt comparison
 // used by SM-2. It cannot mutate evidence, coverage, or the Runtime aggregate.
-func MatchCoverageReceipt(facts runtimecontract.RuntimeFacts, operation runtimecontract.RuntimeOperation, evidenceKind string, receipt *runtimecontract.RuntimeOperationReceipt) CoverageReceiptFinding {
+func MatchCoverageReceipt(bindings []runtimecontract.CoverageEvidenceBinding, operation runtimecontract.RuntimeOperation, evidenceKind string, receipt *runtimecontract.RuntimeOperationReceipt) CoverageReceiptFinding {
 	operation = operation.Normalized()
-	bindings := facts.Focus.Normalized().CoverageEvidenceBindings
+	bindings = runtimecontract.NormalizeCoverageEvidenceBindings(bindings)
 	refs := append([]string(nil), operation.BindingRefs...)
 	if len(bindings) == 0 {
 		return CoverageReceiptFinding{BindingRefs: refs, Diagnostic: "coverage_binding_mismatch: focus has no sealed coverage evidence bindings"}

@@ -60,8 +60,8 @@ func TestValidationFailureTargetsRequirePriorAuthorityOrFreshOwnerObservation(t 
 			SubjectRef: "shell-policy", Revision: "shell-policy-v1",
 		}},
 	}}
-	if !ValidationFailureTargetsAreGrounded(facts, failure) {
-		t.Fatal("fresh structured Shell owner observation was not grounded")
+	if ValidationFailureTargetsAreGrounded(facts, failure) {
+		t.Fatal("fresh structured Shell owner observation bypassed the validation-observation and File-confirmation path")
 	}
 }
 

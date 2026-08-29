@@ -288,7 +288,12 @@ func (m *Biz) handleMCPOperation(event magicevent.Event, result magicevent.Resul
 	var failure *runtimecontract.FailureFact
 	if executeErr != nil {
 		status = runtimecontract.RuntimeOperationExecutionStatusRejected
-		failure = orchestratorevents.RuntimeOperationFailureWithTargetObservation(command.Transaction, operation.Kind, operationResult.FailureCode, safeMCPFailureMessage(operationResult.FailureCode), mcpFailureTargets(operationResult), mcpFailureTargetObservation(operationResult))
+		targetObservation := mcpFailureTargetObservation(operationResult, evidence)
+		var failureTargets []string
+		if targetObservation != nil {
+			failureTargets = append([]string(nil), targetObservation.TargetRefs...)
+		}
+		failure = orchestratorevents.RuntimeOperationFailureWithTargetObservation(command.Transaction, operation.Kind, operationResult.FailureCode, safeMCPFailureMessage(operationResult.FailureCode), failureTargets, targetObservation)
 	}
 	observation := orchestratorevents.RuntimeOperationReceiptObservation{ObservedEffectScope: runtimecontract.RuntimeEffectUnknown}
 	if status == runtimecontract.RuntimeOperationExecutionStatusAccepted {
@@ -323,11 +328,22 @@ func mcpFailureTargets(result RuntimeOperationResult) []string {
 	return normalizeMCPTargetRefs(result.Diagnostics.FailureTargets)
 }
 
-func mcpFailureTargetObservation(result RuntimeOperationResult) *runtimecontract.RuntimeFailureTargetObservation {
+func mcpFailureTargetObservation(result RuntimeOperationResult, evidence runtimecontract.RuntimeOperationEvidence) *runtimecontract.RuntimeFailureTargetObservation {
+	if evidence.ContentAddress == nil || evidence.ContentAddress.Validate() != nil ||
+		evidence.ContentAddress.Digest != evidence.ContentHash || !containsExactMCPValue(evidence.EvidenceRefs, evidence.ContentAddress.Ref) {
+		return nil
+	}
 	targets := mcpFailureTargets(result)
 	observation := runtimecontract.RuntimeFailureTargetObservation{
 		OwnerModuleID: ModuleID, SubjectRef: result.ServerID, TargetRole: result.Diagnostics.TargetRole,
 		ObservedRevision: result.OwnerRevision, TargetRefs: targets,
+		CatalogDependency: &runtimecontract.RuntimeFreshnessDependency{
+			Domain: runtimecontract.RuntimeResourceOwnerCatalog, OwnerModuleID: ModuleID,
+			SubjectRef: "mcp_server_catalog", Revision: result.OwnerRevision,
+		},
+		DiagnosticClass: runtimecontract.RuntimeFailureTargetDiagnosticReceiptEvidence,
+		EvidenceRefs:    append([]string(nil), evidence.EvidenceRefs...),
+		ContentHash:     evidence.ContentHash,
 	}.Normalized()
 	if err := observation.Validate(); err != nil {
 		return nil
@@ -504,7 +520,7 @@ func (m *Biz) handleRuntimeOperationFeasibility(event magicevent.Event, result m
 		setRuntimeOperationFeasibilityResult(result, command, failure, nil)
 		return
 	}
-	if !containsMCPAdmissibleServer(serverIDs, data.ServerID) {
+	if !containsExactMCPValue(serverIDs, data.ServerID) {
 		failure := runtimecontract.RuntimeOperationInfeasibleFailure(operation, "mcp_server_not_admissible", "runtime mcp operation server is absent from the owner admissibility inventory")
 		setRuntimeOperationFeasibilityResult(result, command, failure, nil)
 		return
@@ -572,7 +588,7 @@ func (m *Biz) handleRuntimeSemanticProofFeasibility(event magicevent.Event, resu
 		return
 	}
 	if !surfaceFound || surface.Readiness != runtimecontract.RuntimeValidationSurfaceReady || surface.ProofApplicability != runtimecontract.RuntimeValidationProofDirect || surface.InputBindingRef == "" ||
-		!containsMCPAdmissibleServer(recipeRefs, command.Proposal.ValidationRecipeID) {
+		!containsExactMCPValue(recipeRefs, command.Proposal.ValidationRecipeID) {
 		setRuntimeSemanticProofFeasibilityResult(result, command, runtimecontract.RuntimeSemanticFeasibilityInfeasible, revision, nil,
 			runtimecontract.RuntimeSemanticFeasibilityDiagnostic(ModuleID, "mcp_recipe_not_admissible", "runtime semantic MCP validation recipe is absent from the ready direct-proof owner catalog", "", revision, nil))
 		return
@@ -593,7 +609,7 @@ func (m *Biz) handleRuntimeSemanticProofFeasibility(event magicevent.Event, resu
 		return
 	}
 	for _, selector := range command.Proposal.Target.OwnerSelectorRefs {
-		if !containsMCPAdmissibleServer(serverIDs, selector) {
+		if !containsExactMCPValue(serverIDs, selector) {
 			setRuntimeSemanticProofFeasibilityResult(result, command, runtimecontract.RuntimeSemanticFeasibilityInfeasible, revision, nil,
 				runtimecontract.RuntimeSemanticFeasibilityDiagnostic(ModuleID, "mcp_selector_not_admissible", "runtime semantic MCP selector is absent from the owner catalog", "", revision, []string{selector}))
 			return
@@ -775,7 +791,7 @@ func mcpAdmissibilityStale(observation *runtimecontract.RuntimePrerequisiteObser
 	return nil
 }
 
-func containsMCPAdmissibleServer(values []string, wanted string) bool {
+func containsExactMCPValue(values []string, wanted string) bool {
 	for _, value := range values {
 		if value == wanted {
 			return true

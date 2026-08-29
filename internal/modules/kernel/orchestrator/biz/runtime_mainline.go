@@ -39,7 +39,7 @@ func runtimePrerequisiteResolverClassification(kind runtimecontract.Prerequisite
 		runtimecontract.PrerequisiteKindCapability, runtimecontract.PrerequisiteKindOperationAdmissibility,
 		runtimecontract.PrerequisiteKindCapabilityState:
 		return runtimePrerequisiteResolverExternal
-	case runtimecontract.PrerequisiteKindFailureTarget, runtimecontract.PrerequisiteKindValidationScratch:
+	case runtimecontract.PrerequisiteKindValidationScratch:
 		return runtimePrerequisiteResolverLocal
 	default:
 		return runtimePrerequisiteResolverUnknown
@@ -68,7 +68,7 @@ func (m *Biz) requestAndSealRuntimeCandidate(
 		aggregate.Decision,
 		runtime.ActiveRejectedOperationShapes(aggregate),
 	)
-	manifest, manifestErr := runtimecontract.BuildRuntimeCandidateContractManifest(aggregate.Decision, runtimecontract.RuntimeCandidateManifestOwnerFactsFromContext(candidateContext))
+	manifest, manifestErr := runtime.BuildRuntimeCandidateContractManifestForAggregate(aggregate)
 	if manifestErr != nil {
 		return m.runtimeRecordFailure(ctx, aggregate, runtimecontract.FailureFact{
 			Class: runtimecontract.FailureClassRuntimeContractMisalignment, Code: "runtime_candidate_manifest_invalid",
@@ -202,7 +202,7 @@ func (m *Biz) requestRuntimeCandidateDocument(
 	if err != nil {
 		return runtime.RuntimeAggregate{}, runtimecontract.RuntimeCandidate{}, false, err
 	}
-	if err := runtimecontract.ValidateRuntimeCandidateContractManifestForDecision(manifest, aggregate.Decision, runtimecontract.RuntimeCandidateManifestOwnerFactsFromContext(candidateContext)); err != nil {
+	if err := runtime.ValidateRuntimeCandidateContractManifestForAggregate(aggregate, manifest); err != nil {
 		return runtime.RuntimeAggregate{}, runtimecontract.RuntimeCandidate{}, false, err
 	}
 	correctionDirective, err := runtimePreviousCandidateCorrection(aggregate, candidateAttempt)
@@ -450,7 +450,7 @@ func (m *Biz) admitRuntimeCompletedCandidateDocument(ctx context.Context, aggreg
 		return failed, runtimecontract.RuntimeCandidate{}, false, failureErr
 	}
 	candidateContext := runtimecontract.RuntimeCandidateContextForDecision(aggregate.Facts, aggregate.Decision, runtime.ActiveRejectedOperationShapes(aggregate))
-	if err := runtimecontract.ValidateRuntimeCandidateContractManifestForDecision(manifest, aggregate.Decision, runtimecontract.RuntimeCandidateManifestOwnerFactsFromContext(candidateContext)); err != nil {
+	if err := runtime.ValidateRuntimeCandidateContractManifestForAggregate(aggregate, manifest); err != nil {
 		return runtime.RuntimeAggregate{}, runtimecontract.RuntimeCandidate{}, false, err
 	}
 	// Complete provider bytes remain only in an Orchestrator-private restart
@@ -983,7 +983,7 @@ func (m *Biz) sealRuntimeGovernanceCandidate(ctx context.Context, aggregate runt
 			Signature: "governance-dependency-missing", Message: "runtime governance requires a sealed external dependency",
 		})
 	}
-	manifest, err := runtimecontract.BuildRuntimeCandidateContractManifest(aggregate.Decision, runtimecontract.RuntimeCandidateManifestOwnerFactsFromContext(runtimecontract.RuntimeCandidateContextForDecision(aggregate.Facts, aggregate.Decision, nil)))
+	manifest, err := runtime.BuildRuntimeCandidateContractManifestForAggregate(aggregate)
 	if err != nil {
 		return runtime.RuntimeAggregate{}, err
 	}

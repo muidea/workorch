@@ -283,9 +283,17 @@ func runtimeDispatchRecordFromAggregate(dispatch runtime.SealedDispatch) runtime
 		ID: dispatch.ID, WorkspaceID: dispatch.WorkspaceID, RunID: dispatch.RunID,
 		Transaction: dispatch.Transaction, CandidateHash: dispatch.CandidateHash, Candidate: dispatch.Candidate,
 		CandidateManifestHash:              dispatch.CandidateManifestHash,
+		CoverageBindingHash:                dispatch.CoverageBindingHash,
+		CoverageBindings:                   runtimecontract.CloneCoverageEvidenceBindings(dispatch.CoverageBindings),
 		OperationTargetAuthorizations:      runtimecontract.CloneRuntimeDispatchOperationTargetAuthorizations(dispatch.OperationTargetAuthorizations),
 		FocusTargetRole:                    dispatch.FocusTargetRole,
 		ValidationRecipes:                  runtimecontract.CloneRuntimeValidationRecipes(dispatch.ValidationRecipes),
+		RepairCommitmentHash:               dispatch.RepairCommitmentHash,
+		RepairCommitment:                   cloneRuntimeDispatchRepairCommitmentRecord(dispatch.RepairCommitment),
+		AssessmentAuthorityInputHash:       dispatch.AssessmentAuthorityInputHash,
+		AssessmentAuthorityInput:           cloneRuntimeAssessmentAuthorityInputRecord(dispatch.AssessmentAuthorityInput),
+		AssessmentAdjudicationHash:         dispatch.AssessmentAdjudicationHash,
+		AssessmentAdjudication:             cloneRuntimeAssessmentAdjudicationRecord(dispatch.AssessmentAdjudication),
 		OperationAdmissibilities:           runtimecontract.CloneRuntimeOperationAdmissibilities(dispatch.OperationAdmissibilities),
 		OperationAdmissibilityObservations: runtimecontract.CloneRuntimePrerequisiteObservations(dispatch.OperationAdmissibilityObservations),
 		OperationPolicies:                  runtimecontract.NormalizeRuntimeOperationPolicyFacts(dispatch.OperationPolicies),
@@ -300,9 +308,17 @@ func runtimeDispatchFromRecord(dispatch runtimecontract.RuntimeDispatchRecord) r
 		ID: dispatch.ID, WorkspaceID: dispatch.WorkspaceID, RunID: dispatch.RunID,
 		Transaction: dispatch.Transaction, CandidateHash: dispatch.CandidateHash, Candidate: dispatch.Candidate,
 		CandidateManifestHash:              dispatch.CandidateManifestHash,
+		CoverageBindingHash:                dispatch.CoverageBindingHash,
+		CoverageBindings:                   runtimecontract.CloneCoverageEvidenceBindings(dispatch.CoverageBindings),
 		OperationTargetAuthorizations:      runtimecontract.CloneRuntimeDispatchOperationTargetAuthorizations(dispatch.OperationTargetAuthorizations),
 		FocusTargetRole:                    dispatch.FocusTargetRole,
 		ValidationRecipes:                  runtimecontract.CloneRuntimeValidationRecipes(dispatch.ValidationRecipes),
+		RepairCommitmentHash:               dispatch.RepairCommitmentHash,
+		RepairCommitment:                   cloneRuntimeDispatchRepairCommitmentRecord(dispatch.RepairCommitment),
+		AssessmentAuthorityInputHash:       dispatch.AssessmentAuthorityInputHash,
+		AssessmentAuthorityInput:           cloneRuntimeAssessmentAuthorityInputRecord(dispatch.AssessmentAuthorityInput),
+		AssessmentAdjudicationHash:         dispatch.AssessmentAdjudicationHash,
+		AssessmentAdjudication:             cloneRuntimeAssessmentAdjudicationRecord(dispatch.AssessmentAdjudication),
 		OperationAdmissibilities:           runtimecontract.CloneRuntimeOperationAdmissibilities(dispatch.OperationAdmissibilities),
 		OperationAdmissibilityObservations: runtimecontract.CloneRuntimePrerequisiteObservations(dispatch.OperationAdmissibilityObservations),
 		OperationPolicies:                  runtimecontract.NormalizeRuntimeOperationPolicyFacts(dispatch.OperationPolicies),
@@ -310,4 +326,28 @@ func runtimeDispatchFromRecord(dispatch runtimecontract.RuntimeDispatchRecord) r
 		OperationExecutions: runtimecontract.CloneRuntimeOperationExecutionRecords(dispatch.OperationExecutions), OperationAuthorityHash: dispatch.OperationAuthorityHash,
 		DispatchAuthorityHash: dispatch.DispatchAuthorityHash,
 	}
+}
+
+func cloneRuntimeDispatchRepairCommitmentRecord(value *runtimecontract.RuntimeDispatchRepairCommitment) *runtimecontract.RuntimeDispatchRepairCommitment {
+	if value == nil {
+		return nil
+	}
+	copy := value.Clone()
+	return &copy
+}
+
+func cloneRuntimeAssessmentAuthorityInputRecord(value *runtimecontract.RuntimeAssessmentAuthorityInput) *runtimecontract.RuntimeAssessmentAuthorityInput {
+	if value == nil {
+		return nil
+	}
+	copy := value.Clone()
+	return &copy
+}
+
+func cloneRuntimeAssessmentAdjudicationRecord(value *runtimecontract.RuntimeAssessmentAdjudication) *runtimecontract.RuntimeAssessmentAdjudication {
+	if value == nil {
+		return nil
+	}
+	copy := value.Clone()
+	return &copy
 }

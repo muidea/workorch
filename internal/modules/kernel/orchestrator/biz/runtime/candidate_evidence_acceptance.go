@@ -38,7 +38,15 @@ func applyAcceptedEvidenceCoverageCredit(aggregate *RuntimeAggregate, fact runti
 	// A completed mismatch is deterministic and cannot be repaired by another
 	// provider request for the same immutable dispatch.
 	if len(fact.BindingRefs) != 0 && len(fact.CoverageWorkItemIDs) == 0 && bindingDiagnostic != "" {
-		failure := coverageBindingMismatchFailure(aggregate.Facts, fact, bindingDiagnostic)
+		if aggregate.ActiveDispatch == nil {
+			return fmt.Errorf("coverage binding mismatch has no active sealed dispatch")
+		}
+		failure := coverageBindingMismatchFailure(
+			aggregate.ActiveDispatch.Transaction.FocusID,
+			aggregate.ActiveDispatch.CoverageBindings,
+			fact,
+			bindingDiagnostic,
+		)
 		aggregate.Facts.Failure = &failure
 	}
 	if aggregate.Facts.Focus.RequireAssessment {
@@ -90,17 +98,26 @@ func applyAcceptedEvidenceStateChange(aggregate *RuntimeAggregate, fact runtimec
 }
 
 func applyAcceptedEvidenceProgress(aggregate *RuntimeAggregate, admission executionEvidenceAdmission, fact runtimecontract.EvidenceFact, retainRepairCycle bool) {
-	if !runtimecontract.EvidenceAppliesToCurrentFocus(aggregate.Facts, fact) {
+	if !runtimeAcceptedEvidenceCreditsCurrentFocusWithLineage(aggregate.Facts, fact, aggregate.CoverageProofLineage) {
 		return
 	}
-	aggregate.Facts.Assessments = invalidateNonSatisfiedAssessmentsForFocus(aggregate.Facts.Assessments, aggregate.Facts.Focus.ID)
+	// Assessments are an immutable global evidence ledger. A later accepted
+	// current-focus fact supersedes an older assessment only when the reducer
+	// compares their canonical revisions; it never deletes audit lineage.
 	// Admission alone is not convergence progress. Only a durable changed state
 	// effect resets repair debt; validation awaits assessment satisfaction.
 	if retainRepairCycle {
 		// The Profile convergence is ordered all-of. A repair receipt alone must
 		// not reset the cycle before its mandatory fresh validation.
-	} else if runtimeEvidenceIsEffectiveProgress(aggregate.Facts, fact, admission.Evidence) {
+	} else if runtimeEvidenceIsEffectiveProgress(aggregate.Facts, fact, admission.Evidence, aggregate.CoverageProofLineage) {
 		aggregate.Facts.Repair = noteRepairProgress(aggregate.Facts.Repair, fact.Revision)
+	} else if runtimeEvidenceReopensMandatoryValidationWindow(aggregate.Facts, fact, admission.Evidence, aggregate.CoverageProofLineage) {
+		// Mandatory assessment keeps the same-gap repair debt and provenance
+		// until adjudication. A changed, exactly credited durable receipt is
+		// nevertheless no longer a validation-only retry: reopen that bounded
+		// window so SM-2 can obtain the still-missing validation proof instead of
+		// terminating before the required all-of successor can run.
+		aggregate.Facts.Repair.ValidationOnlyRetries = 0
 	} else if fact.Kind == runtimecontract.EvidenceKindValidation && aggregate.Facts.Repair.ActiveGap != nil {
 		aggregate.Facts.Repair = recordNoProgressOperationShape(aggregate.Facts.Repair, runtimecontract.RuntimeRejectedOperationShape{
 			Operation: admission.Operation, EvidenceID: fact.ID,
@@ -115,6 +132,13 @@ func applyAcceptedEvidenceProgress(aggregate *RuntimeAggregate, admission execut
 	if aggregate.Facts.Failure == nil || aggregate.Facts.Failure.Code != coverageBindingMismatchFailureCode {
 		aggregate.Facts.Failure = nil
 	}
+}
+
+func runtimeEvidenceReopensMandatoryValidationWindow(facts runtimecontract.RuntimeFacts, fact runtimecontract.EvidenceFact, evidence ExecutionEvidence, proofLineages ...[]runtimecontract.RuntimeCoverageProofLineage) bool {
+	if !facts.Focus.RequireAssessment || !containsString(missingEvidenceKinds(facts, proofLineages...), runtimecontract.EvidenceKindValidation) {
+		return false
+	}
+	return runtimeEvidenceIsGroundedDurableStateChange(facts, fact, evidence, proofLineages...)
 }
 
 func applyExecutionEvidenceByStatus(aggregate *RuntimeAggregate, admission executionEvidenceAdmission, fact runtimecontract.EvidenceFact, finding executionEvidenceCreditFinding) error {

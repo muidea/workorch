@@ -16,7 +16,10 @@ func applyRejectedExecutionEvidence(aggregate *RuntimeAggregate, admission execu
 		fact.FailureMessage = evidence.Failure.Message
 		failure := groundRejectedExecutionFailure(aggregate.Facts, fact.Kind, *evidence.Failure)
 		aggregate.Facts.Failure = &failure
-		recordRejectedExecutionFailureTarget(aggregate, failure)
+		if evidence.Receipt != nil && evidence.Receipt.Outcome == runtimecontract.RuntimeOperationOutcomeRejected &&
+			evidence.Receipt.Feedback != nil && evidence.Receipt.Feedback.OriginalDiagnostic != nil {
+			recordRejectedExecutionFailureTarget(aggregate, failure)
+		}
 		gap := rejectedExecutionAssessmentGap(aggregate.Facts, fact, failure)
 		signature := ensureRejectedExecutionFailureSignature(aggregate, &fact, &gap)
 		ledger, err := rejectedExecutionRepairLedger(aggregate.Facts, evidence, admission.Operation, fact, failure, gap, signature)
@@ -36,7 +39,12 @@ func groundRejectedExecutionFailure(facts runtimecontract.RuntimeFacts, evidence
 	// A validation command target is an execution entry, not proof that this
 	// object requires repair. Preserve it only when prior owner authority grounds
 	// the target; state-changing owner failures retain their effect lineage.
-	if evidenceKind == runtimecontract.EvidenceKindValidation && !validationFailureTargetsAreGrounded(facts, failure) {
+	// A direct observation has already crossed the sole receipt-ingress fence:
+	// descriptor policy, owner identity, content address and freshness binding
+	// were checked before this transition. It is therefore the owner authority
+	// being promoted atomically by this receipt, not an ungrounded command
+	// target that must have existed in the previous facts snapshot.
+	if evidenceKind == runtimecontract.EvidenceKindValidation && failure.TargetObservation == nil && !validationFailureTargetsAreGrounded(facts, failure) {
 		failure.TargetRefs = nil
 		failure.TargetObservation = nil
 	}

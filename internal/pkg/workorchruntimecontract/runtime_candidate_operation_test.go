@@ -372,7 +372,7 @@ func TestOperationHasWorkspaceSideEffectsDefaultsSSHAndMCP(t *testing.T) {
 	}
 }
 
-func TestEvidenceWithoutCoverageBindingIsDiagnosticOnlyOnFinalFocus(t *testing.T) {
+func TestEvidenceWithoutCoverageBindingUsesExactFocusForDiagnosticOnly(t *testing.T) {
 	facts := RuntimeFacts{
 		Activation:  RuntimeActivationContext{ProviderSelection: ProviderInferenceSelection{Target: ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "gpt-4o"}}},
 		WorkspaceID: "ws-1", RunID: "run-1", DefinitionRevision: "def-1", EvidenceRevision: "ev-1",
@@ -385,24 +385,25 @@ func TestEvidenceWithoutCoverageBindingIsDiagnosticOnlyOnFinalFocus(t *testing.T
 			RequiredEvidenceKinds: []string{EvidenceKindValidation},
 		}},
 		Evidence: EvidenceLedger{Accepted: []EvidenceFact{{
-			ID: "acc-empty", Kind: EvidenceKindValidation,
+			ID: "acc-empty", Kind: EvidenceKindValidation, FocusID: "focus-1",
 		}}},
 	}.Normalized()
-	if EvidenceAppliesToCurrentFocus(facts, facts.Evidence.Accepted[0]) {
-		t.Fatalf("empty-coverage evidence must not apply before the last focus")
+	if !EvidenceBelongsToCurrentFocusForDiagnosticLineage(facts, facts.Evidence.Accepted[0]) {
+		t.Fatalf("focus-bound empty-coverage evidence must remain diagnostic lineage for its owning focus")
 	}
 	missing := MissingRequiredEvidenceKinds(facts)
 	if len(missing) != 1 || missing[0] != EvidenceKindValidation {
 		t.Fatalf("missing evidence = %#v, want [validation]", missing)
 	}
 
+	facts.Focus = facts.RemainingFocuses[0]
 	facts.RemainingFocuses = nil
 	facts = facts.Normalized()
-	if !EvidenceAppliesToCurrentFocus(facts, facts.Evidence.Accepted[0]) {
-		t.Fatalf("empty-coverage evidence must remain diagnostic lineage on the final focus")
+	if EvidenceBelongsToCurrentFocusForDiagnosticLineage(facts, facts.Evidence.Accepted[0]) {
+		t.Fatalf("earlier-focus empty-coverage evidence must not become diagnostic lineage for a later final focus")
 	}
 	missing = MissingRequiredEvidenceKinds(facts)
-	if len(missing) != 0 {
-		t.Fatalf("diagnostic validation did not satisfy action-level requirement on final focus: %#v", missing)
+	if len(missing) != 1 || missing[0] != EvidenceKindValidation {
+		t.Fatalf("diagnostic validation incorrectly satisfied proof requirement on final focus: %#v", missing)
 	}
 }

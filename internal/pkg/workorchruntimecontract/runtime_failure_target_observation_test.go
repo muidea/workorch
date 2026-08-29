@@ -1,6 +1,7 @@
 package workorchruntimecontract
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 )
@@ -44,6 +45,14 @@ func TestRuntimeFailureTargetObservationNormalizesAndValidates(t *testing.T) {
 		if err := invalid.Validate(); err == nil {
 			t.Fatalf("Validate(%+v) = nil, want error", invalid)
 		}
+	}
+	overflow := value
+	overflow.TargetRefs = make([]string, 0, RuntimeFailureTargetObservationMaxTargetRefs+1)
+	for index := 0; index <= RuntimeFailureTargetObservationMaxTargetRefs; index++ {
+		overflow.TargetRefs = append(overflow.TargetRefs, fmt.Sprintf("target-%02d.go", index))
+	}
+	if err := overflow.Validate(); err == nil {
+		t.Fatalf("overflow target observation validated: %+v", overflow)
 	}
 }
 

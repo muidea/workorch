@@ -96,3 +96,11 @@ func sameValidationFailureDiagnostic(left, right *ValidationFailureDiagnostic) b
 		l.ObservationType == r.ObservationType && l.EvidenceMode == r.EvidenceMode &&
 		l.StdoutPreview == r.StdoutPreview && l.StderrPreview == r.StderrPreview
 }
+
+// SameValidationFailureDiagnostic reports canonical equality for the bounded
+// typed diagnostic. Runtime aggregate invariants use it to prove that the
+// reducer-facing copy and the immutable owner-diagnostic copy have not drifted
+// across persistence or recovery.
+func SameValidationFailureDiagnostic(left, right *ValidationFailureDiagnostic) bool {
+	return sameValidationFailureDiagnostic(left, right)
+}

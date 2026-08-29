@@ -539,7 +539,7 @@ func ValidateRuntimeDispatchExecutionKeyLineage(
 			originExecution, found := runtimeDispatchExecutionForOperation(origin, execution.OperationID)
 			if !found || originExecution.ExecutionKey != StableRuntimeOperationExecutionKey(workspaceID, runID, origin.ID, execution.OperationID) ||
 				originExecution.OperationHash != execution.OperationHash || originExecution.AuthorityHash != execution.AuthorityHash ||
-				origin.CandidateHash != dispatch.CandidateHash || stableRuntimeValidationRecipeSnapshotHash(origin.ValidationRecipes) != stableRuntimeValidationRecipeSnapshotHash(dispatch.ValidationRecipes) {
+				origin.CandidateHash != dispatch.CandidateHash || StableRuntimeValidationRecipeSnapshotHash(origin.ValidationRecipes) != StableRuntimeValidationRecipeSnapshotHash(dispatch.ValidationRecipes) {
 				return fmt.Errorf("runtime dispatch %q operation %q execution-key origin authority mismatch", dispatch.ID, execution.OperationID)
 			}
 			if len(resumeBindingIndexes) != 1 {
@@ -608,7 +608,7 @@ func runtimeGovernanceBindingResumesDispatch(binding RuntimeOperationGovernanceB
 		return false
 	}
 	source := history[sourceIndex].dispatch
-	if source.CandidateHash != dispatch.CandidateHash || stableRuntimeValidationRecipeSnapshotHash(source.ValidationRecipes) != stableRuntimeValidationRecipeSnapshotHash(dispatch.ValidationRecipes) {
+	if source.CandidateHash != dispatch.CandidateHash || StableRuntimeValidationRecipeSnapshotHash(source.ValidationRecipes) != StableRuntimeValidationRecipeSnapshotHash(dispatch.ValidationRecipes) {
 		return false
 	}
 	sourceExecution, found := runtimeDispatchExecutionForOperation(source, binding.OperationID)
@@ -642,7 +642,7 @@ func runtimeGovernanceCompletedSiblingCloneMatches(binding RuntimeOperationGover
 	}
 	source := history[sourceIndex].dispatch
 	if source.CandidateHash != current.CandidateHash ||
-		stableRuntimeValidationRecipeSnapshotHash(source.ValidationRecipes) != stableRuntimeValidationRecipeSnapshotHash(current.ValidationRecipes) ||
+		StableRuntimeValidationRecipeSnapshotHash(source.ValidationRecipes) != StableRuntimeValidationRecipeSnapshotHash(current.ValidationRecipes) ||
 		!containsString(source.CompletedOperationIDs, execution.OperationID) {
 		return false
 	}
@@ -803,27 +803,63 @@ func ValidateRuntimeOperationGovernanceGrantLineage(bindings []RuntimeOperationG
 
 func normalizedRuntimeGovernanceEvidenceFact(raw EvidenceFact) (EvidenceFact, bool) {
 	values := normalizeEvidenceFacts([]EvidenceFact{raw})
-	if len(values) != 1 {
+	if len(values) != 1 || !reflect.DeepEqual(raw, values[0]) {
 		return EvidenceFact{}, false
 	}
 	return values[0], true
 }
 
+// RuntimeGovernanceEvidenceFactForResolution is the sole canonical governance
+// evidence projection. Revision is supplied by the Orchestrator's global
+// evidence ledger; every other EvidenceFact field is determined here so a
+// governance result cannot acquire operation or coverage credit by persistence
+// mutation.
+func RuntimeGovernanceEvidenceFactForResolution(resolution RuntimeGovernanceResolution, revision string) (EvidenceFact, error) {
+	resolution = resolution.Normalized()
+	revision = strings.TrimSpace(revision)
+	if err := resolution.Validate(); err != nil {
+		return EvidenceFact{}, err
+	}
+	if revision == "" {
+		return EvidenceFact{}, fmt.Errorf("runtime governance evidence requires revision")
+	}
+	fact := EvidenceFact{
+		ID:                  common.EvidenceRecordID(resolution.EventID()),
+		Kind:                EvidenceKindGovernance,
+		SubjectRef:          resolution.SubjectRef,
+		SourceRef:           "governance-resolution/" + string(resolution.ResolutionID),
+		AuthoritySnapshotID: resolution.AuthoritySnapshotID,
+		DispatchID:          resolution.DispatchID,
+		Revision:            revision,
+		Summary:             resolution.Summary,
+		ContentHash:         StableRuntimeGovernanceResolutionHash(resolution),
+		EvidenceRefs:        append([]string(nil), resolution.EvidenceRefs...),
+	}
+	if resolution.Outcome == RuntimeGovernanceResolutionOutcomeFail {
+		fact.FailureClass = FailureClassGovernanceRejected
+		fact.FailureMessage = resolution.Summary
+	}
+	return fact, nil
+}
+
+// RuntimeGovernanceEvidenceFactMatchesResolution compares the complete raw
+// canonical fact. In particular OperationID, target/binding/CWI credit,
+// validation observations and quality metadata must remain their zero values.
+func RuntimeGovernanceEvidenceFactMatchesResolution(fact EvidenceFact, resolution RuntimeGovernanceResolution) bool {
+	expected, err := RuntimeGovernanceEvidenceFactForResolution(resolution, fact.Revision)
+	return err == nil && reflect.DeepEqual(fact, expected)
+}
+
 func runtimeGovernanceEvidenceMatchesResolution(fact EvidenceFact, resolution RuntimeGovernanceResolutionRecord) bool {
 	resolution = resolution.Normalized()
-	wantEvidenceID := common.EvidenceRecordID("governance-resolution:" + string(resolution.ResolutionID) + ":" + resolution.AuthoritySnapshotID)
-	wantSource := "governance-resolution/" + string(resolution.ResolutionID)
-	return fact.ID == wantEvidenceID && fact.Kind == EvidenceKindGovernance && fact.SubjectRef == resolution.SubjectRef && fact.SourceRef == wantSource &&
-		fact.AuthoritySnapshotID == resolution.AuthoritySnapshotID && fact.DispatchID == resolution.DispatchID && fact.FailureClass == "" &&
-		fact.FailureCode == "" && fact.FailureSignature == "" && fact.FailureMessage == "" && fact.Summary == resolution.Summary &&
-		fact.ContentHash == resolution.ResolutionHash && sameStrings(fact.EvidenceRefs, resolution.EvidenceRefs)
+	return resolution.Outcome == RuntimeGovernanceResolutionOutcomeContinue &&
+		RuntimeGovernanceEvidenceFactMatchesResolution(fact, resolution.Resolution())
 }
 
 func runtimeGovernanceRejectedEvidenceMatchesResolution(fact EvidenceFact, resolution RuntimeGovernanceResolutionRecord) bool {
 	resolution = resolution.Normalized()
-	return runtimeGovernanceEvidenceHasResolutionIdentity(fact, resolution) && fact.FailureClass == FailureClassGovernanceRejected &&
-		fact.FailureCode == "" && fact.FailureSignature == "" && fact.FailureMessage == resolution.Summary &&
-		fact.Summary == resolution.Summary && fact.ContentHash == resolution.ResolutionHash && sameStrings(fact.EvidenceRefs, resolution.EvidenceRefs)
+	return resolution.Outcome == RuntimeGovernanceResolutionOutcomeFail &&
+		RuntimeGovernanceEvidenceFactMatchesResolution(fact, resolution.Resolution())
 }
 
 func runtimeGovernanceEvidenceHasResolutionIdentity(fact EvidenceFact, resolution RuntimeGovernanceResolutionRecord) bool {
@@ -838,7 +874,8 @@ func sameRuntimeOperationExecutionRecord(left, right RuntimeOperationExecutionRe
 	left = left.Normalized()
 	right = right.Normalized()
 	if !sameRuntimeOperationExecutionImmutableAuthority(left, right) || left.State != right.State || left.Fence != right.Fence || left.OwnerReceiptRef != right.OwnerReceiptRef ||
-		left.OwnerReceiptHash != right.OwnerReceiptHash || left.ClaimedAt != right.ClaimedAt {
+		left.OwnerReceiptHash != right.OwnerReceiptHash || left.EvidenceFactID != right.EvidenceFactID ||
+		left.EvidenceFactHash != right.EvidenceFactHash || left.ClaimedAt != right.ClaimedAt {
 		return false
 	}
 	return true

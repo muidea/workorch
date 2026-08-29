@@ -226,6 +226,15 @@ func (c *candidateDispatchComponent) commitPersistedOperationReceiptEvidence(ctx
 	if !found {
 		return EvidenceCommitResult{}, fmt.Errorf("operation %q has no sealed execution record", operation.ID)
 	}
+	// The capability response may be the pre-CAS receipt shape (for example,
+	// before Runtime binds its execution fence). Evidence identity and owner
+	// diagnostic authority must instead come from the exact receipt already
+	// persisted by ExecutionKey+Fence in this aggregate.
+	persisted, found := runtimecontract.RuntimeOperationReceiptForExecutionKeyFence(aggregate.OperationReceipts, execution.ExecutionKey, execution.Fence)
+	if !found || persisted.OperationID != operation.ID {
+		return EvidenceCommitResult{}, fmt.Errorf("operation %q has no exact persisted owner receipt", operation.ID)
+	}
+	receipt = persisted
 	status, failure, err := runtimeOperationReceiptEvidenceJudgment(aggregate.Decision, execution, operation, receipt)
 	if err != nil {
 		return EvidenceCommitResult{}, err

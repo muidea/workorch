@@ -31,7 +31,7 @@ func mapRuntimeProgress(state runtimecontract.RuntimeStateRecord) projectioncont
 	acceptedValidation := 0
 	rejected := 0
 	for _, evidence := range facts.Evidence.Accepted {
-		if runtimecontract.EvidenceAppliesToCurrentFocus(facts, evidence) {
+		if runtimecontract.EvidenceBelongsToCurrentFocusForDiagnosticLineage(facts, evidence) {
 			accepted++
 			if evidence.Kind == runtimecontract.EvidenceKindValidation {
 				acceptedValidation++
@@ -39,7 +39,7 @@ func mapRuntimeProgress(state runtimecontract.RuntimeStateRecord) projectioncont
 		}
 	}
 	for _, evidence := range facts.Evidence.Rejected {
-		if runtimecontract.EvidenceAppliesToCurrentFocus(facts, evidence) {
+		if runtimecontract.EvidenceBelongsToCurrentFocusForDiagnosticLineage(facts, evidence) {
 			rejected++
 		}
 	}

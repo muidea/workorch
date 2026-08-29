@@ -28,6 +28,20 @@ func TestRuntimeRepairSurfaceObservationIsFactOnlyAndBounded(t *testing.T) {
 	if err := invalid.Validate(); err == nil {
 		t.Fatal("observation accepted candidate outside sealed validation scope")
 	}
+	invalid = confirmation
+	invalid.OwnerModuleID = RuntimeModuleMCP
+	if err := invalid.Validate(); err == nil {
+		t.Fatal("repair surface confirmation accepted a non-File owner")
+	}
+	overflow := observation
+	for index := len(overflow.CandidateTargetRefs); index <= RuntimeValidationFailureObservationMaxCandidateTargetRefs; index++ {
+		ref := string(rune('c'+index)) + ".go"
+		overflow.CandidateTargetRefs = append(overflow.CandidateTargetRefs, ref)
+		overflow.ValidationScopeTargetRefs = append(overflow.ValidationScopeTargetRefs, ref)
+	}
+	if err := overflow.Validate(); err == nil {
+		t.Fatal("validation failure observation accepted an over-bounded candidate set")
+	}
 }
 
 func TestRuntimeRepairSurfaceConfirmationRecordProvidesTypedReplayFence(t *testing.T) {
@@ -69,5 +83,44 @@ func TestRuntimeRepairSurfaceConfirmationRecordProvidesTypedReplayFence(t *testi
 	mutated.Signature = StableRuntimeRepairSurfaceConfirmationHash(mutated.Confirmation)
 	if err := mutated.Validate(); err == nil {
 		t.Fatal("mutated record unexpectedly retained a valid identity signature")
+	}
+}
+
+func TestRuntimeRepairSurfaceConfirmationSequenceEndsAtTerminalDisposition(t *testing.T) {
+	observation := RuntimeValidationFailureObservation{
+		WorkspaceID: "ws", RunID: "run", AuthoritySnapshotID: "authority", DispatchID: "dispatch", OperationID: "validate",
+		FailureSignature: "build-failure", TargetRole: "implementation", DiagnosticClass: ValidationDiagnosticBuildFailed,
+		CandidateTargetRefs: []string{"main.go"}, ValidationScopeTargetRefs: []string{"main.go"}, DiagnosticHash: strings.Repeat("c", 64),
+	}
+	makeRecord := func(disposition RuntimeRepairSurfaceDisposition, revision string) RuntimeRepairSurfaceConfirmationRecord {
+		value := RuntimeRepairSurfaceConfirmation{
+			Observation: observation, OwnerModuleID: RuntimeModuleFile, SubjectRef: "workspace_deliverable",
+			Disposition: disposition, ObservedRevision: revision,
+		}
+		if disposition == RuntimeRepairSurfaceConfirmed {
+			value.ConfirmedTargetRefs = []string{"main.go"}
+		}
+		record, err := NewRuntimeRepairSurfaceConfirmationRecord(value)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return record
+	}
+	staleV1 := makeRecord(RuntimeRepairSurfaceStale, "tree-v1")
+	staleV2 := makeRecord(RuntimeRepairSurfaceStale, "tree-v2")
+	confirmedV3 := makeRecord(RuntimeRepairSurfaceConfirmed, "tree-v3")
+	if err := ValidateRuntimeRepairSurfaceConfirmationRecords([]RuntimeRepairSurfaceConfirmationRecord{staleV1, staleV2, confirmedV3}); err != nil {
+		t.Fatalf("stale refresh sequence with one terminal response: %v", err)
+	}
+	late := makeRecord(RuntimeRepairSurfaceRejected, "tree-v4")
+	if err := ValidateRuntimeRepairSurfaceConfirmationRecords([]RuntimeRepairSurfaceConfirmationRecord{staleV1, confirmedV3, late}); err == nil || !strings.Contains(err.Error(), "follows terminal response") {
+		t.Fatalf("post-terminal confirmation sequence error = %v", err)
+	}
+	driftedSubject := staleV2.Clone()
+	driftedSubject.Confirmation.SubjectRef = "another_subject"
+	driftedSubject.Signature = StableRuntimeRepairSurfaceConfirmationHash(driftedSubject.Confirmation)
+	driftedSubject.IdentitySignature = StableRuntimeRepairSurfaceConfirmationIdentityHash(driftedSubject.Confirmation)
+	if err := ValidateRuntimeRepairSurfaceConfirmationRecords([]RuntimeRepairSurfaceConfirmationRecord{staleV1, driftedSubject}); err == nil || !strings.Contains(err.Error(), "changes subject") {
+		t.Fatalf("confirmation subject drift error = %v", err)
 	}
 }

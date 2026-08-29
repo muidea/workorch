@@ -436,26 +436,11 @@ func runtimeTestProjectSealedSemanticFacts(t *testing.T, facts runtimecontract.R
 		if _, duplicate := sealedByID[coverageID]; duplicate {
 			t.Fatalf("test semantic projection duplicates coverage %q", coverageID)
 		}
-		if source, found := sourceByCoverage[coverageID]; found {
-			// Direct reducer/candidate fixtures may deliberately declare that target
-			// grounding is outside their subject. Keep that immutable test contract;
-			// Run-backed fixtures that exercise owner grounding declare it true and
-			// still pass through the production prerequisite path.
-			focus.RequireTargetGrounding = source.RequireTargetGrounding
-		}
-		if source, found := sourceByCoverage[coverageID]; found && focus.TargetSelectorRef != "" && source.TargetSelectorRef == focus.TargetSelectorRef {
-			// Semantic binding owns the executable proof. The original focus still
-			// owns profile-declared target discovery context, which remains a
-			// prerequisite input rather than a binding or credit authority.
-			focus.TargetRole = source.TargetRole
-			focus.TargetDiscoverySources = append([]string(nil), source.TargetDiscoverySources...)
-			focus.TargetSelectorRef = source.TargetSelectorRef
-			focus.TargetSelectorOwnerRef = source.TargetSelectorOwnerRef
-			focus.TargetSelectorSubjectRef = source.TargetSelectorSubjectRef
-			focus.TargetSelectorCandidateRefs = append([]string(nil), source.TargetSelectorCandidateRefs...)
-			focus.RequireTargetGrounding = source.RequireTargetGrounding
-			focus = focus.Normalized()
-		}
+		// CompileRuntimeSemanticBindings already projects the immutable
+		// Definition obligation onto the semantic focus. Do not overlay the
+		// pre-seal cursor here: that would create a focus which has no exact
+		// compiler/ledger preimage and could therefore pass tests in a shape that
+		// production recovery must reject.
 		index, found := coverageIndex[coverageID]
 		if !found {
 			t.Fatalf("test semantic focus references unknown coverage %q", coverageID)
@@ -743,6 +728,37 @@ func startRuntimeCandidateFileEditAdmissionOwners(t *testing.T, hub magicevent.H
 	t.Cleanup(func() { probeObserver.Unsubscribe(fileevents.TopicProbeRuntimeOperationFeasibility) })
 }
 
+// runtimeTestPersistBootstrappedPreSemanticFixture persists only the immutable
+// startup aggregate. It is for prerequisite/semantic-drive tests whose subject
+// would be bypassed by a pre-sealed synthetic semantic ledger.
+func runtimeTestPersistBootstrappedPreSemanticFixture(
+	t *testing.T,
+	ctx context.Context,
+	hub magicevent.Hub,
+	workspaceID common.WorkspaceID,
+	runID common.RunID,
+	bootstrap runtimecontract.RuntimeBootstrap,
+) runtime.RuntimeAggregate {
+	t.Helper()
+	if hub == nil {
+		t.Fatal("runtime test pre-semantic fixture hub is nil")
+	}
+	facts, err := bootstrap.InitialFacts(workspaceID, runID)
+	if err != nil {
+		t.Fatalf("build runtime pre-semantic fixture facts: %v", err)
+	}
+	repository := runtimeStateRepository{hub: hub}
+	owner := newTestBiz(newRuntimeTestOwner(), hub, nil)
+	if err := owner.ConfigureRuntimeRepository(repository); err != nil {
+		t.Fatalf("configure runtime pre-semantic fixture repository: %v", err)
+	}
+	initialized, err := owner.InitializeRuntime(ctx, facts, bootstrap.Definition, bootstrap.Requirements)
+	if err != nil {
+		t.Fatalf("initialize runtime pre-semantic fixture: %v", err)
+	}
+	return initialized
+}
+
 // runtimeTestPersistBootstrappedOperationFixture prepares a Run-backed test
 // that starts from a RuntimeBootstrap but only exercises the post-semantic
 // operation/recovery mainline. Fresh semantic-drive tests must not use it.
@@ -767,7 +783,20 @@ func runtimeTestPersistBootstrappedOperationFixture(
 	if err := owner.ConfigureRuntimeRepository(repository); err != nil {
 		t.Fatalf("configure runtime operation fixture repository: %v", err)
 	}
-	return runtimeTestInitializeOperationFixture(t, ctx, owner, repository, facts, bootstrap.Definition, bootstrap.Requirements)
+	initialized, err := owner.InitializeRuntime(ctx, facts, bootstrap.Definition, bootstrap.Requirements)
+	if err != nil {
+		t.Fatalf("initialize bootstrapped runtime operation fixture: %v", err)
+	}
+	// Production seals semantic authority only after capability owners have
+	// committed their pre-semantic facts. In particular, capability-state and
+	// operation-admissibility snapshots must be the exact inputs later copied
+	// into the semantic manifest; a synthetic catalog cannot be replaced after
+	// seal without invalidating restart authority.
+	prepared, err := owner.prepareRuntimePrerequisites(ctx, initialized)
+	if err != nil {
+		t.Fatalf("prepare bootstrapped runtime operation fixture prerequisites: %v", err)
+	}
+	return runtimeTestPersistSealedSemanticAuthority(t, ctx, repository, prepared)
 }
 
 // Most orchestrator drive fixtures exercise the post-semantic operations
@@ -804,7 +833,7 @@ func runtimeTestSealedSemanticPlanning(t *testing.T, aggregate runtime.RuntimeAg
 		t.Fatal("test semantic fixture has no CWI eligible for planning")
 	}
 	fixtureSpecs := runtimeTestSemanticFixtureSpecs(t, aggregate, eligible)
-	catalogs := runtimeTestSemanticFixtureCatalogs(t, fixtureSpecs)
+	catalogs := runtimeTestSemanticFixtureCatalogs(t, aggregate.Facts.Resources.OperationAdmissibilities, fixtureSpecs)
 	coverageItems := runtimeTestSemanticFixtureCoverageItems(t, aggregate.Facts.DefinitionSeed, eligible)
 	operationContractRevision := aggregate.Facts.Activation.ExecutionContract.OperationContractRevision
 	if operationContractRevision == "" {
@@ -944,6 +973,13 @@ func runtimeTestSealedSemanticPlanning(t *testing.T, aggregate runtime.RuntimeAg
 	ledger.CoverageOrderDocument = &orderDocument
 	ledger.Batches = []runtimecontract.RuntimeSemanticPlanBatch{batch}
 	ledger.BatchDocuments = []runtimecontract.RuntimeSemanticPlanDocument{document}
+	batchFeasibility := runtimecontract.RuntimeSemanticPlanBatchFeasibilityResult{
+		BatchID: batch.BatchID, BatchHash: batch.Hash,
+		DocumentHash:  runtimecontract.StableRuntimeSemanticPlanDocumentHash(document),
+		Feasibilities: append([]runtimecontract.RuntimeSemanticProofFeasibility(nil), feasibilities...),
+	}
+	batchFeasibility.Hash = runtimecontract.StableRuntimeSemanticPlanBatchFeasibilityResultHash(batchFeasibility)
+	ledger.BatchFeasibilityResults = []runtimecontract.RuntimeSemanticPlanBatchFeasibilityResult{batchFeasibility}
 	ledger.CompletedBatchIDs = []string{batch.BatchID}
 	ledger.NextBatchSequence = 1
 	ledger.PendingCoverageIDs = append([]common.CoverageWorkItemID(nil), batch.PendingCoverageWorkItemIDs...)
@@ -1049,8 +1085,11 @@ func runtimeTestSemanticProofObligations(t *testing.T, facts runtimecontract.Run
 		}
 		obligation := runtimecontract.RuntimeSemanticProofObligation{
 			CoverageWorkItemID: item.ID, RequiredEvidenceKinds: runtimeTestNormalizeStrings(evidenceKinds),
-			DeclarationTargetRole: source.TargetRole, DeclarationTargetDiscoverySources: append([]string(nil), source.TargetDiscoverySources...),
+			DeclarationEvidenceRole: source.EvidenceRole,
+			DeclarationTargetRole:   source.TargetRole, DeclarationTargetDiscoverySources: append([]string(nil), source.TargetDiscoverySources...),
 			RequireTargetGrounding: source.RequireTargetGrounding, RequireAssessment: source.RequireAssessment,
+			RequireDirectEvidence: source.RequireDirectEvidence, RequireClaimEvidence: source.RequireClaimEvidence,
+			RequireExecutableBehaviorEvidence: source.RequireExecutableBehaviorEvidence, RequireCoverageTargets: source.RequireCoverageTargets,
 			RequiredOwnerFacts:    append([]runtimecontract.RuntimeOwnerFactRequirement(nil), source.RequiredOwnerFacts...),
 			OwnerFactConvergences: runtimecontract.CloneRuntimeOwnerFactConvergences(source.OwnerFactConvergences),
 			MetricConstraints:     append([]string(nil), source.MetricConstraints...), ArtifactRefs: append([]string(nil), source.ArtifactRefs...),
@@ -1211,7 +1250,7 @@ func runtimeTestSemanticFixtureSpecs(t *testing.T, aggregate runtime.RuntimeAggr
 				t.Fatalf("test semantic fixture operation %q has no descriptor", kind)
 			}
 			variantID := runtimeTestSemanticFixtureVariant(t, aggregate, source, kind)
-			target, feasibilityRefs, selectorRefs, constraintRefs, catalogTargets := runtimeTestSemanticFixtureTarget(aggregate.Facts, source, coverageID, evidenceKind, kind)
+			target, feasibilityRefs, selectorRefs, constraintRefs, catalogTargets := runtimeTestSemanticFixtureTarget(t, aggregate.Facts, source, coverageID, evidenceKind, kind, variantID)
 			proposal := runtimecontract.RuntimeSemanticProofProposal{
 				CoverageWorkItemID: coverageID,
 				OwnerModuleID:      descriptor.OwnerModuleID,
@@ -1244,6 +1283,14 @@ func runtimeTestSemanticFixtureSpecs(t *testing.T, aggregate runtime.RuntimeAggr
 				}
 				checks = append([]string(nil), source.RequiredCheckRefs...)
 				if len(checks) == 0 {
+					checks = runtimeTestSemanticFixtureCatalogChecks(
+						aggregate.Facts.Resources.OperationAdmissibilities,
+						kind,
+						variantID,
+						proposal.ValidationRecipeID,
+					)
+				}
+				if len(checks) == 0 && len(aggregate.Facts.Resources.OperationAdmissibilities) == 0 {
 					checks = []string{proposal.ValidationRecipeID}
 				}
 				proposal.RequiredCheckRefs = append([]string(nil), checks...)
@@ -1261,6 +1308,23 @@ func runtimeTestSemanticFixtureSpecs(t *testing.T, aggregate runtime.RuntimeAggr
 		t.Fatal("test semantic fixture has no proof proposals")
 	}
 	return specs
+}
+
+func runtimeTestSemanticFixtureCatalogChecks(
+	catalogs []runtimecontract.RuntimeOperationAdmissibility,
+	operationKind, variantID, recipeID string,
+) []string {
+	catalog, found := runtimeTestSemanticFixtureCurrentCatalog(catalogs, operationKind, variantID)
+	if !found {
+		return nil
+	}
+	for _, surface := range catalog.Normalized().ValidationSurfaces {
+		surface = surface.Normalized()
+		if surface.ID == recipeID && surface.OperationKind == runtimecontract.CanonicalRuntimeBlockKind(operationKind) {
+			return append([]string(nil), surface.CheckRefs...)
+		}
+	}
+	return nil
 }
 
 func runtimeTestSemanticFixtureAcquisitionSpec(
@@ -1465,16 +1529,31 @@ func runtimeTestSemanticFixtureVariant(t *testing.T, aggregate runtime.RuntimeAg
 }
 
 func runtimeTestSemanticFixtureTarget(
+	t *testing.T,
 	facts runtimecontract.RuntimeFacts,
 	source runtimecontract.CoverageFocus,
 	coverageID common.CoverageWorkItemID,
 	evidenceKind string,
 	operationKind string,
+	variantID string,
 ) (runtimecontract.RuntimeOperationTargetAuthorization, []string, []string, []string, []string) {
+	t.Helper()
 	source = source.Normalized()
 	targets := append([]string(nil), source.TargetRefs...)
 	if len(targets) == 0 && facts.Resources.TargetSelection != nil {
 		targets = append(targets, facts.Resources.TargetSelection.TargetRefs...)
+	}
+	if catalog, found := runtimeTestSemanticFixtureCurrentCatalog(facts.Resources.OperationAdmissibilities, operationKind, variantID); found {
+		// A bounded multi-proof CWI must share one target surface across owners.
+		// The pre-seal File catalog is the owner-grounded workspace inventory and
+		// Shell receives that same bounded set when it publishes its validation
+		// surface. Use the exact current catalog targets instead of two unrelated
+		// owner selectors; no path is invented by the fixture.
+		if len(targets) == 0 && len(source.ProspectiveTargetRefs) == 0 && len(source.TargetSelectorCandidateRefs) == 0 &&
+			len(source.RequiredEvidenceKinds) > 1 && len(catalog.TargetRefs) != 0 {
+			targets = append([]string(nil), catalog.TargetRefs...)
+		}
+		return runtimeTestSemanticFixtureTargetFromCatalog(t, source, coverageID, evidenceKind, operationKind, variantID, targets, catalog)
 	}
 	selector := source.TargetSelectorRef
 	if selector == "" {
@@ -1531,14 +1610,142 @@ func runtimeTestSemanticFixtureTarget(
 	}, targets, nil, nil, targets
 }
 
-func runtimeTestSemanticFixtureCatalogs(t *testing.T, specs []runtimeTestSemanticFixtureSpec) []runtimecontract.RuntimeOperationAdmissibility {
+// runtimeTestSemanticFixtureCurrentCatalog returns the already persisted owner
+// catalog for a proposal. An operation-ready fixture must never replace this
+// snapshot with a synthetic selector after acquisition; that would sever the
+// semantic binding from the exact owner observation used by recovery.
+func runtimeTestSemanticFixtureCurrentCatalog(values []runtimecontract.RuntimeOperationAdmissibility, operationKind, variantID string) (runtimecontract.RuntimeOperationAdmissibility, bool) {
+	descriptor, found := runtimecontract.RuntimeOperationDescriptorForKind(operationKind)
+	if !found {
+		return runtimecontract.RuntimeOperationAdmissibility{}, false
+	}
+	var match runtimecontract.RuntimeOperationAdmissibility
+	matched := false
+	for _, value := range runtimecontract.NormalizeRuntimeOperationAdmissibilities(values) {
+		value = value.Normalized()
+		if value.OwnerModuleID != descriptor.OwnerModuleID {
+			continue
+		}
+		if _, factFound, err := runtimecontract.RuntimeOperationAdmissibilityVariantForProposal(value, operationKind, variantID); err != nil || !factFound {
+			// Non-discriminated kinds legitimately use the catalog-level fact.
+			if contract, ok := runtimecontract.RuntimeOperationContractForKind(operationKind); ok && len(contract.Variants) != 0 {
+				continue
+			}
+			kindFound := false
+			for _, kind := range value.OperationKinds {
+				if runtimecontract.CanonicalRuntimeBlockKind(kind) == runtimecontract.CanonicalRuntimeBlockKind(operationKind) {
+					kindFound = true
+					break
+				}
+			}
+			if !kindFound {
+				continue
+			}
+		}
+		// Mirror CompileRuntimeSemanticPlanManifest: when distinct prerequisite
+		// identities publish the same owner, the normalized last owner snapshot is
+		// the exact manifest input. Do not merge those snapshots in test code.
+		match, matched = value, true
+	}
+	return match, matched
+}
+
+func runtimeTestSemanticFixtureTargetFromCatalog(
+	t *testing.T,
+	source runtimecontract.CoverageFocus,
+	coverageID common.CoverageWorkItemID,
+	evidenceKind, operationKind, variantID string,
+	targets []string,
+	catalog runtimecontract.RuntimeOperationAdmissibility,
+) (runtimecontract.RuntimeOperationTargetAuthorization, []string, []string, []string, []string) {
 	t.Helper()
+	catalog = catalog.Normalized()
+	allows := func(policy runtimecontract.RuntimeOperationTargetPolicy) (bool, []string, []string) {
+		allowed, selectors, constraints, _, err := runtimecontract.RuntimeOperationAdmissibilityAllowsTargetPolicy(
+			catalog, operationKind, variantID, policy,
+		)
+		if err != nil {
+			t.Fatalf("test semantic owner catalog %q policy %q: %v", catalog.OwnerModuleID, policy, err)
+		}
+		return allowed, selectors, constraints
+	}
+	containsAll := func(haystack, needles []string) bool {
+		for _, needle := range needles {
+			if !runtimeTestStringContains(haystack, needle) {
+				return false
+			}
+		}
+		return true
+	}
+
+	prospective := append([]string(nil), source.ProspectiveTargetRefs...)
+	if len(prospective) == 0 && len(source.TargetSelectorCandidateRefs) != 0 {
+		for _, candidate := range source.TargetSelectorCandidateRefs {
+			if !runtimeTestStringContains(catalog.TargetRefs, candidate) {
+				prospective = append(prospective, candidate)
+			}
+		}
+	}
+	if len(prospective) != 0 && evidenceKind == runtimecontract.EvidenceKindStateChange {
+		allowed, selectors, constraints := allows(runtimecontract.RuntimeOperationTargetPolicyProspectiveOwnerTarget)
+		if !allowed || len(selectors) == 0 || len(constraints) == 0 {
+			t.Fatalf("test semantic coverage %q prospective target is outside persisted owner catalog %q", coverageID, catalog.SnapshotID)
+		}
+		// Definition.TargetSelectorRef is the immutable discovery declaration;
+		// the operation authorization selector is a distinct owner-published
+		// vocabulary. The semantic proposal must use the latter verbatim.
+		selectorRefs := append([]string(nil), selectors...)
+		return runtimecontract.RuntimeOperationTargetAuthorization{
+			Policy:            runtimecontract.RuntimeOperationTargetPolicyProspectiveOwnerTarget,
+			OwnerSelectorRefs: selectorRefs, ProspectiveConstraintRefs: constraints,
+			ProspectiveTargetRefs: prospective,
+		}, prospective, selectorRefs, constraints, append([]string(nil), catalog.TargetRefs...)
+	}
+	if len(targets) != 0 {
+		allowed, _, _ := allows(runtimecontract.RuntimeOperationTargetPolicyExactTarget)
+		if !allowed || !containsAll(catalog.TargetRefs, targets) {
+			t.Fatalf("test semantic coverage %q exact targets %v are outside persisted owner catalog %q targets=%v", coverageID, targets, catalog.SnapshotID, catalog.TargetRefs)
+		}
+		return runtimecontract.RuntimeOperationTargetAuthorization{
+			Policy: runtimecontract.RuntimeOperationTargetPolicyExactTarget, ExactTargetRefs: targets,
+		}, targets, nil, nil, append([]string(nil), catalog.TargetRefs...)
+	}
+	allowed, selectors, _ := allows(runtimecontract.RuntimeOperationTargetPolicyExistingOwnerScope)
+	if !allowed {
+		t.Fatalf("test semantic coverage %q has no declaration-compatible target policy in persisted owner catalog %q", coverageID, catalog.SnapshotID)
+	}
+	selectorRefs := append([]string(nil), selectors...)
+	ownerScopeTargets := append([]string(nil), catalog.TargetRefs...)
+	if len(ownerScopeTargets) == 0 && len(selectorRefs) == 0 {
+		t.Fatalf("test semantic coverage %q persisted owner catalog %q has no bounded existing scope", coverageID, catalog.SnapshotID)
+	}
+	return runtimecontract.RuntimeOperationTargetAuthorization{
+		Policy:               runtimecontract.RuntimeOperationTargetPolicyExistingOwnerScope,
+		OwnerScopeTargetRefs: ownerScopeTargets, OwnerSelectorRefs: selectorRefs,
+	}, ownerScopeTargets, selectorRefs, nil, ownerScopeTargets
+}
+
+func runtimeTestSemanticFixtureCatalogs(t *testing.T, current []runtimecontract.RuntimeOperationAdmissibility, specs []runtimeTestSemanticFixtureSpec) []runtimecontract.RuntimeOperationAdmissibility {
+	t.Helper()
+	currentByOwner := make(map[string]runtimecontract.RuntimeOperationAdmissibility, len(current))
+	for _, catalog := range runtimecontract.NormalizeRuntimeOperationAdmissibilities(current) {
+		catalog = catalog.Normalized()
+		currentByOwner[catalog.OwnerModuleID] = catalog
+	}
 	byOwner := make(map[string]*runtimecontract.RuntimeOperationAdmissibility, len(specs))
 	order := make([]string, 0, len(specs))
 	variantIndex := make(map[string]map[string]int, len(specs))
 	validationSurfaceIndex := make(map[string]map[string]int, len(specs))
 	for _, spec := range specs {
 		proposal := spec.proposal.Normalized()
+		if currentCatalog, found := currentByOwner[proposal.OwnerModuleID]; found {
+			if _, alreadyAdded := byOwner[proposal.OwnerModuleID]; !alreadyAdded {
+				catalog := currentCatalog.Normalized()
+				byOwner[proposal.OwnerModuleID] = &catalog
+				order = append(order, proposal.OwnerModuleID)
+			}
+			continue
+		}
 		catalog := byOwner[proposal.OwnerModuleID]
 		if catalog == nil {
 			catalog = &runtimecontract.RuntimeOperationAdmissibility{
@@ -2067,6 +2274,26 @@ func runtimeTestBootstrapWithBindings(bootstrap runtimecontract.RuntimeBootstrap
 		if bootstrap.CoverageItems[index].SourceID == "" {
 			bootstrap.CoverageItems[index].SourceID = string(bootstrap.CoverageItems[index].ID)
 		}
+		if bootstrap.CoverageItems[index].TargetText == "" {
+			bootstrap.CoverageItems[index].TargetText = "verify " + string(bootstrap.CoverageItems[index].ID)
+		}
+	}
+	itemsByID := make(map[common.CoverageWorkItemID]runtimecontract.RuntimeCoverageItem, len(bootstrap.CoverageItems))
+	for _, item := range bootstrap.CoverageItems {
+		itemsByID[item.ID] = item
+	}
+	for index := range bootstrap.DefinitionFocuses {
+		if len(bootstrap.DefinitionFocuses[index].CoverageWorkItemIDs) != 1 {
+			continue
+		}
+		item, found := itemsByID[bootstrap.DefinitionFocuses[index].CoverageWorkItemIDs[0]]
+		if !found {
+			continue
+		}
+		bootstrap.DefinitionFocuses[index].SliceID = item.SliceID
+		bootstrap.DefinitionFocuses[index].AssessmentScope = item.SourceScope
+		bootstrap.DefinitionFocuses[index].AssessmentID = item.SourceID
+		bootstrap.DefinitionFocuses[index].AssessmentText = item.TargetText
 	}
 	seed, err := runtimecontract.CompileRuntimeDefinitionSeed(bootstrap.Definition, bootstrap.Activation, bootstrap.CoverageItems, bootstrap.Slices)
 	if err == nil {

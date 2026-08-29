@@ -4,11 +4,13 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	llmevents "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/events"
@@ -91,6 +93,14 @@ func (f runtimeMCPIntegrationRoundTripper) RoundTrip(request *http.Request) (*ht
 // delivery reuses the persisted receipt without another MCP call.
 func TestMCPOwnerObservedFailureTargetBindsThroughEventHubAndFileSnapshot(t *testing.T) {
 	ctx := context.Background()
+	targetSnapshotForRef := func(values []runtimecontract.TargetSnapshot, targetRef string) (runtimecontract.TargetSnapshot, bool) {
+		for _, value := range values {
+			if value.TargetRef == targetRef {
+				return value, true
+			}
+		}
+		return runtimecontract.TargetSnapshot{}, false
+	}
 	calls := 0
 	client := &http.Client{Transport: runtimeMCPIntegrationRoundTripper(func(request *http.Request) (*http.Response, error) {
 		calls++
@@ -119,7 +129,8 @@ func TestMCPOwnerObservedFailureTargetBindsThroughEventHubAndFileSnapshot(t *tes
 	hub := magicevent.NewHub(16)
 	t.Cleanup(func() { hub.Terminate(ctx) })
 	workspaceDirectory := t.TempDir()
-	if err := os.WriteFile(filepath.Join(workspaceDirectory, "implementation.go"), []byte("package fixture\n"), 0o644); err != nil {
+	initialImplementation := []byte("package fixture\n")
+	if err := os.WriteFile(filepath.Join(workspaceDirectory, "implementation.go"), initialImplementation, 0o644); err != nil {
 		t.Fatal(err)
 	}
 	fileOwner, err := filebiz.New(hub, nil)
@@ -130,6 +141,27 @@ func TestMCPOwnerObservedFailureTargetBindsThroughEventHubAndFileSnapshot(t *tes
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { fileOwner.Teardown(ctx) })
+	preSealSnapshotPrerequisite := runtimecontract.RuntimePrerequisite{
+		ID: "test-mcp-preseal-implementation-snapshot", Kind: runtimecontract.PrerequisiteKindTargetSnapshot,
+		Scope: runtimecontract.RuntimePrerequisiteScopeFocus, FocusID: "focus-1",
+		OwnerModuleID: runtimecontract.RuntimeModuleFile, SubjectRef: "implementation.go",
+	}
+	preSealSnapshotResult := hub.Send(magicevent.NewEventWithContext(
+		fileevents.TopicAcquireTargetSnapshot, runtimecontract.RuntimeModuleOrchestrator, orchestratorevents.PrerequisiteCommandDestination,
+		magicevent.NewHeader(), ctx, fileevents.AcquireTargetSnapshotCommand{
+			WorkspaceID: "ws-1", RunID: "run-1", AuthoritySnapshotID: "test-mcp-preseal-authority",
+			PrerequisiteID: preSealSnapshotPrerequisite.ID, WorkspaceDeliverableDirectory: workspaceDirectory,
+			TargetRef: preSealSnapshotPrerequisite.SubjectRef, MaxBytes: 16 * 1024,
+		},
+	))
+	preSealSnapshotData, preSealSnapshotErr := preSealSnapshotResult.Get()
+	if preSealSnapshotErr != nil {
+		t.Fatal(preSealSnapshotErr)
+	}
+	preSealSnapshot, ok := preSealSnapshotData.(fileevents.AcquireTargetSnapshotResult)
+	if !ok || !preSealSnapshot.Snapshot.Complete() || preSealSnapshot.Observation.ObservationID == "" {
+		t.Fatalf("pre-seal File target snapshot response = %#v", preSealSnapshotData)
+	}
 	mcpServer := &mcpmodel.Server{
 		ID: "mcp-observed-target", Name: "observed target", Transport: "http", Endpoint: "http://mcp-observed-target.test/runtime",
 		Enabled: true, AllowedTools: []string{"lookup.references"}, TimeoutMillis: 1000,
@@ -148,7 +180,25 @@ func TestMCPOwnerObservedFailureTargetBindsThroughEventHubAndFileSnapshot(t *tes
 	}
 	t.Cleanup(func() { owner.Teardown(ctx) })
 
-	aggregate := validationAggregate(t)
+	aggregate := validationAggregateWithPreparation(t, func(initial *RuntimeAggregate) {
+		// The semantic contract must authorize the same workspace target that the
+		// later owner diagnostic can nominate for repair. Keeping the default
+		// main.go binding would make implementation.go diagnostic-only by design.
+		initial.Facts.Focus.TargetRefs = []string{"implementation.go"}
+		initial.Facts.Resources.TargetSnapshots = []runtimecontract.TargetSnapshot{preSealSnapshot.Snapshot}
+		initial.Facts.Resources.PrerequisiteObservations = append(initial.Facts.Resources.PrerequisiteObservations, preSealSnapshot.Observation)
+		initial.Facts.Prerequisites.Satisfied = append(initial.Facts.Prerequisites.Satisfied, preSealSnapshotPrerequisite)
+		initial.Definition.CapabilityContract = []string{
+			runtimecontract.RuntimeBlockKindPatchApply,
+			runtimecontract.RuntimeBlockKindManagedValidationSession,
+			runtimecontract.StepKindMCPToolCall,
+		}
+		initial.Facts.Activation.MCPCapabilities = []runtimecontract.RuntimeMCPCapabilityContext{{
+			ID: "mcp-observed-target:tool:lookup.references", ServerID: "mcp-observed-target", Kind: "tool", OperationKind: runtimecontract.StepKindMCPToolCall, Name: "lookup.references", Enabled: true,
+			EffectScope: string(runtimecontract.RuntimeEffectNone), IdempotencyClass: string(runtimecontract.RuntimeOperationIdempotencySafeToReplay),
+		}}
+		initial.Facts.ConvergencePolicy.MaxCandidateContextItems = 4
+	})
 	aggregate.Facts.Resources.ProviderCeiling = &runtimecontract.ProviderCeiling{
 		Selection:                aggregate.Facts.Activation.ProviderSelection,
 		ContextWindowTokens:      128000,
@@ -159,38 +209,13 @@ func TestMCPOwnerObservedFailureTargetBindsThroughEventHubAndFileSnapshot(t *tes
 		CapabilityRevision:       "capability-1",
 		ConfigurationRevision:    "config-1",
 	}
-	aggregate.Facts.Capabilities.ValidationKinds = []string{runtimecontract.StepKindMCPToolCall}
-	aggregate.Facts.Activation.MCPCapabilities = []runtimecontract.RuntimeMCPCapabilityContext{{
-		ID: "mcp-observed-target:tool:lookup.references", ServerID: "mcp-observed-target", Kind: "tool", OperationKind: runtimecontract.StepKindMCPToolCall, Name: "lookup.references", Enabled: true,
-		EffectScope: string(runtimecontract.RuntimeEffectNone), IdempotencyClass: string(runtimecontract.RuntimeOperationIdempotencySafeToReplay),
-	}}
-	aggregate.Facts.Focus.TargetRefs = nil
-	aggregate.Facts.Focus.TargetRole = "implementation"
-	aggregate.Facts.Focus.RequireTargetGrounding = true
-	aggregate.Facts.Focus.RequireAssessment = true
-	aggregate.Facts.ConvergencePolicy.MaxCandidateContextItems = 4
-	aggregate.Facts.Focus.TargetDiscoverySources = []string{runtimecontract.RuntimeValidationDiscoverySourceWorkspaceManifest}
 	// This fixture exercises the non-crediting failure-target path. Its
 	// declaration deliberately reserves validation proof for managed Shell, so
 	// the later MCP owner fact may ground implementation.go without a generic
 	// MCP success acquiring CWI credit. The separate C12 MCP binding regression
 	// covers the explicit server/tool proof path.
-	runtimeTestEnsureCurrentFocusBindings(t, &aggregate)
-	binding := aggregate.Facts.Focus.CoverageEvidenceBindings[0]
-	proof, found := runtimecontract.CoverageEvidenceProofForKind(binding, runtimecontract.EvidenceKindValidation)
-	if !found {
-		t.Fatal("fixture binding has no validation proof")
-	}
-	proof.AllowedOperationKinds = []string{runtimecontract.RuntimeBlockKindManagedValidationSession}
-	for index := range binding.Proofs {
-		if binding.Proofs[index].EvidenceKind == runtimecontract.EvidenceKindValidation {
-			binding.Proofs[index] = proof
-		}
-	}
-	binding.Hash = runtimecontract.StableCoverageEvidenceBindingHash(binding)
-	aggregate.Facts.Focus.CoverageEvidenceBindings = []runtimecontract.CoverageEvidenceBinding{binding}
-	runtimeTestSynchronizeCanonicalCWILedger(t, &aggregate)
 	mcpCatalog := addObservedMCPOperationAdmissibilityFixture(t, ctx, hub, &aggregate, catalogRevision)
+	aggregate.Facts.Capabilities.ValidationKinds = append(aggregate.Facts.Capabilities.ValidationKinds, runtimecontract.StepKindMCPToolCall)
 	decision, err := runtimecontract.SealRuntimeDecision(aggregate.Facts, runtimecontract.RuntimeDecision{
 		State: runtimecontract.ConvergenceStateNeedValidation,
 		Focus: aggregate.Facts.Focus,
@@ -205,7 +230,6 @@ func TestMCPOwnerObservedFailureTargetBindsThroughEventHubAndFileSnapshot(t *tes
 		t.Fatal(err)
 	}
 	aggregate.Decision = decision
-	aggregate.Definition.CapabilityContract = []string{runtimecontract.StepKindMCPToolCall}
 	addObservedFileOperationAdmissibilityFixture(t, ctx, hub, &aggregate, workspaceDirectory)
 	decision, err = runtimecontract.SealRuntimeDecision(aggregate.Facts, runtimecontract.RuntimeDecision{
 		State: aggregate.Decision.State, Focus: aggregate.Decision.Focus, RequiredOutput: aggregate.Decision.RequiredOutput,
@@ -247,6 +271,8 @@ func TestMCPOwnerObservedFailureTargetBindsThroughEventHubAndFileSnapshot(t *tes
 	if err != nil {
 		t.Fatal(err)
 	}
+	assertMCPReceiptEvidenceDriftRejectedAtCommit(t, repository.aggregate, canonicalOperation)
+	var ownerCommittedReceiptAggregate RuntimeAggregate
 	receiptObserver := magicevent.NewSimpleObserver(orchestratorevents.CommandDestination, hub)
 	receiptObserver.Subscribe(orchestratorevents.TopicOrchestratorQueryRuntimeOperationReceipt, func(event magicevent.Event, result magicevent.Result) {
 		command := event.Data().(orchestratorevents.QueryRuntimeOperationReceiptCommand)
@@ -268,6 +294,7 @@ func TestMCPOwnerObservedFailureTargetBindsThroughEventHubAndFileSnapshot(t *tes
 			result.Set(nil, runtimeMagicFailure(commitErr))
 			return
 		}
+		ownerCommittedReceiptAggregate = cloneRuntimeAggregateForMCPProvenanceTest(t, next)
 		result.Set(orchestratorevents.CommitRuntimeOperationReceiptResult{Receipt: receipt, StateRevision: next.StateRevision}, nil)
 	})
 	t.Cleanup(func() {
@@ -284,55 +311,23 @@ func TestMCPOwnerObservedFailureTargetBindsThroughEventHubAndFileSnapshot(t *tes
 	}
 	if persisted.Facts.Resources.FailureTarget == nil || persisted.Facts.Resources.FailureTarget.TargetObservation == nil ||
 		len(persisted.Facts.Resources.FailureTarget.TargetRefs) != 1 || persisted.Facts.Resources.FailureTarget.TargetRefs[0] != "implementation.go" ||
-		persisted.Decision.State != runtimecontract.ConvergenceStateNeedPrerequisite {
-		t.Fatalf("controller did not CAS-bind observed target before prerequisite: %+v", persisted)
+		persisted.Decision.State != runtimecontract.ConvergenceStateNeedStateChange {
+		t.Fatalf("controller did not CAS-bind the pre-authorized observed target: %+v", persisted)
 	}
-	if len(persisted.Facts.Prerequisites.Pending) == 0 || calls != 1 || len(persisted.OperationReceipts) != 1 {
-		t.Fatalf("missing target snapshot prerequisite or unexpected MCP calls: pending=%+v calls=%d", persisted.Facts.Prerequisites.Pending, calls)
+	if len(persisted.Facts.Prerequisites.Pending) != 0 || calls != 1 ||
+		len(persisted.OperationReceipts) != len(ownerCommittedReceiptAggregate.OperationReceipts) {
+		t.Fatalf("pre-sealed target authority scheduled unexpected prerequisites or MCP calls: pending=%+v calls=%d", persisted.Facts.Prerequisites.Pending, calls)
 	}
-	var snapshotPrerequisite runtimecontract.RuntimePrerequisite
-	for _, item := range persisted.Facts.Prerequisites.Pending {
-		if item.Kind == runtimecontract.PrerequisiteKindTargetSnapshot && item.OwnerModuleID == runtimecontract.RuntimeModuleFile && item.SubjectRef == "implementation.go" {
-			snapshotPrerequisite = item
-			break
-		}
-	}
-	if snapshotPrerequisite.ID == "" {
-		t.Fatalf("observed target did not schedule File snapshot: %+v", persisted.Facts.Prerequisites.Pending)
-	}
-	snapshotResult := hub.Send(magicevent.NewEventWithContext(
-		fileevents.TopicAcquireTargetSnapshot, runtimecontract.RuntimeModuleOrchestrator, orchestratorevents.PrerequisiteCommandDestination,
-		magicevent.NewHeader(), ctx, fileevents.AcquireTargetSnapshotCommand{
-			WorkspaceID: persisted.Facts.WorkspaceID, RunID: persisted.Facts.RunID, AuthoritySnapshotID: persisted.Decision.AuthoritySnapshot.ID,
-			PrerequisiteID: snapshotPrerequisite.ID, WorkspaceDeliverableDirectory: workspaceDirectory, TargetRef: snapshotPrerequisite.SubjectRef, MaxBytes: 16 * 1024,
-		},
-	))
-	if snapshotResult == nil {
-		t.Fatal("File owner returned no target snapshot result")
-	}
-	snapshotData, snapshotErr := snapshotResult.Get()
-	if snapshotErr != nil {
-		t.Fatal(snapshotErr)
-	}
-	snapshotResponse, ok := snapshotData.(fileevents.AcquireTargetSnapshotResult)
-	if !ok || !snapshotResponse.Snapshot.Complete() || snapshotResponse.Observation.ObservationID == "" {
-		t.Fatalf("File target snapshot response = %#v", snapshotData)
-	}
-	persisted, err = controller.commitPrerequisite(ctx, persisted.Facts.WorkspaceID, persisted.Facts.RunID, PrerequisiteResult{
-		PrerequisiteID: snapshotPrerequisite.ID, TargetSnapshot: &snapshotResponse.Snapshot, Observation: &snapshotResponse.Observation,
-	})
-	if err != nil || len(persisted.Facts.Resources.TargetSnapshots) != 1 || persisted.Facts.Resources.TargetSnapshots[0].TargetRef != "implementation.go" {
-		t.Fatalf("File snapshot was not CAS-bound after observed MCP target: aggregate=%+v err=%v", persisted, err)
-	}
-	persisted = commitObservedWorkspaceManifest(t, ctx, hub, controller, persisted, workspaceDirectory)
-	if persisted.Decision.State != runtimecontract.ConvergenceStateNeedStateChange {
-		t.Fatalf("grounded aggregate did not reduce to a state-change candidate: action=%s pending=%+v", persisted.Decision.State, persisted.Facts.Prerequisites.Pending)
+	assertMCPFailureTargetReverseProvenance(t, controller, repository, ownerCommittedReceiptAggregate, persisted)
+	if snapshot, found := targetSnapshotForRef(persisted.Facts.Resources.TargetSnapshots, "implementation.go"); !found || !snapshot.Complete() || snapshot.ContentHash != preSealSnapshot.Snapshot.ContentHash {
+		t.Fatalf("pre-seal File target snapshot was not retained after MCP observation: %+v", persisted.Facts.Resources.TargetSnapshots)
 	}
 
 	// H4: the LLM owner receives only the aggregate facts already CAS-bound by
-	// H1--H3. It can return a target-bound proposal, but it cannot manufacture
-	// the observation or mutate the authority. The controller remains the only
-	// component that seals the resulting candidate.
+	// H1--H3. The MCP observation remains the failure-target authority; the File
+	// snapshot only grounds that observed target in current workspace state. LLM
+	// can return a target-bound proposal, but it cannot manufacture or mutate
+	// that authority. The controller remains the only component that seals it.
 	provider := &runtimeCapturedCandidateProvider{payloadFor: runtimeObservedCandidatePayload}
 	llmConfig := workorchconfig.DefaultLLMConfig()
 	llmConfig.AIProxy.BaseURL = "http://127.0.0.1:8090"
@@ -456,7 +451,8 @@ func TestMCPOwnerObservedFailureTargetBindsThroughEventHubAndFileSnapshot(t *tes
 			break
 		}
 	}
-	if len(sealed.Aggregate.Facts.Resources.TargetSnapshots) != 1 || sealedBaseHash == "" || sealedBaseHash != sealed.Aggregate.Facts.Resources.TargetSnapshots[0].ContentHash {
+	sealedSnapshot, found := targetSnapshotForRef(sealed.Aggregate.Facts.Resources.TargetSnapshots, "implementation.go")
+	if !found || sealedBaseHash == "" || sealedBaseHash != sealedSnapshot.ContentHash {
 		t.Fatalf("sealed file_write did not bind the owner snapshot revision: operation=%+v snapshots=%+v", sealedOperation, sealed.Aggregate.Facts.Resources.TargetSnapshots)
 	}
 	sealedExecution, found := operationExecutionRecord(sealed.Aggregate.ActiveDispatch.OperationExecutions, sealedOperation.ID)
@@ -472,8 +468,22 @@ func TestMCPOwnerObservedFailureTargetBindsThroughEventHubAndFileSnapshot(t *tes
 		persisted.Facts.Repair.LastProgressRevision != "" || persisted.Facts.Resources.FailureTarget == nil {
 		t.Fatalf("durable target receipt bypassed freshness/assessment progress gate: action=%s repair=%+v aggregate=%+v", persisted.Decision.State, persisted.Facts.Repair, persisted)
 	}
-	if !hasObservedTargetSnapshotPrerequisite(persisted.Facts.Prerequisites.Pending, "implementation.go") {
-		t.Fatalf("durable target receipt did not invalidate and re-acquire its grounded snapshot: pending=%+v", persisted.Facts.Prerequisites.Pending)
+	if _, current := runtimecontract.RuntimePrerequisiteObservationForID(persisted.Facts.Resources.PrerequisiteObservations, preSealSnapshotPrerequisite.ID); current {
+		t.Fatalf("durable target receipt retained current authority for the stale grounded snapshot: %+v", persisted.Facts.Resources.PrerequisiteObservations)
+	}
+	if _, retired := runtimecontract.RuntimePrerequisiteObservationForID(persisted.Facts.Resources.RetiredPrerequisiteObservations, preSealSnapshotPrerequisite.ID); !retired {
+		t.Fatalf("durable target receipt did not retire the grounded snapshot observation: %+v", persisted.Facts.Resources.RetiredPrerequisiteObservations)
+	}
+	hasFileRefresh := false
+	for _, prerequisite := range persisted.Facts.Prerequisites.Pending {
+		if prerequisite.OwnerModuleID == runtimecontract.RuntimeModuleFile &&
+			(prerequisite.Kind == runtimecontract.PrerequisiteKindOperationAdmissibility || prerequisite.Kind == runtimecontract.PrerequisiteKindTargetSnapshot) {
+			hasFileRefresh = true
+			break
+		}
+	}
+	if !hasFileRefresh {
+		t.Fatalf("durable target receipt did not schedule File authority refresh: pending=%+v", persisted.Facts.Prerequisites.Pending)
 	}
 	controller, err = NewRuntimeController(repository)
 	if err != nil {
@@ -484,40 +494,74 @@ func TestMCPOwnerObservedFailureTargetBindsThroughEventHubAndFileSnapshot(t *tes
 		t.Fatalf("restart after committed File receipt did not reuse authority: aggregate=%+v err=%v", persisted, err)
 	}
 	persisted = reacquireObservedFilePrerequisites(t, ctx, hub, controller, persisted, workspaceDirectory)
-	if persisted.Decision.State != runtimecontract.ConvergenceStateNeedValidation || len(persisted.Facts.Prerequisites.Pending) != 0 ||
+	if persisted.Decision.State == runtimecontract.ConvergenceStateNeedPrerequisite || len(persisted.Facts.Prerequisites.Pending) != 0 ||
 		persisted.Facts.Repair.LastProgressRevision != "" {
-		t.Fatalf("fresh owner facts did not return to validation without synthetic progress: action=%s pending=%+v repair=%+v", persisted.Decision.State, persisted.Facts.Prerequisites.Pending, persisted.Facts.Repair)
+		t.Fatalf("fresh File owner facts did not close prerequisite acquisition: action=%s pending=%+v repair=%+v", persisted.Decision.State, persisted.Facts.Prerequisites.Pending, persisted.Facts.Repair)
 	}
-	persisted = requestAndSealObservedCandidate(t, ctx, hub, controller, persisted, workspaceDirectory)
-	if persisted.Decision.State != runtimecontract.ConvergenceStateNeedValidation || persisted.ActiveDispatch == nil || persisted.ActiveDispatch.Candidate.Validation == nil {
-		t.Fatalf("reacquired aggregate did not seal a validation candidate: %+v", persisted)
+	// The old snapshot body remains an immutable replay input, but its owner
+	// observation was retired above; it is therefore not current target authority.
+	// The refreshed File catalog/observation below is the current owner fact and
+	// the next state-change acquisition must obtain a new target snapshot before
+	// another patch can be sealed.
+	if snapshot, found := targetSnapshotForRef(persisted.Facts.Resources.TargetSnapshots, "implementation.go"); !found || !snapshot.Complete() || snapshot.ContentHash != preSealSnapshot.Snapshot.ContentHash {
+		t.Fatalf("File refresh rewrote the immutable repair replay snapshot: before=%+v current=%+v", preSealSnapshot.Snapshot, persisted.Facts.Resources.TargetSnapshots)
 	}
-	persisted, err = controller.executeActiveDispatch(ctx, persisted.Facts.WorkspaceID, persisted.Facts.RunID, runtimeObservedMCPExecutor{hub: hub, deliverableDirectory: workspaceDirectory, internalDirectory: t.TempDir()})
-	if err != nil || calls != 2 || persisted.Decision.State != runtimecontract.ConvergenceStateNeedAssessment || persisted.Facts.Repair.LastProgressRevision != "" {
-		t.Fatalf("accepted validation did not enter assessment without clearing progress: calls=%d action=%s repair=%+v err=%v", calls, persisted.Decision.State, persisted.Facts.Repair, err)
+	fileCatalog, found := runtimeOperationAdmissibilityForKind(
+		persisted.Facts.Resources.OperationAdmissibilities,
+		runtimecontract.RuntimeModuleFile,
+		runtimecontract.RuntimeBlockKindPatchApply,
+	)
+	if !found || len(fileCatalog.TargetRefs) != 1 || fileCatalog.TargetRefs[0] != "implementation.go" {
+		t.Fatalf("File refresh did not retain exact repaired-target catalog authority: %+v", persisted.Facts.Resources.OperationAdmissibilities)
 	}
-	persisted = requestAndSealObservedCandidate(t, ctx, hub, controller, persisted, workspaceDirectory)
-	if persisted.ActiveDispatch == nil || persisted.ActiveDispatch.Candidate.Assessment == nil {
-		t.Fatalf("assessment candidate was not sealed: %+v", persisted)
+	if _, found := runtimecontract.RuntimePrerequisiteObservationForID(
+		persisted.Facts.Resources.PrerequisiteObservations,
+		fileCatalog.PrerequisiteID,
+	); !found {
+		t.Fatalf("File refresh catalog has no current owner observation: catalog=%+v observations=%+v", fileCatalog, persisted.Facts.Resources.PrerequisiteObservations)
 	}
-	persisted, err = controller.commitAssessment(ctx, persisted.Facts.WorkspaceID, persisted.Facts.RunID)
-	// This fixture intentionally has no profile-compiled coverage binding for
-	// the generic MCP observation. The receipt remains useful owner evidence
-	// for the failure-target chain, but it must not become CWI credit merely
-	// because the tool returned a successful response or an assessment claims
-	// satisfaction. C12 therefore requires the canonical repair state here.
-	if err != nil || persisted.Decision.State != runtimecontract.ConvergenceStateNeedStateChange || persisted.Facts.Repair.LastProgressRevision != "" {
-		t.Fatalf("unbound generic MCP validation received coverage credit: action=%s repair=%+v err=%v", persisted.Decision.State, persisted.Facts.Repair, err)
+	// Prerequisite acquisition may expose a transient reducer decision while the
+	// invalidated semantic generation is being replaced. The next owner-private
+	// SM-2 seal must replay the Definition/owner batch. The generic MCP diagnostic
+	// is not validation credit, and one durable File effect does not authorize a
+	// synthetic validation transition, so the canonical next action remains an
+	// exact target-bound state change.
+	persisted, err = controller.EnsureSemanticContractSealedForOperationTest(
+		ctx,
+		persisted.Facts.WorkspaceID,
+		persisted.Facts.RunID,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if persisted.Decision.State != runtimecontract.ConvergenceStateNeedStateChange || persisted.ActiveDispatch != nil ||
+		persisted.Facts.Resources.FailureTarget == nil || persisted.Facts.Resources.FailureTarget.TargetObservation == nil ||
+		len(persisted.Facts.Resources.FailureTarget.TargetRefs) != 1 || persisted.Facts.Resources.FailureTarget.TargetRefs[0] != "implementation.go" ||
+		persisted.Facts.Repair.LastProgressRevision == "" || calls != 1 {
+		t.Fatalf("semantic reseal changed MCP target authority or invented validation credit: calls=%d action=%s failureTarget=%+v repair=%+v", calls, persisted.Decision.State, persisted.Facts.Resources.FailureTarget, persisted.Facts.Repair)
+	}
+	var repairProgress *runtimecontract.EvidenceFact
+	for index := range persisted.Facts.Evidence.Accepted {
+		fact := &persisted.Facts.Evidence.Accepted[index]
+		if fact.Revision == persisted.Facts.Repair.LastProgressRevision {
+			repairProgress = fact
+			break
+		}
+	}
+	if repairProgress == nil || repairProgress.Kind != runtimecontract.EvidenceKindStateChange ||
+		repairProgress.OperationID != sealedOperation.ID || len(repairProgress.TargetRefs) != 1 || repairProgress.TargetRefs[0] != "implementation.go" {
+		t.Fatalf("semantic reseal progress is not the exact File owner receipt: revision=%q evidence=%+v", persisted.Facts.Repair.LastProgressRevision, repairProgress)
 	}
 	controller, err = NewRuntimeController(repository)
 	if err != nil {
 		t.Fatal(err)
 	}
-	loadedAfterAssessment, err := controller.Load(ctx, persisted.Facts.WorkspaceID, persisted.Facts.RunID)
-	if err != nil || loadedAfterAssessment.Decision.State != runtimecontract.ConvergenceStateNeedStateChange || loadedAfterAssessment.StateRevision != persisted.StateRevision ||
-		loadedAfterAssessment.Facts.Repair.LastProgressRevision != persisted.Facts.Repair.LastProgressRevision {
-		t.Fatalf("restart after unbound assessment did not preserve canonical gap: aggregate=%+v err=%v", loadedAfterAssessment, err)
+	loadedAfterValidation, err := controller.Load(ctx, persisted.Facts.WorkspaceID, persisted.Facts.RunID)
+	if err != nil || loadedAfterValidation.Decision.State != runtimecontract.ConvergenceStateNeedStateChange || loadedAfterValidation.StateRevision != persisted.StateRevision ||
+		loadedAfterValidation.Facts.Repair.LastProgressRevision != persisted.Facts.Repair.LastProgressRevision {
+		t.Fatalf("restart after semantic reseal did not preserve target-bound state-change authority: aggregate=%+v err=%v", loadedAfterValidation, err)
 	}
+	persisted = loadedAfterValidation
 	content, readErr := os.ReadFile(filepath.Join(workspaceDirectory, "implementation.go"))
 	if readErr != nil || string(content) != "package fixture\n// repaired\n" {
 		t.Fatalf("File owner did not apply sealed target-bound patch: content=%q err=%v", content, readErr)
@@ -561,9 +605,465 @@ func TestMCPOwnerObservedFailureTargetBindsThroughEventHubAndFileSnapshot(t *tes
 		SealedOperation: replaySealed,
 		TargetRole:      "implementation",
 	})
-	if calls != 2 || replayed.Receipt.ExecutionKey != execution.ExecutionKey || replayed.Receipt.Feedback == nil ||
+	if calls != 1 || replayed.Receipt.ExecutionKey != execution.ExecutionKey || replayed.Receipt.Feedback == nil ||
 		replayed.Receipt.Feedback.OriginalDiagnostic == nil || replayed.Receipt.Feedback.OriginalDiagnostic.TargetObservation == nil {
 		t.Fatalf("duplicate MCP receipt replayed side effect or lost observation: calls=%d replay=%+v", calls, replayed)
+	}
+}
+
+func assertMCPFailureTargetReverseProvenance(
+	t *testing.T,
+	controller *RuntimeController,
+	repository *durableRuntimeStateRepository,
+	ownerCommitted RuntimeAggregate,
+	persisted RuntimeAggregate,
+) {
+	t.Helper()
+	if ownerCommitted.ActiveDispatch == nil {
+		t.Fatal("MCP reverse-provenance fixture did not capture owner_committed state")
+	}
+	var receipt runtimecontract.RuntimeOperationReceipt
+	for _, candidate := range ownerCommitted.OperationReceipts {
+		if candidate.Feedback == nil || candidate.Feedback.DispatchID != ownerCommitted.ActiveDispatch.ID {
+			continue
+		}
+		receipt = candidate.Normalized()
+		break
+	}
+	if receipt.OperationID == "" {
+		t.Fatalf("captured MCP owner-committed receipt is missing: receipts=%+v", ownerCommitted.OperationReceipts)
+	}
+	operationID := receipt.OperationID
+	if receipt.Feedback == nil || receipt.Feedback.OriginalDiagnostic == nil || receipt.Feedback.OriginalDiagnostic.TargetObservation == nil {
+		t.Fatalf("captured MCP receipt has no direct target observation: %+v", receipt)
+	}
+	targetObservation := receipt.Feedback.OriginalDiagnostic.TargetObservation.Normalized()
+	if targetObservation.DiagnosticClass != runtimecontract.RuntimeFailureTargetDiagnosticReceiptEvidence ||
+		targetObservation.ContentHash != receipt.Evidence.ContentHash ||
+		!sameRuntimeTargetRefs(targetObservation.EvidenceRefs, receipt.Evidence.EvidenceRefs) {
+		t.Fatalf("captured MCP target observation is not bound to response evidence: observation=%+v evidence=%+v", targetObservation, receipt.Evidence)
+	}
+	if execution, found := operationExecutionRecord(ownerCommitted.ActiveDispatch.OperationExecutions, operationID); !found || execution.State != runtimecontract.OperationExecutionOwnerCommitted {
+		t.Fatalf("captured MCP receipt state = %+v, want owner_committed", execution)
+	}
+	if err := cloneRuntimeAggregateForMCPProvenanceTest(t, persisted).Validate(); err != nil {
+		t.Fatalf("valid MCP receipt-derived target authority rejected after serialization: %v", err)
+	}
+
+	t.Run("generic_commit_ingress_cannot_copy_MCP_authority", func(t *testing.T) {
+		beforeRevision := repository.aggregate.StateRevision
+		_, err := controller.recordFailureFact(
+			context.Background(),
+			persisted.Facts.WorkspaceID,
+			persisted.Facts.RunID,
+			persisted.Facts.Failure.Clone(),
+		)
+		if !errors.Is(err, common.ErrInvalidArgument) || !strings.Contains(err.Error(), "generic failure ingress cannot carry capability-owner authority") {
+			t.Fatalf("generic MCP authority ingress error = %v", err)
+		}
+		if repository.aggregate.StateRevision != beforeRevision {
+			t.Fatalf("rejected generic MCP authority ingress changed revision: before=%d after=%d", beforeRevision, repository.aggregate.StateRevision)
+		}
+	})
+
+	t.Run("owner_committed_is_not_target_authority", func(t *testing.T) {
+		tampered := cloneRuntimeAggregateForMCPProvenanceTest(t, ownerCommitted)
+		authority := cloneRuntimeAggregateForMCPProvenanceTest(t, persisted)
+		tampered.Facts.Failure = authority.Facts.Failure
+		tampered.Facts.Resources.FailureTarget = authority.Facts.Resources.FailureTarget
+		assertMCPProvenanceFreshLoadRejected(t, tampered, "evidence-committed execution")
+	})
+
+	t.Run("missing_rejected_evidence_is_not_target_authority", func(t *testing.T) {
+		tampered := cloneRuntimeAggregateForMCPProvenanceTest(t, persisted)
+		tampered.Facts.Evidence.Rejected = nil
+		assertMCPProvenanceFreshLoadRejected(t, tampered, "has no persisted fact")
+	})
+
+	t.Run("missing_processed_event_fence_is_not_target_authority", func(t *testing.T) {
+		tampered := cloneRuntimeAggregateForMCPProvenanceTest(t, persisted)
+		receiptIndex := runtimeMCPFailureReceiptIndexForProvenanceTest(t, tampered)
+		eventID := "runtime-receipt|" + runtimecontract.StableRuntimeOperationReceiptHash(tampered.OperationReceipts[receiptIndex])
+		filtered := tampered.ProcessedEventIDs[:0]
+		for _, value := range tampered.ProcessedEventIDs {
+			if value != eventID {
+				filtered = append(filtered, value)
+			}
+		}
+		tampered.ProcessedEventIDs = filtered
+		assertMCPProvenanceFreshLoadRejected(t, tampered, "processed-event fence")
+	})
+
+	t.Run("duplicate_rejected_evidence_is_not_target_authority", func(t *testing.T) {
+		tampered := cloneRuntimeAggregateForMCPProvenanceTest(t, persisted)
+		receiptIndex := runtimeMCPFailureReceiptIndexForProvenanceTest(t, tampered)
+		eventID := "runtime-receipt|" + runtimecontract.StableRuntimeOperationReceiptHash(tampered.OperationReceipts[receiptIndex])
+		for _, evidence := range tampered.Facts.Evidence.Rejected {
+			if string(evidence.ID) == eventID {
+				tampered.Facts.Evidence.Rejected = append(tampered.Facts.Evidence.Rejected, evidence)
+				break
+			}
+		}
+		assertMCPProvenanceFreshLoadRejected(t, tampered, "canonical raw facts")
+	})
+
+	t.Run("rejected_evidence_lineage_drift_is_not_target_authority", func(t *testing.T) {
+		tampered := cloneRuntimeAggregateForMCPProvenanceTest(t, persisted)
+		receiptIndex := runtimeMCPFailureReceiptIndexForProvenanceTest(t, tampered)
+		eventID := "runtime-receipt|" + runtimecontract.StableRuntimeOperationReceiptHash(tampered.OperationReceipts[receiptIndex])
+		for index := range tampered.Facts.Evidence.Rejected {
+			if string(tampered.Facts.Evidence.Rejected[index].ID) == eventID {
+				tampered.Facts.Evidence.Rejected[index].SourceRef = "runtime-receipt/drifted"
+			}
+		}
+		assertMCPProvenanceFreshLoadRejected(t, tampered, "evidence fact projection mismatch")
+	})
+
+	t.Run("rejected_evidence_focus_drift_with_coordinated_hash_is_not_target_authority", func(t *testing.T) {
+		tampered := cloneRuntimeAggregateForMCPProvenanceTest(t, persisted)
+		receiptIndex := runtimeMCPFailureReceiptIndexForProvenanceTest(t, tampered)
+		eventID := common.EvidenceRecordID("runtime-receipt|" + runtimecontract.StableRuntimeOperationReceiptHash(tampered.OperationReceipts[receiptIndex]))
+		for index := range tampered.Facts.Evidence.Rejected {
+			if tampered.Facts.Evidence.Rejected[index].ID == eventID {
+				tampered.Facts.Evidence.Rejected[index].FocusID = "focus-forged"
+				runtimeTestRebindEvidenceFactHash(t, &tampered, eventID)
+			}
+		}
+		assertMCPProvenanceFreshLoadRejected(t, tampered, "receipt-derived rejected evidence does not match")
+	})
+
+	for _, test := range []struct {
+		name   string
+		mutate func(*runtimecontract.EvidenceFact)
+		want   string
+	}{
+		{name: "kind", mutate: func(value *runtimecontract.EvidenceFact) { value.Kind = runtimecontract.EvidenceKindStateChange }, want: "evidence fact projection mismatch"},
+		{name: "revision", mutate: func(value *runtimecontract.EvidenceFact) { value.Revision = "evidence-999" }, want: "evidence fact projection mismatch"},
+		{name: "binding refs", mutate: func(value *runtimecontract.EvidenceFact) { value.BindingRefs = []string{"binding/forged"} }, want: "evidence fact projection mismatch"},
+		{name: "coverage work item ids", mutate: func(value *runtimecontract.EvidenceFact) {
+			value.CoverageWorkItemIDs = []common.CoverageWorkItemID{"cwi-forged"}
+		}, want: "evidence fact projection mismatch"},
+		{name: "evidence reason", mutate: func(value *runtimecontract.EvidenceFact) { value.EvidenceReason = "forged reason" }, want: "evidence fact projection mismatch"},
+	} {
+		t.Run("rejected_evidence_"+test.name+"_tamper_fails_fresh_load", func(t *testing.T) {
+			tampered := cloneRuntimeAggregateForMCPProvenanceTest(t, persisted)
+			receiptIndex := runtimeMCPFailureReceiptIndexForProvenanceTest(t, tampered)
+			eventID := common.EvidenceRecordID("runtime-receipt|" + runtimecontract.StableRuntimeOperationReceiptHash(tampered.OperationReceipts[receiptIndex]))
+			found := false
+			for index := range tampered.Facts.Evidence.Rejected {
+				if tampered.Facts.Evidence.Rejected[index].ID == eventID {
+					test.mutate(&tampered.Facts.Evidence.Rejected[index])
+					found = true
+				}
+			}
+			if !found {
+				t.Fatal("rejected evidence fact is missing")
+			}
+			assertMCPProvenanceFreshLoadRejected(t, tampered, test.want)
+		})
+	}
+
+	t.Run("coordinated_live_runtime_operation_identity_is_rejected", func(t *testing.T) {
+		tampered := cloneRuntimeAggregateForMCPProvenanceTest(t, persisted)
+		receiptIndex := runtimeMCPFailureReceiptIndexForProvenanceTest(t, tampered)
+		receipt := tampered.OperationReceipts[receiptIndex].Normalized()
+		oldEventID := common.EvidenceRecordID("runtime-receipt|" + runtimecontract.StableRuntimeOperationReceiptHash(receipt))
+		liveEventID := common.EvidenceRecordID("runtime-operation|" + receipt.Feedback.DispatchID + "|" + receipt.OperationID)
+		liveSourceRef := "workorch://runtime-operations/" + receipt.Feedback.DispatchID + "/" + receipt.OperationID
+		var rewritten runtimecontract.EvidenceFact
+		for index := range tampered.Facts.Evidence.Rejected {
+			if tampered.Facts.Evidence.Rejected[index].ID != oldEventID {
+				continue
+			}
+			tampered.Facts.Evidence.Rejected[index].ID = liveEventID
+			tampered.Facts.Evidence.Rejected[index].SourceRef = liveSourceRef
+			rewritten = tampered.Facts.Evidence.Rejected[index]
+		}
+		for index := range tampered.ProcessedEventIDs {
+			if tampered.ProcessedEventIDs[index] == string(oldEventID) {
+				tampered.ProcessedEventIDs[index] = string(liveEventID)
+			}
+		}
+		for dispatchIndex := range tampered.CompletedDispatches {
+			dispatch := &tampered.CompletedDispatches[dispatchIndex]
+			if dispatch.ID != receipt.Feedback.DispatchID {
+				continue
+			}
+			for executionIndex := range dispatch.OperationExecutions {
+				execution := &dispatch.OperationExecutions[executionIndex]
+				if execution.OperationID == receipt.OperationID {
+					execution.EvidenceFactID = liveEventID
+					execution.EvidenceFactHash = runtimecontract.StableRuntimeEvidenceFactHash(rewritten)
+				}
+			}
+		}
+		assertMCPProvenanceFreshLoadRejected(t, tampered, "does not match its exact receipt")
+	})
+
+	t.Run("execution_evidence_fact_hash_drift_is_rejected", func(t *testing.T) {
+		tampered := cloneRuntimeAggregateForMCPProvenanceTest(t, persisted)
+		receiptIndex := runtimeMCPFailureReceiptIndexForProvenanceTest(t, tampered)
+		receipt := tampered.OperationReceipts[receiptIndex].Normalized()
+		for dispatchIndex := range tampered.CompletedDispatches {
+			dispatch := &tampered.CompletedDispatches[dispatchIndex]
+			if dispatch.ID != receipt.Feedback.DispatchID {
+				continue
+			}
+			for executionIndex := range dispatch.OperationExecutions {
+				if dispatch.OperationExecutions[executionIndex].OperationID == receipt.OperationID {
+					dispatch.OperationExecutions[executionIndex].EvidenceFactHash = "forged-evidence-fact-hash"
+				}
+			}
+		}
+		assertMCPProvenanceFreshLoadRejected(t, tampered, "evidence fact projection mismatch")
+	})
+
+	t.Run("receipt_diagnostic_drift_is_not_target_authority", func(t *testing.T) {
+		tampered := cloneRuntimeAggregateForMCPProvenanceTest(t, persisted)
+		receiptIndex := runtimeMCPFailureReceiptIndexForProvenanceTest(t, tampered)
+		receipt := &tampered.OperationReceipts[receiptIndex]
+		receipt.Feedback.OriginalDiagnostic.OriginalMessage += " drifted"
+		newHash := runtimecontract.StableRuntimeOperationReceiptHash(*receipt)
+		for dispatchIndex := range tampered.CompletedDispatches {
+			dispatch := &tampered.CompletedDispatches[dispatchIndex]
+			if dispatch.ID != receipt.Feedback.DispatchID {
+				continue
+			}
+			for executionIndex := range dispatch.OperationExecutions {
+				if dispatch.OperationExecutions[executionIndex].OperationID == receipt.OperationID {
+					dispatch.OperationExecutions[executionIndex].OwnerReceiptHash = newHash
+				}
+			}
+		}
+		assertMCPProvenanceFreshLoadRejected(t, tampered, "does not match its exact receipt")
+	})
+
+	t.Run("coordinated_observation_content_hash_drift_is_not_target_authority", func(t *testing.T) {
+		tampered := cloneRuntimeAggregateForMCPProvenanceTest(t, persisted)
+		mutateMCPObservationCopiesAndReceiptHashForProvenanceTest(t, &tampered, func(value *runtimecontract.RuntimeFailureTargetObservation) {
+			value.ContentHash = strings.Repeat("b", 64)
+		})
+		assertMCPProvenanceFreshLoadRejected(t, tampered, "does not match receipt evidence")
+	})
+
+	t.Run("coordinated_observation_evidence_refs_drift_is_not_target_authority", func(t *testing.T) {
+		tampered := cloneRuntimeAggregateForMCPProvenanceTest(t, persisted)
+		mutateMCPObservationCopiesAndReceiptHashForProvenanceTest(t, &tampered, func(value *runtimecontract.RuntimeFailureTargetObservation) {
+			value.EvidenceRefs = append(value.EvidenceRefs, "workorch://mcp/evidence/drifted")
+		})
+		assertMCPProvenanceFreshLoadRejected(t, tampered, "does not match receipt evidence")
+	})
+
+	t.Run("coordinated_observation_diagnostic_class_drift_is_not_target_authority", func(t *testing.T) {
+		tampered := cloneRuntimeAggregateForMCPProvenanceTest(t, persisted)
+		mutateMCPObservationCopiesAndReceiptHashForProvenanceTest(t, &tampered, func(value *runtimecontract.RuntimeFailureTargetObservation) {
+			value.DiagnosticClass = "untyped_failure"
+		})
+		assertMCPProvenanceFreshLoadRejected(t, tampered, "invalid diagnostic class")
+	})
+
+	t.Run("coordinated_target_overflow_is_not_target_authority", func(t *testing.T) {
+		tampered := cloneRuntimeAggregateForMCPProvenanceTest(t, persisted)
+		targets := make([]string, 0, runtimecontract.RuntimeFailureTargetObservationMaxTargetRefs+1)
+		for index := 0; index <= runtimecontract.RuntimeFailureTargetObservationMaxTargetRefs; index++ {
+			targets = append(targets, fmt.Sprintf("target-%02d.go", index))
+		}
+		mutateMCPObservationCopiesAndReceiptHashForProvenanceTest(t, &tampered, func(value *runtimecontract.RuntimeFailureTargetObservation) {
+			value.TargetRefs = append([]string(nil), targets...)
+		})
+		receiptIndex := runtimeMCPFailureReceiptIndexForProvenanceTest(t, tampered)
+		receipt := &tampered.OperationReceipts[receiptIndex]
+		receipt.Feedback.OriginalDiagnostic.TargetRefs = append([]string(nil), targets...)
+		if tampered.Facts.Failure != nil {
+			tampered.Facts.Failure.TargetRefs = append([]string(nil), targets...)
+			if tampered.Facts.Failure.OriginalDiagnostic != nil {
+				tampered.Facts.Failure.OriginalDiagnostic.TargetRefs = append([]string(nil), targets...)
+			}
+		}
+		if tampered.Facts.Resources.FailureTarget != nil {
+			tampered.Facts.Resources.FailureTarget.TargetRefs = append([]string(nil), targets...)
+		}
+		newHash := runtimecontract.StableRuntimeOperationReceiptHash(*receipt)
+		for dispatchIndex := range tampered.CompletedDispatches {
+			dispatch := &tampered.CompletedDispatches[dispatchIndex]
+			if dispatch.ID != receipt.Feedback.DispatchID {
+				continue
+			}
+			for executionIndex := range dispatch.OperationExecutions {
+				if dispatch.OperationExecutions[executionIndex].OperationID == receipt.OperationID {
+					dispatch.OperationExecutions[executionIndex].OwnerReceiptHash = newHash
+				}
+			}
+		}
+		assertMCPProvenanceFreshLoadRejected(t, tampered, "bounded targets")
+	})
+
+	t.Run("current_owner_catalog_revision_drift_is_not_target_authority", func(t *testing.T) {
+		tampered := cloneRuntimeAggregateForMCPProvenanceTest(t, persisted)
+		updated := false
+		for index := range tampered.Facts.Resources.PrerequisiteObservations {
+			observation := &tampered.Facts.Resources.PrerequisiteObservations[index]
+			if observation.OwnerModuleID != runtimecontract.RuntimeModuleMCP || observation.Kind != runtimecontract.PrerequisiteKindOperationAdmissibility {
+				continue
+			}
+			for dependencyIndex := range observation.Dependencies {
+				dependency := &observation.Dependencies[dependencyIndex]
+				if dependency.Domain == runtimecontract.RuntimeResourceOwnerCatalog && dependency.OwnerModuleID == runtimecontract.RuntimeModuleMCP {
+					dependency.Revision += "-drifted"
+					updated = true
+				}
+			}
+			observation.ObservationID = runtimecontract.StableRuntimePrerequisiteObservationID(*observation)
+		}
+		if !updated {
+			t.Fatal("MCP provenance fixture has no current owner-catalog revision dependency")
+		}
+		assertMCPProvenanceFreshLoadRejected(t, tampered, "current exact owner catalog and prerequisite freshness")
+	})
+}
+
+func assertMCPReceiptEvidenceDriftRejectedAtCommit(t *testing.T, sealed RuntimeAggregate, operation runtimecontract.RuntimeOperation) {
+	t.Helper()
+	for _, test := range []struct {
+		name   string
+		mutate func(*runtimecontract.RuntimeFeedback)
+		want   string
+	}{
+		{name: "response evidence drift", want: "does not match receipt evidence", mutate: func(value *runtimecontract.RuntimeFeedback) {
+			value.OriginalDiagnostic.TargetObservation.ContentHash = strings.Repeat("b", 64)
+		}},
+		{name: "target overflow", want: "bounded targets", mutate: func(value *runtimecontract.RuntimeFeedback) {
+			targets := make([]string, 0, runtimecontract.RuntimeFailureTargetObservationMaxTargetRefs+1)
+			for index := 0; index <= runtimecontract.RuntimeFailureTargetObservationMaxTargetRefs; index++ {
+				targets = append(targets, fmt.Sprintf("target-%02d.go", index))
+			}
+			value.OriginalDiagnostic.TargetRefs = append([]string(nil), targets...)
+			value.OriginalDiagnostic.TargetObservation.TargetRefs = append([]string(nil), targets...)
+		}},
+	} {
+		t.Run("commit_"+test.name, func(t *testing.T) {
+			repository := &durableRuntimeStateRepository{aggregate: cloneRuntimeAggregateForMCPProvenanceTest(t, sealed)}
+			controller, err := NewRuntimeController(repository)
+			if err != nil {
+				t.Fatal(err)
+			}
+			claimed, err := controller.claimOperationExecution(context.Background(), sealed.Facts.WorkspaceID, sealed.Facts.RunID, operation.ID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			execution, found := operationExecutionRecord(claimed.ActiveDispatch.OperationExecutions, operation.ID)
+			if !found {
+				t.Fatal("MCP commit-drift fixture has no claimed execution")
+			}
+			evidenceHash := strings.Repeat("a", 64)
+			evidence := runtimecontract.RuntimeOperationEvidence{
+				Summary:        "persisted MCP owner response",
+				ContentHash:    evidenceHash,
+				ContentAddress: &runtimecontract.RuntimeEvidenceContentAddress{Algorithm: runtimecontract.RuntimeEvidenceDigestSHA256, Digest: evidenceHash, Ref: "workorch://mcp/evidence/" + evidenceHash},
+				EvidenceRefs:   []string{"workorch://mcp/capability/mcp-observed-target/catalog-1", "workorch://mcp/evidence/" + evidenceHash},
+			}
+			observation := runtimecontract.RuntimeFailureTargetObservation{
+				OwnerModuleID: runtimecontract.RuntimeModuleMCP, SubjectRef: "mcp-observed-target", TargetRole: "implementation",
+				ObservedRevision: "catalog-1", TargetRefs: []string{"implementation.go"},
+				CatalogDependency: &runtimecontract.RuntimeFreshnessDependency{Domain: runtimecontract.RuntimeResourceOwnerCatalog, OwnerModuleID: runtimecontract.RuntimeModuleMCP, SubjectRef: "mcp_server_catalog", Revision: "catalog-1"},
+				DiagnosticClass:   runtimecontract.RuntimeFailureTargetDiagnosticReceiptEvidence,
+				EvidenceRefs:      append([]string(nil), evidence.EvidenceRefs...), ContentHash: evidence.ContentHash,
+			}
+			failure := runtimecontract.FailureFact{
+				Class: runtimecontract.FailureClassExecutionFailure, Code: "tool_call_failed", Signature: "mcp-commit-drift",
+				Message: "MCP owner operation failed", TargetRefs: append([]string(nil), observation.TargetRefs...), TargetObservation: &observation,
+			}
+			feedback := runtimeOperationFeedbackForTest(t, claimed, operation.ID, failure)
+			test.mutate(feedback)
+			receipt := runtimecontract.RuntimeOperationReceipt{
+				ExecutionKey: execution.ExecutionKey, OperationID: operation.ID,
+				Outcome: runtimecontract.RuntimeOperationOutcomeRejected, ObservedEffectScope: runtimecontract.RuntimeEffectUnknown,
+				TargetRefs: append([]string(nil), operation.TargetRefs...), Evidence: evidence,
+				Feedback: feedback,
+			}
+			revision := repository.aggregate.StateRevision
+			receiptCount := len(repository.aggregate.OperationReceipts)
+			if _, _, err := controller.commitOperationReceipt(context.Background(), claimed.Facts.WorkspaceID, claimed.Facts.RunID, claimed.ActiveDispatch.ID, execution.Fence, receipt); err == nil ||
+				!strings.Contains(err.Error(), test.want) {
+				t.Fatalf("MCP %s commit error = %v", test.name, err)
+			}
+			if repository.aggregate.StateRevision != revision || len(repository.aggregate.OperationReceipts) != receiptCount {
+				t.Fatalf("rejected MCP %s changed aggregate: revision=%d receipts=%d", test.name, repository.aggregate.StateRevision, len(repository.aggregate.OperationReceipts))
+			}
+		})
+	}
+}
+
+func mutateMCPObservationCopiesAndReceiptHashForProvenanceTest(
+	t *testing.T,
+	aggregate *RuntimeAggregate,
+	mutate func(*runtimecontract.RuntimeFailureTargetObservation),
+) {
+	t.Helper()
+	receiptIndex := runtimeMCPFailureReceiptIndexForProvenanceTest(t, *aggregate)
+	receipt := &aggregate.OperationReceipts[receiptIndex]
+	mutate(receipt.Feedback.OriginalDiagnostic.TargetObservation)
+	mutateFailure := func(failure *runtimecontract.FailureFact) {
+		if failure == nil {
+			return
+		}
+		if failure.TargetObservation != nil {
+			mutate(failure.TargetObservation)
+		}
+		if failure.OriginalDiagnostic != nil && failure.OriginalDiagnostic.TargetObservation != nil {
+			mutate(failure.OriginalDiagnostic.TargetObservation)
+		}
+	}
+	mutateFailure(aggregate.Facts.Failure)
+	if aggregate.Facts.Resources.FailureTarget != nil && aggregate.Facts.Resources.FailureTarget.TargetObservation != nil {
+		mutate(aggregate.Facts.Resources.FailureTarget.TargetObservation)
+	}
+	if aggregate.Facts.RepairDirective != nil {
+		mutateFailure(aggregate.Facts.RepairDirective.CurrentFailure)
+	}
+	newHash := runtimecontract.StableRuntimeOperationReceiptHash(*receipt)
+	for dispatchIndex := range aggregate.CompletedDispatches {
+		dispatch := &aggregate.CompletedDispatches[dispatchIndex]
+		if dispatch.ID != receipt.Feedback.DispatchID {
+			continue
+		}
+		for executionIndex := range dispatch.OperationExecutions {
+			if dispatch.OperationExecutions[executionIndex].OperationID == receipt.OperationID {
+				dispatch.OperationExecutions[executionIndex].OwnerReceiptHash = newHash
+			}
+		}
+	}
+}
+
+func cloneRuntimeAggregateForMCPProvenanceTest(t *testing.T, aggregate RuntimeAggregate) RuntimeAggregate {
+	t.Helper()
+	payload, err := json.Marshal(aggregate)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var cloned RuntimeAggregate
+	if err := json.Unmarshal(payload, &cloned); err != nil {
+		t.Fatal(err)
+	}
+	return cloned
+}
+
+func runtimeMCPFailureReceiptIndexForProvenanceTest(t *testing.T, aggregate RuntimeAggregate) int {
+	t.Helper()
+	for index, receipt := range aggregate.OperationReceipts {
+		if receipt.Outcome == runtimecontract.RuntimeOperationOutcomeRejected && receipt.Feedback != nil && receipt.Feedback.OriginalDiagnostic != nil &&
+			receipt.Feedback.OriginalDiagnostic.OwnerModuleID == runtimecontract.RuntimeModuleMCP && receipt.Feedback.OriginalDiagnostic.TargetObservation != nil {
+			return index
+		}
+	}
+	t.Fatal("MCP provenance fixture has no rejected target-observation receipt")
+	return -1
+}
+
+func assertMCPProvenanceFreshLoadRejected(t *testing.T, aggregate RuntimeAggregate, message string) {
+	t.Helper()
+	if err := aggregate.Validate(); err == nil || !strings.Contains(err.Error(), message) {
+		t.Fatalf("fresh-load MCP target authority error = %v, want %q", err, message)
 	}
 }
 
@@ -1074,7 +1574,7 @@ func requestAndSealObservedCandidate(t *testing.T, ctx context.Context, hub magi
 			t.Fatal(probeErr)
 		}
 		if probeResult.Outcome != runtimecontract.RuntimeOwnerFeasibilityFeasible || probeResult.Feedback != nil || probeResult.Stale != nil {
-			t.Fatalf("candidate feasibility = %#v", probeResult)
+			t.Fatalf("candidate feasibility state=%s operation=%+v inventory=%+v result=%#v", aggregate.Decision.State, operation, inventory, probeResult)
 		}
 		aggregate, err = controller.recordCandidateFeasibility(ctx, aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, 0, runtimecontract.RuntimeCandidateFeasibilityRecord{OperationID: operation.ID, AdmissibilitySnapshotID: inventory.SnapshotID, AcquisitionBinding: inventory.AcquisitionBinding, CandidateManifestHash: probeResult.CandidateManifestHash, Observation: &runtimecontract.RuntimeOwnerFeasibilityObservation{Outcome: runtimecontract.RuntimeOwnerFeasibilityFeasible}, ReplayProof: probeResult.ReplayProof})
 		if err != nil {
@@ -1097,26 +1597,25 @@ func assertObservedTargetAuthorityInCandidateRequest(t *testing.T, request llmmo
 	if resources.FailureTarget == nil || resources.FailureTarget.TargetObservation == nil ||
 		resources.FailureTarget.TargetObservation.OwnerModuleID != runtimecontract.RuntimeModuleMCP ||
 		resources.FailureTarget.TargetObservation.SubjectRef != "mcp-observed-target" ||
-		resources.FailureTarget.TargetObservation.TargetRole != "implementation" ||
+		resources.FailureTarget.TargetObservation.TargetRole == "" ||
+		resources.FailureTarget.TargetObservation.TargetRole != request.CandidateContext.Focus.TargetRole ||
 		resources.FailureTarget.TargetObservation.ObservedRevision == "" ||
 		len(resources.FailureTarget.TargetRefs) != 1 || resources.FailureTarget.TargetRefs[0] != "implementation.go" {
-		t.Fatalf("LLM request lost committed failure target authority: %+v", resources.FailureTarget)
+		t.Fatalf("LLM request lost committed failure target authority: %+v observation=%+v", resources.FailureTarget, resources.FailureTarget.TargetObservation)
 	}
-	if len(resources.TargetSnapshots) != 1 || resources.TargetSnapshots[0].TargetRef != "implementation.go" {
-		t.Fatalf("LLM request target snapshots = %+v, want only owner-observed target", resources.TargetSnapshots)
-	}
-	if len(request.CandidateContext.Focus.TargetRefs) != 0 {
-		t.Fatalf("LLM request rewrote Focus target refs from failure target: %+v", request.CandidateContext.Focus)
-	}
-}
-
-func hasObservedTargetSnapshotPrerequisite(values []runtimecontract.RuntimePrerequisite, targetRef string) bool {
-	for _, value := range values {
-		if value.Kind == runtimecontract.PrerequisiteKindTargetSnapshot && value.OwnerModuleID == runtimecontract.RuntimeModuleFile && value.SubjectRef == targetRef {
-			return true
+	foundObservedTargetSnapshot := false
+	for _, snapshot := range resources.TargetSnapshots {
+		if snapshot.TargetRef == "implementation.go" && snapshot.Complete() {
+			foundObservedTargetSnapshot = true
+			break
 		}
 	}
-	return false
+	if !foundObservedTargetSnapshot {
+		t.Fatalf("LLM request target snapshots = %+v, want grounded owner-observed target", resources.TargetSnapshots)
+	}
+	if !sameRuntimeStrings(request.CandidateContext.Focus.TargetRefs, request.Decision.Focus.TargetRefs) {
+		t.Fatalf("LLM request rewrote sealed semantic Focus targets from failure target: %+v", request.CandidateContext.Focus)
+	}
 }
 
 func runtimeMagicFailure(err error) *cd.Error {

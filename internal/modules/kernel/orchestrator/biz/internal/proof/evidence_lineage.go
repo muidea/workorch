@@ -131,13 +131,11 @@ func EvidenceAppliesToCurrentCoverageWithLineage(facts runtimecontract.RuntimeFa
 	return EvidenceAppliesToCoverageIDsWithLineage(facts, evidence, facts.Focus.CoverageWorkItemIDs, lineage)
 }
 
-// AcceptedEvidenceAppliesToCurrentFocusWithLineage retains the narrow
-// non-credit current-state path while binding CWI-naming evidence to the
-// current proof lineage.
-func AcceptedEvidenceAppliesToCurrentFocusWithLineage(facts runtimecontract.RuntimeFacts, evidence runtimecontract.EvidenceFact, lineage []runtimecontract.RuntimeCoverageProofLineage) bool {
-	if len(evidence.CoverageWorkItemIDs) == 0 {
-		return runtimecontract.EvidenceAppliesToCurrentFocus(facts, evidence)
-	}
+// AcceptedEvidenceCreditsCurrentFocusWithLineage is the single
+// coverage-sensitive gate for accepted ordinary evidence. A fact without
+// reducer-derived CWI credit remains diagnostic lineage only and cannot
+// satisfy a required kind, stale an assessment, or close a repair directive.
+func AcceptedEvidenceCreditsCurrentFocusWithLineage(facts runtimecontract.RuntimeFacts, evidence runtimecontract.EvidenceFact, lineage []runtimecontract.RuntimeCoverageProofLineage) bool {
 	return EvidenceAppliesToCurrentCoverageWithLineage(facts, evidence, lineage)
 }
 

@@ -52,8 +52,34 @@ func TestCompileRuntimeSemanticBindingsDoesNotPromoteTargetToArtifact(t *testing
 	}
 }
 
+func TestCompileRuntimeSemanticBindingsRetainsDefinitionTargetRoleForExactTarget(t *testing.T) {
+	manifest, document, facts, source := semanticIndependentProofSetFixture(t)
+	source.TargetRole = "implementation"
+	manifest = sealSemanticTestManifestWithSource(t, manifest, source)
+	document.ManifestHash = manifest.Hash
+	for index := range facts {
+		facts[index] = semanticFeasibilityForTest(
+			t, manifest, document.Proposals[index], facts[index].TargetRefs,
+			facts[index].ValidationRecipeID, facts[index].RequiredCheckRefs,
+		)
+	}
+	focuses, _, err := CompileRuntimeSemanticBindings(manifest, runtimeSemanticBindingTestRequestID, document, facts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(focuses) != 1 || focuses[0].TargetRole != source.TargetRole {
+		t.Fatalf("exact-target binding lost immutable Definition target role: focuses=%+v", focuses)
+	}
+}
+
 func TestCompileRuntimeSemanticBindingsSealsSourceProofRequirementsOnUniqueValidationProof(t *testing.T) {
 	manifest, document, facts, source := semanticIndependentProofSetFixture(t)
+	source.EvidenceRole = "executable_behavior"
+	source.RequireDirectEvidence = true
+	source.RequireClaimEvidence = true
+	source.RequireExecutableBehaviorEvidence = true
+	source.RequireCoverageTargets = true
+	source.RequireAssessment = true
 	source.RequiredOwnerFacts = []RuntimeOwnerFactRequirement{{
 		OwnerModuleID: RuntimeModuleShell, FactKind: RuntimeOwnerFactSelectableValidationSurface,
 		OperationKind: RuntimeBlockKindManagedValidationSession,
@@ -87,6 +113,11 @@ func TestCompileRuntimeSemanticBindingsSealsSourceProofRequirementsOnUniqueValid
 	}
 	if !SameRuntimeOwnerFactConvergences(focuses[0].OwnerFactConvergences, source.OwnerFactConvergences) {
 		t.Fatalf("compiled focus lost source owner-fact convergence: %+v", focuses[0])
+	}
+	if focuses[0].EvidenceRole != source.EvidenceRole || !focuses[0].RequireDirectEvidence ||
+		!focuses[0].RequireClaimEvidence || !focuses[0].RequireExecutableBehaviorEvidence ||
+		!focuses[0].RequireCoverageTargets || !focuses[0].RequireAssessment {
+		t.Fatalf("compiled focus lost immutable Definition assessment gates: %+v", focuses[0])
 	}
 }
 
@@ -448,7 +479,8 @@ func TestCompileRuntimeSemanticBindingsRetainsSourceSelectorCandidates(t *testin
 	}
 	binding := focuses[0].CoverageEvidenceBindings[0]
 	if !SameRuntimeTargetSelectorCandidateRefs(binding.TargetSelectorCandidateRefs, RuntimeSemanticProposalTargetRefs(proposal)) ||
-		!SameRuntimeTargetSelectorCandidateRefs(focuses[0].TargetSelectorCandidateRefs, RuntimeSemanticProposalTargetRefs(proposal)) {
+		!SameRuntimeTargetSelectorCandidateRefs(focuses[0].TargetSelectorCandidateRefs, RuntimeSemanticProposalTargetRefs(proposal)) ||
+		focuses[0].TargetRole != source.TargetRole {
 		t.Fatalf("compiled selector declaration = binding:%+v focus:%+v", binding, focuses[0])
 	}
 	if len(contract.Bindings) != 1 || !SameRuntimeTargetSelectorCandidateRefs(contract.Bindings[0].TargetSelectorCandidateRefs, RuntimeSemanticProposalTargetRefs(proposal)) {

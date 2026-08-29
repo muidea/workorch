@@ -591,9 +591,14 @@ func stringPtr(value string) *string { return &value }
 func mustRuntimeCandidatePayloadManifest(t *testing.T, decision RuntimeDecision) RuntimeCandidateContractManifest {
 	t.Helper()
 	decision = runtimeCandidateTestDecisionWithBindings(t, decision)
-	manifest, err := BuildRuntimeCandidateContractManifest(decision, RuntimeCandidateManifestOwnerFacts{ValidationRecipes: []RuntimeValidationRecipe{{
+	ownerFacts := RuntimeCandidateManifestOwnerFacts{ValidationRecipes: []RuntimeValidationRecipe{{
 		ID: "recipe/candidate-test", Command: "sh", Args: []string{"-c", "true"},
-	}}})
+	}}}
+	if decision.State == ConvergenceStateNeedAssessment {
+		ownerFacts.AssessmentPurpose = RuntimeAssessmentPurposeDefinitionProof
+		ownerFacts.AssessmentPurposeManifestHash = "semantic-manifest/candidate-payload"
+	}
+	manifest, err := BuildRuntimeCandidateContractManifest(decision, ownerFacts)
 	if err != nil {
 		t.Fatal(err)
 	}

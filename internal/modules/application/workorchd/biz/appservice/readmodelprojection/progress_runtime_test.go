@@ -36,11 +36,11 @@ func TestApplyRuntimeProgressAlignsCountsAndMilestones(t *testing.T) {
 				},
 				Evidence: runtimecontract.EvidenceLedger{
 					Accepted: []runtimecontract.EvidenceFact{{
-						ID: "acc-1", Kind: runtimecontract.EvidenceKindStateChange,
+						ID: "acc-1", Kind: runtimecontract.EvidenceKindStateChange, FocusID: "focus-1",
 						CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-1"},
 					}},
 					Rejected: []runtimecontract.EvidenceFact{{
-						ID: "rej-1", Kind: runtimecontract.EvidenceKindValidation,
+						ID: "rej-1", Kind: runtimecontract.EvidenceKindValidation, FocusID: "focus-1",
 						CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-1"},
 						FailureSignature:    "sig-1", FailureMessage: "validation failed",
 					}},
@@ -128,7 +128,7 @@ func TestApplyRuntimeProgressDoesNotTreatStateChangeEvidenceAsValidation(t *test
 		Facts: runtimecontract.RuntimeFacts{
 			WorkspaceID: "ws-1", RunID: "run-1", DefinitionRevision: "def", EvidenceRevision: "ev",
 			Focus:    runtimecontract.CoverageFocus{ID: "focus-1", CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-1"}, RequiredEvidenceKinds: []string{runtimecontract.EvidenceKindStateChange}},
-			Evidence: runtimecontract.EvidenceLedger{Accepted: []runtimecontract.EvidenceFact{{ID: "state-change", Kind: runtimecontract.EvidenceKindStateChange, CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-1"}}}},
+			Evidence: runtimecontract.EvidenceLedger{Accepted: []runtimecontract.EvidenceFact{{ID: "state-change", Kind: runtimecontract.EvidenceKindStateChange, FocusID: "focus-1", CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-1"}}}},
 		},
 	}}
 	applyRuntimeProgress(&progress, run)
@@ -149,7 +149,7 @@ func TestApplyRuntimeProgressCompletesValidationOnlyWithValidationEvidence(t *te
 		Facts: runtimecontract.RuntimeFacts{
 			WorkspaceID: "ws-1", RunID: "run-1", DefinitionRevision: "def", EvidenceRevision: "ev",
 			Focus:    runtimecontract.CoverageFocus{ID: "focus-1", CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-1"}, RequiredEvidenceKinds: []string{runtimecontract.EvidenceKindValidation}},
-			Evidence: runtimecontract.EvidenceLedger{Accepted: []runtimecontract.EvidenceFact{{ID: "validation", Kind: runtimecontract.EvidenceKindValidation, CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-1"}}}},
+			Evidence: runtimecontract.EvidenceLedger{Accepted: []runtimecontract.EvidenceFact{{ID: "validation", Kind: runtimecontract.EvidenceKindValidation, FocusID: "focus-1", CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-1"}}}},
 		},
 	}}
 	applyRuntimeProgress(&progress, run)

@@ -38,24 +38,6 @@ func applyTargetSelectionPrerequisiteResult(facts *runtimecontract.RuntimeFacts,
 	return nil
 }
 
-func applyFailureTargetPrerequisiteResult(facts *runtimecontract.RuntimeFacts, result PrerequisiteResult) error {
-	if facts.Failure == nil || strings.TrimSpace(facts.Failure.Signature) == "" || len(facts.Failure.TargetRefs) == 0 {
-		return fmt.Errorf("failure target prerequisite has no typed failure identity")
-	}
-	if result.FailureTarget == nil || strings.TrimSpace(result.FailureTarget.Signature) == "" || len(result.FailureTarget.TargetRefs) == 0 {
-		return fmt.Errorf("failure target prerequisite returned no typed target identity")
-	}
-	failure := facts.Failure.Normalized()
-	if strings.TrimSpace(result.FailureTarget.Signature) != failure.Signature || !sameRuntimeTargetRefs(result.FailureTarget.TargetRefs, failure.TargetRefs) {
-		return fmt.Errorf("failure target prerequisite does not match current typed failure")
-	}
-	target := *result.FailureTarget
-	target.Signature = strings.TrimSpace(target.Signature)
-	target.TargetRefs = normalizeRuntimeTargetRefs(target.TargetRefs)
-	facts.Resources.FailureTarget = &target
-	return nil
-}
-
 func applyCapabilityPrerequisiteResult(facts *runtimecontract.RuntimeFacts, prerequisite runtimecontract.RuntimePrerequisite, result PrerequisiteResult) error {
 	if result.Capabilities == nil || !capabilitiesSatisfy(*result.Capabilities, prerequisite.CapabilityClass, prerequisite.RequiredCapabilities) {
 		return fmt.Errorf("capability prerequisite returned no required capabilities")

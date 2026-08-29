@@ -141,6 +141,7 @@ func taskProgressEvidenceRefs(snapshot readmodelcore.RunSnapshotState) []string 
 	refs = append(refs, idsFromResults(results)...)
 	refs = append(refs, idsFromArtifacts(artifacts)...)
 	refs = append(refs, governanceEvidenceRefs(snapshot)...)
+	refs = append(refs, committedRuntimeOperationEvidenceRefs(snapshot.Acceptance.Operations)...)
 	return compactUniqueStrings(refs)
 }
 

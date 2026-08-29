@@ -53,38 +53,7 @@ func (i RuntimeCompleteAdmissionInput) Clone() RuntimeCompleteAdmissionInput {
 }
 
 func cloneRuntimeCompleteAdmissionAttempt(value RuntimeCandidateAttemptRecord) RuntimeCandidateAttemptRecord {
-	ret := value
-	if value.Proposal != nil {
-		proposal := cloneRuntimeCandidate(*value.Proposal)
-		ret.Proposal = &proposal
-	}
-	ret.Feasibilities = cloneRuntimeCandidateFeasibilities(value.Feasibilities)
-	if value.Failure != nil {
-		failure := *value.Failure
-		failure.TargetRefs = append([]string(nil), value.Failure.TargetRefs...)
-		failure.Diagnostic = value.Failure.Diagnostic.Clone()
-		if value.Failure.ValidationDiagnostic != nil {
-			diagnostic := value.Failure.ValidationDiagnostic.Clone()
-			failure.ValidationDiagnostic = &diagnostic
-		}
-		ret.Failure = &failure
-	}
-	if value.Correction != nil {
-		ret.Correction = value.Correction.Clone()
-	}
-	if value.Stale != nil {
-		stale := value.Stale.Normalized()
-		ret.Stale = &stale
-	}
-	if value.PrerequisiteRequest != nil {
-		request := value.PrerequisiteRequest.Normalized()
-		ret.PrerequisiteRequest = &request
-	}
-	if value.OwnerFeasibility != nil {
-		observation := value.OwnerFeasibility.Clone()
-		ret.OwnerFeasibility = &observation
-	}
-	return ret
+	return value.Clone()
 }
 
 func (i RuntimeCompleteAdmissionInput) cloneExecutionFacts() RuntimeCompleteAdmissionInput {
@@ -168,6 +137,18 @@ func EvaluateRuntimeCompleteAdmission(raw RuntimeCompleteAdmissionInput) Runtime
 		return completeAdmissionFailure(disposition, code, err)
 	}
 	ownerFacts := RuntimeCandidateManifestOwnerFactsFromContext(RuntimeCandidateContextForDecision(input.Facts, input.Decision, nil))
+	if input.Decision.State == ConvergenceStateNeedAssessment {
+		focus := input.Decision.Focus.Normalized()
+		if _, err := RuntimeAssessmentSourceProjection(input.Facts, focus.ID, focus.CoverageWorkItemIDs); err != nil {
+			return completeAdmissionFailure(RuntimeCompleteAdmissionTerminalContractFailure, "assessment_definition_preimage_invalid", err)
+		}
+		preimage, err := ResolveRuntimeAssessmentPurposePreimage(input.SemanticPlanning, focus.CoverageEvidenceBindings)
+		if err != nil {
+			return completeAdmissionFailure(RuntimeCompleteAdmissionTerminalContractFailure, "assessment_purpose_preimage_invalid", err)
+		}
+		ownerFacts.AssessmentPurpose = preimage.Purpose
+		ownerFacts.AssessmentPurposeManifestHash = preimage.SemanticManifestHash
+	}
 	if err := ValidateRuntimeCandidateContractManifestForDecision(input.Manifest, input.Decision, ownerFacts); err != nil {
 		return completeAdmissionFailure(RuntimeCompleteAdmissionStaleConflict, "candidate_manifest_stale", err)
 	}

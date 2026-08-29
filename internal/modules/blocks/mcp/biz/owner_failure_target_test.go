@@ -3,9 +3,12 @@ package mcp
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"reflect"
+	"strings"
 	"sync/atomic"
 	"testing"
 
@@ -36,16 +39,24 @@ func TestMCPFailureTargetsDoNotFallBackToOperationTarget(t *testing.T) {
 }
 
 func TestMCPFailureTargetObservationRequiresBoundedOwnerFields(t *testing.T) {
+	evidenceHash := strings.Repeat("a", 64)
+	evidence := runtimecontract.RuntimeOperationEvidence{
+		ContentHash:    evidenceHash,
+		ContentAddress: &runtimecontract.RuntimeEvidenceContentAddress{Algorithm: runtimecontract.RuntimeEvidenceDigestSHA256, Digest: evidenceHash, Ref: "workorch://mcp/evidence/" + evidenceHash},
+		EvidenceRefs:   []string{"workorch://mcp/capability/server-a/revision-1", "workorch://mcp/evidence/" + evidenceHash},
+	}
 	result := RuntimeOperationResult{
 		ServerID: "server-a", OwnerRevision: "mcp-server-v1",
 		Diagnostics: MCPCapabilityFailureDiagnostics{TargetRole: "implementation", FailureTargets: []string{" implementation.go ", "implementation.go"}},
 	}
-	observation := mcpFailureTargetObservation(result)
+	observation := mcpFailureTargetObservation(result, evidence)
 	if observation == nil {
 		t.Fatal("mcpFailureTargetObservation() = nil, want owner observation")
 	}
 	if observation.OwnerModuleID != ModuleID || observation.SubjectRef != "server-a" || observation.TargetRole != "implementation" ||
-		observation.ObservedRevision != "mcp-server-v1" || !reflect.DeepEqual(observation.TargetRefs, []string{"implementation.go"}) {
+		observation.ObservedRevision != "mcp-server-v1" || !reflect.DeepEqual(observation.TargetRefs, []string{"implementation.go"}) ||
+		observation.DiagnosticClass != runtimecontract.RuntimeFailureTargetDiagnosticReceiptEvidence || observation.ContentHash != evidence.ContentHash ||
+		!reflect.DeepEqual(observation.EvidenceRefs, evidence.EvidenceRefs) {
 		t.Fatalf("observation = %+v", observation)
 	}
 	for _, invalid := range []RuntimeOperationResult{
@@ -53,9 +64,41 @@ func TestMCPFailureTargetObservationRequiresBoundedOwnerFields(t *testing.T) {
 		{ServerID: "server-a", Diagnostics: MCPCapabilityFailureDiagnostics{TargetRole: "implementation", FailureTargets: []string{"implementation.go"}}},
 		{ServerID: "server-a", OwnerRevision: "mcp-server-v1", Diagnostics: MCPCapabilityFailureDiagnostics{TargetRole: "implementation"}},
 	} {
-		if got := mcpFailureTargetObservation(invalid); got != nil {
+		if got := mcpFailureTargetObservation(invalid, evidence); got != nil {
 			t.Fatalf("mcpFailureTargetObservation(%+v) = %+v, want nil", invalid, got)
 		}
+	}
+	if got := mcpFailureTargetObservation(result, runtimecontract.RuntimeOperationEvidence{Summary: "evidence persistence failed"}); got != nil {
+		t.Fatalf("observation without persisted owner evidence = %+v, want nil", got)
+	}
+}
+
+func TestMCPFailureTargetOverflowDoesNotTruncateIntoAuthority(t *testing.T) {
+	targets := make([]string, 0, runtimecontract.RuntimeFailureTargetObservationMaxTargetRefs+1)
+	for index := 0; index <= runtimecontract.RuntimeFailureTargetObservationMaxTargetRefs; index++ {
+		targets = append(targets, fmt.Sprintf("target-%02d.go", index))
+	}
+	result := RuntimeOperationResult{
+		ServerID: "server-a", OwnerRevision: "mcp-server-v1",
+		Diagnostics: MCPCapabilityFailureDiagnostics{TargetRole: "implementation", FailureTargets: targets},
+	}
+	if got := mcpFailureTargets(result); got != nil {
+		t.Fatalf("overflow targets were truncated into authority: %+v", got)
+	}
+	raw, err := json.Marshal(map[string]any{"failureTargets": targets})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := observedMCPFailureTargets(MCPResponsePayload{JSON: raw}); got != nil {
+		t.Fatalf("response overflow was truncated into authority: %+v", got)
+	}
+	evidenceHash := strings.Repeat("a", 64)
+	if got := mcpFailureTargetObservation(result, runtimecontract.RuntimeOperationEvidence{
+		ContentHash:    evidenceHash,
+		ContentAddress: &runtimecontract.RuntimeEvidenceContentAddress{Algorithm: runtimecontract.RuntimeEvidenceDigestSHA256, Digest: evidenceHash, Ref: "workorch://mcp/evidence/" + evidenceHash},
+		EvidenceRefs:   []string{"workorch://mcp/evidence/" + evidenceHash},
+	}); got != nil {
+		t.Fatalf("overflow observation = %+v, want nil", got)
 	}
 }
 
@@ -164,7 +207,10 @@ func TestMCPOwnerEmitsStructuredFailureTargetObservationThroughTypedReceipt(t *t
 	if response.Receipt.Outcome != runtimecontract.RuntimeOperationOutcomeRejected || diagnostic == nil ||
 		!reflect.DeepEqual(diagnostic.TargetRefs, []string{"implementation.go"}) ||
 		diagnostic.TargetObservation == nil || diagnostic.TargetObservation.TargetRole != "implementation" ||
-		!reflect.DeepEqual(diagnostic.TargetObservation.TargetRefs, []string{"implementation.go"}) {
+		!reflect.DeepEqual(diagnostic.TargetObservation.TargetRefs, []string{"implementation.go"}) ||
+		diagnostic.TargetObservation.DiagnosticClass != runtimecontract.RuntimeFailureTargetDiagnosticReceiptEvidence ||
+		diagnostic.TargetObservation.ContentHash != response.Receipt.Evidence.ContentHash ||
+		!reflect.DeepEqual(diagnostic.TargetObservation.EvidenceRefs, response.Receipt.Evidence.EvidenceRefs) {
 		t.Fatalf("MCP owner failure result = %+v", response)
 	}
 	if !reflect.DeepEqual(response.Receipt.TargetRefs, []string{"validation-entry.go"}) ||
@@ -196,6 +242,107 @@ func TestMCPOwnerEmitsStructuredFailureTargetObservationThroughTypedReceipt(t *t
 	duplicate, ok := duplicateData.(mcpevents.ExecuteOperationResult)
 	if !ok || !runtimecontract.SameRuntimeOperationReceipt(duplicate.Receipt, response.Receipt) || requests.Load() != 1 {
 		t.Fatalf("duplicate MCP receipt repeated owner effect: response=%+v requests=%d", duplicate, requests.Load())
+	}
+}
+
+func TestMCPOwnerEvidencePersistenceFailureEmitsNoDirectTargetObservation(t *testing.T) {
+	ctx := context.Background()
+	internalDirectory := t.TempDir()
+	evidenceDirectory, err := mcpEvidenceDirectory(internalDirectory)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var sabotageErr atomic.Value
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		if err := os.RemoveAll(evidenceDirectory); err != nil {
+			sabotageErr.Store(err.Error())
+		}
+		if err := os.WriteFile(evidenceDirectory, []byte("not a directory"), 0o600); err != nil {
+			sabotageErr.Store(err.Error())
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"content":        []map[string]any{{"type": "text", "text": "implementation failed"}},
+			"failureTargets": []string{"implementation.go"},
+			"isError":        true,
+		})
+	}))
+	defer server.Close()
+
+	hub := magicevent.NewHub(16)
+	t.Cleanup(func() { hub.Terminate(ctx) })
+	owner, err := New(hub, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	capability := testMCPToolCapability("mcp-evidence-failure", "lookup.references", mcpmodel.ValidationProofApplicabilityDirect)
+	owner.runtimeAdapter = NewRuntimeAdapter(staticMCPServerGetter{server: &mcpmodel.Server{
+		ID: "mcp-evidence-failure", Name: "evidence failure", Transport: "http", Endpoint: server.URL,
+		Enabled: true, AllowedTools: []string{"lookup.references"}, TimeoutMillis: 1000,
+	}, capabilities: []*mcpmodel.Capability{capability}})
+	if err := owner.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { owner.Teardown(ctx) })
+
+	receiptOwner := magicevent.NewSimpleObserver(orchestratorevents.CommandDestination, hub)
+	receiptOwner.Subscribe(orchestratorevents.TopicOrchestratorQueryRuntimeOperationReceipt, func(_ magicevent.Event, result magicevent.Result) {
+		result.Set(orchestratorevents.QueryRuntimeOperationReceiptResult{Found: false}, nil)
+	})
+	receiptOwner.Subscribe(orchestratorevents.TopicOrchestratorCommitRuntimeOperationReceipt, func(event magicevent.Event, result magicevent.Result) {
+		command := event.Data().(orchestratorevents.CommitRuntimeOperationReceiptCommand)
+		result.Set(orchestratorevents.CommitRuntimeOperationReceiptResult{Receipt: command.Receipt, StateRevision: 1}, nil)
+	})
+	t.Cleanup(func() {
+		receiptOwner.Unsubscribe(orchestratorevents.TopicOrchestratorCommitRuntimeOperationReceipt)
+		receiptOwner.Unsubscribe(orchestratorevents.TopicOrchestratorQueryRuntimeOperationReceipt)
+	})
+
+	operation := runtimecontract.RuntimeOperation{
+		ID: "validate-entry", Kind: runtimecontract.StepKindMCPToolCall,
+		CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-v2"}, TargetRefs: []string{"validation-entry.go"},
+		Parameters: []runtimecontract.OperationParameter{
+			{Name: "serverId", String: stringPointer("mcp-evidence-failure")}, {Name: "tool", String: stringPointer("lookup.references")},
+			{Name: "input.path", String: stringPointer("validation-entry.go")},
+		},
+	}
+	sealed := sealMCPTestOperation(t, owner.runtimeAdapter, operation)
+	command := mcpevents.ExecuteOperationCommand{
+		RuntimeOperationExecutionContext: runtimecontract.RuntimeOperationExecutionContext{
+			Execution: mcpTestExecutionEnvelope(operation, runtimecontract.RuntimeOperationExecutionEnvelope{
+				ExecutionKey: "exec/ws-v2/run-v2/dispatch-1/validate-entry", Fence: 1,
+				ExpectedEffectScope: runtimecontract.RuntimeEffectNone, AdmissibilitySnapshotID: sealed.Authorization.CatalogSnapshotID,
+				AcquisitionBinding: sealed.Authorization.AcquisitionBinding,
+			}, sealed.Authorization.Policy),
+			WorkspaceID: "ws-v2", RunID: "run-v2", DispatchID: "dispatch-1",
+			Transaction: runtimecontract.AuthorityTransaction{AuthoritySnapshotID: "authority-1"},
+			OperationID: "validate-entry", CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-v2"}, TargetRefs: []string{"validation-entry.go"},
+			EvidenceKind: runtimecontract.EvidenceKindValidation, WorkspaceDeliverableDirectory: t.TempDir(), WorkspaceInternalDirectory: internalDirectory,
+		},
+		SealedOperation: sealed,
+		TargetRole:      "implementation",
+	}
+	result := hub.Send(magicevent.NewEventWithContext(
+		mcpevents.TopicExecuteOperation, runtimecontract.RuntimeModuleOrchestrator, ModuleID,
+		magicevent.NewHeader(), ctx, command,
+	))
+	if result == nil {
+		t.Fatal("MCP owner returned no execution result")
+	}
+	data, resultErr := result.Get()
+	if resultErr != nil {
+		t.Fatalf("MCP owner execution result error=%#v resultError=%#v", resultErr, result.Error())
+	}
+	if value := sabotageErr.Load(); value != nil {
+		t.Fatalf("failed to force MCP evidence persistence failure: %v", value)
+	}
+	response, ok := data.(mcpevents.ExecuteOperationResult)
+	if !ok || response.Receipt.Outcome != runtimecontract.RuntimeOperationOutcomeRejected || response.Receipt.Feedback == nil ||
+		response.Receipt.Feedback.OriginalDiagnostic == nil {
+		t.Fatalf("MCP evidence-persistence failure result = %#v", data)
+	}
+	diagnostic := response.Receipt.Feedback.OriginalDiagnostic
+	if diagnostic.TargetObservation != nil || len(diagnostic.TargetRefs) != 0 || response.Receipt.Evidence.ContentHash != "" || len(response.Receipt.Evidence.EvidenceRefs) != 0 {
+		t.Fatalf("MCP evidence-persistence failure leaked target authority: receipt=%+v", response.Receipt)
 	}
 }
 

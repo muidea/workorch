@@ -691,6 +691,13 @@ func invalidateFailureTargetObservations(facts *runtimecontract.RuntimeFacts, in
 	if facts.Failure != nil && sameFailureTargetObservationBinding(facts.Failure.TargetObservation, &targetObservation) {
 		facts.Failure.TargetRefs = nil
 		facts.Failure.TargetObservation = nil
+		// The receipt ledger remains the immutable audit source. Once the mutable
+		// owner revision is invalidated, its nested diagnostic copy must not remain
+		// as alternate current MCP target authority.
+		if facts.Failure.OriginalDiagnostic != nil && sameFailureTargetObservationBinding(facts.Failure.OriginalDiagnostic.TargetObservation, &targetObservation) {
+			facts.Failure.OriginalDiagnostic.TargetRefs = nil
+			facts.Failure.OriginalDiagnostic.TargetObservation = nil
+		}
 	}
 	// The directive is a sealed SM-2 decision derived from the same stale
 	// failure fact. ReduceRuntimeStateWithDirective will rebuild it from the
@@ -704,9 +711,19 @@ func invalidateFailureTargetObservations(facts *runtimecontract.RuntimeFacts, in
 
 func failureTargetObservationDependsOnInvalidatedOwnerRevision(target runtimecontract.RuntimeFailureTargetObservation, invalidated map[string]runtimecontract.RuntimePrerequisiteObservation) bool {
 	target = target.Normalized()
+	if target.CatalogDependency == nil {
+		return false
+	}
+	targetDependency := target.CatalogDependency.Normalized()
+	if err := targetDependency.Validate(); err != nil {
+		return false
+	}
 	for _, observation := range invalidated {
 		for _, dependency := range observation.Normalized().Dependencies {
-			if dependency.OwnerModuleID == target.OwnerModuleID && dependency.Revision == target.ObservedRevision {
+			// A catalog revision is identified by the complete owner fact key. An
+			// equal owner/revision from another domain or subject is unrelated and
+			// cannot retire this observation's repair authority.
+			if dependency.Normalized() == targetDependency {
 				return true
 			}
 		}
@@ -722,6 +739,10 @@ func sameFailureTargetObservationBinding(left *runtimecontract.RuntimeFailureTar
 	r := right.Normalized()
 	if l.OwnerModuleID != r.OwnerModuleID || l.SubjectRef != r.SubjectRef || l.TargetRole != r.TargetRole || l.ObservedRevision != r.ObservedRevision ||
 		l.DiagnosticClass != r.DiagnosticClass || l.ContentHash != r.ContentHash || !sameRuntimeTargetRefs(l.EvidenceRefs, r.EvidenceRefs) || len(l.TargetRefs) != len(r.TargetRefs) {
+		return false
+	}
+	if (l.CatalogDependency == nil) != (r.CatalogDependency == nil) ||
+		(l.CatalogDependency != nil && l.CatalogDependency.Normalized() != r.CatalogDependency.Normalized()) {
 		return false
 	}
 	for idx := range l.TargetRefs {

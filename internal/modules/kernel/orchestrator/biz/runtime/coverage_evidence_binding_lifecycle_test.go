@@ -3,6 +3,7 @@ package runtime
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"sync"
 	"testing"
@@ -186,11 +187,8 @@ func TestCoverageEvidenceBindingReceiptCrashRecoveryCreditsExactlyOnce(t *testin
 		t.Fatal(err)
 	}
 	facts := controllerFacts()
-	facts = runtimeTestFactsWithCurrentFocusBindings(t, facts, controllerDefinition())
-	aggregate, err := controller.initialize(ctx, facts, controllerDefinition(), nil)
-	if err != nil {
-		t.Fatal(err)
-	}
+	aggregate := runtimeTestInitializeAndSealSemanticContract(t, ctx, controller, facts, controllerDefinition(), nil)
+	facts = aggregate.Facts
 	bindingRef := aggregate.Facts.Focus.CoverageEvidenceBindings[0].ID
 	candidate := runtimecontract.RuntimeCandidate{StateChange: &runtimecontract.StateChangeCandidate{Operations: []runtimecontract.StateChangingOperation{{
 		Operation: runtimecontract.RuntimeOperation{
@@ -232,6 +230,10 @@ func TestCoverageEvidenceBindingReceiptCrashRecoveryCreditsExactlyOnce(t *testin
 	if noReplay.called {
 		t.Fatal("crash recovery replayed owner side effect after persisted receipt")
 	}
+	completed, err = runtimeTestCommitSatisfiedCoverageAssessment(ctx, restarted, completed)
+	if err != nil {
+		t.Fatal(err)
+	}
 	assertSingleBindingCredit(t, completed, bindingRef, facts.Focus.CoverageWorkItemIDs[0])
 
 	// A lost response after the evidence CAS is represented by the original
@@ -261,7 +263,7 @@ func TestCoverageEvidenceBindingIsolatedAcrossConcurrentWorkspaces(t *testing.T)
 		workspaceID common.WorkspaceID
 		runID       common.RunID
 		target      string
-		facts       runtimecontract.RuntimeFacts
+		aggregate   RuntimeAggregate
 	}
 	scenarios := []scenario{
 		{workspaceID: "ws-c12-a", runID: "run-c12-a", target: "a.txt"},
@@ -270,11 +272,21 @@ func TestCoverageEvidenceBindingIsolatedAcrossConcurrentWorkspaces(t *testing.T)
 	for index := range scenarios {
 		facts := controllerFacts()
 		facts.WorkspaceID, facts.RunID = scenarios[index].workspaceID, scenarios[index].runID
+		seed := facts.DefinitionSeed.Clone()
+		seed.CoverageItems[0].ID = "cwi-c12-shared"
+		seed.Slices[0].CoverageWorkItemIDs = []common.CoverageWorkItemID{"cwi-c12-shared"}
+		seed.Hash = runtimecontract.StableRuntimeDefinitionSeedHash(seed)
+		facts.DefinitionSeed = seed
+		facts.Slices = append([]runtimecontract.RuntimeAcceptanceSlice(nil), seed.Slices...)
 		facts.Focus.ID = "focus-c12-shared"
 		facts.Focus.CoverageWorkItemIDs = []common.CoverageWorkItemID{"cwi-c12-shared"}
 		facts.Focus.TargetRefs = []string{scenarios[index].target}
-		facts.Coverage = []runtimecontract.RuntimeCoverageItemFact{{ID: "cwi-c12-shared", State: runtimecontract.RuntimeCoverageItemStateOpen}}
-		scenarios[index].facts = runtimeTestFactsWithCurrentFocusBindings(t, facts, controllerDefinition())
+		facts.Coverage = []runtimecontract.RuntimeCoverageItemFact{{
+			ID: "cwi-c12-shared", SliceID: seed.CoverageItems[0].SliceID,
+			SourceScope: seed.CoverageItems[0].SourceScope, SourceID: seed.CoverageItems[0].SourceID,
+			TargetText: seed.CoverageItems[0].TargetText, State: runtimecontract.RuntimeCoverageItemStateOpen,
+		}}
+		scenarios[index].aggregate = runtimeTestInitializeAndSealSemanticContract(t, ctx, controller, facts, controllerDefinition(), nil)
 	}
 	type outcome struct {
 		scenario  scenario
@@ -288,11 +300,7 @@ func TestCoverageEvidenceBindingIsolatedAcrossConcurrentWorkspaces(t *testing.T)
 		group.Add(1)
 		go func() {
 			defer group.Done()
-			aggregate, err := controller.initialize(ctx, current.facts, controllerDefinition(), nil)
-			if err != nil {
-				results <- outcome{scenario: current, err: err}
-				return
-			}
+			aggregate := current.aggregate
 			bindingRef := aggregate.Facts.Focus.CoverageEvidenceBindings[0].ID
 			candidate := runtimecontract.RuntimeCandidate{StateChange: &runtimecontract.StateChangeCandidate{Operations: []runtimecontract.StateChangingOperation{{
 				Operation: runtimecontract.RuntimeOperation{ID: "write-c12-shared", Kind: runtimecontract.StepKindFileWrite, BindingRefs: []string{bindingRef}, TargetRefs: []string{current.target}, Parameters: runtimeFileWriteParameters(current.target)},
@@ -310,6 +318,9 @@ func TestCoverageEvidenceBindingIsolatedAcrossConcurrentWorkspaces(t *testing.T)
 				return
 			}
 			completed, err := controller.executeActiveDispatch(ctx, current.workspaceID, current.runID, &acceptingOperationExecutor{owner: controller})
+			if err == nil {
+				completed, err = runtimeTestCommitSatisfiedCoverageAssessment(ctx, controller, completed)
+			}
 			results <- outcome{scenario: current, aggregate: completed, err: err}
 		}()
 	}
@@ -350,11 +361,10 @@ func TestCoverageEvidenceBindingMissingProofCannotBeClaimedOrGovernedAway(t *tes
 	facts := validationQualityFacts(t)
 	facts.Focus.RequireAssessment = true
 	facts.Focus.RequiredCheckRefs = []string{"required-check"}
-	facts = runtimeTestFactsWithCurrentFocusBindings(t, facts, controllerDefinition())
-	aggregate, err := controller.initialize(ctx, facts, controllerDefinition(), nil)
-	if err != nil {
-		t.Fatal(err)
-	}
+	definition := controllerDefinition()
+	definition.CapabilityContract = []string{runtimecontract.StepKindFileWrite, runtimecontract.RuntimeBlockKindManagedValidationSession}
+	aggregate := runtimeTestInitializeAndSealSemanticContract(t, ctx, controller, facts, definition, nil)
+	facts = aggregate.Facts
 	bindingRef := aggregate.Facts.Focus.CoverageEvidenceBindings[0].ID
 	candidate := managedValidationCandidate("validate-c12-missing-proof")
 	candidate.Validation.Operations[0].Operation.BindingRefs = []string{bindingRef}
@@ -408,6 +418,14 @@ func TestCoverageEvidenceBindingMissingProofCannotBeClaimedOrGovernedAway(t *tes
 // It must not install a hand-written binding because this regression protects
 // the exact authorization semantics shared by semantic seal and dispatch.
 func sealMultiTargetExactBindingForTest(t *testing.T, targets []string) (*RuntimeController, *controllerRepository, RuntimeAggregate) {
+	return sealMultiTargetExactBindingWithValidationForTest(t, targets, false, "", "file-multi-target-revision-1")
+}
+
+func sealMultiTargetExactValidationBindingForTest(t *testing.T, targets []string, targetRole string) (*RuntimeController, *controllerRepository, RuntimeAggregate) {
+	return sealMultiTargetExactBindingWithValidationForTest(t, targets, true, targetRole, "tree-v1")
+}
+
+func sealMultiTargetExactBindingWithValidationForTest(t *testing.T, targets []string, includeValidation bool, targetRole, observedRevision string) (*RuntimeController, *controllerRepository, RuntimeAggregate) {
 	t.Helper()
 	ctx := context.Background()
 	repository := &controllerRepository{}
@@ -417,11 +435,18 @@ func sealMultiTargetExactBindingForTest(t *testing.T, targets []string) (*Runtim
 	}
 	facts := controllerFacts()
 	facts.Focus.TargetRefs = append([]string(nil), targets...)
+	facts.Focus.TargetRole = targetRole
+	if includeValidation {
+		facts.Focus.RequiredEvidenceKinds = []string{runtimecontract.EvidenceKindStateChange, runtimecontract.EvidenceKindValidation}
+		facts.Capabilities.ValidationKinds = []string{runtimecontract.RuntimeBlockKindManagedValidationSession}
+		facts = runtimeFactsWithManagedValidationRecipe(facts)
+		facts.Resources.Manifest = &runtimecontract.WorkspaceManifest{Revision: observedRevision, TargetRefs: append([]string(nil), targets...)}
+	}
 	facts.DefinitionFocuses = nil
 	catalog := runtimecontract.RuntimeOperationAdmissibility{
 		PrerequisiteID: "semantic-multi-target-file", OwnerModuleID: runtimecontract.RuntimeModuleFile,
 		OperationKinds: []string{runtimecontract.StepKindFileWrite}, TargetRefs: append([]string(nil), targets...),
-		ObservedRevision: "file-multi-target-revision-1",
+		ObservedRevision: observedRevision,
 	}
 	catalog.SnapshotID = runtimecontract.StableRuntimeOperationAdmissibilitySnapshotID(catalog)
 	prerequisite := runtimecontract.RuntimePrerequisite{
@@ -437,11 +462,39 @@ func sealMultiTargetExactBindingForTest(t *testing.T, targets []string) (*Runtim
 		}},
 	}
 	observation.ObservationID = runtimecontract.StableRuntimePrerequisiteObservationID(observation)
-	facts.Resources.OperationAdmissibilities = []runtimecontract.RuntimeOperationAdmissibility{catalog}
+	ownerCatalogs := []runtimecontract.RuntimeOperationAdmissibility{catalog}
+	for _, ownerCatalog := range facts.Resources.OperationAdmissibilities {
+		if ownerCatalog.Normalized().OwnerModuleID != runtimecontract.RuntimeModuleFile {
+			ownerCatalogs = append(ownerCatalogs, ownerCatalog)
+		}
+	}
+	facts.Resources.OperationAdmissibilities = ownerCatalogs
 	facts.Resources.PrerequisiteObservations = []runtimecontract.RuntimePrerequisiteObservation{observation}
-	facts.Prerequisites.Satisfied = []runtimecontract.RuntimePrerequisite{prerequisite}
+	for _, ownerCatalog := range ownerCatalogs {
+		ownerCatalog = ownerCatalog.Normalized()
+		if ownerCatalog.OwnerModuleID == runtimecontract.RuntimeModuleFile {
+			continue
+		}
+		ownerObservation := runtimecontract.RuntimePrerequisiteObservation{
+			PrerequisiteID: ownerCatalog.PrerequisiteID,
+			Kind:           runtimecontract.PrerequisiteKindOperationAdmissibility,
+			OwnerModuleID:  ownerCatalog.OwnerModuleID,
+			ContentHash:    ownerCatalog.SnapshotID,
+			Dependencies: []runtimecontract.RuntimeFreshnessDependency{{
+				Domain: runtimecontract.RuntimeResourceOwnerCatalog, OwnerModuleID: ownerCatalog.OwnerModuleID,
+				SubjectRef: ownerCatalog.PrerequisiteID, Revision: ownerCatalog.ObservedRevision,
+			}},
+		}
+		ownerObservation.ObservationID = runtimecontract.StableRuntimePrerequisiteObservationID(ownerObservation)
+		facts.Resources.PrerequisiteObservations = append(facts.Resources.PrerequisiteObservations, ownerObservation)
+	}
+	facts.Prerequisites.Satisfied = append(facts.Prerequisites.Satisfied, prerequisite)
 	facts.DefinitionFocuses = runtimeTestDefinitionFocuses(facts)
-	aggregate, err := controller.initialize(ctx, facts, controllerDefinition(), nil)
+	definition := controllerDefinition()
+	if includeValidation {
+		definition.CapabilityContract = append(definition.CapabilityContract, runtimecontract.RuntimeBlockKindManagedValidationSession)
+	}
+	aggregate, err := controller.initialize(ctx, facts, definition, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -478,12 +531,67 @@ func sealMultiTargetExactBindingForTest(t *testing.T, targets []string) (*Runtim
 		RequiredEffectScopes:  []runtimecontract.RuntimeEffectScope{runtimecontract.RuntimeEffectWorkspaceDurable},
 		DeclarationRef:        "semantic/multi-target-exact/" + string(manifest.CoverageItems[0].ID),
 	}
+	type proposalFixture struct {
+		proposal             runtimecontract.RuntimeSemanticProofProposal
+		catalog              runtimecontract.RuntimeOperationAdmissibility
+		catalogObservationID string
+		requiredCheckRefs    []string
+	}
+	proposalFixtures := []proposalFixture{{proposal: proposal, catalog: catalog, catalogObservationID: observation.ObservationID}}
+	if includeValidation {
+		var shellCatalog runtimecontract.RuntimeOperationAdmissibility
+		var surface runtimecontract.RuntimeValidationSurface
+		for _, ownerCatalog := range aggregate.Facts.Resources.OperationAdmissibilities {
+			if ownerCatalog.Normalized().OwnerModuleID != runtimecontract.RuntimeModuleShell {
+				continue
+			}
+			shellCatalog = ownerCatalog.Normalized()
+			for _, candidateSurface := range shellCatalog.ValidationSurfaces {
+				candidateSurface = candidateSurface.Normalized()
+				if candidateSurface.Readiness == runtimecontract.RuntimeValidationSurfaceReady &&
+					candidateSurface.ProofApplicability == runtimecontract.RuntimeValidationProofDirect {
+					surface = candidateSurface
+					break
+				}
+			}
+		}
+		if shellCatalog.SnapshotID == "" || surface.ID == "" {
+			t.Fatal("multi-target validation semantic fixture has no ready Shell surface")
+		}
+		shellObservation, found := CurrentSemanticCatalogObservation(aggregate, shellCatalog)
+		if !found {
+			t.Fatal("multi-target validation semantic fixture has no current Shell catalog observation")
+		}
+		validationProposal := runtimecontract.RuntimeSemanticProofProposal{
+			CoverageWorkItemID: manifest.CoverageItems[0].ID, OwnerModuleID: shellCatalog.OwnerModuleID,
+			OperationKind: surface.OperationKind,
+			Target: runtimecontract.RuntimeOperationTargetAuthorization{
+				Policy: runtimecontract.RuntimeOperationTargetPolicyExactTarget, ExactTargetRefs: append([]string(nil), targets...),
+			},
+			RequiredEvidenceKinds: []string{runtimecontract.EvidenceKindValidation},
+			RequiredEffectScopes:  []runtimecontract.RuntimeEffectScope{surface.EffectScope},
+			ValidationRecipeID:    surface.ID,
+			DeclarationRef:        proposal.DeclarationRef,
+		}
+		proposalFixtures = append(proposalFixtures, proposalFixture{
+			proposal: validationProposal, catalog: shellCatalog,
+			catalogObservationID: shellObservation.ObservationID,
+			requiredCheckRefs:    append([]string(nil), surface.CheckRefs...),
+		})
+	}
 	apply := func(event RuntimeInternalEvent) {
 		t.Helper()
 		event.Scope.WorkspaceID, event.Scope.RunID = aggregate.Facts.WorkspaceID, aggregate.Facts.RunID
 		result, applyErr := controller.ApplyInternalEvent(ctx, event)
 		if applyErr != nil {
-			t.Fatalf("apply %s: %v", event.Kind, applyErr)
+			t.Fatalf("apply %s: %v (phase=%q activeBatch=%q feasibilityBatch=%q proposals=%d feasibilities=%d)",
+				event.Kind, applyErr, aggregate.SemanticPlanning.Phase, aggregate.SemanticPlanning.ActiveBatchID,
+				aggregate.SemanticPlanning.FeasibilityBatchID, func() int {
+					if aggregate.SemanticPlanning.Document == nil {
+						return 0
+					}
+					return len(aggregate.SemanticPlanning.Document.Proposals)
+				}(), len(aggregate.SemanticPlanning.Feasibilities))
 		}
 		aggregate = result.Aggregate
 	}
@@ -510,8 +618,15 @@ func sealMultiTargetExactBindingForTest(t *testing.T, targets []string) (*Runtim
 		PlanStep: runtimecontract.RuntimeSemanticPlanStepProofBatch,
 		BatchID:  batch.BatchID, BatchSequence: batch.Sequence,
 		BatchCoverageWorkItemIDs: append([]common.CoverageWorkItemID(nil), batch.CoverageWorkItemIDs...),
-		Proposals:                []runtimecontract.RuntimeSemanticProofProposal{proposal},
+		Proposals: func() []runtimecontract.RuntimeSemanticProofProposal {
+			ret := make([]runtimecontract.RuntimeSemanticProofProposal, 0, len(proposalFixtures))
+			for _, fixture := range proposalFixtures {
+				ret = append(ret, fixture.proposal)
+			}
+			return ret
+		}(),
 	}
+	proof = proof.Normalized()
 	if err := proof.ValidateAgainstManifest(manifest); err != nil {
 		t.Fatal(err)
 	}
@@ -519,18 +634,23 @@ func sealMultiTargetExactBindingForTest(t *testing.T, targets []string) (*Runtim
 		SemanticDocument: &proof, LogicalRequestID: batch.RequestLogicalID,
 	}})
 	apply(RuntimeInternalEvent{Kind: RuntimeInternalEventSemanticFeasibilityRequired, Authority: &RuntimeInternalAuthorityPayload{}})
-	feasibility := runtimecontract.RuntimeSemanticProofFeasibility{
-		SchemaVersion: runtimecontract.RuntimeSemanticFeasibilitySchemaCurrent,
-		ManifestHash:  manifest.Hash, DefinitionSeedHash: manifest.DefinitionSeedHash,
-		CoverageWorkItemID: proposal.CoverageWorkItemID,
-		ProposalHash:       runtimecontract.StableRuntimeSemanticProofProposalHash(proposal),
-		OwnerModuleID:      proposal.OwnerModuleID, CatalogSnapshotID: catalog.SnapshotID,
-		CatalogObservationID: observation.ObservationID, Status: runtimecontract.RuntimeSemanticFeasibilityFeasible,
-		ObservedRevision: catalog.ObservedRevision, TargetRefs: append([]string(nil), targets...),
+	for _, fixture := range proposalFixtures {
+		candidateProposal := fixture.proposal.Normalized()
+		feasibility := runtimecontract.RuntimeSemanticProofFeasibility{
+			SchemaVersion: runtimecontract.RuntimeSemanticFeasibilitySchemaCurrent,
+			ManifestHash:  manifest.Hash, DefinitionSeedHash: manifest.DefinitionSeedHash,
+			CoverageWorkItemID: candidateProposal.CoverageWorkItemID,
+			ProposalHash:       runtimecontract.StableRuntimeSemanticProofProposalHash(candidateProposal),
+			OwnerModuleID:      candidateProposal.OwnerModuleID, CatalogSnapshotID: fixture.catalog.SnapshotID,
+			CatalogObservationID: fixture.catalogObservationID, Status: runtimecontract.RuntimeSemanticFeasibilityFeasible,
+			ObservedRevision: fixture.catalog.ObservedRevision, TargetRefs: append([]string(nil), targets...),
+			ValidationRecipeID: candidateProposal.ValidationRecipeID,
+			RequiredCheckRefs:  append([]string(nil), fixture.requiredCheckRefs...),
+		}
+		apply(RuntimeInternalEvent{Kind: RuntimeInternalEventSemanticFeasibilityObserved, Authority: &RuntimeInternalAuthorityPayload{
+			SemanticBatchID: aggregate.SemanticPlanning.FeasibilityBatchID, SemanticFeasibility: &feasibility,
+		}})
 	}
-	apply(RuntimeInternalEvent{Kind: RuntimeInternalEventSemanticFeasibilityObserved, Authority: &RuntimeInternalAuthorityPayload{
-		SemanticBatchID: aggregate.SemanticPlanning.FeasibilityBatchID, SemanticFeasibility: &feasibility,
-	}})
 	accepted := aggregate.SemanticPlanning.Batches[0]
 	merged, err := runtimecontract.MergeRuntimeSemanticPlanFocusBatchDocument(manifest, accepted, proof)
 	if err != nil {
@@ -579,7 +699,8 @@ func multiTargetExactCandidate(bindingRef string, targets ...string) runtimecont
 
 func assertSingleBindingCredit(t *testing.T, aggregate RuntimeAggregate, bindingRef string, coverageID common.CoverageWorkItemID) {
 	t.Helper()
-	if len(aggregate.OperationReceipts) != 1 || len(aggregate.Facts.Evidence.Accepted) != 1 || aggregate.EvidenceSequence != 1 {
+	if len(aggregate.OperationReceipts) != 1 || len(aggregate.Facts.Evidence.Accepted) != 1 ||
+		len(aggregate.Facts.Assessments) != 1 || aggregate.EvidenceSequence != 2 {
 		t.Fatalf("C12 receipt/evidence was not exactly once: %+v", aggregate)
 	}
 	evidence := aggregate.Facts.Evidence.Accepted[0]
@@ -589,4 +710,21 @@ func assertSingleBindingCredit(t *testing.T, aggregate RuntimeAggregate, binding
 	if len(aggregate.Facts.Coverage) != 1 || aggregate.Facts.Coverage[0].ID != coverageID || aggregate.Facts.Coverage[0].State != runtimecontract.RuntimeCoverageItemStateSatisfied {
 		t.Fatalf("C12 coverage is not binding-derived and satisfied: %+v", aggregate.Facts.Coverage)
 	}
+}
+
+func runtimeTestCommitSatisfiedCoverageAssessment(ctx context.Context, controller *RuntimeController, aggregate RuntimeAggregate) (RuntimeAggregate, error) {
+	if aggregate.Decision.State != runtimecontract.ConvergenceStateNeedAssessment {
+		return RuntimeAggregate{}, fmt.Errorf("coverage assessment fixture state = %q, want %q", aggregate.Decision.State, runtimecontract.ConvergenceStateNeedAssessment)
+	}
+	if _, err := controller.BeginCandidateAttemptForTest(ctx, aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, 0, "coverage-assessment/"+aggregate.Facts.Focus.ID); err != nil {
+		return RuntimeAggregate{}, err
+	}
+	candidate := runtimecontract.RuntimeCandidate{Assessment: &runtimecontract.AssessmentCandidate{
+		FocusID: aggregate.Facts.Focus.ID, CoverageWorkItemIDs: append([]common.CoverageWorkItemID(nil), aggregate.Facts.Focus.CoverageWorkItemIDs...),
+		Disposition: runtimecontract.AssessmentDispositionSatisfied, Summary: "sealed coverage evidence satisfies the active focus",
+	}}
+	if _, err := controller.AcceptCandidateAttempt(ctx, aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, 0, candidate); err != nil {
+		return RuntimeAggregate{}, err
+	}
+	return controller.commitAssessment(ctx, aggregate.Facts.WorkspaceID, aggregate.Facts.RunID)
 }

@@ -87,8 +87,9 @@ func BenchmarkRuntimeDriveLoopReduction64CWI(b *testing.B) {
 		facts, decision, err := ReduceRuntimeStateWithDirective(
 			aggregate.Facts,
 			&previous,
-			aggregate.CoverageProofLineage,
-		)
+
+			aggregate.CoverageProofLineage)
+
 		if err != nil {
 			b.Fatal(err)
 		}

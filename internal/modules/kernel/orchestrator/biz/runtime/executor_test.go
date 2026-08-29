@@ -3,6 +3,7 @@ package runtime
 import (
 	"context"
 	"errors"
+	"fmt"
 	"reflect"
 	"testing"
 
@@ -56,17 +57,34 @@ func TestRuntimeOperationReceiptJudgmentStillRejectsAcceptedEffectMismatch(t *te
 	}
 }
 
-func TestRuntimeValidationScopeTargetsOnlyCrossShellManagedValidationBoundary(t *testing.T) {
-	facts := runtimecontract.RuntimeFacts{Resources: runtimecontract.RuntimeResourceFacts{Manifest: &runtimecontract.WorkspaceManifest{
-		Revision: "tree-r1", TargetRefs: []string{"cmd/lsp-bridge/main.go", "internal/lspbridge/validation_surface_test.go"},
-	}}}
-	managed := runtimecontract.RuntimeOperation{ID: "validate", Kind: runtimecontract.RuntimeBlockKindManagedValidationSession}
-	if got := runtimeValidationScopeTargetRefs(facts, managed); len(got) != 2 || got[0] != "cmd/lsp-bridge/main.go" || got[1] != "internal/lspbridge/validation_surface_test.go" {
-		t.Fatalf("managed validation target scope = %v", got)
+func TestRuntimeValidationScopeTargetsOnlyUseSealedManagedValidationAuthority(t *testing.T) {
+	managed := runtimecontract.RuntimeOperation{ID: "validate", Kind: runtimecontract.RuntimeBlockKindManagedValidationSession, TargetRefs: []string{"internal/lspbridge/validation_surface_test.go"}}
+	dispatch := SealedDispatch{
+		Candidate: runtimecontract.RuntimeCandidate{Validation: &runtimecontract.ValidationCandidate{Operations: []runtimecontract.ValidationOperation{{Operation: managed}}}},
+		OperationTargetAuthorizations: []runtimecontract.RuntimeDispatchOperationTargetAuthorization{{
+			OperationID: managed.ID, OperationHash: runtimecontract.StableRuntimeOperationHash(managed), RequireTargets: true,
+			Target: runtimecontract.RuntimeOperationTargetAuthorization{
+				Policy:               runtimecontract.RuntimeOperationTargetPolicyExistingOwnerScope,
+				OwnerScopeTargetRefs: []string{"cmd/lsp-bridge/main.go", "internal/lspbridge/validation_surface_test.go"},
+			},
+		}},
 	}
-	got := runtimeValidationScopeTargetRefs(facts, runtimecontract.RuntimeOperation{ID: "mutate", Kind: runtimecontract.StepKindShellCommand})
-	if len(got) != 0 {
-		t.Fatalf("durable Shell command received validation target scope: %v", got)
+	got, err := runtimeValidationScopeTargetRefs(dispatch, managed)
+	if err != nil || len(got) != 2 || got[0] != "cmd/lsp-bridge/main.go" || got[1] != "internal/lspbridge/validation_surface_test.go" {
+		t.Fatalf("managed validation sealed target scope = %v err=%v", got, err)
+	}
+	got, err = runtimeValidationScopeTargetRefs(SealedDispatch{}, runtimecontract.RuntimeOperation{ID: "mutate", Kind: runtimecontract.StepKindShellCommand})
+	if err != nil || len(got) != 0 {
+		t.Fatalf("durable Shell command received validation target scope: %v err=%v", got, err)
+	}
+
+	selectorOnly := dispatch
+	selectorOnly.OperationTargetAuthorizations = runtimecontract.CloneRuntimeDispatchOperationTargetAuthorizations(dispatch.OperationTargetAuthorizations)
+	selectorOnly.OperationTargetAuthorizations[0].Target.OwnerScopeTargetRefs = nil
+	selectorOnly.OperationTargetAuthorizations[0].Target.OwnerSelectorRefs = []string{"workspace-validation-target"}
+	got, err = runtimeValidationScopeTargetRefs(selectorOnly, managed)
+	if err != nil || len(got) != 0 {
+		t.Fatalf("selector-only managed validation invented a finite diagnostic scope: scope=%v err=%v", got, err)
 	}
 }
 
@@ -93,6 +111,37 @@ func (e *noOpOperationExecutor) ExecuteRuntimeOperation(ctx context.Context, req
 		EventID: "event-" + string(request.WorkspaceID) + "-" + string(request.RunID) + "-" + request.Operation.ID, OperationID: request.Operation.ID, EvidenceKind: request.EvidenceKind,
 		Status: ExecutionEvidenceStatusAccepted, SourceRef: "runtime://" + request.Operation.ID,
 		Evidence: receipt.Evidence, Receipt: committed,
+	}, nil
+}
+
+type passingManagedValidationExecutor struct {
+	owner *RuntimeController
+}
+
+func (e *passingManagedValidationExecutor) ExecuteRuntimeOperation(ctx context.Context, request RuntimeOperationExecutionRequest) (RuntimeOperationExecutionResult, error) {
+	if len(request.ValidationRecipes) != 1 {
+		return RuntimeOperationExecutionResult{}, fmt.Errorf("managed validation fixture requires one sealed recipe, got %d", len(request.ValidationRecipes))
+	}
+	recipeID := request.ValidationRecipes[0].ID
+	checkRef := "check/" + recipeID
+	evidence := runtimecontract.RuntimeOperationEvidence{
+		Summary: "current workspace state validated",
+		Validation: &runtimecontract.RuntimeValidationObservation{
+			RecipeID: recipeID, ExecutedChecks: []string{checkRef}, PassedChecks: []string{checkRef},
+		},
+	}
+	receipt := runtimecontract.RuntimeOperationReceipt{
+		ExecutionKey: request.Execution.ExecutionKey, OperationID: request.Operation.ID,
+		Outcome: runtimecontract.RuntimeOperationOutcomeAccepted, ObservedEffectScope: request.Execution.ExpectedEffectScope,
+		TargetRefs: append([]string(nil), request.Operation.TargetRefs...), Evidence: evidence,
+	}
+	_, committed, err := e.owner.commitOperationReceipt(ctx, request.WorkspaceID, request.RunID, request.DispatchID, request.Execution.Fence, receipt)
+	if err != nil {
+		return RuntimeOperationExecutionResult{}, err
+	}
+	return RuntimeOperationExecutionResult{
+		EventID: "event-current-state-validation", OperationID: request.Operation.ID, EvidenceKind: request.EvidenceKind,
+		Status: ExecutionEvidenceStatusAccepted, SourceRef: "runtime://current-state-validation", Evidence: evidence, Receipt: committed,
 	}, nil
 }
 
@@ -281,10 +330,8 @@ func TestRuntimeControllerExecutesDependencyOrderedOperationsAndCommitsEvidence(
 	controller, _ := NewRuntimeController(repository)
 	facts := multiOperationDependencyFixtureFacts(t)
 	facts.Activation.EvidencePolicies = []runtimecontract.RuntimeEvidencePolicy{{ID: "policy-1", AppliesTo: runtimecontract.StepKindFileEdit}}
-	aggregate, err := controller.initialize(context.Background(), facts, controllerDefinition(), nil)
-	if err != nil {
-		t.Fatal(err)
-	}
+	aggregate := runtimeTestInitializeAndSealSemanticContract(t, context.Background(), controller, facts, controllerDefinition(), nil)
+	facts = aggregate.Facts
 	candidate := multiOperationCandidate()
 	sealed, err := beginAndAcceptCandidate(t, controller, aggregate, candidate)
 	if err != nil {
@@ -304,7 +351,7 @@ func TestRuntimeControllerExecutesDependencyOrderedOperationsAndCommitsEvidence(
 	if len(executor.requests[0].EvidencePolicies) != 1 || executor.requests[0].EvidencePolicies[0].ID != "policy-1" {
 		t.Fatalf("executor request lost typed evidence policy: %+v", executor.requests[0].EvidencePolicies)
 	}
-	if completed.ActiveDispatch != nil || len(completed.CompletedDispatches) != 1 || completed.Decision.State != runtimecontract.ConvergenceStateComplete {
+	if completed.ActiveDispatch != nil || len(completed.CompletedDispatches) != 1 || completed.Decision.State != runtimecontract.ConvergenceStateNeedAssessment {
 		t.Fatalf("completed aggregate = %+v", completed)
 	}
 	if completed.EvidenceSequence != 2 || len(completed.Facts.Evidence.Accepted) != 2 {
@@ -320,10 +367,8 @@ func TestTerminatedRuntimeCannotClaimOrExecuteSealedDispatch(t *testing.T) {
 		t.Fatal(err)
 	}
 	facts := multiOperationDependencyFixtureFacts(t)
-	aggregate, err := controller.initialize(ctx, facts, controllerDefinition(), nil)
-	if err != nil {
-		t.Fatal(err)
-	}
+	aggregate := runtimeTestInitializeAndSealSemanticContract(t, ctx, controller, facts, controllerDefinition(), nil)
+	facts = aggregate.Facts
 	sealed, err := beginAndAcceptCandidate(t, controller, aggregate, multiOperationCandidate())
 	if err != nil {
 		t.Fatal(err)
@@ -357,8 +402,20 @@ func TestTerminatedRuntimeCannotClaimOrExecuteSealedDispatch(t *testing.T) {
 
 func TestRuntimeControllerRestartContinuesSealedDispatchAfterResourceChangingReceipt(t *testing.T) {
 	ctx := context.Background()
-	aggregate := stateChangeAggregate(t)
-	runtimeTestSealCurrentFocusBindingTargetSurface(&aggregate.Facts, runtimeTestBindingTargetSurface{TargetRefs: []string{"main.go", "other.go"}})
+	aggregate := stateChangeAggregateWithPreparation(t, func(aggregate *RuntimeAggregate) {
+		aggregate.Facts.Focus.TargetRefs = []string{"main.go", "other.go"}
+		catalog := runtimecontract.RuntimeOperationAdmissibility{
+			PrerequisiteID: "test-semantic-file", OwnerModuleID: runtimecontract.RuntimeModuleFile,
+			OperationKinds: []string{runtimecontract.RuntimeBlockKindPatchApply},
+			OperationVariants: []runtimecontract.RuntimeOperationAdmissibilityVariant{{
+				Kind: runtimecontract.RuntimeBlockKindPatchApply, VariantID: "file_write",
+				AllowedTargetPolicies: []runtimecontract.RuntimeOperationTargetPolicy{runtimecontract.RuntimeOperationTargetPolicyExactTarget},
+			}},
+			TargetRefs: []string{"main.go", "other.go"}, ObservedRevision: "tree-v1",
+		}
+		catalog.SnapshotID = runtimecontract.StableRuntimeOperationAdmissibilitySnapshotID(catalog)
+		aggregate.Facts.Resources.OperationAdmissibilities = []runtimecontract.RuntimeOperationAdmissibility{catalog}
+	})
 	_, _ = addFreshFileAdmissibilityObservation(t, &aggregate)
 	repository := &durableRuntimeStateRepository{aggregate: aggregate}
 	controller, err := NewRuntimeController(repository)
@@ -424,10 +481,8 @@ func TestRuntimeControllerStopsDispatchAfterRejectedOperation(t *testing.T) {
 	controller, _ := NewRuntimeController(repository)
 	// This test stops a rejected operation before it can close coverage.
 	facts := multiOperationDependencyFixtureFacts(t)
-	aggregate, err := controller.initialize(context.Background(), facts, controllerDefinition(), nil)
-	if err != nil {
-		t.Fatal(err)
-	}
+	aggregate := runtimeTestInitializeAndSealSemanticContract(t, context.Background(), controller, facts, controllerDefinition(), nil)
+	facts = aggregate.Facts
 	sealed, err := beginAndAcceptCandidate(t, controller, aggregate, multiOperationCandidate())
 	if err != nil {
 		t.Fatal(err)
@@ -506,12 +561,9 @@ func TestRuntimeControllerRecoversReceiptWhenOwnerResponseIsLostAfterCommit(t *t
 	// Response-loss recovery is an SM-3 receipt fence test. Keep the fixture on
 	// an explicitly sealed non-assessment focus so this test does not conflate
 	// it with the separate SM-2 assessment transition of semantic planning.
-	facts := runtimeTestFactsWithCurrentFocusBindings(t, controllerFacts(), controllerDefinition())
-	facts = runtimeTestSeedSemanticTargetSnapshots(facts)
-	aggregate, err := controller.initialize(context.Background(), facts, controllerDefinition(), nil)
-	if err != nil {
-		t.Fatal(err)
-	}
+	facts := controllerFacts()
+	aggregate := runtimeTestInitializeAndSealSemanticContract(t, context.Background(), controller, facts, controllerDefinition(), nil)
+	facts = aggregate.Facts
 	if _, err := beginAndAcceptCandidate(t, controller, aggregate, runtimecontract.RuntimeCandidate{StateChange: &runtimecontract.StateChangeCandidate{Operations: []runtimecontract.StateChangingOperation{{
 		Operation: runtimecontract.RuntimeOperation{ID: "write-1", Kind: runtimecontract.StepKindFileWrite, CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-v2"}, TargetRefs: []string{"target.txt"}, Parameters: runtimeFileWriteParameters("recovered")},
 	}}}}); err != nil {
@@ -522,7 +574,7 @@ func TestRuntimeControllerRecoversReceiptWhenOwnerResponseIsLostAfterCommit(t *t
 	if err != nil {
 		t.Fatalf("response-loss recovery: %v", err)
 	}
-	if completed.ActiveDispatch != nil || completed.Decision.State != runtimecontract.ConvergenceStateComplete ||
+	if completed.ActiveDispatch != nil || completed.Decision.State != runtimecontract.ConvergenceStateNeedAssessment ||
 		len(completed.OperationReceipts) != 1 || len(completed.Facts.Evidence.Accepted) != 1 {
 		t.Fatalf("response-loss recovery aggregate = %+v", completed)
 	}
@@ -642,11 +694,10 @@ func TestRuntimeControllerDoesNotReplayClaimedManagedValidationWithoutReplayProo
 	facts.Focus.RequiredEvidenceKinds = []string{runtimecontract.EvidenceKindValidation}
 	facts.Focus.AcceptedStepKinds = []string{runtimecontract.RuntimeBlockKindManagedValidationSession}
 	facts.Capabilities = runtimecontract.RuntimeCapabilities{ValidationKinds: []string{runtimecontract.RuntimeBlockKindManagedValidationSession}}
-	facts = runtimeTestFactsWithCurrentFocusBindings(t, facts, controllerDefinition())
-	aggregate, err := controller.initialize(context.Background(), facts, controllerDefinition(), nil)
-	if err != nil {
-		t.Fatal(err)
-	}
+	definition := controllerDefinition()
+	definition.CapabilityContract = []string{runtimecontract.StepKindFileWrite, runtimecontract.RuntimeBlockKindManagedValidationSession}
+	aggregate := runtimeTestInitializeAndSealSemanticContract(t, context.Background(), controller, facts, definition, nil)
+	facts = aggregate.Facts
 	sealed, err := beginAndAcceptCandidate(t, controller, aggregate, managedValidationCandidate("read-1"))
 	if err != nil {
 		t.Fatal(err)
@@ -681,13 +732,14 @@ func TestRuntimeControllerRecoversClaimedAtMostOnceOperationOnlyWithSealedReplay
 	controller, _ := NewRuntimeController(repository)
 	facts := controllerFacts()
 	facts.Capabilities = runtimecontract.RuntimeCapabilities{StateChangeKinds: []string{runtimecontract.StepKindFileWrite}}
+	// The semantic test compiler supplies the exact File catalog after the
+	// unbound activation is persisted. Keeping a second handwritten File
+	// snapshot here would create two owner identities for one feasibility.
+	facts.Resources.OperationAdmissibilities = nil
 	definition := controllerDefinition()
 	definition.CapabilityContract = []string{runtimecontract.StepKindFileWrite}
-	facts = runtimeTestFactsWithCurrentFocusBindings(t, facts, definition)
-	_, err := controller.initialize(context.Background(), facts, definition, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
+	aggregate := runtimeTestInitializeAndSealSemanticContract(t, context.Background(), controller, facts, definition, nil)
+	facts = aggregate.Facts
 	target, content := "target.txt", "after\n"
 	candidate := runtimecontract.RuntimeCandidate{StateChange: &runtimecontract.StateChangeCandidate{Operations: []runtimecontract.StateChangingOperation{{Operation: runtimecontract.RuntimeOperation{
 		ID: "write-1", Kind: runtimecontract.StepKindFileWrite, CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-v2"}, TargetRefs: []string{target},
@@ -731,7 +783,7 @@ func TestRuntimeControllerRecoversClaimedAtMostOnceOperationOnlyWithSealedReplay
 	if len(executor.requests) != 2 || executor.requests[0].Execution.ExecutionKey != executor.requests[1].Execution.ExecutionKey || executor.requests[0].Execution.Fence != executor.requests[1].Execution.Fence || executor.requests[1].Execution.ReplayProof == nil {
 		t.Fatalf("recovery did not reuse sealed execution identity/proof: %+v", executor.requests)
 	}
-	if completed.ActiveDispatch != nil || completed.Decision.State != runtimecontract.ConvergenceStateComplete || completed.Facts.Recovery.OperationRecoveryAttempts != 1 || len(completed.OperationReceipts) != 1 || len(completed.Facts.Evidence.Accepted) != 1 {
+	if completed.ActiveDispatch != nil || completed.Decision.State != runtimecontract.ConvergenceStateNeedAssessment || completed.Facts.Recovery.OperationRecoveryAttempts != 1 || len(completed.OperationReceipts) != 1 || len(completed.Facts.Evidence.Accepted) != 1 {
 		t.Fatalf("replay-proof recovery did not converge exactly once: %+v", completed)
 	}
 }
@@ -739,17 +791,24 @@ func TestRuntimeControllerRecoversClaimedAtMostOnceOperationOnlyWithSealedReplay
 func TestRuntimeControllerRoutesStateChangeNoOpToOneBoundedCurrentStateValidation(t *testing.T) {
 	repository := &controllerRepository{}
 	controller, _ := NewRuntimeController(repository)
-	facts := controllerFacts()
-	facts.Capabilities.ValidationKinds = []string{runtimecontract.StepKindFileRead}
+	facts := runtimeFactsWithManagedValidationRecipe(controllerFacts())
+	facts.Focus.RequiredEvidenceKinds = []string{runtimecontract.EvidenceKindStateChange, runtimecontract.EvidenceKindValidation}
+	facts.Focus.AcceptedStepKinds = []string{runtimecontract.StepKindFileWrite, runtimecontract.RuntimeBlockKindManagedValidationSession}
+	facts.Capabilities.ValidationKinds = []string{runtimecontract.RuntimeBlockKindManagedValidationSession}
+	ownerCatalogs := facts.Resources.OperationAdmissibilities[:0]
+	for _, catalog := range facts.Resources.OperationAdmissibilities {
+		if catalog.Normalized().OwnerModuleID != runtimecontract.RuntimeModuleFile {
+			ownerCatalogs = append(ownerCatalogs, catalog)
+		}
+	}
+	facts.Resources.OperationAdmissibilities = ownerCatalogs
 	// This isolates the policy that follows a no-op durable operation. A
 	// semantic focus requires assessment after a valid state change, which is
 	// outside this bounded validation-path assertion.
-	facts = runtimeTestFactsWithCurrentFocusBindings(t, facts, controllerDefinition())
-	facts = runtimeTestSeedSemanticTargetSnapshots(facts)
-	aggregate, err := controller.initialize(context.Background(), facts, controllerDefinition(), nil)
-	if err != nil {
-		t.Fatal(err)
-	}
+	definition := controllerDefinition()
+	definition.CapabilityContract = []string{runtimecontract.StepKindFileWrite, runtimecontract.RuntimeBlockKindManagedValidationSession}
+	aggregate := runtimeTestInitializeAndSealSemanticContract(t, context.Background(), controller, facts, definition, nil)
+	facts = aggregate.Facts
 	if _, err := beginAndAcceptCandidate(t, controller, aggregate, runtimecontract.RuntimeCandidate{StateChange: &runtimecontract.StateChangeCandidate{Operations: []runtimecontract.StateChangingOperation{{
 		Operation: runtimecontract.RuntimeOperation{ID: "write-1", Kind: runtimecontract.StepKindFileWrite, CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-v2"}, TargetRefs: []string{"target.txt"}, Parameters: runtimeFileWriteParameters("same")},
 	}}}}); err != nil {
@@ -771,17 +830,15 @@ func TestRuntimeControllerRoutesStateChangeNoOpToOneBoundedCurrentStateValidatio
 	if len(progressed.Facts.Evidence.Accepted) != 0 || len(progressed.Facts.Evidence.Rejected) != 1 || len(progressed.OperationReceipts) != 1 {
 		t.Fatalf("no-op incorrectly closed durable evidence: accepted=%+v rejected=%+v receipts=%+v", progressed.Facts.Evidence.Accepted, progressed.Facts.Evidence.Rejected, progressed.OperationReceipts)
 	}
-	if _, err := beginAndAcceptCandidate(t, controller, progressed, runtimecontract.RuntimeCandidate{Validation: &runtimecontract.ValidationCandidate{Operations: []runtimecontract.ValidationOperation{{
-		Operation: runtimecontract.RuntimeOperation{ID: "inspect-current-state", Kind: runtimecontract.StepKindFileRead, TargetRefs: []string{"target.txt"}},
-	}}}}); err != nil {
+	if _, err := beginAndAcceptCandidate(t, controller, progressed, managedValidationCandidate("inspect-current-state")); err != nil {
 		t.Fatal(err)
 	}
-	inspected, err := controller.executeActiveDispatch(context.Background(), "ws-v2", "run-v2", &noOpOperationExecutor{owner: controller})
+	inspected, err := controller.executeActiveDispatch(context.Background(), "ws-v2", "run-v2", &passingManagedValidationExecutor{owner: controller})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if inspected.Decision.State != runtimecontract.ConvergenceStateFailed || inspected.Decision.Terminal == nil || inspected.Decision.Terminal.Code != "state_change_provenance_missing" {
-		t.Fatalf("validated no-op state did not terminate the provenance gap: decision=%+v", inspected.Decision)
+	if inspected.Decision.State != runtimecontract.ConvergenceStateNeedAssessment || inspected.Decision.Terminal != nil {
+		t.Fatalf("validated no-op state did not advance to canonical assessment: decision=%+v", inspected.Decision)
 	}
 	if len(inspected.Facts.Evidence.Accepted) != 1 || inspected.Facts.Evidence.Accepted[0].Kind != runtimecontract.EvidenceKindValidation || len(inspected.Facts.Evidence.Rejected) != 1 {
 		t.Fatalf("no-op path fabricated state-change evidence: accepted=%+v rejected=%+v", inspected.Facts.Evidence.Accepted, inspected.Facts.Evidence.Rejected)
@@ -949,10 +1006,10 @@ func TestRecordDriveFailureFactAtomicallyInvalidatesActiveDispatch(t *testing.T)
 func TestRuntimeControllerRejectsAcceptedOwnerReceiptWithInconclusiveValidationEvidence(t *testing.T) {
 	repository := &controllerRepository{}
 	controller, _ := NewRuntimeController(repository)
-	aggregate, err := controller.initialize(context.Background(), validationQualityFacts(t), controllerDefinition(), nil)
-	if err != nil {
-		t.Fatal(err)
-	}
+	facts := validationQualityFacts(t)
+	definition := controllerDefinition()
+	definition.CapabilityContract = []string{runtimecontract.StepKindFileWrite, runtimecontract.RuntimeBlockKindManagedValidationSession}
+	aggregate := runtimeTestInitializeAndSealSemanticContract(t, context.Background(), controller, facts, definition, nil)
 	if _, err := beginAndAcceptCandidate(t, controller, aggregate, managedValidationCandidate("validate-zero-work")); err != nil {
 		t.Fatal(err)
 	}
@@ -966,7 +1023,7 @@ func TestRuntimeControllerRejectsAcceptedOwnerReceiptWithInconclusiveValidationE
 		t.Fatal(err)
 	}
 	if executor.called != 1 || progressed.ActiveDispatch != nil || progressed.Decision.State != runtimecontract.ConvergenceStateNeedValidation ||
-		progressed.Decision.Terminal != nil || progressed.Facts.Focus.ID != "focus-v2" {
+		progressed.Decision.Terminal != nil || progressed.Facts.Focus.ID != aggregate.Facts.Focus.ID {
 		t.Fatalf("inconclusive validation did not return to same-focus validation repair: %+v calls=%d", progressed, executor.called)
 	}
 	if len(progressed.Facts.Evidence.Accepted) != 0 || len(progressed.Facts.Evidence.Rejected) != 1 || progressed.Facts.Failure == nil ||
@@ -979,10 +1036,10 @@ func TestRuntimeControllerRejectsAcceptedOwnerReceiptWithInconclusiveValidationE
 func TestRuntimeControllerRestartRejectsPersistedInconclusiveValidationReceiptWithoutReexecution(t *testing.T) {
 	repository := &controllerRepository{}
 	controller, _ := NewRuntimeController(repository)
-	aggregate, err := controller.initialize(context.Background(), validationQualityFacts(t), controllerDefinition(), nil)
-	if err != nil {
-		t.Fatal(err)
-	}
+	facts := validationQualityFacts(t)
+	definition := controllerDefinition()
+	definition.CapabilityContract = []string{runtimecontract.StepKindFileWrite, runtimecontract.RuntimeBlockKindManagedValidationSession}
+	aggregate := runtimeTestInitializeAndSealSemanticContract(t, context.Background(), controller, facts, definition, nil)
 	sealed, err := beginAndAcceptCandidate(t, controller, aggregate, managedValidationCandidate("validate-zero-work"))
 	if err != nil {
 		t.Fatal(err)
@@ -1027,6 +1084,11 @@ func TestRuntimeControllerExecutesManagedValidationWithSealedRecipeAfterResource
 	if sealed.ActiveDispatch == nil || len(sealed.ActiveDispatch.ValidationRecipes) != 1 || sealed.ActiveDispatch.ValidationRecipes[0].ID != "test-managed-validation" {
 		t.Fatalf("sealed recipe snapshot = %+v", sealed.ActiveDispatch)
 	}
+	operation := sealed.ActiveDispatch.Candidate.Validation.Operations[0].Operation
+	sealedValidationScope, err := runtimeValidationScopeTargetRefs(*sealed.ActiveDispatch, operation)
+	if err != nil {
+		t.Fatalf("sealed validation scope: %v", err)
+	}
 
 	// Simulate a resource refresh between seal and a fresh-process recovery. The
 	// current Shell inventory now exposes only a different recipe; it must not
@@ -1035,10 +1097,24 @@ func TestRuntimeControllerExecutesManagedValidationWithSealedRecipeAfterResource
 	refreshedPrerequisite := runtimeTestManagedValidationPrerequisite("operation-admissibility-shell-refreshed")
 	refreshedInventory := runtimeTestManagedValidationInventory(refreshedPrerequisite.ID)
 	refreshedInventory.ValidationRecipes = refreshedInventory.ValidationRecipes[1:]
+	refreshedInventory.ValidationSurfaces = refreshedInventory.ValidationSurfaces[1:]
 	refreshedInventory.ObservedRevision = "shell-policy-test-v2"
 	refreshedInventory.SnapshotID = runtimecontract.StableRuntimeOperationAdmissibilitySnapshotID(refreshedInventory)
+	refreshedObservation := runtimecontract.RuntimePrerequisiteObservation{
+		PrerequisiteID: refreshedPrerequisite.ID, Kind: refreshedPrerequisite.Kind,
+		OwnerModuleID: runtimecontract.RuntimeModuleShell, ContentHash: refreshedInventory.SnapshotID,
+		Dependencies: []runtimecontract.RuntimeFreshnessDependency{{
+			Domain: runtimecontract.RuntimeResourceOwnerCatalog, OwnerModuleID: runtimecontract.RuntimeModuleShell,
+			SubjectRef: runtimecontract.RuntimeModuleShell, Revision: refreshedInventory.ObservedRevision,
+		}},
+	}
+	refreshedObservation.ObservationID = runtimecontract.StableRuntimePrerequisiteObservationID(refreshedObservation)
 	repository.aggregate.Facts.Prerequisites.Satisfied = []runtimecontract.RuntimePrerequisite{refreshedPrerequisite}
 	repository.aggregate.Facts.Resources.OperationAdmissibilities = []runtimecontract.RuntimeOperationAdmissibility{refreshedInventory}
+	repository.aggregate.Facts.Resources.PrerequisiteObservations = []runtimecontract.RuntimePrerequisiteObservation{refreshedObservation}
+	repository.aggregate.Facts.Resources.Manifest = &runtimecontract.WorkspaceManifest{
+		Revision: "tree-after-seal", TargetRefs: []string{"mutable-current-only.go"},
+	}
 
 	restarted, err := NewRuntimeController(repository)
 	if err != nil {
@@ -1050,6 +1126,9 @@ func TestRuntimeControllerExecutesManagedValidationWithSealedRecipeAfterResource
 	}
 	if len(executor.requests) != 1 || len(executor.requests[0].ValidationRecipes) != 1 {
 		t.Fatalf("execution recipes = %+v", executor.requests)
+	}
+	if !reflect.DeepEqual(executor.requests[0].ValidationScopeTargetRefs, sealedValidationScope) {
+		t.Fatalf("execution rebuilt validation scope after restart: got=%v sealed=%v", executor.requests[0].ValidationScopeTargetRefs, sealedValidationScope)
 	}
 	got := executor.requests[0].ValidationRecipes[0]
 	if got.ID != "test-managed-validation" || got.Command != "true" || len(got.Args) != 1 || got.Args[0] != "workorch-validation" {
@@ -1084,7 +1163,7 @@ func multiOperationCandidate() runtimecontract.RuntimeCandidate {
 func multiOperationFixtureFacts(t *testing.T) runtimecontract.RuntimeFacts {
 	t.Helper()
 	facts := controllerFacts()
-	facts.Focus.TargetRefs = nil
+	facts.Focus.TargetRefs = []string{"a.txt", "b.txt"}
 	if len(facts.Resources.OperationAdmissibilities) != 1 {
 		t.Fatalf("multi-operation fixture requires one File catalog: %+v", facts.Resources.OperationAdmissibilities)
 	}
@@ -1092,7 +1171,7 @@ func multiOperationFixtureFacts(t *testing.T) runtimecontract.RuntimeFacts {
 	catalog.TargetRefs = []string{"a.txt", "b.txt"}
 	catalog.SnapshotID = runtimecontract.StableRuntimeOperationAdmissibilitySnapshotID(catalog)
 	facts.Resources.OperationAdmissibilities = []runtimecontract.RuntimeOperationAdmissibility{catalog}
-	return runtimeTestFactsWithCurrentFocusBindings(t, facts, controllerDefinition())
+	return facts
 }
 
 func multiOperationDependencyFixtureFacts(t *testing.T) runtimecontract.RuntimeFacts {
@@ -1137,7 +1216,7 @@ func validationQualityFacts(t *testing.T) runtimecontract.RuntimeFacts {
 		StateChangeKinds: []string{runtimecontract.StepKindFileWrite},
 		ValidationKinds:  []string{runtimecontract.RuntimeBlockKindManagedValidationSession},
 	}
-	return runtimeTestFactsWithCurrentFocusBindings(t, facts, controllerDefinition())
+	return facts
 }
 
 func managedValidationCandidate(operationID string) runtimecontract.RuntimeCandidate {

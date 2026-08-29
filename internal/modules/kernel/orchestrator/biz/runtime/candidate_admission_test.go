@@ -220,9 +220,10 @@ func TestActiveRejectedOperationShapesRetainsOnlyCurrentLineageAndInfeasibleProp
 }
 
 func TestOwnerRetargetKeepsOldRejectedShapeDiagnosticButAdmitsNewTargetShape(t *testing.T) {
-	aggregate, oldCandidate := aggregateWithActiveRejectedCandidate(t)
-	aggregate.Facts.Focus.RequireTargetGrounding = true
-	aggregate.Facts.Focus.TargetRole = "implementation"
+	aggregate, oldCandidate := aggregateWithActiveRejectedCandidateWithPreparation(t, func(initial *RuntimeAggregate) {
+		initial.Facts.Focus.RequireTargetGrounding = true
+		initial.Facts.Focus.TargetRole = "implementation"
+	})
 	aggregate.Facts.Resources.FailureTarget = &runtimecontract.FailureTarget{
 		Signature: "owner-retarget", TargetRefs: []string{"implementation.go"},
 		TargetObservation: &runtimecontract.RuntimeFailureTargetObservation{
@@ -233,6 +234,10 @@ func TestOwnerRetargetKeepsOldRejectedShapeDiagnosticButAdmitsNewTargetShape(t *
 	aggregate.Facts.Resources.TargetSnapshots = []runtimecontract.TargetSnapshot{{
 		TargetRef: "implementation.go", ContentHash: "implementation-v2", ContentState: runtimecontract.SnapshotContentStateComplete,
 	}}
+	// The owner retarget is a new current repair authority. Preserve the old
+	// rejected receipt/fact as diagnostic lineage, but do not retain the repair
+	// directive derived from its superseded target observation.
+	aggregate.Facts.RepairDirective = nil
 	updatedFacts, decision, err := ReduceRuntimeStateWithDirective(aggregate.Facts, nil)
 	if err != nil {
 		t.Fatal(err)
@@ -247,7 +252,10 @@ func TestOwnerRetargetKeepsOldRejectedShapeDiagnosticButAdmitsNewTargetShape(t *
 		t.Fatalf("old rejected shape was not retained as diagnostic lineage: %+v", shapes)
 	}
 	newCandidate := oldCandidate
-	newCandidate.StateChange.Operations[0].Operation = patchApplyTestOperation("patch-implementation", "implementation.go")
+	newCandidate.StateChange = &runtimecontract.StateChangeCandidate{Operations: append([]runtimecontract.StateChangingOperation(nil), oldCandidate.StateChange.Operations...)}
+	newCandidate.StateChange.Operations[0].Operation.ID = "patch-implementation"
+	newCandidate.StateChange.Operations[0].Operation.TargetRefs = []string{"implementation.go"}
+	newCandidate.StateChange.Operations[0].Operation.Parameters = patchApplyTestParameters("implementation.go")
 	if runtimecontract.StableRuntimeOperationShape(newCandidate.StateChange.Operations[0].Operation) == shapes[0].Hash {
 		t.Fatal("retarget must produce a distinct canonical operation shape")
 	}
@@ -258,19 +266,21 @@ func TestOwnerRetargetKeepsOldRejectedShapeDiagnosticButAdmitsNewTargetShape(t *
 
 func TestEvaluateCandidateAdmissionRespectsRepairDirectiveForValidationGap(t *testing.T) {
 	aggregate := stateChangeAggregate(t)
+	bindingRef := aggregate.Facts.Focus.CoverageEvidenceBindings[0].ID
 	aggregate.Facts.Evidence.Accepted = []runtimecontract.EvidenceFact{{
 		ID: "accepted-state", Kind: runtimecontract.EvidenceKindStateChange,
+		FocusID: aggregate.Facts.Focus.ID, BindingRefs: []string{bindingRef}, Quality: common.EvidenceQualityValid,
 		CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-1"}, Revision: "runtime-evidence-00000000000000000001",
 	}}
 	aggregate.Facts.Evidence.Rejected = []runtimecontract.EvidenceFact{{
 		ID: "rejected-state", Kind: runtimecontract.EvidenceKindStateChange,
+		FocusID: aggregate.Facts.Focus.ID, BindingRefs: []string{bindingRef}, Quality: common.EvidenceQualityInvalid,
 		CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-1"}, Revision: "runtime-evidence-00000000000000000002",
 	}}
-	runtimeTestSealCurrentFocusBindings(t, &aggregate)
 	candidate := runtimeTestBindCandidateToCurrentFocus(t, aggregate, stateChangeCandidate())
 	rejected := EvaluateCandidateAdmission(aggregate, candidate)
 	if rejected.Disposition != CandidateAdmissionRejectedContract || rejected.Failure == nil || rejected.Failure.Code != candidateAdmissionCodeActionEvidenceMismatch {
-		t.Fatalf("missing-validation admission = %+v", rejected)
+		t.Fatalf("missing-validation admission=%+v failure=%+v correction=%+v", rejected, rejected.Failure, rejected.Correction)
 	}
 	aggregate.Facts.RepairDirective = &runtimecontract.RuntimeRepairDirective{
 		ID: "directive-1", FocusID: aggregate.Facts.Focus.ID,
@@ -283,7 +293,7 @@ func TestEvaluateCandidateAdmissionRespectsRepairDirectiveForValidationGap(t *te
 
 func TestEvaluateCandidateAdmissionUsesSemanticContractNotOperationIdentityOrParameterOrder(t *testing.T) {
 	aggregate := stateChangeAggregate(t)
-	base := stateChangeCandidate()
+	base := runtimeTestBindCandidateToCurrentFocus(t, aggregate, stateChangeCandidate())
 
 	equivalent := base
 	equivalent.StateChange.Operations = append([]runtimecontract.StateChangingOperation(nil), base.StateChange.Operations...)
@@ -344,8 +354,13 @@ func TestEvaluateCandidateAdmissionUsesSemanticContractNotOperationIdentityOrPar
 		},
 	} {
 		t.Run(testCase.name, func(t *testing.T) {
-			candidate := stateChangeCandidate()
+			candidate := base
+			candidate.StateChange = &runtimecontract.StateChangeCandidate{Operations: append([]runtimecontract.StateChangingOperation(nil), base.StateChange.Operations...)}
 			operation := candidate.StateChange.Operations[0].Operation
+			operation.TargetRefs = append([]string(nil), operation.TargetRefs...)
+			operation.BindingRefs = append([]string(nil), operation.BindingRefs...)
+			operation.CoverageWorkItemIDs = append([]common.CoverageWorkItemID(nil), operation.CoverageWorkItemIDs...)
+			operation.Parameters = append([]runtimecontract.OperationParameter(nil), operation.Parameters...)
 			testCase.mutate(&operation)
 			candidate.StateChange.Operations[0].Operation = operation
 			result := EvaluateCandidateAdmission(aggregate, candidate)
@@ -433,10 +448,11 @@ func TestRepairableAssessmentSameGapRecordsAcceptedOperationShapeForAdmission(t 
 }
 
 func TestEvaluateCandidateAdmissionRejectsDurableChangeOutsideGroundedRepairTarget(t *testing.T) {
-	aggregate := stateChangeAggregate(t)
-	aggregate.Facts.Focus.RequireTargetGrounding = true
-	aggregate.Facts.Focus.TargetRole = "implementation"
-	aggregate.Facts.Focus.TargetRefs = nil
+	aggregate := stateChangeAggregateWithPreparation(t, func(initial *RuntimeAggregate) {
+		initial.Facts.Focus.RequireTargetGrounding = true
+		initial.Facts.Focus.TargetRole = "implementation"
+		initial.Facts.Focus.TargetRefs = []string{"implementation.go"}
+	})
 	aggregate.Facts.Resources.FailureTarget = &runtimecontract.FailureTarget{Signature: "validation-failure", TargetRefs: []string{"implementation.go"}}
 
 	wrong := stateChangeCandidate()
@@ -737,7 +753,7 @@ func TestAdmitCandidateProposalReturnsCommittedDuplicateAfterAdministrativeTermi
 	if _, err := controller.BeginCandidateAttemptForTest(context.Background(), aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, 0, "terminal-duplicate-prefix"); err != nil {
 		t.Fatal(err)
 	}
-	candidate := stateChangeCandidate()
+	candidate := runtimeTestBindCandidateToCurrentFocus(t, aggregate, stateChangeCandidate())
 	candidate.StateChange.Operations[0].Operation.TargetRefs = []string{"other.go"}
 	first, err := controller.AdmitCandidateProposalForTest(context.Background(), aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, 0, candidate)
 	if err != nil || first.Admission.Failure == nil || first.Admission.Correction == nil ||
@@ -758,7 +774,7 @@ func TestAdmitCandidateProposalReturnsCommittedDuplicateAfterAdministrativeTermi
 		duplicate.Aggregate.StateRevision != terminated.StateRevision || repository.saves != saves {
 		t.Fatalf("terminated exact duplicate=%+v err=%v saves=%d", duplicate, err, repository.saves)
 	}
-	different := stateChangeCandidate()
+	different := runtimeTestBindCandidateToCurrentFocus(t, aggregate, stateChangeCandidate())
 	different.StateChange.Operations[0].Operation.TargetRefs = []string{"different.go"}
 	if _, err := controller.AdmitCandidateProposalForTest(context.Background(), aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, 0, different); err == nil || repository.saves != saves {
 		t.Fatalf("terminated non-duplicate err=%v saves=%d, want conflict and no CAS", err, repository.saves)
@@ -767,36 +783,34 @@ func TestAdmitCandidateProposalReturnsCommittedDuplicateAfterAdministrativeTermi
 
 func TestAdmitCandidateProposalExhaustsSemanticReplayWithoutOperationIdentity(t *testing.T) {
 	newGroundedAggregate := func() RuntimeAggregate {
-		aggregate := stateChangeAggregate(t)
-		aggregate.Facts.Focus.RequireTargetGrounding = true
-		aggregate.Facts.Focus.TargetRole = "implementation"
-		runtimeTestSealCurrentFocusBindingTargetSurface(&aggregate.Facts, runtimeTestBindingTargetSurface{
-			SelectorRef: "test/runtime-repair-target", SelectorOwnerRef: runtimecontract.RuntimeModuleFile, SelectorSubjectRef: "implementation",
+		return stateChangeAggregateWithPreparation(t, func(initial *RuntimeAggregate) {
+			initial.Facts.Focus.RequireTargetGrounding = true
+			initial.Facts.Focus.TargetRole = "implementation"
+			initial.Facts.Focus.TargetRefs = []string{"implementation.go"}
 		})
-		aggregate.Facts.Resources.FailureTarget = &runtimecontract.FailureTarget{
-			Signature: "owner-observed-failure", TargetRefs: []string{"implementation.go"},
-		}
-		// Keep Decision aligned with Facts so the sealed TargetPolicy matches
-		// the FailureTarget membership the production reducer would compile.
-		decision, err := ReduceRuntimeState(aggregate.Facts, nil)
-		if err != nil {
-			t.Fatal(err)
-		}
-		aggregate.Decision = decision
-		return aggregate
 	}
-	wrongCandidate := stateChangeCandidate()
-	equivalent := wrongCandidate
-	equivalent.StateChange.Operations = append([]runtimecontract.StateChangingOperation(nil), wrongCandidate.StateChange.Operations...)
-	equivalent.StateChange.Operations[0].Operation.ID = "provider-rewritten-id"
-	parameters := append([]runtimecontract.OperationParameter(nil), equivalent.StateChange.Operations[0].Operation.Parameters...)
-	for left, right := 0, len(parameters)-1; left < right; left, right = left+1, right-1 {
-		parameters[left], parameters[right] = parameters[right], parameters[left]
+	candidateForTarget := func(aggregate RuntimeAggregate, operationID, targetRef string) runtimecontract.RuntimeCandidate {
+		candidate := stateChangeCandidate()
+		candidate.StateChange.Operations[0].Operation.TargetRefs = []string{"implementation.go"}
+		candidate.StateChange.Operations[0].Operation.Parameters = patchApplyTestParameters("implementation.go")
+		candidate = runtimeTestBindCandidateToCurrentFocus(t, aggregate, candidate)
+		candidate.StateChange.Operations[0].Operation.ID = operationID
+		candidate.StateChange.Operations[0].Operation.TargetRefs = []string{targetRef}
+		candidate.StateChange.Operations[0].Operation.Parameters = patchApplyTestParameters(targetRef)
+		return candidate
 	}
-	equivalent.StateChange.Operations[0].Operation.Parameters = parameters
 
 	t.Run("semantic replay exhausts exactly once", func(t *testing.T) {
 		aggregate := newGroundedAggregate()
+		wrongCandidate := candidateForTarget(aggregate, "provider-wrong-id", "main.go")
+		equivalent := wrongCandidate
+		equivalent.StateChange = &runtimecontract.StateChangeCandidate{Operations: append([]runtimecontract.StateChangingOperation(nil), wrongCandidate.StateChange.Operations...)}
+		equivalent.StateChange.Operations[0].Operation.ID = "provider-rewritten-id"
+		parameters := append([]runtimecontract.OperationParameter(nil), equivalent.StateChange.Operations[0].Operation.Parameters...)
+		for left, right := 0, len(parameters)-1; left < right; left, right = left+1, right-1 {
+			parameters[left], parameters[right] = parameters[right], parameters[left]
+		}
+		equivalent.StateChange.Operations[0].Operation.Parameters = parameters
 		repository := &controllerRepository{aggregate: &aggregate}
 		controller, err := NewRuntimeController(repository)
 		if err != nil {
@@ -842,6 +856,7 @@ func TestAdmitCandidateProposalExhaustsSemanticReplayWithoutOperationIdentity(t 
 
 	t.Run("retarget remains admissible", func(t *testing.T) {
 		aggregate := newGroundedAggregate()
+		wrongCandidate := candidateForTarget(aggregate, "provider-wrong-id", "main.go")
 		repository := &controllerRepository{aggregate: &aggregate}
 		controller, err := NewRuntimeController(repository)
 		if err != nil {
@@ -853,14 +868,16 @@ func TestAdmitCandidateProposalExhaustsSemanticReplayWithoutOperationIdentity(t 
 		if _, err := controller.AdmitCandidateProposalForTest(context.Background(), aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, 0, wrongCandidate); err != nil {
 			t.Fatal(err)
 		}
-		retargeted := stateChangeCandidate()
-		retargeted.StateChange.Operations[0].Operation = patchApplyTestOperation("provider-corrected-id", "implementation.go")
+		retargeted := wrongCandidate
+		retargeted.StateChange = &runtimecontract.StateChangeCandidate{Operations: append([]runtimecontract.StateChangingOperation(nil), wrongCandidate.StateChange.Operations...)}
+		retargeted.StateChange.Operations[0].Operation.ID = "provider-corrected-id"
+		retargeted.StateChange.Operations[0].Operation.TargetRefs = []string{"implementation.go"}
 		if _, err := controller.BeginCandidateAttemptForTest(context.Background(), aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, 1, "stable-prefix"); err != nil {
 			t.Fatal(err)
 		}
 		second, err := controller.AdmitCandidateProposalForTest(context.Background(), aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, 1, retargeted)
 		if err != nil || !second.Admission.Accepted() || second.Aggregate.Decision.State == runtimecontract.ConvergenceStateFailed || hasPendingCandidateAttempt(second.Aggregate.CandidateAttempts) == false {
-			t.Fatalf("legal retarget was incorrectly classified as semantic replay: %+v err=%v", second, err)
+			t.Fatalf("legal retarget was incorrectly classified as semantic replay: failure=%+v correction=%+v decision=%+v err=%v", second.Admission.Failure, second.Admission.Correction, second.Aggregate.Decision, err)
 		}
 	})
 }
@@ -926,9 +943,29 @@ func TestAdmitAndSealCandidateAttemptKeepsRejectedAndAcceptedDuplicateDeliveries
 		if _, err := controller.BeginCandidateAttemptForTest(context.Background(), aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, 0, "stable-prefix"); err != nil {
 			t.Fatal(err)
 		}
+		if err := RecordFixtureCandidateFeasibilities(
+			context.Background(), controller, aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, 0, candidate,
+		); err != nil {
+			t.Fatal(err)
+		}
 		first, err := controller.AdmitAndSealCandidateAttemptForTest(context.Background(), aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, 0, candidate)
 		if err != nil || !first.Admission.Accepted() || first.Aggregate.ActiveDispatch == nil {
 			t.Fatalf("first seal = %+v err=%v", first, err)
+		}
+		if len(first.Aggregate.CandidateAttempts) != 1 ||
+			!runtimecontract.RuntimeDispatchOperationTargetAuthorizationProjectionsEqual(
+				first.Aggregate.CandidateAttempts[0].AdmissionTargetAuthorizations,
+				first.Aggregate.ActiveDispatch.OperationTargetAuthorizations,
+			) ||
+			first.Aggregate.CandidateAttempts[0].TargetAuthorizationHash != runtimecontract.StableRuntimeDispatchOperationTargetAuthorizationsHash(
+				first.Aggregate.CandidateAttempts[0].AdmissionTargetAuthorizations,
+			) {
+			t.Fatalf("accepted attempt did not persist its independent admission target projection: %+v", first.Aggregate.CandidateAttempts)
+		}
+		if len(first.Aggregate.ActiveDispatch.OperationExecutions) != 1 ||
+			first.Aggregate.ActiveDispatch.OperationExecutions[0].AdmissibilitySnapshotID == "" ||
+			len(first.Aggregate.ActiveDispatch.OperationAdmissibilities) != 1 {
+			t.Fatalf("accepted attempt did not seal its exact feasible owner catalog: %+v", first.Aggregate.ActiveDispatch)
 		}
 		saves := repository.saves
 		duplicate, err := controller.AdmitAndSealCandidateAttemptForTest(context.Background(), aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, 0, candidate)
@@ -939,31 +976,39 @@ func TestAdmitAndSealCandidateAttemptKeepsRejectedAndAcceptedDuplicateDeliveries
 }
 
 func aggregateWithActiveRejectedCandidate(t *testing.T) (RuntimeAggregate, runtimecontract.RuntimeCandidate) {
+	return aggregateWithActiveRejectedCandidateWithPreparation(t, nil)
+}
+
+func aggregateWithActiveRejectedCandidateWithPreparation(t *testing.T, prepare func(*RuntimeAggregate)) (RuntimeAggregate, runtimecontract.RuntimeCandidate) {
 	t.Helper()
-	aggregate := stateChangeAggregate(t)
+	aggregate := stateChangeAggregateWithPreparation(t, prepare)
 	candidate := stateChangeCandidate()
 	repository := &durableRuntimeStateRepository{aggregate: aggregate}
 	aggregate = sealCandidateForTest(t, repository, candidate)
-	dispatch := *aggregate.ActiveDispatch
-	candidate = dispatch.Candidate
+	candidate = aggregate.ActiveDispatch.Candidate
 	operationID := runtimeTestCandidateOperationID(t, candidate, 0)
-	dispatch.State = DispatchStateCommitted
-	aggregate.ActiveDispatch = nil
-	aggregate.CompletedDispatches = []SealedDispatch{dispatch}
-	aggregate.Facts.Evidence.Rejected = []runtimecontract.EvidenceFact{{
-		ID: "rejected-patch", Kind: runtimecontract.EvidenceKindStateChange,
-		DispatchID: dispatch.ID, OperationID: operationID, CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-1"},
-		Revision: "runtime-evidence-00000000000000000001", FailureSignature: "rejected-patch",
-	}}
-	aggregate.Facts.EvidenceRevision = aggregate.Facts.Evidence.Rejected[0].Revision
-	decision, err := runtimecontract.SealRuntimeDecision(aggregate.Facts, runtimecontract.RuntimeDecision{
-		State: aggregate.Decision.State, Focus: aggregate.Decision.Focus, RequiredOutput: aggregate.Decision.RequiredOutput,
-	}, 0)
+	evidence := ExecutionEvidence{
+		EventID: "rejected-patch", WorkspaceID: aggregate.Facts.WorkspaceID, RunID: aggregate.Facts.RunID,
+		DispatchID: aggregate.ActiveDispatch.ID, AuthoritySnapshotID: aggregate.ActiveDispatch.Transaction.AuthoritySnapshotID,
+		OperationID: operationID, Kind: runtimecontract.EvidenceKindStateChange, Status: ExecutionEvidenceStatusRejected,
+		Failure: &runtimecontract.FailureFact{
+			Class: runtimecontract.FailureClassExecutionRejected, Code: "rejected-patch",
+			Signature: "rejected-patch", Message: "owner rejected patch operation",
+		},
+	}
+	attachRuntimeTestOwnerReceipt(t, &repository.aggregate, &evidence)
+	coordinator, err := NewDispatchCoordinator(repository)
 	if err != nil {
 		t.Fatal(err)
 	}
-	aggregate.Decision = decision
-	return aggregate, candidate
+	committed, err := coordinator.commitEvidence(context.Background(), evidence)
+	if err != nil {
+		t.Fatalf("commit rejected candidate-shape receipt: %v", err)
+	}
+	if len(committed.Aggregate.Facts.Evidence.Rejected) != 1 || committed.Aggregate.Facts.Evidence.Rejected[0].FailureSignature != "rejected-patch" {
+		t.Fatalf("canonical rejected candidate shape = %+v", committed.Aggregate.Facts.Evidence.Rejected)
+	}
+	return committed.Aggregate, candidate
 }
 
 func addCandidateAdmissionTargetPolicyFixture(facts *runtimecontract.RuntimeFacts, owner, kind, variantID string, policy runtimecontract.RuntimeOperationTargetPolicy, targetRefs []string) {

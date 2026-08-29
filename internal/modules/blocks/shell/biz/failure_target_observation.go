@@ -1,20 +1,18 @@
 package shell
 
 import (
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"io"
+	"sort"
 	"strings"
 
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
 const (
-	shellFailureTargetObservationPrefix  = "WORKORCH_FAILURE_TARGET="
-	shellFailureTargetObservationSchema  = "workorch.shell.failure_target"
-	shellFailureTargetObservationSubject = "shell_runtime_policy"
-	shellFailureTargetObservationMaxRefs = 8
+	shellFailureTargetMarkerPrefix         = "WORKORCH_FAILURE_TARGET="
+	shellFailureTargetMarkerSchema         = "workorch.shell.failure_target"
+	shellValidationDiagnosticMaxTargetRefs = runtimecontract.RuntimeValidationFailureObservationMaxCandidateTargetRefs
 )
 
 // shellFailureTargetRecord is intentionally a closed JSONL protocol. It is
@@ -27,62 +25,128 @@ type shellFailureTargetRecord struct {
 	DiagnosticClass string   `json:"diagnosticClass"`
 }
 
-func shellFailureTargetObservation(result RuntimeCommandResult, targetRole, ownerRevision string) *runtimecontract.RuntimeFailureTargetObservation {
-	diagnostic := result.ValidationFailureDiagnostic
-	if diagnostic == nil || strings.TrimSpace(diagnostic.Class) == "" || strings.TrimSpace(targetRole) == "" || strings.TrimSpace(ownerRevision) == "" {
-		return nil
-	}
-	record, raw, ok := parseShellFailureTargetRecord(result.Stdout)
-	if !ok || record.TargetRole != strings.TrimSpace(targetRole) || record.DiagnosticClass != strings.TrimSpace(diagnostic.Class) || len(record.TargetRefs) > shellFailureTargetObservationMaxRefs {
-		return nil
-	}
-	hash := sha256.Sum256([]byte(raw))
-	observation := runtimecontract.RuntimeFailureTargetObservation{
-		OwnerModuleID:    ModuleID,
-		SubjectRef:       shellFailureTargetObservationSubject,
-		TargetRole:       record.TargetRole,
-		ObservedRevision: ownerRevision,
-		TargetRefs:       record.TargetRefs,
-		DiagnosticClass:  record.DiagnosticClass,
-		EvidenceRefs:     []string{"workorch://shell/failure-target/sha256/" + hex.EncodeToString(hash[:])},
-		ContentHash:      hex.EncodeToString(hash[:]),
-	}.Normalized()
-	if err := observation.Validate(); err != nil || len(observation.TargetRefs) == 0 || len(observation.TargetRefs) > shellFailureTargetObservationMaxRefs {
-		return nil
-	}
-	return &observation
+type shellFailureTargetMarkerCandidate struct {
+	Present    bool
+	Valid      bool
+	TargetRefs []string
 }
 
-func parseShellFailureTargetRecord(stdout string) (shellFailureTargetRecord, string, bool) {
+// decodeShellFailureTargetMarkerCandidate decodes only a bounded diagnostic
+// hint.  A
+// present-but-invalid marker is deliberately distinct from an absent marker:
+// the former invalidates the complete marker+tool candidate transaction and
+// must never let the caller fall back to only the tool-derived subset.
+func decodeShellFailureTargetMarkerCandidate(result RuntimeCommandResult, targetRole string) shellFailureTargetMarkerCandidate {
+	diagnostic := result.ValidationFailureDiagnostic
+	if diagnostic == nil || strings.TrimSpace(diagnostic.Class) == "" || strings.TrimSpace(targetRole) == "" {
+		return shellFailureTargetMarkerCandidate{}
+	}
+	record, _, present, valid := parseShellFailureTargetRecord(result.Stdout)
+	if !present {
+		return shellFailureTargetMarkerCandidate{}
+	}
+	candidate := shellFailureTargetMarkerCandidate{Present: true}
+	if !valid || record.TargetRole != strings.TrimSpace(targetRole) || record.DiagnosticClass != strings.TrimSpace(diagnostic.Class) ||
+		len(record.TargetRefs) == 0 || len(record.TargetRefs) > shellValidationDiagnosticMaxTargetRefs {
+		return candidate
+	}
+	for _, value := range record.TargetRefs {
+		if strings.TrimSpace(value) == "" {
+			return candidate
+		}
+	}
+	refs := canonicalShellFailureTargetRefs(record.TargetRefs)
+	if len(refs) == 0 || len(refs) > shellValidationDiagnosticMaxTargetRefs {
+		return candidate
+	}
+	candidate.Valid = true
+	candidate.TargetRefs = refs
+	return candidate
+}
+
+// shellFailureTargetCandidateUnion validates the complete owner-private
+// candidate transaction against the matching sealed per-operation scope.  The
+// boolean reports whether the whole transaction was admissible; an empty but
+// admissible result simply means there is no scope-bound observation.
+func shellFailureTargetCandidateUnion(result RuntimeCommandResult, targetRole string, validationScopeTargetRefs []string) ([]string, bool) {
+	diagnostic := result.ValidationFailureDiagnostic
+	if diagnostic == nil || result.validationFailureTargetCandidatesInvalid {
+		return nil, false
+	}
+	diagnosticTargetRefs := canonicalShellFailureTargetRefs(diagnostic.TargetRefs)
+	if len(diagnosticTargetRefs) > shellValidationDiagnosticMaxTargetRefs ||
+		(len(diagnosticTargetRefs) != 0 && !shellTargetRefsSubset(diagnosticTargetRefs, validationScopeTargetRefs)) {
+		return nil, false
+	}
+	marker := decodeShellFailureTargetMarkerCandidate(result, targetRole)
+	if marker.Present && (!marker.Valid || !shellTargetRefsSubset(marker.TargetRefs, validationScopeTargetRefs)) {
+		return nil, false
+	}
+	refs, valid := shellMergeFailureTargetCandidateRefs(diagnosticTargetRefs, marker.TargetRefs)
+	if !valid {
+		return nil, false
+	}
+	return refs, true
+}
+
+func shellMergeFailureTargetCandidateRefs(diagnosticTargetRefs, markerTargetRefs []string) ([]string, bool) {
+	refs := canonicalShellFailureTargetRefs(append(append([]string(nil), diagnosticTargetRefs...), markerTargetRefs...))
+	if len(refs) > shellValidationDiagnosticMaxTargetRefs {
+		return nil, false
+	}
+	return refs, true
+}
+
+func canonicalShellFailureTargetRefs(values []string) []string {
+	seen := make(map[string]struct{}, len(values))
+	for _, value := range values {
+		if value = strings.TrimSpace(value); value != "" {
+			seen[value] = struct{}{}
+		}
+	}
+	refs := make([]string, 0, len(seen))
+	for value := range seen {
+		refs = append(refs, value)
+	}
+	sort.Strings(refs)
+	return refs
+}
+
+func parseShellFailureTargetRecord(stdout string) (shellFailureTargetRecord, string, bool, bool) {
 	var record shellFailureTargetRecord
 	var raw string
+	markerCount := 0
 	for _, line := range strings.Split(stdout, "\n") {
 		line = strings.TrimSpace(line)
-		if !strings.HasPrefix(line, shellFailureTargetObservationPrefix) {
+		if !strings.HasPrefix(line, shellFailureTargetMarkerPrefix) {
 			continue
 		}
-		if raw != "" {
-			return shellFailureTargetRecord{}, "", false
+		markerCount++
+		if markerCount > 1 {
+			return shellFailureTargetRecord{}, "", true, false
 		}
-		raw = strings.TrimSpace(strings.TrimPrefix(line, shellFailureTargetObservationPrefix))
+		raw = strings.TrimSpace(strings.TrimPrefix(line, shellFailureTargetMarkerPrefix))
+	}
+	if markerCount == 0 {
+		return shellFailureTargetRecord{}, "", false, false
 	}
 	if raw == "" {
-		return shellFailureTargetRecord{}, "", false
+		return shellFailureTargetRecord{}, "", true, false
 	}
 	decoder := json.NewDecoder(strings.NewReader(raw))
 	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(&record); err != nil {
-		return shellFailureTargetRecord{}, "", false
+		return shellFailureTargetRecord{}, "", true, false
 	}
 	var extra json.RawMessage
 	if err := decoder.Decode(&extra); err != io.EOF {
-		return shellFailureTargetRecord{}, "", false
+		return shellFailureTargetRecord{}, "", true, false
 	}
 	record.SchemaVersion = strings.TrimSpace(record.SchemaVersion)
 	record.TargetRole = strings.TrimSpace(record.TargetRole)
 	record.DiagnosticClass = strings.TrimSpace(record.DiagnosticClass)
-	if record.SchemaVersion != shellFailureTargetObservationSchema || record.TargetRole == "" || record.DiagnosticClass == "" {
-		return shellFailureTargetRecord{}, "", false
+	if record.SchemaVersion != shellFailureTargetMarkerSchema || record.TargetRole == "" || record.DiagnosticClass == "" {
+		return shellFailureTargetRecord{}, "", true, false
 	}
-	return record, raw, true
+	return record, raw, true, true
 }

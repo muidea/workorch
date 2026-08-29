@@ -54,7 +54,10 @@ receipt-set 或独立 CWI `all_of` 明确表达，禁止只在 receipt 阶段把
 final SM-3 seal 必须把 candidate manifest hash 与每项 operation 的最小 target-policy preimage 一并封入
 `DispatchAuthorityHash`。该 preimage 只可由 final manifest seal 生成；Run 只 opaque 持久化，governance resume 只复制，
 fresh-load 只重验，任何路径都不得从 mutable current facts 重编译、增量修改或把它提升为第二 target owner。缺少该 sealed
-preimage 的 operation dispatch 直接按无效当前合同拒绝，不保留旧 record 兼容分支。
+preimage 的 operation dispatch 直接按无效当前合同拒绝，不保留旧 record 兼容分支。assessment 的 purpose 也必须先写入
+request-session `CandidateManifest`，并以 exact semantic manifest/provider document/owner feasibility batch 为独立 preimage；
+dispatch 的 `AssessmentAuthorityInput` 只能在一次性 final seal 中消费该 purpose。repair commitment 及 governance continuation 的
+source/grant/execution projection同样必须在首次 hash/Validate 前完成，seal 返回后不得再写 authority 字段或重算 hash。
 
 同一 locally compiled candidate/dispatch 内，每个 durable operation 必须独占 canonical
 `(OwnerModuleID, TargetRef)`。两个普通 operation 即使由 manifest 派生出 dependency edge，也不能先后修改同一 owner resource，因为它们的
@@ -103,6 +106,15 @@ ledger 必须持久化 Definition seed、manifest、attempt 0/1、stable prefix�
 owner batch/observation set 与 sealed binding lineage hash；这些 identity 必须进入 convergence progress signature。
 duplicate event 不增加 revision，scope/seed/request/batch 漂移必须拒绝，任何阶段都不得直接创建 dispatch、coverage、
 Decision 或 Approval。
+
+fresh-load 不能把已经互相一致的 Focus、CWI binding ref、reconciliation、candidate session、accepted attempt 与 dispatch
+projection 当作 semantic authority 的自证。Orchestrator 必须逐个 replay active/history 中每个 accepted semantic batch：只使用
+persisted manifest、该 batch 的 `RequestLogicalID`、provider document，以及同 batch 已归档或仍封存的 capability-owner
+feasibility facts 调用唯一纯编译器 `CompileRuntimeSemanticBindings`。replay 结果必须与 current/remaining/completed Focus、CWI
+`CurrentBindingRef`/`BindingLineage`、由 current refs 编译的 reconciliation contract，以及 session/attempt/dispatch 的完整
+coverage binding projection exact-match。缺失/重复 batch preimage、manifest/document/owner fact 漂移，或协调改写所有下游
+projection 与 self-hash，均必须在 owner call、provider call、transition 与 delivery 前 fail closed。该 invocation-local replay
+inventory 不持久化、不选择 action，也不成为另一份 binding ledger 或 owner。
 
 ### Prospective owner-fact composite feasibility
 
@@ -168,6 +180,18 @@ sequence；它们不直接消费 semantic proposal 或 File/Shell fact，也不�
 每次semantic-plan或operations provider call都必须使用SM-3 persisted request session形成purpose-bound invocation seal；
 seal不是另一份activation authority。对应call、correction、semantic generation和operation consumption必须引用
 [Execution Budget](execution-budget.md)中的exact sub-ledger identity。
+
+operations document 被接受时，SM-3 必须先从 exact manifest + candidate 前像独立生成并持久化
+`AdmissionTargetAuthorizations + TargetAuthorizationHash`；若选择 `validation/managed_session`，同时生成并持久化
+`AdmissionValidationRecipes + ValidationRecipeHash`，完整覆盖 recipe command、ordered args 与 timeout。随后才可构造
+dispatch。restart/duplicate admission 必须将 accepted commitment 与 active/completed dispatch 做 exact 双向匹配；同步改写
+dispatch projection 与 `DispatchAuthorityHash` 不能改写 accepted admission。普通 File/MCP candidate 的 recipe projection 必须为空。
+operations request session 必须在 accepted seal 之前保存完整 `CandidateManifest` body；持久化 body 必须 raw-canonical，不能让
+normalize 消除 duplicate、顺序、空白或 nil/empty 漂移。accepted attempt 和 origin dispatch 的 target authorization、coverage
+binding、validation recipe 必须从该 body 与 persisted candidate 重新派生并 exact-match；missing/duplicate session、body/hash
+漂移或三类 projection 的协调改写都 fail closed。assessment body 额外封存 `AssessmentPurpose` 与 semantic-manifest hash；
+fresh-load 从 immutable semantic batch 重放 purpose，禁止 EventHub/LLM/evaluator 从 `CandidateContext.Resources` 合成副本。
+governance resume 不生成新 candidate authority，只逐 hop 继承 origin seal并在唯一 final seal 前完成 continuation projection。
 
 普通 owner feasibility 的 `stale | prerequisite_required` 先以 `semantic_feasibility_observed` 单独持久化 owner factual observation。
 只有带有 expected/observed revision 且精确匹配当前 catalog dependency 的 `stale` 事实，才能复用

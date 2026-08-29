@@ -33,44 +33,49 @@ type RuntimeCommandRequest struct {
 }
 
 type RuntimeCommandResult struct {
-	Status                          string
-	Stage                           string
-	Command                         string
-	ValidationRecipeID              string
-	Args                            []string
-	ActualCommand                   string
-	WorkingDirectory                string
-	Stdout                          string
-	Stderr                          string
-	ExitCode                        int64
-	DurationMillis                  int64
-	TimeoutMillis                   int64
-	OutputTruncated                 bool
-	StdoutTruncated                 bool
-	StderrTruncated                 bool
-	StdoutBytes                     int64
-	StderrBytes                     int64
-	FailureCode                     string
-	FailureMessage                  string
-	Summary                         string
-	Reason                          string
-	FailureReason                   string
-	UnavailableCommand              string
-	CapabilityMissing               bool
-	ZeroWork                        bool
-	EvidenceQuality                 string
-	EvidenceReason                  string
-	EvidenceTags                    []string
-	TargetRefs                      []string
-	CommandNormalization            string
-	MaxOutputBytes                  int64
-	ValidationEvidence              runtimecontract.RuntimeValidationEvidence
-	ManagedValidation               runtimecontract.RuntimeManagedValidation
-	ValidationResources             []runtimecontract.RuntimeValidationResource
-	RuntimeDiagnostics              runtimecontract.RuntimeDiagnostics
-	ValidationFailureDiagnostic     *runtimecontract.ValidationFailureDiagnostic
-	WorkspaceStateChangeFingerprint runtimecontract.RuntimeWorkspaceStateChangeFingerprint
-	ValidationObservation           *runtimecontract.RuntimeValidationObservation
+	Status                      string
+	Stage                       string
+	Command                     string
+	ValidationRecipeID          string
+	Args                        []string
+	ActualCommand               string
+	WorkingDirectory            string
+	Stdout                      string
+	Stderr                      string
+	ExitCode                    int64
+	DurationMillis              int64
+	TimeoutMillis               int64
+	OutputTruncated             bool
+	StdoutTruncated             bool
+	StderrTruncated             bool
+	StdoutBytes                 int64
+	StderrBytes                 int64
+	FailureCode                 string
+	FailureMessage              string
+	Summary                     string
+	Reason                      string
+	FailureReason               string
+	UnavailableCommand          string
+	CapabilityMissing           bool
+	ZeroWork                    bool
+	EvidenceQuality             string
+	EvidenceReason              string
+	EvidenceTags                []string
+	TargetRefs                  []string
+	CommandNormalization        string
+	MaxOutputBytes              int64
+	ValidationEvidence          runtimecontract.RuntimeValidationEvidence
+	ManagedValidation           runtimecontract.RuntimeManagedValidation
+	ValidationResources         []runtimecontract.RuntimeValidationResource
+	RuntimeDiagnostics          runtimecontract.RuntimeDiagnostics
+	ValidationFailureDiagnostic *runtimecontract.ValidationFailureDiagnostic
+	// validationFailureTargetCandidatesInvalid records that the owner-private
+	// structured-output parser observed more candidates than the bounded
+	// validation-failure protocol permits. An empty TargetRefs slice alone cannot
+	// distinguish that fail-closed case from output which identified no target.
+	validationFailureTargetCandidatesInvalid bool
+	WorkspaceStateChangeFingerprint          runtimecontract.RuntimeWorkspaceStateChangeFingerprint
+	ValidationObservation                    *runtimecontract.RuntimeValidationObservation
 	// WorkspaceTargetChanges is the bounded before/after observation for the
 	// explicitly sealed workspace targets of a state-changing Shell operation.
 	// It remains owner-local until the Shell owner converts it to the typed
