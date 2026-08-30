@@ -856,6 +856,10 @@
               "targetSelectorRef": "file/workspace_deliverable",
               "targetSelectorOwnerRef": "software-dev",
               "targetSelectorSubjectRef": "workspace_deliverable_create_scope",
+              "prospectiveTargetAllOfConstraintRefs": [
+                "workspace-relative-path",
+                "new-target-requires-owner-selector"
+              ],
               "requireTargetGrounding": true,
               "requireDirectEvidence": true,
               "requireCoverageTargets": true,
@@ -937,6 +941,10 @@
               "targetSelectorRef": "file/workspace_deliverable",
               "targetSelectorOwnerRef": "software-dev",
               "targetSelectorSubjectRef": "dodItem",
+              "prospectiveTargetAllOfConstraintRefs": [
+                "workspace-relative-path",
+                "new-target-requires-owner-selector"
+              ],
               "requireTargetGrounding": true,
               "requireDirectEvidence": true,
               "requireClaimEvidence": true,
@@ -1018,6 +1026,12 @@
                 "project_files"
               ],
               "targetSelectorRef": "file/workspace_deliverable",
+              "targetSelectorOwnerRef": "software-dev",
+              "targetSelectorSubjectRef": "goalCoverage",
+              "prospectiveTargetAllOfConstraintRefs": [
+                "workspace-relative-path",
+                "new-target-requires-owner-selector"
+              ],
               "requireTargetGrounding": true,
               "requireDirectEvidence": true,
               "requireClaimEvidence": true,

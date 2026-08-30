@@ -57,17 +57,20 @@ func TestRuntimeCWIReconciliationContractRetainsSelectorCandidates(t *testing.T)
 	focus.CoverageEvidenceBindings[0].TargetSelectorOwnerRef = RuntimeModuleFile
 	focus.CoverageEvidenceBindings[0].TargetSelectorSubjectRef = "deliverable"
 	focus.CoverageEvidenceBindings[0].TargetSelectorCandidateRefs = []string{"main.go"}
+	focus.CoverageEvidenceBindings[0].ProspectiveTargetAllOfConstraintRefs = []string{"workspace-relative-path", "new-target-requires-owner-selector"}
 	focus.CoverageEvidenceBindings[0].Hash = StableCoverageEvidenceBindingHash(focus.CoverageEvidenceBindings[0])
 	focus.TargetRefs = nil
 	focus.TargetSelectorRef = "file/profile_declared_candidates"
 	focus.TargetSelectorOwnerRef = RuntimeModuleFile
 	focus.TargetSelectorSubjectRef = "deliverable"
 	focus.TargetSelectorCandidateRefs = []string{"main.go"}
+	focus.ProspectiveTargetAllOfConstraintRefs = []string{"workspace-relative-path", "new-target-requires-owner-selector"}
 	contract, err := CompileRuntimeCWIReconciliationContract("definition-1", []CoverageFocus{focus})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(contract.Bindings) != 1 || !SameRuntimeTargetSelectorCandidateRefs(contract.Bindings[0].TargetSelectorCandidateRefs, []string{"main.go"}) {
+	if len(contract.Bindings) != 1 || !SameRuntimeTargetSelectorCandidateRefs(contract.Bindings[0].TargetSelectorCandidateRefs, []string{"main.go"}) ||
+		!SameRuntimeProspectiveTargetAllOfConstraintRefs(contract.Bindings[0].ProspectiveTargetAllOfConstraintRefs, []string{"new-target-requires-owner-selector", "workspace-relative-path"}) {
 		t.Fatalf("reconciliation binding lost selector candidates: %+v", contract)
 	}
 	request := RuntimeCWIReconciliationRequest{
@@ -77,6 +80,11 @@ func TestRuntimeCWIReconciliationContractRetainsSelectorCandidates(t *testing.T)
 	}
 	if err := request.ValidateAgainstContract(contract); err != nil {
 		t.Fatal(err)
+	}
+	allOfDrift := request.Clone()
+	allOfDrift.Bindings[0].ProspectiveTargetAllOfConstraintRefs = []string{"workspace-relative-path"}
+	if err := allOfDrift.ValidateAgainstContract(contract); err == nil {
+		t.Fatal("reconciliation request accepted prospective all-of declaration drift")
 	}
 	request.Bindings[0].TargetSelectorCandidateRefs[0] = "other.go"
 	if err := request.ValidateAgainstContract(contract); err == nil {

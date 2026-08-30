@@ -64,17 +64,18 @@ type RuntimeCWIReconciliationBindingRef struct {
 	// are copied from CoverageEvidenceBinding at activation; an owner may use
 	// them to inspect its own resource, but it must not infer semantics from
 	// Goal/DoD text or from a candidate.
-	AllowedOperationKinds       []string
-	TargetRefs                  []string
-	TargetSelectorRef           string
-	TargetSelectorOwnerRef      string
-	TargetSelectorSubjectRef    string
-	TargetSelectorCandidateRefs []string
-	ProspectiveTargetRefs       []string
-	ValidationRecipeIDs         []string
-	RequiredCheckRefs           []string
-	MetricConstraints           []string
-	ArtifactRefs                []string
+	AllowedOperationKinds                []string
+	TargetRefs                           []string
+	TargetSelectorRef                    string
+	TargetSelectorOwnerRef               string
+	TargetSelectorSubjectRef             string
+	TargetSelectorCandidateRefs          []string
+	ProspectiveTargetAllOfConstraintRefs []string
+	ProspectiveTargetRefs                []string
+	ValidationRecipeIDs                  []string
+	RequiredCheckRefs                    []string
+	MetricConstraints                    []string
+	ArtifactRefs                         []string
 }
 
 func (r RuntimeCWIReconciliationBindingRef) Normalized() RuntimeCWIReconciliationBindingRef {
@@ -89,6 +90,7 @@ func (r RuntimeCWIReconciliationBindingRef) Normalized() RuntimeCWIReconciliatio
 	r.TargetSelectorOwnerRef = strings.TrimSpace(r.TargetSelectorOwnerRef)
 	r.TargetSelectorSubjectRef = strings.TrimSpace(r.TargetSelectorSubjectRef)
 	r.TargetSelectorCandidateRefs = normalizeStrings(r.TargetSelectorCandidateRefs)
+	r.ProspectiveTargetAllOfConstraintRefs = NormalizeRuntimeProspectiveTargetAllOfConstraintRefs(r.ProspectiveTargetAllOfConstraintRefs)
 	r.ProspectiveTargetRefs = normalizeStrings(r.ProspectiveTargetRefs)
 	r.ValidationRecipeIDs = normalizeStrings(r.ValidationRecipeIDs)
 	r.RequiredCheckRefs = normalizeStrings(r.RequiredCheckRefs)
@@ -104,6 +106,7 @@ func (r RuntimeCWIReconciliationBindingRef) Clone() RuntimeCWIReconciliationBind
 	r.AllowedOperationKinds = append([]string(nil), r.AllowedOperationKinds...)
 	r.TargetRefs = append([]string(nil), r.TargetRefs...)
 	r.TargetSelectorCandidateRefs = append([]string(nil), r.TargetSelectorCandidateRefs...)
+	r.ProspectiveTargetAllOfConstraintRefs = append([]string(nil), r.ProspectiveTargetAllOfConstraintRefs...)
 	r.ProspectiveTargetRefs = append([]string(nil), r.ProspectiveTargetRefs...)
 	r.ValidationRecipeIDs = append([]string(nil), r.ValidationRecipeIDs...)
 	r.RequiredCheckRefs = append([]string(nil), r.RequiredCheckRefs...)
@@ -127,6 +130,12 @@ func (r RuntimeCWIReconciliationBindingRef) Validate() error {
 	}
 	if len(r.TargetSelectorCandidateRefs) != 0 && r.TargetSelectorRef == "" {
 		return fmt.Errorf("reconciliation binding ref %q selector candidates require a selector", r.BindingID)
+	}
+	if len(r.ProspectiveTargetAllOfConstraintRefs) != 0 && (r.TargetSelectorRef == "" || r.TargetSelectorOwnerRef == "" || r.TargetSelectorSubjectRef == "") {
+		return fmt.Errorf("reconciliation binding ref %q prospective target all-of declaration requires a complete selector", r.BindingID)
+	}
+	if err := ValidateRuntimeProspectiveTargetAllOfConstraintRefs(r.ProspectiveTargetAllOfConstraintRefs); err != nil {
+		return fmt.Errorf("reconciliation binding ref %q: %w", r.BindingID, err)
 	}
 	return nil
 }
@@ -235,22 +244,23 @@ func CompileRuntimeCWIReconciliationContract(definitionRevision string, focuses 
 				}
 			}
 			ref := RuntimeCWIReconciliationBindingRef{
-				CoverageWorkItemID:          binding.CoverageWorkItemID,
-				BindingID:                   binding.ID,
-				BindingHash:                 binding.Hash,
-				OwnerModuleIDs:              owners,
-				RequiredEvidenceKinds:       binding.EvidenceKinds(),
-				AllowedOperationKinds:       operationKinds,
-				TargetRefs:                  binding.TargetRefs,
-				TargetSelectorRef:           binding.TargetSelectorRef,
-				TargetSelectorOwnerRef:      binding.TargetSelectorOwnerRef,
-				TargetSelectorSubjectRef:    binding.TargetSelectorSubjectRef,
-				TargetSelectorCandidateRefs: binding.TargetSelectorCandidateRefs,
-				ProspectiveTargetRefs:       binding.ProspectiveTargetRefs,
-				ValidationRecipeIDs:         recipeIDs,
-				RequiredCheckRefs:           checkRefs,
-				MetricConstraints:           metricConstraints,
-				ArtifactRefs:                artifactRefs,
+				CoverageWorkItemID:                   binding.CoverageWorkItemID,
+				BindingID:                            binding.ID,
+				BindingHash:                          binding.Hash,
+				OwnerModuleIDs:                       owners,
+				RequiredEvidenceKinds:                binding.EvidenceKinds(),
+				AllowedOperationKinds:                operationKinds,
+				TargetRefs:                           binding.TargetRefs,
+				TargetSelectorRef:                    binding.TargetSelectorRef,
+				TargetSelectorOwnerRef:               binding.TargetSelectorOwnerRef,
+				TargetSelectorSubjectRef:             binding.TargetSelectorSubjectRef,
+				TargetSelectorCandidateRefs:          binding.TargetSelectorCandidateRefs,
+				ProspectiveTargetAllOfConstraintRefs: binding.ProspectiveTargetAllOfConstraintRefs,
+				ProspectiveTargetRefs:                binding.ProspectiveTargetRefs,
+				ValidationRecipeIDs:                  recipeIDs,
+				RequiredCheckRefs:                    checkRefs,
+				MetricConstraints:                    metricConstraints,
+				ArtifactRefs:                         artifactRefs,
 			}.Normalized()
 			if err := ref.Validate(); err != nil {
 				return RuntimeCWIReconciliationContract{}, err
@@ -289,6 +299,7 @@ func StableRuntimeCWIReconciliationContractHash(contract RuntimeCWIReconciliatio
 		writeHashString(h, binding.TargetSelectorOwnerRef)
 		writeHashString(h, binding.TargetSelectorSubjectRef)
 		writeHashStrings(h, binding.TargetSelectorCandidateRefs)
+		writeHashStrings(h, binding.ProspectiveTargetAllOfConstraintRefs)
 		writeHashStrings(h, binding.ProspectiveTargetRefs)
 		writeHashStrings(h, binding.ValidationRecipeIDs)
 		writeHashStrings(h, binding.RequiredCheckRefs)
@@ -1067,6 +1078,7 @@ func sameRuntimeCWIReconciliationBindingRefs(left, right []RuntimeCWIReconciliat
 			left[index].TargetSelectorOwnerRef != right[index].TargetSelectorOwnerRef ||
 			left[index].TargetSelectorSubjectRef != right[index].TargetSelectorSubjectRef ||
 			!sameStrings(left[index].TargetSelectorCandidateRefs, right[index].TargetSelectorCandidateRefs) ||
+			!SameRuntimeProspectiveTargetAllOfConstraintRefs(left[index].ProspectiveTargetAllOfConstraintRefs, right[index].ProspectiveTargetAllOfConstraintRefs) ||
 			!sameStrings(left[index].ProspectiveTargetRefs, right[index].ProspectiveTargetRefs) ||
 			!sameStrings(left[index].ValidationRecipeIDs, right[index].ValidationRecipeIDs) ||
 			!sameStrings(left[index].RequiredCheckRefs, right[index].RequiredCheckRefs) ||

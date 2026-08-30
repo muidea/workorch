@@ -126,7 +126,7 @@ func TestFileOwnerReconciliationObservesRealizedProspectiveTargetWithoutReopenin
 	workspace := t.TempDir()
 	const targetRef = "coverage-map.json"
 	adapter := NewRuntimeAdapter()
-	selectorBinding := runtimeTargetSelectionBinding{ownerRef: modulecommon.ModuleID, subjectRef: "workspace_deliverable"}
+	selectorBinding := runtimeTargetSelectionBinding{ownerRef: modulecommon.ModuleID, subjectRef: "workspace_deliverable", prospectiveTargetAllOfConstraintRefs: runtimeFileProspectiveTargetAllOfConstraintRefs()}
 	admission, err := adapter.AcquireRuntimeTargetSelection(workspace, "target-selection-before-create", "semantic_proof_target", runtimeFileSelectorWorkspaceRelativeNewTarget, targetRef, 4, selectorBinding)
 	if err != nil {
 		t.Fatal(err)
@@ -139,7 +139,8 @@ func TestFileOwnerReconciliationObservesRealizedProspectiveTargetWithoutReopenin
 		CoverageWorkItemID: common.CoverageWorkItemID("cwi-file-prospective"), BindingID: "binding-file-prospective", BindingHash: "binding-hash-file-prospective",
 		OwnerModuleIDs: []string{modulecommon.ModuleID}, RequiredEvidenceKinds: []string{runtimecontract.EvidenceKindStateChange},
 		AllowedOperationKinds: []string{runtimecontract.StepKindFileWrite}, TargetSelectorRef: runtimeFileSelectorWorkspaceRelativeNewTarget,
-		TargetSelectorOwnerRef: modulecommon.ModuleID, TargetSelectorSubjectRef: "workspace_deliverable", ProspectiveTargetRefs: []string{targetRef},
+		TargetSelectorOwnerRef: modulecommon.ModuleID, TargetSelectorSubjectRef: "workspace_deliverable",
+		ProspectiveTargetAllOfConstraintRefs: runtimeFileProspectiveTargetAllOfConstraintRefs(), ProspectiveTargetRefs: []string{targetRef},
 	})
 	before := sendFileReconciliationQuery(t, ctx, hub, command)
 	if before.Observation.Status != runtimecontract.RuntimeCWIReconciliationObservationUnsatisfied || len(before.Observation.TargetRefs) != 1 || before.Observation.TargetRefs[0] != targetRef {
@@ -258,11 +259,25 @@ func TestFileOwnerReconciliationClassifiesAmbiguousAndOutOfWorkspaceTargetsAsUnv
 			CoverageWorkItemID: common.CoverageWorkItemID("cwi-file-unauthorized-prospective"), BindingID: "binding-file-unauthorized-prospective", BindingHash: "binding-hash-file-unauthorized-prospective",
 			OwnerModuleIDs: []string{modulecommon.ModuleID}, RequiredEvidenceKinds: []string{runtimecontract.EvidenceKindStateChange},
 			AllowedOperationKinds: []string{runtimecontract.StepKindFileWrite}, TargetRefs: []string{"first.txt"},
-			TargetSelectorRef: runtimeFileTargetSelectorUniqueWorkspaceEntry, ProspectiveTargetRefs: []string{"second.txt"},
+			TargetSelectorRef: runtimeFileTargetSelectorUniqueWorkspaceEntry, TargetSelectorOwnerRef: modulecommon.ModuleID,
+			TargetSelectorSubjectRef: "workspace_deliverable", ProspectiveTargetRefs: []string{"second.txt"},
 		})
 		result := sendFileReconciliationQuery(t, ctx, hub, command)
 		if result.Observation.Status != runtimecontract.RuntimeCWIReconciliationObservationUnverifiable || result.Observation.OriginalDiagnostic == nil || result.Observation.OriginalDiagnostic.OriginalCode != "prospective_target_unsupported_for_selector" {
 			t.Fatalf("hidden unauthorized prospective observation = %+v", result.Observation)
+		}
+	})
+	t.Run("prospective target cannot weaken sealed all-of constraints", func(t *testing.T) {
+		command := fileReconciliationQueryCommand(workspace, runtimecontract.RuntimeCWIReconciliationBindingRef{
+			CoverageWorkItemID: common.CoverageWorkItemID("cwi-file-weakened-all-of"), BindingID: "binding-file-weakened-all-of", BindingHash: "binding-hash-file-weakened-all-of",
+			OwnerModuleIDs: []string{modulecommon.ModuleID}, RequiredEvidenceKinds: []string{runtimecontract.EvidenceKindStateChange},
+			AllowedOperationKinds: []string{runtimecontract.StepKindFileWrite}, TargetSelectorRef: runtimeFileTargetSelectorWorkspaceDeliverable,
+			TargetSelectorOwnerRef: modulecommon.ModuleID, TargetSelectorSubjectRef: "workspace_deliverable",
+			ProspectiveTargetAllOfConstraintRefs: []string{"workspace-relative-path"}, ProspectiveTargetRefs: []string{"second.txt"},
+		})
+		result := sendFileReconciliationQuery(t, ctx, hub, command)
+		if result.Observation.Status != runtimecontract.RuntimeCWIReconciliationObservationUnverifiable || result.Observation.OriginalDiagnostic == nil || result.Observation.OriginalDiagnostic.OriginalCode != "prospective_target_all_of_constraints_mismatch" {
+			t.Fatalf("weakened all-of observation = %+v", result.Observation)
 		}
 	})
 }

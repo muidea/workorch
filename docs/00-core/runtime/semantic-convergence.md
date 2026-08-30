@@ -4,7 +4,7 @@ Status: normative
 
 Type: core-contract-part
 
-Last Verified: 2026-08-27
+Last Verified: 2026-08-30
 
 ## Runtime 生产主链
 
@@ -103,9 +103,18 @@ acquisition owner/kind/variant/target-policy/operation-selector。`RuntimeSemant
 generation 的 current kinds 只能是 acquisition 所需的 `state_change`，不能覆盖 Definition 的 terminal `validation` 等声明，
 也不能继承 terminal metric/artifact credit。
 
-`prospective_owner_target` acquisition 必须在 pre-seal Profile declaration、compiled obligation 与 provider projection 中携带
+target-grounded Profile declaration 若允许在没有 bounded exact candidate path 的空 scope 中进行 prospective File creation，必须在 pre-seal snapshot 中携带完整
+`ProspectiveTargetAllOfConstraintRefs`。该集合最多 8 项、规范化后每项都必需，并与完整 declaration selector
+ref/owner/subject 一同进入 Definition/Profile hash；它既不是 exact target set，也没有任选一项的语义。File 的
+pre-semantic `TargetSelection` 必须回显该集合，且只在集合 exact-equal owner 支持的 prospective constraint set 时返回可继续的
+selection。compiled `RuntimeSemanticProofObligation` 以
+`DeclarationProspectiveTargetAllOfConstraintRefs` 封存同一值，C3 只投影这一 sealed declaration；SM-3 schema 与本地 admission
+要求 prospective proposal 的 `ProspectiveConstraintRefs` exact-equal 整个集合。缺项、扩项或漂移均在 owner probe 前形成 typed
+field violation，不能由 File/Shell result 补齐或缩减。
+
+`prospective_owner_target` acquisition 还必须在 pre-seal Profile declaration、compiled obligation 与 provider projection 中携带
 同一个非空 `ProspectiveSatisfactionContractRef`；preexisting 与 `existing_owner_scope` 禁止携带。pre-seal
-Definition 只封存 declaration selector/candidate refs 与 acquisition closure；compiled obligation/manifest 只追加
+Definition 只封存 declaration selector/candidate refs、mandatory prospective constraint refs 与 acquisition closure；compiled obligation/manifest 只追加
 acquisition owner/kind/variant/target-policy/operation-selector 与 current owner constraints，两者都不携带 exact
 prospective target set。required owner catalog 发布 provider-safe typed `ProspectiveTargetSatisfactionConstraint`，只含
 `all_of` clause；每个 clause 内的 predicate 全部必须满足，全部 clause 都是必需条件，不存在替代分支。compiled
@@ -205,7 +214,7 @@ decode/validate 边界失败；不得补声明、推导旧状态、生成 compat
 Fresh activation 的 immutable `DefinitionFocuses` 与 SM-2 generation-specific
 `Focus/RemainingFocuses/CompletedFocuses` 必须分离。前者只包含 CWI、presentation slice、required
 evidence/assessment、声明式 metric/artifact obligation、owner-fact postcondition、target role 与可选 profile
-selector/candidate scope，以及可选的单一 Profile `ValidationFailureRepairConvergence`；不得携带
+selector/candidate scope、mandatory prospective constraint refs，以及可选的单一 Profile `ValidationFailureRepairConvergence`；不得携带
 exact/resolved/prospective target、operation kind/variant、recipe/check 或 binding。后者可以随 owner resource revision
 退休、重开和重新 seal。semantic document admission、owner feasibility 与 final seal 都只能用 immutable
 DefinitionFocus 检查 source declaration，不能把上一 generation 的 accepted operation 当成下一 generation 声明。
@@ -215,15 +224,16 @@ DefinitionFocus 检查 source declaration，不能把上一 generation 的 accep
 `RuntimeFocusSeedsFromDefinitionFocuses` 生成不含 target selector、owner-fact closure、resolved target、operation、recipe、
 check、binding 或 `ValidationFailureRepairConvergence` 的 `CoverageFocus` seed。只有 SM-2 semantic seal 可以用
 generation-specific `CoverageFocus` 替换该游标。
-Definition/activation 只封存 declaration selector identity、candidate refs 与 acquisition closure；它们不封存
+Definition/activation 只封存 declaration selector identity、candidate refs、mandatory prospective constraint refs 与 acquisition closure；它们不封存
 exact prospective target set。`ProspectiveTargetRefs` 首次出现在 SM-3 semantic proposal，File/Shell owner fact 只通过
 typed lineage 绑定该 proposal/target set 并返回 factual feasibility/satisfaction；只有 SM-2 private event 封存的
 `CoverageEvidenceBinding` 才是完整 target-set authority。后续 operations manifest 为每个 target 封存一项
 `RequiredOperationSequence`，每项的 `TargetRef` 要求 candidate `targetRefs` 为 exact singleton，并通过 requirement dependency
 按 canonical order 执行；candidate 必须完整提交全部项，dispatch 只从 binding 派生 target，不重新选择或允许部分执行。
 
-owner target scope 的空观察只证明当前不存在既有目标，不能授权任意新路径。prospective creation 必须同时具有
-SM-3 document 提出的 bounded nonempty exact target set、Definition 的完整 `selector ref + owner ref + subject ref`/candidate scope，以及同一
+owner target scope 的空观察只证明当前不存在既有目标，不能授权任意新路径。开放 scope 的 `prospective_owner_target` creation 必须同时具有
+SM-3 document 提出的 bounded nonempty exact target set、Definition 的完整 `selector ref + owner ref + subject ref`/candidate scope、
+exact mandatory `ProspectiveTargetAllOfConstraintRefs`，以及同一
 capability owner catalog 发布的 matching operation selector/constraint/variant。缺 proposal target set 由 strict schema/admission 拒绝；
 scope/catalog 不匹配由 pure evaluator 或 File feasibility 拒绝。全部 exact-current owner fact 通过后，SM-2 才封存 binding；
 之前始终零 candidate/dispatch/effect。
@@ -249,10 +259,12 @@ Shell 也不成为 File target owner。
 要求 target grounding 的 immutable DefinitionFocus 必须在 semantic provider request 前形成 focus-scoped typed
 `TargetSelection` prerequisite，并由 File owner 返回 exact selection 与 workspace-tree freshness observation。只有该 observation
 逐字段匹配 current focus、Definition selector/owner/subject/candidate declaration，且 disposition 为
-`absent | ambiguous | unsupported`，或“empty scope 且 Definition 无 bounded selector candidates”时，
+`absent | ambiguous | unsupported`，或“empty scope 且 Definition 既无 bounded selector candidates 也无 owner-accepted
+`ProspectiveTargetAllOfConstraintRefs`”时，
 `target_grounding_unresolved` 才是可交付的 owner-grounded terminal，整个
 路径保持零 semantic/candidate provider call。缺少 selection、observation 或 current lineage 的 binding-free view 仍是 transient，
-不得提前交付；`selected`，以及“empty scope 但 Definition 有 bounded selector candidates”的合法 prospective creation 则继续
+不得提前交付；`selected`，以及“empty scope 但 Definition 有 bounded selector candidates 或 exact owner-accepted mandatory
+constraint set”的合法 prospective creation则继续
 semantic planning。
 
 catalog retirement 可以在同一 Orchestrator owner-local CAS 中打开新的 semantic generation。若旧 generation 的 no-effect

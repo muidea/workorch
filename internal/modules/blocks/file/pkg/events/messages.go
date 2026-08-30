@@ -29,18 +29,19 @@ type AcquireTargetSnapshotResult struct {
 // AcquireRuntimeTargetSelectionCommand asks File for a bounded, read-only
 // target-selection observation. TargetRole remains opaque to the owner.
 type AcquireRuntimeTargetSelectionCommand struct {
-	WorkspaceID                   common.WorkspaceID
-	RunID                         common.RunID
-	AuthoritySnapshotID           string
-	PrerequisiteID                string
-	WorkspaceDeliverableDirectory string
-	TargetRole                    string
-	TargetSelectorRef             string
-	TargetSelectorOwnerRef        string
-	TargetSelectorSubjectRef      string
-	TargetSelectorCandidateRefs   []string
-	ProspectiveTargetRef          string
-	MaxItems                      int
+	WorkspaceID                          common.WorkspaceID
+	RunID                                common.RunID
+	AuthoritySnapshotID                  string
+	PrerequisiteID                       string
+	WorkspaceDeliverableDirectory        string
+	TargetRole                           string
+	TargetSelectorRef                    string
+	TargetSelectorOwnerRef               string
+	TargetSelectorSubjectRef             string
+	TargetSelectorCandidateRefs          []string
+	ProspectiveTargetAllOfConstraintRefs []string
+	ProspectiveTargetRef                 string
+	MaxItems                             int
 }
 
 type AcquireRuntimeTargetSelectionResult struct {

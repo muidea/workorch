@@ -4,7 +4,7 @@ Status: normative
 
 Type: core-contract-part
 
-Last Verified: 2026-08-26
+Last Verified: 2026-08-30
 
 ## 仅允许 all-of terminal 语义
 
@@ -92,6 +92,13 @@ DefinitionAdmissionCandidate
   binding 只封存 admission policy authority，不携带 exact prospective target set。任一侧 policy 内容漂移都必须形成新的
   candidate revision，不能修改已封存 lineage；final bootstrap gate 还必须把 activation 中的 typed policies 与 exact-current
   admitted Workspace policy projection 逐项比较，投影漂移不得创建 Run；
+- 允许在没有 bounded exact candidate path 的空 scope 中创建 prospective File target 时，target-grounded Profile requirement 必须在 pre-seal snapshot 中显式携带
+  `ProspectiveTargetAllOfConstraintRefs`。该字段是最多 8 项的唯一、规范化、全员必需约束引用集合，要求完整
+  `target selector ref + owner ref + subject ref` 与 `RequireTargetGrounding=true`；它不是 `one_of` 候选列表，也不能携带
+  exact prospective path。该集合进入 normalized Profile hash，因而被 `CandidateHash`、promotion 与
+  `RuntimeProfileContractsHash` 传递性封存；任一缺项、扩项或 selector 漂移都必须形成新的 candidate revision，不能由
+  Application、LLM 或 capability result 补写。Profile 若要表达替代约束分支，仍属于 unsupported relation，必须走
+  pre-Run blocking clarification，而不能把多个 ref 解释成任选其一；
 - `RuntimeProfileContracts` 是 admission compiler 的完整 typed 输入，不是仅供展示的副本。其规范化 hash 必须与
   `RuntimeProfileContractsHash` 精确一致；Workspace pure compiler 必须从该 snapshot 独立派生 owner-fact/convergence
   manifest，并逐项匹配 candidate 中的 bindings，Application 不能只提交一个 hash 或自算 manifest 取代 owner 校验；

@@ -14,8 +14,37 @@ const (
 	RuntimeProspectiveTargetSatisfactionConstraintHashPrefix    = "runtime-prospective-target-satisfaction-constraint-"
 	// RuntimeProspectiveTargetRefsMaxCount is the shared provider, admission,
 	// delta and owner-satisfaction bound for one prospective proposal.
-	RuntimeProspectiveTargetRefsMaxCount = 8
+	RuntimeProspectiveTargetRefsMaxCount                = 8
+	RuntimeProspectiveTargetAllOfConstraintRefsMaxCount = 8
 )
+
+// NormalizeRuntimeProspectiveTargetAllOfConstraintRefs canonicalizes the
+// immutable pre-seal constraint declaration. Every returned ref is mandatory:
+// this contract deliberately has no one-of/any-of interpretation.
+func NormalizeRuntimeProspectiveTargetAllOfConstraintRefs(values []string) []string {
+	return normalizeStrings(values)
+}
+
+// ValidateRuntimeProspectiveTargetAllOfConstraintRefs keeps the pre-seal
+// declaration finite. Capability owners still decide whether they support the
+// exact all-of set; this pure validation never interprets an owner constraint.
+func ValidateRuntimeProspectiveTargetAllOfConstraintRefs(values []string) error {
+	values = NormalizeRuntimeProspectiveTargetAllOfConstraintRefs(values)
+	if len(values) > RuntimeProspectiveTargetAllOfConstraintRefsMaxCount {
+		return fmt.Errorf("runtime prospective target all-of declaration exceeds %d constraints", RuntimeProspectiveTargetAllOfConstraintRefsMaxCount)
+	}
+	return nil
+}
+
+// SameRuntimeProspectiveTargetAllOfConstraintRefs compares the canonical
+// mandatory constraint set carried across Definition, prerequisite and owner
+// observation contracts.
+func SameRuntimeProspectiveTargetAllOfConstraintRefs(left, right []string) bool {
+	return sameStrings(
+		NormalizeRuntimeProspectiveTargetAllOfConstraintRefs(left),
+		NormalizeRuntimeProspectiveTargetAllOfConstraintRefs(right),
+	)
+}
 
 // RuntimeProspectiveTargetPredicateKind is a closed, owner-neutral predicate
 // vocabulary over one prospective workspace-relative target. Predicates are

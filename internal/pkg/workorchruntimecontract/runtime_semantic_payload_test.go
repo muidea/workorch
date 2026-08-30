@@ -79,6 +79,64 @@ func TestRuntimeSemanticPlanRequestSchemaNarrowsOrderAndProofBatch(t *testing.T)
 	}
 }
 
+func TestRuntimeSemanticPlanRequestSchemaRequiresExactDefinitionProspectiveAllOfSet(t *testing.T) {
+	manifest, document, _ := semanticDeclarationTargetSurfaceFixture(t, RuntimeOperationTargetPolicyProspectiveOwnerTarget)
+	schema, err := RuntimeSemanticPlanJSONSchemaForRequest(
+		manifest,
+		RuntimeSemanticPlanStepProofBatch,
+		document.BatchID,
+		document.BatchSequence,
+		document.BatchCoverageWorkItemIDs,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var decoded map[string]any
+	if err := json.Unmarshal([]byte(schema), &decoded); err != nil {
+		t.Fatal(err)
+	}
+	items := decoded["properties"].(map[string]any)["proposals"].(map[string]any)["items"].(map[string]any)
+	found := false
+	for _, raw := range items["allOf"].([]any) {
+		conditional, ok := raw.(map[string]any)
+		if !ok {
+			continue
+		}
+		then, ok := conditional["then"].(map[string]any)
+		if !ok {
+			continue
+		}
+		properties, ok := then["properties"].(map[string]any)
+		if !ok {
+			continue
+		}
+		target, ok := properties["target"].(map[string]any)
+		if !ok {
+			continue
+		}
+		targetProperties, ok := target["properties"].(map[string]any)
+		if !ok {
+			continue
+		}
+		constraints, ok := targetProperties["prospectiveConstraintRefs"].(map[string]any)
+		if !ok {
+			continue
+		}
+		if constraints["minItems"] != float64(2) {
+			continue
+		}
+		values, ok := constraints["items"].(map[string]any)["enum"].([]any)
+		if !ok || constraints["minItems"] != float64(2) || constraints["maxItems"] != float64(2) || constraints["uniqueItems"] != true || len(values) != 2 || values[0] != "new-target-requires-owner-selector" || values[1] != "workspace-relative-path" {
+			t.Fatalf("prospective all-of schema = %+v", constraints)
+		}
+		found = true
+		break
+	}
+	if !found {
+		t.Fatalf("proof-batch schema has no exact prospective all-of condition: %s", schema)
+	}
+}
+
 func TestRuntimeSemanticOwnerFactAcquisitionSchemaUsesOperationSelectorNotDefinitionSelector(t *testing.T) {
 	manifest, document, _ := semanticMissingOwnerFactAcquisitionFixture(t)
 	if !sameStrings(manifest.ProofObligations[0].RequiredEvidenceKinds, []string{EvidenceKindValidation}) {

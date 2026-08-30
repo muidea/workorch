@@ -477,6 +477,12 @@ func assertSoftwareDevWorkspaceDeliverableSelectors(t *testing.T, hints map[stri
 			if _, present := item["prospectiveTargetRef"]; present {
 				t.Fatalf("%s/%s retains deprecated prospectiveTargetRef = %q", id, item["scope"], item["prospectiveTargetRef"])
 			}
+			constraints, ok := item["prospectiveTargetAllOfConstraintRefs"].([]any)
+			if !ok || len(constraints) != 2 {
+				t.Fatalf("%s/%s prospective target all-of declaration = %+v, want two mandatory constraints", id, item["scope"], item["prospectiveTargetAllOfConstraintRefs"])
+			}
+			assertStringListContains(t, constraints, "workspace-relative-path")
+			assertStringListContains(t, constraints, "new-target-requires-owner-selector")
 			found++
 		}
 		if found == 0 {

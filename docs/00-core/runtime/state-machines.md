@@ -4,7 +4,7 @@ Status: normative
 
 Type: core-contract-part
 
-Last Verified: 2026-08-29
+Last Verified: 2026-08-30
 
 ## 四个协调状态机
 
@@ -61,11 +61,12 @@ load facts
   validation scratch、provider ceiling 等未完成前不得请求 operation candidate。全部 prerequisite 必须通过 typed
   acquisition 获得并持久化。
 - immutable DefinitionFocus 要求 target grounding 时，focus-scoped File-owner `TargetSelection` 及其 exact workspace-tree
-  freshness observation 也是 semantic provider 前置条件。`absent | ambiguous | unsupported`，以及无 bounded Definition
-  candidate 的 empty scope，只有在 selection、
-  prerequisite、observation 与 current Definition selector/owner/subject/candidate declaration 全部一致时，才能零 LLM
-  fail-closed 为 `target_grounding_unresolved`；无 selection 的 binding-free view 继续 pending，selected 或带 bounded
-  Definition candidates 的 empty scope 作为合法 prospective creation 进入 semantic request。
+  freshness observation 也是 semantic provider 前置条件。selection 必须逐字段回显 current Definition 的
+  selector/owner/subject/candidates 与 `ProspectiveTargetAllOfConstraintRefs`；File 只确认 exact owner-supported mandatory set。
+  `absent | ambiguous | unsupported`，以及既无 bounded Definition candidate 也无 owner-accepted all-of set 的 empty scope，
+  只有在 prerequisite、observation 与声明全部一致时，才能零 LLM fail-closed 为 `target_grounding_unresolved`；无 selection
+  的 binding-free view 继续 pending，selected 或带 bounded candidates/exact mandatory set 的 empty scope 作为合法
+  prospective creation 进入 semantic request。
 - `need_validation` candidate 前，profile 声明的 validation discovery source 必须由 fresh owner resource 与 matching prerequisite observation 同时证明。
   缺失 `workspace_manifest | project_files | declared_commands | available_capabilities` 是 SM-2 prerequisite debt，不是
   capability unavailable feasibility：SM-2 必须用既有 typed requirement 返回 `need_prerequisite` 并重获 owner fact。
@@ -234,7 +235,11 @@ current manifest 临时补全 scope；没有 matching sealed fallback 时按 typ
   `CurrentBindingRef`。导致 owner-fact gap 的 accepted state-change operation shape 必须作为同一 CWI 的 anti-replay fact
   跨 successor semantic focus 保留；SM-2 不携带 predecessor repair attempt/gap/directive，SM-3 在 dispatch 前拒绝等价
   shape，因此新 binding generation 不能重置等价副作用的防重放边界。
-- prospective composite feasibility 的 pre-seal Definition 不携带 exact target set；compiled obligation/manifest 也不补写。
+- prospective composite feasibility 的 pre-seal Definition 不携带 exact target set，但必须封存完整 mandatory
+  `ProspectiveTargetAllOfConstraintRefs`；compiled obligation 以
+  `DeclarationProspectiveTargetAllOfConstraintRefs` 原样传递，SM-3 schema/document admission 要求 proposal
+  `ProspectiveConstraintRefs` exact-equal，禁止子集、超集和 alternative。File target-selection fact 与后续 reconciliation
+  同样绑定该集合；只有 exact owner-supported set 可继续。compiled obligation/manifest 不补写 exact target path。
   required owner catalog 发布 provider-safe typed `ProspectiveTargetSatisfactionConstraint`，且只允许 mandatory `all_of`
   clauses；同一值封存到 acquisition/manifest 并在 C3 投影。SM-3 只能提交一份 bounded semantic proposal，其中
   `ProspectiveTargetRefs` 必须包含 1～8 个唯一 canonical exact target。每项都必须位于 Definition declaration

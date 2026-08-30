@@ -102,7 +102,7 @@ func validateRuntimeCapabilityResourceRequirement(requirement RuntimeRequirement
 	default:
 		return fmt.Errorf("unsupported capability resource prerequisite kind %q", requirement.Kind)
 	}
-	if requirement.CapabilityClass != "" || len(requirement.RequiredCapabilities) != 0 || requirement.TargetSelectorRef != "" || requirement.TargetSelectorOwnerRef != "" || requirement.TargetSelectorSubjectRef != "" || len(requirement.TargetSelectorCandidateRefs) != 0 || requirement.ProspectiveTargetRef != "" {
+	if requirement.CapabilityClass != "" || len(requirement.RequiredCapabilities) != 0 || requirement.TargetSelectorRef != "" || requirement.TargetSelectorOwnerRef != "" || requirement.TargetSelectorSubjectRef != "" || len(requirement.TargetSelectorCandidateRefs) != 0 || len(requirement.ProspectiveTargetAllOfConstraintRefs) != 0 || requirement.ProspectiveTargetRef != "" {
 		return fmt.Errorf("resource requirement contains capability or target-selection authority")
 	}
 	return nil
@@ -396,6 +396,7 @@ func writeRuntimeRequirementHash(h hashStringWriter, requirement RuntimeRequirem
 	writeHashString(h, requirement.TargetSelectorOwnerRef)
 	writeHashString(h, requirement.TargetSelectorSubjectRef)
 	writeHashStrings(h, requirement.TargetSelectorCandidateRefs)
+	writeHashStrings(h, requirement.ProspectiveTargetAllOfConstraintRefs)
 	writeHashString(h, requirement.ProspectiveTargetRef)
 	writeHashString(h, string(requirement.CapabilityClass))
 	writeHashStrings(h, requirement.RequiredCapabilities)

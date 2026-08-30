@@ -68,17 +68,21 @@ type RuntimeProfileEvidenceRequirement struct {
 	// TargetSelectorOwnerRef and TargetSelectorSubjectRef bind a generic File
 	// selection query to the profile declaration which owns its semantics. File
 	// only evaluates the bounded candidate refs; it never interprets these values.
-	TargetSelectorOwnerRef            string
-	TargetSelectorSubjectRef          string
-	TargetSelectorCandidateRefs       []string
-	RequireTargetGrounding            bool
-	RequiredEvidenceKinds             []string
-	RequireDirectEvidence             bool
-	RequireClaimEvidence              bool
-	RequireExecutableBehaviorEvidence bool
-	RequireCoverageTargets            bool
-	AcceptedStepKinds                 []string
-	AcceptedOperationVariants         []RuntimeOperationVariantRef
+	TargetSelectorOwnerRef      string
+	TargetSelectorSubjectRef    string
+	TargetSelectorCandidateRefs []string
+	// ProspectiveTargetAllOfConstraintRefs is the immutable pre-seal creation
+	// declaration. Every ref is mandatory and exact prospective targets are
+	// intentionally absent until an SM-3 proposal is owner-validated.
+	ProspectiveTargetAllOfConstraintRefs []string
+	RequireTargetGrounding               bool
+	RequiredEvidenceKinds                []string
+	RequireDirectEvidence                bool
+	RequireClaimEvidence                 bool
+	RequireExecutableBehaviorEvidence    bool
+	RequireCoverageTargets               bool
+	AcceptedStepKinds                    []string
+	AcceptedOperationVariants            []RuntimeOperationVariantRef
 	// ValidationRecipeID and RequiredCheckRefs are profile-owned proof
 	// declarations. Runtime only seals and compares these opaque identities;
 	// Shell remains the owner that observes executed/passed checks.
@@ -318,6 +322,14 @@ func ValidateRuntimeProfileContracts(values []RuntimeProfileContract) error {
 			if len(item.TargetSelectorCandidateRefs) > 0 {
 				if !item.RequireTargetGrounding || item.TargetSelectorRef == "" || item.TargetSelectorOwnerRef == "" || item.TargetSelectorSubjectRef == "" {
 					return fmt.Errorf("runtime profile evidence requirement %q candidate selector requires grounding and a complete selector", item.ID)
+				}
+			}
+			if len(item.ProspectiveTargetAllOfConstraintRefs) > 0 {
+				if !item.RequireTargetGrounding || item.TargetSelectorRef == "" || item.TargetSelectorOwnerRef == "" || item.TargetSelectorSubjectRef == "" {
+					return fmt.Errorf("runtime profile evidence requirement %q prospective target all-of declaration requires grounding and a complete selector", item.ID)
+				}
+				if err := ValidateRuntimeProspectiveTargetAllOfConstraintRefs(item.ProspectiveTargetAllOfConstraintRefs); err != nil {
+					return fmt.Errorf("runtime profile evidence requirement %q: %w", item.ID, err)
 				}
 			}
 			for _, state := range item.CapabilityStateRequirements {
@@ -620,6 +632,7 @@ func normalizeRuntimeProfileEvidenceRequirements(values []RuntimeProfileEvidence
 		value.TargetSelectorOwnerRef = strings.TrimSpace(value.TargetSelectorOwnerRef)
 		value.TargetSelectorSubjectRef = strings.TrimSpace(value.TargetSelectorSubjectRef)
 		value.TargetSelectorCandidateRefs = normalizeStrings(value.TargetSelectorCandidateRefs)
+		value.ProspectiveTargetAllOfConstraintRefs = NormalizeRuntimeProspectiveTargetAllOfConstraintRefs(value.ProspectiveTargetAllOfConstraintRefs)
 		value.RequiredEvidenceKinds = normalizeStrings(value.RequiredEvidenceKinds)
 		value.AcceptedStepKinds = normalizeStrings(value.AcceptedStepKinds)
 		value.AcceptedOperationVariants = NormalizeRuntimeOperationVariantRefs(value.AcceptedOperationVariants)
@@ -694,7 +707,7 @@ func sameRuntimeProfileContract(left RuntimeProfileContract, right RuntimeProfil
 	for idx := range left.EvidenceRequirements {
 		l, r := left.EvidenceRequirements[idx], right.EvidenceRequirements[idx]
 		if l.ID != r.ID || l.Scope != r.Scope || l.EvidenceRole != r.EvidenceRole || l.TargetRole != r.TargetRole || l.TargetSelectorRef != r.TargetSelectorRef || l.TargetSelectorOwnerRef != r.TargetSelectorOwnerRef || l.TargetSelectorSubjectRef != r.TargetSelectorSubjectRef ||
-			!sameStrings(l.TargetRefs, r.TargetRefs) || !sameStrings(l.TargetDiscoverySources, r.TargetDiscoverySources) || !sameStrings(l.TargetSelectorCandidateRefs, r.TargetSelectorCandidateRefs) || l.RequireTargetGrounding != r.RequireTargetGrounding ||
+			!sameStrings(l.TargetRefs, r.TargetRefs) || !sameStrings(l.TargetDiscoverySources, r.TargetDiscoverySources) || !sameStrings(l.TargetSelectorCandidateRefs, r.TargetSelectorCandidateRefs) || !SameRuntimeProspectiveTargetAllOfConstraintRefs(l.ProspectiveTargetAllOfConstraintRefs, r.ProspectiveTargetAllOfConstraintRefs) || l.RequireTargetGrounding != r.RequireTargetGrounding ||
 			!sameStrings(l.RequiredEvidenceKinds, r.RequiredEvidenceKinds) || l.RequireDirectEvidence != r.RequireDirectEvidence ||
 			l.RequireClaimEvidence != r.RequireClaimEvidence || l.RequireExecutableBehaviorEvidence != r.RequireExecutableBehaviorEvidence ||
 			l.RequireCoverageTargets != r.RequireCoverageTargets || l.ValidationRecipeID != r.ValidationRecipeID || l.Description != r.Description ||

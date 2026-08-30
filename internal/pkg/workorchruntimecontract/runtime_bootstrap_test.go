@@ -62,6 +62,19 @@ func TestRuntimeBootstrapCloneAndEqualityPreserveTypedContract(t *testing.T) {
 	if len(facts.DefinitionFocuses) != 2 {
 		t.Fatalf("initial facts definition focus count = %d", len(facts.DefinitionFocuses))
 	}
+	invalidAllOfPrerequisite := cloneRuntimeFactsRaw(facts)
+	invalidAllOfPrerequisite.Prerequisites.Pending = append(invalidAllOfPrerequisite.Prerequisites.Pending, RuntimePrerequisite{
+		ID: "prerequisite-invalid-all-of", Kind: PrerequisiteKindTargetSelection, OwnerModuleID: RuntimeModuleFile,
+		ProspectiveTargetAllOfConstraintRefs: []string{"workspace-relative-path"},
+	})
+	if err := invalidAllOfPrerequisite.Validate(); err == nil {
+		t.Fatal("runtime facts accepted a prospective target all-of prerequisite without a complete selector")
+	}
+	invalidAllOfFocus := cloneRuntimeFactsRaw(facts)
+	invalidAllOfFocus.Focus.ProspectiveTargetAllOfConstraintRefs = []string{"workspace-relative-path"}
+	if err := invalidAllOfFocus.Validate(); err == nil {
+		t.Fatal("runtime facts accepted a prospective target all-of focus without grounding and a complete selector")
+	}
 	facts.Focus.AcceptedStepKinds = []string{RuntimeBlockKindPatchApply}
 	if facts.DefinitionFocuses[0].ID != "focus-1" {
 		t.Fatal("semantic generation mutation changed immutable definition focus")
@@ -82,6 +95,14 @@ func TestRuntimeBootstrapCloneAndEqualityPreserveTypedContract(t *testing.T) {
 	})
 	if err := presealedTarget.Validate(); err == nil {
 		t.Fatal("bootstrap requirement accepted a pre-seal prospective target")
+	}
+	invalidAllOfBootstrap := bootstrap.Clone()
+	invalidAllOfBootstrap.Requirements = append(invalidAllOfBootstrap.Requirements, RuntimeRequirement{
+		Kind: PrerequisiteKindTargetSelection, OwnerModuleID: RuntimeModuleFile,
+		ProspectiveTargetAllOfConstraintRefs: []string{"workspace-relative-path"},
+	})
+	if err := invalidAllOfBootstrap.Validate(); err == nil {
+		t.Fatal("bootstrap requirement accepted a prospective target all-of declaration without a complete selector")
 	}
 	retiredFailureTarget := bootstrap.Clone()
 	retiredFailureTarget.Requirements = append(retiredFailureTarget.Requirements, RuntimeRequirement{Kind: PrerequisiteKind("failure_target")})
@@ -171,7 +192,7 @@ func TestRuntimeDefinitionFocusPreservesDeclarationWithoutGenerationAuthority(t 
 		RequiredEvidenceKinds: []string{EvidenceKindValidation}, TargetRole: "verification_target",
 		TargetRefs: []string{"declared-but-not-owner-resolved.txt"}, TargetSelectorRef: "file/workspace-deliverable",
 		TargetSelectorOwnerRef: "profile/test", TargetSelectorSubjectRef: "verification_target",
-		TargetSelectorCandidateRefs: []string{"activation-sealed-validation.sh"}, RequireTargetGrounding: true,
+		TargetSelectorCandidateRefs: []string{"activation-sealed-validation.sh"}, ProspectiveTargetAllOfConstraintRefs: []string{"workspace-relative-path", "new-target-requires-owner-selector"}, RequireTargetGrounding: true,
 		AcceptedStepKinds: []string{RuntimeBlockKindManagedValidationSession}, ValidationRecipeID: "recipe-1",
 		RequiredCheckRefs: []string{"check-1"},
 	}})
@@ -179,7 +200,8 @@ func TestRuntimeDefinitionFocusPreservesDeclarationWithoutGenerationAuthority(t 
 		t.Fatalf("immutable declaration rejected: %v", err)
 	}
 	if len(compiled) != 1 || compiled[0].TargetRole != "verification_target" || !compiled[0].RequireTargetGrounding ||
-		!sameStrings(compiled[0].TargetSelectorCandidateRefs, []string{"activation-sealed-validation.sh"}) {
+		!sameStrings(compiled[0].TargetSelectorCandidateRefs, []string{"activation-sealed-validation.sh"}) ||
+		!SameRuntimeProspectiveTargetAllOfConstraintRefs(compiled[0].ProspectiveTargetAllOfConstraintRefs, []string{"new-target-requires-owner-selector", "workspace-relative-path"}) {
 		t.Fatalf("definition declaration lost grounding obligation: %+v", compiled)
 	}
 	for name, mutate := range map[string]func(*RuntimeDefinitionFocus){
@@ -197,7 +219,7 @@ func TestRuntimeDefinitionFocusPreservesDeclarationWithoutGenerationAuthority(t 
 		})
 	}
 	seedFocus := compiled[0].RuntimeFocusSeed()
-	if len(seedFocus.TargetRefs) != 0 || len(seedFocus.ProspectiveTargetRefs) != 0 || len(seedFocus.AcceptedStepKinds) != 0 || seedFocus.ValidationRecipeID != "" || len(seedFocus.RequiredCheckRefs) != 0 {
+	if len(seedFocus.TargetRefs) != 0 || len(seedFocus.ProspectiveTargetAllOfConstraintRefs) != 0 || len(seedFocus.ProspectiveTargetRefs) != 0 || len(seedFocus.AcceptedStepKinds) != 0 || seedFocus.ValidationRecipeID != "" || len(seedFocus.RequiredCheckRefs) != 0 {
 		t.Fatalf("initial generation queue contains pre-sealed authority: %+v", seedFocus)
 	}
 }

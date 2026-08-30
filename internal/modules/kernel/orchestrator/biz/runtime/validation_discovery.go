@@ -222,7 +222,8 @@ func runtimePrerequisiteFromRequirement(requirement runtimecontract.RuntimeRequi
 		OwnerModuleID: requirement.OwnerModuleID, SubjectRef: requirement.SubjectRef,
 		TargetSelectorRef: requirement.TargetSelectorRef, TargetSelectorOwnerRef: requirement.TargetSelectorOwnerRef,
 		TargetSelectorSubjectRef: requirement.TargetSelectorSubjectRef, TargetSelectorCandidateRefs: requirement.TargetSelectorCandidateRefs,
-		ProspectiveTargetRef: requirement.ProspectiveTargetRef, CapabilityClass: requirement.CapabilityClass,
+		ProspectiveTargetAllOfConstraintRefs: requirement.ProspectiveTargetAllOfConstraintRefs,
+		ProspectiveTargetRef:                 requirement.ProspectiveTargetRef, CapabilityClass: requirement.CapabilityClass,
 		RequiredCapabilities: requirement.RequiredCapabilities, CapabilityStateKind: requirement.CapabilityStateKind,
 		MinimumBytes: requirement.MinimumBytes, Reason: requirement.Reason,
 	}

@@ -52,6 +52,10 @@ type CoverageFocus struct {
 	TargetSelectorOwnerRef      string
 	TargetSelectorSubjectRef    string
 	TargetSelectorCandidateRefs []string
+	// ProspectiveTargetAllOfConstraintRefs is the immutable Definition-side
+	// constraint set. Every ref is mandatory; it never contains or selects an
+	// exact prospective target.
+	ProspectiveTargetAllOfConstraintRefs []string
 	// ProspectiveTargetRefs is the complete bounded target set sealed from one
 	// semantic prospective proposal. It is empty for existing-target focuses.
 	ProspectiveTargetRefs             []string
@@ -524,22 +528,23 @@ func RuntimePrerequisiteKindSupported(kind PrerequisiteKind) bool {
 }
 
 type RuntimePrerequisite struct {
-	ID                          string
-	Kind                        PrerequisiteKind
-	Scope                       RuntimePrerequisiteScope
-	FocusID                     string
-	OwnerModuleID               string
-	SubjectRef                  string
-	TargetSelectorRef           string
-	TargetSelectorOwnerRef      string
-	TargetSelectorSubjectRef    string
-	TargetSelectorCandidateRefs []string
-	ProspectiveTargetRef        string
-	CapabilityClass             RuntimeCapabilityClass
-	RequiredCapabilities        []string
-	CapabilityStateKind         string
-	MinimumBytes                int
-	Reason                      string
+	ID                                   string
+	Kind                                 PrerequisiteKind
+	Scope                                RuntimePrerequisiteScope
+	FocusID                              string
+	OwnerModuleID                        string
+	SubjectRef                           string
+	TargetSelectorRef                    string
+	TargetSelectorOwnerRef               string
+	TargetSelectorSubjectRef             string
+	TargetSelectorCandidateRefs          []string
+	ProspectiveTargetAllOfConstraintRefs []string
+	ProspectiveTargetRef                 string
+	CapabilityClass                      RuntimeCapabilityClass
+	RequiredCapabilities                 []string
+	CapabilityStateKind                  string
+	MinimumBytes                         int
+	Reason                               string
 }
 
 // RuntimePrerequisiteScope identifies whether a prerequisite may be reused
@@ -598,21 +603,22 @@ func (r RuntimeOperationPrerequisiteRequest) Same(other RuntimeOperationPrerequi
 }
 
 type RuntimeRequirement struct {
-	Kind                        PrerequisiteKind
-	Scope                       RuntimePrerequisiteScope
-	FocusID                     string
-	OwnerModuleID               string
-	SubjectRef                  string
-	TargetSelectorRef           string
-	TargetSelectorOwnerRef      string
-	TargetSelectorSubjectRef    string
-	TargetSelectorCandidateRefs []string
-	ProspectiveTargetRef        string
-	CapabilityClass             RuntimeCapabilityClass
-	RequiredCapabilities        []string
-	CapabilityStateKind         string
-	MinimumBytes                int
-	Reason                      string
+	Kind                                 PrerequisiteKind
+	Scope                                RuntimePrerequisiteScope
+	FocusID                              string
+	OwnerModuleID                        string
+	SubjectRef                           string
+	TargetSelectorRef                    string
+	TargetSelectorOwnerRef               string
+	TargetSelectorSubjectRef             string
+	TargetSelectorCandidateRefs          []string
+	ProspectiveTargetAllOfConstraintRefs []string
+	ProspectiveTargetRef                 string
+	CapabilityClass                      RuntimeCapabilityClass
+	RequiredCapabilities                 []string
+	CapabilityStateKind                  string
+	MinimumBytes                         int
+	Reason                               string
 }
 
 type RuntimeFacts struct {
@@ -1325,9 +1331,12 @@ type RuntimeTargetSelection struct {
 	SelectorOwnerRef      string
 	SelectorSubjectRef    string
 	SelectorCandidateRefs []string
-	Disposition           RuntimeTargetSelectionDisposition
-	TargetRefs            []string
-	CandidateTargetRefs   []string
+	// ProspectiveTargetAllOfConstraintRefs echoes the exact mandatory pre-seal
+	// declaration that File accepted for this selector observation.
+	ProspectiveTargetAllOfConstraintRefs []string
+	Disposition                          RuntimeTargetSelectionDisposition
+	TargetRefs                           []string
+	CandidateTargetRefs                  []string
 	// ProspectiveTargetRef is the single concrete candidate used by the ordinary
 	// File-owner target-selection prerequisite. Bounded semantic acquisition is
 	// sealed separately as CoverageEvidenceBinding.ProspectiveTargetRefs and
@@ -1349,6 +1358,7 @@ func (s RuntimeTargetSelection) Normalized() RuntimeTargetSelection {
 	s.SelectorOwnerRef = strings.TrimSpace(s.SelectorOwnerRef)
 	s.SelectorSubjectRef = strings.TrimSpace(s.SelectorSubjectRef)
 	s.SelectorCandidateRefs = normalizeStrings(s.SelectorCandidateRefs)
+	s.ProspectiveTargetAllOfConstraintRefs = NormalizeRuntimeProspectiveTargetAllOfConstraintRefs(s.ProspectiveTargetAllOfConstraintRefs)
 	s.Disposition = RuntimeTargetSelectionDisposition(strings.TrimSpace(string(s.Disposition)))
 	s.TargetRefs = normalizeStrings(s.TargetRefs)
 	s.CandidateTargetRefs = normalizeStrings(s.CandidateTargetRefs)
@@ -1364,6 +1374,12 @@ func (s RuntimeTargetSelection) Validate() error {
 	s = s.Normalized()
 	if s.PrerequisiteID == "" || s.SnapshotID == "" || s.OwnerModuleID == "" || s.TargetRole == "" || s.SelectorRef == "" || s.ObservedRevision == "" {
 		return fmt.Errorf("runtime target selection requires identity, owner, role, selector and revision")
+	}
+	if err := ValidateRuntimeProspectiveTargetAllOfConstraintRefs(s.ProspectiveTargetAllOfConstraintRefs); err != nil {
+		return err
+	}
+	if len(s.ProspectiveTargetAllOfConstraintRefs) != 0 && (s.SelectorOwnerRef == "" || s.SelectorSubjectRef == "") {
+		return fmt.Errorf("runtime target selection prospective all-of declaration requires selector owner and subject")
 	}
 	switch s.Disposition {
 	case RuntimeTargetSelectionSelected:
@@ -1416,6 +1432,7 @@ func StableRuntimeTargetSelectionSnapshotID(value RuntimeTargetSelection) string
 	writeHashString(h, value.SelectorOwnerRef)
 	writeHashString(h, value.SelectorSubjectRef)
 	writeHashStrings(h, value.SelectorCandidateRefs)
+	writeHashStrings(h, value.ProspectiveTargetAllOfConstraintRefs)
 	writeHashString(h, string(value.Disposition))
 	writeHashStrings(h, value.TargetRefs)
 	writeHashStrings(h, value.CandidateTargetRefs)
@@ -1686,6 +1703,13 @@ func (f RuntimeFacts) Validate() error {
 		return fmt.Errorf("runtime capability prerequisite facts: %w", err)
 	}
 	for _, focus := range append(append([]CoverageFocus{f.Focus}, f.RemainingFocuses...), f.CompletedFocuses...) {
+		if err := ValidateRuntimeProspectiveTargetAllOfConstraintRefs(focus.ProspectiveTargetAllOfConstraintRefs); err != nil {
+			return fmt.Errorf("runtime focus %q prospective target all-of declaration: %w", focus.ID, err)
+		}
+		if len(focus.ProspectiveTargetAllOfConstraintRefs) != 0 &&
+			(!focus.RequireTargetGrounding || focus.TargetSelectorRef == "" || focus.TargetSelectorOwnerRef == "" || focus.TargetSelectorSubjectRef == "") {
+			return fmt.Errorf("runtime focus %q prospective target all-of declaration requires grounding and a complete selector", focus.ID)
+		}
 		if err := ValidateRuntimeOwnerFactRequirements(focus.RequiredOwnerFacts); err != nil {
 			return fmt.Errorf("runtime focus %q owner facts: %w", focus.ID, err)
 		}
@@ -1802,6 +1826,9 @@ func (f RuntimeFacts) Validate() error {
 		if !RuntimePrerequisiteKindSupported(prerequisite.Kind) {
 			return fmt.Errorf("runtime prerequisite %q has unsupported kind %q", prerequisite.ID, prerequisite.Kind)
 		}
+		if err := validateRuntimePrerequisiteProspectiveTargetAllOfDeclaration(prerequisite); err != nil {
+			return err
+		}
 		if prerequisite.Scope == RuntimePrerequisiteScopeFocus && prerequisite.FocusID != f.Focus.ID {
 			return fmt.Errorf("runtime active focus-scoped prerequisite %q is bound to focus %q instead of current focus %q", prerequisite.ID, prerequisite.FocusID, f.Focus.ID)
 		}
@@ -1811,6 +1838,9 @@ func (f RuntimeFacts) Validate() error {
 	for _, prerequisite := range f.Prerequisites.Retired {
 		if !RuntimePrerequisiteKindSupported(prerequisite.Kind) {
 			return fmt.Errorf("runtime retired prerequisite %q has unsupported kind %q", prerequisite.ID, prerequisite.Kind)
+		}
+		if err := validateRuntimePrerequisiteProspectiveTargetAllOfDeclaration(prerequisite); err != nil {
+			return err
 		}
 		if _, active := activeIDs[prerequisite.ID]; active {
 			return fmt.Errorf("runtime prerequisite %q cannot be both active and retired", prerequisite.ID)
@@ -1936,6 +1966,7 @@ func (f CoverageFocus) Normalized() CoverageFocus {
 	f.TargetSelectorOwnerRef = strings.TrimSpace(f.TargetSelectorOwnerRef)
 	f.TargetSelectorSubjectRef = strings.TrimSpace(f.TargetSelectorSubjectRef)
 	f.TargetSelectorCandidateRefs = normalizeStrings(f.TargetSelectorCandidateRefs)
+	f.ProspectiveTargetAllOfConstraintRefs = NormalizeRuntimeProspectiveTargetAllOfConstraintRefs(f.ProspectiveTargetAllOfConstraintRefs)
 	f.ProspectiveTargetRefs = normalizeStrings(f.ProspectiveTargetRefs)
 	f.RequiredOwnerFacts = NormalizeRuntimeOwnerFactRequirements(f.RequiredOwnerFacts)
 	f.OwnerFactConvergences = NormalizeRuntimeOwnerFactConvergences(f.OwnerFactConvergences)
@@ -2636,6 +2667,7 @@ func normalizeRuntimePrerequisites(values []RuntimePrerequisite) []RuntimePrereq
 		value.TargetSelectorOwnerRef = strings.TrimSpace(value.TargetSelectorOwnerRef)
 		value.TargetSelectorSubjectRef = strings.TrimSpace(value.TargetSelectorSubjectRef)
 		value.TargetSelectorCandidateRefs = normalizeStrings(value.TargetSelectorCandidateRefs)
+		value.ProspectiveTargetAllOfConstraintRefs = NormalizeRuntimeProspectiveTargetAllOfConstraintRefs(value.ProspectiveTargetAllOfConstraintRefs)
 		value.ProspectiveTargetRef = strings.TrimSpace(value.ProspectiveTargetRef)
 		value.CapabilityClass = RuntimeCapabilityClass(strings.TrimSpace(string(value.CapabilityClass)))
 		value.RequiredCapabilities = normalizeStrings(value.RequiredCapabilities)
@@ -2654,6 +2686,19 @@ func normalizeRuntimePrerequisites(values []RuntimePrerequisite) []RuntimePrereq
 		return nil
 	}
 	return ret
+}
+
+func validateRuntimePrerequisiteProspectiveTargetAllOfDeclaration(prerequisite RuntimePrerequisite) error {
+	prerequisite = normalizeRuntimePrerequisites([]RuntimePrerequisite{prerequisite})[0]
+	if err := ValidateRuntimeProspectiveTargetAllOfConstraintRefs(prerequisite.ProspectiveTargetAllOfConstraintRefs); err != nil {
+		return fmt.Errorf("runtime prerequisite %q prospective target all-of declaration: %w", prerequisite.ID, err)
+	}
+	if len(prerequisite.ProspectiveTargetAllOfConstraintRefs) != 0 &&
+		(prerequisite.Kind != PrerequisiteKindTargetSelection || prerequisite.OwnerModuleID != RuntimeModuleFile ||
+			prerequisite.TargetSelectorRef == "" || prerequisite.TargetSelectorOwnerRef == "" || prerequisite.TargetSelectorSubjectRef == "") {
+		return fmt.Errorf("runtime prerequisite %q prospective target all-of declaration requires one File target-selection prerequisite with a complete selector", prerequisite.ID)
+	}
+	return nil
 }
 
 func normalizeTargetSnapshots(values []TargetSnapshot) []TargetSnapshot {

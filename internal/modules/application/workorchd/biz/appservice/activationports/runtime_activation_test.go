@@ -58,6 +58,8 @@ func TestRuntimeActivationContextUsesConcreteSelectionSnapshots(t *testing.T) {
 			workorcheventpayload.Field{Name: "coverageRequirements", Value: workorcheventpayload.Value{Kind: workorcheventpayload.ValueArray, Array: []workorcheventpayload.Value{{Kind: workorcheventpayload.ValueObject, Object: workorcheventpayload.New(
 				workorcheventpayload.StringField("id", "*"), workorcheventpayload.StringField("scope", "dod_item"),
 				workorcheventpayload.StringField("targetRole", "verification_target"), workorcheventpayload.StringArrayField("targetRefs", []string{"runtime-validation-source.txt"}),
+				workorcheventpayload.StringField("targetSelectorRef", "file/workspace_deliverable"), workorcheventpayload.StringField("targetSelectorOwnerRef", "software-dev"), workorcheventpayload.StringField("targetSelectorSubjectRef", "dod_item"),
+				workorcheventpayload.StringArrayField("prospectiveTargetAllOfConstraintRefs", []string{"workspace-relative-path", "new-target-requires-owner-selector"}),
 				workorcheventpayload.BoolField("requireTargetGrounding", true), workorcheventpayload.BoolField("requireCoverageTargets", true),
 				workorcheventpayload.StringArrayField("acceptedStepKinds", []string{"validation/managed_session"}),
 				workorcheventpayload.StringField("validationRecipeId", "policy-1"),
@@ -123,6 +125,7 @@ func TestRuntimeActivationContextUsesConcreteSelectionSnapshots(t *testing.T) {
 	}
 	if policy := activation.EvidencePolicies[0]; len(policy.CoverageRequirements) != 1 || policy.CoverageRequirements[0].TargetRole != "verification_target" ||
 		len(policy.CoverageRequirements[0].TargetRefs) != 1 || policy.CoverageRequirements[0].TargetRefs[0] != "runtime-validation-source.txt" ||
+		!runtimecontract.SameRuntimeProspectiveTargetAllOfConstraintRefs(policy.CoverageRequirements[0].ProspectiveTargetAllOfConstraintRefs, []string{"new-target-requires-owner-selector", "workspace-relative-path"}) ||
 		!policy.CoverageRequirements[0].RequireTargetGrounding || !policy.CoverageRequirements[0].RequireCoverageTargets ||
 		policy.CoverageRequirements[0].ValidationRecipeID != "policy-1" {
 		t.Fatalf("runtime activation coverage declaration = %+v", policy.CoverageRequirements)

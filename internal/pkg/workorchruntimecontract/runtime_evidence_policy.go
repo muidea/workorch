@@ -52,27 +52,28 @@ type RuntimeCoverageEvidenceRequirement struct {
 	// policy.  They are declarative input compiled at activation into the
 	// immutable coverage binding; a command, candidate, or receipt cannot
 	// supply or widen them later.
-	TargetRole                        string
-	TargetRefs                        []string
-	TargetDiscoverySources            []string
-	TargetSelectorRef                 string
-	TargetSelectorOwnerRef            string
-	TargetSelectorSubjectRef          string
-	TargetSelectorCandidateRefs       []string
-	RequireTargetGrounding            bool
-	RequiredEvidenceKinds             []string
-	RequireDirectEvidence             bool
-	RequireClaimEvidence              bool
-	RequireExecutableBehaviorEvidence bool
-	RequireCoverageTargets            bool
-	AcceptedStepKinds                 []string
-	AcceptedOperationVariants         []RuntimeOperationVariantRef
-	RejectedStepKinds                 []string
-	ValidationRecipeID                string
-	RequiredCheckRefs                 []string
-	MetricConstraints                 []string
-	ArtifactRefs                      []string
-	Description                       string
+	TargetRole                           string
+	TargetRefs                           []string
+	TargetDiscoverySources               []string
+	TargetSelectorRef                    string
+	TargetSelectorOwnerRef               string
+	TargetSelectorSubjectRef             string
+	TargetSelectorCandidateRefs          []string
+	ProspectiveTargetAllOfConstraintRefs []string
+	RequireTargetGrounding               bool
+	RequiredEvidenceKinds                []string
+	RequireDirectEvidence                bool
+	RequireClaimEvidence                 bool
+	RequireExecutableBehaviorEvidence    bool
+	RequireCoverageTargets               bool
+	AcceptedStepKinds                    []string
+	AcceptedOperationVariants            []RuntimeOperationVariantRef
+	RejectedStepKinds                    []string
+	ValidationRecipeID                   string
+	RequiredCheckRefs                    []string
+	MetricConstraints                    []string
+	ArtifactRefs                         []string
+	Description                          string
 }
 
 // CloneRuntimeEvidencePolicies preserves declaration order and multiplicity
@@ -95,6 +96,7 @@ func CloneRuntimeEvidencePolicies(values []RuntimeEvidencePolicy) []RuntimeEvide
 				requirement.TargetRefs = append([]string(nil), requirement.TargetRefs...)
 				requirement.TargetDiscoverySources = append([]string(nil), requirement.TargetDiscoverySources...)
 				requirement.TargetSelectorCandidateRefs = append([]string(nil), requirement.TargetSelectorCandidateRefs...)
+				requirement.ProspectiveTargetAllOfConstraintRefs = append([]string(nil), requirement.ProspectiveTargetAllOfConstraintRefs...)
 				requirement.RequiredEvidenceKinds = append([]string(nil), requirement.RequiredEvidenceKinds...)
 				requirement.AcceptedStepKinds = append([]string(nil), requirement.AcceptedStepKinds...)
 				requirement.AcceptedOperationVariants = append([]RuntimeOperationVariantRef(nil), requirement.AcceptedOperationVariants...)
@@ -159,6 +161,14 @@ func (p RuntimeEvidencePolicy) Validate() error {
 		}
 		if len(requirement.TargetSelectorCandidateRefs) > 0 && (!requirement.RequireTargetGrounding || requirement.TargetSelectorRef == "" || requirement.TargetSelectorOwnerRef == "" || requirement.TargetSelectorSubjectRef == "") {
 			return fmt.Errorf("runtime coverage evidence requirement %q candidate selector requires grounding and a complete selector", requirement.ID)
+		}
+		if len(requirement.ProspectiveTargetAllOfConstraintRefs) > 0 {
+			if !requirement.RequireTargetGrounding || requirement.TargetSelectorRef == "" || requirement.TargetSelectorOwnerRef == "" || requirement.TargetSelectorSubjectRef == "" {
+				return fmt.Errorf("runtime coverage evidence requirement %q prospective target all-of declaration requires grounding and a complete selector", requirement.ID)
+			}
+			if err := ValidateRuntimeProspectiveTargetAllOfConstraintRefs(requirement.ProspectiveTargetAllOfConstraintRefs); err != nil {
+				return fmt.Errorf("runtime coverage evidence requirement %q: %w", requirement.ID, err)
+			}
 		}
 	}
 	return nil
@@ -406,6 +416,7 @@ func normalizeRuntimeCoverageEvidenceRequirements(values []RuntimeCoverageEviden
 		value.TargetSelectorOwnerRef = strings.TrimSpace(value.TargetSelectorOwnerRef)
 		value.TargetSelectorSubjectRef = strings.TrimSpace(value.TargetSelectorSubjectRef)
 		value.TargetSelectorCandidateRefs = normalizeStrings(value.TargetSelectorCandidateRefs)
+		value.ProspectiveTargetAllOfConstraintRefs = NormalizeRuntimeProspectiveTargetAllOfConstraintRefs(value.ProspectiveTargetAllOfConstraintRefs)
 		value.RequiredEvidenceKinds = normalizeStrings(value.RequiredEvidenceKinds)
 		value.AcceptedStepKinds = normalizeStrings(value.AcceptedStepKinds)
 		value.AcceptedOperationVariants = NormalizeRuntimeOperationVariantRefs(value.AcceptedOperationVariants)
@@ -449,7 +460,7 @@ func sameRuntimeEvidencePolicy(left RuntimeEvidencePolicy, right RuntimeEvidence
 			l.TargetSelectorOwnerRef != r.TargetSelectorOwnerRef || l.TargetSelectorSubjectRef != r.TargetSelectorSubjectRef ||
 			l.RequireTargetGrounding != r.RequireTargetGrounding || l.RequireDirectEvidence != r.RequireDirectEvidence || l.RequireClaimEvidence != r.RequireClaimEvidence ||
 			l.RequireExecutableBehaviorEvidence != r.RequireExecutableBehaviorEvidence || l.RequireCoverageTargets != r.RequireCoverageTargets || l.ValidationRecipeID != r.ValidationRecipeID || l.Description != r.Description ||
-			!sameStrings(l.TargetRefs, r.TargetRefs) || !sameStrings(l.TargetDiscoverySources, r.TargetDiscoverySources) || !sameStrings(l.TargetSelectorCandidateRefs, r.TargetSelectorCandidateRefs) ||
+			!sameStrings(l.TargetRefs, r.TargetRefs) || !sameStrings(l.TargetDiscoverySources, r.TargetDiscoverySources) || !sameStrings(l.TargetSelectorCandidateRefs, r.TargetSelectorCandidateRefs) || !SameRuntimeProspectiveTargetAllOfConstraintRefs(l.ProspectiveTargetAllOfConstraintRefs, r.ProspectiveTargetAllOfConstraintRefs) ||
 			!sameStrings(l.RequiredEvidenceKinds, r.RequiredEvidenceKinds) || !sameStrings(l.AcceptedStepKinds, r.AcceptedStepKinds) || !SameRuntimeOperationVariantRefs(l.AcceptedOperationVariants, r.AcceptedOperationVariants) ||
 			!sameStrings(l.RequiredCheckRefs, r.RequiredCheckRefs) || !sameStrings(l.MetricConstraints, r.MetricConstraints) || !sameStrings(l.ArtifactRefs, r.ArtifactRefs) || !sameStrings(l.RejectedStepKinds, r.RejectedStepKinds) {
 			return false

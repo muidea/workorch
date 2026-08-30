@@ -35,22 +35,23 @@ func PreflightRuntimeFacts(facts runtimecontract.RuntimeFacts, requirements []ru
 		prerequisiteID := runtimePrerequisiteID(requirement)
 		reacquiring[prerequisiteID] = struct{}{}
 		pending = append(pending, runtimecontract.RuntimePrerequisite{
-			ID:                          prerequisiteID,
-			Kind:                        requirement.Kind,
-			Scope:                       requirement.Scope,
-			FocusID:                     requirement.FocusID,
-			OwnerModuleID:               requirement.OwnerModuleID,
-			SubjectRef:                  requirement.SubjectRef,
-			TargetSelectorRef:           requirement.TargetSelectorRef,
-			TargetSelectorOwnerRef:      requirement.TargetSelectorOwnerRef,
-			TargetSelectorSubjectRef:    requirement.TargetSelectorSubjectRef,
-			TargetSelectorCandidateRefs: requirement.TargetSelectorCandidateRefs,
-			ProspectiveTargetRef:        requirement.ProspectiveTargetRef,
-			CapabilityClass:             requirement.CapabilityClass,
-			RequiredCapabilities:        requirement.RequiredCapabilities,
-			CapabilityStateKind:         requirement.CapabilityStateKind,
-			MinimumBytes:                requirement.MinimumBytes,
-			Reason:                      requirement.Reason,
+			ID:                                   prerequisiteID,
+			Kind:                                 requirement.Kind,
+			Scope:                                requirement.Scope,
+			FocusID:                              requirement.FocusID,
+			OwnerModuleID:                        requirement.OwnerModuleID,
+			SubjectRef:                           requirement.SubjectRef,
+			TargetSelectorRef:                    requirement.TargetSelectorRef,
+			TargetSelectorOwnerRef:               requirement.TargetSelectorOwnerRef,
+			TargetSelectorSubjectRef:             requirement.TargetSelectorSubjectRef,
+			TargetSelectorCandidateRefs:          requirement.TargetSelectorCandidateRefs,
+			ProspectiveTargetAllOfConstraintRefs: requirement.ProspectiveTargetAllOfConstraintRefs,
+			ProspectiveTargetRef:                 requirement.ProspectiveTargetRef,
+			CapabilityClass:                      requirement.CapabilityClass,
+			RequiredCapabilities:                 requirement.RequiredCapabilities,
+			CapabilityStateKind:                  requirement.CapabilityStateKind,
+			MinimumBytes:                         requirement.MinimumBytes,
+			Reason:                               requirement.Reason,
 		})
 	}
 	if len(reacquiring) != 0 {
@@ -155,7 +156,8 @@ func runtimePrerequisiteCanonicalID(prerequisite runtimecontract.RuntimePrerequi
 		OwnerModuleID: prerequisite.OwnerModuleID, SubjectRef: prerequisite.SubjectRef,
 		TargetSelectorRef: prerequisite.TargetSelectorRef, TargetSelectorOwnerRef: prerequisite.TargetSelectorOwnerRef,
 		TargetSelectorSubjectRef: prerequisite.TargetSelectorSubjectRef, TargetSelectorCandidateRefs: prerequisite.TargetSelectorCandidateRefs,
-		ProspectiveTargetRef: prerequisite.ProspectiveTargetRef, CapabilityClass: prerequisite.CapabilityClass,
+		ProspectiveTargetAllOfConstraintRefs: prerequisite.ProspectiveTargetAllOfConstraintRefs,
+		ProspectiveTargetRef:                 prerequisite.ProspectiveTargetRef, CapabilityClass: prerequisite.CapabilityClass,
 		RequiredCapabilities: prerequisite.RequiredCapabilities, CapabilityStateKind: prerequisite.CapabilityStateKind,
 		MinimumBytes: prerequisite.MinimumBytes, Reason: prerequisite.Reason,
 	})
@@ -231,7 +233,7 @@ func runtimeTargetGroundingRequirements(facts runtimecontract.RuntimeFacts) []ru
 					Kind: runtimecontract.PrerequisiteKindTargetSelection, OwnerModuleID: runtimecontract.RuntimeModuleFile,
 					SubjectRef: focus.TargetRole, TargetSelectorRef: focus.TargetSelectorRef,
 					TargetSelectorOwnerRef: focus.TargetSelectorOwnerRef, TargetSelectorSubjectRef: focus.TargetSelectorSubjectRef,
-					TargetSelectorCandidateRefs: focus.TargetSelectorCandidateRefs, ProspectiveTargetRef: focus.ProspectiveTargetRefs[0],
+					TargetSelectorCandidateRefs: focus.TargetSelectorCandidateRefs, ProspectiveTargetAllOfConstraintRefs: focus.ProspectiveTargetAllOfConstraintRefs, ProspectiveTargetRef: focus.ProspectiveTargetRefs[0],
 					Reason: "prospective File target requires owner target selection",
 				}))
 				goto selectionRequirementDone
@@ -241,7 +243,7 @@ func runtimeTargetGroundingRequirements(facts runtimecontract.RuntimeFacts) []ru
 				case runtimecontract.RuntimeValidationDiscoverySourceWorkspaceManifest, runtimecontract.RuntimeValidationDiscoverySourceProjectFiles:
 					requirements = append(requirements, focusScopedRuntimeRequirement(facts, runtimecontract.RuntimeRequirement{
 						Kind: runtimecontract.PrerequisiteKindTargetSelection, OwnerModuleID: runtimecontract.RuntimeModuleFile,
-						SubjectRef: focus.TargetRole, TargetSelectorRef: focus.TargetSelectorRef, TargetSelectorOwnerRef: focus.TargetSelectorOwnerRef, TargetSelectorSubjectRef: focus.TargetSelectorSubjectRef, TargetSelectorCandidateRefs: focus.TargetSelectorCandidateRefs, Reason: "focus target grounding requires owner target selection",
+						SubjectRef: focus.TargetRole, TargetSelectorRef: focus.TargetSelectorRef, TargetSelectorOwnerRef: focus.TargetSelectorOwnerRef, TargetSelectorSubjectRef: focus.TargetSelectorSubjectRef, TargetSelectorCandidateRefs: focus.TargetSelectorCandidateRefs, ProspectiveTargetAllOfConstraintRefs: focus.ProspectiveTargetAllOfConstraintRefs, Reason: "focus target grounding requires owner target selection",
 					}))
 					// One File-owner observation covers both file-backed source IDs.
 					goto selectionRequirementDone
@@ -354,7 +356,8 @@ func runtimePrerequisiteRequirements(values []runtimecontract.RuntimePrerequisit
 			OwnerModuleID: prerequisite.OwnerModuleID, SubjectRef: prerequisite.SubjectRef,
 			TargetSelectorRef: prerequisite.TargetSelectorRef, TargetSelectorOwnerRef: prerequisite.TargetSelectorOwnerRef,
 			TargetSelectorSubjectRef: prerequisite.TargetSelectorSubjectRef, TargetSelectorCandidateRefs: prerequisite.TargetSelectorCandidateRefs,
-			ProspectiveTargetRef: prerequisite.ProspectiveTargetRef, CapabilityClass: prerequisite.CapabilityClass,
+			ProspectiveTargetAllOfConstraintRefs: prerequisite.ProspectiveTargetAllOfConstraintRefs,
+			ProspectiveTargetRef:                 prerequisite.ProspectiveTargetRef, CapabilityClass: prerequisite.CapabilityClass,
 			RequiredCapabilities: prerequisite.RequiredCapabilities, CapabilityStateKind: prerequisite.CapabilityStateKind,
 			MinimumBytes: prerequisite.MinimumBytes, Reason: prerequisite.Reason,
 		})
@@ -522,6 +525,7 @@ func normalizeRuntimeRequirements(values []runtimecontract.RuntimeRequirement) [
 		value.TargetSelectorOwnerRef = strings.TrimSpace(value.TargetSelectorOwnerRef)
 		value.TargetSelectorSubjectRef = strings.TrimSpace(value.TargetSelectorSubjectRef)
 		value.TargetSelectorCandidateRefs = normalizeRequirementStrings(value.TargetSelectorCandidateRefs)
+		value.ProspectiveTargetAllOfConstraintRefs = runtimecontract.NormalizeRuntimeProspectiveTargetAllOfConstraintRefs(value.ProspectiveTargetAllOfConstraintRefs)
 		value.ProspectiveTargetRef = strings.TrimSpace(value.ProspectiveTargetRef)
 		value.OwnerModuleID = strings.TrimSpace(value.OwnerModuleID)
 		if value.Kind == runtimecontract.PrerequisiteKindValidationScratch && value.OwnerModuleID == "" {
@@ -552,7 +556,7 @@ func normalizeRuntimeRequirements(values []runtimecontract.RuntimeRequirement) [
 }
 
 func runtimePrerequisiteID(requirement runtimecontract.RuntimeRequirement) string {
-	parts := []string{string(requirement.Kind), string(requirement.Scope), requirement.FocusID, requirement.OwnerModuleID, requirement.SubjectRef, requirement.TargetSelectorRef, requirement.TargetSelectorOwnerRef, requirement.TargetSelectorSubjectRef, strings.Join(requirement.TargetSelectorCandidateRefs, ","), requirement.ProspectiveTargetRef, string(requirement.CapabilityClass), strings.Join(requirement.RequiredCapabilities, ","), requirement.CapabilityStateKind, fmt.Sprintf("%d", requirement.MinimumBytes)}
+	parts := []string{string(requirement.Kind), string(requirement.Scope), requirement.FocusID, requirement.OwnerModuleID, requirement.SubjectRef, requirement.TargetSelectorRef, requirement.TargetSelectorOwnerRef, requirement.TargetSelectorSubjectRef, strings.Join(requirement.TargetSelectorCandidateRefs, ","), strings.Join(requirement.ProspectiveTargetAllOfConstraintRefs, ","), requirement.ProspectiveTargetRef, string(requirement.CapabilityClass), strings.Join(requirement.RequiredCapabilities, ","), requirement.CapabilityStateKind, fmt.Sprintf("%d", requirement.MinimumBytes)}
 	return strings.Join(parts, ":")
 }
 

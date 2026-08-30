@@ -4,7 +4,7 @@ Status: normative
 
 Type: core-contract-index
 
-Last Verified: 2026-08-29
+Last Verified: 2026-08-30
 
 ## Purpose
 
@@ -123,6 +123,10 @@ provider、candidate、semantic proof、capability operation、repair 与 recove
   invalid typed policy、normalize cardinality drift 及任何退役 `prospectiveTargetRef`，并把双方 exact policy
   ref/revision/snapshot hash 封存为 candidate 的 `AdmissionPolicyBindings`；final bootstrap 还 exact 比较 admitted
   Workspace policy projection。这些 binding 是 immutable policy authority，不是 exact prospective target-set authority。
+- 没有 bounded exact candidate path 的 target-grounded prospective Profile declaration 以 `ProspectiveTargetAllOfConstraintRefs` 封存完整 mandatory File
+  creation constraints；它随 Profile/startup hash 固定、没有 one-of 解释且不含 exact path。File owner 的 typed
+  `TargetSelection` 必须逐字段回显/确认该集合；SM-3 proposal 的 `prospectiveConstraintRefs` 必须 exact-equal，只有 SM-2
+  sealed binding 才可把随后提出的 exact `ProspectiveTargetRefs` 变成 authority。
 - startup input 封存后允许执行期 LLM 基于 exact revision/hash 处理 semantic proof、candidate 或 bounded gap diagnostic；LLM
   不得改写输入、选择 Runtime action、授予 credit 或裁决 terminal。
 - owner-fact acquisition 是同一 CWI 的有界前置 transaction，不是 terminal proof：manifest 必须同时保留 Definition 的

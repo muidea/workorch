@@ -135,3 +135,28 @@ func TestRuntimeProspectiveTargetSatisfactionConstraintEnforcesSharedBoundAndRel
 		t.Fatal("prospective target set exceeded the shared bound")
 	}
 }
+
+func TestRuntimeProspectiveTargetAllOfDeclarationIsCanonicalBoundedAndExact(t *testing.T) {
+	declaration := NormalizeRuntimeProspectiveTargetAllOfConstraintRefs([]string{
+		" new-target-requires-owner-selector ",
+		"workspace-relative-path",
+		"workspace-relative-path",
+	})
+	want := []string{"new-target-requires-owner-selector", "workspace-relative-path"}
+	if !SameRuntimeProspectiveTargetAllOfConstraintRefs(declaration, want) {
+		t.Fatalf("normalized all-of declaration = %#v, want %#v", declaration, want)
+	}
+	if SameRuntimeProspectiveTargetAllOfConstraintRefs(declaration, []string{"workspace-relative-path"}) {
+		t.Fatal("all-of declaration accepted a mandatory-constraint subset")
+	}
+	if err := ValidateRuntimeProspectiveTargetAllOfConstraintRefs(declaration); err != nil {
+		t.Fatalf("valid all-of declaration rejected: %v", err)
+	}
+	overBound := make([]string, 0, RuntimeProspectiveTargetAllOfConstraintRefsMaxCount+1)
+	for index := 0; index <= RuntimeProspectiveTargetAllOfConstraintRefsMaxCount; index++ {
+		overBound = append(overBound, fmt.Sprintf("constraint-%02d", index))
+	}
+	if err := ValidateRuntimeProspectiveTargetAllOfConstraintRefs(overBound); err == nil || !strings.Contains(err.Error(), "all-of declaration exceeds") {
+		t.Fatalf("unbounded all-of declaration error = %v", err)
+	}
+}

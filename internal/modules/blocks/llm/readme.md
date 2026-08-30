@@ -4,7 +4,7 @@ Status: active
 
 Type: capability-block-contract
 
-Last Verified: 2026-08-27
+Last Verified: 2026-08-30
 
 ## 功能范围与边界
 
@@ -127,7 +127,10 @@ application、Web 与 orchestrator 不直接访问 ai-proxy。
     `currentRequiredEvidenceKinds`。`evidencePurpose=owner_fact_acquisition` 及其 `ownerFactAcquisition` 表示已经封存的当前
     前置 acquisition proof，不是尚待模型发现的 Definition 缺口：obligation 精确固定
     owner/operation/variant/target policy/operation selector/constraints，但故意不携带 exact prospective target set。对
-    `prospective_owner_target`，semantic-plan provider 必须在一份 proposal 的 `prospectiveTargetRefs` 中提交 1～8 个唯一
+    `prospective_owner_target`，C3 还必须原样投影 pre-seal obligation 的
+    `declarationProspectiveTargetAllOfConstraintRefs`；schema 与 instruction 要求 proposal
+    `prospectiveConstraintRefs` exact-equal 整个 mandatory set，不能让模型选子集、添加替代值或从 owner 文本补值。
+    semantic-plan provider 必须在一份 proposal 的 `prospectiveTargetRefs` 中提交 1～8 个唯一
     canonical exact target；集合中每项都必须位于 Definition declaration selector/candidate refs 与 current operation
     selector/owner constraints 的交集，非空 candidate refs 要求逐项 exact member match。current schema 不接受 singular
     `prospectiveTargetRef` 或兼容 alias。required owner 已发布 `ProspectiveTargetSatisfactionConstraint` 时，C3 还要投影其

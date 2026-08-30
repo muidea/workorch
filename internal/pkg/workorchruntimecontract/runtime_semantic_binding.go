@@ -278,6 +278,19 @@ func validateRuntimeSemanticProofSetSourceWithEvidenceKinds(proofSet RuntimeSema
 func validateRuntimeSemanticProposalDeclarationTargetSurface(coverageID common.CoverageWorkItemID, proposal RuntimeSemanticProofProposal, proposalIndex int, declaration CoverageFocus) error {
 	proposal = proposal.Normalized()
 	declaration = declaration.Normalized()
+	if proposal.Target.Policy == RuntimeOperationTargetPolicyProspectiveOwnerTarget && len(declaration.ProspectiveTargetAllOfConstraintRefs) != 0 &&
+		!SameRuntimeProspectiveTargetAllOfConstraintRefs(proposal.Target.ProspectiveConstraintRefs, declaration.ProspectiveTargetAllOfConstraintRefs) {
+		return runtimeSemanticProposalViolation(
+			proposal,
+			proposalIndex,
+			"target.prospectiveConstraintRefs",
+			RuntimeSemanticConstraintAllowedValue,
+			strings.Join(proposal.Target.ProspectiveConstraintRefs, ","),
+			nil,
+			declaration.ProspectiveTargetAllOfConstraintRefs,
+			fmt.Errorf("runtime semantic proof for coverage %q does not match the Definition prospective target all-of declaration", coverageID),
+		)
+	}
 	allowed := declaration.TargetSelectorCandidateRefs
 	if len(allowed) == 0 {
 		return nil
@@ -461,6 +474,7 @@ func compileRuntimeSemanticFocus(manifest RuntimeSemanticPlanManifest, generatio
 				binding.TargetSelectorOwnerRef = declaration.TargetSelectorOwnerRef
 				binding.TargetSelectorSubjectRef = declaration.TargetSelectorSubjectRef
 				binding.TargetSelectorCandidateRefs = append([]string(nil), declaration.TargetSelectorCandidateRefs...)
+				binding.ProspectiveTargetAllOfConstraintRefs = append([]string(nil), declaration.ProspectiveTargetAllOfConstraintRefs...)
 			}
 		}
 		if validationRepair != nil {
@@ -469,6 +483,10 @@ func compileRuntimeSemanticFocus(manifest RuntimeSemanticPlanManifest, generatio
 			binding.TargetSelectorSubjectRef = repair.RepairDeclarationTargetSelectorSubjectRef
 			binding.TargetSelectorCandidateRefs = append([]string(nil), repair.RepairDeclarationTargetSelectorCandidateRefs...)
 		}
+	}
+	if source != nil && len(prospectiveTargetRefs) != 0 {
+		declaration := source.Normalized()
+		binding.ProspectiveTargetAllOfConstraintRefs = append([]string(nil), declaration.ProspectiveTargetAllOfConstraintRefs...)
 	}
 	binding = binding.Normalized()
 	binding.Hash = StableCoverageEvidenceBindingHash(binding)
@@ -500,6 +518,9 @@ func compileRuntimeSemanticFocus(manifest RuntimeSemanticPlanManifest, generatio
 		focus.OwnerFactConvergences = CloneRuntimeOwnerFactConvergences(declaration.OwnerFactConvergences)
 		focus.MetricConstraints = append([]string(nil), declaration.MetricConstraints...)
 		focus.ArtifactRefs = append([]string(nil), declaration.ArtifactRefs...)
+		if len(prospectiveTargetRefs) != 0 {
+			focus.ProspectiveTargetAllOfConstraintRefs = append([]string(nil), declaration.ProspectiveTargetAllOfConstraintRefs...)
+		}
 	}
 	if validationRepair != nil {
 		repair := validationRepair.Normalized()
@@ -518,6 +539,7 @@ func compileRuntimeSemanticFocus(manifest RuntimeSemanticPlanManifest, generatio
 			focus.TargetSelectorOwnerRef = declaration.TargetSelectorOwnerRef
 			focus.TargetSelectorSubjectRef = declaration.TargetSelectorSubjectRef
 			focus.TargetSelectorCandidateRefs = append([]string(nil), declaration.TargetSelectorCandidateRefs...)
+			focus.ProspectiveTargetAllOfConstraintRefs = append([]string(nil), declaration.ProspectiveTargetAllOfConstraintRefs...)
 			focus.RequireTargetGrounding = declaration.RequireTargetGrounding
 		}
 	}

@@ -349,18 +349,19 @@ func runtimeTestSealCurrentFocusBindings(t *testing.T, aggregate *RuntimeAggrega
 	bindings := make([]runtimecontract.CoverageEvidenceBinding, 0, len(focus.CoverageWorkItemIDs))
 	for _, coverageID := range focus.CoverageWorkItemIDs {
 		binding := runtimecontract.CoverageEvidenceBinding{
-			ID:                          "binding/test/runtime/" + focus.ID + "/" + string(coverageID),
-			CoverageWorkItemID:          coverageID,
-			FocusID:                     focus.ID,
-			DefinitionRevision:          definitionRevision,
-			Proofs:                      append([]runtimecontract.CoverageEvidenceProof(nil), proofs...),
-			TargetRefs:                  append([]string(nil), focus.TargetRefs...),
-			TargetSelectorRef:           focus.TargetSelectorRef,
-			TargetSelectorOwnerRef:      focus.TargetSelectorOwnerRef,
-			TargetSelectorSubjectRef:    focus.TargetSelectorSubjectRef,
-			TargetSelectorCandidateRefs: append([]string(nil), focus.TargetSelectorCandidateRefs...),
-			ProspectiveTargetRefs:       append([]string(nil), focus.ProspectiveTargetRefs...),
-			DeclarationRef:              "test/runtime-reducer-fixture",
+			ID:                                   "binding/test/runtime/" + focus.ID + "/" + string(coverageID),
+			CoverageWorkItemID:                   coverageID,
+			FocusID:                              focus.ID,
+			DefinitionRevision:                   definitionRevision,
+			Proofs:                               append([]runtimecontract.CoverageEvidenceProof(nil), proofs...),
+			TargetRefs:                           append([]string(nil), focus.TargetRefs...),
+			TargetSelectorRef:                    focus.TargetSelectorRef,
+			TargetSelectorOwnerRef:               focus.TargetSelectorOwnerRef,
+			TargetSelectorSubjectRef:             focus.TargetSelectorSubjectRef,
+			TargetSelectorCandidateRefs:          append([]string(nil), focus.TargetSelectorCandidateRefs...),
+			ProspectiveTargetAllOfConstraintRefs: append([]string(nil), focus.ProspectiveTargetAllOfConstraintRefs...),
+			ProspectiveTargetRefs:                append([]string(nil), focus.ProspectiveTargetRefs...),
+			DeclarationRef:                       "test/runtime-reducer-fixture",
 		}.Normalized()
 		if len(binding.TargetRefs) == 0 && binding.TargetSelectorRef == "" && len(binding.ProspectiveTargetRefs) == 0 {
 			binding.TargetSelectorRef = "test/runtime-owner-selector"
@@ -430,6 +431,7 @@ func runtimeTestAlignFocusTargetSurfaceFromBindings(focus runtimecontract.Covera
 	focus.TargetSelectorOwnerRef = binding.TargetSelectorOwnerRef
 	focus.TargetSelectorSubjectRef = binding.TargetSelectorSubjectRef
 	focus.TargetSelectorCandidateRefs = append([]string(nil), binding.TargetSelectorCandidateRefs...)
+	focus.ProspectiveTargetAllOfConstraintRefs = append([]string(nil), binding.ProspectiveTargetAllOfConstraintRefs...)
 	focus.ProspectiveTargetRefs = append([]string(nil), binding.ProspectiveTargetRefs...)
 	return focus.Normalized()
 }
@@ -1285,25 +1287,26 @@ func runtimeTestSemanticProofObligations(sourceFocuses []runtimecontract.Coverag
 	for _, item := range coverageItems {
 		source := sourceByCoverage[item.ID]
 		obligation := runtimecontract.RuntimeSemanticProofObligation{
-			CoverageWorkItemID:                     item.ID,
-			RequiredEvidenceKinds:                  append([]string(nil), source.RequiredEvidenceKinds...),
-			DeclarationEvidenceRole:                source.EvidenceRole,
-			DeclarationTargetRole:                  source.TargetRole,
-			DeclarationTargetDiscoverySources:      append([]string(nil), source.TargetDiscoverySources...),
-			DeclarationTargetSelectorRef:           source.TargetSelectorRef,
-			DeclarationTargetSelectorOwnerRef:      source.TargetSelectorOwnerRef,
-			DeclarationTargetSelectorSubjectRef:    source.TargetSelectorSubjectRef,
-			DeclarationTargetSelectorCandidateRefs: append([]string(nil), source.TargetSelectorCandidateRefs...),
-			RequireTargetGrounding:                 source.RequireTargetGrounding,
-			RequireDirectEvidence:                  source.RequireDirectEvidence,
-			RequireClaimEvidence:                   source.RequireClaimEvidence,
-			RequireExecutableBehaviorEvidence:      source.RequireExecutableBehaviorEvidence,
-			RequireCoverageTargets:                 source.RequireCoverageTargets,
-			RequireAssessment:                      source.RequireAssessment,
-			RequiredOwnerFacts:                     append([]runtimecontract.RuntimeOwnerFactRequirement(nil), source.RequiredOwnerFacts...),
-			OwnerFactConvergences:                  runtimecontract.CloneRuntimeOwnerFactConvergences(source.OwnerFactConvergences),
-			MetricConstraints:                      append([]string(nil), source.MetricConstraints...),
-			ArtifactRefs:                           append([]string(nil), source.ArtifactRefs...),
+			CoverageWorkItemID:                              item.ID,
+			RequiredEvidenceKinds:                           append([]string(nil), source.RequiredEvidenceKinds...),
+			DeclarationEvidenceRole:                         source.EvidenceRole,
+			DeclarationTargetRole:                           source.TargetRole,
+			DeclarationTargetDiscoverySources:               append([]string(nil), source.TargetDiscoverySources...),
+			DeclarationTargetSelectorRef:                    source.TargetSelectorRef,
+			DeclarationTargetSelectorOwnerRef:               source.TargetSelectorOwnerRef,
+			DeclarationTargetSelectorSubjectRef:             source.TargetSelectorSubjectRef,
+			DeclarationTargetSelectorCandidateRefs:          append([]string(nil), source.TargetSelectorCandidateRefs...),
+			DeclarationProspectiveTargetAllOfConstraintRefs: append([]string(nil), source.ProspectiveTargetAllOfConstraintRefs...),
+			RequireTargetGrounding:                          source.RequireTargetGrounding,
+			RequireDirectEvidence:                           source.RequireDirectEvidence,
+			RequireClaimEvidence:                            source.RequireClaimEvidence,
+			RequireExecutableBehaviorEvidence:               source.RequireExecutableBehaviorEvidence,
+			RequireCoverageTargets:                          source.RequireCoverageTargets,
+			RequireAssessment:                               source.RequireAssessment,
+			RequiredOwnerFacts:                              append([]runtimecontract.RuntimeOwnerFactRequirement(nil), source.RequiredOwnerFacts...),
+			OwnerFactConvergences:                           runtimecontract.CloneRuntimeOwnerFactConvergences(source.OwnerFactConvergences),
+			MetricConstraints:                               append([]string(nil), source.MetricConstraints...),
+			ArtifactRefs:                                    append([]string(nil), source.ArtifactRefs...),
 		}
 		if len(runtimecontract.RuntimeMissingOwnerFactRequirements(source.RequiredOwnerFacts, catalogs)) != 0 {
 			convergence, required := runtimecontract.ResolveRuntimeOwnerFactAcquisition(source.RequiredOwnerFacts, source.OwnerFactConvergences, catalogs)

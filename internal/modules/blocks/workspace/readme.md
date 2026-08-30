@@ -4,7 +4,7 @@ Status: active
 
 Type: stateful-block-contract
 
-Last Verified: 2026-08-27
+Last Verified: 2026-08-30
 
 ## 功能范围与边界
 
@@ -15,7 +15,9 @@ Workspace 还独占 immutable pre-seal `DefinitionAdmissionCandidate`、promoted
 确认的完整 `all_of`，并以 `StartupInputHash` 封存 Definition、Template/Profile contract hash、目录和 candidate-item mapping。
 candidate 还封存 required owner-fact binding 与唯一 acquisition/reobserve closure；Workspace 只持久化/校验该事实，
 不读取 capability catalog 或选择运行期动作。`CandidateHash` 覆盖 acquisition operation variant、operation target policy、
-operation selector 与 Definition declaration selector/candidate refs；owner ingress 不替 caller 重新计算 hash。pre-seal
+operation selector 与 Definition declaration selector/candidate refs，以及 target-grounded Profile 的完整 mandatory
+`ProspectiveTargetAllOfConstraintRefs`；owner ingress 不替 caller 重新计算 hash。该字段最多 8 项、每项都必需，不能表达
+one-of，也不携带路径。pre-seal
 candidate/startup input 不携带 exact prospective target set；运行期只有一份 SM-3 semantic proposal 可以在这份
 declaration 与 current owner constraints 的交集中提交 1～8 个唯一 canonical `ProspectiveTargetRefs`，Workspace 不补默认值、
 不接受 singular 兼容字段，也不回写 proposal/owner fact/binding。
@@ -29,7 +31,9 @@ candidate 同时封存完整 normalized typed `RuntimeProfileContracts` snapshot
 独立派生 owner-fact/convergence manifest，并要求与 candidate bindings 逐项相等；每个 Profile-required acceptance/deliverable
 CWI 还必须有 exact `scope + id` evidence requirement、非空受支持 evidence kinds，以及至少一个能返回对应 typed owner receipt
 proof 的 accepted operation。wildcard policy 不能替代 exact Profile-owned CWI proof，也不能把无证明交付项降级为
-assessment-only Runtime focus。可选 validation-failure repair declaration 只能是一份 validation-triggered、`state_change`
+assessment-only Runtime focus。非空 `ProspectiveTargetAllOfConstraintRefs` 还要求完整 target selector/owner/subject 与
+target grounding，并随 normalized Profile hash 封存；Workspace 不把该集合解释成 alternatives 或 exact targets。可选
+validation-failure repair declaration 只能是一份 validation-triggered、`state_change`
 repair、fresh-validation、bounded-attempt、declaration/operation selector 分离的 all-of convergence；current input 中该字段的
 非 object/空 object、unknown/alternative/alias shape，以及同一 Profile 内重复 normalized `scope + id`，都必须在 promotion
 前返回 `definition_profile_contract_invalid`。pure compiler 不读取 live owner fact，不选择 repair target，也不产生 Run、provider

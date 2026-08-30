@@ -130,6 +130,7 @@ func TestRuntimeCandidatePrefixChangesWithProfileTargetSelectorAndCandidateBound
 			ID: "initial-deliverable", Scope: "deliverable", RequireTargetGrounding: true, TargetRole: "deliverable",
 			TargetDiscoverySources: []string{RuntimeValidationDiscoverySourceWorkspaceManifest}, TargetSelectorRef: "file/workspace_deliverable",
 			TargetSelectorOwnerRef: "profile", TargetSelectorSubjectRef: "initial-deliverable", TargetSelectorCandidateRefs: []string{"initial-deliverable.txt"},
+			ProspectiveTargetAllOfConstraintRefs: []string{"workspace-relative-path", "new-target-requires-owner-selector"},
 		}},
 	}}}
 	changedSelector := base
@@ -140,12 +141,17 @@ func TestRuntimeCandidatePrefixChangesWithProfileTargetSelectorAndCandidateBound
 	changedCandidates.ProfileContracts = append([]RuntimeProfileContract(nil), base.ProfileContracts...)
 	changedCandidates.ProfileContracts[0].EvidenceRequirements = append([]RuntimeProfileEvidenceRequirement(nil), base.ProfileContracts[0].EvidenceRequirements...)
 	changedCandidates.ProfileContracts[0].EvidenceRequirements[0].TargetSelectorCandidateRefs = []string{"other-deliverable.txt"}
+	changedAllOf := base.Normalized()
+	changedAllOf.ProfileContracts[0].EvidenceRequirements[0].ProspectiveTargetAllOfConstraintRefs = []string{"workspace-relative-path"}
 	baseHash := StableRuntimeCandidatePrefixHashWithExecutionContract(definition, base)
 	if baseHash == StableRuntimeCandidatePrefixHashWithExecutionContract(definition, changedSelector) {
 		t.Fatal("candidate prefix did not change with target selector")
 	}
 	if baseHash == StableRuntimeCandidatePrefixHashWithExecutionContract(definition, changedCandidates) {
 		t.Fatal("candidate prefix did not change with prospective target candidate bounds")
+	}
+	if baseHash == StableRuntimeCandidatePrefixHashWithExecutionContract(definition, changedAllOf) {
+		t.Fatal("candidate prefix did not change with prospective target all-of declaration")
 	}
 }
 

@@ -7,6 +7,20 @@ import (
 	runtimemodel "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
+const (
+	runtimeFileConstraintWorkspaceRelativePath          = "workspace-relative-path"
+	runtimeFileConstraintExistingTargetListed           = "existing-target-must-be-listed"
+	runtimeFileConstraintNewTargetRequiresOwnerSelector = "new-target-requires-owner-selector"
+	runtimeFileConstraintRegularExistingTarget          = "regular-file-required-for-read-edit-and-existing-patch-target"
+)
+
+func runtimeFileProspectiveTargetAllOfConstraintRefs() []string {
+	return []string{
+		runtimeFileConstraintWorkspaceRelativePath,
+		runtimeFileConstraintNewTargetRequiresOwnerSelector,
+	}
+}
+
 // AcquireRuntimeOperationAdmissibility returns the bounded File-owner view used
 // to render a candidate. It reads metadata only and never writes a receipt or
 // workspace file.
@@ -26,10 +40,10 @@ func (a *RuntimeAdapter) AcquireRuntimeOperationAdmissibility(workspaceDirectory
 		TargetRefs:        boundedAdmissibilityTargetRefs(requiredTargetRefs, manifest.TargetRefs, maxItems),
 		SelectorRefs:      fileAdmissibilitySelectorRefs(operationKinds),
 		ConstraintRefs: []string{
-			"workspace-relative-path",
-			"existing-target-must-be-listed",
-			"new-target-requires-owner-selector",
-			"regular-file-required-for-read-edit-and-existing-patch-target",
+			runtimeFileConstraintWorkspaceRelativePath,
+			runtimeFileConstraintExistingTargetListed,
+			runtimeFileConstraintNewTargetRequiresOwnerSelector,
+			runtimeFileConstraintRegularExistingTarget,
 		},
 		ObservedRevision: manifest.Revision,
 	}
@@ -62,7 +76,7 @@ func fileAdmissibilityOperationVariants(operationKinds []string) []runtimemodel.
 	}
 	policiesCreate := append(append([]runtimemodel.RuntimeOperationTargetPolicy(nil), policiesExisting...), runtimemodel.RuntimeOperationTargetPolicyProspectiveOwnerTarget)
 	selector := []string{runtimeFileSelectorWorkspaceRelativeNewTarget}
-	constraints := []string{"workspace-relative-path", "new-target-requires-owner-selector"}
+	constraints := runtimeFileProspectiveTargetAllOfConstraintRefs()
 	ret := make([]runtimemodel.RuntimeOperationAdmissibilityVariant, 0)
 	for _, raw := range operationKinds {
 		kind := runtimemodel.CanonicalRuntimeBlockKind(raw)
@@ -86,7 +100,7 @@ func fileAdmissibilityOperationVariants(operationKinds []string) []runtimemodel.
 			for _, variantID := range []string{patchTypeFileWrite, patchTypeTextReplace, patchTypeUnifiedDiff} {
 				policies := policiesExisting
 				variantSelectors := []string(nil)
-				variantConstraints := []string{"workspace-relative-path", "existing-target-must-be-listed"}
+				variantConstraints := []string{runtimeFileConstraintWorkspaceRelativePath, runtimeFileConstraintExistingTargetListed}
 				if variantID == patchTypeFileWrite || variantID == patchTypeUnifiedDiff {
 					policies = policiesCreate
 					variantSelectors = selector
@@ -98,7 +112,7 @@ func fileAdmissibilityOperationVariants(operationKinds []string) []runtimemodel.
 			for _, variantID := range []string{patchTypeFileWrite, patchTypeTextReplace, patchTypeUnifiedDiff} {
 				policies := policiesExisting
 				variantSelectors := []string(nil)
-				variantConstraints := []string{"workspace-relative-path", "existing-target-must-be-listed"}
+				variantConstraints := []string{runtimeFileConstraintWorkspaceRelativePath, runtimeFileConstraintExistingTargetListed}
 				if variantID == patchTypeFileWrite || variantID == patchTypeUnifiedDiff {
 					policies = policiesCreate
 					variantSelectors = selector

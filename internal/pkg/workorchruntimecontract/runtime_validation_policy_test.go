@@ -41,7 +41,8 @@ func TestRuntimeEvidencePolicySelectorCandidatesRequireGroundingAndCompleteSelec
 			ID: "deliverable", Scope: "deliverable", TargetRole: "deliverable", RequireTargetGrounding: true,
 			TargetDiscoverySources: []string{RuntimeValidationDiscoverySourceWorkspaceManifest},
 			TargetSelectorRef:      "file/profile-declared-candidates", TargetSelectorOwnerRef: "profile/test", TargetSelectorSubjectRef: "deliverable",
-			TargetSelectorCandidateRefs: []string{"README.md", "internal/main.go"},
+			TargetSelectorCandidateRefs:          []string{"README.md", "internal/main.go"},
+			ProspectiveTargetAllOfConstraintRefs: []string{"workspace-relative-path", "new-target-requires-owner-selector"},
 		}},
 	}
 	if err := policy.Validate(); err != nil {

@@ -13,31 +13,32 @@ import (
 // prospective target is selected only by a bounded semantic proposal and does
 // not become Runtime authority until SM-2 seals its evidence binding.
 type RuntimeDefinitionFocus struct {
-	ID                                 string
-	SliceID                            string
-	AssessmentScope                    string
-	AssessmentID                       string
-	AssessmentText                     string
-	CoverageWorkItemIDs                []common.CoverageWorkItemID
-	RequiredEvidenceKinds              []string
-	EvidenceRole                       string
-	TargetRole                         string
-	TargetDiscoverySources             []string
-	TargetSelectorRef                  string
-	TargetSelectorOwnerRef             string
-	TargetSelectorSubjectRef           string
-	TargetSelectorCandidateRefs        []string
-	RequireTargetGrounding             bool
-	RequireDirectEvidence              bool
-	RequireClaimEvidence               bool
-	RequireExecutableBehaviorEvidence  bool
-	RequireCoverageTargets             bool
-	RequireAssessment                  bool
-	RequiredOwnerFacts                 []RuntimeOwnerFactRequirement
-	OwnerFactConvergences              []RuntimeOwnerFactConvergence
-	ValidationFailureRepairConvergence *RuntimeValidationFailureRepairConvergence
-	MetricConstraints                  []string
-	ArtifactRefs                       []string
+	ID                                   string
+	SliceID                              string
+	AssessmentScope                      string
+	AssessmentID                         string
+	AssessmentText                       string
+	CoverageWorkItemIDs                  []common.CoverageWorkItemID
+	RequiredEvidenceKinds                []string
+	EvidenceRole                         string
+	TargetRole                           string
+	TargetDiscoverySources               []string
+	TargetSelectorRef                    string
+	TargetSelectorOwnerRef               string
+	TargetSelectorSubjectRef             string
+	TargetSelectorCandidateRefs          []string
+	ProspectiveTargetAllOfConstraintRefs []string
+	RequireTargetGrounding               bool
+	RequireDirectEvidence                bool
+	RequireClaimEvidence                 bool
+	RequireExecutableBehaviorEvidence    bool
+	RequireCoverageTargets               bool
+	RequireAssessment                    bool
+	RequiredOwnerFacts                   []RuntimeOwnerFactRequirement
+	OwnerFactConvergences                []RuntimeOwnerFactConvergence
+	ValidationFailureRepairConvergence   *RuntimeValidationFailureRepairConvergence
+	MetricConstraints                    []string
+	ArtifactRefs                         []string
 }
 
 func (f RuntimeDefinitionFocus) Normalized() RuntimeDefinitionFocus {
@@ -55,6 +56,7 @@ func (f RuntimeDefinitionFocus) Normalized() RuntimeDefinitionFocus {
 	f.TargetSelectorOwnerRef = strings.TrimSpace(f.TargetSelectorOwnerRef)
 	f.TargetSelectorSubjectRef = strings.TrimSpace(f.TargetSelectorSubjectRef)
 	f.TargetSelectorCandidateRefs = normalizeStrings(f.TargetSelectorCandidateRefs)
+	f.ProspectiveTargetAllOfConstraintRefs = NormalizeRuntimeProspectiveTargetAllOfConstraintRefs(f.ProspectiveTargetAllOfConstraintRefs)
 	f.RequiredOwnerFacts = NormalizeRuntimeOwnerFactRequirements(f.RequiredOwnerFacts)
 	f.OwnerFactConvergences = NormalizeRuntimeOwnerFactConvergences(f.OwnerFactConvergences)
 	f.ValidationFailureRepairConvergence = cloneRuntimeValidationFailureRepairConvergence(f.ValidationFailureRepairConvergence)
@@ -69,6 +71,7 @@ func (f RuntimeDefinitionFocus) Clone() RuntimeDefinitionFocus {
 	f.RequiredEvidenceKinds = append([]string(nil), f.RequiredEvidenceKinds...)
 	f.TargetDiscoverySources = append([]string(nil), f.TargetDiscoverySources...)
 	f.TargetSelectorCandidateRefs = append([]string(nil), f.TargetSelectorCandidateRefs...)
+	f.ProspectiveTargetAllOfConstraintRefs = append([]string(nil), f.ProspectiveTargetAllOfConstraintRefs...)
 	f.RequiredOwnerFacts = append([]RuntimeOwnerFactRequirement(nil), f.RequiredOwnerFacts...)
 	f.OwnerFactConvergences = CloneRuntimeOwnerFactConvergences(f.OwnerFactConvergences)
 	f.ValidationFailureRepairConvergence = cloneRuntimeValidationFailureRepairConvergence(f.ValidationFailureRepairConvergence)
@@ -86,25 +89,26 @@ func (f RuntimeDefinitionFocus) CoverageFocusDeclaration() CoverageFocus {
 	return CoverageFocus{
 		ID: f.ID, SliceID: f.SliceID, AssessmentScope: f.AssessmentScope,
 		AssessmentID: f.AssessmentID, AssessmentText: f.AssessmentText,
-		CoverageWorkItemIDs:               append([]common.CoverageWorkItemID(nil), f.CoverageWorkItemIDs...),
-		RequiredEvidenceKinds:             append([]string(nil), f.RequiredEvidenceKinds...),
-		EvidenceRole:                      f.EvidenceRole,
-		TargetRole:                        f.TargetRole,
-		TargetDiscoverySources:            append([]string(nil), f.TargetDiscoverySources...),
-		TargetSelectorRef:                 f.TargetSelectorRef,
-		TargetSelectorOwnerRef:            f.TargetSelectorOwnerRef,
-		TargetSelectorSubjectRef:          f.TargetSelectorSubjectRef,
-		TargetSelectorCandidateRefs:       append([]string(nil), f.TargetSelectorCandidateRefs...),
-		RequireTargetGrounding:            f.RequireTargetGrounding,
-		RequireDirectEvidence:             f.RequireDirectEvidence,
-		RequireClaimEvidence:              f.RequireClaimEvidence,
-		RequireExecutableBehaviorEvidence: f.RequireExecutableBehaviorEvidence,
-		RequireCoverageTargets:            f.RequireCoverageTargets,
-		RequireAssessment:                 f.RequireAssessment,
-		RequiredOwnerFacts:                append([]RuntimeOwnerFactRequirement(nil), f.RequiredOwnerFacts...),
-		OwnerFactConvergences:             CloneRuntimeOwnerFactConvergences(f.OwnerFactConvergences),
-		MetricConstraints:                 append([]string(nil), f.MetricConstraints...),
-		ArtifactRefs:                      append([]string(nil), f.ArtifactRefs...),
+		CoverageWorkItemIDs:                  append([]common.CoverageWorkItemID(nil), f.CoverageWorkItemIDs...),
+		RequiredEvidenceKinds:                append([]string(nil), f.RequiredEvidenceKinds...),
+		EvidenceRole:                         f.EvidenceRole,
+		TargetRole:                           f.TargetRole,
+		TargetDiscoverySources:               append([]string(nil), f.TargetDiscoverySources...),
+		TargetSelectorRef:                    f.TargetSelectorRef,
+		TargetSelectorOwnerRef:               f.TargetSelectorOwnerRef,
+		TargetSelectorSubjectRef:             f.TargetSelectorSubjectRef,
+		TargetSelectorCandidateRefs:          append([]string(nil), f.TargetSelectorCandidateRefs...),
+		ProspectiveTargetAllOfConstraintRefs: append([]string(nil), f.ProspectiveTargetAllOfConstraintRefs...),
+		RequireTargetGrounding:               f.RequireTargetGrounding,
+		RequireDirectEvidence:                f.RequireDirectEvidence,
+		RequireClaimEvidence:                 f.RequireClaimEvidence,
+		RequireExecutableBehaviorEvidence:    f.RequireExecutableBehaviorEvidence,
+		RequireCoverageTargets:               f.RequireCoverageTargets,
+		RequireAssessment:                    f.RequireAssessment,
+		RequiredOwnerFacts:                   append([]RuntimeOwnerFactRequirement(nil), f.RequiredOwnerFacts...),
+		OwnerFactConvergences:                CloneRuntimeOwnerFactConvergences(f.OwnerFactConvergences),
+		MetricConstraints:                    append([]string(nil), f.MetricConstraints...),
+		ArtifactRefs:                         append([]string(nil), f.ArtifactRefs...),
 	}.Normalized()
 }
 
@@ -135,30 +139,31 @@ func CompileRuntimeDefinitionFocuses(values []CoverageFocus) []RuntimeDefinition
 	for _, raw := range values {
 		value := raw.Normalized()
 		ret = append(ret, RuntimeDefinitionFocus{
-			ID:                                value.ID,
-			SliceID:                           value.SliceID,
-			AssessmentScope:                   value.AssessmentScope,
-			AssessmentID:                      value.AssessmentID,
-			AssessmentText:                    value.AssessmentText,
-			CoverageWorkItemIDs:               append([]common.CoverageWorkItemID(nil), value.CoverageWorkItemIDs...),
-			RequiredEvidenceKinds:             append([]string(nil), value.RequiredEvidenceKinds...),
-			EvidenceRole:                      value.EvidenceRole,
-			TargetRole:                        value.TargetRole,
-			TargetDiscoverySources:            append([]string(nil), value.TargetDiscoverySources...),
-			TargetSelectorRef:                 value.TargetSelectorRef,
-			TargetSelectorOwnerRef:            value.TargetSelectorOwnerRef,
-			TargetSelectorSubjectRef:          value.TargetSelectorSubjectRef,
-			TargetSelectorCandidateRefs:       append([]string(nil), value.TargetSelectorCandidateRefs...),
-			RequireTargetGrounding:            value.RequireTargetGrounding,
-			RequireDirectEvidence:             value.RequireDirectEvidence,
-			RequireClaimEvidence:              value.RequireClaimEvidence,
-			RequireExecutableBehaviorEvidence: value.RequireExecutableBehaviorEvidence,
-			RequireCoverageTargets:            value.RequireCoverageTargets,
-			RequireAssessment:                 value.RequireAssessment,
-			RequiredOwnerFacts:                append([]RuntimeOwnerFactRequirement(nil), value.RequiredOwnerFacts...),
-			OwnerFactConvergences:             CloneRuntimeOwnerFactConvergences(value.OwnerFactConvergences),
-			MetricConstraints:                 append([]string(nil), value.MetricConstraints...),
-			ArtifactRefs:                      append([]string(nil), value.ArtifactRefs...),
+			ID:                                   value.ID,
+			SliceID:                              value.SliceID,
+			AssessmentScope:                      value.AssessmentScope,
+			AssessmentID:                         value.AssessmentID,
+			AssessmentText:                       value.AssessmentText,
+			CoverageWorkItemIDs:                  append([]common.CoverageWorkItemID(nil), value.CoverageWorkItemIDs...),
+			RequiredEvidenceKinds:                append([]string(nil), value.RequiredEvidenceKinds...),
+			EvidenceRole:                         value.EvidenceRole,
+			TargetRole:                           value.TargetRole,
+			TargetDiscoverySources:               append([]string(nil), value.TargetDiscoverySources...),
+			TargetSelectorRef:                    value.TargetSelectorRef,
+			TargetSelectorOwnerRef:               value.TargetSelectorOwnerRef,
+			TargetSelectorSubjectRef:             value.TargetSelectorSubjectRef,
+			TargetSelectorCandidateRefs:          append([]string(nil), value.TargetSelectorCandidateRefs...),
+			ProspectiveTargetAllOfConstraintRefs: append([]string(nil), value.ProspectiveTargetAllOfConstraintRefs...),
+			RequireTargetGrounding:               value.RequireTargetGrounding,
+			RequireDirectEvidence:                value.RequireDirectEvidence,
+			RequireClaimEvidence:                 value.RequireClaimEvidence,
+			RequireExecutableBehaviorEvidence:    value.RequireExecutableBehaviorEvidence,
+			RequireCoverageTargets:               value.RequireCoverageTargets,
+			RequireAssessment:                    value.RequireAssessment,
+			RequiredOwnerFacts:                   append([]RuntimeOwnerFactRequirement(nil), value.RequiredOwnerFacts...),
+			OwnerFactConvergences:                CloneRuntimeOwnerFactConvergences(value.OwnerFactConvergences),
+			MetricConstraints:                    append([]string(nil), value.MetricConstraints...),
+			ArtifactRefs:                         append([]string(nil), value.ArtifactRefs...),
 		}.Normalized())
 	}
 	return nilIfEmpty(ret)
@@ -239,6 +244,14 @@ func ValidateRuntimeDefinitionFocuses(seed RuntimeDefinitionSeed, focuses []Runt
 		if len(focus.TargetSelectorCandidateRefs) != 0 && (!focus.RequireTargetGrounding || selectorParts != 3) {
 			return fmt.Errorf("runtime definition focus %q selector candidates require target grounding and a complete selector", focus.ID)
 		}
+		if len(focus.ProspectiveTargetAllOfConstraintRefs) != 0 {
+			if !focus.RequireTargetGrounding || selectorParts != 3 {
+				return fmt.Errorf("runtime definition focus %q prospective target all-of declaration requires target grounding and a complete selector", focus.ID)
+			}
+			if err := ValidateRuntimeProspectiveTargetAllOfConstraintRefs(focus.ProspectiveTargetAllOfConstraintRefs); err != nil {
+				return fmt.Errorf("runtime definition focus %q: %w", focus.ID, err)
+			}
+		}
 		if focus.RequireTargetGrounding && focus.TargetRole == "" {
 			return fmt.Errorf("runtime definition focus %q target grounding requires a target role", focus.ID)
 		}
@@ -287,7 +300,7 @@ func sameRuntimeDefinitionFocus(left, right RuntimeDefinitionFocus) bool {
 		sameStrings(left.RequiredEvidenceKinds, right.RequiredEvidenceKinds) && left.EvidenceRole == right.EvidenceRole &&
 		left.TargetRole == right.TargetRole && sameStrings(left.TargetDiscoverySources, right.TargetDiscoverySources) &&
 		left.TargetSelectorRef == right.TargetSelectorRef && left.TargetSelectorOwnerRef == right.TargetSelectorOwnerRef &&
-		left.TargetSelectorSubjectRef == right.TargetSelectorSubjectRef && sameStrings(left.TargetSelectorCandidateRefs, right.TargetSelectorCandidateRefs) &&
+		left.TargetSelectorSubjectRef == right.TargetSelectorSubjectRef && sameStrings(left.TargetSelectorCandidateRefs, right.TargetSelectorCandidateRefs) && SameRuntimeProspectiveTargetAllOfConstraintRefs(left.ProspectiveTargetAllOfConstraintRefs, right.ProspectiveTargetAllOfConstraintRefs) &&
 		left.RequireTargetGrounding == right.RequireTargetGrounding && left.RequireDirectEvidence == right.RequireDirectEvidence &&
 		left.RequireClaimEvidence == right.RequireClaimEvidence && left.RequireExecutableBehaviorEvidence == right.RequireExecutableBehaviorEvidence &&
 		left.RequireCoverageTargets == right.RequireCoverageTargets && left.RequireAssessment == right.RequireAssessment &&

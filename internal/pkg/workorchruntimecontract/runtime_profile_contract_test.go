@@ -269,13 +269,15 @@ func TestRuntimeProfileDeclaredSelectorCandidatesAreBoundedAndAffectEquality(t *
 		ID: "implementation", Scope: "deliverable", RequireTargetGrounding: true, TargetRole: "implementation",
 		TargetDiscoverySources: []string{RuntimeValidationDiscoverySourceWorkspaceManifest}, TargetSelectorRef: "file/profile_declared_candidates",
 		TargetSelectorOwnerRef: "profile-lsp", TargetSelectorSubjectRef: "implementation", TargetSelectorCandidateRefs: []string{"internal/lsp/server.go", "internal/lsp/manager.go", "internal/lsp/manager.go"},
+		ProspectiveTargetAllOfConstraintRefs: []string{"workspace-relative-path", "new-target-requires-owner-selector", "workspace-relative-path"},
 	}}}
 	if err := ValidateRuntimeProfileContracts([]RuntimeProfileContract{valid}); err != nil {
 		t.Fatalf("valid profile-declared selector candidates rejected: %v", err)
 	}
 	normalized := NormalizeRuntimeProfileContracts([]RuntimeProfileContract{valid})
 	requirement := normalized[0].EvidenceRequirements[0]
-	if requirement.TargetSelectorOwnerRef != "profile-lsp" || requirement.TargetSelectorSubjectRef != "implementation" || !SameRuntimeTargetSelectorCandidateRefs(requirement.TargetSelectorCandidateRefs, []string{"internal/lsp/manager.go", "internal/lsp/server.go"}) {
+	if requirement.TargetSelectorOwnerRef != "profile-lsp" || requirement.TargetSelectorSubjectRef != "implementation" || !SameRuntimeTargetSelectorCandidateRefs(requirement.TargetSelectorCandidateRefs, []string{"internal/lsp/manager.go", "internal/lsp/server.go"}) ||
+		!SameRuntimeProspectiveTargetAllOfConstraintRefs(requirement.ProspectiveTargetAllOfConstraintRefs, []string{"new-target-requires-owner-selector", "workspace-relative-path"}) {
 		t.Fatalf("profile-declared selector candidate normalization = %+v", requirement)
 	}
 	changed := append([]RuntimeProfileContract(nil), normalized...)
@@ -283,6 +285,11 @@ func TestRuntimeProfileDeclaredSelectorCandidatesAreBoundedAndAffectEquality(t *
 	changed[0].EvidenceRequirements[0].TargetSelectorCandidateRefs = []string{"internal/lsp/other.go"}
 	if SameRuntimeProfileContracts(normalized, changed) {
 		t.Fatal("profile-declared selector candidate drift was not detected")
+	}
+	changed = NormalizeRuntimeProfileContracts([]RuntimeProfileContract{valid})
+	changed[0].EvidenceRequirements[0].ProspectiveTargetAllOfConstraintRefs = []string{"workspace-relative-path"}
+	if SameRuntimeProfileContracts(normalized, changed) {
+		t.Fatal("profile prospective target all-of declaration drift was not detected")
 	}
 	for name, mutate := range map[string]func(*RuntimeProfileEvidenceRequirement){
 		"missing target grounding": func(item *RuntimeProfileEvidenceRequirement) { item.RequireTargetGrounding = false },

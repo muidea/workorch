@@ -4,7 +4,7 @@ Status: normative
 
 Type: verification
 
-Last Verified: 2026-08-29
+Last Verified: 2026-08-30
 
 ## Purpose
 
@@ -93,10 +93,12 @@ Cross-owner regression必须证明 concrete receiving-owner Command/Result、wor
   从相同 replacement transaction materialize successor并保存 Run/Result 双 lineage，覆盖 duplicate、CAS cut、fresh reload、
   Result identity drift、terminal 不重开且不重复 delivery；
 - target-grounding 0/1/N matrix 必须证明 semantic provider 前先取得 focus-scoped File-owner TargetSelection：exact current
-  selection + freshness 为 absent/ambiguous/unsupported，或无 bounded Definition candidates 的 empty-scope 时，零
+  selection 必须回显 Definition selector/owner/subject/candidates 与完整 `ProspectiveTargetAllOfConstraintRefs`。其 freshness
+  为 absent/ambiguous/unsupported，或同时无 bounded Definition candidates 与 owner-accepted mandatory set 的 empty-scope 时，零
   semantic/candidate provider call并交付
   `target_grounding_unresolved`；无 selection/observation、wrong focus/declaration/revision 仍为 transient；selected，或带
-  bounded Definition candidates 的 empty scope，才继续 prospective semantic。catalog retirement 后若旧 no-effect binding 尚未由
+  bounded Definition candidates/exact owner-accepted mandatory set 的 empty scope，才继续 prospective semantic。subset、superset
+  或 owner 不支持的 set 必须 typed fail-closed 且零 semantic provider。catalog retirement 后若旧 no-effect binding 尚未由
   typed `CWIBindingRetired` event 退休，该 provisional
   terminal 不得生成 SM-4 drive result、startup classification 或 delivery request，旧 binding 也不得执行；restart/duplicate
   必须只退休一次并使 CWI 重新 eligible。已有 effect credit 的 binding 不得被 catalog refresh 退休；其它
@@ -299,6 +301,11 @@ Cross-owner regression必须证明 concrete receiving-owner Command/Result、wor
   普通 generation 的真实新增 eligible member会退休 exact generation；accepted-order projection 与 focus-advance retirement
   对同一 purpose 得到相同 closure。还必须覆盖 owner-private CAS 恰好退休 manifest 的 cut point，断言 caller 从 returned
   aggregate 重新分派且不会读取旧/nil manifest、不会重复 provider/effect。
+- pre-seal Definition 不携带 exact prospective target set，compiled obligation/manifest 也不回填；对没有 bounded exact candidate path 的开放 scope，SM-3
+  必须另行封存 normalized mandatory `ProspectiveTargetAllOfConstraintRefs`，并在 Definition/Profile hash、target-selection
+  command/result/snapshot、proof obligation/C3、binding 与 reconciliation hash 中逐 hop exact 保留。proposal
+  `ProspectiveConstraintRefs` 必须 exact-equal；缺项、扩项、duplicate normalization drift 与 restart raw-clone alias 均需
+  回归覆盖，且 rejection 发生在 owner probe 前。
 - pre-seal Definition 不携带 exact prospective target set，compiled obligation/manifest 也不回填；SM-3
   schema/admission 只接受一份 proposal 中 1～8 个唯一 canonical `ProspectiveTargetRefs`，不接受 singular
   `ProspectiveTargetRef` 兼容字段。集合中每项都必须位于 Definition declaration selector/candidate refs 与 current

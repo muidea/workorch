@@ -4,7 +4,7 @@ Status: active
 
 Type: application-module-contract
 
-Last Verified: 2026-08-27
+Last Verified: 2026-08-30
 
 ## 功能范围与边界
 
@@ -93,8 +93,10 @@ Last Verified: 2026-08-27
   attempt）使用 reconcile-candidate；新 admitted revision严格执行 Workspace owner-selected pending promotion → Decision
   resolution → Workspace owner-selected eligible，之后仍需用户显式 Restart。
 - activation 可以把 profile 显式声明的 `targetSelectorOwnerRef`、`targetSelectorSubjectRef` 与
-  `targetSelectorCandidateRefs` 封存为 File declaration scope，但不封存 exact prospective target set。空 candidate
-  refs 只表示 profile 授权一份 SM-3 semantic proposal 在 current File operation selector/constraints 内提出 1～8 个
+  `targetSelectorCandidateRefs` 及完整 mandatory `prospectiveTargetAllOfConstraintRefs` 封存为 File declaration scope，
+  但不封存 exact prospective target set。constraint refs 最多 8 项且全部必需，要求 target grounding 与完整 selector；
+  activation 只无损解析、规范化、合并并传递，不能把它们解释成 one-of、补默认值或选择路径。空 candidate
+  refs 加上非空 mandatory constraint set 表示 profile 授权一份 SM-3 semantic proposal 在 current File operation selector/constraints 内提出 1～8 个
   workspace-relative canonical 创建目标；非空 refs 要求集合中每项 exact member match。proposal 仍必须满足 required-owner
   mandatory `all_of` clauses 的完整覆盖且每个 target 有贡献，不接受 `one_of`/`any_of`、singular 字段或兼容 alias。
   Workorchd 不从 Goal/DoD 或目录名猜路径，

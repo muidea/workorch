@@ -168,7 +168,8 @@ func TestCompileRuntimeCoverageCarriesProfileBoundEmptyWorkspaceScope(t *testing
 				ID: "source_change", Scope: "deliverable", EvidenceRole: "primary_state_change", RequireTargetGrounding: true, TargetRole: "deliverable_implementation",
 				TargetDiscoverySources: []string{runtimecontract.RuntimeValidationDiscoverySourceWorkspaceManifest}, TargetSelectorRef: "file/workspace_deliverable",
 				TargetSelectorOwnerRef: "software-dev", TargetSelectorSubjectRef: "workspace_deliverable_create_scope",
-				RequiredEvidenceKinds: []string{runtimecontract.EvidenceKindStateChange}, AcceptedStepKinds: []string{runtimecontract.StepKindFileWrite},
+				ProspectiveTargetAllOfConstraintRefs: []string{"workspace-relative-path", "new-target-requires-owner-selector"},
+				RequiredEvidenceKinds:                []string{runtimecontract.EvidenceKindStateChange}, AcceptedStepKinds: []string{runtimecontract.StepKindFileWrite},
 			}},
 		}}},
 	}
@@ -187,7 +188,8 @@ func TestCompileRuntimeCoverageCarriesProfileBoundEmptyWorkspaceScope(t *testing
 			break
 		}
 	}
-	if focus == nil || focus.TargetSelectorOwnerRef != "software-dev" || focus.TargetSelectorSubjectRef != "workspace_deliverable_create_scope" || len(focus.ProspectiveTargetRefs) != 0 {
+	if focus == nil || focus.TargetSelectorOwnerRef != "software-dev" || focus.TargetSelectorSubjectRef != "workspace_deliverable_create_scope" || len(focus.ProspectiveTargetRefs) != 0 ||
+		!runtimecontract.SameRuntimeProspectiveTargetAllOfConstraintRefs(focus.ProspectiveTargetAllOfConstraintRefs, []string{"new-target-requires-owner-selector", "workspace-relative-path"}) {
 		t.Fatalf("compiler lost profile-bound empty workspace scope: %+v", focuses)
 	}
 }

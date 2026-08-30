@@ -57,6 +57,11 @@ func invalidFileReconciliationProspectiveSelector(binding runtimecontract.Runtim
 	if len(binding.ProspectiveTargetRefs) == 0 {
 		return nil
 	}
+	if len(binding.ProspectiveTargetAllOfConstraintRefs) != 0 &&
+		!runtimecontract.SameRuntimeProspectiveTargetAllOfConstraintRefs(binding.ProspectiveTargetAllOfConstraintRefs, runtimeFileProspectiveTargetAllOfConstraintRefs()) {
+		fact := unverifiableFileReconciliationFact(manifestRevision, "sealed prospective File target does not carry the exact owner-supported all-of constraints", "prospective_target_all_of_constraints_mismatch", nil)
+		return &fact
+	}
 	var fact fileRuntimeReconciliationTargetFact
 	switch binding.TargetSelectorRef {
 	case runtimeFileSelectorWorkspaceRelativeNewTarget, runtimeFileTargetSelectorWorkspaceDeliverable:

@@ -95,6 +95,7 @@ func StableRuntimeCandidatePrefixHashWithExecutionContract(definition RuntimeDef
 			writeHashString(h, requirement.TargetSelectorOwnerRef)
 			writeHashString(h, requirement.TargetSelectorSubjectRef)
 			writeHashStrings(h, requirement.TargetSelectorCandidateRefs)
+			writeHashStrings(h, requirement.ProspectiveTargetAllOfConstraintRefs)
 			writeHashString(h, fmt.Sprintf("%t", requirement.RequireTargetGrounding))
 			writeHashStrings(h, requirement.RequiredEvidenceKinds)
 			writeHashString(h, fmt.Sprintf("%t", requirement.RequireDirectEvidence))

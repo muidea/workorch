@@ -28,7 +28,7 @@ func applyTargetSelectionPrerequisiteResult(facts *runtimecontract.RuntimeFacts,
 		return fmt.Errorf("target selection prerequisite returned no selection")
 	}
 	selection := result.TargetSelection.Normalized()
-	if selection.PrerequisiteID != prerequisite.ID || selection.OwnerModuleID != prerequisite.OwnerModuleID || selection.TargetRole != prerequisite.SubjectRef || selection.SelectorRef != prerequisite.TargetSelectorRef || selection.SelectorOwnerRef != prerequisite.TargetSelectorOwnerRef || selection.SelectorSubjectRef != prerequisite.TargetSelectorSubjectRef || !runtimecontract.SameRuntimeTargetSelectorCandidateRefs(selection.SelectorCandidateRefs, prerequisite.TargetSelectorCandidateRefs) || selection.ProspectiveTargetRef != prerequisite.ProspectiveTargetRef {
+	if selection.PrerequisiteID != prerequisite.ID || selection.OwnerModuleID != prerequisite.OwnerModuleID || selection.TargetRole != prerequisite.SubjectRef || selection.SelectorRef != prerequisite.TargetSelectorRef || selection.SelectorOwnerRef != prerequisite.TargetSelectorOwnerRef || selection.SelectorSubjectRef != prerequisite.TargetSelectorSubjectRef || !runtimecontract.SameRuntimeTargetSelectorCandidateRefs(selection.SelectorCandidateRefs, prerequisite.TargetSelectorCandidateRefs) || !runtimecontract.SameRuntimeProspectiveTargetAllOfConstraintRefs(selection.ProspectiveTargetAllOfConstraintRefs, prerequisite.ProspectiveTargetAllOfConstraintRefs) || selection.ProspectiveTargetRef != prerequisite.ProspectiveTargetRef {
 		return fmt.Errorf("target selection prerequisite returned a mismatched selection")
 	}
 	if err := selection.Validate(); err != nil {

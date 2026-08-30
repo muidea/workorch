@@ -73,6 +73,14 @@ func (b RuntimeBootstrap) Validate() error {
 		if requirement.ProspectiveTargetRef != "" {
 			return fmt.Errorf("runtime bootstrap requirement cannot carry a prospective target before semantic binding")
 		}
+		if err := ValidateRuntimeProspectiveTargetAllOfConstraintRefs(requirement.ProspectiveTargetAllOfConstraintRefs); err != nil {
+			return fmt.Errorf("runtime bootstrap requirement prospective target all-of declaration: %w", err)
+		}
+		if len(requirement.ProspectiveTargetAllOfConstraintRefs) != 0 &&
+			(requirement.Kind != PrerequisiteKindTargetSelection || requirement.OwnerModuleID != RuntimeModuleFile ||
+				requirement.TargetSelectorRef == "" || requirement.TargetSelectorOwnerRef == "" || requirement.TargetSelectorSubjectRef == "") {
+			return fmt.Errorf("runtime bootstrap prospective target all-of declaration requires one File target-selection prerequisite with a complete selector")
+		}
 	}
 	if len(b.DefinitionFocuses) == 0 {
 		return fmt.Errorf("runtime bootstrap requires at least one definition focus")
@@ -303,7 +311,7 @@ func sameCoverageFocus(left CoverageFocus, right CoverageFocus) bool {
 	return left.ID == right.ID && left.SliceID == right.SliceID && sameCoverageWorkItemIDs(left.CoverageWorkItemIDs, right.CoverageWorkItemIDs) &&
 		left.AssessmentScope == right.AssessmentScope && left.AssessmentID == right.AssessmentID && left.AssessmentText == right.AssessmentText &&
 		left.EvidenceDeclarationRef == right.EvidenceDeclarationRef &&
-		left.EvidenceRole == right.EvidenceRole && left.TargetRole == right.TargetRole && left.TargetSelectorRef == right.TargetSelectorRef && left.TargetSelectorOwnerRef == right.TargetSelectorOwnerRef && left.TargetSelectorSubjectRef == right.TargetSelectorSubjectRef && sameStrings(left.ProspectiveTargetRefs, right.ProspectiveTargetRefs) && left.RequireTargetGrounding == right.RequireTargetGrounding && left.RequireAssessment == right.RequireAssessment &&
+		left.EvidenceRole == right.EvidenceRole && left.TargetRole == right.TargetRole && left.TargetSelectorRef == right.TargetSelectorRef && left.TargetSelectorOwnerRef == right.TargetSelectorOwnerRef && left.TargetSelectorSubjectRef == right.TargetSelectorSubjectRef && SameRuntimeProspectiveTargetAllOfConstraintRefs(left.ProspectiveTargetAllOfConstraintRefs, right.ProspectiveTargetAllOfConstraintRefs) && sameStrings(left.ProspectiveTargetRefs, right.ProspectiveTargetRefs) && left.RequireTargetGrounding == right.RequireTargetGrounding && left.RequireAssessment == right.RequireAssessment &&
 		left.RequireDirectEvidence == right.RequireDirectEvidence && left.RequireClaimEvidence == right.RequireClaimEvidence &&
 		left.RequireExecutableBehaviorEvidence == right.RequireExecutableBehaviorEvidence && left.RequireCoverageTargets == right.RequireCoverageTargets && left.ValidationRecipeID == right.ValidationRecipeID &&
 		sameRuntimeOwnerFactRequirements(left.RequiredOwnerFacts, right.RequiredOwnerFacts) && SameRuntimeOwnerFactConvergences(left.OwnerFactConvergences, right.OwnerFactConvergences) &&
@@ -335,7 +343,7 @@ func sameRuntimeRequirement(left RuntimeRequirement, right RuntimeRequirement) b
 	}
 	left = leftValues[0]
 	right = rightValues[0]
-	return left.Kind == right.Kind && left.Scope == right.Scope && left.FocusID == right.FocusID && left.OwnerModuleID == right.OwnerModuleID && left.SubjectRef == right.SubjectRef && left.TargetSelectorRef == right.TargetSelectorRef && left.TargetSelectorOwnerRef == right.TargetSelectorOwnerRef && left.TargetSelectorSubjectRef == right.TargetSelectorSubjectRef && left.ProspectiveTargetRef == right.ProspectiveTargetRef &&
+	return left.Kind == right.Kind && left.Scope == right.Scope && left.FocusID == right.FocusID && left.OwnerModuleID == right.OwnerModuleID && left.SubjectRef == right.SubjectRef && left.TargetSelectorRef == right.TargetSelectorRef && left.TargetSelectorOwnerRef == right.TargetSelectorOwnerRef && left.TargetSelectorSubjectRef == right.TargetSelectorSubjectRef && SameRuntimeProspectiveTargetAllOfConstraintRefs(left.ProspectiveTargetAllOfConstraintRefs, right.ProspectiveTargetAllOfConstraintRefs) && left.ProspectiveTargetRef == right.ProspectiveTargetRef &&
 		left.CapabilityClass == right.CapabilityClass && left.MinimumBytes == right.MinimumBytes && left.Reason == right.Reason &&
 		sameStrings(left.RequiredCapabilities, right.RequiredCapabilities) && sameStrings(left.TargetSelectorCandidateRefs, right.TargetSelectorCandidateRefs)
 }
@@ -384,11 +392,12 @@ func normalizeRuntimeRequirements(values []RuntimeRequirement) []RuntimeRequirem
 		value.TargetSelectorOwnerRef = strings.TrimSpace(value.TargetSelectorOwnerRef)
 		value.TargetSelectorSubjectRef = strings.TrimSpace(value.TargetSelectorSubjectRef)
 		value.TargetSelectorCandidateRefs = normalizeStrings(value.TargetSelectorCandidateRefs)
+		value.ProspectiveTargetAllOfConstraintRefs = NormalizeRuntimeProspectiveTargetAllOfConstraintRefs(value.ProspectiveTargetAllOfConstraintRefs)
 		value.ProspectiveTargetRef = strings.TrimSpace(value.ProspectiveTargetRef)
 		value.CapabilityClass = RuntimeCapabilityClass(strings.TrimSpace(string(value.CapabilityClass)))
 		value.RequiredCapabilities = normalizeStrings(value.RequiredCapabilities)
 		value.Reason = strings.TrimSpace(value.Reason)
-		key := strings.Join([]string{string(value.Kind), string(value.Scope), value.FocusID, value.OwnerModuleID, value.SubjectRef, value.TargetSelectorRef, value.TargetSelectorOwnerRef, value.TargetSelectorSubjectRef, strings.Join(value.TargetSelectorCandidateRefs, ","), value.ProspectiveTargetRef, string(value.CapabilityClass), strings.Join(value.RequiredCapabilities, ","), fmt.Sprintf("%d", value.MinimumBytes)}, "|")
+		key := strings.Join([]string{string(value.Kind), string(value.Scope), value.FocusID, value.OwnerModuleID, value.SubjectRef, value.TargetSelectorRef, value.TargetSelectorOwnerRef, value.TargetSelectorSubjectRef, strings.Join(value.TargetSelectorCandidateRefs, ","), strings.Join(value.ProspectiveTargetAllOfConstraintRefs, ","), value.ProspectiveTargetRef, string(value.CapabilityClass), strings.Join(value.RequiredCapabilities, ","), fmt.Sprintf("%d", value.MinimumBytes)}, "|")
 		if value.Kind == "" || key == "" {
 			continue
 		}

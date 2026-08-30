@@ -48,16 +48,17 @@ type runtimeSemanticManifestProjection struct {
 }
 
 type runtimeSemanticProofObligationProjection struct {
-	CoverageWorkItemID                  common.CoverageWorkItemID                                `json:"coverageWorkItemId"`
-	EvidencePurpose                     runtimecontract.RuntimeSemanticEvidenceObligationPurpose `json:"evidencePurpose"`
-	TerminalRequiredEvidenceKinds       []string                                                 `json:"terminalRequiredEvidenceKinds"`
-	CurrentRequiredEvidenceKinds        []string                                                 `json:"currentRequiredEvidenceKinds"`
-	DeclarationTargetSelectorRef        string                                                   `json:"declarationTargetSelectorRef,omitempty"`
-	DeclarationTargetSelectorOwnerRef   string                                                   `json:"declarationTargetSelectorOwnerRef,omitempty"`
-	DeclarationTargetSelectorSubjectRef string                                                   `json:"declarationTargetSelectorSubjectRef,omitempty"`
-	DeclarationTargetSelectorCandidates []string                                                 `json:"declarationTargetSelectorCandidateRefs,omitempty"`
-	OwnerFactAcquisition                *runtimeSemanticOwnerFactAcquisitionProjection           `json:"ownerFactAcquisition,omitempty"`
-	ValidationFailureRepair             *runtimeSemanticValidationFailureRepairProjection        `json:"validationFailureRepair,omitempty"`
+	CoverageWorkItemID                              common.CoverageWorkItemID                                `json:"coverageWorkItemId"`
+	EvidencePurpose                                 runtimecontract.RuntimeSemanticEvidenceObligationPurpose `json:"evidencePurpose"`
+	TerminalRequiredEvidenceKinds                   []string                                                 `json:"terminalRequiredEvidenceKinds"`
+	CurrentRequiredEvidenceKinds                    []string                                                 `json:"currentRequiredEvidenceKinds"`
+	DeclarationTargetSelectorRef                    string                                                   `json:"declarationTargetSelectorRef,omitempty"`
+	DeclarationTargetSelectorOwnerRef               string                                                   `json:"declarationTargetSelectorOwnerRef,omitempty"`
+	DeclarationTargetSelectorSubjectRef             string                                                   `json:"declarationTargetSelectorSubjectRef,omitempty"`
+	DeclarationTargetSelectorCandidates             []string                                                 `json:"declarationTargetSelectorCandidateRefs,omitempty"`
+	DeclarationProspectiveTargetAllOfConstraintRefs []string                                                 `json:"declarationProspectiveTargetAllOfConstraintRefs,omitempty"`
+	OwnerFactAcquisition                            *runtimeSemanticOwnerFactAcquisitionProjection           `json:"ownerFactAcquisition,omitempty"`
+	ValidationFailureRepair                         *runtimeSemanticValidationFailureRepairProjection        `json:"validationFailureRepair,omitempty"`
 }
 
 // runtimeSemanticValidationFailureRepairProjection is the provider-safe C3
@@ -218,14 +219,15 @@ func runtimeSemanticProofObligationsForProvider(values []runtimecontract.Runtime
 			return nil, err
 		}
 		projection := runtimeSemanticProofObligationProjection{
-			CoverageWorkItemID:                  value.CoverageWorkItemID,
-			EvidencePurpose:                     evidenceObligation.Purpose,
-			TerminalRequiredEvidenceKinds:       append([]string(nil), evidenceObligation.TerminalRequiredEvidenceKinds...),
-			CurrentRequiredEvidenceKinds:        append([]string(nil), evidenceObligation.CurrentRequiredEvidenceKinds...),
-			DeclarationTargetSelectorRef:        value.DeclarationTargetSelectorRef,
-			DeclarationTargetSelectorOwnerRef:   value.DeclarationTargetSelectorOwnerRef,
-			DeclarationTargetSelectorSubjectRef: value.DeclarationTargetSelectorSubjectRef,
-			DeclarationTargetSelectorCandidates: append([]string(nil), value.DeclarationTargetSelectorCandidateRefs...),
+			CoverageWorkItemID:                              value.CoverageWorkItemID,
+			EvidencePurpose:                                 evidenceObligation.Purpose,
+			TerminalRequiredEvidenceKinds:                   append([]string(nil), evidenceObligation.TerminalRequiredEvidenceKinds...),
+			CurrentRequiredEvidenceKinds:                    append([]string(nil), evidenceObligation.CurrentRequiredEvidenceKinds...),
+			DeclarationTargetSelectorRef:                    value.DeclarationTargetSelectorRef,
+			DeclarationTargetSelectorOwnerRef:               value.DeclarationTargetSelectorOwnerRef,
+			DeclarationTargetSelectorSubjectRef:             value.DeclarationTargetSelectorSubjectRef,
+			DeclarationTargetSelectorCandidates:             append([]string(nil), value.DeclarationTargetSelectorCandidateRefs...),
+			DeclarationProspectiveTargetAllOfConstraintRefs: append([]string(nil), value.DeclarationProspectiveTargetAllOfConstraintRefs...),
 		}
 		if value.OwnerFactAcquisition != nil {
 			acquisition := value.OwnerFactAcquisition.Normalized()

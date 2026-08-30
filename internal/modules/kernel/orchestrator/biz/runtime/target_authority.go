@@ -76,6 +76,7 @@ func CurrentFocusTargetSelectionConfirmsUnresolved(facts runtimecontract.Runtime
 		value.SelectorOwnerRef != declaration.TargetSelectorOwnerRef ||
 		value.SelectorSubjectRef != declaration.TargetSelectorSubjectRef ||
 		!runtimecontract.SameRuntimeTargetSelectorCandidateRefs(value.SelectorCandidateRefs, declaration.TargetSelectorCandidateRefs) ||
+		!runtimecontract.SameRuntimeProspectiveTargetAllOfConstraintRefs(value.ProspectiveTargetAllOfConstraintRefs, declaration.ProspectiveTargetAllOfConstraintRefs) ||
 		value.ProspectiveTargetRef != prospectiveTargetRef {
 		return false
 	}
@@ -92,6 +93,7 @@ func CurrentFocusTargetSelectionConfirmsUnresolved(facts runtimecontract.Runtime
 			prerequisite.TargetSelectorOwnerRef == value.SelectorOwnerRef &&
 			prerequisite.TargetSelectorSubjectRef == value.SelectorSubjectRef &&
 			runtimecontract.SameRuntimeTargetSelectorCandidateRefs(prerequisite.TargetSelectorCandidateRefs, value.SelectorCandidateRefs) &&
+			runtimecontract.SameRuntimeProspectiveTargetAllOfConstraintRefs(prerequisite.ProspectiveTargetAllOfConstraintRefs, value.ProspectiveTargetAllOfConstraintRefs) &&
 			prerequisite.ProspectiveTargetRef == value.ProspectiveTargetRef {
 			prerequisiteMatched = true
 			break
@@ -127,11 +129,12 @@ func CurrentFocusTargetSelectionConfirmsUnresolved(facts runtimecontract.Runtime
 		return true
 	case runtimecontract.RuntimeTargetSelectionScope:
 		// Empty current owner scope is terminal only when the immutable
-		// declaration also has no bounded candidate from which SM-3 could
-		// propose a prospective target.  With declaration candidates it means
-		// "nothing exists yet", not "no legal target can be created".
+		// declaration has neither a finite exact candidate surface nor an
+		// owner-accepted all-of prospective creation contract. With either
+		// declaration it means "nothing exists yet", not "no legal target can
+		// be created".
 		return value.CandidateCount == 0 && len(value.TargetRefs) == 0 && len(value.CandidateTargetRefs) == 0 &&
-			len(value.SelectorCandidateRefs) == 0
+			len(value.SelectorCandidateRefs) == 0 && len(value.ProspectiveTargetAllOfConstraintRefs) == 0
 	default:
 		return false
 	}

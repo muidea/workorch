@@ -4,7 +4,7 @@ Status: normative
 
 Type: core-contract-part
 
-Last Verified: 2026-08-26
+Last Verified: 2026-08-30
 
 ## State-Machine Binding
 
@@ -41,14 +41,20 @@ admitted activation fact
 All aggregate mutation still uses the sole `ApplyInternalEvent -> RuntimeTransitionCoordinator.Commit` boundary. Scheduling,
 ready projection and clarification dispatch are Orchestrator-private facts, not EventHub target-state topics.
 
-For `prospective_owner_target`, the pre-seal declaration's exact `ProspectiveSatisfactionContractRef` is the only authority to
-join the acquisition owner and required owner facts. The semantic manifest keeps required-owner
+For an open-scope `prospective_owner_target` without bounded exact candidate paths, the target-grounded pre-seal Profile declaration seals one exact
+`ProspectiveTargetAllOfConstraintRefs` set alongside its complete Definition selector identity. Every ref is mandatory; the set
+is neither a target list nor an alternative list. File's pre-semantic `TargetSelection` must echo and accept that exact set, and
+the compiled proof obligation exposes it as `DeclarationProspectiveTargetAllOfConstraintRefs`. The proof-batch schema and local
+admission require `target.prospectiveConstraintRefs` to equal the entire declaration set before owner feasibility; a subset,
+superset or drift cannot be corrected by an owner result. For owner-fact acquisition, the pre-seal declaration's exact
+`ProspectiveSatisfactionContractRef` separately joins the acquisition owner and required owner facts. The semantic manifest keeps required-owner
 `OwnerFactDependencyCatalogs` separate from provider-selectable `OwnerCatalogs`: dependency catalogs participate in hash,
 freshness, CAS and seal, but never appear as LLM-selectable operations/surfaces. File and Shell return only their own factual
 outer/nested observations. The required-owner catalog publishes one provider-safe typed
 `ProspectiveTargetSatisfactionConstraint` with `all_of` predicates; the generation-specific acquisition/manifest seals the same
 value and projects it only in C3. Its clauses and every predicate within a clause are mandatory; it has no `one_of`, `any_of` or
-fallback relation. The pre-seal declaration and compiled obligation contain no exact prospective target set. One SM-3 semantic
+fallback relation. This required-owner predicate contract is distinct from the pre-seal File constraint-ref set; both are
+conjunctive and neither can weaken the other. The pre-seal declaration and compiled obligation contain no exact prospective target set. One SM-3 semantic
 proposal supplies a bounded `ProspectiveTargetRefs` set of 1–8 unique canonical values at the intersection of the Definition
 declaration selector/candidate refs and the current semantic manifest's operation selector/owner constraints. Every mandatory
 clause must be covered by at least one set member, every member must contribute to a clause, and non-empty candidate refs require

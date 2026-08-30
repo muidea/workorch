@@ -2373,8 +2373,9 @@ func runtimeTestFactsWithReboundBindings(facts runtimecontract.RuntimeFacts, def
 			Proofs:     append([]runtimecontract.CoverageEvidenceProof(nil), proofs...),
 			TargetRefs: append([]string(nil), focus.TargetRefs...), TargetSelectorRef: focus.TargetSelectorRef,
 			TargetSelectorOwnerRef: focus.TargetSelectorOwnerRef, TargetSelectorSubjectRef: focus.TargetSelectorSubjectRef,
-			TargetSelectorCandidateRefs: append([]string(nil), focus.TargetSelectorCandidateRefs...),
-			ProspectiveTargetRefs:       append([]string(nil), focus.ProspectiveTargetRefs...), DeclarationRef: "test/runtime-fixture",
+			TargetSelectorCandidateRefs:          append([]string(nil), focus.TargetSelectorCandidateRefs...),
+			ProspectiveTargetAllOfConstraintRefs: append([]string(nil), focus.ProspectiveTargetAllOfConstraintRefs...),
+			ProspectiveTargetRefs:                append([]string(nil), focus.ProspectiveTargetRefs...), DeclarationRef: "test/runtime-fixture",
 		}.Normalized()
 		if len(binding.TargetRefs) == 0 && binding.TargetSelectorRef == "" && len(binding.ProspectiveTargetRefs) == 0 {
 			binding.TargetSelectorRef = "test/fixture-owner-selector"

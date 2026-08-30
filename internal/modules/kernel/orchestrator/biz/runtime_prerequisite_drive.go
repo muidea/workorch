@@ -146,7 +146,7 @@ func (m *Biz) resolveRuntimePrerequisite(
 	case runtimecontract.PrerequisiteKindTargetSelection:
 		result, err := AcquireRuntimeTargetSelectionPrerequisite(ctx, m.EventHub(), fileevents.AcquireRuntimeTargetSelectionCommand{
 			WorkspaceID: commandScope.workspaceID, RunID: commandScope.runID, AuthoritySnapshotID: commandScope.snapshotID,
-			PrerequisiteID: prerequisite.ID, WorkspaceDeliverableDirectory: deliverableDirectory, TargetRole: prerequisite.SubjectRef, TargetSelectorRef: prerequisite.TargetSelectorRef, TargetSelectorOwnerRef: prerequisite.TargetSelectorOwnerRef, TargetSelectorSubjectRef: prerequisite.TargetSelectorSubjectRef, TargetSelectorCandidateRefs: prerequisite.TargetSelectorCandidateRefs, ProspectiveTargetRef: prerequisite.ProspectiveTargetRef,
+			PrerequisiteID: prerequisite.ID, WorkspaceDeliverableDirectory: deliverableDirectory, TargetRole: prerequisite.SubjectRef, TargetSelectorRef: prerequisite.TargetSelectorRef, TargetSelectorOwnerRef: prerequisite.TargetSelectorOwnerRef, TargetSelectorSubjectRef: prerequisite.TargetSelectorSubjectRef, TargetSelectorCandidateRefs: prerequisite.TargetSelectorCandidateRefs, ProspectiveTargetAllOfConstraintRefs: prerequisite.ProspectiveTargetAllOfConstraintRefs, ProspectiveTargetRef: prerequisite.ProspectiveTargetRef,
 			// Target selection seals a complete File-owner feasibility fact for
 			// SM-2.  It must not inherit the much smaller per-request candidate
 			// context budget, otherwise a normal workspace with more files than

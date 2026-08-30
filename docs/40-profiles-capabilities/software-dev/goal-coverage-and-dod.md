@@ -4,7 +4,7 @@ Status: normative
 
 Type: profile-capability
 
-Last Verified: 2026-08-27
+Last Verified: 2026-08-30
 
 ## Scope
 
@@ -60,7 +60,11 @@ and reopens the same CWI for a fresh validation binding; it never grants DoD cre
 That one-shot closure uses the Profile-sealed
 `shell/selectable-validation-surface/prospective-workspace-manifest/v1` satisfaction contract. Before any File effect, File
 validates the bounded 1–8 target set proposed by one SM-3 semantic document at the intersection of the Definition declaration
-selector/candidate refs and the current File operation selector/constraints. Shell publishes a provider-safe typed `all_of`
+selector/candidate refs and the current File operation selector/constraints. The built-in Profile pre-seals
+`ProspectiveTargetAllOfConstraintRefs=[workspace-relative-path,new-target-requires-owner-selector]` for source-change, DoD and
+Goal target-grounding declarations. Both refs are mandatory, File must echo/accept the exact set before semantic planning, and
+the proof-batch proposal must return the exact same `prospectiveConstraintRefs`; this declaration has no exact path and no
+alternative branch. Shell separately publishes a provider-safe typed `all_of`
 target-clause constraint derived from the activation-sealed recipe applicability rule; every clause is mandatory and each clause's
 predicates are conjunctive. The acquisition/manifest seals it into C3; no clause or target has a `one_of`/`any_of` escape. For the
 default `go test -v ./...` recipe, current readiness requires both root `go.mod` and a non-excluded test input. If either is
@@ -95,6 +99,9 @@ the Runtime must not manufacture a generic CWI without an exact proof declaratio
 - `prospective_owner_target` validation preparation must carry the exact Profile-derived
   `ProspectiveSatisfactionContractRef`; Shell must publish one matching provider-safe typed `all_of` constraint, while the
   dependency catalog and recipe command remain freshness authority only and never LLM-selectable;
+- every built-in target-grounded source/DoD/Goal requirement carries the exact mandatory File creation constraint refs
+  `workspace-relative-path + new-target-requires-owner-selector`; the Profile hash, File TargetSelection, semantic obligation,
+  C3/schema, SM-2 binding and reconciliation must preserve that full set. A subset/superset is not another admissible option;
 - the Profile declaration does not carry an exact prospective target set; one SM-3 proposal supplies 1–8
   `ProspectiveTargetRefs` at the intersection of its declaration selector/candidate refs and the current operation
   selector/owner constraints. File/Shell validate the whole all-of set, and only the SM-2 binding authorizes the later

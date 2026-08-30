@@ -42,34 +42,35 @@ type coverageSliceBucket struct {
 // compiledEvidencePolicy is the neutral merge result for one coverage focus.
 // Description is audit-only and never enters reducer authority.
 type compiledEvidencePolicy struct {
-	RequiredEvidenceKinds              []string
-	AcceptedStepKinds                  []string
-	AcceptedOperationVariants          []runtimecontract.RuntimeOperationVariantRef
-	RejectedStepKinds                  []string
-	EvidenceRole                       string
-	TargetRole                         string
-	TargetRefs                         []string
-	TargetDiscoverySources             []string
-	TargetSelectorRef                  string
-	TargetSelectorOwnerRef             string
-	TargetSelectorSubjectRef           string
-	TargetSelectorCandidateRefs        []string
-	RequireTargetGrounding             bool
-	RequireDirectEvidence              bool
-	RequireClaimEvidence               bool
-	RequireExecutableBehaviorEvidence  bool
-	RequireCoverageTargets             bool
-	RequireAssessment                  bool
-	RequiredOwnerFacts                 []runtimecontract.RuntimeOwnerFactRequirement
-	OwnerFactConvergences              []runtimecontract.RuntimeOwnerFactConvergence
-	ValidationFailureRepairConvergence *runtimecontract.RuntimeValidationFailureRepairConvergence
-	ValidationRecipeID                 string
-	RequiredCheckRefs                  []string
-	MetricConstraints                  []string
-	ArtifactRefs                       []string
-	DeclarationRef                     string
-	SemanticProofDeclarationRef        string
-	Description                        string
+	RequiredEvidenceKinds                []string
+	AcceptedStepKinds                    []string
+	AcceptedOperationVariants            []runtimecontract.RuntimeOperationVariantRef
+	RejectedStepKinds                    []string
+	EvidenceRole                         string
+	TargetRole                           string
+	TargetRefs                           []string
+	TargetDiscoverySources               []string
+	TargetSelectorRef                    string
+	TargetSelectorOwnerRef               string
+	TargetSelectorSubjectRef             string
+	TargetSelectorCandidateRefs          []string
+	ProspectiveTargetAllOfConstraintRefs []string
+	RequireTargetGrounding               bool
+	RequireDirectEvidence                bool
+	RequireClaimEvidence                 bool
+	RequireExecutableBehaviorEvidence    bool
+	RequireCoverageTargets               bool
+	RequireAssessment                    bool
+	RequiredOwnerFacts                   []runtimecontract.RuntimeOwnerFactRequirement
+	OwnerFactConvergences                []runtimecontract.RuntimeOwnerFactConvergence
+	ValidationFailureRepairConvergence   *runtimecontract.RuntimeValidationFailureRepairConvergence
+	ValidationRecipeID                   string
+	RequiredCheckRefs                    []string
+	MetricConstraints                    []string
+	ArtifactRefs                         []string
+	DeclarationRef                       string
+	SemanticProofDeclarationRef          string
+	Description                          string
 }
 
 // compileRuntimeCoverageFocuses builds the deterministic focus queue for one activation.
@@ -347,8 +348,9 @@ func newCompiledCoverageFocus(id, sliceID, groupScope string, item resolvedCover
 		EvidenceRole: policy.EvidenceRole, TargetRole: policy.TargetRole, TargetRefs: policy.TargetRefs,
 		TargetDiscoverySources: policy.TargetDiscoverySources, TargetSelectorRef: policy.TargetSelectorRef,
 		TargetSelectorOwnerRef: policy.TargetSelectorOwnerRef, TargetSelectorSubjectRef: policy.TargetSelectorSubjectRef,
-		TargetSelectorCandidateRefs: policy.TargetSelectorCandidateRefs,
-		RequireTargetGrounding:      policy.RequireTargetGrounding, AcceptedStepKinds: policy.AcceptedStepKinds,
+		TargetSelectorCandidateRefs:          policy.TargetSelectorCandidateRefs,
+		ProspectiveTargetAllOfConstraintRefs: policy.ProspectiveTargetAllOfConstraintRefs,
+		RequireTargetGrounding:               policy.RequireTargetGrounding, AcceptedStepKinds: policy.AcceptedStepKinds,
 		AcceptedOperationVariants: policy.AcceptedOperationVariants, RejectedStepKinds: policy.RejectedStepKinds,
 		RequireDirectEvidence: policy.RequireDirectEvidence, RequireClaimEvidence: policy.RequireClaimEvidence,
 		RequireExecutableBehaviorEvidence: policy.RequireExecutableBehaviorEvidence, RequireCoverageTargets: policy.RequireCoverageTargets,
@@ -679,30 +681,31 @@ func resolveCoverageEvidencePolicy(scope, id string, activation runtimecontract.
 				continue
 			}
 			mapped := runtimecontract.RuntimeProfileEvidenceRequirement{
-				ID:                                reqID,
-				Scope:                             reqScope,
-				EvidenceRole:                      requirement.EvidenceRole,
-				TargetRole:                        requirement.TargetRole,
-				TargetRefs:                        append([]string(nil), requirement.TargetRefs...),
-				TargetDiscoverySources:            append([]string(nil), requirement.TargetDiscoverySources...),
-				TargetSelectorRef:                 requirement.TargetSelectorRef,
-				TargetSelectorOwnerRef:            requirement.TargetSelectorOwnerRef,
-				TargetSelectorSubjectRef:          requirement.TargetSelectorSubjectRef,
-				TargetSelectorCandidateRefs:       append([]string(nil), requirement.TargetSelectorCandidateRefs...),
-				RequireTargetGrounding:            requirement.RequireTargetGrounding,
-				RequiredEvidenceKinds:             append([]string(nil), requirement.RequiredEvidenceKinds...),
-				RequireDirectEvidence:             requirement.RequireDirectEvidence,
-				RequireClaimEvidence:              requirement.RequireClaimEvidence,
-				RequireExecutableBehaviorEvidence: requirement.RequireExecutableBehaviorEvidence,
-				RequireCoverageTargets:            requirement.RequireCoverageTargets,
-				AcceptedStepKinds:                 append([]string(nil), requirement.AcceptedStepKinds...),
-				AcceptedOperationVariants:         append([]runtimecontract.RuntimeOperationVariantRef(nil), requirement.AcceptedOperationVariants...),
-				RejectedStepKinds:                 append([]string(nil), requirement.RejectedStepKinds...),
-				ValidationRecipeID:                requirement.ValidationRecipeID,
-				RequiredCheckRefs:                 append([]string(nil), requirement.RequiredCheckRefs...),
-				MetricConstraints:                 append([]string(nil), requirement.MetricConstraints...),
-				ArtifactRefs:                      append([]string(nil), requirement.ArtifactRefs...),
-				Description:                       requirement.Description,
+				ID:                                   reqID,
+				Scope:                                reqScope,
+				EvidenceRole:                         requirement.EvidenceRole,
+				TargetRole:                           requirement.TargetRole,
+				TargetRefs:                           append([]string(nil), requirement.TargetRefs...),
+				TargetDiscoverySources:               append([]string(nil), requirement.TargetDiscoverySources...),
+				TargetSelectorRef:                    requirement.TargetSelectorRef,
+				TargetSelectorOwnerRef:               requirement.TargetSelectorOwnerRef,
+				TargetSelectorSubjectRef:             requirement.TargetSelectorSubjectRef,
+				TargetSelectorCandidateRefs:          append([]string(nil), requirement.TargetSelectorCandidateRefs...),
+				ProspectiveTargetAllOfConstraintRefs: append([]string(nil), requirement.ProspectiveTargetAllOfConstraintRefs...),
+				RequireTargetGrounding:               requirement.RequireTargetGrounding,
+				RequiredEvidenceKinds:                append([]string(nil), requirement.RequiredEvidenceKinds...),
+				RequireDirectEvidence:                requirement.RequireDirectEvidence,
+				RequireClaimEvidence:                 requirement.RequireClaimEvidence,
+				RequireExecutableBehaviorEvidence:    requirement.RequireExecutableBehaviorEvidence,
+				RequireCoverageTargets:               requirement.RequireCoverageTargets,
+				AcceptedStepKinds:                    append([]string(nil), requirement.AcceptedStepKinds...),
+				AcceptedOperationVariants:            append([]runtimecontract.RuntimeOperationVariantRef(nil), requirement.AcceptedOperationVariants...),
+				RejectedStepKinds:                    append([]string(nil), requirement.RejectedStepKinds...),
+				ValidationRecipeID:                   requirement.ValidationRecipeID,
+				RequiredCheckRefs:                    append([]string(nil), requirement.RequiredCheckRefs...),
+				MetricConstraints:                    append([]string(nil), requirement.MetricConstraints...),
+				ArtifactRefs:                         append([]string(nil), requirement.ArtifactRefs...),
+				Description:                          requirement.Description,
 			}
 			if err := validateProfileAcceptedKinds(mapped); err != nil {
 				return compiledEvidencePolicy{}, err
@@ -798,6 +801,7 @@ func mergeCompiledEvidencePolicy(base compiledEvidencePolicy, requirements []run
 			base.TargetSelectorSubjectRef = strings.TrimSpace(requirement.TargetSelectorSubjectRef)
 		}
 		base.TargetSelectorCandidateRefs = stableStringUnion(base.TargetSelectorCandidateRefs, requirement.TargetSelectorCandidateRefs)
+		base.ProspectiveTargetAllOfConstraintRefs = stableStringUnion(base.ProspectiveTargetAllOfConstraintRefs, requirement.ProspectiveTargetAllOfConstraintRefs)
 		base.TargetRefs = stableStringUnion(base.TargetRefs, requirement.TargetRefs)
 		base.TargetDiscoverySources = stableStringUnion(base.TargetDiscoverySources, requirement.TargetDiscoverySources)
 		base.RequireTargetGrounding = base.RequireTargetGrounding || requirement.RequireTargetGrounding
@@ -844,6 +848,7 @@ func applyCompiledEvidencePolicy(focus runtimecontract.CoverageFocus, policy com
 	focus.TargetSelectorOwnerRef = policy.TargetSelectorOwnerRef
 	focus.TargetSelectorSubjectRef = policy.TargetSelectorSubjectRef
 	focus.TargetSelectorCandidateRefs = append([]string(nil), policy.TargetSelectorCandidateRefs...)
+	focus.ProspectiveTargetAllOfConstraintRefs = append([]string(nil), policy.ProspectiveTargetAllOfConstraintRefs...)
 	focus.TargetRefs = append([]string(nil), policy.TargetRefs...)
 	focus.TargetDiscoverySources = append([]string(nil), policy.TargetDiscoverySources...)
 	focus.RequireTargetGrounding = policy.RequireTargetGrounding

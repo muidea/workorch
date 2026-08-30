@@ -69,6 +69,36 @@ func TestRuntimeSemanticDefinitionSelectorCandidatesConstrainEveryTargetPolicy(t
 	}
 }
 
+func TestRuntimeSemanticProspectiveTargetRequiresExactDefinitionAllOfDeclaration(t *testing.T) {
+	manifest, document, fact := semanticDeclarationTargetSurfaceFixture(t, RuntimeOperationTargetPolicyProspectiveOwnerTarget)
+	focuses, reconciliation, err := CompileRuntimeSemanticBindings(manifest, "semantic-declaration-all-of-request", document, []RuntimeSemanticProofFeasibility{fact})
+	if err != nil {
+		t.Fatalf("valid prospective all-of binding: %v", err)
+	}
+	want := []string{"new-target-requires-owner-selector", "workspace-relative-path"}
+	if len(focuses) != 1 || len(focuses[0].CoverageEvidenceBindings) != 1 ||
+		!SameRuntimeProspectiveTargetAllOfConstraintRefs(focuses[0].ProspectiveTargetAllOfConstraintRefs, want) ||
+		!SameRuntimeProspectiveTargetAllOfConstraintRefs(focuses[0].CoverageEvidenceBindings[0].ProspectiveTargetAllOfConstraintRefs, want) ||
+		len(reconciliation.Bindings) != 1 ||
+		!SameRuntimeProspectiveTargetAllOfConstraintRefs(reconciliation.Bindings[0].ProspectiveTargetAllOfConstraintRefs, want) {
+		t.Fatalf("sealed prospective all-of lineage drifted: focuses=%+v reconciliation=%+v", focuses, reconciliation)
+	}
+
+	for name, constraints := range map[string][]string{
+		"missing mandatory constraint": {"workspace-relative-path"},
+		"added undeclared constraint":  {"workspace-relative-path", "new-target-requires-owner-selector", "regular-file-required"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			invalid := document.Clone()
+			invalid.Proposals[0].Target.ProspectiveConstraintRefs = constraints
+			var violation *RuntimeSemanticProposalViolationError
+			if err := invalid.ValidateAgainstManifest(manifest); !errors.As(err, &violation) || violation.Violation().Path != "$.proposals[0].target.prospectiveConstraintRefs" {
+				t.Fatalf("prospective all-of violation=%+v err=%v", violation, err)
+			}
+		})
+	}
+}
+
 func semanticDeclarationTargetSurfaceFixture(t *testing.T, policy RuntimeOperationTargetPolicy) (RuntimeSemanticPlanManifest, RuntimeSemanticPlanDocument, RuntimeSemanticProofFeasibility) {
 	t.Helper()
 	manifest := semanticContractTestManifest(t)
@@ -80,6 +110,7 @@ func semanticDeclarationTargetSurfaceFixture(t *testing.T, policy RuntimeOperati
 	catalog := &manifest.OwnerCatalogs[0]
 	proposal := semanticContractTestProposal("cwi-001")
 	allowedTarget := "allowed.go"
+	var prospectiveAllOf []string
 	switch policy {
 	case RuntimeOperationTargetPolicyExactTarget:
 		catalog.TargetRefs = []string{allowedTarget, "outside.go"}
@@ -89,10 +120,15 @@ func semanticDeclarationTargetSurfaceFixture(t *testing.T, policy RuntimeOperati
 		proposal.Target = RuntimeOperationTargetAuthorization{Policy: policy, OwnerScopeTargetRefs: []string{allowedTarget}}
 	case RuntimeOperationTargetPolicyProspectiveOwnerTarget:
 		allowedTarget = "allowed-new.go"
+		prospectiveAllOf = []string{"workspace-relative-path", "new-target-requires-owner-selector"}
 		catalog.TargetRefs = []string{"existing.go"}
+		catalog.ConstraintRefs = append([]string(nil), prospectiveAllOf...)
+		for index := range catalog.OperationVariants {
+			catalog.OperationVariants[index].ConstraintRefs = append([]string(nil), prospectiveAllOf...)
+		}
 		proposal.Target = RuntimeOperationTargetAuthorization{
 			Policy: policy, OwnerSelectorRefs: []string{"file/workspace-relative-create"},
-			ProspectiveConstraintRefs: []string{"workspace-relative-path"}, ProspectiveTargetRefs: []string{allowedTarget},
+			ProspectiveConstraintRefs: append([]string(nil), prospectiveAllOf...), ProspectiveTargetRefs: []string{allowedTarget},
 		}
 	default:
 		t.Fatalf("unsupported fixture target policy %q", policy)
@@ -103,7 +139,7 @@ func semanticDeclarationTargetSurfaceFixture(t *testing.T, policy RuntimeOperati
 		RequiredEvidenceKinds: []string{EvidenceKindStateChange}, TargetRole: "deliverable",
 		TargetDiscoverySources: []string{RuntimeValidationDiscoverySourceWorkspaceManifest},
 		TargetSelectorRef:      "profile/declaration-selector", TargetSelectorOwnerRef: "profile/test", TargetSelectorSubjectRef: "deliverable",
-		TargetSelectorCandidateRefs: []string{allowedTarget}, RequireTargetGrounding: true,
+		TargetSelectorCandidateRefs: append([]string(nil), []string{allowedTarget}...), ProspectiveTargetAllOfConstraintRefs: append([]string(nil), prospectiveAllOf...), RequireTargetGrounding: true,
 	}
 	manifest = sealSemanticTestManifestWithSource(t, manifest, source)
 	document := RuntimeSemanticPlanDocument{

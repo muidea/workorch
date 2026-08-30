@@ -145,9 +145,15 @@ func TestRuntimeAggregateEvidenceCommitLedgerRejectsAcceptedValidationFactDrift(
 	if len(baseline.Facts.Evidence.Accepted) < 2 {
 		t.Fatalf("accepted validation fixture has no validation fact: %+v", baseline.Facts.Evidence.Accepted)
 	}
-	fact := baseline.Facts.Evidence.Accepted[len(baseline.Facts.Evidence.Accepted)-1]
-	if fact.Kind != runtimecontract.EvidenceKindValidation {
-		t.Fatalf("last accepted fact kind = %q, want validation", fact.Kind)
+	var fact runtimecontract.EvidenceFact
+	for _, candidate := range baseline.Facts.Evidence.Accepted {
+		if candidate.Kind == runtimecontract.EvidenceKindValidation {
+			fact = candidate
+			break
+		}
+	}
+	if fact.ID == "" {
+		t.Fatalf("accepted validation fixture has no validation fact: %+v", baseline.Facts.Evidence.Accepted)
 	}
 
 	for _, test := range []struct {
@@ -210,6 +216,19 @@ func runtimeTestAcceptedValidationEvidenceAggregate(t *testing.T) RuntimeAggrega
 	committed, err := coordinator.commitEvidence(context.Background(), evidence)
 	if err != nil {
 		t.Fatalf("commit accepted validation fixture: %v", err)
+	}
+	if committed.Disposition != CommitDispositionCommitted {
+		t.Fatalf("accepted validation fixture disposition = %q, aggregate=%+v", committed.Disposition, committed.Aggregate)
+	}
+	validationPersisted := false
+	for _, fact := range committed.Aggregate.Facts.Evidence.Accepted {
+		if fact.Kind == runtimecontract.EvidenceKindValidation {
+			validationPersisted = true
+			break
+		}
+	}
+	if len(committed.Aggregate.Facts.Evidence.Accepted) < 2 || !validationPersisted {
+		t.Fatalf("accepted validation fixture did not persist validation fact: %+v", committed.Aggregate.Facts.Evidence.Accepted)
 	}
 	return committed.Aggregate
 }

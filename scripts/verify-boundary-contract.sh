@@ -4097,6 +4097,14 @@ if grep -q -i -E -- '[[:space:]](ProspectiveTargetRefs?|TargetRef)[[:space:]]|js
 	echo "boundary contract violation: a pre-seal Definition/profile/semantic declaration regained an exact prospective target" >&2
 	exit 1
 fi
+for marker in \
+	'^[[:space:]]+ProspectiveTargetAllOfConstraintRefs[[:space:]]+\[\]string' \
+	'^[[:space:]]+DeclarationProspectiveTargetAllOfConstraintRefs[[:space:]]+\[\]string'; do
+	if ! grep -q -E -- "$marker" <<<"$preseal_target_shapes"; then
+		echo "boundary contract violation: pre-seal prospective target authority lost its explicit all-of declaration ($marker)" >&2
+		exit 1
+	fi
+done
 validation_repair_preseal_shapes="$({
 	sed -n '/^type RuntimeValidationFailureRepairConvergence struct {/,/^}/p' internal/pkg/workorchruntimecontract/runtime_validation_failure_repair_convergence.go
 	sed -n '/^type RuntimeSemanticValidationFailureRepair struct {/,/^}/p' internal/pkg/workorchruntimecontract/runtime_semantic_validation_failure_repair.go
@@ -4203,6 +4211,9 @@ fi
 for regression in \
 	'TestRuntimeSemanticOwnerFactAcquisitionSchemaUsesOperationSelectorNotDefinitionSelector' \
 	'TestRuntimeSemanticOwnerFactAcquisitionSchemaBoundsProspectiveTargetByCandidateCardinality' \
+	'TestRuntimeSemanticPlanRequestSchemaRequiresExactDefinitionProspectiveAllOfSet' \
+	'TestRuntimeSemanticProspectiveTargetRequiresExactDefinitionAllOfDeclaration' \
+	'TestPresemanticTargetSelectionOwnerFactFencesSemanticRequest' \
 	'TestCoverageEvidenceBindingProspectiveTargetRequiresBoundedSelectorSurface' \
 	'TestRuntimeSemanticManifestRejectsAcquisitionSelectorDriftFromSealedCatalog' \
 	'TestRuntimeSemanticProviderProjectsDefinitionLineageAndExactAcquisitionSelector' \
@@ -4537,6 +4548,9 @@ done
 # not leak the hidden dependency surface/recipe identity under an alias.
 prospective_target_contract="$(cat internal/pkg/workorchruntimecontract/runtime_prospective_target_constraint.go)"
 for marker in \
+	'NormalizeRuntimeProspectiveTargetAllOfConstraintRefs' \
+	'ValidateRuntimeProspectiveTargetAllOfConstraintRefs' \
+	'SameRuntimeProspectiveTargetAllOfConstraintRefs' \
 	'RuntimeProspectiveTargetSatisfiesConstraint' \
 	'RuntimeProspectiveTargetsSatisfyConstraint' \
 	'RuntimeProspectiveTargetClause' \
@@ -4583,11 +4597,27 @@ if ! grep -q -E -- 'AllOf[[:space:]]+\[\]RuntimeProspectiveTargetPredicate' <<<"
 	exit 1
 fi
 for regression in \
+	'TestRuntimeProspectiveTargetAllOfDeclarationIsCanonicalBoundedAndExact' \
 	'TestRuntimeProspectiveTargetSatisfactionConstraintMatchesBoundedAllOfTargetSet' \
 	'TestResolveRuntimeProspectiveTargetSatisfactionConstraintRejectsImplicitAnyOf' \
 	'TestRuntimeProspectiveTargetSatisfactionConstraintEnforcesSharedBoundAndRelevantTargets'; do
 	if ! grep -q -F -- "$regression" internal/pkg/workorchruntimecontract/runtime_prospective_target_constraint_test.go; then
 		echo "boundary contract violation: bounded all-of prospective constraint regression is missing ($regression)" >&2
+		exit 1
+	fi
+done
+
+file_static_prospective_all_of_contract="$(cat \
+	internal/modules/blocks/file/biz/file_runtime_catalog.go \
+	internal/modules/blocks/file/biz/file_runtime_target.go \
+	internal/modules/blocks/file/biz/file_runtime_reconciliation.go)"
+for marker in \
+	'workspace-relative-path' \
+	'new-target-requires-owner-selector' \
+	'SameRuntimeProspectiveTargetAllOfConstraintRefs' \
+	'prospective_target_all_of_constraints_mismatch'; do
+	if ! grep -q -F -- "$marker" <<<"$file_static_prospective_all_of_contract"; then
+		echo "boundary contract violation: File lost exact ownership of the static prospective all-of declaration ($marker)" >&2
 		exit 1
 	fi
 done

@@ -164,6 +164,37 @@ func TestRuntimeAdapterAcquireRuntimeTargetSelectionIsCardinalityBounded(t *test
 			t.Fatalf("profile-bound empty workspace scope = %+v", selection)
 		}
 	})
+	t.Run("all-of declaration keeps an empty workspace open for semantic creation", func(t *testing.T) {
+		binding := runtimeTargetSelectionBinding{
+			ownerRef: "software-dev", subjectRef: "workspace_deliverable_create_scope",
+			prospectiveTargetAllOfConstraintRefs: []string{
+				"workspace-relative-path",
+				"new-target-requires-owner-selector",
+			},
+		}
+		selection, err := adapter.AcquireRuntimeTargetSelection(t.TempDir(), "target-selection-empty-all-of-scope", "deliverable", runtimeFileTargetSelectorWorkspaceDeliverable, "", 4, binding)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if selection.Disposition != runtimecontract.RuntimeTargetSelectionScope || selection.CandidateCount != 0 ||
+			!runtimecontract.SameRuntimeProspectiveTargetAllOfConstraintRefs(selection.ProspectiveTargetAllOfConstraintRefs, binding.prospectiveTargetAllOfConstraintRefs) {
+			t.Fatalf("all-of empty workspace scope = %+v", selection)
+		}
+	})
+	t.Run("unsupported all-of declaration is a typed owner fact", func(t *testing.T) {
+		binding := runtimeTargetSelectionBinding{
+			ownerRef: "software-dev", subjectRef: "workspace_deliverable_create_scope",
+			prospectiveTargetAllOfConstraintRefs: []string{"workspace-relative-path"},
+		}
+		selection, err := adapter.AcquireRuntimeTargetSelection(t.TempDir(), "target-selection-unsupported-all-of", "deliverable", runtimeFileTargetSelectorWorkspaceDeliverable, "", 4, binding)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if selection.Disposition != runtimecontract.RuntimeTargetSelectionUnsupported ||
+			!runtimecontract.SameRuntimeProspectiveTargetAllOfConstraintRefs(selection.ProspectiveTargetAllOfConstraintRefs, binding.prospectiveTargetAllOfConstraintRefs) {
+			t.Fatalf("unsupported all-of selection = %+v", selection)
+		}
+	})
 	t.Run("empty workspace rejects noncanonical prospective target", func(t *testing.T) {
 		workspace := t.TempDir()
 		for _, target := range []string{"../escape.txt", "/absolute.txt", "nested/../deliverable.txt", `nested\\deliverable.txt`} {

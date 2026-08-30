@@ -105,11 +105,22 @@ func TestCoverageEvidenceBindingProspectiveTargetRequiresBoundedSelectorSurface(
 		}},
 		TargetSelectorRef: "file/workspace-relative-create", TargetSelectorOwnerRef: RuntimeModuleFile,
 		TargetSelectorSubjectRef: "deliverable", TargetSelectorCandidateRefs: []string{"README.md", "internal/main.go", "internal/main_test.go"},
-		ProspectiveTargetRefs: []string{"internal/main.go", "internal/main_test.go"}, DeclarationRef: "profile/prospective",
+		ProspectiveTargetAllOfConstraintRefs: []string{"workspace-relative-path", "new-target-requires-owner-selector"},
+		ProspectiveTargetRefs:                []string{"internal/main.go", "internal/main_test.go"}, DeclarationRef: "profile/prospective",
 	}.Normalized()
 	binding.Hash = StableCoverageEvidenceBindingHash(binding)
 	if err := binding.Validate(); err != nil {
 		t.Fatalf("valid prospective binding rejected: %v", err)
+	}
+	cloned := binding.Clone()
+	cloned.ProspectiveTargetAllOfConstraintRefs[0] = "mutated"
+	if binding.ProspectiveTargetAllOfConstraintRefs[0] == "mutated" {
+		t.Fatal("prospective all-of binding clone aliases declaration storage")
+	}
+	changed := binding.Clone()
+	changed.ProspectiveTargetAllOfConstraintRefs = []string{"workspace-relative-path"}
+	if StableCoverageEvidenceBindingHash(changed) == binding.Hash {
+		t.Fatal("binding hash did not retain prospective target all-of declaration")
 	}
 
 	for name, mutate := range map[string]func(*CoverageEvidenceBinding){
@@ -143,7 +154,8 @@ func TestValidateCoverageEvidenceBindingsForFocusRequiresExactTargetSurface(t *t
 			RequiredEvidenceKinds: binding.EvidenceKinds(), CoverageEvidenceBindings: []CoverageEvidenceBinding{binding},
 			TargetRefs: binding.TargetRefs, TargetSelectorRef: binding.TargetSelectorRef,
 			TargetSelectorOwnerRef: binding.TargetSelectorOwnerRef, TargetSelectorSubjectRef: binding.TargetSelectorSubjectRef,
-			TargetSelectorCandidateRefs: binding.TargetSelectorCandidateRefs, ProspectiveTargetRefs: binding.ProspectiveTargetRefs,
+			TargetSelectorCandidateRefs: binding.TargetSelectorCandidateRefs, ProspectiveTargetAllOfConstraintRefs: binding.ProspectiveTargetAllOfConstraintRefs,
+			ProspectiveTargetRefs: binding.ProspectiveTargetRefs,
 		}
 	}
 
@@ -159,7 +171,7 @@ func TestValidateCoverageEvidenceBindingsForFocusRequiresExactTargetSurface(t *t
 		ID: "binding-prospective", CoverageWorkItemID: "cwi-prospective", FocusID: "focus-prospective", DefinitionRevision: "definition-target-surface",
 		Proofs: []CoverageEvidenceProof{proof}, TargetSelectorRef: "workspace-relative-new-file-target",
 		TargetSelectorOwnerRef: RuntimeModuleFile, TargetSelectorSubjectRef: "workspace_deliverable",
-		TargetSelectorCandidateRefs: []string{"README.md", "internal/main.go"}, ProspectiveTargetRefs: []string{"internal/main.go"},
+		TargetSelectorCandidateRefs: []string{"README.md", "internal/main.go"}, ProspectiveTargetAllOfConstraintRefs: []string{"workspace-relative-path", "new-target-requires-owner-selector"}, ProspectiveTargetRefs: []string{"internal/main.go"},
 		DeclarationRef: "profile/prospective",
 	}
 	prospectiveFocus := validFocus(prospective)
@@ -176,6 +188,9 @@ func TestValidateCoverageEvidenceBindingsForFocusRequiresExactTargetSurface(t *t
 		{name: "selector owner", mutate: func(value *CoverageFocus) { value.TargetSelectorOwnerRef = "blocks/other" }},
 		{name: "selector subject", mutate: func(value *CoverageFocus) { value.TargetSelectorSubjectRef = "other-subject" }},
 		{name: "selector candidates", mutate: func(value *CoverageFocus) { value.TargetSelectorCandidateRefs = []string{"other.go"} }},
+		{name: "prospective all-of constraints", mutate: func(value *CoverageFocus) {
+			value.ProspectiveTargetAllOfConstraintRefs = []string{"workspace-relative-path"}
+		}},
 		{name: "prospective target", mutate: func(value *CoverageFocus) { value.ProspectiveTargetRefs = []string{"other.go"} }},
 	} {
 		t.Run(testCase.name, func(t *testing.T) {

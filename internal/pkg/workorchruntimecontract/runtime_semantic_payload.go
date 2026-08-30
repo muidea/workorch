@@ -652,6 +652,26 @@ func attachRuntimeSemanticProofObligationSchema(items map[string]any, manifest R
 		if !found {
 			return fmt.Errorf("runtime semantic proof-batch coverage %q has no sealed proof obligation", coverageID)
 		}
+		if len(obligation.DeclarationProspectiveTargetAllOfConstraintRefs) != 0 {
+			allOf = append(allOf, map[string]any{
+				"if": map[string]any{
+					"required": []string{"coverageWorkItemId", "target"},
+					"properties": map[string]any{
+						"coverageWorkItemId": map[string]any{"const": string(coverageID)},
+						"target": map[string]any{
+							"required":   []string{"policy"},
+							"properties": map[string]any{"policy": map[string]any{"const": string(RuntimeOperationTargetPolicyProspectiveOwnerTarget)}},
+						},
+					},
+				},
+				"then": map[string]any{"properties": map[string]any{
+					"target": map[string]any{
+						"required":   []string{"prospectiveConstraintRefs"},
+						"properties": map[string]any{"prospectiveConstraintRefs": exactStringArraySchema(obligation.DeclarationProspectiveTargetAllOfConstraintRefs)},
+					},
+				}},
+			})
+		}
 		if obligation.ValidationFailureRepair != nil {
 			repair := obligation.ValidationFailureRepair.Normalized()
 			targetRequired := []string{"policy", "ownerSelectorRefs"}

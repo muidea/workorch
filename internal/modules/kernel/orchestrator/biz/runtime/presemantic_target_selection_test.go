@@ -27,7 +27,11 @@ func TestPresemanticDefinitionTargetSelectionRequirementUsesImmutableDeclaration
 		TargetSelectorOwnerRef:      "profile/test",
 		TargetSelectorSubjectRef:    "deliverable",
 		TargetSelectorCandidateRefs: []string{"allowed.go"},
-		RequireTargetGrounding:      true,
+		ProspectiveTargetAllOfConstraintRefs: []string{
+			"workspace-relative-path",
+			"new-target-requires-owner-selector",
+		},
+		RequireTargetGrounding: true,
 	}}
 	facts.Prerequisites = runtimecontract.PrerequisiteState{}
 	facts.Resources.Manifest = nil
@@ -52,7 +56,8 @@ func TestPresemanticDefinitionTargetSelectionRequirementUsesImmutableDeclaration
 		selection.OwnerModuleID != runtimecontract.RuntimeModuleFile || selection.SubjectRef != "deliverable" ||
 		selection.TargetSelectorRef != "profile/declaration-selector" || selection.TargetSelectorOwnerRef != "profile/test" ||
 		selection.TargetSelectorSubjectRef != "deliverable" ||
-		!runtimecontract.SameRuntimeTargetSelectorCandidateRefs(selection.TargetSelectorCandidateRefs, []string{"allowed.go"}) {
+		!runtimecontract.SameRuntimeTargetSelectorCandidateRefs(selection.TargetSelectorCandidateRefs, []string{"allowed.go"}) ||
+		!runtimecontract.SameRuntimeProspectiveTargetAllOfConstraintRefs(selection.ProspectiveTargetAllOfConstraintRefs, []string{"new-target-requires-owner-selector", "workspace-relative-path"}) {
 		t.Fatalf("presemantic target-selection prerequisite=%+v", selection)
 	}
 	if updated.Focus.TargetSelectorRef != "" || updated.Focus.RequireTargetGrounding {
@@ -94,6 +99,20 @@ func TestPresemanticTargetSelectionOwnerFactFencesSemanticRequest(t *testing.T) 
 		t.Fatalf("bounded prospective declaration did not continue semantic planning: %v", err)
 	}
 
+	allOfEmptyScope := presemanticTargetSelectionGateAggregate(
+		t,
+		runtimecontract.RuntimeTargetSelectionScope,
+		nil,
+		"workspace-relative-path",
+		"new-target-requires-owner-selector",
+	)
+	if CurrentFocusTargetSelectionConfirmsUnresolved(allOfEmptyScope.Facts) {
+		t.Fatal("empty owner scope hid an owner-accepted all-of prospective declaration")
+	}
+	if err := candidateRequestSessionActionAllowed(allOfEmptyScope, runtimecontract.RuntimeProviderDocumentSemanticPlan); err != nil {
+		t.Fatalf("owner-accepted all-of declaration did not continue semantic planning: %v", err)
+	}
+
 	unboundedEmptyScope := presemanticTargetSelectionGateAggregate(t, runtimecontract.RuntimeTargetSelectionScope, nil)
 	if !CurrentFocusTargetSelectionConfirmsUnresolved(unboundedEmptyScope.Facts) {
 		t.Fatal("empty owner scope without a declaration candidate was not recognized as unresolved")
@@ -111,7 +130,7 @@ func TestPresemanticTargetSelectionOwnerFactFencesSemanticRequest(t *testing.T) 
 	}
 }
 
-func presemanticTargetSelectionGateAggregate(t *testing.T, disposition runtimecontract.RuntimeTargetSelectionDisposition, selectorCandidates []string) RuntimeAggregate {
+func presemanticTargetSelectionGateAggregate(t *testing.T, disposition runtimecontract.RuntimeTargetSelectionDisposition, selectorCandidates []string, prospectiveAllOf ...string) RuntimeAggregate {
 	t.Helper()
 	const (
 		focusID      = "focus-presemantic-gate"
@@ -128,7 +147,7 @@ func presemanticTargetSelectionGateAggregate(t *testing.T, disposition runtimeco
 			RequiredEvidenceKinds: []string{runtimecontract.EvidenceKindStateChange}, TargetRole: "deliverable",
 			TargetDiscoverySources: []string{runtimecontract.RuntimeValidationDiscoverySourceWorkspaceManifest},
 			TargetSelectorRef:      "profile/declaration-selector", TargetSelectorOwnerRef: "profile/test", TargetSelectorSubjectRef: "deliverable",
-			TargetSelectorCandidateRefs: append([]string(nil), selectorCandidates...), RequireTargetGrounding: true,
+			TargetSelectorCandidateRefs: append([]string(nil), selectorCandidates...), ProspectiveTargetAllOfConstraintRefs: append([]string(nil), prospectiveAllOf...), RequireTargetGrounding: true,
 		}},
 	}
 	selectionPrerequisite := runtimecontract.RuntimePrerequisite{
@@ -136,7 +155,7 @@ func presemanticTargetSelectionGateAggregate(t *testing.T, disposition runtimeco
 		Scope: runtimecontract.RuntimePrerequisiteScopeFocus, FocusID: focusID,
 		OwnerModuleID: runtimecontract.RuntimeModuleFile, SubjectRef: "deliverable",
 		TargetSelectorRef: "profile/declaration-selector", TargetSelectorOwnerRef: "profile/test", TargetSelectorSubjectRef: "deliverable",
-		TargetSelectorCandidateRefs: append([]string(nil), selectorCandidates...),
+		TargetSelectorCandidateRefs: append([]string(nil), selectorCandidates...), ProspectiveTargetAllOfConstraintRefs: append([]string(nil), prospectiveAllOf...),
 	}
 	aggregate := RuntimeAggregate{
 		Facts:            facts,
@@ -151,7 +170,7 @@ func presemanticTargetSelectionGateAggregate(t *testing.T, disposition runtimeco
 	selection := runtimecontract.RuntimeTargetSelection{
 		PrerequisiteID: prerequisite, OwnerModuleID: runtimecontract.RuntimeModuleFile,
 		TargetRole: "deliverable", SelectorRef: "profile/declaration-selector", SelectorOwnerRef: "profile/test", SelectorSubjectRef: "deliverable",
-		SelectorCandidateRefs: append([]string(nil), selectorCandidates...), Disposition: disposition, ObservedRevision: observed,
+		SelectorCandidateRefs: append([]string(nil), selectorCandidates...), ProspectiveTargetAllOfConstraintRefs: append([]string(nil), prospectiveAllOf...), Disposition: disposition, ObservedRevision: observed,
 	}
 	switch disposition {
 	case runtimecontract.RuntimeTargetSelectionSelected:

@@ -170,27 +170,28 @@ func (a RuntimeSemanticOwnerFactAcquisition) Validate() error {
 // carried by a sealed manifest. It replaces later reads of activation
 // DefinitionFocuses during document admission and binding compilation.
 type RuntimeSemanticProofObligation struct {
-	CoverageWorkItemID                     common.CoverageWorkItemID
-	RequiredEvidenceKinds                  []string
-	DeclarationEvidenceRole                string
-	DeclarationTargetRole                  string
-	DeclarationTargetDiscoverySources      []string
-	DeclarationTargetSelectorRef           string
-	DeclarationTargetSelectorOwnerRef      string
-	DeclarationTargetSelectorSubjectRef    string
-	DeclarationTargetSelectorCandidateRefs []string
-	RequireTargetGrounding                 bool
-	RequireDirectEvidence                  bool
-	RequireClaimEvidence                   bool
-	RequireExecutableBehaviorEvidence      bool
-	RequireCoverageTargets                 bool
-	RequireAssessment                      bool
-	RequiredOwnerFacts                     []RuntimeOwnerFactRequirement
-	OwnerFactConvergences                  []RuntimeOwnerFactConvergence
-	MetricConstraints                      []string
-	ArtifactRefs                           []string
-	OwnerFactAcquisition                   *RuntimeSemanticOwnerFactAcquisition
-	ValidationFailureRepair                *RuntimeSemanticValidationFailureRepair
+	CoverageWorkItemID                              common.CoverageWorkItemID
+	RequiredEvidenceKinds                           []string
+	DeclarationEvidenceRole                         string
+	DeclarationTargetRole                           string
+	DeclarationTargetDiscoverySources               []string
+	DeclarationTargetSelectorRef                    string
+	DeclarationTargetSelectorOwnerRef               string
+	DeclarationTargetSelectorSubjectRef             string
+	DeclarationTargetSelectorCandidateRefs          []string
+	DeclarationProspectiveTargetAllOfConstraintRefs []string
+	RequireTargetGrounding                          bool
+	RequireDirectEvidence                           bool
+	RequireClaimEvidence                            bool
+	RequireExecutableBehaviorEvidence               bool
+	RequireCoverageTargets                          bool
+	RequireAssessment                               bool
+	RequiredOwnerFacts                              []RuntimeOwnerFactRequirement
+	OwnerFactConvergences                           []RuntimeOwnerFactConvergence
+	MetricConstraints                               []string
+	ArtifactRefs                                    []string
+	OwnerFactAcquisition                            *RuntimeSemanticOwnerFactAcquisition
+	ValidationFailureRepair                         *RuntimeSemanticValidationFailureRepair
 }
 
 func (o RuntimeSemanticProofObligation) Normalized() RuntimeSemanticProofObligation {
@@ -203,6 +204,7 @@ func (o RuntimeSemanticProofObligation) Normalized() RuntimeSemanticProofObligat
 	o.DeclarationTargetSelectorOwnerRef = strings.TrimSpace(o.DeclarationTargetSelectorOwnerRef)
 	o.DeclarationTargetSelectorSubjectRef = strings.TrimSpace(o.DeclarationTargetSelectorSubjectRef)
 	o.DeclarationTargetSelectorCandidateRefs = normalizeStrings(o.DeclarationTargetSelectorCandidateRefs)
+	o.DeclarationProspectiveTargetAllOfConstraintRefs = NormalizeRuntimeProspectiveTargetAllOfConstraintRefs(o.DeclarationProspectiveTargetAllOfConstraintRefs)
 	o.RequiredOwnerFacts = NormalizeRuntimeOwnerFactRequirements(o.RequiredOwnerFacts)
 	o.OwnerFactConvergences = NormalizeRuntimeOwnerFactConvergences(o.OwnerFactConvergences)
 	o.MetricConstraints = normalizeStrings(o.MetricConstraints)
@@ -223,6 +225,7 @@ func (o RuntimeSemanticProofObligation) Clone() RuntimeSemanticProofObligation {
 	o.RequiredEvidenceKinds = append([]string(nil), o.RequiredEvidenceKinds...)
 	o.DeclarationTargetDiscoverySources = append([]string(nil), o.DeclarationTargetDiscoverySources...)
 	o.DeclarationTargetSelectorCandidateRefs = append([]string(nil), o.DeclarationTargetSelectorCandidateRefs...)
+	o.DeclarationProspectiveTargetAllOfConstraintRefs = append([]string(nil), o.DeclarationProspectiveTargetAllOfConstraintRefs...)
 	o.RequiredOwnerFacts = append([]RuntimeOwnerFactRequirement(nil), o.RequiredOwnerFacts...)
 	o.OwnerFactConvergences = CloneRuntimeOwnerFactConvergences(o.OwnerFactConvergences)
 	o.MetricConstraints = append([]string(nil), o.MetricConstraints...)
@@ -251,6 +254,14 @@ func (o RuntimeSemanticProofObligation) Validate() error {
 	}
 	if len(o.DeclarationTargetSelectorCandidateRefs) != 0 && (!o.RequireTargetGrounding || o.DeclarationTargetSelectorRef == "" || o.DeclarationTargetSelectorOwnerRef == "" || o.DeclarationTargetSelectorSubjectRef == "") {
 		return fmt.Errorf("runtime semantic proof obligation declaration selector candidates require target grounding and a complete selector")
+	}
+	if len(o.DeclarationProspectiveTargetAllOfConstraintRefs) != 0 {
+		if !o.RequireTargetGrounding || o.DeclarationTargetSelectorRef == "" || o.DeclarationTargetSelectorOwnerRef == "" || o.DeclarationTargetSelectorSubjectRef == "" {
+			return fmt.Errorf("runtime semantic proof obligation prospective target all-of declaration requires target grounding and a complete selector")
+		}
+		if err := ValidateRuntimeProspectiveTargetAllOfConstraintRefs(o.DeclarationProspectiveTargetAllOfConstraintRefs); err != nil {
+			return err
+		}
 	}
 	if o.OwnerFactAcquisition != nil {
 		if err := o.OwnerFactAcquisition.Validate(); err != nil {
@@ -310,6 +321,7 @@ func sameRuntimeSemanticProofObligations(left, right []RuntimeSemanticProofOblig
 			l.DeclarationTargetSelectorOwnerRef != r.DeclarationTargetSelectorOwnerRef ||
 			l.DeclarationTargetSelectorSubjectRef != r.DeclarationTargetSelectorSubjectRef ||
 			!sameStrings(l.DeclarationTargetSelectorCandidateRefs, r.DeclarationTargetSelectorCandidateRefs) ||
+			!SameRuntimeProspectiveTargetAllOfConstraintRefs(l.DeclarationProspectiveTargetAllOfConstraintRefs, r.DeclarationProspectiveTargetAllOfConstraintRefs) ||
 			l.RequireTargetGrounding != r.RequireTargetGrounding ||
 			l.RequireDirectEvidence != r.RequireDirectEvidence ||
 			l.RequireClaimEvidence != r.RequireClaimEvidence ||
@@ -367,23 +379,24 @@ func runtimeSemanticProofObligationDefinitionSource(o RuntimeSemanticProofObliga
 			}
 			return o.ValidationFailureRepair.Normalized().FailedFocusID
 		}(),
-		CoverageWorkItemIDs:               []common.CoverageWorkItemID{o.CoverageWorkItemID},
-		RequiredEvidenceKinds:             append([]string(nil), o.RequiredEvidenceKinds...),
-		EvidenceRole:                      o.DeclarationEvidenceRole,
-		TargetRole:                        o.DeclarationTargetRole,
-		TargetDiscoverySources:            append([]string(nil), o.DeclarationTargetDiscoverySources...),
-		TargetSelectorRef:                 o.DeclarationTargetSelectorRef,
-		TargetSelectorOwnerRef:            o.DeclarationTargetSelectorOwnerRef,
-		TargetSelectorSubjectRef:          o.DeclarationTargetSelectorSubjectRef,
-		TargetSelectorCandidateRefs:       append([]string(nil), o.DeclarationTargetSelectorCandidateRefs...),
-		RequireTargetGrounding:            o.RequireTargetGrounding,
-		RequireDirectEvidence:             o.RequireDirectEvidence,
-		RequireClaimEvidence:              o.RequireClaimEvidence,
-		RequireExecutableBehaviorEvidence: o.RequireExecutableBehaviorEvidence,
-		RequireCoverageTargets:            o.RequireCoverageTargets,
-		RequireAssessment:                 o.RequireAssessment,
-		RequiredOwnerFacts:                append([]RuntimeOwnerFactRequirement(nil), o.RequiredOwnerFacts...),
-		OwnerFactConvergences:             CloneRuntimeOwnerFactConvergences(o.OwnerFactConvergences),
+		CoverageWorkItemIDs:                  []common.CoverageWorkItemID{o.CoverageWorkItemID},
+		RequiredEvidenceKinds:                append([]string(nil), o.RequiredEvidenceKinds...),
+		EvidenceRole:                         o.DeclarationEvidenceRole,
+		TargetRole:                           o.DeclarationTargetRole,
+		TargetDiscoverySources:               append([]string(nil), o.DeclarationTargetDiscoverySources...),
+		TargetSelectorRef:                    o.DeclarationTargetSelectorRef,
+		TargetSelectorOwnerRef:               o.DeclarationTargetSelectorOwnerRef,
+		TargetSelectorSubjectRef:             o.DeclarationTargetSelectorSubjectRef,
+		TargetSelectorCandidateRefs:          append([]string(nil), o.DeclarationTargetSelectorCandidateRefs...),
+		ProspectiveTargetAllOfConstraintRefs: append([]string(nil), o.DeclarationProspectiveTargetAllOfConstraintRefs...),
+		RequireTargetGrounding:               o.RequireTargetGrounding,
+		RequireDirectEvidence:                o.RequireDirectEvidence,
+		RequireClaimEvidence:                 o.RequireClaimEvidence,
+		RequireExecutableBehaviorEvidence:    o.RequireExecutableBehaviorEvidence,
+		RequireCoverageTargets:               o.RequireCoverageTargets,
+		RequireAssessment:                    o.RequireAssessment,
+		RequiredOwnerFacts:                   append([]RuntimeOwnerFactRequirement(nil), o.RequiredOwnerFacts...),
+		OwnerFactConvergences:                CloneRuntimeOwnerFactConvergences(o.OwnerFactConvergences),
 		ValidationFailureRepairConvergence: func() *RuntimeValidationFailureRepairConvergence {
 			if o.ValidationFailureRepair == nil {
 				return nil
@@ -425,6 +438,7 @@ func writeRuntimeSemanticProofObligationsHash(h hashStringWriter, values []Runti
 		writeHashString(h, value.DeclarationTargetSelectorOwnerRef)
 		writeHashString(h, value.DeclarationTargetSelectorSubjectRef)
 		writeHashStrings(h, value.DeclarationTargetSelectorCandidateRefs)
+		writeHashStrings(h, value.DeclarationProspectiveTargetAllOfConstraintRefs)
 		writeHashString(h, strconv.FormatBool(value.RequireTargetGrounding))
 		writeHashString(h, strconv.FormatBool(value.RequireDirectEvidence))
 		writeHashString(h, strconv.FormatBool(value.RequireClaimEvidence))
@@ -511,25 +525,26 @@ func compileRuntimeSemanticProofObligations(sourceFocuses []RuntimeDefinitionFoc
 		}
 		source = source.Normalized()
 		obligation := RuntimeSemanticProofObligation{
-			CoverageWorkItemID:                     item.ID,
-			RequiredEvidenceKinds:                  append([]string(nil), source.RequiredEvidenceKinds...),
-			DeclarationEvidenceRole:                source.EvidenceRole,
-			DeclarationTargetRole:                  source.TargetRole,
-			DeclarationTargetDiscoverySources:      append([]string(nil), source.TargetDiscoverySources...),
-			DeclarationTargetSelectorRef:           source.TargetSelectorRef,
-			DeclarationTargetSelectorOwnerRef:      source.TargetSelectorOwnerRef,
-			DeclarationTargetSelectorSubjectRef:    source.TargetSelectorSubjectRef,
-			DeclarationTargetSelectorCandidateRefs: append([]string(nil), source.TargetSelectorCandidateRefs...),
-			RequireTargetGrounding:                 source.RequireTargetGrounding,
-			RequireDirectEvidence:                  source.RequireDirectEvidence,
-			RequireClaimEvidence:                   source.RequireClaimEvidence,
-			RequireExecutableBehaviorEvidence:      source.RequireExecutableBehaviorEvidence,
-			RequireCoverageTargets:                 source.RequireCoverageTargets,
-			RequireAssessment:                      source.RequireAssessment,
-			RequiredOwnerFacts:                     append([]RuntimeOwnerFactRequirement(nil), source.RequiredOwnerFacts...),
-			OwnerFactConvergences:                  CloneRuntimeOwnerFactConvergences(source.OwnerFactConvergences),
-			MetricConstraints:                      append([]string(nil), source.MetricConstraints...),
-			ArtifactRefs:                           append([]string(nil), source.ArtifactRefs...),
+			CoverageWorkItemID:                              item.ID,
+			RequiredEvidenceKinds:                           append([]string(nil), source.RequiredEvidenceKinds...),
+			DeclarationEvidenceRole:                         source.EvidenceRole,
+			DeclarationTargetRole:                           source.TargetRole,
+			DeclarationTargetDiscoverySources:               append([]string(nil), source.TargetDiscoverySources...),
+			DeclarationTargetSelectorRef:                    source.TargetSelectorRef,
+			DeclarationTargetSelectorOwnerRef:               source.TargetSelectorOwnerRef,
+			DeclarationTargetSelectorSubjectRef:             source.TargetSelectorSubjectRef,
+			DeclarationTargetSelectorCandidateRefs:          append([]string(nil), source.TargetSelectorCandidateRefs...),
+			DeclarationProspectiveTargetAllOfConstraintRefs: append([]string(nil), source.ProspectiveTargetAllOfConstraintRefs...),
+			RequireTargetGrounding:                          source.RequireTargetGrounding,
+			RequireDirectEvidence:                           source.RequireDirectEvidence,
+			RequireClaimEvidence:                            source.RequireClaimEvidence,
+			RequireExecutableBehaviorEvidence:               source.RequireExecutableBehaviorEvidence,
+			RequireCoverageTargets:                          source.RequireCoverageTargets,
+			RequireAssessment:                               source.RequireAssessment,
+			RequiredOwnerFacts:                              append([]RuntimeOwnerFactRequirement(nil), source.RequiredOwnerFacts...),
+			OwnerFactConvergences:                           CloneRuntimeOwnerFactConvergences(source.OwnerFactConvergences),
+			MetricConstraints:                               append([]string(nil), source.MetricConstraints...),
+			ArtifactRefs:                                    append([]string(nil), source.ArtifactRefs...),
 		}
 		if len(RuntimeMissingOwnerFactRequirements(source.RequiredOwnerFacts, catalogs)) != 0 {
 			convergence, required := ResolveRuntimeOwnerFactAcquisition(source.RequiredOwnerFacts, source.OwnerFactConvergences, catalogs)
@@ -558,6 +573,10 @@ func compileRuntimeSemanticProofObligations(sourceFocuses []RuntimeDefinitionFoc
 			}
 			if convergence.AcquisitionTargetPolicy != RuntimeOperationTargetPolicyProspectiveOwnerTarget {
 				constraints = nil
+			}
+			if convergence.AcquisitionTargetPolicy == RuntimeOperationTargetPolicyProspectiveOwnerTarget && len(source.ProspectiveTargetAllOfConstraintRefs) != 0 &&
+				!SameRuntimeProspectiveTargetAllOfConstraintRefs(constraints, source.ProspectiveTargetAllOfConstraintRefs) {
+				return nil, fmt.Errorf("runtime semantic proof obligation for coverage %q acquisition constraints do not match the Definition all-of declaration", item.ID)
 			}
 			var prospectiveConstraint *RuntimeProspectiveTargetSatisfactionConstraint
 			if convergence.AcquisitionTargetPolicy == RuntimeOperationTargetPolicyProspectiveOwnerTarget {

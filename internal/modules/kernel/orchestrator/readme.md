@@ -4,7 +4,7 @@ Status: active
 
 Type: kernel-module-implementation-contract
 
-Last Verified: 2026-08-29
+Last Verified: 2026-08-30
 
 ## 功能范围与边界
 
@@ -216,9 +216,13 @@ deployed run ID 只属于 archive regression evidence，不定义当前候选、
   catalog snapshot；它进入 manifest/hash/freshness/CAS/seal，但不进入 LLM C3、allowed operation/surface、schema enum、
   correction values 或 provider choice。required owner catalog 还必须发布唯一 provider-safe typed
   `ProspectiveTargetSatisfactionConstraint`，只允许 `all_of`；同一值封存到 acquisition/manifest 并只在 C3 投影，dependency
-  recipe identity/command 不进入 provider。Definition 只封存 declaration selector/candidate refs 与 acquisition closure，
+  recipe identity/command 不进入 provider。Definition 只封存 declaration selector/candidate refs、完整 mandatory
+  `ProspectiveTargetAllOfConstraintRefs` 与 acquisition closure，
   obligation/manifest 只追加 owner/kind/variant/policy/operation-selector/current constraints 与 exact contract ref，两者都不封存
-  prospective target set。SM-3 只能提交一份 bounded semantic proposal，其 `ProspectiveTargetRefs` 必须是 1～8 个唯一
+  prospective target set。obligation/C3 将该静态集合命名为
+  `DeclarationProspectiveTargetAllOfConstraintRefs`；proposal 的 `ProspectiveConstraintRefs` 必须 exact-equal，subset/superset
+  在 owner probe 前拒绝。该约束引用集合与 required-owner 的动态 `ProspectiveTargetSatisfactionConstraint` 各自封存，均为
+  conjunctive，但不得互相替代。SM-3 只能提交一份 bounded semantic proposal，其 `ProspectiveTargetRefs` 必须是 1～8 个唯一
   canonical exact target；集合中每项都必须在 declaration selector/candidate refs 与 current operation selector/owner
   constraints 的交集内。required-owner constraint 由 mandatory `all_of` clauses 组成：每个 clause 至少被一个 target
   完整满足，每个 target 也必须对至少一个 clause 有贡献；不存在 `one_of`/`any_of` 关系。current semantic
@@ -461,7 +465,7 @@ deployed run ID 只属于 archive regression evidence，不定义当前候选、
 - Activation 必须封存 Definition seed；fresh restart 缺 workspace-specific exact proof 时进入 persisted
   `semantic_contract_required`，不得由 application 终止或要求普通用户补 `contextHints/evidencePolicies` JSON。
 - activation declaration 与 generation authority 使用不同类型：`RuntimeDefinitionFocus` 只能携带 CWI、slice、evidence/
-  assessment、declarative selector/owner-fact/metric/artifact obligation，以及可选的单一 Profile
+  assessment、declarative selector/mandatory prospective constraint refs/owner-fact/metric/artifact obligation，以及可选的单一 Profile
   `ValidationFailureRepairConvergence`；`RuntimeFocusSeedsFromDefinitionFocuses` 生成的初始 `CoverageFocus` cursor 不携带
   selector closure、repair convergence 或任何 resolved target/operation/recipe/check/binding。只有 SM-2 semantic
   seal 可以写 generation-specific `CoverageFocus`；restart 不得从旧 focus queue 重建 Definition declaration。
@@ -492,9 +496,10 @@ deployed run ID 只属于 archive regression evidence，不定义当前候选、
 - File/Shell/Git/MCP owner 只能返回 factual observation：File 不从 Goal/DoD 猜 target，Shell 没有 CWI-specific checks
   时返回 `unverifiable`，Git repository revision 不等于 semantic proof，MCP surface readiness 没有 behavior probe 时
   返回 `unverifiable`。coverage credit 仍只由 SM-2 从 matching sealed receipt 派生。
-- 空 target scope 只是一条“当前无 existing target”的 owner observation，不能授权候选任意创建路径。prospective
+- 空 target scope 只是一条“当前无 existing target”的 owner observation，不能授权候选任意创建路径。没有 bounded exact candidate path 的开放 scope prospective
   target set 必须由一份 SM-3 document 作为 exact proposal 提出，同时匹配完整 declaration selector
-  ref/owner/subject/candidate refs 和 File owner catalog 的 operation selector/constraint/variant；非空 candidate refs 对集合中
+  ref/owner/subject/candidate refs、exact mandatory `ProspectiveTargetAllOfConstraintRefs` 和 File owner catalog 的
+  operation selector/constraint/variant；非空 candidate refs 对集合中
   每项要求 exact member match。File/Shell fact 只验证该 proposal 与 resulting manifest，SM-2 sealed binding 才使整个集合
   成为 authority。operation candidate 只引用该 binding，并必须完整满足每个 target 的 exact-singleton required
   operation；dispatch 只从 binding 派生 target。
@@ -701,9 +706,10 @@ deployed run ID 只属于 archive regression evidence，不定义当前候选、
   handoff record 不是 SM-1 state，Orchestrator 不得“投影”或代写 Run lifecycle。
 - immutable DefinitionFocus 要求 target grounding 时，semantic provider 前必须先取得 focus-scoped File-owner
   TargetSelection 与 exact workspace-tree freshness。只有 selection、prerequisite、observation 和 current Definition
-  selector/owner/subject/candidate declaration 全部匹配，且 disposition 为 absent/ambiguous/unsupported，或 empty-scope 且
-  Definition 无 bounded selector candidates，才以零 LLM call 交付 `target_grounding_unresolved`；缺少 owner fact 的
-  binding-free view 仍为 transient，selected 或带 bounded Definition candidates 的 empty scope 继续 prospective semantic
+  selector/owner/subject/candidate/mandatory constraint declaration 全部匹配，且 disposition 为
+  absent/ambiguous/unsupported，或 empty-scope 且 Definition 同时无 bounded selector candidates 和 owner-accepted
+  `ProspectiveTargetAllOfConstraintRefs`，才以零 LLM call 交付 `target_grounding_unresolved`；缺少 owner fact 的
+  binding-free view 仍为 transient，selected 或带 bounded Definition candidates/exact mandatory set 的 empty scope 继续 prospective semantic
   planning。
 - semantic owner catalog 退休后若旧 no-effect binding 仍为 current binding，SM-4 必须先投递 typed
   `CWIBindingRetired` internal fact，由 SM-2 reducer 唯一退休 exact lineage 并 reopen CWI。该事件前旧 binding 不可执行，

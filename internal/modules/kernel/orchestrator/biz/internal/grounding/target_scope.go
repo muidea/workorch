@@ -77,6 +77,7 @@ func HasOwnerGroundedCreationScope(facts runtimecontract.RuntimeFacts) bool {
 		value.TargetRole == focus.TargetRole && value.SelectorRef == focus.TargetSelectorRef &&
 		value.SelectorOwnerRef == focus.TargetSelectorOwnerRef && value.SelectorSubjectRef == focus.TargetSelectorSubjectRef &&
 		runtimecontract.SameRuntimeTargetSelectorCandidateRefs(value.SelectorCandidateRefs, focus.TargetSelectorCandidateRefs) &&
+		runtimecontract.SameRuntimeProspectiveTargetAllOfConstraintRefs(value.ProspectiveTargetAllOfConstraintRefs, focus.ProspectiveTargetAllOfConstraintRefs) &&
 		value.ProspectiveTargetRef != "" && len(focus.ProspectiveTargetRefs) == 1 && value.ProspectiveTargetRef == focus.ProspectiveTargetRefs[0]
 }
 

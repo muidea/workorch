@@ -182,6 +182,9 @@ type CoverageEvidenceBinding struct {
 	// It is sealed with the binding so reconciliation can ask the owner to
 	// verify the same target surface after a process restart.
 	TargetSelectorCandidateRefs []string
+	// ProspectiveTargetAllOfConstraintRefs is the exact mandatory Definition
+	// declaration accepted for this semantic generation.
+	ProspectiveTargetAllOfConstraintRefs []string
 	// ProspectiveTargetRefs is the complete bounded target set accepted by owner
 	// facts and sealed by SM-2. It is generation authority and is never a
 	// pre-seal Definition/Profile declaration.
@@ -202,6 +205,7 @@ func (b CoverageEvidenceBinding) Normalized() CoverageEvidenceBinding {
 	b.TargetSelectorOwnerRef = strings.TrimSpace(b.TargetSelectorOwnerRef)
 	b.TargetSelectorSubjectRef = strings.TrimSpace(b.TargetSelectorSubjectRef)
 	b.TargetSelectorCandidateRefs = normalizeStrings(b.TargetSelectorCandidateRefs)
+	b.ProspectiveTargetAllOfConstraintRefs = NormalizeRuntimeProspectiveTargetAllOfConstraintRefs(b.ProspectiveTargetAllOfConstraintRefs)
 	b.ProspectiveTargetRefs = normalizeStrings(b.ProspectiveTargetRefs)
 	b.DeclarationRef = strings.TrimSpace(b.DeclarationRef)
 	b.PrerequisiteRefs = normalizeStrings(b.PrerequisiteRefs)
@@ -217,6 +221,7 @@ func (b CoverageEvidenceBinding) Clone() CoverageEvidenceBinding {
 	}
 	b.TargetRefs = append([]string(nil), b.TargetRefs...)
 	b.TargetSelectorCandidateRefs = append([]string(nil), b.TargetSelectorCandidateRefs...)
+	b.ProspectiveTargetAllOfConstraintRefs = append([]string(nil), b.ProspectiveTargetAllOfConstraintRefs...)
 	b.ProspectiveTargetRefs = append([]string(nil), b.ProspectiveTargetRefs...)
 	b.PrerequisiteRefs = append([]string(nil), b.PrerequisiteRefs...)
 	return b
@@ -243,6 +248,14 @@ func (b CoverageEvidenceBinding) Validate() error {
 	}
 	if len(b.TargetSelectorCandidateRefs) != 0 && b.TargetSelectorRef == "" {
 		return fmt.Errorf("coverage evidence binding %q selector candidates require a selector", b.ID)
+	}
+	if len(b.ProspectiveTargetAllOfConstraintRefs) != 0 {
+		if b.TargetSelectorRef == "" || b.TargetSelectorOwnerRef == "" || b.TargetSelectorSubjectRef == "" {
+			return fmt.Errorf("coverage evidence binding %q prospective target all-of declaration requires a complete selector", b.ID)
+		}
+		if err := ValidateRuntimeProspectiveTargetAllOfConstraintRefs(b.ProspectiveTargetAllOfConstraintRefs); err != nil {
+			return fmt.Errorf("coverage evidence binding %q: %w", b.ID, err)
+		}
 	}
 	if len(b.ProspectiveTargetRefs) != 0 {
 		if len(b.TargetRefs) != 0 || b.TargetSelectorRef == "" || b.TargetSelectorOwnerRef == "" || b.TargetSelectorSubjectRef == "" {
@@ -291,6 +304,7 @@ func StableCoverageEvidenceBindingHash(binding CoverageEvidenceBinding) string {
 	writeHashString(h, binding.TargetSelectorOwnerRef)
 	writeHashString(h, binding.TargetSelectorSubjectRef)
 	writeHashStrings(h, binding.TargetSelectorCandidateRefs)
+	writeHashStrings(h, binding.ProspectiveTargetAllOfConstraintRefs)
 	writeHashStrings(h, binding.ProspectiveTargetRefs)
 	writeHashString(h, binding.DeclarationRef)
 	writeHashStrings(h, binding.PrerequisiteRefs)
@@ -403,6 +417,7 @@ func ValidateCoverageEvidenceBindingsForFocus(focus CoverageFocus, definitionRev
 			binding.TargetSelectorOwnerRef != focus.TargetSelectorOwnerRef ||
 			binding.TargetSelectorSubjectRef != focus.TargetSelectorSubjectRef ||
 			!sameStrings(binding.TargetSelectorCandidateRefs, focus.TargetSelectorCandidateRefs) ||
+			!SameRuntimeProspectiveTargetAllOfConstraintRefs(binding.ProspectiveTargetAllOfConstraintRefs, focus.ProspectiveTargetAllOfConstraintRefs) ||
 			!sameStrings(binding.ProspectiveTargetRefs, focus.ProspectiveTargetRefs) {
 			return fmt.Errorf("coverage binding %q target surface does not match focus authority", binding.ID)
 		}

@@ -19,9 +19,10 @@ import (
 // File never derives a path: it only verifies the binding-sealed prospective path
 // and operation admissibility validates every operation target.
 type runtimeTargetSelectionBinding struct {
-	ownerRef      string
-	subjectRef    string
-	candidateRefs []string
+	ownerRef                             string
+	subjectRef                           string
+	candidateRefs                        []string
+	prospectiveTargetAllOfConstraintRefs []string
 }
 
 func (a *RuntimeAdapter) AcquireRuntimeTargetSelection(workspaceDirectory, prerequisiteID, targetRole, selectorRef, prospectiveTargetRef string, maxItems int, bindings ...runtimeTargetSelectionBinding) (runtimemodel.RuntimeTargetSelection, error) {
@@ -32,6 +33,10 @@ func (a *RuntimeAdapter) AcquireRuntimeTargetSelection(workspaceDirectory, prere
 		return runtimemodel.RuntimeTargetSelection{}, err
 	}
 	if !runtimeFileTargetSelectorSupported(request.selectorRef) {
+		return unsupportedRuntimeTargetSelection(request)
+	}
+	if len(request.binding.prospectiveTargetAllOfConstraintRefs) != 0 &&
+		!runtimemodel.SameRuntimeProspectiveTargetAllOfConstraintRefs(request.binding.prospectiveTargetAllOfConstraintRefs, runtimeFileProspectiveTargetAllOfConstraintRefs()) {
 		return unsupportedRuntimeTargetSelection(request)
 	}
 	observation, err := a.acquireWorkspaceManifestObservation(request.workspaceDirectory)
@@ -99,6 +104,13 @@ func normalizeRuntimeTargetSelectionRequest(workspaceDirectory, prerequisiteID, 
 		request.binding.ownerRef = strings.TrimSpace(bindings[0].ownerRef)
 		request.binding.subjectRef = strings.TrimSpace(bindings[0].subjectRef)
 		request.binding.candidateRefs = normalizeRuntimeFileTargetRefs(bindings[0].candidateRefs)
+		request.binding.prospectiveTargetAllOfConstraintRefs = runtimemodel.NormalizeRuntimeProspectiveTargetAllOfConstraintRefs(bindings[0].prospectiveTargetAllOfConstraintRefs)
+		if err := runtimemodel.ValidateRuntimeProspectiveTargetAllOfConstraintRefs(request.binding.prospectiveTargetAllOfConstraintRefs); err != nil {
+			return runtimeTargetSelectionRequest{}, common.ErrInvalidArgument
+		}
+		if len(request.binding.prospectiveTargetAllOfConstraintRefs) != 0 && (request.binding.ownerRef == "" || request.binding.subjectRef == "") {
+			return runtimeTargetSelectionRequest{}, common.ErrInvalidArgument
+		}
 	}
 	return request, nil
 }
@@ -120,7 +132,7 @@ func unsupportedRuntimeTargetSelection(request runtimeTargetSelectionRequest) (r
 		PrerequisiteID: request.prerequisiteID, OwnerModuleID: runtimemodel.RuntimeModuleFile,
 		TargetRole: request.targetRole, SelectorRef: request.selectorRef,
 		SelectorOwnerRef: request.binding.ownerRef, SelectorSubjectRef: request.binding.subjectRef,
-		SelectorCandidateRefs: request.binding.candidateRefs, ProspectiveTargetRef: request.prospectiveTargetRef,
+		SelectorCandidateRefs: request.binding.candidateRefs, ProspectiveTargetAllOfConstraintRefs: request.binding.prospectiveTargetAllOfConstraintRefs, ProspectiveTargetRef: request.prospectiveTargetRef,
 		Disposition:      runtimemodel.RuntimeTargetSelectionUnsupported,
 		ObservedRevision: "unsupported-selector:" + request.selectorRef,
 	}
@@ -228,7 +240,7 @@ func runtimeTargetSelectionForManifest(request runtimeTargetSelectionRequest, ma
 		PrerequisiteID: request.prerequisiteID, OwnerModuleID: runtimemodel.RuntimeModuleFile,
 		TargetRole: request.targetRole, SelectorRef: request.selectorRef,
 		SelectorOwnerRef: request.binding.ownerRef, SelectorSubjectRef: request.binding.subjectRef,
-		SelectorCandidateRefs: request.binding.candidateRefs, ProspectiveTargetRef: request.prospectiveTargetRef,
+		SelectorCandidateRefs: request.binding.candidateRefs, ProspectiveTargetAllOfConstraintRefs: request.binding.prospectiveTargetAllOfConstraintRefs, ProspectiveTargetRef: request.prospectiveTargetRef,
 		ObservedRevision: manifest.Revision,
 	}
 }

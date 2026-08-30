@@ -4,7 +4,7 @@ Status: active
 
 Type: capability-block-contract
 
-Last Verified: 2026-08-28
+Last Verified: 2026-08-30
 
 ## 功能范围与边界
 
@@ -34,6 +34,10 @@ Last Verified: 2026-08-28
   `workspace-relative-new-file-target`）描述具体 capability admission。两者由 File owner 各自解释但不是 alias：File
   只对请求中的 exact selector 返回 factual selection/feasibility/receipt，不把声明 selector 改写成 operation selector，
   也不决定 CWI、重试、reopen 或 Runtime 状态。
+- target-grounded Definition 可以随 selector command 携带完整
+  `ProspectiveTargetAllOfConstraintRefs`。File 当前 prospective creation 只接受 exact mandatory set
+  `workspace-relative-path + new-target-requires-owner-selector`，并在 `TargetSelection` snapshot 原样回显；缺项、扩项或
+  selector owner/subject 缺失只形成 `unsupported` owner fact，File 不替 Profile 修正约束，也不触发 semantic transition。
 - prospective target 的创建前 admission 与创建后 reconciliation 是两条 File-private 只读语义。普通
   prospective proposal（包括 Profile 触发的 `validation_failure_repair`）仍校验完整 exact target set；owner-fact acquisition 也校验同一 SM-3 semantic proposal 中
   1～8 个唯一 canonical `ProspectiveTargetRefs` 的完整 all-of target set。File 使用同一 complete manifest revision
@@ -45,6 +49,10 @@ Last Verified: 2026-08-28
   非规范或越出 workspace/manifest 的路径返回 `unverifiable`。`file/workspace_deliverable` 表达完整 bounded
   manifest scope，因此多文件返回 `satisfied + 全部 TargetRefs`；只有 unique/profile selector 的多匹配才是
   ambiguous。该观察不返回 retain/reopen/CWI 状态。File 只验证 proposal 的整个 target set 并返回 factual feasible refs；
+  sealed prospective reconciliation 若携带静态 creation declaration，则还必须携带与 File owner exact supported set 相同的
+  `ProspectiveTargetAllOfConstraintRefs`；漂移返回
+  `prospective_target_all_of_constraints_mismatch`，不能用已存在的 target 掩盖约束缺口。由 bounded candidate selector 在
+  pre-semantic 阶段精确选定的 target 不伪造这份开放 scope declaration，仍以其 exact candidate/selection lineage 对账。
   它不解释 validation diagnostic、repair purpose、fresh-validation lineage 或 terminal credit。
   File-feasible 且随后由 SM-2 binding 封存的 absent prospective refs 在创建前不是 snapshot target；Orchestrator 只能对
   当前 existing refs 请求 `target_snapshot`。File 不为 absent path 合成空 snapshot，也不通过 snapshot failure 触发
@@ -57,9 +65,10 @@ Last Verified: 2026-08-28
   value 交给 required-fact owner 的 concrete typed pure query；其他组件不得重建 File manifest 后果。validation-failure
   repair 使用 generic semantic feasibility fact，不得生成或借用该 owner-fact-only delta。
 - 对 profile 显式绑定的空工作区，File 可以返回不含具体路径的 `scope` selection；它只授权
-  LLM 在同一 sealed all-of constraint 下提出必需的 1～8 个 workspace-relative File target，并由同一 owner
+  LLM 在同一 sealed `ProspectiveTargetAllOfConstraintRefs` 下提出必需的 1～8 个 workspace-relative File target，并由同一 owner
   feasibility/admissibility gate 验证整个集合。File 不从 Goal、DoD、目录名或文件后缀推断路径；未绑定 profile 的
-  空工作区仍返回 `absent`。
+  空工作区仍返回 `absent`。仅 selector owner/subject 而没有 bounded candidates/mandatory constraint set 的 scope 不会被
+  Orchestrator 当作 prospective creation authority。
 - Runtime state-change/validation operation 以 `RuntimeOperationReceipt.Outcome` 为唯一结果，并携带本 owner
   stable factual category、完整安全 original diagnostic 与 evidence；不返回跨组件 Status 双权威或 map。
 - request 必须携带 workspace/run/authority/dispatch/operation identity 与 File-owned `SealedRuntimeOperation`；该值包含从已持久化 dispatch 复制的 typed operation 及其全量 payload hash。File 先核对精确 Orchestrator source、hash、operation ID、target/CWI scope，再在 owner 内解包 path/ref 和有界输入，不接收一份可与 seal 漂移的独立执行 `Data`；
