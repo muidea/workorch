@@ -29,17 +29,13 @@ var _ common.Provider = (*RepositoryInitiator)(nil)
 
 type repositorySet struct {
 	Souls                 repository.SoulRepository
-	WorkspaceTemplates    repository.WorkspaceTemplateRepository
+	WorkspaceOwner        repository.WorkspaceOwnerRepositories
 	MemoryOwner           repository.MemoryOwnerRepositories
 	AutoGovernanceTraces  repository.AutoGovernanceTraceRepository
 	Skills                repository.SkillRepository
 	MCPRegistry           repository.MCPRegistryRepository
 	ResultOwner           repository.ResultOwnerRepositories
 	EventStreamOwner      repository.EventStreamOwnerRepositories
-	Workspaces            repository.WorkspaceRepository
-	WorkspaceCleaner      repository.WorkspaceDeletionMaterialCleaner
-	Goals                 repository.GoalRepository
-	DoDs                  repository.DoDRepository
 	Runs                  repository.RunRepository
 	Steps                 repository.StepRepository
 	RunOwner              repository.RunOwnerRepositories
@@ -101,13 +97,7 @@ func (r *RepositoryInitiator) RepositoryProvider() common.RepositoryProvider {
 }
 
 func (r repositorySet) Workspace() common.WorkspaceRepositories {
-	return common.WorkspaceRepositories{
-		Workspaces:              r.Workspaces,
-		DeletionMaterialCleaner: r.WorkspaceCleaner,
-		Goals:                   r.Goals,
-		DoDs:                    r.DoDs,
-		Templates:               r.WorkspaceTemplates,
-	}
+	return common.WorkspaceRepositories{Owner: r.WorkspaceOwner}
 }
 
 func (r repositorySet) Decision() common.DecisionRepositories {
@@ -163,7 +153,7 @@ func buildRepositories(backend string, dataRoot string) (repositorySet, error) {
 	backend = workorchrepo.NormalizeRepositoryBackend(backend)
 	switch backend {
 	case "memory":
-		workspaceRepository := memory.NewWorkspaceRepository()
+		workspaceOwner := memory.NewWorkspaceOwnerRepositorySet()
 		memoryOwner := memory.NewMemoryOwnerRepositorySet()
 		orchestratorOwner := memory.NewOrchestratorOwnerRepositorySet()
 		resultOwner := memory.NewResultOwnerRepositorySet()
@@ -173,17 +163,13 @@ func buildRepositories(backend string, dataRoot string) (repositorySet, error) {
 		runOwner := memory.NewRunOwnerRepositorySet()
 		return repositorySet{
 			Souls:                 memory.NewSoulRepository(),
-			WorkspaceTemplates:    memory.NewWorkspaceTemplateRepository(),
+			WorkspaceOwner:        workspaceOwner.OwnerRepositories(),
 			MemoryOwner:           memoryOwner.OwnerRepositories(),
 			AutoGovernanceTraces:  memory.NewAutoGovernanceTraceRepository(),
 			Skills:                memory.NewSkillRepository(),
 			MCPRegistry:           memory.NewMCPRegistryRepository(),
 			ResultOwner:           resultOwner.OwnerRepositories(),
 			EventStreamOwner:      eventStreamOwner.OwnerRepositories(),
-			Workspaces:            workspaceRepository,
-			WorkspaceCleaner:      workspaceRepository,
-			Goals:                 memory.NewGoalRepository(),
-			DoDs:                  memory.NewDoDRepository(),
 			Runs:                  runOwner.Runs(),
 			Steps:                 runOwner.Steps(),
 			RunOwner:              runOwner,
@@ -205,17 +191,13 @@ func buildRepositories(backend string, dataRoot string) (repositorySet, error) {
 		workspaceScopedRepos := workorchrepo.NewWorkspaceScopedFileRepositorySet(dataRoot)
 		return repositorySet{
 			Souls:                 fileRepo.NewSoulRepository(filepath.Join(dataRoot, "system", "souls")),
-			WorkspaceTemplates:    fileRepo.NewWorkspaceTemplateRepository(filepath.Join(dataRoot, "system", "workspace_templates.json")),
+			WorkspaceOwner:        workspaceScopedRepos.WorkspaceOwner,
 			MemoryOwner:           workspaceScopedRepos.MemoryOwner,
 			AutoGovernanceTraces:  fileRepo.NewAutoGovernanceTraceRepository(filepath.Join(dataRoot, "system", "auto_governance_trace.json")),
 			Skills:                fileRepo.NewSkillRepository(filepath.Join(dataRoot, "system", "skill.json")),
 			MCPRegistry:           fileRepo.NewMCPRegistryRepository(filepath.Join(dataRoot, "system", "mcp_registry.json")),
 			ResultOwner:           workspaceScopedRepos.ResultOwner,
 			EventStreamOwner:      workspaceScopedRepos.EventStreamOwner,
-			Workspaces:            workspaceScopedRepos.Workspaces,
-			WorkspaceCleaner:      workspaceScopedRepos.WorkspaceCleaner,
-			Goals:                 workspaceScopedRepos.Goals,
-			DoDs:                  workspaceScopedRepos.DoDs,
 			Runs:                  workspaceScopedRepos.Runs,
 			Steps:                 workspaceScopedRepos.Steps,
 			RunOwner:              workspaceScopedRepos.RunOwner,

@@ -151,13 +151,23 @@ func TestShellOwnerStateChangingReceiptReportsFileResourcesAndReplays(t *testing
 		t.Fatalf("first owner effect content=%q err=%v", string(content), err)
 	}
 
-	// The same sealed delivery must return the durable receipt instead of running
-	// a second Shell effect.
+	// Recreate the Shell owner and alter the target after the receipt commit.
+	// The same sealed delivery must return the durable receipt before any
+	// workspace inspection or second process execution.
+	owner.Teardown(ctx)
+	if err := os.WriteFile(filepath.Join(workspace, "generated.txt"), []byte("external"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	restarted := &Biz{Base: basebiz.New(modulecommon.ModuleID, hub, nil), runtimeAdapter: NewRuntimeAdapter()}
+	if err := restarted.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { restarted.Teardown(ctx) })
 	replayed := sendShellStateChangingReceiptCommand(t, ctx, hub, command)
 	if replayed.Receipt.ExecutionKey != response.Receipt.ExecutionKey || replayed.Receipt.AfterHash != response.Receipt.AfterHash {
 		t.Fatalf("replayed receipt = %+v, want persisted %+v", replayed.Receipt, response.Receipt)
 	}
-	if content, err := os.ReadFile(filepath.Join(workspace, "generated.txt")); err != nil || string(content) != "first" {
+	if content, err := os.ReadFile(filepath.Join(workspace, "generated.txt")); err != nil || string(content) != "external" {
 		t.Fatalf("duplicate receipt replay executed shell command: content=%q err=%v", string(content), err)
 	}
 }

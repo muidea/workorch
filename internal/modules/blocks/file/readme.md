@@ -56,6 +56,6 @@ operation identity 与 execution scope，handler 不能从自由文本重建 ope
 | duplicate/idempotency/receipt loss | `TestFileOwnerStateChangingReceiptReplaysWithoutSecondWrite`、`TestRuntimeAdapterPatchApplyFileWriteConfirmsSealedReplayAfterReceiptLoss`、`TestFileOwnerPatchApplyReplaysSealedWriteAfterReceiptCommitFailure` | 覆盖 |
 | reconciliation / restart | [`biz/owner_reconciliation_test.go`](biz/owner_reconciliation_test.go) | fresh owner restart、changed/deleted target 覆盖 |
 | repair confirmation | [`biz/repair_surface_confirmation_test.go`](biz/repair_surface_confirmation_test.go) | current regular target normal/reject 覆盖 |
-| lifecycle / dependency fail-fast | [`module_test.go`](module_test.go)、`TestFileOwnerStartIsIdempotentAndTeardownClearsLifecycle` | 覆盖基本 lifecycle；尚无独立 post-Stop effect 断言 |
-| wrong DTO matrix | 多个 execute/read negative 已覆盖 | 尚未对 15 个 topic 逐项执行 wrong-command-type 表驱动验收 |
+| lifecycle / dependency fail-fast | [`module_test.go`](module_test.go)、`TestFileOwnerStartIsIdempotentAndTeardownClearsLifecycle`、`TestFileOwnerWrongDTOAndLifecycleMatrixCoversAllFifteenTopics` | 覆盖 15 topic 的重复 Start 单次投递与 Stop 后零 payload/effect |
+| wrong DTO matrix | `TestFileOwnerWrongDTOAndLifecycleMatrixCoversAllFifteenTopics` | 覆盖全部 15 topic 的 wrong concrete command，并校验每次恰有一个 owner subscription |
 | provider / external network | 不适用 | 不适用 |

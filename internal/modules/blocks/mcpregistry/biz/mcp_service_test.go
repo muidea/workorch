@@ -3,6 +3,7 @@ package mcp
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -267,9 +268,75 @@ func TestServiceCommitFailureLeavesNoPartialAggregate(t *testing.T) {
 	}
 }
 
+func TestServiceRetriesCASConflictAndStopsAtBound(t *testing.T) {
+	ctx := context.Background()
+	command := mcpevents.CreateServerCommand{
+		ServerID: "mcp-cas-retry", Name: "CAS retry", Transport: "stdio", Command: "mcp-cas-retry", Enabled: true,
+	}
+	t.Run("conflict then success", func(t *testing.T) {
+		repository := &conflictingRegistryRepository{snapshot: &mcpmodel.RegistrySnapshot{}, conflicts: 2, advanceOnConflict: true}
+		created, _, err := newService(repository).createServer(ctx, command)
+		if err != nil || created == nil || created.ID != command.ServerID {
+			t.Fatalf("create after conflicts = %+v err=%v", created, err)
+		}
+		if repository.commits != 3 || repository.loads != 3 || repository.snapshot.Revision != 3 || len(repository.snapshot.Servers) != 3 {
+			t.Fatalf("retry counts loads=%d commits=%d snapshot=%+v", repository.loads, repository.commits, repository.snapshot)
+		}
+		for _, serverID := range []common.MCPServerID{command.ServerID, "mcp-concurrent-1", "mcp-concurrent-2"} {
+			if findServer(repository.snapshot.Servers, serverID) == nil {
+				t.Fatalf("CAS rebase lost server %q: %+v", serverID, repository.snapshot.Servers)
+			}
+		}
+	})
+	t.Run("conflict exhaustion", func(t *testing.T) {
+		repository := &conflictingRegistryRepository{snapshot: &mcpmodel.RegistrySnapshot{}, conflicts: maxRegistryCASAttempts}
+		if _, _, err := newService(repository).createServer(ctx, command); !errors.Is(err, common.ErrConflict) {
+			t.Fatalf("create exhaustion err = %v, want conflict", err)
+		}
+		if repository.commits != maxRegistryCASAttempts || repository.loads != maxRegistryCASAttempts || len(repository.snapshot.Servers) != 0 {
+			t.Fatalf("exhaustion counts loads=%d commits=%d snapshot=%+v", repository.loads, repository.commits, repository.snapshot)
+		}
+	})
+}
+
 type failingRegistryRepository struct {
 	fail     bool
 	snapshot *mcpmodel.RegistrySnapshot
+}
+
+type conflictingRegistryRepository struct {
+	snapshot          *mcpmodel.RegistrySnapshot
+	conflicts         int
+	loads             int
+	commits           int
+	advanceOnConflict bool
+	concurrentWrites  int
+}
+
+func (r *conflictingRegistryRepository) Load(context.Context) (*mcpmodel.RegistrySnapshot, error) {
+	r.loads++
+	return mcpmodel.CloneRegistrySnapshot(r.snapshot), nil
+}
+
+func (r *conflictingRegistryRepository) Commit(_ context.Context, expected uint64, next *mcpmodel.RegistrySnapshot) error {
+	r.commits++
+	if r.conflicts > 0 {
+		r.conflicts--
+		if r.advanceOnConflict {
+			r.concurrentWrites++
+			r.snapshot.Revision++
+			id := common.MCPServerID(fmt.Sprintf("mcp-concurrent-%d", r.concurrentWrites))
+			r.snapshot.Servers = append(r.snapshot.Servers, &mcpmodel.Server{
+				ID: id, Name: string(id), Transport: "stdio", Command: string(id), Enabled: true,
+			})
+		}
+		return common.ErrConflict
+	}
+	if r.snapshot.Revision != expected {
+		return common.ErrConflict
+	}
+	r.snapshot = mcpmodel.CloneRegistrySnapshot(next)
+	return nil
 }
 
 func (r *failingRegistryRepository) Load(context.Context) (*mcpmodel.RegistrySnapshot, error) {

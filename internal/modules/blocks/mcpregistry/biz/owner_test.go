@@ -52,3 +52,39 @@ func TestMCPRegistryEnsureDefaultsRequiresExactSystemSource(t *testing.T) {
 		t.Fatalf("exact-source ensure did not seed registry: %+v err=%v", snapshot, err)
 	}
 }
+
+func TestMCPRegistryCommandSourceAuthorizationMatrix(t *testing.T) {
+	tests := []struct {
+		topic   string
+		allowed []string
+	}{
+		{mcpevents.TopicMCPCommandCreateServer, []string{applicationContextRegistrySource}},
+		{mcpevents.TopicMCPCommandGetServer, []string{applicationContextRegistrySource, applicationOwnerReadSource, mcpExecutionSource}},
+		{mcpevents.TopicMCPCommandListServers, []string{applicationContextRegistrySource}},
+		{mcpevents.TopicMCPCommandUpdateServer, []string{applicationContextRegistrySource}},
+		{mcpevents.TopicMCPCommandCreateCapability, []string{applicationContextRegistrySource}},
+		{mcpevents.TopicMCPCommandGetCapability, []string{applicationContextRegistrySource, applicationOwnerReadSource}},
+		{mcpevents.TopicMCPCommandListCapabilities, []string{applicationContextRegistrySource, applicationReadModelSource}},
+		{mcpevents.TopicMCPCommandUpdateCapability, []string{applicationContextRegistrySource}},
+		{mcpevents.TopicMCPCommandReadRegistrySnapshot, []string{mcpExecutionSource}},
+		{mcpevents.TopicMCPCommandReadSelectionSnapshot, []string{applicationOwnerReadSource}},
+		{mcpevents.TopicMCPCommandEnsureDefaults, []string{systemCommandSource}},
+	}
+	allSources := []string{
+		applicationContextRegistrySource, applicationOwnerReadSource, applicationReadModelSource,
+		mcpExecutionSource, systemCommandSource, "untrusted/module", " application/workorchd/context-registry ",
+	}
+	for _, testCase := range tests {
+		t.Run(testCase.topic, func(t *testing.T) {
+			allowed := make(map[string]bool, len(testCase.allowed))
+			for _, source := range testCase.allowed {
+				allowed[source] = true
+			}
+			for _, source := range allSources {
+				if got := mcpRegistryCommandSourceAllowed(testCase.topic, source); got != allowed[source] {
+					t.Errorf("source %q allowed=%t, want %t", source, got, allowed[source])
+				}
+			}
+		})
+	}
+}

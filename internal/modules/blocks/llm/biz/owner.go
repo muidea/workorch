@@ -30,6 +30,11 @@ import (
 const ModuleID = modulecommon.ModuleID
 const StepKindWorkspaceExecution = modulecommon.StepKindWorkspaceExecution
 
+const (
+	llmApplicationOwnerSource     = "application/workorchd"
+	llmSetupDraftAppserviceSource = "application/workorchd/appservice"
+)
+
 type Biz struct {
 	basebiz.Base
 	catalogService                    *CatalogService
@@ -866,6 +871,10 @@ func (m *Biz) handleCommand(ev magicevent.Event, result magicevent.Result) {
 	if result == nil {
 		return
 	}
+	if !llmCommandHasExactApplicationSource(ev) {
+		setLLMMagicError(result, fmt.Errorf("%w: LLM command requires its exact Application source", common.ErrInvalidArgument))
+		return
+	}
 	switch ev.ID() {
 	case llmevents.TopicLLMCommandGetActiveConfiguration:
 		if _, ok := ev.Data().(llmevents.GetActiveConfigurationCommand); !ok {
@@ -932,6 +941,21 @@ func (m *Biz) handleCommand(ev magicevent.Event, result magicevent.Result) {
 		return
 	}
 	setLLMMagicResult(result, execution.Result, err)
+}
+
+// llmCommandHasExactApplicationSource is the generic LLM command ingress
+// authorization gate. Runtime commands have their own exact Orchestrator
+// gate; these topics are owned by the Application setup/configuration paths.
+// The setup-draft generator is a distinct appservice producer and is allowed
+// only on its completion topic.
+func llmCommandHasExactApplicationSource(ev magicevent.Event) bool {
+	if ev == nil {
+		return false
+	}
+	if ev.ID() == llmevents.TopicLLMCommandCompleteProvider {
+		return ev.Source() == llmSetupDraftAppserviceSource
+	}
+	return ev.Source() == llmApplicationOwnerSource
 }
 
 func (m *Biz) validateInferenceSelection(ctx context.Context, selection runtimecontract.ProviderInferenceSelection, operation string) (runtimecontract.ProviderInferenceSelection, string, error) {

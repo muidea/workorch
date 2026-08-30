@@ -39,10 +39,10 @@ Last Verified: 2026-08-30
 
 | 验收面 | 自动化证据 | 覆盖维度 |
 | --- | --- | --- |
-| Module lifecycle/dependency | `TestSystemModuleConfigureRequiresEventHub`、`TestSystemModuleIdentityStartStopContract` | EventHub required、identity、Start/Stop；该 lifecycle 测试不执行成功后的重复 Start |
+| Module lifecycle/dependency | `TestSystemModuleConfigureRequiresEventHub`、`TestSystemModuleIdentityStartStopContract`、`TestSystemModuleStartConvergesAfterPartialFailureWithoutOverwritingUserChanges` | EventHub required、identity、Start/Stop 与成功后的重复 Start |
 | ordered concrete ensure | `TestSystemModuleStartEnsuresBuiltinDefaultsThroughEventHubConsumers`、`TestSystemStartFailsClosedForEveryEnsureContract` | 三 owner normal、missing/nil/wrong/false/error、fail-fast 顺序 |
-| partial failure and retry | `TestSystemModuleStartConvergesAfterPartialFailureWithoutOverwritingUserChanges` | 仅覆盖同一 System module 实例内失败后再次 `Start`；fresh process/file-backed restart 集成未在 System 组件测试覆盖 |
-| owner create-if-missing | `blocks/soul/biz/defaults_test.go`、`blocks/workspace/biz/defaults_test.go`、`blocks/mcpregistry/biz/defaults_test.go` | memory/file backend、重复 ensure、保留用户修改、补齐缺失资源 |
+| partial failure and retry | `TestSystemModuleStartConvergesAfterPartialFailureWithoutOverwritingUserChanges`、`TestSystemFreshProcessConvergesFileBackedPartialStartupWithoutOverwritingUserChanges` | 覆盖同一实例重试，以及 fresh Hub/System/owner 与 fresh file repository handles 的跨进程等价重建；均保持已有用户修改并补齐缺失 owner defaults |
+| owner create-if-missing | `../../blocks/soul/biz/defaults_test.go`、`../../blocks/workspace/biz/defaults_test.go`、`../../blocks/mcpregistry/biz/defaults_test.go` | memory/file backend、重复 ensure、保留用户修改、补齐缺失资源 |
 | owner boundary | `scripts/verify-boundary-contract.sh` | 无 repository/service、无 generic envelope、只发送三组 concrete contract |
 
 `duplicate/stale/effect/receipt` 对 System 自身不适用：它不持久化业务状态或执行外部 effect；对应幂等与 CAS 由三类资源

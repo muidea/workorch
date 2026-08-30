@@ -47,9 +47,9 @@ Prospective satisfaction 是 Shell-owner 的纯 factual query：它只校验一�
 | --- | --- | --- |
 | normal | command、managed validation、structured check、isolated workspace 与 concrete module EventHub execute tests | 已覆盖两类能力的主要正常路径 |
 | invalid + scope | dangerous command、timeout/output bound、symlink/scratch、masked exit、missing target、undeclared effect、failure-target bounds、`TestShellRuntimeIngressTopicMatrixEnforcesStrongOrchestratorCalls` | 已覆盖主要输入/process scope，并穷举七 topic 的 wrong source、wrong concrete payload 与 Post/nil Result 零查询/零 effect |
-| duplicate + idempotency | zero-work/state-changing receipt replay、prospective duplicate pure-value tests | 已覆盖同 owner 实例的 receipt 重放和纯 query 重复调用 |
+| duplicate + idempotency | zero-work receipt replay、`TestShellOwnerStateChangingReceiptReportsFileResourcesAndReplays`、prospective duplicate pure-value tests | 已覆盖同 owner 与 fresh owner 的 exact receipt 重放和纯 query 重复调用 |
 | stale + freshness | admissibility manifest prerequisite、target revision stale、prospective catalog stale tests | 已覆盖 owner/File fact freshness |
-| restart / owner 重建 | 无直接组件级自动化证据 | 未覆盖新 Shell owner 从 persisted receipt 恢复且零二次进程执行 |
-| lifecycle | `TestShellOwnerLifecycleFencesSubscriptionsAndCapabilityDelivery`、process-group 与 scratch cleanup tests | 仅以 `AcquireRuntimeCapabilities` 代表 topic 覆盖 started fence、重复 Start、Stop 后零投递、重复 Stop 与 fresh-owner restart；不是七 topic lifecycle 矩阵；process/scratch cleanup 由独立 adapter tests 覆盖 |
+| restart / owner 重建 | `TestShellOwnerStateChangingReceiptReportsFileResourcesAndReplays` | fresh owner 从 persisted receipt 重放，外部改写后的 target 保持不变，证明零二次进程执行 |
+| lifecycle | `TestShellOwnerLifecycleFencesSubscriptionsAndCapabilityDelivery`、`TestShellOwnerLifecycleCoversEveryRuntimeTopic`、process-group 与 scratch cleanup tests | 覆盖全部七 topic 的重复 Start 单次投递、Stop 后零投递，以及独立 process/scratch cleanup |
 | effect + receipt | declared/undeclared workspace effects、managed-session observation、accepted/rejected receipt tests | 已覆盖主要 effect 与 receipt 分类 |
-| boundary | `TestShellOwnerAcquiresManagedValidationCapabilityThroughTypedEventHubContract`、`TestShellRuntimeIngressTopicMatrixEnforcesStrongOrchestratorCalls`、module execute、seal/authority tests | 已覆盖七个订阅 topic 的 exact producer/strong-call/concrete payload 边界；operation-feasibility 与 semantic-proof 的真实 EventHub happy path 尚未直接覆盖 |
+| boundary | `TestShellOwnerAcquiresManagedValidationCapabilityThroughTypedEventHubContract`、`TestShellRuntimeIngressTopicMatrixEnforcesStrongOrchestratorCalls`、`TestShellOwnerFeasibilityAndSemanticProofHappyPathsUseTypedEventHub`、module execute、seal/authority tests | 覆盖七 topic 的 exact producer/strong-call/concrete payload，以及 owner adapter 的 typed EventHub admissibility、operation-feasibility 与 state-change semantic feasible 路径 |

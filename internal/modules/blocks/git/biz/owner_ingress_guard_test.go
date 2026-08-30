@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	cd "github.com/muidea/magicCommon/def"
@@ -18,6 +19,16 @@ type gitPanicDataEvent struct{ magicevent.Event }
 
 func (gitPanicDataEvent) Data() any {
 	panic("Git Runtime ingress inspected payload before its call/source guard")
+}
+
+type gitCountingDataEvent struct {
+	magicevent.Event
+	reads atomic.Int32
+}
+
+func (e *gitCountingDataEvent) Data() any {
+	e.reads.Add(1)
+	return struct{}{}
 }
 
 func TestGitRuntimeIngressTopicMatrixEnforcesStrongOrchestratorCalls(t *testing.T) {
@@ -58,6 +69,43 @@ func TestGitRuntimeIngressTopicMatrixEnforcesStrongOrchestratorCalls(t *testing.
 			// even if EventHub Post scheduling changes.
 			item.handler(gitPanicDataEvent{Event: magicevent.NewEventWithContext(item.topic, runtimecontract.RuntimeModuleOrchestrator, ModuleID, magicevent.NewHeader(), ctx, nil)}, nil)
 		})
+	}
+}
+
+func TestGitOwnerLifecycleCoversEveryRuntimeTopic(t *testing.T) {
+	ctx := context.Background()
+	hub := magicevent.NewHub(16)
+	t.Cleanup(func() { hub.Terminate(ctx) })
+	owner := &Biz{Base: basebiz.New(ModuleID, hub, nil), runtimeAdapter: NewRuntimeAdapter()}
+	if err := owner.Start(); err != nil {
+		t.Fatal(err)
+	}
+	if err := owner.Start(); err != nil {
+		t.Fatal(err)
+	}
+	topics := []string{
+		gitevents.TopicAcquireRuntimeCapabilities,
+		gitevents.TopicAcquireRuntimeOperationAdmissibility,
+		gitevents.TopicProbeRuntimeOperationFeasibility,
+		gitevents.TopicProbeRuntimeSemanticProofFeasibility,
+		gitevents.TopicAcquireCapabilityState,
+		gitevents.TopicQueryRuntimeCWIReconciliation,
+		gitevents.TopicExecuteOperation,
+	}
+	for _, topic := range topics {
+		event := &gitCountingDataEvent{Event: magicevent.NewEventWithContext(topic, runtimecontract.RuntimeModuleOrchestrator, ModuleID, magicevent.NewHeader(), ctx, nil)}
+		assertGitRuntimeIngressInvalid(t, hub.Send(event), "payload")
+		if got := event.reads.Load(); got != 1 {
+			t.Fatalf("started topic %s payload reads = %d, want exactly 1 after duplicate Start", topic, got)
+		}
+	}
+	owner.Teardown(ctx)
+	for _, topic := range topics {
+		event := &gitCountingDataEvent{Event: magicevent.NewEventWithContext(topic, runtimecontract.RuntimeModuleOrchestrator, ModuleID, magicevent.NewHeader(), ctx, nil)}
+		hub.Send(event)
+		if got := event.reads.Load(); got != 0 {
+			t.Fatalf("post-Stop topic %s payload reads = %d, want 0", topic, got)
+		}
 	}
 }
 

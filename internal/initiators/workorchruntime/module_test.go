@@ -214,35 +214,79 @@ func TestRuntimeInitiatorRunIsIdempotent(t *testing.T) {
 func assertRepositoryGroupsComplete(t *testing.T, repositories repositorySet) {
 	t.Helper()
 
-	requireNotNil(t, "workspace workspaces", repositories.Workspace().Workspaces)
-	requireNotNil(t, "workspace deletion material cleaner", repositories.Workspace().DeletionMaterialCleaner)
-	requireNotNil(t, "workspace goals", repositories.Workspace().Goals)
-	requireNotNil(t, "workspace dods", repositories.Workspace().DoDs)
-	requireNotNil(t, "workspace templates", repositories.Workspace().Templates)
+	workspaceOwner := repositories.Workspace().Owner
+	if err := workspaceOwner.Validate(); err != nil {
+		t.Fatalf("workspace owner repository group: %v", err)
+	}
+	requireNotNil(t, "workspace workspaces", workspaceOwner.Workspaces())
+	requireNotNil(t, "workspace deletion material cleaner", workspaceOwner.DeletionMaterialCleaner())
+	requireNotNil(t, "workspace goals", workspaceOwner.Goals())
+	requireNotNil(t, "workspace dods", workspaceOwner.DoDs())
+	requireNotNil(t, "workspace templates", workspaceOwner.Templates())
 
-	requireNotNil(t, "decision tickets", repositories.Decision().Owner.Tickets())
-	requireNotNil(t, "decision resolutions", repositories.Decision().Owner.Resolutions())
-	requireNotNil(t, "approval approvals", repositories.Approval().Owner.Approvals())
-	requireNotNil(t, "eventstream records", repositories.EventStream().Owner.EventRecords())
-	requireNotNil(t, "eventstream workspace deletions", repositories.EventStream().Owner.WorkspaceDeletions())
-	requireNotNil(t, "eventstream workspace purger", repositories.EventStream().Owner.WorkspacePurger())
+	decisionOwner := repositories.Decision().Owner
+	if err := decisionOwner.Validate(); err != nil {
+		t.Fatalf("decision owner repository group: %v", err)
+	}
+	requireNotNil(t, "decision tickets", decisionOwner.Tickets())
+	requireNotNil(t, "decision resolutions", decisionOwner.Resolutions())
+	requireNotNil(t, "decision workspace deletions", decisionOwner.WorkspaceDeletions())
+
+	approvalOwner := repositories.Approval().Owner
+	if err := approvalOwner.Validate(); err != nil {
+		t.Fatalf("approval owner repository group: %v", err)
+	}
+	requireNotNil(t, "approval approvals", approvalOwner.Approvals())
+	requireNotNil(t, "approval workspace deletions", approvalOwner.WorkspaceDeletions())
+
+	eventStreamOwner := repositories.EventStream().Owner
+	if err := eventStreamOwner.Validate(); err != nil {
+		t.Fatalf("eventstream owner repository group: %v", err)
+	}
+	requireNotNil(t, "eventstream records", eventStreamOwner.EventRecords())
+	requireNotNil(t, "eventstream workspace deletions", eventStreamOwner.WorkspaceDeletions())
+	requireNotNil(t, "eventstream workspace purger", eventStreamOwner.WorkspacePurger())
 	requireNotNil(t, "governance traces", repositories.Governance().AutoGovernanceTraces)
 	requireNotNil(t, "mcp registry", repositories.MCP().Registry)
-	requireNotNil(t, "memory items", repositories.Memory().Owner.Items())
-	requireNotNil(t, "memory recall traces", repositories.Memory().Owner.RecallTraces())
 
-	requireNotNil(t, "orchestrator tool calls", repositories.Orchestrator().ToolCalls)
-	requireNotNil(t, "orchestrator patches", repositories.Orchestrator().Patches)
-	requireNotNil(t, "orchestrator validation results", repositories.Orchestrator().ValidationResults)
-	requireNotNil(t, "orchestrator evidence", repositories.Orchestrator().EvidenceRecords)
-	requireNotNil(t, "orchestrator coverage", repositories.Orchestrator().CoverageWorkItems)
-	requireNotNil(t, "orchestrator artifact continuations", repositories.Orchestrator().ArtifactContinuations)
+	memoryOwner := repositories.Memory().Owner
+	if err := memoryOwner.Validate(); err != nil {
+		t.Fatalf("memory owner repository group: %v", err)
+	}
+	requireNotNil(t, "memory items", memoryOwner.Items())
+	requireNotNil(t, "memory recall traces", memoryOwner.RecallTraces())
+	requireNotNil(t, "memory workspace deletions", memoryOwner.WorkspaceDeletions())
 
-	requireNotNil(t, "result results", repositories.Result().Owner.Results())
-	requireNotNil(t, "result artifacts", repositories.Result().Owner.Artifacts())
+	orchestratorOwner := repositories.Orchestrator()
+	if err := orchestratorOwner.Validate(); err != nil {
+		t.Fatalf("orchestrator owner repository group: %v", err)
+	}
+	requireNotNil(t, "orchestrator tool calls", orchestratorOwner.ToolCalls())
+	requireNotNil(t, "orchestrator patches", orchestratorOwner.Patches())
+	requireNotNil(t, "orchestrator validation results", orchestratorOwner.ValidationResults())
+	requireNotNil(t, "orchestrator evidence", orchestratorOwner.EvidenceRecords())
+	requireNotNil(t, "orchestrator coverage", orchestratorOwner.CoverageWorkItems())
+	requireNotNil(t, "orchestrator artifact continuations", orchestratorOwner.ArtifactContinuations())
+	requireNotNil(t, "orchestrator workspace deletions", orchestratorOwner.WorkspaceDeletions())
+	requireNotNil(t, "orchestrator workspace purger", orchestratorOwner.WorkspacePurger())
+
+	resultOwner := repositories.Result().Owner
+	if err := resultOwner.Validate(); err != nil {
+		t.Fatalf("result owner repository group: %v", err)
+	}
+	requireNotNil(t, "result results", resultOwner.Results())
+	requireNotNil(t, "result artifacts", resultOwner.Artifacts())
+	requireNotNil(t, "result workspace deletions", resultOwner.WorkspaceDeletions())
 	requireNotNil(t, "run runs", repositories.Run().Runs)
 	requireNotNil(t, "run steps", repositories.Run().Steps)
 	requireNotNil(t, "run checkpoints", repositories.Run().Checkpoints)
+	if err := repositories.Run().Owner.Validate(); err != nil {
+		t.Fatalf("run owner repository group: %v", err)
+	}
+	requireNotNil(t, "run owner runs", repositories.Run().Owner.Runs())
+	requireNotNil(t, "run owner steps", repositories.Run().Owner.Steps())
+	requireNotNil(t, "run owner checkpoints", repositories.Run().Owner.Checkpoints())
+	requireNotNil(t, "run workspace purger", repositories.Run().Owner.WorkspacePurger())
 	requireNotNil(t, "skill skills", repositories.Skill().Skills)
 	requireNotNil(t, "soul souls", repositories.Soul().Souls)
 }

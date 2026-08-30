@@ -7,11 +7,7 @@ import (
 const InitiatorID = "workorch/repositories"
 
 type WorkspaceRepositories struct {
-	Workspaces              repository.WorkspaceRepository
-	DeletionMaterialCleaner repository.WorkspaceDeletionMaterialCleaner
-	Goals                   repository.GoalRepository
-	DoDs                    repository.DoDRepository
-	Templates               repository.WorkspaceTemplateRepository
+	Owner repository.WorkspaceOwnerRepositories
 }
 
 type DecisionRepositories struct {

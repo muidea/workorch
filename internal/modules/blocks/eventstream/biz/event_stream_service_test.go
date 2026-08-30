@@ -24,6 +24,7 @@ import (
 	llmevents "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/events"
 	memorycommon "github.com/muidea/workorch/internal/modules/blocks/memory/pkg/common"
 	memoryevents "github.com/muidea/workorch/internal/modules/blocks/memory/pkg/events"
+	resultcommon "github.com/muidea/workorch/internal/modules/blocks/result/pkg/common"
 	resultevents "github.com/muidea/workorch/internal/modules/blocks/result/pkg/events"
 	runcommon "github.com/muidea/workorch/internal/modules/blocks/run/pkg/common"
 	runevents "github.com/muidea/workorch/internal/modules/blocks/run/pkg/events"
@@ -214,6 +215,36 @@ func TestHighWatermarksFailsClosedBeforeOwnerIOAndDeduplicatesCanonicalIDs(t *te
 	}
 	if records.ListCount() != 2 || deletions.GetCount() != 2 {
 		t.Fatalf("canonical duplicate I/O: event lists=%d deletion gets=%d, want 2/2", records.ListCount(), deletions.GetCount())
+	}
+}
+
+func TestApplicationQueriesRequireExactSourceBeforeOwnerIO(t *testing.T) {
+	ctx := context.Background()
+	records := newCountingEventRecordRepository()
+	deletions := &countingEventStreamWorkspaceDeletionRepository{
+		EventStreamWorkspaceDeletionRepository: memory.NewEventStreamWorkspaceDeletionRepository(),
+	}
+	service := &Biz{repo: records, workspaceDeletions: deletions}
+	for _, testCase := range []struct {
+		name    string
+		topic   string
+		source  string
+		payload any
+	}{
+		{name: "list forged", topic: eventstreamevents.TopicEventStreamCommandList, source: "untrusted/module", payload: eventstreamevents.ListEventsCommand{Query: eventstreamevents.EventQuery{WorkspaceID: "ws-query-source"}}},
+		{name: "list noncanonical", topic: eventstreamevents.TopicEventStreamCommandList, source: " application/workorchd ", payload: eventstreamevents.ListEventsCommand{Query: eventstreamevents.EventQuery{WorkspaceID: "ws-query-source"}}},
+		{name: "high watermarks forged", topic: eventstreamevents.TopicEventStreamCommandHighWatermarks, source: "application/workorchd/appservice", payload: eventstreamevents.HighWatermarksCommand{WorkspaceIDs: []common.WorkspaceID{"ws-query-source"}}},
+		{name: "high watermarks noncanonical", topic: eventstreamevents.TopicEventStreamCommandHighWatermarks, source: " application/workorchd ", payload: eventstreamevents.HighWatermarksCommand{WorkspaceIDs: []common.WorkspaceID{"ws-query-source"}}},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			event := magicevent.NewEventWithContext(testCase.topic, testCase.source, eventstreamevents.CommandDestination, magicevent.NewHeader(), ctx, testCase.payload)
+			if _, err := service.executeCommand(event); !errors.Is(err, common.ErrInvalidArgument) {
+				t.Fatalf("execute command error = %v, want invalid argument", err)
+			}
+		})
+	}
+	if records.ListCount() != 0 || deletions.GetCount() != 0 {
+		t.Fatalf("forged query reached owner I/O: event lists=%d deletion gets=%d", records.ListCount(), deletions.GetCount())
 	}
 }
 
@@ -1230,6 +1261,132 @@ func TestServiceRejectsForgedOwnerNotificationSource(t *testing.T) {
 	items = waitForEventRecords(t, repo, workorchquerycontract.EventRecordQuery{WorkspaceID: data.WorkspaceID}, 1)
 	if len(items) != 1 || items[0].SourceModule != "blocks/workspace" {
 		t.Fatalf("authenticated records = %+v", items)
+	}
+}
+
+func TestServiceRejectsForgedSourceForEverySubscribedProducerTopic(t *testing.T) {
+	ctx := context.Background()
+	repository := newCountingEventRecordRepository()
+	service, rawHub := newEventStreamTestService(t, repository)
+	if err := service.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(service.Stop)
+
+	workspaceID := common.WorkspaceID("ws-producer-source-matrix")
+	runID := common.RunID("run-producer-source-matrix")
+	memoryChanged := memoryevents.MemoryChangedData{MemoryID: "memory-source-matrix", WorkspaceID: workspaceID, RunID: runID, MemoryType: "working", Summary: "source matrix"}
+	memoryRecall := stableMemoryRecallNotificationTestData()
+	memoryRecall.WorkspaceID, memoryRecall.RunID = workspaceID, runID
+	llmUsage := stableLLMUsageNotificationTestData()
+	llmUsage.WorkspaceID, llmUsage.RunID = workspaceID, runID
+	resultChanged := resultevents.ResultChangedData{
+		NotificationID: "result-notification/source-matrix", ResultID: "result-source-matrix",
+		WorkspaceID: workspaceID, RunID: runID, State: common.ResultStateAccepted,
+	}
+	workspaceChanged := workspaceevents.WorkspaceChangedData{WorkspaceID: workspaceID, RunID: runID, State: common.WorkspaceStateActive}
+	goalDefined := workspaceevents.GoalDefinedData{GoalID: "goal-source-matrix", WorkspaceID: workspaceID, Text: "goal", DefinitionRevision: "goal:1", LineageState: "active"}
+	dodDefined := workspaceevents.DoDDefinedData{DoDID: "dod-source-matrix", WorkspaceID: workspaceID, Items: []string{"accept"}, State: common.DoDStateReady, DefinitionRevision: "dod:1", LineageState: "active"}
+	governance := governanceevents.GovernanceData{Trace: governancemodel.AutoGovernanceTrace{
+		ID: "trace-source-matrix", WorkspaceID: workspaceID, RunID: runID,
+		ItemType: "ticket", ItemID: "ticket-source-matrix", Status: "escalated",
+	}}
+	approval := approvalevents.ApprovalChangedData{
+		NotificationID: "approval-notification/source-matrix", ResolutionID: "resolution-source-matrix",
+		ApprovalID: "approval-source-matrix", WorkspaceID: workspaceID, RunID: runID,
+		State:     common.ApprovalStateApproved,
+		Principal: approvalmodel.ApprovalResolutionPrincipal{Kind: approvalmodel.ApprovalResolutionPrincipalHumanOperator, SubjectID: "operator-source-matrix"},
+	}
+	ticket := decisionevents.TicketChangedData{
+		NotificationID: "decision-notification/source-matrix", TicketID: "ticket-source-matrix",
+		WorkspaceID: workspaceID, RunID: runID, State: common.DecisionTicketStateOpen,
+	}
+	resolvedTicket := ticket
+	resolvedTicket.State = common.DecisionTicketStateResolved
+	resolution := decisionevents.TicketResolvedData{
+		NotificationID: "decision-notification/resolved-source-matrix", Ticket: resolvedTicket,
+		ResolutionID: "resolution-source-matrix", ResolutionType: decisioncommon.ResolutionTypeProvideMissingInfo,
+	}
+
+	type notificationCase struct {
+		topic       string
+		source      string
+		destination string
+		data        any
+	}
+	cases := make([]notificationCase, 0, 32)
+	for _, topic := range []string{memoryevents.TopicMemoryCreated, memoryevents.TopicMemoryUpdated, memoryevents.TopicMemoryDeleted} {
+		cases = append(cases, notificationCase{topic, memorycommon.ModuleID, memoryevents.NotificationDestination, memoryChanged})
+	}
+	cases = append(cases,
+		notificationCase{memoryevents.TopicMemoryRecallRecorded, memorycommon.ModuleID, memoryevents.NotificationDestination, memoryRecall},
+		notificationCase{llmevents.TopicLLMUsageRecorded, llmcommon.ModuleID, llmevents.NotificationDestination, llmUsage},
+	)
+	for _, topic := range []string{resultevents.TopicResultCreated, resultevents.TopicResultAccepted, resultevents.TopicResultRejected, resultevents.TopicResultSuperseded} {
+		data := resultChanged
+		data.NotificationID += topic
+		cases = append(cases, notificationCase{topic, resultcommon.ModuleID, resultevents.NotificationDestination, data})
+	}
+	for _, topic := range []string{workspaceevents.TopicWorkspaceCreated, workspaceevents.TopicWorkspaceStateChanged} {
+		cases = append(cases, notificationCase{topic, workspacecommon.ModuleID, workspaceevents.NotificationDestination, workspaceChanged})
+	}
+	cases = append(cases,
+		notificationCase{workspaceevents.TopicGoalDefined, workspacecommon.ModuleID, workspaceevents.NotificationDestination, goalDefined},
+		notificationCase{workspaceevents.TopicDoDDefined, workspacecommon.ModuleID, workspaceevents.NotificationDestination, dodDefined},
+	)
+	runTopics := []struct {
+		topic string
+		state common.RunState
+	}{
+		{runevents.TopicRunCreated, common.RunStatePending},
+		{runevents.TopicRunStarted, common.RunStateActive},
+		{runevents.TopicRunBlockedOnDecision, common.RunStateBlockedOnDecision},
+		{runevents.TopicRunBlockedOnApproval, common.RunStateBlockedOnApproval},
+		{runevents.TopicRunCompleted, common.RunStateCompleted},
+		{runevents.TopicRunFailed, common.RunStateFailed},
+		{runevents.TopicRunCancelled, common.RunStateCancelled},
+		{runevents.TopicRunSuperseded, common.RunStateSuperseded},
+		{runevents.TopicRunStateChanged, common.RunStateActive},
+	}
+	for index, item := range runTopics {
+		revision := uint64(index + 1)
+		data := runevents.RunStateChangedData{
+			WorkspaceID: workspaceID, RunID: runID, WorkspaceRunGeneration: 1, RunRevision: revision, State: item.state,
+			CausationID: runevents.RunStateChangedCausationID(runID, 1, revision, 0),
+		}
+		cases = append(cases, notificationCase{item.topic, runcommon.ModuleID, runevents.NotificationDestination, data})
+	}
+	for _, topic := range []string{
+		governanceevents.TopicGovernanceAutoEvaluated,
+		governanceevents.TopicGovernanceAutoResolved,
+		governanceevents.TopicGovernanceAutoEscalated,
+		governanceevents.TopicGovernanceAutoBlocked,
+	} {
+		cases = append(cases, notificationCase{topic, governancecommon.ModuleID, governanceevents.NotificationDestination, governance})
+	}
+	cases = append(cases,
+		notificationCase{approvalevents.TopicApprovalResolved, approvalcommon.ModuleID, approvalevents.NotificationDestination, approval},
+		notificationCase{decisionevents.TopicTicketCreated, decisioncommon.ModuleID, decisionevents.NotificationDestination, ticket},
+		notificationCase{decisionevents.TopicTicketResolved, decisioncommon.ModuleID, decisionevents.NotificationDestination, resolution},
+	)
+
+	for _, testCase := range cases {
+		rawHub.Send(magicevent.NewEventWithContext(
+			testCase.topic, "untrusted/module", testCase.destination,
+			magicevent.NewHeader(), ctx, testCase.data,
+		))
+	}
+	if repository.AppendCount() != 0 {
+		t.Fatalf("forged producer matrix appended %d records", repository.AppendCount())
+	}
+	for _, testCase := range cases {
+		rawHub.Send(magicevent.NewEventWithContext(
+			testCase.topic, testCase.source, testCase.destination,
+			magicevent.NewHeader(), ctx, testCase.data,
+		))
+	}
+	if repository.AppendCount() != len(cases) {
+		t.Fatalf("exact producer matrix appended %d records, want %d", repository.AppendCount(), len(cases))
 	}
 }
 

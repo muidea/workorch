@@ -13,10 +13,116 @@ import (
 	workspaceevents "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/events"
 	workspacemodel "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
+	"github.com/muidea/workorch/internal/pkg/repository"
 	filerepository "github.com/muidea/workorch/internal/pkg/repository/file"
 	"github.com/muidea/workorch/internal/pkg/repository/memory"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
+
+type workspaceModuleTestBackend struct {
+	binding    repository.OwnerRepositoryBinding
+	workspaces repository.WorkspaceRepository
+	cleaner    repository.WorkspaceDeletionMaterialCleaner
+	goals      repository.GoalRepository
+	dods       repository.DoDRepository
+	templates  repository.WorkspaceTemplateRepository
+}
+
+func (b workspaceModuleTestBackend) WorkspaceOwnerBinding() repository.OwnerRepositoryBinding {
+	return b.binding
+}
+func (b workspaceModuleTestBackend) WorkspaceOwnerWorkspaces() repository.WorkspaceRepository {
+	return b.workspaces
+}
+func (b workspaceModuleTestBackend) WorkspaceOwnerDeletionMaterialCleaner() repository.WorkspaceDeletionMaterialCleaner {
+	return b.cleaner
+}
+func (b workspaceModuleTestBackend) WorkspaceOwnerGoals() repository.GoalRepository { return b.goals }
+func (b workspaceModuleTestBackend) WorkspaceOwnerDoDs() repository.DoDRepository   { return b.dods }
+func (b workspaceModuleTestBackend) WorkspaceOwnerTemplates() repository.WorkspaceTemplateRepository {
+	return b.templates
+}
+
+type workspaceModuleTestWorkspaceRepository struct {
+	repository.WorkspaceRepository
+	binding repository.OwnerRepositoryBinding
+}
+
+func (r workspaceModuleTestWorkspaceRepository) OwnerRepositoryBinding() repository.OwnerRepositoryBinding {
+	return r.binding
+}
+
+type workspaceModuleTestCleaner struct {
+	repository.WorkspaceDeletionMaterialCleaner
+	binding repository.OwnerRepositoryBinding
+}
+
+func (r workspaceModuleTestCleaner) OwnerRepositoryBinding() repository.OwnerRepositoryBinding {
+	return r.binding
+}
+
+type workspaceModuleTestGoalRepository struct {
+	repository.GoalRepository
+	binding repository.OwnerRepositoryBinding
+}
+
+func (r workspaceModuleTestGoalRepository) OwnerRepositoryBinding() repository.OwnerRepositoryBinding {
+	return r.binding
+}
+
+type workspaceModuleTestDoDRepository struct {
+	repository.DoDRepository
+	binding repository.OwnerRepositoryBinding
+}
+
+func (r workspaceModuleTestDoDRepository) OwnerRepositoryBinding() repository.OwnerRepositoryBinding {
+	return r.binding
+}
+
+type workspaceModuleTestTemplateRepository struct {
+	repository.WorkspaceTemplateRepository
+	binding repository.OwnerRepositoryBinding
+}
+
+func (r workspaceModuleTestTemplateRepository) OwnerRepositoryBinding() repository.OwnerRepositoryBinding {
+	return r.binding
+}
+
+func newWorkspaceModuleTestRepositories(
+	workspaces repository.WorkspaceRepository,
+	cleaner repository.WorkspaceDeletionMaterialCleaner,
+	goals repository.GoalRepository,
+	dods repository.DoDRepository,
+	templates repository.WorkspaceTemplateRepository,
+) repository.WorkspaceOwnerRepositories {
+	binding := repository.NewWorkspaceOwnerRepositoryBinding()
+	owner, err := repository.NewWorkspaceOwnerRepositories(workspaceModuleTestBackend{
+		binding:    binding,
+		workspaces: workspaceModuleTestWorkspaceRepository{WorkspaceRepository: workspaces, binding: binding},
+		cleaner:    workspaceModuleTestCleaner{WorkspaceDeletionMaterialCleaner: cleaner, binding: binding},
+		goals:      workspaceModuleTestGoalRepository{GoalRepository: goals, binding: binding},
+		dods:       workspaceModuleTestDoDRepository{DoDRepository: dods, binding: binding},
+		templates:  workspaceModuleTestTemplateRepository{WorkspaceTemplateRepository: templates, binding: binding},
+	})
+	if err != nil {
+		panic(err)
+	}
+	return owner
+}
+
+func workspaceModuleTestDependencies(
+	hub magicevent.Hub,
+	workspaces repository.WorkspaceRepository,
+	cleaner repository.WorkspaceDeletionMaterialCleaner,
+	goals repository.GoalRepository,
+	dods repository.DoDRepository,
+	templates repository.WorkspaceTemplateRepository,
+) workspacebiz.Dependencies {
+	return workspacebiz.Dependencies{
+		OwnerRepositories: newWorkspaceModuleTestRepositories(workspaces, cleaner, goals, dods, templates),
+		EventHub:          hub,
+	}
+}
 
 func TestModuleIdentityConfigureStartStopContract(t *testing.T) {
 	module := New()
@@ -32,14 +138,9 @@ func TestModuleIdentityConfigureStartStopContract(t *testing.T) {
 
 	hub := magicevent.NewHub(16)
 	workspaces := memory.NewWorkspaceRepository()
-	if err := module.Configure(workspacebiz.Dependencies{
-		Workspaces:              workspaces,
-		DeletionMaterialCleaner: workspaces,
-		Goals:                   memory.NewGoalRepository(),
-		DoDs:                    memory.NewDoDRepository(),
-		Templates:               memory.NewWorkspaceTemplateRepository(),
-		EventHub:                hub,
-	}); err != nil {
+	if err := module.Configure(workspaceModuleTestDependencies(
+		hub, workspaces, workspaces, memory.NewGoalRepository(), memory.NewDoDRepository(), memory.NewWorkspaceTemplateRepository(),
+	)); err != nil {
 		t.Fatalf("Configure: %v", err)
 	}
 	if module.bizPtr == nil {
@@ -73,7 +174,7 @@ func TestWorkspaceChangedNotificationClonesDefaultLLMSelection(t *testing.T) {
 		t.Fatalf("create workspace: %v", err)
 	}
 	module := New()
-	if err := module.Configure(workspacebiz.Dependencies{Workspaces: workspaces, DeletionMaterialCleaner: workspaces, Goals: memory.NewGoalRepository(), DoDs: memory.NewDoDRepository(), Templates: memory.NewWorkspaceTemplateRepository(), EventHub: hub}); err != nil {
+	if err := module.Configure(workspaceModuleTestDependencies(hub, workspaces, workspaces, memory.NewGoalRepository(), memory.NewDoDRepository(), memory.NewWorkspaceTemplateRepository())); err != nil {
 		t.Fatalf("Configure: %v", err)
 	}
 	if err := module.Start(); err != nil {
@@ -115,7 +216,7 @@ func TestUpdateWorkspaceLLMSelectionCommandPersistsCompleteTargetAndClears(t *te
 	}
 	hub := magicevent.NewHub(16)
 	module := New()
-	if err := module.Configure(workspacebiz.Dependencies{Workspaces: repo, DeletionMaterialCleaner: repo, Goals: memory.NewGoalRepository(), DoDs: memory.NewDoDRepository(), Templates: memory.NewWorkspaceTemplateRepository(), EventHub: hub}); err != nil {
+	if err := module.Configure(workspaceModuleTestDependencies(hub, repo, repo, memory.NewGoalRepository(), memory.NewDoDRepository(), memory.NewWorkspaceTemplateRepository())); err != nil {
 		t.Fatalf("Configure: %v", err)
 	}
 	if err := module.Start(); err != nil {
@@ -184,7 +285,7 @@ func TestWorkspaceLLMSelectionSurvivesFileBackedOwnerRestart(t *testing.T) {
 	firstHub := magicevent.NewHub(16)
 	t.Cleanup(func() { firstHub.Terminate(context.Background()) })
 	first := New()
-	if err := first.Configure(workspacebiz.Dependencies{Workspaces: firstRepo, DeletionMaterialCleaner: firstRepo, Goals: memory.NewGoalRepository(), DoDs: memory.NewDoDRepository(), Templates: memory.NewWorkspaceTemplateRepository(), EventHub: firstHub}); err != nil {
+	if err := first.Configure(workspaceModuleTestDependencies(firstHub, firstRepo, firstRepo, memory.NewGoalRepository(), memory.NewDoDRepository(), memory.NewWorkspaceTemplateRepository())); err != nil {
 		t.Fatalf("configure first owner: %v", err)
 	}
 	if err := first.Start(); err != nil {
@@ -199,7 +300,7 @@ func TestWorkspaceLLMSelectionSurvivesFileBackedOwnerRestart(t *testing.T) {
 	t.Cleanup(func() { secondHub.Terminate(context.Background()) })
 	second := New()
 	secondRepo := filerepository.NewWorkspaceRepository(path)
-	if err := second.Configure(workspacebiz.Dependencies{Workspaces: secondRepo, DeletionMaterialCleaner: secondRepo, Goals: memory.NewGoalRepository(), DoDs: memory.NewDoDRepository(), Templates: memory.NewWorkspaceTemplateRepository(), EventHub: secondHub}); err != nil {
+	if err := second.Configure(workspaceModuleTestDependencies(secondHub, secondRepo, secondRepo, memory.NewGoalRepository(), memory.NewDoDRepository(), memory.NewWorkspaceTemplateRepository())); err != nil {
 		t.Fatalf("configure restarted owner: %v", err)
 	}
 	if err := second.Start(); err != nil {
@@ -239,28 +340,17 @@ func sendWorkspaceTestCommand[Command any](t *testing.T, ctx context.Context, hu
 	return typed
 }
 
-func TestModuleConfigureRequiresAllRepositories(t *testing.T) {
-	workspaces := memory.NewWorkspaceRepository()
-	valid := workspacebiz.Dependencies{
-		Workspaces:              workspaces,
-		DeletionMaterialCleaner: workspaces,
-		Goals:                   memory.NewGoalRepository(),
-		DoDs:                    memory.NewDoDRepository(),
-		Templates:               memory.NewWorkspaceTemplateRepository(),
-		EventHub:                magicevent.NewHub(16),
-	}
-	tests := []struct {
+func TestModuleConfigureRequiresBoundOwnerRepositoriesAndEventHub(t *testing.T) {
+	hub := magicevent.NewHub(16)
+	t.Cleanup(func() { hub.Terminate(context.Background()) })
+	ownerRepositories := memory.NewWorkspaceOwnerRepositorySet().OwnerRepositories()
+	for _, tc := range []struct {
 		name string
 		deps workspacebiz.Dependencies
 	}{
-		{name: "missing workspaces", deps: workspacebiz.Dependencies{DeletionMaterialCleaner: valid.DeletionMaterialCleaner, Goals: valid.Goals, DoDs: valid.DoDs, Templates: valid.Templates, EventHub: valid.EventHub}},
-		{name: "missing deletion material cleaner", deps: workspacebiz.Dependencies{Workspaces: valid.Workspaces, Goals: valid.Goals, DoDs: valid.DoDs, Templates: valid.Templates, EventHub: valid.EventHub}},
-		{name: "missing goals", deps: workspacebiz.Dependencies{Workspaces: valid.Workspaces, DeletionMaterialCleaner: valid.DeletionMaterialCleaner, DoDs: valid.DoDs, Templates: valid.Templates, EventHub: valid.EventHub}},
-		{name: "missing dods", deps: workspacebiz.Dependencies{Workspaces: valid.Workspaces, DeletionMaterialCleaner: valid.DeletionMaterialCleaner, Goals: valid.Goals, Templates: valid.Templates, EventHub: valid.EventHub}},
-		{name: "missing templates", deps: workspacebiz.Dependencies{Workspaces: valid.Workspaces, DeletionMaterialCleaner: valid.DeletionMaterialCleaner, Goals: valid.Goals, DoDs: valid.DoDs, EventHub: valid.EventHub}},
-		{name: "missing event hub", deps: workspacebiz.Dependencies{Workspaces: valid.Workspaces, DeletionMaterialCleaner: valid.DeletionMaterialCleaner, Goals: valid.Goals, DoDs: valid.DoDs, Templates: valid.Templates}},
-	}
-	for _, tc := range tests {
+		{name: "missing owner repositories", deps: workspacebiz.Dependencies{EventHub: hub}},
+		{name: "missing event hub", deps: workspacebiz.Dependencies{OwnerRepositories: ownerRepositories}},
+	} {
 		t.Run(tc.name, func(t *testing.T) {
 			if err := New().Configure(tc.deps); !errors.Is(err, common.ErrInvalidArgument) {
 				t.Fatalf("Configure err = %v, want invalid argument", err)

@@ -21,7 +21,13 @@ func TestStrongSoulCommandsIgnoreFireAndForgetPost(t *testing.T) {
 		t.Fatal(err)
 	}
 	eventFor := func(topic string, data any) magicevent.Event {
-		return magicevent.NewEventWithContext(topic, "test", soulevents.CommandDestination, magicevent.NewHeader(), ctx, data)
+		source := applicationContextRegistrySource
+		if topic == soulevents.TopicSoulCommandEnsureDefaults {
+			source = systemCommandSource
+		} else if !soulCommandSourceAllowed(topic, source) {
+			t.Fatalf("Post fixture source %q is not authorized for %s", source, topic)
+		}
+		return magicevent.NewEventWithContext(topic, source, soulevents.CommandDestination, magicevent.NewHeader(), ctx, data)
 	}
 
 	owner.handleSoulCommand(eventFor(soulevents.TopicSoulCommandCreate, soulevents.CreateSoulCommand{SoulID: "post-create", Name: "post", SoulMD: "# post"}), nil)
@@ -42,8 +48,12 @@ func TestStrongSoulCommandsIgnoreFireAndForgetPost(t *testing.T) {
 	if err != nil || len(items) != 1 {
 		t.Fatalf("Post ensure seeded defaults: len=%d err=%v", len(items), err)
 	}
-	wrongSourceResult := magicevent.NewResult(soulevents.TopicSoulCommandEnsureDefaults, "test", soulevents.CommandDestination)
-	owner.handleSystemDefaultsCommand(eventFor(soulevents.TopicSoulCommandEnsureDefaults, soulevents.EnsureDefaultsCommand{}), wrongSourceResult)
+	wrongSourceEvent := magicevent.NewEventWithContext(
+		soulevents.TopicSoulCommandEnsureDefaults, applicationContextRegistrySource, soulevents.CommandDestination,
+		magicevent.NewHeader(), ctx, soulevents.EnsureDefaultsCommand{},
+	)
+	wrongSourceResult := magicevent.NewResult(soulevents.TopicSoulCommandEnsureDefaults, applicationContextRegistrySource, soulevents.CommandDestination)
+	owner.handleSystemDefaultsCommand(wrongSourceEvent, wrongSourceResult)
 	if _, err := wrongSourceResult.Get(); !errors.Is(err, common.ErrInvalidArgument) {
 		t.Fatalf("wrong-source ensure error = %v, want invalid argument", err)
 	}
@@ -62,5 +72,34 @@ func TestStrongSoulCommandsIgnoreFireAndForgetPost(t *testing.T) {
 	items, err = repo.List(ctx)
 	if err != nil || len(items) <= 1 {
 		t.Fatalf("exact-source ensure did not seed defaults: len=%d err=%v", len(items), err)
+	}
+}
+
+func TestSoulCommandSourceAuthorizationMatrix(t *testing.T) {
+	for _, topic := range []string{
+		soulevents.TopicSoulCommandCreate,
+		soulevents.TopicSoulCommandList,
+		soulevents.TopicSoulCommandUpdate,
+		soulevents.TopicSoulCommandDelete,
+		soulevents.TopicSoulCommandValidateCapability,
+	} {
+		if !soulCommandSourceAllowed(topic, applicationContextRegistrySource) {
+			t.Errorf("context-registry source rejected for %s", topic)
+		}
+		for _, source := range []string{applicationOwnerReadSource, "untrusted/module", " " + applicationContextRegistrySource + " "} {
+			if soulCommandSourceAllowed(topic, source) {
+				t.Errorf("source %q accepted for %s", source, topic)
+			}
+		}
+	}
+	for _, source := range []string{applicationContextRegistrySource, applicationOwnerReadSource} {
+		if !soulCommandSourceAllowed(soulevents.TopicSoulCommandGet, source) {
+			t.Errorf("read source %q rejected", source)
+		}
+	}
+	for _, source := range []string{"untrusted/module", " " + applicationOwnerReadSource + " "} {
+		if soulCommandSourceAllowed(soulevents.TopicSoulCommandGet, source) {
+			t.Errorf("forged read source %q accepted", source)
+		}
 	}
 }

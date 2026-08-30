@@ -19,11 +19,9 @@ func TestWorkspacePrivilegedIngressRejectsForgedSourcesWithoutOwnerMutation(t *t
 	t.Cleanup(func() { hub.Terminate(ctx) })
 	workspaces := memoryrepo.NewWorkspaceRepository()
 	templates := memoryrepo.NewWorkspaceTemplateRepository()
-	owner, err := New(hub, nil, Dependencies{
-		Workspaces: workspaces, DeletionMaterialCleaner: workspaces,
-		Goals: memoryrepo.NewGoalRepository(), DoDs: memoryrepo.NewDoDRepository(), Templates: templates,
-		EventHub: hub,
-	})
+	owner, err := New(hub, nil, workspaceOwnerTestDependencies(
+		hub, nil, workspaces, workspaces, memoryrepo.NewGoalRepository(), memoryrepo.NewDoDRepository(), templates,
+	))
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -17,6 +17,30 @@ type resultBackend struct {
 	deletions repository.ResultWorkspaceDeletionRepository
 }
 
+type workspaceBackend struct {
+	binding    repository.OwnerRepositoryBinding
+	workspaces repository.WorkspaceRepository
+	cleaner    repository.WorkspaceDeletionMaterialCleaner
+	goals      repository.GoalRepository
+	dods       repository.DoDRepository
+	templates  repository.WorkspaceTemplateRepository
+}
+
+func (b workspaceBackend) WorkspaceOwnerBinding() repository.OwnerRepositoryBinding {
+	return b.binding
+}
+func (b workspaceBackend) WorkspaceOwnerWorkspaces() repository.WorkspaceRepository {
+	return b.workspaces
+}
+func (b workspaceBackend) WorkspaceOwnerDeletionMaterialCleaner() repository.WorkspaceDeletionMaterialCleaner {
+	return b.cleaner
+}
+func (b workspaceBackend) WorkspaceOwnerGoals() repository.GoalRepository { return b.goals }
+func (b workspaceBackend) WorkspaceOwnerDoDs() repository.DoDRepository   { return b.dods }
+func (b workspaceBackend) WorkspaceOwnerTemplates() repository.WorkspaceTemplateRepository {
+	return b.templates
+}
+
 func (b resultBackend) ResultOwnerBinding() repository.OwnerRepositoryBinding { return b.binding }
 func (b resultBackend) ResultOwnerResults() repository.ResultRepository       { return b.results }
 func (b resultBackend) ResultOwnerArtifacts() repository.ArtifactRepository   { return b.artifacts }
@@ -92,6 +116,7 @@ func (b eventStreamBackend) EventStreamOwnerWorkspacePurger() repository.EventSt
 
 func TestResourceOwnerRepositoryBundlesRejectZeroAndUnboundFakeBackends(t *testing.T) {
 	for name, validate := range map[string]func() error{
+		"workspace zero":   func() error { return (repository.WorkspaceOwnerRepositories{}).Validate() },
 		"result zero":      func() error { return (repository.ResultOwnerRepositories{}).Validate() },
 		"decision zero":    func() error { return (repository.DecisionOwnerRepositories{}).Validate() },
 		"approval zero":    func() error { return (repository.ApprovalOwnerRepositories{}).Validate() },
@@ -101,6 +126,13 @@ func TestResourceOwnerRepositoryBundlesRejectZeroAndUnboundFakeBackends(t *testi
 		if err := validate(); !errors.Is(err, common.ErrInvalidArgument) {
 			t.Errorf("%s validation = %v, want invalid argument", name, err)
 		}
+	}
+	workspaceRepository := memory.NewWorkspaceRepository()
+	if _, err := repository.NewWorkspaceOwnerRepositories(workspaceBackend{
+		binding: repository.NewWorkspaceOwnerRepositoryBinding(), workspaces: workspaceRepository, cleaner: workspaceRepository,
+		goals: memory.NewGoalRepository(), dods: memory.NewDoDRepository(), templates: memory.NewWorkspaceTemplateRepository(),
+	}); !errors.Is(err, common.ErrConflict) {
+		t.Errorf("unbound fake Workspace backend = %v, want conflict", err)
 	}
 
 	if _, err := repository.NewResultOwnerRepositories(resultBackend{
@@ -137,6 +169,14 @@ func TestResourceOwnerRepositoryBundlesRejectZeroAndUnboundFakeBackends(t *testi
 }
 
 func TestResourceOwnerRepositoryBundlesRejectMixedMemorySets(t *testing.T) {
+	workspaceFirst, workspaceSecond := memory.NewWorkspaceOwnerRepositorySet(), memory.NewWorkspaceOwnerRepositorySet()
+	if _, err := repository.NewWorkspaceOwnerRepositories(workspaceBackend{
+		binding: workspaceFirst.WorkspaceOwnerBinding(), workspaces: workspaceFirst.Workspaces, cleaner: workspaceFirst.Workspaces,
+		goals: workspaceSecond.Goals, dods: workspaceFirst.DoDs, templates: workspaceFirst.Templates,
+	}); !errors.Is(err, common.ErrConflict) {
+		t.Errorf("mixed Workspace set = %v, want conflict", err)
+	}
+
 	resultFirst, resultSecond := memory.NewResultOwnerRepositorySet(), memory.NewResultOwnerRepositorySet()
 	if _, err := repository.NewResultOwnerRepositories(resultBackend{
 		binding: resultFirst.ResultOwnerBinding(), results: resultFirst.Results,
@@ -180,6 +220,7 @@ func TestResourceOwnerRepositoryBundlesRejectMixedMemorySets(t *testing.T) {
 
 func TestResourceOwnerRepositoryBundlesValidateForMemoryAndReopenedFileBackends(t *testing.T) {
 	memoryBundles := []interface{ Validate() error }{
+		memory.NewWorkspaceOwnerRepositorySet().OwnerRepositories(),
 		memory.NewResultOwnerRepositorySet().OwnerRepositories(),
 		memory.NewDecisionOwnerRepositorySet().OwnerRepositories(),
 		memory.NewApprovalOwnerRepositorySet().OwnerRepositories(),
@@ -196,7 +237,7 @@ func TestResourceOwnerRepositoryBundlesValidateForMemoryAndReopenedFileBackends(
 	for attempt := 0; attempt < 2; attempt++ {
 		file := workorchrepo.NewWorkspaceScopedFileRepositorySet(root)
 		fileBundles := []interface{ Validate() error }{
-			file.ResultOwner, file.DecisionOwner, file.ApprovalOwner, file.MemoryOwner, file.EventStreamOwner,
+			file.WorkspaceOwner, file.ResultOwner, file.DecisionOwner, file.ApprovalOwner, file.MemoryOwner, file.EventStreamOwner,
 		}
 		for idx, bundle := range fileBundles {
 			if err := bundle.Validate(); err != nil {

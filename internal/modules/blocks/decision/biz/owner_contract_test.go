@@ -146,6 +146,27 @@ func TestDecisionPrivilegedIngressRejectsForgedSourcesWithoutMutation(t *testing
 		if err != nil || !ok || result.ValidateFor(command) != nil {
 			t.Fatalf("trusted reconcile result = %#v err=%v", data, err)
 		}
+
+		staleNewRequest := newRequest
+		staleNewRequest.CandidateRevision++
+		staleNewRequest.CandidateHash = "candidate-hash-reconcile-stale"
+		staleNewRequest.CanonicalSignature = "one-of:reconcile-stale"
+		staleNewRequest.CanonicalSignatureHash = decisionevents.CanonicalDefinitionClarificationSignatureHash("workspace-signature", staleNewRequest.CanonicalSignatureVersion, staleNewRequest.CanonicalSignature)
+		staleNewRequest.TicketID = decisionevents.StableWorkspaceDefinitionClarificationTicketID(staleNewRequest)
+		stale := decisionevents.ReconcileWorkspaceDefinitionClarificationCandidateCommand{OldRequest: oldRequest, NewRequest: staleNewRequest}.Normalized()
+		if err := stale.Validate(); err != nil {
+			t.Fatalf("production-valid stale reconcile command: %v", err)
+		}
+		if _, err := sendDecisionOwnerContractCommand(bound, hub, decisionevents.TopicReconcileWorkspaceDefinitionClarificationCandidate, workspaceDefinitionClarificationSource, stale); !errors.Is(err, common.ErrConflict) {
+			t.Fatalf("persisted stale reconcile error = %v, want conflict", err)
+		}
+		if _, err := repositories.Tickets.Get(bound, staleNewRequest.TicketID); !errors.Is(err, common.ErrNotFound) {
+			t.Fatalf("persisted stale reconcile opened an unrelated blocker: %v", err)
+		}
+		oldTicket, err = repositories.Tickets.Get(bound, oldRequest.TicketID)
+		if err != nil || oldTicket.DefinitionClarification == nil || oldTicket.DefinitionClarification.ResolutionBindingHash != result.ReconciliationBindingHash {
+			t.Fatalf("persisted stale reconcile changed old binding = %+v err=%v", oldTicket, err)
+		}
 	})
 
 	t.Run("runtime open", func(t *testing.T) {

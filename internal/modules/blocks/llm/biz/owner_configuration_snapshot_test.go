@@ -67,7 +67,7 @@ func TestBizStartFreezesLLMConfigurationForCatalogAndStatus(t *testing.T) {
 
 	result := hub.Send(magicevent.NewEventWithContext(
 		llmevents.TopicLLMCommandGetActiveConfiguration,
-		"test",
+		llmApplicationOwnerSource,
 		llmevents.CommandDestination,
 		magicevent.NewHeader(),
 		ctx,

@@ -93,10 +93,9 @@ type definitionAdmissionProvenanceLedger struct {
 func newDefinitionAdmissionProvenanceTestBiz(t *testing.T, workspaces *memoryrepo.WorkspaceRepository) (*Biz, *definitionAdmissionProvenanceLedger) {
 	t.Helper()
 	hub := magicevent.NewHub(16)
-	owner, err := New(hub, nil, Dependencies{
-		Workspaces: workspaces, DeletionMaterialCleaner: workspaces, Goals: memoryrepo.NewGoalRepository(), DoDs: memoryrepo.NewDoDRepository(),
-		Templates: memoryrepo.NewWorkspaceTemplateRepository(), EventHub: hub,
-	})
+	owner, err := New(hub, nil, workspaceOwnerTestDependencies(
+		hub, nil, workspaces, workspaces, memoryrepo.NewGoalRepository(), memoryrepo.NewDoDRepository(), memoryrepo.NewWorkspaceTemplateRepository(),
+	))
 	if err != nil {
 		t.Fatal(err)
 	}

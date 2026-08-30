@@ -228,7 +228,7 @@ func startOwnerModules(exports Exports, rawHub magicevent.Hub, dataRoot string) 
 		return nil, err
 	}
 	workspaceModule := workspacemodule.New()
-	if err := configure(workspaceModule, workspaceModule.Configure(workspacebiz.Dependencies{Workspaces: repositories.Workspaces, DeletionMaterialCleaner: repositories.WorkspaceCleaner, Goals: repositories.Goals, DoDs: repositories.DoDs, Templates: repositories.WorkspaceTemplates, EventHub: rawHub})); err != nil {
+	if err := configure(workspaceModule, workspaceModule.Configure(workspacebiz.Dependencies{OwnerRepositories: repositories.WorkspaceOwner, EventHub: rawHub})); err != nil {
 		return nil, err
 	}
 	decisionModule := decisionmodule.New()

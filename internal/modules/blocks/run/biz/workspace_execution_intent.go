@@ -135,6 +135,7 @@ func (m *Biz) restartWorkspaceExecutionIntent(ctx context.Context, cmd runevents
 	if err != nil {
 		return runevents.WorkspaceExecutionIntentResult{}, err
 	}
+	inventory := runInventoryByWorkspaceAndID(items)
 	for _, item := range items {
 		if item != nil && strings.TrimSpace(item.ActivationRequestID) == cmd.RequestID {
 			if !replacementRunMatchesIntent(item, requestedIntent) {
@@ -144,6 +145,19 @@ func (m *Biz) restartWorkspaceExecutionIntent(ctx context.Context, cmd runevents
 			case common.RunStatePending:
 				if err := validatePendingWorkspaceActivation(item); err != nil {
 					return runevents.WorkspaceExecutionIntentResult{}, err
+				}
+				predecessor, err := validatePendingReplacementSuccessor(item, inventory)
+				if err != nil {
+					return runevents.WorkspaceExecutionIntentResult{}, err
+				}
+				if predecessor != nil {
+					// A linked successor is not an ordinary create-before-activate
+					// cut. Its predecessor must first seal SuccessorRunID and the
+					// superseded lineage through the replacement private reducer.
+					// Exact ingress replay may wake that persisted transaction, but
+					// must not activate the child directly.
+					m.scheduleReplacementRecovery(predecessor.WorkspaceID, predecessor.ID)
+					return runExecutionIntentResult(cmd, item.ID, runtimecontract.RuntimeExecutionIntentReplacementPending, runtimecontract.RuntimeExecutionIntentReasonDuplicateRestart), nil
 				}
 				transition, err := m.applyRunActivation(ctx, activateRunFact{
 					WorkspaceID: item.WorkspaceID, RunID: item.ID,
@@ -165,6 +179,12 @@ func (m *Biz) restartWorkspaceExecutionIntent(ctx context.Context, cmd runevents
 				return runevents.WorkspaceExecutionIntentResult{}, fmt.Errorf("%w: restart request already belongs to a terminal or non-reconcilable Run", common.ErrConflict)
 			}
 		}
+	}
+	// A successor can be durably created before its predecessor seals the
+	// SuccessorRunID CAS. Resolve the exact ActivationRequestID across the
+	// complete inventory first; repository ordering must not let the older
+	// predecessor shadow that already-materialized child.
+	for _, item := range items {
 		if item != nil && item.ReplacementIntent != nil && item.ReplacementIntent.RequestID == cmd.RequestID {
 			if !item.ReplacementIntent.ValidFor(item) {
 				return runevents.WorkspaceExecutionIntentResult{}, fmt.Errorf("%w: persisted replacement intent is invalid", common.ErrConflict)
@@ -425,9 +445,13 @@ func validatePendingWorkspaceActivation(item *runmodel.Run) error {
 		item.WorkspaceRunGeneration == 0 || strings.TrimSpace(item.ActivationRequestID) == "" ||
 		item.RuntimeBootstrap == nil || item.ReconciliationScope != runtimecontract.RuntimeCWIReconciliationScopeWorkspaceFull ||
 		strings.TrimSpace(item.InitialStepKind) != llmcommon.StepKindWorkspaceExecution ||
+		item.Lineage.LineageState != runmodel.RunLineageStateActive || item.Lineage.SuccessorRunID != "" ||
 		strings.TrimSpace(item.StartedAt) != "" || strings.TrimSpace(item.EndedAt) != "" || item.TerminalDelivery != nil ||
 		item.BlockingTicketID != "" || item.BlockingApprovalID != "" || strings.TrimSpace(item.FailureReason) != "" {
 		return fmt.Errorf("%w: pending restart activation record is incomplete or inconsistent", common.ErrConflict)
+	}
+	if item.ID != runmodel.WorkspaceRunID(item.WorkspaceRunGeneration) {
+		return fmt.Errorf("%w: pending restart activation generation is not canonical", common.ErrConflict)
 	}
 	if err := item.RuntimeBootstrap.Validate(); err != nil {
 		return fmt.Errorf("%w: pending restart bootstrap is invalid: %v", common.ErrConflict, err)
@@ -439,6 +463,78 @@ func validatePendingWorkspaceActivation(item *runmodel.Run) error {
 		return fmt.Errorf("%w: pending restart bootstrap does not match Run identity", common.ErrConflict)
 	}
 	return nil
+}
+
+// validatePendingReplacementSuccessor distinguishes the second half of a
+// replacement transaction from a root restart activation. A successor can be
+// durable before the predecessor's lineage CAS; neither startup nor an exact
+// Workspace ingress replay may activate it across that cut.
+type workspaceRunInventoryKey struct {
+	workspaceID common.WorkspaceID
+	runID       common.RunID
+}
+
+func validatePendingReplacementSuccessor(item *runmodel.Run, inventory map[workspaceRunInventoryKey]*runmodel.Run) (*runmodel.Run, error) {
+	if item == nil {
+		return nil, common.ErrInvalidArgument
+	}
+	predecessorID := item.Lineage.PredecessorRunID
+	predecessorResultID := item.Lineage.PredecessorResultID
+	if predecessorID == "" && predecessorResultID == "" {
+		return nil, nil
+	}
+	if predecessorID == "" || predecessorResultID == "" || item.Lineage.LineageState != runmodel.RunLineageStateActive || item.Lineage.SuccessorRunID != "" {
+		return nil, fmt.Errorf("%w: pending replacement successor lineage is incomplete", common.ErrConflict)
+	}
+	predecessor := inventory[workspaceRunInventoryKey{workspaceID: item.WorkspaceID, runID: predecessorID}]
+	if predecessor == nil || !runStateIsTerminal(predecessor.State) ||
+		predecessor.TerminalResultID != predecessorResultID || predecessor.ReplacementIntent == nil ||
+		!predecessor.ReplacementIntent.ValidFor(predecessor) ||
+		!replacementRunMatchesIntent(item, *predecessor.ReplacementIntent) {
+		return nil, fmt.Errorf("%w: pending replacement successor is not bound to its predecessor transaction", common.ErrConflict)
+	}
+	if predecessor.WorkspaceRunGeneration == ^uint64(0) ||
+		item.WorkspaceRunGeneration != predecessor.WorkspaceRunGeneration+1 ||
+		item.ID != runmodel.WorkspaceRunID(item.WorkspaceRunGeneration) {
+		return nil, fmt.Errorf("%w: pending replacement successor generation is not canonical", common.ErrConflict)
+	}
+	intent := predecessor.ReplacementIntent
+	if intent.Recovery.Stage != runmodel.ReplacementRecoverySuccessorMaterialization || !replacementRecoveryAdmissibleAtStartup(intent.Recovery.State) {
+		return nil, fmt.Errorf("%w: pending replacement successor has no recoverable owner lease", common.ErrConflict)
+	}
+	switch intent.State {
+	case runmodel.ReplacementIntentTerminationAcknowledged:
+		if intent.SuccessorRunID != "" || predecessor.Lineage.SuccessorRunID != "" {
+			return nil, fmt.Errorf("%w: unbound replacement successor has conflicting predecessor lineage", common.ErrConflict)
+		}
+	case runmodel.ReplacementIntentSuccessorCreated:
+		if intent.SuccessorRunID != item.ID || predecessor.Lineage.SuccessorRunID != item.ID || predecessor.Lineage.LineageState != runmodel.RunLineageStateSuperseded {
+			return nil, fmt.Errorf("%w: replacement successor lineage binding drifted", common.ErrConflict)
+		}
+	default:
+		return nil, fmt.Errorf("%w: pending replacement successor is inconsistent with predecessor stage", common.ErrConflict)
+	}
+	return predecessor, nil
+}
+
+// replacementRecoveryAdmissibleAtStartup separates structural durability from
+// process-local scheduling. Exhausted is a valid terminal owner lease: startup
+// must retain its linked pending child for diagnosis/exact replay, but
+// scheduleReplacementRecovery deliberately mounts no new attempt for it.
+func replacementRecoveryAdmissibleAtStartup(state runmodel.ReplacementRecoveryState) bool {
+	return state == runmodel.ReplacementRecoveryScheduled ||
+		state == runmodel.ReplacementRecoveryRunning ||
+		state == runmodel.ReplacementRecoveryExhausted
+}
+
+func runInventoryByWorkspaceAndID(items []*runmodel.Run) map[workspaceRunInventoryKey]*runmodel.Run {
+	ret := make(map[workspaceRunInventoryKey]*runmodel.Run, len(items))
+	for _, item := range items {
+		if item != nil && item.WorkspaceID != "" && item.ID != "" {
+			ret[workspaceRunInventoryKey{workspaceID: item.WorkspaceID, runID: item.ID}] = item
+		}
+	}
+	return ret
 }
 
 // recoverPendingWorkspaceActivations closes the Run-create -> activation CAS
@@ -454,6 +550,7 @@ func (m *Biz) recoverPendingWorkspaceActivations() error {
 	if err != nil {
 		return err
 	}
+	inventory := runInventoryByWorkspaceAndID(items)
 	// Validate the complete owner inventory before the first CAS. Startup must
 	// not partially activate one Workspace and only then discover corrupt
 	// activation lineage in another.
@@ -469,11 +566,23 @@ func (m *Biz) recoverPendingWorkspaceActivations() error {
 			}
 			currentByWorkspace[item.WorkspaceID] = item.ID
 		}
-		if item.State != common.RunStatePending || strings.TrimSpace(item.ActivationRequestID) == "" {
+		if item.State != common.RunStatePending {
 			continue
+		}
+		if strings.TrimSpace(item.ActivationRequestID) == "" {
+			return fmt.Errorf("%w: pending Workspace activation lacks request identity", common.ErrConflict)
 		}
 		if err := validatePendingWorkspaceActivation(item); err != nil {
 			return err
+		}
+		predecessor, err := validatePendingReplacementSuccessor(item, inventory)
+		if err != nil {
+			return err
+		}
+		if predecessor != nil {
+			// Start remounts the predecessor's persisted replacement lease.
+			// Leave the child pending until that private reducer seals lineage.
+			continue
 		}
 		plan = append(plan, item)
 	}

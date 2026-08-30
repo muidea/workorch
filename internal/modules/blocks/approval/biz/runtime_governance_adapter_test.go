@@ -15,6 +15,7 @@ import (
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/repository/memory"
 	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
+	"github.com/muidea/workorch/internal/pkg/workorchrepo"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
@@ -150,6 +151,105 @@ func TestApprovalResolutionIngressRequiresTrustedSourceAndPrincipal(t *testing.T
 	}
 }
 
+func TestApprovalResolutionIngressCoversPrincipalAndTerminalMatrix(t *testing.T) {
+	ctx := context.Background()
+	hub := magicevent.NewHub(64)
+	t.Cleanup(func() { hub.Terminate(ctx) })
+	repo := memory.NewApprovalRepository()
+	startApprovalBizForGovernanceTest(t, hub, repo)
+	var evidenceValid atomic.Bool
+	evidenceValid.Store(true)
+	var resolutionValid atomic.Bool
+	resolutionValid.Store(true)
+	subscribeApprovalDeliveryResults(t, hub, &evidenceValid, &resolutionValid)
+
+	tests := []struct {
+		name      string
+		source    string
+		principal approvalmodel.ApprovalResolutionPrincipal
+		topic     string
+		wantState common.ApprovalState
+	}{
+		{
+			name: "application human approved", source: approvalApplicationSource,
+			principal: approvalmodel.ApprovalResolutionPrincipal{Kind: approvalmodel.ApprovalResolutionPrincipalHumanOperator, SubjectID: approvalApplicationSource},
+			topic:     approvalevents.TopicApprovalCommandEnsureApproved, wantState: common.ApprovalStateApproved,
+		},
+		{
+			name: "application human rejected", source: approvalApplicationSource,
+			principal: approvalmodel.ApprovalResolutionPrincipal{Kind: approvalmodel.ApprovalResolutionPrincipalHumanOperator, SubjectID: approvalApplicationSource},
+			topic:     approvalevents.TopicApprovalCommandEnsureRejected, wantState: common.ApprovalStateRejected,
+		},
+		{
+			name: "governance auto approved", source: approvalGovernanceSource,
+			principal: approvalmodel.ApprovalResolutionPrincipal{Kind: approvalmodel.ApprovalResolutionPrincipalAutoGovernance, SubjectID: approvalGovernanceSource},
+			topic:     approvalevents.TopicApprovalCommandEnsureApproved, wantState: common.ApprovalStateApproved,
+		},
+		{
+			name: "governance auto rejected", source: approvalGovernanceSource,
+			principal: approvalmodel.ApprovalResolutionPrincipal{Kind: approvalmodel.ApprovalResolutionPrincipalAutoGovernance, SubjectID: approvalGovernanceSource},
+			topic:     approvalevents.TopicApprovalCommandEnsureRejected, wantState: common.ApprovalStateRejected,
+		},
+	}
+	for index, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			suffix := string(rune('a' + index))
+			workspaceID := common.WorkspaceID("ws-principal-matrix-" + suffix)
+			runID := common.RunID("run-principal-matrix-" + suffix)
+			approvalID := common.ApprovalID("approval-principal-matrix-" + suffix)
+			if err := repo.Create(ctx, &approvalmodel.Approval{
+				ID: approvalID, WorkspaceID: workspaceID, RunID: runID,
+				Reason: "principal matrix", State: common.ApprovalStatePending,
+			}); err != nil {
+				t.Fatal(err)
+			}
+			base := approvalevents.ResolveApprovalCommand{
+				ApprovalID: approvalID, WorkspaceID: workspaceID, RunID: runID, Principal: test.principal,
+				ResolutionContext: workorcheventpayload.New(workorcheventpayload.StringField("summary", test.name)).Fields,
+			}
+			var command any
+			switch test.topic {
+			case approvalevents.TopicApprovalCommandEnsureApproved:
+				command = approvalevents.EnsureApprovedCommand(base)
+			case approvalevents.TopicApprovalCommandEnsureRejected:
+				command = approvalevents.EnsureRejectedCommand(base)
+			default:
+				t.Fatalf("unknown topic %q", test.topic)
+			}
+			if err := approvalCommandError(hub, test.source, test.topic, command); err != nil {
+				t.Fatalf("trusted resolution: %v", err)
+			}
+			item, err := repo.GetScoped(ctx, workspaceID, runID, approvalID)
+			if err != nil || item.State != test.wantState || item.ResolutionPrincipal != test.principal {
+				t.Fatalf("resolved approval = %+v err=%v", item, err)
+			}
+		})
+	}
+
+	workspaceID := common.WorkspaceID("ws-forged-auto-principal")
+	runID := common.RunID("run-forged-auto-principal")
+	approvalID := common.ApprovalID("approval-forged-auto-principal")
+	if err := repo.Create(ctx, &approvalmodel.Approval{
+		ID: approvalID, WorkspaceID: workspaceID, RunID: runID,
+		Reason: "forged auto principal", State: common.ApprovalStatePending,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	forged := approvalevents.EnsureRejectedCommand{
+		ApprovalID: approvalID, WorkspaceID: workspaceID, RunID: runID,
+		Principal: approvalmodel.ApprovalResolutionPrincipal{
+			Kind: approvalmodel.ApprovalResolutionPrincipalHumanOperator, SubjectID: approvalGovernanceSource,
+		},
+	}
+	if err := approvalCommandError(hub, approvalGovernanceSource, approvalevents.TopicApprovalCommandEnsureRejected, forged); !errors.Is(err, common.ErrInvalidArgument) {
+		t.Fatalf("forged governance principal err = %v, want invalid argument", err)
+	}
+	item, err := repo.GetScoped(ctx, workspaceID, runID, approvalID)
+	if err != nil || item.State != common.ApprovalStatePending || item.ResolutionID != "" {
+		t.Fatalf("forged governance principal mutated approval = %+v err=%v", item, err)
+	}
+}
+
 func TestRuntimeApprovalRequestRequiresOrchestratorAndExactReplay(t *testing.T) {
 	ctx := context.Background()
 	hub := magicevent.NewHub(32)
@@ -272,6 +372,169 @@ func TestRuntimeApprovalProposalRecoversAfterInvalidCommitResult(t *testing.T) {
 	}
 	if len(hub.Posted()) != 1 {
 		t.Fatalf("duplicate reconciliation published %d notifications, want one", len(hub.Posted()))
+	}
+}
+
+func TestApprovalFileOwnerRecoversDurableRuntimeProposalAfterReopen(t *testing.T) {
+	ctx := context.Background()
+	root := t.TempDir()
+	open := approvalevents.OpenRuntimeApprovalRequestCommand{
+		ApprovalID: "approval-file-proposal", WorkspaceID: "ws-file-proposal", RunID: "run-file-proposal",
+		DispatchID: "dispatch-file-proposal", AuthoritySnapshotID: "authority-file-proposal",
+		DependencyKind: string(runtimecontract.GovernanceApproval), SubjectRef: "secret-file.txt",
+		Reason: "file-backed approval", RequestedAction: "file/write", RiskLevel: "high",
+		AuthorizationContext: workorcheventpayload.New(workorcheventpayload.StringField("targetRef", "secret-file.txt")).Fields,
+	}
+	bound := common.ContextWithRuntimeWorkspaceID(ctx, open.WorkspaceID)
+
+	firstRepositories := workorchrepo.NewWorkspaceScopedFileRepositorySet(root)
+	firstHub := magicevent.NewHub(64)
+	first, err := New(firstHub, nil, Dependencies{OwnerRepositories: firstRepositories.ApprovalOwner, EventHub: firstHub})
+	if err != nil {
+		t.Fatalf("configure first file owner: %v", err)
+	}
+	if err := first.Start(); err != nil {
+		t.Fatalf("start first file owner: %v", err)
+	}
+	invalidCommit := magicevent.NewSimpleObserver(orchestratorevents.CommandDestination, firstHub)
+	invalidCommit.Subscribe(orchestratorevents.TopicOrchestratorCommitRuntimeGovernanceApproval, func(_ magicevent.Event, result magicevent.Result) {
+		result.Set(struct{}{}, nil)
+	})
+	if err := approvalCommandError(firstHub, runtimecontract.RuntimeModuleOrchestrator, approvalevents.TopicOpenRuntimeApprovalRequest, open); err != nil {
+		t.Fatalf("open file-backed approval: %v", err)
+	}
+	resolution := humanApprovalResolution(open.ApprovalID, open.WorkspaceID, open.RunID)
+	if err := approvalCommandError(firstHub, approvalApplicationSource, approvalevents.TopicApprovalCommandEnsureApproved, resolution); !errors.Is(err, common.ErrInvalidArgument) {
+		t.Fatalf("invalid first commit result err = %v, want invalid argument", err)
+	}
+	pending, err := firstRepositories.Approvals.GetScoped(bound, open.WorkspaceID, open.RunID, open.ApprovalID)
+	if err != nil || pending.State != common.ApprovalStatePending || pending.ResolutionProposal == nil || pending.ResolutionProposal.State != approvalmodel.ResolutionProposalPending {
+		t.Fatalf("durable file proposal = %+v err=%v", pending, err)
+	}
+	invalidCommit.Unsubscribe(orchestratorevents.TopicOrchestratorCommitRuntimeGovernanceApproval)
+	first.Teardown(ctx)
+	firstHub.Terminate(ctx)
+
+	secondRepositories := workorchrepo.NewWorkspaceScopedFileRepositorySet(root)
+	secondHub := magicevent.NewHub(64)
+	second, err := New(secondHub, nil, Dependencies{OwnerRepositories: secondRepositories.ApprovalOwner, EventHub: secondHub})
+	if err != nil {
+		t.Fatalf("configure reopened file owner: %v", err)
+	}
+	if err := second.Start(); err != nil {
+		t.Fatalf("start reopened file owner: %v", err)
+	}
+	t.Cleanup(func() {
+		second.Teardown(context.Background())
+		secondHub.Terminate(context.Background())
+	})
+	commit := magicevent.NewSimpleObserver(orchestratorevents.CommandDestination, secondHub)
+	commit.Subscribe(orchestratorevents.TopicOrchestratorCommitRuntimeGovernanceApproval, func(event magicevent.Event, result magicevent.Result) {
+		command, ok := event.Data().(orchestratorevents.CommitRuntimeGovernanceApprovalResolutionCommand)
+		if !ok {
+			result.Set(struct{}{}, nil)
+			return
+		}
+		result.Set(orchestratorevents.CommitRuntimeGovernanceResolutionResult{
+			WorkspaceID: command.WorkspaceID, RunID: command.RunID, ResolutionID: command.ResolutionID,
+			Disposition:   orchestratorevents.RuntimeGovernanceResolutionDispositionCommitted,
+			StateRevision: 2, EvidenceRevision: "evidence-file-proposal",
+			AuthoritySnapshotID: open.AuthoritySnapshotID, State: runtimecontract.ConvergenceStateNeedStateChange,
+		}, nil)
+	})
+	t.Cleanup(func() { commit.Unsubscribe(orchestratorevents.TopicOrchestratorCommitRuntimeGovernanceApproval) })
+	var evidenceValid atomic.Bool
+	evidenceValid.Store(true)
+	var resolutionValid atomic.Bool
+	resolutionValid.Store(true)
+	subscribeApprovalDeliveryResults(t, secondHub, &evidenceValid, &resolutionValid)
+
+	if err := second.ReconcileApprovalDeliveries(bound); err != nil {
+		t.Fatalf("reconcile reopened file proposal: %v", err)
+	}
+	recovered, err := secondRepositories.Approvals.GetScoped(bound, open.WorkspaceID, open.RunID, open.ApprovalID)
+	if err != nil || recovered.State != common.ApprovalStateApproved || recovered.ResolutionProposal == nil || recovered.ResolutionProposal.State != approvalmodel.ResolutionProposalCommitted || recovered.EvidenceRecordedAt == "" || recovered.ResolutionNotificationPublishedAt == "" {
+		t.Fatalf("recovered file approval = %+v err=%v", recovered, err)
+	}
+	if recovered.ResolutionPrincipal != resolution.Principal || !recovered.ResolutionContext.Equal(workorcheventpayload.New(resolution.ResolutionContext...)) {
+		t.Fatalf("recovered file approval resolution drift = %+v", recovered)
+	}
+}
+
+func TestApprovalFileOwnerRecoversTerminalDeliveryCheckpointsAfterReopen(t *testing.T) {
+	for _, checkpoint := range []struct {
+		name                  string
+		id                    string
+		firstEvidenceValid    bool
+		firstResolutionValid  bool
+		wantEvidencePersisted bool
+	}{
+		{name: "evidence pending", id: "evidence-pending", firstEvidenceValid: false, firstResolutionValid: true, wantEvidencePersisted: false},
+		{name: "audit pending", id: "audit-pending", firstEvidenceValid: true, firstResolutionValid: false, wantEvidencePersisted: true},
+	} {
+		t.Run(checkpoint.name, func(t *testing.T) {
+			ctx := context.Background()
+			root := t.TempDir()
+			workspaceID := common.WorkspaceID("ws-file-" + checkpoint.id)
+			runID := common.RunID("run-file-" + checkpoint.id)
+			approvalID := common.ApprovalID("approval-file-" + checkpoint.id)
+			bound := common.ContextWithRuntimeWorkspaceID(ctx, workspaceID)
+
+			firstRepositories := workorchrepo.NewWorkspaceScopedFileRepositorySet(root)
+			if err := firstRepositories.Approvals.Create(bound, &approvalmodel.Approval{
+				ID: approvalID, WorkspaceID: workspaceID, RunID: runID,
+				Reason: "file delivery checkpoint", State: common.ApprovalStatePending,
+			}); err != nil {
+				t.Fatalf("seed approval: %v", err)
+			}
+			firstHub := magicevent.NewHub(64)
+			first, err := New(firstHub, nil, Dependencies{OwnerRepositories: firstRepositories.ApprovalOwner, EventHub: firstHub})
+			if err != nil {
+				t.Fatalf("configure first owner: %v", err)
+			}
+			if err := first.Start(); err != nil {
+				t.Fatalf("start first owner: %v", err)
+			}
+			var firstEvidenceValid atomic.Bool
+			firstEvidenceValid.Store(checkpoint.firstEvidenceValid)
+			var firstResolutionValid atomic.Bool
+			firstResolutionValid.Store(checkpoint.firstResolutionValid)
+			subscribeApprovalDeliveryResults(t, firstHub, &firstEvidenceValid, &firstResolutionValid)
+			resolution := humanApprovalResolution(approvalID, workspaceID, runID)
+			if err := approvalCommandError(firstHub, approvalApplicationSource, approvalevents.TopicApprovalCommandEnsureApproved, resolution); !errors.Is(err, common.ErrInvalidArgument) {
+				t.Fatalf("first checkpoint delivery err = %v, want invalid argument", err)
+			}
+			persisted, err := firstRepositories.Approvals.GetScoped(bound, workspaceID, runID, approvalID)
+			if err != nil || persisted.State != common.ApprovalStateApproved || (persisted.EvidenceRecordedAt != "") != checkpoint.wantEvidencePersisted || persisted.ResolutionNotificationPublishedAt != "" {
+				t.Fatalf("persisted checkpoint approval = %+v err=%v", persisted, err)
+			}
+			first.Teardown(ctx)
+			firstHub.Terminate(ctx)
+
+			secondRepositories := workorchrepo.NewWorkspaceScopedFileRepositorySet(root)
+			secondHub := magicevent.NewHub(64)
+			second, err := New(secondHub, nil, Dependencies{OwnerRepositories: secondRepositories.ApprovalOwner, EventHub: secondHub})
+			if err != nil {
+				t.Fatalf("configure reopened owner: %v", err)
+			}
+			if err := second.Start(); err != nil {
+				t.Fatalf("start reopened owner: %v", err)
+			}
+			var secondEvidenceValid atomic.Bool
+			secondEvidenceValid.Store(true)
+			var secondResolutionValid atomic.Bool
+			secondResolutionValid.Store(true)
+			subscribeApprovalDeliveryResults(t, secondHub, &secondEvidenceValid, &secondResolutionValid)
+			if err := second.ReconcileApprovalDeliveries(bound); err != nil {
+				t.Fatalf("reconcile reopened checkpoint: %v", err)
+			}
+			recovered, err := secondRepositories.Approvals.GetScoped(bound, workspaceID, runID, approvalID)
+			if err != nil || recovered.State != common.ApprovalStateApproved || recovered.EvidenceRecordedAt == "" || recovered.ResolutionNotificationPublishedAt == "" || recovered.ResolutionPrincipal != resolution.Principal {
+				t.Fatalf("recovered checkpoint approval = %+v err=%v", recovered, err)
+			}
+			second.Teardown(ctx)
+			secondHub.Terminate(ctx)
+		})
 	}
 }
 

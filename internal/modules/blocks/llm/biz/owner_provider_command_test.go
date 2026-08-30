@@ -427,7 +427,7 @@ func TestGenericProviderCompletionStreamingCompletedEmptyReturnsErrorAndPublishe
 	request.Kind = "provider_completion"
 	request.Model = "chat-model"
 	magicResult := hub.Send(magicevent.NewEventWithContext(
-		llmevents.TopicLLMCommandCompleteProvider, "application/workorchd", llmevents.CommandDestination,
+		llmevents.TopicLLMCommandCompleteProvider, llmSetupDraftAppserviceSource, llmevents.CommandDestination,
 		magicevent.NewHeader(), ctx, llmevents.CompleteProviderCommand{Request: llmevents.ProviderRequestFromModel(request)},
 	))
 	if magicResult == nil {
@@ -534,7 +534,7 @@ func TestProviderCommandsPublishAuditAndRejectPostBeforePhysicalCall(t *testing.
 
 	embeddingTarget := runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "embedding-model"}
 	result := hub.Send(magicevent.NewEventWithContext(
-		llmevents.TopicLLMCommandGenerateEmbedding, "application/workorchd", llmevents.CommandDestination,
+		llmevents.TopicLLMCommandGenerateEmbedding, llmApplicationOwnerSource, llmevents.CommandDestination,
 		magicevent.NewHeader(), ctx, llmevents.GenerateEmbeddingCommand{WorkspaceID: "workspace-1", Target: embeddingTarget, Input: "workspace goal"},
 	))
 	if result == nil || result.Error() != nil {
@@ -559,7 +559,7 @@ func TestProviderCommandsPublishAuditAndRejectPostBeforePhysicalCall(t *testing.
 	completionRequest.Kind = "provider_completion"
 	completionRequest.Model = completionTarget.ModelID
 	result = hub.Send(magicevent.NewEventWithContext(
-		llmevents.TopicLLMCommandCompleteProvider, "application/workorchd", llmevents.CommandDestination,
+		llmevents.TopicLLMCommandCompleteProvider, llmSetupDraftAppserviceSource, llmevents.CommandDestination,
 		magicevent.NewHeader(), ctx, llmevents.CompleteProviderCommand{Target: completionTarget, Request: llmevents.ProviderRequestFromModel(completionRequest)},
 	))
 	if result == nil {
@@ -581,11 +581,11 @@ func TestProviderCommandsPublishAuditAndRejectPostBeforePhysicalCall(t *testing.
 	}
 
 	hub.Post(magicevent.NewEventWithContext(
-		llmevents.TopicLLMCommandGenerateEmbedding, "application/workorchd", llmevents.CommandDestination,
+		llmevents.TopicLLMCommandGenerateEmbedding, llmApplicationOwnerSource, llmevents.CommandDestination,
 		magicevent.NewHeader(), ctx, llmevents.GenerateEmbeddingCommand{WorkspaceID: "workspace-1", Target: embeddingTarget, Input: "must not execute"},
 	))
 	hub.Post(magicevent.NewEventWithContext(
-		llmevents.TopicLLMCommandCompleteProvider, "application/workorchd", llmevents.CommandDestination,
+		llmevents.TopicLLMCommandCompleteProvider, llmSetupDraftAppserviceSource, llmevents.CommandDestination,
 		magicevent.NewHeader(), ctx, llmevents.CompleteProviderCommand{Request: llmevents.ProviderRequestFromModel(llmmodels.ProviderRequest{Kind: "post-must-not-execute"})},
 	))
 	hub.Post(magicevent.NewEventWithContext(
@@ -593,11 +593,32 @@ func TestProviderCommandsPublishAuditAndRejectPostBeforePhysicalCall(t *testing.
 		magicevent.NewHeader(), ctx, llmevents.RequestRuntimeCandidateCommand{},
 	))
 	hub.Post(magicevent.NewEventWithContext(
-		llmevents.TopicLLMCommandRefreshProviderModelCatalog, "application/workorchd", llmevents.CommandDestination,
+		llmevents.TopicLLMCommandRefreshProviderModelCatalog, llmApplicationOwnerSource, llmevents.CommandDestination,
 		magicevent.NewHeader(), ctx, llmevents.RefreshProviderModelCatalogCommand{},
 	))
 	time.Sleep(100 * time.Millisecond)
 	if embeddingCalls.Load() != 1 || responseCalls.Load() != 1 || candidateProvider.calls.Load() != 0 || catalogCalls.Load() != 1 {
 		t.Fatalf("Post physical calls: embedding=%d completion=%d candidate=%d catalog=%d", embeddingCalls.Load(), responseCalls.Load(), candidateProvider.calls.Load(), catalogCalls.Load())
+	}
+
+	owner.Teardown(ctx)
+	for _, event := range []magicevent.Event{
+		magicevent.NewEventWithContext(
+			llmevents.TopicLLMCommandGenerateEmbedding, llmApplicationOwnerSource, llmevents.CommandDestination,
+			magicevent.NewHeader(), ctx, llmevents.GenerateEmbeddingCommand{WorkspaceID: "workspace-1", Target: embeddingTarget, Input: "must not execute after stop"},
+		),
+		magicevent.NewEventWithContext(
+			llmevents.TopicLLMCommandCompleteProvider, llmSetupDraftAppserviceSource, llmevents.CommandDestination,
+			magicevent.NewHeader(), ctx, llmevents.CompleteProviderCommand{Target: completionTarget, Request: llmevents.ProviderRequestFromModel(completionRequest)},
+		),
+		magicevent.NewEventWithContext(
+			llmevents.TopicLLMCommandRefreshProviderModelCatalog, llmApplicationOwnerSource, llmevents.CommandDestination,
+			magicevent.NewHeader(), ctx, llmevents.RefreshProviderModelCatalogCommand{},
+		),
+	} {
+		hub.Send(event)
+	}
+	if embeddingCalls.Load() != 1 || responseCalls.Load() != 1 || catalogCalls.Load() != 1 {
+		t.Fatalf("post-Stop physical calls: embedding=%d completion=%d catalog=%d", embeddingCalls.Load(), responseCalls.Load(), catalogCalls.Load())
 	}
 }

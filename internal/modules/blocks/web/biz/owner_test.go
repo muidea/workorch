@@ -200,6 +200,22 @@ func TestWebOwnerFailsClosedBeforeNetworkAndCommitsRecoverableEvidence(t *testin
 	if providerCalls.Load() != 1 || !runtimecontract.SameRuntimeOperationReceipt(receipt, duplicateReceipt) {
 		t.Fatalf("duplicate Web execution crossed provider fence: first=%+v duplicate=%+v calls=%d", receipt, duplicateReceipt, providerCalls.Load())
 	}
+
+	owner.Teardown(ctx)
+	restarted := &Biz{Base: basebiz.New(ModuleID, hub, nil), runtimeAdapter: adapter}
+	if err := restarted.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { restarted.Teardown(ctx) })
+	restartedDuplicate := hub.Send(event)
+	restartedData, err := restartedDuplicate.Get()
+	if err != nil {
+		t.Fatal(err)
+	}
+	restartedReceipt := restartedData.(webevents.ExecuteOperationResult).Receipt
+	if providerCalls.Load() != 1 || !runtimecontract.SameRuntimeOperationReceipt(receipt, restartedReceipt) {
+		t.Fatalf("fresh Web owner repeated provider request: first=%+v replayed=%+v calls=%d", receipt, restartedReceipt, providerCalls.Load())
+	}
 }
 
 func TestWebOwnerCommitsSafeRejectedReceiptForProviderFailure(t *testing.T) {
@@ -296,6 +312,32 @@ func TestWebOwnerFetchRequiresGrantThenCommitsBoundedReceipt(t *testing.T) {
 	}
 	if err := receipt.Validate(); err != nil {
 		t.Fatalf("fetch receipt validation: %v", err)
+	}
+	resumeEvent := magicevent.NewEventWithContext(
+		webevents.TopicExecuteOperation, runtimecontract.RuntimeModuleOrchestrator, ModuleID, magicevent.NewHeader(), ctx, resume,
+	)
+	duplicateData, err := hub.Send(resumeEvent).Get()
+	if err != nil {
+		t.Fatal(err)
+	}
+	duplicateReceipt := duplicateData.(webevents.ExecuteOperationResult).Receipt
+	if calls.Load() != 1 || !runtimecontract.SameRuntimeOperationReceipt(receipt, duplicateReceipt) {
+		t.Fatalf("duplicate fetch repeated target request: first=%+v duplicate=%+v calls=%d", receipt, duplicateReceipt, calls.Load())
+	}
+
+	owner.Teardown(ctx)
+	restarted := &Biz{Base: basebiz.New(ModuleID, hub, nil), runtimeAdapter: adapter}
+	if err := restarted.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { restarted.Teardown(ctx) })
+	restartedData, err := hub.Send(resumeEvent).Get()
+	if err != nil {
+		t.Fatal(err)
+	}
+	restartedReceipt := restartedData.(webevents.ExecuteOperationResult).Receipt
+	if calls.Load() != 1 || !runtimecontract.SameRuntimeOperationReceipt(receipt, restartedReceipt) {
+		t.Fatalf("fresh Web owner repeated fetch: first=%+v replayed=%+v calls=%d", receipt, restartedReceipt, calls.Load())
 	}
 }
 

@@ -3,6 +3,7 @@ package file
 import (
 	"context"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	magicevent "github.com/muidea/magicCommon/event"
@@ -10,6 +11,16 @@ import (
 	fileevents "github.com/muidea/workorch/internal/modules/blocks/file/pkg/events"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
+
+type fileCountingDataEvent struct {
+	magicevent.Event
+	reads atomic.Int32
+}
+
+func (e *fileCountingDataEvent) Data() any {
+	e.reads.Add(1)
+	return struct{}{}
+}
 
 func TestFileRuntimeOwnerCommandsRejectUntrustedSources(t *testing.T) {
 	ctx := context.Background()
@@ -92,5 +103,60 @@ func TestFileOwnerStartIsIdempotentAndTeardownClearsLifecycle(t *testing.T) {
 	owner.Teardown(ctx)
 	if owner.started || owner.runtimeAdapter != nil {
 		t.Fatalf("owner teardown retained lifecycle resources: started=%t adapter=%v", owner.started, owner.runtimeAdapter)
+	}
+}
+
+func TestFileOwnerWrongDTOAndLifecycleMatrixCoversAllFifteenTopics(t *testing.T) {
+	ctx := context.Background()
+	hub := magicevent.NewHub(32)
+	t.Cleanup(func() { hub.Terminate(ctx) })
+	owner := &Biz{Base: basebiz.New(ModuleID, hub, nil), runtimeAdapter: NewRuntimeAdapter()}
+	if err := owner.Start(); err != nil {
+		t.Fatal(err)
+	}
+	if err := owner.Start(); err != nil {
+		t.Fatal(err)
+	}
+	topics := []struct {
+		topic       string
+		destination string
+	}{
+		{fileevents.TopicAcquireRuntimeCapabilities, ModuleID},
+		{fileevents.TopicAcquireRuntimeOperationAdmissibility, ModuleID},
+		{fileevents.TopicProbeRuntimeOperationFeasibility, ModuleID},
+		{fileevents.TopicProbeRuntimeSemanticProofFeasibility, ModuleID},
+		{fileevents.TopicQueryRuntimeCWIReconciliation, ModuleID},
+		{fileevents.TopicAcquireTargetSnapshot, fileevents.PrerequisiteCommandDestination},
+		{fileevents.TopicAcquireRuntimeTargetSelection, fileevents.PrerequisiteCommandDestination},
+		{fileevents.TopicAcquireWorkspaceManifest, fileevents.PrerequisiteCommandDestination},
+		{fileevents.TopicConfirmRuntimeRepairSurface, fileevents.PrerequisiteCommandDestination},
+		{fileevents.TopicExecuteFileListOperation, ModuleID},
+		{fileevents.TopicExecuteFileReadOperation, ModuleID},
+		{fileevents.TopicExecuteFileEditOperation, ModuleID},
+		{fileevents.TopicExecuteFileWriteOperation, ModuleID},
+		{fileevents.TopicExecutePatchApplyOperation, ModuleID},
+		{fileevents.TopicExecutePatchPreviewOperation, ModuleID},
+	}
+	for _, item := range topics {
+		event := &fileCountingDataEvent{Event: magicevent.NewEventWithContext(
+			item.topic, runtimecontract.RuntimeModuleOrchestrator, item.destination, magicevent.NewHeader(), ctx, nil,
+		)}
+		result := hub.Send(event)
+		if result == nil || result.Error() == nil {
+			t.Fatalf("started topic %s accepted wrong concrete command: result=%#v", item.topic, result)
+		}
+		if got := event.reads.Load(); got != 1 {
+			t.Fatalf("started topic %s payload reads = %d, want exactly 1 after duplicate Start", item.topic, got)
+		}
+	}
+	owner.Teardown(ctx)
+	for _, item := range topics {
+		event := &fileCountingDataEvent{Event: magicevent.NewEventWithContext(
+			item.topic, runtimecontract.RuntimeModuleOrchestrator, item.destination, magicevent.NewHeader(), ctx, nil,
+		)}
+		hub.Send(event)
+		if got := event.reads.Load(); got != 0 {
+			t.Fatalf("post-Stop topic %s payload reads = %d, want 0", item.topic, got)
+		}
 	}
 }

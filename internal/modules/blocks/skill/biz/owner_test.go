@@ -24,12 +24,35 @@ func TestCreateCommandWithoutSynchronousResultDoesNotMutateRegistry(t *testing.T
 	if err != nil {
 		t.Fatalf("new owner: %v", err)
 	}
-	event := magicevent.NewEventWithContext(skillevents.TopicSkillCommandCreate, "test", skillevents.CommandDestination, magicevent.NewHeader(), context.Background(), skillevents.CreateSkillCommand{
+	event := magicevent.NewEventWithContext(skillevents.TopicSkillCommandCreate, applicationContextRegistrySource, skillevents.CommandDestination, magicevent.NewHeader(), context.Background(), skillevents.CreateSkillCommand{
 		SkillID: "skill-post", Name: "post", Version: "v1", Instruction: "must not persist",
 	})
 	owner.handleSkillCommand(event, nil)
 	if _, err := repository.Get(context.Background(), "skill-post"); !errors.Is(err, common.ErrNotFound) {
 		t.Fatalf("Post-style create mutated registry: %v", err)
+	}
+}
+
+func TestSkillCommandSourceAuthorizationMatrix(t *testing.T) {
+	if !skillCommandSourceAllowed(skillevents.TopicSkillCommandCreate, applicationContextRegistrySource) {
+		t.Fatal("context-registry create source rejected")
+	}
+	for _, source := range []string{applicationOwnerReadSource, "untrusted/module", " " + applicationContextRegistrySource + " "} {
+		if skillCommandSourceAllowed(skillevents.TopicSkillCommandCreate, source) {
+			t.Errorf("create source %q accepted", source)
+		}
+	}
+	for _, topic := range []string{skillevents.TopicSkillCommandGet, skillevents.TopicSkillCommandList} {
+		for _, source := range []string{applicationContextRegistrySource, applicationOwnerReadSource} {
+			if !skillCommandSourceAllowed(topic, source) {
+				t.Errorf("read source %q rejected for %s", source, topic)
+			}
+		}
+		for _, source := range []string{"untrusted/module", " " + applicationOwnerReadSource + " "} {
+			if skillCommandSourceAllowed(topic, source) {
+				t.Errorf("read source %q accepted for %s", source, topic)
+			}
+		}
 	}
 }
 
@@ -69,7 +92,7 @@ func TestFileBackedOwnerRejectsLegacySkillWithoutProvenanceWithoutRewriting(t *t
 		{name: "list", topic: skillevents.TopicSkillCommandList, data: skillevents.ListSkillsCommand{}},
 	} {
 		t.Run(request.name, func(t *testing.T) {
-			event := magicevent.NewEventWithContext(request.topic, "test", skillevents.CommandDestination, magicevent.NewHeader(), ctx, request.data)
+			event := magicevent.NewEventWithContext(request.topic, applicationOwnerReadSource, skillevents.CommandDestination, magicevent.NewHeader(), ctx, request.data)
 			response := hub.Send(event)
 			if response == nil {
 				t.Fatalf("legacy %s response is nil", request.name)

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	cd "github.com/muidea/magicCommon/def"
@@ -18,6 +19,16 @@ type webPanicDataEvent struct{ magicevent.Event }
 
 func (webPanicDataEvent) Data() any {
 	panic("Web Runtime ingress inspected payload before its call/source guard")
+}
+
+type webCountingDataEvent struct {
+	magicevent.Event
+	reads atomic.Int32
+}
+
+func (e *webCountingDataEvent) Data() any {
+	e.reads.Add(1)
+	return struct{}{}
 }
 
 func TestWebRuntimeIngressTopicMatrixEnforcesStrongOrchestratorCalls(t *testing.T) {
@@ -52,6 +63,41 @@ func TestWebRuntimeIngressTopicMatrixEnforcesStrongOrchestratorCalls(t *testing.
 
 			item.handler(webPanicDataEvent{Event: magicevent.NewEventWithContext(item.topic, runtimecontract.RuntimeModuleOrchestrator, ModuleID, magicevent.NewHeader(), ctx, nil)}, nil)
 		})
+	}
+}
+
+func TestWebOwnerLifecycleCoversEveryRuntimeTopic(t *testing.T) {
+	ctx := context.Background()
+	hub := magicevent.NewHub(16)
+	t.Cleanup(func() { hub.Terminate(ctx) })
+	owner := &Biz{Base: basebiz.New(ModuleID, hub, nil), runtimeAdapter: NewRuntimeAdapter("", nil)}
+	if err := owner.Start(); err != nil {
+		t.Fatal(err)
+	}
+	if err := owner.Start(); err != nil {
+		t.Fatal(err)
+	}
+	topics := []string{
+		webevents.TopicAcquireRuntimeCapabilities,
+		webevents.TopicAcquireRuntimeOperationAdmissibility,
+		webevents.TopicProbeRuntimeOperationFeasibility,
+		webevents.TopicProbeRuntimeSemanticProofFeasibility,
+		webevents.TopicExecuteOperation,
+	}
+	for _, topic := range topics {
+		event := &webCountingDataEvent{Event: magicevent.NewEventWithContext(topic, runtimecontract.RuntimeModuleOrchestrator, ModuleID, magicevent.NewHeader(), ctx, nil)}
+		assertWebRuntimeIngressInvalid(t, hub.Send(event), "payload")
+		if got := event.reads.Load(); got != 1 {
+			t.Fatalf("started topic %s payload reads = %d, want exactly 1 after duplicate Start", topic, got)
+		}
+	}
+	owner.Teardown(ctx)
+	for _, topic := range topics {
+		event := &webCountingDataEvent{Event: magicevent.NewEventWithContext(topic, runtimecontract.RuntimeModuleOrchestrator, ModuleID, magicevent.NewHeader(), ctx, nil)}
+		hub.Send(event)
+		if got := event.reads.Load(); got != 0 {
+			t.Fatalf("post-Stop topic %s payload reads = %d, want 0", topic, got)
+		}
 	}
 }
 

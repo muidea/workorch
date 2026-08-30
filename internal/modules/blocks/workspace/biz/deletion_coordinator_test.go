@@ -132,7 +132,7 @@ func TestWorkspaceDeletionRejectsNonApplicationSourceWithoutIntentOrRetirementCo
 		result.Set(nil, &cd.Error{Code: cd.Unexpected, Message: "must not be called", Cause: common.ErrConflict})
 	})
 	workspaceRepo := memoryrepo.NewWorkspaceRepository()
-	owner, err := New(hub, nil, Dependencies{Workspaces: workspaceRepo, DeletionMaterialCleaner: workspaceRepo, Goals: memoryrepo.NewGoalRepository(), DoDs: memoryrepo.NewDoDRepository(), Templates: memoryrepo.NewWorkspaceTemplateRepository(), EventHub: hub})
+	owner, err := New(hub, nil, workspaceOwnerTestDependencies(hub, nil, workspaceRepo, workspaceRepo, memoryrepo.NewGoalRepository(), memoryrepo.NewDoDRepository(), memoryrepo.NewWorkspaceTemplateRepository()))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -235,14 +235,15 @@ func TestWorkspaceDeletionFreshOwnerStartRecoversPersistedFileFinalization(t *te
 	})
 	t.Cleanup(func() { inventory.Unsubscribe(runevents.TopicRunCommandLifecycleFactInventory) })
 	freshWorkspaceRepo := filerepo.NewWorkspaceRepository(workspacePath)
-	fresh, err := New(hub, nil, Dependencies{
-		Workspaces:              freshWorkspaceRepo,
-		DeletionMaterialCleaner: freshWorkspaceRepo,
-		Goals:                   filerepo.NewGoalRepository(filepath.Join(dir, "goals.json")),
-		DoDs:                    filerepo.NewDoDRepository(filepath.Join(dir, "dods.json")),
-		Templates:               filerepo.NewWorkspaceTemplateRepository(filepath.Join(dir, "templates.json")),
-		EventHub:                hub,
-	})
+	fresh, err := New(hub, nil, workspaceOwnerTestDependencies(
+		hub,
+		nil,
+		freshWorkspaceRepo,
+		freshWorkspaceRepo,
+		filerepo.NewGoalRepository(filepath.Join(dir, "goals.json")),
+		filerepo.NewDoDRepository(filepath.Join(dir, "dods.json")),
+		filerepo.NewWorkspaceTemplateRepository(filepath.Join(dir, "templates.json")),
+	))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -353,7 +354,7 @@ func TestWorkspaceDeletionCoordinatorBusyRetryDoesNotBurnRevision(t *testing.T) 
 		result.Set(nil, &cd.Error{Code: cd.Unexpected, Message: runevents.ErrWorkspaceRetirementBusy.Error(), Cause: runevents.ErrWorkspaceRetirementBusy})
 	})
 	workspaceRepo := memoryrepo.NewWorkspaceRepository()
-	owner, err := New(hub, nil, Dependencies{Workspaces: workspaceRepo, DeletionMaterialCleaner: workspaceRepo, Goals: memoryrepo.NewGoalRepository(), DoDs: memoryrepo.NewDoDRepository(), Templates: memoryrepo.NewWorkspaceTemplateRepository(), EventHub: hub})
+	owner, err := New(hub, nil, workspaceOwnerTestDependencies(hub, nil, workspaceRepo, workspaceRepo, memoryrepo.NewGoalRepository(), memoryrepo.NewDoDRepository(), memoryrepo.NewWorkspaceTemplateRepository()))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -407,7 +408,7 @@ func TestWorkspaceDeletionWithActiveRunCreatesNoIntentOrRetirementCommand(t *tes
 		result.Set(nil, &cd.Error{Code: cd.Unexpected, Message: "must not be called", Cause: common.ErrConflict})
 	})
 	workspaceRepo := memoryrepo.NewWorkspaceRepository()
-	owner, err := New(hub, nil, Dependencies{Workspaces: workspaceRepo, DeletionMaterialCleaner: workspaceRepo, Goals: memoryrepo.NewGoalRepository(), DoDs: memoryrepo.NewDoDRepository(), Templates: memoryrepo.NewWorkspaceTemplateRepository(), EventHub: hub})
+	owner, err := New(hub, nil, workspaceOwnerTestDependencies(hub, nil, workspaceRepo, workspaceRepo, memoryrepo.NewGoalRepository(), memoryrepo.NewDoDRepository(), memoryrepo.NewWorkspaceTemplateRepository()))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -436,7 +437,7 @@ func newWorkspaceDeletionCoordinatorFixture(t *testing.T, purge bool, failOnceTo
 	workspaceRepo := memoryrepo.NewWorkspaceRepository()
 	goalRepo := memoryrepo.NewGoalRepository()
 	dodRepo := memoryrepo.NewDoDRepository()
-	owner, err := New(hub, nil, Dependencies{Workspaces: workspaceRepo, DeletionMaterialCleaner: workspaceRepo, Goals: goalRepo, DoDs: dodRepo, Templates: memoryrepo.NewWorkspaceTemplateRepository(), EventHub: hub})
+	owner, err := New(hub, nil, workspaceOwnerTestDependencies(hub, nil, workspaceRepo, workspaceRepo, goalRepo, dodRepo, memoryrepo.NewWorkspaceTemplateRepository()))
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -167,10 +167,9 @@ func newProjectionReliabilityOwners(
 		}
 		result.Set(testRunLifecycleFactInventory(items, command), nil)
 	})
-	workspaceOwner, err := New(hub, workspaceBackground, Dependencies{
-		Workspaces: workspaceRepository, DeletionMaterialCleaner: deletionMaterialCleaner, Goals: memory.NewGoalRepository(), DoDs: memory.NewDoDRepository(),
-		Templates: memory.NewWorkspaceTemplateRepository(), EventHub: hub, BackgroundRoutine: workspaceBackground,
-	})
+	workspaceOwner, err := New(hub, workspaceBackground, workspaceOwnerTestDependencies(
+		hub, workspaceBackground, workspaceRepository, deletionMaterialCleaner, memory.NewGoalRepository(), memory.NewDoDRepository(), memory.NewWorkspaceTemplateRepository(),
+	))
 	if err != nil {
 		t.Fatalf("new Workspace owner: %v", err)
 	}
@@ -297,10 +296,9 @@ func TestWorkspaceRunProjectionStartRollsBackWorkerInstallationFailure(t *testin
 				background.asyncErr = failure
 			}
 			workspaces := memory.NewWorkspaceRepository()
-			owner, err := New(hub, background, Dependencies{
-				Workspaces: workspaces, DeletionMaterialCleaner: workspaces, Goals: memory.NewGoalRepository(), DoDs: memory.NewDoDRepository(),
-				Templates: memory.NewWorkspaceTemplateRepository(), EventHub: hub, BackgroundRoutine: background,
-			})
+			owner, err := New(hub, background, workspaceOwnerTestDependencies(
+				hub, background, workspaces, workspaces, memory.NewGoalRepository(), memory.NewDoDRepository(), memory.NewWorkspaceTemplateRepository(),
+			))
 			if err != nil {
 				t.Fatal(err)
 			}

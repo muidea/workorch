@@ -25,7 +25,7 @@ Blocks 的 owner 边界，不保存历史偏差、重构过程或 closure 记录
 | --- | --- | --- |
 | `application/workorchd` | typed bootstrap, HTTP/SSE, application use cases and projection; no Runtime drive | [contract](../../internal/modules/application/workorchd/readme.md) |
 | `kernel/orchestrator` | sole SM-2/SM-3/SM-4 reducer, drive, evidence, governance resolution and delivery authority | [contract](../../internal/modules/kernel/orchestrator/readme.md) |
-| `kernel/governance` | policy/risk evaluation and immutable governance facts | [contract](../../internal/modules/kernel/governance/readme.md) |
+| `kernel/governance` | policy/risk evaluation, immutable governance facts and owner-local AutoGovernanceTrace coordination/recovery | [contract](../../internal/modules/kernel/governance/readme.md) |
 | `kernel/system` | startup coordination for owner-defined default-resource ensure commands | [contract](../../internal/modules/kernel/system/readme.md) |
 
 ## Resource Owner Blocks

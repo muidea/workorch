@@ -22,7 +22,6 @@ import (
 	filebiz "github.com/muidea/workorch/internal/modules/blocks/file/biz"
 	llmbiz "github.com/muidea/workorch/internal/modules/blocks/llm/biz"
 	resultbiz "github.com/muidea/workorch/internal/modules/blocks/result/biz"
-	workspacebiz "github.com/muidea/workorch/internal/modules/blocks/workspace/biz"
 
 	decisionevents "github.com/muidea/workorch/internal/modules/blocks/decision/pkg/events"
 
@@ -799,10 +798,7 @@ func TestRuntimeFileBackedGroundedTargetStateSequenceRestartsAtCommittedBoundari
 				}
 				t.Cleanup(func() { _ = runOwner.Stop(ctx) })
 				workspaceOwner := workspacemodule.New()
-				if err := workspaceOwner.Configure(workspacebiz.Dependencies{
-					Workspaces: workspaces, DeletionMaterialCleaner: workspaces, Goals: memory.NewGoalRepository(), DoDs: memory.NewDoDRepository(),
-					Templates: memory.NewWorkspaceTemplateRepository(), EventHub: hub,
-				}); err != nil {
+				if err := workspaceOwner.Configure(workspaceOwnerTestDependencies(hub, workspaces, workspaces, memory.NewGoalRepository(), memory.NewDoDRepository(), memory.NewWorkspaceTemplateRepository())); err != nil {
 					t.Fatal(err)
 				}
 				if err := workspaceOwner.Start(); err != nil {
@@ -1088,10 +1084,7 @@ func TestRuntimeFileBackedEmptyWorkspaceCreationReceiptCrashRestartDoesNotReplay
 			}
 			t.Cleanup(func() { _ = runOwner.Stop(ctx) })
 			workspaceOwner := workspacemodule.New()
-			if err := workspaceOwner.Configure(workspacebiz.Dependencies{
-				Workspaces: workspaces, DeletionMaterialCleaner: workspaces, Goals: memory.NewGoalRepository(), DoDs: memory.NewDoDRepository(),
-				Templates: memory.NewWorkspaceTemplateRepository(), EventHub: hub,
-			}); err != nil {
+			if err := workspaceOwner.Configure(workspaceOwnerTestDependencies(hub, workspaces, workspaces, memory.NewGoalRepository(), memory.NewDoDRepository(), memory.NewWorkspaceTemplateRepository())); err != nil {
 				t.Fatal(err)
 			}
 			if err := workspaceOwner.Start(); err != nil {
@@ -5785,7 +5778,7 @@ func TestDriveRuntimeFileBackedFreshFileShellGitAcceptance(t *testing.T) {
 	t.Cleanup(func() { _ = runOwner.Stop(ctx) })
 	startRuntimeReceiptTestOwner(t, hub)
 	workspaceOwner := workspacemodule.New()
-	if err := workspaceOwner.Configure(workspacebiz.Dependencies{Workspaces: workspaces, DeletionMaterialCleaner: workspaces, Goals: memory.NewGoalRepository(), DoDs: memory.NewDoDRepository(), Templates: memory.NewWorkspaceTemplateRepository(), EventHub: hub}); err != nil {
+	if err := workspaceOwner.Configure(workspaceOwnerTestDependencies(hub, workspaces, workspaces, memory.NewGoalRepository(), memory.NewDoDRepository(), memory.NewWorkspaceTemplateRepository())); err != nil {
 		t.Fatal(err)
 	}
 	if err := workspaceOwner.Start(); err != nil {
@@ -7750,10 +7743,7 @@ func testRuntimeFileBackedPatchReplayProofRestartsAfterOwnerReceiptCASFailure(t 
 		t.Fatal(err)
 	}
 	workspaceOwner := workspacemodule.New()
-	if err := workspaceOwner.Configure(workspacebiz.Dependencies{
-		Workspaces: workspaces, DeletionMaterialCleaner: workspaces, Goals: memory.NewGoalRepository(), DoDs: memory.NewDoDRepository(),
-		Templates: memory.NewWorkspaceTemplateRepository(), EventHub: restartedHub,
-	}); err != nil {
+	if err := workspaceOwner.Configure(workspaceOwnerTestDependencies(restartedHub, workspaces, workspaces, memory.NewGoalRepository(), memory.NewDoDRepository(), memory.NewWorkspaceTemplateRepository())); err != nil {
 		t.Fatal(err)
 	}
 	if err := workspaceOwner.Start(); err != nil {
@@ -9211,10 +9201,7 @@ func TestDriveRuntimeFileBackedTwoFocusStateValidationAssessmentAndRestart(t *te
 	}
 	t.Cleanup(func() { _ = runOwner.Stop(ctx) })
 	workspaceOwner := workspacemodule.New()
-	if err := workspaceOwner.Configure(workspacebiz.Dependencies{
-		Workspaces: workspaces, DeletionMaterialCleaner: workspaces, Goals: memory.NewGoalRepository(), DoDs: memory.NewDoDRepository(),
-		Templates: memory.NewWorkspaceTemplateRepository(), EventHub: hub,
-	}); err != nil {
+	if err := workspaceOwner.Configure(workspaceOwnerTestDependencies(hub, workspaces, workspaces, memory.NewGoalRepository(), memory.NewDoDRepository(), memory.NewWorkspaceTemplateRepository())); err != nil {
 		t.Fatal(err)
 	}
 	if err := workspaceOwner.Start(); err != nil {

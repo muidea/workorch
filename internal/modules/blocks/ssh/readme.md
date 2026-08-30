@@ -41,12 +41,13 @@ secret/host identity hash，不包含明文。
 
 | 验收维度 | 自动化证据 | 状态 |
 | --- | --- | --- |
-| normal | `TestRuntimeAdapterExecutesPasswordSSHWithStrictHostIdentityAndObservation`、`TestRuntimeAdapterExecutesPrivateKeyWithoutExposingConfiguredPath`、`TestRuntimeAdapterBoundsAndHashesFullSSHCommandOutput` | 通过 PATH 注入 fake ssh/setsid 覆盖 argv、credential staging、observation 与 output bound；不证明真实 SSH handshake/auth/host-key/network 互操作 |
+| normal | `TestRuntimeAdapterExecutesPasswordSSHWithStrictHostIdentityAndObservation`、`TestRuntimeAdapterExecutesPrivateKeyWithoutExposingConfiguredPath`、`TestRuntimeAdapterBoundsAndHashesFullSSHCommandOutput` | 通过 PATH 注入 fake ssh/setsid 覆盖 argv、credential staging、observation 与 output bound |
 | invalid + scope | config path/permission、owner ref、seal/catalog/grant drift、`TestSSHRuntimeIngressTopicMatrixEnforcesStrongOrchestratorCalls` | 已覆盖主要 secret/scope/authorization，并穷举五 topic 的 wrong source、wrong concrete payload 与 Post/nil Result 零查询/零 effect |
-| duplicate + idempotency | `TestSSHOwnerRequiresExactApprovalBeforeNetworkAndCommitsObservedChange` | 已覆盖同 owner 实例的 exact receipt replay 与零二次远端调用 |
+| duplicate + idempotency | `TestSSHOwnerRequiresExactApprovalBeforeNetworkAndCommitsObservedChange`、`TestSSHOwnerCommitsUnknownEffectReceiptWhenRemoteObservationFails` | 覆盖同 owner 与 fresh owner 的 exact receipt replay，以及 observation failure receipt 的零二次远端调用 |
 | stale + freshness | admissibility/feasibility/semantic-proof catalog stale tests | 已覆盖 owner policy revision drift |
-| restart / owner 重建 | 无直接组件级自动化证据 | 未覆盖新 SSH owner 查询 persisted receipt 后零二次远端调用 |
-| lifecycle | `TestSSHModuleIdentityConfigureStartStopContract`、`TestSSHOwnerLifecycleFencesSubscriptionsAndCapabilityDelivery` | 仅以 `AcquireRuntimeCapabilities` 代表 topic 覆盖 started fence、重复 Start、Stop 后零投递、重复 Stop 与 fresh-owner restart；不是五 topic lifecycle 矩阵，credential memory 清空和临时 secret 清理也无直接断言 |
-| timeout / cancellation | 无直接组件级自动化证据 | 未覆盖本地 ssh child 的 deadline/cancel 终止、timeout fact 与临时 credential material 清理；更不承诺远端后台进程终止 |
-| effect + receipt | `TestSSHOwnerCommitsFailedCommandWithObservedEffectClassification`、成功 changed/no-op receipt tests | 已覆盖成功及命令失败后的 changed/no-change receipt；before/after observation 自身失败的 owner receipt 尚未覆盖 |
+| restart / owner 重建 | `TestSSHOwnerRequiresExactApprovalBeforeNetworkAndCommitsObservedChange` | fresh owner 查询 persisted receipt 后零二次远端调用 |
+| lifecycle | `TestSSHModuleIdentityConfigureStartStopContract`、`TestSSHOwnerLifecycleFencesSubscriptionsAndCapabilityDelivery`、`TestSSHOwnerLifecycleCoversEveryRuntimeTopic`、`TestSSHOwnerRequiresExactApprovalBeforeNetworkAndCommitsObservedChange` | 覆盖全部五 topic 的重复 Start/Stop fence，并断言 Teardown 清空 target/session/credential memory |
+| timeout / cancellation | `TestRuntimeAdapterTimeoutAndCancellationTerminateLocalSSHAndRemoveCredentialMaterial` | 覆盖本地 ssh child 的 deadline/cancel 终止、typed timeout/unknown-effect fact 与临时 password material 清理；按合同不承诺远端后台进程终止 |
+| effect + receipt | `TestSSHOwnerCommitsFailedCommandWithObservedEffectClassification`、`TestSSHOwnerCommitsUnknownEffectReceiptWhenRemoteObservationFails`、成功 changed/no-op receipt tests | 覆盖成功、命令失败 changed/no-change，以及 before/after observation failure 的 rejected `effect=unknown` receipt |
 | boundary | `TestSSHOwnerAcquiresCapabilitiesThroughTypedEventHubContract`、`TestSSHRuntimeIngressTopicMatrixEnforcesStrongOrchestratorCalls`、typed operation/seal 及 admissibility/feasibility/semantic EventHub tests | 已覆盖 capability 正常 Send，以及五个订阅 topic 的 exact producer/strong-call/concrete payload 映射 |
+| deployed SSH interoperability | [Service Acceptance](../../../../docs/50-product-interface/service-acceptance.md) | 组件级未覆盖；真实 SSH handshake/auth/host-key/network 与远程环境必须由显式 deployed/live gate 验收；当前 acceptance inventory 无 SSH-specific producer，因此本项仍是部署缺口，不能计入本地组件单测完成度 |

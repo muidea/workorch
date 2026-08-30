@@ -39,7 +39,7 @@ owner 分组的 `RepositoryProvider` 暴露仓储基础设施。
 
 | 验收维度 | 自动化证据 | 状态 |
 | --- | --- | --- |
-| normal | `TestRuntimeInitiatorMemoryRepositoriesCoverOwnerContracts`、`TestRuntimeInitiatorFileRepositoriesCoverOwnerContracts`、`TestRuntimeInitiatorSetupPublishesCompleteProviderOnlyOnSuccess` | 已覆盖 memory/file 的当前 12 个 repository family 代表性非空 surface 与成功发布；不等价于各 repository 行为合同或全部子接口覆盖 |
+| normal | `TestRuntimeInitiatorMemoryRepositoriesCoverOwnerContracts`、`TestRuntimeInitiatorFileRepositoriesCoverOwnerContracts`、`TestRuntimeInitiatorSetupPublishesCompleteProviderOnlyOnSuccess` | 已覆盖 memory/file 当前 12 个 repository family 的全部公开子接口、owner aggregate `Validate` 与成功发布；不等价于各 repository 的 CRUD/CAS 行为合同 |
 | invalid + scope | `TestRuntimeInitiatorSetupFailureLeavesRepositoriesEmpty`、`TestRuntimeInitiatorRejectsUnsupportedRepositoryBackend` | 已覆盖非法配置、未知 backend 与失败后 fail-closed |
 | duplicate + idempotency | `TestRuntimeInitiatorRunIsIdempotent`、`TestRuntimeInitiatorTeardownClearsRuntimeResources` | 已覆盖重复 Run/Teardown；成功 Setup 本身不承诺复用同一 provider identity |
 | stale + freshness | `TestRuntimeInitiatorSetupFailureLeavesRepositoriesEmpty` | 仅适用为重复 Setup 不泄漏旧 provider；无业务 freshness 语义 |
@@ -48,5 +48,5 @@ owner 分组的 `RepositoryProvider` 暴露仓储基础设施。
 | effect + receipt | 不适用 | Initiator 不执行外部业务 effect，也不产生 Runtime receipt |
 | boundary | `TestRepositoryConsumersUseTheirOwnerRepositoryGroups`、`TestRepositoryProviderAccessIsCentralizedInWorkorchdeps`、`TestRepositoryInitiatorExportSurfaceStaysRepositoryOnly` | 已覆盖 consumer/family、调用入口、导出面及无 EventHub 操作 |
 
-`assertRepositoryGroupsComplete` 当前只验证各 owner 的代表性 repository handle 非空；若 repository 分组新增子接口，仍需
-同步扩展该断言。具体 CRUD/CAS、错误、并发与 file reopen 语义由 repository contract 测试承担，不能从这些 Initiator 测试推导。
+`assertRepositoryGroupsComplete` 显式枚举每个公开 repository group surface；若分组新增子接口，必须同步扩展该断言。具体
+CRUD/CAS、错误、并发与 file reopen 语义仍由 repository contract 测试承担，不能从这些 Initiator 测试推导。

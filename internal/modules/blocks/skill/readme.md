@@ -22,7 +22,7 @@ Application 的精确读取先查询 Registry，仅在 `ErrNotFound` 时回退 S
 
 | 交互方 | 方向 | typed EventHub 合同 | 调用/授权语义 |
 | --- | --- | --- | --- |
-| `application/workorchd` | Application → Skill | `CreateSkillCommand/Result`、`GetSkillCommand/Result`、`ListSkillsCommand/Result` | intended caller；当前 handler 校验 destination 与 concrete DTO，不执行 exact source authorization |
+| `application/workorchd` | Application → Skill | `CreateSkillCommand/Result`、`GetSkillCommand/Result`、`ListSkillsCommand/Result` | create 只接受 exact `application/workorchd/context-registry`；get/list 接受该 source 与 exact `application/workorchd/appservice` |
 | repository backend | Skill → repository | `SkillRepository` create/get/list | owner-private 技术依赖，不是跨组件 facade |
 
 topic、command 和 result 的唯一实现入口是 [`pkg/events`](pkg/events)。三个 topic 分别使用 concrete result，不共享可空
@@ -35,7 +35,8 @@ topic、command 和 result 的唯一实现入口是 [`pkg/events`](pkg/events)�
   不补写、不迁移。
 - result/model 必须 detached clone；调用方不能通过返回值修改 owner state。
 - repository、service 与 constructor 保持 Biz-private；跨 owner 只能使用 receiver-defined concrete EventHub 合同。
-- `Start` 重复调用不重复注册；`Stop` 释放订阅。Application source 目前只是调用约定，不是安全授权边界。
+- `Start` 重复调用不重复注册；`Stop` 释放订阅，后续 delivery 不得读取或修改 Registry。Application publisher source 是
+  owner ingress 合同，forged/noncanonical source 在 repository I/O 前拒绝。
 - Skill 不解释 Goal/DoD，不选择 Soul/MCP，不修改 activation 或 Runtime aggregate。
 - Skill 不根据 `TriggerRules` 路由请求；Application/profile 只能读取 owner 返回的 detached 声明后在自身用例中选择。
 
@@ -49,9 +50,9 @@ topic、command 和 result 的唯一实现入口是 [`pkg/events`](pkg/events)�
 | provenance / detached result | `TestServiceRejectsPersistedSkillWithMissingOrDriftedOwnerProvenance`、[`pkg/events/messages_test.go`](pkg/events/messages_test.go) | 覆盖 |
 | fire-and-forget effect guard | `TestCreateCommandWithoutSynchronousResultDoesNotMutateRegistry` | 覆盖 |
 | memory/file persistence | `TestSkillRepositoryContract_Memory`、`TestSkillRepositoryContract_File` in [`internal/pkg/repository/repository_contract_test.go`](../../../pkg/repository/repository_contract_test.go) | 覆盖 |
-| lifecycle | `TestModuleIdentityConfigureStartStopContract` | 覆盖基本 Start/Stop；尚无独立 post-Stop delivery 断言 |
-| duplicate / idempotency | repository duplicate identity 由 repository contract 覆盖 | EventHub duplicate-create 的 error/零写入尚无独立验收 |
+| lifecycle | `TestModuleIdentityConfigureStartStopContract`、`TestModuleStopFencesSubsequentSkillDelivery` | 覆盖重复 Start/Stop、3-topic subscribe/unsubscribe 平衡，以及独立的 post-Stop delivery 零写入 fence |
+| duplicate / idempotency | `TestModuleRejectsForgedSkillSourcesAndDuplicateCreateWithoutExtraWrite` | 覆盖 EventHub duplicate-create 返回 conflict 且 Registry 保持单项 |
 | stale/freshness | 不适用：公开面没有 update/CAS | 不适用 |
 | cross-catalog routing / activation | `TestReadSkillViewFallsBackToSkillHubWhenRepositorySkillMissing`、`TestListSkillsViewMergesRepositoryAndSkillHubSkills`、`TestSelectedSkillsCanResolveSkillHubReferences` | 这些是 Application 级边界证据；Skill owner 只保存声明，不执行 fallback、merge、匹配、选择或调用 |
-| caller authorization | 无 exact Application source gate | 未覆盖，调用方仅为 intended caller |
+| caller authorization | `TestSkillCommandSourceAuthorizationMatrix`、`TestModuleRejectsForgedSkillSourcesAndDuplicateCreateWithoutExtraWrite` | 覆盖全部 topic 的 exact source allowlist，以及 forged/noncanonical create 零写入 |
 | provider / external lifecycle | 不适用：本组件不访问 provider 或 SkillHub | 不适用 |

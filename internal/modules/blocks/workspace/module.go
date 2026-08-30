@@ -17,8 +17,11 @@ func (m *Module) ID() string                                     { return Module
 func (m *Module) Configure(deps workspacebiz.Dependencies) error { return m.configure(deps) }
 
 func (m *Module) configure(deps workspacebiz.Dependencies) error {
-	if m == nil || deps.EventHub == nil || deps.Workspaces == nil || deps.DeletionMaterialCleaner == nil || deps.Goals == nil || deps.DoDs == nil || deps.Templates == nil {
+	if m == nil || deps.EventHub == nil {
 		return common.ErrInvalidArgument
+	}
+	if err := deps.OwnerRepositories.Validate(); err != nil {
+		return err
 	}
 	bizPtr, err := workspacebiz.New(deps.EventHub, deps.BackgroundRoutine, deps)
 	if err != nil {

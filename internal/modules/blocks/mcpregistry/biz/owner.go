@@ -18,6 +18,13 @@ const ModuleID = modulecommon.ModuleID
 
 const systemCommandSource = "kernel/system"
 
+const (
+	applicationContextRegistrySource = "application/workorchd/context-registry"
+	applicationOwnerReadSource       = "application/workorchd/appservice"
+	applicationReadModelSource       = "application/workorchd/readmodel"
+	mcpExecutionSource               = "blocks/mcp"
+)
+
 type Dependencies struct {
 	Registry          repository.MCPRegistryRepository
 	EventHub          magicevent.Hub
@@ -91,8 +98,8 @@ func (m *Biz) handleCommand(ev magicevent.Event, result magicevent.Result) {
 		setMagicResult(result, struct{}{}, common.ErrInvalidArgument)
 		return
 	}
-	if ev.ID() == mcpevents.TopicMCPCommandEnsureDefaults && ev.Source() != systemCommandSource {
-		setMagicResult(result, mcpevents.EnsureDefaultsResult{}, common.ErrInvalidArgument)
+	if !mcpRegistryCommandSourceAllowed(ev.ID(), ev.Source()) {
+		setMCPRegistryCommandInvalidResult(ev, result)
 		return
 	}
 	ctx := ev.Context()
@@ -187,6 +194,65 @@ func (m *Biz) handleCommand(ev magicevent.Event, result magicevent.Result) {
 		}
 		revision, err := m.service.ensureBuiltinDefaults(ctx)
 		setMagicResult(result, mcpevents.EnsureDefaultsResult{Ensured: err == nil, RegistryRevision: revision}, err)
+	default:
+		setMagicResult(result, struct{}{}, common.ErrInvalidArgument)
+	}
+}
+
+func mcpRegistryCommandSourceAllowed(topic, source string) bool {
+	switch topic {
+	case mcpevents.TopicMCPCommandCreateServer,
+		mcpevents.TopicMCPCommandUpdateServer,
+		mcpevents.TopicMCPCommandCreateCapability,
+		mcpevents.TopicMCPCommandUpdateCapability:
+		return source == applicationContextRegistrySource
+	case mcpevents.TopicMCPCommandListServers:
+		return source == applicationContextRegistrySource
+	case mcpevents.TopicMCPCommandGetServer:
+		return source == applicationContextRegistrySource || source == applicationOwnerReadSource || source == mcpExecutionSource
+	case mcpevents.TopicMCPCommandListCapabilities:
+		return source == applicationContextRegistrySource || source == applicationReadModelSource
+	case mcpevents.TopicMCPCommandGetCapability:
+		return source == applicationContextRegistrySource || source == applicationOwnerReadSource
+	case mcpevents.TopicMCPCommandReadRegistrySnapshot:
+		return source == mcpExecutionSource
+	case mcpevents.TopicMCPCommandReadSelectionSnapshot:
+		return source == applicationOwnerReadSource
+	case mcpevents.TopicMCPCommandEnsureDefaults:
+		return source == systemCommandSource
+	default:
+		return false
+	}
+}
+
+func setMCPRegistryCommandInvalidResult(ev magicevent.Event, result magicevent.Result) {
+	topic := ""
+	if ev != nil {
+		topic = ev.ID()
+	}
+	switch topic {
+	case mcpevents.TopicMCPCommandCreateServer:
+		setMagicResult(result, mcpevents.CreateServerResult{}, common.ErrInvalidArgument)
+	case mcpevents.TopicMCPCommandGetServer:
+		setMagicResult(result, mcpevents.GetServerResult{}, common.ErrInvalidArgument)
+	case mcpevents.TopicMCPCommandListServers:
+		setMagicResult(result, mcpevents.ListServersResult{}, common.ErrInvalidArgument)
+	case mcpevents.TopicMCPCommandUpdateServer:
+		setMagicResult(result, mcpevents.UpdateServerResult{}, common.ErrInvalidArgument)
+	case mcpevents.TopicMCPCommandCreateCapability:
+		setMagicResult(result, mcpevents.CreateCapabilityResult{}, common.ErrInvalidArgument)
+	case mcpevents.TopicMCPCommandGetCapability:
+		setMagicResult(result, mcpevents.GetCapabilityResult{}, common.ErrInvalidArgument)
+	case mcpevents.TopicMCPCommandListCapabilities:
+		setMagicResult(result, mcpevents.ListCapabilitiesResult{}, common.ErrInvalidArgument)
+	case mcpevents.TopicMCPCommandUpdateCapability:
+		setMagicResult(result, mcpevents.UpdateCapabilityResult{}, common.ErrInvalidArgument)
+	case mcpevents.TopicMCPCommandReadRegistrySnapshot:
+		setMagicResult(result, mcpevents.RegistrySnapshotResult{}, common.ErrInvalidArgument)
+	case mcpevents.TopicMCPCommandReadSelectionSnapshot:
+		setMagicResult(result, mcpevents.SelectionSnapshotResult{}, common.ErrInvalidArgument)
+	case mcpevents.TopicMCPCommandEnsureDefaults:
+		setMagicResult(result, mcpevents.EnsureDefaultsResult{}, common.ErrInvalidArgument)
 	default:
 		setMagicResult(result, struct{}{}, common.ErrInvalidArgument)
 	}

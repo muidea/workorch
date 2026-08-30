@@ -74,6 +74,7 @@ const (
 
 type workspaceScopedFileStore struct {
 	dataRoot                string
+	workspaceOwnerBinding   repository.OwnerRepositoryBinding
 	runOwnerBinding         repository.RunOwnerRepositoryBinding
 	resultOwnerBinding      repository.OwnerRepositoryBinding
 	decisionOwnerBinding    repository.OwnerRepositoryBinding
@@ -136,6 +137,8 @@ type WorkspaceScopedFileRepositorySet struct {
 	WorkspaceCleaner      repository.WorkspaceDeletionMaterialCleaner
 	Goals                 repository.GoalRepository
 	DoDs                  repository.DoDRepository
+	WorkspaceTemplates    repository.WorkspaceTemplateRepository
+	WorkspaceOwner        repository.WorkspaceOwnerRepositories
 	Results               repository.ResultRepository
 	Artifacts             repository.ArtifactRepository
 	ResultDeletions       repository.ResultWorkspaceDeletionRepository
@@ -188,6 +191,10 @@ type workspaceSoulBindingsFile struct {
 func NewWorkspaceScopedFileRepositorySet(dataRoot string) WorkspaceScopedFileRepositorySet {
 	store := newWorkspaceScopedFileStore(dataRoot)
 	workspaces := newWorkspaceScopedWorkspaceRepository(store)
+	workspaceTemplates := &boundWorkspaceTemplateRepository{
+		WorkspaceTemplateRepository: fileRepo.NewWorkspaceTemplateRepository(filepath.Join(dataRoot, "system", "workspace_templates.json")),
+		binding:                     store.workspaceOwnerBinding,
+	}
 	runs := newWorkspaceScopedRunRepository(store)
 	steps := newWorkspaceScopedStepRepository(store, runs)
 	checkpoints := newWorkspaceScopedRuntimeCheckpointRepository(store, runs)
@@ -220,6 +227,7 @@ func NewWorkspaceScopedFileRepositorySet(dataRoot string) WorkspaceScopedFileRep
 		WorkspaceCleaner:      workspaces,
 		Goals:                 newWorkspaceScopedGoalRepository(store),
 		DoDs:                  newWorkspaceScopedDoDRepository(store),
+		WorkspaceTemplates:    workspaceTemplates,
 		Results:               results,
 		Artifacts:             artifacts,
 		ResultDeletions:       resultDeletions,
@@ -246,6 +254,9 @@ func NewWorkspaceScopedFileRepositorySet(dataRoot string) WorkspaceScopedFileRep
 		ApprovalDeletions:     approvalDeletions,
 	}
 	var err error
+	if ret.WorkspaceOwner, err = repository.NewWorkspaceOwnerRepositories(ret); err != nil {
+		panic(err)
+	}
 	if ret.MemoryOwner, err = repository.NewMemoryOwnerRepositories(ret); err != nil {
 		panic(err)
 	}
@@ -262,6 +273,29 @@ func NewWorkspaceScopedFileRepositorySet(dataRoot string) WorkspaceScopedFileRep
 		panic(err)
 	}
 	return ret
+}
+
+func (r WorkspaceScopedFileRepositorySet) WorkspaceOwnerBinding() repository.OwnerRepositoryBinding {
+	bound, _ := r.Workspaces.(repository.OwnerRepositoryBound)
+	if bound == nil {
+		return repository.OwnerRepositoryBinding{}
+	}
+	return bound.OwnerRepositoryBinding()
+}
+func (r WorkspaceScopedFileRepositorySet) WorkspaceOwnerWorkspaces() repository.WorkspaceRepository {
+	return r.Workspaces
+}
+func (r WorkspaceScopedFileRepositorySet) WorkspaceOwnerDeletionMaterialCleaner() repository.WorkspaceDeletionMaterialCleaner {
+	return r.WorkspaceCleaner
+}
+func (r WorkspaceScopedFileRepositorySet) WorkspaceOwnerGoals() repository.GoalRepository {
+	return r.Goals
+}
+func (r WorkspaceScopedFileRepositorySet) WorkspaceOwnerDoDs() repository.DoDRepository {
+	return r.DoDs
+}
+func (r WorkspaceScopedFileRepositorySet) WorkspaceOwnerTemplates() repository.WorkspaceTemplateRepository {
+	return r.WorkspaceTemplates
 }
 
 func (r WorkspaceScopedFileRepositorySet) MemoryOwnerBinding() repository.OwnerRepositoryBinding {
@@ -657,6 +691,7 @@ func countWorkspaceScopedArtifactEvidence(root string) (map[string]uint64, error
 func newWorkspaceScopedFileStore(dataRoot string) *workspaceScopedFileStore {
 	return &workspaceScopedFileStore{
 		dataRoot:                dataRoot,
+		workspaceOwnerBinding:   repository.NewWorkspaceOwnerRepositoryBinding(),
 		runOwnerBinding:         repository.NewRunOwnerRepositoryBinding(),
 		resultOwnerBinding:      repository.NewResultOwnerRepositoryBinding(),
 		decisionOwnerBinding:    repository.NewDecisionOwnerRepositoryBinding(),
@@ -856,6 +891,23 @@ func (s *workspaceScopedFileStore) workspaceRunRoots(workspaceID common.Workspac
 	matches, _ := filepath.Glob(filepath.Join(s.dataRoot, "internal", "workspaces", string(workspaceID), "runs", "*"))
 	sort.Strings(matches)
 	return matches
+}
+
+func (s *workspaceScopedFileStore) decisionRoot(workspaceID common.WorkspaceID, runID common.RunID) string {
+	if runID == "" {
+		return s.workspaceRoot(workspaceID)
+	}
+	return s.runRoot(workspaceID, runID)
+}
+
+func (s *workspaceScopedFileStore) workspaceDecisionRoots(workspaceID common.WorkspaceID) []string {
+	if workspaceID != "" {
+		return append([]string{s.workspaceRoot(workspaceID)}, s.workspaceRunRoots(workspaceID)...)
+	}
+	roots := append([]string(nil), s.allWorkspaceRoots()...)
+	roots = append(roots, s.allRunRoots()...)
+	sort.Strings(roots)
+	return roots
 }
 
 func (s *workspaceScopedFileStore) runRootByID(ctx context.Context, runID common.RunID) (string, bool) {
@@ -1371,6 +1423,25 @@ type workspaceScopedWorkspaceRepository struct {
 	store *workspaceScopedFileStore
 }
 
+type boundWorkspaceTemplateRepository struct {
+	repository.WorkspaceTemplateRepository
+	binding repository.OwnerRepositoryBinding
+}
+
+func (r *boundWorkspaceTemplateRepository) OwnerRepositoryBinding() repository.OwnerRepositoryBinding {
+	if r == nil {
+		return repository.OwnerRepositoryBinding{}
+	}
+	return r.binding
+}
+
+func (r *workspaceScopedWorkspaceRepository) OwnerRepositoryBinding() repository.OwnerRepositoryBinding {
+	if r == nil || r.store == nil {
+		return repository.OwnerRepositoryBinding{}
+	}
+	return r.store.workspaceOwnerBinding
+}
+
 func newWorkspaceScopedWorkspaceRepository(store *workspaceScopedFileStore) *workspaceScopedWorkspaceRepository {
 	return &workspaceScopedWorkspaceRepository{store: store}
 }
@@ -1577,6 +1648,13 @@ type workspaceScopedGoalRepository struct {
 	store *workspaceScopedFileStore
 }
 
+func (r *workspaceScopedGoalRepository) OwnerRepositoryBinding() repository.OwnerRepositoryBinding {
+	if r == nil || r.store == nil {
+		return repository.OwnerRepositoryBinding{}
+	}
+	return r.store.workspaceOwnerBinding
+}
+
 func newWorkspaceScopedGoalRepository(store *workspaceScopedFileStore) *workspaceScopedGoalRepository {
 	return &workspaceScopedGoalRepository{store: store}
 }
@@ -1635,6 +1713,13 @@ func (r *workspaceScopedGoalRepository) Delete(ctx context.Context, id common.Go
 
 type workspaceScopedDoDRepository struct {
 	store *workspaceScopedFileStore
+}
+
+func (r *workspaceScopedDoDRepository) OwnerRepositoryBinding() repository.OwnerRepositoryBinding {
+	if r == nil || r.store == nil {
+		return repository.OwnerRepositoryBinding{}
+	}
+	return r.store.workspaceOwnerBinding
 }
 
 func newWorkspaceScopedDoDRepository(store *workspaceScopedFileStore) *workspaceScopedDoDRepository {
@@ -3858,11 +3943,12 @@ func (r *workspaceScopedDecisionTicketRepository) OwnerRepositoryBinding() repos
 }
 
 func (r *workspaceScopedDecisionTicketRepository) Create(ctx context.Context, item *decisionmodel.Ticket) error {
-	if item == nil || item.WorkspaceID == "" || item.RunID == "" || item.ID == "" {
+	if item == nil || item.WorkspaceID == "" || item.ID == "" ||
+		(item.RunID == "" && (item.DefinitionClarification == nil || item.DefinitionClarification.Class != decisionmodel.DefinitionClarificationWorkspacePreSeal)) {
 		return common.ErrInvalidArgument
 	}
 	return withWorkspaceDeletionMutation(ctx, r.store.dataRoot, "decision", item.WorkspaceID, func(guarded context.Context) error {
-		return r.store.ticketRepo(r.store.runPath(r.store.runRoot(item.WorkspaceID, item.RunID), workspaceScopedTicketFile)).Create(guarded, item)
+		return r.store.ticketRepo(r.store.runPath(r.store.decisionRoot(item.WorkspaceID, item.RunID), workspaceScopedTicketFile)).Create(guarded, item)
 	})
 }
 
@@ -3870,14 +3956,14 @@ func (r *workspaceScopedDecisionTicketRepository) Get(ctx context.Context, id co
 	if id == "" {
 		return nil, common.ErrInvalidArgument
 	}
-	return findUniqueInPaths(r.store.workspaceRunRoots(common.RuntimeWorkspaceIDFromContext(ctx)), func(root string) (*decisionmodel.Ticket, error) {
+	return findUniqueInPaths(r.store.workspaceDecisionRoots(common.RuntimeWorkspaceIDFromContext(ctx)), func(root string) (*decisionmodel.Ticket, error) {
 		return r.store.ticketRepo(r.store.runPath(root, workspaceScopedTicketFile)).Get(ctx, id)
 	})
 }
 
 func (r *workspaceScopedDecisionTicketRepository) List(ctx context.Context) ([]*decisionmodel.Ticket, error) {
 	ret := []*decisionmodel.Ticket{}
-	for _, root := range r.store.allRunRoots() {
+	for _, root := range r.store.workspaceDecisionRoots("") {
 		items, err := r.store.ticketRepo(r.store.runPath(root, workspaceScopedTicketFile)).List(ctx)
 		if err != nil {
 			return nil, err
@@ -3914,7 +4000,7 @@ func (r *workspaceScopedDecisionTicketRepository) ListByRunID(ctx context.Contex
 
 func (r *workspaceScopedDecisionTicketRepository) ListByWorkspaceID(ctx context.Context, workspaceID common.WorkspaceID) ([]*decisionmodel.Ticket, error) {
 	ret := []*decisionmodel.Ticket{}
-	for _, root := range r.store.workspaceRunRoots(workspaceID) {
+	for _, root := range r.store.workspaceDecisionRoots(workspaceID) {
 		items, err := r.store.ticketRepo(r.store.runPath(root, workspaceScopedTicketFile)).ListByWorkspaceID(ctx, workspaceID)
 		if err != nil {
 			return nil, err
@@ -3929,9 +4015,9 @@ func (r *workspaceScopedDecisionTicketRepository) Update(ctx context.Context, it
 	if item == nil || item.ID == "" {
 		return common.ErrInvalidArgument
 	}
-	if item.WorkspaceID != "" && item.RunID != "" {
+	if item.WorkspaceID != "" {
 		err := withWorkspaceDeletionMutation(ctx, r.store.dataRoot, "decision", item.WorkspaceID, func(guarded context.Context) error {
-			return r.store.ticketRepo(r.store.runPath(r.store.runRoot(item.WorkspaceID, item.RunID), workspaceScopedTicketFile)).Update(guarded, item)
+			return r.store.ticketRepo(r.store.runPath(r.store.decisionRoot(item.WorkspaceID, item.RunID), workspaceScopedTicketFile)).Update(guarded, item)
 		})
 		if err == nil || err != common.ErrNotFound {
 			return err
@@ -3944,7 +4030,7 @@ func (r *workspaceScopedDecisionTicketRepository) Update(ctx context.Context, it
 	item.WorkspaceID = current.WorkspaceID
 	item.RunID = current.RunID
 	return withWorkspaceDeletionMutation(ctx, r.store.dataRoot, "decision", item.WorkspaceID, func(guarded context.Context) error {
-		return r.store.ticketRepo(r.store.runPath(r.store.runRoot(item.WorkspaceID, item.RunID), workspaceScopedTicketFile)).Update(guarded, item)
+		return r.store.ticketRepo(r.store.runPath(r.store.decisionRoot(item.WorkspaceID, item.RunID), workspaceScopedTicketFile)).Update(guarded, item)
 	})
 }
 
@@ -3957,7 +4043,7 @@ func (r *workspaceScopedDecisionTicketRepository) Delete(ctx context.Context, id
 		return err
 	}
 	return withWorkspaceDeletionMutation(ctx, r.store.dataRoot, "decision", current.WorkspaceID, func(guarded context.Context) error {
-		return r.store.ticketRepo(r.store.runPath(r.store.runRoot(current.WorkspaceID, current.RunID), workspaceScopedTicketFile)).Delete(guarded, id)
+		return r.store.ticketRepo(r.store.runPath(r.store.decisionRoot(current.WorkspaceID, current.RunID), workspaceScopedTicketFile)).Delete(guarded, id)
 	})
 }
 
@@ -3986,7 +4072,7 @@ func (r *workspaceScopedDecisionResolutionRepository) Create(ctx context.Context
 		return err
 	}
 	return withWorkspaceDeletionMutation(ctx, r.store.dataRoot, "decision", ticket.WorkspaceID, func(guarded context.Context) error {
-		return r.store.resolutionRepo(r.store.runPath(r.store.runRoot(ticket.WorkspaceID, ticket.RunID), workspaceScopedResolutionFile)).Create(guarded, item)
+		return r.store.resolutionRepo(r.store.runPath(r.store.decisionRoot(ticket.WorkspaceID, ticket.RunID), workspaceScopedResolutionFile)).Create(guarded, item)
 	})
 }
 
@@ -3995,14 +4081,14 @@ func (r *workspaceScopedDecisionResolutionRepository) GetByTicketID(ctx context.
 		return nil, common.ErrInvalidArgument
 	}
 	if ticket, err := r.tickets.Get(ctx, ticketID); err == nil {
-		item, err := r.store.resolutionRepo(r.store.runPath(r.store.runRoot(ticket.WorkspaceID, ticket.RunID), workspaceScopedResolutionFile)).GetByTicketID(ctx, ticketID)
+		item, err := r.store.resolutionRepo(r.store.runPath(r.store.decisionRoot(ticket.WorkspaceID, ticket.RunID), workspaceScopedResolutionFile)).GetByTicketID(ctx, ticketID)
 		if err == nil || err != common.ErrNotFound {
 			return item, err
 		}
 	} else if err != common.ErrNotFound {
 		return nil, err
 	}
-	return findUniqueInPaths(r.store.workspaceRunRoots(common.RuntimeWorkspaceIDFromContext(ctx)), func(root string) (*decisionmodel.Resolution, error) {
+	return findUniqueInPaths(r.store.workspaceDecisionRoots(common.RuntimeWorkspaceIDFromContext(ctx)), func(root string) (*decisionmodel.Resolution, error) {
 		return r.store.resolutionRepo(r.store.runPath(root, workspaceScopedResolutionFile)).GetByTicketID(ctx, ticketID)
 	})
 }
@@ -4013,7 +4099,7 @@ func (r *workspaceScopedDecisionResolutionRepository) DeleteByTicketID(ctx conte
 	}
 	if ticket, err := r.tickets.Get(ctx, ticketID); err == nil {
 		err := withWorkspaceDeletionMutation(ctx, r.store.dataRoot, "decision", ticket.WorkspaceID, func(guarded context.Context) error {
-			return r.store.resolutionRepo(r.store.runPath(r.store.runRoot(ticket.WorkspaceID, ticket.RunID), workspaceScopedResolutionFile)).DeleteByTicketID(guarded, ticketID)
+			return r.store.resolutionRepo(r.store.runPath(r.store.decisionRoot(ticket.WorkspaceID, ticket.RunID), workspaceScopedResolutionFile)).DeleteByTicketID(guarded, ticketID)
 		})
 		if err == nil || err != common.ErrNotFound {
 			return err
@@ -4021,7 +4107,7 @@ func (r *workspaceScopedDecisionResolutionRepository) DeleteByTicketID(ctx conte
 	} else if err != common.ErrNotFound {
 		return err
 	}
-	root, err := findUniqueInPaths(r.store.workspaceRunRoots(common.RuntimeWorkspaceIDFromContext(ctx)), func(root string) (string, error) {
+	root, err := findUniqueInPaths(r.store.workspaceDecisionRoots(common.RuntimeWorkspaceIDFromContext(ctx)), func(root string) (string, error) {
 		if _, err := r.store.resolutionRepo(r.store.runPath(root, workspaceScopedResolutionFile)).GetByTicketID(ctx, ticketID); err != nil {
 			return "", err
 		}

@@ -24,13 +24,9 @@ func (m *Module) Setup(_ context.Context, eventHub event.Hub, backgroundRoutine 
 		return err
 	}
 	if setupErr := m.configure(workspacebiz.Dependencies{
-		Workspaces:              repos.Workspaces,
-		DeletionMaterialCleaner: repos.DeletionMaterialCleaner,
-		Goals:                   repos.Goals,
-		DoDs:                    repos.DoDs,
-		Templates:               repos.Templates,
-		EventHub:                eventHub,
-		BackgroundRoutine:       backgroundRoutine,
+		OwnerRepositories: repos.Owner,
+		EventHub:          eventHub,
+		BackgroundRoutine: backgroundRoutine,
 	}); setupErr != nil {
 		return cd.NewError(cd.Unexpected, setupErr.Error())
 	}

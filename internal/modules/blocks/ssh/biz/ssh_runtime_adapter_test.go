@@ -2,6 +2,7 @@ package ssh
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -105,6 +106,75 @@ func TestRuntimeAdapterNoOpUsesActualRemoteObservation(t *testing.T) {
 	if result.Changed || result.ObservedScope != runtimecontract.RuntimeEffectNone || !result.Evidence.ZeroWork || result.BeforeHash != result.AfterHash {
 		t.Fatalf("result = %+v, want factual no-op", result)
 	}
+}
+
+func TestRuntimeAdapterTimeoutAndCancellationTerminateLocalSSHAndRemoveCredentialMaterial(t *testing.T) {
+	newFixture := func(t *testing.T, marker string) *RuntimeAdapter {
+		t.Helper()
+		toolsDir := t.TempDir()
+		writeExecutable(t, filepath.Join(toolsDir, "setsid"), "#!/bin/sh\nexec \"$@\"\n")
+		writeExecutable(t, filepath.Join(toolsDir, "ssh"), "#!/bin/sh\nlast=\"\"\nfor arg in \"$@\"; do last=\"$arg\"; done\nif [ \"$last\" = \"observe-state\" ]; then echo before; exit 0; fi\nprintf '%s' \"$WORKORCH_SSH_PASSWORD_FILE\" > \""+marker+"\"\nexec sleep 10\n")
+		t.Setenv("PATH", toolsDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+		return configuredPasswordRuntimeAdapter(t, "WORKORCH_TEST_SSH_CANCEL_PASSWORD", "test-password")
+	}
+	assertCredentialRemoved := func(t *testing.T, marker string) {
+		t.Helper()
+		path, err := os.ReadFile(marker)
+		if err != nil || strings.TrimSpace(string(path)) == "" {
+			t.Fatalf("read staged credential path: path=%q err=%v", string(path), err)
+		}
+		if _, err := os.Stat(strings.TrimSpace(string(path))); !os.IsNotExist(err) {
+			t.Fatalf("temporary SSH credential material remains at %q: %v", string(path), err)
+		}
+	}
+
+	t.Run("sealed timeout", func(t *testing.T) {
+		marker := filepath.Join(t.TempDir(), "credential-path")
+		adapter := newFixture(t, marker)
+		request := testRuntimeCommandRequest("slow")
+		request.TimeoutMillis = 1000
+		started := time.Now()
+		result, err := adapter.ExecuteOperation(context.Background(), request)
+		if !errors.Is(err, context.DeadlineExceeded) || result.FailureCode != "ssh_command_timeout" || result.ObservedScope != runtimecontract.RuntimeEffectUnknown || time.Since(started) > 3*time.Second {
+			t.Fatalf("timeout result=%+v err=%v duration=%s", result, err, time.Since(started))
+		}
+		assertCredentialRemoved(t, marker)
+	})
+
+	t.Run("caller cancellation", func(t *testing.T) {
+		marker := filepath.Join(t.TempDir(), "credential-path")
+		adapter := newFixture(t, marker)
+		ctx, cancel := context.WithCancel(context.Background())
+		type outcome struct {
+			result RuntimeCommandResult
+			err    error
+		}
+		done := make(chan outcome, 1)
+		go func() {
+			result, err := adapter.ExecuteOperation(ctx, testRuntimeCommandRequest("slow"))
+			done <- outcome{result: result, err: err}
+		}()
+		deadline := time.Now().Add(2 * time.Second)
+		for {
+			if _, err := os.Stat(marker); err == nil {
+				break
+			}
+			if time.Now().After(deadline) {
+				t.Fatal("SSH child did not start before cancellation")
+			}
+			time.Sleep(10 * time.Millisecond)
+		}
+		cancel()
+		select {
+		case got := <-done:
+			if !errors.Is(got.err, context.Canceled) || got.result.ObservedScope != runtimecontract.RuntimeEffectUnknown {
+				t.Fatalf("cancel result=%+v err=%v", got.result, got.err)
+			}
+		case <-time.After(3 * time.Second):
+			t.Fatal("local SSH child survived caller cancellation")
+		}
+		assertCredentialRemoved(t, marker)
+	})
 }
 
 func TestRuntimeAdapterFailedCommandClassifiesObservedRemoteEffect(t *testing.T) {

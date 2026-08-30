@@ -3,18 +3,23 @@ package decision
 import (
 	"bytes"
 	"context"
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
+	"strings"
 	"testing"
 	"time"
 
 	decisioncontracts "github.com/muidea/workorch/internal/modules/blocks/decision/biz/contracts"
 	decisioncommon "github.com/muidea/workorch/internal/modules/blocks/decision/pkg/common"
+	decisionevents "github.com/muidea/workorch/internal/modules/blocks/decision/pkg/events"
 	decisionmodel "github.com/muidea/workorch/internal/modules/blocks/decision/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 	filerepo "github.com/muidea/workorch/internal/pkg/repository/file"
 	"github.com/muidea/workorch/internal/pkg/repository/memory"
+	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
 )
 
 const (
@@ -23,12 +28,30 @@ const (
 	decisionCutpointRootEnv   = "WORKORCH_DECISION_CUTPOINT_ROOT"
 )
 
-func TestFileBackedDecisionRecoversEveryOwnerWriteCutAfterProcessKill(t *testing.T) {
+func TestFileBackedDecisionRecoversRuntimeGovernanceWriteCutsAfterProcessKill(t *testing.T) {
 	for _, phase := range []string{
 		"proposal-pending",
 		"proposal-resolution-created",
 		"delivery-finalized",
 		"delivery-evidence-recorded",
+	} {
+		t.Run(phase, func(t *testing.T) {
+			root := t.TempDir()
+			killDecisionCutpointHelper(t, root, phase)
+			assertDecisionCutpointRecovery(t, root, phase)
+		})
+	}
+}
+
+func TestFileBackedDecisionRecoversWorkspaceClarificationWriteCutsAfterProcessKill(t *testing.T) {
+	for _, phase := range []string{
+		"workspace-clarification-open-ticket-created",
+		"workspace-clarification-resolution-created",
+		"workspace-clarification-ticket-resolved",
+		"workspace-clarification-reconcile-resolution-created",
+		"workspace-clarification-successor-ticket-created",
+		"workspace-clarification-successor-notified",
+		"workspace-clarification-reconcile-ticket-resolved",
 	} {
 		t.Run(phase, func(t *testing.T) {
 			root := t.TempDir()
@@ -47,33 +70,37 @@ func TestDecisionFileCutpointHelperProcess(t *testing.T) {
 	if root == "" || phase == "" {
 		t.Fatal("missing Decision cut-point helper configuration")
 	}
-	ctx := common.ContextWithRuntimeWorkspaceID(context.Background(), "ws-decision-file-cut")
 	tickets, resolutions := decisionFileCutpointRepositories(root)
 	service := newMutationService(tickets, resolutions)
-	seedDecisionFileCutpointTicket(t, ctx, tickets)
-	command := decisionFileCutpointCommand(t)
+	if strings.HasPrefix(phase, "workspace-clarification-") {
+		seedWorkspaceClarificationFileCutpoint(t, service, tickets, resolutions, phase)
+	} else {
+		ctx := common.ContextWithRuntimeWorkspaceID(context.Background(), "ws-decision-file-cut")
+		seedDecisionFileCutpointTicket(t, ctx, tickets)
+		command := decisionFileCutpointCommand(t)
 
-	switch phase {
-	case "proposal-pending":
-		if _, _, err := service.EnsureRuntimeGovernanceResolutionProposal(ctx, command); err != nil {
-			t.Fatalf("persist pending proposal: %v", err)
-		}
-	case "proposal-resolution-created":
-		if _, _, err := service.EnsureRuntimeGovernanceResolutionProposal(ctx, command); err != nil {
-			t.Fatalf("persist pending proposal: %v", err)
-		}
-		if err := resolutions.Create(ctx, resolutionFromResolveCommand(command)); err != nil {
-			t.Fatalf("persist formal resolution cut: %v", err)
-		}
-	case "delivery-finalized", "delivery-evidence-recorded":
-		ticket := finalizeDecisionFileCutpointProposal(t, ctx, service, command)
-		if phase == "delivery-evidence-recorded" {
-			if _, err := service.markRuntimeGovernanceDelivery(ctx, ticket, lifecycleInternalEventProposalEvidenceRecorded); err != nil {
-				t.Fatalf("persist evidence delivery marker: %v", err)
+		switch phase {
+		case "proposal-pending":
+			if _, _, err := service.EnsureRuntimeGovernanceResolutionProposal(ctx, command); err != nil {
+				t.Fatalf("persist pending proposal: %v", err)
 			}
+		case "proposal-resolution-created":
+			if _, _, err := service.EnsureRuntimeGovernanceResolutionProposal(ctx, command); err != nil {
+				t.Fatalf("persist pending proposal: %v", err)
+			}
+			if err := resolutions.Create(ctx, resolutionFromResolveCommand(command)); err != nil {
+				t.Fatalf("persist formal resolution cut: %v", err)
+			}
+		case "delivery-finalized", "delivery-evidence-recorded":
+			ticket := finalizeDecisionFileCutpointProposal(t, ctx, service, command)
+			if phase == "delivery-evidence-recorded" {
+				if _, err := service.markRuntimeGovernanceDelivery(ctx, ticket, lifecycleInternalEventProposalEvidenceRecorded); err != nil {
+					t.Fatalf("persist evidence delivery marker: %v", err)
+				}
+			}
+		default:
+			t.Fatalf("unknown Decision cut-point phase %q", phase)
 		}
-	default:
-		t.Fatalf("unknown Decision cut-point phase %q", phase)
 	}
 
 	// Signal only after the atomic repository call returned, then wait without
@@ -125,6 +152,10 @@ func killDecisionCutpointHelper(t *testing.T, root string, phase string) {
 
 func assertDecisionCutpointRecovery(t *testing.T, root string, phase string) {
 	t.Helper()
+	if strings.HasPrefix(phase, "workspace-clarification-") {
+		assertWorkspaceClarificationFileCutpointRecovery(t, root, phase)
+		return
+	}
 	ctx := common.ContextWithRuntimeWorkspaceID(context.Background(), "ws-decision-file-cut")
 	tickets, resolutions := decisionFileCutpointRepositories(root)
 	service := newMutationService(tickets, resolutions)
@@ -193,6 +224,271 @@ func assertDecisionCutpointRecovery(t *testing.T, root string, phase string) {
 		}
 	default:
 		t.Fatalf("unknown Decision cut-point phase %q", phase)
+	}
+}
+
+func seedWorkspaceClarificationFileCutpoint(
+	t *testing.T,
+	service *mutationService,
+	_ *filerepo.DecisionTicketRepository,
+	resolutions *filerepo.DecisionResolutionRepository,
+	phase string,
+) {
+	t.Helper()
+	open, resolve, reconcile := workspaceClarificationFileCutpointCommands()
+	ctx := common.ContextWithRuntimeWorkspaceID(context.Background(), open.WorkspaceID)
+	oldTicket, err := service.applyLifecycleInternalEvent(ctx, nil, lifecycleInternalEvent{
+		Kind: lifecycleInternalEventOpened, TicketID: open.TicketID, Ticket: workspaceDefinitionClarificationTicketForCommand(open),
+	})
+	if err != nil {
+		t.Fatalf("persist Workspace clarification ticket cut: %v", err)
+	}
+	if phase == "workspace-clarification-open-ticket-created" {
+		return
+	}
+	oldTicket, err = service.MarkTicketCreatedNotificationPublished(ctx, oldTicket)
+	if err != nil {
+		t.Fatalf("persist Workspace clarification creation marker: %v", err)
+	}
+
+	switch phase {
+	case "workspace-clarification-resolution-created", "workspace-clarification-ticket-resolved":
+		resolution := workspaceClarificationAdmissionResolution(resolve)
+		if err := resolutions.Create(ctx, resolution); err != nil {
+			t.Fatalf("persist Workspace clarification admission resolution cut: %v", err)
+		}
+		if phase == "workspace-clarification-resolution-created" {
+			return
+		}
+		if _, err := service.applyLifecycleInternalEvent(ctx, oldTicket, lifecycleInternalEvent{
+			Kind: lifecycleInternalEventResolutionObserved, TicketID: oldTicket.ID, ResolvedAt: resolution.ResolvedAt,
+			Clarification: &definitionClarificationResolutionFact{
+				ResolutionID: resolution.ID, ResolutionBindingHash: resolve.BindingHash(resolution.ID),
+				ResolutionCandidateID: resolve.NewCandidateID, ResolutionCandidateRevision: resolve.NewCandidateRevision,
+				ResolutionCandidateHash: resolve.NewCandidateHash, AdmissionResultHash: resolve.AdmissionResultHash,
+				DefinitionRevision: resolve.DefinitionRevision, StartupInputHash: resolve.StartupInputHash,
+			},
+		}); err != nil {
+			t.Fatalf("persist Workspace clarification admission ticket cut: %v", err)
+		}
+		return
+	case "workspace-clarification-reconcile-resolution-created",
+		"workspace-clarification-successor-ticket-created",
+		"workspace-clarification-successor-notified",
+		"workspace-clarification-reconcile-ticket-resolved":
+		resolution := workspaceClarificationSupersededResolution(reconcile)
+		if err := resolutions.Create(ctx, resolution); err != nil {
+			t.Fatalf("persist Workspace clarification reconciliation resolution cut: %v", err)
+		}
+		if phase == "workspace-clarification-reconcile-resolution-created" {
+			return
+		}
+		successor, createErr := service.applyLifecycleInternalEvent(ctx, nil, lifecycleInternalEvent{
+			Kind: lifecycleInternalEventOpened, TicketID: reconcile.NewRequest.TicketID,
+			Ticket: workspaceDefinitionClarificationTicketForCommand(reconcile.NewRequest),
+		})
+		if createErr != nil {
+			t.Fatalf("persist Workspace clarification successor ticket cut: %v", createErr)
+		}
+		if phase == "workspace-clarification-successor-ticket-created" {
+			return
+		}
+		if _, err := service.MarkTicketCreatedNotificationPublished(ctx, successor); err != nil {
+			t.Fatalf("persist Workspace clarification successor notification cut: %v", err)
+		}
+		if phase == "workspace-clarification-successor-notified" {
+			return
+		}
+		if _, err := service.applyLifecycleInternalEvent(ctx, oldTicket, lifecycleInternalEvent{
+			Kind: lifecycleInternalEventResolutionObserved, TicketID: oldTicket.ID, ResolvedAt: resolution.ResolvedAt,
+			Clarification: &definitionClarificationResolutionFact{
+				ResolutionID: resolution.ID, ResolutionBindingHash: reconcile.BindingHash(resolution.ID),
+			},
+		}); err != nil {
+			t.Fatalf("persist Workspace clarification reconciliation ticket cut: %v", err)
+		}
+		return
+	default:
+		t.Fatalf("unknown Workspace clarification cut-point phase %q", phase)
+	}
+}
+
+func assertWorkspaceClarificationFileCutpointRecovery(t *testing.T, root, phase string) {
+	t.Helper()
+	open, resolve, reconcile := workspaceClarificationFileCutpointCommands()
+	ctx := common.ContextWithRuntimeWorkspaceID(context.Background(), open.WorkspaceID)
+	tickets, resolutions := decisionFileCutpointRepositories(root)
+	hub := newRecordingDecisionHub(t)
+	owner, err := New(hub, nil, Dependencies{OwnerRepositories: decisionBizTestOwnerRepositories(
+		tickets, resolutions, memory.NewDecisionWorkspaceDeletionRepository(),
+	), EventHub: hub})
+	if err != nil {
+		t.Fatalf("recreate Decision owner for Workspace clarification cut: %v", err)
+	}
+	if phase == "workspace-clarification-reconcile-resolution-created" ||
+		phase == "workspace-clarification-successor-ticket-created" ||
+		phase == "workspace-clarification-successor-notified" {
+		assertWorkspaceClarificationDriftFencedAtCut(t, owner, hub, tickets, resolutions, reconcile)
+	}
+
+	switch phase {
+	case "workspace-clarification-open-ticket-created":
+		result, replayErr := owner.openWorkspaceDefinitionClarification(ctx, open)
+		if replayErr != nil || result.Disposition != decisionevents.DefinitionClarificationDuplicate {
+			t.Fatalf("recover Workspace clarification open cut = %+v err=%v", result, replayErr)
+		}
+	case "workspace-clarification-resolution-created", "workspace-clarification-ticket-resolved":
+		result, replayErr := owner.resolveWorkspaceDefinitionClarification(ctx, resolve)
+		if replayErr != nil || result.ValidateFor(resolve) != nil {
+			t.Fatalf("recover Workspace clarification admission cut = %+v err=%v", result, replayErr)
+		}
+	case "workspace-clarification-reconcile-resolution-created",
+		"workspace-clarification-successor-ticket-created",
+		"workspace-clarification-successor-notified",
+		"workspace-clarification-reconcile-ticket-resolved":
+		result, replayErr := owner.reconcileWorkspaceDefinitionClarification(ctx, reconcile)
+		if replayErr != nil || result.ValidateFor(reconcile) != nil {
+			t.Fatalf("recover Workspace clarification reconciliation cut = %+v err=%v", result, replayErr)
+		}
+	default:
+		t.Fatalf("unknown Workspace clarification recovery phase %q", phase)
+	}
+
+	oldTicket, err := tickets.Get(ctx, open.TicketID)
+	if err != nil || oldTicket.CreatedNotificationPublishedAt == "" {
+		t.Fatalf("recovered old Workspace clarification creation marker = %+v err=%v", oldTicket, err)
+	}
+	if phase != "workspace-clarification-open-ticket-created" {
+		if oldTicket.State != common.DecisionTicketStateResolved || oldTicket.ResolutionNotificationPublishedAt == "" || oldTicket.DefinitionClarification == nil || oldTicket.DefinitionClarification.ResolutionID == "" {
+			t.Fatalf("recovered old Workspace clarification resolution = %+v", oldTicket)
+		}
+	}
+	if strings.Contains(phase, "successor") || strings.Contains(phase, "reconcile") {
+		successor, loadErr := tickets.Get(ctx, reconcile.NewRequest.TicketID)
+		if loadErr != nil || successor.State != common.DecisionTicketStateOpen || successor.CreatedNotificationPublishedAt == "" {
+			t.Fatalf("recovered Workspace clarification successor = %+v err=%v", successor, loadErr)
+		}
+	}
+
+	postedBeforeExactReplay := len(hub.Posted())
+	switch phase {
+	case "workspace-clarification-open-ticket-created":
+		_, err = owner.openWorkspaceDefinitionClarification(ctx, open)
+	case "workspace-clarification-resolution-created", "workspace-clarification-ticket-resolved":
+		_, err = owner.resolveWorkspaceDefinitionClarification(ctx, resolve)
+	default:
+		_, err = owner.reconcileWorkspaceDefinitionClarification(ctx, reconcile)
+	}
+	if err != nil {
+		t.Fatalf("repeat exact Workspace clarification recovery: %v", err)
+	}
+	if postedAfterExactReplay := len(hub.Posted()); postedAfterExactReplay != postedBeforeExactReplay {
+		t.Fatalf("exact Workspace clarification replay duplicated notification: before=%d after=%d", postedBeforeExactReplay, postedAfterExactReplay)
+	}
+}
+
+func assertWorkspaceClarificationDriftFencedAtCut(
+	t *testing.T,
+	owner *Biz,
+	hub *recordingDecisionHub,
+	tickets *filerepo.DecisionTicketRepository,
+	resolutions *filerepo.DecisionResolutionRepository,
+	exact decisionevents.ReconcileWorkspaceDefinitionClarificationCandidateCommand,
+) {
+	t.Helper()
+	ctx := common.ContextWithRuntimeWorkspaceID(context.Background(), exact.OldRequest.WorkspaceID)
+	drift := exact
+	drift.NewRequest.CandidateRevision++
+	drift.NewRequest.CandidateHash = "candidate-hash-file-cut-drift"
+	drift.NewRequest.CanonicalSignature = "one-of:file-cut-drift"
+	drift.NewRequest.CanonicalSignatureHash = decisionevents.CanonicalDefinitionClarificationSignatureHash(
+		"workspace-signature",
+		drift.NewRequest.CanonicalSignatureVersion,
+		drift.NewRequest.CanonicalSignature,
+	)
+	drift.NewRequest.TicketID = decisionevents.StableWorkspaceDefinitionClarificationTicketID(drift.NewRequest)
+	drift = drift.Normalized()
+
+	oldBefore, err := tickets.Get(ctx, exact.OldRequest.TicketID)
+	if err != nil {
+		t.Fatalf("load old clarification before drift replay: %v", err)
+	}
+	resolutionBefore, err := resolutions.GetByTicketID(ctx, exact.OldRequest.TicketID)
+	if err != nil {
+		t.Fatalf("load selected clarification resolution before drift replay: %v", err)
+	}
+	ticketsBefore, err := tickets.ListByWorkspaceID(ctx, exact.OldRequest.WorkspaceID)
+	if err != nil {
+		t.Fatalf("list clarification tickets before drift replay: %v", err)
+	}
+	postedBefore := len(hub.Posted())
+
+	if _, err := owner.reconcileWorkspaceDefinitionClarification(ctx, drift); !errors.Is(err, common.ErrConflict) {
+		t.Fatalf("drifted successor replay error = %v, want conflict", err)
+	}
+	if _, err := tickets.Get(ctx, drift.NewRequest.TicketID); !errors.Is(err, common.ErrNotFound) {
+		t.Fatalf("drifted successor ticket lookup error = %v, want not found", err)
+	}
+	oldAfter, err := tickets.Get(ctx, exact.OldRequest.TicketID)
+	if err != nil || !reflect.DeepEqual(oldAfter, oldBefore) {
+		t.Fatalf("drifted replay mutated old clarification: before=%+v after=%+v err=%v", oldBefore, oldAfter, err)
+	}
+	resolutionAfter, err := resolutions.GetByTicketID(ctx, exact.OldRequest.TicketID)
+	if err != nil || !reflect.DeepEqual(resolutionAfter, resolutionBefore) {
+		t.Fatalf("drifted replay mutated selected resolution: before=%+v after=%+v err=%v", resolutionBefore, resolutionAfter, err)
+	}
+	ticketsAfter, err := tickets.ListByWorkspaceID(ctx, exact.OldRequest.WorkspaceID)
+	if err != nil || len(ticketsAfter) != len(ticketsBefore) {
+		t.Fatalf("drifted replay changed ticket inventory: before=%d after=%d err=%v", len(ticketsBefore), len(ticketsAfter), err)
+	}
+	if postedAfter := len(hub.Posted()); postedAfter != postedBefore {
+		t.Fatalf("drifted replay published notification: before=%d after=%d", postedBefore, postedAfter)
+	}
+}
+
+func workspaceClarificationFileCutpointCommands() (
+	decisionevents.OpenWorkspaceDefinitionClarificationRequestCommand,
+	decisionevents.ResolveWorkspaceDefinitionClarificationByAdmissionCommand,
+	decisionevents.ReconcileWorkspaceDefinitionClarificationCandidateCommand,
+) {
+	open := workspaceDefinitionClarificationCommandForBizTest().Normalized()
+	resolve := decisionevents.ResolveWorkspaceDefinitionClarificationByAdmissionCommand{
+		TicketID: open.TicketID, WorkspaceID: open.WorkspaceID,
+		OldCandidateID: open.CandidateID, OldCandidateRevision: open.CandidateRevision, OldCandidateHash: open.CandidateHash,
+		NewCandidateID: open.CandidateID, NewCandidateRevision: open.CandidateRevision + 1, NewCandidateHash: "candidate-hash-file-cut-recovered",
+		AdmissionResultHash: "admission-hash-file-cut-recovered", DefinitionRevision: "definition-revision-file-cut-recovered", StartupInputHash: "startup-input-file-cut-recovered",
+	}.Normalized()
+	successor := open
+	successor.CandidateRevision++
+	successor.CandidateHash = "candidate-hash-file-cut-successor"
+	successor.CanonicalSignature = "one-of:file-cut-successor"
+	successor.CanonicalSignatureHash = decisionevents.CanonicalDefinitionClarificationSignatureHash("workspace-signature", successor.CanonicalSignatureVersion, successor.CanonicalSignature)
+	successor.TicketID = decisionevents.StableWorkspaceDefinitionClarificationTicketID(successor)
+	reconcile := decisionevents.ReconcileWorkspaceDefinitionClarificationCandidateCommand{OldRequest: open, NewRequest: successor}.Normalized()
+	return open, resolve, reconcile
+}
+
+func workspaceClarificationAdmissionResolution(command decisionevents.ResolveWorkspaceDefinitionClarificationByAdmissionCommand) *decisionmodel.Resolution {
+	resolutionID := decisionevents.StableDefinitionClarificationResolutionID(command.TicketID, command.AdmissionResultHash+"\x00"+command.StartupInputHash)
+	return &decisionmodel.Resolution{
+		ID: resolutionID, TicketID: command.TicketID, ResolvedAt: newDecisionResolutionTimestamp(),
+		Type: decisionevents.DefinitionClarificationResolutionCandidateAdjusted,
+		Payload: workorcheventpayload.New(
+			workorcheventpayload.StringField("definitionRevision", command.DefinitionRevision),
+			workorcheventpayload.StringField("startupInputHash", command.StartupInputHash),
+		),
+	}
+}
+
+func workspaceClarificationSupersededResolution(command decisionevents.ReconcileWorkspaceDefinitionClarificationCandidateCommand) *decisionmodel.Resolution {
+	resolutionID := decisionevents.StableDefinitionClarificationResolutionID(command.OldRequest.TicketID, command.NewRequest.BindingHash())
+	return &decisionmodel.Resolution{
+		ID: resolutionID, TicketID: command.OldRequest.TicketID, ResolvedAt: newDecisionResolutionTimestamp(),
+		Type: decisionevents.DefinitionClarificationResolutionCandidateSuperseded,
+		Payload: workorcheventpayload.New(
+			workorcheventpayload.StringField("newTicketId", string(command.NewRequest.TicketID)),
+			workorcheventpayload.StringField("newCandidateHash", command.NewRequest.CandidateHash),
+		),
 	}
 }
 

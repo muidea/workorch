@@ -79,6 +79,27 @@ func TestSSHOwnerRequiresExactApprovalBeforeNetworkAndCommitsObservedChange(t *t
 	if !runtimecontract.SameRuntimeOperationReceipt(receipt, duplicateReceipt) || readFile(t, captureFile) != captureBeforeReplay {
 		t.Fatalf("duplicate SSH execution crossed remote-effect fence: first=%+v duplicate=%+v", receipt, duplicateReceipt)
 	}
+
+	owner.Teardown(ctx)
+	if adapter.targets != nil || adapter.sessions != nil || adapter.credentials != nil {
+		t.Fatalf("SSH owner teardown retained target/session/credential material: targets=%v sessions=%v credentials=%v", adapter.targets, adapter.sessions, adapter.credentials)
+	}
+	restartedAdapter := configuredPasswordRuntimeAdapter(t, "WORKORCH_TEST_SSH_PASSWORD", "test-password")
+	restarted := &Biz{Base: basebiz.New(ModuleID, hub, nil), runtimeAdapter: restartedAdapter}
+	if err := restarted.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { restarted.Teardown(ctx) })
+	restartedData, err := hub.Send(magicevent.NewEventWithContext(
+		sshevents.TopicExecuteOperation, runtimecontract.RuntimeModuleOrchestrator, ModuleID, magicevent.NewHeader(), ctx, second,
+	)).Get()
+	if err != nil {
+		t.Fatal(err)
+	}
+	restartedReceipt := restartedData.(sshevents.ExecuteOperationResult).Receipt
+	if !runtimecontract.SameRuntimeOperationReceipt(receipt, restartedReceipt) || readFile(t, captureFile) != captureBeforeReplay {
+		t.Fatalf("fresh SSH owner repeated remote effect: first=%+v replayed=%+v", receipt, restartedReceipt)
+	}
 }
 
 func TestSSHOwnerCommitsFailedCommandWithObservedEffectClassification(t *testing.T) {
@@ -140,6 +161,90 @@ func TestSSHOwnerCommitsFailedCommandWithObservedEffectClassification(t *testing
 			}
 			if err := receipt.Validate(); err != nil {
 				t.Fatalf("failed SSH owner receipt validation: %v", err)
+			}
+		})
+	}
+}
+
+func TestSSHOwnerCommitsUnknownEffectReceiptWhenRemoteObservationFails(t *testing.T) {
+	for _, testCase := range []struct {
+		name           string
+		failAfter      bool
+		wantCode       string
+		wantBeforeHash bool
+	}{
+		{name: "before observation fails", wantCode: "ssh_observation_before_failed"},
+		{name: "after observation fails", failAfter: true, wantCode: "ssh_observation_after_failed", wantBeforeHash: true},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			ctx := context.Background()
+			hub := magicevent.NewHub(16)
+			t.Cleanup(func() { hub.Terminate(ctx) })
+			toolsDir := t.TempDir()
+			observationCount := filepath.Join(toolsDir, "observation-count")
+			callsFile := filepath.Join(toolsDir, "ssh-calls")
+			writeExecutable(t, filepath.Join(toolsDir, "setsid"), "#!/bin/sh\nexec \"$@\"\n")
+			script := "#!/bin/sh\nprintf x >> \"" + callsFile + "\"\nlast=\"\"\nfor arg in \"$@\"; do last=\"$arg\"; done\n"
+			if testCase.failAfter {
+				script += "if [ \"$last\" = \"observe-state\" ]; then if [ -f \"" + observationCount + "\" ]; then exit 4; fi; touch \"" + observationCount + "\"; echo before; exit 0; fi\nif [ \"$last\" = \"mutate-state\" ]; then exit 0; fi\nexit 3\n"
+			} else {
+				script += "if [ \"$last\" = \"observe-state\" ]; then exit 4; fi\nif [ \"$last\" = \"mutate-state\" ]; then exit 0; fi\nexit 3\n"
+			}
+			writeExecutable(t, filepath.Join(toolsDir, "ssh"), script)
+			t.Setenv("PATH", toolsDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+			adapter := configuredPasswordRuntimeAdapter(t, "WORKORCH_TEST_SSH_OBSERVATION_PASSWORD", "test-password")
+			owner := &Biz{Base: basebiz.New(ModuleID, hub, nil), runtimeAdapter: adapter}
+			if err := owner.Start(); err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() { owner.Teardown(ctx) })
+			installSSHReceiptObserver(t, hub)
+
+			operation, operationData, sealed := testSSHRuntimeOperation(t, adapter, "mutate-state")
+			beforeApproval := testSSHExecuteCommand(t, operation, sealed, nil, 1)
+			if _, err := hub.Send(magicevent.NewEventWithContext(
+				sshevents.TopicExecuteOperation, runtimecontract.RuntimeModuleOrchestrator, ModuleID,
+				magicevent.NewHeader(), ctx, beforeApproval,
+			)).Get(); err != nil {
+				t.Fatal(err)
+			}
+			requirement := sshApprovalRequirement(operationData)
+			grant := runtimecontract.RuntimeOperationGovernanceGrant{
+				ResolutionID: "resolution-observation", ResolutionHash: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+				ApprovalID: "approval-observation", ExecutionKey: beforeApproval.Execution.ExecutionKey,
+				GovernanceFence: 1, ResumeFence: 2, DependencyKind: string(runtimecontract.GovernanceApproval),
+				SubjectRef: requirement.SubjectRef, RequestedAction: requirement.RequestedAction, RiskLevel: requirement.RiskLevel,
+				AuthorizationHash: runtimecontract.StableRuntimeAuthorizationContextHash(requirement.AuthorizationContext), GovernanceReceiptHash: "governance-receipt-observation",
+			}
+			command := testSSHExecuteCommand(t, operation, sealed, &grant, 2)
+			responseData, err := hub.Send(magicevent.NewEventWithContext(
+				sshevents.TopicExecuteOperation, runtimecontract.RuntimeModuleOrchestrator, ModuleID,
+				magicevent.NewHeader(), ctx, command,
+			)).Get()
+			if err != nil {
+				t.Fatal(err)
+			}
+			receipt := responseData.(sshevents.ExecuteOperationResult).Receipt
+			if receipt.Outcome != runtimecontract.RuntimeOperationOutcomeRejected || receipt.ObservedEffectScope != runtimecontract.RuntimeEffectUnknown || receipt.Changed ||
+				len(receipt.ResourceChanges) != 0 || receipt.AfterHash != "" || (receipt.BeforeHash != "") != testCase.wantBeforeHash || receipt.Feedback == nil ||
+				receipt.Feedback.OriginalDiagnostic == nil || receipt.Feedback.OriginalDiagnostic.OriginalCode != testCase.wantCode {
+				t.Fatalf("observation failure receipt = %+v", receipt)
+			}
+			if err := receipt.Validate(); err != nil {
+				t.Fatalf("observation failure receipt validation: %v", err)
+			}
+			callsBeforeReplay := readFile(t, callsFile)
+			replayedData, err := hub.Send(magicevent.NewEventWithContext(
+				sshevents.TopicExecuteOperation, runtimecontract.RuntimeModuleOrchestrator, ModuleID,
+				magicevent.NewHeader(), ctx, command,
+			)).Get()
+			if err != nil {
+				t.Fatal(err)
+			}
+			replayed := replayedData.(sshevents.ExecuteOperationResult).Receipt
+			if !runtimecontract.SameRuntimeOperationReceipt(receipt, replayed) || readFile(t, callsFile) != callsBeforeReplay {
+				t.Fatalf("observation failure receipt was not replayed exactly: first=%+v replayed=%+v", receipt, replayed)
 			}
 		})
 	}

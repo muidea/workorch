@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	cd "github.com/muidea/magicCommon/def"
@@ -18,6 +19,16 @@ type shellPanicDataEvent struct{ magicevent.Event }
 
 func (shellPanicDataEvent) Data() any {
 	panic("Shell Runtime ingress inspected payload before its call/source guard")
+}
+
+type shellCountingDataEvent struct {
+	magicevent.Event
+	reads atomic.Int32
+}
+
+func (e *shellCountingDataEvent) Data() any {
+	e.reads.Add(1)
+	return struct{}{}
 }
 
 func TestShellRuntimeIngressTopicMatrixEnforcesStrongOrchestratorCalls(t *testing.T) {
@@ -54,6 +65,43 @@ func TestShellRuntimeIngressTopicMatrixEnforcesStrongOrchestratorCalls(t *testin
 
 			item.handler(shellPanicDataEvent{Event: magicevent.NewEventWithContext(item.topic, runtimecontract.RuntimeModuleOrchestrator, ModuleID, magicevent.NewHeader(), ctx, nil)}, nil)
 		})
+	}
+}
+
+func TestShellOwnerLifecycleCoversEveryRuntimeTopic(t *testing.T) {
+	ctx := context.Background()
+	hub := magicevent.NewHub(16)
+	t.Cleanup(func() { hub.Terminate(ctx) })
+	owner := &Biz{Base: basebiz.New(ModuleID, hub, nil), runtimeAdapter: NewRuntimeAdapter()}
+	if err := owner.Start(); err != nil {
+		t.Fatal(err)
+	}
+	if err := owner.Start(); err != nil {
+		t.Fatal(err)
+	}
+	topics := []string{
+		shellevents.TopicAcquireRuntimeCapabilities,
+		shellevents.TopicAcquireRuntimeOperationAdmissibility,
+		shellevents.TopicProbeRuntimeOperationFeasibility,
+		shellevents.TopicProbeRuntimeSemanticProofFeasibility,
+		shellevents.TopicProbeRuntimeOwnerFactProspectiveSatisfaction,
+		shellevents.TopicQueryRuntimeCWIReconciliation,
+		shellevents.TopicExecuteOperation,
+	}
+	for _, topic := range topics {
+		event := &shellCountingDataEvent{Event: magicevent.NewEventWithContext(topic, runtimecontract.RuntimeModuleOrchestrator, ModuleID, magicevent.NewHeader(), ctx, nil)}
+		assertShellRuntimeIngressInvalid(t, hub.Send(event), "payload")
+		if got := event.reads.Load(); got != 1 {
+			t.Fatalf("started topic %s payload reads = %d, want exactly 1 after duplicate Start", topic, got)
+		}
+	}
+	owner.Teardown(ctx)
+	for _, topic := range topics {
+		event := &shellCountingDataEvent{Event: magicevent.NewEventWithContext(topic, runtimecontract.RuntimeModuleOrchestrator, ModuleID, magicevent.NewHeader(), ctx, nil)}
+		hub.Send(event)
+		if got := event.reads.Load(); got != 0 {
+			t.Fatalf("post-Stop topic %s payload reads = %d, want 0", topic, got)
+		}
 	}
 }
 

@@ -385,6 +385,13 @@ func buildRuntimeRecoveryInventoryWithDraining(runs []*runmodel.Run, cmd runeven
 		if run == nil {
 			continue
 		}
+		// Pending belongs to Run-owner activation/replacement recovery and is
+		// never an SM-4 Runtime aggregate. Configure activates a valid root cut
+		// and retains a validated linked successor; this defensive filter keeps
+		// either shape out of Orchestrator recovery inventory.
+		if run.State == common.RunStatePending {
+			continue
+		}
 		key := string(run.WorkspaceID) + "\x00" + string(run.ID)
 		if cursor != "" && key <= cursor {
 			continue

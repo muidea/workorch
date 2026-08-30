@@ -4,7 +4,9 @@ import (
 	"context"
 	"errors"
 	"sync"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	cd "github.com/muidea/magicCommon/def"
 	decisionbiz "github.com/muidea/workorch/internal/modules/blocks/decision/biz"
@@ -15,6 +17,7 @@ import (
 	decisionevents "github.com/muidea/workorch/internal/modules/blocks/decision/pkg/events"
 
 	decisionmodel "github.com/muidea/workorch/internal/modules/blocks/decision/pkg/models"
+	runcommon "github.com/muidea/workorch/internal/modules/blocks/run/pkg/common"
 	orchestratorevents "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/repository/memory"
@@ -180,6 +183,241 @@ func TestDecisionFileDeletionFenceLinearizesAcrossRepositorySets(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestDecisionRuntimeClarificationReplayStaleAndResolutionSurviveFileOwnerReopen(t *testing.T) {
+	ctx := context.Background()
+	root := t.TempDir()
+	open := decisionRuntimeClarificationFileCommand()
+	bound := common.ContextWithRuntimeWorkspaceID(ctx, open.WorkspaceID)
+
+	firstRepositories := workorchrepo.NewWorkspaceScopedFileRepositorySet(root)
+	firstHub := magicevent.NewHub(16)
+	first := New()
+	if err := first.Configure(decisionbiz.Dependencies{OwnerRepositories: firstRepositories.DecisionOwner, EventHub: firstHub}); err != nil {
+		t.Fatalf("configure first owner: %v", err)
+	}
+	if err := first.Start(); err != nil {
+		t.Fatalf("start first owner: %v", err)
+	}
+	created, err := sendDecisionTestCommandFrom[decisionevents.OpenRuntimeDefinitionClarificationRequestResult](
+		bound, firstHub, decisionevents.TopicOpenRuntimeDefinitionClarification,
+		runtimecontract.RuntimeModuleOrchestrator, open,
+	)
+	if err != nil || created.Disposition != decisionevents.DefinitionClarificationCreated || created.ClarificationRequestBindingHash != open.BindingHash() {
+		t.Fatalf("create Runtime clarification = %+v err=%v", created, err)
+	}
+	if err := first.Stop(ctx); err != nil {
+		t.Fatalf("stop first owner: %v", err)
+	}
+	firstHub.Terminate(ctx)
+
+	secondRepositories := workorchrepo.NewWorkspaceScopedFileRepositorySet(root)
+	secondHub := magicevent.NewHub(16)
+	second := New()
+	if err := second.Configure(decisionbiz.Dependencies{OwnerRepositories: secondRepositories.DecisionOwner, EventHub: secondHub}); err != nil {
+		t.Fatalf("configure second owner: %v", err)
+	}
+	if err := second.Start(); err != nil {
+		t.Fatalf("start second owner: %v", err)
+	}
+	stopSecondEvidence := subscribeDecisionEvidenceAck(secondHub)
+	duplicateOpen, err := sendDecisionTestCommandFrom[decisionevents.OpenRuntimeDefinitionClarificationRequestResult](
+		bound, secondHub, decisionevents.TopicOpenRuntimeDefinitionClarification,
+		runtimecontract.RuntimeModuleOrchestrator, open,
+	)
+	if err != nil || duplicateOpen.Disposition != decisionevents.DefinitionClarificationDuplicate || duplicateOpen.ClarificationRequestBindingHash != created.ClarificationRequestBindingHash {
+		t.Fatalf("reopened Runtime clarification replay = %+v err=%v", duplicateOpen, err)
+	}
+
+	resolve := decisionevents.ResolveRuntimeDefinitionClarificationByReplacementCommand{
+		TicketID: open.TicketID, WorkspaceID: open.WorkspaceID, PredecessorRunID: open.RunID,
+		ReplacementIntentID: "replacement-intent-file", PredecessorDefinitionRevision: open.DefinitionRevision,
+		PredecessorStartupInputHash: open.StartupInputHash, SuccessorDefinitionRevision: "definition-file-successor",
+		SuccessorStartupInputHash: "startup-file-successor", ReplacementIntentHash: "replacement-intent-file-hash",
+	}
+	stale := resolve
+	stale.PredecessorDefinitionRevision = "definition-file-stale"
+	staleResult, err := sendDecisionTestCommandFrom[decisionevents.ResolveRuntimeDefinitionClarificationByReplacementResult](
+		bound, secondHub, decisionevents.TopicResolveRuntimeDefinitionClarificationByReplacement, runcommon.ModuleID, stale,
+	)
+	if err != nil || staleResult.ValidateFor(stale) != nil || staleResult.Disposition != decisionevents.DefinitionClarificationStale || staleResult.ConflictKind != decisionevents.RuntimeDefinitionClarificationScopeMismatch {
+		t.Fatalf("stale Runtime clarification result = %+v err=%v", staleResult, err)
+	}
+	resolved, err := sendDecisionTestCommandFrom[decisionevents.ResolveRuntimeDefinitionClarificationByReplacementResult](
+		bound, secondHub, decisionevents.TopicResolveRuntimeDefinitionClarificationByReplacement, runcommon.ModuleID, resolve,
+	)
+	if err != nil || resolved.ValidateFor(resolve) != nil || resolved.Disposition != decisionevents.DefinitionClarificationResolved {
+		t.Fatalf("resolve Runtime clarification = %+v err=%v", resolved, err)
+	}
+	if err := second.Stop(ctx); err != nil {
+		t.Fatalf("stop second owner: %v", err)
+	}
+	stopSecondEvidence()
+	secondHub.Terminate(ctx)
+
+	thirdRepositories := workorchrepo.NewWorkspaceScopedFileRepositorySet(root)
+	thirdHub := magicevent.NewHub(16)
+	third := New()
+	if err := third.Configure(decisionbiz.Dependencies{OwnerRepositories: thirdRepositories.DecisionOwner, EventHub: thirdHub}); err != nil {
+		t.Fatalf("configure third owner: %v", err)
+	}
+	if err := third.Start(); err != nil {
+		t.Fatalf("start third owner: %v", err)
+	}
+	stopThirdEvidence := subscribeDecisionEvidenceAck(thirdHub)
+	t.Cleanup(func() {
+		stopThirdEvidence()
+		_ = third.Stop(context.Background())
+		thirdHub.Terminate(context.Background())
+	})
+	duplicateResolve, err := sendDecisionTestCommandFrom[decisionevents.ResolveRuntimeDefinitionClarificationByReplacementResult](
+		bound, thirdHub, decisionevents.TopicResolveRuntimeDefinitionClarificationByReplacement, runcommon.ModuleID, resolve,
+	)
+	if err != nil || duplicateResolve.ValidateFor(resolve) != nil || duplicateResolve.Disposition != decisionevents.DefinitionClarificationDuplicate || duplicateResolve.ResolutionID != resolved.ResolutionID {
+		t.Fatalf("reopened Runtime resolution replay = %+v err=%v", duplicateResolve, err)
+	}
+	drift := resolve
+	drift.ReplacementIntentID = "replacement-intent-file-drift"
+	drift.ReplacementIntentHash = "replacement-intent-file-drift-hash"
+	driftResult, err := sendDecisionTestCommandFrom[decisionevents.ResolveRuntimeDefinitionClarificationByReplacementResult](
+		bound, thirdHub, decisionevents.TopicResolveRuntimeDefinitionClarificationByReplacement, runcommon.ModuleID, drift,
+	)
+	if err != nil || driftResult.ValidateFor(drift) != nil || driftResult.Disposition != decisionevents.DefinitionClarificationStale || driftResult.ConflictKind != decisionevents.RuntimeDefinitionClarificationTicketAlreadyBound || driftResult.CurrentReplacementIntentID != resolve.ReplacementIntentID {
+		t.Fatalf("reopened Runtime resolution drift = %+v err=%v", driftResult, err)
+	}
+	stored, err := thirdRepositories.Tickets.Get(bound, open.TicketID)
+	if err != nil || stored.DefinitionClarification == nil || stored.DefinitionClarification.ReplacementIntentID != resolve.ReplacementIntentID {
+		t.Fatalf("reopened Runtime clarification changed by drift = %+v err=%v", stored, err)
+	}
+}
+
+func TestDecisionReopenedFileOwnerRecoversOnRepeatedBackgroundTick(t *testing.T) {
+	ctx := context.Background()
+	root := t.TempDir()
+	open := decisionevents.OpenRuntimeGovernanceRequestCommand{
+		TicketID: "ticket-file-background", WorkspaceID: "ws-file-background", RunID: "run-file-background",
+		DispatchID:  "dispatch-file-background",
+		Transaction: runtimecontract.AuthorityTransaction{AuthoritySnapshotID: "authority-file-background"},
+		Dependency: runtimecontract.ExternalDependency{
+			Kind: "operator_input", SubjectRef: "provider-file-background", Reason: "confirm file recovery",
+		},
+		ContinueResolutionType: decisioncommon.ResolutionTypeProvideMissingInfo,
+		FailResolutionType:     decisioncommon.ResolutionTypeRejectCurrentPath,
+	}
+	bound := common.ContextWithRuntimeWorkspaceID(ctx, open.WorkspaceID)
+
+	firstRepositories := workorchrepo.NewWorkspaceScopedFileRepositorySet(root)
+	firstHub := magicevent.NewHub(32)
+	first := New()
+	if err := first.Configure(decisionbiz.Dependencies{OwnerRepositories: firstRepositories.DecisionOwner, EventHub: firstHub}); err != nil {
+		t.Fatalf("configure first owner: %v", err)
+	}
+	if err := first.Start(); err != nil {
+		t.Fatalf("start first owner: %v", err)
+	}
+	invalidCommit := magicevent.NewSimpleObserver(orchestratorevents.CommandDestination, firstHub)
+	invalidCommit.Subscribe(orchestratorevents.TopicOrchestratorCommitRuntimeGovernanceTicket, func(_ magicevent.Event, result magicevent.Result) {
+		result.Set(struct{}{}, nil)
+	})
+	if _, err := sendDecisionTestCommandFrom[decisionevents.OpenRuntimeGovernanceRequestResult](
+		bound, firstHub, decisionevents.TopicOpenRuntimeGovernanceRequest, runtimecontract.RuntimeModuleOrchestrator, open,
+	); err != nil {
+		t.Fatalf("open Runtime governance request: %v", err)
+	}
+	resolution := runtimeGovernanceResolutionCommand(open.TicketID, open.WorkspaceID, open.RunID)
+	resolution.StepID = common.StepID("runtime/" + open.DispatchID)
+	if _, err := sendDecisionTestCommand[decisionevents.EnsureResolvedResult](bound, firstHub, decisionevents.TopicDecisionCommandEnsureResolved, resolution); !errors.Is(err, common.ErrInvalidArgument) {
+		t.Fatalf("seed pending proposal err = %v, want invalid commit result", err)
+	}
+	pending, err := firstRepositories.Tickets.Get(bound, open.TicketID)
+	if err != nil || pending.RuntimeGovernanceProposal == nil || pending.RuntimeGovernanceProposal.State != decisionmodel.RuntimeGovernanceResolutionProposalPending {
+		t.Fatalf("pending file proposal = %+v err=%v", pending, err)
+	}
+	invalidCommit.Unsubscribe(orchestratorevents.TopicOrchestratorCommitRuntimeGovernanceTicket)
+	if err := first.Stop(ctx); err != nil {
+		t.Fatalf("stop first owner: %v", err)
+	}
+	firstHub.Terminate(ctx)
+
+	secondRepositories := workorchrepo.NewWorkspaceScopedFileRepositorySet(root)
+	secondHub := magicevent.NewHub(32)
+	background := magictask.NewBackgroundRoutine(2)
+	second := New()
+	if err := second.Configure(decisionbiz.Dependencies{
+		OwnerRepositories: secondRepositories.DecisionOwner, EventHub: secondHub, BackgroundRoutine: background,
+	}); err != nil {
+		t.Fatalf("configure reopened owner: %v", err)
+	}
+	var commitValid atomic.Bool
+	var commitCount atomic.Int64
+	commit := magicevent.NewSimpleObserver(orchestratorevents.CommandDestination, secondHub)
+	commit.Subscribe(orchestratorevents.TopicOrchestratorCommitRuntimeGovernanceTicket, func(event magicevent.Event, result magicevent.Result) {
+		commitCount.Add(1)
+		command, ok := event.Data().(orchestratorevents.CommitRuntimeGovernanceTicketResolutionCommand)
+		if !ok || !commitValid.Load() {
+			result.Set(struct{}{}, nil)
+			return
+		}
+		result.Set(orchestratorevents.CommitRuntimeGovernanceResolutionResult{
+			WorkspaceID: command.WorkspaceID, RunID: command.RunID, ResolutionID: command.ResolutionID,
+			Disposition:   orchestratorevents.RuntimeGovernanceResolutionDispositionCommitted,
+			StateRevision: 2, EvidenceRevision: "evidence-file-background",
+			AuthoritySnapshotID: open.Transaction.AuthoritySnapshotID, State: runtimecontract.ConvergenceStateNeedStateChange,
+		}, nil)
+	})
+	stopEvidence := subscribeDecisionEvidenceAck(secondHub)
+	if err := second.Start(); err != nil {
+		t.Fatalf("start reopened owner: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = second.Stop(context.Background())
+		stopEvidence()
+		commit.Unsubscribe(orchestratorevents.TopicOrchestratorCommitRuntimeGovernanceTicket)
+		background.Shutdown(context.Background())
+		secondHub.Terminate(context.Background())
+	})
+
+	waitUntil := func(name string, condition func() bool) {
+		t.Helper()
+		deadline := time.Now().Add(3 * time.Second)
+		for time.Now().Before(deadline) {
+			if condition() {
+				return
+			}
+			time.Sleep(10 * time.Millisecond)
+		}
+		t.Fatalf("timed out waiting for %s", name)
+	}
+	waitUntil("initial failed background reconciliation", func() bool { return commitCount.Load() >= 1 })
+	commitValid.Store(true)
+	waitUntil("repeated-tick file reconciliation", func() bool {
+		item, loadErr := secondRepositories.Tickets.Get(bound, open.TicketID)
+		return loadErr == nil && item.State == common.DecisionTicketStateResolved && item.RuntimeGovernanceProposal != nil &&
+			item.RuntimeGovernanceProposal.State == decisionmodel.RuntimeGovernanceResolutionProposalCommitted &&
+			item.RuntimeGovernanceProposal.EvidenceRecordedAt != "" && item.RuntimeGovernanceProposal.ResolutionNotificationPublishedAt != ""
+	})
+	if commitCount.Load() < 2 {
+		t.Fatalf("background commit attempts = %d, want initial failure plus repeated tick", commitCount.Load())
+	}
+}
+
+func decisionRuntimeClarificationFileCommand() decisionevents.OpenRuntimeDefinitionClarificationRequestCommand {
+	command := decisionevents.OpenRuntimeDefinitionClarificationRequestCommand{
+		SchemaVersion: decisionevents.DefinitionClarificationSchemaVersionCurrent,
+		WorkspaceID:   "workspace-runtime-file", RunID: "run-runtime-file",
+		DefinitionRevision: "definition-runtime-file", StartupInputHash: "startup-runtime-file",
+		AuthoritySnapshotID: "authority-runtime-file", ClarificationDispatchID: "dispatch-runtime-file",
+		FocusRef: "focus-runtime-file", LogicalRequestID: "request-runtime-file",
+		SemanticDocumentHash: "document-runtime-file", GapKind: decisionevents.RuntimeDefinitionGapSemanticAmbiguity,
+		OffendingItemRefs: []string{"dod:item-runtime-file"}, CanonicalGapSignatureVersion: "v1",
+		CanonicalGapSignature: "semantic-ambiguity:file", RequiredActionKind: decisionevents.DefinitionClarificationActionReviseAndRestart,
+	}
+	command.CanonicalGapSignatureHash = decisionevents.CanonicalDefinitionClarificationSignatureHash(
+		"runtime-signature", command.CanonicalGapSignatureVersion, command.CanonicalGapSignature,
+	)
+	command.TicketID = decisionevents.StableRuntimeDefinitionClarificationTicketID(command)
+	return command.Normalized()
 }
 
 func mustDecisionEventPayload(t *testing.T, input map[string]any) []workorcheventpayload.Field {

@@ -71,6 +71,23 @@ func TestDecisionWorkspaceDeletionRejectsForgedPurgeAndUsesPrivatePath(t *testin
 	}
 	scope.RequestHash = deletioncontract.StableRequestHash(scope)
 	bound := common.ContextWithRuntimeWorkspaceID(ctx, workspaceID)
+	forgedSealCommand := decisionevents.SealWorkspaceDecisionDeletionCommand{
+		WorkspaceID: scope.WorkspaceID, DeletionID: scope.DeletionID, DeletionGeneration: scope.DeletionGeneration,
+		DataDispositionIntent: scope.Mode, QuiescenceID: scope.QuiescenceID, RequestHash: scope.RequestHash,
+	}
+	forgedSealEvent := magicevent.NewEventWithContext(
+		decisionevents.TopicDecisionCommandSealWorkspaceDeletion, "application/workorchd", decisionevents.CommandDestination,
+		magicevent.NewHeader(), bound, forgedSealCommand,
+	)
+	if _, err := owner.executeSealWorkspaceDeletion(bound, forgedSealEvent); !errors.Is(err, common.ErrInvalidArgument) {
+		t.Fatalf("forged Decision seal source error=%v, want invalid argument", err)
+	}
+	if _, err := repositories.WorkspaceDeletions.Get(bound, workspaceID); !errors.Is(err, common.ErrNotFound) {
+		t.Fatalf("forged Decision seal created tombstone: %v", err)
+	}
+	if count := decisionPhysicalTicketCountWithoutFence(t, bound, repositories, workspaceID); count != 1 {
+		t.Fatalf("forged Decision seal changed physical tickets: count=%d", count)
+	}
 	current, err := owner.applyWorkspaceDeletionInternalEvent(bound, nil, workspaceDeletionInternalEvent{
 		Kind: workspaceDeletionInternalEventFenceObserved, Scope: scope,
 	})
@@ -110,6 +127,15 @@ func TestDecisionWorkspaceDeletionRejectsForgedPurgeAndUsesPrivatePath(t *testin
 	if count := decisionPhysicalTicketCount(t, bound, repositories, scope); count != 0 {
 		t.Fatalf("Decision private purge retained physical tickets: count=%d", count)
 	}
+}
+
+func decisionPhysicalTicketCountWithoutFence(t *testing.T, ctx context.Context, repositories memory.DecisionOwnerRepositorySet, workspaceID common.WorkspaceID) int {
+	t.Helper()
+	items, err := repositories.Tickets.ListByWorkspaceID(ctx, workspaceID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return len(items)
 }
 
 func decisionDeletionFunctionBody(t *testing.T, source, start, end string) string {

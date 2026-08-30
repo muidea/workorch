@@ -101,6 +101,112 @@ func TestModuleSkillCommandsUseRegistryContract(t *testing.T) {
 	}
 }
 
+func TestModuleRejectsForgedSkillSourcesAndDuplicateCreateWithoutExtraWrite(t *testing.T) {
+	ctx := context.Background()
+	hub := magicevent.NewHub(16)
+	repository := memory.NewSkillRepository()
+	module := New()
+	if err := module.Configure(skillbiz.Dependencies{Skills: repository, EventHub: hub}); err != nil {
+		t.Fatal(err)
+	}
+	if err := module.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = module.Stop(ctx) })
+	command := skillevents.CreateSkillCommand{
+		SkillID: "skill-source-duplicate", Name: "source duplicate", Version: "1.0.0", Instruction: "preserve exactly one owner resource",
+	}
+	send := func(source string) magicevent.Result {
+		return hub.Send(magicevent.NewEventWithContext(
+			skillevents.TopicSkillCommandCreate, source, skillevents.CommandDestination,
+			magicevent.NewHeader(), ctx, command,
+		))
+	}
+	for _, source := range []string{"untrusted/module", " application/workorchd/context-registry "} {
+		result := send(source)
+		if result == nil || !errors.Is(result.Error(), common.ErrInvalidArgument) {
+			t.Fatalf("forged source %q result = %+v, want invalid argument", source, result)
+		}
+	}
+	if _, err := repository.Get(ctx, command.SkillID); !errors.Is(err, common.ErrNotFound) {
+		t.Fatalf("forged create mutated owner: %v", err)
+	}
+	first := send("application/workorchd/context-registry")
+	if first == nil || first.Error() != nil {
+		t.Fatalf("first create = %+v", first)
+	}
+	second := send("application/workorchd/context-registry")
+	if second == nil || !errors.Is(second.Error(), common.ErrConflict) {
+		t.Fatalf("duplicate create = %+v, want conflict", second)
+	}
+	items, err := repository.List(ctx)
+	if err != nil || len(items) != 1 || items[0].ID != command.SkillID {
+		t.Fatalf("skills after duplicate = %+v err=%v", items, err)
+	}
+}
+
+func TestModuleStopFencesSubsequentSkillDelivery(t *testing.T) {
+	ctx := context.Background()
+	rawHub := magicevent.NewHub(16)
+	hub := &skillLifecycleHub{
+		Hub:             rawHub,
+		subscriptions:   map[string]int{},
+		unsubscriptions: map[string]int{},
+	}
+	t.Cleanup(func() { rawHub.Terminate(context.Background()) })
+	repository := memory.NewSkillRepository()
+	module := New()
+	if err := module.Configure(skillbiz.Dependencies{Skills: repository, EventHub: hub}); err != nil {
+		t.Fatal(err)
+	}
+	if err := module.Start(); err != nil {
+		t.Fatal(err)
+	}
+	if err := module.Stop(ctx); err != nil {
+		t.Fatal(err)
+	}
+	for _, topic := range skillLifecycleTopics() {
+		if hub.subscriptions[topic] != 1 || hub.unsubscriptions[topic] != 1 {
+			t.Fatalf("topic %s lifecycle subscriptions=%d unsubscriptions=%d, want 1/1", topic, hub.subscriptions[topic], hub.unsubscriptions[topic])
+		}
+	}
+	command := skillevents.CreateSkillCommand{SkillID: "skill-after-stop", Name: "after stop", Version: "1.0.0", Instruction: "must not persist"}
+	result := hub.Send(magicevent.NewEventWithContext(
+		skillevents.TopicSkillCommandCreate, "application/workorchd/context-registry", skillevents.CommandDestination,
+		magicevent.NewHeader(), ctx, command,
+	))
+	if result != nil && result.Error() == nil {
+		t.Fatalf("post-Stop command unexpectedly succeeded: %+v", result)
+	}
+	if _, err := repository.Get(ctx, command.SkillID); !errors.Is(err, common.ErrNotFound) {
+		t.Fatalf("post-Stop command mutated owner: %v", err)
+	}
+}
+
+type skillLifecycleHub struct {
+	magicevent.Hub
+	subscriptions   map[string]int
+	unsubscriptions map[string]int
+}
+
+func (h *skillLifecycleHub) Subscribe(topic string, observer magicevent.Observer) {
+	h.subscriptions[topic]++
+	h.Hub.Subscribe(topic, observer)
+}
+
+func (h *skillLifecycleHub) Unsubscribe(topic string, observer magicevent.Observer) {
+	h.unsubscriptions[topic]++
+	h.Hub.Unsubscribe(topic, observer)
+}
+
+func skillLifecycleTopics() []string {
+	return []string{
+		skillevents.TopicSkillCommandCreate,
+		skillevents.TopicSkillCommandGet,
+		skillevents.TopicSkillCommandList,
+	}
+}
+
 func skillModuleContractDependencies() skillbiz.Dependencies {
 	return skillbiz.Dependencies{
 		Skills:   memory.NewSkillRepository(),
@@ -111,7 +217,11 @@ func skillModuleContractDependencies() skillbiz.Dependencies {
 func sendSkillCommand[Command any, Response any](t *testing.T, ctx context.Context, hub magicevent.Hub, topic string, command Command) Response {
 	t.Helper()
 	var zero Response
-	ev := magicevent.NewEventWithContext(topic, "test", skillevents.CommandDestination, magicevent.NewHeader(), ctx, command)
+	source := "application/workorchd/appservice"
+	if topic == skillevents.TopicSkillCommandCreate {
+		source = "application/workorchd/context-registry"
+	}
+	ev := magicevent.NewEventWithContext(topic, source, skillevents.CommandDestination, magicevent.NewHeader(), ctx, command)
 	result := hub.Send(ev)
 	if result == nil || result.Error() != nil {
 		t.Fatalf("send %s error: %v", topic, result)

@@ -39,3 +39,38 @@ func TestDecisionCommandTopicsHaveOneSemanticFamily(t *testing.T) {
 		t.Fatal("unknown command topic must fail closed")
 	}
 }
+
+func TestDecisionOwnerCommandInventoryCoversAllSixteenTypedTopics(t *testing.T) {
+	expected := map[string]struct{}{
+		decisionevents.TopicDecisionCommandGetTicket: {}, decisionevents.TopicDecisionCommandListTickets: {},
+		decisionevents.TopicDecisionCommandListTicketsByRun: {}, decisionevents.TopicDecisionCommandListTicketsByWS: {},
+		decisionevents.TopicDecisionCommandEnsureResolved: {}, decisionevents.TopicDecisionCommandGetResolution: {},
+		decisionevents.TopicDecisionCommandPurgeWorkspace: {}, decisionevents.TopicDecisionCommandSealWorkspaceDeletion: {},
+		decisionevents.TopicOpenRuntimeGovernanceRequest: {}, decisionevents.TopicAcquireRuntimeCapabilities: {},
+		decisionevents.TopicOpenWorkspaceDefinitionClarification: {}, decisionevents.TopicReconcileWorkspaceDefinitionClarificationCandidate: {},
+		decisionevents.TopicResolveWorkspaceDefinitionClarificationByAdmission: {}, decisionevents.TopicQueryWorkspaceDefinitionClarificationFact: {},
+		decisionevents.TopicOpenRuntimeDefinitionClarification: {}, decisionevents.TopicResolveRuntimeDefinitionClarificationByReplacement: {},
+	}
+	topics := append([]string(nil), decisionCommandTopics()...)
+	topics = append(topics, decisionevents.TopicOpenRuntimeGovernanceRequest)
+	topics = append(topics, definitionClarificationTopics()...)
+	topics = append(topics, decisionevents.TopicAcquireRuntimeCapabilities)
+	if len(topics) != len(expected) {
+		t.Fatalf("Decision command inventory count = %d, want %d", len(topics), len(expected))
+	}
+	seen := make(map[string]struct{}, len(topics))
+	for _, topic := range topics {
+		if _, ok := expected[topic]; !ok {
+			t.Fatalf("undeclared Decision command topic %q", topic)
+		}
+		if _, duplicate := seen[topic]; duplicate {
+			t.Fatalf("duplicate Decision command topic %q", topic)
+		}
+		seen[topic] = struct{}{}
+	}
+	for topic := range expected {
+		if _, ok := seen[topic]; !ok {
+			t.Fatalf("missing Decision command topic %q", topic)
+		}
+	}
+}

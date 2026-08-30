@@ -3,6 +3,7 @@ package soul
 import (
 	"context"
 	"errors"
+	"fmt"
 	"slices"
 	"strings"
 	"testing"
@@ -261,5 +262,24 @@ func TestServiceListSoulsUsesBoundedStableCursor(t *testing.T) {
 	}
 	if _, _, err := service.listSouls(ctx, " soul-b ", 2); !errors.Is(err, common.ErrInvalidArgument) {
 		t.Fatalf("noncanonical cursor err = %v, want invalid argument", err)
+	}
+}
+
+func TestServiceListSoulsAppliesDefaultAndMaximumLimits(t *testing.T) {
+	ctx := context.Background()
+	service := newService(memory.NewSoulRepository())
+	for index := 0; index < modulecommon.SoulListMaxLimit+5; index++ {
+		id := common.SoulID(fmt.Sprintf("soul-page-%03d", index))
+		if _, err := service.createSoulCommand(ctx, soulservice.CreateSoulCommand{SoulID: id, Name: string(id), SoulMD: "# " + string(id)}); err != nil {
+			t.Fatalf("create %s: %v", id, err)
+		}
+	}
+	defaultPage, defaultCursor, err := service.listSouls(ctx, "", 0)
+	if err != nil || len(defaultPage) != modulecommon.SoulListDefaultLimit || defaultCursor != "soul-page-099" {
+		t.Fatalf("default page len=%d cursor=%q err=%v", len(defaultPage), defaultCursor, err)
+	}
+	maximumPage, maximumCursor, err := service.listSouls(ctx, "", modulecommon.SoulListMaxLimit+1)
+	if err != nil || len(maximumPage) != modulecommon.SoulListMaxLimit || maximumCursor != "soul-page-199" {
+		t.Fatalf("maximum page len=%d cursor=%q err=%v", len(maximumPage), maximumCursor, err)
 	}
 }

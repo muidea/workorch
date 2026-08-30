@@ -114,6 +114,154 @@ func TestWorkspaceCommandResultsAreNarrowPerTopic(t *testing.T) {
 	}
 }
 
+func TestWorkspacePublicManagementCRUDPositivePaths(t *testing.T) {
+	ctx := context.Background()
+	hub := magicevent.NewHub(32)
+	t.Cleanup(func() { hub.Terminate(ctx) })
+	workspaces := memoryRepo.NewWorkspaceRepository()
+	goals := memoryRepo.NewGoalRepository()
+	dods := memoryRepo.NewDoDRepository()
+	templates := memoryRepo.NewWorkspaceTemplateRepository()
+	owner, err := New(hub, nil, workspaceOwnerTestDependencies(hub, nil, workspaces, workspaces, goals, dods, templates))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := owner.Start(); err != nil {
+		t.Fatalf("start owner: %v", err)
+	}
+	t.Cleanup(func() { owner.Teardown(context.Background()) })
+	execute := func(topic string, command any) workspaceCommandResponse {
+		t.Helper()
+		result := hub.Send(magicevent.NewEventWithContext(
+			topic, "application/workorchd", workspaceevents.CommandDestination, magicevent.NewHeader(), ctx, command,
+		))
+		if result == nil || result.Error() != nil {
+			t.Fatalf("execute %s: %v", topic, result)
+		}
+		data, resultErr := result.Get()
+		if resultErr != nil {
+			t.Fatalf("read %s result: %v", topic, resultErr)
+		}
+		switch response := data.(type) {
+		case workspaceevents.WorkspaceResult:
+			return workspaceCommandResponse{Workspace: response.Workspace}
+		case workspaceevents.WorkspaceListResult:
+			return workspaceCommandResponse{Workspaces: response.Workspaces}
+		case workspaceevents.GoalResult:
+			return workspaceCommandResponse{Goal: response.Goal}
+		case workspaceevents.GoalListResult:
+			return workspaceCommandResponse{Goals: response.Goals}
+		case workspaceevents.DeleteGoalResult:
+			return workspaceCommandResponse{}
+		case workspaceevents.DoDResult:
+			return workspaceCommandResponse{DoD: response.DoD}
+		case workspaceevents.DoDListResult:
+			return workspaceCommandResponse{DoDs: response.DoDs}
+		case workspaceevents.DeleteDoDResult:
+			return workspaceCommandResponse{}
+		case workspaceevents.WorkspaceTemplateResult:
+			return workspaceCommandResponse{Template: response.Template}
+		case workspaceevents.WorkspaceTemplateListResult:
+			return workspaceCommandResponse{Templates: response.Templates}
+		case workspaceevents.DeleteWorkspaceTemplateResult:
+			return workspaceCommandResponse{}
+		default:
+			t.Fatalf("%s result type = %T", topic, data)
+			return workspaceCommandResponse{}
+		}
+	}
+
+	workspaceID := common.WorkspaceID("ws-public-crud")
+	created := execute(workspaceevents.TopicWorkspaceCommandCreate, workspaceevents.CreateWorkspaceCommand{
+		WorkspaceID: workspaceID, Title: "created", Description: "initial",
+		DeliverableDirectory: "/tmp/ws-public-crud", InternalDirectory: "/tmp/ws-public-crud/.workorch",
+	})
+	if created.Workspace == nil || created.Workspace.ID != workspaceID || created.Workspace.Title != "created" {
+		t.Fatalf("created workspace = %+v", created.Workspace)
+	}
+	updated := execute(workspaceevents.TopicWorkspaceCommandUpdate, workspaceevents.UpdateWorkspaceCommand{
+		WorkspaceID: workspaceID, Title: "updated", Description: "changed",
+		DeliverableDirectory: "/tmp/ws-public-crud-v2", InternalDirectory: "/tmp/ws-public-crud-v2/.workorch",
+		TemplateID: "template-public-crud", ProfileID: "profile-public-crud",
+	})
+	if updated.Workspace == nil || updated.Workspace.Title != "updated" || updated.Workspace.Revision <= created.Workspace.Revision {
+		t.Fatalf("updated workspace = %+v", updated.Workspace)
+	}
+	listed := execute(workspaceevents.TopicWorkspaceCommandList, workspaceevents.ListWorkspacesCommand{})
+	if len(listed.Workspaces) != 1 || listed.Workspaces[0].ID != workspaceID || listed.Workspaces[0].Title != "updated" {
+		t.Fatalf("listed workspaces = %+v", listed.Workspaces)
+	}
+
+	goalID := common.GoalID("goal-public-crud")
+	execute(workspaceevents.TopicWorkspaceCommandDefineGoal, workspaceevents.DefineGoalCommand{
+		WorkspaceID: workspaceID, GoalID: goalID, Text: "initial goal",
+	})
+	goal := execute(workspaceevents.TopicWorkspaceCommandUpdateGoal, workspaceevents.UpdateGoalCommand{
+		WorkspaceID: workspaceID, GoalID: goalID, Text: "updated goal",
+	})
+	if goal.Goal == nil || goal.Goal.Text != "updated goal" {
+		t.Fatalf("updated goal = %+v", goal.Goal)
+	}
+	successorGoalID := common.GoalID("goal-public-crud-successor")
+	execute(workspaceevents.TopicWorkspaceCommandDefineGoal, workspaceevents.DefineGoalCommand{
+		WorkspaceID: workspaceID, GoalID: successorGoalID, Text: "successor goal",
+	})
+	goalList := execute(workspaceevents.TopicWorkspaceCommandListGoalsByWS, workspaceevents.ListGoalsByWorkspaceCommand{WorkspaceID: workspaceID})
+	if len(goalList.Goals) != 2 {
+		t.Fatalf("listed goals = %+v", goalList.Goals)
+	}
+	execute(workspaceevents.TopicWorkspaceCommandDeleteGoal, workspaceevents.DeleteGoalCommand{WorkspaceID: workspaceID, GoalID: goalID})
+	if _, err := goals.Get(common.ContextWithRuntimeWorkspaceID(ctx, workspaceID), goalID); !errors.Is(err, common.ErrNotFound) {
+		t.Fatalf("deleted goal remains: %v", err)
+	}
+
+	dodID := common.DoDID("dod-public-crud")
+	execute(workspaceevents.TopicWorkspaceCommandDefineDoD, workspaceevents.DefineDoDCommand{
+		WorkspaceID: workspaceID, DoDID: dodID, Items: []string{"initial item"},
+	})
+	dod := execute(workspaceevents.TopicWorkspaceCommandUpdateDoD, workspaceevents.UpdateDoDCommand{
+		WorkspaceID: workspaceID, DoDID: dodID, Items: []string{"updated item"},
+	})
+	if dod.DoD == nil || len(dod.DoD.Items) != 1 || dod.DoD.Items[0] != "updated item" {
+		t.Fatalf("updated DoD = %+v", dod.DoD)
+	}
+	successorDoDID := common.DoDID("dod-public-crud-successor")
+	execute(workspaceevents.TopicWorkspaceCommandDefineDoD, workspaceevents.DefineDoDCommand{
+		WorkspaceID: workspaceID, DoDID: successorDoDID, Items: []string{"successor item"},
+	})
+	dodList := execute(workspaceevents.TopicWorkspaceCommandListDoDsByWS, workspaceevents.ListDoDsByWorkspaceCommand{WorkspaceID: workspaceID})
+	if len(dodList.DoDs) != 2 {
+		t.Fatalf("listed DoDs = %+v", dodList.DoDs)
+	}
+	execute(workspaceevents.TopicWorkspaceCommandDeleteDoD, workspaceevents.DeleteDoDCommand{WorkspaceID: workspaceID, DoDID: dodID})
+	if _, err := dods.Get(common.ContextWithRuntimeWorkspaceID(ctx, workspaceID), dodID); !errors.Is(err, common.ErrNotFound) {
+		t.Fatalf("deleted DoD remains: %v", err)
+	}
+
+	createTemplate := workspaceevents.CreateWorkspaceTemplateCommand{
+		TemplateID: "template-public-crud", Name: "created template", Description: "initial",
+		GoalText: "template goal", DoDItems: []string{"template item"}, DefaultSoulID: "soul-public-crud",
+	}
+	createdTemplate := execute(workspaceevents.TopicWorkspaceTemplateCommandCreate, createTemplate)
+	if createdTemplate.Template == nil || createdTemplate.Template.Name != "created template" {
+		t.Fatalf("created template = %+v", createdTemplate.Template)
+	}
+	updateTemplate := workspaceevents.UpdateWorkspaceTemplateCommand(createTemplate)
+	updateTemplate.Name = "updated template"
+	updatedTemplate := execute(workspaceevents.TopicWorkspaceTemplateCommandUpdate, updateTemplate)
+	if updatedTemplate.Template == nil || updatedTemplate.Template.Name != "updated template" {
+		t.Fatalf("updated template = %+v", updatedTemplate.Template)
+	}
+	templateList := execute(workspaceevents.TopicWorkspaceTemplateCommandList, workspaceevents.ListWorkspaceTemplatesCommand{})
+	if len(templateList.Templates) != 1 || templateList.Templates[0].ID != createTemplate.TemplateID || templateList.Templates[0].Name != "updated template" {
+		t.Fatalf("listed templates = %+v", templateList.Templates)
+	}
+	execute(workspaceevents.TopicWorkspaceTemplateCommandDelete, workspaceevents.DeleteWorkspaceTemplateCommand{TemplateID: createTemplate.TemplateID})
+	if _, err := templates.Get(ctx, createTemplate.TemplateID); !errors.Is(err, common.ErrNotFound) {
+		t.Fatalf("deleted template remains: %v", err)
+	}
+}
+
 func TestWorkspaceDefinitionCommandsEnforceScopeAcrossBackends(t *testing.T) {
 	for _, backend := range []struct {
 		name string

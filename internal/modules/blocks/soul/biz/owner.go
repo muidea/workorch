@@ -17,6 +17,11 @@ const ModuleID = modulecommon.ModuleID
 
 const systemCommandSource = "kernel/system"
 
+const (
+	applicationContextRegistrySource = "application/workorchd/context-registry"
+	applicationOwnerReadSource       = "application/workorchd/appservice"
+)
+
 type Dependencies struct {
 	Souls             repository.SoulRepository
 	EventHub          magicevent.Hub
@@ -114,6 +119,10 @@ func (m *Biz) handleSoulCommand(ev magicevent.Event, result magicevent.Result) {
 		setMagicResult(result, struct{}{}, common.ErrInvalidArgument)
 		return
 	}
+	if ev == nil || !soulCommandSourceAllowed(ev.ID(), ev.Source()) {
+		setSoulCommandInvalidResult(ev, result)
+		return
+	}
 	ctx := ev.Context()
 	switch ev.ID() {
 	case soulevents.TopicSoulCommandCreate:
@@ -186,6 +195,44 @@ func (m *Biz) handleSoulCommand(ev magicevent.Event, result magicevent.Result) {
 			return
 		}
 		setMagicResult(result, soulevents.ValidateCapabilitySelectionResult{SoulID: cmd.SoulID, Validated: true}, nil)
+	default:
+		setMagicResult(result, struct{}{}, common.ErrInvalidArgument)
+	}
+}
+
+func soulCommandSourceAllowed(topic, source string) bool {
+	switch topic {
+	case soulevents.TopicSoulCommandCreate,
+		soulevents.TopicSoulCommandList,
+		soulevents.TopicSoulCommandUpdate,
+		soulevents.TopicSoulCommandDelete,
+		soulevents.TopicSoulCommandValidateCapability:
+		return source == applicationContextRegistrySource
+	case soulevents.TopicSoulCommandGet:
+		return source == applicationContextRegistrySource || source == applicationOwnerReadSource
+	default:
+		return false
+	}
+}
+
+func setSoulCommandInvalidResult(ev magicevent.Event, result magicevent.Result) {
+	topic := ""
+	if ev != nil {
+		topic = ev.ID()
+	}
+	switch topic {
+	case soulevents.TopicSoulCommandCreate:
+		setMagicResult(result, soulevents.CreateSoulResult{}, common.ErrInvalidArgument)
+	case soulevents.TopicSoulCommandGet:
+		setMagicResult(result, soulevents.GetSoulResult{}, common.ErrInvalidArgument)
+	case soulevents.TopicSoulCommandList:
+		setMagicResult(result, soulevents.ListSoulsResult{}, common.ErrInvalidArgument)
+	case soulevents.TopicSoulCommandUpdate:
+		setMagicResult(result, soulevents.UpdateSoulResult{}, common.ErrInvalidArgument)
+	case soulevents.TopicSoulCommandDelete:
+		setMagicResult(result, soulevents.DeleteSoulResult{}, common.ErrInvalidArgument)
+	case soulevents.TopicSoulCommandValidateCapability:
+		setMagicResult(result, soulevents.ValidateCapabilitySelectionResult{}, common.ErrInvalidArgument)
 	default:
 		setMagicResult(result, struct{}{}, common.ErrInvalidArgument)
 	}

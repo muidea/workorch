@@ -425,11 +425,7 @@ func assertRepositoryStructFields(t *testing.T, path string, typeSpec *ast.TypeS
 func repositoryGroupFieldContracts() map[string]map[string]string {
 	return map[string]map[string]string{
 		"WorkspaceRepositories": {
-			"Workspaces":              "WorkspaceRepository",
-			"DeletionMaterialCleaner": "WorkspaceDeletionMaterialCleaner",
-			"Goals":                   "GoalRepository",
-			"DoDs":                    "DoDRepository",
-			"Templates":               "WorkspaceTemplateRepository",
+			"Owner": "WorkspaceOwnerRepositories",
 		},
 		"DecisionRepositories": {
 			"Owner": "DecisionOwnerRepositories",

@@ -30,13 +30,84 @@ import (
 )
 
 type WorkspaceRepository struct {
-	mu    sync.RWMutex
-	items map[common.WorkspaceID]*workspace.Workspace
+	mu           sync.RWMutex
+	items        map[common.WorkspaceID]*workspace.Workspace
+	ownerBinding repository.OwnerRepositoryBinding
 }
 
 type WorkspaceTemplateRepository struct {
-	mu    sync.RWMutex
-	items map[string]*workspace.WorkspaceTemplate
+	mu           sync.RWMutex
+	items        map[string]*workspace.WorkspaceTemplate
+	ownerBinding repository.OwnerRepositoryBinding
+}
+
+type WorkspaceOwnerRepositorySet struct {
+	Workspaces *WorkspaceRepository
+	Goals      *GoalRepository
+	DoDs       *DoDRepository
+	Templates  *WorkspaceTemplateRepository
+	binding    repository.OwnerRepositoryBinding
+}
+
+func NewWorkspaceOwnerRepositorySet() WorkspaceOwnerRepositorySet {
+	binding := repository.NewWorkspaceOwnerRepositoryBinding()
+	return WorkspaceOwnerRepositorySet{
+		Workspaces: newWorkspaceRepository(binding),
+		Goals:      newGoalRepository(binding),
+		DoDs:       newDoDRepository(binding),
+		Templates:  newWorkspaceTemplateRepository(binding),
+		binding:    binding,
+	}
+}
+
+func (s WorkspaceOwnerRepositorySet) WorkspaceOwnerBinding() repository.OwnerRepositoryBinding {
+	return s.binding
+}
+func (s WorkspaceOwnerRepositorySet) WorkspaceOwnerWorkspaces() repository.WorkspaceRepository {
+	return s.Workspaces
+}
+func (s WorkspaceOwnerRepositorySet) WorkspaceOwnerDeletionMaterialCleaner() repository.WorkspaceDeletionMaterialCleaner {
+	return s.Workspaces
+}
+func (s WorkspaceOwnerRepositorySet) WorkspaceOwnerGoals() repository.GoalRepository { return s.Goals }
+func (s WorkspaceOwnerRepositorySet) WorkspaceOwnerDoDs() repository.DoDRepository   { return s.DoDs }
+func (s WorkspaceOwnerRepositorySet) WorkspaceOwnerTemplates() repository.WorkspaceTemplateRepository {
+	return s.Templates
+}
+func (s WorkspaceOwnerRepositorySet) OwnerRepositories() repository.WorkspaceOwnerRepositories {
+	owner, err := repository.NewWorkspaceOwnerRepositories(s)
+	if err != nil {
+		panic(err)
+	}
+	return owner
+}
+
+func (r *WorkspaceRepository) OwnerRepositoryBinding() repository.OwnerRepositoryBinding {
+	if r == nil {
+		return repository.OwnerRepositoryBinding{}
+	}
+	return r.ownerBinding
+}
+
+func (r *WorkspaceTemplateRepository) OwnerRepositoryBinding() repository.OwnerRepositoryBinding {
+	if r == nil {
+		return repository.OwnerRepositoryBinding{}
+	}
+	return r.ownerBinding
+}
+
+func (r *GoalRepository) OwnerRepositoryBinding() repository.OwnerRepositoryBinding {
+	if r == nil {
+		return repository.OwnerRepositoryBinding{}
+	}
+	return r.ownerBinding
+}
+
+func (r *DoDRepository) OwnerRepositoryBinding() repository.OwnerRepositoryBinding {
+	if r == nil {
+		return repository.OwnerRepositoryBinding{}
+	}
+	return r.ownerBinding
 }
 
 type SoulRepository struct {
@@ -576,7 +647,11 @@ func (r *SoulRepository) Delete(_ context.Context, id common.SoulID) error {
 }
 
 func NewWorkspaceTemplateRepository() *WorkspaceTemplateRepository {
-	return &WorkspaceTemplateRepository{items: map[string]*workspace.WorkspaceTemplate{}}
+	return newWorkspaceTemplateRepository(repository.NewWorkspaceOwnerRepositoryBinding())
+}
+
+func newWorkspaceTemplateRepository(binding repository.OwnerRepositoryBinding) *WorkspaceTemplateRepository {
+	return &WorkspaceTemplateRepository{items: map[string]*workspace.WorkspaceTemplate{}, ownerBinding: binding}
 }
 
 func (r *WorkspaceTemplateRepository) Create(_ context.Context, item *workspace.WorkspaceTemplate) error {
@@ -1742,7 +1817,11 @@ func applyMemoryEventRecordCursorAndLimit(items []*eventstream.EventRecord, quer
 }
 
 func NewWorkspaceRepository() *WorkspaceRepository {
-	return &WorkspaceRepository{items: map[common.WorkspaceID]*workspace.Workspace{}}
+	return newWorkspaceRepository(repository.NewWorkspaceOwnerRepositoryBinding())
+}
+
+func newWorkspaceRepository(binding repository.OwnerRepositoryBinding) *WorkspaceRepository {
+	return &WorkspaceRepository{items: map[common.WorkspaceID]*workspace.Workspace{}, ownerBinding: binding}
 }
 
 func (r *WorkspaceRepository) Create(_ context.Context, item *workspace.Workspace) error {
@@ -1868,12 +1947,17 @@ func cloneWorkspace(item *workspace.Workspace) *workspace.Workspace {
 }
 
 type GoalRepository struct {
-	mu    sync.RWMutex
-	items map[string]*workspace.Goal
+	mu           sync.RWMutex
+	items        map[string]*workspace.Goal
+	ownerBinding repository.OwnerRepositoryBinding
 }
 
 func NewGoalRepository() *GoalRepository {
-	return &GoalRepository{items: map[string]*workspace.Goal{}}
+	return newGoalRepository(repository.NewWorkspaceOwnerRepositoryBinding())
+}
+
+func newGoalRepository(binding repository.OwnerRepositoryBinding) *GoalRepository {
+	return &GoalRepository{items: map[string]*workspace.Goal{}, ownerBinding: binding}
 }
 
 func (r *GoalRepository) Create(ctx context.Context, item *workspace.Goal) error {
@@ -1971,12 +2055,17 @@ func (r *GoalRepository) Delete(ctx context.Context, id common.GoalID) error {
 }
 
 type DoDRepository struct {
-	mu    sync.RWMutex
-	items map[string]*workspace.DoD
+	mu           sync.RWMutex
+	items        map[string]*workspace.DoD
+	ownerBinding repository.OwnerRepositoryBinding
 }
 
 func NewDoDRepository() *DoDRepository {
-	return &DoDRepository{items: map[string]*workspace.DoD{}}
+	return newDoDRepository(repository.NewWorkspaceOwnerRepositoryBinding())
+}
+
+func newDoDRepository(binding repository.OwnerRepositoryBinding) *DoDRepository {
+	return &DoDRepository{items: map[string]*workspace.DoD{}, ownerBinding: binding}
 }
 
 func (r *DoDRepository) Create(ctx context.Context, item *workspace.DoD) error {

@@ -4,6 +4,7 @@ import (
 	"context"
 
 	magicevent "github.com/muidea/magicCommon/event"
+	applicationcommon "github.com/muidea/workorch/internal/modules/application/workorchd/pkg/common"
 	eventstreamevents "github.com/muidea/workorch/internal/modules/blocks/eventstream/pkg/events"
 
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/ownerevent"
@@ -17,7 +18,7 @@ func ListEventRecordsByOwnerCommand(ctx context.Context, hub magicevent.Hub, que
 		return nil, common.ErrInvalidArgument
 	}
 	query = query.Normalized()
-	event := magicevent.NewEventWithContext(eventstreamevents.TopicEventStreamCommandList, sourceModule, eventstreamevents.CommandDestination, magicevent.NewHeader(), ctx, eventstreamevents.ListEventsCommand{Query: eventstreamevents.EventQuery{
+	event := magicevent.NewEventWithContext(eventstreamevents.TopicEventStreamCommandList, applicationcommon.ModuleID, eventstreamevents.CommandDestination, magicevent.NewHeader(), ctx, eventstreamevents.ListEventsCommand{Query: eventstreamevents.EventQuery{
 		WorkspaceID: query.WorkspaceID, RunID: query.RunID, Topic: query.Topic, ExcludeTopics: append([]string(nil), query.ExcludeTopics...),
 		SubjectType: query.SubjectType, SubjectID: query.SubjectID, CursorAfterID: query.CursorAfterID,
 		OccurredAfter: query.OccurredAfter, OccurredBefore: query.OccurredBefore, Limit: query.Limit, IncludePayload: query.IncludePayload,

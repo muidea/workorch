@@ -9,7 +9,9 @@ import (
 	"time"
 
 	magicevent "github.com/muidea/magicCommon/event"
+	magictask "github.com/muidea/magicCommon/task"
 	decisionevents "github.com/muidea/workorch/internal/modules/blocks/decision/pkg/events"
+	llmcommon "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/common"
 	runevents "github.com/muidea/workorch/internal/modules/blocks/run/pkg/events"
 	runmodel "github.com/muidea/workorch/internal/modules/blocks/run/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
@@ -28,11 +30,27 @@ type blockingNextWorkspaceRunRepository struct {
 
 type fixedRunInventoryRepository struct {
 	repository.RunRepository
-	items []*runmodel.Run
+	items    []*runmodel.Run
+	casCalls int
 }
 
 func (r *fixedRunInventoryRepository) List(context.Context) ([]*runmodel.Run, error) {
 	return runmodel.CloneRuns(r.items), nil
+}
+
+func (r *fixedRunInventoryRepository) ListByWorkspaceID(_ context.Context, workspaceID common.WorkspaceID) ([]*runmodel.Run, error) {
+	items := make([]*runmodel.Run, 0, len(r.items))
+	for _, item := range r.items {
+		if item != nil && item.WorkspaceID == workspaceID {
+			items = append(items, runmodel.CloneRun(item))
+		}
+	}
+	return items, nil
+}
+
+func (r *fixedRunInventoryRepository) CompareAndSwap(ctx context.Context, item *runmodel.Run, expectedRevision uint64) error {
+	r.casCalls++
+	return r.RunRepository.CompareAndSwap(ctx, item, expectedRevision)
 }
 
 func (r *blockingNextWorkspaceRunRepository) CreateNextWorkspaceRun(ctx context.Context, item *runmodel.Run) error {
@@ -378,6 +396,326 @@ func TestRunConfigureRejectsMultipleCurrentRunsBeforeAnyCAS(t *testing.T) {
 	if err != nil || unchanged.State != common.RunStatePending || unchanged.Revision != created.Revision {
 		t.Fatalf("multiple-current validation partially activated Run: %+v, err=%v", unchanged, err)
 	}
+}
+
+func TestRunConfigureScopesPendingReplacementPredecessorByWorkspace(t *testing.T) {
+	predecessor, successor, _ := pendingReplacementCutInventory(t, "ws-a-replacement")
+	colliding := &runmodel.Run{
+		ID: runmodel.WorkspaceRunID(1), WorkspaceID: "ws-z-colliding",
+		WorkspaceRunGeneration: 1, State: common.RunStateActive,
+	}
+	for _, test := range []struct {
+		name  string
+		items []*runmodel.Run
+	}{
+		{name: "colliding run follows predecessor", items: []*runmodel.Run{predecessor, successor, colliding}},
+		{name: "colliding run precedes predecessor", items: []*runmodel.Run{colliding, successor, predecessor}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			repo := &fixedRunInventoryRepository{RunRepository: memory.NewRunRepository(), items: test.items}
+			hub := magicevent.NewHub(16)
+			defer hub.Terminate(context.Background())
+			owner := New()
+			if err := owner.Configure(runBizTestDependencies(repo, nil, nil, hub, nil)); err != nil {
+				t.Fatalf("Configure same RunID across Workspaces: %v", err)
+			}
+			if repo.casCalls != 0 {
+				t.Fatalf("Configure mutated linked successor before predecessor recovery: CAS calls=%d", repo.casCalls)
+			}
+		})
+	}
+}
+
+func TestRunConfigureRejectsNonCanonicalPendingReplacementCoordinatesBeforeAnyCAS(t *testing.T) {
+	for _, test := range []struct {
+		name   string
+		mutate func(*runmodel.Run)
+	}{
+		{name: "generation skips predecessor sequence", mutate: func(item *runmodel.Run) {
+			item.WorkspaceRunGeneration++
+			item.ID = runmodel.WorkspaceRunID(item.WorkspaceRunGeneration)
+		}},
+		{name: "ID does not derive from generation", mutate: func(item *runmodel.Run) {
+			item.ID = "run-corrupt-successor"
+		}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			predecessor, successor, _ := pendingReplacementCutInventory(t, "ws-corrupt-replacement")
+			test.mutate(successor)
+			repo := &fixedRunInventoryRepository{
+				RunRepository: memory.NewRunRepository(),
+				items:         []*runmodel.Run{successor, predecessor},
+			}
+			hub := magicevent.NewHub(16)
+			defer hub.Terminate(context.Background())
+			owner := New()
+			if err := owner.Configure(runBizTestDependencies(repo, nil, nil, hub, nil)); !errors.Is(err, common.ErrConflict) {
+				t.Fatalf("Configure corrupt pending successor err=%v, want conflict", err)
+			}
+			if repo.casCalls != 0 {
+				t.Fatalf("corrupt inventory caused partial CAS before rejection: %d", repo.casCalls)
+			}
+		})
+	}
+}
+
+func TestRunConfigureRejectsNonCanonicalRootActivationBeforeAnyCAS(t *testing.T) {
+	workspaceID := common.WorkspaceID("ws-corrupt-root-activation")
+	bootstrap := restartTestBootstrap(t, workspaceID)
+	command := runevents.WorkspaceExecutionIntentCommand{
+		WorkspaceID: workspaceID, RequestID: "restart-corrupt-root", Kind: runtimecontract.RuntimeExecutionIntentRestart,
+		GoalID: bootstrap.Definition.GoalID, DoDID: bootstrap.Definition.DoDID,
+		DefinitionRevision: bootstrap.Definition.Revision, StartupInputHash: bootstrap.Definition.StartupInputHash,
+		Bootstrap: &bootstrap,
+	}.Normalized()
+	base := memory.NewRunRepository()
+	created, err := (&Biz{runs: base}).createWorkspaceExecutionReplacement(
+		common.ContextWithRuntimeWorkspaceID(context.Background(), workspaceID), replacementIntentFromCommand(command), "",
+	)
+	if err != nil {
+		t.Fatalf("create root activation cut: %v", err)
+	}
+	for _, test := range []struct {
+		name   string
+		mutate func(*runmodel.Run)
+	}{
+		{name: "generation drift", mutate: func(item *runmodel.Run) { item.WorkspaceRunGeneration++ }},
+		{name: "ID drift", mutate: func(item *runmodel.Run) { item.ID = "run-corrupt-root" }},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			item := runmodel.CloneRun(created)
+			test.mutate(item)
+			repo := &fixedRunInventoryRepository{RunRepository: memory.NewRunRepository(), items: []*runmodel.Run{item}}
+			hub := magicevent.NewHub(16)
+			defer hub.Terminate(context.Background())
+			owner := New()
+			if err := owner.Configure(runBizTestDependencies(repo, nil, nil, hub, nil)); !errors.Is(err, common.ErrConflict) {
+				t.Fatalf("Configure non-canonical root activation err=%v, want conflict", err)
+			}
+			if repo.casCalls != 0 {
+				t.Fatalf("non-canonical root activation caused partial CAS: %d", repo.casCalls)
+			}
+		})
+	}
+}
+
+func TestRunConfigureRejectsRootPendingActivationWithoutRequestBeforeAnyCASOrSM4(t *testing.T) {
+	workspaceID := common.WorkspaceID("ws-root-missing-request")
+	bootstrap := restartTestBootstrap(t, workspaceID)
+	command := runevents.WorkspaceExecutionIntentCommand{
+		WorkspaceID: workspaceID, RequestID: "restart-root-missing-request", Kind: runtimecontract.RuntimeExecutionIntentRestart,
+		GoalID: bootstrap.Definition.GoalID, DoDID: bootstrap.Definition.DoDID,
+		DefinitionRevision: bootstrap.Definition.Revision, StartupInputHash: bootstrap.Definition.StartupInputHash,
+		Bootstrap: &bootstrap,
+	}.Normalized()
+	base := memory.NewRunRepository()
+	created, err := (&Biz{runs: base}).createWorkspaceExecutionReplacement(
+		common.ContextWithRuntimeWorkspaceID(context.Background(), workspaceID), replacementIntentFromCommand(command), "",
+	)
+	if err != nil {
+		t.Fatalf("create root activation cut: %v", err)
+	}
+	created.ActivationRequestID = ""
+	repo := &fixedRunInventoryRepository{RunRepository: memory.NewRunRepository(), items: []*runmodel.Run{created}}
+	hub := magicevent.NewHub(16)
+	defer hub.Terminate(context.Background())
+	owner := New()
+	if err := owner.Configure(runBizTestDependencies(repo, nil, nil, hub, nil)); !errors.Is(err, common.ErrConflict) {
+		t.Fatalf("Configure root activation without request err=%v, want conflict", err)
+	}
+	if repo.casCalls != 0 {
+		t.Fatalf("root activation without request caused partial CAS: %d", repo.casCalls)
+	}
+	inventory := buildRuntimeRecoveryInventory([]*runmodel.Run{created}, runevents.QueryRuntimeRecoveryInventoryCommand{Limit: 10})
+	if len(inventory.Items) != 0 {
+		t.Fatalf("corrupt root pending activation leaked into SM-4 inventory: %+v", inventory.Items)
+	}
+}
+
+func TestRunConfigureRejectsIncompletePendingReplacementBeforeAnyCAS(t *testing.T) {
+	for _, test := range []struct {
+		name   string
+		mutate func(*runmodel.Run)
+	}{
+		{name: "missing activation request", mutate: func(item *runmodel.Run) { item.ActivationRequestID = "" }},
+		{name: "missing predecessor Run", mutate: func(item *runmodel.Run) { item.Lineage.PredecessorRunID = "" }},
+		{name: "missing predecessor Result", mutate: func(item *runmodel.Run) { item.Lineage.PredecessorResultID = "" }},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			predecessor, successor, _ := pendingReplacementCutInventory(t, "ws-incomplete-replacement")
+			test.mutate(successor)
+			repo := &fixedRunInventoryRepository{
+				RunRepository: memory.NewRunRepository(),
+				items:         []*runmodel.Run{successor, predecessor},
+			}
+			hub := magicevent.NewHub(16)
+			defer hub.Terminate(context.Background())
+			owner := New()
+			if err := owner.Configure(runBizTestDependencies(repo, nil, nil, hub, nil)); !errors.Is(err, common.ErrConflict) {
+				t.Fatalf("Configure incomplete pending successor err=%v, want conflict", err)
+			}
+			if repo.casCalls != 0 {
+				t.Fatalf("incomplete pending successor caused partial CAS: %d", repo.casCalls)
+			}
+		})
+	}
+}
+
+func TestRunConfigureRetainsExhaustedPendingReplacementForOwnerRecovery(t *testing.T) {
+	for _, test := range []struct {
+		name          string
+		lineageSealed bool
+	}{
+		{name: "successor durable before predecessor lineage CAS"},
+		{name: "predecessor lineage sealed before successor activation", lineageSealed: true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			predecessor, successor, command := pendingReplacementCutInventory(t, "ws-exhausted-replacement")
+			intent := predecessor.ReplacementIntent
+			intent.Recovery.State = runmodel.ReplacementRecoveryExhausted
+			intent.Recovery.Attempt = intent.Recovery.MaxAttempts
+			intent.Recovery.DueAt = ""
+			intent.Recovery.LastError = "successor materialization retry budget exhausted"
+			if test.lineageSealed {
+				intent.State = runmodel.ReplacementIntentSuccessorCreated
+				intent.SuccessorRunID = successor.ID
+				predecessor.Lineage.SuccessorRunID = successor.ID
+				predecessor.Lineage.LineageState = runmodel.RunLineageStateSuperseded
+			}
+			if !intent.ValidFor(predecessor) {
+				t.Fatalf("exhausted replacement fixture is invalid: %+v", intent)
+			}
+			ctx := common.ContextWithRuntimeWorkspaceID(context.Background(), command.WorkspaceID)
+			runs := memory.NewRunRepository()
+			// The repository allocates and persists the canonical generation while
+			// retaining the fixture's deterministic Run IDs.
+			predecessor.WorkspaceRunGeneration = 0
+			successor.WorkspaceRunGeneration = 0
+			if err := runs.Create(ctx, predecessor); err != nil {
+				t.Fatalf("persist exhausted predecessor: %v", err)
+			}
+			if err := runs.Create(ctx, successor); err != nil {
+				t.Fatalf("persist exhausted linked child: %v", err)
+			}
+			hub := magicevent.NewHub(16)
+			background := magictask.NewBackgroundRoutine(8)
+			owner := New()
+			if err := owner.Configure(runBizTestDependencies(runs, nil, nil, hub, background)); err != nil {
+				t.Fatalf("Configure exhausted durable cut: %v", err)
+			}
+			if err := owner.Start(); err != nil {
+				t.Fatalf("Start exhausted durable cut: %v", err)
+			}
+			t.Cleanup(func() {
+				_ = owner.Stop(context.Background())
+				background.Shutdown(context.Background())
+				hub.Terminate(context.Background())
+			})
+			owner.replacementRecoveryMu.Lock()
+			_, wakeupMounted := owner.replacementRecoveryTasks[replacementRecoveryTaskKey(predecessor.WorkspaceID, predecessor.ID)]
+			owner.replacementRecoveryMu.Unlock()
+			if wakeupMounted {
+				t.Fatal("exhausted replacement lease mounted another process-local recovery attempt")
+			}
+			storedChild, err := runs.GetByWorkspaceID(ctx, successor.WorkspaceID, successor.ID)
+			if err != nil || storedChild.State != common.RunStatePending || storedChild.Revision != successor.Revision {
+				t.Fatalf("Configure/Start activated exhausted linked child: %+v err=%v", storedChild, err)
+			}
+			storedPredecessor, err := runs.GetByWorkspaceID(ctx, predecessor.WorkspaceID, predecessor.ID)
+			if err != nil || storedPredecessor.Revision != predecessor.Revision {
+				t.Fatalf("Configure/Start rewrote exhausted predecessor: %+v err=%v", storedPredecessor, err)
+			}
+
+			result, err := owner.restartWorkspaceExecutionIntent(ctx, command)
+			if err != nil || result.RunID != successor.ID ||
+				result.Outcome != runtimecontract.RuntimeExecutionIntentReplacementPending ||
+				result.Reason != runtimecontract.RuntimeExecutionIntentReasonDuplicateRestart {
+				t.Fatalf("exact exhausted replacement replay result=%+v err=%v", result, err)
+			}
+			afterChild, childErr := runs.GetByWorkspaceID(ctx, successor.WorkspaceID, successor.ID)
+			afterPredecessor, predecessorErr := runs.GetByWorkspaceID(ctx, predecessor.WorkspaceID, predecessor.ID)
+			if childErr != nil || predecessorErr != nil || afterChild.Revision != storedChild.Revision || afterPredecessor.Revision != storedPredecessor.Revision {
+				t.Fatalf("exact exhausted replay mutated owner state: child=%+v predecessor=%+v errors=%v,%v", afterChild, afterPredecessor, childErr, predecessorErr)
+			}
+		})
+	}
+}
+
+func TestWorkspaceExecutionRestartFindsPendingReplacementAcrossRepositoryOrders(t *testing.T) {
+	predecessor, successor, command := pendingReplacementCutInventory(t, "ws-replacement-order")
+	for _, test := range []struct {
+		name  string
+		items []*runmodel.Run
+	}{
+		{name: "predecessor first", items: []*runmodel.Run{predecessor, successor}},
+		{name: "successor first", items: []*runmodel.Run{successor, predecessor}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			repo := &fixedRunInventoryRepository{RunRepository: memory.NewRunRepository(), items: test.items}
+			owner := &Biz{runs: repo}
+			ctx := common.ContextWithRuntimeWorkspaceID(context.Background(), command.WorkspaceID)
+			result, err := owner.restartWorkspaceExecutionIntent(ctx, command)
+			if err != nil || result.RunID != successor.ID ||
+				result.Outcome != runtimecontract.RuntimeExecutionIntentReplacementPending ||
+				result.Reason != runtimecontract.RuntimeExecutionIntentReasonDuplicateRestart {
+				t.Fatalf("exact replacement replay result=%+v err=%v", result, err)
+			}
+			if repo.casCalls != 0 {
+				t.Fatalf("exact linked-successor replay activated child: CAS calls=%d", repo.casCalls)
+			}
+		})
+	}
+}
+
+func pendingReplacementCutInventory(t *testing.T, workspaceID common.WorkspaceID) (*runmodel.Run, *runmodel.Run, runevents.WorkspaceExecutionIntentCommand) {
+	t.Helper()
+	bootstrap := restartTestBootstrap(t, workspaceID)
+	command := runevents.WorkspaceExecutionIntentCommand{
+		WorkspaceID: workspaceID, RequestID: "restart-pending-replacement", Kind: runtimecontract.RuntimeExecutionIntentRestart,
+		GoalID: bootstrap.Definition.GoalID, DoDID: bootstrap.Definition.DoDID,
+		DefinitionRevision: bootstrap.Definition.Revision, StartupInputHash: bootstrap.Definition.StartupInputHash,
+		Bootstrap: &bootstrap,
+	}.Normalized()
+	predecessorID := runmodel.WorkspaceRunID(1)
+	terminalID := "terminal-pending-replacement"
+	resultID := common.ResultID(string(workspaceID) + "/" + string(predecessorID) + "/result/dod-assessment")
+	intent := replacementIntentFromCommand(command)
+	intent.State = runmodel.ReplacementIntentTerminationAcknowledged
+	intent.TerminalDeliveryID = terminalID
+	intent.RuntimeStateRevision = 9
+	intent.Recovery = newReplacementRecoveryLease(intent, runmodel.ReplacementRecoverySuccessorMaterialization, 1, "2026-08-25T00:00:00Z")
+	intent.Recovery.State = runmodel.ReplacementRecoveryRunning
+	intent.Recovery.DueAt = ""
+	predecessor := &runmodel.Run{
+		ID: predecessorID, WorkspaceID: workspaceID, WorkspaceRunGeneration: 1,
+		GoalID: "goal-predecessor", DoDID: "dod-predecessor", DefinitionRevision: "definition-predecessor", StartupInputHash: "startup-predecessor",
+		State:   common.RunStateSuperseded,
+		Lineage: runmodel.RunLineage{LineageState: runmodel.RunLineageStateActive},
+		TerminalDelivery: &runtimecontract.RuntimeTerminalDeliveryIdentity{
+			WorkspaceID: workspaceID, RunID: predecessorID, TerminalDeliveryID: terminalID,
+		},
+		TerminalResultID:  resultID,
+		ReplacementIntent: &intent,
+	}
+	successorGeneration := predecessor.WorkspaceRunGeneration + 1
+	successor := &runmodel.Run{
+		ID: runmodel.WorkspaceRunID(successorGeneration), WorkspaceID: workspaceID, WorkspaceRunGeneration: successorGeneration,
+		GoalID: intent.GoalID, DoDID: intent.DoDID, DefinitionRevision: intent.DefinitionRevision, StartupInputHash: intent.StartupInputHash,
+		InitialStepKind: llmcommon.StepKindWorkspaceExecution, RuntimeBootstrap: intent.Bootstrap,
+		ActivationRequestID: intent.RequestID, ReconciliationScope: intent.ReconciliationScope,
+		State: common.RunStatePending,
+		Lineage: runmodel.RunLineage{
+			PredecessorRunID: predecessor.ID, PredecessorResultID: predecessor.TerminalResultID,
+			LineageState: runmodel.RunLineageStateActive,
+		},
+	}
+	if !intent.ValidFor(predecessor) {
+		t.Fatal("pending replacement test fixture has invalid predecessor intent")
+	}
+	if err := validatePendingWorkspaceActivation(successor); err != nil {
+		t.Fatalf("pending replacement test fixture has invalid successor activation: %v", err)
+	}
+	return predecessor, successor, command
 }
 
 func TestReplacementMaterializationSerializesDifferentRestartAndKeepsOneCurrentRun(t *testing.T) {

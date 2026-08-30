@@ -72,14 +72,26 @@ func TestEnsureBuiltinSoulDefaultsSeedsMissingAndPreservesExisting(t *testing.T)
 }
 
 func TestEnsureSoulDefaultsRejectsInvalidSeedBeforePersistence(t *testing.T) {
-	ctx := context.Background()
-	repo := memoryrepo.NewSoulRepository()
-	err := ensureSoulDefaults(ctx, newService(repo), []workorchmanagementcontract.Soul{{ID: "invalid-default", Name: "missing instructions"}})
-	if !errors.Is(err, common.ErrInvalidArgument) {
-		t.Fatalf("ensure invalid defaults err = %v, want invalid argument", err)
-	}
-	items, listErr := repo.List(ctx)
-	if listErr != nil || len(items) != 0 {
-		t.Fatalf("invalid default persisted: items=%+v err=%v", items, listErr)
+	for _, testCase := range []struct {
+		name string
+		new  func(*testing.T) repository.SoulRepository
+	}{
+		{name: "memory", new: func(*testing.T) repository.SoulRepository { return memoryrepo.NewSoulRepository() }},
+		{name: "file", new: func(t *testing.T) repository.SoulRepository {
+			return filerepo.NewSoulRepository(filepath.Join(t.TempDir(), "souls"))
+		}},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			ctx := context.Background()
+			repo := testCase.new(t)
+			err := ensureSoulDefaults(ctx, newService(repo), []workorchmanagementcontract.Soul{{ID: "invalid-default", Name: "missing instructions"}})
+			if !errors.Is(err, common.ErrInvalidArgument) {
+				t.Fatalf("ensure invalid defaults err = %v, want invalid argument", err)
+			}
+			items, listErr := repo.List(ctx)
+			if listErr != nil || len(items) != 0 {
+				t.Fatalf("invalid default persisted: items=%+v err=%v", items, listErr)
+			}
+		})
 	}
 }

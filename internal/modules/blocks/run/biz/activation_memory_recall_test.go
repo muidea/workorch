@@ -168,7 +168,7 @@ func TestRuntimeActivationMemoryRecallReDrivesFromPersistedRunOnStartup(t *testi
 	}}
 	persisted := &runmodel.Run{
 		ID: "run-memory-startup", WorkspaceID: "ws-memory-startup", GoalID: "goal-memory-startup", DoDID: "dod-memory-startup",
-		DefinitionRevision: "definition-memory-startup", RuntimeBootstrap: bootstrap, State: common.RunStatePending,
+		DefinitionRevision: "definition-memory-startup", RuntimeBootstrap: bootstrap, State: common.RunStateActive,
 		CreatedAt: "2026-08-19T01:02:03Z",
 	}
 	if err := runs.Create(ctx, persisted); err != nil {

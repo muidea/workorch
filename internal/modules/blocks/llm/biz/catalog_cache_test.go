@@ -3,8 +3,11 @@ package llm
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -13,6 +16,26 @@ import (
 	llmmodels "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/workorchconfig"
 )
+
+func catalogServiceTestConfig(baseURL string) workorchconfig.LLMConfig {
+	cfg := workorchconfig.DefaultLLMConfig()
+	cfg.AIProxy.BaseURL = baseURL
+	cfg.AIProxy.CatalogRequestTimeout = "2s"
+	cfg.AIProxy.CatalogTTL = "1m"
+	cfg.AIProxy.CatalogMaxStaleAge = "1h"
+	cfg.DefaultChat = workorchconfig.ProviderModelTargetConfig{ProviderID: "ai-proxy", ModelID: "model-a"}
+	return cfg
+}
+
+func writeCatalogTestResponse(w http.ResponseWriter) {
+	_ = json.NewEncoder(w).Encode(map[string]any{
+		"object": "list",
+		"data": []map[string]any{{
+			"id": "model-a", "supported_endpoints": []string{"/v1/responses"},
+			"contextWindowTokens": 8192, "maxOutputTokens": 1024,
+		}},
+	})
+}
 
 func TestCatalogReadinessIsDerivedAndNeverStoredInCacheValue(t *testing.T) {
 	base := llmmodels.ProviderModelCatalog{
@@ -164,6 +187,124 @@ func TestCatalogServiceAPIKeyRotationUsesNewAuthorization(t *testing.T) {
 	if len(authorizations) != 2 || authorizations[0] != "Bearer old-key" || authorizations[1] != "Bearer new-key" {
 		t.Fatalf("authorization sequence = %q, want old then new key", authorizations)
 	}
+}
+
+func TestCatalogServiceTransportStatusAndBodyFailureMatrix(t *testing.T) {
+	t.Run("network error retries once", func(t *testing.T) {
+		var calls atomic.Int32
+		svc := NewCatalogService()
+		svc.client = &http.Client{Transport: llmRoundTripFunc(func(*http.Request) (*http.Response, error) {
+			calls.Add(1)
+			return nil, errors.New("network unavailable")
+		})}
+		catalog, err := svc.GetCatalog(context.Background(), catalogServiceTestConfig("http://provider.invalid"), true)
+		if err == nil || calls.Load() != 2 || catalog.State != llmmodels.ProviderCatalogStateUnavailable {
+			t.Fatalf("network catalog=%+v err=%v calls=%d, want unavailable after two attempts", catalog, err, calls.Load())
+		}
+	})
+
+	for _, testCase := range []struct {
+		name      string
+		status    int
+		body      string
+		maxBytes  int
+		wantCalls int32
+		fragment  string
+	}{
+		{name: "5xx retries once", status: http.StatusServiceUnavailable, body: "temporarily unavailable", wantCalls: 2, fragment: "status 503"},
+		{name: "4xx does not retry", status: http.StatusTooManyRequests, body: "rate limited", wantCalls: 1, fragment: "status 429"},
+		{name: "malformed JSON", status: http.StatusOK, body: `{"object":`, wantCalls: 1, fragment: "decode failed"},
+		{name: "oversize body", status: http.StatusOK, body: strings.Repeat("x", 65), maxBytes: 64, wantCalls: 1, fragment: "exceeds maxCatalogResponseBytes"},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			var calls atomic.Int32
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				calls.Add(1)
+				w.WriteHeader(testCase.status)
+				_, _ = io.WriteString(w, testCase.body)
+			}))
+			defer server.Close()
+			cfg := catalogServiceTestConfig(server.URL)
+			if testCase.maxBytes > 0 {
+				cfg.AIProxy.MaxCatalogResponseBytes = testCase.maxBytes
+			}
+			catalog, err := NewCatalogService().GetCatalog(context.Background(), cfg, true)
+			if err == nil || !strings.Contains(err.Error(), testCase.fragment) || calls.Load() != testCase.wantCalls || catalog.State != llmmodels.ProviderCatalogStateUnavailable {
+				t.Fatalf("catalog=%+v err=%v calls=%d, want unavailable/%q/%d", catalog, err, calls.Load(), testCase.fragment, testCase.wantCalls)
+			}
+		})
+	}
+}
+
+func TestCatalogServiceRedirectPolicyAndStaleFallback(t *testing.T) {
+	t.Run("same-origin redirect strips authorization", func(t *testing.T) {
+		var redirectedAuthorization string
+		server := httptest.NewServer(nil)
+		server.Config.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.URL.Path == "/v1/models" {
+				http.Redirect(w, r, "/redirected-models", http.StatusTemporaryRedirect)
+				return
+			}
+			redirectedAuthorization = r.Header.Get("Authorization")
+			writeCatalogTestResponse(w)
+		})
+		defer server.Close()
+		cfg := catalogServiceTestConfig(server.URL)
+		cfg.AIProxy.APIKey = "catalog-secret"
+		catalog, err := NewCatalogService().GetCatalog(context.Background(), cfg, true)
+		if err != nil || catalog.State != llmmodels.ProviderCatalogStateFresh || redirectedAuthorization != "" {
+			t.Fatalf("redirect catalog=%+v err=%v authorization=%q", catalog, err, redirectedAuthorization)
+		}
+	})
+
+	t.Run("cross-origin redirect never reaches target", func(t *testing.T) {
+		var targetCalls atomic.Int32
+		target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			targetCalls.Add(1)
+			writeCatalogTestResponse(w)
+		}))
+		defer target.Close()
+		origin := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			http.Redirect(w, r, target.URL+"/v1/models", http.StatusTemporaryRedirect)
+		}))
+		defer origin.Close()
+		catalog, err := NewCatalogService().GetCatalog(context.Background(), catalogServiceTestConfig(origin.URL), true)
+		if err == nil || targetCalls.Load() != 0 || catalog.State != llmmodels.ProviderCatalogStateUnavailable {
+			t.Fatalf("cross-origin catalog=%+v err=%v targetCalls=%d", catalog, err, targetCalls.Load())
+		}
+	})
+
+	t.Run("bounded LKG becomes stale then expires", func(t *testing.T) {
+		var fail atomic.Bool
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			if fail.Load() {
+				http.Error(w, "private catalog outage", http.StatusServiceUnavailable)
+				return
+			}
+			writeCatalogTestResponse(w)
+		}))
+		defer server.Close()
+		cfg := catalogServiceTestConfig(server.URL)
+		cfg.AIProxy.APIKey = "catalog-secret"
+		now := time.Date(2026, 8, 30, 0, 0, 0, 0, time.UTC)
+		svc := NewCatalogService()
+		svc.now = func() time.Time { return now }
+		fresh, err := svc.GetCatalog(context.Background(), cfg, true)
+		if err != nil || fresh.State != llmmodels.ProviderCatalogStateFresh {
+			t.Fatalf("initial catalog=%+v err=%v", fresh, err)
+		}
+		fail.Store(true)
+		now = now.Add(2 * time.Minute)
+		stale, err := svc.GetCatalog(context.Background(), cfg, true)
+		if err != nil || stale.State != llmmodels.ProviderCatalogStateStale || !stale.Stale || strings.Contains(stale.ErrorMessage, cfg.AIProxy.APIKey) {
+			t.Fatalf("stale catalog=%+v err=%v", stale, err)
+		}
+		now = now.Add(2 * time.Hour)
+		unavailable, err := svc.GetCatalog(context.Background(), cfg, true)
+		if err == nil || unavailable.State != llmmodels.ProviderCatalogStateUnavailable {
+			t.Fatalf("expired catalog=%+v err=%v", unavailable, err)
+		}
+	})
 }
 
 func TestBuildCatalogFromWirePreservesCaseDistinctModelIDs(t *testing.T) {

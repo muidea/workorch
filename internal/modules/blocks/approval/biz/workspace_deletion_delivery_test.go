@@ -70,6 +70,23 @@ func TestApprovalWorkspaceDeletionRejectsForgedPurgeAndUsesPrivatePath(t *testin
 	}
 	scope.RequestHash = deletioncontract.StableRequestHash(scope)
 	bound := common.ContextWithRuntimeWorkspaceID(ctx, workspaceID)
+	forgedSealCommand := approvalevents.SealWorkspaceApprovalDeletionCommand{
+		WorkspaceID: scope.WorkspaceID, DeletionID: scope.DeletionID, DeletionGeneration: scope.DeletionGeneration,
+		DataDispositionIntent: scope.Mode, QuiescenceID: scope.QuiescenceID, RequestHash: scope.RequestHash,
+	}
+	forgedSealEvent := magicevent.NewEventWithContext(
+		approvalevents.TopicApprovalCommandSealWorkspaceDeletion, "application/workorchd", approvalevents.CommandDestination,
+		magicevent.NewHeader(), bound, forgedSealCommand,
+	)
+	if _, err := owner.executeSealWorkspaceDeletion(bound, forgedSealEvent); !errors.Is(err, common.ErrInvalidArgument) {
+		t.Fatalf("forged Approval seal source error=%v, want invalid argument", err)
+	}
+	if _, err := repositories.WorkspaceDeletions.Get(bound, workspaceID); !errors.Is(err, common.ErrNotFound) {
+		t.Fatalf("forged Approval seal created tombstone: %v", err)
+	}
+	if count := approvalPhysicalItemCountWithoutFence(t, bound, repositories, workspaceID); count != 1 {
+		t.Fatalf("forged Approval seal changed physical approvals: count=%d", count)
+	}
 	current, err := owner.applyWorkspaceDeletionInternalEvent(bound, nil, workspaceDeletionInternalEvent{
 		Kind: workspaceDeletionInternalEventFenceObserved, Scope: scope,
 	})
@@ -109,6 +126,15 @@ func TestApprovalWorkspaceDeletionRejectsForgedPurgeAndUsesPrivatePath(t *testin
 	if count := approvalPhysicalItemCount(t, bound, repositories, scope); count != 0 {
 		t.Fatalf("Approval private purge retained physical approvals: count=%d", count)
 	}
+}
+
+func approvalPhysicalItemCountWithoutFence(t *testing.T, ctx context.Context, repositories memory.ApprovalOwnerRepositorySet, workspaceID common.WorkspaceID) int {
+	t.Helper()
+	items, err := repositories.Approvals.ListByWorkspaceID(ctx, workspaceID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return len(items)
 }
 
 func approvalDeletionFunctionBody(t *testing.T, source, start, end string) string {

@@ -10,7 +10,6 @@ import (
 	"testing"
 
 	resultbiz "github.com/muidea/workorch/internal/modules/blocks/result/biz"
-	workspacebiz "github.com/muidea/workorch/internal/modules/blocks/workspace/biz"
 
 	magicevent "github.com/muidea/magicCommon/event"
 	resultmodule "github.com/muidea/workorch/internal/modules/blocks/result"
@@ -101,7 +100,7 @@ func startTerminalDeliveryResourceOwners(t *testing.T, ctx context.Context, hub 
 	}
 	t.Cleanup(func() { _ = runOwner.Stop(ctx) })
 	workspaceOwner := workspacemodule.New()
-	if err := workspaceOwner.Configure(workspacebiz.Dependencies{Workspaces: workspaces, DeletionMaterialCleaner: cleaner, Goals: memory.NewGoalRepository(), DoDs: memory.NewDoDRepository(), Templates: memory.NewWorkspaceTemplateRepository(), EventHub: hub}); err != nil {
+	if err := workspaceOwner.Configure(workspaceOwnerTestDependencies(hub, workspaces, cleaner, memory.NewGoalRepository(), memory.NewDoDRepository(), memory.NewWorkspaceTemplateRepository())); err != nil {
 		t.Fatal(err)
 	}
 	if err := workspaceOwner.Start(); err != nil {
@@ -284,7 +283,7 @@ func TestDeliverRuntimeTerminalCreatesResultAndProjectsOwnersIdempotently(t *tes
 	}
 	t.Cleanup(func() { _ = runOwner.Stop(ctx) })
 	workspaceOwner := workspacemodule.New()
-	if err := workspaceOwner.Configure(workspacebiz.Dependencies{Workspaces: workspaces, DeletionMaterialCleaner: workspaces, Goals: memory.NewGoalRepository(), DoDs: memory.NewDoDRepository(), Templates: memory.NewWorkspaceTemplateRepository(), EventHub: hub}); err != nil {
+	if err := workspaceOwner.Configure(workspaceOwnerTestDependencies(hub, workspaces, workspaces, memory.NewGoalRepository(), memory.NewDoDRepository(), memory.NewWorkspaceTemplateRepository())); err != nil {
 		t.Fatal(err)
 	}
 	if err := workspaceOwner.Start(); err != nil {
@@ -358,10 +357,7 @@ func TestDeliverRuntimeTerminalUsesTypedOwnerEventContracts(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = runOwner.Stop(ctx) })
 	workspaceOwner := workspacemodule.New()
-	if err := workspaceOwner.Configure(workspacebiz.Dependencies{
-		Workspaces: workspaces, DeletionMaterialCleaner: workspaces, Goals: memory.NewGoalRepository(), DoDs: memory.NewDoDRepository(),
-		Templates: memory.NewWorkspaceTemplateRepository(), EventHub: hub,
-	}); err != nil {
+	if err := workspaceOwner.Configure(workspaceOwnerTestDependencies(hub, workspaces, workspaces, memory.NewGoalRepository(), memory.NewDoDRepository(), memory.NewWorkspaceTemplateRepository())); err != nil {
 		t.Fatal(err)
 	}
 	if err := workspaceOwner.Start(); err != nil {
@@ -512,10 +508,7 @@ func TestDeliverRuntimeTerminalRestartsAfterOwnerProjectionAcknowledgementLoss(t
 				t.Fatal(err)
 			}
 			firstWorkspaceOwner := workspacemodule.New()
-			if err := firstWorkspaceOwner.Configure(workspacebiz.Dependencies{
-				Workspaces: firstWorkspaces, DeletionMaterialCleaner: baseWorkspaces, Goals: memory.NewGoalRepository(), DoDs: memory.NewDoDRepository(),
-				Templates: memory.NewWorkspaceTemplateRepository(), EventHub: firstHub,
-			}); err != nil {
+			if err := firstWorkspaceOwner.Configure(workspaceOwnerTestDependencies(firstHub, firstWorkspaces, baseWorkspaces, memory.NewGoalRepository(), memory.NewDoDRepository(), memory.NewWorkspaceTemplateRepository())); err != nil {
 				t.Fatal(err)
 			}
 			if err := firstWorkspaceOwner.Start(); err != nil {
@@ -586,10 +579,7 @@ func TestDeliverRuntimeTerminalRestartsAfterOwnerProjectionAcknowledgementLoss(t
 			}
 			t.Cleanup(func() { _ = restartedRunOwner.Stop(ctx) })
 			restartedWorkspaceOwner := workspacemodule.New()
-			if err := restartedWorkspaceOwner.Configure(workspacebiz.Dependencies{
-				Workspaces: baseWorkspaces, DeletionMaterialCleaner: baseWorkspaces, Goals: memory.NewGoalRepository(), DoDs: memory.NewDoDRepository(),
-				Templates: memory.NewWorkspaceTemplateRepository(), EventHub: restartedHub,
-			}); err != nil {
+			if err := restartedWorkspaceOwner.Configure(workspaceOwnerTestDependencies(restartedHub, baseWorkspaces, baseWorkspaces, memory.NewGoalRepository(), memory.NewDoDRepository(), memory.NewWorkspaceTemplateRepository())); err != nil {
 				t.Fatal(err)
 			}
 			if err := restartedWorkspaceOwner.Start(); err != nil {
@@ -755,7 +745,7 @@ func TestDeliverRuntimeTerminalReplaysSameIdentityAfterOwnerCASConflict(t *testi
 			}
 			t.Cleanup(func() { _ = runOwner.Stop(ctx) })
 			workspaceOwner := workspacemodule.New()
-			if err := workspaceOwner.Configure(workspacebiz.Dependencies{Workspaces: workspaces, DeletionMaterialCleaner: baseWorkspaces, Goals: memory.NewGoalRepository(), DoDs: memory.NewDoDRepository(), Templates: memory.NewWorkspaceTemplateRepository(), EventHub: hub}); err != nil {
+			if err := workspaceOwner.Configure(workspaceOwnerTestDependencies(hub, workspaces, baseWorkspaces, memory.NewGoalRepository(), memory.NewDoDRepository(), memory.NewWorkspaceTemplateRepository())); err != nil {
 				t.Fatal(err)
 			}
 			if err := workspaceOwner.Start(); err != nil {
@@ -1044,10 +1034,7 @@ func TestRuntimeStartupRecoveryDeliversPendingTerminalThroughOwnerChain(t *testi
 	}
 	t.Cleanup(func() { _ = runOwner.Stop(ctx) })
 	workspaceOwner := workspacemodule.New()
-	if err := workspaceOwner.Configure(workspacebiz.Dependencies{
-		Workspaces: workspaces, DeletionMaterialCleaner: workspaces, Goals: memory.NewGoalRepository(), DoDs: memory.NewDoDRepository(),
-		Templates: memory.NewWorkspaceTemplateRepository(), EventHub: hub,
-	}); err != nil {
+	if err := workspaceOwner.Configure(workspaceOwnerTestDependencies(hub, workspaces, workspaces, memory.NewGoalRepository(), memory.NewDoDRepository(), memory.NewWorkspaceTemplateRepository())); err != nil {
 		t.Fatal(err)
 	}
 	if err := workspaceOwner.Start(); err != nil {

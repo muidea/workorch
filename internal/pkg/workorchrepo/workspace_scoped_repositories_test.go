@@ -589,6 +589,78 @@ func TestWorkspaceScopedResultRecoveryInventoryIsBounded(t *testing.T) {
 	}
 }
 
+func TestWorkspaceScopedPreSealDecisionPathSupportsWorkspaceCRUDAndReopen(t *testing.T) {
+	ctx := context.Background()
+	root := t.TempDir()
+	repositories := NewWorkspaceScopedFileRepositorySet(root)
+	workspaceID := common.WorkspaceID("ws-preseal-decision-crud")
+	ticketID := common.TicketID("ticket-preseal-decision-crud")
+	scoped := common.ContextWithRuntimeWorkspaceID(ctx, workspaceID)
+	ticket := &decisionmodel.Ticket{
+		ID:          ticketID,
+		WorkspaceID: workspaceID,
+		State:       common.DecisionTicketStateOpen,
+		DefinitionClarification: &decisionmodel.DefinitionClarificationBinding{
+			Class: decisionmodel.DefinitionClarificationWorkspacePreSeal,
+		},
+	}
+	if err := repositories.Tickets.Create(scoped, ticket); err != nil {
+		t.Fatalf("create workspace-scoped pre-seal ticket: %v", err)
+	}
+	if err := repositories.Tickets.Create(scoped, &decisionmodel.Ticket{
+		ID:          "ticket-runtime-without-run",
+		WorkspaceID: workspaceID,
+		DefinitionClarification: &decisionmodel.DefinitionClarificationBinding{
+			Class: decisionmodel.DefinitionClarificationRuntime,
+		},
+	}); !errors.Is(err, common.ErrInvalidArgument) {
+		t.Fatalf("create runless Runtime clarification err=%v, want invalid argument", err)
+	}
+	listed, err := repositories.Tickets.ListByWorkspaceID(scoped, workspaceID)
+	if err != nil || len(listed) != 1 || listed[0].ID != ticketID || listed[0].RunID != "" {
+		t.Fatalf("workspace ticket list = %+v err=%v", listed, err)
+	}
+
+	resolution := &decisionmodel.Resolution{
+		ID:         "resolution-preseal-decision-crud",
+		TicketID:   ticketID,
+		ResolvedAt: "2026-08-30T00:00:00Z",
+		Type:       "candidate_adjusted",
+	}
+	if err := repositories.Resolutions.Create(scoped, resolution); err != nil {
+		t.Fatalf("create workspace-scoped resolution: %v", err)
+	}
+	resolved := decisionmodel.CloneTicket(ticket)
+	resolved.State = common.DecisionTicketStateResolved
+	resolved.ResolvedAt = resolution.ResolvedAt
+	resolved.DefinitionClarification.ResolutionID = resolution.ID
+	if err := repositories.Tickets.Update(scoped, resolved); err != nil {
+		t.Fatalf("update workspace-scoped ticket: %v", err)
+	}
+
+	reopened := NewWorkspaceScopedFileRepositorySet(root)
+	got, err := reopened.Tickets.Get(scoped, ticketID)
+	if err != nil || got.State != common.DecisionTicketStateResolved || got.RunID != "" || got.DefinitionClarification == nil || got.DefinitionClarification.ResolutionID != resolution.ID {
+		t.Fatalf("reopened workspace-scoped ticket = %+v err=%v", got, err)
+	}
+	if gotResolution, loadErr := reopened.Resolutions.GetByTicketID(scoped, ticketID); loadErr != nil || gotResolution.ID != resolution.ID {
+		t.Fatalf("reopened workspace-scoped resolution = %+v err=%v", gotResolution, loadErr)
+	}
+	if err := reopened.Resolutions.DeleteByTicketID(scoped, ticketID); err != nil {
+		t.Fatalf("delete workspace-scoped resolution: %v", err)
+	}
+	if err := reopened.Tickets.Delete(scoped, ticketID); err != nil {
+		t.Fatalf("delete workspace-scoped ticket: %v", err)
+	}
+	afterDelete := NewWorkspaceScopedFileRepositorySet(root)
+	if _, loadErr := afterDelete.Tickets.Get(scoped, ticketID); !errors.Is(loadErr, common.ErrNotFound) {
+		t.Fatalf("reopened deleted workspace-scoped ticket err=%v, want not found", loadErr)
+	}
+	if _, loadErr := afterDelete.Resolutions.GetByTicketID(scoped, ticketID); !errors.Is(loadErr, common.ErrNotFound) {
+		t.Fatalf("reopened deleted workspace-scoped resolution err=%v, want not found", loadErr)
+	}
+}
+
 func TestWorkspaceScopedEventRecordListHonorsRunScopeCursorAndLimit(t *testing.T) {
 	ctx := context.Background()
 	repos := NewWorkspaceScopedFileRepositorySet(t.TempDir())

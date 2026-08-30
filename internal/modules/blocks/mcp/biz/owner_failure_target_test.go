@@ -243,6 +243,32 @@ func TestMCPOwnerEmitsStructuredFailureTargetObservationThroughTypedReceipt(t *t
 	if !ok || !runtimecontract.SameRuntimeOperationReceipt(duplicate.Receipt, response.Receipt) || requests.Load() != 1 {
 		t.Fatalf("duplicate MCP receipt repeated owner effect: response=%+v requests=%d", duplicate, requests.Load())
 	}
+
+	owner.Teardown(ctx)
+	restarted, err := New(hub, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	restarted.runtimeAdapter = NewRuntimeAdapter(staticMCPServerGetter{server: &mcpmodel.Server{
+		ID: "mcp-observed-target", Name: "observed target", Transport: "http", Endpoint: server.URL,
+		Enabled: true, AllowedTools: []string{"lookup.references"}, TimeoutMillis: 1000,
+	}, capabilities: []*mcpmodel.Capability{capability}})
+	if err := restarted.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { restarted.Teardown(ctx) })
+	restartedResult := hub.Send(magicevent.NewEventWithContext(
+		mcpevents.TopicExecuteOperation, runtimecontract.RuntimeModuleOrchestrator, ModuleID,
+		magicevent.NewHeader(), ctx, command,
+	))
+	restartedData, restartedErr := restartedResult.Get()
+	if restartedErr != nil {
+		t.Fatalf("fresh MCP owner receipt replay: %v", restartedErr)
+	}
+	restartedResponse, ok := restartedData.(mcpevents.ExecuteOperationResult)
+	if !ok || !runtimecontract.SameRuntimeOperationReceipt(restartedResponse.Receipt, response.Receipt) || requests.Load() != 1 {
+		t.Fatalf("fresh MCP owner repeated provider invocation: response=%+v requests=%d", restartedResponse, requests.Load())
+	}
 }
 
 func TestMCPOwnerEvidencePersistenceFailureEmitsNoDirectTargetObservation(t *testing.T) {

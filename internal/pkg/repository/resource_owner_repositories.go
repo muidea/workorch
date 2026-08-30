@@ -10,6 +10,7 @@ const (
 	ownerRepositoryFamilyApproval
 	ownerRepositoryFamilyMemory
 	ownerRepositoryFamilyEventStream
+	ownerRepositoryFamilyWorkspace
 )
 
 // OwnerRepositoryBinding is an opaque, process-local identity minted by a
@@ -49,6 +50,10 @@ func NewEventStreamOwnerRepositoryBinding() OwnerRepositoryBinding {
 	return newOwnerRepositoryBinding(ownerRepositoryFamilyEventStream)
 }
 
+func NewWorkspaceOwnerRepositoryBinding() OwnerRepositoryBinding {
+	return newOwnerRepositoryBinding(ownerRepositoryFamilyWorkspace)
+}
+
 func (b OwnerRepositoryBinding) validFor(family ownerRepositoryFamily) bool {
 	return b.token != nil && b.family == family
 }
@@ -75,6 +80,81 @@ func validateOwnerRepositorySurfaces(family ownerRepositoryFamily, binding Owner
 	}
 	return nil
 }
+
+// WorkspaceOwnerBackend is implemented only by a backend factory that mints
+// one binding for every repository surface used by the Workspace owner. The
+// aggregate prevents independently assembled Workspace/Goal/DoD/Template and
+// deletion-cleaner implementations from splitting one owner across backends.
+type WorkspaceOwnerBackend interface {
+	WorkspaceOwnerBinding() OwnerRepositoryBinding
+	WorkspaceOwnerWorkspaces() WorkspaceRepository
+	WorkspaceOwnerDeletionMaterialCleaner() WorkspaceDeletionMaterialCleaner
+	WorkspaceOwnerGoals() GoalRepository
+	WorkspaceOwnerDoDs() DoDRepository
+	WorkspaceOwnerTemplates() WorkspaceTemplateRepository
+}
+
+type WorkspaceOwnerRepositories struct {
+	workspaces              WorkspaceRepository
+	deletionMaterialCleaner WorkspaceDeletionMaterialCleaner
+	goals                   GoalRepository
+	dods                    DoDRepository
+	templates               WorkspaceTemplateRepository
+	binding                 OwnerRepositoryBinding
+}
+
+func NewWorkspaceOwnerRepositories(backend WorkspaceOwnerBackend) (WorkspaceOwnerRepositories, error) {
+	if backend == nil {
+		return WorkspaceOwnerRepositories{}, common.ErrInvalidArgument
+	}
+	workspaces := backend.WorkspaceOwnerWorkspaces()
+	cleaner := backend.WorkspaceOwnerDeletionMaterialCleaner()
+	goals := backend.WorkspaceOwnerGoals()
+	dods := backend.WorkspaceOwnerDoDs()
+	templates := backend.WorkspaceOwnerTemplates()
+	if workspaces == nil || cleaner == nil || goals == nil || dods == nil || templates == nil {
+		return WorkspaceOwnerRepositories{}, common.ErrInvalidArgument
+	}
+	binding := backend.WorkspaceOwnerBinding()
+	if err := validateOwnerRepositorySurfaces(ownerRepositoryFamilyWorkspace, binding, workspaces, cleaner, goals, dods, templates); err != nil {
+		return WorkspaceOwnerRepositories{}, err
+	}
+	return WorkspaceOwnerRepositories{
+		workspaces:              workspaces,
+		deletionMaterialCleaner: cleaner,
+		goals:                   goals,
+		dods:                    dods,
+		templates:               templates,
+		binding:                 binding,
+	}, nil
+}
+
+func (r WorkspaceOwnerRepositories) Validate() error {
+	if r.workspaces == nil || r.deletionMaterialCleaner == nil || r.goals == nil || r.dods == nil || r.templates == nil {
+		return common.ErrInvalidArgument
+	}
+	return validateOwnerRepositorySurfaces(
+		ownerRepositoryFamilyWorkspace,
+		r.binding,
+		r.workspaces,
+		r.deletionMaterialCleaner,
+		r.goals,
+		r.dods,
+		r.templates,
+	)
+}
+
+func (r WorkspaceOwnerRepositories) Present() bool {
+	return r.workspaces != nil || r.deletionMaterialCleaner != nil || r.goals != nil || r.dods != nil || r.templates != nil || r.binding.token != nil
+}
+
+func (r WorkspaceOwnerRepositories) Workspaces() WorkspaceRepository { return r.workspaces }
+func (r WorkspaceOwnerRepositories) DeletionMaterialCleaner() WorkspaceDeletionMaterialCleaner {
+	return r.deletionMaterialCleaner
+}
+func (r WorkspaceOwnerRepositories) Goals() GoalRepository                  { return r.goals }
+func (r WorkspaceOwnerRepositories) DoDs() DoDRepository                    { return r.dods }
+func (r WorkspaceOwnerRepositories) Templates() WorkspaceTemplateRepository { return r.templates }
 
 // ResultOwnerBackend is implemented only by the memory and file backend
 // aggregates. The constructor below never accepts independently supplied

@@ -15,6 +15,11 @@ import (
 
 const ModuleID = modulecommon.ModuleID
 
+const (
+	applicationContextRegistrySource = "application/workorchd/context-registry"
+	applicationOwnerReadSource       = "application/workorchd/appservice"
+)
+
 type Dependencies struct {
 	Skills            repository.SkillRepository
 	EventHub          magicevent.Hub
@@ -79,6 +84,10 @@ func (m *Biz) handleSkillCommand(ev magicevent.Event, result magicevent.Result) 
 		setMagicResult(result, struct{}{}, common.ErrInvalidArgument)
 		return
 	}
+	if ev == nil || !skillCommandSourceAllowed(ev.ID(), ev.Source()) {
+		setSkillCommandInvalidResult(ev, result)
+		return
+	}
 	ctx := ev.Context()
 	switch ev.ID() {
 	case skillevents.TopicSkillCommandCreate:
@@ -117,6 +126,34 @@ func (m *Biz) handleSkillCommand(ev magicevent.Event, result magicevent.Result) 
 			return
 		}
 		setMagicResult(result, (skillevents.ListSkillsResult{Skills: items, NextCursor: nextCursor}).Clone(), nil)
+	default:
+		setMagicResult(result, struct{}{}, common.ErrInvalidArgument)
+	}
+}
+
+func skillCommandSourceAllowed(topic, source string) bool {
+	switch topic {
+	case skillevents.TopicSkillCommandCreate:
+		return source == applicationContextRegistrySource
+	case skillevents.TopicSkillCommandGet, skillevents.TopicSkillCommandList:
+		return source == applicationContextRegistrySource || source == applicationOwnerReadSource
+	default:
+		return false
+	}
+}
+
+func setSkillCommandInvalidResult(ev magicevent.Event, result magicevent.Result) {
+	topic := ""
+	if ev != nil {
+		topic = ev.ID()
+	}
+	switch topic {
+	case skillevents.TopicSkillCommandCreate:
+		setMagicResult(result, skillevents.CreateSkillResult{}, common.ErrInvalidArgument)
+	case skillevents.TopicSkillCommandGet:
+		setMagicResult(result, skillevents.GetSkillResult{}, common.ErrInvalidArgument)
+	case skillevents.TopicSkillCommandList:
+		setMagicResult(result, skillevents.ListSkillsResult{}, common.ErrInvalidArgument)
 	default:
 		setMagicResult(result, struct{}{}, common.ErrInvalidArgument)
 	}

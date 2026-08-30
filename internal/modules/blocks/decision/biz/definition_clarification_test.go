@@ -3,6 +3,7 @@ package decision
 import (
 	"context"
 	"errors"
+	"reflect"
 	"testing"
 
 	decisionevents "github.com/muidea/workorch/internal/modules/blocks/decision/pkg/events"
@@ -106,6 +107,605 @@ func TestWorkspaceDefinitionClarificationOrphanResolutionWaitsForDedicatedReplay
 	}
 }
 
+func TestWorkspaceDefinitionClarificationReconcileFencesResolutionOnlySuccessorBeforeOpeningAnotherTicket(t *testing.T) {
+	baseCtx := context.Background()
+	hub := newRecordingDecisionHub(t)
+	repositories := memory.NewDecisionOwnerRepositorySet()
+	owner, err := New(hub, nil, Dependencies{OwnerRepositories: repositories.OwnerRepositories(), EventHub: hub})
+	if err != nil {
+		t.Fatalf("construct Decision owner: %v", err)
+	}
+
+	oldRequest := workspaceDefinitionClarificationCommandForBizTest().Normalized()
+	ctx := common.ContextWithRuntimeWorkspaceID(baseCtx, oldRequest.WorkspaceID)
+	if _, err := owner.openWorkspaceDefinitionClarification(ctx, oldRequest); err != nil {
+		t.Fatalf("open old clarification: %v", err)
+	}
+	selectedRequest := oldRequest
+	selectedRequest.CandidateRevision++
+	selectedRequest.CandidateHash = "candidate-hash-selected"
+	selectedRequest.CanonicalSignature = "one-of:selected"
+	selectedRequest.CanonicalSignatureHash = decisionevents.CanonicalDefinitionClarificationSignatureHash("workspace-signature", selectedRequest.CanonicalSignatureVersion, selectedRequest.CanonicalSignature)
+	selectedRequest.TicketID = decisionevents.StableWorkspaceDefinitionClarificationTicketID(selectedRequest)
+	selectedRequest = selectedRequest.Normalized()
+	selectedCommand := decisionevents.ReconcileWorkspaceDefinitionClarificationCandidateCommand{
+		OldRequest: oldRequest, NewRequest: selectedRequest,
+	}.Normalized()
+	resolutionID := decisionevents.StableDefinitionClarificationResolutionID(oldRequest.TicketID, selectedRequest.BindingHash())
+	resolution := &decisionmodel.Resolution{
+		ID: resolutionID, TicketID: oldRequest.TicketID, ResolvedAt: newDecisionResolutionTimestamp(),
+		Type: decisionevents.DefinitionClarificationResolutionCandidateSuperseded,
+		Payload: workorcheventpayload.New(
+			workorcheventpayload.StringField("newTicketId", string(selectedRequest.TicketID)),
+			workorcheventpayload.StringField("newCandidateHash", selectedRequest.CandidateHash),
+		),
+	}
+	if err := repositories.Resolutions.Create(ctx, resolution); err != nil {
+		t.Fatalf("persist selected resolution cut point: %v", err)
+	}
+
+	driftedRequest := selectedRequest
+	driftedRequest.CandidateRevision++
+	driftedRequest.CandidateHash = "candidate-hash-drifted"
+	driftedRequest.CanonicalSignature = "one-of:drifted"
+	driftedRequest.CanonicalSignatureHash = decisionevents.CanonicalDefinitionClarificationSignatureHash("workspace-signature", driftedRequest.CanonicalSignatureVersion, driftedRequest.CanonicalSignature)
+	driftedRequest.TicketID = decisionevents.StableWorkspaceDefinitionClarificationTicketID(driftedRequest)
+	drifted := decisionevents.ReconcileWorkspaceDefinitionClarificationCandidateCommand{
+		OldRequest: oldRequest, NewRequest: driftedRequest,
+	}.Normalized()
+	if _, err := owner.reconcileWorkspaceDefinitionClarification(ctx, drifted); !errors.Is(err, common.ErrConflict) {
+		t.Fatalf("resolution-only drift error = %v, want conflict", err)
+	}
+	if _, err := repositories.Tickets.Get(ctx, driftedRequest.TicketID); !errors.Is(err, common.ErrNotFound) {
+		t.Fatalf("resolution-only drift opened unrelated blocker: %v", err)
+	}
+	oldTicket, err := repositories.Tickets.Get(ctx, oldRequest.TicketID)
+	if err != nil || oldTicket.State != common.DecisionTicketStateOpen || oldTicket.DefinitionClarification == nil || oldTicket.DefinitionClarification.ResolutionID != "" {
+		t.Fatalf("resolution-only drift changed old ticket = %+v err=%v", oldTicket, err)
+	}
+
+	result, err := owner.reconcileWorkspaceDefinitionClarification(ctx, selectedCommand)
+	if err != nil || result.ValidateFor(selectedCommand) != nil || result.NewTicketDisposition != decisionevents.DefinitionClarificationCreated {
+		t.Fatalf("exact cut-point replay result = %+v err=%v", result, err)
+	}
+	oldTicket, err = repositories.Tickets.Get(ctx, oldRequest.TicketID)
+	if err != nil || oldTicket.State != common.DecisionTicketStateResolved || oldTicket.DefinitionClarification == nil ||
+		oldTicket.DefinitionClarification.ResolutionID != resolutionID ||
+		oldTicket.DefinitionClarification.ResolutionBindingHash != selectedCommand.BindingHash(resolutionID) {
+		t.Fatalf("exact cut-point replay did not bind selected resolution = %+v err=%v", oldTicket, err)
+	}
+}
+
+func TestWorkspaceDefinitionClarificationReconcileRejectsCorruptBoundStateBeforeMutation(t *testing.T) {
+	for _, test := range []struct {
+		name              string
+		persistSuccessor  bool
+		persistResolution bool
+	}{
+		{name: "missing successor", persistResolution: true},
+		{name: "missing resolution", persistSuccessor: true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			hub := newRecordingDecisionHub(t)
+			repositories := memory.NewDecisionOwnerRepositorySet()
+			owner, err := New(hub, nil, Dependencies{OwnerRepositories: repositories.OwnerRepositories(), EventHub: hub})
+			if err != nil {
+				t.Fatalf("construct Decision owner: %v", err)
+			}
+			oldRequest, _, exact := workspaceClarificationFileCutpointCommands()
+			ctx := common.ContextWithRuntimeWorkspaceID(context.Background(), oldRequest.WorkspaceID)
+			if _, err := owner.openWorkspaceDefinitionClarification(ctx, oldRequest); err != nil {
+				t.Fatalf("open old clarification: %v", err)
+			}
+			if test.persistSuccessor {
+				if _, err := owner.openWorkspaceDefinitionClarification(ctx, exact.NewRequest); err != nil {
+					t.Fatalf("persist successor clarification: %v", err)
+				}
+			}
+			resolution := workspaceClarificationSupersededResolution(exact)
+			if test.persistResolution {
+				if err := repositories.Resolutions.Create(ctx, resolution); err != nil {
+					t.Fatalf("persist reconciliation resolution: %v", err)
+				}
+			}
+			oldTicket, err := repositories.Tickets.Get(ctx, oldRequest.TicketID)
+			if err != nil {
+				t.Fatalf("load old clarification: %v", err)
+			}
+			oldTicket.State = common.DecisionTicketStateResolved
+			oldTicket.ResolvedAt = resolution.ResolvedAt
+			oldTicket.DefinitionClarification.ResolutionID = resolution.ID
+			oldTicket.DefinitionClarification.ResolutionBindingHash = exact.BindingHash(resolution.ID)
+			if err := repositories.Tickets.Update(ctx, oldTicket); err != nil {
+				t.Fatalf("persist corrupt bound clarification: %v", err)
+			}
+			before, err := repositories.Tickets.Get(ctx, oldRequest.TicketID)
+			if err != nil {
+				t.Fatalf("reload corrupt bound clarification: %v", err)
+			}
+			postedBefore := len(hub.Posted())
+
+			if _, err := owner.reconcileWorkspaceDefinitionClarification(ctx, exact); !errors.Is(err, common.ErrConflict) {
+				t.Fatalf("corrupt bound replay error = %v, want conflict", err)
+			}
+			after, err := repositories.Tickets.Get(ctx, oldRequest.TicketID)
+			if err != nil || !reflect.DeepEqual(after, before) {
+				t.Fatalf("corrupt bound replay mutated old ticket: before=%+v after=%+v err=%v", before, after, err)
+			}
+			if postedAfter := len(hub.Posted()); postedAfter != postedBefore {
+				t.Fatalf("corrupt bound replay published notification: before=%d after=%d", postedBefore, postedAfter)
+			}
+			if !test.persistSuccessor {
+				if _, err := repositories.Tickets.Get(ctx, exact.NewRequest.TicketID); !errors.Is(err, common.ErrNotFound) {
+					t.Fatalf("corrupt replay reconstructed missing successor: %v", err)
+				}
+			}
+			if !test.persistResolution {
+				if _, err := repositories.Resolutions.GetByTicketID(ctx, oldRequest.TicketID); !errors.Is(err, common.ErrNotFound) {
+					t.Fatalf("corrupt replay reconstructed missing resolution: %v", err)
+				}
+			}
+		})
+	}
+}
+
+func TestWorkspaceDefinitionClarificationReconcileRejectsCorruptSuccessorBeforeSelectingResolution(t *testing.T) {
+	hub := newRecordingDecisionHub(t)
+	repositories := memory.NewDecisionOwnerRepositorySet()
+	owner, err := New(hub, nil, Dependencies{OwnerRepositories: repositories.OwnerRepositories(), EventHub: hub})
+	if err != nil {
+		t.Fatalf("construct Decision owner: %v", err)
+	}
+	open, _, reconcile := workspaceClarificationFileCutpointCommands()
+	ctx := common.ContextWithRuntimeWorkspaceID(context.Background(), open.WorkspaceID)
+	if _, err := owner.openWorkspaceDefinitionClarification(ctx, open); err != nil {
+		t.Fatalf("open old clarification: %v", err)
+	}
+	successor, err := owner.service.applyLifecycleInternalEvent(ctx, nil, lifecycleInternalEvent{
+		Kind: lifecycleInternalEventOpened, TicketID: reconcile.NewRequest.TicketID,
+		Ticket: workspaceDefinitionClarificationTicketForCommand(reconcile.NewRequest),
+	})
+	if err != nil {
+		t.Fatalf("persist successor creation cut: %v", err)
+	}
+	// Preserve every immutable opening field while forging a resolved outer
+	// lifecycle without its required Decision-owned resolution binding.
+	successor.State = common.DecisionTicketStateResolved
+	successor.ResolvedAt = "2026-08-30T00:00:00Z"
+	if err := repositories.Tickets.Update(ctx, successor); err != nil {
+		t.Fatalf("persist corrupt successor lifecycle: %v", err)
+	}
+	oldBefore, err := repositories.Tickets.Get(ctx, open.TicketID)
+	if err != nil {
+		t.Fatalf("load old clarification: %v", err)
+	}
+	successorBefore, err := repositories.Tickets.Get(ctx, reconcile.NewRequest.TicketID)
+	if err != nil {
+		t.Fatalf("load corrupt successor: %v", err)
+	}
+	postedBefore := len(hub.Posted())
+
+	if _, err := owner.reconcileWorkspaceDefinitionClarification(ctx, reconcile); !errors.Is(err, common.ErrConflict) {
+		t.Fatalf("corrupt successor reconcile error = %v, want conflict", err)
+	}
+	if _, err := repositories.Resolutions.GetByTicketID(ctx, open.TicketID); !errors.Is(err, common.ErrNotFound) {
+		t.Fatalf("corrupt successor selected old-ticket resolution: %v", err)
+	}
+	oldAfter, err := repositories.Tickets.Get(ctx, open.TicketID)
+	if err != nil || !reflect.DeepEqual(oldAfter, oldBefore) {
+		t.Fatalf("corrupt successor mutated old ticket: before=%+v after=%+v err=%v", oldBefore, oldAfter, err)
+	}
+	successorAfter, err := repositories.Tickets.Get(ctx, reconcile.NewRequest.TicketID)
+	if err != nil || !reflect.DeepEqual(successorAfter, successorBefore) {
+		t.Fatalf("corrupt successor replay mutated successor: before=%+v after=%+v err=%v", successorBefore, successorAfter, err)
+	}
+	if postedAfter := len(hub.Posted()); postedAfter != postedBefore {
+		t.Fatalf("corrupt successor replay published notification: before=%d after=%d", postedBefore, postedAfter)
+	}
+}
+
+func TestWorkspaceDefinitionClarificationReconcileRejectsResolvedSuccessorWithoutResolutionBeforeMutation(t *testing.T) {
+	hub := newRecordingDecisionHub(t)
+	repositories := memory.NewDecisionOwnerRepositorySet()
+	owner, err := New(hub, nil, Dependencies{OwnerRepositories: repositories.OwnerRepositories(), EventHub: hub})
+	if err != nil {
+		t.Fatalf("construct Decision owner: %v", err)
+	}
+	open, _, reconcile := workspaceClarificationFileCutpointCommands()
+	ctx := common.ContextWithRuntimeWorkspaceID(context.Background(), open.WorkspaceID)
+	if _, err := owner.openWorkspaceDefinitionClarification(ctx, open); err != nil {
+		t.Fatalf("open old clarification: %v", err)
+	}
+	if _, err := owner.openWorkspaceDefinitionClarification(ctx, reconcile.NewRequest); err != nil {
+		t.Fatalf("open successor clarification: %v", err)
+	}
+	successorResolve := decisionevents.ResolveWorkspaceDefinitionClarificationByAdmissionCommand{
+		TicketID: reconcile.NewRequest.TicketID, WorkspaceID: reconcile.NewRequest.WorkspaceID,
+		OldCandidateID: reconcile.NewRequest.CandidateID, OldCandidateRevision: reconcile.NewRequest.CandidateRevision, OldCandidateHash: reconcile.NewRequest.CandidateHash,
+		NewCandidateID: reconcile.NewRequest.CandidateID, NewCandidateRevision: reconcile.NewRequest.CandidateRevision + 1, NewCandidateHash: "candidate-hash-successor-resolved",
+		AdmissionResultHash: "admission-hash-successor-resolved", DefinitionRevision: "definition-successor-resolved", StartupInputHash: "startup-successor-resolved",
+	}.Normalized()
+	if _, err := owner.resolveWorkspaceDefinitionClarification(ctx, successorResolve); err != nil {
+		t.Fatalf("resolve successor clarification: %v", err)
+	}
+	if err := repositories.Resolutions.DeleteByTicketID(ctx, reconcile.NewRequest.TicketID); err != nil {
+		t.Fatalf("remove successor Resolution row: %v", err)
+	}
+	oldBefore, err := repositories.Tickets.Get(ctx, open.TicketID)
+	if err != nil {
+		t.Fatalf("load old clarification: %v", err)
+	}
+	successorBefore, err := repositories.Tickets.Get(ctx, reconcile.NewRequest.TicketID)
+	if err != nil {
+		t.Fatalf("load resolved successor: %v", err)
+	}
+	postedBefore := len(hub.Posted())
+
+	if _, err := owner.reconcileWorkspaceDefinitionClarification(ctx, reconcile); !errors.Is(err, common.ErrConflict) {
+		t.Fatalf("resolved successor without Resolution error=%v, want conflict", err)
+	}
+	if _, err := repositories.Resolutions.GetByTicketID(ctx, open.TicketID); !errors.Is(err, common.ErrNotFound) {
+		t.Fatalf("corrupt successor selected old Resolution: %v", err)
+	}
+	oldAfter, oldErr := repositories.Tickets.Get(ctx, open.TicketID)
+	successorAfter, successorErr := repositories.Tickets.Get(ctx, reconcile.NewRequest.TicketID)
+	if oldErr != nil || successorErr != nil || !reflect.DeepEqual(oldAfter, oldBefore) || !reflect.DeepEqual(successorAfter, successorBefore) {
+		t.Fatalf("corrupt successor preflight mutated tickets: old=%+v/%+v successor=%+v/%+v errors=%v,%v", oldBefore, oldAfter, successorBefore, successorAfter, oldErr, successorErr)
+	}
+	if postedAfter := len(hub.Posted()); postedAfter != postedBefore {
+		t.Fatalf("corrupt successor preflight published notification: before=%d after=%d", postedBefore, postedAfter)
+	}
+}
+
+func TestDefinitionClarificationResolvedOpenRejectsMissingResolutionRecordBeforeNotification(t *testing.T) {
+	t.Run("Workspace", func(t *testing.T) {
+		hub := newRecordingDecisionHub(t)
+		repositories := memory.NewDecisionOwnerRepositorySet()
+		owner, err := New(hub, nil, Dependencies{OwnerRepositories: repositories.OwnerRepositories(), EventHub: hub})
+		if err != nil {
+			t.Fatalf("construct Decision owner: %v", err)
+		}
+		open, resolve, _ := workspaceClarificationFileCutpointCommands()
+		ctx := common.ContextWithRuntimeWorkspaceID(context.Background(), open.WorkspaceID)
+		if _, err := owner.openWorkspaceDefinitionClarification(ctx, open); err != nil {
+			t.Fatalf("open Workspace clarification: %v", err)
+		}
+		if _, err := owner.resolveWorkspaceDefinitionClarification(ctx, resolve); err != nil {
+			t.Fatalf("resolve Workspace clarification: %v", err)
+		}
+		if err := repositories.Resolutions.DeleteByTicketID(ctx, open.TicketID); err != nil {
+			t.Fatalf("remove Workspace Resolution row: %v", err)
+		}
+		ticket, err := repositories.Tickets.Get(ctx, open.TicketID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		ticket.ResolutionNotificationPublishedAt = ""
+		if err := repositories.Tickets.Update(ctx, ticket); err != nil {
+			t.Fatal(err)
+		}
+		before, _ := repositories.Tickets.Get(ctx, open.TicketID)
+		postedBefore := len(hub.Posted())
+		if _, err := owner.openWorkspaceDefinitionClarification(ctx, open); !errors.Is(err, common.ErrConflict) {
+			t.Fatalf("resolved Workspace duplicate open error=%v, want conflict", err)
+		}
+		after, loadErr := repositories.Tickets.Get(ctx, open.TicketID)
+		if loadErr != nil || !reflect.DeepEqual(after, before) || len(hub.Posted()) != postedBefore {
+			t.Fatalf("resolved Workspace duplicate open mutated delivery: before=%+v after=%+v err=%v posts=%d/%d", before, after, loadErr, postedBefore, len(hub.Posted()))
+		}
+	})
+
+	t.Run("Runtime", func(t *testing.T) {
+		hub := newRecordingDecisionHub(t)
+		repositories := memory.NewDecisionOwnerRepositorySet()
+		owner, err := New(hub, nil, Dependencies{OwnerRepositories: repositories.OwnerRepositories(), EventHub: hub})
+		if err != nil {
+			t.Fatalf("construct Decision owner: %v", err)
+		}
+		open := runtimeDefinitionClarificationSourceCommand("missing-resolution")
+		resolve := runtimeClarificationResolutionCommand(open)
+		ctx := common.ContextWithRuntimeWorkspaceID(context.Background(), open.WorkspaceID)
+		if _, err := owner.openRuntimeDefinitionClarification(ctx, open); err != nil {
+			t.Fatalf("open Runtime clarification: %v", err)
+		}
+		if _, err := owner.resolveRuntimeDefinitionClarification(ctx, resolve); err != nil {
+			t.Fatalf("resolve Runtime clarification: %v", err)
+		}
+		if err := repositories.Resolutions.DeleteByTicketID(ctx, open.TicketID); err != nil {
+			t.Fatalf("remove Runtime Resolution row: %v", err)
+		}
+		ticket, err := repositories.Tickets.Get(ctx, open.TicketID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		ticket.ResolutionNotificationPublishedAt = ""
+		if err := repositories.Tickets.Update(ctx, ticket); err != nil {
+			t.Fatal(err)
+		}
+		before, _ := repositories.Tickets.Get(ctx, open.TicketID)
+		postedBefore := len(hub.Posted())
+		if _, err := owner.openRuntimeDefinitionClarification(ctx, open); !errors.Is(err, common.ErrConflict) {
+			t.Fatalf("resolved Runtime duplicate open error=%v, want conflict", err)
+		}
+		after, loadErr := repositories.Tickets.Get(ctx, open.TicketID)
+		if loadErr != nil || !reflect.DeepEqual(after, before) || len(hub.Posted()) != postedBefore {
+			t.Fatalf("resolved Runtime duplicate open mutated delivery: before=%+v after=%+v err=%v posts=%d/%d", before, after, loadErr, postedBefore, len(hub.Posted()))
+		}
+	})
+}
+
+func TestDefinitionClarificationResolvedReplayRejectsResolutionTimestampDriftBeforeDelivery(t *testing.T) {
+	t.Run("Workspace", func(t *testing.T) {
+		hub := newRecordingDecisionHub(t)
+		repositories := memory.NewDecisionOwnerRepositorySet()
+		owner, err := New(hub, nil, Dependencies{OwnerRepositories: repositories.OwnerRepositories(), EventHub: hub})
+		if err != nil {
+			t.Fatalf("construct Decision owner: %v", err)
+		}
+		open, resolve, _ := workspaceClarificationFileCutpointCommands()
+		ctx := common.ContextWithRuntimeWorkspaceID(context.Background(), open.WorkspaceID)
+		if _, err := owner.openWorkspaceDefinitionClarification(ctx, open); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := owner.resolveWorkspaceDefinitionClarification(ctx, resolve); err != nil {
+			t.Fatal(err)
+		}
+		ticket, _ := repositories.Tickets.Get(ctx, open.TicketID)
+		ticket.ResolvedAt = "2026-08-30T12:00:00Z"
+		ticket.ResolutionNotificationPublishedAt = ""
+		if err := repositories.Tickets.Update(ctx, ticket); err != nil {
+			t.Fatal(err)
+		}
+		before, _ := repositories.Tickets.Get(ctx, open.TicketID)
+		resolutionBefore, _ := repositories.Resolutions.GetByTicketID(ctx, open.TicketID)
+		postedBefore := len(hub.Posted())
+		if _, err := owner.resolveWorkspaceDefinitionClarification(ctx, resolve); !errors.Is(err, common.ErrConflict) {
+			t.Fatalf("Workspace timestamp drift replay error=%v, want conflict", err)
+		}
+		after, ticketErr := repositories.Tickets.Get(ctx, open.TicketID)
+		resolutionAfter, resolutionErr := repositories.Resolutions.GetByTicketID(ctx, open.TicketID)
+		if ticketErr != nil || resolutionErr != nil || !reflect.DeepEqual(after, before) || !reflect.DeepEqual(resolutionAfter, resolutionBefore) || len(hub.Posted()) != postedBefore {
+			t.Fatalf("Workspace timestamp drift replay mutated owner state/delivery: ticket=%+v/%+v resolution=%+v/%+v errors=%v,%v posts=%d/%d", before, after, resolutionBefore, resolutionAfter, ticketErr, resolutionErr, postedBefore, len(hub.Posted()))
+		}
+	})
+
+	t.Run("Runtime", func(t *testing.T) {
+		hub := newRecordingDecisionHub(t)
+		repositories := memory.NewDecisionOwnerRepositorySet()
+		owner, err := New(hub, nil, Dependencies{OwnerRepositories: repositories.OwnerRepositories(), EventHub: hub})
+		if err != nil {
+			t.Fatalf("construct Decision owner: %v", err)
+		}
+		open := runtimeDefinitionClarificationSourceCommand("timestamp-drift")
+		resolve := runtimeClarificationResolutionCommand(open)
+		ctx := common.ContextWithRuntimeWorkspaceID(context.Background(), open.WorkspaceID)
+		if _, err := owner.openRuntimeDefinitionClarification(ctx, open); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := owner.resolveRuntimeDefinitionClarification(ctx, resolve); err != nil {
+			t.Fatal(err)
+		}
+		ticket, _ := repositories.Tickets.Get(ctx, open.TicketID)
+		ticket.ResolvedAt = "2026-08-30T12:00:00Z"
+		ticket.ResolutionNotificationPublishedAt = ""
+		if err := repositories.Tickets.Update(ctx, ticket); err != nil {
+			t.Fatal(err)
+		}
+		before, _ := repositories.Tickets.Get(ctx, open.TicketID)
+		resolutionBefore, _ := repositories.Resolutions.GetByTicketID(ctx, open.TicketID)
+		postedBefore := len(hub.Posted())
+		if _, err := owner.resolveRuntimeDefinitionClarification(ctx, resolve); !errors.Is(err, common.ErrConflict) {
+			t.Fatalf("Runtime timestamp drift replay error=%v, want conflict", err)
+		}
+		after, ticketErr := repositories.Tickets.Get(ctx, open.TicketID)
+		resolutionAfter, resolutionErr := repositories.Resolutions.GetByTicketID(ctx, open.TicketID)
+		if ticketErr != nil || resolutionErr != nil || !reflect.DeepEqual(after, before) || !reflect.DeepEqual(resolutionAfter, resolutionBefore) || len(hub.Posted()) != postedBefore {
+			t.Fatalf("Runtime timestamp drift replay mutated owner state/delivery: ticket=%+v/%+v resolution=%+v/%+v errors=%v,%v posts=%d/%d", before, after, resolutionBefore, resolutionAfter, ticketErr, resolutionErr, postedBefore, len(hub.Posted()))
+		}
+	})
+}
+
+func TestWorkspaceDefinitionClarificationMutationIngressRejectsOuterTicketDriftBeforeWrite(t *testing.T) {
+	mutations := []struct {
+		name   string
+		mutate func(*decisionmodel.Ticket)
+	}{
+		{name: "step", mutate: func(ticket *decisionmodel.Ticket) { ticket.StepID = "forged-step" }},
+		{name: "reason", mutate: func(ticket *decisionmodel.Ticket) { ticket.Reason = "forged-reason" }},
+		{name: "decision kind", mutate: func(ticket *decisionmodel.Ticket) { ticket.DecisionKind = "ordinary" }},
+		{name: "question", mutate: func(ticket *decisionmodel.Ticket) { ticket.Question = "forged question" }},
+		{name: "failure class", mutate: func(ticket *decisionmodel.Ticket) { ticket.FailureClass = "forged" }},
+		{name: "failure signature", mutate: func(ticket *decisionmodel.Ticket) { ticket.FailureSignature = "forged" }},
+		{name: "recovery actions", mutate: func(ticket *decisionmodel.Ticket) { ticket.AllowedRecoveryActions = []string{"forged"} }},
+		{name: "state time", mutate: func(ticket *decisionmodel.Ticket) { ticket.State = common.DecisionTicketStateResolved }},
+	}
+	for _, operation := range []string{"reconcile", "resolve"} {
+		for _, mutation := range mutations {
+			t.Run(operation+"/"+mutation.name, func(t *testing.T) {
+				hub := newRecordingDecisionHub(t)
+				repositories := memory.NewDecisionOwnerRepositorySet()
+				owner, err := New(hub, nil, Dependencies{OwnerRepositories: repositories.OwnerRepositories(), EventHub: hub})
+				if err != nil {
+					t.Fatalf("construct Decision owner: %v", err)
+				}
+				open, resolve, reconcile := workspaceClarificationFileCutpointCommands()
+				ctx := common.ContextWithRuntimeWorkspaceID(context.Background(), open.WorkspaceID)
+				if _, err := owner.openWorkspaceDefinitionClarification(ctx, open); err != nil {
+					t.Fatalf("open Workspace clarification: %v", err)
+				}
+				ticket, err := repositories.Tickets.Get(ctx, open.TicketID)
+				if err != nil {
+					t.Fatalf("load Workspace clarification: %v", err)
+				}
+				mutation.mutate(ticket)
+				if err := repositories.Tickets.Update(ctx, ticket); err != nil {
+					t.Fatalf("persist outer drift: %v", err)
+				}
+				before, err := repositories.Tickets.Get(ctx, open.TicketID)
+				if err != nil {
+					t.Fatalf("reload outer drift: %v", err)
+				}
+				postedBefore := len(hub.Posted())
+
+				switch operation {
+				case "reconcile":
+					_, err = owner.reconcileWorkspaceDefinitionClarification(ctx, reconcile)
+				case "resolve":
+					_, err = owner.resolveWorkspaceDefinitionClarification(ctx, resolve)
+				}
+				if !errors.Is(err, common.ErrConflict) {
+					t.Fatalf("%s outer-drift error = %v, want conflict", operation, err)
+				}
+				after, loadErr := repositories.Tickets.Get(ctx, open.TicketID)
+				if loadErr != nil || !reflect.DeepEqual(after, before) {
+					t.Fatalf("%s outer-drift mutated ticket: before=%+v after=%+v err=%v", operation, before, after, loadErr)
+				}
+				if _, loadErr := repositories.Resolutions.GetByTicketID(ctx, open.TicketID); !errors.Is(loadErr, common.ErrNotFound) {
+					t.Fatalf("%s outer-drift persisted resolution: %v", operation, loadErr)
+				}
+				if _, loadErr := repositories.Tickets.Get(ctx, reconcile.NewRequest.TicketID); !errors.Is(loadErr, common.ErrNotFound) {
+					t.Fatalf("%s outer-drift opened successor: %v", operation, loadErr)
+				}
+				if postedAfter := len(hub.Posted()); postedAfter != postedBefore {
+					t.Fatalf("%s outer-drift published notification: before=%d after=%d", operation, postedBefore, postedAfter)
+				}
+			})
+		}
+	}
+}
+
+func TestOpenRuntimeDefinitionClarificationRejectsPersistedSemanticDriftBeforeNotification(t *testing.T) {
+	mutations := []struct {
+		name   string
+		mutate func(*decisionmodel.Ticket)
+	}{
+		{name: "step", mutate: func(ticket *decisionmodel.Ticket) { ticket.StepID = "forged-step" }},
+		{name: "reason", mutate: func(ticket *decisionmodel.Ticket) { ticket.Reason = "forged-reason" }},
+		{name: "decision kind", mutate: func(ticket *decisionmodel.Ticket) { ticket.DecisionKind = "ordinary" }},
+		{name: "question", mutate: func(ticket *decisionmodel.Ticket) { ticket.Question = "forged question" }},
+		{name: "failure class", mutate: func(ticket *decisionmodel.Ticket) { ticket.FailureClass = "forged" }},
+		{name: "failure signature", mutate: func(ticket *decisionmodel.Ticket) { ticket.FailureSignature = "forged" }},
+		{name: "recovery actions", mutate: func(ticket *decisionmodel.Ticket) { ticket.AllowedRecoveryActions = []string{"forged"} }},
+		{name: "binding refs", mutate: func(ticket *decisionmodel.Ticket) {
+			ticket.DefinitionClarification.OffendingRefs = []string{"forged-ref"}
+		}},
+		{name: "binding focus", mutate: func(ticket *decisionmodel.Ticket) { ticket.DefinitionClarification.FocusRef = "forged-focus" }},
+		{name: "binding lifecycle", mutate: func(ticket *decisionmodel.Ticket) {
+			ticket.DefinitionClarification.ReplacementIntentID = "forged-intent"
+		}},
+		{name: "state time", mutate: func(ticket *decisionmodel.Ticket) { ticket.State = common.DecisionTicketStateResolved }},
+	}
+	for _, mutation := range mutations {
+		t.Run(mutation.name, func(t *testing.T) {
+			hub := newRecordingDecisionHub(t)
+			repositories := memory.NewDecisionOwnerRepositorySet()
+			owner, err := New(hub, nil, Dependencies{OwnerRepositories: repositories.OwnerRepositories(), EventHub: hub})
+			if err != nil {
+				t.Fatalf("construct Decision owner: %v", err)
+			}
+			command := runtimeDefinitionClarificationSourceCommand("semantic-drift")
+			ctx := common.ContextWithRuntimeWorkspaceID(context.Background(), command.WorkspaceID)
+			ticket, err := owner.service.applyLifecycleInternalEvent(ctx, nil, lifecycleInternalEvent{
+				Kind: lifecycleInternalEventOpened, TicketID: command.TicketID,
+				Ticket: runtimeDefinitionClarificationTicketForCommand(command),
+			})
+			if err != nil {
+				t.Fatalf("persist Runtime clarification creation cut: %v", err)
+			}
+			mutation.mutate(ticket)
+			if err := repositories.Tickets.Update(ctx, ticket); err != nil {
+				t.Fatalf("persist Runtime clarification drift: %v", err)
+			}
+			before, err := repositories.Tickets.Get(ctx, command.TicketID)
+			if err != nil {
+				t.Fatalf("reload Runtime clarification drift: %v", err)
+			}
+
+			if _, err := owner.openRuntimeDefinitionClarification(ctx, command); !errors.Is(err, common.ErrConflict) {
+				t.Fatalf("Runtime duplicate open drift error = %v, want conflict", err)
+			}
+			after, loadErr := repositories.Tickets.Get(ctx, command.TicketID)
+			if loadErr != nil || !reflect.DeepEqual(after, before) {
+				t.Fatalf("Runtime duplicate open drift mutated ticket: before=%+v after=%+v err=%v", before, after, loadErr)
+			}
+			if after.CreatedNotificationPublishedAt != "" || len(hub.Posted()) != 0 {
+				t.Fatalf("Runtime duplicate open drift published creation: ticket=%+v posted=%d", after, len(hub.Posted()))
+			}
+		})
+	}
+}
+
+func TestResolveRuntimeDefinitionClarificationRejectsPersistedSemanticDriftBeforeWrite(t *testing.T) {
+	mutations := []struct {
+		name   string
+		mutate func(*decisionmodel.Ticket)
+	}{
+		{name: "outer decision kind", mutate: func(ticket *decisionmodel.Ticket) { ticket.DecisionKind = "ordinary" }},
+		{name: "opening binding", mutate: func(ticket *decisionmodel.Ticket) { ticket.DefinitionClarification.FocusRef = "forged-focus" }},
+		{name: "open lifecycle binding", mutate: func(ticket *decisionmodel.Ticket) {
+			ticket.DefinitionClarification.ReplacementIntentID = "forged-intent"
+		}},
+		{name: "resolved state without binding", mutate: func(ticket *decisionmodel.Ticket) {
+			ticket.State = common.DecisionTicketStateResolved
+			ticket.ResolvedAt = "2026-08-30T00:00:00Z"
+		}},
+	}
+	for _, mutation := range mutations {
+		t.Run(mutation.name, func(t *testing.T) {
+			hub := newRecordingDecisionHub(t)
+			repositories := memory.NewDecisionOwnerRepositorySet()
+			owner, err := New(hub, nil, Dependencies{OwnerRepositories: repositories.OwnerRepositories(), EventHub: hub})
+			if err != nil {
+				t.Fatalf("construct Decision owner: %v", err)
+			}
+			open := runtimeDefinitionClarificationSourceCommand("resolve-drift")
+			ctx := common.ContextWithRuntimeWorkspaceID(context.Background(), open.WorkspaceID)
+			if _, err := owner.openRuntimeDefinitionClarification(ctx, open); err != nil {
+				t.Fatalf("open Runtime clarification: %v", err)
+			}
+			ticket, err := repositories.Tickets.Get(ctx, open.TicketID)
+			if err != nil {
+				t.Fatalf("load Runtime clarification: %v", err)
+			}
+			mutation.mutate(ticket)
+			if err := repositories.Tickets.Update(ctx, ticket); err != nil {
+				t.Fatalf("persist Runtime clarification drift: %v", err)
+			}
+			before, err := repositories.Tickets.Get(ctx, open.TicketID)
+			if err != nil {
+				t.Fatalf("reload Runtime clarification drift: %v", err)
+			}
+			postedBefore := len(hub.Posted())
+			command := runtimeClarificationResolutionCommand(open)
+
+			if _, err := owner.resolveRuntimeDefinitionClarification(ctx, command); !errors.Is(err, common.ErrConflict) {
+				t.Fatalf("Runtime resolve drift error = %v, want conflict", err)
+			}
+			after, loadErr := repositories.Tickets.Get(ctx, open.TicketID)
+			if loadErr != nil || !reflect.DeepEqual(after, before) {
+				t.Fatalf("Runtime resolve drift mutated ticket: before=%+v after=%+v err=%v", before, after, loadErr)
+			}
+			if _, loadErr := repositories.Resolutions.GetByTicketID(ctx, open.TicketID); !errors.Is(loadErr, common.ErrNotFound) {
+				t.Fatalf("Runtime resolve drift persisted resolution: %v", loadErr)
+			}
+			if postedAfter := len(hub.Posted()); postedAfter != postedBefore {
+				t.Fatalf("Runtime resolve drift published notification: before=%d after=%d", postedBefore, postedAfter)
+			}
+		})
+	}
+}
+
+func runtimeClarificationResolutionCommand(open decisionevents.OpenRuntimeDefinitionClarificationRequestCommand) decisionevents.ResolveRuntimeDefinitionClarificationByReplacementCommand {
+	return decisionevents.ResolveRuntimeDefinitionClarificationByReplacementCommand{
+		TicketID: open.TicketID, WorkspaceID: open.WorkspaceID, PredecessorRunID: open.RunID,
+		ReplacementIntentID:           "replacement-intent-semantic-guard",
+		PredecessorDefinitionRevision: open.DefinitionRevision, PredecessorStartupInputHash: open.StartupInputHash,
+		SuccessorDefinitionRevision: open.DefinitionRevision + "-successor",
+		SuccessorStartupInputHash:   open.StartupInputHash + "-successor",
+		ReplacementIntentHash:       "replacement-intent-hash-semantic-guard",
+	}.Normalized()
+}
+
 func workspaceDefinitionClarificationCommandForBizTest() decisionevents.OpenWorkspaceDefinitionClarificationRequestCommand {
 	command := decisionevents.OpenWorkspaceDefinitionClarificationRequestCommand{
 		SchemaVersion: decisionevents.DefinitionClarificationSchemaVersionCurrent,
@@ -135,7 +735,8 @@ func TestOpenWorkspaceDefinitionClarificationReplayMatchesPersistedFieldsNotOnly
 		}},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			tickets := memory.NewDecisionTicketRepository()
+			repositories := memory.NewDecisionOwnerRepositorySet()
+			tickets := repositories.Tickets
 			binding := workspaceDefinitionClarificationBindingForCommand(command)
 			if test.mutate != nil {
 				test.mutate(binding)
@@ -146,7 +747,11 @@ func TestOpenWorkspaceDefinitionClarificationReplayMatchesPersistedFieldsNotOnly
 			if err := tickets.Create(context.Background(), ticket); err != nil {
 				t.Fatalf("seed ticket: %v", err)
 			}
-			owner := &Biz{tickets: tickets}
+			hub := newRecordingDecisionHub(t)
+			owner, err := New(hub, nil, Dependencies{OwnerRepositories: repositories.OwnerRepositories(), EventHub: hub})
+			if err != nil {
+				t.Fatalf("construct Decision owner: %v", err)
+			}
 			result, err := owner.openWorkspaceDefinitionClarification(context.Background(), command)
 			if test.wantErr {
 				if !errors.Is(err, common.ErrConflict) {

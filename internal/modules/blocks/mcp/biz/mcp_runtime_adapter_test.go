@@ -17,6 +17,7 @@ import (
 	"testing"
 	"time"
 
+	magicevent "github.com/muidea/magicCommon/event"
 	mcpevents "github.com/muidea/workorch/internal/modules/blocks/mcp/pkg/events"
 	registryevents "github.com/muidea/workorch/internal/modules/blocks/mcpregistry/pkg/events"
 	mcpmodel "github.com/muidea/workorch/internal/modules/blocks/mcpregistry/pkg/models"
@@ -946,6 +947,64 @@ func TestRuntimeAdapterReusesLongLivedStdioSession(t *testing.T) {
 	}
 }
 
+func TestMCPOwnerTeardownTerminatesLongLivedStdioSession(t *testing.T) {
+	ctx := context.Background()
+	hub := magicevent.NewHub(16)
+	t.Cleanup(func() { hub.Terminate(ctx) })
+	service := newMCPService(t, mcpmodel.Server{
+		ID:            common.MCPServerID("mcp-stdio-close-session"),
+		Name:          "stdio close session",
+		Transport:     "stdio",
+		Command:       os.Args[0],
+		Args:          []string{"-test.run=TestMCPStdioHelperProcess"},
+		Env:           map[string]string{"WORKORCH_MCP_STDIO_HELPER": "1"},
+		Enabled:       true,
+		AllowedTools:  []string{"repo.summary"},
+		SessionPolicy: "long_lived",
+		TimeoutMillis: 1000,
+	})
+	adapter := NewRuntimeAdapter(service)
+	owner, err := NewWithDependencies(Dependencies{EventHub: hub, RuntimeAdapter: adapter})
+	if err != nil {
+		t.Fatalf("NewWithDependencies: %v", err)
+	}
+	if err := owner.Start(); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	t.Cleanup(func() { owner.Teardown(ctx) })
+	result, err := adapter.ExecuteOperation(ctx, RuntimeOperationRequest{
+		WorkspaceID: "ws-close", Kind: "mcp/tool_call",
+		Data: mcpevents.OperationData{ServerID: "mcp-stdio-close-session", Tool: "repo.summary"},
+	})
+	if err != nil {
+		t.Fatalf("ExecuteOperation: %v output=%+v", err, result)
+	}
+	adapter.sessionMu.Lock()
+	sessionCount := len(adapter.sessions)
+	if sessionCount != 1 {
+		adapter.sessionMu.Unlock()
+		t.Fatalf("stdio sessions = %d, want 1 before close", sessionCount)
+	}
+	var session *stdioSession
+	for _, value := range adapter.sessions {
+		session = value
+	}
+	adapter.sessionMu.Unlock()
+	if session == nil || session.cmd == nil || session.cmd.Process == nil {
+		t.Fatalf("long-lived stdio session is not active before close: %+v", session)
+	}
+
+	owner.Teardown(ctx)
+	adapter.sessionMu.Lock()
+	remaining := len(adapter.sessions)
+	adapter.sessionMu.Unlock()
+	if remaining != 0 || owner.runtimeAdapter != nil || session.cmd.ProcessState == nil || !session.cmd.ProcessState.Exited() {
+		t.Fatalf("owner teardown left stdio session active: remaining=%d adapter=%v state=%v", remaining, owner.runtimeAdapter, session.cmd.ProcessState)
+	}
+	// Teardown is an idempotent lifecycle fence.
+	owner.Teardown(ctx)
+}
+
 func TestRuntimeAdapterEvictsIdleLongLivedStdioSession(t *testing.T) {
 	ctx := context.Background()
 	initFile := filepath.Join(t.TempDir(), "mcp-init-count.txt")
@@ -1110,6 +1169,9 @@ func TestMCPStdioHelperProcess(t *testing.T) {
 			})
 		case "notifications/initialized":
 		case "tools/call":
+			if os.Getenv("WORKORCH_MCP_STDIO_TOOL_DELAY") == "1" {
+				time.Sleep(5 * time.Second)
+			}
 			if os.Getenv("WORKORCH_MCP_STDIO_TOOL_ERROR") == "1" {
 				_ = encoder.Encode(map[string]any{
 					"jsonrpc": "2.0",

@@ -83,8 +83,8 @@ EventHub DTO 互不复用；response 在跨层前校验 workspace/run/item ident
 - Runtime raw provider body、reasoning 与 credential 不进入 public content API、projection、SSE 或 audit DTO。
 - 当前配置严格拒绝 unknown/retired field；Application 不提供 data migration、legacy decoder 或 compatibility outcome。
 - repository builder、owner fixture 与 direct repository write 只允许在 `biz/testkit` 或 `_test.go`。
-- `WorkspaceProjectionChangedData` 是 Application self-notification；当前 consumer 尚无 exact `application/workorchd` source gate，
-  不能把该路径计作已完成的 producer-authorization 边界。
+- `WorkspaceProjectionChangedData` 是 Application self-notification；consumer 只接受 exact `application/workorchd` source 与
+  concrete data，forged/noncanonical source 不得进入 SSE transport。
 
 ## 能力验收
 
@@ -97,7 +97,7 @@ EventHub DTO 互不复用；response 在跨层前校验 workspace/run/item ident
 | Eventstream high-watermark result | `TestReadWorkspaceProjectionHighWatermarksRejectsResultContractDrift`、`TestReadWorkspaceProjectionHighWatermarksReturnsDetachedCanonicalResult` | 覆盖 exact requested scope/order/revision 校验与 detached clone |
 | LLM embedding result | `TestGenerateEmbeddingRejectsCompletionResultOnEmbeddingTopic`、`TestGenerateEmbeddingRejectsInvalidConcreteResult`、`TestGenerateEmbeddingReturnsDetachedVectorAndUsage` | 覆盖 topic/result type、exact target/vector fact 与 vector/usage detachment |
 | projection/read model/SSE | `biz/projection/*_test.go`、`biz/appservice/readmodelprojection/*_test.go`、`service/server/projection_sse_test.go` | legal/illegal lifecycle、duplicate/stale event、restart generation、failed/degraded recovery、transport detachment |
-| Application self-source authorization | 无直接自动化证据 | 未覆盖：`WorkspaceProjectionChangedData` consumer 尚未拒绝 forged/noncanonical source |
+| Application self-source authorization | `TestWorkspaceProjectionChangedConsumerRequiresExactApplicationOwnerSource` | 覆盖 exact owner、forged/noncanonical source 与 wrong concrete payload |
 | Workspace deletion ingress | `biz/appservice/appmodelcore/workspace_deletion_test.go`、`biz/appservice/workspaceports/workspace_command_payload_test.go`、`service/server/event_subscriptions_test.go` | stable RequestID、single owner command、duplicate disposition、SSE-only receipt；payload-conflict/response-loss 的 durable replay 属于 Workspace owner 验收 |
 | persistence and owner boundaries | `biz/testkit/runtime_integration_test.go`、`biz/production_setup_test.go`、`service/server/production_transport_boundary_test.go`、`service/server/application_port_validation_test.go` | memory/file assembly、typed production wiring、repository/service/EventHub AST fences |
 

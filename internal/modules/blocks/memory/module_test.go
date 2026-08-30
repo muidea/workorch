@@ -628,6 +628,70 @@ func TestMemoryRecallTraceOwnerPreservesScopeWithFileBackend(t *testing.T) {
 	}
 }
 
+func TestMemoryRecallTraceExactReplayAndConflictSurviveFileOwnerReopen(t *testing.T) {
+	ctx := context.Background()
+	root := t.TempDir()
+	command := memoryevents.UpsertMemoryRecallTraceCommand{
+		TraceID: "trace-file-replay", WorkspaceID: "ws-file-replay", RunID: "run-file-replay",
+		Source: "recovery", Policy: "recovery", Status: "inherited", Reason: "sealed recall",
+		OccurredAt: "2026-08-30T00:00:00Z",
+	}
+	bound := common.ContextWithRuntimeWorkspaceID(ctx, command.WorkspaceID)
+
+	firstRepositories := workorchrepo.NewWorkspaceScopedFileRepositorySet(root)
+	firstHub := magicevent.NewHub(16)
+	first := New()
+	if err := first.Configure(memorybiz.Dependencies{OwnerRepositories: firstRepositories.MemoryOwner, EventHub: firstHub}); err != nil {
+		t.Fatalf("configure first owner: %v", err)
+	}
+	if err := first.Start(); err != nil {
+		t.Fatalf("start first owner: %v", err)
+	}
+	created := sendMemoryOwnerResult[memoryevents.UpsertMemoryRecallTraceResult](t, bound, firstHub, memoryevents.TopicMemoryRecallTraceCommandUpsert, command)
+	if created.Disposition != memoryevents.MemoryRecallTraceRecorded {
+		t.Fatalf("first disposition = %q, want recorded", created.Disposition)
+	}
+	if err := first.Stop(ctx); err != nil {
+		t.Fatalf("stop first owner: %v", err)
+	}
+	firstHub.Terminate(ctx)
+
+	secondRepositories := workorchrepo.NewWorkspaceScopedFileRepositorySet(root)
+	secondHub := magicevent.NewHub(16)
+	second := New()
+	if err := second.Configure(memorybiz.Dependencies{OwnerRepositories: secondRepositories.MemoryOwner, EventHub: secondHub}); err != nil {
+		t.Fatalf("configure reopened owner: %v", err)
+	}
+	if err := second.Start(); err != nil {
+		t.Fatalf("start reopened owner: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = second.Stop(context.Background())
+		secondHub.Terminate(context.Background())
+	})
+
+	duplicate := sendMemoryOwnerResult[memoryevents.UpsertMemoryRecallTraceResult](t, bound, secondHub, memoryevents.TopicMemoryRecallTraceCommandUpsert, command)
+	if duplicate.Disposition != memoryevents.MemoryRecallTraceDuplicate {
+		t.Fatalf("reopened replay disposition = %q, want duplicate", duplicate.Disposition)
+	}
+	drift := command
+	drift.Reason = "drifted recall"
+	response := secondHub.Send(magicevent.NewEventWithContext(
+		memoryevents.TopicMemoryRecallTraceCommandUpsert, runcommon.ModuleID, memoryevents.CommandDestination,
+		magicevent.NewHeader(), bound, drift,
+	))
+	if response == nil || !errors.Is(response.Error(), common.ErrConflict) {
+		t.Fatalf("reopened drift response = %v, want conflict", response)
+	}
+	stored, err := secondRepositories.MemoryRecallTraces.Get(bound, command.TraceID)
+	if err != nil {
+		t.Fatalf("load reopened trace: %v", err)
+	}
+	if stored.Reason != command.Reason || stored.RunID != command.RunID {
+		t.Fatalf("reopened drift changed trace = %+v", stored)
+	}
+}
+
 func TestMemoryItemOwnerEnforcesWorkspaceScope(t *testing.T) {
 	ctx := context.Background()
 	hub := magicevent.NewHub(32)

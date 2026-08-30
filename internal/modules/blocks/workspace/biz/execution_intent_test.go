@@ -30,10 +30,9 @@ func newWorkspaceExecutionIntentFixture(t *testing.T, respond func(runevents.Wor
 	fixture := &workspaceExecutionIntentFixture{
 		hub: hub, workspaces: memoryrepo.NewWorkspaceRepository(), goals: memoryrepo.NewGoalRepository(), dods: memoryrepo.NewDoDRepository(),
 	}
-	biz, err := New(hub, nil, Dependencies{
-		Workspaces: fixture.workspaces, DeletionMaterialCleaner: fixture.workspaces, Goals: fixture.goals, DoDs: fixture.dods,
-		Templates: memoryrepo.NewWorkspaceTemplateRepository(), EventHub: hub,
-	})
+	biz, err := New(hub, nil, workspaceOwnerTestDependencies(
+		hub, nil, fixture.workspaces, fixture.workspaces, fixture.goals, fixture.dods, memoryrepo.NewWorkspaceTemplateRepository(),
+	))
 	if err != nil {
 		t.Fatal(err)
 	}

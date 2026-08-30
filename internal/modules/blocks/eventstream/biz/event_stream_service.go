@@ -74,6 +74,7 @@ const (
 	stableRunNotificationRecordIDPrefix = "run-notification/"
 	stableMemoryRecallRecordIDPrefix    = "memory-recall-notification/"
 	stableLLMUsageRecordIDPrefix        = "llm-usage-notification/"
+	applicationCommandSource            = "application/workorchd"
 )
 
 func New(deps Dependencies) *Biz {
@@ -229,6 +230,9 @@ func (s *Biz) executeCommand(ev magicevent.Event) (any, error) {
 	}
 	switch ev.ID() {
 	case eventstreamevents.TopicEventStreamCommandList:
+		if ev.Source() != applicationCommandSource {
+			return eventstreamevents.ListEventsResult{}, common.ErrInvalidArgument
+		}
 		cmd, ok := ev.Data().(eventstreamevents.ListEventsCommand)
 		if !ok {
 			return nil, common.ErrInvalidArgument
@@ -260,6 +264,9 @@ func (s *Biz) executeCommand(ev magicevent.Event) (any, error) {
 		}
 		return eventstreamevents.ListEventsResult{Events: data}, nil
 	case eventstreamevents.TopicEventStreamCommandHighWatermarks:
+		if ev.Source() != applicationCommandSource {
+			return eventstreamevents.HighWatermarksResult{}, common.ErrInvalidArgument
+		}
 		cmd, ok := ev.Data().(eventstreamevents.HighWatermarksCommand)
 		if !ok {
 			return nil, common.ErrInvalidArgument

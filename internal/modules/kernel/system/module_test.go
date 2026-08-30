@@ -3,6 +3,7 @@ package system
 import (
 	"context"
 	"errors"
+	"path/filepath"
 	"testing"
 
 	mcpregistrybiz "github.com/muidea/workorch/internal/modules/blocks/mcpregistry/biz"
@@ -15,7 +16,9 @@ import (
 	soulmodule "github.com/muidea/workorch/internal/modules/blocks/soul"
 	workspacemodule "github.com/muidea/workorch/internal/modules/blocks/workspace"
 	"github.com/muidea/workorch/internal/pkg/common"
+	filerepo "github.com/muidea/workorch/internal/pkg/repository/file"
 	memoryrepo "github.com/muidea/workorch/internal/pkg/repository/memory"
+	"github.com/muidea/workorch/internal/pkg/workorchrepo"
 )
 
 func TestSystemModuleConfigureRequiresEventHub(t *testing.T) {
@@ -57,7 +60,8 @@ func TestSystemModuleStartEnsuresBuiltinDefaultsThroughEventHubConsumers(t *test
 	hub := magicevent.NewHub(64)
 	defer hub.Terminate(ctx)
 	souls := memoryrepo.NewSoulRepository()
-	templates := memoryrepo.NewWorkspaceTemplateRepository()
+	workspaceRepositories := memoryrepo.NewWorkspaceOwnerRepositorySet()
+	templates := workspaceRepositories.OwnerRepositories().Templates()
 	mcpRegistry := memoryrepo.NewMCPRegistryRepository()
 
 	soulOwner := soulmodule.New()
@@ -65,14 +69,9 @@ func TestSystemModuleStartEnsuresBuiltinDefaultsThroughEventHubConsumers(t *test
 		t.Fatalf("configure soul owner: %v", err)
 	}
 	workspaceOwner := workspacemodule.New()
-	workspaces := memoryrepo.NewWorkspaceRepository()
 	if err := workspaceOwner.Configure(workspacebiz.Dependencies{
-		Workspaces:              workspaces,
-		DeletionMaterialCleaner: workspaces,
-		Goals:                   memoryrepo.NewGoalRepository(),
-		DoDs:                    memoryrepo.NewDoDRepository(),
-		Templates:               templates,
-		EventHub:                hub,
+		OwnerRepositories: workspaceRepositories.OwnerRepositories(),
+		EventHub:          hub,
 	}); err != nil {
 		t.Fatalf("configure workspace owner: %v", err)
 	}
@@ -118,7 +117,8 @@ func TestSystemModuleStartConvergesAfterPartialFailureWithoutOverwritingUserChan
 	hub := magicevent.NewHub(64)
 	defer hub.Terminate(ctx)
 	souls := memoryrepo.NewSoulRepository()
-	templates := memoryrepo.NewWorkspaceTemplateRepository()
+	workspaceRepositories := memoryrepo.NewWorkspaceOwnerRepositorySet()
+	templates := workspaceRepositories.OwnerRepositories().Templates()
 	mcpRegistry := memoryrepo.NewMCPRegistryRepository()
 
 	soulOwner := soulmodule.New()
@@ -126,14 +126,9 @@ func TestSystemModuleStartConvergesAfterPartialFailureWithoutOverwritingUserChan
 		t.Fatalf("configure soul owner: %v", err)
 	}
 	workspaceOwner := workspacemodule.New()
-	workspaces := memoryrepo.NewWorkspaceRepository()
 	if err := workspaceOwner.Configure(workspacebiz.Dependencies{
-		Workspaces:              workspaces,
-		DeletionMaterialCleaner: workspaces,
-		Goals:                   memoryrepo.NewGoalRepository(),
-		DoDs:                    memoryrepo.NewDoDRepository(),
-		Templates:               templates,
-		EventHub:                hub,
+		OwnerRepositories: workspaceRepositories.OwnerRepositories(),
+		EventHub:          hub,
 	}); err != nil {
 		t.Fatalf("configure workspace owner: %v", err)
 	}
@@ -228,6 +223,125 @@ func TestSystemModuleStartConvergesAfterPartialFailureWithoutOverwritingUserChan
 	if err != nil || gotRegistry.Servers[0].Name != customServer.Name || gotRegistry.Servers[0].Enabled != customServer.Enabled ||
 		gotRegistry.Capabilities[0].DisplayName != customCapability.DisplayName || gotRegistry.Capabilities[0].Enabled != customCapability.Enabled {
 		t.Fatalf("MCP aggregate after repeat Start = %+v err=%v, want user customization preserved", gotRegistry, err)
+	}
+}
+
+func TestSystemFreshProcessConvergesFileBackedPartialStartupWithoutOverwritingUserChanges(t *testing.T) {
+	ctx := context.Background()
+	root := t.TempDir()
+	soulPath := filepath.Join(root, "souls")
+	templatePath := filepath.Join(root, "system", "workspace_templates.json")
+	mcpPath := filepath.Join(root, "mcp_registry.json")
+
+	firstHub := magicevent.NewHub(64)
+	firstSouls := filerepo.NewSoulRepository(soulPath)
+	firstWorkspaceRepositories := workorchrepo.NewWorkspaceScopedFileRepositorySet(root)
+	firstSoulOwner := soulmodule.New()
+	if err := firstSoulOwner.Configure(soulbiz.Dependencies{Souls: firstSouls, EventHub: firstHub}); err != nil {
+		t.Fatal(err)
+	}
+	firstWorkspaceOwner := workspacemodule.New()
+	if err := firstWorkspaceOwner.Configure(workspacebiz.Dependencies{
+		OwnerRepositories: firstWorkspaceRepositories.WorkspaceOwner,
+		EventHub:          firstHub,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := firstSoulOwner.Start(); err != nil {
+		t.Fatal(err)
+	}
+	if err := firstWorkspaceOwner.Start(); err != nil {
+		t.Fatal(err)
+	}
+	firstSystem := New()
+	if err := firstSystem.Configure(systembiz.Dependencies{EventHub: firstHub}); err != nil {
+		t.Fatal(err)
+	}
+	if err := firstSystem.Start(ctx); err == nil {
+		t.Fatal("partial file-backed Start unexpectedly succeeded without MCP Registry owner")
+	}
+	if err := firstSystem.Stop(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if err := firstWorkspaceOwner.Stop(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if err := firstSoulOwner.Stop(ctx); err != nil {
+		t.Fatal(err)
+	}
+	firstHub.Terminate(ctx)
+
+	freshSouls := filerepo.NewSoulRepository(soulPath)
+	seededSouls, err := freshSouls.List(ctx)
+	if err != nil || len(seededSouls) == 0 {
+		t.Fatalf("fresh Soul repository after partial Start len=%d err=%v", len(seededSouls), err)
+	}
+	customSoul := seededSouls[0]
+	customSoul.Name = "fresh-process customized soul"
+	if err := freshSouls.Update(ctx, customSoul); err != nil {
+		t.Fatal(err)
+	}
+	freshTemplates := filerepo.NewWorkspaceTemplateRepository(templatePath)
+	seededTemplates, err := freshTemplates.List(ctx)
+	if err != nil || len(seededTemplates) == 0 {
+		t.Fatalf("fresh Template repository after partial Start len=%d err=%v", len(seededTemplates), err)
+	}
+	customTemplate := seededTemplates[0]
+	customTemplate.Name = "fresh-process customized template"
+	if err := freshTemplates.Update(ctx, customTemplate); err != nil {
+		t.Fatal(err)
+	}
+
+	secondHub := magicevent.NewHub(64)
+	secondSoulOwner := soulmodule.New()
+	if err := secondSoulOwner.Configure(soulbiz.Dependencies{Souls: filerepo.NewSoulRepository(soulPath), EventHub: secondHub}); err != nil {
+		t.Fatal(err)
+	}
+	secondWorkspaceOwner := workspacemodule.New()
+	secondWorkspaceRepositories := workorchrepo.NewWorkspaceScopedFileRepositorySet(root)
+	if err := secondWorkspaceOwner.Configure(workspacebiz.Dependencies{
+		OwnerRepositories: secondWorkspaceRepositories.WorkspaceOwner,
+		EventHub:          secondHub,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	secondMCPOwner := mcpmodule.New()
+	if err := secondMCPOwner.Configure(mcpregistrybiz.Dependencies{Registry: filerepo.NewMCPRegistryRepository(mcpPath), EventHub: secondHub}); err != nil {
+		t.Fatal(err)
+	}
+	for name, start := range map[string]func() error{
+		"soul": secondSoulOwner.Start, "workspace": secondWorkspaceOwner.Start, "mcp": secondMCPOwner.Start,
+	} {
+		if err := start(); err != nil {
+			t.Fatalf("start fresh %s owner: %v", name, err)
+		}
+	}
+	t.Cleanup(func() {
+		_ = secondMCPOwner.Stop(ctx)
+		_ = secondWorkspaceOwner.Stop(ctx)
+		_ = secondSoulOwner.Stop(ctx)
+		secondHub.Terminate(ctx)
+	})
+	secondSystem := New()
+	if err := secondSystem.Configure(systembiz.Dependencies{EventHub: secondHub}); err != nil {
+		t.Fatal(err)
+	}
+	if err := secondSystem.Start(ctx); err != nil {
+		t.Fatalf("fresh file-backed Start: %v", err)
+	}
+	t.Cleanup(func() { _ = secondSystem.Stop(ctx) })
+
+	gotSoul, err := filerepo.NewSoulRepository(soulPath).Get(ctx, customSoul.ID)
+	if err != nil || gotSoul.Name != customSoul.Name {
+		t.Fatalf("custom Soul after fresh retry = %+v err=%v", gotSoul, err)
+	}
+	gotTemplate, err := filerepo.NewWorkspaceTemplateRepository(templatePath).Get(ctx, customTemplate.ID)
+	if err != nil || gotTemplate.Name != customTemplate.Name {
+		t.Fatalf("custom Template after fresh retry = %+v err=%v", gotTemplate, err)
+	}
+	registry, err := filerepo.NewMCPRegistryRepository(mcpPath).Load(ctx)
+	if err != nil || len(registry.Servers) == 0 || len(registry.Capabilities) == 0 {
+		t.Fatalf("MCP defaults after fresh retry = %+v err=%v", registry, err)
 	}
 }
 

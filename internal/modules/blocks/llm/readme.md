@@ -20,7 +20,7 @@ Eventstream 只记录 audit notification。
 
 | 交互方 | 方向 | typed EventHub 合同 | 调用/授权语义 |
 | --- | --- | --- | --- |
-| `application/workorchd` | Application → LLM | `CompleteProviderCommand/CompleteProviderResult`、`GenerateEmbeddingCommand/GenerateEmbeddingResult`、active config/catalog/selection commands | intended caller；generic topics 当前无 exact source authorization |
+| `application/workorchd` | Application → LLM | `CompleteProviderCommand/CompleteProviderResult`、`GenerateEmbeddingCommand/GenerateEmbeddingResult`、active config/catalog/selection commands | completion 仅接受 exact `application/workorchd/appservice`；其余 generic command 仅接受 exact `application/workorchd`，均在读取 payload/provider 前校验 |
 | `kernel/orchestrator` | Orchestrator → LLM | capabilities、provider ceiling、candidate preflight、`RequestRuntimeCandidateCommand/Result` | 所有 Runtime topic 仅接受 exact `kernel/orchestrator` source |
 | Eventstream | LLM → Eventstream | `LLMUsageRecordedData` | provider execution/preflight 的 bounded factual audit（包含未提交失败）；Eventstream 校验 exact LLM source |
 | ai-proxy | LLM → HTTP provider | `/v1/models`、`/v1/responses`、`/v1/embeddings` | owner-private adapter；endpoint/credential 不进入跨 owner result |
@@ -56,8 +56,7 @@ workspace/run、logical/physical request identity、document hash、audit 与 us
 | provider protocol、output bound、stream/non-stream、embedding | [`biz/http_provider_test.go`](biz/http_provider_test.go)、[`biz/http_provider_security_matrix_test.go`](biz/http_provider_security_matrix_test.go) | 仅以本地 `httptest.Server`/fake transport 覆盖主要 wire success/negative edges；不证明真实 ai-proxy、credential 或 upstream 模型兼容性 |
 | candidate framing、schema、correction、cache hash | `biz/runtime_candidate_*_test.go`、`biz/provider_prompt_projection_test.go` | 覆盖 |
 | active configuration freeze | `TestBizStartFreezesLLMConfigurationForCatalogAndStatus` | 覆盖 |
-| catalog cache/key/concurrent refresh | [`biz/catalog_cache_test.go`](biz/catalog_cache_test.go) | 以 fake catalog fetcher 覆盖 merge、key、auth rotation 与 capability mapping；不覆盖真实 catalog HTTP interoperability |
-| lifecycle / dependency fail-fast | [`module_test.go`](module_test.go)、`TestLLMOwnerStartIsIdempotentAndTeardownClearsLifecycle` | 覆盖基本 lifecycle；尚无独立 post-Stop provider-call 断言 |
-| catalog transport failure matrix | 无完整矩阵 | network/5xx retry、oversize/malformed body、redirect 与 LKG fallback 边界尚未逐项验收 |
-| generic caller authorization | 无 exact Application source gate | 未覆盖，Application 仅为 intended caller |
-| deployed real provider | 无组件级自动化证据 | 未覆盖；真实 ai-proxy endpoint、credential、模型 catalog 与 provider behavior 由部署验收负责，不能计入组件单测完成度 |
+| catalog cache/key/concurrent refresh | [`biz/catalog_cache_test.go`](biz/catalog_cache_test.go) | 覆盖 merge、key、auth rotation、capability mapping，以及本地 HTTP transport 的 network/5xx 有界 retry、4xx no-retry、oversize/malformed body、same/cross-origin redirect、fresh→stale→expired LKG |
+| lifecycle / dependency fail-fast | [`module_test.go`](module_test.go)、`TestLLMOwnerStartIsIdempotentAndTeardownClearsLifecycle`、`TestProviderCommandsPublishAuditAndRejectPostBeforePhysicalCall` | 覆盖重复 Start、Stop 清理，以及 Stop 后 completion/embedding/catalog 零 physical call |
+| generic caller authorization | `TestLLMGenericCommandMatrixRequiresExactApplicationSourceBeforePayload` | 覆盖 6 个 generic topic 的 exact Application source matrix，并证明拒绝发生在 payload 读取前 |
+| deployed real provider | [Service Acceptance](../../../../docs/50-product-interface/service-acceptance.md)、[Deployed Convergence DC-01/DC-02](../../../../docs/50-product-interface/deployed-convergence-scenarios.md) | 组件级未覆盖；真实 ai-proxy endpoint、credential、模型 catalog 与 provider behavior 仅由显式 real-provider deployed gate 验收，不能计入组件单测完成度 |

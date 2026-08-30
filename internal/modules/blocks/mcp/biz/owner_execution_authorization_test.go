@@ -295,6 +295,59 @@ func TestMCPOwnerRequiresFactualDurableEffectObservation(t *testing.T) {
 	}
 }
 
+func TestMCPOwnerCommitsUnknownEffectReceiptForStdioObservationAndTimeoutFailures(t *testing.T) {
+	for _, testCase := range []struct {
+		name      string
+		durable   bool
+		delay     bool
+		wantCode  string
+		timeoutMS int
+	}{
+		{name: "durable response omits effect observation", durable: true, wantCode: "mcp_effect_observation_invalid", timeoutMS: 1000},
+		{name: "stdio tool call times out", delay: true, wantCode: "mcp_tool_call_timeout", timeoutMS: 1000},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			serverID := common.MCPServerID("mcp-stdio-owner-failure")
+			tool := "mutate"
+			capability := testMCPToolCapability(serverID, tool, mcpmodel.ValidationProofApplicabilityNotDeclared)
+			effect := runtimecontract.RuntimeEffectNone
+			if testCase.durable {
+				effect = runtimecontract.RuntimeEffectRemoteDurable
+				capability.EffectScope = string(effect)
+				capability.IdempotencyClass = string(runtimecontract.RuntimeOperationIdempotencyAtMostOnce)
+			}
+			endpoint := "env WORKORCH_MCP_STDIO_HELPER=1 "
+			if testCase.delay {
+				endpoint += "WORKORCH_MCP_STDIO_TOOL_DELAY=1 "
+			}
+			endpoint += os.Args[0] + " -test.run=^TestMCPStdioHelperProcess$"
+			owner, hub, receipts := newMCPExecutionTestOwner(t, &mcpmodel.Server{
+				ID: serverID, Name: "stdio owner failure", Transport: "stdio", Endpoint: endpoint,
+				Enabled: true, AllowedTools: []string{tool}, TimeoutMillis: testCase.timeoutMS,
+			}, []*mcpmodel.Capability{capability})
+			operation := testMCPExecutionOperation(string(serverID), tool)
+			sealed := sealMCPTestOperation(t, owner.runtimeAdapter, operation)
+			command := testMCPExecutionCommand(t, operation, sealed, effect, 1, nil, "")
+
+			data, err := sendMCPExecutionCommand(t, hub, command).Get()
+			if err != nil {
+				t.Fatal(err)
+			}
+			receipt := data.(mcpevents.ExecuteOperationResult).Receipt
+			if receipt.Outcome != runtimecontract.RuntimeOperationOutcomeRejected || receipt.ObservedEffectScope != runtimecontract.RuntimeEffectUnknown || receipt.Changed ||
+				len(receipt.ResourceChanges) != 0 || receipt.Feedback == nil || receipt.Feedback.OriginalDiagnostic == nil || receipt.Feedback.OriginalDiagnostic.OriginalCode != testCase.wantCode {
+				t.Fatalf("stdio failure receipt = %+v", receipt)
+			}
+			if err := receipt.Validate(); err != nil {
+				t.Fatalf("stdio failure receipt validation: %v", err)
+			}
+			if receipts.queryCount.Load() != 1 || receipts.commitCount.Load() != 1 {
+				t.Fatalf("stdio failure receipt authority calls: query=%d commit=%d", receipts.queryCount.Load(), receipts.commitCount.Load())
+			}
+		})
+	}
+}
+
 func TestMCPNonDurableEffectRejectsConflictingProviderObservation(t *testing.T) {
 	authorization := mcpevents.RuntimeExecutionAuthorization{Policy: runtimecontract.RuntimeOperationPolicyFact{EffectScope: runtimecontract.RuntimeEffectNone}}
 	response := MCPResponsePayload{JSON: json.RawMessage(`{"workorchEffect":{"effectScope":"remote_durable","changed":false,"beforeHash":"v1","afterHash":"v1"}}`)}

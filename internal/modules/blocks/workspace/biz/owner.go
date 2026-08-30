@@ -25,13 +25,9 @@ const ModuleID = modulecommon.ModuleID
 const workspaceTemplateDefaultsCommandSource = "kernel/system"
 
 type Dependencies struct {
-	Workspaces              repository.WorkspaceRepository
-	DeletionMaterialCleaner repository.WorkspaceDeletionMaterialCleaner
-	Goals                   repository.GoalRepository
-	DoDs                    repository.DoDRepository
-	Templates               repository.WorkspaceTemplateRepository
-	EventHub                magicevent.Hub
-	BackgroundRoutine       task.BackgroundRoutine
+	OwnerRepositories repository.WorkspaceOwnerRepositories
+	EventHub          magicevent.Hub
+	BackgroundRoutine task.BackgroundRoutine
 }
 
 type Biz struct {
@@ -61,11 +57,24 @@ type Biz struct {
 }
 
 func New(h magicevent.Hub, b task.BackgroundRoutine, deps Dependencies) (*Biz, error) {
-	if deps.Workspaces == nil || deps.DeletionMaterialCleaner == nil || deps.Goals == nil || deps.DoDs == nil || deps.Templates == nil || deps.EventHub == nil || h == nil {
+	if deps.EventHub == nil || h == nil {
 		return nil, common.ErrInvalidArgument
 	}
-	bizPtr := &Biz{Base: basebiz.New(modulecommon.ModuleID, h, b), workspaces: deps.Workspaces, cleaner: deps.DeletionMaterialCleaner, goals: deps.Goals, dods: deps.DoDs, templates: deps.Templates}
-	bizPtr.manager = newGoalDoDManagerWithPublisher(deps.Workspaces, deps.Goals, deps.DoDs, bizPtr.PostEvent)
+	if err := deps.OwnerRepositories.Validate(); err != nil {
+		return nil, err
+	}
+	workspaces := deps.OwnerRepositories.Workspaces()
+	goals := deps.OwnerRepositories.Goals()
+	dods := deps.OwnerRepositories.DoDs()
+	bizPtr := &Biz{
+		Base:       basebiz.New(modulecommon.ModuleID, h, b),
+		workspaces: workspaces,
+		cleaner:    deps.OwnerRepositories.DeletionMaterialCleaner(),
+		goals:      goals,
+		dods:       dods,
+		templates:  deps.OwnerRepositories.Templates(),
+	}
+	bizPtr.manager = newGoalDoDManagerWithPublisher(workspaces, goals, dods, bizPtr.PostEvent)
 	return bizPtr, nil
 }
 

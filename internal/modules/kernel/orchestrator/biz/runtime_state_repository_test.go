@@ -942,7 +942,7 @@ func TestRuntimeInitializesFromPersistedRunBootstrap(t *testing.T) {
 	bootstrap := runtimeBootstrap()
 	if err := runs.Create(ctx, &runmodel.Run{
 		ID: "run-v2", WorkspaceID: "ws-v2", GoalID: "goal-v2", DoDID: "dod-v2",
-		DefinitionRevision: "definition-v2", RuntimeBootstrap: &bootstrap, ReconciliationScope: runtimecontract.RuntimeCWIReconciliationScopeCurrentRun, State: common.RunStatePending,
+		DefinitionRevision: "definition-v2", RuntimeBootstrap: &bootstrap, ReconciliationScope: runtimecontract.RuntimeCWIReconciliationScopeCurrentRun, State: common.RunStateActive,
 	}); err != nil {
 		t.Fatal(err)
 	}

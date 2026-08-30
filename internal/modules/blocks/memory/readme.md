@@ -46,5 +46,5 @@ Memory purge 不是分页算法。owner-private sink 每一 pass 直接读取该
 | deletion source/private path/idempotency | `module_test.go::TestMemoryWorkspaceDeletionCommandsAreWorkspaceOnly`、`module_test.go::TestMemoryWorkspaceDeletionFenceHidesRetainedDataAndPurgeIsStable`、`biz/workspace_deletion_private_dispatch_test.go::TestWorkspaceDeletionPrivateDispatcherRejectsForgedPurgeCompletion` | 已覆盖 |
 | larger-than-public-page purge与file reopen | `module_test.go::TestMemoryFileOwnerPurgesInventoryLargerThanPublicPageAcrossReopen` | 已覆盖 |
 | file backend workspace-local ID isolation | `module_test.go::TestMemoryRecallTraceOwnerPreservesScopeWithFileBackend` | 已覆盖 |
-| trace exact replay/conflict after file owner reopen | 当前file test验证同进程scope隔离；尚无stop/reopen后duplicate与drift replay测试 | 未覆盖 |
+| trace exact replay/conflict after file owner reopen | `module_test.go::TestMemoryRecallTraceExactReplayAndConflictSurviveFileOwnerReopen` | 已覆盖stop/reopen后的duplicate、drift conflict与持久事实不变 |
 | durable notification outbox | 当前通知仅是post-commit fact，outbox不属于本owner合同 | 不适用 |

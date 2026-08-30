@@ -19,7 +19,7 @@ func TestWorkspaceDeletionWaitingBlocksConfigurationGoalAndDoDMutations(t *testi
 	dodRepo := memoryrepo.NewDoDRepository()
 	hub := magicevent.NewHub(16)
 	t.Cleanup(func() { hub.Terminate(context.Background()) })
-	owner, err := New(hub, nil, Dependencies{Workspaces: workspaceRepo, DeletionMaterialCleaner: workspaceRepo, Goals: goalRepo, DoDs: dodRepo, Templates: memoryrepo.NewWorkspaceTemplateRepository(), EventHub: hub})
+	owner, err := New(hub, nil, workspaceOwnerTestDependencies(hub, nil, workspaceRepo, workspaceRepo, goalRepo, dodRepo, memoryrepo.NewWorkspaceTemplateRepository()))
 	if err != nil {
 		t.Fatal(err)
 	}

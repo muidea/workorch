@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	cd "github.com/muidea/magicCommon/def"
@@ -17,6 +18,16 @@ type mcpPanicDataEvent struct{ magicevent.Event }
 
 func (mcpPanicDataEvent) Data() any {
 	panic("MCP Runtime ingress inspected payload before its call/source guard")
+}
+
+type mcpCountingDataEvent struct {
+	magicevent.Event
+	reads atomic.Int32
+}
+
+func (e *mcpCountingDataEvent) Data() any {
+	e.reads.Add(1)
+	return struct{}{}
 }
 
 func TestMCPRuntimeIngressTopicMatrixEnforcesStrongOrchestratorCalls(t *testing.T) {
@@ -55,6 +66,45 @@ func TestMCPRuntimeIngressTopicMatrixEnforcesStrongOrchestratorCalls(t *testing.
 
 			item.handler(mcpPanicDataEvent{Event: magicevent.NewEventWithContext(item.topic, runtimecontract.RuntimeModuleOrchestrator, ModuleID, magicevent.NewHeader(), ctx, nil)}, nil)
 		})
+	}
+}
+
+func TestMCPOwnerLifecycleCoversEveryRuntimeTopic(t *testing.T) {
+	ctx := context.Background()
+	hub := magicevent.NewHub(16)
+	t.Cleanup(func() { hub.Terminate(ctx) })
+	owner, err := New(hub, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := owner.Start(); err != nil {
+		t.Fatal(err)
+	}
+	if err := owner.Start(); err != nil {
+		t.Fatal(err)
+	}
+	topics := []string{
+		mcpevents.TopicAcquireRuntimeCapabilities,
+		mcpevents.TopicAcquireRuntimeOperationAdmissibility,
+		mcpevents.TopicProbeRuntimeOperationFeasibility,
+		mcpevents.TopicProbeRuntimeSemanticProofFeasibility,
+		mcpevents.TopicQueryRuntimeCWIReconciliation,
+		mcpevents.TopicExecuteOperation,
+	}
+	for _, topic := range topics {
+		event := &mcpCountingDataEvent{Event: magicevent.NewEventWithContext(topic, runtimecontract.RuntimeModuleOrchestrator, ModuleID, magicevent.NewHeader(), ctx, nil)}
+		assertMCPRuntimeIngressInvalid(t, hub.Send(event), "payload")
+		if got := event.reads.Load(); got != 1 {
+			t.Fatalf("started topic %s payload reads = %d, want exactly 1 after duplicate Start", topic, got)
+		}
+	}
+	owner.Teardown(ctx)
+	for _, topic := range topics {
+		event := &mcpCountingDataEvent{Event: magicevent.NewEventWithContext(topic, runtimecontract.RuntimeModuleOrchestrator, ModuleID, magicevent.NewHeader(), ctx, nil)}
+		hub.Send(event)
+		if got := event.reads.Load(); got != 0 {
+			t.Fatalf("post-Stop topic %s payload reads = %d, want 0", topic, got)
+		}
 	}
 }
 

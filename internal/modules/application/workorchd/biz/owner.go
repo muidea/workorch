@@ -174,10 +174,18 @@ func (b *Biz) Stop(ctx context.Context) {
 }
 
 func (b *Biz) handleWorkspaceProjectionChanged(event magicevent.Event, _ magicevent.Result) {
-	data, ok := event.Data().(workorchdevents.WorkspaceProjectionChangedData)
+	data, ok := workspaceProjectionChangedFromOwner(event)
 	if ok && b != nil && b.service != nil {
 		b.service.RecordWorkspaceProjectionChanged(event.Context(), data)
 	}
+}
+
+func workspaceProjectionChangedFromOwner(event magicevent.Event) (workorchdevents.WorkspaceProjectionChangedData, bool) {
+	if event == nil || event.Source() != ModuleID {
+		return workorchdevents.WorkspaceProjectionChangedData{}, false
+	}
+	data, ok := event.Data().(workorchdevents.WorkspaceProjectionChangedData)
+	return data, ok
 }
 
 // handleRunStateChanged consumes the Run owner's concrete state notification

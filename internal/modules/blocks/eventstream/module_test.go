@@ -19,7 +19,7 @@ import (
 )
 
 func sendEventStreamTestCommand[Command any, Response any](ctx context.Context, rawHub magicevent.Hub, topic string, command Command) (Response, error) {
-	return sendEventStreamTestCommandFrom[Command, Response](ctx, rawHub, topic, "application/workorchd/appservice", command)
+	return sendEventStreamTestCommandFrom[Command, Response](ctx, rawHub, topic, "application/workorchd", command)
 }
 
 func sendEventStreamTestCommandFrom[Command any, Response any](ctx context.Context, rawHub magicevent.Hub, topic, source string, command Command) (Response, error) {

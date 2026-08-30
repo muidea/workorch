@@ -412,7 +412,7 @@ func TestRunCommandGetHonorsWorkspaceScope(t *testing.T) {
 	if err := runs.Create(ctx, &runmodel.Run{
 		ID:          runID,
 		WorkspaceID: "ws-run-owner-a",
-		State:       common.RunStatePending,
+		State:       common.RunStateActive,
 	}); err != nil {
 		t.Fatalf("create run: %v", err)
 	}
@@ -526,7 +526,7 @@ func TestRunWriteCommandsRequireWorkspaceScope(t *testing.T) {
 	if err := runs.Create(ctx, &runmodel.Run{
 		ID:          runID,
 		WorkspaceID: "ws-write-scope-a",
-		State:       common.RunStatePending,
+		State:       common.RunStateActive,
 	}); err != nil {
 		t.Fatalf("create run: %v", err)
 	}
@@ -641,7 +641,7 @@ func TestRuntimeStateStoreRejectsLegacyLifecycleMutationBypass(t *testing.T) {
 	ctx := context.Background()
 	hub := newRunModuleTestHub(t)
 	runs := memory.NewRunRepository()
-	if err := runs.Create(ctx, &runmodel.Run{ID: "legacy-run", WorkspaceID: "legacy-workspace", State: common.RunStatePending}); err != nil {
+	if err := runs.Create(ctx, &runmodel.Run{ID: "legacy-run", WorkspaceID: "legacy-workspace", State: common.RunStateActive}); err != nil {
 		t.Fatal(err)
 	}
 	module := New()

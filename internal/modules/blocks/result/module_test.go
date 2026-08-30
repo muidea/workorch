@@ -17,6 +17,7 @@ import (
 	"github.com/muidea/workorch/internal/pkg/repository"
 	"github.com/muidea/workorch/internal/pkg/repository/memory"
 	deletioncontract "github.com/muidea/workorch/internal/pkg/workorchdeletioncontract"
+	"github.com/muidea/workorch/internal/pkg/workorchrepo"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
@@ -102,6 +103,84 @@ func TestResultWorkspaceDeletionFenceHidesRetainedDataAndPurgeIsStable(t *testin
 	}
 	if tombstone, err := repositories.WorkspaceDeletions.Get(ctx, purged.WorkspaceID); err != nil || tombstone.Phase != resultmodel.WorkspaceDeletionPhasePurged {
 		t.Fatalf("purge tombstone = %#v err=%v", tombstone, err)
+	}
+}
+
+func TestResultWorkspaceDeletionResumesThroughFreshModuleAndEventHubAfterFileReopen(t *testing.T) {
+	ctx := context.Background()
+	root := t.TempDir()
+	workspaceID := common.WorkspaceID("ws-result-module-reopen")
+	item := validModuleTestResult()
+	item.WorkspaceID, item.RunID, item.ID = workspaceID, "run-result-module-reopen", "result-module-reopen"
+	artifact := validModuleTestArtifact(item.ID)
+	artifact.WorkspaceID, artifact.RunID = workspaceID, item.RunID
+
+	firstRepositories := workorchrepo.NewWorkspaceScopedFileRepositorySet(root)
+	if err := firstRepositories.Results.Create(ctx, item); err != nil {
+		t.Fatalf("seed result: %v", err)
+	}
+	if err := firstRepositories.Artifacts.Create(ctx, artifact); err != nil {
+		t.Fatalf("seed artifact: %v", err)
+	}
+	firstHub := magicevent.NewHub(16)
+	first := New()
+	if err := first.Configure(resultbiz.Dependencies{OwnerRepositories: firstRepositories.ResultOwner, EventHub: firstHub}); err != nil {
+		t.Fatalf("configure first module: %v", err)
+	}
+	if err := first.Start(); err != nil {
+		t.Fatalf("start first module: %v", err)
+	}
+	scope := deletioncontract.Scope{
+		WorkspaceID: workspaceID, DeletionID: "delete-result-module-reopen", DeletionGeneration: 1,
+		Mode: deletioncontract.ModePurge, QuiescenceID: "quiescence-result-module-reopen",
+	}
+	scope.RequestHash = deletioncontract.StableRequestHash(scope)
+	seal := resultevents.SealWorkspaceResultDeletionCommand{
+		WorkspaceID: scope.WorkspaceID, DeletionID: scope.DeletionID, DeletionGeneration: scope.DeletionGeneration,
+		DataDispositionIntent: scope.Mode, QuiescenceID: scope.QuiescenceID, RequestHash: scope.RequestHash,
+	}
+	sealResultWorkspaceDeletion(t, ctx, firstHub, seal)
+	if err := first.Stop(ctx); err != nil {
+		t.Fatalf("stop first module: %v", err)
+	}
+	firstHub.Terminate(ctx)
+
+	secondRepositories := workorchrepo.NewWorkspaceScopedFileRepositorySet(root)
+	secondHub := magicevent.NewHub(16)
+	second := New()
+	if err := second.Configure(resultbiz.Dependencies{OwnerRepositories: secondRepositories.ResultOwner, EventHub: secondHub}); err != nil {
+		t.Fatalf("configure reopened module: %v", err)
+	}
+	if err := second.Start(); err != nil {
+		t.Fatalf("start reopened module: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = second.Stop(context.Background())
+		secondHub.Terminate(context.Background())
+	})
+	purge := resultevents.PurgeWorkspaceResultsCommand{
+		WorkspaceID: scope.WorkspaceID, DeletionID: scope.DeletionID, DeletionGeneration: scope.DeletionGeneration,
+		QuiescenceID: scope.QuiescenceID, RequestHash: scope.RequestHash,
+	}
+	response := secondHub.Send(magicevent.NewEventWithContext(
+		resultevents.TopicResultCommandPurgeWorkspace, "blocks/workspace", resultevents.CommandDestination,
+		magicevent.NewHeader(), common.ContextWithRuntimeWorkspaceID(ctx, workspaceID), purge,
+	))
+	if response == nil || response.Error() != nil {
+		t.Fatalf("reopened EventHub purge response = %v", response)
+	}
+	data, err := response.Get()
+	result, ok := data.(resultevents.PurgeWorkspaceResultsResult)
+	if err != nil || !ok || result.ValidateFor(purge) != nil {
+		t.Fatalf("reopened EventHub purge result = %#v err=%v", data, err)
+	}
+
+	finalRepositories := workorchrepo.NewWorkspaceScopedFileRepositorySet(root)
+	results, resultErr := finalRepositories.Results.ListByWorkspace(ctx, workspaceID)
+	artifacts, artifactErr := finalRepositories.Artifacts.ListByWorkspace(ctx, workspaceID)
+	tombstone, tombstoneErr := finalRepositories.ResultDeletions.Get(ctx, workspaceID)
+	if resultErr != nil || artifactErr != nil || tombstoneErr != nil || len(results) != 0 || len(artifacts) != 0 || tombstone.Phase != resultmodel.WorkspaceDeletionPhasePurged {
+		t.Fatalf("reopened Module purge results=%d artifacts=%d tombstone=%+v errors=%v/%v/%v", len(results), len(artifacts), tombstone, resultErr, artifactErr, tombstoneErr)
 	}
 }
 

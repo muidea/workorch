@@ -27,14 +27,10 @@ func newWorkspaceLifecycleBiz(t *testing.T) (*Biz, *memory.WorkspaceRepository) 
 	t.Helper()
 	workspaces := memory.NewWorkspaceRepository()
 	hub := magicevent.NewHub(16)
-	biz, err := New(hub, task.NewBackgroundRoutine(4), Dependencies{
-		Workspaces:              workspaces,
-		DeletionMaterialCleaner: workspaces,
-		Goals:                   memory.NewGoalRepository(),
-		DoDs:                    memory.NewDoDRepository(),
-		Templates:               memory.NewWorkspaceTemplateRepository(),
-		EventHub:                hub,
-	})
+	background := task.NewBackgroundRoutine(4)
+	biz, err := New(hub, background, workspaceOwnerTestDependencies(
+		hub, background, workspaces, workspaces, memory.NewGoalRepository(), memory.NewDoDRepository(), memory.NewWorkspaceTemplateRepository(),
+	))
 	if err != nil {
 		t.Fatalf("new: %v", err)
 	}

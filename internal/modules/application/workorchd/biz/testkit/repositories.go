@@ -40,6 +40,7 @@ type RepositoryExports struct {
 	WorkspaceCleaner      repository.WorkspaceDeletionMaterialCleaner
 	Goals                 repository.GoalRepository
 	DoDs                  repository.DoDRepository
+	WorkspaceOwner        repository.WorkspaceOwnerRepositories
 	RunOwner              repository.RunOwnerRepositories
 	Runs                  repository.RunRepository
 	Steps                 repository.StepRepository
@@ -108,7 +109,7 @@ func buildRepositories(backend string, dataRoot string) RepositoryExports {
 	backend = workorchrepo.NormalizeRepositoryBackend(backend)
 	switch backend {
 	case "memory":
-		workspaceRepository := memory.NewWorkspaceRepository()
+		workspaceOwner := memory.NewWorkspaceOwnerRepositorySet()
 		registry := memory.NewMCPRegistryRepository()
 		memoryOwner := memory.NewMemoryOwnerRepositorySet()
 		resultOwner := memory.NewResultOwnerRepositorySet()
@@ -119,7 +120,7 @@ func buildRepositories(backend string, dataRoot string) RepositoryExports {
 		runOwner := memory.NewRunOwnerRepositorySet()
 		return RepositoryExports{
 			Souls:                 memory.NewSoulRepository(),
-			WorkspaceTemplates:    memory.NewWorkspaceTemplateRepository(),
+			WorkspaceTemplates:    workspaceOwner.Templates,
 			MemoryItems:           memoryOwner.Items,
 			MemoryRecallTraces:    memoryOwner.RecallTraces,
 			MemoryDeletions:       memoryOwner.WorkspaceDeletions,
@@ -137,10 +138,11 @@ func buildRepositories(backend string, dataRoot string) RepositoryExports {
 			EventStreamDeletions:  eventStreamOwner.WorkspaceDeletions,
 			EventStreamPurger:     eventStreamOwner.EventRecords,
 			EventStreamOwner:      eventStreamOwner.OwnerRepositories(),
-			Workspaces:            workspaceRepository,
-			WorkspaceCleaner:      workspaceRepository,
-			Goals:                 memory.NewGoalRepository(),
-			DoDs:                  memory.NewDoDRepository(),
+			Workspaces:            workspaceOwner.Workspaces,
+			WorkspaceCleaner:      workspaceOwner.Workspaces,
+			Goals:                 workspaceOwner.Goals,
+			DoDs:                  workspaceOwner.DoDs,
+			WorkspaceOwner:        workspaceOwner.OwnerRepositories(),
 			RunOwner:              runOwner,
 			Runs:                  runOwner.Runs(),
 			Steps:                 runOwner.Steps(),
@@ -166,7 +168,7 @@ func buildRepositories(backend string, dataRoot string) RepositoryExports {
 		registry := fileRepo.NewMCPRegistryRepository(filepath.Join(dataRoot, "system", "mcp_registry.json"))
 		return RepositoryExports{
 			Souls:                 fileRepo.NewSoulRepository(filepath.Join(dataRoot, "system", "souls")),
-			WorkspaceTemplates:    fileRepo.NewWorkspaceTemplateRepository(filepath.Join(dataRoot, "system", "workspace_templates.json")),
+			WorkspaceTemplates:    workspaceScopedRepos.WorkspaceTemplates,
 			MemoryItems:           workspaceScopedRepos.MemoryItems,
 			MemoryRecallTraces:    workspaceScopedRepos.MemoryRecallTraces,
 			MemoryDeletions:       workspaceScopedRepos.MemoryDeletions,
@@ -188,6 +190,7 @@ func buildRepositories(backend string, dataRoot string) RepositoryExports {
 			WorkspaceCleaner:      workspaceScopedRepos.WorkspaceCleaner,
 			Goals:                 workspaceScopedRepos.Goals,
 			DoDs:                  workspaceScopedRepos.DoDs,
+			WorkspaceOwner:        workspaceScopedRepos.WorkspaceOwner,
 			RunOwner:              workspaceScopedRepos.RunOwner,
 			Runs:                  workspaceScopedRepos.RunOwner.Runs(),
 			Steps:                 workspaceScopedRepos.RunOwner.Steps(),
