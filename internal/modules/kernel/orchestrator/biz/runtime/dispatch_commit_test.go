@@ -1057,13 +1057,21 @@ func TestRuntimeAggregateRequiresReducerTransitionAfterCandidateAttemptOneFailur
 	}
 	bindRuntimeCandidateAttemptForTest(t, &aggregate, 0)
 	bindRuntimeCandidateAttemptForTest(t, &aggregate, 1)
+	aggregate.CandidateAttempts[0].Failure = &runtimecontract.RuntimeCandidateFailure{
+		Class: runtimecontract.RuntimeCandidateFailureClassSchema, Code: "candidate_schema_invalid", Signature: "candidate-schema-invalid", Reason: "required operations field is missing",
+		Diagnostic: &runtimecontract.RuntimeCandidateFailureDiagnostic{
+			Path: "$.operations", Actual: "missing_operations", Required: []string{"operations"},
+			ManifestHash: aggregate.CandidateAttempts[0].ManifestHash,
+			Objectives:   []runtimecontract.RuntimeCandidateCorrectionObjective{runtimecontract.RuntimeCandidateCorrectionSupplyRequiredField},
+		},
+	}
 	aggregate.CandidateAttempts[0].Correction = (&runtimecontract.RuntimeCandidateCorrectionDirective{
 		Disposition:  runtimecontract.RuntimeCandidateCorrectionCorrectableOnce,
-		Objectives:   []runtimecontract.RuntimeCandidateCorrectionObjective{runtimecontract.RuntimeCandidateCorrectionChangeReplayedShape},
+		Objectives:   []runtimecontract.RuntimeCandidateCorrectionObjective{runtimecontract.RuntimeCandidateCorrectionSupplyRequiredField},
 		ManifestHash: aggregate.CandidateAttempts[0].ManifestHash,
 		Witness: &runtimecontract.RuntimeCandidateCorrectionWitness{
 			Dimension: runtimecontract.RuntimeCandidateCorrectionWitnessSchemaField,
-			Path:      "$.operations", RejectedValue: "replayed_shape", AlternativeValue: "different_shape",
+			Path:      "$.operations", RejectedValue: "field_absent", AlternativeValue: "field_present",
 		},
 	}).Clone()
 	aggregate.CandidateAttempts[1].Correction = (&runtimecontract.RuntimeCandidateCorrectionDirective{

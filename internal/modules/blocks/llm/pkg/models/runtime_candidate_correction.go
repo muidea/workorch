@@ -10,7 +10,6 @@ import (
 const (
 	runtimeCandidateCorrectionFieldAbsent  = "field_absent"
 	runtimeCandidateCorrectionFieldPresent = "field_present"
-	runtimeCandidateCorrectionValueAbsent  = "value_absent:"
 )
 
 // ValidateAgainstObservation proves that a detached attempt-1 correction is
@@ -34,117 +33,34 @@ func (c RuntimeCandidateCorrectionInput) ValidateAgainstObservation(manifest run
 	if err := c.Validate(manifest.Hash); err != nil {
 		return err
 	}
-	diagnostic := observation.Diagnostic.Normalized()
-	if diagnostic.ManifestHash != manifest.Hash {
-		return fmt.Errorf("runtime candidate correction observation manifest identity is stale")
-	}
-	if !runtimeCandidateCorrectionObjectivesEqual(c.Objectives, diagnostic.Objectives) {
-		return fmt.Errorf("runtime candidate correction objectives differ from observation")
-	}
-	expectedHash := runtimecontract.StableRuntimeCandidateSealedCorrectionHash(c.ManifestHash, c.Objectives, &c.Witness)
-	if expectedHash == "" || expectedHash != observation.SealedCorrectionHash {
-		return fmt.Errorf("runtime candidate correction differs from sealed observation authority")
-	}
-	return validateRuntimeCandidateCorrectionWitnessObservation(manifest, observation, c.Witness)
-}
-
-func runtimeCandidateCorrectionObjectivesEqual(left, right []runtimecontract.RuntimeCandidateCorrectionObjective) bool {
-	left = (&runtimecontract.RuntimeCandidateFailureDiagnostic{Objectives: append([]runtimecontract.RuntimeCandidateCorrectionObjective(nil), left...)}).Normalized().Objectives
-	right = (&runtimecontract.RuntimeCandidateFailureDiagnostic{Objectives: append([]runtimecontract.RuntimeCandidateCorrectionObjective(nil), right...)}).Normalized().Objectives
-	if len(left) != len(right) {
-		return false
-	}
-	for idx := range left {
-		if left[idx] != right[idx] {
-			return false
-		}
-	}
-	return true
-}
-
-func validateRuntimeCandidateCorrectionWitnessObservation(manifest runtimecontract.RuntimeCandidateContractManifest, observation runtimecontract.RuntimeCandidateCorrectionObservation, witness runtimecontract.RuntimeCandidateCorrectionWitness) error {
-	diagnostic := observation.Diagnostic.Normalized()
-	witness = witness.Normalized()
-	if err := witness.Validate(); err != nil {
+	if err := runtimecontract.ValidateRuntimeCandidateCorrectionAgainstObservation(
+		observation, c.ManifestHash, c.Objectives, c.Witness,
+	); err != nil {
 		return err
 	}
-	if diagnostic.RejectedShapeHash != "" && witness.RejectedShapeHash != diagnostic.RejectedShapeHash {
-		return fmt.Errorf("runtime candidate correction witness rejected shape differs from observation")
-	}
-	switch witness.Dimension {
-	case runtimecontract.RuntimeCandidateCorrectionWitnessDocumentShape:
-		if observation.Code != "candidate_document_nonconformant" || diagnostic.Path != "$" ||
-			diagnostic.Actual != witness.RejectedValue ||
-			!runtimeCandidateCorrectionHasObjective(observation.Diagnostic.Objectives, runtimecontract.RuntimeCandidateCorrectionConformExpectedDocument) {
-			return fmt.Errorf("runtime candidate document correction witness differs from observation")
-		}
-	case runtimecontract.RuntimeCandidateCorrectionWitnessSchemaField:
-		if err := validateRuntimeCandidateSchemaWitness(manifest, diagnostic, witness); err != nil {
-			return err
-		}
-	default:
-		// Operation-semantic alternatives are selected from Orchestrator's
-		// private candidate/frontier. The sealed hash above is the exact fence;
-		// only diagnostic facts actually present here are rechecked locally.
-		if diagnostic.Path != "" && witness.Path != diagnostic.Path {
-			return fmt.Errorf("runtime candidate correction witness path differs from observation")
-		}
-		if diagnostic.Actual != "" && witness.RejectedValue != diagnostic.Actual {
-			return fmt.Errorf("runtime candidate correction witness rejected value differs from observation")
-		}
-		if diagnostic.RejectedShapeHash == "" || witness.RejectedShapeHash != diagnostic.RejectedShapeHash {
-			return fmt.Errorf("runtime candidate semantic correction witness lacks observed rejected shape")
-		}
+	if c.Witness.Dimension == runtimecontract.RuntimeCandidateCorrectionWitnessSchemaField {
+		return validateRuntimeCandidateSchemaWitnessManifest(manifest, c.Witness)
 	}
 	return nil
 }
 
-func validateRuntimeCandidateSchemaWitness(manifest runtimecontract.RuntimeCandidateContractManifest, diagnostic runtimecontract.RuntimeCandidateFailureDiagnostic, witness runtimecontract.RuntimeCandidateCorrectionWitness) error {
-	if witness.OperationKind != "" || witness.Path != diagnostic.Path || witness.Path == "" {
-		return fmt.Errorf("runtime candidate schema correction witness path differs from observation")
-	}
+func validateRuntimeCandidateSchemaWitnessManifest(manifest runtimecontract.RuntimeCandidateContractManifest, witness runtimecontract.RuntimeCandidateCorrectionWitness) error {
 	field := runtimeCandidateCorrectionPathField(witness.Path)
-	if field == "" {
-		return fmt.Errorf("runtime candidate schema correction witness has no typed field")
-	}
-	requires := runtimeCandidateCorrectionDiagnosticContains(diagnostic.Required, field) ||
-		strings.HasPrefix(diagnostic.Actual, "missing_") || strings.HasPrefix(diagnostic.Actual, "empty_")
-	forbids := runtimeCandidateCorrectionDiagnosticContains(diagnostic.Forbidden, field) ||
-		(diagnostic.Actual == field && len(diagnostic.Allowed) != 0 && !runtimeCandidateCorrectionDiagnosticContains(diagnostic.Allowed, field))
 	switch {
 	case witness.AlternativeValue == runtimeCandidateCorrectionFieldPresent:
-		if witness.RejectedValue != runtimeCandidateCorrectionFieldAbsent || !requires || !runtimeCandidateManifestRequiresCorrectionField(manifest, witness.Path, field) {
+		if !runtimeCandidateManifestRequiresCorrectionField(manifest, witness.Path, field) {
 			return fmt.Errorf("runtime candidate schema correction witness does not prove a required field")
 		}
 	case witness.AlternativeValue == runtimeCandidateCorrectionFieldAbsent:
-		if !forbids || !runtimeCandidateManifestForbidsCorrectionField(manifest, witness.Path, field) {
+		if !runtimeCandidateManifestForbidsCorrectionField(manifest, witness.Path, field) {
 			return fmt.Errorf("runtime candidate schema correction witness does not prove a forbidden field")
 		}
-		if diagnostic.Actual != "" && witness.RejectedValue != diagnostic.Actual && witness.RejectedValue != field {
-			return fmt.Errorf("runtime candidate schema correction rejected value differs from observation")
-		}
-	case strings.HasPrefix(witness.AlternativeValue, runtimeCandidateCorrectionValueAbsent):
-		removed := strings.TrimPrefix(witness.AlternativeValue, runtimeCandidateCorrectionValueAbsent)
-		if removed == "" || diagnostic.Actual != removed || witness.RejectedValue != diagnostic.Actual || !forbids ||
-			!runtimeCandidateManifestForbidsCorrectionField(manifest, witness.Path, field) {
+	case strings.HasPrefix(witness.AlternativeValue, "value_absent:"):
+		if !runtimeCandidateManifestForbidsCorrectionField(manifest, witness.Path, field) {
 			return fmt.Errorf("runtime candidate schema correction witness does not prove removed value")
 		}
-	default:
-		return fmt.Errorf("runtime candidate schema correction witness has undeclared alternative")
-	}
-	if witness.RejectedShapeHash != "" && witness.RejectedShapeHash != diagnostic.RejectedShapeHash {
-		return fmt.Errorf("runtime candidate schema correction rejected shape differs from observation")
 	}
 	return nil
-}
-
-func runtimeCandidateCorrectionHasObjective(values []runtimecontract.RuntimeCandidateCorrectionObjective, wanted runtimecontract.RuntimeCandidateCorrectionObjective) bool {
-	for _, value := range values {
-		if value == wanted {
-			return true
-		}
-	}
-	return false
 }
 
 func runtimeCandidateCorrectionDiagnosticContains(values []string, wanted string) bool {

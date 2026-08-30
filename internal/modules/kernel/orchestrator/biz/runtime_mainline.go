@@ -105,26 +105,37 @@ func (m *Biz) requestAndSealRuntimeCandidate(
 	// boundary; re-rendering it on restart would add a non-authoritative failure
 	// point to an otherwise idempotent seal path.
 	// Runtime preflight acquisition guarantees a sealed provider ceiling before
-	// any provider request. Persisted proposals do not re-enter this boundary.
+	// any provider request. Persisted proposals and the exact request session do
+	// not re-enter this boundary.
 	if candidateContext.Resources.ProviderCeiling != nil {
-		if _, proposalPersisted := runtimePendingCandidateProposal(aggregate, candidateAttempt); !proposalPersisted {
-			previousFailure, previousErr := runtimePreviousCandidateFailure(aggregate, candidateAttempt)
-			if previousErr != nil {
-				return runtime.RuntimeAggregate{}, previousErr
-			}
-			correctionDirective, correctionErr := runtimePreviousCandidateCorrection(aggregate, candidateAttempt)
-			if correctionErr != nil {
-				return runtime.RuntimeAggregate{}, correctionErr
-			}
-			correctionObservation, observationErr := requestcontent.ProjectRuntimeCandidateCorrectionObservation(previousFailure, correctionDirective)
-			if observationErr != nil {
-				return runtime.RuntimeAggregate{}, observationErr
-			}
+		_, proposalPersisted := runtimePendingCandidateProposal(aggregate, candidateAttempt)
+		previousFailure, previousErr := runtimePreviousCandidateFailure(aggregate, candidateAttempt)
+		if previousErr != nil {
+			return runtime.RuntimeAggregate{}, previousErr
+		}
+		correctionDirective, correctionErr := runtimePreviousCandidateCorrection(aggregate, candidateAttempt)
+		if correctionErr != nil {
+			return runtime.RuntimeAggregate{}, correctionErr
+		}
+		correctionObservation, observationErr := requestcontent.ProjectRuntimeCandidateCorrectionObservation(previousFailure, correctionDirective)
+		if observationErr != nil {
+			return runtime.RuntimeAggregate{}, observationErr
+		}
+		correctionInput := runtimeCandidateCorrectionInputFromDirective(correctionDirective)
+		correctionHash := correctionInput.StableRequestCorrectionHash(correctionObservation)
+		requestSessionPersisted := runtimeCurrentOperationsCandidateRequestSessionPersisted(
+			aggregate,
+			stablePrefixHash,
+			manifest.Hash,
+			correctionHash,
+			candidateAttempt,
+		)
+		if !proposalPersisted && !requestSessionPersisted {
 			preflight, preflightErr := PreflightRuntimeCandidate(ctx, m.EventHub(), llmevents.PreflightRuntimeCandidateCommand{
 				WorkspaceID: aggregate.Facts.WorkspaceID, RunID: aggregate.Facts.RunID,
 				DocumentKind: runtimecontract.RuntimeProviderDocumentOperations,
 				Decision:     aggregate.Decision, Transaction: aggregate.Decision.AuthorityTransaction(), CandidateAttempt: candidateAttempt,
-				CandidateCorrectionObservation: correctionObservation, CandidateCorrection: runtimeCandidateCorrectionInputFromDirective(correctionDirective),
+				CandidateCorrectionObservation: correctionObservation, CandidateCorrection: correctionInput,
 				StablePrefixHash: stablePrefixHash, CandidateManifest: manifest, DefinitionContext: aggregate.Definition, CandidateContext: candidateContext,
 			})
 			if preflightErr != nil {
@@ -518,6 +529,53 @@ func runtimeCandidateRequestSession(aggregate runtime.RuntimeAggregate, logicalR
 		}
 	}
 	return runtimecontract.RuntimeCandidateRequestSession{}, false
+}
+
+// runtimeCurrentOperationsCandidateRequestSessionPersisted recognizes only the
+// exact SM-3 request identity that requestRuntimeCandidateDocument would ensure
+// for the current authority transaction. The production order is preflight ->
+// request-session CAS -> provider submission, so this durable session is the
+// restart proof that preflight has already passed. A stale prefix, manifest,
+// correction lineage, transaction, or expected-document attempt cannot suppress
+// a new preflight.
+func runtimeCurrentOperationsCandidateRequestSessionPersisted(
+	aggregate runtime.RuntimeAggregate,
+	stablePrefixHash string,
+	manifestHash string,
+	correctionHash string,
+	candidateAttempt int,
+) bool {
+	transaction := aggregate.Decision.AuthorityTransaction()
+	logicalRequestID := runtimecontract.StableRuntimeCandidateRequestSessionID(
+		runtimecontract.RuntimeProviderDocumentOperations,
+		aggregate.Facts.WorkspaceID,
+		aggregate.Facts.RunID,
+		transaction,
+		stablePrefixHash,
+		manifestHash,
+		correctionHash,
+	)
+	session, found := runtimeCandidateRequestSession(aggregate, logicalRequestID)
+	if !found || session.ExpectedDocument == nil {
+		return false
+	}
+	persistedExpected := session.ExpectedDocument.Normalized()
+	currentExpected := runtimeOperationsExpectedDocument(aggregate, strings.TrimSpace(manifestHash), candidateAttempt).Normalized()
+	currentExpected.DocumentKind = runtimecontract.RuntimeProviderDocumentOperations
+	currentExpected.LogicalRequestID = logicalRequestID
+	currentExpected.StablePrefixHash = strings.TrimSpace(stablePrefixHash)
+	currentExpected.Hash = runtimecontract.StableRuntimeExpectedDocumentHash(currentExpected)
+	return session.DocumentKind == runtimecontract.RuntimeProviderDocumentOperations &&
+		session.Transaction == transaction &&
+		session.StablePrefixHash == strings.TrimSpace(stablePrefixHash) &&
+		session.ManifestHash == strings.TrimSpace(manifestHash) &&
+		session.CorrectionHash == strings.TrimSpace(correctionHash) &&
+		persistedExpected.DocumentKind == runtimecontract.RuntimeProviderDocumentOperations &&
+		persistedExpected.LogicalRequestID == logicalRequestID &&
+		persistedExpected.StablePrefixHash == strings.TrimSpace(stablePrefixHash) &&
+		persistedExpected.ManifestHash == strings.TrimSpace(manifestHash) &&
+		persistedExpected.CorrectionAttempt == candidateAttempt &&
+		persistedExpected.Hash == currentExpected.Hash
 }
 
 func (m *Biz) terminateRuntimeCandidateRequestProtocol(ctx context.Context, aggregate runtime.RuntimeAggregate, logicalRequestID, code, message string, originalDiagnostic *runtimecontract.RuntimeOriginalDiagnostic, budgetSettlement ...*runtime.RuntimeProviderBudgetSettlement) (runtime.RuntimeAggregate, runtimecontract.RuntimeCandidate, bool, error) {

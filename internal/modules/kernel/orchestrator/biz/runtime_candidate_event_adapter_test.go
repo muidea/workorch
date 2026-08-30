@@ -606,11 +606,12 @@ func TestPreflightRuntimeCandidateRendersWithoutProviderSubmission(t *testing.T)
 	}
 	definition := runtimecontract.RuntimeDefinitionContext{StartupInputHash: "startup-input-test", Revision: "definition-1", GoalID: "goal-1", GoalDefinition: "goal", DoDID: "dod-1", DoDDefinition: "dod", CapabilityContract: []string{"patch/apply"}}
 	prefix := runtimecontract.StableRuntimeCandidatePrefixHashWithExecutionContract(definition, candidateContext.Activation.ExecutionContract)
+	manifest := candidateManifestForEventRequest(t, decision, candidateContext)
 	response, err := PreflightRuntimeCandidate(ctx, hub, llmevents.PreflightRuntimeCandidateCommand{
 		DocumentKind: runtimecontract.RuntimeProviderDocumentOperations,
 		WorkspaceID:  "ws-1", RunID: "run-1", Decision: decision, Transaction: decision.AuthorityTransaction(), StablePrefixHash: prefix,
 		DefinitionContext: definition,
-		CandidateManifest: candidateManifestForEventRequest(t, decision, candidateContext), CandidateContext: candidateContext,
+		CandidateManifest: manifest, CandidateContext: candidateContext,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -620,6 +621,35 @@ func TestPreflightRuntimeCandidateRendersWithoutProviderSubmission(t *testing.T)
 	}
 	if response.Audit.ContextBudget.ContextGateAction != "" || len(response.Audit.ContextBudget.SectionHashes) == 0 || len(response.Audit.ContextBudget.SourceRefs) == 0 || len(response.Audit.ContextBudget.ProtectedFields) == 0 {
 		t.Fatalf("ready preflight audit=%+v", response.Audit.ContextBudget)
+	}
+
+	directive := (&runtimecontract.RuntimeCandidateCorrectionDirective{
+		Disposition: runtimecontract.RuntimeCandidateCorrectionCorrectableOnce, ManifestHash: manifest.Hash,
+		Objectives: []runtimecontract.RuntimeCandidateCorrectionObjective{runtimecontract.RuntimeCandidateCorrectionSupplyRequiredField},
+		Witness: &runtimecontract.RuntimeCandidateCorrectionWitness{
+			Dimension: runtimecontract.RuntimeCandidateCorrectionWitnessSchemaField, Path: "$.operations[0].targetRefs",
+			RejectedValue: "field_absent", AlternativeValue: "field_present",
+		},
+	}).Clone()
+	observation := &runtimecontract.RuntimeCandidateCorrectionObservation{
+		Class: runtimecontract.RuntimeCandidateFailureClassSchema, Code: "candidate_schema_invalid", Signature: "candidate-schema-invalid",
+		Diagnostic: &runtimecontract.RuntimeCandidateFailureDiagnostic{
+			Path: "$.operations[0].targetRefs", Actual: "missing_targetRefs", Required: []string{"targetRefs"},
+			ManifestHash: manifest.Hash, Objectives: append([]runtimecontract.RuntimeCandidateCorrectionObjective(nil), directive.Objectives...),
+		},
+		SealedCorrectionHash: runtimecontract.StableRuntimeCandidateSealedCorrectionHash(directive.ManifestHash, directive.Objectives, directive.Witness),
+	}
+	retry, err := PreflightRuntimeCandidate(ctx, hub, llmevents.PreflightRuntimeCandidateCommand{
+		DocumentKind: runtimecontract.RuntimeProviderDocumentOperations,
+		WorkspaceID:  "ws-1", RunID: "run-1", Decision: decision, Transaction: decision.AuthorityTransaction(), CandidateAttempt: 1,
+		CandidateCorrectionObservation: observation, CandidateCorrection: runtimeCandidateCorrectionInputFromDirective(directive),
+		StablePrefixHash: prefix, DefinitionContext: definition, CandidateManifest: manifest, CandidateContext: candidateContext,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if retry.Feedback.StableCategory != runtimecontract.RuntimeFeedbackCategoryAccepted || retry.Audit == nil || retry.Audit.ProviderSubmitted || providerCalls != 0 {
+		t.Fatalf("schema correction preflight response=%+v providerCalls=%d", retry, providerCalls)
 	}
 }
 

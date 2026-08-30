@@ -64,6 +64,15 @@ func candidateCorrectionWitness(
 	if witness := candidateDocumentShapeCorrectionWitness(failure); witness != nil {
 		return witness
 	}
+	// A strict required-field absence describes the rejected wire shape, not an
+	// operation-semantic alternative. Seal that directly observable fact before
+	// consulting the decoded candidate frontier; otherwise an empty decoded value
+	// can be laundered into a semantic witness. Other schema diagnostics still
+	// consult the typed semantic frontier first because a concrete disallowed
+	// value is not equivalent to field absence.
+	if failure.Diagnostic != nil && candidateCorrectionDiagnosticReportsFieldAbsence(failure.Diagnostic.Normalized()) {
+		return candidateSchemaCorrectionWitness(failure.Diagnostic, manifest, frontier.candidate)
+	}
 	if frontier.candidate != nil {
 		candidate := *frontier.candidate
 		operations := candidateadmission.Operations(candidate)
@@ -167,6 +176,9 @@ func candidateCorrectionAllowsOperationWitness(failure *runtimecontract.RuntimeC
 	if failure.Diagnostic == nil {
 		return false
 	}
+	if candidateCorrectionDiagnosticReportsFieldAbsence(failure.Diagnostic.Normalized()) {
+		return false
+	}
 	path := strings.TrimSpace(failure.Diagnostic.Path)
 	if path == "" || path != field.CandidatePath(operationIndex) {
 		return false
@@ -186,6 +198,7 @@ func candidateSchemaCorrectionWitness(diagnostic *runtimecontract.RuntimeCandida
 	if path == "" {
 		return nil
 	}
+	reportsFieldAbsence := candidateCorrectionDiagnosticReportsFieldAbsence(diagnostic.Normalized())
 	field := candidateCorrectionPathField(path)
 	if field == "" || field == "summary" {
 		return nil
@@ -204,7 +217,7 @@ func candidateSchemaCorrectionWitness(diagnostic *runtimecontract.RuntimeCandida
 		return nil
 	}
 	if strings.HasPrefix(path, "$.") && !strings.HasPrefix(path, "$.operations[") {
-		if containsCandidateCorrectionString(manifest.RequiredTopLevelFields, field) && candidateCorrectionDiagnosticRequires(diagnostic, field) {
+		if containsCandidateCorrectionString(manifest.RequiredTopLevelFields, field) && reportsFieldAbsence {
 			return schemaCorrectionWitness(path, candidateCorrectionFieldAbsent, candidateCorrectionFieldPresent)
 		}
 		if !containsCandidateCorrectionString(manifest.AllowedTopLevelFields, field) && candidateCorrectionDiagnosticForbids(diagnostic, field) {
@@ -220,7 +233,7 @@ func candidateSchemaCorrectionWitness(diagnostic *runtimecontract.RuntimeCandida
 		return nil
 	}
 	if !strings.Contains(path, ".parameters") {
-		if candidateCorrectionDiagnosticRequires(diagnostic, field) &&
+		if reportsFieldAbsence &&
 			containsCandidateCorrectionString(operationManifest.RequiredOperationFields, field) {
 			return schemaCorrectionWitness(path, candidateCorrectionFieldAbsent, candidateCorrectionFieldPresent)
 		}
@@ -229,7 +242,7 @@ func candidateSchemaCorrectionWitness(diagnostic *runtimecontract.RuntimeCandida
 	if field == "summary" {
 		return nil
 	}
-	if candidateCorrectionDiagnosticRequires(diagnostic, field) && candidateCorrectionParameterDeclared(operationManifest, field) {
+	if reportsFieldAbsence && candidateCorrectionParameterDeclared(operationManifest, field) {
 		return schemaCorrectionWitness(path, candidateCorrectionFieldAbsent, candidateCorrectionFieldPresent)
 	}
 	if candidateCorrectionDiagnosticForbids(diagnostic, field) && candidateCorrectionParameterRemovalAllowed(operationManifest, field) {
@@ -405,6 +418,10 @@ func candidateVariantCorrectionWitness(manifest runtimecontract.RuntimeCandidate
 		return nil
 	}
 	current, _ := runtimecontract.MatchRuntimeOperationVariant(operation, contract)
+	rejectedValue := current.ID
+	if rejectedValue == "" {
+		rejectedValue = "unmatched_variant"
+	}
 	for _, variant := range authorization.Variants {
 		if variant.ID == "" || variant.ID == current.ID || len(variant.Discriminators) == 0 {
 			continue
@@ -413,7 +430,7 @@ func candidateVariantCorrectionWitness(manifest runtimecontract.RuntimeCandidate
 		for _, discriminator := range variant.Discriminators {
 			mutated.Parameters = candidateCorrectionSetStringParameter(mutated.Parameters, discriminator.Name, discriminator.EqualsString)
 		}
-		if witness := candidateOperationMutationWitness(manifest, candidate, index, operation, mutated, field, current.ID, variant.ID, rejectedShape, blocked); witness != nil {
+		if witness := candidateOperationMutationWitness(manifest, candidate, index, operation, mutated, field, rejectedValue, variant.ID, rejectedShape, blocked); witness != nil {
 			return witness
 		}
 	}
@@ -596,7 +613,30 @@ func candidateCorrectionDiagnosticRequires(diagnostic *runtimecontract.RuntimeCa
 	if diagnostic == nil {
 		return false
 	}
-	return strings.HasPrefix(diagnostic.Actual, "missing_") || strings.HasPrefix(diagnostic.Actual, "empty_") || containsCandidateCorrectionString(diagnostic.Required, field)
+	field = strings.TrimSpace(field)
+	if field == "" {
+		return false
+	}
+	if containsCandidateCorrectionString(diagnostic.Required, field) {
+		return true
+	}
+	actual := strings.TrimSpace(diagnostic.Actual)
+	for _, prefix := range []string{"missing_", "empty_"} {
+		if strings.HasPrefix(actual, prefix) && candidateCorrectionFieldTokenEqual(strings.TrimPrefix(actual, prefix), field) {
+			return true
+		}
+	}
+	return false
+}
+
+func candidateCorrectionFieldTokenEqual(left, right string) bool {
+	normalize := func(value string) string {
+		value = strings.ToLower(strings.TrimSpace(value))
+		value = strings.ReplaceAll(value, "_", "")
+		value = strings.ReplaceAll(value, "-", "")
+		return value
+	}
+	return normalize(left) != "" && normalize(left) == normalize(right)
 }
 
 func candidateCorrectionDiagnosticForbids(diagnostic *runtimecontract.RuntimeCandidateFailureDiagnostic, field string) bool {
@@ -891,13 +931,24 @@ func candidateCrossesSchemaFieldWitness(candidate runtimecontract.RuntimeCandida
 	}
 	switch {
 	case strings.HasSuffix(witness.Path, ".kind"):
+		if witness.AlternativeValue == candidateCorrectionFieldPresent {
+			return operation.Kind != ""
+		}
+		if witness.AlternativeValue == candidateCorrectionFieldAbsent {
+			return operation.Kind == ""
+		}
 		return operation.Kind == runtimecontract.CanonicalRuntimeBlockKind(witness.AlternativeValue)
 	case strings.HasSuffix(witness.Path, ".coverageWorkItemIds"):
+		if witness.AlternativeValue == candidateCorrectionFieldPresent {
+			return len(operation.CoverageWorkItemIDs) != 0
+		}
 		return witness.AlternativeValue == candidateCorrectionFieldAbsent && len(operation.CoverageWorkItemIDs) == 0
 	case strings.HasSuffix(witness.Path, ".dependsOn"):
 		switch {
 		case witness.AlternativeValue == candidateCorrectionFieldAbsent:
 			return len(operation.DependsOn) == 0
+		case witness.AlternativeValue == candidateCorrectionFieldPresent:
+			return len(operation.DependsOn) != 0
 		case strings.HasPrefix(witness.AlternativeValue, candidateCorrectionValueAbsent):
 			return !containsCandidateCorrectionString(operation.DependsOn, strings.TrimPrefix(witness.AlternativeValue, candidateCorrectionValueAbsent))
 		default:
@@ -907,15 +958,27 @@ func candidateCrossesSchemaFieldWitness(candidate runtimecontract.RuntimeCandida
 		if witness.AlternativeValue == candidateCorrectionFieldAbsent {
 			return operation.RequiredOperationRef == ""
 		}
+		if witness.AlternativeValue == candidateCorrectionFieldPresent {
+			return operation.RequiredOperationRef != ""
+		}
 		return operation.RequiredOperationRef == witness.AlternativeValue
 	case strings.HasSuffix(witness.Path, ".bindingRefs"):
 		if witness.AlternativeValue == candidateCorrectionFieldAbsent {
 			return len(operation.BindingRefs) == 0
 		}
+		if witness.AlternativeValue == candidateCorrectionFieldPresent {
+			return len(operation.BindingRefs) != 0
+		}
 		return containsCandidateCorrectionString(operation.BindingRefs, witness.AlternativeValue)
 	case strings.Contains(witness.Path, ".parameters"):
 		name := candidateCorrectionPathField(witness.Path)
 		if name == "parameters" {
+			switch witness.AlternativeValue {
+			case candidateCorrectionFieldPresent:
+				return len(operation.Parameters) != 0
+			case candidateCorrectionFieldAbsent:
+				return len(operation.Parameters) == 0
+			}
 			contract, found := runtimecontract.RuntimeOperationContractForKind(operation.Kind)
 			if !found {
 				return false
@@ -942,6 +1005,12 @@ func candidateCrossesSchemaFieldWitness(candidate runtimecontract.RuntimeCandida
 		}
 		targetField, found, err := runtimecontract.RuntimeOperationCorrectionFieldForRole(authorization, runtimecontract.RuntimeOperationCorrectionRoleTarget)
 		if err == nil && found && witness.Path == targetField.CandidatePath(operationIndex) {
+			if witness.AlternativeValue == candidateCorrectionFieldPresent {
+				return len(operation.TargetRefs) != 0
+			}
+			if witness.AlternativeValue == candidateCorrectionFieldAbsent {
+				return len(operation.TargetRefs) == 0
+			}
 			return containsCandidateCorrectionString(operation.TargetRefs, witness.AlternativeValue)
 		}
 		return witness.AlternativeValue == candidateCorrectionFieldAbsent

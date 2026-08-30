@@ -80,6 +80,9 @@ func CandidateCorrectionObjectivesForFailure(failure *runtimecontract.RuntimeCan
 		candidateCorrectionDiagnosticForbids(&diagnostic, identityField) {
 		return []runtimecontract.RuntimeCandidateCorrectionObjective{runtimecontract.RuntimeCandidateCorrectionRemoveForbiddenField}
 	}
+	if candidateCorrectionDiagnosticReportsFieldAbsence(diagnostic) {
+		return []runtimecontract.RuntimeCandidateCorrectionObjective{runtimecontract.RuntimeCandidateCorrectionSupplyRequiredField}
+	}
 	objectives := append([]runtimecontract.RuntimeCandidateCorrectionObjective(nil), diagnostic.Objectives...)
 	if len(diagnostic.Forbidden) != 0 {
 		objectives = append(objectives, runtimecontract.RuntimeCandidateCorrectionRemoveForbiddenField)
@@ -89,10 +92,8 @@ func CandidateCorrectionObjectivesForFailure(failure *runtimecontract.RuntimeCan
 	// Some strict unknown-field diagnostics carry Allowed rather than a copied
 	// operation-level Forbidden set, so recognize only these two exact paths and
 	// only when the typed diagnostic itself proves the field is forbidden.
-	if len(diagnostic.Required) != 0 {
-		objectives = append(objectives, runtimecontract.RuntimeCandidateCorrectionSupplyRequiredField)
-	}
-	if (strings.Contains(diagnostic.Path, "targetRefs") || strings.Contains(diagnostic.Path, "targetRef")) && len(diagnostic.Allowed) != 0 {
+	if (strings.Contains(diagnostic.Path, "targetRefs") || strings.Contains(diagnostic.Path, "targetRef")) &&
+		len(diagnostic.Allowed) != 0 && !candidateCorrectionDiagnosticReportsFieldAbsence(diagnostic) {
 		objectives = append(objectives, runtimecontract.RuntimeCandidateCorrectionReplaceTarget)
 	}
 	if strings.HasSuffix(diagnostic.Path, ".kind") && len(diagnostic.Allowed) != 0 {
@@ -141,6 +142,20 @@ func CandidateCorrectionObjectivesForFailure(failure *runtimecontract.RuntimeCan
 		objectives = append(objectives, runtimecontract.RuntimeCandidateCorrectionChangeReplayedShape)
 	}
 	return (&runtimecontract.RuntimeCandidateFailureDiagnostic{Objectives: objectives}).Normalized().Objectives
+}
+
+// candidateCorrectionDiagnosticReportsFieldAbsence distinguishes a strict
+// wire/schema absence from a concrete semantic value rejection. Allowed may
+// contain the operation field vocabulary for a missing-field diagnostic; it
+// must not be reinterpreted as a list of alternative target values.
+func candidateCorrectionDiagnosticReportsFieldAbsence(diagnostic runtimecontract.RuntimeCandidateFailureDiagnostic) bool {
+	actual := strings.TrimSpace(diagnostic.Actual)
+	field := candidateCorrectionPathField(diagnostic.Path)
+	if field == "" {
+		return false
+	}
+	return (actual == "" || strings.HasPrefix(actual, "missing_") || strings.HasPrefix(actual, "empty_")) &&
+		candidateCorrectionDiagnosticRequires(&diagnostic, field)
 }
 
 // SealCandidateRejection is the only SM-3 policy that converts a complete
@@ -199,12 +214,31 @@ func sealCandidateRejectionWithFrontier(failure *runtimecontract.RuntimeCandidat
 		if witness == nil {
 			return &sealed, rejectedFinalDirective(manifest.Hash, "candidate_authority_exhausted"), nil
 		}
+		// A semantic or decoded-schema witness may derive the exact rejected
+		// candidate shape from the private frontier. Persist that fact in the
+		// diagnostic before crossing owners so recovery and the LLM receiver can
+		// independently prove the same failure/witness lineage.
+		if sealed.Diagnostic != nil {
+			switch {
+			case witness.RejectedShapeHash != "":
+				sealed.Diagnostic.RejectedShapeHash = witness.RejectedShapeHash
+			case witness.Dimension == runtimecontract.RuntimeCandidateCorrectionWitnessSchemaField:
+				// Schema-only removal/presence witnesses need not change the
+				// execution-semantic shape. Do not carry an unrelated candidate
+				// hash into C4 as if the witness had asserted it.
+				sealed.Diagnostic.RejectedShapeHash = ""
+			}
+			sealed.Diagnostic = sealed.Diagnostic.Clone()
+		}
 		directive := runtimecontract.RuntimeCandidateCorrectionDirective{
 			Disposition: runtimecontract.RuntimeCandidateCorrectionCorrectableOnce,
 			Objectives:  objectives, ManifestHash: manifest.Hash, Witness: witness,
 		}.Normalized()
 		if err := directive.Validate(); err != nil {
 			return candidateRejectionContractDefect(sealed, "manifest-bound correction witness is invalid"), rejectedFinalDirective(manifest.Hash, "runtime_contract_defect"), nil
+		}
+		if err := runtimecontract.ValidateRuntimeCandidateFailureCorrectionPair(&sealed, &directive); err != nil {
+			return candidateRejectionContractDefect(sealed, "manifest-bound correction witness differs from the rejected diagnostic: "+err.Error()), rejectedFinalDirective(manifest.Hash, "runtime_contract_defect"), nil
 		}
 		return &sealed, &directive, nil
 	case runtimecontract.RuntimeCandidateCorrectionRejectedFinal:

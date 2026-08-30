@@ -180,6 +180,11 @@ sequence；它们不直接消费 semantic proposal 或 File/Shell fact，也不�
 每次semantic-plan或operations provider call都必须使用SM-3 persisted request session形成purpose-bound invocation seal；
 seal不是另一份activation authority。对应call、correction、semantic generation和operation consumption必须引用
 [Execution Budget](execution-budget.md)中的exact sub-ledger identity。
+operations 的 rendered preflight 必须先于 exact request-session CAS；因此同一 authority transaction、stable prefix、manifest、
+correction hash 与 expected-document attempt 的 session 是 restart 已通过 preflight 的 durable proof。prepared、document-complete 或
+已绑定 pending proposal 的恢复不得重发 preflight/provider，也不得重复扣减 correction budget；任一 identity 漂移都不能复用旧
+session。document-complete 后 attempt-begin CAS 前中断与 CAS 后响应丢失必须分别恢复为“无新 attempt”或“原 pending attempt”，
+两者都只继续 local admission/feasibility/seal，不能产生第二次 capability effect。
 
 operations document 被接受时，SM-3 必须先从 exact manifest + candidate 前像独立生成并持久化
 `AdmissionTargetAuthorizations + TargetAuthorizationHash`；若选择 `validation/managed_session`，同时生成并持久化
@@ -259,6 +264,10 @@ required proposal field、选择 allowed kind、为 exact operation slot 选择 
 包含 raw provider/decoder/owner 错误文本。`correctable_once` 还必须携带 `RuntimeCandidateCorrectionWitness`：
 document-shape witness 只携带 path、closed rejected shape 与 required complete shape；schema witness 携带 manifest-bound
 field/rule；semantic witness 才要求 rejected/alternative value、适用 operation kind 与不同 semantic-shape hash。
+strict decoder 报告 `missing_*`/`empty_*` required field 时，SM-3 必须先于 semantic frontier 封存同 path 的
+`schema_field` witness（`field_absent -> field_present`）；diagnostic 的 `Allowed` 若是 operation field vocabulary，不能解释为
+target/binding alternative，correction objective 只能是 `supply_required_field`。attempt 1 对 `field_present` 的验收是相应
+typed field 确实存在，而不是把 `field_present` 当作 kind、target、binding 或 parameter 的字面业务值。
 其中 `evidence_binding` witness 必须绑定 exact `$.operations[i].bindingRefs[j]`、operation kind/slot、当前 rejected binding、
 manifest 授权的一个不同 binding，以及 rejected/alternative 两个不同 semantic-shape hash；attempt 1 仍须用同一 manifest
 重新严格验证完整 candidate。allowed binding 无不同 member、field path/slot 漂移或替换后仍不通过同一 manifest 时，frontier
@@ -272,6 +281,10 @@ retry tail；该 input 仅包含 manifest、objectives 与 witness，不含 pers
 据此渲染 exact alternative，但不能选择、修改或持久化 correction。failure 与 detached input 共同参与
 correction/request-session identity，且不得改变 C0～C3 或 `stablePrefixHash`。duplicate/restart 复用 attempt 0 的 exact
 directive 并重新投影相同 input，不重新推导或重新分配预算。
+failed `CandidateAttempt` 的 durable invariant 必须在 CAS 前及 fresh load 时共同校验 failure/correction pair：manifest、normalized
+objectives、field path、observed actual、适用 rejected shape 与 witness 必须一致；objective 还必须与 witness dimension 的 bounded
+兼容矩阵一致，不能由 diagnostic 与 directive 携带同一错误映射而共同越过校验。结构合法但与 diagnostic 不一致的 directive
+属于 `runtime_contract_defect`，不得进入 attempt-1 preflight/provider、dispatch 或 capability effect。
 
 document-conformance、complete schema 与 semantic rejection 共享同一 candidate attempt 0/1，不是三套串联预算：例如
 attempt 0 empty 后的 attempt 1 即使成为完整 JSON，只要 strict decoder/evaluator 仍拒绝，也必须 final，不能再以“首次完整

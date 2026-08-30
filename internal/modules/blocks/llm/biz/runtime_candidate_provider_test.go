@@ -37,7 +37,6 @@ func runtimeCandidateCorrectionInputForProviderTest(manifestHash, path, alternat
 		witness.AlternativeShapeHash = "candidate-shape-alternative"
 	}
 	input := llmmodels.RuntimeCandidateCorrectionInput{
-		Objectives:   []runtimecontract.RuntimeCandidateCorrectionObjective{runtimecontract.RuntimeCandidateCorrectionChangeReplayedShape},
 		ManifestHash: manifestHash,
 		Witness:      witness,
 	}.Normalized()
@@ -59,12 +58,30 @@ func runtimeCandidateCorrectionObservationForProviderTest(failure runtimecontrac
 func runtimeCandidateCorrectionPairForProviderTest(failure runtimecontract.RuntimeCandidateFailure, manifestHash, path, alternative string) (*runtimecontract.RuntimeCandidateCorrectionObservation, *llmmodels.RuntimeCandidateCorrectionInput) {
 	observation := runtimeCandidateCorrectionObservationForProviderTest(failure, path)
 	input := runtimeCandidateCorrectionInputForProviderTest(manifestHash, path, alternative)
+	switch input.Witness.Dimension {
+	case runtimecontract.RuntimeCandidateCorrectionWitnessSchemaField:
+		if input.Witness.AlternativeValue == "field_absent" {
+			input.Objectives = []runtimecontract.RuntimeCandidateCorrectionObjective{runtimecontract.RuntimeCandidateCorrectionRemoveForbiddenField}
+		} else {
+			input.Objectives = []runtimecontract.RuntimeCandidateCorrectionObjective{runtimecontract.RuntimeCandidateCorrectionSupplyRequiredField}
+		}
+	case runtimecontract.RuntimeCandidateCorrectionWitnessTarget:
+		switch failure.Code {
+		case "candidate_replays_rejected_shape", "candidate_partially_replays_rejected_shape", "candidate_replays_no_progress_shape":
+			input.Objectives = []runtimecontract.RuntimeCandidateCorrectionObjective{runtimecontract.RuntimeCandidateCorrectionChangeReplayedShape}
+		default:
+			input.Objectives = []runtimecontract.RuntimeCandidateCorrectionObjective{runtimecontract.RuntimeCandidateCorrectionReplaceTarget}
+		}
+	}
 	if observation.Diagnostic == nil {
 		observation.Diagnostic = &runtimecontract.RuntimeCandidateFailureDiagnostic{Path: path}
 	}
 	observation.Diagnostic.ManifestHash = manifestHash
 	observation.Diagnostic.Objectives = append([]runtimecontract.RuntimeCandidateCorrectionObjective(nil), input.Objectives...)
-	if observation.Diagnostic.Actual == "" {
+	field := runtimeCandidateCorrectionPathFieldForProviderTest(path)
+	if input.Witness.AlternativeValue == "field_present" && observation.Diagnostic.Actual == "" {
+		observation.Diagnostic.Actual = "missing_" + field
+	} else if observation.Diagnostic.Actual == "" {
 		observation.Diagnostic.Actual = input.Witness.RejectedValue
 	}
 	if input.Witness.AlternativeValue == "field_absent" && observation.Diagnostic.Actual != "" {
@@ -83,7 +100,6 @@ func runtimeCandidateCorrectionPairForProviderTest(failure runtimecontract.Runti
 		input.Witness.RejectedShapeHash = observation.Diagnostic.RejectedShapeHash
 		input.Witness.AlternativeShapeHash = observation.Diagnostic.RejectedShapeHash + "-alternative"
 	}
-	field := runtimeCandidateCorrectionPathFieldForProviderTest(path)
 	if input.Witness.AlternativeValue == "field_present" && len(observation.Diagnostic.Required) == 0 {
 		observation.Diagnostic.Required = []string{field}
 	}

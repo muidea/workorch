@@ -19,13 +19,23 @@ func runtimeCandidateAttemptCorrectableDirective(manifestHash string) *RuntimeCa
 	}).Clone()
 }
 
+func runtimeCandidateAttemptCorrectableFailure(manifestHash string) *RuntimeCandidateFailure {
+	return &RuntimeCandidateFailure{
+		Class: RuntimeCandidateFailureClassSchema, Code: "candidate_schema_invalid", Signature: "candidate-schema-invalid", Reason: "required operations field is missing",
+		Diagnostic: &RuntimeCandidateFailureDiagnostic{
+			Path: "$.operations", Actual: "missing_operations", Required: []string{"operations"}, ManifestHash: manifestHash,
+			Objectives: []RuntimeCandidateCorrectionObjective{RuntimeCandidateCorrectionSupplyRequiredField},
+		},
+	}
+}
+
 func TestRuntimeCandidateAttemptScopeValidationRequiresExplicitContractAndRejectsDuplicate(t *testing.T) {
 	facts := testRuntimeFacts()
 	decision := validDecisionForState(ConvergenceStateNeedStateChange)
 	current := decision.AuthorityTransaction()
 	resealed := current
 	contractID := StableAuthorityContractID(facts.WorkspaceID, facts.RunID, current)
-	failure := &RuntimeCandidateFailure{Class: RuntimeCandidateFailureClassContract, Reason: "invalid candidate"}
+	failure := runtimeCandidateAttemptCorrectableFailure("manifest-1")
 	values := []RuntimeCandidateAttemptRecord{
 		{Transaction: resealed, Attempt: 0, StablePrefixHash: "stable-prefix", ManifestHash: "manifest-1", LogicalRequestID: "request-0", State: RuntimeCandidateAttemptStateFailed, Failure: failure, Correction: runtimeCandidateAttemptCorrectableDirective("manifest-1")},
 		{AuthorityContractID: contractID, Transaction: current, Attempt: 1, StablePrefixHash: "stable-prefix", ManifestHash: "manifest-1", LogicalRequestID: "request-1", State: RuntimeCandidateAttemptStatePending},
@@ -99,7 +109,7 @@ func TestRuntimeCandidateAttemptAcceptedRequiresIndependentTargetAuthorizationCo
 	failedProjectionOnly.DispatchID = ""
 	failedProjectionOnly.TargetAuthorizationHash = ""
 	failedProjectionOnly.DispatchAuthorityHash = ""
-	failedProjectionOnly.Failure = &RuntimeCandidateFailure{Class: RuntimeCandidateFailureClassContract, Reason: "invalid candidate"}
+	failedProjectionOnly.Failure = runtimeCandidateAttemptCorrectableFailure(record.ManifestHash)
 	failedProjectionOnly.Correction = runtimeCandidateAttemptCorrectableDirective(record.ManifestHash)
 	if err := ValidateRuntimeCandidateAttemptRecordsForScope(facts.WorkspaceID, facts.RunID, []RuntimeCandidateAttemptRecord{failedProjectionOnly}); err == nil ||
 		!strings.Contains(err.Error(), "cannot carry dispatch authority") {
@@ -208,6 +218,7 @@ func TestRuntimeCandidateAttemptFailedRequiresManifestBoundTotalCorrection(t *te
 		t.Fatalf("failed attempt without correction disposition err=%v", err)
 	}
 	record.Correction = runtimeCandidateAttemptCorrectableDirective(record.ManifestHash)
+	record.Failure = runtimeCandidateAttemptCorrectableFailure(record.ManifestHash)
 	if err := ValidateRuntimeCandidateAttemptRecordsForScope(facts.WorkspaceID, facts.RunID, []RuntimeCandidateAttemptRecord{record}); err != nil {
 		t.Fatalf("manifest-bound correctable attempt rejected: %v", err)
 	}
@@ -216,6 +227,104 @@ func TestRuntimeCandidateAttemptFailedRequiresManifestBoundTotalCorrection(t *te
 	record.Correction.Witness.AlternativeValue = "mutated"
 	if clone.CandidateAttempts[0].Correction == nil || clone.CandidateAttempts[0].Correction.Witness == nil || clone.CandidateAttempts[0].Correction.Witness.AlternativeValue != "field_present" {
 		t.Fatalf("candidate correction witness clone shares mutable state: %+v", clone.CandidateAttempts[0].Correction)
+	}
+}
+
+func TestRuntimeCandidateAttemptRejectsFailureCorrectionLineageMismatch(t *testing.T) {
+	facts := testRuntimeFacts()
+	transaction := validDecisionForState(ConvergenceStateNeedStateChange).AuthorityTransaction()
+	newRecord := func() RuntimeCandidateAttemptRecord {
+		return RuntimeCandidateAttemptRecord{
+			AuthorityContractID: StableAuthorityContractID(facts.WorkspaceID, facts.RunID, transaction), Transaction: transaction,
+			Attempt: 0, StablePrefixHash: "stable-prefix", ManifestHash: "manifest-1", LogicalRequestID: "request-0",
+			State: RuntimeCandidateAttemptStateFailed, Failure: runtimeCandidateAttemptCorrectableFailure("manifest-1"),
+			Correction: runtimeCandidateAttemptCorrectableDirective("manifest-1"),
+		}
+	}
+	if err := ValidateRuntimeCandidateAttemptRecordsForScope(facts.WorkspaceID, facts.RunID, []RuntimeCandidateAttemptRecord{newRecord()}); err != nil {
+		t.Fatalf("valid failure/correction lineage rejected: %v", err)
+	}
+
+	tests := map[string]func(*RuntimeCandidateAttemptRecord){
+		"missing field as semantic target": func(record *RuntimeCandidateAttemptRecord) {
+			record.Failure.Diagnostic.Path = "$.operations[0].targetRefs"
+			record.Failure.Diagnostic.Actual = "missing_targetRefs"
+			record.Failure.Diagnostic.Required = []string{"targetRefs"}
+			record.Correction.Witness = &RuntimeCandidateCorrectionWitness{
+				Dimension: RuntimeCandidateCorrectionWitnessTarget, OperationKind: RuntimeBlockKindPatchApply,
+				Path: "$.operations[0].targetRefs", RejectedValue: "", AlternativeValue: "README.md",
+				RejectedShapeHash: "rejected-shape", AlternativeShapeHash: "alternative-shape",
+			}
+		},
+		"field present without absence observation": func(record *RuntimeCandidateAttemptRecord) {
+			record.Failure.Diagnostic.Path = "$.operations[0].targetRefs"
+			record.Failure.Diagnostic.Actual = "invalid_targetRefs"
+			record.Failure.Diagnostic.Required = []string{"targetRefs"}
+			record.Correction.Witness = &RuntimeCandidateCorrectionWitness{
+				Dimension: RuntimeCandidateCorrectionWitnessSchemaField,
+				Path:      "$.operations[0].targetRefs", RejectedValue: "field_absent", AlternativeValue: "field_present",
+			}
+		},
+		"schema path": func(record *RuntimeCandidateAttemptRecord) {
+			record.Correction.Witness.Path = "$.unexpected"
+		},
+		"objective": func(record *RuntimeCandidateAttemptRecord) {
+			record.Correction.Objectives = []RuntimeCandidateCorrectionObjective{RuntimeCandidateCorrectionRemoveForbiddenField}
+		},
+		"diagnostic manifest": func(record *RuntimeCandidateAttemptRecord) {
+			record.Failure.Diagnostic.ManifestHash = "other-manifest"
+		},
+	}
+	for name, mutate := range tests {
+		t.Run(name, func(t *testing.T) {
+			record := newRecord()
+			mutate(&record)
+			if err := ValidateRuntimeCandidateAttemptRecordsForScope(facts.WorkspaceID, facts.RunID, []RuntimeCandidateAttemptRecord{record}); err == nil ||
+				!strings.Contains(err.Error(), "failure/correction lineage") {
+				t.Fatalf("mismatched persisted pair error = %v", err)
+			}
+		})
+	}
+
+	semanticFailure := &RuntimeCandidateFailure{
+		Class: RuntimeCandidateFailureClassContract, Code: "candidate_target_outside_grounding", Signature: "target-outside", Reason: "target is outside grounding",
+		Diagnostic: &RuntimeCandidateFailureDiagnostic{
+			Path: "$.operations[0].targetRefs", Actual: "main.go", Allowed: []string{"support.go"}, ManifestHash: "manifest-1", RejectedShapeHash: "rejected-shape",
+			Objectives: []RuntimeCandidateCorrectionObjective{RuntimeCandidateCorrectionReplaceTarget},
+		},
+	}
+	semanticCorrection := &RuntimeCandidateCorrectionDirective{
+		Disposition: RuntimeCandidateCorrectionCorrectableOnce, ManifestHash: "manifest-1",
+		Objectives: []RuntimeCandidateCorrectionObjective{RuntimeCandidateCorrectionReplaceTarget},
+		Witness: &RuntimeCandidateCorrectionWitness{
+			Dimension: RuntimeCandidateCorrectionWitnessTarget, OperationKind: RuntimeBlockKindPatchApply,
+			Path: "$.operations[0].targetRefs", RejectedValue: "main.go", AlternativeValue: "support.go",
+			RejectedShapeHash: "rejected-shape", AlternativeShapeHash: "alternative-shape",
+		},
+	}
+	if err := ValidateRuntimeCandidateFailureCorrectionPair(semanticFailure, semanticCorrection); err != nil {
+		t.Fatalf("valid semantic failure/correction lineage rejected: %v", err)
+	}
+	semanticFailure.Diagnostic.Objectives = []RuntimeCandidateCorrectionObjective{RuntimeCandidateCorrectionSelectOperationKind}
+	semanticCorrection.Objectives = []RuntimeCandidateCorrectionObjective{RuntimeCandidateCorrectionSelectOperationKind}
+	if err := ValidateRuntimeCandidateFailureCorrectionPair(semanticFailure, semanticCorrection); err == nil || !strings.Contains(err.Error(), "incompatible with witness dimension") {
+		t.Fatalf("same wrong objective/witness mapping error = %v", err)
+	}
+	semanticFailure.Diagnostic.Objectives = []RuntimeCandidateCorrectionObjective{RuntimeCandidateCorrectionReplaceTarget}
+	semanticCorrection.Objectives = []RuntimeCandidateCorrectionObjective{RuntimeCandidateCorrectionReplaceTarget}
+	semanticFailure.Diagnostic.Actual = "other.go"
+	if err := ValidateRuntimeCandidateFailureCorrectionPair(semanticFailure, semanticCorrection); err == nil || !strings.Contains(err.Error(), "rejected value differs") {
+		t.Fatalf("semantic actual mismatch error = %v", err)
+	}
+	semanticFailure.Diagnostic.Actual = "main.go"
+	semanticFailure.Diagnostic.RejectedShapeHash = "other-shape"
+	if err := ValidateRuntimeCandidateFailureCorrectionPair(semanticFailure, semanticCorrection); err == nil || !strings.Contains(err.Error(), "rejected shape") || !strings.Contains(err.Error(), "differs") {
+		t.Fatalf("semantic shape mismatch error = %v", err)
+	}
+
+	rejectedFinal := &RuntimeCandidateCorrectionDirective{Disposition: RuntimeCandidateCorrectionRejectedFinal, ManifestHash: "manifest-1", TerminalCode: "candidate_authority_exhausted"}
+	if err := ValidateRuntimeCandidateFailureCorrectionPair(&RuntimeCandidateFailure{Class: RuntimeCandidateFailureClassContract, Reason: "terminal"}, rejectedFinal); err != nil {
+		t.Fatalf("rejected-final pair unexpectedly required correction diagnostic: %v", err)
 	}
 }
 
@@ -270,7 +379,7 @@ func TestRuntimeCandidateAttemptBindingContradictionValidatesAndClones(t *testin
 func TestRuntimeCandidateAttemptScopeValidationRejectsRunawayAttempts(t *testing.T) {
 	facts := testRuntimeFacts()
 	transaction := validDecisionForState(ConvergenceStateNeedStateChange).AuthorityTransaction()
-	failure := &RuntimeCandidateFailure{Class: RuntimeCandidateFailureClassContract, Reason: "invalid candidate"}
+	failure := runtimeCandidateAttemptCorrectableFailure("manifest-1")
 	values := make([]RuntimeCandidateAttemptRecord, 0, 3)
 	contractID := StableAuthorityContractID(facts.WorkspaceID, facts.RunID, transaction)
 	for attempt := 0; attempt < 3; attempt++ {

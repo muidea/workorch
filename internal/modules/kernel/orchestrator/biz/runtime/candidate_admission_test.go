@@ -367,7 +367,7 @@ func TestEvaluateCandidateAdmissionUsesSemanticContractNotOperationIdentityOrPar
 			if result.Disposition != CandidateAdmissionRejectedContract || result.Failure == nil || result.Failure.Diagnostic == nil || result.Failure.Diagnostic.Path == "" ||
 				result.Failure.Class != runtimecontract.RuntimeCandidateFailureClassContract ||
 				result.Failure.Code != candidateAdmissionCodeInvalid || result.Failure.Signature == "" || result.Failure.Reason == "" || result.Correction == nil {
-				t.Fatalf("semantic contract admission = %+v", result)
+				t.Fatalf("semantic contract admission = %+v failure=%+v correction=%+v", result, result.Failure, result.Correction)
 			}
 			if testCase.correctable {
 				if result.Correction.Disposition != runtimecontract.RuntimeCandidateCorrectionCorrectableOnce || len(result.Correction.Objectives) == 0 || result.Correction.Witness == nil {
@@ -413,7 +413,7 @@ func TestEvaluateCandidateAdmissionRejectsAcceptedNoProgressShape(t *testing.T) 
 		}
 	}
 	if admitted := EvaluateCandidateAdmission(aggregate, runtimecontract.RuntimeCandidate{Validation: &runtimecontract.ValidationCandidate{Operations: []runtimecontract.ValidationOperation{{Operation: changed}}}}); admitted.Accepted() || admitted.Failure == nil || admitted.Failure.Code != candidateAdmissionCodeInvalid {
-		t.Fatalf("validation recipe outside the sealed CWI binding was accepted: %+v", admitted)
+		t.Fatalf("validation recipe outside the sealed CWI binding was accepted: %+v failure=%+v correction=%+v", admitted, admitted.Failure, admitted.Correction)
 	}
 }
 

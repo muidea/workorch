@@ -4,6 +4,7 @@ package orchestrator
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"path/filepath"
@@ -11,6 +12,7 @@ import (
 	"strings"
 	"testing"
 
+	cd "github.com/muidea/magicCommon/def"
 	llmevents "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/events"
 
 	magicevent "github.com/muidea/magicCommon/event"
@@ -3471,6 +3473,391 @@ func TestRuntimeMainlineRetriesSameCandidateContractOnce(t *testing.T) {
 	duplicate, err := module.requestAndSealRuntimeCandidateWithRetry(ctx, sealed, "stable-prefix-v2")
 	if err != nil || duplicate.ActiveDispatch == nil || len(attempts) != 2 || len(duplicate.CandidateAttempts) != 2 {
 		t.Fatalf("duplicate correction notification replayed provider: aggregate=%+v attempts=%+v err=%v", duplicate, attempts, err)
+	}
+}
+
+func TestRuntimeMainlineMissingRequiredTargetCorrectionSurvivesRestart(t *testing.T) {
+	ctx := context.Background()
+	hub := magicevent.NewHub(16)
+	t.Cleanup(func() { hub.Terminate(ctx) })
+	startRuntimeCandidateFileEditAdmissionOwners(t, hub)
+	runs := memory.NewRunRepository()
+	if err := runs.Create(ctx, runtimeRunForTest(common.RunStateActive, runtimeDefinition())); err != nil {
+		t.Fatal(err)
+	}
+	runOwner := runmodule.New()
+	if err := runOwner.Configure(runOwnerTestDependencies(runs, nil, nil, hub)); err != nil {
+		t.Fatal(err)
+	}
+	if err := runOwner.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = runOwner.Stop(ctx) })
+
+	var commands []llmevents.RequestRuntimeCandidateCommand
+	var preflights []llmevents.PreflightRuntimeCandidateCommand
+	var providerCallsAtPreflight []int
+	llmObserver := magicevent.NewSimpleObserver(runtimecontract.RuntimeModuleLLM, hub)
+	llmObserver.Subscribe(llmevents.TopicPreflightRuntimeCandidate, func(event magicevent.Event, result magicevent.Result) {
+		command := event.Data().(llmevents.PreflightRuntimeCandidateCommand)
+		preflights = append(preflights, command)
+		providerCallsAtPreflight = append(providerCallsAtPreflight, len(commands))
+		feedback := runtimecontract.RuntimeFeedback{
+			Domain: runtimecontract.RuntimeFeedbackDomainProviderPreflight, StableCategory: runtimecontract.RuntimeFeedbackCategoryAccepted,
+			WorkspaceID: command.WorkspaceID, RunID: command.RunID, AuthoritySnapshotID: command.Transaction.AuthoritySnapshotID,
+		}
+		result.Set(llmevents.PreflightRuntimeCandidateResult{Transaction: command.Transaction, DocumentKind: command.DocumentKind, Feedback: feedback}, nil)
+	})
+	llmObserver.Subscribe(llmevents.TopicRequestRuntimeCandidate, func(event magicevent.Event, result magicevent.Result) {
+		command := event.Data().(llmevents.RequestRuntimeCandidateCommand)
+		commands = append(commands, command)
+		candidate := runtimecontract.RuntimeCandidate{StateChange: &runtimecontract.StateChangeCandidate{Operations: []runtimecontract.StateChangingOperation{{Operation: runtimecontract.RuntimeOperation{
+			ID: "edit-1", Kind: runtimecontract.StepKindFileEdit, CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-v2"},
+			TargetRefs: []string{"target.txt"}, Parameters: runtimeFileEditParameters("target.txt"),
+		}}}}}
+		response := runtimeCandidateResultForTest(t, command, candidate)
+		if command.CandidateAttempt == 0 && response.DocumentOutcome != nil {
+			var payload struct {
+				Operations []map[string]json.RawMessage `json:"operations"`
+			}
+			if err := json.Unmarshal(response.DocumentOutcome.Content, &payload); err != nil || len(payload.Operations) != 1 {
+				result.Set(nil, &cd.Error{Code: cd.Unexpected, Message: "decode valid candidate fixture before removing targetRefs", Cause: err})
+				return
+			}
+			delete(payload.Operations[0], "targetRefs")
+			document, err := json.Marshal(payload)
+			if err != nil {
+				result.Set(nil, &cd.Error{Code: cd.Unexpected, Message: "encode candidate fixture without targetRefs", Cause: err})
+				return
+			}
+			response.DocumentOutcome = runtimeCompleteDocumentOutcome(command.ExpectedDocument, document)
+		}
+		result.Set(response, nil)
+	})
+	t.Cleanup(func() {
+		llmObserver.Unsubscribe(llmevents.TopicPreflightRuntimeCandidate)
+		llmObserver.Unsubscribe(llmevents.TopicRequestRuntimeCandidate)
+	})
+	fileExecuteCalls := 0
+	fileExecuteObserver := magicevent.NewSimpleObserver(runtimecontract.RuntimeModuleFile, hub)
+	fileExecuteObserver.Subscribe(fileevents.TopicExecuteFileEditOperation, func(_ magicevent.Event, _ magicevent.Result) { fileExecuteCalls++ })
+	t.Cleanup(func() { fileExecuteObserver.Unsubscribe(fileevents.TopicExecuteFileEditOperation) })
+
+	repository := runtimeStateRepository{hub: hub}
+	owner := newRuntimeTestOwner()
+	if err := owner.ConfigureRuntimeRepository(repository); err != nil {
+		t.Fatal(err)
+	}
+	facts := runtimeCandidateSealExactFileEditFacts(t, "target.txt")
+	facts.Resources.TargetSnapshots = []runtimecontract.TargetSnapshot{{
+		TargetRef: "target.txt", ContentHash: "missing-target-fixture-v1", ContentState: runtimecontract.SnapshotContentStateComplete,
+	}}
+	initialized := runtimeTestInitializeOperationFixture(t, ctx, owner, repository, facts, runtimeDefinition(), nil)
+	beforeCorrectionBudget, err := runtimecontract.RuntimeBudgetRemaining(initialized.ExecutionBudget, runtimecontract.RuntimeBudgetDimensionCandidateCorrection)
+	if err != nil {
+		t.Fatal(err)
+	}
+	module := newTestBiz(owner, hub, nil)
+	failed, err := module.requestAndSealRuntimeCandidate(ctx, initialized, "missing-target-prefix", 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	afterRejectedBudget, err := runtimecontract.RuntimeBudgetRemaining(failed.ExecutionBudget, runtimecontract.RuntimeBudgetDimensionCandidateCorrection)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(preflights) != 1 || preflights[0].CandidateAttempt != 0 || !reflect.DeepEqual(providerCallsAtPreflight, []int{0}) ||
+		len(commands) != 1 || commands[0].CandidateAttempt != 0 || fileExecuteCalls != 0 || beforeCorrectionBudget != afterRejectedBudget || failed.ActiveDispatch != nil || len(failed.CompletedDispatches) != 0 || len(failed.OperationReceipts) != 0 ||
+		len(failed.CandidateAttempts) != 1 || failed.CandidateAttempts[0].State != runtimecontract.RuntimeCandidateAttemptStateFailed || failed.CandidateAttempts[0].Failure == nil ||
+		failed.CandidateAttempts[0].Correction == nil || failed.CandidateAttempts[0].Correction.Witness == nil ||
+		failed.CandidateAttempts[0].Correction.Witness.Dimension != runtimecontract.RuntimeCandidateCorrectionWitnessSchemaField ||
+		failed.CandidateAttempts[0].Correction.Witness.Path != "$.operations[0].targetRefs" ||
+		!reflect.DeepEqual(failed.CandidateAttempts[0].Correction.Objectives, []runtimecontract.RuntimeCandidateCorrectionObjective{runtimecontract.RuntimeCandidateCorrectionSupplyRequiredField}) {
+		t.Fatalf("attempt 0 did not persist a schema-only correction with zero capability effect: commands=%+v aggregate=%+v", commands, failed)
+	}
+	if err := runtimecontract.ValidateRuntimeCandidateFailureCorrectionPair(failed.CandidateAttempts[0].Failure, failed.CandidateAttempts[0].Correction); err != nil {
+		t.Fatalf("attempt 0 persisted invalid correction lineage: %v", err)
+	}
+
+	restartedOwner := newRuntimeTestOwner()
+	if err := restartedOwner.ConfigureRuntimeRepository(repository); err != nil {
+		t.Fatal(err)
+	}
+	restarted, err := restartedOwner.loadRuntime(ctx, "ws-v2", "run-v2")
+	if err != nil {
+		t.Fatal(err)
+	}
+	sealed, err := newTestBiz(restartedOwner, hub, nil).requestAndSealRuntimeCandidateWithRetry(ctx, restarted, "missing-target-prefix")
+	if err != nil {
+		t.Fatal(err)
+	}
+	afterAcceptedBudget, err := runtimecontract.RuntimeBudgetRemaining(sealed.ExecutionBudget, runtimecontract.RuntimeBudgetDimensionCandidateCorrection)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(preflights) != 2 || preflights[1].CandidateAttempt != 1 || preflights[1].CandidateCorrectionObservation == nil || preflights[1].CandidateCorrection == nil ||
+		!reflect.DeepEqual(providerCallsAtPreflight, []int{0, 1}) || len(commands) != 2 || commands[1].CandidateAttempt != 1 || commands[1].CandidateCorrectionObservation == nil || commands[1].CandidateCorrection == nil ||
+		commands[1].CandidateCorrection.Witness.Dimension != runtimecontract.RuntimeCandidateCorrectionWitnessSchemaField || commands[1].CandidateCorrection.Witness.Path != "$.operations[0].targetRefs" ||
+		sealed.ActiveDispatch == nil || fileExecuteCalls != 0 || len(sealed.OperationReceipts) != 0 || afterAcceptedBudget != beforeCorrectionBudget-1 || len(sealed.CandidateAttempts) != 2 || sealed.CandidateAttempts[1].State != runtimecontract.RuntimeCandidateAttemptStateAccepted ||
+		sealed.Decision.State == runtimecontract.ConvergenceStateFailed {
+		var retryAttempt *runtimecontract.RuntimeCandidateAttemptRecord
+		var retryFailure *runtimecontract.RuntimeCandidateFailure
+		if len(sealed.CandidateAttempts) > 1 {
+			retryAttempt = &sealed.CandidateAttempts[1]
+			retryFailure = retryAttempt.Failure
+		}
+		t.Fatalf("restart did not advance the schema correction into one sealed dispatch: commandCount=%d retryCommand=%+v retryAttempt=%+v retryFailure=%+v decision=%+v", len(commands), commands[1], retryAttempt, retryFailure, sealed.Decision)
+	}
+
+	revision := sealed.StateRevision
+	replayed, err := newTestBiz(restartedOwner, hub, nil).requestAndSealRuntimeCandidateWithRetry(ctx, sealed, "missing-target-prefix")
+	replayedBudget, budgetErr := runtimecontract.RuntimeBudgetRemaining(replayed.ExecutionBudget, runtimecontract.RuntimeBudgetDimensionCandidateCorrection)
+	if err != nil || budgetErr != nil || len(preflights) != 2 || len(commands) != 2 || fileExecuteCalls != 0 || replayedBudget != afterAcceptedBudget || replayed.StateRevision != revision || len(replayed.CandidateAttempts) != 2 {
+		t.Fatalf("duplicate/restart replay allocated another correction: commands=%+v aggregate=%+v err=%v", commands, replayed, err)
+	}
+}
+
+func TestRuntimeMainlineSchemaCorrectionDocumentCASRestartMatrix(t *testing.T) {
+	for _, testCase := range []struct {
+		name         string
+		responseLoss bool
+	}{
+		{name: "attempt_begin_pre_commit"},
+		{name: "attempt_begin_response_loss", responseLoss: true},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			ctx := context.Background()
+			hub := magicevent.NewHub(16)
+			t.Cleanup(func() { hub.Terminate(ctx) })
+
+			deliverableDirectory, internalDirectory := t.TempDir(), t.TempDir()
+			workspaceObserver := magicevent.NewSimpleObserver(workspaceevents.CommandDestination, hub)
+			workspaceObserver.Subscribe(workspaceevents.TopicWorkspaceCommandGet, func(_ magicevent.Event, result magicevent.Result) {
+				result.Set(workspaceevents.WorkspaceResult{Workspace: &workspaceevents.Workspace{
+					ID: "ws-v2", DeliverableDirectory: deliverableDirectory, InternalDirectory: internalDirectory,
+				}}, nil)
+			})
+			t.Cleanup(func() { workspaceObserver.Unsubscribe(workspaceevents.TopicWorkspaceCommandGet) })
+
+			probeCalls, fileExecuteCalls := 0, 0
+			fileObserver := magicevent.NewSimpleObserver(runtimecontract.RuntimeModuleFile, hub)
+			fileObserver.Subscribe(fileevents.TopicProbeRuntimeOperationFeasibility, func(event magicevent.Event, result magicevent.Result) {
+				probeCalls++
+				command := event.Data().(fileevents.ProbeRuntimeOperationFeasibilityCommand)
+				response, responseErr := fileevents.NewProbeRuntimeOperationFeasibilityResult(command, "", nil, nil, nil, nil)
+				if responseErr != nil {
+					result.Set(nil, runtimeOperationMagicFailure(responseErr))
+					return
+				}
+				result.Set(response, nil)
+			})
+			fileObserver.Subscribe(fileevents.TopicExecuteFileEditOperation, func(_ magicevent.Event, _ magicevent.Result) {
+				fileExecuteCalls++
+			})
+			t.Cleanup(func() {
+				fileObserver.Unsubscribe(fileevents.TopicProbeRuntimeOperationFeasibility)
+				fileObserver.Unsubscribe(fileevents.TopicExecuteFileEditOperation)
+			})
+
+			runs := memory.NewRunRepository()
+			if err := runs.Create(ctx, runtimeRunForTest(common.RunStateActive, runtimeDefinition())); err != nil {
+				t.Fatal(err)
+			}
+			runOwner := runmodule.New()
+			if err := runOwner.Configure(runOwnerTestDependencies(runs, nil, nil, hub)); err != nil {
+				t.Fatal(err)
+			}
+			if err := runOwner.Start(); err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() { _ = runOwner.Stop(ctx) })
+
+			var preflightAttempts, providerAttempts, providerCallsAtPreflight []int
+			llmObserver := magicevent.NewSimpleObserver(runtimecontract.RuntimeModuleLLM, hub)
+			llmObserver.Subscribe(llmevents.TopicPreflightRuntimeCandidate, func(event magicevent.Event, result magicevent.Result) {
+				command := event.Data().(llmevents.PreflightRuntimeCandidateCommand)
+				preflightAttempts = append(preflightAttempts, command.CandidateAttempt)
+				providerCallsAtPreflight = append(providerCallsAtPreflight, len(providerAttempts))
+				feedback := runtimecontract.RuntimeFeedback{
+					Domain: runtimecontract.RuntimeFeedbackDomainProviderPreflight, StableCategory: runtimecontract.RuntimeFeedbackCategoryAccepted,
+					WorkspaceID: command.WorkspaceID, RunID: command.RunID, AuthoritySnapshotID: command.Transaction.AuthoritySnapshotID,
+				}
+				result.Set(llmevents.PreflightRuntimeCandidateResult{Transaction: command.Transaction, DocumentKind: command.DocumentKind, Feedback: feedback}, nil)
+			})
+			llmObserver.Subscribe(llmevents.TopicRequestRuntimeCandidate, func(event magicevent.Event, result magicevent.Result) {
+				command := event.Data().(llmevents.RequestRuntimeCandidateCommand)
+				providerAttempts = append(providerAttempts, command.CandidateAttempt)
+				candidate := runtimecontract.RuntimeCandidate{StateChange: &runtimecontract.StateChangeCandidate{Operations: []runtimecontract.StateChangingOperation{{Operation: runtimecontract.RuntimeOperation{
+					ID: "edit-1", Kind: runtimecontract.StepKindFileEdit, CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-v2"},
+					TargetRefs: []string{"target.txt"}, Parameters: runtimeFileEditParameters("target.txt"),
+				}}}}}
+				response := runtimeCandidateResultForTest(t, command, candidate)
+				if command.CandidateAttempt == 0 && response.DocumentOutcome != nil {
+					var payload struct {
+						Operations []map[string]json.RawMessage `json:"operations"`
+					}
+					if err := json.Unmarshal(response.DocumentOutcome.Content, &payload); err != nil || len(payload.Operations) != 1 {
+						result.Set(nil, &cd.Error{Code: cd.Unexpected, Message: "decode candidate before removing targetRefs", Cause: err})
+						return
+					}
+					delete(payload.Operations[0], "targetRefs")
+					document, err := json.Marshal(payload)
+					if err != nil {
+						result.Set(nil, &cd.Error{Code: cd.Unexpected, Message: "encode candidate without targetRefs", Cause: err})
+						return
+					}
+					response.DocumentOutcome = runtimeCompleteDocumentOutcome(command.ExpectedDocument, document)
+				}
+				result.Set(response, nil)
+			})
+			t.Cleanup(func() {
+				llmObserver.Unsubscribe(llmevents.TopicPreflightRuntimeCandidate)
+				llmObserver.Unsubscribe(llmevents.TopicRequestRuntimeCandidate)
+			})
+
+			baseRepository := runtimeStateRepository{hub: hub}
+			artifactContents := filerepository.NewArtifactContinuationRepository(filepath.Join(t.TempDir(), "candidate-contents"))
+			evidence := RuntimeEvidenceRepositories{ArtifactContinuations: artifactContents}
+			initialOwner := newRuntimeTestOwnerWithEvidence(evidence)
+			if err := initialOwner.ConfigureRuntimeRepository(baseRepository); err != nil {
+				t.Fatal(err)
+			}
+			facts := runtimeCandidateSealExactFileEditFacts(t, "target.txt")
+			facts.Resources.TargetSnapshots = []runtimecontract.TargetSnapshot{{
+				TargetRef: "target.txt", ContentHash: "schema-correction-cas-target-v1", ContentState: runtimecontract.SnapshotContentStateComplete,
+			}}
+			initialized := runtimeTestInitializeOperationFixture(t, ctx, initialOwner, baseRepository, facts, runtimeDefinition(), nil)
+			initialCorrectionBudget, err := runtimecontract.RuntimeBudgetRemaining(initialized.ExecutionBudget, runtimecontract.RuntimeBudgetDimensionCandidateCorrection)
+			if err != nil {
+				t.Fatal(err)
+			}
+			failed, err := newTestBiz(initialOwner, hub, nil).requestAndSealRuntimeCandidate(ctx, initialized, "schema-correction-cas-prefix", 0)
+			if err != nil {
+				t.Fatal(err)
+			}
+			failedCorrectionBudget, err := runtimecontract.RuntimeBudgetRemaining(failed.ExecutionBudget, runtimecontract.RuntimeBudgetDimensionCandidateCorrection)
+			if err != nil || failedCorrectionBudget != initialCorrectionBudget || len(failed.CandidateAttempts) != 1 || failed.CandidateAttempts[0].State != runtimecontract.RuntimeCandidateAttemptStateFailed || failed.CandidateAttempts[0].Correction == nil {
+				t.Fatalf("attempt 0 did not stop at one budget-neutral schema correction: budget=%d->%d aggregate=%+v err=%v", initialCorrectionBudget, failedCorrectionBudget, failed, err)
+			}
+
+			candidateAttemptBegin := func(aggregate runtime.RuntimeAggregate) bool {
+				if len(aggregate.CandidateAttempts) != 2 || aggregate.CandidateAttempts[1].Attempt != 1 || aggregate.CandidateAttempts[1].State != runtimecontract.RuntimeCandidateAttemptStatePending || aggregate.CandidateAttempts[1].Proposal != nil {
+					return false
+				}
+				for _, session := range aggregate.CandidateRequestSessions {
+					if session.DocumentKind == runtimecontract.RuntimeProviderDocumentOperations && session.ExpectedDocument != nil && session.ExpectedDocument.CorrectionAttempt == 1 && session.State == runtimecontract.RuntimeCandidateRequestSessionDocumentComplete {
+						return true
+					}
+				}
+				return false
+			}
+			var cutRepository runtime.RuntimeStateRepository
+			var preCommit *failWhenRuntimeStateRepository
+			var responseLoss *panicAfterRuntimeStateSaveRepository
+			if testCase.responseLoss {
+				responseLoss = &panicAfterRuntimeStateSaveRepository{
+					RuntimeStateRepository: baseRepository, marker: "schema-correction-attempt-begin-response-loss", match: candidateAttemptBegin,
+				}
+				cutRepository = responseLoss
+			} else {
+				preCommit = &failWhenRuntimeStateRepository{
+					RuntimeStateRepository: baseRepository, err: errors.New("injected schema correction attempt-begin CAS failure"), match: candidateAttemptBegin,
+				}
+				cutRepository = preCommit
+			}
+			correctionOwner := newRuntimeTestOwnerWithEvidence(evidence)
+			if err := correctionOwner.ConfigureRuntimeRepository(cutRepository); err != nil {
+				t.Fatal(err)
+			}
+			correctionStart, err := correctionOwner.loadRuntime(ctx, "ws-v2", "run-v2")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if testCase.responseLoss {
+				func() {
+					defer func() {
+						if recovered := recover(); recovered != "schema-correction-attempt-begin-response-loss" {
+							t.Fatalf("unexpected schema-correction response-loss marker: %v", recovered)
+						}
+					}()
+					_, _ = newTestBiz(correctionOwner, hub, nil).requestAndSealRuntimeCandidate(ctx, correctionStart, "schema-correction-cas-prefix", 1)
+					t.Fatal("expected response loss after durable attempt-begin CAS")
+				}()
+				if !responseLoss.fired {
+					t.Fatal("schema-correction attempt-begin response-loss cut was not reached")
+				}
+			} else {
+				if _, err := newTestBiz(correctionOwner, hub, nil).requestAndSealRuntimeCandidate(ctx, correctionStart, "schema-correction-cas-prefix", 1); err == nil || !preCommit.failed {
+					t.Fatalf("schema-correction attempt-begin pre-commit cut was not reached: err=%v", err)
+				}
+			}
+
+			restartedOwner := newRuntimeTestOwnerWithEvidence(evidence)
+			if err := restartedOwner.ConfigureRuntimeRepository(baseRepository); err != nil {
+				t.Fatal(err)
+			}
+			durable, err := restartedOwner.loadRuntime(ctx, "ws-v2", "run-v2")
+			if err != nil {
+				t.Fatal(err)
+			}
+			var correctionSession *runtimecontract.RuntimeCandidateRequestSession
+			for index := range durable.CandidateRequestSessions {
+				session := &durable.CandidateRequestSessions[index]
+				if session.ExpectedDocument != nil && session.ExpectedDocument.CorrectionAttempt == 1 {
+					correctionSession = session
+					break
+				}
+			}
+			providerCeilingDrift := durable
+			if providerCeilingDrift.Facts.Resources.ProviderCeiling == nil {
+				t.Fatal("schema-correction restart fixture has no provider ceiling")
+			}
+			changedProviderCeiling := *providerCeilingDrift.Facts.Resources.ProviderCeiling
+			changedProviderCeiling.EffectiveMaxOutputTokens++
+			providerCeilingDrift.Facts.Resources.ProviderCeiling = &changedProviderCeiling
+			recoveryPolicyDrift := durable
+			if recoveryPolicyDrift.Facts.Activation.ExecutionContract.CandidateDocumentRecovery.MaxAttempts <= 0 {
+				recoveryPolicyDrift.Facts.Activation.ExecutionContract.CandidateDocumentRecovery.MaxAttempts = 2
+			} else {
+				recoveryPolicyDrift.Facts.Activation.ExecutionContract.CandidateDocumentRecovery.MaxAttempts++
+			}
+			if correctionSession == nil ||
+				!runtimeCurrentOperationsCandidateRequestSessionPersisted(durable, "schema-correction-cas-prefix", correctionSession.ManifestHash, correctionSession.CorrectionHash, 1) ||
+				runtimeCurrentOperationsCandidateRequestSessionPersisted(durable, "stale-schema-correction-prefix", correctionSession.ManifestHash, correctionSession.CorrectionHash, 1) ||
+				runtimeCurrentOperationsCandidateRequestSessionPersisted(durable, "schema-correction-cas-prefix", correctionSession.ManifestHash, "stale-correction-hash", 1) ||
+				runtimeCurrentOperationsCandidateRequestSessionPersisted(durable, "schema-correction-cas-prefix", correctionSession.ManifestHash, correctionSession.CorrectionHash, 0) ||
+				runtimeCurrentOperationsCandidateRequestSessionPersisted(providerCeilingDrift, "schema-correction-cas-prefix", correctionSession.ManifestHash, correctionSession.CorrectionHash, 1) ||
+				runtimeCurrentOperationsCandidateRequestSessionPersisted(recoveryPolicyDrift, "schema-correction-cas-prefix", correctionSession.ManifestHash, correctionSession.CorrectionHash, 1) {
+				t.Fatalf("persisted request-session restart proof accepted stale identity: %+v", correctionSession)
+			}
+			durableCorrectionBudget, err := runtimecontract.RuntimeBudgetRemaining(durable.ExecutionBudget, runtimecontract.RuntimeBudgetDimensionCandidateCorrection)
+			if err != nil || durableCorrectionBudget != initialCorrectionBudget-1 || !reflect.DeepEqual(preflightAttempts, []int{0, 1}) || !reflect.DeepEqual(providerCallsAtPreflight, []int{0, 1}) || !reflect.DeepEqual(providerAttempts, []int{0, 1}) || probeCalls != 0 || fileExecuteCalls != 0 || durable.ActiveDispatch != nil || len(durable.OperationReceipts) != 0 || len(durable.CandidateRequestSessions) != 2 {
+				t.Fatalf("schema-correction cut did not retain one document and one budget charge: preflights=%v providerAtPreflight=%v providers=%v probe=%d execute=%d budget=%d aggregate=%+v err=%v", preflightAttempts, providerCallsAtPreflight, providerAttempts, probeCalls, fileExecuteCalls, durableCorrectionBudget, durable, err)
+			}
+			if testCase.responseLoss {
+				if len(durable.CandidateAttempts) != 2 || durable.CandidateAttempts[1].State != runtimecontract.RuntimeCandidateAttemptStatePending || durable.CandidateAttempts[1].Proposal != nil {
+					t.Fatalf("post-CAS restart lost or advanced the durable pending attempt: %+v", durable.CandidateAttempts)
+				}
+			} else if len(durable.CandidateAttempts) != 1 {
+				t.Fatalf("pre-CAS failure partially persisted attempt 1: %+v", durable.CandidateAttempts)
+			}
+
+			sealed, err := newTestBiz(restartedOwner, hub, nil).requestAndSealRuntimeCandidate(ctx, durable, "schema-correction-cas-prefix", 1)
+			if err != nil {
+				t.Fatal(err)
+			}
+			sealedCorrectionBudget, err := runtimecontract.RuntimeBudgetRemaining(sealed.ExecutionBudget, runtimecontract.RuntimeBudgetDimensionCandidateCorrection)
+			if err != nil || sealedCorrectionBudget != durableCorrectionBudget || !reflect.DeepEqual(preflightAttempts, []int{0, 1}) || !reflect.DeepEqual(providerAttempts, []int{0, 1}) || probeCalls != 1 || fileExecuteCalls != 0 || sealed.ActiveDispatch == nil || len(sealed.OperationReceipts) != 0 || len(sealed.CandidateAttempts) != 2 || sealed.CandidateAttempts[1].State != runtimecontract.RuntimeCandidateAttemptStateAccepted {
+				t.Fatalf("restart replayed correction I/O or failed to seal persisted document: preflights=%v providers=%v probe=%d execute=%d budget=%d aggregate=%+v err=%v", preflightAttempts, providerAttempts, probeCalls, fileExecuteCalls, sealedCorrectionBudget, sealed, err)
+			}
+
+			revision := sealed.StateRevision
+			replayed, err := newTestBiz(restartedOwner, hub, nil).requestAndSealRuntimeCandidateWithRetry(ctx, sealed, "schema-correction-cas-prefix")
+			replayedCorrectionBudget, budgetErr := runtimecontract.RuntimeBudgetRemaining(replayed.ExecutionBudget, runtimecontract.RuntimeBudgetDimensionCandidateCorrection)
+			if err != nil || budgetErr != nil || replayed.StateRevision != revision || replayedCorrectionBudget != sealedCorrectionBudget || !reflect.DeepEqual(preflightAttempts, []int{0, 1}) || !reflect.DeepEqual(providerAttempts, []int{0, 1}) || probeCalls != 1 || fileExecuteCalls != 0 || len(replayed.OperationReceipts) != 0 {
+				t.Fatalf("duplicate replay crossed the schema-correction fence: preflights=%v providers=%v probe=%d execute=%d budget=%d aggregate=%+v err=%v budgetErr=%v", preflightAttempts, providerAttempts, probeCalls, fileExecuteCalls, replayedCorrectionBudget, replayed, err, budgetErr)
+			}
+		})
 	}
 }
 

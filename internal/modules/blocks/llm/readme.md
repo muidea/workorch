@@ -38,6 +38,8 @@ workspace/run、logical/physical request identity、document hash、audit 与 us
 - `JSONSchemaResponse` 只有显式 capability fact 为 true 才发送；未声明时依赖同一 sealed manifest、prompt 和 local strict
   decoder，不发第二次无-format fallback call。
 - Runtime logical/physical identity 在 owner guard 内执行 concurrent/duplicate at-most-once；provider outcome 不选择 caller retry。
+- attempt-1 correction 通过共享纯合同核对 observation 的 manifest/objectives、objective↔witness-dimension、path/actual/shape 与 sealed witness，再独立核对
+  manifest field authorization；LLM 不把 `missing_*`/`empty_*` schema observation 重新解释为 semantic target/binding value。
 - generic completion、embedding 与 Runtime I/O 均有 token/byte/wire/SSE/event/line 上限；成功 result 不能是同类型空值或漂移
   target。raw request、response、credential、
   endpoint 和未脱敏 diagnostic 不得进入 aggregate 或 audit notification。
@@ -54,7 +56,7 @@ workspace/run、logical/physical request identity、document hash、audit 与 us
 | Runtime result exhaustive union / audit identity | [`pkg/events/runtime_provider_test.go`](pkg/events/runtime_provider_test.go) | 覆盖 normal、invalid、tamper |
 | Runtime exact source / duplicate / concurrent | [`biz/runtime_owner_guard_test.go`](biz/runtime_owner_guard_test.go) | 覆盖 |
 | provider protocol、output bound、stream/non-stream、embedding | [`biz/http_provider_test.go`](biz/http_provider_test.go)、[`biz/http_provider_security_matrix_test.go`](biz/http_provider_security_matrix_test.go) | 仅以本地 `httptest.Server`/fake transport 覆盖主要 wire success/negative edges；不证明真实 ai-proxy、credential 或 upstream 模型兼容性 |
-| candidate framing、schema、correction、cache hash | `biz/runtime_candidate_*_test.go`、`biz/provider_prompt_projection_test.go` | 覆盖 |
+| candidate framing、schema、correction、cache hash | `biz/runtime_candidate_*_test.go`、`pkg/models/runtime_candidate_correction_test.go`、`biz/provider_prompt_projection_test.go` | 覆盖 schema/semantic witness 分离、failure/correction exact binding 与 C0～C5 identity |
 | active configuration freeze | `TestBizStartFreezesLLMConfigurationForCatalogAndStatus` | 覆盖 |
 | catalog cache/key/concurrent refresh | [`biz/catalog_cache_test.go`](biz/catalog_cache_test.go) | 覆盖 merge、key、auth rotation、capability mapping，以及本地 HTTP transport 的 network/5xx 有界 retry、4xx no-retry、oversize/malformed body、same/cross-origin redirect、fresh→stale→expired LKG |
 | lifecycle / dependency fail-fast | [`module_test.go`](module_test.go)、`TestLLMOwnerStartIsIdempotentAndTeardownClearsLifecycle`、`TestProviderCommandsPublishAuditAndRejectPostBeforePhysicalCall` | 覆盖重复 Start、Stop 清理，以及 Stop 后 completion/embedding/catalog 零 physical call |

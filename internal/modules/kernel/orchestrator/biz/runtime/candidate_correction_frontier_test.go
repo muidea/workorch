@@ -102,6 +102,116 @@ func TestCandidateCorrectionFrontierExhaustsSingleTargetAndSealsConcreteAlternat
 	}
 }
 
+func TestCandidateCorrectionFrontierPrioritizesMissingRequiredFieldOverSemanticTarget(t *testing.T) {
+	aggregate, candidate := aggregateWithActiveRejectedCandidate(t)
+	manifest, err := runtimecontract.BuildRuntimeCandidateContractManifest(
+		aggregate.Decision,
+		runtimecontract.RuntimeCandidateManifestOwnerFactsFromContext(runtimecontract.RuntimeCandidateContextForDecision(aggregate.Facts, aggregate.Decision, nil)),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(manifest.Operations) != 1 {
+		t.Fatalf("target frontier fixture operations=%+v", manifest.Operations)
+	}
+	manifest.Operations[0].Target.ExactTargetRefs = append(manifest.Operations[0].Target.ExactTargetRefs, "README.md")
+	manifest.Hash = ""
+	manifest = manifest.Normalized()
+	manifest.Hash = runtimecontract.StableRuntimeCandidateContractManifestHash(manifest)
+	candidate = runtimeTestMustDeriveCandidateForManifest(t, manifest, candidate)
+	partial := candidate
+	partial.StateChange = &runtimecontract.StateChangeCandidate{Operations: append([]runtimecontract.StateChangingOperation(nil), candidate.StateChange.Operations...)}
+	partial.StateChange.Operations[0].Operation.TargetRefs = nil
+	failure := &runtimecontract.RuntimeCandidateFailure{
+		Class: runtimecontract.RuntimeCandidateFailureClassSchema, Code: "candidate_schema_invalid", Signature: "candidate-schema-invalid", Reason: "required targetRefs field is missing",
+		Diagnostic: &runtimecontract.RuntimeCandidateFailureDiagnostic{
+			Path: "$.operations[0].targetRefs", Actual: "missing_targetRefs",
+			Allowed:  []string{"bindingRefs", "kind", "parameters", "targetRefs"},
+			Required: []string{"bindingRefs", "kind", "parameters", "targetRefs"}, ManifestHash: manifest.Hash,
+		},
+	}
+	sealed, correction, err := sealCandidateRejectionWithFrontier(failure, manifest, candidateCorrectionFrontier{candidate: &partial})
+	if err != nil || sealed == nil || correction == nil || correction.Disposition != runtimecontract.RuntimeCandidateCorrectionCorrectableOnce || correction.Witness == nil {
+		t.Fatalf("missing required target correction was not sealed: failure=%+v correction=%+v err=%v", sealed, correction, err)
+	}
+	if correction.Witness.Dimension != runtimecontract.RuntimeCandidateCorrectionWitnessSchemaField ||
+		correction.Witness.Path != failure.Diagnostic.Path || correction.Witness.RejectedValue != candidateCorrectionFieldAbsent ||
+		correction.Witness.AlternativeValue != candidateCorrectionFieldPresent || correction.Witness.RejectedShapeHash != "" || correction.Witness.AlternativeShapeHash != "" {
+		t.Fatalf("missing field was converted into a semantic witness: %+v", correction.Witness)
+	}
+	if !reflect.DeepEqual(correction.Objectives, []runtimecontract.RuntimeCandidateCorrectionObjective{runtimecontract.RuntimeCandidateCorrectionSupplyRequiredField}) {
+		t.Fatalf("strict field vocabulary was treated as semantic targets: %+v", correction.Objectives)
+	}
+	if err := runtimecontract.ValidateRuntimeCandidateFailureCorrectionPair(sealed, correction); err != nil {
+		t.Fatalf("sealed missing-field correction does not survive persisted lineage validation: %v", err)
+	}
+	if !candidateCrossesCorrectionWitness(candidate, manifest, *correction.Witness) || candidateCrossesCorrectionWitness(partial, manifest, *correction.Witness) {
+		t.Fatal("schema field presence witness did not distinguish corrected and missing targetRefs")
+	}
+}
+
+func TestCandidateSchemaFieldPresenceWitnessUsesFieldPresenceNotLiteralValue(t *testing.T) {
+	aggregate, candidate := aggregateWithActiveRejectedCandidate(t)
+	manifest, err := runtimecontract.BuildRuntimeCandidateContractManifest(
+		aggregate.Decision,
+		runtimecontract.RuntimeCandidateManifestOwnerFactsFromContext(runtimecontract.RuntimeCandidateContextForDecision(aggregate.Facts, aggregate.Decision, nil)),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	candidate = runtimeTestMustDeriveCandidateForManifest(t, manifest, candidate)
+	operationManifest := manifest.Operations[0]
+	targetField, targetFound, err := runtimecontract.RuntimeOperationCorrectionFieldForRole(operationManifest, runtimecontract.RuntimeOperationCorrectionRoleTarget)
+	if err != nil || !targetFound {
+		t.Fatalf("target correction field missing: field=%+v err=%v", targetField, err)
+	}
+	bindingField, bindingFound, err := runtimecontract.RuntimeOperationCorrectionFieldForRole(operationManifest, runtimecontract.RuntimeOperationCorrectionRoleEvidenceBinding)
+	if err != nil || !bindingFound {
+		t.Fatalf("binding correction field missing: field=%+v err=%v", bindingField, err)
+	}
+	for _, testCase := range []struct {
+		name    string
+		path    string
+		prepare func(*runtimecontract.RuntimeOperation)
+		remove  func(*runtimecontract.RuntimeOperation)
+	}{
+		{name: "kind", path: "$.operations[0].kind", remove: func(operation *runtimecontract.RuntimeOperation) { operation.Kind = "" }},
+		{name: "bindingRefs", path: bindingField.CandidatePath(0), remove: func(operation *runtimecontract.RuntimeOperation) { operation.BindingRefs = nil }},
+		{name: "targetRefs", path: targetField.CandidatePath(0), remove: func(operation *runtimecontract.RuntimeOperation) { operation.TargetRefs = nil }},
+		{name: "parameters", path: "$.operations[0].parameters", remove: func(operation *runtimecontract.RuntimeOperation) { operation.Parameters = nil }},
+		{
+			name: "requiredOperationRef", path: "$.operations[0].requiredOperationRef",
+			prepare: func(operation *runtimecontract.RuntimeOperation) { operation.RequiredOperationRef = "requirement-1" },
+			remove:  func(operation *runtimecontract.RuntimeOperation) { operation.RequiredOperationRef = "" },
+		},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			witness := runtimecontract.RuntimeCandidateCorrectionWitness{
+				Dimension: runtimecontract.RuntimeCandidateCorrectionWitnessSchemaField, Path: testCase.path,
+				RejectedValue: candidateCorrectionFieldAbsent, AlternativeValue: candidateCorrectionFieldPresent,
+			}
+			present := candidate
+			present.StateChange = &runtimecontract.StateChangeCandidate{Operations: append([]runtimecontract.StateChangingOperation(nil), candidate.StateChange.Operations...)}
+			operation := present.StateChange.Operations[0].Operation
+			if testCase.prepare != nil {
+				testCase.prepare(&operation)
+			}
+			present.StateChange.Operations[0].Operation = operation
+			if !candidateCrossesCorrectionWitness(present, manifest, witness) {
+				t.Fatalf("present %s was compared with the literal field_present token", testCase.name)
+			}
+			missing := present
+			missing.StateChange = &runtimecontract.StateChangeCandidate{Operations: append([]runtimecontract.StateChangingOperation(nil), present.StateChange.Operations...)}
+			operation = missing.StateChange.Operations[0].Operation
+			testCase.remove(&operation)
+			missing.StateChange.Operations[0].Operation = operation
+			if candidateCrossesCorrectionWitness(missing, manifest, witness) {
+				t.Fatalf("missing %s crossed a field-presence witness", testCase.name)
+			}
+		})
+	}
+}
+
 func TestCandidateCorrectionFrontierSealsExactEvidenceBindingAlternative(t *testing.T) {
 	aggregate, candidate := aggregateWithActiveRejectedCandidate(t)
 	manifest, err := runtimecontract.BuildRuntimeCandidateContractManifest(

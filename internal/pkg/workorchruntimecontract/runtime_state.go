@@ -740,6 +740,9 @@ func ValidateRuntimeCandidateAttemptRecords(values []RuntimeCandidateAttemptReco
 			if err := value.Correction.Validate(); err != nil {
 				return fmt.Errorf("failed runtime candidate attempt %s correction: %w", key, err)
 			}
+			if err := ValidateRuntimeCandidateFailureCorrectionPair(value.Failure, value.Correction); err != nil {
+				return fmt.Errorf("failed runtime candidate attempt %s failure/correction lineage: %w", key, err)
+			}
 			if value.Correction.ManifestHash != value.ManifestHash {
 				return fmt.Errorf("failed runtime candidate attempt %s correction manifest mismatch", key)
 			}

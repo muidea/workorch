@@ -76,6 +76,48 @@ func TestCandidateCorrectionObjectivesRequireAllowedEvidenceBinding(t *testing.T
 	}
 }
 
+func TestCandidateCorrectionObjectivesKeepMissingFieldsSchemaOnly(t *testing.T) {
+	t.Parallel()
+	for _, testCase := range []struct {
+		name, path, actual, required string
+	}{
+		{name: "target", path: "$.operations[0].targetRefs", actual: "missing_targetRefs", required: "targetRefs"},
+		{name: "kind", path: "$.operations[0].kind", actual: "missing_kind", required: "kind"},
+		{name: "binding", path: "$.operations[0].bindingRefs", actual: "empty_bindingRefs", required: "bindingRefs"},
+		{name: "parameter", path: "$.operations[0].parameters[name=content]", actual: "missing_content", required: "content"},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			failure := runtimecontract.RuntimeCandidateFailure{
+				Class: runtimecontract.RuntimeCandidateFailureClassSchema, Code: "candidate_schema_invalid", Signature: "candidate-schema-invalid",
+				Reason: "required field is missing",
+				Diagnostic: &runtimecontract.RuntimeCandidateFailureDiagnostic{
+					Path: testCase.path, Actual: testCase.actual,
+					Allowed: []string{"bindingRefs", "kind", "parameters", "targetRefs"}, Required: []string{testCase.required},
+				},
+			}
+			objectives := CandidateCorrectionObjectivesForFailure(&failure)
+			want := []runtimecontract.RuntimeCandidateCorrectionObjective{runtimecontract.RuntimeCandidateCorrectionSupplyRequiredField}
+			if !reflect.DeepEqual(objectives, want) {
+				t.Fatalf("missing field objectives = %+v, want %+v", objectives, want)
+			}
+		})
+	}
+}
+
+func TestCandidateCorrectionObjectivesDoNotTreatDocumentRequirementAsMissingField(t *testing.T) {
+	t.Parallel()
+	failure := runtimecontract.RuntimeCandidateFailure{
+		Class: runtimecontract.RuntimeCandidateFailureClassSchema, Code: "candidate_document_nonconformant", Signature: "candidate-document-nonconformant",
+		Diagnostic: &runtimecontract.RuntimeCandidateFailureDiagnostic{
+			Path: "$", Actual: runtimecontract.RuntimeCandidateDocumentShapeNonObjectJSONValue,
+			Required: []string{runtimecontract.RuntimeCandidateDocumentShapeConformant},
+		},
+	}
+	if objectives := CandidateCorrectionObjectivesForFailure(&failure); !reflect.DeepEqual(objectives, []runtimecontract.RuntimeCandidateCorrectionObjective{runtimecontract.RuntimeCandidateCorrectionConformExpectedDocument}) {
+		t.Fatalf("document requirement was projected as a missing field: %+v", objectives)
+	}
+}
+
 func TestCandidateCorrectionObjectivesRemoveForbiddenProviderIdentityOnly(t *testing.T) {
 	t.Parallel()
 	for _, field := range []string{"id", "dependsOn"} {

@@ -205,9 +205,42 @@ func TestRuntimeCandidateCorrectionInputUsesSealedHashForPrivateReplayFrontier(t
 	if err := input.ValidateAgainstObservation(manifest, observation); err != nil {
 		t.Fatal(err)
 	}
+	wrongInput := input.Normalized()
+	wrongInput.Objectives = []runtimecontract.RuntimeCandidateCorrectionObjective{runtimecontract.RuntimeCandidateCorrectionSelectOperationKind}
+	wrongObservation := observation.Clone()
+	wrongObservation.Diagnostic.Objectives = append([]runtimecontract.RuntimeCandidateCorrectionObjective(nil), wrongInput.Objectives...)
+	wrongObservation.SealedCorrectionHash = runtimecontract.StableRuntimeCandidateSealedCorrectionHash(wrongInput.ManifestHash, wrongInput.Objectives, &wrongInput.Witness)
+	if err := wrongInput.ValidateAgainstObservation(manifest, wrongObservation); err == nil || !strings.Contains(err.Error(), "incompatible with witness dimension") {
+		t.Fatalf("same wrong objective/witness mapping error = %v", err)
+	}
 	input.Witness.AlternativeValue = "another.go"
 	input.Witness.AlternativeShapeHash = "another-shape"
 	if err := input.ValidateAgainstObservation(manifest, observation); err == nil {
 		t.Fatal("replay witness outside the sealed private frontier was accepted")
+	}
+}
+
+func TestRuntimeCandidateCorrectionInputRejectsSemanticWitnessForMissingRequiredFieldObservation(t *testing.T) {
+	t.Parallel()
+	manifest := candidateCorrectionTestManifest()
+	input := RuntimeCandidateCorrectionInput{
+		ManifestHash: manifest.Hash,
+		Objectives:   []runtimecontract.RuntimeCandidateCorrectionObjective{runtimecontract.RuntimeCandidateCorrectionSupplyRequiredField},
+		Witness: runtimecontract.RuntimeCandidateCorrectionWitness{
+			Dimension: runtimecontract.RuntimeCandidateCorrectionWitnessTarget, OperationKind: runtimecontract.RuntimeBlockKindPatchApply,
+			Path: "$.operations[0].targetRefs", RejectedValue: "", AlternativeValue: "README.md",
+			RejectedShapeHash: "rejected-shape", AlternativeShapeHash: "alternative-shape",
+		},
+	}.Normalized()
+	observation := runtimecontract.RuntimeCandidateCorrectionObservation{
+		Class: runtimecontract.RuntimeCandidateFailureClassSchema, Code: "candidate_schema_invalid", Signature: "candidate-schema-invalid",
+		Diagnostic: &runtimecontract.RuntimeCandidateFailureDiagnostic{
+			Path: "$.operations[0].targetRefs", Actual: "missing_targetRefs", Required: []string{"targetRefs"},
+			ManifestHash: manifest.Hash, Objectives: append([]runtimecontract.RuntimeCandidateCorrectionObjective(nil), input.Objectives...),
+		},
+		SealedCorrectionHash: runtimecontract.StableRuntimeCandidateSealedCorrectionHash(input.ManifestHash, input.Objectives, &input.Witness),
+	}.Normalized()
+	if err := input.ValidateAgainstObservation(manifest, observation); err == nil || !strings.Contains(err.Error(), "schema-only authority") {
+		t.Fatalf("missing-field semantic witness error = %v", err)
 	}
 }

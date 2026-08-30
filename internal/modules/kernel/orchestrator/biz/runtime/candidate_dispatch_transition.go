@@ -954,7 +954,8 @@ func normalizeCandidateAttemptFailure(aggregate RuntimeAggregate, idx, attempt i
 	} else {
 		correction = correction.Clone()
 	}
-	if correction == nil || correction.ManifestHash != aggregate.CandidateAttempts[idx].ManifestHash || correction.Validate() != nil {
+	if correction == nil || correction.ManifestHash != aggregate.CandidateAttempts[idx].ManifestHash || correction.Validate() != nil ||
+		runtimecontract.ValidateRuntimeCandidateFailureCorrectionPair(&failure, correction) != nil {
 		failure = *candidateRejectionContractDefect(failure, "candidate rejection has no valid manifest-bound correction disposition")
 		correction = rejectedFinalDirective(aggregate.CandidateAttempts[idx].ManifestHash, "runtime_contract_defect")
 	}

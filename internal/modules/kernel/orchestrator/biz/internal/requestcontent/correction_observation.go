@@ -23,6 +23,9 @@ func ProjectRuntimeCandidateCorrectionObservation(failure *runtimecontract.Runti
 	if sealedCorrection.Disposition != runtimecontract.RuntimeCandidateCorrectionCorrectableOnce || sealedCorrection.Witness == nil {
 		return nil, fmt.Errorf("project runtime candidate correction observation requires a correctable-once directive")
 	}
+	if err := runtimecontract.ValidateRuntimeCandidateFailureCorrectionPair(failure, &sealedCorrection); err != nil {
+		return nil, fmt.Errorf("project runtime candidate correction observation: %w", err)
+	}
 	observation := runtimecontract.RuntimeCandidateCorrectionObservation{
 		Class: failure.Class, Code: failure.Code, Signature: failure.Signature,
 		TargetRefs: append([]string(nil), failure.TargetRefs...), Diagnostic: failure.Diagnostic.Clone(),
@@ -31,7 +34,7 @@ func ProjectRuntimeCandidateCorrectionObservation(failure *runtimecontract.Runti
 		),
 	}
 	if observation.Diagnostic == nil || observation.Diagnostic.Normalized().ManifestHash != sealedCorrection.ManifestHash ||
-		!runtimeCandidateCorrectionObjectivesEqual(observation.Diagnostic.Normalized().Objectives, sealedCorrection.Objectives) {
+		!runtimecontract.RuntimeCandidateCorrectionObjectivesEqual(observation.Diagnostic.Normalized().Objectives, sealedCorrection.Objectives) {
 		return nil, fmt.Errorf("project runtime candidate correction observation has stale failure/directive lineage")
 	}
 	if err := observation.Validate(); err != nil {
@@ -39,20 +42,6 @@ func ProjectRuntimeCandidateCorrectionObservation(failure *runtimecontract.Runti
 	}
 	value := observation.Clone()
 	return &value, nil
-}
-
-func runtimeCandidateCorrectionObjectivesEqual(left, right []runtimecontract.RuntimeCandidateCorrectionObjective) bool {
-	left = (&runtimecontract.RuntimeCandidateFailureDiagnostic{Objectives: append([]runtimecontract.RuntimeCandidateCorrectionObjective(nil), left...)}).Normalized().Objectives
-	right = (&runtimecontract.RuntimeCandidateFailureDiagnostic{Objectives: append([]runtimecontract.RuntimeCandidateCorrectionObjective(nil), right...)}).Normalized().Objectives
-	if len(left) != len(right) {
-		return false
-	}
-	for idx := range left {
-		if left[idx] != right[idx] {
-			return false
-		}
-	}
-	return true
 }
 
 // ProjectRuntimeSemanticCorrectionObservation is the sole cross-owner

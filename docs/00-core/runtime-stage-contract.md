@@ -146,6 +146,14 @@ provider、candidate、semantic proof、capability operation、repair 与 recove
   `ProspectiveTargetRef` 不是 Runtime semantic wire 的兼容字段；出现时必须由 strict current decoder 拒绝。schema/document
   admission 在 owner probe 前校验完整合取集合；缺项、多余 target、重复、越界或不满足 clause 只形成
   普通完整文档/schema correction，且零 File/Shell probe。
+- operation document 的 `missing_*`/`empty_*` required field 必须先于 semantic frontier 形成同 path 的
+  `schema_field(field_absent -> field_present)` witness；field vocabulary 不是 target/binding alternative。failed attempt 在 CAS 与
+  fresh load 都必须验证 diagnostic/correction 的 manifest、objectives、objective↔witness-dimension、path、actual/shape lineage；
+  不一致时零 attempt-1
+  provider、dispatch 与 capability effect。
+- operations preflight 必须发生在 exact request-session CAS 之前；同一 transaction、stable prefix、manifest、correction hash 与
+  expected-document attempt 的 persisted session 是 restart proof。document-complete 后 attempt-begin CAS 前中断或 CAS 后响应丢失
+  只能恢复同一 local admission transaction，不能重发 preflight/provider、重复扣减 correction budget 或提前执行 capability。
 - strict decoder 已得到 current wire 的完整 typed operation document、但 manifest semantic admission 因 exact
   `bindingRefs` 等字段失败时，SM-3 只可把该 typed value 保存在 failed `CandidateAttempt` 的 owner-private correction
   frontier；它从不成为 accepted candidate、feasibility input、dispatch 或 authority。manifest 为 exact operation slot 声明
