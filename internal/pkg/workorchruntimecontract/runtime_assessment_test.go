@@ -69,6 +69,19 @@ func TestValidateAssessmentDispositionPreservesOriginalObservation(t *testing.T)
 	}
 }
 
+func TestRuntimeAssessmentExecutableBehaviorGateAppliesOnlyToTerminalDefinitionProof(t *testing.T) {
+	focus := CoverageFocus{RequireExecutableBehaviorEvidence: true}
+	if !RuntimeAssessmentRequiresExecutableBehaviorEvidence(RuntimeAssessmentPurposeDefinitionProof, focus) {
+		t.Fatal("terminal Definition proof lost its executable-behavior gate")
+	}
+	if RuntimeAssessmentRequiresExecutableBehaviorEvidence(RuntimeAssessmentPurposeOwnerFactAcquisition, focus) {
+		t.Fatal("owner-fact acquisition inherited the terminal executable-behavior gate")
+	}
+	if !RuntimeAssessmentRequiresExecutableBehaviorEvidence(RuntimeAssessmentPurpose("unknown"), focus) {
+		t.Fatal("unknown assessment purpose weakened the executable-behavior gate")
+	}
+}
+
 func TestAssessmentCandidatePreservesOutOfSliceObservationItems(t *testing.T) {
 	facts := testRuntimeFacts()
 	facts.Focus.CoverageWorkItemIDs = []common.CoverageWorkItemID{"cwi-1"}

@@ -158,6 +158,10 @@ assessment 可以 settle CWI。当前 binding 的 purpose 必须由 exact `Seman
 immutable generation history 恢复；该历史只解释 purpose，不能授权候选、operation 或 transition。aggregate invariant
 必须拒绝 acquisition purpose 的 `satisfied/settled` 组合。duplicate/restart 只从该 aggregate 幂等 re-drive，不能重复
 effect、assessment、reopen 或 attempt。
+acquisition assessment 的质量裁决只检查该 purpose 当前 binding 的 `state_change` proof；Definition 中仍然封存的
+`RequireExecutableBehaviorEvidence` 是 successor terminal-proof gate，不能反向要求 acquisition receipt 伪装为可执行行为证据，
+也不能因 producer 声称 `repairable_gap`、missing kind 或 target unsupported 而阻止上述 settlement。该门禁只延后到 successor，
+不因 acquisition 成功而被删除或视为已满足。
 Shell 不选择 File 操作，File 不解释 Shell fact，kernel 不硬编码语言/测试框架。
 
 Definition-gap provider document 还必须通过 pure、manifest-bound admission 才能成为

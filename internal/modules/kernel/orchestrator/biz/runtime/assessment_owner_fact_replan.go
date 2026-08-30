@@ -93,7 +93,7 @@ func settleRuntimeOwnerFactAcquisition(aggregate *RuntimeAggregate, assessmentID
 	if aggregate.ActiveDispatch != nil {
 		return false, fmt.Errorf("%w: owner-fact acquisition settlement cannot retain an active dispatch", common.ErrConflict)
 	}
-	if !canonicalAssessmentProofCompleteWithoutOwnerFacts(*aggregate) ||
+	if !canonicalAssessmentProofCompleteWithoutOwnerFactsForPurpose(*aggregate, runtimecontract.RuntimeAssessmentPurposeOwnerFactAcquisition) ||
 		len(runtimecontract.RuntimeMissingOwnerFactRequirements(aggregate.Facts.Focus.RequiredOwnerFacts, aggregate.Facts.Resources.OperationAdmissibilities)) != 0 {
 		return false, fmt.Errorf("%w: owner-fact acquisition settlement requires proof and the re-observed owner fact", common.ErrConflict)
 	}
@@ -138,7 +138,7 @@ func recordAcceptedOwnerFactAcquisitionShapes(aggregate RuntimeAggregate, ledger
 // proof did not establish the profile-declared postcondition and reopens the
 // same CWI for a new semantic generation. No capability or Run state is
 // mutated here.
-func replanRuntimeCWIForUnmetOwnerFacts(aggregate *RuntimeAggregate, assessmentID string) (bool, error) {
+func replanRuntimeCWIForUnmetOwnerFacts(aggregate *RuntimeAggregate, assessmentID string, purpose runtimecontract.RuntimeAssessmentPurpose) (bool, error) {
 	if aggregate == nil || strings.TrimSpace(assessmentID) == "" {
 		return false, common.ErrInvalidArgument
 	}
@@ -149,7 +149,7 @@ func replanRuntimeCWIForUnmetOwnerFacts(aggregate *RuntimeAggregate, assessmentI
 	if err := requireCurrentRuntimeCWILedger(facts); err != nil {
 		return false, err
 	}
-	if !canonicalAssessmentProofCompleteWithoutOwnerFacts(*aggregate) {
+	if !canonicalAssessmentProofCompleteWithoutOwnerFactsForPurpose(*aggregate, purpose) {
 		return false, nil
 	}
 	if len(runtimecontract.RuntimeMissingOwnerFactRequirements(facts.Focus.RequiredOwnerFacts, facts.Resources.OperationAdmissibilities)) == 0 {

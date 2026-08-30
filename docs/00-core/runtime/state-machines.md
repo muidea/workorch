@@ -235,6 +235,10 @@ current manifest 临时补全 scope；没有 matching sealed fallback 时按 typ
   `CurrentBindingRef`。导致 owner-fact gap 的 accepted state-change operation shape 必须作为同一 CWI 的 anti-replay fact
   跨 successor semantic focus 保留；SM-2 不携带 predecessor repair attempt/gap/directive，SM-3 在 dispatch 前拒绝等价
   shape，因此新 binding generation 不能重置等价副作用的防重放边界。
+  assessment 的 canonical quality gate 必须同时读取 pre-seal purpose：`owner_fact_acquisition` 只裁决当前 binding 的
+  acquisition evidence，不能把 Definition 的 terminal `RequireExecutableBehaviorEvidence` 应用到中间 `state_change` receipt；
+  `definition_proof` 仍完整应用该门禁。producer 的 disposition、missing evidence、target 与 reason 只进入 audit，不能覆盖
+  purpose-aware adjudication。acquisition 成功仍必须 reopen CWI，绝不因此取得 terminal credit。
 - prospective composite feasibility 的 pre-seal Definition 不携带 exact target set，但必须封存完整 mandatory
   `ProspectiveTargetAllOfConstraintRefs`；compiled obligation 以
   `DeclarationProspectiveTargetAllOfConstraintRefs` 原样传递，SM-3 schema/document admission 要求 proposal

@@ -34,6 +34,20 @@ const (
 	RuntimeAssessmentPurposeOwnerFactAcquisition RuntimeAssessmentPurpose = "owner_fact_acquisition"
 )
 
+// RuntimeAssessmentRequiresExecutableBehaviorEvidence applies the immutable
+// Definition quality gate only to terminal Definition proof. An owner-fact
+// acquisition is an intermediate transaction whose sealed binding proves the
+// current state-change obligation; it must reopen the CWI for a successor
+// terminal-proof generation instead of requiring that state-change receipt to
+// masquerade as executable-behavior evidence.
+func RuntimeAssessmentRequiresExecutableBehaviorEvidence(purpose RuntimeAssessmentPurpose, focus CoverageFocus) bool {
+	purpose = RuntimeAssessmentPurpose(strings.TrimSpace(string(purpose)))
+	if purpose == RuntimeAssessmentPurposeOwnerFactAcquisition {
+		return false
+	}
+	return focus.Normalized().RequireExecutableBehaviorEvidence
+}
+
 func (a RuntimeAssessmentAuthorityInput) Normalized() RuntimeAssessmentAuthorityInput {
 	a.AuthorityInput = a.AuthorityInput.Normalized()
 	a.Purpose = RuntimeAssessmentPurpose(strings.TrimSpace(string(a.Purpose)))
@@ -223,7 +237,7 @@ func DeriveRuntimeAssessmentAdjudication(
 			result.Disposition = AssessmentDispositionRepairableGap
 			continue
 		}
-		coverageProofs, complete := deriveAssessmentCoverageProofs(dispatch, authority.Focus, binding, facts.Evidence.Accepted, completed, lineage)
+		coverageProofs, complete := deriveAssessmentCoverageProofs(dispatch, authority.Purpose, authority.Focus, binding, facts.Evidence.Accepted, completed, lineage)
 		result.Proofs = append(result.Proofs, coverageProofs...)
 		if !complete {
 			result.Disposition = AssessmentDispositionRepairableGap
@@ -347,6 +361,7 @@ func assessmentBindingForCoverage(values []CoverageEvidenceBinding, coverageID c
 
 func deriveAssessmentCoverageProofs(
 	assessmentDispatch RuntimeDispatchRecord,
+	purpose RuntimeAssessmentPurpose,
 	focus CoverageFocus,
 	binding CoverageEvidenceBinding,
 	accepted []EvidenceFact,
@@ -399,7 +414,7 @@ func deriveAssessmentCoverageProofs(
 			selected = append(selected, eligible...)
 		}
 	}
-	if focus.RequireExecutableBehaviorEvidence {
+	if RuntimeAssessmentRequiresExecutableBehaviorEvidence(purpose, focus) {
 		executable := false
 		for _, fact := range selected {
 			if assessmentValidationShowsExecutableBehavior(binding, fact) {

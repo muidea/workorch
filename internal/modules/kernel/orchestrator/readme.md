@@ -696,6 +696,10 @@ deployed run ID 只属于 archive regression evidence，不定义当前候选、
   的防重放事实：SM-2 只把 shape 携带到 successor focus，repair attempt/gap/directive 仍按 focus 清零；SM-3 必须拒绝
   successor candidate 重放该 shape。新 generation 必须使用新 logical request 派生 focus/binding，历史 reopened binding
   绝不能重新成为 current。
+  commit-time assessment classifier 必须从 sealed `AssessmentPurpose` 区分当前 acquisition proof 与 terminal Definition proof：
+  acquisition 只对当前 binding 的 `state_change` 做 owner receipt/effect/quality 裁决，Definition 中保留的
+  `RequireExecutableBehaviorEvidence` 只能由 successor terminal generation 满足。LLM 即使声称 `repairable_gap`、缺少
+  state-change evidence 或 target unsupported，也只能保留为 producer audit，不能覆盖 SM-2 adjudication 或阻止 CWI reopen。
 - semantic Definition-gap document 在提交 `definition_gap_observed` 前必须通过 pure manifest admission。已有 sealed
   `OwnerFactAcquisition` 时，provider 的 `undeclared_prerequisite` 只进入 bounded typed correction，不能创建
   clarification observation、`need_governance` 或 ticket；只有 admitted gap 才由 owner-private internal event 选择专用
@@ -1114,6 +1118,9 @@ deployed run ID 只属于 archive regression evidence，不定义当前候选、
   Definition `Order` 重排；proof-batch provider projection 只携带相关 coverage，C0～C5 stable prefix/context 分层保持不变。
 - [x] owner fact 的 missing、stale、duplicate、out-of-order、rollback/reappearance（ABA）、新 generation 与无关
   prerequisite 组合矩阵；semantic manifest hash 回滚重现仍由新 logical request 隔离。
+- [x] owner-fact acquisition 在 Definition 仍要求 executable-behavior terminal proof 时，只以 sealed purpose + current
+  state-change binding 完成中间 assessment；producer 反向声称 repairable gap 不能覆盖 canonical adjudication，fresh restart
+  仍 exactly-once reopen 同一 CWI 并恢复 terminal-proof successor。
 - [x] prospective owner-fact composite probe 的 1～8 target-set File hypothetical delta + Shell dependency catalog/observation exact binding、
   dependency catalog provider 隔离、CAS/seal 双 freshness gate、nested typed stale bounded refresh 且零 correction 消耗，
   required-owner provider-safe typed `all_of` clause contract 的 acquisition/manifest/C3 seal、schema/admission pre-probe

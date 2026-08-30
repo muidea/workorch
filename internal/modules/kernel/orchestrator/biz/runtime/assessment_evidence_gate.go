@@ -14,7 +14,22 @@ import (
 // prose and gap data remain audit observations and cannot be rewritten into
 // canonical repair authority.
 func canonicalAssessmentEvidenceQualityFailure(aggregate RuntimeAggregate, coverageID common.CoverageWorkItemID, refs []string) string {
+	return canonicalAssessmentEvidenceQualityFailureForPurpose(
+		aggregate,
+		coverageID,
+		refs,
+		runtimecontract.RuntimeAssessmentPurposeDefinitionProof,
+	)
+}
+
+func canonicalAssessmentEvidenceQualityFailureForPurpose(
+	aggregate RuntimeAggregate,
+	coverageID common.CoverageWorkItemID,
+	refs []string,
+	purpose runtimecontract.RuntimeAssessmentPurpose,
+) string {
 	focus := aggregate.Facts.Focus.Normalized()
+	requireExecutableBehavior := runtimecontract.RuntimeAssessmentRequiresExecutableBehaviorEvidence(purpose, focus)
 	evidenceFacts := acceptedEvidenceFactsForRefs(aggregate.Facts, coverageID, refs)
 	if len(evidenceFacts) == 0 {
 		return "satisfied claim has no accepted evidence bound to the coverage item"
@@ -39,7 +54,7 @@ func canonicalAssessmentEvidenceQualityFailure(aggregate RuntimeAggregate, cover
 		if !runtimeEvidenceMatchesCoverageBindingWithLineage(aggregate.Facts, focus, coverageID, evidence, aggregate.CoverageProofLineage) {
 			continue
 		}
-		if focus.RequireExecutableBehaviorEvidence && !runtimeEvidenceShowsExecutableBehaviorWithLineage(aggregate.Facts, focus, coverageID, operation, evidence, aggregate.CoverageProofLineage) {
+		if requireExecutableBehavior && !runtimeEvidenceShowsExecutableBehaviorWithLineage(aggregate.Facts, focus, coverageID, operation, evidence, aggregate.CoverageProofLineage) {
 			continue
 		}
 		sawExecutableBehavior = true
@@ -52,7 +67,7 @@ func canonicalAssessmentEvidenceQualityFailure(aggregate RuntimeAggregate, cover
 	if !sawNonWeak {
 		return "accepted evidence is weak, zero-work, or inconclusive"
 	}
-	if focus.RequireExecutableBehaviorEvidence && !sawExecutableBehavior {
+	if requireExecutableBehavior && !sawExecutableBehavior {
 		return "accepted evidence does not show executed behavior for the coverage claim"
 	}
 	return "accepted evidence does not satisfy the focus evidence contract"

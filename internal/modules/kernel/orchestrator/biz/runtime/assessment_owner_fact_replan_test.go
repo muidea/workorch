@@ -159,6 +159,18 @@ func TestCommitAssessmentSettlesAcquisitionBeforeTerminalDefinitionProof(t *test
 	if progressed.DefinitionClarification != nil || progressed.Decision.State == runtimecontract.ConvergenceStateNeedGovernance {
 		t.Fatalf("declared acquisition opened a Definition clarification: %+v", progressed.DefinitionClarification)
 	}
+	assessment := progressed.Facts.Assessments[len(progressed.Facts.Assessments)-1]
+	if assessment.ClaimedDisposition != runtimecontract.AssessmentDispositionRepairableGap ||
+		assessment.Disposition != runtimecontract.AssessmentDispositionSatisfied {
+		t.Fatalf("producer gap overrode owner-fact acquisition adjudication: %+v", assessment)
+	}
+	assessmentDispatch := progressed.CompletedDispatches[len(progressed.CompletedDispatches)-1]
+	if assessmentDispatch.AssessmentAdjudication == nil ||
+		assessmentDispatch.AssessmentAdjudication.Disposition != runtimecontract.AssessmentDispositionSatisfied ||
+		len(assessmentDispatch.AssessmentAdjudication.Proofs) != 1 ||
+		assessmentDispatch.AssessmentAdjudication.Proofs[0].EvidenceKind != runtimecontract.EvidenceKindStateChange {
+		t.Fatalf("acquisition adjudication did not retain the sealed state-change proof: %+v", assessmentDispatch.AssessmentAdjudication)
+	}
 	if len(progressed.Facts.Repair.NoProgressOperationShapes) != 1 ||
 		progressed.Facts.Repair.NoProgressOperationShapes[0].FailureCode != runtimeCWIReopenReasonOwnerFactAcquisitionSettled ||
 		progressed.Facts.Repair.NoProgressOperationShapes[0].Operation.Kind != runtimecontract.StepKindFileWrite {
@@ -534,6 +546,7 @@ func prepareTerminalValidationOwnerFactAcquisitionAssessment(t *testing.T, retir
 	}
 	facts := controllerFacts()
 	facts.Focus.RequireAssessment = true
+	facts.Focus.RequireExecutableBehaviorEvidence = true
 	facts.Focus.RequiredEvidenceKinds = []string{runtimecontract.EvidenceKindValidation}
 	facts.Focus.AcceptedStepKinds = []string{runtimecontract.StepKindFileWrite, runtimecontract.RuntimeBlockKindManagedValidationSession}
 	facts.Capabilities.ValidationKinds = []string{runtimecontract.RuntimeBlockKindManagedValidationSession}
@@ -744,7 +757,14 @@ func prepareTerminalValidationOwnerFactAcquisitionAssessment(t *testing.T, retir
 	}
 	assessment := runtimecontract.RuntimeCandidate{Assessment: &runtimecontract.AssessmentCandidate{
 		FocusID: committed.Aggregate.Facts.Focus.ID, CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-v2"},
-		Disposition: runtimecontract.AssessmentDispositionSatisfied, Summary: "producer observed the acquisition receipt", EvidenceRefs: []string{"event-owner-fact-acquisition"},
+		Disposition: runtimecontract.AssessmentDispositionRepairableGap,
+		Summary:     "producer did not recognize the committed acquisition receipt",
+		Gap: &runtimecontract.RuntimeAssessmentGap{
+			CoverageWorkItemIDs:  []common.CoverageWorkItemID{"cwi-v2"},
+			MissingEvidenceKinds: []string{runtimecontract.EvidenceKindStateChange},
+			TargetRefs:           []string{target},
+			Reason:               "producer reported the prospective target as unsupported",
+		},
 	}}
 	if _, err := controller.AcceptCandidateAttempt(context.Background(), "ws-v2", "run-v2", 0, assessment); err != nil {
 		t.Fatal(err)
