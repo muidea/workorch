@@ -2,10 +2,14 @@ package shell
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/muidea/workorch/internal/pkg/common"
+	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
 func TestFinalizeShellResultIncludesOutputPreviewOnFailure(t *testing.T) {
@@ -62,6 +66,18 @@ func TestExecuteOperationNonzeroExitSetsStructuredFailure(t *testing.T) {
 		t.Fatalf("failure message = %q", result.FailureMessage)
 	}
 	_ = os.WriteFile(filepath.Join(dir, "keep"), []byte("x"), 0o644)
+}
+
+func TestShellValidationDiagnosticPrioritizesNonzeroExitOverStaleZeroWork(t *testing.T) {
+	class, targetType := shellValidationDiagnosticClassAndTarget(RuntimeCommandResult{
+		ExitCode:        1,
+		ZeroWork:        true,
+		EvidenceQuality: string(common.EvidenceQualityInconclusive),
+	}, runtimecontract.RuntimeValidationEvidence{}, false, false, errors.New("exit status 1"))
+	if class != runtimecontract.ValidationDiagnosticBuildFailed || targetType != runtimecontract.ValidationEvidenceTargetFailureSurface {
+		t.Fatalf("diagnostic = (%q, %q), want (%q, %q)", class, targetType,
+			runtimecontract.ValidationDiagnosticBuildFailed, runtimecontract.ValidationEvidenceTargetFailureSurface)
+	}
 }
 
 func TestEnrichShellFailureMessageRedactsSecrets(t *testing.T) {

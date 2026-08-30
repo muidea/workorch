@@ -80,9 +80,8 @@ func shellValidationDiagnosticClassAndTarget(output RuntimeCommandResult, valida
 	)); class != "" {
 		return class, firstNonEmptyShellString(validationEvidence.RecommendedEvidenceTargetType, defaultShellValidationDiagnosticTargetType(class))
 	}
-	if output.ZeroWork || strings.TrimSpace(output.EvidenceQuality) == string(common.EvidenceQualityInconclusive) {
-		return runtimemodel.ValidationDiagnosticOutputInconclusive, runtimemodel.ValidationEvidenceTargetValidationOutput
-	}
+	// Preserve the process failure even if a stale or malformed owner-private
+	// result also carries a zero-work marker from an unrelated subpackage.
 	if output.ExitCode != 0 {
 		switch strings.TrimSpace(firstNonEmptyShellString(validationEvidence.ObservationType, validationEvidence.Observation)) {
 		case "dependency_resolution", "dependency_check", "dependency_contract":
@@ -94,6 +93,9 @@ func shellValidationDiagnosticClassAndTarget(output RuntimeCommandResult, valida
 		default:
 			return runtimemodel.ValidationDiagnosticBuildFailed, runtimemodel.ValidationEvidenceTargetFailureSurface
 		}
+	}
+	if output.ZeroWork || strings.TrimSpace(output.EvidenceQuality) == string(common.EvidenceQualityInconclusive) {
+		return runtimemodel.ValidationDiagnosticOutputInconclusive, runtimemodel.ValidationEvidenceTargetValidationOutput
 	}
 	if err != nil {
 		return runtimemodel.ValidationDiagnosticOutputInconclusive, runtimemodel.ValidationEvidenceTargetValidationOutput

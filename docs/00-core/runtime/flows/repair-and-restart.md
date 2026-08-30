@@ -4,7 +4,7 @@ Status: normative
 
 Type: runtime-flow
 
-Last Verified: 2026-08-29
+Last Verified: 2026-08-30
 
 ## Purpose
 
@@ -74,6 +74,9 @@ repair 在 Runtime 中不是独立 stage 对象，而是 **drive/reducer 在当�
   → request-session 有界 continuation/recovery，不创建 candidate attempt
 - operation 失败 evidence
   → typed operation feedback 进入 internal event；reducer 决定下一 canonical state
+- managed validation 的 zero-work 只表示 exit-zero command 未执行匹配检查；aggregate command 非零退出时，无关 package 的
+  `[no test files]` 不能把 build/test failure 降级为 `validation_output_inconclusive`，Shell 必须先发布失败 factual class，再由
+  SM-2 对照 sealed Profile convergence 决定 repair 或 terminal
 - assessment 返回 repairable gap
   → 结构化 gap 进入 facts；按 missing evidence kind 回 state change / validation，不能直接 terminal
 - Profile-declared typed validation rejection without an exact failure target

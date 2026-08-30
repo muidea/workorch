@@ -4,7 +4,7 @@ Status: active
 
 Type: capability-block-contract
 
-Last Verified: 2026-08-28
+Last Verified: 2026-08-30
 
 ## 功能范围与边界
 
@@ -109,7 +109,9 @@ raw diagnostic 留在 Shell-private adapter；receipt 只携带有界、脱敏�
   是上述 owner-specific seal。`shell/command` 的 command/args/effect/targets 必须与 sealed execution 一致；managed validation
   的 command/args 只能由 Shell owner 根据 seal 内 owner-confirmed recipe 回填，candidate 不能提交执行正文。
 - Runtime evidence policy 是 seal 内的 immutable detached value，用于 zero-work marker、work-evidence marker、evidence
-  quality、reason 和 tag 判定；Shell 不消费 context 中可独立漂移的副本，也不从 operation parameter map 解析跨组件 policy。
+  quality、reason 和 tag 判定；zero-work marker 只可描述 exit-zero validation 未执行匹配检查，aggregate command 非零退出时，
+  其它 package 的 `[no test files]` 不得覆盖 build/test failure。Shell 不消费 context 中可独立漂移的副本，也不从 operation
+  parameter map 解析跨组件 policy。
 - Orchestrator 与 Approval 流程在高风险命令进入本 block 前完成准入；只有本 block 返回独立 typed
   `GovernanceRequirement` 时才可进入治理，普通失败或 budget exhaustion 不能创建 ticket。
 - effect 前的 Orchestrator receipt query 同时是 exact sealed-dispatch authorization：只有当前
@@ -161,7 +163,8 @@ raw diagnostic 留在 Shell-private adapter；receipt 只携带有界、脱敏�
   passed+failed / passed+skipped 冲突。
 - 已覆盖 durable Shell 的零变化、未声明 effect、多目标合法 effect、receipt exact replay 与 claimed/no-receipt
   at-most-once recovery。
-- 已覆盖输出截断、脱敏 diagnostic、timeout、非法/危险命令和 managed resource cleanup。
+- 已覆盖输出截断、脱敏 diagnostic、timeout、非法/危险命令和 managed resource cleanup；并覆盖 aggregate validation
+  非零退出与无关 package zero-work marker 同时出现时，失败事实和 typed build/test diagnostic 优先。
 - 已覆盖 validation entry 不晋升 failure target、无结构化输出零 candidate，以及 managed Go line diagnostic 与 exact
   package-conflict diagnostic 仅报告实际 sealed-scope source target；package conflict 返回两个受限文件并拒绝越界成员。
 - 已覆盖 rejected managed-validation 的 scope-bound `RuntimeValidationFailureObservation`、finite-scope marker 与

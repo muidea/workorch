@@ -55,6 +55,13 @@ func shellEvidencePolicyApplies(policy runtimecontract.RuntimeEvidencePolicy, co
 }
 
 func shellEvidencePolicyZeroWork(policy runtimecontract.RuntimeEvidencePolicy, output *RuntimeCommandResult) bool {
+	// Zero-work markers describe a successful validation that executed no
+	// matching checks. A failed aggregate command can contain the same marker
+	// for an unrelated package; its non-zero exit remains the authoritative
+	// owner fact.
+	if output == nil || output.ExitCode != 0 {
+		return false
+	}
 	text := strings.ToLower(strings.Join([]string{
 		strings.TrimSpace(output.Stdout),
 		strings.TrimSpace(output.Stderr),

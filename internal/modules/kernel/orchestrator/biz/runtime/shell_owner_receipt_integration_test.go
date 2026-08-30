@@ -60,10 +60,15 @@ func TestShellOwnerObservedFailureTargetBindsThroughEventHubAndFileSnapshot(t *t
 	t.Cleanup(func() { shellOwner.Teardown(ctx) })
 
 	record := `WORKORCH_FAILURE_TARGET={"schemaVersion":"workorch.shell.failure_target","targetRole":"implementation","targetRefs":["implementation.go"],"diagnosticClass":"validation_build_failed"}`
-	script := "printf '%s\\n' '" + record + "'; exit 7"
+	script := "printf '%s\\n' '" + record + "' '? github.com/user/lsp-bridge/internal/config [no test files]'; exit 7"
 	policy := runtimeManagedValidationEvidencePolicy()
 	policy.CommandName = "sh"
 	policy.RecipeArgs = []string{"-c", script}
+	policy.ZeroWorkMarkers = []string{"[no test files]"}
+	policy.WorkEvidenceMarkers = []string{"=== RUN", "--- PASS:", "ok  "}
+	policy.QualityOnZeroWork = string(common.EvidenceQualityInconclusive)
+	policy.EvidenceReason = "configured zero-work marker matched"
+	policy.EvidenceTags = []string{"validation", "zero_work"}
 	ownerPreflight := validationAggregate(t)
 	ownerPreflight.Facts.Activation.EvidencePolicies = []runtimecontract.RuntimeEvidencePolicy{policy}
 	shellCatalog := addObservedShellFailureTargetFreshness(t, ctx, hub, &ownerPreflight, workspaceDirectory)
@@ -158,6 +163,43 @@ func TestShellOwnerObservedFailureTargetBindsThroughEventHubAndFileSnapshot(t *t
 	if persisted.Facts.Failure == nil || persisted.Facts.Failure.ValidationFailureObservation == nil ||
 		persisted.Facts.Resources.FailureTarget != nil {
 		t.Fatalf("Shell receipt bypassed File repair-surface confirmation: %+v", persisted)
+	}
+	receipt := runtimecontract.RuntimeOperationReceipt{}
+	found := false
+	for _, candidateReceipt := range persisted.OperationReceipts {
+		if candidateReceipt.ExecutionKey == sealedExecution.ExecutionKey {
+			receipt, found = candidateReceipt, true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("Shell failure receipt is missing: execution=%+v receipts=%+v", sealedExecution, persisted.OperationReceipts)
+	}
+	receipt = receipt.Normalized()
+	if receipt.Outcome != runtimecontract.RuntimeOperationOutcomeRejected || receipt.Evidence.ZeroWork ||
+		receipt.Evidence.Quality == common.EvidenceQualityInconclusive || receipt.Evidence.EvidenceReason == "configured zero-work marker matched" ||
+		len(receipt.Evidence.EvidenceTags) != 0 {
+		t.Fatalf("mixed aggregate failure receipt = %+v, want rejected non-zero-work evidence", receipt)
+	}
+	if receipt.Feedback == nil || receipt.Feedback.OriginalDiagnostic == nil ||
+		receipt.Feedback.OriginalDiagnostic.ValidationDiagnostic == nil ||
+		receipt.Feedback.OriginalDiagnostic.ValidationDiagnostic.Class != runtimecontract.ValidationDiagnosticBuildFailed {
+		t.Fatalf("mixed aggregate failure diagnostic = %+v, want validation build failure", receipt.Feedback)
+	}
+	receiptHash := runtimecontract.StableRuntimeOperationReceiptHash(receipt)
+	persistedReceiptHash := ""
+	for _, dispatch := range persisted.CompletedDispatches {
+		if dispatch.ID != sealedAggregate.ActiveDispatch.ID {
+			continue
+		}
+		for _, execution := range dispatch.OperationExecutions {
+			if execution.ExecutionKey == receipt.ExecutionKey && execution.Fence == receipt.Fence {
+				persistedReceiptHash = execution.OwnerReceiptHash
+			}
+		}
+	}
+	if receiptHash == "" || persistedReceiptHash != receiptHash {
+		t.Fatalf("Shell owner receipt hash was not exact-persisted: receipt=%+v dispatches=%+v", receipt, persisted.CompletedDispatches)
 	}
 	failureObservation := persisted.Facts.Failure.ValidationFailureObservation.Clone()
 	if !slices.Equal(failureObservation.CandidateTargetRefs, []string{"implementation.go"}) ||

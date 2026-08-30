@@ -910,6 +910,47 @@ func TestRuntimeAdapterPrefersWorkEvidenceMarkersOverZeroWorkMarkers(t *testing.
 	}
 }
 
+func TestRuntimeAdapterPreservesNonzeroFailureWhenOtherPackageReportsZeroWork(t *testing.T) {
+	adapter := NewRuntimeAdapter()
+	result, err := adapter.ExecuteOperation(context.Background(), RuntimeCommandRequest{
+		WorkspaceDeliverableDirectory: t.TempDir(),
+		Command:                       "sh",
+		Args: []string{"-c", "printf 'FAIL github.com/user/lsp-bridge/cmd/lsp-bridge [setup failed]\\n" +
+			"? github.com/user/lsp-bridge/internal/config [no test files]\\nFAIL\\n'; exit 1"},
+		EvidencePolicies: []runtimemodel.RuntimeEvidencePolicy{{
+			ID: "test-zero-work", AppliesTo: "shell/command", CommandName: "sh", ArgsContain: []string{"-c"},
+			ZeroWorkMarkers: []string{"[no test files]"}, WorkEvidenceMarkers: []string{"=== RUN", "--- PASS:", "ok  "},
+			QualityOnZeroWork: string(common.EvidenceQualityInconclusive), EvidenceReason: "configured zero-work marker matched",
+			EvidenceTags: []string{"test", "zero_work"},
+		}},
+	})
+	if err == nil {
+		t.Fatal("ExecuteOperation err = nil, want nonzero command failure")
+	}
+	if result.ExitCode != 1 || result.Status != "failed" {
+		t.Fatalf("result status = %q exitCode = %d, want failed/1", result.Status, result.ExitCode)
+	}
+	if result.ZeroWork || result.Evidence.ZeroWork {
+		t.Fatalf("result = %+v, want nonzero failure to remain non-zero-work", result)
+	}
+	if result.EvidenceQuality == string(common.EvidenceQualityInconclusive) || result.Evidence.Quality == common.EvidenceQualityInconclusive {
+		t.Fatalf("result = %+v, want nonzero failure not to be classified as inconclusive", result)
+	}
+	if result.EvidenceReason == "configured zero-work marker matched" || len(result.EvidenceTags) != 0 ||
+		result.Evidence.EvidenceReason == "configured zero-work marker matched" || len(result.Evidence.EvidenceTags) != 0 {
+		t.Fatalf("result = %+v, want zero-work policy metadata absent", result)
+	}
+	if result.ValidationFailureDiagnostic == nil ||
+		result.ValidationFailureDiagnostic.Class != runtimemodel.ValidationDiagnosticBuildFailed ||
+		result.ValidationFailureDiagnostic.RecommendedEvidenceTargetType != runtimemodel.ValidationEvidenceTargetFailureSurface {
+		t.Fatalf("diagnostic = %+v, want validation build failure", result.ValidationFailureDiagnostic)
+	}
+	if result.RuntimeDiagnostics.ValidationFailureDiagnostic == nil ||
+		result.RuntimeDiagnostics.ValidationFailureDiagnostic.Class != runtimemodel.ValidationDiagnosticBuildFailed {
+		t.Fatalf("runtime diagnostic = %+v, want validation build failure", result.RuntimeDiagnostics.ValidationFailureDiagnostic)
+	}
+}
+
 func TestSanitizeSuccessfulCommandStderrStripsCurlProgressMeter(t *testing.T) {
 	progress := "  % Total    % Received % Xferd  Average Speed   Time    Time     Time  Current\n" +
 		"                                 Dload  Upload   Total   Spent    Left  Speed\n" +

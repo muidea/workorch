@@ -4,7 +4,7 @@ Status: normative
 
 Type: verification-contract
 
-Last Verified: 2026-08-27
+Last Verified: 2026-08-30
 
 ## Purpose
 
@@ -41,7 +41,9 @@ and converges through the same neutral Runtime owner model. It must not make leg
 - one candidate contains at most one ordinary durable operation for each capability owner/canonical target; same-file edits are
   merged even when dependency order is declared, while an owner-sealed exact required operation sequence and distinct targets
   remain executable in one dispatch;
-- build/test/lint and direct entrypoint checks produce matching validation receipts;
+- build/test/lint and direct entrypoint checks produce matching validation receipts; a nonzero aggregate Go validation containing
+  an unrelated package's `[no test files]` remains a build/test failure and may match the sealed repair convergence, never
+  `validation_output_inconclusive` zero-work;
 - prospective validation preparation proves the profile-specific applicability split by publishing a provider-safe typed
   `all_of` clause set derived from the exact default recipe. The empty/source-only/module-only/ready workspace matrix must prove
   that missing root `go.mod`, test input and declared package roots become mandatory clauses without `one_of`/`any_of` fallback.
