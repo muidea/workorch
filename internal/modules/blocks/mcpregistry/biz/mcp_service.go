@@ -68,8 +68,7 @@ func (s *service) updateServer(ctx context.Context, cmd mcpevents.UpdateServerCo
 }
 
 func (s *service) getServer(ctx context.Context, id common.MCPServerID) (*mcpmodel.Server, string, error) {
-	id = common.MCPServerID(strings.TrimSpace(string(id)))
-	if id == "" {
+	if err := validateCanonicalRegistryID(string(id)); err != nil {
 		return nil, "", common.ErrInvalidArgument
 	}
 	snapshot, err := s.load(ctx)
@@ -142,8 +141,8 @@ func (s *service) createCapability(ctx context.Context, cmd mcpevents.CreateCapa
 
 func (s *service) updateCapability(ctx context.Context, cmd mcpevents.UpdateCapabilityCommand) (*mcpmodel.Capability, string, error) {
 	mutation := mcpevents.CreateCapabilityCommand(cmd)
-	id := common.MCPCapabilityID(strings.TrimSpace(string(mutation.CapabilityID)))
-	if id == "" {
+	id := mutation.CapabilityID
+	if err := validateCanonicalRegistryID(string(id)); err != nil {
 		return nil, "", common.ErrInvalidArgument
 	}
 	snapshot, err := s.mutate(ctx, func(next *mcpmodel.RegistrySnapshot) error {
@@ -179,8 +178,7 @@ func (s *service) updateCapability(ctx context.Context, cmd mcpevents.UpdateCapa
 }
 
 func (s *service) getCapability(ctx context.Context, id common.MCPCapabilityID) (*mcpmodel.Capability, string, error) {
-	id = common.MCPCapabilityID(strings.TrimSpace(string(id)))
-	if id == "" {
+	if err := validateCanonicalRegistryID(string(id)); err != nil {
 		return nil, "", common.ErrInvalidArgument
 	}
 	snapshot, err := s.load(ctx)
@@ -741,6 +739,13 @@ func registryContentRevision(snapshot *mcpmodel.RegistrySnapshot) string {
 	raw, _ := json.Marshal(value)
 	sum := sha256.Sum256(raw)
 	return "mcp-registry-" + hex.EncodeToString(sum[:])[:24]
+}
+
+func validateCanonicalRegistryID(value string) error {
+	if value == "" || strings.TrimSpace(value) != value || !validBoundedString(value, modulecommon.MaxIDBytes, true) {
+		return common.ErrInvalidArgument
+	}
+	return nil
 }
 
 func normalizeListRequest(cursor string, limit int) (string, int, error) {

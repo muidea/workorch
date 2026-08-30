@@ -15,6 +15,7 @@ import (
 
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/eventcontract"
+	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
 func TestRuntimeInternalFactsHaveCompleteOwnerPrivateClassification(t *testing.T) {
@@ -320,6 +321,26 @@ func TestRuntimeInternalEventEnvelopeRejectsMalformedPayloadBeforeLoadOrCAS(t *t
 				Kind:        RuntimeInternalEventDispatchExecutionRequested,
 				Scope:       scope,
 				Transaction: &RuntimeInternalTransactionPayload{RecoveryOperationID: "op-recovery", RecoveryBudgetAttempt: -1},
+			},
+		},
+		{
+			name: "receipt without exact owner source",
+			event: RuntimeInternalEvent{
+				Kind:  RuntimeInternalEventOperationReceiptObserved,
+				Scope: scope,
+				Transaction: &RuntimeInternalTransactionPayload{
+					OperationReceipt: &runtimecontract.RuntimeOperationReceipt{},
+				},
+			},
+		},
+		{
+			name: "receipt source on unrelated transaction",
+			event: RuntimeInternalEvent{
+				Kind:  RuntimeInternalEventCandidateRequestSubmitted,
+				Scope: scope,
+				Transaction: &RuntimeInternalTransactionPayload{
+					OperationReceiptOwnerSource: runtimecontract.RuntimeModuleFile,
+				},
 			},
 		},
 	}

@@ -753,8 +753,8 @@ func TestWorkspaceScopedEventPurgePreservesOwnerFilesAndGlobalPosition(t *testin
 		positions[index] = position
 	}
 	for _, item := range []*eventstreammodel.EventRecord{
-		{ID: "event-purge-system", Topic: "/test", WorkspaceID: workspaceID, StreamPosition: positions[0], Revision: 1},
-		{ID: "event-purge-run", Topic: "/test", WorkspaceID: workspaceID, RunID: runID, StreamPosition: positions[1], Revision: 2},
+		{ID: "event-purge-system", Topic: "/test", OccurredAt: "2026-08-25T00:04:00Z", WorkspaceID: workspaceID, StreamPosition: positions[0], Revision: 1},
+		{ID: "event-purge-run", Topic: "/test", OccurredAt: "2026-08-25T00:04:01Z", WorkspaceID: workspaceID, RunID: runID, StreamPosition: positions[1], Revision: 2},
 	} {
 		if err := repos.EventRecords.Append(scoped, item); err != nil {
 			t.Fatal(err)

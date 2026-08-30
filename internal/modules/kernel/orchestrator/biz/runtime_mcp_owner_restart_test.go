@@ -14,7 +14,6 @@ import (
 	"testing"
 
 	filebiz "github.com/muidea/workorch/internal/modules/blocks/file/biz"
-	runbiz "github.com/muidea/workorch/internal/modules/blocks/run/biz"
 
 	fileevents "github.com/muidea/workorch/internal/modules/blocks/file/pkg/events"
 
@@ -180,7 +179,7 @@ func TestRuntimeFileBackedMCPOwnerFailureTargetReceiptRestartMatrix(t *testing.T
 					t.Fatalf("file-backed initial runtime state = %+v err=%v", persistedRun, err)
 				}
 				runOwner := runmodule.New()
-				if err := runOwner.Configure(runbiz.Dependencies{Runs: runs, EventHub: hub}); err != nil {
+				if err := runOwner.Configure(runOwnerTestDependencies(runs, nil, nil, hub)); err != nil {
 					t.Fatal(err)
 				}
 				if err := runOwner.Start(); err != nil {
@@ -272,7 +271,7 @@ func TestRuntimeFileBackedMCPOwnerFailureTargetReceiptRestartMatrix(t *testing.T
 				receiptObserver := magicevent.NewSimpleObserver(orchestratorevents.CommandDestination, hub)
 				receiptObserver.Subscribe(orchestratorevents.TopicOrchestratorQueryRuntimeOperationReceipt, func(event magicevent.Event, result magicevent.Result) {
 					command := event.Data().(orchestratorevents.QueryRuntimeOperationReceiptCommand)
-					receipt, found, queryErr := receiptController.QueryOperationReceipt(event.Context(), command.WorkspaceID, command.RunID, command.DispatchID, command.OperationID, command.ExecutionKey, command.Fence, command.GovernanceGrant)
+					receipt, found, queryErr := receiptController.QueryOperationReceipt(event.Context(), command.WorkspaceID, command.RunID, command.DispatchID, command.OperationID, command.ExecutionKey, command.Fence, event.Source(), command.GovernanceGrant)
 					if queryErr != nil {
 						result.Set(nil, runtimeOperationMagicFailure(queryErr))
 						return
@@ -286,7 +285,7 @@ func TestRuntimeFileBackedMCPOwnerFailureTargetReceiptRestartMatrix(t *testing.T
 				})
 				receiptObserver.Subscribe(orchestratorevents.TopicOrchestratorCommitRuntimeOperationReceipt, func(event magicevent.Event, result magicevent.Result) {
 					command := event.Data().(orchestratorevents.CommitRuntimeOperationReceiptCommand)
-					next, receipt, commitErr := runtimeTestControllerCommitOperationReceipt(receiptController, event.Context(), command.WorkspaceID, command.RunID, command.DispatchID, command.Fence, command.Receipt)
+					next, receipt, commitErr := runtimeTestControllerCommitOperationReceipt(receiptController, event.Context(), command.WorkspaceID, command.RunID, command.DispatchID, command.Fence, event.Source(), command.Receipt)
 					if commitErr != nil {
 						result.Set(nil, runtimeOperationMagicFailure(commitErr))
 						return

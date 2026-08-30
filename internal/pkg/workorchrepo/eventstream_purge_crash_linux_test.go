@@ -58,11 +58,11 @@ func TestFileEventStreamPurgeCrashBetweenWorkspaceScopedPathsRecoversExactly(t *
 		"target-b-" + strings.Repeat("b", 9*1024),
 	}
 	records := []*eventstreammodel.EventRecord{
-		{ID: "event-target-system", Topic: "/target/system", WorkspaceID: targetWorkspace, Revision: 1,
+		{ID: "event-target-system", Topic: "/target/system", OccurredAt: "2026-08-26T03:00:00Z", WorkspaceID: targetWorkspace, Revision: 1,
 			Payload: mustWorkspaceScopedPayload(t, map[string]any{"content": targetSecrets[0]})},
-		{ID: "event-target-run-a", Topic: "/target/run-a", WorkspaceID: targetWorkspace, RunID: targetRuns[0], Revision: 2,
+		{ID: "event-target-run-a", Topic: "/target/run-a", OccurredAt: "2026-08-26T03:00:01Z", WorkspaceID: targetWorkspace, RunID: targetRuns[0], Revision: 2,
 			Payload: mustWorkspaceScopedPayload(t, map[string]any{"content": targetSecrets[1]})},
-		{ID: "event-target-run-b", Topic: "/target/run-b", WorkspaceID: targetWorkspace, RunID: targetRuns[1], Revision: 3,
+		{ID: "event-target-run-b", Topic: "/target/run-b", OccurredAt: "2026-08-26T03:00:02Z", WorkspaceID: targetWorkspace, RunID: targetRuns[1], Revision: 3,
 			Payload: mustWorkspaceScopedPayload(t, map[string]any{"content": targetSecrets[2]})},
 		{ID: "event-other-system", Version: "workorch.event", Topic: "/other/system", OccurredAt: "2026-08-26T03:00:00Z",
 			SourceModule: "blocks/other", SubjectType: "other", SubjectID: "other-system", WorkspaceID: otherWorkspace, Revision: 4,

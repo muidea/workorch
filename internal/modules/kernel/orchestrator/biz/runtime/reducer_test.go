@@ -1001,10 +1001,15 @@ func TestReduceRuntimeStateUsesOwnerGroundedFailureForStateChangeRepair(t *testi
 	}
 
 	grounded := base
+	targetObservation := &runtimecontract.RuntimeFailureTargetObservation{
+		OwnerModuleID: runtimecontract.RuntimeModuleFile, SubjectRef: "workspace_deliverable",
+		TargetRole: "implementation", ObservedRevision: "file-revision-1", TargetRefs: []string{"implementation.go"},
+	}
 	grounded.Failure = &runtimecontract.FailureFact{
 		Class: runtimecontract.FailureClassExecutionFailure, Signature: "build-failed", Message: "build failed", TargetRefs: []string{"implementation.go"},
+		TargetObservation: targetObservation,
 	}
-	grounded.Resources.FailureTarget = &runtimecontract.FailureTarget{Signature: "build-failed", TargetRefs: []string{"implementation.go"}}
+	grounded.Resources.FailureTarget = &runtimecontract.FailureTarget{Signature: "build-failed", TargetRefs: []string{"implementation.go"}, TargetObservation: targetObservation}
 	decision, err = reduceRuntimeStateFixture(t, grounded, nil)
 	if err != nil {
 		t.Fatal(err)
@@ -1019,19 +1024,29 @@ func TestReduceRuntimeStateUsesOwnerGroundedFailureForStateChangeRepair(t *testi
 
 func TestOwnerGroundedFailureRepairKindsRequiresCompleteOwnerAuthority(t *testing.T) {
 	const prerequisiteID = "operation-admissibility:file-repair"
+	const shellPrerequisiteID = "operation-admissibility:shell-repair"
 	base := func() runtimecontract.RuntimeFacts {
 		return runtimecontract.RuntimeFacts{
 			Focus: runtimecontract.CoverageFocus{AcceptedStepKinds: []string{runtimecontract.StepKindMCPToolCall}},
 			Failure: &runtimecontract.FailureFact{
 				Class: runtimecontract.FailureClassExecutionFailure, Signature: "validation-failed", TargetRefs: []string{"implementation.go"},
 			},
-			Capabilities: runtimecontract.RuntimeCapabilities{StateChangeKinds: []string{runtimecontract.RuntimeBlockKindPatchApply}},
+			Capabilities: runtimecontract.RuntimeCapabilities{StateChangeKinds: []string{runtimecontract.RuntimeBlockKindPatchApply, runtimecontract.StepKindShellCommand}},
 			Prerequisites: runtimecontract.PrerequisiteState{Satisfied: []runtimecontract.RuntimePrerequisite{{
 				ID: prerequisiteID, Kind: runtimecontract.PrerequisiteKindOperationAdmissibility,
 				OwnerModuleID: runtimecontract.RuntimeModuleFile, RequiredCapabilities: []string{runtimecontract.RuntimeBlockKindPatchApply},
+			}, {
+				ID: shellPrerequisiteID, Kind: runtimecontract.PrerequisiteKindOperationAdmissibility,
+				OwnerModuleID: runtimecontract.RuntimeModuleShell, RequiredCapabilities: []string{runtimecontract.StepKindShellCommand},
 			}}},
 			Resources: runtimecontract.RuntimeResourceFacts{
-				FailureTarget: &runtimecontract.FailureTarget{Signature: "validation-failed", TargetRefs: []string{"implementation.go"}},
+				FailureTarget: &runtimecontract.FailureTarget{
+					Signature: "validation-failed", TargetRefs: []string{"implementation.go"},
+					TargetObservation: &runtimecontract.RuntimeFailureTargetObservation{
+						OwnerModuleID: runtimecontract.RuntimeModuleFile, SubjectRef: "workspace_deliverable",
+						TargetRole: "implementation", ObservedRevision: "file-revision-1", TargetRefs: []string{"implementation.go"},
+					},
+				},
 				OperationAdmissibilities: []runtimecontract.RuntimeOperationAdmissibility{{
 					PrerequisiteID: prerequisiteID, SnapshotID: "file-repair-catalog", OwnerModuleID: runtimecontract.RuntimeModuleFile,
 					OperationKinds: []string{runtimecontract.RuntimeBlockKindPatchApply}, TargetRefs: []string{"implementation.go"}, ObservedRevision: "file-revision-1",
@@ -1039,17 +1054,50 @@ func TestOwnerGroundedFailureRepairKindsRequiresCompleteOwnerAuthority(t *testin
 						Kind: runtimecontract.RuntimeBlockKindPatchApply, VariantID: "file_write",
 						AllowedTargetPolicies: []runtimecontract.RuntimeOperationTargetPolicy{runtimecontract.RuntimeOperationTargetPolicyExactTarget},
 					}},
+				}, {
+					PrerequisiteID: shellPrerequisiteID, SnapshotID: "shell-repair-catalog", OwnerModuleID: runtimecontract.RuntimeModuleShell,
+					OperationKinds: []string{runtimecontract.StepKindShellCommand}, TargetRefs: []string{"implementation.go"}, ObservedRevision: "shell-revision-1",
 				}},
 				PrerequisiteObservations: []runtimecontract.RuntimePrerequisiteObservation{{
 					PrerequisiteID: prerequisiteID, Kind: runtimecontract.PrerequisiteKindOperationAdmissibility,
 					OwnerModuleID: runtimecontract.RuntimeModuleFile, ObservationID: "file-repair-observation", ContentHash: "file-repair-catalog",
+				}, {
+					PrerequisiteID: shellPrerequisiteID, Kind: runtimecontract.PrerequisiteKindOperationAdmissibility,
+					OwnerModuleID: runtimecontract.RuntimeModuleShell, ObservationID: "shell-repair-observation", ContentHash: "shell-repair-catalog",
 				}},
 			},
 		}
 	}
 
-	if got := ownerGroundedFailureRepairKinds(base()); len(got) != 1 || got[0] != runtimecontract.RuntimeBlockKindPatchApply {
+	facts := base()
+	if got := ownerGroundedFailureRepairKinds(facts); len(got) != 1 || got[0] != runtimecontract.RuntimeBlockKindPatchApply {
 		t.Fatalf("complete owner repair authority kinds = %v", got)
+	}
+	decision, err := stateChangeDecision(runtimecontract.RuntimeDecision{}, facts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := decision.RequiredOutput.AcceptedKinds; len(got) != 1 || got[0] != runtimecontract.RuntimeBlockKindPatchApply {
+		t.Fatalf("owner-grounded decision leaked cross-owner repair kinds = %v", got)
+	}
+	receiptGrounded := base()
+	receiptGrounded.Resources.FailureTarget.TargetObservation = &runtimecontract.RuntimeFailureTargetObservation{
+		OwnerModuleID: runtimecontract.RuntimeModuleMCP, SubjectRef: "mcp-observed-target",
+		TargetRole: "implementation", ObservedRevision: "mcp-receipt-1", TargetRefs: []string{"implementation.go"},
+		CatalogDependency: &runtimecontract.RuntimeFreshnessDependency{
+			Domain: runtimecontract.RuntimeResourceOwnerCatalog, OwnerModuleID: runtimecontract.RuntimeModuleMCP,
+			SubjectRef: "mcp_server_catalog", Revision: "mcp-catalog-1",
+		},
+	}
+	receiptGrounded.Resources.TargetSnapshots = []runtimecontract.TargetSnapshot{{
+		TargetRef: "implementation.go", ContentHash: "file-content-1", ContentState: runtimecontract.SnapshotContentStateComplete,
+	}}
+	if got := ownerGroundedFailureRepairKinds(receiptGrounded); len(got) != 1 || got[0] != runtimecontract.RuntimeBlockKindPatchApply {
+		t.Fatalf("receipt-evidence target did not resolve to File repair authority: %v", got)
+	}
+	receiptGrounded.Resources.TargetSnapshots = nil
+	if got := ownerGroundedFailureRepairKinds(receiptGrounded); len(got) != 0 {
+		t.Fatalf("receipt-evidence target without File snapshot granted repair authority: %v", got)
 	}
 	for _, test := range []struct {
 		name   string

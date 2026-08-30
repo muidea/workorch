@@ -53,9 +53,14 @@ type RuntimeInternalTransactionPayload struct {
 	Stale                *runtimecontract.RuntimePrerequisiteStale
 
 	OperationReceipt *runtimecontract.RuntimeOperationReceipt
-	DispatchID       string
-	Fence            uint64
-	Executor         RuntimeOperationExecutor
+	// OperationReceiptOwnerSource is the exact EventHub producer identity
+	// observed by the Orchestrator adapter. It is admitted only with
+	// OperationReceiptObserved and is checked against the sealed operation
+	// descriptor in the same aggregate load/CAS transaction as the receipt.
+	OperationReceiptOwnerSource string
+	DispatchID                  string
+	Fence                       uint64
+	Executor                    RuntimeOperationExecutor
 	// Recovery authorization is produced only after the independent SM-4
 	// RecoveryBudgetConsumed event commits.  The attempt is an exact persisted
 	// counter fence, not a request to mutate the budget from the SM-3 handler.

@@ -459,7 +459,7 @@ func TestManagedValidationReceiptRejectsDirectDiagnosticTargetsAtCommitAndFreshL
 				Outcome: runtimecontract.RuntimeOperationOutcomeRejected, ObservedEffectScope: runtimecontract.RuntimeEffectEphemeralSession,
 				Feedback: runtimeOperationFeedbackForTest(t, claimed, operationID, failure),
 			}
-			if _, _, err := controller.commitOperationReceipt(context.Background(), claimed.Facts.WorkspaceID, claimed.Facts.RunID, claimed.ActiveDispatch.ID, execution.Fence, receipt); err == nil ||
+			if _, _, err := controller.commitOperationReceipt(context.Background(), claimed.Facts.WorkspaceID, claimed.Facts.RunID, claimed.ActiveDispatch.ID, execution.Fence, runtimecontract.RuntimeModuleShell, receipt); err == nil ||
 				!strings.Contains(err.Error(), "managed-validation receipt cannot carry direct diagnostic target refs") {
 				t.Fatalf("receipt commit error = %v", err)
 			}

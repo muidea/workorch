@@ -993,7 +993,7 @@ func registerRuntimeOperationReceiptOwner(t *testing.T, hub magicevent.Hub, cont
 	observer := magicevent.NewSimpleObserver(orchestratorevents.CommandDestination, hub)
 	observer.Subscribe(orchestratorevents.TopicOrchestratorQueryRuntimeOperationReceipt, func(event magicevent.Event, result magicevent.Result) {
 		command := event.Data().(orchestratorevents.QueryRuntimeOperationReceiptCommand)
-		receipt, found, err := controller.QueryOperationReceipt(event.Context(), command.WorkspaceID, command.RunID, command.DispatchID, command.OperationID, command.ExecutionKey, command.Fence, command.GovernanceGrant)
+		receipt, found, err := controller.QueryOperationReceipt(event.Context(), command.WorkspaceID, command.RunID, command.DispatchID, command.OperationID, command.ExecutionKey, command.Fence, event.Source(), command.GovernanceGrant)
 		if err != nil {
 			result.Set(nil, runtimeMagicFailure(err))
 			return
@@ -1006,7 +1006,7 @@ func registerRuntimeOperationReceiptOwner(t *testing.T, hub magicevent.Hub, cont
 	})
 	observer.Subscribe(orchestratorevents.TopicOrchestratorCommitRuntimeOperationReceipt, func(event magicevent.Event, result magicevent.Result) {
 		command := event.Data().(orchestratorevents.CommitRuntimeOperationReceiptCommand)
-		next, receipt, err := controller.commitOperationReceipt(event.Context(), command.WorkspaceID, command.RunID, command.DispatchID, command.Fence, command.Receipt)
+		next, receipt, err := controller.commitOperationReceipt(event.Context(), command.WorkspaceID, command.RunID, command.DispatchID, command.Fence, event.Source(), command.Receipt)
 		if err != nil {
 			result.Set(nil, runtimeMagicFailure(err))
 			return

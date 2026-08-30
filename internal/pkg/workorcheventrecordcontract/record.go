@@ -4,9 +4,27 @@
 package workorcheventrecordcontract
 
 import (
+	"fmt"
+	"strings"
+	"time"
+
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
 )
+
+// CanonicalOccurredAt validates an event source timestamp and returns the
+// single persisted representation used by the Eventstream owner.
+func CanonicalOccurredAt(value string) (string, error) {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return "", fmt.Errorf("%w: event record occurredAt is required", common.ErrInvalidArgument)
+	}
+	parsed, err := time.Parse(time.RFC3339Nano, value)
+	if err != nil {
+		return "", fmt.Errorf("%w: event record occurredAt must be RFC3339: %v", common.ErrInvalidArgument, err)
+	}
+	return parsed.UTC().Format(time.RFC3339Nano), nil
+}
 
 // Record is the complete immutable value appended by the Eventstream owner.
 // Protocol projections may redact or reshape it but must not post it back as

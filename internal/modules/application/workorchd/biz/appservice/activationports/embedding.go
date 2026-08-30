@@ -21,11 +21,12 @@ func GenerateEmbedding(ctx context.Context, hub magicevent.Hub, workspaceID comm
 	if hub == nil || workspaceID == "" || target.Validate() != nil || strings.TrimSpace(input) == "" {
 		return llmmodels.ProviderEmbeddingResult{}, common.ErrInvalidArgument
 	}
-	ev := magicevent.NewEventWithContext(llmevents.TopicLLMCommandGenerateEmbedding, modulecommon.ModuleID, llmevents.CommandDestination, magicevent.NewHeader(), ctx, llmevents.GenerateEmbeddingCommand{
+	command := llmevents.GenerateEmbeddingCommand{
 		WorkspaceID: workspaceID,
 		Target:      target,
 		Input:       strings.TrimSpace(input),
-	})
+	}
+	ev := magicevent.NewEventWithContext(llmevents.TopicLLMCommandGenerateEmbedding, modulecommon.ModuleID, llmevents.CommandDestination, magicevent.NewHeader(), ctx, command)
 	ev.BindLaneKey(events.EventHubLaneKeyFor(llmevents.Contracts(), llmevents.TopicLLMCommandGenerateEmbedding, eventcontract.LaneScope{SubjectType: "llm_embedding", SubjectID: target.ProviderID + "/" + target.ModelID, WorkspaceID: string(workspaceID)}))
 	result := hub.Send(ev)
 	if result == nil {
@@ -41,9 +42,18 @@ func GenerateEmbedding(ctx context.Context, hub magicevent.Hub, workspaceID comm
 	if resultErr != nil {
 		return llmmodels.ProviderEmbeddingResult{}, resultErr
 	}
-	response, ok := data.(llmevents.LLMCommandResult)
-	if !ok || response.Embedding == nil {
+	response, ok := data.(llmevents.GenerateEmbeddingResult)
+	if !ok {
 		return llmmodels.ProviderEmbeddingResult{}, fmt.Errorf("%w: llm embedding result type %T", common.ErrInvalidArgument, data)
 	}
-	return *response.Embedding, nil
+	if err := response.ValidateFor(command); err != nil {
+		return llmmodels.ProviderEmbeddingResult{}, err
+	}
+	embedding := response.Embedding
+	embedding.Vector = append([]float64(nil), response.Embedding.Vector...)
+	if response.Embedding.Usage != nil {
+		usage := *response.Embedding.Usage
+		embedding.Usage = &usage
+	}
+	return embedding, nil
 }

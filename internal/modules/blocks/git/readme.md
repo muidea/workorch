@@ -4,90 +4,49 @@ Status: active
 
 Type: capability-block-contract
 
-Last Verified: 2026-08-26
+Last Verified: 2026-08-30
 
 ## 功能范围与边界
 
-`blocks/git` 提供受控的 Git read/write 运行时能力。Git-private adapter 保留有界规范化输出；跨 Owner
-只返回权威 `RuntimeOperationReceipt`，不会把 stdout、stderr、diff 或完整私有结果 DTO 暴露为第二套结果合同。
+`blocks/git` 是 `git/read` 与 `git/write` 的 capability owner。它在 workspace deliverable repository 内执行固定 Git
+operation catalog，观察 repository/File revision，并把 owner-private 命令结果规范化为 typed fact 或
+`RuntimeOperationReceipt`。
+
+Git stdout、stderr、diff 和完整私有 DTO 不跨 owner。跨 owner 的执行结果只有有界 evidence、resource change 与 receipt。
 
 ## 组件交互及合同
 
-- `kernel/orchestrator` 通过 Git owner 在 `blocks/git/pkg/events` 定义的 `ExecuteOperationCommand/Result` 同步投递
-  Git 操作；本组件直接订阅 EventHub，不启动通用 runtime executor 或第二套执行通知。
-- Runtime capability、operation-admissibility、operation-feasibility、semantic-proof feasibility、CWI reconciliation
-  与 capability-state acquisition 均使用 Git owner 定义的 concrete typed command/result。
-- Git capability-state prerequisite 的 canonical owner identity 是 `blocks/git`；profile 只能通过该 identity 请求 `repository_state`，不得使用 `git` 等 EventHub destination 别名。
-- Git capability-state receipt 是 Git owner 的 durable prerequisite evidence，按 `<repository.dataDir>/internal/workspaces/<workspaceId>/runtime/git-capability-state-receipts/` 分区；同一 workspace/acquisition key 只能对应同一快照。它不写入 deliverable，随 workspace internal directory 的受控删除一并清理。
-- capability-state receipt 的首次发布使用 owner-private temp file `write -> file fsync -> close -> hard-link-if-absent`；创建目录后从
-  receipt leaf 到 configured data root 逐级 fsync。发布成功或并发 exact duplicate 都必须先 unlink 当前 temp alias，再以 leaf
-  directory fsync 作为最终 durability fence；任一 mkdir-chain、unlink 或最终 fsync 失败均不得确认成功，exact retry 只重验并
-  重同步同一 immutable receipt，不引入新的状态转换。
-- Runtime Git operation 以 `RuntimeOperationReceipt.Outcome` 为唯一结果。`ExecuteOperationCommand` 只携带
-  execution context、完整 `SealedRuntimeOperation` 与 prerequisite facts；Git 校验发送方必须是 Orchestrator、
-  payload hash、operation/target/CWI scope，并从 seal 内派生 adapter 参数，不再接受可独立漂移的 `Data`。
-- `git add` 的 pathspec 必须由同一 sealed operation 的 exact target refs（或 owner selector
-  `workspace-repository`）授权。执行前后比较完整的有界 porcelain state；已有 staged 文件不构成本次变化，
-  重复 add 返回 `no_op`，不会生成 repository resource change。
-- Git read 的 `ref/baseRef` 拒绝 option-shaped、控制字符和超长输入，并在 argv 中使用
-  `--end-of-options`；声明为 `effect=none` 的 read 不能借 ref 写文件。
-- public receipt 保留 summary、exit code、规范化内容 hash、最多 64 个 changed/commit evidence refs、
-  add 的 before/after hash 与 repository revision change。原始 stdout/stderr/diff 只留在 Git-private result；
-  stdout/stderr 在子进程 pipe 写入时即分别按 64 KiB（diff 128 KiB）限长保留，同时独立累计真实总字节数；失败反馈仅记录
-  安全摘要、原始字节数、截断和 `raw_git_command_output` omitted metadata，不声称完整 raw diagnostic。
-- Orchestrator 和 Approval 流程在写操作进入本 block 前完成策略准入和必要授权。
-- workspace repository manifest 通过 File owner 的 `AcquireWorkspaceManifestCommand/Result` 获取；Git 对
-  workspace/run/authority/prerequisite scope 和完整 manifest binding 做精确校验，并在 operation feasibility 与
-  effect 前重新读取 File workspace-tree revision。Git 不读取 File repository/service，也不取得 workspace tree 所有权。
-- Git repository revision 使用 `git-state-v2` 对有界完整 porcelain observation 哈希；File revision 单独覆盖
-  “路径仍 dirty 但内容已变化”的 freshness。
-- effect 前后通过 Orchestrator 的 receipt query/commit concrete command 完成幂等握手。receipt query 的
-  `found=false` 只对当前 active dispatch 中 exact operation/execution-key/fence 且状态为 `claimed` 的记录成立；
-  sealed、stale、completed、invalidated 或伪造 identity 均 fail-closed。query 的 Found/Receipt 一致性与 receipt identity、
-  commit 的完整 receipt equality 使用 capability owners 共享的 typed event-contract validator。
-- execute handler 要求同步 result；误投为 `Post` 时在 receipt 查询和 Git 调用前返回，不产生副作用。
+| 交互方 | 方向 | concrete typed 合同 |
+| --- | --- | --- |
+| Orchestrator | Orchestrator → Git | `AcquireRuntimeCapabilities`、`AcquireRuntimeOperationAdmissibility`、`ProbeRuntimeOperationFeasibility`、`ProbeRuntimeSemanticProofFeasibility`、`QueryRuntimeCWIReconciliation`、`AcquireCapabilityState`、`ExecuteOperation` Command/Result |
+| Orchestrator | Git → Orchestrator | typed runtime-operation receipt query/commit；query 只授权 exact active claim，commit 只接受完整 receipt equality |
+| File owner | Git → File | `AcquireWorkspaceManifestCommand/Result`，用于 workspace-tree binding 和 effect 前 freshness 重验 |
+| Git repository | Git-private | 固定 `status/diff/log/show/branch/init/add/commit` argv、输出解析、revision/effect observation |
 
-## 交互合同完整性
+Owner topic、Command/Result 与 seal 类型的定义源是 `blocks/git/pkg/events`。Git 不读取 File service/repository，也不暴露
+跨 owner service facade。
 
-| 交互组件 | 方向 | 具体合同 | 当前结论 |
-| --- | --- | --- | --- |
-| `kernel/orchestrator` | 双向 | capability/admissibility/feasibility/reconciliation/state acquisition/execute；receipt query/commit | 当前生产路径完整；execute 与 receipt authorization 均为 exact sealed identity |
-| `blocks/file` | Git → File | `AcquireWorkspaceManifestCommand/Result` | 当前生产路径完整；只读 scoped binding，并在 feasibility/effect 前重验 |
-| Git repository | Git-private adapter | sealed read/write operation、bounded evidence 与 revision observation | 当前 operation catalog 完整；无任意 CLI 文本入口，raw output 不跨 Owner |
+## 不变量与非职责
 
-## 相关约束
+- repository root 必须等于解析后的 deliverable root；父仓库、bare repository、外置或 symlink `.git` 均不取得 authority。
+- read ref/baseRef 拒绝 option-shaped、控制字符和超长输入；不提供任意 Git CLI、remote 或 history rewrite 入口。
+- write 只能使用 sealed operation 授权的 target/pathspec；`add` 根据完整 index delta 判断 changed/no-op。
+- capability-state receipt 按 workspace 分区、不可变并 durable 发布；同 acquisition key 的不同 snapshot 必须冲突。
+- effect 前必须重验 File-owned workspace-tree revision，repository revision 与 File revision 不得相互替代。
+- 全部七个 Runtime ingress 都是 strong call：必须先确认同步 `Result` 与 exact `kernel/orchestrator` producer，再解析 concrete
+  Command；Post/nil Result、错误 producer 或错误 concrete payload 均不得触发 File query、repository query/effect 或 receipt I/O。
+- 本组件不拥有 Run、Result、CWI credit、retry、governance 或 terminal 状态；Git fact/evidence 不能直接判定 DoD。
+- CWI reconciliation 只可陈述 repository fact；repository revision 不能替代 check、metric、artifact 或 semantic proof。
 
-- Git 操作只能作用于 workspace deliverable repository。
-- Git adapter 只有当前构造合同；不存在 `enabled/writeEnabled` 参数、禁用开关兼容分支或被忽略的旧配置值。
-- repository root 必须与解析后的 deliverable root 相同，Git control directory 也必须位于该 root 内；父仓库继承、外置
-  `gitdir`、`.git` symlink 与 bare repository 均不得取得 workspace Git authority。workspace 内指向外部文件的 symlink
-  只按 Git symlink identity 暂存，不跟随或修改外部目标。
-- 不得执行未声明或未准入的远程操作、历史改写或任意 Git CLI 文本。
-- 本 block 不访问其他组件 service/repository，不拥有 Run、Result 或 completion 状态。
-- Git 输出只作为 evidence candidate，不能直接判定 DoD 或 Result accepted。
-- 本 owner 私有 code 只在 Git Biz 边界映射为 factual category；不得选择 correction、retry、governance、terminal
-  或修改 Runtime aggregate。unknown code 保留原 code/message 并 typed fail-fast。
-- CWI reconciliation 只返回 repository presence/revision 这一 Git fact；binding 同时要求 check、metric 或 artifact
-  时必须返回 `unverifiable/git_proof_incomplete`。commit/revision 本身不能替代 semantic validation proof。
+## 能力验收
 
-## 测试覆盖状态
-
-已覆盖：
-
-- File workspace-tree binding、dirty-content stale feasibility 与 effect 前 stale 拒绝。
-- durable capability receipt 的重启加载、重复 acquisition、同 key 不同 snapshot 冲突。
-- durable receipt 目录链 leaf-to-root fsync、final-link 后 temp-unlink-before-leaf-fsync 顺序、并发 exact duplicate，以及
-  mkdir-chain/final-sync 故障注入与幂等重试。
-- exact owner receipt 重放、Orchestrator active/claimed query authorization、resource-change crash/restart。
-- ref option injection、sealed payload/target drift、非 Orchestrator source、Post 强调用和重复 add no-op。
-- CWI reconciliation 仅形成 repository fact，check/metric/artifact 要求返回 unverifiable。
-- File responder missing/nil/wrong type、owner error、workspace/run/authority/prerequisite identity 与 manifest binding 漂移。
-- 未声明 remote/history-rewrite operation 的 read/write 全矩阵，ref/baseRef option/control/oversize 输入，以及 operation variant
-  catalog 与 descriptor 的精确一致性。
-- 父仓库、非 repository、外置 `.git` file/symlink、workspace symlink identity 与 capability receipt 跨 workspace 隔离。
-- 大 diff 与 900-file dirty repository 的 retained bytes、changed-files/evidence-ref 上限回归及 allocation benchmark。
-
-## 当前验证结论
-
-- 当前没有已知的本地可执行合同或测试缺口。不同部署环境中的 Git binary/version 兼容性保留为 deployed verification；
-  版本差异不得扩展固定 operation catalog、revision grammar 或 workspace 边界。
+| 验收维度 | 自动化证据 | 状态 |
+| --- | --- | --- |
+| normal | `TestRuntimeAdapterReadBranchLogAndShowFromCommittedRepository`、read/status/diff 与 init/add/commit adapter tests | 已覆盖固定 operation catalog 的主要正常路径，包括非空 branch/log/show 解码 |
+| invalid + scope | option/pathspec、remote/history rewrite、parent/external gitdir、detached HEAD、expected-head、File responder matrix、`TestGitRuntimeIngressTopicMatrixEnforcesStrongOrchestratorCalls` | 已覆盖主要输入/repository scope，并穷举七 topic 的 wrong source、wrong concrete payload 与 Post/nil Result 零查询/零 effect |
+| duplicate + idempotency | `TestRuntimeAdapterWriteInitIsIdempotentForExistingRepository`、重复 add/no-op、`TestGitOwnerStateChangingReceiptReplaysWithoutSecondOperationAfterOwnerRecreation` | 已覆盖 owner receipt 与主要 write 幂等路径 |
+| stale + freshness | `TestGitOwnerCapabilityBoundAdmissibilityRejectsMismatchedProbeBindingAsStale`、`TestGitOwnerRechecksFileWorkspaceTreeBeforeFeasibilityAndExecution` | 已覆盖 catalog/File revision stale fence |
+| restart / owner 重建 | `TestGitOwnerStateChangingReceiptReplaysWithoutSecondOperationAfterOwnerRecreation`、capability receipt store durable tests | 已覆盖 receipt 重放和 durable capability-state 加载 |
+| lifecycle | `TestGitModuleIdentityConfigureStartStopContract`、`TestGitOwnerLifecycleFencesSubscriptionsAndCapabilityDelivery` | 仅以 `AcquireRuntimeCapabilities` 代表 topic 覆盖 started fence、重复 Start、Stop 后零投递、重复 Stop 与 fresh-owner restart；不是七 topic lifecycle 矩阵 |
+| effect + receipt | resource-change、repository revision、crash/restart 与 state-changing receipt tests | 已覆盖 write effect；read execute 的完整 owner receipt topic 矩阵仍未单独覆盖 |
+| boundary | `TestGitOwnerAcquiresCapabilitiesThroughTypedEventHubContract`、`TestGitRuntimeIngressTopicMatrixEnforcesStrongOrchestratorCalls`、seal/authority tests、File typed responder matrix | 已覆盖七个订阅 topic 的 exact producer/strong-call/concrete payload 边界；semantic-proof 的真实 EventHub happy/stale 路径尚未直接覆盖 |

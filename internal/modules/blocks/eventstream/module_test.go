@@ -124,13 +124,21 @@ func eventstreamModuleContractDependencies() eventstreambiz.Dependencies {
 
 }
 
+func eventstreamModulePersistedRecord(id common.EventRecordID, workspaceID common.WorkspaceID, revision int64) *eventstreammodel.EventRecord {
+	return &eventstreammodel.EventRecord{
+		ID: id, Version: "workorch.event", Topic: "/test", OccurredAt: "2026-08-30T00:00:00Z",
+		SourceModule: "blocks/test", SubjectType: "test", SubjectID: string(id), WorkspaceID: workspaceID,
+		StreamPosition: revision, Revision: revision,
+	}
+}
+
 func TestPurgeWorkspaceCommandAcceptsContractPayload(t *testing.T) {
 	ctx := context.Background()
 	rawHub := magicevent.NewHub(16)
 	owner := memory.NewEventStreamOwnerRepositorySet()
 	repo := owner.EventRecords
 	workspaceID := common.WorkspaceID("ws-eventstream-contract")
-	if err := repo.Append(ctx, &eventstreammodel.EventRecord{ID: "event-contract", WorkspaceID: workspaceID, Topic: "/test"}); err != nil {
+	if err := repo.Append(ctx, eventstreamModulePersistedRecord("event-contract", workspaceID, 1)); err != nil {
 		t.Fatalf("seed event record: %v", err)
 	}
 	module := New()
@@ -176,7 +184,7 @@ func TestWorkspaceDeletionSealPostedWithoutResultDoesNotFence(t *testing.T) {
 	owner := memory.NewEventStreamOwnerRepositorySet()
 	repo := owner.EventRecords
 	workspaceID := common.WorkspaceID("ws-eventstream-post-purge")
-	if err := repo.Append(ctx, &eventstreammodel.EventRecord{ID: "event-post-purge", WorkspaceID: workspaceID, Topic: "/test"}); err != nil {
+	if err := repo.Append(ctx, eventstreamModulePersistedRecord("event-post-purge", workspaceID, 1)); err != nil {
 		t.Fatal(err)
 	}
 	module := New()
@@ -218,8 +226,8 @@ func TestListEventsCommandUsesConcreteBoundedResult(t *testing.T) {
 	repo := owner.EventRecords
 	workspaceID := common.WorkspaceID("ws-eventstream-list")
 	for _, item := range []*eventstreammodel.EventRecord{
-		{ID: "event-list-1", WorkspaceID: workspaceID, Topic: "/test", Revision: 1},
-		{ID: "event-list-2", WorkspaceID: workspaceID, Topic: "/test", Revision: 2},
+		eventstreamModulePersistedRecord("event-list-1", workspaceID, 1),
+		eventstreamModulePersistedRecord("event-list-2", workspaceID, 2),
 	} {
 		if err := repo.Append(ctx, item); err != nil {
 			t.Fatal(err)
@@ -249,9 +257,9 @@ func TestHighWatermarksCommandReadsPersistedWorkspaceRevisions(t *testing.T) {
 	owner := memory.NewEventStreamOwnerRepositorySet()
 	repo := owner.EventRecords
 	for _, item := range []*eventstreammodel.EventRecord{
-		{ID: "event-a-1", WorkspaceID: "ws-a", Topic: "/test", Revision: 1},
-		{ID: "event-a-7", WorkspaceID: "ws-a", Topic: "/test", Revision: 7},
-		{ID: "event-b-3", WorkspaceID: "ws-b", Topic: "/test", Revision: 3},
+		eventstreamModulePersistedRecord("event-a-1", "ws-a", 1),
+		eventstreamModulePersistedRecord("event-a-7", "ws-a", 7),
+		eventstreamModulePersistedRecord("event-b-3", "ws-b", 3),
 	} {
 		if err := repo.Append(ctx, item); err != nil {
 			t.Fatal(err)

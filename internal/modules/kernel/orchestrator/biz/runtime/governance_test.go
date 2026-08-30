@@ -500,7 +500,7 @@ func TestRecordOperationGovernanceRequiredDoesNotUseExecutionRepair(t *testing.T
 		Evidence: runtimecontract.RuntimeOperationEvidence{Summary: "completed non-credit predecessor", ContentHash: "completed-predecessor-hash"},
 	}
 	predecessorReceiptAggregate, _, err := controller.commitOperationReceipt(
-		context.Background(), "ws-v2", "run-v2", claimedPredecessor.ActiveDispatch.ID, predecessorExecution.Fence, predecessorReceipt,
+		context.Background(), "ws-v2", "run-v2", claimedPredecessor.ActiveDispatch.ID, predecessorExecution.Fence, runtimecontract.RuntimeModuleFile, predecessorReceipt,
 	)
 	if err != nil {
 		t.Fatal(err)
@@ -542,7 +542,7 @@ func TestRecordOperationGovernanceRequiredDoesNotUseExecutionRepair(t *testing.T
 		Outcome: runtimecontract.RuntimeOperationOutcomeGovernanceRequired, ObservedEffectScope: runtimecontract.RuntimeEffectGovernanceOnly,
 		Governance: &requirement,
 	}
-	_, committed, err := controller.commitOperationReceipt(context.Background(), "ws-v2", "run-v2", sealed.ActiveDispatch.ID, execution.Fence, receipt)
+	_, committed, err := controller.commitOperationReceipt(context.Background(), "ws-v2", "run-v2", sealed.ActiveDispatch.ID, execution.Fence, runtimecontract.RuntimeModuleFile, receipt)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -795,17 +795,17 @@ func TestRecordOperationGovernanceRequiredDoesNotUseExecutionRepair(t *testing.T
 		t.Fatalf("governance grant = %+v", grant)
 	}
 	if _, found, err := controller.QueryOperationReceipt(context.Background(), "ws-v2", "run-v2", continued.Aggregate.ActiveDispatch.ID,
-		governedOperationID, execution.ExecutionKey, execution.Fence+1, grant); err != nil || found {
+		governedOperationID, execution.ExecutionKey, execution.Fence+1, runtimecontract.RuntimeModuleFile, grant); err != nil || found {
 		t.Fatalf("authorized resume receipt preflight found=%v err=%v", found, err)
 	}
 	if _, _, err := controller.QueryOperationReceipt(context.Background(), "ws-v2", "run-v2", continued.Aggregate.ActiveDispatch.ID,
-		governedOperationID, execution.ExecutionKey, execution.Fence+1, nil); !errors.Is(err, common.ErrConflict) {
+		governedOperationID, execution.ExecutionKey, execution.Fence+1, runtimecontract.RuntimeModuleFile, nil); !errors.Is(err, common.ErrConflict) {
 		t.Fatalf("omitted persisted governance grant err=%v, want conflict", err)
 	}
 	driftedGrant := grant.Normalized()
 	driftedGrant.SubjectRef = "other.txt"
 	if _, _, err := controller.QueryOperationReceipt(context.Background(), "ws-v2", "run-v2", continued.Aggregate.ActiveDispatch.ID,
-		governedOperationID, execution.ExecutionKey, execution.Fence+1, &driftedGrant); !errors.Is(err, common.ErrConflict) {
+		governedOperationID, execution.ExecutionKey, execution.Fence+1, runtimecontract.RuntimeModuleFile, &driftedGrant); !errors.Is(err, common.ErrConflict) {
 		t.Fatalf("drifted governance grant err=%v, want conflict", err)
 	}
 	restarted, err := NewRuntimeController(repository)

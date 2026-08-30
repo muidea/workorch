@@ -201,7 +201,11 @@ func mustDecisionModelPayload(t *testing.T, input map[string]any) workorcheventp
 }
 
 func sendDecisionTestCommand[Response any, Command any](ctx context.Context, rawHub magicevent.Hub, topic string, command Command) (Response, error) {
-	return sendDecisionTestCommandFrom[Response](ctx, rawHub, topic, "decision/module_test", command)
+	source := "decision/module_test"
+	if topic == decisionevents.TopicDecisionCommandEnsureResolved {
+		source = "application/workorchd/appservice"
+	}
+	return sendDecisionTestCommandFrom[Response](ctx, rawHub, topic, source, command)
 }
 
 func sendDecisionTestCommandFrom[Response any, Command any](ctx context.Context, rawHub magicevent.Hub, topic string, source string, command Command) (Response, error) {

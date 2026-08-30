@@ -38,7 +38,7 @@ func (g EventHubGenerator) GenerateWorkspaceSetupDraft(ctx context.Context, requ
 	if err != nil {
 		return Draft{}, err
 	}
-	ev := magicevent.NewEventWithContext(llmevents.TopicLLMCommandCompleteProvider, "application/workorchd/appservice", llmevents.CommandDestination, magicevent.NewHeader(), ctx, llmevents.CompleteProviderCommand{
+	command := llmevents.CompleteProviderCommand{
 		Request: llmevents.ProviderRequestFromModel(llmmodels.ProviderRequest{
 			Kind:           "workspace/setup_draft",
 			Schema:         WorkspaceSetupDraftSchemaName,
@@ -51,7 +51,8 @@ func (g EventHubGenerator) GenerateWorkspaceSetupDraft(ctx context.Context, requ
 				"templateId": request.Template.ID,
 			},
 		}),
-	})
+	}
+	ev := magicevent.NewEventWithContext(llmevents.TopicLLMCommandCompleteProvider, "application/workorchd/appservice", llmevents.CommandDestination, magicevent.NewHeader(), ctx, command)
 	ev.BindLaneKey(events.EventHubLaneKeyFor(llmevents.Contracts(), llmevents.TopicLLMCommandCompleteProvider, eventcontract.LaneScope{SubjectType: "workspace_setup_draft"}))
 	result := g.CommandHub.Send(ev)
 	if result == nil {
@@ -67,9 +68,12 @@ func (g EventHubGenerator) GenerateWorkspaceSetupDraft(ctx context.Context, requ
 	if resultErr != nil {
 		return Draft{}, resultErr
 	}
-	response, ok := data.(llmevents.LLMCommandResult)
-	if !ok || response.Completion == nil {
+	response, ok := data.(llmevents.CompleteProviderResult)
+	if !ok {
 		return Draft{}, fmt.Errorf("%w: llm completion result type %T", common.ErrInvalidArgument, data)
+	}
+	if err := response.ValidateFor(command); err != nil {
+		return Draft{}, err
 	}
 	return ParseCompletion([]byte(response.Completion.Content))
 }

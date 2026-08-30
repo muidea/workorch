@@ -8,297 +8,56 @@ Last Verified: 2026-08-30
 
 ## 功能范围与边界
 
-`blocks/llm` 是 WorkOrch 的 LLM 能力 block，独占：
+`blocks/llm` 拥有进程生命周期内冻结的 provider configuration snapshot、ai-proxy model catalog/cache、
+`ProviderModelTarget` capability resolution、provider ceiling、Responses/embedding 调用、Runtime candidate provider transaction，
+以及每次 physical request 的 factual audit/usage。当前内置 provider 只有 `ai-proxy` 的 OpenAI-compatible HTTP adapter。
 
-- ai-proxy `/v1/models` catalog 访问、TTL/LKG cache 与并发 refresh merge
-- `ProviderModelTarget` 精确解析与上下文预算推导
-- provider client 解析（唯一的 `ai-proxy` OpenAI-compatible endpoint）
-- Responses / embedding / Runtime candidate 请求
-- Orchestrator provider ceiling prerequisite 封存
-- provider/request factual result、audit-safe original diagnostic 与 provider-safe correction projection
+本组件不选择 Workspace/Run/Runtime action，不修改 Goal/DoD 或 authority transaction，不决定 candidate admission、retry、
+governance continuation 或 terminal state。Orchestrator 是 Runtime reducer；Application 只选择/传入 target 并消费 factual result；
+Eventstream 只记录 audit notification。
 
-application、Web 与 orchestrator 不直接访问 ai-proxy。
+## 组件交互及合同
 
-## 生产语义
-
-1. 内置首选 provider ID 固定为 `ai-proxy`。
-2. activation 与 Runtime 使用完整 `ProviderModelTarget{ProviderID, ModelID}`。
-3. catalog 精确模型容量是能力权威；ai-proxy exact override 是 Responses 容量的唯一替代来源。
-   OpenAI-compatible API surface、模型名称或 `/v1/models` 的 `/v1/responses` endpoint 声明不等同于
-   `json_schema` 支持；只有 owner provider profile 显式声明 `JSONSchemaResponse=true` 时 adapter 才能发送
-   `text.format=json_schema`。未显式声明时必须省略该字段，并继续由
-   sealed manifest、prompt 与 strict decoder 约束候选输出。catalog cache 只保存目录事实；`fresh | stale |
-   unavailable` 是每次读取时纯派生的 readiness observation，不写回 cache、不提供 transition API，也不形成 LLM
-   owner 内的第二个 lifecycle。当前 builtin ai-proxy contract 明确保持 `JSONSchemaResponse=false`；在上游没有提供
-   可验证 capability fact 前不得开启，也不得以失败后的第二次无 format 调用伪造兼容支持。该 capability 始终只是可选
-   wire conformance 加速，不是 Runtime authority/admission 或正确性前提；无论是否启用，Orchestrator 都必须执行同一 sealed
-   manifest 驱动的 strict local decoder/schema/evaluator admission。
-4. 能力不完整时 fail-fast，不使用 model pattern 或 conservative default。
-5. `effectiveMaxOutputTokens` 直接采用 selected model 能力；Responses 的 input/output/wire/SSE 上限由 context window、
-   输出保留量、利用率和 token/byte 估算派生。Embedding 不使用 chat output ceiling，但必须从 catalog
-   `contextWindowTokens` 派生 input/response byte guard；容量缺失时 fail-closed。不存在进程级固定 output/request cap，
-   non-stream JSON、stream content/event/line/wire 与 embedding JSON 都禁止无界读取。non-stream wire ceiling 只计算
-   bounded JSON envelope 与最坏 JSON escaping；stream wire ceiling 独立计算累计 decoded content、bounded data-event
-   count × event envelope、单行上限与 bounded non-data framing，并为 terminal response 可能携带的第二份 output 留出
-   一条完整 line。non-stream decoded output 必须在 `TrimSpace` 等交付规范化之前按原始 bytes 检查同一 content ceiling，
-   包括首尾与分段空白；所有乘加都必须安全防溢出，不能以整数回绕放宽 guard。
-   SSE reader 必须先确认最后一行已完整结束，再解码该 data event；bounded reader 在 partial line
-   后返回 wire-limit error 时，`response_byte_limit_exceeded` 必须先于由该 partial line 引起的 JSON decode error。
-6. 已封存 `ProviderCeiling` 的 Run 不因 catalog 刷新漂移。
-7. ai-proxy client API key 是可选配置；catalog、Responses、stream、embedding 仅在 key 非空时发送 Bearer header，
-   空 key 不得编码成无效 `Authorization: Bearer `。Responses、stream 与 embedding 对任意 redirect 都必须在
-   重发 prompt/input body 前以 typed protocol failure 拒绝；一个 `PhysicalCallID` 恰好只授权一次 physical submission，
-   后续调用必须由 Orchestrator 以新 identity 明确授权。LLM owner 在调用 candidate provider 前还维护有界、进程内的
-   exact identity submission guard：并发或重复的同一 physical identity 在第二次 provider 调用前 fail-closed；只有
-   canonical owner audit 精确证明 `ProviderSubmitted=false` 时才释放该 entry，submitted、unknown 或 malformed observation
-   都保持 fenced。guard 容量耗尽同样 fail-closed，并在 `Teardown()` 清空。它只关闭 live-process 重入窗口，不是恢复
-   authority；跨进程恢复继续只消费 Orchestrator aggregate 中调用前已 CAS 持久化的 submitted marker，不从本地 guard
-   重建、释放或重放请求。该收口只强化 SM-3 provider transaction 与 SM-4 recovery replay guard，不改变 C0～C5、
-   ExpectedDocument 或 sealed startup input。注入 client 的 redirect callback 不能放宽该 owner guard。
-   2xx Responses/embedding 的实际 `Content-Type`
-   必须与本次声明模式一致：non-stream/embedding 接受 JSON media type，stream 只接受 `text/event-stream`；mismatch
-   只解析/处置当前物理响应并返回 typed protocol failure，禁止切换 parser 后发起第二次 provider call。
-8. Runtime candidate request 只消费 Orchestrator sealed canonical state、authority transaction、manifest、C0～C5
-   与可选 detached correction input；不从 action、raw reason、projection 或 provider response 重建 authority。attempt 0
-   不携带 correction；attempt 1 只接收 manifest-bound objectives 与一份 concrete correction witness。witness 可表达 closed
-   `document_shape`、local schema field/rule 或具体 semantic alternative，但三者共用同一个 attempt 0/1，不形成 LLM-owned
-   format/schema retry lifecycle。Orchestrator-owned
-   `Disposition`、`TerminalCode` 和 persisted directive 不跨入 LLM command/model/C4；LLM 不反向重建 directive。该输入在
-   provider call 前按 witness kind 精确校验 manifest、field path、closed shape/rule 或 rejected/alternative value 与 shape hash，
-   C4 只渲染这份 bounded witness；
-   缺失或漂移均零 provider invocation，且不能改变 C0～C3/stable prefix。
-9. incomplete/empty/invalid `DocumentOutcome` 与 transient/authentication/configuration/protocol `Feedback` 只返回本边界 factual category
-   与 safe original diagnostic；LLM Block 不创建 candidate attempt，也不选择 correction、retry、governance 或 terminal。
-   LLM 产生的 closed category/class vocabulary 与穷尽映射只在 LLM `pkg/events` 维护；submitted marker 后无 durable outcome
-   的 `provider_submission_unknown` 由 Orchestrator owner 在 fresh reload 时确定性派生，不伪造成 LLM feedback，也不重调 provider。
-   非法 2xx provider response envelope JSON、非法 SSE framing/event、响应超限与跨 origin redirect 属于
-   `provider_protocol`，不得消费
-   Orchestrator transport recovery budget；显式 protocol class 在 feedback 转换中不得改写为 internal。`http.Client.Do`
-   返回的 endpoint-bearing `url.Error` 或自定义 transport error 必须先收敛为稳定的 timeout/cancel/DNS/TLS/network code，
-   原始 error 文本不得离开 provider adapter。adapter-owned typed error 必须通过 audit-safe identity 保留精确 code
-   （例如 `response_byte_limit_exceeded`、transport code 或 safe HTTP status identity）；Runtime boundary 不得从
-   `Error()` 文本重新猜测该 identity，也不得以 generic `provider_request_failed` 覆盖它。
-10. `/llm/runtime-candidate/request` 的结果是严格互斥的 `Stale | Feedback | DocumentOutcome`，不存在顶层
-    content-only 兼容面。`DocumentOutcome` 是 LLM owner 事实：`complete_document` 必须携带与 response hash/bytes
-    一致的 opaque content，`incomplete_document | empty_document | invalid_provider_output` 禁止携带 content；provider
-    显式返回 `response.incomplete/max_output_tokens` 时，该事实优先于 final-output payload 形态，即使 reasoning 已耗尽
-    output budget、最终 document bytes 为零，也必须归一为 `incomplete_document/max_output_tokens`。partial JSON 形成
-    incomplete，coherent prose/non-JSON 形成 invalid；两者都只保留 bounded hash/bytes，不作为 continuation prefix。每个 owner fact 必须绑定
-    `submitted + completed + empty failureClass` 的同一 physical audit，任何 failed/unsubmitted 平行状态在 LLM boundary
-    直接 fail-closed，不得发布 usage 与 document 两套相互矛盾的事实。只有 incomplete 允许 Orchestrator 复用 sealed
-    ExpectedDocument 从头发起 whole-document recovery；empty/invalid 只等待 SM-3 persisted correction/final。streaming adapter 只有在 embedded response 明确为
-    `completed`、event 顶层没有 `incomplete_details`，且 `output_text.done`/terminal response 中提供的非空全文与累计
-    delta 逐字一致时才接受 terminal；`response.incomplete/max_output_tokens` 也必须先封存为唯一 typed terminal 并继续
-    消费至 EOF，以拒绝其后的第二个 terminal、late data event 或重复 `[DONE]`。缺失、未知或互相矛盾的 terminal
-    framing 一律是 typed protocol failure，不能发送 `done` 或保留 rejected payload/usage。completed 且 final output 为空（包括
-    reasoning-only response）仍为 `empty_document/provider_final_output_missing`；coherent completed 的 non-JSON
-    final output 为 `invalid_provider_output/provider_final_output_invalid`。两者都是 model document-conformance observation，
-    不得改写成 provider-protocol Feedback，不得把 reasoning 当作 content，并须保留 submitted/completed audit 与 provider-native usage。
-    generic completion surface 仍返回 typed `final_output_missing` error；
-    只有 Runtime candidate owner boundary 将该 exact typed observation 转换为 empty document fact。共享 Runtime package 只保留
-    owner-neutral framing DTO，不能把 framing 当成 Orchestrator durable authority。
-    audit-safe original diagnostic 与 provider-safe field-violation projection 分开生成，任一转换都不得覆盖另一份；
-    raw provider prompt/credential/endpoint 与非 complete body 只允许留在 owner-private audit carrier；跨 owner 通常只暴露
-    bounded hash/bytes/ref。唯一 body 例外是 coherent complete document 通过同步 typed `DocumentOutcome.Content`（`json:"-"`）
-    到 Orchestrator 做当次 SM-3 decode；它不得进入 EventHub JSON、durable audit、aggregate、eventstream、projection、memory
-    或 attempt-1 C4/后续 request。LLM owner 对 empty/invalid 不做 fallback/replay；
-    只有 Orchestrator SM-3 持久化 rejection 后才可通过新的 request/physical identity 授权唯一 attempt 1，SM-4 不参与选择。
-11. `Start()` 只读取一次 LLM configuration，并冻结为本 owner 的 active snapshot。配置文件 watcher 与 Web 保存
-    只能改变下次进程启动使用的 persisted configuration；它们不得改变运行中的 catalog、Responses、embedding、
-    provider ceiling 或 sealed-ceiling revision 校验。typed active-configuration result 同时返回 revision、DefaultChat
-    与可选 DefaultEmbedding；application 的 setup draft、fresh activation 和 semantic recall 都只能消费该 snapshot。
-    completion 的空 Target 精确表示 owner active DefaultChat，不允许 application 重读热配置补值。persisted revision
-    未匹配时 application 投影 `restartRequired` 并拒绝 catalog refresh。
-12. semantic C3 只渲染 owner catalog 的可选择 vocabulary：snapshot/revision、operation/variant、target/selector/
-    constraint 和 `ready + direct` validation recipe identity。non-ready 或 auxiliary/not-declared validation surface、
-    input schema/binding/prerequisite、完整 MCP capability effect metadata 与 Shell command/args 都不得进入 provider context；
-    最终 renderer 必须再次按 readiness 与 proof applicability 取交集，不能把 audit fact 变成 model hint。
-    prospective owner-fact pure query 使用的 `OwnerFactDependencyCatalogs` 也必须完全排除；它只属于 Orchestrator aggregate
-    freshness/CAS/seal，不得进入 C3 catalog、allowed operation/surface、schema enum、correction values 或 provider instruction。
-    coverage-order schema 要求 `proposals` 字段存在且恒为 `[]`，provider instruction 必须逐字保持同一合同，禁止用
-    “不返回 proposals”制造 schema/prompt 冲突；结构错误只返回 factual diagnostic，由 Orchestrator SM-3 决定一次有界纠错。
-13. profile `RequiredOwnerFacts` 作为 immutable declaration 进入 C2 和 stable prefix；它不是 current availability。
-    current selectable identity 只能来自同 owner 的 C3 catalog。semantic instruction 明确禁止模型发明或宣称 owner fact；
-    assessment credit/replan 仍只属于 Orchestrator SM-2。owner fact 缺失时，C3 只渲染 Orchestrator 已封存的 per-CWI
-    proof obligation：Definition selector 仅作为声明 lineage 展示，proposal 的 `targetSelectorRef` 必须是 capability
-    catalog 授权的 acquisition operation selector。LLM 不得复制 Definition selector 充当 File/Shell/MCP target；两者
-    不一致时也不得自行协调，typed field violation 交由 Orchestrator attempt-0 有界纠错，且不形成 candidate/dispatch。
-    C3 通过同一个 derived evidence obligation 同时投影 immutable `terminalRequiredEvidenceKinds` 与本轮
-    `currentRequiredEvidenceKinds`。`evidencePurpose=owner_fact_acquisition` 及其 `ownerFactAcquisition` 表示已经封存的当前
-    前置 acquisition proof，不是尚待模型发现的 Definition 缺口：obligation 精确固定
-    owner/operation/variant/target policy/operation selector/constraints，但故意不携带 exact prospective target set。对
-    `prospective_owner_target`，C3 还必须原样投影 pre-seal obligation 的
-    `declarationProspectiveTargetAllOfConstraintRefs`；schema 与 instruction 要求 proposal
-    `prospectiveConstraintRefs` exact-equal 整个 mandatory set，不能让模型选子集、添加替代值或从 owner 文本补值。
-    semantic-plan provider 必须在一份 proposal 的 `prospectiveTargetRefs` 中提交 1～8 个唯一
-    canonical exact target；集合中每项都必须位于 Definition declaration selector/candidate refs 与 current operation
-    selector/owner constraints 的交集，非空 candidate refs 要求逐项 exact member match。current schema 不接受 singular
-    `prospectiveTargetRef` 或兼容 alias。required owner 已发布 `ProspectiveTargetSatisfactionConstraint` 时，C3 还要投影其
-    surface/contract/input-schema/catalog-revision lineage 与完整 `allOf` mandatory clauses。同一 manifest 驱动的 JSON
-    Schema 和本地 evaluator 必须证明每个 clause 至少由一个 target 完整满足，且每个 target 对至少一个
-    clause 有贡献，再允许任何 File/Shell probe。projection 故意省略该 dependency surface 的 `ValidationRecipeID`，
-    不得把它提升成 selectable validation recipe，也不得解释 owner reason 或引入 `any_of/one_of`。
-    proposal 只声明 `state_change` evidence。该集合仍只是 proposal，File 只生成无副作用 hypothetical resulting
-    manifest，Shell 只基于该 resulting manifest 返回 satisfaction fact；只有 SM-2 sealed binding 才形成完整
-    target-set authority。后续 operations provider 只能选择 binding ref；manifest 为每个 target 投影一项带 exact
-    singleton `TargetRef` 的 `RequiredOperationSequence`，provider proposal 必须齐全并唯一匹配每个 slot，target 不再是
-    provider choice。operations wire schema/instruction 明确禁止 `id`、`dependsOn` 与 dependency graph；operation identity 与
-    dependency edges 只由 Orchestrator strict local admission 按 normalized manifest required-sequence slot 或
-    manifest-bound auxiliary execution-semantic key 确定性派生；`AuthorityTransaction` 只做 exact-match gate，provider 数组
-    order 不形成 authority。完整 candidate 仍只是 dispatch proposal；LLM 不产生 owner receipt，不得把首项、partial sequence 或
-    自报 completion 解释为 collective credit/settled。该 proof 只可由 Orchestrator 基于同一 sealed dispatch 的全部 exact
-    accepted receipt/evidence members exactly-once 派生。最终 validation surface/recipe 在
-    acquisition 与 owner re-observation 前暂不可选择是预期事实，不能单独据此输出 `undeclared_prerequisite`。acquisition
-    receipt 只证明前置状态变化，不产生 terminal validation evidence/coverage credit；ticket、retry、Runtime state/action
-    以及 re-observation 后的新 planning generation 仍完全由 Orchestrator owner 决定。
-    prospective obligation只可回显pre-seal sealed `ProspectiveSatisfactionContractRef`及上述 owner-authored typed constraint
-    作为 proposal 合同，不能回显 required-owner dependency catalog、recipe command 或让模型填写
-    `would_satisfy|would_not_satisfy|stale`；这些 outcome 只来自 required owner typed result。
-    prospective target set 不满足 sealed typed constraint 时，只形成普通完整 document/schema rejection；LLM attempt 1
-    继续复用同一 transaction/manifest/C0～C3/stable prefix，并只在 C4 取得 manifest/CWI/field-path-bound typed
-    violation，不复制第二份 constraint authority，也不取得 raw owner diagnostic/dependency catalog。通过 constraint 后的
-    exact-current File+Shell full-composite `would_not_satisfy` 不再调用 LLM；它由 Orchestrator 直接归类为
-    `prospective_satisfaction_contract_violated -> semantic_contract_failed`。typed stale 只使 Orchestrator 刷新 owner fact。
-    `evidencePurpose=validation_failure_repair` 使用另一份 generation-specific C3 projection：它投影 failed focus、stable
-    failure signature、typed trigger owner/operation/diagnostic class、Profile convergence ID，以及 exact repair
-    owner/operation vocabulary/target policy/declaration candidates/operation selector/constraints/fresh-validation bound。
-    provider instruction 必须把这些字段逐项映射为唯一 `state_change` proposal，并要求每个 proposed target 对消除该
-    typed failure 有贡献；raw diagnostic、owner message、receipt、Runtime action、retry、terminal 与 coverage credit
-    均不得进入 projection。proposal 仍由 File 对完整 all-of target set 做 factual feasibility，只有 SM-2 private event
-    可以 seal；该 repair projection 只改变 C3，不能改变 C0～C2 bytes/hash 或 stable-prefix identity。普通 semantic
-    generation 不渲染这段专用 instruction，避免把无关 repair vocabulary 加入 provider context。
-14. Skill 只从 Run owner 的 sealed activation 进入 volatile C3。每项携带 WorkOrch Registry 或 SkillHub typed
-    provenance、original/truncated instruction identity 与 activation-time byte budget；LLM 不读取 Skill repository/catalog、
-    不重新选择或裁剪 Skill，也不把 Skill material 移入 C0～C2。缺失/漂移的 provenance 或 budget 在 Runtime
-    invariant/request 前置校验中 fail-closed。
-15. Soul guidance 同样只消费 Run owner 封存的 stage snapshot，并要求 owner-issued revision、content hash 与 source
-    provenance 完整；LLM 不回查 Soul catalog，也不能用同 ID 的较新内容改写既有 Run 的 C3。planning 与
-    execution/validation/decision 继续按 sealed stage binding 隔离。
-16. completion、embedding、catalog refresh 与 Runtime candidate 都是同步强调用。handler 必须先确认非空
-    `magicevent.Result`，`Post` 不得触发 catalog refresh 或任何物理 provider 请求。
-17. 每次物理 completion、embedding 与 Runtime candidate 调用都发布一条 bounded `LLMUsageRecordedData`；preflight
-    同样发布 `ProviderSubmitted=false` audit。request/response bytes 来自 adapter 实际 wire 计量，失败时不得用 schema
-    长度替代。setup draft 可为 process scope，activation embedding 可为 workspace scope，Runtime 为 workspace/run scope；
-    RunID 不得脱离 WorkspaceID。每条 audit 都携带 bounded `physicalResponseMode=streaming|non_streaming`：completion
-    采用本次实际 adapter path，transport/output-limit 也必须保真，embedding/preflight 固定 non-streaming；`streaming`
-    boolean 只能由该 enum 纯派生，下游不得按 provider/model/status 猜测。任何 submission 前的 terminal/guard failure
-    都保留 canonical `non_streaming + ProviderSubmitted=false`，不得用零值 completion 覆盖 sealed audit，也不得把仅选中
-    streaming adapter 误报为已发生物理调用。`ProviderSubmitted` 是 HTTP adapter 在调用 `http.Client.Do` 前立即设置的
-    独立事实：request bytes 只是序列化计量，禁止据此推断 submission；`Do` 一旦被调用，即使返回 transport error，
-    submitted 仍为 true，success、transport、protocol 与 output-limit 都保留 owner 实际 dispatch mode。usage
-    notification 在发布前校验失败必须使同步 command fail-closed，禁止静默丢弃 audit 后继续返回 Runtime factual result。
-    `/llm/runtime-candidate/request` 的每个 result 必须携带 canonical workspace/run echo、logical/physical request identity
-    与非空 audit；`RequestID == PhysicalCallID`，audit 的 scope/identity 必须逐项等于 result，target/context、submitted、
-    usage/actual tokens 与 physical mode 必须一致。terminal/submission 矩阵固定为：`DocumentOutcome=true`、`Stale=false`；
-    transient/authentication feedback=true；configuration feedback=true 或 false；owner-side pre-dispatch protocol guard=false、
-    provider-response protocol=true。所有 false variant 均为 `usage=nil + responseBytes=0 + non_streaming`。Runtime usage
-    notification 继续显式透传 `LogicalRequestID + PhysicalCallID`，其中 `RequestID == PhysicalCallID`；generic
-    completion/embedding 可不携带两级 identity，但禁止只携带其中一级。notification 自身在发布前重复执行同一
-    submitted/mode/bytes/tokens/context 一致性校验，缺失 audit 必须同步 fail-closed，Eventstream 只持久化 owner 已校验事实。
-    provider failure code/signature 只接受 adapter 的 typed `RuntimeProviderFailureIdentity`；任意 generic error 文本不得
-    被解析成 timeout、idle、empty-response、authentication、configuration 或其他 owner fact，只能形成稳定的
-    `provider_request_failed`。failure class 同样只消费 typed HTTP/protocol/model/transport error 与 adapter 的独立
-    submitted fact；generic `Error()` 中伪装的 `invalid api key`、`unauthorized`、`model not found` 或 `configuration`
-    不改变分类。
-18. `AcquireProviderCeilingCommand` 的timeout/temporary error只是一项owner factual failure；LLM不自行retry或创建wait。
-    Orchestrator若封存bounded recoverable wait，后续probe仍必须使用相同workspace/run/authority、selection、minimum bytes与
-    canonical request hash。matching result返回detached ceiling fact；stale selection/revision或非typed diagnostic不能解除wait。
-19. Runtime provider result携带的typed usage只确认LLM owner实际观察到的physical call/token消费；无可靠usage时保持
-    unknown，LLM、audit、billing或metrics均不能回写Orchestrator execution-budget allocation。provider返回的负数usage、
-    无法安全派生的total或整数溢出属于typed provider protocol failure；不得向调用方暴露该usage或同一响应的payload/vector。
-20. `/llm/runtime/acquire-provider-ceiling`、`/llm/runtime-candidate/preflight` 与
-    `/llm/runtime-candidate/request` 只接受 exact `source=kernel/orchestrator`。nil Event、任意其它 source 以及带空白的
-    lookalike source 都在读取 command、catalog/configuration、渲染 request、调用 provider 或发布 usage 前拒绝；该 source
-    gate 只是 LLM owner ingress authorization，不触发 SM-2/SM-3/SM-4 transition。
-
-## EventHub 合同
-
-- Provider/configuration：`/llm/command/complete-provider`、`/llm/command/generate-embedding`、
-  `/llm/command/get-active-configuration`、`/llm/command/get-provider-model-catalog`、
-  `/llm/command/refresh-provider-model-catalog`、`/llm/command/validate-inference-selection`。
-- Runtime prerequisite/request：`/llm/runtime/acquire-provider-ceiling`、
-  `/llm/runtime-prerequisite/acquire-capabilities`、`/llm/runtime-candidate/preflight`、
-  `/llm/runtime-candidate/request`。
-- 审计通知：`/llm/usage/recorded`。这些 topic、Command、Result/Data 都由 LLM owner 的
-  `pkg/events` 定义；Orchestrator 只作为调用方消费 factual result。
-
-## 交互合同完整性
-
-| 交互组件 | 方向 | 具体合同 | 当前结论 |
+| 交互方 | 方向 | typed EventHub 合同 | 调用/授权语义 |
 | --- | --- | --- | --- |
-| `application/workorchd` | Application → LLM | active configuration/default targets、catalog、refresh、selection validation、completion/embedding | 完整；setup/activation/embedding 均使用 owner 启动快照 |
-| `kernel/orchestrator` | Orchestrator → LLM | provider ceiling、runtime capabilities/preflight/candidate request | 完整；LLM 不创建 attempt 或 authority |
-| Skill Registry / SkillHub Catalog | 无直接 I/O | Run activation 中已封存的 bounded Skill C3 snapshot/budget | 完整；LLM 不查询或解释 Registry/Catalog |
-| ai-proxy provider | LLM-private adapter | models、Responses、embedding | 完整；POST redirect fail-closed、capacity-derived response guard |
-| `blocks/eventstream` | LLM → Eventstream | process/workspace/run scoped typed LLM usage notification | 完整；不含 raw prompt/body/credential，audit 不参与 authority |
+| `application/workorchd` | Application → LLM | `CompleteProviderCommand/CompleteProviderResult`、`GenerateEmbeddingCommand/GenerateEmbeddingResult`、active config/catalog/selection commands | intended caller；generic topics 当前无 exact source authorization |
+| `kernel/orchestrator` | Orchestrator → LLM | capabilities、provider ceiling、candidate preflight、`RequestRuntimeCandidateCommand/Result` | 所有 Runtime topic 仅接受 exact `kernel/orchestrator` source |
+| Eventstream | LLM → Eventstream | `LLMUsageRecordedData` | provider execution/preflight 的 bounded factual audit（包含未提交失败）；Eventstream 校验 exact LLM source |
+| ai-proxy | LLM → HTTP provider | `/v1/models`、`/v1/responses`、`/v1/embeddings` | owner-private adapter；endpoint/credential 不进入跨 owner result |
 
-## 非职责
+[`pkg/events`](pkg/events) 为 completion 与 embedding 定义不同的 value result；不存在 nullable generic union。completion
+以 `ValidateFor(command)` 绑定 exact target/model；embedding 绑定 exact target/provider/model/input，并要求 non-empty finite
+vector 与真实 non-streaming physical response fact。owner 发布前和 Application 消费后使用同一校验。
+`RequestRuntimeCandidateResult` 则是受校验的封闭事实联合，`Stale | Feedback | DocumentOutcome` 必须恰好一个，并绑定 exact
+workspace/run、logical/physical request identity、document hash、audit 与 usage。
 
-- 不拥有 Run / Result / Evidence / Workspace 业务状态
-- 不复制 ai-proxy 上游路由与 fallback
-- 不在 Runtime reducer 中解释模型品牌或预算算法
-- 不拥有 candidate evaluator、attempt/correction policy、Runtime action 或 terminal disposition
+## 不变量与非职责
 
-## 已覆盖回归
+- `Configure` 缺 EventHub 立即失败；`Start` 冻结配置且重复调用不重复订阅，`Stop` 清除订阅、配置和 physical guard。
+- provider/model 必须由 exact catalog/config fact 解析；capacity 不完整时 fail-closed，不按模型名猜测、不静默换 target。
+- `JSONSchemaResponse` 只有显式 capability fact 为 true 才发送；未声明时依赖同一 sealed manifest、prompt 和 local strict
+  decoder，不发第二次无-format fallback call。
+- Runtime logical/physical identity 在 owner guard 内执行 concurrent/duplicate at-most-once；provider outcome 不选择 caller retry。
+- generic completion、embedding 与 Runtime I/O 均有 token/byte/wire/SSE/event/line 上限；成功 result 不能是同类型空值或漂移
+  target。raw request、response、credential、
+  endpoint 和未脱敏 diagnostic 不得进入 aggregate 或 audit notification。
+- provider-facing cache 分区以 [Runtime request/cache contract](../../../../docs/00-core/runtime-request-cache-note.md) 为准：
+  C0～C2 是连续稳定 prefix，C3～C5 是 current/volatile tail；意外 `stablePrefixHash` 漂移即 rendering defect。
+- catalog control-plane 允许实现内的有界 GET retry；completion、embedding 与 Runtime provider execution 不以 retry/fallback
+  发起第二次 physical call。
 
-- [x] owner `Start()` 配置冻结、persisted revision 漂移、`restartRequired`/refresh 拒绝，以及真实
-  Setup Draft、fresh activation、DefaultEmbedding 不读取热配置。
-- [x] completion/embedding/candidate 的 Post 零物理调用；setup completion、workspace embedding 与 Runtime/preflight
-  audit 均覆盖 typed scope、submitted flag、usage 及实际 request/response bytes。
-- [x] 2xx 非法 JSON、非法 SSE event、media type/mode mismatch、stream/content/wire/embedding response 超限稳定归类为 protocol；feedback 保留
-  explicit `provider_protocol` 与 adapter 精确 code，Orchestrator 对该类走 request-terminal 而非 transport recovery，
-  fresh reload 后仍可从 terminal failure fact 读取同一 original diagnostic。
-- [x] non-stream 与 stream 的独立 wire ceiling 均覆盖 limit+1；合法高 event-overhead SSE 不再误用 non-stream ceiling；
-  SSE partial final data line 与 wire byte limit 同时命中时，稳定保留 `response_byte_limit_exceeded`，不被提前 JSON decode 改写。
-- [x] stream/non-stream `Content-Type` 与请求声明模式交叉 mismatch、两种 wire guard failure 都确认只有一次物理
-  provider call，不存在 adapter fallback/replay。
-- [x] Responses/stream/embedding 任意 3xx 在第二次 physical submission 前拒绝；跨 origin 保留精确 protocol identity，
-  注入 redirect callback 不能放宽 owner at-most-once guard，空 API key 不发送 Authorization。
-- [x] Runtime ceiling/preflight/request 的 exact Orchestrator source 与 nil Event fail-closed；Runtime candidate 同一
-  `PhysicalCallID` 的并发/重复投递零第二次 provider invocation，不同 physical identity 独立执行；有界 guard 满载、
-  canonical unsubmitted release 与 Teardown clear 均覆盖。
-- [x] model-derived request/output/response guard、sealed ProviderCeiling、ExpectedDocument token equality 与 catalog
-  refresh 后 sealed revision 不漂移。
-- [x] provider-ceiling transient failure的exact recoverable-wait probe、普通drive/伪造lease零额外调用与matching result恢复。
-- [x] C0～C2 stable prefix、C3～C5 volatile tail；JSON Schema 只受显式 provider capability 控制，模型名不参与推断，
-  未声明时省略 provider format，且任何 structured-output failure 都不触发 adapter-local fallback/第二次 physical call；
-  provider-format on/off 两条路径都必须接受后继 strict local admission，只有 coherent document rejection 经 SM-3
-  persisted directive 才可授权独立 attempt 1，format unsupported/failure 本身不授权 correction。
-- [x] C3 owner-fact acquisition 同时保留 terminal `validation` 与 current `state_change` obligation，投影 exact
-  File/write selector，明确暂未 ready 的 validation surface 不构成 `undeclared_prerequisite`；该动态变化不改变 C0～C2 bytes/hash。
-- [x] prospective target 的 owner-authored `allOf` clause contract 只进入 C3 volatile authority；provider schema 与本地
-  evaluator 在 owner probe 前对 1～8 个 `prospectiveTargetRefs` 执行同一合取覆盖合同，拒绝 singular 字段、
-  partial/extra/duplicate target set；C4 只携带 typed violation 引用，且 dependency recipe identity/command 不进入 provider。
-- [x] validation-failure repair 的 typed failure/convergence/repair vocabulary 与 exact declaration/operation selector 只投影到
-  C3；专用 instruction 仅在 repair batch 出现，普通 generation 不携带。相同 Definition 下 repair/non-repair 请求的
-  C0～C2 bytes/hash 与 stable-prefix identity 完全一致，projection 不含 raw diagnostic、receipt 或 Runtime disposition。
-- [x] candidate attempt 0 无 correction；attempt 1 的 detached correction input 绑定 manifest 与 concrete alternative witness，
-  missing/stale/shape drift 在 provider 前拒绝。LLM command/model/C4 不含 disposition/terminal，也无 persisted-directive rebuild。
-- [x] candidate terminal framing 强制 `Stale | Feedback | DocumentOutcome` exactly-one；complete content 与 hash/bytes
-  一致，所有非 complete outcome 拒绝 content-only/混合 envelope；显式 max-output stop 在零 final-document bytes、
-  partial/prose 与 complete-looking payload 下均保持 incomplete fact，并只授权 whole-document recovery；streaming terminal
-  另覆盖 `[DONE]` 前置、terminal 后事件、顶层/embedded incomplete 矛盾、未知状态，以及累计 delta 与 done/terminal 全文漂移；
-  stream/non-stream reasoning-only completed 均形成 empty document，coherent non-JSON 形成 invalid document，
-  两者保留 native usage/completed audit、零 content、零 provider-protocol Feedback、零 owner-local replay，同时 generic
-  completion 保持 typed error 语义。duplicate/stale/restart 必须复用 exact result identity；LLM 不增加 attempt/budget，
-  raw 只留 owner-private audit 且不进入 C4。
-- operations provider schema/rendering 必须拒绝 `id`、`dependsOn` 与 dependency graph；fixture 证明 LLM 只返回
-  manifest-selectable proposal，且相同 proposal 的 operation identity/dependencies 始终由 Orchestrator local compiler 派生。
-- [x] completion/stream/embedding/preflight 的 physical response mode 在成功、transport failure 与 output-limit audit 中
-  保真；pre-dispatch failure 保留 `non_streaming + submitted=false`，invalid audit publication 显式 fail-closed，并由
-  Eventstream 无损持久化；durable payload 不含 raw body、prompt、credential 或 endpoint。
-- [x] completion、stream、embedding 的 deadline/cancel/DNS/TLS/generic transport，以及 400/401/429/503、malformed 2xx
-  矩阵均确认不泄漏 raw body、prompt、credential、endpoint 或 transport detail；redirect protocol identity 保持 typed。
-- [x] generic provider error message 中伪装 authentication/configuration/model-not-found 词汇不再改变 failure class；
-  authentication 只来自 typed HTTP fact，configuration 来自 typed model/config fact 或明确的 unsubmitted fact；generic
-  failure 仅按独立 submitted fact 保守分类。
-- [x] completion/stream/embedding usage 的负数与派生 total 溢出均 fail-closed 为 typed protocol fact，结果不携带
-  rejected usage/payload/vector，且每个边界只发生一次 physical call。
-- [x] 1M-token capacity limit arithmetic、4096-event SSE 与 8192-dimension embedding decode benchmark 已建立；基准机
-  分别为 0 alloc、约 9.3ms/2.1MB、约 1.6ms/325KB，用于后续性能漂移比较，不改变模型派生 hard guard。
+## 能力验收
 
-## Deployed verification
-
-- 真实 provider 的 submission-unknown、native usage/cache usage 与 context-too-large 差异只能在部署验收中观察；仓库内
-  HTTP adapter 已覆盖对应 typed factual contract 与模拟响应，真实凭证/endpoint 不进入 CI。该项是环境验收，不是当前
-  code-closure 缺口；LLM owner 在任何供应商差异下仍不得自行选择 retry/correction/terminal。
+| 维度 | 可执行证据 | 覆盖结论 |
+| --- | --- | --- |
+| concrete completion/embedding producer-consumer | [`pkg/events/messages_test.go`](pkg/events/messages_test.go)、[`biz/owner_provider_command_test.go`](biz/owner_provider_command_test.go)、[`application setupdraft`](../../application/workorchd/biz/appservice/setupdraft/generator_test.go)、[`activation embedding`](../../application/workorchd/biz/appservice/activationports/embedding_test.go) | normal、跨-topic wrong-result、同类型空值、target/physical/vector drift 覆盖 |
+| Runtime result exhaustive union / audit identity | [`pkg/events/runtime_provider_test.go`](pkg/events/runtime_provider_test.go) | 覆盖 normal、invalid、tamper |
+| Runtime exact source / duplicate / concurrent | [`biz/runtime_owner_guard_test.go`](biz/runtime_owner_guard_test.go) | 覆盖 |
+| provider protocol、output bound、stream/non-stream、embedding | [`biz/http_provider_test.go`](biz/http_provider_test.go)、[`biz/http_provider_security_matrix_test.go`](biz/http_provider_security_matrix_test.go) | 仅以本地 `httptest.Server`/fake transport 覆盖主要 wire success/negative edges；不证明真实 ai-proxy、credential 或 upstream 模型兼容性 |
+| candidate framing、schema、correction、cache hash | `biz/runtime_candidate_*_test.go`、`biz/provider_prompt_projection_test.go` | 覆盖 |
+| active configuration freeze | `TestBizStartFreezesLLMConfigurationForCatalogAndStatus` | 覆盖 |
+| catalog cache/key/concurrent refresh | [`biz/catalog_cache_test.go`](biz/catalog_cache_test.go) | 以 fake catalog fetcher 覆盖 merge、key、auth rotation 与 capability mapping；不覆盖真实 catalog HTTP interoperability |
+| lifecycle / dependency fail-fast | [`module_test.go`](module_test.go)、`TestLLMOwnerStartIsIdempotentAndTeardownClearsLifecycle` | 覆盖基本 lifecycle；尚无独立 post-Stop provider-call 断言 |
+| catalog transport failure matrix | 无完整矩阵 | network/5xx retry、oversize/malformed body、redirect 与 LKG fallback 边界尚未逐项验收 |
+| generic caller authorization | 无 exact Application source gate | 未覆盖，Application 仅为 intended caller |
+| deployed real provider | 无组件级自动化证据 | 未覆盖；真实 ai-proxy endpoint、credential、模型 catalog 与 provider behavior 由部署验收负责，不能计入组件单测完成度 |

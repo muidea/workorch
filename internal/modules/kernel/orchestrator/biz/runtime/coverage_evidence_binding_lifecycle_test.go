@@ -59,7 +59,7 @@ func TestCoverageEvidenceBindingMultiTargetExactOperationsCreditAndRecoverExactl
 		Changed: true, TargetRefs: []string{"main.go"},
 		Evidence: runtimecontract.RuntimeOperationEvidence{Summary: "main.go owner effect committed"},
 	}
-	if _, _, err := controller.commitOperationReceipt(ctx, aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, sealed.ActiveDispatch.ID, execution.Fence, firstReceipt); err != nil {
+	if _, _, err := controller.commitOperationReceipt(ctx, aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, sealed.ActiveDispatch.ID, execution.Fence, runtimecontract.RuntimeModuleFile, firstReceipt); err != nil {
 		t.Fatal(err)
 	}
 
@@ -148,7 +148,7 @@ func TestCoverageEvidenceBindingMultiTargetExactRejectsReceiptOperationTargetDri
 		Changed: true, TargetRefs: []string{"semantic_test.go"},
 		Evidence: runtimecontract.RuntimeOperationEvidence{Summary: "owner reported the wrong exact target"},
 	}
-	if _, _, err := controller.commitOperationReceipt(ctx, aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, sealed.ActiveDispatch.ID, execution.Fence, driftedReceipt); err != nil {
+	if _, _, err := controller.commitOperationReceipt(ctx, aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, sealed.ActiveDispatch.ID, execution.Fence, runtimecontract.RuntimeModuleFile, driftedReceipt); err != nil {
 		t.Fatal(err)
 	}
 
@@ -214,7 +214,7 @@ func TestCoverageEvidenceBindingReceiptCrashRecoveryCreditsExactlyOnce(t *testin
 		Outcome: runtimecontract.RuntimeOperationOutcomeAccepted, ObservedEffectScope: runtimecontract.RuntimeEffectWorkspaceDurable,
 		Changed: true, TargetRefs: []string{"target.txt"}, Evidence: runtimecontract.RuntimeOperationEvidence{Summary: "owner committed before evidence CAS"},
 	}
-	if _, _, err := controller.commitOperationReceipt(ctx, facts.WorkspaceID, facts.RunID, sealed.ActiveDispatch.ID, execution.Fence, receipt); err != nil {
+	if _, _, err := controller.commitOperationReceipt(ctx, facts.WorkspaceID, facts.RunID, sealed.ActiveDispatch.ID, execution.Fence, runtimecontract.RuntimeModuleFile, receipt); err != nil {
 		t.Fatal(err)
 	}
 

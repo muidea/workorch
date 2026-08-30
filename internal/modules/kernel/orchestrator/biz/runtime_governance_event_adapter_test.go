@@ -8,7 +8,6 @@ import (
 	"testing"
 
 	decisionbiz "github.com/muidea/workorch/internal/modules/blocks/decision/biz"
-	runbiz "github.com/muidea/workorch/internal/modules/blocks/run/biz"
 
 	llmevents "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/events"
 
@@ -115,7 +114,7 @@ func TestRuntimeGovernanceResolutionCommitsThroughTypedEventHubCommand(t *testin
 		t.Fatal(err)
 	}
 	runOwner := runmodule.New()
-	if err := runOwner.Configure(runbiz.Dependencies{Runs: runs, EventHub: hub}); err != nil {
+	if err := runOwner.Configure(runOwnerTestDependencies(runs, nil, nil, hub)); err != nil {
 		t.Fatal(err)
 	}
 	if err := runOwner.Start(); err != nil {
@@ -184,7 +183,7 @@ func TestRuntimeGovernanceResolutionCommitsThroughTypedEventHubCommand(t *testin
 
 	resolutionResult := hub.Send(magicevent.NewEventWithContext(
 		decisionevents.TopicDecisionCommandEnsureResolved,
-		"runtime-governance-test",
+		"kernel/governance",
 		decisionevents.CommandDestination,
 		magicevent.NewHeader(),
 		ctx,
@@ -261,7 +260,7 @@ func TestRuntimeGovernanceResolutionFileBackedRestartReplaysExactlyOnce(t *testi
 	hub := magicevent.NewHub(16)
 	background := &recordingBackgroundRoutine{}
 	runOwner := runmodule.New()
-	if err := runOwner.Configure(runbiz.Dependencies{Runs: runs, EventHub: hub}); err != nil {
+	if err := runOwner.Configure(runOwnerTestDependencies(runs, nil, nil, hub)); err != nil {
 		t.Fatal(err)
 	}
 	if err := runOwner.Start(); err != nil {
@@ -315,7 +314,7 @@ func TestRuntimeGovernanceResolutionFileBackedRestartReplaysExactlyOnce(t *testi
 		Payload: mustRuntimeGovernancePayload(t, map[string]any{"summary": "治理已完成"}),
 	}
 	initialResult := hub.Send(magicevent.NewEventWithContext(
-		decisionevents.TopicDecisionCommandEnsureResolved, "runtime-file-restart", decisionevents.CommandDestination,
+		decisionevents.TopicDecisionCommandEnsureResolved, "kernel/governance", decisionevents.CommandDestination,
 		magicevent.NewHeader(), ctx, resolve,
 	))
 	if initialResult == nil || initialResult.Error() != nil {
@@ -345,7 +344,7 @@ func TestRuntimeGovernanceResolutionFileBackedRestartReplaysExactlyOnce(t *testi
 	restartedHub := magicevent.NewHub(16)
 	restartedRuns := filerepository.NewRunRepository(runsPath)
 	restartedRunOwner := runmodule.New()
-	if err := restartedRunOwner.Configure(runbiz.Dependencies{Runs: restartedRuns, EventHub: restartedHub}); err != nil {
+	if err := restartedRunOwner.Configure(runOwnerTestDependencies(restartedRuns, nil, nil, restartedHub)); err != nil {
 		t.Fatal(err)
 	}
 	if err := restartedRunOwner.Start(); err != nil {
@@ -381,7 +380,7 @@ func TestRuntimeGovernanceResolutionFileBackedRestartReplaysExactlyOnce(t *testi
 
 	for replay := 0; replay < 2; replay++ {
 		result := restartedHub.Send(magicevent.NewEventWithContext(
-			decisionevents.TopicDecisionCommandEnsureResolved, "runtime-file-restart", decisionevents.CommandDestination,
+			decisionevents.TopicDecisionCommandEnsureResolved, "kernel/governance", decisionevents.CommandDestination,
 			magicevent.NewHeader(), ctx, resolve,
 		))
 		if result == nil || result.Error() != nil {
@@ -437,7 +436,7 @@ func TestRuntimeFileBackedBoundGovernanceRestartPreservesBindingWithoutCandidate
 
 	firstHub := magicevent.NewHub(16)
 	firstRunOwner := runmodule.New()
-	if err := firstRunOwner.Configure(runbiz.Dependencies{Runs: runs, EventHub: firstHub}); err != nil {
+	if err := firstRunOwner.Configure(runOwnerTestDependencies(runs, nil, nil, firstHub)); err != nil {
 		t.Fatal(err)
 	}
 	if err := firstRunOwner.Start(); err != nil {
@@ -495,7 +494,7 @@ func TestRuntimeFileBackedBoundGovernanceRestartPreservesBindingWithoutCandidate
 	restartedHub := magicevent.NewHub(16)
 	restartedRuns := filerepository.NewRunRepository(runsPath)
 	restartedRunOwner := runmodule.New()
-	if err := restartedRunOwner.Configure(runbiz.Dependencies{Runs: restartedRuns, EventHub: restartedHub}); err != nil {
+	if err := restartedRunOwner.Configure(runOwnerTestDependencies(restartedRuns, nil, nil, restartedHub)); err != nil {
 		t.Fatal(err)
 	}
 	if err := restartedRunOwner.Start(); err != nil {

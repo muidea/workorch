@@ -10,12 +10,15 @@ import (
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
-func (c *RuntimeController) QueryOperationReceipt(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, dispatchID, operationID, executionKey string, fence uint64, grant *runtimecontract.RuntimeOperationGovernanceGrant) (runtimecontract.RuntimeOperationReceipt, bool, error) {
-	if c == nil || c.repository == nil || workspaceID == "" || runID == "" || strings.TrimSpace(dispatchID) == "" || strings.TrimSpace(operationID) == "" || strings.TrimSpace(executionKey) == "" || fence == 0 {
+func (c *RuntimeController) QueryOperationReceipt(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, dispatchID, operationID, executionKey string, fence uint64, ownerModuleID string, grant *runtimecontract.RuntimeOperationGovernanceGrant) (runtimecontract.RuntimeOperationReceipt, bool, error) {
+	if c == nil || c.repository == nil || workspaceID == "" || runID == "" || strings.TrimSpace(dispatchID) == "" || strings.TrimSpace(operationID) == "" || strings.TrimSpace(executionKey) == "" || fence == 0 || !exactOperationReceiptOwnerSource(ownerModuleID) {
 		return runtimecontract.RuntimeOperationReceipt{}, false, common.ErrInvalidArgument
 	}
 	aggregate, err := c.repository.Load(ctx, workspaceID, runID)
 	if err != nil {
+		return runtimecontract.RuntimeOperationReceipt{}, false, err
+	}
+	if err := validateOperationReceiptOwnerSource(aggregate, dispatchID, operationID, ownerModuleID); err != nil {
 		return runtimecontract.RuntimeOperationReceipt{}, false, err
 	}
 	dispatch, active, found := operationReceiptDispatch(aggregate, dispatchID)
@@ -64,20 +67,54 @@ func (c *RuntimeController) QueryOperationReceipt(ctx context.Context, workspace
 	return receipt, true, nil
 }
 
-func (c *candidateDispatchComponent) commitOperationReceipt(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, dispatchID string, fence uint64, receipt runtimecontract.RuntimeOperationReceipt) (RuntimeAggregate, runtimecontract.RuntimeOperationReceipt, error) {
-	if c == nil || c.repository == nil || workspaceID == "" || runID == "" || strings.TrimSpace(dispatchID) == "" || fence == 0 {
+func validateOperationReceiptOwnerSource(aggregate RuntimeAggregate, dispatchID, operationID, ownerModuleID string) error {
+	dispatchID = strings.TrimSpace(dispatchID)
+	operationID = strings.TrimSpace(operationID)
+	if dispatchID == "" || operationID == "" || !exactOperationReceiptOwnerSource(ownerModuleID) {
+		return common.ErrInvalidArgument
+	}
+	dispatch, _, found := operationReceiptDispatch(aggregate, dispatchID)
+	if !found {
+		return fmt.Errorf("%w: receipt owner source dispatch is not present in runtime aggregate", common.ErrConflict)
+	}
+	operation, found := candidateOperationByID(dispatch.Candidate, operationID)
+	if !found {
+		return fmt.Errorf("%w: receipt owner source operation is not sealed in dispatch", common.ErrConflict)
+	}
+	descriptor, found := runtimecontract.RuntimeOperationDescriptorForKind(operation.Kind)
+	if !found || !descriptor.RequiresOwnerReceipt || strings.TrimSpace(descriptor.OwnerModuleID) == "" {
+		return fmt.Errorf("%w: sealed operation has no capability-owner receipt contract", common.ErrConflict)
+	}
+	if ownerModuleID != descriptor.OwnerModuleID {
+		return fmt.Errorf("%w: receipt producer %q does not own sealed operation %q", common.ErrConflict, ownerModuleID, operationID)
+	}
+	return nil
+}
+
+// EventHub producer identity is exact protocol data. In particular, do not
+// normalize whitespace into a capability owner: publishers must emit the
+// canonical module ID and subscribers may only compare it byte-for-byte.
+func exactOperationReceiptOwnerSource(ownerModuleID string) bool {
+	return ownerModuleID != "" && ownerModuleID == strings.TrimSpace(ownerModuleID)
+}
+
+func (c *candidateDispatchComponent) commitOperationReceipt(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, dispatchID string, fence uint64, ownerModuleID string, receipt runtimecontract.RuntimeOperationReceipt) (RuntimeAggregate, runtimecontract.RuntimeOperationReceipt, error) {
+	if c == nil || c.repository == nil || workspaceID == "" || runID == "" || strings.TrimSpace(dispatchID) == "" || fence == 0 || !exactOperationReceiptOwnerSource(ownerModuleID) {
 		return RuntimeAggregate{}, runtimecontract.RuntimeOperationReceipt{}, common.ErrInvalidArgument
 	}
 	receipt = receipt.Normalized()
-	receipt.Fence = fence
-	if err := receipt.Validate(); err != nil {
-		return RuntimeAggregate{}, runtimecontract.RuntimeOperationReceipt{}, err
-	}
 	aggregate, err := c.repository.Load(ctx, workspaceID, runID)
 	if err != nil {
 		return RuntimeAggregate{}, runtimecontract.RuntimeOperationReceipt{}, err
 	}
-	if err := rejectRuntimeProgressAfterTermination(aggregate); err != nil {
+	if err := validateOperationReceiptOwnerSource(aggregate, dispatchID, receipt.OperationID, ownerModuleID); err != nil {
+		return RuntimeAggregate{}, runtimecontract.RuntimeOperationReceipt{}, err
+	}
+	// Producer authority is independent of receipt outcome shape. Reject a
+	// forged owner before interpreting accepted/no-op/rejected content so every
+	// terminal variant has the same sealed-source gate.
+	receipt.Fence = fence
+	if err := receipt.Validate(); err != nil {
 		return RuntimeAggregate{}, runtimecontract.RuntimeOperationReceipt{}, err
 	}
 	if existing, ok := runtimecontract.RuntimeOperationReceiptForExecutionKeyFence(aggregate.OperationReceipts, receipt.ExecutionKey, receipt.Fence); ok {
@@ -85,6 +122,9 @@ func (c *candidateDispatchComponent) commitOperationReceipt(ctx context.Context,
 			return RuntimeAggregate{}, runtimecontract.RuntimeOperationReceipt{}, fmt.Errorf("%w: execution key already has a different terminal receipt", common.ErrConflict)
 		}
 		return aggregate, existing, nil
+	}
+	if err := rejectRuntimeProgressAfterTermination(aggregate); err != nil {
+		return RuntimeAggregate{}, runtimecontract.RuntimeOperationReceipt{}, err
 	}
 	// A receipt is an owner fact, but accepting it into the Runtime aggregate is
 	// still an SM-3 admission. Do not persist a new receipt once the focus has

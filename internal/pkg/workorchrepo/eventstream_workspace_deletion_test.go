@@ -45,7 +45,7 @@ func TestFileEventStreamRetainReopenHidesPhysicalRecordsAndRejectsOrdinaryMutati
 	if err != nil {
 		t.Fatal(err)
 	}
-	record := &eventstreammodel.EventRecord{ID: "event-file-retain", Topic: "/test", WorkspaceID: workspaceID, RunID: runID, Revision: 1, StreamPosition: position}
+	record := &eventstreammodel.EventRecord{ID: "event-file-retain", Topic: "/test", OccurredAt: "2026-08-25T00:00:00Z", WorkspaceID: workspaceID, RunID: runID, Revision: 1, StreamPosition: position}
 	if err := repos.EventRecords.Append(ctx, record); err != nil {
 		t.Fatal(err)
 	}
@@ -57,7 +57,7 @@ func TestFileEventStreamRetainReopenHidesPhysicalRecordsAndRejectsOrdinaryMutati
 	if err != nil {
 		t.Fatal(err)
 	}
-	visibleRecord := &eventstreammodel.EventRecord{ID: record.ID, Topic: "/test", WorkspaceID: visibleWorkspaceID, RunID: runID, Revision: 1, StreamPosition: visiblePosition}
+	visibleRecord := &eventstreammodel.EventRecord{ID: record.ID, Topic: "/test", OccurredAt: "2026-08-25T00:00:01Z", WorkspaceID: visibleWorkspaceID, RunID: runID, Revision: 1, StreamPosition: visiblePosition}
 	if err := repos.EventRecords.Append(ctx, visibleRecord); err != nil {
 		t.Fatal(err)
 	}
@@ -81,7 +81,7 @@ func TestFileEventStreamRetainReopenHidesPhysicalRecordsAndRejectsOrdinaryMutati
 	if err != nil || len(physical) != 1 || physical[0].ID != record.ID {
 		t.Fatalf("retained physical records = %+v err=%v", physical, err)
 	}
-	if err := reopened.EventRecords.Append(ctx, &eventstreammodel.EventRecord{ID: "event-file-after-retain", Topic: "/test", WorkspaceID: workspaceID, RunID: runID, Revision: 2, StreamPosition: position + 1}); !errors.Is(err, common.ErrNotFound) {
+	if err := reopened.EventRecords.Append(ctx, &eventstreammodel.EventRecord{ID: "event-file-after-retain", Topic: "/test", OccurredAt: "2026-08-25T00:00:02Z", WorkspaceID: workspaceID, RunID: runID, Revision: 2, StreamPosition: position + 1}); !errors.Is(err, common.ErrNotFound) {
 		t.Fatalf("append after retain = %v, want not found", err)
 	}
 	if err := reopened.EventRecords.Delete(scoped, record.ID); !errors.Is(err, common.ErrNotFound) {
@@ -112,7 +112,7 @@ func TestFileEventStreamExactPurgeReopenIsFixedPointAndPositionMonotonic(t *test
 		if idx == 2 {
 			itemWorkspace, itemRun = "ws-eventstream-file-keep", "run-eventstream-file-keep"
 		}
-		if err := repos.EventRecords.Append(ctx, &eventstreammodel.EventRecord{ID: id, Topic: "/test", WorkspaceID: itemWorkspace, RunID: itemRun, Revision: int64(idx + 1), StreamPosition: position}); err != nil {
+		if err := repos.EventRecords.Append(ctx, &eventstreammodel.EventRecord{ID: id, Topic: "/test", OccurredAt: fmt.Sprintf("2026-08-25T00:00:0%dZ", idx), WorkspaceID: itemWorkspace, RunID: itemRun, Revision: int64(idx + 1), StreamPosition: position}); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -160,7 +160,7 @@ func TestFileEventStreamExactPurgeReopenIsFixedPointAndPositionMonotonic(t *test
 	if err != nil || nextPosition != 4 {
 		t.Fatalf("next global position = %d err=%v, want 4", nextPosition, err)
 	}
-	if err := reopened.EventRecords.Append(ctx, &eventstreammodel.EventRecord{ID: "event-global-after-file-purge", Topic: "/test", StreamPosition: nextPosition}); err != nil {
+	if err := reopened.EventRecords.Append(ctx, &eventstreammodel.EventRecord{ID: "event-global-after-file-purge", Topic: "/test", OccurredAt: "2026-08-25T00:02:00Z", StreamPosition: nextPosition}); err != nil {
 		t.Fatalf("global append after workspace purge: %v", err)
 	}
 }
@@ -181,7 +181,7 @@ func TestFileEventStreamIndependentRepositorySetsSealVsAppend(t *testing.T) {
 		go func() {
 			defer wait.Done()
 			<-start
-			appendErr = first.EventRecords.Append(ctx, &eventstreammodel.EventRecord{ID: "event-file-race", Topic: "/test", WorkspaceID: workspaceID, RunID: "run-eventstream-file-race", Revision: 1, StreamPosition: 1})
+			appendErr = first.EventRecords.Append(ctx, &eventstreammodel.EventRecord{ID: "event-file-race", Topic: "/test", OccurredAt: "2026-08-25T00:03:00Z", WorkspaceID: workspaceID, RunID: "run-eventstream-file-race", Revision: 1, StreamPosition: 1})
 		}()
 		go func() {
 			defer wait.Done()
@@ -197,7 +197,7 @@ func TestFileEventStreamIndependentRepositorySetsSealVsAppend(t *testing.T) {
 			t.Fatalf("iteration %d append error: %v", iteration, appendErr)
 		}
 		reopened := NewWorkspaceScopedFileRepositorySet(root)
-		if err := reopened.EventRecords.Append(ctx, &eventstreammodel.EventRecord{ID: "event-file-after-race", Topic: "/test", WorkspaceID: workspaceID, RunID: "run-eventstream-file-race", Revision: 2, StreamPosition: 2}); !errors.Is(err, common.ErrNotFound) {
+		if err := reopened.EventRecords.Append(ctx, &eventstreammodel.EventRecord{ID: "event-file-after-race", Topic: "/test", OccurredAt: "2026-08-25T00:03:01Z", WorkspaceID: workspaceID, RunID: "run-eventstream-file-race", Revision: 2, StreamPosition: 2}); !errors.Is(err, common.ErrNotFound) {
 			t.Fatalf("iteration %d post-fence append = %v, want not found", iteration, err)
 		}
 		if items, err := reopened.EventRecords.List(ctx, workorchquerycontract.EventRecordQuery{WorkspaceID: workspaceID}); err != nil || len(items) != 0 {

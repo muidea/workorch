@@ -1,6 +1,7 @@
 package file
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -287,6 +288,38 @@ func TestEventRecordRepositoryAppendsJSONLSegmentsWithoutMapRewrite(t *testing.T
 	}
 }
 
+func TestEventRecordRepositoryFailsClosedOnCorruptPersistedOccurredAt(t *testing.T) {
+	ctx := context.Background()
+	root := filepath.Join(t.TempDir(), "event-records")
+	repo := NewEventRecordRepository(root)
+	record := &eventstreammodel.EventRecord{
+		ID: "event-corrupt-time", Version: "workorch.event", Topic: "/test", OccurredAt: "2026-08-30T00:00:00Z",
+		SourceModule: "blocks/test", SubjectType: "test", SubjectID: "corrupt-time", StreamPosition: 1,
+	}
+	if err := repo.Append(ctx, record); err != nil {
+		t.Fatal(err)
+	}
+	segmentPath := filepath.Join(root, "events", eventRecordSegmentName(1))
+	data, err := os.ReadFile(segmentPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	corrupt := bytes.Replace(data, []byte(record.OccurredAt), []byte("invalid"), 1)
+	if bytes.Equal(corrupt, data) {
+		t.Fatal("persisted OccurredAt was not found in JSONL segment")
+	}
+	if err := os.WriteFile(segmentPath, corrupt, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	fresh := NewEventRecordRepository(root)
+	if _, err := fresh.Get(ctx, record.ID); !errors.Is(err, common.ErrConflict) {
+		t.Fatalf("Get corrupt OccurredAt error = %v, want conflict", err)
+	}
+	if _, err := fresh.List(ctx, workorchquerycontract.EventRecordQuery{}); !errors.Is(err, common.ErrConflict) {
+		t.Fatalf("List corrupt OccurredAt error = %v, want conflict", err)
+	}
+}
+
 func TestEventRecordRepositoryRejectsNullExternalPayload(t *testing.T) {
 	repo := NewEventRecordRepository(filepath.Join(t.TempDir(), "event-records"))
 	if err := os.MkdirAll(repo.eventSegmentDir(), 0o755); err != nil {
@@ -372,11 +405,15 @@ func TestEventRecordRepositoryPurgeWorkspacePhysicallyCompactsPayloads(t *testin
 	}
 	for _, item := range []*eventstreammodel.EventRecord{
 		{
-			ID: "event-purge-physical", Topic: "/test", WorkspaceID: "ws-purge-physical", StreamPosition: firstPosition, Revision: 1,
+			ID: "event-purge-physical", Version: "workorch.event", Topic: "/test", OccurredAt: "2026-08-30T00:00:00Z",
+			SourceModule: "blocks/test", SubjectType: "test", SubjectID: "purge-physical",
+			WorkspaceID: "ws-purge-physical", StreamPosition: firstPosition, Revision: 1,
 			Payload: mustFileRepositoryPayload(t, map[string]any{"content": secret + strings.Repeat("x", eventRecordPayloadInlineThreshold+1)}),
 		},
 		{
-			ID: "event-keep-physical", Topic: "/test", WorkspaceID: "ws-keep-physical", StreamPosition: secondPosition, Revision: 1,
+			ID: "event-keep-physical", Version: "workorch.event", Topic: "/test", OccurredAt: "2026-08-30T00:00:01Z",
+			SourceModule: "blocks/test", SubjectType: "test", SubjectID: "keep-physical",
+			WorkspaceID: "ws-keep-physical", StreamPosition: secondPosition, Revision: 1,
 			Payload: mustFileRepositoryPayload(t, map[string]any{"content": "keep" + strings.Repeat("y", eventRecordPayloadInlineThreshold+1)}),
 		},
 	} {

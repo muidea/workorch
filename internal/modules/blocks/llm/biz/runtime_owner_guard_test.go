@@ -33,6 +33,7 @@ func TestRuntimeLLMOwnerCommandsRequireExactOrchestratorSource(t *testing.T) {
 		payload any
 		handler func(magicevent.Event, magicevent.Result)
 	}{
+		{name: "runtime capabilities", topic: llmevents.TopicAcquireRuntimeCapabilities, payload: llmevents.AcquireRuntimeCapabilitiesCommand{}, handler: owner.handleRuntimeCapabilities},
 		{name: "provider ceiling", topic: llmevents.TopicAcquireProviderCeiling, payload: llmevents.AcquireProviderCeilingCommand{}, handler: owner.handleProviderCeilingPrerequisite},
 		{name: "candidate preflight", topic: llmevents.TopicPreflightRuntimeCandidate, payload: llmevents.PreflightRuntimeCandidateCommand{}, handler: owner.handleRuntimeCandidatePreflight},
 		{name: "candidate request", topic: llmevents.TopicRequestRuntimeCandidate, payload: llmevents.RequestRuntimeCandidateCommand{}, handler: owner.handleRuntimeCandidate},

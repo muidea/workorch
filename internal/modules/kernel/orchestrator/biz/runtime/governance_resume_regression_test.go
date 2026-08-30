@@ -115,7 +115,7 @@ func newCatalogOnlyShellGovernanceFixture(t *testing.T) catalogOnlyShellGovernan
 		Outcome: runtimecontract.RuntimeOperationOutcomeGovernanceRequired, ObservedEffectScope: runtimecontract.RuntimeEffectGovernanceOnly,
 		Governance: &requirement,
 	}
-	_, committed, err := controller.commitOperationReceipt(ctx, facts.WorkspaceID, facts.RunID, sealed.ActiveDispatch.ID, execution.Fence, receipt)
+	_, committed, err := controller.commitOperationReceipt(ctx, facts.WorkspaceID, facts.RunID, sealed.ActiveDispatch.ID, execution.Fence, runtimecontract.RuntimeModuleShell, receipt)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -195,6 +195,7 @@ func TestRejectedGovernanceResumeReceiptBindsResumeDispatchAcrossFreshLoad(t *te
 		fixture.aggregate.Facts.RunID,
 		resume.ID,
 		execution.Fence,
+		runtimecontract.RuntimeModuleShell,
 		receipt,
 	)
 	if err != nil {
@@ -238,7 +239,7 @@ func TestRejectedGovernanceResumeReceiptRejectsOriginOrUnknownFeedbackDispatch(t
 			revision, saves, receiptCount := fixture.aggregate.StateRevision, fixture.repository.saves, len(fixture.aggregate.OperationReceipts)
 			if _, _, err := fixture.controller.commitOperationReceipt(
 				context.Background(), fixture.aggregate.Facts.WorkspaceID, fixture.aggregate.Facts.RunID,
-				resume.ID, execution.Fence, receipt,
+				resume.ID, execution.Fence, runtimecontract.RuntimeModuleShell, receipt,
 			); err == nil || !strings.Contains(err.Error(), "operation receipt feedback does not match receipt identity") {
 				t.Fatalf("feedback dispatch %q commit error = %v", receipt.Feedback.DispatchID, err)
 			}
@@ -261,7 +262,7 @@ func TestRejectedGovernanceResumeReceiptRejectsOriginOrUnknownFeedbackDispatch(t
 			}
 			committed, _, err := fixture.controller.commitOperationReceipt(
 				context.Background(), fixture.aggregate.Facts.WorkspaceID, fixture.aggregate.Facts.RunID,
-				resume.ID, execution.Fence, receipt,
+				resume.ID, execution.Fence, runtimecontract.RuntimeModuleShell, receipt,
 			)
 			if err != nil {
 				t.Fatal(err)
@@ -380,7 +381,7 @@ func TestSequentialGovernanceResumePreservesCompletedGovernedExecution(t *testin
 		Evidence: runtimecontract.RuntimeOperationEvidence{Summary: "first governed shell operation completed without CWI credit"},
 	}
 	ownerCommitted, _, err := fixture.controller.commitOperationReceipt(
-		ctx, started.Facts.WorkspaceID, started.Facts.RunID, firstResumeID, firstExecution.Fence, firstReceipt,
+		ctx, started.Facts.WorkspaceID, started.Facts.RunID, firstResumeID, firstExecution.Fence, runtimecontract.RuntimeModuleShell, firstReceipt,
 	)
 	if err != nil {
 		t.Fatal(err)
@@ -409,7 +410,7 @@ func TestSequentialGovernanceResumePreservesCompletedGovernedExecution(t *testin
 		Governance: &secondRequirement,
 	}
 	_, committed, err := fixture.controller.commitOperationReceipt(
-		ctx, claimed.Facts.WorkspaceID, claimed.Facts.RunID, firstResumeID, secondExecution.Fence, secondReceipt,
+		ctx, claimed.Facts.WorkspaceID, claimed.Facts.RunID, firstResumeID, secondExecution.Fence, runtimecontract.RuntimeModuleShell, secondReceipt,
 	)
 	if err != nil {
 		t.Fatal(err)
@@ -527,7 +528,7 @@ func TestSameOperationCanRequireGovernanceAgainAtNextFence(t *testing.T) {
 		Governance: &secondRequirement,
 	}
 	_, committedReceipt, err := fixture.controller.commitOperationReceipt(
-		ctx, started.Facts.WorkspaceID, started.Facts.RunID, firstResumeID, firstResumeExecution.Fence, secondReceipt,
+		ctx, started.Facts.WorkspaceID, started.Facts.RunID, firstResumeID, firstResumeExecution.Fence, runtimecontract.RuntimeModuleShell, secondReceipt,
 	)
 	if err != nil {
 		t.Fatal(err)

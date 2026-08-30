@@ -10,9 +10,11 @@ import (
 	magictask "github.com/muidea/magicCommon/task"
 	basebiz "github.com/muidea/workorch/internal/modules/base/biz"
 	approvalmodel "github.com/muidea/workorch/internal/modules/blocks/approval/pkg/models"
+	decisioncommon "github.com/muidea/workorch/internal/modules/blocks/decision/pkg/common"
 	decisionevents "github.com/muidea/workorch/internal/modules/blocks/decision/pkg/events"
 	decisionmodel "github.com/muidea/workorch/internal/modules/blocks/decision/pkg/models"
 	memorymodel "github.com/muidea/workorch/internal/modules/blocks/memory/pkg/models"
+	runcommon "github.com/muidea/workorch/internal/modules/blocks/run/pkg/common"
 	runevents "github.com/muidea/workorch/internal/modules/blocks/run/pkg/events"
 	runmodel "github.com/muidea/workorch/internal/modules/blocks/run/pkg/models"
 	workspace "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/models"
@@ -168,7 +170,7 @@ func (s *Service) Start() error {
 	if s.EventHub() != nil {
 		const observerID = "/decision/consumers/kernel/governance"
 		s.SubscribeMatchedFunc(observerID, observerID, decisionevents.TopicTicketCreated, func(event magicevent.Event, _ magicevent.Result) {
-			if data, ok := event.Data().(decisionevents.TicketChangedData); ok {
+			if data, ok := governanceTicketCreatedData(event); ok {
 				if data.DecisionKind == "workspace_definition_clarification" || data.DecisionKind == "runtime_definition_clarification" {
 					return
 				}
@@ -183,7 +185,7 @@ func (s *Service) Start() error {
 	if s.EventHub() != nil {
 		const observerID = "/run/consumers/kernel/governance"
 		s.SubscribeMatchedFunc(observerID, observerID, runevents.TopicRunStateChanged, func(event magicevent.Event, _ magicevent.Result) {
-			if data, ok := event.Data().(runevents.RunStateChangedData); ok {
+			if data, ok := governanceRunStateChangedData(event); ok {
 				s.enqueueGovernanceWork(func(workCtx context.Context) {
 					s.processRunStateChanged(workCtx, data)
 				})
@@ -224,6 +226,22 @@ func (s *Service) Start() error {
 		return err
 	}
 	return nil
+}
+
+func governanceTicketCreatedData(event magicevent.Event) (decisionevents.TicketChangedData, bool) {
+	if event == nil || event.Source() != decisioncommon.ModuleID {
+		return decisionevents.TicketChangedData{}, false
+	}
+	data, ok := event.Data().(decisionevents.TicketChangedData)
+	return data, ok
+}
+
+func governanceRunStateChangedData(event magicevent.Event) (runevents.RunStateChangedData, bool) {
+	if event == nil || event.Source() != runcommon.ModuleID {
+		return runevents.RunStateChangedData{}, false
+	}
+	data, ok := event.Data().(runevents.RunStateChangedData)
+	return data, ok
 }
 
 func (s *Service) Stop() {
@@ -282,7 +300,7 @@ func (s *Service) handleCommand(ev magicevent.Event, result magicevent.Result) {
 }
 
 func (s *Service) executeCommand(ev magicevent.Event) (governanceevents.GovernanceCommandResult, error) {
-	if s == nil || s.traces == nil {
+	if s == nil || s.traces == nil || ev == nil || ev.Source() != "application/workorchd/appservice" {
 		return governanceevents.GovernanceCommandResult{}, common.ErrInvalidArgument
 	}
 	if ev.ID() != governanceevents.TopicGovernanceAutoCommandListTraces {
@@ -291,6 +309,10 @@ func (s *Service) executeCommand(ev magicevent.Event) (governanceevents.Governan
 	cmd, ok := ev.Data().(governanceevents.ListAutoGovernanceTracesCommand)
 	if !ok {
 		return governanceevents.GovernanceCommandResult{}, common.ErrInvalidArgument
+	}
+	cmd, err := cmd.Normalized()
+	if err != nil {
+		return governanceevents.GovernanceCommandResult{}, err
 	}
 	items, err := s.traces.List(ev.Context(), cmd.Query)
 	if err != nil {

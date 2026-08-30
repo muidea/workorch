@@ -12,7 +12,6 @@ import (
 	decisioncommon "github.com/muidea/workorch/internal/modules/blocks/decision/pkg/common"
 	resultevents "github.com/muidea/workorch/internal/modules/blocks/result/pkg/events"
 	runmodule "github.com/muidea/workorch/internal/modules/blocks/run"
-	runbiz "github.com/muidea/workorch/internal/modules/blocks/run/biz"
 	runevents "github.com/muidea/workorch/internal/modules/blocks/run/pkg/events"
 	runmodel "github.com/muidea/workorch/internal/modules/blocks/run/pkg/models"
 	workspaceevents "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/events"
@@ -195,7 +194,7 @@ func TestScheduledRuntimeDrivePanicPersistsSingleOwnerSuccessorAndRestartMountsO
 				t.Fatal(err)
 			}
 			runOwner := runmodule.New()
-			if err := runOwner.Configure(runbiz.Dependencies{Runs: runs, EventHub: hub}); err != nil {
+			if err := runOwner.Configure(runOwnerTestDependencies(runs, nil, nil, hub)); err != nil {
 				t.Fatal(err)
 			}
 			if err := runOwner.Start(); err != nil {
@@ -577,7 +576,7 @@ func TestRuntimeDefinitionClarificationPersistsExactLifecycleFenceAndBlocksRun(t
 		t.Fatal(err)
 	}
 	runOwner := runmodule.New()
-	if err := runOwner.Configure(runbiz.Dependencies{Runs: runs, EventHub: hub}); err != nil {
+	if err := runOwner.Configure(runOwnerTestDependencies(runs, nil, nil, hub)); err != nil {
 		t.Fatal(err)
 	}
 	if err := runOwner.Start(); err != nil {
@@ -851,7 +850,7 @@ func TestRuntimeDefinitionClarificationLifecycleHandoffCASAndFreshReload(t *test
 			firstHub := magicevent.NewHub(16)
 			wrappedRuns := tc.wrap(baseRuns)
 			firstRunOwner := runmodule.New()
-			if err := firstRunOwner.Configure(runbiz.Dependencies{Runs: wrappedRuns, EventHub: firstHub}); err != nil {
+			if err := firstRunOwner.Configure(runOwnerTestDependencies(wrappedRuns, nil, nil, firstHub)); err != nil {
 				t.Fatal(err)
 			}
 			if err := firstRunOwner.Start(); err != nil {
@@ -885,7 +884,7 @@ func TestRuntimeDefinitionClarificationLifecycleHandoffCASAndFreshReload(t *test
 			restartedHub := magicevent.NewHub(16)
 			t.Cleanup(func() { restartedHub.Terminate(ctx) })
 			restartedRunOwner := runmodule.New()
-			if err := restartedRunOwner.Configure(runbiz.Dependencies{Runs: baseRuns, EventHub: restartedHub}); err != nil {
+			if err := restartedRunOwner.Configure(runOwnerTestDependencies(baseRuns, nil, nil, restartedHub)); err != nil {
 				t.Fatal(err)
 			}
 			if err := restartedRunOwner.Start(); err != nil {
@@ -919,7 +918,7 @@ func TestRuntimeStartupRecoveryRedrivesPersistedDefinitionClarificationHandoff(t
 		t.Fatal(err)
 	}
 	runOwner := runmodule.New()
-	if err := runOwner.Configure(runbiz.Dependencies{Runs: runs, EventHub: hub}); err != nil {
+	if err := runOwner.Configure(runOwnerTestDependencies(runs, nil, nil, hub)); err != nil {
 		t.Fatal(err)
 	}
 	if err := runOwner.Start(); err != nil {
@@ -1703,7 +1702,7 @@ func TestRuntimeGovernanceContinuationSuccessHandoffRetainsDurableSingleSuccesso
 	baseRuns := memory.NewRunRepository()
 	hub := magicevent.NewHub(32)
 	runOwner := runmodule.New()
-	if err := runOwner.Configure(runbiz.Dependencies{Runs: baseRuns, EventHub: hub}); err != nil {
+	if err := runOwner.Configure(runOwnerTestDependencies(baseRuns, nil, nil, hub)); err != nil {
 		t.Fatal(err)
 	}
 	if err := runOwner.Start(); err != nil {
@@ -2023,7 +2022,7 @@ func TestRuntimeGovernanceContinuationHistoricalDuplicateDoesNotReplayAcrossLate
 	baseRuns := memory.NewRunRepository()
 	hub := magicevent.NewHub(32)
 	runOwner := runmodule.New()
-	if err := runOwner.Configure(runbiz.Dependencies{Runs: baseRuns, EventHub: hub}); err != nil {
+	if err := runOwner.Configure(runOwnerTestDependencies(baseRuns, nil, nil, hub)); err != nil {
 		t.Fatal(err)
 	}
 	if err := runOwner.Start(); err != nil {
@@ -2095,7 +2094,7 @@ func TestRuntimeGovernanceFailureUsesAtomicTerminalSuccessorAcrossPartialAckAndR
 	baseRuns := memory.NewRunRepository()
 	hub := magicevent.NewHub(32)
 	runOwner := runmodule.New()
-	if err := runOwner.Configure(runbiz.Dependencies{Runs: baseRuns, EventHub: hub}); err != nil {
+	if err := runOwner.Configure(runOwnerTestDependencies(baseRuns, nil, nil, hub)); err != nil {
 		t.Fatal(err)
 	}
 	if err := runOwner.Start(); err != nil {
@@ -2352,7 +2351,7 @@ func TestRuntimeStartupRecoveryDeliversPersistedGovernanceContinuationToBlockedR
 		t.Fatal(err)
 	}
 	firstRunOwner := runmodule.New()
-	if err := firstRunOwner.Configure(runbiz.Dependencies{Runs: guardedRuns, EventHub: firstHub}); err != nil {
+	if err := firstRunOwner.Configure(runOwnerTestDependencies(guardedRuns, nil, nil, firstHub)); err != nil {
 		t.Fatal(err)
 	}
 	if err := firstRunOwner.Start(); err != nil {
@@ -2440,7 +2439,7 @@ func TestRuntimeStartupRecoveryDeliversPersistedGovernanceContinuationToBlockedR
 	cutHub := magicevent.NewHub(16)
 	cutDriveGuard := &failFirstRuntimeDriveReadAfterContinuationRepository{RunRepository: cutRuns, resolutionID: resolution.ResolutionID}
 	cutRunOwner := runmodule.New()
-	if err := cutRunOwner.Configure(runbiz.Dependencies{Runs: cutDriveGuard, EventHub: cutHub}); err != nil {
+	if err := cutRunOwner.Configure(runOwnerTestDependencies(cutDriveGuard, nil, nil, cutHub)); err != nil {
 		t.Fatal(err)
 	}
 	if err := cutRunOwner.Start(); err != nil {
@@ -2514,7 +2513,7 @@ func TestRuntimeStartupRecoveryDeliversPersistedGovernanceContinuationToBlockedR
 	t.Cleanup(func() { restartedHub.Terminate(ctx) })
 	restartedDriveGuard := &failFirstRuntimeDriveReadAfterContinuationRepository{RunRepository: baseRuns, resolutionID: resolution.ResolutionID}
 	restartedRunOwner := runmodule.New()
-	if err := restartedRunOwner.Configure(runbiz.Dependencies{Runs: restartedDriveGuard, EventHub: restartedHub}); err != nil {
+	if err := restartedRunOwner.Configure(runOwnerTestDependencies(restartedDriveGuard, nil, nil, restartedHub)); err != nil {
 		t.Fatal(err)
 	}
 	if err := restartedRunOwner.Start(); err != nil {

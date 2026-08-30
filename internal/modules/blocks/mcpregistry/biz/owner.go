@@ -16,6 +16,8 @@ import (
 
 const ModuleID = modulecommon.ModuleID
 
+const systemCommandSource = "kernel/system"
+
 type Dependencies struct {
 	Registry          repository.MCPRegistryRepository
 	EventHub          magicevent.Hub
@@ -83,6 +85,14 @@ func (m *Biz) handleCommand(ev magicevent.Event, result magicevent.Result) {
 	}
 	if m == nil || m.service == nil {
 		setMagicResult(result, struct{}{}, common.ErrInvalidArgument)
+		return
+	}
+	if ev == nil {
+		setMagicResult(result, struct{}{}, common.ErrInvalidArgument)
+		return
+	}
+	if ev.ID() == mcpevents.TopicMCPCommandEnsureDefaults && ev.Source() != systemCommandSource {
+		setMagicResult(result, mcpevents.EnsureDefaultsResult{}, common.ErrInvalidArgument)
 		return
 	}
 	ctx := ev.Context()

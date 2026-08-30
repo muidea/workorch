@@ -202,6 +202,103 @@ func TestWebOwnerFailsClosedBeforeNetworkAndCommitsRecoverableEvidence(t *testin
 	}
 }
 
+func TestWebOwnerCommitsSafeRejectedReceiptForProviderFailure(t *testing.T) {
+	ctx := context.Background()
+	hub := magicevent.NewHub(16)
+	t.Cleanup(func() { hub.Terminate(ctx) })
+	provider := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		http.Error(w, "private upstream detail", http.StatusServiceUnavailable)
+	}))
+	defer provider.Close()
+	adapter := NewRuntimeAdapterWithHTTPClient("http", map[string]webmodels.ProviderConfig{"http": testWebProvider(provider.URL)}, provider.Client())
+	owner := &Biz{Base: basebiz.New(ModuleID, hub, nil), runtimeAdapter: adapter}
+	if err := owner.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { owner.Teardown(ctx) })
+	installWebReceiptObserver(t, hub, nil)
+	operation, sealed := testWebSearchOperation(t, adapter)
+	result := hub.Send(magicevent.NewEventWithContext(
+		webevents.TopicExecuteOperation, runtimecontract.RuntimeModuleOrchestrator, ModuleID, magicevent.NewHeader(), ctx,
+		testWebExecuteCommand(t, operation, sealed),
+	))
+	data, err := result.Get()
+	if err != nil {
+		t.Fatal(err)
+	}
+	receipt := data.(webevents.ExecuteOperationResult).Receipt
+	if receipt.Outcome != runtimecontract.RuntimeOperationOutcomeRejected || receipt.Feedback == nil || receipt.Feedback.OriginalDiagnostic == nil ||
+		receipt.Feedback.OriginalDiagnostic.OriginalCode != "bad_gateway_response" || receipt.Feedback.OriginalDiagnostic.OriginalMessage != "Web owner request failed" ||
+		receipt.Evidence.Summary != "Web owner request failed" {
+		t.Fatalf("provider failure receipt = %+v", receipt)
+	}
+	if strings.Contains(receipt.Feedback.OriginalDiagnostic.OriginalMessage, provider.URL) || strings.Contains(receipt.Feedback.OriginalDiagnostic.OriginalMessage, "private upstream detail") {
+		t.Fatalf("provider-private detail crossed owner receipt boundary: %+v", receipt.Feedback)
+	}
+	if err := receipt.Validate(); err != nil {
+		t.Fatalf("provider failure receipt validation: %v", err)
+	}
+}
+
+func TestWebOwnerFetchRequiresGrantThenCommitsBoundedReceipt(t *testing.T) {
+	ctx := context.Background()
+	hub := magicevent.NewHub(16)
+	t.Cleanup(func() { hub.Terminate(ctx) })
+	var calls atomic.Int64
+	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		calls.Add(1)
+		w.Header().Set("Content-Type", "text/html")
+		_, _ = w.Write([]byte("<html><head><title>Fetched</title></head><body>owner fetch evidence</body></html>"))
+	}))
+	defer target.Close()
+	adapter := NewRuntimeAdapterWithHTTPClient("http", map[string]webmodels.ProviderConfig{"http": testWebProvider(target.URL)}, target.Client())
+	owner := &Biz{Base: basebiz.New(ModuleID, hub, nil), runtimeAdapter: adapter}
+	if err := owner.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { owner.Teardown(ctx) })
+	installWebReceiptObserver(t, hub, nil)
+
+	operation, sealed := testWebFetchOperation(t, adapter, target.URL+"/page")
+	first := testWebExecuteCommand(t, operation, sealed)
+	firstResult := hub.Send(magicevent.NewEventWithContext(
+		webevents.TopicExecuteOperation, runtimecontract.RuntimeModuleOrchestrator, ModuleID, magicevent.NewHeader(), ctx, first,
+	))
+	firstData, err := firstResult.Get()
+	if err != nil {
+		t.Fatal(err)
+	}
+	governanceReceipt := firstData.(webevents.ExecuteOperationResult).Receipt
+	if governanceReceipt.Outcome != runtimecontract.RuntimeOperationOutcomeGovernanceRequired || governanceReceipt.Governance == nil || calls.Load() != 0 {
+		t.Fatalf("pre-grant fetch receipt=%+v calls=%d", governanceReceipt, calls.Load())
+	}
+
+	grant := runtimeWebGrant(*governanceReceipt.Governance)
+	grant.ExecutionKey = first.Execution.ExecutionKey
+	grant.GovernanceFence = first.Execution.Fence
+	grant.ResumeFence = first.Execution.Fence + 1
+	grant.ResumeDispatchID = "dispatch-web-resume"
+	resume := first
+	resume.DispatchID = grant.ResumeDispatchID
+	resume.Execution.Fence = grant.ResumeFence
+	resume.Execution.GovernanceGrant = grant
+	resumedResult := hub.Send(magicevent.NewEventWithContext(
+		webevents.TopicExecuteOperation, runtimecontract.RuntimeModuleOrchestrator, ModuleID, magicevent.NewHeader(), ctx, resume,
+	))
+	resumedData, err := resumedResult.Get()
+	if err != nil {
+		t.Fatal(err)
+	}
+	receipt := resumedData.(webevents.ExecuteOperationResult).Receipt
+	if calls.Load() != 1 || receipt.Outcome != runtimecontract.RuntimeOperationOutcomeAccepted || receipt.Changed ||
+		receipt.ObservedEffectScope != runtimecontract.RuntimeEffectNone || !strings.Contains(receipt.Evidence.Summary, "owner fetch evidence") || len(receipt.Evidence.EvidenceRefs) != 2 {
+		t.Fatalf("granted fetch receipt=%+v calls=%d", receipt, calls.Load())
+	}
+	if err := receipt.Validate(); err != nil {
+		t.Fatalf("fetch receipt validation: %v", err)
+	}
+}
+
 // SM-2 catalog freshness is an execution fence for the SM-3 sealed
 // transaction: configuration drift produces a typed stale receipt before the
 // provider transport can be called.
@@ -341,6 +438,35 @@ func testWebSearchOperation(t *testing.T, adapter *RuntimeAdapter) (runtimecontr
 	catalog.OperationPolicies = []runtimecontract.RuntimeOperationPolicyFact{{
 		ID: "operation-policy/web-search", OwnerModuleID: ModuleID, OperationKind: runtimecontract.StepKindWebSearch,
 		SubjectRef: "configured-web-provider", EffectScope: runtimecontract.RuntimeEffectNone,
+		IdempotencyClass: runtimecontract.RuntimeOperationIdempotencyAtMostOnce,
+	}}
+	catalog.SnapshotID = runtimecontract.StableRuntimeOperationAdmissibilitySnapshotID(catalog)
+	observation := webAdmissibilityObservation(catalog.PrerequisiteID, catalog)
+	sealed, err := webevents.SealRuntimeOperation(operation, catalog, observation)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return operation, sealed
+}
+
+func testWebFetchOperation(t *testing.T, adapter *RuntimeAdapter, rawURL string) (runtimecontract.RuntimeOperation, webevents.SealedRuntimeOperation) {
+	t.Helper()
+	operation := runtimecontract.RuntimeOperation{
+		ID: "web-fetch-1", Kind: runtimecontract.StepKindWebFetch, TargetRefs: []string{"web-target"},
+		Parameters: []runtimecontract.OperationParameter{{Name: "url", String: &rawURL}},
+	}
+	providerIDs, revision, err := adapter.OperationAdmissibility()
+	if err != nil {
+		t.Fatal(err)
+	}
+	catalog, err := runtimecontract.NewRuntimeOperationAdmissibility("web-admissibility", ModuleID, []string{operation.Kind}, nil, providerIDs,
+		[]string{"configured-web-provider", "owner-execution-policy"}, revision)
+	if err != nil {
+		t.Fatal(err)
+	}
+	catalog.OperationPolicies = []runtimecontract.RuntimeOperationPolicyFact{{
+		ID: "operation-policy/web-fetch", OwnerModuleID: ModuleID, OperationKind: runtimecontract.StepKindWebFetch,
+		SubjectRef: "owner-controlled-network-target", EffectScope: runtimecontract.RuntimeEffectNone,
 		IdempotencyClass: runtimecontract.RuntimeOperationIdempotencyAtMostOnce,
 	}}
 	catalog.SnapshotID = runtimecontract.StableRuntimeOperationAdmissibilitySnapshotID(catalog)

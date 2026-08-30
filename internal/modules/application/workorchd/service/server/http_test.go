@@ -3707,13 +3707,18 @@ func TestWorkspaceSnapshotEndpointReturnsCompactProjection(t *testing.T) {
 			runID = "run-00"
 		}
 		if err := repos.EventRecords.Append(ctx, &eventstreammodel.EventRecord{
-			ID:          common.EventRecordID(fmt.Sprintf("usage-%02d", idx)),
-			Version:     recordpayload.WorkorchEventVersion,
-			Topic:       "/llm/usage/recorded",
-			OccurredAt:  fmt.Sprintf("2026-06-12T00:%02d:00Z", idx),
-			WorkspaceID: workspaceID,
-			RunID:       runID,
-			StepID:      common.StepID(fmt.Sprintf("%s/step-%02d", runID, idx)),
+			ID:             common.EventRecordID(fmt.Sprintf("usage-%02d", idx)),
+			Version:        recordpayload.WorkorchEventVersion,
+			Topic:          "/llm/usage/recorded",
+			OccurredAt:     fmt.Sprintf("2026-06-12T00:%02d:00Z", idx),
+			SourceModule:   llmcommon.ModuleID,
+			SubjectType:    "llm_usage",
+			SubjectID:      fmt.Sprintf("request-compact-%02d", idx),
+			WorkspaceID:    workspaceID,
+			RunID:          runID,
+			StepID:         common.StepID(fmt.Sprintf("%s/step-%02d", runID, idx)),
+			StreamPosition: int64(idx + 1),
+			Revision:       int64(idx + 1),
 			Payload: mustServerEventPayload(t, map[string]any{
 				recordpayload.PayloadKeyWorkspaceID:          string(workspaceID),
 				recordpayload.PayloadKeyRunID:                string(runID),
@@ -5757,7 +5762,7 @@ func resolveDecisionForHTTP(t *testing.T, dataRoot string, ticketID string, reje
 		TicketID:     common.TicketID(ticketID),
 		Type:         string(resolutionType),
 	}
-	event := magicevent.NewEventWithContext(decisionevents.TopicDecisionCommandEnsureResolved, "workorchd/server/http-test", decisionevents.CommandDestination, magicevent.NewHeader(), ctx, command)
+	event := magicevent.NewEventWithContext(decisionevents.TopicDecisionCommandEnsureResolved, "application/workorchd/appservice", decisionevents.CommandDestination, magicevent.NewHeader(), ctx, command)
 	event.BindLaneKey(events.EventHubLaneKeyFor(decisionevents.Contracts(), decisionevents.TopicDecisionCommandEnsureResolved, eventcontract.LaneScope{SubjectType: "decision_ticket", SubjectID: ticketID}))
 	result := commandHub.Send(event)
 	if result == nil {

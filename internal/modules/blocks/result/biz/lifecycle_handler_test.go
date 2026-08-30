@@ -8,11 +8,167 @@ import (
 
 	magicevent "github.com/muidea/magicCommon/event"
 	resultevents "github.com/muidea/workorch/internal/modules/blocks/result/pkg/events"
+	resultmodel "github.com/muidea/workorch/internal/modules/blocks/result/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/repository"
 	"github.com/muidea/workorch/internal/pkg/repository/memory"
+	deletioncontract "github.com/muidea/workorch/internal/pkg/workorchdeletioncontract"
+	"github.com/muidea/workorch/internal/pkg/workorchrepo"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
+
+func TestResultPrivilegedIngressRejectsForgedSourcesWithoutOwnerMutation(t *testing.T) {
+	ctx := context.Background()
+	hub := magicevent.NewHub(16)
+	t.Cleanup(func() { hub.Terminate(ctx) })
+	repositories := memory.NewResultOwnerRepositorySet()
+	owner, err := New(hub, nil, Dependencies{OwnerRepositories: repositories.OwnerRepositories(), EventHub: hub})
+	if err != nil {
+		t.Fatal(err)
+	}
+	terminal := terminalDeliveryFixture("delivery-forged-source", nil)
+	terminalEvent := magicevent.NewEventWithContext(
+		resultevents.TopicResultFactTerminalDelivery, "blocks/run", resultevents.CommandDestination,
+		magicevent.NewHeader(), ctx, terminal,
+	)
+	if _, err := owner.executeLifecycleCommand(ctx, terminalEvent); !errors.Is(err, common.ErrInvalidArgument) {
+		t.Fatalf("forged terminal source error = %v, want invalid argument", err)
+	}
+	if items, listErr := repositories.Results.ListByWorkspace(ctx, terminal.WorkspaceID); listErr != nil || len(items) != 0 {
+		t.Fatalf("forged terminal source persisted Results: len=%d err=%v", len(items), listErr)
+	}
+
+	scope := deletioncontract.Scope{
+		WorkspaceID: terminal.WorkspaceID, DeletionID: "delete-result-source", DeletionGeneration: 1,
+		Mode: deletioncontract.ModePurge, QuiescenceID: "quiescence-result-source",
+	}
+	scope.RequestHash = deletioncontract.StableRequestHash(scope)
+	seal := resultevents.SealWorkspaceResultDeletionCommand{
+		WorkspaceID: scope.WorkspaceID, DeletionID: scope.DeletionID, DeletionGeneration: scope.DeletionGeneration,
+		DataDispositionIntent: scope.Mode, QuiescenceID: scope.QuiescenceID, RequestHash: scope.RequestHash,
+	}
+	sealEvent := magicevent.NewEventWithContext(
+		resultevents.TopicResultCommandSealWorkspaceDeletion, "application/workorchd", resultevents.CommandDestination,
+		magicevent.NewHeader(), ctx, seal,
+	)
+	if _, err := owner.executeWorkspaceDeletionCommand(ctx, sealEvent); !errors.Is(err, common.ErrInvalidArgument) {
+		t.Fatalf("forged seal source error = %v, want invalid argument", err)
+	}
+	if _, err := repositories.WorkspaceDeletions.Get(ctx, scope.WorkspaceID); !errors.Is(err, common.ErrNotFound) {
+		t.Fatalf("forged seal source persisted tombstone: %v", err)
+	}
+	if _, err := owner.sealWorkspaceDeletion(ctx, scope); err != nil {
+		t.Fatal(err)
+	}
+	purge := resultevents.PurgeWorkspaceResultsCommand{
+		WorkspaceID: scope.WorkspaceID, DeletionID: scope.DeletionID, DeletionGeneration: scope.DeletionGeneration,
+		QuiescenceID: scope.QuiescenceID, RequestHash: scope.RequestHash,
+	}
+	purgeEvent := magicevent.NewEventWithContext(
+		resultevents.TopicResultCommandPurgeWorkspace, "kernel/orchestrator", resultevents.CommandDestination,
+		magicevent.NewHeader(), ctx, purge,
+	)
+	if _, err := owner.executeWorkspaceDeletionCommand(ctx, purgeEvent); !errors.Is(err, common.ErrInvalidArgument) {
+		t.Fatalf("forged purge source error = %v, want invalid argument", err)
+	}
+	tombstone, err := repositories.WorkspaceDeletions.Get(ctx, scope.WorkspaceID)
+	if err != nil || tombstone.Phase != resultmodel.WorkspaceDeletionPhaseFenced || tombstone.Revision != 1 {
+		t.Fatalf("forged purge source changed tombstone: value=%+v err=%v", tombstone, err)
+	}
+}
+
+func TestResultFileOwnerReplaysTerminalAndResumesDeletionAfterReopen(t *testing.T) {
+	ctx := context.Background()
+	root := t.TempDir()
+	firstRepositories := workorchrepo.NewWorkspaceScopedFileRepositorySet(root)
+	firstHub := magicevent.NewHub(16)
+	first, err := New(firstHub, nil, Dependencies{OwnerRepositories: firstRepositories.ResultOwner, EventHub: firstHub})
+	if err != nil {
+		t.Fatal(err)
+	}
+	command := terminalDeliveryFixture("delivery-file-reopen", nil)
+	created, err := first.applyTerminalDelivery(ctx, command)
+	if err != nil || created.Result == nil {
+		t.Fatalf("persist terminal Result: result=%+v err=%v", created, err)
+	}
+	first.Teardown(ctx)
+	firstHub.Terminate(ctx)
+
+	secondRepositories := workorchrepo.NewWorkspaceScopedFileRepositorySet(root)
+	secondHub := magicevent.NewHub(16)
+	const observerID = "/result/consumers/file-reopen-test"
+	observer := magicevent.NewSimpleObserverWithMatchID(observerID, observerID, secondHub)
+	received := make(chan resultevents.ResultChangedData, 1)
+	observer.Subscribe(resultevents.TopicResultAccepted, func(event magicevent.Event, _ magicevent.Result) {
+		if data, ok := event.Data().(resultevents.ResultChangedData); ok {
+			received <- data
+		}
+	})
+	second, err := New(secondHub, nil, Dependencies{OwnerRepositories: secondRepositories.ResultOwner, EventHub: secondHub})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := second.Start(); err != nil {
+		t.Fatal(err)
+	}
+	replayed := receiveChangedData(t, received)
+	if replayed.ResultID != created.Result.ID || replayed.NotificationID != resultevents.ResultNotificationID(created.Result) {
+		t.Fatalf("file terminal replay = %+v, want Result %q", replayed, created.Result.ID)
+	}
+
+	scope := deletioncontract.Scope{
+		WorkspaceID: command.WorkspaceID, DeletionID: "delete-result-file", DeletionGeneration: 1,
+		Mode: deletioncontract.ModePurge, QuiescenceID: "quiescence-result-file",
+	}
+	scope.RequestHash = deletioncontract.StableRequestHash(scope)
+	seal := resultevents.SealWorkspaceResultDeletionCommand{
+		WorkspaceID: scope.WorkspaceID, DeletionID: scope.DeletionID, DeletionGeneration: scope.DeletionGeneration,
+		DataDispositionIntent: scope.Mode, QuiescenceID: scope.QuiescenceID, RequestHash: scope.RequestHash,
+	}
+	sealEvent := magicevent.NewEventWithContext(
+		resultevents.TopicResultCommandSealWorkspaceDeletion, workspaceDeletionCommandSource, resultevents.CommandDestination,
+		magicevent.NewHeader(), ctx, seal,
+	)
+	sealed, err := second.executeWorkspaceDeletionCommand(ctx, sealEvent)
+	if err != nil || sealed.(resultevents.SealWorkspaceResultDeletionResult).ValidateFor(seal) != nil {
+		t.Fatalf("seal before reopen = %#v err=%v", sealed, err)
+	}
+	second.Teardown(ctx)
+	observer.Unsubscribe(resultevents.TopicResultAccepted)
+	secondHub.Terminate(ctx)
+
+	thirdRepositories := workorchrepo.NewWorkspaceScopedFileRepositorySet(root)
+	thirdHub := magicevent.NewHub(16)
+	t.Cleanup(func() { thirdHub.Terminate(ctx) })
+	third, err := New(thirdHub, nil, Dependencies{OwnerRepositories: thirdRepositories.ResultOwner, EventHub: thirdHub})
+	if err != nil {
+		t.Fatal(err)
+	}
+	purge := resultevents.PurgeWorkspaceResultsCommand{
+		WorkspaceID: scope.WorkspaceID, DeletionID: scope.DeletionID, DeletionGeneration: scope.DeletionGeneration,
+		QuiescenceID: scope.QuiescenceID, RequestHash: scope.RequestHash,
+	}
+	purgeEvent := magicevent.NewEventWithContext(
+		resultevents.TopicResultCommandPurgeWorkspace, workspaceDeletionCommandSource, resultevents.CommandDestination,
+		magicevent.NewHeader(), ctx, purge,
+	)
+	purgedValue, err := third.executeWorkspaceDeletionCommand(ctx, purgeEvent)
+	if err != nil {
+		t.Fatal(err)
+	}
+	purged := purgedValue.(resultevents.PurgeWorkspaceResultsResult)
+	if err := purged.ValidateFor(purge); err != nil {
+		t.Fatalf("purge after reopen: %+v err=%v", purged, err)
+	}
+
+	finalRepositories := workorchrepo.NewWorkspaceScopedFileRepositorySet(root)
+	items, listErr := finalRepositories.Results.ListByWorkspace(ctx, command.WorkspaceID)
+	artifacts, artifactErr := finalRepositories.Artifacts.ListByWorkspace(ctx, command.WorkspaceID)
+	tombstone, tombstoneErr := finalRepositories.ResultDeletions.Get(ctx, command.WorkspaceID)
+	if listErr != nil || artifactErr != nil || len(items) != 0 || len(artifacts) != 0 || tombstoneErr != nil || tombstone.Phase != resultmodel.WorkspaceDeletionPhasePurged {
+		t.Fatalf("file purge reopen items=%d/%d tombstone=%+v errors=%v/%v/%v", len(items), len(artifacts), tombstone, listErr, artifactErr, tombstoneErr)
+	}
+}
 
 func TestTerminalDeliveryDerivesCanonicalResultAndRejectsMaterialDrift(t *testing.T) {
 	ctx := context.Background()

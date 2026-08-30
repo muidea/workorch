@@ -32,6 +32,14 @@ func memoryEventStreamFence(scope deletioncontract.Scope) *eventstreammodel.Work
 	}
 }
 
+func memoryPersistedEventRecord(id common.EventRecordID, workspaceID common.WorkspaceID, runID common.RunID, revision, position int64) *eventstreammodel.EventRecord {
+	return &eventstreammodel.EventRecord{
+		ID: id, Version: "workorch.event", Topic: "/test", OccurredAt: "2026-08-25T00:00:00Z",
+		SourceModule: "blocks/test", SubjectType: "test", SubjectID: string(id), WorkspaceID: workspaceID, RunID: runID,
+		Revision: revision, StreamPosition: position,
+	}
+}
+
 func TestMemoryEventStreamRetainFenceHidesWithoutPhysicalDeletionAndRejectsMutation(t *testing.T) {
 	ctx := context.Background()
 	owner := NewEventStreamOwnerRepositorySet()
@@ -42,7 +50,7 @@ func TestMemoryEventStreamRetainFenceHidesWithoutPhysicalDeletionAndRejectsMutat
 	if err != nil {
 		t.Fatal(err)
 	}
-	record := &eventstreammodel.EventRecord{ID: "event-retain", Topic: "/test", WorkspaceID: workspaceID, RunID: sharedRunID, Revision: 1, StreamPosition: position}
+	record := memoryPersistedEventRecord("event-retain", workspaceID, sharedRunID, 1, position)
 	if err := owner.EventRecords.Append(ctx, record); err != nil {
 		t.Fatal(err)
 	}
@@ -60,7 +68,7 @@ func TestMemoryEventStreamRetainFenceHidesWithoutPhysicalDeletionAndRejectsMutat
 	if len(owner.EventRecords.items) != 1 {
 		t.Fatalf("physical records after retain = %d, want 1", len(owner.EventRecords.items))
 	}
-	if err := owner.EventRecords.Append(ctx, &eventstreammodel.EventRecord{ID: "event-after-retain", Topic: "/test", WorkspaceID: workspaceID, Revision: 2, StreamPosition: position + 1}); !errors.Is(err, common.ErrNotFound) {
+	if err := owner.EventRecords.Append(ctx, memoryPersistedEventRecord("event-after-retain", workspaceID, "", 2, position+1)); !errors.Is(err, common.ErrNotFound) {
 		t.Fatalf("append after retain fence = %v, want not found", err)
 	}
 	if err := owner.EventRecords.Delete(scoped, record.ID); !errors.Is(err, common.ErrNotFound) {
@@ -78,7 +86,7 @@ func TestMemoryEventStreamRetainFenceHidesWithoutPhysicalDeletionAndRejectsMutat
 	if err != nil {
 		t.Fatal(err)
 	}
-	visibleRecord := &eventstreammodel.EventRecord{ID: record.ID, Topic: "/test", WorkspaceID: visibleWorkspaceID, RunID: sharedRunID, Revision: 1, StreamPosition: visiblePosition}
+	visibleRecord := memoryPersistedEventRecord(record.ID, visibleWorkspaceID, sharedRunID, 1, visiblePosition)
 	if err := owner.EventRecords.Append(ctx, visibleRecord); err != nil {
 		t.Fatal(err)
 	}
@@ -92,7 +100,7 @@ func TestMemoryEventStreamRetainFenceHidesWithoutPhysicalDeletionAndRejectsMutat
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := owner.EventRecords.Append(ctx, &eventstreammodel.EventRecord{ID: "event-global", Topic: "/test", StreamPosition: globalPosition}); err != nil {
+	if err := owner.EventRecords.Append(ctx, memoryPersistedEventRecord("event-global", "", "", 0, globalPosition)); err != nil {
 		t.Fatalf("global append after workspace retain fence: %v", err)
 	}
 }
@@ -110,7 +118,7 @@ func TestMemoryEventStreamExactPurgeIsFixedPointAndPreservesPositionFloor(t *tes
 		if idx == 2 {
 			itemWorkspace = "ws-eventstream-memory-keep"
 		}
-		if err := owner.EventRecords.Append(ctx, &eventstreammodel.EventRecord{ID: id, Topic: "/test", WorkspaceID: itemWorkspace, Revision: int64(idx + 1), StreamPosition: position}); err != nil {
+		if err := owner.EventRecords.Append(ctx, memoryPersistedEventRecord(id, itemWorkspace, "", int64(idx+1), position)); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -165,7 +173,7 @@ func TestMemoryEventStreamSealVsAppendUsesOneSharedGuard(t *testing.T) {
 		go func() {
 			defer wait.Done()
 			<-start
-			appendErr = owner.EventRecords.Append(ctx, &eventstreammodel.EventRecord{ID: "event-race", Topic: "/test", WorkspaceID: workspaceID, Revision: 1, StreamPosition: 1})
+			appendErr = owner.EventRecords.Append(ctx, memoryPersistedEventRecord("event-race", workspaceID, "", 1, 1))
 		}()
 		go func() {
 			defer wait.Done()
@@ -180,7 +188,7 @@ func TestMemoryEventStreamSealVsAppendUsesOneSharedGuard(t *testing.T) {
 		if appendErr != nil && !errors.Is(appendErr, common.ErrNotFound) {
 			t.Fatalf("iteration %d append error: %v", iteration, appendErr)
 		}
-		if err := owner.EventRecords.Append(ctx, &eventstreammodel.EventRecord{ID: "event-after-race", Topic: "/test", WorkspaceID: workspaceID, Revision: 2, StreamPosition: 2}); !errors.Is(err, common.ErrNotFound) {
+		if err := owner.EventRecords.Append(ctx, memoryPersistedEventRecord("event-after-race", workspaceID, "", 2, 2)); !errors.Is(err, common.ErrNotFound) {
 			t.Fatalf("iteration %d post-fence append = %v, want not found", iteration, err)
 		}
 		if items, err := owner.EventRecords.List(ctx, workorchquerycontract.EventRecordQuery{WorkspaceID: workspaceID}); err != nil || len(items) != 0 {

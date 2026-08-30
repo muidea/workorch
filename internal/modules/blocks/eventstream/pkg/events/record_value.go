@@ -26,6 +26,13 @@ func (item EventRecordData) Validate() error {
 	if item.StreamPosition < 1 {
 		return fmt.Errorf("%w: event record requires positive stream position", common.ErrInvalidArgument)
 	}
+	canonicalOccurredAt, err := workorcheventrecordcontract.CanonicalOccurredAt(item.OccurredAt)
+	if err != nil {
+		return err
+	}
+	if canonicalOccurredAt != item.OccurredAt {
+		return fmt.Errorf("%w: event record occurredAt must use canonical UTC RFC3339", common.ErrInvalidArgument)
+	}
 	if !recordpayload.SanitizeAuditPayload(item.Payload).Equal(item.Payload) {
 		return fmt.Errorf("%w: event record payload is not sanitized and bounded", common.ErrInvalidArgument)
 	}
@@ -46,6 +53,9 @@ func EventRecordDataFromModel(item *eventstreammodel.EventRecord) (EventRecordDa
 	}
 	ret.Payload = item.Payload.Clone()
 	ret.PayloadSummary = item.PayloadSummary.Clone()
+	if err := ret.Validate(); err != nil {
+		return EventRecordData{}, err
+	}
 	return ret, nil
 }
 

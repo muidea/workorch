@@ -15,6 +15,8 @@ import (
 
 const ModuleID = modulecommon.ModuleID
 
+const systemCommandSource = "kernel/system"
+
 type Dependencies struct {
 	Souls             repository.SoulRepository
 	EventHub          magicevent.Hub
@@ -82,7 +84,11 @@ func (m *Biz) handleSystemDefaultsCommand(ev magicevent.Event, result magicevent
 	if result == nil {
 		return
 	}
-	if _, ok := ev.Data().(soulevents.EnsureDefaultsCommand); !ok || m == nil || m.service == nil {
+	if ev == nil || ev.Source() != systemCommandSource || m == nil || m.service == nil {
+		setSystemSoulDefaultsResult(result, common.ErrInvalidArgument)
+		return
+	}
+	if _, ok := ev.Data().(soulevents.EnsureDefaultsCommand); !ok {
 		setSystemSoulDefaultsResult(result, common.ErrInvalidArgument)
 		return
 	}

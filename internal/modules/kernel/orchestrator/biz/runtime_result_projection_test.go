@@ -10,7 +10,6 @@ import (
 	"testing"
 
 	resultbiz "github.com/muidea/workorch/internal/modules/blocks/result/biz"
-	runbiz "github.com/muidea/workorch/internal/modules/blocks/run/biz"
 	workspacebiz "github.com/muidea/workorch/internal/modules/blocks/workspace/biz"
 
 	magicevent "github.com/muidea/magicCommon/event"
@@ -94,7 +93,7 @@ func (r *failAfterResultCreateRepository) Get(ctx context.Context, id common.Res
 func startTerminalDeliveryResourceOwners(t *testing.T, ctx context.Context, hub magicevent.Hub, runs repository.RunRepository, workspaces repository.WorkspaceRepository, cleaner repository.WorkspaceDeletionMaterialCleaner) {
 	t.Helper()
 	runOwner := runmodule.New()
-	if err := runOwner.Configure(runbiz.Dependencies{Runs: runs, EventHub: hub}); err != nil {
+	if err := runOwner.Configure(runOwnerTestDependencies(runs, nil, nil, hub)); err != nil {
 		t.Fatal(err)
 	}
 	if err := runOwner.Start(); err != nil {
@@ -277,7 +276,7 @@ func TestDeliverRuntimeTerminalCreatesResultAndProjectsOwnersIdempotently(t *tes
 		t.Fatal(err)
 	}
 	runOwner := runmodule.New()
-	if err := runOwner.Configure(runbiz.Dependencies{Runs: runs, EventHub: hub}); err != nil {
+	if err := runOwner.Configure(runOwnerTestDependencies(runs, nil, nil, hub)); err != nil {
 		t.Fatal(err)
 	}
 	if err := runOwner.Start(); err != nil {
@@ -351,7 +350,7 @@ func TestDeliverRuntimeTerminalUsesTypedOwnerEventContracts(t *testing.T) {
 	results := memory.NewResultRepository()
 
 	runOwner := runmodule.New()
-	if err := runOwner.Configure(runbiz.Dependencies{Runs: runs, EventHub: hub}); err != nil {
+	if err := runOwner.Configure(runOwnerTestDependencies(runs, nil, nil, hub)); err != nil {
 		t.Fatal(err)
 	}
 	if err := runOwner.Start(); err != nil {
@@ -506,7 +505,7 @@ func TestDeliverRuntimeTerminalRestartsAfterOwnerProjectionAcknowledgementLoss(t
 
 			firstHub := magicevent.NewHub(32)
 			firstRunOwner := runmodule.New()
-			if err := firstRunOwner.Configure(runbiz.Dependencies{Runs: firstRuns, EventHub: firstHub}); err != nil {
+			if err := firstRunOwner.Configure(runOwnerTestDependencies(firstRuns, nil, nil, firstHub)); err != nil {
 				t.Fatal(err)
 			}
 			if err := firstRunOwner.Start(); err != nil {
@@ -579,7 +578,7 @@ func TestDeliverRuntimeTerminalRestartsAfterOwnerProjectionAcknowledgementLoss(t
 			restartedHub := magicevent.NewHub(32)
 			t.Cleanup(func() { restartedHub.Terminate(ctx) })
 			restartedRunOwner := runmodule.New()
-			if err := restartedRunOwner.Configure(runbiz.Dependencies{Runs: baseRuns, EventHub: restartedHub}); err != nil {
+			if err := restartedRunOwner.Configure(runOwnerTestDependencies(baseRuns, nil, nil, restartedHub)); err != nil {
 				t.Fatal(err)
 			}
 			if err := restartedRunOwner.Start(); err != nil {
@@ -748,7 +747,7 @@ func TestDeliverRuntimeTerminalReplaysSameIdentityAfterOwnerCASConflict(t *testi
 				t.Fatal(err)
 			}
 			runOwner := runmodule.New()
-			if err := runOwner.Configure(runbiz.Dependencies{Runs: runs, EventHub: hub}); err != nil {
+			if err := runOwner.Configure(runOwnerTestDependencies(runs, nil, nil, hub)); err != nil {
 				t.Fatal(err)
 			}
 			if err := runOwner.Start(); err != nil {
@@ -885,7 +884,11 @@ func runtimeFocusGroundedTerminalAggregate(t *testing.T) runtime.RuntimeAggregat
 			}
 			feedback.OriginalDiagnostic.OperationID = request.Operation.ID
 			receipt.Feedback = &feedback
-			_, committed, commitErr := runtimeTestControllerCommitOperationReceipt(controller, ctx, request.WorkspaceID, request.RunID, request.DispatchID, request.Execution.Fence, receipt)
+			descriptor, found := runtimecontract.RuntimeOperationDescriptorForKind(request.Operation.Kind)
+			if !found || descriptor.OwnerModuleID == "" {
+				return runtime.RuntimeOperationExecutionResult{}, fmt.Errorf("unknown operation kind %q", request.Operation.Kind)
+			}
+			_, committed, commitErr := runtimeTestControllerCommitOperationReceipt(controller, ctx, request.WorkspaceID, request.RunID, request.DispatchID, request.Execution.Fence, descriptor.OwnerModuleID, receipt)
 			if commitErr != nil {
 				return runtime.RuntimeOperationExecutionResult{}, commitErr
 			}
@@ -958,7 +961,7 @@ func TestRuntimeTerminalDeliveryBudgetExhaustionRetainsStartupRecoveryInventory(
 
 	firstHub := magicevent.NewHub(16)
 	firstRunOwner := runmodule.New()
-	if err := firstRunOwner.Configure(runbiz.Dependencies{Runs: runs, EventHub: firstHub}); err != nil {
+	if err := firstRunOwner.Configure(runOwnerTestDependencies(runs, nil, nil, firstHub)); err != nil {
 		t.Fatal(err)
 	}
 	if err := firstRunOwner.Start(); err != nil {
@@ -984,7 +987,7 @@ func TestRuntimeTerminalDeliveryBudgetExhaustionRetainsStartupRecoveryInventory(
 	restartedHub := magicevent.NewHub(16)
 	t.Cleanup(func() { restartedHub.Terminate(ctx) })
 	restartedRunOwner := runmodule.New()
-	if err := restartedRunOwner.Configure(runbiz.Dependencies{Runs: runs, EventHub: restartedHub}); err != nil {
+	if err := restartedRunOwner.Configure(runOwnerTestDependencies(runs, nil, nil, restartedHub)); err != nil {
 		t.Fatal(err)
 	}
 	if err := restartedRunOwner.Start(); err != nil {
@@ -1033,7 +1036,7 @@ func TestRuntimeStartupRecoveryDeliversPendingTerminalThroughOwnerChain(t *testi
 	hub := magicevent.NewHub(32)
 	t.Cleanup(func() { hub.Terminate(ctx) })
 	runOwner := runmodule.New()
-	if err := runOwner.Configure(runbiz.Dependencies{Runs: runs, EventHub: hub}); err != nil {
+	if err := runOwner.Configure(runOwnerTestDependencies(runs, nil, nil, hub)); err != nil {
 		t.Fatal(err)
 	}
 	if err := runOwner.Start(); err != nil {
@@ -1289,7 +1292,7 @@ func TestAdministrativeSupersedeRestartsAfterResultPersistenceBeforeOwnerProject
 		t.Fatal(err)
 	}
 	firstRunOwner := runmodule.New()
-	if err := firstRunOwner.Configure(runbiz.Dependencies{Runs: runs, EventHub: firstHub}); err != nil {
+	if err := firstRunOwner.Configure(runOwnerTestDependencies(runs, nil, nil, firstHub)); err != nil {
 		t.Fatal(err)
 	}
 	if err := firstRunOwner.Start(); err != nil {

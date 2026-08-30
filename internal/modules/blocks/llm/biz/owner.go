@@ -40,6 +40,7 @@ type Biz struct {
 	activeLLMConfigurationInitialized bool
 	physicalSubmissionGuard           *runtimePhysicalSubmissionGuard
 	topics                            []string
+	started                           bool
 }
 
 type Dependencies struct {
@@ -58,7 +59,7 @@ type providerExecutionMetadata struct {
 }
 
 type providerCommandExecution struct {
-	Result llmevents.LLMCommandResult
+	Result any
 	Audit  *llmmodels.ProviderRequestAudit
 	Usage  *llmaudit.ProviderUsage
 }
@@ -100,6 +101,9 @@ func (m *Biz) Start() error {
 	if m == nil || m.catalogService == nil || m.EventHub() == nil {
 		return common.ErrInvalidArgument
 	}
+	if m.started {
+		return nil
+	}
 	if !m.activeLLMConfigurationInitialized {
 		if err := m.captureActiveLLMConfiguration(); err != nil {
 			return err
@@ -125,6 +129,7 @@ func (m *Biz) Start() error {
 		m.topics = append(m.topics, llmevents.TopicRequestRuntimeCandidate)
 	}
 	m.SubscribeMatchedFunc(ModuleID+"/prerequisite", orchestratorevents.PrerequisiteCommandDestination, llmevents.TopicAcquireProviderCeiling, m.handleProviderCeilingPrerequisite)
+	m.started = true
 	return nil
 }
 
@@ -182,6 +187,10 @@ func (m *Biz) handleRuntimeCapabilities(event magicevent.Event, result magiceven
 	if result == nil {
 		return
 	}
+	if !runtimeCommandHasExactOrchestratorSource(event) {
+		setPrerequisiteMagicError(result, fmt.Errorf("%w: runtime LLM capability acquisition requires the exact Orchestrator source", common.ErrInvalidArgument))
+		return
+	}
 	command, ok := event.Data().(llmevents.AcquireRuntimeCapabilitiesCommand)
 	if !ok {
 		setPrerequisiteMagicError(result, common.ErrInvalidArgument)
@@ -210,6 +219,7 @@ func (m *Biz) Teardown(context.Context) {
 	m.activeLLMConfigurationRevision = ""
 	m.activeLLMConfigurationInitialized = false
 	m.physicalSubmissionGuard.clear()
+	m.started = false
 }
 
 // handleRuntimeCandidatePreflight renders the sealed C0-C5 request and runs
@@ -970,13 +980,12 @@ func (m *Biz) executeCommand(ev magicevent.Event) (providerCommandExecution, err
 		completion, metadata, err := m.completeProvider(ctx, cmd.Target, request)
 		audit := providerCommandAudit(request, metadata, completion.RequestBytes, completion.ResponseBytes, startedAt, time.Now().UTC(), err)
 		applyProviderUsageToAudit(audit, completion.Usage)
-		execution := providerCommandExecution{
-			Result: llmevents.LLMCommandResult{Target: metadata.Target, Completion: llmCompletionEventData(completion)},
-			Audit:  audit,
-			Usage:  cloneProviderUsage(completion.Usage),
-		}
-		if err != nil {
-			execution.Result.Completion = nil
+		execution := providerCommandExecution{Audit: audit, Usage: cloneProviderUsage(completion.Usage)}
+		if err == nil {
+			response := llmevents.CompleteProviderResult{Target: metadata.Target, Completion: llmCompletionEventData(completion)}
+			if err = response.ValidateFor(cmd); err == nil {
+				execution.Result = response
+			}
 		}
 		return execution, err
 	case llmevents.TopicLLMCommandGenerateEmbedding:
@@ -988,13 +997,12 @@ func (m *Biz) executeCommand(ev magicevent.Event) (providerCommandExecution, err
 		embedding, metadata, err := m.generateEmbedding(ctx, cmd.Target, cmd.Input)
 		audit := providerEmbeddingAudit(cmd, metadata, embedding.RequestBytes, embedding.ResponseBytes, startedAt, time.Now().UTC(), err)
 		applyProviderUsageToAudit(audit, embedding.Usage)
-		execution := providerCommandExecution{
-			Result: llmevents.LLMCommandResult{Target: metadata.Target, Embedding: &embedding},
-			Audit:  audit,
-			Usage:  cloneProviderUsage(embedding.Usage),
-		}
-		if err != nil {
-			execution.Result.Embedding = nil
+		execution := providerCommandExecution{Audit: audit, Usage: cloneProviderUsage(embedding.Usage)}
+		if err == nil {
+			response := llmevents.GenerateEmbeddingResult{Target: metadata.Target, Embedding: embedding}
+			if err = response.ValidateFor(cmd); err == nil {
+				execution.Result = response
+			}
 		}
 		return execution, err
 	default:
@@ -1107,8 +1115,8 @@ func newProviderCommandRequestID(operation string, startedAt time.Time) string {
 	return fmt.Sprintf("llm-%s-%d-%d", strings.TrimSpace(operation), startedAt.UnixNano(), providerCommandSequence.Add(1))
 }
 
-func llmCompletionEventData(completion llmmodels.ProviderCompletionResult) *llmevents.ProviderCompletionData {
-	ret := &llmevents.ProviderCompletionData{Content: string(completion.Payload)}
+func llmCompletionEventData(completion llmmodels.ProviderCompletionResult) llmevents.ProviderCompletionData {
+	ret := llmevents.ProviderCompletionData{Content: string(completion.Payload)}
 	if completion.Usage != nil {
 		usage := *completion.Usage
 		ret.Usage = &usage
@@ -1116,7 +1124,7 @@ func llmCompletionEventData(completion llmmodels.ProviderCompletionResult) *llme
 	return ret
 }
 
-func setLLMMagicResult(result magicevent.Result, data llmevents.LLMCommandResult, err error) {
+func setLLMMagicResult(result magicevent.Result, data any, err error) {
 	if result == nil {
 		return
 	}

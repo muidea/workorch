@@ -28,6 +28,7 @@ const StepKindPromptGet = modulecommon.StepKindPromptGet
 type Biz struct {
 	basebiz.Base
 	runtimeAdapter *RuntimeAdapter
+	started        bool
 }
 
 type Dependencies struct {
@@ -64,12 +65,16 @@ func (m *Biz) Start() error {
 	if m == nil || m.runtimeAdapter == nil || m.EventHub() == nil {
 		return common.ErrInvalidArgument
 	}
+	if m.started {
+		return nil
+	}
 	m.SubscribeFunc(mcpevents.TopicAcquireRuntimeCapabilities, m.handleRuntimeCapabilities)
 	m.SubscribeFunc(mcpevents.TopicAcquireRuntimeOperationAdmissibility, m.handleRuntimeOperationAdmissibility)
 	m.SubscribeFunc(mcpevents.TopicProbeRuntimeOperationFeasibility, m.handleRuntimeOperationFeasibility)
 	m.SubscribeFunc(mcpevents.TopicProbeRuntimeSemanticProofFeasibility, m.handleRuntimeSemanticProofFeasibility)
 	m.SubscribeFunc(mcpevents.TopicQueryRuntimeCWIReconciliation, m.handleRuntimeCWIReconciliationQuery)
 	m.SubscribeFunc(mcpevents.TopicExecuteOperation, m.handleMCPOperation)
+	m.started = true
 	return nil
 }
 
@@ -77,12 +82,15 @@ func (m *Biz) Teardown(context.Context) {
 	if m == nil {
 		return
 	}
-	m.UnsubscribeFunc(mcpevents.TopicExecuteOperation)
-	m.UnsubscribeFunc(mcpevents.TopicAcquireRuntimeCapabilities)
-	m.UnsubscribeFunc(mcpevents.TopicAcquireRuntimeOperationAdmissibility)
-	m.UnsubscribeFunc(mcpevents.TopicProbeRuntimeOperationFeasibility)
-	m.UnsubscribeFunc(mcpevents.TopicProbeRuntimeSemanticProofFeasibility)
-	m.UnsubscribeFunc(mcpevents.TopicQueryRuntimeCWIReconciliation)
+	if m.started {
+		m.UnsubscribeFunc(mcpevents.TopicExecuteOperation)
+		m.UnsubscribeFunc(mcpevents.TopicAcquireRuntimeCapabilities)
+		m.UnsubscribeFunc(mcpevents.TopicAcquireRuntimeOperationAdmissibility)
+		m.UnsubscribeFunc(mcpevents.TopicProbeRuntimeOperationFeasibility)
+		m.UnsubscribeFunc(mcpevents.TopicProbeRuntimeSemanticProofFeasibility)
+		m.UnsubscribeFunc(mcpevents.TopicQueryRuntimeCWIReconciliation)
+		m.started = false
+	}
 	if m.runtimeAdapter != nil {
 		m.runtimeAdapter.Close()
 	}
@@ -95,8 +103,11 @@ func (m *Biz) Teardown(context.Context) {
 // binding-declared executable probe (including its exact input contract),
 // which this reconciliation command intentionally does not invent.
 func (m *Biz) handleRuntimeCWIReconciliationQuery(event magicevent.Event, result magicevent.Result) {
-	command, ok := event.Data().(mcpevents.QueryRuntimeCWIReconciliationCommand)
-	if !ok || m == nil || m.runtimeAdapter == nil || command.ValidateForOwner(ModuleID) != nil {
+	command, ok := mcpRuntimeIngressCommand[mcpevents.QueryRuntimeCWIReconciliationCommand](event, result)
+	if !ok {
+		return
+	}
+	if m == nil || m.runtimeAdapter == nil || command.ValidateForOwner(ModuleID) != nil {
 		setCapabilityError(result, common.ErrInvalidArgument)
 		return
 	}
@@ -195,15 +206,11 @@ func mcpReconciliationObservation(command mcpevents.QueryRuntimeCWIReconciliatio
 }
 
 func (m *Biz) handleMCPOperation(event magicevent.Event, result magicevent.Result) {
-	if result == nil {
+	command, ok := mcpRuntimeIngressCommand[mcpevents.ExecuteOperationCommand](event, result)
+	if !ok {
 		return
 	}
-	if event == nil || event.Source() != runtimecontract.RuntimeModuleOrchestrator {
-		setCapabilityError(result, fmt.Errorf("runtime MCP operation requires Orchestrator source"))
-		return
-	}
-	command, ok := event.Data().(mcpevents.ExecuteOperationCommand)
-	if !ok || m.runtimeAdapter == nil {
+	if m == nil || m.runtimeAdapter == nil {
 		setCapabilityError(result, common.ErrInvalidArgument)
 		return
 	}
@@ -352,9 +359,8 @@ func mcpFailureTargetObservation(result RuntimeOperationResult, evidence runtime
 }
 
 func (m *Biz) handleRuntimeCapabilities(event magicevent.Event, result magicevent.Result) {
-	command, ok := event.Data().(mcpevents.AcquireRuntimeCapabilitiesCommand)
+	command, ok := mcpRuntimeIngressCommand[mcpevents.AcquireRuntimeCapabilitiesCommand](event, result)
 	if !ok {
-		setCapabilityError(result, common.ErrInvalidArgument)
 		return
 	}
 	response, err := mcpevents.ResolveRuntimeCapabilities(command, ModuleID, modulecommon.RuntimeCapabilityKinds()...)
@@ -366,8 +372,11 @@ func (m *Biz) handleRuntimeCapabilities(event magicevent.Event, result magiceven
 }
 
 func (m *Biz) handleRuntimeOperationAdmissibility(event magicevent.Event, result magicevent.Result) {
-	command, ok := event.Data().(mcpevents.AcquireRuntimeOperationAdmissibilityCommand)
+	command, ok := mcpRuntimeIngressCommand[mcpevents.AcquireRuntimeOperationAdmissibilityCommand](event, result)
 	if !ok {
+		return
+	}
+	if m == nil || m.runtimeAdapter == nil {
 		setCapabilityError(result, common.ErrInvalidArgument)
 		return
 	}
@@ -488,8 +497,11 @@ func setRuntimeOperationFeasibilityResult(result magicevent.Result, command mcpe
 }
 
 func (m *Biz) handleRuntimeOperationFeasibility(event magicevent.Event, result magicevent.Result) {
-	command, ok := event.Data().(mcpevents.ProbeRuntimeOperationFeasibilityCommand)
-	if !ok || m.runtimeAdapter == nil {
+	command, ok := mcpRuntimeIngressCommand[mcpevents.ProbeRuntimeOperationFeasibilityCommand](event, result)
+	if !ok {
+		return
+	}
+	if m == nil || m.runtimeAdapter == nil {
 		setCapabilityError(result, common.ErrInvalidArgument)
 		return
 	}
@@ -548,8 +560,11 @@ func (m *Biz) handleRuntimeOperationFeasibility(event magicevent.Event, result m
 }
 
 func (m *Biz) handleRuntimeSemanticProofFeasibility(event magicevent.Event, result magicevent.Result) {
-	command, ok := event.Data().(mcpevents.ProbeRuntimeSemanticProofFeasibilityCommand)
-	if !ok || m.runtimeAdapter == nil {
+	command, ok := mcpRuntimeIngressCommand[mcpevents.ProbeRuntimeSemanticProofFeasibilityCommand](event, result)
+	if !ok {
+		return
+	}
+	if m == nil || m.runtimeAdapter == nil {
 		setCapabilityError(result, common.ErrInvalidArgument)
 		return
 	}
@@ -798,6 +813,35 @@ func containsExactMCPValue(values []string, wanted string) bool {
 		}
 	}
 	return false
+}
+
+// mcpRuntimeIngressCommand is the owner-local strong-call gate for every
+// Runtime topic subscribed by MCP. Post is rejected before DTO inspection;
+// only the exact Orchestrator source may reach registry queries, tool/resource
+// calls, receipt lookup, or evidence paths.
+func mcpRuntimeIngressCommand[T any](event magicevent.Event, result magicevent.Result) (T, bool) {
+	var zero T
+	if result == nil {
+		return zero, false
+	}
+	if event == nil || event.Source() != runtimecontract.RuntimeModuleOrchestrator {
+		setMCPRuntimeIngressInvalid(result, "runtime MCP ingress requires exact Orchestrator source")
+		return zero, false
+	}
+	command, ok := event.Data().(T)
+	if !ok {
+		setMCPRuntimeIngressInvalid(result, "runtime MCP ingress payload has an invalid concrete type")
+		return zero, false
+	}
+	return command, true
+}
+
+func setMCPRuntimeIngressInvalid(result magicevent.Result, message string) {
+	if result == nil {
+		return
+	}
+	err := fmt.Errorf("%w: %s", common.ErrInvalidArgument, message)
+	result.Set(nil, &cd.Error{Code: cd.IllegalParam, Message: err.Error(), Cause: err})
 }
 
 func setCapabilityError(result magicevent.Result, err error) {

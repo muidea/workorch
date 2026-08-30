@@ -676,10 +676,16 @@ func stateChangeDecision(base runtimecontract.RuntimeDecision, facts runtimecont
 }
 
 func ownerGroundedFailureRepairKinds(facts runtimecontract.RuntimeFacts) []string {
-	if !needsStateChangeForOwnerGroundedFailure(facts) || facts.Resources.FailureTarget == nil {
+	if !needsStateChangeForOwnerGroundedFailure(facts) || facts.Resources.FailureTarget == nil ||
+		facts.Resources.FailureTarget.TargetObservation == nil {
 		return nil
 	}
-	targetRefs := facts.Resources.FailureTarget.TargetRefs
+	target := facts.Resources.FailureTarget
+	repairOwner := ownerGroundedFailureRepairOwner(facts, *target)
+	if repairOwner == "" {
+		return nil
+	}
+	targetRefs := target.TargetRefs
 	ret := make([]string, 0, len(facts.Capabilities.StateChangeKinds))
 	for _, rawKind := range facts.Capabilities.StateChangeKinds {
 		kind := runtimecontract.CanonicalRuntimeBlockKind(rawKind)
@@ -687,7 +693,7 @@ func ownerGroundedFailureRepairKinds(facts runtimecontract.RuntimeFacts) []strin
 			continue
 		}
 		descriptor, found := runtimecontract.RuntimeOperationDescriptorForKind(kind)
-		if !found || descriptor.OwnerModuleID == "" || !runtimecontract.RuntimeEffectIsDurable(descriptor.DefaultEffectScope) {
+		if !found || descriptor.OwnerModuleID != repairOwner || !runtimecontract.RuntimeEffectIsDurable(descriptor.DefaultEffectScope) {
 			continue
 		}
 		inventory, found := runtimeOperationAdmissibilityForKind(facts.Resources.OperationAdmissibilities, descriptor.OwnerModuleID, kind)
@@ -703,6 +709,41 @@ func ownerGroundedFailureRepairKinds(facts runtimecontract.RuntimeFacts) []strin
 		ret = append(ret, kind)
 	}
 	return ret
+}
+
+// ownerGroundedFailureRepairOwner keeps diagnostic provenance separate from
+// effect ownership. A File-confirmed observation names its repair owner
+// directly. A receipt-evidence observation instead names the capability that
+// produced the diagnostic; it may authorize a File repair only when every
+// exact target was already grounded by a complete File snapshot. The File
+// catalog and its fresh prerequisite observation are checked by the caller.
+func ownerGroundedFailureRepairOwner(facts runtimecontract.RuntimeFacts, target runtimecontract.FailureTarget) string {
+	if target.TargetObservation == nil {
+		return ""
+	}
+	observation := target.TargetObservation.Normalized()
+	if observation.OwnerModuleID == "" {
+		return ""
+	}
+	if observation.CatalogDependency == nil {
+		return observation.OwnerModuleID
+	}
+	for _, targetRef := range target.TargetRefs {
+		found := false
+		for _, snapshot := range facts.Resources.TargetSnapshots {
+			if snapshot.TargetRef == targetRef && snapshot.Complete() {
+				found = true
+				break
+			}
+		}
+		if !found {
+			return ""
+		}
+	}
+	if len(target.TargetRefs) == 0 {
+		return ""
+	}
+	return runtimecontract.RuntimeModuleFile
 }
 
 func runtimeInventoryAllowsExactTarget(inventory runtimecontract.RuntimeOperationAdmissibility, kind string) bool {

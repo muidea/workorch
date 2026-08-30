@@ -540,6 +540,11 @@ func TestProviderCommandsPublishAuditAndRejectPostBeforePhysicalCall(t *testing.
 	if result == nil || result.Error() != nil {
 		t.Fatalf("embedding result = %+v", result)
 	}
+	resultData, resultErr := result.Get()
+	embeddingResult, ok := resultData.(llmevents.GenerateEmbeddingResult)
+	if resultErr != nil || !ok || !embeddingResult.Target.Same(embeddingTarget) || len(embeddingResult.Embedding.Vector) != 3 {
+		t.Fatalf("embedding concrete result = %#v err=%v", resultData, resultErr)
+	}
 	select {
 	case audit := <-audits:
 		if audit.Operation != workorchconfig.LLMOperationEmbeddings || audit.WorkspaceID != "workspace-1" || audit.RunID != "" || !audit.ProviderSubmitted || audit.RequestBytes == 0 || audit.ResponseBytes == 0 || audit.InputTokens != 7 || audit.TotalTokens != 7 || audit.ContextBudget.ActualTokens != 7 || audit.PhysicalResponseMode != llmaudit.PhysicalResponseModeNonStreaming {
@@ -547,6 +552,32 @@ func TestProviderCommandsPublishAuditAndRejectPostBeforePhysicalCall(t *testing.
 		}
 	case <-time.After(2 * time.Second):
 		t.Fatal("embedding call did not publish usage audit")
+	}
+
+	completionTarget := runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "chat-model"}
+	completionRequest := llmProviderRequest()
+	completionRequest.Kind = "provider_completion"
+	completionRequest.Model = completionTarget.ModelID
+	result = hub.Send(magicevent.NewEventWithContext(
+		llmevents.TopicLLMCommandCompleteProvider, "application/workorchd", llmevents.CommandDestination,
+		magicevent.NewHeader(), ctx, llmevents.CompleteProviderCommand{Target: completionTarget, Request: llmevents.ProviderRequestFromModel(completionRequest)},
+	))
+	if result == nil {
+		t.Fatal("completion returned no result")
+	}
+	resultData, resultErr = result.Get()
+	completionResult, ok := resultData.(llmevents.CompleteProviderResult)
+	if resultErr != nil || !ok || !completionResult.Target.Same(completionTarget) || completionResult.Completion.Content != "ok" {
+		t.Fatalf("completion concrete result = %#v err=%v", resultData, resultErr)
+	}
+	select {
+	case audit := <-audits:
+		if audit.Operation != workorchconfig.LLMOperationResponses || audit.Kind != "provider_completion" ||
+			!audit.ProviderSubmitted || audit.PhysicalResponseMode != llmaudit.PhysicalResponseModeStreaming {
+			t.Fatalf("completion audit = %+v", audit)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("completion call did not publish usage audit")
 	}
 
 	hub.Post(magicevent.NewEventWithContext(
@@ -566,7 +597,7 @@ func TestProviderCommandsPublishAuditAndRejectPostBeforePhysicalCall(t *testing.
 		magicevent.NewHeader(), ctx, llmevents.RefreshProviderModelCatalogCommand{},
 	))
 	time.Sleep(100 * time.Millisecond)
-	if embeddingCalls.Load() != 1 || responseCalls.Load() != 0 || candidateProvider.calls.Load() != 0 || catalogCalls.Load() != 1 {
+	if embeddingCalls.Load() != 1 || responseCalls.Load() != 1 || candidateProvider.calls.Load() != 0 || catalogCalls.Load() != 1 {
 		t.Fatalf("Post physical calls: embedding=%d completion=%d candidate=%d catalog=%d", embeddingCalls.Load(), responseCalls.Load(), candidateProvider.calls.Load(), catalogCalls.Load())
 	}
 }

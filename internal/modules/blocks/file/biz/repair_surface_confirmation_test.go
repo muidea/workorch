@@ -33,7 +33,7 @@ func TestFileOwnerConfirmsOnlyCurrentRegularRepairSurface(t *testing.T) {
 	}
 	observation := runtimecontract.RuntimeValidationFailureObservation{WorkspaceID: "ws", RunID: "run", AuthoritySnapshotID: "authority", DispatchID: "dispatch", OperationID: "validate", FailureSignature: "build-failure", TargetRole: "implementation", DiagnosticClass: runtimecontract.ValidationDiagnosticBuildFailed, CandidateTargetRefs: []string{"internal/manager.go"}, ValidationScopeTargetRefs: []string{"internal/manager.go"}, DiagnosticHash: strings.Repeat("a", 64)}
 	command := fileevents.ConfirmRuntimeRepairSurfaceCommand{WorkspaceID: "ws", RunID: "run", WorkspaceDeliverableDirectory: workspace, Observation: observation}
-	result := hub.Send(magicevent.NewEventWithContext(fileevents.TopicConfirmRuntimeRepairSurface, "test", orchestratorevents.PrerequisiteCommandDestination, magicevent.NewHeader(), ctx, command))
+	result := hub.Send(magicevent.NewEventWithContext(fileevents.TopicConfirmRuntimeRepairSurface, runtimecontract.RuntimeModuleOrchestrator, orchestratorevents.PrerequisiteCommandDestination, magicevent.NewHeader(), ctx, command))
 	data, err := result.Get()
 	if err != nil {
 		t.Fatal(err)
@@ -45,7 +45,7 @@ func TestFileOwnerConfirmsOnlyCurrentRegularRepairSurface(t *testing.T) {
 	command.Observation.CandidateTargetRefs = []string{"missing.go"}
 	command.Observation.ValidationScopeTargetRefs = []string{"missing.go"}
 	command.Observation.DiagnosticHash = strings.Repeat("b", 64)
-	result = hub.Send(magicevent.NewEventWithContext(fileevents.TopicConfirmRuntimeRepairSurface, "test", orchestratorevents.PrerequisiteCommandDestination, magicevent.NewHeader(), ctx, command))
+	result = hub.Send(magicevent.NewEventWithContext(fileevents.TopicConfirmRuntimeRepairSurface, runtimecontract.RuntimeModuleOrchestrator, orchestratorevents.PrerequisiteCommandDestination, magicevent.NewHeader(), ctx, command))
 	data, err = result.Get()
 	if err != nil {
 		t.Fatal(err)

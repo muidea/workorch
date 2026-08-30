@@ -4,97 +4,50 @@ Status: active
 
 Type: capability-block-contract
 
-Last Verified: 2026-08-28
+Last Verified: 2026-08-30
 
 ## 功能范围与边界
 
-`blocks/mcp` 是 MCP tool、resource 与 prompt 的唯一 execution owner。它读取 Registry owner 发布的一致 catalog，
-执行 owner-private transport/session，并把有界结果规范化为 `RuntimeOperationReceipt`。它不拥有 Runtime aggregate，
-不选择 focus/action/credit/terminal，也不修改 MCP Registry。
+`blocks/mcp` 是 MCP tool、resource 与 prompt operation 的唯一 execution owner。它读取 MCPRegistry owner 发布的单一一致
+snapshot，执行 owner-private HTTP/stdio transport/session，并把结果规范化为有界 `RuntimeOperationReceipt`。
 
-## Runtime 合同
+本组件不修改 Registry，不拥有 Runtime aggregate，也不选择 focus、action、CWI credit、retry、governance resolution 或 terminal。
 
-- SM-2 的 capability、operation-admissibility、operation-feasibility、semantic-proof feasibility 与 CWI reconciliation
-  均使用本组件 `pkg/events` 定义的 concrete command/result。catalog/feasibility 只读取一致 Registry snapshot，校验
-  schema/input binding 与本地 transport prerequisite；不得调用 MCP endpoint、启动 stdio process、创建 dispatch 或 receipt。
-- callable capability 与 validation surface 分离。只有 `ready + direct`、已有 owner-sealed input binding、non-durable
-  且 replay policy 合法的 surface 才进入 `ValidationRecipeRefs`；required-input、auxiliary、not-declared 与 unavailable
-  surface 只保留 typed audit fact，不能关闭 CWI。
-- SM-3 的 `ExecuteOperationCommand` 只携带完整 `SealedRuntimeOperation`，不存在可独立漂移的第二份 `Data`。payload hash
-  同时绑定 operation、参数、target/CWI scope、owner catalog snapshot、Registry revision、exact Capability、effect/
-  idempotency policy 与适用 validation surface。execution envelope 的 `AdmissibilitySnapshotID + AcquisitionBinding` 必须
-  与 seal 内 catalog identity 精确相等；缺少 SM-3 封存 identity 或用同 execution key/fence 替换 catalog 均 fail-closed。
-- 外部调用前依次校验同步 result、Orchestrator producer、workspace/run/dispatch/execution key/fence、sealed payload、
-  Orchestrator receipt authorization、当前 Registry revision、enabled Server/Capability、allowlist、exact kind/name/URI、
-  bounded input schema、effect/idempotency 与 exact approval grant。任一漂移均在 transport 前 fail-closed。
-- receipt query 的 `Found=false` 只有 Orchestrator 已证明当前 execution 仍为 active+claimed 且 grant parity 精确匹配时
-  才是执行许可；MCP owner 不把普通“未找到 receipt”解释为授权。已提交的 exact receipt 重放只返回既有事实；query 的
-  Found/Receipt 一致性与 identity、commit 的完整 receipt equality 由 capability owners 共享的 typed validator fail-closed 校验。
-- MCP direct failure target 是 descriptor 声明 `receipt_evidence_observation` 后的 concrete owner 实现；是否允许 direct
-  observation 由共享 descriptor policy 决定，Runtime core 不按 MCP 名称特判。只有 rejected MCP response 显式给出不超过 16 个的
-  `failureTargets`，且 Server subject、target role 与当前 Registry/catalog revision 齐全时，owner 才可在 exact receipt 的
-  `OriginalDiagnostic.TargetObservation` 中返回该观察；第 17 个 canonical target 使完整 observation 失效，不得截断后形成
-  authority，也不得从 operation `TargetRefs`、request input、自由文本或 current workspace manifest 推断。
-- MCP direct observation 的 `DiagnosticClass` 固定为 `receipt_evidence_failure_target`，其 `ContentHash`、`EvidenceRefs` 必须与同一
-  receipt 中实际 `buildMCPOperationEvidence` 持久化的 owner response evidence 精确一致，并包含对应
-  `workorch://mcp/evidence/<content-hash>` content-addressed ref。evidence 持久化失败时 receipt 只能保留 generic rejection，
-  `OriginalDiagnostic.TargetRefs` 与 `TargetObservation` 均为空；receipt 自身的 operation `TargetRefs` 仍只保留 sealed execution
-  lineage。MCP receipt 不得携带 `RuntimeValidationFailureObservation`，也不创建
-  `FailureTarget` 或 `RepairDirective`。
-- approval policy 来自 exact Capability（缺失时使用同一 Server snapshot 的 default）；typed requirement 绑定 capability、
-  operation payload hash、catalog/Registry/capability revision、effect 与 idempotency。MCP owner 不创建或解决 Approval。
+## 组件交互及合同
 
-## 输出与 effect 合同
+| 交互方 | 方向 | concrete typed 合同 |
+| --- | --- | --- |
+| Orchestrator | Orchestrator → MCP | `AcquireRuntimeCapabilities`、`AcquireRuntimeOperationAdmissibility`、`ProbeRuntimeOperationFeasibility`、`ProbeRuntimeSemanticProofFeasibility`、`QueryRuntimeCWIReconciliation`、`ExecuteOperation` Command/Result |
+| Orchestrator | MCP → Orchestrator | exact receipt query/commit；execute 只消费 sealed operation、catalog identity 与 grant |
+| MCPRegistry owner | MCP → Registry | `ReadRegistrySnapshotCommand/Result` 一次读取同 revision Server/Capability aggregate；静态单 server probe 使用 `GetServerCommand/Result` |
+| MCP server | MCP-private | bounded HTTP/stdio tool/resource/prompt invocation、session、evidence 与 effect observation |
 
-- HTTP/stdio response 总量上限为 1 MiB，stream/notification 上限为 128；超限或非法 JSON/protocol 直接 rejected，
-  不做无标记截断。HTTP 仅允许同 origin 的有界 redirect，跨 origin payload 转发在 follow 前拒绝。动态 operation
-  参数最多 64 项，单项/名称/总字符串预算均由 Runtime contract 强制。
-- provider response 与 stream event 只写入 workspace internal 下 owner-private、`0600`、content-addressed evidence file；
-  EventHub/Runtime receipt 仅携带安全 summary、SHA-256、`workorch://mcp/evidence/...` raw ref 与 exact capability source ref。
-  endpoint、credential、stderr、raw provider error 和实际 tool 内容不得进入 aggregate、Eventstream 或 projection。
-- non-durable capability 只能返回无 changed fact。durable capability 必须在 response 的 `workorchEffect` 中提供与 sealed
-  effect 一致的 `changed`、before/after revision 及 bounded remote resource changes；真实 no-op 返回相同 revision。
-  缺失、冲突或伪造 observation 产生 rejected receipt，不能按声明盲报 `Changed=true`。
-- Orchestrator 在 commit 与 fresh-load 使用同一 ingress invariant，先精确比较 observation 的 class/content hash/evidence refs 与
-  owner receipt evidence；只有在该 rejected receipt 已属于 completed committed dispatch、matching operation execution 已
-  `evidence_committed`、key/fence/ref/hash 与唯一 receipt-derived rejected evidence/processed-event fence 精确一致，且 sealed 与
-  current MCP catalog snapshot/acquisition/revision、subject selector 和 owner-catalog prerequisite observation 均保持新鲜时，
-  才能把 direct observation 作为 current failure/target authority。`owner_committed`、generic failure ingress、receipt/evidence
-  漂移或 catalog stale 均 fail-closed；后续 File target snapshot 只负责 workspace grounding，不能反向创建 MCP observation。
-- provider side effect 已发生但 receipt 尚未持久化时，恢复严格服从 sealed replay class：`at_most_once | unknown`
-  进入 `outcome_unknown`，不得重发；已有 exact receipt 的响应丢失只重放该 receipt/evidence transaction。
+Callable capability 与 validation surface 是不同 fact：只有 owner 明确声明、输入 binding 完整、non-durable 且 replay-safe 的
+`ready + direct` surface 才可作为 validation recipe；其他 surface 仍保留 typed readiness/audit fact。
 
-## Registry 与 secret 边界
+## 不变量与非职责
 
-- 本 block 只导入 `blocks/mcpregistry/pkg/events`，通过 `ReadRegistrySnapshotCommand/Result` 一次取得同一
-  `RegistryRevision` 的 Server/Capability aggregate；静态 transport probe 可使用具体 `GetServerCommand/Result`，
-  不注入 Registry service/repository，也不拼接两次 list。
-- EventHub 中的 environment metadata 仅允许 `env://ENV_NAME` 或受支持的 workspace placeholder。stdio execution owner
-  在启动进程前最后解析引用；缺失引用、明文值、非法路径或非法 placeholder 均 fail-closed。secret value 不进入
-  Registry DTO、Runtime authority、日志或 projection。
+- SM-2 capability/admissibility/feasibility/reconciliation 查询不得调用 MCP endpoint、启动 stdio process 或创建 receipt。
+- execute 前必须验证 Orchestrator producer、完整 sealed payload/scope、Registry/catalog revision、Capability allowlist/schema、effect/
+  idempotency policy、execution key/fence、receipt authority 和 exact grant。
+- Registry 只通过 typed EventHub bridge 读取；MCP 不注入 Registry service/repository，也不拼接两次 list 形成伪 snapshot。
+- environment metadata 只允许 `env://NAME` 或受支持 workspace placeholder；secret 只在 stdio 启动前 owner-local 解析。
+- HTTP/stdio response 和 stream/event 数量必须有界；endpoint、credential、stderr、raw provider error/body 不进入 aggregate。
+- non-durable capability 不得报告 changed；durable capability 必须返回与 sealed policy 一致的 before/after effect observation。
+- direct failure-target observation 只能来自 bounded owner response evidence，不能从 operation target、input 或自由文本推断。
+- at-most-once/unknown effect 在 receipt 丢失时不得自动重发；已有 exact receipt 只能重放相同 evidence transaction。
+- 全部六个 Runtime ingress 都是 strong call：必须先确认同步 `Result` 与 exact `kernel/orchestrator` producer，再解析 concrete
+  Command；Post/nil Result、错误 producer 或错误 concrete payload 均不得查询 Registry、启动 session、调用 endpoint 或访问 receipt。
 
-## 交互合同完整性
+## 能力验收
 
-| 交互组件 | 方向 | 具体合同 | 当前结论 |
-| --- | --- | --- | --- |
-| `kernel/orchestrator` | 双向 | capability/admissibility/feasibility/reconciliation/execute；receipt query/commit | 完整；SM-2 零副作用，SM-3 exact sealed execution |
-| `blocks/mcpregistry` | MCP → Registry | `ReadRegistrySnapshotCommand/Result`、静态 probe 的 `GetServerCommand/Result` | 完整；单 aggregate revision、reference-only environment |
-| 外部 MCP server | MCP-private adapter | bounded tool/resource/prompt invocation、owner-private evidence/effect observation | 完整；只在 authorized SM-3 execute 中触达 |
-
-## 回归覆盖
-
-- [x] direct/auxiliary/not-declared 与 ready/prerequisite-required/unavailable surface、required input、empty binding、非法 schema。
-- [x] catalog acquisition 与 semantic feasibility 零 endpoint/process side effect；Registry repository 不跨 owner 注入。
-- [x] Post、错误 producer、scope/fence、sealed payload、execution-record catalog identity、Capability/allowlist/schema/policy/
-  revision 与 approval grant 漂移，且前述 ingress 漂移均为零 provider transport。
-- [x] tool/resource/prompt exact Capability 选择及 non-durable、durable changed、durable no-op、缺失 effect observation。
-- [x] explicit MCP failure target 的真实 EventHub receipt、evidence commit、File snapshot、duplicate/restart 正向链，以及
-  generic ingress、owner-committed-only、缺失/重复 evidence、缺失 processed fence、receipt/catalog revision 漂移的
-  commit/reload 拒绝。
-- [x] direct observation 非 MCP owner 拒绝、response evidence persist 失败零 authority、17 项 overflow 不截断，以及
-  diagnostic class/content hash/evidence refs 协同漂移的 commit/fresh-load 拒绝。
-- [x] HTTP/stdio byte/event guard、安全 diagnostic、private raw ref/hash、credential/environment reference 隔离。
-- [x] receipt commit 前后崩溃、response loss、duplicate/restart 与 stale catalog 的 at-most-once/replay 收敛。
-
-真实 provider/credential 的 deployed verification 继续由 `RUNTIME-LIVE` 与显式 MCP live gate 负责；它不是第二套
-组件合同或 Runtime authority。
+| 验收维度 | 自动化证据 | 状态 |
+| --- | --- | --- |
+| normal | HTTP/stdio tool、resource、prompt tests；`TestMCPOwnerReadsTypedRegistrySnapshotThroughProductionEventBridge` | 已覆盖三类 operation 与生产 MCP↔MCPRegistry typed snapshot/admissibility 路径 |
+| invalid + scope | transport/schema/redirect/size/secret、seal/catalog/capability/grant drift、`TestMCPRuntimeIngressTopicMatrixEnforcesStrongOrchestratorCalls` | 已覆盖主要 owner/Registry/input/transport，并穷举六 topic 的 wrong source、wrong concrete payload 与 Post/nil Result 零查询/零 effect |
+| duplicate + idempotency | owner execute duplicate/receipt tests及 stdio session reuse | 已覆盖同 owner 实例重放与 session reuse |
+| stale + freshness | catalog drift/unavailable feasibility、execute registry drift tests | 已覆盖 Registry/catalog freshness |
+| restart / owner 重建 | 无直接组件级自动化证据 | 未覆盖新 MCP owner 查询 persisted receipt 后零二次 provider invocation |
+| lifecycle | `TestMCPModuleIdentityConfigureStartStopContract`、`TestMCPOwnerLifecycleFencesSubscriptionsAndCapabilityDelivery`、stdio reuse/idle eviction/workspace isolation tests | 仅以 `AcquireRuntimeCapabilities` 代表 topic 覆盖 started fence、重复 Start、Stop 后零投递、重复 Stop 与 fresh-owner restart；不是六 topic lifecycle 矩阵；Teardown 关闭已存在长期 stdio session 尚无直接断言 |
+| effect + receipt | non-durable/durable changed/no-op、failure target/evidence persistence、resource/prompt owner receipts | 已覆盖主要 effect/receipt；stdio observation/timeout 失败的 owner receipt 组合仍未穷举 |
+| boundary | capability EventHub、Registry admissibility bridge、`TestMCPRuntimeIngressTopicMatrixEnforcesStrongOrchestratorCalls`、semantic proof、CWI negative reconciliation 与 seal/authority tests | 已覆盖六个订阅 topic 的 exact producer/strong-call/concrete payload 映射；正向 CWI executable recipe reconciliation 尚无直接 EventHub 验收 |

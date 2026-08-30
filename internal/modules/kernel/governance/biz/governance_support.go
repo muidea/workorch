@@ -128,33 +128,38 @@ func compactUniqueStrings(items []string) []string {
 	return ret
 }
 
-func (s *Service) loadGoalAndDoD(ctx context.Context, goalID common.GoalID, dodID common.DoDID) (*workspace.Goal, *workspace.DoD) {
+func (s *Service) loadGoalAndDoD(ctx context.Context, goalID common.GoalID, dodID common.DoDID) (*workspace.Goal, *workspace.DoD, error) {
+	if s == nil || s.workspaceDefs == nil {
+		return nil, nil, common.ErrInvalidArgument
+	}
 	var goal *workspace.Goal
 	var dod *workspace.DoD
 	if goalID != "" {
 		item, err := s.workspaceDefs.GetGoal(ctx, goalID)
-		if err == nil {
-			goal = item
+		if err != nil {
+			return nil, nil, err
 		}
+		goal = item
 	}
 	if dodID != "" {
 		item, err := s.workspaceDefs.GetDoD(ctx, dodID)
-		if err == nil {
-			dod = item
+		if err != nil {
+			return nil, nil, err
 		}
+		dod = item
 	}
-	return goal, dod
+	return goal, dod, nil
 }
 
-func (s *Service) loadMemoryItems(ctx context.Context, workspaceID common.WorkspaceID) []*memorymodel.MemoryItem {
+func (s *Service) loadMemoryItems(ctx context.Context, workspaceID common.WorkspaceID) ([]*memorymodel.MemoryItem, error) {
 	if s == nil || s.memoryItems == nil || workspaceID == "" {
-		return nil
+		return nil, common.ErrInvalidArgument
 	}
 	items, err := s.memoryItems.ListByWorkspaceID(ctx, workspaceID)
 	if err != nil {
-		return nil
+		return nil, err
 	}
-	return items
+	return items, nil
 }
 
 func (s *Service) publishGovernanceEvent(ctx context.Context, topic string, trace *governancemodel.AutoGovernanceTrace, escalationReason string) error {

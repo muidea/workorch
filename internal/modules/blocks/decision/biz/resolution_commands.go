@@ -10,6 +10,20 @@ import (
 	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
 )
 
+const (
+	decisionResolutionApplicationSource = "application/workorchd/appservice"
+	decisionResolutionGovernanceSource  = "kernel/governance"
+)
+
+func decisionResolutionIngressSourceAllowed(source string) bool {
+	switch source {
+	case decisionResolutionApplicationSource, decisionResolutionGovernanceSource:
+		return true
+	default:
+		return false
+	}
+}
+
 func (m *Biz) executeEnsureResolvedCommand(ctx context.Context, data any) (decisionevents.EnsureResolvedResult, error) {
 	cmd, ok := data.(decisionevents.EnsureResolvedCommand)
 	if !ok || cmd.WorkspaceID == "" {

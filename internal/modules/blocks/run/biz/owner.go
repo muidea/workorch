@@ -22,9 +22,6 @@ import (
 const ModuleID = modulecommon.ModuleID
 
 type Dependencies struct {
-	Runs              repository.RunRepository
-	Steps             repository.StepRepository
-	Checkpoints       repository.RuntimeCheckpointRepository
 	OwnerRepositories repository.RunOwnerRepositories
 	EventHub          magicevent.Hub
 	BackgroundRoutine magictask.BackgroundRoutine
@@ -71,23 +68,13 @@ func (m *Biz) Configure(deps Dependencies) error {
 	if deps.EventHub == nil {
 		return common.ErrInvalidArgument
 	}
-	if deps.OwnerRepositories.Present() {
-		if deps.OwnerRepositories.Validate() != nil || deps.Runs != nil || deps.Steps != nil || deps.Checkpoints != nil {
-			return common.ErrInvalidArgument
-		}
-		m.runs = deps.OwnerRepositories.Runs()
-		m.steps = deps.OwnerRepositories.Steps()
-		m.checkpoints = deps.OwnerRepositories.Checkpoints()
-		m.workspacePurger = deps.OwnerRepositories.WorkspacePurger()
-	} else {
-		if deps.Runs == nil {
-			return common.ErrInvalidArgument
-		}
-		m.runs = deps.Runs
-		m.steps = deps.Steps
-		m.checkpoints = deps.Checkpoints
-		m.workspacePurger = nil
+	if err := deps.OwnerRepositories.Validate(); err != nil {
+		return err
 	}
+	m.runs = deps.OwnerRepositories.Runs()
+	m.steps = deps.OwnerRepositories.Steps()
+	m.checkpoints = deps.OwnerRepositories.Checkpoints()
+	m.workspacePurger = deps.OwnerRepositories.WorkspacePurger()
 	m.stopping = false
 	m.Base = basebiz.New(modulecommon.ModuleID, deps.EventHub, deps.BackgroundRoutine)
 	m.notifier = eventRunStateNotifier{post: m.PostEvent}

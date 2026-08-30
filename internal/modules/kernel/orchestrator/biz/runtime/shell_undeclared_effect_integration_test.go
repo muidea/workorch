@@ -143,7 +143,7 @@ func TestShellUndeclaredWorkspaceEffectCommitsAuditWithoutTargetAuthority(t *tes
 	}
 	dispatch := persisted.CompletedDispatches[0]
 	execution := dispatch.OperationExecutions[0]
-	replayed, found, err := controller.QueryOperationReceipt(ctx, facts.WorkspaceID, facts.RunID, dispatch.ID, execution.OperationID, execution.ExecutionKey, execution.Fence, nil)
+	replayed, found, err := controller.QueryOperationReceipt(ctx, facts.WorkspaceID, facts.RunID, dispatch.ID, execution.OperationID, execution.ExecutionKey, execution.Fence, runtimecontract.RuntimeModuleShell, nil)
 	if err != nil || !found || runtimecontract.StableRuntimeOperationReceiptHash(replayed) != runtimecontract.StableRuntimeOperationReceiptHash(receipt) {
 		t.Fatalf("real receipt ingress did not persist exact replay fact: found=%t receipt=%+v err=%v sealed=%+v", found, replayed, err, sealed.ActiveDispatch)
 	}

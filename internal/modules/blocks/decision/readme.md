@@ -4,166 +4,50 @@ Status: active
 
 Type: stateful-block-contract
 
-Last Verified: 2026-08-26
+Last Verified: 2026-08-30
 
-## 组件类型与职责
+## 功能范围与边界
 
-`blocks/decision` 是 DecisionTicket/DecisionResolution 聚合的唯一 owner。Ticket 是聚合根，Resolution 和
-`RuntimeGovernanceResolutionProposal` 都只能通过 Decision-private lifecycle event/reducer 创建或迁移。本 Block
-表达治理选择并保存审计身份，不拥有 SM-1～SM-4，也不恢复 Run、不修改 Runtime aggregate、不执行 capability。
+`blocks/decision` 是 DecisionTicket、DecisionResolution、Workspace/Runtime Definition clarification binding、Runtime governance resolution proposal、交付 checkpoint 和 Workspace deletion tombstone 的唯一 owner。它负责 ticket 的 `open → resolved`、resolution identity/fingerprint、clarification 与 Runtime governance 两阶段提交后的 owner-local恢复。
 
-本组件影响 SM-2 governance resolution 的提交，以及 SM-4 的重放、恢复和投影交付；相应 authority 仍分别属于
-Orchestrator 与各资源 owner。
-
-## 写入与恢复合同
-
-- 所有 Ticket creation 入口只构造无 state/时间戳/进度的 immutable seed，再提交同一
-  `opened` Decision-private lifecycle event。只有 `lifecycle_internal_event.go` 可选择 initial `open`、封存
-  timestamps 并执行 Ticket repository Create；generic、Runtime governance 和两类 clarification open 都不得直写初始状态。
-- Definition clarification 不复用普通 `EnsureResolvedCommand` 或 Runtime governance envelope。pre-seal Workspace 路径使用
-  dedicated open/reconcile-candidate/resolve-by-admission command/result；execution-time 路径使用 dedicated runtime open 与
-  Run-owner resolve-by-replacement command/result。generic resolver、auto-governance policy 和 continuation action 均拒绝这两类 ticket。
-- pre-seal open/reconcile/resolve result 都提供 `ValidateFor(exact command)`：调用方必须重算 stable ticket/resolution identity、
-  request/reconciliation/resolution binding hash 与允许的 created/duplicate/resolved disposition。非空 ID/hash、错误 scope 或
-  不匹配的 Decision result 不能被映射为 Workspace admission fact。owner-neutral
-  `internal/pkg/workorchdefinitioncontract` 只保存 immutable `Identity/Binding/Record` values 与 pure identity proof；Decision
-  `pkg/events` 声明自己的 concrete named command/result roots 并显式转换这些 values，不使用 type alias。Workspace
-  `pkg/events` 只依赖 neutral values，不导入 Decision owner package；Workspace Biz 作为正常 EventHub sender 可导入 Decision
-  events，并在进入 private admission reducer/CAS 前调用 `QueryWorkspaceDefinitionClarificationFactCommand/Result`。该 read 由
-  Decision ticket aggregate 与 resolution repository 重建 persisted record；Found=false、retired/superseded ticket、partial
-  resolution、binding 漂移，或外层 Ticket 的 canonical DecisionKind/reason/question/failure/actions/context/governance 语义漂移均
-  fail-closed，caller 自洽的 identity/binding pair 本身不构成 provenance。
-- 静态 invalid candidate ticket 绑定完整 candidate revision/hash、typed violation、canonical signature bytes/hash 与修改动作；
-  新 invalid revision 先建立确定性新 ticket，再以 `definition_candidate_revision_superseded` 幂等退休旧 ticket。新 candidate
-  admitted 后只记录 `definition_candidate_adjusted` resolution；Application 只转交 immutable resolution fact，Workspace-private
-  reducer 才决定 activation eligibility。
-- Runtime clarification ticket 绑定 Run、Definition/StartupInput、authority、focus、semantic request/document 与 clarification
-  dispatch。只有 `blocks/run` 已持久化的 replacement intent 可以绑定 resolution；重复 command 返回相同 resolution/binding
-  hash，scope mismatch 或另一 intent 返回 typed stale/conflict，不生成 Runtime continuation。
-- clarification resolution 不得在 handler 中先改 nested binding 再改 Ticket state。handler 只提交 bounded
-  `definitionClarificationResolutionFact`，唯一 lifecycle reducer 在同一 owner Update 中原子绑定
-  resolution/replacement/admission identity 并执行 `open -> resolved`；partial binding 或已解决 binding 重写 fail-closed。
-- Definition clarification 不进入 generic ordinary-resolution reconciliation。若进程停在 Resolution create 与 Ticket
-  clarification binding CAS 之间，只有原 dedicated resolve command 的 exact replay 可以补齐 private reducer 所需事实；
-  background reconciliation 不得把它降级为缺少 binding 的普通 resolved Ticket。
-
-- Runtime governance ticket 的唯一创建入口是 `OpenRuntimeGovernanceRequestCommand/Result`。Decision 在任何
-  repository 访问前同时校验 EventHub source 必须为 `kernel/orchestrator`，并用 command `WorkspaceID` 绑定已有
-  execution context；错误 source 或 workspace mismatch 必须零写入失败。Ticket ID、Run、dispatch、authority
-  snapshot 和 allowed resolution type 都来自 sealed request，不接受通用 create/update 或 map context。
-- 普通 resolution 使用 `EnsureResolvedCommand/EnsureResolvedResult`。持久化前生成的 canonical fingerprint 包含
-  ResolutionID、TicketID、type、脱敏后的 payload、`ContinuationAction`、`ResumeRunID` 和 `SuccessorRunID`；完全相同
-  的重放幂等，任一 sealed 字段漂移均 conflict。
-- `runtime_governance` resolution 使用 owner-local 两阶段事务：先把 proposal 持久化为 `pending`，再向
-  Orchestrator 发送 `CommitRuntimeGovernanceTicketResolutionCommand`，只有收到 scope/identity 完整且 disposition 为
-  `committed` 或 `duplicate` 的 typed result 后，Decision 才创建正式 Resolution 并将 Ticket/proposal finalize 为
-  resolved/committed。nil result、wrong result、missing subscriber 和 owner/transient error 都保留 pending；只有
-  Orchestrator 明确返回 `stale_diagnostic` 才能标为 rejected。
-- `RuntimeGovernanceResolutionProposal` 的 ingress seed 同样不携带 state、failure、timestamp 或 delivery progress；
-  `proposal_prepared` private event 是唯一可选择 initial `pending` 并封存 proposal timestamps 的位置，caller-selected
-  proposal lifecycle 字段必须 fail-closed。
-- 已 committed 的相同 Runtime resolution 重放仍会向 Orchestrator 执行幂等 join，但不会再次 Update Ticket、刷新
-  Ticket/proposal 时间戳或重写 Resolution。proposal 的 evidence/notification marker 只有在对应交付成功后由 private
-  reducer 持久化；finalize 后进程中断或 evidence owner 失败时，启动/周期 reconciliation 会从正式 Resolution 重放
-  未完成交付。
-- 普通 resolution 的 `Resolution create -> Ticket update` 写入切点同样可恢复：若只留下 Resolution，owner
-  reconciliation 使用持久化的完整 resolution fingerprint 触发 private recovery event，将 Ticket 收敛到 resolved 并补发
-  evidence/notification；外部 caller 不得直接修复 Ticket state。
-
-## 查询与删除合同
-
-- 每个 EventHub topic 都使用独立 concrete result：`GetTicketResult`、`ListTicketsResult`、
-  `ListTicketsByRunResult`、`ListTicketsByWorkspaceResult`、`GetResolutionResult`、`EnsureResolvedResult` 和
-  `PurgeWorkspaceDecisionsResult`。不存在同时承载 Ticket、Resolution、列表和删除计数的通用 result envelope。
-- 所有 list command 使用 workspace/run/ticket composite keyset cursor；默认单页 100、上限 200。全局列表必须显式
-  指定 `TicketListScopeAll`，workspace/run 列表必须显式携带 WorkspaceID；run query 不允许只有 RunID。Application
-  将 HTTP cursor/limit 直接交给 owner，不再先读取全量 Ticket 后本地分页。
-- 普通 `EnsureResolvedCommand` 必须显式携带 WorkspaceID；不再保留按 TicketID 反查 scope 的无 workspace mutation
-  入口。只读 `GetResolutionCommand` 若未携带 scope，仅可解析全局唯一 TicketID；跨 workspace 任意重复 ID 均 conflict，
-  不得按 open/resolved 状态、repository 顺序或“优先 open”猜测 owner scope。所有返回 entity 在离开 owner 前显式深拷贝。
-- Ticket 与 Resolution 不公开独立 delete command。Workspace owner 先发送
-  `SealWorkspaceDecisionDeletionCommand`；Decision 持久化永久、workspace-scoped tombstone 后，所有公共查询、恢复和普通
-  Create/Update/Delete 都 fail closed。`retain` 保留物理数据但永久隐藏；`purge` 只能由同一 scope 的
-  `PurgeWorkspaceDecisionsCommand` 翻译为 `purge_requested` owner-private event；只有同一个 private dispatcher 能在 exact
-  `fenced` scope 下进入 privileged sink，fixed-point 清空 Resolution 与 Ticket，再提交 `purge_completed` CAS 将 tombstone
-  转为 `purged`。command adapter 不直接调用 purge fence/物理 helper，伪造 `purge_completed` 也不能越过 dispatcher。
-  seal/purge exact replay 返回稳定 FenceID/PurgeID/AckHash/PurgeProofHash。
-- seal、purge、普通 mutation 和逐 Ticket reconciliation 共用 Decision owner-local workspace mutation lock；reconciliation
-  进入锁后必须重新读取最新聚合。每一次发往 Orchestrator/Eventstream 的 commit、evidence 或 notification 都在
-  Decision durable active-fence 回调内再次裁决，因而 tombstone 一旦持久化，当前进程和重启实例都不能补发 late delivery。
-
-## 通知与 evidence 合同
-
-- Ticket created/resolved 分别发布 `TicketChangedData` 与 `TicketResolvedData`；不存在“任意 Ticket 状态变化”通知。
-  两者携带 Decision owner 派生的 stable `NotificationID`，Eventstream 以该 ID 作为 EventRecord identity，重复 append
-  只对相同通知视为幂等。
-- Runtime ticket creation、Runtime resolution evidence/resolved notification，以及普通 resolution notification 都有
-  owner-private delivery marker。调用失败和重启恢复不会把未完成交付误判成新治理选择；marker 完成后的相同 Runtime
-  resolution 是 owner repository 零写入 duplicate。
-- Resolution evidence 使用 Decision 定义的 `RecordDecisionEvidenceCommand/Result` 同步交给 Orchestrator；Decision
-  不访问 EvidenceRecord repository。正式 Resolution 在 Ticket transition 前封存 immutable `ResolvedAt`；write-cut
-  恢复只能从该 durable fact 复原 Ticket 时间，不能使用恢复时钟或可推进的 `UpdatedAt`。EvidenceRecordID 由
-  Workspace/Run/Ticket/Resolution 完整 immutable scope 稳定派生，因此同局部 ResolutionID 可跨 Workspace 隔离，
-  同 scope 失败重放仍是完全相同的一条 evidence。
-- pre-seal Workspace Definition clarification 没有 RunID，因此不进入上述 run-scoped Orchestrator evidence 合同；其
-  dedicated resolve result 与 stable `TicketResolvedData` notification 构成完整交付。普通与 Runtime resolution 仍强制
-  使用带 RunID 的 evidence，不能以 pre-seal 例外放宽 Orchestrator 校验。
-- 通知与 evidence 都是 SM-4 audit/projection 交付，不反向决定 SM-2 authority，也不允许 Application 因通知成功而
-  自动 Resume Run。
+Decision 的公开 surface 包含 8 个 ordinary command topics、1 个 Runtime governance open、1 个 capability acquisition 及 6 个 Definition clarification topics。每个 topic 使用独立 concrete command/result；不存在 generic ticket mutation envelope。
 
 ## 组件交互及合同
 
-| 交互组件 | 方向 | 具体合同 | 当前结论 |
-| --- | --- | --- | --- |
-| `kernel/orchestrator` | 双向 | sealed Runtime governance open、typed resolution commit、Decision evidence record | 充分且必要；source/scope fail-closed，Decision 不代写 Runtime |
-| `application/workorchd` / `kernel/governance` | consumer → Decision | concrete scoped query/page、普通/Runtime ticket resolution | 充分且必要；无全量后分页、无 repository/service 注入 |
-| `blocks/run` | 双向受限 | dedicated runtime-definition replacement resolution；普通 governance 仍经 Orchestrator fact | 充分；clarification ack 不迁移 SM-1、不生成 continuation |
-| `blocks/eventstream` | Decision → Eventstream | created/resolved typed notification + stable NotificationID | 充分；Eventstream 幂等记录，projection 不参与 authority |
-| workspace deletion | Workspace → Decision | seal fence + optional fixed-point purge | exact scope；不暴露 Ticket/Resolution 独立删除 |
+| 交互方 | typed command/data/result | 边界 |
+| --- | --- | --- |
+| `application/workorchd` | Get/List；Workspace clarification open/reconcile/resolve | Workspace clarification mutation 只接受 exact `application/workorchd` source。 |
+| `application/workorchd/appservice` | ordinary `EnsureResolvedCommand/Result` | human/application resolution ingress 只接受 exact appservice source。 |
+| `blocks/workspace` | `QueryWorkspaceDefinitionClarificationFactCommand/Result`；seal/purge Decision deletion | fact query 与 deletion 只接受 Workspace source；返回持久 ticket/resolution 的 exact binding。 |
+| `kernel/orchestrator` | capability acquisition、Runtime governance open、Runtime clarification open；Decision→Orchestrator governance commit/evidence | privileged ingress 只接受 Orchestrator；Decision 不自行提交 Runtime authority。 |
+| `blocks/run` | `ResolveRuntimeDefinitionClarificationByReplacementCommand/Result` | 只接受 Run 已持久化的 exact replacement binding。 |
+| `kernel/governance` | scoped decision read；ordinary `EnsureResolvedCommand/Result` | Governance 可提交已授权的 ordinary resolution intent，不取得 Decision repository。 |
+| Eventstream/projection consumers | `TicketChangedData`、`TicketResolvedData` | audit/display 消费；不是 Decision lifecycle owner。 |
 
-## Owner 内部边界
+Workspace clarification来源矩阵为 Application open/reconcile/resolve、Workspace persisted-fact query；Runtime clarification来源矩阵为 Orchestrator open、Run replacement resolve。Runtime capability catalog 只发布 `decision/request` governance kind。
+生产 `Configure` 只接受通过 `Validate()` 的 canonical `DecisionOwnerRepositories` 与 EventHub。
 
-- `owner.go` 只负责 Biz 构造、订阅与生命周期；`command_router.go` 对七个普通 topic 静态穷尽分派，未知 topic
-  fail-closed。Runtime governance open/capability ingress 另由专用 adapter 处理并先校验 Orchestrator source。
-- mutation implementation 与 constructor 均为 Decision owner-private；跨 package（包括测试）只能启动 owner Module
-  后发送 `pkg/events` concrete command/result，或消费 owner 已发布的 immutable fact，不得直接构造 mutation service、
-  导入 `biz/contracts` 或注入 Ticket/Resolution repository。
-- `ticket_commands.go` 只实现 scoped query 与 keyset page；`workspace_deletion_internal_event.go` 独占 workspace fence/purge reducer；`resolution_commands.go` 只实现
-  resolution query/ensure；二者共享 workspace fence，但不形成第二个 owner 或 facade。
-- `lifecycle_internal_event.go` 是 Ticket creation/lifecycle、clarification binding、proposal、delivery marker 和 deletion tombstone 的唯一状态 reducer。
-  `runtime_governance_proposal_reconciliation.go` 只重放已持久化 fact，不选择新的 resolution 或 Runtime action。
-- 生产构造只接受 backend aggregate 铸造并通过 `Validate` 的 opaque `DecisionOwnerRepositories` bundle，以及 EventHub
-  和 framework background routine；Ticket、Resolution 与 Workspace deletion surface 必须携带同一 backend binding。
-  zero、fake 或 memory/file mixed-set 在订阅前 fail closed，不保留独立 repository 注入或 legacy fallback；也不得注入
-  Run、Workspace、Evidence、Orchestrator repository/service 或 application callback。
+## 不变量与非职责
 
-## 已覆盖回归
+- Ticket、Resolution、clarification/proposal/checkpoint 的转换只由 Decision-private lifecycle event/reducer触发；外部 command 不得携带 target state或 owner timestamp。
+- 相同 sealed identity/fingerprint 重放幂等；payload、scope、candidate revision、replacement intent 或 binding hash 漂移必须 conflict/stale。
+- Definition clarification 与 ordinary resolution 是两条显式合同；background reconciliation 不得把 clarification 降级为普通 resolved ticket。
+- Runtime governance proposal 只有 Orchestrator 返回 committed/duplicate 后才能 finalize；失败保留可恢复 pending，不能假装跨 owner transaction 已完成。
+- Workspace deletion fence 后普通读写/late delivery fail closed；physical purge 只由 Decision-private dispatcher触发。
+- 不拥有 Run SM-1、Runtime SM-2～SM-4、Workspace admission、Approval 或 Result 状态机；不选择下一动作，不暴露 repository/service。
 
-- Runtime open 的错误 source、错误 workspace context、合法 scope 与确定性重复创建。
-- nil/wrong/missing/owner-error commit 保持 pending，stale 显式拒绝，以及 committed/duplicate finalize。
-- finalize 后 evidence 失败的重启补写、delivery marker 幂等、完成后的 Runtime replay 零 Ticket update/零时间戳漂移。
-- 普通 resolution 脱敏 payload 重放，continuation/resume/successor drift conflict，以及 Resolution/Ticket 写入切点恢复。
-- workspace retain/purge tombstone、public read/recovery 隔离、普通 Delete-after-seal 拒绝、fixed-point purge 与 exact replay。
-- deletion seal 与在途 reconciliation delivery 的线性化、seal 后零 Orchestrator/Eventstream delivery，以及重启实例对未完成
-  resolved delivery checkpoint 的永久抑制。
-- concrete result type、显式全局 scope、默认/最大 limit、composite cursor continuation、无 Workspace resolution mutation
-  零写入拒绝、跨 workspace mixed-state 重复 ID conflict 和深拷贝。
-- stable Decision notification identity 与 Eventstream duplicate append 去重。
-- Workspace invalid-candidate replacement、admission resolution、owner-neutral Identity/Binding values 上的 open/reconcile/resolve
-  deterministic pair validation、persisted-fact query 的 Found=false/retired/partial/binding mismatch 与外层 Ticket semantic
-  mutation 拒绝、Workspace events 零
-  Decision-owner import，以及 Runtime replacement resolution 的 exact
-  duplicate、scope mismatch、orphan-resolution recovery。
-- pre-seal resolution 不投递 run-scoped evidence，真实 Decision→Orchestrator handler 保持零调用；首次成功响应丢失后的
-  exact replay 返回同一 duplicate acknowledgement，且 persisted clarification fact 仍可由 Workspace 查询。
-- Ticket/proposal seed 均拒绝 caller-selected initial/progress state；clarification binding 与 `open -> resolved` 单次 owner write，静态门禁拒绝 handler 直写 binding、proposal initial state 或 Ticket repository Create。
+## 能力验收
 
-## 闭合验证
-
-- [x] file backend 使用独立 helper process 在原子 owner 写入完成后执行真实 SIGKILL，覆盖 pending proposal、formal
-  Resolution 已写与 finalize 后双 delivery marker 等切点；workspace deletion 使用独立永久 tombstone/replay 回归，不复用逐实体 lifecycle；每个切点都由新 owner
-  实例从持久化状态幂等收敛。
-- [x] `BenchmarkDecisionTicketInventoryPage100K` 固定 100k Ticket inventory/page 基准；分页排序改为 typed composite-field
-  比较，避免在 sort comparison 中反复拼接 cursor。单次基准分配由百万级降到仅 page clone/visible index 所需的有界分配。
-
-当前没有与本合同对应的已知可执行缺口。
+| 能力/维度 | 测试证据 | 结论 |
+| --- | --- | --- |
+| module lifecycle与核心依赖校验 | `module_test.go::TestModuleIdentityConfigureStartStopContract`、`module_test.go::TestModuleConfigureRequiresCoreDependencies` | 已覆盖 |
+| ordinary 8-topic semantic family、bounded scope/cursor | `biz/command_router_test.go::TestDecisionCommandTopicsHaveOneSemanticFamily`、`module_test.go::TestDecisionTicketListsAreExplicitBoundedAndCompositeCursorPaged` | 已覆盖；该测试不证明完整16-topic inventory |
+| ordinary ticket/resolution normal/duplicate/conflict/recovery | `biz/decision_service_test.go::TestService_ResolveTicket_OpenToResolvedAndPersistsResolution`、`biz/decision_service_test.go::TestService_EnsureResolvedTicket_IsIdempotentAndRejectsResolutionMismatch`、`biz/decision_service_test.go::TestBiz_ReconciliationClosesOrdinaryResolutionWriteCut` | 已覆盖 |
+| ordinary EnsureResolved exact source与零 mutation | `biz/owner_contract_test.go::TestDecisionOrdinaryResolutionAcceptsOnlyApplicationOrGovernanceSources` | 已覆盖；仅 `application/workorchd/appservice`、`kernel/governance` |
+| capability 与 clarification source matrix/zero mutation | `biz/owner_contract_test.go::TestDecisionRuntimeCapabilityAcquisitionIsOrchestratorOnly`、`biz/owner_contract_test.go::TestDecisionPrivilegedIngressRejectsForgedSourcesWithoutMutation`、`module_test.go::TestRuntimeGovernanceOpenRequiresOrchestratorSourceAndMatchingWorkspaceContext` | 已覆盖；fixture 可进入真实 owner mutation path |
+| Workspace clarification duplicate/provenance/fact query | `biz/definition_clarification_test.go::TestOpenWorkspaceDefinitionClarificationReplayMatchesPersistedFieldsNotOnlyHash`、`biz/definition_clarification_test.go::TestQueryWorkspaceDefinitionClarificationFactReadsExactPersistedTicketAndResolution` | 已覆盖；persisted owner stale reconcile未覆盖，当前revision-pair证据仅为DTO validation |
+| Runtime governance commit failure/replay | `module_test.go::TestRuntimeGovernanceInvalidCommitResultRemainsRecoverable`、`module_test.go::TestRuntimeGovernanceResolutionDoesNotResolveTicketBeforeAggregateCommit` | 已覆盖 |
+| Runtime clarification owner replay/restart | `pkg/events/definition_clarification_test.go::TestRuntimeReplacementResolutionResultValidatesExactDispositionAndBinding`、`biz/owner_contract_test.go`仅覆盖DTO与单次正常/source路径 | duplicate、stale、restart与file cutpoint未覆盖 |
+| deletion duplicate/lifecycle/restart与purge source | `module_test.go::TestDecisionWorkspaceDeletionFenceRetainAndPurgeAreStable`、`biz/workspace_deletion_delivery_test.go::TestDecisionWorkspaceDeletionRejectsForgedPurgeAndUsesPrivatePath`、`biz/workspace_deletion_delivery_test.go::TestDecisionRestartSkipsLateResolvedDeliveryAfterDeletionSeal` | 已覆盖；forged seal source未覆盖 |
+| Runtime-governance proposal/delivery file cutpoints | `biz/file_cutpoint_recovery_test.go::TestFileBackedDecisionRecoversEveryOwnerWriteCutAfterProcessKill`、`module_test.go::TestDecisionFileDeletionFenceLinearizesAcrossRepositorySets` | 仅覆盖proposal pending、resolution created、delivery finalized、evidence recorded四个governance cut；不代表全部Decision write cut |
+| real scheduler repeated-tick recovery on reopened file backend | file cutpoints与手动 reconciliation 已覆盖；尚无真实 `BackgroundRoutine` 多 tick + reopen 组合测试 | 未覆盖 |

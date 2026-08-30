@@ -56,7 +56,7 @@ func TestWorkspaceExecutionRestartReplaysFromFilePersistenceAfterOwnerRestart(t 
 		hub := magicevent.NewHub(32)
 		runs := filerepo.NewRunRepository(path)
 		owner := New()
-		if err := owner.Configure(Dependencies{Runs: runs, EventHub: hub}); err != nil {
+		if err := owner.Configure(runBizTestDependencies(runs, nil, nil, hub, nil)); err != nil {
 			t.Fatalf("configure Run owner: %v", err)
 		}
 		if err := owner.Start(); err != nil {
@@ -272,7 +272,7 @@ func TestRunConfigureRecoversPendingActivationBeforeRuntimeInventory(t *testing.
 
 	hub := magicevent.NewHub(32)
 	owner := New()
-	if err := owner.Configure(Dependencies{Runs: filerepo.NewRunRepository(path), EventHub: hub}); err != nil {
+	if err := owner.Configure(runBizTestDependencies(filerepo.NewRunRepository(path), nil, nil, hub, nil)); err != nil {
 		t.Fatalf("fresh owner Configure recovery: %v", err)
 	}
 	t.Cleanup(func() {
@@ -299,7 +299,7 @@ func TestRunConfigureRecoversPendingActivationBeforeRuntimeInventory(t *testing.
 	// additional transition or generation allocation.
 	secondHub := magicevent.NewHub(16)
 	second := New()
-	if err := second.Configure(Dependencies{Runs: filerepo.NewRunRepository(path), EventHub: secondHub}); err != nil {
+	if err := second.Configure(runBizTestDependencies(filerepo.NewRunRepository(path), nil, nil, secondHub, nil)); err != nil {
 		t.Fatalf("second fresh owner Configure: %v", err)
 	}
 	if err := second.Stop(context.Background()); err != nil {
@@ -341,7 +341,7 @@ func TestRunConfigureValidatesAllPendingActivationsBeforeAnyCAS(t *testing.T) {
 	owner := New()
 	hub := magicevent.NewHub(16)
 	defer hub.Terminate(context.Background())
-	if err := owner.Configure(Dependencies{Runs: runs, EventHub: hub}); !errors.Is(err, common.ErrConflict) {
+	if err := owner.Configure(runBizTestDependencies(runs, nil, nil, hub, nil)); !errors.Is(err, common.ErrConflict) {
 		t.Fatalf("Configure malformed inventory err=%v, want conflict", err)
 	}
 	unchanged, err := runs.GetByWorkspaceID(context.Background(), valid.WorkspaceID, valid.ID)
@@ -371,7 +371,7 @@ func TestRunConfigureRejectsMultipleCurrentRunsBeforeAnyCAS(t *testing.T) {
 	owner := New()
 	hub := magicevent.NewHub(16)
 	defer hub.Terminate(context.Background())
-	if err := owner.Configure(Dependencies{Runs: repo, EventHub: hub}); !errors.Is(err, common.ErrConflict) {
+	if err := owner.Configure(runBizTestDependencies(repo, nil, nil, hub, nil)); !errors.Is(err, common.ErrConflict) {
 		t.Fatalf("Configure multiple current Runs err=%v, want conflict", err)
 	}
 	unchanged, err := base.GetByWorkspaceID(ctx, workspaceID, created.ID)
@@ -448,7 +448,7 @@ func TestWorkspaceExecutionRestartRejectsInvalidPersistedDuplicateIntent(t *test
 	hub := magicevent.NewHub(16)
 	t.Cleanup(func() { hub.Terminate(context.Background()) })
 	biz := New()
-	if err := biz.Configure(Dependencies{Runs: runs, EventHub: hub}); err != nil {
+	if err := biz.Configure(runBizTestDependencies(runs, nil, nil, hub, nil)); err != nil {
 		t.Fatal(err)
 	}
 	ctx := common.ContextWithRuntimeWorkspaceID(context.Background(), "ws-invalid-intent")
@@ -542,7 +542,7 @@ func TestWorkspaceExecutionDefinitionClarificationBindsPersistedIntentAndReplays
 	runs := memory.NewRunRepository()
 	hub := magicevent.NewHub(16)
 	biz := New()
-	if err := biz.Configure(Dependencies{Runs: runs, EventHub: hub}); err != nil {
+	if err := biz.Configure(runBizTestDependencies(runs, nil, nil, hub, nil)); err != nil {
 		t.Fatal(err)
 	}
 	ctx := common.ContextWithRuntimeWorkspaceID(context.Background(), "ws-1")
@@ -622,7 +622,7 @@ func TestWorkspaceExecutionDefinitionClarificationRequiresRevisedSealedInput(t *
 			hub := magicevent.NewHub(16)
 			t.Cleanup(func() { hub.Terminate(context.Background()) })
 			biz := New()
-			if err := biz.Configure(Dependencies{Runs: runs, EventHub: hub}); err != nil {
+			if err := biz.Configure(runBizTestDependencies(runs, nil, nil, hub, nil)); err != nil {
 				t.Fatal(err)
 			}
 			ctx := common.ContextWithRuntimeWorkspaceID(context.Background(), "ws-revision-required")
@@ -688,7 +688,7 @@ func TestRuntimeClarificationRejectsForgedConflictBindingWithoutStateAdvance(t *
 	runs := memory.NewRunRepository()
 	hub := magicevent.NewHub(16)
 	biz := New()
-	if err := biz.Configure(Dependencies{Runs: runs, EventHub: hub}); err != nil {
+	if err := biz.Configure(runBizTestDependencies(runs, nil, nil, hub, nil)); err != nil {
 		t.Fatal(err)
 	}
 	ctx := common.ContextWithRuntimeWorkspaceID(context.Background(), "ws-1")

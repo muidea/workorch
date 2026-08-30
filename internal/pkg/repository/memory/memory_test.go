@@ -355,7 +355,11 @@ func TestMemoryWorkspaceLocalRepositoriesRequireScopedLookup(t *testing.T) {
 		if err := artifacts.Create(scoped, &resultmodel.Artifact{ID: "artifact-shared", WorkspaceID: workspaceID, RunID: "run-shared", ResultID: "result-shared", State: common.ArtifactStateAvailable}); err != nil {
 			t.Fatalf("create artifact %s: %v", workspaceID, err)
 		}
-		if err := events.Append(scoped, &eventstreammodel.EventRecord{ID: "event-shared", WorkspaceID: workspaceID, RunID: "run-shared", Topic: "/test", Revision: 1}); err != nil {
+		if err := events.Append(scoped, &eventstreammodel.EventRecord{
+			ID: "event-shared", Version: "workorch.event", Topic: "/test", OccurredAt: "2026-08-30T00:00:00Z",
+			SourceModule: "blocks/test", SubjectType: "test", SubjectID: "event-shared", WorkspaceID: workspaceID,
+			RunID: "run-shared", Revision: 1, StreamPosition: 1,
+		}); err != nil {
 			t.Fatalf("append event %s: %v", workspaceID, err)
 		}
 	}
@@ -402,5 +406,28 @@ func TestMemoryWorkspaceLocalRepositoriesRequireScopedLookup(t *testing.T) {
 	}
 	if len(eventItems) != 1 || eventItems[0].WorkspaceID != "ws-local-b" {
 		t.Fatalf("scoped event list = %#v, want one ws-local-b event", eventItems)
+	}
+}
+
+func TestEventRecordRepositoryFailsClosedOnCorruptPersistedOccurredAt(t *testing.T) {
+	ctx := context.Background()
+	repo := NewEventRecordRepository()
+	record := &eventstreammodel.EventRecord{
+		ID: "event-corrupt-time", Version: "workorch.event", Topic: "/test", OccurredAt: "2026-08-30T00:00:00Z",
+		SourceModule: "blocks/test", SubjectType: "test", SubjectID: "corrupt-time", StreamPosition: 1,
+	}
+	if err := repo.Append(ctx, record); err != nil {
+		t.Fatal(err)
+	}
+	for _, stored := range repo.items {
+		if stored != nil && stored.ID == record.ID {
+			stored.OccurredAt = "invalid"
+		}
+	}
+	if _, err := repo.Get(ctx, record.ID); !errors.Is(err, common.ErrConflict) {
+		t.Fatalf("Get corrupt OccurredAt error = %v, want conflict", err)
+	}
+	if _, err := repo.List(ctx, workorchquerycontract.EventRecordQuery{}); !errors.Is(err, common.ErrConflict) {
+		t.Fatalf("List corrupt OccurredAt error = %v, want conflict", err)
 	}
 }

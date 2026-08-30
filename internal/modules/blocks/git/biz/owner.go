@@ -33,6 +33,7 @@ type Biz struct {
 	basebiz.Base
 	runtimeAdapter     *RuntimeAdapter
 	capabilityReceipts *CapabilityStateReceiptStore
+	started            bool
 }
 
 type Dependencies struct {
@@ -82,6 +83,9 @@ func (m *Biz) Start() error {
 	if m.EventHub() == nil {
 		return common.ErrInvalidArgument
 	}
+	if m.started {
+		return nil
+	}
 	m.SubscribeFunc(gitevents.TopicAcquireRuntimeCapabilities, m.handleRuntimeCapabilities)
 	m.SubscribeFunc(gitevents.TopicAcquireRuntimeOperationAdmissibility, m.handleRuntimeOperationAdmissibility)
 	m.SubscribeFunc(gitevents.TopicProbeRuntimeOperationFeasibility, m.handleRuntimeOperationFeasibility)
@@ -89,6 +93,7 @@ func (m *Biz) Start() error {
 	m.SubscribeFunc(gitevents.TopicAcquireCapabilityState, m.handleGitCapabilityState)
 	m.SubscribeFunc(gitevents.TopicQueryRuntimeCWIReconciliation, m.handleRuntimeCWIReconciliationQuery)
 	m.SubscribeFunc(gitevents.TopicExecuteOperation, m.handleGitOperation)
+	m.started = true
 	return nil
 }
 
@@ -96,13 +101,16 @@ func (m *Biz) Teardown(context.Context) {
 	if m == nil {
 		return
 	}
-	m.UnsubscribeFunc(gitevents.TopicExecuteOperation)
-	m.UnsubscribeFunc(gitevents.TopicAcquireRuntimeCapabilities)
-	m.UnsubscribeFunc(gitevents.TopicAcquireRuntimeOperationAdmissibility)
-	m.UnsubscribeFunc(gitevents.TopicProbeRuntimeOperationFeasibility)
-	m.UnsubscribeFunc(gitevents.TopicProbeRuntimeSemanticProofFeasibility)
-	m.UnsubscribeFunc(gitevents.TopicAcquireCapabilityState)
-	m.UnsubscribeFunc(gitevents.TopicQueryRuntimeCWIReconciliation)
+	if m.started {
+		m.UnsubscribeFunc(gitevents.TopicExecuteOperation)
+		m.UnsubscribeFunc(gitevents.TopicAcquireRuntimeCapabilities)
+		m.UnsubscribeFunc(gitevents.TopicAcquireRuntimeOperationAdmissibility)
+		m.UnsubscribeFunc(gitevents.TopicProbeRuntimeOperationFeasibility)
+		m.UnsubscribeFunc(gitevents.TopicProbeRuntimeSemanticProofFeasibility)
+		m.UnsubscribeFunc(gitevents.TopicAcquireCapabilityState)
+		m.UnsubscribeFunc(gitevents.TopicQueryRuntimeCWIReconciliation)
+		m.started = false
+	}
 	m.runtimeAdapter = nil
 	m.capabilityReceipts = nil
 }
@@ -112,8 +120,11 @@ func (m *Biz) Teardown(context.Context) {
 // accepted current Run; it is never a new coverage proof for workspace_full
 // restart and it never writes a capability receipt or Runtime aggregate.
 func (m *Biz) handleRuntimeCWIReconciliationQuery(event magicevent.Event, result magicevent.Result) {
-	command, ok := event.Data().(gitevents.QueryRuntimeCWIReconciliationCommand)
-	if !ok || m == nil || m.runtimeAdapter == nil || command.ValidateForOwner(ModuleID) != nil {
+	command, ok := gitRuntimeIngressCommand[gitevents.QueryRuntimeCWIReconciliationCommand](event, result)
+	if !ok {
+		return
+	}
+	if m == nil || m.runtimeAdapter == nil || command.ValidateForOwner(ModuleID) != nil {
 		setCapabilityError(result, common.ErrInvalidArgument)
 		return
 	}
@@ -184,8 +195,11 @@ func gitReconciliationObservation(command gitevents.QueryRuntimeCWIReconciliatio
 }
 
 func (m *Biz) handleGitCapabilityState(event magicevent.Event, result magicevent.Result) {
-	command, ok := event.Data().(gitevents.AcquireCapabilityStateCommand)
-	if !ok || m.runtimeAdapter == nil || m.capabilityReceipts == nil || command.WorkspaceID == "" || command.PrerequisiteID == "" || command.AcquisitionKey == "" || command.WorkspaceDeliverableDirectory == "" || command.CapabilityStateKind != "repository_state" || command.SubjectRef == "" {
+	command, ok := gitRuntimeIngressCommand[gitevents.AcquireCapabilityStateCommand](event, result)
+	if !ok {
+		return
+	}
+	if m == nil || m.runtimeAdapter == nil || m.capabilityReceipts == nil || command.WorkspaceID == "" || command.PrerequisiteID == "" || command.AcquisitionKey == "" || command.WorkspaceDeliverableDirectory == "" || command.CapabilityStateKind != "repository_state" || command.SubjectRef == "" {
 		setCapabilityError(result, common.ErrInvalidArgument)
 		return
 	}
@@ -283,8 +297,11 @@ func (m *Biz) acquireFileWorkspaceTreeRevision(ctx context.Context, workspaceID 
 }
 
 func (m *Biz) handleRuntimeOperationAdmissibility(event magicevent.Event, result magicevent.Result) {
-	command, ok := event.Data().(gitevents.AcquireRuntimeOperationAdmissibilityCommand)
-	if !ok || m.runtimeAdapter == nil {
+	command, ok := gitRuntimeIngressCommand[gitevents.AcquireRuntimeOperationAdmissibilityCommand](event, result)
+	if !ok {
+		return
+	}
+	if m == nil || m.runtimeAdapter == nil {
 		setCapabilityError(result, common.ErrInvalidArgument)
 		return
 	}
@@ -395,8 +412,11 @@ func gitAdmissibilityOperationVariants(operationKinds []string) []runtimecontrac
 }
 
 func (m *Biz) handleRuntimeOperationFeasibility(event magicevent.Event, result magicevent.Result) {
-	command, ok := event.Data().(gitevents.ProbeRuntimeOperationFeasibilityCommand)
-	if !ok || m.runtimeAdapter == nil {
+	command, ok := gitRuntimeIngressCommand[gitevents.ProbeRuntimeOperationFeasibilityCommand](event, result)
+	if !ok {
+		return
+	}
+	if m == nil || m.runtimeAdapter == nil {
 		setCapabilityError(result, common.ErrInvalidArgument)
 		return
 	}
@@ -490,8 +510,11 @@ func (m *Biz) runtimeWorkspaceTreeFeasibility(ctx context.Context, command gitev
 }
 
 func (m *Biz) handleRuntimeSemanticProofFeasibility(event magicevent.Event, result magicevent.Result) {
-	command, ok := event.Data().(gitevents.ProbeRuntimeSemanticProofFeasibilityCommand)
-	if !ok || m.runtimeAdapter == nil {
+	command, ok := gitRuntimeIngressCommand[gitevents.ProbeRuntimeSemanticProofFeasibilityCommand](event, result)
+	if !ok {
+		return
+	}
+	if m == nil || m.runtimeAdapter == nil {
 		setCapabilityError(result, common.ErrInvalidArgument)
 		return
 	}
@@ -613,17 +636,11 @@ func (m *Biz) runtimeOperationFeasibility(ctx context.Context, command gitevents
 }
 
 func (m *Biz) handleGitOperation(event magicevent.Event, result magicevent.Result) {
-	// Execute is a strong call. A fire-and-forget Post must not reach receipt
-	// lookup, Git, or receipt commit.
-	if result == nil {
+	command, ok := gitRuntimeIngressCommand[gitevents.ExecuteOperationCommand](event, result)
+	if !ok {
 		return
 	}
-	if event == nil {
-		setCapabilityError(result, common.ErrInvalidArgument)
-		return
-	}
-	command, ok := event.Data().(gitevents.ExecuteOperationCommand)
-	if !ok || m.runtimeAdapter == nil {
+	if m == nil || m.runtimeAdapter == nil {
 		setCapabilityError(result, common.ErrInvalidArgument)
 		return
 	}
@@ -905,9 +922,8 @@ func validateGitCapabilityStatePredecessorReceipts(snapshot runtimecontract.Runt
 }
 
 func (m *Biz) handleRuntimeCapabilities(event magicevent.Event, result magicevent.Result) {
-	command, ok := event.Data().(gitevents.AcquireRuntimeCapabilitiesCommand)
+	command, ok := gitRuntimeIngressCommand[gitevents.AcquireRuntimeCapabilitiesCommand](event, result)
 	if !ok {
-		setCapabilityError(result, common.ErrInvalidArgument)
 		return
 	}
 	response, err := gitevents.ResolveRuntimeCapabilities(command, ModuleID, modulecommon.RuntimeCapabilityKinds()...)
@@ -916,6 +932,35 @@ func (m *Biz) handleRuntimeCapabilities(event magicevent.Event, result magiceven
 		return
 	}
 	result.Set(response, nil)
+}
+
+// gitRuntimeIngressCommand is the owner-local strong-call gate for every
+// Runtime topic subscribed by Git. It deliberately rejects Post before
+// inspecting the DTO, and rejects every source except the exact Orchestrator
+// module before any repository, receipt-store, or File-owner query can run.
+func gitRuntimeIngressCommand[T any](event magicevent.Event, result magicevent.Result) (T, bool) {
+	var zero T
+	if result == nil {
+		return zero, false
+	}
+	if event == nil || event.Source() != runtimecontract.RuntimeModuleOrchestrator {
+		setGitRuntimeIngressInvalid(result, "runtime Git ingress requires exact Orchestrator source")
+		return zero, false
+	}
+	command, ok := event.Data().(T)
+	if !ok {
+		setGitRuntimeIngressInvalid(result, "runtime Git ingress payload has an invalid concrete type")
+		return zero, false
+	}
+	return command, true
+}
+
+func setGitRuntimeIngressInvalid(result magicevent.Result, message string) {
+	if result == nil {
+		return
+	}
+	err := fmt.Errorf("%w: %s", common.ErrInvalidArgument, message)
+	result.Set(nil, &cd.Error{Code: cd.IllegalParam, Message: err.Error(), Cause: err})
 }
 
 func setCapabilityError(result magicevent.Result, err error) {

@@ -58,7 +58,7 @@ func TestRuntimeControllerOperationReceiptFenceAndTerminalUniqueness(t *testing.
 	if !ok {
 		t.Fatal("sealed execution is missing")
 	}
-	if _, _, err := controller.QueryOperationReceipt(context.Background(), "ws-v2", "run-v2", sealed.ActiveDispatch.ID, operationID, sealedExecution.ExecutionKey, 1, nil); !errors.Is(err, common.ErrConflict) {
+	if _, _, err := controller.QueryOperationReceipt(context.Background(), "ws-v2", "run-v2", sealed.ActiveDispatch.ID, operationID, sealedExecution.ExecutionKey, 1, runtimecontract.RuntimeModuleFile, nil); !errors.Is(err, common.ErrConflict) {
 		t.Fatalf("unclaimed receipt query err = %v, want conflict", err)
 	}
 	claimed, err := controller.claimOperationExecution(context.Background(), "ws-v2", "run-v2", operationID)
@@ -74,13 +74,13 @@ func TestRuntimeControllerOperationReceiptFenceAndTerminalUniqueness(t *testing.
 		t.Fatal(err)
 	}
 	assertRuntimeExecutionDimension(t, claimedBudget, runtimecontract.RuntimeBudgetDimensionCapabilityOperation, 0, 1, 0)
-	if _, found, err := controller.QueryOperationReceipt(context.Background(), "ws-v2", "run-v2", claimed.ActiveDispatch.ID, operationID, execution.ExecutionKey, execution.Fence, nil); err != nil || found {
+	if _, found, err := controller.QueryOperationReceipt(context.Background(), "ws-v2", "run-v2", claimed.ActiveDispatch.ID, operationID, execution.ExecutionKey, execution.Fence, runtimecontract.RuntimeModuleFile, nil); err != nil || found {
 		t.Fatalf("claimed receipt query found=%v err=%v, want authorized found=false", found, err)
 	}
-	if _, _, err := controller.QueryOperationReceipt(context.Background(), "ws-v2", "run-v2", "different-dispatch", operationID, execution.ExecutionKey, execution.Fence, nil); !errors.Is(err, common.ErrConflict) {
+	if _, _, err := controller.QueryOperationReceipt(context.Background(), "ws-v2", "run-v2", "different-dispatch", operationID, execution.ExecutionKey, execution.Fence, runtimecontract.RuntimeModuleFile, nil); !errors.Is(err, common.ErrConflict) {
 		t.Fatalf("wrong dispatch receipt query err = %v, want conflict", err)
 	}
-	if _, _, err := controller.QueryOperationReceipt(context.Background(), "ws-v2", "run-v2", claimed.ActiveDispatch.ID, operationID, execution.ExecutionKey+"-wrong", execution.Fence, nil); !errors.Is(err, common.ErrConflict) {
+	if _, _, err := controller.QueryOperationReceipt(context.Background(), "ws-v2", "run-v2", claimed.ActiveDispatch.ID, operationID, execution.ExecutionKey+"-wrong", execution.Fence, runtimecontract.RuntimeModuleFile, nil); !errors.Is(err, common.ErrConflict) {
 		t.Fatalf("wrong execution key receipt query err = %v, want conflict", err)
 	}
 	receipt := runtimecontract.RuntimeOperationReceipt{
@@ -88,10 +88,10 @@ func TestRuntimeControllerOperationReceiptFenceAndTerminalUniqueness(t *testing.
 		Outcome: runtimecontract.RuntimeOperationOutcomeAccepted, ObservedEffectScope: runtimecontract.RuntimeEffectWorkspaceDurable, Changed: true,
 		Evidence: runtimecontract.RuntimeOperationEvidence{Summary: "written"},
 	}
-	if _, _, err := controller.commitOperationReceipt(context.Background(), "ws-v2", "run-v2", sealed.ActiveDispatch.ID, execution.Fence+1, receipt); !errors.Is(err, common.ErrConflict) {
+	if _, _, err := controller.commitOperationReceipt(context.Background(), "ws-v2", "run-v2", sealed.ActiveDispatch.ID, execution.Fence+1, runtimecontract.RuntimeModuleFile, receipt); !errors.Is(err, common.ErrConflict) {
 		t.Fatalf("stale fence err = %v, want conflict", err)
 	}
-	committed, first, err := controller.commitOperationReceipt(context.Background(), "ws-v2", "run-v2", sealed.ActiveDispatch.ID, execution.Fence, receipt)
+	committed, first, err := controller.commitOperationReceipt(context.Background(), "ws-v2", "run-v2", sealed.ActiveDispatch.ID, execution.Fence, runtimecontract.RuntimeModuleFile, receipt)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -100,19 +100,31 @@ func TestRuntimeControllerOperationReceiptFenceAndTerminalUniqueness(t *testing.
 		t.Fatal(err)
 	}
 	assertRuntimeExecutionDimension(t, committedBudget, runtimecontract.RuntimeBudgetDimensionCapabilityOperation, 1, 0, 0)
-	queried, found, err := controller.QueryOperationReceipt(context.Background(), "ws-v2", "run-v2", claimed.ActiveDispatch.ID, operationID, execution.ExecutionKey, execution.Fence, nil)
+	queried, found, err := controller.QueryOperationReceipt(context.Background(), "ws-v2", "run-v2", claimed.ActiveDispatch.ID, operationID, execution.ExecutionKey, execution.Fence, runtimecontract.RuntimeModuleFile, nil)
 	if err != nil || !found || !runtimecontract.SameRuntimeOperationReceipt(first, queried) {
 		t.Fatalf("committed receipt query found=%v receipt=%+v err=%v", found, queried, err)
 	}
 	saves := repository.saves
-	replayed, duplicate, err := controller.commitOperationReceipt(context.Background(), "ws-v2", "run-v2", sealed.ActiveDispatch.ID, execution.Fence, receipt)
+	replayed, duplicate, err := controller.commitOperationReceipt(context.Background(), "ws-v2", "run-v2", sealed.ActiveDispatch.ID, execution.Fence, runtimecontract.RuntimeModuleFile, receipt)
 	if err != nil || !runtimecontract.SameRuntimeOperationReceipt(first, duplicate) || replayed.StateRevision != committed.StateRevision || repository.saves != saves {
 		t.Fatalf("duplicate receipt was not idempotent: aggregate=%+v receipt=%+v saves=%d err=%v", replayed, duplicate, repository.saves, err)
 	}
 	conflict := receipt
 	conflict.Evidence.Summary = "different terminal outcome"
-	if _, _, err := controller.commitOperationReceipt(context.Background(), "ws-v2", "run-v2", sealed.ActiveDispatch.ID, execution.Fence, conflict); !errors.Is(err, common.ErrConflict) {
+	if _, _, err := controller.commitOperationReceipt(context.Background(), "ws-v2", "run-v2", sealed.ActiveDispatch.ID, execution.Fence, runtimecontract.RuntimeModuleFile, conflict); !errors.Is(err, common.ErrConflict) {
 		t.Fatalf("different receipt for same execution key err = %v, want conflict", err)
+	}
+	terminated, err := controller.requestTermination(context.Background(), "ws-v2", "run-v2", runtimecontract.RuntimeTerminationSuperseded, "blocks/run", "replacement")
+	if err != nil {
+		t.Fatal(err)
+	}
+	saves = repository.saves
+	replayed, duplicate, err = controller.commitOperationReceipt(context.Background(), "ws-v2", "run-v2", sealed.ActiveDispatch.ID, execution.Fence, runtimecontract.RuntimeModuleFile, receipt)
+	if err != nil || !runtimecontract.SameRuntimeOperationReceipt(first, duplicate) || replayed.StateRevision != terminated.StateRevision || repository.saves != saves {
+		t.Fatalf("post-termination exact receipt replay was not idempotent: aggregate=%+v receipt=%+v saves=%d err=%v", replayed, duplicate, repository.saves, err)
+	}
+	if _, _, err := controller.candidateDispatch.commitOperationReceipt(context.Background(), "ws-v2", "run-v2", sealed.ActiveDispatch.ID, execution.Fence, runtimecontract.RuntimeModuleShell, receipt); !errors.Is(err, common.ErrConflict) || repository.saves != saves {
+		t.Fatalf("post-termination forged receipt source err=%v saves=%d, want conflict/%d", err, repository.saves, saves)
 	}
 }
 
@@ -178,7 +190,7 @@ func TestManagedValidationReceiptRejectsForeignOrMismatchedValidationFailureObse
 			repository, controller, claimed, execution, receipt := claimedManagedValidationReceiptForTest(t)
 			beforeReceiptCount := len(repository.aggregate.OperationReceipts)
 			test.mutate(receipt.Feedback.OriginalDiagnostic.ValidationFailureObservation, receipt.Feedback.OriginalDiagnostic.ValidationDiagnostic)
-			if _, _, err := controller.commitOperationReceipt(context.Background(), claimed.Facts.WorkspaceID, claimed.Facts.RunID, claimed.ActiveDispatch.ID, execution.Fence, receipt); err == nil {
+			if _, _, err := controller.commitOperationReceipt(context.Background(), claimed.Facts.WorkspaceID, claimed.Facts.RunID, claimed.ActiveDispatch.ID, execution.Fence, runtimecontract.RuntimeModuleShell, receipt); err == nil {
 				t.Fatal("mismatched observation was accepted at receipt commit")
 			}
 			if len(repository.aggregate.OperationReceipts) != beforeReceiptCount {
@@ -314,7 +326,7 @@ func TestOperationReceiptFeedbackScopeRejectsDriftAtCommitAndFreshLoad(t *testin
 			repository, controller, claimed, execution, receipt := claimedManagedValidationReceiptForTest(t)
 			beforeReceiptCount := len(repository.aggregate.OperationReceipts)
 			test.mutate(receipt.Feedback)
-			if _, _, err := controller.commitOperationReceipt(context.Background(), claimed.Facts.WorkspaceID, claimed.Facts.RunID, claimed.ActiveDispatch.ID, execution.Fence, receipt); err == nil {
+			if _, _, err := controller.commitOperationReceipt(context.Background(), claimed.Facts.WorkspaceID, claimed.Facts.RunID, claimed.ActiveDispatch.ID, execution.Fence, runtimecontract.RuntimeModuleShell, receipt); err == nil {
 				t.Fatal("drifted feedback scope was accepted at receipt commit")
 			}
 			if len(repository.aggregate.OperationReceipts) != beforeReceiptCount {

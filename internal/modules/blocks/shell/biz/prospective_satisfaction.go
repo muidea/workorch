@@ -17,15 +17,11 @@ const shellProspectiveValidationNotSatisfiedReason = "prospective workspace mani
 // prospective target-ref value carried by the request. It does not call File,
 // inspect the workspace, start a process, or mutate owner/Runtime state.
 func (m *Biz) handleRuntimeOwnerFactProspectiveSatisfaction(event magicevent.Event, result magicevent.Result) {
-	if result == nil {
-		return
-	}
-	if event == nil || event.Source() != runtimecontract.RuntimeModuleOrchestrator || m == nil || m.runtimeAdapter == nil {
-		setCapabilityError(result, common.ErrInvalidArgument)
-		return
-	}
-	command, ok := event.Data().(shellevents.ProbeRuntimeOwnerFactProspectiveSatisfactionCommand)
+	command, ok := shellRuntimeIngressCommand[shellevents.ProbeRuntimeOwnerFactProspectiveSatisfactionCommand](event, result)
 	if !ok {
+		return
+	}
+	if m == nil || m.runtimeAdapter == nil {
 		setCapabilityError(result, common.ErrInvalidArgument)
 		return
 	}

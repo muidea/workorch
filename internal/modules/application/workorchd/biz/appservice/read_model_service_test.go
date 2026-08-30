@@ -27,6 +27,7 @@ import (
 	memorymodel "github.com/muidea/workorch/internal/modules/blocks/memory/pkg/models"
 	resultcommon "github.com/muidea/workorch/internal/modules/blocks/result/pkg/common"
 	resultmodel "github.com/muidea/workorch/internal/modules/blocks/result/pkg/models"
+	runcommon "github.com/muidea/workorch/internal/modules/blocks/run/pkg/common"
 	runmodel "github.com/muidea/workorch/internal/modules/blocks/run/pkg/models"
 	shellcommon "github.com/muidea/workorch/internal/modules/blocks/shell/pkg/common"
 	webcommon "github.com/muidea/workorch/internal/modules/blocks/web/pkg/common"
@@ -426,8 +427,14 @@ func TestReadRunSnapshotUsesBoundedProjectedEventRecords(t *testing.T) {
 			recordpayload.PayloadKeyOutput: map[string]any{"raw": strings.Repeat("x", eventPayloadStringLimit*8)},
 		}
 		topic := runevents.TopicRunStateChanged
+		sourceModule := runcommon.ModuleID
+		subjectType := "run"
+		subjectID := string(runID)
 		if i == readModelEventRecordLimit+20 {
 			topic = "/llm/usage/recorded"
+			sourceModule = llmcommon.ModuleID
+			subjectType = "llm_usage"
+			subjectID = "request-bounded-events"
 			payload = map[string]any{
 				recordpayload.PayloadKeyWorkspaceID:          string(workspaceID),
 				recordpayload.PayloadKeyRunID:                string(runID),
@@ -444,13 +451,18 @@ func TestReadRunSnapshotUsesBoundedProjectedEventRecords(t *testing.T) {
 			}
 		}
 		if err := exports.Repositories.EventRecords.Append(ctx, &eventstreammodel.EventRecord{
-			ID:          common.EventRecordID("event-bounded-" + strconv.Itoa(i)),
-			Version:     "v1",
-			Topic:       topic,
-			OccurredAt:  fmt.Sprintf("2026-05-16T%02d:%02d:00Z", 10+i/60, i%60),
-			WorkspaceID: workspaceID,
-			RunID:       runID,
-			Payload:     mustAppserviceGovernancePayload(t, payload),
+			ID:             common.EventRecordID("event-bounded-" + strconv.Itoa(i)),
+			Version:        recordpayload.WorkorchEventVersion,
+			Topic:          topic,
+			OccurredAt:     fmt.Sprintf("2026-05-16T%02d:%02d:00Z", 10+i/60, i%60),
+			SourceModule:   sourceModule,
+			SubjectType:    subjectType,
+			SubjectID:      subjectID,
+			WorkspaceID:    workspaceID,
+			RunID:          runID,
+			StreamPosition: int64(i + 1),
+			Revision:       int64(i + 1),
+			Payload:        mustAppserviceGovernancePayload(t, payload),
 		}); err != nil {
 			t.Fatalf("append event %d: %v", i, err)
 		}
@@ -3706,12 +3718,18 @@ func TestReadWorkspaceSnapshotWithBackendSummarizesRunScopedLLMUsageRecords(t *t
 		t.Fatalf("create run: %v", err)
 	}
 	if err := exports.Repositories.EventRecords.Append(ctx, &eventstreammodel.EventRecord{
-		ID:          "run-scoped-llm-usage/event/llm-usage-recorded",
-		Version:     recordpayload.WorkorchEventVersion,
-		Topic:       "/llm/usage/recorded",
-		WorkspaceID: workspaceID,
-		RunID:       runID,
-		StepID:      "run-scoped-llm-usage/step-1",
+		ID:             "run-scoped-llm-usage/event/llm-usage-recorded",
+		Version:        recordpayload.WorkorchEventVersion,
+		Topic:          "/llm/usage/recorded",
+		OccurredAt:     "2026-08-30T00:00:00Z",
+		SourceModule:   llmcommon.ModuleID,
+		SubjectType:    "llm_usage",
+		SubjectID:      "request-run-scoped",
+		WorkspaceID:    workspaceID,
+		RunID:          runID,
+		StepID:         "run-scoped-llm-usage/step-1",
+		StreamPosition: 1,
+		Revision:       1,
 		Payload: mustAppserviceGovernancePayload(t, map[string]any{
 			recordpayload.PayloadKeyWorkspaceID:          string(workspaceID),
 			recordpayload.PayloadKeyRunID:                string(runID),
@@ -4375,28 +4393,34 @@ func TestReadWorkspaceSnapshotProjectsLatestRunFailureOverHistoricalAcceptedResu
 		t.Fatalf("create failed run: %v", err)
 	}
 	if err := exports.Repositories.EventRecords.Append(ctx, &eventstreammodel.EventRecord{
-		ID:          common.EventRecordID("evt-run-completed-created"),
-		Version:     recordpayload.WorkorchEventVersion,
-		Topic:       runevents.TopicRunCreated,
-		OccurredAt:  "2026-04-29T10:00:00Z",
-		SubjectType: "run",
-		SubjectID:   string(completedRunID),
-		WorkspaceID: workspaceID,
-		RunID:       completedRunID,
-		Payload:     mustAppserviceGovernancePayload(t, map[string]any{recordpayload.PayloadKeyState: string(common.RunStateCompleted)}),
+		ID:             common.EventRecordID("evt-run-completed-created"),
+		Version:        recordpayload.WorkorchEventVersion,
+		Topic:          runevents.TopicRunCreated,
+		OccurredAt:     "2026-04-29T10:00:00Z",
+		SourceModule:   runcommon.ModuleID,
+		SubjectType:    "run",
+		SubjectID:      string(completedRunID),
+		WorkspaceID:    workspaceID,
+		RunID:          completedRunID,
+		StreamPosition: 1,
+		Revision:       1,
+		Payload:        mustAppserviceGovernancePayload(t, map[string]any{recordpayload.PayloadKeyState: string(common.RunStateCompleted)}),
 	}); err != nil {
 		t.Fatalf("append completed event: %v", err)
 	}
 	if err := exports.Repositories.EventRecords.Append(ctx, &eventstreammodel.EventRecord{
-		ID:          common.EventRecordID("evt-run-latest-failed"),
-		Version:     recordpayload.WorkorchEventVersion,
-		Topic:       runevents.TopicRunStateChanged,
-		OccurredAt:  "2026-04-30T10:00:00Z",
-		SubjectType: "run",
-		SubjectID:   string(failedRunID),
-		WorkspaceID: workspaceID,
-		RunID:       failedRunID,
-		Payload:     mustAppserviceGovernancePayload(t, map[string]any{recordpayload.PayloadKeyState: string(common.RunStateFailed), recordpayload.PayloadKeyFailureReason: "llm provider returned html"}),
+		ID:             common.EventRecordID("evt-run-latest-failed"),
+		Version:        recordpayload.WorkorchEventVersion,
+		Topic:          runevents.TopicRunStateChanged,
+		OccurredAt:     "2026-04-30T10:00:00Z",
+		SourceModule:   runcommon.ModuleID,
+		SubjectType:    "run",
+		SubjectID:      string(failedRunID),
+		WorkspaceID:    workspaceID,
+		RunID:          failedRunID,
+		StreamPosition: 2,
+		Revision:       2,
+		Payload:        mustAppserviceGovernancePayload(t, map[string]any{recordpayload.PayloadKeyState: string(common.RunStateFailed), recordpayload.PayloadKeyFailureReason: "llm provider returned html"}),
 	}); err != nil {
 		t.Fatalf("append failed event: %v", err)
 	}
@@ -4478,15 +4502,18 @@ func TestReadWorkspaceSnapshotTaskProgressUsesLatestTerminalRejectedResult(t *te
 		t.Fatalf("create current result: %v", err)
 	}
 	if err := exports.Repositories.EventRecords.Append(ctx, &eventstreammodel.EventRecord{
-		ID:          common.EventRecordID("evt-old-failed-before-current-result"),
-		Version:     recordpayload.WorkorchEventVersion,
-		Topic:       runevents.TopicRunStateChanged,
-		OccurredAt:  "2026-05-17T12:30:00Z",
-		SubjectType: "run",
-		SubjectID:   string(oldRunID),
-		WorkspaceID: workspaceID,
-		RunID:       oldRunID,
-		Payload:     mustAppserviceGovernancePayload(t, map[string]any{recordpayload.PayloadKeyState: string(common.RunStateFailed)}),
+		ID:             common.EventRecordID("evt-old-failed-before-current-result"),
+		Version:        recordpayload.WorkorchEventVersion,
+		Topic:          runevents.TopicRunStateChanged,
+		OccurredAt:     "2026-05-17T12:30:00Z",
+		SourceModule:   runcommon.ModuleID,
+		SubjectType:    "run",
+		SubjectID:      string(oldRunID),
+		WorkspaceID:    workspaceID,
+		RunID:          oldRunID,
+		StreamPosition: 1,
+		Revision:       1,
+		Payload:        mustAppserviceGovernancePayload(t, map[string]any{recordpayload.PayloadKeyState: string(common.RunStateFailed)}),
 	}); err != nil {
 		t.Fatalf("append stale event: %v", err)
 	}

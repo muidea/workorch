@@ -3,6 +3,7 @@ package repository_test
 import (
 	"context"
 	"errors"
+	"fmt"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -1052,6 +1053,51 @@ func testEventRecordRepositoryContract(t *testing.T, factory func() repository.E
 	}
 	if len(latest) != 2 || latest[0].ID != second.ID || latest[1].ID != third.ID {
 		t.Fatalf("latest events = %+v, want newest two in chronological order", latest)
+	}
+	for _, item := range []*eventstreammodel.EventRecord{
+		{
+			ID: "event-time-before", Version: "workorch.event", Topic: "/time/test", OccurredAt: "2026-04-28T00:00:00Z",
+			SourceModule: "blocks/test", SubjectType: "time-range", SubjectID: "before", WorkspaceID: "ws-time-range",
+			StreamPosition: reservePosition(), Revision: 1,
+		},
+		{
+			ID: "event-time-inside", Version: "workorch.event", Topic: "/time/test", OccurredAt: "2026-04-28T00:00:00.5Z",
+			SourceModule: "blocks/test", SubjectType: "time-range", SubjectID: "inside", WorkspaceID: "ws-time-range",
+			StreamPosition: reservePosition(), Revision: 2,
+		},
+		{
+			ID: "event-time-after", Version: "workorch.event", Topic: "/time/test", OccurredAt: "2026-04-28T00:00:01Z",
+			SourceModule: "blocks/test", SubjectType: "time-range", SubjectID: "after", WorkspaceID: "ws-time-range",
+			StreamPosition: reservePosition(), Revision: 3,
+		},
+	} {
+		if err := repo.Append(ctx, item); err != nil {
+			t.Fatalf("append time-range event: %v", err)
+		}
+	}
+	timeRange, err := repo.List(ctx, workorchquerycontract.EventRecordQuery{
+		WorkspaceID: "ws-time-range", SubjectType: "time-range",
+		OccurredAfter: "2026-04-28T00:00:00.25Z", OccurredBefore: "2026-04-28T00:00:00.75Z",
+	})
+	if err != nil || len(timeRange) != 1 || timeRange[0].ID != "event-time-inside" {
+		t.Fatalf("time-range events = %+v err=%v, want semantic RFC3339 match", timeRange, err)
+	}
+	for index, occurredAt := range []string{"invalid", "2026-04-27T19:00:00.5-05:00"} {
+		invalidRecord := &eventstreammodel.EventRecord{
+			ID: common.EventRecordID(fmt.Sprintf("event-invalid-time-%d", index)), Version: "workorch.event", Topic: "/time/test", OccurredAt: occurredAt,
+			SourceModule: "blocks/test", SubjectType: "time-range", SubjectID: "invalid", StreamPosition: reservePosition(),
+		}
+		if err := repo.Append(ctx, invalidRecord); !errors.Is(err, common.ErrInvalidArgument) {
+			t.Fatalf("append OccurredAt %q error = %v, want invalid argument", occurredAt, err)
+		}
+	}
+	for _, invalid := range []workorchquerycontract.EventRecordQuery{
+		{OccurredAfter: "invalid"},
+		{OccurredAfter: "2026-04-28T01:00:00Z", OccurredBefore: "2026-04-28T00:00:00Z"},
+	} {
+		if _, err := repo.List(ctx, invalid); !errors.Is(err, common.ErrInvalidArgument) {
+			t.Fatalf("invalid time query %+v error = %v, want invalid argument", invalid, err)
+		}
 	}
 	for _, item := range []*eventstreammodel.EventRecord{
 		{

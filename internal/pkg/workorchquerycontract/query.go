@@ -4,7 +4,9 @@
 package workorchquerycontract
 
 import (
+	"fmt"
 	"strings"
+	"time"
 
 	"github.com/muidea/workorch/internal/pkg/common"
 )
@@ -135,6 +137,42 @@ func (q EventRecordQuery) Normalized() EventRecordQuery {
 	q.OccurredAfter = strings.TrimSpace(q.OccurredAfter)
 	q.OccurredBefore = strings.TrimSpace(q.OccurredBefore)
 	return q
+}
+
+// Canonicalized normalizes an internal EventRecord query and turns both time
+// bounds into comparable UTC RFC3339 values. Repository implementations call
+// this method even when the query did not originate at the Eventstream
+// EventHub boundary, so malformed or reversed time ranges cannot fall back to
+// lexical string comparison.
+func (q EventRecordQuery) Canonicalized() (EventRecordQuery, error) {
+	q = q.Normalized()
+	after, afterTime, err := canonicalEventRecordTime(q.OccurredAfter)
+	if err != nil {
+		return EventRecordQuery{}, err
+	}
+	before, beforeTime, err := canonicalEventRecordTime(q.OccurredBefore)
+	if err != nil {
+		return EventRecordQuery{}, err
+	}
+	if after != "" && before != "" && afterTime.After(beforeTime) {
+		return EventRecordQuery{}, fmt.Errorf("%w: event occurred-after bound must not follow occurred-before bound", common.ErrInvalidArgument)
+	}
+	q.OccurredAfter = after
+	q.OccurredBefore = before
+	return q, nil
+}
+
+func canonicalEventRecordTime(value string) (string, time.Time, error) {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return "", time.Time{}, nil
+	}
+	parsed, err := time.Parse(time.RFC3339Nano, value)
+	if err != nil {
+		return "", time.Time{}, fmt.Errorf("%w: invalid event RFC3339 time bound", common.ErrInvalidArgument)
+	}
+	parsed = parsed.UTC()
+	return parsed.Format(time.RFC3339Nano), parsed, nil
 }
 
 func normalizeStrings(input []string) []string {

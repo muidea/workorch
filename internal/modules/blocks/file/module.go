@@ -41,7 +41,7 @@ func (m *Module) configure(deps filebiz.Dependencies) error {
 	}
 	if deps.EventHub == nil {
 		m.bizPtr = nil
-		return nil
+		return common.ErrInvalidArgument
 	}
 	configured, err := filebiz.NewWithDependencies(deps)
 	if err != nil {

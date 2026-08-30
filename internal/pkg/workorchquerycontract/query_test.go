@@ -1,6 +1,11 @@
 package workorchquerycontract
 
-import "testing"
+import (
+	"errors"
+	"testing"
+
+	"github.com/muidea/workorch/internal/pkg/common"
+)
 
 func TestRunResourcePageQueryNormalizedPreservesTypedScopeAndBoundsLimit(t *testing.T) {
 	query := RunResourcePageQuery{
@@ -71,5 +76,28 @@ func TestEventRecordQueryNormalizedClonesAndCompactsTopics(t *testing.T) {
 	}
 	if len(normalized.ExcludeTopics) != 1 || normalized.ExcludeTopics[0] != "/run/noise" {
 		t.Fatalf("normalized exclude topics = %#v", normalized.ExcludeTopics)
+	}
+}
+
+func TestEventRecordQueryCanonicalizedUsesUTCAndRejectsInvalidRanges(t *testing.T) {
+	query, err := (EventRecordQuery{
+		OccurredAfter:  " 2026-08-30T08:00:00.25+08:00 ",
+		OccurredBefore: "2026-08-30T00:00:00.75Z",
+	}).Canonicalized()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if query.OccurredAfter != "2026-08-30T00:00:00.25Z" || query.OccurredBefore != "2026-08-30T00:00:00.75Z" {
+		t.Fatalf("canonical range = %+v", query)
+	}
+	for _, query := range []EventRecordQuery{
+		{OccurredAfter: "invalid"},
+		{OccurredBefore: "invalid"},
+		{OccurredAfter: "2026-08-30T01:00:00Z", OccurredBefore: "2026-08-30T00:00:00Z"},
+		{OccurredAfter: "0001-01-01T00:00:01Z", OccurredBefore: "0001-01-01T00:00:00Z"},
+	} {
+		if _, err := query.Canonicalized(); !errors.Is(err, common.ErrInvalidArgument) {
+			t.Fatalf("query %+v error = %v, want invalid argument", query, err)
+		}
 	}
 }

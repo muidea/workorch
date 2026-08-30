@@ -3,6 +3,7 @@ package setupdraft
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -13,8 +14,10 @@ import (
 	magicevent "github.com/muidea/magicCommon/event"
 	llmbiz "github.com/muidea/workorch/internal/modules/blocks/llm/biz"
 	llmevents "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/events"
+	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/workorchconfig"
 	"github.com/muidea/workorch/internal/pkg/workorchmanagementcontract"
+	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 
 	llmmodels "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/models"
 )
@@ -33,8 +36,9 @@ func TestEventHubGeneratorUsesLLMCommandEvent(t *testing.T) {
 			t.Fatalf("provider request mapping: %v", err)
 		}
 		seenRequest = request
-		result.Set(llmevents.LLMCommandResult{
-			Completion: &llmevents.ProviderCompletionData{
+		result.Set(llmevents.CompleteProviderResult{
+			Target: runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "setup-draft-model"},
+			Completion: llmevents.ProviderCompletionData{
 				Content: `{"draft":{"goalText":"Generated goal","doDItems":["Generated DoD"],"confidence":"high"}}`,
 			},
 		}, nil)
@@ -61,6 +65,40 @@ func TestEventHubGeneratorUsesLLMCommandEvent(t *testing.T) {
 	}
 	if seenRequest.PromptContext == nil || len(seenRequest.PromptContext.Sections) != 2 {
 		t.Fatalf("prompt context = %+v, want typed setup contract and request sections", seenRequest.PromptContext)
+	}
+}
+
+func TestEventHubGeneratorRejectsEmptyConcreteCompletionResult(t *testing.T) {
+	ctx := context.Background()
+	hub := magicevent.NewHub(16)
+	t.Cleanup(func() { hub.Terminate(ctx) })
+	observer := magicevent.NewSimpleObserver(llmevents.CommandDestination, hub)
+	observer.Subscribe(llmevents.TopicLLMCommandCompleteProvider, func(_ magicevent.Event, result magicevent.Result) {
+		result.Set(llmevents.CompleteProviderResult{Target: runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "setup-draft-model"}}, nil)
+	})
+	t.Cleanup(func() { observer.Unsubscribe(llmevents.TopicLLMCommandCompleteProvider) })
+	time.Sleep(10 * time.Millisecond)
+	_, err := (EventHubGenerator{CommandHub: hub}).GenerateWorkspaceSetupDraft(ctx, GenerationRequest{Template: workorchmanagementcontract.WorkspaceTemplate{ID: "template-001"}})
+	if !errors.Is(err, common.ErrInvalidArgument) {
+		t.Fatalf("empty concrete completion result error = %v, want invalid argument", err)
+	}
+}
+
+func TestEventHubGeneratorRejectsEmbeddingResultOnCompletionTopic(t *testing.T) {
+	ctx := context.Background()
+	hub := magicevent.NewHub(16)
+	t.Cleanup(func() { hub.Terminate(ctx) })
+	observer := magicevent.NewSimpleObserver(llmevents.CommandDestination, hub)
+	observer.Subscribe(llmevents.TopicLLMCommandCompleteProvider, func(_ magicevent.Event, result magicevent.Result) {
+		result.Set(llmevents.GenerateEmbeddingResult{}, nil)
+	})
+	t.Cleanup(func() { observer.Unsubscribe(llmevents.TopicLLMCommandCompleteProvider) })
+	time.Sleep(10 * time.Millisecond)
+	_, err := (EventHubGenerator{CommandHub: hub}).GenerateWorkspaceSetupDraft(ctx, GenerationRequest{
+		Template: workorchmanagementcontract.WorkspaceTemplate{ID: "template-001"},
+	})
+	if !errors.Is(err, common.ErrInvalidArgument) {
+		t.Fatalf("cross-topic result error = %v, want invalid argument", err)
 	}
 }
 

@@ -42,4 +42,25 @@ func TestStrongSoulCommandsIgnoreFireAndForgetPost(t *testing.T) {
 	if err != nil || len(items) != 1 {
 		t.Fatalf("Post ensure seeded defaults: len=%d err=%v", len(items), err)
 	}
+	wrongSourceResult := magicevent.NewResult(soulevents.TopicSoulCommandEnsureDefaults, "test", soulevents.CommandDestination)
+	owner.handleSystemDefaultsCommand(eventFor(soulevents.TopicSoulCommandEnsureDefaults, soulevents.EnsureDefaultsCommand{}), wrongSourceResult)
+	if _, err := wrongSourceResult.Get(); !errors.Is(err, common.ErrInvalidArgument) {
+		t.Fatalf("wrong-source ensure error = %v, want invalid argument", err)
+	}
+	items, err = repo.List(ctx)
+	if err != nil || len(items) != 1 {
+		t.Fatalf("wrong-source ensure seeded defaults: len=%d err=%v", len(items), err)
+	}
+	exactSourceEvent := magicevent.NewEventWithContext(soulevents.TopicSoulCommandEnsureDefaults, systemCommandSource, soulevents.CommandDestination, magicevent.NewHeader(), ctx, soulevents.EnsureDefaultsCommand{})
+	exactSourceResult := magicevent.NewResult(soulevents.TopicSoulCommandEnsureDefaults, systemCommandSource, soulevents.CommandDestination)
+	owner.handleSystemDefaultsCommand(exactSourceEvent, exactSourceResult)
+	data, resultErr := exactSourceResult.Get()
+	response, ok := data.(soulevents.EnsureDefaultsResult)
+	if resultErr != nil || !ok || !response.Ensured {
+		t.Fatalf("exact-source ensure result = %#v err=%v", data, resultErr)
+	}
+	items, err = repo.List(ctx)
+	if err != nil || len(items) <= 1 {
+		t.Fatalf("exact-source ensure did not seed defaults: len=%d err=%v", len(items), err)
+	}
 }

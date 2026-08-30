@@ -9,7 +9,6 @@ import (
 
 	magicevent "github.com/muidea/magicCommon/event"
 	runmodule "github.com/muidea/workorch/internal/modules/blocks/run"
-	runbiz "github.com/muidea/workorch/internal/modules/blocks/run/biz"
 	runmodel "github.com/muidea/workorch/internal/modules/blocks/run/pkg/models"
 	runtime "github.com/muidea/workorch/internal/modules/kernel/orchestrator/biz/runtime"
 	orchestratorevents "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/events"
@@ -173,7 +172,7 @@ func TestWorkspaceRuntimeQuiescenceStartupSetupFactsClassifyDrainingOnly(t *test
 	// Configure is the framework Setup boundary. Run.Start is deliberately not
 	// called: Orchestrator startup must acquire retirement/recovery facts before
 	// the regular Run command surface is live.
-	if err := runOwner.Configure(runbiz.Dependencies{Runs: runs, EventHub: hub}); err != nil {
+	if err := runOwner.Configure(runOwnerTestDependencies(runs, nil, nil, hub)); err != nil {
 		t.Fatal(err)
 	}
 	background := &startupReadyRecordingBackgroundRoutine{scheduled: make(chan struct{}, 1)}
@@ -235,7 +234,7 @@ func TestWorkspaceRuntimeQuiescenceStartupSetupFactsClassifyPendingDeliveryLease
 	runOwner := runmodule.New()
 	// Keep Run at Setup: startup classification may queue only the exact
 	// persisted terminal-delivery lease drain, never an ordinary Runtime drive.
-	if err := runOwner.Configure(runbiz.Dependencies{Runs: runs, EventHub: hub}); err != nil {
+	if err := runOwner.Configure(runOwnerTestDependencies(runs, nil, nil, hub)); err != nil {
 		t.Fatal(err)
 	}
 	background := &startupReadyRecordingBackgroundRoutine{scheduled: make(chan struct{}, 1)}
@@ -291,7 +290,7 @@ func TestWorkspaceRuntimeQuiescenceStartupSetupFactsSkipRetired(t *testing.T) {
 		t.Fatal(err)
 	}
 	runOwner := runmodule.New()
-	if err := runOwner.Configure(runbiz.Dependencies{Runs: runs, EventHub: hub}); err != nil {
+	if err := runOwner.Configure(runOwnerTestDependencies(runs, nil, nil, hub)); err != nil {
 		t.Fatal(err)
 	}
 	background := &startupReadyRecordingBackgroundRoutine{scheduled: make(chan struct{}, 1)}
@@ -375,7 +374,7 @@ func TestWorkspaceRuntimeQuiescenceFileRestartRestoresTokenGateAndRunDraining(t 
 	firstRepositories := workorchrepo.NewWorkspaceScopedFileRepositorySet(dataRoot)
 	firstHub := magicevent.NewHub(32)
 	firstRunOwner := runmodule.New()
-	if err := firstRunOwner.Configure(runbiz.Dependencies{Runs: firstRepositories.Runs, Steps: firstRepositories.Steps, Checkpoints: firstRepositories.RuntimeCheckpoints, EventHub: firstHub}); err != nil {
+	if err := firstRunOwner.Configure(runOwnerTestDependencies(firstRepositories.Runs, firstRepositories.Steps, firstRepositories.RuntimeCheckpoints, firstHub)); err != nil {
 		t.Fatal(err)
 	}
 	if err := firstRunOwner.Start(); err != nil {
@@ -421,7 +420,7 @@ func TestWorkspaceRuntimeQuiescenceFileRestartRestoresTokenGateAndRunDraining(t 
 
 	secondHub := magicevent.NewHub(32)
 	secondRunOwner := runmodule.New()
-	if err := secondRunOwner.Configure(runbiz.Dependencies{Runs: secondRepositories.Runs, Steps: secondRepositories.Steps, Checkpoints: secondRepositories.RuntimeCheckpoints, EventHub: secondHub}); err != nil {
+	if err := secondRunOwner.Configure(runOwnerTestDependencies(secondRepositories.Runs, secondRepositories.Steps, secondRepositories.RuntimeCheckpoints, secondHub)); err != nil {
 		t.Fatal(err)
 	}
 	if err := secondRunOwner.Start(); err != nil {
@@ -465,7 +464,7 @@ func newAdversarialRuntimeQuiescenceFixture(t *testing.T, fullyAcknowledged bool
 	hub := magicevent.NewHub(32)
 	runs := memoryrepo.NewRunRepository()
 	runOwner := runmodule.New()
-	if err := runOwner.Configure(runbiz.Dependencies{Runs: runs, EventHub: hub}); err != nil {
+	if err := runOwner.Configure(runOwnerTestDependencies(runs, nil, nil, hub)); err != nil {
 		t.Fatal(err)
 	}
 	if err := runOwner.Start(); err != nil {
@@ -524,7 +523,7 @@ func newAdversarialNoRuntimeQuiescenceFixture(t *testing.T, suffix string, evide
 		t.Fatal(err)
 	}
 	runOwner := runmodule.New()
-	if err := runOwner.Configure(runbiz.Dependencies{Runs: runs, EventHub: hub}); err != nil {
+	if err := runOwner.Configure(runOwnerTestDependencies(runs, nil, nil, hub)); err != nil {
 		t.Fatal(err)
 	}
 	if err := runOwner.Start(); err != nil {

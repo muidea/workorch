@@ -92,6 +92,42 @@ func TestRuntimeAdapterReadLogAndShowInEmptyRepository(t *testing.T) {
 	}
 }
 
+func TestRuntimeAdapterReadBranchLogAndShowFromCommittedRepository(t *testing.T) {
+	repo := newTestRepo(t)
+	adapter := NewRuntimeAdapter()
+	head := gitOutputForTest(t, repo, "rev-parse", "HEAD")
+
+	branch, err := adapter.ExecuteOperation(context.Background(), RuntimeOperationRequest{
+		Kind: runtimecontract.StepKindGitRead, WorkspaceDeliverableDirectory: repo, Operation: gitcommon.OperationBranch,
+	})
+	if err != nil {
+		t.Fatalf("execute branch: %v\nresult=%+v", err, branch)
+	}
+	if branch.Status != "completed" || len(branch.Branches) != 1 || !branch.Branches[0].Current || branch.Branches[0].Commit != head || branch.Branches[0].Name == "" {
+		t.Fatalf("branch result = %+v, want the current committed branch", branch)
+	}
+
+	logResult, err := adapter.ExecuteOperation(context.Background(), RuntimeOperationRequest{
+		Kind: runtimecontract.StepKindGitRead, WorkspaceDeliverableDirectory: repo, Operation: gitcommon.OperationLog, Limit: 1,
+	})
+	if err != nil {
+		t.Fatalf("execute log: %v\nresult=%+v", err, logResult)
+	}
+	if logResult.Status != "completed" || len(logResult.Commits) != 1 || logResult.Commits[0].Hash != head || logResult.Commits[0].Subject != "chore: initial" || logResult.Commits[0].Author == "" {
+		t.Fatalf("log result = %+v, want one decoded initial commit", logResult)
+	}
+
+	show, err := adapter.ExecuteOperation(context.Background(), RuntimeOperationRequest{
+		Kind: runtimecontract.StepKindGitRead, WorkspaceDeliverableDirectory: repo, Operation: gitcommon.OperationShow, Ref: "HEAD",
+	})
+	if err != nil {
+		t.Fatalf("execute show: %v\nresult=%+v", err, show)
+	}
+	if show.Status != "completed" || show.Ref != "HEAD" || show.OutputBytes == 0 || !strings.Contains(show.Stdout, head) || !strings.Contains(show.Stdout, "chore: initial") {
+		t.Fatalf("show result = %+v, want bounded non-empty commit output", show)
+	}
+}
+
 func TestRuntimeAdapterReadPathspecDotMeansRepositoryRoot(t *testing.T) {
 	repo := newTestRepo(t)
 

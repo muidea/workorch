@@ -175,7 +175,7 @@ func TestRuntimeActivationMemoryRecallReDrivesFromPersistedRunOnStartup(t *testi
 		t.Fatalf("persist run before recovery: %v", err)
 	}
 	runOwner := New()
-	if err := runOwner.Configure(Dependencies{Runs: runs, EventHub: hub}); err != nil {
+	if err := runOwner.Configure(runBizTestDependencies(runs, nil, nil, hub, nil)); err != nil {
 		t.Fatalf("configure run owner: %v", err)
 	}
 	t.Cleanup(func() {
@@ -249,7 +249,7 @@ func TestActivationMemoryRecallObservabilityFailureDoesNotRollbackCommittedRun(t
 			}
 			runs := memoryrepo.NewRunRepository()
 			owner := New()
-			if err := owner.Configure(Dependencies{Runs: runs, EventHub: hub}); err != nil {
+			if err := owner.Configure(runBizTestDependencies(runs, nil, nil, hub, nil)); err != nil {
 				t.Fatal(err)
 			}
 			intent := activationMemoryReplacementIntent(t, "ws-memory-observability", "restart-memory-observability")

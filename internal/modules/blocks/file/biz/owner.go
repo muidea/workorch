@@ -31,6 +31,7 @@ const StepKindPatchRevert = modulecommon.StepKindPatchRevert
 type Biz struct {
 	basebiz.Base
 	runtimeAdapter *RuntimeAdapter
+	started        bool
 }
 
 type Dependencies struct {
@@ -56,6 +57,9 @@ func (m *Biz) Start() error {
 	if m == nil || m.runtimeAdapter == nil || m.EventHub() == nil {
 		return common.ErrInvalidArgument
 	}
+	if m.started {
+		return nil
+	}
 	m.SubscribeMatchedFunc(ModuleID+"/prerequisite", fileevents.PrerequisiteCommandDestination, fileevents.TopicAcquireTargetSnapshot, m.handleAcquireTargetSnapshot)
 	m.SubscribeMatchedFunc(ModuleID+"/prerequisite", fileevents.PrerequisiteCommandDestination, fileevents.TopicAcquireRuntimeTargetSelection, m.handleAcquireRuntimeTargetSelection)
 	m.SubscribeMatchedFunc(ModuleID+"/prerequisite", fileevents.PrerequisiteCommandDestination, fileevents.TopicAcquireWorkspaceManifest, m.handleAcquireWorkspaceManifest)
@@ -71,6 +75,7 @@ func (m *Biz) Start() error {
 	m.SubscribeFunc(fileevents.TopicExecuteFileWriteOperation, m.handleFileWriteOperation)
 	m.SubscribeFunc(fileevents.TopicExecutePatchApplyOperation, m.handlePatchApplyOperation)
 	m.SubscribeFunc(fileevents.TopicExecutePatchPreviewOperation, m.handlePatchPreviewOperation)
+	m.started = true
 	return nil
 }
 
@@ -94,6 +99,7 @@ func (m *Biz) Teardown(context.Context) {
 	m.UnsubscribeFunc(fileevents.TopicProbeRuntimeSemanticProofFeasibility)
 	m.UnsubscribeFunc(fileevents.TopicQueryRuntimeCWIReconciliation)
 	m.runtimeAdapter = nil
+	m.started = false
 }
 
 func (m *Biz) handleFileListOperation(event magicevent.Event, result magicevent.Result) {
@@ -507,6 +513,9 @@ func (m *Biz) handleRuntimeCapabilities(event magicevent.Event, result magiceven
 	if result == nil {
 		return
 	}
+	if !requireOrchestratorRuntimeSource(event, result) {
+		return
+	}
 	command, ok := event.Data().(fileevents.AcquireRuntimeCapabilitiesCommand)
 	if !ok {
 		setPrerequisiteError(result, common.ErrInvalidArgument)
@@ -521,6 +530,9 @@ func (m *Biz) handleRuntimeCapabilities(event magicevent.Event, result magiceven
 
 func (m *Biz) handleRuntimeOperationAdmissibility(event magicevent.Event, result magicevent.Result) {
 	if result == nil {
+		return
+	}
+	if !requireOrchestratorRuntimeSource(event, result) {
 		return
 	}
 	command, ok := event.Data().(fileevents.AcquireRuntimeOperationAdmissibilityCommand)
@@ -539,6 +551,9 @@ func (m *Biz) handleRuntimeOperationAdmissibility(event magicevent.Event, result
 
 func (m *Biz) handleRuntimeOperationFeasibility(event magicevent.Event, result magicevent.Result) {
 	if result == nil {
+		return
+	}
+	if !requireOrchestratorRuntimeSource(event, result) {
 		return
 	}
 	command, ok := event.Data().(fileevents.ProbeRuntimeOperationFeasibilityCommand)
@@ -577,7 +592,10 @@ func (m *Biz) handleRuntimeSemanticProofFeasibility(event magicevent.Event, resu
 	if result == nil {
 		return
 	}
-	if event == nil || event.Source() != runtimecontract.RuntimeModuleOrchestrator || m == nil || m.runtimeAdapter == nil {
+	if !requireOrchestratorRuntimeSource(event, result) {
+		return
+	}
+	if m == nil || m.runtimeAdapter == nil {
 		setPrerequisiteError(result, common.ErrInvalidArgument)
 		return
 	}
@@ -744,6 +762,9 @@ func (m *Biz) handleAcquireWorkspaceManifest(event magicevent.Event, result magi
 	if result == nil {
 		return
 	}
+	if !requireWorkspaceManifestSource(event, result) {
+		return
+	}
 	command, ok := event.Data().(fileevents.AcquireWorkspaceManifestCommand)
 	if !ok || command.WorkspaceID == "" || command.RunID == "" || command.AuthoritySnapshotID == "" || command.PrerequisiteID == "" || command.WorkspaceDeliverableDirectory == "" {
 		setPrerequisiteError(result, common.ErrInvalidArgument)
@@ -763,6 +784,9 @@ func (m *Biz) handleAcquireWorkspaceManifest(event magicevent.Event, result magi
 // coverage, or interprets Goal/DoD text.
 func (m *Biz) handleRuntimeCWIReconciliationQuery(event magicevent.Event, result magicevent.Result) {
 	if result == nil {
+		return
+	}
+	if !requireOrchestratorRuntimeSource(event, result) {
 		return
 	}
 	command, ok := event.Data().(fileevents.QueryRuntimeCWIReconciliationCommand)
@@ -813,6 +837,9 @@ func (m *Biz) handleConfirmRuntimeRepairSurface(event magicevent.Event, result m
 	if result == nil {
 		return
 	}
+	if !requireOrchestratorRuntimeSource(event, result) {
+		return
+	}
 	command, ok := event.Data().(fileevents.ConfirmRuntimeRepairSurfaceCommand)
 	if !ok || m.runtimeAdapter == nil || command.WorkspaceID == "" || command.RunID == "" || strings.TrimSpace(command.WorkspaceDeliverableDirectory) == "" {
 		setPrerequisiteError(result, common.ErrInvalidArgument)
@@ -858,6 +885,9 @@ func (m *Biz) handleAcquireTargetSnapshot(event magicevent.Event, result magicev
 	if result == nil {
 		return
 	}
+	if !requireOrchestratorRuntimeSource(event, result) {
+		return
+	}
 	command, ok := event.Data().(fileevents.AcquireTargetSnapshotCommand)
 	if !ok || command.WorkspaceID == "" || command.RunID == "" || command.AuthoritySnapshotID == "" || command.PrerequisiteID == "" || command.WorkspaceDeliverableDirectory == "" || command.TargetRef == "" {
 		setPrerequisiteError(result, common.ErrInvalidArgument)
@@ -873,6 +903,9 @@ func (m *Biz) handleAcquireTargetSnapshot(event magicevent.Event, result magicev
 
 func (m *Biz) handleAcquireRuntimeTargetSelection(event magicevent.Event, result magicevent.Result) {
 	if result == nil {
+		return
+	}
+	if !requireOrchestratorRuntimeSource(event, result) {
 		return
 	}
 	command, ok := event.Data().(fileevents.AcquireRuntimeTargetSelectionCommand)
@@ -896,6 +929,22 @@ func setPrerequisiteError(result magicevent.Result, err error) bool {
 		result.Set(nil, &cd.Error{Code: cd.Unexpected, Message: err.Error(), Cause: err})
 		return true
 	}
+	return false
+}
+
+func requireOrchestratorRuntimeSource(event magicevent.Event, result magicevent.Result) bool {
+	if event != nil && event.Source() == runtimecontract.RuntimeModuleOrchestrator {
+		return true
+	}
+	setPrerequisiteError(result, fmt.Errorf("%w: runtime File command requires the exact Orchestrator source", common.ErrInvalidArgument))
+	return false
+}
+
+func requireWorkspaceManifestSource(event magicevent.Event, result magicevent.Result) bool {
+	if event != nil && (event.Source() == runtimecontract.RuntimeModuleOrchestrator || event.Source() == runtimecontract.RuntimeModuleGit) {
+		return true
+	}
+	setPrerequisiteError(result, fmt.Errorf("%w: workspace manifest command requires the exact Orchestrator or Git owner source", common.ErrInvalidArgument))
 	return false
 }
 

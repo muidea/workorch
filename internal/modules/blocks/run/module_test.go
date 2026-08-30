@@ -125,12 +125,9 @@ func TestModuleIdentityConfigureStartStopContract(t *testing.T) {
 		t.Fatal("new module biz pointer is non-nil before Configure")
 	}
 	rawHub := newRunModuleTestHub(t)
-	if err := module.Configure(runbiz.Dependencies{
-		Runs:        memory.NewRunRepository(),
-		Steps:       memory.NewStepRepository(),
-		Checkpoints: memory.NewRuntimeCheckpointRepository(),
-		EventHub:    rawHub,
-	}); err != nil {
+	if err := module.Configure(runTestDependencies(
+		memory.NewRunRepository(), memory.NewStepRepository(), memory.NewRuntimeCheckpointRepository(), rawHub, nil,
+	)); err != nil {
 		t.Fatalf("Configure: %v", err)
 	}
 	if module.bizPtr == nil {
@@ -157,7 +154,7 @@ func TestGMMR1SM4RecoveryInventoryAvailableAfterSetupBeforeRun(t *testing.T) {
 	ctx := context.Background()
 	rawHub := newRunModuleTestHub(t)
 	module := New()
-	if err := module.Configure(runbiz.Dependencies{Runs: memory.NewRunRepository(), EventHub: rawHub}); err != nil {
+	if err := module.Configure(runTestDependencies(memory.NewRunRepository(), nil, nil, rawHub, nil)); err != nil {
 		t.Fatalf("Configure: %v", err)
 	}
 	// plugin.Setup invokes this immediately after Configure. Do not call Start:
@@ -210,7 +207,7 @@ func TestGMMR3RuntimeStateRecordReadIsAvailableDuringSetupWithoutRegularGet(t *t
 		t.Fatal(err)
 	}
 	module := New()
-	if err := module.Configure(runbiz.Dependencies{Runs: runs, EventHub: rawHub}); err != nil {
+	if err := module.Configure(runTestDependencies(runs, nil, nil, rawHub, nil)); err != nil {
 		t.Fatalf("Configure: %v", err)
 	}
 
@@ -285,7 +282,7 @@ func TestSM4OwnerPrivateReadCommandsRejectForgedSource(t *testing.T) {
 	ctx := context.Background()
 	rawHub := newRunModuleTestHub(t)
 	module := New()
-	if err := module.Configure(runbiz.Dependencies{Runs: memory.NewRunRepository(), EventHub: rawHub}); err != nil {
+	if err := module.Configure(runTestDependencies(memory.NewRunRepository(), nil, nil, rawHub, nil)); err != nil {
 		t.Fatalf("Configure: %v", err)
 	}
 	if err := module.prepareRuntimeRecoveryInventory(); err != nil {
@@ -342,7 +339,7 @@ func TestModuleStopWaitsForInFlightOwnerCommand(t *testing.T) {
 		release:       make(chan struct{}),
 	}
 	module := New()
-	if err := module.Configure(runbiz.Dependencies{Runs: runs, EventHub: rawHub}); err != nil {
+	if err := module.Configure(runTestDependencies(runs, nil, nil, rawHub, nil)); err != nil {
 		t.Fatal(err)
 	}
 	if err := module.Start(); err != nil {
@@ -396,7 +393,7 @@ func TestModuleConfigureRequiresRunRepositoryAndEventHub(t *testing.T) {
 		deps runbiz.Dependencies
 	}{
 		{name: "missing runs", deps: runbiz.Dependencies{EventHub: magicevent.NewHub(16)}},
-		{name: "missing event hub", deps: runbiz.Dependencies{Runs: memory.NewRunRepository()}},
+		{name: "missing event hub", deps: runTestDependencies(memory.NewRunRepository(), nil, nil, nil, nil)},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -428,7 +425,7 @@ func TestRunCommandGetHonorsWorkspaceScope(t *testing.T) {
 	}
 
 	module := New()
-	if err := module.Configure(runbiz.Dependencies{Runs: runs, EventHub: rawHub}); err != nil {
+	if err := module.Configure(runTestDependencies(runs, nil, nil, rawHub, nil)); err != nil {
 		t.Fatalf("Setup: %v", err)
 	}
 	if err := module.Start(); err != nil {
@@ -493,7 +490,7 @@ func TestRunCommandListSupportsCompactStateFilter(t *testing.T) {
 	}
 
 	module := New()
-	if err := module.Configure(runbiz.Dependencies{Runs: runs, EventHub: rawHub}); err != nil {
+	if err := module.Configure(runTestDependencies(runs, nil, nil, rawHub, nil)); err != nil {
 		t.Fatalf("Setup: %v", err)
 	}
 	if err := module.Start(); err != nil {
@@ -535,7 +532,7 @@ func TestRunWriteCommandsRequireWorkspaceScope(t *testing.T) {
 	}
 
 	module := New()
-	if err := module.Configure(runbiz.Dependencies{Runs: runs, EventHub: rawHub}); err != nil {
+	if err := module.Configure(runTestDependencies(runs, nil, nil, rawHub, nil)); err != nil {
 		t.Fatalf("Setup: %v", err)
 	}
 	if err := module.Start(); err != nil {
@@ -623,7 +620,7 @@ func TestRuntimeStateUpdateRejectsNonOrchestratorSource(t *testing.T) {
 		t.Fatal(err)
 	}
 	module := New()
-	if err := module.Configure(runbiz.Dependencies{Runs: runs, EventHub: hub}); err != nil {
+	if err := module.Configure(runTestDependencies(runs, nil, nil, hub, nil)); err != nil {
 		t.Fatal(err)
 	}
 	if err := module.Start(); err != nil {
@@ -648,7 +645,7 @@ func TestRuntimeStateStoreRejectsLegacyLifecycleMutationBypass(t *testing.T) {
 		t.Fatal(err)
 	}
 	module := New()
-	if err := module.Configure(runbiz.Dependencies{Runs: runs, EventHub: hub}); err != nil {
+	if err := module.Configure(runTestDependencies(runs, nil, nil, hub, nil)); err != nil {
 		t.Fatal(err)
 	}
 	if err := module.Start(); err != nil {
@@ -725,7 +722,7 @@ func TestRunStepReadCommandsHonorWorkspaceScope(t *testing.T) {
 	}
 
 	module := New()
-	if err := module.Configure(runbiz.Dependencies{Runs: runs, Steps: steps, EventHub: rawHub}); err != nil {
+	if err := module.Configure(runTestDependencies(runs, steps, nil, rawHub, nil)); err != nil {
 		t.Fatalf("Setup: %v", err)
 	}
 	if err := module.Start(); err != nil {
@@ -789,7 +786,7 @@ func TestRunCheckpointReadCommandsHonorWorkspaceScope(t *testing.T) {
 	}
 
 	module := New()
-	if err := module.Configure(runbiz.Dependencies{Runs: runs, Checkpoints: checkpoints, EventHub: rawHub}); err != nil {
+	if err := module.Configure(runTestDependencies(runs, nil, checkpoints, rawHub, nil)); err != nil {
 		t.Fatalf("Setup: %v", err)
 	}
 	if err := module.Start(); err != nil {

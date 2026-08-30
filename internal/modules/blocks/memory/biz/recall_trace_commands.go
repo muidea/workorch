@@ -5,6 +5,7 @@ import (
 
 	magicevent "github.com/muidea/magicCommon/event"
 	memoryevents "github.com/muidea/workorch/internal/modules/blocks/memory/pkg/events"
+	runcommon "github.com/muidea/workorch/internal/modules/blocks/run/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/common"
 )
 
@@ -12,7 +13,7 @@ func (m *Biz) executeMemoryRecallTraceCommand(ctx context.Context, ev magicevent
 	switch ev.ID() {
 	case memoryevents.TopicMemoryRecallTraceCommandUpsert:
 		cmd, ok := ev.Data().(memoryevents.UpsertMemoryRecallTraceCommand)
-		if !ok {
+		if !ok || ev.Source() != runcommon.ModuleID {
 			setMemoryMagicResult(result, memoryevents.UpsertMemoryRecallTraceResult{}, common.ErrInvalidArgument)
 			return common.ErrInvalidArgument
 		}

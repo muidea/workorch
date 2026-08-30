@@ -9,10 +9,12 @@ import (
 	magicevent "github.com/muidea/magicCommon/event"
 	approvalevents "github.com/muidea/workorch/internal/modules/blocks/approval/pkg/events"
 	approvalmodel "github.com/muidea/workorch/internal/modules/blocks/approval/pkg/models"
+	decisioncommon "github.com/muidea/workorch/internal/modules/blocks/decision/pkg/common"
 	decisionevents "github.com/muidea/workorch/internal/modules/blocks/decision/pkg/events"
 	decisionmodel "github.com/muidea/workorch/internal/modules/blocks/decision/pkg/models"
 	memoryevents "github.com/muidea/workorch/internal/modules/blocks/memory/pkg/events"
 	memorymodel "github.com/muidea/workorch/internal/modules/blocks/memory/pkg/models"
+	runcommon "github.com/muidea/workorch/internal/modules/blocks/run/pkg/common"
 	runevents "github.com/muidea/workorch/internal/modules/blocks/run/pkg/events"
 	runmodel "github.com/muidea/workorch/internal/modules/blocks/run/pkg/models"
 	workspaceevents "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/events"
@@ -26,6 +28,33 @@ func governanceTestResult(data any, err *cd.Error) magicevent.Result {
 	result := magicevent.NewResult("test", "owner", governancecommon.ModuleID)
 	result.Set(data, err)
 	return result
+}
+
+func TestGovernanceNotificationIngressRequiresExactOwnerSource(t *testing.T) {
+	ctx := context.Background()
+	ticket := decisionevents.TicketChangedData{TicketID: "ticket-source", WorkspaceID: "workspace-source"}
+	run := runevents.RunStateChangedData{RunID: "run-source", WorkspaceID: "workspace-source"}
+	for _, test := range []struct {
+		name   string
+		event  magicevent.Event
+		accept func(magicevent.Event) bool
+		want   bool
+	}{
+		{name: "decision owner", event: magicevent.NewEventWithContext(decisionevents.TopicTicketCreated, decisioncommon.ModuleID, governancecommon.ModuleID, magicevent.NewHeader(), ctx, ticket), accept: func(event magicevent.Event) bool { _, ok := governanceTicketCreatedData(event); return ok }, want: true},
+		{name: "decision forged", event: magicevent.NewEventWithContext(decisionevents.TopicTicketCreated, runcommon.ModuleID, governancecommon.ModuleID, magicevent.NewHeader(), ctx, ticket), accept: func(event magicevent.Event) bool { _, ok := governanceTicketCreatedData(event); return ok }},
+		{name: "decision wrong payload", event: magicevent.NewEventWithContext(decisionevents.TopicTicketCreated, decisioncommon.ModuleID, governancecommon.ModuleID, magicevent.NewHeader(), ctx, run), accept: func(event magicevent.Event) bool { _, ok := governanceTicketCreatedData(event); return ok }},
+		{name: "run owner", event: magicevent.NewEventWithContext(runevents.TopicRunStateChanged, runcommon.ModuleID, governancecommon.ModuleID, magicevent.NewHeader(), ctx, run), accept: func(event magicevent.Event) bool { _, ok := governanceRunStateChangedData(event); return ok }, want: true},
+		{name: "run forged", event: magicevent.NewEventWithContext(runevents.TopicRunStateChanged, decisioncommon.ModuleID, governancecommon.ModuleID, magicevent.NewHeader(), ctx, run), accept: func(event magicevent.Event) bool { _, ok := governanceRunStateChangedData(event); return ok }},
+		{name: "run wrong payload", event: magicevent.NewEventWithContext(runevents.TopicRunStateChanged, runcommon.ModuleID, governancecommon.ModuleID, magicevent.NewHeader(), ctx, ticket), accept: func(event magicevent.Event) bool { _, ok := governanceRunStateChangedData(event); return ok }},
+		{name: "nil decision", accept: func(event magicevent.Event) bool { _, ok := governanceTicketCreatedData(event); return ok }},
+		{name: "nil run", accept: func(event magicevent.Event) bool { _, ok := governanceRunStateChangedData(event); return ok }},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			if got := test.accept(test.event); got != test.want {
+				t.Fatalf("accepted = %v, want %v", got, test.want)
+			}
+		})
+	}
 }
 
 func TestGovernanceOwnerResponseFamiliesFailClosed(t *testing.T) {

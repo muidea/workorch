@@ -17,7 +17,7 @@ import (
 )
 
 func sendGovernanceTestCommand[Command any](ctx context.Context, rawHub magicevent.Hub, topic string, command Command) (governanceevents.GovernanceCommandResult, error) {
-	ev := magicevent.NewEventWithContext(topic, "governance/module_test", governanceevents.CommandDestination, magicevent.NewHeader(), ctx, command)
+	ev := magicevent.NewEventWithContext(topic, "application/workorchd/appservice", governanceevents.CommandDestination, magicevent.NewHeader(), ctx, command)
 	result := rawHub.Send(ev)
 	if result == nil {
 		return governanceevents.GovernanceCommandResult{}, common.ErrInvalidArgument
@@ -137,6 +137,7 @@ func TestModuleListTracesCommandUsesRepositoryQueryContract(t *testing.T) {
 			RunID:       "run-governance-owner-a",
 			ItemType:    "decision",
 			Status:      "resolved",
+			Limit:       10,
 		},
 	})
 	if err != nil {

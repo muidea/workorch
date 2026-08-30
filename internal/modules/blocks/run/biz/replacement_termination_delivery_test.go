@@ -27,7 +27,7 @@ func TestReplacementRecoveryPersistsTerminationAndSuccessorStages(t *testing.T) 
 	observeReplacementTermination(t, hub, runs, predecessor.WorkspaceID, predecessor.ID, "terminal-1", 9)
 
 	biz := New()
-	if err := biz.Configure(Dependencies{Runs: runs, EventHub: hub}); err != nil {
+	if err := biz.Configure(runBizTestDependencies(runs, nil, nil, hub, nil)); err != nil {
 		t.Fatal(err)
 	}
 	if err := biz.deliverReplacementTermination(predecessor.WorkspaceID, predecessor.ID); err != nil {
@@ -83,7 +83,7 @@ func TestReplacementRecoveryFailurePersistsNextGeneration(t *testing.T) {
 	})
 	t.Cleanup(func() { observer.Unsubscribe(orchestratorevents.TopicOrchestratorRequestRuntimeTermination) })
 	biz := New()
-	if err := biz.Configure(Dependencies{Runs: runs, EventHub: hub}); err != nil {
+	if err := biz.Configure(runBizTestDependencies(runs, nil, nil, hub, nil)); err != nil {
 		t.Fatal(err)
 	}
 
@@ -122,7 +122,7 @@ func TestReplacementRecoveryFreshOwnerRecoversRunningGeneration(t *testing.T) {
 	observeReplacementTermination(t, hub, runs, predecessor.WorkspaceID, predecessor.ID, "terminal-recovery", 11)
 
 	biz := New()
-	if err := biz.Configure(Dependencies{Runs: runs, EventHub: hub, BackgroundRoutine: background}); err != nil {
+	if err := biz.Configure(runBizTestDependencies(runs, nil, nil, hub, background)); err != nil {
 		t.Fatal(err)
 	}
 	biz.recoverPendingWorkspaceExecutionSuccessors()
@@ -161,7 +161,7 @@ func TestReplacementRecoveryStopCancelsWakeupAndFreshOwnerRemountsPersistedLease
 		t.Helper()
 		background := magictask.NewBackgroundRoutine(8)
 		owner := New()
-		if err := owner.Configure(Dependencies{Runs: runs, EventHub: hub, BackgroundRoutine: background}); err != nil {
+		if err := owner.Configure(runBizTestDependencies(runs, nil, nil, hub, background)); err != nil {
 			t.Fatalf("configure Run owner: %v", err)
 		}
 		if err := owner.Start(); err != nil {

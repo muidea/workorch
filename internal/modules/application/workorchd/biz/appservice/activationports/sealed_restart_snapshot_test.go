@@ -2,7 +2,6 @@ package activationports
 
 import (
 	"context"
-	"path/filepath"
 	"testing"
 
 	magicevent "github.com/muidea/magicCommon/event"
@@ -12,8 +11,8 @@ import (
 	runevents "github.com/muidea/workorch/internal/modules/blocks/run/pkg/events"
 	soulmodel "github.com/muidea/workorch/internal/modules/blocks/soul/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
-	filerepo "github.com/muidea/workorch/internal/pkg/repository/file"
 	"github.com/muidea/workorch/internal/pkg/workorchmanagementcontract"
+	"github.com/muidea/workorch/internal/pkg/workorchrepo"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 	"github.com/muidea/workorch/internal/pkg/workorchskillcontract"
 )
@@ -79,8 +78,8 @@ func TestRestartSealsSoulMCPAndProfileSnapshotsAcrossOwnerRestart(t *testing.T) 
 		GoalID: "goal-1", DoDID: "dod-1", DefinitionRevision: "def-1", StartupInputHash: "startup-input-sealed",
 		Bootstrap: &bootstrap,
 	}
-	path := filepath.Join(t.TempDir(), "runs.json")
-	firstOwner, firstHub := startSealedSnapshotRunOwner(t, path)
+	dataRoot := t.TempDir()
+	firstOwner, firstHub := startSealedSnapshotRunOwner(t, dataRoot)
 	first := sendSealedSnapshotRestart(t, firstHub, command)
 	stopSealedSnapshotRunOwner(t, firstOwner, firstHub)
 
@@ -103,7 +102,7 @@ func TestRestartSealsSoulMCPAndProfileSnapshotsAcrossOwnerRestart(t *testing.T) 
 	bootstrap.Activation.MCPCapabilities[0].Tags[0] = "caller-capability-mutated"
 	bootstrap.Activation.ExecutionContract.ProfileContracts[0].EvidenceRequirements[0].AcceptedStepKinds[0] = "caller/profile-mutated"
 
-	secondOwner, secondHub := startSealedSnapshotRunOwner(t, path)
+	secondOwner, secondHub := startSealedSnapshotRunOwner(t, dataRoot)
 	t.Cleanup(func() { stopSealedSnapshotRunOwner(t, secondOwner, secondHub) })
 	replay := command
 	replay.Bootstrap = &replayBootstrap
@@ -112,7 +111,7 @@ func TestRestartSealsSoulMCPAndProfileSnapshotsAcrossOwnerRestart(t *testing.T) 
 		t.Fatalf("restart replay = %+v, first=%+v", duplicate, first)
 	}
 
-	stored, err := filerepo.NewRunRepository(path).GetByWorkspaceID(
+	stored, err := workorchrepo.NewWorkspaceScopedFileRepositorySet(dataRoot).RunOwner.Runs().GetByWorkspaceID(
 		common.ContextWithRuntimeWorkspaceID(context.Background(), command.WorkspaceID), command.WorkspaceID, first.RunID,
 	)
 	if err != nil {
@@ -173,11 +172,14 @@ func sealedRestartSnapshotBootstrap(t *testing.T, activation runtimecontract.Run
 	return bootstrap.Clone()
 }
 
-func startSealedSnapshotRunOwner(t *testing.T, path string) (*runbiz.Biz, magicevent.Hub) {
+func startSealedSnapshotRunOwner(t *testing.T, dataRoot string) (*runbiz.Biz, magicevent.Hub) {
 	t.Helper()
 	hub := magicevent.NewHub(32)
 	owner := runbiz.New()
-	if err := owner.Configure(runbiz.Dependencies{Runs: filerepo.NewRunRepository(path), EventHub: hub}); err != nil {
+	if err := owner.Configure(runbiz.Dependencies{
+		OwnerRepositories: workorchrepo.NewWorkspaceScopedFileRepositorySet(dataRoot).RunOwner,
+		EventHub:          hub,
+	}); err != nil {
 		t.Fatalf("configure Run owner: %v", err)
 	}
 	if err := owner.Start(); err != nil {

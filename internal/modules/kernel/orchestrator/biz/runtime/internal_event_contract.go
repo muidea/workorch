@@ -135,6 +135,29 @@ func (event RuntimeInternalEvent) validateEnvelope() error {
 	if err := event.validateRecoveryAuthorization(); err != nil {
 		return err
 	}
+	if err := event.validateOperationReceiptOwnerSource(); err != nil {
+		return err
+	}
+	return nil
+}
+
+// validateOperationReceiptOwnerSource keeps cross-owner producer identity on
+// its one owner-private fact. Missing/non-canonical identity is rejected before
+// aggregate I/O, and unrelated SM-3 facts cannot smuggle receipt authority.
+func (event RuntimeInternalEvent) validateOperationReceiptOwnerSource() error {
+	if event.Transaction == nil {
+		return nil
+	}
+	source := event.Transaction.OperationReceiptOwnerSource
+	if event.Kind == RuntimeInternalEventOperationReceiptObserved {
+		if !exactOperationReceiptOwnerSource(source) {
+			return fmt.Errorf("%w: operation receipt event requires exact owner source", common.ErrInvalidArgument)
+		}
+		return nil
+	}
+	if source != "" {
+		return fmt.Errorf("%w: runtime internal event %q cannot carry operation receipt owner source", common.ErrInvalidArgument, event.Kind)
+	}
 	return nil
 }
 

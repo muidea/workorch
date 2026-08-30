@@ -183,7 +183,7 @@ func TestGitOwnerStateChangingReceiptReplaysWithoutSecondOperationAfterOwnerRecr
 	// delivery with the same key/fence and exact sealed payload must return the
 	// persisted receipt before it can alter the repository again.
 	owner.Teardown(ctx)
-	writeFile(t, filepath.Join(workspace, "replayed.txt"), "must remain unstaged\n")
+	writeFile(t, filepath.Join(workspace, "generated.txt"), "second\n")
 	recreated := &Biz{Base: basebiz.New(ModuleID, hub, nil), runtimeAdapter: NewRuntimeAdapter()}
 	if err := recreated.Start(); err != nil {
 		t.Fatal(err)
@@ -196,6 +196,9 @@ func TestGitOwnerStateChangingReceiptReplaysWithoutSecondOperationAfterOwnerRecr
 	}
 	if staged := gitOutputForTest(t, workspace, "diff", "--cached", "--name-only"); staged != "generated.txt" {
 		t.Fatalf("duplicate receipt replay ran another git add: staged = %q", staged)
+	}
+	if stagedContent := gitOutputForTest(t, workspace, "show", ":generated.txt"); stagedContent != "first" {
+		t.Fatalf("duplicate receipt replay replaced the first staged content: got %q want %q", stagedContent, "first")
 	}
 }
 

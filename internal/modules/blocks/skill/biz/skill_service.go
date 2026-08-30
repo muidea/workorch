@@ -4,6 +4,7 @@ import (
 	"context"
 	"sort"
 	"strings"
+	"unicode/utf8"
 
 	modulecommon "github.com/muidea/workorch/internal/modules/blocks/skill/pkg/common"
 	skillevents "github.com/muidea/workorch/internal/modules/blocks/skill/pkg/events"
@@ -33,7 +34,7 @@ func (s *service) createSkill(ctx context.Context, cmd skillevents.CreateSkillCo
 }
 
 func (s *service) getSkill(ctx context.Context, id common.SkillID) (*skillmodel.Skill, error) {
-	if id == "" {
+	if err := validateSkillID(id); err != nil {
 		return nil, common.ErrInvalidArgument
 	}
 	item, err := s.skills.Get(ctx, id)
@@ -44,6 +45,9 @@ func (s *service) getSkill(ctx context.Context, id common.SkillID) (*skillmodel.
 }
 
 func (s *service) listSkills(ctx context.Context, cursorAfterID common.SkillID, limit int) ([]*skillmodel.Skill, common.SkillID, error) {
+	if cursorAfterID != "" && validateSkillID(cursorAfterID) != nil {
+		return nil, "", common.ErrInvalidArgument
+	}
 	limit = normalizedSkillListLimit(limit)
 	items, err := s.skills.List(ctx)
 	if err != nil {
@@ -77,7 +81,7 @@ func (s *service) listSkills(ctx context.Context, cursorAfterID common.SkillID, 
 }
 
 func validateSkillCommand(cmd skillevents.CreateSkillCommand) error {
-	if cmd.SkillID == "" || strings.TrimSpace(string(cmd.SkillID)) != string(cmd.SkillID) ||
+	if validateSkillID(cmd.SkillID) != nil ||
 		strings.TrimSpace(cmd.Name) == "" ||
 		strings.TrimSpace(cmd.Version) == "" ||
 		strings.TrimSpace(cmd.Instruction) == "" {
@@ -92,6 +96,14 @@ func validateSkillCommand(cmd skillevents.CreateSkillCommand) error {
 		return common.ErrInvalidArgument
 	}
 	return validateSkillContent(skillContentFromCommand(cmd).Normalized())
+}
+
+func validateSkillID(id common.SkillID) error {
+	value := string(id)
+	if value == "" || strings.TrimSpace(value) != value || !utf8.ValidString(value) || len(value) > modulecommon.SkillIDMaxBytes {
+		return common.ErrInvalidArgument
+	}
+	return nil
 }
 
 func skillFromCommand(cmd skillevents.CreateSkillCommand) *skillmodel.Skill {
@@ -126,6 +138,8 @@ func skillContentFromCommand(cmd skillevents.CreateSkillCommand) workorchskillco
 
 func validateSkillContent(content workorchskillcontract.Content) error {
 	if content.ID == "" || content.Name == "" || content.Version == "" || content.Instruction == "" ||
+		!utf8.ValidString(content.ID) || !utf8.ValidString(content.Name) || !utf8.ValidString(content.Version) ||
+		!utf8.ValidString(content.Description) || !utf8.ValidString(content.Instruction) ||
 		len(content.ID) > modulecommon.SkillIDMaxBytes || len(content.Name) > modulecommon.SkillNameMaxBytes ||
 		len(content.Version) > modulecommon.SkillVersionMaxBytes || len(content.Description) > modulecommon.SkillDescriptionMaxBytes ||
 		len(content.Instruction) > modulecommon.SkillInstructionMaxBytes || content.ByteSize() > modulecommon.SkillContentMaxBytes {
@@ -136,7 +150,7 @@ func validateSkillContent(content workorchskillcontract.Content) error {
 			return common.ErrInvalidArgument
 		}
 		for _, value := range values {
-			if value == "" || len(value) > modulecommon.SkillListValueMaxBytes {
+			if value == "" || !utf8.ValidString(value) || len(value) > modulecommon.SkillListValueMaxBytes {
 				return common.ErrInvalidArgument
 			}
 		}

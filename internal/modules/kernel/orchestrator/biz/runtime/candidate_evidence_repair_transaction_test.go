@@ -1318,7 +1318,7 @@ func advanceConfirmedFileRepairOperationGovernanceForTest(
 	}
 	sourceDispatchID := claimed.ActiveDispatch.ID
 	_, persistedReceipt, err := controller.commitOperationReceipt(
-		ctx, claimed.Facts.WorkspaceID, claimed.Facts.RunID, sourceDispatchID, execution.Fence, receipt,
+		ctx, claimed.Facts.WorkspaceID, claimed.Facts.RunID, sourceDispatchID, execution.Fence, runtimecontract.RuntimeModuleFile, receipt,
 	)
 	if err != nil {
 		t.Fatalf("commit confirmed File repair governance receipt: %v", err)

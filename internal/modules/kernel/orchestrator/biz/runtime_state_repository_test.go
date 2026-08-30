@@ -11,8 +11,6 @@ import (
 	"strings"
 	"testing"
 
-	runbiz "github.com/muidea/workorch/internal/modules/blocks/run/biz"
-
 	llmevents "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/events"
 
 	magicevent "github.com/muidea/magicCommon/event"
@@ -241,7 +239,11 @@ func executeRuntimeFreshValidationForAssessment(t *testing.T, ctx context.Contex
 				},
 			},
 		}
-		_, committed, err := runtimeTestControllerCommitOperationReceipt(controller, ctx, request.WorkspaceID, request.RunID, request.DispatchID, request.Execution.Fence, receipt)
+		descriptor, found := runtimecontract.RuntimeOperationDescriptorForKind(request.Operation.Kind)
+		if !found || descriptor.OwnerModuleID == "" {
+			return runtime.RuntimeOperationExecutionResult{}, fmt.Errorf("unknown operation kind %q", request.Operation.Kind)
+		}
+		_, committed, err := runtimeTestControllerCommitOperationReceipt(controller, ctx, request.WorkspaceID, request.RunID, request.DispatchID, request.Execution.Fence, descriptor.OwnerModuleID, receipt)
 		if err != nil {
 			return runtime.RuntimeOperationExecutionResult{}, err
 		}
@@ -406,7 +408,11 @@ func executeRejectedRuntimeFileEditForRepositoryTest(
 		}
 		feedback.OriginalDiagnostic.OperationID = request.Operation.ID
 		receipt.Feedback = &feedback
-		_, committed, commitErr := runtimeTestControllerCommitOperationReceipt(controller, ctx, request.WorkspaceID, request.RunID, request.DispatchID, request.Execution.Fence, receipt)
+		descriptor, found := runtimecontract.RuntimeOperationDescriptorForKind(request.Operation.Kind)
+		if !found || descriptor.OwnerModuleID == "" {
+			return runtime.RuntimeOperationExecutionResult{}, fmt.Errorf("unknown operation kind %q", request.Operation.Kind)
+		}
+		_, committed, commitErr := runtimeTestControllerCommitOperationReceipt(controller, ctx, request.WorkspaceID, request.RunID, request.DispatchID, request.Execution.Fence, descriptor.OwnerModuleID, receipt)
 		if commitErr != nil {
 			return runtime.RuntimeOperationExecutionResult{}, commitErr
 		}
@@ -566,7 +572,7 @@ func startRuntimeFileBackedRunOwner(t *testing.T, ctx context.Context, runs *fil
 	t.Helper()
 	hub := magicevent.NewHub(16)
 	runOwner := runmodule.New()
-	if err := runOwner.Configure(runbiz.Dependencies{Runs: runs, EventHub: hub}); err != nil {
+	if err := runOwner.Configure(runOwnerTestDependencies(runs, nil, nil, hub)); err != nil {
 		hub.Terminate(ctx)
 		t.Fatal(err)
 	}
@@ -602,7 +608,7 @@ func TestRuntimeStateRepositoryPersistsAndLoadsThroughRunOwner(t *testing.T) {
 		t.Fatal(err)
 	}
 	module := runmodule.New()
-	if err := module.Configure(runbiz.Dependencies{Runs: runs, EventHub: hub}); err != nil {
+	if err := module.Configure(runOwnerTestDependencies(runs, nil, nil, hub)); err != nil {
 		t.Fatal(err)
 	}
 	if err := module.Start(); err != nil {
@@ -907,7 +913,7 @@ func TestRuntimeStateRepositoryRejectsInvalidDuplicateCWILedgerWithoutRewriting(
 	hub := magicevent.NewHub(16)
 	t.Cleanup(func() { hub.Terminate(ctx) })
 	module := runmodule.New()
-	if err := module.Configure(runbiz.Dependencies{Runs: runs, EventHub: hub}); err != nil {
+	if err := module.Configure(runOwnerTestDependencies(runs, nil, nil, hub)); err != nil {
 		t.Fatal(err)
 	}
 	if err := module.Start(); err != nil {
@@ -941,7 +947,7 @@ func TestRuntimeInitializesFromPersistedRunBootstrap(t *testing.T) {
 		t.Fatal(err)
 	}
 	runOwner := runmodule.New()
-	if err := runOwner.Configure(runbiz.Dependencies{Runs: runs, EventHub: hub}); err != nil {
+	if err := runOwner.Configure(runOwnerTestDependencies(runs, nil, nil, hub)); err != nil {
 		t.Fatal(err)
 	}
 	if err := runOwner.Start(); err != nil {
@@ -982,7 +988,7 @@ func TestRuntimeStateRepositoryRejectsStaleRevision(t *testing.T) {
 		t.Fatal(err)
 	}
 	module := runmodule.New()
-	if err := module.Configure(runbiz.Dependencies{Runs: runs, EventHub: hub}); err != nil {
+	if err := module.Configure(runOwnerTestDependencies(runs, nil, nil, hub)); err != nil {
 		t.Fatal(err)
 	}
 	if err := module.Start(); err != nil {
@@ -1016,7 +1022,7 @@ func TestRuntimeStateRepositoryTreatsRuntimeDefinitionAsOpaque(t *testing.T) {
 		t.Fatal(err)
 	}
 	runOwner := runmodule.New()
-	if err := runOwner.Configure(runbiz.Dependencies{Runs: runs, EventHub: hub}); err != nil {
+	if err := runOwner.Configure(runOwnerTestDependencies(runs, nil, nil, hub)); err != nil {
 		t.Fatal(err)
 	}
 	if err := runOwner.Start(); err != nil {
@@ -1043,7 +1049,7 @@ func TestRuntimeStateRepositoryRestartPersistsMCPOwnerCatalogStaleCandidateInval
 		t.Fatal(err)
 	}
 	runOwner := runmodule.New()
-	if err := runOwner.Configure(runbiz.Dependencies{Runs: runs, EventHub: hub}); err != nil {
+	if err := runOwner.Configure(runOwnerTestDependencies(runs, nil, nil, hub)); err != nil {
 		t.Fatal(err)
 	}
 	if err := runOwner.Start(); err != nil {
@@ -1223,7 +1229,7 @@ func TestRuntimeStateRepositoryPrerequisiteCommitCrashRestartIsAtomic(t *testing
 		t.Fatal(err)
 	}
 	runOwner := runmodule.New()
-	if err := runOwner.Configure(runbiz.Dependencies{Runs: runs, EventHub: hub}); err != nil {
+	if err := runOwner.Configure(runOwnerTestDependencies(runs, nil, nil, hub)); err != nil {
 		t.Fatal(err)
 	}
 	if err := runOwner.Start(); err != nil {
@@ -1340,7 +1346,7 @@ func TestRuntimeStateRepositoryValidationScratchStaleInvalidationIsAtomic(t *tes
 		t.Fatal(err)
 	}
 	runOwner := runmodule.New()
-	if err := runOwner.Configure(runbiz.Dependencies{Runs: runs, EventHub: hub}); err != nil {
+	if err := runOwner.Configure(runOwnerTestDependencies(runs, nil, nil, hub)); err != nil {
 		t.Fatal(err)
 	}
 	if err := runOwner.Start(); err != nil {
@@ -1432,7 +1438,7 @@ func TestRuntimeStateRepositoryTargetSelectionCommitCrashRestartIsAtomic(t *test
 		t.Fatal(err)
 	}
 	runOwner := runmodule.New()
-	if err := runOwner.Configure(runbiz.Dependencies{Runs: runs, EventHub: hub}); err != nil {
+	if err := runOwner.Configure(runOwnerTestDependencies(runs, nil, nil, hub)); err != nil {
 		t.Fatal(err)
 	}
 	if err := runOwner.Start(); err != nil {
@@ -1575,7 +1581,7 @@ func TestRuntimeStateRepositoryTargetSnapshotCommitCrashRestartIsAtomic(t *testi
 		t.Fatal(err)
 	}
 	runOwner := runmodule.New()
-	if err := runOwner.Configure(runbiz.Dependencies{Runs: runs, EventHub: hub}); err != nil {
+	if err := runOwner.Configure(runOwnerTestDependencies(runs, nil, nil, hub)); err != nil {
 		t.Fatal(err)
 	}
 	if err := runOwner.Start(); err != nil {
@@ -1757,7 +1763,7 @@ func TestRuntimeStateRepositoryOwnerPrerequisiteResponseLossIsCommittedOnly(t *t
 				t.Fatal(err)
 			}
 			runOwner := runmodule.New()
-			if err := runOwner.Configure(runbiz.Dependencies{Runs: runs, EventHub: hub}); err != nil {
+			if err := runOwner.Configure(runOwnerTestDependencies(runs, nil, nil, hub)); err != nil {
 				t.Fatal(err)
 			}
 			if err := runOwner.Start(); err != nil {
@@ -1832,7 +1838,7 @@ func TestRuntimeStateRepositoryCandidateProposalAndDispatchSealCrashRestartAreAt
 			t.Fatal(err)
 		}
 		runOwner := runmodule.New()
-		if err := runOwner.Configure(runbiz.Dependencies{Runs: runs, EventHub: hub}); err != nil {
+		if err := runOwner.Configure(runOwnerTestDependencies(runs, nil, nil, hub)); err != nil {
 			t.Fatal(err)
 		}
 		if err := runOwner.Start(); err != nil {
@@ -2174,7 +2180,7 @@ func TestRuntimeStateRepositoryValidationFailureObservationReceiptCrashRestartIs
 		t.Fatal(err)
 	}
 	runOwner := runmodule.New()
-	if err := runOwner.Configure(runbiz.Dependencies{Runs: runs, EventHub: hub}); err != nil {
+	if err := runOwner.Configure(runOwnerTestDependencies(runs, nil, nil, hub)); err != nil {
 		t.Fatal(err)
 	}
 	if err := runOwner.Start(); err != nil {
@@ -2298,7 +2304,7 @@ func TestRuntimeStateRepositoryValidationFailureObservationReceiptCrashRestartIs
 			}
 			feedback.OriginalDiagnostic.OperationID = request.Operation.ID
 			receipt.Feedback = &feedback
-			_, committed, err := runtimeTestControllerCommitOperationReceipt(owner, ctx, request.WorkspaceID, request.RunID, request.DispatchID, request.Execution.Fence, receipt)
+			_, committed, err := runtimeTestControllerCommitOperationReceipt(owner, ctx, request.WorkspaceID, request.RunID, request.DispatchID, request.Execution.Fence, descriptor.OwnerModuleID, receipt)
 			if err != nil {
 				if crashOnReceiptError {
 					panic("failure-observation-receipt-cas")
@@ -2387,7 +2393,7 @@ func TestRuntimeFileBackedRestartRejectsCrossOwnerTargetObservationAtomically(t 
 	firstHub := magicevent.NewHub(16)
 	t.Cleanup(func() { firstHub.Terminate(ctx) })
 	firstRunOwner := runmodule.New()
-	if err := firstRunOwner.Configure(runbiz.Dependencies{Runs: runs, EventHub: firstHub}); err != nil {
+	if err := firstRunOwner.Configure(runOwnerTestDependencies(runs, nil, nil, firstHub)); err != nil {
 		t.Fatal(err)
 	}
 	if err := firstRunOwner.Start(); err != nil {
@@ -2457,7 +2463,7 @@ func TestRuntimeFileBackedRestartRejectsCrossOwnerTargetObservationAtomically(t 
 		}
 		feedback.OriginalDiagnostic.OperationID = request.Operation.ID
 		receipt.Feedback = &feedback
-		_, _, err = runtimeTestControllerCommitOperationReceipt(firstController, ctx, request.WorkspaceID, request.RunID, request.DispatchID, request.Execution.Fence, receipt)
+		_, _, err = runtimeTestControllerCommitOperationReceipt(firstController, ctx, request.WorkspaceID, request.RunID, request.DispatchID, request.Execution.Fence, descriptor.OwnerModuleID, receipt)
 		return runtime.RuntimeOperationExecutionResult{}, err
 	})
 	if _, err := runtimeTestControllerExecuteDispatch(firstController, ctx, "ws-v2", "run-v2", executor); err == nil ||
@@ -2478,7 +2484,7 @@ func TestRuntimeFileBackedRestartRejectsCrossOwnerTargetObservationAtomically(t 
 	secondHub := magicevent.NewHub(16)
 	t.Cleanup(func() { secondHub.Terminate(ctx) })
 	secondRunOwner := runmodule.New()
-	if err := secondRunOwner.Configure(runbiz.Dependencies{Runs: runs, EventHub: secondHub}); err != nil {
+	if err := secondRunOwner.Configure(runOwnerTestDependencies(runs, nil, nil, secondHub)); err != nil {
 		t.Fatal(err)
 	}
 	if err := secondRunOwner.Start(); err != nil {
@@ -2550,7 +2556,11 @@ func TestRuntimeStateRepositoryAssessmentCommitCrashRestartIsAtomic(t *testing.T
 			Changed: true, TargetRefs: append([]string(nil), request.Operation.TargetRefs...),
 			Evidence: runtimecontract.RuntimeOperationEvidence{Summary: "state change applied"},
 		}
-		_, committed, err := runtimeTestControllerCommitOperationReceipt(controller, ctx, request.WorkspaceID, request.RunID, request.DispatchID, request.Execution.Fence, receipt)
+		descriptor, found := runtimecontract.RuntimeOperationDescriptorForKind(request.Operation.Kind)
+		if !found || descriptor.OwnerModuleID == "" {
+			return runtime.RuntimeOperationExecutionResult{}, fmt.Errorf("unknown operation kind %q", request.Operation.Kind)
+		}
+		_, committed, err := runtimeTestControllerCommitOperationReceipt(controller, ctx, request.WorkspaceID, request.RunID, request.DispatchID, request.Execution.Fence, descriptor.OwnerModuleID, receipt)
 		if err != nil {
 			return runtime.RuntimeOperationExecutionResult{}, err
 		}
@@ -2831,7 +2841,11 @@ func TestRuntimeStateRepositoryClaimedSameGapAssessmentCrashRestartUsesCanonical
 			ExecutionKey: request.Execution.ExecutionKey, OperationID: request.Operation.ID, Outcome: runtimecontract.RuntimeOperationOutcomeAccepted,
 			ObservedEffectScope: runtimecontract.RuntimeEffectWorkspaceDurable, Changed: true, TargetRefs: append([]string(nil), request.Operation.TargetRefs...), Evidence: runtimecontract.RuntimeOperationEvidence{Summary: "same-gap write"},
 		}
-		_, committed, err := runtimeTestControllerCommitOperationReceipt(controller, ctx, request.WorkspaceID, request.RunID, request.DispatchID, request.Execution.Fence, receipt)
+		descriptor, found := runtimecontract.RuntimeOperationDescriptorForKind(request.Operation.Kind)
+		if !found || descriptor.OwnerModuleID == "" {
+			return runtime.RuntimeOperationExecutionResult{}, fmt.Errorf("unknown operation kind %q", request.Operation.Kind)
+		}
+		_, committed, err := runtimeTestControllerCommitOperationReceipt(controller, ctx, request.WorkspaceID, request.RunID, request.DispatchID, request.Execution.Fence, descriptor.OwnerModuleID, receipt)
 		if err != nil {
 			return runtime.RuntimeOperationExecutionResult{}, err
 		}
@@ -2950,7 +2964,7 @@ func TestRuntimeMainlinePreparesLocalPrerequisiteThroughPersistedController(t *t
 		t.Fatal(err)
 	}
 	runOwner := runmodule.New()
-	if err := runOwner.Configure(runbiz.Dependencies{Runs: runs, EventHub: hub}); err != nil {
+	if err := runOwner.Configure(runOwnerTestDependencies(runs, nil, nil, hub)); err != nil {
 		t.Fatal(err)
 	}
 	if err := runOwner.Start(); err != nil {
@@ -3047,7 +3061,7 @@ func TestRuntimeMainlineRequestsAndSealsTypedCandidate(t *testing.T) {
 		t.Fatal(err)
 	}
 	runOwner := runmodule.New()
-	if err := runOwner.Configure(runbiz.Dependencies{Runs: runs, EventHub: hub}); err != nil {
+	if err := runOwner.Configure(runOwnerTestDependencies(runs, nil, nil, hub)); err != nil {
 		t.Fatal(err)
 	}
 	if err := runOwner.Start(); err != nil {
@@ -3130,7 +3144,7 @@ func TestRuntimeFileBackedSemanticCandidateReplayExhaustionSurvivesCASBoundaries
 			t.Fatal(err)
 		}
 		runOwner := runmodule.New()
-		if err := runOwner.Configure(runbiz.Dependencies{Runs: runs, EventHub: hub}); err != nil {
+		if err := runOwner.Configure(runOwnerTestDependencies(runs, nil, nil, hub)); err != nil {
 			t.Fatal(err)
 		}
 		if err := runOwner.Start(); err != nil {
@@ -3395,7 +3409,7 @@ func TestRuntimeMainlineRetriesSameCandidateContractOnce(t *testing.T) {
 		t.Fatal(err)
 	}
 	runOwner := runmodule.New()
-	if err := runOwner.Configure(runbiz.Dependencies{Runs: runs, EventHub: hub}); err != nil {
+	if err := runOwner.Configure(runOwnerTestDependencies(runs, nil, nil, hub)); err != nil {
 		t.Fatal(err)
 	}
 	if err := runOwner.Start(); err != nil {
@@ -3469,7 +3483,7 @@ func TestRuntimeMainlineCandidateAuthorityExhaustionHasNoCorrectionProviderOrBud
 		t.Fatal(err)
 	}
 	runOwner := runmodule.New()
-	if err := runOwner.Configure(runbiz.Dependencies{Runs: runs, EventHub: hub}); err != nil {
+	if err := runOwner.Configure(runOwnerTestDependencies(runs, nil, nil, hub)); err != nil {
 		t.Fatal(err)
 	}
 	if err := runOwner.Start(); err != nil {
@@ -3557,7 +3571,7 @@ func TestRuntimeMainlineRenderedPreflightStopsBeforeCandidateAttempt(t *testing.
 		t.Fatal(err)
 	}
 	runOwner := runmodule.New()
-	if err := runOwner.Configure(runbiz.Dependencies{Runs: runs, EventHub: hub}); err != nil {
+	if err := runOwner.Configure(runOwnerTestDependencies(runs, nil, nil, hub)); err != nil {
 		t.Fatal(err)
 	}
 	if err := runOwner.Start(); err != nil {
@@ -3622,7 +3636,7 @@ func TestDriveRuntimeDecisionReacquiresMissingSealedProviderCeilingBeforeLLM(t *
 		t.Fatal(err)
 	}
 	runOwner := runmodule.New()
-	if err := runOwner.Configure(runbiz.Dependencies{Runs: runs, EventHub: hub}); err != nil {
+	if err := runOwner.Configure(runOwnerTestDependencies(runs, nil, nil, hub)); err != nil {
 		t.Fatal(err)
 	}
 	if err := runOwner.Start(); err != nil {
@@ -3712,7 +3726,7 @@ func TestRuntimeMainlineRecordsInfeasibleCandidateBeforeDispatchSeal(t *testing.
 		t.Fatal(err)
 	}
 	runOwner := runmodule.New()
-	if err := runOwner.Configure(runbiz.Dependencies{Runs: runs, EventHub: hub}); err != nil {
+	if err := runOwner.Configure(runOwnerTestDependencies(runs, nil, nil, hub)); err != nil {
 		t.Fatal(err)
 	}
 	if err := runOwner.Start(); err != nil {
@@ -3830,7 +3844,7 @@ func TestRuntimeFileBackedOwnerInfeasibilityDoesNotRequestCorrection(t *testing.
 		t.Fatal(err)
 	}
 	runOwner := runmodule.New()
-	if err := runOwner.Configure(runbiz.Dependencies{Runs: runs, EventHub: hub}); err != nil {
+	if err := runOwner.Configure(runOwnerTestDependencies(runs, nil, nil, hub)); err != nil {
 		t.Fatal(err)
 	}
 	if err := runOwner.Start(); err != nil {
@@ -3926,7 +3940,7 @@ func TestRuntimeFileBackedOwnerInfeasibilityPersistsWithoutCorrection(t *testing
 		t.Fatal(err)
 	}
 	runOwner := runmodule.New()
-	if err := runOwner.Configure(runbiz.Dependencies{Runs: runs, EventHub: hub}); err != nil {
+	if err := runOwner.Configure(runOwnerTestDependencies(runs, nil, nil, hub)); err != nil {
 		t.Fatal(err)
 	}
 	if err := runOwner.Start(); err != nil {
@@ -4030,7 +4044,7 @@ func TestRuntimeMainlineExhaustsTwoInfeasibleCandidatesWithoutDispatch(t *testin
 		t.Fatal(err)
 	}
 	runOwner := runmodule.New()
-	if err := runOwner.Configure(runbiz.Dependencies{Runs: runs, EventHub: hub}); err != nil {
+	if err := runOwner.Configure(runOwnerTestDependencies(runs, nil, nil, hub)); err != nil {
 		t.Fatal(err)
 	}
 	if err := runOwner.Start(); err != nil {
@@ -4128,7 +4142,7 @@ func TestRuntimeMainlineRestartsFromPersistedCandidateProposalWithoutProviderRep
 		t.Fatal(err)
 	}
 	runOwner := runmodule.New()
-	if err := runOwner.Configure(runbiz.Dependencies{Runs: runs, EventHub: hub}); err != nil {
+	if err := runOwner.Configure(runOwnerTestDependencies(runs, nil, nil, hub)); err != nil {
 		t.Fatal(err)
 	}
 	if err := runOwner.Start(); err != nil {
@@ -4203,7 +4217,7 @@ func TestRuntimeMainlinePartialReplayClosesAttemptThenSealsCorrectedRetry(t *tes
 		t.Fatal(err)
 	}
 	runOwner := runmodule.New()
-	if err := runOwner.Configure(runbiz.Dependencies{Runs: runs, EventHub: hub}); err != nil {
+	if err := runOwner.Configure(runOwnerTestDependencies(runs, nil, nil, hub)); err != nil {
 		t.Fatal(err)
 	}
 	if err := runOwner.Start(); err != nil {
@@ -4353,7 +4367,7 @@ func TestRuntimeMainlineRestartSkipsPersistedFeasibilityProbe(t *testing.T) {
 		t.Fatal(err)
 	}
 	runOwner := runmodule.New()
-	if err := runOwner.Configure(runbiz.Dependencies{Runs: runs, EventHub: hub}); err != nil {
+	if err := runOwner.Configure(runOwnerTestDependencies(runs, nil, nil, hub)); err != nil {
 		t.Fatal(err)
 	}
 	if err := runOwner.Start(); err != nil {
@@ -4456,7 +4470,7 @@ func TestRuntimeMainlinePreservesProviderProtocolDiagnosticWithoutCandidateAttem
 		t.Fatal(err)
 	}
 	runOwner := runmodule.New()
-	if err := runOwner.Configure(runbiz.Dependencies{Runs: runs, EventHub: hub}); err != nil {
+	if err := runOwner.Configure(runOwnerTestDependencies(runs, nil, nil, hub)); err != nil {
 		t.Fatal(err)
 	}
 	if err := runOwner.Start(); err != nil {
@@ -4752,7 +4766,11 @@ func TestRuntimeStateRecordPreservesRepairSurfaceConfirmationFenceAcrossOpaqueRe
 			}
 			feedback.OriginalDiagnostic.OperationID = request.Operation.ID
 			receipt.Feedback = &feedback
-			_, committed, commitErr := runtimeTestControllerCommitOperationReceipt(controller, ctx, request.WorkspaceID, request.RunID, request.DispatchID, request.Execution.Fence, receipt)
+			descriptor, found := runtimecontract.RuntimeOperationDescriptorForKind(request.Operation.Kind)
+			if !found || descriptor.OwnerModuleID == "" {
+				return runtime.RuntimeOperationExecutionResult{}, fmt.Errorf("unknown operation kind %q", request.Operation.Kind)
+			}
+			_, committed, commitErr := runtimeTestControllerCommitOperationReceipt(controller, ctx, request.WorkspaceID, request.RunID, request.DispatchID, request.Execution.Fence, descriptor.OwnerModuleID, receipt)
 			if commitErr != nil {
 				return runtime.RuntimeOperationExecutionResult{}, commitErr
 			}

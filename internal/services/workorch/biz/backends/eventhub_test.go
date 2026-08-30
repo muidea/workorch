@@ -177,14 +177,17 @@ func TestEventHubEventsBackendReceivesTypedEventStreamRecord(t *testing.T) {
 	defer unsubscribe()
 
 	data, err := eventstreamevents.EventRecordDataFromModel(&eventstreammodel.EventRecord{
-		ID:          "eventstream-workspace-created",
-		Version:     recordpayload.WorkorchEventVersion,
-		Topic:       workspaceevents.TopicWorkspaceCreated,
-		WorkspaceID: "ws-eventstream",
-		SubjectType: "workspace",
-		SubjectID:   "ws-eventstream",
-		Revision:    1,
-		Payload:     workorcheventpayload.New(workorcheventpayload.StringField("title", "typed event stream")),
+		ID:             "eventstream-workspace-created",
+		Version:        recordpayload.WorkorchEventVersion,
+		Topic:          workspaceevents.TopicWorkspaceCreated,
+		OccurredAt:     "2026-08-30T00:00:00Z",
+		SourceModule:   "blocks/workspace",
+		WorkspaceID:    "ws-eventstream",
+		SubjectType:    "workspace",
+		SubjectID:      "ws-eventstream",
+		StreamPosition: 1,
+		Revision:       1,
+		Payload:        workorcheventpayload.New(workorcheventpayload.StringField("title", "typed event stream")),
 	})
 	if err != nil {
 		t.Fatalf("build event record data: %v", err)

@@ -75,15 +75,11 @@ func (m *Biz) Teardown(context.Context) {
 }
 
 func (m *Biz) handleWebOperation(event magicevent.Event, result magicevent.Result) {
-	if result == nil {
+	command, ok := webRuntimeIngressCommand[webevents.ExecuteOperationCommand](event, result)
+	if !ok {
 		return
 	}
-	if event == nil || event.Source() != runtimecontract.RuntimeModuleOrchestrator {
-		setCapabilityError(result, fmt.Errorf("runtime Web operation requires Orchestrator source"))
-		return
-	}
-	command, ok := event.Data().(webevents.ExecuteOperationCommand)
-	if !ok || m.runtimeAdapter == nil {
+	if m == nil || m.runtimeAdapter == nil {
 		setCapabilityError(result, common.ErrInvalidArgument)
 		return
 	}
@@ -200,9 +196,8 @@ func safeWebOperationFailureMessage(code string) string {
 }
 
 func (m *Biz) handleRuntimeCapabilities(event magicevent.Event, result magicevent.Result) {
-	command, ok := event.Data().(webevents.AcquireRuntimeCapabilitiesCommand)
+	command, ok := webRuntimeIngressCommand[webevents.AcquireRuntimeCapabilitiesCommand](event, result)
 	if !ok {
-		setCapabilityError(result, common.ErrInvalidArgument)
 		return
 	}
 	response, err := webevents.ResolveRuntimeCapabilities(command, ModuleID, modulecommon.RuntimeCapabilityKinds()...)
@@ -214,8 +209,11 @@ func (m *Biz) handleRuntimeCapabilities(event magicevent.Event, result magiceven
 }
 
 func (m *Biz) handleRuntimeOperationAdmissibility(event magicevent.Event, result magicevent.Result) {
-	command, ok := event.Data().(webevents.AcquireRuntimeOperationAdmissibilityCommand)
-	if !ok || m.runtimeAdapter == nil {
+	command, ok := webRuntimeIngressCommand[webevents.AcquireRuntimeOperationAdmissibilityCommand](event, result)
+	if !ok {
+		return
+	}
+	if m == nil || m.runtimeAdapter == nil {
 		setCapabilityError(result, common.ErrInvalidArgument)
 		return
 	}
@@ -265,8 +263,11 @@ func setRuntimeOperationFeasibilityResult(result magicevent.Result, command webe
 }
 
 func (m *Biz) handleRuntimeOperationFeasibility(event magicevent.Event, result magicevent.Result) {
-	command, ok := event.Data().(webevents.ProbeRuntimeOperationFeasibilityCommand)
-	if !ok || m.runtimeAdapter == nil {
+	command, ok := webRuntimeIngressCommand[webevents.ProbeRuntimeOperationFeasibilityCommand](event, result)
+	if !ok {
+		return
+	}
+	if m == nil || m.runtimeAdapter == nil {
 		setCapabilityError(result, common.ErrInvalidArgument)
 		return
 	}
@@ -313,8 +314,11 @@ func (m *Biz) handleRuntimeOperationFeasibility(event magicevent.Event, result m
 }
 
 func (m *Biz) handleRuntimeSemanticProofFeasibility(event magicevent.Event, result magicevent.Result) {
-	command, ok := event.Data().(webevents.ProbeRuntimeSemanticProofFeasibilityCommand)
-	if !ok || m.runtimeAdapter == nil {
+	command, ok := webRuntimeIngressCommand[webevents.ProbeRuntimeSemanticProofFeasibilityCommand](event, result)
+	if !ok {
+		return
+	}
+	if m == nil || m.runtimeAdapter == nil {
 		setCapabilityError(result, common.ErrInvalidArgument)
 		return
 	}
@@ -384,6 +388,35 @@ func webAdmissibilityStale(observation *runtimecontract.RuntimePrerequisiteObser
 		}
 	}
 	return nil
+}
+
+// webRuntimeIngressCommand is the owner-local strong-call gate for every
+// Runtime topic subscribed by Web. Post is rejected before DTO inspection;
+// only the exact Orchestrator source may reach provider discovery, network,
+// receipt, or evidence paths.
+func webRuntimeIngressCommand[T any](event magicevent.Event, result magicevent.Result) (T, bool) {
+	var zero T
+	if result == nil {
+		return zero, false
+	}
+	if event == nil || event.Source() != runtimecontract.RuntimeModuleOrchestrator {
+		setWebRuntimeIngressInvalid(result, "runtime Web ingress requires exact Orchestrator source")
+		return zero, false
+	}
+	command, ok := event.Data().(T)
+	if !ok {
+		setWebRuntimeIngressInvalid(result, "runtime Web ingress payload has an invalid concrete type")
+		return zero, false
+	}
+	return command, true
+}
+
+func setWebRuntimeIngressInvalid(result magicevent.Result, message string) {
+	if result == nil {
+		return
+	}
+	err := fmt.Errorf("%w: %s", common.ErrInvalidArgument, message)
+	result.Set(nil, &cd.Error{Code: cd.IllegalParam, Message: err.Error(), Cause: err})
 }
 
 func setCapabilityError(result magicevent.Result, err error) {

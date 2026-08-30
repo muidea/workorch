@@ -22,7 +22,7 @@ func TestPersistReplacementIntentKeepsSuccessorAbsent(t *testing.T) {
 		t.Fatal(err)
 	}
 	biz := New()
-	if err := biz.Configure(Dependencies{Runs: runs, EventHub: magicevent.NewHub(8)}); err != nil {
+	if err := biz.Configure(runBizTestDependencies(runs, nil, nil, magicevent.NewHub(8), nil)); err != nil {
 		t.Fatal(err)
 	}
 	bootstrap := restartTestBootstrap(t, predecessor.WorkspaceID)
@@ -66,7 +66,7 @@ func TestPersistReplacementIntentRetiresOnlyRejectedClarificationOnExplicitNewRe
 	ctx := common.ContextWithRuntimeWorkspaceID(context.Background(), "ws-restart")
 	runs := memory.NewRunRepository()
 	biz := New()
-	if err := biz.Configure(Dependencies{Runs: runs, EventHub: magicevent.NewHub(16)}); err != nil {
+	if err := biz.Configure(runBizTestDependencies(runs, nil, nil, magicevent.NewHub(16), nil)); err != nil {
 		t.Fatal(err)
 	}
 	bootstrap := restartTestBootstrap(t, "ws-restart")
@@ -180,7 +180,7 @@ func TestMaterializeReplacementRequiresTerminalPredecessorAndIsIdempotent(t *tes
 		t.Fatal(err)
 	}
 	biz := New()
-	if err := biz.Configure(Dependencies{Runs: runs, EventHub: magicevent.NewHub(16)}); err != nil {
+	if err := biz.Configure(runBizTestDependencies(runs, nil, nil, magicevent.NewHub(16), nil)); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := biz.materializeReplacementAfterTerminalDelivery(ctx, predecessor, "terminal-1"); err != common.ErrInvalidArgument {

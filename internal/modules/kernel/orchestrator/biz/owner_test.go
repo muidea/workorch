@@ -9,7 +9,6 @@ import (
 	"time"
 
 	cd "github.com/muidea/magicCommon/def"
-	runbiz "github.com/muidea/workorch/internal/modules/blocks/run/biz"
 
 	llmevents "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/events"
 
@@ -169,7 +168,7 @@ func TestGMMR3StartupRecoveryWaitsForRunCommandsReady(t *testing.T) {
 		t.Fatal(err)
 	}
 	runOwner := runmodule.New()
-	if err := runOwner.Configure(runbiz.Dependencies{Runs: runs, EventHub: deps.CommandHub}); err != nil {
+	if err := runOwner.Configure(runOwnerTestDependencies(runs, nil, nil, deps.CommandHub)); err != nil {
 		t.Fatal(err)
 	}
 	module := New()
@@ -325,7 +324,7 @@ func TestSemanticDocumentPendingSchedulesOnePersistedLeaseWithoutBusyLoop(t *tes
 		t.Fatal(err)
 	}
 	runOwner := runmodule.New()
-	if err := runOwner.Configure(runbiz.Dependencies{Runs: runs, EventHub: hub}); err != nil {
+	if err := runOwner.Configure(runOwnerTestDependencies(runs, nil, nil, hub)); err != nil {
 		t.Fatal(err)
 	}
 	if err := runOwner.Start(); err != nil {

@@ -2,6 +2,7 @@ package eventstream
 
 import (
 	"context"
+	"crypto/sha256"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -41,6 +42,7 @@ import (
 	"github.com/muidea/workorch/internal/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/repository"
 	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
+	"github.com/muidea/workorch/internal/pkg/workorcheventrecordcontract"
 	"github.com/muidea/workorch/internal/pkg/workorchmemorycontract"
 	"github.com/muidea/workorch/internal/pkg/workorchquerycontract"
 )
@@ -68,6 +70,12 @@ type Dependencies struct {
 
 var eventRecordIDSequence atomic.Uint64
 
+const (
+	stableRunNotificationRecordIDPrefix = "run-notification/"
+	stableMemoryRecallRecordIDPrefix    = "memory-recall-notification/"
+	stableLLMUsageRecordIDPrefix        = "llm-usage-notification/"
+)
+
 func New(deps Dependencies) *Biz {
 	return &Biz{
 		Base: basebiz.New(modulecommon.ModuleID, deps.EventHub, deps.BackgroundRoutine), repo: deps.OwnerRepositories.EventRecords(),
@@ -76,18 +84,18 @@ func New(deps Dependencies) *Biz {
 }
 
 func (s *Biz) highWatermarks(ctx context.Context, workspaceIDs []common.WorkspaceID) ([]eventstreamevents.WorkspaceHighWatermark, error) {
-	if s == nil || s.repo == nil || s.workspaceDeletions == nil || len(workspaceIDs) == 0 || len(workspaceIDs) > eventstreamevents.MaxHighWatermarkScopes {
+	if s == nil {
+		return nil, common.ErrInvalidArgument
+	}
+	command, err := (eventstreamevents.HighWatermarksCommand{WorkspaceIDs: workspaceIDs}).Normalized()
+	if err != nil {
+		return nil, err
+	}
+	if s.repo == nil || s.workspaceDeletions == nil {
 		return nil, common.ErrInvalidArgument
 	}
 	revisions := map[common.WorkspaceID]int64{}
-	for _, workspaceID := range workspaceIDs {
-		workspaceID = common.WorkspaceID(strings.TrimSpace(string(workspaceID)))
-		if workspaceID == "" {
-			continue
-		}
-		if _, exists := revisions[workspaceID]; exists {
-			continue
-		}
+	for _, workspaceID := range command.WorkspaceIDs {
 		hidden, err := s.workspaceDeletionHidden(ctx, workspaceID)
 		if err != nil {
 			return nil, err
@@ -253,11 +261,19 @@ func (s *Biz) executeCommand(ev magicevent.Event) (any, error) {
 		return eventstreamevents.ListEventsResult{Events: data}, nil
 	case eventstreamevents.TopicEventStreamCommandHighWatermarks:
 		cmd, ok := ev.Data().(eventstreamevents.HighWatermarksCommand)
-		if !ok || len(cmd.WorkspaceIDs) == 0 || len(cmd.WorkspaceIDs) > eventstreamevents.MaxHighWatermarkScopes {
+		if !ok {
 			return nil, common.ErrInvalidArgument
 		}
-		items, err := s.highWatermarks(ev.Context(), cmd.WorkspaceIDs)
-		return eventstreamevents.HighWatermarksResult{HighWatermarks: items}, err
+		normalized, err := cmd.Normalized()
+		if err != nil {
+			return nil, err
+		}
+		items, err := s.highWatermarks(ev.Context(), normalized.WorkspaceIDs)
+		response := eventstreamevents.HighWatermarksResult{HighWatermarks: items}
+		if err == nil {
+			err = response.ValidateFor(normalized)
+		}
+		return response, err
 	case eventstreamevents.TopicEventStreamCommandSealWorkspaceDeletion,
 		eventstreamevents.TopicEventStreamCommandPurgeWorkspace:
 		return s.executeWorkspaceDeletionCommand(ev.Context(), ev)
@@ -427,7 +443,7 @@ func (s *Biz) subscribeRunStateNotifications() {
 		topic := topic
 		s.SubscribeMatchedFunc(observerID, observerID, topic, func(event magicevent.Event, _ magicevent.Result) {
 			data, ok := event.Data().(runevents.RunStateChangedData)
-			if !ok || event.Source() != runcommon.ModuleID || data.Validate() != nil {
+			if !ok || event.Source() != runcommon.ModuleID || !validRunStateNotification(topic, data) {
 				s.finishRecordAppend(event, nil, common.ErrInvalidArgument)
 				return
 			}
@@ -542,11 +558,40 @@ func validMemoryChangedData(data memoryevents.MemoryChangedData) bool {
 }
 
 func validMemoryRecallRecordedData(data memoryevents.MemoryRecallRecordedData) bool {
-	return data.TraceID != "" && data.WorkspaceID != "" && data.RunID != "" && strings.TrimSpace(data.Status) != ""
+	traceID := string(data.TraceID)
+	return traceID != "" && traceID == strings.TrimSpace(traceID) && data.WorkspaceID != "" && data.RunID != "" && strings.TrimSpace(data.Status) != ""
 }
 
 func validLLMUsageRecordedData(data llmevents.LLMUsageRecordedData) bool {
 	return data.Validate() == nil
+}
+
+func validRunStateNotification(topic string, data runevents.RunStateChangedData) bool {
+	if data.Validate() != nil {
+		return false
+	}
+	var specificTopic string
+	switch data.State {
+	case common.RunStatePending:
+		specificTopic = runevents.TopicRunCreated
+	case common.RunStateActive:
+		specificTopic = runevents.TopicRunStarted
+	case common.RunStateBlockedOnDecision:
+		specificTopic = runevents.TopicRunBlockedOnDecision
+	case common.RunStateBlockedOnApproval:
+		specificTopic = runevents.TopicRunBlockedOnApproval
+	case common.RunStateCompleted:
+		specificTopic = runevents.TopicRunCompleted
+	case common.RunStateFailed:
+		specificTopic = runevents.TopicRunFailed
+	case common.RunStateCancelled:
+		specificTopic = runevents.TopicRunCancelled
+	case common.RunStateSuperseded:
+		specificTopic = runevents.TopicRunSuperseded
+	default:
+		return false
+	}
+	return topic == runevents.TopicRunStateChanged || topic == specificTopic
 }
 
 func validResultChangedData(data resultevents.ResultChangedData) bool {
@@ -579,29 +624,61 @@ func validTicketResolvedData(data decisionevents.TicketResolvedData) bool {
 }
 
 func (s *Biz) finishRecordAppend(event magicevent.Event, record *eventstreammodel.EventRecord, inputErr error) {
+	err := s.appendNotificationRecord(event, record, inputErr)
+	if err != nil {
+		topic, source := "", ""
+		if event != nil {
+			topic, source = event.ID(), event.Source()
+		}
+		slog.Error("workorch eventstream append failed", "topic", topic, "source", source, "err", err)
+	}
+}
+
+func (s *Biz) appendNotificationRecord(event magicevent.Event, record *eventstreammodel.EventRecord, inputErr error) error {
+	if event == nil {
+		return common.ErrInvalidArgument
+	}
 	err := inputErr
 	if err == nil {
 		for attempt := 0; attempt < 3; attempt++ {
 			err = s.appendRecord(event.Context(), record)
 			if err == nil {
-				return
+				return nil
 			}
 			if errors.Is(err, common.ErrConflict) || errors.Is(err, common.ErrInvalidArgument) {
 				break
 			}
 		}
 	}
-	// Result and Decision notifications carry stable owner-derived EventRecord
-	// IDs. A conflict for those identities is an idempotent replay; conflicts
-	// for any other event remain visible.
-	if errors.Is(err, common.ErrConflict) && record != nil &&
-		(strings.HasPrefix(string(record.ID), "result-notification/") || strings.HasPrefix(string(record.ID), "decision-notification/") || strings.HasPrefix(string(record.ID), "approval-notification/")) &&
+	// Stable owner notification identities are idempotent only when every
+	// persisted source/topic/scope/payload field still matches. A collision with
+	// drift remains a visible conflict; arbitrary record IDs never gain replay
+	// semantics merely because the repository reports a conflict.
+	if errors.Is(err, common.ErrConflict) && hasStableNotificationRecordID(record) &&
 		s.samePersistedRecord(event.Context(), record) {
-		return
+		return nil
 	}
-	if err != nil {
-		slog.Error("workorch eventstream append failed", "topic", event.ID(), "source", event.Source(), "err", err)
+	return err
+}
+
+func hasStableNotificationRecordID(record *eventstreammodel.EventRecord) bool {
+	if record == nil || record.ID == "" {
+		return false
 	}
+	id := string(record.ID)
+	for _, prefix := range []string{
+		"result-notification/",
+		"decision-notification/",
+		"approval-notification/",
+		stableRunNotificationRecordIDPrefix,
+		stableMemoryRecallRecordIDPrefix,
+		stableLLMUsageRecordIDPrefix,
+	} {
+		if strings.HasPrefix(id, prefix) {
+			return true
+		}
+	}
+	return false
 }
 
 func (s *Biz) samePersistedRecord(ctx context.Context, expected *eventstreammodel.EventRecord) bool {
@@ -648,6 +725,12 @@ func (s *Biz) appendRecord(ctx context.Context, record *eventstreammodel.EventRe
 	}
 	if record.OccurredAt == "" {
 		record.OccurredAt = time.Now().UTC().Format(time.RFC3339Nano)
+	} else {
+		canonicalOccurredAt, err := workorcheventrecordcontract.CanonicalOccurredAt(record.OccurredAt)
+		if err != nil {
+			return err
+		}
+		record.OccurredAt = canonicalOccurredAt
 	}
 	record.Payload = recordpayload.SanitizeAuditPayload(record.Payload)
 	record.PayloadSummary = recordpayload.SanitizeAuditPayload(record.PayloadSummary)
@@ -777,6 +860,7 @@ func governanceRecord(topic string, data governanceevents.GovernanceData) *event
 
 func runStateRecord(topic string, source string, data runevents.RunStateChangedData) *eventstreammodel.EventRecord {
 	return &eventstreammodel.EventRecord{
+		ID:           stableNotificationRecordID(stableRunNotificationRecordIDPrefix, topic, data.WorkspaceID, data.RunID, data.CausationID),
 		Topic:        topic,
 		SourceModule: source,
 		SubjectType:  "run",
@@ -872,6 +956,7 @@ func memoryRecord(topic string, source string, data memoryevents.MemoryChangedDa
 
 func memoryRecallRecord(source string, data memoryevents.MemoryRecallRecordedData) *eventstreammodel.EventRecord {
 	return &eventstreammodel.EventRecord{
+		ID:    stableNotificationRecordID(stableMemoryRecallRecordIDPrefix, memoryevents.TopicMemoryRecallRecorded, data.WorkspaceID, data.RunID, string(data.TraceID)),
 		Topic: memoryevents.TopicMemoryRecallRecorded, SourceModule: source, SubjectType: "memory_recall", SubjectID: string(data.TraceID),
 		WorkspaceID: data.WorkspaceID, RunID: data.RunID, StepID: data.StepID, OccurredAt: data.OccurredAt,
 		Payload: (recordpayload.MemoryRecallPayloadData{
@@ -888,6 +973,7 @@ func llmUsageRecord(source string, data llmevents.LLMUsageRecordedData) *eventst
 		subjectID = string(data.RunID)
 	}
 	return &eventstreammodel.EventRecord{
+		ID:           stableNotificationRecordID(stableLLMUsageRecordIDPrefix, llmevents.TopicLLMUsageRecorded, data.WorkspaceID, data.RunID, data.RequestID),
 		Topic:        llmevents.TopicLLMUsageRecorded,
 		SourceModule: source,
 		SubjectType:  "llm_usage",
@@ -930,6 +1016,26 @@ func llmUsageRecord(source string, data llmevents.LLMUsageRecordedData) *eventst
 			ProviderSubmitted:     data.ProviderSubmitted,
 		}).EventPayload(),
 	}
+}
+
+func stableNotificationRecordID(prefix, topic string, workspaceID common.WorkspaceID, runID common.RunID, identity string) common.EventRecordID {
+	if prefix == "" || topic == "" || topic != strings.TrimSpace(topic) || identity == "" || identity != strings.TrimSpace(identity) {
+		return ""
+	}
+	// Length-prefix every field so arbitrary owner IDs cannot create delimiter
+	// ambiguity. Source and payload are deliberately excluded: they must collide
+	// with the same stable identity and be rejected as drift. Topic is included
+	// because Run legitimately publishes a state-specific and canonical fact with
+	// the same causation identity.
+	material := fmt.Sprintf(
+		"eventstream/stable-notification/v1\n%d:%s\n%d:%s\n%d:%s\n%d:%s",
+		len(topic), topic,
+		len(workspaceID), workspaceID,
+		len(runID), runID,
+		len(identity), identity,
+	)
+	digest := sha256.Sum256([]byte(material))
+	return common.EventRecordID(fmt.Sprintf("%s%x", prefix, digest))
 }
 
 func decisionResolvedRecord(topic string, data decisionevents.TicketResolvedData) *eventstreammodel.EventRecord {

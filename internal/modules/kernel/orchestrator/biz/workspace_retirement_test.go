@@ -10,7 +10,6 @@ import (
 
 	magicevent "github.com/muidea/magicCommon/event"
 	runmodule "github.com/muidea/workorch/internal/modules/blocks/run"
-	runbiz "github.com/muidea/workorch/internal/modules/blocks/run/biz"
 	runevents "github.com/muidea/workorch/internal/modules/blocks/run/pkg/events"
 	runmodel "github.com/muidea/workorch/internal/modules/blocks/run/pkg/models"
 	orchestratorevents "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/events"
@@ -144,7 +143,7 @@ func TestWorkspaceRetirementGateSurvivesBusyConfirmationAndRestart(t *testing.T)
 	}
 
 	runOwner := runmodule.New()
-	if err := runOwner.Configure(runbiz.Dependencies{Runs: runs, Steps: steps, Checkpoints: checkpoints, EventHub: hub}); err != nil {
+	if err := runOwner.Configure(runOwnerTestDependencies(runs, steps, checkpoints, hub)); err != nil {
 		t.Fatal(err)
 	}
 	if err := runOwner.Start(); err != nil {
@@ -275,7 +274,7 @@ func TestWorkspaceRetirementCommandsRejectUntrustedSources(t *testing.T) {
 		t.Fatal(err)
 	}
 	runOwner := runmodule.New()
-	if err := runOwner.Configure(runbiz.Dependencies{Runs: runs, EventHub: hub}); err != nil {
+	if err := runOwner.Configure(runOwnerTestDependencies(runs, nil, nil, hub)); err != nil {
 		t.Fatal(err)
 	}
 	if err := runOwner.Start(); err != nil {

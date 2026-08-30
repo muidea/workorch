@@ -25,6 +25,7 @@ const StepKindCommand = modulecommon.StepKindCommand
 type Biz struct {
 	basebiz.Base
 	runtimeAdapter *RuntimeAdapter
+	started        bool
 }
 
 type Dependencies struct {
@@ -61,6 +62,9 @@ func (m *Biz) Start() error {
 	if m == nil || m.runtimeAdapter == nil || m.EventHub() == nil {
 		return common.ErrInvalidArgument
 	}
+	if m.started {
+		return nil
+	}
 	m.SubscribeFunc(shellevents.TopicAcquireRuntimeCapabilities, m.handleRuntimeCapabilities)
 	m.SubscribeFunc(shellevents.TopicAcquireRuntimeOperationAdmissibility, m.handleRuntimeOperationAdmissibility)
 	m.SubscribeFunc(shellevents.TopicProbeRuntimeOperationFeasibility, m.handleRuntimeOperationFeasibility)
@@ -68,6 +72,7 @@ func (m *Biz) Start() error {
 	m.SubscribeFunc(shellevents.TopicProbeRuntimeOwnerFactProspectiveSatisfaction, m.handleRuntimeOwnerFactProspectiveSatisfaction)
 	m.SubscribeFunc(shellevents.TopicQueryRuntimeCWIReconciliation, m.handleRuntimeCWIReconciliationQuery)
 	m.SubscribeFunc(shellevents.TopicExecuteOperation, m.handleShellOperation)
+	m.started = true
 	return nil
 }
 
@@ -75,13 +80,16 @@ func (m *Biz) Teardown(context.Context) {
 	if m == nil {
 		return
 	}
-	m.UnsubscribeFunc(shellevents.TopicExecuteOperation)
-	m.UnsubscribeFunc(shellevents.TopicAcquireRuntimeCapabilities)
-	m.UnsubscribeFunc(shellevents.TopicAcquireRuntimeOperationAdmissibility)
-	m.UnsubscribeFunc(shellevents.TopicProbeRuntimeOperationFeasibility)
-	m.UnsubscribeFunc(shellevents.TopicProbeRuntimeSemanticProofFeasibility)
-	m.UnsubscribeFunc(shellevents.TopicProbeRuntimeOwnerFactProspectiveSatisfaction)
-	m.UnsubscribeFunc(shellevents.TopicQueryRuntimeCWIReconciliation)
+	if m.started {
+		m.UnsubscribeFunc(shellevents.TopicExecuteOperation)
+		m.UnsubscribeFunc(shellevents.TopicAcquireRuntimeCapabilities)
+		m.UnsubscribeFunc(shellevents.TopicAcquireRuntimeOperationAdmissibility)
+		m.UnsubscribeFunc(shellevents.TopicProbeRuntimeOperationFeasibility)
+		m.UnsubscribeFunc(shellevents.TopicProbeRuntimeSemanticProofFeasibility)
+		m.UnsubscribeFunc(shellevents.TopicProbeRuntimeOwnerFactProspectiveSatisfaction)
+		m.UnsubscribeFunc(shellevents.TopicQueryRuntimeCWIReconciliation)
+		m.started = false
+	}
 	m.runtimeAdapter = nil
 }
 
@@ -90,15 +98,11 @@ func (m *Biz) Teardown(context.Context) {
 // mutate Runtime coverage: the result is an owner-local current-workspace
 // observation consumed by the Orchestrator's SM-2 reducer.
 func (m *Biz) handleRuntimeCWIReconciliationQuery(event magicevent.Event, result magicevent.Result) {
-	if result == nil {
+	command, ok := shellRuntimeIngressCommand[shellevents.QueryRuntimeCWIReconciliationCommand](event, result)
+	if !ok {
 		return
 	}
-	if event == nil || event.Source() != runtimecontract.RuntimeModuleOrchestrator {
-		setCapabilityError(result, common.ErrInvalidArgument)
-		return
-	}
-	command, ok := event.Data().(shellevents.QueryRuntimeCWIReconciliationCommand)
-	if !ok || m == nil || m.runtimeAdapter == nil || command.ValidateForOwner(ModuleID) != nil {
+	if m == nil || m.runtimeAdapter == nil || command.ValidateForOwner(ModuleID) != nil {
 		setCapabilityError(result, common.ErrInvalidArgument)
 		return
 	}
@@ -249,17 +253,11 @@ func shellReconciliationObservation(command shellevents.QueryRuntimeCWIReconcili
 }
 
 func (m *Biz) handleShellOperation(event magicevent.Event, result magicevent.Result) {
-	// Execute is a strong call. A fire-and-forget Post must not reach receipt
-	// authorization, the local process adapter, or receipt commit.
-	if result == nil {
+	command, ok := shellRuntimeIngressCommand[shellevents.ExecuteOperationCommand](event, result)
+	if !ok {
 		return
 	}
-	if event == nil || event.Source() != runtimecontract.RuntimeModuleOrchestrator {
-		setCapabilityError(result, common.ErrInvalidArgument)
-		return
-	}
-	command, ok := event.Data().(shellevents.ExecuteOperationCommand)
-	if !ok || m.runtimeAdapter == nil {
+	if m == nil || m.runtimeAdapter == nil {
 		setCapabilityError(result, common.ErrInvalidArgument)
 		return
 	}
@@ -643,9 +641,8 @@ func shellUndeclaredWorkspaceTargets(changes []RuntimeWorkspaceTargetChange, dec
 }
 
 func (m *Biz) handleRuntimeCapabilities(event magicevent.Event, result magicevent.Result) {
-	command, ok := event.Data().(shellevents.AcquireRuntimeCapabilitiesCommand)
+	command, ok := shellRuntimeIngressCommand[shellevents.AcquireRuntimeCapabilitiesCommand](event, result)
 	if !ok {
-		setCapabilityError(result, common.ErrInvalidArgument)
 		return
 	}
 	response, err := shellevents.ResolveRuntimeCapabilities(command, ModuleID, modulecommon.RuntimeCapabilityKinds()...)
@@ -657,8 +654,11 @@ func (m *Biz) handleRuntimeCapabilities(event magicevent.Event, result magiceven
 }
 
 func (m *Biz) handleRuntimeOperationAdmissibility(event magicevent.Event, result magicevent.Result) {
-	command, ok := event.Data().(shellevents.AcquireRuntimeOperationAdmissibilityCommand)
-	if !ok || m.runtimeAdapter == nil {
+	command, ok := shellRuntimeIngressCommand[shellevents.AcquireRuntimeOperationAdmissibilityCommand](event, result)
+	if !ok {
+		return
+	}
+	if m == nil || m.runtimeAdapter == nil {
 		setCapabilityError(result, common.ErrInvalidArgument)
 		return
 	}
@@ -712,8 +712,11 @@ func runtimeShellManagedValidationRequested(kinds []string) bool {
 }
 
 func (m *Biz) handleRuntimeOperationFeasibility(event magicevent.Event, result magicevent.Result) {
-	command, ok := event.Data().(shellevents.ProbeRuntimeOperationFeasibilityCommand)
-	if !ok || m.runtimeAdapter == nil {
+	command, ok := shellRuntimeIngressCommand[shellevents.ProbeRuntimeOperationFeasibilityCommand](event, result)
+	if !ok {
+		return
+	}
+	if m == nil || m.runtimeAdapter == nil {
 		setCapabilityError(result, common.ErrInvalidArgument)
 		return
 	}
@@ -733,8 +736,11 @@ func (m *Biz) handleRuntimeOperationFeasibility(event magicevent.Event, result m
 }
 
 func (m *Biz) handleRuntimeSemanticProofFeasibility(event magicevent.Event, result magicevent.Result) {
-	command, ok := event.Data().(shellevents.ProbeRuntimeSemanticProofFeasibilityCommand)
-	if !ok || m.runtimeAdapter == nil {
+	command, ok := shellRuntimeIngressCommand[shellevents.ProbeRuntimeSemanticProofFeasibilityCommand](event, result)
+	if !ok {
+		return
+	}
+	if m == nil || m.runtimeAdapter == nil {
 		setCapabilityError(result, common.ErrInvalidArgument)
 		return
 	}
@@ -787,6 +793,35 @@ func (m *Biz) setRuntimeSemanticProofFeasibility(result magicevent.Result, comma
 		return
 	}
 	result.Set(response, nil)
+}
+
+// shellRuntimeIngressCommand is the owner-local strong-call gate for every
+// Runtime topic subscribed by Shell. Post is rejected before DTO inspection;
+// only the exact Orchestrator source may reach process, receipt, or workspace
+// observation paths.
+func shellRuntimeIngressCommand[T any](event magicevent.Event, result magicevent.Result) (T, bool) {
+	var zero T
+	if result == nil {
+		return zero, false
+	}
+	if event == nil || event.Source() != runtimecontract.RuntimeModuleOrchestrator {
+		setShellRuntimeIngressInvalid(result, "runtime Shell ingress requires exact Orchestrator source")
+		return zero, false
+	}
+	command, ok := event.Data().(T)
+	if !ok {
+		setShellRuntimeIngressInvalid(result, "runtime Shell ingress payload has an invalid concrete type")
+		return zero, false
+	}
+	return command, true
+}
+
+func setShellRuntimeIngressInvalid(result magicevent.Result, message string) {
+	if result == nil {
+		return
+	}
+	err := fmt.Errorf("%w: %s", common.ErrInvalidArgument, message)
+	result.Set(nil, &cd.Error{Code: cd.IllegalParam, Message: err.Error(), Cause: err})
 }
 
 func setCapabilityError(result magicevent.Result, err error) {

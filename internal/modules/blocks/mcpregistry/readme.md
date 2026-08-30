@@ -1,57 +1,55 @@
-# MCP Registry Stateful Block
+# MCP Registry Block
 
 Status: active
 
 Type: stateful-block-contract
 
-Last Verified: 2026-08-26
+Last Verified: 2026-08-30
 
 ## 功能范围与边界
 
-`blocks/mcpregistry` 是 MCP Server 定义与 Capability catalog 的唯一正式状态 owner。Server、Capability 及两者的绑定关系保存在一个带 revision 的 `RegistrySnapshot` 聚合中；本 block 负责规范化、校验、原子 CAS 更新、一致快照和有界查询，但不打开 MCP transport、不执行 operation，也不修改 Runtime aggregate。
+目录 `blocks/mcpregistry` 对应 ModuleID `blocks/mcp-registry`，是 MCP Server、Capability 及其 binding 的唯一 catalog owner。全部状态保存在一个带 revision 的
+`RegistrySnapshot` 聚合中；本组件负责规范化、校验、原子 CAS 提交、一致快照、有界查询和内置默认资源 ensure。
+
+命名映射固定为：目录 `mcpregistry`、Go package `mcp`、ModuleID `blocks/mcp-registry`、EventHub contract owner
+`mcp-registry`、topic namespace `/mcp/...`。它与执行能力组件 `blocks/mcp` 不同；Registry 不打开 transport、不解析
+secret reference、不执行 operation，也不修改 Runtime aggregate。
 
 ## 组件交互及合同
 
-- `blocks/mcpregistry/pkg/events` 为每个 create/get/list/update、defaults、完整快照和选择快照 topic 定义独立 command/result；不存在通用 `MCPCommandResult` 联合 envelope。所有同步 handler 在 `result == nil` 时直接返回，因此 EventHub `Post` 不能执行查询或强写。
-- Registry aggregate helper、constructor 与全部 mutation/query/snapshot 方法均为 Biz package-private；Application、System
-  和 MCP execution 只能发送 Registry owner 定义的 concrete EventHub command/result，不能直接构造 Registry service。
-- Server command/result 只携带 `EnvironmentReference{Name, Reference}`。允许的引用为 `env://ENV_NAME`、固定 workspace/run/step/directory 占位符或经校验的 `{workspaceManagedConfig:relative/path}`；明文 secret、credential 和任意字符串在进入 owner 状态前即被拒绝。引用值只由 `blocks/mcp` 在执行边界解析。
-- Server 与 Capability 通过单个 `MCPRegistryRepository.Load/Commit(expectedRevision)` 聚合合同持久化。一次 server update、allowlist reconciliation、Capability create/update 或 defaults ensure 要么整体提交，要么零提交；memory/file backend 均执行相同 CAS 语义。
-- `ReadRegistrySnapshotCommand` 返回同一 revision 的完整 bounded Server/Capability catalog，供 `blocks/mcp` 编译 execution catalog；`ReadSelectionSnapshotCommand` 在同一 revision 内校验选中的 enabled Capability 必须属于选中的 enabled Server 且仍位于对应 allowlist，供 fresh activation 使用。
-- Server/Capability list 使用 `cursorAfterID + limit`，owner 对 cursor/query 字节数、枚举值和 limit 执行上限校验。Application 跨页读取必须保持 `RegistryRevision` 不变并检查 cursor 前进；revision 漂移或不前进均 fail-closed。
-- Capability create/update command 只携带字段化配置意图。owner 签发并维护 `Source`、`SourceRef` 和单调 `Revision`；update 不允许改变已存在 Capability 的 ServerID、kind 或 name。
-- `Enabled` 是唯一可用性权威，不存在独立 `draft/active/deprecated Status`。Capability 只有在 Server enabled、Capability enabled 且 Server allowlist 含其精确 binding 时才可进入选择快照；非法或陈旧 binding 不可调用。
-- Server allowlist 更新会为新增 binding 创建中立的 `server_allowlist` metadata，保留已有 binding 的用户 metadata/禁用状态，并禁用已删除或因 Server 禁用而失效的 Capability；不会把用户禁用项重新启用。
-- `kernel/system` 发送 owner-local `EnsureDefaultsCommand`。Registry 在同一聚合事务内补齐缺失默认值，完整复用普通规范化/校验路径；内置 ID 或 binding 已存在时保持当前对象，不以启动 ensure 覆盖用户配置。
-
-## 交互合同完整性
-
-| 交互组件 | 方向 | 具体合同 | 当前结论 |
+| 交互方 | 方向 | typed EventHub 合同 | 调用/授权语义 |
 | --- | --- | --- | --- |
-| `application/workorchd` | Application → Registry | concrete Server/Capability CRUD、paged list、`ReadSelectionSnapshotCommand/Result` | 完整；管理读取检测跨页 revision，activation 使用单次一致选择快照 |
-| `blocks/mcp` | MCP execution → Registry | `GetServerCommand/Result`、`ReadRegistrySnapshotCommand/Result` | 完整；只取得 detached catalog，不取得 repository，secret 引用在执行边界解析 |
-| `kernel/system` | System → Registry | `EnsureDefaultsCommand` / `EnsureDefaultsResult` | 完整；原子、幂等且不覆盖已有资源 |
-| `kernel/orchestrator` | 无直接 Registry I/O | 只消费 sealed activation 与 MCP execution owner facts | 完整 |
+| `application/workorchd` | Application → Registry | Server/Capability create/get/list/update、`ReadSelectionSnapshotCommand/Result` | intended caller；当前无 exact source authorization |
+| `blocks/mcp` | MCP execution → Registry | `GetServerCommand/Result`、`ReadRegistrySnapshotCommand/Result` | intended caller；当前无 exact source authorization |
+| `kernel/system` | System → Registry | `EnsureDefaultsCommand/Result` | 仅接受 exact source `kernel/system` |
+| repository backend | Registry → repository | `Load`、`Commit(expectedRevision, snapshot)` | owner-private aggregate CAS |
 
-## 相关约束
+[`pkg/events`](pkg/events) 为 11 个 topic 定义 11 组 concrete command/result。Server 环境只保存受校验的 reference，
+不保存明文 credential。selection snapshot 在一个 revision 内验证 enabled Server、Capability、binding 与 allowlist 关系。
 
-- 本 block 只依赖一个 MCP Registry 聚合 repository；不得重新拆成独立 Server/Capability 写事务或向调用方暴露 repository/service。
-- Registry 上限为 256 个 Server、4096 个 Capability；单页默认 100、最大 200，selection 最多 64 个 Server/256 个 Capability。ID、查询、schema、字符串列表和 environment reference 均有 owner 上限。
-- `effectScope`、`idempotencyClass` 和 `direct | auxiliary | not_declared` validation proof applicability 必须是合法枚举；空值规范化为显式 `unknown`/`not_declared`，非法值不允许静默降级。Registry 不从名称、category、risk 或描述推断这些权威元数据。
-- `ready | prerequisite_required | unavailable` 仍由 `blocks/mcp` 基于同一次 detached snapshot 与 sealed input 编译；Registry 不执行 probe、不生成 input binding、不选择 Runtime action。
-- file backend 只读取一个 current Registry aggregate 文件；旧 Server/Capability 分文件、未知/退役字段和明文
-  environment value直接失败，不导入、不补 provenance、不改写。
-- 默认资源是可编辑的首次启动种子。当前阶段不提供强制刷新或数据升级；需要新默认值时清理数据后重新初始化。
+## 不变量与非职责
 
-## 测试状态
+- 所有 mutation 经过单个 `RegistrySnapshot` CAS；提交失败必须零部分写入，禁止拆成 Server/Capability 两套正式事务。
+- 所有 handler 都要求同步 `Result`；EventHub `Post` 不执行 query 或 mutation。
+- Server/Capability list、selection、字符串、schema、environment reference 和聚合数量均受 owner 上限约束。
+- update 保持 immutable identity；Server allowlist reconciliation 保留用户 metadata/disabled 状态并禁用失效 binding。
+- defaults 只补齐缺失 ID，不覆盖已有资源；错误 System source 在 owner mutation 前拒绝。
+- Registry 不推断 effect/risk/readiness，不选择 Runtime action；transport 与 reference resolution 归 `blocks/mcp`。
 
-- [x] memory/file 聚合 CAS、深拷贝、file reload、旧文件/未知字段拒绝及 revision conflict。
-- [x] create/update/defaults 的原子提交；注入 Commit 失败后无部分 Server/Capability，重试可收敛。
-- [x] plaintext environment value、非法/重复 reference、执行期缺失 env ref 均 fail-closed；EventHub DTO 与执行期解析有回归。
-- [x] `Post` 不能修改 Registry；各 topic 使用 concrete result，一致完整/选择快照返回同一 revision。
-- [x] Capability binding、immutable identity、Server/allowlist/enabled 关系、metadata 枚举、provenance/revision 与 stale reconciliation。
-- [x] cursor/limit/query 上限、分页前进与 Application 跨页 revision 检查。
-- [x] defaults 在 memory/file backend 原子幂等，保留内置 ID 上的用户 Server/Capability 配置。
-- [x] Registry/MCP execution/Application/Orchestrator repository 与 transport 边界由静态合同扫描保护。
+## 能力验收
 
-当前没有与本次评审合同对应的已知可执行缺口。
+| 维度 | 可执行证据 | 覆盖结论 |
+| --- | --- | --- |
+| normal create/get/list/update/snapshot/selection | [`module_test.go`](module_test.go)、[`biz/mcp_service_test.go`](biz/mcp_service_test.go) | 覆盖核心路径 |
+| invalid bounds、identity、relationship、reference/provenance | `TestServiceListsArePaginatedAndRejectInvalidBounds`、`TestServiceRejectsInvalidLookupAndUpdateCapabilityIDs`、`TestServiceSelectionSnapshotFailsClosedOnServerRelationship`、[`pkg/events/messages_test.go`](pkg/events/messages_test.go) | 覆盖 canonical/UTF-8/byte-bound lookup identity 与核心关系负面路径 |
+| atomic failure / no partial write | `TestServiceCommitFailureLeavesNoPartialAggregate` | 覆盖通用 commit failure |
+| defaults / idempotency | [`biz/defaults_test.go`](biz/defaults_test.go) | memory/file 覆盖 |
+| System exact source | `TestMCPRegistryEnsureDefaultsRequiresExactSystemSource` | 覆盖 |
+| Post effect guard | `TestModulePostCannotMutateRegistry` | 覆盖 |
+| aggregate CAS / memory/file persistence | `TestMCPRegistryRepositoryContract_Memory`、`TestMCPRegistryRepositoryContract_File` in [`internal/pkg/repository/repository_contract_test.go`](../../../pkg/repository/repository_contract_test.go) | 覆盖 repository fence |
+| duplicate / CAS conflict | `TestMCPRegistryRepositoryContract_Memory`、`TestMCPRegistryRepositoryContract_File` | 覆盖 repository expected-revision conflict；service CAS loop 的 conflict-then-success 与 conflict exhaustion 尚无注入验收 |
+| stale / freshness | `TestServiceServerReconciliationPreservesEditsAndDisablesStaleBindings` | 这里的 stale 只指失效 binding reconciliation；公开 command 没有 caller-supplied expected revision 或独立 stale/freshness outcome，因此该语义当前未定义 |
+| restart/recovery | file aggregate reload 由 repository contract 覆盖 | owner restart 后一致 snapshot 尚无独立 EventHub 验收 |
+| lifecycle | `TestModuleIdentityConfigureStartStopContract` | 覆盖基本 Start/Stop；尚无 post-Stop delivery 断言 |
+| caller authorization | 仅 defaults 有 exact System gate | Application/MCP caller source 未授权化 |
+| provider / remote transport | 不适用：归 `blocks/mcp` | 不适用 |

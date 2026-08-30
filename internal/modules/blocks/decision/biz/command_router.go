@@ -52,6 +52,10 @@ func (m *Biz) handleCommand(ev magicevent.Event, result magicevent.Result) {
 		setDecisionMagicResult(result, struct{}{}, common.ErrInvalidArgument)
 		return
 	}
+	if ev.ID() == decisionevents.TopicDecisionCommandEnsureResolved && !decisionResolutionIngressSourceAllowed(ev.Source()) {
+		setDecisionMagicResult(result, decisionevents.EnsureResolvedResult{}, common.ErrInvalidArgument)
+		return
+	}
 	data := ev.Data()
 	ctx, err := m.bindDecisionCommandScope(ev.Context(), data)
 	if err != nil {

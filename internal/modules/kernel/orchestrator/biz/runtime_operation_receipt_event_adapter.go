@@ -4,6 +4,7 @@ package orchestrator
 
 import (
 	"context"
+	"strings"
 
 	cd "github.com/muidea/magicCommon/def"
 	magicevent "github.com/muidea/magicCommon/event"
@@ -21,7 +22,7 @@ func runtimeOperationMagicFailure(err error) *cd.Error {
 }
 
 func (m *Biz) handleRuntimeOperationReceipt(event magicevent.Event, result magicevent.Result) {
-	if m == nil || result == nil {
+	if m == nil || event == nil || result == nil {
 		if result != nil {
 			result.Set(nil, runtimeOperationMagicFailure(common.ErrInvalidArgument))
 		}
@@ -47,7 +48,7 @@ func (m *Biz) handleRuntimeOperationReceipt(event magicevent.Event, result magic
 		var found bool
 		err := m.withOrchestratorWorkspaceResourceRead(event.Context(), command.WorkspaceID, func(guarded context.Context) error {
 			var queryErr error
-			receipt, found, queryErr = m.runtimeController.QueryOperationReceipt(guarded, command.WorkspaceID, command.RunID, command.DispatchID, command.OperationID, command.ExecutionKey, command.Fence, command.GovernanceGrant)
+			receipt, found, queryErr = m.runtimeController.QueryOperationReceipt(guarded, command.WorkspaceID, command.RunID, command.DispatchID, command.OperationID, command.ExecutionKey, command.Fence, event.Source(), command.GovernanceGrant)
 			return queryErr
 		})
 		if err != nil {
@@ -66,8 +67,25 @@ func (m *Biz) handleRuntimeOperationReceipt(event magicevent.Event, result magic
 			result.Set(nil, runtimeOperationMagicFailure(common.ErrInvalidArgument))
 			return
 		}
+		if event.Source() == "" || event.Source() != strings.TrimSpace(event.Source()) {
+			result.Set(nil, runtimeOperationMagicFailure(common.ErrInvalidArgument))
+			return
+		}
+		// The first read gate hides an already deleted Workspace. It is released
+		// before the canonical Runtime dispatcher acquires the same mutation
+		// fence: a concurrent deletion either waits for the receipt CAS or wins
+		// the write fence and makes the following submission fail closed.
+		err := m.withOrchestratorWorkspaceResourceRead(event.Context(), command.WorkspaceID, func(context.Context) error { return nil })
+		if err != nil {
+			result.Set(nil, runtimeOperationMagicFailure(err))
+			return
+		}
 		committed, err := m.submitRuntimeInternalEvent(event.Context(), runtime.RuntimeInternalEvent{
-			Kind: runtime.RuntimeInternalEventOperationReceiptObserved, Scope: runtime.RuntimeInternalEventScope{WorkspaceID: command.WorkspaceID, RunID: command.RunID}, Transaction: &runtime.RuntimeInternalTransactionPayload{DispatchID: command.DispatchID, Fence: command.Fence, OperationReceipt: &command.Receipt},
+			Kind:  runtime.RuntimeInternalEventOperationReceiptObserved,
+			Scope: runtime.RuntimeInternalEventScope{WorkspaceID: command.WorkspaceID, RunID: command.RunID},
+			Transaction: &runtime.RuntimeInternalTransactionPayload{
+				DispatchID: command.DispatchID, Fence: command.Fence, OperationReceiptOwnerSource: event.Source(), OperationReceipt: &command.Receipt,
+			},
 		})
 		if err != nil {
 			result.Set(nil, runtimeOperationMagicFailure(err))

@@ -50,12 +50,15 @@ func TestLLMModuleIdentityConfigureStartStopContract(t *testing.T) {
 	if module.bizPtr != nil {
 		t.Fatalf("module was not cleared after Stop: %+v", module)
 	}
+	if err := module.Stop(ctx); err != nil {
+		t.Fatalf("second Stop: %v", err)
+	}
 }
 
 func TestLLMModuleStartRequiresEventHub(t *testing.T) {
 	module := New()
-	if err := module.Configure(llmbiz.Dependencies{}); err != nil {
-		t.Fatalf("Configure with empty dependencies: %v", err)
+	if err := module.Configure(llmbiz.Dependencies{}); !errors.Is(err, common.ErrInvalidArgument) {
+		t.Fatalf("Configure with empty dependencies err = %v, want invalid argument", err)
 	}
 	if err := module.Start(); !errors.Is(err, common.ErrInvalidArgument) {
 		t.Fatalf("Start without EventHub err = %v, want invalid argument", err)

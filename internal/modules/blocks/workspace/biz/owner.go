@@ -22,6 +22,8 @@ import (
 
 const ModuleID = modulecommon.ModuleID
 
+const workspaceTemplateDefaultsCommandSource = "kernel/system"
+
 type Dependencies struct {
 	Workspaces              repository.WorkspaceRepository
 	DeletionMaterialCleaner repository.WorkspaceDeletionMaterialCleaner
@@ -104,7 +106,11 @@ func (m *Biz) Start() error {
 }
 
 func (m *Biz) handleSystemDefaultsCommand(ev magicevent.Event, result magicevent.Result) {
-	if _, ok := ev.Data().(workspaceevents.EnsureWorkspaceTemplateDefaultsCommand); !ok || m == nil || m.templates == nil {
+	if ev == nil || ev.Source() != workspaceTemplateDefaultsCommandSource || m == nil || m.templates == nil {
+		setSystemWorkspaceTemplateDefaultsResult(result, common.ErrInvalidArgument)
+		return
+	}
+	if _, ok := ev.Data().(workspaceevents.EnsureWorkspaceTemplateDefaultsCommand); !ok {
 		setSystemWorkspaceTemplateDefaultsResult(result, common.ErrInvalidArgument)
 		return
 	}

@@ -276,7 +276,7 @@ func TestMCPOwnerObservedFailureTargetBindsThroughEventHubAndFileSnapshot(t *tes
 	receiptObserver := magicevent.NewSimpleObserver(orchestratorevents.CommandDestination, hub)
 	receiptObserver.Subscribe(orchestratorevents.TopicOrchestratorQueryRuntimeOperationReceipt, func(event magicevent.Event, result magicevent.Result) {
 		command := event.Data().(orchestratorevents.QueryRuntimeOperationReceiptCommand)
-		receipt, found, queryErr := controller.QueryOperationReceipt(event.Context(), command.WorkspaceID, command.RunID, command.DispatchID, command.OperationID, command.ExecutionKey, command.Fence, command.GovernanceGrant)
+		receipt, found, queryErr := controller.QueryOperationReceipt(event.Context(), command.WorkspaceID, command.RunID, command.DispatchID, command.OperationID, command.ExecutionKey, command.Fence, event.Source(), command.GovernanceGrant)
 		if queryErr != nil {
 			result.Set(nil, runtimeMagicFailure(queryErr))
 			return
@@ -289,7 +289,7 @@ func TestMCPOwnerObservedFailureTargetBindsThroughEventHubAndFileSnapshot(t *tes
 	})
 	receiptObserver.Subscribe(orchestratorevents.TopicOrchestratorCommitRuntimeOperationReceipt, func(event magicevent.Event, result magicevent.Result) {
 		command := event.Data().(orchestratorevents.CommitRuntimeOperationReceiptCommand)
-		next, receipt, commitErr := controller.commitOperationReceipt(event.Context(), command.WorkspaceID, command.RunID, command.DispatchID, command.Fence, command.Receipt)
+		next, receipt, commitErr := controller.commitOperationReceipt(event.Context(), command.WorkspaceID, command.RunID, command.DispatchID, command.Fence, event.Source(), command.Receipt)
 		if commitErr != nil {
 			result.Set(nil, runtimeMagicFailure(commitErr))
 			return
@@ -983,7 +983,7 @@ func assertMCPReceiptEvidenceDriftRejectedAtCommit(t *testing.T, sealed RuntimeA
 			}
 			revision := repository.aggregate.StateRevision
 			receiptCount := len(repository.aggregate.OperationReceipts)
-			if _, _, err := controller.commitOperationReceipt(context.Background(), claimed.Facts.WorkspaceID, claimed.Facts.RunID, claimed.ActiveDispatch.ID, execution.Fence, receipt); err == nil ||
+			if _, _, err := controller.commitOperationReceipt(context.Background(), claimed.Facts.WorkspaceID, claimed.Facts.RunID, claimed.ActiveDispatch.ID, execution.Fence, runtimecontract.RuntimeModuleMCP, receipt); err == nil ||
 				!strings.Contains(err.Error(), test.want) {
 				t.Fatalf("MCP %s commit error = %v", test.name, err)
 			}

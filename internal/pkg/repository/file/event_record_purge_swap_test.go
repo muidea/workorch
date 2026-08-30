@@ -278,7 +278,9 @@ func TestEventRecordPurgeSwapEveryRepositoryIngressRecoversFirst(t *testing.T) {
 	}{
 		{name: "append", run: func(repo *EventRecordRepository, fixture eventRecordPurgeCrashFixture) error {
 			return repo.Append(context.Background(), &eventstreammodel.EventRecord{
-				ID: "event-after-recovery", Topic: "/after/recovery", WorkspaceID: "ws-after-recovery", StreamPosition: 40, Revision: 1,
+				ID: "event-after-recovery", Version: "workorch.event", Topic: "/after/recovery", OccurredAt: "2026-08-26T01:02:05Z",
+				SourceModule: "blocks/test", SubjectType: "test", SubjectID: "after-recovery",
+				WorkspaceID: "ws-after-recovery", StreamPosition: 40, Revision: 1,
 				Payload: mustFileRepositoryPayload(t, map[string]any{"ok": true}),
 			})
 		}},

@@ -107,6 +107,38 @@ func TestRuntimeAdapterNoOpUsesActualRemoteObservation(t *testing.T) {
 	}
 }
 
+func TestRuntimeAdapterFailedCommandClassifiesObservedRemoteEffect(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		command   string
+		changed   bool
+		wantScope runtimecontract.RuntimeEffectScope
+	}{
+		{name: "failed after remote change", command: "fail-after-change", changed: true, wantScope: runtimecontract.RuntimeEffectRemoteDurable},
+		{name: "failed without remote change", command: "fail-without-change", changed: false, wantScope: runtimecontract.RuntimeEffectNone},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			toolsDir := t.TempDir()
+			stateFile := filepath.Join(toolsDir, "remote-state")
+			writeExecutable(t, filepath.Join(toolsDir, "setsid"), "#!/bin/sh\nexec \"$@\"\n")
+			writeExecutable(t, filepath.Join(toolsDir, "ssh"), "#!/bin/sh\nlast=\"\"\nfor arg in \"$@\"; do last=\"$arg\"; done\nif [ \"$last\" = \"observe-state\" ]; then if [ -f \""+stateFile+"\" ]; then echo after; else echo before; fi; exit 0; fi\nif [ \"$last\" = \"fail-after-change\" ]; then touch \""+stateFile+"\"; echo changed-but-failed; exit 2; fi\nif [ \"$last\" = \"fail-without-change\" ]; then echo unchanged-failure >&2; exit 2; fi\nexit 3\n")
+			t.Setenv("PATH", toolsDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+			adapter := configuredPasswordRuntimeAdapter(t, "WORKORCH_TEST_SSH_FAILURE_PASSWORD", "test-password")
+			result, err := adapter.ExecuteOperation(context.Background(), testRuntimeCommandRequest(tc.command))
+			if err == nil {
+				t.Fatal("failed SSH command returned nil error")
+			}
+			if result.Status != "failed" || result.FailureCode != "ssh_command_failed" || result.Changed != tc.changed || result.ObservedScope != tc.wantScope || result.BeforeHash == "" || result.AfterHash == "" || result.OutputHash == "" {
+				t.Fatalf("failed SSH result = %+v, want changed=%t scope=%q", result, tc.changed, tc.wantScope)
+			}
+			if tc.changed == (result.BeforeHash == result.AfterHash) {
+				t.Fatalf("failed SSH observation hashes do not match changed=%t: before=%q after=%q", tc.changed, result.BeforeHash, result.AfterHash)
+			}
+		})
+	}
+}
+
 func TestRuntimeAdapterProbeResolvesOwnerRefsWithoutSSHExecution(t *testing.T) {
 	toolsDir := t.TempDir()
 	marker := filepath.Join(toolsDir, "ssh-called")

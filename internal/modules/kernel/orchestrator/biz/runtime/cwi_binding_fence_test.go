@@ -146,7 +146,7 @@ func TestRuntimeCWIBindingFenceRejectsReceiptAndBlocksOwnerExecution(t *testing.
 		before := *repository.aggregate
 		saves := repository.saves
 
-		_, _, err = controller.commitOperationReceipt(ctx, before.Facts.WorkspaceID, before.Facts.RunID, sealed.ActiveDispatch.ID, execution.Fence, receipt)
+		_, _, err = controller.commitOperationReceipt(ctx, before.Facts.WorkspaceID, before.Facts.RunID, sealed.ActiveDispatch.ID, execution.Fence, runtimecontract.RuntimeModuleFile, receipt)
 		if !errors.Is(err, common.ErrConflict) || !strings.Contains(err.Error(), "operation receipt binding fence") {
 			t.Fatalf("operation receipt stale binding error = %v", err)
 		}

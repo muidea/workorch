@@ -23,6 +23,7 @@ const StepKindCommand = modulecommon.StepKindCommand
 type Biz struct {
 	basebiz.Base
 	runtimeAdapter *RuntimeAdapter
+	started        bool
 }
 
 type Dependencies struct {
@@ -45,11 +46,15 @@ func (m *Biz) Start() error {
 	if m == nil || m.runtimeAdapter == nil || m.EventHub() == nil {
 		return common.ErrInvalidArgument
 	}
+	if m.started {
+		return nil
+	}
 	m.SubscribeFunc(sshevents.TopicAcquireRuntimeCapabilities, m.handleRuntimeCapabilities)
 	m.SubscribeFunc(sshevents.TopicAcquireRuntimeOperationAdmissibility, m.handleRuntimeOperationAdmissibility)
 	m.SubscribeFunc(sshevents.TopicProbeRuntimeOperationFeasibility, m.handleRuntimeOperationFeasibility)
 	m.SubscribeFunc(sshevents.TopicProbeRuntimeSemanticProofFeasibility, m.handleRuntimeSemanticProofFeasibility)
 	m.SubscribeFunc(sshevents.TopicExecuteOperation, m.handleSSHOperation)
+	m.started = true
 	return nil
 }
 
@@ -57,11 +62,14 @@ func (m *Biz) Teardown(context.Context) {
 	if m == nil {
 		return
 	}
-	m.UnsubscribeFunc(sshevents.TopicExecuteOperation)
-	m.UnsubscribeFunc(sshevents.TopicAcquireRuntimeCapabilities)
-	m.UnsubscribeFunc(sshevents.TopicAcquireRuntimeOperationAdmissibility)
-	m.UnsubscribeFunc(sshevents.TopicProbeRuntimeOperationFeasibility)
-	m.UnsubscribeFunc(sshevents.TopicProbeRuntimeSemanticProofFeasibility)
+	if m.started {
+		m.UnsubscribeFunc(sshevents.TopicExecuteOperation)
+		m.UnsubscribeFunc(sshevents.TopicAcquireRuntimeCapabilities)
+		m.UnsubscribeFunc(sshevents.TopicAcquireRuntimeOperationAdmissibility)
+		m.UnsubscribeFunc(sshevents.TopicProbeRuntimeOperationFeasibility)
+		m.UnsubscribeFunc(sshevents.TopicProbeRuntimeSemanticProofFeasibility)
+		m.started = false
+	}
 	if m.runtimeAdapter != nil {
 		m.runtimeAdapter.Close()
 		m.runtimeAdapter = nil
@@ -69,15 +77,11 @@ func (m *Biz) Teardown(context.Context) {
 }
 
 func (m *Biz) handleSSHOperation(event magicevent.Event, result magicevent.Result) {
-	if result == nil {
+	command, ok := sshRuntimeIngressCommand[sshevents.ExecuteOperationCommand](event, result)
+	if !ok {
 		return
 	}
-	if event == nil || event.Source() != runtimecontract.RuntimeModuleOrchestrator {
-		setCapabilityError(result, fmt.Errorf("runtime SSH operation requires Orchestrator source"))
-		return
-	}
-	command, ok := event.Data().(sshevents.ExecuteOperationCommand)
-	if !ok || m.runtimeAdapter == nil {
+	if m == nil || m.runtimeAdapter == nil {
 		setCapabilityError(result, common.ErrInvalidArgument)
 		return
 	}
@@ -229,9 +233,8 @@ func attachSSHOutputDiagnostic(receipt *runtimecontract.RuntimeOperationReceipt,
 }
 
 func (m *Biz) handleRuntimeCapabilities(event magicevent.Event, result magicevent.Result) {
-	command, ok := event.Data().(sshevents.AcquireRuntimeCapabilitiesCommand)
+	command, ok := sshRuntimeIngressCommand[sshevents.AcquireRuntimeCapabilitiesCommand](event, result)
 	if !ok {
-		setCapabilityError(result, common.ErrInvalidArgument)
 		return
 	}
 	response, err := sshevents.ResolveRuntimeCapabilities(command, ModuleID, modulecommon.RuntimeCapabilityKinds()...)
@@ -243,9 +246,8 @@ func (m *Biz) handleRuntimeCapabilities(event magicevent.Event, result magiceven
 }
 
 func (m *Biz) handleRuntimeOperationAdmissibility(event magicevent.Event, result magicevent.Result) {
-	command, ok := event.Data().(sshevents.AcquireRuntimeOperationAdmissibilityCommand)
+	command, ok := sshRuntimeIngressCommand[sshevents.AcquireRuntimeOperationAdmissibilityCommand](event, result)
 	if !ok {
-		setCapabilityError(result, common.ErrInvalidArgument)
 		return
 	}
 	if err := sshevents.ValidateRuntimeOperationAdmissibilityCommand(command, ModuleID); err != nil {
@@ -299,8 +301,11 @@ func setRuntimeOperationFeasibilityResult(result magicevent.Result, command sshe
 }
 
 func (m *Biz) handleRuntimeOperationFeasibility(event magicevent.Event, result magicevent.Result) {
-	command, ok := event.Data().(sshevents.ProbeRuntimeOperationFeasibilityCommand)
-	if !ok || m.runtimeAdapter == nil {
+	command, ok := sshRuntimeIngressCommand[sshevents.ProbeRuntimeOperationFeasibilityCommand](event, result)
+	if !ok {
+		return
+	}
+	if m == nil || m.runtimeAdapter == nil {
 		setCapabilityError(result, common.ErrInvalidArgument)
 		return
 	}
@@ -344,8 +349,11 @@ func (m *Biz) handleRuntimeOperationFeasibility(event magicevent.Event, result m
 }
 
 func (m *Biz) handleRuntimeSemanticProofFeasibility(event magicevent.Event, result magicevent.Result) {
-	command, ok := event.Data().(sshevents.ProbeRuntimeSemanticProofFeasibilityCommand)
-	if !ok || m.runtimeAdapter == nil {
+	command, ok := sshRuntimeIngressCommand[sshevents.ProbeRuntimeSemanticProofFeasibilityCommand](event, result)
+	if !ok {
+		return
+	}
+	if m == nil || m.runtimeAdapter == nil {
 		setCapabilityError(result, common.ErrInvalidArgument)
 		return
 	}
@@ -394,6 +402,35 @@ func sshAdmissibilityStale(observation *runtimecontract.RuntimePrerequisiteObser
 		}
 	}
 	return nil
+}
+
+// sshRuntimeIngressCommand is the owner-local strong-call gate for every
+// Runtime topic subscribed by SSH. Post is rejected before DTO inspection;
+// only the exact Orchestrator source may reach remote-session, policy, receipt,
+// or command execution paths.
+func sshRuntimeIngressCommand[T any](event magicevent.Event, result magicevent.Result) (T, bool) {
+	var zero T
+	if result == nil {
+		return zero, false
+	}
+	if event == nil || event.Source() != runtimecontract.RuntimeModuleOrchestrator {
+		setSSHRuntimeIngressInvalid(result, "runtime SSH ingress requires exact Orchestrator source")
+		return zero, false
+	}
+	command, ok := event.Data().(T)
+	if !ok {
+		setSSHRuntimeIngressInvalid(result, "runtime SSH ingress payload has an invalid concrete type")
+		return zero, false
+	}
+	return command, true
+}
+
+func setSSHRuntimeIngressInvalid(result magicevent.Result, message string) {
+	if result == nil {
+		return
+	}
+	err := fmt.Errorf("%w: %s", common.ErrInvalidArgument, message)
+	result.Set(nil, &cd.Error{Code: cd.IllegalParam, Message: err.Error(), Cause: err})
 }
 
 func setCapabilityError(result magicevent.Result, err error) {

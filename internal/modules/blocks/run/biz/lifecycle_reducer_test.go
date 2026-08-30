@@ -28,7 +28,7 @@ func newLifecycleTestBiz(t *testing.T) (*Biz, *memory.RunRepository, magicevent.
 	runs := memory.NewRunRepository()
 	hub := magicevent.NewHub(32)
 	biz := New()
-	if err := biz.Configure(Dependencies{Runs: runs, EventHub: hub}); err != nil {
+	if err := biz.Configure(runBizTestDependencies(runs, nil, nil, hub, nil)); err != nil {
 		t.Fatalf("configure: %v", err)
 	}
 	if err := biz.Start(); err != nil {
@@ -473,7 +473,7 @@ func TestRuntimeAggregatePersistenceRebasesUnrelatedRunModelWrite(t *testing.T) 
 	}
 	runs := &runtimeStateCASRaceRepository{RunRepository: base, mutateModelOnly: true}
 	biz := New()
-	if err := biz.Configure(Dependencies{Runs: runs, EventHub: magicevent.NewHub(8)}); err != nil {
+	if err := biz.Configure(runBizTestDependencies(runs, nil, nil, magicevent.NewHub(8), nil)); err != nil {
 		t.Fatal(err)
 	}
 	defer func() { _ = biz.Stop(ctx) }()
@@ -518,7 +518,7 @@ func TestRuntimeAggregatePersistenceRejectsAggregateRevisionRace(t *testing.T) {
 	}
 	runs := &runtimeStateCASRaceRepository{RunRepository: base, mutateAggregate: true}
 	biz := New()
-	if err := biz.Configure(Dependencies{Runs: runs, EventHub: magicevent.NewHub(8)}); err != nil {
+	if err := biz.Configure(runBizTestDependencies(runs, nil, nil, magicevent.NewHub(8), nil)); err != nil {
 		t.Fatal(err)
 	}
 	defer func() { _ = biz.Stop(ctx) }()

@@ -2,6 +2,7 @@ package memory
 
 import (
 	"context"
+	"fmt"
 	"math"
 	"sort"
 	"strings"
@@ -23,6 +24,7 @@ import (
 	"github.com/muidea/workorch/internal/pkg/repository"
 	deletioncontract "github.com/muidea/workorch/internal/pkg/workorchdeletioncontract"
 	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
+	"github.com/muidea/workorch/internal/pkg/workorcheventrecordcontract"
 	"github.com/muidea/workorch/internal/pkg/workorchquerycontract"
 	"github.com/muidea/workorch/internal/pkg/workorchresultcontract"
 )
@@ -1510,6 +1512,10 @@ func (r *EventRecordRepository) Append(ctx context.Context, item *eventstream.Ev
 	if r == nil || item == nil || item.ID == "" {
 		return common.ErrInvalidArgument
 	}
+	canonicalOccurredAt, err := workorcheventrecordcontract.CanonicalOccurredAt(item.OccurredAt)
+	if err != nil || canonicalOccurredAt != item.OccurredAt {
+		return fmt.Errorf("%w: event record occurredAt must use canonical UTC RFC3339", common.ErrInvalidArgument)
+	}
 	appendRecord := func(context.Context) error {
 		r.mu.Lock()
 		defer r.mu.Unlock()
@@ -1572,12 +1578,20 @@ func (r *EventRecordRepository) Get(ctx context.Context, id common.EventRecordID
 	if len(visible) != 1 {
 		return nil, common.ErrConflict
 	}
+	if err := validatePersistedEventOccurredAt(visible[0]); err != nil {
+		return nil, err
+	}
 	return visible[0], nil
 }
 
 func (r *EventRecordRepository) List(ctx context.Context, query workorchquerycontract.EventRecordQuery) ([]*eventstream.EventRecord, error) {
 	if r == nil {
 		return nil, common.ErrInvalidArgument
+	}
+	var err error
+	query, err = query.Canonicalized()
+	if err != nil {
+		return nil, err
 	}
 	if query.WorkspaceID == "" {
 		query.WorkspaceID = common.RuntimeWorkspaceIDFromContext(ctx)
@@ -1595,8 +1609,11 @@ func (r *EventRecordRepository) List(ctx context.Context, query workorchquerycon
 	unbounded := query
 	unbounded.CursorAfterID = ""
 	unbounded.Limit = 0
-	items := listEventRecords(r.items, unbounded)
+	items, err := listEventRecords(r.items, unbounded)
 	r.mu.RUnlock()
+	if err != nil {
+		return nil, err
+	}
 	visible := items[:0]
 	visibility := map[common.WorkspaceID]bool{}
 	for _, item := range items {
@@ -4249,11 +4266,15 @@ func sortedArtifactList(ret []*resultmodel.Artifact) []*resultmodel.Artifact {
 	return ret
 }
 
-func listEventRecords(items map[string]*eventstream.EventRecord, query workorchquerycontract.EventRecordQuery) []*eventstream.EventRecord {
+func listEventRecords(items map[string]*eventstream.EventRecord, query workorchquerycontract.EventRecordQuery) ([]*eventstream.EventRecord, error) {
 	ret := make([]*eventstream.EventRecord, 0)
 	cursorMatched := query.CursorAfterID == ""
 	for _, item := range items {
-		if !eventRecordMatches(item, query) {
+		matches, err := eventRecordMatches(item, query)
+		if err != nil {
+			return nil, err
+		}
+		if !matches {
 			continue
 		}
 		ret = append(ret, cloneEventRecord(item))
@@ -4280,9 +4301,9 @@ func listEventRecords(items map[string]*eventstream.EventRecord, query workorchq
 		}
 	}
 	if len(ret) == 0 {
-		return nil
+		return nil, nil
 	}
-	return ret
+	return ret, nil
 }
 
 func stripEventRecordPayload(item *eventstream.EventRecord) {
@@ -4295,37 +4316,64 @@ func stripEventRecordPayload(item *eventstream.EventRecord) {
 	item.Payload = workorcheventpayload.Payload{}
 }
 
-func eventRecordMatches(item *eventstream.EventRecord, query workorchquerycontract.EventRecordQuery) bool {
+func eventRecordMatches(item *eventstream.EventRecord, query workorchquerycontract.EventRecordQuery) (bool, error) {
 	if item == nil {
-		return false
+		return false, nil
 	}
+	if err := validatePersistedEventOccurredAt(item); err != nil {
+		return false, err
+	}
+	canonicalOccurredAt := item.OccurredAt
 	if query.WorkspaceID != "" && item.WorkspaceID != query.WorkspaceID {
-		return false
+		return false, nil
 	}
 	if query.RunID != "" && item.RunID != query.RunID {
-		return false
+		return false, nil
 	}
 	if query.Topic != "" && item.Topic != query.Topic {
-		return false
+		return false, nil
 	}
 	for _, topic := range query.ExcludeTopics {
 		if strings.TrimSpace(topic) != "" && item.Topic == strings.TrimSpace(topic) {
-			return false
+			return false, nil
 		}
 	}
 	if query.SubjectType != "" && item.SubjectType != query.SubjectType {
-		return false
+		return false, nil
 	}
 	if query.SubjectID != "" && item.SubjectID != query.SubjectID {
-		return false
+		return false, nil
 	}
-	if query.OccurredAfter != "" && item.OccurredAt <= query.OccurredAfter {
-		return false
+	if query.OccurredAfter != "" || query.OccurredBefore != "" {
+		occurredAt, err := time.Parse(time.RFC3339Nano, canonicalOccurredAt)
+		if err != nil {
+			return false, fmt.Errorf("%w: persisted event record %q has invalid occurredAt", common.ErrConflict, item.ID)
+		}
+		if query.OccurredAfter != "" {
+			after, err := time.Parse(time.RFC3339Nano, query.OccurredAfter)
+			if err != nil || !occurredAt.After(after) {
+				return false, nil
+			}
+		}
+		if query.OccurredBefore != "" {
+			before, err := time.Parse(time.RFC3339Nano, query.OccurredBefore)
+			if err != nil || !occurredAt.Before(before) {
+				return false, nil
+			}
+		}
 	}
-	if query.OccurredBefore != "" && item.OccurredAt >= query.OccurredBefore {
-		return false
+	return true, nil
+}
+
+func validatePersistedEventOccurredAt(item *eventstream.EventRecord) error {
+	if item == nil {
+		return fmt.Errorf("%w: persisted event record is nil", common.ErrConflict)
 	}
-	return true
+	canonicalOccurredAt, err := workorcheventrecordcontract.CanonicalOccurredAt(item.OccurredAt)
+	if err != nil || canonicalOccurredAt != item.OccurredAt {
+		return fmt.Errorf("%w: persisted event record %q has invalid occurredAt", common.ErrConflict, item.ID)
+	}
+	return nil
 }
 
 func memoryItemMatches(item *memorymodel.MemoryItem, query workorchquerycontract.MemorySearchQuery) bool {

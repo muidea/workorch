@@ -60,11 +60,11 @@ func (c *RuntimeController) recordDeliveryAcknowledgement(ctx context.Context, a
 	return c.driveDelivery.recordDeliveryAcknowledgement(ctx, acknowledgement)
 }
 
-func (c *RuntimeController) commitOperationReceipt(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, dispatchID string, fence uint64, receipt runtimecontract.RuntimeOperationReceipt) (RuntimeAggregate, runtimecontract.RuntimeOperationReceipt, error) {
+func (c *RuntimeController) commitOperationReceipt(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, dispatchID string, fence uint64, ownerModuleID string, receipt runtimecontract.RuntimeOperationReceipt) (RuntimeAggregate, runtimecontract.RuntimeOperationReceipt, error) {
 	if c == nil || c.candidateDispatch == nil {
 		return RuntimeAggregate{}, runtimecontract.RuntimeOperationReceipt{}, common.ErrInvalidArgument
 	}
-	return c.candidateDispatch.commitOperationReceipt(ctx, workspaceID, runID, dispatchID, fence, receipt)
+	return c.candidateDispatch.commitOperationReceipt(ctx, workspaceID, runID, dispatchID, fence, ownerModuleID, receipt)
 }
 
 func (c *RuntimeController) reconcileAuthorityBeforeCandidate(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID) (RuntimeAggregate, error) {

@@ -69,8 +69,8 @@ func TestFileModuleIdentityConfigureStartStopContract(t *testing.T) {
 
 func TestFileModuleStartRequiresEventHub(t *testing.T) {
 	module := New()
-	if err := module.Configure(filebiz.Dependencies{}); err != nil {
-		t.Fatalf("Configure with empty dependencies: %v", err)
+	if err := module.Configure(filebiz.Dependencies{}); !errors.Is(err, common.ErrInvalidArgument) {
+		t.Fatalf("Configure with empty dependencies err = %v, want invalid argument", err)
 	}
 	if err := module.Start(); !errors.Is(err, common.ErrInvalidArgument) {
 		t.Fatalf("Start without EventHub err = %v, want invalid argument", err)

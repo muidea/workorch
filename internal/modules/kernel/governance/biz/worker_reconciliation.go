@@ -153,8 +153,14 @@ func (s *Service) processPendingTicket(ctx context.Context, ticketID common.Tick
 	if run == nil {
 		return common.ErrNotFound
 	}
-	goal, dod := s.loadGoalAndDoD(ctx, run.GoalID, run.DoDID)
-	memoryItems := s.loadMemoryItems(ctx, ticket.WorkspaceID)
+	goal, dod, err := s.loadGoalAndDoD(ctx, run.GoalID, run.DoDID)
+	if err != nil {
+		return err
+	}
+	memoryItems, err := s.loadMemoryItems(ctx, ticket.WorkspaceID)
+	if err != nil {
+		return err
+	}
 	eval := s.evaluateTicket(ctx, ticket, run, goal, dod, memoryItems)
 	if eval.infrastructureErr != nil {
 		return eval.infrastructureErr
@@ -271,7 +277,10 @@ func (s *Service) processPendingApproval(ctx context.Context, runID common.RunID
 	if run == nil {
 		return common.ErrNotFound
 	}
-	goal, dod := s.loadGoalAndDoD(ctx, run.GoalID, run.DoDID)
+	goal, dod, err := s.loadGoalAndDoD(ctx, run.GoalID, run.DoDID)
+	if err != nil {
+		return err
+	}
 	eval := s.evaluateApproval(ctx, approval, goal, dod, cfg.Governance)
 	if eval.infrastructureErr != nil {
 		return eval.infrastructureErr

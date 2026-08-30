@@ -81,6 +81,70 @@ func TestSSHOwnerRequiresExactApprovalBeforeNetworkAndCommitsObservedChange(t *t
 	}
 }
 
+func TestSSHOwnerCommitsFailedCommandWithObservedEffectClassification(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		command   string
+		changed   bool
+		wantScope runtimecontract.RuntimeEffectScope
+		resources int
+	}{
+		{name: "remote changed before command failure", command: "fail-after-change", changed: true, wantScope: runtimecontract.RuntimeEffectRemoteDurable, resources: 1},
+		{name: "no remote change before command failure", command: "fail-without-change", changed: false, wantScope: runtimecontract.RuntimeEffectNone},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx := context.Background()
+			hub := magicevent.NewHub(16)
+			t.Cleanup(func() { hub.Terminate(ctx) })
+			toolsDir := t.TempDir()
+			stateFile := filepath.Join(toolsDir, "remote-state")
+			writeExecutable(t, filepath.Join(toolsDir, "setsid"), "#!/bin/sh\nexec \"$@\"\n")
+			writeExecutable(t, filepath.Join(toolsDir, "ssh"), "#!/bin/sh\nlast=\"\"\nfor arg in \"$@\"; do last=\"$arg\"; done\nif [ \"$last\" = \"observe-state\" ]; then if [ -f \""+stateFile+"\" ]; then echo after; else echo before; fi; exit 0; fi\nif [ \"$last\" = \"fail-after-change\" ]; then touch \""+stateFile+"\"; echo changed-but-failed; exit 2; fi\nif [ \"$last\" = \"fail-without-change\" ]; then echo unchanged-failure >&2; exit 2; fi\nexit 3\n")
+			t.Setenv("PATH", toolsDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+			adapter := configuredPasswordRuntimeAdapter(t, "WORKORCH_TEST_SSH_OWNER_FAILURE_PASSWORD", "test-password")
+			owner := &Biz{Base: basebiz.New(ModuleID, hub, nil), runtimeAdapter: adapter}
+			if err := owner.Start(); err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() { owner.Teardown(ctx) })
+			installSSHReceiptObserver(t, hub)
+
+			operation, data, sealed := testSSHRuntimeOperation(t, adapter, tc.command)
+			first := testSSHExecuteCommand(t, operation, sealed, nil, 1)
+			firstResult := hub.Send(magicevent.NewEventWithContext(sshevents.TopicExecuteOperation, runtimecontract.RuntimeModuleOrchestrator, ModuleID, magicevent.NewHeader(), ctx, first))
+			firstData, err := firstResult.Get()
+			if err != nil {
+				t.Fatal(err)
+			}
+			if receipt := firstData.(sshevents.ExecuteOperationResult).Receipt; receipt.Outcome != runtimecontract.RuntimeOperationOutcomeGovernanceRequired {
+				t.Fatalf("pre-grant receipt = %+v", receipt)
+			}
+
+			requirement := sshApprovalRequirement(data)
+			grant := runtimecontract.RuntimeOperationGovernanceGrant{
+				ResolutionID: "resolution-failure", ResolutionHash: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", ApprovalID: "approval-failure", ExecutionKey: first.Execution.ExecutionKey,
+				GovernanceFence: 1, ResumeFence: 2, DependencyKind: string(runtimecontract.GovernanceApproval),
+				SubjectRef: requirement.SubjectRef, RequestedAction: requirement.RequestedAction, RiskLevel: requirement.RiskLevel,
+				AuthorizationHash: runtimecontract.StableRuntimeAuthorizationContextHash(requirement.AuthorizationContext), GovernanceReceiptHash: "governance-receipt-failure",
+			}
+			second := testSSHExecuteCommand(t, operation, sealed, &grant, 2)
+			secondResult := hub.Send(magicevent.NewEventWithContext(sshevents.TopicExecuteOperation, runtimecontract.RuntimeModuleOrchestrator, ModuleID, magicevent.NewHeader(), ctx, second))
+			secondData, err := secondResult.Get()
+			if err != nil {
+				t.Fatal(err)
+			}
+			receipt := secondData.(sshevents.ExecuteOperationResult).Receipt
+			if receipt.Outcome != runtimecontract.RuntimeOperationOutcomeRejected || receipt.Changed != tc.changed || receipt.ObservedEffectScope != tc.wantScope || len(receipt.ResourceChanges) != tc.resources || receipt.Feedback == nil || receipt.Feedback.OriginalDiagnostic == nil || receipt.Feedback.OriginalDiagnostic.OriginalCode != "ssh_command_failed" {
+				t.Fatalf("failed SSH owner receipt = %+v, want changed=%t scope=%q resources=%d", receipt, tc.changed, tc.wantScope, tc.resources)
+			}
+			if err := receipt.Validate(); err != nil {
+				t.Fatalf("failed SSH owner receipt validation: %v", err)
+			}
+		})
+	}
+}
+
 func TestSSHOwnerFailsClosedForPostWrongSourceSealedDriftAndGrantDrift(t *testing.T) {
 	ctx := context.Background()
 	hub := magicevent.NewHub(16)

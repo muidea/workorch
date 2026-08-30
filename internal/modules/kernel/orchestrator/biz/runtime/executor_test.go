@@ -15,6 +15,14 @@ type failIfExecutedOperationExecutor struct {
 	called bool
 }
 
+func runtimeTestOperationOwnerSource(kind string) (string, error) {
+	descriptor, found := runtimecontract.RuntimeOperationDescriptorForKind(kind)
+	if !found || descriptor.OwnerModuleID == "" {
+		return "", fmt.Errorf("operation kind %q has no receipt owner", kind)
+	}
+	return descriptor.OwnerModuleID, nil
+}
+
 func TestRuntimeOperationReceiptJudgmentPreservesRejectedOwnerDiagnostic(t *testing.T) {
 	operation := runtimecontract.RuntimeOperation{ID: "patch-2", Kind: runtimecontract.RuntimeBlockKindPatchApply, TargetRefs: []string{"main.go"}}
 	execution := runtimecontract.RuntimeOperationExecutionRecord{OperationID: operation.ID, ExpectedEffectScope: runtimecontract.RuntimeEffectWorkspaceDurable}
@@ -103,7 +111,11 @@ func (e *noOpOperationExecutor) ExecuteRuntimeOperation(ctx context.Context, req
 		Outcome: runtimecontract.RuntimeOperationOutcomeNoOp, ObservedEffectScope: runtimecontract.RuntimeEffectNone,
 		Evidence: runtimecontract.RuntimeOperationEvidence{Summary: "content already matched"},
 	}
-	_, committed, err := e.owner.commitOperationReceipt(ctx, request.WorkspaceID, request.RunID, request.DispatchID, request.Execution.Fence, receipt)
+	ownerSource, err := runtimeTestOperationOwnerSource(request.Operation.Kind)
+	if err != nil {
+		return RuntimeOperationExecutionResult{}, err
+	}
+	_, committed, err := e.owner.commitOperationReceipt(ctx, request.WorkspaceID, request.RunID, request.DispatchID, request.Execution.Fence, ownerSource, receipt)
 	if err != nil {
 		return RuntimeOperationExecutionResult{}, err
 	}
@@ -135,7 +147,11 @@ func (e *passingManagedValidationExecutor) ExecuteRuntimeOperation(ctx context.C
 		Outcome: runtimecontract.RuntimeOperationOutcomeAccepted, ObservedEffectScope: request.Execution.ExpectedEffectScope,
 		TargetRefs: append([]string(nil), request.Operation.TargetRefs...), Evidence: evidence,
 	}
-	_, committed, err := e.owner.commitOperationReceipt(ctx, request.WorkspaceID, request.RunID, request.DispatchID, request.Execution.Fence, receipt)
+	ownerSource, err := runtimeTestOperationOwnerSource(request.Operation.Kind)
+	if err != nil {
+		return RuntimeOperationExecutionResult{}, err
+	}
+	_, committed, err := e.owner.commitOperationReceipt(ctx, request.WorkspaceID, request.RunID, request.DispatchID, request.Execution.Fence, ownerSource, receipt)
 	if err != nil {
 		return RuntimeOperationExecutionResult{}, err
 	}
@@ -175,7 +191,11 @@ func (e *replayProofRecoveryExecutor) ExecuteRuntimeOperation(ctx context.Contex
 		TargetRefs: append([]string(nil), request.Operation.TargetRefs...),
 		Evidence:   runtimecontract.RuntimeOperationEvidence{Summary: "owner replay proof confirmed"},
 	}
-	_, committed, err := e.owner.commitOperationReceipt(ctx, request.WorkspaceID, request.RunID, request.DispatchID, request.Execution.Fence, receipt)
+	ownerSource, err := runtimeTestOperationOwnerSource(request.Operation.Kind)
+	if err != nil {
+		return RuntimeOperationExecutionResult{}, err
+	}
+	_, committed, err := e.owner.commitOperationReceipt(ctx, request.WorkspaceID, request.RunID, request.DispatchID, request.Execution.Fence, ownerSource, receipt)
 	if err != nil {
 		return RuntimeOperationExecutionResult{}, err
 	}
@@ -209,7 +229,11 @@ func (e *sealedValidationRecipeExecutor) ExecuteRuntimeOperation(ctx context.Con
 			},
 		},
 	}
-	_, committed, err := e.owner.commitOperationReceipt(ctx, request.WorkspaceID, request.RunID, request.DispatchID, request.Execution.Fence, receipt)
+	ownerSource, err := runtimeTestOperationOwnerSource(request.Operation.Kind)
+	if err != nil {
+		return RuntimeOperationExecutionResult{}, err
+	}
+	_, committed, err := e.owner.commitOperationReceipt(ctx, request.WorkspaceID, request.RunID, request.DispatchID, request.Execution.Fence, ownerSource, receipt)
 	if err != nil {
 		return RuntimeOperationExecutionResult{}, err
 	}
@@ -228,7 +252,11 @@ func (e *qualityOperationExecutor) ExecuteRuntimeOperation(ctx context.Context, 
 		TargetRefs: append([]string(nil), request.Operation.TargetRefs...),
 		Evidence:   e.evidence,
 	}
-	_, committed, err := e.owner.commitOperationReceipt(ctx, request.WorkspaceID, request.RunID, request.DispatchID, request.Execution.Fence, receipt)
+	ownerSource, err := runtimeTestOperationOwnerSource(request.Operation.Kind)
+	if err != nil {
+		return RuntimeOperationExecutionResult{}, err
+	}
+	_, committed, err := e.owner.commitOperationReceipt(ctx, request.WorkspaceID, request.RunID, request.DispatchID, request.Execution.Fence, ownerSource, receipt)
 	if err != nil {
 		return RuntimeOperationExecutionResult{}, err
 	}
@@ -254,7 +282,11 @@ func (e *acceptingOperationExecutor) ExecuteRuntimeOperation(ctx context.Context
 		TargetRefs: append([]string(nil), request.Operation.TargetRefs...),
 		Evidence:   evidence,
 	}
-	_, committed, err := e.owner.commitOperationReceipt(ctx, request.WorkspaceID, request.RunID, request.DispatchID, request.Execution.Fence, receipt)
+	ownerSource, err := runtimeTestOperationOwnerSource(request.Operation.Kind)
+	if err != nil {
+		return RuntimeOperationExecutionResult{}, err
+	}
+	_, committed, err := e.owner.commitOperationReceipt(ctx, request.WorkspaceID, request.RunID, request.DispatchID, request.Execution.Fence, ownerSource, receipt)
 	if err != nil {
 		return RuntimeOperationExecutionResult{}, err
 	}
@@ -273,7 +305,11 @@ func (e *receiptCommittedResponseLostExecutor) ExecuteRuntimeOperation(ctx conte
 		Changed: true, TargetRefs: append([]string(nil), request.Operation.TargetRefs...),
 		Evidence: runtimecontract.RuntimeOperationEvidence{Summary: "owner committed before response loss"},
 	}
-	if _, _, err := e.owner.commitOperationReceipt(ctx, request.WorkspaceID, request.RunID, request.DispatchID, request.Execution.Fence, receipt); err != nil {
+	ownerSource, err := runtimeTestOperationOwnerSource(request.Operation.Kind)
+	if err != nil {
+		return RuntimeOperationExecutionResult{}, err
+	}
+	if _, _, err := e.owner.commitOperationReceipt(ctx, request.WorkspaceID, request.RunID, request.DispatchID, request.Execution.Fence, ownerSource, receipt); err != nil {
 		return RuntimeOperationExecutionResult{}, err
 	}
 	return RuntimeOperationExecutionResult{}, errors.New("owner response lost after receipt commit")
@@ -316,7 +352,11 @@ func (e *recordingOperationExecutor) ExecuteRuntimeOperation(ctx context.Context
 		receipt.Feedback = &feedback
 	}
 	if e.owner != nil {
-		_, committed, err := e.owner.commitOperationReceipt(ctx, request.WorkspaceID, request.RunID, request.DispatchID, request.Execution.Fence, receipt)
+		ownerSource, err := runtimeTestOperationOwnerSource(request.Operation.Kind)
+		if err != nil {
+			return RuntimeOperationExecutionResult{}, err
+		}
+		_, committed, err := e.owner.commitOperationReceipt(ctx, request.WorkspaceID, request.RunID, request.DispatchID, request.Execution.Fence, ownerSource, receipt)
 		if err != nil {
 			return RuntimeOperationExecutionResult{}, err
 		}
@@ -450,7 +490,7 @@ func TestRuntimeControllerRestartContinuesSealedDispatchAfterResourceChangingRec
 			SubjectRef: "workspace_deliverable", BeforeRevision: "tree-v1", AfterRevision: "tree-v2",
 		}},
 	}
-	if _, _, err := controller.commitOperationReceipt(ctx, "ws-1", "run-1", sealed.ActiveDispatch.ID, execution.Fence, receipt); err != nil {
+	if _, _, err := controller.commitOperationReceipt(ctx, "ws-1", "run-1", sealed.ActiveDispatch.ID, execution.Fence, runtimecontract.RuntimeModuleFile, receipt); err != nil {
 		t.Fatal(err)
 	}
 
@@ -528,7 +568,7 @@ func TestRuntimeControllerRecoversOwnerCommittedReceiptWithoutReplayingSideEffec
 		TargetRefs: []string{"target.txt"},
 		Evidence:   runtimecontract.RuntimeOperationEvidence{Summary: "owner committed before crash", EvidenceRefs: []string{"file://target.txt"}},
 	}
-	if _, _, err := controller.commitOperationReceipt(context.Background(), "ws-v2", "run-v2", sealed.ActiveDispatch.ID, execution.Fence, receipt); err != nil {
+	if _, _, err := controller.commitOperationReceipt(context.Background(), "ws-v2", "run-v2", sealed.ActiveDispatch.ID, execution.Fence, runtimecontract.RuntimeModuleFile, receipt); err != nil {
 		t.Fatal(err)
 	}
 
@@ -872,7 +912,7 @@ func TestRuntimeControllerRestartAtomicallyInvalidatesUncommittableOwnerReceipt(
 		Outcome: runtimecontract.RuntimeOperationOutcomeAccepted, ObservedEffectScope: runtimecontract.RuntimeEffectNone,
 		Evidence: runtimecontract.RuntimeOperationEvidence{Summary: "owner observed no durable change"},
 	}
-	if _, _, err := controller.commitOperationReceipt(context.Background(), "ws-v2", "run-v2", sealed.ActiveDispatch.ID, execution.Fence, receipt); err != nil {
+	if _, _, err := controller.commitOperationReceipt(context.Background(), "ws-v2", "run-v2", sealed.ActiveDispatch.ID, execution.Fence, runtimecontract.RuntimeModuleFile, receipt); err != nil {
 		t.Fatal(err)
 	}
 
@@ -1061,7 +1101,7 @@ func TestRuntimeControllerRestartRejectsPersistedInconclusiveValidationReceiptWi
 			EvidenceReason: "no matching validation checks", Validation: &runtimecontract.RuntimeValidationObservation{OutputPreview: "no tests to run"},
 		},
 	}
-	if _, _, err := controller.commitOperationReceipt(context.Background(), "ws-v2", "run-v2", sealed.ActiveDispatch.ID, execution.Fence, receipt); err != nil {
+	if _, _, err := controller.commitOperationReceipt(context.Background(), "ws-v2", "run-v2", sealed.ActiveDispatch.ID, execution.Fence, runtimecontract.RuntimeModuleShell, receipt); err != nil {
 		t.Fatal(err)
 	}
 

@@ -571,7 +571,10 @@ func (p *HTTPProvider) Embed(ctx context.Context, request llmmodels.ProviderEmbe
 	if err != nil {
 		return llmmodels.ProviderEmbeddingResult{}, err
 	}
-	result = llmmodels.ProviderEmbeddingResult{ProviderID: p.config.ID, Model: model, Input: input, RequestBytes: len(payload)}
+	result = llmmodels.ProviderEmbeddingResult{
+		ProviderID: p.config.ID, Model: model, Input: input, RequestBytes: len(payload),
+		PhysicalResponseMode: llmaudit.PhysicalResponseModeNonStreaming,
+	}
 	requestCtx, cancel := p.requestContext(ctx)
 	defer cancel()
 	httpReq, err := http.NewRequestWithContext(requestCtx, http.MethodPost, endpoint, bytes.NewReader(payload))

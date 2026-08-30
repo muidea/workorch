@@ -10,10 +10,9 @@ import (
 
 func TestEventRecordDataRoundTripWithoutAnyInContract(t *testing.T) {
 	input := &eventstreammodel.EventRecord{
-		ID:          common.EventRecordID("event-1"),
-		Topic:       "/run/state/changed",
-		WorkspaceID: common.WorkspaceID("ws-1"),
-		RunID:       common.RunID("run-1"),
+		ID: common.EventRecordID("event-1"), Version: "workorch.event", Topic: "/run/state/changed",
+		OccurredAt: "2026-08-20T00:00:00Z", SourceModule: "blocks/run", SubjectType: "run", SubjectID: "run-1",
+		WorkspaceID: common.WorkspaceID("ws-1"), RunID: common.RunID("run-1"), StreamPosition: 1, Revision: 1,
 		Payload: workorcheventpayload.New(
 			workorcheventpayload.StringField("state", "running"),
 			workorcheventpayload.IntField("count", 3),
@@ -41,7 +40,8 @@ func TestEventRecordDataRoundTripWithoutAnyInContract(t *testing.T) {
 
 func TestEventRecordDataClonesPayload(t *testing.T) {
 	input := &eventstreammodel.EventRecord{
-		ID:      common.EventRecordID("event-clone"),
+		ID: common.EventRecordID("event-clone"), Version: "workorch.event", Topic: "/test",
+		OccurredAt: "2026-08-20T00:00:00Z", SourceModule: "blocks/test", SubjectType: "test", SubjectID: "clone", StreamPosition: 1,
 		Payload: workorcheventpayload.New(workorcheventpayload.StringField("state", "running")),
 	}
 	data, err := EventRecordDataFromModel(input)
@@ -78,5 +78,23 @@ func TestEventRecordDataValidateRequiresOwnerAppendIdentity(t *testing.T) {
 	data.StreamPosition = 0
 	if err := data.Validate(); err == nil {
 		t.Fatal("record without stream position validated")
+	}
+}
+
+func TestEventRecordDataRejectsInvalidOrNonCanonicalOccurredAt(t *testing.T) {
+	base := EventRecordData{
+		ID: "event-time", Version: "workorch.event", Topic: "/test", OccurredAt: "2026-08-20T00:00:00Z",
+		SourceModule: "blocks/test", SubjectType: "test", SubjectID: "time", StreamPosition: 1,
+	}
+	for _, occurredAt := range []string{"invalid", "2026-08-19T19:00:00-05:00", " 2026-08-20T00:00:00Z "} {
+		item := base
+		item.OccurredAt = occurredAt
+		if err := item.Validate(); err == nil {
+			t.Fatalf("OccurredAt %q validated", occurredAt)
+		}
+		model := item.Model()
+		if _, err := EventRecordDataFromModel(model); err == nil {
+			t.Fatalf("persisted OccurredAt %q was accepted", occurredAt)
+		}
 	}
 }

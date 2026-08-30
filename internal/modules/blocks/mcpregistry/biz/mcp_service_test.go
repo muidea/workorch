@@ -3,6 +3,7 @@ package mcp
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 
 	modulecommon "github.com/muidea/workorch/internal/modules/blocks/mcpregistry/pkg/common"
@@ -217,6 +218,29 @@ func TestServiceListsArePaginatedAndRejectInvalidBounds(t *testing.T) {
 	}
 	if _, _, _, err := service.listCapabilities(ctx, mcpevents.CapabilityQuery{Query: string(make([]byte, modulecommon.MaxQueryBytes+1))}, "", 1); !errors.Is(err, common.ErrInvalidArgument) {
 		t.Fatalf("oversized capability query err = %v", err)
+	}
+}
+
+func TestServiceRejectsInvalidLookupAndUpdateCapabilityIDs(t *testing.T) {
+	ctx := context.Background()
+	service := newService(memory.NewMCPRegistryRepository())
+	for name, value := range map[string]string{
+		"non-canonical": " mcp-id ",
+		"invalid UTF-8": string([]byte{0xff}),
+		"oversized":     strings.Repeat("x", modulecommon.MaxIDBytes+1),
+	} {
+		t.Run(name, func(t *testing.T) {
+			if _, _, err := service.getServer(ctx, common.MCPServerID(value)); !errors.Is(err, common.ErrInvalidArgument) {
+				t.Fatalf("get server with invalid ID error = %v, want invalid argument", err)
+			}
+			if _, _, err := service.getCapability(ctx, common.MCPCapabilityID(value)); !errors.Is(err, common.ErrInvalidArgument) {
+				t.Fatalf("get capability with invalid ID error = %v, want invalid argument", err)
+			}
+			command := mcpevents.UpdateCapabilityCommand(mcpevents.CreateCapabilityCommand{CapabilityID: common.MCPCapabilityID(value)})
+			if _, _, err := service.updateCapability(ctx, command); !errors.Is(err, common.ErrInvalidArgument) {
+				t.Fatalf("update capability with invalid ID error = %v, want invalid argument", err)
+			}
+		})
 	}
 }
 

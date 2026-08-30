@@ -4,12 +4,12 @@ Status: normative
 
 Type: runtime-flow
 
-Last Verified: 2026-08-21
+Last Verified: 2026-08-30
 
 ## Purpose
 
 本文件定义 Runtime 为 candidate 请求组装上下文的链路：
-**typed `RuntimeCandidateContext` + provider-facing C0–C5 stable prefix**。
+**typed `RuntimeCandidateContext` + provider-facing C0–C2 stable prefix + C3–C5 current/volatile tail**。
 
 生产主线**不**从 禁止的 execution-context map、临时 JSON bridge 或 full runtime dump 重建 authority。
 
@@ -80,7 +80,7 @@ candidate request 封存完整 authority transaction。返回的 candidate 必�
 - `BeginCandidateAttempt` 在请求前持久化 attempt 状态
 - 第二次 complete candidate rejection 形成 typed candidate terminal；不存在第三次 attempt，也不创建无信息 governance
 
-## C0–C5 Stable Prefix
+## C0–C5 Cache Partition
 
 provider-facing 请求按 cacheability 分层（细则见 `../00-core/runtime-request-cache-note.md`）：
 
@@ -89,7 +89,7 @@ provider-facing 请求按 cacheability 分层（细则见 `../00-core/runtime-re
 | **C0** | stable runtime prefix（身份、中立 runtime 规则 / schema） | 最高 / 长寿命 |
 | **C1** | workspace definition（Goal/DoD 正文等 definition 快照） | 随 definition revision |
 | **C2** | capability contract / governance 声明 / profile owner-fact postcondition | 声明式稳定 |
-| **C3** | current stage / focus bundle（required output、focus、action） | 随 decision 变 |
+| **C3** | current authority/focus、required output、sealed manifest 与 current owner catalog | 随 authority/decision 变 |
 | **C4** | volatile execution tail（failure、recent evidence、attempt diagnostics） | 易变 |
 | **C5** | large refs / trace | ref-only |
 

@@ -224,7 +224,11 @@ func (b *Biz) readWorkspaceProjectionHighWatermarks(ctx context.Context, workspa
 	if b == nil || b.EventHub() == nil || len(workspaceIDs) == 0 {
 		return nil, common.ErrInvalidArgument
 	}
-	event := magicevent.NewEventWithContext(eventstreamevents.TopicEventStreamCommandHighWatermarks, ModuleID, eventstreamevents.CommandDestination, magicevent.NewHeader(), ctx, eventstreamevents.HighWatermarksCommand{WorkspaceIDs: workspaceIDs})
+	command, err := (eventstreamevents.HighWatermarksCommand{WorkspaceIDs: workspaceIDs}).Normalized()
+	if err != nil {
+		return nil, err
+	}
+	event := magicevent.NewEventWithContext(eventstreamevents.TopicEventStreamCommandHighWatermarks, ModuleID, eventstreamevents.CommandDestination, magicevent.NewHeader(), ctx, command)
 	response := b.SendEvent(event)
 	if response == nil {
 		return nil, common.ErrConflict
@@ -243,7 +247,10 @@ func (b *Biz) readWorkspaceProjectionHighWatermarks(ctx context.Context, workspa
 	if !ok {
 		return nil, common.ErrInvalidArgument
 	}
-	return result.HighWatermarks, nil
+	if err := result.ValidateFor(command); err != nil {
+		return nil, err
+	}
+	return result.Clone().HighWatermarks, nil
 }
 
 func (b *Biz) publishWorkspaceProjectionChanged(ctx context.Context, data workorchdevents.WorkspaceProjectionChangedData) {

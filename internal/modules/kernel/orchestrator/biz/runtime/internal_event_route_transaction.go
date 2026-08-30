@@ -230,7 +230,7 @@ func (c *RuntimeController) applyCandidateDispatchTransactionInternalEvent(ctx c
 		if event.Transaction.OperationReceipt == nil {
 			return result, common.ErrInvalidArgument
 		}
-		aggregate, receipt, err := c.candidateDispatch.commitOperationReceipt(ctx, event.Scope.WorkspaceID, event.Scope.RunID, event.Transaction.DispatchID, event.Transaction.Fence, *event.Transaction.OperationReceipt)
+		aggregate, receipt, err := c.candidateDispatch.commitOperationReceipt(ctx, event.Scope.WorkspaceID, event.Scope.RunID, event.Transaction.DispatchID, event.Transaction.Fence, event.Transaction.OperationReceiptOwnerSource, *event.Transaction.OperationReceipt)
 		result.Aggregate = aggregate
 		result.Receipt = &receipt
 		return result, err

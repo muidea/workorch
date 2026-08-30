@@ -95,6 +95,43 @@ func TestRuntimeInitiatorSetupPublishesCompleteProviderOnlyOnSuccess(t *testing.
 	assertRepositoryGroupsComplete(t, *repositories)
 }
 
+func TestRuntimeInitiatorSetupAfterTeardownPublishesFreshProvider(t *testing.T) {
+	closeRepositoryInitiatorConfig(t)
+	configDir := writeRepositoryInitiatorConfig(t, "memory", "http://127.0.0.1:8080")
+	t.Setenv(workorchconfig.EnvConfigDir, configDir)
+	t.Cleanup(func() {
+		if err := workorchconfig.Close(); err != nil {
+			t.Errorf("close config manager: %v", err)
+		}
+	})
+
+	runtime := New()
+	if setupErr := runtime.Setup(context.Background(), nil, nil); setupErr != nil {
+		t.Fatalf("first Setup: %v", setupErr)
+	}
+	first := runtime.repositories
+	if first == nil {
+		t.Fatal("first Setup did not publish repositories")
+	}
+
+	runtime.Teardown(context.Background())
+	if runtime.RepositoryProvider() != nil || runtime.repositories != nil {
+		t.Fatal("Teardown did not revoke the first provider")
+	}
+
+	if setupErr := runtime.Setup(context.Background(), nil, nil); setupErr != nil {
+		t.Fatalf("second Setup: %v", setupErr)
+	}
+	second := runtime.repositories
+	if second == nil {
+		t.Fatal("second Setup did not publish repositories")
+	}
+	if second == first {
+		t.Fatal("Setup after Teardown reused the revoked repository set")
+	}
+	assertRepositoryGroupsComplete(t, *second)
+}
+
 func TestRuntimeInitiatorSetupFailureLeavesRepositoriesEmpty(t *testing.T) {
 	tests := []struct {
 		name    string

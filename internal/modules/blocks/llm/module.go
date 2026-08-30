@@ -31,7 +31,7 @@ func (m *Module) configure(deps ...llmbiz.Dependencies) error {
 	}
 	if len(deps) == 0 || deps[0].EventHub == nil {
 		m.bizPtr = nil
-		return nil
+		return common.ErrInvalidArgument
 	}
 	configured, err := llmbiz.New(deps[0].EventHub, deps[0].BackgroundRoutine, deps...)
 	if err != nil {

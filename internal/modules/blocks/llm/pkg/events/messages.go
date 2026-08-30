@@ -2,8 +2,10 @@ package events
 
 import (
 	"fmt"
+	"math"
 	"sort"
 	"strings"
+	"unicode/utf8"
 
 	modulecommon "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/common"
 	llmmodel "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/models"
@@ -500,10 +502,100 @@ type ProviderCompletionData struct {
 	Usage   *llmaudit.ProviderUsage
 }
 
-type LLMCommandResult struct {
+// CompleteProviderResult is the only successful result for
+// TopicLLMCommandCompleteProvider. Completion is a value rather than a nullable
+// union arm, so a successful EventHub response cannot be confused with an
+// embedding response or an empty generic envelope.
+type CompleteProviderResult struct {
 	Target     runtimecontract.ProviderModelTarget
-	Completion *ProviderCompletionData
-	Embedding  *llmmodel.ProviderEmbeddingResult
+	Completion ProviderCompletionData
+}
+
+func (r CompleteProviderResult) ValidateFor(command CompleteProviderCommand) error {
+	target := r.Target.Normalized()
+	if err := target.Validate(); err != nil {
+		return fmt.Errorf("%w: completion result target: %v", common.ErrInvalidArgument, err)
+	}
+	if r.Target != target {
+		return fmt.Errorf("%w: completion result target is not canonical", common.ErrInvalidArgument)
+	}
+	requested := command.Target.Normalized()
+	if requested.ProviderID != "" || requested.ModelID != "" {
+		if err := requested.Validate(); err != nil || !target.Same(requested) {
+			return fmt.Errorf("%w: completion result target does not match command", common.ErrInvalidArgument)
+		}
+	}
+	if model := strings.TrimSpace(command.Request.Model); model != "" && target.ModelID != model {
+		return fmt.Errorf("%w: completion result model does not match request", common.ErrInvalidArgument)
+	}
+	if strings.TrimSpace(r.Completion.Content) == "" || !utf8.ValidString(r.Completion.Content) {
+		return fmt.Errorf("%w: completion result requires non-empty UTF-8 content", common.ErrInvalidArgument)
+	}
+	if err := validateGenericProviderUsage(r.Completion.Usage); err != nil {
+		return err
+	}
+	return nil
+}
+
+// GenerateEmbeddingResult is the only successful result for
+// TopicLLMCommandGenerateEmbedding. Embedding is a value rather than a nullable
+// union arm, so the topic contract is exhaustive by construction.
+type GenerateEmbeddingResult struct {
+	Target    runtimecontract.ProviderModelTarget
+	Embedding llmmodel.ProviderEmbeddingResult
+}
+
+func (r GenerateEmbeddingResult) ValidateFor(command GenerateEmbeddingCommand) error {
+	target := r.Target.Normalized()
+	requested := command.Target.Normalized()
+	if err := target.Validate(); err != nil {
+		return fmt.Errorf("%w: embedding result target: %v", common.ErrInvalidArgument, err)
+	}
+	if r.Target != target {
+		return fmt.Errorf("%w: embedding result target is not canonical", common.ErrInvalidArgument)
+	}
+	if err := requested.Validate(); err != nil || !target.Same(requested) {
+		return fmt.Errorf("%w: embedding result target does not match command", common.ErrInvalidArgument)
+	}
+	input := strings.TrimSpace(command.Input)
+	if input == "" || r.Embedding.ProviderID != target.ProviderID || r.Embedding.Model != target.ModelID || r.Embedding.Input != input {
+		return fmt.Errorf("%w: embedding result provider, model, or input binding mismatch", common.ErrInvalidArgument)
+	}
+	if len(r.Embedding.Vector) == 0 {
+		return fmt.Errorf("%w: embedding result vector is empty", common.ErrInvalidArgument)
+	}
+	for _, value := range r.Embedding.Vector {
+		if math.IsNaN(value) || math.IsInf(value, 0) {
+			return fmt.Errorf("%w: embedding result vector contains a non-finite value", common.ErrInvalidArgument)
+		}
+	}
+	if r.Embedding.PhysicalResponseMode != llmaudit.PhysicalResponseModeNonStreaming ||
+		!r.Embedding.ProviderSubmitted || r.Embedding.RequestBytes <= 0 || r.Embedding.ResponseBytes <= 0 {
+		return fmt.Errorf("%w: embedding result is missing its physical response fact", common.ErrInvalidArgument)
+	}
+	if err := validateGenericProviderUsage(r.Embedding.Usage); err != nil {
+		return err
+	}
+	return nil
+}
+
+func validateGenericProviderUsage(usage *llmaudit.ProviderUsage) error {
+	if usage == nil {
+		return nil
+	}
+	values := []int{
+		usage.InputTokens, usage.OutputTokens, usage.TotalTokens, usage.CacheReadTokens, usage.CacheWriteTokens,
+		usage.CacheCreationTokens, usage.CacheableInputTokens, usage.NonCacheableInputTokens,
+	}
+	for _, value := range values {
+		if value < 0 {
+			return fmt.Errorf("%w: provider usage contains a negative token count", common.ErrInvalidArgument)
+		}
+	}
+	if usage.TotalTokens <= 0 || usage.TotalTokens < usage.InputTokens || usage.TotalTokens < usage.OutputTokens {
+		return fmt.Errorf("%w: provider usage total is inconsistent", common.ErrInvalidArgument)
+	}
+	return nil
 }
 
 // LLMUsageRecordedData is the durable request audit notification for one provider call.
@@ -647,8 +739,8 @@ func llmCacheUsageHasNoTokens(usage llmaudit.CacheUsage) bool {
 func MessageContracts() []eventcontract.MessageContract {
 	return eventcontract.MessageContracts(
 		eventcontract.CommandTopic[AcquireRuntimeCapabilitiesCommand, AcquireRuntimeCapabilitiesResult]("llm", definitionPackage, eventcontract.CommandClassRead, eventcontract.LanePolicyQuery, TopicAcquireRuntimeCapabilities),
-		eventcontract.CommandTopic[CompleteProviderCommand, LLMCommandResult]("llm", definitionPackage, eventcontract.CommandClassExecute, eventcontract.LanePolicyExecute, TopicLLMCommandCompleteProvider),
-		eventcontract.CommandTopic[GenerateEmbeddingCommand, LLMCommandResult]("llm", definitionPackage, eventcontract.CommandClassExecute, eventcontract.LanePolicyExecute, TopicLLMCommandGenerateEmbedding),
+		eventcontract.CommandTopic[CompleteProviderCommand, CompleteProviderResult]("llm", definitionPackage, eventcontract.CommandClassExecute, eventcontract.LanePolicyExecute, TopicLLMCommandCompleteProvider),
+		eventcontract.CommandTopic[GenerateEmbeddingCommand, GenerateEmbeddingResult]("llm", definitionPackage, eventcontract.CommandClassExecute, eventcontract.LanePolicyExecute, TopicLLMCommandGenerateEmbedding),
 		eventcontract.CommandTopic[GetActiveConfigurationCommand, GetActiveConfigurationResult]("llm", definitionPackage, eventcontract.CommandClassRead, eventcontract.LanePolicyQuery, TopicLLMCommandGetActiveConfiguration),
 		eventcontract.CommandTopic[GetProviderModelCatalogCommand, GetProviderModelCatalogResult]("llm", definitionPackage, eventcontract.CommandClassRead, eventcontract.LanePolicyQuery, TopicLLMCommandGetProviderModelCatalog),
 		eventcontract.CommandTopic[RefreshProviderModelCatalogCommand, RefreshProviderModelCatalogResult]("llm", definitionPackage, eventcontract.CommandClassExecute, eventcontract.LanePolicyExecute, TopicLLMCommandRefreshProviderModelCatalog),

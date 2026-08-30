@@ -102,8 +102,8 @@ func (o *Biz) InvalidateRuntimeCandidateRequestSessionForPrerequisiteStale(ctx c
 	return result.Aggregate, err
 }
 
-func (o *Biz) CommitRuntimeOperationReceipt(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, dispatchID string, fence uint64, receipt runtimecontract.RuntimeOperationReceipt) (runtime.RuntimeAggregate, runtimecontract.RuntimeOperationReceipt, error) {
-	result, err := o.submitRuntimeInternalEvent(ctx, runtime.RuntimeInternalEvent{Kind: runtime.RuntimeInternalEventOperationReceiptObserved, Scope: runtime.RuntimeInternalEventScope{WorkspaceID: workspaceID, RunID: runID}, Transaction: &runtime.RuntimeInternalTransactionPayload{DispatchID: dispatchID, Fence: fence, OperationReceipt: &receipt}})
+func (o *Biz) CommitRuntimeOperationReceipt(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, dispatchID string, fence uint64, ownerSource string, receipt runtimecontract.RuntimeOperationReceipt) (runtime.RuntimeAggregate, runtimecontract.RuntimeOperationReceipt, error) {
+	result, err := o.submitRuntimeInternalEvent(ctx, runtime.RuntimeInternalEvent{Kind: runtime.RuntimeInternalEventOperationReceiptObserved, Scope: runtime.RuntimeInternalEventScope{WorkspaceID: workspaceID, RunID: runID}, Transaction: &runtime.RuntimeInternalTransactionPayload{DispatchID: dispatchID, Fence: fence, OperationReceiptOwnerSource: ownerSource, OperationReceipt: &receipt}})
 	if result.Receipt == nil {
 		return result.Aggregate, runtimecontract.RuntimeOperationReceipt{}, err
 	}

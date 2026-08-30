@@ -6,7 +6,6 @@ import (
 	"testing"
 
 	magicevent "github.com/muidea/magicCommon/event"
-	runbiz "github.com/muidea/workorch/internal/modules/blocks/run/biz"
 	runevents "github.com/muidea/workorch/internal/modules/blocks/run/pkg/events"
 	runmodel "github.com/muidea/workorch/internal/modules/blocks/run/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
@@ -34,7 +33,7 @@ func TestRunStoreAndQueryPreserveOpaqueRuntimeStateRawShape(t *testing.T) {
 		t.Fatalf("create Run: %v", err)
 	}
 	module := New()
-	if err := module.Configure(runbiz.Dependencies{Runs: runs, EventHub: hub}); err != nil {
+	if err := module.Configure(runTestDependencies(runs, nil, nil, hub, nil)); err != nil {
 		t.Fatalf("configure Run: %v", err)
 	}
 	if err := module.Start(); err != nil {

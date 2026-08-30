@@ -4,104 +4,47 @@ Status: active
 
 Type: stateful-block-contract
 
-Last Verified: 2026-08-26
+Last Verified: 2026-08-30
 
 ## 功能范围与边界
 
-`blocks/approval` 是 Approval 聚合的唯一 owner。聚合 identity 为
-`(WorkspaceID, RunID, ApprovalID)`，负责保存不可变授权目标、`pending -> approved|rejected`
-生命周期、解决提案，以及 evidence/audit/notification 的交付检查点。
+`blocks/approval` 是 Approval 聚合、immutable authorization context、`pending → approved|rejected` lifecycle、Runtime resolution proposal、evidence/audit/notification checkpoint 和 Workspace deletion tombstone 的唯一 owner。它持久化批准事实并恢复未完成交付，但不执行被授权副作用。
 
-本 Block 不拥有 SM-1～SM-4，也不执行被授权的副作用。它通过 typed contract 参与 SM-2：
-Orchestrator 创建 Runtime Approval 请求，Approval 在终态落库前将 Runtime resolution proposal
-提交给 Orchestrator；崩溃后只从持久化提案和交付检查点重放，不重建 Runtime authority。
-
-`Approval.Context` 是创建时封存的授权目标，approve/reject 不能修改；解决方补充的数据只进入
-`ResolutionContext`，用于审计和说明，不能替换 action、provider、URL/query 或其他目标字段。
-
-## 生命周期与恢复协议
-
-1. Orchestrator 先从 Approval owner 获取 `approval/request` capability，再以
-   `OpenRuntimeApprovalRequestCommand/Result` 创建 Runtime Approval。入口只接受 Orchestrator，
-   相同 identity 的完全相同请求是幂等重放，不同 sealed payload 返回 conflict。
-   所有 create ingress 只构造无 state/时间戳/proposal/resolution 的 immutable seed；唯一
-   `opened` Approval-private lifecycle event 选择 initial `pending`、封存 timestamps 并执行 repository Create。
-2. 解决入口只接受两个生产 producer：`application/workorchd/appservice` 的
-   `human_operator` principal，或 `kernel/governance` 的 `auto_governance` principal；Event source、
-   principal kind 和 subject 必须匹配。该 principal 表达进程内 producer authority，不替代 transport
-   层的终端用户认证。
-3. owner 先持久化 `ResolutionProposal`。proposal ingress seed 不携带 state、failure、timestamp 或 delivery progress，
-   只有 `resolution_proposed` Approval-private event 可选择 initial `pending` 并封存 `ProposedAt`；caller-selected
-   proposal lifecycle 字段必须 fail-closed。Runtime Approval 随后同步提交
-   `CommitRuntimeGovernanceApprovalResolutionCommand/Result`；只有 committed/duplicate 才能进入终态，
-   stale proposal 会被持久化为 rejected 并 fail closed。普通 owner-local Approval 不触发 Runtime commit。
-4. 终态落库后，owner 依次取得 Orchestrator evidence 的 exact-scope ack、Eventstream resolution record
-   的 durable ack，再发布稳定 `NotificationID` 的 `TopicApprovalResolved` 展示通知并写入交付检查点。
-   任一阶段失败都保留可恢复状态；后台 reconciliation 从 proposal/terminal checkpoint 继续，不重新解决
-   Approval，也不把失败描述成跨 owner transaction。
-5. Workspace 删除由 `SealWorkspaceApprovalDeletionCommand` 先持久化永久 tombstone。`retain` 物理保留但永久隐藏，
-   `purge` 仅允许同一 scope 的 `PurgeWorkspaceApprovalsCommand` 翻译为 `purge_requested` owner-private event；只有同一个
-   private dispatcher 能在 exact `fenced` scope 下进入 privileged sink 并 fixed-point 清空，再提交 `purge_completed` CAS。
-   command adapter 不直接调用 purge fence/物理 helper，伪造 `purge_completed` 不能越过 dispatcher；
-   所有普通 Create/Update/Delete、延迟事实和 recovery 在 fence 后 fail closed，不存在逐 Approval 删除状态机。seal、purge、
-   resolution、Runtime request 与逐 Approval reconciliation 只通过统一的 `workspace -> lifecycle` owner-local mutation lock；
-   reconciliation 入锁后重新读取最新聚合。每次 Orchestrator/Eventstream outbound 都在 durable active-fence 回调中再次裁决，
-   所以 tombstone 持久化后，当前进程和重启实例都不能补发 late evidence、audit record 或 notification。
+Web capability 与 Approval owner 没有直接 EventHub query 合同。`blocks/web` 只验证 Runtime sealed dispatch 中携带的 approved grant/target hash；它不调用 `GetApprovalCommand`，也不取得 Approval repository。
 
 ## 组件交互及合同
 
-| 交互组件 | 方向 | 具体 typed contract | 约束 |
-| --- | --- | --- | --- |
-| `kernel/orchestrator` | Orchestrator → Approval | `AcquireRuntimeCapabilitiesCommand/Result`、`OpenRuntimeApprovalRequestCommand/Result` | 只接受 Orchestrator；请求绑定 workspace/run、dispatch、authority snapshot、action 与 authorization hash |
-| `kernel/orchestrator` | Approval → Orchestrator | `CommitRuntimeGovernanceApprovalResolutionCommand/Result`、`RecordApprovalEvidenceCommand/Result` | 前者是终态前 SM-2 commit；后者是终态后 exact-scope evidence ack |
-| `blocks/workspace` | Workspace → Approval | `SealWorkspaceApprovalDeletionCommand/Result`、`PurgeWorkspaceApprovalsCommand/Result` | 只接受 Workspace owner；exact scope/replay，普通删除不可越过 fence |
-| `application/workorchd` | Application → Approval | `GetApprovalCommand/Result`、三类 bounded list result、`EnsureApprovedCommand/Result`、`EnsureRejectedCommand/Result` | ID-only HTTP 路由先做有界全局发现；重复 identity 必须报 conflict |
-| `kernel/governance` | Governance → Approval | scoped get、`EnsureApprovedCommand/Result` | 仅以 `auto_governance` principal 解决当前 workspace/run Approval |
-| `blocks/web` | Web → Approval | scoped `GetApprovalCommand/Result` | capability 只消费与 sealed target/hash 精确一致的 approved grant |
-| `blocks/eventstream` | Approval → Eventstream | `RecordApprovalResolutionCommand/Result` | 同步持久化；相同 notification material 幂等，不同 material 冲突 |
-| projection / display consumers | Approval → consumer | `TopicApprovalResolved` / `ApprovalChangedData` | 非 authority 通知；携带稳定 notification/resolution identity 和完整 scope |
+| 交互方 | typed command/data/result | 边界 |
+| --- | --- | --- |
+| `kernel/orchestrator` | capability acquisition、`OpenRuntimeApprovalRequestCommand/Result`；Approval→Orchestrator resolution commit/evidence | Runtime request与capability只接受 Orchestrator；终态前先 exact commit，终态后记录 evidence。 |
+| `application/workorchd/appservice` | `GetApprovalCommand → GetApprovalResult`、typed lists、EnsureApproved/EnsureRejected | human resolution source必须与 `human_operator` principal exact匹配；Application不直接修改 state。 |
+| `kernel/governance` | scoped query、EnsureApproved/EnsureRejected | auto-governance source必须与 `auto_governance` principal exact匹配。 |
+| `blocks/workspace` | `SealWorkspaceApprovalDeletionCommand/Result`、`PurgeWorkspaceApprovalsCommand/Result` | 唯一 deletion producer；Approval独自执行 fence/purge。 |
+| `blocks/eventstream` | `RecordApprovalResolutionCommand/Result` | terminal audit ack；失败保留 checkpoint待重放。 |
+| projection consumers | `ApprovalChangedData` on `TopicApprovalResolved` | display notification，不是授权或 lifecycle authority。 |
 
-所有 query/mutation 都有具体 result 类型，不再共用联合 envelope。列表命令必须显式 scope，使用稳定 cursor，
-默认 limit 100、上限 200；`ListAllApprovalsCommand` 还必须显式声明 `Scope: all`。
-任何 ID-only owner discovery 只有在全局恰好一个匹配项时才可返回；跨 workspace 出现两个同 ID Approval 时，无论
-它们是 pending/approved/rejected 的何种组合都必须 conflict，不能按状态优先选择。mutation 继续强制完整
-WorkspaceID + RunID scope。
+所有 query/mutation 使用 `pkg/events` concrete result；列表显式 scope、bounded cursor。`Approval.Context` 在 open 时封存；resolution只能写 `ResolutionContext`，不得替换 action/provider/URL/query 等授权目标。
+生产 `Configure` 只接受通过 `Validate()` 的 canonical `ApprovalOwnerRepositories` 与 EventHub。
 
-## Owner 内部职责边界
+## 不变量与非职责
 
-- `owner.go` 只负责 Biz 构造、typed topic 订阅、reconciliation 生命周期和 teardown；重复 Start/Teardown
-  不增加订阅或遗留后台任务。
-- mutation implementation 与 constructor 均为 Approval owner-private；跨 package（包括测试）只能启动 owner Module
-  后发送 `pkg/events` concrete command/result，或消费 owner 已发布的 immutable fact，不得直接构造 mutation service、
-  导入 `biz/contracts` 或注入 Approval repository。
-- `command_router.go` 对 query、resolution、workspace deletion 三类 topic 做穷尽分派，未知 topic fail closed。
-- `runtime_governance_adapter.go` 只负责可信 Runtime create ingress；`resolution_commands.go` 负责
-  proposal/commit/finalize 协议；private lifecycle reducer 是 creation 与全部聚合变更的唯一入口。
-- `evidence_event.go`、`approval_notification.go` 只执行 scope-validated delivery；`reconciliation.go`
-  只重放持久化 proposal/checkpoint。
-- 生产构造只接受 backend aggregate 铸造并通过 `Validate` 的 opaque `ApprovalOwnerRepositories` bundle；Approval 与
-  Workspace deletion surface 必须携带同一 backend binding。zero、fake 或 memory/file mixed-set 在订阅前 fail closed，
-  Biz、Module、Plugin 和 Initiator 均不保留独立 repository 注入或 legacy fallback。本 Block 不直接访问 Run、Workspace、
-  EvidenceRecord 或 capability implementation。
+- Approval state、proposal state、terminal checkpoint 只由 Approval-private lifecycle event/reducer转换；caller不得提交 target state/timestamp。
+- Runtime Approval 仅在 Orchestrator commit 返回 committed/duplicate 后进入终态；invalid/stale/failure保留可恢复 proposal或明确拒绝。
+- 完全相同 identity/sealed payload重放幂等；scope、authorization hash、principal或resolution漂移必须 conflict。
+- terminal后 evidence→Eventstream audit→notification 按持久 checkpoint恢复；recovery不得重新决定 approved/rejected。
+- Workspace fence后普通 mutation和late delivery fail closed；purge只由 Approval-private dispatcher调用。
+- 不拥有 SM-1～SM-4，不执行 Web/SSH/Shell/File副作用，不直接服务Web，也不暴露 repository/service。
 
-## 已覆盖的合同回归
+## 能力验收
 
-- immutable authorization target 与独立 `ResolutionContext`；可信 source/principal 组合及伪造来源拒绝；
-- Runtime request exact replay、sealed payload 冲突、SM-2 commit 的 nil/wrong/stale/duplicate 处理；
-- commit 后崩溃、终态后 evidence 失败、Eventstream ack 失败及 notification 重放恢复；
-- pending/approved/rejected 转换、同结果幂等、相反终态冲突、repository 写失败不提前发布；
-- Approval/proposal seed 均拒绝 caller-selected initial/progress state，静态门禁拒绝 lifecycle reducer 之外的 initial state 与 Approval repository Create；
-- 同 Approval ID 跨 workspace/run 的 memory/file backend 隔离、mixed-state ID-only duplicate conflict 及错误 scope 拒绝；
-- concrete typed result、显式 all scope、cursor/limit 边界与 detached deep-copy；
-- workspace retain/purge 永久 tombstone、普通 Delete-after-seal 拒绝、exact replay、重复 Teardown，以及 capability/open ingress 的 Orchestrator-only 边界。
-- deletion seal 与在途 reconciliation delivery 的线性化、统一双锁顺序的并发无死锁、seal 后零 Orchestrator/Eventstream
-  delivery，以及重启实例对未完成 terminal delivery checkpoint 的永久抑制。
-
-## 非本 Block 合同
-
-- 终端用户的登录、角色和凭证验证属于 transport/application；Approval 只校验已经进入进程的 producer
-  authority 与 typed principal。
-- Eventstream 是 durable audit/display owner，不参与授权判定；projection 和普通 resolved notification
-  丢失时可由持久化 audit/checkpoint 重放，不能作为 Runtime authority。
-- 低层 file repository 只负责一个已解析 run path；跨 workspace/run 的定位与歧义拒绝由生产
-  `workspaceScopedApprovalRepository` 提供。
+| 能力/维度 | 测试证据 | 结论 |
+| --- | --- | --- |
+| module lifecycle与核心依赖校验 | `module_test.go::TestModuleIdentityConfigureStartStopContract`、`module_test.go::TestModuleConfigureRequiresCoreDependencies` | 已覆盖 |
+| typed command inventory、scope/cursor/clone | `biz/command_router_test.go::TestApprovalCommandTopicsHaveOneSemanticFamily`、`module_test.go::TestApprovalListCommandsAreTypedBoundedAndCursorValidated`、`pkg/events/messages_test.go::TestGetApprovalResultCloneBoundaryUsesDetachedOwnerState` | 已覆盖 |
+| capability/open source与duplicate conflict | `module_test.go::TestApprovalPublishesRuntimeGovernanceCapabilityOnlyToOrchestrator`、`biz/runtime_governance_adapter_test.go::TestRuntimeApprovalRequestRequiresOrchestratorAndExactReplay` | 已覆盖 |
+| human source-principal admission | `biz/runtime_governance_adapter_test.go::TestApprovalResolutionIngressRequiresTrustedSourceAndPrincipal` | 覆盖Application/human approved代表路径；Governance/auto正向、伪造principal及rejected topic矩阵未覆盖 |
+| lifecycle normal/duplicate/opposite terminal | `biz/approval_service_test.go::TestService_ResolveApproval_PendingTransitions`、`biz/approval_service_test.go::TestService_EnsureApprovalResolution_IsIdempotentAndRejectsOppositeTerminalState`、`biz/approval_service_test.go::TestApprovalLifecycleDuplicateObservedFactDoesNotMutateOwnerState` | 已覆盖 |
+| proposal/commit/evidence/audit recovery | `biz/runtime_governance_adapter_test.go::TestRuntimeApprovalProposalRecoversAfterInvalidCommitResult`、`biz/runtime_governance_adapter_test.go::TestApprovalTerminalEvidenceDeliveryRecoversWithoutReResolving`、`biz/runtime_governance_adapter_test.go::TestApprovalResolutionAuditAckFailureRecoversFromDurableTerminal` | 已覆盖 |
+| deletion private path/restart与purge source | `biz/workspace_deletion_delivery_test.go::TestApprovalWorkspaceDeletionRejectsForgedPurgeAndUsesPrivatePath`、`module_test.go::TestApprovalFileDeletionFenceLinearizesAcrossRepositorySets`、`biz/workspace_deletion_delivery_test.go::TestApprovalRestartSkipsLateResolvedDeliveryAfterDeletionSeal` | 已覆盖；forged seal source未覆盖 |
+| file-backed proposal/terminal delivery cutpoints | 当前 proposal/evidence/audit cutpoint使用 memory repositories；尚无 reopened file owner逐 checkpoint恢复测试 | 未覆盖 |
+| Web直连Approval | 无此生产合同，按设计不适用 | 不适用 |

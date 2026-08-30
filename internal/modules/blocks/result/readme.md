@@ -4,111 +4,46 @@ Status: active
 
 Type: stateful-block-contract
 
-Last Verified: 2026-08-29
+Last Verified: 2026-08-30
 
 ## 功能范围与边界
 
-`blocks/result` 是 Result formal outcome 聚合的唯一 owner。聚合根为 Result，Artifact 是 owner 物化并与
-Result 同 scope 的正式子实体。该 block 负责 identity、持久化状态、幂等 fence、artifact 元数据、查询与 Workspace-scoped 清理；
-不负责 evidence quality、DoD coverage 或 accepted 判定策略，也不读取 Runtime authority 重新裁决结果。
+`blocks/result` 是 Result 聚合及其 Artifact 子实体、terminal material binding、Workspace deletion tombstone 的唯一 owner。它从 Orchestrator 已裁决并封存的 terminal delivery 物化 canonical Result/Artifact，维护状态/identity/幂等 fence，提供 bounded query/content read，并执行自身 Workspace-scoped retain/purge。
 
-## 写入与状态合同
-
-- Runtime formal Result 的唯一生产写入口是 typed `RuntimeTerminalDeliveryFact`，且 source 必须为
-  `kernel/orchestrator`。调用方只提交 sealed `ResultMaterial`，不能提交 Result ID、state、revision、时间戳或完整
-  Result/Artifact entity。
-- Result owner 按 `<workspace-id>/<run-id>/result/dod-assessment` 派生 canonical Result ID，并对完整规范化 material
-  计算 `result-material-sha256:*`。相同 terminal identity、相同 material 是幂等重放；相同 Result ID 下 identity 或
-  material 任一漂移均为 conflict，不能创建第二条 Result。
-- Result owner 的 terminal delivery acknowledgement 必须携带上述已持久化、owner-derived exact `ResultID`。该字段只是一项
-  immutable fact，供 SM-4 原样交给最终 Run delivery并形成 successor lineage；Orchestrator、Run、Workspace 均不得自行派生、
-  覆盖或通过 Result repository反查它，Result owner也不因此获得 Run lifecycle authority。
-- Result 状态转换矩阵为：同状态幂等；`draft -> accepted | rejected`；`accepted | rejected -> superseded`。其中
-  `draft` 只用于需要先物化 Artifact 子实体的 owner-private pending 状态；无 Artifact 的 terminal delivery 直接单次
-  持久化最终状态。Runtime 的 failed/cancelled/superseded terminal outcome 均形成 rejected Result，不开放外围状态
-  更新命令。
-- terminal material 的顶层 `ArtifactRefs` 是允许引用集合；summary、coverage 与 closeout 中的 artifact ref 必须属于
-  该集合。owner 将每个 raw ref 物化为 canonical child Artifact ID，并只在 Result 顶层、summary 与 coverage 投影中
-  改写为 child ID；formal closeout 保留其 hash 已封存的 raw ref，child 的 `URI`/`SourceRef` 提供二者映射。正文不进入
-  EventHub，Artifact scope 必须与父 Result 的 workspace/run/result 完全一致。
-- current-schema formal closeout 绑定 `CloseoutID + StartupInputHash + DefinitionRevision + RuntimeStateRevision + TerminalOutcome`
-  并逐 requirement/CWI 保存 coverage、assessment、evidence 三个独立状态。accepted evidence 必须给出 owner revision-set
-  hash；顶层 accepted refs 必须等于逐项 accepted union，完整 closeout 以 canonical hash 防漂移。`completed` 不接受
-  uncovered、unsatisfied、indeterminate 或无 accepted evidence 的 requirement；Result owner只校验封存完整性，不重新授予 credit。
-- 不提供 Result/Artifact 单项 delete command。删除只进入 Workspace owner 的 durable deletion transaction；Result owner
-  自己执行 fixed-point Result/Artifact purge，外部 caller 不能绕过 tombstone 或留下孤立子实体。
-
-## 查询合同
-
-- 每个 topic 都有独立 concrete result type；不存在同时承载 Result、Artifact、列表和删除计数的通用 result
-  envelope，也不存在 generic entity create/update command。
-- Artifact 正文只能通过 Result owner 定义的 concrete typed `/artifact/command/read-content` 读取。command
-  必须携带 exact Workspace/Run scope 与 opaque logical URI；只有 Result owner 可以将 URI 解析为其 Artifact 子实体及
-  owner-private material。result 返回 detached `ArtifactID/URI/FileName/ContentType/Content/ContentSHA256`，内容上限
-  1 MiB，并在跨 EventHub 前验证 scope、文件名、长度与 SHA-256。该合同不返回 path、reader、repository 或
-  任何可变 owner handle，Application 也不得直读 Result 后端目录。
-- Workspace 删除只接受 `blocks/workspace` 的 concrete seal/purge command。Result owner 持久化自身 tombstone，并以 owner-private internal event 推进 `fenced → purged`；command adapter 只能提交 `purge_requested`，物理 Result/Artifact fixed-point sink 只能由同一 private dispatcher 调用，完成后再提交 `purge_completed` CAS。retain 隐藏公共 Result/Artifact 查询且不物理删除。所有 terminal delivery、recovery 及实体 mutation 都先核对同一 owner fence；file backend 与 tombstone 共用 path-global workspace 锁，memory production repository set 共用 guard。seal/purge ack 使用确定性的 `FenceID`、`PurgeID`、`Revision`、`AckHash`、`PurgeProofHash`，重放不以删除计数作为身份。
-- repository helper 与 Result/Artifact mutation method 均为 Biz 包内私有实现；Biz 不导出或嵌入可由其他组件取得的
-  `Service` facade，跨组件写入只能进入 owner typed EventHub handler。
-- 生产构造只接受 backend aggregate 铸造并通过 `Validate` 的 opaque `ResultOwnerRepositories` bundle；Result、Artifact
-  与 Workspace deletion surface 必须携带同一 backend binding。zero、fake 或 memory/file mixed-set 在订阅前 fail closed，
-  Biz、Module、Plugin 和 Initiator 均不保留独立 repository 注入或 legacy fallback。
-- 所有 get/list command 都显式携带 `WorkspaceID`。按 Run/Result 查询时也必须绑定相同 workspace context；
-  memory 与 file backend 对重复局部 ID 采用相同的 scoped/ambiguous 语义。
-- 所有 list command 使用 ID keyset `Cursor` 和 `Limit`，默认 100、单页上限 200。Application 与 Orchestrator 的
-  production collector 同时具备 cursor visited-set 与 1,000 页 hard limit。
-- entity 离开 owner 前通过 `CloneResult`/`CloneArtifact` 隔离可变 slice 与嵌套值。terminal material normalization
-  自身返回 detached value，owner 映射 canonical Artifact ID 时不再额外执行完整 `CloneResult`。allocation benchmark
-  是性能回归观测，不把固定拷贝次数或 alloc 数写成语义合同。
-
-## 通知与恢复合同
-
-- Result 最终状态持久化后由 owner 发布 accepted/rejected `ResultChangedData`；通知含 owner-derived
-  `NotificationID` 与 `TerminalMaterialHash`，不携带 Artifact 正文。
-- terminal Result 行本身是通知的 durable replay source。相同 SM-4 delivery 重放会再次发布同一通知；owner 启动时
-  及运行期间每分钟还会通过 owner-private、单页 200/最多 1,000 页的 recovery inventory 有界重放正式结果。
-- file repository 只接受 current object-shaped `SummaryDetail.Diagnostics`；`null`、数组、标量、未知/退役字段与空文件
-  均在 read/recovery 边界 fail-closed，不补值、不改写。
-- Eventstream 将 `NotificationID` 用作 EventRecord ID；重复 append 只对该 stable identity 视为幂等，其他 ID conflict
-  仍 fail-visible。因此 Result 持久化与 SM-4 acknowledgement 不依赖 projection，可同时关闭“持久化后崩溃/Hub
-  投递中断导致永久缺通知”的窗口。
+持久模型允许 `draft`、`accepted`、`rejected`、`superseded`；Runtime terminal ingress 仅将 completed 映射为 accepted，将 failed/cancelled/superseded outcome 映射为 rejected。`draft` 仅是 Artifact 物化期间的 owner-private cutpoint。四个 data topic `created/accepted/rejected/superseded` 描述 Result 模型生命周期/恢复重放，不能等同四种 Runtime terminal outcome。
 
 ## 组件交互及合同
 
-| 交互组件 | 方向 | 具体合同 | 当前结论 |
-| --- | --- | --- | --- |
-| `kernel/orchestrator` | Orchestrator → Result | sealed `RuntimeTerminalDeliveryFact` / `ResultLifecycleCommandResult` | 完整；Result owner 派生 identity/state 并在 ack 返回 exact ResultID，SM-4 只转交该 fact |
-| `application/workorchd` | Application → Result | concrete scoped get/list 与 bounded Artifact content-read command/result | 完整；Application 只读且不解析 owner-private path，Workspace owner 独占删除协调 ingress |
-| `blocks/workspace` | Workspace → Result | workspace-scoped seal/purge command/result | 完整；Result owner 私有 fence 与 fixed-point sink |
-| Eventstream / projection | Result → consumer | accepted/rejected `ResultChangedData` + stable `NotificationID` | 完整；Result durable replay、Eventstream 幂等去重，projection 不参与 Runtime authority |
-| Run / Workspace | 无 repository 直连 | 同一 sealed terminal outcome 的 Result → Workspace → Run delivery 顺序 | 完整；Result 不直接迁移 SM-1 或 Workspace lifecycle |
+| 交互方 | typed command/data/result | 边界 |
+| --- | --- | --- |
+| `kernel/orchestrator` | `RuntimeTerminalDeliveryFact → ResultLifecycleCommandResult` | 唯一 terminal producer；source 必须为 Orchestrator。Result 校验 sealed material，但不重判 evidence/DoD。 |
+| `blocks/workspace` | `SealWorkspaceResultDeletionCommand/Result`、`PurgeWorkspaceResultsCommand/Result` | 唯一 deletion producer；Result 独自 fence、fixed-point purge、证明和 replay。 |
+| Application/read consumers | Get/List Result；List Artifact by workspace/run/result；`ReadArtifactContentCommand/Result` | 返回 detached typed value；content read 有 scope、大小和 hash 校验，不暴露 path/repository。 |
+| projection consumers | `ResultChangedData` on `created/accepted/rejected/superseded` | 提交后或启动恢复通知，不授予 authority。 |
 
-## 相关约束
+canonical Result ID 由 workspace/run 派生；Artifact ID 由 Result ID 与 sealed source ref 派生。相同 terminal identity/material 是幂等重放，任一 identity 或 material 漂移均 conflict。每个 EventHub topic 使用 `pkg/events` 中的具体 result。
+生产 `Configure` 只接受通过 `Validate()` 的 canonical `ResultOwnerRepositories` 与 EventHub；公开面没有 generic create/update/delete。
 
-- 本 block 只访问 Result 与 Artifact repository，不得访问 Run、Workspace、Decision、EvidenceRecord repository 或
-  其他 owner service。
-- 对外 Artifact content read 只是 bounded owner query，不创建第二份 Artifact 内容权威，不改变 Result/Artifact state，也不参与
-  Runtime evidence/closeout 重判。
-- Result owner 只按 sealed outcome identity 执行 owner-local transition，不读取 `ConvergenceState`、focus、repair 或
-  error message 重新裁决；delivery feedback 保留 stable category 与安全 original diagnostic。
-- 如需新增 Artifact 写入，必须扩展只携带 immutable artifact material 的 typed terminal/owner contract，由 Result
-  owner 派生 identity、state 和时间戳；不得恢复允许调用方提交完整 Artifact entity 的 generic write surface。
+## 不变量与非职责
 
-## 已覆盖回归
+- Result/Artifact scope 必须与 terminal material 的 workspace/run/result 完全一致；返回值和 notification 必须深拷贝。
+- formal closeout、material hash、artifact ref 映射和 terminal delivery identity 一经封存不可漂移。
+- Result 状态同状态重放幂等；`draft → accepted|rejected`，已终态只允许 owner-internal `→ superseded`，不存在外围 generic update/delete。
+- Workspace tombstone 后普通读写永久 fail closed；purge 物理 sink 只能由 Result-private deletion dispatcher 调用。
+- 不拥有 evidence quality、DoD coverage credit、terminal outcome 选择、Run SM-1 或 Runtime SM-2～SM-4。
+- 不从 Runtime authority/repository反向重建裁决，也不向其他组件暴露 Result repository/service。
 
-- canonical Result/Artifact ID、规范化 material hash、相同 delivery 重放、material/identity drift conflict。
-- Result pending、Artifact 部分写入后的重启收敛，以及持久化 terminal Result 的启动通知重放。
-- Result/Artifact scope、父引用、Workspace retain/purge fixed point 与 file backend 跨 workspace ResultID 隔离。
-- concrete command/result 类型、默认/最大分页、cursor continuation/cycle guard 和 query clone 隔离。
-- bounded Artifact content-read 的 Workspace/Run/URI scope、Result-owned material 解析、1 MiB guard、SHA-256 完整性、
-  detached copy，nil/wrong result 与跨 scope/tampered payload 拒绝。
-- stable Eventstream dedupe、nested artifact reference closure、terminal material isolation 与 allocation benchmark。
-- formal closeout identity/hash、三轴 requirement outcome、accepted-evidence union、owner revision set 与 indeterminate-success 拒绝。
-- 1,024 组 unique evidence/artifact refs 的 normalization/hash、canonical child mapping、重排稳定性、输入隔离与
-  toolchain-relative allocation growth guard；同时保留 hash 与 Result mapping 的独立 allocation benchmark。
-- `SummaryDetail.Diagnostics:null`、非对象 diagnostics、未知/退役字段与空文件严格拒绝。
+## 能力验收
 
-## 当前验证结论
-
-- 当前没有已知的本地可执行合同或测试缺口；性能守卫只约束引用规模增长不得出现异常的超线性 allocation，
-  不把特定机器 wall-clock 或绝对 alloc 数写成业务合同。
+| 能力/维度 | 测试证据 | 结论 |
+| --- | --- | --- |
+| module lifecycle、依赖校验、重复 Run | `module_test.go::TestModuleIdentityConfigureStartStopContract`、`module_test.go::TestModuleSetupRequiresRepositories`、`module_test.go::TestModuleRunIsIdempotent` | 已覆盖 |
+| owner-private terminal materialization；public Result/Artifact query、scope、clone、list bound | `module_test.go::TestModuleManagesResultsAndArtifacts`、`module_test.go::TestResultOwnerListContractsAreBoundedAndCursorBased`、`biz/result_service_test.go::TestServiceEnforcesArtifactParentScope`、`pkg/events/messages_test.go::TestCloneResultAndArtifactIsolateEventHubBoundary` | 已覆盖；测试中的 seed 不是 public CRUD |
+| terminal normal/duplicate/material drift/partial recovery | `biz/lifecycle_handler_test.go::TestTerminalDeliveryDerivesCanonicalResultAndRejectsMaterialDrift`、`biz/lifecycle_handler_test.go::TestTerminalDeliveryRecoversDraftAndPartialArtifactMaterialization`、`biz/lifecycle_handler_test.go::TestTerminalDeliveryReplayReemitsStableNotification` | 已覆盖 |
+| privileged terminal/seal/purge sources与零 mutation | `biz/lifecycle_handler_test.go::TestResultPrivilegedIngressRejectsForgedSourcesWithoutOwnerMutation` | 已覆盖 |
+| transition negative/material drift | `biz/result_service_test.go::TestResultTransitionMatrixRejectsTerminalRegression`、`biz/result_service_test.go::TestServiceRejectsTerminalMaterialMutation` | 已覆盖；public contract无 revision-based stale mutation，stale维度不适用 |
+| deletion retain/purge/idempotency/private dispatcher | `module_test.go::TestResultWorkspaceDeletionFenceHidesRetainedDataAndPurgeIsStable`、`biz/workspace_deletion_private_dispatch_test.go::TestWorkspaceDeletionPhysicalPurgeUsesOwnerPrivateDispatcher`、`biz/workspace_deletion_private_dispatch_test.go::TestWorkspaceDeletionPrivateDispatcherRejectsForgedPurgeCompletion` | 已覆盖 |
+| durable terminal notification 的 fresh-owner Start replay | `biz/lifecycle_handler_test.go::TestResultFileOwnerReplaysTerminalAndResumesDeletionAfterReopen`、`biz/lifecycle_handler_test.go::TestResultOwnerStartReplaysDurableTerminalNotification` | 已覆盖；前者第二个 file owner 显式 Start |
+| content boundary/limit/hash | `biz/result_service_test.go::TestServiceReadsBoundedArtifactContentFromOwnerState`、`pkg/events/messages_test.go::TestReadArtifactContentResultIsBoundedHashedAndCloned` | 已覆盖 |
+| deletion restart via fresh Module.Start + EventHub ingress | file reopen测试仅以新 owner直接调用private command adapter；尚未从重开 backend启动Module并经EventHub继续deletion | 未覆盖 |
+| Artifact 多子项每个 durable write cut 的真实进程 kill/reopen | 当前 partial-materialization 使用 fault injection；未覆盖每个 child write cut 的子进程 kill matrix | 未覆盖 |

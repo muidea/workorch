@@ -1,9 +1,12 @@
 package eventstream
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
+	"log/slog"
 	"strings"
 	"sync"
 	"testing"
@@ -45,6 +48,7 @@ type countingEventRecordRepository struct {
 	base        repository.EventRecordRepository
 	mu          sync.Mutex
 	appendCount int
+	listCount   int
 }
 
 type failingAppendEventRecordRepository struct {
@@ -52,6 +56,12 @@ type failingAppendEventRecordRepository struct {
 	mu       sync.Mutex
 	failures int
 	err      error
+}
+
+type countingEventStreamWorkspaceDeletionRepository struct {
+	repository.EventStreamWorkspaceDeletionRepository
+	mu       sync.Mutex
+	getCount int
 }
 
 type eventStreamTestPurger struct {
@@ -125,6 +135,9 @@ func (r *countingEventRecordRepository) Get(ctx context.Context, id common.Event
 }
 
 func (r *countingEventRecordRepository) List(ctx context.Context, query workorchquerycontract.EventRecordQuery) ([]*eventstreammodel.EventRecord, error) {
+	r.mu.Lock()
+	r.listCount++
+	r.mu.Unlock()
 	return r.base.List(ctx, query)
 }
 
@@ -142,6 +155,25 @@ func (r *countingEventRecordRepository) AppendCount() int {
 	return r.appendCount
 }
 
+func (r *countingEventRecordRepository) ListCount() int {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.listCount
+}
+
+func (r *countingEventStreamWorkspaceDeletionRepository) Get(ctx context.Context, workspaceID common.WorkspaceID) (*eventstreammodel.WorkspaceDeletion, error) {
+	r.mu.Lock()
+	r.getCount++
+	r.mu.Unlock()
+	return r.EventStreamWorkspaceDeletionRepository.Get(ctx, workspaceID)
+}
+
+func (r *countingEventStreamWorkspaceDeletionRepository) GetCount() int {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.getCount
+}
+
 func newEventStreamTestService(t *testing.T, repo repository.EventRecordRepository) (*Biz, magicevent.Hub) {
 	t.Helper()
 	rawHub := magicevent.NewHub(16)
@@ -149,6 +181,40 @@ func newEventStreamTestService(t *testing.T, repo repository.EventRecordReposito
 	deletions := memory.NewEventStreamWorkspaceDeletionRepository()
 	return New(Dependencies{OwnerRepositories: eventStreamBizTestOwnerRepositories(
 		repo, deletions, eventStreamTestPurger{repo: repo}), EventHub: rawHub}), rawHub
+}
+
+func TestHighWatermarksFailsClosedBeforeOwnerIOAndDeduplicatesCanonicalIDs(t *testing.T) {
+	ctx := context.Background()
+	records := newCountingEventRecordRepository()
+	deletions := &countingEventStreamWorkspaceDeletionRepository{
+		EventStreamWorkspaceDeletionRepository: memory.NewEventStreamWorkspaceDeletionRepository(),
+	}
+	service := &Biz{repo: records, workspaceDeletions: deletions}
+
+	invalidInputs := [][]common.WorkspaceID{
+		{"ws-valid", " "},
+		{common.WorkspaceID(string([]byte{0xff}))},
+		{common.WorkspaceID(strings.Repeat("x", eventstreamevents.MaxHighWatermarkWorkspaceIDBytes+1))},
+	}
+	for index, workspaceIDs := range invalidInputs {
+		if _, err := service.highWatermarks(ctx, workspaceIDs); !errors.Is(err, common.ErrInvalidArgument) {
+			t.Fatalf("invalid input %d error = %v, want invalid argument", index, err)
+		}
+	}
+	if records.ListCount() != 0 || deletions.GetCount() != 0 {
+		t.Fatalf("invalid input reached owner I/O: event lists=%d deletion gets=%d", records.ListCount(), deletions.GetCount())
+	}
+
+	items, err := service.highWatermarks(ctx, []common.WorkspaceID{" ws-b ", "ws-a", "ws-b"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(items) != 2 || items[0].WorkspaceID != "ws-a" || items[1].WorkspaceID != "ws-b" {
+		t.Fatalf("high watermarks = %+v, want canonical sorted unique IDs", items)
+	}
+	if records.ListCount() != 2 || deletions.GetCount() != 2 {
+		t.Fatalf("canonical duplicate I/O: event lists=%d deletion gets=%d, want 2/2", records.ListCount(), deletions.GetCount())
+	}
 }
 
 func sendPurgeWorkspaceCommand(ctx context.Context, rawHub magicevent.Hub, workspaceID common.WorkspaceID) (eventstreamevents.PurgeWorkspaceResult, error) {
@@ -627,6 +693,227 @@ func TestServiceDeduplicatesStableDecisionNotificationReplay(t *testing.T) {
 	}
 }
 
+func TestServiceStableOwnerNotificationReplayRejectsSourceTopicAndPayloadDrift(t *testing.T) {
+	ctx := context.Background()
+	type recordFactory func(source string) *eventstreammodel.EventRecord
+	tests := []struct {
+		name         string
+		topic        string
+		source       string
+		destination  string
+		workspaceID  common.WorkspaceID
+		data         func() any
+		build        recordFactory
+		payloadDrift recordFactory
+	}{
+		{
+			name: "run", topic: runevents.TopicRunStateChanged, source: runcommon.ModuleID, destination: runevents.NotificationDestination, workspaceID: "ws-stable-run",
+			data: func() any { return stableRunNotificationTestData() },
+			build: func(source string) *eventstreammodel.EventRecord {
+				data := stableRunNotificationTestData()
+				return runStateRecord(runevents.TopicRunStateChanged, source, data)
+			},
+			payloadDrift: func(source string) *eventstreammodel.EventRecord {
+				data := stableRunNotificationTestData()
+				data.FailureReason = "drifted audit payload"
+				return runStateRecord(runevents.TopicRunStateChanged, source, data)
+			},
+		},
+		{
+			name: "memory recall", topic: memoryevents.TopicMemoryRecallRecorded, source: memorycommon.ModuleID, destination: memoryevents.NotificationDestination, workspaceID: "ws-stable-memory",
+			data: func() any { return stableMemoryRecallNotificationTestData() },
+			build: func(source string) *eventstreammodel.EventRecord {
+				data := stableMemoryRecallNotificationTestData()
+				return memoryRecallRecord(source, data)
+			},
+			payloadDrift: func(source string) *eventstreammodel.EventRecord {
+				data := stableMemoryRecallNotificationTestData()
+				data.Reason = "drifted audit payload"
+				return memoryRecallRecord(source, data)
+			},
+		},
+		{
+			name: "LLM usage", topic: llmevents.TopicLLMUsageRecorded, source: llmcommon.ModuleID, destination: llmevents.NotificationDestination, workspaceID: "ws-stable-llm",
+			data: func() any { return stableLLMUsageNotificationTestData() },
+			build: func(source string) *eventstreammodel.EventRecord {
+				data := stableLLMUsageNotificationTestData()
+				return llmUsageRecord(source, data)
+			},
+			payloadDrift: func(source string) *eventstreammodel.EventRecord {
+				data := stableLLMUsageNotificationTestData()
+				data.Operation = "embeddings"
+				return llmUsageRecord(source, data)
+			},
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			repo := newCountingEventRecordRepository()
+			service, rawHub := newEventStreamTestService(t, repo)
+			if err := service.Start(); err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(service.Stop)
+			eventFor := func(topic, source string) magicevent.Event {
+				return magicevent.NewEventWithContext(topic, source, eventstreamevents.CommandDestination, magicevent.NewHeader(), ctx, struct{}{})
+			}
+
+			first := test.build(test.source)
+			if first.ID == "" || !hasStableNotificationRecordID(first) {
+				t.Fatalf("stable record ID = %q", first.ID)
+			}
+			for range 2 {
+				rawHub.Post(magicevent.NewEventWithContext(
+					test.topic, test.source, test.destination, magicevent.NewHeader(), ctx, test.data(),
+				))
+			}
+			waitForEventRecords(t, repo, workorchquerycontract.EventRecordQuery{WorkspaceID: test.workspaceID}, 1)
+			deadline := time.Now().Add(2 * time.Second)
+			for repo.AppendCount() < 2 && time.Now().Before(deadline) {
+				time.Sleep(5 * time.Millisecond)
+			}
+			if repo.AppendCount() != 2 {
+				t.Fatalf("exact replay append attempts = %d, want 2", repo.AppendCount())
+			}
+			exactRecords, err := repo.List(ctx, workorchquerycontract.EventRecordQuery{WorkspaceID: test.workspaceID, IncludePayload: true})
+			if err != nil || len(exactRecords) != 1 || exactRecords[0].ID != first.ID {
+				t.Fatalf("exact replay records = %+v err=%v, want one stable record", exactRecords, err)
+			}
+			exactReplay := test.build(test.source)
+			if err := service.appendNotificationRecord(eventFor(test.topic, test.source), exactReplay, nil); err != nil {
+				t.Fatalf("owner did not acknowledge exact replay: %v", err)
+			}
+			restartedService, _ := newEventStreamTestService(t, repo)
+			if err := restartedService.appendNotificationRecord(eventFor(test.topic, test.source), test.build(test.source), nil); err != nil {
+				t.Fatalf("fresh owner did not acknowledge persisted exact replay: %v", err)
+			}
+
+			payloadDrift := test.payloadDrift(test.source)
+			if payloadDrift.ID != first.ID {
+				t.Fatalf("payload drift escaped stable identity: %q != %q", payloadDrift.ID, first.ID)
+			}
+			if err := service.appendNotificationRecord(eventFor(test.topic, test.source), payloadDrift, nil); !errors.Is(err, common.ErrConflict) {
+				t.Fatalf("payload drift error = %v, want conflict", err)
+			}
+
+			sourceDrift := test.build("untrusted/module")
+			if sourceDrift.ID != first.ID {
+				t.Fatalf("source drift escaped stable identity: %q != %q", sourceDrift.ID, first.ID)
+			}
+			if err := service.appendNotificationRecord(eventFor(test.topic, "untrusted/module"), sourceDrift, nil); !errors.Is(err, common.ErrConflict) {
+				t.Fatalf("source drift error = %v, want conflict", err)
+			}
+
+			topicDrift := test.build(test.source)
+			topicDrift.Topic = test.topic + "/drift"
+			if err := service.appendNotificationRecord(eventFor(topicDrift.Topic, test.source), topicDrift, nil); !errors.Is(err, common.ErrConflict) {
+				t.Fatalf("topic drift error = %v, want conflict", err)
+			}
+
+			var conflictLog bytes.Buffer
+			func() {
+				previous := slog.Default()
+				slog.SetDefault(slog.New(slog.NewTextHandler(&conflictLog, nil)))
+				defer slog.SetDefault(previous)
+				service.finishRecordAppend(eventFor(test.topic, test.source), test.payloadDrift(test.source), nil)
+			}()
+			if !strings.Contains(conflictLog.String(), "workorch eventstream append failed") || !strings.Contains(conflictLog.String(), "conflict") {
+				t.Fatalf("stable replay drift was not logged as conflict: %q", conflictLog.String())
+			}
+
+			records, err := repo.List(ctx, workorchquerycontract.EventRecordQuery{WorkspaceID: test.workspaceID, IncludePayload: true})
+			if err != nil || len(records) != 1 || records[0].ID != first.ID {
+				t.Fatalf("persisted stable records = %+v err=%v, want one exact record", records, err)
+			}
+		})
+	}
+}
+
+func TestRunStableNotificationIdentitySeparatesSpecificAndCanonicalTopics(t *testing.T) {
+	ctx := context.Background()
+	repo := memory.NewEventRecordRepository()
+	service, _ := newEventStreamTestService(t, repo)
+	data := stableRunNotificationTestData()
+	specific := runStateRecord(runevents.TopicRunBlockedOnDecision, runcommon.ModuleID, data)
+	canonical := runStateRecord(runevents.TopicRunStateChanged, runcommon.ModuleID, data)
+	if specific.ID == canonical.ID {
+		t.Fatalf("same Run causation collided across legitimate topics: %q", specific.ID)
+	}
+	if !validRunStateNotification(runevents.TopicRunBlockedOnDecision, data) || !validRunStateNotification(runevents.TopicRunStateChanged, data) {
+		t.Fatal("Run owner specific/canonical topic pair was rejected")
+	}
+	if validRunStateNotification(runevents.TopicRunBlockedOnApproval, data) {
+		t.Fatal("Run topic drift was accepted for the same state/causation")
+	}
+	unknownState := data
+	unknownState.State = ""
+	if validRunStateNotification(runevents.TopicRunStateChanged, unknownState) {
+		t.Fatal("canonical Run topic accepted an unknown state")
+	}
+	for _, item := range []struct {
+		topic  string
+		record *eventstreammodel.EventRecord
+	}{
+		{topic: runevents.TopicRunBlockedOnDecision, record: specific},
+		{topic: runevents.TopicRunStateChanged, record: canonical},
+	} {
+		event := magicevent.NewEventWithContext(item.topic, runcommon.ModuleID, runevents.NotificationDestination, magicevent.NewHeader(), ctx, data)
+		if err := service.appendNotificationRecord(event, item.record, nil); err != nil {
+			t.Fatalf("append %s: %v", item.topic, err)
+		}
+		replay := runStateRecord(item.topic, runcommon.ModuleID, data)
+		if err := service.appendNotificationRecord(event, replay, nil); err != nil {
+			t.Fatalf("replay %s: %v", item.topic, err)
+		}
+	}
+	records, err := repo.List(ctx, workorchquerycontract.EventRecordQuery{WorkspaceID: data.WorkspaceID})
+	if err != nil || len(records) != 2 || records[0].ID == records[1].ID {
+		t.Fatalf("Run specific/canonical records = %+v err=%v", records, err)
+	}
+	otherWorkspaceID := stableNotificationRecordID(stableRunNotificationRecordIDPrefix, runevents.TopicRunStateChanged, "ws-other", data.RunID, data.CausationID)
+	if otherWorkspaceID == canonical.ID {
+		t.Fatalf("workspace-local Run identity collided globally: %q", canonical.ID)
+	}
+	if stableNotificationRecordID(stableRunNotificationRecordIDPrefix, runevents.TopicRunStateChanged, data.WorkspaceID, data.RunID, " ") != "" {
+		t.Fatal("blank stable notification identity produced a record ID")
+	}
+	invalidRecall := stableMemoryRecallNotificationTestData()
+	invalidRecall.TraceID = " "
+	if validMemoryRecallRecordedData(invalidRecall) {
+		t.Fatal("Memory recall accepted a noncanonical blank TraceID")
+	}
+}
+
+func TestFinishRecordAppendIsNilEventSafe(t *testing.T) {
+	previous := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(io.Discard, nil)))
+	t.Cleanup(func() { slog.SetDefault(previous) })
+	(&Biz{}).finishRecordAppend(nil, nil, common.ErrInvalidArgument)
+}
+
+func stableRunNotificationTestData() runevents.RunStateChangedData {
+	return runevents.RunStateChangedData{
+		WorkspaceID: "ws-stable-run", RunID: "run-stable", WorkspaceRunGeneration: 1, RunRevision: 3,
+		State: common.RunStateBlockedOnDecision, BlockingTicketID: "ticket-stable", RuntimeStateRevision: 7,
+		RuntimeStateRef: "runtime-state/ws-stable-run/run-stable/7",
+		CausationID:     runevents.RunStateChangedCausationID("run-stable", 1, 3, 7),
+	}
+}
+
+func stableMemoryRecallNotificationTestData() memoryevents.MemoryRecallRecordedData {
+	return memoryevents.MemoryRecallRecordedData{
+		TraceID: "trace-stable", WorkspaceID: "ws-stable-memory", RunID: "run-stable-memory", StepID: "step-stable-memory",
+		Stage: "execution", Source: "semantic", Status: "completed", Reason: "stable audit payload", OccurredAt: "2026-08-30T00:00:00Z",
+	}
+}
+
+func stableLLMUsageNotificationTestData() llmevents.LLMUsageRecordedData {
+	return llmevents.LLMUsageRecordedData{
+		RequestID: "request-stable", WorkspaceID: "ws-stable-llm", RunID: "run-stable-llm", Operation: "responses",
+		Status: "completed", PhysicalResponseMode: llmaudit.PhysicalResponseModeNonStreaming, OccurredAt: "2026-08-30T00:00:00Z",
+	}
+}
+
 func TestServicePersistsTypedMemoryNotifications(t *testing.T) {
 	ctx := context.Background()
 	repo := memory.NewEventRecordRepository()
@@ -751,9 +1038,9 @@ func TestPurgeWorkspaceCommandDeletesOnlyWorkspaceRecords(t *testing.T) {
 	}
 	t.Cleanup(service.Stop)
 	for _, record := range []*eventstreammodel.EventRecord{
-		{ID: "event-purge-1", Topic: runevents.TopicRunCreated, WorkspaceID: "ws-purge", RunID: "run-purge"},
-		{ID: "event-purge-2", Topic: runevents.TopicRunStateChanged, WorkspaceID: "ws-purge", RunID: "run-purge"},
-		{ID: "event-keep", Topic: runevents.TopicRunCreated, WorkspaceID: "ws-keep", RunID: "run-keep"},
+		{ID: "event-purge-1", Version: "workorch.event", Topic: runevents.TopicRunCreated, OccurredAt: "2026-08-30T00:00:00Z", SourceModule: runcommon.ModuleID, SubjectType: "run", SubjectID: "run-purge", WorkspaceID: "ws-purge", RunID: "run-purge", StreamPosition: 1, Revision: 1},
+		{ID: "event-purge-2", Version: "workorch.event", Topic: runevents.TopicRunStateChanged, OccurredAt: "2026-08-30T00:00:01Z", SourceModule: runcommon.ModuleID, SubjectType: "run", SubjectID: "run-purge", WorkspaceID: "ws-purge", RunID: "run-purge", StreamPosition: 2, Revision: 2},
+		{ID: "event-keep", Version: "workorch.event", Topic: runevents.TopicRunCreated, OccurredAt: "2026-08-30T00:00:02Z", SourceModule: runcommon.ModuleID, SubjectType: "run", SubjectID: "run-keep", WorkspaceID: "ws-keep", RunID: "run-keep", StreamPosition: 3, Revision: 1},
 	} {
 		if err := repo.Append(ctx, record); err != nil {
 			t.Fatalf("append event %s: %v", record.ID, err)
@@ -975,6 +1262,32 @@ func TestServiceSanitizesAndBoundsPayloadBeforePersistence(t *testing.T) {
 	redacted, _ := item.Payload.String("apiToken")
 	if redacted != "[redacted]" {
 		t.Fatalf("secret field = %q, want redacted", redacted)
+	}
+}
+
+func TestServiceCanonicalizesOccurredAtBeforePersistence(t *testing.T) {
+	ctx := context.Background()
+	repo := memory.NewEventRecordRepository()
+	service, _ := newEventStreamTestService(t, repo)
+	record := &eventstreammodel.EventRecord{
+		ID: "event-canonical-time", Topic: "/test", OccurredAt: "2026-08-19T19:00:00.5-05:00",
+		SourceModule: "blocks/test", SubjectType: "test", SubjectID: "canonical-time",
+	}
+	if err := service.appendRecord(ctx, record); err != nil {
+		t.Fatalf("append offset timestamp: %v", err)
+	}
+	stored, err := repo.Get(ctx, record.ID)
+	if err != nil {
+		t.Fatalf("get canonical timestamp record: %v", err)
+	}
+	if stored.OccurredAt != "2026-08-20T00:00:00.5Z" {
+		t.Fatalf("stored OccurredAt = %q, want canonical UTC", stored.OccurredAt)
+	}
+	if err := service.appendRecord(ctx, &eventstreammodel.EventRecord{
+		ID: "event-invalid-time", Topic: "/test", OccurredAt: "not-rfc3339",
+		SourceModule: "blocks/test", SubjectType: "test", SubjectID: "invalid-time",
+	}); !errors.Is(err, common.ErrInvalidArgument) {
+		t.Fatalf("invalid OccurredAt error = %v, want invalid argument", err)
 	}
 }
 

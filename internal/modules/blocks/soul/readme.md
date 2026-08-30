@@ -1,93 +1,55 @@
-# Soul Registry Stateful Block
+# Soul Registry Block
 
 Status: active
 
 Type: stateful-block-contract
 
-Last Verified: 2026-08-26
+Last Verified: 2026-08-30
 
 ## 功能范围与边界
 
-`blocks/soul` 是 Soul catalog 的唯一 owner。正式状态包括 Soul identity、monotonic revision、content hash、source
-provenance、名称/描述、business domains、`SoulMD` guidance，以及 Skill、MCP server、MCP capability、capability
-category、tool kind 五组 context-selection allowlist。
+`blocks/soul` 是 Soul definition 的唯一 owner。它拥有 identity、monotonic revision、canonical content hash、source
+provenance、名称/描述、business domains、`SoulMD`，以及 Skill、MCP server、MCP capability、capability category、tool
+kind 五组 context-selection allowlist。公开能力为 CRUD、有界 list、allowlist validation 和内置默认资源 ensure。
 
-下列内容不属于 Soul owner 状态：
-
-- stage binding 与 template stage-policy refs 由 Workspace/template/Application activation 组合；
-- capability 是否存在、server/capability 归属、stage readiness 由 MCP Registry 或相应 capability owner 提供 typed fact；
-- effect、replay、risk 与 approval authority 由 capability/governance 合同提供；
-
-Soul allowlist 只约束 activation 选择和 provider-visible stage context，不产生 Runtime operation authority。SM-2/SM-3
-仍只能从 template/profile 声明、capability owner fact 与 sealed manifest 获得授权。
+Soul allowlist 只约束 Application 的 activation/context 选择，不产生 capability readiness、effect、governance 或 Runtime
+operation authority。本组件不拥有 stage binding、workspace template policy、MCP Registry 关系、Run snapshot 或 SM-2/SM-3
+transition。
 
 ## 组件交互及合同
 
-- create/get/list/update/delete 与 allowlist validation 都由 `blocks/soul/pkg/events` 定义；每个 topic 使用独立的
-  concrete command/result：`CreateSoulResult`、`GetSoulResult`、`ListSoulsResult`、`UpdateSoulResult`、
-  `DeleteSoulResult`、`ValidateCapabilitySelectionResult`。
-- 所有 topic 都是同步 command。若误用无 result 的 `Post`，handler 在任何读取或写入前直接返回；create、update、
-  delete 和 ensure-defaults 不会静默改变 owner 状态。
-- Soul repository helper、constructor 与 CRUD/list/validation 方法全部为 Biz package-private；外部只能通过 concrete
-  EventHub command/result 进入 owner，因此不能绕过 owner ingress 直接执行 read-update-write mutation。
-- `ListSoulsCommand` 使用 `CursorAfterID + Limit`，默认 100、owner hard limit 200；结果回显稳定 `NextCursor`。
-  Application 若需完整管理视图，必须逐页读取，并执行页数、条目数、单调 cursor 和 cycle guard。
-- `application/workorchd` 通过 EventHub 管理/读取 Soul。fresh activation 使用 execution stage Soul（缺失时才回退
-  effective default Soul）完成 Skill 自动选择和五组 allowlist admission，避免 default 先选中、execution 后拒绝。
-- MCP selection 在 Application 组合层先用 Registry typed record 确认 capability 存在、绑定已选择 server 且具有
-  category，再提交 Soul allowlist validation；Soul owner 不跨 owner 查询 Registry，也不猜 risk/effect/approval。
-- activation 封存 detached default/stage Soul snapshot。LLM semantic-plan C3 消费 planning Soul；operation candidate
-  C3 按 execution/validation/decision 当前 stage 选择 Soul，并按该 Soul 过滤共享 Skill/MCP context。approval/artifact
-  当前没有 provider/capability 执行入口，其 binding 只是封存快照，不能宣称已有独立执行语义。
-- `kernel/system` 发送 Soul owner-local `EnsureDefaultsCommand` / `EnsureDefaultsResult`；默认种子复用 create 的同一
-  normalization/validation 路径，只创建缺失 ID，已存在对象保持不变。
-
-## 交互合同完整性
-
-| 交互组件 | 方向 | 具体合同 | 当前结论 |
+| 交互方 | 方向 | typed EventHub 合同 | 调用/授权语义 |
 | --- | --- | --- | --- |
-| `application/workorchd` | Application → Soul | concrete CRUD、bounded list、allowlist validation | 完整；只覆盖 Soul 自有五组 allowlist |
-| `kernel/system` | System → Soul | `EnsureDefaultsCommand` / `EnsureDefaultsResult` | 完整；校验后 create-only、非覆盖 |
-| Workspace activation | Application → Run bootstrap | detached default/stage Soul guidance 与 allowlist snapshot | 完整；选择使用 execution Soul |
-| `blocks/llm` | Run snapshot → provider C3 | planning 及 execution/validation/decision 当前 stage guidance；Skill/MCP stage filter | 完整；不产生 operation authority |
-| capability / governance owner | 无 Soul 直连 | existence、ownership、effect/risk/approval typed fact | 不属于 Soul 合同 |
+| `application/workorchd` | Application → Soul | create/get/list/update/delete、`ValidateCapabilitySelectionCommand/Result` | intended caller；CRUD/validation 当前不执行 exact source authorization |
+| `kernel/system` | System → Soul | `EnsureDefaultsCommand/Result` | 仅接受 exact source `kernel/system` |
+| repository backend | Soul → repository | `SoulRepository` CRUD/list | owner-private 技术依赖 |
 
-## Owner 不变量
+每个 topic 在 [`pkg/events`](pkg/events) 中有独立 concrete command/result。list 使用稳定 ID cursor，默认 100、最大 200。
+默认资源 ensure 复用同一 normalization/validation 路径，只创建缺失 ID，不覆盖已有对象。
 
-- Soul ID 必须是已 trim、非 `.`/`..`、不含路径分隔符的 UTF-8 值，最大 256 bytes；因此 memory/file backend 的
-  正式 EventHub 寻址一致。
-- name 必填且最大 256 bytes；description 最大 4 KiB；`SoulMD` 必填且最大 64 KiB；完整 Soul 最大 96 KiB。
-- 每组 list 最多 64 项、单项最大 2 KiB；owner trim、去重并稳定排序。allowlist 中 `*` 必须单独出现；空 allowlist
-  表示该类别不允许进入当前 stage context。
-- create/update/default seed 写入规范化对象；get/list 对 repository 数据重新校验并 detached clone，非法存量数据
-  fail-closed 为 conflict。
-- create 从 revision 1 开始并签发稳定 content hash；相同内容 update 零写/零 revision，内容变化单调递增且保留 source
-  provenance。builtin seed 标记 `builtin_seed`，用户创建标记 `user_managed`；持久化 record 必须完整携带 current
-  identity/revision/content hash/source，缺失、未知或退役字段一律 fail-closed，不投影升级来源。
-- 本 block 只访问 Soul repository，不调度 Runtime block、不修改 Run 或 Result 状态。
-- core Runtime 不得按 Soul ID、名称或显示文本写死业务分支；Soul guidance 不得覆盖 Goal、DoD、sealed manifest、
-  stage contract、Runtime policy 或 requiredOutput。
-- 默认 Soul 是可由用户编辑的首次启动种子；普通 ensure 不得覆盖内置 ID 上的当前对象。当前阶段不提供默认资源升级；
-  需要新种子时清理数据后重新初始化。
+## 不变量与非职责
 
-## 已覆盖测试点
+- 所有 topic 都是同步合同；`result == nil` 时在读取或写入前返回，`Post` 不得改变 Soul 或默认资源。
+- create/update 规范化并校验 ID、内容、五组 allowlist、provenance 与聚合字节上限；revision 由 owner 单调签发。
+- result 必须 detached clone；repository/service 不对其它组件开放。
+- `EnsureDefaults` 的 caller identity 是合同的一部分，错误 source 即 fail-closed、零写入。
+- Soul 不查询 Skill/MCP owner、不判断 selected capability 是否存在，也不把 guidance 转成 Runtime authority。
+- `Start` 幂等注册，`Stop` 反向退订；Application source 仍是调用约定而非授权边界。
 
-- [x] memory/file backend 上默认 Soul 的部分已存在、缺失补建、重复 ensure 与内置 ID 用户修改非覆盖语义。
-- [x] 默认种子走 create 校验，非法 seed 在持久化前失败。
-- [x] create/get/update/list concrete result 深拷贝；delete/validation 返回可校验 identity/disposition。
-- [x] create/update/delete/ensure-defaults 误用 `Post` 时零写入。
-- [x] ID、文本、list、wildcard 冲突、内容上限、规范化与稳定 cursor 分页。
-- [x] Configure 缺 repository 或 EventHub 时 fail-fast；重复 Start/Stop 保持幂等。
-- [x] execution Soul 优先于 default Soul；MCP capability/server/category 绑定校验；planning 与
-  execution/validation/decision provider C3 使用对应 stage Soul，Skill/MCP context 不跨 stage 泄漏。
-- [x] Orchestrator 不直接查询 Soul；既有 Run 只消费持久化 activation snapshot，Registry 后续变化不改写当前 Run。
-- [x] Soul revision/content hash/source provenance 的 create、same-content noop、changed-content increment、builtin seed 与无效存量拒绝。
-- [x] 接近 96 KiB aggregate 上限的 Soul normalization/get、总量越界拒绝，以及 250/450 条多页 Application 管理读取的
-  顺序/cursor 正确性与 allocation/CPU benchmark。
+## 能力验收
 
-## 扩展准入条件
-
-- 当前没有已知的本地可执行合同或测试缺口。
-- approval/artifact 当前没有 provider 或 capability 执行入口，因此不存在待补实现。未来若新增此类入口，必须先定义对应
-  stage 的 typed 输入、allowlist projection 与消费回归，再将其从“仅封存 binding”提升为完整合同；该条件不能反向宣称
-  当前已支持相应执行语义。
+| 维度 | 可执行证据 | 覆盖结论 |
+| --- | --- | --- |
+| normal CRUD/list/validation/revision | [`module_test.go`](module_test.go)、[`biz/soul_service_test.go`](biz/soul_service_test.go) | 覆盖 |
+| invalid / allowlist / size / provenance | `TestServiceRejectsInvalidSoul`、`TestServiceCanonicalizesAndBoundsSoulState`、`TestServiceAcceptsNearLimitSoulAndRejectsAggregateOverflow` | 覆盖 |
+| cursor / pagination bounds | `TestServiceListSoulsUsesBoundedStableCursor` | limit 分页与 noncanonical cursor 已覆盖；default 100 与 max 200 尚无独立断言 |
+| defaults normal / idempotent | [`biz/defaults_test.go`](biz/defaults_test.go) | memory/file 均覆盖 |
+| defaults invalid seed 零写入 | `TestEnsureSoulDefaultsRejectsInvalidSeedBeforePersistence` | memory 覆盖；file 尚无独立 invalid-seed 验收 |
+| System exact source 与 Post 零写入 | `TestStrongSoulCommandsIgnoreFireAndForgetPost` | 覆盖 |
+| detached result | [`pkg/events/messages_test.go`](pkg/events/messages_test.go) | 覆盖 |
+| memory/file persistence | `TestSoulRepositoryContract_Memory`、`TestSoulRepositoryContract_File` in [`internal/pkg/repository/repository_contract_test.go`](../../../pkg/repository/repository_contract_test.go) | 覆盖 |
+| duplicate / idempotency | delete missing 与 defaults replay 有局部覆盖 | duplicate create、duplicate update 的 EventHub 结果尚无矩阵验收 |
+| stale/freshness | update command 没有 expected-revision/CAS 字段 | stale writer 语义未定义、未验收 |
+| lifecycle | `TestModuleIdentityConfigureStartStopContract` | 覆盖基本 Start/Stop；尚无独立 post-Stop delivery 断言 |
+| Application caller authorization | 无 exact source gate | 未覆盖，Application 仅为 intended caller |
+| provider / external lifecycle | 不适用 | 不适用 |
