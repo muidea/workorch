@@ -213,7 +213,7 @@ func (p runtimeTargetAuthorityPlan) grounded() bool {
 
 // runtimeValidationScopeTargetRefs projects the diagnostic scope from the
 // exact SM-3 dispatch seal. A selector-only authorization deliberately has no
-// finite diagnostic scope: execution remains legal, but the Shell owner cannot
+// finite diagnostic scope: execution remains legal, but the validation owner cannot
 // publish a structured repair observation for it. Neither shape may substitute
 // the current workspace manifest, focus, or owner inventory after seal/restart.
 func runtimeValidationScopeTargetRefs(dispatch SealedDispatch, operation runtimecontract.RuntimeOperation) ([]string, error) {

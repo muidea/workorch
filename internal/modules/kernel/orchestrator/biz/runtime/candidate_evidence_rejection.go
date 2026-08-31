@@ -15,10 +15,17 @@ func applyRejectedExecutionEvidence(aggregate *RuntimeAggregate, admission execu
 		fact.FailureSignature = evidence.Failure.Signature
 		fact.FailureMessage = evidence.Failure.Message
 		failure := groundRejectedExecutionFailure(aggregate.Facts, fact.Kind, *evidence.Failure)
-		aggregate.Facts.Failure = &failure
+		policy := runtimeFailureAuthorityRetire
+		var ownerTarget *runtimecontract.FailureTarget
 		if evidence.Receipt != nil && evidence.Receipt.Outcome == runtimecontract.RuntimeOperationOutcomeRejected &&
 			evidence.Receipt.Feedback != nil && evidence.Receipt.Feedback.OriginalDiagnostic != nil {
-			recordRejectedExecutionFailureTarget(aggregate, failure)
+			ownerTarget = rejectedExecutionFailureTarget(failure)
+			if ownerTarget != nil {
+				policy = runtimeFailureAuthorityReplaceFromExactOwnerFact
+			}
+		}
+		if err := replaceRuntimeFailureAuthority(&aggregate.Facts, failure, policy, ownerTarget); err != nil {
+			return err
 		}
 		gap := rejectedExecutionAssessmentGap(aggregate.Facts, fact, failure)
 		signature := ensureRejectedExecutionFailureSignature(aggregate, &fact, &gap)
@@ -51,18 +58,19 @@ func groundRejectedExecutionFailure(facts runtimecontract.RuntimeFacts, evidence
 	return failure
 }
 
-func recordRejectedExecutionFailureTarget(aggregate *RuntimeAggregate, failure runtimecontract.FailureFact) {
+func rejectedExecutionFailureTarget(failure runtimecontract.FailureFact) *runtimecontract.FailureTarget {
 	if len(failure.TargetRefs) == 0 {
-		return
+		return nil
 	}
-	aggregate.Facts.Resources.FailureTarget = &runtimecontract.FailureTarget{
+	target := &runtimecontract.FailureTarget{
 		Signature:  failure.Signature,
 		TargetRefs: append([]string(nil), failure.TargetRefs...),
 	}
 	if failure.TargetObservation != nil {
 		observation := failure.TargetObservation.Normalized()
-		aggregate.Facts.Resources.FailureTarget.TargetObservation = &observation
+		target.TargetObservation = &observation
 	}
+	return target
 }
 
 func rejectedExecutionAssessmentGap(facts runtimecontract.RuntimeFacts, fact runtimecontract.EvidenceFact, failure runtimecontract.FailureFact) runtimecontract.RuntimeAssessmentGap {

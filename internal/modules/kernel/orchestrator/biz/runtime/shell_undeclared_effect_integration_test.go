@@ -115,7 +115,7 @@ func TestShellUndeclaredWorkspaceEffectCommitsAuditWithoutTargetAuthority(t *tes
 		t.Fatal(err)
 	}
 	if len(persisted.OperationReceipts) != 1 || len(persisted.CompletedDispatches) != 1 || persisted.ActiveDispatch != nil {
-		t.Fatalf("rejected Shell receipt did not complete through Runtime owner: %+v", persisted)
+		t.Fatalf("rejected validation-owner receipt did not complete through Runtime owner: %+v", persisted)
 	}
 	receipt := persisted.OperationReceipts[0].Normalized()
 	diagnostic := receipt.Feedback.OriginalDiagnostic

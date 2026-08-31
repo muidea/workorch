@@ -19,7 +19,6 @@ func Contracts() []eventcontract.Contract {
 		TopicOrchestratorCommandPurgeWorkspaceEvidence,
 		TopicOrchestratorCommandRecordDecisionEvidence,
 		TopicOrchestratorCommandRecordApprovalEvidence,
-		TopicOrchestratorCommitRuntimeGovernanceResolution,
 		TopicOrchestratorCommitRuntimeGovernanceApproval,
 		TopicOrchestratorCommitRuntimeGovernanceTicket,
 		TopicOrchestratorRequestRuntimeTermination,
@@ -37,7 +36,7 @@ func Contracts() []eventcontract.Contract {
 		TopicOrchestratorCommandListArtifactContinuationsByRun, TopicOrchestratorQueryRuntimeOperationReceipt,
 	)
 	ret = eventcontract.Annotate(ret, eventcontract.RuntimeMetadata(eventcontract.CommandClassWrite, eventcontract.StateMachineSM2, eventcontract.ScopePolicyWorkspaceRun, eventcontract.IdentityPolicyRuntimeAuthority, true),
-		TopicOrchestratorCommitRuntimeGovernanceResolution, TopicOrchestratorCommitRuntimeGovernanceTicket, TopicOrchestratorCommitRuntimeGovernanceApproval,
+		TopicOrchestratorCommitRuntimeGovernanceTicket, TopicOrchestratorCommitRuntimeGovernanceApproval,
 	)
 	ret = eventcontract.Annotate(ret, eventcontract.RuntimeMetadata(eventcontract.CommandClassWrite, eventcontract.StateMachineSM3, eventcontract.ScopePolicyWorkspaceRunStep, eventcontract.IdentityPolicyRuntimeOperation, true), TopicOrchestratorCommitRuntimeOperationReceipt)
 	ret = eventcontract.Annotate(ret, eventcontract.RuntimeMetadata(eventcontract.CommandClassWrite, eventcontract.StateMachineSM4, eventcontract.ScopePolicyWorkspaceRun, eventcontract.IdentityPolicyRuntimeAuthority, true), TopicOrchestratorRequestRuntimeTermination)

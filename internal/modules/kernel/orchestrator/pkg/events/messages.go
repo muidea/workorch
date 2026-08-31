@@ -44,6 +44,10 @@ type DriveRuntimeResult struct {
 	BlockingApprovalID  common.ApprovalID
 	RecoverableWait     *runtimecontract.RuntimeRecoverableWaitView
 	Terminal            *runtimecontract.RuntimeTerminalDecision
+	// AdministrativeTermination is the persisted SM-4 handoff for a Run-owned
+	// cancel/supersede intent. It is distinct from the SM-2 convergence terminal
+	// and is consumed only by the terminal-delivery lane.
+	AdministrativeTermination *runtimecontract.RuntimeTerminationRecord
 }
 
 type QueryRuntimeOperationReceiptCommand struct {
@@ -81,10 +85,6 @@ const (
 	RuntimeGovernanceResolutionDispositionStale     RuntimeGovernanceResolutionDisposition = "stale_diagnostic"
 	RuntimeGovernanceResolutionDispositionDuplicate RuntimeGovernanceResolutionDisposition = "duplicate"
 )
-
-type CommitRuntimeGovernanceResolutionCommand struct {
-	Resolution runtimecontract.RuntimeGovernanceResolution
-}
 
 type CommitRuntimeGovernanceTicketResolutionCommand struct {
 	ResolutionID common.ResolutionID
@@ -330,7 +330,6 @@ func MessageContracts() []eventcontract.MessageContract {
 		eventcontract.CommandTopic[QueryRuntimeOperationReceiptCommand, QueryRuntimeOperationReceiptResult]("orchestrator", definitionPackage, eventcontract.CommandClassRead, eventcontract.LanePolicyQuery, TopicOrchestratorQueryRuntimeOperationReceipt).MessageContract(),
 		eventcontract.CommandTopic[CommitRuntimeOperationReceiptCommand, CommitRuntimeOperationReceiptResult]("orchestrator", definitionPackage, eventcontract.CommandClassWrite, eventcontract.LanePolicyState, TopicOrchestratorCommitRuntimeOperationReceipt).MessageContract(),
 		eventcontract.CommandTopic[RequestRuntimeTerminationCommand, RequestRuntimeTerminationResult]("orchestrator", definitionPackage, eventcontract.CommandClassWrite, eventcontract.LanePolicyState, TopicOrchestratorRequestRuntimeTermination).MessageContract(),
-		eventcontract.CommandTopic[CommitRuntimeGovernanceResolutionCommand, CommitRuntimeGovernanceResolutionResult]("orchestrator", definitionPackage, eventcontract.CommandClassWrite, eventcontract.LanePolicyState, TopicOrchestratorCommitRuntimeGovernanceResolution).MessageContract(),
 		eventcontract.CommandTopic[CommitRuntimeGovernanceTicketResolutionCommand, CommitRuntimeGovernanceResolutionResult]("orchestrator", definitionPackage, eventcontract.CommandClassWrite, eventcontract.LanePolicyState, TopicOrchestratorCommitRuntimeGovernanceTicket).MessageContract(),
 		eventcontract.CommandTopic[CommitRuntimeGovernanceApprovalResolutionCommand, CommitRuntimeGovernanceResolutionResult]("orchestrator", definitionPackage, eventcontract.CommandClassWrite, eventcontract.LanePolicyState, TopicOrchestratorCommitRuntimeGovernanceApproval).MessageContract(),
 	}

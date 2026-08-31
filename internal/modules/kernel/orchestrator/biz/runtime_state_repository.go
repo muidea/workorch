@@ -138,26 +138,27 @@ func (r runtimeStateRepository) Save(ctx context.Context, aggregate runtime.Runt
 
 func runtimeStateRecordFromAggregate(aggregate runtime.RuntimeAggregate) runtimecontract.RuntimeStateRecord {
 	ret := runtimecontract.RuntimeStateRecord{
-		StateRevision:               aggregate.StateRevision,
-		EvidenceSequence:            aggregate.EvidenceSequence,
-		Definition:                  aggregate.Definition,
-		Facts:                       aggregate.Facts,
-		SemanticPlanning:            aggregate.SemanticPlanning.Clone(),
-		Reconciliation:              aggregate.Reconciliation.Clone(),
-		CoverageProofLineage:        runtimecontract.NormalizeRuntimeCoverageProofLineage(aggregate.CoverageProofLineage),
-		Decision:                    aggregate.Decision,
-		ProcessedEventIDs:           append([]string(nil), aggregate.ProcessedEventIDs...),
-		RepairSurfaceConfirmations:  cloneRuntimeRepairSurfaceConfirmations(aggregate.RepairSurfaceConfirmations),
-		CandidateRequestSessions:    cloneRuntimeCandidateRequestSessions(aggregate.CandidateRequestSessions),
-		CandidateAttempts:           append([]runtimecontract.RuntimeCandidateAttemptRecord(nil), aggregate.CandidateAttempts...),
-		ExecutionBudget:             aggregate.ExecutionBudget.Clone(),
-		RecoverableWaits:            cloneRuntimeRecoverableWaits(aggregate.RecoverableWaits),
-		GovernanceRequests:          append([]runtimecontract.RuntimeGovernanceRequestRecord(nil), aggregate.GovernanceRequests...),
-		GovernanceResolutions:       runtimecontract.CloneRuntimeGovernanceResolutionRecords(aggregate.GovernanceResolutions),
-		OperationGovernanceBindings: cloneRuntimeOperationGovernanceBindings(aggregate.OperationGovernanceBindings),
-		OperationReceipts:           runtimecontract.NormalizeRuntimeOperationReceipts(aggregate.OperationReceipts),
-		DeliveryAcknowledgements:    append([]runtimecontract.RuntimeDeliveryAcknowledgement(nil), aggregate.DeliveryAcknowledgements...),
-		PrerequisiteInvalidations:   runtimecontract.NormalizeRuntimePrerequisiteInvalidations(aggregate.PrerequisiteInvalidations),
+		StateRevision:                   aggregate.StateRevision,
+		EvidenceSequence:                aggregate.EvidenceSequence,
+		Definition:                      aggregate.Definition,
+		Facts:                           aggregate.Facts,
+		SemanticPlanning:                aggregate.SemanticPlanning.Clone(),
+		Reconciliation:                  aggregate.Reconciliation.Clone(),
+		CoverageProofLineage:            runtimecontract.NormalizeRuntimeCoverageProofLineage(aggregate.CoverageProofLineage),
+		Decision:                        aggregate.Decision,
+		ProcessedEventIDs:               append([]string(nil), aggregate.ProcessedEventIDs...),
+		RepairSurfaceConfirmations:      cloneRuntimeRepairSurfaceConfirmations(aggregate.RepairSurfaceConfirmations),
+		CandidateRequestSessions:        cloneRuntimeCandidateRequestSessions(aggregate.CandidateRequestSessions),
+		CandidateAttempts:               append([]runtimecontract.RuntimeCandidateAttemptRecord(nil), aggregate.CandidateAttempts...),
+		ExecutionBudget:                 aggregate.ExecutionBudget.Clone(),
+		RecoverableWaits:                cloneRuntimeRecoverableWaits(aggregate.RecoverableWaits),
+		OperationRecoveryAuthorizations: cloneRuntimeOperationRecoveryAuthorizations(aggregate.OperationRecoveryAuthorizations),
+		GovernanceRequests:              append([]runtimecontract.RuntimeGovernanceRequestRecord(nil), aggregate.GovernanceRequests...),
+		GovernanceResolutions:           runtimecontract.CloneRuntimeGovernanceResolutionRecords(aggregate.GovernanceResolutions),
+		OperationGovernanceBindings:     cloneRuntimeOperationGovernanceBindings(aggregate.OperationGovernanceBindings),
+		OperationReceipts:               runtimecontract.NormalizeRuntimeOperationReceipts(aggregate.OperationReceipts),
+		DeliveryAcknowledgements:        append([]runtimecontract.RuntimeDeliveryAcknowledgement(nil), aggregate.DeliveryAcknowledgements...),
+		PrerequisiteInvalidations:       runtimecontract.NormalizeRuntimePrerequisiteInvalidations(aggregate.PrerequisiteInvalidations),
 	}
 	if aggregate.DefinitionClarification != nil {
 		value := aggregate.DefinitionClarification.Clone()
@@ -185,26 +186,27 @@ func runtimeStateRecordFromAggregate(aggregate runtime.RuntimeAggregate) runtime
 
 func runtimeAggregateFromRecord(record runtimecontract.RuntimeStateRecord) runtime.RuntimeAggregate {
 	ret := runtime.RuntimeAggregate{
-		StateRevision:               record.StateRevision,
-		EvidenceSequence:            record.EvidenceSequence,
-		Definition:                  record.Definition,
-		Facts:                       record.Facts,
-		SemanticPlanning:            record.SemanticPlanning.Clone(),
-		Reconciliation:              record.Reconciliation.Clone(),
-		CoverageProofLineage:        runtimecontract.NormalizeRuntimeCoverageProofLineage(record.CoverageProofLineage),
-		Decision:                    record.Decision,
-		ProcessedEventIDs:           append([]string(nil), record.ProcessedEventIDs...),
-		RepairSurfaceConfirmations:  cloneRuntimeRepairSurfaceConfirmations(record.RepairSurfaceConfirmations),
-		CandidateRequestSessions:    cloneRuntimeCandidateRequestSessions(record.CandidateRequestSessions),
-		CandidateAttempts:           append([]runtimecontract.RuntimeCandidateAttemptRecord(nil), record.CandidateAttempts...),
-		ExecutionBudget:             record.ExecutionBudget.Clone(),
-		RecoverableWaits:            cloneRuntimeRecoverableWaits(record.RecoverableWaits),
-		GovernanceRequests:          append([]runtimecontract.RuntimeGovernanceRequestRecord(nil), record.GovernanceRequests...),
-		GovernanceResolutions:       runtimecontract.CloneRuntimeGovernanceResolutionRecords(record.GovernanceResolutions),
-		OperationGovernanceBindings: cloneRuntimeOperationGovernanceBindings(record.OperationGovernanceBindings),
-		OperationReceipts:           runtimecontract.NormalizeRuntimeOperationReceipts(record.OperationReceipts),
-		DeliveryAcknowledgements:    append([]runtimecontract.RuntimeDeliveryAcknowledgement(nil), record.DeliveryAcknowledgements...),
-		PrerequisiteInvalidations:   runtimecontract.NormalizeRuntimePrerequisiteInvalidations(record.PrerequisiteInvalidations),
+		StateRevision:                   record.StateRevision,
+		EvidenceSequence:                record.EvidenceSequence,
+		Definition:                      record.Definition,
+		Facts:                           record.Facts,
+		SemanticPlanning:                record.SemanticPlanning.Clone(),
+		Reconciliation:                  record.Reconciliation.Clone(),
+		CoverageProofLineage:            runtimecontract.NormalizeRuntimeCoverageProofLineage(record.CoverageProofLineage),
+		Decision:                        record.Decision,
+		ProcessedEventIDs:               append([]string(nil), record.ProcessedEventIDs...),
+		RepairSurfaceConfirmations:      cloneRuntimeRepairSurfaceConfirmations(record.RepairSurfaceConfirmations),
+		CandidateRequestSessions:        cloneRuntimeCandidateRequestSessions(record.CandidateRequestSessions),
+		CandidateAttempts:               append([]runtimecontract.RuntimeCandidateAttemptRecord(nil), record.CandidateAttempts...),
+		ExecutionBudget:                 record.ExecutionBudget.Clone(),
+		RecoverableWaits:                cloneRuntimeRecoverableWaits(record.RecoverableWaits),
+		OperationRecoveryAuthorizations: cloneRuntimeOperationRecoveryAuthorizations(record.OperationRecoveryAuthorizations),
+		GovernanceRequests:              append([]runtimecontract.RuntimeGovernanceRequestRecord(nil), record.GovernanceRequests...),
+		GovernanceResolutions:           runtimecontract.CloneRuntimeGovernanceResolutionRecords(record.GovernanceResolutions),
+		OperationGovernanceBindings:     cloneRuntimeOperationGovernanceBindings(record.OperationGovernanceBindings),
+		OperationReceipts:               runtimecontract.NormalizeRuntimeOperationReceipts(record.OperationReceipts),
+		DeliveryAcknowledgements:        append([]runtimecontract.RuntimeDeliveryAcknowledgement(nil), record.DeliveryAcknowledgements...),
+		PrerequisiteInvalidations:       runtimecontract.NormalizeRuntimePrerequisiteInvalidations(record.PrerequisiteInvalidations),
 	}
 	if record.DefinitionClarification != nil {
 		value := record.DefinitionClarification.Clone()
@@ -235,6 +237,17 @@ func cloneRuntimeRecoverableWaits(values []runtimecontract.RuntimeRecoverableWai
 		return nil
 	}
 	ret := make([]runtimecontract.RuntimeRecoverableWaitRecord, len(values))
+	for idx := range values {
+		ret[idx] = values[idx].Clone()
+	}
+	return ret
+}
+
+func cloneRuntimeOperationRecoveryAuthorizations(values []runtimecontract.RuntimeOperationRecoveryAuthorization) []runtimecontract.RuntimeOperationRecoveryAuthorization {
+	if values == nil {
+		return nil
+	}
+	ret := make([]runtimecontract.RuntimeOperationRecoveryAuthorization, len(values))
 	for idx := range values {
 		ret[idx] = values[idx].Clone()
 	}

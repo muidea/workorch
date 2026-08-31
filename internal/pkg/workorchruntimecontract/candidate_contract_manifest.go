@@ -656,7 +656,7 @@ func ValidateRuntimeCandidateContractManifestRawCanonical(manifest RuntimeCandid
 		return fmt.Errorf("runtime candidate contract manifest is not raw-canonical")
 	}
 	if manifest.RepairPurpose != "" &&
-		(manifest.RepairPurpose != RuntimeDispatchRepairPurposeConfirmedFileValidation || manifest.RepairClosureID == "") {
+		(manifest.RepairPurpose != RuntimeDispatchRepairPurposeConfirmedValidation || manifest.RepairClosureID == "") {
 		return fmt.Errorf("runtime candidate contract manifest has invalid repair purpose %q", manifest.RepairPurpose)
 	}
 	if manifest.State == ConvergenceStateNeedAssessment {

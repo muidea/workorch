@@ -28,8 +28,8 @@ func syncRepairDirective(facts runtimecontract.RuntimeFacts, decision runtimecon
 	if facts.RepairDirective != nil && facts.RepairDirective.FocusID != focusID {
 		facts.RepairDirective = nil
 	}
-	if runtimeValidationFailureObservationAwaitsFileConfirmation(facts) {
-		// A Shell observation is not yet a repair continuation. File must first
+	if runtimeValidationFailureObservationAwaitsRepairConfirmation(facts) {
+		// A validation-owner observation is not yet a repair continuation. The resource owner must first
 		// confirm the exact current resource surface; retaining or rebuilding a
 		// directive here would expose focus/gap targets as premature authority.
 		facts.RepairDirective = nil
@@ -43,7 +43,7 @@ func syncRepairDirective(facts runtimecontract.RuntimeFacts, decision runtimecon
 		return facts
 	}
 	if runtimeValidationFailureRepairOwnsSealedDirective(facts) || runtimeValidationFailureRepairOwnsFreshValidationDirective(facts) ||
-		runtimeConfirmedFileRepairOwnsFreshValidationDirective(facts) {
+		runtimeConfirmedRepairOwnsFreshValidationDirective(facts) {
 		// The repair-purpose binding and exact capability-owner-confirmed target already own
 		// the state-change continuation; its Definition-proof successor likewise
 		// owns the independently sealed validation action. Completing a target
@@ -103,7 +103,7 @@ func syncRepairDirective(facts runtimecontract.RuntimeFacts, decision runtimecon
 	return facts
 }
 
-func runtimeValidationFailureObservationAwaitsFileConfirmation(facts runtimecontract.RuntimeFacts) bool {
+func runtimeValidationFailureObservationAwaitsRepairConfirmation(facts runtimecontract.RuntimeFacts) bool {
 	facts = facts.Normalized()
 	if facts.Failure == nil || facts.Failure.ValidationFailureObservation == nil {
 		return false
@@ -116,12 +116,28 @@ func runtimeValidationFailureObservationAwaitsFileConfirmation(facts runtimecont
 // repair directive merely because it is state-changing; otherwise its accepted
 // evidence would incorrectly force a validation follow-up.
 func repairDirectiveRequired(facts runtimecontract.RuntimeFacts) bool {
+	// A new receipt/feasibility failure may arrive while an older confirmed-owner
+	// repair gap is still present. That audit gap cannot recreate the retired
+	// directive unless the new failure itself retained an exact owner-grounded
+	// target. Targetless receipts and owner infeasibility therefore return to
+	// ordinary convergence without inheriting the previous repair generation.
+	if facts.Failure != nil {
+		switch facts.Failure.Class {
+		case runtimecontract.FailureClassCandidateInfeasible,
+			runtimecontract.FailureClassExecutionRejected,
+			runtimecontract.FailureClassExecutionFailure,
+			runtimecontract.FailureClassBuildFailure,
+			runtimecontract.FailureClassEffectMismatch:
+			if !needsStateChangeForOwnerGroundedFailure(facts) {
+				return false
+			}
+		}
+	}
 	if facts.Repair.ActiveGap != nil || facts.Repair.RepairAttempts > 0 {
 		return true
 	}
 	// A receipt-backed, owner-grounded implementation/effect failure can begin
-	// a repair before an assessment creates its gap. Candidate infeasibility is
-	// deliberately excluded: it carries no durable repair target authority.
+	// a repair before an assessment creates its gap.
 	return needsStateChangeForOwnerGroundedFailure(facts)
 }
 
@@ -232,8 +248,8 @@ func buildRepairDirective(facts runtimecontract.RuntimeFacts, decision runtimeco
 		TargetRefs:            repairDirectiveTargets(facts, required.TargetRefs),
 		RepairAttempt:         attempt,
 	}
-	if decision.State == runtimecontract.ConvergenceStateNeedStateChange && confirmedFileRepairDirectivePurpose(facts) {
-		directive.Purpose = runtimecontract.RuntimeDispatchRepairPurposeConfirmedFileValidation
+	if decision.State == runtimecontract.ConvergenceStateNeedStateChange && confirmedRepairDirectivePurpose(facts, required) {
+		directive.Purpose = runtimecontract.RuntimeDispatchRepairPurposeConfirmedValidation
 	}
 	if facts.Failure != nil {
 		failure := *facts.Failure
@@ -276,7 +292,7 @@ func buildRepairDirective(facts runtimecontract.RuntimeFacts, decision runtimeco
 	return directive.Normalized()
 }
 
-func confirmedFileRepairDirectivePurpose(facts runtimecontract.RuntimeFacts) bool {
+func confirmedRepairDirectivePurpose(facts runtimecontract.RuntimeFacts, required runtimecontract.RequiredOutputContract) bool {
 	if facts.Failure == nil || facts.Failure.ValidationFailureObservation == nil ||
 		facts.Resources.FailureTarget == nil || facts.Resources.FailureTarget.TargetObservation == nil {
 		return false
@@ -285,8 +301,19 @@ func confirmedFileRepairDirectivePurpose(facts runtimecontract.RuntimeFacts) boo
 	observation := failure.ValidationFailureObservation.Normalized()
 	target := facts.Resources.FailureTarget
 	ownerObservation := target.TargetObservation.Normalized()
-	return ownerObservation.OwnerModuleID == runtimecontract.RuntimeModuleFile &&
-		failure.Signature == observation.FailureSignature && target.Signature == observation.FailureSignature &&
+	if ownerObservation.OwnerModuleID == "" || ownerObservation.SubjectRef == "" || ownerObservation.ObservedRevision == "" ||
+		ownerObservation.DiagnosticClass != "" || len(ownerObservation.EvidenceRefs) != 0 || ownerObservation.ContentHash != "" ||
+		len(required.AcceptedKinds) == 0 {
+		return false
+	}
+	for _, kind := range required.AcceptedKinds {
+		descriptor, found := runtimecontract.RuntimeOperationDescriptorForKind(kind)
+		if !found || descriptor.OwnerModuleID != ownerObservation.OwnerModuleID ||
+			!runtimecontract.RuntimeOperationKindSupportsCoverageEvidence(kind, runtimecontract.EvidenceKindStateChange) {
+			return false
+		}
+	}
+	return failure.Signature == observation.FailureSignature && target.Signature == observation.FailureSignature &&
 		ownerObservation.TargetRole == observation.TargetRole &&
 		sameRuntimeTargetRefs(ownerObservation.TargetRefs, observation.CandidateTargetRefs) &&
 		sameRuntimeTargetRefs(target.TargetRefs, observation.CandidateTargetRefs)
@@ -309,10 +336,10 @@ func repairClosureRequiredEvidenceKinds(decision runtimecontract.RuntimeDecision
 
 // repairDirectiveTargets is an SM-2 ownership rule: an explicit Focus target
 // remains immutable focus declaration, while a persisted owner failure target
-// may supersede it as the current repair surface. A File owner scope is
+// may supersede it as the current repair surface. A bounded owner scope is
 // deliberately excluded: it is a bounded feasibility inventory, not a
 // concrete repair target, and must remain available for the next candidate to
-// propose one concrete File target. The runtime core does not infer
+// propose one concrete resource target. The runtime core does not infer
 // source/test roles from path names or provider text.
 func repairDirectiveTargets(facts runtimecontract.RuntimeFacts, fallback []string) []string {
 	if facts.RepairDirective != nil && facts.RepairDirective.Closure != nil && len(facts.RepairDirective.Closure.GroundedTargetRefs) > 0 {
@@ -330,7 +357,7 @@ func repairDirectiveTargets(facts runtimecontract.RuntimeFacts, fallback []strin
 	if hasOwnerGroundedTargetScope(facts) {
 		// The state-change decision retains the bounded scope only in Resources
 		// for candidate context. It must not turn into directive authority through
-		// this fallback; SM-3 still asks File to adjudicate the candidate's next
+		// this fallback; SM-3 still asks the typed resource owner to adjudicate the candidate's next
 		// concrete target.
 		return nil
 	}

@@ -212,8 +212,8 @@ func (r RuntimeTerminationRecord) Validate() error {
 	if !ValidRuntimeTerminationKind(r.Kind) {
 		return fmt.Errorf("termination record has invalid kind %q", r.Kind)
 	}
-	if r.Reason == "" {
-		return fmt.Errorf("termination record requires reason")
+	if r.RequestedBy == "" || r.Reason == "" {
+		return fmt.Errorf("termination record requires requester and reason")
 	}
 	if r.Revision == 0 {
 		return fmt.Errorf("termination record requires revision")
@@ -308,7 +308,7 @@ func (d RuntimeRepairDirective) Validate() error {
 	if !ValidRuntimeRepairTrigger(d.Trigger) {
 		return fmt.Errorf("repair directive has invalid trigger %q", d.Trigger)
 	}
-	if d.Purpose != "" && d.Purpose != RuntimeDispatchRepairPurposeConfirmedFileValidation {
+	if d.Purpose != "" && d.Purpose != RuntimeDispatchRepairPurposeConfirmedValidation {
 		return fmt.Errorf("repair directive has invalid purpose %q", d.Purpose)
 	}
 	switch d.RequiredState {

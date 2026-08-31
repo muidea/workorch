@@ -49,10 +49,13 @@ type Biz struct {
 	startupRecoveryMu       sync.Mutex
 	runRuntimeCommandsReady bool
 	startupRecoveryActions  []runtimeStartupRecoveryAction
-	// lifecycleMu protects Runtime owner dependencies while a background
-	// drive is using them. Stop takes the write lock before clearing pointers;
-	// every drive holds the read lock through authority and projection work.
-	lifecycleMu sync.RWMutex
+	// lifecycleStopMu serializes framework Start/Stop without becoming a Runtime
+	// state-machine lock. lifecycleMu protects Runtime owner dependencies while
+	// an ingress handler or background drive is using them. Stop takes the write
+	// lock before clearing pointers; every drive holds the read lock through
+	// authority and projection work.
+	lifecycleStopMu sync.Mutex
+	lifecycleMu     sync.RWMutex
 	// runtimeMutationFence linearizes the durable Workspace quiescing gate and
 	// final quiescence token with every owner-private Runtime aggregate CAS.
 	runtimeMutationFence sync.RWMutex
@@ -77,6 +80,8 @@ type Biz struct {
 	retryLeaseTimers         map[string]runtimeLeaseTimerRegistration
 	runtimeLeaseTimerCtx     context.Context
 	runtimeLeaseTimerCancel  context.CancelFunc
+	lifecycleCtx             context.Context
+	lifecycleCancel          context.CancelFunc
 	runtimeLeaseTimerEpoch   uint64
 	runtimeLeaseTimerClosing bool
 	started                  bool
@@ -105,7 +110,7 @@ func New() *Biz { return &Biz{} }
 func (m *Biz) ID() string { return ModuleID }
 
 func (m *Biz) Configure(deps Dependencies) error {
-	if deps.Evidence.Validate() != nil || deps.CommandHub == nil {
+	if deps.Evidence.Validate() != nil || deps.CommandHub == nil || deps.BackgroundRoutine == nil {
 		return common.ErrInvalidArgument
 	}
 	m.Base = basebiz.New(ModuleID, deps.CommandHub, deps.BackgroundRoutine)
@@ -129,86 +134,112 @@ func (m *Biz) Configure(deps Dependencies) error {
 }
 
 func (m *Biz) Start() error {
-	if m == nil || m.runtimeController == nil || m.EventHub() == nil {
+	return m.StartContext(context.Background())
+}
+
+// StartContext binds all owner-local background drive and timer work to the
+// framework lifecycle. Setup has already supplied the shared scheduler; a
+// missing scheduler or a cancelled framework context is a startup failure.
+func (m *Biz) StartContext(ctx context.Context) error {
+	if m == nil || ctx == nil || m.runtimeController == nil || m.EventHub() == nil || m.BackgroundRoutine() == nil {
 		return common.ErrInvalidArgument
 	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if err := m.lockLifecycleTransition(ctx); err != nil {
+		return err
+	}
+	defer m.lifecycleStopMu.Unlock()
 	if m.started {
 		return nil
 	}
-	m.driveMu.Lock()
-	if m.runtimeLeaseTimerEpoch == 0 {
-		m.runtimeLeaseTimerEpoch = 1
+	if err := m.openRuntimeLifecycle(ctx); err != nil {
+		return err
 	}
-	m.runtimeLeaseTimerClosing = false
+	startupSucceeded := false
+	defer func() {
+		if !startupSucceeded {
+			m.rollbackRuntimeStart()
+		}
+	}()
+	lifecycleCtx := m.runtimeLifecycleContext()
+	m.driveMu.Lock()
 	m.retiredWorkspaces = make(map[common.WorkspaceID]runevents.RunWorkspaceRetirementFence)
 	m.quiescingWorkspaces = make(map[common.WorkspaceID]deletioncontract.WorkspaceRuntimeQuiescenceIntent)
 	m.driveMu.Unlock()
 	// Durable Orchestrator gates are restored before either Run retirement
 	// inventory or ordinary SM-4 recovery is classified. A fresh process must
 	// never briefly reopen a workspace that was already quiesced.
-	if err := m.recoverWorkspaceRuntimeQuiescenceGates(context.Background()); err != nil {
+	if err := m.recoverWorkspaceRuntimeQuiescenceGates(lifecycleCtx); err != nil {
 		return fmt.Errorf("Runtime startup Workspace quiescence inventory: %w", err)
 	}
-	if err := m.recoverWorkspaceRetirementGates(context.Background()); err != nil {
+	if err := m.recoverWorkspaceRetirementGates(lifecycleCtx); err != nil {
 		return fmt.Errorf("Runtime startup retirement inventory: %w", err)
 	}
-	if len(m.rawTopics) == 0 {
-		m.rawTopics = []string{
-			// RUNTIME-SMO: Run lifecycle topics are owned by blocks/run. The
-			orchestratorevents.TopicOrchestratorCommandBeginWorkspaceRuntimeQuiescence,
-			orchestratorevents.TopicOrchestratorCommandConfirmWorkspaceRuntimeQuiescence,
-			orchestratorevents.TopicOrchestratorCommandSealWorkspaceDeletion,
-			orchestratorevents.TopicOrchestratorCommandPurgeWorkspaceEvidence,
-			orchestratorevents.TopicOrchestratorCommandListToolCallsByRun,
-			orchestratorevents.TopicOrchestratorCommandListPatchesByRun,
-			orchestratorevents.TopicOrchestratorCommandListValidationResultsByRun,
-			orchestratorevents.TopicOrchestratorCommandListCoverageWorkItemsByRun,
-			orchestratorevents.TopicOrchestratorCommandListArtifactContinuationsByRun,
-		}
-		for _, topic := range m.rawTopics {
-			switch topic {
-			case orchestratorevents.TopicOrchestratorCommandBeginWorkspaceRuntimeQuiescence,
-				orchestratorevents.TopicOrchestratorCommandConfirmWorkspaceRuntimeQuiescence:
-				m.SubscribeFunc(topic, m.handleWorkspaceRuntimeQuiescence)
-			case orchestratorevents.TopicOrchestratorCommandSealWorkspaceDeletion,
-				orchestratorevents.TopicOrchestratorCommandPurgeWorkspaceEvidence:
-				m.SubscribeFunc(topic, m.handleWorkspaceDeletion)
-			default:
-				m.SubscribeFunc(topic, m.handleMagicCommand)
-			}
-		}
-		m.rawTopics = append(m.rawTopics,
-			orchestratorevents.TopicOrchestratorDriveRuntime,
-			orchestratorevents.TopicOrchestratorQueryRuntimeOperationReceipt,
-			orchestratorevents.TopicOrchestratorCommitRuntimeOperationReceipt,
-			orchestratorevents.TopicOrchestratorCommitRuntimeGovernanceTicket,
-			orchestratorevents.TopicOrchestratorCommitRuntimeGovernanceApproval,
-			orchestratorevents.TopicOrchestratorRequestRuntimeTermination,
-			orchestratorevents.TopicOrchestratorCommandRecordDecisionEvidence,
-			orchestratorevents.TopicOrchestratorCommandRecordApprovalEvidence,
-		)
-		m.SubscribeFunc(orchestratorevents.TopicOrchestratorDriveRuntime, m.handleRuntimeDrive)
-		m.SubscribeFunc(orchestratorevents.TopicOrchestratorQueryRuntimeOperationReceipt, m.handleRuntimeOperationReceipt)
-		m.SubscribeFunc(orchestratorevents.TopicOrchestratorCommitRuntimeOperationReceipt, m.handleRuntimeOperationReceipt)
-		m.SubscribeFunc(orchestratorevents.TopicOrchestratorCommitRuntimeGovernanceTicket, m.handleRuntimeGovernanceTicketResolution)
-		m.SubscribeFunc(orchestratorevents.TopicOrchestratorCommitRuntimeGovernanceApproval, m.handleRuntimeGovernanceApprovalResolution)
-		m.SubscribeFunc(orchestratorevents.TopicOrchestratorRequestRuntimeTermination, m.handleRuntimeTerminationRequest)
-		m.SubscribeFunc(orchestratorevents.TopicOrchestratorCommandRecordDecisionEvidence, m.handleDecisionEvidenceCommand)
-		m.SubscribeFunc(orchestratorevents.TopicOrchestratorCommandRecordApprovalEvidence, m.handleApprovalEvidenceCommand)
-		m.SubscribeMatchedFunc(ModuleID+"/run-drive", runevents.NotificationDestination, runevents.TopicRunStateChanged, m.handleRunStateChanged)
-		m.SubscribeMatchedFunc(ModuleID+"/run-drive", runevents.NotificationDestination, runevents.TopicRunContinuationRequested, m.handleRunContinuationRequested)
-		m.SubscribeMatchedFunc(ModuleID+"/run-drive", runevents.NotificationDestination, runevents.TopicRunRuntimeCommandsReady, m.handleRunRuntimeCommandsReady)
-	}
-	if m.started {
-		return nil
-	}
+	m.subscribeRuntimeIngress()
 	// GMM-R1 / SM-4: recovery inventory must be acquired synchronously. A missing
 	// Run owner subscriber is a startup failure, not a warning that loses recovery.
-	if err := m.recoverRuntimeStartup(context.Background()); err != nil {
+	if err := m.recoverRuntimeStartup(lifecycleCtx); err != nil {
+		return err
+	}
+	if err := lifecycleCtx.Err(); err != nil {
 		return err
 	}
 	m.started = true
+	startupSucceeded = true
 	return nil
+}
+
+func (m *Biz) subscribeRuntimeIngress() {
+	if m == nil || len(m.rawTopics) != 0 {
+		return
+	}
+	m.rawTopics = []string{
+		// RUNTIME-SMO: Run lifecycle topics are owned by blocks/run. The
+		orchestratorevents.TopicOrchestratorCommandBeginWorkspaceRuntimeQuiescence,
+		orchestratorevents.TopicOrchestratorCommandConfirmWorkspaceRuntimeQuiescence,
+		orchestratorevents.TopicOrchestratorCommandSealWorkspaceDeletion,
+		orchestratorevents.TopicOrchestratorCommandPurgeWorkspaceEvidence,
+		orchestratorevents.TopicOrchestratorCommandListToolCallsByRun,
+		orchestratorevents.TopicOrchestratorCommandListPatchesByRun,
+		orchestratorevents.TopicOrchestratorCommandListValidationResultsByRun,
+		orchestratorevents.TopicOrchestratorCommandListCoverageWorkItemsByRun,
+		orchestratorevents.TopicOrchestratorCommandListArtifactContinuationsByRun,
+	}
+	for _, topic := range m.rawTopics {
+		switch topic {
+		case orchestratorevents.TopicOrchestratorCommandBeginWorkspaceRuntimeQuiescence,
+			orchestratorevents.TopicOrchestratorCommandConfirmWorkspaceRuntimeQuiescence:
+			m.SubscribeFunc(topic, m.handleWorkspaceRuntimeQuiescence)
+		case orchestratorevents.TopicOrchestratorCommandSealWorkspaceDeletion,
+			orchestratorevents.TopicOrchestratorCommandPurgeWorkspaceEvidence:
+			m.SubscribeFunc(topic, m.handleWorkspaceDeletion)
+		default:
+			m.SubscribeFunc(topic, m.handleMagicCommand)
+		}
+	}
+	m.rawTopics = append(m.rawTopics,
+		orchestratorevents.TopicOrchestratorDriveRuntime,
+		orchestratorevents.TopicOrchestratorQueryRuntimeOperationReceipt,
+		orchestratorevents.TopicOrchestratorCommitRuntimeOperationReceipt,
+		orchestratorevents.TopicOrchestratorCommitRuntimeGovernanceTicket,
+		orchestratorevents.TopicOrchestratorCommitRuntimeGovernanceApproval,
+		orchestratorevents.TopicOrchestratorRequestRuntimeTermination,
+		orchestratorevents.TopicOrchestratorCommandRecordDecisionEvidence,
+		orchestratorevents.TopicOrchestratorCommandRecordApprovalEvidence,
+	)
+	m.SubscribeFunc(orchestratorevents.TopicOrchestratorDriveRuntime, m.handleRuntimeDrive)
+	m.SubscribeFunc(orchestratorevents.TopicOrchestratorQueryRuntimeOperationReceipt, m.handleRuntimeOperationReceipt)
+	m.SubscribeFunc(orchestratorevents.TopicOrchestratorCommitRuntimeOperationReceipt, m.handleRuntimeOperationReceipt)
+	m.SubscribeFunc(orchestratorevents.TopicOrchestratorCommitRuntimeGovernanceTicket, m.handleRuntimeGovernanceTicketResolution)
+	m.SubscribeFunc(orchestratorevents.TopicOrchestratorCommitRuntimeGovernanceApproval, m.handleRuntimeGovernanceApprovalResolution)
+	m.SubscribeFunc(orchestratorevents.TopicOrchestratorRequestRuntimeTermination, m.handleRuntimeTerminationRequest)
+	m.SubscribeFunc(orchestratorevents.TopicOrchestratorCommandRecordDecisionEvidence, m.handleDecisionEvidenceCommand)
+	m.SubscribeFunc(orchestratorevents.TopicOrchestratorCommandRecordApprovalEvidence, m.handleApprovalEvidenceCommand)
+	m.SubscribeMatchedFunc(ModuleID+"/run-drive", runevents.NotificationDestination, runevents.TopicRunStateChanged, m.handleRunStateChanged)
+	m.SubscribeMatchedFunc(ModuleID+"/run-drive", runevents.NotificationDestination, runevents.TopicRunContinuationRequested, m.handleRunContinuationRequested)
+	m.SubscribeMatchedFunc(ModuleID+"/run-drive", runevents.NotificationDestination, runevents.TopicRunRuntimeCommandsReady, m.handleRunRuntimeCommandsReady)
 }
 
 func (m *Biz) handleRuntimeTerminationRequest(ev magicevent.Event, result magicevent.Result) {
@@ -216,7 +247,13 @@ func (m *Biz) handleRuntimeTerminationRequest(ev magicevent.Event, result magice
 	// A termination request is only the persisted supersede fact emitted by
 	// the Run owner.  No application/UI/governance caller may turn a command
 	// into an SM-4 transition directly.
-	if !ok || ev.Source() != "blocks/run" || m == nil || m.runtimeController == nil || cmd.Validate() != nil || cmd.RequestedBy != "blocks/run" {
+	if !ok || ev.Source() != "blocks/run" || m == nil || cmd.Validate() != nil || cmd.RequestedBy != "blocks/run" {
+		setOrchestratorAck(result, common.ErrInvalidArgument)
+		return
+	}
+	m.lifecycleMu.RLock()
+	defer m.lifecycleMu.RUnlock()
+	if m.runtimeController == nil {
 		setOrchestratorAck(result, common.ErrInvalidArgument)
 		return
 	}
@@ -519,25 +556,86 @@ func queryRuntimeRecoveryInventoryBounded(ctx context.Context, hub magicevent.Hu
 	return nil, fmt.Errorf("%w: runtime recovery inventory exceeds %d pages", common.ErrConflict, maxPages)
 }
 
-func (m *Biz) Stop(ctx context.Context) error {
-	if m == nil {
-		return nil
+func (m *Biz) openRuntimeLifecycle(ctx context.Context) error {
+	if m == nil || ctx == nil {
+		return common.ErrInvalidArgument
 	}
-	// Wake every delayed persisted-lease timer before waiting for lifecycle
-	// readers. The lease remains persisted; cancellation removes only local
-	// delivery machinery and fresh startup will mount it again.
 	m.driveMu.Lock()
-	m.runtimeLeaseTimerClosing = true
-	m.runtimeLeaseTimerEpoch++
+	defer m.driveMu.Unlock()
+	if m.lifecycleCtx != nil || m.lifecycleCancel != nil {
+		return fmt.Errorf("%w: orchestrator lifecycle is already open", common.ErrConflict)
+	}
+	if m.runtimeLeaseTimerEpoch == 0 {
+		m.runtimeLeaseTimerEpoch = 1
+	}
+	m.runtimeLeaseTimerClosing = false
+	m.lifecycleCtx, m.lifecycleCancel = context.WithCancel(ctx)
+	m.runtimeLeaseTimerCtx, m.runtimeLeaseTimerCancel = context.WithCancel(m.lifecycleCtx)
+	return nil
+}
+
+func (m *Biz) runtimeLifecycleContext() context.Context {
+	if m == nil {
+		return context.Background()
+	}
+	m.driveMu.Lock()
+	ctx := m.lifecycleCtx
+	m.driveMu.Unlock()
+	if ctx == nil {
+		return context.Background()
+	}
+	return ctx
+}
+
+func (m *Biz) rollbackRuntimeStart() {
+	if m == nil {
+		return
+	}
+	m.unsubscribeRuntimeIngress()
+	m.driveMu.Lock()
+	if !m.runtimeLeaseTimerClosing {
+		m.runtimeLeaseTimerClosing = true
+		m.runtimeLeaseTimerEpoch++
+	}
+	if m.lifecycleCancel != nil {
+		m.lifecycleCancel()
+	}
 	if m.runtimeLeaseTimerCancel != nil {
 		m.runtimeLeaseTimerCancel()
 	}
 	m.driveMu.Unlock()
-	// A drive can still be executing after its EventHub subscription has been
-	// removed. Wait for it before dropping the owner dependencies it uses; this
-	// is lifecycle synchronization only, not a second recovery state machine.
-	m.lifecycleMu.Lock()
+	m.startupRecoveryMu.Lock()
+	m.runRuntimeCommandsReady = false
+	m.startupRecoveryActions = nil
+	m.startupRecoveryMu.Unlock()
+	m.started = false
+	// Recovery may have accepted earlier actions before a later item failed.
+	// Clear process-local gates only when no such owner work is in flight. Never
+	// turn a startup error into an unbounded teardown wait: a busy cancelled
+	// lifecycle remains closed to Start and a later deadline-aware Stop drains it.
+	if !m.lifecycleMu.TryLock() {
+		return
+	}
 	defer m.lifecycleMu.Unlock()
+	m.runtimeMutationFence.Lock()
+	m.driveMu.Lock()
+	m.lifecycleCtx = nil
+	m.lifecycleCancel = nil
+	m.runtimeLeaseTimerCtx = nil
+	m.runtimeLeaseTimerCancel = nil
+	m.drivingRuns = nil
+	m.persistedLeaseMounts = nil
+	m.retryLeaseTimers = nil
+	m.retiredWorkspaces = nil
+	m.quiescingWorkspaces = nil
+	m.driveMu.Unlock()
+	m.runtimeMutationFence.Unlock()
+}
+
+func (m *Biz) unsubscribeRuntimeIngress() {
+	if m == nil {
+		return
+	}
 	for idx := len(m.rawTopics) - 1; idx >= 0; idx-- {
 		m.UnsubscribeFunc(m.rawTopics[idx])
 	}
@@ -545,12 +643,102 @@ func (m *Biz) Stop(ctx context.Context) error {
 	m.UnsubscribeMatchedFunc(ModuleID+"/run-drive", runevents.TopicRunContinuationRequested)
 	m.UnsubscribeMatchedFunc(ModuleID+"/run-drive", runevents.TopicRunRuntimeCommandsReady)
 	m.rawTopics = nil
+}
+
+func (m *Biz) lockLifecycleForStop(ctx context.Context) error {
+	if m == nil {
+		return nil
+	}
+	if ctx == nil {
+		return common.ErrInvalidArgument
+	}
+	if m.lifecycleMu.TryLock() {
+		return nil
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	ticker := time.NewTicker(time.Millisecond)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-ticker.C:
+			if m.lifecycleMu.TryLock() {
+				return nil
+			}
+		}
+	}
+}
+
+func (m *Biz) lockLifecycleTransition(ctx context.Context) error {
+	if m == nil || ctx == nil {
+		return common.ErrInvalidArgument
+	}
+	if m.lifecycleStopMu.TryLock() {
+		return nil
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	ticker := time.NewTicker(time.Millisecond)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-ticker.C:
+			if m.lifecycleStopMu.TryLock() {
+				return nil
+			}
+		}
+	}
+}
+
+func (m *Biz) Stop(ctx context.Context) error {
+	if m == nil {
+		return nil
+	}
+	if ctx == nil {
+		return common.ErrInvalidArgument
+	}
+	if err := m.lockLifecycleTransition(ctx); err != nil {
+		return err
+	}
+	defer m.lifecycleStopMu.Unlock()
+	// Wake every delayed persisted-lease timer before waiting for lifecycle
+	// readers. The lease remains persisted; cancellation removes only local
+	// delivery machinery and fresh startup will mount it again.
+	m.driveMu.Lock()
+	if !m.runtimeLeaseTimerClosing {
+		m.runtimeLeaseTimerClosing = true
+		m.runtimeLeaseTimerEpoch++
+	}
+	if m.lifecycleCancel != nil {
+		m.lifecycleCancel()
+	}
+	if m.runtimeLeaseTimerCancel != nil {
+		m.runtimeLeaseTimerCancel()
+	}
+	m.driveMu.Unlock()
+	m.started = false
+	// Remove every external ingress before waiting. Already-running handlers hold
+	// lifecycleMu; queued drive/timer callbacks observe the cancelled lifecycle
+	// root and the closing epoch before they can create another successor.
+	m.unsubscribeRuntimeIngress()
+	// A drive can still be executing after its EventHub subscription has been
+	// removed. Wait for it before dropping the owner dependencies it uses; this
+	// is lifecycle synchronization only, not a second recovery state machine.
+	if err := m.lockLifecycleForStop(ctx); err != nil {
+		return err
+	}
+	defer m.lifecycleMu.Unlock()
 	m.runtimeController = nil
 	m.evidence = RuntimeEvidenceRepositories{}
 	m.evidenceRecords = nil
 	m.workspaceDeletions = nil
 	m.workspacePurger = nil
-	m.started = false
 	m.runtimeMutationFence.Lock()
 	m.driveMu.Lock()
 	// Cancel again under the lifecycle write fence. A pre-existing reader may
@@ -567,6 +755,8 @@ func (m *Biz) Stop(ctx context.Context) error {
 	m.quiescingWorkspaces = nil
 	m.runtimeLeaseTimerCtx = nil
 	m.runtimeLeaseTimerCancel = nil
+	m.lifecycleCtx = nil
+	m.lifecycleCancel = nil
 	m.driveMu.Unlock()
 	m.runtimeMutationFence.Unlock()
 	m.startupRecoveryMu.Lock()
@@ -581,22 +771,36 @@ func (m *Biz) Stop(ctx context.Context) error {
 // external owner state.
 func (m *Biz) handleRunStateChanged(ev magicevent.Event, _ magicevent.Result) {
 	data, ok := ev.Data().(runevents.RunStateChangedData)
-	if ok && ev.Source() == runevents.CommandDestination && data.Validate() == nil && data.State == common.RunStateActive {
-		var scheduleErr error
-		if requestID := strings.TrimSpace(data.ReconciliationRequestID); requestID != "" {
-			scheduleErr = m.scheduleRuntimeDriveWithReconciliation(ev.Context(), data.WorkspaceID, data.RunID, "run_state_active_resume", requestID, 0)
-		} else {
-			scheduleErr = m.scheduleRuntimeDrive(ev.Context(), data.WorkspaceID, data.RunID, "run_state_active")
-		}
-		if err := scheduleErr; err != nil && !errors.Is(err, context.Canceled) {
-			m.recordRuntimeDriveScheduleFailure(ev.Context(), data.WorkspaceID, data.RunID, "run_state_active", err)
-		}
+	if !ok || m == nil || ev.Source() != runevents.CommandDestination || data.Validate() != nil || data.State != common.RunStateActive {
+		return
+	}
+	// A notification may already be queued when Stop removes the matched
+	// observer. Fence validation, admission, and task submission as one in-flight
+	// lifecycle operation so teardown cannot clear dependencies in between.
+	m.lifecycleMu.RLock()
+	defer m.lifecycleMu.RUnlock()
+	if m.runtimeController == nil {
+		return
+	}
+	var scheduleErr error
+	if requestID := strings.TrimSpace(data.ReconciliationRequestID); requestID != "" {
+		scheduleErr = m.scheduleRuntimeDriveWithReconciliation(ev.Context(), data.WorkspaceID, data.RunID, "run_state_active_resume", requestID, 0)
+	} else {
+		scheduleErr = m.scheduleRuntimeDrive(ev.Context(), data.WorkspaceID, data.RunID, "run_state_active")
+	}
+	if err := scheduleErr; err != nil && !errors.Is(err, context.Canceled) {
+		m.recordRuntimeDriveScheduleFailure(ev.Context(), data.WorkspaceID, data.RunID, "run_state_active", err)
 	}
 }
 
 func (m *Biz) handleRunContinuationRequested(ev magicevent.Event, _ magicevent.Result) {
 	data, ok := ev.Data().(runevents.RunContinuationRequestedData)
-	if !ok || ev.Source() != runevents.CommandDestination || data.Validate() != nil {
+	if !ok || m == nil || ev.Source() != runevents.CommandDestination || data.Validate() != nil {
+		return
+	}
+	m.lifecycleMu.RLock()
+	defer m.lifecycleMu.RUnlock()
+	if m.runtimeController == nil {
 		return
 	}
 	data = data.Normalized()
@@ -618,7 +822,7 @@ func (m *Biz) recordRuntimeDriveScheduleFailure(ctx context.Context, workspaceID
 		slog.Error("workorch Runtime drive scheduling rejected with no recovery routine", "source", source, "workspaceID", workspaceID, "runID", runID, "scheduleErr", scheduleErr)
 		return
 	}
-	recoveryCtx := orchestratorBackgroundContext(ctx, workspaceID)
+	recoveryCtx := m.orchestratorBackgroundContext(ctx, workspaceID)
 	// This path is called by a Run notification observer. Persisting through
 	// the Run owner synchronously from that callback can deadlock its EventHub
 	// lane, so recovery accounting is explicitly moved to a framework task.
@@ -728,6 +932,9 @@ func (m *Biz) scheduleRuntimeDriveWithLeaseAndReconciliation(ctx context.Context
 	if m == nil || workspaceID == "" || runID == "" {
 		return common.ErrInvalidArgument
 	}
+	if err := m.runtimeLifecycleSchedulingError(); err != nil {
+		return err
+	}
 	if err := m.validateWorkspaceRetirementDriveAdmission(ctx, workspaceID, runID, leaseGeneration); err != nil {
 		if errors.Is(err, common.ErrNotFound) {
 			return nil
@@ -752,7 +959,7 @@ func (m *Biz) scheduleRuntimeDriveWithLeaseAndReconciliation(ctx context.Context
 		workspaceID: workspaceID, runID: runID, source: source, driveKey: driveKey, leaseGeneration: leaseGeneration,
 		reconciliationRequestID: reconciliationRequestID, reconciliationGeneration: reconciliationGeneration,
 	}
-	bgCtx := orchestratorBackgroundContext(ctx, workspaceID)
+	bgCtx := m.orchestratorBackgroundContext(ctx, workspaceID)
 	// A timer already runs inside BackgroundRoutine. Execute the claimed lease
 	// there so the persisted running lease and local gate have no handoff gap.
 	if m.BackgroundRoutine() == nil || leaseGeneration != 0 {
@@ -1147,6 +1354,21 @@ func (m *Biz) handleScheduledRuntimeDriveFailure(ctx context.Context, request sc
 			Source:           request.source,
 		}
 	}
+	if operationID, claimID, deadlineText, inFlight := runtime.RuntimeOperationRecoveryInFlight(err); inFlight {
+		deadline, parseErr := time.Parse(time.RFC3339Nano, deadlineText)
+		if parseErr != nil {
+			return nil
+		}
+		delay := time.Until(deadline)
+		if delay <= 0 {
+			delay = time.Millisecond
+		}
+		return &runtimeRecoveryLeaseRequest{
+			Reason:           runtimecontract.RuntimeDriveLeaseReasonOperationRetry,
+			FailureSignature: "operation-recovery-in-flight/" + operationID + "/" + claimID,
+			Delay:            delay, Source: request.source,
+		}
+	}
 	var persisted *runtimePersistedDrivePendingError
 	if errors.As(err, &persisted) {
 		slog.Debug("workorch Runtime persisted bounded retry state", "source", request.source, "workspaceID", request.workspaceID, "runID", request.runID, "revision", persisted.Revision)
@@ -1497,7 +1719,11 @@ func (m *Biz) launchRuntimeDriveLeaseTimer(_ context.Context, lease runtimecontr
 		return false
 	}
 	if m.runtimeLeaseTimerCtx == nil {
-		m.runtimeLeaseTimerCtx, m.runtimeLeaseTimerCancel = context.WithCancel(context.Background())
+		root := m.lifecycleCtx
+		if root == nil {
+			root = context.Background()
+		}
+		m.runtimeLeaseTimerCtx, m.runtimeLeaseTimerCancel = context.WithCancel(root)
 	}
 	retryCtx := m.runtimeLeaseTimerCtx
 	if lease.WorkspaceID != "" {
@@ -1893,8 +2119,32 @@ func (m *Biz) endRuntimeLeaseTimer(key string, generation uint64, epoch uint64) 
 	m.driveMu.Unlock()
 }
 
-func orchestratorBackgroundContext(ctx context.Context, workspaceID common.WorkspaceID) context.Context {
+func (m *Biz) runtimeLifecycleSchedulingError() error {
+	if m == nil {
+		return common.ErrInvalidArgument
+	}
+	m.driveMu.Lock()
+	closing := m.runtimeLeaseTimerClosing
+	ctx := m.lifecycleCtx
+	m.driveMu.Unlock()
+	if closing {
+		return context.Canceled
+	}
+	if ctx != nil && ctx.Err() != nil {
+		return ctx.Err()
+	}
+	return nil
+}
+
+func (m *Biz) orchestratorBackgroundContext(ctx context.Context, workspaceID common.WorkspaceID) context.Context {
 	bgCtx := context.Background()
+	if m != nil {
+		m.driveMu.Lock()
+		if m.lifecycleCtx != nil {
+			bgCtx = m.lifecycleCtx
+		}
+		m.driveMu.Unlock()
+	}
 	if workspaceID != "" {
 		bgCtx, _ = common.BindRuntimeWorkspaceContext(bgCtx, workspaceID)
 	} else if workspaceID := common.RuntimeWorkspaceIDFromContext(ctx); workspaceID != "" {
@@ -2006,9 +2256,16 @@ func classifyRuntimeDriveFailure(err error) runtimecontract.FailureFact {
 			Signature: "execution-budget-exhausted/" + string(executionBudgetExhausted.Dimension), Message: msg,
 		}
 	case errors.As(err, &capabilityCatalogUnavailable):
+		signature := "runtime-capability-catalog-unavailable"
+		if owner := strings.TrimSpace(capabilityCatalogUnavailable.OwnerModuleID); owner != "" {
+			signature += "/" + owner
+		}
+		if subject := strings.TrimSpace(capabilityCatalogUnavailable.SubjectRef); subject != "" {
+			signature += "/" + subject
+		}
 		return runtimecontract.FailureFact{
-			Class: runtimecontract.FailureClassCapabilityUnavailable, Code: "mcp_capability_catalog_unavailable",
-			Signature: "mcp-capability-catalog-unavailable", Message: msg,
+			Class: runtimecontract.FailureClassCapabilityUnavailable, Code: "runtime_capability_catalog_unavailable",
+			Signature: signature, Message: msg,
 		}
 	case errors.As(err, &unsupportedCapability):
 		return runtimecontract.FailureFact{

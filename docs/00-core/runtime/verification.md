@@ -4,7 +4,7 @@ Status: normative
 
 Type: verification
 
-Last Verified: 2026-08-30
+Last Verified: 2026-08-31
 
 ## Purpose
 
@@ -38,6 +38,9 @@ projection gate；owner root、private-event file 与 dispatcher 必须都位于
 导入或用于 reducer dispatch；正式 Runtime owner 仍只由 typed contract 和 private reducer 决定。state model 可以列出
 多个协调 transition ID，但 verifier 必须证明它们全部回到该 state type 的同一唯一 owner；跨 owner 组合必须失败。
 `run.replacement` 必须分类为 Run-owner `owner_private_transaction` 并与 SM-1 owner 相同，不能作为第五个状态机。
+Orchestrator private-event verifier 还必须穷尽 kind→concrete payload family→primary SM；允许的跨 SM 写集只能落在同 owner
+package-private transaction 与单次 aggregate CAS 内。新增 kind 未分类、同一 payload 被多个 ingress 分步提交、协调写集留下
+torn sibling ledger，或 primary SM 被当作第二个 reducer owner，都必须失败。
 Workspace 删除、Run 退役以及各资源 owner purge 的 privileged physical sink 还必须在所属 owner production root 中只有
 一个调用点，且该调用点必须位于清单声明的 private dispatcher；全 production tree 的其他 reference 仅允许列明的
 repository storage delegation。仅证明 dispatcher 内“存在一次”不足以阻止第二入口或 owner 外 helper 转调。
@@ -117,6 +120,9 @@ Cross-owner regression必须证明 concrete receiving-owner Command/Result、wor
   arithmetic overflow或任一limit breach均形成typed protocol fact，不能通过提高Runtime budget或切换decode路径恢复；
 - producer 没有 diagnostic 的普通 accepted fact 才允许 original 为空；
 - unknown code 保留 original 并 typed fail-fast，不能默认 retry、CAS、repair、governance 或 terminal；
+- core classification 必须只消费 typed feasibility/status、sealed operation descriptor 与 Profile declaration。测试需给出相同
+  typed status + 不同 capability-private code/prefix，以及未知 typed status，证明私有码不改变 failure/repair/retry/governance/
+  terminal，未知 status fail closed；静态扫描必须拒绝 reducer 引用 concrete capability owner 常量或其 diagnostic prefix；
 - provider-safe correction projection 与 audit-safe original diagnostic 分开生成，互不覆盖；
 - credential、endpoint、raw prompt/provider body/stream、未脱敏文件内容只允许记录 hash/bytes 与
   redacted/omitted metadata，不得进入 aggregate、eventstream、projection、memory 或下一次 candidate context。
@@ -184,21 +190,26 @@ Cross-owner regression必须证明 concrete receiving-owner Command/Result、wor
   `CompletedDispatch.OperationTargetAuthorizations` 的 canonical `Target.AllowedTargetRefs()={A,B}`、structured diagnostic
   candidate `B`：在 `existing_owner_scope` case 中该 finite set 同时等于 canonical `OwnerScopeTargetRefs`；entry 与 candidate
   分别是 full scope 的子集，observation `ValidationScopeTargetRefs` 与该 sealed full
-  scope exact-match；candidate 与 entry 不相等、甚至不相交仍须通过 causation 并进入 File confirmation。expected scope 必须按
+  scope exact-match；candidate 与 entry 不相等、甚至不相交仍须通过 causation并进入 sealed Profile/descriptor 指定的
+  resource/effect owner confirmation。expected scope 必须按
   exact `OperationID` + operation hash 从 completed dispatch 读取 `Target.AllowedTargetRefs()`，不得从 mutable manifest、current
   focus、owner inventory 或 operation entry 重建；
 - operation entry cardinality 必须分别覆盖 sealed per-operation `RequireTargets=true|false`：前者 empty entry 在 owner call 前拒绝，
   后者不因 empty entry 单独失败；finite allowed set 存在时，任何非空 entry member 都必须属于该 set。structured validation
   negative matrix 还必须覆盖：observation scope 缺项/附加项，entry/candidate 任一越界或 candidate 为空，
   missing/duplicate target authorization，wrong operation hash，wrong dispatch/authority/operation/`FocusTargetRole`，以及 persisted
-  authorization/observation tamper。所有分支在 File query、provider call、repair transition、budget consumption 前 fail closed；
+  authorization/observation tamper。所有分支在 repair-owner query、provider call、repair transition、budget consumption 前
+  fail closed；
+- dispatch execution 必须证明 `dispatch_execution_requested` 只做单次 SM-3 preparation/claim CAS 并返回 immutable call
+  handoff，`ApplyInternalEvent` 内零 capability call/callback；owner receipt 之后由 evidence/stale/governance 三个互斥 private event
+  或独立 outcome-unknown event 收口，并逐项验证 declared write-set、pre/post-CAS、duplicate/stale 与 fresh restart；
 - accepted admission projection matrix 必须覆盖 target authorization 与 managed-validation recipe 两份独立 commitment：真实
   admission/duplicate/restart 正向，missing/hash mismatch，协调改写 dispatch projection + self-seal，以及 recipe ID、command、
   ordered args、timeout 漂移；governance multi-hop 必须逐跳 exact 继承。非 managed File/MCP candidate 必须保持空 recipe
   projection/hash；
-- Shell `WORKORCH_FAILURE_TARGET` matrix 必须证明 closed/role/class/scope-bounded marker 只贡献 diagnostic candidate refs，receipt
+- software-dev specialization 的 Shell `WORKORCH_FAILURE_TARGET` matrix 必须证明 closed/role/class/scope-bounded marker 只贡献 diagnostic candidate refs，receipt
   的 direct `RuntimeFailureTargetObservation`/`TargetObservation` authority 保持为空；只有 matching finite scope 才能形成
-  `RuntimeValidationFailureObservation`，且必须继续等待 File confirmation 与 SM-2 transition。missing/multiple/unknown-field、
+  `RuntimeValidationFailureObservation`，且必须继续等待 sealed repair-owner confirmation 与 SM-2 transition。missing/multiple/unknown-field、
   role/class mismatch、越界 marker 均不能形成 candidate authority；tool diagnostic 与 marker 的 canonical union 必须仍为
   1～8 项，`8+1`/`8+8` 越界 union 整组失效；
 - managed-validation receipt matrix 必须在 commit 与 fresh-load 同时拒绝 direct diagnostic `TargetRefs`（即使它等于 current
@@ -207,8 +218,9 @@ Cross-owner regression必须证明 concrete receiving-owner Command/Result、wor
   observation/typed diagnostic 必须覆盖 presence 缺失与 canonical drift。合法 VFO 必须回指 completed/committed dispatch 中
   completed operation 的 `evidence_committed` execution，并 exact-match key/fence/ref/hash Shell receipt；owner-committed-only、
   invalidated dispatch、generic FailureObserved/DriveFailureObserved 与 governance-resume origin/current dispatch 混淆均须在
-  commit/fresh-load 原子拒绝。pending VFO 保持零 concrete `RepairDirective`、零 `FailureTarget`。File confirmation 必须在
-  ingress 与 reload 都拒绝非 File owner；任何 promoted File target authority 必须反向匹配 exact confirmed record，generic
+  commit/fresh-load 原子拒绝。pending VFO 保持零 concrete `RepairDirective`、零 `FailureTarget`。repair-owner confirmation 必须在
+  ingress 与 reload 都拒绝与 sealed Profile convergence/source binding descriptor 不一致的 owner；任何 promoted owner-grounded
+  target authority 必须反向匹配 exact confirmed record、matching `OwnerModuleID` 与 exact validation-owner receipt，generic
   failure ingress 与协调修改 receipt hash 不得旁路；
 - descriptor-authorized receipt-evidence direct-target matrix 必须使用真实 capability owner/EventHub receipt 保留合法非 VFO
   正向路径（当前 concrete fixture 为 MCP），并在 commit、JSON round-trip 与
@@ -218,7 +230,7 @@ Cross-owner regression必须证明 concrete receiving-owner Command/Result、wor
   negative matrix 至少覆盖 generic ingress、owner-committed-only、missing/duplicate evidence、missing/duplicate processed fence、
   receipt ref/hash或 diagnostic drift、descriptor policy/owner/target-role drift、catalog dependency
   domain/owner/subject/revision drift、stale restart 与 coordinated tamper；所有分支均
-  不得由 File snapshot、current manifest 或 terminal projection 补建 authority；
+  不得由后续 resource-owner snapshot、current manifest 或 terminal projection 补建原 diagnostic owner authority；
 - evidence-commit reverse-proof matrix 必须证明每个 `evidence_committed` execution 都唯一绑定 exact
   `EvidenceFactID + EvidenceFactHash`，覆盖 accepted/rejected、active/completed、JSON round-trip、restart/duplicate，以及
   kind、revision、binding refs、CWI refs、failure/reason、receipt/operation lineage 的单字段和协调篡改；ledger commitment 不得
@@ -240,30 +252,34 @@ Cross-owner regression必须证明 concrete receiving-owner Command/Result、wor
   dispatch authority hash；
 - operations request-session manifest matrix 必须覆盖完整 raw-canonical CandidateManifest body 的 positive restart/duplicate，
   nil/empty、顺序、duplicate、whitespace、missing/duplicate session、body/hash drift，以及 attempt+dispatch target/coverage/recipe
-  projection 协调改写；confirmed File repair 还必须覆盖 typed purpose/closure 与三份 RepairCommitment exact inheritance，删除
+  projection 协调改写；confirmed validation repair 还必须覆盖 exact purpose `confirmed_validation_repair`、closure、
+  `RepairOwnerModuleID` 与三份 RepairCommitment exact inheritance，删除
   commitment/confirmation/directive及其协调删除、source receipt/evidence/fence/hash drift、governance resume 与 partial/rejected/
   completed restart；
 - descriptor policy matrix 还必须证明 `sealed_operation_targets` 的无 observation refs 只能是 sealed operation target 子集，
   `validation_failure_candidates` 不能携带 direct refs/observation，`none` 全拒绝，并拒绝通过删除 observation、同步改写
   failure message/signature/refs 或注入已退役 prerequisite 来降级 receipt-evidence authority；
-- File confirmation sequence matrix 必须覆盖 stale(v1)→confirmed(v2)、confirmed(v1)→late rejected/stale(v2)、rejected→late
+- repair-owner confirmation sequence matrix 必须覆盖 stale(v1)→confirmed(v2)、confirmed(v1)→late rejected/stale(v2)、rejected→late
   confirmed、exact response-loss replay 与 fresh-load coordinated append。允许 stale refresh，但 confirmed/rejected 是同一 VFO
   的终端 response；Runtime current failure/target 必须只匹配 latest valid record，不能从任意历史 confirmed record恢复 authority；
-- confirmed File repair transaction matrix 必须覆盖单项与多项 all-of：accepted durable changed receipt 的每个 operation target、
-  target resource change、sealed target authorization 与 confirmed surface exact binding；workspace-tree revision chain 从
+- confirmed validation repair transaction matrix 必须覆盖单项与多项 all-of：sealed Profile convergence 与 source binding descriptor
+  各自确定唯一 repair owner 的正向路径，以及 ambiguous/mixed/wrong owner 的零 effect 反向路径；manifest purpose 必须为
+  `confirmed_validation_repair`，三份 commitment 的 `RepairOwnerModuleID`、confirmation、每个 operation descriptor、receipt producer
+  与 resource change owner exact-match。accepted durable changed receipt 的每个 operation target、target resource change、sealed
+  target authorization 与 confirmed surface exact binding；workspace-tree revision chain 从
   confirmation revision 唯一连续推进，禁止按 operation ID 排序。首项 partial CAS、fresh-process reload、首/末 receipt duplicate 与
   final accepted→fresh-validation 都必须保留 closure 且不重复 effect；首项 partial CAS 后 mutable `FailureTarget` 与旧
   `need_state_change RepairDirective` 必须同时为空，current pending prerequisite 必须精确等于该 dispatch invalidation 的 prerequisite
   union。negative matrix 至少覆盖恢复旧 target/directive、额外/缺失 pending prerequisite、恢复 invalidated observation、第二 receipt
   复用原 revision、branch/detached chain、missing/duplicate accepted evidence 或 processed fence、payload/hash drift、partial member
   rejected、refresh-exhausted/dispatch invalidation，以及把 `need_validation` partial dispatch 误识别为 repair transaction；所有失败
-  均不得恢复 stale File authority；
-- confirmed File governance matrix 必须覆盖 single/multi-operation、首项 accepted 后 pause、未完成首项直接 pause、
+  均不得恢复 stale repair-owner authority；
+- confirmed validation repair governance matrix 必须覆盖 single/multi-operation、首项 accepted 后 pause、未完成首项直接 pause、
   `continue|fail`、fresh-process reload 与 resolution/receipt duplicate。continue 只能从 origin accepted admission、confirmation、
   source dispatch/candidate seal、completed receipt chain 与 exact binding/grant 生成同一 candidate 的 next-fence resume；不得重新请求
-  candidate、增加/替换 operation、恢复旧 target/directive 或让 File 写 Runtime state。accepted receipt、governance resolution 与后续
+  candidate、增加/替换 operation、恢复旧 target/directive 或让 repair owner 写 Runtime state。accepted receipt、governance resolution 与后续
   receipt 必须消费同一全局连续 evidence revision；测试需协调更新 execution fact hash 后单独漂移 revision，并同时证明 aggregate
-  ledger 与 File transaction reverse proof 都 fail closed，不能依赖某个 validator 的先后次序或 diagnostic 文本；
+  ledger 与 owner-neutral repair transaction reverse proof 都 fail closed，不能依赖某个 validator 的先后次序或 diagnostic 文本；
 - selector-only managed-validation authorization 的 canonical `Target.AllowedTargetRefs()` 为空；operation 可按 sealed
   `RequireTargets` 与 owner feasibility 执行，但必须向 owner 传递空 `ValidationScopeTargetRefs` 且零 scope-bound structured repair
   observation。manifest/current focus 漂移不得把它补成 finite scope，无 observation 的 rejected validation 只走 Profile 已封存的
@@ -279,7 +295,7 @@ Cross-owner regression必须证明 concrete receiving-owner Command/Result、wor
   ceiling/reasoning/budget/stable prefix构成唯一purpose-bound semantic invocation seal；不得出现独立SemanticActivation
   repository/lifecycle或assessment通过operations envelope升级role。
 - owner-fact acquisition manifest 必须同时投影 immutable terminal evidence kinds 与 current acquisition evidence kinds；
-  schema、decoder 与 binding compiler 对 terminal `validation` + current File `state_change` 给出同一解释，且 C0～C2 bytes/hash
+  schema、decoder 与 binding compiler 对 terminal `validation` + current `RepairOwnerModuleID` `state_change` 给出同一解释，且 C0～C2 bytes/hash
   不因 current acquisition 改变；acquisition 不携带 terminal metric/artifact credit。
 - `prospective_owner_target` declaration/obligation/projection 必须具有同一 nonempty
   `ProspectiveSatisfactionContractRef`，其它 policy 禁止携带；manifest 分离 provider-selectable `OwnerCatalogs` 与
@@ -367,7 +383,7 @@ Cross-owner regression必须证明 concrete receiving-owner Command/Result、wor
 - durable effect 使用稳定 ExecutionKey/Fence/owner receipt，restart/duplicate 不重复副作用或改变 diagnostic hash；
 - File/Shell/Git fresh chain 必须使用 owner catalog 的 exact kind/variant/target policy；File effect 退休 catalog 后，Shell
   从 fresh File-owner inventory 重获 target vocabulary，不把空 scope 当创建授权；
-- MCP owner failure-target + File repair 的 receipt 矩阵至少覆盖 `file_write|text_replace|unified_diff` × CAS-before/
+- software-dev specialization 的 MCP owner failure-target + File repair receipt 矩阵至少覆盖 `file_write|text_replace|unified_diff` × CAS-before/
   CAS-after-response-loss；重启复用 exact owner receipt，MCP remote call 与 File durable effect 均不重复；
 - stale/resource revision 独立于 failure/candidate budget；accepted resource change 不消耗 recovery budget。
 - `need_validation` 前的 validation discovery 缺失必须恢复为 matching typed prerequisite，而不是 capability-unavailable feasibility；局部 target、
@@ -378,6 +394,18 @@ Cross-owner regression必须证明 concrete receiving-owner Command/Result、wor
 - 只有 repository expected/observed revision 不一致产生 typed concurrent-state conflict 并消费 CAS reload；
 - semantic reject、stale identity、candidate session conflict、duplicate/no-op 不得借 `common.ErrConflict` 进入 CAS；
 - provider transport、operation outcome recovery、delivery retry 使用独立 persisted ledger；
+- failure-authority matrix 必须覆盖唯一 `replaceRuntimeFailureAuthority` production writer 与三种显式 policy：bounded interlude
+  exact保留；retire 同时清空旧 `FailureTarget + RepairDirective`；replace-from-exact-owner-fact 要求新 failure/target 的
+  signature、canonical targets、observation逐字段一致并清空旧 directive。至少覆盖 owner infeasibility、targetless rejected
+  receipt、provider/candidate/governance/terminal failure、confirmation replacement、duplicate/restart 及协调 tamper；任何普通 failure
+  不得继承上一 lineage 的 repair authority；
+- operation recovery 必须覆盖 `recovery_budget_consumed` 在同一 CAS 中增加 counter 与 exact
+  `RuntimeOperationRecoveryAuthorization`、`operation_recovery_claimed` 的 `issued -> in_flight`，以及 receipt/call-return 的
+  `in_flight -> settled|uncertain`。矩阵至少覆盖 budget/claim CAS 前后、pre-call crash、physical replay 前后、response loss、
+  claim lease expiry、fresh-process reload、双 worker、exact duplicate、wrong claim/operation/authorization、counter/ledger 缺项或
+  乱序、duplicate identity、wrong dispatch/key/fence、orphan execution 与 forged state；只有成功 claim exact matching
+  `in_flight` 的 caller 可获得一次 physical-call handoff，active/expired/uncertain/settled/retired record 与 process-local counter
+  均不得单独授权 effect；
 - governance wait/continuation lifecycle handoff 与 terminal delivery 必须分流：前者以 exact persisted governance fence 和
   SM-4 drive lease等待 Run-owner acknowledgement，后者才可消费 terminal-delivery ledger；Definition clarification 必须与
   普通 Decision/Approval 一样覆盖 bind-CAS、duplicate、stale、response-loss 和 fresh reload；
@@ -395,7 +423,9 @@ Cross-owner regression必须证明 concrete receiving-owner Command/Result、wor
   epoch defer不挂 zombie successor、不清理新 epoch gate、Stop及时清空本地 map/context且不删除 persisted lease；
 - governance ingress 必须覆盖 Decision/Approval wrong-source在 authority load 前拒绝；same ResolutionID+snapshot 的 Summary、
   EvidenceRefs、outcome、ticket/approval、dispatch、dependency、subject任一漂移均 conflict/零 CAS。首次 stale diagnostic 与其
-  exact replay必须持续返回 stale且不触发 Run/timer，stale payload漂移同样 fail-closed；
+  exact replay必须持续返回 stale且不触发 Run/timer，stale payload漂移同样 fail-closed；同时静态/合同测试必须证明只存在
+  ticket-resolution 与 approval-resolution 两个 concrete ingress，generic governance-resolution topic/command/handler 不存在，
+  且 concrete adapter 必须先从 persisted request 重建 exact binding；
 - recoverable runtime wait只有在typed owner recovery/reconciliation合同、condition、trigger/deadline和budget完整时合法；
   matching trigger幂等re-drive，stale/duplicate trigger零迁移，deadline/budget/guard耗尽typed terminal；
 - wait不新增SM-1 state，不创建Decision/Approval，不由Web/TUI/projection/普通Resume驱动，且不存在
@@ -438,6 +468,12 @@ Cross-owner regression必须证明 concrete receiving-owner Command/Result、wor
 - component instance、Service、global/cache/background task 不保存未经 workspace scope 约束的“current workspace”；
 - 至少两个 workspace 并发 candidate、receipt、recovery、delivery 时不串 identity、diagnostic 或 singleflight；
 - CAS 前/后 crash、owner commit 前/后 crash、response 丢失、duplicate/stale/乱序均零重复副作用；
+- Orchestrator Module lifecycle 必须覆盖 Setup 缺 EventHub/`BackgroundRoutine` fail-fast、`Run(ctx)` 绑定 framework context、
+  startup inventory 中途失败撤销全部 ingress/context、重复 Start/Stop、Stop cancellation/deadline、已排队 handler/drive 与
+  already-due timer race。cancel 点后不得新增 task/context/timer 或 zombie successor；Stop 只清 process-local gate，不删除
+  persisted lease/operation authorization，fresh Start 必须从 Run inventory + opaque aggregate 恢复；该 lifecycle 不得被登记为
+  SM-1 transition或新的 SM-4 authority。还必须验证 startup priority 保持 Orchestrator 先于 Run，而独立 teardown priority 保持
+  Workorchd → Orchestrator → Run/capability 的依赖释放顺序；
 - Orchestrator worker-exit fence 必须注入 drive body panic、panic 后 recovery-lease CAS 成功、CAS-before/CAS-after response
   loss、recovery CAS 失败、timer registration/submission/mount 失败、persisted-lease preflight 的 load/recover/mount 失败、
   duplicate ingress、Stop 与 fresh-process restart；证明 panic 只形成稳定 typed owner-local failure，
@@ -496,18 +532,20 @@ Cross-owner regression必须证明 concrete receiving-owner Command/Result、wor
 - 首次 `file/write` 创建成功后若同 CWI reopen，latest owner catalog 必须使 correction 选择 revision-bound
   `file/edit`/`patch/apply`；重复 create-only write 在副作用前拒绝且不能形成无限 revision/等价操作循环。
 - profile verifier 必须证明 validation entry 只保留 recipe/receipt lineage：无 owner-supported 结构化位置时零 failure-target
-  candidate；支持的工具诊断只能报告 sealed validation scope 内的 actual target，越界目标丢弃且仍需 File owner confirmation。
+  candidate；支持的工具诊断只能报告 sealed validation scope 内的 actual target，越界目标丢弃且仍需 sealed repair-owner
+  confirmation。
   `WORKORCH_FAILURE_TARGET` marker 只能进入同一 bounded diagnostic-candidate path，不能直接产生
   `RuntimeFailureTargetObservation` authority。
-  File 的 current regular manifest 只确认 candidate freshness，不重定义 completed-dispatch full scope。回归还必须覆盖：dispatch
+  repair owner 的 current manifest 只确认 candidate freshness，不重定义 completed-dispatch full scope。software-dev specialization
+  可用 File manifest 作 fixture。回归还必须覆盖：dispatch
   seal/持久化保留 `FocusTargetRole`、per-operation target authorization 与 operation hash；current Focus/manifest 漂移不改变
-  completed-dispatch causation；observation receipt 到 File confirmation 之间零 CWI reopen、零 repair semantic input、零
+  completed-dispatch causation；observation receipt 到 repair-owner confirmation 之间零 CWI reopen、零 repair semantic input、零
   validation-only retry 和零 provider call；
-- duplicate/restart matrix 必须覆盖 observation persist 前后、File query 前后、confirmation CAS 前后与 response loss。exact
+- duplicate/restart matrix 必须覆盖 observation persist 前后、repair-owner query 前后、confirmation CAS 前后与 response loss。exact
   duplicate 只能复用同一 operation entry、sealed full scope、candidate、diagnostic/causation identity；已持久化 confirmation 的
   replay 为零 CAS，pending confirmation 只能重发相同 read-only query。fresh load 必须从 completed dispatch matching
   authorization 恢复 scope 并重验 subset/exact invariants，不能读取 current manifest 补 scope；payload 漂移 conflict 且零
-  repair/provider/effect/budget。stale/rejected File disposition 分别只进入 prerequisite/typed terminal，confirmed 只由 SM-2
+  repair/provider/effect/budget。stale/rejected repair-owner disposition 分别只进入 prerequisite/typed terminal，confirmed 只由 SM-2
   private event 封存 `FailureTarget`。
 
 ## Verification Entry
@@ -519,7 +557,9 @@ Cross-owner regression必须证明 concrete receiving-owner Command/Result、wor
 Boundary verification 必须覆盖：共享 package transition policy、verification-only owner manifest 完整性、全 owner code 表、
 error-text routing、Action/Output.Kind 与 Status/Outcome 双权威、terminal action、Runtime reducer-owner/role 漂移、
 secondary owner 直接 state write、DoD definition 的 draft/satisfied 影子状态、通用 Envelope/map/any/JSON/reflect bridge、
-scope 缺失及禁止 raw provider 内容。它还必须拒绝workorchd `biz/execution`反向依赖protocol `service/server`，并拒绝
+scope 缺失及禁止 raw provider 内容。Orchestrator 专项门禁还必须拒绝绕过 failure-authority writer 的直接字段写入、
+operation-recovery counter 与 authorization ledger 脱节、generic governance-resolution ingress，以及 core reducer 对 concrete
+capability owner/私有 diagnostic prefix 的依赖。它还必须拒绝workorchd `biz/execution`反向依赖protocol `service/server`，并拒绝
 有效verifier把retired application scheduler/watchdog/continuation state、metric或automatic successor重新定义为正向证据；
 退休metric的显式“必须不存在”负向断言不属于该禁止范围。
 测试选择为空或只命中 projection-only wrapper 不能算通过。

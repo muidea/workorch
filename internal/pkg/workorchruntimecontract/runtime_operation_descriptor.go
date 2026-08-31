@@ -32,7 +32,7 @@ const (
 	// owner-catalog revision.
 	RuntimeFailureTargetProtocolReceiptEvidence RuntimeFailureTargetProtocol = "receipt_evidence_observation"
 	// RuntimeFailureTargetProtocolValidationCandidates keeps managed-validation
-	// target candidates non-authoritative until the File confirmation route.
+	// target candidates non-authoritative until the typed resource-owner confirmation route.
 	RuntimeFailureTargetProtocolValidationCandidates RuntimeFailureTargetProtocol = "validation_failure_candidates"
 )
 

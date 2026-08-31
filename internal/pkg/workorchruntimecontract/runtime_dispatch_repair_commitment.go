@@ -16,11 +16,11 @@ import (
 type RuntimeDispatchRepairPurpose string
 
 const (
-	RuntimeDispatchRepairPurposeConfirmedFileValidation RuntimeDispatchRepairPurpose = "confirmed_file_validation_repair"
+	RuntimeDispatchRepairPurposeConfirmedValidation RuntimeDispatchRepairPurpose = "confirmed_validation_repair"
 )
 
 // RuntimeDispatchRepairCommitment is the immutable SM-3 projection of one
-// Shell rejection -> File confirmation -> File repair closure.  The source
+// validation rejection -> resource-owner confirmation -> owner repair closure. The source
 // confirmation, rejected evidence and owner receipt remain their own ledgers;
 // this value makes their mandatory relationship non-erasable from a completed
 // dispatch and lets fresh-load require every reverse edge exactly.
@@ -28,10 +28,11 @@ const (
 // OriginDispatchID remains unchanged across operation-governance resume hops.
 // No field is derived from current Focus, FailureTarget or RepairDirective.
 type RuntimeDispatchRepairCommitment struct {
-	Purpose          RuntimeDispatchRepairPurpose
-	OriginDispatchID string
-	FocusID          string
-	Closure          RuntimeRepairClosure
+	Purpose             RuntimeDispatchRepairPurpose
+	RepairOwnerModuleID string
+	OriginDispatchID    string
+	FocusID             string
+	Closure             RuntimeRepairClosure
 
 	ConfirmationIdentityHash string
 	ConfirmationHash         string
@@ -49,6 +50,7 @@ type RuntimeDispatchRepairCommitment struct {
 
 func (c RuntimeDispatchRepairCommitment) Normalized() RuntimeDispatchRepairCommitment {
 	c.Purpose = RuntimeDispatchRepairPurpose(strings.TrimSpace(string(c.Purpose)))
+	c.RepairOwnerModuleID = strings.TrimSpace(c.RepairOwnerModuleID)
 	c.OriginDispatchID = strings.TrimSpace(c.OriginDispatchID)
 	c.FocusID = strings.TrimSpace(c.FocusID)
 	c.Closure = c.Closure.Normalized()
@@ -73,10 +75,10 @@ func (c RuntimeDispatchRepairCommitment) Clone() RuntimeDispatchRepairCommitment
 
 func (c RuntimeDispatchRepairCommitment) Validate() error {
 	c = c.Normalized()
-	if c.Purpose != RuntimeDispatchRepairPurposeConfirmedFileValidation {
+	if c.Purpose != RuntimeDispatchRepairPurposeConfirmedValidation {
 		return fmt.Errorf("runtime dispatch repair commitment has invalid purpose %q", c.Purpose)
 	}
-	if c.OriginDispatchID == "" || c.FocusID == "" || c.ConfirmationIdentityHash == "" || c.ConfirmationHash == "" ||
+	if c.RepairOwnerModuleID == "" || c.OriginDispatchID == "" || c.FocusID == "" || c.ConfirmationIdentityHash == "" || c.ConfirmationHash == "" ||
 		c.SourceDispatchID == "" || c.SourceAuthoritySnapshotID == "" || c.SourceOperationID == "" ||
 		c.SourceOperationHash == "" || c.SourceEvidenceFactID == "" || c.SourceEvidenceFactHash == "" ||
 		c.SourceReceiptExecutionKey == "" || c.SourceReceiptFence == 0 || c.SourceReceiptHash == "" {
@@ -97,6 +99,7 @@ func StableRuntimeDispatchRepairCommitmentHash(value RuntimeDispatchRepairCommit
 	h := sha256.New()
 	writeHashString(h, "runtime-dispatch-repair-commitment/v1")
 	writeHashString(h, string(value.Purpose))
+	writeHashString(h, value.RepairOwnerModuleID)
 	writeHashString(h, value.OriginDispatchID)
 	writeHashString(h, value.FocusID)
 	writeHashString(h, value.Closure.ID)
@@ -120,7 +123,8 @@ func SameRuntimeDispatchRepairCommitment(left, right *RuntimeDispatchRepairCommi
 		return left == nil && right == nil
 	}
 	l, r := left.Normalized(), right.Normalized()
-	return l.Purpose == r.Purpose && l.OriginDispatchID == r.OriginDispatchID && l.FocusID == r.FocusID &&
+	return l.Purpose == r.Purpose && l.RepairOwnerModuleID == r.RepairOwnerModuleID &&
+		l.OriginDispatchID == r.OriginDispatchID && l.FocusID == r.FocusID &&
 		SameRuntimeRepairClosure(&l.Closure, &r.Closure) &&
 		l.ConfirmationIdentityHash == r.ConfirmationIdentityHash && l.ConfirmationHash == r.ConfirmationHash &&
 		l.SourceDispatchID == r.SourceDispatchID && l.SourceAuthoritySnapshotID == r.SourceAuthoritySnapshotID &&

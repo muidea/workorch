@@ -371,7 +371,7 @@ func (c *candidateDispatchComponent) admitCandidateProposal(ctx context.Context,
 		}
 		return CandidateAdmissionCommitResult{Aggregate: aggregate, Admission: admission}, nil
 	}
-	repairCommitment, err := deriveConfirmedFileRepairAdmissionCommitment(aggregate, manifest, candidate)
+	repairCommitment, err := deriveConfirmedRepairAdmissionCommitment(aggregate, manifest, candidate)
 	if err != nil {
 		return CandidateAdmissionCommitResult{}, err
 	}
@@ -551,7 +551,7 @@ func (c *candidateDispatchComponent) admitAndSealCandidateAttempt(ctx context.Co
 		}
 		return CandidateAdmissionCommitResult{Aggregate: aggregate, Admission: admission}, nil
 	}
-	repairCommitment, err := deriveConfirmedFileRepairAdmissionCommitment(aggregate, manifest, candidate)
+	repairCommitment, err := deriveConfirmedRepairAdmissionCommitment(aggregate, manifest, candidate)
 	if err != nil {
 		return CandidateAdmissionCommitResult{}, err
 	}
@@ -907,7 +907,9 @@ func closeCandidateAttemptWithCorrection(aggregate *RuntimeAggregate, idx, attem
 	if fact == nil {
 		return nil
 	}
-	aggregate.Facts.Failure = fact
+	if err := replaceRuntimeFailureAuthority(&aggregate.Facts, *fact, runtimeFailureAuthorityRetire, nil); err != nil {
+		return err
+	}
 	facts, decision, err := ReduceRuntimeStateWithDirective(aggregate.Facts, &aggregate.Decision.AuthoritySnapshot, aggregate.CoverageProofLineage)
 	if err != nil {
 		return err

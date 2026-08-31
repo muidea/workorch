@@ -54,6 +54,36 @@ func TestRuntimeTerminalDeliveryWaitsForCurrentSemanticAuthority(t *testing.T) {
 	}
 }
 
+func TestRuntimeAdministrativeTerminationIsStartupAndDriveTerminalSuccessor(t *testing.T) {
+	aggregate := runtime.RuntimeAggregate{
+		StateRevision: 12,
+		Facts: runtimecontract.RuntimeFacts{
+			WorkspaceID: "ws-admin-terminal", RunID: "run-admin-terminal",
+			DefinitionRevision: "definition-admin-terminal", EvidenceRevision: "evidence-admin-terminal",
+		},
+		Decision: runtimecontract.RuntimeDecision{
+			State: runtimecontract.ConvergenceStateNeedStateChange,
+			AuthoritySnapshot: runtimecontract.AuthoritySnapshot{
+				ID: "authority-admin-terminal", WorkspaceID: "ws-admin-terminal", RunID: "run-admin-terminal",
+			},
+		},
+		Termination: &runtimecontract.RuntimeTerminationRecord{
+			Kind: runtimecontract.RuntimeTerminationCancelled, RequestedBy: "blocks/run", Reason: "operator cancel",
+			Revision: 12, RequestedAt: "2026-08-30T00:00:00Z",
+		},
+	}
+	if !runtimeTerminalDeliveryReady(aggregate) {
+		t.Fatal("persisted administrative termination was not classified as a startup terminal-delivery successor")
+	}
+	result := runtimeTerminalDriveResult(aggregate)
+	if result.AdministrativeTermination == nil || result.Terminal != nil || result.AdministrativeTermination.Kind != runtimecontract.RuntimeTerminationCancelled {
+		t.Fatalf("administrative terminal drive result rebuilt convergence authority: %+v", result)
+	}
+	if err := validateRuntimeDriveResult(result); err != nil {
+		t.Fatalf("administrative terminal drive result rejected: %v", err)
+	}
+}
+
 func TestRuntimeDriveResultDerivesItsOnlyValidDispositionFromSealedFacts(t *testing.T) {
 	base := orchestratorevents.DriveRuntimeResult{
 		WorkspaceID: "ws-drive-result", RunID: "run-drive-result",

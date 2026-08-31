@@ -169,6 +169,15 @@ func (c *candidateDispatchComponent) commitOperationReceipt(ctx context.Context,
 		return RuntimeAggregate{}, runtimecontract.RuntimeOperationReceipt{}, err
 	}
 	aggregate.OperationReceipts = append(aggregate.OperationReceipts, receipt.Clone())
+	for idx := range aggregate.OperationRecoveryAuthorizations {
+		authorization := aggregate.OperationRecoveryAuthorizations[idx].Normalized()
+		if authorization.State == runtimecontract.RuntimeOperationRecoveryAuthorizationInFlight &&
+			authorization.DispatchID == aggregate.ActiveDispatch.ID && authorization.OperationID == matchedExecution.OperationID &&
+			authorization.ExecutionKey == matchedExecution.ExecutionKey && authorization.Fence == matchedExecution.Fence {
+			authorization.State = runtimecontract.RuntimeOperationRecoveryAuthorizationSettled
+			aggregate.OperationRecoveryAuthorizations[idx] = authorization
+		}
+	}
 	aggregate.StateRevision++
 	if err := aggregate.Validate(); err != nil {
 		return RuntimeAggregate{}, runtimecontract.RuntimeOperationReceipt{}, err
@@ -288,7 +297,7 @@ func validateOperationReceiptDiagnosticOwner(aggregate RuntimeAggregate, dispatc
 	// A validation owner's top-level TargetRefs would be interpreted as immediate
 	// repair authority by rejected-evidence admission. Managed validation must
 	// keep candidates solely inside RuntimeValidationFailureObservation until a
-	// File-owner confirmation is committed through the SM-2 transition.
+	// Resource-owner confirmation is committed through the SM-2 transition.
 	if len(normalized.TargetRefs) != 0 {
 		return fmt.Errorf("managed-validation receipt cannot carry direct diagnostic target refs")
 	}

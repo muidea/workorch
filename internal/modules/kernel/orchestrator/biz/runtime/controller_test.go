@@ -199,14 +199,16 @@ func TestRuntimeControllerTerminationRetryAcceptsPersistedIdentityAfterTerminalP
 	if err != nil {
 		t.Fatal(err)
 	}
-	terminated, err := controller.requestTermination(ctx, initialized.Facts.WorkspaceID, initialized.Facts.RunID, runtimecontract.RuntimeTerminationSuperseded, "blocks/run", "replacement")
+	terminated, err := controller.requestTermination(ctx, initialized.Facts.WorkspaceID, initialized.Facts.RunID, " superseded ", " blocks/run ", " replacement ")
 	if err != nil {
 		t.Fatal(err)
 	}
+	if terminated.Termination == nil || terminated.Termination.Kind != runtimecontract.RuntimeTerminationSuperseded || terminated.Termination.RequestedBy != "blocks/run" || terminated.Termination.Reason != "replacement" {
+		t.Fatalf("termination ingress was not canonicalized: %+v", terminated.Termination)
+	}
 	saves := repository.saves
-	// Model response loss after the persisted termination was projected to a
-	// terminal convergence state. A retry carries the same durable identity.
-	repository.aggregate.Decision.State = runtimecontract.ConvergenceStateComplete
+	// Model response loss after the persisted administrative termination CAS. A
+	// retry carries the same durable identity and must remain a zero-write read.
 	retried, err := controller.requestTermination(ctx, initialized.Facts.WorkspaceID, initialized.Facts.RunID, runtimecontract.RuntimeTerminationSuperseded, "blocks/run", "replacement")
 	if err != nil {
 		t.Fatalf("retry persisted termination: %v", err)
@@ -216,6 +218,13 @@ func TestRuntimeControllerTerminationRetryAcceptsPersistedIdentityAfterTerminalP
 	}
 	if _, err := controller.requestTermination(ctx, initialized.Facts.WorkspaceID, initialized.Facts.RunID, runtimecontract.RuntimeTerminationCancelled, "blocks/run", "different"); err == nil {
 		t.Fatal("different termination kind was accepted after terminal projection")
+	}
+	// A corrupt fresh-load carrying both terminal authorities is not an
+	// idempotent retry of either one.
+	repository.aggregate.Decision.State = runtimecontract.ConvergenceStateComplete
+	repository.aggregate.Decision.Terminal = &runtimecontract.RuntimeTerminalDecision{Code: "complete", Summary: "complete"}
+	if _, err := controller.requestTermination(ctx, initialized.Facts.WorkspaceID, initialized.Facts.RunID, runtimecontract.RuntimeTerminationSuperseded, "blocks/run", "replacement"); err == nil {
+		t.Fatal("dual convergence and administrative terminal was accepted as a duplicate")
 	}
 }
 

@@ -20,17 +20,17 @@ type RuntimeOperationAdmissibilityRequest struct {
 	RequiredKinds                 []string
 	RequiredTargetRefs            []string
 	ValidationRecipes             []RuntimeValidationRecipe
-	// WorkspaceManifestBinding is the current File-owner fact used by a
+	// WorkspaceManifestBinding is the current workspace-manifest owner fact used by a
 	// capability owner whose admissibility depends on workspace contents.  It
 	// is immutable request context, not a second workspace observation: the
 	// receiver must copy its exact workspace-tree revision into the returned
-	// freshness dependencies instead of inventing another File revision.
+	// freshness dependencies instead of inventing another owner revision.
 	WorkspaceManifestBinding RuntimeWorkspaceManifestBinding
 	CapabilityStateBinding   string
 	MaxItems                 int
 }
 
-// RuntimeWorkspaceManifestBinding couples the current File-owner manifest to
+// RuntimeWorkspaceManifestBinding couples the current resource-owner manifest to
 // its persisted prerequisite observation.  The DTO is owner-neutral and pure;
 // it grants no operation authority and performs no filesystem acquisition.
 type RuntimeWorkspaceManifestBinding struct {
@@ -57,19 +57,20 @@ func (b RuntimeWorkspaceManifestBinding) Clone() RuntimeWorkspaceManifestBinding
 }
 
 func (b RuntimeWorkspaceManifestBinding) Validate() error {
+	rawOwnerModuleID := b.Observation.OwnerModuleID
 	b = b.Normalized()
 	if b.Manifest.Revision == "" || b.Observation.PrerequisiteID == "" || b.Observation.ObservationID == "" {
 		return fmt.Errorf("runtime workspace manifest binding requires manifest and observation identity")
 	}
-	if b.Observation.Kind != PrerequisiteKindManifest || b.Observation.OwnerModuleID != RuntimeModuleFile ||
+	if b.Observation.Kind != PrerequisiteKindManifest || b.Observation.OwnerModuleID == "" || rawOwnerModuleID != b.Observation.OwnerModuleID ||
 		b.Observation.ContentHash != b.Manifest.Revision {
-		return fmt.Errorf("runtime workspace manifest binding does not match File-owner observation")
+		return fmt.Errorf("runtime workspace manifest binding does not match canonical owner observation")
 	}
 	if err := b.Observation.Validate(); err != nil {
 		return err
 	}
-	if !runtimeObservationDependsOnWorkspaceTreeRevision(b.Observation, b.Manifest.Revision) {
-		return fmt.Errorf("runtime workspace manifest binding has no matching File workspace-tree dependency")
+	if !runtimeObservationDependsOnWorkspaceTreeRevision(b.Observation, b.Observation.OwnerModuleID, b.Manifest.Revision) {
+		return fmt.Errorf("runtime workspace manifest binding has no matching owner workspace-tree dependency")
 	}
 	return nil
 }
@@ -104,7 +105,7 @@ func (a RuntimeOperationAdmissibilityAcquisition) ValidateForRequest(request Run
 		return err
 	}
 	binding := request.WorkspaceManifestBinding.Normalized()
-	if !binding.Empty() && !runtimeObservationDependsOnWorkspaceTreeRevision(observation, binding.Manifest.Revision) {
+	if !binding.Empty() && !runtimeObservationDependsOnWorkspaceTreeRevision(observation, binding.Observation.OwnerModuleID, binding.Manifest.Revision) {
 		return fmt.Errorf("runtime operation admissibility acquisition omitted workspace manifest freshness")
 	}
 	declarations := NormalizeRuntimeValidationRecipes(request.ValidationRecipes)
@@ -126,10 +127,11 @@ func (a RuntimeOperationAdmissibilityAcquisition) ValidateForRequest(request Run
 	return nil
 }
 
-func runtimeObservationDependsOnWorkspaceTreeRevision(observation RuntimePrerequisiteObservation, revision string) bool {
+func runtimeObservationDependsOnWorkspaceTreeRevision(observation RuntimePrerequisiteObservation, ownerModuleID, revision string) bool {
+	ownerModuleID = strings.TrimSpace(ownerModuleID)
 	revision = strings.TrimSpace(revision)
 	for _, dependency := range observation.Normalized().Dependencies {
-		if dependency.Domain == RuntimeResourceWorkspaceTree && dependency.OwnerModuleID == RuntimeModuleFile &&
+		if dependency.Domain == RuntimeResourceWorkspaceTree && ownerModuleID != "" && dependency.OwnerModuleID == ownerModuleID &&
 			dependency.SubjectRef == "workspace_deliverable" && dependency.Revision == revision {
 			return true
 		}

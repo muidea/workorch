@@ -1731,18 +1731,12 @@ func runtimeCapabilitiesWithSemanticProofs(capabilities runtimecontract.RuntimeC
 	return capabilities
 }
 
-// failSemanticContract is the only semantic terminal transition. It preserves
-// the producer-authored diagnostic and never creates governance work.
-func semanticFailureClass(code string) runtimecontract.FailureClass {
-	return semanticFailureClassForDiagnostic(runtimecontract.RuntimeOriginalDiagnostic{OriginalCode: code})
-}
-
 // semanticFailureClassForFailureCode lets the Orchestrator retain a bounded
 // terminal outcome selected by its own persisted budget (for example refresh
 // exhaustion) while preserving the complete producer diagnostic unchanged.
 // The outer code is never copied into OriginalDiagnostic; it only supplies the
 // stable class for these explicit owner-local terminal transitions.
-func semanticFailureClassForFailureCode(code string, diagnostic runtimecontract.RuntimeOriginalDiagnostic) runtimecontract.FailureClass {
+func semanticFailureClassForFailureCode(code string, _ runtimecontract.RuntimeOriginalDiagnostic) runtimecontract.FailureClass {
 	code = strings.TrimSpace(code)
 	switch code {
 	case "semantic_catalog_refresh_exhausted":
@@ -1753,27 +1747,18 @@ func semanticFailureClassForFailureCode(code string, diagnostic runtimecontract.
 		return runtimecontract.FailureClassCandidateDocumentRecoveryExhausted
 	case "semantic_provider_submission_unknown", "provider_submission_unknown":
 		return runtimecontract.FailureClassProviderSubmissionUnknown
-	case "semantic_provider_body_idle_timeout", "semantic_provider_transport_exhausted",
-		"provider_body_idle_timeout", "provider_transport_exhausted":
+	case "semantic_provider_body_idle_timeout", "semantic_provider_transport_exhausted":
 		return runtimecontract.FailureClassProviderTransient
-	case "semantic_provider_authentication", "provider_authentication", "authentication_failed", "invalid_api_key":
+	case "semantic_provider_authentication":
 		return runtimecontract.FailureClassProviderAuthentication
-	case "semantic_provider_configuration", "provider_configuration", "provider_not_configured":
+	case "semantic_provider_configuration":
 		return runtimecontract.FailureClassProviderConfiguration
 	case "semantic_provider_contract_error", "semantic_provider_failure", "semantic_provider_outcome_missing",
-		"semantic_provider_outcome_invalid", "semantic_provider_document_missing", "provider_protocol_failure",
-		"provider_document_content_invalid":
+		"semantic_provider_outcome_invalid", "semantic_provider_document_missing":
 		return runtimecontract.FailureClassProviderProtocol
-	case "validation_recipe_exhausted", "validation_recipe_unavailable", "validation_recipe_not_sealed",
-		"mcp_semantic_proof_unavailable", "mcp_recipe_not_admissible", "mcp_selector_not_admissible",
-		"file_semantic_proof_unavailable", "git_semantic_proof_unavailable", "web_semantic_proof_unavailable",
-		"ssh_semantic_proof_unavailable", "semantic_target_unavailable", "semantic_target_invalid",
-		"semantic_target_not_regular", "prospective_target_exists", "prospective_target_unobservable",
-		"semantic_owner_feasibility_infeasible":
+	case "semantic_owner_feasibility_infeasible":
 		return runtimecontract.FailureClassCandidateInfeasible
-	case "semantic_provider_ceiling_missing", "semantic_catalog_stale", "mcp_catalog_unavailable",
-		"mcp_capability_catalog_unavailable", "mcp_validation_input_binding_required", "web_catalog_unavailable", "git_repository_state_unavailable",
-		"shell_policy_unavailable", "workspace_manifest_unavailable", "semantic_owner_catalog_missing":
+	case "semantic_provider_ceiling_missing", "semantic_catalog_stale", "semantic_owner_catalog_missing", "semantic_owner_prerequisite_required":
 		return runtimecontract.FailureClassCapabilityUnavailable
 	case "runtime_contract_defect", "semantic_context_integrity", "semantic_manifest_invalid", "semantic_request_context_invalid",
 		"semantic_expected_document_invalid", "semantic_request_identity_invalid", "semantic_request_session_mismatch",
@@ -1782,84 +1767,7 @@ func semanticFailureClassForFailureCode(code string, diagnostic runtimecontract.
 		"semantic_owner_probe_invalid", "semantic_probe_proposal_invalid", "prospective_satisfaction_contract_violated":
 		return runtimecontract.FailureClassRuntimeContractMisalignment
 	}
-	return semanticFailureClassForDiagnostic(diagnostic)
-}
-
-// semanticFailureClassForDiagnostic is the exhaustive SM-2 mapping for a
-// semantic-planning terminal.  The semantic ledger has its own terminal code
-// (semantic_contract_failed), but its stable failure class must retain the
-// factual producer category.  In particular, a zero-attempt owner gap is not
-// a no-progress exhaustion: that class is only produced by the reducer after
-// a persisted repair/retry budget has actually been consumed.
-func semanticFailureClassForDiagnostic(diagnostic runtimecontract.RuntimeOriginalDiagnostic) runtimecontract.FailureClass {
-	code := strings.TrimSpace(diagnostic.OriginalCode)
-	producerClass := strings.TrimSpace(diagnostic.OriginalClass)
-
-	// LLM feedback carries the candidate/provider class in OriginalClass.  Keep
-	// those classes even when the Orchestrator wraps the diagnostic in a
-	// semantic terminal.
-	switch runtimecontract.RuntimeCandidateFailureClass(producerClass) {
-	case runtimecontract.RuntimeCandidateFailureClassProviderTransient:
-		return runtimecontract.FailureClassProviderTransient
-	case runtimecontract.RuntimeCandidateFailureClassProviderAuthentication:
-		return runtimecontract.FailureClassProviderAuthentication
-	case runtimecontract.RuntimeCandidateFailureClassProviderConfiguration:
-		return runtimecontract.FailureClassProviderConfiguration
-	case runtimecontract.RuntimeCandidateFailureClassProvider, runtimecontract.RuntimeCandidateFailureClassProviderProtocol:
-		return runtimecontract.FailureClassProviderProtocol
-	}
-
-	// These are terminal outcomes of bounded semantic/provider sessions.  They
-	// must remain distinct from runtime contract defects and no-progress.
-	switch code {
-	case "semantic_catalog_refresh_exhausted":
-		return runtimecontract.FailureClassPrerequisiteRefreshExhausted
-	case "semantic_plan_retry_exhausted", "candidate_retry_exhausted":
-		return runtimecontract.FailureClassCandidateExhausted
-	case "semantic_document_recovery_exhausted", "candidate_document_recovery_exhausted":
-		return runtimecontract.FailureClassCandidateDocumentRecoveryExhausted
-	case "semantic_provider_submission_unknown", "provider_submission_unknown":
-		return runtimecontract.FailureClassProviderSubmissionUnknown
-	case "semantic_provider_body_idle_timeout", "semantic_provider_transport_exhausted",
-		"provider_body_idle_timeout", "provider_transport_exhausted":
-		return runtimecontract.FailureClassProviderTransient
-	case "semantic_provider_authentication", "provider_authentication", "authentication_failed", "invalid_api_key":
-		return runtimecontract.FailureClassProviderAuthentication
-	case "semantic_provider_configuration", "provider_configuration", "provider_not_configured":
-		return runtimecontract.FailureClassProviderConfiguration
-	case "semantic_provider_contract_error", "semantic_provider_failure", "semantic_provider_outcome_missing",
-		"semantic_provider_outcome_invalid", "semantic_provider_document_missing", "provider_protocol_failure",
-		"provider_document_content_invalid":
-		return runtimecontract.FailureClassProviderProtocol
-	}
-
-	// Owner semantic feasibility statuses are represented by a small, closed
-	// code vocabulary.  Capability/catalog gaps retain capability-unavailable;
-	// an owner that cannot independently prove the requested recipe/target is a
-	// candidate-infeasible fact.  Unknown owner codes fail closed as a runtime
-	// contract defect rather than being guessed from free text.
-	switch code {
-	case "semantic_provider_ceiling_missing", "semantic_catalog_stale", "mcp_catalog_unavailable",
-		"mcp_capability_catalog_unavailable", "mcp_validation_input_binding_required", "web_catalog_unavailable", "git_repository_state_unavailable",
-		"shell_policy_unavailable", "workspace_manifest_unavailable", "semantic_owner_catalog_missing",
-		"semantic_owner_prerequisite_required", "semantic_owner_feasibility_stale":
-		return runtimecontract.FailureClassCapabilityUnavailable
-	case "validation_recipe_exhausted", "validation_recipe_unavailable", "validation_recipe_not_sealed",
-		"mcp_semantic_proof_unavailable", "mcp_recipe_not_admissible", "mcp_selector_not_admissible",
-		"file_semantic_proof_unavailable", "git_semantic_proof_unavailable", "web_semantic_proof_unavailable",
-		"ssh_semantic_proof_unavailable", "semantic_target_unavailable", "semantic_target_invalid",
-		"semantic_target_not_regular", "prospective_target_exists", "prospective_target_unobservable",
-		"semantic_owner_feasibility_infeasible":
-		return runtimecontract.FailureClassCandidateInfeasible
-	case "mcp_recipe_invalid", "semantic_owner_probe_invalid", "semantic_probe_proposal_invalid", "prospective_satisfaction_contract_violated":
-		return runtimecontract.FailureClassRuntimeContractMisalignment
-	}
-
-	// A typed owner feasibility diagnostic with the generic semantic class is
-	// still an infeasibility only when the owner used the known semantic status
-	// marker.  Otherwise preserve fail-closed contract-defect semantics.
-	if producerClass == "semantic_feasibility" && code == "semantic_proof_infeasible" {
-		return runtimecontract.FailureClassCandidateInfeasible
-	}
+	// Unknown outer codes fail closed. The nested producer diagnostic is audit
+	// data and can never select the Runtime failure class.
 	return runtimecontract.FailureClassRuntimeContractMisalignment
 }

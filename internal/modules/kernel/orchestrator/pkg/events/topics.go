@@ -16,13 +16,12 @@ const (
 	TopicOrchestratorCommandListCoverageWorkItemsByRun        = "/orchestrator/command/list-coverage-work-items-by-run"
 	TopicOrchestratorCommandListArtifactContinuationsByRun    = "/orchestrator/command/list-artifact-continuations-by-run"
 
-	TopicOrchestratorDriveRuntime                      = "/orchestrator/runtime/drive"
-	TopicOrchestratorQueryRuntimeOperationReceipt      = "/orchestrator/runtime-operation/receipt/query"
-	TopicOrchestratorCommitRuntimeOperationReceipt     = "/orchestrator/runtime-operation/receipt/commit"
-	TopicOrchestratorCommitRuntimeGovernanceResolution = "/orchestrator/runtime-governance/commit-resolution"
-	TopicOrchestratorCommitRuntimeGovernanceApproval   = "/orchestrator/runtime-governance/commit-approval"
-	TopicOrchestratorCommitRuntimeGovernanceTicket     = "/orchestrator/runtime-governance/commit-ticket-resolution"
-	TopicOrchestratorRequestRuntimeTermination         = "/orchestrator/runtime-lifecycle/request-termination"
+	TopicOrchestratorDriveRuntime                    = "/orchestrator/runtime/drive"
+	TopicOrchestratorQueryRuntimeOperationReceipt    = "/orchestrator/runtime-operation/receipt/query"
+	TopicOrchestratorCommitRuntimeOperationReceipt   = "/orchestrator/runtime-operation/receipt/commit"
+	TopicOrchestratorCommitRuntimeGovernanceApproval = "/orchestrator/runtime-governance/commit-approval"
+	TopicOrchestratorCommitRuntimeGovernanceTicket   = "/orchestrator/runtime-governance/commit-ticket-resolution"
+	TopicOrchestratorRequestRuntimeTermination       = "/orchestrator/runtime-lifecycle/request-termination"
 	// RUNTIME-SMO observability facts.
 	// TopicOrchestratorRuntimeDriveObserved is a read-only SM-4 observability
 	// notification. Consumers may render metrics/logs but must not use it to

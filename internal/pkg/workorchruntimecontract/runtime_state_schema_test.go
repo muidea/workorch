@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"strings"
 	"testing"
+
+	"github.com/muidea/workorch/internal/pkg/common"
 )
 
 func TestRuntimePersistenceRejectsRetiredAndUnknownFields(t *testing.T) {
@@ -169,6 +171,85 @@ func TestRuntimeStateTerminalDeliveryLedgerAllowsSealedTerminalRetry(t *testing.
 	termination := &RuntimeTerminationRecord{Kind: RuntimeTerminationSuperseded, RequestedBy: "blocks/run", Reason: "replacement", Revision: 2, RequestedAt: "2026-08-23T00:00:00Z"}
 	if err := ValidateRuntimeStateTerminalDeliveryLedger(RuntimeDecision{State: ConvergenceStateNeedGovernance}, termination, nil, RuntimeRecoveryLedger{TerminalDeliveryAttempts: 1}); err != nil {
 		t.Fatalf("administrative terminal retry rejected: %v", err)
+	}
+}
+
+func TestRuntimeStateTerminalDeliveryLedgerFreshLoadRequiresExactOrderedAcknowledgements(t *testing.T) {
+	workspaceID := common.WorkspaceID("ws-terminal-ledger")
+	runID := common.RunID("run-terminal-ledger")
+	decision := RuntimeDecision{
+		State: ConvergenceStateNeedGovernance,
+		AuthoritySnapshot: AuthoritySnapshot{
+			ID: "authority-terminal-ledger", WorkspaceID: workspaceID, RunID: runID,
+		},
+	}
+	termination := &RuntimeTerminationRecord{
+		Kind: RuntimeTerminationCancelled, RequestedBy: "blocks/run", Reason: "operator cancel",
+		Revision: 12, RequestedAt: "2026-08-30T00:00:00Z",
+	}
+	outcome, terminal, err := DeriveRuntimeTerminalOutcome(decision, termination)
+	if err != nil || !terminal {
+		t.Fatal(err)
+	}
+	deliveryID := StableTerminalDeliveryID(workspaceID, runID, decision.AuthoritySnapshot.ID, outcome)
+	base := RuntimeDeliveryAcknowledgement{
+		WorkspaceID: workspaceID, RunID: runID, TerminalDeliveryID: deliveryID,
+		AuthoritySnapshotID: decision.AuthoritySnapshot.ID, CausationID: "terminal-delivery/" + deliveryID,
+		Outcome: outcome,
+	}
+	result := base
+	result.Owner = RuntimeDeliveryOwnerResult
+	result.ResultID = RuntimeTerminalResultID(workspaceID, runID)
+	result.AcknowledgedState = RuntimeDeliveryAcknowledgedResultRecorded
+	workspace := base
+	workspace.Owner = RuntimeDeliveryOwnerWorkspace
+	workspace.AcknowledgedState = RuntimeDeliveryAcknowledgedWorkspaceReleased
+	run := base
+	run.Owner = RuntimeDeliveryOwnerRun
+	run.AcknowledgedState = RuntimeDeliveryAcknowledgedRunTerminal
+	valid := []RuntimeDeliveryAcknowledgement{result, workspace, run}
+	if err := ValidateRuntimeStateTerminalDeliveryLedger(decision, termination, valid, RuntimeRecoveryLedger{TerminalDeliveryAttempts: 1}); err != nil {
+		t.Fatalf("exact fresh-load terminal ledger rejected: %v", err)
+	}
+
+	for _, test := range []struct {
+		name   string
+		mutate func([]RuntimeDeliveryAcknowledgement) []RuntimeDeliveryAcknowledgement
+	}{
+		{name: "wrong order", mutate: func(values []RuntimeDeliveryAcknowledgement) []RuntimeDeliveryAcknowledgement {
+			values[0], values[1] = values[1], values[0]
+			return values
+		}},
+		{name: "duplicate owner", mutate: func(values []RuntimeDeliveryAcknowledgement) []RuntimeDeliveryAcknowledgement {
+			values[1] = values[0]
+			return values
+		}},
+		{name: "result identity drift", mutate: func(values []RuntimeDeliveryAcknowledgement) []RuntimeDeliveryAcknowledgement {
+			values[0].ResultID = "wrong-result"
+			return values
+		}},
+		{name: "owner state drift", mutate: func(values []RuntimeDeliveryAcknowledgement) []RuntimeDeliveryAcknowledgement {
+			values[1].AcknowledgedState = RuntimeDeliveryAcknowledgedRunTerminal
+			return values
+		}},
+		{name: "terminal identity drift", mutate: func(values []RuntimeDeliveryAcknowledgement) []RuntimeDeliveryAcknowledgement {
+			values[2].AuthoritySnapshotID = "wrong-authority"
+			return values
+		}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			values := append([]RuntimeDeliveryAcknowledgement(nil), valid...)
+			if err := ValidateRuntimeStateTerminalDeliveryLedger(decision, termination, test.mutate(values), RuntimeRecoveryLedger{TerminalDeliveryAttempts: 1}); err == nil {
+				t.Fatal("corrupt fresh-load terminal ledger was accepted")
+			}
+		})
+	}
+
+	convergence := decision
+	convergence.State = ConvergenceStateFailed
+	convergence.Terminal = &RuntimeTerminalDecision{Code: "failed", Summary: "failed"}
+	if err := ValidateRuntimeStateTerminalDeliveryLedger(convergence, termination, nil, RuntimeRecoveryLedger{}); err == nil {
+		t.Fatal("dual convergence and administrative terminal authority was accepted")
 	}
 }
 

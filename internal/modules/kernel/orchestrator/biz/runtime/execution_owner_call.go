@@ -7,15 +7,10 @@ import (
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
-type activeDispatchOwnerCall struct {
-	result RuntimeOperationExecutionResult
-	flow   activeDispatchExecutionFlow
-}
-
-func (x *activeDispatchExecution) callOperationOwner(operation runtimecontract.RuntimeOperation, prepared preparedActiveDispatchOperation) (activeDispatchOwnerCall, error) {
+func (x *activeDispatchExecution) operationExecutionCallHandoff(operation runtimecontract.RuntimeOperation, prepared preparedActiveDispatchOperation) (*RuntimeOperationExecutionCallHandoff, error) {
 	validationScopeTargetRefs, err := runtimeValidationScopeTargetRefs(x.dispatch, operation)
 	if err != nil {
-		return activeDispatchOwnerCall{}, err
+		return nil, err
 	}
 	ownerCatalog := runtimeOwnerCatalogForOperation(
 		x.dispatch.OperationAdmissibilities,
@@ -24,7 +19,7 @@ func (x *activeDispatchExecution) callOperationOwner(operation runtimecontract.R
 		prepared.execution.AdmissibilitySnapshotID,
 		prepared.execution.AcquisitionBinding,
 	)
-	result, err := x.executor.ExecuteRuntimeOperation(x.ctx, RuntimeOperationExecutionRequest{
+	handoff := &RuntimeOperationExecutionCallHandoff{Request: RuntimeOperationExecutionRequest{
 		WorkspaceID: x.workspaceID, RunID: x.runID, DispatchID: x.dispatch.ID,
 		Transaction: x.dispatch.Transaction, Operation: operation, Execution: prepared.execution,
 		GovernanceGrant:                    prepared.governanceGrant,
@@ -38,34 +33,15 @@ func (x *activeDispatchExecution) callOperationOwner(operation runtimecontract.R
 		CompletedRequiredOperationReceipts: completedRequiredOperationReceiptBindings(*x.aggregate.ActiveDispatch, x.aggregate.OperationReceipts, x.completed),
 		OwnerCatalog:                       ownerCatalog,
 		OwnerCatalogObservation:            runtimeOwnerCatalogObservationForOperation(x.dispatch.OperationAdmissibilityObservations, ownerCatalog),
-	})
-	if err == nil {
-		return activeDispatchOwnerCall{result: result, flow: activeDispatchExecutionReady}, nil
+	}}
+	if x.recoveryAuthorization != nil {
+		handoff.RecoveryAuthorizationID = x.recoveryAuthorization.AuthorizationID
+		handoff.RecoveryClaimID = x.recoveryAuthorization.ClaimID
 	}
-	// The owner may have committed its terminal receipt while the response was
-	// lost. Reload the exact ExecutionKey+Fence before declaring outcome_unknown.
-	recovered, found, recoverErr := x.component.recoverOperationReceiptAfterExecuteError(
-		x.ctx, x.workspaceID, x.runID, x.dispatch, operation, prepared.execution,
-	)
-	if recoverErr != nil {
-		return activeDispatchOwnerCall{}, recoverErr
+	if err := handoff.Validate(); err != nil {
+		return nil, err
 	}
-	if found {
-		x.aggregate = recovered
-		return activeDispatchOwnerCall{flow: activeDispatchExecutionStop}, nil
-	}
-	// The persisted claim is the pre-call write-ahead fence for both ordinary and
-	// governance-authorized execution. Only the replay class/proof sealed by SM-3
-	// may turn a missing receipt into a bounded SM-4 recovery handoff.
-	if runtimeOperationHasReplayAuthority(prepared.execution) {
-		// The re-drive reloads only persisted aggregate facts and hands recovery
-		// budget acquisition back to SM-4.
-		return activeDispatchOwnerCall{flow: activeDispatchExecutionRetry}, nil
-	}
-	if _, markErr := x.component.markOperationExecutionOutcomeUnknown(x.ctx, x.workspaceID, x.runID, operation.ID); markErr != nil {
-		return activeDispatchOwnerCall{}, markErr
-	}
-	return activeDispatchOwnerCall{}, err
+	return handoff, nil
 }
 
 func runtimeOwnerCatalogObservationForOperation(values []runtimecontract.RuntimePrerequisiteObservation, catalog *runtimecontract.RuntimeOperationAdmissibility) *runtimecontract.RuntimePrerequisiteObservation {
@@ -125,16 +101,25 @@ func runtimeWorkspaceManifestObservation(aggregate RuntimeAggregate) *runtimecon
 		return nil
 	}
 	revision := strings.TrimSpace(aggregate.Facts.Resources.Manifest.Revision)
-	for _, observation := range aggregate.Facts.Resources.PrerequisiteObservations {
-		observation = observation.Normalized()
-		if observation.Kind != runtimecontract.PrerequisiteKindManifest || observation.OwnerModuleID != runtimecontract.RuntimeModuleFile || observation.ContentHash != revision {
+	var matched *runtimecontract.RuntimePrerequisiteObservation
+	for _, prerequisite := range aggregate.Facts.Prerequisites.Satisfied {
+		if prerequisite.Kind != runtimecontract.PrerequisiteKindManifest || strings.TrimSpace(prerequisite.OwnerModuleID) == "" {
 			continue
+		}
+		observation, found := runtimecontract.RuntimePrerequisiteObservationForID(aggregate.Facts.Resources.PrerequisiteObservations, prerequisite.ID)
+		observation = observation.Normalized()
+		if !found || observation.Validate() != nil || observation.Kind != runtimecontract.PrerequisiteKindManifest ||
+			observation.OwnerModuleID != strings.TrimSpace(prerequisite.OwnerModuleID) || observation.ContentHash != revision {
+			continue
+		}
+		if matched != nil && matched.OwnerModuleID != observation.OwnerModuleID {
+			return nil
 		}
 		value := observation
 		value.Dependencies = append([]runtimecontract.RuntimeFreshnessDependency(nil), observation.Dependencies...)
-		return &value
+		matched = &value
 	}
-	return nil
+	return matched
 }
 
 func validateOwnerReceiptIdentity(operation runtimecontract.RuntimeOperation, execution runtimecontract.RuntimeOperationExecutionRecord, result *RuntimeOperationExecutionResult) error {

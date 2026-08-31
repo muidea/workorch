@@ -365,7 +365,7 @@ func (r RuntimeOwnerFactProspectiveSatisfactionRequest) Validate() error {
 	if err := validateRuntimeProspectiveWorkspaceManifestDeltaForProposal(r.ProspectiveWorkspaceManifestDelta, r.Manifest, r.Proposal, acquisition); err != nil {
 		return err
 	}
-	if !runtimeObservationDependsOnWorkspaceTreeRevision(observation, r.ProspectiveWorkspaceManifestDelta.BaseWorkspaceManifestRevision) {
+	if !runtimeObservationDependsOnWorkspaceTreeRevision(observation, r.ProspectiveWorkspaceManifestDelta.OwnerModuleID, r.ProspectiveWorkspaceManifestDelta.BaseWorkspaceManifestRevision) {
 		return fmt.Errorf("runtime owner-fact prospective satisfaction catalog observation is not bound to the File manifest delta base revision")
 	}
 	if !runtimeObservationDependsOnOwnerCatalogRevision(observation, r.OwnerCatalog.OwnerModuleID, r.OwnerCatalog.ObservedRevision) {

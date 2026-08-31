@@ -59,10 +59,11 @@ func TestRuntimeInternalFactsHaveCompleteOwnerPrivateClassification(t *testing.T
 // TestRuntimeInternalFactsStayWithinStateMachineFences makes the SM-1~SM-4
 // ownership split executable. Orchestrator never owns an SM-1 transition; its
 // activation input and authority facts reduce through SM-2, candidate/dispatch
-// transactions through SM-3, and delivery/recovery through SM-4. The one
-// transaction-shaped exception is candidate-request recovery: its payload
-// retains the exact request identity, while the transition itself belongs to
-// the SM-4 recovery ledger.
+// transactions through SM-3, and delivery/recovery through SM-4. Bounded
+// transaction-shaped result facts keep their exact operation/request identity
+// while declaring the machine that owns the coordinated transition: operation
+// evidence/stale/governance facts belong to SM-2, and provider request recovery
+// belongs to SM-4.
 func TestRuntimeInternalFactsStayWithinStateMachineFences(t *testing.T) {
 	kinds, _, _ := runtimeInternalEventSourceFacts(t)
 	for name, kind := range kinds {
@@ -87,7 +88,12 @@ func TestRuntimeInternalFactsStayWithinStateMachineFences(t *testing.T) {
 			runtimeInternalEventPayloadTransaction: eventcontract.StateMachineSM3,
 			runtimeInternalEventPayloadDelivery:    eventcontract.StateMachineSM4,
 		}[payloadClass]
-		if kind == RuntimeInternalEventProviderRequestRecoveryCoordinated {
+		switch kind {
+		case RuntimeInternalEventOperationEvidenceObserved,
+			RuntimeInternalEventOperationPrerequisiteStaleObserved,
+			RuntimeInternalEventOperationGovernanceRequiredObserved:
+			want = eventcontract.StateMachineSM2
+		case RuntimeInternalEventProviderRequestRecoveryCoordinated:
 			want = eventcontract.StateMachineSM4
 		}
 		if metadata.StateMachine != want {
@@ -284,43 +290,31 @@ func TestRuntimeInternalEventEnvelopeRejectsMalformedPayloadBeforeLoadOrCAS(t *t
 			},
 		},
 		{
-			name: "recovery authorization on non-dispatch transaction",
+			name: "operation recovery budget missing operation identity",
 			event: RuntimeInternalEvent{
-				Kind:        RuntimeInternalEventCandidateRequestSubmitted,
-				Scope:       scope,
-				Transaction: &RuntimeInternalTransactionPayload{RecoveryOperationID: "op-recovery", RecoveryBudgetAttempt: 1},
+				Kind: RuntimeInternalEventRecoveryBudgetConsumed, Scope: scope,
+				Delivery: &RuntimeInternalDeliveryPayload{RecoveryBudgetKind: runtimecontract.RuntimeRecoveryBudgetOperationRecovery},
 			},
 		},
 		{
-			name: "partial recovery authorization identity",
+			name: "non-operation recovery budget carries operation identity",
 			event: RuntimeInternalEvent{
-				Kind:        RuntimeInternalEventDispatchExecutionRequested,
-				Scope:       scope,
-				Transaction: &RuntimeInternalTransactionPayload{RecoveryBudgetAttempt: 1},
+				Kind: RuntimeInternalEventRecoveryBudgetConsumed, Scope: scope,
+				Delivery: &RuntimeInternalDeliveryPayload{RecoveryBudgetKind: runtimecontract.RuntimeRecoveryBudgetCASReload, RecoveryOperationID: "op-recovery"},
 			},
 		},
 		{
-			name: "partial recovery authorization attempt",
+			name: "operation recovery claim missing authorization identity",
 			event: RuntimeInternalEvent{
-				Kind:        RuntimeInternalEventDispatchExecutionRequested,
-				Scope:       scope,
-				Transaction: &RuntimeInternalTransactionPayload{RecoveryOperationID: "op-recovery"},
+				Kind: RuntimeInternalEventOperationRecoveryClaimed, Scope: scope,
+				Delivery: &RuntimeInternalDeliveryPayload{RecoveryOperationID: "op-recovery", LeaseNow: "2026-08-30T00:00:00Z"},
 			},
 		},
 		{
-			name: "blank recovery authorization identity",
+			name: "operation recovery claim carries budget kind",
 			event: RuntimeInternalEvent{
-				Kind:        RuntimeInternalEventDispatchExecutionRequested,
-				Scope:       scope,
-				Transaction: &RuntimeInternalTransactionPayload{RecoveryOperationID: " \t", RecoveryBudgetAttempt: 1},
-			},
-		},
-		{
-			name: "negative recovery authorization attempt",
-			event: RuntimeInternalEvent{
-				Kind:        RuntimeInternalEventDispatchExecutionRequested,
-				Scope:       scope,
-				Transaction: &RuntimeInternalTransactionPayload{RecoveryOperationID: "op-recovery", RecoveryBudgetAttempt: -1},
+				Kind: RuntimeInternalEventOperationRecoveryClaimed, Scope: scope,
+				Delivery: &RuntimeInternalDeliveryPayload{RecoveryOperationID: "op-recovery", RecoveryAuthorizationID: "auth-recovery", RecoveryBudgetKind: runtimecontract.RuntimeRecoveryBudgetOperationRecovery, LeaseNow: "2026-08-30T00:00:00Z"},
 			},
 		},
 		{
@@ -357,12 +351,18 @@ func TestRuntimeInternalEventEnvelopeRejectsMalformedPayloadBeforeLoadOrCAS(t *t
 	}
 }
 
-func TestRuntimeInternalEventEnvelopeAcceptsUnauthenticatedAndCompleteRecoveryDispatch(t *testing.T) {
+func TestRuntimeInternalEventEnvelopeAcceptsDispatchAndCompleteRecoveryLedgerFacts(t *testing.T) {
 	scope := RuntimeInternalEventScope{WorkspaceID: "ws-envelope", RunID: "run-envelope"}
 	for _, event := range []RuntimeInternalEvent{
 		{Kind: RuntimeInternalEventDispatchExecutionRequested, Scope: scope, Transaction: &RuntimeInternalTransactionPayload{}},
-		{Kind: RuntimeInternalEventDispatchExecutionRequested, Scope: scope, Transaction: &RuntimeInternalTransactionPayload{
-			RecoveryOperationID: "op-recovery", RecoveryBudgetAttempt: 2,
+		{Kind: RuntimeInternalEventRecoveryBudgetConsumed, Scope: scope, Delivery: &RuntimeInternalDeliveryPayload{
+			RecoveryBudgetKind: runtimecontract.RuntimeRecoveryBudgetOperationRecovery, RecoveryOperationID: "op-recovery", LeaseNow: "2026-08-30T00:00:00Z",
+		}},
+		{Kind: RuntimeInternalEventOperationRecoveryClaimed, Scope: scope, Delivery: &RuntimeInternalDeliveryPayload{
+			RecoveryOperationID: "op-recovery", RecoveryAuthorizationID: "auth-recovery", LeaseNow: "2026-08-30T00:00:00Z",
+		}},
+		{Kind: RuntimeInternalEventOperationRecoveryCallReturned, Scope: scope, Delivery: &RuntimeInternalDeliveryPayload{
+			RecoveryOperationID: "op-recovery", RecoveryAuthorizationID: "auth-recovery", RecoveryClaimID: "claim-recovery",
 		}},
 	} {
 		if err := event.validateEnvelope(); err != nil {

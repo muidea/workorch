@@ -11,8 +11,9 @@ import (
 
 func TestSealedDispatchToRuntimeRecordPreservesRawAuthorityProjectionShape(t *testing.T) {
 	repair := runtimecontract.RuntimeDispatchRepairCommitment{
-		Purpose:          runtimecontract.RuntimeDispatchRepairPurpose(" confirmed_file_validation_repair "),
-		OriginDispatchID: " dispatch-origin ",
+		Purpose:             runtimecontract.RuntimeDispatchRepairPurpose(" confirmed_validation_repair "),
+		RepairOwnerModuleID: " blocks/synthetic-repair ",
+		OriginDispatchID:    " dispatch-origin ",
 		Closure: runtimecontract.RuntimeRepairClosure{
 			CoverageWorkItemIDs:   []common.CoverageWorkItemID{"cwi-2", "cwi-1", "cwi-1"},
 			RequiredEvidenceKinds: []string{runtimecontract.EvidenceKindValidation, runtimecontract.EvidenceKindStateChange, runtimecontract.EvidenceKindValidation},

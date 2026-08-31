@@ -240,23 +240,23 @@ func TestRejectedValidationObservationWaitsForFileConfirmationBeforeSemanticRepa
 		t.Fatalf("completed validation dispatch did not retain sealed focus role: %+v", committed.Aggregate)
 	}
 	if !reflect.DeepEqual(originalFocus, committed.Aggregate.Facts.Focus.Normalized()) {
-		t.Fatalf("owner observation reopened or replaced focus before File confirmation: before=%+v after=%+v", originalFocus, committed.Aggregate.Facts.Focus)
+		t.Fatalf("owner observation reopened or replaced focus before owner confirmation: before=%+v after=%+v", originalFocus, committed.Aggregate.Facts.Focus)
 	}
 	currentPlanning := committed.Aggregate.SemanticPlanning
 	if currentPlanning.Phase != originalPlanning.Phase || currentPlanning.Attempt != originalPlanning.Attempt ||
 		currentPlanning.LogicalRequestID != originalPlanning.LogicalRequestID || currentPlanning.DocumentHash != originalPlanning.DocumentHash ||
 		currentPlanning.SealedBindingSetHash != originalPlanning.SealedBindingSetHash || len(currentPlanning.Batches) != len(originalPlanning.Batches) ||
 		len(currentPlanning.History) != len(originalPlanning.History) {
-		t.Fatalf("owner observation opened semantic planning before File confirmation: before=%+v after=%+v", originalPlanning, committed.Aggregate.SemanticPlanning)
+		t.Fatalf("owner observation opened semantic planning before owner confirmation: before=%+v after=%+v", originalPlanning, committed.Aggregate.SemanticPlanning)
 	}
 	if committed.Aggregate.Facts.Repair.RepairAttempts != 1 || committed.Aggregate.Facts.Repair.ValidationOnlyRetries != 0 {
-		t.Fatalf("pending File confirmation created extra repair or validation-retry authority: %+v", committed.Aggregate.Facts.Repair)
+		t.Fatalf("pending owner confirmation created extra repair or validation-retry authority: %+v", committed.Aggregate.Facts.Repair)
 	}
 	if _, required, inputErr := CurrentRuntimeValidationFailureRepairGenerationInput(committed.Aggregate); inputErr != nil || required {
-		t.Fatalf("pending File confirmation exposed semantic repair input: required=%v err=%v", required, inputErr)
+		t.Fatalf("pending owner confirmation exposed semantic repair input: required=%v err=%v", required, inputErr)
 	}
 	if committed.Aggregate.Decision.State != runtimecontract.ConvergenceStateNeedValidation || committed.Aggregate.Facts.Resources.FailureTarget != nil || committed.Aggregate.Facts.RepairDirective != nil {
-		t.Fatalf("pending File confirmation selected premature repair authority: decision=%+v target=%+v directive=%+v", committed.Aggregate.Decision, committed.Aggregate.Facts.Resources.FailureTarget, committed.Aggregate.Facts.RepairDirective)
+		t.Fatalf("pending owner confirmation selected premature repair authority: decision=%+v target=%+v directive=%+v", committed.Aggregate.Decision, committed.Aggregate.Facts.Resources.FailureTarget, committed.Aggregate.Facts.RepairDirective)
 	}
 
 	// A later focus projection cannot rewrite the completed validation's
@@ -285,7 +285,7 @@ func TestRejectedValidationObservationWaitsForFileConfirmationBeforeSemanticRepa
 	}
 	if _, required, inputErr := CurrentRuntimeValidationFailureRepairGenerationInput(reloaded); inputErr != nil || required ||
 		!sealedValidationFailureObservationMatches(reloaded, observation) {
-		t.Fatalf("restart changed pending File confirmation: required=%v err=%v aggregate=%+v", required, inputErr, reloaded)
+		t.Fatalf("restart changed pending owner confirmation: required=%v err=%v aggregate=%+v", required, inputErr, reloaded)
 	}
 }
 
@@ -579,7 +579,7 @@ func TestValidationFailureRepairProductionReceiptReopensFreshValidationAndProfil
 	sealedRepairSemantic := runtimeSealValidationFailureRepairSemanticProofForTest(t, repository, repairManifest, repairProposal, repairFeasibility)
 	binding, found := coverageEvidenceBindingForCoverage(sealedRepairSemantic.Facts.Focus, "cwi-1")
 	if !found || !sameRuntimeTargetRefs(binding.ProspectiveTargetRefs, repairTargets) {
-		t.Fatalf("repair semantic seal did not bind File-confirmed target: %+v", sealedRepairSemantic.Facts.Focus)
+		t.Fatalf("repair semantic seal did not bind owner-confirmed target: %+v", sealedRepairSemantic.Facts.Focus)
 	}
 	repair, repairPurpose, err := currentRuntimeSemanticValidationFailureRepair(sealedRepairSemantic)
 	if err != nil || !repairPurpose || repair.FailureSignature != "validation-failure/typed/1" {

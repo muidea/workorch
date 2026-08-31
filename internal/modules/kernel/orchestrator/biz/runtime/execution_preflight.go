@@ -3,6 +3,7 @@ package runtime
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"github.com/muidea/workorch/internal/pkg/common"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
@@ -14,7 +15,6 @@ const (
 	activeDispatchExecutionReady activeDispatchExecutionFlow = iota + 1
 	activeDispatchExecutionSkip
 	activeDispatchExecutionStop
-	activeDispatchExecutionRetry
 )
 
 type activeDispatchExecution struct {
@@ -22,23 +22,91 @@ type activeDispatchExecution struct {
 	ctx                   context.Context
 	workspaceID           common.WorkspaceID
 	runID                 common.RunID
-	executor              RuntimeOperationExecutor
-	recoveryOperationID   string
-	recoveryBudgetAttempt int
+	recoveryAuthorization *runtimecontract.RuntimeOperationRecoveryAuthorization
+	recoveryCallToken     string
+	recoveryNow           string
 	aggregate             RuntimeAggregate
 	dispatch              SealedDispatch
 	operations            []runtimecontract.RuntimeOperation
 	completed             map[string]struct{}
 }
 
+// RuntimeOperationExecutionCallHandoff is the immutable output of the one
+// SM-3 preparation transition. Biz may execute this request through the typed
+// EventHub only after the claim/fence (and, for replay, the exact SM-4 claim)
+// is durable. It carries no repository or callback authority.
+type RuntimeOperationExecutionCallHandoff struct {
+	Request                 RuntimeOperationExecutionRequest
+	RecoveryAuthorizationID string
+	RecoveryClaimID         string
+}
+
+func (h RuntimeOperationExecutionCallHandoff) Validate() error {
+	request := h.Request
+	if request.WorkspaceID == "" || request.RunID == "" || request.DispatchID == "" || request.Operation.ID == "" ||
+		request.Execution.OperationID != request.Operation.ID || request.Execution.ExecutionKey == "" || request.Execution.Fence == 0 {
+		return common.ErrInvalidArgument
+	}
+	if h.RecoveryClaimID != strings.TrimSpace(h.RecoveryClaimID) || h.RecoveryAuthorizationID != strings.TrimSpace(h.RecoveryAuthorizationID) ||
+		(h.RecoveryClaimID == "") != (h.RecoveryAuthorizationID == "") {
+		return common.ErrInvalidArgument
+	}
+	return nil
+}
+
+// RuntimeDispatchExecutionHandoff is the bounded, read-only result of one
+// sealed-operation call. The execution event itself owns only SM-3 claim/call
+// coordination; the exact persisted receipt is promoted by one subsequent
+// owner-private fact event with its complete coordinated write-set.
+type RuntimeDispatchExecutionHandoff struct {
+	DispatchID               string
+	OperationID              string
+	Evidence                 *ExecutionEvidence
+	PrerequisiteStaleReceipt *runtimecontract.RuntimeOperationReceipt
+	GovernanceRequired       *RuntimeOperationExecutionResult
+}
+
+func (h RuntimeDispatchExecutionHandoff) Validate() error {
+	if h.DispatchID == "" || h.OperationID == "" {
+		return common.ErrInvalidArgument
+	}
+	count := 0
+	if h.Evidence != nil {
+		count++
+		if h.Evidence.DispatchID != h.DispatchID || h.Evidence.OperationID != h.OperationID || h.Evidence.Validate() != nil {
+			return common.ErrInvalidArgument
+		}
+	}
+	if h.PrerequisiteStaleReceipt != nil {
+		count++
+		receipt := h.PrerequisiteStaleReceipt.Normalized()
+		if receipt.OperationID != h.OperationID || receipt.PrerequisiteStale == nil || receipt.Validate() != nil {
+			return common.ErrInvalidArgument
+		}
+	}
+	if h.GovernanceRequired != nil {
+		count++
+		result := h.GovernanceRequired
+		if result.OperationID != h.OperationID || result.Governance == nil || result.Receipt.OperationID != h.OperationID ||
+			result.Governance.Validate() != nil || result.Receipt.Validate() != nil {
+			return common.ErrInvalidArgument
+		}
+	}
+	if count != 1 {
+		return common.ErrInvalidArgument
+	}
+	return nil
+}
+
 type preparedActiveDispatchOperation struct {
 	execution       runtimecontract.RuntimeOperationExecutionRecord
 	governanceGrant *runtimecontract.RuntimeOperationGovernanceGrant
+	handoff         *RuntimeDispatchExecutionHandoff
 	flow            activeDispatchExecutionFlow
 }
 
-func prepareActiveDispatchExecution(ctx context.Context, component *candidateDispatchComponent, workspaceID common.WorkspaceID, runID common.RunID, executor RuntimeOperationExecutor, recoveryOperationID string, recoveryBudgetAttempt int) (*activeDispatchExecution, error) {
-	if component == nil || component.repository == nil || executor == nil || workspaceID == "" || runID == "" {
+func prepareActiveDispatchExecution(ctx context.Context, component *candidateDispatchComponent, workspaceID common.WorkspaceID, runID common.RunID, recoveryClaimID, recoveryNow string) (*activeDispatchExecution, error) {
+	if component == nil || component.repository == nil || workspaceID == "" || runID == "" {
 		return nil, common.ErrInvalidArgument
 	}
 	aggregate, err := component.repository.Load(ctx, workspaceID, runID)
@@ -62,50 +130,41 @@ func prepareActiveDispatchExecution(ctx context.Context, component *candidateDis
 		return nil, err
 	}
 	return &activeDispatchExecution{
-		component: component, ctx: ctx, workspaceID: workspaceID, runID: runID, executor: executor,
-		recoveryOperationID: recoveryOperationID, recoveryBudgetAttempt: recoveryBudgetAttempt,
+		component: component, ctx: ctx, workspaceID: workspaceID, runID: runID,
+		recoveryCallToken: recoveryClaimID, recoveryNow: strings.TrimSpace(recoveryNow),
 		aggregate: aggregate, dispatch: dispatch, operations: operations,
 		completed: stringSet(dispatch.CompletedOperationIDs),
 	}, nil
 }
 
-func (x *activeDispatchExecution) run() (RuntimeAggregate, error) {
+func (x *activeDispatchExecution) run() (RuntimeAggregate, *RuntimeOperationExecutionCallHandoff, *RuntimeDispatchExecutionHandoff, error) {
 	for _, operation := range x.operations {
 		if _, ok := x.completed[operation.ID]; ok {
 			continue
 		}
 		if err := requireCompletedOperationDependencies(operation, x.completed); err != nil {
-			return RuntimeAggregate{}, err
+			return RuntimeAggregate{}, nil, nil, err
 		}
 		prepared, err := x.prepareOperation(operation)
 		if err != nil {
-			return RuntimeAggregate{}, err
+			return RuntimeAggregate{}, nil, nil, err
+		}
+		if prepared.handoff != nil {
+			return x.aggregate, nil, prepared.handoff, nil
 		}
 		switch prepared.flow {
 		case activeDispatchExecutionSkip:
 			continue
 		case activeDispatchExecutionStop:
-			return x.aggregate, nil
+			return x.aggregate, nil, nil, nil
 		}
-		ownerCall, err := x.callOperationOwner(operation, prepared)
+		call, err := x.operationExecutionCallHandoff(operation, prepared)
 		if err != nil {
-			return RuntimeAggregate{}, err
+			return RuntimeAggregate{}, nil, nil, err
 		}
-		switch ownerCall.flow {
-		case activeDispatchExecutionStop:
-			return x.aggregate, nil
-		case activeDispatchExecutionRetry:
-			return x.component.executeActiveDispatch(x.ctx, x.workspaceID, x.runID, x.executor, "", 0)
-		}
-		flow, err := x.projectOperationReceipt(operation, prepared.execution, ownerCall.result)
-		if err != nil {
-			return RuntimeAggregate{}, err
-		}
-		if flow == activeDispatchExecutionStop {
-			return x.aggregate, nil
-		}
+		return x.aggregate, call, nil, nil
 	}
-	return x.aggregate, nil
+	return x.aggregate, nil, nil, nil
 }
 
 func requireCompletedOperationDependencies(operation runtimecontract.RuntimeOperation, completed map[string]struct{}) error {

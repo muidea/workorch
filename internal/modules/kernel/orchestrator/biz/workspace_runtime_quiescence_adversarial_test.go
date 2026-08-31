@@ -392,7 +392,7 @@ func TestWorkspaceRuntimeQuiescenceFileRestartRestoresTokenGateAndRunDraining(t 
 		t.Fatal(err)
 	}
 	firstOrchestrator := New()
-	if err := firstOrchestrator.Configure(Dependencies{Evidence: firstRepositories.OrchestratorEvidence, CommandHub: firstHub}); err != nil {
+	if err := firstOrchestrator.Configure(Dependencies{Evidence: firstRepositories.OrchestratorEvidence, CommandHub: firstHub, BackgroundRoutine: &recordingBackgroundRoutine{}}); err != nil {
 		t.Fatal(err)
 	}
 	quiescenceIntent := adversarialQuiescenceIntent(*fence)
@@ -427,7 +427,7 @@ func TestWorkspaceRuntimeQuiescenceFileRestartRestoresTokenGateAndRunDraining(t 
 		t.Fatal(err)
 	}
 	secondOrchestrator := New()
-	if err := secondOrchestrator.Configure(Dependencies{Evidence: secondRepositories.OrchestratorEvidence, CommandHub: secondHub}); err != nil {
+	if err := secondOrchestrator.Configure(Dependencies{Evidence: secondRepositories.OrchestratorEvidence, CommandHub: secondHub, BackgroundRoutine: &recordingBackgroundRoutine{}}); err != nil {
 		t.Fatal(err)
 	}
 	if err := secondOrchestrator.Start(); err != nil {
@@ -472,7 +472,7 @@ func newAdversarialRuntimeQuiescenceFixture(t *testing.T, fullyAcknowledged bool
 	}
 	evidence := memoryrepo.NewOrchestratorOwnerRepositorySet()
 	owner := New()
-	if err := owner.Configure(Dependencies{Evidence: evidence, CommandHub: hub}); err != nil {
+	if err := owner.Configure(Dependencies{Evidence: evidence, CommandHub: hub, BackgroundRoutine: &recordingBackgroundRoutine{}}); err != nil {
 		t.Fatal(err)
 	}
 	aggregate, request, item := adversarialTerminalRun(t, fullyAcknowledged)
@@ -530,7 +530,7 @@ func newAdversarialNoRuntimeQuiescenceFixture(t *testing.T, suffix string, evide
 		t.Fatal(err)
 	}
 	owner := New()
-	if err := owner.Configure(Dependencies{Evidence: evidence, CommandHub: hub}); err != nil {
+	if err := owner.Configure(Dependencies{Evidence: evidence, CommandHub: hub, BackgroundRoutine: &recordingBackgroundRoutine{}}); err != nil {
 		t.Fatal(err)
 	}
 	return &adversarialRuntimeQuiescenceFixture{

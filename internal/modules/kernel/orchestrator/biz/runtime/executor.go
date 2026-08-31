@@ -169,13 +169,16 @@ func (c *candidateDispatchComponent) recordOperationGovernanceRequired(ctx conte
 	// ticket bind may attach governance dispatch/ticket information, but it must
 	// never reconstruct an ExecutionKey or fence from kind-level data.
 	aggregate.OperationGovernanceBindings = append(aggregate.OperationGovernanceBindings, finding.Binding)
-	aggregate.Facts.Failure = &runtimecontract.FailureFact{
+	failure := runtimecontract.FailureFact{
 		Class:                runtimecontract.FailureClassGovernanceRequired,
 		Code:                 "approval_required",
 		Signature:            "governance-" + finding.Dependency.Kind + "-" + finding.Dependency.SubjectRef,
 		Message:              finding.Dependency.Reason,
 		TargetRefs:           []string{finding.Dependency.SubjectRef},
 		GovernanceDependency: &finding.Dependency,
+	}
+	if err := replaceRuntimeFailureAuthority(&aggregate.Facts, failure, runtimeFailureAuthorityRetainInterlude, nil); err != nil {
+		return RuntimeAggregate{}, err
 	}
 	// Close active dispatch as committed-without-evidence so reduce can open governance.
 	if aggregate.ActiveDispatch != nil {
@@ -221,10 +224,10 @@ func operationExecutionRecord(values []runtimecontract.RuntimeOperationExecution
 	return runtimecontract.RuntimeOperationExecutionRecord{}, false
 }
 
-func (c *candidateDispatchComponent) commitPersistedOperationReceiptEvidence(ctx context.Context, aggregate RuntimeAggregate, dispatch SealedDispatch, operation runtimecontract.RuntimeOperation, receipt runtimecontract.RuntimeOperationReceipt) (EvidenceCommitResult, error) {
+func operationEvidenceFromPersistedReceipt(aggregate RuntimeAggregate, dispatch SealedDispatch, operation runtimecontract.RuntimeOperation, receipt runtimecontract.RuntimeOperationReceipt) (ExecutionEvidence, error) {
 	execution, found := operationExecutionRecord(dispatch.OperationExecutions, operation.ID)
 	if !found {
-		return EvidenceCommitResult{}, fmt.Errorf("operation %q has no sealed execution record", operation.ID)
+		return ExecutionEvidence{}, fmt.Errorf("operation %q has no sealed execution record", operation.ID)
 	}
 	// The capability response may be the pre-CAS receipt shape (for example,
 	// before Runtime binds its execution fence). Evidence identity and owner
@@ -232,21 +235,21 @@ func (c *candidateDispatchComponent) commitPersistedOperationReceiptEvidence(ctx
 	// persisted by ExecutionKey+Fence in this aggregate.
 	persisted, found := runtimecontract.RuntimeOperationReceiptForExecutionKeyFence(aggregate.OperationReceipts, execution.ExecutionKey, execution.Fence)
 	if !found || persisted.OperationID != operation.ID {
-		return EvidenceCommitResult{}, fmt.Errorf("operation %q has no exact persisted owner receipt", operation.ID)
+		return ExecutionEvidence{}, fmt.Errorf("operation %q has no exact persisted owner receipt", operation.ID)
 	}
 	receipt = persisted
 	status, failure, err := runtimeOperationReceiptEvidenceJudgment(aggregate.Decision, execution, operation, receipt)
 	if err != nil {
-		return EvidenceCommitResult{}, err
+		return ExecutionEvidence{}, err
 	}
 	hash := runtimecontract.StableRuntimeOperationReceiptHash(receipt)
-	return c.commitEvidence(ctx, ExecutionEvidence{
+	return ExecutionEvidence{
 		EventID: "runtime-receipt|" + hash, WorkspaceID: aggregate.Facts.WorkspaceID, RunID: aggregate.Facts.RunID,
 		DispatchID: dispatch.ID, AuthoritySnapshotID: dispatch.Transaction.AuthoritySnapshotID,
 		OperationID: operation.ID, Status: status, SourceRef: "runtime-receipt/" + receipt.ExecutionKey,
 		Failure: failure, Evidence: receipt.Evidence, ObservedEffectScope: receipt.ObservedEffectScope, NoOp: receipt.Outcome == runtimecontract.RuntimeOperationOutcomeNoOp,
 		OwnerReceiptRef: "runtime-receipt/" + receipt.ExecutionKey, OwnerReceiptHash: hash, Receipt: &receipt,
-	})
+	}, nil
 }
 
 // runtimeOperationReceiptEvidenceJudgment is the only ordinary receipt-to-

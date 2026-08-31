@@ -272,7 +272,7 @@ func canonicalizeResultArtifactRefs(item *resultmodel.Result, sourceRefs, artifa
 }
 
 func canonicalRuntimeResultID(workspaceID common.WorkspaceID, runID common.RunID) common.ResultID {
-	return common.ResultID(fmt.Sprintf("%s/%s/result/dod-assessment", workspaceID, runID))
+	return runtimecontract.RuntimeTerminalResultID(workspaceID, runID)
 }
 
 func canonicalRuntimeArtifactID(resultID common.ResultID, sourceRef string) common.ArtifactID {

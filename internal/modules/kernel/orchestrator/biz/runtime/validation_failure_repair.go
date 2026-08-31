@@ -80,7 +80,9 @@ func openRuntimeValidationFailureRepairGeneration(aggregate *RuntimeAggregate, f
 		return false, err
 	}
 	if aggregate.Facts.Repair.Exhausted || aggregate.Facts.Repair.RepairAttempts > trigger.convergence.MaxAttempts {
-		markRuntimeValidationFailureRepairExhausted(&aggregate.Facts, trigger)
+		if err := markRuntimeValidationFailureRepairExhausted(&aggregate.Facts, trigger); err != nil {
+			return false, err
+		}
 		return false, nil
 	}
 
@@ -470,7 +472,11 @@ func applyRuntimeValidationFailureRepairSemanticSeal(facts runtimecontract.Runti
 	continuation.repair.FocusID = facts.Focus.ID
 	continuation.repair.SliceID = facts.Focus.SliceID
 	facts.Repair = continuation.repair.Normalized()
-	facts.Failure = continuation.failure
+	if continuation.failure != nil {
+		if err := replaceRuntimeFailureAuthority(&facts, *continuation.failure, runtimeFailureAuthorityRetainInterlude, nil); err != nil {
+			return runtimecontract.RuntimeFacts{}, err
+		}
+	}
 	facts.Feasibility = nil
 
 	switch continuation.kind {
@@ -555,17 +561,16 @@ func runtimeStringsWithin(values, allowed []string) bool {
 	return true
 }
 
-func markRuntimeValidationFailureRepairExhausted(facts *runtimecontract.RuntimeFacts, trigger runtimeValidationFailureRepairTrigger) {
+func markRuntimeValidationFailureRepairExhausted(facts *runtimecontract.RuntimeFacts, trigger runtimeValidationFailureRepairTrigger) error {
 	if facts == nil {
-		return
+		return common.ErrInvalidArgument
 	}
 	facts.Repair.Exhausted = true
 	failure := trigger.failure.Clone()
 	failure.Class = runtimecontract.FailureClassNoProgressExhausted
 	failure.Code = "validation_failure_repair_exhausted"
 	failure.Message = fmt.Sprintf("validation failure repair convergence %q exhausted its bounded %d attempts", trigger.convergence.ID, trigger.convergence.MaxAttempts)
-	facts.Failure = &failure
-	facts.RepairDirective = nil
+	return replaceRuntimeFailureAuthority(facts, failure, runtimeFailureAuthorityRetire, nil)
 }
 
 // currentRuntimeSemanticValidationFailureRepair resolves purpose exclusively

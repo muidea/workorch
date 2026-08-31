@@ -70,9 +70,12 @@ func (c *planningTransactionComponent) invalidateCandidateRequestSessionForPrere
 		InvalidatedDependencies: invalidatedDependencies, Stale: &staleCopy,
 	})
 	if !consumed {
-		facts.Failure = &runtimecontract.FailureFact{
+		failure := runtimecontract.FailureFact{
 			Class: runtimecontract.FailureClassPrerequisiteRefreshExhausted, Code: "prerequisite_refresh_exhausted",
 			Signature: signature, Message: "prerequisite refresh budget exhausted: " + stale.Reason,
+		}
+		if err := replaceRuntimeFailureAuthority(&facts, failure, runtimeFailureAuthorityRetire, nil); err != nil {
+			return RuntimeAggregate{}, err
 		}
 	}
 	facts, decision, err := ReduceRuntimeStateWithDirective(facts, nil, aggregate.CoverageProofLineage)

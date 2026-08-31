@@ -52,9 +52,12 @@ func (c *candidateDispatchComponent) invalidateCandidateAttemptForPrerequisiteSt
 		InvalidatedDependencies: invalidatedDependencies, Stale: &staleCopy,
 	})
 	if !consumed {
-		facts.Failure = &runtimecontract.FailureFact{
+		failure := runtimecontract.FailureFact{
 			Class: runtimecontract.FailureClassPrerequisiteRefreshExhausted, Code: "prerequisite_refresh_exhausted",
 			Signature: signature, Message: "prerequisite refresh budget exhausted: " + stale.Reason,
+		}
+		if err := replaceRuntimeFailureAuthority(&facts, failure, runtimeFailureAuthorityRetire, nil); err != nil {
+			return RuntimeAggregate{}, err
 		}
 	}
 	facts, decision, err := ReduceRuntimeStateWithDirective(facts, nil, aggregate.CoverageProofLineage)
@@ -310,8 +313,10 @@ func retireContradictedRuntimeCWIBinding(facts *runtimecontract.RuntimeFacts, co
 
 func applyOwnerInfeasibilityFailure(aggregate *RuntimeAggregate, observation runtimecontract.RuntimeOwnerFeasibilityObservation, contradictionUnbound bool) error {
 	failure := ownerInfeasibilityFailure(observation, contradictionUnbound)
+	if err := replaceRuntimeFailureAuthority(&aggregate.Facts, failure, runtimeFailureAuthorityRetire, nil); err != nil {
+		return err
+	}
 	facts := aggregate.Facts
-	facts.Failure = &failure
 	facts, decision, err := ReduceRuntimeStateWithDirective(facts, &aggregate.Decision.AuthoritySnapshot, aggregate.CoverageProofLineage)
 	if err != nil {
 		return err
@@ -395,9 +400,12 @@ func (c *candidateDispatchComponent) invalidateActiveDispatchForPrerequisiteStal
 	aggregate.CompletedDispatches = append(aggregate.CompletedDispatches, dispatch)
 	aggregate.ActiveDispatch = nil
 	if !consumed {
-		facts.Failure = &runtimecontract.FailureFact{
+		failure := runtimecontract.FailureFact{
 			Class: runtimecontract.FailureClassPrerequisiteRefreshExhausted, Code: "prerequisite_refresh_exhausted",
 			Signature: signature, Message: "prerequisite refresh budget exhausted: " + stale.Reason,
+		}
+		if err := replaceRuntimeFailureAuthority(&facts, failure, runtimeFailureAuthorityRetire, nil); err != nil {
+			return RuntimeAggregate{}, err
 		}
 	}
 	facts, decision, err := ReduceRuntimeStateWithDirective(facts, nil, aggregate.CoverageProofLineage)

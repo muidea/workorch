@@ -162,7 +162,7 @@ func TestShellOwnerObservedFailureTargetBindsThroughEventHubAndFileSnapshot(t *t
 	}
 	if persisted.Facts.Failure == nil || persisted.Facts.Failure.ValidationFailureObservation == nil ||
 		persisted.Facts.Resources.FailureTarget != nil {
-		t.Fatalf("Shell receipt bypassed File repair-surface confirmation: %+v", persisted)
+		t.Fatalf("validation-owner receipt bypassed File repair-surface confirmation: %+v", persisted)
 	}
 	receipt := runtimecontract.RuntimeOperationReceipt{}
 	found := false
@@ -210,7 +210,7 @@ func TestShellOwnerObservedFailureTargetBindsThroughEventHubAndFileSnapshot(t *t
 		t.Fatalf("validation observation identity fence: %v", err)
 	}
 	// The semantic helper snapshots only the pre-validation target set. The
-	// later File confirmation is a new owner revision and must not inherit those
+	// later owner confirmation is a new owner revision and must not inherit those
 	// fixture snapshots as repair authority.
 	repository.aggregate.Facts.Resources.TargetSnapshots = nil
 	persisted.Facts.Resources.TargetSnapshots = nil
@@ -237,7 +237,7 @@ func TestShellOwnerObservedFailureTargetBindsThroughEventHubAndFileSnapshot(t *t
 	if err != nil || persisted.Facts.Resources.FailureTarget == nil || persisted.Facts.Resources.FailureTarget.TargetObservation == nil ||
 		!slices.Equal(persisted.Facts.Resources.FailureTarget.TargetRefs, []string{"implementation.go"}) ||
 		persisted.Decision.State != runtimecontract.ConvergenceStateNeedPrerequisite {
-		t.Fatalf("File confirmation did not CAS-bind failure target before snapshot acquisition: aggregate=%+v err=%v", persisted, err)
+		t.Fatalf("owner confirmation did not CAS-bind failure target before snapshot acquisition: aggregate=%+v err=%v", persisted, err)
 	}
 	var snapshotPrerequisite runtimecontract.RuntimePrerequisite
 	for _, pending := range persisted.Facts.Prerequisites.Pending {
@@ -321,7 +321,7 @@ func TestShellOwnerObservedFailureTargetBindsThroughEventHubAndFileSnapshot(t *t
 		t.Fatalf("duplicate Shell execution did not replay the committed receipt: %+v", replayed)
 	}
 
-	// The File-confirmed target is now the exact repair surface. Reacquire all
+	// The owner-confirmed target is now the exact repair surface. Reacquire all
 	// current File/Shell facts, seal one target-bound File operation and execute
 	// it through the real File owner/EventHub receipt route. The operation's own
 	// workspace change must invalidate old owner facts without erasing the
@@ -389,11 +389,11 @@ func TestShellOwnerObservedFailureTargetBindsThroughEventHubAndFileSnapshot(t *t
 		repaired.Facts.RepairDirective.Closure == nil || repaired.Facts.RepairDirective.Closure.ID != repairClosureID ||
 		repaired.Facts.Resources.FailureTarget != nil || len(repaired.Facts.Prerequisites.Pending) == 0 ||
 		len(repaired.PrerequisiteInvalidations) == 0 {
-		t.Fatalf("accepted confirmed File repair lost closure or bypassed freshness: %+v", repaired)
+		t.Fatalf("accepted confirmed owner repair lost closure or bypassed freshness: %+v", repaired)
 	}
 	if repaired.Facts.RepairDirective.CurrentFailure != nil ||
 		!slices.Equal(repaired.Facts.RepairDirective.Closure.GroundedTargetRefs, []string{"implementation.go"}) {
-		t.Fatalf("accepted confirmed File repair retained stale target authority or lost immutable closure: %+v", repaired.Facts.RepairDirective)
+		t.Fatalf("accepted confirmed owner repair retained stale target authority or lost immutable closure: %+v", repaired.Facts.RepairDirective)
 	}
 	content, readErr := os.ReadFile(filepath.Join(workspaceDirectory, "implementation.go"))
 	if readErr != nil || string(content) != repairedContent {
@@ -410,7 +410,7 @@ func TestShellOwnerObservedFailureTargetBindsThroughEventHubAndFileSnapshot(t *t
 	if err != nil || restarted.StateRevision != repaired.StateRevision || restarted.Facts.Resources.FailureTarget != nil ||
 		restarted.Facts.RepairDirective == nil || restarted.Facts.RepairDirective.Closure == nil ||
 		restarted.Facts.RepairDirective.Closure.ID != repairClosureID {
-		t.Fatalf("restart lost confirmed File repair transaction: aggregate=%+v err=%v", restarted, err)
+		t.Fatalf("restart lost confirmed owner repair transaction: aggregate=%+v err=%v", restarted, err)
 	}
 	repairDispatch := restarted.CompletedDispatches[len(restarted.CompletedDispatches)-1]
 	repairExecution, found := operationExecutionRecord(repairDispatch.OperationExecutions, repairOperation.ID)

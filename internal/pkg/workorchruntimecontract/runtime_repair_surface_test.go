@@ -18,6 +18,11 @@ func TestRuntimeRepairSurfaceObservationIsFactOnlyAndBounded(t *testing.T) {
 	if err := confirmation.Validate(); err != nil {
 		t.Fatalf("confirmation: %v", err)
 	}
+	syntheticOwner := confirmation
+	syntheticOwner.OwnerModuleID = "blocks/synthetic-repair-owner"
+	if err := syntheticOwner.Validate(); err != nil {
+		t.Fatalf("synthetic non-File owner confirmation: %v", err)
+	}
 	invalid := confirmation
 	invalid.ConfirmedTargetRefs = []string{"test.go"}
 	if err := invalid.Validate(); err == nil {
@@ -28,10 +33,12 @@ func TestRuntimeRepairSurfaceObservationIsFactOnlyAndBounded(t *testing.T) {
 	if err := invalid.Validate(); err == nil {
 		t.Fatal("observation accepted candidate outside sealed validation scope")
 	}
-	invalid = confirmation
-	invalid.OwnerModuleID = RuntimeModuleMCP
-	if err := invalid.Validate(); err == nil {
-		t.Fatal("repair surface confirmation accepted a non-File owner")
+	for _, ownerModuleID := range []string{"", "   ", " blocks/synthetic-repair-owner"} {
+		invalid = syntheticOwner
+		invalid.OwnerModuleID = ownerModuleID
+		if err := invalid.Validate(); err == nil {
+			t.Fatalf("repair surface confirmation accepted non-canonical owner %q", ownerModuleID)
+		}
 	}
 	overflow := observation
 	for index := len(overflow.CandidateTargetRefs); index <= RuntimeValidationFailureObservationMaxCandidateTargetRefs; index++ {

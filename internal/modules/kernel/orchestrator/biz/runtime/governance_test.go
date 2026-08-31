@@ -6,6 +6,7 @@ import (
 	"errors"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
@@ -828,7 +829,7 @@ func TestRecordOperationGovernanceRequiredDoesNotUseExecutionRepair(t *testing.T
 	_, casErr := casController.ApplyInternalEvent(context.Background(), RuntimeInternalEvent{
 		Kind:        RuntimeInternalEventDispatchExecutionRequested,
 		Scope:       RuntimeInternalEventScope{WorkspaceID: "ws-v2", RunID: "run-v2"},
-		Transaction: &RuntimeInternalTransactionPayload{Executor: casExecutor},
+		Transaction: &RuntimeInternalTransactionPayload{},
 	})
 	if !errors.Is(casErr, common.ErrConflict) || casExecutor.called {
 		t.Fatalf("failed governance effect-start CAS reached owner: called=%v err=%v", casExecutor.called, casErr)
@@ -838,10 +839,18 @@ func TestRecordOperationGovernanceRequiredDoesNotUseExecutionRepair(t *testing.T
 		t.Fatalf("failed governance effect-start CAS leaked an uncommitted marker: %+v", casPersistedExecution)
 	}
 	executor := &governanceRetryProbeExecutor{owner: restarted}
-	_, firstDriveErr := restarted.ApplyInternalEvent(context.Background(), RuntimeInternalEvent{
+	prepared, firstDriveErr := restarted.ApplyInternalEvent(context.Background(), RuntimeInternalEvent{
 		Kind:        RuntimeInternalEventDispatchExecutionRequested,
 		Scope:       RuntimeInternalEventScope{WorkspaceID: "ws-v2", RunID: "run-v2"},
-		Transaction: &RuntimeInternalTransactionPayload{Executor: executor},
+		Transaction: &RuntimeInternalTransactionPayload{},
+	})
+	if firstDriveErr != nil || prepared.OperationCall == nil {
+		t.Fatalf("governance owner call preparation: handoff=%+v err=%v", prepared.OperationCall, firstDriveErr)
+	}
+	_, _ = executor.ExecuteRuntimeOperation(context.Background(), prepared.OperationCall.Request)
+	_, firstDriveErr = restarted.ApplyInternalEvent(context.Background(), RuntimeInternalEvent{
+		Kind: RuntimeInternalEventDispatchExecutionRequested, Scope: RuntimeInternalEventScope{WorkspaceID: "ws-v2", RunID: "run-v2"},
+		Transaction: &RuntimeInternalTransactionPayload{},
 	})
 	if operationID, required := RuntimeOperationRecoveryBudgetRequired(firstDriveErr); !required || operationID != governedOperationID || len(executor.requests) != 1 {
 		t.Fatalf("governance owner error bypassed recovery handoff: operation=%q required=%v requests=%d err=%v", operationID, required, len(executor.requests), firstDriveErr)
@@ -864,6 +873,7 @@ func TestRecordOperationGovernanceRequiredDoesNotUseExecutionRepair(t *testing.T
 	exhaustedAggregate.ActiveDispatch = &exhaustedActive
 	exhaustedAggregate.ExecutionBudget = afterFirstDrive.ExecutionBudget.Clone()
 	exhaustedAggregate.Facts.Recovery.OperationRecoveryAttempts = exhaustedAggregate.Facts.RecoveryPolicy.MaxOperationRecoveryAttempts
+	exhaustedAggregate.OperationRecoveryAuthorizations = runtimeOperationRecoveryAuthorizationHistoryForTest(t, exhaustedAggregate, governedOperationID)
 	exhaustedRepository := &controllerRepository{aggregate: &exhaustedAggregate}
 	exhaustedController, err := NewRuntimeController(exhaustedRepository)
 	if err != nil {
@@ -892,6 +902,7 @@ func TestRecordOperationGovernanceRequiredDoesNotUseExecutionRepair(t *testing.T
 	outcomeCASAggregate.ActiveDispatch = &outcomeCASActive
 	outcomeCASAggregate.ExecutionBudget = afterFirstDrive.ExecutionBudget.Clone()
 	outcomeCASAggregate.Facts.Recovery.OperationRecoveryAttempts = outcomeCASAggregate.Facts.RecoveryPolicy.MaxOperationRecoveryAttempts
+	outcomeCASAggregate.OperationRecoveryAuthorizations = runtimeOperationRecoveryAuthorizationHistoryForTest(t, outcomeCASAggregate, governedOperationID)
 	outcomeCASRepository := &governanceCASFailRepository{aggregate: outcomeCASAggregate}
 	outcomeCASController, err := NewRuntimeController(outcomeCASRepository)
 	if err != nil {
@@ -987,4 +998,33 @@ func runtimeOperationBudgetAllocationForTest(aggregate RuntimeAggregate, executi
 		}
 	}
 	return runtimecontract.RuntimeBudgetAllocation{}, false
+}
+
+func runtimeOperationRecoveryAuthorizationHistoryForTest(t *testing.T, aggregate RuntimeAggregate, operationID string) []runtimecontract.RuntimeOperationRecoveryAuthorization {
+	t.Helper()
+	if aggregate.ActiveDispatch == nil {
+		t.Fatal("recovery authorization fixture requires active dispatch")
+	}
+	execution, found := operationExecutionRecord(aggregate.ActiveDispatch.OperationExecutions, operationID)
+	if !found {
+		t.Fatalf("recovery authorization fixture operation %q is absent", operationID)
+	}
+	ret := make([]runtimecontract.RuntimeOperationRecoveryAuthorization, aggregate.Facts.Recovery.OperationRecoveryAttempts)
+	for idx := range ret {
+		value := runtimecontract.RuntimeOperationRecoveryAuthorization{
+			WorkspaceID: aggregate.Facts.WorkspaceID, RunID: aggregate.Facts.RunID, DispatchID: aggregate.ActiveDispatch.ID,
+			OperationID: execution.OperationID, ExecutionKey: execution.ExecutionKey, Fence: execution.Fence,
+			RecoveryAttempt: idx + 1, IssuedAtStateRevision: uint64(idx + 1),
+			State: runtimecontract.RuntimeOperationRecoveryAuthorizationIssued,
+		}
+		value.AuthorizationID = runtimecontract.StableRuntimeOperationRecoveryAuthorizationID(value)
+		value.State = runtimecontract.RuntimeOperationRecoveryAuthorizationUncertain
+		value.ClaimGeneration = 1
+		claimedAt := time.Date(2026, time.August, 30, 0, idx, 0, 0, time.UTC)
+		value.ClaimedAt = claimedAt.Format(time.RFC3339Nano)
+		value.LeaseDeadline = claimedAt.Add(runtimecontract.RuntimeOperationRecoveryClaimLeaseDuration).Format(time.RFC3339Nano)
+		value.ClaimID = runtimecontract.StableRuntimeOperationRecoveryClaimID(value)
+		ret[idx] = value
+	}
+	return ret
 }

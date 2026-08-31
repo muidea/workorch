@@ -1092,6 +1092,14 @@ func TestOwnerGroundedFailureRepairKindsRequiresCompleteOwnerAuthority(t *testin
 	receiptGrounded.Resources.TargetSnapshots = []runtimecontract.TargetSnapshot{{
 		TargetRef: "implementation.go", ContentHash: "file-content-1", ContentState: runtimecontract.SnapshotContentStateComplete,
 	}}
+	receiptGrounded.Prerequisites.Satisfied = append(receiptGrounded.Prerequisites.Satisfied, runtimecontract.RuntimePrerequisite{
+		ID: "target-snapshot:implementation.go", Kind: runtimecontract.PrerequisiteKindTargetSnapshot,
+		OwnerModuleID: runtimecontract.RuntimeModuleFile, SubjectRef: "implementation.go",
+	})
+	receiptGrounded.Resources.PrerequisiteObservations = append(receiptGrounded.Resources.PrerequisiteObservations, runtimecontract.RuntimePrerequisiteObservation{
+		PrerequisiteID: "target-snapshot:implementation.go", Kind: runtimecontract.PrerequisiteKindTargetSnapshot,
+		OwnerModuleID: runtimecontract.RuntimeModuleFile,
+	})
 	if got := ownerGroundedFailureRepairKinds(receiptGrounded); len(got) != 1 || got[0] != runtimecontract.RuntimeBlockKindPatchApply {
 		t.Fatalf("receipt-evidence target did not resolve to File repair authority: %v", got)
 	}

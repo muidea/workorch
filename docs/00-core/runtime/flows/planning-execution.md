@@ -4,7 +4,7 @@ Status: normative
 
 Type: runtime-flow
 
-Last Verified: 2026-08-23
+Last Verified: 2026-08-31
 
 ## Purpose
 
@@ -150,7 +150,7 @@ Candidate context and any bounded correction must use the latest capability-owne
 existence and revision. A complete candidate rejected by owner semantic contract is persisted with its stable factual
 category and safe diagnostic before the one allowed correction.
 
-For example:
+For example, the software-dev Profile may specialize the neutral owner contract as follows:
 
 - `file/write` is create-only and may target only an absent/prospective owner target;
 - when the target already exists, correction must choose an admitted revision-bound replacement such as `file/edit` or
@@ -158,8 +158,11 @@ For example:
 - retrying the equivalent create-only operation is not progress and must be rejected before side effect;
 - stale catalog/target revision cannot be hidden by changing prose or operation identity.
 
-LLM proposes the replacement, File owner checks current feasibility/admissibility, SM-3 seals it, and SM-2 alone decides the
-post-receipt convergence state. No component may patch CWI/focus state to force closure.
+Generally, the LLM proposes only within the sealed vocabulary; the resource/effect owner selected by the sealed Profile or operation
+descriptor checks current feasibility/admissibility, SM-3 seals the exact owner in
+`RuntimeDispatchRepairCommitment.RepairOwnerModuleID`, and SM-2 alone decides the post-receipt convergence state. A confirmed
+validation repair uses purpose `confirmed_validation_repair`. File is only the concrete owner in the example above; no component may
+patch CWI/focus state to force closure.
 
 ### 7. What Is Not On This Path
 

@@ -31,7 +31,7 @@ func finalizeExecutionEvidence(
 	aggregate.ProcessedEventIDs = appendNormalizedString(aggregate.ProcessedEventIDs, evidence.EventID)
 	dispatch := *aggregate.ActiveDispatch
 	dispatch.CompletedOperationIDs = appendNormalizedString(dispatch.CompletedOperationIDs, evidence.OperationID)
-	repairTransaction, err := currentConfirmedFileRepairTransaction(*aggregate, admission, fact)
+	repairTransaction, err := currentConfirmedRepairTransaction(*aggregate, admission, fact)
 	if err != nil {
 		return false, err
 	}
@@ -44,7 +44,7 @@ func finalizeExecutionEvidence(
 		if err != nil {
 			return false, err
 		}
-		// Once an accepted File receipt has been admitted to an exact confirmed
+		// Once an accepted repair-owner receipt has been admitted to an exact confirmed
 		// repair transaction, the pre-change target and directive are superseded
 		// regardless of whether their mutable catalog observations happen to
 		// intersect the receipt's prerequisite invalidation set. Remaining all-of
@@ -98,7 +98,7 @@ func completeEvidenceDispatch(
 	invalidated bool,
 	admission executionEvidenceAdmission,
 	fact runtimecontract.EvidenceFact,
-	repairTransaction *confirmedFileRepairTransaction,
+	repairTransaction *confirmedRepairTransaction,
 ) error {
 	if invalidated {
 		dispatch.State = DispatchStateInvalidated
@@ -123,15 +123,15 @@ func completeEvidenceDispatch(
 				return err
 			}
 		} else if repairTransaction != nil {
-			if _, err := settleConfirmedFileDefinitionRepair(aggregate, fact, *repairTransaction); err != nil {
+			if _, err := settleConfirmedRepairDefinitionRepair(aggregate, fact, *repairTransaction); err != nil {
 				return err
 			}
 		}
 	}
 	if admission.Evidence.Status == ExecutionEvidenceStatusRejected && !invalidated {
-		// A structured validation observation already carries one bounded Shell
+		// A structured validation observation already carries one bounded owner
 		// diagnostic surface. Preserve the completed dispatch/focus causation and
-		// let the next drive obtain File's read-only confirmation before any new
+		// let the next drive obtain the resource owner's read-only confirmation before any new
 		// semantic/provider work. Only a target-free typed failure may enter the
 		// Profile-declared prospective repair generation.
 		if !repairSurfaceConfirmationPending {

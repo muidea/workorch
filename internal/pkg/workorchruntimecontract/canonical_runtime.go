@@ -309,7 +309,7 @@ type FailureFact struct {
 	TargetObservation    *RuntimeFailureTargetObservation
 	ValidationDiagnostic *ValidationFailureDiagnostic
 	// ValidationFailureObservation is a capability fact only. It remains
-	// separate from TargetRefs until the File owner confirms the repair surface.
+	// separate from TargetRefs until the sealed resource owner confirms the repair surface.
 	ValidationFailureObservation *RuntimeValidationFailureObservation
 	// GovernanceDependency is present only when an owner, prerequisite, or
 	// activation fact has already identified a concrete external dependency.
@@ -408,7 +408,7 @@ type RuntimeFailureTargetObservation struct {
 	TargetRefs       []string `json:"targetRefs"`
 	// CatalogDependency is required by the descriptor-authorized
 	// receipt-evidence protocol and binds the observation to one exact owner
-	// catalog dependency. File-confirmed observations use their separate typed
+	// catalog dependency. Owner-confirmed observations use their separate typed
 	// confirmation lineage and leave this nil.
 	CatalogDependency *RuntimeFreshnessDependency `json:"catalogDependency,omitempty"`
 	// Structured observations bind a target claim to the tool output from
@@ -2184,7 +2184,7 @@ func (c RequiredOutputContract) Normalized() RequiredOutputContract {
 }
 func (c RequiredOutputContract) Validate() error {
 	if c.RepairPurpose != "" {
-		if c.RepairPurpose != RuntimeDispatchRepairPurposeConfirmedFileValidation || strings.TrimSpace(c.RepairClosureID) == "" {
+		if c.RepairPurpose != RuntimeDispatchRepairPurposeConfirmedValidation || strings.TrimSpace(c.RepairClosureID) == "" {
 			return fmt.Errorf("required output has invalid repair purpose %q", c.RepairPurpose)
 		}
 	}

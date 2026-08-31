@@ -49,7 +49,7 @@ type RuntimeDispatchRecord struct {
 	// not activation policy and not mutable current owner inventory.
 	ValidationRecipes []RuntimeValidationRecipe
 	// RepairCommitment is present only when the accepted candidate was admitted
-	// as the exact File repair of a confirmed rejected-validation surface.  It is
+	// as the exact resource-owner repair of a confirmed rejected-validation surface. It is
 	// immutable across execution progress and governance resume.
 	RepairCommitmentHash string
 	RepairCommitment     *RuntimeDispatchRepairCommitment
@@ -301,6 +301,10 @@ type RuntimeStateRecord struct {
 	// RecoverableWaits are Orchestrator-owned bounded wait records. Run stores
 	// them opaquely; only one record may be active for a Runtime aggregate.
 	RecoverableWaits []RuntimeRecoverableWaitRecord
+	// OperationRecoveryAuthorizations are exact SM-4 replay permissions. Run
+	// persists them opaquely and never interprets an operation recovery counter
+	// as execution authority.
+	OperationRecoveryAuthorizations []RuntimeOperationRecoveryAuthorization
 	// DefinitionClarification is the dedicated persisted gap observation,
 	// sealed dispatch and Decision-owner request binding.
 	DefinitionClarification     *RuntimeDefinitionClarificationState
@@ -596,8 +600,14 @@ func (r RuntimeStateRecord) Validate() error {
 		if err := r.Termination.Validate(); err != nil {
 			return fmt.Errorf("runtime state termination: %w", err)
 		}
+		if r.Termination.Revision > r.StateRevision {
+			return fmt.Errorf("runtime state termination revision exceeds state revision")
+		}
 	}
 	if err := ValidateRuntimeStateTerminalDeliveryLedger(r.Decision, r.Termination, r.DeliveryAcknowledgements, r.Facts.Recovery); err != nil {
+		return err
+	}
+	if err := ValidateRuntimeOperationRecoveryAuthorizations(r.Facts.WorkspaceID, r.Facts.RunID, r.ActiveDispatch, r.CompletedDispatches, r.OperationReceipts, r.OperationRecoveryAuthorizations, r.Facts.Recovery, r.StateRevision); err != nil {
 		return err
 	}
 	if r.ActiveDispatch != nil {
@@ -623,7 +633,11 @@ func ValidateRuntimeStateTerminalDeliveryLedger(
 	acknowledgements []RuntimeDeliveryAcknowledgement,
 	recovery RuntimeRecoveryLedger,
 ) error {
-	terminal := isTerminalRuntimeDecision(decision) || termination != nil
+	convergenceTerminal := isTerminalRuntimeDecision(decision)
+	if convergenceTerminal && termination != nil {
+		return fmt.Errorf("runtime state cannot carry both convergence and administrative terminals")
+	}
+	terminal := convergenceTerminal || termination != nil
 	if !terminal {
 		if recovery.Normalized().TerminalDeliveryAttempts != 0 {
 			return fmt.Errorf("non-terminal runtime state cannot consume terminal delivery budget")
@@ -633,9 +647,46 @@ func ValidateRuntimeStateTerminalDeliveryLedger(
 		}
 		return nil
 	}
-	for _, acknowledgement := range acknowledgements {
+	outcome, terminalOutcome, err := DeriveRuntimeTerminalOutcome(decision, termination)
+	if err != nil || !terminalOutcome {
+		if err == nil {
+			err = fmt.Errorf("runtime terminal outcome is absent")
+		}
+		return err
+	}
+	workspaceID := decision.AuthoritySnapshot.WorkspaceID
+	runID := decision.AuthoritySnapshot.RunID
+	expectedDeliveryID := StableTerminalDeliveryID(workspaceID, runID, decision.AuthoritySnapshot.ID, outcome)
+	expectedResultID := RuntimeTerminalResultID(workspaceID, runID)
+	expectedOwners := []RuntimeDeliveryOwner{RuntimeDeliveryOwnerResult, RuntimeDeliveryOwnerWorkspace, RuntimeDeliveryOwnerRun}
+	if len(acknowledgements) > len(expectedOwners) {
+		return fmt.Errorf("runtime state terminal delivery acknowledgement ledger is over-complete")
+	}
+	for idx, acknowledgement := range acknowledgements {
+		acknowledgement = acknowledgement.Normalized()
 		if err := acknowledgement.Validate(); err != nil {
 			return fmt.Errorf("terminal delivery acknowledgement: %w", err)
+		}
+		if acknowledgement.WorkspaceID != workspaceID || acknowledgement.RunID != runID ||
+			acknowledgement.TerminalDeliveryID != expectedDeliveryID || acknowledgement.Owner != expectedOwners[idx] ||
+			acknowledgement.AuthoritySnapshotID != decision.AuthoritySnapshot.ID ||
+			acknowledgement.CausationID != "terminal-delivery/"+expectedDeliveryID || acknowledgement.Outcome != outcome {
+			return fmt.Errorf("runtime state terminal delivery acknowledgement does not match exact terminal order and identity")
+		}
+		switch acknowledgement.Owner {
+		case RuntimeDeliveryOwnerResult:
+			if acknowledgement.ResultID != expectedResultID ||
+				(acknowledgement.AcknowledgedState != RuntimeDeliveryAcknowledgedResultRecorded && acknowledgement.AcknowledgedState != RuntimeDeliveryAcknowledgedNoop) {
+				return fmt.Errorf("runtime state Result acknowledgement has invalid owner-local state")
+			}
+		case RuntimeDeliveryOwnerWorkspace:
+			if acknowledgement.AcknowledgedState != RuntimeDeliveryAcknowledgedWorkspaceReleased && acknowledgement.AcknowledgedState != RuntimeDeliveryAcknowledgedNoop {
+				return fmt.Errorf("runtime state Workspace acknowledgement has invalid owner-local state")
+			}
+		case RuntimeDeliveryOwnerRun:
+			if acknowledgement.AcknowledgedState != RuntimeDeliveryAcknowledgedRunTerminal && acknowledgement.AcknowledgedState != RuntimeDeliveryAcknowledgedNoop {
+				return fmt.Errorf("runtime state Run acknowledgement has invalid owner-local state")
+			}
 		}
 	}
 	return nil

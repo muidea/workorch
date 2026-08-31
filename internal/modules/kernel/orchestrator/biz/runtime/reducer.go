@@ -572,7 +572,7 @@ func reduceDeterminedFailure(base runtimecontract.RuntimeDecision, facts runtime
 	case runtimecontract.FailureClassCandidateDocumentRecoveryExhausted:
 		return terminalDecision(base, runtimecontract.ConvergenceStateFailed, "candidate_document_recovery_exhausted", failure.Message), true, nil
 	case runtimecontract.FailureClassCandidateInfeasible:
-		// A File owner rejection of the exact validation-derived repair surface
+		// A resource-owner rejection of the exact validation-derived repair surface
 		// is a typed infeasibility terminal. It did not consume a repair budget,
 		// so it must not be relabeled as no_progress_exhausted or re-enter the
 		// same-focus repair loop.
@@ -712,11 +712,11 @@ func ownerGroundedFailureRepairKinds(facts runtimecontract.RuntimeFacts) []strin
 }
 
 // ownerGroundedFailureRepairOwner keeps diagnostic provenance separate from
-// effect ownership. A File-confirmed observation names its repair owner
-// directly. A receipt-evidence observation instead names the capability that
-// produced the diagnostic; it may authorize a File repair only when every
-// exact target was already grounded by a complete File snapshot. The File
-// catalog and its fresh prerequisite observation are checked by the caller.
+// effect ownership. A directly confirmed observation names its resource owner.
+// A receipt-evidence observation instead names the capability that produced
+// the diagnostic; its repair owner is the unique owner of the exact, current
+// target snapshots already sealed in the aggregate. The reducer never selects
+// an owner from a capability-specific constant.
 func ownerGroundedFailureRepairOwner(facts runtimecontract.RuntimeFacts, target runtimecontract.FailureTarget) string {
 	if target.TargetObservation == nil {
 		return ""
@@ -728,6 +728,7 @@ func ownerGroundedFailureRepairOwner(facts runtimecontract.RuntimeFacts, target 
 	if observation.CatalogDependency == nil {
 		return observation.OwnerModuleID
 	}
+	repairOwner := ""
 	for _, targetRef := range target.TargetRefs {
 		found := false
 		for _, snapshot := range facts.Resources.TargetSnapshots {
@@ -739,11 +740,38 @@ func ownerGroundedFailureRepairOwner(facts runtimecontract.RuntimeFacts, target 
 		if !found {
 			return ""
 		}
+		owner := runtimeTargetSnapshotOwner(facts, targetRef)
+		if owner == "" || repairOwner != "" && owner != repairOwner {
+			return ""
+		}
+		repairOwner = owner
 	}
-	if len(target.TargetRefs) == 0 {
+	if len(target.TargetRefs) == 0 || repairOwner == "" {
 		return ""
 	}
-	return runtimecontract.RuntimeModuleFile
+	return repairOwner
+}
+
+func runtimeTargetSnapshotOwner(facts runtimecontract.RuntimeFacts, targetRef string) string {
+	targetRef = strings.TrimSpace(targetRef)
+	owner := ""
+	for _, prerequisite := range facts.Prerequisites.Satisfied {
+		prerequisite.ID = strings.TrimSpace(prerequisite.ID)
+		prerequisite.OwnerModuleID = strings.TrimSpace(prerequisite.OwnerModuleID)
+		prerequisite.SubjectRef = strings.TrimSpace(prerequisite.SubjectRef)
+		if prerequisite.Kind != runtimecontract.PrerequisiteKindTargetSnapshot || prerequisite.SubjectRef != targetRef || prerequisite.OwnerModuleID == "" {
+			continue
+		}
+		observation, found := runtimecontract.RuntimePrerequisiteObservationForID(facts.Resources.PrerequisiteObservations, prerequisite.ID)
+		if !found || observation.Kind != runtimecontract.PrerequisiteKindTargetSnapshot || observation.OwnerModuleID != prerequisite.OwnerModuleID {
+			continue
+		}
+		if owner != "" && owner != prerequisite.OwnerModuleID {
+			return ""
+		}
+		owner = prerequisite.OwnerModuleID
+	}
+	return owner
 }
 
 func runtimeInventoryAllowsExactTarget(inventory runtimecontract.RuntimeOperationAdmissibility, kind string) bool {
@@ -942,7 +970,7 @@ func creationScopeOperationVariantsAreDurable(kind string, variantIDs []string) 
 
 // requiredCapabilityStateSequence only contributes a capability owner's
 // sequence when the current focus admits that owner's operation kind. A
-// persisted Git sequence must not make an unrelated File-only focus emit Git
+// persisted owner sequence must not make an unrelated focus emit that owner's
 // operations merely because both capabilities were acquired for the Run.
 func requiredCapabilityStateSequence(facts runtimecontract.RuntimeFacts, acceptedKinds []string) []runtimecontract.RuntimeRequiredOperationVariant {
 	ret := []runtimecontract.RuntimeRequiredOperationVariant{}
@@ -1263,7 +1291,7 @@ func hasOwnerGroundedTargetScope(facts runtimecontract.RuntimeFacts) bool {
 
 // targetSelectionHasConcreteTarget is intentionally narrower than an owner
 // scope. A selected value is an owner-grounded concrete repair surface; a
-// scope is only a bounded File feasibility inventory and must not enter facts
+// scope is only a bounded owner feasibility inventory and must not enter facts
 // that are interpreted as a repair target.
 func targetSelectionHasConcreteTarget(selection runtimecontract.RuntimeTargetSelection) bool {
 	return grounding.TargetSelectionHasConcreteTarget(selection)
@@ -1445,7 +1473,7 @@ func advanceSatisfiedCoverageFocus(facts runtimecontract.RuntimeFacts, proofLine
 	facts.Feasibility = nil
 	// Target selections and snapshots are scoped to the completed Focus. A
 	// profile bootstrap recipe intentionally advances through several sealed
-	// artifact targets; retaining the prior File observation would make the
+	// artifact targets; retaining the prior owner observation would make the
 	// next Focus reuse its predecessor's path and violate its own selector
 	// binding. Manifest and capability inventories remain valid owner facts and
 	// are refreshed normally when their revisions change.

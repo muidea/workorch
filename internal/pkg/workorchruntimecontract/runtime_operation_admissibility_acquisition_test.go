@@ -2,6 +2,32 @@ package workorchruntimecontract
 
 import "testing"
 
+func TestRuntimeWorkspaceManifestBindingAcceptsOnlyCanonicalOwner(t *testing.T) {
+	const syntheticOwner = "blocks/synthetic-manifest-owner"
+	observation := RuntimePrerequisiteObservation{
+		PrerequisiteID: "manifest-synthetic", Kind: PrerequisiteKindManifest, OwnerModuleID: syntheticOwner,
+		ContentHash: "tree-synthetic", Dependencies: []RuntimeFreshnessDependency{{
+			Domain: RuntimeResourceWorkspaceTree, OwnerModuleID: syntheticOwner, SubjectRef: "workspace_deliverable", Revision: "tree-synthetic",
+		}},
+	}
+	observation.ObservationID = StableRuntimePrerequisiteObservationID(observation)
+	binding := RuntimeWorkspaceManifestBinding{
+		Manifest: WorkspaceManifest{Revision: "tree-synthetic", TargetRefs: []string{"artifact.txt"}}, Observation: observation,
+	}
+	if err := binding.Validate(); err != nil {
+		t.Fatalf("synthetic non-File manifest owner: %v", err)
+	}
+
+	for _, ownerModuleID := range []string{"", "   ", " " + syntheticOwner} {
+		invalid := binding
+		invalid.Observation.OwnerModuleID = ownerModuleID
+		invalid.Observation.ObservationID = StableRuntimePrerequisiteObservationID(invalid.Observation)
+		if err := invalid.Validate(); err == nil {
+			t.Fatalf("workspace manifest binding accepted non-canonical owner %q", ownerModuleID)
+		}
+	}
+}
+
 func TestRuntimeOperationAdmissibilityAcquisitionRejectsScopeAndObservationDrift(t *testing.T) {
 	request := RuntimeOperationAdmissibilityRequest{
 		WorkspaceID: "ws-1", RunID: "run-1", AuthoritySnapshotID: "authority-1",

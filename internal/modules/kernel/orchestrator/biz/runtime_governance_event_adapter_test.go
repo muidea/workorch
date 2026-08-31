@@ -7,7 +7,13 @@ import (
 	"path/filepath"
 	"testing"
 
+	approvalmodule "github.com/muidea/workorch/internal/modules/blocks/approval"
+	approvalbiz "github.com/muidea/workorch/internal/modules/blocks/approval/biz"
+	approvalcommon "github.com/muidea/workorch/internal/modules/blocks/approval/pkg/common"
+	approvalevents "github.com/muidea/workorch/internal/modules/blocks/approval/pkg/events"
+	approvalmodel "github.com/muidea/workorch/internal/modules/blocks/approval/pkg/models"
 	decisionbiz "github.com/muidea/workorch/internal/modules/blocks/decision/biz"
+	eventstreamevents "github.com/muidea/workorch/internal/modules/blocks/eventstream/pkg/events"
 
 	llmevents "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/events"
 
@@ -73,16 +79,20 @@ func TestRuntimeGovernanceResolutionIngressRejectsNonOwnerSourcesBeforeAuthority
 		handle func(magicevent.Event, magicevent.Result)
 	}{
 		{
-			name: "generic resolution topic", topic: orchestratorevents.TopicOrchestratorCommitRuntimeGovernanceResolution,
-			data: orchestratorevents.CommitRuntimeGovernanceResolutionCommand{Resolution: resolution}, handle: module.handleRuntimeGovernanceResolution,
-		},
-		{
 			name: "decision ticket topic", topic: orchestratorevents.TopicOrchestratorCommitRuntimeGovernanceTicket,
 			data: orchestratorevents.CommitRuntimeGovernanceTicketResolutionCommand{
 				ResolutionID: resolution.ResolutionID, TicketID: resolution.TicketID, WorkspaceID: resolution.WorkspaceID, RunID: resolution.RunID,
 				Outcome: resolution.Outcome, Summary: resolution.Summary,
 			},
 			handle: module.handleRuntimeGovernanceTicketResolution,
+		},
+		{
+			name: "approval topic", topic: orchestratorevents.TopicOrchestratorCommitRuntimeGovernanceApproval,
+			data: orchestratorevents.CommitRuntimeGovernanceApprovalResolutionCommand{
+				ResolutionID: resolution.ResolutionID, ApprovalID: "approval-wrong-source", WorkspaceID: resolution.WorkspaceID, RunID: resolution.RunID,
+				Outcome: resolution.Outcome, Summary: resolution.Summary,
+			},
+			handle: module.handleRuntimeGovernanceApprovalResolution,
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -99,7 +109,7 @@ func TestRuntimeGovernanceResolutionIngressRejectsNonOwnerSourcesBeforeAuthority
 	}
 }
 
-func TestRuntimeGovernanceResolutionCommitsThroughTypedEventHubCommand(t *testing.T) {
+func TestRuntimeGovernanceTicketResolutionCommitsThroughConcreteTypedEventHubCommand(t *testing.T) {
 	ctx := context.Background()
 	hub := magicevent.NewHub(16)
 	t.Cleanup(func() { hub.Terminate(ctx) })
@@ -172,13 +182,11 @@ func TestRuntimeGovernanceResolutionCommitsThroughTypedEventHubCommand(t *testin
 	}
 
 	observer := magicevent.NewSimpleObserver(ModuleID, hub)
-	observer.Subscribe(orchestratorevents.TopicOrchestratorCommitRuntimeGovernanceResolution, module.handleRuntimeGovernanceResolution)
 	observer.Subscribe(orchestratorevents.TopicOrchestratorCommitRuntimeGovernanceTicket, module.handleRuntimeGovernanceTicketResolution)
 	observer.Subscribe(orchestratorevents.TopicOrchestratorCommandRecordDecisionEvidence, module.handleDecisionEvidenceCommand)
 	t.Cleanup(func() {
 		observer.Unsubscribe(orchestratorevents.TopicOrchestratorCommandRecordDecisionEvidence)
 		observer.Unsubscribe(orchestratorevents.TopicOrchestratorCommitRuntimeGovernanceTicket)
-		observer.Unsubscribe(orchestratorevents.TopicOrchestratorCommitRuntimeGovernanceResolution)
 	})
 
 	resolutionResult := hub.Send(magicevent.NewEventWithContext(
@@ -229,6 +237,167 @@ func TestRuntimeGovernanceResolutionCommitsThroughTypedEventHubCommand(t *testin
 	}
 	if background.asyncFunctionCalls != 1 || loaded.DriveLease == nil || loaded.DriveLease.State != runtimecontract.RuntimeDriveLeaseScheduled {
 		t.Fatalf("governance continuation did not retain one atomic successor: calls=%d lease=%+v", background.asyncFunctionCalls, loaded.DriveLease)
+	}
+}
+
+func TestRuntimeGovernanceApprovalResolutionCommitsThroughConcreteOwnerIngress(t *testing.T) {
+	ctx := context.Background()
+	hub := magicevent.NewHub(32)
+	t.Cleanup(func() { hub.Terminate(ctx) })
+	runs := memory.NewRunRepository()
+	definition := runtimeDefinition()
+	definition.CapabilityContract = append(definition.CapabilityContract, runtimecontract.RuntimeBlockKindApprovalRequest)
+	if err := runs.Create(ctx, runtimeRunForTest(common.RunStateActive, definition)); err != nil {
+		t.Fatal(err)
+	}
+	runOwner := runmodule.New()
+	if err := runOwner.Configure(runOwnerTestDependencies(runs, nil, nil, hub)); err != nil {
+		t.Fatal(err)
+	}
+	if err := runOwner.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = runOwner.Stop(ctx) })
+
+	approvals := memory.NewApprovalRepository()
+	approvalOwner := approvalmodule.New()
+	if err := approvalOwner.Configure(approvalbiz.Dependencies{
+		OwnerRepositories: testApprovalOwnerRepositories(approvals, memory.NewApprovalWorkspaceDeletionRepository()),
+		EventHub:          hub,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := approvalOwner.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = approvalOwner.Stop(ctx) })
+
+	owner := newRuntimeTestOwner()
+	if err := owner.ConfigureRuntimeRepository(runtimeStateRepository{hub: hub}); err != nil {
+		t.Fatal(err)
+	}
+	background := &recordingBackgroundRoutine{}
+	module := newTestBiz(owner, hub, background)
+	module.evidenceRecords = memory.NewEvidenceRecordRepository()
+	observer := magicevent.NewSimpleObserver(ModuleID, hub)
+	observer.Subscribe(orchestratorevents.TopicOrchestratorCommitRuntimeGovernanceApproval, module.handleRuntimeGovernanceApprovalResolution)
+	observer.Subscribe(orchestratorevents.TopicOrchestratorCommandRecordApprovalEvidence, module.handleApprovalEvidenceCommand)
+	eventstreamObserver := magicevent.NewSimpleObserver(eventstreamevents.CommandDestination, hub)
+	eventstreamObserver.Subscribe(eventstreamevents.TopicEventStreamCommandRecordApprovalResolution, func(event magicevent.Event, result magicevent.Result) {
+		command := event.Data().(eventstreamevents.RecordApprovalResolutionCommand)
+		result.Set(eventstreamevents.RecordApprovalResolutionResult{
+			NotificationID: command.Data.NotificationID, ResolutionID: command.Data.ResolutionID, ApprovalID: command.Data.ApprovalID,
+			WorkspaceID: command.Data.WorkspaceID, RunID: command.Data.RunID,
+		}, nil)
+	})
+	t.Cleanup(func() {
+		eventstreamObserver.Unsubscribe(eventstreamevents.TopicEventStreamCommandRecordApprovalResolution)
+		observer.Unsubscribe(orchestratorevents.TopicOrchestratorCommandRecordApprovalEvidence)
+		observer.Unsubscribe(orchestratorevents.TopicOrchestratorCommitRuntimeGovernanceApproval)
+	})
+
+	facts := runtimeAggregate(t, 1).Facts
+	facts.Capabilities.GovernanceKinds = []string{runtimecontract.RuntimeBlockKindApprovalRequest}
+	facts.Failure = &runtimecontract.FailureFact{
+		Class: runtimecontract.FailureClassGovernanceDependency, Signature: "approval-required", Message: "sensitive change requires approval",
+		GovernanceDependency: &runtimecontract.ExternalDependency{
+			Kind: string(runtimecontract.GovernanceApproval), SubjectRef: "secret.txt", Reason: "sensitive change requires approval",
+			RequestedAction: runtimecontract.StepKindFileWrite, RiskLevel: "high",
+			AuthorizationContext: workorcheventpayload.New(
+				workorcheventpayload.StringField("targetRef", "secret.txt"),
+			),
+		},
+	}
+	initialized, err := owner.InitializeRuntime(ctx, facts, definition, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sealed, err := module.requestAndSealRuntimeCandidateWithRetry(ctx, initialized, "approval-stable-prefix")
+	if err != nil || sealed.ActiveDispatch == nil || len(sealed.GovernanceRequests) != 1 {
+		t.Fatalf("approval governance request = %+v err=%v", sealed, err)
+	}
+	request := sealed.GovernanceRequests[0]
+	if request.ApprovalID == "" || request.TicketID != "" {
+		t.Fatalf("approval request binding = %+v", request)
+	}
+	if _, err := approvals.GetScoped(ctx, facts.WorkspaceID, facts.RunID, request.ApprovalID); err != nil {
+		t.Fatalf("approval owner did not persist request: %v", err)
+	}
+
+	resolutionContext := workorcheventpayload.New(workorcheventpayload.StringField("summary", "approval granted"))
+	ensure := approvalevents.EnsureApprovedCommand(approvalevents.ResolveApprovalCommand{
+		ApprovalID: request.ApprovalID, WorkspaceID: facts.WorkspaceID, RunID: facts.RunID,
+		Principal: approvalmodel.ApprovalResolutionPrincipal{
+			Kind: approvalmodel.ApprovalResolutionPrincipalHumanOperator, SubjectID: "application/workorchd/appservice",
+		},
+		ResolutionContext: resolutionContext.Fields,
+	})
+	resolutionResult := hub.Send(magicevent.NewEventWithContext(
+		approvalevents.TopicApprovalCommandEnsureApproved, "application/workorchd/appservice", approvalevents.CommandDestination,
+		magicevent.NewHeader(), ctx, ensure,
+	))
+	if resolutionResult == nil || resolutionResult.Error() != nil {
+		var resultErr any
+		if resolutionResult != nil {
+			resultErr = resolutionResult.Error()
+			if resolutionResult.Error() != nil && resolutionResult.Error().Cause != nil {
+				resultErr = resolutionResult.Error().Cause
+			}
+		}
+		t.Fatalf("approval owner resolution result = %+v err=%v", resolutionResult, resultErr)
+	}
+	approved, err := approvals.GetScoped(ctx, facts.WorkspaceID, facts.RunID, request.ApprovalID)
+	if err != nil || approved.State != common.ApprovalStateApproved || approved.ResolutionID == "" {
+		t.Fatalf("resolved approval = %+v err=%v", approved, err)
+	}
+	committed, err := owner.loadRuntime(ctx, facts.WorkspaceID, facts.RunID)
+	if err != nil || committed.ActiveDispatch != nil || len(committed.GovernanceResolutions) != 1 || committed.GovernanceResolutions[0].ApprovalID != request.ApprovalID || committed.Decision.State != runtimecontract.ConvergenceStateNeedStateChange {
+		t.Fatalf("approval resolution aggregate = %+v err=%v", committed, err)
+	}
+	revision := committed.StateRevision
+	commit := orchestratorevents.CommitRuntimeGovernanceApprovalResolutionCommand{
+		ResolutionID: approved.ResolutionID, ApprovalID: request.ApprovalID,
+		WorkspaceID: facts.WorkspaceID, RunID: facts.RunID,
+		Outcome: runtimecontract.RuntimeGovernanceResolutionOutcomeContinue, Summary: "approval granted",
+	}
+	duplicate := hub.Send(magicevent.NewEventWithContext(
+		orchestratorevents.TopicOrchestratorCommitRuntimeGovernanceApproval, approvalcommon.ModuleID, orchestratorevents.CommandDestination,
+		magicevent.NewHeader(), ctx, commit,
+	))
+	if duplicate == nil {
+		t.Fatal("duplicate approval ingress returned no result")
+	}
+	duplicateData, duplicateErr := duplicate.Get()
+	duplicateResponse, duplicateOK := duplicateData.(orchestratorevents.CommitRuntimeGovernanceResolutionResult)
+	if duplicateErr != nil || !duplicateOK || duplicateResponse.Disposition != orchestratorevents.RuntimeGovernanceResolutionDispositionDuplicate {
+		t.Fatalf("duplicate approval ingress = %+v err=%v", duplicateData, duplicateErr)
+	}
+
+	for name, changed := range map[string]orchestratorevents.CommitRuntimeGovernanceApprovalResolutionCommand{
+		"content drift": func() orchestratorevents.CommitRuntimeGovernanceApprovalResolutionCommand {
+			value := commit
+			value.Summary = "changed summary"
+			return value
+		}(),
+		"wrong approval": func() orchestratorevents.CommitRuntimeGovernanceApprovalResolutionCommand {
+			value := commit
+			value.ApprovalID = "approval-stale"
+			return value
+		}(),
+	} {
+		t.Run(name, func(t *testing.T) {
+			result := hub.Send(magicevent.NewEventWithContext(
+				orchestratorevents.TopicOrchestratorCommitRuntimeGovernanceApproval, approvalcommon.ModuleID, orchestratorevents.CommandDestination,
+				magicevent.NewHeader(), ctx, changed,
+			))
+			if result == nil || result.Error() == nil {
+				t.Fatalf("invalid approval ingress was accepted: %+v", changed)
+			}
+		})
+	}
+	reloaded, err := owner.loadRuntime(ctx, facts.WorkspaceID, facts.RunID)
+	if err != nil || reloaded.StateRevision != revision || len(reloaded.GovernanceResolutions) != 1 || background.asyncFunctionCalls != 1 {
+		t.Fatalf("approval duplicate/drift changed authority: aggregate=%+v calls=%d err=%v", reloaded, background.asyncFunctionCalls, err)
 	}
 }
 
@@ -297,7 +466,6 @@ func TestRuntimeGovernanceResolutionFileBackedRestartReplaysExactlyOnce(t *testi
 		}}}), nil)
 	})
 	observer := magicevent.NewSimpleObserver(ModuleID, hub)
-	observer.Subscribe(orchestratorevents.TopicOrchestratorCommitRuntimeGovernanceResolution, module.handleRuntimeGovernanceResolution)
 	observer.Subscribe(orchestratorevents.TopicOrchestratorCommitRuntimeGovernanceTicket, module.handleRuntimeGovernanceTicketResolution)
 	observer.Subscribe(orchestratorevents.TopicOrchestratorCommandRecordDecisionEvidence, module.handleDecisionEvidenceCommand)
 
@@ -336,7 +504,6 @@ func TestRuntimeGovernanceResolutionFileBackedRestartReplaysExactlyOnce(t *testi
 	llmObserver.Unsubscribe(llmevents.TopicRequestRuntimeCandidate)
 	observer.Unsubscribe(orchestratorevents.TopicOrchestratorCommandRecordDecisionEvidence)
 	observer.Unsubscribe(orchestratorevents.TopicOrchestratorCommitRuntimeGovernanceTicket)
-	observer.Unsubscribe(orchestratorevents.TopicOrchestratorCommitRuntimeGovernanceResolution)
 	hub.Terminate(ctx)
 
 	// Reconstruct process-local infrastructure and repository instances from the
@@ -368,13 +535,11 @@ func TestRuntimeGovernanceResolutionFileBackedRestartReplaysExactlyOnce(t *testi
 	restartedModule := newTestBiz(restartedBiz, restartedHub, restartedBackground)
 	restartedModule.evidenceRecords = memory.NewEvidenceRecordRepository()
 	restartedObserver := magicevent.NewSimpleObserver(ModuleID, restartedHub)
-	restartedObserver.Subscribe(orchestratorevents.TopicOrchestratorCommitRuntimeGovernanceResolution, restartedModule.handleRuntimeGovernanceResolution)
 	restartedObserver.Subscribe(orchestratorevents.TopicOrchestratorCommitRuntimeGovernanceTicket, restartedModule.handleRuntimeGovernanceTicketResolution)
 	restartedObserver.Subscribe(orchestratorevents.TopicOrchestratorCommandRecordDecisionEvidence, restartedModule.handleDecisionEvidenceCommand)
 	t.Cleanup(func() {
 		restartedObserver.Unsubscribe(orchestratorevents.TopicOrchestratorCommandRecordDecisionEvidence)
 		restartedObserver.Unsubscribe(orchestratorevents.TopicOrchestratorCommitRuntimeGovernanceTicket)
-		restartedObserver.Unsubscribe(orchestratorevents.TopicOrchestratorCommitRuntimeGovernanceResolution)
 		restartedHub.Terminate(ctx)
 	})
 

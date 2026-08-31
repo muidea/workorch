@@ -122,7 +122,7 @@ func TestStaleRepairSurfaceReacquiresOwnerPrerequisiteWithoutTerminal(t *testing
 	}
 }
 
-func TestRepairSurfaceConfirmationRequiresFileOwnerAtCommitAndFreshLoad(t *testing.T) {
+func TestRepairSurfaceConfirmationRequiresSealedOwnerAtCommitAndFreshLoad(t *testing.T) {
 	aggregate, observation := validationRepairSurfaceObservedAggregateForTest(t, true, strings.Repeat("d", 64))
 	repository := &durableRuntimeStateRepository{aggregate: aggregate}
 	controller, err := NewRuntimeController(repository)
@@ -135,11 +135,12 @@ func TestRepairSurfaceConfirmationRequiresFileOwnerAtCommitAndFreshLoad(t *testi
 		ConfirmedTargetRefs: append([]string(nil), observation.CandidateTargetRefs...), ObservedRevision: "mcp-v1",
 	}.Normalized()
 	beforeRevision := repository.aggregate.StateRevision
-	if _, err := controller.recordRepairSurfaceConfirmation(context.Background(), aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, invalid); !errors.Is(err, common.ErrInvalidArgument) {
-		t.Fatalf("non-File confirmation commit error = %v", err)
+	if _, err := controller.recordRepairSurfaceConfirmation(context.Background(), aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, invalid); !errors.Is(err, common.ErrConflict) ||
+		!strings.Contains(err.Error(), "owner does not match sealed repair provenance") {
+		t.Fatalf("wrong-owner confirmation commit error = %v", err)
 	}
 	if repository.aggregate.StateRevision != beforeRevision || len(repository.aggregate.RepairSurfaceConfirmations) != 0 || repository.aggregate.Facts.Resources.FailureTarget != nil {
-		t.Fatalf("non-File confirmation changed Runtime authority: %+v", repository.aggregate)
+		t.Fatalf("non-owner confirmation changed Runtime authority: %+v", repository.aggregate)
 	}
 
 	tampered := aggregate
@@ -148,8 +149,8 @@ func TestRepairSurfaceConfirmationRequiresFileOwnerAtCommitAndFreshLoad(t *testi
 		Signature:         runtimecontract.StableRuntimeRepairSurfaceConfirmationHash(invalid),
 		IdentitySignature: runtimecontract.StableRuntimeRepairSurfaceConfirmationIdentityHash(invalid),
 	})
-	if err := tampered.Validate(); err == nil || !strings.Contains(err.Error(), "requires File owner") {
-		t.Fatalf("fresh-load non-File confirmation error = %v", err)
+	if err := tampered.Validate(); err == nil || !strings.Contains(err.Error(), "owner does not match sealed repair provenance") {
+		t.Fatalf("fresh-load wrong-owner confirmation error = %v", err)
 	}
 }
 
@@ -189,8 +190,8 @@ func TestRepairSurfaceConfirmationTerminalResponseFencesLaterRevisions(t *testin
 	}
 	tampered.RepairSurfaceConfirmations = append(tampered.RepairSurfaceConfirmations, lateRecord)
 	if err := tampered.Validate(); err == nil || (!strings.Contains(err.Error(), "follows terminal response") &&
-		!strings.Contains(err.Error(), "exact confirmed File repair surface") &&
-		!strings.Contains(err.Error(), "no exact File-confirmed failure authority")) {
+		!strings.Contains(err.Error(), "exact confirmed owner repair surface") &&
+		!strings.Contains(err.Error(), "no exact owner-confirmed failure authority")) {
 		t.Fatalf("fresh-load post-terminal confirmation error = %v", err)
 	}
 }
@@ -233,7 +234,7 @@ func TestRuntimeAggregateRejectsValidationFailureObservationWithoutExactShellRec
 		t.Fatal("production-shaped failure lost original diagnostic")
 	}
 	aggregate.Facts.Failure.OriginalDiagnostic.ValidationFailureObservation = &forged
-	if err := aggregate.Validate(); err == nil || !strings.Contains(err.Error(), "has no exact persisted Shell receipt") {
+	if err := aggregate.Validate(); err == nil || !strings.Contains(err.Error(), "has no exact persisted validation-owner receipt") {
 		t.Fatalf("fresh-load receipt provenance error = %v", err)
 	}
 }
@@ -345,7 +346,7 @@ func TestValidationFailureObservationRequiresEvidenceCommittedReceiptTransaction
 	}
 }
 
-func TestValidationFailureRepairAuthorityRequiresExactFileConfirmationAtCommitAndFreshLoad(t *testing.T) {
+func TestValidationFailureRepairAuthorityRequiresExactOwnerConfirmationAtCommitAndFreshLoad(t *testing.T) {
 	aggregate, observation := validationRepairSurfaceObservedAggregateForTest(t, true, strings.Repeat("1", 64))
 	forgedFailure := aggregate.Facts.Failure.Clone()
 	forgedFailure.TargetRefs = append([]string(nil), observation.CandidateTargetRefs...)
@@ -373,8 +374,9 @@ func TestValidationFailureRepairAuthorityRequiresExactFileConfirmationAtCommitAn
 		Signature: observation.FailureSignature, TargetRefs: append([]string(nil), observation.CandidateTargetRefs...),
 		TargetObservation: forgedFailure.TargetObservation,
 	}
-	if err := tampered.Validate(); err == nil || (!strings.Contains(err.Error(), "requires an exact confirmed File repair surface") &&
-		!strings.Contains(err.Error(), "no exact File-confirmed failure authority")) {
+	if err := tampered.Validate(); err == nil || (!strings.Contains(err.Error(), "requires an exact confirmed owner repair surface") &&
+		!strings.Contains(err.Error(), "no exact owner-confirmed failure authority") &&
+		!strings.Contains(err.Error(), "must come from its exact owner confirmation")) {
 		t.Fatalf("fresh-load unconfirmed repair authority error = %v", err)
 	}
 }
@@ -413,7 +415,7 @@ func validationRepairSurfaceObservedAggregateForTest(t *testing.T, requireTarget
 	if err != nil {
 		t.Fatalf("commit validation failure observation: %v", err)
 	}
-	// The File confirmation is intentionally a later owner observation. Model
+	// The owner confirmation is intentionally a later owner observation. Model
 	// the workspace revision edge by retiring the pre-validation target snapshot
 	// so a confirmed/stale response must reacquire current File authority instead
 	// of reusing the semantic-seal fixture snapshot.

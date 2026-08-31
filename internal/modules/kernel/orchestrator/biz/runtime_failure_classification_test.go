@@ -21,6 +21,18 @@ func TestClassifyRuntimeDriveFailureKeepsUnsupportedCapabilityOutOfGovernance(t 
 	}
 }
 
+func TestClassifyRuntimeDriveFailureKeepsCapabilityCatalogClassificationOwnerNeutral(t *testing.T) {
+	failure := classifyRuntimeDriveFailure(&runtimecontract.RuntimeCapabilityCatalogUnavailableError{
+		OwnerModuleID: runtimecontract.RuntimeModuleMCP,
+		SubjectRef:    "server-catalog",
+		Reason:        "owner_unavailable",
+	})
+	if failure.Class != runtimecontract.FailureClassCapabilityUnavailable || failure.Code != "runtime_capability_catalog_unavailable" ||
+		failure.Signature != "runtime-capability-catalog-unavailable/blocks/mcp/server-catalog" {
+		t.Fatalf("capability catalog classification = %+v", failure)
+	}
+}
+
 func TestClassifyRuntimeDriveFailureUsesTypedRecoveryOutcomes(t *testing.T) {
 	cas := classifyRuntimeDriveFailure(&runtime.RuntimeCASConflictError{WorkspaceID: "ws-v2", RunID: "run-v2", ExpectedRevision: 4, ObservedRevision: 5})
 	if cas.Class != runtimecontract.FailureClassCASConflict {

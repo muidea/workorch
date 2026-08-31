@@ -238,7 +238,7 @@ func (m *Biz) driveRuntimeLocked(ctx context.Context, command orchestratorevents
 }
 
 func runtimeDriveContinuationFence(aggregate runtime.RuntimeAggregate, run *runmodel.Run) error {
-	if runtimeConvergenceTerminal(aggregate.Decision.State) || aggregate.Decision.State == runtimecontract.ConvergenceStateNeedGovernance {
+	if aggregate.Termination != nil || runtimeConvergenceTerminal(aggregate.Decision.State) || aggregate.Decision.State == runtimecontract.ConvergenceStateNeedGovernance {
 		return nil
 	}
 	record := runtimeStateRecordFromAggregate(aggregate)
@@ -389,6 +389,10 @@ func runtimeSemanticAuthorityPending(aggregate runtime.RuntimeAggregate) bool {
 // express durable authority (for example a contract defect or exhausted
 // budget); a failed semantic transaction is likewise final.
 func runtimeTerminalDeliveryReady(aggregate runtime.RuntimeAggregate) bool {
+	if aggregate.Termination != nil {
+		_, terminal, err := runtime.DeriveTerminalOutcome(aggregate.Decision, aggregate.Termination)
+		return err == nil && terminal
+	}
 	if !runtimeConvergenceTerminal(aggregate.Decision.State) || aggregate.Decision.Terminal == nil {
 		return false
 	}
@@ -567,6 +571,12 @@ func (m *Biz) driveAndProjectRuntimeLockedWithCommand(ctx context.Context, comma
 		return err
 	}
 	switch {
+	case result.AdministrativeTermination != nil:
+		aggregate, loadErr := m.runtimeController.Load(ctx, command.WorkspaceID, command.RunID)
+		if loadErr != nil {
+			return runtimeTerminalDeliveryFailure(loadErr)
+		}
+		return runtimeTerminalDeliveryFailure(m.deliverRuntimeTerminal(ctx, aggregate))
 	case result.RecoverableWait != nil:
 		return &runtimeRecoverableWaitPendingError{Wait: result.RecoverableWait.Clone()}
 	case result.Terminal == nil && result.State == runtimecontract.ConvergenceStateNeedGovernance:
@@ -630,6 +640,9 @@ func (m *Biz) deliverPersistedRuntimeGovernanceContinuation(ctx context.Context,
 		}
 		return false, err
 	}
+	if aggregate.Termination != nil {
+		return false, nil
+	}
 	if aggregate.Decision.State == runtimecontract.ConvergenceStateComplete || aggregate.Decision.State == runtimecontract.ConvergenceStateFailed || aggregate.Decision.State == runtimecontract.ConvergenceStateNeedGovernance {
 		return false, nil
 	}
@@ -670,13 +683,19 @@ func (m *Biz) deliverPersistedRuntimeGovernanceContinuation(ctx context.Context,
 }
 
 func runtimeTerminalDriveResult(aggregate runtime.RuntimeAggregate) orchestratorevents.DriveRuntimeResult {
-	return orchestratorevents.DriveRuntimeResult{
+	result := orchestratorevents.DriveRuntimeResult{
 		WorkspaceID: aggregate.Facts.WorkspaceID, RunID: aggregate.Facts.RunID,
 		StateRevision: aggregate.StateRevision, EvidenceRevision: aggregate.Facts.EvidenceRevision,
 		DefinitionRevision:  aggregate.Facts.DefinitionRevision,
 		AuthoritySnapshotID: aggregate.Decision.AuthoritySnapshot.ID, State: aggregate.Decision.State,
 		Terminal: aggregate.Decision.Terminal,
 	}
+	if aggregate.Termination != nil {
+		termination := aggregate.Termination.Clone()
+		result.Terminal = nil
+		result.AdministrativeTermination = &termination
+	}
+	return result
 }
 
 func runtimeGovernedWaitDriveResult(aggregate runtime.RuntimeAggregate) (orchestratorevents.DriveRuntimeResult, error) {
@@ -728,20 +747,24 @@ func validateRuntimeDriveResult(result orchestratorevents.DriveRuntimeResult) er
 		return fmt.Errorf("invalid Runtime drive result")
 	}
 	switch {
+	case result.AdministrativeTermination != nil:
+		if result.Terminal != nil || result.RecoverableWait != nil || result.BlockingTicketID != "" || result.BlockingApprovalID != "" || result.AdministrativeTermination.Validate() != nil {
+			return fmt.Errorf("invalid administrative-terminal Runtime drive result")
+		}
 	case result.RecoverableWait != nil:
 		wait := result.RecoverableWait
-		if result.Terminal != nil || result.BlockingTicketID != "" || result.BlockingApprovalID != "" ||
+		if result.Terminal != nil || result.AdministrativeTermination != nil || result.BlockingTicketID != "" || result.BlockingApprovalID != "" ||
 			result.State != runtimecontract.ConvergenceStateNeedPrerequisite || wait.WaitID == "" || !waitStatusActive(wait.Status) || wait.StateRevision != result.StateRevision {
 			return fmt.Errorf("invalid recoverable-wait Runtime drive result")
 		}
 	case result.Terminal == nil && result.State == runtimecontract.ConvergenceStateNeedGovernance:
 		hasTicket := result.BlockingTicketID != ""
 		hasApproval := result.BlockingApprovalID != ""
-		if result.State != runtimecontract.ConvergenceStateNeedGovernance || hasTicket == hasApproval || result.Terminal != nil {
+		if result.State != runtimecontract.ConvergenceStateNeedGovernance || hasTicket == hasApproval || result.Terminal != nil || result.AdministrativeTermination != nil {
 			return fmt.Errorf("invalid governed Runtime drive result")
 		}
 	case result.Terminal != nil:
-		if (result.State != runtimecontract.ConvergenceStateComplete && result.State != runtimecontract.ConvergenceStateFailed) || result.Terminal == nil || result.BlockingTicketID != "" || result.BlockingApprovalID != "" {
+		if (result.State != runtimecontract.ConvergenceStateComplete && result.State != runtimecontract.ConvergenceStateFailed) || result.Terminal == nil || result.AdministrativeTermination != nil || result.BlockingTicketID != "" || result.BlockingApprovalID != "" {
 			return fmt.Errorf("invalid terminal Runtime drive result")
 		}
 	default:

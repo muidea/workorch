@@ -51,6 +51,9 @@ func (a RuntimeAggregate) Validate() error {
 	if err := validateRuntimeAggregateRecoverableWaits(a); err != nil {
 		return err
 	}
+	if err := validateRuntimeAggregateOperationRecoveryAuthorizations(a); err != nil {
+		return err
+	}
 	if err := validateRuntimeAggregateGovernanceLedgers(a); err != nil {
 		return err
 	}
@@ -64,6 +67,27 @@ func (a RuntimeAggregate) Validate() error {
 		return err
 	}
 	return validateRuntimeAggregateCrossMachineFences(a)
+}
+
+func validateRuntimeAggregateOperationRecoveryAuthorizations(a RuntimeAggregate) error {
+	var active *runtimecontract.RuntimeDispatchRecord
+	if a.ActiveDispatch != nil {
+		value := sealedDispatchToRuntimeRecord(*a.ActiveDispatch)
+		active = &value
+	}
+	if err := runtimecontract.ValidateRuntimeOperationRecoveryAuthorizations(
+		a.Facts.WorkspaceID,
+		a.Facts.RunID,
+		active,
+		sealedDispatchesToRuntimeRecords(a.CompletedDispatches),
+		a.OperationReceipts,
+		a.OperationRecoveryAuthorizations,
+		a.Facts.Recovery,
+		a.StateRevision,
+	); err != nil {
+		return fmt.Errorf("runtime aggregate operation recovery authorization: %w", err)
+	}
+	return nil
 }
 
 func validateRuntimeAggregateRecoverableWaits(a RuntimeAggregate) error {
@@ -266,7 +290,7 @@ func validateRuntimeSemanticBindingPurposeInvariant(a RuntimeAggregate) error {
 			}
 		case runtimecontract.RuntimeSemanticEvidenceObligationValidationFailureRepair:
 			binding, bindingFound := coverageEvidenceBindingForCoverage(focus, item.ID)
-			pendingFileTransaction, err := pendingConfirmedFileRepairTransactionCovers(a, item.ID)
+			pendingFileTransaction, err := pendingConfirmedRepairTransactionCovers(a, item.ID)
 			if err != nil {
 				return err
 			}
@@ -301,6 +325,9 @@ func validateRuntimeAggregateActivationFence(a RuntimeAggregate) error {
 	if err := a.Termination.Validate(); err != nil {
 		return fmt.Errorf("runtime aggregate termination: %w", err)
 	}
+	if a.Termination.Revision > a.StateRevision {
+		return fmt.Errorf("runtime aggregate termination revision exceeds aggregate revision")
+	}
 	return nil
 }
 
@@ -315,6 +342,9 @@ func validateRuntimeAggregateSM3CandidateTransaction(a RuntimeAggregate) error {
 		return err
 	}
 	if err := validateRuntimeCandidateAttemptSessionBindings(a.CandidateAttempts, a.CandidateRequestSessions); err != nil {
+		return err
+	}
+	if err := validateRuntimePendingCandidateFeasibilityBindings(a); err != nil {
 		return err
 	}
 	if (isTerminalConvergenceState(a.Decision.State) || a.Decision.Terminal != nil) && hasPendingCandidateAttempt(a.CandidateAttempts) {
@@ -344,6 +374,78 @@ func validateRuntimeAggregateSM3CandidateTransaction(a RuntimeAggregate) error {
 		return err
 	}
 	return runtimecontract.ValidateRuntimeAcceptedAssessmentPurposePreimages(a.SemanticPlanning, active, completed, a.CandidateAttempts, a.CandidateRequestSessions)
+}
+
+// validateRuntimePendingCandidateFeasibilityBindings is the fresh-load reverse
+// proof for the mutable pre-seal owner probe ledger. Shape validation alone is
+// insufficient: after restart each result must still belong to the exact
+// proposal, manifest, operation owner and current owner-authored catalog that
+// the live admission path checked before persisting it.
+func validateRuntimePendingCandidateFeasibilityBindings(a RuntimeAggregate) error {
+	for _, attempt := range a.CandidateAttempts {
+		if attempt.State != runtimecontract.RuntimeCandidateAttemptStatePending || len(attempt.Feasibilities) == 0 {
+			continue
+		}
+		if attempt.Proposal == nil {
+			return fmt.Errorf("pending runtime candidate feasibility ledger has no persisted proposal")
+		}
+		for _, feasibility := range attempt.Feasibilities {
+			operation, found := candidateOperationByID(*attempt.Proposal, feasibility.OperationID)
+			if !found {
+				return fmt.Errorf("pending runtime candidate feasibility operation %q is absent from its proposal", feasibility.OperationID)
+			}
+			operation = operation.Normalized()
+			if feasibility.CandidateManifestHash != attempt.ManifestHash {
+				return fmt.Errorf("pending runtime candidate feasibility operation %q has stale manifest identity", operation.ID)
+			}
+			descriptor, known := runtimecontract.RuntimeOperationDescriptorForKind(operation.Kind)
+			if !known || descriptor.OwnerModuleID == "" {
+				return fmt.Errorf("pending runtime candidate feasibility operation %q has no canonical owner", operation.ID)
+			}
+			if !runtimecontract.RuntimeOperationAdmissibilityRequiredForOperation(a.Facts.Prerequisites, descriptor.OwnerModuleID, operation.Kind) {
+				return fmt.Errorf("pending runtime candidate feasibility operation %q has no current admissibility requirement", operation.ID)
+			}
+			inventory, found := runtimeOperationAdmissibilityForKind(a.Facts.Resources.OperationAdmissibilities, descriptor.OwnerModuleID, operation.Kind)
+			if !found || inventory.SnapshotID != feasibility.AdmissibilitySnapshotID || inventory.AcquisitionBinding != feasibility.AcquisitionBinding {
+				return fmt.Errorf("pending runtime candidate feasibility operation %q does not match current owner admissibility", operation.ID)
+			}
+			if feasibility.Observation == nil {
+				return fmt.Errorf("pending runtime candidate feasibility operation %q has no owner observation", operation.ID)
+			}
+			observation := feasibility.Observation.Normalized()
+			ownerPolicy := observation.OwnerPolicy.Normalized()
+			if ownerPolicy.OwnerModuleID != "" || ownerPolicy.PolicyRevision != "" || ownerPolicy.CatalogSnapshotID != "" {
+				if err := ownerPolicy.Validate(); err != nil || ownerPolicy.OwnerModuleID != descriptor.OwnerModuleID || ownerPolicy.CatalogSnapshotID != inventory.SnapshotID {
+					return fmt.Errorf("pending runtime candidate feasibility operation %q owner policy does not match its descriptor and catalog", operation.ID)
+				}
+			}
+			if observation.Feedback != nil {
+				feedback := observation.Feedback.Normalized()
+				if feedback.WorkspaceID != a.Facts.WorkspaceID || feedback.RunID != a.Facts.RunID || feedback.OriginalDiagnostic == nil ||
+					feedback.OriginalDiagnostic.OwnerModuleID != descriptor.OwnerModuleID {
+					return fmt.Errorf("pending runtime candidate feasibility operation %q feedback does not match aggregate scope and owner", operation.ID)
+				}
+			}
+			if observation.Stale != nil && observation.Stale.Normalized().OwnerModuleID != descriptor.OwnerModuleID {
+				return fmt.Errorf("pending runtime candidate feasibility operation %q stale fact has the wrong owner", operation.ID)
+			}
+			if observation.PrerequisiteRequest != nil {
+				request := observation.PrerequisiteRequest.Normalized()
+				if request.OwnerModuleID != descriptor.OwnerModuleID || request.OperationID != operation.ID {
+					return fmt.Errorf("pending runtime candidate feasibility operation %q prerequisite request has the wrong identity", operation.ID)
+				}
+			}
+			if feasibility.ReplayProof != nil {
+				proof := feasibility.ReplayProof.Normalized()
+				if proof.OwnerModuleID != descriptor.OwnerModuleID || proof.OperationID != operation.ID ||
+					proof.AdmissibilitySnapshotID != inventory.SnapshotID || proof.AcquisitionBinding != inventory.AcquisitionBinding ||
+					!sameStringSet(proof.TargetRefs, operation.TargetRefs) {
+					return fmt.Errorf("pending runtime candidate feasibility operation %q replay proof does not match sealed owner facts", operation.ID)
+				}
+			}
+		}
+	}
+	return nil
 }
 
 func validateRuntimeDefinitionClarificationAggregate(a RuntimeAggregate) error {
@@ -540,7 +642,7 @@ func validateRuntimeAggregateEvidenceCommitLedger(a RuntimeAggregate) error {
 		sort.Slice(facts, func(i, j int) bool { return facts[i].Revision < facts[j].Revision })
 		previous := dispatch.Transaction.EvidenceRevision
 		for _, fact := range facts {
-			if !confirmedFileRepairConsecutiveEvidenceRevision(fact.Revision, previous) {
+			if !confirmedRepairConsecutiveEvidenceRevision(fact.Revision, previous) {
 				return fmt.Errorf("evidence commit fact %q revision does not form the exact dispatch evidence chain", fact.ID)
 			}
 			previous = fact.Revision
@@ -812,6 +914,25 @@ func validateRuntimeAggregateSM4DeliveryAcknowledgements(a RuntimeAggregate) err
 }
 
 func validateRuntimeAggregateSM2RepairLedgers(a RuntimeAggregate) error {
+	if err := runtimecontract.ValidateRuntimeRepairSurfaceConfirmationRecords(a.RepairSurfaceConfirmations); err != nil {
+		return fmt.Errorf("runtime aggregate repair surface confirmations: %w", err)
+	}
+	for _, confirmation := range a.RepairSurfaceConfirmations {
+		value := confirmation.Confirmation.Normalized()
+		if value.Observation.WorkspaceID != a.Facts.WorkspaceID || value.Observation.RunID != a.Facts.RunID {
+			return fmt.Errorf("runtime aggregate repair surface confirmation scope mismatch")
+		}
+		if !sealedValidationFailureObservationMatches(a, value.Observation) {
+			return fmt.Errorf("runtime aggregate repair surface confirmation does not match a sealed completed dispatch")
+		}
+		if !runtimeValidationFailureObservationHasPersistedReceipt(a, value.Observation) {
+			return fmt.Errorf("runtime aggregate repair surface confirmation has no exact persisted owner receipt")
+		}
+		expectedOwner, err := runtimeExpectedRepairSurfaceOwner(a, value.Observation)
+		if err != nil || value.OwnerModuleID != expectedOwner {
+			return fmt.Errorf("runtime aggregate repair surface confirmation owner does not match sealed repair provenance")
+		}
+	}
 	if err := validateRuntimeFailureTargetObservationOwnerAuthorities(a); err != nil {
 		return err
 	}
@@ -839,8 +960,8 @@ func validateRuntimeAggregateSM2RepairLedgers(a RuntimeAggregate) error {
 		if err != nil {
 			return fmt.Errorf("runtime aggregate failure target authority: %w", err)
 		}
-		if a.Facts.Resources.FailureTarget.Signature != observation.FailureSignature || !runtimeFileTargetObservationMatchesConfirmation(a.Facts.Resources.FailureTarget.TargetObservation, confirmation) {
-			return fmt.Errorf("runtime aggregate failure target authority does not match File confirmation")
+		if a.Facts.Resources.FailureTarget.Signature != observation.FailureSignature || !runtimeTargetObservationMatchesConfirmation(a.Facts.Resources.FailureTarget.TargetObservation, confirmation) {
+			return fmt.Errorf("runtime aggregate failure target authority does not match owner confirmation")
 		}
 	}
 	for _, invalidation := range a.PrerequisiteInvalidations {
@@ -848,25 +969,11 @@ func validateRuntimeAggregateSM2RepairLedgers(a RuntimeAggregate) error {
 			return fmt.Errorf("runtime aggregate prerequisite invalidation: %w", err)
 		}
 	}
-	if err := validatePendingConfirmedFileRepairTransaction(a); err != nil {
+	if err := validatePendingConfirmedRepairTransaction(a); err != nil {
 		return err
 	}
-	if err := validateConfirmedFileRepairFreshValidationContinuation(a); err != nil {
+	if err := validateConfirmedRepairFreshValidationContinuation(a); err != nil {
 		return err
-	}
-	if err := runtimecontract.ValidateRuntimeRepairSurfaceConfirmationRecords(a.RepairSurfaceConfirmations); err != nil {
-		return fmt.Errorf("runtime aggregate repair surface confirmations: %w", err)
-	}
-	for _, confirmation := range a.RepairSurfaceConfirmations {
-		if confirmation.Confirmation.Observation.WorkspaceID != a.Facts.WorkspaceID || confirmation.Confirmation.Observation.RunID != a.Facts.RunID {
-			return fmt.Errorf("runtime aggregate repair surface confirmation scope mismatch")
-		}
-		if !sealedValidationFailureObservationMatches(a, confirmation.Confirmation.Observation) {
-			return fmt.Errorf("runtime aggregate repair surface confirmation does not match a sealed completed dispatch")
-		}
-		if !runtimeValidationFailureObservationHasPersistedReceipt(a, confirmation.Confirmation.Observation) {
-			return fmt.Errorf("runtime aggregate repair surface confirmation has no exact persisted Shell receipt")
-		}
 	}
 	return nil
 }
@@ -875,7 +982,7 @@ func validateRuntimeAggregateSM2RepairLedgers(a RuntimeAggregate) error {
 // source of a target resource that has no discovered-target observation: an
 // exact rejected receipt whose diagnostic refs are a subset of its sealed
 // operation. This keeps
-// deletion of a receipt-evidence/File observation from downgrading discovered
+// deletion of a receipt-evidence/owner-confirmed observation from downgrading discovered
 // targets into generic repair authority.
 func validateRuntimeUnobservedFailureTargetAuthority(a RuntimeAggregate) error {
 	target := a.Facts.Resources.FailureTarget
@@ -942,8 +1049,9 @@ func validateRuntimeUnobservedFailureTargetAuthority(a RuntimeAggregate) error {
 
 // validateRuntimeFailureTargetObservationOwnerAuthorities is the aggregate
 // fresh-load fence for concrete repair targets. Receipt ingress already admits
-// direct observations only from MCP, while the File owner may create an
-// observation only through repair-surface confirmation. Persisted state must
+// receipt-derived observations only through a descriptor-declared protocol,
+// while a resource owner may create an observation only through exact
+// repair-surface confirmation. Persisted state must
 // replay the same rule instead of treating the DTO's generic OwnerModuleID as
 // authority for another capability owner.
 func validateRuntimeFailureTargetObservationOwnerAuthorities(a RuntimeAggregate) error {
@@ -966,9 +1074,10 @@ func validateRuntimeFailureTargetObservationOwnerAuthorities(a RuntimeAggregate)
 				nested = diagnostic.TargetObservation
 			}
 		}
-		if runtimeValidationFailureObservationFromFailure(&failure) != nil && failure.TargetObservation != nil {
-			if failure.TargetObservation.OwnerModuleID != runtimecontract.RuntimeModuleFile || nested != nil {
-				return fmt.Errorf("runtime aggregate %s validation target authority must come only from File confirmation", item.subject)
+		if validationObservation := runtimeValidationFailureObservationFromFailure(&failure); validationObservation != nil && failure.TargetObservation != nil {
+			confirmation, err := runtimeConfirmedRepairSurfaceForTargets(a, *validationObservation, failure.TargetRefs)
+			if err != nil || nested != nil || !runtimeTargetObservationMatchesConfirmation(failure.TargetObservation, confirmation) {
+				return fmt.Errorf("runtime aggregate %s validation target authority must come from its exact owner confirmation", item.subject)
 			}
 			continue
 		}
@@ -982,11 +1091,8 @@ func validateRuntimeFailureTargetObservationOwnerAuthorities(a RuntimeAggregate)
 	if target == nil || target.TargetObservation == nil {
 		return nil
 	}
-	if target.TargetObservation.Normalized().OwnerModuleID == runtimecontract.RuntimeModuleFile {
-		if runtimeFileFailureTargetResourceMatchesConfirmedFailure(a, *target) {
-			return nil
-		}
-		return fmt.Errorf("runtime aggregate failure target resource has no exact File-confirmed failure authority")
+	if runtimeFailureTargetResourceMatchesConfirmedFailure(a, *target) {
+		return nil
 	}
 	// A receipt-evidence target may intentionally outlive the mutable current
 	// failure while a repair receipt awaits fresh validation. The independent
@@ -996,7 +1102,7 @@ func validateRuntimeFailureTargetObservationOwnerAuthorities(a RuntimeAggregate)
 	return nil
 }
 
-func runtimeFileFailureTargetResourceMatchesConfirmedFailure(a RuntimeAggregate, target runtimecontract.FailureTarget) bool {
+func runtimeFailureTargetResourceMatchesConfirmedFailure(a RuntimeAggregate, target runtimecontract.FailureTarget) bool {
 	for _, rawFailure := range []*runtimecontract.FailureFact{
 		a.Facts.Failure,
 		runtimeRepairDirectiveCurrentFailure(a.Facts.RepairDirective),
@@ -1006,13 +1112,13 @@ func runtimeFileFailureTargetResourceMatchesConfirmedFailure(a RuntimeAggregate,
 		}
 		failure := rawFailure.Normalized()
 		observation := runtimeValidationFailureObservationFromFailure(&failure)
-		if observation == nil || failure.TargetObservation == nil || failure.TargetObservation.OwnerModuleID != runtimecontract.RuntimeModuleFile ||
+		if observation == nil || failure.TargetObservation == nil ||
 			failure.Signature != target.Signature || !sameRuntimeTargetRefs(failure.TargetRefs, target.TargetRefs) ||
 			!sameFailureTargetObservationBinding(failure.TargetObservation, target.TargetObservation) {
 			continue
 		}
 		confirmation, err := runtimeConfirmedRepairSurfaceForTargets(a, *observation, failure.TargetRefs)
-		if err == nil && runtimeFileTargetObservationMatchesConfirmation(failure.TargetObservation, confirmation) {
+		if err == nil && runtimeTargetObservationMatchesConfirmation(failure.TargetObservation, confirmation) {
 			return true
 		}
 	}
@@ -1052,7 +1158,7 @@ func validateRuntimeReceiptEvidenceFailureTargetAuthorities(a RuntimeAggregate) 
 	}
 
 	target := a.Facts.Resources.FailureTarget
-	if target == nil || target.TargetObservation == nil || target.TargetObservation.Normalized().OwnerModuleID == runtimecontract.RuntimeModuleFile {
+	if target == nil || target.TargetObservation == nil || runtimeFailureTargetResourceMatchesConfirmedFailure(a, *target) {
 		return nil
 	}
 	observation := target.TargetObservation.Normalized()
@@ -1399,14 +1505,14 @@ func validateRuntimeFailureObservationReceiptAuthority(a RuntimeAggregate, subje
 			return fmt.Errorf("runtime aggregate %s validation failure observation does not match a sealed completed dispatch", subject)
 		}
 		if !runtimeValidationFailureObservationHasPersistedReceipt(a, *observation) {
-			return fmt.Errorf("runtime aggregate %s validation failure observation has no exact persisted Shell receipt", subject)
+			return fmt.Errorf("runtime aggregate %s validation failure observation has no exact persisted validation-owner receipt", subject)
 		}
 	}
 	observation := runtimeValidationFailureObservationFromFailure(&normalizedFailure)
 	if observation != nil {
 		if latest, found := runtimeLatestRepairSurfaceConfirmation(a, *observation); found && latest.Disposition == runtimecontract.RuntimeRepairSurfaceConfirmed {
-			if len(normalizedFailure.TargetRefs) == 0 || !runtimeFileTargetObservationMatchesConfirmation(normalizedFailure.TargetObservation, latest) {
-				return fmt.Errorf("runtime aggregate %s does not retain the latest confirmed File repair surface", subject)
+			if len(normalizedFailure.TargetRefs) == 0 || !runtimeTargetObservationMatchesConfirmation(normalizedFailure.TargetObservation, latest) {
+				return fmt.Errorf("runtime aggregate %s does not retain the latest confirmed owner repair surface", subject)
 			}
 		}
 	}
@@ -1415,8 +1521,8 @@ func validateRuntimeFailureObservationReceiptAuthority(a RuntimeAggregate, subje
 		if err != nil {
 			return fmt.Errorf("runtime aggregate %s target authority: %w", subject, err)
 		}
-		if !runtimeFileTargetObservationMatchesConfirmation(normalizedFailure.TargetObservation, confirmation) {
-			return fmt.Errorf("runtime aggregate %s target authority does not match File confirmation", subject)
+		if !runtimeTargetObservationMatchesConfirmation(normalizedFailure.TargetObservation, confirmation) {
+			return fmt.Errorf("runtime aggregate %s target authority does not match owner confirmation", subject)
 		}
 	}
 	return nil
@@ -1443,11 +1549,134 @@ func runtimeValidationFailureObservationFromFailure(failure *runtimecontract.Fai
 
 func runtimeConfirmedRepairSurfaceForTargets(a RuntimeAggregate, observation runtimecontract.RuntimeValidationFailureObservation, targetRefs []string) (runtimecontract.RuntimeRepairSurfaceConfirmation, error) {
 	confirmation, found := runtimeLatestRepairSurfaceConfirmation(a, observation)
-	if found && confirmation.OwnerModuleID == runtimecontract.RuntimeModuleFile && confirmation.Disposition == runtimecontract.RuntimeRepairSurfaceConfirmed &&
+	expectedOwner, ownerErr := runtimeExpectedRepairSurfaceOwner(a, observation)
+	if ownerErr == nil && found && confirmation.OwnerModuleID == expectedOwner &&
+		confirmation.Disposition == runtimecontract.RuntimeRepairSurfaceConfirmed &&
 		sameRuntimeTargetRefs(confirmation.ConfirmedTargetRefs, targetRefs) {
 		return confirmation, nil
 	}
-	return runtimecontract.RuntimeRepairSurfaceConfirmation{}, fmt.Errorf("validation failure target authority requires an exact confirmed File repair surface")
+	return runtimecontract.RuntimeRepairSurfaceConfirmation{}, fmt.Errorf("validation failure target authority requires an exact confirmed owner repair surface")
+}
+
+// runtimeExpectedRepairSurfaceOwner derives the only capability owner allowed
+// to confirm a validation failure's concrete repair surface. A matching sealed
+// Profile convergence is authoritative when present; otherwise the exact
+// source operation's immutable coverage bindings must agree on one
+// state-change operation owner. The confirmation itself never selects owner.
+func runtimeExpectedRepairSurfaceOwner(a RuntimeAggregate, observation runtimecontract.RuntimeValidationFailureObservation) (string, error) {
+	observation = observation.Normalized()
+	var sourceDispatch *SealedDispatch
+	for index := range a.CompletedDispatches {
+		dispatch := &a.CompletedDispatches[index]
+		if dispatch.ID != observation.DispatchID || dispatch.State != DispatchStateCommitted ||
+			!containsString(dispatch.CompletedOperationIDs, observation.OperationID) {
+			continue
+		}
+		if sourceDispatch != nil {
+			return "", fmt.Errorf("validation failure repair owner has multiple source dispatches")
+		}
+		sourceDispatch = dispatch
+	}
+	if sourceDispatch == nil || !sealedValidationFailureObservationMatchesDispatch(*sourceDispatch, observation) {
+		return "", fmt.Errorf("validation failure repair owner has no exact sealed source")
+	}
+	operation, found := candidateOperationByID(sourceDispatch.Candidate, observation.OperationID)
+	if !found {
+		return "", fmt.Errorf("validation failure repair owner source operation is not sealed")
+	}
+	triggerDescriptor, found := runtimecontract.RuntimeOperationDescriptorForKind(operation.Kind)
+	if !found || triggerDescriptor.FailureTargetProtocol != runtimecontract.RuntimeFailureTargetProtocolValidationCandidates {
+		return "", fmt.Errorf("validation failure repair owner source operation has no candidate-target protocol")
+	}
+
+	bindingIDs := normalizeRuntimeTargetRefs(operation.BindingRefs)
+	if len(bindingIDs) == 0 {
+		return "", fmt.Errorf("validation failure repair owner source operation has no sealed binding")
+	}
+	sourceBindings := make([]runtimecontract.CoverageEvidenceBinding, 0, len(bindingIDs))
+	coverageIDs := append([]common.CoverageWorkItemID(nil), operation.CoverageWorkItemIDs...)
+	for _, bindingID := range bindingIDs {
+		matches := 0
+		var binding runtimecontract.CoverageEvidenceBinding
+		for index := range sourceDispatch.CoverageBindings {
+			candidate := sourceDispatch.CoverageBindings[index].Normalized()
+			if candidate.ID != bindingID {
+				continue
+			}
+			binding, matches = candidate, matches+1
+		}
+		if matches != 1 {
+			return "", fmt.Errorf("validation failure repair owner binding %q does not have one exact source projection", bindingID)
+		}
+		sourceBindings = append(sourceBindings, binding)
+		if len(operation.CoverageWorkItemIDs) == 0 {
+			coverageIDs = append(coverageIDs, binding.CoverageWorkItemID)
+		} else if !coverageIDsIntersect(operation.CoverageWorkItemIDs, []common.CoverageWorkItemID{binding.CoverageWorkItemID}) {
+			return "", fmt.Errorf("validation failure repair owner binding %q is outside its source operation coverage", bindingID)
+		}
+	}
+	coverageIDs = normalizeCoverageIDs(coverageIDs)
+	if len(coverageIDs) == 0 {
+		return "", fmt.Errorf("validation failure repair owner has no sealed coverage")
+	}
+	profileOwner := ""
+	profileMatches := 0
+	for _, coverageID := range coverageIDs {
+		declaration, found, err := runtimeDefinitionFocusForCoverage(a.Facts.DefinitionFocuses, coverageID)
+		if err != nil {
+			return "", err
+		}
+		if !found || declaration.ValidationFailureRepairConvergence == nil {
+			continue
+		}
+		convergence := declaration.ValidationFailureRepairConvergence.Normalized()
+		if !convergence.MatchesTrigger(triggerDescriptor.OwnerModuleID, operation.Kind, observation.DiagnosticClass) {
+			return "", fmt.Errorf("validation failure repair owner does not match sealed Profile trigger")
+		}
+		if profileOwner != "" && profileOwner != convergence.RepairOwnerModuleID {
+			return "", fmt.Errorf("validation failure repair owner is ambiguous across sealed Profile declarations")
+		}
+		profileOwner = convergence.RepairOwnerModuleID
+		profileMatches++
+	}
+	if profileMatches != 0 {
+		if profileMatches != len(coverageIDs) || profileOwner == "" {
+			return "", fmt.Errorf("validation failure repair owner has incomplete sealed Profile coverage")
+		}
+		return profileOwner, nil
+	}
+
+	bindingOwner := ""
+	for _, binding := range sourceBindings {
+		proofMatched := false
+		for _, proof := range binding.Proofs {
+			proof = proof.Normalized()
+			if proof.EvidenceKind != runtimecontract.EvidenceKindStateChange {
+				continue
+			}
+			if proofMatched || len(proof.AllowedOperationKinds) == 0 {
+				return "", fmt.Errorf("validation failure repair owner binding %q has ambiguous state-change proof", binding.ID)
+			}
+			proofMatched = true
+			for _, kind := range proof.AllowedOperationKinds {
+				descriptor, found := runtimecontract.RuntimeOperationDescriptorForKind(kind)
+				if !found || !runtimecontract.RuntimeOperationKindSupportsCoverageEvidence(kind, runtimecontract.EvidenceKindStateChange) {
+					return "", fmt.Errorf("validation failure repair owner binding %q has invalid state-change operation %q", binding.ID, kind)
+				}
+				if bindingOwner != "" && bindingOwner != descriptor.OwnerModuleID {
+					return "", fmt.Errorf("validation failure repair owner is ambiguous across sealed operations")
+				}
+				bindingOwner = descriptor.OwnerModuleID
+			}
+		}
+		if !proofMatched {
+			return "", fmt.Errorf("validation failure repair owner binding %q has no state-change proof", binding.ID)
+		}
+	}
+	if bindingOwner == "" {
+		return "", fmt.Errorf("validation failure repair owner has incomplete binding provenance")
+	}
+	return bindingOwner, nil
 }
 
 func runtimeLatestRepairSurfaceConfirmation(a RuntimeAggregate, observation runtimecontract.RuntimeValidationFailureObservation) (runtimecontract.RuntimeRepairSurfaceConfirmation, bool) {
@@ -1464,12 +1693,12 @@ func runtimeLatestRepairSurfaceConfirmation(a RuntimeAggregate, observation runt
 	return runtimecontract.RuntimeRepairSurfaceConfirmation{}, false
 }
 
-func runtimeFileTargetObservationMatchesConfirmation(observation *runtimecontract.RuntimeFailureTargetObservation, confirmation runtimecontract.RuntimeRepairSurfaceConfirmation) bool {
+func runtimeTargetObservationMatchesConfirmation(observation *runtimecontract.RuntimeFailureTargetObservation, confirmation runtimecontract.RuntimeRepairSurfaceConfirmation) bool {
 	if observation == nil {
 		return false
 	}
 	value := observation.Normalized()
-	return value.OwnerModuleID == runtimecontract.RuntimeModuleFile && value.SubjectRef == confirmation.SubjectRef &&
+	return value.OwnerModuleID == confirmation.OwnerModuleID && value.SubjectRef == confirmation.SubjectRef &&
 		value.TargetRole == confirmation.Observation.TargetRole && value.ObservedRevision == confirmation.ObservedRevision &&
 		value.DiagnosticClass == "" && len(value.EvidenceRefs) == 0 && value.ContentHash == "" &&
 		sameRuntimeTargetRefs(value.TargetRefs, confirmation.ConfirmedTargetRefs)
@@ -1484,6 +1713,9 @@ func validateRuntimeAggregateSM4DriveLease(a RuntimeAggregate) error {
 	}
 	if a.DriveLease.WorkspaceID != a.Facts.WorkspaceID || a.DriveLease.RunID != a.Facts.RunID {
 		return fmt.Errorf("runtime aggregate drive lease scope mismatch")
+	}
+	if a.Termination != nil && a.DriveLease.Reason != runtimecontract.RuntimeDriveLeaseReasonDeliveryRetry {
+		return fmt.Errorf("administratively terminated runtime aggregate can retain only a delivery-retry lease")
 	}
 	return nil
 }

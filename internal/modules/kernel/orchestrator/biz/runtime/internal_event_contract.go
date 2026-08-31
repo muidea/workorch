@@ -6,6 +6,7 @@ import (
 
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/eventcontract"
+	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
 type runtimeInternalEventPayloadClass string
@@ -75,6 +76,10 @@ func runtimeInternalFactPayloadClass(kind RuntimeInternalEventKind) (runtimeInte
 		RuntimeInternalEventGovernanceResolutionObserved,
 		RuntimeInternalEventOperationReceiptObserved,
 		RuntimeInternalEventDispatchExecutionRequested,
+		RuntimeInternalEventOperationEvidenceObserved,
+		RuntimeInternalEventOperationPrerequisiteStaleObserved,
+		RuntimeInternalEventOperationGovernanceRequiredObserved,
+		RuntimeInternalEventOperationExecutionOutcomeUnknownObserved,
 		RuntimeInternalEventDefinitionClarificationDispatchSealed,
 		RuntimeInternalEventDefinitionClarificationRequestObserved:
 		return runtimeInternalEventPayloadTransaction, true
@@ -83,6 +88,8 @@ func runtimeInternalFactPayloadClass(kind RuntimeInternalEventKind) (runtimeInte
 		RuntimeInternalEventDriveFailureObserved,
 		RuntimeInternalEventTerminalDeliveryAcknowledged,
 		RuntimeInternalEventRecoveryBudgetConsumed,
+		RuntimeInternalEventOperationRecoveryClaimed,
+		RuntimeInternalEventOperationRecoveryCallReturned,
 		RuntimeInternalEventDriveLeaseScheduled,
 		RuntimeInternalEventDriveLeaseClaimed,
 		RuntimeInternalEventDriveLeaseReleased,
@@ -138,6 +145,53 @@ func (event RuntimeInternalEvent) validateEnvelope() error {
 	if err := event.validateOperationReceiptOwnerSource(); err != nil {
 		return err
 	}
+	if err := event.validateExecutionTransaction(); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (event RuntimeInternalEvent) validateExecutionTransaction() error {
+	if event.Transaction == nil {
+		return nil
+	}
+	switch event.Kind {
+	case RuntimeInternalEventDispatchExecutionRequested:
+		if event.Transaction.ExecutionEvidence != nil ||
+			event.Transaction.OperationPrerequisiteStaleReceipt != nil || event.Transaction.OperationGovernanceResult != nil || event.Transaction.OperationOutcomeUnknownID != "" {
+			return fmt.Errorf("%w: dispatch execution preparation cannot carry a result fact", common.ErrInvalidArgument)
+		}
+	case RuntimeInternalEventOperationEvidenceObserved:
+		if event.Transaction.ExecutionEvidence == nil || event.Transaction.RecoveryClaimID != "" || event.Transaction.RecoveryClaimNow != "" ||
+			event.Transaction.OperationPrerequisiteStaleReceipt != nil || event.Transaction.OperationGovernanceResult != nil || event.Transaction.OperationOutcomeUnknownID != "" {
+			return fmt.Errorf("%w: operation evidence event requires only an evidence fact", common.ErrInvalidArgument)
+		}
+	case RuntimeInternalEventOperationPrerequisiteStaleObserved:
+		receipt := event.Transaction.OperationPrerequisiteStaleReceipt
+		if receipt == nil || receipt.PrerequisiteStale == nil || event.Transaction.DispatchID == "" ||
+			event.Transaction.RecoveryClaimID != "" || event.Transaction.RecoveryClaimNow != "" || event.Transaction.ExecutionEvidence != nil ||
+			event.Transaction.OperationGovernanceResult != nil || event.Transaction.OperationOutcomeUnknownID != "" {
+			return fmt.Errorf("%w: operation prerequisite-stale event requires only dispatch and persisted stale receipt facts", common.ErrInvalidArgument)
+		}
+	case RuntimeInternalEventOperationGovernanceRequiredObserved:
+		result := event.Transaction.OperationGovernanceResult
+		if result == nil || result.Governance == nil || result.OperationID == "" ||
+			event.Transaction.RecoveryClaimID != "" || event.Transaction.RecoveryClaimNow != "" || event.Transaction.ExecutionEvidence != nil ||
+			event.Transaction.OperationPrerequisiteStaleReceipt != nil || event.Transaction.OperationOutcomeUnknownID != "" {
+			return fmt.Errorf("%w: operation governance event requires only a persisted governance result fact", common.ErrInvalidArgument)
+		}
+	case RuntimeInternalEventOperationExecutionOutcomeUnknownObserved:
+		if strings.TrimSpace(event.Transaction.OperationOutcomeUnknownID) == "" || event.Transaction.OperationOutcomeUnknownID != strings.TrimSpace(event.Transaction.OperationOutcomeUnknownID) ||
+			event.Transaction.RecoveryClaimID != "" || event.Transaction.RecoveryClaimNow != "" || event.Transaction.ExecutionEvidence != nil ||
+			event.Transaction.OperationPrerequisiteStaleReceipt != nil || event.Transaction.OperationGovernanceResult != nil {
+			return fmt.Errorf("%w: operation outcome-unknown event requires only an exact operation identity", common.ErrInvalidArgument)
+		}
+	default:
+		if event.Transaction.ExecutionEvidence != nil ||
+			event.Transaction.OperationPrerequisiteStaleReceipt != nil || event.Transaction.OperationGovernanceResult != nil || event.Transaction.OperationOutcomeUnknownID != "" {
+			return fmt.Errorf("%w: runtime internal event %q cannot carry execution orchestration data", common.ErrInvalidArgument, event.Kind)
+		}
+	}
 	return nil
 }
 
@@ -167,25 +221,49 @@ func (event RuntimeInternalEvent) validateOperationReceiptOwnerSource() error {
 // prior RecoveryBudgetConsumed event; they must never be smuggled into another
 // transaction fact or partially specified dispatch request.
 func (event RuntimeInternalEvent) validateRecoveryAuthorization() error {
-	if event.Transaction == nil {
-		return nil
+	transactionClaimID := ""
+	transactionClaimNow := ""
+	if event.Transaction != nil {
+		transactionClaimID = event.Transaction.RecoveryClaimID
+		transactionClaimNow = event.Transaction.RecoveryClaimNow
 	}
-	operationID := strings.TrimSpace(event.Transaction.RecoveryOperationID)
-	authenticated := operationID != "" || event.Transaction.RecoveryBudgetAttempt != 0
-	if event.Kind != RuntimeInternalEventDispatchExecutionRequested {
-		if authenticated {
-			return fmt.Errorf("%w: runtime internal event %q cannot carry recovery authorization", common.ErrInvalidArgument, event.Kind)
+	if event.Kind == RuntimeInternalEventDispatchExecutionRequested {
+		if transactionClaimID != strings.TrimSpace(transactionClaimID) || transactionClaimNow != strings.TrimSpace(transactionClaimNow) ||
+			(transactionClaimID != "" && transactionClaimNow == "") {
+			return fmt.Errorf("%w: dispatch recovery authorization token is not canonical", common.ErrInvalidArgument)
 		}
+	} else if transactionClaimID != "" || transactionClaimNow != "" {
+		return fmt.Errorf("%w: runtime internal event %q cannot carry a dispatch recovery authorization token", common.ErrInvalidArgument, event.Kind)
+	}
+	if event.Delivery == nil {
 		return nil
 	}
-	if operationID == "" {
-		if event.Transaction.RecoveryBudgetAttempt != 0 {
-			return fmt.Errorf("%w: dispatch recovery budget attempt requires recovery operation identity", common.ErrInvalidArgument)
+	operationID := strings.TrimSpace(event.Delivery.RecoveryOperationID)
+	authorizationID := strings.TrimSpace(event.Delivery.RecoveryAuthorizationID)
+	claimID := strings.TrimSpace(event.Delivery.RecoveryClaimID)
+	switch event.Kind {
+	case RuntimeInternalEventRecoveryBudgetConsumed:
+		if event.Delivery.RecoveryBudgetKind == runtimecontract.RuntimeRecoveryBudgetOperationRecovery {
+			if operationID == "" || authorizationID != "" || claimID != "" || strings.TrimSpace(event.Delivery.LeaseNow) == "" {
+				return fmt.Errorf("%w: operation recovery budget requires exact operation identity only", common.ErrInvalidArgument)
+			}
+			return nil
 		}
-		return nil
-	}
-	if event.Transaction.RecoveryBudgetAttempt <= 0 {
-		return fmt.Errorf("%w: dispatch recovery authorization requires a positive persisted budget attempt", common.ErrInvalidArgument)
+		if operationID != "" || authorizationID != "" || claimID != "" {
+			return fmt.Errorf("%w: non-operation recovery budget cannot carry operation authorization", common.ErrInvalidArgument)
+		}
+	case RuntimeInternalEventOperationRecoveryClaimed:
+		if operationID == "" || authorizationID == "" || claimID != "" || event.Delivery.RecoveryBudgetKind != "" || strings.TrimSpace(event.Delivery.LeaseNow) == "" {
+			return fmt.Errorf("%w: operation recovery claim requires operation, authorization and observed-at identity", common.ErrInvalidArgument)
+		}
+	case RuntimeInternalEventOperationRecoveryCallReturned:
+		if operationID == "" || authorizationID == "" || claimID == "" || event.Delivery.RecoveryBudgetKind != "" || event.Delivery.LeaseNow != "" {
+			return fmt.Errorf("%w: operation recovery return requires operation, authorization and claim identity", common.ErrInvalidArgument)
+		}
+	default:
+		if operationID != "" || authorizationID != "" || claimID != "" {
+			return fmt.Errorf("%w: runtime internal event %q cannot carry operation recovery identity", common.ErrInvalidArgument, event.Kind)
+		}
 	}
 	return nil
 }
@@ -198,6 +276,10 @@ func (event RuntimeInternalEvent) validateRecoveryAuthorization() error {
 // The classification is used only for architecture validation. Runtime state
 // still changes exclusively through RuntimeController.ApplyInternalEvent.
 func runtimeInternalFactMetadata(kind RuntimeInternalEventKind) (eventcontract.Metadata, bool) {
+	descriptor, declared := runtimeInternalTransitionContract(kind)
+	if !declared || !descriptor.valid() {
+		return eventcontract.Metadata{}, false
+	}
 	metadata := eventcontract.Metadata{
 		Layer:             eventcontract.LayerOrchestratorPrivateFact,
 		ReducerOwner:      eventcontract.ReducerOwnerForStateMachine(eventcontract.StateMachineSM2),
@@ -234,6 +316,9 @@ func runtimeInternalFactMetadata(kind RuntimeInternalEventKind) (eventcontract.M
 		RuntimeInternalEventGovernanceRequestObserved,
 		RuntimeInternalEventValidationFailureObserved,
 		RuntimeInternalEventRepairSurfaceConfirmationObserved,
+		RuntimeInternalEventOperationEvidenceObserved,
+		RuntimeInternalEventOperationPrerequisiteStaleObserved,
+		RuntimeInternalEventOperationGovernanceRequiredObserved,
 		RuntimeInternalEventDefinitionGapObserved:
 		metadata.StateMachine = eventcontract.StateMachineSM2
 
@@ -262,6 +347,7 @@ func runtimeInternalFactMetadata(kind RuntimeInternalEventKind) (eventcontract.M
 		RuntimeInternalEventGovernanceResolutionObserved,
 		RuntimeInternalEventOperationReceiptObserved,
 		RuntimeInternalEventDispatchExecutionRequested,
+		RuntimeInternalEventOperationExecutionOutcomeUnknownObserved,
 		RuntimeInternalEventDefinitionClarificationDispatchSealed,
 		RuntimeInternalEventDefinitionClarificationRequestObserved:
 		metadata.StateMachine = eventcontract.StateMachineSM3
@@ -271,6 +357,8 @@ func runtimeInternalFactMetadata(kind RuntimeInternalEventKind) (eventcontract.M
 		RuntimeInternalEventDriveFailureObserved,
 		RuntimeInternalEventTerminalDeliveryAcknowledged,
 		RuntimeInternalEventRecoveryBudgetConsumed,
+		RuntimeInternalEventOperationRecoveryClaimed,
+		RuntimeInternalEventOperationRecoveryCallReturned,
 		RuntimeInternalEventDriveLeaseScheduled,
 		RuntimeInternalEventDriveLeaseClaimed,
 		RuntimeInternalEventDriveLeaseReleased,
@@ -284,6 +372,9 @@ func runtimeInternalFactMetadata(kind RuntimeInternalEventKind) (eventcontract.M
 		metadata.StateMachine = eventcontract.StateMachineSM4
 
 	default:
+		return eventcontract.Metadata{}, false
+	}
+	if metadata.StateMachine != descriptor.Primary {
 		return eventcontract.Metadata{}, false
 	}
 
@@ -313,6 +404,10 @@ func runtimeInternalFactMetadata(kind RuntimeInternalEventKind) (eventcontract.M
 		RuntimeInternalEventGovernanceRequestObserved,
 		RuntimeInternalEventGovernanceResolutionObserved,
 		RuntimeInternalEventOperationReceiptObserved,
+		RuntimeInternalEventOperationEvidenceObserved,
+		RuntimeInternalEventOperationPrerequisiteStaleObserved,
+		RuntimeInternalEventOperationGovernanceRequiredObserved,
+		RuntimeInternalEventOperationExecutionOutcomeUnknownObserved,
 		RuntimeInternalEventValidationFailureObserved,
 		RuntimeInternalEventRepairSurfaceConfirmationObserved,
 		RuntimeInternalEventTerminalDeliveryAcknowledged,
@@ -328,12 +423,15 @@ func runtimeInternalFactMetadata(kind RuntimeInternalEventKind) (eventcontract.M
 		RuntimeInternalEventDefinitionClarificationDispatchSealed:
 		metadata.IdentityPolicy = eventcontract.IdentityPolicyRuntimeDispatch
 	case RuntimeInternalEventOperationReceiptObserved,
+		RuntimeInternalEventOperationEvidenceObserved,
+		RuntimeInternalEventOperationPrerequisiteStaleObserved,
+		RuntimeInternalEventOperationGovernanceRequiredObserved,
+		RuntimeInternalEventOperationExecutionOutcomeUnknownObserved,
 		RuntimeInternalEventValidationFailureObserved,
 		RuntimeInternalEventRepairSurfaceConfirmationObserved:
 		metadata.IdentityPolicy = eventcontract.IdentityPolicyRuntimeOperation
 	case RuntimeInternalEventDispatchExecutionRequested:
 		metadata.IdentityPolicy = eventcontract.IdentityPolicyRuntimeDispatch
-		metadata.EffectClass = eventcontract.EffectClassExternalSideEffect
 	}
 
 	return metadata, true

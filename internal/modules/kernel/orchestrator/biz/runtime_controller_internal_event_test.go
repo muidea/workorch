@@ -146,35 +146,7 @@ func runtimeTestControllerCommitOperationReceipt(controller *runtime.RuntimeCont
 }
 
 func runtimeTestControllerExecuteDispatch(controller *runtime.RuntimeController, ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, executor runtime.RuntimeOperationExecutor) (runtime.RuntimeAggregate, error) {
-	var recoveryOperationID string
-	var recoveryBudgetAttempt int
-	for transition := 0; transition <= runtimecontract.RuntimeRecoveryBudgetLimit; transition++ {
-		result, err := controller.ApplyInternalEvent(ctx, runtime.RuntimeInternalEvent{
-			Kind:  runtime.RuntimeInternalEventDispatchExecutionRequested,
-			Scope: runtime.RuntimeInternalEventScope{WorkspaceID: workspaceID, RunID: runID},
-			Transaction: &runtime.RuntimeInternalTransactionPayload{
-				Executor: executor, RecoveryOperationID: recoveryOperationID, RecoveryBudgetAttempt: recoveryBudgetAttempt,
-			},
-		})
-		if operationID, required := runtime.RuntimeOperationRecoveryBudgetRequired(err); required {
-			budget, budgetErr := controller.ApplyInternalEvent(ctx, runtime.RuntimeInternalEvent{
-				Kind:     runtime.RuntimeInternalEventRecoveryBudgetConsumed,
-				Scope:    runtime.RuntimeInternalEventScope{WorkspaceID: workspaceID, RunID: runID},
-				Delivery: &runtime.RuntimeInternalDeliveryPayload{RecoveryBudgetKind: runtimecontract.RuntimeRecoveryBudgetOperationRecovery},
-			})
-			if budgetErr != nil {
-				return budget.Aggregate, budgetErr
-			}
-			recoveryOperationID, recoveryBudgetAttempt = "", 0
-			if budget.BudgetConsumed {
-				recoveryOperationID = operationID
-				recoveryBudgetAttempt = budget.Aggregate.Facts.Recovery.OperationRecoveryAttempts
-			}
-			continue
-		}
-		return result.Aggregate, err
-	}
-	return runtime.RuntimeAggregate{}, common.ErrConflict
+	return executeRuntimeDispatchWithExecutor(ctx, workspaceID, runID, executor, controller.ApplyInternalEvent)
 }
 
 func runtimeTestControllerRequestTermination(controller *runtime.RuntimeController, ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, kind runtimecontract.RuntimeTerminationKind, requestedBy, reason string) (runtime.RuntimeAggregate, error) {

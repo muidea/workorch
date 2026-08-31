@@ -5,6 +5,8 @@ package orchestrator
 import (
 	"context"
 	"fmt"
+	"strings"
+	"time"
 
 	magicevent "github.com/muidea/magicCommon/event"
 	fileevents "github.com/muidea/workorch/internal/modules/blocks/file/pkg/events"
@@ -16,6 +18,8 @@ import (
 	runtime "github.com/muidea/workorch/internal/modules/kernel/orchestrator/biz/runtime"
 	orchestratorevents "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/common"
+	"github.com/muidea/workorch/internal/pkg/eventcontract"
+	workorchevents "github.com/muidea/workorch/internal/pkg/events"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
@@ -23,8 +27,20 @@ type eventRuntimeOperationExecutor struct {
 	hub magicevent.Hub
 }
 
+func runtimeOperationExecutionEvent(ctx context.Context, ownerContracts []eventcontract.Contract, topic, destination string, request runtime.RuntimeOperationExecutionRequest, data any) magicevent.Event {
+	event := magicevent.NewEventWithContext(topic, ModuleID, destination, magicevent.NewHeader(), ctx, data)
+	event.BindLaneKey(workorchevents.EventHubLaneKeyFor(ownerContracts, topic, eventcontract.LaneScope{
+		SubjectType: "operation_execution",
+		SubjectID:   request.Execution.ExecutionKey,
+		WorkspaceID: string(request.WorkspaceID),
+		RunID:       string(request.RunID),
+		StepID:      request.Execution.ExecutionKey,
+	}))
+	return event
+}
+
 func (e eventRuntimeOperationExecutor) ExecuteRuntimeOperation(ctx context.Context, request runtime.RuntimeOperationExecutionRequest) (runtime.RuntimeOperationExecutionResult, error) {
-	if e.hub == nil || request.WorkspaceID == "" || request.RunID == "" || request.DispatchID == "" {
+	if e.hub == nil || request.WorkspaceID == "" || request.RunID == "" || request.DispatchID == "" || strings.TrimSpace(request.Execution.ExecutionKey) == "" {
 		return runtime.RuntimeOperationExecutionResult{}, common.ErrInvalidArgument
 	}
 	var err error
@@ -76,7 +92,7 @@ func (e eventRuntimeOperationExecutor) executeFileList(ctx context.Context, requ
 		RuntimeOperationExecutionContext: runtimeOperationExecutionContext(request, deliverableDirectory, internalDirectory),
 		SealedOperation:                  sealedOperation,
 	}
-	result := e.hub.Send(magicevent.NewEventWithContext(fileevents.TopicExecuteFileListOperation, ModuleID, runtimecontract.RuntimeModuleFile, magicevent.NewHeader(), ctx, command))
+	result := e.hub.Send(runtimeOperationExecutionEvent(ctx, fileevents.Contracts(), fileevents.TopicExecuteFileListOperation, runtimecontract.RuntimeModuleFile, request, command))
 	response, err := fileListOperationResponse(result)
 	if err != nil {
 		return runtime.RuntimeOperationExecutionResult{}, err
@@ -93,7 +109,7 @@ func (e eventRuntimeOperationExecutor) executeFileRead(ctx context.Context, requ
 		RuntimeOperationExecutionContext: runtimeOperationExecutionContext(request, deliverableDirectory, internalDirectory),
 		SealedOperation:                  sealedOperation,
 	}
-	result := e.hub.Send(magicevent.NewEventWithContext(fileevents.TopicExecuteFileReadOperation, ModuleID, runtimecontract.RuntimeModuleFile, magicevent.NewHeader(), ctx, command))
+	result := e.hub.Send(runtimeOperationExecutionEvent(ctx, fileevents.Contracts(), fileevents.TopicExecuteFileReadOperation, runtimecontract.RuntimeModuleFile, request, command))
 	response, err := fileReadOperationResponse(result)
 	if err != nil {
 		return runtime.RuntimeOperationExecutionResult{}, err
@@ -113,7 +129,7 @@ func (e eventRuntimeOperationExecutor) executeSSH(ctx context.Context, request r
 		RuntimeOperationExecutionContext: runtimeOperationExecutionContext(request, deliverableDirectory, internalDirectory),
 		SealedOperation:                  sealedOperation,
 	}
-	result := e.hub.Send(magicevent.NewEventWithContext(sshevents.TopicExecuteOperation, ModuleID, runtimecontract.RuntimeModuleSSH, magicevent.NewHeader(), ctx, command))
+	result := e.hub.Send(runtimeOperationExecutionEvent(ctx, sshevents.Contracts(), sshevents.TopicExecuteOperation, runtimecontract.RuntimeModuleSSH, request, command))
 	response, err := sshOperationResponse(result)
 	if err != nil {
 		return runtime.RuntimeOperationExecutionResult{}, err
@@ -133,7 +149,7 @@ func (e eventRuntimeOperationExecutor) executeWeb(ctx context.Context, request r
 		RuntimeOperationExecutionContext: runtimeOperationExecutionContext(request, deliverableDirectory, internalDirectory),
 		SealedOperation:                  sealedOperation,
 	}
-	result := e.hub.Send(magicevent.NewEventWithContext(webevents.TopicExecuteOperation, ModuleID, runtimecontract.RuntimeModuleWeb, magicevent.NewHeader(), ctx, command))
+	result := e.hub.Send(runtimeOperationExecutionEvent(ctx, webevents.Contracts(), webevents.TopicExecuteOperation, runtimecontract.RuntimeModuleWeb, request, command))
 	response, err := webOperationResponse(result)
 	if err != nil {
 		return runtime.RuntimeOperationExecutionResult{}, err
@@ -154,7 +170,7 @@ func (e eventRuntimeOperationExecutor) executeMCP(ctx context.Context, request r
 		SealedOperation:                  sealedOperation,
 		TargetRole:                       request.TargetRole,
 	}
-	result := e.hub.Send(magicevent.NewEventWithContext(mcpevents.TopicExecuteOperation, ModuleID, runtimecontract.RuntimeModuleMCP, magicevent.NewHeader(), ctx, command))
+	result := e.hub.Send(runtimeOperationExecutionEvent(ctx, mcpevents.Contracts(), mcpevents.TopicExecuteOperation, runtimecontract.RuntimeModuleMCP, request, command))
 	response, err := mcpOperationResponse(result)
 	if err != nil {
 		return runtime.RuntimeOperationExecutionResult{}, err
@@ -174,7 +190,7 @@ func (e eventRuntimeOperationExecutor) executeGit(ctx context.Context, request r
 		WorkspaceTreeObservation:           cloneRuntimePrerequisiteObservation(request.WorkspaceTreeObservation),
 		CompletedRequiredOperationReceipts: append([]runtimecontract.RuntimeRequiredOperationReceiptBinding(nil), request.CompletedRequiredOperationReceipts...),
 	}
-	result := e.hub.Send(magicevent.NewEventWithContext(gitevents.TopicExecuteOperation, ModuleID, runtimecontract.RuntimeModuleGit, magicevent.NewHeader(), ctx, command))
+	result := e.hub.Send(runtimeOperationExecutionEvent(ctx, gitevents.Contracts(), gitevents.TopicExecuteOperation, runtimecontract.RuntimeModuleGit, request, command))
 	response, err := gitOperationResponse(result)
 	if err != nil {
 		return runtime.RuntimeOperationExecutionResult{}, err
@@ -208,7 +224,7 @@ func (e eventRuntimeOperationExecutor) executeShell(ctx context.Context, request
 		RuntimeOperationExecutionContext: runtimeOperationExecutionContext(request, deliverableDirectory, internalDirectory),
 		SealedOperation:                  sealedOperation,
 	}
-	result := e.hub.Send(magicevent.NewEventWithContext(shellevents.TopicExecuteOperation, ModuleID, runtimecontract.RuntimeModuleShell, magicevent.NewHeader(), ctx, command))
+	result := e.hub.Send(runtimeOperationExecutionEvent(ctx, shellevents.Contracts(), shellevents.TopicExecuteOperation, runtimecontract.RuntimeModuleShell, request, command))
 	response, err := shellOperationResponse(result)
 	if err != nil {
 		return runtime.RuntimeOperationExecutionResult{}, err
@@ -225,7 +241,7 @@ func (e eventRuntimeOperationExecutor) executeFileEdit(ctx context.Context, requ
 		RuntimeOperationExecutionContext: runtimeOperationExecutionContext(request, deliverableDirectory, internalDirectory),
 		SealedOperation:                  sealedOperation,
 	}
-	result := e.hub.Send(magicevent.NewEventWithContext(fileevents.TopicExecuteFileEditOperation, ModuleID, runtimecontract.RuntimeModuleFile, magicevent.NewHeader(), ctx, command))
+	result := e.hub.Send(runtimeOperationExecutionEvent(ctx, fileevents.Contracts(), fileevents.TopicExecuteFileEditOperation, runtimecontract.RuntimeModuleFile, request, command))
 	response, err := fileEditOperationResponse(result)
 	if err != nil {
 		return runtime.RuntimeOperationExecutionResult{}, err
@@ -242,7 +258,7 @@ func (e eventRuntimeOperationExecutor) executeFileWrite(ctx context.Context, req
 		RuntimeOperationExecutionContext: runtimeOperationExecutionContext(request, deliverableDirectory, internalDirectory),
 		SealedOperation:                  sealedOperation,
 	}
-	result := e.hub.Send(magicevent.NewEventWithContext(fileevents.TopicExecuteFileWriteOperation, ModuleID, runtimecontract.RuntimeModuleFile, magicevent.NewHeader(), ctx, command))
+	result := e.hub.Send(runtimeOperationExecutionEvent(ctx, fileevents.Contracts(), fileevents.TopicExecuteFileWriteOperation, runtimecontract.RuntimeModuleFile, request, command))
 	response, err := fileWriteOperationResponse(result)
 	if err != nil {
 		return runtime.RuntimeOperationExecutionResult{}, err
@@ -259,7 +275,7 @@ func (e eventRuntimeOperationExecutor) executePatchApply(ctx context.Context, re
 		RuntimeOperationExecutionContext: runtimeOperationExecutionContext(request, deliverableDirectory, internalDirectory),
 		SealedOperation:                  sealedOperation,
 	}
-	result := e.hub.Send(magicevent.NewEventWithContext(fileevents.TopicExecutePatchApplyOperation, ModuleID, runtimecontract.RuntimeModuleFile, magicevent.NewHeader(), ctx, command))
+	result := e.hub.Send(runtimeOperationExecutionEvent(ctx, fileevents.Contracts(), fileevents.TopicExecutePatchApplyOperation, runtimecontract.RuntimeModuleFile, request, command))
 	response, err := patchApplyOperationResponse(result)
 	if err != nil {
 		return runtime.RuntimeOperationExecutionResult{}, err
@@ -276,7 +292,7 @@ func (e eventRuntimeOperationExecutor) executePatchPreview(ctx context.Context, 
 		RuntimeOperationExecutionContext: runtimeOperationExecutionContext(request, deliverableDirectory, internalDirectory),
 		SealedOperation:                  sealedOperation,
 	}
-	result := e.hub.Send(magicevent.NewEventWithContext(fileevents.TopicExecutePatchPreviewOperation, ModuleID, runtimecontract.RuntimeModuleFile, magicevent.NewHeader(), ctx, command))
+	result := e.hub.Send(runtimeOperationExecutionEvent(ctx, fileevents.Contracts(), fileevents.TopicExecutePatchPreviewOperation, runtimecontract.RuntimeModuleFile, request, command))
 	response, err := patchPreviewOperationResponse(result)
 	if err != nil {
 		return runtime.RuntimeOperationExecutionResult{}, err
@@ -368,15 +384,111 @@ func (m *Biz) executeRuntimeActiveDispatch(ctx context.Context, aggregate runtim
 	if m == nil || m.runtimeController == nil || m.EventHub() == nil {
 		return runtime.RuntimeAggregate{}, common.ErrInvalidArgument
 	}
-	var recoveryOperationID string
-	var recoveryBudgetAttempt int
-	for transition := 0; transition <= runtimecontract.RuntimeRecoveryBudgetLimit; transition++ {
+	recoveryClaimID := ""
+	var operationCallErr error
+	maxTransitions := runtimecontract.RuntimeCandidateOperationMaxCount + runtimecontract.RuntimeRecoveryBudgetLimit*3 + 4
+	for transition := 0; transition <= maxTransitions; transition++ {
 		updated, err := m.submitRuntimeInternalEvent(ctx, runtime.RuntimeInternalEvent{
 			Kind:        runtime.RuntimeInternalEventDispatchExecutionRequested,
 			Scope:       runtime.RuntimeInternalEventScope{WorkspaceID: aggregate.Facts.WorkspaceID, RunID: aggregate.Facts.RunID},
-			Transaction: &runtime.RuntimeInternalTransactionPayload{Executor: eventRuntimeOperationExecutor{hub: m.EventHub()}, RecoveryOperationID: recoveryOperationID, RecoveryBudgetAttempt: recoveryBudgetAttempt},
+			Transaction: &runtime.RuntimeInternalTransactionPayload{RecoveryClaimID: recoveryClaimID, RecoveryClaimNow: time.Now().UTC().Format(time.RFC3339Nano)},
 		})
-		recoveryOperationID, recoveryBudgetAttempt = "", 0
+		recoveryClaimID = ""
+		if operationID, authorizationID, claimRequired := runtime.RuntimeOperationRecoveryAuthorizationClaimRequired(err); claimRequired {
+			claimed, claimErr := m.submitRuntimeInternalEvent(ctx, runtime.RuntimeInternalEvent{
+				Kind:     runtime.RuntimeInternalEventOperationRecoveryClaimed,
+				Scope:    runtime.RuntimeInternalEventScope{WorkspaceID: aggregate.Facts.WorkspaceID, RunID: aggregate.Facts.RunID},
+				Delivery: &runtime.RuntimeInternalDeliveryPayload{RecoveryOperationID: operationID, RecoveryAuthorizationID: authorizationID, LeaseNow: time.Now().UTC().Format(time.RFC3339Nano)},
+			})
+			if claimErr != nil {
+				return runtime.RuntimeAggregate{}, claimErr
+			}
+			if !claimed.RecoveryClaimChanged || claimed.RecoveryClaimID == "" {
+				// Another worker or a response-loss replay already claimed this
+				// grant. Persisted in-flight state cannot be turned back into a
+				// physical-call token by a duplicate delivery.
+				return runtime.RuntimeAggregate{}, common.ErrConflict
+			}
+			aggregate = claimed.Aggregate
+			recoveryClaimID = claimed.RecoveryClaimID
+			continue
+		}
+		if operationID, required := runtime.RuntimeOperationOutcomeUnknownTransitionRequired(err); required {
+			observed, observeErr := m.submitRuntimeInternalEvent(ctx, runtime.RuntimeInternalEvent{
+				Kind:        runtime.RuntimeInternalEventOperationExecutionOutcomeUnknownObserved,
+				Scope:       runtime.RuntimeInternalEventScope{WorkspaceID: aggregate.Facts.WorkspaceID, RunID: aggregate.Facts.RunID},
+				Transaction: &runtime.RuntimeInternalTransactionPayload{OperationOutcomeUnknownID: operationID},
+			})
+			if observeErr != nil {
+				return observed.Aggregate, observeErr
+			}
+			aggregate = observed.Aggregate
+			if operationCallErr != nil {
+				return aggregate, operationCallErr
+			}
+			continue
+		}
+		if err == nil && updated.OperationCall != nil {
+			call := updated.OperationCall
+			if call.Validate() != nil {
+				return runtime.RuntimeAggregate{}, common.ErrConflict
+			}
+			aggregate = updated.Aggregate
+			_, operationCallErr = (eventRuntimeOperationExecutor{hub: m.EventHub()}).ExecuteRuntimeOperation(ctx, call.Request)
+			if call.RecoveryClaimID != "" {
+				returned, returnErr := m.submitRuntimeInternalEvent(ctx, runtime.RuntimeInternalEvent{
+					Kind:  runtime.RuntimeInternalEventOperationRecoveryCallReturned,
+					Scope: runtime.RuntimeInternalEventScope{WorkspaceID: aggregate.Facts.WorkspaceID, RunID: aggregate.Facts.RunID},
+					Delivery: &runtime.RuntimeInternalDeliveryPayload{RecoveryOperationID: call.Request.Operation.ID,
+						RecoveryAuthorizationID: call.RecoveryAuthorizationID, RecoveryClaimID: call.RecoveryClaimID},
+				})
+				if returnErr != nil {
+					return returned.Aggregate, returnErr
+				}
+				aggregate = returned.Aggregate
+			}
+			// Capability owners synchronously commit their exact terminal receipt
+			// before returning. Re-enter the preparation event and derive the next
+			// owner-private fact only from that persisted receipt; an error/no-receipt
+			// path is classified from the durable claim on the next iteration.
+			continue
+		}
+		if err == nil && updated.DispatchExecution != nil {
+			handoff := updated.DispatchExecution
+			if handoff.Validate() != nil {
+				return runtime.RuntimeAggregate{}, common.ErrConflict
+			}
+			// A persisted, validated receipt is the canonical call outcome. Any
+			// synchronous transport error from that call was response loss only.
+			operationCallErr = nil
+			event := runtime.RuntimeInternalEvent{
+				Scope:       runtime.RuntimeInternalEventScope{WorkspaceID: aggregate.Facts.WorkspaceID, RunID: aggregate.Facts.RunID},
+				Transaction: &runtime.RuntimeInternalTransactionPayload{},
+			}
+			switch {
+			case handoff.Evidence != nil:
+				event.Kind = runtime.RuntimeInternalEventOperationEvidenceObserved
+				event.Transaction.ExecutionEvidence = handoff.Evidence
+			case handoff.PrerequisiteStaleReceipt != nil:
+				event.Kind = runtime.RuntimeInternalEventOperationPrerequisiteStaleObserved
+				event.Transaction.DispatchID = handoff.DispatchID
+				event.Transaction.OperationPrerequisiteStaleReceipt = handoff.PrerequisiteStaleReceipt
+			case handoff.GovernanceRequired != nil:
+				event.Kind = runtime.RuntimeInternalEventOperationGovernanceRequiredObserved
+				event.Transaction.OperationGovernanceResult = handoff.GovernanceRequired
+			default:
+				return runtime.RuntimeAggregate{}, common.ErrConflict
+			}
+			committed, commitErr := m.submitRuntimeInternalEvent(ctx, event)
+			if commitErr != nil {
+				return runtime.RuntimeAggregate{}, commitErr
+			}
+			aggregate = committed.Aggregate
+			if aggregate.ActiveDispatch == nil {
+				return aggregate, nil
+			}
+			continue
+		}
 		operationID, required := runtime.RuntimeOperationRecoveryBudgetRequired(err)
 		if !required {
 			return updated.Aggregate, err
@@ -387,7 +499,7 @@ func (m *Biz) executeRuntimeActiveDispatch(ctx context.Context, aggregate runtim
 		budget, budgetErr := m.submitRuntimeInternalEvent(ctx, runtime.RuntimeInternalEvent{
 			Kind:     runtime.RuntimeInternalEventRecoveryBudgetConsumed,
 			Scope:    runtime.RuntimeInternalEventScope{WorkspaceID: aggregate.Facts.WorkspaceID, RunID: aggregate.Facts.RunID},
-			Delivery: &runtime.RuntimeInternalDeliveryPayload{RecoveryBudgetKind: runtimecontract.RuntimeRecoveryBudgetOperationRecovery},
+			Delivery: &runtime.RuntimeInternalDeliveryPayload{RecoveryBudgetKind: runtimecontract.RuntimeRecoveryBudgetOperationRecovery, RecoveryOperationID: operationID, LeaseNow: time.Now().UTC().Format(time.RFC3339Nano)},
 		})
 		if budgetErr != nil {
 			return runtime.RuntimeAggregate{}, budgetErr
@@ -396,10 +508,6 @@ func (m *Biz) executeRuntimeActiveDispatch(ctx context.Context, aggregate runtim
 			return runtime.RuntimeAggregate{}, common.ErrConflict
 		}
 		aggregate = budget.Aggregate
-		if budget.BudgetConsumed {
-			recoveryOperationID = operationID
-			recoveryBudgetAttempt = budget.Aggregate.Facts.Recovery.OperationRecoveryAttempts
-		}
 	}
 	return runtime.RuntimeAggregate{}, common.ErrConflict
 }

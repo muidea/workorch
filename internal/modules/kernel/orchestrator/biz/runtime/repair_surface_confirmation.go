@@ -12,8 +12,8 @@ import (
 
 // recordValidationFailureObservation is intentionally an identity fence, not
 // a state transition. The receipt/evidence transaction is the only producer
-// of the Shell fact; this method makes the following File handoff explicit and
-// rejects stale/forged observations before any File query is used.
+// of the validation-owner fact; this method makes the following resource-owner
+// handoff explicit and rejects stale/forged observations before any owner query.
 func (c *authorityComponent) recordValidationFailureObservation(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, observation runtimecontract.RuntimeValidationFailureObservation) (RuntimeAggregate, error) {
 	if c == nil || c.repository == nil || workspaceID == "" || runID == "" || observation.Validate() != nil || observation.WorkspaceID != workspaceID || observation.RunID != runID {
 		return RuntimeAggregate{}, common.ErrInvalidArgument
@@ -28,9 +28,10 @@ func (c *authorityComponent) recordValidationFailureObservation(ctx context.Cont
 	return aggregate, nil
 }
 
-// recordRepairSurfaceConfirmation is the sole SM-2 transition from a File
-// fact to repair authority. File cannot select the action, and Shell cannot
-// promote its diagnostic candidates without this exact confirmation.
+// recordRepairSurfaceConfirmation is the sole SM-2 transition from a typed
+// resource-owner fact to repair authority. The resource owner cannot select
+// the action, and the validation owner cannot promote diagnostic candidates
+// without this exact confirmation.
 func (c *authorityComponent) recordRepairSurfaceConfirmation(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, confirmation runtimecontract.RuntimeRepairSurfaceConfirmation) (RuntimeAggregate, error) {
 	if c == nil || c.repository == nil || workspaceID == "" || runID == "" || confirmation.Validate() != nil || confirmation.Observation.WorkspaceID != workspaceID || confirmation.Observation.RunID != runID {
 		return RuntimeAggregate{}, common.ErrInvalidArgument
@@ -56,6 +57,10 @@ func (c *authorityComponent) recordRepairSurfaceConfirmation(ctx context.Context
 	if failure == nil || failure.ValidationFailureObservation == nil || !runtimecontract.SameRuntimeValidationFailureObservation(*failure.ValidationFailureObservation, confirmation.Observation) || !sealedValidationFailureObservationMatches(aggregate, confirmation.Observation) || !runtimeValidationFailureObservationHasPersistedReceipt(aggregate, confirmation.Observation) {
 		return RuntimeAggregate{}, fmt.Errorf("%w: repair surface confirmation does not match persisted validation failure", common.ErrConflict)
 	}
+	expectedOwner, ownerErr := runtimeExpectedRepairSurfaceOwner(aggregate, confirmation.Observation)
+	if ownerErr != nil || confirmation.OwnerModuleID != expectedOwner {
+		return RuntimeAggregate{}, fmt.Errorf("%w: repair surface confirmation owner does not match sealed repair provenance", common.ErrConflict)
+	}
 	if aggregate.Facts.Resources.FailureTarget != nil {
 		return RuntimeAggregate{}, fmt.Errorf("%w: repair surface observation already has terminal target authority", common.ErrConflict)
 	}
@@ -67,11 +72,12 @@ func (c *authorityComponent) recordRepairSurfaceConfirmation(ctx context.Context
 		// callers while preserving the original diagnostic nested in the failure.
 		updatedFailure.Class = runtimecontract.FailureClassCandidateInfeasible
 		updatedFailure.Code = "repair_surface_unavailable"
-		updatedFailure.Message = firstNonEmpty(strings.TrimSpace(confirmation.Reason), "File owner could not confirm a repair surface")
+		updatedFailure.Message = firstNonEmpty(strings.TrimSpace(confirmation.Reason), "resource owner could not confirm a repair surface")
 		updatedFailure.TargetRefs = nil
 		updatedFailure.TargetObservation = nil
-		aggregate.Facts.Failure = &updatedFailure
-		aggregate.Facts.Resources.FailureTarget = nil
+		if err := replaceRuntimeFailureAuthority(&aggregate.Facts, updatedFailure, runtimeFailureAuthorityRetire, nil); err != nil {
+			return RuntimeAggregate{}, err
+		}
 		aggregate.Facts.Resources.TargetSelection = nil
 		aggregate.Facts.Resources.TargetSnapshots = nil
 	} else if confirmation.Disposition == runtimecontract.RuntimeRepairSurfaceStale {
@@ -81,8 +87,9 @@ func (c *authorityComponent) recordRepairSurfaceConfirmation(ctx context.Context
 		// sealed focus scope; do not turn a stale observation into a terminal.
 		updatedFailure.TargetRefs = nil
 		updatedFailure.TargetObservation = nil
-		aggregate.Facts.Failure = &updatedFailure
-		aggregate.Facts.Resources.FailureTarget = nil
+		if err := replaceRuntimeFailureAuthority(&aggregate.Facts, updatedFailure, runtimeFailureAuthorityRetire, nil); err != nil {
+			return RuntimeAggregate{}, err
+		}
 		aggregate.Facts.Resources.TargetSelection = nil
 		aggregate.Facts.Resources.TargetSnapshots = nil
 		aggregate.Facts = preflightRuntimeFactsPreservingPending(aggregate.Facts, runtimeTargetGroundingRequirements(aggregate.Facts))
@@ -90,9 +97,11 @@ func (c *authorityComponent) recordRepairSurfaceConfirmation(ctx context.Context
 		updatedFailure := failure.Clone()
 		updatedFailure.TargetRefs = append([]string(nil), confirmation.ConfirmedTargetRefs...)
 		updatedFailure.TargetObservation = &runtimecontract.RuntimeFailureTargetObservation{OwnerModuleID: confirmation.OwnerModuleID, SubjectRef: confirmation.SubjectRef, TargetRole: confirmation.Observation.TargetRole, ObservedRevision: confirmation.ObservedRevision, TargetRefs: confirmation.ConfirmedTargetRefs}
-		aggregate.Facts.Failure = &updatedFailure
-		aggregate.Facts.Resources.FailureTarget = &runtimecontract.FailureTarget{Signature: updatedFailure.Signature, TargetRefs: append([]string(nil), confirmation.ConfirmedTargetRefs...), TargetObservation: updatedFailure.TargetObservation}
-		// A newly confirmed File surface replaces stale focus snapshots before
+		ownerTarget := &runtimecontract.FailureTarget{Signature: updatedFailure.Signature, TargetRefs: append([]string(nil), confirmation.ConfirmedTargetRefs...), TargetObservation: updatedFailure.TargetObservation}
+		if err := replaceRuntimeFailureAuthority(&aggregate.Facts, updatedFailure, runtimeFailureAuthorityReplaceFromExactOwnerFact, ownerTarget); err != nil {
+			return RuntimeAggregate{}, err
+		}
+		// A newly confirmed owner surface replaces stale focus snapshots before
 		// issuing the state-change authority.
 		aggregate.Facts = preflightRuntimeFactsPreservingPending(aggregate.Facts, runtimeTargetGroundingRequirements(aggregate.Facts))
 	}
@@ -126,7 +135,7 @@ func repairSurfaceConfirmationIdentityConflict(aggregate RuntimeAggregate, confi
 
 // sealedValidationFailureObservationMatches binds the diagnostic candidates
 // back to the immutable validation operation that produced them.  This is the
-// Orchestrator-side causation check; File subsequently verifies the current
+// Orchestrator-side causation check; the resource owner subsequently verifies the current
 // resource revision. Neither check interprets diagnostic text.
 func sealedValidationFailureObservationMatches(aggregate RuntimeAggregate, observation runtimecontract.RuntimeValidationFailureObservation) bool {
 	if observation.WorkspaceID != aggregate.Facts.WorkspaceID || observation.RunID != aggregate.Facts.RunID {
@@ -169,7 +178,9 @@ func sealedValidationFailureObservationMatchesDispatch(dispatch SealedDispatch, 
 
 // runtimeValidationFailureObservationHasPersistedReceipt proves provenance,
 // not merely shape: the exact observation must be nested in the rejected
-// Shell receipt for the dispatch/operation it names.
+// receipt for the sealed validation operation it names. The operation
+// descriptor, rather than a profile-specific owner constant, identifies the
+// capability owner whose diagnostic may be admitted.
 func runtimeValidationFailureObservationHasPersistedReceipt(aggregate RuntimeAggregate, observation runtimecontract.RuntimeValidationFailureObservation) bool {
 	var completed *SealedDispatch
 	for idx := range aggregate.CompletedDispatches {
@@ -183,6 +194,14 @@ func runtimeValidationFailureObservationHasPersistedReceipt(aggregate RuntimeAgg
 	if completed == nil || !sealedValidationFailureObservationMatchesDispatch(*completed, observation) {
 		return false
 	}
+	operation, found := candidateOperationForEvidence(completed.Candidate, observation.OperationID)
+	if !found {
+		return false
+	}
+	descriptor, found := runtimecontract.RuntimeOperationDescriptorForKind(operation.Kind)
+	if !found || descriptor.FailureTargetProtocol != runtimecontract.RuntimeFailureTargetProtocolValidationCandidates {
+		return false
+	}
 	execution, found := operationExecutionRecord(completed.OperationExecutions, observation.OperationID)
 	if !found || execution.State != runtimecontract.OperationExecutionEvidenceCommitted || execution.Fence == 0 {
 		return false
@@ -192,7 +211,7 @@ func runtimeValidationFailureObservationHasPersistedReceipt(aggregate RuntimeAgg
 		execution.OwnerReceiptRef != "runtime-receipt/"+receipt.ExecutionKey || execution.OwnerReceiptHash != runtimecontract.StableRuntimeOperationReceiptHash(receipt) ||
 		receipt.Feedback == nil || receipt.Feedback.WorkspaceID != observation.WorkspaceID || receipt.Feedback.RunID != observation.RunID ||
 		receipt.Feedback.DispatchID != observation.DispatchID || receipt.Feedback.AuthoritySnapshotID != observation.AuthoritySnapshotID ||
-		receipt.Feedback.OriginalDiagnostic == nil || receipt.Feedback.OriginalDiagnostic.OwnerModuleID != runtimecontract.RuntimeModuleShell ||
+		receipt.Feedback.OriginalDiagnostic == nil || receipt.Feedback.OriginalDiagnostic.OwnerModuleID != descriptor.OwnerModuleID ||
 		receipt.Feedback.OriginalDiagnostic.ValidationFailureObservation == nil {
 		return false
 	}

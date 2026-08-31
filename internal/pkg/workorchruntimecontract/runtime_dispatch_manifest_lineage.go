@@ -83,7 +83,7 @@ func ValidateRuntimeAcceptedCandidateManifestLineage(
 			return fmt.Errorf("accepted runtime candidate attempt repair commitment does not match pre-seal request session")
 		}
 		repairRequired := manifest.State == ConvergenceStateNeedStateChange &&
-			manifest.RepairPurpose == RuntimeDispatchRepairPurposeConfirmedFileValidation
+			manifest.RepairPurpose == RuntimeDispatchRepairPurposeConfirmedValidation
 		if repairRequired {
 			if session.RepairCommitment == nil || attempt.AdmissionRepairCommitment == nil || dispatch.RepairCommitment == nil ||
 				dispatch.RepairCommitment.Normalized().Closure.ID != manifest.RepairClosureID ||

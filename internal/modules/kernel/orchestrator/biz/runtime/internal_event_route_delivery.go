@@ -34,9 +34,20 @@ func (c *RuntimeController) applyDeliveryInternalEvent(ctx context.Context, even
 		result.BudgetConsumed = changed
 		return result, err
 	case RuntimeInternalEventRecoveryBudgetConsumed:
-		aggregate, consumed, err := c.driveDelivery.consumeRecoveryBudget(ctx, event.Scope.WorkspaceID, event.Scope.RunID, event.Delivery.RecoveryBudgetKind)
+		aggregate, consumed, err := c.driveDelivery.consumeRecoveryBudget(ctx, event.Scope.WorkspaceID, event.Scope.RunID, event.Delivery.RecoveryBudgetKind, event.Delivery.RecoveryOperationID, event.Delivery.LeaseNow)
 		result.Aggregate = aggregate
 		result.BudgetConsumed = consumed
+		return result, err
+	case RuntimeInternalEventOperationRecoveryClaimed:
+		aggregate, claimID, changed, err := c.driveDelivery.claimOperationRecoveryAuthorization(ctx, event.Scope.WorkspaceID, event.Scope.RunID, event.Delivery.RecoveryOperationID, event.Delivery.RecoveryAuthorizationID, event.Delivery.LeaseNow)
+		result.Aggregate = aggregate
+		result.RecoveryClaimChanged = changed
+		result.RecoveryClaimID = claimID
+		return result, err
+	case RuntimeInternalEventOperationRecoveryCallReturned:
+		aggregate, changed, err := c.driveDelivery.completeOperationRecoveryCall(ctx, event.Scope.WorkspaceID, event.Scope.RunID, event.Delivery.RecoveryOperationID, event.Delivery.RecoveryAuthorizationID, event.Delivery.RecoveryClaimID)
+		result.Aggregate = aggregate
+		result.RecoveryClaimChanged = changed
 		return result, err
 	case RuntimeInternalEventDriveLeaseScheduled:
 		if event.Delivery.DriveLease == nil {

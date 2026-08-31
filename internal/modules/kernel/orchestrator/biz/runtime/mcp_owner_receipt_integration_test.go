@@ -491,7 +491,7 @@ func TestMCPOwnerObservedFailureTargetBindsThroughEventHubAndFileSnapshot(t *tes
 	}
 	persisted, err = controller.Load(ctx, persisted.Facts.WorkspaceID, persisted.Facts.RunID)
 	if err != nil || persisted.Decision.State != runtimecontract.ConvergenceStateNeedPrerequisite || persisted.Facts.Resources.FailureTarget == nil {
-		t.Fatalf("restart after committed File receipt did not reuse authority: aggregate=%+v err=%v", persisted, err)
+		t.Fatalf("restart after committed repair-owner receipt did not reuse authority: aggregate=%+v err=%v", persisted, err)
 	}
 	persisted = reacquireObservedFilePrerequisites(t, ctx, hub, controller, persisted, workspaceDirectory)
 	if persisted.Decision.State == runtimecontract.ConvergenceStateNeedPrerequisite || len(persisted.Facts.Prerequisites.Pending) != 0 ||

@@ -229,7 +229,7 @@ func (c *authorityComponent) commitGovernanceResolutionWithContinuationLease(
 	}
 	grantedBindingIndex := -1
 	resolvedOperationBindingIndex := -1
-	retireConfirmedFileRepairAuthority := false
+	retireConfirmedRepairAuthority := false
 	for idx := range aggregate.OperationGovernanceBindings {
 		binding := aggregate.OperationGovernanceBindings[idx].Normalized()
 		if !governancecheck.BindingMatchesResolution(binding, resolution) {
@@ -239,11 +239,11 @@ func (c *authorityComponent) commitGovernanceResolutionWithContinuationLease(
 			return EvidenceCommitResult{}, fmt.Errorf("%w: governance resolution matches multiple operation bindings", common.ErrConflict)
 		}
 		resolvedOperationBindingIndex = idx
-		_, _, confirmedFileRepair, transactionErr := confirmedFileRepairGovernanceSourceTransaction(aggregate, binding)
+		_, _, confirmedRepair, transactionErr := confirmedRepairGovernanceSourceTransaction(aggregate, binding)
 		if transactionErr != nil {
 			return EvidenceCommitResult{}, transactionErr
 		}
-		retireConfirmedFileRepairAuthority = confirmedFileRepair
+		retireConfirmedRepairAuthority = confirmedRepair
 		switch resolution.Outcome {
 		case runtimecontract.RuntimeGovernanceResolutionOutcomeContinue:
 			if !governancecheck.BindingStateAllowsOutcome(binding.State, resolution.Outcome) {
@@ -279,16 +279,19 @@ func (c *authorityComponent) commitGovernanceResolutionWithContinuationLease(
 		aggregate.Facts.Failure = nil
 	case runtimecontract.RuntimeGovernanceResolutionOutcomeFail:
 		aggregate.Facts.Evidence.Rejected = append(aggregate.Facts.Evidence.Rejected, fact)
-		aggregate.Facts.Failure = &runtimecontract.FailureFact{
+		failure := runtimecontract.FailureFact{
 			Class: runtimecontract.FailureClassGovernanceRejected, Signature: string(resolution.ResolutionID), Message: resolution.Summary,
+		}
+		if err := replaceRuntimeFailureAuthority(&aggregate.Facts, failure, runtimeFailureAuthorityRetire, nil); err != nil {
+			return EvidenceCommitResult{}, err
 		}
 	default:
 		return EvidenceCommitResult{}, fmt.Errorf("unsupported governance resolution outcome %q", resolution.Outcome)
 	}
-	if retireConfirmedFileRepairAuthority {
+	if retireConfirmedRepairAuthority {
 		// The governance resolution either terminates this exact operation or
 		// continues it from its immutable dispatch admission.  In neither case may
-		// the pre-effect File confirmation remain a second mutable target authority.
+		// the pre-effect owner confirmation remain a second mutable target authority.
 		aggregate.Facts.Resources.FailureTarget = nil
 	}
 	aggregate.Facts = aggregate.Facts.Normalized()
@@ -304,7 +307,7 @@ func (c *authorityComponent) commitGovernanceResolutionWithContinuationLease(
 	var ownerReductionEvent *runtimeOwnerInternalReductionEvent
 	if grantedBindingIndex >= 0 {
 		binding := aggregate.OperationGovernanceBindings[grantedBindingIndex].Normalized()
-		event, matched, eventErr := confirmedFileRepairGovernanceReductionEvent(aggregate, resolution, binding)
+		event, matched, eventErr := confirmedRepairGovernanceReductionEvent(aggregate, resolution, binding)
 		if eventErr != nil {
 			return EvidenceCommitResult{}, eventErr
 		}

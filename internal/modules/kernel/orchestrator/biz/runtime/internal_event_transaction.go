@@ -60,13 +60,27 @@ type RuntimeInternalTransactionPayload struct {
 	OperationReceiptOwnerSource string
 	DispatchID                  string
 	Fence                       uint64
-	Executor                    RuntimeOperationExecutor
-	// Recovery authorization is produced only after the independent SM-4
-	// RecoveryBudgetConsumed event commits.  The attempt is an exact persisted
-	// counter fence, not a request to mutate the budget from the SM-3 handler.
-	RecoveryOperationID   string
-	RecoveryBudgetAttempt int
-	GovernanceResolution  *runtimecontract.RuntimeGovernanceResolution
+	// RecoveryClaimID is a one-shot, process-local token returned only
+	// to the winner of the SM-4 issued->attempted pre-call CAS. It is never
+	// persisted and is valid only on DispatchExecutionRequested for the latest
+	// exact operation execution.
+	RecoveryClaimID  string
+	RecoveryClaimNow string
+	// ExecutionEvidence is derived only from an exact persisted owner receipt.
+	// OperationEvidenceObserved commits its SM-2 authority projection and SM-3
+	// execution/dispatch projection together in one aggregate CAS.
+	ExecutionEvidence *ExecutionEvidence
+	// OperationPrerequisiteStaleReceipt is an exact already-persisted owner
+	// receipt. Its dedicated private fact coordinates SM-2 prerequisite
+	// invalidation, SM-3 dispatch retirement, and the SM-4 refresh budget; it is
+	// never admitted as a fresh cross-owner receipt.
+	OperationPrerequisiteStaleReceipt *runtimecontract.RuntimeOperationReceipt
+	// OperationGovernanceResult is the bounded projection of an exact
+	// governance_required owner receipt. Its dedicated private fact coordinates
+	// SM-2 governance authority and SM-3 dispatch retirement.
+	OperationGovernanceResult *RuntimeOperationExecutionResult
+	OperationOutcomeUnknownID string
+	GovernanceResolution      *runtimecontract.RuntimeGovernanceResolution
 	// GovernanceContinuationDriveLease is an SM-4 successor template sealed in
 	// the same owner-private CAS as a successful governance continuation. The
 	// reducer owns revision/generation/state; the caller supplies only the exact
@@ -78,32 +92,36 @@ type RuntimeInternalTransactionPayload struct {
 // SM-3 facts advance the provider/candidate/sealed-dispatch transaction. They
 // cannot select the next convergence action.
 const (
-	RuntimeInternalEventSemanticPlanRequestStarted             RuntimeInternalEventKind = "semantic_plan_request_started"
-	RuntimeInternalEventSemanticPlanEvaluated                  RuntimeInternalEventKind = "semantic_plan_evaluated"
-	RuntimeInternalEventSemanticPlanCorrectionRequired         RuntimeInternalEventKind = "semantic_plan_correction_required"
-	RuntimeInternalEventCandidateRequestEnsured                RuntimeInternalEventKind = "candidate_request_ensured"
-	RuntimeInternalEventSemanticPlanBatchCompiled              RuntimeInternalEventKind = "semantic_plan_batch_compiled"
-	RuntimeInternalEventSemanticPlanBatchAdvanced              RuntimeInternalEventKind = "semantic_plan_batch_advanced"
-	RuntimeInternalEventSemanticPlanBatchFeasibilityObserved   RuntimeInternalEventKind = "semantic_plan_batch_feasibility_observed"
-	RuntimeInternalEventSemanticPlanBatchDocumentObserved      RuntimeInternalEventKind = "semantic_plan_batch_document_observed"
-	RuntimeInternalEventSemanticPlanBatchDocumentsMerged       RuntimeInternalEventKind = "semantic_plan_batch_documents_merged"
-	RuntimeInternalEventCandidateRequestSubmitted              RuntimeInternalEventKind = "candidate_request_submitted"
-	RuntimeInternalEventProviderRequestRecoveryCoordinated     RuntimeInternalEventKind = "provider_request_recovery_coordinated"
-	RuntimeInternalEventCandidateDocumentObserved              RuntimeInternalEventKind = "candidate_document_observed"
-	RuntimeInternalEventCandidateRequestStaleObserved          RuntimeInternalEventKind = "candidate_request_stale_observed"
-	RuntimeInternalEventProviderRequestTerminalCoordinated     RuntimeInternalEventKind = "provider_request_terminal_coordinated"
-	RuntimeInternalEventCandidateAttemptBegun                  RuntimeInternalEventKind = "candidate_attempt_begun"
-	RuntimeInternalEventCandidateDocumentRejected              RuntimeInternalEventKind = "candidate_document_rejected"
-	RuntimeInternalEventCandidateProposalObserved              RuntimeInternalEventKind = "candidate_proposal_observed"
-	RuntimeInternalEventCandidateFeasibilityObserved           RuntimeInternalEventKind = "candidate_feasibility_observed"
-	RuntimeInternalEventCandidatePrerequisiteStaleObserved     RuntimeInternalEventKind = "candidate_prerequisite_stale_observed"
-	RuntimeInternalEventCandidatePrerequisiteObserved          RuntimeInternalEventKind = "candidate_prerequisite_observed"
-	RuntimeInternalEventCandidateSealed                        RuntimeInternalEventKind = "candidate_sealed"
-	RuntimeInternalEventGovernanceDispatchSealed               RuntimeInternalEventKind = "governance_dispatch_sealed"
-	RuntimeInternalEventCandidateRejected                      RuntimeInternalEventKind = "candidate_rejected"
-	RuntimeInternalEventGovernanceResolutionObserved           RuntimeInternalEventKind = "governance_resolution_observed"
-	RuntimeInternalEventOperationReceiptObserved               RuntimeInternalEventKind = "operation_receipt_observed"
-	RuntimeInternalEventDispatchExecutionRequested             RuntimeInternalEventKind = "dispatch_execution_requested"
-	RuntimeInternalEventDefinitionClarificationDispatchSealed  RuntimeInternalEventKind = "definition_clarification_dispatch_sealed"
-	RuntimeInternalEventDefinitionClarificationRequestObserved RuntimeInternalEventKind = "definition_clarification_request_observed"
+	RuntimeInternalEventSemanticPlanRequestStarted               RuntimeInternalEventKind = "semantic_plan_request_started"
+	RuntimeInternalEventSemanticPlanEvaluated                    RuntimeInternalEventKind = "semantic_plan_evaluated"
+	RuntimeInternalEventSemanticPlanCorrectionRequired           RuntimeInternalEventKind = "semantic_plan_correction_required"
+	RuntimeInternalEventCandidateRequestEnsured                  RuntimeInternalEventKind = "candidate_request_ensured"
+	RuntimeInternalEventSemanticPlanBatchCompiled                RuntimeInternalEventKind = "semantic_plan_batch_compiled"
+	RuntimeInternalEventSemanticPlanBatchAdvanced                RuntimeInternalEventKind = "semantic_plan_batch_advanced"
+	RuntimeInternalEventSemanticPlanBatchFeasibilityObserved     RuntimeInternalEventKind = "semantic_plan_batch_feasibility_observed"
+	RuntimeInternalEventSemanticPlanBatchDocumentObserved        RuntimeInternalEventKind = "semantic_plan_batch_document_observed"
+	RuntimeInternalEventSemanticPlanBatchDocumentsMerged         RuntimeInternalEventKind = "semantic_plan_batch_documents_merged"
+	RuntimeInternalEventCandidateRequestSubmitted                RuntimeInternalEventKind = "candidate_request_submitted"
+	RuntimeInternalEventProviderRequestRecoveryCoordinated       RuntimeInternalEventKind = "provider_request_recovery_coordinated"
+	RuntimeInternalEventCandidateDocumentObserved                RuntimeInternalEventKind = "candidate_document_observed"
+	RuntimeInternalEventCandidateRequestStaleObserved            RuntimeInternalEventKind = "candidate_request_stale_observed"
+	RuntimeInternalEventProviderRequestTerminalCoordinated       RuntimeInternalEventKind = "provider_request_terminal_coordinated"
+	RuntimeInternalEventCandidateAttemptBegun                    RuntimeInternalEventKind = "candidate_attempt_begun"
+	RuntimeInternalEventCandidateDocumentRejected                RuntimeInternalEventKind = "candidate_document_rejected"
+	RuntimeInternalEventCandidateProposalObserved                RuntimeInternalEventKind = "candidate_proposal_observed"
+	RuntimeInternalEventCandidateFeasibilityObserved             RuntimeInternalEventKind = "candidate_feasibility_observed"
+	RuntimeInternalEventCandidatePrerequisiteStaleObserved       RuntimeInternalEventKind = "candidate_prerequisite_stale_observed"
+	RuntimeInternalEventCandidatePrerequisiteObserved            RuntimeInternalEventKind = "candidate_prerequisite_observed"
+	RuntimeInternalEventCandidateSealed                          RuntimeInternalEventKind = "candidate_sealed"
+	RuntimeInternalEventGovernanceDispatchSealed                 RuntimeInternalEventKind = "governance_dispatch_sealed"
+	RuntimeInternalEventCandidateRejected                        RuntimeInternalEventKind = "candidate_rejected"
+	RuntimeInternalEventGovernanceResolutionObserved             RuntimeInternalEventKind = "governance_resolution_observed"
+	RuntimeInternalEventOperationReceiptObserved                 RuntimeInternalEventKind = "operation_receipt_observed"
+	RuntimeInternalEventDispatchExecutionRequested               RuntimeInternalEventKind = "dispatch_execution_requested"
+	RuntimeInternalEventOperationEvidenceObserved                RuntimeInternalEventKind = "operation_evidence_observed"
+	RuntimeInternalEventOperationPrerequisiteStaleObserved       RuntimeInternalEventKind = "operation_prerequisite_stale_observed"
+	RuntimeInternalEventOperationGovernanceRequiredObserved      RuntimeInternalEventKind = "operation_governance_required_observed"
+	RuntimeInternalEventOperationExecutionOutcomeUnknownObserved RuntimeInternalEventKind = "operation_execution_outcome_unknown_observed"
+	RuntimeInternalEventDefinitionClarificationDispatchSealed    RuntimeInternalEventKind = "definition_clarification_dispatch_sealed"
+	RuntimeInternalEventDefinitionClarificationRequestObserved   RuntimeInternalEventKind = "definition_clarification_request_observed"
 )

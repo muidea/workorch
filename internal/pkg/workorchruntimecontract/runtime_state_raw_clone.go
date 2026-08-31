@@ -1910,6 +1910,9 @@ func cloneRuntimeStateRecordRaw(in RuntimeStateRecord) RuntimeStateRecord {
 	out.RecoverableWaits = cloneRuntimeStateRawSlice(in.RecoverableWaits, func(item RuntimeRecoverableWaitRecord) RuntimeRecoverableWaitRecord {
 		return cloneRuntimeRecoverableWaitRecordRaw(item)
 	})
+	out.OperationRecoveryAuthorizations = cloneRuntimeStateRawSlice(in.OperationRecoveryAuthorizations, func(item RuntimeOperationRecoveryAuthorization) RuntimeOperationRecoveryAuthorization {
+		return item
+	})
 	out.DefinitionClarification = cloneRuntimeStateRawPointer(in.DefinitionClarification, func(item RuntimeDefinitionClarificationState) RuntimeDefinitionClarificationState {
 		return cloneRuntimeDefinitionClarificationStateRaw(item)
 	})

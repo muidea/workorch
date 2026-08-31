@@ -116,6 +116,63 @@ func TestRuntimeRecoverableWaitClaimDeferRestartConfirmAndRetire(t *testing.T) {
 	}
 }
 
+func TestRuntimeAdministrativeTerminationAtomicallyRetiresActiveWaitLeaseAndAllocation(t *testing.T) {
+	for _, test := range []struct {
+		name           string
+		claimProbe     bool
+		wantWait       runtimecontract.RuntimeRecoverableWaitStatus
+		wantAllocation runtimecontract.RuntimeBudgetAllocationState
+	}{
+		{name: "waiting", wantWait: runtimecontract.RuntimeRecoverableWaitExpired, wantAllocation: runtimecontract.RuntimeBudgetAllocationReleased},
+		{name: "probe claimed", claimProbe: true, wantWait: runtimecontract.RuntimeRecoverableWaitExhausted, wantAllocation: runtimecontract.RuntimeBudgetAllocationExhausted},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			ctx := context.Background()
+			controller, repository, initialized, prerequisite := runtimeRecoverableWaitController(t)
+			base := time.Date(2026, time.August, 21, 10, 0, 0, 0, time.UTC)
+			wait := runtimeRecoverableWaitRecord(t, initialized, prerequisite, base, base.Add(time.Second), base.Add(time.Minute))
+			opened, err := controller.driveDelivery.openRecoverableWait(ctx, wait)
+			if err != nil {
+				t.Fatal(err)
+			}
+			requested := runtimecontract.RuntimeDriveLease{
+				WorkspaceID: opened.Facts.WorkspaceID, RunID: opened.Facts.RunID,
+				Reason: runtimecontract.RuntimeDriveLeaseReasonRecoverableWait, FailureSignature: "recoverable-wait/" + wait.WaitID,
+				DueAt: wait.NextEligibleAt,
+			}
+			leased, lease, changed, err := controller.scheduleDriveLease(ctx, opened.Facts.WorkspaceID, opened.Facts.RunID, requested)
+			if err != nil || !changed || leased.DriveLease == nil {
+				t.Fatalf("schedule wait lease aggregate=%+v lease=%+v changed=%v err=%v", leased, lease, changed, err)
+			}
+			beforeTermination := leased
+			if test.claimProbe {
+				_, running, claimed, claimErr := controller.claimDriveLease(ctx, opened.Facts.WorkspaceID, opened.Facts.RunID, lease, wait.NextEligibleAt)
+				if claimErr != nil || !claimed {
+					t.Fatalf("claim wait lease=%+v claimed=%v err=%v", running, claimed, claimErr)
+				}
+				beforeTermination, claimed, err = controller.driveDelivery.claimRecoverableWaitProbe(ctx, opened.Facts.WorkspaceID, opened.Facts.RunID, wait.WaitID, running.RecoveryGeneration, wait.NextEligibleAt)
+				if err != nil || !claimed {
+					t.Fatalf("claim wait probe aggregate=%+v claimed=%v err=%v", beforeTermination, claimed, err)
+				}
+			}
+			saves := repository.saves
+			terminated, err := controller.requestTermination(ctx, opened.Facts.WorkspaceID, opened.Facts.RunID, runtimecontract.RuntimeTerminationCancelled, "blocks/run", "operator cancel")
+			if err != nil {
+				t.Fatal(err)
+			}
+			allocation, found := runtimecontract.RuntimeBudgetAllocationForID(terminated.ExecutionBudget.Allocations, wait.BudgetAllocationID)
+			if !found || terminated.Termination == nil || terminated.Termination.Revision != terminated.StateRevision ||
+				terminated.StateRevision != beforeTermination.StateRevision+1 || terminated.DriveLease != nil ||
+				terminated.RecoverableWaits[0].Status != test.wantWait || allocation.State != test.wantAllocation || repository.saves != saves+1 {
+				t.Fatalf("termination did not atomically retire SM-4 work: termination=%+v wait=%+v allocation=%+v saves=%d/%d", terminated.Termination, terminated.RecoverableWaits, allocation, repository.saves, saves)
+			}
+			if test.claimProbe && (len(terminated.ExecutionBudget.Reconciliations) != 1 || terminated.ExecutionBudget.Reconciliations[0].Status != runtimecontract.RuntimeBudgetReconciliationFailed) {
+				t.Fatalf("claimed probe termination did not close conservative reconciliation: %+v", terminated.ExecutionBudget.Reconciliations)
+			}
+		})
+	}
+}
+
 func TestRuntimeRecoverableWaitDeadlineAndContractFailureAreTerminal(t *testing.T) {
 	for _, test := range []struct {
 		name       string

@@ -3899,6 +3899,8 @@ func TestRuntimeMainlineCandidateAuthorityExhaustionHasNoCorrectionProviderOrBud
 	}
 	ownerCatalog.SnapshotID = runtimecontract.StableRuntimeOperationAdmissibilitySnapshotID(ownerCatalog)
 	facts.Resources.OperationAdmissibilities = []runtimecontract.RuntimeOperationAdmissibility{ownerCatalog}
+	facts.Prerequisites.Satisfied = append(facts.Prerequisites.Satisfied, runtimeOperationAdmissibilityPrerequisite(ownerCatalog))
+	facts.Resources.PrerequisiteObservations = append(facts.Resources.PrerequisiteObservations, runtimeFileAdmissibilityObservation(ownerCatalog))
 	runtimeTestInitializeOperationFixture(t, ctx, biz, runtimeRepository, facts, runtimeDefinition(), nil)
 	rawCandidate := runtimecontract.RuntimeCandidate{StateChange: &runtimecontract.StateChangeCandidate{Operations: []runtimecontract.StateChangingOperation{{Operation: runtimecontract.RuntimeOperation{
 		Kind: runtimecontract.StepKindFileEdit, CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-v2"},
@@ -5024,7 +5026,7 @@ func TestRuntimeStateRecordPreservesCoverageProofLineageAcrossOpaqueReload(t *te
 
 func TestRuntimeStateRecordPreservesRepairSurfaceConfirmationFenceAcrossOpaqueReload(t *testing.T) {
 	ctx := context.Background()
-	aggregate := runtimeAggregate(t, 7)
+	aggregate, repairConvergence, repairCatalog := runtimeOuterValidationRepairAggregate(t, 7)
 	aggregate.Facts.Focus.RequiredEvidenceKinds = []string{runtimecontract.EvidenceKindValidation}
 	aggregate.Facts.Focus.AcceptedStepKinds = []string{runtimecontract.RuntimeBlockKindManagedValidationSession}
 	aggregate.Facts.Focus.ValidationRecipeID = "repair-surface-reload"
@@ -5032,7 +5034,10 @@ func TestRuntimeStateRecordPreservesRepairSurfaceConfirmationFenceAcrossOpaqueRe
 	aggregate.Facts.Focus.RequiredCheckRefs = []string{repairSurfaceCheck}
 	aggregate.Facts.Focus.TargetRefs = []string{"main.go"}
 	aggregate.Facts.Focus.TargetRole = "implementation"
-	aggregate.Facts.Capabilities = runtimecontract.RuntimeCapabilities{ValidationKinds: []string{runtimecontract.RuntimeBlockKindManagedValidationSession}}
+	aggregate.Facts.Capabilities = runtimecontract.RuntimeCapabilities{
+		StateChangeKinds: append([]string(nil), repairConvergence.RepairOperationKinds...),
+		ValidationKinds:  []string{runtimecontract.RuntimeBlockKindManagedValidationSession},
+	}
 	recipe := runtimecontract.RuntimeValidationRecipe{ID: "repair-surface-reload", Command: "sh", Args: []string{"-c", "true"}}
 	inventory := runtimecontract.RuntimeOperationAdmissibility{
 		PrerequisiteID: "admissibility-shell-repair-surface-reload", OwnerModuleID: runtimecontract.RuntimeModuleShell,
@@ -5050,45 +5055,66 @@ func TestRuntimeStateRecordPreservesRepairSurfaceConfirmationFenceAcrossOpaqueRe
 		ObservedRevision: "shell-repair-surface-reload-v1",
 	}
 	inventory.SnapshotID = runtimecontract.StableRuntimeOperationAdmissibilitySnapshotID(inventory)
-	aggregate.Facts.Prerequisites.Satisfied = []runtimecontract.RuntimePrerequisite{{
+	aggregate.Facts.Prerequisites.Satisfied = append(aggregate.Facts.Prerequisites.Satisfied, runtimecontract.RuntimePrerequisite{
 		ID: inventory.PrerequisiteID, Kind: runtimecontract.PrerequisiteKindOperationAdmissibility,
 		OwnerModuleID: runtimecontract.RuntimeModuleShell, RequiredCapabilities: []string{runtimecontract.RuntimeBlockKindManagedValidationSession},
-	}}
-	aggregate.Facts.Resources.OperationAdmissibilities = []runtimecontract.RuntimeOperationAdmissibility{inventory}
+	})
+	aggregate.Facts.Resources.OperationAdmissibilities = append(aggregate.Facts.Resources.OperationAdmissibilities, inventory)
 	aggregate = runtimeTestAggregateWithSemanticPlanning(t, aggregate)
+	var repairPrerequisite runtimecontract.RuntimePrerequisite
+	for _, satisfied := range aggregate.Facts.Prerequisites.Satisfied {
+		if satisfied.ID == repairCatalog.PrerequisiteID && satisfied.Kind == runtimecontract.PrerequisiteKindOperationAdmissibility && satisfied.OwnerModuleID == repairConvergence.RepairOwnerModuleID {
+			repairPrerequisite = satisfied
+			break
+		}
+	}
+	if repairPrerequisite.ID == "" {
+		t.Fatalf("repair fixture lost sealed owner catalog prerequisite %q: %+v", repairCatalog.PrerequisiteID, aggregate.Facts.Prerequisites.Satisfied)
+	}
+	var repairPrerequisiteObservation runtimecontract.RuntimePrerequisiteObservation
+	for _, observed := range aggregate.Facts.Resources.PrerequisiteObservations {
+		if observed.PrerequisiteID == repairPrerequisite.ID && observed.OwnerModuleID == repairPrerequisite.OwnerModuleID {
+			repairPrerequisiteObservation = observed
+			break
+		}
+	}
+	if repairPrerequisiteObservation.ObservationID == "" || repairPrerequisiteObservation.ContentHash != repairCatalog.SnapshotID {
+		t.Fatalf("repair fixture lost exact owner catalog observation: prerequisite=%+v observations=%+v", repairPrerequisite, aggregate.Facts.Resources.PrerequisiteObservations)
+	}
 	repository := &runtimeDriveRepository{aggregate: aggregate}
 	controller, err := runtime.NewRuntimeController(repository)
 	if err != nil {
 		t.Fatal(err)
 	}
 	var snapshotPrerequisite runtimecontract.RuntimePrerequisite
+	snapshotMatches := 0
 	for _, pending := range aggregate.Facts.Prerequisites.Pending {
-		if pending.Kind == runtimecontract.PrerequisiteKindTargetSnapshot && pending.OwnerModuleID == runtimecontract.RuntimeModuleFile && pending.SubjectRef == "main.go" {
+		if pending.Kind == runtimecontract.PrerequisiteKindTargetSnapshot && pending.OwnerModuleID == repairConvergence.RepairOwnerModuleID && pending.SubjectRef == "main.go" {
 			snapshotPrerequisite = pending
-			break
+			snapshotMatches++
 		}
 	}
-	if snapshotPrerequisite.ID == "" {
-		t.Fatalf("repair-surface reload fixture has no File target-snapshot prerequisite: %+v", aggregate.Facts.Prerequisites.Pending)
+	if snapshotMatches != 1 || snapshotPrerequisite.ID == "" {
+		t.Fatalf("repair fixture target snapshot prerequisite is not uniquely owned by sealed repair owner %q: %+v", repairConvergence.RepairOwnerModuleID, aggregate.Facts.Prerequisites.Pending)
 	}
-	snapshot := runtimecontract.TargetSnapshot{TargetRef: "main.go", ContentHash: "repair-surface-main-v1", ContentState: runtimecontract.SnapshotContentStateComplete}
-	observation := runtimecontract.RuntimePrerequisiteObservation{
+	snapshot := runtimecontract.TargetSnapshot{TargetRef: snapshotPrerequisite.SubjectRef, ContentHash: "repair-surface-main-v1", ContentState: runtimecontract.SnapshotContentStateComplete}
+	snapshotObservation := runtimecontract.RuntimePrerequisiteObservation{
 		PrerequisiteID: snapshotPrerequisite.ID, Kind: snapshotPrerequisite.Kind, OwnerModuleID: snapshotPrerequisite.OwnerModuleID,
 		ContentHash: snapshot.ContentHash,
 		Dependencies: []runtimecontract.RuntimeFreshnessDependency{{
-			Domain: runtimecontract.RuntimeResourceWorkspaceTarget, OwnerModuleID: runtimecontract.RuntimeModuleFile,
+			Domain: runtimecontract.RuntimeResourceWorkspaceTarget, OwnerModuleID: snapshotPrerequisite.OwnerModuleID,
 			SubjectRef: snapshot.TargetRef, Revision: snapshot.ContentHash,
 		}},
 	}
-	observation.ObservationID = runtimecontract.StableRuntimePrerequisiteObservationID(observation)
+	snapshotObservation.ObservationID = runtimecontract.StableRuntimePrerequisiteObservationID(snapshotObservation)
 	aggregate, err = runtimeTestControllerCommitPrerequisite(controller, ctx, aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, runtime.PrerequisiteResult{
-		PrerequisiteID: snapshotPrerequisite.ID, TargetSnapshot: &snapshot, Observation: &observation,
+		PrerequisiteID: snapshotPrerequisite.ID, TargetSnapshot: &snapshot, Observation: &snapshotObservation,
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if aggregate.Decision.State != runtimecontract.ConvergenceStateNeedValidation {
-		t.Fatalf("repair-surface reload fixture action = %s, want need_validation", aggregate.Decision.State)
+		t.Fatalf("repair-surface reload fixture action = %s, want need_validation; pending=%+v", aggregate.Decision.State, aggregate.Facts.Prerequisites.Pending)
 	}
 	bindingRef := aggregate.Facts.Focus.CoverageEvidenceBindings[0].ID
 	recipeID := recipe.ID
@@ -5175,7 +5201,7 @@ func TestRuntimeStateRecordPreservesRepairSurfaceConfirmationFenceAcrossOpaqueRe
 	}
 	confirmation := runtimecontract.RuntimeRepairSurfaceConfirmation{
 		Observation:   *failed.Facts.Failure.ValidationFailureObservation,
-		OwnerModuleID: runtimecontract.RuntimeModuleFile, SubjectRef: "workspace_deliverable",
+		OwnerModuleID: repairConvergence.RepairOwnerModuleID, SubjectRef: "workspace_deliverable",
 		Disposition: runtimecontract.RuntimeRepairSurfaceStale, ObservedRevision: "tree-v2", Reason: "changed",
 	}
 	confirmedEvent, err := controller.ApplyInternalEvent(ctx, runtime.RuntimeInternalEvent{
@@ -5200,6 +5226,29 @@ func TestRuntimeStateRecordPreservesRepairSurfaceConfirmationFenceAcrossOpaqueRe
 	}
 	if len(reloaded.RepairSurfaceConfirmations) != 1 || !runtimecontract.SameRuntimeRepairSurfaceConfirmation(reloaded.RepairSurfaceConfirmations[0].Confirmation, confirmation) {
 		t.Fatalf("repair surface confirmation fence drifted across reload: %+v", reloaded.RepairSurfaceConfirmations)
+	}
+	if reloaded.RepairSurfaceConfirmations[0].Confirmation.OwnerModuleID != repairConvergence.RepairOwnerModuleID {
+		t.Fatalf("repair confirmation owner drifted across reload: got=%q want=%q", reloaded.RepairSurfaceConfirmations[0].Confirmation.OwnerModuleID, repairConvergence.RepairOwnerModuleID)
+	}
+	var reloadedPrerequisite runtimecontract.RuntimePrerequisite
+	for _, satisfied := range reloaded.Facts.Prerequisites.Satisfied {
+		if satisfied.ID == repairPrerequisite.ID && satisfied.OwnerModuleID == repairPrerequisite.OwnerModuleID {
+			reloadedPrerequisite = satisfied
+			break
+		}
+	}
+	if reloadedPrerequisite.ID == "" || reloadedPrerequisite.Kind != repairPrerequisite.Kind || !reflect.DeepEqual(reloadedPrerequisite.RequiredCapabilities, repairPrerequisite.RequiredCapabilities) {
+		t.Fatalf("repair owner prerequisite identity drifted across reload: got=%+v want=%+v", reloadedPrerequisite, repairPrerequisite)
+	}
+	var reloadedObservation runtimecontract.RuntimePrerequisiteObservation
+	for _, observed := range reloaded.Facts.Resources.PrerequisiteObservations {
+		if observed.ObservationID == repairPrerequisiteObservation.ObservationID {
+			reloadedObservation = observed
+			break
+		}
+	}
+	if reloadedObservation.ObservationID == "" || reloadedObservation.PrerequisiteID != repairPrerequisiteObservation.PrerequisiteID || reloadedObservation.ContentHash != repairPrerequisiteObservation.ContentHash || !reflect.DeepEqual(reloadedObservation.Dependencies, repairPrerequisiteObservation.Dependencies) {
+		t.Fatalf("repair owner prerequisite observation drifted across reload: got=%+v want=%+v", reloadedObservation, repairPrerequisiteObservation)
 	}
 	reloaded.RepairSurfaceConfirmations[0].Confirmation.Observation.CandidateTargetRefs[0] = "mutated.go"
 	if persisted.RepairSurfaceConfirmations[0].Confirmation.Observation.CandidateTargetRefs[0] == "mutated.go" {

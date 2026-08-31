@@ -43,17 +43,13 @@ func (m *Biz) handleRuntimeGovernanceApprovalResolution(event magicevent.Event, 
 		setRuntimeGovernanceResult(result, orchestratorevents.CommitRuntimeGovernanceResolutionResult{}, fmt.Errorf("%w: runtime governance approval has no persisted binding", common.ErrConflict))
 		return
 	}
-	m.handleRuntimeGovernanceResolutionLocked(magicevent.NewEventWithContext(
-		orchestratorevents.TopicOrchestratorCommitRuntimeGovernanceResolution,
-		event.Source(), ModuleID, magicevent.NewHeader(), event.Context(),
-		orchestratorevents.CommitRuntimeGovernanceResolutionCommand{Resolution: runtimecontract.RuntimeGovernanceResolution{
-			ResolutionID: command.ResolutionID, ApprovalID: command.ApprovalID,
-			WorkspaceID: command.WorkspaceID, RunID: command.RunID,
-			AuthoritySnapshotID: binding.AuthoritySnapshotID, DispatchID: binding.DispatchID,
-			DependencyKind: binding.DependencyKind, SubjectRef: binding.SubjectRef,
-			Outcome: command.Outcome, Summary: command.Summary, EvidenceRefs: append([]string(nil), command.EvidenceRefs...),
-		}},
-	), result)
+	m.commitRuntimeGovernanceResolutionLocked(event.Context(), event.Source(), runtimecontract.RuntimeGovernanceResolution{
+		ResolutionID: command.ResolutionID, ApprovalID: command.ApprovalID,
+		WorkspaceID: command.WorkspaceID, RunID: command.RunID,
+		AuthoritySnapshotID: binding.AuthoritySnapshotID, DispatchID: binding.DispatchID,
+		DependencyKind: binding.DependencyKind, SubjectRef: binding.SubjectRef,
+		Outcome: command.Outcome, Summary: command.Summary, EvidenceRefs: append([]string(nil), command.EvidenceRefs...),
+	}, result)
 }
 
 func (m *Biz) handleRuntimeGovernanceTicketResolution(event magicevent.Event, result magicevent.Result) {
@@ -82,52 +78,41 @@ func (m *Biz) handleRuntimeGovernanceTicketResolutionLocked(event magicevent.Eve
 		setRuntimeGovernanceResult(result, orchestratorevents.CommitRuntimeGovernanceResolutionResult{}, fmt.Errorf("%w: runtime governance ticket has no persisted binding", common.ErrConflict))
 		return
 	}
-	m.handleRuntimeGovernanceResolutionLocked(magicevent.NewEventWithContext(
-		orchestratorevents.TopicOrchestratorCommitRuntimeGovernanceResolution,
-		event.Source(), ModuleID, magicevent.NewHeader(), event.Context(),
-		orchestratorevents.CommitRuntimeGovernanceResolutionCommand{Resolution: runtimecontract.RuntimeGovernanceResolution{
-			ResolutionID: command.ResolutionID, TicketID: command.TicketID,
-			WorkspaceID: command.WorkspaceID, RunID: command.RunID,
-			AuthoritySnapshotID: binding.AuthoritySnapshotID, DispatchID: binding.DispatchID,
-			DependencyKind: binding.DependencyKind, SubjectRef: binding.SubjectRef,
-			Outcome: command.Outcome, Summary: command.Summary, EvidenceRefs: append([]string(nil), command.EvidenceRefs...),
-		}},
-	), result)
+	m.commitRuntimeGovernanceResolutionLocked(event.Context(), event.Source(), runtimecontract.RuntimeGovernanceResolution{
+		ResolutionID: command.ResolutionID, TicketID: command.TicketID,
+		WorkspaceID: command.WorkspaceID, RunID: command.RunID,
+		AuthoritySnapshotID: binding.AuthoritySnapshotID, DispatchID: binding.DispatchID,
+		DependencyKind: binding.DependencyKind, SubjectRef: binding.SubjectRef,
+		Outcome: command.Outcome, Summary: command.Summary, EvidenceRefs: append([]string(nil), command.EvidenceRefs...),
+	}, result)
 }
 
-func (m *Biz) handleRuntimeGovernanceResolution(event magicevent.Event, result magicevent.Result) {
-	if m == nil || event == nil {
+// commitRuntimeGovernanceResolutionLocked is an owner-private value adapter.
+// Only the narrow Decision/Approval commands above are EventHub ingress; after
+// they reconstruct the persisted binding, no generic authority-shaped command
+// is published or exposed for another component to call.
+func (m *Biz) commitRuntimeGovernanceResolutionLocked(ctx context.Context, source string, resolution runtimecontract.RuntimeGovernanceResolution, result magicevent.Result) {
+	if m == nil || m.runtimeController == nil || !runtimeGovernanceResolutionSourceMatchesOwner(source, resolution) {
 		setRuntimeGovernanceResult(result, orchestratorevents.CommitRuntimeGovernanceResolutionResult{}, common.ErrInvalidArgument)
 		return
 	}
-	m.lifecycleMu.RLock()
-	defer m.lifecycleMu.RUnlock()
-	m.handleRuntimeGovernanceResolutionLocked(event, result)
-}
-
-func (m *Biz) handleRuntimeGovernanceResolutionLocked(event magicevent.Event, result magicevent.Result) {
-	command, ok := event.Data().(orchestratorevents.CommitRuntimeGovernanceResolutionCommand)
-	if !ok || m == nil || m.runtimeController == nil || !runtimeGovernanceResolutionSourceMatchesOwner(event.Source(), command.Resolution) {
-		setRuntimeGovernanceResult(result, orchestratorevents.CommitRuntimeGovernanceResolutionResult{}, common.ErrInvalidArgument)
-		return
-	}
-	transaction := &runtime.RuntimeInternalTransactionPayload{GovernanceResolution: &command.Resolution}
-	if command.Resolution.Outcome == runtimecontract.RuntimeGovernanceResolutionOutcomeContinue || command.Resolution.Outcome == runtimecontract.RuntimeGovernanceResolutionOutcomeFail {
-		signature, signatureErr := runtime.RuntimeGovernanceResolutionDriveLeaseSignature(command.Resolution)
+	transaction := &runtime.RuntimeInternalTransactionPayload{GovernanceResolution: &resolution}
+	if resolution.Outcome == runtimecontract.RuntimeGovernanceResolutionOutcomeContinue || resolution.Outcome == runtimecontract.RuntimeGovernanceResolutionOutcomeFail {
+		signature, signatureErr := runtime.RuntimeGovernanceResolutionDriveLeaseSignature(resolution)
 		if signatureErr != nil {
 			setRuntimeGovernanceResult(result, orchestratorevents.CommitRuntimeGovernanceResolutionResult{}, signatureErr)
 			return
 		}
 		transaction.GovernanceContinuationDriveLease = &runtimecontract.RuntimeDriveLease{
-			WorkspaceID:      command.Resolution.WorkspaceID,
-			RunID:            command.Resolution.RunID,
+			WorkspaceID:      resolution.WorkspaceID,
+			RunID:            resolution.RunID,
 			Reason:           runtimecontract.RuntimeDriveLeaseReasonDeliveryRetry,
 			FailureSignature: signature,
 			DueAt:            time.Now().UTC().Add(time.Second).Format(time.RFC3339Nano),
 		}
 	}
-	commitEvent, err := m.submitRuntimeInternalEvent(event.Context(), runtime.RuntimeInternalEvent{
-		Kind: runtime.RuntimeInternalEventGovernanceResolutionObserved, Scope: runtime.RuntimeInternalEventScope{WorkspaceID: command.Resolution.WorkspaceID, RunID: command.Resolution.RunID}, Transaction: transaction,
+	commitEvent, err := m.submitRuntimeInternalEvent(ctx, runtime.RuntimeInternalEvent{
+		Kind: runtime.RuntimeInternalEventGovernanceResolutionObserved, Scope: runtime.RuntimeInternalEventScope{WorkspaceID: resolution.WorkspaceID, RunID: resolution.RunID}, Transaction: transaction,
 	})
 	if err != nil {
 		setRuntimeGovernanceResult(result, orchestratorevents.CommitRuntimeGovernanceResolutionResult{}, err)
@@ -139,9 +124,9 @@ func (m *Biz) handleRuntimeGovernanceResolutionLocked(event magicevent.Event, re
 	}
 	commit := *commitEvent.Evidence
 	response := orchestratorevents.CommitRuntimeGovernanceResolutionResult{
-		WorkspaceID:         command.Resolution.WorkspaceID,
-		RunID:               command.Resolution.RunID,
-		ResolutionID:        command.Resolution.ResolutionID,
+		WorkspaceID:         resolution.WorkspaceID,
+		RunID:               resolution.RunID,
+		ResolutionID:        resolution.ResolutionID,
 		Disposition:         runtimeGovernanceDisposition(commit.Disposition),
 		StateRevision:       commit.Aggregate.StateRevision,
 		EvidenceRevision:    commit.Aggregate.Facts.EvidenceRevision,
@@ -154,7 +139,7 @@ func (m *Biz) handleRuntimeGovernanceResolutionLocked(event magicevent.Event, re
 		return
 	}
 	if commit.Disposition == runtime.CommitDispositionCommitted || commit.Disposition == runtime.CommitDispositionDuplicate {
-		if err := m.continueRuntimeGovernance(event.Context(), response, command.Resolution, commitEvent.DriveLease); err != nil {
+		if err := m.continueRuntimeGovernance(ctx, response, resolution, commitEvent.DriveLease); err != nil {
 			setRuntimeGovernanceResult(result, orchestratorevents.CommitRuntimeGovernanceResolutionResult{}, err)
 			return
 		}

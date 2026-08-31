@@ -155,7 +155,7 @@ func (c *authorityComponent) commitFailureFact(ctx context.Context, workspaceID 
 // runtimeGenericFailureCarriesOwnerAuthority keeps the generic SM-2/SM-4
 // defect path separate from receipt admission. Validation observations and
 // concrete target observations are capability-owner facts: they may enter the
-// aggregate only through the exact receipt/evidence transaction and the File
+// aggregate only through the exact receipt/evidence transaction and the resource-owner
 // confirmation transition respectively.
 func runtimeGenericFailureCarriesOwnerAuthority(fact runtimecontract.FailureFact) bool {
 	fact = fact.Normalized()
@@ -189,12 +189,13 @@ func applyFailureFactToAggregate(aggregate RuntimeAggregate, fact runtimecontrac
 		aggregate.CompletedDispatches = append(aggregate.CompletedDispatches, dispatch)
 		aggregate.ActiveDispatch = nil
 	}
-	aggregate.Facts.Failure = &fact
 	// FailureTarget authority is created only by an admitted owner receipt or a
-	// File repair-surface confirmation. A new local/administrative failure fact
-	// must not inherit a target resource from the preceding failure merely
+	// resource-owner repair-surface confirmation. A new local/administrative failure fact
+	// must not inherit a target or directive from the preceding failure merely
 	// because mutable signature or refs happen to overlap.
-	aggregate.Facts.Resources.FailureTarget = nil
+	if err := replaceRuntimeFailureAuthority(&aggregate.Facts, fact, runtimeFailureAuthorityRetire, nil); err != nil {
+		return RuntimeAggregate{}, err
+	}
 	facts := aggregate.Facts
 	facts, decision, err := ReduceRuntimeStateWithDirective(facts, &aggregate.Decision.AuthoritySnapshot, aggregate.CoverageProofLineage)
 	if err != nil {

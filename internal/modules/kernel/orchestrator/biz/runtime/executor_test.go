@@ -2,6 +2,7 @@ package runtime
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"reflect"
@@ -769,7 +770,76 @@ func TestRuntimeControllerDoesNotReplayClaimedManagedValidationWithoutReplayProo
 
 func TestRuntimeControllerRecoversClaimedAtMostOnceOperationOnlyWithSealedReplayProof(t *testing.T) {
 	repository := &controllerRepository{}
-	controller, _ := NewRuntimeController(repository)
+	controller, sealed, operationID := runtimeSealReplayProofOperation(t, repository)
+	executor := &replayProofRecoveryExecutor{owner: controller}
+	completed, err := controller.executeActiveDispatch(context.Background(), "ws-v2", "run-v2", executor)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(executor.requests) != 2 || executor.requests[0].Execution.ExecutionKey != executor.requests[1].Execution.ExecutionKey || executor.requests[0].Execution.Fence != executor.requests[1].Execution.Fence || executor.requests[1].Execution.ReplayProof == nil {
+		t.Fatalf("recovery did not reuse sealed execution identity/proof: %+v", executor.requests)
+	}
+	if completed.ActiveDispatch != nil || completed.Decision.State != runtimecontract.ConvergenceStateNeedAssessment || completed.Facts.Recovery.OperationRecoveryAttempts != 1 || len(completed.OperationReceipts) != 1 || len(completed.Facts.Evidence.Accepted) != 1 {
+		t.Fatalf("replay-proof recovery did not converge exactly once: sealed=%+v operation=%s completed=%+v", sealed, operationID, completed)
+	}
+}
+
+func TestRuntimeOperationRecoveryAuthorizationSurvivesFreshControllerAndDuplicateConsumeIsReadOnly(t *testing.T) {
+	repository := &controllerRepository{}
+	controller, sealed, operationID := runtimeSealReplayProofOperation(t, repository)
+	claimed, err := controller.claimOperationExecution(context.Background(), "ws-v2", "run-v2", operationID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	authorized, consumed, err := controller.consumeRecoveryBudget(context.Background(), "ws-v2", "run-v2", runtimecontract.RuntimeRecoveryBudgetOperationRecovery, operationID)
+	if err != nil || !consumed || authorized.StateRevision != claimed.StateRevision+1 || len(authorized.OperationRecoveryAuthorizations) != 1 {
+		t.Fatalf("persist exact recovery authorization: aggregate=%+v consumed=%v err=%v", authorized, consumed, err)
+	}
+	authorization := authorized.OperationRecoveryAuthorizations[0]
+	if authorization.State != runtimecontract.RuntimeOperationRecoveryAuthorizationIssued || authorization.OperationID != operationID ||
+		authorization.DispatchID != sealed.ActiveDispatch.ID || authorization.IssuedAtStateRevision != authorized.StateRevision {
+		t.Fatalf("recovery authorization is not exact: %+v", authorization)
+	}
+	saves := repository.saves
+	duplicate, consumed, err := controller.consumeRecoveryBudget(context.Background(), "ws-v2", "run-v2", runtimecontract.RuntimeRecoveryBudgetOperationRecovery, operationID)
+	if err != nil || consumed || duplicate.StateRevision != authorized.StateRevision || repository.saves != saves {
+		t.Fatalf("duplicate recovery consume mutated state: revision=%d/%d saves=%d/%d consumed=%v err=%v", duplicate.StateRevision, authorized.StateRevision, repository.saves, saves, consumed, err)
+	}
+
+	// Cross a serialization boundary before constructing the new controller so
+	// no pointer or process-local authorization can survive the restart. The
+	// exact persisted grant must still replay the original execution key/fence.
+	encoded, err := json.Marshal(duplicate)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var freshAggregate RuntimeAggregate
+	if err := json.Unmarshal(encoded, &freshAggregate); err != nil {
+		t.Fatal(err)
+	}
+	repository.aggregate = &freshAggregate
+	restarted, err := NewRuntimeController(repository)
+	if err != nil {
+		t.Fatal(err)
+	}
+	executor := &acceptingOperationExecutor{owner: restarted}
+	completed, err := restarted.executeActiveDispatch(context.Background(), "ws-v2", "run-v2", executor)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if executor.called != 1 || completed.ActiveDispatch != nil || len(completed.OperationReceipts) != 1 ||
+		len(completed.OperationRecoveryAuthorizations) != 1 || completed.OperationRecoveryAuthorizations[0].State != runtimecontract.RuntimeOperationRecoveryAuthorizationSettled ||
+		completed.Facts.Recovery.OperationRecoveryAttempts != 1 {
+		t.Fatalf("fresh controller did not consume exact persisted replay authorization once: called=%d aggregate=%+v", executor.called, completed)
+	}
+}
+
+func runtimeSealReplayProofOperation(t *testing.T, repository *controllerRepository) (*RuntimeController, RuntimeAggregate, string) {
+	t.Helper()
+	controller, err := NewRuntimeController(repository)
+	if err != nil {
+		t.Fatal(err)
+	}
 	facts := controllerFacts()
 	facts.Capabilities = runtimecontract.RuntimeCapabilities{StateChangeKinds: []string{runtimecontract.StepKindFileWrite}}
 	// The semantic test compiler supplies the exact File catalog after the
@@ -815,17 +885,7 @@ func TestRuntimeControllerRecoversClaimedAtMostOnceOperationOnlyWithSealedReplay
 	if !ok || execution.ReplayProof == nil || execution.ReplayProof.AfterHash != "after" {
 		t.Fatalf("sealed execution omitted replay proof: %+v", execution)
 	}
-	executor := &replayProofRecoveryExecutor{owner: controller}
-	completed, err := controller.executeActiveDispatch(context.Background(), "ws-v2", "run-v2", executor)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(executor.requests) != 2 || executor.requests[0].Execution.ExecutionKey != executor.requests[1].Execution.ExecutionKey || executor.requests[0].Execution.Fence != executor.requests[1].Execution.Fence || executor.requests[1].Execution.ReplayProof == nil {
-		t.Fatalf("recovery did not reuse sealed execution identity/proof: %+v", executor.requests)
-	}
-	if completed.ActiveDispatch != nil || completed.Decision.State != runtimecontract.ConvergenceStateNeedAssessment || completed.Facts.Recovery.OperationRecoveryAttempts != 1 || len(completed.OperationReceipts) != 1 || len(completed.Facts.Evidence.Accepted) != 1 {
-		t.Fatalf("replay-proof recovery did not converge exactly once: %+v", completed)
-	}
+	return controller, sealed.Aggregate, operationID
 }
 
 func TestRuntimeControllerRoutesStateChangeNoOpToOneBoundedCurrentStateValidation(t *testing.T) {

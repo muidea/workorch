@@ -83,9 +83,8 @@ func runtimeValidationDiscoverySourceSatisfied(facts runtimecontract.RuntimeFact
 
 // reconcileRuntimeValidationDiscoveryPrerequisites turns each missing current
 // owner observation back into the same typed acquisition. It never invents an
-// owner action: manifest is the canonical File-owned discovery fact, while
-// capability/admissibility requirements are recovered only from the active
-// graph or a current owner catalog.
+// owner action: manifest, capability and admissibility requirements are
+// recovered only from the active graph or a current owner catalog.
 func reconcileRuntimeValidationDiscoveryPrerequisites(facts runtimecontract.RuntimeFacts) (runtimecontract.RuntimeFacts, error) {
 	missing := MissingRuntimeValidationDiscoverySources(facts)
 	if len(missing) == 0 {
@@ -151,18 +150,17 @@ func runtimeValidationDiscoveryRequirements(facts runtimecontract.RuntimeFacts, 
 	for _, source := range missing {
 		switch source {
 		case runtimecontract.RuntimeValidationDiscoverySourceWorkspaceManifest, runtimecontract.RuntimeValidationDiscoverySourceProjectFiles:
-			before := len(values)
+			manifestRequirements := make([]runtimecontract.RuntimeRequirement, 0, 1)
 			for _, requirement := range active {
 				if requirement.Kind == runtimecontract.PrerequisiteKindManifest {
-					values = append(values, requirement)
+					manifestRequirements = append(manifestRequirements, requirement)
 				}
 			}
-			if len(values) == before {
-				values = append(values, runtimecontract.RuntimeRequirement{
-					Kind: runtimecontract.PrerequisiteKindManifest, OwnerModuleID: runtimecontract.RuntimeModuleFile,
-					Reason: "validation discovery requires a fresh workspace manifest",
-				})
+			if _, ok := runtimeUniqueRequirementOwner(manifestRequirements); !ok {
+				unresolved = append(unresolved, source)
+				continue
 			}
+			values = append(values, manifestRequirements...)
 		case runtimecontract.RuntimeValidationDiscoverySourceDeclaredCommands:
 			before := len(values)
 			for _, requirement := range active {

@@ -4,7 +4,7 @@ Status: normative
 
 Type: core-contract-part
 
-Last Verified: 2026-08-28
+Last Verified: 2026-08-31
 
 ## 跨状态机不变量
 
@@ -49,9 +49,11 @@ admission commitment 与 dispatch 完全一致，不能用协调改写 dispatch 
 非 managed candidate 不得携带 recipe commitment。governance continuation 必须从 immediate source 逐跳继承两份 commitment。
 accepted operations attempt 还必须反证到更早持久化的 raw-canonical request-session `CandidateManifest` body；manifest 与 persisted
 candidate 是 target/coverage/recipe projection 的共同 preimage，不能只依赖 attempt/dispatch 两份可协调改写副本及 self-hash。
-typed confirmed-File repair manifest 使 `RuntimeDispatchRepairCommitment` 成为必填 admission projection；commitment 必须绑定 origin
-dispatch、confirmation、rejected source receipt/evidence 与 closure，并在 governance resume 逐 hop exact 继承。fresh-load 不能因
-confirmation、directive 或 commitment 被删除而把该 transaction 归类为普通 dispatch。
+typed `confirmed_validation_repair` manifest 使 `RuntimeDispatchRepairCommitment` 成为必填 admission projection；commitment
+必须显式封存 sealed Profile/descriptor 确定的唯一 `RepairOwnerModuleID`，并绑定 origin dispatch、matching-owner
+confirmation、rejected source receipt/evidence 与 closure，在 governance resume 逐 hop exact 继承。candidate 中所有
+state-change operation descriptor owner、confirmation owner、resource changes 与 receipt producer 必须匹配该值；fresh-load 不能因
+confirmation、directive 或 commitment 被删除而把该 transaction 归类为普通 dispatch，也不能按 capability 名称重选 repair owner。
 dispatch seal 必须纳入 canonical candidate、validation recipe body、完整 owner catalog/observation preimage、精确 fallback
 policy 与 per-operation execution authority；active execution、restart 和 governance resume 只能读取该 seal，不能用 current
 owner catalog、current activation policy 或 current prerequisite observation 重新解释历史 authority。

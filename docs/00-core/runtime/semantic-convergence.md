@@ -4,7 +4,7 @@ Status: normative
 
 Type: core-contract-part
 
-Last Verified: 2026-08-30
+Last Verified: 2026-08-31
 
 ## Runtime 生产主链
 
@@ -289,12 +289,15 @@ generation。因而无关 CWI 变为 eligible 不能退休 repair-local manifest
 
 该 repair generation 的 provider C3 必须投影 sealed `ValidationFailureRepair` 的 failed focus、stable failure signature、
 typed trigger owner/operation/diagnostic class、convergence ID、repair owner/operation vocabulary、target policy、declaration
-candidate scope、operation selector/constraints 与 fresh-validation bound。不得投影 raw diagnostic、owner message、receipt、
-Runtime action、retry 或 terminal disposition。provider 只能提出一份结构匹配且与 typed failure 相关的 `state_change`
-proposal；每个 prospective target 都必须对修复该 failure 有贡献。File 只判断完整 target set 的 factual feasibility，
-只有 SM-2 private internal event 可以 seal binding；`RequireFreshValidation` 保证 repair receipt 不授予 terminal validation
-credit。该内容只属于 C3 volatile authority，相同 Definition 的普通/repair generation 必须保持 C0～C2 与 stable prefix
-完全一致。
+candidate scope、operation selector/constraints 与 fresh-validation bound。repair owner 来自 sealed Profile convergence；若该
+declaration 不适用，则只能由 source binding 中 state-change operation descriptor 的唯一 owner 确定，不能按 capability 名称或
+diagnostic 文本推断。不得投影 raw diagnostic、owner message、receipt、Runtime action、retry 或 terminal disposition。provider
+只能提出一份结构匹配且与 typed failure 相关的 `state_change` proposal；每个 prospective target 都必须对修复该 failure 有
+贡献。选定的 resource/effect owner 只判断完整 target set 的 factual feasibility，只有 SM-2 private internal event 可以 seal
+binding；`RequireFreshValidation` 保证 repair receipt 不授予 terminal validation credit。accepted repair 的 pre-seal purpose
+固定为 `confirmed_validation_repair`，commitment 以 `RepairOwnerModuleID` 封存同一 owner。该内容只属于 C3 volatile
+authority，相同 Definition 的普通/repair generation 必须保持 C0～C2 与 stable prefix 完全一致。software-dev Profile 将该
+owner specialization 为 File 只是 Profile 事实，不是 Core reducer 分支。
 
 每次 semantic owner-private event 完成 CAS 后，调用方必须仅从返回的 current aggregate 重新读取 phase、generation、
 manifest、accepted order 与 request identity。若该 event 已退休 generation 或清空 manifest，本轮 semantic transaction

@@ -5,43 +5,33 @@ import (
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
-func (x *activeDispatchExecution) projectOperationReceipt(operation runtimecontract.RuntimeOperation, execution runtimecontract.RuntimeOperationExecutionRecord, result RuntimeOperationExecutionResult) (activeDispatchExecutionFlow, error) {
+func (x *activeDispatchExecution) projectOperationReceipt(operation runtimecontract.RuntimeOperation, execution runtimecontract.RuntimeOperationExecutionRecord, result RuntimeOperationExecutionResult) (activeDispatchExecutionFlow, *RuntimeDispatchExecutionHandoff, error) {
 	if err := validateOwnerReceiptIdentity(operation, execution, &result); err != nil {
-		return 0, err
+		return 0, nil, err
 	}
 	if result.Receipt.PrerequisiteStale != nil {
-		invalidated, err := x.component.invalidateActiveDispatchForPrerequisiteStale(x.ctx, x.workspaceID, x.runID, x.dispatch.ID, result.Receipt)
-		if err != nil {
-			return 0, err
-		}
-		x.aggregate = invalidated
-		return activeDispatchExecutionStop, nil
+		receipt := result.Receipt.Clone()
+		return activeDispatchExecutionStop, &RuntimeDispatchExecutionHandoff{
+			DispatchID: x.dispatch.ID, OperationID: operation.ID, PrerequisiteStaleReceipt: &receipt,
+		}, nil
 	}
 	// Pre-effect governance must not enter ordinary execution repair.
 	if result.Governance != nil {
-		governed, err := x.component.recordOperationGovernanceRequired(x.ctx, x.workspaceID, x.runID, operation.ID, result)
-		if err != nil {
-			return 0, err
-		}
-		x.aggregate = governed
-		return activeDispatchExecutionStop, nil
+		value := result
+		return activeDispatchExecutionStop, &RuntimeDispatchExecutionHandoff{
+			DispatchID: x.dispatch.ID, OperationID: operation.ID, GovernanceRequired: &value,
+		}, nil
 	}
 	if err := adjudicateRuntimeOperationResult(x.aggregate.Decision, execution, operation, &result); err != nil {
-		return 0, err
+		return 0, nil, err
 	}
 	if err := validateRuntimeOperationExecutionResult(x.aggregate.Decision, operation, result); err != nil {
-		return 0, err
+		return 0, nil, err
 	}
-	commit, err := x.component.commitEvidence(x.ctx, executionEvidenceFromOperationResult(x.workspaceID, x.runID, x.dispatch, operation, result))
-	if err != nil {
-		return 0, err
-	}
-	x.aggregate = commit.Aggregate
-	x.completed[operation.ID] = struct{}{}
-	if commit.DispatchCompleted {
-		return activeDispatchExecutionStop, nil
-	}
-	return activeDispatchExecutionReady, nil
+	evidence := executionEvidenceFromOperationResult(x.workspaceID, x.runID, x.dispatch, operation, result)
+	return activeDispatchExecutionStop, &RuntimeDispatchExecutionHandoff{
+		DispatchID: x.dispatch.ID, OperationID: operation.ID, Evidence: &evidence,
+	}, nil
 }
 
 func adjudicateRuntimeOperationResult(decision runtimecontract.RuntimeDecision, execution runtimecontract.RuntimeOperationExecutionRecord, operation runtimecontract.RuntimeOperation, result *RuntimeOperationExecutionResult) error {

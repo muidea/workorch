@@ -47,7 +47,9 @@ func applyAcceptedEvidenceCoverageCredit(aggregate *RuntimeAggregate, fact runti
 			fact,
 			bindingDiagnostic,
 		)
-		aggregate.Facts.Failure = &failure
+		if err := replaceRuntimeFailureAuthority(&aggregate.Facts, failure, runtimeFailureAuthorityRetire, nil); err != nil {
+			return err
+		}
 	}
 	if aggregate.Facts.Focus.RequireAssessment {
 		return nil

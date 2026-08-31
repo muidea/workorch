@@ -2,6 +2,7 @@ package runtime
 
 import (
 	"context"
+	"time"
 
 	"github.com/muidea/workorch/internal/pkg/common"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
@@ -39,15 +40,24 @@ func (c *RuntimeController) recoverDriveLease(ctx context.Context, workspaceID c
 	return c.driveDelivery.recoverDriveLease(ctx, workspaceID, runID, dueAt)
 }
 
-func (c *RuntimeController) consumeRecoveryBudget(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, kind runtimecontract.RuntimeRecoveryBudgetKind) (RuntimeAggregate, bool, error) {
+func (c *RuntimeController) consumeRecoveryBudget(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, kind runtimecontract.RuntimeRecoveryBudgetKind, recoveryOperationIDs ...string) (RuntimeAggregate, bool, error) {
 	if c == nil || c.driveDelivery == nil {
 		return RuntimeAggregate{}, false, common.ErrInvalidArgument
+	}
+	if len(recoveryOperationIDs) > 1 {
+		return RuntimeAggregate{}, false, common.ErrInvalidArgument
+	}
+	recoveryOperationID := ""
+	leaseNow := ""
+	if len(recoveryOperationIDs) == 1 {
+		recoveryOperationID = recoveryOperationIDs[0]
+		leaseNow = time.Now().UTC().Format(time.RFC3339Nano)
 	}
 	result, err := c.ApplyInternalEvent(ctx, RuntimeInternalEvent{
 		Kind:  RuntimeInternalEventRecoveryBudgetConsumed,
 		Scope: RuntimeInternalEventScope{WorkspaceID: workspaceID, RunID: runID},
 		Delivery: &RuntimeInternalDeliveryPayload{
-			RecoveryBudgetKind: kind,
+			RecoveryBudgetKind: kind, RecoveryOperationID: recoveryOperationID, LeaseNow: leaseNow,
 		},
 	})
 	return result.Aggregate, result.BudgetConsumed, err
@@ -244,37 +254,112 @@ func (c *RuntimeController) executeActiveDispatch(ctx context.Context, workspace
 	if c == nil || c.candidateDispatch == nil || c.driveDelivery == nil {
 		return RuntimeAggregate{}, common.ErrInvalidArgument
 	}
-	var recoveryOperationID string
-	var recoveryBudgetAttempt int
-	for transition := 0; transition <= runtimecontract.RuntimeRecoveryBudgetLimit; transition++ {
+	recoveryClaimID := ""
+	var operationCallErr error
+	maxTransitions := runtimecontract.RuntimeCandidateOperationMaxCount + runtimecontract.RuntimeRecoveryBudgetLimit*3 + 4
+	for transition := 0; transition <= maxTransitions; transition++ {
 		result, err := c.ApplyInternalEvent(ctx, RuntimeInternalEvent{
-			Kind:  RuntimeInternalEventDispatchExecutionRequested,
-			Scope: RuntimeInternalEventScope{WorkspaceID: workspaceID, RunID: runID},
-			Transaction: &RuntimeInternalTransactionPayload{
-				Executor: executor, RecoveryOperationID: recoveryOperationID, RecoveryBudgetAttempt: recoveryBudgetAttempt,
-			},
+			Kind:        RuntimeInternalEventDispatchExecutionRequested,
+			Scope:       RuntimeInternalEventScope{WorkspaceID: workspaceID, RunID: runID},
+			Transaction: &RuntimeInternalTransactionPayload{RecoveryClaimID: recoveryClaimID, RecoveryClaimNow: time.Now().UTC().Format(time.RFC3339Nano)},
 		})
+		recoveryClaimID = ""
 		aggregate := result.Aggregate
-		recoveryOperationID, recoveryBudgetAttempt = "", 0
+		if operationID, authorizationID, claimRequired := RuntimeOperationRecoveryAuthorizationClaimRequired(err); claimRequired {
+			claimed, claimErr := c.ApplyInternalEvent(ctx, RuntimeInternalEvent{
+				Kind: RuntimeInternalEventOperationRecoveryClaimed, Scope: RuntimeInternalEventScope{WorkspaceID: workspaceID, RunID: runID},
+				Delivery: &RuntimeInternalDeliveryPayload{RecoveryOperationID: operationID, RecoveryAuthorizationID: authorizationID, LeaseNow: time.Now().UTC().Format(time.RFC3339Nano)},
+			})
+			if claimErr != nil {
+				return claimed.Aggregate, claimErr
+			}
+			if !claimed.RecoveryClaimChanged || claimed.RecoveryClaimID == "" {
+				return claimed.Aggregate, common.ErrConflict
+			}
+			recoveryClaimID = claimed.RecoveryClaimID
+			continue
+		}
+		if operationID, required := RuntimeOperationOutcomeUnknownTransitionRequired(err); required {
+			observed, observeErr := c.ApplyInternalEvent(ctx, RuntimeInternalEvent{
+				Kind: RuntimeInternalEventOperationExecutionOutcomeUnknownObserved, Scope: RuntimeInternalEventScope{WorkspaceID: workspaceID, RunID: runID},
+				Transaction: &RuntimeInternalTransactionPayload{OperationOutcomeUnknownID: operationID},
+			})
+			if observeErr != nil {
+				return observed.Aggregate, observeErr
+			}
+			if operationCallErr != nil {
+				return observed.Aggregate, operationCallErr
+			}
+			continue
+		}
+		if err == nil && result.OperationCall != nil {
+			if result.OperationCall.Validate() != nil {
+				return aggregate, common.ErrConflict
+			}
+			call := result.OperationCall
+			_, operationCallErr = executor.ExecuteRuntimeOperation(ctx, call.Request)
+			if call.RecoveryClaimID != "" {
+				returned, returnErr := c.ApplyInternalEvent(ctx, RuntimeInternalEvent{
+					Kind: RuntimeInternalEventOperationRecoveryCallReturned, Scope: RuntimeInternalEventScope{WorkspaceID: workspaceID, RunID: runID},
+					Delivery: &RuntimeInternalDeliveryPayload{RecoveryOperationID: call.Request.Operation.ID,
+						RecoveryAuthorizationID: call.RecoveryAuthorizationID, RecoveryClaimID: call.RecoveryClaimID},
+				})
+				if returnErr != nil {
+					return returned.Aggregate, returnErr
+				}
+			}
+			continue
+		}
+		if err == nil && result.DispatchExecution != nil {
+			handoff := result.DispatchExecution
+			if handoff.Validate() != nil {
+				return aggregate, common.ErrConflict
+			}
+			operationCallErr = nil
+			event := RuntimeInternalEvent{
+				Scope:       RuntimeInternalEventScope{WorkspaceID: workspaceID, RunID: runID},
+				Transaction: &RuntimeInternalTransactionPayload{},
+			}
+			switch {
+			case handoff.Evidence != nil:
+				event.Kind = RuntimeInternalEventOperationEvidenceObserved
+				event.Transaction.ExecutionEvidence = handoff.Evidence
+			case handoff.PrerequisiteStaleReceipt != nil:
+				event.Kind = RuntimeInternalEventOperationPrerequisiteStaleObserved
+				event.Transaction.DispatchID = handoff.DispatchID
+				event.Transaction.OperationPrerequisiteStaleReceipt = handoff.PrerequisiteStaleReceipt
+			case handoff.GovernanceRequired != nil:
+				event.Kind = RuntimeInternalEventOperationGovernanceRequiredObserved
+				event.Transaction.OperationGovernanceResult = handoff.GovernanceRequired
+			default:
+				return aggregate, common.ErrConflict
+			}
+			committed, commitErr := c.ApplyInternalEvent(ctx, event)
+			if commitErr != nil {
+				return committed.Aggregate, commitErr
+			}
+			if committed.Aggregate.ActiveDispatch == nil {
+				return committed.Aggregate, nil
+			}
+			continue
+		}
 		if operationID, required := RuntimeOperationRecoveryBudgetRequired(err); !required {
 			return aggregate, err
 		} else {
 			// Keep the test harness on the same owner-private event route as
 			// production Biz. The candidate facet only hands off; SM-4 owns the
 			// budget transition through ApplyInternalEvent.
-			budget, budgetErr := c.ApplyInternalEvent(ctx, RuntimeInternalEvent{
+			_, budgetErr := c.ApplyInternalEvent(ctx, RuntimeInternalEvent{
 				Kind:  RuntimeInternalEventRecoveryBudgetConsumed,
 				Scope: RuntimeInternalEventScope{WorkspaceID: workspaceID, RunID: runID},
 				Delivery: &RuntimeInternalDeliveryPayload{
-					RecoveryBudgetKind: runtimecontract.RuntimeRecoveryBudgetOperationRecovery,
+					RecoveryBudgetKind:  runtimecontract.RuntimeRecoveryBudgetOperationRecovery,
+					RecoveryOperationID: operationID,
+					LeaseNow:            time.Now().UTC().Format(time.RFC3339Nano),
 				},
 			})
 			if budgetErr != nil {
 				return RuntimeAggregate{}, budgetErr
-			}
-			if budget.BudgetConsumed {
-				recoveryOperationID = operationID
-				recoveryBudgetAttempt = budget.Aggregate.Facts.Recovery.OperationRecoveryAttempts
 			}
 		}
 	}

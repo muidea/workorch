@@ -47,8 +47,12 @@ type RuntimeInternalEventResult struct {
 	Admission               *CandidateAdmissionCommitResult
 	Evidence                *EvidenceCommitResult
 	Receipt                 *runtimecontract.RuntimeOperationReceipt
+	OperationCall           *RuntimeOperationExecutionCallHandoff
+	DispatchExecution       *RuntimeDispatchExecutionHandoff
 	Found                   bool
 	BudgetConsumed          bool
+	RecoveryClaimChanged    bool
+	RecoveryClaimID         string
 	DriveLease              *runtimecontract.RuntimeDriveLease
 	LeaseChanged            bool
 	LeaseClaimed            bool
@@ -130,6 +134,10 @@ func (c *RuntimeController) ApplyInternalEvent(ctx context.Context, event Runtim
 		RuntimeInternalEventGovernanceResolutionObserved,
 		RuntimeInternalEventOperationReceiptObserved,
 		RuntimeInternalEventDispatchExecutionRequested,
+		RuntimeInternalEventOperationEvidenceObserved,
+		RuntimeInternalEventOperationPrerequisiteStaleObserved,
+		RuntimeInternalEventOperationGovernanceRequiredObserved,
+		RuntimeInternalEventOperationExecutionOutcomeUnknownObserved,
 		RuntimeInternalEventDefinitionClarificationDispatchSealed,
 		RuntimeInternalEventDefinitionClarificationRequestObserved:
 		return c.applyTransactionInternalEvent(ctx, event)
@@ -138,6 +146,8 @@ func (c *RuntimeController) ApplyInternalEvent(ctx context.Context, event Runtim
 		RuntimeInternalEventDriveFailureObserved,
 		RuntimeInternalEventTerminalDeliveryAcknowledged,
 		RuntimeInternalEventRecoveryBudgetConsumed,
+		RuntimeInternalEventOperationRecoveryClaimed,
+		RuntimeInternalEventOperationRecoveryCallReturned,
 		RuntimeInternalEventDriveLeaseScheduled,
 		RuntimeInternalEventDriveLeaseClaimed,
 		RuntimeInternalEventDriveLeaseReleased,

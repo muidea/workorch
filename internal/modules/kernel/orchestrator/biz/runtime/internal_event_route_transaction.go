@@ -37,6 +37,10 @@ func (c *RuntimeController) applyTransactionInternalEvent(ctx context.Context, e
 		RuntimeInternalEventCandidateRejected,
 		RuntimeInternalEventOperationReceiptObserved,
 		RuntimeInternalEventDispatchExecutionRequested,
+		RuntimeInternalEventOperationEvidenceObserved,
+		RuntimeInternalEventOperationPrerequisiteStaleObserved,
+		RuntimeInternalEventOperationGovernanceRequiredObserved,
+		RuntimeInternalEventOperationExecutionOutcomeUnknownObserved,
 		RuntimeInternalEventDefinitionClarificationDispatchSealed,
 		RuntimeInternalEventDefinitionClarificationRequestObserved:
 		return c.applyCandidateDispatchTransactionInternalEvent(ctx, event)
@@ -235,10 +239,50 @@ func (c *RuntimeController) applyCandidateDispatchTransactionInternalEvent(ctx c
 		result.Receipt = &receipt
 		return result, err
 	case RuntimeInternalEventDispatchExecutionRequested:
-		if event.Transaction.Executor == nil {
+		aggregate, call, handoff, err := c.candidateDispatch.executeActiveDispatch(ctx, event.Scope.WorkspaceID, event.Scope.RunID, event.Transaction.RecoveryClaimID, event.Transaction.RecoveryClaimNow)
+		result.Aggregate = aggregate
+		result.OperationCall = call
+		result.DispatchExecution = handoff
+		return result, err
+	case RuntimeInternalEventOperationEvidenceObserved:
+		if event.Transaction.ExecutionEvidence == nil {
 			return result, common.ErrInvalidArgument
 		}
-		aggregate, err := c.candidateDispatch.executeActiveDispatch(ctx, event.Scope.WorkspaceID, event.Scope.RunID, event.Transaction.Executor, event.Transaction.RecoveryOperationID, event.Transaction.RecoveryBudgetAttempt)
+		commit, err := c.candidateDispatch.commitEvidence(ctx, *event.Transaction.ExecutionEvidence)
+		result.Aggregate = commit.Aggregate
+		result.Evidence = &commit
+		return result, err
+	case RuntimeInternalEventOperationPrerequisiteStaleObserved:
+		if event.Transaction.OperationPrerequisiteStaleReceipt == nil {
+			return result, common.ErrInvalidArgument
+		}
+		aggregate, err := c.candidateDispatch.invalidateActiveDispatchForPrerequisiteStale(
+			ctx,
+			event.Scope.WorkspaceID,
+			event.Scope.RunID,
+			event.Transaction.DispatchID,
+			*event.Transaction.OperationPrerequisiteStaleReceipt,
+		)
+		result.Aggregate = aggregate
+		return result, err
+	case RuntimeInternalEventOperationGovernanceRequiredObserved:
+		if event.Transaction.OperationGovernanceResult == nil {
+			return result, common.ErrInvalidArgument
+		}
+		aggregate, err := c.candidateDispatch.recordOperationGovernanceRequired(
+			ctx,
+			event.Scope.WorkspaceID,
+			event.Scope.RunID,
+			event.Transaction.OperationGovernanceResult.OperationID,
+			*event.Transaction.OperationGovernanceResult,
+		)
+		result.Aggregate = aggregate
+		return result, err
+	case RuntimeInternalEventOperationExecutionOutcomeUnknownObserved:
+		if event.Transaction.OperationOutcomeUnknownID == "" {
+			return result, common.ErrInvalidArgument
+		}
+		aggregate, err := c.candidateDispatch.markOperationExecutionOutcomeUnknown(ctx, event.Scope.WorkspaceID, event.Scope.RunID, event.Transaction.OperationOutcomeUnknownID)
 		result.Aggregate = aggregate
 		return result, err
 	case RuntimeInternalEventDefinitionClarificationDispatchSealed:

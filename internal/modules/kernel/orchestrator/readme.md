@@ -4,7 +4,7 @@ Status: active
 
 Type: kernel-module-implementation-contract
 
-Last Verified: 2026-08-30
+Last Verified: 2026-08-31
 
 ## 功能范围与边界
 
@@ -34,10 +34,18 @@ capability resource state。
   `RuntimeInternalEvent`。只有 `RuntimeController.ApplyInternalEvent` 可以分派 mutation；handler 为 package-private。
 - private event 只允许 `Activation | Authority | Transaction | Delivery` 四个 concrete payload family，且 kind 与非空 payload
   一一对应。missing/wrong/multiple payload、scope/identity drift 在 aggregate load/CAS 前拒绝。
+- 每个 private event 只有一个 primary SM 分类；若同 owner 的一次事实提交需要同时协调 SM-2/SM-3/SM-4 ledger，其完整写集必须
+  留在一个 package-private transaction 内，并由一次 aggregate CAS 与 cross-machine fence 原子验收。不得把同一事实拆成多个
+  EventHub ingress、多个 CAS 或由某个 sibling state machine 事后补写。
 - `runtimeMutationKernel` 唯一持有 repository port 与 `RuntimeTransitionCoordinator`；authority、planning transaction、
   candidate dispatch、drive delivery component 只共享该 kernel，不持有 sibling、Hub 或第二份 aggregate。
 - `RuntimeAggregate.Validate` 顺序验证 SM-2、SM-3、SM-4 及 cross-machine fence。所有合法变化经一次 semantic CAS；
   projection、timer、adapter 和 shared contract package都不能直接写 aggregate。
+- `Facts.Failure` 的替换只能经过 `replaceRuntimeFailureAuthority`，并必须显式选择三种 policy 之一：
+  `runtimeFailureAuthorityRetainInterlude` 仅在同一原子事务的有界中间态保留既有 target/directive；
+  `runtimeFailureAuthorityRetire` 同时清除旧 `FailureTarget + RepairDirective`；
+  `runtimeFailureAuthorityReplaceFromExactOwnerFact` 只接受与新 failure signature/targets/observation exact-match
+  的 owner fact，并先退休旧 directive。任何普通 failure 写入不得隐式继承 repair authority。
 - `internal/pkg/workorchruntimecontract` 只包含 DTO、enum、normalize/validate/clone/hash、manifest compiler 和纯 matcher；
   不持有 Hub/I/O/CAS，也不选择 retry、terminal 或 Runtime action。
 
@@ -51,6 +59,8 @@ capability resource state。
   `one_of`/`any_of` terminal escape。Definition gap 只能进入专用 clarification transaction。
 - provider-facing manifest、closed JSON Schema、strict decoder、single evaluator 和 owner feasibility 共享一个 sealed
   `RuntimeCandidateContractManifest`。LLM wire 不包含 operation ID/dependency；本地 compiler 唯一派生 identity/graph。
+- core reducer 只读取 typed feasibility/status、sealed operation descriptor 与 Profile declaration；capability owner 的私有
+  diagnostic code/prefix只作为 original diagnostic 保真，不能选择 failure class、repair owner、retry、governance 或 terminal。
 - JSON Schema response format 是可选 transport acceleration。format on/off 都必须经过同一 local decoder/evaluator；format
   failure不授权第二次无 format physical call。
 - coherent empty/invalid、schema rejection 与 semantic rejection 共用 attempt 0/1。只有 persisted typed correction witness
@@ -76,16 +86,25 @@ capability resource state。
   receipt admission；`found=false` 虽由 SM-4 drive 中的 owner executor 使用，也不能成为独立 SM-4 transition authority。
 - `rejected` receipt 先保留 owner exact diagnostic；只有 `accepted|no_op` 进入 effect/quality gate。raw stdout/stderr、provider
   reasoning 和 decoder message不能进入 aggregate、Eventstream、projection、memory 或 C4。
-- claimed/no-receipt 只在 sealed idempotency 允许时消费 SM-4 operation-recovery budget后重放；at-most-once/unknown effect 进入
-  `outcome_unknown`。exact receipt duplicate零 effect、零 evidence revision、零 credit。
+- claimed/no-receipt 只在 sealed idempotency 允许时消费 SM-4 operation-recovery budget，并持久化 exact
+  `RuntimeOperationRecoveryAuthorization` 后重放。authorization 逐项绑定 workspace/run、dispatch、operation、
+  `ExecutionKey + Fence`、全局 recovery attempt 与 issued revision；`issued` 必须先由独立 private event CAS 为带 lease 的
+  `in_flight` claim，只有成功 claim caller 获得一次 physical-call handoff。exact receipt 原子 `settled`；返回无 receipt 记为
+  `uncertain`；active claim 禁止新 grant，lease expiry/restart 也必须先持久化 uncertain 才可消费下一预算。counter/ledger、顺序、
+  identity、claim lease 与 dispatch reverse proof 在 fresh load 全量校验；at-most-once/unknown effect 进入 `outcome_unknown`。
+  exact receipt duplicate零 effect、零 evidence revision、零 credit。
 - `Facts.RepairDirective` 是同 focus 唯一 repair action authority。LLM assessment 的文本、missing claim 和 owner diagnostic
   只作为 observation，不能选择 state change、validation、retry 或 terminal。
-- owner-grounded repair 必须区分 diagnostic observer 与 effect owner：File-confirmed observation 直接绑定 File；MCP
-  receipt-evidence observation 只有在 exact targets 已有完整 File snapshot，且 File 自己提供 fresh exact-target admissibility 时，
-  才能暴露 File-owned durable operation。Shell/Git/MCP 等其它 durable catalog 即使同时存在也不能进入该 manifest。
-- validation failure target 必须来自 sealed finite scope 内的 structured owner observation。Shell candidate先经 File read-only
-  confirmation；pending/stale/rejected confirmation均无 concrete repair authority。confirmed all-of 的每个 File receipt都必须
-  形成连续 workspace revision edge，最后一项后才生成 target-free fresh-validation directive。
+- owner-grounded repair 必须区分 diagnostic observer 与 effect owner。repair owner 只能由 sealed Profile
+  `ValidationFailureRepairConvergence.RepairOwnerModuleID`，或 source binding 中 operation descriptor 的唯一 owner 确定；
+  `RuntimeRepairSurfaceConfirmation.OwnerModuleID`、candidate 中每个 state-change descriptor owner 与后续 receipt producer 必须
+  exact-match。其它 owner 的 catalog/diagnostic 即使同时存在也不能进入该 repair manifest。
+- validation failure target 必须来自 sealed finite scope 内的 structured owner observation，再由上述 resource/effect owner 执行
+  read-only confirmation；pending/stale/rejected confirmation 均无 concrete repair authority。pre-seal manifest 必须将 purpose
+  固定为 `confirmed_validation_repair`，并在 `RuntimeDispatchRepairCommitment.RepairOwnerModuleID` 中封存 owner。confirmed
+  all-of 的每个 matching-owner receipt 都必须形成连续、owner-scoped workspace revision edge，最后一项后才生成 target-free
+  fresh-validation directive。software-dev Profile 的 Shell diagnostic → File confirmation/File effect 只是该中立合同的一种
+  specialization，不是 Orchestrator core 分支条件。
 
 ### Recovery, governance and delivery
 
@@ -93,10 +112,17 @@ capability resource state。
   call/effect 前与授权同 CAS 创建；submitted outcome必须 settlement，unknown conservatively占用预算。
 - `RuntimeDriveLease` 是 delayed recovery 的唯一 authority。timer只 claim exact due generation；process-local gate/timer 仅合并
   persisted identity。Stop 清理本地等待但不删除 durable lease，fresh startup从 Run owner inventory恢复。
+- framework `Setup` 必须同时注入 EventHub 与 `BackgroundRoutine`，`Run(ctx)` 把 framework context 绑定到全部 owner-local drive、
+  timer 和 startup recovery。startup 任一步失败必须撤销订阅并取消本地 lifecycle；`Stop(ctx)` 先取消 context、关闭 ingress，
+  再按 deadline 等待既有 handler/drive 退出并清空本地依赖。该锁与 context 只做 Module 生命周期同步，不是 SM-1/SM-4 authority；
+  durable successor仍只来自 aggregate lease/authorization，重启从 Run owner inventory 恢复。Module 保持 startup weight 30、
+  teardown weight 90：前者保证 Orchestrator ingress 先于 Run recovery，后者保证 Orchestrator worker 先于 Run/capability teardown
+  停止；两个依赖顺序不得再复用同一个反向权重推导。
 - startup 只用 Run owner 的 bounded recovery inventory/readiness/opaque record query。unknown/retired current JSON、cursor cycle、
   page/item limit、nil/wrong result直接使启动失败，零 provider/capability/governance side effect。
-- Decision/Approval owner 持久化 resolution；Orchestrator用 exact ticket/approval、resolution、dispatch/dependency/grant fence
-  提交 continuation或terminal。Application和Governance都不发布 Resume。
+- Decision/Approval owner 持久化 resolution；Orchestrator只暴露 ticket-resolution 与 approval-resolution 两个具体 typed ingress，
+  先从 aggregate 重建 exact persisted binding，再在 owner-private value adapter 中提交 continuation或terminal。不存在 generic
+  governance-resolution EventHub command/topic；Application和Governance都不发布 Resume。
 - terminal outcome先由 SM-2 seal，再由 SM-4按 Result→Workspace→Run顺序交付。各 owner只执行自身 private reducer并返回 exact
   acknowledgement；partial/response-loss从同一 delivery ledger幂等续驱，不改写 terminal decision。
 - Workspace deletion只允许在 Run owner `draining` fence后排空既有 terminal delivery。Orchestrator独占自身 quiescence/purge
@@ -136,16 +162,17 @@ capability resource state。
 
 | 验收面 | 自动化证据 | 必需维度 |
 | --- | --- | --- |
-| Module lifecycle/core dependencies | `biz/owner_test.go::TestModuleIdentityConfigureStartStopContract`、`biz/owner_test.go::TestModuleConfigureRequiresCoreDependencies` | identity、Configure/Start/Stop、重复 lifecycle、canonical evidence repository bundle 与 EventHub dependency fail-fast；可选 BackgroundRoutine 的 scheduling/Stop 行为由 SM-4 行验收 |
-| owner-private dispatcher/CAS/aggregate | `biz/runtime/internal_event_*_test.go`、`biz/runtime/component_facades_test.go`、`biz/runtime/aggregate_invariant_test.go`、`biz/runtime/structure_contract_test.go` | exactly-one payload、legal/illegal transition、single mutation root、pre/post-CAS failure |
+| Module lifecycle/core dependencies | `plugin_test.go::TestModuleRunBindsFrameworkContextToOwnerLifecycle`、`plugin_test.go::TestModuleSetupRejectsMissingBackgroundRoutine`、`biz/owner_test.go::TestModuleIdentityConfigureStartStopContract`、`biz/owner_test.go::TestModuleConfigureRequiresCoreDependencies`、`biz/owner_test.go::TestFailedStartRemovesAllIngressAndCancelsLifecycle` | identity、Configure/Start/Stop、framework context、required BackgroundRoutine、startup rollback、deadline-aware Stop、canonical evidence repository bundle 与 EventHub dependency fail-fast |
+| owner-private dispatcher/CAS/aggregate | `biz/runtime/internal_event_*_test.go`、`biz/runtime/component_facades_test.go`、`biz/runtime/aggregate_invariant_test.go`、`biz/runtime/structure_contract_test.go`、`biz/runtime/failure_authority_transition_test.go` | exactly-one payload、primary SM 与 coordinated write-set、single mutation root/CAS、三种 failure-authority policy、旧 target/directive 不泄漏、pre/post-CAS failure |
 | SM-2 semantic/CWI/binding | `biz/runtime/semantic_*_test.go`、`biz/runtime/cwi_*_test.go`、`biz/runtime/coverage_*_test.go`、`biz/runtime/assessment_*_test.go` | all-of、owner fact、duplicate/stale/ABA、reopen/settle、proof preimage/restart |
 | SM-3 document/candidate/seal | `biz/runtime_document_conformance_test.go`、`biz/runtime/candidate_*_test.go`、`biz/runtime/dispatch_*_test.go`；`biz/runtime_state_repository_test.go` 中的 `TestRuntimeMainlineMissingRequiredTargetCorrectionSurvivesRestart`、`TestRuntimeMainlineSchemaCorrectionDocumentCASRestartMatrix`、`TestRuntimeFileBackedSemanticCandidateReplayExhaustionSurvivesCASBoundaries`、`TestRuntimeMainlineCandidateAuthorityExhaustionHasNoCorrectionProviderOrBudgetEffect`、`TestRuntimeMainlineRenderedPreflightStopsBeforeCandidateAttempt` | empty/invalid/schema/semantic、schema-first required-field/presence、failure↔correction durable lineage、attempt 0/1、target/binding/effect/dependency；correction preflight 零 provider/attempt、document-complete 后 attempt-begin CAS 前中断/CAS 后响应丢失、fresh-load/duplicate、预算单次扣减、无合法 correction 时零额外 provider/budget、schema rejection 零 dispatch/receipt 均属 SM-3 |
 | capability effect/receipt/evidence | `biz/runtime_operation_receipt_source_test.go`、`biz/runtime/capability_receipt_transaction_matrix_test.go`、`biz/runtime/*_owner_receipt_integration_test.go`、`biz/runtime/operation_receipt_test.go`、`biz/runtime/candidate_evidence_*_test.go` | 六类 owner 的 descriptor/source/query 边界矩阵；empty/whitespace/noncanonical/wrong/cross 的 Query/Commit 零 CAS、aggregate 不变；File 的真实 adapter 路径及 Git/Shell/SSH/MCP 的 proof/state-change 路径均覆盖 production-shaped admission→seal→claim→accepted/no-op/rejected Commit/Query；Web 只作为无 CWI credit 的 auxiliary validation 覆盖同一事务，不能被提升为验收证明；retirement fence 与 receipt-loss recovery均有回归 |
-| owner-grounded repair | `biz/runtime/repair_surface_confirmation_test.go`、`biz/runtime/candidate_evidence_repair_transaction_test.go`、`biz/runtime/mcp_owner_receipt_integration_test.go`、`biz/runtime/reducer_test.go` | Shell failure→File confirmation、MCP receipt→File snapshot、effect-owner filter、single/multi all-of、partial/rejected/restart/governance |
-| governance/clarification | `biz/runtime/governance*_test.go`、`biz/runtime/definition_clarification_test.go`、`biz/runtime_lifecycle_handoff_test.go` | ticket/approval identity、continue/fail、duplicate/stale、response loss、blocked Run ack |
-| SM-4 wait/recovery/delivery | `biz/runtime/drive_lease_test.go`、`biz/runtime_lifecycle_handoff_test.go`、`biz/runtime_drive_result_test.go`、`biz/runtime_result_projection_test.go` | singleflight、timer/Stop epoch、CAS cut points、fresh process、budget、three-owner partial ack；`runtime_state_repository_test.go` 中的 correction transaction 不归入 SM-4 |
+| owner-grounded repair | `biz/runtime/repair_surface_confirmation_test.go`、`biz/runtime/candidate_evidence_repair_transaction_test.go`、`biz/runtime/repair_owner_neutrality_test.go`、`biz/runtime/mcp_owner_receipt_integration_test.go`、`biz/runtime/reducer_test.go` | sealed Profile/descriptor→唯一 `RepairOwnerModuleID`、confirmation/operation/receipt owner exact-match、`confirmed_validation_repair` purpose、single/multi all-of、partial/rejected/restart/governance；software-dev 的 Shell→File/MCP→File 仅作具体 specialization fixture |
+| governance/clarification | `biz/runtime/governance*_test.go`、`biz/runtime/definition_clarification_test.go`、`biz/runtime_lifecycle_handoff_test.go` | ticket/approval 两个 concrete ingress、无 generic resolution ingress、exact binding、continue/fail、duplicate/stale、response loss、blocked Run ack |
+| SM-4 wait/recovery/delivery | `biz/runtime/recovery_budget_test.go`、`biz/runtime/executor_test.go`、`biz/runtime/drive_lease_test.go`、`biz/runtime_lifecycle_handoff_test.go`、`biz/runtime_drive_result_test.go`、`biz/runtime_result_projection_test.go` | singleflight、timer/Stop epoch、CAS cut points、operation authorization issued→in_flight→settled\|uncertain、claim lease/双 worker/counter/ledger/dispatch fresh-load reverse proof、fresh process、budget、three-owner partial ack；`runtime_state_repository_test.go` 中的 correction transaction 不归入 SM-4 |
 | Workspace deletion | `biz/workspace_retirement_test.go`、`biz/workspace_runtime_quiescence_adversarial_test.go` | draining/quiescing fence、in-flight writer、retain/purge、pending journal、restart/tombstone |
 | LLM request/cache/audit | `biz/runtime/provider_request_recovery_test.go`、`biz/runtime/provider_request_terminal_test.go`、`biz/runtime_candidate_event_adapter_test.go` 与 `../../blocks/llm/biz/runtime_*_test.go` | ceiling、identity、format on/off、submission settlement、raw isolation、C0～C5 stability |
+| core neutrality | `biz/runtime/core_neutrality_contract_test.go`、`biz/runtime/semantic_failure_class_test.go`、`biz/runtime_semantic_drive_test.go` | typed feasibility/status 与 descriptor/Profile 驱动分类；不解释 capability owner 常量或私有 diagnostic prefix |
 | static owner boundary | `make verify-boundary-contract` | no forbidden surface、no cross-owner service/repository、state owner manifest consistency |
 
 真实 provider、远端 endpoint 和长时间网络故障由

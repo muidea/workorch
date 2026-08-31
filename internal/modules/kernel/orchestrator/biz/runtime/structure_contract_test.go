@@ -611,7 +611,7 @@ func TestO7CandidateRequestAndExecutionFacetsRemainNarrow(t *testing.T) {
 			case "terminalizeEquivalentAuthorityNoProgress":
 				terminalizerCount++
 			}
-			if receiver == "candidateDispatchComponent" && (function.Name.Name == "executeActiveDispatch" || function.Name.Name == "recoverOperationReceiptAfterExecuteError") {
+			if receiver == "candidateDispatchComponent" && function.Name.Name == "executeActiveDispatch" {
 				if filepath.Base(filename) != "execution_coordinator.go" {
 					t.Fatalf("%s remains in mixed executor file %s", function.Name.Name, filepath.Base(filename))
 				}
@@ -625,7 +625,7 @@ func TestO7CandidateRequestAndExecutionFacetsRemainNarrow(t *testing.T) {
 	if terminalizerCount != 0 {
 		t.Fatalf("equivalent-authority terminalizer declarations = %d, want 0", terminalizerCount)
 	}
-	for _, name := range []string{"executeActiveDispatch", "recoverOperationReceiptAfterExecuteError"} {
+	for _, name := range []string{"executeActiveDispatch"} {
 		if !controllerExecutionMethods[name] {
 			t.Fatalf("execution coordinator method %s is missing", name)
 		}
@@ -646,8 +646,7 @@ func TestO7ExecutionHandsRecoveryBudgetToSM4(t *testing.T) {
 			if !ok || function.Recv == nil || len(function.Recv.List) != 1 {
 				continue
 			}
-			if runtimeReceiverType(function.Recv.List[0].Type) != "candidateDispatchComponent" ||
-				(function.Name.Name != "executeActiveDispatch" && function.Name.Name != "recoverOperationReceiptAfterExecuteError") {
+			if runtimeReceiverType(function.Recv.List[0].Type) != "candidateDispatchComponent" || function.Name.Name != "executeActiveDispatch" {
 				continue
 			}
 			ast.Inspect(function.Body, func(node ast.Node) bool {
@@ -690,8 +689,36 @@ func TestO7ExecutionHandsRecoveryBudgetToSM4(t *testing.T) {
 		}
 		return true
 	})
-	if !seenOperationID || !seenBudgetAttempt {
-		t.Fatalf("recovery handoff identity fields missing: operation=%v attempt=%v", seenOperationID, seenBudgetAttempt)
+	if seenOperationID || seenBudgetAttempt {
+		t.Fatalf("process-local transaction recovery authority returned: operation=%v attempt=%v", seenOperationID, seenBudgetAttempt)
+	}
+	deliverySource := files[filepath.Join(".", "internal_event_delivery.go")]
+	if deliverySource == nil {
+		for filename, file := range files {
+			if filepath.Base(filename) == "internal_event_delivery.go" {
+				deliverySource = file
+				break
+			}
+		}
+	}
+	if deliverySource == nil {
+		t.Fatal("internal event delivery source is missing")
+	}
+	seenAuthorizationID, seenClaimID := false, false
+	ast.Inspect(deliverySource, func(node ast.Node) bool {
+		field, ok := node.(*ast.Field)
+		if !ok || field.Names == nil {
+			return true
+		}
+		for _, name := range field.Names {
+			seenOperationID = seenOperationID || name.Name == "RecoveryOperationID"
+			seenAuthorizationID = seenAuthorizationID || name.Name == "RecoveryAuthorizationID"
+			seenClaimID = seenClaimID || name.Name == "RecoveryClaimID"
+		}
+		return true
+	})
+	if !seenOperationID || !seenAuthorizationID || !seenClaimID {
+		t.Fatalf("durable recovery-ledger fact identity fields missing: operation=%v authorization=%v claim=%v", seenOperationID, seenAuthorizationID, seenClaimID)
 	}
 }
 
@@ -717,8 +744,7 @@ func TestO7RuntimeFilesKeepOneFacetPerTransitionFile(t *testing.T) {
 		"authority_assessment_transition.go": {"authorityComponent.commitAssessment": true},
 		"drive_delivery_transition.go":       {"driveDeliveryComponent.requestTermination": true},
 		"execution_coordinator.go": {
-			"candidateDispatchComponent.executeActiveDispatch":                    true,
-			"candidateDispatchComponent.recoverOperationReceiptAfterExecuteError": true,
+			"candidateDispatchComponent.executeActiveDispatch": true,
 		},
 	}
 	files := parseRuntimeProductionSources(t)

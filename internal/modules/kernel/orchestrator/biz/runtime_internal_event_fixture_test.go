@@ -3,6 +3,7 @@ package orchestrator
 import (
 	"context"
 	"fmt"
+	"time"
 
 	runtime "github.com/muidea/workorch/internal/modules/kernel/orchestrator/biz/runtime"
 	"github.com/muidea/workorch/internal/pkg/common"
@@ -127,29 +128,112 @@ func (o *Biz) CommitRuntimeGovernanceResolution(ctx context.Context, resolution 
 }
 
 func (o *Biz) ExecuteRuntimeDispatch(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, executor runtime.RuntimeOperationExecutor) (runtime.RuntimeAggregate, error) {
-	var recoveryOperationID string
-	var recoveryBudgetAttempt int
-	for transition := 0; transition <= runtimecontract.RuntimeRecoveryBudgetLimit; transition++ {
-		result, err := o.submitRuntimeInternalEvent(ctx, runtime.RuntimeInternalEvent{
-			Kind:  runtime.RuntimeInternalEventDispatchExecutionRequested,
-			Scope: runtime.RuntimeInternalEventScope{WorkspaceID: workspaceID, RunID: runID},
-			Transaction: &runtime.RuntimeInternalTransactionPayload{
-				Executor: executor, RecoveryOperationID: recoveryOperationID, RecoveryBudgetAttempt: recoveryBudgetAttempt,
-			},
+	return executeRuntimeDispatchWithExecutor(ctx, workspaceID, runID, executor, o.submitRuntimeInternalEvent)
+}
+
+func executeRuntimeDispatchWithExecutor(
+	ctx context.Context,
+	workspaceID common.WorkspaceID,
+	runID common.RunID,
+	executor runtime.RuntimeOperationExecutor,
+	submit func(context.Context, runtime.RuntimeInternalEvent) (runtime.RuntimeInternalEventResult, error),
+) (runtime.RuntimeAggregate, error) {
+	if executor == nil || submit == nil {
+		return runtime.RuntimeAggregate{}, common.ErrInvalidArgument
+	}
+	recoveryClaimID := ""
+	var operationCallErr error
+	maxTransitions := runtimecontract.RuntimeCandidateOperationMaxCount + runtimecontract.RuntimeRecoveryBudgetLimit*3 + 4
+	for transition := 0; transition <= maxTransitions; transition++ {
+		result, err := submit(ctx, runtime.RuntimeInternalEvent{
+			Kind:        runtime.RuntimeInternalEventDispatchExecutionRequested,
+			Scope:       runtime.RuntimeInternalEventScope{WorkspaceID: workspaceID, RunID: runID},
+			Transaction: &runtime.RuntimeInternalTransactionPayload{RecoveryClaimID: recoveryClaimID, RecoveryClaimNow: time.Now().UTC().Format(time.RFC3339Nano)},
 		})
+		recoveryClaimID = ""
+		if operationID, authorizationID, claimRequired := runtime.RuntimeOperationRecoveryAuthorizationClaimRequired(err); claimRequired {
+			claimed, claimErr := submit(ctx, runtime.RuntimeInternalEvent{
+				Kind: runtime.RuntimeInternalEventOperationRecoveryClaimed, Scope: runtime.RuntimeInternalEventScope{WorkspaceID: workspaceID, RunID: runID},
+				Delivery: &runtime.RuntimeInternalDeliveryPayload{RecoveryOperationID: operationID, RecoveryAuthorizationID: authorizationID, LeaseNow: time.Now().UTC().Format(time.RFC3339Nano)},
+			})
+			if claimErr != nil {
+				return claimed.Aggregate, claimErr
+			}
+			if !claimed.RecoveryClaimChanged || claimed.RecoveryClaimID == "" {
+				return claimed.Aggregate, common.ErrConflict
+			}
+			recoveryClaimID = claimed.RecoveryClaimID
+			continue
+		}
+		if operationID, required := runtime.RuntimeOperationOutcomeUnknownTransitionRequired(err); required {
+			observed, observeErr := submit(ctx, runtime.RuntimeInternalEvent{
+				Kind: runtime.RuntimeInternalEventOperationExecutionOutcomeUnknownObserved, Scope: runtime.RuntimeInternalEventScope{WorkspaceID: workspaceID, RunID: runID},
+				Transaction: &runtime.RuntimeInternalTransactionPayload{OperationOutcomeUnknownID: operationID},
+			})
+			if observeErr != nil {
+				return observed.Aggregate, observeErr
+			}
+			if operationCallErr != nil {
+				return observed.Aggregate, operationCallErr
+			}
+			continue
+		}
+		if err == nil && result.OperationCall != nil {
+			if result.OperationCall.Validate() != nil {
+				return result.Aggregate, common.ErrConflict
+			}
+			call := result.OperationCall
+			_, operationCallErr = executor.ExecuteRuntimeOperation(ctx, call.Request)
+			if call.RecoveryClaimID != "" {
+				returned, returnErr := submit(ctx, runtime.RuntimeInternalEvent{
+					Kind: runtime.RuntimeInternalEventOperationRecoveryCallReturned, Scope: runtime.RuntimeInternalEventScope{WorkspaceID: workspaceID, RunID: runID},
+					Delivery: &runtime.RuntimeInternalDeliveryPayload{RecoveryOperationID: call.Request.Operation.ID,
+						RecoveryAuthorizationID: call.RecoveryAuthorizationID, RecoveryClaimID: call.RecoveryClaimID},
+				})
+				if returnErr != nil {
+					return returned.Aggregate, returnErr
+				}
+			}
+			continue
+		}
+		if err == nil && result.DispatchExecution != nil {
+			handoff := result.DispatchExecution
+			if handoff.Validate() != nil {
+				return result.Aggregate, common.ErrConflict
+			}
+			operationCallErr = nil
+			event := runtime.RuntimeInternalEvent{Scope: runtime.RuntimeInternalEventScope{WorkspaceID: workspaceID, RunID: runID}, Transaction: &runtime.RuntimeInternalTransactionPayload{}}
+			switch {
+			case handoff.Evidence != nil:
+				event.Kind = runtime.RuntimeInternalEventOperationEvidenceObserved
+				event.Transaction.ExecutionEvidence = handoff.Evidence
+			case handoff.PrerequisiteStaleReceipt != nil:
+				event.Kind = runtime.RuntimeInternalEventOperationPrerequisiteStaleObserved
+				event.Transaction.DispatchID = handoff.DispatchID
+				event.Transaction.OperationPrerequisiteStaleReceipt = handoff.PrerequisiteStaleReceipt
+			case handoff.GovernanceRequired != nil:
+				event.Kind = runtime.RuntimeInternalEventOperationGovernanceRequiredObserved
+				event.Transaction.OperationGovernanceResult = handoff.GovernanceRequired
+			default:
+				return result.Aggregate, common.ErrConflict
+			}
+			committed, commitErr := submit(ctx, event)
+			if commitErr != nil {
+				return committed.Aggregate, commitErr
+			}
+			if committed.Aggregate.ActiveDispatch == nil {
+				return committed.Aggregate, nil
+			}
+			continue
+		}
 		if operationID, required := runtime.RuntimeOperationRecoveryBudgetRequired(err); required {
-			budget, budgetErr := o.submitRuntimeInternalEvent(ctx, runtime.RuntimeInternalEvent{
+			budget, budgetErr := submit(ctx, runtime.RuntimeInternalEvent{
 				Kind:     runtime.RuntimeInternalEventRecoveryBudgetConsumed,
 				Scope:    runtime.RuntimeInternalEventScope{WorkspaceID: workspaceID, RunID: runID},
-				Delivery: &runtime.RuntimeInternalDeliveryPayload{RecoveryBudgetKind: runtimecontract.RuntimeRecoveryBudgetOperationRecovery},
+				Delivery: &runtime.RuntimeInternalDeliveryPayload{RecoveryBudgetKind: runtimecontract.RuntimeRecoveryBudgetOperationRecovery, RecoveryOperationID: operationID, LeaseNow: time.Now().UTC().Format(time.RFC3339Nano)},
 			})
 			if budgetErr != nil {
 				return budget.Aggregate, budgetErr
-			}
-			recoveryOperationID, recoveryBudgetAttempt = "", 0
-			if budget.BudgetConsumed {
-				recoveryOperationID = operationID
-				recoveryBudgetAttempt = budget.Aggregate.Facts.Recovery.OperationRecoveryAttempts
 			}
 			continue
 		}

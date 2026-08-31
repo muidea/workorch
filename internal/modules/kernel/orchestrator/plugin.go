@@ -18,9 +18,15 @@ func init() {
 
 func (m *Module) Weight() int { return 30 }
 
+// TeardownWeight stops Runtime drive workers after the application ingress is
+// closed but before Run and capability owners dismantle their repositories and
+// command subscriptions. Startup remains Weight 30 so Run recovery still sees
+// a fully subscribed Orchestrator.
+func (m *Module) TeardownWeight() int { return 90 }
+
 func (m *Module) Setup(_ context.Context, rawEventHub event.Hub, backgroundRoutine task.BackgroundRoutine) *cd.Error {
-	if rawEventHub == nil {
-		return cd.NewError(cd.IllegalParam, "event hub is required")
+	if rawEventHub == nil || backgroundRoutine == nil {
+		return cd.NewError(cd.IllegalParam, "event hub and background routine are required")
 	}
 	repos, err := workorchdeps.ResolveOrchestratorRepositories(ModuleID)
 	if err != nil {
@@ -36,11 +42,11 @@ func (m *Module) Setup(_ context.Context, rawEventHub event.Hub, backgroundRouti
 	return nil
 }
 
-func (m *Module) Run(_ context.Context) *cd.Error {
-	if m == nil {
+func (m *Module) Run(ctx context.Context) *cd.Error {
+	if m == nil || m.bizPtr == nil || ctx == nil {
 		return cd.NewError(cd.IllegalParam, "orchestrator module is not configured")
 	}
-	if err := m.Start(); err != nil {
+	if err := m.bizPtr.StartContext(ctx); err != nil {
 		return cd.NewError(cd.Unexpected, err.Error())
 	}
 	return nil

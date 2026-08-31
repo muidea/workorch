@@ -43,9 +43,9 @@ func ValidateRuntimeSemanticProposalBeforeOwnerProbe(
 }
 
 // RuntimeProspectiveSatisfactionContractViolationDiagnostic maps one already
-// persisted Shell-owned would_not_satisfy fact to the Orchestrator's terminal
+// persisted capability-owner would_not_satisfy fact to the Orchestrator's terminal
 // semantic-contract diagnostic. A proposal reaches this point only after the
-// same Shell-authored all-of target constraint was sealed in the manifest and
+// same owner-authored all-of target constraint was sealed in the manifest and
 // validated before any owner probe, so another target retry cannot resolve the
 // contradiction without changing owner authority.
 func RuntimeProspectiveSatisfactionContractViolationDiagnostic(

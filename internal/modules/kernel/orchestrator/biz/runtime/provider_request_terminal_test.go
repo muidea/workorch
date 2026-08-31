@@ -70,13 +70,14 @@ func TestNormalizeRuntimeProviderRequestTerminalMatrixPreservesProducerDiagnosti
 		class        runtimecontract.RuntimeCandidateRequestOutcomeClass
 		terminalCode string
 		failureClass runtimecontract.FailureClass
+		privateCode  string
 	}{
-		{name: "authentication", class: runtimecontract.RuntimeCandidateRequestOutcomeProviderAuthentication, terminalCode: "provider_authentication", failureClass: runtimecontract.FailureClassProviderAuthentication},
-		{name: "configuration", class: runtimecontract.RuntimeCandidateRequestOutcomeProviderConfiguration, terminalCode: "provider_configuration", failureClass: runtimecontract.FailureClassProviderConfiguration},
-		{name: "transient", class: runtimecontract.RuntimeCandidateRequestOutcomeProviderTransient, terminalCode: "provider_transport_exhausted", failureClass: runtimecontract.FailureClassProviderTransient},
-		{name: "protocol", class: runtimecontract.RuntimeCandidateRequestOutcomeProviderProtocol, terminalCode: "provider_protocol_failure", failureClass: runtimecontract.FailureClassProviderProtocol},
-		{name: "submission_unknown", class: runtimecontract.RuntimeCandidateRequestOutcomeProviderSubmissionUnknown, terminalCode: "provider_submission_unknown", failureClass: runtimecontract.FailureClassProviderSubmissionUnknown},
-		{name: "document_recovery_exhausted", class: runtimecontract.RuntimeCandidateRequestOutcomeDocumentRecoveryExhausted, terminalCode: "candidate_document_recovery_exhausted", failureClass: runtimecontract.FailureClassCandidateDocumentRecoveryExhausted},
+		{name: "authentication", class: runtimecontract.RuntimeCandidateRequestOutcomeProviderAuthentication, terminalCode: "provider_authentication", failureClass: runtimecontract.FailureClassProviderAuthentication, privateCode: "provider_not_configured"},
+		{name: "configuration", class: runtimecontract.RuntimeCandidateRequestOutcomeProviderConfiguration, terminalCode: "provider_configuration", failureClass: runtimecontract.FailureClassProviderConfiguration, privateCode: "invalid_api_key"},
+		{name: "transient", class: runtimecontract.RuntimeCandidateRequestOutcomeProviderTransient, terminalCode: "provider_transport_exhausted", failureClass: runtimecontract.FailureClassProviderTransient, privateCode: "provider_document_content_invalid"},
+		{name: "protocol", class: runtimecontract.RuntimeCandidateRequestOutcomeProviderProtocol, terminalCode: "provider_protocol_failure", failureClass: runtimecontract.FailureClassProviderProtocol, privateCode: "invalid_api_key"},
+		{name: "submission_unknown", class: runtimecontract.RuntimeCandidateRequestOutcomeProviderSubmissionUnknown, terminalCode: "provider_submission_unknown", failureClass: runtimecontract.FailureClassProviderSubmissionUnknown, privateCode: "provider_not_configured"},
+		{name: "document_recovery_exhausted", class: runtimecontract.RuntimeCandidateRequestOutcomeDocumentRecoveryExhausted, terminalCode: "candidate_document_recovery_exhausted", failureClass: runtimecontract.FailureClassCandidateDocumentRecoveryExhausted, privateCode: "invalid_api_key"},
 	}
 	for _, kind := range []runtimecontract.RuntimeProviderDocumentKind{
 		runtimecontract.RuntimeProviderDocumentOperations,
@@ -88,7 +89,7 @@ func TestNormalizeRuntimeProviderRequestTerminalMatrixPreservesProducerDiagnosti
 					SchemaVersion:   runtimecontract.RuntimeOriginalDiagnosticSchemaCurrent,
 					OwnerModuleID:   runtimecontract.RuntimeModuleLLM,
 					OriginalClass:   providerRequestTerminalOriginalClass(tc.class),
-					OriginalCode:    "producer_" + tc.name,
+					OriginalCode:    tc.privateCode,
 					OriginalMessage: "producer exact " + tc.name,
 					Signature:       "producer-exact-" + tc.name,
 				}
@@ -107,7 +108,7 @@ func TestNormalizeRuntimeProviderRequestTerminalMatrixPreservesProducerDiagnosti
 					t.Fatalf("failure rewrote producer diagnostic: %+v", fact.Failure)
 				}
 				if kind == runtimecontract.RuntimeProviderDocumentSemanticPlan {
-					if fact.Failure.Code != "semantic_contract_failed" {
+					if fact.Failure.Code != "semantic_contract_failed" || fact.Failure.Class != tc.failureClass {
 						t.Fatalf("semantic failure = %+v", fact.Failure)
 					}
 				} else if fact.Failure.Class != tc.failureClass || fact.Failure.Code != tc.terminalCode {

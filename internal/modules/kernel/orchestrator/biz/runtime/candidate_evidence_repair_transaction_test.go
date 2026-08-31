@@ -13,15 +13,15 @@ import (
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
-func TestConfirmedFileRepairMultiOperationReceiptChainSurvivesRestartAndDuplicate(t *testing.T) {
-	fixture := newConfirmedFileRepairMultiOperationFixture(t)
+func TestConfirmedRepairMultiOperationReceiptChainSurvivesRestartAndDuplicate(t *testing.T) {
+	fixture := newConfirmedRepairMultiOperationFixture(t)
 	coordinator, err := NewDispatchCoordinator(fixture.repository)
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	first := fixture.acceptedEvidence(t, 0, "tree-v1", "tree-v2")
-	attachConfirmedFileRepairReceiptForTest(t, &fixture.repository.aggregate, &first, "tree-v1", "tree-v2")
+	attachConfirmedRepairReceiptForTest(t, &fixture.repository.aggregate, &first, "tree-v1", "tree-v2")
 	partial, err := coordinator.commitEvidence(context.Background(), first)
 	if err != nil {
 		t.Fatal(err)
@@ -47,7 +47,7 @@ func TestConfirmedFileRepairMultiOperationReceiptChainSurvivesRestartAndDuplicat
 	}
 
 	second := fixture.acceptedEvidence(t, 1, "tree-v2", "tree-v3")
-	attachConfirmedFileRepairReceiptForTest(t, &fixture.repository.aggregate, &second, "tree-v2", "tree-v3")
+	attachConfirmedRepairReceiptForTest(t, &fixture.repository.aggregate, &second, "tree-v2", "tree-v3")
 	settled, err := restarted.commitEvidence(context.Background(), second)
 	if err != nil {
 		t.Fatal(err)
@@ -95,7 +95,7 @@ func TestConfirmedFileRepairMultiOperationReceiptChainSurvivesRestartAndDuplicat
 			mutate: func(value *RuntimeAggregate) {
 				value.RepairSurfaceConfirmations = nil
 			},
-			wantError: "has no unique exact File confirmation",
+			wantError: "has no unique exact owner confirmation",
 		},
 	} {
 		t.Run("fresh-load "+test.name, func(t *testing.T) {
@@ -110,7 +110,7 @@ func TestConfirmedFileRepairMultiOperationReceiptChainSurvivesRestartAndDuplicat
 	// Evidence revision is global chronology, not a mutable payload detail. Keep
 	// the execution's fact ID/hash projection coordinated with the tampered fact
 	// so this case proves both recovery gates reject revision drift itself: the
-	// aggregate-wide ledger and the confirmed-File receipt-chain reverse proof.
+	// aggregate-wide ledger and the confirmed-owner receipt-chain reverse proof.
 	// Do not couple the assertion to which validator reports first or to its
 	// diagnostic wording.
 	t.Run("fresh-load completed evidence revision drift", func(t *testing.T) {
@@ -135,12 +135,12 @@ func TestConfirmedFileRepairMultiOperationReceiptChainSurvivesRestartAndDuplicat
 			break
 		}
 		if !mutated {
-			t.Fatal("settled File transaction has no final execution evidence to drift")
+			t.Fatal("settled repair-owner transaction has no final execution evidence to drift")
 		}
 		if err := tampered.Validate(); err == nil {
 			t.Fatal("fresh-load aggregate accepted a coordinated completed evidence revision drift")
 		}
-		if err := validateConfirmedFileRepairFreshValidationContinuation(tampered); err == nil {
+		if err := validateConfirmedRepairFreshValidationContinuation(tampered); err == nil {
 			t.Fatal("confirmed File continuation accepted a coordinated completed evidence revision drift")
 		}
 	})
@@ -158,25 +158,25 @@ func TestConfirmedFileRepairMultiOperationReceiptChainSurvivesRestartAndDuplicat
 	}
 }
 
-func TestConfirmedFileRepairCommitmentFreshLoadRejectsDeletionAndCoordinatedTamper(t *testing.T) {
-	fixture := newConfirmedFileRepairMultiOperationFixture(t)
+func TestConfirmedRepairCommitmentFreshLoadRejectsDeletionAndCoordinatedTamper(t *testing.T) {
+	fixture := newConfirmedRepairMultiOperationFixture(t)
 	coordinator, err := NewDispatchCoordinator(fixture.repository)
 	if err != nil {
 		t.Fatal(err)
 	}
 	first := fixture.acceptedEvidence(t, 0, "tree-v1", "tree-v2")
-	attachConfirmedFileRepairReceiptForTest(t, &fixture.repository.aggregate, &first, "tree-v1", "tree-v2")
+	attachConfirmedRepairReceiptForTest(t, &fixture.repository.aggregate, &first, "tree-v1", "tree-v2")
 	if _, err := coordinator.commitEvidence(context.Background(), first); err != nil {
 		t.Fatal(err)
 	}
 	second := fixture.acceptedEvidence(t, 1, "tree-v2", "tree-v3")
-	attachConfirmedFileRepairReceiptForTest(t, &fixture.repository.aggregate, &second, "tree-v2", "tree-v3")
+	attachConfirmedRepairReceiptForTest(t, &fixture.repository.aggregate, &second, "tree-v2", "tree-v3")
 	settled, err := coordinator.commitEvidence(context.Background(), second)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if err := settled.Aggregate.Validate(); err != nil {
-		t.Fatalf("settled confirmed File repair baseline: %v", err)
+		t.Fatalf("settled confirmed owner repair baseline: %v", err)
 	}
 
 	dispatchIndex := -1
@@ -186,7 +186,7 @@ func TestConfirmedFileRepairCommitmentFreshLoadRejectsDeletionAndCoordinatedTamp
 		}
 	}
 	if dispatchIndex < 0 {
-		t.Fatal("settled confirmed File repair has no committed repair-purpose dispatch")
+		t.Fatal("settled confirmed owner repair has no committed repair-purpose dispatch")
 	}
 	dispatchID := settled.Aggregate.CompletedDispatches[dispatchIndex].ID
 	attemptIndex := -1
@@ -204,7 +204,7 @@ func TestConfirmedFileRepairCommitmentFreshLoadRejectsDeletionAndCoordinatedTamp
 		}
 	}
 	if attemptIndex < 0 || sessionIndex < 0 {
-		t.Fatalf("settled confirmed File repair has no accepted pre-seal lineage: attempt=%d session=%d", attemptIndex, sessionIndex)
+		t.Fatalf("settled confirmed owner repair has no accepted pre-seal lineage: attempt=%d session=%d", attemptIndex, sessionIndex)
 	}
 
 	tests := []struct {
@@ -229,7 +229,7 @@ func TestConfirmedFileRepairCommitmentFreshLoadRejectsDeletionAndCoordinatedTamp
 			mutate: func(value *RuntimeAggregate) {
 				value.RepairSurfaceConfirmations = nil
 			},
-			wantError: "has no unique exact File confirmation",
+			wantError: "has no unique exact owner confirmation",
 		},
 		{
 			name: "fresh validation directive deleted",
@@ -244,7 +244,7 @@ func TestConfirmedFileRepairCommitmentFreshLoadRejectsDeletionAndCoordinatedTamp
 				value.RepairSurfaceConfirmations = nil
 				value.Facts.RepairDirective = nil
 			},
-			wantError: "has no unique exact File confirmation",
+			wantError: "has no unique exact owner confirmation",
 		},
 		{
 			name: "all commitment copies confirmation and directive deleted",
@@ -311,7 +311,7 @@ func TestConfirmedFileRepairCommitmentFreshLoadRejectsDeletionAndCoordinatedTamp
 			},
 			precheck: func(t *testing.T, value *RuntimeAggregate) {
 				t.Helper()
-				if err := validateConfirmedFileRepairMandatoryCommitments(*value); err == nil ||
+				if err := validateConfirmedRepairMandatoryCommitments(*value); err == nil ||
 					!strings.Contains(err.Error(), "omitted its mandatory rejected-validation commitment") {
 					t.Fatalf("marker-independent mandatory commitment detector error = %v", err)
 				}
@@ -372,24 +372,24 @@ func TestConfirmedFileRepairCommitmentFreshLoadRejectsDeletionAndCoordinatedTamp
 				test.precheck(t, &tampered)
 			}
 			if err := tampered.Validate(); err == nil || !strings.Contains(err.Error(), test.wantError) {
-				t.Fatalf("confirmed File repair commitment tamper error = %v", err)
+				t.Fatalf("confirmed owner repair commitment tamper error = %v", err)
 			}
 		})
 	}
 }
 
-func TestAcceptedConfirmedFileRepairManifestLineageRejectsMissingDuplicateAndBodyDrift(t *testing.T) {
-	fixture := newConfirmedFileRepairSingleOperationFixture(t)
+func TestAcceptedConfirmedRepairManifestLineageRejectsMissingDuplicateAndBodyDrift(t *testing.T) {
+	fixture := newConfirmedRepairSingleOperationFixture(t)
 	aggregate := cloneRuntimeAggregateForMCPProvenanceTest(t, fixture.repository.aggregate)
 	if aggregate.ActiveDispatch == nil {
-		t.Fatal("confirmed File repair manifest fixture has no active dispatch")
+		t.Fatal("confirmed owner repair manifest fixture has no active dispatch")
 	}
 	activeRecord := sealedDispatchToRuntimeRecord(*aggregate.ActiveDispatch)
 	completedRecords := sealedDispatchesToRuntimeRecords(aggregate.CompletedDispatches)
 	if err := runtimecontract.ValidateRuntimeAcceptedCandidateManifestLineage(
 		&activeRecord, completedRecords, aggregate.CandidateAttempts, aggregate.CandidateRequestSessions,
 	); err != nil {
-		t.Fatalf("confirmed File repair manifest baseline: %v", err)
+		t.Fatalf("confirmed owner repair manifest baseline: %v", err)
 	}
 
 	logicalRequestID := ""
@@ -399,7 +399,7 @@ func TestAcceptedConfirmedFileRepairManifestLineageRejectsMissingDuplicateAndBod
 		}
 	}
 	if logicalRequestID == "" {
-		t.Fatal("confirmed File repair manifest fixture has no accepted request identity")
+		t.Fatal("confirmed owner repair manifest fixture has no accepted request identity")
 	}
 	sessionIndex := -1
 	for index := range aggregate.CandidateRequestSessions {
@@ -408,7 +408,7 @@ func TestAcceptedConfirmedFileRepairManifestLineageRejectsMissingDuplicateAndBod
 		}
 	}
 	if sessionIndex < 0 || aggregate.CandidateRequestSessions[sessionIndex].CandidateManifest == nil {
-		t.Fatal("confirmed File repair manifest fixture has no persisted body")
+		t.Fatal("confirmed owner repair manifest fixture has no persisted body")
 	}
 
 	for _, test := range []struct {
@@ -467,9 +467,9 @@ func TestAcceptedConfirmedFileRepairManifestLineageRejectsMissingDuplicateAndBod
 	}
 }
 
-func TestConfirmedFileRepairSingleOperationGovernanceContinueSurvivesRestartAndDuplicate(t *testing.T) {
-	fixture := newConfirmedFileRepairSingleOperationFixture(t)
-	governance := advanceConfirmedFileRepairOperationGovernanceForTest(
+func TestConfirmedRepairSingleOperationGovernanceContinueSurvivesRestartAndDuplicate(t *testing.T) {
+	fixture := newConfirmedRepairSingleOperationFixture(t)
+	governance := advanceConfirmedRepairOperationGovernanceForTest(
 		t, fixture.repository, 0, "single", runtimecontract.RuntimeGovernanceResolutionOutcomeContinue,
 	)
 	if governance.Aggregate.ActiveDispatch == nil {
@@ -485,7 +485,7 @@ func TestConfirmedFileRepairSingleOperationGovernanceContinueSurvivesRestartAndD
 		t.Fatalf("start single-operation File repair governance resume: %v", err)
 	}
 	evidence := fixture.acceptedEvidence(t, 0, "tree-v1", "tree-v2")
-	attachConfirmedFileRepairReceiptForTest(t, &fixture.repository.aggregate, &evidence, "tree-v1", "tree-v2")
+	attachConfirmedRepairReceiptForTest(t, &fixture.repository.aggregate, &evidence, "tree-v1", "tree-v2")
 	coordinator, err := NewDispatchCoordinator(fixture.repository)
 	if err != nil {
 		t.Fatal(err)
@@ -494,7 +494,7 @@ func TestConfirmedFileRepairSingleOperationGovernanceContinueSurvivesRestartAndD
 	if err != nil {
 		t.Fatal(err)
 	}
-	assertConfirmedFileRepairFreshValidationForTest(t, settled.Aggregate, fixture.closureID)
+	assertConfirmedRepairFreshValidationForTest(t, settled.Aggregate, fixture.closureID)
 	if err := settled.Aggregate.Validate(); err != nil {
 		t.Fatalf("single-operation governed File repair did not survive fresh load: %v", err)
 	}
@@ -519,14 +519,14 @@ func TestConfirmedFileRepairSingleOperationGovernanceContinueSurvivesRestartAndD
 	}
 }
 
-func TestConfirmedFileRepairMultiOperationGovernanceContinueOrdersAcceptedAndResolutionEvidence(t *testing.T) {
-	fixture := newConfirmedFileRepairMultiOperationFixture(t)
+func TestConfirmedRepairMultiOperationGovernanceContinueOrdersAcceptedAndResolutionEvidence(t *testing.T) {
+	fixture := newConfirmedRepairMultiOperationFixture(t)
 	coordinator, err := NewDispatchCoordinator(fixture.repository)
 	if err != nil {
 		t.Fatal(err)
 	}
 	first := fixture.acceptedEvidence(t, 0, "tree-v1", "tree-v2")
-	attachConfirmedFileRepairReceiptForTest(t, &fixture.repository.aggregate, &first, "tree-v1", "tree-v2")
+	attachConfirmedRepairReceiptForTest(t, &fixture.repository.aggregate, &first, "tree-v1", "tree-v2")
 	partial, err := coordinator.commitEvidence(context.Background(), first)
 	if err != nil {
 		t.Fatal(err)
@@ -536,7 +536,7 @@ func TestConfirmedFileRepairMultiOperationGovernanceContinueOrdersAcceptedAndRes
 	}
 	acceptedAttemptCount := len(partial.Aggregate.CandidateAttempts)
 
-	governance := advanceConfirmedFileRepairOperationGovernanceForTest(
+	governance := advanceConfirmedRepairOperationGovernanceForTest(
 		t, fixture.repository, 1, "multi-second", runtimecontract.RuntimeGovernanceResolutionOutcomeContinue,
 	)
 	if governance.Aggregate.ActiveDispatch == nil {
@@ -599,7 +599,7 @@ func TestConfirmedFileRepairMultiOperationGovernanceContinueOrdersAcceptedAndRes
 		t.Fatalf("start second File repair governance resume: %v", err)
 	}
 	second := fixture.acceptedEvidence(t, 1, "tree-v2", "tree-v3")
-	attachConfirmedFileRepairReceiptForTest(t, &fixture.repository.aggregate, &second, "tree-v2", "tree-v3")
+	attachConfirmedRepairReceiptForTest(t, &fixture.repository.aggregate, &second, "tree-v2", "tree-v3")
 	restartedCoordinator, err := NewDispatchCoordinator(fixture.repository)
 	if err != nil {
 		t.Fatal(err)
@@ -608,7 +608,7 @@ func TestConfirmedFileRepairMultiOperationGovernanceContinueOrdersAcceptedAndRes
 	if err != nil {
 		t.Fatal(err)
 	}
-	assertConfirmedFileRepairFreshValidationForTest(t, settled.Aggregate, fixture.closureID)
+	assertConfirmedRepairFreshValidationForTest(t, settled.Aggregate, fixture.closureID)
 	if err := settled.Aggregate.Validate(); err != nil {
 		t.Fatalf("multi-operation governed File repair did not survive fresh load: %v", err)
 	}
@@ -626,7 +626,7 @@ func TestConfirmedFileRepairMultiOperationGovernanceContinueOrdersAcceptedAndRes
 	if !foundGovernanceEvidence {
 		t.Fatal("governed File repair fixture has no accepted governance evidence")
 	}
-	if err := validateConfirmedFileRepairFreshValidationContinuation(tampered); err == nil ||
+	if err := validateConfirmedRepairFreshValidationContinuation(tampered); err == nil ||
 		!strings.Contains(err.Error(), "evidence revision gap has no exact governance-resolution lineage") {
 		t.Fatalf("coordinated governance revision drift error = %v", err)
 	}
@@ -648,17 +648,17 @@ func TestConfirmedFileRepairMultiOperationGovernanceContinueOrdersAcceptedAndRes
 }
 
 func TestReduceRuntimeStateWithDirectiveConsumesGovernanceContinuationOwnerEvent(t *testing.T) {
-	fixture := newConfirmedFileRepairMultiOperationFixture(t)
+	fixture := newConfirmedRepairMultiOperationFixture(t)
 	coordinator, err := NewDispatchCoordinator(fixture.repository)
 	if err != nil {
 		t.Fatal(err)
 	}
 	first := fixture.acceptedEvidence(t, 0, "tree-v1", "tree-v2")
-	attachConfirmedFileRepairReceiptForTest(t, &fixture.repository.aggregate, &first, "tree-v1", "tree-v2")
+	attachConfirmedRepairReceiptForTest(t, &fixture.repository.aggregate, &first, "tree-v1", "tree-v2")
 	if _, err := coordinator.commitEvidence(context.Background(), first); err != nil {
 		t.Fatal(err)
 	}
-	governance := advanceConfirmedFileRepairOperationGovernanceForTest(
+	governance := advanceConfirmedRepairOperationGovernanceForTest(
 		t, fixture.repository, 1, "sole-reducer", runtimecontract.RuntimeGovernanceResolutionOutcomeContinue,
 	)
 
@@ -714,9 +714,9 @@ func TestReduceRuntimeStateWithDirectiveConsumesGovernanceContinuationOwnerEvent
 	}
 }
 
-func TestConfirmedFileRepairGovernanceFailCannotCreateFreshValidationAuthority(t *testing.T) {
-	fixture := newConfirmedFileRepairSingleOperationFixture(t)
-	governance := advanceConfirmedFileRepairOperationGovernanceForTest(
+func TestConfirmedRepairGovernanceFailCannotCreateFreshValidationAuthority(t *testing.T) {
+	fixture := newConfirmedRepairSingleOperationFixture(t)
+	governance := advanceConfirmedRepairOperationGovernanceForTest(
 		t, fixture.repository, 0, "fail", runtimecontract.RuntimeGovernanceResolutionOutcomeFail,
 	)
 	if governance.Aggregate.ActiveDispatch != nil || governance.Aggregate.Facts.RepairDirective != nil ||
@@ -724,7 +724,7 @@ func TestConfirmedFileRepairGovernanceFailCannotCreateFreshValidationAuthority(t
 		governance.Aggregate.Facts.Failure.Class != runtimecontract.FailureClassGovernanceRejected {
 		t.Fatalf("failed File governance resolution created repair continuation authority: %+v", governance.Aggregate)
 	}
-	completed, err := completedConfirmedFileRepairTransactions(governance.Aggregate)
+	completed, err := completedConfirmedRepairTransactions(governance.Aggregate)
 	if err != nil {
 		t.Fatalf("classify failed File governance transaction: %v", err)
 	}
@@ -747,14 +747,14 @@ func TestConfirmedFileRepairGovernanceFailCannotCreateFreshValidationAuthority(t
 	}
 }
 
-func TestConfirmedFileRepairMultiOperationRejectedMemberRetiresTransientAuthority(t *testing.T) {
-	fixture := newConfirmedFileRepairMultiOperationFixture(t)
+func TestConfirmedRepairMultiOperationRejectedMemberRetiresTransientAuthority(t *testing.T) {
+	fixture := newConfirmedRepairMultiOperationFixture(t)
 	coordinator, err := NewDispatchCoordinator(fixture.repository)
 	if err != nil {
 		t.Fatal(err)
 	}
 	first := fixture.acceptedEvidence(t, 0, "tree-v1", "tree-v2")
-	attachConfirmedFileRepairReceiptForTest(t, &fixture.repository.aggregate, &first, "tree-v1", "tree-v2")
+	attachConfirmedRepairReceiptForTest(t, &fixture.repository.aggregate, &first, "tree-v1", "tree-v2")
 	partial, err := coordinator.commitEvidence(context.Background(), first)
 	if err != nil || partial.Aggregate.Facts.Resources.FailureTarget != nil || partial.Aggregate.Facts.RepairDirective != nil {
 		t.Fatalf("first repair member retained superseded mutable authority: result=%+v err=%v", partial, err)
@@ -807,26 +807,26 @@ func TestConfirmedFileRepairMultiOperationRejectedMemberRetiresTransientAuthorit
 	}
 }
 
-func TestConfirmedFileRepairMultiOperationRejectsSecondReceiptFromOriginalRevision(t *testing.T) {
-	fixture := newConfirmedFileRepairMultiOperationFixture(t)
+func TestConfirmedRepairMultiOperationRejectsSecondReceiptFromOriginalRevision(t *testing.T) {
+	fixture := newConfirmedRepairMultiOperationFixture(t)
 	coordinator, err := NewDispatchCoordinator(fixture.repository)
 	if err != nil {
 		t.Fatal(err)
 	}
 	first := fixture.acceptedEvidence(t, 0, "tree-v1", "tree-v2")
-	attachConfirmedFileRepairReceiptForTest(t, &fixture.repository.aggregate, &first, "tree-v1", "tree-v2")
+	attachConfirmedRepairReceiptForTest(t, &fixture.repository.aggregate, &first, "tree-v1", "tree-v2")
 	if _, err := coordinator.commitEvidence(context.Background(), first); err != nil {
 		t.Fatal(err)
 	}
 	second := fixture.acceptedEvidence(t, 1, "tree-v1", "tree-v3")
-	attachConfirmedFileRepairReceiptForTest(t, &fixture.repository.aggregate, &second, "tree-v1", "tree-v3")
+	attachConfirmedRepairReceiptForTest(t, &fixture.repository.aggregate, &second, "tree-v1", "tree-v3")
 	if _, err := coordinator.commitEvidence(context.Background(), second); err == nil ||
 		!strings.Contains(err.Error(), "does not continue the completed receipt chain") {
 		t.Fatalf("second receipt reusing original confirmation revision error = %v", err)
 	}
 }
 
-func TestPendingConfirmedFileRepairTransactionDoesNotMatchFreshValidationPartialDispatch(t *testing.T) {
+func TestPendingConfirmedRepairTransactionDoesNotMatchFreshValidationPartialDispatch(t *testing.T) {
 	observation := runtimecontract.RuntimeValidationFailureObservation{
 		WorkspaceID: "ws-1", RunID: "run-1", AuthoritySnapshotID: "authority-validation",
 		DispatchID: "dispatch-validation-source", OperationID: "validate-source",
@@ -855,24 +855,24 @@ func TestPendingConfirmedFileRepairTransactionDoesNotMatchFreshValidationPartial
 			CompletedOperationIDs: []string{"validate-1"},
 		},
 	}
-	if err := validatePendingConfirmedFileRepairTransaction(aggregate); err != nil {
-		t.Fatalf("fresh-validation partial dispatch was classified as confirmed File repair transaction: %v", err)
+	if err := validatePendingConfirmedRepairTransaction(aggregate); err != nil {
+		t.Fatalf("fresh-validation partial dispatch was classified as confirmed owner repair transaction: %v", err)
 	}
 }
 
-func TestRefreshExhaustedConfirmedFileRepairKeepsMutableAuthorityRetired(t *testing.T) {
-	fixture := newConfirmedFileRepairMultiOperationFixture(t)
+func TestRefreshExhaustedConfirmedRepairKeepsMutableAuthorityRetired(t *testing.T) {
+	fixture := newConfirmedRepairMultiOperationFixture(t)
 	coordinator, err := NewDispatchCoordinator(fixture.repository)
 	if err != nil {
 		t.Fatal(err)
 	}
 	first := fixture.acceptedEvidence(t, 0, "tree-v1", "tree-v2")
-	attachConfirmedFileRepairReceiptForTest(t, &fixture.repository.aggregate, &first, "tree-v1", "tree-v2")
+	attachConfirmedRepairReceiptForTest(t, &fixture.repository.aggregate, &first, "tree-v1", "tree-v2")
 	partial, err := coordinator.commitEvidence(context.Background(), first)
 	if err != nil {
 		t.Fatal(err)
 	}
-	transaction, found, err := resolveConfirmedFileRepairTransaction(partial.Aggregate, *partial.Aggregate.ActiveDispatch)
+	transaction, found, err := resolveConfirmedRepairTransaction(partial.Aggregate, *partial.Aggregate.ActiveDispatch)
 	if err != nil || !found || transaction == nil {
 		t.Fatalf("partial repair has no exact immutable transaction: transaction=%+v found=%v err=%v", transaction, found, err)
 	}
@@ -892,14 +892,14 @@ func TestRefreshExhaustedConfirmedFileRepairKeepsMutableAuthorityRetired(t *test
 	}
 }
 
-func TestPendingConfirmedFileRepairTransactionRejectsBrokenReceiptEvidenceAndRevisionChain(t *testing.T) {
-	fixture := newConfirmedFileRepairMultiOperationFixture(t)
+func TestPendingConfirmedRepairTransactionRejectsBrokenReceiptEvidenceAndRevisionChain(t *testing.T) {
+	fixture := newConfirmedRepairMultiOperationFixture(t)
 	coordinator, err := NewDispatchCoordinator(fixture.repository)
 	if err != nil {
 		t.Fatal(err)
 	}
 	first := fixture.acceptedEvidence(t, 0, "tree-v1", "tree-v2")
-	attachConfirmedFileRepairReceiptForTest(t, &fixture.repository.aggregate, &first, "tree-v1", "tree-v2")
+	attachConfirmedRepairReceiptForTest(t, &fixture.repository.aggregate, &first, "tree-v1", "tree-v2")
 	partial, err := coordinator.commitEvidence(context.Background(), first)
 	if err != nil {
 		t.Fatal(err)
@@ -943,7 +943,7 @@ func TestPendingConfirmedFileRepairTransactionRejectsBrokenReceiptEvidenceAndRev
 					}
 				}
 				if fact == nil {
-					t.Fatal("pending confirmed File repair fixture has no accepted fact for its completed member")
+					t.Fatal("pending confirmed owner repair fixture has no accepted fact for its completed member")
 				}
 				fact.ContentHash = "forged-evidence-payload"
 				for index := range value.ActiveDispatch.OperationExecutions {
@@ -1099,7 +1099,7 @@ func TestPendingConfirmedFileRepairTransactionRejectsBrokenReceiptEvidenceAndRev
 					}
 				}
 			},
-			wantError: "does not match its exact Shell receipt",
+			wantError: "does not match its exact validation-owner receipt",
 		},
 		{
 			name: "source revision drift",
@@ -1118,26 +1118,26 @@ func TestPendingConfirmedFileRepairTransactionRejectsBrokenReceiptEvidenceAndRev
 		t.Run(test.name, func(t *testing.T) {
 			tampered := cloneRuntimeAggregateForMCPProvenanceTest(t, partial.Aggregate)
 			test.mutate(&tampered)
-			if err := validatePendingConfirmedFileRepairTransaction(tampered); err == nil || !strings.Contains(err.Error(), test.wantError) {
+			if err := validatePendingConfirmedRepairTransaction(tampered); err == nil || !strings.Contains(err.Error(), test.wantError) {
 				t.Fatalf("fresh-load tamper error = %v", err)
 			}
 		})
 	}
 }
 
-func TestPendingConfirmedFileRepairTransactionRejectsMutableAuthorityAndFreshnessDrift(t *testing.T) {
-	fixture := newConfirmedFileRepairMultiOperationFixture(t)
+func TestPendingConfirmedRepairTransactionRejectsMutableAuthorityAndFreshnessDrift(t *testing.T) {
+	fixture := newConfirmedRepairMultiOperationFixture(t)
 	coordinator, err := NewDispatchCoordinator(fixture.repository)
 	if err != nil {
 		t.Fatal(err)
 	}
 	first := fixture.acceptedEvidence(t, 0, "tree-v1", "tree-v2")
-	attachConfirmedFileRepairReceiptForTest(t, &fixture.repository.aggregate, &first, "tree-v1", "tree-v2")
+	attachConfirmedRepairReceiptForTest(t, &fixture.repository.aggregate, &first, "tree-v1", "tree-v2")
 	partial, err := coordinator.commitEvidence(context.Background(), first)
 	if err != nil {
 		t.Fatal(err)
 	}
-	transaction, found, err := resolveConfirmedFileRepairTransaction(partial.Aggregate, *partial.Aggregate.ActiveDispatch)
+	transaction, found, err := resolveConfirmedRepairTransaction(partial.Aggregate, *partial.Aggregate.ActiveDispatch)
 	if err != nil || !found {
 		t.Fatalf("resolve partial transaction: found=%v err=%v", found, err)
 	}
@@ -1182,7 +1182,7 @@ func TestPendingConfirmedFileRepairTransactionRejectsMutableAuthorityAndFreshnes
 					TargetObservation: &observation,
 				}
 			},
-			wantError: "has no unique exact File confirmation",
+			wantError: "has no unique exact owner confirmation",
 		},
 		{
 			name: "unrelated directive cannot hide missing confirmation lineage",
@@ -1193,7 +1193,7 @@ func TestPendingConfirmedFileRepairTransactionRejectsMutableAuthorityAndFreshnes
 				directive.CurrentFailure = nil
 				value.Facts.RepairDirective = &directive
 			},
-			wantError: "has no unique exact File confirmation",
+			wantError: "has no unique exact owner confirmation",
 		},
 		{
 			name: "unrelated failure target cannot hide missing confirmation lineage",
@@ -1203,7 +1203,7 @@ func TestPendingConfirmedFileRepairTransactionRejectsMutableAuthorityAndFreshnes
 					Signature: "unrelated-failure", TargetRefs: []string{"unrelated.go"},
 				}
 			},
-			wantError: "has no unique exact File confirmation",
+			wantError: "has no unique exact owner confirmation",
 		},
 		{
 			name: "restored state change directive",
@@ -1258,34 +1258,34 @@ func TestPendingConfirmedFileRepairTransactionRejectsMutableAuthorityAndFreshnes
 		t.Run(test.name, func(t *testing.T) {
 			tampered := cloneRuntimeAggregateForMCPProvenanceTest(t, partial.Aggregate)
 			test.mutate(&tampered)
-			if err := validatePendingConfirmedFileRepairTransaction(tampered); err == nil || !strings.Contains(err.Error(), test.wantError) {
+			if err := validatePendingConfirmedRepairTransaction(tampered); err == nil || !strings.Contains(err.Error(), test.wantError) {
 				t.Fatalf("pending File repair tamper error = %v", err)
 			}
 		})
 	}
 }
 
-type confirmedFileRepairMultiOperationFixture struct {
+type confirmedRepairMultiOperationFixture struct {
 	repository *durableRuntimeStateRepository
 	closureID  string
 }
 
-type confirmedFileRepairGovernanceTestResult struct {
+type confirmedRepairGovernanceTestResult struct {
 	Aggregate   RuntimeAggregate
 	operationID string
 	resolution  runtimecontract.RuntimeGovernanceResolution
 }
 
-func advanceConfirmedFileRepairOperationGovernanceForTest(
+func advanceConfirmedRepairOperationGovernanceForTest(
 	t *testing.T,
 	repository *durableRuntimeStateRepository,
 	operationIndex int,
 	suffix string,
 	outcome runtimecontract.RuntimeGovernanceResolutionOutcome,
-) confirmedFileRepairGovernanceTestResult {
+) confirmedRepairGovernanceTestResult {
 	t.Helper()
 	if repository == nil || repository.aggregate.ActiveDispatch == nil {
-		t.Fatal("confirmed File repair governance fixture has no active dispatch")
+		t.Fatal("confirmed owner repair governance fixture has no active dispatch")
 	}
 	ctx := context.Background()
 	controller, err := NewRuntimeController(repository)
@@ -1294,21 +1294,21 @@ func advanceConfirmedFileRepairOperationGovernanceForTest(
 	}
 	operations, err := orderedCandidateOperations(repository.aggregate.ActiveDispatch.Candidate)
 	if err != nil || operationIndex < 0 || operationIndex >= len(operations) {
-		t.Fatalf("confirmed File repair governance operation index %d: %v", operationIndex, err)
+		t.Fatalf("confirmed owner repair governance operation index %d: %v", operationIndex, err)
 	}
 	operation := operations[operationIndex].Normalized()
 	claimed, err := controller.claimOperationExecution(ctx, repository.aggregate.Facts.WorkspaceID, repository.aggregate.Facts.RunID, operation.ID)
 	if err != nil {
-		t.Fatalf("claim confirmed File repair operation for governance: %v", err)
+		t.Fatalf("claim confirmed owner repair operation for governance: %v", err)
 	}
 	execution, found := operationExecutionRecord(claimed.ActiveDispatch.OperationExecutions, operation.ID)
 	if !found || execution.State != runtimecontract.OperationExecutionClaimed {
-		t.Fatalf("confirmed File repair governance execution was not claimed: %+v", execution)
+		t.Fatalf("confirmed owner repair governance execution was not claimed: %+v", execution)
 	}
 	targetRef := operation.TargetRefs[0]
 	requirement := runtimecontract.RuntimeGovernanceRequirement{
 		Kind: runtimecontract.GovernanceApproval, SubjectRef: targetRef,
-		Reason: "confirmed File repair requires explicit owner approval", RequestedAction: operation.Kind, RiskLevel: "high",
+		Reason: "confirmed owner repair requires explicit owner approval", RequestedAction: operation.Kind, RiskLevel: "high",
 		AuthorizationContext: workorcheventpayload.New(workorcheventpayload.StringField("targetRef", targetRef)),
 	}
 	receipt := runtimecontract.RuntimeOperationReceipt{
@@ -1321,28 +1321,28 @@ func advanceConfirmedFileRepairOperationGovernanceForTest(
 		ctx, claimed.Facts.WorkspaceID, claimed.Facts.RunID, sourceDispatchID, execution.Fence, runtimecontract.RuntimeModuleFile, receipt,
 	)
 	if err != nil {
-		t.Fatalf("commit confirmed File repair governance receipt: %v", err)
+		t.Fatalf("commit confirmed owner repair governance receipt: %v", err)
 	}
 	governanceRequired, err := controller.candidateDispatch.recordOperationGovernanceRequired(
 		ctx, claimed.Facts.WorkspaceID, claimed.Facts.RunID, operation.ID,
 		RuntimeOperationExecutionResult{
-			EventID: "confirmed-file-repair-governance-" + suffix, OperationID: operation.ID,
+			EventID: "confirmed-repair-governance-" + suffix, OperationID: operation.ID,
 			Receipt: persistedReceipt, Governance: &requirement,
 		},
 	)
 	if err != nil {
-		t.Fatalf("record confirmed File repair governance requirement: %v", err)
+		t.Fatalf("record confirmed owner repair governance requirement: %v", err)
 	}
 	if governanceRequired.ActiveDispatch != nil || governanceRequired.Decision.State != runtimecontract.ConvergenceStateNeedGovernance ||
 		governanceRequired.Facts.Failure == nil || governanceRequired.Facts.Failure.GovernanceDependency == nil {
-		t.Fatalf("confirmed File repair did not enter exact governance wait: %+v", governanceRequired)
+		t.Fatalf("confirmed owner repair did not enter exact governance wait: %+v", governanceRequired)
 	}
 	manifest, err := runtimecontract.BuildRuntimeCandidateContractManifest(
 		governanceRequired.Decision,
 		runtimecontract.RuntimeCandidateManifestOwnerFactsFromResources(governanceRequired.Facts.Resources),
 	)
 	if err != nil {
-		t.Fatalf("build confirmed File repair governance manifest: %v", err)
+		t.Fatalf("build confirmed owner repair governance manifest: %v", err)
 	}
 	dependency := governanceRequired.Facts.Failure.GovernanceDependency.Clone()
 	governanceCandidate := runtimecontract.RuntimeCandidate{Governance: &runtimecontract.GovernanceCandidate{ExternalDependency: dependency}}
@@ -1351,9 +1351,9 @@ func advanceConfirmedFileRepairOperationGovernanceForTest(
 		governanceCandidate,
 	)
 	if err != nil {
-		t.Fatalf("seal confirmed File repair governance dispatch: %v", err)
+		t.Fatalf("seal confirmed owner repair governance dispatch: %v", err)
 	}
-	approvalID := common.ApprovalID("approval-confirmed-file-repair-" + suffix)
+	approvalID := common.ApprovalID("approval-confirmed-repair-" + suffix)
 	bound, err := controller.bindGovernanceRequest(
 		ctx, governed.Facts.WorkspaceID, governed.Facts.RunID,
 		runtimecontract.RuntimeGovernanceRequestRecord{
@@ -1364,56 +1364,64 @@ func advanceConfirmedFileRepairOperationGovernanceForTest(
 		},
 	)
 	if err != nil {
-		t.Fatalf("bind confirmed File repair governance request: %v", err)
+		t.Fatalf("bind confirmed owner repair governance request: %v", err)
 	}
 	if len(bound.OperationGovernanceBindings) == 0 {
-		t.Fatal("confirmed File repair governance request has no operation binding")
+		t.Fatal("confirmed owner repair governance request has no operation binding")
 	}
 	resolution := runtimecontract.RuntimeGovernanceResolution{
-		ResolutionID: common.ResolutionID("resolution-confirmed-file-repair-" + suffix),
+		ResolutionID: common.ResolutionID("resolution-confirmed-repair-" + suffix),
 		ApprovalID:   approvalID, WorkspaceID: governed.Facts.WorkspaceID, RunID: governed.Facts.RunID,
 		AuthoritySnapshotID: governed.ActiveDispatch.Transaction.AuthoritySnapshotID, DispatchID: governed.ActiveDispatch.ID,
 		DependencyKind: dependency.Kind, SubjectRef: dependency.SubjectRef, Outcome: outcome,
-		Summary: "confirmed File repair governance " + string(outcome), EvidenceRefs: []string{"approval://confirmed-file-repair/" + suffix},
+		Summary: "confirmed owner repair governance " + string(outcome), EvidenceRefs: []string{"approval://confirmed-repair/" + suffix},
 	}
 	committed, err := controller.commitGovernanceResolution(ctx, resolution)
 	if err != nil {
-		t.Fatalf("commit confirmed File repair governance resolution: %v", err)
+		t.Fatalf("commit confirmed owner repair governance resolution: %v", err)
 	}
 	if committed.Disposition != CommitDispositionCommitted {
-		t.Fatalf("confirmed File repair governance resolution disposition = %q", committed.Disposition)
+		t.Fatalf("confirmed owner repair governance resolution disposition = %q", committed.Disposition)
 	}
-	return confirmedFileRepairGovernanceTestResult{
+	return confirmedRepairGovernanceTestResult{
 		Aggregate: committed.Aggregate, operationID: operation.ID, resolution: resolution,
 	}
 }
 
-func assertConfirmedFileRepairFreshValidationForTest(t *testing.T, aggregate RuntimeAggregate, closureID string) {
+func assertConfirmedRepairFreshValidationForTest(t *testing.T, aggregate RuntimeAggregate, closureID string) {
 	t.Helper()
 	if aggregate.ActiveDispatch != nil || aggregate.Facts.Resources.FailureTarget != nil || aggregate.Facts.RepairDirective == nil ||
 		aggregate.Facts.RepairDirective.RequiredState != runtimecontract.ConvergenceStateNeedValidation ||
 		aggregate.Facts.RepairDirective.CurrentFailure != nil || len(aggregate.Facts.RepairDirective.TargetRefs) != 0 ||
 		aggregate.Facts.RepairDirective.Closure == nil || aggregate.Facts.RepairDirective.Closure.ID != closureID {
-		t.Fatalf("confirmed File repair did not close into target-free fresh validation: %+v", aggregate)
+		t.Fatalf("confirmed owner repair did not close into target-free fresh validation: %+v", aggregate)
 	}
 }
 
-func newConfirmedFileRepairMultiOperationFixture(t *testing.T) confirmedFileRepairMultiOperationFixture {
+func newConfirmedRepairMultiOperationFixture(t *testing.T) confirmedRepairMultiOperationFixture {
 	t.Helper()
-	return newConfirmedFileRepairFixture(t, []string{"main.go", "other.go"})
+	return newConfirmedRepairFixture(t, []string{"main.go", "other.go"})
 }
 
-func newConfirmedFileRepairSingleOperationFixture(t *testing.T) confirmedFileRepairMultiOperationFixture {
+func newConfirmedRepairSingleOperationFixture(t *testing.T) confirmedRepairMultiOperationFixture {
 	t.Helper()
-	return newConfirmedFileRepairFixture(t, []string{"main.go"})
+	return newConfirmedRepairFixture(t, []string{"main.go"})
 }
 
-func newConfirmedFileRepairFixture(t *testing.T, targets []string) confirmedFileRepairMultiOperationFixture {
+type confirmedRepairAuthorityFixture struct {
+	repository *durableRuntimeStateRepository
+	controller *RuntimeController
+	aggregate  RuntimeAggregate
+	closureID  string
+	targets    []string
+}
+
+func newConfirmedRepairAuthorityFixture(t *testing.T, targets []string) confirmedRepairAuthorityFixture {
 	t.Helper()
 	ctx := context.Background()
 	targets = normalizeRuntimeTargetRefs(targets)
 	if len(targets) == 0 {
-		t.Fatal("confirmed File repair fixture requires at least one target")
+		t.Fatal("confirmed owner repair fixture requires at least one target")
 	}
 	_, _, aggregate := sealMultiTargetExactValidationBindingForTest(t, targets, "implementation")
 	aggregate.Facts.Capabilities.GovernanceKinds = []string{runtimecontract.RuntimeBlockKindApprovalRequest}
@@ -1431,24 +1439,24 @@ func newConfirmedFileRepairFixture(t *testing.T, targets []string) confirmedFile
 	sealedStateChange := sealCandidateForTest(t, repository, stateChange)
 	for index, operation := range candidateRuntimeOperations(sealedStateChange.ActiveDispatch.Candidate) {
 		evidence := ExecutionEvidence{
-			EventID:     fmt.Sprintf("confirmed-file-repair-baseline-state-%d", index+1),
+			EventID:     fmt.Sprintf("confirmed-repair-baseline-state-%d", index+1),
 			WorkspaceID: sealedStateChange.Facts.WorkspaceID, RunID: sealedStateChange.Facts.RunID,
 			DispatchID: sealedStateChange.ActiveDispatch.ID, AuthoritySnapshotID: sealedStateChange.ActiveDispatch.Transaction.AuthoritySnapshotID,
 			OperationID: operation.ID, Kind: runtimecontract.EvidenceKindStateChange,
-			Status: ExecutionEvidenceStatusAccepted, SourceRef: "confirmed-file-repair/baseline-state/" + operation.ID,
+			Status: ExecutionEvidenceStatusAccepted, SourceRef: "confirmed-repair/baseline-state/" + operation.ID,
 		}
 		attachRuntimeTestOwnerReceipt(t, &repository.aggregate, &evidence)
 		if _, err := coordinator.commitEvidence(ctx, evidence); err != nil {
-			t.Fatalf("commit confirmed File repair baseline state change %q: %v", operation.ID, err)
+			t.Fatalf("commit confirmed owner repair baseline state change %q: %v", operation.ID, err)
 		}
 	}
 	aggregate = repository.aggregate
 	if aggregate.Decision.State != runtimecontract.ConvergenceStateNeedValidation || aggregate.ActiveDispatch != nil {
-		t.Fatalf("confirmed File repair baseline did not require validation: %+v", aggregate)
+		t.Fatalf("confirmed owner repair baseline did not require validation: %+v", aggregate)
 	}
 	aggregate.Facts.Repair = runtimecontract.RuntimeRepairLedger{FocusID: aggregate.Facts.Focus.ID, SliceID: aggregate.Facts.Focus.SliceID}
 	if err := aggregate.Validate(); err != nil {
-		t.Fatalf("reset confirmed File repair validation cycle: %v", err)
+		t.Fatalf("reset confirmed owner repair validation cycle: %v", err)
 	}
 	repository.aggregate = aggregate
 	validation := validationCandidate()
@@ -1458,7 +1466,7 @@ func newConfirmedFileRepairFixture(t *testing.T, targets []string) confirmedFile
 	sealed := sealCandidateForTest(t, repository, validation)
 	operationID := runtimeTestCandidateOperationID(t, sealed.ActiveDispatch.Candidate, 0)
 	if sealed.ActiveDispatch.FocusTargetRole == "" {
-		t.Fatal("confirmed File repair validation dispatch omitted the sealed focus target role")
+		t.Fatal("confirmed owner repair validation dispatch omitted the sealed focus target role")
 	}
 	observation := runtimecontract.RuntimeValidationFailureObservation{
 		WorkspaceID: sealed.Facts.WorkspaceID, RunID: sealed.Facts.RunID,
@@ -1487,13 +1495,30 @@ func newConfirmedFileRepairFixture(t *testing.T, targets []string) confirmedFile
 	if err != nil {
 		t.Fatalf("confirm multi-target repair surface: %v", err)
 	}
-	confirmed = satisfyConfirmedFileRepairTargetSnapshotsForTest(t, ctx, controller, confirmed, "tree-v1")
+	confirmed = satisfyConfirmedRepairTargetSnapshotsForTest(t, ctx, controller, confirmed, "tree-v1")
 	if confirmed.Decision.State != runtimecontract.ConvergenceStateNeedStateChange || confirmed.Facts.RepairDirective == nil ||
 		confirmed.Facts.RepairDirective.Closure == nil || confirmed.Facts.Resources.FailureTarget == nil {
 		t.Fatalf("multi-target confirmation did not establish repair authority: %+v", confirmed)
 	}
-	closureID := confirmed.Facts.RepairDirective.Closure.ID
-	bindingID = confirmed.Facts.Focus.CoverageEvidenceBindings[0].ID
+	return confirmedRepairAuthorityFixture{
+		repository: repository,
+		controller: controller,
+		aggregate:  confirmed,
+		closureID:  confirmed.Facts.RepairDirective.Closure.ID,
+		targets:    append([]string(nil), targets...),
+	}
+}
+
+func newConfirmedRepairFixture(t *testing.T, targets []string) confirmedRepairMultiOperationFixture {
+	t.Helper()
+	ctx := context.Background()
+	authority := newConfirmedRepairAuthorityFixture(t, targets)
+	targets = authority.targets
+	repository := authority.repository
+	controller := authority.controller
+	confirmed := authority.aggregate
+	closureID := authority.closureID
+	bindingID := confirmed.Facts.Focus.CoverageEvidenceBindings[0].ID
 	operations := make([]runtimecontract.StateChangingOperation, 0, len(targets))
 	previousID := ""
 	for index, targetRef := range targets {
@@ -1509,20 +1534,20 @@ func newConfirmedFileRepairFixture(t *testing.T, targets []string) confirmedFile
 	}
 	candidate := runtimecontract.RuntimeCandidate{StateChange: &runtimecontract.StateChangeCandidate{Operations: operations}}
 	if _, err := controller.BeginCandidateAttemptForTest(
-		ctx, confirmed.Facts.WorkspaceID, confirmed.Facts.RunID, 0, "confirmed-file-repair-production-admission",
+		ctx, confirmed.Facts.WorkspaceID, confirmed.Facts.RunID, 0, "confirmed-repair-production-admission",
 	); err != nil {
-		t.Fatalf("begin confirmed File repair production admission: %v", err)
+		t.Fatalf("begin confirmed owner repair production admission: %v", err)
 	}
 	if err := RecordFixtureCandidateFeasibilities(
 		ctx, controller, confirmed.Facts.WorkspaceID, confirmed.Facts.RunID, 0, candidate,
 	); err != nil {
-		t.Fatalf("record confirmed File repair owner feasibility: %v", err)
+		t.Fatalf("record confirmed owner repair owner feasibility: %v", err)
 	}
 	admissionResult, err := controller.AdmitAndSealCandidateAttemptForTest(
 		ctx, confirmed.Facts.WorkspaceID, confirmed.Facts.RunID, 0, candidate,
 	)
 	if err != nil || !admissionResult.Admission.Accepted() || admissionResult.Aggregate.ActiveDispatch == nil {
-		t.Fatalf("seal confirmed File repair production admission: result=%+v err=%v", admissionResult, err)
+		t.Fatalf("seal confirmed owner repair production admission: result=%+v err=%v", admissionResult, err)
 	}
 	_, acceptedAttempt := runtimeTestAcceptedAttemptForActiveDispatch(t, admissionResult.Aggregate)
 	var requestSession *runtimecontract.RuntimeCandidateRequestSession
@@ -1535,12 +1560,12 @@ func newConfirmedFileRepairFixture(t *testing.T, targets []string) confirmedFile
 		admissionResult.Aggregate.ActiveDispatch.RepairCommitment == nil ||
 		!runtimecontract.SameRuntimeDispatchRepairCommitment(requestSession.RepairCommitment, acceptedAttempt.AdmissionRepairCommitment) ||
 		!runtimecontract.SameRuntimeDispatchRepairCommitment(requestSession.RepairCommitment, admissionResult.Aggregate.ActiveDispatch.RepairCommitment) {
-		t.Fatalf("confirmed File repair production admission did not persist exact pre-seal commitment: session=%+v attempt=%+v dispatch=%+v", requestSession, acceptedAttempt, admissionResult.Aggregate.ActiveDispatch)
+		t.Fatalf("confirmed owner repair production admission did not persist exact pre-seal commitment: session=%+v attempt=%+v dispatch=%+v", requestSession, acceptedAttempt, admissionResult.Aggregate.ActiveDispatch)
 	}
-	return confirmedFileRepairMultiOperationFixture{repository: repository, closureID: closureID}
+	return confirmedRepairMultiOperationFixture{repository: repository, closureID: closureID}
 }
 
-func satisfyConfirmedFileRepairTargetSnapshotsForTest(
+func satisfyConfirmedRepairTargetSnapshotsForTest(
 	t *testing.T,
 	ctx context.Context,
 	controller *RuntimeController,
@@ -1557,7 +1582,7 @@ func satisfyConfirmedFileRepairTargetSnapshotsForTest(
 			}
 		}
 		if prerequisite.ID == "" {
-			t.Fatalf("unexpected confirmed File repair prerequisites: %+v", current.Facts.Prerequisites.Pending)
+			t.Fatalf("unexpected confirmed owner repair prerequisites: %+v", current.Facts.Prerequisites.Pending)
 		}
 		snapshot := runtimecontract.TargetSnapshot{
 			TargetRef: prerequisite.SubjectRef, Content: "before " + prerequisite.SubjectRef,
@@ -1577,13 +1602,13 @@ func satisfyConfirmedFileRepairTargetSnapshotsForTest(
 			PrerequisiteID: prerequisite.ID, TargetSnapshot: &snapshot, Observation: &observation,
 		})
 		if err != nil {
-			t.Fatalf("commit confirmed File repair target snapshot: %v", err)
+			t.Fatalf("commit confirmed owner repair target snapshot: %v", err)
 		}
 	}
 	return current
 }
 
-func (f confirmedFileRepairMultiOperationFixture) acceptedEvidence(t *testing.T, index int, beforeTree, afterTree string) ExecutionEvidence {
+func (f confirmedRepairMultiOperationFixture) acceptedEvidence(t *testing.T, index int, beforeTree, afterTree string) ExecutionEvidence {
 	t.Helper()
 	if f.repository == nil || f.repository.aggregate.ActiveDispatch == nil {
 		t.Fatal("multi-operation repair fixture has no active dispatch")
@@ -1606,7 +1631,7 @@ func (f confirmedFileRepairMultiOperationFixture) acceptedEvidence(t *testing.T,
 	}
 }
 
-func attachConfirmedFileRepairReceiptForTest(
+func attachConfirmedRepairReceiptForTest(
 	t *testing.T,
 	aggregate *RuntimeAggregate,
 	evidence *ExecutionEvidence,
@@ -1617,7 +1642,7 @@ func attachConfirmedFileRepairReceiptForTest(
 	attachRuntimeTestOwnerReceipt(t, aggregate, evidence)
 	operation, found := candidateOperationByID(aggregate.ActiveDispatch.Candidate, evidence.OperationID)
 	if !found || len(operation.TargetRefs) != 1 || evidence.Receipt == nil {
-		t.Fatalf("confirmed File repair receipt fixture operation = %+v receipt=%+v", operation, evidence.Receipt)
+		t.Fatalf("confirmed owner repair receipt fixture operation = %+v receipt=%+v", operation, evidence.Receipt)
 	}
 	receipt := evidence.Receipt.Normalized()
 	receipt.BeforeHash = "content-before/" + operation.ID

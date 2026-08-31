@@ -187,9 +187,12 @@ func (c *driveDeliveryComponent) exhaustRecoverableWait(ctx context.Context, wor
 	}
 	expectedRevision := aggregate.StateRevision
 	aggregate.RecoverableWaits[idx].Status = runtimecontract.RuntimeRecoverableWaitExhausted
-	aggregate.Facts.Failure = &runtimecontract.FailureFact{
+	failure := runtimecontract.FailureFact{
 		Class: runtimecontract.FailureClassRecoverableWaitExhausted, Code: strings.TrimSpace(code),
 		Signature: "recoverable-wait-exhausted/" + wait.WaitID, Message: "recoverable Runtime wait probe failed its sealed contract",
+	}
+	if err := replaceRuntimeFailureAuthority(&aggregate.Facts, failure, runtimeFailureAuthorityRetire, nil); err != nil {
+		return RuntimeAggregate{}, err
 	}
 	facts, decision, reduceErr := ReduceRuntimeStateWithDirective(aggregate.Facts, &aggregate.Decision.AuthoritySnapshot, aggregate.CoverageProofLineage)
 	if reduceErr != nil {
@@ -241,9 +244,12 @@ func (c *driveDeliveryComponent) expireRecoverableWait(ctx context.Context, aggr
 		}
 	}
 	aggregate.RecoverableWaits[idx].Status = runtimecontract.RuntimeRecoverableWaitExpired
-	aggregate.Facts.Failure = &runtimecontract.FailureFact{
+	failure := runtimecontract.FailureFact{
 		Class: runtimecontract.FailureClassRecoverableWaitExpired, Code: strings.TrimSpace(code),
 		Signature: "recoverable-wait-expired/" + wait.WaitID, Message: "recoverable Runtime wait exceeded its sealed deadline",
+	}
+	if err := replaceRuntimeFailureAuthority(&aggregate.Facts, failure, runtimeFailureAuthorityRetire, nil); err != nil {
+		return RuntimeAggregate{}, false, err
 	}
 	facts, decision, err := ReduceRuntimeStateWithDirective(aggregate.Facts, &aggregate.Decision.AuthoritySnapshot, aggregate.CoverageProofLineage)
 	if err != nil {
@@ -370,9 +376,12 @@ func confirmRecoverableWaitProbe(aggregate *RuntimeAggregate, observation runtim
 	aggregate.RecoverableWaits[idx].LastProbeResultHash = observation.OwnerResultHash
 	if !observedAt.Before(deadline) {
 		aggregate.RecoverableWaits[idx].Status = runtimecontract.RuntimeRecoverableWaitExpired
-		aggregate.Facts.Failure = &runtimecontract.FailureFact{
+		failure := runtimecontract.FailureFact{
 			Class: runtimecontract.FailureClassRecoverableWaitExpired, Code: "recoverable_wait_deadline_exceeded",
 			Signature: "recoverable-wait-expired/" + wait.WaitID, Message: "recoverable Runtime wait result arrived after its sealed deadline",
+		}
+		if err := replaceRuntimeFailureAuthority(&aggregate.Facts, failure, runtimeFailureAuthorityRetire, nil); err != nil {
+			return false, err
 		}
 		facts, decision, reduceErr := ReduceRuntimeStateWithDirective(aggregate.Facts, &aggregate.Decision.AuthoritySnapshot, aggregate.CoverageProofLineage)
 		if reduceErr != nil {

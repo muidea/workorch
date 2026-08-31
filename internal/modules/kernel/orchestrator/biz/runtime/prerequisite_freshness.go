@@ -81,7 +81,7 @@ func NextRuntimeSemanticCatalogScopeGap(aggregate RuntimeAggregate) (RuntimeSema
 }
 
 // runtimeSemanticCatalogCoversFocusTargets distinguishes an exact target
-// catalog from a closed owner selector. Git, MCP and similar owners may
+// catalog from a closed owner selector. Capability owners may
 // authorize an existing owner scope without enumerating workspace target
 // refs; repeatedly reacquiring that unchanged catalog cannot make its target
 // list grow. The selector is authority only when the exact accepted
@@ -120,7 +120,7 @@ func SemanticManifestCatalogFreshnessGaps(aggregate RuntimeAggregate, manifest r
 }
 
 // SemanticProspectiveFeasibilityFreshnessGaps compares the exact observation
-// identities persisted by one composite File→required-owner fact. A catalog
+// identities persisted by one composite manifest-owner→required-owner fact. A catalog
 // snapshot can remain byte-identical while its workspace dependency is
 // re-observed, so snapshot-only freshness is insufficient at CAS and seal.
 func SemanticProspectiveFeasibilityFreshnessGaps(aggregate RuntimeAggregate, manifest runtimecontract.RuntimeSemanticPlanManifest, feasibility runtimecontract.RuntimeSemanticProofFeasibility) []RuntimeSemanticCatalogFreshnessGap {
@@ -551,8 +551,8 @@ func invalidatePrerequisiteObservationsForStale(facts runtimecontract.RuntimeFac
 	// A stale owner observation proves that the exact dependency revision is no
 	// longer authoritative, not merely that the responder which reported it is
 	// stale. Retire every current observation with that same typed dependency.
-	// This matters for a Git admissibility inventory: it is bound to a Git
-	// repository-state snapshot that carries the identical repository revision.
+	// This matters for an admissibility inventory bound to an owner state
+	// snapshot that carries the identical resource revision.
 	// Keeping that snapshot would force re-acquisition to reuse the obsolete
 	// binding and make the next owner result uncommittable.
 	affected := make([]runtimecontract.RuntimePrerequisiteObservation, 0, 1)
@@ -693,7 +693,7 @@ func invalidateFailureTargetObservations(facts *runtimecontract.RuntimeFacts, in
 		facts.Failure.TargetObservation = nil
 		// The receipt ledger remains the immutable audit source. Once the mutable
 		// owner revision is invalidated, its nested diagnostic copy must not remain
-		// as alternate current MCP target authority.
+		// as alternate current capability target authority.
 		if facts.Failure.OriginalDiagnostic != nil && sameFailureTargetObservationBinding(facts.Failure.OriginalDiagnostic.TargetObservation, &targetObservation) {
 			facts.Failure.OriginalDiagnostic.TargetRefs = nil
 			facts.Failure.OriginalDiagnostic.TargetObservation = nil

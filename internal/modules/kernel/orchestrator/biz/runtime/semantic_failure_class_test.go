@@ -20,7 +20,7 @@ func TestSemanticFailureClassForFailureCodePreservesBoundedTerminalCategories(t 
 		{name: "document recovery exhausted", code: "semantic_document_recovery_exhausted", want: runtimecontract.FailureClassCandidateDocumentRecoveryExhausted},
 		{name: "provider body timeout", code: "semantic_provider_body_idle_timeout", want: runtimecontract.FailureClassProviderTransient},
 		{name: "provider protocol", code: "semantic_provider_outcome_invalid", want: runtimecontract.FailureClassProviderProtocol},
-		{name: "MCP validation input prerequisite", code: "mcp_validation_input_binding_required", want: runtimecontract.FailureClassCapabilityUnavailable},
+		{name: "owner prerequisite", code: "semantic_owner_prerequisite_required", want: runtimecontract.FailureClassCapabilityUnavailable},
 		{name: "runtime contract", code: "runtime_contract_defect", want: runtimecontract.FailureClassRuntimeContractMisalignment},
 	}
 	for _, tt := range tests {
@@ -39,33 +39,32 @@ func TestSemanticFailureClassForFailureCodePreservesBoundedTerminalCategories(t 
 	}
 }
 
-func TestSemanticFailureClassForDiagnosticKeepsMCPInputBindingAsCapabilityPrerequisite(t *testing.T) {
-	got := semanticFailureClassForDiagnostic(runtimecontract.RuntimeOriginalDiagnostic{
+func TestSemanticFailureClassForDiagnosticDoesNotInterpretCapabilityPrivateCode(t *testing.T) {
+	got := semanticFailureClassForFailureCode("unclassified_semantic_failure", runtimecontract.RuntimeOriginalDiagnostic{
 		OriginalClass: "semantic_feasibility", OriginalCode: "mcp_validation_input_binding_required",
 	})
-	if got != runtimecontract.FailureClassCapabilityUnavailable {
-		t.Fatalf("MCP validation input prerequisite class = %q, want %q", got, runtimecontract.FailureClassCapabilityUnavailable)
+	if got != runtimecontract.FailureClassRuntimeContractMisalignment {
+		t.Fatalf("capability-private code class = %q, want fail-closed %q", got, runtimecontract.FailureClassRuntimeContractMisalignment)
 	}
 }
 
-func TestSemanticFailureClassForDiagnosticPreservesProviderCategories(t *testing.T) {
+func TestSemanticFailureClassForFailureCodeDoesNotInterpretProviderPrivateCategories(t *testing.T) {
 	tests := []struct {
-		name  string
-		class string
-		want  runtimecontract.FailureClass
+		name string
+		code string
 	}{
-		{name: "transient", class: string(runtimecontract.RuntimeCandidateFailureClassProviderTransient), want: runtimecontract.FailureClassProviderTransient},
-		{name: "authentication", class: string(runtimecontract.RuntimeCandidateFailureClassProviderAuthentication), want: runtimecontract.FailureClassProviderAuthentication},
-		{name: "configuration", class: string(runtimecontract.RuntimeCandidateFailureClassProviderConfiguration), want: runtimecontract.FailureClassProviderConfiguration},
-		{name: "protocol", class: string(runtimecontract.RuntimeCandidateFailureClassProviderProtocol), want: runtimecontract.FailureClassProviderProtocol},
+		{name: "transient", code: "provider_body_idle_timeout"},
+		{name: "authentication", code: "invalid_api_key"},
+		{name: "configuration", code: "provider_not_configured"},
+		{name: "protocol", code: "provider_document_content_invalid"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := semanticFailureClassForDiagnostic(runtimecontract.RuntimeOriginalDiagnostic{
-				OriginalClass: tt.class, OriginalCode: "provider-specific-code",
+			got := semanticFailureClassForFailureCode("unclassified_semantic_failure", runtimecontract.RuntimeOriginalDiagnostic{
+				OriginalClass: string(runtimecontract.RuntimeCandidateFailureClassProviderProtocol), OriginalCode: tt.code,
 			})
-			if got != tt.want {
-				t.Fatalf("semantic diagnostic class %q = %q, want %q", tt.class, got, tt.want)
+			if got != runtimecontract.FailureClassRuntimeContractMisalignment {
+				t.Fatalf("provider-private diagnostic code %q selected class %q", tt.code, got)
 			}
 		})
 	}

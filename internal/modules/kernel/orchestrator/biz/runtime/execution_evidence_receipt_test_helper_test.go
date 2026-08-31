@@ -47,9 +47,15 @@ func runtimeTestCommitAcceptedReceiptEvidence(t *testing.T, aggregate *RuntimeAg
 	if err != nil {
 		t.Fatalf("initialize accepted receipt projection controller: %v", err)
 	}
-	committed, err := controller.candidateDispatch.commitPersistedOperationReceiptEvidence(
-		context.Background(), *aggregate, *dispatch, operation, receipt,
-	)
+	evidence, err := operationEvidenceFromPersistedReceipt(*aggregate, *dispatch, operation, receipt)
+	if err != nil {
+		t.Fatalf("derive accepted receipt projection: %v", err)
+	}
+	committed, err := controller.ApplyInternalEvent(context.Background(), RuntimeInternalEvent{
+		Kind:        RuntimeInternalEventOperationEvidenceObserved,
+		Scope:       RuntimeInternalEventScope{WorkspaceID: aggregate.Facts.WorkspaceID, RunID: aggregate.Facts.RunID},
+		Transaction: &RuntimeInternalTransactionPayload{ExecutionEvidence: &evidence},
+	})
 	if err != nil {
 		t.Fatalf("commit accepted receipt projection: %v", err)
 	}

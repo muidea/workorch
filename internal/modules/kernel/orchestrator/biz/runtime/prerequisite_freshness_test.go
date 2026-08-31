@@ -951,7 +951,24 @@ func TestOwnerContractDefectFailsFastWithoutCorrectionOrEffect(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	initialized, err := controller.initialize(ctx, controllerFacts(), controllerDefinition(), nil)
+	facts := controllerFacts()
+	inventory := facts.Resources.OperationAdmissibilities[0].Normalized()
+	admissibility := runtimecontract.RuntimePrerequisite{
+		ID: inventory.PrerequisiteID, Kind: runtimecontract.PrerequisiteKindOperationAdmissibility,
+		OwnerModuleID: inventory.OwnerModuleID, RequiredCapabilities: []string{runtimecontract.StepKindFileWrite},
+	}
+	observation := runtimecontract.RuntimePrerequisiteObservation{
+		PrerequisiteID: admissibility.ID, Kind: admissibility.Kind, OwnerModuleID: admissibility.OwnerModuleID,
+		ContentHash: inventory.SnapshotID,
+		Dependencies: []runtimecontract.RuntimeFreshnessDependency{{
+			Domain: runtimecontract.RuntimeResourceWorkspaceTree, OwnerModuleID: runtimecontract.RuntimeModuleFile,
+			SubjectRef: "workspace_deliverable", Revision: inventory.ObservedRevision,
+		}},
+	}
+	observation.ObservationID = runtimecontract.StableRuntimePrerequisiteObservationID(observation)
+	facts.Prerequisites.Satisfied = []runtimecontract.RuntimePrerequisite{admissibility}
+	facts.Resources.PrerequisiteObservations = []runtimecontract.RuntimePrerequisiteObservation{observation}
+	initialized, err := controller.initialize(ctx, facts, controllerDefinition(), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -964,6 +981,14 @@ func TestOwnerContractDefectFailsFastWithoutCorrectionOrEffect(t *testing.T) {
 	proposed, err := controller.recordCandidateProposal(ctx, initialized.Facts.WorkspaceID, initialized.Facts.RunID, 0, candidate)
 	if err != nil {
 		t.Fatal(err)
+	}
+	currentInventory, found := runtimeOperationAdmissibilityForKind(
+		proposed.Facts.Resources.OperationAdmissibilities,
+		runtimecontract.RuntimeModuleFile,
+		runtimecontract.StepKindFileWrite,
+	)
+	if !found {
+		t.Fatal("owner contract-defect fixture has no current File admissibility")
 	}
 	operationID := runtimeTestCandidateOperationID(t, *proposed.CandidateAttempts[len(proposed.CandidateAttempts)-1].Proposal, 0)
 	original := runtimecontract.FailureFact{
@@ -982,7 +1007,7 @@ func TestOwnerContractDefectFailsFastWithoutCorrectionOrEffect(t *testing.T) {
 		t.Fatal(err)
 	}
 	if _, err := controller.recordCandidateFeasibility(ctx, initialized.Facts.WorkspaceID, initialized.Facts.RunID, 0, runtimecontract.RuntimeCandidateFeasibilityRecord{
-		OperationID: operationID, AdmissibilitySnapshotID: "inventory-file",
+		OperationID: operationID, AdmissibilitySnapshotID: currentInventory.SnapshotID, AcquisitionBinding: currentInventory.AcquisitionBinding,
 		CandidateManifestHash: runtimeTestPendingCandidateManifestHash(t, controller, initialized.Facts.WorkspaceID, initialized.Facts.RunID, 0), Observation: &ownerObservation,
 	}); err != nil {
 		t.Fatal(err)
@@ -1479,7 +1504,7 @@ func TestFileTargetChangeInvalidatesShellValidationObservation(t *testing.T) {
 		len(aggregate.Facts.Prerequisites.Satisfied) != 1 || aggregate.Facts.Prerequisites.Satisfied[0].ID != filePrerequisite.ID ||
 		len(aggregate.Facts.Resources.OperationAdmissibilities) != 1 || aggregate.Facts.Resources.OperationAdmissibilities[0].PrerequisiteID != filePrerequisite.ID ||
 		len(aggregate.PrerequisiteInvalidations) != 1 || aggregate.PrerequisiteInvalidations[0].DispatchID != "dispatch-file" || aggregate.PrerequisiteInvalidations[0].OperationID != "write-target" {
-		t.Fatalf("accepted File receipt did not retire only Shell validation inventory: aggregate=%+v changed=%t err=%v", aggregate, changed, err)
+		t.Fatalf("accepted repair-owner receipt did not retire only Shell validation inventory: aggregate=%+v changed=%t err=%v", aggregate, changed, err)
 	}
 	duplicate, err := applyReceiptResourceChangeInvalidation(&aggregate, "dispatch-file", "write-target", runtimecontract.RuntimeOperationReceipt{
 		ExecutionKey: "exec/ws/run/dispatch-file/write-target", Fence: 1, OperationID: "write-target",

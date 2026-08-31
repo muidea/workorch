@@ -5,6 +5,7 @@ package orchestrator
 import (
 	"context"
 	"errors"
+	"sync"
 	"testing"
 	"time"
 
@@ -100,6 +101,76 @@ func TestGMMR1SM4OrchestratorStartFailsWithoutRecoveryInventory(t *testing.T) {
 	}
 	if err := module.Stop(context.Background()); err != nil {
 		t.Fatalf("Stop after failed Start: %v", err)
+	}
+}
+
+func TestFailedStartRemovesAllIngressAndCancelsLifecycle(t *testing.T) {
+	deps := moduleContractDependencies()
+	background := &recordingBackgroundRoutine{}
+	deps.BackgroundRoutine = background
+	t.Cleanup(func() { deps.CommandHub.Terminate(context.Background()) })
+	// Let Start pass the pre-subscription retirement recovery stage, then fail
+	// on the required Runtime inventory after every ingress has been installed.
+	// This exercises rollback rather than the earlier fail-fast path.
+	recoveryObserver := magicevent.NewSimpleObserver(runevents.CommandDestination, deps.CommandHub)
+	recoveryObserver.Subscribe(runevents.TopicRunCommandWorkspaceRetirementInventory, func(_ magicevent.Event, result magicevent.Result) {
+		if result != nil {
+			result.Set(runevents.QueryWorkspaceRetirementInventoryResult{}, nil)
+		}
+	})
+	t.Cleanup(func() {
+		recoveryObserver.Unsubscribe(runevents.TopicRunCommandWorkspaceRetirementInventory)
+		recoveryObserver.Unsubscribe(runevents.TopicRunCommandRuntimeRecoveryInventory)
+	})
+	module := New()
+	if err := module.Configure(deps); err != nil {
+		t.Fatal(err)
+	}
+	if err := module.StartContext(context.Background()); err == nil {
+		t.Fatal("Start succeeded without recovery inventory")
+	}
+	if module.started || len(module.rawTopics) != 0 || module.lifecycleCtx != nil || module.lifecycleCancel != nil {
+		t.Fatalf("failed Start retained ingress/lifecycle: started=%v topics=%d lifecycle=%v", module.started, len(module.rawTopics), module.lifecycleCtx)
+	}
+	module.driveMu.Lock()
+	closing := module.runtimeLeaseTimerClosing
+	module.driveMu.Unlock()
+	if !closing || !errors.Is(module.runtimeLifecycleSchedulingError(), context.Canceled) {
+		t.Fatalf("failed Start reopened queued callback scheduling: closing=%v err=%v", closing, module.runtimeLifecycleSchedulingError())
+	}
+
+	data := runevents.RunStateChangedData{
+		WorkspaceID: "ws-failed-start", RunID: "run-failed-start", WorkspaceRunGeneration: 1, RunRevision: 1,
+		State: common.RunStateActive,
+	}
+	data.CausationID = runevents.RunStateChangedCausationID(data.RunID, data.WorkspaceRunGeneration, data.RunRevision, 0)
+	deps.CommandHub.Post(magicevent.NewEventWithContext(
+		runevents.TopicRunStateChanged, runevents.CommandDestination, runevents.NotificationDestination,
+		magicevent.NewHeader(), context.Background(), data,
+	))
+	time.Sleep(20 * time.Millisecond)
+	if background.asyncFunctionCalls != 0 {
+		t.Fatalf("failed Start retained Run ingress: background calls=%d", background.asyncFunctionCalls)
+	}
+	recoveryObserver.Subscribe(runevents.TopicRunCommandRuntimeRecoveryInventory, func(_ magicevent.Event, result magicevent.Result) {
+		if result != nil {
+			result.Set(runevents.QueryRuntimeRecoveryInventoryResult{}, nil)
+		}
+	})
+	if err := module.StartContext(context.Background()); err != nil {
+		t.Fatalf("Start retry after recovery repair: %v", err)
+	}
+	if !module.started || len(module.rawTopics) == 0 {
+		t.Fatal("Start retry did not restore lifecycle ingress")
+	}
+	module.driveMu.Lock()
+	closing = module.runtimeLeaseTimerClosing
+	module.driveMu.Unlock()
+	if closing {
+		t.Fatal("successful Start retry did not atomically reopen callback scheduling")
+	}
+	if err := module.Stop(context.Background()); err != nil {
+		t.Fatalf("Stop after recovered Start: %v", err)
 	}
 }
 
@@ -225,6 +296,7 @@ func TestModuleConfigureRequiresCoreDependencies(t *testing.T) {
 			return d
 		}()},
 		{name: "missing command hub", deps: func() Dependencies { d := base; d.CommandHub = nil; return d }()},
+		{name: "missing background routine", deps: func() Dependencies { d := base; d.BackgroundRoutine = nil; return d }()},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -489,6 +561,66 @@ func TestStopWaitsForRuntimeDriveLifecycleReadLockBeforeClearingDependencies(t *
 	}
 }
 
+func TestStopDeadlineCancelsLifecycleAndRetainsDependenciesUntilBlockingDriveExits(t *testing.T) {
+	repository := &lifecycleBlockingRuntimeStateRepository{loadEntered: make(chan struct{}), releaseLoad: make(chan struct{})}
+	owner := newRuntimeTestOwner()
+	if err := owner.ConfigureRuntimeRepository(repository); err != nil {
+		t.Fatal(err)
+	}
+	background := &recordingBackgroundRoutine{}
+	hub := magicevent.NewHub(8)
+	t.Cleanup(func() { hub.Terminate(context.Background()) })
+	module := newTestBiz(owner, hub, background)
+	if err := module.openRuntimeLifecycle(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	module.started = true
+	if err := module.scheduleRuntimeDrive(context.Background(), "ws-stop-deadline", "run-stop-deadline", "blocking-drive"); err != nil {
+		t.Fatal(err)
+	}
+	if background.lastAsyncFunction == nil {
+		t.Fatal("blocking drive was not submitted")
+	}
+	workerDone := make(chan struct{})
+	go func() {
+		background.lastAsyncFunction()
+		close(workerDone)
+	}()
+	<-repository.loadEntered
+
+	stopCtx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
+	defer cancel()
+	if err := module.Stop(stopCtx); !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("Stop err=%v, want deadline exceeded", err)
+	}
+	if module.runtimeController == nil {
+		t.Fatal("deadline Stop cleared dependencies while drive was in flight")
+	}
+	if module.lifecycleCtx == nil || !errors.Is(module.lifecycleCtx.Err(), context.Canceled) {
+		t.Fatalf("deadline Stop did not cancel lifecycle root: %v", module.lifecycleCtx)
+	}
+	before := background.asyncFunctionCalls
+	if err := module.scheduleRuntimeDrive(context.Background(), "ws-stop-deadline", "run-stop-deadline", "after-stop"); !errors.Is(err, context.Canceled) {
+		t.Fatalf("post-Stop schedule err=%v, want context canceled", err)
+	}
+	if background.asyncFunctionCalls != before {
+		t.Fatal("post-Stop schedule reached BackgroundRoutine")
+	}
+
+	close(repository.releaseLoad)
+	select {
+	case <-workerDone:
+	case <-time.After(time.Second):
+		t.Fatal("blocking drive did not exit after repository release")
+	}
+	if err := module.Stop(context.Background()); err != nil {
+		t.Fatalf("second Stop did not finish teardown: %v", err)
+	}
+	if module.runtimeController != nil || module.lifecycleCtx != nil {
+		t.Fatalf("completed Stop retained lifecycle dependencies: controller=%v lifecycle=%v", module.runtimeController, module.lifecycleCtx)
+	}
+}
+
 func TestStopWaitsForQueuedDecisionEvidenceHandlerBeforeClearingDependencies(t *testing.T) {
 	hub := magicevent.NewHub(8)
 	installEmptyRecoveryInventory(t, hub)
@@ -583,7 +715,7 @@ func TestStopWaitsForQueuedRuntimeOperationReceiptHandlerBeforeClearingDependenc
 	}
 }
 
-func TestStopWaitsForQueuedRuntimeGovernanceResolutionHandlerBeforeClearingDependencies(t *testing.T) {
+func TestStopWaitsForQueuedRuntimeGovernanceTicketHandlerBeforeClearingDependencies(t *testing.T) {
 	hub := magicevent.NewHub(8)
 	installEmptyRecoveryInventory(t, hub)
 	t.Cleanup(func() { hub.Terminate(context.Background()) })
@@ -594,20 +726,19 @@ func TestStopWaitsForQueuedRuntimeGovernanceResolutionHandlerBeforeClearingDepen
 	}
 	module := newTestBiz(owner, hub, nil)
 	event := magicevent.NewEventWithContext(
-		orchestratorevents.TopicOrchestratorCommitRuntimeGovernanceResolution,
+		orchestratorevents.TopicOrchestratorCommitRuntimeGovernanceTicket,
 		decisioncommon.ModuleID,
 		ModuleID,
 		magicevent.NewHeader(),
 		context.Background(),
-		orchestratorevents.CommitRuntimeGovernanceResolutionCommand{Resolution: runtimecontract.RuntimeGovernanceResolution{
+		orchestratorevents.CommitRuntimeGovernanceTicketResolutionCommand{
 			ResolutionID: "resolution-lifecycle", TicketID: "ticket-lifecycle", WorkspaceID: "ws-lifecycle", RunID: "run-lifecycle",
-			AuthoritySnapshotID: "authority-lifecycle", DispatchID: "dispatch-lifecycle", DependencyKind: "decision", SubjectRef: "subject-lifecycle",
 			Outcome: runtimecontract.RuntimeGovernanceResolutionOutcomeContinue, Summary: "continue lifecycle test",
-		}},
+		},
 	)
 	handled := make(chan struct{})
 	go func() {
-		module.handleRuntimeGovernanceResolution(event, magicevent.NewResult(event.ID(), event.Source(), event.Destination()))
+		module.handleRuntimeGovernanceTicketResolution(event, magicevent.NewResult(event.ID(), event.Source(), event.Destination()))
 		close(handled)
 	}()
 	<-repository.loadEntered
@@ -646,6 +777,22 @@ type blockingRuntimeStateRepository struct {
 	releaseLoad chan struct{}
 }
 
+type lifecycleBlockingRuntimeStateRepository struct {
+	loadOnce    sync.Once
+	loadEntered chan struct{}
+	releaseLoad chan struct{}
+}
+
+func (r *lifecycleBlockingRuntimeStateRepository) Load(context.Context, common.WorkspaceID, common.RunID) (runtime.RuntimeAggregate, error) {
+	r.loadOnce.Do(func() { close(r.loadEntered) })
+	<-r.releaseLoad
+	return runtime.RuntimeAggregate{}, common.ErrNotFound
+}
+
+func (*lifecycleBlockingRuntimeStateRepository) Save(context.Context, runtime.RuntimeAggregate, uint64) error {
+	return nil
+}
+
 func (r *blockingRuntimeStateRepository) Load(context.Context, common.WorkspaceID, common.RunID) (runtime.RuntimeAggregate, error) {
 	close(r.loadEntered)
 	<-r.releaseLoad
@@ -659,8 +806,9 @@ func (*blockingRuntimeStateRepository) Save(context.Context, runtime.RuntimeAggr
 func moduleContractDependencies() Dependencies {
 	rawHub := magicevent.NewHub(32)
 	return Dependencies{
-		Evidence:   memoryrepo.NewOrchestratorOwnerRepositorySet(),
-		CommandHub: rawHub,
+		Evidence:          memoryrepo.NewOrchestratorOwnerRepositorySet(),
+		CommandHub:        rawHub,
+		BackgroundRoutine: &recordingBackgroundRoutine{},
 	}
 }
 
@@ -668,6 +816,7 @@ type recordingBackgroundRoutine struct {
 	asyncFunctionCalls int
 	lastAsyncFunction  func()
 	err                error
+	executeAsync       bool
 }
 
 // startupReadyRecordingBackgroundRoutine observes scheduling without running
@@ -706,6 +855,9 @@ func (r *recordingBackgroundRoutine) SyncTaskWithTimeOut(task magictask.Task, _ 
 func (r *recordingBackgroundRoutine) AsyncFunction(function func()) error {
 	r.asyncFunctionCalls++
 	r.lastAsyncFunction = function
+	if r.err == nil && r.executeAsync && function != nil {
+		function()
+	}
 	return r.err
 }
 

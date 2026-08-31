@@ -192,11 +192,13 @@ func runtimeRequirementsWithCapabilityPrerequisiteFacts(facts runtimecontract.Ru
 }
 
 // runtimeTargetGroundingRequirements translates a sealed focus declaration
-// into owner acquisitions. It never chooses a target from workspace content:
-// existing refs require File snapshots, while a binding-sealed prospective
-// target already has File feasibility authority and must not be read before
-// creation. Discovery source IDs only assert the owner facts that the profile
-// declared as a bounded basis.
+// into owner acquisitions. It never chooses a target or resource owner from
+// workspace content. Existing refs require snapshots from the unique owner
+// already sealed by a prerequisite/observation, target selection, semantic
+// operation descriptor, or current capability contract. A binding-sealed
+// prospective target already has owner feasibility authority and must not be
+// read before creation. Discovery source IDs only assert the owner facts that
+// the profile declared as a bounded basis.
 func runtimeTargetGroundingRequirements(facts runtimecontract.RuntimeFacts) []runtimecontract.RuntimeRequirement {
 	facts = facts.Normalized()
 	focus, required := runtimeCurrentTargetGroundingFocus(facts)
@@ -208,64 +210,91 @@ func runtimeTargetGroundingRequirements(facts runtimecontract.RuntimeFacts) []ru
 	// SM-3 candidate admission. Only targets classified as currently existing
 	// may produce a snapshot prerequisite.
 	targetAuthority := runtimeTargetAuthorityPlanForFacts(facts)
+	groundingOwner := runtimeTargetGroundingOwner(facts, focus)
+	snapshotRequirements := make([]runtimecontract.RuntimeRequirement, 0, len(targetAuthority.existingTargets()))
 	for _, target := range targetAuthority.existingTargets() {
-		requirements = append(requirements, focusScopedRuntimeRequirement(facts, runtimecontract.RuntimeRequirement{
-			Kind: runtimecontract.PrerequisiteKindTargetSnapshot, OwnerModuleID: runtimecontract.RuntimeModuleFile,
+		owner := runtimeTargetSnapshotRequirementOwner(facts, focus, target)
+		if owner == "" {
+			// An incomplete or ambiguous owner lineage cannot be repaired by
+			// choosing a conventional capability owner. Keep the whole target
+			// set out of the acquisition graph so the authority boundary fails
+			// closed instead of scheduling a partial all-of snapshot set.
+			return nil
+		}
+		snapshotRequirements = append(snapshotRequirements, focusScopedRuntimeRequirement(facts, runtimecontract.RuntimeRequirement{
+			Kind: runtimecontract.PrerequisiteKindTargetSnapshot, OwnerModuleID: owner,
 			SubjectRef: target, Reason: "grounded repair target requires owner snapshot",
 		}))
 	}
+	requirements = append(requirements, snapshotRequirements...)
 	// A failure target is already an owner-selected repair surface. Otherwise a
-	// File owner may only make the neutral cardinality observation below; it
-	// must not infer an implementation role from paths, suffixes, or content.
+	// resource owner may only make the neutral cardinality observation below;
+	// it must not infer an implementation role from paths, suffixes, or content.
 	if len(targetAuthority.targetRefs) == 0 && !targetAuthority.hasProspectiveTargets() {
 		selection := currentFocusTargetSelection(facts)
 		if selection == nil {
-			// A File-owned prospective selector is itself a sealed target
+			// A prospective selector is itself a sealed target
 			// acquisition requirement.  Semantic planning may provide the
 			// selector/prospective declaration without a discovery-source hint;
-			// that must not let SM-2 skip the File observation and reach the
-			// operations provider with an ungrounded target.  File remains the
-			// sole owner of existence/path-boundary facts; this branch only
-			// schedules its typed prerequisite.
-			if focus.TargetSelectorOwnerRef == runtimecontract.RuntimeModuleFile &&
-				focus.TargetSelectorRef != "" && len(focus.ProspectiveTargetRefs) == 1 {
+			// that must not let SM-2 skip the owner observation and reach the
+			// operations provider with an ungrounded target. This branch only
+			// schedules an owner already established by typed Runtime facts; the
+			// declaration selector owner is deliberately not a module identity.
+			if groundingOwner != "" && focus.TargetSelectorRef != "" && len(focus.ProspectiveTargetRefs) == 1 {
 				requirements = append(requirements, focusScopedRuntimeRequirement(facts, runtimecontract.RuntimeRequirement{
-					Kind: runtimecontract.PrerequisiteKindTargetSelection, OwnerModuleID: runtimecontract.RuntimeModuleFile,
+					Kind: runtimecontract.PrerequisiteKindTargetSelection, OwnerModuleID: groundingOwner,
 					SubjectRef: focus.TargetRole, TargetSelectorRef: focus.TargetSelectorRef,
 					TargetSelectorOwnerRef: focus.TargetSelectorOwnerRef, TargetSelectorSubjectRef: focus.TargetSelectorSubjectRef,
 					TargetSelectorCandidateRefs: focus.TargetSelectorCandidateRefs, ProspectiveTargetAllOfConstraintRefs: focus.ProspectiveTargetAllOfConstraintRefs, ProspectiveTargetRef: focus.ProspectiveTargetRefs[0],
-					Reason: "prospective File target requires owner target selection",
+					Reason: "prospective target requires owner target selection",
 				}))
 				goto selectionRequirementDone
 			}
 			for _, source := range focus.TargetDiscoverySources {
 				switch source {
 				case runtimecontract.RuntimeValidationDiscoverySourceWorkspaceManifest, runtimecontract.RuntimeValidationDiscoverySourceProjectFiles:
+					if groundingOwner == "" {
+						return nil
+					}
 					requirements = append(requirements, focusScopedRuntimeRequirement(facts, runtimecontract.RuntimeRequirement{
-						Kind: runtimecontract.PrerequisiteKindTargetSelection, OwnerModuleID: runtimecontract.RuntimeModuleFile,
+						Kind: runtimecontract.PrerequisiteKindTargetSelection, OwnerModuleID: groundingOwner,
 						SubjectRef: focus.TargetRole, TargetSelectorRef: focus.TargetSelectorRef, TargetSelectorOwnerRef: focus.TargetSelectorOwnerRef, TargetSelectorSubjectRef: focus.TargetSelectorSubjectRef, TargetSelectorCandidateRefs: focus.TargetSelectorCandidateRefs, ProspectiveTargetAllOfConstraintRefs: focus.ProspectiveTargetAllOfConstraintRefs, Reason: "focus target grounding requires owner target selection",
 					}))
-					// One File-owner observation covers both file-backed source IDs.
+					// One owner observation covers both resource-backed source IDs.
 					goto selectionRequirementDone
 				}
 			}
 		} else if targetSelectionHasConcreteTarget(*selection) {
+			selectionOwner := strings.TrimSpace(selection.OwnerModuleID)
+			if selectionOwner == "" {
+				return nil
+			}
+			selectedSnapshots := make([]runtimecontract.RuntimeRequirement, 0, len(selection.TargetRefs))
 			for _, target := range selection.TargetRefs {
-				requirements = append(requirements, focusScopedRuntimeRequirement(facts, runtimecontract.RuntimeRequirement{
-					Kind: runtimecontract.PrerequisiteKindTargetSnapshot, OwnerModuleID: runtimecontract.RuntimeModuleFile,
+				selectedSnapshots = append(selectedSnapshots, focusScopedRuntimeRequirement(facts, runtimecontract.RuntimeRequirement{
+					Kind: runtimecontract.PrerequisiteKindTargetSnapshot, OwnerModuleID: selectionOwner,
 					SubjectRef: target, Reason: "selected focus target requires owner snapshot",
 				}))
 			}
+			requirements = append(requirements, selectedSnapshots...)
 		}
 	}
 selectionRequirementDone:
 	for _, source := range focus.TargetDiscoverySources {
 		switch source {
 		case runtimecontract.RuntimeValidationDiscoverySourceWorkspaceManifest, runtimecontract.RuntimeValidationDiscoverySourceProjectFiles:
-			requirements = append(requirements, runtimecontract.RuntimeRequirement{
-				Kind: runtimecontract.PrerequisiteKindManifest, OwnerModuleID: runtimecontract.RuntimeModuleFile,
-				Reason: "focus target grounding requires workspace owner discovery",
-			})
+			manifestRequirements := runtimeActiveRequirementsForKind(facts, runtimecontract.PrerequisiteKindManifest)
+			if owner, ok := runtimeUniqueRequirementOwner(manifestRequirements); ok {
+				requirements = append(requirements, manifestRequirements...)
+				groundingOwner = owner
+			} else if len(manifestRequirements) != 0 || groundingOwner == "" {
+				return nil
+			} else {
+				requirements = append(requirements, runtimecontract.RuntimeRequirement{
+					Kind: runtimecontract.PrerequisiteKindManifest, OwnerModuleID: groundingOwner,
+					Reason: "focus target grounding requires workspace owner discovery",
+				})
+			}
 		case runtimecontract.RuntimeValidationDiscoverySourceDeclaredCommands:
 			requirements = append(requirements, runtimecontract.RuntimeRequirement{
 				Kind: runtimecontract.PrerequisiteKindValidationScratch, OwnerModuleID: runtimecontract.RuntimeModuleOrchestrator,
@@ -277,6 +306,152 @@ selectionRequirementDone:
 		}
 	}
 	return normalizeRuntimeRequirements(requirements)
+}
+
+// runtimeTargetGroundingOwner returns one already-declared resource owner. It
+// never treats TargetSelectorOwnerRef as a component ID: that field belongs to
+// Profile/Definition declaration lineage. Conflicting typed sources are an
+// authority defect and therefore return no owner.
+func runtimeTargetGroundingOwner(facts runtimecontract.RuntimeFacts, focus runtimecontract.CoverageFocus) string {
+	if selection := currentFocusTargetSelection(facts); selection != nil {
+		return strings.TrimSpace(selection.OwnerModuleID)
+	}
+	selectionRequirements := runtimeMatchingTargetSelectionRequirements(facts, focus)
+	if len(selectionRequirements) != 0 {
+		owner, ok := runtimeUniqueRequirementOwner(selectionRequirements)
+		if !ok {
+			return ""
+		}
+		return owner
+	}
+	manifestRequirements := runtimeActiveRequirementsForKind(facts, runtimecontract.PrerequisiteKindManifest)
+	if len(manifestRequirements) != 0 {
+		owner, ok := runtimeUniqueRequirementOwner(manifestRequirements)
+		if !ok {
+			return ""
+		}
+		return owner
+	}
+	if owner, found := runtimeStateChangeDescriptorOwner(runtimeFocusBindingStateChangeKinds(focus)); found {
+		return owner
+	}
+	if owner, found := runtimeStateChangeDescriptorOwner(focus.AcceptedStepKinds); found {
+		return owner
+	}
+	owner, _ := runtimeStateChangeDescriptorOwner(facts.Capabilities.StateChangeKinds)
+	return owner
+}
+
+func runtimeTargetSnapshotRequirementOwner(facts runtimecontract.RuntimeFacts, focus runtimecontract.CoverageFocus, targetRef string) string {
+	targetRef = strings.TrimSpace(targetRef)
+	if targetRef == "" {
+		return ""
+	}
+	if owner := runtimeTargetSnapshotOwner(facts, targetRef); owner != "" {
+		return owner
+	}
+	if selection := currentFocusTargetSelection(facts); selection != nil &&
+		(runtimeStringIncluded(selection.TargetRefs, targetRef) || runtimeStringIncluded(selection.CandidateTargetRefs, targetRef)) {
+		return strings.TrimSpace(selection.OwnerModuleID)
+	}
+	if failureTarget := facts.Resources.FailureTarget; failureTarget != nil && failureTarget.TargetObservation != nil &&
+		runtimeStringIncluded(failureTarget.TargetRefs, targetRef) {
+		observation := failureTarget.TargetObservation.Normalized()
+		// A receipt-evidence observation names the diagnostic owner, not the
+		// repair resource owner. Its resource owner must instead come from an
+		// already observed snapshot or another sealed target contract below.
+		if observation.CatalogDependency == nil {
+			return observation.OwnerModuleID
+		}
+	}
+	return runtimeTargetGroundingOwner(facts, focus)
+}
+
+func runtimeMatchingTargetSelectionRequirements(facts runtimecontract.RuntimeFacts, focus runtimecontract.CoverageFocus) []runtimecontract.RuntimeRequirement {
+	prospectiveTargetRef := ""
+	if len(focus.ProspectiveTargetRefs) == 1 {
+		prospectiveTargetRef = focus.ProspectiveTargetRefs[0]
+	} else if len(focus.ProspectiveTargetRefs) > 1 {
+		return nil
+	}
+	ret := make([]runtimecontract.RuntimeRequirement, 0, 1)
+	for _, requirement := range runtimeActiveRequirementsForKind(facts, runtimecontract.PrerequisiteKindTargetSelection) {
+		if requirement.Scope != runtimecontract.RuntimePrerequisiteScopeFocus || requirement.FocusID != facts.Focus.ID ||
+			requirement.SubjectRef != focus.TargetRole || requirement.TargetSelectorRef != focus.TargetSelectorRef ||
+			requirement.TargetSelectorOwnerRef != focus.TargetSelectorOwnerRef || requirement.TargetSelectorSubjectRef != focus.TargetSelectorSubjectRef ||
+			!runtimecontract.SameRuntimeTargetSelectorCandidateRefs(requirement.TargetSelectorCandidateRefs, focus.TargetSelectorCandidateRefs) ||
+			!runtimecontract.SameRuntimeProspectiveTargetAllOfConstraintRefs(requirement.ProspectiveTargetAllOfConstraintRefs, focus.ProspectiveTargetAllOfConstraintRefs) ||
+			requirement.ProspectiveTargetRef != prospectiveTargetRef {
+			continue
+		}
+		ret = append(ret, requirement)
+	}
+	return normalizeRuntimeRequirements(ret)
+}
+
+func runtimeActiveRequirementsForKind(facts runtimecontract.RuntimeFacts, kind runtimecontract.PrerequisiteKind) []runtimecontract.RuntimeRequirement {
+	ret := make([]runtimecontract.RuntimeRequirement, 0)
+	for _, requirement := range runtimeActivePrerequisiteRequirements(facts) {
+		if requirement.Kind == kind {
+			ret = append(ret, requirement)
+		}
+	}
+	return normalizeRuntimeRequirements(ret)
+}
+
+func runtimeUniqueRequirementOwner(requirements []runtimecontract.RuntimeRequirement) (string, bool) {
+	owner := ""
+	for _, requirement := range requirements {
+		candidate := strings.TrimSpace(requirement.OwnerModuleID)
+		if candidate == "" || owner != "" && owner != candidate {
+			return "", false
+		}
+		owner = candidate
+	}
+	return owner, owner != ""
+}
+
+func runtimeFocusBindingStateChangeKinds(focus runtimecontract.CoverageFocus) []string {
+	ret := make([]string, 0)
+	for _, binding := range focus.CoverageEvidenceBindings {
+		for _, proof := range binding.Proofs {
+			if proof.EvidenceKind == runtimecontract.EvidenceKindStateChange {
+				ret = append(ret, proof.AllowedOperationKinds...)
+			}
+		}
+	}
+	return normalizeRequirementStrings(ret)
+}
+
+// runtimeStateChangeDescriptorOwner resolves only a unique owner from the
+// shared typed operation descriptors. Unknown state-change kinds or mixed
+// owners are ambiguous and deliberately yield no owner.
+func runtimeStateChangeDescriptorOwner(kinds []string) (string, bool) {
+	owner := ""
+	found := false
+	for _, kind := range normalizeRequirementStrings(kinds) {
+		descriptor, known := runtimecontract.RuntimeOperationDescriptorForKind(kind)
+		if !known {
+			return "", true
+		}
+		allowsStateChange := false
+		for _, state := range descriptor.AllowedStates {
+			if state == runtimecontract.ConvergenceStateNeedStateChange {
+				allowsStateChange = true
+				break
+			}
+		}
+		if !allowsStateChange {
+			continue
+		}
+		candidate := strings.TrimSpace(descriptor.OwnerModuleID)
+		if candidate == "" || owner != "" && owner != candidate {
+			return "", true
+		}
+		owner = candidate
+		found = true
+	}
+	return owner, found
 }
 
 // currentFocusTargetSelection returns only an owner selection committed as a

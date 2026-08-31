@@ -17,7 +17,8 @@ func TestRuntimeDispatchRepairCommitmentProjectionRejectsNormalizationLaundering
 	}.Normalized()
 	closure.ID = StableRuntimeRepairClosureID(closure)
 	commitment := RuntimeDispatchRepairCommitment{
-		Purpose:                   RuntimeDispatchRepairPurposeConfirmedFileValidation,
+		Purpose:                   RuntimeDispatchRepairPurposeConfirmedValidation,
+		RepairOwnerModuleID:       "blocks/synthetic-repair",
 		OriginDispatchID:          "dispatch-repair-1",
 		FocusID:                   "focus-1",
 		Closure:                   closure,
@@ -46,6 +47,9 @@ func TestRuntimeDispatchRepairCommitmentProjectionRejectsNormalizationLaundering
 		{"hash whitespace", func(RuntimeDispatchRepairCommitment *RuntimeDispatchRepairCommitment) {}},
 		{"purpose whitespace", func(value *RuntimeDispatchRepairCommitment) {
 			value.Purpose = RuntimeDispatchRepairPurpose(" " + string(value.Purpose) + " ")
+		}},
+		{"repair owner whitespace", func(value *RuntimeDispatchRepairCommitment) {
+			value.RepairOwnerModuleID = " " + value.RepairOwnerModuleID
 		}},
 		{"origin whitespace", func(value *RuntimeDispatchRepairCommitment) {
 			value.OriginDispatchID = " " + value.OriginDispatchID

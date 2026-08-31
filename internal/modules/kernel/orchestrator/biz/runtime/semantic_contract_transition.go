@@ -433,7 +433,9 @@ func applySemanticContractFailureToAggregate(aggregate RuntimeAggregate, termina
 	}
 	aggregate.SemanticPlanning = ledger
 	semanticFailure := semanticContractFailureFact(terminalCode, failure)
-	aggregate.Facts.Failure = &semanticFailure
+	if err := replaceRuntimeFailureAuthority(&aggregate.Facts, semanticFailure, runtimeFailureAuthorityRetire, nil); err != nil {
+		return RuntimeAggregate{}, err
+	}
 	facts, decision, err := ReduceRuntimeStateWithDirective(aggregate.Facts, &aggregate.Decision.AuthoritySnapshot, aggregate.CoverageProofLineage)
 	if err != nil {
 		return RuntimeAggregate{}, err

@@ -104,6 +104,56 @@ func StableTerminalDeliveryID(workspaceID common.WorkspaceID, runID common.RunID
 		strings.TrimSpace(authoritySnapshotID) + "/" + string(outcome.Kind) + "/" + outcome.Code
 }
 
+// DeriveRuntimeTerminalOutcome is the shared canonical terminal identity
+// function used by both live SM-4 delivery and fresh-load validation. It is
+// intentionally pure: no owner can reinterpret an administrative or
+// convergence terminal after restart.
+func DeriveRuntimeTerminalOutcome(decision RuntimeDecision, termination *RuntimeTerminationRecord) (TerminalOutcome, bool, error) {
+	if termination != nil {
+		value := termination.Normalized()
+		if err := value.Validate(); err != nil {
+			return TerminalOutcome{}, false, err
+		}
+		if decision.Terminal != nil || decision.State == ConvergenceStateComplete || decision.State == ConvergenceStateFailed {
+			return TerminalOutcome{}, false, fmt.Errorf("runtime cannot carry administrative and convergence terminals together")
+		}
+		kind := TerminalOutcomeKindCancelled
+		if value.Kind == RuntimeTerminationSuperseded {
+			kind = TerminalOutcomeKindSuperseded
+		}
+		outcome := TerminalOutcome{Kind: kind, Code: "administrative_" + string(value.Kind), Summary: value.Reason}.Normalized()
+		if err := outcome.Validate(); err != nil {
+			return TerminalOutcome{}, false, err
+		}
+		return outcome, true, nil
+	}
+	if decision.State != ConvergenceStateComplete && decision.State != ConvergenceStateFailed {
+		if decision.Terminal != nil {
+			return TerminalOutcome{}, false, fmt.Errorf("non-terminal convergence state carries terminal detail")
+		}
+		return TerminalOutcome{}, false, nil
+	}
+	if decision.Terminal == nil {
+		return TerminalOutcome{}, false, fmt.Errorf("terminal convergence state has no terminal detail")
+	}
+	kind := TerminalOutcomeKindFailed
+	if decision.State == ConvergenceStateComplete {
+		kind = TerminalOutcomeKindCompleted
+	}
+	outcome := TerminalOutcome{Kind: kind, Code: decision.Terminal.Code, Summary: decision.Terminal.Summary}.Normalized()
+	if err := outcome.Validate(); err != nil {
+		return TerminalOutcome{}, false, err
+	}
+	return outcome, true, nil
+}
+
+// RuntimeTerminalResultID is the shared immutable Result identity carried by
+// terminal delivery acknowledgements. Result remains the mutation owner; this
+// helper only prevents Orchestrator validation from copying a private formula.
+func RuntimeTerminalResultID(workspaceID common.WorkspaceID, runID common.RunID) common.ResultID {
+	return common.ResultID(string(workspaceID) + "/" + string(runID) + "/result/dod-assessment")
+}
+
 // RuntimeDeliveryAcknowledgement is the immutable fact an owner returns after
 // applying a terminal delivery request. Orchestrator SM-4 may only record it in
 // the delivery ledger; it must not rewrite SM-2 terminal.

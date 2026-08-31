@@ -549,7 +549,7 @@ func TestEvaluateCandidateAdmissionWorkspaceScopeDoesNotAuthorizeOtherDurableOwn
 
 	operation := runtimecontract.RuntimeOperation{ID: "initialize-repository", Kind: runtimecontract.StepKindGitWrite, TargetRefs: []string{"implementation.go"}}
 	if result := rejectCandidateOutsideGroundedTargets(aggregate.Facts, aggregate.Decision, runtimecontract.RuntimeCandidate{StateChange: &runtimecontract.StateChangeCandidate{Operations: []runtimecontract.StateChangingOperation{{Operation: operation}}}}); result.Disposition != CandidateAdmissionRejectedContract || result.Failure == nil || result.Failure.Code != candidateAdmissionCodeTargetOutsideGrounding {
-		t.Fatalf("non-File workspace-scope candidate admission = %+v", result)
+		t.Fatalf("foreign-owner workspace-scope candidate admission = %+v", result)
 	}
 }
 
@@ -646,7 +646,7 @@ func TestEvaluateCandidateAdmissionCreationScopeRequiresConcreteDurableFileTarge
 		Parameters: []runtimecontract.OperationParameter{{Name: "operation", String: &gitInit}},
 	}}}}}
 	if result := rejectCandidateOutsideGroundedTargets(aggregate.Facts, aggregate.Decision, nonFileCandidate); result.Disposition != CandidateAdmissionRejectedContract || result.Failure == nil || result.Failure.Code != candidateAdmissionCodeTargetOutsideGrounding {
-		t.Fatalf("non-File creation-scope candidate admission = %+v", result)
+		t.Fatalf("foreign-owner creation-scope candidate admission = %+v", result)
 	}
 
 	fileCandidate := stateChangeCandidate()

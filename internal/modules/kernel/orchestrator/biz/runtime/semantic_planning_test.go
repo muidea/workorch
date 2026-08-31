@@ -708,7 +708,9 @@ func TestRuntimeSemanticPlanningFailurePreservesOwnerDiagnosticFacts(t *testing.
 	failure.OriginalCode = "validation_recipe_exhausted"
 	failure.OriginalMessage = "validation recipe cannot execute in workspace"
 	failure.Signature = "shell/validation-recipe-exhausted"
-	apply(RuntimeInternalEvent{Kind: RuntimeInternalEventSemanticContractFailed, Authority: &RuntimeInternalAuthorityPayload{SemanticDiagnostic: &failure}})
+	apply(RuntimeInternalEvent{Kind: RuntimeInternalEventSemanticContractFailed, Authority: &RuntimeInternalAuthorityPayload{
+		SemanticFailureCode: "semantic_owner_feasibility_infeasible", SemanticDiagnostic: &failure,
+	}})
 	if aggregate.SemanticPlanning.Phase != runtimecontract.RuntimeSemanticPlanningFailed || len(aggregate.SemanticPlanning.Feasibilities) != 1 || aggregate.SemanticPlanning.Feasibilities[0].OriginalDiagnostic == nil || aggregate.SemanticPlanning.Feasibilities[0].OriginalDiagnostic.OriginalMessage != ownerDiagnostic.OriginalMessage {
 		t.Fatalf("failed semantic ledger lost owner facts: %+v", aggregate.SemanticPlanning)
 	}

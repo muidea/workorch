@@ -395,8 +395,9 @@ func TestDeliverRuntimeTerminalUsesTypedOwnerEventContracts(t *testing.T) {
 
 	owner := New()
 	if err := owner.Configure(Dependencies{
-		Evidence:   memory.NewOrchestratorOwnerRepositorySet(),
-		CommandHub: hub,
+		Evidence:          memory.NewOrchestratorOwnerRepositorySet(),
+		CommandHub:        hub,
+		BackgroundRoutine: &recordingBackgroundRoutine{},
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -524,8 +525,9 @@ func TestDeliverRuntimeTerminalRestartsAfterOwnerProjectionAcknowledgementLoss(t
 			}
 			firstOrchestrator := New()
 			if err := firstOrchestrator.Configure(Dependencies{
-				Evidence:   memory.NewOrchestratorOwnerRepositorySet(),
-				CommandHub: firstHub,
+				Evidence:          memory.NewOrchestratorOwnerRepositorySet(),
+				CommandHub:        firstHub,
+				BackgroundRoutine: &recordingBackgroundRoutine{},
 			}); err != nil {
 				t.Fatal(err)
 			}
@@ -611,8 +613,9 @@ func TestDeliverRuntimeTerminalRestartsAfterOwnerProjectionAcknowledgementLoss(t
 			terminalRevision := restartedAggregate.StateRevision
 			restartedOrchestrator := New()
 			if err := restartedOrchestrator.Configure(Dependencies{
-				Evidence:   memory.NewOrchestratorOwnerRepositorySet(),
-				CommandHub: restartedHub,
+				Evidence:          memory.NewOrchestratorOwnerRepositorySet(),
+				CommandHub:        restartedHub,
+				BackgroundRoutine: &recordingBackgroundRoutine{},
 			}); err != nil {
 				t.Fatal(err)
 			}
@@ -762,8 +765,9 @@ func TestDeliverRuntimeTerminalReplaysSameIdentityAfterOwnerCASConflict(t *testi
 			t.Cleanup(func() { _ = resultOwner.Stop(ctx) })
 			orchestratorOwner := New()
 			if err := orchestratorOwner.Configure(Dependencies{
-				Evidence:   memory.NewOrchestratorOwnerRepositorySet(),
-				CommandHub: hub,
+				Evidence:          memory.NewOrchestratorOwnerRepositorySet(),
+				CommandHub:        hub,
+				BackgroundRoutine: &recordingBackgroundRoutine{},
 			}); err != nil {
 				t.Fatal(err)
 			}
@@ -1053,8 +1057,9 @@ func TestRuntimeStartupRecoveryDeliversPendingTerminalThroughOwnerChain(t *testi
 
 	owner := New()
 	if err := owner.Configure(Dependencies{
-		Evidence:   memory.NewOrchestratorOwnerRepositorySet(),
-		CommandHub: hub,
+		Evidence:          memory.NewOrchestratorOwnerRepositorySet(),
+		CommandHub:        hub,
+		BackgroundRoutine: &recordingBackgroundRoutine{executeAsync: true},
 	}); err != nil {
 		t.Fatal(err)
 	}

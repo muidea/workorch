@@ -163,7 +163,8 @@ func TestRuntimeFileBackedMCPOwnerFailureTargetReceiptRestartMatrix(t *testing.T
 
 				inventory, observation := acquireFileBackedMCPAdmissibility(t, ctx, hub, deliverable, "validation-entry.go")
 				fileInventory, fileObservation := acquireFileBackedFileAdmissibility(t, ctx, hub, deliverable)
-				aggregate := runtimeFileBackedMCPFailureAggregate(t, inventory, observation, fileInventory, fileObservation)
+				fileManifest := acquireFileBackedManifest(t, ctx, hub, deliverable)
+				aggregate := runtimeFileBackedMCPFailureAggregate(t, inventory, observation, fileInventory, fileObservation, fileManifest)
 				runs := filerepository.NewRunRepository(filepath.Join(root, "runs.json"))
 				run := runtimeRunForTest(common.RunStateActive, aggregate.Definition)
 				bootstrap := runtimeBootstrap()
@@ -324,11 +325,17 @@ func TestRuntimeFileBackedMCPOwnerFailureTargetReceiptRestartMatrix(t *testing.T
 					// consume SM-4 recovery budget inside the receipt observation event;
 					// a fresh owner-private event after restart owns that transition.
 					executionResult, executionErr := controller.ApplyInternalEvent(ctx, runtime.RuntimeInternalEvent{
-						Kind:  runtime.RuntimeInternalEventDispatchExecutionRequested,
-						Scope: runtime.RuntimeInternalEventScope{WorkspaceID: "ws-v2", RunID: "run-v2"},
-						Transaction: &runtime.RuntimeInternalTransactionPayload{
-							Executor: eventRuntimeOperationExecutor{hub: hub},
-						},
+						Kind:        runtime.RuntimeInternalEventDispatchExecutionRequested,
+						Scope:       runtime.RuntimeInternalEventScope{WorkspaceID: "ws-v2", RunID: "run-v2"},
+						Transaction: &runtime.RuntimeInternalTransactionPayload{},
+					})
+					if executionErr != nil || executionResult.OperationCall == nil {
+						t.Fatalf("prepare MCP owner call: handoff=%+v err=%v", executionResult.OperationCall, executionErr)
+					}
+					_, _ = (eventRuntimeOperationExecutor{hub: hub}).ExecuteRuntimeOperation(ctx, executionResult.OperationCall.Request)
+					executionResult, executionErr = controller.ApplyInternalEvent(ctx, runtime.RuntimeInternalEvent{
+						Kind: runtime.RuntimeInternalEventDispatchExecutionRequested, Scope: runtime.RuntimeInternalEventScope{WorkspaceID: "ws-v2", RunID: "run-v2"},
+						Transaction: &runtime.RuntimeInternalTransactionPayload{},
 					})
 					operationID, recoveryRequired := runtime.RuntimeOperationRecoveryBudgetRequired(executionErr)
 					if !recoveryRequired || operationID != candidate.Validation.Operations[0].Operation.ID ||
@@ -860,6 +867,29 @@ func acquireFileBackedMCPAdmissibility(t *testing.T, ctx context.Context, hub ma
 	return inventory, observation
 }
 
+func acquireFileBackedManifest(t *testing.T, ctx context.Context, hub magicevent.Hub, deliverable string) fileevents.AcquireWorkspaceManifestResult {
+	t.Helper()
+	result := hub.Send(magicevent.NewEventWithContext(
+		fileevents.TopicAcquireWorkspaceManifest, runtimecontract.RuntimeModuleOrchestrator, orchestratorevents.PrerequisiteCommandDestination,
+		magicevent.NewHeader(), ctx, fileevents.AcquireWorkspaceManifestCommand{
+			WorkspaceID: "ws-v2", RunID: "run-v2", AuthoritySnapshotID: "authority-file-grounding",
+			PrerequisiteID: "manifest:file-grounding", WorkspaceDeliverableDirectory: deliverable,
+		},
+	))
+	if result == nil {
+		t.Fatal("File owner returned no workspace manifest")
+	}
+	data, err := result.Get()
+	if err != nil {
+		t.Fatal(err)
+	}
+	response, ok := data.(fileevents.AcquireWorkspaceManifestResult)
+	if !ok || response.Manifest.Revision == "" || response.Observation.ObservationID == "" {
+		t.Fatalf("File workspace manifest response = %#v", data)
+	}
+	return response
+}
+
 func acquireFileBackedFileAdmissibility(t *testing.T, ctx context.Context, hub magicevent.Hub, deliverable string) (runtimecontract.RuntimeOperationAdmissibility, runtimecontract.RuntimePrerequisiteObservation) {
 	t.Helper()
 	result := hub.Send(magicevent.NewEventWithContext(
@@ -890,6 +920,7 @@ func runtimeFileBackedMCPFailureAggregate(
 	observation runtimecontract.RuntimePrerequisiteObservation,
 	fileInventory runtimecontract.RuntimeOperationAdmissibility,
 	fileObservation runtimecontract.RuntimePrerequisiteObservation,
+	fileManifest fileevents.AcquireWorkspaceManifestResult,
 ) runtime.RuntimeAggregate {
 	t.Helper()
 	facts := runtimeAggregate(t, 1).Facts
@@ -912,14 +943,21 @@ func runtimeFileBackedMCPFailureAggregate(
 		OperationKind: runtimecontract.StepKindMCPToolCall, Name: "lookup.references", Enabled: true,
 		EffectScope: string(runtimecontract.RuntimeEffectNone), IdempotencyClass: string(runtimecontract.RuntimeOperationIdempotencySafeToReplay),
 	}}
+	// Seal the actual File-owner manifest response as the resource-owner
+	// declaration. The Runtime core can then ground both validation and repair
+	// targets without inferring File from a path or from the MCP diagnostic.
+	facts.Resources.Manifest = &fileManifest.Manifest
 	facts.Resources.OperationAdmissibilities = []runtimecontract.RuntimeOperationAdmissibility{inventory, fileInventory}
-	facts.Resources.PrerequisiteObservations = []runtimecontract.RuntimePrerequisiteObservation{observation, fileObservation}
+	facts.Resources.PrerequisiteObservations = []runtimecontract.RuntimePrerequisiteObservation{observation, fileObservation, fileManifest.Observation}
 	facts.Prerequisites.Satisfied = []runtimecontract.RuntimePrerequisite{{
 		ID: inventory.PrerequisiteID, Kind: runtimecontract.PrerequisiteKindOperationAdmissibility,
 		OwnerModuleID: runtimecontract.RuntimeModuleMCP, RequiredCapabilities: []string{runtimecontract.StepKindMCPToolCall},
 	}, {
 		ID: fileInventory.PrerequisiteID, Kind: runtimecontract.PrerequisiteKindOperationAdmissibility,
 		OwnerModuleID: runtimecontract.RuntimeModuleFile, RequiredCapabilities: []string{runtimecontract.RuntimeBlockKindPatchApply},
+	}, {
+		ID: fileManifest.Observation.PrerequisiteID, Kind: fileManifest.Observation.Kind,
+		OwnerModuleID: fileManifest.Observation.OwnerModuleID,
 	}}
 	// Keep the current-schema CWI unbound here. The shared semantic fixture below
 	// compiles and seals the MCP validation binding, updating binding lineage and
@@ -950,13 +988,20 @@ func runtimeFileBackedMCPFailureCandidate() runtimecontract.RuntimeCandidate {
 
 func runtimeFileBackedMCPFailureTargetSnapshotPrerequisite(t *testing.T, aggregate runtime.RuntimeAggregate) runtimecontract.RuntimePrerequisite {
 	t.Helper()
+	var matched runtimecontract.RuntimePrerequisite
 	for _, prerequisite := range aggregate.Facts.Prerequisites.Pending {
-		if prerequisite.Kind == runtimecontract.PrerequisiteKindTargetSnapshot && prerequisite.OwnerModuleID == runtimecontract.RuntimeModuleFile && prerequisite.SubjectRef == "implementation.go" {
-			return prerequisite
+		if prerequisite.Kind != runtimecontract.PrerequisiteKindTargetSnapshot || prerequisite.SubjectRef != "implementation.go" {
+			continue
 		}
+		if prerequisite.OwnerModuleID == "" || matched.ID != "" {
+			t.Fatalf("MCP failure target scheduled an ambiguous owner snapshot: %+v", aggregate.Facts.Prerequisites.Pending)
+		}
+		matched = prerequisite
 	}
-	t.Fatalf("MCP failure target did not schedule File target snapshot: %+v", aggregate.Facts.Prerequisites.Pending)
-	return runtimecontract.RuntimePrerequisite{}
+	if matched.ID == "" {
+		t.Fatalf("MCP failure target did not schedule an owner target snapshot: %+v", aggregate.Facts.Prerequisites.Pending)
+	}
+	return matched
 }
 
 func acquireFileBackedMCPTargetSnapshot(t *testing.T, ctx context.Context, hub magicevent.Hub, aggregate runtime.RuntimeAggregate, prerequisite runtimecontract.RuntimePrerequisite, deliverable string) fileevents.AcquireTargetSnapshotResult {
@@ -978,6 +1023,23 @@ func acquireFileBackedMCPTargetSnapshot(t *testing.T, ctx context.Context, hub m
 	response, ok := data.(fileevents.AcquireTargetSnapshotResult)
 	if !ok || !response.Snapshot.Complete() || response.Observation.ObservationID == "" {
 		t.Fatalf("File target snapshot response = %#v", data)
+	}
+	// The typed owner response must seal the exact completed prerequisite and
+	// target revision. The fixture never rewrites a File observation into a
+	// different owner merely to satisfy the reducer.
+	observation := response.Observation.Normalized()
+	if err := observation.Validate(); err != nil {
+		t.Fatalf("owner-grounded target snapshot observation: %v", err)
+	}
+	if observation.PrerequisiteID != prerequisite.ID || observation.Kind != prerequisite.Kind ||
+		observation.OwnerModuleID != prerequisite.OwnerModuleID || observation.ContentHash != response.Snapshot.ContentHash ||
+		len(observation.Dependencies) != 1 {
+		t.Fatalf("target snapshot observation does not match completed prerequisite: prerequisite=%+v observation=%+v", prerequisite, observation)
+	}
+	dependency := observation.Dependencies[0]
+	if dependency.Domain != runtimecontract.RuntimeResourceWorkspaceTarget || dependency.OwnerModuleID != prerequisite.OwnerModuleID ||
+		dependency.SubjectRef != response.Snapshot.TargetRef || dependency.Revision != response.Snapshot.ContentHash {
+		t.Fatalf("target snapshot observation does not bind exact owner revision: prerequisite=%+v observation=%+v", prerequisite, observation)
 	}
 	return response
 }

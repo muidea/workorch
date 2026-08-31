@@ -428,7 +428,16 @@ func (m *Biz) handleRuntimeSemanticProviderFeedback(ctx context.Context, aggrega
 	providerFailure := runtimeProviderRequestFailure(feedback)
 	providerDiagnostic := feedback.OriginalDiagnostic.CloneOriginal()
 	if feedback.StableCategory != runtimecontract.RuntimeFeedbackCategoryProviderTransient {
-		return m.failRuntimeSemanticContract(ctx, aggregate, firstNonEmptyString(providerFailure.Code, "semantic_provider_failure"), providerFailure.Reason, providerDiagnostic, settlement)
+		outcomeClass, terminalCode, ok := runtimeSemanticProviderTerminal(feedback.StableCategory)
+		if !ok {
+			return runtime.RuntimeAggregate{}, fmt.Errorf("%w: unsupported semantic provider feedback category %q", common.ErrInvalidArgument, feedback.StableCategory)
+		}
+		return m.runtimeCoordinateProviderRequestTerminal(ctx, aggregate, session.LogicalRequestID, runtime.RuntimeProviderRequestTerminalInput{
+			DocumentKind: runtimecontract.RuntimeProviderDocumentSemanticPlan,
+			OutcomeClass: outcomeClass,
+			TerminalCode: terminalCode, TerminalSignature: strings.ReplaceAll(terminalCode, "_", "-"),
+			Message: providerFailure.Reason, OriginalDiagnostic: providerDiagnostic,
+		}, settlement)
 	}
 	outcome := runtimecontract.RuntimeCandidateRequestOutcome{
 		Class: runtimecontract.RuntimeCandidateRequestOutcomeProviderTransient,
@@ -438,6 +447,22 @@ func (m *Biz) handleRuntimeSemanticProviderFeedback(ctx context.Context, aggrega
 		DocumentKind:     runtimecontract.RuntimeProviderDocumentSemanticPlan,
 		TransportOutcome: &outcome, Message: providerFailure.Reason, OriginalDiagnostic: providerDiagnostic,
 	}, settlement)
+}
+
+// runtimeSemanticProviderTerminal is the only semantic-provider terminal
+// classifier. The LLM owner's private OriginalCode/OriginalClass remain exact
+// nested diagnostics, but cannot select an SM-2 or SM-3 transition.
+func runtimeSemanticProviderTerminal(category runtimecontract.RuntimeFeedbackCategory) (runtimecontract.RuntimeCandidateRequestOutcomeClass, string, bool) {
+	switch category {
+	case runtimecontract.RuntimeFeedbackCategoryProviderAuthentication:
+		return runtimecontract.RuntimeCandidateRequestOutcomeProviderAuthentication, "semantic_provider_authentication", true
+	case runtimecontract.RuntimeFeedbackCategoryProviderConfiguration:
+		return runtimecontract.RuntimeCandidateRequestOutcomeProviderConfiguration, "semantic_provider_configuration", true
+	case runtimecontract.RuntimeFeedbackCategoryProviderProtocol:
+		return runtimecontract.RuntimeCandidateRequestOutcomeProviderProtocol, "semantic_provider_contract_error", true
+	default:
+		return runtimecontract.RuntimeCandidateRequestOutcomeNone, "", false
+	}
 }
 
 func (m *Biz) handleRuntimeSemanticDocumentOutcome(ctx context.Context, aggregate runtime.RuntimeAggregate, session runtimecontract.RuntimeCandidateRequestSession, response llmevents.RequestRuntimeCandidateResult, sequence int, physicalCallID string, settlement *runtime.RuntimeProviderBudgetSettlement) (runtime.RuntimeAggregate, error) {
@@ -767,12 +792,12 @@ func (m *Biz) driveRuntimeSemanticFeasibility(ctx context.Context, aggregate run
 			if fact.OriginalDiagnostic == nil {
 				return m.failRuntimeSemanticContract(ctx, aggregate, "semantic_owner_feasibility_unknown", "semantic owner prerequisite fact omitted its original diagnostic", nil)
 			}
-			return m.failRuntimeSemanticContract(ctx, aggregate, semanticOwnerFeasibilityTerminalCode(fact), fact.OriginalDiagnostic.OriginalMessage, fact.OriginalDiagnostic)
+			return m.failRuntimeSemanticContract(ctx, aggregate, semanticOwnerFeasibilityTerminalCode(fact.Status), fact.OriginalDiagnostic.OriginalMessage, fact.OriginalDiagnostic)
 		case runtimecontract.RuntimeSemanticFeasibilityInfeasible:
 			if fact.OriginalDiagnostic == nil {
 				return m.failRuntimeSemanticContract(ctx, aggregate, "semantic_owner_feasibility_failed", "semantic owner feasibility was not accepted", nil)
 			}
-			return m.failRuntimeSemanticContract(ctx, aggregate, semanticOwnerFeasibilityTerminalCode(fact), fact.OriginalDiagnostic.OriginalMessage, fact.OriginalDiagnostic)
+			return m.failRuntimeSemanticContract(ctx, aggregate, semanticOwnerFeasibilityTerminalCode(fact.Status), fact.OriginalDiagnostic.OriginalMessage, fact.OriginalDiagnostic)
 		}
 	}
 	observed := make(map[string]struct{}, len(ledger.Feasibilities))
@@ -791,26 +816,16 @@ func (m *Biz) driveRuntimeSemanticFeasibility(ctx context.Context, aggregate run
 	return sealed.Aggregate, err
 }
 
-// semanticOwnerFeasibilityTerminalCode returns only a closed internal code
-// for the reducer's failure-class mapping. The nested owner diagnostic is
-// preserved unchanged and remains the sole producer-authored detail.
-func semanticOwnerFeasibilityTerminalCode(fact runtimecontract.RuntimeSemanticProofFeasibility) string {
-	if fact.OriginalDiagnostic == nil {
-		return "semantic_owner_feasibility_unknown"
-	}
-	code := strings.TrimSpace(fact.OriginalDiagnostic.OriginalCode)
-	switch code {
-	case "validation_recipe_unavailable", "validation_recipe_not_sealed", "validation_recipe_exhausted",
-		"mcp_semantic_proof_unavailable", "mcp_recipe_not_admissible", "mcp_selector_not_admissible",
-		"file_semantic_proof_unavailable", "git_semantic_proof_unavailable", "web_semantic_proof_unavailable",
-		"ssh_semantic_proof_unavailable", "semantic_target_unavailable", "semantic_target_invalid",
-		"semantic_target_not_regular", "prospective_target_exists", "prospective_target_unobservable",
-		"semantic_owner_feasibility_infeasible", "mcp_recipe_invalid":
-		return code
-	case "semantic_provider_ceiling_missing", "semantic_catalog_stale", "mcp_catalog_unavailable",
-		"mcp_capability_catalog_unavailable", "mcp_validation_input_binding_required", "web_catalog_unavailable", "git_repository_state_unavailable",
-		"shell_policy_unavailable", "workspace_manifest_unavailable", "semantic_owner_catalog_missing":
-		return code
+// semanticOwnerFeasibilityTerminalCode maps only the owner-neutral, typed
+// semantic status to an Orchestrator-local terminal code. Capability-private
+// diagnostic codes remain nested audit facts and never select a Runtime
+// failure class or transition.
+func semanticOwnerFeasibilityTerminalCode(status runtimecontract.RuntimeSemanticFeasibilityStatus) string {
+	switch status {
+	case runtimecontract.RuntimeSemanticFeasibilityPrerequisiteRequired:
+		return "semantic_owner_prerequisite_required"
+	case runtimecontract.RuntimeSemanticFeasibilityInfeasible:
+		return "semantic_owner_feasibility_infeasible"
 	default:
 		return "semantic_owner_feasibility_unknown"
 	}

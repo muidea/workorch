@@ -48,12 +48,12 @@ func TestRuntimeSemanticPrerequisitePathUsesCapabilityStateBeforeAdmissibility(t
 	}
 }
 
-func TestSemanticOwnerFeasibilityTerminalCodePreservesMCPInputBindingPrerequisite(t *testing.T) {
-	fact := runtimecontract.RuntimeSemanticProofFeasibility{OriginalDiagnostic: &runtimecontract.RuntimeOriginalDiagnostic{
-		OriginalCode: "mcp_validation_input_binding_required",
-	}}
-	if got := semanticOwnerFeasibilityTerminalCode(fact); got != "mcp_validation_input_binding_required" {
+func TestSemanticOwnerFeasibilityTerminalCodeUsesTypedStatusOnly(t *testing.T) {
+	if got := semanticOwnerFeasibilityTerminalCode(runtimecontract.RuntimeSemanticFeasibilityPrerequisiteRequired); got != "semantic_owner_prerequisite_required" {
 		t.Fatalf("semantic prerequisite terminal code = %q", got)
+	}
+	if got := semanticOwnerFeasibilityTerminalCode(runtimecontract.RuntimeSemanticFeasibilityInfeasible); got != "semantic_owner_feasibility_infeasible" {
+		t.Fatalf("semantic infeasible terminal code = %q", got)
 	}
 }
 
@@ -783,7 +783,7 @@ func TestRuntimeSemanticDriveClosesProviderSessionBeforeSemanticTerminal(t *test
 	if err != nil {
 		t.Fatal(err)
 	}
-	if providerCalls != 1 || failed.SemanticPlanning.Phase != runtimecontract.RuntimeSemanticPlanningFailed || failed.Decision.Terminal == nil || len(failed.CandidateRequestSessions) != 1 {
+	if providerCalls != 1 || failed.SemanticPlanning.Phase != runtimecontract.RuntimeSemanticPlanningFailed || failed.Decision.Terminal == nil || len(failed.CandidateRequestSessions) != 1 || failed.Facts.Failure == nil || failed.Facts.Failure.Class != runtimecontract.FailureClassProviderProtocol {
 		t.Fatalf("semantic provider failure did not seal one terminal lineage: %+v", failed)
 	}
 	session := failed.CandidateRequestSessions[0]
@@ -801,6 +801,27 @@ func TestRuntimeSemanticDriveClosesProviderSessionBeforeSemanticTerminal(t *test
 	}
 	if providerCalls != 1 || replayed.StateRevision != failed.StateRevision || replayed.Facts.Failure == nil || replayed.Facts.Failure.OriginalDiagnostic == nil || replayed.Facts.Failure.OriginalDiagnostic.OriginalCode != "semantic_provider_protocol_invalid" || replayed.Facts.Failure.OriginalDiagnostic.Signature != "semantic-provider-protocol-invalid" {
 		t.Fatalf("semantic fresh reload changed exact failure or replayed provider: providerCalls=%d aggregate=%+v", providerCalls, replayed)
+	}
+}
+
+func TestRuntimeSemanticProviderTerminalUsesOnlyStableCategory(t *testing.T) {
+	tests := []struct {
+		category runtimecontract.RuntimeFeedbackCategory
+		class    runtimecontract.RuntimeCandidateRequestOutcomeClass
+		code     string
+	}{
+		{category: runtimecontract.RuntimeFeedbackCategoryProviderAuthentication, class: runtimecontract.RuntimeCandidateRequestOutcomeProviderAuthentication, code: "semantic_provider_authentication"},
+		{category: runtimecontract.RuntimeFeedbackCategoryProviderConfiguration, class: runtimecontract.RuntimeCandidateRequestOutcomeProviderConfiguration, code: "semantic_provider_configuration"},
+		{category: runtimecontract.RuntimeFeedbackCategoryProviderProtocol, class: runtimecontract.RuntimeCandidateRequestOutcomeProviderProtocol, code: "semantic_provider_contract_error"},
+	}
+	for _, tt := range tests {
+		class, code, ok := runtimeSemanticProviderTerminal(tt.category)
+		if !ok || class != tt.class || code != tt.code {
+			t.Fatalf("semantic provider category %q = (%q, %q, %t)", tt.category, class, code, ok)
+		}
+	}
+	if _, _, ok := runtimeSemanticProviderTerminal(runtimecontract.RuntimeFeedbackCategoryProviderTransient); ok {
+		t.Fatal("transient provider feedback must use bounded recovery, not direct terminalization")
 	}
 }
 

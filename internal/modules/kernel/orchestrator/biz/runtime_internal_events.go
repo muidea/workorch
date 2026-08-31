@@ -252,8 +252,15 @@ func (m *Biz) runtimeRecordCandidateFeasibility(ctx context.Context, aggregate r
 	return result.Aggregate, err
 }
 
-func (m *Biz) runtimeConsumeRecoveryBudget(ctx context.Context, aggregate runtime.RuntimeAggregate, kind runtimecontract.RuntimeRecoveryBudgetKind) (runtime.RuntimeAggregate, bool, error) {
-	result, err := m.submitRuntimeInternalEvent(ctx, runtime.RuntimeInternalEvent{Kind: runtime.RuntimeInternalEventRecoveryBudgetConsumed, Scope: runtime.RuntimeInternalEventScope{WorkspaceID: aggregate.Facts.WorkspaceID, RunID: aggregate.Facts.RunID}, Delivery: &runtime.RuntimeInternalDeliveryPayload{RecoveryBudgetKind: kind}})
+func (m *Biz) runtimeConsumeRecoveryBudget(ctx context.Context, aggregate runtime.RuntimeAggregate, kind runtimecontract.RuntimeRecoveryBudgetKind, recoveryOperationIDs ...string) (runtime.RuntimeAggregate, bool, error) {
+	if len(recoveryOperationIDs) > 1 {
+		return runtime.RuntimeAggregate{}, false, common.ErrInvalidArgument
+	}
+	recoveryOperationID := ""
+	if len(recoveryOperationIDs) == 1 {
+		recoveryOperationID = recoveryOperationIDs[0]
+	}
+	result, err := m.submitRuntimeInternalEvent(ctx, runtime.RuntimeInternalEvent{Kind: runtime.RuntimeInternalEventRecoveryBudgetConsumed, Scope: runtime.RuntimeInternalEventScope{WorkspaceID: aggregate.Facts.WorkspaceID, RunID: aggregate.Facts.RunID}, Delivery: &runtime.RuntimeInternalDeliveryPayload{RecoveryBudgetKind: kind, RecoveryOperationID: recoveryOperationID}})
 	return result.Aggregate, result.BudgetConsumed, err
 }
 

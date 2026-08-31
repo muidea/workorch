@@ -315,6 +315,178 @@ func TestRuntimeAggregateRejectsRetiredFailureTargetPrerequisite(t *testing.T) {
 	}
 }
 
+func TestRuntimeAggregateRejectsPendingCandidateFeasibilityBindingDriftAfterFreshLoad(t *testing.T) {
+	baseline := runtimePendingCandidateFeasibilityAggregate(t)
+	if err := baseline.Validate(); err != nil {
+		t.Fatalf("valid pending candidate feasibility aggregate rejected: %v", err)
+	}
+	if len(baseline.CandidateAttempts) != 1 || len(baseline.CandidateAttempts[0].Feasibilities) != 1 {
+		t.Fatalf("pending feasibility fixture is incomplete: %+v", baseline.CandidateAttempts)
+	}
+
+	for _, test := range []struct {
+		name    string
+		mutate  func(*runtimecontract.RuntimeCandidateFeasibilityRecord)
+		wantErr string
+	}{
+		{
+			name: "operation absent from proposal",
+			mutate: func(record *runtimecontract.RuntimeCandidateFeasibilityRecord) {
+				record.OperationID = "forged-operation"
+				record.ReplayProof.OperationID = "forged-operation"
+			},
+			wantErr: "absent from its proposal",
+		},
+		{
+			name: "manifest drift",
+			mutate: func(record *runtimecontract.RuntimeCandidateFeasibilityRecord) {
+				record.CandidateManifestHash = "forged-manifest"
+			},
+			wantErr: "stale manifest identity",
+		},
+		{
+			name: "catalog drift",
+			mutate: func(record *runtimecontract.RuntimeCandidateFeasibilityRecord) {
+				record.AdmissibilitySnapshotID = "forged-catalog"
+				record.ReplayProof.AdmissibilitySnapshotID = "forged-catalog"
+			},
+			wantErr: "does not match current owner admissibility",
+		},
+		{
+			name: "owner policy drift",
+			mutate: func(record *runtimecontract.RuntimeCandidateFeasibilityRecord) {
+				record.Observation.OwnerPolicy.OwnerModuleID = runtimecontract.RuntimeModuleMCP
+			},
+			wantErr: "owner policy does not match",
+		},
+		{
+			name: "feedback scope and owner drift",
+			mutate: func(record *runtimecontract.RuntimeCandidateFeasibilityRecord) {
+				failure := runtimecontract.FailureFact{
+					Class: runtimecontract.FailureClassCandidateInfeasible, Code: "owner_infeasible",
+					Signature: "owner-infeasible", Message: "owner rejected the operation",
+				}
+				feedback, err := runtimecontract.RuntimeFeedbackFromFailureFact(
+					runtimecontract.RuntimeFeedbackScope{WorkspaceID: "ws-forged", RunID: "run-forged"},
+					runtimecontract.RuntimeFeedbackDomainFeasibility,
+					runtimecontract.RuntimeFeedbackCategory(runtimecontract.RuntimeOwnerFeasibilityCategoryObservationUnknown),
+					runtimecontract.RuntimeModuleMCP,
+					failure,
+				)
+				if err != nil {
+					t.Fatal(err)
+				}
+				record.Observation.Outcome = runtimecontract.RuntimeOwnerFeasibilityInfeasible
+				record.Observation.Feedback = &feedback
+				record.ReplayProof = nil
+			},
+			wantErr: "feedback does not match aggregate scope and owner",
+		},
+		{
+			name: "replay proof target drift",
+			mutate: func(record *runtimecontract.RuntimeCandidateFeasibilityRecord) {
+				record.ReplayProof.TargetRefs = []string{"forged-target.txt"}
+			},
+			wantErr: "replay proof does not match sealed owner facts",
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			loaded := runtimeTestEvidenceAggregateRoundTrip(t, baseline)
+			test.mutate(&loaded.CandidateAttempts[0].Feasibilities[0])
+			loaded = runtimeTestEvidenceAggregateRoundTrip(t, loaded)
+			if err := loaded.Validate(); err == nil || !strings.Contains(err.Error(), test.wantErr) {
+				t.Fatalf("fresh-load pending feasibility error = %v, want containing %q", err, test.wantErr)
+			}
+		})
+	}
+}
+
+func runtimePendingCandidateFeasibilityAggregate(t *testing.T) RuntimeAggregate {
+	t.Helper()
+	ctx := context.Background()
+	repository := &controllerRepository{}
+	controller, err := NewRuntimeController(repository)
+	if err != nil {
+		t.Fatal(err)
+	}
+	facts := controllerFacts()
+	facts.Capabilities.StateChangeKinds = []string{runtimecontract.StepKindFileEdit}
+	inventory := runtimecontract.RuntimeOperationAdmissibility{
+		PrerequisiteID:     "operation-admissibility:file/fresh-load",
+		OwnerModuleID:      runtimecontract.RuntimeModuleFile,
+		OperationKinds:     []string{runtimecontract.StepKindFileEdit},
+		TargetRefs:         []string{"target.txt"},
+		AcquisitionBinding: "file-capability-v1",
+		ObservedRevision:   "workspace-tree-v1",
+	}
+	inventory.SnapshotID = runtimecontract.StableRuntimeOperationAdmissibilitySnapshotID(inventory)
+	prerequisite := runtimecontract.RuntimePrerequisite{
+		ID: inventory.PrerequisiteID, Kind: runtimecontract.PrerequisiteKindOperationAdmissibility,
+		OwnerModuleID: inventory.OwnerModuleID, RequiredCapabilities: []string{runtimecontract.StepKindFileEdit},
+	}
+	observation := runtimecontract.RuntimePrerequisiteObservation{
+		PrerequisiteID: prerequisite.ID, Kind: prerequisite.Kind, OwnerModuleID: prerequisite.OwnerModuleID,
+		ContentHash: inventory.SnapshotID,
+		Dependencies: []runtimecontract.RuntimeFreshnessDependency{{
+			Domain: runtimecontract.RuntimeResourceWorkspaceTree, OwnerModuleID: runtimecontract.RuntimeModuleFile,
+			SubjectRef: "workspace_deliverable", Revision: inventory.ObservedRevision,
+		}},
+	}
+	observation.ObservationID = runtimecontract.StableRuntimePrerequisiteObservationID(observation)
+	facts.Prerequisites.Satisfied = []runtimecontract.RuntimePrerequisite{prerequisite}
+	facts.Resources.OperationAdmissibilities = []runtimecontract.RuntimeOperationAdmissibility{inventory}
+	facts.Resources.PrerequisiteObservations = []runtimecontract.RuntimePrerequisiteObservation{observation}
+	initialized := runtimeTestInitializeAndSealSemanticContract(t, ctx, controller, facts, controllerDefinition(), nil)
+	if initialized.Decision.State != runtimecontract.ConvergenceStateNeedStateChange {
+		t.Fatalf("pending feasibility fixture decision = %+v", initialized.Decision)
+	}
+	oldText, newText := "before", "after"
+	candidate := runtimecontract.RuntimeCandidate{StateChange: &runtimecontract.StateChangeCandidate{Operations: []runtimecontract.StateChangingOperation{{Operation: runtimecontract.RuntimeOperation{
+		ID: "edit-target", Kind: runtimecontract.StepKindFileEdit,
+		CoverageWorkItemIDs: append([]common.CoverageWorkItemID(nil), initialized.Facts.Focus.CoverageWorkItemIDs...),
+		TargetRefs:          []string{"target.txt"},
+		Parameters: []runtimecontract.OperationParameter{
+			{Name: "oldText", String: &oldText}, {Name: "newText", String: &newText},
+		},
+	}}}}}
+	if _, err := controller.BeginCandidateAttemptForTest(ctx, facts.WorkspaceID, facts.RunID, 0, "fresh-load-feasibility"); err != nil {
+		t.Fatal(err)
+	}
+	proposed, err := controller.recordCandidateProposal(ctx, facts.WorkspaceID, facts.RunID, 0, candidate)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pending := proposed.CandidateAttempts[len(proposed.CandidateAttempts)-1]
+	operations := candidateRuntimeOperations(*pending.Proposal)
+	if len(operations) != 1 {
+		t.Fatalf("pending feasibility fixture lost operation: %+v", pending.Proposal)
+	}
+	operation := operations[0].Normalized()
+	ownerObservation := runtimecontract.RuntimeOwnerFeasibilityObservation{
+		Outcome: runtimecontract.RuntimeOwnerFeasibilityFeasible,
+		OwnerPolicy: runtimecontract.RuntimeOwnerPolicyIdentity{
+			OwnerModuleID: runtimecontract.RuntimeModuleFile, PolicyRevision: "file-owner-feasibility-v1",
+			CatalogSnapshotID: inventory.SnapshotID,
+		},
+	}
+	replayProof := runtimecontract.RuntimeOperationReplayProof{
+		OwnerModuleID: runtimecontract.RuntimeModuleFile, OperationID: operation.ID, TargetRefs: operation.TargetRefs,
+		BeforeHash: "target-before-v1", AfterHash: "target-after-v1",
+		AdmissibilitySnapshotID: inventory.SnapshotID, AcquisitionBinding: inventory.AcquisitionBinding,
+	}
+	if _, err := controller.recordCandidateFeasibility(ctx, facts.WorkspaceID, facts.RunID, 0, runtimecontract.RuntimeCandidateFeasibilityRecord{
+		OperationID: operation.ID, AdmissibilitySnapshotID: inventory.SnapshotID, AcquisitionBinding: inventory.AcquisitionBinding,
+		CandidateManifestHash: pending.ManifestHash, Observation: &ownerObservation, ReplayProof: &replayProof,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := controller.Load(ctx, facts.WorkspaceID, facts.RunID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return loaded
+}
+
 func TestRuntimeAggregateSemanticPurposeInvariantFailsClosedWithoutExactLineage(t *testing.T) {
 	_, repository, _, _ := prepareTerminalValidationOwnerFactAcquisitionAssessment(t)
 	base := *repository.aggregate

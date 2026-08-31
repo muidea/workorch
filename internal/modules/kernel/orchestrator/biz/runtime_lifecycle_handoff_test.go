@@ -69,6 +69,30 @@ type panicOnceRuntimeTimerBackground struct {
 	successfulSubmits int
 }
 
+// commitRuntimeGovernanceResolutionForTest exercises the owner-private value
+// transition without recreating the removed generic EventHub authority ingress.
+// Cross-owner adapter tests cover the narrow Decision/Approval commands.
+func commitRuntimeGovernanceResolutionForTest(
+	module *Biz,
+	ctx context.Context,
+	source string,
+	resolution runtimecontract.RuntimeGovernanceResolution,
+) magicevent.Result {
+	event := magicevent.NewEventWithContext(
+		orchestratorevents.TopicOrchestratorCommitRuntimeGovernanceTicket,
+		source,
+		ModuleID,
+		magicevent.NewHeader(),
+		ctx,
+		nil,
+	)
+	result := magicevent.NewResult(event.ID(), event.Source(), event.Destination())
+	module.lifecycleMu.RLock()
+	defer module.lifecycleMu.RUnlock()
+	module.commitRuntimeGovernanceResolutionLocked(ctx, source, resolution, result)
+	return result
+}
+
 func (b *panicOnceRuntimeTimerBackground) AsyncFunction(function func()) error {
 	b.asyncFunctionCalls++
 	if !b.panicked {
@@ -1789,13 +1813,7 @@ func TestRuntimeGovernanceContinuationSuccessHandoffRetainsDurableSingleSuccesso
 		DependencyKind: request.DependencyKind, SubjectRef: request.SubjectRef,
 		Outcome: runtimecontract.RuntimeGovernanceResolutionOutcomeContinue, Summary: "continue with durable successor",
 	}
-	event := magicevent.NewEventWithContext(
-		orchestratorevents.TopicOrchestratorCommitRuntimeGovernanceResolution,
-		decisioncommon.ModuleID, ModuleID, magicevent.NewHeader(), ctx,
-		orchestratorevents.CommitRuntimeGovernanceResolutionCommand{Resolution: resolution},
-	)
-	result := magicevent.NewResult(event.ID(), event.Source(), event.Destination())
-	module.handleRuntimeGovernanceResolution(event, result)
+	result := commitRuntimeGovernanceResolutionForTest(module, ctx, decisioncommon.ModuleID, resolution)
 	data, magicErr := result.Get()
 	if magicErr != nil {
 		t.Fatalf("commit exact governance continuation: %v", magicErr)
@@ -1830,8 +1848,7 @@ func TestRuntimeGovernanceContinuationSuccessHandoffRetainsDurableSingleSuccesso
 
 	// Response-loss duplicate proves the exact Run-owned resolution and joins
 	// the same persisted generation without rewriting either owner.
-	duplicateResult := magicevent.NewResult(event.ID(), event.Source(), event.Destination())
-	module.handleRuntimeGovernanceResolution(event, duplicateResult)
+	duplicateResult := commitRuntimeGovernanceResolutionForTest(module, ctx, decisioncommon.ModuleID, resolution)
 	duplicateData, duplicateMagicErr := duplicateResult.Get()
 	duplicateResponse, duplicateOK := duplicateData.(orchestratorevents.CommitRuntimeGovernanceResolutionResult)
 	if duplicateMagicErr != nil || !duplicateOK || duplicateResponse.Disposition != orchestratorevents.RuntimeGovernanceResolutionDispositionDuplicate {
@@ -1849,13 +1866,7 @@ func TestRuntimeGovernanceContinuationSuccessHandoffRetainsDurableSingleSuccesso
 	// successor after the governed dispatch has already committed.
 	wrong := resolution
 	wrong.ResolutionID = "resolution-wrong-handoff"
-	wrongEvent := magicevent.NewEventWithContext(
-		orchestratorevents.TopicOrchestratorCommitRuntimeGovernanceResolution,
-		decisioncommon.ModuleID, ModuleID, magicevent.NewHeader(), ctx,
-		orchestratorevents.CommitRuntimeGovernanceResolutionCommand{Resolution: wrong},
-	)
-	wrongResult := magicevent.NewResult(wrongEvent.ID(), wrongEvent.Source(), wrongEvent.Destination())
-	module.handleRuntimeGovernanceResolution(wrongEvent, wrongResult)
+	wrongResult := commitRuntimeGovernanceResolutionForTest(module, ctx, decisioncommon.ModuleID, wrong)
 	wrongData, wrongErr := wrongResult.Get()
 	wrongResponse, wrongOK := wrongData.(orchestratorevents.CommitRuntimeGovernanceResolutionResult)
 	if wrongErr != nil || !wrongOK || wrongResponse.Disposition != orchestratorevents.RuntimeGovernanceResolutionDispositionStale {
@@ -2066,13 +2077,7 @@ func TestRuntimeGovernanceContinuationHistoricalDuplicateDoesNotReplayAcrossLate
 		t.Fatal(err)
 	}
 
-	event := magicevent.NewEventWithContext(
-		orchestratorevents.TopicOrchestratorCommitRuntimeGovernanceResolution,
-		decisioncommon.ModuleID, ModuleID, magicevent.NewHeader(), ctx,
-		orchestratorevents.CommitRuntimeGovernanceResolutionCommand{Resolution: historicalResolution},
-	)
-	result := magicevent.NewResult(event.ID(), event.Source(), event.Destination())
-	module.handleRuntimeGovernanceResolution(event, result)
+	result := commitRuntimeGovernanceResolutionForTest(module, ctx, decisioncommon.ModuleID, historicalResolution)
 	data, magicErr := result.Get()
 	response, ok := data.(orchestratorevents.CommitRuntimeGovernanceResolutionResult)
 	if magicErr != nil || !ok || response.Disposition != orchestratorevents.RuntimeGovernanceResolutionDispositionDuplicate {
@@ -2205,13 +2210,7 @@ func TestRuntimeGovernanceFailureUsesAtomicTerminalSuccessorAcrossPartialAckAndR
 		DependencyKind: request.DependencyKind, SubjectRef: request.SubjectRef,
 		Outcome: runtimecontract.RuntimeGovernanceResolutionOutcomeFail, Summary: "governance rejected",
 	}
-	event := magicevent.NewEventWithContext(
-		orchestratorevents.TopicOrchestratorCommitRuntimeGovernanceResolution,
-		decisioncommon.ModuleID, ModuleID, magicevent.NewHeader(), ctx,
-		orchestratorevents.CommitRuntimeGovernanceResolutionCommand{Resolution: resolution},
-	)
-	result := magicevent.NewResult(event.ID(), event.Source(), event.Destination())
-	module.handleRuntimeGovernanceResolution(event, result)
+	result := commitRuntimeGovernanceResolutionForTest(module, ctx, decisioncommon.ModuleID, resolution)
 	data, magicErr := result.Get()
 	response, ok := data.(orchestratorevents.CommitRuntimeGovernanceResolutionResult)
 	if magicErr != nil || !ok || response.Disposition != orchestratorevents.RuntimeGovernanceResolutionDispositionCommitted || response.Terminal == nil {
@@ -2231,8 +2230,7 @@ func TestRuntimeGovernanceFailureUsesAtomicTerminalSuccessorAcrossPartialAckAndR
 		t.Fatalf("terminal resolution wrote Run lifecycle directly: run=%+v err=%v", blocked, err)
 	}
 
-	duplicate := magicevent.NewResult(event.ID(), event.Source(), event.Destination())
-	module.handleRuntimeGovernanceResolution(event, duplicate)
+	duplicate := commitRuntimeGovernanceResolutionForTest(module, ctx, decisioncommon.ModuleID, resolution)
 	duplicateData, duplicateErr := duplicate.Get()
 	duplicateResponse, duplicateOK := duplicateData.(orchestratorevents.CommitRuntimeGovernanceResolutionResult)
 	if duplicateErr != nil || !duplicateOK || duplicateResponse.Disposition != orchestratorevents.RuntimeGovernanceResolutionDispositionDuplicate || background.asyncFunctionCalls != 0 {
@@ -2261,8 +2259,7 @@ func TestRuntimeGovernanceFailureUsesAtomicTerminalSuccessorAcrossPartialAckAndR
 		t.Fatalf("partial terminal delivery=%+v lease=%+v recovery=%+v resultCalls=%d timers=%d err=%v", partial.DeliveryAcknowledgements, partial.DriveLease, partial.Facts.Recovery, resultCalls, background.asyncFunctionCalls, err)
 	}
 	partialRevision := partial.StateRevision
-	partialDuplicate := magicevent.NewResult(event.ID(), event.Source(), event.Destination())
-	module.handleRuntimeGovernanceResolution(event, partialDuplicate)
+	partialDuplicate := commitRuntimeGovernanceResolutionForTest(module, ctx, decisioncommon.ModuleID, resolution)
 	partialDuplicateData, partialDuplicateErr := partialDuplicate.Get()
 	partialDuplicateResponse, partialDuplicateOK := partialDuplicateData.(orchestratorevents.CommitRuntimeGovernanceResolutionResult)
 	afterPartialDuplicate, loadErr := owner.runtimeController.Load(ctx, facts.WorkspaceID, facts.RunID)
@@ -2324,8 +2321,7 @@ func TestRuntimeGovernanceFailureUsesAtomicTerminalSuccessorAcrossPartialAckAndR
 	}
 	fullyAcknowledgedRevision := terminalRun.Revision
 	fullyAcknowledgedTimerCalls := restartedBackground.asyncFunctionCalls
-	fullyAcknowledgedDuplicate := magicevent.NewResult(event.ID(), event.Source(), event.Destination())
-	restartedModule.handleRuntimeGovernanceResolution(event, fullyAcknowledgedDuplicate)
+	fullyAcknowledgedDuplicate := commitRuntimeGovernanceResolutionForTest(restartedModule, ctx, decisioncommon.ModuleID, resolution)
 	fullyAcknowledgedData, fullyAcknowledgedErr := fullyAcknowledgedDuplicate.Get()
 	fullyAcknowledgedResponse, fullyAcknowledgedOK := fullyAcknowledgedData.(orchestratorevents.CommitRuntimeGovernanceResolutionResult)
 	afterFullyAcknowledgedDuplicate, runErr := baseRuns.GetByWorkspaceID(ctx, facts.WorkspaceID, facts.RunID)

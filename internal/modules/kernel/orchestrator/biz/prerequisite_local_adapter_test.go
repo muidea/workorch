@@ -252,9 +252,10 @@ func TestRuntimePrerequisiteResolverInventoryUsesProductionRequirementSources(t 
 	groundingFacts.Focus = runtimecontract.CoverageFocus{
 		ID: "focus-ground", SliceID: "slice-default-001", CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-001"},
 		RequiredEvidenceKinds: []string{runtimecontract.EvidenceKindStateChange}, RequireTargetGrounding: true,
-		TargetRole: "implementation", TargetDiscoverySources: []string{runtimecontract.RuntimeValidationDiscoverySourceWorkspaceManifest},
-		TargetSelectorRef: "file/profile_declared_candidates", TargetSelectorOwnerRef: "profile-inventory",
-		TargetSelectorSubjectRef: "implementation", TargetSelectorCandidateRefs: []string{"implementation.go"},
+		AcceptedStepKinds: []string{runtimecontract.StepKindGitWrite},
+		TargetRole:        "repository", TargetDiscoverySources: []string{runtimecontract.RuntimeValidationDiscoverySourceWorkspaceManifest},
+		TargetSelectorRef: "profile/repository-targets", TargetSelectorOwnerRef: "profile-inventory",
+		TargetSelectorSubjectRef: "repository", TargetSelectorCandidateRefs: []string{"repository://current"},
 	}
 	groundingFacts.Coverage[0].FocusID = groundingFacts.Focus.ID
 	groundingFacts.Coverage[0].CWIConvergenceState = runtimecontract.RuntimeCWIConvergenceStateUnbound
@@ -277,16 +278,16 @@ func TestRuntimePrerequisiteResolverInventoryUsesProductionRequirementSources(t 
 	if selectionPrerequisite.ID == "" {
 		t.Fatalf("reducer did not expose target selection prerequisite: %+v", grounded.Prerequisites.Pending)
 	}
-	if selectionPrerequisite.Kind != runtimecontract.PrerequisiteKindTargetSelection || selectionPrerequisite.OwnerModuleID != runtimecontract.RuntimeModuleFile ||
+	if selectionPrerequisite.Kind != runtimecontract.PrerequisiteKindTargetSelection || selectionPrerequisite.OwnerModuleID != runtimecontract.RuntimeModuleGit ||
 		runtimePrerequisiteResolverClassification(selectionPrerequisite.Kind) != runtimePrerequisiteResolverExternal {
 		t.Fatalf("reducer target selection binding=%+v", selectionPrerequisite)
 	}
 	seen[selectionPrerequisite.Kind] = struct{}{}
 	selection := runtimecontract.RuntimeTargetSelection{
-		PrerequisiteID: selectionPrerequisite.ID, OwnerModuleID: runtimecontract.RuntimeModuleFile, TargetRole: selectionPrerequisite.SubjectRef,
+		PrerequisiteID: selectionPrerequisite.ID, OwnerModuleID: runtimecontract.RuntimeModuleGit, TargetRole: selectionPrerequisite.SubjectRef,
 		SelectorRef: selectionPrerequisite.TargetSelectorRef, SelectorOwnerRef: selectionPrerequisite.TargetSelectorOwnerRef,
 		SelectorSubjectRef: selectionPrerequisite.TargetSelectorSubjectRef, SelectorCandidateRefs: selectionPrerequisite.TargetSelectorCandidateRefs,
-		Disposition: runtimecontract.RuntimeTargetSelectionSelected, TargetRefs: []string{"implementation.go"}, CandidateTargetRefs: []string{"implementation.go"}, CandidateCount: 1, ObservedRevision: "tree-v1",
+		Disposition: runtimecontract.RuntimeTargetSelectionSelected, TargetRefs: []string{"repository://current"}, CandidateTargetRefs: []string{"repository://current"}, CandidateCount: 1, ObservedRevision: "tree-v1",
 	}
 	selection.SnapshotID = runtimecontract.StableRuntimeTargetSelectionSnapshotID(selection)
 	grounded, err = runtime.CommitPrerequisiteResult(grounded, runtime.PrerequisiteResult{PrerequisiteID: selectionPrerequisite.ID, TargetSelection: &selection})
@@ -297,7 +298,7 @@ func TestRuntimePrerequisiteResolverInventoryUsesProductionRequirementSources(t 
 	if err != nil || decision.State != runtimecontract.ConvergenceStateNeedPrerequisite || len(grounded.Prerequisites.Pending) != 1 || grounded.Prerequisites.Pending[0].Kind != runtimecontract.PrerequisiteKindTargetSnapshot {
 		t.Fatalf("reducer did not generate target snapshot prerequisite: facts=%+v decision=%+v err=%v", grounded, decision, err)
 	}
-	if grounded.Prerequisites.Pending[0].OwnerModuleID != runtimecontract.RuntimeModuleFile || runtimePrerequisiteResolverClassification(grounded.Prerequisites.Pending[0].Kind) != runtimePrerequisiteResolverExternal {
+	if grounded.Prerequisites.Pending[0].OwnerModuleID != runtimecontract.RuntimeModuleGit || runtimePrerequisiteResolverClassification(grounded.Prerequisites.Pending[0].Kind) != runtimePrerequisiteResolverExternal {
 		t.Fatalf("reducer target snapshot binding=%+v", grounded.Prerequisites.Pending[0])
 	}
 	seen[runtimecontract.PrerequisiteKindTargetSnapshot] = struct{}{}

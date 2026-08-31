@@ -2,7 +2,7 @@ package runtime
 
 import (
 	"fmt"
-	"strings"
+	"time"
 
 	"github.com/muidea/workorch/internal/modules/kernel/orchestrator/biz/internal/governancecheck"
 	"github.com/muidea/workorch/internal/pkg/common"
@@ -10,6 +10,7 @@ import (
 )
 
 func (x *activeDispatchExecution) prepareOperation(operation runtimecontract.RuntimeOperation) (preparedActiveDispatchOperation, error) {
+	x.recoveryAuthorization = nil
 	execution, found := operationExecutionRecord(x.aggregate.ActiveDispatch.OperationExecutions, operation.ID)
 	if !found {
 		return preparedActiveDispatchOperation{}, fmt.Errorf("%w: operation %q execution ledger is missing", common.ErrConflict, operation.ID)
@@ -82,24 +83,56 @@ func (x *activeDispatchExecution) prepareClaimedOperation(operation runtimecontr
 
 func (x *activeDispatchExecution) authorizeClaimedOperationReplay(operation runtimecontract.RuntimeOperation, execution runtimecontract.RuntimeOperationExecutionRecord) error {
 	if !runtimeOperationHasReplayAuthority(execution) {
-		if _, err := x.component.markOperationExecutionOutcomeUnknown(x.ctx, x.workspaceID, x.runID, operation.ID); err != nil {
-			return err
-		}
-		return operationOutcomeUnknown(operation.ID, "claimed execution has no receipt or replay authority")
+		return &runtimeOperationOutcomeUnknownTransitionRequiredError{OperationID: operation.ID}
 	}
-	// The persisted counter and operation identity form one exact SM-4 handoff
-	// fence; an unrelated later charge cannot authorize this replay.
-	authorized := strings.TrimSpace(x.recoveryOperationID) == operation.ID && x.recoveryBudgetAttempt > 0 && x.aggregate.Facts.Recovery.OperationRecoveryAttempts == x.recoveryBudgetAttempt
-	if authorized {
-		x.recoveryOperationID = ""
-		x.recoveryBudgetAttempt = 0
+	// A one-shot call token is accepted only for the latest exact authorization
+	// that this process just changed from issued to in-flight. Persisted
+	// in-flight state by itself never authorizes an effect after restart.
+	if x.recoveryCallToken != "" {
+		authorization, authorized := runtimecontract.RuntimeInFlightOperationRecoveryAuthorizationForExecution(
+			x.aggregate.OperationRecoveryAuthorizations,
+			x.recoveryCallToken,
+			x.recoveryNow,
+			x.dispatch.ID,
+			execution,
+		)
+		if !authorized {
+			return fmt.Errorf("%w: operation recovery call token does not match the latest in-flight authorization", common.ErrConflict)
+		}
+		value := authorization.Clone()
+		x.recoveryAuthorization = &value
 		return nil
 	}
-	if !runtimeOperationRecoveryBudgetAvailable(x.aggregate) {
-		if _, err := x.component.markOperationExecutionOutcomeUnknown(x.ctx, x.workspaceID, x.runID, operation.ID); err != nil {
-			return err
+	// The exact persisted issued authorization is a request for an SM-4
+	// pre-call claim CAS, not replay authority. This closes the call-after-CAS
+	// crash window: a fresh process can claim an unclaimed issue, but can never
+	// reuse a grant whose physical call may already have occurred.
+	if authorization, authorized := runtimecontract.RuntimeOperationRecoveryAuthorizationForExecution(x.aggregate.OperationRecoveryAuthorizations, x.dispatch.ID, execution); authorized {
+		return &runtimeOperationRecoveryAuthorizationClaimRequiredError{
+			OperationID: operation.ID, AuthorizationID: authorization.AuthorizationID,
 		}
-		return operationOutcomeUnknown(operation.ID, "safe replay recovery budget exhausted")
+	}
+	if authorization, found := runtimecontract.RuntimeCurrentOperationRecoveryAuthorizationForExecution(x.aggregate.OperationRecoveryAuthorizations, x.dispatch.ID, execution); found {
+		switch authorization.State {
+		case runtimecontract.RuntimeOperationRecoveryAuthorizationInFlight:
+			now, nowErr := time.Parse(time.RFC3339Nano, x.recoveryNow)
+			deadline, deadlineErr := time.Parse(time.RFC3339Nano, authorization.LeaseDeadline)
+			if nowErr != nil || deadlineErr != nil {
+				return common.ErrInvalidArgument
+			}
+			if !now.After(deadline) {
+				return &runtimeOperationRecoveryInFlightError{OperationID: operation.ID, ClaimID: authorization.ClaimID, LeaseDeadline: authorization.LeaseDeadline}
+			}
+		case runtimecontract.RuntimeOperationRecoveryAuthorizationUncertain:
+			// A completed call without a receipt admits one newly budgeted replay.
+		case runtimecontract.RuntimeOperationRecoveryAuthorizationSettled:
+			return fmt.Errorf("%w: settled recovery authorization has no persisted receipt", common.ErrConflict)
+		case runtimecontract.RuntimeOperationRecoveryAuthorizationRetired:
+			return fmt.Errorf("%w: retired recovery authorization cannot execute", common.ErrConflict)
+		}
+	}
+	if !runtimeOperationRecoveryBudgetAvailable(x.aggregate) {
+		return &runtimeOperationOutcomeUnknownTransitionRequiredError{OperationID: operation.ID}
 	}
 	return &runtimeOperationRecoveryBudgetRequiredError{OperationID: operation.ID}
 }
@@ -126,21 +159,26 @@ func (x *activeDispatchExecution) claimSealedOperation(operation runtimecontract
 
 func (x *activeDispatchExecution) projectPersistedOperationReceipt(operation runtimecontract.RuntimeOperation, receipt runtimecontract.RuntimeOperationReceipt) (preparedActiveDispatchOperation, error) {
 	if receipt.PrerequisiteStale != nil {
-		invalidated, err := x.component.invalidateActiveDispatchForPrerequisiteStale(x.ctx, x.workspaceID, x.runID, x.dispatch.ID, receipt)
-		if err != nil {
-			return preparedActiveDispatchOperation{}, err
-		}
-		x.aggregate = invalidated
-		return preparedActiveDispatchOperation{flow: activeDispatchExecutionStop}, nil
+		value := receipt.Clone()
+		return preparedActiveDispatchOperation{handoff: &RuntimeDispatchExecutionHandoff{
+			DispatchID: x.dispatch.ID, OperationID: operation.ID, PrerequisiteStaleReceipt: &value,
+		}, flow: activeDispatchExecutionStop}, nil
 	}
-	commit, err := x.component.commitPersistedOperationReceiptEvidence(x.ctx, x.aggregate, x.dispatch, operation, receipt)
+	if receipt.Outcome == runtimecontract.RuntimeOperationOutcomeGovernanceRequired {
+		if receipt.Governance == nil {
+			return preparedActiveDispatchOperation{}, fmt.Errorf("persisted governance receipt has no requirement")
+		}
+		cloned := receipt.Clone()
+		result := RuntimeOperationExecutionResult{OperationID: operation.ID, Receipt: cloned, Governance: cloned.Governance}
+		return preparedActiveDispatchOperation{handoff: &RuntimeDispatchExecutionHandoff{
+			DispatchID: x.dispatch.ID, OperationID: operation.ID, GovernanceRequired: &result,
+		}, flow: activeDispatchExecutionStop}, nil
+	}
+	evidence, err := operationEvidenceFromPersistedReceipt(x.aggregate, x.dispatch, operation, receipt)
 	if err != nil {
 		return preparedActiveDispatchOperation{}, err
 	}
-	x.aggregate = commit.Aggregate
-	x.completed[operation.ID] = struct{}{}
-	if commit.DispatchCompleted {
-		return preparedActiveDispatchOperation{flow: activeDispatchExecutionStop}, nil
-	}
-	return preparedActiveDispatchOperation{flow: activeDispatchExecutionSkip}, nil
+	return preparedActiveDispatchOperation{handoff: &RuntimeDispatchExecutionHandoff{
+		DispatchID: x.dispatch.ID, OperationID: operation.ID, Evidence: &evidence,
+	}, flow: activeDispatchExecutionStop}, nil
 }

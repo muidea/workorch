@@ -689,8 +689,7 @@ func TestOwnerEventCommandsHaveProductionSenderAndReceiver(t *testing.T) {
 	}
 	uses := auditTopicSymbolUses(t, repositoryRoot, topicBySymbol)
 	ownerInternalCanonicalEntries := map[string]bool{
-		orchestratorevents.TopicOrchestratorDriveRuntime:                      true,
-		orchestratorevents.TopicOrchestratorCommitRuntimeGovernanceResolution: true,
+		orchestratorevents.TopicOrchestratorDriveRuntime: true,
 	}
 	for topic, contract := range contracts {
 		message := messages[topic]

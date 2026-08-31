@@ -88,7 +88,7 @@ func NormalizeRuntimeProviderRequestTerminal(input RuntimeProviderRequestTermina
 		if err := original.Validate(); err != nil {
 			return RuntimeProviderRequestTerminalFact{}, err
 		}
-		fact.Failure = semanticContractFailureFact(input.TerminalCode, *original)
+		fact.Failure = semanticProviderRequestTerminalFailureFact(input.TerminalCode, *original, outcomeClass)
 	} else {
 		failureClass, ok := providerRequestTerminalFailureClass(outcomeClass)
 		if !ok {
@@ -125,7 +125,7 @@ func (f RuntimeProviderRequestTerminalFact) Validate() error {
 		if f.Failure.Code != "semantic_contract_failed" || f.Failure.OriginalDiagnostic == nil {
 			return common.ErrInvalidArgument
 		}
-		expected := semanticContractFailureFact(f.TerminalCode, *f.Failure.OriginalDiagnostic)
+		expected := semanticProviderRequestTerminalFailureFact(f.TerminalCode, *f.Failure.OriginalDiagnostic, f.RequestOutcome.Class)
 		if !sameRuntimeFailureFact(expected, f.Failure) {
 			return common.ErrInvalidArgument
 		}
@@ -136,6 +136,18 @@ func (f RuntimeProviderRequestTerminalFact) Validate() error {
 		return common.ErrInvalidArgument
 	}
 	return nil
+}
+
+// semanticProviderRequestTerminalFailureFact keeps the semantic ledger's
+// canonical terminal identity while deriving its typed failure class from the
+// already validated request outcome. Producer-private diagnostic vocabulary is
+// audit data only and cannot create an SM-3/SM-2 classification mismatch.
+func semanticProviderRequestTerminalFailureFact(terminalCode string, diagnostic runtimecontract.RuntimeOriginalDiagnostic, outcomeClass runtimecontract.RuntimeCandidateRequestOutcomeClass) runtimecontract.FailureFact {
+	fact := semanticContractFailureFact(terminalCode, diagnostic)
+	if class, ok := providerRequestTerminalFailureClass(outcomeClass); ok {
+		fact.Class = class
+	}
+	return fact
 }
 
 func providerRequestTerminalOutcomeClass(explicit runtimecontract.RuntimeCandidateRequestOutcomeClass, code string, original *runtimecontract.RuntimeOriginalDiagnostic) runtimecontract.RuntimeCandidateRequestOutcomeClass {

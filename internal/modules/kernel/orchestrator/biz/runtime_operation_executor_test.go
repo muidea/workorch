@@ -5,10 +5,82 @@ import (
 	"strings"
 	"testing"
 
+	fileevents "github.com/muidea/workorch/internal/modules/blocks/file/pkg/events"
+	gitevents "github.com/muidea/workorch/internal/modules/blocks/git/pkg/events"
+	mcpevents "github.com/muidea/workorch/internal/modules/blocks/mcp/pkg/events"
+	shellevents "github.com/muidea/workorch/internal/modules/blocks/shell/pkg/events"
+	sshevents "github.com/muidea/workorch/internal/modules/blocks/ssh/pkg/events"
+	webevents "github.com/muidea/workorch/internal/modules/blocks/web/pkg/events"
 	runtime "github.com/muidea/workorch/internal/modules/kernel/orchestrator/biz/runtime"
+	"github.com/muidea/workorch/internal/pkg/eventcontract"
 	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
+
+func TestRuntimeOperationExecutionEventBindsExactExecutionLane(t *testing.T) {
+	base := runtime.RuntimeOperationExecutionRequest{
+		WorkspaceID: "ws-lane", RunID: "run-lane",
+		Execution: runtimecontract.RuntimeOperationExecutionRecord{ExecutionKey: "exec/ws-lane/run-lane/dispatch-1/operation-1", Fence: 1},
+	}
+	tests := []struct {
+		name        string
+		contracts   []eventcontract.Contract
+		topic       string
+		destination string
+		laneOwner   string
+	}{
+		{name: "file_list", contracts: fileevents.Contracts(), topic: fileevents.TopicExecuteFileListOperation, destination: runtimecontract.RuntimeModuleFile, laneOwner: "file"},
+		{name: "file_read", contracts: fileevents.Contracts(), topic: fileevents.TopicExecuteFileReadOperation, destination: runtimecontract.RuntimeModuleFile, laneOwner: "file"},
+		{name: "file_edit", contracts: fileevents.Contracts(), topic: fileevents.TopicExecuteFileEditOperation, destination: runtimecontract.RuntimeModuleFile, laneOwner: "file"},
+		{name: "file_write", contracts: fileevents.Contracts(), topic: fileevents.TopicExecuteFileWriteOperation, destination: runtimecontract.RuntimeModuleFile, laneOwner: "file"},
+		{name: "patch_apply", contracts: fileevents.Contracts(), topic: fileevents.TopicExecutePatchApplyOperation, destination: runtimecontract.RuntimeModuleFile, laneOwner: "file"},
+		{name: "patch_preview", contracts: fileevents.Contracts(), topic: fileevents.TopicExecutePatchPreviewOperation, destination: runtimecontract.RuntimeModuleFile, laneOwner: "file"},
+		{name: "git", contracts: gitevents.Contracts(), topic: gitevents.TopicExecuteOperation, destination: runtimecontract.RuntimeModuleGit, laneOwner: "git"},
+		{name: "shell", contracts: shellevents.Contracts(), topic: shellevents.TopicExecuteOperation, destination: runtimecontract.RuntimeModuleShell, laneOwner: "shell"},
+		{name: "ssh", contracts: sshevents.Contracts(), topic: sshevents.TopicExecuteOperation, destination: runtimecontract.RuntimeModuleSSH, laneOwner: "ssh"},
+		{name: "web", contracts: webevents.Contracts(), topic: webevents.TopicExecuteOperation, destination: runtimecontract.RuntimeModuleWeb, laneOwner: "web"},
+		{name: "mcp", contracts: mcpevents.Contracts(), topic: mcpevents.TopicExecuteOperation, destination: runtimecontract.RuntimeModuleMCP, laneOwner: "mcp"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			contractFound := false
+			for _, contract := range test.contracts {
+				if contract.Topic == test.topic {
+					contractFound = true
+					if contract.LanePolicy != eventcontract.LanePolicyExecute {
+						t.Fatalf("owner contract lane policy = %q, want %q", contract.LanePolicy, eventcontract.LanePolicyExecute)
+					}
+					if contract.Metadata.EffectClass != eventcontract.EffectClassExternalSideEffect {
+						t.Fatalf("owner execute effect class = %q, want %q", contract.Metadata.EffectClass, eventcontract.EffectClassExternalSideEffect)
+					}
+				}
+			}
+			if !contractFound {
+				t.Fatalf("execute topic %q is absent from receiver contracts", test.topic)
+			}
+
+			event := runtimeOperationExecutionEvent(context.Background(), test.contracts, test.topic, test.destination, base, struct{}{})
+			want := "exec/block/" + test.laneOwner + "/workspace/ws-lane/step/" + base.Execution.ExecutionKey
+			if event.LaneKey() != want {
+				t.Fatalf("operation execution lane = %q, want %q", event.LaneKey(), want)
+			}
+
+			retry := base
+			retry.Execution.Fence = 2
+			retryEvent := runtimeOperationExecutionEvent(context.Background(), test.contracts, test.topic, test.destination, retry, struct{}{})
+			if retryEvent.LaneKey() != event.LaneKey() {
+				t.Fatalf("same execution key with a new fence changed lane: first=%q retry=%q", event.LaneKey(), retryEvent.LaneKey())
+			}
+
+			other := base
+			other.Execution.ExecutionKey = "exec/ws-lane/run-lane/dispatch-1/operation-2"
+			otherEvent := runtimeOperationExecutionEvent(context.Background(), test.contracts, test.topic, test.destination, other, struct{}{})
+			if otherEvent.LaneKey() == event.LaneKey() {
+				t.Fatal("distinct execution keys shared one capability execution lane")
+			}
+		})
+	}
+}
 
 func TestRuntimeOperationExecutionResultUsesOnlyPersistedReceiptGovernance(t *testing.T) {
 	failure := &runtimecontract.FailureFact{

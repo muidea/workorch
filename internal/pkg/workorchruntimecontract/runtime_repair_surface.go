@@ -83,7 +83,7 @@ const (
 	RuntimeRepairSurfaceRejected  RuntimeRepairSurfaceDisposition = "rejected"
 )
 
-// RuntimeRepairSurfaceConfirmation is the File owner's read-only reply. It
+// RuntimeRepairSurfaceConfirmation is the resource owner's read-only reply. It
 // contains no action or retry instruction; Orchestrator alone maps a confirmed
 // fact to a new authority transaction.
 type RuntimeRepairSurfaceConfirmation struct {
@@ -97,7 +97,7 @@ type RuntimeRepairSurfaceConfirmation struct {
 }
 
 // RuntimeRepairSurfaceConfirmationRecord is the Orchestrator-owned replay
-// fence for one File-owner confirmation.  The complete normalized
+// fence for one resource-owner confirmation.  The complete normalized
 // confirmation is retained so a duplicate can be recognized without relying
 // on an event-id index or reconstructing the owner fact from mutable state.
 // IdentitySignature deliberately excludes response-specific disposition,
@@ -248,12 +248,13 @@ func (c RuntimeRepairSurfaceConfirmation) Normalized() RuntimeRepairSurfaceConfi
 }
 
 func (c RuntimeRepairSurfaceConfirmation) Validate() error {
+	rawOwnerModuleID := c.OwnerModuleID
 	c = c.Normalized()
 	if err := c.Observation.Validate(); err != nil {
 		return err
 	}
-	if c.OwnerModuleID != RuntimeModuleFile || c.SubjectRef == "" || c.Disposition == "" || c.ObservedRevision == "" {
-		return fmt.Errorf("repair surface confirmation requires File owner, subject, disposition and revision")
+	if c.OwnerModuleID == "" || rawOwnerModuleID != c.OwnerModuleID || c.SubjectRef == "" || c.Disposition == "" || c.ObservedRevision == "" {
+		return fmt.Errorf("repair surface confirmation requires canonical owner, subject, disposition and revision")
 	}
 	switch c.Disposition {
 	case RuntimeRepairSurfaceConfirmed:

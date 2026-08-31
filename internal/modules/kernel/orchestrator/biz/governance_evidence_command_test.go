@@ -31,8 +31,9 @@ func TestWorkspacePreSealDefinitionResolutionSkipsRunScopedEvidenceAndReplaysAft
 	// an empty RunID; a pre-seal Decision resolution must never call it.
 	orchestratorOwner := New()
 	if err := orchestratorOwner.Configure(Dependencies{
-		Evidence:   memoryrepo.NewOrchestratorOwnerRepositorySet(),
-		CommandHub: hub,
+		Evidence:          memoryrepo.NewOrchestratorOwnerRepositorySet(),
+		CommandHub:        hub,
+		BackgroundRoutine: &recordingBackgroundRoutine{},
 	}); err != nil {
 		t.Fatalf("configure Orchestrator owner: %v", err)
 	}

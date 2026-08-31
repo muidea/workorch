@@ -61,7 +61,10 @@ func TestOwnerEventContractsAreCompleteAndUnique(t *testing.T) {
 	// retirement adds Orchestrator Begin/Confirm quiescence and Run Finalize;
 	// each carries immutable facts while the respective owner-private reducer
 	// remains the sole transition authority.
-	const expectedProductionTopicCount = 283
+	// Orchestrator's generic Runtime governance-resolution command is absent:
+	// the concrete Decision/Approval result adapters now reload their exact
+	// persisted binding before invoking the owner-private SM-2 transition.
+	const expectedProductionTopicCount = 282
 	if len(contracts) != expectedProductionTopicCount {
 		t.Fatalf("production EventHub topic inventory = %d, want %d; adjudicate additions/removals in the active component contract closure plan", len(contracts), expectedProductionTopicCount)
 	}

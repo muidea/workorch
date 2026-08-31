@@ -158,7 +158,7 @@ func TestWorkspaceRetirementGateSurvivesBusyConfirmationAndRestart(t *testing.T)
 	}
 	newOrchestrator := func() *Biz {
 		owner := New()
-		if err := owner.Configure(Dependencies{Evidence: evidenceOwner, CommandHub: hub}); err != nil {
+		if err := owner.Configure(Dependencies{Evidence: evidenceOwner, CommandHub: hub, BackgroundRoutine: &recordingBackgroundRoutine{}}); err != nil {
 			t.Fatal(err)
 		}
 		if err := owner.Start(); err != nil {
@@ -344,8 +344,9 @@ func TestRuntimeDriveFailsClosedWithoutRunRetirementOwner(t *testing.T) {
 
 func workspaceRetirementTestDependencies(hub magicevent.Hub) Dependencies {
 	return Dependencies{
-		Evidence:   memoryrepo.NewOrchestratorOwnerRepositorySet(),
-		CommandHub: hub,
+		Evidence:          memoryrepo.NewOrchestratorOwnerRepositorySet(),
+		CommandHub:        hub,
+		BackgroundRoutine: &recordingBackgroundRoutine{},
 	}
 }
 

@@ -583,7 +583,7 @@ func TestValidationFailureTargetObservationRejectsDirectShellAuthority(t *testin
 		},
 	}
 	if validationFailureTargetsAreGrounded(facts, failure) {
-		t.Fatal("content-bound Shell observation bypassed the validation-observation and File-confirmation path")
+		t.Fatal("content-bound Shell observation bypassed the validation-observation and owner-confirmation path")
 	}
 	failure.TargetObservation.SubjectRef = "command_target"
 	if validationFailureTargetsAreGrounded(facts, failure) {
@@ -1139,7 +1139,7 @@ func sealCandidateWithFeasibilitiesForTest(t *testing.T, repository *durableRunt
 	if err != nil {
 		t.Fatal(err)
 	}
-	repairCommitment, err := deriveConfirmedFileRepairAdmissionCommitment(aggregate, manifest, candidate)
+	repairCommitment, err := deriveConfirmedRepairAdmissionCommitment(aggregate, manifest, candidate)
 	if err != nil {
 		t.Fatal(err)
 	}

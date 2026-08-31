@@ -10,13 +10,13 @@ import (
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
-// confirmedFileRepairTransaction is a private, derived view of one exact
-// Shell-rejection -> File-confirmation -> sealed state-change transaction. It
+// confirmedRepairTransaction is a private, derived view of one exact
+// validation-owner rejection -> resource-owner confirmation -> sealed state-change transaction. It
 // is never persisted and carries no mutable target authority. In particular,
 // a partial all-of dispatch keeps the old FailureTarget and NeedStateChange
 // directive retired after generic freshness invalidation; the remaining
 // operations are authorized exclusively by the immutable dispatch seal.
-type confirmedFileRepairTransaction struct {
+type confirmedRepairTransaction struct {
 	confirmation  runtimecontract.RuntimeRepairSurfaceConfirmation
 	sourceFact    runtimecontract.EvidenceFact
 	sourceReceipt runtimecontract.RuntimeOperationReceipt
@@ -24,68 +24,71 @@ type confirmedFileRepairTransaction struct {
 	closure       runtimecontract.RuntimeRepairClosure
 }
 
-type confirmedFileRepairReceiptLink struct {
+type confirmedRepairReceiptLink struct {
 	beforeRevision string
 	afterRevision  string
 }
 
-type completedConfirmedFileRepairTransaction struct {
-	transaction            confirmedFileRepairTransaction
+type completedConfirmedRepairTransaction struct {
+	transaction            confirmedRepairTransaction
 	dispatch               SealedDispatch
 	finalEvidenceRevision  string
 	finalWorkspaceRevision string
 }
 
-type confirmedFileRepairDispatchLineage struct {
+type confirmedRepairDispatchLineage struct {
 	dispatches []SealedDispatch
 	bindings   []runtimecontract.RuntimeOperationGovernanceBinding
 }
 
-// deriveConfirmedFileRepairAdmissionCommitment recognizes the exact
+// deriveConfirmedRepairAdmissionCommitment recognizes the exact
 // confirmed-validation repair transaction while its mutable SM-2 authority is
 // still current. The returned value is persisted on the operations request
 // session in the proposal CAS, before feasibility and final dispatch seal.
 // Later consumers may only copy and reverse-prove this commitment; they may
 // not reconstruct repair purpose from current FailureTarget or directive.
-func deriveConfirmedFileRepairAdmissionCommitment(
+func deriveConfirmedRepairAdmissionCommitment(
 	aggregate RuntimeAggregate,
 	manifest runtimecontract.RuntimeCandidateContractManifest,
 	candidate runtimecontract.RuntimeCandidate,
 ) (*runtimecontract.RuntimeDispatchRepairCommitment, error) {
 	manifest = manifest.Normalized()
 	if manifest.State != runtimecontract.ConvergenceStateNeedStateChange ||
-		manifest.RepairPurpose != runtimecontract.RuntimeDispatchRepairPurposeConfirmedFileValidation {
+		manifest.RepairPurpose != runtimecontract.RuntimeDispatchRepairPurposeConfirmedValidation {
 		return nil, nil
 	}
 	if candidate.StateChange == nil || aggregate.Decision.State != runtimecontract.ConvergenceStateNeedStateChange ||
-		aggregate.Decision.RequiredOutput.RepairPurpose != runtimecontract.RuntimeDispatchRepairPurposeConfirmedFileValidation ||
+		aggregate.Decision.RequiredOutput.RepairPurpose != runtimecontract.RuntimeDispatchRepairPurposeConfirmedValidation ||
 		strings.TrimSpace(aggregate.Decision.RequiredOutput.RepairClosureID) == "" ||
 		manifest.RepairClosureID != aggregate.Decision.RequiredOutput.RepairClosureID || aggregate.Facts.Focus.ID == "" {
-		return nil, fmt.Errorf("%w: confirmed File repair manifest has no exact typed decision purpose", common.ErrConflict)
+		return nil, fmt.Errorf("%w: confirmed owner repair manifest has no exact typed decision purpose", common.ErrConflict)
 	}
 	operations := candidateRuntimeOperations(candidate)
 	if len(operations) == 0 {
 		return nil, nil
 	}
 	var targetRefs []string
+	repairOwnerModuleID := ""
 	for _, rawOperation := range operations {
 		operation := rawOperation.Normalized()
 		descriptor, found := runtimecontract.RuntimeOperationDescriptorForKind(operation.Kind)
 		if !found {
-			return nil, fmt.Errorf("%w: confirmed File repair candidate operation %q has no descriptor", common.ErrConflict, operation.Kind)
+			return nil, fmt.Errorf("%w: confirmed owner repair candidate operation %q has no descriptor", common.ErrConflict, operation.Kind)
 		}
-		if descriptor.OwnerModuleID != runtimecontract.RuntimeModuleFile {
-			return nil, fmt.Errorf("%w: confirmed File repair manifest admitted a non-File operation", common.ErrConflict)
+		if repairOwnerModuleID == "" {
+			repairOwnerModuleID = descriptor.OwnerModuleID
+		} else if repairOwnerModuleID != descriptor.OwnerModuleID {
+			return nil, fmt.Errorf("%w: confirmed repair manifest spans multiple operation owners", common.ErrConflict)
 		}
 		if len(operation.TargetRefs) == 0 {
-			return nil, fmt.Errorf("%w: confirmed File repair candidate operation %q has no target", common.ErrConflict, operation.ID)
+			return nil, fmt.Errorf("%w: confirmed owner repair candidate operation %q has no target", common.ErrConflict, operation.ID)
 		}
 		targetRefs = append(targetRefs, operation.TargetRefs...)
 	}
 	targetRefs = normalizeRuntimeTargetRefs(targetRefs)
 	targetAuthorizations, err := runtimecontract.RuntimeCandidateAdmissionTargetAuthorizationsFromManifest(manifest, candidate)
 	if err != nil {
-		return nil, fmt.Errorf("%w: confirmed File repair candidate target projection: %v", common.ErrConflict, err)
+		return nil, fmt.Errorf("%w: confirmed owner repair candidate target projection: %v", common.ErrConflict, err)
 	}
 	probe := SealedDispatch{Candidate: candidate, OperationTargetAuthorizations: targetAuthorizations}
 	coverageIDs := append([]common.CoverageWorkItemID(nil), aggregate.Decision.RequiredOutput.CoverageWorkItemIDs...)
@@ -100,28 +103,29 @@ func deriveConfirmedFileRepairAdmissionCommitment(
 	var matched *runtimecontract.RuntimeDispatchRepairCommitment
 	for _, rawRecord := range aggregate.RepairSurfaceConfirmations {
 		if err := rawRecord.Validate(); err != nil {
-			return nil, fmt.Errorf("%w: confirmed File repair admission confirmation: %v", common.ErrConflict, err)
+			return nil, fmt.Errorf("%w: confirmed owner repair admission confirmation: %v", common.ErrConflict, err)
 		}
 		record := rawRecord.Normalized()
 		confirmation := record.Confirmation
 		if confirmation.Disposition != runtimecontract.RuntimeRepairSurfaceConfirmed ||
+			confirmation.OwnerModuleID != repairOwnerModuleID ||
 			!sameRuntimeTargetRefs(confirmation.ConfirmedTargetRefs, targetRefs) {
 			continue
 		}
-		if err := validateConfirmedFileRepairDispatchOperations(probe, confirmation); err != nil {
+		if err := validateConfirmedRepairDispatchOperations(probe, confirmation); err != nil {
 			return nil, err
 		}
-		sourceFact, sourceReceipt, sourceOperation, sourceErr := confirmedFileRepairSourceRejection(aggregate, confirmation)
+		sourceFact, sourceReceipt, sourceOperation, sourceErr := confirmedRepairSourceRejection(aggregate, confirmation)
 		if sourceErr != nil {
 			return nil, sourceErr
 		}
 		if sourceFact.Revision != aggregate.Decision.AuthorityTransaction().EvidenceRevision ||
 			!sameRuntimeStringSet(sourceFact.BindingRefs, sourceOperation.BindingRefs) ||
-			!confirmedFileRepairSourceBindingsCoverCurrentScope(aggregate, sourceOperation.BindingRefs, coverageIDs) {
+			!confirmedRepairSourceBindingsCoverCurrentScope(aggregate, sourceOperation.BindingRefs, coverageIDs) {
 			continue
 		}
 		if len(sourceFact.CoverageWorkItemIDs) != 0 && !sameCoverageIDs(sourceFact.CoverageWorkItemIDs, coverageIDs) {
-			return nil, fmt.Errorf("%w: confirmed File repair admission source coverage drifted", common.ErrConflict)
+			return nil, fmt.Errorf("%w: confirmed owner repair admission source coverage drifted", common.ErrConflict)
 		}
 		closure := runtimecontract.RuntimeRepairClosure{
 			GapSignature:                      confirmation.Observation.FailureSignature,
@@ -135,12 +139,12 @@ func deriveConfirmedFileRepairAdmissionCommitment(
 		if closure.ID != aggregate.Decision.RequiredOutput.RepairClosureID {
 			continue
 		}
-		transaction := confirmedFileRepairTransaction{
+		transaction := confirmedRepairTransaction{
 			confirmation: confirmation, sourceFact: sourceFact, sourceReceipt: sourceReceipt,
 			sourceOp: sourceOperation, closure: closure,
 		}
 		// The current SM-2 directive is produced by the ordinary reducer in the
-		// File-confirmation CAS. Rebuild that owner-local projection exactly, then
+		// owner-confirmation CAS. Rebuild that owner-local projection exactly, then
 		// independently bind its closure to the receipt-derived transaction. The
 		// commitment does not require a second, repair-specific directive ID and
 		// it never treats the mutable directive itself as the source lineage.
@@ -148,10 +152,11 @@ func deriveConfirmedFileRepairAdmissionCommitment(
 		if aggregate.Facts.RepairDirective == nil ||
 			!runtimecontract.SameRuntimeRepairDirective(aggregate.Facts.RepairDirective, &expectedDirective) ||
 			!runtimecontract.SameRuntimeRepairClosure(aggregate.Facts.RepairDirective.Closure, &transaction.closure) {
-			return nil, fmt.Errorf("%w: confirmed File repair admission has no exact current state-change directive", common.ErrConflict)
+			return nil, fmt.Errorf("%w: confirmed owner repair admission has no exact current state-change directive", common.ErrConflict)
 		}
 		commitment := runtimecontract.RuntimeDispatchRepairCommitment{
-			Purpose:                   runtimecontract.RuntimeDispatchRepairPurposeConfirmedFileValidation,
+			Purpose:                   runtimecontract.RuntimeDispatchRepairPurposeConfirmedValidation,
+			RepairOwnerModuleID:       confirmation.OwnerModuleID,
 			OriginDispatchID:          originID,
 			FocusID:                   aggregate.Facts.Focus.ID,
 			Closure:                   closure,
@@ -171,41 +176,41 @@ func deriveConfirmedFileRepairAdmissionCommitment(
 			return nil, err
 		}
 		if matched != nil {
-			return nil, fmt.Errorf("%w: confirmed File repair admission has multiple exact source lineages", common.ErrConflict)
+			return nil, fmt.Errorf("%w: confirmed owner repair admission has multiple exact source lineages", common.ErrConflict)
 		}
 		matched = &commitment
 	}
 	if matched == nil {
-		return nil, fmt.Errorf("%w: confirmed File repair directive has no pre-seal source commitment", common.ErrConflict)
+		return nil, fmt.Errorf("%w: confirmed owner repair directive has no pre-seal source commitment", common.ErrConflict)
 	}
 	return matched, nil
 }
 
-// confirmedFileRepairTransactionFromCommitment is the fresh-load reverse
+// confirmedRepairTransactionFromCommitment is the fresh-load reverse
 // proof for the immutable repair purpose. Classification starts from the
-// dispatch commitment, then requires the independently persisted File
+// dispatch commitment, then requires the independently persisted owner
 // confirmation and exact rejected receipt/evidence lineage. Missing either
 // side fails closed; current mutable repair projections are never consulted.
-func confirmedFileRepairTransactionFromCommitment(
+func confirmedRepairTransactionFromCommitment(
 	aggregate RuntimeAggregate,
 	dispatch SealedDispatch,
 	origin SealedDispatch,
-) (*confirmedFileRepairTransaction, error) {
+) (*confirmedRepairTransaction, error) {
 	if dispatch.RepairCommitment == nil {
-		return nil, fmt.Errorf("%w: confirmed File repair dispatch has no repair commitment", common.ErrConflict)
+		return nil, fmt.Errorf("%w: confirmed owner repair dispatch has no repair commitment", common.ErrConflict)
 	}
 	if err := runtimecontract.ValidateRuntimeDispatchRepairCommitmentProjection(
 		dispatch.RepairCommitmentHash,
 		dispatch.RepairCommitment,
 	); err != nil {
-		return nil, fmt.Errorf("%w: confirmed File repair dispatch commitment: %v", common.ErrConflict, err)
+		return nil, fmt.Errorf("%w: confirmed owner repair dispatch commitment: %v", common.ErrConflict, err)
 	}
 	commitment := dispatch.RepairCommitment.Normalized()
-	if commitment.Purpose != runtimecontract.RuntimeDispatchRepairPurposeConfirmedFileValidation ||
+	if commitment.Purpose != runtimecontract.RuntimeDispatchRepairPurposeConfirmedValidation ||
 		commitment.OriginDispatchID != origin.ID || commitment.FocusID != origin.Transaction.FocusID ||
 		origin.RepairCommitmentHash != dispatch.RepairCommitmentHash ||
 		!runtimecontract.SameRuntimeDispatchRepairCommitment(origin.RepairCommitment, dispatch.RepairCommitment) {
-		return nil, fmt.Errorf("%w: confirmed File repair commitment does not match its origin admission", common.ErrConflict)
+		return nil, fmt.Errorf("%w: confirmed owner repair commitment does not match its origin admission", common.ErrConflict)
 	}
 	var confirmation *runtimecontract.RuntimeRepairSurfaceConfirmation
 	matches := 0
@@ -215,16 +220,17 @@ func confirmedFileRepairTransactionFromCommitment(
 			continue
 		}
 		if err := rawRecord.Validate(); err != nil {
-			return nil, fmt.Errorf("%w: confirmed File repair committed confirmation: %v", common.ErrConflict, err)
+			return nil, fmt.Errorf("%w: confirmed owner repair committed confirmation: %v", common.ErrConflict, err)
 		}
 		value := rawRecord.Normalized().Confirmation
 		confirmation = &value
 		matches++
 	}
-	if matches != 1 || confirmation == nil || confirmation.Disposition != runtimecontract.RuntimeRepairSurfaceConfirmed {
-		return nil, fmt.Errorf("%w: confirmed File repair commitment has no unique exact File confirmation", common.ErrConflict)
+	if matches != 1 || confirmation == nil || confirmation.Disposition != runtimecontract.RuntimeRepairSurfaceConfirmed ||
+		confirmation.OwnerModuleID != commitment.RepairOwnerModuleID {
+		return nil, fmt.Errorf("%w: confirmed owner repair commitment has no unique exact owner confirmation", common.ErrConflict)
 	}
-	sourceFact, sourceReceipt, sourceOperation, err := confirmedFileRepairSourceRejection(aggregate, *confirmation)
+	sourceFact, sourceReceipt, sourceOperation, err := confirmedRepairSourceRejection(aggregate, *confirmation)
 	if err != nil {
 		return nil, err
 	}
@@ -240,7 +246,7 @@ func confirmedFileRepairTransactionFromCommitment(
 		commitment.SourceReceiptFence != sourceReceipt.Fence ||
 		commitment.SourceReceiptHash != runtimecontract.StableRuntimeOperationReceiptHash(sourceReceipt) ||
 		sourceFact.Revision != origin.Transaction.EvidenceRevision {
-		return nil, fmt.Errorf("%w: confirmed File repair commitment source lineage mismatch", common.ErrConflict)
+		return nil, fmt.Errorf("%w: confirmed owner repair commitment source lineage mismatch", common.ErrConflict)
 	}
 	closure := commitment.Closure.Normalized()
 	if closure.ID != runtimecontract.StableRuntimeRepairClosureID(closure) ||
@@ -249,32 +255,32 @@ func confirmedFileRepairTransactionFromCommitment(
 		!sameRuntimeTargetRefs(closure.GroundedTargetRefs, confirmation.ConfirmedTargetRefs) ||
 		!sameRuntimeStringSet(closure.RequiredEvidenceKinds, []string{runtimecontract.EvidenceKindStateChange, runtimecontract.EvidenceKindValidation}) ||
 		!closure.RequireValidationAfterStateChange {
-		return nil, fmt.Errorf("%w: confirmed File repair commitment closure does not match its source", common.ErrConflict)
+		return nil, fmt.Errorf("%w: confirmed owner repair commitment closure does not match its source", common.ErrConflict)
 	}
 	if len(sourceFact.CoverageWorkItemIDs) != 0 &&
 		!sameCoverageIDs(sourceFact.CoverageWorkItemIDs, closure.CoverageWorkItemIDs) {
-		return nil, fmt.Errorf("%w: confirmed File repair commitment source coverage mismatch", common.ErrConflict)
+		return nil, fmt.Errorf("%w: confirmed owner repair commitment source coverage mismatch", common.ErrConflict)
 	}
-	if err := validateConfirmedFileRepairDispatchOperations(dispatch, *confirmation); err != nil {
+	if err := validateConfirmedRepairDispatchOperations(dispatch, *confirmation); err != nil {
 		return nil, err
 	}
-	return &confirmedFileRepairTransaction{
+	return &confirmedRepairTransaction{
 		confirmation: *confirmation, sourceFact: sourceFact, sourceReceipt: sourceReceipt,
 		sourceOp: sourceOperation, closure: closure,
 	}, nil
 }
 
-func confirmedFileRepairAdmissionLineage(aggregate RuntimeAggregate, leaf SealedDispatch) (confirmedFileRepairDispatchLineage, error) {
+func confirmedRepairAdmissionLineage(aggregate RuntimeAggregate, leaf SealedDispatch) (confirmedRepairDispatchLineage, error) {
 	byID := make(map[string]SealedDispatch, len(aggregate.CompletedDispatches)+1)
 	for _, dispatch := range aggregate.CompletedDispatches {
 		if _, duplicate := byID[dispatch.ID]; duplicate {
-			return confirmedFileRepairDispatchLineage{}, fmt.Errorf("%w: confirmed File repair dispatch lineage duplicates dispatch %q", common.ErrConflict, dispatch.ID)
+			return confirmedRepairDispatchLineage{}, fmt.Errorf("%w: confirmed owner repair dispatch lineage duplicates dispatch %q", common.ErrConflict, dispatch.ID)
 		}
 		byID[dispatch.ID] = dispatch
 	}
 	if aggregate.ActiveDispatch != nil {
 		if _, duplicate := byID[aggregate.ActiveDispatch.ID]; duplicate {
-			return confirmedFileRepairDispatchLineage{}, fmt.Errorf("%w: confirmed File repair dispatch lineage duplicates active dispatch", common.ErrConflict)
+			return confirmedRepairDispatchLineage{}, fmt.Errorf("%w: confirmed owner repair dispatch lineage duplicates active dispatch", common.ErrConflict)
 		}
 		byID[aggregate.ActiveDispatch.ID] = *aggregate.ActiveDispatch
 	}
@@ -286,7 +292,7 @@ func confirmedFileRepairAdmissionLineage(aggregate RuntimeAggregate, leaf Sealed
 	current := leaf
 	for {
 		if _, cycle := visited[current.ID]; cycle {
-			return confirmedFileRepairDispatchLineage{}, fmt.Errorf("%w: confirmed File repair governance dispatch lineage is cyclic", common.ErrConflict)
+			return confirmedRepairDispatchLineage{}, fmt.Errorf("%w: confirmed owner repair governance dispatch lineage is cyclic", common.ErrConflict)
 		}
 		visited[current.ID] = struct{}{}
 		reversedDispatches = append(reversedDispatches, current)
@@ -310,7 +316,7 @@ func confirmedFileRepairAdmissionLineage(aggregate RuntimeAggregate, leaf Sealed
 			resumeMatches++
 		}
 		if acceptedMatches+resumeMatches != 1 {
-			return confirmedFileRepairDispatchLineage{}, fmt.Errorf("%w: confirmed File repair dispatch %q has no unique accepted-attempt/governance admission", common.ErrConflict, current.ID)
+			return confirmedRepairDispatchLineage{}, fmt.Errorf("%w: confirmed owner repair dispatch %q has no unique accepted-attempt/governance admission", common.ErrConflict, current.ID)
 		}
 		if acceptedMatches == 1 {
 			break
@@ -323,7 +329,7 @@ func confirmedFileRepairAdmissionLineage(aggregate RuntimeAggregate, leaf Sealed
 			!runtimecontract.SameRuntimeDispatchRepairCommitment(source.RepairCommitment, current.RepairCommitment) ||
 			!runtimecontract.RuntimeDispatchOperationTargetAuthorizationProjectionsEqual(source.OperationTargetAuthorizations, current.OperationTargetAuthorizations) ||
 			!runtimecontract.RuntimeValidationRecipeProjectionsEqual(source.ValidationRecipes, current.ValidationRecipes) {
-			return confirmedFileRepairDispatchLineage{}, fmt.Errorf("%w: confirmed File repair governance resume does not inherit its exact source admission", common.ErrConflict)
+			return confirmedRepairDispatchLineage{}, fmt.Errorf("%w: confirmed owner repair governance resume does not inherit its exact source admission", common.ErrConflict)
 		}
 		reversedBindings = append(reversedBindings, binding)
 		current = source
@@ -335,10 +341,10 @@ func confirmedFileRepairAdmissionLineage(aggregate RuntimeAggregate, leaf Sealed
 			aggregate.Facts.Evidence.Accepted,
 			aggregate.Facts.Evidence.Rejected,
 		); err != nil {
-			return confirmedFileRepairDispatchLineage{}, fmt.Errorf("%w: confirmed File repair governance lineage: %v", common.ErrConflict, err)
+			return confirmedRepairDispatchLineage{}, fmt.Errorf("%w: confirmed owner repair governance lineage: %v", common.ErrConflict, err)
 		}
 	}
-	lineage := confirmedFileRepairDispatchLineage{
+	lineage := confirmedRepairDispatchLineage{
 		dispatches: make([]SealedDispatch, len(reversedDispatches)),
 		bindings:   make([]runtimecontract.RuntimeOperationGovernanceBinding, len(reversedBindings)),
 	}
@@ -351,14 +357,14 @@ func confirmedFileRepairAdmissionLineage(aggregate RuntimeAggregate, leaf Sealed
 	return lineage, nil
 }
 
-func (l confirmedFileRepairDispatchLineage) origin() (SealedDispatch, bool) {
+func (l confirmedRepairDispatchLineage) origin() (SealedDispatch, bool) {
 	if len(l.dispatches) == 0 {
 		return SealedDispatch{}, false
 	}
 	return l.dispatches[0], true
 }
 
-func (l confirmedFileRepairDispatchLineage) dispatchIndex(dispatchID string) int {
+func (l confirmedRepairDispatchLineage) dispatchIndex(dispatchID string) int {
 	for index := range l.dispatches {
 		if l.dispatches[index].ID == dispatchID {
 			return index
@@ -367,15 +373,15 @@ func (l confirmedFileRepairDispatchLineage) dispatchIndex(dispatchID string) int
 	return -1
 }
 
-// confirmedFileRepairGovernanceSourceTransaction proves that one operation
-// governance binding belongs to an already admitted, all-File repair
+// confirmedRepairGovernanceSourceTransaction proves that one operation
+// governance binding belongs to an already admitted, single-owner repair
 // transaction.  The proof is rooted in the source dispatch's accepted
-// admission and the immutable Shell rejection/File confirmation pair; current
+// admission and the immutable validation rejection/owner confirmation pair; current
 // FailureTarget or RepairDirective state is deliberately not consulted.
-func confirmedFileRepairGovernanceSourceTransaction(
+func confirmedRepairGovernanceSourceTransaction(
 	aggregate RuntimeAggregate,
 	binding runtimecontract.RuntimeOperationGovernanceBinding,
-) (SealedDispatch, *confirmedFileRepairTransaction, bool, error) {
+) (SealedDispatch, *confirmedRepairTransaction, bool, error) {
 	binding = binding.Normalized()
 	if binding.OperationDispatchID == "" || binding.OperationID == "" || binding.ExecutionKey == "" {
 		return SealedDispatch{}, nil, false, nil
@@ -387,7 +393,7 @@ func confirmedFileRepairGovernanceSourceTransaction(
 			continue
 		}
 		if source != nil {
-			return SealedDispatch{}, nil, false, fmt.Errorf("%w: confirmed File repair governance source dispatch is duplicated", common.ErrConflict)
+			return SealedDispatch{}, nil, false, fmt.Errorf("%w: confirmed owner repair governance source dispatch is duplicated", common.ErrConflict)
 		}
 		source = candidate
 	}
@@ -398,42 +404,42 @@ func confirmedFileRepairGovernanceSourceTransaction(
 	if !found {
 		return SealedDispatch{}, nil, false, nil
 	}
-	descriptor, found := runtimecontract.RuntimeOperationDescriptorForKind(operation.Kind)
-	if !found || descriptor.OwnerModuleID != runtimecontract.RuntimeModuleFile {
-		return SealedDispatch{}, nil, false, nil
-	}
 	execution, found := operationExecutionRecord(source.OperationExecutions, binding.OperationID)
 	if !found || execution.ExecutionKey != binding.ExecutionKey || execution.Fence != binding.Fence {
-		return SealedDispatch{}, nil, false, fmt.Errorf("%w: confirmed File repair governance binding does not match its source execution", common.ErrConflict)
+		return SealedDispatch{}, nil, false, fmt.Errorf("%w: confirmed owner repair governance binding does not match its source execution", common.ErrConflict)
 	}
 	if source.RepairCommitment == nil {
 		return SealedDispatch{}, nil, false, nil
 	}
-	lineage, err := confirmedFileRepairAdmissionLineage(aggregate, *source)
+	lineage, err := confirmedRepairAdmissionLineage(aggregate, *source)
 	if err != nil {
 		return SealedDispatch{}, nil, false, err
 	}
 	origin, found := lineage.origin()
 	if !found {
-		return SealedDispatch{}, nil, false, fmt.Errorf("%w: confirmed File repair governance source has no origin admission", common.ErrConflict)
+		return SealedDispatch{}, nil, false, fmt.Errorf("%w: confirmed owner repair governance source has no origin admission", common.ErrConflict)
 	}
-	transaction, err := confirmedFileRepairTransactionFromCommitment(aggregate, *source, origin)
+	transaction, err := confirmedRepairTransactionFromCommitment(aggregate, *source, origin)
 	if err != nil {
 		return SealedDispatch{}, nil, false, err
 	}
+	descriptor, found := runtimecontract.RuntimeOperationDescriptorForKind(operation.Kind)
+	if !found || descriptor.OwnerModuleID != transaction.confirmation.OwnerModuleID {
+		return SealedDispatch{}, nil, false, fmt.Errorf("%w: confirmed repair governance operation owner does not match its confirmation", common.ErrConflict)
+	}
 	coverageIDs := append([]common.CoverageWorkItemID(nil), transaction.closure.CoverageWorkItemIDs...)
 	if len(coverageIDs) == 0 || !sameCoverageIDs(coverageIDs, aggregate.Facts.Focus.CoverageWorkItemIDs) ||
-		!confirmedFileRepairSourceBindingsCoverCurrentScope(aggregate, transaction.sourceOp.BindingRefs, coverageIDs) {
-		return SealedDispatch{}, nil, false, fmt.Errorf("%w: confirmed File repair governance source has no current coverage", common.ErrConflict)
+		!confirmedRepairSourceBindingsCoverCurrentScope(aggregate, transaction.sourceOp.BindingRefs, coverageIDs) {
+		return SealedDispatch{}, nil, false, fmt.Errorf("%w: confirmed owner repair governance source has no current coverage", common.ErrConflict)
 	}
 	return *source, transaction, true, nil
 }
 
-// confirmedFileRepairGovernanceReductionEvent proves the repair-specific
+// confirmedRepairGovernanceReductionEvent proves the repair-specific
 // admission and freshness lineage, then returns only the typed owner-private
 // event input consumed by the sole SM-2 reducer. It does not construct a
 // RuntimeDecision or RequiredOutput; action selection remains in reducer.go.
-func confirmedFileRepairGovernanceReductionEvent(
+func confirmedRepairGovernanceReductionEvent(
 	aggregate RuntimeAggregate,
 	resolution runtimecontract.RuntimeGovernanceResolution,
 	binding runtimecontract.RuntimeOperationGovernanceBinding,
@@ -442,7 +448,7 @@ func confirmedFileRepairGovernanceReductionEvent(
 	if binding.State != runtimecontract.RuntimeOperationGovernanceBindingGranted || binding.Grant == nil {
 		return nil, false, nil
 	}
-	source, transaction, matched, err := confirmedFileRepairGovernanceSourceTransaction(aggregate, binding)
+	source, transaction, matched, err := confirmedRepairGovernanceSourceTransaction(aggregate, binding)
 	if err != nil || !matched {
 		return nil, false, err
 	}
@@ -450,11 +456,11 @@ func confirmedFileRepairGovernanceReductionEvent(
 		containsString(source.CompletedOperationIDs, binding.OperationID) {
 		return nil, false, nil
 	}
-	_, receipts, err := confirmedFileRepairCompletedReceiptChain(aggregate, source, transaction.confirmation)
+	_, receipts, err := confirmedRepairCompletedReceiptChain(aggregate, source, transaction.confirmation)
 	if err != nil {
 		return nil, false, err
 	}
-	if err := validateConfirmedFileRepairPartialFreshness(aggregate, source, transaction.confirmation, receipts); err != nil {
+	if err := validateConfirmedRepairPartialFreshness(aggregate, source, transaction.confirmation, receipts); err != nil {
 		return nil, false, err
 	}
 	return &runtimeOwnerInternalReductionEvent{
@@ -465,129 +471,135 @@ func confirmedFileRepairGovernanceReductionEvent(
 	}, true, nil
 }
 
-func currentConfirmedFileRepairTransaction(
+func currentConfirmedRepairTransaction(
 	aggregate RuntimeAggregate,
 	admission executionEvidenceAdmission,
 	fact runtimecontract.EvidenceFact,
-) (*confirmedFileRepairTransaction, error) {
+) (*confirmedRepairTransaction, error) {
 	if aggregate.ActiveDispatch == nil || aggregate.Decision.State != runtimecontract.ConvergenceStateNeedStateChange ||
 		admission.Evidence.Status != ExecutionEvidenceStatusAccepted || fact.Kind != runtimecontract.EvidenceKindStateChange ||
 		admission.Evidence.Receipt == nil {
 		return nil, nil
 	}
-	descriptor, found := runtimecontract.RuntimeOperationDescriptorForKind(admission.Operation.Kind)
-	if !found || descriptor.OwnerModuleID != runtimecontract.RuntimeModuleFile {
-		return nil, nil
-	}
-	transaction, found, err := resolveConfirmedFileRepairTransaction(aggregate, *aggregate.ActiveDispatch)
+	transaction, found, err := resolveConfirmedRepairTransaction(aggregate, *aggregate.ActiveDispatch)
 	if err != nil || !found {
 		return nil, err
+	}
+	descriptor, found := runtimecontract.RuntimeOperationDescriptorForKind(admission.Operation.Kind)
+	if !found || descriptor.OwnerModuleID != transaction.confirmation.OwnerModuleID {
+		return nil, fmt.Errorf("%w: confirmed repair operation owner does not match its confirmation", common.ErrConflict)
 	}
 	if _, err := runtimecontract.RuntimeDispatchOperationTargetAuthorizationForOperation(
 		aggregate.ActiveDispatch.Candidate,
 		aggregate.ActiveDispatch.OperationTargetAuthorizations,
 		admission.Operation,
 	); err != nil {
-		return nil, fmt.Errorf("%w: confirmed File repair operation target authorization: %v", common.ErrConflict, err)
+		return nil, fmt.Errorf("%w: confirmed owner repair operation target authorization: %v", common.ErrConflict, err)
 	}
 	if !runtimeTargetRefsWithin(admission.Operation.TargetRefs, transaction.confirmation.ConfirmedTargetRefs) {
-		return nil, fmt.Errorf("%w: confirmed File repair operation exceeds confirmed target surface", common.ErrConflict)
+		return nil, fmt.Errorf("%w: confirmed owner repair operation exceeds confirmed target surface", common.ErrConflict)
 	}
-	if err := validateConfirmedFileRepairDispatchOperations(*aggregate.ActiveDispatch, transaction.confirmation); err != nil {
+	if err := validateConfirmedRepairDispatchOperations(*aggregate.ActiveDispatch, transaction.confirmation); err != nil {
 		return nil, err
 	}
-	expectedWorkspaceRevision, _, err := confirmedFileRepairCompletedReceiptChain(aggregate, *aggregate.ActiveDispatch, transaction.confirmation)
+	expectedWorkspaceRevision, _, err := confirmedRepairCompletedReceiptChain(aggregate, *aggregate.ActiveDispatch, transaction.confirmation)
 	if err != nil {
 		return nil, err
 	}
 	receipt := admission.Evidence.Receipt.Normalized()
-	if _, err := validateConfirmedFileRepairAcceptedEvidenceLineage(aggregate, *aggregate.ActiveDispatch, admission.Operation, receipt); err != nil {
+	if _, err := validateConfirmedRepairAcceptedEvidenceLineage(aggregate, *aggregate.ActiveDispatch, admission.Operation, receipt); err != nil {
 		return nil, err
 	}
-	link, err := validateConfirmedFileRepairResourceChanges(admission.Operation, receipt, transaction.confirmation)
+	link, err := validateConfirmedRepairResourceChanges(admission.Operation, receipt, transaction.confirmation)
 	if err != nil {
 		return nil, err
 	}
 	if link.beforeRevision != expectedWorkspaceRevision {
-		return nil, fmt.Errorf("%w: confirmed File repair workspace revision does not continue the completed receipt chain", common.ErrConflict)
+		return nil, fmt.Errorf("%w: confirmed owner repair workspace revision does not continue the completed receipt chain", common.ErrConflict)
 	}
 	return transaction, nil
 }
 
-// resolveConfirmedFileRepairTransaction rebuilds the repair closure only from
+// resolveConfirmedRepairTransaction rebuilds the repair closure only from
 // immutable lineage. The current FailureTarget and RepairDirective are
 // intentionally absent from this derivation: both are owner-revision-bound
-// authority and are retired as soon as the first durable File receipt changes
+// authority and are retired as soon as the first durable repair-owner receipt changes
 // that revision.
-func resolveConfirmedFileRepairTransaction(aggregate RuntimeAggregate, dispatch SealedDispatch) (*confirmedFileRepairTransaction, bool, error) {
+func resolveConfirmedRepairTransaction(aggregate RuntimeAggregate, dispatch SealedDispatch) (*confirmedRepairTransaction, bool, error) {
 	if dispatch.State != DispatchStateSealed || dispatch.Candidate.StateChange == nil ||
 		aggregate.Decision.State != runtimecontract.ConvergenceStateNeedStateChange ||
 		strings.TrimSpace(aggregate.Decision.RequiredOutput.RepairClosureID) == "" {
 		return nil, false, nil
 	}
 	if dispatch.Transaction != aggregate.Decision.AuthorityTransaction() {
-		return nil, false, fmt.Errorf("%w: confirmed File repair dispatch does not match the current sealed Decision", common.ErrConflict)
+		return nil, false, fmt.Errorf("%w: confirmed owner repair dispatch does not match the current sealed Decision", common.ErrConflict)
 	}
-	admissionLineage, err := confirmedFileRepairAdmissionLineage(aggregate, dispatch)
+	admissionLineage, err := confirmedRepairAdmissionLineage(aggregate, dispatch)
 	if err != nil {
 		return nil, false, err
 	}
 	originDispatch, found := admissionLineage.origin()
 	if !found {
-		return nil, false, fmt.Errorf("%w: confirmed File repair dispatch has no origin admission", common.ErrConflict)
+		return nil, false, fmt.Errorf("%w: confirmed owner repair dispatch has no origin admission", common.ErrConflict)
 	}
-	targetRefs, allFile, err := confirmedFileRepairDispatchTargets(dispatch)
+	targetRefs, repairOwnerModuleID, err := confirmedRepairDispatchTargets(dispatch)
 	if err != nil {
 		return nil, false, err
 	}
-	if !allFile {
+	if repairOwnerModuleID == "" {
 		return nil, false, nil
 	}
 	decisionCoverage := append([]common.CoverageWorkItemID(nil), aggregate.Decision.RequiredOutput.CoverageWorkItemIDs...)
 	if len(decisionCoverage) == 0 || !sameCoverageIDs(decisionCoverage, aggregate.Facts.Focus.CoverageWorkItemIDs) ||
 		!sameRuntimeTargetRefs(targetRefs, aggregate.Decision.RequiredOutput.TargetRefs) {
-		return nil, false, fmt.Errorf("%w: confirmed File repair dispatch scope does not match its sealed Decision", common.ErrConflict)
+		return nil, false, fmt.Errorf("%w: confirmed owner repair dispatch scope does not match its sealed Decision", common.ErrConflict)
 	}
 
 	if dispatch.RepairCommitment == nil {
 		return nil, false, nil
 	}
-	matched, err := confirmedFileRepairTransactionFromCommitment(aggregate, dispatch, originDispatch)
+	matched, err := confirmedRepairTransactionFromCommitment(aggregate, dispatch, originDispatch)
 	if err != nil {
 		return nil, false, err
 	}
+	if matched.confirmation.OwnerModuleID != repairOwnerModuleID {
+		return nil, false, fmt.Errorf("%w: confirmed repair dispatch owner does not match its committed confirmation", common.ErrConflict)
+	}
 	if matched.closure.ID != aggregate.Decision.RequiredOutput.RepairClosureID ||
 		!sameCoverageIDs(matched.closure.CoverageWorkItemIDs, decisionCoverage) ||
-		!confirmedFileRepairSourceBindingsCoverCurrentScope(aggregate, matched.sourceOp.BindingRefs, decisionCoverage) {
-		return nil, false, fmt.Errorf("%w: confirmed File repair commitment does not match the current sealed Decision", common.ErrConflict)
+		!confirmedRepairSourceBindingsCoverCurrentScope(aggregate, matched.sourceOp.BindingRefs, decisionCoverage) {
+		return nil, false, fmt.Errorf("%w: confirmed owner repair commitment does not match the current sealed Decision", common.ErrConflict)
 	}
 	return matched, true, nil
 }
 
-func confirmedFileRepairDispatchTargets(dispatch SealedDispatch) ([]string, bool, error) {
+func confirmedRepairDispatchTargets(dispatch SealedDispatch) ([]string, string, error) {
 	operations := candidateRuntimeOperations(dispatch.Candidate)
 	if dispatch.Candidate.StateChange == nil || len(operations) == 0 {
-		return nil, false, nil
+		return nil, "", nil
 	}
 	var targetRefs []string
+	repairOwnerModuleID := ""
 	for _, rawOperation := range operations {
 		operation := rawOperation.Normalized()
 		descriptor, found := runtimecontract.RuntimeOperationDescriptorForKind(operation.Kind)
 		if !found {
-			return nil, false, fmt.Errorf("%w: confirmed File repair operation %q has no descriptor", common.ErrConflict, operation.Kind)
+			return nil, "", fmt.Errorf("%w: confirmed repair operation %q has no descriptor", common.ErrConflict, operation.Kind)
 		}
-		if descriptor.OwnerModuleID != runtimecontract.RuntimeModuleFile {
-			return nil, false, nil
+		if repairOwnerModuleID == "" {
+			repairOwnerModuleID = descriptor.OwnerModuleID
+		} else if repairOwnerModuleID != descriptor.OwnerModuleID {
+			return nil, "", fmt.Errorf("%w: confirmed repair dispatch spans multiple operation owners", common.ErrConflict)
 		}
 		if len(operation.TargetRefs) == 0 {
-			return nil, false, fmt.Errorf("%w: confirmed File repair operation %q has no sealed target", common.ErrConflict, operation.ID)
+			return nil, "", fmt.Errorf("%w: confirmed repair operation %q has no sealed target", common.ErrConflict, operation.ID)
 		}
 		targetRefs = append(targetRefs, operation.TargetRefs...)
 	}
-	return normalizeRuntimeTargetRefs(targetRefs), true, nil
+	return normalizeRuntimeTargetRefs(targetRefs), repairOwnerModuleID, nil
 }
 
-func confirmedFileRepairSourceRejection(
+func confirmedRepairSourceRejection(
 	aggregate RuntimeAggregate,
 	confirmation runtimecontract.RuntimeRepairSurfaceConfirmation,
 ) (runtimecontract.EvidenceFact, runtimecontract.RuntimeOperationReceipt, runtimecontract.RuntimeOperation, error) {
@@ -599,32 +611,32 @@ func confirmedFileRepairSourceRejection(
 		if candidate.ID == observation.DispatchID && candidate.State == DispatchStateCommitted &&
 			containsString(candidate.CompletedOperationIDs, observation.OperationID) {
 			if dispatch != nil {
-				return runtimecontract.EvidenceFact{}, runtimecontract.RuntimeOperationReceipt{}, runtimecontract.RuntimeOperation{}, fmt.Errorf("%w: confirmed File repair observation matches multiple source dispatches", common.ErrConflict)
+				return runtimecontract.EvidenceFact{}, runtimecontract.RuntimeOperationReceipt{}, runtimecontract.RuntimeOperation{}, fmt.Errorf("%w: confirmed owner repair observation matches multiple source dispatches", common.ErrConflict)
 			}
 			dispatch = candidate
 		}
 	}
 	if dispatch == nil || !sealedValidationFailureObservationMatchesDispatch(*dispatch, observation) {
-		return runtimecontract.EvidenceFact{}, runtimecontract.RuntimeOperationReceipt{}, runtimecontract.RuntimeOperation{}, fmt.Errorf("%w: confirmed File repair has no exact sealed validation source", common.ErrConflict)
+		return runtimecontract.EvidenceFact{}, runtimecontract.RuntimeOperationReceipt{}, runtimecontract.RuntimeOperation{}, fmt.Errorf("%w: confirmed owner repair has no exact sealed validation source", common.ErrConflict)
 	}
 	operation, found := candidateOperationByID(dispatch.Candidate, observation.OperationID)
 	if !found {
-		return runtimecontract.EvidenceFact{}, runtimecontract.RuntimeOperationReceipt{}, runtimecontract.RuntimeOperation{}, fmt.Errorf("%w: confirmed File repair source operation is not sealed", common.ErrConflict)
+		return runtimecontract.EvidenceFact{}, runtimecontract.RuntimeOperationReceipt{}, runtimecontract.RuntimeOperation{}, fmt.Errorf("%w: confirmed owner repair source operation is not sealed", common.ErrConflict)
 	}
 	execution, found := operationExecutionRecord(dispatch.OperationExecutions, observation.OperationID)
 	if !found || execution.State != runtimecontract.OperationExecutionEvidenceCommitted || execution.Fence == 0 {
-		return runtimecontract.EvidenceFact{}, runtimecontract.RuntimeOperationReceipt{}, runtimecontract.RuntimeOperation{}, fmt.Errorf("%w: confirmed File repair source has no evidence-committed execution", common.ErrConflict)
+		return runtimecontract.EvidenceFact{}, runtimecontract.RuntimeOperationReceipt{}, runtimecontract.RuntimeOperation{}, fmt.Errorf("%w: confirmed owner repair source has no evidence-committed execution", common.ErrConflict)
 	}
 	receipt, found := runtimecontract.RuntimeOperationReceiptForExecutionKeyFence(aggregate.OperationReceipts, execution.ExecutionKey, execution.Fence)
 	if !found || receipt.Outcome != runtimecontract.RuntimeOperationOutcomeRejected || receipt.OperationID != operation.ID ||
 		execution.OwnerReceiptRef != "runtime-receipt/"+receipt.ExecutionKey ||
 		execution.OwnerReceiptHash != runtimecontract.StableRuntimeOperationReceiptHash(receipt) ||
 		!runtimeValidationFailureObservationHasPersistedReceipt(aggregate, observation) {
-		return runtimecontract.EvidenceFact{}, runtimecontract.RuntimeOperationReceipt{}, runtimecontract.RuntimeOperation{}, fmt.Errorf("%w: confirmed File repair source has no exact rejected Shell receipt", common.ErrConflict)
+		return runtimecontract.EvidenceFact{}, runtimecontract.RuntimeOperationReceipt{}, runtimecontract.RuntimeOperation{}, fmt.Errorf("%w: confirmed owner repair source has no exact rejected validation-owner receipt", common.ErrConflict)
 	}
 	expectedFailure := failureFactFromOperationReceiptFeedback(receipt)
 	if expectedFailure == nil || expectedFailure.Signature != observation.FailureSignature {
-		return runtimecontract.EvidenceFact{}, runtimecontract.RuntimeOperationReceipt{}, runtimecontract.RuntimeOperation{}, fmt.Errorf("%w: confirmed File repair source receipt failure identity mismatch", common.ErrConflict)
+		return runtimecontract.EvidenceFact{}, runtimecontract.RuntimeOperationReceipt{}, runtimecontract.RuntimeOperation{}, fmt.Errorf("%w: confirmed owner repair source receipt failure identity mismatch", common.ErrConflict)
 	}
 	var fact runtimecontract.EvidenceFact
 	matches := 0
@@ -635,14 +647,14 @@ func confirmedFileRepairSourceRejection(
 		fact, matches = candidate, matches+1
 	}
 	if matches != 1 {
-		return runtimecontract.EvidenceFact{}, runtimecontract.RuntimeOperationReceipt{}, runtimecontract.RuntimeOperation{}, fmt.Errorf("%w: confirmed File repair source requires one receipt-derived rejected evidence fact", common.ErrConflict)
+		return runtimecontract.EvidenceFact{}, runtimecontract.RuntimeOperationReceipt{}, runtimecontract.RuntimeOperation{}, fmt.Errorf("%w: confirmed owner repair source requires one receipt-derived rejected evidence fact", common.ErrConflict)
 	}
 	receiptHash := runtimecontract.StableRuntimeOperationReceiptHash(receipt)
 	eventID := string(fact.ID)
 	recoveryEventID := "runtime-receipt|" + receiptHash
 	recoverySourceRef := "runtime-receipt/" + receipt.ExecutionKey
 	if eventID != recoveryEventID || fact.SourceRef != recoverySourceRef {
-		return runtimecontract.EvidenceFact{}, runtimecontract.RuntimeOperationReceipt{}, runtimecontract.RuntimeOperation{}, fmt.Errorf("%w: confirmed File repair source evidence has no canonical persisted receipt-recovery identity", common.ErrConflict)
+		return runtimecontract.EvidenceFact{}, runtimecontract.RuntimeOperationReceipt{}, runtimecontract.RuntimeOperation{}, fmt.Errorf("%w: confirmed owner repair source evidence has no canonical persisted receipt-recovery identity", common.ErrConflict)
 	}
 	processed := 0
 	for _, eventID := range aggregate.ProcessedEventIDs {
@@ -652,22 +664,22 @@ func confirmedFileRepairSourceRejection(
 	}
 	receiptEvidence := receipt.Normalized().Evidence
 	if processed != 1 {
-		return runtimecontract.EvidenceFact{}, runtimecontract.RuntimeOperationReceipt{}, runtimecontract.RuntimeOperation{}, fmt.Errorf("%w: confirmed File repair source evidence has no unique processed-event fence", common.ErrConflict)
+		return runtimecontract.EvidenceFact{}, runtimecontract.RuntimeOperationReceipt{}, runtimecontract.RuntimeOperation{}, fmt.Errorf("%w: confirmed owner repair source evidence has no unique processed-event fence", common.ErrConflict)
 	}
 	if fact.Kind != runtimecontract.EvidenceKindValidation || fact.SubjectRef != operation.ID ||
 		fact.Revision == "" || !runtimecontract.EvidenceRevisionAfter(fact.Revision, dispatch.Transaction.EvidenceRevision) ||
 		fact.AuthoritySnapshotID != dispatch.Transaction.AuthoritySnapshotID ||
 		fact.DispatchID != dispatch.ID || fact.OperationID != operation.ID {
-		return runtimecontract.EvidenceFact{}, runtimecontract.RuntimeOperationReceipt{}, runtimecontract.RuntimeOperation{}, fmt.Errorf("%w: confirmed File repair source evidence scope/revision does not match its sealed operation", common.ErrConflict)
+		return runtimecontract.EvidenceFact{}, runtimecontract.RuntimeOperationReceipt{}, runtimecontract.RuntimeOperation{}, fmt.Errorf("%w: confirmed owner repair source evidence scope/revision does not match its sealed operation", common.ErrConflict)
 	}
 	if !sameRuntimeTargetRefs(fact.TargetRefs, operation.TargetRefs) ||
 		!sameRuntimeStringSet(fact.BindingRefs, operation.BindingRefs) ||
 		!sameCoverageIDs(fact.CoverageWorkItemIDs, operation.CoverageWorkItemIDs) {
-		return runtimecontract.EvidenceFact{}, runtimecontract.RuntimeOperationReceipt{}, runtimecontract.RuntimeOperation{}, fmt.Errorf("%w: confirmed File repair source evidence target/binding/coverage does not match its sealed operation", common.ErrConflict)
+		return runtimecontract.EvidenceFact{}, runtimecontract.RuntimeOperationReceipt{}, runtimecontract.RuntimeOperation{}, fmt.Errorf("%w: confirmed owner repair source evidence target/binding/coverage does not match its sealed operation", common.ErrConflict)
 	}
 	if fact.FailureClass != expectedFailure.Class || fact.FailureCode != expectedFailure.Code ||
 		fact.FailureSignature != expectedFailure.Signature || fact.FailureMessage != expectedFailure.Message {
-		return runtimecontract.EvidenceFact{}, runtimecontract.RuntimeOperationReceipt{}, runtimecontract.RuntimeOperation{}, fmt.Errorf("%w: confirmed File repair source failure does not match its exact Shell receipt", common.ErrConflict)
+		return runtimecontract.EvidenceFact{}, runtimecontract.RuntimeOperationReceipt{}, runtimecontract.RuntimeOperation{}, fmt.Errorf("%w: confirmed owner repair source failure does not match its exact validation-owner receipt", common.ErrConflict)
 	}
 	if fact.Summary != receiptEvidence.Summary || fact.ContentHash != receiptEvidence.ContentHash ||
 		!reflect.DeepEqual(fact.ContentAddress, receiptEvidence.ContentAddress) ||
@@ -675,15 +687,15 @@ func confirmedFileRepairSourceRejection(
 		fact.Quality != receiptEvidence.Quality || fact.ZeroWork != receiptEvidence.ZeroWork ||
 		!sameRuntimeTargetRefs(fact.EvidenceTags, receiptEvidence.EvidenceTags) ||
 		!reflect.DeepEqual(fact.Validation, receiptEvidence.Validation) {
-		return runtimecontract.EvidenceFact{}, runtimecontract.RuntimeOperationReceipt{}, runtimecontract.RuntimeOperation{}, fmt.Errorf("%w: confirmed File repair source evidence does not match its exact Shell receipt", common.ErrConflict)
+		return runtimecontract.EvidenceFact{}, runtimecontract.RuntimeOperationReceipt{}, runtimecontract.RuntimeOperation{}, fmt.Errorf("%w: confirmed owner repair source evidence does not match its exact validation-owner receipt", common.ErrConflict)
 	}
 	if fact.EvidenceReason != receiptEvidence.EvidenceReason {
-		return runtimecontract.EvidenceFact{}, runtimecontract.RuntimeOperationReceipt{}, runtimecontract.RuntimeOperation{}, fmt.Errorf("%w: confirmed File repair source evidence reason does not match its exact Shell receipt", common.ErrConflict)
+		return runtimecontract.EvidenceFact{}, runtimecontract.RuntimeOperationReceipt{}, runtimecontract.RuntimeOperation{}, fmt.Errorf("%w: confirmed owner repair source evidence reason does not match its exact validation-owner receipt", common.ErrConflict)
 	}
 	return fact, receipt, operation, nil
 }
 
-func confirmedFileRepairSourceBindingsCoverCurrentScope(aggregate RuntimeAggregate, bindingRefs []string, coverageIDs []common.CoverageWorkItemID) bool {
+func confirmedRepairSourceBindingsCoverCurrentScope(aggregate RuntimeAggregate, bindingRefs []string, coverageIDs []common.CoverageWorkItemID) bool {
 	bindingRefs = normalizeRuntimeTargetRefs(bindingRefs)
 	if len(bindingRefs) == 0 || len(coverageIDs) == 0 {
 		return false
@@ -699,7 +711,7 @@ func confirmedFileRepairSourceBindingsCoverCurrentScope(aggregate RuntimeAggrega
 	return sameRuntimeStringSet(bindingRefs, expected)
 }
 
-func confirmedFileRepairConsecutiveEvidenceRevision(current, previous string) bool {
+func confirmedRepairConsecutiveEvidenceRevision(current, previous string) bool {
 	const prefix = "runtime-evidence-"
 	previous = strings.TrimSpace(previous)
 	current = strings.TrimSpace(current)
@@ -713,11 +725,11 @@ func confirmedFileRepairConsecutiveEvidenceRevision(current, previous string) bo
 	return current == nextEvidenceRevision(sequence+1)
 }
 
-func validateConfirmedFileRepairResourceChanges(
+func validateConfirmedRepairResourceChanges(
 	operation runtimecontract.RuntimeOperation,
 	receipt runtimecontract.RuntimeOperationReceipt,
 	confirmation runtimecontract.RuntimeRepairSurfaceConfirmation,
-) (confirmedFileRepairReceiptLink, error) {
+) (confirmedRepairReceiptLink, error) {
 	operation = operation.Normalized()
 	receipt = receipt.Normalized()
 	confirmation = confirmation.Normalized()
@@ -726,167 +738,171 @@ func validateConfirmedFileRepairResourceChanges(
 		len(operation.TargetRefs) == 0 || !sameRuntimeTargetRefs(receipt.TargetRefs, operation.TargetRefs) ||
 		receipt.BeforeHash == "" || receipt.AfterHash == "" || receipt.BeforeHash == receipt.AfterHash ||
 		len(receipt.ResourceChanges) == 0 {
-		return confirmedFileRepairReceiptLink{}, fmt.Errorf("%w: confirmed File repair receipt is not an accepted target-bound workspace change", common.ErrConflict)
+		return confirmedRepairReceiptLink{}, fmt.Errorf("%w: confirmed owner repair receipt is not an accepted target-bound workspace change", common.ErrConflict)
 	}
 	targets := make(map[string]bool, len(operation.TargetRefs))
 	for _, targetRef := range operation.TargetRefs {
 		targets[strings.TrimSpace(targetRef)] = false
 	}
-	var workspaceTree *confirmedFileRepairReceiptLink
+	var workspaceTree *confirmedRepairReceiptLink
+	descriptor, found := runtimecontract.RuntimeOperationDescriptorForKind(operation.Kind)
+	if !found || descriptor.OwnerModuleID != confirmation.OwnerModuleID {
+		return confirmedRepairReceiptLink{}, fmt.Errorf("%w: confirmed repair operation owner does not match its confirmation", common.ErrConflict)
+	}
 	for _, rawChange := range receipt.ResourceChanges {
 		change := rawChange.Normalized()
-		if change.OwnerModuleID != runtimecontract.RuntimeModuleFile {
-			return confirmedFileRepairReceiptLink{}, fmt.Errorf("%w: confirmed File repair receipt carries a foreign-owner resource change", common.ErrConflict)
+		if change.OwnerModuleID != descriptor.OwnerModuleID {
+			return confirmedRepairReceiptLink{}, fmt.Errorf("%w: confirmed owner repair receipt carries a foreign-owner resource change", common.ErrConflict)
 		}
 		switch change.Domain {
 		case runtimecontract.RuntimeResourceWorkspaceTarget:
 			if _, found := targets[change.SubjectRef]; !found || change.BeforeRevision != receipt.BeforeHash || change.AfterRevision != receipt.AfterHash {
-				return confirmedFileRepairReceiptLink{}, fmt.Errorf("%w: confirmed File repair target change does not match the sealed operation receipt", common.ErrConflict)
+				return confirmedRepairReceiptLink{}, fmt.Errorf("%w: confirmed owner repair target change does not match the sealed operation receipt", common.ErrConflict)
 			}
 			targets[change.SubjectRef] = true
 		case runtimecontract.RuntimeResourceWorkspaceTree:
 			if workspaceTree != nil || change.SubjectRef != confirmation.SubjectRef ||
 				change.BeforeRevision == "" || change.AfterRevision == "" || change.BeforeRevision == change.AfterRevision {
-				return confirmedFileRepairReceiptLink{}, fmt.Errorf("%w: confirmed File repair workspace change has no exact revision edge", common.ErrConflict)
+				return confirmedRepairReceiptLink{}, fmt.Errorf("%w: confirmed owner repair workspace change has no exact revision edge", common.ErrConflict)
 			}
-			workspaceTree = &confirmedFileRepairReceiptLink{beforeRevision: change.BeforeRevision, afterRevision: change.AfterRevision}
+			workspaceTree = &confirmedRepairReceiptLink{beforeRevision: change.BeforeRevision, afterRevision: change.AfterRevision}
 		default:
-			return confirmedFileRepairReceiptLink{}, fmt.Errorf("%w: confirmed File repair receipt carries an unexpected resource domain", common.ErrConflict)
+			return confirmedRepairReceiptLink{}, fmt.Errorf("%w: confirmed owner repair receipt carries an unexpected resource domain", common.ErrConflict)
 		}
 	}
 	if workspaceTree == nil {
-		return confirmedFileRepairReceiptLink{}, fmt.Errorf("%w: confirmed File repair receipt omits the workspace-tree revision change", common.ErrConflict)
+		return confirmedRepairReceiptLink{}, fmt.Errorf("%w: confirmed owner repair receipt omits the workspace-tree revision change", common.ErrConflict)
 	}
 	for _, observed := range targets {
 		if !observed {
-			return confirmedFileRepairReceiptLink{}, fmt.Errorf("%w: confirmed File repair receipt omits an operation target change", common.ErrConflict)
+			return confirmedRepairReceiptLink{}, fmt.Errorf("%w: confirmed owner repair receipt omits an operation target change", common.ErrConflict)
 		}
 	}
 	return *workspaceTree, nil
 }
 
-func validateConfirmedFileRepairDispatchOperations(dispatch SealedDispatch, confirmation runtimecontract.RuntimeRepairSurfaceConfirmation) error {
+func validateConfirmedRepairDispatchOperations(dispatch SealedDispatch, confirmation runtimecontract.RuntimeRepairSurfaceConfirmation) error {
 	if dispatch.Candidate.StateChange == nil || len(candidateRuntimeOperations(dispatch.Candidate)) == 0 {
-		return fmt.Errorf("%w: confirmed File repair transaction requires a state-change dispatch", common.ErrConflict)
+		return fmt.Errorf("%w: confirmed owner repair transaction requires a state-change dispatch", common.ErrConflict)
 	}
 	var dispatchTargetRefs []string
 	for _, rawOperation := range candidateRuntimeOperations(dispatch.Candidate) {
 		operation := rawOperation.Normalized()
 		descriptor, found := runtimecontract.RuntimeOperationDescriptorForKind(operation.Kind)
-		if !found || descriptor.OwnerModuleID != runtimecontract.RuntimeModuleFile ||
+		if !found || descriptor.OwnerModuleID != confirmation.OwnerModuleID ||
 			!runtimeTargetRefsWithin(operation.TargetRefs, confirmation.ConfirmedTargetRefs) {
-			return fmt.Errorf("%w: confirmed File repair transaction contains an unauthorized operation", common.ErrConflict)
+			return fmt.Errorf("%w: confirmed owner repair transaction contains an unauthorized operation", common.ErrConflict)
 		}
 		if _, err := runtimecontract.RuntimeDispatchOperationTargetAuthorizationForOperation(
 			dispatch.Candidate,
 			dispatch.OperationTargetAuthorizations,
 			operation,
 		); err != nil {
-			return fmt.Errorf("%w: confirmed File repair transaction target authorization: %v", common.ErrConflict, err)
+			return fmt.Errorf("%w: confirmed owner repair transaction target authorization: %v", common.ErrConflict, err)
 		}
 		dispatchTargetRefs = append(dispatchTargetRefs, operation.TargetRefs...)
 	}
 	if !sameRuntimeTargetRefs(dispatchTargetRefs, confirmation.ConfirmedTargetRefs) {
-		return fmt.Errorf("%w: confirmed File repair all-of dispatch does not cover the exact confirmed target surface", common.ErrConflict)
+		return fmt.Errorf("%w: confirmed owner repair all-of dispatch does not cover the exact confirmed target surface", common.ErrConflict)
 	}
 	return nil
 }
 
-// confirmedFileRepairCompletedReceiptChain reconstructs only the revision
+// confirmedRepairCompletedReceiptChain reconstructs only the revision
 // order already proved by evidence-committed owner receipts. Operation IDs are
 // normalized as a set in the dispatch, so their lexical order is never treated
 // as execution order. A unique before->after workspace-tree chain rooted at
-// the File confirmation is the sole ordering authority.
-func confirmedFileRepairCompletedReceiptChain(
+// the owner confirmation is the sole ordering authority.
+func confirmedRepairCompletedReceiptChain(
 	aggregate RuntimeAggregate,
 	dispatch SealedDispatch,
 	confirmation runtimecontract.RuntimeRepairSurfaceConfirmation,
 ) (string, map[string]runtimecontract.RuntimeOperationReceipt, error) {
 	confirmation = confirmation.Normalized()
-	if err := validateConfirmedFileRepairDispatchOperations(dispatch, confirmation); err != nil {
+	if err := validateConfirmedRepairDispatchOperations(dispatch, confirmation); err != nil {
 		return "", nil, err
 	}
 	receipts := make(map[string]runtimecontract.RuntimeOperationReceipt, len(dispatch.CompletedOperationIDs))
-	links := make(map[string]confirmedFileRepairReceiptLink, len(dispatch.CompletedOperationIDs))
+	links := make(map[string]confirmedRepairReceiptLink, len(dispatch.CompletedOperationIDs))
 	evidenceByOperation := make(map[string]runtimecontract.EvidenceFact, len(dispatch.CompletedOperationIDs))
 	for _, operationID := range dispatch.CompletedOperationIDs {
 		operation, found := candidateOperationByID(dispatch.Candidate, operationID)
 		if !found {
-			return "", nil, fmt.Errorf("%w: confirmed File repair transaction completed operation is not sealed", common.ErrConflict)
+			return "", nil, fmt.Errorf("%w: confirmed owner repair transaction completed operation is not sealed", common.ErrConflict)
 		}
 		execution, found := operationExecutionRecord(dispatch.OperationExecutions, operationID)
 		if !found || execution.State != runtimecontract.OperationExecutionEvidenceCommitted || execution.Fence == 0 {
-			return "", nil, fmt.Errorf("%w: confirmed File repair transaction has no evidence-committed execution", common.ErrConflict)
+			return "", nil, fmt.Errorf("%w: confirmed owner repair transaction has no evidence-committed execution", common.ErrConflict)
 		}
 		receipt, found := runtimecontract.RuntimeOperationReceiptForExecutionKeyFence(aggregate.OperationReceipts, execution.ExecutionKey, execution.Fence)
 		if !found || receipt.OperationID != operationID || execution.OwnerReceiptRef != "runtime-receipt/"+receipt.ExecutionKey ||
 			execution.OwnerReceiptHash != runtimecontract.StableRuntimeOperationReceiptHash(receipt) {
-			return "", nil, fmt.Errorf("%w: confirmed File repair transaction has no exact owner receipt", common.ErrConflict)
+			return "", nil, fmt.Errorf("%w: confirmed owner repair transaction has no exact owner receipt", common.ErrConflict)
 		}
-		evidence, err := validateConfirmedFileRepairAcceptedEvidenceLineage(aggregate, dispatch, operation, receipt)
+		evidence, err := validateConfirmedRepairAcceptedEvidenceLineage(aggregate, dispatch, operation, receipt)
 		if err != nil {
 			return "", nil, err
 		}
-		link, err := validateConfirmedFileRepairResourceChanges(operation, receipt, confirmation)
+		link, err := validateConfirmedRepairResourceChanges(operation, receipt, confirmation)
 		if err != nil {
-			return "", nil, fmt.Errorf("%w: confirmed File repair transaction receipt: %v", common.ErrConflict, err)
+			return "", nil, fmt.Errorf("%w: confirmed owner repair transaction receipt: %v", common.ErrConflict, err)
 		}
 		receipts[operationID] = receipt
 		links[operationID] = link
 		evidenceByOperation[operationID] = evidence
 	}
 
-	admissionLineage, err := confirmedFileRepairAdmissionLineage(aggregate, dispatch)
+	admissionLineage, err := confirmedRepairAdmissionLineage(aggregate, dispatch)
 	if err != nil {
 		return "", nil, err
 	}
 	originDispatch, found := admissionLineage.origin()
 	if !found {
-		return "", nil, fmt.Errorf("%w: confirmed File repair receipt chain has no origin admission", common.ErrConflict)
+		return "", nil, fmt.Errorf("%w: confirmed owner repair receipt chain has no origin admission", common.ErrConflict)
 	}
 	expectedRevision := confirmation.ObservedRevision
 	expectedEvidenceRevision := originDispatch.Transaction.EvidenceRevision
 	currentDispatchIndex := 0
-	remaining := make(map[string]confirmedFileRepairReceiptLink, len(links))
+	remaining := make(map[string]confirmedRepairReceiptLink, len(links))
 	for operationID, link := range links {
 		remaining[operationID] = link
 	}
 	for len(remaining) != 0 {
 		matchedOperationID := ""
-		var matched confirmedFileRepairReceiptLink
+		var matched confirmedRepairReceiptLink
 		for operationID, link := range remaining {
 			if link.beforeRevision != expectedRevision {
 				continue
 			}
 			if matchedOperationID != "" {
-				return "", nil, fmt.Errorf("%w: confirmed File repair receipts branch from one workspace revision", common.ErrConflict)
+				return "", nil, fmt.Errorf("%w: confirmed owner repair receipts branch from one workspace revision", common.ErrConflict)
 			}
 			matchedOperationID, matched = operationID, link
 		}
 		if matchedOperationID == "" {
-			return "", nil, fmt.Errorf("%w: confirmed File repair receipts do not form a complete workspace revision chain", common.ErrConflict)
+			return "", nil, fmt.Errorf("%w: confirmed owner repair receipts do not form a complete workspace revision chain", common.ErrConflict)
 		}
 		accepted := evidenceByOperation[matchedOperationID]
 		ownerDispatchIndex := admissionLineage.dispatchIndex(accepted.DispatchID)
 		if ownerDispatchIndex < currentDispatchIndex {
-			return "", nil, fmt.Errorf("%w: confirmed File repair accepted evidence regresses across governance dispatch lineage", common.ErrConflict)
+			return "", nil, fmt.Errorf("%w: confirmed owner repair accepted evidence regresses across governance dispatch lineage", common.ErrConflict)
 		}
 		for currentDispatchIndex < ownerDispatchIndex {
 			binding := admissionLineage.bindings[currentDispatchIndex]
-			governanceRevision, governanceErr := confirmedFileRepairGovernanceEvidenceRevision(aggregate, binding)
+			governanceRevision, governanceErr := confirmedRepairGovernanceEvidenceRevision(aggregate, binding)
 			if governanceErr != nil {
 				return "", nil, governanceErr
 			}
 			child := admissionLineage.dispatches[currentDispatchIndex+1]
 			if child.Transaction.EvidenceRevision != governanceRevision ||
-				!confirmedFileRepairConsecutiveEvidenceRevision(governanceRevision, expectedEvidenceRevision) {
-				return "", nil, fmt.Errorf("%w: confirmed File repair evidence revision gap has no exact governance-resolution lineage", common.ErrConflict)
+				!confirmedRepairConsecutiveEvidenceRevision(governanceRevision, expectedEvidenceRevision) {
+				return "", nil, fmt.Errorf("%w: confirmed owner repair evidence revision gap has no exact governance-resolution lineage", common.ErrConflict)
 			}
 			expectedEvidenceRevision = governanceRevision
 			currentDispatchIndex++
 		}
-		if !confirmedFileRepairConsecutiveEvidenceRevision(accepted.Revision, expectedEvidenceRevision) {
-			return "", nil, fmt.Errorf("%w: confirmed File repair accepted evidence revisions do not form a contiguous dispatch chain", common.ErrConflict)
+		if !confirmedRepairConsecutiveEvidenceRevision(accepted.Revision, expectedEvidenceRevision) {
+			return "", nil, fmt.Errorf("%w: confirmed owner repair accepted evidence revisions do not form a contiguous dispatch chain", common.ErrConflict)
 		}
 		delete(remaining, matchedOperationID)
 		expectedRevision = matched.afterRevision
@@ -895,10 +911,10 @@ func confirmedFileRepairCompletedReceiptChain(
 	return expectedRevision, receipts, nil
 }
 
-func confirmedFileRepairGovernanceEvidenceRevision(aggregate RuntimeAggregate, binding runtimecontract.RuntimeOperationGovernanceBinding) (string, error) {
+func confirmedRepairGovernanceEvidenceRevision(aggregate RuntimeAggregate, binding runtimecontract.RuntimeOperationGovernanceBinding) (string, error) {
 	binding = binding.Normalized()
 	if binding.Grant == nil {
-		return "", fmt.Errorf("%w: confirmed File repair governance hop has no grant", common.ErrConflict)
+		return "", fmt.Errorf("%w: confirmed owner repair governance hop has no grant", common.ErrConflict)
 	}
 	grant := binding.Grant.Normalized()
 	wantID := common.EvidenceRecordID("governance-resolution:" + string(grant.ResolutionID) + ":" + binding.GovernanceSnapshotID)
@@ -920,32 +936,32 @@ func confirmedFileRepairGovernanceEvidenceRevision(aggregate RuntimeAggregate, b
 		}
 	}
 	if matches != 1 || processed != 1 || matched.Revision == "" {
-		return "", fmt.Errorf("%w: confirmed File repair governance hop has no unique accepted resolution evidence", common.ErrConflict)
+		return "", fmt.Errorf("%w: confirmed owner repair governance hop has no unique accepted resolution evidence", common.ErrConflict)
 	}
 	return matched.Revision, nil
 }
 
-// completedConfirmedFileRepairTransactions reconstructs the immutable source
-// and effect chain for committed confirmed-File repairs. It deliberately does
+// completedConfirmedRepairTransactions reconstructs the immutable source
+// and effect chain for committed confirmed-owner repairs. It deliberately does
 // not consult RepairDirective or FailureTarget: those mutable projections are
 // what this reverse proof is responsible for validating.
-func completedConfirmedFileRepairTransactions(aggregate RuntimeAggregate) ([]completedConfirmedFileRepairTransaction, error) {
-	ret := make([]completedConfirmedFileRepairTransaction, 0)
+func completedConfirmedRepairTransactions(aggregate RuntimeAggregate) ([]completedConfirmedRepairTransaction, error) {
+	ret := make([]completedConfirmedRepairTransaction, 0)
 	for _, rawDispatch := range aggregate.CompletedDispatches {
 		dispatch := rawDispatch
 		if dispatch.State != DispatchStateCommitted || dispatch.Candidate.StateChange == nil ||
 			dispatch.RepairCommitment == nil {
 			continue
 		}
-		admissionLineage, err := confirmedFileRepairAdmissionLineage(aggregate, dispatch)
+		admissionLineage, err := confirmedRepairAdmissionLineage(aggregate, dispatch)
 		if err != nil {
 			return nil, err
 		}
 		originDispatch, found := admissionLineage.origin()
 		if !found {
-			return nil, fmt.Errorf("%w: completed confirmed File repair has no origin admission", common.ErrConflict)
+			return nil, fmt.Errorf("%w: completed confirmed owner repair has no origin admission", common.ErrConflict)
 		}
-		transaction, err := confirmedFileRepairTransactionFromCommitment(aggregate, dispatch, originDispatch)
+		transaction, err := confirmedRepairTransactionFromCommitment(aggregate, dispatch, originDispatch)
 		if err != nil {
 			return nil, err
 		}
@@ -955,22 +971,22 @@ func completedConfirmedFileRepairTransactions(aggregate RuntimeAggregate) ([]com
 		if len(dispatch.CompletedOperationIDs) != candidateOperationCount(dispatch.Candidate) {
 			continue
 		}
-		allAccepted, err := confirmedFileRepairCompletedDispatchAllAccepted(aggregate, dispatch)
+		allAccepted, err := confirmedRepairCompletedDispatchAllAccepted(aggregate, dispatch)
 		if err != nil {
 			return nil, err
 		}
 		if !allAccepted {
 			continue
 		}
-		finalWorkspaceRevision, receipts, err := confirmedFileRepairCompletedReceiptChain(aggregate, dispatch, transaction.confirmation)
+		finalWorkspaceRevision, receipts, err := confirmedRepairCompletedReceiptChain(aggregate, dispatch, transaction.confirmation)
 		if err != nil {
 			return nil, err
 		}
-		finalEvidenceRevision, err := confirmedFileRepairFinalEvidenceRevision(aggregate, dispatch, receipts, finalWorkspaceRevision)
+		finalEvidenceRevision, err := confirmedRepairFinalEvidenceRevision(aggregate, dispatch, receipts, finalWorkspaceRevision)
 		if err != nil {
 			return nil, err
 		}
-		ret = append(ret, completedConfirmedFileRepairTransaction{
+		ret = append(ret, completedConfirmedRepairTransaction{
 			transaction: *transaction, dispatch: dispatch, finalEvidenceRevision: finalEvidenceRevision,
 			finalWorkspaceRevision: finalWorkspaceRevision,
 		})
@@ -978,16 +994,16 @@ func completedConfirmedFileRepairTransactions(aggregate RuntimeAggregate) ([]com
 	return ret, nil
 }
 
-func confirmedFileRepairCompletedDispatchAllAccepted(aggregate RuntimeAggregate, dispatch SealedDispatch) (bool, error) {
+func confirmedRepairCompletedDispatchAllAccepted(aggregate RuntimeAggregate, dispatch SealedDispatch) (bool, error) {
 	for _, operationID := range dispatch.CompletedOperationIDs {
 		execution, found := operationExecutionRecord(dispatch.OperationExecutions, operationID)
 		if !found || execution.State != runtimecontract.OperationExecutionEvidenceCommitted || execution.Fence == 0 {
-			return false, fmt.Errorf("%w: completed confirmed File repair has no evidence-committed execution", common.ErrConflict)
+			return false, fmt.Errorf("%w: completed confirmed owner repair has no evidence-committed execution", common.ErrConflict)
 		}
 		receipt, found := runtimecontract.RuntimeOperationReceiptForExecutionKeyFence(aggregate.OperationReceipts, execution.ExecutionKey, execution.Fence)
 		if !found || receipt.OperationID != operationID || execution.OwnerReceiptRef != "runtime-receipt/"+receipt.ExecutionKey ||
 			execution.OwnerReceiptHash != runtimecontract.StableRuntimeOperationReceiptHash(receipt) {
-			return false, fmt.Errorf("%w: completed confirmed File repair has no exact owner receipt", common.ErrConflict)
+			return false, fmt.Errorf("%w: completed confirmed owner repair has no exact owner receipt", common.ErrConflict)
 		}
 		if receipt.Outcome != runtimecontract.RuntimeOperationOutcomeAccepted {
 			return false, nil
@@ -996,7 +1012,7 @@ func confirmedFileRepairCompletedDispatchAllAccepted(aggregate RuntimeAggregate,
 	return true, nil
 }
 
-func confirmedFileRepairFinalEvidenceRevision(
+func confirmedRepairFinalEvidenceRevision(
 	aggregate RuntimeAggregate,
 	dispatch SealedDispatch,
 	receipts map[string]runtimecontract.RuntimeOperationReceipt,
@@ -1011,29 +1027,29 @@ func confirmedFileRepairFinalEvidenceRevision(
 				continue
 			}
 			if finalOperationID != "" {
-				return "", fmt.Errorf("%w: completed confirmed File repair has multiple final workspace revision receipts", common.ErrConflict)
+				return "", fmt.Errorf("%w: completed confirmed owner repair has multiple final workspace revision receipts", common.ErrConflict)
 			}
 			finalOperationID = operationID
 		}
 	}
 	if finalOperationID == "" {
-		return "", fmt.Errorf("%w: completed confirmed File repair has no final workspace revision receipt", common.ErrConflict)
+		return "", fmt.Errorf("%w: completed confirmed owner repair has no final workspace revision receipt", common.ErrConflict)
 	}
 	operation, found := candidateOperationByID(dispatch.Candidate, finalOperationID)
 	if !found {
-		return "", fmt.Errorf("%w: completed confirmed File repair final operation is not sealed", common.ErrConflict)
+		return "", fmt.Errorf("%w: completed confirmed owner repair final operation is not sealed", common.ErrConflict)
 	}
-	fact, err := validateConfirmedFileRepairAcceptedEvidenceLineage(aggregate, dispatch, operation, receipts[finalOperationID])
+	fact, err := validateConfirmedRepairAcceptedEvidenceLineage(aggregate, dispatch, operation, receipts[finalOperationID])
 	if err != nil || fact.Revision == "" {
 		if err != nil {
 			return "", err
 		}
-		return "", fmt.Errorf("%w: completed confirmed File repair has no unique final accepted evidence revision", common.ErrConflict)
+		return "", fmt.Errorf("%w: completed confirmed owner repair has no unique final accepted evidence revision", common.ErrConflict)
 	}
 	return fact.Revision, nil
 }
 
-func validateConfirmedFileRepairAcceptedEvidenceLineage(
+func validateConfirmedRepairAcceptedEvidenceLineage(
 	aggregate RuntimeAggregate,
 	dispatch SealedDispatch,
 	operation runtimecontract.RuntimeOperation,
@@ -1044,7 +1060,7 @@ func validateConfirmedFileRepairAcceptedEvidenceLineage(
 	execution, found := operationExecutionRecord(dispatch.OperationExecutions, operation.ID)
 	if !found || execution.State != runtimecontract.OperationExecutionEvidenceCommitted || execution.EvidenceFactID == "" ||
 		execution.EvidenceFactHash == "" || execution.ExecutionKey != receipt.ExecutionKey || execution.Fence != receipt.Fence {
-		return runtimecontract.EvidenceFact{}, fmt.Errorf("%w: confirmed File repair accepted evidence has no exact committed execution projection", common.ErrConflict)
+		return runtimecontract.EvidenceFact{}, fmt.Errorf("%w: confirmed owner repair accepted evidence has no exact committed execution projection", common.ErrConflict)
 	}
 	var evidence runtimecontract.EvidenceFact
 	evidenceMatches := 0
@@ -1055,20 +1071,20 @@ func validateConfirmedFileRepairAcceptedEvidenceLineage(
 		evidence, evidenceMatches = fact, evidenceMatches+1
 	}
 	if evidenceMatches != 1 || runtimecontract.StableRuntimeEvidenceFactHash(evidence) != execution.EvidenceFactHash {
-		return runtimecontract.EvidenceFact{}, fmt.Errorf("%w: confirmed File repair accepted evidence does not match its execution-ledger fact id/hash", common.ErrConflict)
+		return runtimecontract.EvidenceFact{}, fmt.Errorf("%w: confirmed owner repair accepted evidence does not match its execution-ledger fact id/hash", common.ErrConflict)
 	}
-	admissionLineage, err := confirmedFileRepairAdmissionLineage(aggregate, dispatch)
+	admissionLineage, err := confirmedRepairAdmissionLineage(aggregate, dispatch)
 	if err != nil {
 		return runtimecontract.EvidenceFact{}, err
 	}
 	ownerIndex := admissionLineage.dispatchIndex(evidence.DispatchID)
 	if ownerIndex < 0 {
-		return runtimecontract.EvidenceFact{}, fmt.Errorf("%w: confirmed File repair accepted evidence dispatch is outside governance admission lineage", common.ErrConflict)
+		return runtimecontract.EvidenceFact{}, fmt.Errorf("%w: confirmed owner repair accepted evidence dispatch is outside governance admission lineage", common.ErrConflict)
 	}
 	ownerDispatch := admissionLineage.dispatches[ownerIndex]
 	ownerExecution, found := operationExecutionRecord(ownerDispatch.OperationExecutions, operation.ID)
 	if !found || !reflect.DeepEqual(ownerExecution.Normalized(), execution.Normalized()) {
-		return runtimecontract.EvidenceFact{}, fmt.Errorf("%w: confirmed File repair governance resume changed a completed execution projection", common.ErrConflict)
+		return runtimecontract.EvidenceFact{}, fmt.Errorf("%w: confirmed owner repair governance resume changed a completed execution projection", common.ErrConflict)
 	}
 	eventID := string(evidence.ID)
 	processedMatches := 0
@@ -1078,12 +1094,12 @@ func validateConfirmedFileRepairAcceptedEvidenceLineage(
 		}
 	}
 	if processedMatches != 1 {
-		return runtimecontract.EvidenceFact{}, fmt.Errorf("%w: confirmed File repair transaction requires one receipt-derived accepted evidence fact and processed-event fence", common.ErrConflict)
+		return runtimecontract.EvidenceFact{}, fmt.Errorf("%w: confirmed owner repair transaction requires one receipt-derived accepted evidence fact and processed-event fence", common.ErrConflict)
 	}
 	recoveryEventID := "runtime-receipt|" + receiptHash
 	recoverySourceRef := "runtime-receipt/" + receipt.ExecutionKey
 	if eventID != recoveryEventID || evidence.SourceRef != recoverySourceRef {
-		return runtimecontract.EvidenceFact{}, fmt.Errorf("%w: confirmed File repair accepted evidence has no canonical persisted receipt identity", common.ErrConflict)
+		return runtimecontract.EvidenceFact{}, fmt.Errorf("%w: confirmed owner repair accepted evidence has no canonical persisted receipt identity", common.ErrConflict)
 	}
 	receiptEvidence := receipt.Evidence
 	if evidence.Kind != runtimecontract.EvidenceKindStateChange || evidence.SubjectRef != operation.ID ||
@@ -1097,7 +1113,7 @@ func validateConfirmedFileRepairAcceptedEvidenceLineage(
 		!sameRuntimeTargetRefs(evidence.EvidenceRefs, receiptEvidence.EvidenceRefs) || evidence.Quality != receiptEvidence.Quality ||
 		evidence.ZeroWork != receiptEvidence.ZeroWork || evidence.EvidenceReason != receiptEvidence.EvidenceReason ||
 		!sameRuntimeTargetRefs(evidence.EvidenceTags, receiptEvidence.EvidenceTags) || !reflect.DeepEqual(evidence.Validation, receiptEvidence.Validation) {
-		return runtimecontract.EvidenceFact{}, fmt.Errorf("%w: confirmed File repair accepted evidence does not match its exact receipt and sealed operation", common.ErrConflict)
+		return runtimecontract.EvidenceFact{}, fmt.Errorf("%w: confirmed owner repair accepted evidence does not match its exact receipt and sealed operation", common.ErrConflict)
 	}
 	return evidence, nil
 }
@@ -1119,37 +1135,37 @@ func runtimeTargetRefsWithin(values, allowed []string) bool {
 	return true
 }
 
-// validateConfirmedFileRepairMandatoryCommitments is independent from the
+// validateConfirmedRepairMandatoryCommitments is independent from the
 // typed manifest-purpose marker. A regression that omits or coordinates away
 // that marker still cannot turn an exact rejected managed-validation
-// observation followed by an all-File same-focus repair into an ordinary
+// observation followed by an single-owner same-focus repair into an ordinary
 // dispatch. The immutable receipt/evidence and accepted dispatch preimages
 // prove only that a commitment is mandatory; the commitment remains the sole
 // reverse key for confirmation, closure and fresh-validation settlement.
-func validateConfirmedFileRepairMandatoryCommitments(aggregate RuntimeAggregate) error {
+func validateConfirmedRepairMandatoryCommitments(aggregate RuntimeAggregate) error {
 	dispatches := make([]SealedDispatch, 0, len(aggregate.CompletedDispatches)+1)
 	dispatches = append(dispatches, aggregate.CompletedDispatches...)
 	if aggregate.ActiveDispatch != nil {
 		dispatches = append(dispatches, *aggregate.ActiveDispatch)
 	}
 	for _, dispatch := range dispatches {
-		required, err := confirmedFileRepairCommitmentRequiredByRejectedObservation(aggregate, dispatch)
+		required, err := confirmedRepairCommitmentRequiredByRejectedObservation(aggregate, dispatch)
 		if err != nil {
 			return err
 		}
 		if required && dispatch.RepairCommitment == nil {
-			return fmt.Errorf("runtime aggregate confirmed File repair dispatch %q omitted its mandatory rejected-validation commitment", dispatch.ID)
+			return fmt.Errorf("runtime aggregate confirmed owner repair dispatch %q omitted its mandatory rejected-validation commitment", dispatch.ID)
 		}
 	}
 	return nil
 }
 
-func confirmedFileRepairCommitmentRequiredByRejectedObservation(aggregate RuntimeAggregate, dispatch SealedDispatch) (bool, error) {
+func confirmedRepairCommitmentRequiredByRejectedObservation(aggregate RuntimeAggregate, dispatch SealedDispatch) (bool, error) {
 	if dispatch.Candidate.StateChange == nil || dispatch.Transaction.State != runtimecontract.ConvergenceStateNeedStateChange {
 		return false, nil
 	}
-	targetRefs, allFile, err := confirmedFileRepairDispatchTargets(dispatch)
-	if err != nil || !allFile {
+	targetRefs, repairOwnerModuleID, err := confirmedRepairDispatchTargets(dispatch)
+	if err != nil || repairOwnerModuleID == "" {
 		return false, err
 	}
 	operations := candidateRuntimeOperations(dispatch.Candidate)
@@ -1168,7 +1184,7 @@ func confirmedFileRepairCommitmentRequiredByRejectedObservation(aggregate Runtim
 				continue
 			}
 			if sourceDispatch != nil {
-				return false, fmt.Errorf("%w: confirmed File repair mandatory source dispatch is duplicated", common.ErrConflict)
+				return false, fmt.Errorf("%w: confirmed owner repair mandatory source dispatch is duplicated", common.ErrConflict)
 			}
 			sourceDispatch = candidate
 		}
@@ -1196,10 +1212,15 @@ func confirmedFileRepairCommitmentRequiredByRejectedObservation(aggregate Runtim
 			observation.TargetRole != dispatch.FocusTargetRole || !sameRuntimeTargetRefs(observation.CandidateTargetRefs, targetRefs) {
 			continue
 		}
-		// Reuse the full receipt/evidence reverse proof without consulting a File
-		// confirmation: this detector proves necessity only. Confirmation identity
-		// remains available exclusively through the commitment consumer.
-		sourceFact, _, exactSourceOperation, sourceErr := confirmedFileRepairSourceRejection(
+		expectedOwner, ownerErr := runtimeExpectedRepairSurfaceOwner(aggregate, *observation)
+		if ownerErr != nil || expectedOwner != repairOwnerModuleID {
+			continue
+		}
+		// Reuse the full receipt/evidence reverse proof without depending on the
+		// mutable confirmation ledger: the sealed Profile/binding owner plus source
+		// rejection is sufficient to prove that a commitment was mandatory. The
+		// commitment remains the reverse key for the exact confirmation itself.
+		sourceFact, _, exactSourceOperation, sourceErr := confirmedRepairSourceRejection(
 			aggregate,
 			runtimecontract.RuntimeRepairSurfaceConfirmation{Observation: observation.Clone()},
 		)
@@ -1208,29 +1229,29 @@ func confirmedFileRepairCommitmentRequiredByRejectedObservation(aggregate Runtim
 		}
 		if sourceFact.ID != fact.ID || sourceFact.Revision != dispatch.Transaction.EvidenceRevision ||
 			!sameRuntimeStringSet(sourceFact.BindingRefs, exactSourceOperation.BindingRefs) {
-			return false, fmt.Errorf("%w: confirmed File repair mandatory source evidence drifted", common.ErrConflict)
+			return false, fmt.Errorf("%w: confirmed owner repair mandatory source evidence drifted", common.ErrConflict)
 		}
 		for _, operation := range operations {
 			operation = operation.Normalized()
 			if !sameRuntimeStringSet(operation.BindingRefs, exactSourceOperation.BindingRefs) ||
 				!sameCoverageIDs(operation.CoverageWorkItemIDs, exactSourceOperation.CoverageWorkItemIDs) {
-				return false, fmt.Errorf("%w: confirmed File repair mandatory dispatch does not retain its source binding", common.ErrConflict)
+				return false, fmt.Errorf("%w: confirmed owner repair mandatory dispatch does not retain its source binding", common.ErrConflict)
 			}
 		}
 		matches++
 	}
 	if matches > 1 {
-		return false, fmt.Errorf("%w: confirmed File repair dispatch has multiple mandatory rejected-validation sources", common.ErrConflict)
+		return false, fmt.Errorf("%w: confirmed owner repair dispatch has multiple mandatory rejected-validation sources", common.ErrConflict)
 	}
 	return matches == 1, nil
 }
 
-// validatePendingConfirmedFileRepairTransaction is the fresh-load proof for a
-// partially completed File all-of dispatch. It validates only immutable
+// validatePendingConfirmedRepairTransaction is the fresh-load proof for a
+// partially completed single-owner all-of dispatch. It validates only immutable
 // transaction lineage and explicitly rejects restoration of the superseded
 // target/directive.
-func validatePendingConfirmedFileRepairTransaction(aggregate RuntimeAggregate) error {
-	if err := validateConfirmedFileRepairMandatoryCommitments(aggregate); err != nil {
+func validatePendingConfirmedRepairTransaction(aggregate RuntimeAggregate) error {
+	if err := validateConfirmedRepairMandatoryCommitments(aggregate); err != nil {
 		return err
 	}
 	if aggregate.ActiveDispatch == nil || len(aggregate.ActiveDispatch.CompletedOperationIDs) == 0 {
@@ -1242,44 +1263,44 @@ func validatePendingConfirmedFileRepairTransaction(aggregate RuntimeAggregate) e
 	}
 	if dispatch.Candidate.StateChange == nil || aggregate.Decision.State != runtimecontract.ConvergenceStateNeedStateChange ||
 		aggregate.Decision.RequiredOutput.RepairClosureID == "" {
-		return fmt.Errorf("runtime aggregate pending confirmed File repair commitment has an invalid dispatch shape")
+		return fmt.Errorf("runtime aggregate pending confirmed owner repair commitment has an invalid dispatch shape")
 	}
-	_, allFile, err := confirmedFileRepairDispatchTargets(dispatch)
+	_, repairOwnerModuleID, err := confirmedRepairDispatchTargets(dispatch)
 	if err != nil {
 		return err
 	}
-	if !allFile {
-		return fmt.Errorf("runtime aggregate pending confirmed File repair commitment has a non-File operation")
+	if repairOwnerModuleID == "" || repairOwnerModuleID != dispatch.RepairCommitment.Normalized().RepairOwnerModuleID {
+		return fmt.Errorf("runtime aggregate pending confirmed repair commitment has no unique committed operation owner")
 	}
 	if len(dispatch.CompletedOperationIDs) >= candidateOperationCount(dispatch.Candidate) {
-		return fmt.Errorf("runtime aggregate pending confirmed File repair transaction has no remaining sealed operation")
+		return fmt.Errorf("runtime aggregate pending confirmed owner repair transaction has no remaining sealed operation")
 	}
-	transaction, found, err := resolveConfirmedFileRepairTransaction(aggregate, dispatch)
+	transaction, found, err := resolveConfirmedRepairTransaction(aggregate, dispatch)
 	if err != nil {
 		return err
 	}
 	if !found {
-		return fmt.Errorf("runtime aggregate pending confirmed File repair transaction has no exact immutable confirmation lineage")
+		return fmt.Errorf("runtime aggregate pending confirmed owner repair transaction has no exact immutable confirmation lineage")
 	}
 	if aggregate.Facts.RepairDirective != nil || aggregate.Facts.Resources.FailureTarget != nil {
-		return fmt.Errorf("runtime aggregate pending confirmed File repair transaction restored superseded mutable authority (directive=%t target=%t)", aggregate.Facts.RepairDirective != nil, aggregate.Facts.Resources.FailureTarget != nil)
+		return fmt.Errorf("runtime aggregate pending confirmed owner repair transaction restored superseded mutable authority (directive=%t target=%t)", aggregate.Facts.RepairDirective != nil, aggregate.Facts.Resources.FailureTarget != nil)
 	}
-	_, receipts, err := confirmedFileRepairCompletedReceiptChain(aggregate, dispatch, transaction.confirmation)
+	_, receipts, err := confirmedRepairCompletedReceiptChain(aggregate, dispatch, transaction.confirmation)
 	if err != nil {
-		return fmt.Errorf("runtime aggregate pending confirmed File repair transaction: %w", err)
+		return fmt.Errorf("runtime aggregate pending confirmed owner repair transaction: %w", err)
 	}
-	return validateConfirmedFileRepairPartialFreshness(aggregate, dispatch, transaction.confirmation, receipts)
+	return validateConfirmedRepairPartialFreshness(aggregate, dispatch, transaction.confirmation, receipts)
 }
 
-func pendingConfirmedFileRepairTransactionCovers(aggregate RuntimeAggregate, coverageID common.CoverageWorkItemID) (bool, error) {
+func pendingConfirmedRepairTransactionCovers(aggregate RuntimeAggregate, coverageID common.CoverageWorkItemID) (bool, error) {
 	if aggregate.ActiveDispatch == nil || len(aggregate.ActiveDispatch.CompletedOperationIDs) == 0 ||
 		aggregate.Facts.RepairDirective != nil || aggregate.Facts.Resources.FailureTarget != nil {
 		return false, nil
 	}
-	if err := validatePendingConfirmedFileRepairTransaction(aggregate); err != nil {
+	if err := validatePendingConfirmedRepairTransaction(aggregate); err != nil {
 		return false, err
 	}
-	transaction, found, err := resolveConfirmedFileRepairTransaction(aggregate, *aggregate.ActiveDispatch)
+	transaction, found, err := resolveConfirmedRepairTransaction(aggregate, *aggregate.ActiveDispatch)
 	if err != nil || !found {
 		return false, err
 	}
@@ -1291,7 +1312,7 @@ func pendingConfirmedFileRepairTransactionCovers(aggregate RuntimeAggregate, cov
 	return false, nil
 }
 
-func validateConfirmedFileRepairPartialFreshness(
+func validateConfirmedRepairPartialFreshness(
 	aggregate RuntimeAggregate,
 	dispatch SealedDispatch,
 	confirmation runtimecontract.RuntimeRepairSurfaceConfirmation,
@@ -1301,9 +1322,9 @@ func validateConfirmedFileRepairPartialFreshness(
 	for operationID, receipt := range receipts {
 		operation, found := candidateOperationByID(dispatch.Candidate, operationID)
 		if !found {
-			return fmt.Errorf("runtime aggregate pending confirmed File repair transaction freshness operation is not sealed")
+			return fmt.Errorf("runtime aggregate pending confirmed owner repair transaction freshness operation is not sealed")
 		}
-		fact, err := validateConfirmedFileRepairAcceptedEvidenceLineage(aggregate, dispatch, operation, receipt)
+		fact, err := validateConfirmedRepairAcceptedEvidenceLineage(aggregate, dispatch, operation, receipt)
 		if err != nil {
 			return err
 		}
@@ -1320,14 +1341,14 @@ func validateConfirmedFileRepairPartialFreshness(
 		}
 		receipt, found := receipts[invalidation.OperationID]
 		if !found || invalidationByOperation[invalidation.OperationID] {
-			return fmt.Errorf("runtime aggregate pending confirmed File repair transaction has an invalidation outside its unique completed receipt chain")
+			return fmt.Errorf("runtime aggregate pending confirmed owner repair transaction has an invalidation outside its unique completed receipt chain")
 		}
 		invalidationByOperation[invalidation.OperationID] = true
 		receiptHash := runtimecontract.StableRuntimeOperationReceiptHash(receipt)
 		if invalidation.ReceiptHash != receiptHash ||
 			invalidation.Signature != runtimecontract.StableRuntimeResourceChangeInvalidationSignature(receiptHash, receipt.ResourceChanges) ||
 			!reflect.DeepEqual(invalidation.ResourceChanges, runtimecontract.NormalizeRuntimeResourceChanges(receipt.ResourceChanges)) {
-			return fmt.Errorf("runtime aggregate pending confirmed File repair transaction has a mismatched freshness invalidation")
+			return fmt.Errorf("runtime aggregate pending confirmed owner repair transaction has a mismatched freshness invalidation")
 		}
 		invalidatedPrerequisites = append(invalidatedPrerequisites, invalidation.PrerequisiteIDs...)
 		invalidatedObservations = append(invalidatedObservations, invalidation.ObservationIDs...)
@@ -1347,30 +1368,30 @@ func validateConfirmedFileRepairPartialFreshness(
 		pendingIDs = append(pendingIDs, prerequisite.ID)
 	}
 	if len(invalidatedPrerequisites) == 0 || !relevantConfirmationRevision || !sameRuntimeStringSet(invalidatedPrerequisites, pendingIDs) {
-		return fmt.Errorf("runtime aggregate pending confirmed File repair transaction does not exactly bind current pending prerequisites to the confirmed revision invalidation")
+		return fmt.Errorf("runtime aggregate pending confirmed owner repair transaction does not exactly bind current pending prerequisites to the confirmed revision invalidation")
 	}
 	for _, prerequisite := range aggregate.Facts.Prerequisites.Satisfied {
 		if containsString(invalidatedPrerequisites, prerequisite.ID) {
-			return fmt.Errorf("runtime aggregate pending confirmed File repair transaction retains an invalidated satisfied prerequisite")
+			return fmt.Errorf("runtime aggregate pending confirmed owner repair transaction retains an invalidated satisfied prerequisite")
 		}
 	}
 	for _, observation := range aggregate.Facts.Resources.PrerequisiteObservations {
 		if containsString(invalidatedObservations, observation.ObservationID) || containsString(invalidatedPrerequisites, observation.PrerequisiteID) {
-			return fmt.Errorf("runtime aggregate pending confirmed File repair transaction retains an invalidated owner observation")
+			return fmt.Errorf("runtime aggregate pending confirmed owner repair transaction retains an invalidated owner observation")
 		}
 	}
 	return nil
 }
 
-func (t confirmedFileRepairTransaction) stateChangeDirective(facts runtimecontract.RuntimeFacts, decision runtimecontract.RuntimeDecision) runtimecontract.RuntimeRepairDirective {
+func (t confirmedRepairTransaction) stateChangeDirective(facts runtimecontract.RuntimeFacts, decision runtimecontract.RuntimeDecision) runtimecontract.RuntimeRepairDirective {
 	facts = facts.Normalized()
 	decision.RequiredOutput = decision.RequiredOutput.Normalized()
 	closure := t.closure.Clone()
 	return runtimecontract.RuntimeRepairDirective{
-		ID:                         fmt.Sprintf("confirmed-file-repair/%s/%s/state-change", facts.Focus.ID, closure.ID),
+		ID:                         fmt.Sprintf("confirmed-repair/%s/%s/state-change", facts.Focus.ID, closure.ID),
 		FocusID:                    facts.Focus.ID,
 		Trigger:                    runtimecontract.RuntimeRepairTriggerRejectedValidation,
-		Purpose:                    runtimecontract.RuntimeDispatchRepairPurposeConfirmedFileValidation,
+		Purpose:                    runtimecontract.RuntimeDispatchRepairPurposeConfirmedValidation,
 		RequiredState:              runtimecontract.ConvergenceStateNeedStateChange,
 		RequiredEffectScopes:       append([]runtimecontract.RuntimeEffectScope(nil), decision.RequiredOutput.RequiredEffectScopes...),
 		RequiredEvidenceKinds:      []string{runtimecontract.EvidenceKindStateChange},
@@ -1384,14 +1405,14 @@ func (t confirmedFileRepairTransaction) stateChangeDirective(facts runtimecontra
 	}.Normalized()
 }
 
-func (t confirmedFileRepairTransaction) freshValidationDirective(facts runtimecontract.RuntimeFacts, supersedesRevision string) runtimecontract.RuntimeRepairDirective {
+func (t confirmedRepairTransaction) freshValidationDirective(facts runtimecontract.RuntimeFacts, supersedesRevision string) runtimecontract.RuntimeRepairDirective {
 	facts = facts.Normalized()
 	closure := t.closure.Clone()
 	return runtimecontract.RuntimeRepairDirective{
-		ID:                    fmt.Sprintf("confirmed-file-repair/%s/%s/fresh-validation", facts.Focus.ID, closure.ID),
+		ID:                    fmt.Sprintf("confirmed-repair/%s/%s/fresh-validation", facts.Focus.ID, closure.ID),
 		FocusID:               facts.Focus.ID,
 		Trigger:               runtimecontract.RuntimeRepairTriggerRejectedValidation,
-		Purpose:               runtimecontract.RuntimeDispatchRepairPurposeConfirmedFileValidation,
+		Purpose:               runtimecontract.RuntimeDispatchRepairPurposeConfirmedValidation,
 		RequiredState:         runtimecontract.ConvergenceStateNeedValidation,
 		RequiredEffectScopes:  []runtimecontract.RuntimeEffectScope{runtimecontract.RuntimeEffectNone, runtimecontract.RuntimeEffectEphemeralSession},
 		RequiredEvidenceKinds: []string{runtimecontract.EvidenceKindValidation},
@@ -1405,20 +1426,20 @@ func (t confirmedFileRepairTransaction) freshValidationDirective(facts runtimeco
 	}.Normalized()
 }
 
-// runtimeConfirmedFileRepairOwnsFreshValidationDirective is the facts-only
+// runtimeConfirmedRepairOwnsFreshValidationDirective is the facts-only
 // reducer guard for the exact target-free handoff created by
-// settleConfirmedFileDefinitionRepair. Aggregate fresh-load separately proves
-// the completed File transaction and receipt lineage; this helper only keeps
+// settleConfirmedRepairDefinitionRepair. Aggregate fresh-load separately proves
+// the completed repair-owner transaction and receipt lineage; this helper only keeps
 // generic directive synchronization from copying audit-only closure targets
 // back into action authority while prerequisites are reacquired.
-func runtimeConfirmedFileRepairOwnsFreshValidationDirective(facts runtimecontract.RuntimeFacts) bool {
+func runtimeConfirmedRepairOwnsFreshValidationDirective(facts runtimecontract.RuntimeFacts) bool {
 	facts = facts.Normalized()
 	if facts.RepairDirective == nil || facts.RepairDirective.Closure == nil || len(facts.Focus.CoverageWorkItemIDs) == 0 {
 		return false
 	}
 	directive := facts.RepairDirective.Normalized()
 	closure := directive.Closure.Normalized()
-	if directive.ID != fmt.Sprintf("confirmed-file-repair/%s/%s/fresh-validation", facts.Focus.ID, closure.ID) ||
+	if directive.ID != fmt.Sprintf("confirmed-repair/%s/%s/fresh-validation", facts.Focus.ID, closure.ID) ||
 		directive.FocusID != facts.Focus.ID || directive.Trigger != runtimecontract.RuntimeRepairTriggerRejectedValidation ||
 		directive.CurrentFailure != nil || directive.RequiredState != runtimecontract.ConvergenceStateNeedValidation ||
 		len(directive.TargetRefs) != 0 || !sameCoverageIDs(directive.CoverageWorkItemIDs, facts.Focus.CoverageWorkItemIDs) ||
@@ -1438,13 +1459,13 @@ func runtimeConfirmedFileRepairOwnsFreshValidationDirective(facts runtimecontrac
 	return true
 }
 
-// validateConfirmedFileRepairFreshValidationContinuation is the fresh-load
+// validateConfirmedRepairFreshValidationContinuation is the fresh-load
 // reverse proof for the target-free NeedValidation handoff. Every applicable
 // completed transaction must either have fresh validation newer than its final
-// File receipt or retain exactly one canonical target-free directive. A stale,
+// repair-owner receipt or retain exactly one canonical target-free directive. A stale,
 // renamed, target-restored, or lineage-free projection fails closed.
-func validateConfirmedFileRepairFreshValidationContinuation(aggregate RuntimeAggregate) error {
-	transactions, err := completedConfirmedFileRepairTransactions(aggregate)
+func validateConfirmedRepairFreshValidationContinuation(aggregate RuntimeAggregate) error {
+	transactions, err := completedConfirmedRepairTransactions(aggregate)
 	if err != nil {
 		return err
 	}
@@ -1455,44 +1476,44 @@ func validateConfirmedFileRepairFreshValidationContinuation(aggregate RuntimeAgg
 	for _, completed := range transactions {
 		transaction := completed.transaction
 		if !sameCoverageIDs(transaction.closure.CoverageWorkItemIDs, facts.Focus.CoverageWorkItemIDs) ||
-			!confirmedFileRepairSourceUsesCurrentBinding(facts, transaction.sourceOp.BindingRefs, transaction.closure.CoverageWorkItemIDs) {
+			!confirmedRepairSourceUsesCurrentBinding(facts, transaction.sourceOp.BindingRefs, transaction.closure.CoverageWorkItemIDs) {
 			continue
 		}
 		applicable++
 		expected := transaction.freshValidationDirective(facts, completed.finalEvidenceRevision)
 		if repairDirectiveEvidenceSatisfied(facts, expected, aggregate.CoverageProofLineage) {
 			if facts.RepairDirective != nil && runtimecontract.SameRuntimeRepairClosure(facts.RepairDirective.Closure, expected.Closure) {
-				return fmt.Errorf("runtime aggregate settled confirmed File repair retained a satisfied fresh-validation directive")
+				return fmt.Errorf("runtime aggregate settled confirmed owner repair retained a satisfied fresh-validation directive")
 			}
 			continue
 		}
 		outstanding++
 		if facts.RepairDirective == nil || !runtimecontract.SameRuntimeRepairDirective(facts.RepairDirective, &expected) {
-			return fmt.Errorf("runtime aggregate confirmed File repair fresh-validation continuation does not exactly match its completed transaction")
+			return fmt.Errorf("runtime aggregate confirmed owner repair fresh-validation continuation does not exactly match its completed transaction")
 		}
 		matchedDirective = true
 	}
 	if outstanding > 1 {
-		return fmt.Errorf("runtime aggregate has multiple outstanding confirmed File repair fresh-validation continuations")
+		return fmt.Errorf("runtime aggregate has multiple outstanding confirmed owner repair fresh-validation continuations")
 	}
-	if facts.RepairDirective != nil && strings.HasPrefix(facts.RepairDirective.ID, "confirmed-file-repair/") && !matchedDirective {
-		return fmt.Errorf("runtime aggregate confirmed File repair fresh-validation directive has no exact completed transaction (completed=%d applicable=%d)", len(transactions), applicable)
+	if facts.RepairDirective != nil && strings.HasPrefix(facts.RepairDirective.ID, "confirmed-repair/") && !matchedDirective {
+		return fmt.Errorf("runtime aggregate confirmed owner repair fresh-validation directive has no exact completed transaction (completed=%d applicable=%d)", len(transactions), applicable)
 	}
 	return nil
 }
 
-func settleConfirmedFileDefinitionRepair(
+func settleConfirmedRepairDefinitionRepair(
 	aggregate *RuntimeAggregate,
 	fact runtimecontract.EvidenceFact,
-	transaction confirmedFileRepairTransaction,
+	transaction confirmedRepairTransaction,
 ) (bool, error) {
 	if aggregate == nil || aggregate.ActiveDispatch != nil || fact.Kind != runtimecontract.EvidenceKindStateChange || weakRuntimeEvidence(fact) {
 		return false, common.ErrInvalidArgument
 	}
 	facts := aggregate.Facts.Normalized()
 	if !sameCoverageIDs(transaction.closure.CoverageWorkItemIDs, facts.Focus.CoverageWorkItemIDs) ||
-		!confirmedFileRepairSourceUsesCurrentBinding(facts, transaction.sourceOp.BindingRefs, transaction.closure.CoverageWorkItemIDs) {
-		return false, fmt.Errorf("%w: confirmed File Definition repair no longer has its exact source binding", common.ErrConflict)
+		!confirmedRepairSourceUsesCurrentBinding(facts, transaction.sourceOp.BindingRefs, transaction.closure.CoverageWorkItemIDs) {
+		return false, fmt.Errorf("%w: confirmed owner Definition repair no longer has its exact source binding", common.ErrConflict)
 	}
 	directive := transaction.freshValidationDirective(facts, fact.Revision)
 	if err := directive.Validate(); err != nil {
@@ -1504,6 +1525,6 @@ func settleConfirmedFileDefinitionRepair(
 	return true, nil
 }
 
-func confirmedFileRepairSourceUsesCurrentBinding(facts runtimecontract.RuntimeFacts, bindingRefs []string, coverageIDs []common.CoverageWorkItemID) bool {
-	return confirmedFileRepairSourceBindingsCoverCurrentScope(RuntimeAggregate{Facts: facts}, bindingRefs, coverageIDs)
+func confirmedRepairSourceUsesCurrentBinding(facts runtimecontract.RuntimeFacts, bindingRefs []string, coverageIDs []common.CoverageWorkItemID) bool {
+	return confirmedRepairSourceBindingsCoverCurrentScope(RuntimeAggregate{Facts: facts}, bindingRefs, coverageIDs)
 }

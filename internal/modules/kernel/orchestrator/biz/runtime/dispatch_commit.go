@@ -39,11 +39,11 @@ type SealedDispatch struct {
 	// mutable Focus projection for this value.
 	FocusTargetRole string
 	// ValidationRecipes is the immutable subset selected from the candidate
-	// manifest's Shell-owner-confirmed recipes.  Execution must never replace it
+	// manifest's validation-owner-confirmed recipes. Execution must never replace it
 	// with activation policy or a later admissibility inventory.
 	ValidationRecipes []runtimecontract.RuntimeValidationRecipe
 	// RepairCommitment is the pre-seal, request-session-bound purpose and
-	// closure lineage for a confirmed File validation repair. It is immutable
+	// closure lineage for an owner-confirmed validation repair. It is immutable
 	// across partial completion and governance resume hops.
 	RepairCommitmentHash         string
 	RepairCommitment             *runtimecontract.RuntimeDispatchRepairCommitment
@@ -167,7 +167,7 @@ type RuntimeAggregate struct {
 	ActiveDispatch       *SealedDispatch
 	CompletedDispatches  []SealedDispatch
 	ProcessedEventIDs    []string
-	// RepairSurfaceConfirmations is the typed SM-2 replay ledger for File-owner
+	// RepairSurfaceConfirmations is the typed SM-2 replay ledger for resource-owner
 	// repair-surface facts.  It is separate from generic event IDs so owner
 	// confirmation idempotency cannot become a global event index.
 	RepairSurfaceConfirmations []runtimecontract.RuntimeRepairSurfaceConfirmationRecord
@@ -180,6 +180,10 @@ type RuntimeAggregate struct {
 	// RecoverableWaits are the bounded SM-2/3/4 wait lineage; timers and Run
 	// lifecycle never own or infer these records.
 	RecoverableWaits []runtimecontract.RuntimeRecoverableWaitRecord
+	// OperationRecoveryAuthorizations are the durable SM-4 replay permissions
+	// for exact claimed SM-3 executions. A process-local counter is never replay
+	// authority.
+	OperationRecoveryAuthorizations []runtimecontract.RuntimeOperationRecoveryAuthorization
 	// DefinitionClarification is the dedicated semantic-gap transaction. It is
 	// neither an operation/governance candidate nor a generic dependency.
 	DefinitionClarification     *runtimecontract.RuntimeDefinitionClarificationState
@@ -286,7 +290,7 @@ func SealDispatchWithManifestAndPreSealAuthority(
 ) (SealedDispatch, error) {
 	manifest = manifest.Normalized()
 	repairRequired := manifest.State == runtimecontract.ConvergenceStateNeedStateChange &&
-		manifest.RepairPurpose == runtimecontract.RuntimeDispatchRepairPurposeConfirmedFileValidation
+		manifest.RepairPurpose == runtimecontract.RuntimeDispatchRepairPurposeConfirmedValidation
 	if repairRequired {
 		if authority.RepairCommitment == nil ||
 			authority.RepairCommitment.Normalized().Purpose != manifest.RepairPurpose ||
@@ -754,6 +758,20 @@ func requireFreshTargetSnapshots(facts runtimecontract.RuntimeFacts, targetRefs 
 	if len(targets) == 0 {
 		return facts
 	}
+	owners := make(map[string]string, len(targets))
+	focus, _ := runtimeCurrentTargetGroundingFocus(facts)
+	for ref := range targets {
+		owner := runtimeTargetSnapshotRequirementOwner(facts, focus, ref)
+		if owner == "" {
+			// The rejected effect proves the current snapshot stale, so it must
+			// be retired even when its owner lineage is malformed. Do not issue
+			// a partial or conventional-owner refresh; the resulting missing
+			// authority fails closed on the next SM-2 reduction.
+			owners = nil
+			break
+		}
+		owners[ref] = owner
+	}
 	kept := make([]runtimecontract.TargetSnapshot, 0, len(facts.Resources.TargetSnapshots))
 	for _, snapshot := range facts.Resources.TargetSnapshots {
 		if _, refresh := targets[snapshot.TargetRef]; !refresh {
@@ -761,10 +779,13 @@ func requireFreshTargetSnapshots(facts runtimecontract.RuntimeFacts, targetRefs 
 		}
 	}
 	facts.Resources.TargetSnapshots = kept
+	if len(owners) != len(targets) {
+		return facts.Normalized()
+	}
 	requirements := make([]runtimecontract.RuntimeRequirement, 0, len(targets))
 	for ref := range targets {
 		requirements = append(requirements, runtimecontract.RuntimeRequirement{
-			Kind: runtimecontract.PrerequisiteKindTargetSnapshot, OwnerModuleID: runtimecontract.RuntimeModuleFile,
+			Kind: runtimecontract.PrerequisiteKindTargetSnapshot, OwnerModuleID: owners[ref],
 			SubjectRef: ref, Reason: "fresh target snapshot required after state-change conflict",
 		})
 	}
