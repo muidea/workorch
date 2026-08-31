@@ -1103,6 +1103,60 @@ func TestRecordDriveFailureFactAtomicallyInvalidatesActiveDispatch(t *testing.T)
 	}
 }
 
+func TestRecordDriveFailureFactAtomicallyInvalidatesActiveAssessmentDispatch(t *testing.T) {
+	controller := prepareAssessmentController(t, runtimecontract.AssessmentCandidate{
+		CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-v2"},
+		Disposition:         runtimecontract.AssessmentDispositionSatisfied,
+		Items:               make([]runtimecontract.RuntimeAssessmentItemFact, 0),
+		Summary:             "producer reports the current focus is satisfied",
+	})
+	repository, ok := controller.repository.(*controllerRepository)
+	if !ok || repository == nil {
+		t.Fatalf("assessment fixture repository = %T, want *controllerRepository", controller.repository)
+	}
+	sealed, err := controller.Load(context.Background(), "ws-v2", "run-v2")
+	if err != nil || sealed.ActiveDispatch == nil || sealed.ActiveDispatch.Candidate.Assessment == nil {
+		t.Fatalf("sealed assessment dispatch = %+v err=%v", sealed.ActiveDispatch, err)
+	}
+	dispatchID := sealed.ActiveDispatch.ID
+	completedBefore := len(sealed.CompletedDispatches)
+
+	failed, err := controller.recordDriveFailureFact(context.Background(), "ws-v2", "run-v2", runtimecontract.FailureFact{
+		Class: runtimecontract.FailureClassRuntimeContractMisalignment, Code: "runtime_drive_failed",
+		Signature: "runtime-drive-failed/assessment", Message: "typed assessment drive contract failure",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if failed.ActiveDispatch != nil || len(failed.CompletedDispatches) != completedBefore+1 {
+		t.Fatalf("assessment drive failure did not atomically close its active dispatch: %+v", failed)
+	}
+	invalidated := failed.CompletedDispatches[len(failed.CompletedDispatches)-1]
+	if invalidated.ID != dispatchID || invalidated.State != DispatchStateInvalidated || invalidated.Candidate.Assessment == nil ||
+		invalidated.AssessmentAdjudication != nil || invalidated.AssessmentAdjudicationHash != "" {
+		t.Fatalf("invalidated assessment dispatch retained committed adjudication authority: %+v", invalidated)
+	}
+	if len(failed.Facts.Assessments) != 0 {
+		t.Fatalf("invalidated assessment dispatch created an assessment fact: %+v", failed.Facts.Assessments)
+	}
+	if failed.Decision.State != runtimecontract.ConvergenceStateFailed || failed.Decision.Terminal == nil ||
+		failed.Facts.Failure == nil || failed.Facts.Failure.Class != runtimecontract.FailureClassRuntimeContractMisalignment {
+		t.Fatalf("assessment drive failure did not atomically reduce SM-2: %+v", failed)
+	}
+	if err := failed.Validate(); err != nil {
+		t.Fatalf("invalidated assessment aggregate: %v", err)
+	}
+
+	saves := repository.saves
+	replayed, err := controller.recordDriveFailureFact(context.Background(), "ws-v2", "run-v2", runtimecontract.FailureFact{
+		Class: runtimecontract.FailureClassRuntimeContractMisalignment,
+		Code:  "runtime_drive_failed", Signature: "runtime-drive-failed/assessment", Message: "duplicate assessment drive failure",
+	})
+	if err != nil || repository.saves != saves || replayed.StateRevision != failed.StateRevision || !reflect.DeepEqual(replayed, failed) {
+		t.Fatalf("duplicate assessment drive failure mutated aggregate: aggregate=%+v saves=%d want=%d err=%v", replayed, repository.saves, saves, err)
+	}
+}
+
 func TestRuntimeControllerRejectsAcceptedOwnerReceiptWithInconclusiveValidationEvidence(t *testing.T) {
 	repository := &controllerRepository{}
 	controller, _ := NewRuntimeController(repository)

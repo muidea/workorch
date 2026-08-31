@@ -3,6 +3,7 @@ package runtime
 import (
 	"context"
 	"fmt"
+	"slices"
 	"strings"
 
 	"github.com/muidea/workorch/internal/modules/kernel/orchestrator/biz/internal/proof"
@@ -92,7 +93,7 @@ func (c *authorityComponent) commitAssessment(ctx context.Context, workspaceID c
 		ID: aggregate.ActiveDispatch.ID, Revision: assessmentRevision, FocusID: assessment.FocusID, SliceID: firstNonEmpty(assessment.SliceID, assessmentSource.SliceID),
 		Scope: assessmentSource.AssessmentScope, RequirementID: assessmentSource.AssessmentID,
 		RequirementText: assessmentSource.AssessmentText, CoverageWorkItemIDs: assessment.CoverageWorkItemIDs,
-		ClaimedDisposition: assessment.Disposition, Disposition: canonicalDisposition, Items: append([]runtimecontract.RuntimeAssessmentItemFact(nil), assessment.Items...),
+		ClaimedDisposition: assessment.Disposition, Disposition: canonicalDisposition, Items: slices.Clone(assessment.Items),
 		Summary: assessment.Summary, EvidenceRefs: assessment.EvidenceRefs, ArtifactRefs: assessment.ArtifactRefs,
 	}
 	if assessment.Gap != nil {

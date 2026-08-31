@@ -1054,6 +1054,81 @@ func TestRuntimeLifecycleOwnerDeliveryUsesPersistedLeaseWithoutTerminalBudget(t 
 	}
 }
 
+func TestRuntimeBusinessFailureFactCommitFailureRetainsPersistedSM4Successor(t *testing.T) {
+	ctx := context.Background()
+	aggregate := runtimeAggregate(t, 1)
+	baseRepository := &inMemoryRuntimeStateRepository{aggregate: &aggregate}
+	faultRepository := &failOnceRuntimeStateRepository{
+		RuntimeStateRepository: baseRepository,
+		err:                    errors.New("injected failure-fact CAS boundary failure"),
+	}
+	owner := newRuntimeTestOwner()
+	if err := owner.ConfigureRuntimeRepository(faultRepository); err != nil {
+		t.Fatal(err)
+	}
+	hub := magicevent.NewHub(8)
+	t.Cleanup(func() { hub.Terminate(ctx) })
+	background := &recordingBackgroundRoutine{}
+	module := newTestBiz(owner, hub, background)
+	failure := runtimecontract.FailureFact{
+		Class: runtimecontract.FailureClassRuntimeContractMisalignment,
+		Code:  "runtime_drive_failed", Signature: "assessment-double-entry", Message: "assessment fact did not match sealed candidate",
+	}
+	request := scheduledRuntimeDriveRequest{
+		workspaceID: aggregate.Facts.WorkspaceID, runID: aggregate.Facts.RunID, source: "test",
+		driveKey: runtimeDriveKey(aggregate.Facts.WorkspaceID, aggregate.Facts.RunID),
+	}
+	if !module.beginRuntimeDrive(request.driveKey) {
+		t.Fatal("scheduled drive did not acquire its run-scoped gate")
+	}
+	retry := module.handleRuntimeBusinessTerminalFailure(ctx, request, failure)
+	if retry == nil || retry.Reason != runtimecontract.RuntimeDriveLeaseReasonPersistedPending ||
+		retry.FailureSignature != "failure-fact-pending/runtime_internal_contract_misalignment/assessment-double-entry" {
+		t.Fatalf("failure-fact persistence retry=%+v", retry)
+	}
+	uncommitted, err := baseRepository.Load(ctx, aggregate.Facts.WorkspaceID, aggregate.Facts.RunID)
+	if err != nil || uncommitted.StateRevision != aggregate.StateRevision || uncommitted.Facts.Failure != nil ||
+		uncommitted.Decision.Terminal != nil || uncommitted.DriveLease != nil {
+		t.Fatalf("failed failure-fact CAS leaked terminal authority: aggregate=%+v err=%v", uncommitted, err)
+	}
+
+	module.finishScheduledRuntimeDrive(ctx, request, &retry)
+	persisted, err := baseRepository.Load(ctx, aggregate.Facts.WorkspaceID, aggregate.Facts.RunID)
+	if err != nil || persisted.DriveLease == nil || persisted.DriveLease.State != runtimecontract.RuntimeDriveLeaseScheduled ||
+		persisted.DriveLease.Reason != runtimecontract.RuntimeDriveLeaseReasonPersistedPending ||
+		persisted.DriveLease.FailureSignature != "failure-fact-pending/runtime_internal_contract_misalignment/assessment-double-entry" ||
+		persisted.Facts.Failure != nil || persisted.Decision.Terminal != nil {
+		t.Fatalf("owner exit did not persist the exact failure-fact successor: aggregate=%+v err=%v", persisted, err)
+	}
+	if background.asyncFunctionCalls != 1 || background.lastAsyncFunction == nil || module.beginRuntimeDrive(request.driveKey) {
+		t.Fatalf("persisted successor lost its single drive gate: schedules=%d", background.asyncFunctionCalls)
+	}
+
+	// A new process/controller observes the durable lease without inventing a
+	// terminal fact or repeating provider/capability work before it claims that
+	// exact generation.
+	restarted, err := runtime.NewRuntimeController(baseRepository)
+	if err != nil {
+		t.Fatal(err)
+	}
+	reloaded, err := restarted.Load(ctx, aggregate.Facts.WorkspaceID, aggregate.Facts.RunID)
+	if err != nil || reloaded.DriveLease == nil || reloaded.DriveLease.RecoveryGeneration != persisted.DriveLease.RecoveryGeneration ||
+		reloaded.StateRevision != persisted.StateRevision || reloaded.Facts.Failure != nil || reloaded.Decision.Terminal != nil {
+		t.Fatalf("fresh process lost the persisted failure-fact successor: aggregate=%+v err=%v", reloaded, err)
+	}
+}
+
+func TestRuntimeFailureFactPendingLeaseUsesCASReloadForTypedConflict(t *testing.T) {
+	retry := runtimeFailureFactPendingLeaseRequest("test", runtimecontract.FailureFact{
+		Class: runtimecontract.FailureClassRuntimeContractMisalignment,
+		Code:  "runtime_drive_failed", Signature: "assessment-double-entry", Message: "failed",
+	}, &runtime.RuntimeCASConflictError{ExpectedRevision: 11, ObservedRevision: 12})
+	if retry == nil || retry.Reason != runtimecontract.RuntimeDriveLeaseReasonCASReload ||
+		retry.FailureSignature != "failure-fact-cas/11/12" || retry.Source != "test" {
+		t.Fatalf("typed failure-fact CAS retry=%+v", retry)
+	}
+}
+
 func TestRuntimeLifecycleLeasePersistedBehindDriveGateIsMountedByOwnerExit(t *testing.T) {
 	ctx := context.Background()
 	aggregate := runtimeAggregate(t, 1)

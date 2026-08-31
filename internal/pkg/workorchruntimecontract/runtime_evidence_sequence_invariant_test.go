@@ -191,6 +191,53 @@ func TestValidateRuntimeEvidenceLedgerSequenceRejectsAssessmentTamper(t *testing
 	}
 }
 
+func TestRuntimeAssessmentDoubleEntryAppliesOnlyToCommittedDispatches(t *testing.T) {
+	t.Run("invalidated dispatch has no fact or adjudication", func(t *testing.T) {
+		_, facts, active, completed, resolutions := runtimeEvidenceSequenceFixture(t)
+		completed[2].State = RuntimeDispatchStateInvalidated
+		completed[2].AssessmentAdjudication = nil
+		completed[2].AssessmentAdjudicationHash = ""
+		facts.Assessments = nil
+		facts.EvidenceRevision = runtimeEvidenceRevisionForSequence(2)
+		active.Transaction.EvidenceRevision = runtimeEvidenceRevisionForSequence(2)
+
+		if err := ValidateRuntimeEvidenceLedgerSequence(2, facts, active, completed, resolutions); err != nil {
+			t.Fatalf("invalidated assessment dispatch required a fact: %v", err)
+		}
+		if err := ValidateRuntimeAssessmentAdjudications(facts, completed, nil); err != nil {
+			t.Fatalf("invalidated assessment dispatch required adjudication: %v", err)
+		}
+	})
+
+	t.Run("committed dispatch requires fact", func(t *testing.T) {
+		_, facts, _, completed, _ := runtimeEvidenceSequenceFixture(t)
+		facts.Assessments = nil
+		if err := ValidateRuntimeAssessmentAdjudications(facts, completed, nil); err == nil || !strings.Contains(err.Error(), "no assessment fact") {
+			t.Fatalf("committed assessment missing-fact error = %v", err)
+		}
+	})
+
+	t.Run("committed dispatch requires adjudication", func(t *testing.T) {
+		_, facts, _, completed, _ := runtimeEvidenceSequenceFixture(t)
+		if err := ValidateRuntimeAssessmentAdjudications(facts, completed, nil); err == nil || !strings.Contains(err.Error(), "double-entry adjudication") {
+			t.Fatalf("committed assessment missing-adjudication error = %v", err)
+		}
+	})
+}
+
+func TestValidateRuntimeEvidenceLedgerSequenceRejectsAssessmentItemNilEmptyDrift(t *testing.T) {
+	sequence, facts, active, completed, resolutions := runtimeEvidenceSequenceFixture(t)
+	completed[2].Candidate.Assessment.Items = make([]RuntimeAssessmentItemFact, 0)
+	if completed[2].Candidate.Assessment.Items == nil || facts.Assessments[0].Items != nil {
+		t.Fatalf("fixture does not preserve sealed empty versus fact nil: candidate=%#v fact=%#v", completed[2].Candidate.Assessment.Items, facts.Assessments[0].Items)
+	}
+
+	err := ValidateRuntimeEvidenceLedgerSequence(sequence, facts, active, completed, resolutions)
+	if err == nil || !strings.Contains(err.Error(), "does not match its exact sealed candidate") {
+		t.Fatalf("assessment nil/empty drift error = %v", err)
+	}
+}
+
 func runtimeEvidenceSequenceFixture(t *testing.T) (uint64, RuntimeFacts, *RuntimeDispatchRecord, []RuntimeDispatchRecord, []RuntimeGovernanceResolutionRecord) {
 	t.Helper()
 	operation := RuntimeOperation{ID: "operation-1", Kind: StepKindFileWrite}

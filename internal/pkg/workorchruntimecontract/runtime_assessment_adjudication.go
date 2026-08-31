@@ -292,7 +292,12 @@ func ValidateRuntimeAssessmentAdjudications(facts RuntimeFacts, completed []Runt
 		byID[fact.ID] = fact
 	}
 	for _, dispatch := range completed {
-		if dispatch.Candidate.Assessment == nil {
+		// Invalidated assessment dispatches are durable SM-3 history, but they
+		// never crossed the SM-2 assessment commit boundary and therefore must
+		// not have a fact or adjudication. Dispatch intrinsic validation and the
+		// evidence-sequence invariant enforce that negative side of the double
+		// entry; only committed dispatches enter the positive adjudication proof.
+		if dispatch.Candidate.Assessment == nil || dispatch.State != RuntimeDispatchStateCommitted {
 			continue
 		}
 		fact, found := byID[dispatch.ID]

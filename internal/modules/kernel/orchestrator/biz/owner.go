@@ -1543,7 +1543,7 @@ func (m *Biz) recordExhaustedOwnerTransient(ctx context.Context, request schedul
 	})
 	if err != nil {
 		slog.Warn("workorch Runtime exhausted operation recovery fact commit failed", "workspaceID", request.workspaceID, "runID", request.runID, "err", err)
-		return nil
+		return runtimeFailureFactPendingLeaseRequest(request.source, failure, err)
 	}
 	return runtimeDeliveryRecoveryLease(request.source, "owner-transient-terminal")
 }
@@ -1554,12 +1554,12 @@ func (m *Biz) handleRuntimeBusinessTerminalFailure(ctx context.Context, request 
 	})
 	if err != nil {
 		slog.Warn("workorch Runtime drive failure fact commit failed", "source", request.source, "workspaceID", request.workspaceID, "runID", request.runID, "err", err)
-		return nil
+		return runtimeFailureFactPendingLeaseRequest(request.source, failure, err)
 	}
 	aggregate := recorded.Aggregate
 	if aggregate.Decision.State != runtimecontract.ConvergenceStateFailed || aggregate.Decision.Terminal == nil {
 		slog.Warn("workorch Runtime drive failure did not reduce to terminal", "source", request.source, "workspaceID", request.workspaceID, "runID", request.runID)
-		return nil
+		return runtimeFailureFactPendingLeaseRequest(request.source, failure, nil)
 	}
 	if err := m.deliverRuntimeTerminal(ctx, aggregate); err != nil {
 		m.observeRuntimeDrive(ctx, orchestratorevents.RuntimeDriveObservedData{
@@ -1585,6 +1585,38 @@ func (m *Biz) consumeRuntimeDeliveryRetryBudget(ctx context.Context, request sch
 
 func runtimeDeliveryRecoveryLease(source, signature string) *runtimeRecoveryLeaseRequest {
 	return &runtimeRecoveryLeaseRequest{Reason: runtimecontract.RuntimeDriveLeaseReasonDeliveryRetry, FailureSignature: signature, Delay: time.Second, Source: source}
+}
+
+// runtimeFailureFactPendingLeaseRequest preserves SM-4 successor authority
+// when the owner-private failure transition has not reached its CAS boundary.
+// This is not a delivery retry: no terminal authority exists until the exact
+// failure fact and any active-dispatch invalidation commit together. A typed
+// CAS conflict keeps its reload identity; every other persistence/validation
+// failure is a stable persisted-pending re-drive that fresh startup can adopt.
+func runtimeFailureFactPendingLeaseRequest(source string, failure runtimecontract.FailureFact, commitErr error) *runtimeRecoveryLeaseRequest {
+	var cas *runtime.RuntimeCASConflictError
+	if errors.As(commitErr, &cas) {
+		return &runtimeRecoveryLeaseRequest{
+			Reason: runtimecontract.RuntimeDriveLeaseReasonCASReload, FailureSignature: fmt.Sprintf("failure-fact-cas/%d/%d", cas.ExpectedRevision, cas.ObservedRevision),
+			Delay: time.Second, Source: source,
+		}
+	}
+	failure = failure.Normalized()
+	identity := failure.Signature
+	if identity == "" {
+		identity = failure.Code
+	}
+	if identity == "" {
+		identity = "unknown"
+	}
+	class := strings.TrimSpace(string(failure.Class))
+	if class == "" {
+		class = "unknown"
+	}
+	return &runtimeRecoveryLeaseRequest{
+		Reason: runtimecontract.RuntimeDriveLeaseReasonPersistedPending, FailureSignature: "failure-fact-pending/" + class + "/" + identity,
+		Delay: time.Second, Source: source,
+	}
 }
 
 type runtimeRecoveryLeaseRequest struct {

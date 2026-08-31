@@ -2583,14 +2583,13 @@ func TestRuntimeStateRepositoryAssessmentCommitCrashRestartIsAtomic(t *testing.T
 		FocusID: afterEvidence.Decision.Focus.ID, CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-v2"},
 		Disposition: runtimecontract.AssessmentDispositionSatisfied, Summary: "current focus satisfied",
 		EvidenceRefs: []string{"assessment-state-change-evidence"},
-		Items: []runtimecontract.RuntimeAssessmentItemFact{{
-			CoverageWorkItemID: "cwi-v2", Satisfied: true, EvidenceRefs: []string{"assessment-state-change-evidence"},
-		}},
+		Items:        []runtimecontract.RuntimeAssessmentItemFact{},
 	}}
 	assessmentDispatch, err := admitAndSealRuntimeCandidateAttemptForTest(ctx, controller, "ws-v2", "run-v2", 0, assessmentCandidate)
 	if err != nil || !assessmentDispatch.Admission.Accepted() || assessmentDispatch.Aggregate.ActiveDispatch == nil {
 		t.Fatalf("assessment seal disposition=%s failure=%+v correction=%+v err=%v", assessmentDispatch.Admission.Disposition, assessmentDispatch.Admission.Failure, assessmentDispatch.Admission.Correction, err)
 	}
+	assessmentBudget := assessmentDispatch.Aggregate.ExecutionBudget.Clone()
 
 	beforeCommit, err := runtime.NewRuntimeController(&failOnceRuntimeStateRepository{
 		RuntimeStateRepository: repository,
@@ -2622,6 +2621,15 @@ func TestRuntimeStateRepositoryAssessmentCommitCrashRestartIsAtomic(t *testing.T
 		len(loaded.Facts.Assessments) != 0 || loaded.Facts.Coverage[0].State != runtimecontract.RuntimeCoverageItemStateOpen ||
 		loaded.Decision.State != runtimecontract.ConvergenceStateNeedAssessment {
 		t.Fatalf("assessment CAS failure partially persisted progress or terminal authority: %+v", loaded)
+	}
+	if loaded.ActiveDispatch.Candidate.Assessment.Items == nil || len(loaded.ActiveDispatch.Candidate.Assessment.Items) != 0 {
+		t.Fatalf("pre-CAS restart changed explicit empty assessment candidate items: %#v", loaded.ActiveDispatch.Candidate.Assessment.Items)
+	}
+	if !reflect.DeepEqual(loaded.ExecutionBudget, assessmentBudget) {
+		t.Fatalf("pre-CAS assessment failure changed execution budget: before=%+v after=%+v", assessmentBudget, loaded.ExecutionBudget)
+	}
+	if err := loaded.Validate(); err != nil {
+		t.Fatalf("pre-CAS assessment aggregate is invalid after restart: %v", err)
 	}
 
 	// The same assessment transition now commits, but its caller loses the
@@ -2669,6 +2677,20 @@ func TestRuntimeStateRepositoryAssessmentCommitCrashRestartIsAtomic(t *testing.T
 		persisted.ActiveDispatch != nil || len(persisted.Facts.Assessments) != 1 || persisted.Facts.Coverage[0].State != runtimecontract.RuntimeCoverageItemStateSatisfied || persisted.Facts.Repair.LastProgressRevision == "" {
 		t.Fatalf("restart did not reuse response-loss assessment transition: aggregate=%+v err=%v", persisted, err)
 	}
+	if len(persisted.CompletedDispatches) == 0 || persisted.CompletedDispatches[len(persisted.CompletedDispatches)-1].Candidate.Assessment == nil {
+		t.Fatalf("response-loss restart lost committed assessment candidate: %+v", persisted.CompletedDispatches)
+	}
+	persistedCandidateItems := persisted.CompletedDispatches[len(persisted.CompletedDispatches)-1].Candidate.Assessment.Items
+	if persistedCandidateItems == nil || len(persistedCandidateItems) != 0 ||
+		persisted.Facts.Assessments[0].Items == nil || len(persisted.Facts.Assessments[0].Items) != 0 {
+		t.Fatalf("response-loss restart changed exact empty assessment projection: candidate=%#v fact=%#v", persistedCandidateItems, persisted.Facts.Assessments[0].Items)
+	}
+	if !reflect.DeepEqual(persisted.ExecutionBudget, assessmentBudget) {
+		t.Fatalf("assessment commit changed execution budget: before=%+v after=%+v", assessmentBudget, persisted.ExecutionBudget)
+	}
+	if err := persisted.Validate(); err != nil {
+		t.Fatalf("response-loss assessment aggregate is invalid after fresh load: %v", err)
+	}
 	if _, err := commitRuntimeAssessmentForTest(ctx, restartedAfterResponseLoss, "ws-v2", "run-v2"); !errors.Is(err, common.ErrConflict) {
 		t.Fatalf("committed assessment was replayed instead of rejected: %v", err)
 	}
@@ -2676,6 +2698,20 @@ func TestRuntimeStateRepositoryAssessmentCommitCrashRestartIsAtomic(t *testing.T
 	if err != nil || reloaded.StateRevision != persisted.StateRevision || len(reloaded.Facts.Assessments) != 1 ||
 		reloaded.Facts.Repair.LastProgressRevision != persisted.Facts.Repair.LastProgressRevision {
 		t.Fatalf("assessment response-loss replay changed committed aggregate: reloaded=%+v err=%v", reloaded, err)
+	}
+	if len(reloaded.CompletedDispatches) == 0 || reloaded.CompletedDispatches[len(reloaded.CompletedDispatches)-1].Candidate.Assessment == nil {
+		t.Fatalf("duplicate assessment check lost committed assessment candidate: %+v", reloaded.CompletedDispatches)
+	}
+	reloadedCandidateItems := reloaded.CompletedDispatches[len(reloaded.CompletedDispatches)-1].Candidate.Assessment.Items
+	if reloadedCandidateItems == nil || len(reloadedCandidateItems) != 0 ||
+		reloaded.Facts.Assessments[0].Items == nil || len(reloaded.Facts.Assessments[0].Items) != 0 {
+		t.Fatalf("duplicate assessment check changed exact empty assessment projection: candidate=%#v fact=%#v", reloadedCandidateItems, reloaded.Facts.Assessments[0].Items)
+	}
+	if !reflect.DeepEqual(reloaded.ExecutionBudget, assessmentBudget) {
+		t.Fatalf("duplicate assessment check changed execution budget: before=%+v after=%+v", assessmentBudget, reloaded.ExecutionBudget)
+	}
+	if err := reloaded.Validate(); err != nil {
+		t.Fatalf("duplicate assessment aggregate is invalid: %v", err)
 	}
 }
 
