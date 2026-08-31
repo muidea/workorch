@@ -99,6 +99,10 @@ repair 在 Runtime 中不是独立 stage 对象，而是 **drive/reducer 在当�
   → only a rejection without that structured observation may enter the Profile-declared semantic fallback above
   the validation owner does not choose the repair transition, and Orchestrator never derives targets from free text, mutable current
   Focus or a current manifest that was not part of the completed dispatch seal
+- capability-owner typed dependency/toolchain/environment diagnostics are not implementation-effect surfaces. For example, Shell
+  classifies bounded Go missing-`go.sum`/module-metadata output as `validation_dependency_mismatch + dependency_contract` and emits
+  zero implementation candidate refs; incidental compiler import locations cannot enter File confirmation. A Profile must declare
+  a concrete repair owner/vocabulary for that class before SM-2 can repair it, otherwise the failure terminates boundedly.
 - 需要外部信息 / 审批 / 依赖
   → sealed governance candidate → ticket → resolution commit
 - 存在owner-defined typed recovery/reconciliation合同的暂时不可用或consumption unknown

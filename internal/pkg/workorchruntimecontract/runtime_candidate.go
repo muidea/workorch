@@ -769,10 +769,11 @@ func runtimeOperationBoundToRequiredCoverage(decision RuntimeDecision, operation
 	if len(CoverageEvidenceBindingRefsForOperationEvidenceKind(bindings, operation.Kind, evidenceKind)) == 0 {
 		return true
 	}
-	// Manifest admission requires a proof-bearing operation to preserve one
+	// Manifest admission requires a proof-bearing operation, and may require a
+	// confirmed-repair operation carrying source causation, to preserve one
 	// sealed binding ref. This decision-only helper does not own that manifest,
 	// so it leaves a missing ref to the single manifest evaluator instead of
-	// inferring coverage here.
+	// inferring either relation here.
 	if len(operation.Normalized().BindingRefs) == 0 {
 		return true
 	}

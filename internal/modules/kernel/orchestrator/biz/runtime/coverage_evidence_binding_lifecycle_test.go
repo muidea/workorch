@@ -418,15 +418,22 @@ func TestCoverageEvidenceBindingMissingProofCannotBeClaimedOrGovernedAway(t *tes
 // It must not install a hand-written binding because this regression protects
 // the exact authorization semantics shared by semantic seal and dispatch.
 func sealMultiTargetExactBindingForTest(t *testing.T, targets []string) (*RuntimeController, *controllerRepository, RuntimeAggregate) {
-	return sealMultiTargetExactBindingWithValidationForTest(t, targets, false, "", "file-multi-target-revision-1")
+	return sealMultiTargetExactBindingProofsForTest(t, targets, true, false, "", "file-multi-target-revision-1")
 }
 
 func sealMultiTargetExactValidationBindingForTest(t *testing.T, targets []string, targetRole string) (*RuntimeController, *controllerRepository, RuntimeAggregate) {
-	return sealMultiTargetExactBindingWithValidationForTest(t, targets, true, targetRole, "tree-v1")
+	return sealMultiTargetExactBindingProofsForTest(t, targets, true, true, targetRole, "tree-v1")
 }
 
-func sealMultiTargetExactBindingWithValidationForTest(t *testing.T, targets []string, includeValidation bool, targetRole, observedRevision string) (*RuntimeController, *controllerRepository, RuntimeAggregate) {
+func sealMultiTargetExactValidationOnlyBindingForTest(t *testing.T, targets []string, targetRole string) (*RuntimeController, *controllerRepository, RuntimeAggregate) {
+	return sealMultiTargetExactBindingProofsForTest(t, targets, false, true, targetRole, "tree-v1")
+}
+
+func sealMultiTargetExactBindingProofsForTest(t *testing.T, targets []string, includeStateChange, includeValidation bool, targetRole, observedRevision string) (*RuntimeController, *controllerRepository, RuntimeAggregate) {
 	t.Helper()
+	if !includeStateChange && !includeValidation {
+		t.Fatal("multi-target exact binding fixture requires at least one proof kind")
+	}
 	ctx := context.Background()
 	repository := &controllerRepository{}
 	controller, err := NewRuntimeController(repository)
@@ -436,8 +443,12 @@ func sealMultiTargetExactBindingWithValidationForTest(t *testing.T, targets []st
 	facts := controllerFacts()
 	facts.Focus.TargetRefs = append([]string(nil), targets...)
 	facts.Focus.TargetRole = targetRole
+	facts.Focus.RequiredEvidenceKinds = nil
+	if includeStateChange {
+		facts.Focus.RequiredEvidenceKinds = append(facts.Focus.RequiredEvidenceKinds, runtimecontract.EvidenceKindStateChange)
+	}
 	if includeValidation {
-		facts.Focus.RequiredEvidenceKinds = []string{runtimecontract.EvidenceKindStateChange, runtimecontract.EvidenceKindValidation}
+		facts.Focus.RequiredEvidenceKinds = append(facts.Focus.RequiredEvidenceKinds, runtimecontract.EvidenceKindValidation)
 		facts.Capabilities.ValidationKinds = []string{runtimecontract.RuntimeBlockKindManagedValidationSession}
 		facts = runtimeFactsWithManagedValidationRecipe(facts)
 		facts.Resources.Manifest = &runtimecontract.WorkspaceManifest{Revision: observedRevision, TargetRefs: append([]string(nil), targets...)}
@@ -521,7 +532,8 @@ func sealMultiTargetExactBindingWithValidationForTest(t *testing.T, targets []st
 	if err := order.ValidateAgainstManifest(manifest); err != nil {
 		t.Fatal(err)
 	}
-	proposal := runtimecontract.RuntimeSemanticProofProposal{
+	declarationRef := "semantic/multi-target-exact/" + string(manifest.CoverageItems[0].ID)
+	stateChangeProposal := runtimecontract.RuntimeSemanticProofProposal{
 		CoverageWorkItemID: manifest.CoverageItems[0].ID, OwnerModuleID: runtimecontract.RuntimeModuleFile,
 		OperationKind: runtimecontract.StepKindFileWrite,
 		Target: runtimecontract.RuntimeOperationTargetAuthorization{
@@ -529,7 +541,7 @@ func sealMultiTargetExactBindingWithValidationForTest(t *testing.T, targets []st
 		},
 		RequiredEvidenceKinds: []string{runtimecontract.EvidenceKindStateChange},
 		RequiredEffectScopes:  []runtimecontract.RuntimeEffectScope{runtimecontract.RuntimeEffectWorkspaceDurable},
-		DeclarationRef:        "semantic/multi-target-exact/" + string(manifest.CoverageItems[0].ID),
+		DeclarationRef:        declarationRef,
 	}
 	type proposalFixture struct {
 		proposal             runtimecontract.RuntimeSemanticProofProposal
@@ -537,7 +549,10 @@ func sealMultiTargetExactBindingWithValidationForTest(t *testing.T, targets []st
 		catalogObservationID string
 		requiredCheckRefs    []string
 	}
-	proposalFixtures := []proposalFixture{{proposal: proposal, catalog: catalog, catalogObservationID: observation.ObservationID}}
+	proposalFixtures := make([]proposalFixture, 0, 2)
+	if includeStateChange {
+		proposalFixtures = append(proposalFixtures, proposalFixture{proposal: stateChangeProposal, catalog: catalog, catalogObservationID: observation.ObservationID})
+	}
 	if includeValidation {
 		var shellCatalog runtimecontract.RuntimeOperationAdmissibility
 		var surface runtimecontract.RuntimeValidationSurface
@@ -571,7 +586,7 @@ func sealMultiTargetExactBindingWithValidationForTest(t *testing.T, targets []st
 			RequiredEvidenceKinds: []string{runtimecontract.EvidenceKindValidation},
 			RequiredEffectScopes:  []runtimecontract.RuntimeEffectScope{surface.EffectScope},
 			ValidationRecipeID:    surface.ID,
-			DeclarationRef:        proposal.DeclarationRef,
+			DeclarationRef:        declarationRef,
 		}
 		proposalFixtures = append(proposalFixtures, proposalFixture{
 			proposal: validationProposal, catalog: shellCatalog,
@@ -679,7 +694,11 @@ func sealMultiTargetExactBindingWithValidationForTest(t *testing.T, targets []st
 			t.Fatalf("commit exact target snapshot %q: %v", pending.SubjectRef, err)
 		}
 	}
-	if aggregate.Decision.State != runtimecontract.ConvergenceStateNeedStateChange || len(aggregate.Facts.Prerequisites.Pending) != 0 {
+	wantState := runtimecontract.ConvergenceStateNeedStateChange
+	if !includeStateChange {
+		wantState = runtimecontract.ConvergenceStateNeedValidation
+	}
+	if aggregate.Decision.State != wantState || len(aggregate.Facts.Prerequisites.Pending) != 0 {
 		t.Fatalf("multi-target exact prerequisite closure = decision=%+v pending=%+v", aggregate.Decision, aggregate.Facts.Prerequisites.Pending)
 	}
 	return controller, repository, aggregate

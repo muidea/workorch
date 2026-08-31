@@ -115,6 +115,81 @@ func TestBuildRuntimeCandidateContractManifestSealsAssessmentBindingProjection(t
 	}
 }
 
+func TestBuildRuntimeCandidateContractManifestConfirmedRepairRequiresSourceValidationBinding(t *testing.T) {
+	source := runtimeCandidateTestDecisionWithBindings(t, RuntimeDecision{
+		State: ConvergenceStateNeedValidation,
+		RequiredOutput: RequiredOutputContract{
+			AcceptedKinds:         []string{RuntimeBlockKindManagedValidationSession},
+			AcceptedEffectScopes:  []RuntimeEffectScope{RuntimeEffectNone},
+			RequiredEffectScopes:  []RuntimeEffectScope{RuntimeEffectNone},
+			RequiredEvidenceKinds: []string{EvidenceKindValidation},
+			CoverageWorkItemIDs:   []common.CoverageWorkItemID{"cwi-confirmed-repair"},
+			TargetRefs:            []string{"main.go"},
+		},
+	})
+	bindingID := source.Focus.CoverageEvidenceBindings[0].ID
+	decision := source
+	decision.State = ConvergenceStateNeedStateChange
+	decision.AuthoritySnapshot.State = ConvergenceStateNeedStateChange
+	decision.RequiredOutput = RequiredOutputContract{
+		AcceptedKinds:         []string{StepKindFileWrite},
+		AcceptedEffectScopes:  []RuntimeEffectScope{RuntimeEffectWorkspaceDurable},
+		RequiredEffectScopes:  []RuntimeEffectScope{RuntimeEffectWorkspaceDurable},
+		RequiredEvidenceKinds: []string{EvidenceKindStateChange},
+		CoverageWorkItemIDs:   []common.CoverageWorkItemID{"cwi-confirmed-repair"},
+		TargetRefs:            []string{"main.go"},
+		RepairClosureID:       "repair-closure-confirmed",
+		RepairPurpose:         RuntimeDispatchRepairPurposeConfirmedValidation,
+	}
+
+	manifest, err := BuildRuntimeCandidateContractManifest(decision, RuntimeCandidateManifestOwnerFacts{})
+	if err != nil {
+		t.Fatalf("confirmed repair manifest: %v", err)
+	}
+	if len(manifest.Operations) != 1 {
+		t.Fatalf("confirmed repair operations = %+v", manifest.Operations)
+	}
+	operation := manifest.Operations[0]
+	if got := runtimeOperationBindingAuthorizationRefs(operation.BindingAuthorizations); !reflect.DeepEqual(got, []string{bindingID}) ||
+		!reflect.DeepEqual(operation.RequiredOperationFields, []string{"bindingRefs", "kind", "parameters", "targetRefs"}) {
+		t.Fatalf("confirmed repair source binding authorization = %+v", operation)
+	}
+	missingBinding := []byte(`{"operations":[{"kind":"file/write","targetRefs":["main.go"],"parameters":[{"name":"content","string":"package main"}]}]}`)
+	if _, err := DecodeRuntimeCandidatePayloadWithManifest(manifest, missingBinding); err == nil || !strings.Contains(err.Error(), "bindingRefs") {
+		t.Fatalf("confirmed repair candidate without source binding error = %v", err)
+	}
+	withBinding := []byte(`{"operations":[{"kind":"file/write","bindingRefs":["` + bindingID + `"],"targetRefs":["main.go"],"parameters":[{"name":"content","string":"package main"}]}]}`)
+	candidate, err := DecodeRuntimeCandidatePayloadWithManifest(manifest, withBinding)
+	if err != nil {
+		t.Fatalf("confirmed repair candidate with source binding: %v", err)
+	}
+	operations, err := runtimeCandidatePayloadOperations(candidate)
+	if err != nil || len(operations) != 1 ||
+		!reflect.DeepEqual(operations[0].BindingRefs, []string{bindingID}) ||
+		len(operations[0].CoverageWorkItemIDs) != 0 {
+		t.Fatalf("confirmed repair derived source lineage = %+v err=%v", operations, err)
+	}
+	drifted := manifest.Clone()
+	drifted.Operations[0].BindingAuthorizations[0].AllowedBindingRefs = nil
+	drifted.Hash = StableRuntimeCandidateContractManifestHash(drifted)
+	if err := ValidateRuntimeCandidateContractManifestRawCanonical(drifted); err == nil ||
+		!strings.Contains(err.Error(), "source binding authorization drifted") {
+		t.Fatalf("persisted confirmed repair manifest accepted source binding drift: %v", err)
+	}
+
+	ordinary := decision
+	ordinary.RequiredOutput.RepairClosureID = ""
+	ordinary.RequiredOutput.RepairPurpose = ""
+	ordinaryManifest, err := BuildRuntimeCandidateContractManifest(ordinary, RuntimeCandidateManifestOwnerFacts{})
+	if err != nil {
+		t.Fatalf("ordinary state-change manifest with validation-only focus: %v", err)
+	}
+	if got := runtimeOperationBindingAuthorizationRefs(ordinaryManifest.Operations[0].BindingAuthorizations); len(got) != 0 ||
+		containsManifestString(ordinaryManifest.Operations[0].RequiredOperationFields, "bindingRefs") {
+		t.Fatalf("ordinary state change borrowed validation binding: %+v", ordinaryManifest.Operations[0])
+	}
+}
+
 func TestBuildRuntimeCandidateContractManifestSealsCompleteProspectiveBindingTargetSetWithoutSelection(t *testing.T) {
 	decision := runtimeCandidateTestDecisionWithBindings(t, RuntimeDecision{
 		State: ConvergenceStateNeedStateChange,
@@ -253,7 +328,7 @@ func TestValidateRuntimeCandidateAgainstManifestRequiresSealedBindingForProofBea
 		t.Fatal(err)
 	}
 	err = ValidateRuntimeCandidateAgainstManifest(manifest, candidate)
-	if err == nil || !strings.Contains(err.Error(), "proof-bearing operation must select exactly one sealed coverage evidence binding") {
+	if err == nil || !strings.Contains(err.Error(), "binding-authorized operation must select exactly one sealed coverage evidence binding") {
 		t.Fatalf("missing binding error = %v", err)
 	}
 }

@@ -289,7 +289,7 @@ func runtimeCandidateStructuredOutputInstruction(manifest runtimecontract.Runtim
 		lines = append(lines, fmt.Sprintf("Emit at most %d operations in this complete candidate document.", manifest.MaxOperationCount))
 	}
 	if runtimeManifestHasAllowedBindingRefs(manifest) {
-		lines = append(lines, "Every operation kind with a sealed binding authorization must select exactly one bindingRefs value from that authorization; never emit coverageWorkItemIds. Operation kinds without binding authorization are non-crediting and must omit bindingRefs.")
+		lines = append(lines, "Every operation kind with a sealed binding authorization must select exactly one bindingRefs value from that authorization; never emit coverageWorkItemIds. The binding may represent coverage proof or confirmed-repair source causation, as declared by the manifest. Operation kinds without binding authorization are non-crediting and must omit bindingRefs.")
 	}
 	if len(manifest.RequiredOperationSequence) > 0 {
 		refs := make([]string, 0, len(manifest.RequiredOperationSequence))

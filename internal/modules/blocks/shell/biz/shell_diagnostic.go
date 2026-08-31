@@ -34,11 +34,15 @@ func attachShellValidationFailureDiagnostic(output *RuntimeCommandResult, reques
 	if output == nil {
 		return
 	}
-	class, targetType := shellValidationDiagnosticClassAndTarget(*output, request.ValidationEvidence, timedOut, policyViolation, err)
+	class, targetType := shellValidationDiagnosticClassAndTarget(*output, request.ValidationEvidence, execCommand, timedOut, policyViolation, err)
 	if class == "" {
 		return
 	}
-	targetRefs, targetCandidatesValid := shellValidationDiagnosticTargetCandidates(*output, request, execCommand)
+	var targetRefs []string
+	targetCandidatesValid := true
+	if shellValidationDiagnosticMayIdentifyImplementationEffect(class) {
+		targetRefs, targetCandidatesValid = shellValidationDiagnosticTargetCandidates(*output, request, execCommand)
+	}
 	output.validationFailureTargetCandidatesInvalid = !targetCandidatesValid
 	diagnostic := &runtimemodel.ValidationFailureDiagnostic{
 		SchemaVersion:                 runtimemodel.ValidationFailureDiagnosticSchemaVersion,
@@ -65,7 +69,7 @@ func attachShellValidationFailureDiagnostic(output *RuntimeCommandResult, reques
 	}
 }
 
-func shellValidationDiagnosticClassAndTarget(output RuntimeCommandResult, validationEvidence runtimemodel.RuntimeValidationEvidence, timedOut bool, policyViolation bool, err error) (string, string) {
+func shellValidationDiagnosticClassAndTarget(output RuntimeCommandResult, validationEvidence runtimemodel.RuntimeValidationEvidence, execCommand string, timedOut bool, policyViolation bool, err error) (string, string) {
 	if policyViolation {
 		return runtimemodel.ValidationDiagnosticCommandInvalid, runtimemodel.ValidationEvidenceTargetCommandContract
 	}
@@ -74,6 +78,14 @@ func shellValidationDiagnosticClassAndTarget(output RuntimeCommandResult, valida
 	}
 	if output.FailureReason == "command_not_found" || output.CapabilityMissing {
 		return runtimemodel.ValidationDiagnosticEnvironmentMissing, runtimemodel.ValidationEvidenceTargetEnvironment
+	}
+	// The managed recipe may carry a generic build/test classification, but a
+	// bounded Go tool diagnostic can identify a narrower dependency-contract
+	// failure. Preserve that owner fact before consulting the generic profile
+	// hint so incidental importing .go locations never become File repair
+	// candidates for missing module metadata.
+	if output.ExitCode != 0 && shellGoDependencyMetadataMismatch(output, execCommand) {
+		return runtimemodel.ValidationDiagnosticDependencyMismatch, runtimemodel.ValidationEvidenceTargetDependencyContract
 	}
 	if class := allowedShellValidationDiagnosticClass(firstNonEmptyShellString(
 		validationEvidence.DiagnosticClass, validationEvidence.FailureClass, validationEvidence.ExpectedFailureClass,
@@ -101,6 +113,29 @@ func shellValidationDiagnosticClassAndTarget(output RuntimeCommandResult, valida
 		return runtimemodel.ValidationDiagnosticOutputInconclusive, runtimemodel.ValidationEvidenceTargetValidationOutput
 	}
 	return "", ""
+}
+
+func shellGoDependencyMetadataMismatch(output RuntimeCommandResult, execCommand string) bool {
+	command := strings.TrimSpace(filepath.Base(execCommand))
+	if command == "" {
+		command = strings.TrimSpace(filepath.Base(output.Command))
+	}
+	if command != "go" {
+		return false
+	}
+	text := strings.ToLower(output.Stdout + "\n" + output.Stderr)
+	for _, marker := range []string{
+		"missing go.sum entry for module providing package",
+		"missing go.sum entry needed to verify package",
+		"updates to go.mod needed; to update it:",
+		"inconsistent vendoring in",
+		"no required module provides package",
+	} {
+		if strings.Contains(text, marker) {
+			return true
+		}
+	}
+	return false
 }
 
 func allowedShellValidationDiagnosticClass(value string) string {

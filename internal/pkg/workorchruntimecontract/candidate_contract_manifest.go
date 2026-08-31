@@ -128,9 +128,11 @@ type RuntimeCandidateOperationManifest struct {
 	AllowsDynamicParameters     bool
 	DynamicParameterPrefixes    []string
 	RequiredOperationReferences []string
-	// BindingAuthorizations bind proof credit to the exact operation variant and
+	// BindingAuthorizations bind proof credit, or the exact rejected-validation
+	// causation lineage of a confirmed repair, to the operation variant and
 	// required-sequence reference. An entry with no AllowedBindingRefs is an
-	// explicitly auxiliary operation; callers must not infer credit from Kind.
+	// explicitly auxiliary operation; callers must not infer either relation
+	// from Kind.
 	BindingAuthorizations []RuntimeOperationBindingAuthorization
 	AcceptedEffectScopes  []RuntimeEffectScope
 	RequiredEffectScopes  []RuntimeEffectScope
@@ -354,6 +356,9 @@ func BuildRuntimeCandidateContractManifest(decision RuntimeDecision, ownerFacts 
 		return RuntimeCandidateContractManifest{}, err
 	}
 	if err := validateRuntimeCandidateManifestOperationWireFields(manifest); err != nil {
+		return RuntimeCandidateContractManifest{}, err
+	}
+	if err := validateRuntimeConfirmedRepairManifestBindingLineage(manifest); err != nil {
 		return RuntimeCandidateContractManifest{}, err
 	}
 	if err := ValidateRuntimeCandidateOperationCorrectionMetadata(manifest); err != nil {
@@ -659,6 +664,9 @@ func ValidateRuntimeCandidateContractManifestRawCanonical(manifest RuntimeCandid
 		(manifest.RepairPurpose != RuntimeDispatchRepairPurposeConfirmedValidation || manifest.RepairClosureID == "") {
 		return fmt.Errorf("runtime candidate contract manifest has invalid repair purpose %q", manifest.RepairPurpose)
 	}
+	if err := validateRuntimeConfirmedRepairManifestBindingLineage(manifest); err != nil {
+		return err
+	}
 	if manifest.State == ConvergenceStateNeedAssessment {
 		if (manifest.AssessmentPurpose != RuntimeAssessmentPurposeDefinitionProof && manifest.AssessmentPurpose != RuntimeAssessmentPurposeOwnerFactAcquisition) ||
 			manifest.AssessmentPurposeManifestHash == "" || len(manifest.Bindings) == 0 {
@@ -669,6 +677,36 @@ func ValidateRuntimeCandidateContractManifestRawCanonical(manifest RuntimeCandid
 	}
 	if manifest.Hash == "" || manifest.Hash != StableRuntimeCandidateContractManifestHash(manifest) {
 		return fmt.Errorf("runtime candidate contract manifest hash mismatch")
+	}
+	return nil
+}
+
+func validateRuntimeConfirmedRepairManifestBindingLineage(manifest RuntimeCandidateContractManifest) error {
+	manifest = manifest.Normalized()
+	if manifest.RepairPurpose == "" {
+		return nil
+	}
+	if manifest.RepairPurpose != RuntimeDispatchRepairPurposeConfirmedValidation ||
+		manifest.State != ConvergenceStateNeedStateChange || len(manifest.Bindings) != 1 {
+		return fmt.Errorf("confirmed validation repair manifest requires one source binding in need_state_change")
+	}
+	binding := manifest.Bindings[0]
+	if _, found := CoverageEvidenceProofForKind(binding, EvidenceKindValidation); !found {
+		return fmt.Errorf("confirmed validation repair manifest source binding %q has no validation proof", binding.ID)
+	}
+	if len(manifest.Operations) == 0 {
+		return fmt.Errorf("confirmed validation repair manifest has no operation authorization")
+	}
+	for _, operation := range manifest.Operations {
+		if !containsString(operation.AllowedOperationFields, "bindingRefs") ||
+			!containsString(operation.RequiredOperationFields, "bindingRefs") || len(operation.BindingAuthorizations) == 0 {
+			return fmt.Errorf("confirmed validation repair operation %q does not require its source binding", operation.Kind)
+		}
+		for _, authorization := range operation.BindingAuthorizations {
+			if !sameStrings(authorization.AllowedBindingRefs, []string{binding.ID}) {
+				return fmt.Errorf("confirmed validation repair operation %q source binding authorization drifted", operation.Kind)
+			}
+		}
 	}
 	return nil
 }
@@ -851,8 +889,11 @@ func runtimeCandidateOperationManifestForKind(kind string, state ConvergenceStat
 	case ConvergenceStateNeedValidation:
 		evidenceKind = EvidenceKindValidation
 	}
-	bindingAuthorizations := runtimeCandidateOperationBindingAuthorizations(required, contract, bindings, evidenceKind)
-	if runtimeOperationBindingAuthorizationsHaveCredit(bindingAuthorizations) {
+	bindingAuthorizations, err := runtimeCandidateOperationBindingAuthorizations(required, contract, bindings, evidenceKind)
+	if err != nil {
+		return RuntimeCandidateOperationManifest{}, err
+	}
+	if runtimeOperationBindingAuthorizationsHaveBinding(bindingAuthorizations) {
 		fields = append(fields, "bindingRefs")
 	}
 	if len(references) != 0 {
@@ -911,7 +952,17 @@ func runtimeCandidateOperationManifestForKind(kind string, state ConvergenceStat
 	return operationManifest, nil
 }
 
-func runtimeCandidateOperationBindingAuthorizations(required RequiredOutputContract, contract RuntimeOperationContract, bindings []CoverageEvidenceBinding, evidenceKind string) []RuntimeOperationBindingAuthorization {
+func runtimeCandidateOperationBindingAuthorizations(required RequiredOutputContract, contract RuntimeOperationContract, bindings []CoverageEvidenceBinding, evidenceKind string) ([]RuntimeOperationBindingAuthorization, error) {
+	repairSourceBindingRefs, err := runtimeConfirmedValidationRepairSourceBindingRefs(required, bindings)
+	if err != nil {
+		return nil, err
+	}
+	bindingRefsForVariant := func(variantID string) []string {
+		if repairSourceBindingRefs != nil {
+			return append([]string(nil), repairSourceBindingRefs...)
+		}
+		return coverageEvidenceBindingRefsForOperationVariant(bindings, contract.Kind, variantID, evidenceKind)
+	}
 	requirements := make([]RuntimeRequiredOperationVariant, 0)
 	for _, requirement := range required.RequiredOperationSequence {
 		if CanonicalRuntimeBlockKind(requirement.Kind) == contract.Kind {
@@ -924,21 +975,66 @@ func runtimeCandidateOperationBindingAuthorizations(required RequiredOutputContr
 			ret = append(ret, RuntimeOperationBindingAuthorization{
 				RequiredOperationRef: requirement.RequirementID,
 				VariantID:            requirement.VariantID,
-				AllowedBindingRefs:   coverageEvidenceBindingRefsForOperationVariant(bindings, contract.Kind, requirement.VariantID, evidenceKind),
+				AllowedBindingRefs:   bindingRefsForVariant(requirement.VariantID),
 			})
 		}
-		return ret
+		return ret, nil
 	}
 	for _, variant := range contract.Variants {
 		ret = append(ret, RuntimeOperationBindingAuthorization{
 			VariantID:          variant.ID,
-			AllowedBindingRefs: coverageEvidenceBindingRefsForOperationVariant(bindings, contract.Kind, variant.ID, evidenceKind),
+			AllowedBindingRefs: bindingRefsForVariant(variant.ID),
 		})
 	}
 	if len(ret) == 0 {
-		ret = append(ret, RuntimeOperationBindingAuthorization{AllowedBindingRefs: CoverageEvidenceBindingRefsForOperationEvidenceKind(bindings, contract.Kind, evidenceKind)})
+		allowedBindingRefs := CoverageEvidenceBindingRefsForOperationEvidenceKind(bindings, contract.Kind, evidenceKind)
+		if repairSourceBindingRefs != nil {
+			allowedBindingRefs = append([]string(nil), repairSourceBindingRefs...)
+		}
+		ret = append(ret, RuntimeOperationBindingAuthorization{AllowedBindingRefs: allowedBindingRefs})
 	}
-	return ret
+	return ret, nil
+}
+
+// runtimeConfirmedValidationRepairSourceBindingRefs returns the exact current
+// validation binding whose rejected owner receipt caused a confirmed repair.
+// This is causation lineage, not state-change proof credit: receipt
+// adjudication still requires the repair commitment and fresh validation.
+//
+// A confirmed repair is scoped to one CWI and therefore to one binding. Fail
+// closed here, before rendering a provider request, instead of emitting an
+// auxiliary operation that the immutable repair commitment must later reject.
+func runtimeConfirmedValidationRepairSourceBindingRefs(required RequiredOutputContract, bindings []CoverageEvidenceBinding) ([]string, error) {
+	required = required.Normalized()
+	if required.RepairPurpose == "" {
+		return nil, nil
+	}
+	if required.RepairPurpose != RuntimeDispatchRepairPurposeConfirmedValidation {
+		return nil, fmt.Errorf("candidate manifest has unsupported repair purpose %q", required.RepairPurpose)
+	}
+	if len(required.CoverageWorkItemIDs) != 1 {
+		return nil, fmt.Errorf("confirmed validation repair requires exactly one source coverage work item")
+	}
+	wanted := required.CoverageWorkItemIDs[0]
+	var matched *CoverageEvidenceBinding
+	for _, raw := range NormalizeCoverageEvidenceBindings(bindings) {
+		binding := raw.Clone()
+		if binding.CoverageWorkItemID != wanted {
+			continue
+		}
+		if matched != nil {
+			return nil, fmt.Errorf("confirmed validation repair source coverage %q has multiple bindings", wanted)
+		}
+		value := binding
+		matched = &value
+	}
+	if matched == nil {
+		return nil, fmt.Errorf("confirmed validation repair source coverage %q has no current binding", wanted)
+	}
+	if _, found := CoverageEvidenceProofForKind(*matched, EvidenceKindValidation); !found {
+		return nil, fmt.Errorf("confirmed validation repair source binding %q has no validation proof", matched.ID)
+	}
+	return []string{matched.ID}, nil
 }
 
 func coverageEvidenceBindingRefsForOperationVariant(bindings []CoverageEvidenceBinding, kind, variantID, evidenceKind string) []string {
@@ -967,7 +1063,7 @@ func coverageEvidenceBindingRefsForOperationVariant(bindings []CoverageEvidenceB
 	return normalizeStrings(ret)
 }
 
-func runtimeOperationBindingAuthorizationsHaveCredit(values []RuntimeOperationBindingAuthorization) bool {
+func runtimeOperationBindingAuthorizationsHaveBinding(values []RuntimeOperationBindingAuthorization) bool {
 	return len(runtimeOperationBindingAuthorizationRefs(values)) != 0
 }
 
@@ -1443,14 +1539,14 @@ func runtimeCandidateRequiredOperationFields(operation RuntimeCandidateOperation
 		required = append(required, "requiredOperationRef")
 	}
 	if len(operation.BindingAuthorizations) != 0 {
-		allRequireCredit := true
+		allRequireBinding := true
 		for _, authorization := range operation.BindingAuthorizations {
 			if len(authorization.AllowedBindingRefs) == 0 {
-				allRequireCredit = false
+				allRequireBinding = false
 				break
 			}
 		}
-		if allRequireCredit {
+		if allRequireBinding {
 			required = append(required, "bindingRefs")
 		}
 	}

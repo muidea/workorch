@@ -73,10 +73,53 @@ func TestShellValidationDiagnosticPrioritizesNonzeroExitOverStaleZeroWork(t *tes
 		ExitCode:        1,
 		ZeroWork:        true,
 		EvidenceQuality: string(common.EvidenceQualityInconclusive),
-	}, runtimecontract.RuntimeValidationEvidence{}, false, false, errors.New("exit status 1"))
+	}, runtimecontract.RuntimeValidationEvidence{}, "go", false, false, errors.New("exit status 1"))
 	if class != runtimecontract.ValidationDiagnosticBuildFailed || targetType != runtimecontract.ValidationEvidenceTargetFailureSurface {
 		t.Fatalf("diagnostic = (%q, %q), want (%q, %q)", class, targetType,
 			runtimecontract.ValidationDiagnosticBuildFailed, runtimecontract.ValidationEvidenceTargetFailureSurface)
+	}
+}
+
+func TestShellValidationDiagnosticClassifiesGoDependencyMetadataBeforeGenericBuildFailure(t *testing.T) {
+	output := RuntimeCommandResult{
+		Command:  "go",
+		ExitCode: 1,
+		Stderr: "internal/lsp/client.go:12:2: missing go.sum entry for module providing package github.com/sourcegraph/jsonrpc2 " +
+			"(imported by example/internal/lsp); to add:\n\tgo get example/internal/lsp",
+	}
+	class, targetType := shellValidationDiagnosticClassAndTarget(
+		output,
+		runtimecontract.RuntimeValidationEvidence{DiagnosticClass: runtimecontract.ValidationDiagnosticBuildFailed},
+		"go",
+		false,
+		false,
+		errors.New("exit status 1"),
+	)
+	if class != runtimecontract.ValidationDiagnosticDependencyMismatch ||
+		targetType != runtimecontract.ValidationEvidenceTargetDependencyContract {
+		t.Fatalf("diagnostic = (%q, %q), want dependency-contract mismatch", class, targetType)
+	}
+
+	request := RuntimeCommandRequest{
+		ManagedValidation:         runtimecontract.RuntimeManagedValidation{RuntimeManaged: true, Kind: runtimecontract.RuntimeBlockKindManagedValidationSession},
+		ValidationScopeTargetRefs: []string{"go.mod", "internal/lsp/client.go"},
+		ValidationEvidence:        runtimecontract.RuntimeValidationEvidence{DiagnosticClass: runtimecontract.ValidationDiagnosticBuildFailed},
+	}
+	attachShellValidationFailureDiagnostic(&output, request, "go", 1, false, false, errors.New("exit status 1"))
+	if output.ValidationFailureDiagnostic == nil ||
+		output.ValidationFailureDiagnostic.Class != runtimecontract.ValidationDiagnosticDependencyMismatch ||
+		len(output.ValidationFailureDiagnostic.TargetRefs) != 0 ||
+		output.validationFailureTargetCandidatesInvalid {
+		t.Fatalf("dependency diagnostic leaked implementation repair targets: %+v", output.ValidationFailureDiagnostic)
+	}
+
+	nonGo := output
+	nonGo.Command = "custom-validator"
+	class, _ = shellValidationDiagnosticClassAndTarget(
+		nonGo, runtimecontract.RuntimeValidationEvidence{}, "custom-validator", false, false, errors.New("exit status 1"),
+	)
+	if class != runtimecontract.ValidationDiagnosticBuildFailed {
+		t.Fatalf("non-Go output borrowed Go dependency classification: %q", class)
 	}
 }
 

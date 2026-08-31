@@ -4,7 +4,7 @@ Status: normative
 
 Type: verification-contract
 
-Last Verified: 2026-08-30
+Last Verified: 2026-08-31
 
 ## Purpose
 
@@ -61,7 +61,8 @@ and converges through the same neutral Runtime owner model. It must not make leg
   reaches `prospective_satisfaction_contract_violated -> semantic_contract_failed`; it never reuses the correction ledger for a
   replacement target or second provider request. Duplicate/restart neither repeats terminal delivery nor the same proposal's owner probe;
 - a validation entry is recipe lineage, not an implementation repair target; unstructured output yields no target candidate,
-  while managed Go diagnostics may report only actual `*.go:line[:column]` locations inside the fresh File manifest scope;
+  while managed Go implementation diagnostics may report only actual `*.go:line[:column]` locations inside the fresh File manifest
+  scope. Missing `go.sum`/module-metadata output is instead a dependency-contract diagnostic with zero implementation candidates;
 - a matching typed validation rejection without an exact owner-grounded target opens one
   `validation_failure_repair` semantic generation for the same CWI. The manifest preserves terminal `validation`, exposes only
   current File state-change authority, and binds the failure/convergence/catalog identities. File feasibility must confirm the
@@ -69,6 +70,9 @@ and converges through the same neutral Runtime owner model. It must not make leg
   dispatches. The complete repair receipt set retires the repair binding and requires fresh validation. Duplicate/restart is
   idempotent, stale catalog/failure lineage cannot seal, and the Profile/repair
   budgets terminate rather than loop;
+- confirmed exact-surface repair reuses the rejected validation operation's unique current binding as immutable causation lineage;
+  the operations manifest requires that `bindingRef` even when the source focus has validation proof only, while repair receipts
+  still grant no terminal validation credit and fresh-load must reverse-prove the same source commitment;
 - Git snapshot requirements use `git/write:add` + `git/write:commit`, not shell/read evidence;
 - optional LSP MCP evidence remains auxiliary;
 - assessment cites current-Run accepted evidence and partial closure leaves remaining items active.

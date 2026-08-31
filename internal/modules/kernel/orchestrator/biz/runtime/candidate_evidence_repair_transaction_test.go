@@ -250,6 +250,65 @@ func TestConfirmedRepairExactTargetSubsetSealsAndCompletesSelectedOperations(t *
 	}
 }
 
+func TestConfirmedRepairValidationOnlyBindingManifestRetainsSourceLineage(t *testing.T) {
+	ctx := context.Background()
+	authority := newConfirmedRepairValidationOnlyAuthorityFixture(t, []string{"main.go"})
+	confirmed := authority.aggregate
+	bindingID := confirmed.Facts.Focus.CoverageEvidenceBindings[0].ID
+
+	pending, err := authority.controller.BeginCandidateAttemptForTest(
+		ctx, confirmed.Facts.WorkspaceID, confirmed.Facts.RunID, 0, "confirmed-repair-validation-source-binding",
+	)
+	if err != nil {
+		t.Fatalf("begin confirmed repair candidate: %v", err)
+	}
+	if len(pending.CandidateRequestSessions) == 0 {
+		t.Fatal("confirmed repair candidate has no persisted request session")
+	}
+	session := pending.CandidateRequestSessions[len(pending.CandidateRequestSessions)-1]
+	if session.CandidateManifest == nil || session.CandidateManifest.RepairPurpose != runtimecontract.RuntimeDispatchRepairPurposeConfirmedValidation {
+		t.Fatalf("confirmed repair request manifest = %+v", session.CandidateManifest)
+	}
+	manifest := session.CandidateManifest.Normalized()
+	if len(manifest.Operations) != 1 ||
+		!reflect.DeepEqual(manifest.Operations[0].RequiredOperationFields, []string{"bindingRefs", "kind", "parameters", "targetRefs"}) {
+		t.Fatalf("confirmed repair operation manifest = %+v", manifest.Operations)
+	}
+	for _, authorization := range manifest.Operations[0].BindingAuthorizations {
+		if !reflect.DeepEqual(authorization.AllowedBindingRefs, []string{bindingID}) {
+			t.Fatalf("confirmed repair binding authorization = %+v, want %q", authorization, bindingID)
+		}
+	}
+	withoutBinding := []byte(`{"operations":[{"kind":"file/write","targetRefs":["main.go"],"parameters":[{"name":"content","string":"updated"}]}]}`)
+	if _, err := runtimecontract.DecodeRuntimeCandidatePayloadWithManifest(manifest, withoutBinding); err == nil || !strings.Contains(err.Error(), "bindingRefs") {
+		t.Fatalf("confirmed repair request accepted operation without source binding: %v", err)
+	}
+
+	candidate := runtimecontract.RuntimeCandidate{StateChange: &runtimecontract.StateChangeCandidate{Operations: []runtimecontract.StateChangingOperation{{Operation: runtimecontract.RuntimeOperation{
+		Kind: runtimecontract.StepKindFileWrite, BindingRefs: []string{bindingID}, TargetRefs: []string{"main.go"},
+		Parameters: runtimeFileWriteParameters("updated"),
+	}}}}}
+	if err := RecordFixtureCandidateFeasibilities(
+		ctx, authority.controller, confirmed.Facts.WorkspaceID, confirmed.Facts.RunID, 0, candidate,
+	); err != nil {
+		t.Fatalf("record confirmed repair feasibility: %v", err)
+	}
+	sealed, err := authority.controller.AdmitAndSealCandidateAttemptForTest(
+		ctx, confirmed.Facts.WorkspaceID, confirmed.Facts.RunID, 0, candidate,
+	)
+	if err != nil || !sealed.Admission.Accepted() || sealed.Aggregate.ActiveDispatch == nil ||
+		sealed.Aggregate.ActiveDispatch.RepairCommitment == nil {
+		t.Fatalf("confirmed repair admission = %+v err=%v", sealed, err)
+	}
+	required, err := confirmedRepairCommitmentRequiredByRejectedObservation(sealed.Aggregate, *sealed.Aggregate.ActiveDispatch)
+	if err != nil || !required {
+		t.Fatalf("confirmed repair source binding was not retained: required=%v err=%v", required, err)
+	}
+	if err := sealed.Aggregate.Validate(); err != nil {
+		t.Fatalf("confirmed repair with validation-only source binding did not survive fresh load: %v", err)
+	}
+}
+
 func TestConfirmedRepairCommitmentFreshLoadRejectsDeletionAndCoordinatedTamper(t *testing.T) {
 	fixture := newConfirmedRepairMultiOperationFixture(t)
 	coordinator, err := NewDispatchCoordinator(fixture.repository)
@@ -1509,13 +1568,32 @@ type confirmedRepairAuthorityFixture struct {
 }
 
 func newConfirmedRepairAuthorityFixture(t *testing.T, targets []string) confirmedRepairAuthorityFixture {
+	return newConfirmedRepairAuthorityFixtureWithBindingProofs(t, targets, false)
+}
+
+func newConfirmedRepairValidationOnlyAuthorityFixture(t *testing.T, targets []string) confirmedRepairAuthorityFixture {
+	return newConfirmedRepairAuthorityFixtureWithBindingProofs(t, targets, true)
+}
+
+func newConfirmedRepairAuthorityFixtureWithBindingProofs(t *testing.T, targets []string, validationOnly bool) confirmedRepairAuthorityFixture {
 	t.Helper()
 	ctx := context.Background()
 	targets = normalizeRuntimeTargetRefs(targets)
 	if len(targets) == 0 {
 		t.Fatal("confirmed owner repair fixture requires at least one target")
 	}
-	_, _, aggregate := sealMultiTargetExactValidationBindingForTest(t, targets, "implementation")
+	var aggregate RuntimeAggregate
+	if validationOnly {
+		_, _, aggregate = sealMultiTargetExactValidationOnlyBindingForTest(t, targets, "implementation")
+		if len(aggregate.Facts.DefinitionFocuses) != 1 {
+			t.Fatalf("validation-only confirmed repair fixture Definition focuses = %+v", aggregate.Facts.DefinitionFocuses)
+		}
+		convergence := runtimeValidationFailureRepairConvergenceForTest(2)
+		aggregate.Facts.DefinitionFocuses[0].ValidationFailureRepairConvergence = &convergence
+		aggregate.Facts.DefinitionFocuses = runtimecontract.NormalizeRuntimeDefinitionFocuses(aggregate.Facts.DefinitionFocuses)
+	} else {
+		_, _, aggregate = sealMultiTargetExactValidationBindingForTest(t, targets, "implementation")
+	}
 	aggregate.Facts.Capabilities.GovernanceKinds = []string{runtimecontract.RuntimeBlockKindApprovalRequest}
 	repository := &durableRuntimeStateRepository{aggregate: aggregate}
 	coordinator, err := NewDispatchCoordinator(repository)
@@ -1527,19 +1605,21 @@ func newConfirmedRepairAuthorityFixture(t *testing.T, targets []string) confirme
 		t.Fatal(err)
 	}
 	bindingID := aggregate.Facts.Focus.CoverageEvidenceBindings[0].ID
-	stateChange := multiTargetExactCandidate(bindingID, targets...)
-	sealedStateChange := sealCandidateForTest(t, repository, stateChange)
-	for index, operation := range candidateRuntimeOperations(sealedStateChange.ActiveDispatch.Candidate) {
-		evidence := ExecutionEvidence{
-			EventID:     fmt.Sprintf("confirmed-repair-baseline-state-%d", index+1),
-			WorkspaceID: sealedStateChange.Facts.WorkspaceID, RunID: sealedStateChange.Facts.RunID,
-			DispatchID: sealedStateChange.ActiveDispatch.ID, AuthoritySnapshotID: sealedStateChange.ActiveDispatch.Transaction.AuthoritySnapshotID,
-			OperationID: operation.ID, Kind: runtimecontract.EvidenceKindStateChange,
-			Status: ExecutionEvidenceStatusAccepted, SourceRef: "confirmed-repair/baseline-state/" + operation.ID,
-		}
-		attachRuntimeTestOwnerReceipt(t, &repository.aggregate, &evidence)
-		if _, err := coordinator.commitEvidence(ctx, evidence); err != nil {
-			t.Fatalf("commit confirmed owner repair baseline state change %q: %v", operation.ID, err)
+	if !validationOnly {
+		stateChange := multiTargetExactCandidate(bindingID, targets...)
+		sealedStateChange := sealCandidateForTest(t, repository, stateChange)
+		for index, operation := range candidateRuntimeOperations(sealedStateChange.ActiveDispatch.Candidate) {
+			evidence := ExecutionEvidence{
+				EventID:     fmt.Sprintf("confirmed-repair-baseline-state-%d", index+1),
+				WorkspaceID: sealedStateChange.Facts.WorkspaceID, RunID: sealedStateChange.Facts.RunID,
+				DispatchID: sealedStateChange.ActiveDispatch.ID, AuthoritySnapshotID: sealedStateChange.ActiveDispatch.Transaction.AuthoritySnapshotID,
+				OperationID: operation.ID, Kind: runtimecontract.EvidenceKindStateChange,
+				Status: ExecutionEvidenceStatusAccepted, SourceRef: "confirmed-repair/baseline-state/" + operation.ID,
+			}
+			attachRuntimeTestOwnerReceipt(t, &repository.aggregate, &evidence)
+			if _, err := coordinator.commitEvidence(ctx, evidence); err != nil {
+				t.Fatalf("commit confirmed owner repair baseline state change %q: %v", operation.ID, err)
+			}
 		}
 	}
 	aggregate = repository.aggregate
