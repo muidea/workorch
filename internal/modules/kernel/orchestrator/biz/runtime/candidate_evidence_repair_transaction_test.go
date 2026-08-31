@@ -158,6 +158,98 @@ func TestConfirmedRepairMultiOperationReceiptChainSurvivesRestartAndDuplicate(t 
 	}
 }
 
+func TestConfirmedRepairExactTargetSubsetSealsAndCompletesSelectedOperations(t *testing.T) {
+	surfaceTargets := []string{
+		"internal/config/config.go",
+		"internal/config/defaults.go",
+		"internal/lsp/client.go",
+		"internal/lsp/references.go",
+		"internal/lsp/server.go",
+	}
+	selectedTargets := []string{"internal/lsp/client.go", "internal/lsp/references.go"}
+	fixture := newConfirmedRepairSubsetFixture(t, surfaceTargets, selectedTargets)
+	dispatch := fixture.repository.aggregate.ActiveDispatch
+	if dispatch == nil || dispatch.RepairCommitment == nil {
+		t.Fatal("confirmed owner repair subset has no sealed dispatch commitment")
+	}
+	actualTargets, ownerModuleID, err := confirmedRepairDispatchTargets(*dispatch)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ownerModuleID != runtimecontract.RuntimeModuleFile || !sameRuntimeTargetRefs(actualTargets, selectedTargets) {
+		t.Fatalf("sealed repair targets = %q owner=%q, want selected subset %q", actualTargets, ownerModuleID, selectedTargets)
+	}
+	var confirmedTargets []string
+	for _, record := range fixture.repository.aggregate.RepairSurfaceConfirmations {
+		if record.IdentitySignature == dispatch.RepairCommitment.ConfirmationIdentityHash {
+			confirmedTargets = record.Confirmation.ConfirmedTargetRefs
+		}
+	}
+	if !sameRuntimeTargetRefs(fixture.repository.aggregate.Decision.RequiredOutput.TargetRefs, surfaceTargets) ||
+		!sameRuntimeTargetRefs(confirmedTargets, surfaceTargets) ||
+		!sameRuntimeTargetRefs(dispatch.RepairCommitment.Closure.GroundedTargetRefs, surfaceTargets) {
+		t.Fatalf("repair surface drifted: decision=%q confirmation=%q closure=%q want=%q",
+			fixture.repository.aggregate.Decision.RequiredOutput.TargetRefs, confirmedTargets,
+			dispatch.RepairCommitment.Closure.GroundedTargetRefs, surfaceTargets)
+	}
+	required, err := confirmedRepairCommitmentRequiredByRejectedObservation(fixture.repository.aggregate, *dispatch)
+	if err != nil || !required {
+		t.Fatalf("confirmed repair subset lost marker-independent commitment requirement: required=%v err=%v", required, err)
+	}
+	if err := fixture.repository.aggregate.Validate(); err != nil {
+		t.Fatalf("confirmed repair subset did not survive initial fresh load: %v", err)
+	}
+	narrowedDecision := cloneRuntimeAggregateForMCPProvenanceTest(t, fixture.repository.aggregate)
+	narrowedDecision.Decision.RequiredOutput.TargetRefs = append([]string(nil), selectedTargets...)
+	if _, _, err := resolveConfirmedRepairTransaction(narrowedDecision, *narrowedDecision.ActiveDispatch); err == nil ||
+		!strings.Contains(err.Error(), "commitment does not match the current sealed Decision") {
+		t.Fatalf("confirmed repair closure was narrowed to the candidate subset: %v", err)
+	}
+	missingCommitment := cloneRuntimeAggregateForMCPProvenanceTest(t, fixture.repository.aggregate)
+	missingCommitment.ActiveDispatch.RepairCommitment = nil
+	missingCommitment.ActiveDispatch.RepairCommitmentHash = ""
+	if err := validateConfirmedRepairMandatoryCommitments(missingCommitment); err == nil ||
+		!strings.Contains(err.Error(), "omitted its mandatory rejected-validation commitment") {
+		t.Fatalf("confirmed repair subset escaped marker-independent commitment detection: %v", err)
+	}
+
+	coordinator, err := NewDispatchCoordinator(fixture.repository)
+	if err != nil {
+		t.Fatal(err)
+	}
+	first := fixture.acceptedEvidence(t, 0, "tree-v1", "tree-v2")
+	attachConfirmedRepairReceiptForTest(t, &fixture.repository.aggregate, &first, "tree-v1", "tree-v2")
+	partial, err := coordinator.commitEvidence(context.Background(), first)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if partial.DispatchCompleted || partial.Aggregate.ActiveDispatch == nil || len(partial.Aggregate.ActiveDispatch.CompletedOperationIDs) != 1 {
+		t.Fatalf("first selected repair operation did not remain partial: %+v", partial.Aggregate.ActiveDispatch)
+	}
+	if err := partial.Aggregate.Validate(); err != nil {
+		t.Fatalf("partial selected repair subset did not survive restart: %v", err)
+	}
+
+	restarted, err := NewDispatchCoordinator(fixture.repository)
+	if err != nil {
+		t.Fatal(err)
+	}
+	second := fixture.acceptedEvidence(t, 1, "tree-v2", "tree-v3")
+	attachConfirmedRepairReceiptForTest(t, &fixture.repository.aggregate, &second, "tree-v2", "tree-v3")
+	settled, err := restarted.commitEvidence(context.Background(), second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertConfirmedRepairFreshValidationForTest(t, settled.Aggregate, fixture.closureID)
+	if settled.Aggregate.Facts.RepairDirective == nil || settled.Aggregate.Facts.RepairDirective.Closure == nil ||
+		!sameRuntimeTargetRefs(settled.Aggregate.Facts.RepairDirective.Closure.GroundedTargetRefs, surfaceTargets) {
+		t.Fatalf("fresh-validation continuation lost the full confirmed repair surface: %+v", settled.Aggregate.Facts.RepairDirective)
+	}
+	if err := settled.Aggregate.Validate(); err != nil {
+		t.Fatalf("completed selected repair subset did not survive fresh load: %v", err)
+	}
+}
+
 func TestConfirmedRepairCommitmentFreshLoadRejectsDeletionAndCoordinatedTamper(t *testing.T) {
 	fixture := newConfirmedRepairMultiOperationFixture(t)
 	coordinator, err := NewDispatchCoordinator(fixture.repository)
@@ -1511,17 +1603,26 @@ func newConfirmedRepairAuthorityFixture(t *testing.T, targets []string) confirme
 
 func newConfirmedRepairFixture(t *testing.T, targets []string) confirmedRepairMultiOperationFixture {
 	t.Helper()
+	return newConfirmedRepairSubsetFixture(t, targets, targets)
+}
+
+func newConfirmedRepairSubsetFixture(t *testing.T, surfaceTargets, selectedTargets []string) confirmedRepairMultiOperationFixture {
+	t.Helper()
 	ctx := context.Background()
-	authority := newConfirmedRepairAuthorityFixture(t, targets)
-	targets = authority.targets
+	authority := newConfirmedRepairAuthorityFixture(t, surfaceTargets)
+	surfaceTargets = authority.targets
+	selectedTargets = normalizeRuntimeTargetRefs(selectedTargets)
+	if !runtimeTargetRefsWithin(selectedTargets, surfaceTargets) {
+		t.Fatalf("confirmed owner repair selected targets %q are outside surface %q", selectedTargets, surfaceTargets)
+	}
 	repository := authority.repository
 	controller := authority.controller
 	confirmed := authority.aggregate
 	closureID := authority.closureID
 	bindingID := confirmed.Facts.Focus.CoverageEvidenceBindings[0].ID
-	operations := make([]runtimecontract.StateChangingOperation, 0, len(targets))
+	operations := make([]runtimecontract.StateChangingOperation, 0, len(selectedTargets))
 	previousID := ""
-	for index, targetRef := range targets {
+	for index, targetRef := range selectedTargets {
 		operation := runtimecontract.RuntimeOperation{
 			ID: fmt.Sprintf("repair-%d", index+1), Kind: runtimecontract.StepKindFileWrite,
 			BindingRefs: []string{bindingID}, TargetRefs: []string{targetRef}, Parameters: runtimeFileWriteParameters("updated " + targetRef),

@@ -65,7 +65,7 @@ func deriveConfirmedRepairAdmissionCommitment(
 	}
 	operations := candidateRuntimeOperations(candidate)
 	if len(operations) == 0 {
-		return nil, nil
+		return nil, fmt.Errorf("%w: confirmed owner repair candidate has no state-change operation", common.ErrConflict)
 	}
 	var targetRefs []string
 	repairOwnerModuleID := ""
@@ -92,9 +92,12 @@ func deriveConfirmedRepairAdmissionCommitment(
 	}
 	probe := SealedDispatch{Candidate: candidate, OperationTargetAuthorizations: targetAuthorizations}
 	coverageIDs := append([]common.CoverageWorkItemID(nil), aggregate.Decision.RequiredOutput.CoverageWorkItemIDs...)
+	// Decision targets are the complete owner-confirmed authorization surface,
+	// not an implicit operation sequence. Admission may choose a non-empty
+	// subset, while the confirmation and closure below must retain the surface.
 	if len(coverageIDs) == 0 || !sameCoverageIDs(coverageIDs, aggregate.Facts.Focus.CoverageWorkItemIDs) ||
-		!sameRuntimeTargetRefs(targetRefs, aggregate.Decision.RequiredOutput.TargetRefs) {
-		return nil, nil
+		!runtimeTargetRefsWithin(targetRefs, aggregate.Decision.RequiredOutput.TargetRefs) {
+		return nil, fmt.Errorf("%w: confirmed owner repair candidate scope is outside its sealed Decision", common.ErrConflict)
 	}
 	originID := runtimecontract.StableRuntimeDispatchID(
 		aggregate.Decision.AuthorityTransaction(),
@@ -109,7 +112,7 @@ func deriveConfirmedRepairAdmissionCommitment(
 		confirmation := record.Confirmation
 		if confirmation.Disposition != runtimecontract.RuntimeRepairSurfaceConfirmed ||
 			confirmation.OwnerModuleID != repairOwnerModuleID ||
-			!sameRuntimeTargetRefs(confirmation.ConfirmedTargetRefs, targetRefs) {
+			!sameRuntimeTargetRefs(confirmation.ConfirmedTargetRefs, aggregate.Decision.RequiredOutput.TargetRefs) {
 			continue
 		}
 		if err := validateConfirmedRepairDispatchOperations(probe, confirmation); err != nil {
@@ -551,7 +554,7 @@ func resolveConfirmedRepairTransaction(aggregate RuntimeAggregate, dispatch Seal
 	}
 	decisionCoverage := append([]common.CoverageWorkItemID(nil), aggregate.Decision.RequiredOutput.CoverageWorkItemIDs...)
 	if len(decisionCoverage) == 0 || !sameCoverageIDs(decisionCoverage, aggregate.Facts.Focus.CoverageWorkItemIDs) ||
-		!sameRuntimeTargetRefs(targetRefs, aggregate.Decision.RequiredOutput.TargetRefs) {
+		!runtimeTargetRefsWithin(targetRefs, aggregate.Decision.RequiredOutput.TargetRefs) {
 		return nil, false, fmt.Errorf("%w: confirmed owner repair dispatch scope does not match its sealed Decision", common.ErrConflict)
 	}
 
@@ -566,6 +569,7 @@ func resolveConfirmedRepairTransaction(aggregate RuntimeAggregate, dispatch Seal
 		return nil, false, fmt.Errorf("%w: confirmed repair dispatch owner does not match its committed confirmation", common.ErrConflict)
 	}
 	if matched.closure.ID != aggregate.Decision.RequiredOutput.RepairClosureID ||
+		!sameRuntimeTargetRefs(matched.closure.GroundedTargetRefs, aggregate.Decision.RequiredOutput.TargetRefs) ||
 		!sameCoverageIDs(matched.closure.CoverageWorkItemIDs, decisionCoverage) ||
 		!confirmedRepairSourceBindingsCoverCurrentScope(aggregate, matched.sourceOp.BindingRefs, decisionCoverage) {
 		return nil, false, fmt.Errorf("%w: confirmed owner repair commitment does not match the current sealed Decision", common.ErrConflict)
@@ -785,7 +789,6 @@ func validateConfirmedRepairDispatchOperations(dispatch SealedDispatch, confirma
 	if dispatch.Candidate.StateChange == nil || len(candidateRuntimeOperations(dispatch.Candidate)) == 0 {
 		return fmt.Errorf("%w: confirmed owner repair transaction requires a state-change dispatch", common.ErrConflict)
 	}
-	var dispatchTargetRefs []string
 	for _, rawOperation := range candidateRuntimeOperations(dispatch.Candidate) {
 		operation := rawOperation.Normalized()
 		descriptor, found := runtimecontract.RuntimeOperationDescriptorForKind(operation.Kind)
@@ -800,11 +803,10 @@ func validateConfirmedRepairDispatchOperations(dispatch SealedDispatch, confirma
 		); err != nil {
 			return fmt.Errorf("%w: confirmed owner repair transaction target authorization: %v", common.ErrConflict, err)
 		}
-		dispatchTargetRefs = append(dispatchTargetRefs, operation.TargetRefs...)
 	}
-	if !sameRuntimeTargetRefs(dispatchTargetRefs, confirmation.ConfirmedTargetRefs) {
-		return fmt.Errorf("%w: confirmed owner repair all-of dispatch does not cover the exact confirmed target surface", common.ErrConflict)
-	}
+	// all-of completion is defined by the sealed candidate operations. The
+	// confirmation remains their bounded authorization surface and is not a
+	// hidden requirement to produce an effect for every confirmed target.
 	return nil
 }
 
@@ -1209,7 +1211,7 @@ func confirmedRepairCommitmentRequiredByRejectedObservation(aggregate RuntimeAgg
 		observation := runtimeValidationFailureObservationFromFailure(failure)
 		if observation == nil || observation.DispatchID != fact.DispatchID || observation.OperationID != fact.OperationID ||
 			observation.AuthoritySnapshotID != fact.AuthoritySnapshotID || observation.FailureSignature != fact.FailureSignature ||
-			observation.TargetRole != dispatch.FocusTargetRole || !sameRuntimeTargetRefs(observation.CandidateTargetRefs, targetRefs) {
+			observation.TargetRole != dispatch.FocusTargetRole || !runtimeTargetRefsWithin(targetRefs, observation.CandidateTargetRefs) {
 			continue
 		}
 		expectedOwner, ownerErr := runtimeExpectedRepairSurfaceOwner(aggregate, *observation)

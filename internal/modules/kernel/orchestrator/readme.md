@@ -109,9 +109,11 @@ capability resource state。
 - validation failure target 必须来自 sealed finite scope 内的 structured owner observation，再由上述 resource/effect owner 执行
   read-only confirmation；pending/stale/rejected confirmation 均无 concrete repair authority。pre-seal manifest 必须将 purpose
   固定为 `confirmed_validation_repair`，并在 `RuntimeDispatchRepairCommitment.RepairOwnerModuleID` 中封存 owner。confirmed
-  all-of 的每个 matching-owner receipt 都必须形成连续、owner-scoped workspace revision edge，最后一项后才生成 target-free
-  fresh-validation directive。software-dev Profile 的 Shell diagnostic → File confirmation/File effect 只是该中立合同的一种
-  specialization，不是 Orchestrator core 分支条件。
+  surface 在 Decision、owner confirmation 与 commitment closure 中保持 exact；`exact_target` candidate 可选择其中非空子集，
+  但不能改写该 surface。sealed candidate all-of 的每个 matching-owner receipt 都必须形成连续、owner-scoped workspace
+  revision edge，最后一项后才生成 target-free fresh-validation directive；只有显式 required sequence/collective receipt-set
+  才要求完整 surface 全部产生 effect。software-dev Profile 的 Shell diagnostic → File confirmation/File effect 只是该中立
+  合同的一种 specialization，不是 Orchestrator core 分支条件。
 
 ### Recovery, governance and delivery
 

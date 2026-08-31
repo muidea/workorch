@@ -51,6 +51,14 @@ operation 的 `TargetRefs` 精确相等，再用同一策略验证该 operation 
 `one_of`/`any_of` terminal 关系。若一项义务要求完整 target set 全部完成，必须由 sealed required sequence/collective
 receipt-set 或独立 CWI `all_of` 明确表达，禁止只在 receipt 阶段把 membership 偷换为 full-set equality。
 
+`confirmed_validation_repair` 同样遵守该规则：`Decision.RequiredOutput.TargetRefs`、resource-owner
+`RuntimeRepairSurfaceConfirmation.ConfirmedTargetRefs` 与 repair commitment 的 `Closure.GroundedTargetRefs` 必须精确保存
+同一份完整 confirmed surface；它是 state-change candidate 的有限授权集合，不是“每个 target 都必须修改”的隐式 operation
+清单。candidate 必须选择该 surface 内的非空 target 子集，所有已封存 operation/receipt 仍按 `all_of` 完成，最后一项后才可
+生成 target-free fresh-validation directive。若某个 repair 确实要求完整 surface 全部产生 effect，SM-2 必须事先编译显式
+`RequiredOperationSequence`/collective receipt-set；LLM candidate、commitment 派生或 receipt 校验均不得自行把 membership
+升级为 full-set equality，也不得把 closure 缩成 candidate 选择的子集。
+
 final SM-3 seal 必须把 candidate manifest hash 与每项 operation 的最小 target-policy preimage 一并封入
 `DispatchAuthorityHash`。该 preimage 只可由 final manifest seal 生成；Run 只 opaque 持久化，governance resume 只复制，
 fresh-load 只重验，任何路径都不得从 mutable current facts 重编译、增量修改或把它提升为第二 target owner。缺少该 sealed
