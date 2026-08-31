@@ -835,9 +835,12 @@ func StableRuntimeSemanticPlanManifestHash(manifest RuntimeSemanticPlanManifest)
 }
 
 // StableRuntimeSemanticGenerationID binds semantic authority to the exact
-// catalog snapshot and logical provider request that produced it. A resource
+// catalog snapshot and immutable semantic generation request selected by its
+// caller. For focus/binding authority the production caller must use the
+// accepted batch RequestLogicalID; a correction provider request remains a
+// request-session descendant and does not replace that identity. A resource
 // rollback may reproduce the same manifest hash, so the manifest alone is not
-// a sufficient generation identity for a focus or evidence binding.
+// sufficient for a focus or evidence binding.
 func StableRuntimeSemanticGenerationID(manifestHash, logicalRequestID string) string {
 	manifestHash = strings.TrimSpace(manifestHash)
 	logicalRequestID = strings.TrimSpace(logicalRequestID)
@@ -1762,12 +1765,15 @@ func (g RuntimeSemanticPlanningGeneration) Validate() error {
 // RuntimeSemanticPlanningLedger is persisted owner data.  pkg validates its
 // value shape only; Orchestrator private internal events own every transition.
 type RuntimeSemanticPlanningLedger struct {
-	SchemaVersion       string
-	Phase               RuntimeSemanticPlanningPhase
-	DefinitionSeed      RuntimeDefinitionSeed
-	Manifest            *RuntimeSemanticPlanManifest
-	Attempt             int
-	StablePrefixHash    string
+	SchemaVersion    string
+	Phase            RuntimeSemanticPlanningPhase
+	DefinitionSeed   RuntimeDefinitionSeed
+	Manifest         *RuntimeSemanticPlanManifest
+	Attempt          int
+	StablePrefixHash string
+	// LogicalRequestID is the current provider request-session cursor. During an
+	// attempt-1 correction it intentionally differs from the active batch's
+	// immutable RequestLogicalID and is never a sealed binding preimage by itself.
 	LogicalRequestID    string
 	CorrectionDirective *RuntimeSemanticCorrectionDirective
 	// CoverageOrderDocument is the immutable, provider-authored full CWI order.

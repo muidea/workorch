@@ -107,9 +107,14 @@ owner batch/observation set 与 sealed binding lineage hash；这些 identity �
 duplicate event 不增加 revision，scope/seed/request/batch 漂移必须拒绝，任何阶段都不得直接创建 dispatch、coverage、
 Decision 或 Approval。
 
+proof batch 的 `RequestLogicalID` 是 batch 打开时即封存的 semantic generation identity；attempt 1 correction 只把 ledger
+当前 `LogicalRequestID` 推进为新的 provider request-session cursor，不得改写 batch identity。最终 accepted document 由同一
+batch 的 `DocumentHash` 独立封存，因此 SM-2 seal 与 fresh-load replay 都必须消费 `batch.RequestLogicalID + DocumentHash`，
+禁止用可变 ledger cursor、最后一个 request session 或下游 binding ID 替代。
+
 fresh-load 不能把已经互相一致的 Focus、CWI binding ref、reconciliation、candidate session、accepted attempt 与 dispatch
 projection 当作 semantic authority 的自证。Orchestrator 必须逐个 replay active/history 中每个 accepted semantic batch：只使用
-persisted manifest、该 batch 的 `RequestLogicalID`、provider document，以及同 batch 已归档或仍封存的 capability-owner
+persisted manifest、该 batch 封存的 generation `RequestLogicalID`、exact-hash provider document，以及同 batch 已归档或仍封存的 capability-owner
 feasibility facts 调用唯一纯编译器 `CompileRuntimeSemanticBindings`。replay 结果必须与 current/remaining/completed Focus、CWI
 `CurrentBindingRef`/`BindingLineage`、由 current refs 编译的 reconciliation contract，以及 session/attempt/dispatch 的完整
 coverage binding projection exact-match。缺失/重复 batch preimage、manifest/document/owner fact 漂移，或协调改写所有下游
@@ -208,8 +213,9 @@ fail-closed 为 typed terminal。未来若增加 prerequisite acquisition，必�
 再由同一 private transition 接入，不能复用 stale refresh。以上处理不是新的 phase 或第五状态机，不增加 semantic
 candidate attempt。新 catalog revision 必须产生新 manifest/request identity，旧 complete session 只保留 audit；
 generation history 的 identity 是封存的 `manifestHash + logicalRequestID`，所以同一 active generation 内的
-correction/focus request 变化不会制造重复 history，而资源回滚重现旧 catalog hash 时可以用新的 logical request
-建立独立 generation。该 pair 同时是 semantic focus/binding 的 generation identity；同 manifest 的新 logical request
+correction/focus request-session 变化不会制造重复 history，而资源回滚重现旧 catalog hash 时可以用新的 batch generation request
+建立独立 generation。每个 focus/binding 的 generation pair 必须取其 accepted batch 的
+`manifestHash + batch.RequestLogicalID`；同 manifest 的新 batch generation request
 必须生成不同 focus/binding ID，而同一 pair 的 restart/replay 必须稳定。duplicate generation 不写 CAS，refresh budget
 耗尽才以原始 owner diagnostic 进入
 `semantic_contract_failed`。

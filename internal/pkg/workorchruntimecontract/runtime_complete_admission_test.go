@@ -252,7 +252,11 @@ func runtimeCompleteAdmissionOwnerFeedback(t *testing.T, input RuntimeCompleteAd
 func runtimeCompleteAdmissionFixture(t *testing.T) RuntimeCompleteAdmissionInput {
 	t.Helper()
 	semantic := semanticSealedLedgerFixture(t)
-	focuses, reconciliation, err := CompileRuntimeSemanticBindings(*semantic.Manifest, semantic.LogicalRequestID, *semantic.Document, semantic.Feasibilities)
+	batch, found := runtimeSemanticPlanningBatch(semantic.Batches, semantic.Document.BatchID)
+	if !found {
+		t.Fatal("compile semantic fixture: accepted document batch is missing")
+	}
+	focuses, reconciliation, err := CompileRuntimeSemanticBindings(*semantic.Manifest, batch.RequestLogicalID, *semantic.Document, semantic.Feasibilities)
 	if err != nil || len(focuses) != 1 {
 		t.Fatalf("compile semantic fixture: focuses=%d err=%v", len(focuses), err)
 	}

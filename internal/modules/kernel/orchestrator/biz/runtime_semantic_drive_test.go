@@ -694,6 +694,40 @@ func TestRuntimeSemanticDriveUsesPersistedRequestSessionAndExcludesRetiredGenera
 	})
 	t.Cleanup(func() { llmObserver.Unsubscribe(llmevents.TopicRequestRuntimeCandidate) })
 
+	workspaceObserver := magicevent.NewSimpleObserver(workspaceevents.CommandDestination, hub)
+	workspaceObserver.Subscribe(workspaceevents.TopicWorkspaceCommandGet, func(event magicevent.Event, result magicevent.Result) {
+		command, ok := event.Data().(workspaceevents.GetWorkspaceCommand)
+		if !ok || command.WorkspaceID != aggregate.Facts.WorkspaceID {
+			t.Errorf("semantic workspace read command = %#v", event.Data())
+			return
+		}
+		result.Set(workspaceevents.WorkspaceResult{Workspace: &workspaceevents.Workspace{
+			ID: aggregate.Facts.WorkspaceID, DeliverableDirectory: t.TempDir(), InternalDirectory: t.TempDir(),
+		}}, nil)
+	})
+	t.Cleanup(func() { workspaceObserver.Unsubscribe(workspaceevents.TopicWorkspaceCommandGet) })
+
+	ownerProbeCalls := 0
+	fileObserver := magicevent.NewSimpleObserver(runtimecontract.RuntimeModuleFile, hub)
+	fileObserver.Subscribe(fileevents.TopicProbeRuntimeSemanticProofFeasibility, func(event magicevent.Event, result magicevent.Result) {
+		ownerProbeCalls++
+		command, ok := event.Data().(fileevents.ProbeRuntimeSemanticProofFeasibilityCommand)
+		if !ok {
+			t.Errorf("semantic File feasibility command = %#v", event.Data())
+			return
+		}
+		observation, observationErr := fileevents.NewRuntimeSemanticProofFeasibilityResult(
+			command, runtimecontract.RuntimeSemanticFeasibilityFeasible, command.OwnerCatalog.ObservedRevision,
+			append([]string(nil), command.Proposal.Target.ExactTargetRefs...), nil,
+		)
+		if observationErr != nil {
+			t.Errorf("semantic File feasibility result: %v", observationErr)
+			return
+		}
+		result.Set(observation, nil)
+	})
+	t.Cleanup(func() { fileObserver.Unsubscribe(fileevents.TopicProbeRuntimeSemanticProofFeasibility) })
+
 	started, err := module.driveRuntimeSemanticPlanning(ctx, aggregate)
 	if err != nil {
 		t.Fatal(err)
@@ -728,6 +762,65 @@ func TestRuntimeSemanticDriveUsesPersistedRequestSessionAndExcludesRetiredGenera
 	}
 	if corrected.SemanticPlanning.Phase != runtimecontract.RuntimeSemanticPlanningProofBatchDocumentAccepted || corrected.SemanticPlanning.Attempt != 1 || len(corrected.SemanticPlanning.Rejections) != 1 || requestCount != 3 || len(corrected.CandidateAttempts) != 0 || corrected.ActiveDispatch != nil {
 		t.Fatalf("corrected proof lost bounded lineage or crossed into operation authority: ledger=%+v requests=%d", corrected.SemanticPlanning, requestCount)
+	}
+	acceptedBatchRequestID := corrected.SemanticPlanning.Batches[0].RequestLogicalID
+	correctionRequestID := corrected.SemanticPlanning.LogicalRequestID
+	if acceptedBatchRequestID == "" || correctionRequestID == "" || acceptedBatchRequestID == correctionRequestID {
+		t.Fatalf("semantic correction collapsed batch generation and request-session identities: batch=%q correction=%q", acceptedBatchRequestID, correctionRequestID)
+	}
+	feasibilityRequired, err := module.driveRuntimeSemanticPlanning(ctx, corrected)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if feasibilityRequired.SemanticPlanning.Phase != runtimecontract.RuntimeSemanticPlanningFeasibilityRequired || ownerProbeCalls != 0 {
+		t.Fatalf("semantic feasibility was not persisted before owner I/O: phase=%q probes=%d", feasibilityRequired.SemanticPlanning.Phase, ownerProbeCalls)
+	}
+	feasibilityComplete, err := module.driveRuntimeSemanticPlanning(ctx, feasibilityRequired)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if feasibilityComplete.SemanticPlanning.Phase != runtimecontract.RuntimeSemanticPlanningProofBatchFeasibilityComplete || ownerProbeCalls != 1 {
+		t.Fatalf("corrected semantic proof did not persist one owner fact: phase=%q probes=%d", feasibilityComplete.SemanticPlanning.Phase, ownerProbeCalls)
+	}
+	archived, err := module.driveRuntimeSemanticPlanning(ctx, feasibilityComplete)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if archived.SemanticPlanning.Phase != runtimecontract.RuntimeSemanticPlanningProofBatchFeasibilityComplete || len(archived.SemanticPlanning.BatchFeasibilityResults) != 1 {
+		t.Fatalf("corrected semantic owner facts were not archived before seal: %+v", archived.SemanticPlanning)
+	}
+	sealed, err := module.driveRuntimeSemanticPlanning(ctx, archived)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if sealed.SemanticPlanning.Phase != runtimecontract.RuntimeSemanticPlanningSealed || len(sealed.Facts.Focus.CoverageEvidenceBindings) != 1 ||
+		requestCount != 3 || ownerProbeCalls != 1 || len(sealed.CandidateAttempts) != 0 || sealed.ActiveDispatch != nil {
+		t.Fatalf("corrected semantic drive did not seal without operation authority: ledger=%+v requests=%d probes=%d", sealed.SemanticPlanning, requestCount, ownerProbeCalls)
+	}
+	acceptedBatch := sealed.SemanticPlanning.Batches[0]
+	acceptedDocument := sealed.SemanticPlanning.BatchDocuments[0]
+	wantFocuses, _, err := runtimecontract.CompileRuntimeSemanticBindings(
+		*sealed.SemanticPlanning.Manifest, acceptedBatchRequestID, acceptedDocument, sealed.SemanticPlanning.Feasibilities,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if acceptedBatch.RequestLogicalID != acceptedBatchRequestID || sealed.SemanticPlanning.LogicalRequestID != correctionRequestID ||
+		!runtimecontract.RuntimeCoverageEvidenceBindingProjectionsEqual(sealed.Facts.Focus.CoverageEvidenceBindings, wantFocuses[0].CoverageEvidenceBindings) {
+		t.Fatalf("semantic seal changed batch/correction lineage: batch=%q correction=%q bindings=%+v", acceptedBatch.RequestLogicalID, sealed.SemanticPlanning.LogicalRequestID, sealed.Facts.Focus.CoverageEvidenceBindings)
+	}
+	reloaded, err := repository.Load(ctx, sealed.Facts.WorkspaceID, sealed.Facts.RunID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	restarted := newRuntimeGroundedTargetSequenceModule(t, hub, repository)
+	replayed, err := restarted.driveRuntimeSemanticPlanning(ctx, reloaded)
+	if err != nil {
+		t.Fatalf("fresh-load corrected semantic preimage failed: %v", err)
+	}
+	if replayed.StateRevision != sealed.StateRevision || requestCount != 3 || ownerProbeCalls != 1 ||
+		!runtimecontract.RuntimeCoverageEvidenceBindingProjectionsEqual(replayed.Facts.Focus.CoverageEvidenceBindings, wantFocuses[0].CoverageEvidenceBindings) {
+		t.Fatalf("fresh-load replay repeated semantic work or changed binding: revision=%d/%d requests=%d probes=%d", replayed.StateRevision, sealed.StateRevision, requestCount, ownerProbeCalls)
 	}
 }
 

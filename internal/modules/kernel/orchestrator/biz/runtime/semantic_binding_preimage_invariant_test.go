@@ -77,6 +77,24 @@ func TestRuntimeSemanticBindingPreimageRejectsCoordinatedProjectionRewrite(t *te
 		tampered := runtimeTestRewriteSemanticBindingProjections(t, aggregate, true, true, true, true)
 		runtimeTestRequireSemanticBindingPreimageViolation(t, validateRuntimeSemanticBindingPreimages(tampered), "coordinated downstream rewrite")
 	})
+
+	t.Run("accepted batch generation request", func(t *testing.T) {
+		aggregate := runtimeTestSemanticPreimageStateChangeAggregate(t)
+		if len(aggregate.SemanticPlanning.Batches) != 1 || len(aggregate.SemanticPlanning.BatchFeasibilityResults) != 1 {
+			t.Fatalf("semantic generation rewrite fixture is incomplete: %+v", aggregate.SemanticPlanning)
+		}
+		tampered := aggregate
+		tampered.SemanticPlanning = aggregate.SemanticPlanning.Clone()
+		batch := tampered.SemanticPlanning.Batches[0].Clone()
+		batch.RequestLogicalID += "-coordinated-rewrite"
+		batch.Hash = runtimecontract.StableRuntimeSemanticPlanBatchHash(batch)
+		tampered.SemanticPlanning.Batches[0] = batch
+		result := tampered.SemanticPlanning.BatchFeasibilityResults[0].Normalized()
+		result.BatchHash = batch.Hash
+		result.Hash = runtimecontract.StableRuntimeSemanticPlanBatchFeasibilityResultHash(result)
+		tampered.SemanticPlanning.BatchFeasibilityResults[0] = result
+		runtimeTestRequireSemanticBindingPreimageViolation(t, validateRuntimeSemanticBindingPreimages(tampered), "coordinated accepted-batch generation rewrite")
+	})
 }
 
 func TestRuntimeSemanticBindingPreimageRequiresArchivedHistoryOwnerFacts(t *testing.T) {

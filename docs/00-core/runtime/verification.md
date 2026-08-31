@@ -240,9 +240,11 @@ Cross-owner regression必须证明 concrete receiving-owner Command/Result、wor
   JSON round-trip/restart 均不得重复推进。negative matrix 必须拒绝 revision gap/倒序/协调重写、orphan/duplicate、跨
   accepted/rejected 重复、assessment kind 混入 ordinary ledger、governance credit pollution，以及最终 sequence/
   `Facts.EvidenceRevision` 漂移；
-- semantic provider/owner preimage matrix 必须从 active/history accepted batch 的 exact manifest、logical request、document 与
-  archived/retained feasibility facts重放 `CompileRuntimeSemanticBindings`，并覆盖 multi-batch merge、response loss、settled-CWI
-  generation history。negative matrix 必须分别及协调改写 Focus/binding、CWI current/history refs、reconciliation、session
+- semantic provider/owner preimage matrix 必须从 active/history accepted batch 的 exact manifest、batch generation
+  `RequestLogicalID`、document hash/content 与 archived/retained feasibility facts重放 `CompileRuntimeSemanticBindings`，并覆盖
+  attempt-0 直接接受、attempt-1 correction→feasibility→seal、duplicate、multi-batch merge、response loss、fresh-load 与 settled-CWI
+  generation history。attempt-1 ledger request cursor 与 batch generation identity 必须明确不同；seal 使用 cursor、batch/document
+  identity 漂移均须在 owner/provider/effect 前 fail closed。negative matrix 还必须分别及协调改写 Focus/binding、CWI current/history refs、reconciliation、session
   manifest bindings、accepted-attempt bindings 与 active/completed dispatch bindings；同步重算下游 hash 仍须因上游 preimage
   不匹配而 fail closed；
 - assessment authority/adjudication matrix 必须覆盖 DefinitionFocus 对 seed source 的 exact projection、pre-seal raw-canonical

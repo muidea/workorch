@@ -390,7 +390,18 @@ func runtimeTestProjectSealedSemanticFacts(t *testing.T, facts runtimecontract.R
 	if facts.CWILedgerSchemaVersion != runtimecontract.RuntimeCWILedgerSchemaCurrent || ledger.Manifest == nil || ledger.Document == nil {
 		t.Fatalf("test semantic projection requires initialized ledger and complete document")
 	}
-	focuses, contract, err := runtimecontract.CompileRuntimeSemanticBindings(*ledger.Manifest, ledger.LogicalRequestID, *ledger.Document, ledger.Feasibilities)
+	var acceptedBatch *runtimecontract.RuntimeSemanticPlanBatch
+	for index := range ledger.Batches {
+		if ledger.Batches[index].BatchID == ledger.Document.BatchID {
+			value := ledger.Batches[index].Clone()
+			acceptedBatch = &value
+			break
+		}
+	}
+	if acceptedBatch == nil || acceptedBatch.State != runtimecontract.RuntimeSemanticPlanBatchAccepted || acceptedBatch.DocumentHash != ledger.DocumentHash {
+		t.Fatalf("test semantic projection requires the exact accepted document batch")
+	}
+	focuses, contract, err := runtimecontract.CompileRuntimeSemanticBindings(*ledger.Manifest, acceptedBatch.RequestLogicalID, *ledger.Document, ledger.Feasibilities)
 	if err != nil {
 		t.Fatalf("compile test semantic bindings for canonical projection: %v", err)
 	}

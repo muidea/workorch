@@ -301,7 +301,11 @@ func (c *planningTransactionComponent) sealSemanticContract(ctx context.Context,
 	if err != nil {
 		return RuntimeAggregate{}, err
 	}
-	focuses, _, err := runtimecontract.CompileRuntimeSemanticBindings(*ledger.Manifest, ledger.LogicalRequestID, *ledger.Document, ledger.Feasibilities)
+	acceptedBatch, found := runtimeSemanticBatch(ledger.Batches, ledger.Document.BatchID)
+	if !found {
+		return RuntimeAggregate{}, fmt.Errorf("%w: semantic contract has no accepted batch for the seal document", common.ErrConflict)
+	}
+	focuses, _, err := compileRuntimeSemanticAcceptedBatchBindings(*ledger.Manifest, acceptedBatch, *ledger.Document, ledger.Feasibilities)
 	if err != nil {
 		return RuntimeAggregate{}, err
 	}

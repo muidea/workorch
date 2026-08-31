@@ -400,9 +400,9 @@ func TestRuntimeSemanticPlanningBindsProposalCorrectionToActiveBatch(t *testing.
 	}
 }
 
-func TestRuntimeSemanticPlanningRejectsInvalidStaleAndThirdAttemptTransitions(t *testing.T) {
-	controller, _, aggregate := newSemanticPlanningController(t)
-	manifest, document, _ := semanticPlanningFixture(t, aggregate)
+func TestRuntimeSemanticPlanningCorrectionRejectsStaleAndSealsWithBatchGeneration(t *testing.T) {
+	controller, repository, aggregate := newSemanticPlanningController(t)
+	manifest, document, feasibility := semanticPlanningFixture(t, aggregate)
 	ctx := context.Background()
 	if _, err := controller.ApplyInternalEvent(ctx, RuntimeInternalEvent{
 		Kind: RuntimeInternalEventSemanticPlanEvaluated, Scope: RuntimeInternalEventScope{WorkspaceID: aggregate.Facts.WorkspaceID, RunID: aggregate.Facts.RunID}, Transaction: &RuntimeInternalTransactionPayload{SemanticDocument: &document, LogicalRequestID: "missing-request"},
@@ -503,6 +503,74 @@ func TestRuntimeSemanticPlanningRejectsInvalidStaleAndThirdAttemptTransitions(t 
 		accepted.Aggregate.SemanticPlanning.Attempt != 1 || accepted.Aggregate.SemanticPlanning.CorrectionDirective == nil ||
 		len(accepted.Aggregate.SemanticPlanning.Rejections) != 1 {
 		t.Fatalf("corrected proof document lost bounded correction lineage: %+v", accepted.Aggregate.SemanticPlanning)
+	}
+	aggregate = accepted.Aggregate
+	acceptedDocumentRevision := aggregate.StateRevision
+	apply(RuntimeInternalEvent{Kind: RuntimeInternalEventSemanticPlanEvaluated, Transaction: &RuntimeInternalTransactionPayload{LogicalRequestID: "semantic-request-2", SemanticDocument: &correctedProof}})
+	if aggregate.StateRevision != acceptedDocumentRevision {
+		t.Fatal("duplicate corrected proof document changed aggregate revision")
+	}
+	if aggregate.SemanticPlanning.LogicalRequestID != "semantic-request-2" || batch.RequestLogicalID == aggregate.SemanticPlanning.LogicalRequestID {
+		t.Fatalf("correction request cursor and batch generation were not kept distinct: batch=%q ledger=%q", batch.RequestLogicalID, aggregate.SemanticPlanning.LogicalRequestID)
+	}
+
+	apply(RuntimeInternalEvent{Kind: RuntimeInternalEventSemanticFeasibilityRequired, Authority: &RuntimeInternalAuthorityPayload{}})
+	apply(RuntimeInternalEvent{Kind: RuntimeInternalEventSemanticFeasibilityObserved, Authority: &RuntimeInternalAuthorityPayload{
+		SemanticBatchID: aggregate.SemanticPlanning.FeasibilityBatchID, SemanticFeasibility: &feasibility,
+	}})
+	acceptedBatch, found := runtimeSemanticBatch(aggregate.SemanticPlanning.Batches, batch.BatchID)
+	if !found || acceptedBatch.State != runtimecontract.RuntimeSemanticPlanBatchAccepted || acceptedBatch.RequestLogicalID != batch.RequestLogicalID {
+		t.Fatalf("corrected proof changed accepted batch generation: %+v", acceptedBatch)
+	}
+	batchResult := runtimecontract.RuntimeSemanticPlanBatchFeasibilityResult{
+		BatchID: acceptedBatch.BatchID, BatchHash: acceptedBatch.Hash, DocumentHash: acceptedBatch.DocumentHash,
+		Feasibilities: []runtimecontract.RuntimeSemanticProofFeasibility{feasibility},
+	}
+	batchResult.Hash = runtimecontract.StableRuntimeSemanticPlanBatchFeasibilityResultHash(batchResult)
+	apply(RuntimeInternalEvent{Kind: RuntimeInternalEventSemanticPlanBatchFeasibilityObserved, Transaction: &RuntimeInternalTransactionPayload{SemanticPlanBatchFeasibilityResult: &batchResult}})
+	merged, err := runtimecontract.MergeRuntimeSemanticPlanFocusBatchDocument(manifest, acceptedBatch, correctedProof)
+	if err != nil {
+		t.Fatal(err)
+	}
+	apply(RuntimeInternalEvent{Kind: RuntimeInternalEventSemanticPlanBatchDocumentsMerged, Transaction: &RuntimeInternalTransactionPayload{SemanticPlanMergedDocument: &merged}})
+	apply(RuntimeInternalEvent{Kind: RuntimeInternalEventSemanticContractSealed, Authority: &RuntimeInternalAuthorityPayload{}})
+	if aggregate.SemanticPlanning.Phase != runtimecontract.RuntimeSemanticPlanningSealed || len(aggregate.Facts.Focus.CoverageEvidenceBindings) != 1 {
+		t.Fatalf("corrected semantic proof did not seal one binding: %+v", aggregate.SemanticPlanning)
+	}
+	wantFocuses, _, err := runtimecontract.CompileRuntimeSemanticBindings(manifest, batch.RequestLogicalID, correctedProof, []runtimecontract.RuntimeSemanticProofFeasibility{feasibility})
+	if err != nil {
+		t.Fatal(err)
+	}
+	wrongFocuses, _, err := runtimecontract.CompileRuntimeSemanticBindings(manifest, "semantic-request-2", correctedProof, []runtimecontract.RuntimeSemanticProofFeasibility{feasibility})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !runtimecontract.RuntimeCoverageEvidenceBindingProjectionsEqual(aggregate.Facts.Focus.CoverageEvidenceBindings, wantFocuses[0].CoverageEvidenceBindings) ||
+		runtimecontract.RuntimeCoverageEvidenceBindingProjectionsEqual(aggregate.Facts.Focus.CoverageEvidenceBindings, wrongFocuses[0].CoverageEvidenceBindings) {
+		t.Fatalf("sealed binding did not use batch generation: got=%+v want=%+v correction=%+v", aggregate.Facts.Focus.CoverageEvidenceBindings, wantFocuses[0].CoverageEvidenceBindings, wrongFocuses[0].CoverageEvidenceBindings)
+	}
+	if err := aggregate.Validate(); err != nil {
+		t.Fatalf("corrected semantic seal failed aggregate preimage validation: %v", err)
+	}
+	sealedRevision := aggregate.StateRevision
+	apply(RuntimeInternalEvent{Kind: RuntimeInternalEventSemanticContractSealed, Authority: &RuntimeInternalAuthorityPayload{}})
+	if aggregate.StateRevision != sealedRevision {
+		t.Fatal("duplicate corrected semantic seal changed aggregate revision")
+	}
+	reloaded, err := NewRuntimeController(repository)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fresh, err := reloaded.Load(ctx, aggregate.Facts.WorkspaceID, aggregate.Facts.RunID)
+	if err != nil {
+		t.Fatalf("corrected semantic seal failed fresh-load preimage replay: %v", err)
+	}
+	if fresh.StateRevision != sealedRevision || fresh.SemanticPlanning.LogicalRequestID != "semantic-request-2" ||
+		!runtimecontract.RuntimeCoverageEvidenceBindingProjectionsEqual(fresh.Facts.Focus.CoverageEvidenceBindings, wantFocuses[0].CoverageEvidenceBindings) {
+		t.Fatalf("fresh load changed correction or batch-generation lineage: %+v", fresh.SemanticPlanning)
+	}
+	if _, err := runtimecontract.ResolveRuntimeAssessmentPurposePreimage(fresh.SemanticPlanning, fresh.Facts.Focus.CoverageEvidenceBindings); err != nil {
+		t.Fatalf("assessment could not replay corrected semantic batch identity: %v", err)
 	}
 }
 

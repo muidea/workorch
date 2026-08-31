@@ -32,11 +32,16 @@ type RuntimeSemanticPlanBatch struct {
 	Sequence                   int
 	CoverageWorkItemIDs        []common.CoverageWorkItemID
 	PendingCoverageWorkItemIDs []common.CoverageWorkItemID
-	RequestLogicalID           string
-	DocumentHash               string
-	DependencyBarrierRefs      []string
-	State                      RuntimeSemanticPlanBatchState
-	Hash                       string
+	// RequestLogicalID is the immutable semantic generation identity sealed
+	// when this proof batch opens. A later correction has its own provider
+	// request-session identity and must not replace this value.
+	RequestLogicalID string
+	// DocumentHash seals the exact accepted attempt-0/attempt-1 document under
+	// the batch generation. Together these fields are the binding preimage.
+	DocumentHash          string
+	DependencyBarrierRefs []string
+	State                 RuntimeSemanticPlanBatchState
+	Hash                  string
 }
 
 type RuntimeSemanticPlanBatchFeasibilityResult struct {

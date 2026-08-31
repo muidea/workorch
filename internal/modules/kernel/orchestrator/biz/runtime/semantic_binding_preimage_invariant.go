@@ -178,7 +178,7 @@ func addRuntimeSemanticLedgerBindingPreimages(inventory *runtimeSemanticBindingP
 			// set). Any projection that tries to use it will fail the lookup below.
 			continue
 		}
-		focuses, _, err := runtimecontract.CompileRuntimeSemanticBindings(manifest, batch.RequestLogicalID, document, feasibilities)
+		focuses, _, err := compileRuntimeSemanticAcceptedBatchBindings(manifest, batch, document, feasibilities)
 		if err != nil {
 			return fmt.Errorf("runtime aggregate semantic binding preimage %s batch %q: %w", label, batch.BatchID, err)
 		}

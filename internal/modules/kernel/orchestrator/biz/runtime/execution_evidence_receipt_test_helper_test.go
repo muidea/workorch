@@ -129,9 +129,11 @@ func runtimeTestProjectSemanticBindingPreimageFacts(aggregate RuntimeAggregate) 
 		return runtimecontract.RuntimeFacts{}, nil, fmt.Errorf("test semantic binding projection requires a sealed ledger preimage")
 	}
 	ledger := aggregate.SemanticPlanning.Clone()
-	focuses, _, err := runtimecontract.CompileRuntimeSemanticBindings(
-		*ledger.Manifest, ledger.LogicalRequestID, *ledger.Document, ledger.Feasibilities,
-	)
+	batch, found := runtimeSemanticBatch(ledger.Batches, ledger.Document.BatchID)
+	if !found {
+		return runtimecontract.RuntimeFacts{}, nil, fmt.Errorf("test semantic binding projection has no accepted document batch")
+	}
+	focuses, _, err := compileRuntimeSemanticAcceptedBatchBindings(*ledger.Manifest, batch, *ledger.Document, ledger.Feasibilities)
 	if err != nil {
 		return runtimecontract.RuntimeFacts{}, nil, fmt.Errorf("compile test semantic binding preimages: %w", err)
 	}

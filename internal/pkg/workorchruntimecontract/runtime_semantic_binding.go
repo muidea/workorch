@@ -9,8 +9,11 @@ import (
 
 // CompileRuntimeSemanticBindings is a pure all-or-nothing conversion from one
 // complete semantic document plus matching owner facts to immutable focus
-// bindings and a reconciliation contract. It does not mutate an aggregate or
-// choose a Runtime action; only the SM-2 reducer may persist its output.
+// bindings and a reconciliation contract. logicalRequestID is the immutable
+// semantic generation request (the accepted batch RequestLogicalID in the
+// production path), not a mutable correction request-session cursor. It does
+// not mutate an aggregate or choose a Runtime action; only the SM-2 reducer may
+// persist its output.
 func CompileRuntimeSemanticBindings(manifest RuntimeSemanticPlanManifest, logicalRequestID string, document RuntimeSemanticPlanDocument, feasibilities []RuntimeSemanticProofFeasibility) ([]CoverageFocus, RuntimeCWIReconciliationContract, error) {
 	manifest = manifest.Normalized()
 	document = document.Normalized()
