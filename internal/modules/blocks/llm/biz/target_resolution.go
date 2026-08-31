@@ -271,12 +271,13 @@ func ResolveProviderClient(cfg workorchconfig.LLMConfig, target runtimecontract.
 		return llmmodels.ProviderConfig{}, err
 	}
 	return withAvailability(llmmodels.ProviderConfig{
-		ID:         target.ProviderID,
-		APISurface: llmcommon.ProviderSurfaceOpenAICompatibleHTTP,
-		BaseURL:    strings.TrimSpace(cfg.AIProxy.BaseURL),
-		APIKey:     strings.TrimSpace(cfg.AIProxy.APIKey),
-		Model:      target.ModelID,
-		Timeout:    timeout,
+		ID:          target.ProviderID,
+		APISurface:  llmcommon.ProviderSurfaceOpenAICompatibleHTTP,
+		BaseURL:     strings.TrimSpace(cfg.AIProxy.BaseURL),
+		APIKey:      strings.TrimSpace(cfg.AIProxy.APIKey),
+		Model:       target.ModelID,
+		Timeout:     timeout,
+		HardTimeout: workorchconfig.MaxAIProxyTimeout,
 		Capabilities: llmmodels.ProviderCapabilities{
 			Responses: true,
 			Streaming: true,

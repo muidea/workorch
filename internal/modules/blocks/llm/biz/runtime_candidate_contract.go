@@ -146,12 +146,12 @@ func runtimeTargetSelectionInstruction(selection *runtimecontract.RuntimeTargetS
 func runtimeCandidateContractCatalog() string {
 	return strings.Join([]string{
 		"Return exactly one JSON object for the requested Runtime convergence state; it must be complete, compact, and finished in this response. The JSON object itself is the candidate; never wrap it in another object.",
-		"The current runtime authority's context.outputContract is the sole structured-output contract. Its manifestHash, schema, structuredOutputInstruction, and operationContracts define the complete allowed fields, kinds, variants, parameters, targets, coverage and dependencies for this request.",
+		"The C3 current runtime authority's outputContract is the sole structured-output contract. Its manifestHash, schema, structuredOutputInstruction, and operationContracts define the complete allowed fields, kinds, variants, parameters, targets, coverage and dependencies for this request.",
 		"Emit only schema fields and manifest-authorized operations. Do not infer or add unknown fields, unrequested operations, prose, preface, suffix, or markdown fences. Do not repeat the Goal, DoD, manifest, authority, or input context.",
 		"context.requiredState is the sole canonical decision authority. Do not invent or modify convergence state, focus, authority, transaction, or output mode.",
-		"When context.repairDirective is present, obey its sealed state, effect, evidence and operation constraints. The exact fields and values remain in context.outputContract and current runtime authority.",
-		"context.missingEvidenceKinds is completion-audit information only and must never override context.requiredState or context.repairDirective.",
-		"When context.rejectedOperationShapes is present, every listed operation hash and exact structural operation is forbidden until later accepted evidence supersedes it. Choose an admissible kind and change kind, targets, or execution-semantic parameters.",
+		"When context.repairDirective is present, obey its sealed state, effect, evidence and operation constraints. The exact fields and values remain in outputContract and the current runtime authority.",
+		"context.requiredEvidenceKinds declares the current evidence obligation; it never overrides context.requiredState, context.repairDirective, or outputContract.",
+		"When rejectedOperationShapes is present in the C4 execution-tail object, every listed operation hash and exact structural operation is forbidden until later accepted evidence supersedes it. Choose an admissible kind and change kind, targets, or execution-semantic parameters.",
 	}, "\n")
 }
 
@@ -419,13 +419,13 @@ func runtimeCandidateRetryForManifest(attempt int, observation *runtimecontract.
 	instruction := "Retry the exact same sealed authority contract. Return only the legal top-level object for the requested action."
 	manifest = manifest.Normalized()
 	if manifest.Hash != "" {
-		instruction += " Re-read context.outputContract.structuredOutputInstruction and schema for sealed manifest hash " + manifest.Hash + "; they are the only source of allowed fields, kinds, variants, parameters, targets, coverage and dependencies."
+		instruction += " Re-read outputContract.structuredOutputInstruction and schema in the C3 current runtime authority for sealed manifest hash " + manifest.Hash + "; they are the only source of allowed fields, kinds, variants, parameters, targets, coverage and dependencies."
 	}
 	if previous.Class == runtimecontract.RuntimeCandidateFailureClassSchema || previous.Class == runtimecontract.RuntimeCandidateFailureClassContract {
 		instruction += " The previous candidate shape was rejected. Remove every field or value not permitted by that sealed manifest instead of adding a wrapper, narrative, summary, explanation or convenience parameter."
 	}
 	if runtimeCandidateFailureIsOperationShapeReplay(previous.Code) {
-		instruction += " The previous candidate replayed a rejected or no-progress operation shape. Inspect context.rejectedOperationShapes and context.noProgressOperationShapes. Changing only an operation ID, narrative, or cosmetic parameter is not sufficient."
+		instruction += " The previous candidate replayed a rejected or no-progress operation shape. Inspect rejectedOperationShapes and noProgressOperationShapes in the C4 execution-tail object. Changing only an operation ID, narrative, or cosmetic parameter is not sufficient."
 	}
 	input := correction.Normalized()
 	instruction += fmt.Sprintf(" Apply the exact correction alternative %q at %s (%s); an unrelated valid change does not satisfy this retry.", input.Witness.AlternativeValue, input.Witness.Path, input.Witness.Dimension)

@@ -4,7 +4,7 @@ Status: normative
 
 Type: core-contract-part
 
-Last Verified: 2026-08-27
+Last Verified: 2026-08-31
 
 ## Provider-Neutral Cache Model
 
@@ -19,7 +19,7 @@ physical call identity 和 adapter options 不能进入稳定前缀；adapter �
 | C0 | 中立 Runtime rules、schema 与 owner-neutral contract | long-lived stable |
 | C1 | immutable `DefinitionPartitionEnvelope` 与 current partition exact Goal/DoD members | Definition-revision stable |
 | C2 | declarative capability/governance/validation/acceptance-slice/template-profile policy | activation stable |
-| C3 | current focus、required output、decision bundle、sealed manifest/current owner catalog | authority-current |
+| C3 | current focus、required output、decision bundle、sealed manifest 与 manifest-scoped execution context | authority-current |
 | C4 | provider-safe current failure、attempt diagnostic、recent evidence identity、detached correction input | volatile |
 | C5 | bounded large refs、trace 与 cross-partition expansion | ref-oriented volatile |
 
@@ -30,6 +30,12 @@ Provider-facing 第一段必须是连续的 C0→C1→C2。C3→C4→C5 只能�
 
 - C3 operation kind、variant、parameter、effect、coverage 与 target policy 只从 persisted
   `RuntimeCandidateContractManifest` 渲染，不能从 profile、owner inventory 或错误文本拼第二份合同；
+- typed candidate command 可以携带完整 owner facts供 LLM owner执行本地 integrity/freshness 校验，但 provider-facing C3
+  不得展开 raw operation-admissibility catalog、prerequisite-observation ledger、capability-state 或 validation scratch。
+  target snapshot、target-selection 与 MCP activation supporting fact 只能按当前 manifest 的 owner、target policy 与
+  snapshot refs 投影；与当前 manifest 无关的 owner catalog/capability 必须省略。manifest 引用的 prerequisite 或
+  admissibility snapshot 在完整 typed facts 中缺失、内容漂移或 owner/kind 不匹配时，LLM owner 必须在 physical submission
+  前 fail closed，不能把静默省略后的 C3 发送给 provider；
 - active rejected shape、failure lineage、current owner readiness 与 admissible operation set 属于 C3/C4，不得回写 C2；
 - C4 correction 只包含 provider-safe rejection 与 Orchestrator persisted `CorrectionDirective` 的 detached
   `correctionInput` 投影。`correctable_once` 必须投影 manifest、objectives、concrete document-shape/schema/semantic

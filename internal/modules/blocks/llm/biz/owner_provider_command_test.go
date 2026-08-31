@@ -345,7 +345,8 @@ func TestRuntimeCandidateReasoningOnlyCompletedPublishesSingleEmptyDocumentFact(
 		response.Audit.ResponseBytes == 0 || response.Audit.ContextBudget.ActualTokens != 28 {
 		t.Fatalf("reasoning-only completed request audit = %+v", response.Audit)
 	}
-	if response.Usage == nil || response.Usage.InputTokens != 20 || response.Usage.OutputTokens != 8 || response.Usage.TotalTokens != 28 {
+	if response.Usage == nil || response.Usage.InputTokens != 20 || response.Usage.CacheReadTokens != 2 ||
+		response.Usage.OutputTokens != 8 || response.Usage.TotalTokens != 28 {
 		t.Fatalf("reasoning-only completed usage = %+v", response.Usage)
 	}
 	if responseCalls.Load() != 1 {
@@ -356,7 +357,7 @@ func TestRuntimeCandidateReasoningOnlyCompletedPublishesSingleEmptyDocumentFact(
 	case audit := <-audits:
 		if !audit.ProviderSubmitted || audit.Status != llmmodels.RuntimeCandidateStatusCompleted || audit.FailureClass != "" ||
 			audit.PhysicalResponseMode != llmaudit.PhysicalResponseModeStreaming || audit.InputTokens != 20 ||
-			audit.OutputTokens != 8 || audit.TotalTokens != 28 || audit.ContextBudget.ActualTokens != 28 {
+			audit.CacheUsage.CacheReadTokens != 2 || audit.OutputTokens != 8 || audit.TotalTokens != 28 || audit.ContextBudget.ActualTokens != 28 {
 			t.Fatalf("published reasoning-only completed usage audit = %+v", audit)
 		}
 	case <-time.After(2 * time.Second):

@@ -7,12 +7,19 @@ import (
 )
 
 type ProviderConfig struct {
-	ID                string
-	APISurface        string
-	BaseURL           string
-	APIKey            string
-	Model             string
-	Timeout           time.Duration
+	ID         string
+	APISurface string
+	BaseURL    string
+	APIKey     string
+	Model      string
+	// Timeout is an absolute deadline for non-streaming completion/embedding.
+	// Streaming interprets it as the response-header/body idle timeout and
+	// resets it whenever any response wire bytes are read.
+	Timeout time.Duration
+	// HardTimeout is the absolute physical-call ceiling. It is resolved from
+	// the configuration owner's process-wide maximum and remains independent
+	// from response progress.
+	HardTimeout       time.Duration
 	Disabled          bool
 	Capabilities      ProviderCapabilities
 	InferenceProfile  ProviderInferenceProfile

@@ -15,6 +15,7 @@ import (
 	llmmodels "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/llmaudit"
+	"github.com/muidea/workorch/internal/pkg/workorchmemorycontract"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 	"github.com/muidea/workorch/internal/pkg/workorchskillcontract"
 )
@@ -1591,7 +1592,7 @@ func TestRuntimeProviderRequestPreservesStablePrefixAndTypedContext(t *testing.T
 		t.Fatalf("provider request lost dynamic context: %+v", request)
 	}
 	contractSection := request.PromptContext.Sections[0].Content
-	for _, value := range []string{"one JSON object", "context.outputContract is the sole structured-output contract", "manifestHash", "sole canonical decision authority", "completion-audit information only"} {
+	for _, value := range []string{"one JSON object", "outputContract is the sole structured-output contract", "manifestHash", "sole canonical decision authority", "requiredEvidenceKinds declares the current evidence obligation"} {
 		if !strings.Contains(contractSection, value) {
 			t.Fatalf("provider request stable contract lost %q: %s", value, contractSection)
 		}
@@ -1611,13 +1612,17 @@ func TestRuntimeProviderRequestPreservesStablePrefixAndTypedContext(t *testing.T
 		`"outputContract"`, `"manifestHash"`, `"structuredOutputInstruction"`, `"$id":"workorch.runtime_candidate.state_change"`, `"forbiddenTopLevelFields"`,
 		`"operationContracts":[{"kind":"file/write"`, `"name":"content"`, `"targetCardinality":"one"`,
 		`"forbiddenParameters":["input","output","payload","path","targetRef","targetRefs"]`,
-		`"capabilityStates"`, `"repo-state-hash"`, `"targetSelectionInstruction"`, "empty workspace creation scope", `sealed prospective target \"initial-deliverable.txt\"`, `"evidencePolicyIds":["go-test-observable"]`, `"skillContextBudget"`,
+		`"targetSelectionInstruction"`, "empty workspace creation scope", `sealed prospective target \"initial-deliverable.txt\"`, `"skillContextBudget"`,
 	} {
 		if !strings.Contains(dynamicSection, value) {
 			t.Fatalf("provider request dynamic output contract lost %q: %s", value, dynamicSection)
 		}
 	}
-	for _, forbidden := range []string{`"RequiredArgs"`, `"CommandName"`, `"RecipeArgs"`} {
+	for _, forbidden := range []string{
+		`"RequiredArgs"`, `"CommandName"`, `"RecipeArgs"`, `"admissibleOperationKinds"`, `"capabilities"`,
+		`"capabilityStates"`, `"repo-state-hash"`, `"operationAdmissibilities"`, `"prerequisiteObservations"`,
+		`"evidencePolicyIds"`,
+	} {
 		if strings.Contains(dynamicSection, forbidden) {
 			t.Fatalf("provider request leaked Shell command-construction policy %q: %s", forbidden, dynamicSection)
 		}
@@ -1717,7 +1722,7 @@ func TestRuntimeProviderRequestPreservesStablePrefixAndTypedContext(t *testing.T
 				t.Fatal(err)
 			}
 			retrySection := retryRequest.PromptContext.Sections[4].Content
-			for _, value := range append([]string{`"candidateAttempt":1`, `"previousFailure"`, `"correctionInput"`, `"path":"` + testCase.correctionPath + `"`, `"alternativeValue":"` + testCase.alternative + `"`, "context.outputContract.structuredOutputInstruction", "sealed manifest hash"}, testCase.want...) {
+			for _, value := range append([]string{`"candidateAttempt":1`, `"previousFailure"`, `"correctionInput"`, `"path":"` + testCase.correctionPath + `"`, `"alternativeValue":"` + testCase.alternative + `"`, "outputContract.structuredOutputInstruction", "sealed manifest hash"}, testCase.want...) {
 				if !strings.Contains(retrySection, value) {
 					t.Fatalf("provider retry lost correction %q: %s", value, retrySection)
 				}
@@ -1783,8 +1788,11 @@ func TestRuntimeProviderRequestPreservesStablePrefixAndTypedContext(t *testing.T
 			t.Fatalf("freshness metadata drifted stable C%d section", idx)
 		}
 	}
-	if !strings.Contains(freshRequest.PromptContext.Sections[3].Content, `"prerequisiteObservations"`) || !strings.Contains(freshRequest.PromptContext.Sections[3].Content, "tree-v2") {
-		t.Fatalf("freshness metadata was not rendered in volatile C3: %s", freshRequest.PromptContext.Sections[3].Content)
+	if strings.Contains(freshRequest.PromptContext.Sections[3].Content, `"prerequisiteObservations"`) || strings.Contains(freshRequest.PromptContext.Sections[3].Content, "tree-v2") {
+		t.Fatalf("raw freshness metadata leaked into manifest-scoped C3: %s", freshRequest.PromptContext.Sections[3].Content)
+	}
+	if freshRequest.PromptContext.Sections[3].Content != request.PromptContext.Sections[3].Content {
+		t.Fatal("freshness-only aggregate change must not change the manifest-scoped provider C3 projection")
 	}
 	limitedContext := runtimecontract.RuntimeCandidateContextForDecision(facts, decision, nil)
 	limitedContext.Resources.ProviderCeiling = &runtimecontract.ProviderCeiling{
@@ -1803,6 +1811,372 @@ func TestRuntimeProviderRequestPreservesStablePrefixAndTypedContext(t *testing.T
 		CandidateManifest: runtimeCandidateManifestForRequest(t, decision, limitedContext), DefinitionContext: definition, CandidateContext: limitedContext,
 	}); err == nil || !strings.Contains(err.Error(), "provider ceiling") {
 		t.Fatalf("runtimeProviderRequest ceiling err = %v, want typed provider ceiling failure", err)
+	}
+}
+
+func TestRuntimeProviderRequestProjectsManifestScopedC3AtRunScale(t *testing.T) {
+	const (
+		criticalTargetBodyMarker = "critical-target-body-08"
+		nonManifestTargetMarker  = "nonmanifest-target-body"
+		nonManifestCatalogMarker = "nonmanifest-mcp-catalog"
+		nonManifestMCPMarker     = "nonmanifest-mcp-activation"
+		rawFreshnessMarker       = "raw-freshness-observation"
+		rawSequenceMarker        = "raw-capability-sequence"
+	)
+	targetRefs := make([]string, 0, 17)
+	targetSnapshots := make([]runtimecontract.TargetSnapshot, 0, 18)
+	for idx := 0; idx < 17; idx++ {
+		targetRef := fmt.Sprintf("internal/runtime/target-%02d.go", idx)
+		bodyMarker := fmt.Sprintf("target-body-%02d", idx)
+		if idx == 8 {
+			bodyMarker = criticalTargetBodyMarker
+		}
+		content := "package runtime\n\n// " + bodyMarker + "\n" + strings.Repeat(fmt.Sprintf("var target%02d = %q\n", idx, bodyMarker), 130)
+		targetRefs = append(targetRefs, targetRef)
+		targetSnapshots = append(targetSnapshots, runtimecontract.TargetSnapshot{
+			TargetRef: targetRef, Content: content, ContentHash: fmt.Sprintf("target-hash-%02d", idx),
+			ContentState: runtimecontract.SnapshotContentStateComplete, Size: int64(len(content)), LineCount: 133,
+		})
+	}
+	targetSnapshots = append(targetSnapshots, runtimecontract.TargetSnapshot{
+		TargetRef: "unrelated/private.txt", Content: nonManifestTargetMarker + strings.Repeat("x", 8*1024),
+		ContentHash: "unrelated-target-hash", ContentState: runtimecontract.SnapshotContentStateComplete,
+	})
+
+	selection := runtimecontract.RuntimeTargetSelection{
+		PrerequisiteID: "target-selection-run-scale", OwnerModuleID: runtimecontract.RuntimeModuleFile,
+		TargetRole: "implementation", SelectorRef: "file/workspace-runtime-targets", SelectorOwnerRef: "profile/software-dev", SelectorSubjectRef: "runtime",
+		SelectorCandidateRefs: append([]string(nil), targetRefs...), Disposition: runtimecontract.RuntimeTargetSelectionScope,
+		TargetRefs: append([]string(nil), targetRefs...), CandidateTargetRefs: append([]string(nil), targetRefs...), CandidateCount: len(targetRefs), ObservedRevision: "workspace-tree-run-scale",
+	}
+	selection.SnapshotID = runtimecontract.StableRuntimeTargetSelectionSnapshotID(selection)
+
+	catalogs := runtimeCandidateScopeOwnerFactsForTest()
+	gitCatalog := runtimecontract.RuntimeOperationAdmissibility{
+		PrerequisiteID: "operation-admissibility:git-run-scale", OwnerModuleID: runtimecontract.RuntimeModuleGit,
+		OperationKinds: []string{runtimecontract.StepKindGitWrite}, ObservedRevision: "git-catalog-run-scale",
+	}
+	for _, variantID := range []string{"init", "add", "commit"} {
+		gitCatalog.OperationVariants = append(gitCatalog.OperationVariants, runtimecontract.RuntimeOperationAdmissibilityVariant{
+			Kind: runtimecontract.StepKindGitWrite, VariantID: variantID,
+			AllowedTargetPolicies: []runtimecontract.RuntimeOperationTargetPolicy{runtimecontract.RuntimeOperationTargetPolicyExactTarget},
+		})
+	}
+	gitCatalog.SnapshotID = runtimecontract.StableRuntimeOperationAdmissibilitySnapshotID(gitCatalog)
+	mcpCapability := runtimecontract.RuntimeMCPCapabilityContext{
+		ID: "mcp-unrelated:tool:inspect", ServerID: "mcp-unrelated", Kind: "tool", OperationKind: runtimecontract.StepKindMCPToolCall,
+		Name: "inspect", Description: nonManifestCatalogMarker + strings.Repeat("m", 16*1024), Enabled: true,
+		EffectScope: string(runtimecontract.RuntimeEffectWorkspaceDurable), IdempotencyClass: string(runtimecontract.RuntimeOperationIdempotencyAtMostOnce),
+	}
+	mcpCatalog := runtimecontract.RuntimeOperationAdmissibility{
+		PrerequisiteID: "operation-admissibility:mcp-run-scale", OwnerModuleID: runtimecontract.RuntimeModuleMCP,
+		OperationKinds: []string{runtimecontract.StepKindMCPToolCall}, ObservedRevision: "mcp-catalog-run-scale",
+		OperationVariants: []runtimecontract.RuntimeOperationAdmissibilityVariant{{
+			Kind:                  runtimecontract.StepKindMCPToolCall,
+			AllowedTargetPolicies: []runtimecontract.RuntimeOperationTargetPolicy{runtimecontract.RuntimeOperationTargetPolicyExactTarget},
+		}},
+		MCPCapabilities: []runtimecontract.RuntimeMCPCapabilityContext{mcpCapability},
+	}
+	mcpCatalog.SnapshotID = runtimecontract.StableRuntimeOperationAdmissibilitySnapshotID(mcpCatalog)
+	catalogs = append(catalogs, gitCatalog, mcpCatalog)
+
+	owners := []string{runtimecontract.RuntimeModuleFile, runtimecontract.RuntimeModuleGit, runtimecontract.RuntimeModuleShell, runtimecontract.RuntimeModuleMCP}
+	observations := make([]runtimecontract.RuntimePrerequisiteObservation, 0, 34)
+	for idx := 0; idx < 34; idx++ {
+		owner := owners[idx%len(owners)]
+		observation := runtimecontract.RuntimePrerequisiteObservation{
+			PrerequisiteID: fmt.Sprintf("unrelated-prerequisite-%02d", idx), Kind: runtimecontract.PrerequisiteKindOperationAdmissibility,
+			OwnerModuleID: owner, ContentHash: fmt.Sprintf("unrelated-content-%02d", idx),
+			Dependencies: []runtimecontract.RuntimeFreshnessDependency{{
+				Domain: runtimecontract.RuntimeResourceOwnerCatalog, OwnerModuleID: owner, SubjectRef: fmt.Sprintf("unrelated-catalog-%02d", idx),
+				Revision: fmt.Sprintf("%s-%02d-%s", rawFreshnessMarker, idx, strings.Repeat("f", 768)),
+			}},
+		}
+		observation.ObservationID = runtimecontract.StableRuntimePrerequisiteObservationID(observation)
+		observations = append(observations, observation)
+	}
+
+	sequence := []runtimecontract.RuntimeRequiredOperationVariant{
+		{RequirementID: "patch-required-00", Kind: runtimecontract.RuntimeBlockKindPatchApply, VariantID: "unified_diff", TargetRef: targetRefs[0]},
+		{RequirementID: "patch-required-08", Kind: runtimecontract.RuntimeBlockKindPatchApply, VariantID: "unified_diff", TargetRef: targetRefs[8], DependsOnRequirementIDs: []string{"patch-required-00"}},
+	}
+	capabilityState := runtimecontract.RuntimeCapabilityStateSnapshot{
+		RequirementID: "capability-state:run-scale", AcquisitionKey: "capability-state/run-scale", AcquisitionBinding: "capability-state/run-scale",
+		OwnerModuleID: runtimecontract.RuntimeModuleGit, CapabilityStateKind: "repository_state", SubjectRef: "workspace_deliverable",
+		ObservedRevision: "repository-run-scale", WorkspaceTreeRevision: "workspace-tree-run-scale", ContentHash: rawSequenceMarker,
+		Disposition: runtimecontract.RuntimeCapabilityStateSequenceRequired, RequiredOperationSequence: sequence, QueryReceiptRef: "query-receipt/run-scale",
+	}
+	capabilityState.SnapshotID = runtimecontract.StableRuntimeCapabilityStateSnapshotID(capabilityState)
+
+	skillInstruction := "manifest-scoped-skill-marker"
+	runtimeSkills, skillBudget, err := runtimecontract.SealRuntimeSkillContexts([]runtimecontract.RuntimeSkillContext{{
+		ID: "skill-run-scale", Instruction: skillInstruction,
+		Provenance: workorchskillcontract.Provenance{
+			Source: workorchskillcontract.SourceWorkOrchRegistry, Scope: workorchskillcontract.ScopeGlobal,
+			ContentHash: workorchskillcontract.StableContentHash(workorchskillcontract.Content{ID: "skill-run-scale", Instruction: skillInstruction}),
+		},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	facts := runtimecontract.RuntimeFacts{
+		WorkspaceID: "ws-run-scale", RunID: "run-008", DefinitionRevision: "definition-run-scale", EvidenceRevision: runtimecontract.InitialRuntimeEvidenceRevision,
+		Focus:    runtimecontract.CoverageFocus{ID: "focus-run-scale", CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-run-scale"}, TargetRole: "implementation", RequireTargetGrounding: true},
+		Coverage: []runtimecontract.RuntimeCoverageItemFact{{ID: "cwi-run-scale", State: runtimecontract.RuntimeCoverageItemStateOpen}},
+		Capabilities: runtimecontract.RuntimeCapabilities{StateChangeKinds: []string{
+			runtimecontract.RuntimeBlockKindPatchApply, runtimecontract.StepKindGitWrite, runtimecontract.StepKindShellCommand, runtimecontract.StepKindMCPToolCall,
+		}},
+		Resources: runtimecontract.RuntimeResourceFacts{
+			Manifest:        &runtimecontract.WorkspaceManifest{Revision: "workspace-tree-run-scale", TargetRefs: append(append([]string(nil), targetRefs...), "unrelated/private.txt")},
+			TargetSnapshots: targetSnapshots, TargetSelection: &selection, CapabilityStates: []runtimecontract.RuntimeCapabilityStateSnapshot{capabilityState},
+			OperationAdmissibilities: catalogs, PrerequisiteObservations: observations,
+			ProviderCeiling: &runtimecontract.ProviderCeiling{
+				Selection:           runtimecontract.ProviderInferenceSelection{Target: runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "gpt-4o"}},
+				ContextWindowTokens: 256000, ProviderMaxOutputTokens: 29000, EffectiveMaxOutputTokens: 8192, MaxInputTokens: 180000, MaxBytes: 512 * 1024,
+				CapabilityRevision: "capability-run-scale", ConfigurationRevision: "configuration-run-scale",
+			},
+		},
+		Activation: runtimecontract.RuntimeActivationContext{
+			ProviderSelection: runtimecontract.ProviderInferenceSelection{Target: runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "gpt-4o"}}, DialogLanguage: "zh-CN",
+			StageSoulBindings: []runtimecontract.RuntimeStageSoulBinding{{Stage: "execution", Soul: runtimecontract.RuntimeSoulContext{
+				ID: "soul-run-scale", Revision: 1, ContentHash: "soul-run-scale-hash", SourceProvenance: "test", Instructions: "manifest-scoped-soul-marker",
+				AllowedSkillRefs: []string{"*"}, AllowedMCPServerRefs: []string{"*"}, AllowedCapabilityRefs: []string{"*"}, AllowedCapabilityCategories: []string{"*"}, AllowedToolKinds: []string{"*"},
+			}}},
+			Skills: runtimeSkills, SkillContextBudget: skillBudget,
+			MCPServerIDs: []common.MCPServerID{"mcp-unrelated"}, MCPCapabilities: []runtimecontract.RuntimeMCPCapabilityContext{{
+				ID: mcpCapability.ID, ServerID: mcpCapability.ServerID, Kind: mcpCapability.Kind, OperationKind: mcpCapability.OperationKind,
+				Name: mcpCapability.Name, Description: nonManifestMCPMarker + strings.Repeat("a", 8*1024), Enabled: true,
+				EffectScope: mcpCapability.EffectScope, IdempotencyClass: mcpCapability.IdempotencyClass,
+			}},
+			OperationPolicies: []runtimecontract.RuntimeOperationPolicyFact{{
+				ID: "mcp-unrelated-policy", OwnerModuleID: runtimecontract.RuntimeModuleMCP, OperationKind: runtimecontract.StepKindMCPToolCall, SubjectRef: string(mcpCapability.ID),
+				EffectScope: runtimecontract.RuntimeEffectWorkspaceDurable, IdempotencyClass: runtimecontract.RuntimeOperationIdempotencyAtMostOnce,
+			}},
+			Memories: []runtimecontract.RuntimeMemoryContext{{ID: "memory-run-scale", MemoryType: "fact", Content: "manifest-scoped-memory-marker"}},
+			MemorySelection: &workorchmemorycontract.RecallSelectionEvidence{
+				Policy: "test-selection", Status: "selected", CandidateMemoryIDs: []common.MemoryID{"memory-run-scale"},
+				SelectedMemoryIDs: []common.MemoryID{"memory-run-scale"}, RetrievedMemoryIDs: []common.MemoryID{"memory-run-scale"},
+				SelectionScores:     []workorchmemorycontract.RecallSelectionScore{{ID: "memory-run-scale", Score: 1, Reason: "selected"}},
+				RetrievedMemoryHits: []workorchmemorycontract.RecallHit{{ID: "memory-run-scale", Summary: "manifest-scoped-memory-marker"}},
+				ContextBudget:       workorchmemorycontract.RecallContextBudget{MaxItems: 1, MaxBytes: 4096, MaxEstimatedTokens: 1024, UsedItems: 1, UsedBytes: 32, EstimatedTokens: 8},
+			},
+			EvidencePolicies: []runtimecontract.RuntimeEvidencePolicy{{ID: "unrelated-shell-policy", AppliesTo: runtimecontract.StepKindShellCommand, Description: "nonmanifest-shell-policy"}},
+		},
+	}
+	for _, observation := range observations {
+		facts.Prerequisites.Satisfied = append(facts.Prerequisites.Satisfied, runtimecontract.RuntimePrerequisite{
+			ID: observation.PrerequisiteID, Kind: observation.Kind, Scope: runtimecontract.RuntimePrerequisiteScopeGlobal,
+			OwnerModuleID: observation.OwnerModuleID, SubjectRef: "run-scale-owner-catalog", Reason: "run-scale regression freshness fact",
+		})
+	}
+	sealRuntimeProviderTestPolicies(&facts)
+	bindRuntimeCandidateTestSelection(&facts, selection)
+	bindRuntimeCandidateTestFocus(t, &facts, runtimecontract.ConvergenceStateNeedStateChange, []string{runtimecontract.RuntimeBlockKindPatchApply})
+	decision, err := runtimecontract.SealRuntimeDecision(facts, runtimecontract.RuntimeDecision{
+		State: runtimecontract.ConvergenceStateNeedStateChange, Focus: facts.Focus,
+		RequiredOutput: runtimecontract.RequiredOutputContract{
+			AcceptedKinds:             []string{runtimecontract.RuntimeBlockKindPatchApply},
+			AcceptedOperationVariants: []runtimecontract.RuntimeOperationVariantRef{{Kind: runtimecontract.RuntimeBlockKindPatchApply, VariantID: "unified_diff"}},
+			AcceptedEffectScopes:      []runtimecontract.RuntimeEffectScope{runtimecontract.RuntimeEffectWorkspaceDurable}, RequiredEffectScopes: []runtimecontract.RuntimeEffectScope{runtimecontract.RuntimeEffectWorkspaceDurable},
+			CoverageWorkItemIDs: facts.Focus.CoverageWorkItemIDs, RequiredOperationSequence: sequence,
+		},
+	}, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	definition := runtimecontract.RuntimeDefinitionContext{
+		StartupInputHash: "startup-input-run-scale", Revision: facts.DefinitionRevision, GoalID: "goal-run-scale", GoalDefinition: "modify the sealed runtime targets",
+		DoDID: "dod-run-scale", DoDDefinition: "all sealed targets converge", CapabilityContract: []string{runtimecontract.RuntimeBlockKindPatchApply},
+	}
+	prefix := runtimecontract.StableRuntimeCandidatePrefixHashWithExecutionContract(definition, facts.Activation.ExecutionContract)
+	context := runtimecontract.RuntimeCandidateContextForDecision(facts, decision, nil)
+	manifest := runtimeCandidateManifestForRequest(t, decision, context)
+	initial, err := runtimeProviderRequest(llmmodels.RuntimeCandidateRequest{
+		DocumentKind: runtimecontract.RuntimeProviderDocumentOperations, Decision: decision, Transaction: decision.AuthorityTransaction(), StablePrefixHash: prefix,
+		CandidateManifest: manifest, DefinitionContext: definition, CandidateContext: context,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	dynamic := initial.PromptContext.Sections[3].Content
+	for _, retained := range []string{criticalTargetBodyMarker, "manifest-scoped-soul-marker", skillInstruction, "manifest-scoped-memory-marker", `"requiredOperationReferences":["patch-required-00","patch-required-08"]`} {
+		if !strings.Contains(dynamic, retained) {
+			t.Fatalf("manifest-scoped C3 lost %q", retained)
+		}
+	}
+	for _, forbidden := range []string{
+		nonManifestTargetMarker, nonManifestCatalogMarker, nonManifestMCPMarker, rawFreshnessMarker, rawSequenceMarker,
+		`"admissibleOperationKinds"`, `"capabilities"`, `"operationAdmissibilities"`, `"prerequisiteObservations"`, `"capabilityStates"`,
+		`"mcpServerIds"`, `"mcpCapabilities"`, `"evidencePolicyIds"`, "unrelated/private.txt",
+	} {
+		if strings.Contains(dynamic, forbidden) {
+			t.Fatalf("manifest-scoped C3 retained non-manifest/raw value %q", forbidden)
+		}
+	}
+	var rendered struct {
+		Context struct {
+			Resources struct {
+				TargetSnapshots []runtimecontract.TargetSnapshot `json:"targetSnapshots"`
+			} `json:"resources"`
+		} `json:"context"`
+	}
+	if err := json.Unmarshal([]byte(dynamic), &rendered); err != nil {
+		t.Fatal(err)
+	}
+	if len(rendered.Context.Resources.TargetSnapshots) != 17 {
+		t.Fatalf("manifest-scoped target snapshots = %d, want 17", len(rendered.Context.Resources.TargetSnapshots))
+	}
+
+	legacyPayload := map[string]any{}
+	if err := json.Unmarshal([]byte(dynamic), &legacyPayload); err != nil {
+		t.Fatal(err)
+	}
+	legacyContext := legacyPayload["context"].(map[string]any)
+	legacyResources := legacyContext["resources"].(map[string]any)
+	legacyContext["admissibleOperationKinds"] = context.AdmissibleOperationKinds
+	legacyContext["capabilities"] = context.Capabilities
+	legacyResources["manifest"] = context.Resources.Manifest
+	legacyResources["targetSnapshots"] = context.Resources.TargetSnapshots
+	legacyResources["capabilityStates"] = context.Resources.CapabilityStates
+	legacyResources["operationAdmissibilities"] = context.Resources.OperationAdmissibilities
+	legacyResources["prerequisiteObservations"] = context.Resources.PrerequisiteObservations
+	legacyActivation := runtimeCandidateActivationForStage(context.Activation, "execution", manifest.State)
+	legacyActivation.Continuation = nil
+	legacyContext["activation"] = legacyActivation
+	legacyDynamic, err := json.Marshal(legacyPayload)
+	if err != nil {
+		t.Fatal(err)
+	}
+	legacyRequest := initial
+	legacyPrompt := *initial.PromptContext
+	legacyPrompt.Sections = append([]llmmodels.PromptSection(nil), initial.PromptContext.Sections...)
+	legacyPrompt.Sections[3].Content = string(legacyDynamic)
+	legacyRequest.PromptContext = &legacyPrompt
+	legacyWire, err := json.Marshal(legacyRequest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if initial.ContextBudget.ActualBytes*5 >= len(legacyWire)*4 {
+		t.Fatalf("manifest-scoped request did not shrink materially: projected=%d legacy=%d", initial.ContextBudget.ActualBytes, len(legacyWire))
+	}
+
+	retryFailure := runtimecontract.RuntimeCandidateFailure{Class: runtimecontract.RuntimeCandidateFailureClassSchema, Code: "candidate_schema_invalid", Signature: "run-scale-retry"}
+	retryObservation, retryCorrection := runtimeCandidateCorrectionPairForProviderTest(retryFailure, manifest.Hash, "$.operations[0].parameters", "field_present")
+	retry, err := runtimeProviderRequest(llmmodels.RuntimeCandidateRequest{
+		DocumentKind: runtimecontract.RuntimeProviderDocumentOperations, Decision: decision, Transaction: decision.AuthorityTransaction(), CandidateAttempt: 1,
+		CandidateCorrectionObservation: retryObservation, CandidateCorrection: retryCorrection, StablePrefixHash: prefix,
+		CandidateManifest: manifest, DefinitionContext: definition, CandidateContext: context,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for idx := 0; idx <= 3; idx++ {
+		if retry.PromptContext.Sections[idx].Content != initial.PromptContext.Sections[idx].Content {
+			t.Fatalf("same-contract attempt 1 changed C%d", idx)
+		}
+	}
+}
+
+func TestRuntimeCandidateAuthorityProjectionKeepsFileSelectorOnlyBoundedWorkspaceRefs(t *testing.T) {
+	resources := runtimecontract.RuntimeResourceFacts{
+		Manifest: &runtimecontract.WorkspaceManifest{Revision: "workspace-v1", TargetRefs: []string{"a.go", "b.go"}},
+		TargetSnapshots: []runtimecontract.TargetSnapshot{
+			{TargetRef: "a.go", Content: "package a", ContentHash: "hash-a", ContentState: runtimecontract.SnapshotContentStateComplete},
+			{TargetRef: "b.go", Content: "package b", ContentHash: "hash-b", ContentState: runtimecontract.SnapshotContentStateComplete},
+		},
+	}
+	manifest := runtimecontract.RuntimeCandidateContractManifest{Operations: []runtimecontract.RuntimeCandidateOperationManifest{{
+		Kind: runtimecontract.RuntimeBlockKindPatchApply, OwnerModuleID: runtimecontract.RuntimeModuleFile,
+		Target: runtimecontract.RuntimeOperationTargetAuthorization{Policy: runtimecontract.RuntimeOperationTargetPolicyExistingOwnerScope, OwnerSelectorRefs: []string{"file/workspace"}},
+	}}}
+	projection := runtimeCandidateAuthorityResources(resources, manifest)
+	if projection.Manifest == nil || len(projection.Manifest.TargetRefs) != 2 || len(projection.TargetSnapshots) != 2 {
+		t.Fatalf("File selector-only projection lost bounded workspace refs: %+v", projection)
+	}
+
+	nonFileManifest := manifest
+	nonFileManifest.Operations[0].OwnerModuleID = runtimecontract.RuntimeModuleMCP
+	nonFile := runtimeCandidateAuthorityResources(resources, nonFileManifest)
+	if nonFile.Manifest != nil || len(nonFile.TargetSnapshots) != 0 {
+		t.Fatalf("non-File selector-only projection inherited File inventory: %+v", nonFile)
+	}
+}
+
+func TestRuntimeCandidateAuthorityActivationKeepsOnlyManifestCatalogMCP(t *testing.T) {
+	selected := runtimecontract.RuntimeMCPCapabilityContext{
+		ID: "mcp-selected:tool:inspect", ServerID: "mcp-selected", Kind: "tool", OperationKind: runtimecontract.StepKindMCPToolCall,
+		Name: "inspect", Enabled: true, EffectScope: string(runtimecontract.RuntimeEffectWorkspaceDurable), IdempotencyClass: string(runtimecontract.RuntimeOperationIdempotencyAtMostOnce),
+	}
+	unrelated := selected
+	unrelated.ID = "mcp-unrelated:tool:inspect"
+	unrelated.ServerID = "mcp-unrelated"
+	catalog := runtimecontract.RuntimeOperationAdmissibility{
+		PrerequisiteID: "mcp-selected-catalog", OwnerModuleID: runtimecontract.RuntimeModuleMCP,
+		OperationKinds: []string{runtimecontract.StepKindMCPToolCall}, MCPCapabilities: []runtimecontract.RuntimeMCPCapabilityContext{selected}, ObservedRevision: "mcp-selected-v1",
+	}
+	catalog.SnapshotID = runtimecontract.StableRuntimeOperationAdmissibilitySnapshotID(catalog)
+	activation := runtimecontract.RuntimeActivationContext{
+		MCPServerIDs:    []common.MCPServerID{selected.ServerID, unrelated.ServerID},
+		MCPCapabilities: []runtimecontract.RuntimeMCPCapabilityContext{selected, unrelated},
+		OperationPolicies: []runtimecontract.RuntimeOperationPolicyFact{
+			{ID: "selected-policy", OwnerModuleID: runtimecontract.RuntimeModuleMCP, OperationKind: runtimecontract.StepKindMCPToolCall, SubjectRef: string(selected.ID), EffectScope: runtimecontract.RuntimeEffectWorkspaceDurable, IdempotencyClass: runtimecontract.RuntimeOperationIdempotencyAtMostOnce},
+			{ID: "unrelated-policy", OwnerModuleID: runtimecontract.RuntimeModuleMCP, OperationKind: runtimecontract.StepKindMCPToolCall, SubjectRef: string(unrelated.ID), EffectScope: runtimecontract.RuntimeEffectWorkspaceDurable, IdempotencyClass: runtimecontract.RuntimeOperationIdempotencyAtMostOnce},
+		},
+		Memories: []runtimecontract.RuntimeMemoryContext{{ID: "memory-selected", Content: "memory-marker"}},
+	}
+	manifest := runtimecontract.RuntimeCandidateContractManifest{
+		State: runtimecontract.ConvergenceStateNeedStateChange,
+		Operations: []runtimecontract.RuntimeCandidateOperationManifest{{
+			Kind: runtimecontract.StepKindMCPToolCall, OwnerModuleID: runtimecontract.RuntimeModuleMCP, AdmissibilitySnapshotRefs: []string{catalog.SnapshotID},
+		}},
+	}
+	projection := runtimeCandidateAuthorityActivationForManifest(activation, runtimecontract.RuntimeResourceFacts{OperationAdmissibilities: []runtimecontract.RuntimeOperationAdmissibility{catalog}}, manifest)
+	if len(projection.MCPCapabilities) != 1 || projection.MCPCapabilities[0].ID != selected.ID ||
+		len(projection.MCPServerIDs) != 1 || projection.MCPServerIDs[0] != selected.ServerID {
+		t.Fatalf("manifest MCP activation projection = %+v", projection)
+	}
+	if len(projection.Memories) != 1 || projection.Memories[0].ID != "memory-selected" {
+		t.Fatalf("manifest activation lost sealed memory: %+v", projection.Memories)
+	}
+}
+
+func TestValidateRuntimeCandidateManifestSupportingFactsRequiresCanonicalExactBindings(t *testing.T) {
+	capability := runtimecontract.RuntimeCapabilityStateSnapshot{
+		RequirementID: "capability-state-1", AcquisitionKey: "acquisition-1", AcquisitionBinding: "binding-1",
+		OwnerModuleID: runtimecontract.RuntimeModuleFile, CapabilityStateKind: "workspace_tree", SubjectRef: "workspace",
+		ObservedRevision: "workspace-v1", ContentHash: "workspace-hash-v1", Disposition: runtimecontract.RuntimeCapabilityStateReady,
+		QueryReceiptRef: "query-receipt-1",
+	}
+	capability.SnapshotID = runtimecontract.StableRuntimeCapabilityStateSnapshotID(capability)
+	catalog := runtimecontract.RuntimeOperationAdmissibility{
+		PrerequisiteID: "admissibility-file-read", OwnerModuleID: runtimecontract.RuntimeModuleFile,
+		OperationKinds: []string{runtimecontract.StepKindFileRead}, TargetRefs: []string{"main.go"}, ObservedRevision: "workspace-v1",
+	}
+	catalog.SnapshotID = runtimecontract.StableRuntimeOperationAdmissibilitySnapshotID(catalog)
+	manifest := runtimecontract.RuntimeCandidateContractManifest{Operations: []runtimecontract.RuntimeCandidateOperationManifest{{
+		Kind: runtimecontract.StepKindFileRead, OwnerModuleID: runtimecontract.RuntimeModuleFile,
+		PrerequisiteSnapshotRefs: []string{capability.SnapshotID}, AdmissibilitySnapshotRefs: []string{catalog.SnapshotID},
+	}}}
+	resources := runtimecontract.RuntimeResourceFacts{
+		CapabilityStates:         []runtimecontract.RuntimeCapabilityStateSnapshot{capability},
+		OperationAdmissibilities: []runtimecontract.RuntimeOperationAdmissibility{catalog},
+	}
+	if err := validateRuntimeCandidateManifestSupportingFacts(manifest, resources); err != nil {
+		t.Fatalf("canonical supporting facts: %v", err)
+	}
+
+	driftedCapability := resources
+	driftedCapability.CapabilityStates = append([]runtimecontract.RuntimeCapabilityStateSnapshot(nil), resources.CapabilityStates...)
+	driftedCapability.CapabilityStates[0].ContentHash = "workspace-hash-drifted"
+	if err := validateRuntimeCandidateManifestSupportingFacts(manifest, driftedCapability); err == nil || !strings.Contains(err.Error(), "drifted content") {
+		t.Fatalf("drifted capability-state error = %v", err)
+	}
+
+	wrongOwner := manifest
+	wrongOwner.Operations = append([]runtimecontract.RuntimeCandidateOperationManifest(nil), manifest.Operations...)
+	wrongOwner.Operations[0].OwnerModuleID = runtimecontract.RuntimeModuleShell
+	if err := validateRuntimeCandidateManifestSupportingFacts(wrongOwner, resources); err == nil || !strings.Contains(err.Error(), "does not support manifest owner/kind") {
+		t.Fatalf("wrong admissibility owner error = %v", err)
 	}
 }
 
@@ -1856,7 +2230,7 @@ func TestRuntimeCandidateRetryExplainsOperationShapeReplayWithoutChangingStableP
 		t.Fatal("retry projection is nil")
 	}
 	for _, want := range []string{
-		"context.rejectedOperationShapes", "context.noProgressOperationShapes", "exact correction alternative",
+		"rejectedOperationShapes", "noProgressOperationShapes", "C4 execution-tail object", "exact correction alternative",
 		`"support.go"`, "Changing only an operation ID",
 	} {
 		if !strings.Contains(retry.Instruction, want) {
@@ -1950,7 +2324,7 @@ func TestRuntimeTargetSelectionInstructionIsLimitedToFileScopes(t *testing.T) {
 	}
 }
 
-func TestRuntimeCandidateContextProjectionPreservesRepairDirectiveAuthority(t *testing.T) {
+func TestRuntimeCandidateAuthorityProjectionPreservesRepairDirectiveAuthority(t *testing.T) {
 	directive := runtimecontract.RuntimeRepairDirective{
 		ID: "repair-1", FocusID: "focus-1", Trigger: runtimecontract.RuntimeRepairTriggerRejectedValidation,
 		RequiredState:         runtimecontract.ConvergenceStateNeedStateChange,
@@ -1974,7 +2348,7 @@ func TestRuntimeCandidateContextProjectionPreservesRepairDirectiveAuthority(t *t
 		RequiredEvidenceKinds: directive.RequiredEvidenceKinds, RepairDirective: &directive,
 		AdmissibleOperationKinds: []string{runtimecontract.StepKindFileWrite},
 	}
-	projection := buildRuntimeCandidateContextProjection(context, runtimeCandidateContextManifest(runtimecontract.ConvergenceStateNeedStateChange, runtimecontract.StepKindFileWrite))
+	projection := runtimeCandidateAuthorityContextProjection(context, runtimeCandidateContextManifest(runtimecontract.ConvergenceStateNeedStateChange, runtimecontract.StepKindFileWrite))
 	if projection.RequiredState != runtimecontract.ConvergenceStateNeedStateChange || projection.RepairDirective == nil {
 		t.Fatalf("projection lost repair authority: %+v", projection)
 	}
@@ -1998,7 +2372,7 @@ func TestRuntimeCandidateContextProjectionPreservesRepairDirectiveAuthority(t *t
 	}
 }
 
-func TestRuntimeCandidateContextProjectionPreservesTargetGroundingInVolatileAuthority(t *testing.T) {
+func TestRuntimeCandidateAuthorityProjectionPreservesManifestScopedTargetGrounding(t *testing.T) {
 	context := runtimecontract.RuntimeCandidateContext{
 		WorkspaceID: "ws-1", RunID: "run-1", DefinitionRevision: "definition-1", EvidenceRevision: "evidence-1",
 		Focus: runtimecontract.CoverageFocus{
@@ -2015,14 +2389,26 @@ func TestRuntimeCandidateContextProjectionPreservesTargetGroundingInVolatileAuth
 		},
 	}
 	context.Resources.TargetSelection.SnapshotID = runtimecontract.StableRuntimeTargetSelectionSnapshotID(*context.Resources.TargetSelection)
-	projection := buildRuntimeCandidateContextProjection(context, runtimeCandidateContextManifest(runtimecontract.ConvergenceStateNeedStateChange, runtimecontract.RuntimeBlockKindPatchApply))
+	manifest := runtimeCandidateContextManifest(runtimecontract.ConvergenceStateNeedStateChange, runtimecontract.RuntimeBlockKindPatchApply)
+	manifest.TargetRefs = []string{"implementation.go", "support.go"}
+	manifest.Operations[0].OwnerModuleID = runtimecontract.RuntimeModuleFile
+	manifest.Operations[0].Target = runtimecontract.RuntimeOperationTargetAuthorization{
+		Policy: runtimecontract.RuntimeOperationTargetPolicyExistingOwnerScope, OwnerScopeTargetRefs: []string{"implementation.go", "support.go"}, OwnerSelectorRefs: []string{"file/workspace_deliverable"},
+	}
+	manifest.Operations[0].PrerequisiteSnapshotRefs = []string{context.Resources.TargetSelection.SnapshotID}
+	projection := runtimeCandidateAuthorityContextProjection(context, manifest)
 	encoded, err := json.Marshal(projection)
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, required := range []string{`"TargetRole":"implementation"`, `"TargetRefs":["implementation.go"]`, `"TargetDiscoverySources":["workspace_manifest"]`, `"RequireTargetGrounding":true`, `"failureTarget"`, `"TargetObservation"`, `"ownerModuleId":"blocks/mcp"`, `"observedRevision":"mcp-server-v1"`, `"targetSelection"`, `"scope"`, `"support.go"`} {
+	for _, required := range []string{`"TargetRole":"implementation"`, `"TargetRefs":["implementation.go"]`, `"TargetDiscoverySources":["workspace_manifest"]`, `"RequireTargetGrounding":true`, `"failureTarget"`, `"signature":"validation-failure"`, `"targetSelection"`, `"scope"`, `"support.go"`} {
 		if !strings.Contains(string(encoded), required) {
 			t.Fatalf("volatile target-grounding context lost %s: %s", required, encoded)
+		}
+	}
+	for _, forbidden := range []string{`"TargetObservation"`, `"ownerModuleId":"blocks/mcp"`, `"observedRevision":"mcp-server-v1"`} {
+		if strings.Contains(string(encoded), forbidden) {
+			t.Fatalf("manifest-scoped target projection leaked raw owner observation %s: %s", forbidden, encoded)
 		}
 	}
 	definition := runtimecontract.RuntimeDefinitionContext{StartupInputHash: "startup-input-test", Revision: "definition-1", GoalID: "goal-1", GoalDefinition: "goal", DoDID: "dod-1", DoDDefinition: "dod"}
@@ -2054,10 +2440,10 @@ func TestRuntimeCandidateSchemasAreActionSpecific(t *testing.T) {
 	if strings.Contains(catalog, "produce_state_change or produce_validation") || strings.Contains(catalog, "produce only those missing evidence kinds") {
 		t.Fatalf("candidate catalog retains conflicting action guidance: %s", catalog)
 	}
-	if !strings.Contains(catalog, "sole canonical decision authority") || !strings.Contains(catalog, "completion-audit information only") {
+	if !strings.Contains(catalog, "sole canonical decision authority") || !strings.Contains(catalog, "requiredEvidenceKinds declares the current evidence obligation") {
 		t.Fatalf("candidate catalog lost repair authority rules: %s", catalog)
 	}
-	if !strings.Contains(catalog, "context.outputContract") || strings.Contains(catalog, "workorch.runtime_candidate.state_change") ||
+	if !strings.Contains(catalog, "current runtime authority's outputContract") || strings.Contains(catalog, "context.outputContract") || strings.Contains(catalog, "workorch.runtime_candidate.state_change") ||
 		strings.Contains(catalog, "dependsOn") || strings.Contains(catalog, "targetRefs") {
 		t.Fatalf("stable catalog retained a second operation contract: %s", catalog)
 	}
@@ -2692,7 +3078,7 @@ func TestRuntimeCandidateManifestDrivesSchemaInstructionAndRetryCorrection(t *te
 			}
 			observation, directive := runtimeCandidateCorrectionPairForProviderTest(runtimecontract.RuntimeCandidateFailure{Class: runtimecontract.RuntimeCandidateFailureClassContract, Code: "candidate_contract_invalid", Signature: "candidate-contract-invalid", Reason: `arbitrary stale error text with parameter "summary"`}, manifest.Hash, "$.operations", "field_present")
 			retry := runtimeCandidateRetryForManifest(1, observation, manifest, directive)
-			if retry == nil || !strings.Contains(retry.Instruction, manifest.Hash) || !strings.Contains(retry.Instruction, "context.outputContract.structuredOutputInstruction") || strings.Contains(retry.Instruction, "arbitrary stale error text") {
+			if retry == nil || !strings.Contains(retry.Instruction, manifest.Hash) || !strings.Contains(retry.Instruction, "outputContract.structuredOutputInstruction") || strings.Contains(retry.Instruction, "context.outputContract") || strings.Contains(retry.Instruction, "arbitrary stale error text") {
 				t.Fatalf("retry correction was not manifest-derived: %+v", retry)
 			}
 		})
@@ -2837,11 +3223,14 @@ func TestRuntimeProviderRequestNarrowsFileScopeAcrossSchemaContextAndRetry(t *te
 	}
 	definition := runtimecontract.RuntimeDefinitionContext{StartupInputHash: "startup-input-test", Revision: "definition-scope", GoalID: "goal-scope", GoalDefinition: "goal", DoDID: "dod-scope", DoDDefinition: "dod"}
 	prefix := runtimecontract.StableRuntimeCandidatePrefixHashWithExecutionContract(definition, facts.Activation.ExecutionContract)
-	request, err := runtimeProviderRequest(llmmodels.RuntimeCandidateRequest{
+	candidateContext := runtimecontract.RuntimeCandidateContextForDecision(facts, decision, nil)
+	manifest := runtimeCandidateManifestForRequest(t, decision, candidateContext)
+	candidateRequest := llmmodels.RuntimeCandidateRequest{
 		DocumentKind: runtimecontract.RuntimeProviderDocumentOperations,
 		Decision:     decision, Transaction: decision.AuthorityTransaction(), StablePrefixHash: prefix, DefinitionContext: definition,
-		CandidateManifest: runtimeCandidateManifestForRequest(t, decision, runtimecontract.RuntimeCandidateContextForDecision(facts, decision, nil)), CandidateContext: runtimecontract.RuntimeCandidateContextForDecision(facts, decision, nil),
-	})
+		CandidateManifest: manifest, CandidateContext: candidateContext,
+	}
+	request, err := runtimeProviderRequest(candidateRequest)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2854,30 +3243,73 @@ func TestRuntimeProviderRequestNarrowsFileScopeAcrossSchemaContextAndRetry(t *te
 		t.Fatalf("scope provider schema did not retain durable File and declared target-bound operation: %s", request.Schema)
 	}
 	dynamic := request.PromptContext.Sections[3].Content
-	for _, required := range []string{`"admissibleOperationKinds":["patch/apply","shell/command"]`, `"operationContracts":[{"kind":"patch/apply"`, `"kind":"shell/command"`, "bounded workspace feasibility scope"} {
+	for _, required := range []string{`"operationContracts":[{"kind":"patch/apply"`, `"kind":"shell/command"`, "bounded workspace feasibility scope"} {
 		if !strings.Contains(dynamic, required) {
 			t.Fatalf("scope provider C3 lost %q: %s", required, dynamic)
 		}
 	}
-	for _, forbidden := range []string{`"kind":"git/write"`} {
+	for _, forbidden := range []string{`"kind":"git/write"`, `"admissibleOperationKinds"`, `"capabilities"`, `"operationAdmissibilities"`, `"prerequisiteObservations"`} {
 		if strings.Contains(dynamic, forbidden) {
 			t.Fatalf("scope provider C3 widened operation contracts to %s: %s", forbidden, dynamic)
 		}
 	}
-	retryManifest := runtimeCandidateManifestForRequest(t, decision, runtimecontract.RuntimeCandidateContextForDecision(facts, decision, nil))
+
+	t.Run("missing or drifted manifest supporting facts fail before provider submission", func(t *testing.T) {
+		missingSelection := candidateRequest
+		missingSelection.CandidateContext.Resources.TargetSelection = nil
+		if _, err := runtimeProviderRequest(missingSelection); err == nil || !strings.Contains(err.Error(), "prerequisite snapshot") || !strings.Contains(err.Error(), "is missing") {
+			t.Fatalf("missing target-selection snapshot error = %v", err)
+		}
+
+		driftedSelection := candidateRequest
+		drifted := *candidateContext.Resources.TargetSelection
+		drifted.ObservedRevision = "workspace-drifted-with-stale-snapshot-id"
+		driftedSelection.CandidateContext.Resources.TargetSelection = &drifted
+		if _, err := runtimeProviderRequest(driftedSelection); err == nil || !strings.Contains(err.Error(), "prerequisite snapshot") || !strings.Contains(err.Error(), "is invalid") {
+			t.Fatalf("drifted target-selection snapshot error = %v", err)
+		}
+
+		admissibilityRef := ""
+		for _, operation := range manifest.Operations {
+			if len(operation.AdmissibilitySnapshotRefs) != 0 {
+				admissibilityRef = operation.AdmissibilitySnapshotRefs[0]
+				break
+			}
+		}
+		if admissibilityRef == "" {
+			t.Fatal("scope manifest has no admissibility snapshot reference")
+		}
+		missingCatalog := candidateRequest
+		missingCatalog.CandidateContext.Resources.OperationAdmissibilities = slices.DeleteFunc(
+			append([]runtimecontract.RuntimeOperationAdmissibility(nil), candidateContext.Resources.OperationAdmissibilities...),
+			func(value runtimecontract.RuntimeOperationAdmissibility) bool {
+				return value.SnapshotID == admissibilityRef
+			},
+		)
+		if _, err := runtimeProviderRequest(missingCatalog); err == nil || !strings.Contains(err.Error(), "admissibility snapshot") || !strings.Contains(err.Error(), "is missing") {
+			t.Fatalf("missing admissibility snapshot error = %v", err)
+		}
+
+		generation, err := (&Biz{}).GenerateCandidate(context.Background(), missingCatalog)
+		if err == nil || generation.Audit == nil || generation.Audit.ProviderSubmitted || generation.Status != llmmodels.RuntimeCandidateStatusFailed {
+			t.Fatalf("missing supporting fact generation = %+v err=%v", generation, err)
+		}
+	})
+
+	retryManifest := manifest
 	retryObservation, retryCorrection := runtimeCandidateCorrectionPairForProviderTest(runtimecontract.RuntimeCandidateFailure{Class: runtimecontract.RuntimeCandidateFailureClassContract, Code: "candidate_target_outside_grounding", Signature: "candidate-target-outside-grounding", Reason: "owner-grounded workspace scope permits only a durable File operation with a concrete target"}, retryManifest.Hash, "$.operations[0].targetRefs", "main.go")
 	retryRequest, err := runtimeProviderRequest(llmmodels.RuntimeCandidateRequest{
 		DocumentKind: runtimecontract.RuntimeProviderDocumentOperations,
 		Decision:     decision, Transaction: decision.AuthorityTransaction(), CandidateAttempt: 1,
 		CandidateCorrectionObservation: retryObservation,
 		CandidateCorrection:            retryCorrection,
-		StablePrefixHash:               prefix, CandidateManifest: retryManifest, DefinitionContext: definition, CandidateContext: runtimecontract.RuntimeCandidateContextForDecision(facts, decision, nil),
+		StablePrefixHash:               prefix, CandidateManifest: retryManifest, DefinitionContext: definition, CandidateContext: candidateContext,
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 	retryTail := retryRequest.PromptContext.Sections[4].Content
-	if !strings.Contains(retryTail, "context.outputContract.structuredOutputInstruction") ||
+	if !strings.Contains(retryTail, "outputContract.structuredOutputInstruction") || strings.Contains(retryTail, "context.outputContract") ||
 		!strings.Contains(retryTail, "sealed manifest hash") || strings.Contains(retryTail, "do not use Git, MCP, Web, or SSH") {
 		t.Fatalf("scope provider retry did not use manifest-bound correction: %s", retryTail)
 	}
@@ -3070,7 +3502,7 @@ func TestRuntimeAssessmentRequestPublishesCanonicalEvidenceRefContract(t *testin
 	}
 	prefix := runtimecontract.StableRuntimeCandidatePrefixHashWithExecutionContract(definition, facts.Activation.ExecutionContract)
 	context := runtimecontract.RuntimeCandidateContextForDecision(facts, decision, nil)
-	projection := buildRuntimeCandidateContextProjection(context, runtimeCandidateManifestForRequest(t, decision, context))
+	projection := runtimeCandidateAuthorityContextProjection(context, runtimeCandidateManifestForRequest(t, decision, context))
 	wantRefs := runtimecontract.AcceptedEvidenceRefsForFocus(facts)
 	if strings.Join(projection.AllowedEvidenceRefs, "|") != strings.Join(wantRefs, "|") || len(wantRefs) != 3 {
 		t.Fatalf("allowed evidence refs = %+v, want %+v", projection.AllowedEvidenceRefs, wantRefs)
@@ -3114,7 +3546,7 @@ func TestRuntimeAssessmentRequestPublishesCanonicalEvidenceRefContract(t *testin
 	}
 }
 
-func TestRuntimeCandidateContextPublishesExactRejectedShapes(t *testing.T) {
+func TestRuntimeCandidateProviderSeparatesAuthorityFromRejectedShapeTail(t *testing.T) {
 	path := "main.go"
 	operation := runtimecontract.RuntimeOperation{ID: "validate-1", Kind: runtimecontract.StepKindFileRead, TargetRefs: []string{path}}
 	facts := runtimecontract.RuntimeFacts{
@@ -3134,17 +3566,28 @@ func TestRuntimeCandidateContextPublishesExactRejectedShapes(t *testing.T) {
 	context := runtimecontract.RuntimeCandidateContextForDecision(facts, decision, []runtimecontract.RuntimeRejectedOperationShape{{
 		Operation: operation, FailureSignature: "sig-1",
 	}})
-	projection := buildRuntimeCandidateContextProjection(context, runtimeCandidateManifestForRequest(t, decision, context))
-	if len(projection.AdmissibleOperationKinds) != 1 || len(projection.RejectedOperationShapes) != 1 || projection.RejectedOperationShapes[0].FailureSignature != "sig-1" {
-		t.Fatalf("candidate admissibility projection = %+v", projection)
-	}
-	payload, err := json.Marshal(projection)
+	manifest := runtimeCandidateManifestForRequest(t, decision, context)
+	authority := runtimeCandidateAuthorityContextProjection(context, manifest)
+	tail := buildRuntimeCandidateExecutionTailProjection(context, 0, nil, manifest, nil)
+	payload, err := json.Marshal(struct {
+		Authority runtimeCandidateAuthorityProjection     `json:"authority"`
+		Tail      runtimeCandidateExecutionTailProjection `json:"tail"`
+	}{Authority: authority, Tail: tail})
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, value := range []string{"rejectedOperationShapes", "validate-1", "file/read", "sig-1", "admissibleOperationKinds"} {
+	for _, value := range []string{"rejectedOperationShapes", "file/read", "sig-1", "main.go"} {
 		if !strings.Contains(string(payload), value) {
-			t.Fatalf("candidate context lost %q: %s", value, payload)
+			t.Fatalf("provider tail lost %q: %s", value, payload)
+		}
+	}
+	authorityPayload, err := json.Marshal(authority)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, forbidden := range []string{"rejectedOperationShapes", "admissibleOperationKinds", "validate-1", "sig-1"} {
+		if strings.Contains(string(authorityPayload), forbidden) {
+			t.Fatalf("C3 authority retained C4/duplicate fact %q: %s", forbidden, authorityPayload)
 		}
 	}
 }

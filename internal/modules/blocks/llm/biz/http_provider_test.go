@@ -80,7 +80,7 @@ func TestHTTPProviderNonStreamingCompletedEmptyPreservesUsageWithoutSecondCall(t
 	if !errors.As(err, &protocolErr) || protocolErr.Code != providerFinalOutputMissingCode || protocolErr.ResponseBytes != len(body) {
 		t.Fatalf("completed-empty error = %#v (%v)", protocolErr, err)
 	}
-	if len(result.Payload) != 0 || result.Usage == nil || result.Usage.InputTokens != 11 ||
+	if len(result.Payload) != 0 || result.Usage == nil || result.Usage.InputTokens != 11 || result.Usage.CacheReadTokens != 3 ||
 		result.Usage.OutputTokens != 7 || result.Usage.TotalTokens != 18 || !result.ProviderSubmitted ||
 		result.PhysicalResponseMode != llmaudit.PhysicalResponseModeNonStreaming || result.ResponseBytes != len(body) {
 		t.Fatalf("completed-empty result = %+v", result)
@@ -103,7 +103,7 @@ func TestHTTPProviderStreamUsesAIProxyResponses(t *testing.T) {
 		_, _ = w.Write([]byte("data: {\"type\":\"response.reasoning_summary_text.delta\",\"delta\":\"hidden reasoning\"}\n\n"))
 		_, _ = w.Write([]byte("data: {\"type\":\"response.output_text.delta\",\"delta\":\"{\\\"ok\\\":\"}\n\n"))
 		_, _ = w.Write([]byte("data: {\"type\":\"response.output_text.delta\",\"delta\":\"true}\"}\n\n"))
-		_, _ = w.Write([]byte("data: {\"type\":\"response.completed\",\"response\":{\"status\":\"completed\",\"usage\":{\"input_tokens\":3,\"output_tokens\":2,\"total_tokens\":5}}}\n\n"))
+		_, _ = w.Write([]byte("data: {\"type\":\"response.completed\",\"response\":{\"status\":\"completed\",\"usage\":{\"input_tokens\":3,\"input_tokens_details\":{\"cached_tokens\":2},\"output_tokens\":2,\"total_tokens\":5}}}\n\n"))
 	}))
 	defer server.Close()
 
@@ -119,11 +119,129 @@ func TestHTTPProviderStreamUsesAIProxyResponses(t *testing.T) {
 	if !got.Stream {
 		t.Fatal("stream = false, want true")
 	}
-	if string(result.Payload) != `{"ok":true}` || result.Usage == nil || result.Usage.TotalTokens != 5 || !result.ProviderSubmitted || result.PhysicalResponseMode != llmaudit.PhysicalResponseModeStreaming {
+	if string(result.Payload) != `{"ok":true}` || result.Usage == nil || result.Usage.TotalTokens != 5 || result.Usage.CacheReadTokens != 2 || !result.ProviderSubmitted || result.PhysicalResponseMode != llmaudit.PhysicalResponseModeStreaming {
 		t.Fatalf("result = %+v", result)
 	}
 	if len(events) != 3 || events[0].Delta != `{"ok":` || events[2].Type != "done" {
 		t.Fatalf("events = %+v", events)
+	}
+}
+
+func TestHTTPProviderStreamReasoningOnlyCompletedKeepsUsageAndMissingFinalOutput(t *testing.T) {
+	var calls atomic.Int32
+	body := strings.Join([]string{
+		`data: {"type":"response.reasoning_text.delta","delta":"private reasoning"}`,
+		`data: {"type":"response.reasoning_text.done","text":"private reasoning"}`,
+		`data: {"type":"response.content_part.added","part":{"type":"reasoning_text","text":"private reasoning"}}`,
+		`data: {"type":"response.content_part.done","part":{"type":"reasoning_text","text":"private reasoning"}}`,
+		`data: {"type":"response.output_item.done","item":{"type":"reasoning","content":[{"type":"reasoning_text","text":"private reasoning"}]}}`,
+		`data: {"type":"response.completed","response":{"status":"completed","output":[{"type":"reasoning","content":[{"type":"reasoning_text","text":"private reasoning"}]}],"usage":{"input_tokens":48497,"input_tokens_details":{"cached_tokens":48384},"output_tokens":1206,"output_tokens_details":{"reasoning_tokens":1206},"total_tokens":49703}}}`,
+	}, "\n\n") + "\n\n"
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		calls.Add(1)
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write([]byte(body))
+	}))
+	defer server.Close()
+
+	result, err := NewHTTPProvider(testAIProxyProviderConfig(server.URL+"/v1")).StreamComplete(context.Background(), llmProviderRequest(), nil)
+	var protocolErr *ProviderProtocolError
+	if !errors.As(err, &protocolErr) || protocolErr.Code != providerFinalOutputMissingCode || protocolErr.ResponseBytes != len(body) {
+		t.Fatalf("reasoning-only terminal error = %#v (%v)", protocolErr, err)
+	}
+	if len(result.Payload) != 0 || result.Usage == nil || result.Usage.InputTokens != 48497 ||
+		result.Usage.CacheReadTokens != 48384 || result.Usage.OutputTokens != 1206 || result.Usage.TotalTokens != 49703 ||
+		!result.ProviderSubmitted || result.PhysicalResponseMode != llmaudit.PhysicalResponseModeStreaming || result.ResponseBytes != len(body) {
+		t.Fatalf("reasoning-only terminal result = %+v", result)
+	}
+	if calls.Load() != 1 {
+		t.Fatalf("physical provider calls = %d, want 1", calls.Load())
+	}
+}
+
+func TestResponsesUsageRejectsInvalidCachedInputTokens(t *testing.T) {
+	tests := []struct {
+		name  string
+		usage responsesUsage
+	}{
+		{name: "negative", usage: responsesUsage{InputTokens: 3, InputTokensDetails: responsesInputTokenDetails{CachedTokens: -1}}},
+		{name: "exceeds input", usage: responsesUsage{InputTokens: 3, InputTokensDetails: responsesInputTokenDetails{CachedTokens: 4}}},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			usage, err := test.usage.ProviderUsage()
+			var protocolErr *ProviderProtocolError
+			if usage != nil || !errors.As(err, &protocolErr) || protocolErr.Code != "invalid_response_usage" {
+				t.Fatalf("usage=%+v error=%v, want invalid_response_usage", usage, err)
+			}
+		})
+	}
+}
+
+func TestHTTPProviderRejectsInvalidCachedInputUsageInStreamAndNonStream(t *testing.T) {
+	invalid := []struct {
+		name   string
+		cached int
+	}{
+		{name: "negative", cached: -1},
+		{name: "exceeds input", cached: 4},
+	}
+	for _, mode := range []string{"non-stream", "stream"} {
+		for _, test := range invalid {
+			t.Run(mode+"/"+test.name, func(t *testing.T) {
+				response := responsesResponse{
+					Status:     "completed",
+					OutputText: `{"ok":true}`,
+					Usage: responsesUsage{
+						InputTokens:        3,
+						InputTokensDetails: responsesInputTokenDetails{CachedTokens: test.cached},
+						OutputTokens:       2,
+						TotalTokens:        5,
+					},
+				}
+				encoded, err := json.Marshal(response)
+				if err != nil {
+					t.Fatal(err)
+				}
+				body := encoded
+				contentType := "application/json"
+				if mode == "stream" {
+					encoded, err = json.Marshal(responsesStreamEvent{Type: "response.completed", Response: &response})
+					if err != nil {
+						t.Fatal(err)
+					}
+					body = []byte("data: " + string(encoded) + "\n\n")
+					contentType = "text/event-stream"
+				}
+				server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+					w.Header().Set("Content-Type", contentType)
+					_, _ = w.Write(body)
+				}))
+				defer server.Close()
+
+				provider := NewHTTPProvider(testAIProxyProviderConfig(server.URL))
+				var result llmmodels.ProviderCompletionResult
+				if mode == "stream" {
+					result, err = provider.StreamComplete(context.Background(), llmProviderRequest(), nil)
+				} else {
+					result, err = provider.Complete(context.Background(), llmProviderRequest())
+				}
+				var protocolErr *ProviderProtocolError
+				if !errors.As(err, &protocolErr) || protocolErr.Code != "invalid_response_usage" || protocolErr.ResponseBytes != len(body) {
+					t.Fatalf("invalid cached usage error = %#v (%v)", protocolErr, err)
+				}
+				if !result.ProviderSubmitted || result.ResponseBytes != len(body) || len(result.Payload) != 0 || result.Usage != nil {
+					t.Fatalf("invalid cached usage result = %+v", result)
+				}
+				wantMode := llmaudit.PhysicalResponseModeNonStreaming
+				if mode == "stream" {
+					wantMode = llmaudit.PhysicalResponseModeStreaming
+				}
+				if result.PhysicalResponseMode != wantMode {
+					t.Fatalf("physical response mode = %q, want %q", result.PhysicalResponseMode, wantMode)
+				}
+			})
+		}
 	}
 }
 
@@ -550,6 +668,179 @@ func TestHTTPProviderOmitsBlankAPIKeyAndRedactsProviderErrors(t *testing.T) {
 	}
 }
 
+func TestHTTPProviderStreamWireProgressResetsResponseIdleTimeout(t *testing.T) {
+	const heartbeat = ": keepalive\n\n"
+	terminal := "data: {\"type\":\"response.output_text.done\",\"text\":\"{\\\"ok\\\":true}\"}\n\n" +
+		"data: {\"type\":\"response.completed\",\"response\":{\"status\":\"completed\",\"output_text\":\"{\\\"ok\\\":true}\",\"usage\":{\"input_tokens\":3,\"input_tokens_details\":{\"cached_tokens\":2},\"output_tokens\":2,\"total_tokens\":5}}}\n\n"
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = io.Copy(io.Discard, r.Body)
+		_ = r.Body.Close()
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(http.StatusOK)
+		flusher, ok := w.(http.Flusher)
+		if !ok {
+			return
+		}
+		flusher.Flush()
+		for range 6 {
+			time.Sleep(40 * time.Millisecond)
+			_, _ = w.Write([]byte(heartbeat))
+			flusher.Flush()
+		}
+		_, _ = w.Write([]byte(terminal))
+		flusher.Flush()
+	}))
+	defer server.Close()
+
+	config := testAIProxyProviderConfig(server.URL)
+	config.Timeout = 200 * time.Millisecond
+	config.HardTimeout = 2 * time.Second
+	result, err := NewHTTPProvider(config).StreamComplete(context.Background(), llmProviderRequest(), nil)
+	if err != nil {
+		t.Fatalf("active stream crossed idle interval: %v", err)
+	}
+	wantBytes := 6*len(heartbeat) + len(terminal)
+	if string(result.Payload) != `{"ok":true}` || result.Usage == nil || result.Usage.CacheReadTokens != 2 ||
+		!result.ProviderSubmitted || result.PhysicalResponseMode != llmaudit.PhysicalResponseModeStreaming || result.ResponseBytes != wantBytes {
+		t.Fatalf("active stream result = %+v, want responseBytes=%d", result, wantBytes)
+	}
+}
+
+func TestHTTPProviderStreamResponseHeaderIdleReturnsTypedOwnerFact(t *testing.T) {
+	started := make(chan struct{})
+	cancelled := make(chan struct{})
+	server := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
+		_, _ = io.Copy(io.Discard, r.Body)
+		_ = r.Body.Close()
+		close(started)
+		<-r.Context().Done()
+		close(cancelled)
+	}))
+	defer server.Close()
+
+	config := testAIProxyProviderConfig(server.URL)
+	config.Timeout = 80 * time.Millisecond
+	config.HardTimeout = 2 * time.Second
+	result, err := NewHTTPProvider(config).StreamComplete(context.Background(), llmProviderRequest(), nil)
+	var transportErr *ProviderTransportError
+	if !errors.As(err, &transportErr) || transportErr.Code != "provider_body_idle_timeout" {
+		t.Fatalf("header idle error = %#v (%v)", transportErr, err)
+	}
+	code, signature := transportErr.RuntimeProviderFailureIdentity()
+	if code != "provider_body_idle_timeout" || signature != "provider-body-idle-timeout" {
+		t.Fatalf("header idle identity = %q/%q", code, signature)
+	}
+	if !result.ProviderSubmitted || result.PhysicalResponseMode != llmaudit.PhysicalResponseModeStreaming ||
+		result.ResponseBytes != 0 || len(result.Payload) != 0 || result.Usage != nil {
+		t.Fatalf("header idle result = %+v", result)
+	}
+	select {
+	case <-started:
+	case <-time.After(time.Second):
+		t.Fatal("request did not reach provider")
+	}
+	select {
+	case <-cancelled:
+	case <-time.After(time.Second):
+		t.Fatal("header idle did not cancel provider request context")
+	}
+}
+
+func TestHTTPProviderStreamBodyIdlePreservesWireCountAndClearsPartialResult(t *testing.T) {
+	const partial = "data: {\"type\":\"response.output_text.delta\",\"delta\":\"provider-private-partial\"}\n\n"
+	cancelled := make(chan struct{})
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = io.Copy(io.Discard, r.Body)
+		_ = r.Body.Close()
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(partial))
+		w.(http.Flusher).Flush()
+		<-r.Context().Done()
+		close(cancelled)
+	}))
+	defer server.Close()
+
+	config := testAIProxyProviderConfig(server.URL)
+	config.Timeout = 80 * time.Millisecond
+	config.HardTimeout = 2 * time.Second
+	result, err := NewHTTPProvider(config).StreamComplete(context.Background(), llmProviderRequest(), nil)
+	var transportErr *ProviderTransportError
+	if !errors.As(err, &transportErr) || transportErr.Code != "provider_body_idle_timeout" {
+		t.Fatalf("body idle error = %#v (%v)", transportErr, err)
+	}
+	if !result.ProviderSubmitted || result.PhysicalResponseMode != llmaudit.PhysicalResponseModeStreaming ||
+		result.ResponseBytes != len(partial) || len(result.Payload) != 0 || result.Usage != nil {
+		t.Fatalf("body idle result = %+v", result)
+	}
+	select {
+	case <-cancelled:
+	case <-time.After(time.Second):
+		t.Fatal("body idle did not cancel provider request context")
+	}
+}
+
+func TestHTTPProviderStreamHardAndParentDeadlinesReturnStableTypedOwnerFact(t *testing.T) {
+	tests := []struct {
+		name          string
+		hardTimeout   time.Duration
+		parentTimeout time.Duration
+	}{
+		{name: "hard ceiling", hardTimeout: 140 * time.Millisecond},
+		{name: "earlier parent deadline", hardTimeout: 2 * time.Second, parentTimeout: 120 * time.Millisecond},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			cancelled := make(chan struct{})
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				_, _ = io.Copy(io.Discard, r.Body)
+				_ = r.Body.Close()
+				w.Header().Set("Content-Type", "text/event-stream")
+				w.WriteHeader(http.StatusOK)
+				flusher := w.(http.Flusher)
+				flusher.Flush()
+				ticker := time.NewTicker(20 * time.Millisecond)
+				defer ticker.Stop()
+				for {
+					select {
+					case <-r.Context().Done():
+						close(cancelled)
+						return
+					case <-ticker.C:
+						_, _ = w.Write([]byte(": active\n\n"))
+						flusher.Flush()
+					}
+				}
+			}))
+			defer server.Close()
+
+			config := testAIProxyProviderConfig(server.URL)
+			config.Timeout = 500 * time.Millisecond
+			config.HardTimeout = test.hardTimeout
+			var ctx context.Context = context.Background()
+			cancel := func() {}
+			if test.parentTimeout > 0 {
+				ctx, cancel = context.WithTimeout(ctx, test.parentTimeout)
+			}
+			defer cancel()
+			result, err := NewHTTPProvider(config).StreamComplete(ctx, llmProviderRequest(), nil)
+			var transportErr *ProviderTransportError
+			if !errors.As(err, &transportErr) || transportErr.Code != "provider_request_timeout" {
+				t.Fatalf("deadline error = %#v (%v)", transportErr, err)
+			}
+			if !result.ProviderSubmitted || result.PhysicalResponseMode != llmaudit.PhysicalResponseModeStreaming ||
+				result.ResponseBytes == 0 || len(result.Payload) != 0 || result.Usage != nil {
+				t.Fatalf("deadline result = %+v", result)
+			}
+			select {
+			case <-cancelled:
+			case <-time.After(time.Second):
+				t.Fatal("deadline did not cancel provider request context")
+			}
+		})
+	}
+}
+
 func TestHTTPProviderCancelsConfiguredDeadline(t *testing.T) {
 	started := make(chan struct{})
 	cancelled := make(chan struct{})
@@ -579,8 +870,9 @@ func TestHTTPProviderCancelsConfiguredDeadline(t *testing.T) {
 	}
 	select {
 	case err := <-completion:
-		if err == nil || !strings.Contains(strings.ToLower(err.Error()), "timeout") {
-			t.Fatalf("error = %v, want deadline timeout", err)
+		var transportErr *ProviderTransportError
+		if !errors.As(err, &transportErr) || transportErr.Code != "provider_request_timeout" {
+			t.Fatalf("error = %#v (%v), want typed deadline", transportErr, err)
 		}
 	case <-time.After(2 * time.Second):
 		t.Fatal("request did not return after deadline")

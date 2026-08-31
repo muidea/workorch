@@ -118,6 +118,12 @@ Cross-owner regression必须证明 concrete receiving-owner Command/Result、wor
 - completion response guard必须从同一sealed provider ceiling/profile派生，并分别覆盖non-stream JSON body与SSE wire；
   SSE还要独立验证content/event/line limits和wire-limit error优先级，embedding使用独立input-profile bound；media type不匹配、
   arithmetic overflow或任一limit breach均形成typed protocol fact，不能通过提高Runtime budget或切换decode路径恢复；
+- streaming timeout必须覆盖 response header idle、body idle、持续正数wire进展跨过一个idle interval仍成功、独立hard/caller
+  deadline，以及每条失败路径的submitted/response-bytes/零partial-content事实；body idle必须保留
+  `provider_body_idle_timeout` exact identity并走既有SM-3/SM-4 transient settlement，不得由adapter重试；
+- operations request projection必须覆盖manifest引用的target-selection、capability-state与operation-admissibility snapshot
+  缺失/内容漂移，以及admissibility owner/kind错配；所有这类完整性失败必须证明`providerSubmitted=false`，不能以空
+  supporting context继续physical call；C0/C4指令中引用的字段路径必须与实际provider-facing分区一致；
 - producer 没有 diagnostic 的普通 accepted fact 才允许 original 为空；
 - unknown code 保留 original 并 typed fail-fast，不能默认 retry、CAS、repair、governance 或 terminal；
 - core classification 必须只消费 typed feasibility/status、sealed operation descriptor 与 Profile declaration。测试需给出相同

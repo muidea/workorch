@@ -4,7 +4,7 @@ Status: normative
 
 Type: core-contract-part
 
-Last Verified: 2026-08-27
+Last Verified: 2026-08-31
 
 ## Typed Request Binding
 
@@ -69,6 +69,13 @@ SSE 不能复用 non-stream body ceiling：合法流可能同时包含增量输�
 completion content ceiling 约束。non-stream 也必须对 provider decoded 的原始 output bytes（含最终交付前会被
 `TrimSpace` 移除的首尾/分段空白）先执行同一 content ceiling，不能以规范化后的较短 payload 绕过 guard。所有加法、
 乘法和 token-to-byte 转换都必须 overflow-safe；capacity 不完整或溢出在 HTTP submission 前 fail closed。
+
+streaming 的 configured timeout 是 response-header/body no-progress guard：从 submission 开始计时，每次读取到正数 wire
+bytes 后重置；持续有界进展不能因为一次 idle interval 的累计 wall time 被误判为 body idle。streaming 同时必须受独立
+hard request deadline（config owner ceiling 与更早 caller deadline 的较小值）约束，禁止 heartbeat 形成无界调用。
+body idle 与 hard deadline 分别形成 typed transport identity；两者都保留 exact `providerSubmitted`/已读
+`ResponseBytes`，但不交付 partial payload/usage，也不由 adapter 自行 retry。non-stream completion 与 embedding 仍以
+configured timeout 约束整次请求。
 
 media type 在读取 body 前校验。bounded reader 只多探测一个 byte 以区分“恰好到上限”和超限；超限时
 `ResponseBytes = limit + 1` 表示 guard 已命中，不代表已读取或允许记录完整 provider body。SSE 的 wire-limit error 必须

@@ -4,7 +4,7 @@ Status: active
 
 Type: capability-block-contract
 
-Last Verified: 2026-08-30
+Last Verified: 2026-08-31
 
 ## 功能范围与边界
 
@@ -45,6 +45,13 @@ workspace/run、logical/physical request identity、document hash、audit 与 us
   endpoint 和未脱敏 diagnostic 不得进入 aggregate 或 audit notification。
 - provider-facing cache 分区以 [Runtime request/cache contract](../../../../docs/00-core/runtime-request-cache-note.md) 为准：
   C0～C2 是连续稳定 prefix，C3～C5 是 current/volatile tail；意外 `stablePrefixHash` 漂移即 rendering defect。
+- operations typed command保留完整 candidate context供owner-local integrity/freshness校验；provider-facing C3只投影sealed
+  manifest命中的target/stage supporting context，不展开raw operation-admissibility、prerequisite-observation或无关owner/MCP
+  catalog，operation vocabulary只来自同一个sealed manifest。manifest引用的supporting snapshot缺失、漂移或owner/kind
+  不匹配时必须在physical submission前返回unsubmitted integrity fact，不能静默投影为空。
+- streaming configured timeout只表示header/body idle interval并随正数wire read重置；独立hard/caller deadline保持整次调用有界。
+  body idle 与hard deadline返回不同typed transport identity，保留submitted/response bytes且丢弃partial payload/usage；adapter
+  不据此发起第二次physical call。
 - catalog control-plane 允许实现内的有界 GET retry；completion、embedding 与 Runtime provider execution 不以 retry/fallback
   发起第二次 physical call。
 
@@ -55,8 +62,8 @@ workspace/run、logical/physical request identity、document hash、audit 与 us
 | concrete completion/embedding producer-consumer | [`pkg/events/messages_test.go`](pkg/events/messages_test.go)、[`biz/owner_provider_command_test.go`](biz/owner_provider_command_test.go)、[`application setupdraft`](../../application/workorchd/biz/appservice/setupdraft/generator_test.go)、[`activation embedding`](../../application/workorchd/biz/appservice/activationports/embedding_test.go) | normal、跨-topic wrong-result、同类型空值、target/physical/vector drift 覆盖 |
 | Runtime result exhaustive union / audit identity | [`pkg/events/runtime_provider_test.go`](pkg/events/runtime_provider_test.go) | 覆盖 normal、invalid、tamper |
 | Runtime exact source / duplicate / concurrent | [`biz/runtime_owner_guard_test.go`](biz/runtime_owner_guard_test.go) | 覆盖 |
-| provider protocol、output bound、stream/non-stream、embedding | [`biz/http_provider_test.go`](biz/http_provider_test.go)、[`biz/http_provider_security_matrix_test.go`](biz/http_provider_security_matrix_test.go) | 仅以本地 `httptest.Server`/fake transport 覆盖主要 wire success/negative edges；不证明真实 ai-proxy、credential 或 upstream 模型兼容性 |
-| candidate framing、schema、correction、cache hash | `biz/runtime_candidate_*_test.go`、`pkg/models/runtime_candidate_correction_test.go`、`biz/provider_prompt_projection_test.go` | 覆盖 schema/semantic witness 分离、failure/correction exact binding 与 C0～C5 identity |
+| provider protocol、output bound、stream/non-stream、embedding | [`biz/http_provider_test.go`](biz/http_provider_test.go)、[`biz/http_provider_security_matrix_test.go`](biz/http_provider_security_matrix_test.go) | 本地覆盖 wire success/negative edges、stream idle/hard deadline、持续进展与 reasoning-only terminal；不证明真实 ai-proxy、credential 或 upstream 模型兼容性 |
+| candidate framing、schema、correction、cache hash | `biz/runtime_candidate_*_test.go`、`pkg/models/runtime_candidate_correction_test.go`、`biz/provider_prompt_projection_test.go` | 覆盖 schema/semantic witness 分离、failure/correction exact binding、manifest-scoped C3 与 C0～C5 identity |
 | active configuration freeze | `TestBizStartFreezesLLMConfigurationForCatalogAndStatus` | 覆盖 |
 | catalog cache/key/concurrent refresh | [`biz/catalog_cache_test.go`](biz/catalog_cache_test.go) | 覆盖 merge、key、auth rotation、capability mapping，以及本地 HTTP transport 的 network/5xx 有界 retry、4xx no-retry、oversize/malformed body、same/cross-origin redirect、fresh→stale→expired LKG |
 | lifecycle / dependency fail-fast | [`module_test.go`](module_test.go)、`TestLLMOwnerStartIsIdempotentAndTeardownClearsLifecycle`、`TestProviderCommandsPublishAuditAndRejectPostBeforePhysicalCall` | 覆盖重复 Start、Stop 清理，以及 Stop 后 completion/embedding/catalog 零 physical call |

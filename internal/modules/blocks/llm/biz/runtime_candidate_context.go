@@ -15,18 +15,22 @@ type runtimeCandidateDefinitionProjection struct {
 	ChangeImpact   *runtimecontract.RuntimeDefinitionChangeImpact `json:"changeImpact,omitempty"`
 }
 
-type runtimeCandidateResourceProjection struct {
-	Manifest                 *runtimecontract.WorkspaceManifest               `json:"manifest,omitempty"`
-	TargetSnapshots          []runtimecontract.TargetSnapshot                 `json:"targetSnapshots,omitempty"`
-	TargetSelection          *runtimecontract.RuntimeTargetSelection          `json:"targetSelection,omitempty"`
-	FailureTarget            *runtimecontract.FailureTarget                   `json:"failureTarget,omitempty"`
-	ValidationScratch        *runtimecontract.ValidationScratch               `json:"validationScratch,omitempty"`
-	CapabilityStates         []runtimecontract.RuntimeCapabilityStateSnapshot `json:"capabilityStates,omitempty"`
-	OperationAdmissibilities []runtimecontract.RuntimeOperationAdmissibility  `json:"operationAdmissibilities,omitempty"`
-	// Freshness metadata is C3 authority input. It must never be moved into
-	// C0-C2 because a resource refresh legitimately changes it between
-	// transactions while the provider cache prefix stays stable.
-	PrerequisiteObservations []runtimecontract.RuntimePrerequisiteObservation `json:"prerequisiteObservations,omitempty"`
+// runtimeCandidateAuthorityResourceProjection is the provider-facing C3 view
+// of current owner facts. The sealed manifest already contains the complete
+// operation catalog, target authorization and freshness snapshot identities,
+// so C3 must not publish the raw owner catalogs or prerequisite-observation
+// ledger a second time. This projection is derived without mutating the
+// EventHub command or persisted Runtime aggregate.
+type runtimeCandidateAuthorityResourceProjection struct {
+	Manifest        *runtimecontract.WorkspaceManifest                `json:"manifest,omitempty"`
+	TargetSnapshots []runtimecontract.TargetSnapshot                  `json:"targetSnapshots,omitempty"`
+	TargetSelection *runtimecontract.RuntimeTargetSelection           `json:"targetSelection,omitempty"`
+	FailureTarget   *runtimeCandidateAuthorityFailureTargetProjection `json:"failureTarget,omitempty"`
+}
+
+type runtimeCandidateAuthorityFailureTargetProjection struct {
+	Signature  string   `json:"signature,omitempty"`
+	TargetRefs []string `json:"targetRefs,omitempty"`
 }
 
 type runtimeCandidateActivationProjection struct {
@@ -42,54 +46,24 @@ type runtimeCandidateActivationProjection struct {
 	Continuation       *runtimecontract.RuntimeContinuationContext   `json:"continuation,omitempty"`
 }
 
-type runtimeCandidateContextProjection struct {
-	WorkspaceID               common.WorkspaceID                              `json:"workspaceId"`
-	RunID                     common.RunID                                    `json:"runId"`
-	DefinitionRevision        string                                          `json:"definitionRevision"`
-	EvidenceRevision          string                                          `json:"evidenceRevision"`
-	Focus                     runtimecontract.CoverageFocus                   `json:"focus"`
-	RequiredState             runtimecontract.ConvergenceState                `json:"requiredState"`
-	RequiredEffectScopes      []runtimecontract.RuntimeEffectScope            `json:"requiredEffectScopes,omitempty"`
-	RequiredEvidenceKinds     []string                                        `json:"requiredEvidenceKinds,omitempty"`
-	RepairDirective           *runtimecontract.RuntimeRepairDirective         `json:"repairDirective,omitempty"`
-	MissingEvidenceKinds      []string                                        `json:"missingEvidenceKinds,omitempty"`
-	AllowedEvidenceRefs       []string                                        `json:"allowedAcceptedEvidenceRefs,omitempty"`
-	Evidence                  runtimecontract.EvidenceLedger                  `json:"evidence"`
-	Assessments               []runtimecontract.RuntimeAssessmentFact         `json:"assessments,omitempty"`
-	Failure                   *runtimecontract.FailureFact                    `json:"failure,omitempty"`
-	AdmissibleOperationKinds  []string                                        `json:"admissibleOperationKinds,omitempty"`
-	RejectedOperationShapes   []runtimecontract.RuntimeRejectedOperationShape `json:"rejectedOperationShapes,omitempty"`
-	NoProgressOperationShapes []runtimecontract.RuntimeRejectedOperationShape `json:"noProgressOperationShapes,omitempty"`
-	Capabilities              runtimecontract.RuntimeCapabilities             `json:"capabilities"`
-	Resources                 runtimeCandidateResourceProjection              `json:"resources"`
-	// TargetSelectionInstruction renders a sealed File-owner creation or bounded
-	// feasibility scope as volatile C3 guidance. It neither creates a concrete
-	// target fact nor grants any operation that the owner has not already
-	// declared admissible.
-	TargetSelectionInstruction string                               `json:"targetSelectionInstruction,omitempty"`
-	Activation                 runtimeCandidateActivationProjection `json:"activation"`
-}
-
 // runtimeCandidateAuthorityProjection is C3: the current sealed authority
 // needed to choose one legal candidate. Historical evidence and retry
 // correction intentionally live in C4 so they cannot pollute the stable
 // prefix or obscure the current focus.
 type runtimeCandidateAuthorityProjection struct {
-	WorkspaceID                common.WorkspaceID                      `json:"workspaceId"`
-	RunID                      common.RunID                            `json:"runId"`
-	DefinitionRevision         string                                  `json:"definitionRevision"`
-	EvidenceRevision           string                                  `json:"evidenceRevision"`
-	Focus                      runtimecontract.CoverageFocus           `json:"focus"`
-	RequiredState              runtimecontract.ConvergenceState        `json:"requiredState"`
-	RequiredEffectScopes       []runtimecontract.RuntimeEffectScope    `json:"requiredEffectScopes,omitempty"`
-	RequiredEvidenceKinds      []string                                `json:"requiredEvidenceKinds,omitempty"`
-	RepairDirective            *runtimecontract.RuntimeRepairDirective `json:"repairDirective,omitempty"`
-	AllowedEvidenceRefs        []string                                `json:"allowedAcceptedEvidenceRefs,omitempty"`
-	AdmissibleOperationKinds   []string                                `json:"admissibleOperationKinds,omitempty"`
-	Capabilities               runtimecontract.RuntimeCapabilities     `json:"capabilities"`
-	Resources                  runtimeCandidateResourceProjection      `json:"resources"`
-	TargetSelectionInstruction string                                  `json:"targetSelectionInstruction,omitempty"`
-	Activation                 runtimeCandidateActivationProjection    `json:"activation"`
+	WorkspaceID                common.WorkspaceID                          `json:"workspaceId"`
+	RunID                      common.RunID                                `json:"runId"`
+	DefinitionRevision         string                                      `json:"definitionRevision"`
+	EvidenceRevision           string                                      `json:"evidenceRevision"`
+	Focus                      runtimecontract.CoverageFocus               `json:"focus"`
+	RequiredState              runtimecontract.ConvergenceState            `json:"requiredState"`
+	RequiredEffectScopes       []runtimecontract.RuntimeEffectScope        `json:"requiredEffectScopes,omitempty"`
+	RequiredEvidenceKinds      []string                                    `json:"requiredEvidenceKinds,omitempty"`
+	RepairDirective            *runtimecontract.RuntimeRepairDirective     `json:"repairDirective,omitempty"`
+	AllowedEvidenceRefs        []string                                    `json:"allowedAcceptedEvidenceRefs,omitempty"`
+	Resources                  runtimeCandidateAuthorityResourceProjection `json:"resources"`
+	TargetSelectionInstruction string                                      `json:"targetSelectionInstruction,omitempty"`
+	Activation                 runtimeCandidateActivationProjection        `json:"activation"`
 }
 
 // runtimeCandidateExecutionTailProjection is C4: bounded current failure,
@@ -169,44 +143,6 @@ type runtimeCandidateFocusReference struct {
 	SliceID string `json:"sliceId,omitempty"`
 }
 
-func buildRuntimeCandidateContextProjection(context runtimecontract.RuntimeCandidateContext, manifest runtimecontract.RuntimeCandidateContractManifest) runtimeCandidateContextProjection {
-	context = context.Normalized()
-	manifest = manifest.Normalized()
-	activation := context.Activation
-	stage := runtimeCandidateStage(manifest.State)
-	stageActivation := runtimeCandidateActivationForStage(activation, stage, manifest.State)
-	facts := runtimecontract.RuntimeFacts{
-		WorkspaceID: context.WorkspaceID, RunID: context.RunID, DefinitionRevision: context.DefinitionRevision,
-		EvidenceRevision: context.EvidenceRevision, Focus: context.Focus, RemainingFocuses: context.RemainingFocuses,
-		Evidence: context.Evidence, Assessments: context.Assessments, Failure: context.Failure,
-		Capabilities: context.Capabilities, Resources: context.Resources, Activation: context.Activation,
-		RepairDirective: context.RepairDirective,
-	}.Normalized()
-	return runtimeCandidateContextProjection{
-		WorkspaceID: context.WorkspaceID, RunID: context.RunID,
-		DefinitionRevision: context.DefinitionRevision, EvidenceRevision: context.EvidenceRevision,
-		Focus:         context.Focus,
-		RequiredState: context.RequiredState, RequiredEffectScopes: append([]runtimecontract.RuntimeEffectScope(nil), context.RequiredEffectScopes...),
-		RequiredEvidenceKinds: append([]string(nil), context.RequiredEvidenceKinds...), RepairDirective: context.RepairDirective,
-		MissingEvidenceKinds: runtimecontract.MissingRequiredEvidenceKinds(facts),
-		AllowedEvidenceRefs:  runtimecontract.AcceptedEvidenceRefsForFocus(facts), Evidence: context.Evidence,
-		Assessments: context.Assessments, Failure: context.Failure,
-		AdmissibleOperationKinds:  runtimeCandidateManifestOperationKinds(manifest),
-		RejectedOperationShapes:   context.RejectedOperationShapes,
-		NoProgressOperationShapes: context.NoProgressOperationShapes,
-		Capabilities:              context.Capabilities,
-		Resources: runtimeCandidateResourceProjection{
-			Manifest: context.Resources.Manifest, TargetSnapshots: context.Resources.TargetSnapshots,
-			TargetSelection: context.Resources.TargetSelection,
-			FailureTarget:   context.Resources.FailureTarget, ValidationScratch: context.Resources.ValidationScratch,
-			CapabilityStates: context.Resources.CapabilityStates, OperationAdmissibilities: context.Resources.OperationAdmissibilities,
-			PrerequisiteObservations: context.Resources.PrerequisiteObservations,
-		},
-		TargetSelectionInstruction: runtimeTargetSelectionInstruction(context.Resources.TargetSelection, manifest.State),
-		Activation:                 stageActivation,
-	}
-}
-
 func runtimeCandidateActivationForStage(activation runtimecontract.RuntimeActivationContext, stage string, state runtimecontract.ConvergenceState) runtimeCandidateActivationProjection {
 	soul := runtimeCandidateSoul(activation, stage)
 	skills := runtimeCandidateSkillsForSoul(activation.Skills, soul)
@@ -239,27 +175,257 @@ func runtimeCandidateEvidencePolicyIDs(policies []runtimecontract.RuntimeEvidenc
 }
 
 func runtimeCandidateAuthorityContextProjection(context runtimecontract.RuntimeCandidateContext, manifest runtimecontract.RuntimeCandidateContractManifest) runtimeCandidateAuthorityProjection {
-	full := buildRuntimeCandidateContextProjection(context, manifest)
-	activation := full.Activation
+	context = context.Normalized()
+	manifest = manifest.Normalized()
+	activation := runtimeCandidateAuthorityActivationForManifest(context.Activation, context.Resources, manifest)
+	resources := runtimeCandidateAuthorityResources(context.Resources, manifest)
+	facts := runtimecontract.RuntimeFacts{
+		WorkspaceID: context.WorkspaceID, RunID: context.RunID, DefinitionRevision: context.DefinitionRevision,
+		EvidenceRevision: context.EvidenceRevision, Focus: context.Focus, RemainingFocuses: context.RemainingFocuses,
+		Evidence: context.Evidence, Assessments: context.Assessments, Failure: context.Failure,
+		Capabilities: context.Capabilities, Resources: context.Resources, Activation: context.Activation,
+		RepairDirective: context.RepairDirective,
+	}.Normalized()
 	// Continuation is retry/history information and belongs exclusively to C4.
 	activation.Continuation = nil
 	return runtimeCandidateAuthorityProjection{
-		WorkspaceID:                full.WorkspaceID,
-		RunID:                      full.RunID,
-		DefinitionRevision:         full.DefinitionRevision,
-		EvidenceRevision:           full.EvidenceRevision,
-		Focus:                      full.Focus,
-		RequiredState:              full.RequiredState,
-		RequiredEffectScopes:       append([]runtimecontract.RuntimeEffectScope(nil), full.RequiredEffectScopes...),
-		RequiredEvidenceKinds:      append([]string(nil), full.RequiredEvidenceKinds...),
-		RepairDirective:            full.RepairDirective,
-		AllowedEvidenceRefs:        append([]string(nil), full.AllowedEvidenceRefs...),
-		AdmissibleOperationKinds:   append([]string(nil), full.AdmissibleOperationKinds...),
-		Capabilities:               full.Capabilities,
-		Resources:                  full.Resources,
-		TargetSelectionInstruction: full.TargetSelectionInstruction,
+		WorkspaceID:                context.WorkspaceID,
+		RunID:                      context.RunID,
+		DefinitionRevision:         context.DefinitionRevision,
+		EvidenceRevision:           context.EvidenceRevision,
+		Focus:                      context.Focus,
+		RequiredState:              context.RequiredState,
+		RequiredEffectScopes:       append([]runtimecontract.RuntimeEffectScope(nil), context.RequiredEffectScopes...),
+		RequiredEvidenceKinds:      append([]string(nil), context.RequiredEvidenceKinds...),
+		RepairDirective:            context.RepairDirective,
+		AllowedEvidenceRefs:        runtimecontract.AcceptedEvidenceRefsForFocus(facts),
+		Resources:                  resources,
+		TargetSelectionInstruction: runtimeTargetSelectionInstruction(resources.TargetSelection, manifest.State),
 		Activation:                 activation,
 	}
+}
+
+func runtimeCandidateAuthorityResources(resources runtimecontract.RuntimeResourceFacts, manifest runtimecontract.RuntimeCandidateContractManifest) runtimeCandidateAuthorityResourceProjection {
+	targetRefs := runtimeCandidateAuthorityTargetRefSet(resources, manifest)
+	snapshotRefs := runtimeCandidateManifestPrerequisiteSnapshotRefSet(manifest)
+	ret := runtimeCandidateAuthorityResourceProjection{
+		Manifest:        runtimeCandidateAuthorityWorkspaceManifest(resources.Manifest, targetRefs),
+		TargetSnapshots: runtimeCandidateAuthorityTargetSnapshots(resources.TargetSnapshots, targetRefs),
+	}
+	if resources.TargetSelection != nil {
+		selection := resources.TargetSelection.Normalized()
+		if runtimeCandidateTargetSelectionMatchesManifest(selection, manifest, snapshotRefs) {
+			ret.TargetSelection = &selection
+		}
+	}
+	if resources.FailureTarget != nil {
+		refs := runtimeCandidateManifestScopedTargetRefs(resources.FailureTarget.TargetRefs, targetRefs)
+		if len(refs) != 0 {
+			ret.FailureTarget = &runtimeCandidateAuthorityFailureTargetProjection{
+				Signature:  resources.FailureTarget.Signature,
+				TargetRefs: refs,
+			}
+		}
+	}
+	return ret
+}
+
+func runtimeCandidateTargetSelectionMatchesManifest(
+	selection runtimecontract.RuntimeTargetSelection,
+	manifest runtimecontract.RuntimeCandidateContractManifest,
+	snapshotRefs map[string]struct{},
+) bool {
+	if _, ok := snapshotRefs[selection.SnapshotID]; ok {
+		return true
+	}
+	for _, operation := range manifest.Operations {
+		for _, selectorRef := range operation.Target.OwnerSelectorRefs {
+			if selectorRef == selection.SelectorRef {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func runtimeCandidateAuthorityTargetRefSet(resources runtimecontract.RuntimeResourceFacts, manifest runtimecontract.RuntimeCandidateContractManifest) map[string]struct{} {
+	manifest = manifest.Normalized()
+	ret := make(map[string]struct{}, len(manifest.TargetRefs))
+	for _, targetRef := range manifest.TargetRefs {
+		ret[targetRef] = struct{}{}
+	}
+	for _, operation := range manifest.Operations {
+		for _, targetRef := range operation.Target.AllowedTargetRefs() {
+			ret[targetRef] = struct{}{}
+		}
+	}
+	for _, requirement := range manifest.RequiredOperationSequence {
+		if requirement.TargetRef != "" {
+			ret[requirement.TargetRef] = struct{}{}
+		}
+	}
+	fileWorkspaceFallback := false
+	fileSelectionMatched := false
+	for _, operation := range manifest.Operations {
+		target := operation.Target.Normalized()
+		if target.Policy != runtimecontract.RuntimeOperationTargetPolicyExistingOwnerScope || len(target.OwnerScopeTargetRefs) != 0 || len(target.OwnerSelectorRefs) == 0 {
+			continue
+		}
+		if operation.OwnerModuleID == runtimecontract.RuntimeModuleFile {
+			fileWorkspaceFallback = true
+		}
+		if resources.TargetSelection == nil {
+			continue
+		}
+		selection := resources.TargetSelection.Normalized()
+		for _, selectorRef := range target.OwnerSelectorRefs {
+			if selectorRef != selection.SelectorRef {
+				continue
+			}
+			// A cross-owner operation may consume a File-owned target selector,
+			// but an unrelated MCP/Shell selector must never inherit File
+			// inventory merely because both use existing_owner_scope.
+			if operation.OwnerModuleID != runtimecontract.RuntimeModuleFile && selection.OwnerModuleID != runtimecontract.RuntimeModuleFile {
+				continue
+			}
+			if operation.OwnerModuleID == runtimecontract.RuntimeModuleFile {
+				fileSelectionMatched = true
+			}
+			for _, targetRef := range append(append([]string(nil), selection.TargetRefs...), selection.CandidateTargetRefs...) {
+				ret[targetRef] = struct{}{}
+			}
+		}
+	}
+	// A selector-only existing-owner scope deliberately delegates final
+	// membership to owner feasibility. It still needs a bounded factual
+	// workspace inventory from which the provider can name a concrete target.
+	// Prefer a matching TargetSelection; when none exists, the File-owned
+	// WorkspaceManifest is the bounded candidate inventory, not an authorization
+	// expansion.
+	if fileWorkspaceFallback && !fileSelectionMatched && resources.Manifest != nil {
+		for _, targetRef := range resources.Manifest.TargetRefs {
+			ret[targetRef] = struct{}{}
+		}
+	}
+	return ret
+}
+
+func runtimeCandidateManifestPrerequisiteSnapshotRefSet(manifest runtimecontract.RuntimeCandidateContractManifest) map[string]struct{} {
+	manifest = manifest.Normalized()
+	ret := make(map[string]struct{})
+	for _, operation := range manifest.Operations {
+		for _, snapshotRef := range operation.PrerequisiteSnapshotRefs {
+			ret[snapshotRef] = struct{}{}
+		}
+	}
+	return ret
+}
+
+func runtimeCandidateAuthorityWorkspaceManifest(manifest *runtimecontract.WorkspaceManifest, targetRefs map[string]struct{}) *runtimecontract.WorkspaceManifest {
+	if manifest == nil || len(targetRefs) == 0 {
+		return nil
+	}
+	refs := runtimeCandidateManifestScopedTargetRefs(manifest.TargetRefs, targetRefs)
+	if len(refs) == 0 {
+		return nil
+	}
+	return &runtimecontract.WorkspaceManifest{Revision: manifest.Revision, TargetRefs: refs}
+}
+
+func runtimeCandidateAuthorityTargetSnapshots(values []runtimecontract.TargetSnapshot, targetRefs map[string]struct{}) []runtimecontract.TargetSnapshot {
+	if len(values) == 0 || len(targetRefs) == 0 {
+		return nil
+	}
+	ret := make([]runtimecontract.TargetSnapshot, 0, len(values))
+	for _, value := range values {
+		if _, ok := targetRefs[value.TargetRef]; ok {
+			ret = append(ret, value)
+		}
+	}
+	if len(ret) == 0 {
+		return nil
+	}
+	return ret
+}
+
+func runtimeCandidateManifestScopedTargetRefs(values []string, targetRefs map[string]struct{}) []string {
+	if len(values) == 0 || len(targetRefs) == 0 {
+		return nil
+	}
+	ret := make([]string, 0, len(values))
+	seen := make(map[string]struct{}, len(values))
+	for _, value := range values {
+		if _, ok := targetRefs[value]; !ok {
+			continue
+		}
+		if _, duplicate := seen[value]; duplicate {
+			continue
+		}
+		seen[value] = struct{}{}
+		ret = append(ret, value)
+	}
+	if len(ret) == 0 {
+		return nil
+	}
+	return ret
+}
+
+func runtimeCandidateAuthorityActivationForManifest(
+	activation runtimecontract.RuntimeActivationContext,
+	resources runtimecontract.RuntimeResourceFacts,
+	manifest runtimecontract.RuntimeCandidateContractManifest,
+) runtimeCandidateActivationProjection {
+	manifest = manifest.Normalized()
+	projected := runtimeCandidateActivationForStage(activation, runtimeCandidateStage(manifest.State), manifest.State)
+	operationKinds := make(map[string]struct{}, len(manifest.Operations))
+	mcpSnapshotRefs := make(map[string]struct{})
+	for _, operation := range manifest.Operations {
+		operationKinds[operation.Kind] = struct{}{}
+		if operation.OwnerModuleID == runtimecontract.RuntimeModuleMCP {
+			for _, snapshotRef := range operation.AdmissibilitySnapshotRefs {
+				mcpSnapshotRefs[snapshotRef] = struct{}{}
+			}
+		}
+	}
+	manifestMCPCapabilityIDs := make(map[common.MCPCapabilityID]struct{})
+	for _, catalog := range runtimecontract.NormalizeRuntimeOperationAdmissibilities(resources.OperationAdmissibilities) {
+		if _, ok := mcpSnapshotRefs[catalog.SnapshotID]; !ok || catalog.OwnerModuleID != runtimecontract.RuntimeModuleMCP {
+			continue
+		}
+		for _, capability := range catalog.MCPCapabilities {
+			if _, ok := operationKinds[capability.OperationKind]; ok {
+				manifestMCPCapabilityIDs[capability.ID] = struct{}{}
+			}
+		}
+	}
+
+	capabilities := make([]runtimecontract.RuntimeMCPCapabilityContext, 0, len(projected.MCPCapabilities))
+	serverIDs := make(map[common.MCPServerID]struct{})
+	for _, capability := range projected.MCPCapabilities {
+		if _, ok := operationKinds[capability.OperationKind]; !ok {
+			continue
+		}
+		if _, ok := manifestMCPCapabilityIDs[capability.ID]; !ok {
+			continue
+		}
+		capabilities = append(capabilities, capability)
+		serverIDs[capability.ServerID] = struct{}{}
+	}
+	projected.MCPCapabilities = capabilities
+	projected.MCPServerIDs = nil
+	for _, serverID := range runtimeCandidateMCPServerIDsForSoul(activation.MCPServerIDs, projected.Soul) {
+		if _, ok := serverIDs[serverID]; ok {
+			projected.MCPServerIDs = append(projected.MCPServerIDs, serverID)
+		}
+	}
+
+	projected.EvidencePolicyIDs = nil
+	for _, policy := range runtimecontract.NormalizeRuntimeEvidencePolicies(activation.EvidencePolicies) {
+		if _, ok := operationKinds[policy.AppliesTo]; ok && policy.ID != "" {
+			projected.EvidencePolicyIDs = append(projected.EvidencePolicyIDs, policy.ID)
+		}
+	}
+	return projected
 }
 
 func buildRuntimeCandidateExecutionTailProjection(

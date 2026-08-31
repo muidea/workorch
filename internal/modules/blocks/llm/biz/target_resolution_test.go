@@ -2,11 +2,29 @@ package llm
 
 import (
 	"testing"
+	"time"
 
 	llmmodels "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/workorchconfig"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
+
+func TestResolveProviderClientSeparatesResponseIdleAndHardTimeout(t *testing.T) {
+	cfg := workorchconfig.DefaultLLMConfig()
+	cfg.AIProxy.BaseURL = "http://provider.example.test"
+	cfg.AIProxy.APIKey = "test-key"
+	cfg.AIProxy.Timeout = "37s"
+	target := runtimecontract.ProviderModelTarget{ProviderID: workorchconfig.BuiltinAIProxyProviderID, ModelID: "model-1"}
+	profile := llmmodels.ResolvedProviderModelProfile{Target: target, EffectiveMaxOutputTokens: 1024}
+
+	resolved, err := ResolveProviderClient(cfg, target, profile)
+	if err != nil {
+		t.Fatalf("ResolveProviderClient: %v", err)
+	}
+	if resolved.Timeout != 37*time.Second || resolved.HardTimeout != workorchconfig.MaxAIProxyTimeout {
+		t.Fatalf("resolved provider timeouts = idle %s hard %s", resolved.Timeout, resolved.HardTimeout)
+	}
+}
 
 func TestResolveProviderModelTargetUsesCatalogOutputCapabilityWithoutLocalCap(t *testing.T) {
 	cfg := testCatalogOutputCeilingConfig("large-output-model")

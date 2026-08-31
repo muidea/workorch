@@ -89,9 +89,10 @@ type LLMOutputRuntimeConfig struct {
 // built-in ai-proxy endpoint.
 const BuiltinAIProxyProviderID = runtimecontract.BuiltinAIProxyProviderID
 
-// AI-proxy request timeout is bounded so a provider call cannot outlive the
-// runtime recovery budget. Keep the default and ceiling in the config owner so
-// CLI, HTTP and startup validation share one contract.
+// AI-proxy timeout is the non-streaming absolute deadline and the streaming
+// response-idle interval. MaxAIProxyTimeout is also the streaming hard-call
+// ceiling, so active wire progress remains bounded. Keep both values in the
+// config owner so CLI, HTTP and startup validation share one contract.
 const (
 	DefaultAIProxyTimeout = "180s"
 	MaxAIProxyTimeout     = 10 * time.Minute

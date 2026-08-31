@@ -15,10 +15,13 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"sync"
+	"time"
 
 	llmmodels "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/llmaudit"
+	"github.com/muidea/workorch/internal/pkg/workorchconfig"
 )
 
 type providerStreamLimits struct {
@@ -31,6 +34,11 @@ const (
 	providerResponseMediaTypeJSON        = "application/json"
 	providerResponseMediaTypeEventStream = "text/event-stream"
 	providerFinalOutputMissingCode       = "final_output_missing"
+)
+
+var (
+	errProviderResponseIdleTimeout = errors.New("provider response became idle")
+	errProviderRequestHardDeadline = errors.New("provider request hard deadline exceeded")
 )
 
 // ProviderHTTPStatusError preserves the provider status code across adapter
@@ -49,8 +57,8 @@ type ProviderProtocolError struct {
 	ResponseBytes int
 }
 
-// ProviderTransportError is the audit-safe boundary for errors returned by
-// http.Client.Do. Standard url.Error values include the requested endpoint,
+// ProviderTransportError is the audit-safe boundary for request/response
+// transport errors. Standard url.Error values include the requested endpoint,
 // while custom transports may include credentials or request fragments. Only
 // a stable category crosses the provider adapter boundary.
 type ProviderTransportError struct {
@@ -126,6 +134,94 @@ type providerResponseLimitReader struct {
 	reader    io.Reader
 	remaining int
 	read      int
+}
+
+// providerResponseIdleGuard owns the response-header/body idle timer for one
+// streaming physical call. Progress records the actual wire-read time, so a
+// timer callback racing a read rechecks the latest timestamp before canceling.
+type providerResponseIdleGuard struct {
+	mu           sync.Mutex
+	timeout      time.Duration
+	lastProgress time.Time
+	timer        *time.Timer
+	cancel       context.CancelCauseFunc
+	stopped      bool
+}
+
+func newProviderResponseIdleGuard(parent context.Context, timeout time.Duration) (context.Context, *providerResponseIdleGuard) {
+	if timeout <= 0 {
+		timeout = defaultProviderTimeout
+	}
+	ctx, cancel := context.WithCancelCause(parent)
+	guard := &providerResponseIdleGuard{timeout: timeout, lastProgress: time.Now(), cancel: cancel}
+	guard.timer = time.AfterFunc(timeout, guard.expire)
+	return ctx, guard
+}
+
+func (g *providerResponseIdleGuard) progress() {
+	if g == nil {
+		return
+	}
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	if g.stopped {
+		return
+	}
+	g.lastProgress = time.Now()
+	g.timer.Reset(g.timeout)
+}
+
+func (g *providerResponseIdleGuard) expire() {
+	if g == nil {
+		return
+	}
+	g.mu.Lock()
+	if g.stopped {
+		g.mu.Unlock()
+		return
+	}
+	remaining := g.timeout - time.Since(g.lastProgress)
+	if remaining > 0 {
+		g.timer.Reset(remaining)
+		g.mu.Unlock()
+		return
+	}
+	g.stopped = true
+	cancel := g.cancel
+	g.mu.Unlock()
+	cancel(errProviderResponseIdleTimeout)
+}
+
+func (g *providerResponseIdleGuard) stop() {
+	if g == nil {
+		return
+	}
+	g.mu.Lock()
+	if g.stopped {
+		g.mu.Unlock()
+		return
+	}
+	g.stopped = true
+	g.timer.Stop()
+	cancel := g.cancel
+	g.mu.Unlock()
+	cancel(nil)
+}
+
+type providerResponseProgressReader struct {
+	reader io.Reader
+	guard  *providerResponseIdleGuard
+}
+
+func (r *providerResponseProgressReader) Read(buffer []byte) (int, error) {
+	n, err := r.reader.Read(buffer)
+	if n > 0 {
+		// The positive read is linearized under the guard before it is returned
+		// to the stream parser. If expiry already owns that lock, the configured
+		// no-progress interval elapsed before this adapter-level Read completed.
+		r.guard.progress()
+	}
+	return n, err
 }
 
 func newProviderResponseLimitReader(reader io.Reader, limit int) *providerResponseLimitReader {
@@ -313,11 +409,10 @@ func providerHTTPClient(source *http.Client) *http.Client {
 	return client
 }
 
-// requestContext makes the configured provider deadline part of the actual
-// request contract. http.Client.Timeout alone can return to the caller while
-// the request context remains live on the server, which leaves a stale active
-// connection during a provider timeout. The derived context is also used by
-// streaming and embedding requests.
+// requestContext keeps non-streaming and embedding calls on the configured
+// absolute timeout. Streaming uses streamRequestContext plus a separate
+// response-idle guard because active wire progress must not consume the idle
+// interval.
 func (p *HTTPProvider) requestContext(ctx context.Context) (context.Context, context.CancelFunc) {
 	if ctx == nil {
 		ctx = context.Background()
@@ -329,6 +424,43 @@ func (p *HTTPProvider) requestContext(ctx context.Context) (context.Context, con
 	return context.WithTimeout(ctx, timeout)
 }
 
+// streamRequestContext applies only the production hard ceiling. The parent
+// context remains authoritative when it has an earlier deadline.
+func (p *HTTPProvider) streamRequestContext(ctx context.Context) (context.Context, context.CancelFunc) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	timeout := p.config.HardTimeout
+	if timeout <= 0 {
+		timeout = workorchconfig.MaxAIProxyTimeout
+	}
+	return context.WithTimeoutCause(ctx, timeout, errProviderRequestHardDeadline)
+}
+
+func providerRequestContextError(ctx context.Context) error {
+	if ctx == nil {
+		return nil
+	}
+	cause := context.Cause(ctx)
+	switch {
+	case errors.Is(cause, errProviderResponseIdleTimeout):
+		return &ProviderTransportError{Code: "provider_body_idle_timeout", cause: cause}
+	case errors.Is(cause, errProviderRequestHardDeadline), errors.Is(cause, context.DeadlineExceeded):
+		return &ProviderTransportError{Code: "provider_request_timeout", cause: cause}
+	case errors.Is(cause, context.Canceled):
+		return &ProviderTransportError{Code: "request_canceled", cause: cause}
+	default:
+		return nil
+	}
+}
+
+func providerRequestErrorWithContext(err error, ctx context.Context) error {
+	if contextual := providerRequestContextError(ctx); contextual != nil {
+		return contextual
+	}
+	return providerRequestError(err)
+}
+
 func providerRequestError(err error) error {
 	if err == nil {
 		return nil
@@ -338,7 +470,7 @@ func providerRequestError(err error) error {
 		return &ProviderProtocolError{Code: protocolErr.Code, ResponseBytes: protocolErr.ResponseBytes}
 	}
 	if errors.Is(err, context.DeadlineExceeded) {
-		return fmt.Errorf("llm provider request timeout: %w", context.DeadlineExceeded)
+		return &ProviderTransportError{Code: "provider_request_timeout", cause: context.DeadlineExceeded}
 	}
 	if errors.Is(err, context.Canceled) {
 		return &ProviderTransportError{Code: "request_canceled", cause: context.Canceled}
@@ -495,8 +627,10 @@ func (p *HTTPProvider) streamResponses(ctx context.Context, request llmmodels.Pr
 		return llmmodels.ProviderCompletionResult{}, err
 	}
 	result := llmmodels.ProviderCompletionResult{RequestBytes: len(payload)}
-	requestCtx, cancel := p.requestContext(ctx)
-	defer cancel()
+	hardCtx, cancelHard := p.streamRequestContext(ctx)
+	defer cancelHard()
+	requestCtx, idleGuard := newProviderResponseIdleGuard(hardCtx, p.config.Timeout)
+	defer idleGuard.stop()
 	httpReq, err := http.NewRequestWithContext(requestCtx, http.MethodPost, endpoint, bytes.NewReader(payload))
 	if err != nil {
 		return result, err
@@ -507,8 +641,9 @@ func (p *HTTPProvider) streamResponses(ctx context.Context, request llmmodels.Pr
 
 	resp, err := dispatchProviderHTTPRequest(p.client, httpReq, &result.ProviderSubmitted)
 	if err != nil {
-		return result, providerRequestError(err)
+		return result, providerRequestErrorWithContext(err, requestCtx)
 	}
+	idleGuard.progress()
 	defer resp.Body.Close()
 	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
 		return result, providerHTTPStatusError(resp.StatusCode)
@@ -516,7 +651,8 @@ func (p *HTTPProvider) streamResponses(ctx context.Context, request llmmodels.Pr
 	if err := validateProviderResponseMediaType(resp.Header, providerResponseMediaTypeEventStream); err != nil {
 		return result, err
 	}
-	limited := newProviderResponseLimitReader(resp.Body, limits.MaxStreamWireBytes)
+	progressReader := &providerResponseProgressReader{reader: resp.Body, guard: idleGuard}
+	limited := newProviderResponseLimitReader(progressReader, limits.MaxStreamWireBytes)
 	content, usage, err := readResponsesStream(limited, emit, providerStreamLimits{
 		MaxContentBytes: limits.MaxContentBytes,
 		MaxDataEvents:   limits.MaxDataEvents,
@@ -530,6 +666,17 @@ func (p *HTTPProvider) streamResponses(ctx context.Context, request llmmodels.Pr
 			result.Payload = nil
 			result.Usage = nil
 			return result, withProviderProtocolResponseBytes(err, result.ResponseBytes)
+		}
+		var outputLimitErr *ProviderOutputLimitError
+		if errors.As(err, &outputLimitErr) {
+			content = providerCompletionContent(request, content)
+			result.Payload = []byte(content)
+			return result, err
+		}
+		if contextual := providerRequestContextError(requestCtx); contextual != nil {
+			result.Payload = nil
+			result.Usage = nil
+			return result, contextual
 		}
 		content = providerCompletionContent(request, content)
 		result.Payload = []byte(content)
@@ -738,9 +885,14 @@ type responsesContentItem struct {
 }
 
 type responsesUsage struct {
-	InputTokens  int `json:"input_tokens,omitempty"`
-	OutputTokens int `json:"output_tokens,omitempty"`
-	TotalTokens  int `json:"total_tokens,omitempty"`
+	InputTokens        int                        `json:"input_tokens,omitempty"`
+	InputTokensDetails responsesInputTokenDetails `json:"input_tokens_details,omitempty"`
+	OutputTokens       int                        `json:"output_tokens,omitempty"`
+	TotalTokens        int                        `json:"total_tokens,omitempty"`
+}
+
+type responsesInputTokenDetails struct {
+	CachedTokens int `json:"cached_tokens,omitempty"`
 }
 
 type providerResponseError struct {
@@ -765,7 +917,8 @@ func (r responsesResponse) Content() string {
 }
 
 func (u responsesUsage) ProviderUsage() (*llmaudit.ProviderUsage, error) {
-	if u.InputTokens < 0 || u.OutputTokens < 0 || u.TotalTokens < 0 {
+	if u.InputTokens < 0 || u.OutputTokens < 0 || u.TotalTokens < 0 ||
+		u.InputTokensDetails.CachedTokens < 0 || u.InputTokensDetails.CachedTokens > u.InputTokens {
 		return nil, providerProtocolError("invalid_response_usage", 0)
 	}
 	if u.InputTokens == 0 && u.OutputTokens == 0 && u.TotalTokens == 0 {
@@ -778,7 +931,12 @@ func (u responsesUsage) ProviderUsage() (*llmaudit.ProviderUsage, error) {
 		}
 		u.TotalTokens = totalTokens
 	}
-	return &llmaudit.ProviderUsage{InputTokens: u.InputTokens, OutputTokens: u.OutputTokens, TotalTokens: u.TotalTokens}, nil
+	return &llmaudit.ProviderUsage{
+		InputTokens:     u.InputTokens,
+		OutputTokens:    u.OutputTokens,
+		TotalTokens:     u.TotalTokens,
+		CacheReadTokens: u.InputTokensDetails.CachedTokens,
+	}, nil
 }
 
 func responsesInputForRequest(request *llmmodels.ProviderRequest) string {

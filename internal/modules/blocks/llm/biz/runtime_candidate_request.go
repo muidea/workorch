@@ -3,6 +3,7 @@ package llm
 import (
 	"encoding/json"
 	"fmt"
+	"slices"
 	"strings"
 
 	llmmodels "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/models"
@@ -32,6 +33,9 @@ func runtimeOperationsProviderRequest(request llmmodels.RuntimeCandidateRequest)
 	manifest := request.CandidateManifest
 	if err := runtimecontract.ValidateRuntimeCandidateContractManifestForSealedDecision(manifest, request.Decision); err != nil {
 		return llmmodels.ProviderRequest{}, fmt.Errorf("runtime candidate contract manifest: %w", err)
+	}
+	if err := validateRuntimeCandidateManifestSupportingFacts(manifest, candidateContext.Resources); err != nil {
+		return llmmodels.ProviderRequest{}, fmt.Errorf("runtime candidate manifest supporting facts: %w", err)
 	}
 	switch request.CandidateAttempt {
 	case 0:
@@ -154,6 +158,63 @@ func runtimeOperationsProviderRequest(request llmmodels.RuntimeCandidateRequest)
 		return providerRequest, fmt.Errorf("runtime candidate request exceeds provider ceiling: %d > %d", len(payload), ceiling.MaxBytes)
 	}
 	return providerRequest, nil
+}
+
+// validateRuntimeCandidateManifestSupportingFacts is a downstream integrity
+// fence, not a manifest compiler. The Orchestrator remains the only owner that
+// selects authority and seals the manifest; the LLM owner only proves that
+// every snapshot identity referenced by that immutable value is still present
+// as the same canonical typed fact before spending a physical provider call.
+func validateRuntimeCandidateManifestSupportingFacts(
+	manifest runtimecontract.RuntimeCandidateContractManifest,
+	resources runtimecontract.RuntimeResourceFacts,
+) error {
+	manifest = manifest.Normalized()
+	resources = resources.Normalized()
+
+	for _, operation := range manifest.Operations {
+		for _, snapshotRef := range operation.PrerequisiteSnapshotRefs {
+			matched := false
+			if resources.TargetSelection != nil && resources.TargetSelection.SnapshotID == snapshotRef {
+				matched = true
+				if err := resources.TargetSelection.Validate(); err != nil {
+					return fmt.Errorf("prerequisite snapshot %q is invalid: %w", snapshotRef, err)
+				}
+			}
+			for _, snapshot := range resources.CapabilityStates {
+				if snapshot.SnapshotID != snapshotRef {
+					continue
+				}
+				matched = true
+				if snapshot.SnapshotID != runtimecontract.StableRuntimeCapabilityStateSnapshotID(snapshot) {
+					return fmt.Errorf("prerequisite snapshot %q has drifted content", snapshotRef)
+				}
+			}
+			if !matched {
+				return fmt.Errorf("prerequisite snapshot %q is missing", snapshotRef)
+			}
+		}
+
+		for _, snapshotRef := range operation.AdmissibilitySnapshotRefs {
+			matched := false
+			for _, catalog := range resources.OperationAdmissibilities {
+				if catalog.SnapshotID != snapshotRef {
+					continue
+				}
+				matched = true
+				if err := catalog.Validate(); err != nil {
+					return fmt.Errorf("admissibility snapshot %q is invalid: %w", snapshotRef, err)
+				}
+				if catalog.OwnerModuleID != operation.OwnerModuleID || !slices.Contains(catalog.OperationKinds, operation.Kind) {
+					return fmt.Errorf("admissibility snapshot %q does not support manifest owner/kind %s/%s", snapshotRef, operation.OwnerModuleID, operation.Kind)
+				}
+			}
+			if !matched {
+				return fmt.Errorf("admissibility snapshot %q is missing", snapshotRef)
+			}
+		}
+	}
+	return nil
 }
 
 func validateRuntimeCandidateContextIntegrity(

@@ -4,7 +4,7 @@ Status: normative
 
 Type: runtime-flow
 
-Last Verified: 2026-08-30
+Last Verified: 2026-08-31
 
 ## Purpose
 
@@ -89,7 +89,7 @@ provider-facing 请求按 cacheability 分层（细则见 `../00-core/runtime-re
 | **C0** | stable runtime prefix（身份、中立 runtime 规则 / schema） | 最高 / 长寿命 |
 | **C1** | workspace definition（Goal/DoD 正文等 definition 快照） | 随 definition revision |
 | **C2** | capability contract / governance 声明 / profile owner-fact postcondition | 声明式稳定 |
-| **C3** | current authority/focus、required output、sealed manifest 与 current owner catalog | 随 authority/decision 变 |
+| **C3** | current authority/focus、required output、sealed manifest 与 manifest-scoped execution context | 随 authority/decision 变 |
 | **C4** | volatile execution tail（failure、recent evidence、attempt diagnostics） | 易变 |
 | **C5** | large refs / trace | ref-only |
 
@@ -102,8 +102,12 @@ provider-facing 请求按 cacheability 分层（细则见 `../00-core/runtime-re
 - raw stream、full provider payload、large artifact 默认 ref-only
 - `StablePrefixHash` 由 definition + execution contract 等稳定输入计算，并随 attempt 持久化
 - `stablePrefixHash` 意外漂移视为 request rendering bug
-- C2 `RuntimeOwnerFactRequirement` 只声明 postcondition；current owner catalog/readiness/recipe identity 留在 C3。
-  assessment、旧 catalog 或 C4 diagnostic 不得回写 C2，也不得由模型宣称事实已满足。
+- C2 `RuntimeOwnerFactRequirement` 只声明 postcondition；operations C3 的 operation vocabulary 只由 sealed manifest
+  投影。完整 owner catalog、admissibility inventory 与 freshness observation 仍留在 aggregate/request-session 本地校验，
+  不能作为第二份 provider 选择合同；只有 manifest 命中的 target snapshot、stage activation 与 bounded supporting fact
+  可以进入 C3。每个 manifest prerequisite/admissibility snapshot ref 必须在完整 typed context 中命中同一 canonical
+  supporting fact，否则请求在 provider submission 前失败。assessment、旧 catalog 或 C4 diagnostic 不得回写 C2，
+  也不得由模型宣称事实已满足。
 
 core 只定义 provider-neutral 分区与审计；provider 私有 cache-control 仅 adapter 层设置。
 
@@ -114,7 +118,8 @@ core 只定义 provider-neutral 分区与审计；provider 私有 cache-control 
 - 当前 focus 与 required evidence / assessment 要求
 - accepted / rejected evidence 摘要与 refs
 - 当前 failure fact（结构化 class/reason/target，而非 raw dump）
-- 已获取的 manifest / target snapshot / capability / ceiling 事实
+- sealed manifest 命中的 target snapshot、stage activation 与 bounded supporting fact；完整 capability/admissibility/freshness
+  inventory 只供 owner-local integrity/freshness 校验，不直接展开给 provider
 - activation 中的 Soul / Skill / MCP / Memory **快照**（已在 bootstrap 封存）
 
 不得默认注入：
