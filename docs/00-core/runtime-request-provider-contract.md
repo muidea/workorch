@@ -174,7 +174,10 @@ hash/ref 绑定上述公共 audit。唯一跨 owner raw-content 例外是 cohere
 只能进入 Orchestrator-private restart-content carrier。该 content 不得进入 EventHub JSON、durable audit、aggregate、eventstream、
 projection、memory 或 C4 prompt。其余 raw、reasoning、decoder message 或可逆片段一律不得跨 owner。empty/invalid 的 attempt-1
 C4 只可引用 sealed manifest/expected-document identity、source observation hash 与 `document_shape` typed witness；complete
-JSON 的 local schema rejection 只引用 field path/rule 等 provider-safe fact。
+JSON 的 local schema rejection 只引用 field path/rule 等 provider-safe fact。若 fixed declared logical parameter 被错误编码为
+另一个 `parameters[]` entry 的 sibling，C4 只可携带 `parameter_entry_encoding` 的 operation/entry index、operation kind、
+container name，以及每个 misplaced parameter 的 name、contract type 与由 type 确定的 wire value field；不得携带 attempt-0
+原值。该事实只授权 provider 重新生成完整文档，不授权 adapter 或 LLM owner 本地搬移并接受原文。
 
 LLM usage Eventstream/read projection 同样必须原样保留 `logicalRequestId`/`physicalCallId`（Runtime request）、
 `providerSubmitted` 与 `physicalResponseMode`；Runtime usage 的两级 identity 必须同时非空且
@@ -183,14 +186,17 @@ LLM usage Eventstream/read projection 同样必须原样保留 `logicalRequestId
 
 attempt 1 只允许改变 C4 中 provider-safe `CandidateRejection` 与 Orchestrator persisted `CorrectionDirective` 的 detached
 `correctionInput` 投影。document-conformance witness 只表达 `$` 上的 `empty_document | invalid_provider_output ->
-one_complete_json_object`；schema witness 只表达 sealed local schema 的 field path/rule；semantic witness 才表达具体合法
+one_complete_json_object`；schema witness 只表达 sealed local schema 的 field path/rule；parameter-entry witness 只表达
+declared logical parameter 从 inline sibling 到 independent named typed entry 的结构重编码；semantic witness 才表达具体合法
 alternative。该投影只有 manifest、objectives 与 concrete witness；persisted `Disposition`/`TerminalCode` 不进入
 LLM command/model/C4，LLM 也不能反构 directive。若修正需要改变 operation authorization、target policy、allowed
 targets、manifest 或 C0～C3，则必须终止 current transaction，等待 SM-2 以新 owner fact 建立新 authority。
 
 prospective target 的 required-owner typed `all_of` constraint 只进入 C3 authority；document/schema mismatch 的普通
 attempt-1 correction 保持 C0～C3、manifest、semantic batch/order 与 stable prefix 不变，C4 只引用
-manifest/CWI/违规 field，不复制 constraint。exact-current File+Shell full-composite `would_not_satisfy` 不生成 C4 或
+manifest/CWI/违规 field 或 parameter-entry typed encoding fact，不复制 constraint。`JSONSchemaResponse` on/off 必须得到完全
+相同的 C0～C4 correction content；capability 只决定 adapter 是否另发 provider schema format。exact-current File+Shell
+full-composite `would_not_satisfy` 不生成 C4 或
 replacement target：它表示 owner contract contradiction，并直接收口为
 `prospective_satisfaction_contract_violated -> semantic_contract_failed`。typed stale 只刷新 owner fact。
 

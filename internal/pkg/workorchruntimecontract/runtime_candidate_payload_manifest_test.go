@@ -130,6 +130,73 @@ func TestDecodeRuntimeCandidatePayloadWithManifestReportsTypedDynamicDiagnostics
 	}
 }
 
+func TestDecodeRuntimeCandidatePayloadWithManifestClassifiesMisnestedDeclaredParameterEntries(t *testing.T) {
+	manifest := mustRuntimeCandidatePayloadManifest(t, RuntimeDecision{
+		State: ConvergenceStateNeedStateChange,
+		RequiredOutput: RequiredOutputContract{
+			AcceptedKinds:        []string{RuntimeBlockKindPatchApply},
+			AcceptedEffectScopes: []RuntimeEffectScope{RuntimeEffectWorkspaceDurable}, RequiredEffectScopes: []RuntimeEffectScope{RuntimeEffectWorkspaceDurable},
+			CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-1"}, TargetRefs: []string{"main.go"},
+		},
+	})
+	malformed := []byte(`{"operations":[{"kind":"patch/apply","bindingRefs":["binding/test/cwi-1"],"targetRefs":["main.go"],"parameters":[{"name":"patchType","string":"file_write"},{"name":"content","string":"secret complete file content","baseHash":"secret-owner-hash","coverageTargets":["cwi-1"],"summary":"secret change summary"}]}]}`)
+	_, err := DecodeRuntimeCandidatePayloadWithManifest(manifest, malformed)
+	var diagnostic *RuntimeCandidatePayloadDiagnostic
+	if !errors.As(err, &diagnostic) {
+		t.Fatalf("malformed parameter entry error=%v, want typed diagnostic", err)
+	}
+	if diagnostic.ViolationKind != RuntimeCandidatePayloadViolationParameterEntryEncoding || len(diagnostic.ParameterEntryEncodings) != 1 || len(diagnostic.Forbidden) != 0 {
+		t.Fatalf("parameter-entry diagnostic=%+v", diagnostic)
+	}
+	encoding := diagnostic.ParameterEntryEncodings[0]
+	wantMisplaced := []RuntimeCandidateMisplacedParameter{
+		{Name: "baseHash", Type: RuntimeOperationParameterTypeString},
+		{Name: "coverageTargets", Type: RuntimeOperationParameterTypeStringList},
+		{Name: "summary", Type: RuntimeOperationParameterTypeString},
+	}
+	if encoding.OperationIndex != 0 || encoding.ParameterIndex != 1 || encoding.OperationKind != RuntimeBlockKindPatchApply ||
+		encoding.ContainerParameterName != "content" || !reflect.DeepEqual(encoding.MisplacedParameters, wantMisplaced) {
+		t.Fatalf("parameter-entry encoding=%+v", encoding)
+	}
+	projected := RuntimeCandidateFailureDiagnosticFromPayloadDiagnostic(diagnostic)
+	if projected == nil || projected.ViolationKind != diagnostic.ViolationKind ||
+		!sameRuntimeCandidateParameterEntryEncodings(projected.ParameterEntryEncodings, diagnostic.ParameterEntryEncodings) {
+		t.Fatalf("provider-safe projection=%+v", projected)
+	}
+	encodedProjection, marshalErr := json.Marshal(projected)
+	if marshalErr != nil {
+		t.Fatal(marshalErr)
+	}
+	for _, secret := range []string{"secret complete file content", "secret-owner-hash", "secret change summary"} {
+		if strings.Contains(string(encodedProjection), secret) {
+			t.Fatalf("provider-safe projection leaked raw value %q: %s", secret, encodedProjection)
+		}
+	}
+	projected.ParameterEntryEncodings[0].MisplacedParameters[0].Name = "mutated"
+	if diagnostic.ParameterEntryEncodings[0].MisplacedParameters[0].Name != "baseHash" {
+		t.Fatal("diagnostic projection aliases nested encoding facts")
+	}
+
+	for name, payload := range map[string]string{
+		"undeclared sibling":    `{"operations":[{"kind":"patch/apply","bindingRefs":["binding/test/cwi-1"],"targetRefs":["main.go"],"parameters":[{"name":"patchType","string":"file_write"},{"name":"content","string":"content","baseHash":"hash","invented":"value"}]}]}`,
+		"wrong sibling type":    `{"operations":[{"kind":"patch/apply","bindingRefs":["binding/test/cwi-1"],"targetRefs":["main.go"],"parameters":[{"name":"patchType","string":"file_write"},{"name":"content","string":"content","baseHash":42}]}]}`,
+		"already named sibling": `{"operations":[{"kind":"patch/apply","bindingRefs":["binding/test/cwi-1"],"targetRefs":["main.go"],"parameters":[{"name":"patchType","string":"file_write"},{"name":"baseHash","string":"hash"},{"name":"content","string":"content","baseHash":"other"}]}]}`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			_, err := DecodeRuntimeCandidatePayloadWithManifest(manifest, []byte(payload))
+			var rejected *RuntimeCandidatePayloadDiagnostic
+			if !errors.As(err, &rejected) || rejected.ViolationKind != "" || len(rejected.ParameterEntryEncodings) != 0 {
+				t.Fatalf("ambiguous payload gained parameter-entry correction authority: diagnostic=%+v err=%v", rejected, err)
+			}
+		})
+	}
+
+	corrected := []byte(`{"operations":[{"kind":"patch/apply","bindingRefs":["binding/test/cwi-1"],"targetRefs":["main.go"],"parameters":[{"name":"patchType","string":"file_write"},{"name":"content","string":"complete file content"},{"name":"baseHash","string":"owner-hash"},{"name":"coverageTargets","stringList":["cwi-1"]},{"name":"summary","string":"change summary"}]}]}`)
+	if _, err := DecodeRuntimeCandidatePayloadWithManifest(manifest, corrected); err != nil {
+		t.Fatalf("independent named typed entries rejected: %v", err)
+	}
+}
+
 func TestDecodeRuntimeCandidatePayloadWithManifestReturnsRejectedBindingFrontier(t *testing.T) {
 	manifest := mustRuntimeCandidatePayloadManifest(t, RuntimeDecision{
 		State: ConvergenceStateNeedStateChange,

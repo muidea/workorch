@@ -108,13 +108,29 @@ type runtimeCandidateCorrectionInputProjection struct {
 }
 
 type runtimeCandidateCorrectionWitnessProjection struct {
-	Dimension            runtimecontract.RuntimeCandidateCorrectionWitnessDimension `json:"dimension"`
-	OperationKind        string                                                     `json:"operationKind,omitempty"`
-	Path                 string                                                     `json:"path"`
-	RejectedValue        string                                                     `json:"rejectedValue,omitempty"`
-	AlternativeValue     string                                                     `json:"alternativeValue"`
-	RejectedShapeHash    string                                                     `json:"rejectedShapeHash,omitempty"`
-	AlternativeShapeHash string                                                     `json:"alternativeShapeHash,omitempty"`
+	Dimension               runtimecontract.RuntimeCandidateCorrectionWitnessDimension `json:"dimension"`
+	OperationKind           string                                                     `json:"operationKind,omitempty"`
+	Path                    string                                                     `json:"path"`
+	RejectedValue           string                                                     `json:"rejectedValue,omitempty"`
+	AlternativeValue        string                                                     `json:"alternativeValue"`
+	RejectedShapeHash       string                                                     `json:"rejectedShapeHash,omitempty"`
+	AlternativeShapeHash    string                                                     `json:"alternativeShapeHash,omitempty"`
+	ParameterEntryEncodings []runtimeCandidateParameterEntryEncodingProjection         `json:"parameterEntryEncodings,omitempty"`
+}
+
+type runtimeCandidateParameterEntryEncodingProjection struct {
+	OperationIndex         int                                                `json:"operationIndex"`
+	ParameterIndex         int                                                `json:"parameterIndex"`
+	OperationKind          string                                             `json:"operationKind"`
+	SourceEntryPath        string                                             `json:"sourceEntryPath"`
+	ContainerParameterName string                                             `json:"containerParameterName"`
+	Entries                []runtimeCandidateParameterEncodingEntryProjection `json:"entries"`
+}
+
+type runtimeCandidateParameterEncodingEntryProjection struct {
+	Name           string                                        `json:"name"`
+	ContractType   runtimecontract.RuntimeOperationParameterType `json:"contractType"`
+	WireValueField string                                        `json:"wireValueField"`
 }
 
 // runtimeTargetSelectionInstruction converts the persisted File-owner
@@ -421,13 +437,15 @@ func runtimeCandidateRetryForManifest(attempt int, observation *runtimecontract.
 	if manifest.Hash != "" {
 		instruction += " Re-read outputContract.structuredOutputInstruction and schema in the C3 current runtime authority for sealed manifest hash " + manifest.Hash + "; they are the only source of allowed fields, kinds, variants, parameters, targets, coverage and dependencies."
 	}
-	if previous.Class == runtimecontract.RuntimeCandidateFailureClassSchema || previous.Class == runtimecontract.RuntimeCandidateFailureClassContract {
+	input := correction.Normalized()
+	if input.Witness.Dimension == runtimecontract.RuntimeCandidateCorrectionWitnessParameterEntryEncoding {
+		instruction += " The previous candidate encoded manifest-declared logical parameters as sibling keys inside another parameters[] entry. Re-emit a fresh complete document: every listed logical parameter must be its own parameters[] item containing exactly name plus the listed typed wireValueField. Keep the container parameter as its own item; do not place logical parameter names beside its value field. Re-generate values from C3 authority and do not copy this diagnostic as output data."
+	} else if previous.Class == runtimecontract.RuntimeCandidateFailureClassSchema || previous.Class == runtimecontract.RuntimeCandidateFailureClassContract {
 		instruction += " The previous candidate shape was rejected. Remove every field or value not permitted by that sealed manifest instead of adding a wrapper, narrative, summary, explanation or convenience parameter."
 	}
 	if runtimeCandidateFailureIsOperationShapeReplay(previous.Code) {
 		instruction += " The previous candidate replayed a rejected or no-progress operation shape. Inspect rejectedOperationShapes and noProgressOperationShapes in the C4 execution-tail object. Changing only an operation ID, narrative, or cosmetic parameter is not sufficient."
 	}
-	input := correction.Normalized()
 	instruction += fmt.Sprintf(" Apply the exact correction alternative %q at %s (%s); an unrelated valid change does not satisfy this retry.", input.Witness.AlternativeValue, input.Witness.Path, input.Witness.Dimension)
 	witness := input.Witness.Normalized()
 	projection := runtimeCandidateCorrectionInputProjection{
@@ -437,9 +455,35 @@ func runtimeCandidateRetryForManifest(attempt int, observation *runtimecontract.
 			Dimension: witness.Dimension, OperationKind: witness.OperationKind, Path: witness.Path,
 			RejectedValue: witness.RejectedValue, AlternativeValue: witness.AlternativeValue,
 			RejectedShapeHash: witness.RejectedShapeHash, AlternativeShapeHash: witness.AlternativeShapeHash,
+			ParameterEntryEncodings: runtimeCandidateParameterEntryEncodingProjections(witness.ParameterEntryEncodings),
 		},
 	}
 	return &runtimeCandidateRetryProjection{PreviousFailure: previous, CorrectionInput: projection, Instruction: instruction}
+}
+
+func runtimeCandidateParameterEntryEncodingProjections(values []runtimecontract.RuntimeCandidateParameterEntryEncodingViolation) []runtimeCandidateParameterEntryEncodingProjection {
+	ret := make([]runtimeCandidateParameterEntryEncodingProjection, 0, len(values))
+	for _, value := range values {
+		value = value.Normalized()
+		projection := runtimeCandidateParameterEntryEncodingProjection{
+			OperationIndex: value.OperationIndex, ParameterIndex: value.ParameterIndex,
+			OperationKind:          value.OperationKind,
+			SourceEntryPath:        fmt.Sprintf("$.operations[%d].parameters[%d]", value.OperationIndex, value.ParameterIndex),
+			ContainerParameterName: value.ContainerParameterName,
+			Entries:                make([]runtimeCandidateParameterEncodingEntryProjection, 0, len(value.MisplacedParameters)),
+		}
+		for _, parameter := range value.MisplacedParameters {
+			wireField, found := runtimecontract.RuntimeOperationParameterWireValueField(parameter.Type)
+			if !found {
+				continue
+			}
+			projection.Entries = append(projection.Entries, runtimeCandidateParameterEncodingEntryProjection{
+				Name: parameter.Name, ContractType: parameter.Type, WireValueField: wireField,
+			})
+		}
+		ret = append(ret, projection)
+	}
+	return ret
 }
 
 func runtimeCandidateFailureIsOperationShapeReplay(code string) bool {

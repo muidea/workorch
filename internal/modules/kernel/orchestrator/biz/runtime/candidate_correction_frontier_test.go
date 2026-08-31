@@ -150,6 +150,88 @@ func TestCandidateCorrectionFrontierPrioritizesMissingRequiredFieldOverSemanticT
 	}
 }
 
+func TestCandidateCorrectionFrontierSealsDeclaredParameterEntryReencode(t *testing.T) {
+	aggregate, candidate := aggregateWithActiveRejectedCandidate(t)
+	manifest, err := runtimecontract.BuildRuntimeCandidateContractManifest(
+		aggregate.Decision,
+		runtimecontract.RuntimeCandidateManifestOwnerFactsFromContext(runtimecontract.RuntimeCandidateContextForDecision(aggregate.Facts, aggregate.Decision, nil)),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	encodings := []runtimecontract.RuntimeCandidateParameterEntryEncodingViolation{{
+		OperationIndex: 0, ParameterIndex: 1, OperationKind: runtimecontract.RuntimeBlockKindPatchApply, ContainerParameterName: "content",
+		MisplacedParameters: []runtimecontract.RuntimeCandidateMisplacedParameter{
+			{Name: "baseHash", Type: runtimecontract.RuntimeOperationParameterTypeString},
+			{Name: "coverageTargets", Type: runtimecontract.RuntimeOperationParameterTypeStringList},
+			{Name: "summary", Type: runtimecontract.RuntimeOperationParameterTypeString},
+		},
+	}}
+	failure := &runtimecontract.RuntimeCandidateFailure{
+		Class: runtimecontract.RuntimeCandidateFailureClassSchema, Code: "candidate_schema_invalid", Signature: "candidate-schema-invalid",
+		Reason: "provider parameter entry has unknown sibling fields",
+		Diagnostic: &runtimecontract.RuntimeCandidateFailureDiagnostic{
+			Path: "$.operations[0].parameters[1].baseHash", Actual: "baseHash",
+			Allowed:                 []string{"name", "string", "integer", "boolean", "stringList"},
+			ViolationKind:           runtimecontract.RuntimeCandidatePayloadViolationParameterEntryEncoding,
+			ParameterEntryEncodings: encodings, ManifestHash: manifest.Hash,
+		},
+	}
+	sealed, correction, err := SealCandidateRejection(failure, manifest)
+	if err != nil || sealed == nil || correction == nil || correction.Disposition != runtimecontract.RuntimeCandidateCorrectionCorrectableOnce || correction.Witness == nil {
+		t.Fatalf("parameter-entry rejection did not seal one correction: failure=%+v correction=%+v err=%v", sealed, correction, err)
+	}
+	if !reflect.DeepEqual(correction.Objectives, []runtimecontract.RuntimeCandidateCorrectionObjective{runtimecontract.RuntimeCandidateCorrectionReencodeParameterEntries}) ||
+		correction.Witness.Dimension != runtimecontract.RuntimeCandidateCorrectionWitnessParameterEntryEncoding ||
+		correction.Witness.Path != "$.operations" ||
+		correction.Witness.RejectedValue != runtimecontract.RuntimeCandidateParameterEncodingInlineSiblings ||
+		correction.Witness.AlternativeValue != runtimecontract.RuntimeCandidateParameterEncodingNamedEntries ||
+		!reflect.DeepEqual(correction.Witness.ParameterEntryEncodings, encodings) {
+		t.Fatalf("parameter-entry correction authority=%+v", correction)
+	}
+	if err := runtimecontract.ValidateRuntimeCandidateFailureCorrectionPair(sealed, correction); err != nil {
+		t.Fatalf("parameter-entry failure/correction lineage rejected: %v", err)
+	}
+
+	coverageTargets := []string{"cwi-1"}
+	summary := "bounded change summary"
+	corrected := candidate
+	corrected.StateChange = &runtimecontract.StateChangeCandidate{Operations: append([]runtimecontract.StateChangingOperation(nil), candidate.StateChange.Operations...)}
+	corrected.StateChange.Operations[0].Operation.Parameters = append(
+		append([]runtimecontract.OperationParameter(nil), candidate.StateChange.Operations[0].Operation.Parameters...),
+		runtimecontract.OperationParameter{Name: "coverageTargets", StringList: coverageTargets},
+		runtimecontract.OperationParameter{Name: "summary", String: &summary},
+	)
+	if !candidateCrossesCorrectionWitness(corrected, manifest, *correction.Witness) {
+		t.Fatal("strictly decoded independent named entries did not cross parameter-entry witness")
+	}
+	missing := corrected
+	missing.StateChange = &runtimecontract.StateChangeCandidate{Operations: append([]runtimecontract.StateChangingOperation(nil), corrected.StateChange.Operations...)}
+	missing.StateChange.Operations[0].Operation.Parameters = append([]runtimecontract.OperationParameter(nil), corrected.StateChange.Operations[0].Operation.Parameters[:len(corrected.StateChange.Operations[0].Operation.Parameters)-1]...)
+	if candidateCrossesCorrectionWitness(missing, manifest, *correction.Witness) {
+		t.Fatal("dropping a misplaced parameter crossed re-encode witness")
+	}
+	wrongType := corrected
+	wrongType.StateChange = &runtimecontract.StateChangeCandidate{Operations: append([]runtimecontract.StateChangingOperation(nil), corrected.StateChange.Operations...)}
+	wrongType.StateChange.Operations[0].Operation.Parameters = append([]runtimecontract.OperationParameter(nil), corrected.StateChange.Operations[0].Operation.Parameters...)
+	for index := range wrongType.StateChange.Operations[0].Operation.Parameters {
+		if wrongType.StateChange.Operations[0].Operation.Parameters[index].Name == "coverageTargets" {
+			value := "cwi-1"
+			wrongType.StateChange.Operations[0].Operation.Parameters[index].StringList = nil
+			wrongType.StateChange.Operations[0].Operation.Parameters[index].String = &value
+		}
+	}
+	if candidateCrossesCorrectionWitness(wrongType, manifest, *correction.Witness) {
+		t.Fatal("wrong typed independent entry crossed re-encode witness")
+	}
+
+	drifted := correction.Clone()
+	drifted.Witness.ParameterEntryEncodings[0].MisplacedParameters[0].Type = runtimecontract.RuntimeOperationParameterTypeBoolean
+	if err := runtimecontract.ValidateRuntimeCandidateFailureCorrectionPair(sealed, drifted); err == nil {
+		t.Fatal("tampered parameter-entry witness survived persisted lineage validation")
+	}
+}
+
 func TestCandidateSchemaFieldPresenceWitnessUsesFieldPresenceNotLiteralValue(t *testing.T) {
 	aggregate, candidate := aggregateWithActiveRejectedCandidate(t)
 	manifest, err := runtimecontract.BuildRuntimeCandidateContractManifest(

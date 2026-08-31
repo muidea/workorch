@@ -107,6 +107,8 @@ func validateRuntimeCandidateCorrectionObjectiveWitnessCompatibility(objectives 
 	switch witness.Dimension {
 	case RuntimeCandidateCorrectionWitnessDocumentShape:
 		compatible = len(objectives) == 1 && objectives[0] == RuntimeCandidateCorrectionConformExpectedDocument
+	case RuntimeCandidateCorrectionWitnessParameterEntryEncoding:
+		compatible = len(objectives) == 1 && objectives[0] == RuntimeCandidateCorrectionReencodeParameterEntries
 	case RuntimeCandidateCorrectionWitnessSchemaField:
 		compatible = hasAny(RuntimeCandidateCorrectionSupplyRequiredField, RuntimeCandidateCorrectionRemoveForbiddenField) &&
 			allowsOnly(
@@ -216,6 +218,14 @@ func validateRuntimeCandidateCorrectionWitnessAgainstObservation(observation Run
 		}
 	case RuntimeCandidateCorrectionWitnessSchemaField:
 		return validateRuntimeCandidateSchemaWitnessAgainstObservation(diagnostic, witness)
+	case RuntimeCandidateCorrectionWitnessParameterEntryEncoding:
+		if observation.Code != "candidate_schema_invalid" ||
+			diagnostic.ViolationKind != RuntimeCandidatePayloadViolationParameterEntryEncoding ||
+			!runtimeCandidateCorrectionHasObjective(diagnostic.Objectives, RuntimeCandidateCorrectionReencodeParameterEntries) ||
+			witness.Path != "$.operations" ||
+			!sameRuntimeCandidateParameterEntryEncodings(diagnostic.ParameterEntryEncodings, witness.ParameterEntryEncodings) {
+			return fmt.Errorf("runtime candidate parameter-entry correction witness differs from observation")
+		}
 	default:
 		// Semantic alternatives come from the Orchestrator-private candidate
 		// frontier. The observation can nevertheless prove that the rejected

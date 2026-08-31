@@ -64,6 +64,9 @@ func candidateCorrectionWitness(
 	if witness := candidateDocumentShapeCorrectionWitness(failure); witness != nil {
 		return witness
 	}
+	if witness := candidateParameterEntryEncodingCorrectionWitness(failure, manifest); witness != nil {
+		return witness
+	}
 	// A strict required-field absence describes the rejected wire shape, not an
 	// operation-semantic alternative. Seal that directly observable fact before
 	// consulting the decoded candidate frontier; otherwise an empty decoded value
@@ -138,6 +141,29 @@ func candidateCorrectionWitness(
 		}
 	}
 	return candidateSchemaCorrectionWitness(failure.Diagnostic, manifest, frontier.candidate)
+}
+
+func candidateParameterEntryEncodingCorrectionWitness(failure *runtimecontract.RuntimeCandidateFailure, manifest runtimecontract.RuntimeCandidateContractManifest) *runtimecontract.RuntimeCandidateCorrectionWitness {
+	if failure == nil || strings.TrimSpace(failure.Code) != "candidate_schema_invalid" || failure.Diagnostic == nil {
+		return nil
+	}
+	diagnostic := failure.Diagnostic.Normalized()
+	if diagnostic.ViolationKind != runtimecontract.RuntimeCandidatePayloadViolationParameterEntryEncoding ||
+		len(diagnostic.ParameterEntryEncodings) == 0 ||
+		runtimecontract.ValidateRuntimeCandidateParameterEntryEncodings(manifest, diagnostic.ParameterEntryEncodings) != nil {
+		return nil
+	}
+	witness := &runtimecontract.RuntimeCandidateCorrectionWitness{
+		Dimension:               runtimecontract.RuntimeCandidateCorrectionWitnessParameterEntryEncoding,
+		Path:                    "$.operations",
+		RejectedValue:           runtimecontract.RuntimeCandidateParameterEncodingInlineSiblings,
+		AlternativeValue:        runtimecontract.RuntimeCandidateParameterEncodingNamedEntries,
+		ParameterEntryEncodings: diagnostic.ParameterEntryEncodings,
+	}
+	if witness.Validate() != nil {
+		return nil
+	}
+	return witness.Clone()
 }
 
 func candidateDocumentShapeCorrectionWitness(failure *runtimecontract.RuntimeCandidateFailure) *runtimecontract.RuntimeCandidateCorrectionWitness {
@@ -816,6 +842,8 @@ func candidateCrossesCorrectionWitness(candidate runtimecontract.RuntimeCandidat
 		// sealed manifest. That admission boundary is the proof that attempt 1
 		// crossed from an empty/invalid/trailing body to one conformant document.
 		return witness.Path == "$" && witness.AlternativeValue == runtimecontract.RuntimeCandidateDocumentShapeConformant
+	case runtimecontract.RuntimeCandidateCorrectionWitnessParameterEntryEncoding:
+		return candidateCrossesParameterEntryEncodingWitness(operations, manifest, witness)
 	case runtimecontract.RuntimeCandidateCorrectionWitnessOperationKind:
 		return hasOperationIndex && operation.Kind == runtimecontract.CanonicalRuntimeBlockKind(witness.AlternativeValue)
 	case runtimecontract.RuntimeCandidateCorrectionWitnessTarget:
@@ -898,6 +926,59 @@ func candidateCrossesCorrectionWitness(candidate runtimecontract.RuntimeCandidat
 	default:
 		return false
 	}
+}
+
+func candidateCrossesParameterEntryEncodingWitness(operations []runtimecontract.RuntimeOperation, manifest runtimecontract.RuntimeCandidateContractManifest, witness runtimecontract.RuntimeCandidateCorrectionWitness) bool {
+	if runtimecontract.ValidateRuntimeCandidateParameterEntryEncodings(manifest, witness.ParameterEntryEncodings) != nil {
+		return false
+	}
+	for _, encoding := range witness.ParameterEntryEncodings {
+		if encoding.OperationIndex < 0 || encoding.OperationIndex >= len(operations) {
+			return false
+		}
+		operation := operations[encoding.OperationIndex].Normalized()
+		if operation.Kind != runtimecontract.CanonicalRuntimeBlockKind(encoding.OperationKind) {
+			return false
+		}
+		operationManifest, found := candidateCorrectionOperationManifest(manifest, operation.Kind)
+		if !found {
+			return false
+		}
+		containerContract, found := candidateCorrectionManifestParameter(operationManifest, encoding.ContainerParameterName)
+		if !found || !candidateCorrectionOperationHasTypedParameter(operation, containerContract.Name, containerContract.Type) {
+			return false
+		}
+		for _, misplaced := range encoding.MisplacedParameters {
+			if !candidateCorrectionOperationHasTypedParameter(operation, misplaced.Name, misplaced.Type) {
+				return false
+			}
+		}
+	}
+	return true
+}
+
+func candidateCorrectionManifestParameter(operation runtimecontract.RuntimeCandidateOperationManifest, name string) (runtimecontract.RuntimeOperationParameterContract, bool) {
+	name = strings.TrimSpace(name)
+	for _, parameter := range operation.Normalized().Parameters {
+		if parameter.Name == name {
+			return parameter, true
+		}
+	}
+	return runtimecontract.RuntimeOperationParameterContract{}, false
+}
+
+func candidateCorrectionOperationHasTypedParameter(operation runtimecontract.RuntimeOperation, name string, parameterType runtimecontract.RuntimeOperationParameterType) bool {
+	count := 0
+	for _, parameter := range operation.Parameters {
+		if strings.TrimSpace(parameter.Name) != strings.TrimSpace(name) {
+			continue
+		}
+		count++
+		if !runtimecontract.RuntimeOperationParameterMatchesContractType(parameter, parameterType) {
+			return false
+		}
+	}
+	return count == 1
 }
 
 func candidateCrossesSchemaFieldWitness(candidate runtimecontract.RuntimeCandidate, manifest runtimecontract.RuntimeCandidateContractManifest, operations []runtimecontract.RuntimeOperation, operation runtimecontract.RuntimeOperation, operationIndex int, hasOperationIndex bool, witness runtimecontract.RuntimeCandidateCorrectionWitness) bool {

@@ -90,11 +90,26 @@ func (o RuntimeCandidateCorrectionObservation) Validate() error {
 	if diagnostic.ManifestHash == "" || len(diagnostic.Objectives) == 0 {
 		return fmt.Errorf("runtime candidate correction observation requires manifest-bound diagnostic objectives")
 	}
-	if len(diagnostic.Allowed) > maxRuntimeCorrectionObservationItems || len(diagnostic.Required) > maxRuntimeCorrectionObservationItems || len(diagnostic.Forbidden) > maxRuntimeCorrectionObservationItems || len(diagnostic.Objectives) > maxRuntimeCorrectionObservationItems {
+	if len(diagnostic.Allowed) > maxRuntimeCorrectionObservationItems || len(diagnostic.Required) > maxRuntimeCorrectionObservationItems || len(diagnostic.Forbidden) > maxRuntimeCorrectionObservationItems || len(diagnostic.Objectives) > maxRuntimeCorrectionObservationItems || len(diagnostic.ParameterEntryEncodings) > maxRuntimeCorrectionObservationItems {
 		return fmt.Errorf("runtime candidate correction diagnostic exceeds bounded values")
 	}
-	if diagnostic.OperationID == "" && diagnostic.Path == "" && diagnostic.Actual == "" && len(diagnostic.Allowed) == 0 && len(diagnostic.Required) == 0 && len(diagnostic.Forbidden) == 0 && diagnostic.ManifestHash == "" && diagnostic.RejectedShapeHash == "" && len(diagnostic.Objectives) == 0 {
+	if diagnostic.OperationID == "" && diagnostic.Path == "" && diagnostic.Actual == "" && len(diagnostic.Allowed) == 0 && len(diagnostic.Required) == 0 && len(diagnostic.Forbidden) == 0 && diagnostic.ViolationKind == "" && len(diagnostic.ParameterEntryEncodings) == 0 && diagnostic.ManifestHash == "" && diagnostic.RejectedShapeHash == "" && len(diagnostic.Objectives) == 0 {
 		return fmt.Errorf("runtime candidate correction observation requires a non-empty typed diagnostic")
+	}
+	switch diagnostic.ViolationKind {
+	case "":
+		if len(diagnostic.ParameterEntryEncodings) != 0 {
+			return fmt.Errorf("runtime candidate correction diagnostic carries parameter-entry facts without a violation kind")
+		}
+	case RuntimeCandidatePayloadViolationParameterEntryEncoding:
+		if err := validateRuntimeCandidateParameterEntryEncodingFacts(diagnostic.ParameterEntryEncodings); err != nil {
+			return err
+		}
+		if !runtimeCandidateCorrectionHasObjective(diagnostic.Objectives, RuntimeCandidateCorrectionReencodeParameterEntries) {
+			return fmt.Errorf("runtime candidate parameter-entry diagnostic requires re-encode objective")
+		}
+	default:
+		return fmt.Errorf("runtime candidate correction diagnostic has unsupported violation kind %q", diagnostic.ViolationKind)
 	}
 	for _, value := range []struct{ name, text string }{
 		{"candidate correction operation id", diagnostic.OperationID}, {"candidate correction path", diagnostic.Path},
@@ -124,6 +139,7 @@ func (o RuntimeCandidateCorrectionObservation) Validate() error {
 			RuntimeCandidateCorrectionSatisfyCoverage,
 			RuntimeCandidateCorrectionSatisfyDependency,
 			RuntimeCandidateCorrectionSelectEvidenceBinding,
+			RuntimeCandidateCorrectionReencodeParameterEntries,
 			RuntimeCandidateCorrectionConformExpectedDocument:
 		default:
 			return fmt.Errorf("runtime candidate correction observation has unsupported objective %q", objective)
@@ -149,7 +165,7 @@ func StableRuntimeCandidateSealedCorrectionHash(manifestHash string, objectives 
 		return ""
 	}
 	h := sha256.New()
-	writeHashString(h, "runtime-candidate-sealed-correction/v1")
+	writeHashString(h, "runtime-candidate-sealed-correction/v2")
 	writeHashString(h, manifestHash)
 	for _, objective := range objectives {
 		writeHashString(h, string(objective))
@@ -161,6 +177,7 @@ func StableRuntimeCandidateSealedCorrectionHash(manifestHash string, objectives 
 	writeHashString(h, witnessValue.AlternativeValue)
 	writeHashString(h, witnessValue.RejectedShapeHash)
 	writeHashString(h, witnessValue.AlternativeShapeHash)
+	writeHashRuntimeCandidateParameterEntryEncodings(h, witnessValue.ParameterEntryEncodings)
 	return hex.EncodeToString(h.Sum(nil))
 }
 

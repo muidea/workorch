@@ -71,6 +71,9 @@ func CandidateCorrectionObjectivesForFailure(failure *runtimecontract.RuntimeCan
 	if failure.Diagnostic != nil {
 		diagnostic = failure.Diagnostic.Normalized()
 	}
+	if diagnostic.ViolationKind == runtimecontract.RuntimeCandidatePayloadViolationParameterEntryEncoding && len(diagnostic.ParameterEntryEncodings) != 0 {
+		return []runtimecontract.RuntimeCandidateCorrectionObjective{runtimecontract.RuntimeCandidateCorrectionReencodeParameterEntries}
+	}
 	// Provider-authored operation identity is forbidden at the strict wire.
 	// Its only legal correction is removal: dependency satisfaction and every
 	// other identity mutation are owned by the manifest derivation boundary.

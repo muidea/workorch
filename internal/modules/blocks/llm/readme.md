@@ -40,6 +40,9 @@ workspace/run、logical/physical request identity、document hash、audit 与 us
 - Runtime logical/physical identity 在 owner guard 内执行 concurrent/duplicate at-most-once；provider outcome 不选择 caller retry。
 - attempt-1 correction 通过共享纯合同核对 observation 的 manifest/objectives、objective↔witness-dimension、path/actual/shape 与 sealed witness，再独立核对
   manifest field authorization；LLM 不把 `missing_*`/`empty_*` schema observation 重新解释为 semantic target/binding value。
+- `parameter_entry_encoding` correction 在 physical call 前 exact 核对 operation kind/index、container 与每个 fixed parameter 的
+  name/type；C4 仅渲染由 contract type 推导的 `{name, wireValueField}` 结构提示，不携带 attempt-0 value，也不把合法 parameter
+  错写为删除指令。该投影与 `JSONSchemaResponse` capability 无关，只改变 C4，不改变 C0～C3/stable prefix。
 - generic completion、embedding 与 Runtime I/O 均有 token/byte/wire/SSE/event/line 上限；成功 result 不能是同类型空值或漂移
   target。raw request、response、credential、
   endpoint 和未脱敏 diagnostic 不得进入 aggregate 或 audit notification。

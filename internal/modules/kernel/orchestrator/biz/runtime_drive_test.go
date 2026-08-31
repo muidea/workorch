@@ -10060,6 +10060,123 @@ func TestRequestAndSealRuntimeCandidateRemovesForbiddenRawIDOnAttemptOne(t *test
 	}
 }
 
+func TestRequestAndSealRuntimeCandidateReencodesDeclaredParameterEntriesOnAttemptOne(t *testing.T) {
+	ctx := context.Background()
+	hub := magicevent.NewHub(16)
+	t.Cleanup(func() { hub.Terminate(ctx) })
+	startRuntimeCandidateFileEditAdmissionOwners(t, hub)
+	facts := runtimeCandidateSealFileEditFacts(t)
+	state := &inMemoryRuntimeStateRepository{}
+	controller, err := runtime.NewRuntimeController(state)
+	if err != nil {
+		t.Fatal(err)
+	}
+	initialized, err := runtimeTestControllerInitialize(controller, ctx, facts, runtimeDefinition(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	initialized = runtimeTestPersistSealedSemanticAuthority(t, ctx, state, initialized)
+	owner := newRuntimeTestOwnerWithEvidence(RuntimeEvidenceRepositories{ArtifactContinuations: memory.NewArtifactContinuationRepository()})
+	if err := owner.ConfigureRuntimeRepository(state); err != nil {
+		t.Fatal(err)
+	}
+	module := newTestBiz(owner, hub, nil)
+	prefix := runtimecontract.StableRuntimeCandidatePrefixHashWithExecutionContract(initialized.Definition, initialized.Facts.Activation.ExecutionContract)
+	bindingID := initialized.Facts.Focus.CoverageEvidenceBindings[0].ID
+	conformant := []byte(`{"operations":[{"kind":"file/edit","bindingRefs":["` + bindingID + `"],"targetRefs":["target.txt"],"parameters":[{"name":"oldText","string":"old"},{"name":"newText","string":"secret replacement"},{"name":"baseHash","string":"secret owner hash"}]}]}`)
+	malformed := []byte(`{"operations":[{"kind":"file/edit","bindingRefs":["` + bindingID + `"],"targetRefs":["target.txt"],"parameters":[{"name":"oldText","string":"old"},{"name":"newText","string":"secret replacement","baseHash":"secret owner hash"}]}]}`)
+	beforeBudget, err := runtimecontract.RuntimeBudgetRemaining(initialized.ExecutionBudget, runtimecontract.RuntimeBudgetDimensionCandidateCorrection)
+	if err != nil {
+		t.Fatal(err)
+	}
+	providerCalls := 0
+	llmObserver := magicevent.NewSimpleObserver(runtimecontract.RuntimeModuleLLM, hub)
+	llmObserver.Subscribe(llmevents.TopicRequestRuntimeCandidate, func(event magicevent.Event, result magicevent.Result) {
+		providerCalls++
+		command := event.Data().(llmevents.RequestRuntimeCandidateCommand)
+		document := malformed
+		if providerCalls == 2 {
+			document = conformant
+			if command.CandidateAttempt != 1 || command.CandidateCorrectionObservation == nil || command.CandidateCorrectionObservation.Diagnostic == nil ||
+				command.CandidateCorrectionObservation.Diagnostic.ViolationKind != runtimecontract.RuntimeCandidatePayloadViolationParameterEntryEncoding ||
+				command.CandidateCorrection == nil || command.CandidateCorrection.Witness.Dimension != runtimecontract.RuntimeCandidateCorrectionWitnessParameterEntryEncoding ||
+				len(command.CandidateCorrection.Witness.ParameterEntryEncodings) != 1 {
+				t.Errorf("attempt 1 did not receive exact parameter-entry lineage: observation=%+v correction=%+v", command.CandidateCorrectionObservation, command.CandidateCorrection)
+			} else {
+				encoding := command.CandidateCorrection.Witness.ParameterEntryEncodings[0]
+				if encoding.OperationIndex != 0 || encoding.ParameterIndex != 1 || encoding.OperationKind != runtimecontract.StepKindFileEdit ||
+					encoding.ContainerParameterName != "newText" || len(encoding.MisplacedParameters) != 1 ||
+					encoding.MisplacedParameters[0].Name != "baseHash" || encoding.MisplacedParameters[0].Type != runtimecontract.RuntimeOperationParameterTypeString {
+					t.Errorf("attempt 1 parameter-entry witness=%+v", encoding)
+				}
+				if command.CandidateCorrectionObservation.Diagnostic.Actual != "baseHash" ||
+					strings.Contains(command.CandidateCorrectionObservation.Diagnostic.Actual, "secret") {
+					t.Errorf("attempt 1 observation leaked raw parameter values: %+v", command.CandidateCorrectionObservation.Diagnostic)
+				}
+			}
+		}
+		result.Set(runtimeProviderResultWithAuditForTest(command, llmevents.RequestRuntimeCandidateResult{
+			Transaction: command.Transaction, DocumentKind: command.DocumentKind, RequestIdentity: command.RequestIdentity,
+			ExpectedDocumentHash: runtimeExpectedDocumentHash(command.ExpectedDocument),
+			DocumentOutcome:      runtimeCompleteDocumentOutcome(command.ExpectedDocument, document),
+		}), nil)
+	})
+	t.Cleanup(func() { llmObserver.Unsubscribe(llmevents.TopicRequestRuntimeCandidate) })
+
+	failed, err := module.requestAndSealRuntimeCandidate(ctx, initialized, prefix, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	failedBudget, err := runtimecontract.RuntimeBudgetRemaining(failed.ExecutionBudget, runtimecontract.RuntimeBudgetDimensionCandidateCorrection)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if providerCalls != 1 || failedBudget != beforeBudget || failed.ActiveDispatch != nil || len(failed.CandidateAttempts) != 1 ||
+		failed.CandidateAttempts[0].State != runtimecontract.RuntimeCandidateAttemptStateFailed || failed.CandidateAttempts[0].Correction == nil ||
+		failed.CandidateAttempts[0].Correction.Witness == nil || failed.CandidateAttempts[0].Correction.Witness.Dimension != runtimecontract.RuntimeCandidateCorrectionWitnessParameterEntryEncoding {
+		t.Fatalf("attempt 0 did not persist an uncharged parameter-entry correction boundary: calls=%d budget=%d->%d aggregate=%+v", providerCalls, beforeBudget, failedBudget, failed)
+	}
+	reloaded, err := state.Load(ctx, initialized.Facts.WorkspaceID, initialized.Facts.RunID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	restartedOwner := newRuntimeTestOwnerWithEvidence(RuntimeEvidenceRepositories{ArtifactContinuations: memory.NewArtifactContinuationRepository()})
+	if err := restartedOwner.ConfigureRuntimeRepository(state); err != nil {
+		t.Fatal(err)
+	}
+	restarted := newTestBiz(restartedOwner, hub, nil)
+	sealed, err := restarted.requestAndSealRuntimeCandidateWithRetry(ctx, reloaded, prefix)
+	if err != nil {
+		t.Fatal(err)
+	}
+	afterBudget, err := runtimecontract.RuntimeBudgetRemaining(sealed.ExecutionBudget, runtimecontract.RuntimeBudgetDimensionCandidateCorrection)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if providerCalls != 2 || afterBudget != beforeBudget-1 || sealed.ActiveDispatch == nil || len(sealed.CandidateAttempts) != 2 ||
+		sealed.CandidateAttempts[0].State != runtimecontract.RuntimeCandidateAttemptStateFailed || sealed.CandidateAttempts[0].Correction == nil ||
+		sealed.CandidateAttempts[0].Correction.Witness == nil || sealed.CandidateAttempts[0].Correction.Witness.Dimension != runtimecontract.RuntimeCandidateCorrectionWitnessParameterEntryEncoding ||
+		sealed.CandidateAttempts[1].State != runtimecontract.RuntimeCandidateAttemptStateAccepted {
+		t.Fatalf("parameter-entry document did not converge through exactly one correction: calls=%d budget=%d->%d aggregate=%+v", providerCalls, beforeBudget, afterBudget, sealed)
+	}
+	for _, session := range sealed.CandidateRequestSessions {
+		if session.State != runtimecontract.RuntimeCandidateRequestSessionDocumentComplete || session.LastDocumentFraming != nil {
+			t.Fatalf("parameter-entry correction retained stale framing: %+v", session)
+		}
+	}
+	replayed, err := restarted.requestAndSealRuntimeCandidateWithRetry(ctx, sealed, prefix)
+	if err != nil {
+		t.Fatal(err)
+	}
+	replayedBudget, err := runtimecontract.RuntimeBudgetRemaining(replayed.ExecutionBudget, runtimecontract.RuntimeBudgetDimensionCandidateCorrection)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if providerCalls != 2 || replayed.StateRevision != sealed.StateRevision || replayedBudget != afterBudget {
+		t.Fatalf("duplicate drive replayed provider or correction budget: calls=%d revision=%d->%d budget=%d->%d", providerCalls, sealed.StateRevision, replayed.StateRevision, afterBudget, replayedBudget)
+	}
+}
+
 func TestRequestAndSealRuntimeCandidateRecoversProviderLimitedOutputWithCompleteDocument(t *testing.T) {
 	ctx := context.Background()
 	hub := magicevent.NewHub(16)

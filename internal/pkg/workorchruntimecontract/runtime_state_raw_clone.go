@@ -645,6 +645,13 @@ func cloneRuntimeCandidateCorrectionDirectiveRaw(in RuntimeCandidateCorrectionDi
 
 func cloneRuntimeCandidateCorrectionWitnessRaw(in RuntimeCandidateCorrectionWitness) RuntimeCandidateCorrectionWitness {
 	out := in
+	out.ParameterEntryEncodings = cloneRuntimeStateRawSlice(in.ParameterEntryEncodings, func(item RuntimeCandidateParameterEntryEncodingViolation) RuntimeCandidateParameterEntryEncodingViolation {
+		cloned := item
+		cloned.MisplacedParameters = cloneRuntimeStateRawSlice(item.MisplacedParameters, func(parameter RuntimeCandidateMisplacedParameter) RuntimeCandidateMisplacedParameter {
+			return parameter
+		})
+		return cloned
+	})
 	return out
 }
 
@@ -670,6 +677,13 @@ func cloneRuntimeCandidateFailureDiagnosticRaw(in RuntimeCandidateFailureDiagnos
 	out.Allowed = cloneRuntimeStateRawSlice(in.Allowed, func(item string) string { return item })
 	out.Required = cloneRuntimeStateRawSlice(in.Required, func(item string) string { return item })
 	out.Forbidden = cloneRuntimeStateRawSlice(in.Forbidden, func(item string) string { return item })
+	out.ParameterEntryEncodings = cloneRuntimeStateRawSlice(in.ParameterEntryEncodings, func(item RuntimeCandidateParameterEntryEncodingViolation) RuntimeCandidateParameterEntryEncodingViolation {
+		cloned := item
+		cloned.MisplacedParameters = cloneRuntimeStateRawSlice(item.MisplacedParameters, func(parameter RuntimeCandidateMisplacedParameter) RuntimeCandidateMisplacedParameter {
+			return parameter
+		})
+		return cloned
+	})
 	out.Objectives = cloneRuntimeStateRawSlice(in.Objectives, func(item RuntimeCandidateCorrectionObjective) RuntimeCandidateCorrectionObjective { return item })
 	return out
 }

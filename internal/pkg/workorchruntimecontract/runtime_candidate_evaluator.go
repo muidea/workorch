@@ -30,20 +30,26 @@ const (
 type RuntimeCandidateCorrectionWitnessDimension string
 
 const (
-	RuntimeCandidateCorrectionWitnessOperationKind    RuntimeCandidateCorrectionWitnessDimension = "operation_kind"
-	RuntimeCandidateCorrectionWitnessTarget           RuntimeCandidateCorrectionWitnessDimension = "target"
-	RuntimeCandidateCorrectionWitnessVariant          RuntimeCandidateCorrectionWitnessDimension = "variant"
-	RuntimeCandidateCorrectionWitnessValidationRecipe RuntimeCandidateCorrectionWitnessDimension = "validation_recipe"
-	RuntimeCandidateCorrectionWitnessClosedParameter  RuntimeCandidateCorrectionWitnessDimension = "closed_semantic_parameter"
-	RuntimeCandidateCorrectionWitnessEvidenceBinding  RuntimeCandidateCorrectionWitnessDimension = "evidence_binding"
-	RuntimeCandidateCorrectionWitnessSchemaField      RuntimeCandidateCorrectionWitnessDimension = "schema_field"
-	RuntimeCandidateCorrectionWitnessDocumentShape    RuntimeCandidateCorrectionWitnessDimension = "document_shape"
+	RuntimeCandidateCorrectionWitnessOperationKind          RuntimeCandidateCorrectionWitnessDimension = "operation_kind"
+	RuntimeCandidateCorrectionWitnessTarget                 RuntimeCandidateCorrectionWitnessDimension = "target"
+	RuntimeCandidateCorrectionWitnessVariant                RuntimeCandidateCorrectionWitnessDimension = "variant"
+	RuntimeCandidateCorrectionWitnessValidationRecipe       RuntimeCandidateCorrectionWitnessDimension = "validation_recipe"
+	RuntimeCandidateCorrectionWitnessClosedParameter        RuntimeCandidateCorrectionWitnessDimension = "closed_semantic_parameter"
+	RuntimeCandidateCorrectionWitnessEvidenceBinding        RuntimeCandidateCorrectionWitnessDimension = "evidence_binding"
+	RuntimeCandidateCorrectionWitnessSchemaField            RuntimeCandidateCorrectionWitnessDimension = "schema_field"
+	RuntimeCandidateCorrectionWitnessDocumentShape          RuntimeCandidateCorrectionWitnessDimension = "document_shape"
+	RuntimeCandidateCorrectionWitnessParameterEntryEncoding RuntimeCandidateCorrectionWitnessDimension = "parameter_entry_encoding"
 )
 
 // RuntimeCandidateCorrectionConformExpectedDocument is the bounded objective
 // for replacing an empty/invalid/trailing provider body with exactly one
 // manifest-conformant JSON document. It grants no operation authority.
 const RuntimeCandidateCorrectionConformExpectedDocument RuntimeCandidateCorrectionObjective = "conform_expected_document"
+
+const (
+	RuntimeCandidateParameterEncodingInlineSiblings = "inline_declared_parameter_siblings"
+	RuntimeCandidateParameterEncodingNamedEntries   = "independent_named_typed_parameter_entries"
+)
 
 const (
 	RuntimeCandidateDocumentShapeEmpty              = "empty_document"
@@ -60,13 +66,14 @@ const (
 // hashes are required for operation-level differences and intentionally omit
 // operation IDs and display-only summary parameters.
 type RuntimeCandidateCorrectionWitness struct {
-	Dimension            RuntimeCandidateCorrectionWitnessDimension
-	OperationKind        string
-	Path                 string
-	RejectedValue        string
-	AlternativeValue     string
-	RejectedShapeHash    string
-	AlternativeShapeHash string
+	Dimension               RuntimeCandidateCorrectionWitnessDimension
+	OperationKind           string
+	Path                    string
+	RejectedValue           string
+	AlternativeValue        string
+	RejectedShapeHash       string
+	AlternativeShapeHash    string
+	ParameterEntryEncodings []RuntimeCandidateParameterEntryEncodingViolation
 }
 
 func (w RuntimeCandidateCorrectionWitness) Normalized() RuntimeCandidateCorrectionWitness {
@@ -77,11 +84,15 @@ func (w RuntimeCandidateCorrectionWitness) Normalized() RuntimeCandidateCorrecti
 	w.AlternativeValue = strings.TrimSpace(w.AlternativeValue)
 	w.RejectedShapeHash = strings.TrimSpace(w.RejectedShapeHash)
 	w.AlternativeShapeHash = strings.TrimSpace(w.AlternativeShapeHash)
+	w.ParameterEntryEncodings = cloneRuntimeCandidateParameterEntryEncodings(w.ParameterEntryEncodings)
 	return w
 }
 
 func (w RuntimeCandidateCorrectionWitness) Validate() error {
 	w = w.Normalized()
+	if w.Dimension != RuntimeCandidateCorrectionWitnessParameterEntryEncoding && len(w.ParameterEntryEncodings) != 0 {
+		return fmt.Errorf("candidate correction witness dimension %q cannot carry parameter-entry encoding facts", w.Dimension)
+	}
 	switch w.Dimension {
 	case RuntimeCandidateCorrectionWitnessOperationKind,
 		RuntimeCandidateCorrectionWitnessTarget,
@@ -116,6 +127,16 @@ func (w RuntimeCandidateCorrectionWitness) Validate() error {
 			RuntimeCandidateDocumentShapeNonObjectJSONValue:
 		default:
 			return fmt.Errorf("document-shape candidate correction witness has undeclared rejected shape %q", w.RejectedValue)
+		}
+	case RuntimeCandidateCorrectionWitnessParameterEntryEncoding:
+		if w.OperationKind != "" || w.Path != "$.operations" ||
+			w.RejectedValue != RuntimeCandidateParameterEncodingInlineSiblings ||
+			w.AlternativeValue != RuntimeCandidateParameterEncodingNamedEntries ||
+			w.RejectedShapeHash != "" || w.AlternativeShapeHash != "" {
+			return fmt.Errorf("parameter-entry candidate correction witness requires only the bounded encoding alternative")
+		}
+		if err := validateRuntimeCandidateParameterEntryEncodingFacts(w.ParameterEntryEncodings); err != nil {
+			return err
 		}
 	default:
 		return fmt.Errorf("candidate correction witness dimension %q is not declared", w.Dimension)

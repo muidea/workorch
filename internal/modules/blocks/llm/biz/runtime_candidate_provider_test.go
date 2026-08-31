@@ -2245,6 +2245,83 @@ func TestRuntimeCandidateRetryExplainsOperationShapeReplayWithoutChangingStableP
 	}
 }
 
+func TestRuntimeCandidateRetryProjectsParameterEntryReencodeWithoutRawValues(t *testing.T) {
+	manifest := runtimeCandidateManifestForSchema(t, runtimecontract.RuntimeDecision{
+		State: runtimecontract.ConvergenceStateNeedStateChange,
+		RequiredOutput: runtimecontract.RequiredOutputContract{
+			AcceptedKinds:        []string{runtimecontract.RuntimeBlockKindPatchApply},
+			AcceptedEffectScopes: []runtimecontract.RuntimeEffectScope{runtimecontract.RuntimeEffectWorkspaceDurable}, RequiredEffectScopes: []runtimecontract.RuntimeEffectScope{runtimecontract.RuntimeEffectWorkspaceDurable},
+			CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-1"}, TargetRefs: []string{"main.go"},
+		},
+	}, nil)
+	encodings := []runtimecontract.RuntimeCandidateParameterEntryEncodingViolation{{
+		OperationIndex: 0, ParameterIndex: 1, OperationKind: runtimecontract.RuntimeBlockKindPatchApply, ContainerParameterName: "content",
+		MisplacedParameters: []runtimecontract.RuntimeCandidateMisplacedParameter{
+			{Name: "baseHash", Type: runtimecontract.RuntimeOperationParameterTypeString},
+			{Name: "coverageTargets", Type: runtimecontract.RuntimeOperationParameterTypeStringList},
+			{Name: "summary", Type: runtimecontract.RuntimeOperationParameterTypeString},
+		},
+	}}
+	correction := (&llmmodels.RuntimeCandidateCorrectionInput{
+		ManifestHash: manifest.Hash,
+		Objectives:   []runtimecontract.RuntimeCandidateCorrectionObjective{runtimecontract.RuntimeCandidateCorrectionReencodeParameterEntries},
+		Witness: runtimecontract.RuntimeCandidateCorrectionWitness{
+			Dimension: runtimecontract.RuntimeCandidateCorrectionWitnessParameterEntryEncoding, Path: "$.operations",
+			RejectedValue:           runtimecontract.RuntimeCandidateParameterEncodingInlineSiblings,
+			AlternativeValue:        runtimecontract.RuntimeCandidateParameterEncodingNamedEntries,
+			ParameterEntryEncodings: encodings,
+		},
+	}).Normalized()
+	observation := (&runtimecontract.RuntimeCandidateCorrectionObservation{
+		Class: runtimecontract.RuntimeCandidateFailureClassSchema, Code: "candidate_schema_invalid", Signature: "candidate-schema-invalid",
+		Diagnostic: &runtimecontract.RuntimeCandidateFailureDiagnostic{
+			Path: "$.operations[0].parameters[1].baseHash", Actual: "baseHash",
+			Allowed:                 []string{"name", "string", "integer", "boolean", "stringList"},
+			ViolationKind:           runtimecontract.RuntimeCandidatePayloadViolationParameterEntryEncoding,
+			ParameterEntryEncodings: encodings, ManifestHash: manifest.Hash,
+			Objectives: []runtimecontract.RuntimeCandidateCorrectionObjective{runtimecontract.RuntimeCandidateCorrectionReencodeParameterEntries},
+		},
+	}).Clone()
+	observation.SealedCorrectionHash = runtimecontract.StableRuntimeCandidateSealedCorrectionHash(correction.ManifestHash, correction.Objectives, &correction.Witness)
+	if err := correction.ValidateAgainstObservation(manifest, observation); err != nil {
+		t.Fatal(err)
+	}
+	outputContract := runtimeCandidateOutputContractForManifest(manifest)
+	retry := runtimeCandidateRetryForManifest(1, &observation, manifest, &correction)
+	if retry == nil || !reflect.DeepEqual(outputContract, runtimeCandidateOutputContractForManifest(manifest)) {
+		t.Fatalf("parameter-entry C4 changed C3 output contract or produced no retry: %+v", retry)
+	}
+	if strings.Contains(retry.Instruction, "Remove every field") {
+		t.Fatalf("parameter-entry retry was misrendered as legal-field removal: %s", retry.Instruction)
+	}
+	for _, want := range []string{"every listed logical parameter", "exactly name plus the listed typed wireValueField", "Keep the container parameter"} {
+		if !strings.Contains(retry.Instruction, want) {
+			t.Fatalf("parameter-entry retry lost %q: %s", want, retry.Instruction)
+		}
+	}
+	if len(retry.CorrectionInput.Witness.ParameterEntryEncodings) != 1 {
+		t.Fatalf("parameter-entry correction projection=%+v", retry.CorrectionInput.Witness)
+	}
+	entries := retry.CorrectionInput.Witness.ParameterEntryEncodings[0].Entries
+	wantEntries := []runtimeCandidateParameterEncodingEntryProjection{
+		{Name: "baseHash", ContractType: runtimecontract.RuntimeOperationParameterTypeString, WireValueField: "string"},
+		{Name: "coverageTargets", ContractType: runtimecontract.RuntimeOperationParameterTypeStringList, WireValueField: "stringList"},
+		{Name: "summary", ContractType: runtimecontract.RuntimeOperationParameterTypeString, WireValueField: "string"},
+	}
+	if !reflect.DeepEqual(entries, wantEntries) || retry.CorrectionInput.Witness.ParameterEntryEncodings[0].SourceEntryPath != "$.operations[0].parameters[1]" {
+		t.Fatalf("parameter-entry typed examples=%+v", retry.CorrectionInput.Witness.ParameterEntryEncodings)
+	}
+	encoded, err := json.Marshal(retry)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, raw := range []string{"secret complete file content", "secret-owner-hash", "secret change summary"} {
+		if strings.Contains(string(encoded), raw) {
+			t.Fatalf("C4 parameter-entry projection leaked raw provider value %q: %s", raw, encoded)
+		}
+	}
+}
+
 func TestRuntimeCandidateExecutionTailOnlyRendersProviderSafeFacts(t *testing.T) {
 	secretParameter := "raw-operation-payload-must-not-reach-c4"
 	context := runtimecontract.RuntimeCandidateContext{

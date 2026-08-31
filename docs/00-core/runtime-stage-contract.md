@@ -157,6 +157,10 @@ provider、candidate、semantic proof、capability operation、repair 与 recove
   fresh load 都必须验证 diagnostic/correction 的 manifest、objectives、objective↔witness-dimension、path、actual/shape lineage；
   不一致时零 attempt-1
   provider、dispatch 与 capability effect。
+- fixed manifest parameter 被错误编码为另一个 `parameters[]` entry 的 sibling 时，strict decoder 仍拒绝原文；SM-3 可在
+  declared name/type、entry/container、operation kind/index 均无歧义时封存一次 `parameter_entry_encoding` witness，要求
+  attempt 1 重新生成全部独立 named typed entries。它不得本地搬移并接受原值，不得把合法 parameter 当作 forbidden field
+  删除，也不改变 SM-2 authority 或 SM-4 recovery；mixed unknown/type/duplicate、lineage 漂移或 attempt 1 再拒绝均 final。
 - operations preflight 必须发生在 exact request-session CAS 之前；同一 transaction、stable prefix、manifest、correction hash 与
   expected-document attempt 的 persisted session 是 restart proof。document-complete 后 attempt-begin CAS 前中断或 CAS 后响应丢失
   只能恢复同一 local admission transaction，不能重发 preflight/provider、重复扣减 correction budget 或提前执行 capability。

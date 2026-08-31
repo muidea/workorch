@@ -81,6 +81,102 @@ func TestRuntimeCandidateCorrectionInputValidatesExactSealedObservation(t *testi
 	}
 }
 
+func candidateParameterEntryCorrectionPair(t *testing.T) (runtimecontract.RuntimeCandidateContractManifest, RuntimeCandidateCorrectionInput, runtimecontract.RuntimeCandidateCorrectionObservation) {
+	t.Helper()
+	operationContract, found := runtimecontract.RuntimeOperationContractForKind(runtimecontract.RuntimeBlockKindPatchApply)
+	if !found {
+		t.Fatal("patch/apply contract is missing")
+	}
+	manifest := runtimecontract.RuntimeCandidateContractManifest{
+		Revision: runtimecontract.RuntimeCandidateContractManifestRevision,
+		State:    runtimecontract.ConvergenceStateNeedStateChange, MaxOperationCount: 1,
+		RequiredTopLevelFields: []string{"operations"}, AllowedTopLevelFields: []string{"operations"},
+		Operations: []runtimecontract.RuntimeCandidateOperationManifest{{
+			Kind: operationContract.Kind, AllowedOperationFields: []string{"kind", "bindingRefs", "targetRefs", "parameters"},
+			RequiredOperationFields: []string{"kind", "targetRefs", "parameters"},
+			Parameters:              operationContract.Parameters, RequireOneOfParameters: operationContract.RequireOneOfParameters,
+			TargetCardinality: runtimecontract.RuntimeOperationTargetCardinalityOne, RequireTargetRefs: true,
+			ForbiddenParameters: operationContract.ForbiddenParameters, Variants: operationContract.Variants, Rules: operationContract.Rules,
+		}},
+	}
+	manifest = manifest.Normalized()
+	manifest.Hash = runtimecontract.StableRuntimeCandidateContractManifestHash(manifest)
+	encodings := []runtimecontract.RuntimeCandidateParameterEntryEncodingViolation{{
+		OperationIndex: 0, ParameterIndex: 1, OperationKind: runtimecontract.RuntimeBlockKindPatchApply, ContainerParameterName: "content",
+		MisplacedParameters: []runtimecontract.RuntimeCandidateMisplacedParameter{
+			{Name: "baseHash", Type: runtimecontract.RuntimeOperationParameterTypeString},
+			{Name: "coverageTargets", Type: runtimecontract.RuntimeOperationParameterTypeStringList},
+			{Name: "summary", Type: runtimecontract.RuntimeOperationParameterTypeString},
+		},
+	}}
+	input := RuntimeCandidateCorrectionInput{
+		ManifestHash: manifest.Hash,
+		Objectives:   []runtimecontract.RuntimeCandidateCorrectionObjective{runtimecontract.RuntimeCandidateCorrectionReencodeParameterEntries},
+		Witness: runtimecontract.RuntimeCandidateCorrectionWitness{
+			Dimension: runtimecontract.RuntimeCandidateCorrectionWitnessParameterEntryEncoding, Path: "$.operations",
+			RejectedValue:           runtimecontract.RuntimeCandidateParameterEncodingInlineSiblings,
+			AlternativeValue:        runtimecontract.RuntimeCandidateParameterEncodingNamedEntries,
+			ParameterEntryEncodings: encodings,
+		},
+	}.Normalized()
+	observation := runtimecontract.RuntimeCandidateCorrectionObservation{
+		Class: runtimecontract.RuntimeCandidateFailureClassSchema, Code: "candidate_schema_invalid", Signature: "candidate-schema-invalid",
+		Diagnostic: &runtimecontract.RuntimeCandidateFailureDiagnostic{
+			Path: "$.operations[0].parameters[1].baseHash", Actual: "baseHash",
+			Allowed:                 []string{"name", "string", "integer", "boolean", "stringList"},
+			ViolationKind:           runtimecontract.RuntimeCandidatePayloadViolationParameterEntryEncoding,
+			ParameterEntryEncodings: encodings, ManifestHash: manifest.Hash,
+			Objectives: []runtimecontract.RuntimeCandidateCorrectionObjective{runtimecontract.RuntimeCandidateCorrectionReencodeParameterEntries},
+		},
+	}.Normalized()
+	observation.SealedCorrectionHash = runtimecontract.StableRuntimeCandidateSealedCorrectionHash(input.ManifestHash, input.Objectives, &input.Witness)
+	return manifest, input, observation
+}
+
+func TestRuntimeCandidateCorrectionInputValidatesParameterEntryEncodingAgainstExactManifest(t *testing.T) {
+	manifest, input, observation := candidateParameterEntryCorrectionPair(t)
+	if err := input.ValidateAgainstObservation(manifest, observation); err != nil {
+		t.Fatal(err)
+	}
+
+	tests := map[string]func(*runtimecontract.RuntimeCandidateParameterEntryEncodingViolation){
+		"operation index": func(value *runtimecontract.RuntimeCandidateParameterEntryEncodingViolation) { value.OperationIndex = 1 },
+		"operation kind": func(value *runtimecontract.RuntimeCandidateParameterEntryEncodingViolation) {
+			value.OperationKind = "shell/command"
+		},
+		"container": func(value *runtimecontract.RuntimeCandidateParameterEntryEncodingViolation) {
+			value.ContainerParameterName = "invented"
+		},
+		"parameter name": func(value *runtimecontract.RuntimeCandidateParameterEntryEncodingViolation) {
+			value.MisplacedParameters[0].Name = "invented"
+		},
+		"parameter type": func(value *runtimecontract.RuntimeCandidateParameterEntryEncodingViolation) {
+			value.MisplacedParameters[0].Type = runtimecontract.RuntimeOperationParameterTypeBoolean
+		},
+	}
+	for name, mutate := range tests {
+		t.Run(name, func(t *testing.T) {
+			changedInput := input.Normalized()
+			changedObservation := observation.Clone()
+			mutate(&changedInput.Witness.ParameterEntryEncodings[0])
+			changedObservation.Diagnostic.ParameterEntryEncodings = changedInput.Witness.ParameterEntryEncodings
+			changedObservation.SealedCorrectionHash = runtimecontract.StableRuntimeCandidateSealedCorrectionHash(changedInput.ManifestHash, changedInput.Objectives, &changedInput.Witness)
+			if err := changedInput.ValidateAgainstObservation(manifest, changedObservation); err == nil {
+				t.Fatal("manifest-drifted parameter-entry correction reached provider preflight")
+			}
+		})
+	}
+
+	duplicateInput := input.Normalized()
+	duplicateObservation := observation.Clone()
+	duplicateInput.Witness.ParameterEntryEncodings = append(duplicateInput.Witness.ParameterEntryEncodings, duplicateInput.Witness.ParameterEntryEncodings[0].Clone())
+	duplicateObservation.Diagnostic.ParameterEntryEncodings = duplicateInput.Witness.ParameterEntryEncodings
+	duplicateObservation.SealedCorrectionHash = runtimecontract.StableRuntimeCandidateSealedCorrectionHash(duplicateInput.ManifestHash, duplicateInput.Objectives, &duplicateInput.Witness)
+	if err := duplicateInput.ValidateAgainstObservation(manifest, duplicateObservation); err == nil {
+		t.Fatal("duplicate parameter-entry correction reached provider preflight")
+	}
+}
+
 func TestRuntimeCandidateCorrectionInputRejectsAllowedButOptionalFieldAsRequired(t *testing.T) {
 	t.Parallel()
 	manifest := candidateCorrectionTestManifest()

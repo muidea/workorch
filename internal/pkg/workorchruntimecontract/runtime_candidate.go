@@ -181,15 +181,17 @@ type RuntimeCandidateFailure struct {
 // of a schema or semantic candidate rejection. It is a pure value DTO: no
 // action selection, aggregate mutation, EventHub, or I/O belongs here.
 type RuntimeCandidateFailureDiagnostic struct {
-	OperationID       string                                `json:"operationId,omitempty"`
-	Path              string                                `json:"path,omitempty"`
-	Actual            string                                `json:"actual,omitempty"`
-	Allowed           []string                              `json:"allowed,omitempty"`
-	Required          []string                              `json:"required,omitempty"`
-	Forbidden         []string                              `json:"forbidden,omitempty"`
-	ManifestHash      string                                `json:"manifestHash,omitempty"`
-	RejectedShapeHash string                                `json:"rejectedShapeHash,omitempty"`
-	Objectives        []RuntimeCandidateCorrectionObjective `json:"objectives,omitempty"`
+	OperationID             string                                            `json:"operationId,omitempty"`
+	Path                    string                                            `json:"path,omitempty"`
+	Actual                  string                                            `json:"actual,omitempty"`
+	Allowed                 []string                                          `json:"allowed,omitempty"`
+	Required                []string                                          `json:"required,omitempty"`
+	Forbidden               []string                                          `json:"forbidden,omitempty"`
+	ViolationKind           RuntimeCandidatePayloadViolationKind              `json:"violationKind,omitempty"`
+	ParameterEntryEncodings []RuntimeCandidateParameterEntryEncodingViolation `json:"parameterEntryEncodings,omitempty"`
+	ManifestHash            string                                            `json:"manifestHash,omitempty"`
+	RejectedShapeHash       string                                            `json:"rejectedShapeHash,omitempty"`
+	Objectives              []RuntimeCandidateCorrectionObjective             `json:"objectives,omitempty"`
 }
 
 // RuntimeCandidateCorrectionObjective is a bounded, machine-readable delta
@@ -198,15 +200,16 @@ type RuntimeCandidateFailureDiagnostic struct {
 type RuntimeCandidateCorrectionObjective string
 
 const (
-	RuntimeCandidateCorrectionRemoveForbiddenField  RuntimeCandidateCorrectionObjective = "remove_forbidden_field"
-	RuntimeCandidateCorrectionSupplyRequiredField   RuntimeCandidateCorrectionObjective = "supply_required_field"
-	RuntimeCandidateCorrectionReplaceTarget         RuntimeCandidateCorrectionObjective = "replace_target_with_allowed_target"
-	RuntimeCandidateCorrectionSelectOperationKind   RuntimeCandidateCorrectionObjective = "select_allowed_operation_kind"
-	RuntimeCandidateCorrectionSelectDurableEffect   RuntimeCandidateCorrectionObjective = "select_durable_effect"
-	RuntimeCandidateCorrectionChangeReplayedShape   RuntimeCandidateCorrectionObjective = "change_replayed_shape"
-	RuntimeCandidateCorrectionSatisfyCoverage       RuntimeCandidateCorrectionObjective = "satisfy_required_coverage"
-	RuntimeCandidateCorrectionSatisfyDependency     RuntimeCandidateCorrectionObjective = "satisfy_dependency_binding"
-	RuntimeCandidateCorrectionSelectEvidenceBinding RuntimeCandidateCorrectionObjective = "select_allowed_evidence_binding"
+	RuntimeCandidateCorrectionRemoveForbiddenField     RuntimeCandidateCorrectionObjective = "remove_forbidden_field"
+	RuntimeCandidateCorrectionSupplyRequiredField      RuntimeCandidateCorrectionObjective = "supply_required_field"
+	RuntimeCandidateCorrectionReplaceTarget            RuntimeCandidateCorrectionObjective = "replace_target_with_allowed_target"
+	RuntimeCandidateCorrectionSelectOperationKind      RuntimeCandidateCorrectionObjective = "select_allowed_operation_kind"
+	RuntimeCandidateCorrectionSelectDurableEffect      RuntimeCandidateCorrectionObjective = "select_durable_effect"
+	RuntimeCandidateCorrectionChangeReplayedShape      RuntimeCandidateCorrectionObjective = "change_replayed_shape"
+	RuntimeCandidateCorrectionSatisfyCoverage          RuntimeCandidateCorrectionObjective = "satisfy_required_coverage"
+	RuntimeCandidateCorrectionSatisfyDependency        RuntimeCandidateCorrectionObjective = "satisfy_dependency_binding"
+	RuntimeCandidateCorrectionSelectEvidenceBinding    RuntimeCandidateCorrectionObjective = "select_allowed_evidence_binding"
+	RuntimeCandidateCorrectionReencodeParameterEntries RuntimeCandidateCorrectionObjective = "reencode_parameter_entries"
 )
 
 func (d *RuntimeCandidateFailureDiagnostic) Clone() *RuntimeCandidateFailureDiagnostic {
@@ -221,6 +224,8 @@ func (d RuntimeCandidateFailureDiagnostic) Normalized() RuntimeCandidateFailureD
 	d.OperationID = strings.TrimSpace(d.OperationID)
 	d.Path = strings.TrimSpace(d.Path)
 	d.Actual = strings.TrimSpace(d.Actual)
+	d.ViolationKind = RuntimeCandidatePayloadViolationKind(strings.TrimSpace(string(d.ViolationKind)))
+	d.ParameterEntryEncodings = cloneRuntimeCandidateParameterEntryEncodings(d.ParameterEntryEncodings)
 	d.ManifestHash = strings.TrimSpace(d.ManifestHash)
 	d.RejectedShapeHash = strings.TrimSpace(d.RejectedShapeHash)
 	d.Allowed = normalizeStrings(d.Allowed)

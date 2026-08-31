@@ -15,13 +15,15 @@ import (
 // aggregate state and does not choose retry/action; SM-3 classifies it after
 // the LLM owner returns the error.
 type RuntimeCandidatePayloadDiagnostic struct {
-	Path               string
-	Actual             string
-	Allowed            []string
-	Required           []string
-	Forbidden          []string
-	SemanticViolations []RuntimeSemanticContractViolation
-	Cause              error
+	Path                    string
+	Actual                  string
+	Allowed                 []string
+	Required                []string
+	Forbidden               []string
+	ViolationKind           RuntimeCandidatePayloadViolationKind
+	ParameterEntryEncodings []RuntimeCandidateParameterEntryEncodingViolation
+	SemanticViolations      []RuntimeSemanticContractViolation
+	Cause                   error
 }
 
 func (d *RuntimeCandidatePayloadDiagnostic) Error() string {
@@ -65,11 +67,13 @@ func RuntimeCandidateFailureDiagnosticFromPayloadDiagnostic(value *RuntimeCandid
 		return nil
 	}
 	return (&RuntimeCandidateFailureDiagnostic{
-		Path:      value.Path,
-		Actual:    value.Actual,
-		Allowed:   append([]string(nil), value.Allowed...),
-		Required:  append([]string(nil), value.Required...),
-		Forbidden: append([]string(nil), value.Forbidden...),
+		Path:                    value.Path,
+		Actual:                  value.Actual,
+		Allowed:                 append([]string(nil), value.Allowed...),
+		Required:                append([]string(nil), value.Required...),
+		Forbidden:               append([]string(nil), value.Forbidden...),
+		ViolationKind:           value.ViolationKind,
+		ParameterEntryEncodings: cloneRuntimeCandidateParameterEntryEncodings(value.ParameterEntryEncodings),
 	}).Clone()
 }
 
@@ -324,7 +328,16 @@ func runtimeCandidatePayloadDecodeDiagnostic(manifest RuntimeCandidateContractMa
 			allowed = []string{expected}
 		}
 	}
-	return &RuntimeCandidatePayloadDiagnostic{Path: path, Actual: actual, Allowed: allowed, Forbidden: manifest.ForbiddenTopLevelFields, Cause: cause}
+	diagnostic := &RuntimeCandidatePayloadDiagnostic{Path: path, Actual: actual, Allowed: allowed, Forbidden: manifest.ForbiddenTopLevelFields, Cause: cause}
+	if encodings := runtimeCandidatePayloadParameterEntryEncodings(manifest, payload, field); len(encodings) != 0 {
+		diagnostic.ViolationKind = RuntimeCandidatePayloadViolationParameterEntryEncoding
+		diagnostic.ParameterEntryEncodings = encodings
+		// These fields are declared logical parameters encoded in the wrong
+		// physical entry. They are not forbidden manifest fields and must not be
+		// projected as removal authority.
+		diagnostic.Forbidden = nil
+	}
+	return diagnostic
 }
 
 // runtimeCandidatePayloadTypeErrorPath converts encoding/json's Go-struct
@@ -506,6 +519,169 @@ func runtimeCandidatePayloadUnknownFieldPath(manifest RuntimeCandidateContractMa
 		}
 	}
 	return "$." + field, manifest.AllowedTopLevelFields
+}
+
+// runtimeCandidatePayloadParameterEntryEncodings recognizes only the bounded
+// structural defect where fixed, manifest-declared logical parameters were
+// emitted as sibling object keys inside another named parameters[] entry. It
+// never repairs or admits the payload and never retains the sibling values.
+// Mixed/unknown/type-invalid shapes deliberately return no typed encoding
+// fact, so SM-3 cannot widen a correction from ambiguous provider bytes.
+func runtimeCandidatePayloadParameterEntryEncodings(manifest RuntimeCandidateContractManifest, payload []byte, firstUnknownField string) []RuntimeCandidateParameterEntryEncodingViolation {
+	firstUnknownField = strings.TrimSpace(firstUnknownField)
+	if firstUnknownField == "" {
+		return nil
+	}
+	var envelope map[string]json.RawMessage
+	if json.Unmarshal(payload, &envelope) != nil {
+		return nil
+	}
+	for field := range envelope {
+		if !runtimeCandidatePayloadContains(manifest.AllowedTopLevelFields, field) {
+			return nil
+		}
+	}
+	var operations []json.RawMessage
+	if json.Unmarshal(envelope["operations"], &operations) != nil {
+		return nil
+	}
+	if len(operations) == 0 || len(operations) > manifest.MaxOperationCount {
+		return nil
+	}
+	ret := make([]RuntimeCandidateParameterEntryEncodingViolation, 0)
+	foundFirstUnknown := false
+	for operationIndex, rawOperation := range operations {
+		var operation map[string]json.RawMessage
+		if json.Unmarshal(rawOperation, &operation) != nil {
+			return nil
+		}
+		kind := runtimeCandidatePayloadRawString(operation["kind"])
+		operationManifest, found := runtimeCandidatePayloadOperationManifest(manifest, kind)
+		if !found {
+			return nil
+		}
+		for field := range operation {
+			if !runtimeCandidatePayloadContains(operationManifest.AllowedOperationFields, field) {
+				return nil
+			}
+		}
+		parametersRaw, found := operation["parameters"]
+		if !found {
+			continue
+		}
+		var parameters []json.RawMessage
+		if json.Unmarshal(parametersRaw, &parameters) != nil {
+			return nil
+		}
+		if len(parameters) == 0 || len(parameters) > maxRuntimeCandidateParameterEntryEncodings {
+			return nil
+		}
+		existingNames := make(map[string]struct{}, len(parameters))
+		parameterObjects := make([]map[string]json.RawMessage, len(parameters))
+		for parameterIndex, rawParameter := range parameters {
+			var parameter map[string]json.RawMessage
+			if json.Unmarshal(rawParameter, &parameter) != nil {
+				return nil
+			}
+			name := runtimeCandidatePayloadRawString(parameter["name"])
+			if name == "" {
+				return nil
+			}
+			if _, duplicate := existingNames[name]; duplicate {
+				return nil
+			}
+			existingNames[name] = struct{}{}
+			parameterObjects[parameterIndex] = parameter
+		}
+		misplacedNames := map[string]struct{}{}
+		for parameterIndex, parameter := range parameterObjects {
+			containerName := runtimeCandidatePayloadRawString(parameter["name"])
+			containerContract, declared := runtimeCandidateManifestParameterContract(operationManifest, containerName)
+			if !declared || runtimeCandidatePayloadContains(operationManifest.ForbiddenParameters, containerName) ||
+				!runtimeCandidateRawParameterEntryHasContractValue(parameter, containerContract.Type) {
+				return nil
+			}
+			misplaced := make([]RuntimeCandidateMisplacedParameter, 0)
+			for field, rawValue := range parameter {
+				if runtimeCandidateParameterWireField(field) {
+					continue
+				}
+				if field == firstUnknownField {
+					foundFirstUnknown = true
+				}
+				contract, declared := runtimeCandidateManifestParameterContract(operationManifest, field)
+				if !declared || runtimeCandidatePayloadContains(operationManifest.ForbiddenParameters, field) ||
+					!runtimeCandidateRawValueMatchesParameterType(rawValue, contract.Type) {
+					return nil
+				}
+				if _, alreadyNamed := existingNames[field]; alreadyNamed {
+					return nil
+				}
+				if _, duplicate := misplacedNames[field]; duplicate {
+					return nil
+				}
+				misplacedNames[field] = struct{}{}
+				misplaced = append(misplaced, RuntimeCandidateMisplacedParameter{Name: field, Type: contract.Type})
+			}
+			if len(misplaced) != 0 {
+				ret = append(ret, RuntimeCandidateParameterEntryEncodingViolation{
+					OperationIndex: operationIndex, ParameterIndex: parameterIndex,
+					OperationKind: operationManifest.Kind, ContainerParameterName: containerName,
+					MisplacedParameters: misplaced,
+				})
+			}
+		}
+	}
+	ret = normalizeRuntimeCandidateParameterEntryEncodings(ret)
+	if !foundFirstUnknown || ValidateRuntimeCandidateParameterEntryEncodings(manifest, ret) != nil {
+		return nil
+	}
+	return ret
+}
+
+func runtimeCandidateParameterWireField(field string) bool {
+	switch strings.TrimSpace(field) {
+	case "name", "string", "integer", "boolean", "stringList":
+		return true
+	default:
+		return false
+	}
+}
+
+func runtimeCandidateRawParameterEntryHasContractValue(parameter map[string]json.RawMessage, parameterType RuntimeOperationParameterType) bool {
+	wireField, found := RuntimeOperationParameterWireValueField(parameterType)
+	if !found {
+		return false
+	}
+	valueCount := 0
+	for _, field := range []string{"string", "integer", "boolean", "stringList"} {
+		if value, exists := parameter[field]; exists {
+			valueCount++
+			if field != wireField || !runtimeCandidateRawValueMatchesParameterType(value, parameterType) {
+				return false
+			}
+		}
+	}
+	return valueCount == 1
+}
+
+func runtimeCandidateRawValueMatchesParameterType(value json.RawMessage, parameterType RuntimeOperationParameterType) bool {
+	switch parameterType {
+	case RuntimeOperationParameterTypeString:
+		var decoded string
+		return json.Unmarshal(value, &decoded) == nil
+	case RuntimeOperationParameterTypeInteger:
+		var decoded int64
+		return json.Unmarshal(value, &decoded) == nil
+	case RuntimeOperationParameterTypeBoolean:
+		var decoded bool
+		return json.Unmarshal(value, &decoded) == nil
+	case RuntimeOperationParameterTypeStringList:
+		var decoded []string
+		return json.Unmarshal(value, &decoded) == nil && decoded != nil
+	default:
+		return false
+	}
 }
 
 func validateRuntimeCandidatePayloadManifest(manifest RuntimeCandidateContractManifest, payload []byte, candidate RuntimeCandidate) error {

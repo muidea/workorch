@@ -274,14 +274,25 @@ manifest、attempt ledger、rejected shape 与 typed field violations 决定：
 
 `CorrectionDirective` 是 Orchestrator persisted state，不是 evaluator/LLM/capability feedback。它只描述 candidate
 delta，例如把 `$` 上的 empty/invalid shape 修正为 one complete JSON object、删除 forbidden field、补 provider wire 的
-required proposal field、选择 allowed kind、为 exact operation slot 选择 allowed evidence binding、替换为 allowed target或改变 rejected semantic shape；它不修改 authority，也不
+required proposal field、把错误内嵌的 declared parameter 重编码为独立 named typed entries、选择 allowed kind、为 exact operation slot 选择 allowed evidence binding、替换为 allowed target或改变 rejected semantic shape；它不修改 authority，也不
 包含 raw provider/decoder/owner 错误文本。`correctable_once` 还必须携带 `RuntimeCandidateCorrectionWitness`：
 document-shape witness 只携带 path、closed rejected shape 与 required complete shape；schema witness 携带 manifest-bound
-field/rule；semantic witness 才要求 rejected/alternative value、适用 operation kind 与不同 semantic-shape hash。
+field/rule；`parameter_entry_encoding` witness 只携带 operation/parameter index、operation kind、container parameter name 与
+misplaced parameter 的 name/contract type，并固定表达
+`inline_declared_parameter_siblings -> independent_named_typed_parameter_entries`；semantic witness 才要求
+rejected/alternative value、适用 operation kind 与不同 semantic-shape hash。parameter-entry witness 不得携带原始 content、
+hash、coverage、summary value 或其它可逆 provider 数据。
 strict decoder 报告 `missing_*`/`empty_*` required field 时，SM-3 必须先于 semantic frontier 封存同 path 的
 `schema_field` witness（`field_absent -> field_present`）；diagnostic 的 `Allowed` 若是 operation field vocabulary，不能解释为
 target/binding alternative，correction objective 只能是 `supply_required_field`。attempt 1 对 `field_present` 的验收是相应
 typed field 确实存在，而不是把 `field_present` 当作 kind、target、binding 或 parameter 的字面业务值。
+strict decoder 发现 `parameters[i]` 的 sibling key 同时满足以下条件时，必须一次聚合同一文档内的全部结构事实：key 是 exact
+operation manifest 的 fixed declared parameter、raw JSON type 与 contract type 一致、该 parameter 没有另一个 named entry、
+container 本身是合法的 named typed entry，且不存在 mixed undeclared/type-invalid/duplicate ambiguity。原文仍立即拒绝，不能在
+本地搬移字段后接受；SM-3 只可封存 objective `reencode_parameter_entries` 和上述 witness。attempt 1 必须把 witness 中每个
+logical parameter 重新生成为独立的 `{name, <typed-value-field>}` entry，并重新通过完整 strict decoder、manifest evaluator 与
+普通 feasibility。任一参数只被删除、类型漂移、operation/index/manifest 漂移或 attempt 1 再次不合法都进入
+`candidate_retry_exhausted`，不能再开 attempt 2。
 其中 `evidence_binding` witness 必须绑定 exact `$.operations[i].bindingRefs[j]`、operation kind/slot、当前 rejected binding、
 manifest 授权的一个不同 binding，以及 rejected/alternative 两个不同 semantic-shape hash；attempt 1 仍须用同一 manifest
 重新严格验证完整 candidate。allowed binding 无不同 member、field path/slot 漂移或替换后仍不通过同一 manifest 时，frontier
@@ -296,7 +307,7 @@ retry tail；该 input 仅包含 manifest、objectives 与 witness，不含 pers
 correction/request-session identity，且不得改变 C0～C3 或 `stablePrefixHash`。duplicate/restart 复用 attempt 0 的 exact
 directive 并重新投影相同 input，不重新推导或重新分配预算。
 failed `CandidateAttempt` 的 durable invariant 必须在 CAS 前及 fresh load 时共同校验 failure/correction pair：manifest、normalized
-objectives、field path、observed actual、适用 rejected shape 与 witness 必须一致；objective 还必须与 witness dimension 的 bounded
+objectives、field path、observed actual、parameter-entry encoding facts、适用 rejected shape 与 witness 必须一致；objective 还必须与 witness dimension 的 bounded
 兼容矩阵一致，不能由 diagnostic 与 directive 携带同一错误映射而共同越过校验。结构合法但与 diagnostic 不一致的 directive
 属于 `runtime_contract_defect`，不得进入 attempt-1 preflight/provider、dispatch 或 capability effect。
 

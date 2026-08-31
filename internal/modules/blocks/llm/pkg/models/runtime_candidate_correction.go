@@ -41,6 +41,9 @@ func (c RuntimeCandidateCorrectionInput) ValidateAgainstObservation(manifest run
 	if c.Witness.Dimension == runtimecontract.RuntimeCandidateCorrectionWitnessSchemaField {
 		return validateRuntimeCandidateSchemaWitnessManifest(manifest, c.Witness)
 	}
+	if c.Witness.Dimension == runtimecontract.RuntimeCandidateCorrectionWitnessParameterEntryEncoding {
+		return runtimecontract.ValidateRuntimeCandidateParameterEntryEncodings(manifest, c.Witness.ParameterEntryEncodings)
+	}
 	return nil
 }
 
