@@ -4722,6 +4722,58 @@ if ! grep -q -F -- 'if strings.TrimSpace(requirement.TargetRef) != ""' <<<"$requ
 	echo "boundary contract violation: required-operation wire compiler lost exact locally-derived target binding" >&2
 	exit 1
 fi
+
+# Auxiliary operations obey the same SM-3 minimal-wire rule as required slots.
+# A sole reachable variant, one common sealed binding, or one required exact
+# target is local authority, not an LLM selection. Only non-singleton choices
+# remain on the provider wire; schema, decoder and fixtures share that wire.
+auxiliary_operation_wire="$(sed -n '/^func runtimeCandidateAuxiliaryWireRule(/,/^}/p' internal/pkg/workorchruntimecontract/runtime_candidate_wire_contract.go)"
+for marker in \
+	'if len(operation.Variants) == 1' \
+	'runtimeCandidateWireParameterRule(operation, variant, "auxiliary operation "+operation.Kind)' \
+	'runtimeCandidateWireCommonSingletonBinding(authorizations)' \
+	'rule.DerivedBindingRefs = []string{bindingRef}' \
+	'rule.DerivedTargetRefs = append([]string(nil), allowedTargets...)'; do
+	if ! grep -q -F -- "$marker" <<<"$auxiliary_operation_wire"; then
+		echo "boundary contract violation: auxiliary-operation wire compiler lost locally-derived authority marker $marker" >&2
+		exit 1
+	fi
+done
+auxiliary_binding_authority="$(sed -n '/^func runtimeCandidateWireAuxiliaryBindingAuthorizations(/,/^}/p' internal/pkg/workorchruntimecontract/runtime_candidate_wire_contract.go)"
+if ! grep -q -F -- 'for _, variant := range operation.Variants' <<<"$auxiliary_binding_authority" ||
+	! grep -q -F -- 'runtimeCandidateWireBindingAuthorization(operation.BindingAuthorizations, "", variantID)' <<<"$auxiliary_binding_authority"; then
+	echo "boundary contract violation: auxiliary wire can be widened by unreachable binding authorization" >&2
+	exit 1
+fi
+candidate_wire_schema="$(sed -n '/^func runtimeCandidateSchemaForManifest(/,/^}/p' internal/modules/blocks/llm/biz/runtime_candidate_schema.go)"
+if ! grep -q -F -- 'runtimeOperationSchemaBranchesForWire(manifest, wire)' <<<"$candidate_wire_schema" ||
+	! grep -q -F -- 'operations["items"] = map[string]any{"oneOf": branches}' <<<"$candidate_wire_schema"; then
+	echo "boundary contract violation: operations schema no longer comes exclusively from candidate wire branches" >&2
+	exit 1
+fi
+if ! grep -q -F -- 'TestRuntimeCandidateWireContractCompilesAuxiliarySingletonAuthorityLocally' internal/pkg/workorchruntimecontract/runtime_candidate_wire_contract_test.go ||
+	! grep -q -F -- 'TestRuntimeCandidateWireContractRetainsNonSingletonAuxiliaryChoices' internal/pkg/workorchruntimecontract/runtime_candidate_wire_contract_test.go ||
+	! grep -q -F -- 'TestRuntimeCandidateAuxiliarySingletonWireIsMinimalWithJSONSchemaResponseOnOrOff' internal/modules/blocks/llm/biz/runtime_candidate_provider_test.go; then
+	echo "boundary contract violation: auxiliary singleton/non-singleton or JSONSchemaResponse wire regression is missing" >&2
+	exit 1
+fi
+if ! grep -q -F -- 'def provider_operation(contract, kind, parameters):' scripts/verify-llm-workspace-execution.sh ||
+	! grep -q -F -- 'allowed = operation_fields(contract, "allowedOperationFields")' scripts/verify-llm-workspace-execution.sh ||
+	! grep -q -F -- 'if "bindingRefs" in allowed:' scripts/verify-llm-workspace-execution.sh ||
+	! grep -q -F -- 'if "targetRefs" in allowed:' scripts/verify-llm-workspace-execution.sh ||
+	! grep -q -F -- 'def _provider_operation(' scripts/verify_mcp_stdio_mock.py ||
+	! grep -q -F -- 'allowed = _operation_fields(contract, "allowedOperationFields")' scripts/verify_mcp_stdio_mock.py ||
+	! grep -q -F -- 'if "targetRefs" in required:' scripts/verify_mcp_stdio_mock.py ||
+	! grep -q -F -- 'if set(operation) != {"kind", "parameters"}:' scripts/verify_mcp_stdio_mock.py; then
+	echo "boundary contract violation: deployed provider fixtures no longer consume the candidate wire before emitting operation fields" >&2
+	exit 1
+fi
+if ! grep -q -F -- '"missing_bindingRefs"' internal/pkg/workorchruntimecontract/candidate_contract_manifest_semantics.go ||
+	! grep -q -F -- '[]string{"bindingRefs"}' internal/pkg/workorchruntimecontract/candidate_contract_manifest_semantics.go ||
+	! grep -q -F -- 'TestSealCandidateRejectionRequiresConcreteWitnessAndPreservesRequiredFieldCorrection' internal/modules/kernel/orchestrator/biz/runtime/candidate_rejection_policy_test.go; then
+	echo "boundary contract violation: missing binding must remain a typed schema-field correction, not a semantic selection" >&2
+	exit 1
+fi
 if ! grep -q -F -- 'TestRequiredStateChangeOperationSequenceSealsCompleteProspectiveAllOfTargets' internal/modules/kernel/orchestrator/biz/runtime/reducer_test.go ||
 	! grep -q -F -- 'TestValidateRequiredOperationBindingsRequiresExactProspectiveTarget' internal/pkg/workorchruntimecontract/runtime_operation_contract_test.go ||
 	! grep -q -F -- 'operations[:1]' internal/pkg/workorchruntimecontract/runtime_operation_contract_test.go ||

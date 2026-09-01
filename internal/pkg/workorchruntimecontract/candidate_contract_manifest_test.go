@@ -154,14 +154,18 @@ func TestBuildRuntimeCandidateContractManifestConfirmedRepairRequiresSourceValid
 		!reflect.DeepEqual(operation.RequiredOperationFields, []string{"bindingRefs", "kind", "parameters", "targetRefs"}) {
 		t.Fatalf("confirmed repair source binding authorization = %+v", operation)
 	}
-	missingBinding := []byte(`{"operations":[{"kind":"file/write","targetRefs":["main.go"],"parameters":[{"name":"content","string":"package main"}]}]}`)
-	if _, err := DecodeRuntimeCandidatePayloadWithManifest(manifest, missingBinding); err == nil || !strings.Contains(err.Error(), "bindingRefs") {
-		t.Fatalf("confirmed repair candidate without source binding error = %v", err)
-	}
-	withBinding := []byte(`{"operations":[{"kind":"file/write","bindingRefs":["` + bindingID + `"],"targetRefs":["main.go"],"parameters":[{"name":"content","string":"package main"}]}]}`)
-	candidate, err := DecodeRuntimeCandidatePayloadWithManifest(manifest, withBinding)
+	wire, err := BuildRuntimeCandidateWireContract(manifest)
 	if err != nil {
-		t.Fatalf("confirmed repair candidate with source binding: %v", err)
+		t.Fatal(err)
+	}
+	rule, found := RuntimeCandidateWireRuleForAuxiliaryKind(wire, StepKindFileWrite)
+	if !found || !reflect.DeepEqual(rule.DerivedBindingRefs, []string{bindingID}) || !reflect.DeepEqual(rule.DerivedTargetRefs, []string{"main.go"}) {
+		t.Fatalf("confirmed repair wire did not compile sealed lineage: %+v found=%t", rule, found)
+	}
+	providerPayload := []byte(`{"operations":[{"kind":"file/write","parameters":[{"name":"content","string":"package main"}]}]}`)
+	candidate, err := DecodeRuntimeCandidatePayloadWithManifest(manifest, providerPayload)
+	if err != nil {
+		t.Fatalf("confirmed repair candidate with locally compiled source binding: %v", err)
 	}
 	operations, err := runtimeCandidatePayloadOperations(candidate)
 	if err != nil || len(operations) != 1 ||
@@ -294,7 +298,7 @@ func TestBuildRuntimeCandidateContractManifestScopeAllowsOnlyOwnerPublishedKind(
 			t.Fatalf("scope selection must seal existing_owner_scope for %s: %+v", operation.Kind, operation.Target)
 		}
 	}
-	candidate, err := DecodeRuntimeCandidatePayloadWithManifest(manifest, []byte(`{"operations":[{"kind":"shell/command","bindingRefs":["binding/test/cwi-1"],"targetRefs":["go.sum"],"parameters":[{"name":"command","string":"go"},{"name":"args","stringList":["mod","tidy"]},{"name":"stateChanging","boolean":true}]}]}`))
+	candidate, err := DecodeRuntimeCandidatePayloadWithManifest(manifest, []byte(`{"operations":[{"kind":"shell/command","targetRefs":["go.sum"],"parameters":[{"name":"command","string":"go"},{"name":"args","stringList":["mod","tidy"]},{"name":"stateChanging","boolean":true}]}]}`))
 	if err != nil {
 		t.Fatalf("decode File-grounded shell candidate: %v", err)
 	}
@@ -328,8 +332,11 @@ func TestValidateRuntimeCandidateAgainstManifestRequiresSealedBindingForProofBea
 		t.Fatal(err)
 	}
 	err = ValidateRuntimeCandidateAgainstManifest(manifest, candidate)
-	if err == nil || !strings.Contains(err.Error(), "binding-authorized operation must select exactly one sealed coverage evidence binding") {
-		t.Fatalf("missing binding error = %v", err)
+	var diagnostic *RuntimeCandidateContractDiagnostic
+	if !errors.As(err, &diagnostic) || diagnostic.Path != "$.operations[0].bindingRefs" ||
+		diagnostic.Actual != "missing_bindingRefs" || !reflect.DeepEqual(diagnostic.Required, []string{"bindingRefs"}) ||
+		!strings.Contains(err.Error(), "binding-authorized operation must select exactly one sealed coverage evidence binding") {
+		t.Fatalf("missing binding diagnostic = %+v err=%v", diagnostic, err)
 	}
 }
 
@@ -538,15 +545,15 @@ func TestBuildRuntimeCandidateContractManifestSealsThreeTargetPolicies(t *testin
 		if !operation.RequireTargetRefs {
 			t.Fatalf("prospective target authorization must require targetRefs: %+v", operation)
 		}
-		createdPayload := []byte(`{"operations":[{"kind":"file/write","bindingRefs":["binding/test/cwi-1"],"targetRefs":["created.go"],"parameters":[{"name":"content","string":"new content"}]}]}`)
+		createdPayload := []byte(`{"operations":[{"kind":"file/write","parameters":[{"name":"content","string":"new content"}]}]}`)
 		if _, err := DecodeRuntimeCandidatePayloadWithManifest(manifest, createdPayload); err != nil {
 			t.Fatalf("candidate did not accept sealed prospective target: %v", err)
 		}
-		existingPayload := []byte(`{"operations":[{"kind":"file/write","bindingRefs":["binding/test/cwi-1"],"targetRefs":["existing.go"],"parameters":[{"name":"content","string":"new content"}]}]}`)
+		existingPayload := []byte(`{"operations":[{"kind":"file/write","targetRefs":["existing.go"],"parameters":[{"name":"content","string":"new content"}]}]}`)
 		_, err = DecodeRuntimeCandidatePayloadWithManifest(manifest, existingPayload)
 		var diagnostic *RuntimeCandidatePayloadDiagnostic
-		if !errors.As(err, &diagnostic) || diagnostic.Path != "$.operations[0].targetRefs" || !containsManifestString(diagnostic.Allowed, "created.go") || containsManifestString(diagnostic.Allowed, "existing.go") {
-			t.Fatalf("candidate existing target was not rejected by prospective membership: %+v err=%v", diagnostic, err)
+		if !errors.As(err, &diagnostic) || diagnostic.Path != "$.operations[0].targetRefs" || diagnostic.Actual != "locally_derived_targetRefs" {
+			t.Fatalf("candidate echoed a locally compiled prospective target: %+v err=%v", diagnostic, err)
 		}
 	})
 	t.Run("prospective_owner_target from create selection", func(t *testing.T) {
@@ -676,11 +683,11 @@ func TestBuildRuntimeCandidateContractManifestSealsManagedValidationRecipes(t *t
 		!reflect.DeepEqual(manifest.Operations[0].ValidationRecipes, []RuntimeValidationRecipe{recipe}) {
 		t.Fatalf("managed validation recipes were not sealed: %+v", manifest)
 	}
-	valid := []byte(`{"operations":[{"kind":"validation/managed_session","bindingRefs":["binding/test/cwi-1"],"parameters":[{"name":"recipeId","string":"recipe/candidate-test"}]}]}`)
+	valid := []byte(`{"operations":[{"kind":"validation/managed_session","parameters":[{"name":"recipeId","string":"recipe/candidate-test"}]}]}`)
 	if _, err := DecodeRuntimeCandidatePayloadWithManifest(manifest, valid); err != nil {
 		t.Fatalf("managed recipe candidate rejected: %v", err)
 	}
-	freeForm := []byte(`{"operations":[{"kind":"validation/managed_session","bindingRefs":["binding/test/cwi-1"],"parameters":[{"name":"command","string":"go"},{"name":"args","stringList":["test","-run","guessed"]}]}]}`)
+	freeForm := []byte(`{"operations":[{"kind":"validation/managed_session","parameters":[{"name":"command","string":"go"},{"name":"args","stringList":["test","-run","guessed"]}]}]}`)
 	if _, err := DecodeRuntimeCandidatePayloadWithManifest(manifest, freeForm); err == nil {
 		t.Fatal("managed validation manifest accepted a free-form command")
 	}
@@ -772,7 +779,7 @@ func TestBuildRuntimeCandidateContractManifestRestrictsManagedRecipeToCurrentBin
 	if len(manifest.Operations) != 1 || !reflect.DeepEqual(manifest.Operations[0].ValidationRecipes, []RuntimeValidationRecipe{current}) {
 		t.Fatalf("managed validation recipes = %+v, want only current binding recipe", manifest.Operations)
 	}
-	candidate, err := DecodeRuntimeCandidatePayloadWithManifest(manifest, []byte(`{"operations":[{"kind":"validation/managed_session","bindingRefs":["binding/test/cwi-1"],"parameters":[{"name":"recipeId","string":"recipe/other-cwi"}]}]}`))
+	candidate, err := DecodeRuntimeCandidatePayloadWithManifest(manifest, []byte(`{"operations":[{"kind":"validation/managed_session","parameters":[{"name":"recipeId","string":"recipe/other-cwi"}]}]}`))
 	if err != nil {
 		t.Fatalf("decode foreign recipe candidate: %v", err)
 	}
@@ -795,7 +802,7 @@ func TestValidateRuntimeCandidateAgainstManifestReportsTypedSemanticDiagnostics(
 	if err != nil {
 		t.Fatal(err)
 	}
-	candidate, err := DecodeRuntimeCandidatePayloadWithManifest(manifest, []byte(`{"operations":[{"kind":"patch/apply","bindingRefs":["binding/test/cwi-1"],"targetRefs":["main.go"],"parameters":[{"name":"patchType","string":"file_write"},{"name":"content","string":"package main"}]}]}`))
+	candidate, err := DecodeRuntimeCandidatePayloadWithManifest(manifest, []byte(`{"operations":[{"kind":"patch/apply","parameters":[{"name":"patchType","string":"file_write"},{"name":"content","string":"package main"}]}]}`))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1005,7 +1012,7 @@ func TestBuildRuntimeCandidateContractManifestCompilesOperationAdmissibility(t *
 			operation.RequireTargetRefs {
 			t.Fatalf("mcp selector-only authorization = %+v", operation)
 		}
-		if _, err := DecodeRuntimeCandidatePayloadWithManifest(manifest, []byte(`{"operations":[{"kind":"mcp/tool_call","bindingRefs":["binding/test/cwi-1"],"parameters":[{"name":"serverId","string":"server-a"},{"name":"tool","string":"repo.summary"}]}]}`)); err != nil {
+		if _, err := DecodeRuntimeCandidatePayloadWithManifest(manifest, []byte(`{"operations":[{"kind":"mcp/tool_call","parameters":[{"name":"serverId","string":"server-a"},{"name":"tool","string":"repo.summary"}]}]}`)); err != nil {
 			t.Fatalf("binding-selected MCP tool_call without targetRefs must decode under selector-only inventory: %v", err)
 		}
 	})
@@ -1096,7 +1103,7 @@ func TestValidateRuntimeCandidateAgainstManifestRejectsTargetOutsideSealedPolicy
 			AcceptedKinds:        []string{StepKindFileEdit},
 			AcceptedEffectScopes: []RuntimeEffectScope{RuntimeEffectWorkspaceDurable},
 			RequiredEffectScopes: []RuntimeEffectScope{RuntimeEffectWorkspaceDurable},
-			CoverageWorkItemIDs:  []common.CoverageWorkItemID{"cwi-1"}, TargetRefs: []string{"main.go"},
+			CoverageWorkItemIDs:  []common.CoverageWorkItemID{"cwi-1"}, TargetRefs: []string{"main.go", "support.go"},
 		},
 	}
 	decision = runtimeCandidateTestDecisionWithBindings(t, decision)
@@ -1104,7 +1111,7 @@ func TestValidateRuntimeCandidateAgainstManifestRejectsTargetOutsideSealedPolicy
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = DecodeRuntimeCandidatePayloadWithManifest(manifest, []byte(`{"operations":[{"kind":"file/edit","bindingRefs":["binding/test/cwi-1"],"targetRefs":["other.go"],"parameters":[{"name":"oldText","string":"old"},{"name":"newText","string":"new"}]}]}`))
+	_, err = DecodeRuntimeCandidatePayloadWithManifest(manifest, []byte(`{"operations":[{"kind":"file/edit","targetRefs":["other.go"],"parameters":[{"name":"oldText","string":"old"},{"name":"newText","string":"new"}]}]}`))
 	if err == nil {
 		t.Fatal("decoder must reject target outside sealed AllowedTargetRefs")
 	}

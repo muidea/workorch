@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"testing"
 
@@ -1464,7 +1465,13 @@ func runtimeObservedCandidatePayload(request llmmodels.RuntimeCandidateRequest) 
 				break
 			}
 		}
-		return []byte(fmt.Sprintf(`{"operations":[{"kind":"patch/apply",%s"targetRefs":["implementation.go"],"parameters":[{"name":"patchType","string":"file_write"},{"name":"content","string":"package fixture\n// repaired\n"},{"name":"baseHash","string":%q}]}]}`, runtimeObservedCandidateBindingRefsField(request, runtimecontract.RuntimeBlockKindPatchApply), baseHash))
+		patchType, content := "file_write", "package fixture\n// repaired\n"
+		candidate := runtimecontract.RuntimeCandidate{StateChange: &runtimecontract.StateChangeCandidate{Operations: []runtimecontract.StateChangingOperation{{Operation: runtimecontract.RuntimeOperation{
+			Kind: runtimecontract.RuntimeBlockKindPatchApply, BindingRefs: runtimeObservedCandidateBindingRefs(request, runtimecontract.RuntimeBlockKindPatchApply), TargetRefs: []string{"implementation.go"},
+			Parameters: []runtimecontract.OperationParameter{{Name: "patchType", String: &patchType}, {Name: "content", String: &content}, {Name: "baseHash", String: &baseHash}},
+		}}}}}
+		payload, _ := runtimecontract.EncodeRuntimeCandidatePayloadWithManifest(request.CandidateManifest, candidate)
+		return payload
 	case runtimecontract.ConvergenceStateNeedValidation:
 		// After an owner-observed FailureTarget is sealed, N1/N2 compile
 		// exact_target membership from that grounded set. Revalidation must
@@ -1475,7 +1482,13 @@ func runtimeObservedCandidatePayload(request llmmodels.RuntimeCandidateRequest) 
 		} else if request.CandidateContext.Resources.FailureTarget != nil && len(request.CandidateContext.Resources.FailureTarget.TargetRefs) == 1 {
 			target = request.CandidateContext.Resources.FailureTarget.TargetRefs[0]
 		}
-		return []byte(fmt.Sprintf(`{"operations":[{"kind":"mcp/tool_call",%s"targetRefs":[%q],"parameters":[{"name":"serverId","string":"mcp-observed-target"},{"name":"tool","string":"lookup.references"},{"name":"input.path","string":%q}]}]}`, runtimeObservedCandidateBindingRefsField(request, runtimecontract.StepKindMCPToolCall), target, target))
+		serverID, tool := "mcp-observed-target", "lookup.references"
+		candidate := runtimecontract.RuntimeCandidate{Validation: &runtimecontract.ValidationCandidate{Operations: []runtimecontract.ValidationOperation{{Operation: runtimecontract.RuntimeOperation{
+			Kind: runtimecontract.StepKindMCPToolCall, BindingRefs: runtimeObservedCandidateBindingRefs(request, runtimecontract.StepKindMCPToolCall), TargetRefs: []string{target},
+			Parameters: []runtimecontract.OperationParameter{{Name: "serverId", String: &serverID}, {Name: "tool", String: &tool}, {Name: "input.path", String: &target}},
+		}}}}}
+		payload, _ := runtimecontract.EncodeRuntimeCandidatePayloadWithManifest(request.CandidateManifest, candidate)
+		return payload
 	case runtimecontract.ConvergenceStateNeedAssessment:
 		ref := ""
 		if accepted := request.CandidateContext.Evidence.Accepted; len(accepted) > 0 {
@@ -1487,7 +1500,7 @@ func runtimeObservedCandidatePayload(request llmmodels.RuntimeCandidateRequest) 
 	}
 }
 
-func runtimeObservedCandidateBindingRefsField(request llmmodels.RuntimeCandidateRequest, kind string) string {
+func runtimeObservedCandidateBindingRefs(request llmmodels.RuntimeCandidateRequest, kind string) []string {
 	refs := make([]string, 0)
 	seen := map[string]struct{}{}
 	for _, authorization := range request.CandidateManifest.Operations {
@@ -1505,10 +1518,10 @@ func runtimeObservedCandidateBindingRefsField(request llmmodels.RuntimeCandidate
 		}
 	}
 	if len(refs) == 0 {
-		return ""
+		return nil
 	}
-	payload, _ := json.Marshal(refs)
-	return `"bindingRefs":` + string(payload) + `,`
+	sort.Strings(refs)
+	return []string{refs[0]}
 }
 
 func requestAndSealObservedCandidate(t *testing.T, ctx context.Context, hub magicevent.Hub, controller *RuntimeController, aggregate RuntimeAggregate, directory string) RuntimeAggregate {

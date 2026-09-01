@@ -3596,10 +3596,11 @@ func TestRuntimeMainlineMissingRequiredTargetCorrectionSurvivesRestart(t *testin
 	if err := owner.ConfigureRuntimeRepository(repository); err != nil {
 		t.Fatal(err)
 	}
-	facts := runtimeCandidateSealExactFileEditFacts(t, "target.txt")
-	facts.Resources.TargetSnapshots = []runtimecontract.TargetSnapshot{{
-		TargetRef: "target.txt", ContentHash: "missing-target-fixture-v1", ContentState: runtimecontract.SnapshotContentStateComplete,
-	}}
+	facts := runtimeCandidateSealExactFileEditTargetsFacts(t, []string{"alternate.txt", "target.txt"})
+	facts.Resources.TargetSnapshots = []runtimecontract.TargetSnapshot{
+		{TargetRef: "alternate.txt", ContentHash: "missing-target-alternate-v1", ContentState: runtimecontract.SnapshotContentStateComplete},
+		{TargetRef: "target.txt", ContentHash: "missing-target-fixture-v1", ContentState: runtimecontract.SnapshotContentStateComplete},
+	}
 	initialized := runtimeTestInitializeOperationFixture(t, ctx, owner, repository, facts, runtimeDefinition(), nil)
 	beforeCorrectionBudget, err := runtimecontract.RuntimeBudgetRemaining(initialized.ExecutionBudget, runtimecontract.RuntimeBudgetDimensionCandidateCorrection)
 	if err != nil {
@@ -3770,10 +3771,11 @@ func TestRuntimeMainlineSchemaCorrectionDocumentCASRestartMatrix(t *testing.T) {
 			if err := initialOwner.ConfigureRuntimeRepository(baseRepository); err != nil {
 				t.Fatal(err)
 			}
-			facts := runtimeCandidateSealExactFileEditFacts(t, "target.txt")
-			facts.Resources.TargetSnapshots = []runtimecontract.TargetSnapshot{{
-				TargetRef: "target.txt", ContentHash: "schema-correction-cas-target-v1", ContentState: runtimecontract.SnapshotContentStateComplete,
-			}}
+			facts := runtimeCandidateSealExactFileEditTargetsFacts(t, []string{"alternate.txt", "target.txt"})
+			facts.Resources.TargetSnapshots = []runtimecontract.TargetSnapshot{
+				{TargetRef: "alternate.txt", ContentHash: "schema-correction-cas-alternate-v1", ContentState: runtimecontract.SnapshotContentStateComplete},
+				{TargetRef: "target.txt", ContentHash: "schema-correction-cas-target-v1", ContentState: runtimecontract.SnapshotContentStateComplete},
+			}
 			initialized := runtimeTestInitializeOperationFixture(t, ctx, initialOwner, baseRepository, facts, runtimeDefinition(), nil)
 			initialCorrectionBudget, err := runtimecontract.RuntimeBudgetRemaining(initialized.ExecutionBudget, runtimecontract.RuntimeBudgetDimensionCandidateCorrection)
 			if err != nil {

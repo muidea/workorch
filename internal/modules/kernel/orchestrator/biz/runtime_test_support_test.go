@@ -690,10 +690,18 @@ func runtimeCandidateSealExactFileEditFacts(t *testing.T, targetRef string) runt
 	if targetRef == "" {
 		t.Fatal("candidate seal exact File edit fixture requires a target")
 	}
+	return runtimeCandidateSealExactFileEditTargetsFacts(t, []string{targetRef})
+}
+
+func runtimeCandidateSealExactFileEditTargetsFacts(t *testing.T, targetRefs []string) runtimecontract.RuntimeFacts {
+	t.Helper()
+	if len(targetRefs) == 0 {
+		t.Fatal("candidate seal exact File edit fixture requires targets")
+	}
 	facts := runtimeCandidateSealFileEditFacts(t)
-	facts.Focus.TargetRefs = []string{targetRef}
+	facts.Focus.TargetRefs = append([]string(nil), targetRefs...)
 	catalog := facts.Resources.OperationAdmissibilities[0]
-	catalog.TargetRefs = []string{targetRef}
+	catalog.TargetRefs = append([]string(nil), targetRefs...)
 	catalog.SelectorRefs = nil
 	for index := range catalog.OperationVariants {
 		catalog.OperationVariants[index].AllowedTargetPolicies = []runtimecontract.RuntimeOperationTargetPolicy{runtimecontract.RuntimeOperationTargetPolicyExactTarget}
@@ -2175,9 +2183,9 @@ func runtimeExpectedDocumentHash(expected *runtimecontract.RuntimeExpectedDocume
 	return expected.Normalized().Hash
 }
 
-// bindRuntimeTestCandidateToManifest builds the current provider wire shape
-// for scripted test providers. Real provider JSON must name only sealed
-// bindingRefs and raw CWI IDs remain a strict rejection.
+// bindRuntimeTestCandidateToManifest builds the complete typed operation used
+// by scripted providers. EncodeRuntimeCandidatePayloadWithManifest then emits
+// only current provider-selectable wire fields; raw CWI IDs never reach JSON.
 func bindRuntimeTestCandidateToManifest(manifest runtimecontract.RuntimeCandidateContractManifest, candidate runtimecontract.RuntimeCandidate) runtimecontract.RuntimeCandidate {
 	bind := func(operation *runtimecontract.RuntimeOperation) {
 		if operation == nil || len(operation.CoverageWorkItemIDs) == 0 {

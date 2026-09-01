@@ -199,7 +199,7 @@ func runtimeCandidateContractCatalog() string {
 		"Return exactly one JSON object for the requested Runtime convergence state; it must be complete, compact, and finished in this response. The JSON object itself is the candidate; never wrap it in another object.",
 		"The C3 current runtime authority's outputContract is the sole structured-output contract. Its manifestHash, wireContractHash, schema, structuredOutputInstruction, canonicalWireLayout, wireRules, and operationContracts define the complete proposal surface for this request.",
 		"Emit only schema fields and manifest-authorized operations. Do not infer or add unknown fields, unrequested operations, prose, preface, suffix, or markdown fences. Do not repeat the Goal, DoD, manifest, authority, or input context.",
-		"For every required operation, emit only the fields listed by its wireRule. Fields listed as locallyDerivedFields are compiled by Runtime from the sealed manifest and are forbidden in provider output. Keep parameters as the last member of each operation object and close the operation and root only after parameters are complete.",
+		"For every operation, emit only the fields listed by its wireRule. Fields listed as locallyDerivedFields are compiled by Runtime from the sealed manifest and are forbidden in provider output. Keep parameters as the last member of each operation object and close the operation and root only after parameters are complete.",
 		"context.requiredState is the sole canonical decision authority. Do not invent or modify convergence state, focus, authority, transaction, or output mode.",
 		"When context.repairDirective is present, obey its sealed state, effect, evidence and operation constraints. The exact fields and values remain in outputContract and the current runtime authority.",
 		"context.requiredEvidenceKinds declares the current evidence obligation; it never overrides context.requiredState, context.repairDirective, or outputContract.",
@@ -338,7 +338,8 @@ func runtimeCandidateOperationContractsForManifest(values []runtimecontract.Runt
 			requiredWireFields = append([]string(nil), operation.RequiredOperationFields...)
 		}
 		providerParameterNames := runtimeCandidateWireParameterNamesForKind(wire, operation.Kind)
-		hasAuxiliaryRule := runtimeCandidateWireHasAuxiliaryRuleForKind(wire, operation.Kind)
+		auxiliaryRule, hasAuxiliaryRule := runtimeCandidateWireAuxiliaryRuleForKind(wire, operation.Kind)
+		auxiliaryVariantSelectable := hasAuxiliaryRule && auxiliaryRule.VariantID == ""
 		target := operation.Target.Normalized()
 		projection := runtimeCandidateOperationContractProjection{
 			Kind:                        operation.Kind,
@@ -371,12 +372,13 @@ func runtimeCandidateOperationContractsForManifest(values []runtimecontract.Runt
 			OperationContractRevision: operation.OperationContractRevision,
 			Parameters:                make([]runtimeCandidateOperationParameterProjection, 0, len(operation.Parameters)),
 		}
-		if hasAuxiliaryRule {
+		if auxiliaryVariantSelectable {
 			projection.AllowedVariantIDs = append([]string(nil), operation.AllowedVariantIDs...)
 			projection.RequireOneOfParameters = append([]string(nil), operation.RequireOneOfParameters...)
 		}
 		for _, authorization := range operation.BindingAuthorizations {
-			if len(authorization.AllowedBindingRefs) == 1 && !runtimeCandidateWireKindSelectsBinding(wire, operation.Kind, authorization.RequiredOperationRef) {
+			if !runtimeCandidateWireKindSelectsBinding(wire, operation.Kind, authorization.RequiredOperationRef) ||
+				(authorization.RequiredOperationRef == "" && len(operation.Variants) != 0 && !runtimeCandidateManifestHasVariant(operation.Variants, authorization.VariantID)) {
 				continue
 			}
 			projection.BindingAuthorizations = append(projection.BindingAuthorizations, runtimeCandidateBindingAuthorizationProjection{
@@ -393,7 +395,7 @@ func runtimeCandidateOperationContractsForManifest(values []runtimecontract.Runt
 				Name: parameter.Name, Type: string(parameter.Type), Required: parameter.Required, Description: parameter.Description,
 			})
 		}
-		if hasAuxiliaryRule {
+		if auxiliaryVariantSelectable {
 			for _, variant := range operation.Variants {
 				projection.Variants = append(projection.Variants, runtimeCandidateOperationVariantProjection{
 					ID: variant.ID, Discriminators: append([]runtimecontract.RuntimeOperationParameterPredicate(nil), variant.Discriminators...),
@@ -429,10 +431,19 @@ func runtimeCandidateWireOneOfParameterNamesForKind(wire runtimecontract.Runtime
 	return runtimeSortedUniqueStrings(values)
 }
 
-func runtimeCandidateWireHasAuxiliaryRuleForKind(wire runtimecontract.RuntimeCandidateWireContract, kind string) bool {
+func runtimeCandidateWireAuxiliaryRuleForKind(wire runtimecontract.RuntimeCandidateWireContract, kind string) (runtimecontract.RuntimeCandidateWireOperationRule, bool) {
 	kind = runtimecontract.CanonicalRuntimeBlockKind(kind)
 	for _, rule := range wire.OperationRules {
 		if rule.Kind == kind && !rule.RequiredSlot() {
+			return rule.Normalized(), true
+		}
+	}
+	return runtimecontract.RuntimeCandidateWireOperationRule{}, false
+}
+
+func runtimeCandidateManifestHasVariant(values []runtimecontract.RuntimeOperationVariantContract, variantID string) bool {
+	for _, variant := range values {
+		if variant.ID == strings.TrimSpace(variantID) {
 			return true
 		}
 	}
@@ -546,6 +557,9 @@ func runtimeCandidateStructuredOutputInstruction(manifest runtimecontract.Runtim
 			line += " requiredOperationRef=" + rule.RequiredOperationRef + " compiles kind=" + rule.Kind + " variant=" + rule.VariantID + "."
 		} else {
 			line += " auxiliary kind=" + rule.Kind + "."
+			if rule.VariantID != "" {
+				line += " Runtime compiles the sole sealed variant=" + rule.VariantID + "."
+			}
 		}
 		line += " Emit only fields in this order: " + runtimeCandidateContractFieldList(rule.ProviderFields) + ". Required provider fields: " + runtimeCandidateContractFieldList(rule.RequiredProviderFields) + "."
 		derived := runtimeCandidateWireRuleProjections(runtimecontract.RuntimeCandidateWireContract{OperationRules: []runtimecontract.RuntimeCandidateWireOperationRule{rule}})
@@ -619,15 +633,6 @@ func runtimeCandidateBindingAuthorizationRefs(values []runtimecontract.RuntimeOp
 	}
 	sort.Strings(ret)
 	return ret
-}
-
-func runtimeCandidateManifestVariantForID(values []runtimecontract.RuntimeOperationVariantContract, id string) (runtimecontract.RuntimeOperationVariantContract, bool) {
-	for _, value := range values {
-		if value.ID == id {
-			return value, true
-		}
-	}
-	return runtimecontract.RuntimeOperationVariantContract{}, false
 }
 
 func runtimeSortedUniqueStrings(values []string) []string {

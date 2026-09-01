@@ -4,7 +4,7 @@ Status: normative
 
 Type: core-contract-part
 
-Last Verified: 2026-08-31
+Last Verified: 2026-09-01
 
 ## Typed Request Binding
 
@@ -102,8 +102,10 @@ manifest-owned slot/key 派生 operation ID，并从 required-sequence dependenc
 模型自造 identity 或 dependency 均不形成 authority；无法唯一匹配时形成 typed local rejection，零 dispatch。
 
 operations 的有效 provider shape 由 sealed manifest 纯编译的 `RuntimeCandidateWireContract` 唯一定义。
-required slot 必须输出 `requiredOperationRef`，但不得输出本地已唯一确定的 kind、variant discriminator、
-singleton binding/target 或固定 parameter；只有真实未决选择才保留在 wire。ExpectedDocument 必须持久化 exact
+required slot 必须输出 `requiredOperationRef`，auxiliary rule 必须输出 canonical `kind`；两者都不得输出本地已唯一
+确定的 variant discriminator、所有 reachable authorization 共有的 singleton binding、required cardinality-one 的
+singleton allowed target 或固定 parameter。manifest 已排除 variant 的 binding authorization 不参与 wire；只有真实未决
+的多值选择才保留。ExpectedDocument 必须持久化 exact
 `WireContractHash`，request session 必须保留 manifest identity，candidate attempt 开始前还必须封存 exact
 CandidateManifest body。duplicate/restart 按 session 阶段从 current sealed authority 或该 exact body 重算并 exact-match。schema format 开启或关闭
 不改变该 shape；provider 结果一律由同一 strict local compiler 恢复完整 DTO 后再进入原有 evaluator。

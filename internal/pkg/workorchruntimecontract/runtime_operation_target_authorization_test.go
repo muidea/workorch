@@ -88,8 +88,7 @@ func TestCandidateTargetValidatorsShareExactTargetMembership(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	bindingRef := runtimeCandidateTestBindingRef("cwi-1")
-	validPayload := []byte(`{"operations":[{"kind":"file/write","bindingRefs":["` + bindingRef + `"],"targetRefs":["main.go"],"parameters":[{"name":"content","string":"package main"}]}]}`)
+	validPayload := []byte(`{"operations":[{"kind":"file/write","targetRefs":["main.go"],"parameters":[{"name":"content","string":"package main"}]}]}`)
 	candidate, err := DecodeRuntimeCandidatePayloadWithManifest(manifest, validPayload)
 	if err != nil {
 		t.Fatalf("strict decoder rejected exact-target singleton subset: %v", err)
@@ -98,7 +97,7 @@ func TestCandidateTargetValidatorsShareExactTargetMembership(t *testing.T) {
 		t.Fatalf("semantic validator rejected exact-target singleton subset: %v", err)
 	}
 
-	outsidePayload := []byte(`{"operations":[{"kind":"file/write","bindingRefs":["` + bindingRef + `"],"targetRefs":["outside.go"],"parameters":[{"name":"content","string":"package main"}]}]}`)
+	outsidePayload := []byte(`{"operations":[{"kind":"file/write","targetRefs":["outside.go"],"parameters":[{"name":"content","string":"package main"}]}]}`)
 	_, err = DecodeRuntimeCandidatePayloadWithManifest(manifest, outsidePayload)
 	var strictFinding *RuntimeOperationTargetAuthorizationError
 	if !errors.As(err, &strictFinding) || strictFinding.Rule != runtimeOperationTargetRuleOutside {
@@ -117,7 +116,7 @@ func TestCandidateTargetValidatorsShareExactTargetMembership(t *testing.T) {
 		t.Fatalf("semantic target finding=%+v err=%v", semanticFinding, err)
 	}
 
-	emptyPayload := []byte(`{"operations":[{"kind":"file/write","bindingRefs":["` + bindingRef + `"],"targetRefs":[],"parameters":[{"name":"content","string":"package main"}]}]}`)
+	emptyPayload := []byte(`{"operations":[{"kind":"file/write","targetRefs":[],"parameters":[{"name":"content","string":"package main"}]}]}`)
 	_, err = DecodeRuntimeCandidatePayloadWithManifest(manifest, emptyPayload)
 	var emptyFinding *RuntimeOperationTargetAuthorizationError
 	if !errors.As(err, &emptyFinding) || emptyFinding.Rule != runtimeOperationTargetRuleRequired {

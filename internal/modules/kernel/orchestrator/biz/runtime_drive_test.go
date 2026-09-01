@@ -10016,8 +10016,7 @@ func TestRequestAndSealRuntimeCandidateRemovesForbiddenRawIDOnAttemptOne(t *test
 	}
 	module := newTestBiz(owner, hub, nil)
 	prefix := runtimecontract.StableRuntimeCandidatePrefixHashWithExecutionContract(initialized.Definition, initialized.Facts.Activation.ExecutionContract)
-	bindingID := initialized.Facts.Focus.CoverageEvidenceBindings[0].ID
-	conformant := []byte(`{"operations":[{"kind":"file/edit","bindingRefs":["` + bindingID + `"],"targetRefs":["target.txt"],"parameters":[{"name":"oldText","string":"old"},{"name":"newText","string":"new"}]}]}`)
+	conformant := []byte(`{"operations":[{"kind":"file/edit","targetRefs":["target.txt"],"parameters":[{"name":"oldText","string":"old"},{"name":"newText","string":"new"}]}]}`)
 	forbiddenID := []byte(strings.Replace(string(conformant), `{"kind":`, `{"id":"provider-authored","kind":`, 1))
 	providerCalls := 0
 	llmObserver := magicevent.NewSimpleObserver(runtimecontract.RuntimeModuleLLM, hub)
@@ -10082,9 +10081,8 @@ func TestRequestAndSealRuntimeCandidateReencodesDeclaredParameterEntriesOnAttemp
 	}
 	module := newTestBiz(owner, hub, nil)
 	prefix := runtimecontract.StableRuntimeCandidatePrefixHashWithExecutionContract(initialized.Definition, initialized.Facts.Activation.ExecutionContract)
-	bindingID := initialized.Facts.Focus.CoverageEvidenceBindings[0].ID
-	conformant := []byte(`{"operations":[{"kind":"file/edit","bindingRefs":["` + bindingID + `"],"targetRefs":["target.txt"],"parameters":[{"name":"oldText","string":"old"},{"name":"newText","string":"secret replacement"},{"name":"baseHash","string":"secret owner hash"}]}]}`)
-	malformed := []byte(`{"operations":[{"kind":"file/edit","bindingRefs":["` + bindingID + `"],"targetRefs":["target.txt"],"parameters":[{"name":"oldText","string":"old"},{"name":"newText","string":"secret replacement","baseHash":"secret owner hash"}]}]}`)
+	conformant := []byte(`{"operations":[{"kind":"file/edit","targetRefs":["target.txt"],"parameters":[{"name":"oldText","string":"old"},{"name":"newText","string":"secret replacement"},{"name":"baseHash","string":"secret owner hash"}]}]}`)
+	malformed := []byte(`{"operations":[{"kind":"file/edit","targetRefs":["target.txt"],"parameters":[{"name":"oldText","string":"old"},{"name":"newText","string":"secret replacement","baseHash":"secret owner hash"}]}]}`)
 	beforeBudget, err := runtimecontract.RuntimeBudgetRemaining(initialized.ExecutionBudget, runtimecontract.RuntimeBudgetDimensionCandidateCorrection)
 	if err != nil {
 		t.Fatal(err)
@@ -10204,7 +10202,7 @@ func TestRequestAndSealRuntimeCandidateRecoversProviderLimitedOutputWithComplete
 	}
 	module := newTestBiz(owner, hub, nil)
 	prefix := runtimecontract.StableRuntimeCandidatePrefixHashWithExecutionContract(initialized.Definition, initialized.Facts.Activation.ExecutionContract)
-	first := fmt.Sprintf(`{"operations":[{"kind":"file/edit","bindingRefs":[%q],`, initialized.Facts.Focus.CoverageEvidenceBindings[0].ID)
+	first := `{"operations":[{"kind":"file/edit",`
 	second := `"targetRefs":["target.txt"],"parameters":[{"name":"oldText","string":"old"},{"name":"newText","string":"new"}]}]}`
 	calls := 0
 	llmObserver := magicevent.NewSimpleObserver(runtimecontract.RuntimeModuleLLM, hub)
@@ -10271,8 +10269,7 @@ func TestRequestAndSealRuntimeCandidateCommitsSessionBeforeProviderAndAttemptAft
 	}
 	module := newTestBiz(owner, hub, nil)
 	prefix := runtimecontract.StableRuntimeCandidatePrefixHashWithExecutionContract(initialized.Definition, initialized.Facts.Activation.ExecutionContract)
-	bindingID := initialized.Facts.Focus.CoverageEvidenceBindings[0].ID
-	document := []byte("```json\n{\"operations\":[{\"kind\":\"file/edit\",\"bindingRefs\":[\"" + bindingID + "\"],\"targetRefs\":[\"target.txt\"],\"parameters\":[{\"name\":\"oldText\",\"string\":\"old\"},{\"name\":\"newText\",\"string\":\"new\"}]}]}\n```")
+	document := []byte("```json\n{\"operations\":[{\"kind\":\"file/edit\",\"targetRefs\":[\"target.txt\"],\"parameters\":[{\"name\":\"oldText\",\"string\":\"old\"},{\"name\":\"newText\",\"string\":\"new\"}]}]}\n```")
 	providerCalls := 0
 	llmObserver := magicevent.NewSimpleObserver(runtimecontract.RuntimeModuleLLM, hub)
 	llmObserver.Subscribe(llmevents.TopicRequestRuntimeCandidate, func(event magicevent.Event, result magicevent.Result) {
@@ -10322,8 +10319,7 @@ func TestRequestAndSealRuntimeCandidateRetriesTransportWithoutCandidateAttempt(t
 	}
 	module := newTestBiz(owner, hub, nil)
 	prefix := runtimecontract.StableRuntimeCandidatePrefixHashWithExecutionContract(initialized.Definition, initialized.Facts.Activation.ExecutionContract)
-	bindingID := initialized.Facts.Focus.CoverageEvidenceBindings[0].ID
-	document := []byte(`{"operations":[{"kind":"file/edit","bindingRefs":["` + bindingID + `"],"targetRefs":["target.txt"],"parameters":[{"name":"oldText","string":"old"},{"name":"newText","string":"new"}]}]}`)
+	document := []byte(`{"operations":[{"kind":"file/edit","targetRefs":["target.txt"],"parameters":[{"name":"oldText","string":"old"},{"name":"newText","string":"new"}]}]}`)
 	var calls []llmevents.RequestRuntimeCandidateCommand
 	llmObserver := magicevent.NewSimpleObserver(runtimecontract.RuntimeModuleLLM, hub)
 	llmObserver.Subscribe(llmevents.TopicRequestRuntimeCandidate, func(event magicevent.Event, result magicevent.Result) {
@@ -10474,8 +10470,7 @@ func TestRequestAndSealRuntimeCandidateRestartsFromPersistedIncompleteOutcome(t 
 	if err != nil {
 		t.Fatal(err)
 	}
-	bindingID := initialized.Facts.Focus.CoverageEvidenceBindings[0].ID
-	first := `{"operations":[{"kind":"file/edit","bindingRefs":["` + bindingID + `"],`
+	first := `{"operations":[{"kind":"file/edit",`
 	firstPhysicalID := runtimecontract.StableRuntimeCandidatePhysicalCallID(session.LogicalRequestID, 1)
 	submitted, err := owner.MarkRuntimeCandidateRequestSubmitted(ctx, prepared.Facts.WorkspaceID, prepared.Facts.RunID, session.LogicalRequestID, 1, firstPhysicalID)
 	if err != nil {
@@ -10508,7 +10503,7 @@ func TestRequestAndSealRuntimeCandidateRestartsFromPersistedIncompleteOutcome(t 
 		calls++
 		command := event.Data().(llmevents.RequestRuntimeCandidateCommand)
 		if command.RequestIdentity.Sequence != 2 {
-			t.Fatalf("restart whole-document recovery command = %+v", command)
+			t.Errorf("restart whole-document recovery command = %+v", command)
 		}
 		document := []byte(first + `"targetRefs":["target.txt"],"parameters":[{"name":"oldText","string":"old"},{"name":"newText","string":"new"}]}]}`)
 		result.Set(runtimeProviderResultWithAuditForTest(command, llmevents.RequestRuntimeCandidateResult{Transaction: command.Transaction, DocumentKind: command.DocumentKind, RequestIdentity: command.RequestIdentity, ExpectedDocumentHash: runtimeExpectedDocumentHash(command.ExpectedDocument), DocumentOutcome: runtimeCompleteDocumentOutcome(command.ExpectedDocument, document)}), nil)

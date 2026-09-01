@@ -4,7 +4,7 @@ Status: normative
 
 Type: verification
 
-Last Verified: 2026-08-31
+Last Verified: 2026-09-01
 
 ## Purpose
 
@@ -186,10 +186,14 @@ Cross-owner regression必须证明 concrete receiving-owner Command/Result、wor
   按 requirement ref 唯一匹配 normalized required-sequence slot，auxiliary proposal 按 canonical execution-semantic key 派生 identity；
   provider 数组下标不参与 identity 或 dependency authority。任意重排、duplicate/restart 后派生结果必须稳定，provider 自造字段、
   ambiguous/duplicate/missing slot 必须 fail-closed 且零 dispatch；
-- manifest→wire matrix 必须覆盖 required slot 有/无 variant、singleton binding/target 与仍可选多值；证明 schema、instruction、
+- manifest→wire matrix 必须分别覆盖 required 与 auxiliary rule 的有/无 variant、reachable singleton binding、required
+  cardinality-one singleton target 与仍可选多值；证明 unreachable variant authorization 不扩大 wire，schema、instruction、
   fixture encoder 与 strict compiler 共享同一 `RuntimeCandidateWireContract`，provider 只提供真实选择。
   JSONSchemaResponse on/off 必须接受同一最小文档；本地 kind/variant/binding/target/fixed parameter 回显、null
   container、unknown/trailing 字段、提前闭合 root 都精确拒绝且零 repair/effect；
+- 条件必填 operation field 的 semantic diagnostic 必须以 `missing_<field>` 与 `Required=[<field>]` 表达；缺失
+  `bindingRefs` 只能形成 `schema_field/supply_required_field`，不能同时形成 `evidence_binding/select_allowed_evidence_binding`。
+  只有具体错误 binding 与不同 allowed member 才进入 semantic witness；CAS/fresh-load 必须拒绝维度不兼容的 failure/correction；
 - wire identity matrix 必须覆盖 ExpectedDocument/request-session exact hash 正向、manifest 字段漂移、hash 缺失/篡改、
   duplicate、attempt 1、JSON round-trip 与 fresh restart。编译失败或重算不一致必须在 provider/feasibility/
   dispatch 前 fail-closed，不得以空 hash 或当前 renderer 形状继续；

@@ -103,21 +103,17 @@ func runtimeCandidateSchemaForManifest(manifest runtimecontract.RuntimeCandidate
 	if !ok {
 		return base
 	}
-	items, ok := operations["items"].(map[string]any)
-	if !ok {
-		return base
-	}
 	wire, err := runtimecontract.BuildRuntimeCandidateWireContract(manifest)
 	if err != nil {
 		return ""
 	}
+	branches := runtimeOperationSchemaBranchesForWire(manifest, wire)
+	if len(branches) == 0 {
+		return ""
+	}
+	operations["maxItems"] = manifest.MaxOperationCount
+	operations["items"] = map[string]any{"oneOf": branches}
 	if len(manifest.RequiredOperationSequence) != 0 {
-		branches := runtimeOperationSchemaBranchesForWire(manifest, wire)
-		if len(branches) == 0 {
-			return ""
-		}
-		operations["maxItems"] = manifest.MaxOperationCount
-		operations["items"] = map[string]any{"oneOf": branches}
 		requirements := make([]any, 0, len(manifest.RequiredOperationSequence))
 		for _, requirement := range manifest.RequiredOperationSequence {
 			requirements = append(requirements, map[string]any{"contains": map[string]any{
@@ -127,42 +123,6 @@ func runtimeCandidateSchemaForManifest(manifest runtimecontract.RuntimeCandidate
 			}})
 		}
 		operations["allOf"] = requirements
-		encoded, encodeErr := json.Marshal(schema)
-		if encodeErr != nil {
-			return base
-		}
-		return string(encoded)
-	}
-	allowedKinds := make([]string, 0, len(manifest.Operations))
-	operations["maxItems"] = manifest.MaxOperationCount
-	allowsRequiredOperationRef := false
-	for _, operation := range manifest.Operations {
-		allowedKinds = append(allowedKinds, operation.Kind)
-		if runtimeStringIn(operation.AllowedOperationFields, "requiredOperationRef") {
-			allowsRequiredOperationRef = true
-		}
-	}
-	conditions := runtimeOperationSchemaConditionsForManifest(manifest.Operations)
-	if itemProperties, ok := items["properties"].(map[string]any); ok {
-		itemProperties["kind"] = map[string]any{"type": "string", "enum": allowedKinds}
-		if !allowsRequiredOperationRef {
-			delete(itemProperties, "requiredOperationRef")
-		}
-		delete(itemProperties, "coverageWorkItemIds")
-		bindingRefs := make([]string, 0)
-		for _, operation := range manifest.Operations {
-			bindingRefs = append(bindingRefs, runtimeCandidateBindingAuthorizationRefs(operation.BindingAuthorizations)...)
-		}
-		bindingRefs = runtimeSortedUniqueStrings(bindingRefs)
-		if len(bindingRefs) == 0 {
-			delete(itemProperties, "bindingRefs")
-		} else {
-			itemProperties["bindingRefs"] = map[string]any{"type": "array", "minItems": 1, "maxItems": 1, "items": map[string]any{"type": "string", "enum": bindingRefs}}
-		}
-		items["required"] = runtimeCommonRequiredOperationFields(manifest.Operations)
-	}
-	if len(conditions) > 0 {
-		items["allOf"] = conditions
 	}
 	encoded, err := json.Marshal(schema)
 	if err != nil {
@@ -171,11 +131,11 @@ func runtimeCandidateSchemaForManifest(manifest runtimecontract.RuntimeCandidate
 	return string(encoded)
 }
 
-// runtimeOperationSchemaBranchesForWire renders required-operation slots from
-// the same pure wire projection consumed by the strict decoder. A required
-// slot exposes only requiredOperationRef plus genuinely provider-selectable
-// fields; kind, singleton binding/target and variant discriminators are absent
-// from the branch and therefore rejected by additionalProperties=false.
+// runtimeOperationSchemaBranchesForWire renders every provider operation from
+// the same pure wire projection consumed by the strict decoder. Required slots
+// and auxiliary kinds both expose only genuinely provider-selectable fields;
+// locally compiled bindings, targets and variant discriminators are rejected
+// by additionalProperties=false.
 func runtimeOperationSchemaBranchesForWire(manifest runtimecontract.RuntimeCandidateContractManifest, wire runtimecontract.RuntimeCandidateWireContract) []any {
 	ret := make([]any, 0, len(wire.OperationRules))
 	for _, rule := range wire.OperationRules {
@@ -207,6 +167,9 @@ func runtimeOperationSchemaBranchesForWire(manifest runtimecontract.RuntimeCandi
 			"additionalProperties": false,
 			"properties":           properties,
 			"required":             append([]string(nil), rule.RequiredProviderFields...),
+		}
+		if conditions := runtimeOperationBindingSchemaConditionsForWireRule(operation, rule); len(conditions) != 0 {
+			branch["allOf"] = conditions
 		}
 		ret = append(ret, branch)
 	}
@@ -278,7 +241,7 @@ func runtimeOperationParameterSchemaForWireRule(operation runtimecontract.Runtim
 	if len(requirements) != 0 {
 		parameterSchema["allOf"] = requirements
 	}
-	if !rule.RequiredSlot() && len(operation.Variants) != 0 {
+	if !rule.RequiredSlot() && rule.VariantID == "" && len(operation.Variants) != 0 {
 		variantSchemas := make([]any, 0, len(operation.Variants))
 		for _, variant := range operation.Variants {
 			variantSchemas = append(variantSchemas, runtimeOperationVariantParameterSchema(operation.Kind, variant))
@@ -288,6 +251,48 @@ func runtimeOperationParameterSchemaForWireRule(operation runtimecontract.Runtim
 	return parameterSchema
 }
 
+func runtimeOperationBindingSchemaConditionsForWireRule(operation runtimecontract.RuntimeCandidateOperationManifest, rule runtimecontract.RuntimeCandidateWireOperationRule) []any {
+	if rule.RequiredSlot() || rule.VariantID != "" || !runtimeStringIn(rule.ProviderFields, "bindingRefs") || len(operation.Variants) < 2 {
+		return nil
+	}
+	ret := make([]any, 0, len(operation.Variants))
+	for _, variant := range operation.Variants {
+		authorization, found := runtimeCandidateBindingAuthorizationForSchema(operation.BindingAuthorizations, variant.ID)
+		if !found {
+			return nil
+		}
+		condition := map[string]any{
+			"if": map[string]any{
+				"properties": map[string]any{"parameters": runtimeOperationVariantParameterSchema(operation.Kind, variant)},
+				"required":   []string{"parameters"},
+			},
+		}
+		if len(authorization.AllowedBindingRefs) == 0 {
+			condition["then"] = map[string]any{"not": map[string]any{"required": []string{"bindingRefs"}}}
+		} else {
+			condition["then"] = map[string]any{
+				"properties": map[string]any{"bindingRefs": map[string]any{
+					"type": "array", "minItems": 1, "maxItems": 1,
+					"items": map[string]any{"type": "string", "enum": append([]string(nil), authorization.AllowedBindingRefs...)},
+				}},
+				"required": []string{"bindingRefs"},
+			}
+		}
+		ret = append(ret, condition)
+	}
+	return ret
+}
+
+func runtimeCandidateBindingAuthorizationForSchema(values []runtimecontract.RuntimeOperationBindingAuthorization, variantID string) (runtimecontract.RuntimeOperationBindingAuthorization, bool) {
+	for _, authorization := range values {
+		authorization = authorization.Normalized()
+		if authorization.RequiredOperationRef == "" && authorization.VariantID == variantID {
+			return authorization, true
+		}
+	}
+	return runtimecontract.RuntimeOperationBindingAuthorization{}, false
+}
+
 func runtimeStringIn(values []string, wanted string) bool {
 	for _, value := range values {
 		if value == wanted {
@@ -295,135 +300,6 @@ func runtimeStringIn(values []string, wanted string) bool {
 		}
 	}
 	return false
-}
-
-// runtimeOperationSchemaConditionsForManifest is the production schema
-// projection. Its input is already descriptor-derived by
-// BuildRuntimeCandidateContractManifest; it must not call the operation
-// contract inventory again or maintain a parallel field whitelist.
-func runtimeOperationSchemaConditionsForManifest(operations []runtimecontract.RuntimeCandidateOperationManifest) []any {
-	ret := make([]any, 0, len(operations))
-	for _, operation := range operations {
-		operation = operation.Normalized()
-		if operation.Kind == "" {
-			continue
-		}
-		parameterTypes := make(map[string]runtimecontract.RuntimeOperationParameterType, len(operation.Parameters))
-		parameterRequirements := make([]any, 0, len(operation.Parameters)+1)
-		for _, parameter := range operation.Parameters {
-			parameterTypes[parameter.Name] = parameter.Type
-			if parameter.Required {
-				parameterRequirements = append(parameterRequirements, runtimeParameterContainsSchema(parameter.Name))
-			}
-		}
-		if len(operation.RequireOneOfParameters) > 0 {
-			oneOf := make([]any, 0, len(operation.RequireOneOfParameters))
-			for _, name := range operation.RequireOneOfParameters {
-				oneOf = append(oneOf, runtimeNonEmptyParameterContainsSchema(name, parameterTypes[name]))
-			}
-			parameterRequirements = append(parameterRequirements, map[string]any{"anyOf": oneOf})
-		}
-		parameterSchema := map[string]any{
-			"type": "array", "maxItems": len(operation.Parameters) + runtimeProviderStringListMaxItems,
-			"items": runtimeOperationParameterItemSchemaForManifest(operation),
-		}
-		if len(parameterRequirements) > 0 {
-			parameterSchema["allOf"] = parameterRequirements
-		}
-		if len(operation.Variants) > 0 {
-			variantSchemas := make([]any, 0, len(operation.Variants))
-			for _, variant := range operation.Variants {
-				variantSchemas = append(variantSchemas, runtimeOperationVariantParameterSchema(operation.Kind, variant))
-			}
-			parameterSchema["oneOf"] = variantSchemas
-		}
-		thenProperties := map[string]any{"parameters": parameterSchema}
-		then := map[string]any{"properties": thenProperties}
-		requiredFields := append([]string(nil), operation.RequiredOperationFields...)
-		bindingConditions := make([]any, 0, len(operation.BindingAuthorizations))
-		for _, authorization := range operation.BindingAuthorizations {
-			authorization = authorization.Normalized()
-			if len(operation.BindingAuthorizations) == 1 && authorization.RequiredOperationRef == "" {
-				if len(authorization.AllowedBindingRefs) != 0 {
-					requiredFields = append(requiredFields, "bindingRefs")
-				}
-				continue
-			}
-			selectorProperties := make(map[string]any)
-			selectorRequired := make([]string, 0, 1)
-			if authorization.RequiredOperationRef != "" {
-				selectorProperties["requiredOperationRef"] = map[string]any{"const": authorization.RequiredOperationRef}
-				selectorRequired = append(selectorRequired, "requiredOperationRef")
-			} else if variant, found := runtimeCandidateManifestVariantForID(operation.Variants, authorization.VariantID); found {
-				selectorProperties["parameters"] = runtimeOperationVariantParameterSchema(operation.Kind, variant)
-				selectorRequired = append(selectorRequired, "parameters")
-			} else {
-				continue
-			}
-			condition := map[string]any{
-				"if": map[string]any{"properties": selectorProperties, "required": selectorRequired},
-			}
-			if len(authorization.AllowedBindingRefs) != 0 {
-				condition["then"] = map[string]any{
-					"properties": map[string]any{"bindingRefs": map[string]any{"type": "array", "minItems": 1, "maxItems": 1, "items": map[string]any{"type": "string", "enum": authorization.AllowedBindingRefs}}},
-					"required":   []string{"bindingRefs"},
-				}
-			} else {
-				condition["then"] = map[string]any{"not": map[string]any{"required": []string{"bindingRefs"}}}
-			}
-			bindingConditions = append(bindingConditions, condition)
-		}
-		allowedTargets := operation.Target.Normalized().AllowedTargetRefs()
-		if operation.RequireTargetRefs || len(allowedTargets) > 0 {
-			targetItems := map[string]any{"type": "string"}
-			if len(allowedTargets) > 0 {
-				targetItems["enum"] = append([]string(nil), allowedTargets...)
-			}
-			targetSchema := map[string]any{"type": "array", "items": targetItems}
-			if len(allowedTargets) > 0 {
-				targetSchema["maxItems"] = len(allowedTargets)
-			}
-			switch operation.TargetCardinality {
-			case runtimecontract.RuntimeOperationTargetCardinalityOne:
-				targetSchema["minItems"] = 1
-				targetSchema["maxItems"] = 1
-			case runtimecontract.RuntimeOperationTargetCardinalityMany:
-				if operation.RequireTargetRefs {
-					targetSchema["minItems"] = 1
-				}
-			}
-			thenProperties["targetRefs"] = targetSchema
-		}
-		if len(requiredFields) != 0 {
-			then["required"] = runtimeSortedUniqueStrings(requiredFields)
-		}
-		if len(bindingConditions) != 0 {
-			then["allOf"] = bindingConditions
-		}
-		ret = append(ret, map[string]any{
-			"if":   map[string]any{"properties": map[string]any{"kind": map[string]any{"const": operation.Kind}}, "required": []string{"kind"}},
-			"then": then,
-		})
-	}
-	return ret
-}
-
-func runtimeCommonRequiredOperationFields(operations []runtimecontract.RuntimeCandidateOperationManifest) []string {
-	if len(operations) == 0 {
-		return nil
-	}
-	common := append([]string(nil), operations[0].Normalized().RequiredOperationFields...)
-	for _, operation := range operations[1:] {
-		required := operation.Normalized().RequiredOperationFields
-		filtered := common[:0]
-		for _, field := range common {
-			if runtimeStringIn(required, field) {
-				filtered = append(filtered, field)
-			}
-		}
-		common = filtered
-	}
-	return runtimeSortedUniqueStrings(common)
 }
 
 func runtimeOperationParameterItemSchemaForManifest(operation runtimecontract.RuntimeCandidateOperationManifest) map[string]any {

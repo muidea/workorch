@@ -279,9 +279,18 @@ func TestConfirmedRepairValidationOnlyBindingManifestRetainsSourceLineage(t *tes
 			t.Fatalf("confirmed repair binding authorization = %+v, want %q", authorization, bindingID)
 		}
 	}
-	withoutBinding := []byte(`{"operations":[{"kind":"file/write","targetRefs":["main.go"],"parameters":[{"name":"content","string":"updated"}]}]}`)
-	if _, err := runtimecontract.DecodeRuntimeCandidatePayloadWithManifest(manifest, withoutBinding); err == nil || !strings.Contains(err.Error(), "bindingRefs") {
-		t.Fatalf("confirmed repair request accepted operation without source binding: %v", err)
+	wire, err := runtimecontract.BuildRuntimeCandidateWireContract(manifest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rule, found := runtimecontract.RuntimeCandidateWireRuleForAuxiliaryKind(wire, runtimecontract.StepKindFileWrite)
+	if !found || !reflect.DeepEqual(rule.DerivedBindingRefs, []string{bindingID}) || !reflect.DeepEqual(rule.DerivedTargetRefs, []string{"main.go"}) {
+		t.Fatalf("confirmed repair wire did not retain local source lineage: rule=%+v found=%t", rule, found)
+	}
+	providerPayload := []byte(`{"operations":[{"kind":"file/write","parameters":[{"name":"content","string":"updated"}]}]}`)
+	decoded, err := runtimecontract.DecodeRuntimeCandidatePayloadWithManifest(manifest, providerPayload)
+	if err != nil || decoded.StateChange == nil || !reflect.DeepEqual(decoded.StateChange.Operations[0].Operation.BindingRefs, []string{bindingID}) {
+		t.Fatalf("confirmed repair request did not compile source binding: candidate=%+v err=%v", decoded, err)
 	}
 
 	candidate := runtimecontract.RuntimeCandidate{StateChange: &runtimecontract.StateChangeCandidate{Operations: []runtimecontract.StateChangingOperation{{Operation: runtimecontract.RuntimeOperation{

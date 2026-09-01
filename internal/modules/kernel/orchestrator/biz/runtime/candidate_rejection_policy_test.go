@@ -233,7 +233,7 @@ func TestSealCandidateRejectionRequiresConcreteWitnessAndPreservesRequiredFieldC
 
 	manifest.Operations = []runtimecontract.RuntimeCandidateOperationManifest{{
 		Kind:                    runtimecontract.RuntimeBlockKindPatchApply,
-		AllowedOperationFields:  []string{"kind", "parameters", "targetRefs"},
+		AllowedOperationFields:  []string{"bindingRefs", "kind", "parameters", "targetRefs"},
 		RequiredOperationFields: []string{"kind", "parameters", "targetRefs"},
 		RequireTargetRefs:       true,
 		Parameters: []runtimecontract.RuntimeOperationParameterContract{{
@@ -246,6 +246,7 @@ func TestSealCandidateRejectionRequiresConcreteWitnessAndPreservesRequiredFieldC
 		required string
 	}{
 		{path: "$.operations[0].targetRefs", actual: "missing_targetRefs", required: "targetRefs"},
+		{path: "$.operations[0].bindingRefs", actual: "missing_bindingRefs", required: "bindingRefs"},
 		{path: "$.operations[0].parameters[name=content]", actual: "missing_content", required: "content"},
 	} {
 		failure := &runtimecontract.RuntimeCandidateFailure{
@@ -254,9 +255,11 @@ func TestSealCandidateRejectionRequiresConcreteWitnessAndPreservesRequiredFieldC
 				Path: testCase.path, Actual: testCase.actual, Required: []string{testCase.required}, ManifestHash: manifest.Hash,
 			},
 		}
-		_, directive, err := SealCandidateRejection(failure, manifest)
+		sealed, directive, err := SealCandidateRejection(failure, manifest)
 		if err != nil || directive == nil || directive.Disposition != runtimecontract.RuntimeCandidateCorrectionCorrectableOnce || directive.Witness == nil ||
-			directive.Witness.Path != testCase.path || directive.Witness.RejectedValue != candidateCorrectionFieldAbsent || directive.Witness.AlternativeValue != candidateCorrectionFieldPresent {
+			directive.Witness.Path != testCase.path || directive.Witness.RejectedValue != candidateCorrectionFieldAbsent || directive.Witness.AlternativeValue != candidateCorrectionFieldPresent ||
+			!reflect.DeepEqual(directive.Objectives, []runtimecontract.RuntimeCandidateCorrectionObjective{runtimecontract.RuntimeCandidateCorrectionSupplyRequiredField}) ||
+			runtimecontract.ValidateRuntimeCandidateFailureCorrectionPair(sealed, directive) != nil {
 			t.Fatalf("required field %s lost exact correction witness: directive=%+v err=%v", testCase.path, directive, err)
 		}
 	}

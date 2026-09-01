@@ -2691,7 +2691,7 @@ func TestRuntimeCandidateSchemaDerivesPatchTargetRequirementsFromOperationContra
 	schema := runtimeCandidateSchemaForDecision(t, runtimecontract.RuntimeDecision{
 		State: runtimecontract.ConvergenceStateNeedStateChange,
 		RequiredOutput: runtimecontract.RequiredOutputContract{
-			AcceptedKinds: []string{runtimecontract.RuntimeBlockKindPatchApply},
+			AcceptedKinds: []string{runtimecontract.RuntimeBlockKindPatchApply}, TargetRefs: []string{"main.go", "support.go"},
 		},
 	}, nil)
 	for _, value := range []string{`"const":"patch/apply"`, `"const":"patchType"`, `"targetRefs"`, `"minItems":1`, `"maxItems":1`, `"minLength":1`} {
@@ -2815,11 +2815,82 @@ func TestRuntimeCandidateRequiredWireIsMinimalWithJSONSchemaResponseOnOrOff(t *t
 	}
 }
 
-func TestRuntimeCandidateSchemaRequiresExactlyOneSealedBindingForProofBearingKind(t *testing.T) {
+func TestRuntimeCandidateAuxiliarySingletonWireIsMinimalWithJSONSchemaResponseOnOrOff(t *testing.T) {
+	facts := runtimecontract.RuntimeFacts{
+		DefinitionRevision: "definition-auxiliary-wire",
+		Focus: runtimecontract.CoverageFocus{
+			ID: "focus-auxiliary-wire", CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-auxiliary-wire"}, TargetRefs: []string{"main.go"},
+		},
+	}
+	bindRuntimeCandidateTestFocus(t, &facts, runtimecontract.ConvergenceStateNeedStateChange, []string{runtimecontract.RuntimeBlockKindPatchApply})
+	decision := runtimecontract.RuntimeDecision{
+		State: runtimecontract.ConvergenceStateNeedStateChange, Focus: facts.Focus,
+		AuthoritySnapshot: runtimecontract.AuthoritySnapshot{DefinitionRevision: facts.DefinitionRevision},
+		RequiredOutput: runtimecontract.RequiredOutputContract{
+			AcceptedKinds:             []string{runtimecontract.RuntimeBlockKindPatchApply},
+			AcceptedOperationVariants: []runtimecontract.RuntimeOperationVariantRef{{Kind: runtimecontract.RuntimeBlockKindPatchApply, VariantID: "text_replace"}},
+			AcceptedEffectScopes:      []runtimecontract.RuntimeEffectScope{runtimecontract.RuntimeEffectWorkspaceDurable},
+			RequiredEffectScopes:      []runtimecontract.RuntimeEffectScope{runtimecontract.RuntimeEffectWorkspaceDurable},
+			CoverageWorkItemIDs:       append([]common.CoverageWorkItemID(nil), facts.Focus.CoverageWorkItemIDs...),
+			TargetRefs:                append([]string(nil), facts.Focus.TargetRefs...),
+		},
+	}
+	manifest, err := runtimecontract.BuildRuntimeCandidateContractManifest(decision, runtimecontract.RuntimeCandidateManifestOwnerFacts{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	wire := runtimeCandidateWireForTest(t, manifest)
+	rule, found := runtimecontract.RuntimeCandidateWireRuleForAuxiliaryKind(wire, runtimecontract.RuntimeBlockKindPatchApply)
+	if !found || rule.VariantID != "text_replace" ||
+		!slices.Equal(rule.ProviderFields, []string{"kind", "parameters"}) ||
+		len(rule.DerivedBindingRefs) != 1 || !slices.Equal(rule.DerivedTargetRefs, []string{"main.go"}) ||
+		!slices.Contains(rule.DerivedParameterNames(), "patchType") {
+		t.Fatalf("minimal auxiliary wire rule = %+v found=%t", rule, found)
+	}
+	schema := runtimeCandidateSchemaForManifest(manifest)
+	for _, localField := range []string{"bindingRefs", "targetRefs"} {
+		if runtimeOperationSchemaHasProperty(t, schema, localField) {
+			t.Fatalf("auxiliary operation schema exposed locally-derived field %q: %s", localField, schema)
+		}
+	}
+	if strings.Contains(schema, `"const":"patchType"`) || strings.Contains(schema, `"const":"text_replace"`) {
+		t.Fatalf("auxiliary operation schema exposed locally-derived variant authority: %s", schema)
+	}
+	payload := []byte(`{"operations":[{"kind":"patch/apply","parameters":[{"name":"oldText","string":"before"},{"name":"newText","string":"after"}]}]}`)
+	request := llmmodels.ProviderRequest{Schema: schema}
+	for _, enabled := range []bool{false, true} {
+		textConfig := responsesTextForRequest(llmmodels.ProviderCapabilities{JSONSchemaResponse: enabled}, request)
+		if enabled && (textConfig == nil || textConfig.Format == nil || !textConfig.Format.Strict) {
+			t.Fatalf("JSONSchemaResponse=true did not dispatch the minimal auxiliary schema: %+v", textConfig)
+		}
+		if !enabled && textConfig != nil {
+			t.Fatalf("JSONSchemaResponse=false unexpectedly dispatched provider schema: %+v", textConfig)
+		}
+		candidate, decodeErr := runtimecontract.DecodeRuntimeCandidatePayloadWithManifest(manifest, payload)
+		if decodeErr != nil || candidate.StateChange == nil || len(candidate.StateChange.Operations) != 1 {
+			t.Fatalf("JSONSchemaResponse=%t minimal auxiliary candidate=%+v err=%v", enabled, candidate, decodeErr)
+		}
+		operation := candidate.StateChange.Operations[0].Operation
+		variantDerived := false
+		for _, parameter := range operation.Parameters {
+			if parameter.Name == "patchType" && parameter.String != nil && *parameter.String == "text_replace" {
+				variantDerived = true
+				break
+			}
+		}
+		if operation.Kind != runtimecontract.RuntimeBlockKindPatchApply || !variantDerived ||
+			!slices.Equal(operation.BindingRefs, rule.DerivedBindingRefs) ||
+			!slices.Equal(operation.TargetRefs, rule.DerivedTargetRefs) {
+			t.Fatalf("JSONSchemaResponse=%t locally compiled auxiliary operation=%+v", enabled, operation)
+		}
+	}
+}
+
+func TestRuntimeCandidateSchemaRequiresOneSelectionFromNonSingletonSealedBindings(t *testing.T) {
 	facts := runtimecontract.RuntimeFacts{
 		DefinitionRevision: "definition-proof-binding",
 		Focus: runtimecontract.CoverageFocus{
-			ID: "focus-proof-binding", CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-1"}, TargetRefs: []string{"main.go"},
+			ID: "focus-proof-binding", CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-1", "cwi-2"}, TargetRefs: []string{"main.go", "support.go"},
 		},
 	}
 	bindRuntimeCandidateTestFocus(t, &facts, runtimecontract.ConvergenceStateNeedStateChange, []string{runtimecontract.RuntimeBlockKindPatchApply})
@@ -2836,12 +2907,21 @@ func TestRuntimeCandidateSchemaRequiresExactlyOneSealedBindingForProofBearingKin
 		t.Fatal(err)
 	}
 	schema := runtimeCandidateSchemaForManifest(manifest)
-	for _, want := range []string{`"bindingRefs"`, `"minItems":1`, `"maxItems":1`, `"required":["bindingRefs","kind","parameters","targetRefs"]`} {
-		if !strings.Contains(schema, want) {
-			t.Fatalf("proof-bearing schema lost %q: %s", want, schema)
-		}
+	branch := runtimeSchemaOperationBranchForKind(t, schema, runtimecontract.RuntimeBlockKindPatchApply)
+	properties, _ := branch["properties"].(map[string]any)
+	bindingSchema, ok := properties["bindingRefs"].(map[string]any)
+	if !ok || bindingSchema["minItems"] != float64(1) || bindingSchema["maxItems"] != float64(1) ||
+		!runtimeSchemaStringArrayContains(branch["required"], "bindingRefs") {
+		t.Fatalf("proof-bearing schema did not retain one provider binding selection: branch=%+v", branch)
 	}
-	instruction := runtimeCandidateStructuredOutputInstruction(manifest, runtimeCandidateWireForTest(t, manifest))
+	wire := runtimeCandidateWireForTest(t, manifest)
+	rule, found := runtimecontract.RuntimeCandidateWireRuleForAuxiliaryKind(wire, runtimecontract.RuntimeBlockKindPatchApply)
+	if !found || len(rule.DerivedBindingRefs) != 0 || !slices.Equal(rule.AllowedBindingRefs, []string{
+		"binding/test/llm/focus-proof-binding/cwi-1", "binding/test/llm/focus-proof-binding/cwi-2",
+	}) {
+		t.Fatalf("proof-bearing wire rule = %+v found=%t", rule, found)
+	}
+	instruction := runtimeCandidateStructuredOutputInstruction(manifest, wire)
 	if !strings.Contains(instruction, "bindingRefs is required and requires exactly one value") || strings.Contains(instruction, "Optional bindingRefs") || strings.Contains(instruction, "may omit bindingRefs") {
 		t.Fatalf("proof-bearing instruction = %s", instruction)
 	}
@@ -2850,7 +2930,7 @@ func TestRuntimeCandidateSchemaRequiresExactlyOneSealedBindingForProofBearingKin
 func TestRuntimeCandidateSchemaRequiresCanonicalTargetRefsForDurableFileOperations(t *testing.T) {
 	schema := runtimeCandidateSchemaForDecision(t, runtimecontract.RuntimeDecision{
 		State: runtimecontract.ConvergenceStateNeedStateChange,
-		RequiredOutput: runtimecontract.RequiredOutputContract{AcceptedKinds: []string{
+		RequiredOutput: runtimecontract.RequiredOutputContract{TargetRefs: []string{"main.go", "support.go"}, AcceptedKinds: []string{
 			runtimecontract.StepKindFileWrite,
 			runtimecontract.StepKindFileEdit,
 		}},
@@ -2866,7 +2946,7 @@ func TestRuntimeCandidateSchemaClosesNamedParameterObjects(t *testing.T) {
 	schema := runtimeCandidateSchemaForDecision(t, runtimecontract.RuntimeDecision{
 		State: runtimecontract.ConvergenceStateNeedStateChange,
 		RequiredOutput: runtimecontract.RequiredOutputContract{
-			AcceptedKinds: []string{runtimecontract.RuntimeBlockKindPatchApply, runtimecontract.StepKindShellCommand},
+			AcceptedKinds: []string{runtimecontract.RuntimeBlockKindPatchApply, runtimecontract.StepKindShellCommand}, TargetRefs: []string{"main.go", "support.go"},
 		},
 	}, nil)
 	patchParameters := runtimeSchemaParametersForKind(t, schema, runtimecontract.RuntimeBlockKindPatchApply)
@@ -2922,70 +3002,49 @@ func TestRuntimeCandidateSchemaClosesMCPDynamicParameters(t *testing.T) {
 
 func runtimeSchemaParametersForKind(t *testing.T, encoded string, kind string) map[string]any {
 	t.Helper()
-	var root map[string]any
-	if err := json.Unmarshal([]byte(encoded), &root); err != nil {
-		t.Fatal(err)
-	}
-	properties, ok := root["properties"].(map[string]any)
+	branch := runtimeSchemaOperationBranchForKind(t, encoded, kind)
+	properties, ok := branch["properties"].(map[string]any)
 	if !ok {
-		t.Fatalf("candidate schema has no root properties: %#v", root)
+		t.Fatalf("operation branch for %q has no properties: %#v", kind, branch)
 	}
-	operations, ok := properties["operations"].(map[string]any)
+	parameters, ok := properties["parameters"].(map[string]any)
 	if !ok {
-		t.Fatalf("candidate schema has no operations: %#v", root)
+		t.Fatalf("operation branch for %q has no parameter schema: %#v", kind, properties)
 	}
-	items, ok := operations["items"].(map[string]any)
-	if !ok {
-		t.Fatalf("candidate schema has no operation items: %#v", operations)
-	}
-	for _, rawCondition := range runtimeSchemaArray(items["allOf"]) {
-		condition, ok := rawCondition.(map[string]any)
-		if !ok {
-			continue
-		}
-		ifPart, ok := condition["if"].(map[string]any)
-		if !ok || runtimeSchemaKindConst(ifPart) != kind {
-			continue
-		}
-		thenPart, ok := condition["then"].(map[string]any)
-		if !ok {
-			t.Fatalf("operation condition for %q has no then: %#v", kind, condition)
-		}
-		thenProperties, ok := thenPart["properties"].(map[string]any)
-		if !ok {
-			t.Fatalf("operation condition for %q has no properties: %#v", kind, thenPart)
-		}
-		parameters, ok := thenProperties["parameters"].(map[string]any)
-		if !ok {
-			t.Fatalf("operation condition for %q has no parameter schema: %#v", kind, thenProperties)
-		}
-		return parameters
-	}
-	t.Fatalf("candidate schema has no operation condition for %q: %#v", kind, items["allOf"])
-	return nil
+	return parameters
 }
 
 func runtimeSchemaRequiresTopLevelTargetRefs(encoded, kind string) bool {
-	var root map[string]any
-	if json.Unmarshal([]byte(encoded), &root) != nil {
+	branch := runtimeSchemaOperationBranchForKind(nil, encoded, kind)
+	if branch == nil {
 		return false
+	}
+	return runtimeSchemaStringArrayContains(branch["required"], "targetRefs")
+}
+
+func runtimeSchemaOperationBranchForKind(t *testing.T, encoded, kind string) map[string]any {
+	var root map[string]any
+	if err := json.Unmarshal([]byte(encoded), &root); err != nil {
+		if t != nil {
+			t.Fatal(err)
+		}
+		return nil
 	}
 	operations, _ := root["properties"].(map[string]any)["operations"].(map[string]any)
 	items, _ := operations["items"].(map[string]any)
-	for _, rawCondition := range runtimeSchemaArray(items["allOf"]) {
-		condition, _ := rawCondition.(map[string]any)
-		ifPart, _ := condition["if"].(map[string]any)
-		if runtimeSchemaKindConst(ifPart) != kind {
+	for _, rawBranch := range runtimeSchemaArray(items["oneOf"]) {
+		branch, _ := rawBranch.(map[string]any)
+		properties, _ := branch["properties"].(map[string]any)
+		kindSchema, _ := properties["kind"].(map[string]any)
+		if kindSchema["const"] != kind {
 			continue
 		}
-		thenPart, _ := condition["then"].(map[string]any)
-		for _, required := range runtimeSchemaStringArray(thenPart["required"]) {
-			if required == "targetRefs" {
-				return true
-			}
-		}
+		return branch
 	}
-	return false
+	if t != nil {
+		t.Fatalf("candidate schema has no operation branch for %q: %#v", kind, items["oneOf"])
+	}
+	return nil
 }
 
 func runtimeSchemaHasClosedNamedParameterBranch(parameters map[string]any, name, valueField string) bool {
@@ -3112,7 +3171,7 @@ func TestRuntimeCandidateSchemaNarrowsFileOwnerScopeToDurableFileAndDeclaredGrou
 	}
 	manifest := runtimeCandidateManifestForSchema(t, decision, selection)
 	schema := runtimeCandidateSchemaForManifest(manifest)
-	if !strings.Contains(schema, `"enum":["patch/apply","shell/command"]`) {
+	if !strings.Contains(schema, `"const":"patch/apply"`) || !strings.Contains(schema, `"const":"shell/command"`) {
 		t.Fatalf("scope schema = %s, want owner-published File and Shell scope kinds", schema)
 	}
 	for _, forbidden := range []string{`"git/write"`} {
@@ -3219,7 +3278,7 @@ func TestRuntimeCandidateManifestDrivesSchemaInstructionAndRetryCorrection(t *te
 				AcceptedEffectScopes: []runtimecontract.RuntimeEffectScope{runtimecontract.RuntimeEffectWorkspaceDurable}, RequiredEffectScopes: []runtimecontract.RuntimeEffectScope{runtimecontract.RuntimeEffectWorkspaceDurable},
 				CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-1"}, TargetRefs: []string{"main.go"},
 			}},
-			contains: []string{"patch/apply", "targetRefs cardinality=one", "targetRefs is required", "TargetPolicy=exact_target", "Allowed targets: main.go", "Forbidden parameters"},
+			contains: []string{"patch/apply", "Locally derived and forbidden in provider output: targetRefs", "Forbidden parameters"},
 		},
 		{
 			name: "shell summary remains forbidden",
@@ -3441,7 +3500,7 @@ func TestRuntimeProviderRequestNarrowsFileScopeAcrossSchemaContextAndRetry(t *te
 			t.Fatalf("scope provider schema widened to %s: %s", forbidden, request.Schema)
 		}
 	}
-	if !strings.Contains(request.Schema, `"enum":["patch/apply","shell/command"]`) {
+	if !strings.Contains(request.Schema, `"const":"patch/apply"`) || !strings.Contains(request.Schema, `"const":"shell/command"`) {
 		t.Fatalf("scope provider schema did not retain durable File and declared target-bound operation: %s", request.Schema)
 	}
 	dynamic := request.PromptContext.Sections[3].Content
@@ -3590,7 +3649,7 @@ func bindRuntimeCandidateTestFocus(t *testing.T, facts *runtimecontract.RuntimeF
 }
 
 func TestRuntimeCandidateSchemaRestrictsVariantsToSealedAuthority(t *testing.T) {
-	patchSchema := runtimeCandidateSchemaForDecision(t, runtimecontract.RuntimeDecision{
+	patchManifest := runtimeCandidateManifestForSchema(t, runtimecontract.RuntimeDecision{
 		State: runtimecontract.ConvergenceStateNeedStateChange,
 		RequiredOutput: runtimecontract.RequiredOutputContract{
 			AcceptedKinds: []string{runtimecontract.RuntimeBlockKindPatchApply},
@@ -3599,14 +3658,18 @@ func TestRuntimeCandidateSchemaRestrictsVariantsToSealedAuthority(t *testing.T) 
 			}},
 		},
 	}, nil)
-	if !strings.Contains(patchSchema, `"const":"file_write"`) || strings.Contains(patchSchema, `"const":"text_replace"`) || strings.Contains(patchSchema, `"const":"unified_diff"`) {
-		t.Fatalf("patch schema did not restrict variants to sealed file_write authority: %s", patchSchema)
+	patchOutput := runtimeCandidateOutputContractForTest(t, patchManifest)
+	patchSchema := string(patchOutput.Schema)
+	if strings.Contains(patchSchema, `"const":"file_write"`) || strings.Contains(patchSchema, `"const":"text_replace"`) || strings.Contains(patchSchema, `"const":"unified_diff"`) || strings.Contains(patchSchema, `"const":"patchType"`) {
+		t.Fatalf("patch schema exposed locally compiled variant authority: %s", patchSchema)
 	}
-	if !strings.Contains(patchSchema, runtimecontract.RuntimeOperationVariantRuleID(runtimecontract.RuntimeBlockKindPatchApply, "file_write", "contract", "")) {
-		t.Fatalf("patch schema did not project the sealed variant rule id: %s", patchSchema)
+	if len(patchOutput.WireRules) != 1 || patchOutput.WireRules[0].CompiledVariantID != "file_write" ||
+		!slices.Contains(patchOutput.WireRules[0].LocallyDerivedFields, "parameters[name=patchType]") ||
+		len(patchOutput.OperationContracts) != 1 || len(patchOutput.OperationContracts[0].AllowedVariantIDs) != 0 || len(patchOutput.OperationContracts[0].Variants) != 0 {
+		t.Fatalf("patch output did not bind the sole sealed variant locally: %+v", patchOutput)
 	}
 
-	commitSchema := runtimeCandidateSchemaForDecision(t, runtimecontract.RuntimeDecision{
+	commitManifest := runtimeCandidateManifestForSchema(t, runtimecontract.RuntimeDecision{
 		State: runtimecontract.ConvergenceStateNeedStateChange,
 		RequiredOutput: runtimecontract.RequiredOutputContract{
 			AcceptedKinds: []string{runtimecontract.StepKindGitWrite},
@@ -3615,8 +3678,12 @@ func TestRuntimeCandidateSchemaRestrictsVariantsToSealedAuthority(t *testing.T) 
 			}},
 		},
 	}, nil)
-	if !strings.Contains(commitSchema, `"const":"commit"`) || strings.Contains(commitSchema, `"const":"add"`) || strings.Contains(commitSchema, `"const":"init"`) || !strings.Contains(commitSchema, `"const":"pathspecs"`) {
-		t.Fatalf("commit schema did not retain only commit rule including forbidden pathspecs: %s", commitSchema)
+	commitOutput := runtimeCandidateOutputContractForTest(t, commitManifest)
+	commitSchema := string(commitOutput.Schema)
+	if strings.Contains(commitSchema, `"const":"commit"`) || strings.Contains(commitSchema, `"const":"add"`) || strings.Contains(commitSchema, `"const":"init"`) ||
+		strings.Contains(commitSchema, `"const":"operation"`) || strings.Contains(commitSchema, `"const":"pathspecs"`) || !strings.Contains(commitSchema, `"const":"message"`) ||
+		len(commitOutput.WireRules) != 1 || commitOutput.WireRules[0].CompiledVariantID != "commit" {
+		t.Fatalf("commit schema did not keep only provider-selectable commit fields: output=%+v", commitOutput)
 	}
 
 	sequenceManifest := runtimeCandidateManifestForSchema(t, runtimecontract.RuntimeDecision{

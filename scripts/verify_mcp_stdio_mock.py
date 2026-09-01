@@ -2,9 +2,10 @@
 """Deterministic C12 candidate mock for the managed MCP verifier.
 
 The mock treats the provider prompt as an untrusted transport. It reads only
-the current sealed C3 authority, selects an operation BindingRef exposed by
-that authority, and derives the MCP server/tool pair from the binding's exact
-owner-attested validation recipe. It never puts a raw CWI ID on an operation.
+the current sealed C3 authority and emits exactly the fields retained by the
+Runtime candidate wire contract. Locally-derived binding/target authority is
+never echoed; provider-selectable MCP parameters come from the exact sealed
+validation recipe. It never puts a raw CWI ID on an operation.
 """
 
 import argparse
@@ -189,46 +190,68 @@ def _operation_contract(authority: dict[str, Any], kind: str) -> dict[str, Any]:
     raise MockContractError(f"C3 output contract does not authorize {kind!r}")
 
 
-def _mcp_recipe_from_sealed_binding(
-    contract: dict[str, Any], bindings: list[dict[str, Any]], expected_server_id: str
-) -> tuple[list[str], str, str]:
+def _operation_fields(contract: dict[str, Any], key: str) -> set[str]:
+    return set(_strings(_object(contract, key, key[0].upper() + key[1:])))
+
+
+def _operation_parameter_names(contract: dict[str, Any]) -> list[str]:
+    names = []
+    for parameter in _object(contract, "parameters", "Parameters") or []:
+        if not isinstance(parameter, dict):
+            continue
+        name = _object(parameter, "name", "Name")
+        if isinstance(name, str) and name:
+            names.append(name)
+    return _unique(names)
+
+
+def _provider_binding_refs(
+    contract: dict[str, Any], bindings: list[dict[str, Any]]
+) -> list[str]:
     binding_refs: list[str] = []
     authorizations = _object(contract, "bindingAuthorizations", "BindingAuthorizations")
     if not isinstance(authorizations, list):
-        raise MockContractError("sealed MCP operation has no binding authorizations")
+        raise MockContractError("provider-selectable MCP binding has no authorization")
     for authorization in authorizations:
         if not isinstance(authorization, dict):
             continue
         binding_refs.extend(_strings(_object(authorization, "allowedBindingRefs", "AllowedBindingRefs")))
     binding_refs = _unique(binding_refs)
     if len(binding_refs) != 1:
-        raise MockContractError("sealed MCP operation must resolve to exactly one binding ref")
+        raise MockContractError("provider-selectable MCP binding must resolve to exactly one ref")
     by_id = {
         _object(binding, "id", "ID"): binding
         for binding in bindings
         if isinstance(_object(binding, "id", "ID"), str) and _object(binding, "id", "ID")
     }
-    recipes: list[str] = []
     for binding_ref in binding_refs:
         binding = by_id.get(binding_ref)
         if not isinstance(binding, dict):
-            raise MockContractError(f"sealed MCP binding {binding_ref!r} is absent from C3 focus")
-        proofs = _object(binding, "proofs", "Proofs")
-        if not isinstance(proofs, list):
-            raise MockContractError(f"sealed MCP binding {binding_ref!r} has no proof")
-        matching = [
-            _object(proof, "validationRecipeId", "ValidationRecipeID")
-            for proof in proofs
-            if isinstance(proof, dict)
-            and _object(proof, "evidenceKind", "EvidenceKind") == "validation"
-            and "mcp/tool_call" in _strings(_object(proof, "allowedOperationKinds", "AllowedOperationKinds"))
-        ]
-        if len(matching) != 1 or not isinstance(matching[0], str) or not matching[0]:
-            raise MockContractError(f"sealed MCP binding {binding_ref!r} has no exact MCP validation recipe")
-        recipes.append(matching[0])
-    recipes = _unique(recipes)
+            raise MockContractError(f"provider-selectable MCP binding {binding_ref!r} is absent from C3 focus")
+    return binding_refs
+
+
+def _mcp_recipe_from_sealed_authority(
+    contract: dict[str, Any], bindings: list[dict[str, Any]], expected_server_id: str
+) -> tuple[str, str]:
+    recipes = _unique(_strings(_object(contract, "validationRecipeIds", "ValidationRecipeIDs")))
+    if not recipes:
+        for binding in bindings:
+            for proof in _object(binding, "proofs", "Proofs") or []:
+                if not isinstance(proof, dict):
+                    continue
+                if _object(proof, "evidenceKind", "EvidenceKind") != "validation":
+                    continue
+                if "mcp/tool_call" not in _strings(_object(proof, "allowedOperationKinds", "AllowedOperationKinds")):
+                    continue
+                recipe = _object(proof, "validationRecipeId", "ValidationRecipeID")
+                if isinstance(recipe, str) and recipe:
+                    recipes.append(recipe)
+        recipes = _unique(recipes)
+    expected_prefix = f"mcp/tool_call/{expected_server_id}/" if expected_server_id else "mcp/tool_call/"
+    recipes = [recipe for recipe in recipes if recipe.startswith(expected_prefix)]
     if len(recipes) != 1:
-        raise MockContractError("sealed MCP operation has ambiguous validation recipe identities")
+        raise MockContractError("sealed MCP operation must expose one verifier validation recipe")
     prefix = "mcp/tool_call/"
     recipe = recipes[0]
     if not recipe.startswith(prefix):
@@ -243,7 +266,41 @@ def _mcp_recipe_from_sealed_binding(
     selectors = _strings(_object(target, "ownerSelectorRefs", "OwnerSelectorRefs"))
     if selectors and server_id not in selectors:
         raise MockContractError("sealed MCP target selector does not authorize recipe server")
-    return binding_refs, server_id, tool
+    return server_id, tool
+
+
+def _provider_operation(
+    contract: dict[str, Any], bindings: list[dict[str, Any]], expected_server_id: str
+) -> dict[str, Any]:
+    allowed = _operation_fields(contract, "allowedOperationFields")
+    required = _operation_fields(contract, "requiredOperationFields")
+    if "kind" not in allowed:
+        raise MockContractError("MCP verifier supports auxiliary operation wire rules only")
+
+    operation: dict[str, Any] = {"kind": "mcp/tool_call"}
+    if "bindingRefs" in allowed:
+        operation["bindingRefs"] = _provider_binding_refs(contract, bindings)
+    if "targetRefs" in required:
+        target = _object(contract, "target", "Target") or {}
+        targets = _unique(_strings(_object(target, "allowedTargetRefs", "AllowedTargetRefs")))
+        if len(targets) != 1:
+            raise MockContractError("provider-selectable MCP target must resolve to exactly one ref")
+        operation["targetRefs"] = targets
+
+    if "parameters" in allowed:
+        server_id, tool = _mcp_recipe_from_sealed_authority(contract, bindings, expected_server_id)
+        values = {"serverId": server_id, "tool": tool}
+        names = _operation_parameter_names(contract)
+        parameters = [
+            {"name": name, "string": values[name]}
+            for name in names
+            if name in values
+        ]
+        if {parameter["name"] for parameter in parameters} != set(values):
+            raise MockContractError("sealed MCP wire does not expose serverId/tool parameters")
+        if parameters or "parameters" in required:
+            operation["parameters"] = parameters
+    return operation
 
 
 def _current_evidence_refs(context: dict[str, Any], execution_tail: str, coverage: list[str]) -> list[str]:
@@ -274,17 +331,7 @@ def decision_payload(user_content: str, expected_server_id: str) -> dict[str, An
     focus_id, coverage_ids, bindings = _current_focus(context)
     if required_state == "need_validation":
         contract = _operation_contract(authority, "mcp/tool_call")
-        binding_refs, server_id, tool = _mcp_recipe_from_sealed_binding(contract, bindings, expected_server_id)
-        return {
-            "operations": [{
-                "kind": "mcp/tool_call",
-                "bindingRefs": binding_refs,
-                "parameters": [
-                    {"name": "serverId", "string": server_id},
-                    {"name": "tool", "string": tool},
-                ],
-            }]
-        }
+        return {"operations": [_provider_operation(contract, bindings, expected_server_id)]}
     if required_state == "need_assessment":
         refs = _current_evidence_refs(context, execution_tail, coverage_ids)
         if not refs:
@@ -307,14 +354,31 @@ def _prompt(*sections: tuple[str, dict[str, Any]]) -> str:
     return "\n\n".join(f"### {name}\n{json.dumps(value, separators=(',', ':'))}" for name, value in sections)
 
 
-def _authority(state: str, binding_refs: list[str] | None = None) -> dict[str, Any]:
+def _authority(
+    state: str,
+    binding_refs: list[str] | None = None,
+    provider_binding: bool = False,
+) -> dict[str, Any]:
     recipe = "mcp/tool_call/mcp-test/repo.summary"
+    # Selector-only MCP scope permits an optional targetRefs field without
+    # providing a concrete target choice. A minimal provider document omits it.
+    allowed_fields = ["kind", "targetRefs", "parameters"]
+    required_fields = ["kind", "parameters"]
+    if provider_binding:
+        allowed_fields.insert(1, "bindingRefs")
+        required_fields.insert(1, "bindingRefs")
     return {
         "outputContract": {"operationContracts": [{
+            "allowedOperationFields": allowed_fields,
+            "requiredOperationFields": required_fields,
             "kind": "mcp/tool_call", "bindingAuthorizations": [{
                 "allowedBindingRefs": binding_refs or ["binding/cwi-test"],
             }],
             "target": {"ownerSelectorRefs": ["mcp-test"]},
+            "parameters": [
+                {"name": "serverId"}, {"name": "tool"},
+                {"name": "uri"}, {"name": "resourceUri"}, {"name": "prompt"},
+            ],
         }]},
         "context": {
             "workspaceId": "ws-test", "runId": "run-test", "requiredState": state,
@@ -364,12 +428,19 @@ def self_test() -> None:
 
     validation = decision_payload(_prompt(("C3.runtime-authority", _authority("need_validation"))), "mcp-test")
     operation = validation["operations"][0]
-    if operation.get("bindingRefs") != ["binding/cwi-test"] or set(operation) != {"kind", "bindingRefs", "parameters"}:
-        raise AssertionError(f"MCP operation did not use C3 binding-only authorization: {validation}")
+    if set(operation) != {"kind", "parameters"}:
+        raise AssertionError(f"MCP operation re-exposed locally-derived authority: {validation}")
     if operation.get("targetRefs") is not None or operation["parameters"][0].get("string") != "mcp-test":
         raise AssertionError(f"MCP operation did not preserve selector-only target contract: {validation}")
     if [item.get("name") for item in operation["parameters"]] != ["serverId", "tool"]:
         raise AssertionError(f"MCP operation invented input outside the sealed empty schema: {validation}")
+
+    selectable = decision_payload(
+        _prompt(("C3.runtime-authority", _authority("need_validation", provider_binding=True))),
+        "mcp-test",
+    )["operations"][0]
+    if selectable.get("bindingRefs") != ["binding/cwi-test"]:
+        raise AssertionError(f"MCP operation lost provider-selectable binding authority: {selectable}")
 
     assessment = decision_payload(
         _prompt(
@@ -381,7 +452,7 @@ def self_test() -> None:
     if assessment["coverageWorkItemIds"] != ["cwi-test"]:
         raise AssertionError(f"assessment lost current coverage context: {assessment}")
 
-    missing_binding = _authority("need_validation", ["binding/missing"])
+    missing_binding = _authority("need_validation", ["binding/missing"], provider_binding=True)
     malformed = _prompt(("C3.runtime-authority", missing_binding))
     for content in ("", malformed):
         try:

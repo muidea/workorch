@@ -2,6 +2,7 @@ package workorchruntimecontract
 
 import (
 	"errors"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -400,13 +401,13 @@ func TestCurrentBindingManifestRejectsRawCoverageIDsAndUnknownBindingRefs(t *tes
 	}{
 		{
 			name:    "raw coverage is forbidden",
-			payload: `{"operations":[{"kind":"file/write","coverageWorkItemIds":["cwi-main"],"targetRefs":["main.go"],"parameters":[{"name":"content","string":"package main"}]}]}`,
+			payload: `{"operations":[{"kind":"file/write","coverageWorkItemIds":["cwi-main"],"parameters":[{"name":"content","string":"package main"}]}]}`,
 			path:    "$.operations[0].coverageWorkItemIds", actual: "coverageWorkItemIds",
 		},
 		{
-			name:    "unknown binding is forbidden",
-			payload: `{"operations":[{"kind":"file/write","bindingRefs":["binding/unknown"],"targetRefs":["main.go"],"parameters":[{"name":"content","string":"package main"}]}]}`,
-			path:    "$.operations[0].bindingRefs", actual: "binding/unknown",
+			name:    "locally compiled binding rejects provider echo",
+			payload: `{"operations":[{"kind":"file/write","bindingRefs":["binding/unknown"],"parameters":[{"name":"content","string":"package main"}]}]}`,
+			path:    "$.operations[0].bindingRefs", actual: "locally_derived_bindingRefs",
 		},
 	}
 	for _, tc := range cases {
@@ -418,7 +419,7 @@ func TestCurrentBindingManifestRejectsRawCoverageIDsAndUnknownBindingRefs(t *tes
 			}
 		})
 	}
-	valid := []byte(`{"operations":[{"kind":"file/write","bindingRefs":["binding/cwi-main"],"targetRefs":["main.go"],"parameters":[{"name":"content","string":"package main"}]}]}`)
+	valid := []byte(`{"operations":[{"kind":"file/write","parameters":[{"name":"content","string":"package main"}]}]}`)
 	if _, err := DecodeRuntimeCandidatePayloadWithManifest(manifest, valid); err != nil {
 		t.Fatalf("sealed binding reference rejected: %v", err)
 	}
@@ -456,7 +457,8 @@ func TestCurrentBindingManifestRejectsMultipleBindingRefsForOneOperation(t *test
 	}
 	err = ValidateRuntimeCandidateAgainstManifest(manifest, candidate)
 	var diagnostic *RuntimeCandidateContractDiagnostic
-	if !errors.As(err, &diagnostic) || diagnostic.Path != "$.operations[0].bindingRefs" || !strings.Contains(diagnostic.Error(), "exactly one bindingRef") {
+	if !errors.As(err, &diagnostic) || diagnostic.Path != "$.operations[0].bindingRefs" ||
+		!reflect.DeepEqual(diagnostic.Required, []string{"bindingRefs"}) || !strings.Contains(diagnostic.Error(), "only one coverage evidence binding") {
 		t.Fatalf("multi-binding candidate diagnostic=%+v err=%v", diagnostic, err)
 	}
 }

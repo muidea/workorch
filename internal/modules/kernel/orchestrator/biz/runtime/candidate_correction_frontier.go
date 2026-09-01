@@ -260,7 +260,8 @@ func candidateSchemaCorrectionWitness(diagnostic *runtimecontract.RuntimeCandida
 	}
 	if !strings.Contains(path, ".parameters") {
 		if reportsFieldAbsence &&
-			containsCandidateCorrectionString(operationManifest.RequiredOperationFields, field) {
+			containsCandidateCorrectionString(operationManifest.AllowedOperationFields, field) &&
+			candidateCorrectionDiagnosticRequires(diagnostic, field) {
 			return schemaCorrectionWitness(path, candidateCorrectionFieldAbsent, candidateCorrectionFieldPresent)
 		}
 		return nil

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -584,7 +585,7 @@ func TestRequestCandidatePreservesTypedPrerequisiteStaleWithoutCandidateFailure(
 
 func TestRequestCandidateProviderReceivesOnlySealedTypedRequest(t *testing.T) {
 	request := candidateRequest(t, runtimecontract.ConvergenceStateNeedValidation)
-	wantDocument := []byte(`{"operations":[{"kind":"validation/managed_session","bindingRefs":["binding/test/cwi-1"],"parameters":[{"name":"recipeId","string":"test-managed-validation"}]}]}`)
+	wantDocument := []byte(`{"operations":[{"kind":"validation/managed_session","parameters":[{"name":"recipeId","string":"test-managed-validation"}]}]}`)
 	provider := candidateProviderFunc(func(_ context.Context, got llmmodels.RuntimeCandidateRequest) (llmmodels.RuntimeCandidateGenerationResult, error) {
 		if got.Transaction != request.Transaction || got.Decision.AuthoritySnapshot.ID != request.Decision.AuthoritySnapshot.ID || got.Decision.State != runtimecontract.ConvergenceStateNeedValidation {
 			t.Fatalf("provider request changed sealed authority: %+v", got)
@@ -604,6 +605,10 @@ func TestRequestCandidateProviderReceivesOnlySealedTypedRequest(t *testing.T) {
 	}
 	if err := candidate.ValidateWithActivation(request.Decision, request.CandidateContext.Activation); err != nil {
 		t.Fatal(err)
+	}
+	if candidate.Validation == nil || len(candidate.Validation.Operations) != 1 ||
+		!reflect.DeepEqual(candidate.Validation.Operations[0].Operation.BindingRefs, []string{"binding/test/cwi-1"}) {
+		t.Fatalf("minimal provider document lost locally compiled binding: %+v", candidate.Validation)
 	}
 }
 

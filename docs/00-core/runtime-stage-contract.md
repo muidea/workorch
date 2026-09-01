@@ -4,7 +4,7 @@ Status: normative
 
 Type: core-contract-index
 
-Last Verified: 2026-08-31
+Last Verified: 2026-09-01
 
 ## Purpose
 
@@ -152,10 +152,16 @@ provider、candidate、semantic proof、capability operation、repair 与 recove
   `ProspectiveTargetRef` 不是 Runtime semantic wire 的兼容字段；出现时必须由 strict current decoder 拒绝。schema/document
   admission 在 owner probe 前校验完整合取集合；缺项、多余 target、重复、越界或不满足 clause 只形成
   普通完整文档/schema correction，且零 File/Shell probe。
+- SM-3 必须把 sealed manifest 的每条 required/auxiliary operation authorization 编译为同一最小
+  `RuntimeCandidateWireContract`。required slot 用 `requiredOperationRef`、auxiliary rule 用 canonical kind 选择；唯一
+  reachable variant、共有 singleton binding、required cardinality-one singleton target 与 fixed parameter 均由本地派生，
+  只有真实多值选择可进入 provider wire。unreachable variant authorization 不得扩大 binding surface，JSONSchemaResponse
+  on/off、schema、instruction、decoder 与 fixture encoder 不得产生不同 shape。
 - operation document 的 `missing_*`/`empty_*` required field 必须先于 semantic frontier 形成同 path 的
   `schema_field(field_absent -> field_present)` witness；field vocabulary 不是 target/binding alternative。failed attempt 在 CAS 与
   fresh load 都必须验证 diagnostic/correction 的 manifest、objectives、objective↔witness-dimension、path、actual/shape lineage；
-  不一致时零 attempt-1
+  条件必填 binding 缺失必须表达为 `Actual=missing_bindingRefs`、`Required=[bindingRefs]`，不得用人类 cardinality 文本充当
+  Required，也不得同时创建 evidence-binding alternative。不一致时零 attempt-1
   provider、dispatch 与 capability effect。
 - fixed manifest parameter 被错误编码为另一个 `parameters[]` entry 的 sibling 时，strict decoder 仍拒绝原文；SM-3 可在
   declared name/type、entry/container、operation kind/index 均无歧义时封存一次 `parameter_entry_encoding` witness，要求

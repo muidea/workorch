@@ -93,6 +93,100 @@ func TestRuntimeCandidateWireContractSupportsRequiredOperationWithoutVariant(t *
 	}
 }
 
+func TestRuntimeCandidateWireContractCompilesAuxiliarySingletonAuthorityLocally(t *testing.T) {
+	manifest := mustRuntimeCandidatePayloadManifest(t, RuntimeDecision{
+		State: ConvergenceStateNeedStateChange,
+		RequiredOutput: RequiredOutputContract{
+			AcceptedKinds:             []string{RuntimeBlockKindPatchApply},
+			AcceptedOperationVariants: []RuntimeOperationVariantRef{{Kind: RuntimeBlockKindPatchApply, VariantID: "text_replace"}},
+			AcceptedEffectScopes:      []RuntimeEffectScope{RuntimeEffectWorkspaceDurable},
+			RequiredEffectScopes:      []RuntimeEffectScope{RuntimeEffectWorkspaceDurable},
+			CoverageWorkItemIDs:       []common.CoverageWorkItemID{"cwi-aux"},
+			TargetRefs:                []string{"internal/lsp/server.go"},
+		},
+	})
+	wire, err := BuildRuntimeCandidateWireContract(manifest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rule, found := RuntimeCandidateWireRuleForAuxiliaryKind(wire, RuntimeBlockKindPatchApply)
+	patchType := "text_replace"
+	if !found || rule.VariantID != patchType ||
+		!reflect.DeepEqual(rule.ProviderFields, []string{"kind", "parameters"}) ||
+		!reflect.DeepEqual(rule.RequiredProviderFields, []string{"kind", "parameters"}) ||
+		!reflect.DeepEqual(rule.RequiredProviderParameterNames, []string{"newText", "oldText"}) ||
+		!reflect.DeepEqual(rule.RequiredNonEmptyParameterNames, []string{"oldText"}) ||
+		containsManifestString(rule.ProviderParameterNames, "patchType") ||
+		containsManifestString(rule.ProviderParameterNames, "content") ||
+		containsManifestString(rule.ProviderParameterNames, "diff") ||
+		!reflect.DeepEqual(rule.DerivedBindingRefs, []string{"binding/test/cwi-aux"}) ||
+		!reflect.DeepEqual(rule.DerivedTargetRefs, []string{"internal/lsp/server.go"}) ||
+		!reflect.DeepEqual(rule.DerivedParameters, []OperationParameter{{Name: "patchType", String: &patchType}}) {
+		t.Fatalf("auxiliary singleton wire rule = %+v found=%t", rule, found)
+	}
+
+	payload := []byte(`{"operations":[{"kind":"patch/apply","parameters":[{"name":"oldText","string":"before"},{"name":"newText","string":"after"}]}]}`)
+	candidate, err := DecodeRuntimeCandidatePayloadWithManifest(manifest, payload)
+	if err != nil || candidate.StateChange == nil || len(candidate.StateChange.Operations) != 1 {
+		t.Fatalf("compiled auxiliary candidate = %+v err=%v", candidate, err)
+	}
+	operation := candidate.StateChange.Operations[0].Operation
+	if !reflect.DeepEqual(operation.BindingRefs, rule.DerivedBindingRefs) ||
+		!reflect.DeepEqual(operation.TargetRefs, rule.DerivedTargetRefs) ||
+		!runtimeCandidateTestHasStringParameter(operation.Parameters, "patchType", patchType) {
+		t.Fatalf("compiled auxiliary operation = %+v", operation)
+	}
+	for _, testCase := range []struct {
+		name, payload, path, actual string
+	}{
+		{name: "binding echo", payload: `{"operations":[{"kind":"patch/apply","bindingRefs":["binding/test/cwi-aux"],"parameters":[{"name":"oldText","string":"before"},{"name":"newText","string":"after"}]}]}`, path: "$.operations[0].bindingRefs", actual: "locally_derived_bindingRefs"},
+		{name: "target echo", payload: `{"operations":[{"kind":"patch/apply","targetRefs":["internal/lsp/server.go"],"parameters":[{"name":"oldText","string":"before"},{"name":"newText","string":"after"}]}]}`, path: "$.operations[0].targetRefs", actual: "locally_derived_targetRefs"},
+		{name: "variant echo", payload: `{"operations":[{"kind":"patch/apply","parameters":[{"name":"patchType","string":"text_replace"},{"name":"oldText","string":"before"},{"name":"newText","string":"after"}]}]}`, path: "$.operations[0].parameters[0].name", actual: "locally_derived_parameter_patchType"},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			_, err := DecodeRuntimeCandidatePayloadWithManifest(manifest, []byte(testCase.payload))
+			var diagnostic *RuntimeCandidatePayloadDiagnostic
+			if !errors.As(err, &diagnostic) || diagnostic.Path != testCase.path || diagnostic.Actual != testCase.actual {
+				t.Fatalf("fixed auxiliary echo diagnostic = %+v err=%v", diagnostic, err)
+			}
+		})
+	}
+}
+
+func TestRuntimeCandidateWireContractRetainsNonSingletonAuxiliaryChoices(t *testing.T) {
+	manifest := mustRuntimeCandidatePayloadManifest(t, RuntimeDecision{
+		State: ConvergenceStateNeedStateChange,
+		RequiredOutput: RequiredOutputContract{
+			AcceptedKinds:        []string{RuntimeBlockKindPatchApply},
+			AcceptedEffectScopes: []RuntimeEffectScope{RuntimeEffectWorkspaceDurable},
+			RequiredEffectScopes: []RuntimeEffectScope{RuntimeEffectWorkspaceDurable},
+			CoverageWorkItemIDs:  []common.CoverageWorkItemID{"cwi-a", "cwi-b"},
+			TargetRefs:           []string{"main.go", "support.go"},
+		},
+	})
+	wire, err := BuildRuntimeCandidateWireContract(manifest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rule, found := RuntimeCandidateWireRuleForAuxiliaryKind(wire, RuntimeBlockKindPatchApply)
+	if !found || rule.VariantID != "" || len(rule.DerivedBindingRefs) != 0 || len(rule.DerivedTargetRefs) != 0 || len(rule.DerivedParameters) != 0 ||
+		!reflect.DeepEqual(rule.AllowedBindingRefs, []string{"binding/test/cwi-a", "binding/test/cwi-b"}) ||
+		!reflect.DeepEqual(rule.ProviderFields, []string{"kind", "bindingRefs", "targetRefs", "parameters"}) ||
+		!reflect.DeepEqual(rule.RequiredProviderFields, []string{"kind", "bindingRefs", "targetRefs", "parameters"}) ||
+		!containsManifestString(rule.ProviderParameterNames, "patchType") {
+		t.Fatalf("non-singleton auxiliary wire rule = %+v found=%t", rule, found)
+	}
+}
+
+func runtimeCandidateTestHasStringParameter(values []OperationParameter, name, wanted string) bool {
+	for _, value := range values {
+		if value.Name == name && value.String != nil && *value.String == wanted {
+			return true
+		}
+	}
+	return false
+}
+
 func TestRuntimeCandidateProviderWireRejectsNullContainersAndFixedFieldEcho(t *testing.T) {
 	manifest := mustRuntimeCandidatePayloadManifest(t, RuntimeDecision{
 		State: ConvergenceStateNeedStateChange,

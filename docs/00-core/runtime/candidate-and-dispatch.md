@@ -4,7 +4,7 @@ Status: normative
 
 Type: core-contract-part
 
-Last Verified: 2026-08-31
+Last Verified: 2026-09-01
 
 ## 规范化候选合同
 
@@ -33,12 +33,15 @@ execution-semantic key。Orchestrator 只从 manifest hash 与上述 manifest-ow
 required-sequence dependency refs 派生 dependency edges。wire 数组顺序或下标不授予 identity/dependency authority；ambiguous、
 missing、duplicate 或越界 slot/key 只形成 typed rejection，零 feasibility side effect、seal 或 dispatch。
 
-SM-3 还必须从已封存 manifest 纯编译一份 `RuntimeCandidateWireContract`。每个 required-sequence slot
-只由 `requiredOperationRef` 选中；kind、已唯一确定的 variant discriminator、singleton binding/target 与固定
-parameter 都由本地 compiler 派生，provider 必须省略。provider 只输出仍需真实选择的字段；回显本地派生
-字段、`null` container、未知字段或提前闭合 root 后继续输出 operation 字段，均是 typed document rejection，
-不做本地补全、删除或 JSON repair。schema、instruction、strict compiler、fixture encoder 必须消费同一份
-wire contract，禁止各自重新推导字段。
+SM-3 还必须从已封存 manifest 纯编译一份 `RuntimeCandidateWireContract`，并对 required 与 auxiliary operation
+应用同一条最小 wire 规则。required-sequence slot 只由 `requiredOperationRef` 选中，auxiliary rule 只由 canonical
+`kind` 选中；kind（required slot）、唯一 reachable variant 的 discriminator、所有 reachable authorization 共有的
+singleton binding、required cardinality-one 且 allowed set 为 singleton 的 target，以及固定 parameter 都由本地
+compiler 派生，provider 必须省略。已被 manifest 排除的 variant 对应 binding authorization 不得重新扩大 wire；只有
+variant、binding、target 或 parameter 仍存在多个合法值时才保留为 provider 选择。provider 回显本地派生字段、
+`null` container、未知字段或提前闭合 root 后继续输出 operation 字段，均是 typed document rejection，不做本地
+补全、删除或 JSON repair。schema、instruction、strict compiler、fixture encoder 必须消费同一份 wire contract，
+禁止各自重新推导字段；JSONSchemaResponse on/off 不得改变最小文档或本地编译结果。
 
 wire contract 的 deterministic hash 必须绑定 operations `RuntimeExpectedDocumentContract`、request-session manifest
 identity 与 candidate attempt 前封存的 exact `CandidateManifest`。未进入 attempt 的 prepared/recovery session 在 restart
@@ -298,7 +301,10 @@ hash、coverage、summary value 或其它可逆 provider 数据。
 strict decoder 报告 `missing_*`/`empty_*` required field 时，SM-3 必须先于 semantic frontier 封存同 path 的
 `schema_field` witness（`field_absent -> field_present`）；diagnostic 的 `Allowed` 若是 operation field vocabulary，不能解释为
 target/binding alternative，correction objective 只能是 `supply_required_field`。attempt 1 对 `field_present` 的验收是相应
-typed field 确实存在，而不是把 `field_present` 当作 kind、target、binding 或 parameter 的字面业务值。
+typed field 确实存在，而不是把 `field_present` 当作 kind、target、binding 或 parameter 的字面业务值。manifest semantic
+validator 发现条件必填字段缺失时也必须使用相同机器表达，例如 `Actual=missing_bindingRefs`、
+`Required=[bindingRefs]`；`Required` 不得承载“exactly one bindingRef”等人类说明。只有 provider 已提交一个具体但错误的
+binding 且 manifest 存在另一个合法 member 时，才允许形成 `evidence_binding` semantic witness。
 strict decoder 发现 `parameters[i]` 的 sibling key 同时满足以下条件时，必须一次聚合同一文档内的全部结构事实：key 是 exact
 operation manifest 的 fixed declared parameter、raw JSON type 与 contract type 一致、该 parameter 没有另一个 named entry、
 container 本身是合法的 named typed entry，且不存在 mixed undeclared/type-invalid/duplicate ambiguity。原文仍立即拒绝，不能在

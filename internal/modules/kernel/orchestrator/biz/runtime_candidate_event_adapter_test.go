@@ -428,7 +428,7 @@ func TestRequestRuntimeCandidateUsesTypedSealedEventHubContract(t *testing.T) {
 		LoadLLMConfig: testLLMConfigurationSnapshot,
 		CandidateProvider: eventCandidateProviderFunc(func(_ context.Context, request llmmodels.RuntimeCandidateRequest) (llmmodels.RuntimeCandidateGenerationResult, error) {
 			captured = append(captured, request)
-			return eventGenerationResult(request, []byte(`{"operations":[{"kind":"patch/apply","bindingRefs":["binding/test/focus-1/cwi-1"],"targetRefs":["main.go"],"parameters":[{"name":"patchType","string":"file_write"},{"name":"content","string":"package main\n"}]}]}`), nil)
+			return eventGenerationResult(request, []byte(`{"operations":[{"kind":"patch/apply","parameters":[{"name":"patchType","string":"file_write"},{"name":"content","string":"package main\n"}]}]}`), nil)
 		}),
 	}); err != nil {
 		t.Fatal(err)

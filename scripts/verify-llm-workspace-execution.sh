@@ -316,12 +316,9 @@ def operation_target_ref(contract):
     raise ValueError("sealed operation contract has no concrete target")
 
 def operation_binding_refs(contract):
-    # Binding refs are the only candidate-side proof authorization.  They are
-    # sealed per variant/required-operation authorization in C3 by SM-2 and
-    # must be reproduced exactly by the mock; a CWI list is an assessment
-    # observation, never an operation authorization.  This verifier emits one
-    # operation per focus, so its selected contract must resolve to exactly one
-    # proof binding rather than guessing between authorization alternatives.
+    # Call only when bindingRefs remains a provider field. Singleton authority
+    # is absent from bindingAuthorizations because SM-3 compiles it locally.
+    # A CWI list is an assessment observation, never operation authority.
     refs = []
     authorizations = object_value(contract, "bindingAuthorizations", "BindingAuthorizations") or []
     for authorization in authorizations:
@@ -330,6 +327,37 @@ def operation_binding_refs(contract):
     if len(refs) != 1:
         raise ValueError("sealed operation contract must resolve to exactly one binding ref")
     return refs
+
+def operation_fields(contract, key):
+    return set(string_list(object_value(contract, key, key[0].upper() + key[1:])))
+
+def operation_parameter_names(contract):
+    names = []
+    for parameter in object_value(contract, "parameters", "Parameters") or []:
+        name = object_value(parameter, "name", "Name") or ""
+        if name:
+            names.append(name)
+    return set(unique_strings(names))
+
+def provider_operation(contract, kind, parameters):
+    # operationContracts is already the RuntimeCandidateWireContract
+    # projection. The mock must obey it instead of reconstructing fields from
+    # target/binding authority that SM-3 has marked locally derived.
+    allowed = operation_fields(contract, "allowedOperationFields")
+    required = operation_fields(contract, "requiredOperationFields")
+    if "kind" not in allowed:
+        raise ValueError("fixture supports auxiliary operation wire rules only")
+    operation = {"kind": kind}
+    if "bindingRefs" in allowed:
+        operation["bindingRefs"] = operation_binding_refs(contract)
+    if "targetRefs" in allowed:
+        operation["targetRefs"] = [operation_target_ref(contract)]
+    if "parameters" in allowed:
+        provider_names = operation_parameter_names(contract)
+        selected = [parameter for parameter in parameters if parameter.get("name") in provider_names]
+        if selected or "parameters" in required:
+            operation["parameters"] = selected
+    return operation
 
 def operation_validation_recipe_id(contract):
     # The candidate may select only a Shell-owner-confirmed recipe identity.
@@ -598,6 +626,15 @@ def provider_request_parser_self_test():
         raise AssertionError("C3 parser lost sealed operation binding refs")
     if operation_validation_recipe_id({"validationRecipeIds": ["recipe-current"]}) != "recipe-current":
         raise AssertionError("C3 parser lost sealed managed validation recipe identity")
+    minimal = provider_operation({
+        "allowedOperationFields": ["kind", "parameters"],
+        "requiredOperationFields": ["kind", "parameters"],
+        "bindingAuthorizations": [{"allowedBindingRefs": ["binding/local"]}],
+        "target": {"allowedTargetRefs": ["fixture.txt"]},
+        "parameters": [{"name": "recipeId"}],
+    }, "validation/managed_session", [{"name": "recipeId", "string": "recipe-current"}])
+    if set(minimal) != {"kind", "parameters"} or minimal["parameters"] != [{"name": "recipeId", "string": "recipe-current"}]:
+        raise AssertionError("provider fixture re-exposed locally derived binding/target authority: %r" % minimal)
     semantic_order = provider_request_from_payload({"input": """### C3.semantic-authority
 {"workspaceId":"ws-semantic","runId":"run-semantic","definitionSeed":{"hash":"seed-semantic"},"manifest":{"hash":"manifest-semantic","definitionSeedHash":"seed-semantic","coverageItems":[{"id":"cwi-first"},{"id":"cwi-semantic"}]},"schema":{"properties":{"schemaVersion":{"const":"workorch.runtime_semantic_plan_document.v2"},"coverageOrder":{"items":{"enum":["cwi-first","cwi-semantic"]}}}},"planStep":"coverage_order"}
 """})
@@ -689,18 +726,12 @@ def validation_ops(request):
     # recipe. file/read remains a non-credit diagnostic capability.
     contract = select_operation_contract(request, "validation/managed_session")
     kind = object_value(contract, "kind", "Kind")
-    target_ref = operation_target_ref(contract)
     if kind != "validation/managed_session":
         raise ValueError("fixture has no supported sealed validation operation: %r" % kind)
     return {
-        "operations": [{
-            "kind": kind,
-            "bindingRefs": operation_binding_refs(contract),
-            "targetRefs": [target_ref],
-            "parameters": [
-                {"name": "recipeId", "string": operation_validation_recipe_id(contract)},
-            ],
-        }]
+        "operations": [provider_operation(contract, kind, [
+            {"name": "recipeId", "string": operation_validation_recipe_id(contract)},
+        ])]
     }
 
 def probe_validation_ops():
@@ -724,7 +755,6 @@ def state_change_ops(request):
     focus = request["focusId"]
     contract = select_operation_contract(request, "file/edit", "patch/apply", "file/write")
     kind = object_value(contract, "kind", "Kind")
-    target_ref = operation_target_ref(contract)
     previous_content = fixture_file_content("focus-%03d" % (focus_ordinal(focus) - 1)) if focus_ordinal(focus) > 1 else "Runtime bounded terminal fixture input.\n"
     next_content = fixture_file_content(focus)
     if kind == "file/edit":
@@ -742,12 +772,7 @@ def state_change_ops(request):
     else:
         raise ValueError("fixture has no supported sealed state-change operation: %r" % kind)
     return {
-        "operations": [{
-            "kind": kind,
-            "bindingRefs": operation_binding_refs(contract),
-            "targetRefs": [target_ref],
-            "parameters": parameters,
-        }]
+        "operations": [provider_operation(contract, kind, parameters)]
     }
 
 def assessment_payload(request, satisfied=True, summary="Runtime assessment completed."):
