@@ -83,7 +83,7 @@ func CandidateCorrectionObjectivesForFailure(failure *runtimecontract.RuntimeCan
 		candidateCorrectionDiagnosticForbids(&diagnostic, identityField) {
 		return []runtimecontract.RuntimeCandidateCorrectionObjective{runtimecontract.RuntimeCandidateCorrectionRemoveForbiddenField}
 	}
-	if candidateCorrectionDiagnosticReportsFieldAbsence(diagnostic) {
+	if _, requiredFieldCorrection := runtimecontract.RuntimeCandidateRequiredFieldCorrectionRejectedValue(diagnostic); requiredFieldCorrection {
 		return []runtimecontract.RuntimeCandidateCorrectionObjective{runtimecontract.RuntimeCandidateCorrectionSupplyRequiredField}
 	}
 	objectives := append([]runtimecontract.RuntimeCandidateCorrectionObjective(nil), diagnostic.Objectives...)
@@ -152,13 +152,8 @@ func CandidateCorrectionObjectivesForFailure(failure *runtimecontract.RuntimeCan
 // contain the operation field vocabulary for a missing-field diagnostic; it
 // must not be reinterpreted as a list of alternative target values.
 func candidateCorrectionDiagnosticReportsFieldAbsence(diagnostic runtimecontract.RuntimeCandidateFailureDiagnostic) bool {
-	actual := strings.TrimSpace(diagnostic.Actual)
-	field := candidateCorrectionPathField(diagnostic.Path)
-	if field == "" {
-		return false
-	}
-	return (actual == "" || strings.HasPrefix(actual, "missing_") || strings.HasPrefix(actual, "empty_")) &&
-		candidateCorrectionDiagnosticRequires(&diagnostic, field)
+	rejected, found := runtimecontract.RuntimeCandidateRequiredFieldCorrectionRejectedValue(diagnostic)
+	return found && rejected == candidateCorrectionFieldAbsent
 }
 
 // SealCandidateRejection is the only SM-3 policy that converts a complete

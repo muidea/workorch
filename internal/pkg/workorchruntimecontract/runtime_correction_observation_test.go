@@ -46,6 +46,59 @@ func TestRuntimeCandidateCorrectionObservationIsClosedAndBounded(t *testing.T) {
 	}
 }
 
+func TestRuntimeCandidateRequiredFieldTypeCorrectionBindsExactDiagnostic(t *testing.T) {
+	t.Parallel()
+	baseDiagnostic := RuntimeCandidateFailureDiagnostic{
+		Path: "$.operations[0].parameters", Actual: "null",
+		Allowed: []string{"array"}, Required: []string{"parameters"}, ManifestHash: "manifest-hash",
+		Objectives: []RuntimeCandidateCorrectionObjective{RuntimeCandidateCorrectionSupplyRequiredField},
+	}
+	if rejected, found := RuntimeCandidateRequiredFieldCorrectionRejectedValue(baseDiagnostic); !found || rejected != "null" {
+		t.Fatalf("required null container = %q found=%v, want exact null rejection", rejected, found)
+	}
+	witness := RuntimeCandidateCorrectionWitness{
+		Dimension: RuntimeCandidateCorrectionWitnessSchemaField,
+		Path:      baseDiagnostic.Path, RejectedValue: "null", AlternativeValue: RuntimeCandidateCorrectionFieldPresent,
+	}
+	correction := RuntimeCandidateCorrectionDirective{
+		Disposition:  RuntimeCandidateCorrectionCorrectableOnce,
+		Objectives:   []RuntimeCandidateCorrectionObjective{RuntimeCandidateCorrectionSupplyRequiredField},
+		ManifestHash: "manifest-hash", Witness: &witness,
+	}
+	failure := RuntimeCandidateFailure{
+		Class: RuntimeCandidateFailureClassSchema, Code: "candidate_schema_invalid", Signature: "candidate-schema-invalid",
+		Diagnostic: baseDiagnostic.Clone(),
+	}
+	if err := ValidateRuntimeCandidateFailureCorrectionPair(&failure, &correction); err != nil {
+		t.Fatalf("exact required-container correction was rejected: %v", err)
+	}
+
+	for name, mutate := range map[string]func(*RuntimeCandidateFailure, *RuntimeCandidateCorrectionDirective){
+		"actual drift": func(failure *RuntimeCandidateFailure, _ *RuntimeCandidateCorrectionDirective) {
+			failure.Diagnostic.Actual = "object"
+		},
+		"schema type missing": func(failure *RuntimeCandidateFailure, _ *RuntimeCandidateCorrectionDirective) {
+			failure.Diagnostic.Allowed = nil
+		},
+		"required field missing": func(failure *RuntimeCandidateFailure, _ *RuntimeCandidateCorrectionDirective) {
+			failure.Diagnostic.Required = nil
+		},
+		"witness laundering": func(_ *RuntimeCandidateFailure, correction *RuntimeCandidateCorrectionDirective) {
+			correction.Witness.RejectedValue = RuntimeCandidateCorrectionFieldAbsent
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			changedFailure := failure
+			changedFailure.Diagnostic = failure.Diagnostic.Clone()
+			changedCorrection := correction.Normalized()
+			mutate(&changedFailure, &changedCorrection)
+			if err := ValidateRuntimeCandidateFailureCorrectionPair(&changedFailure, &changedCorrection); err == nil {
+				t.Fatal("drifted required-container correction was accepted")
+			}
+		})
+	}
+}
+
 func TestRuntimeSemanticCorrectionObservationEnforcesNestedBoundsAndSafeText(t *testing.T) {
 	t.Parallel()
 	base := RuntimeSemanticCorrectionObservation{

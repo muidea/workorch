@@ -6,10 +6,74 @@ import (
 )
 
 const (
-	runtimeCandidateCorrectionFieldAbsent  = "field_absent"
-	runtimeCandidateCorrectionFieldPresent = "field_present"
+	// RuntimeCandidateCorrectionFieldAbsent and
+	// RuntimeCandidateCorrectionFieldPresent are the closed schema-field
+	// witness values shared by the SM-3 owner and the LLM consumer. A required
+	// field with a wrong JSON type keeps its exact observed type as the rejected
+	// value and still uses FieldPresent as the alternative; successful strict
+	// admission proves both presence and type conformance on attempt 1.
+	RuntimeCandidateCorrectionFieldAbsent  = "field_absent"
+	RuntimeCandidateCorrectionFieldPresent = "field_present"
+
+	runtimeCandidateCorrectionFieldAbsent  = RuntimeCandidateCorrectionFieldAbsent
+	runtimeCandidateCorrectionFieldPresent = RuntimeCandidateCorrectionFieldPresent
 	runtimeCandidateCorrectionValueAbsent  = "value_absent:"
 )
+
+// RuntimeCandidateRequiredFieldCorrectionRejectedValue classifies only a
+// manifest-derived required-field schema defect that has one bounded
+// same-schema correction. Missing/empty fields return FieldAbsent. A present
+// field whose JSON type is rejected by an exact schema-type rule returns the
+// observed type (for example "null" or "object"). Business values and
+// semantic alternatives are deliberately excluded.
+func RuntimeCandidateRequiredFieldCorrectionRejectedValue(diagnostic RuntimeCandidateFailureDiagnostic) (string, bool) {
+	diagnostic = diagnostic.Normalized()
+	field := runtimeCandidateCorrectionPathField(diagnostic.Path)
+	if field == "" || !runtimeCandidateCorrectionDiagnosticRequiresField(diagnostic, field) {
+		return "", false
+	}
+	actual := strings.TrimSpace(diagnostic.Actual)
+	if actual == "" || strings.HasPrefix(actual, "missing_") || strings.HasPrefix(actual, "empty_") {
+		return RuntimeCandidateCorrectionFieldAbsent, true
+	}
+	actualType := runtimeCandidateCorrectionJSONType(actual)
+	if actualType == "" {
+		return "", false
+	}
+	hasExpectedType := false
+	for _, allowed := range diagnostic.Allowed {
+		expectedType := runtimeCandidateCorrectionJSONType(allowed)
+		if expectedType == "" || expectedType == "null" {
+			continue
+		}
+		hasExpectedType = true
+		if actualType != "null" && runtimeCandidateCorrectionJSONTypesCompatible(actualType, expectedType) {
+			return "", false
+		}
+	}
+	if !hasExpectedType {
+		return "", false
+	}
+	return actual, true
+}
+
+func runtimeCandidateCorrectionJSONType(value string) string {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "array", "object", "string", "number", "integer", "boolean", "null":
+		return strings.ToLower(strings.TrimSpace(value))
+	case "bool":
+		return "boolean"
+	default:
+		return ""
+	}
+}
+
+func runtimeCandidateCorrectionJSONTypesCompatible(actual, expected string) bool {
+	if actual == expected {
+		return true
+	}
+	return actual == "number" && expected == "integer"
+}
 
 // RuntimeCandidateCorrectionObjectivesEqual compares the normalized bounded
 // objectives carried by a failure diagnostic and its detached correction.
@@ -199,11 +263,11 @@ func ValidateRuntimeCandidateFailureCorrectionPair(failure *RuntimeCandidateFail
 func validateRuntimeCandidateCorrectionWitnessAgainstObservation(observation RuntimeCandidateCorrectionObservation, witness RuntimeCandidateCorrectionWitness) error {
 	diagnostic := observation.Diagnostic.Normalized()
 	witness = witness.Normalized()
-	if runtimeCandidateCorrectionDiagnosticReportsFieldAbsence(diagnostic) {
+	if rejected, requiredFieldCorrection := RuntimeCandidateRequiredFieldCorrectionRejectedValue(diagnostic); requiredFieldCorrection {
 		if witness.Dimension != RuntimeCandidateCorrectionWitnessSchemaField || witness.Path != diagnostic.Path ||
-			witness.RejectedValue != runtimeCandidateCorrectionFieldAbsent || witness.AlternativeValue != runtimeCandidateCorrectionFieldPresent ||
+			witness.RejectedValue != rejected || witness.AlternativeValue != runtimeCandidateCorrectionFieldPresent ||
 			!RuntimeCandidateCorrectionObjectivesEqual(diagnostic.Objectives, []RuntimeCandidateCorrectionObjective{RuntimeCandidateCorrectionSupplyRequiredField}) {
-			return fmt.Errorf("runtime candidate missing-field correction requires schema-only authority")
+			return fmt.Errorf("runtime candidate required-field correction requires schema-only authority")
 		}
 	}
 	if diagnostic.RejectedShapeHash != "" && witness.RejectedShapeHash != diagnostic.RejectedShapeHash {
@@ -244,13 +308,8 @@ func validateRuntimeCandidateCorrectionWitnessAgainstObservation(observation Run
 }
 
 func runtimeCandidateCorrectionDiagnosticReportsFieldAbsence(diagnostic RuntimeCandidateFailureDiagnostic) bool {
-	field := runtimeCandidateCorrectionPathField(diagnostic.Path)
-	if field == "" {
-		return false
-	}
-	actual := strings.TrimSpace(diagnostic.Actual)
-	return (actual == "" || strings.HasPrefix(actual, "missing_") || strings.HasPrefix(actual, "empty_")) &&
-		runtimeCandidateCorrectionDiagnosticRequiresField(diagnostic, field)
+	rejected, found := RuntimeCandidateRequiredFieldCorrectionRejectedValue(diagnostic)
+	return found && rejected == runtimeCandidateCorrectionFieldAbsent
 }
 
 func validateRuntimeCandidateSchemaWitnessAgainstObservation(diagnostic RuntimeCandidateFailureDiagnostic, witness RuntimeCandidateCorrectionWitness) error {
@@ -266,8 +325,8 @@ func validateRuntimeCandidateSchemaWitnessAgainstObservation(diagnostic RuntimeC
 		(diagnostic.Actual == field && len(diagnostic.Allowed) != 0 && !runtimeCandidateCorrectionDiagnosticContains(diagnostic.Allowed, field))
 	switch {
 	case witness.AlternativeValue == runtimeCandidateCorrectionFieldPresent:
-		if witness.RejectedValue != runtimeCandidateCorrectionFieldAbsent || !requires ||
-			!runtimeCandidateCorrectionDiagnosticReportsFieldAbsence(diagnostic) {
+		rejected, correctable := RuntimeCandidateRequiredFieldCorrectionRejectedValue(diagnostic)
+		if !requires || !correctable || witness.RejectedValue != rejected {
 			return fmt.Errorf("runtime candidate schema correction witness does not prove a required field")
 		}
 	case witness.AlternativeValue == runtimeCandidateCorrectionFieldAbsent:

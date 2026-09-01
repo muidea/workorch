@@ -343,6 +343,9 @@ sealed authority + preflight ready
 - incomplete/transport/provider-terminal 不得创建 candidate attempt。coherent completed 的 empty/non-JSON document-conformance
   rejection 与 complete document 的 schema/contract/semantic rejection 共用 attempt 0/1；attempt 0/1 必须使用同一
   transaction 与 stable prefix，第二次任一可纠错 rejection 形成 typed `candidate_retry_exhausted`，不存在 attempt 2。
+- required field missing/empty 与已存在但为 `null`/wrong JSON type 共享同一 SM-3 correction ledger：前者封存
+  `field_absent -> field_present`，后者封存 exact `<actual_type> -> field_present`，且都只授权 attempt 1 重写完整 document。
+  strict decoder 不本地 repair；attempt 1 必须重新通过同一 typed admission，不新增 correction、transport 或 recovery budget。
 - renderer、wire DTO、strict decoder、admission、owner feasibility 与 fixture 对同一
   `CandidateContractManifest` 给出一致解释；候选只能选择 manifest 已封存的 `bindingRefs`。未知字段、参数、
   target、effect、dependency、operation kind、未知 binding 或裸 `coverageWorkItemIds` 不得由第二解析路径静默放宽。

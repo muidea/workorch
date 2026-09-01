@@ -189,11 +189,14 @@ Cross-owner regression必须证明 concrete receiving-owner Command/Result、wor
 - manifest→wire matrix 必须分别覆盖 required 与 auxiliary rule 的有/无 variant、reachable singleton binding、required
   cardinality-one singleton target 与仍可选多值；证明 unreachable variant authorization 不扩大 wire，schema、instruction、
   fixture encoder 与 strict compiler 共享同一 `RuntimeCandidateWireContract`，provider 只提供真实选择。
-  JSONSchemaResponse on/off 必须接受同一最小文档；本地 kind/variant/binding/target/fixed parameter 回显、null
-  container、unknown/trailing 字段、提前闭合 root 都精确拒绝且零 repair/effect；
+  JSONSchemaResponse on/off 必须接受同一最小文档；本地 kind/variant/binding/target/fixed parameter 回显、null/wrong-type
+  container、unknown/trailing 字段、提前闭合 root 都精确拒绝且零 local repair/effect；required container 的 exact type
+  rejection 只可通过 persisted schema witness 授权一次完整 document rewrite；
 - 条件必填 operation field 的 semantic diagnostic 必须以 `missing_<field>` 与 `Required=[<field>]` 表达；缺失
   `bindingRefs` 只能形成 `schema_field/supply_required_field`，不能同时形成 `evidence_binding/select_allowed_evidence_binding`。
-  只有具体错误 binding 与不同 allowed member 才进入 semantic witness；CAS/fresh-load 必须拒绝维度不兼容的 failure/correction；
+  required field 已存在但为 `null`/wrong JSON type 时，diagnostic 必须保留 exact observed type，schema witness 必须绑定同
+  path、`Required` 与 expected type，并形成 `<actual_type> -> field_present`；只有具体错误 binding 与不同 allowed member 才进入
+  semantic witness。CAS/fresh-load 必须拒绝维度不兼容或 type 漂移的 failure/correction；
 - wire identity matrix 必须覆盖 ExpectedDocument/request-session exact hash 正向、manifest 字段漂移、hash 缺失/篡改、
   duplicate、attempt 1、JSON round-trip 与 fresh restart。编译失败或重算不一致必须在 provider/feasibility/
   dispatch 前 fail-closed，不得以空 hash 或当前 renderer 形状继续；
@@ -382,6 +385,14 @@ Cross-owner regression必须证明 concrete receiving-owner Command/Result、wor
   `candidate_retry_exhausted`。duplicate composite、CAS-before/CAS-after response loss 与 fresh-process reload 必须证明
   correction/terminal 只消耗一次，同 proposal 的 owner probe 不重放；全部分支零 ticket/governance/acquisition/
   operation/effect/coverage，File/Shell result 不含 SM-2/SM-3 target state。
+- `TestRuntimeCandidateProviderWireRejectsNullContainersAndFixedFieldEcho`、
+  `TestRuntimeCandidateRequiredFieldTypeCorrectionBindsExactDiagnostic`、
+  `TestCandidateCorrectionFrontierSealsRequiredParametersContainerDefects`、
+  `TestRuntimeCandidateCorrectionInputAcceptsExactNullRequiredContainer`、
+  `TestDriveRuntimeCompleteSchemaFailureStopsAfterSameContractRetry` 与
+  `TestRuntimeMainlineSchemaCorrectionDocumentCASRestartMatrix` 必须共同证明 required container 的
+  decoder→SM-3 witness→LLM C4→strict retry 闭环，并覆盖 exact null/type lineage、stable prefix、attempt budget、CAS
+  before/after、fresh-load/duplicate、第二次拒绝 final 以及零 capability effect。
 - Definition-gap complete document 在 owner-private transition 前必须通过 pure manifest/expected-document admission；已有 sealed
   acquisition 的 `undeclared_prerequisite` 只产生 attempt-0 typed correction，零 gap observation、governance、ticket、dispatch、
   effect 或 Definition mutation；stale identity 同样不能越过 admission。

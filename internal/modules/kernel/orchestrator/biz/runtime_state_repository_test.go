@@ -3746,13 +3746,13 @@ func TestRuntimeMainlineSchemaCorrectionDocumentCASRestartMatrix(t *testing.T) {
 						Operations []map[string]json.RawMessage `json:"operations"`
 					}
 					if err := json.Unmarshal(response.DocumentOutcome.Content, &payload); err != nil || len(payload.Operations) != 1 {
-						result.Set(nil, &cd.Error{Code: cd.Unexpected, Message: "decode candidate before removing targetRefs", Cause: err})
+						result.Set(nil, &cd.Error{Code: cd.Unexpected, Message: "decode candidate before nulling parameters", Cause: err})
 						return
 					}
-					delete(payload.Operations[0], "targetRefs")
+					payload.Operations[0]["parameters"] = json.RawMessage("null")
 					document, err := json.Marshal(payload)
 					if err != nil {
-						result.Set(nil, &cd.Error{Code: cd.Unexpected, Message: "encode candidate without targetRefs", Cause: err})
+						result.Set(nil, &cd.Error{Code: cd.Unexpected, Message: "encode candidate with null parameters", Cause: err})
 						return
 					}
 					response.DocumentOutcome = runtimeCompleteDocumentOutcome(command.ExpectedDocument, document)
@@ -3786,7 +3786,9 @@ func TestRuntimeMainlineSchemaCorrectionDocumentCASRestartMatrix(t *testing.T) {
 				t.Fatal(err)
 			}
 			failedCorrectionBudget, err := runtimecontract.RuntimeBudgetRemaining(failed.ExecutionBudget, runtimecontract.RuntimeBudgetDimensionCandidateCorrection)
-			if err != nil || failedCorrectionBudget != initialCorrectionBudget || len(failed.CandidateAttempts) != 1 || failed.CandidateAttempts[0].State != runtimecontract.RuntimeCandidateAttemptStateFailed || failed.CandidateAttempts[0].Correction == nil {
+			if err != nil || failedCorrectionBudget != initialCorrectionBudget || len(failed.CandidateAttempts) != 1 || failed.CandidateAttempts[0].State != runtimecontract.RuntimeCandidateAttemptStateFailed || failed.CandidateAttempts[0].Correction == nil || failed.CandidateAttempts[0].Correction.Witness == nil ||
+				failed.CandidateAttempts[0].Correction.Witness.Dimension != runtimecontract.RuntimeCandidateCorrectionWitnessSchemaField || failed.CandidateAttempts[0].Correction.Witness.Path != "$.operations[0].parameters" ||
+				failed.CandidateAttempts[0].Correction.Witness.RejectedValue != "null" || failed.CandidateAttempts[0].Correction.Witness.AlternativeValue != runtimecontract.RuntimeCandidateCorrectionFieldPresent {
 				t.Fatalf("attempt 0 did not stop at one budget-neutral schema correction: budget=%d->%d aggregate=%+v err=%v", initialCorrectionBudget, failedCorrectionBudget, failed, err)
 			}
 

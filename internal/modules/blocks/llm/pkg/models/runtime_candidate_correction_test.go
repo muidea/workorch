@@ -81,6 +81,51 @@ func TestRuntimeCandidateCorrectionInputValidatesExactSealedObservation(t *testi
 	}
 }
 
+func TestRuntimeCandidateCorrectionInputAcceptsExactNullRequiredContainer(t *testing.T) {
+	t.Parallel()
+	manifest, _, _ := candidateParameterEntryCorrectionPair(t)
+	input := RuntimeCandidateCorrectionInput{
+		ManifestHash: manifest.Hash,
+		Objectives:   []runtimecontract.RuntimeCandidateCorrectionObjective{runtimecontract.RuntimeCandidateCorrectionSupplyRequiredField},
+		Witness: runtimecontract.RuntimeCandidateCorrectionWitness{
+			Dimension: runtimecontract.RuntimeCandidateCorrectionWitnessSchemaField,
+			Path:      "$.operations[0].parameters", RejectedValue: "null", AlternativeValue: runtimecontract.RuntimeCandidateCorrectionFieldPresent,
+		},
+	}.Normalized()
+	observation := runtimecontract.RuntimeCandidateCorrectionObservation{
+		Class: runtimecontract.RuntimeCandidateFailureClassSchema, Code: "candidate_schema_invalid", Signature: "candidate-schema-invalid",
+		Diagnostic: &runtimecontract.RuntimeCandidateFailureDiagnostic{
+			Path: input.Witness.Path, Actual: "null", Allowed: []string{"array"}, Required: []string{"parameters"},
+			ManifestHash: manifest.Hash, Objectives: append([]runtimecontract.RuntimeCandidateCorrectionObjective(nil), input.Objectives...),
+		},
+		SealedCorrectionHash: runtimecontract.StableRuntimeCandidateSealedCorrectionHash(input.ManifestHash, input.Objectives, &input.Witness),
+	}.Normalized()
+	if err := input.ValidateAgainstObservation(manifest, observation); err != nil {
+		t.Fatalf("exact null-container correction was rejected: %v", err)
+	}
+
+	for name, mutate := range map[string]func(*RuntimeCandidateCorrectionInput, *runtimecontract.RuntimeCandidateCorrectionObservation){
+		"actual drift": func(_ *RuntimeCandidateCorrectionInput, observation *runtimecontract.RuntimeCandidateCorrectionObservation) {
+			observation.Diagnostic.Actual = "object"
+		},
+		"type rule removed": func(_ *RuntimeCandidateCorrectionInput, observation *runtimecontract.RuntimeCandidateCorrectionObservation) {
+			observation.Diagnostic.Allowed = []string{"business-value"}
+		},
+		"witness drift": func(input *RuntimeCandidateCorrectionInput, _ *runtimecontract.RuntimeCandidateCorrectionObservation) {
+			input.Witness.RejectedValue = runtimecontract.RuntimeCandidateCorrectionFieldAbsent
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			changedInput := input.Normalized()
+			changedObservation := observation.Clone()
+			mutate(&changedInput, &changedObservation)
+			if err := changedInput.ValidateAgainstObservation(manifest, changedObservation); err == nil {
+				t.Fatal("drifted null-container correction crossed the LLM owner fence")
+			}
+		})
+	}
+}
+
 func candidateParameterEntryCorrectionPair(t *testing.T) (runtimecontract.RuntimeCandidateContractManifest, RuntimeCandidateCorrectionInput, runtimecontract.RuntimeCandidateCorrectionObservation) {
 	t.Helper()
 	operationContract, found := runtimecontract.RuntimeOperationContractForKind(runtimecontract.RuntimeBlockKindPatchApply)

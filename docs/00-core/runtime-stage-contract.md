@@ -158,7 +158,10 @@ provider、candidate、semantic proof、capability operation、repair 与 recove
   只有真实多值选择可进入 provider wire。unreachable variant authorization 不得扩大 binding surface，JSONSchemaResponse
   on/off、schema、instruction、decoder 与 fixture encoder 不得产生不同 shape。
 - operation document 的 `missing_*`/`empty_*` required field 必须先于 semantic frontier 形成同 path 的
-  `schema_field(field_absent -> field_present)` witness；field vocabulary 不是 target/binding alternative。failed attempt 在 CAS 与
+  `schema_field(field_absent -> field_present)` witness；required field 已存在但为 `null` 或错误 JSON type 时，必须保留 strict
+  decoder 观察到的 exact type，并形成同 path 的 `schema_field(<actual_type> -> field_present)` witness。两类 correction 都只授权
+  attempt 1 重写一份完整 document，再由同一 strict decoder 证明 required typed shape；field/type vocabulary 不是
+  target/binding alternative。failed attempt 在 CAS 与
   fresh load 都必须验证 diagnostic/correction 的 manifest、objectives、objective↔witness-dimension、path、actual/shape lineage；
   条件必填 binding 缺失必须表达为 `Actual=missing_bindingRefs`、`Required=[bindingRefs]`，不得用人类 cardinality 文本充当
   Required，也不得同时创建 evidence-binding alternative。不一致时零 attempt-1

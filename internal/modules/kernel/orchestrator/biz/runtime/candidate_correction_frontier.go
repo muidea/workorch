@@ -11,8 +11,8 @@ import (
 )
 
 const (
-	candidateCorrectionFieldAbsent  = "field_absent"
-	candidateCorrectionFieldPresent = "field_present"
+	candidateCorrectionFieldAbsent  = runtimecontract.RuntimeCandidateCorrectionFieldAbsent
+	candidateCorrectionFieldPresent = runtimecontract.RuntimeCandidateCorrectionFieldPresent
 	candidateCorrectionValueAbsent  = "value_absent:"
 )
 
@@ -67,14 +67,17 @@ func candidateCorrectionWitness(
 	if witness := candidateParameterEntryEncodingCorrectionWitness(failure, manifest); witness != nil {
 		return witness
 	}
-	// A strict required-field absence describes the rejected wire shape, not an
-	// operation-semantic alternative. Seal that directly observable fact before
-	// consulting the decoded candidate frontier; otherwise an empty decoded value
-	// can be laundered into a semantic witness. Other schema diagnostics still
-	// consult the typed semantic frontier first because a concrete disallowed
-	// value is not equivalent to field absence.
-	if failure.Diagnostic != nil && candidateCorrectionDiagnosticReportsFieldAbsence(failure.Diagnostic.Normalized()) {
-		return candidateSchemaCorrectionWitness(failure.Diagnostic, manifest, frontier.candidate)
+	// A strict required-field absence or exact JSON-type mismatch describes the
+	// rejected wire shape, not an operation-semantic alternative. Seal that
+	// directly observable fact before consulting the decoded candidate frontier;
+	// otherwise an unusable decoded value can be laundered into a semantic
+	// witness. Other schema diagnostics still consult the typed semantic frontier
+	// first because a concrete disallowed business value is not equivalent to a
+	// required-field schema defect.
+	if failure.Diagnostic != nil {
+		if _, requiredFieldCorrection := runtimecontract.RuntimeCandidateRequiredFieldCorrectionRejectedValue(failure.Diagnostic.Normalized()); requiredFieldCorrection {
+			return candidateSchemaCorrectionWitness(failure.Diagnostic, manifest, frontier.candidate)
+		}
 	}
 	if frontier.candidate != nil {
 		candidate := *frontier.candidate
@@ -224,7 +227,7 @@ func candidateSchemaCorrectionWitness(diagnostic *runtimecontract.RuntimeCandida
 	if path == "" {
 		return nil
 	}
-	reportsFieldAbsence := candidateCorrectionDiagnosticReportsFieldAbsence(diagnostic.Normalized())
+	rejectedRequiredFieldValue, reportsRequiredFieldDefect := runtimecontract.RuntimeCandidateRequiredFieldCorrectionRejectedValue(diagnostic.Normalized())
 	field := candidateCorrectionPathField(path)
 	if field == "" || field == "summary" {
 		return nil
@@ -243,8 +246,8 @@ func candidateSchemaCorrectionWitness(diagnostic *runtimecontract.RuntimeCandida
 		return nil
 	}
 	if strings.HasPrefix(path, "$.") && !strings.HasPrefix(path, "$.operations[") {
-		if containsCandidateCorrectionString(manifest.RequiredTopLevelFields, field) && reportsFieldAbsence {
-			return schemaCorrectionWitness(path, candidateCorrectionFieldAbsent, candidateCorrectionFieldPresent)
+		if containsCandidateCorrectionString(manifest.RequiredTopLevelFields, field) && reportsRequiredFieldDefect {
+			return schemaCorrectionWitness(path, rejectedRequiredFieldValue, candidateCorrectionFieldPresent)
 		}
 		if !containsCandidateCorrectionString(manifest.AllowedTopLevelFields, field) && candidateCorrectionDiagnosticForbids(diagnostic, field) {
 			return schemaCorrectionWitness(path, field, candidateCorrectionFieldAbsent)
@@ -259,18 +262,22 @@ func candidateSchemaCorrectionWitness(diagnostic *runtimecontract.RuntimeCandida
 		return nil
 	}
 	if !strings.Contains(path, ".parameters") {
-		if reportsFieldAbsence &&
+		if reportsRequiredFieldDefect &&
 			containsCandidateCorrectionString(operationManifest.AllowedOperationFields, field) &&
 			candidateCorrectionDiagnosticRequires(diagnostic, field) {
-			return schemaCorrectionWitness(path, candidateCorrectionFieldAbsent, candidateCorrectionFieldPresent)
+			return schemaCorrectionWitness(path, rejectedRequiredFieldValue, candidateCorrectionFieldPresent)
 		}
 		return nil
 	}
 	if field == "summary" {
 		return nil
 	}
-	if reportsFieldAbsence && candidateCorrectionParameterDeclared(operationManifest, field) {
-		return schemaCorrectionWitness(path, candidateCorrectionFieldAbsent, candidateCorrectionFieldPresent)
+	if reportsRequiredFieldDefect && field == "parameters" &&
+		containsCandidateCorrectionString(operationManifest.RequiredOperationFields, field) {
+		return schemaCorrectionWitness(path, rejectedRequiredFieldValue, candidateCorrectionFieldPresent)
+	}
+	if reportsRequiredFieldDefect && candidateCorrectionParameterDeclared(operationManifest, field) {
+		return schemaCorrectionWitness(path, rejectedRequiredFieldValue, candidateCorrectionFieldPresent)
 	}
 	if candidateCorrectionDiagnosticForbids(diagnostic, field) && candidateCorrectionParameterRemovalAllowed(operationManifest, field) {
 		return schemaCorrectionWitness(path, field, candidateCorrectionFieldAbsent)

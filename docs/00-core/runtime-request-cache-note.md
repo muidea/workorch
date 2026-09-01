@@ -32,6 +32,10 @@ focused contract；本页不复制字段级正文。
   objectives 与 concrete document-shape/schema/semantic witness；failure 与该 input 的 normalized identity 进入 correction/request-session hash，
   persisted `Disposition`/`TerminalCode` 不跨 owner。LLM 只渲染该 detached fact，不能重新选择 alternative。缺失、漂移或
   无法由相同 manifest 重验的 witness 在 physical provider call 前 fail-closed。
+- required field missing/empty 的 schema witness 使用 `field_absent -> field_present`；required field 为 `null` 或错误 JSON type
+  时，C4 必须携带 strict decoder 的 exact rejected type、同 path 与 expected schema rule，并使用
+  `<actual_type> -> field_present`。两者都只要求重写完整 document，不改变 C0～C3、wire contract、stable-prefix hash 或
+  candidate attempt budget，也不授权 decoder/LLM owner 修复原文。
 - C0～C2 是连续稳定前缀；C3～C5 是 current/volatile tail。意外 stable-prefix 漂移属于 rendering defect。
 - exact Goal/DoD partition、current authority 与 P0～P4 integrity 优先于 cache hit；缺失保护字段必须 fail-closed。
 - raw prompt/body/stream、credential、endpoint 和未脱敏内容不得进入 aggregate、跨 owner diagnostic 或下一次 request。

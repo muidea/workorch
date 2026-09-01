@@ -104,6 +104,11 @@ func runtimeCandidateCorrectionPairForProviderTest(failure runtimecontract.Runti
 	if input.Witness.AlternativeValue == "field_present" && len(observation.Diagnostic.Required) == 0 {
 		observation.Diagnostic.Required = []string{field}
 	}
+	if input.Witness.Dimension == runtimecontract.RuntimeCandidateCorrectionWitnessSchemaField && input.Witness.AlternativeValue == runtimecontract.RuntimeCandidateCorrectionFieldPresent {
+		if rejected, found := runtimecontract.RuntimeCandidateRequiredFieldCorrectionRejectedValue(*observation.Diagnostic); found {
+			input.Witness.RejectedValue = rejected
+		}
+	}
 	if input.Witness.AlternativeValue == "field_absent" && len(observation.Diagnostic.Forbidden) == 0 {
 		observation.Diagnostic.Forbidden = []string{field}
 	}
@@ -1693,6 +1698,18 @@ func TestRuntimeProviderRequestPreservesStablePrefixAndTypedContext(t *testing.T
 			},
 			correctionPath: "$.operations[0].parameters[name=summary]", alternative: "field_absent",
 			want: []string{`"class":"schema"`, `"code":"candidate_schema_invalid"`, `"path":"$.operations[0].parameters[name=summary]"`, `"actual":"summary"`},
+		},
+		{
+			name: "null required parameters container",
+			failure: runtimecontract.RuntimeCandidateFailure{
+				Class: runtimecontract.RuntimeCandidateFailureClassSchema, Code: "candidate_schema_invalid", Signature: "candidate-schema-invalid",
+				Reason: "raw decoder cause must not be rendered",
+				Diagnostic: &runtimecontract.RuntimeCandidateFailureDiagnostic{
+					Path: "$.operations[0].parameters", Actual: "null", Allowed: []string{"array"}, Required: []string{"parameters"},
+				},
+			},
+			correctionPath: "$.operations[0].parameters", alternative: runtimecontract.RuntimeCandidateCorrectionFieldPresent,
+			want: []string{`"class":"schema"`, `"actual":"null"`, `"rejectedValue":"null"`, "wrong JSON type", "field presence without schema conformance"},
 		},
 		{
 			name: "semantic manifest diagnostic",

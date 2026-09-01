@@ -150,6 +150,52 @@ func TestCandidateCorrectionFrontierPrioritizesMissingRequiredFieldOverSemanticT
 	}
 }
 
+func TestCandidateCorrectionFrontierSealsRequiredParametersContainerDefects(t *testing.T) {
+	t.Parallel()
+	aggregate, _ := aggregateWithActiveRejectedCandidate(t)
+	manifest, err := runtimecontract.BuildRuntimeCandidateContractManifest(
+		aggregate.Decision,
+		runtimecontract.RuntimeCandidateManifestOwnerFactsFromContext(runtimecontract.RuntimeCandidateContextForDecision(aggregate.Facts, aggregate.Decision, nil)),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(manifest.Operations) != 1 || !containsCandidateCorrectionString(manifest.Operations[0].RequiredOperationFields, "parameters") {
+		t.Fatalf("required-parameters fixture manifest = %+v", manifest.Operations)
+	}
+
+	for _, testCase := range []struct {
+		name, actual, rejected string
+		allowed                []string
+	}{
+		{name: "missing", actual: "missing_parameters", rejected: runtimecontract.RuntimeCandidateCorrectionFieldAbsent, allowed: manifest.Operations[0].AllowedOperationFields},
+		{name: "null", actual: "null", rejected: "null", allowed: []string{"array"}},
+		{name: "wrong type", actual: "object", rejected: "object", allowed: []string{"array"}},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			failure := &runtimecontract.RuntimeCandidateFailure{
+				Class: runtimecontract.RuntimeCandidateFailureClassSchema, Code: "candidate_schema_invalid", Signature: "candidate-schema-invalid",
+				Diagnostic: &runtimecontract.RuntimeCandidateFailureDiagnostic{
+					Path: "$.operations[0].parameters", Actual: testCase.actual,
+					Allowed: testCase.allowed, Required: []string{"parameters"}, ManifestHash: manifest.Hash,
+				},
+			}
+			sealed, correction, sealErr := SealCandidateRejection(failure, manifest)
+			if sealErr != nil || sealed == nil || correction == nil ||
+				correction.Disposition != runtimecontract.RuntimeCandidateCorrectionCorrectableOnce || correction.Witness == nil ||
+				correction.Witness.Dimension != runtimecontract.RuntimeCandidateCorrectionWitnessSchemaField ||
+				correction.Witness.Path != failure.Diagnostic.Path || correction.Witness.RejectedValue != testCase.rejected ||
+				correction.Witness.AlternativeValue != runtimecontract.RuntimeCandidateCorrectionFieldPresent ||
+				!reflect.DeepEqual(correction.Objectives, []runtimecontract.RuntimeCandidateCorrectionObjective{runtimecontract.RuntimeCandidateCorrectionSupplyRequiredField}) {
+				t.Fatalf("required parameters defect did not seal one schema correction: failure=%+v correction=%+v err=%v", sealed, correction, sealErr)
+			}
+			if err := runtimecontract.ValidateRuntimeCandidateFailureCorrectionPair(sealed, correction); err != nil {
+				t.Fatalf("required parameters correction lineage is invalid: %v", err)
+			}
+		})
+	}
+}
+
 func TestCandidateCorrectionFrontierSealsDeclaredParameterEntryReencode(t *testing.T) {
 	aggregate, candidate := aggregateWithActiveRejectedCandidate(t)
 	manifest, err := runtimecontract.BuildRuntimeCandidateContractManifest(

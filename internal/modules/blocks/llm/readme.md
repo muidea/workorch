@@ -45,7 +45,9 @@ workspace/run、logical/physical request identity、document hash、audit 与 us
   JSONSchemaResponse on/off 不改变该最小 wire 或 local admission；LLM block 不做 JSON repair，不选择 correction/retry。
 - Runtime logical/physical identity 在 owner guard 内执行 concurrent/duplicate at-most-once；provider outcome 不选择 caller retry。
 - attempt-1 correction 通过共享纯合同核对 observation 的 manifest/objectives、objective↔witness-dimension、path/actual/shape 与 sealed witness，再独立核对
-  manifest field authorization；LLM 不把 `missing_*`/`empty_*` schema observation 重新解释为 semantic target/binding value。
+  manifest field authorization；LLM 不把 `missing_*`/`empty_*` 或 `null`/wrong-type required-field schema observation 重新解释为
+  semantic target/binding value。对后者，C4 只投影 exact rejected JSON type 与 expected schema rule，要求重写完整 document；
+  它不改变 C0～C3/stable prefix，也不授权 LLM block 或 decoder 本地修复 attempt-0 文档。
 - `parameter_entry_encoding` correction 在 physical call 前 exact 核对 operation kind/index、container 与每个 fixed parameter 的
   name/type；C4 仅渲染由 contract type 推导的 `{name, wireValueField}` 结构提示，不携带 attempt-0 value，也不把合法 parameter
   错写为删除指令。该投影与 `JSONSchemaResponse` capability 无关，只改变 C4，不改变 C0～C3/stable prefix。
@@ -72,7 +74,7 @@ workspace/run、logical/physical request identity、document hash、audit 与 us
 | Runtime result exhaustive union / audit identity | [`pkg/events/runtime_provider_test.go`](pkg/events/runtime_provider_test.go) | 覆盖 normal、invalid、tamper |
 | Runtime exact source / duplicate / concurrent | [`biz/runtime_owner_guard_test.go`](biz/runtime_owner_guard_test.go) | 覆盖 |
 | provider protocol、output bound、stream/non-stream、embedding | [`biz/http_provider_test.go`](biz/http_provider_test.go)、[`biz/http_provider_security_matrix_test.go`](biz/http_provider_security_matrix_test.go) | 本地覆盖 wire success/negative edges、stream idle/hard deadline、持续进展与 reasoning-only terminal；不证明真实 ai-proxy、credential 或 upstream 模型兼容性 |
-| candidate framing、schema、correction、cache hash | `biz/runtime_candidate_*_test.go`（含 `TestRuntimeCandidateAuxiliarySingletonWireIsMinimalWithJSONSchemaResponseOnOrOff`）、`pkg/models/runtime_candidate_correction_test.go`、`biz/provider_prompt_projection_test.go` | 覆盖 required/auxiliary 最小 wire、JSONSchemaResponse on/off、schema/semantic witness 分离、failure/correction exact binding、manifest-scoped C3 与 C0～C5 identity |
+| candidate framing、schema、correction、cache hash | `biz/runtime_candidate_*_test.go`（含 `TestRuntimeProviderRequestPreservesStablePrefixAndTypedContext`、`TestRuntimeCandidateAuxiliarySingletonWireIsMinimalWithJSONSchemaResponseOnOrOff`）、`pkg/models/runtime_candidate_correction_test.go`（含 `TestRuntimeCandidateCorrectionInputAcceptsExactNullRequiredContainer`）、`biz/provider_prompt_projection_test.go` | 覆盖 required/auxiliary 最小 wire、JSONSchemaResponse on/off、missing/empty/null/wrong-type schema witness 与 semantic witness 分离、failure/correction exact binding、manifest-scoped C3 与 C0～C5 identity |
 | active configuration freeze | `TestBizStartFreezesLLMConfigurationForCatalogAndStatus` | 覆盖 |
 | catalog cache/key/concurrent refresh | [`biz/catalog_cache_test.go`](biz/catalog_cache_test.go) | 覆盖 merge、key、auth rotation、capability mapping，以及本地 HTTP transport 的 network/5xx 有界 retry、4xx no-retry、oversize/malformed body、same/cross-origin redirect、fresh→stale→expired LKG |
 | lifecycle / dependency fail-fast | [`module_test.go`](module_test.go)、`TestLLMOwnerStartIsIdempotentAndTeardownClearsLifecycle`、`TestProviderCommandsPublishAuditAndRejectPostBeforePhysicalCall` | 覆盖重复 Start、Stop 清理，以及 Stop 后 completion/embedding/catalog 零 physical call |

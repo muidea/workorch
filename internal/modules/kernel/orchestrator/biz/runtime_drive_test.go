@@ -9871,7 +9871,7 @@ func TestDriveRuntimeCompleteSchemaFailureStopsAfterSameContractRetry(t *testing
 		result.Set(runtimeProviderResultWithAuditForTest(command, llmevents.RequestRuntimeCandidateResult{
 			Transaction: command.Transaction, DocumentKind: command.DocumentKind, RequestIdentity: command.RequestIdentity,
 			ExpectedDocumentHash: runtimeExpectedDocumentHash(command.ExpectedDocument),
-			DocumentOutcome:      runtimeCompleteDocumentOutcome(command.ExpectedDocument, []byte(`{}`)),
+			DocumentOutcome:      runtimeCompleteDocumentOutcome(command.ExpectedDocument, []byte(`{"operations":null}`)),
 		}), nil)
 	})
 	t.Cleanup(func() { llmObserver.Unsubscribe(llmevents.TopicRequestRuntimeCandidate) })
@@ -9891,7 +9891,8 @@ func TestDriveRuntimeCompleteSchemaFailureStopsAfterSameContractRetry(t *testing
 		requests[1].CandidateCorrectionObservation.Class != runtimecontract.RuntimeCandidateFailureClassSchema || requests[1].CandidateCorrectionObservation.Code != "candidate_schema_invalid" ||
 		requests[1].CandidateCorrectionObservation.Signature != "candidate-schema-invalid" || requests[1].CandidateCorrectionObservation.Diagnostic == nil ||
 		requests[1].CandidateCorrectionObservation.Diagnostic.Path != "$.operations" || requests[1].CandidateCorrection == nil ||
-		requests[1].CandidateCorrection.Witness.Path != "$.operations" || requests[1].CandidateCorrection.Witness.AlternativeValue != "field_present" {
+		requests[1].CandidateCorrectionObservation.Diagnostic.Actual != "null" || requests[1].CandidateCorrection.Witness.Path != "$.operations" ||
+		requests[1].CandidateCorrection.Witness.RejectedValue != "null" || requests[1].CandidateCorrection.Witness.AlternativeValue != runtimecontract.RuntimeCandidateCorrectionFieldPresent {
 		t.Fatalf("candidate retry did not carry the persisted first failure: %+v", requests)
 	}
 }

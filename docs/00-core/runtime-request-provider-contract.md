@@ -114,9 +114,12 @@ CandidateManifest body。duplicate/restart 按 session 阶段从 current sealed 
 provider-facing instruction 仍严格要求裸 JSON。当前 wire normalization 最多只可移除一层完整、独占响应的精确 JSON code fence；
 raw bytes/hash 保留原始 identity，任何 prose、其他语言标签、缺失 closing fence、多 fence 或
 多 JSON value 都不得由该 normalization 放宽。
-对 operations，`operations:null`、`parameters:null`、本地派生字段回显、operation object 结束后的 trailing
-字段与 root 提前闭合都必须形成精确 typed shape rejection。attempt 1 可根据 persisted witness 要求重写整份
-文档，但不得由 decoder 对 attempt 0 做局部拼接或容错。
+对 operations，`operations:null`、`parameters:null`、required container 的其它错误 JSON type、本地派生字段回显、operation
+object 结束后的 trailing 字段与 root 提前闭合都必须形成精确 typed shape rejection。required container rejection 必须保留
+exact observed type，并以 `Required`/expected JSON type 证明 schema rule；missing/empty 使用
+`field_absent -> field_present` witness，`null`/wrong-type 使用 `<actual_type> -> field_present` witness。attempt 1 可根据
+persisted witness 要求重写整份文档，但不得由 decoder 对 attempt 0 做局部拼接或容错，也不得改变 C0～C3、manifest 或
+wire contract。
 
 - incomplete/EOF、output limit、timeout、429/5xx 与允许恢复的 transport failure 只进入 request-session recovery；
 - 401/403、configuration/protocol failure、submission-unknown 和 document recovery exhausted 形成 typed request fact；

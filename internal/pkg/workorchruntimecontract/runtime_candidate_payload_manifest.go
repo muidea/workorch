@@ -149,7 +149,7 @@ func compileRuntimeCandidateProviderWirePayload(manifest RuntimeCandidateContrac
 		return nil, &RuntimeCandidatePayloadDiagnostic{Path: "$.operations", Actual: "missing_operations", Required: []string{"operations"}, Allowed: append([]string(nil), manifest.AllowedTopLevelFields...)}
 	}
 	if value := bytes.TrimSpace(rawOperations); len(value) == 0 || value[0] != '[' {
-		return nil, &RuntimeCandidatePayloadDiagnostic{Path: "$.operations", Actual: "null", Required: []string{"operations"}, Allowed: []string{"array"}}
+		return nil, runtimeCandidateRequiredArrayDiagnostic("$.operations", "operations", rawOperations)
 	}
 	if len(envelope.Operations) > manifest.MaxOperationCount {
 		return nil, validateRuntimeCandidateOperationCount(manifest, len(envelope.Operations))
@@ -272,10 +272,10 @@ func compileRuntimeCandidateWireParameters(compiled map[string]json.RawMessage, 
 	parameters := make([]json.RawMessage, 0, len(rule.DerivedParameters)+len(rule.ProviderParameterNames))
 	if raw, found := compiled["parameters"]; found {
 		if value := bytes.TrimSpace(raw); len(value) == 0 || value[0] != '[' {
-			return &RuntimeCandidatePayloadDiagnostic{Path: path + ".parameters", Actual: "null", Required: []string{"parameters"}, Allowed: []string{"array"}}
+			return runtimeCandidateRequiredArrayDiagnostic(path+".parameters", "parameters", raw)
 		}
 		if err := json.Unmarshal(raw, &parameters); err != nil {
-			return &RuntimeCandidatePayloadDiagnostic{Path: path + ".parameters", Actual: "not_array", Cause: err}
+			return &RuntimeCandidatePayloadDiagnostic{Path: path + ".parameters", Actual: "array", Required: []string{"parameters"}, Allowed: []string{"array"}, Cause: err}
 		}
 		seen := make(map[string]struct{}, len(parameters))
 		for parameterIndex, rawParameter := range parameters {
@@ -305,6 +305,35 @@ func compileRuntimeCandidateWireParameters(compiled map[string]json.RawMessage, 
 	}
 	compiled["parameters"] = runtimeCandidateWireJSONValue(parameters)
 	return nil
+}
+
+func runtimeCandidateRequiredArrayDiagnostic(path, field string, raw json.RawMessage) *RuntimeCandidatePayloadDiagnostic {
+	return &RuntimeCandidatePayloadDiagnostic{
+		Path: path, Actual: runtimeCandidateRawJSONType(raw),
+		Required: []string{field}, Allowed: []string{"array"},
+	}
+}
+
+func runtimeCandidateRawJSONType(raw json.RawMessage) string {
+	value := bytes.TrimSpace(raw)
+	if len(value) == 0 {
+		return "empty"
+	}
+	if bytes.Equal(value, []byte("null")) {
+		return "null"
+	}
+	switch value[0] {
+	case '[':
+		return "array"
+	case '{':
+		return "object"
+	case '"':
+		return "string"
+	case 't', 'f':
+		return "boolean"
+	default:
+		return "number"
+	}
 }
 
 func runtimeCandidateWireRawString(raw map[string]json.RawMessage, field string) (string, bool) {
@@ -561,6 +590,12 @@ func runtimeCandidatePayloadDecodeDiagnostic(manifest RuntimeCandidateContractMa
 		}
 	}
 	diagnostic := &RuntimeCandidatePayloadDiagnostic{Path: path, Actual: actual, Allowed: allowed, Forbidden: manifest.ForbiddenTopLevelFields, Cause: cause}
+	if strings.HasPrefix(path, "$.") && !strings.Contains(strings.TrimPrefix(path, "$."), ".") {
+		field := strings.TrimPrefix(path, "$.")
+		if runtimeCandidatePayloadContains(manifest.RequiredTopLevelFields, field) {
+			diagnostic.Required = []string{field}
+		}
+	}
 	if encodings := runtimeCandidatePayloadParameterEntryEncodings(manifest, payload, field); len(encodings) != 0 {
 		diagnostic.ViolationKind = RuntimeCandidatePayloadViolationParameterEntryEncoding
 		diagnostic.ParameterEntryEncodings = encodings

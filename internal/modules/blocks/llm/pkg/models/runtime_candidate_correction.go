@@ -8,8 +8,8 @@ import (
 )
 
 const (
-	runtimeCandidateCorrectionFieldAbsent  = "field_absent"
-	runtimeCandidateCorrectionFieldPresent = "field_present"
+	runtimeCandidateCorrectionFieldAbsent  = runtimecontract.RuntimeCandidateCorrectionFieldAbsent
+	runtimeCandidateCorrectionFieldPresent = runtimecontract.RuntimeCandidateCorrectionFieldPresent
 )
 
 // ValidateAgainstObservation proves that a detached attempt-1 correction is

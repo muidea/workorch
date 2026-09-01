@@ -3,6 +3,7 @@ package workorchruntimecontract
 import (
 	"errors"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 
@@ -198,13 +199,17 @@ func TestRuntimeCandidateProviderWireRejectsNullContainersAndFixedFieldEcho(t *t
 		},
 	})
 	tests := []struct {
-		name    string
-		payload string
-		path    string
-		actual  string
+		name     string
+		payload  string
+		path     string
+		actual   string
+		required string
+		allowed  string
 	}{
-		{name: "null operations", payload: `{"operations":null}`, path: "$.operations", actual: "null"},
-		{name: "null parameters", payload: `{"operations":[{"requiredOperationRef":"init","parameters":null}]}`, path: "$.operations[0].parameters", actual: "null"},
+		{name: "null operations", payload: `{"operations":null}`, path: "$.operations", actual: "null", required: "operations", allowed: "array"},
+		{name: "object operations", payload: `{"operations":{}}`, path: "$.operations", actual: "object", required: "operations", allowed: "array"},
+		{name: "null parameters", payload: `{"operations":[{"requiredOperationRef":"init","parameters":null}]}`, path: "$.operations[0].parameters", actual: "null", required: "parameters", allowed: "array"},
+		{name: "object parameters", payload: `{"operations":[{"requiredOperationRef":"init","parameters":{}}]}`, path: "$.operations[0].parameters", actual: "object", required: "parameters", allowed: "array"},
 		{name: "fixed kind echo", payload: `{"operations":[{"requiredOperationRef":"init","kind":"git/write"}]}`, path: "$.operations[0].kind", actual: "locally_derived_kind"},
 		{name: "fixed binding echo", payload: `{"operations":[{"requiredOperationRef":"init","bindingRefs":["binding/test/cwi-1"]}]}`, path: "$.operations[0].bindingRefs", actual: "locally_derived_bindingRefs"},
 		{name: "fixed discriminator echo", payload: `{"operations":[{"requiredOperationRef":"init","parameters":[{"name":"operation","string":"init"}]}]}`, path: "$.operations[0].parameters[0].name", actual: "locally_derived_parameter_operation"},
@@ -213,7 +218,9 @@ func TestRuntimeCandidateProviderWireRejectsNullContainersAndFixedFieldEcho(t *t
 		t.Run(test.name, func(t *testing.T) {
 			_, err := DecodeRuntimeCandidatePayloadWithManifest(manifest, []byte(test.payload))
 			var diagnostic *RuntimeCandidatePayloadDiagnostic
-			if !errors.As(err, &diagnostic) || diagnostic.Path != test.path || !strings.Contains(diagnostic.Actual, test.actual) {
+			if !errors.As(err, &diagnostic) || diagnostic.Path != test.path || !strings.Contains(diagnostic.Actual, test.actual) ||
+				(test.required != "" && !slices.Contains(diagnostic.Required, test.required)) ||
+				(test.allowed != "" && !slices.Contains(diagnostic.Allowed, test.allowed)) {
 				t.Fatalf("diagnostic = %+v err=%v, want path=%q actual~%q", diagnostic, err, test.path, test.actual)
 			}
 		})
