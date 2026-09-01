@@ -576,6 +576,10 @@ Cross-owner regression必须证明 concrete receiving-owner Command/Result、wor
   错误直接失败，不写 owner transition/replacement intent，不调用 provider/capability，也不投影替代状态；
 - 首次 `file/write` 创建成功后若同 CWI reopen，latest owner catalog 必须使 correction 选择 revision-bound
   `file/edit`/`patch/apply`；重复 create-only write 在副作用前拒绝且不能形成无限 revision/等价操作循环。
+- owner-fact postcondition、owner-fact acquisition settlement、validation-failure repair required/settled 四类 semantic reopen
+  必须把 current cursor 投影为 immutable Definition 的 exact `RuntimeFocusSeed()`（仅 ID 固定为
+  `semantic-pending/<cwi>`）；predecessor all-of/grounding/selector/operation/recipe 任一字段泄漏、Definition 缺失或重复均
+  fail-closed。fresh-load 与 duplicate private event 必须保留同一投影并保持零额外 CAS、effect、provider 与预算扣减。
 - profile verifier 必须证明 validation entry 只保留 recipe/receipt lineage：无 owner-supported 结构化位置时零 failure-target
   candidate；支持的工具诊断只能报告 sealed validation scope 内的 actual target，越界目标丢弃且仍需 sealed repair-owner
   confirmation。

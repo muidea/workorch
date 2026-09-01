@@ -193,34 +193,24 @@ func runtimeCWIPendingFocus(source runtimecontract.CoverageFocus, coverageID com
 	return value.Normalized()
 }
 
-// runtimeCWISemanticRebindingPendingFocus removes execution authority from a
-// CWI whose current binding has been retired before a new semantic purpose is
-// sealed. Definition/Profile declarations remain in the aggregate; target,
-// operation and validation-recipe values must be projected again from the new
-// binding rather than inherited from the predecessor focus.
-func runtimeCWISemanticRebindingPendingFocus(source runtimecontract.CoverageFocus, coverageID common.CoverageWorkItemID) runtimecontract.CoverageFocus {
-	value := runtimeCWIPendingFocus(source, coverageID)
-	value.TargetRefs = nil
-	value.ProspectiveTargetRefs = nil
-	value.TargetRole = ""
-	value.TargetDiscoverySources = nil
-	value.TargetSelectorRef = ""
-	value.TargetSelectorOwnerRef = ""
-	value.TargetSelectorSubjectRef = ""
-	value.TargetSelectorCandidateRefs = nil
-	value.AcceptedStepKinds = nil
-	value.AcceptedOperationVariants = nil
-	value.ValidationRecipeID = ""
-	value.RequiredCheckRefs = nil
-	return value.Normalized()
-}
-
-func runtimeCWISemanticRebindingExecutionAuthorityEmpty(focus runtimecontract.CoverageFocus) bool {
-	focus = focus.Normalized()
-	return len(focus.TargetRefs) == 0 && len(focus.ProspectiveTargetRefs) == 0 && focus.TargetRole == "" &&
-		len(focus.TargetDiscoverySources) == 0 && focus.TargetSelectorRef == "" && focus.TargetSelectorOwnerRef == "" &&
-		focus.TargetSelectorSubjectRef == "" && len(focus.TargetSelectorCandidateRefs) == 0 && len(focus.AcceptedStepKinds) == 0 &&
-		len(focus.AcceptedOperationVariants) == 0 && focus.ValidationRecipeID == "" && len(focus.RequiredCheckRefs) == 0
+// runtimeCWISemanticRebindingPendingFocus positively constructs the only
+// admissible binding-free cursor for a reopened CWI. The immutable Definition
+// remains the declaration authority, while RuntimeFocusSeed supplies only the
+// minimal terminal proof cursor. Nothing is copied from the retired semantic
+// generation, so a newly added generation field cannot leak through a stale
+// subtractive field list.
+func runtimeCWISemanticRebindingPendingFocus(facts runtimecontract.RuntimeFacts, coverageID common.CoverageWorkItemID) (runtimecontract.CoverageFocus, error) {
+	declaration, found, err := runtimeDefinitionFocusForCoverage(facts.DefinitionFocuses, coverageID)
+	if err != nil {
+		return runtimecontract.CoverageFocus{}, err
+	}
+	if !found {
+		return runtimecontract.CoverageFocus{}, fmt.Errorf("%w: runtime CWI %q semantic rebinding has no immutable Definition focus", common.ErrConflict, coverageID)
+	}
+	value := declaration.RuntimeFocusSeed()
+	value.ID = "semantic-pending/" + string(coverageID)
+	value.CoverageWorkItemIDs = []common.CoverageWorkItemID{coverageID}
+	return value.Normalized(), nil
 }
 
 func runtimeCWIReopenRequiresSemanticRebinding(reason string) bool {
@@ -281,10 +271,10 @@ func TargetGroundingTerminalSemanticReDrivePending(aggregate RuntimeAggregate) b
 }
 
 // validateRuntimeCWISemanticRebindingFocusProjections prevents a persisted
-// reopened CWI from retaining execution authority that belonged to its
-// retired generation. The reopen reason is Orchestrator-private authority;
-// the shared Runtime contract therefore validates the generic CWI shape while
-// this owner-local invariant validates the exact semantic-rebinding reasons.
+// reopened CWI from retaining any value that belonged to its retired
+// generation. The reopen reason is Orchestrator-private authority; the shared
+// Runtime contract validates the generic CWI shape while this owner-local
+// invariant requires the exact positive projection from immutable Definition.
 func validateRuntimeCWISemanticRebindingFocusProjections(facts runtimecontract.RuntimeFacts) error {
 	focuses := append(append([]runtimecontract.CoverageFocus{facts.Focus}, facts.RemainingFocuses...), facts.CompletedFocuses...)
 	byCoverage := make(map[common.CoverageWorkItemID]runtimecontract.CoverageFocus, len(focuses))
@@ -303,11 +293,15 @@ func validateRuntimeCWISemanticRebindingFocusProjections(facts runtimecontract.R
 			continue
 		}
 		focus, found := byCoverage[item.ID]
-		if !found || focus.ID != "semantic-pending/"+string(item.ID) {
+		if !found {
 			return fmt.Errorf("runtime CWI %q semantic rebinding has no canonical pending focus", item.ID)
 		}
-		if !runtimeCWISemanticRebindingExecutionAuthorityEmpty(focus) {
-			return fmt.Errorf("runtime CWI %q semantic rebinding retains predecessor execution authority", item.ID)
+		expected, err := runtimeCWISemanticRebindingPendingFocus(facts, item.ID)
+		if err != nil {
+			return err
+		}
+		if !runtimecontract.SameRuntimeCoverageFocus(focus, expected) {
+			return fmt.Errorf("runtime CWI %q semantic rebinding projection differs from immutable Definition seed", item.ID)
 		}
 	}
 	return nil
@@ -334,22 +328,34 @@ func runtimeCWIWithCoverage(focus runtimecontract.CoverageFocus, coverageIDs []c
 // stable pending projection. The local maps are invocation-scoped only; the
 // persisted authority remains the Coverage row and the focus queue.
 func replaceRuntimeCWIFocusProjection(facts runtimecontract.RuntimeFacts, replacements []common.CoverageWorkItemID) (runtimecontract.RuntimeFacts, error) {
-	return replaceRuntimeCWIFocusProjectionWithPending(facts, replacements, runtimeCWIPendingFocus)
+	return replaceRuntimeCWIFocusProjectionWithPending(
+		facts,
+		replacements,
+		func(source runtimecontract.CoverageFocus, coverageID common.CoverageWorkItemID) (runtimecontract.CoverageFocus, error) {
+			return runtimeCWIPendingFocus(source, coverageID), nil
+		},
+	)
 }
 
 // replaceRuntimeCWIFocusProjectionForSemanticRebinding is the typed SM-2
 // projection used when a private owner event retires one binding and requires
 // a new semantic generation. It keeps all canonical queue writes inside
-// installRuntimeCWIFocusProjection while selecting the target-free pending
-// projection above.
+// installRuntimeCWIFocusProjection while selecting the Definition-seeded
+// pending projection above.
 func replaceRuntimeCWIFocusProjectionForSemanticRebinding(facts runtimecontract.RuntimeFacts, replacements []common.CoverageWorkItemID) (runtimecontract.RuntimeFacts, error) {
-	return replaceRuntimeCWIFocusProjectionWithPending(facts, replacements, runtimeCWISemanticRebindingPendingFocus)
+	return replaceRuntimeCWIFocusProjectionWithPending(
+		facts,
+		replacements,
+		func(_ runtimecontract.CoverageFocus, coverageID common.CoverageWorkItemID) (runtimecontract.CoverageFocus, error) {
+			return runtimeCWISemanticRebindingPendingFocus(facts, coverageID)
+		},
+	)
 }
 
 func replaceRuntimeCWIFocusProjectionWithPending(
 	facts runtimecontract.RuntimeFacts,
 	replacements []common.CoverageWorkItemID,
-	pendingProjection func(runtimecontract.CoverageFocus, common.CoverageWorkItemID) runtimecontract.CoverageFocus,
+	pendingProjection func(runtimecontract.CoverageFocus, common.CoverageWorkItemID) (runtimecontract.CoverageFocus, error),
 ) (runtimecontract.RuntimeFacts, error) {
 	if len(replacements) == 0 {
 		return facts, nil
@@ -367,13 +373,17 @@ func replaceRuntimeCWIFocusProjectionWithPending(
 		return facts, nil
 	}
 
-	split := func(focus runtimecontract.CoverageFocus) ([]runtimecontract.CoverageFocus, []runtimecontract.CoverageFocus) {
+	split := func(focus runtimecontract.CoverageFocus) ([]runtimecontract.CoverageFocus, []runtimecontract.CoverageFocus, error) {
 		focus = focus.Normalized()
 		retainedIDs := make([]common.CoverageWorkItemID, 0, len(focus.CoverageWorkItemIDs))
 		pending := make([]runtimecontract.CoverageFocus, 0)
 		for _, coverageID := range focus.CoverageWorkItemIDs {
 			if _, replace := wanted[coverageID]; replace {
-				pending = append(pending, pendingProjection(focus, coverageID))
+				projection, err := pendingProjection(focus, coverageID)
+				if err != nil {
+					return nil, nil, err
+				}
+				pending = append(pending, projection)
 				continue
 			}
 			retainedIDs = append(retainedIDs, coverageID)
@@ -382,10 +392,13 @@ func replaceRuntimeCWIFocusProjectionWithPending(
 		if len(retainedIDs) != 0 {
 			retained = append(retained, runtimeCWIWithCoverage(focus, retainedIDs))
 		}
-		return retained, pending
+		return retained, pending, nil
 	}
 
-	currentRetained, currentPending := split(facts.Focus)
+	currentRetained, currentPending, err := split(facts.Focus)
+	if err != nil {
+		return runtimecontract.RuntimeFacts{}, err
+	}
 	if len(currentRetained) == 0 && len(currentPending) == 0 {
 		return runtimecontract.RuntimeFacts{}, fmt.Errorf("runtime CWI focus projection has no current focus")
 	}
@@ -397,7 +410,10 @@ func replaceRuntimeCWIFocusProjectionWithPending(
 	remaining := make([]runtimecontract.CoverageFocus, 0, len(currentQueue)-1+len(facts.RemainingFocuses))
 	remaining = append(remaining, currentQueue[1:]...)
 	for _, focus := range facts.RemainingFocuses {
-		retained, pending := split(focus)
+		retained, pending, err := split(focus)
+		if err != nil {
+			return runtimecontract.RuntimeFacts{}, err
+		}
 		remaining = append(remaining, retained...)
 		remaining = append(remaining, pending...)
 	}
@@ -405,7 +421,10 @@ func replaceRuntimeCWIFocusProjectionWithPending(
 	completed := make([]runtimecontract.CoverageFocus, 0, len(facts.CompletedFocuses))
 	requeued := make([]runtimecontract.CoverageFocus, 0)
 	for _, focus := range facts.CompletedFocuses {
-		retained, pending := split(focus)
+		retained, pending, err := split(focus)
+		if err != nil {
+			return runtimecontract.RuntimeFacts{}, err
+		}
 		completed = append(completed, retained...)
 		requeued = append(requeued, pending...)
 	}

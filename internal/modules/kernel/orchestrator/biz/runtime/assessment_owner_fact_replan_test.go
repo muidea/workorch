@@ -52,9 +52,7 @@ func TestCommitAssessmentReopensCurrentCWIWhenOwnerFactIsSoleGap(t *testing.T) {
 	if progressed.Facts.Focus.ID != "semantic-pending/cwi-v2" || len(progressed.Facts.Focus.CoverageEvidenceBindings) != 0 {
 		t.Fatalf("reopened CWI focus projection = %+v", progressed.Facts.Focus)
 	}
-	if !runtimeCWISemanticRebindingExecutionAuthorityEmpty(progressed.Facts.Focus) {
-		t.Fatalf("reopened owner-fact CWI retained predecessor execution authority: %+v", progressed.Facts.Focus)
-	}
+	assertRuntimeSemanticRebindingDefinitionSeed(t, progressed.Facts)
 	item := progressed.Facts.Coverage[0]
 	if item.State != runtimecontract.RuntimeCoverageItemStateOpen || item.CWIConvergenceState != runtimecontract.RuntimeCWIConvergenceStateReopened || item.CurrentBindingRef != nil || len(item.ReopenLineage) != 1 {
 		t.Fatalf("reopened CWI row = %+v", item)
@@ -145,7 +143,12 @@ func TestCommitAssessmentSettlesAcquisitionBeforeTerminalDefinitionProof(t *test
 		t.Fatalf("current generation is not the exact acquisition contract: acquisition=%+v focus=%+v", acquisition, repository.aggregate.Facts.Focus)
 	}
 	declaration := repository.aggregate.Facts.DefinitionFocuses[0].CoverageFocusDeclaration()
-	if len(declaration.RequiredEvidenceKinds) != 1 || declaration.RequiredEvidenceKinds[0] != runtimecontract.EvidenceKindValidation {
+	if len(declaration.RequiredEvidenceKinds) != 1 || declaration.RequiredEvidenceKinds[0] != runtimecontract.EvidenceKindValidation ||
+		!declaration.RequireTargetGrounding ||
+		!runtimecontract.SameRuntimeProspectiveTargetAllOfConstraintRefs(
+			declaration.ProspectiveTargetAllOfConstraintRefs,
+			[]string{"new-target-requires-owner-selector", "workspace-relative-path"},
+		) {
 		t.Fatalf("acquisition overwrote terminal Definition evidence: %+v", declaration)
 	}
 
@@ -167,9 +170,7 @@ func TestCommitAssessmentSettlesAcquisitionBeforeTerminalDefinitionProof(t *test
 	if item.ReopenLineage[0].Reason != runtimeCWIReopenReasonOwnerFactAcquisitionSettled || progressed.Facts.Focus.ID != "semantic-pending/cwi-v2" {
 		t.Fatalf("acquisition successor lineage = %+v focus=%+v", item.ReopenLineage, progressed.Facts.Focus)
 	}
-	if !runtimeCWISemanticRebindingExecutionAuthorityEmpty(progressed.Facts.Focus) {
-		t.Fatalf("acquisition successor retained predecessor target/operation authority: %+v", progressed.Facts.Focus)
-	}
+	assertRuntimeSemanticRebindingDefinitionSeed(t, progressed.Facts)
 	for _, prerequisite := range progressed.Facts.Prerequisites.Pending {
 		if prerequisite.Kind == runtimecontract.PrerequisiteKindTargetSelection {
 			t.Fatalf("acquisition successor reacquired the retired prospective target selector: %+v", prerequisite)
@@ -310,9 +311,7 @@ func TestAssessmentObservedUsesRetiredAcquisitionPurposeAfterReceiptResourceChan
 			t.Fatalf("owner-fact successor reacquired the retired prospective target selector: focus=%+v prerequisite=%+v", progressed.Facts.Focus, prerequisite)
 		}
 	}
-	if !runtimeCWISemanticRebindingExecutionAuthorityEmpty(progressed.Facts.Focus) {
-		t.Fatalf("retired acquisition successor retained predecessor target/operation authority: %+v", progressed.Facts.Focus)
-	}
+	assertRuntimeSemanticRebindingDefinitionSeed(t, progressed.Facts)
 	if err := candidateRequestSessionActionAllowed(progressed, runtimecontract.RuntimeProviderDocumentSemanticPlan); err != nil {
 		t.Fatalf("retired acquisition successor did not admit semantic re-drive: %v", err)
 	}
@@ -592,10 +591,11 @@ func prepareTerminalValidationOwnerFactAcquisitionAssessment(t *testing.T, retir
 	facts.Focus.TargetSelectorSubjectRef = convergence.TargetSelectorSubjectRef
 	facts.Focus.TargetRole = "validation-input"
 	facts.Focus.ProspectiveTargetRefs = []string{"runtime-owner-fact-validation_test.go"}
+	facts.Focus.ProspectiveTargetAllOfConstraintRefs = []string{"workspace-relative-path", "new-target-requires-owner-selector"}
 	facts.Focus.RequireTargetGrounding = true
 	fileCatalog := facts.Resources.OperationAdmissibilities[0]
 	fileCatalog.SelectorRefs = []string{convergence.AcquisitionTargetSelectorRef}
-	fileCatalog.ConstraintRefs = []string{"workspace-relative-path"}
+	fileCatalog.ConstraintRefs = []string{"workspace-relative-path", "new-target-requires-owner-selector"}
 	fileCatalog.OperationVariants = []runtimecontract.RuntimeOperationAdmissibilityVariant{{
 		Kind: runtimecontract.StepKindFileWrite,
 		AllowedTargetPolicies: []runtimecontract.RuntimeOperationTargetPolicy{
@@ -603,7 +603,7 @@ func prepareTerminalValidationOwnerFactAcquisitionAssessment(t *testing.T, retir
 			runtimecontract.RuntimeOperationTargetPolicyProspectiveOwnerTarget,
 		},
 		SelectorRefs:   []string{convergence.AcquisitionTargetSelectorRef},
-		ConstraintRefs: []string{"workspace-relative-path"},
+		ConstraintRefs: []string{"workspace-relative-path", "new-target-requires-owner-selector"},
 	}}
 	fileCatalog.SnapshotID = runtimecontract.StableRuntimeOperationAdmissibilitySnapshotID(fileCatalog)
 	facts.Resources.OperationAdmissibilities = []runtimecontract.RuntimeOperationAdmissibility{
@@ -704,8 +704,10 @@ func prepareTerminalValidationOwnerFactAcquisitionAssessment(t *testing.T, retir
 				selection := runtimecontract.RuntimeTargetSelection{
 					PrerequisiteID: prerequisite.ID, OwnerModuleID: prerequisite.OwnerModuleID, TargetRole: prerequisite.SubjectRef,
 					SelectorRef: prerequisite.TargetSelectorRef, SelectorOwnerRef: prerequisite.TargetSelectorOwnerRef, SelectorSubjectRef: prerequisite.TargetSelectorSubjectRef,
-					SelectorCandidateRefs: append([]string(nil), prerequisite.TargetSelectorCandidateRefs...), Disposition: runtimecontract.RuntimeTargetSelectionUnsupported,
-					ProspectiveTargetRef: prerequisite.ProspectiveTargetRef, ObservedRevision: "workspace-tree-owner-fact-acquisition-v2",
+					SelectorCandidateRefs:                append([]string(nil), prerequisite.TargetSelectorCandidateRefs...),
+					ProspectiveTargetAllOfConstraintRefs: append([]string(nil), prerequisite.ProspectiveTargetAllOfConstraintRefs...),
+					Disposition:                          runtimecontract.RuntimeTargetSelectionUnsupported,
+					ProspectiveTargetRef:                 prerequisite.ProspectiveTargetRef, ObservedRevision: "workspace-tree-owner-fact-acquisition-v2",
 				}
 				selection.SnapshotID = runtimecontract.StableRuntimeTargetSelectionSnapshotID(selection)
 				refreshed, refreshErr := controller.commitPrerequisite(context.Background(), "ws-v2", "run-v2", PrerequisiteResult{
@@ -886,6 +888,29 @@ func runtimeTestAttachReceiptResourceChanges(t *testing.T, aggregate *RuntimeAgg
 	}
 	evidence.Receipt = &receipt
 	evidence.OwnerReceiptHash = hash
+}
+
+func assertRuntimeSemanticRebindingDefinitionSeed(t *testing.T, facts runtimecontract.RuntimeFacts) {
+	t.Helper()
+	focus := facts.Focus.Normalized()
+	if len(focus.CoverageWorkItemIDs) != 1 {
+		t.Fatalf("semantic-rebinding focus coverage = %v, want exactly one CWI", focus.CoverageWorkItemIDs)
+	}
+	coverageID := focus.CoverageWorkItemIDs[0]
+	declaration, found, err := runtimeDefinitionFocusForCoverage(facts.DefinitionFocuses, coverageID)
+	if err != nil || !found {
+		t.Fatalf("semantic-rebinding Definition focus: found=%t err=%v", found, err)
+	}
+	expected := declaration.RuntimeFocusSeed()
+	expected.ID = "semantic-pending/" + string(coverageID)
+	expected.CoverageWorkItemIDs = []common.CoverageWorkItemID{coverageID}
+	expected = expected.Normalized()
+	if !runtimecontract.SameRuntimeCoverageFocus(focus, expected) {
+		t.Fatalf("semantic-rebinding focus differs from immutable Definition seed:\n got=%+v\nwant=%+v", focus, expected)
+	}
+	if err := validateRuntimeCWISemanticRebindingFocusProjections(facts); err != nil {
+		t.Fatalf("semantic-rebinding owner invariant: %v", err)
+	}
 }
 
 func runtimeTestSelectableValidationOwnerFact() runtimecontract.RuntimeOwnerFactRequirement {

@@ -247,8 +247,11 @@ current manifest 临时补全 scope；没有 matching sealed fallback 时按 typ
   `MaxAcquisitionAttempts=1`，reobserve 后仍缺失即以 `owner_fact_convergence_exhausted` fail-closed。reobserve 已满足时，
   `assessment_observed` private event 在同一 CAS 中保留 acquisition audit/anti-replay fact、保持 CWI open、写入
   `assessment_owner_fact_acquisition_settled` reopen lineage并退休 generation；successor semantic generation 必须恢复原
-  terminal evidence obligation，不能继承 acquisition credit。重开投影必须清空 predecessor generation 的 exact target、
-  prospective target、selector、accepted operation/variant、validation recipe/check 权威；create-only target 已由 File effect
+  terminal evidence obligation，不能继承 acquisition credit。重开投影不得复制 predecessor generation 后按字段清空；
+  它必须由 immutable `RuntimeDefinitionFocus.RuntimeFocusSeed()` 正向构造，并且除固定改写为
+  `semantic-pending/<cwi>` 的 ID 外与该 seed 全字段 exact-match。Definition 的 target selector、mandatory all-of、grounding、
+  owner-fact 与 Profile convergence 声明只保留在 immutable Definition，不能进入 pending current cursor；predecessor 的 exact
+  target、prospective target、selector、accepted operation/variant、validation recipe/check 同样不能进入。create-only target 已由 File effect
   实现后，不能再次发布旧 prospective selector 并把 File owner 的 `unsupported` 误作 terminal Definition fact。该
   binding-free projection 允许 reducer 暂存 provisional `target_grounding_unresolved`，但 SM-3 semantic request admission、
   SM-4 delivery 与 fresh-load bootstrap identity 必须消费同一个 semantic-re-drive classification。duplicate/restart 不重复

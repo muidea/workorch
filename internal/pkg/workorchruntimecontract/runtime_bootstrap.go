@@ -321,6 +321,13 @@ func sameCoverageFocus(left CoverageFocus, right CoverageFocus) bool {
 		sameStrings(left.RejectedStepKinds, right.RejectedStepKinds)
 }
 
+// SameRuntimeCoverageFocus reports whether two normalized Runtime focus
+// projections carry exactly the same authority-bearing fields. It is a pure
+// contract matcher; callers must not use it to derive or repair authority.
+func SameRuntimeCoverageFocus(left CoverageFocus, right CoverageFocus) bool {
+	return sameCoverageFocus(left, right)
+}
+
 func sameCoverageEvidenceBindings(left, right []CoverageEvidenceBinding) bool {
 	left = NormalizeCoverageEvidenceBindings(left)
 	right = NormalizeCoverageEvidenceBindings(right)

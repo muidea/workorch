@@ -121,22 +121,42 @@ func TestSemanticCWIFocusProjectionRebindsRepairAuthorityAcrossRetirementAndRese
 func TestValidationFailureRepairSemanticRebindingClearsExecutionAuthorityThroughFocusReducer(t *testing.T) {
 	aggregate := stateChangeAggregate(t)
 	facts := aggregate.Facts
-	focus := facts.Focus.Normalized()
-	focus.TargetRefs = []string{"old-validation-target.go"}
-	focus.ProspectiveTargetRefs = []string{"old-repair-target.go"}
-	focus.TargetRole = "old-target-role"
-	focus.TargetDiscoverySources = []string{runtimecontract.RuntimeValidationDiscoverySourceWorkspaceManifest}
-	focus.TargetSelectorRef = "old-operation-selector"
-	focus.TargetSelectorOwnerRef = "old-owner"
-	focus.TargetSelectorSubjectRef = "old-subject"
-	focus.TargetSelectorCandidateRefs = []string{"old-repair-target.go"}
-	focus.AcceptedStepKinds = []string{runtimecontract.RuntimeBlockKindManagedValidationSession}
-	focus.AcceptedOperationVariants = []runtimecontract.RuntimeOperationVariantRef{{Kind: runtimecontract.RuntimeBlockKindManagedValidationSession, VariantID: "old-validation"}}
-	focus.ValidationRecipeID = "old-validation-recipe"
-	focus.RequiredCheckRefs = []string{"old-validation-check"}
+	predecessor := facts.Focus.Normalized()
+	declaration := predecessor
+	declaration.RequiredEvidenceKinds = []string{runtimecontract.EvidenceKindValidation}
+	declaration.RequireAssessment = true
+	declaration.TargetRole = "definition-validation-target"
+	declaration.TargetSelectorRef = "profile/workspace-deliverable"
+	declaration.TargetSelectorOwnerRef = "test-profile"
+	declaration.TargetSelectorSubjectRef = "dodItem"
+	declaration.TargetSelectorCandidateRefs = []string{"new-validation-target.go"}
+	declaration.ProspectiveTargetAllOfConstraintRefs = []string{"workspace-relative-path", "new-target-requires-owner-selector"}
+	declaration.RequireTargetGrounding = true
+	declaration.RequireExecutableBehaviorEvidence = true
+
+	// Model the retired acquisition generation that caused the deployed
+	// regression: its all-of declaration fields were copied into the pending
+	// cursor even after target/selector fields were cleared.
+	predecessor.RequiredEvidenceKinds = []string{runtimecontract.EvidenceKindStateChange}
+	predecessor.RequireAssessment = false
+	predecessor.TargetRefs = []string{"old-validation-target.go"}
+	predecessor.ProspectiveTargetRefs = []string{"old-repair-target.go"}
+	predecessor.TargetRole = "old-target-role"
+	predecessor.TargetDiscoverySources = []string{runtimecontract.RuntimeValidationDiscoverySourceWorkspaceManifest}
+	predecessor.TargetSelectorRef = "old-operation-selector"
+	predecessor.TargetSelectorOwnerRef = "old-owner"
+	predecessor.TargetSelectorSubjectRef = "old-subject"
+	predecessor.TargetSelectorCandidateRefs = []string{"old-repair-target.go"}
+	predecessor.ProspectiveTargetAllOfConstraintRefs = []string{"workspace-relative-path", "new-target-requires-owner-selector"}
+	predecessor.RequireTargetGrounding = true
+	predecessor.RequireExecutableBehaviorEvidence = true
+	predecessor.AcceptedStepKinds = []string{runtimecontract.RuntimeBlockKindManagedValidationSession}
+	predecessor.AcceptedOperationVariants = []runtimecontract.RuntimeOperationVariantRef{{Kind: runtimecontract.RuntimeBlockKindManagedValidationSession, VariantID: "old-validation"}}
+	predecessor.ValidationRecipeID = "old-validation-recipe"
+	predecessor.RequiredCheckRefs = []string{"old-validation-check"}
 	convergence := runtimeValidationFailureRepairConvergenceForTest(1)
-	facts.Focus = focus
-	facts.DefinitionFocuses = runtimecontract.CompileRuntimeDefinitionFocuses([]runtimecontract.CoverageFocus{focus})
+	facts.Focus = predecessor
+	facts.DefinitionFocuses = runtimecontract.CompileRuntimeDefinitionFocuses([]runtimecontract.CoverageFocus{declaration})
 	facts.DefinitionFocuses[0].ValidationFailureRepairConvergence = &convergence
 	facts.DefinitionFocuses = runtimecontract.NormalizeRuntimeDefinitionFocuses(facts.DefinitionFocuses)
 
@@ -158,25 +178,52 @@ func TestValidationFailureRepairSemanticRebindingClearsExecutionAuthorityThrough
 		t.Fatalf("project validation-failure semantic rebinding: %v", err)
 	}
 	got := projected.Focus
-	if got.ID != "semantic-pending/cwi-1" || len(got.CoverageEvidenceBindings) != 0 ||
-		len(got.TargetRefs) != 0 || len(got.ProspectiveTargetRefs) != 0 || got.TargetRole != "" || len(got.TargetDiscoverySources) != 0 ||
-		got.TargetSelectorRef != "" || got.TargetSelectorOwnerRef != "" || got.TargetSelectorSubjectRef != "" || len(got.TargetSelectorCandidateRefs) != 0 ||
-		len(got.AcceptedStepKinds) != 0 || len(got.AcceptedOperationVariants) != 0 || got.ValidationRecipeID != "" || len(got.RequiredCheckRefs) != 0 {
-		t.Fatalf("semantic rebinding retained predecessor execution authority: %+v", got)
+	expected := projected.DefinitionFocuses[0].RuntimeFocusSeed()
+	expected.ID = "semantic-pending/cwi-1"
+	expected.CoverageWorkItemIDs = []common.CoverageWorkItemID{"cwi-1"}
+	expected = expected.Normalized()
+	if !runtimecontract.SameRuntimeCoverageFocus(got, expected) {
+		t.Fatalf("semantic rebinding projection differs from Definition seed:\n got=%+v\nwant=%+v", got, expected)
 	}
-	if len(got.RequiredEvidenceKinds) == 0 || len(projected.DefinitionFocuses) != 1 ||
+	if len(got.RequiredEvidenceKinds) != 1 || got.RequiredEvidenceKinds[0] != runtimecontract.EvidenceKindValidation || !got.RequireAssessment ||
+		len(got.ProspectiveTargetAllOfConstraintRefs) != 0 || got.RequireTargetGrounding ||
+		len(projected.DefinitionFocuses) != 1 ||
 		projected.DefinitionFocuses[0].ValidationFailureRepairConvergence == nil ||
 		projected.DefinitionFocuses[0].ValidationFailureRepairConvergence.ID != convergence.ID {
-		t.Fatalf("semantic rebinding changed immutable Definition/Profile declaration: focus=%+v definitions=%+v", got, projected.DefinitionFocuses)
+		t.Fatalf("semantic rebinding did not restore the minimal terminal cursor: focus=%+v definitions=%+v", got, projected.DefinitionFocuses)
+	}
+	definition := projected.DefinitionFocuses[0]
+	if !definition.RequireTargetGrounding || !definition.RequireExecutableBehaviorEvidence ||
+		!runtimecontract.SameRuntimeProspectiveTargetAllOfConstraintRefs(
+			definition.ProspectiveTargetAllOfConstraintRefs,
+			[]string{"new-target-requires-owner-selector", "workspace-relative-path"},
+		) {
+		t.Fatalf("semantic rebinding changed immutable Definition all-of declaration: %+v", definition)
 	}
 	if err := validateRuntimeCWISemanticRebindingFocusProjections(projected); err != nil {
-		t.Fatalf("target-free semantic rebinding projection failed owner invariant: %v", err)
+		t.Fatalf("Definition-seeded semantic rebinding projection failed owner invariant: %v", err)
 	}
 	leaked := projected
-	leaked.Focus = runtimeCWIPendingFocus(focus, "cwi-1")
+	leaked.Focus = runtimeCWIPendingFocus(predecessor, "cwi-1")
 	if err := validateRuntimeCWISemanticRebindingFocusProjections(leaked); err == nil ||
-		!strings.Contains(err.Error(), "retains predecessor execution authority") {
+		!strings.Contains(err.Error(), "differs from immutable Definition seed") {
 		t.Fatalf("semantic rebinding owner invariant accepted predecessor authority: %v", err)
+	}
+
+	missingDefinition := facts
+	missingDefinition.DefinitionFocuses = nil
+	if _, err := replaceRuntimeCWIFocusProjectionForSemanticRebinding(missingDefinition, []common.CoverageWorkItemID{"cwi-1"}); err == nil ||
+		!strings.Contains(err.Error(), "has no immutable Definition focus") {
+		t.Fatalf("semantic rebinding without Definition focus error = %v", err)
+	}
+	duplicateDefinition := facts
+	duplicateDefinition.DefinitionFocuses = append(
+		runtimecontract.CloneRuntimeDefinitionFocuses(facts.DefinitionFocuses),
+		facts.DefinitionFocuses[0].Clone(),
+	)
+	if _, err := replaceRuntimeCWIFocusProjectionForSemanticRebinding(duplicateDefinition, []common.CoverageWorkItemID{"cwi-1"}); err == nil ||
+		!strings.Contains(err.Error(), "multiple Definition focus declarations") {
+		t.Fatalf("semantic rebinding with duplicate Definition focus error = %v", err)
 	}
 }
 

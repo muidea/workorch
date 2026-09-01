@@ -3666,6 +3666,12 @@ if ! grep -q -F -- 'func replaceRuntimeCWIFocusProjectionForSemanticRebinding(' 
 	echo "boundary contract violation: validation-failure semantic rebinding bypasses the CWI focus projection reducer" >&2
 	exit 1
 fi
+if ! grep -q -F -- 'value := declaration.RuntimeFocusSeed()' internal/modules/kernel/orchestrator/biz/runtime/cwi_ledger.go ||
+	! grep -q -F -- 'SameRuntimeCoverageFocus(focus, expected)' internal/modules/kernel/orchestrator/biz/runtime/cwi_ledger.go ||
+	grep -q -F -- 'runtimeCWISemanticRebindingExecutionAuthorityEmpty' internal/modules/kernel/orchestrator/biz/runtime/cwi_ledger.go; then
+	echo "boundary contract violation: semantic rebinding pending focus must be the exact immutable Definition seed" >&2
+	exit 1
+fi
 if ! grep -R -q -F --include='*_test.go' -- 'TestValidationFailureRepairSemanticRebindingClearsExecutionAuthorityThroughFocusReducer' internal/modules/kernel/orchestrator/biz/runtime; then
 	echo "boundary contract violation: validation-failure semantic rebinding focus transition regression is missing" >&2
 	exit 1
