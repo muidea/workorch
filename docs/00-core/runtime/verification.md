@@ -186,6 +186,13 @@ Cross-owner regression必须证明 concrete receiving-owner Command/Result、wor
   按 requirement ref 唯一匹配 normalized required-sequence slot，auxiliary proposal 按 canonical execution-semantic key 派生 identity；
   provider 数组下标不参与 identity 或 dependency authority。任意重排、duplicate/restart 后派生结果必须稳定，provider 自造字段、
   ambiguous/duplicate/missing slot 必须 fail-closed 且零 dispatch；
+- manifest→wire matrix 必须覆盖 required slot 有/无 variant、singleton binding/target 与仍可选多值；证明 schema、instruction、
+  fixture encoder 与 strict compiler 共享同一 `RuntimeCandidateWireContract`，provider 只提供真实选择。
+  JSONSchemaResponse on/off 必须接受同一最小文档；本地 kind/variant/binding/target/fixed parameter 回显、null
+  container、unknown/trailing 字段、提前闭合 root 都精确拒绝且零 repair/effect；
+- wire identity matrix 必须覆盖 ExpectedDocument/request-session exact hash 正向、manifest 字段漂移、hash 缺失/篡改、
+  duplicate、attempt 1、JSON round-trip 与 fresh restart。编译失败或重算不一致必须在 provider/feasibility/
+  dispatch 前 fail-closed，不得以空 hash 或当前 renderer 形状继续；
 - target authorization 必须覆盖同一纯 matcher 的纵向一致性：multi-target `exact_target` binding 中，不同 singleton
   operation 及其 exact matching receipt 均可通过 membership gate；空 target、越界 target、receipt/operation target 漂移必须
   分别在 candidate/dispatch 前或 receipt credit 时拒绝。dispatch seal 与 fresh-load invariant 必须重验同一规则，不能等到

@@ -58,7 +58,13 @@ capability resource state。
 - Goal/DoD、prospective constraint、required sequence 和 collective receipt 只支持 conjunctive `all_of`；不存在
   `one_of`/`any_of` terminal escape。Definition gap 只能进入专用 clarification transaction。
 - provider-facing manifest、closed JSON Schema、strict decoder、single evaluator 和 owner feasibility 共享一个 sealed
-  `RuntimeCandidateContractManifest`。LLM wire 不包含 operation ID/dependency；本地 compiler 唯一派生 identity/graph。
+  `RuntimeCandidateContractManifest`。Orchestrator 从它纯编译 `RuntimeCandidateWireContract`；required slot 仅由
+  `requiredOperationRef` 选中，kind、固定 variant、singleton binding/target 和 fixed parameter 均本地派生。LLM
+  wire 不包含这些本地值或 operation ID/dependency；本地 compiler 唯一派生完整 DTO、identity 与 graph。
+- operations ExpectedDocument 持久化 exact `WireContractHash`，request session 保留 manifest identity，candidate
+  attempt 开始前再封存 exact CandidateManifest body。prepared/recovery restart 从 current sealed authority 重编译；
+  attempt 0/1、duplicate 和后续 fresh restart 从 exact body 重算。编译错误、缺失或漂移在 provider 前 fail-closed。
+  Orchestrator 仍是 admission/attempt/retry/seal 唯一 owner；LLM block 只渲染该合同并返回 opaque document fact。
 - Orchestrator 的 typed candidate command保留完整owner facts用于LLM owner的本地integrity/freshness核对；这不授权把raw
   admissibility catalog、prerequisite ledger或无关capability展开给provider。operations C3的operation vocabulary仍只来自
   sealed manifest，supporting context由LLM owner按该manifest有界投影；任一manifest snapshot ref无法绑定同一canonical

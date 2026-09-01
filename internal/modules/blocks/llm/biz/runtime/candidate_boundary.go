@@ -381,6 +381,10 @@ func validateOperationsDocumentRequest(request llmmodels.RuntimeCandidateRequest
 	if request.ExpectedDocument == nil || request.ExpectedDocument.Normalized().CorrectionAttempt != request.CandidateAttempt {
 		return fmt.Errorf("operations request requires a matching sealed expected document")
 	}
+	wire, err := runtimecontract.BuildRuntimeCandidateWireContract(request.CandidateManifest)
+	if err != nil || request.ExpectedDocument.Normalized().WireContractHash != wire.Hash {
+		return fmt.Errorf("operations expected document does not match manifest-derived wire contract")
+	}
 	if err := request.DefinitionContext.Validate(); err != nil {
 		return err
 	}

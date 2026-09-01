@@ -37,6 +37,10 @@ workspace/run、logical/physical request identity、document hash、audit 与 us
 - provider/model 必须由 exact catalog/config fact 解析；capacity 不完整时 fail-closed，不按模型名猜测、不静默换 target。
 - `JSONSchemaResponse` 只有显式 capability fact 为 true 才发送；未声明时依赖同一 sealed manifest、prompt 和 local strict
   decoder，不发第二次无-format fallback call。
+- operations renderer 只消费 sealed manifest 纯编译的 `RuntimeCandidateWireContract`，schema、C3 output contract、
+  instruction 和 local strict compiler 共用其 exact hash/rules。required operation 只要求模型提供真实选择；kind、
+  fixed variant、singleton binding/target 和 fixed parameter 由 Runtime 本地派生，provider 回显必须拒绝。
+  JSONSchemaResponse on/off 不改变该最小 wire 或 local admission；LLM block 不做 JSON repair，不选择 correction/retry。
 - Runtime logical/physical identity 在 owner guard 内执行 concurrent/duplicate at-most-once；provider outcome 不选择 caller retry。
 - attempt-1 correction 通过共享纯合同核对 observation 的 manifest/objectives、objective↔witness-dimension、path/actual/shape 与 sealed witness，再独立核对
   manifest field authorization；LLM 不把 `missing_*`/`empty_*` schema observation 重新解释为 semantic target/binding value。

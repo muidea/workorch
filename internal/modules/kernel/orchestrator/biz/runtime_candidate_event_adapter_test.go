@@ -219,6 +219,11 @@ func withOperationsExpectedDocument(t *testing.T, command llmevents.RequestRunti
 		LogicalRequestID: command.RequestIdentity.LogicalRequestID, CorrectionAttempt: command.CandidateAttempt,
 		StablePrefixHash: command.StablePrefixHash, MaxOutputTokens: command.CandidateContext.Resources.ProviderCeiling.EffectiveMaxOutputTokens, MaxRecoveryAttempts: 2,
 	}
+	wire, err := runtimecontract.BuildRuntimeCandidateWireContract(command.CandidateManifest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	expected.WireContractHash = wire.Hash
 	expected.Hash = runtimecontract.StableRuntimeExpectedDocumentHash(expected)
 	command.ExpectedDocument = &expected
 	return command

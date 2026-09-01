@@ -98,6 +98,11 @@ func TestAcceptedAssessmentPurposeIsPreSealedAndReverseProvedAcrossRestartAndDup
 	if mutatedSession.ExpectedDocument != nil {
 		expected := mutatedSession.ExpectedDocument.Clone()
 		expected.ManifestHash = mutatedSession.ManifestHash
+		wire, err := runtimecontract.BuildRuntimeCandidateWireContract(*mutatedSession.CandidateManifest)
+		if err != nil {
+			t.Fatal(err)
+		}
+		expected.WireContractHash = wire.Hash
 		expected.LogicalRequestID = mutatedSession.LogicalRequestID
 		expected.Hash = runtimecontract.StableRuntimeExpectedDocumentHash(expected)
 		mutatedSession.ExpectedDocument = &expected

@@ -1173,8 +1173,13 @@ func sealCandidateWithFeasibilitiesForTest(t *testing.T, repository *durableRunt
 	stablePrefixHash := "test-sealed-dispatch"
 	logicalRequestID := runtimecontract.StableRuntimeCandidateRequestSessionID(runtimecontract.RuntimeProviderDocumentOperations, aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, transaction, stablePrefixHash, manifest.Hash, "test-sealed-dispatch")
 	manifestCopy := manifest.Clone()
+	expected := runtimeTestOperationsExpectedDocument(aggregate, manifest.Hash, 0)
+	expected.LogicalRequestID = logicalRequestID
+	expected.StablePrefixHash = stablePrefixHash
+	expected.Hash = runtimecontract.StableRuntimeExpectedDocumentHash(expected)
 	aggregate.CandidateRequestSessions = append(aggregate.CandidateRequestSessions, runtimecontract.RuntimeCandidateRequestSession{
 		LogicalRequestID: logicalRequestID, DocumentKind: runtimecontract.RuntimeProviderDocumentOperations, Transaction: transaction, StablePrefixHash: stablePrefixHash, ManifestHash: manifest.Hash,
+		ExpectedDocument:     &expected,
 		CandidateManifest:    &manifestCopy,
 		RepairCommitment:     cloneRuntimeDispatchRepairCommitment(repairCommitment),
 		RepairCommitmentHash: repairCommitmentHash,

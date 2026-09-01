@@ -518,6 +518,16 @@ func recordAcceptedRuntimeDispatchAdmissionForTest(
 		correctionHash,
 	)
 	manifestBody := manifest.Clone()
+	expected, err := runtimeOperationsExpectedDocument(*aggregate, manifest, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if expected.MaxOutputTokens <= 0 {
+		expected.MaxOutputTokens = 8192
+	}
+	expected.LogicalRequestID = logicalRequestID
+	expected.StablePrefixHash = stablePrefixHash
+	expected.Hash = runtimecontract.StableRuntimeExpectedDocumentHash(expected)
 	aggregate.CandidateRequestSessions = append(aggregate.CandidateRequestSessions, runtimecontract.RuntimeCandidateRequestSession{
 		LogicalRequestID:  logicalRequestID,
 		DocumentKind:      runtimecontract.RuntimeProviderDocumentOperations,
@@ -525,6 +535,7 @@ func recordAcceptedRuntimeDispatchAdmissionForTest(
 		StablePrefixHash:  stablePrefixHash,
 		ManifestHash:      manifest.Hash,
 		CandidateManifest: &manifestBody,
+		ExpectedDocument:  &expected,
 		CorrectionHash:    correctionHash,
 		State:             runtimecontract.RuntimeCandidateRequestSessionDocumentComplete,
 		NextSequence:      1,
@@ -635,7 +646,8 @@ func TestRuntimeStateRepositoryPersistsAndLoadsThroughRunOwner(t *testing.T) {
 	)
 	expected := runtimecontract.RuntimeExpectedDocumentContract{
 		SchemaVersion: runtimecontract.RuntimeExpectedDocumentSchemaCurrent, DocumentKind: runtimecontract.RuntimeProviderDocumentOperations,
-		ManifestHash: requestSession.ManifestHash, LogicalRequestID: requestSession.LogicalRequestID, StablePrefixHash: requestSession.StablePrefixHash,
+		ManifestHash: requestSession.ManifestHash, WireContractHash: "runtime-test-wire/" + requestSession.ManifestHash,
+		LogicalRequestID: requestSession.LogicalRequestID, StablePrefixHash: requestSession.StablePrefixHash,
 		MaxOutputTokens: 8192, MaxRecoveryAttempts: 2,
 	}
 	expected.Hash = runtimecontract.StableRuntimeExpectedDocumentHash(expected)
@@ -3857,14 +3869,27 @@ func TestRuntimeMainlineSchemaCorrectionDocumentCASRestartMatrix(t *testing.T) {
 			} else {
 				recoveryPolicyDrift.Facts.Activation.ExecutionContract.CandidateDocumentRecovery.MaxAttempts++
 			}
+			restartManifest, err := runtime.BuildRuntimeCandidateContractManifestForAggregate(durable)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if correctionSession != nil && correctionSession.CandidateManifest != nil {
+				restartManifest = correctionSession.CandidateManifest.Clone()
+			}
 			if correctionSession == nil ||
-				!runtimeCurrentOperationsCandidateRequestSessionPersisted(durable, "schema-correction-cas-prefix", correctionSession.ManifestHash, correctionSession.CorrectionHash, 1) ||
-				runtimeCurrentOperationsCandidateRequestSessionPersisted(durable, "stale-schema-correction-prefix", correctionSession.ManifestHash, correctionSession.CorrectionHash, 1) ||
-				runtimeCurrentOperationsCandidateRequestSessionPersisted(durable, "schema-correction-cas-prefix", correctionSession.ManifestHash, "stale-correction-hash", 1) ||
-				runtimeCurrentOperationsCandidateRequestSessionPersisted(durable, "schema-correction-cas-prefix", correctionSession.ManifestHash, correctionSession.CorrectionHash, 0) ||
-				runtimeCurrentOperationsCandidateRequestSessionPersisted(providerCeilingDrift, "schema-correction-cas-prefix", correctionSession.ManifestHash, correctionSession.CorrectionHash, 1) ||
-				runtimeCurrentOperationsCandidateRequestSessionPersisted(recoveryPolicyDrift, "schema-correction-cas-prefix", correctionSession.ManifestHash, correctionSession.CorrectionHash, 1) {
+				!runtimeCurrentOperationsCandidateRequestSessionPersisted(durable, "schema-correction-cas-prefix", restartManifest, correctionSession.CorrectionHash, 1) ||
+				runtimeCurrentOperationsCandidateRequestSessionPersisted(durable, "stale-schema-correction-prefix", restartManifest, correctionSession.CorrectionHash, 1) ||
+				runtimeCurrentOperationsCandidateRequestSessionPersisted(durable, "schema-correction-cas-prefix", restartManifest, "stale-correction-hash", 1) ||
+				runtimeCurrentOperationsCandidateRequestSessionPersisted(durable, "schema-correction-cas-prefix", restartManifest, correctionSession.CorrectionHash, 0) ||
+				runtimeCurrentOperationsCandidateRequestSessionPersisted(providerCeilingDrift, "schema-correction-cas-prefix", restartManifest, correctionSession.CorrectionHash, 1) ||
+				runtimeCurrentOperationsCandidateRequestSessionPersisted(recoveryPolicyDrift, "schema-correction-cas-prefix", restartManifest, correctionSession.CorrectionHash, 1) {
 				t.Fatalf("persisted request-session restart proof accepted stale identity: %+v", correctionSession)
+			}
+			if testCase.responseLoss && correctionSession.CandidateManifest == nil {
+				t.Fatal("post-CAS response loss did not retain the exact candidate manifest")
+			}
+			if !testCase.responseLoss && correctionSession.CandidateManifest != nil {
+				t.Fatal("pre-CAS failure persisted a candidate manifest before attempt begin")
 			}
 			durableCorrectionBudget, err := runtimecontract.RuntimeBudgetRemaining(durable.ExecutionBudget, runtimecontract.RuntimeBudgetDimensionCandidateCorrection)
 			if err != nil || durableCorrectionBudget != initialCorrectionBudget-1 || !reflect.DeepEqual(preflightAttempts, []int{0, 1}) || !reflect.DeepEqual(providerCallsAtPreflight, []int{0, 1}) || !reflect.DeepEqual(providerAttempts, []int{0, 1}) || probeCalls != 0 || fileExecuteCalls != 0 || durable.ActiveDispatch != nil || len(durable.OperationReceipts) != 0 || len(durable.CandidateRequestSessions) != 2 {

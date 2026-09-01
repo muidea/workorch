@@ -1413,9 +1413,23 @@ func runtimeCandidateSchemaForDecision(t *testing.T, decision runtimecontract.Ru
 	return runtimeCandidateSchemaForManifest(runtimeCandidateManifestForSchema(t, decision, selection))
 }
 
+func runtimeCandidateWireForTest(t *testing.T, manifest runtimecontract.RuntimeCandidateContractManifest) runtimecontract.RuntimeCandidateWireContract {
+	t.Helper()
+	wire, err := runtimecontract.BuildRuntimeCandidateWireContract(manifest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return wire
+}
+
+func runtimeCandidateOutputContractForTest(t *testing.T, manifest runtimecontract.RuntimeCandidateContractManifest) runtimeCandidateOutputContractProjection {
+	t.Helper()
+	return runtimeCandidateOutputContractForManifest(manifest, runtimeCandidateWireForTest(t, manifest))
+}
+
 func runtimeCandidateOutputContractForDecision(t *testing.T, decision runtimecontract.RuntimeDecision, selection *runtimecontract.RuntimeTargetSelection) runtimeCandidateOutputContractProjection {
 	t.Helper()
-	return runtimeCandidateOutputContractForManifest(runtimeCandidateManifestForSchema(t, decision, selection))
+	return runtimeCandidateOutputContractForTest(t, runtimeCandidateManifestForSchema(t, decision, selection))
 }
 
 func runtimeCandidateContextManifest(action runtimecontract.ConvergenceState, kinds ...string) runtimecontract.RuntimeCandidateContractManifest {
@@ -2245,6 +2259,45 @@ func TestRuntimeCandidateRetryExplainsOperationShapeReplayWithoutChangingStableP
 	}
 }
 
+func TestRuntimeCandidateRetryExplainsTrailingOperationFieldsFromTypedWitness(t *testing.T) {
+	manifest := runtimeCandidateManifestForSchema(t, runtimecontract.RuntimeDecision{
+		State: runtimecontract.ConvergenceStateNeedStateChange,
+		RequiredOutput: runtimecontract.RequiredOutputContract{
+			AcceptedKinds: []string{runtimecontract.StepKindFileWrite}, TargetRefs: []string{"go.mod"},
+			RequiredOperationSequence: []runtimecontract.RuntimeRequiredOperationVariant{{
+				RequirementID: "create-module", Kind: runtimecontract.StepKindFileWrite, TargetRef: "go.mod",
+			}},
+		},
+	}, nil)
+	objectives := []runtimecontract.RuntimeCandidateCorrectionObjective{runtimecontract.RuntimeCandidateCorrectionConformExpectedDocument}
+	witness := runtimecontract.RuntimeCandidateCorrectionWitness{
+		Dimension: runtimecontract.RuntimeCandidateCorrectionWitnessDocumentShape,
+		Path:      "$", RejectedValue: runtimecontract.RuntimeCandidateDocumentShapeTrailingOperationFields,
+		AlternativeValue: runtimecontract.RuntimeCandidateDocumentShapeConformant,
+	}
+	observation := runtimecontract.RuntimeCandidateCorrectionObservation{
+		Class: runtimecontract.RuntimeCandidateFailureClassSchema, Code: "candidate_document_nonconformant", Signature: "candidate-document-nonconformant",
+		Diagnostic: &runtimecontract.RuntimeCandidateFailureDiagnostic{
+			Path: "$", Actual: runtimecontract.RuntimeCandidateDocumentShapeTrailingOperationFields,
+			Required: []string{runtimecontract.RuntimeCandidateDocumentShapeConformant}, ManifestHash: manifest.Hash, Objectives: objectives,
+		},
+		SealedCorrectionHash: runtimecontract.StableRuntimeCandidateSealedCorrectionHash(manifest.Hash, objectives, &witness),
+	}
+	correction := llmmodels.RuntimeCandidateCorrectionInput{ManifestHash: manifest.Hash, Objectives: objectives, Witness: witness}
+	if err := correction.ValidateAgainstObservation(manifest, observation); err != nil {
+		t.Fatal(err)
+	}
+	retry := runtimeCandidateRetryForManifest(1, &observation, manifest, &correction)
+	if retry == nil {
+		t.Fatal("trailing-operation correction projection is nil")
+	}
+	for _, want := range []string{"canonicalWireLayout", "parameters last", "close each operation exactly once", "Do not append requiredOperationRef"} {
+		if !strings.Contains(retry.Instruction, want) {
+			t.Fatalf("trailing-operation correction lost %q: %s", want, retry.Instruction)
+		}
+	}
+}
+
 func TestRuntimeCandidateRetryProjectsParameterEntryReencodeWithoutRawValues(t *testing.T) {
 	manifest := runtimeCandidateManifestForSchema(t, runtimecontract.RuntimeDecision{
 		State: runtimecontract.ConvergenceStateNeedStateChange,
@@ -2286,9 +2339,9 @@ func TestRuntimeCandidateRetryProjectsParameterEntryReencodeWithoutRawValues(t *
 	if err := correction.ValidateAgainstObservation(manifest, observation); err != nil {
 		t.Fatal(err)
 	}
-	outputContract := runtimeCandidateOutputContractForManifest(manifest)
+	outputContract := runtimeCandidateOutputContractForTest(t, manifest)
 	retry := runtimeCandidateRetryForManifest(1, &observation, manifest, &correction)
-	if retry == nil || !reflect.DeepEqual(outputContract, runtimeCandidateOutputContractForManifest(manifest)) {
+	if retry == nil || !reflect.DeepEqual(outputContract, runtimeCandidateOutputContractForTest(t, manifest)) {
 		t.Fatalf("parameter-entry C4 changed C3 output contract or produced no retry: %+v", retry)
 	}
 	if strings.Contains(retry.Instruction, "Remove every field") {
@@ -2588,12 +2641,23 @@ func runtimeOperationSchemaHasProperty(t *testing.T, encoded, property string) b
 	if !ok {
 		t.Fatalf("candidate schema has no operations: %s", encoded)
 	}
-	properties, ok := operations["items"].(map[string]any)["properties"].(map[string]any)
+	items, ok := operations["items"].(map[string]any)
 	if !ok {
-		t.Fatalf("candidate schema has no operation properties: %s", encoded)
+		t.Fatalf("candidate schema has no operation items: %s", encoded)
 	}
-	_, found := properties[property]
-	return found
+	if properties, ok := items["properties"].(map[string]any); ok {
+		if _, found := properties[property]; found {
+			return true
+		}
+	}
+	for _, rawBranch := range runtimeSchemaArray(items["oneOf"]) {
+		branch, _ := rawBranch.(map[string]any)
+		properties, _ := branch["properties"].(map[string]any)
+		if _, found := properties[property]; found {
+			return true
+		}
+	}
+	return false
 }
 
 func TestRuntimeCandidateOutputContractUsesActionSpecificForbiddenTopLevelFields(t *testing.T) {
@@ -2699,24 +2763,77 @@ func TestRuntimeCandidateOperationCardinalityIsEquivalentWithJSONSchemaResponseO
 	}
 }
 
-func TestRuntimeCandidateSchemaRequiresExactlyOneSealedBindingForProofBearingKind(t *testing.T) {
-	policy, ok := runtimecontract.RuntimeConvergenceEffectPolicyFor(runtimecontract.ConvergenceStateNeedStateChange)
-	if !ok {
-		t.Fatal("missing state-change effect policy")
-	}
-	manifest := runtimecontract.RuntimeCandidateContractManifest{
-		State: runtimecontract.ConvergenceStateNeedStateChange, EffectPolicy: policy, MaxOperationCount: runtimecontract.RuntimeCandidateOperationMaxCount,
-		RequiredTopLevelFields: []string{"operations"}, AllowedTopLevelFields: []string{"operations"},
-		Operations: []runtimecontract.RuntimeCandidateOperationManifest{{
-			Kind: runtimecontract.RuntimeBlockKindPatchApply, OwnerModuleID: runtimecontract.RuntimeModuleFile,
-			AllowedOperationFields:  []string{"kind", "bindingRefs", "parameters", "targetRefs"},
-			RequiredOperationFields: []string{"kind", "bindingRefs", "parameters", "targetRefs"},
-			BindingAuthorizations:   []runtimecontract.RuntimeOperationBindingAuthorization{{VariantID: "apply", AllowedBindingRefs: []string{"binding/cwi-1"}}},
-			Parameters: []runtimecontract.RuntimeOperationParameterContract{{
-				Name: "patchType", Type: runtimecontract.RuntimeOperationParameterTypeString, Required: true,
+func TestRuntimeCandidateRequiredWireIsMinimalWithJSONSchemaResponseOnOrOff(t *testing.T) {
+	manifest := runtimeCandidateManifestForSchema(t, runtimecontract.RuntimeDecision{
+		State: runtimecontract.ConvergenceStateNeedStateChange,
+		RequiredOutput: runtimecontract.RequiredOutputContract{
+			AcceptedKinds: []string{runtimecontract.StepKindFileWrite},
+			TargetRefs:    []string{"go.mod"},
+			RequiredOperationSequence: []runtimecontract.RuntimeRequiredOperationVariant{{
+				RequirementID: "create-module", Kind: runtimecontract.StepKindFileWrite, TargetRef: "go.mod",
 			}},
-			RequireTargetRefs: true,
-		}},
+		},
+	}, nil)
+	wire := runtimeCandidateWireForTest(t, manifest)
+	rule, found := runtimecontract.RuntimeCandidateWireRuleForRequiredOperation(wire, "create-module")
+	if !found || !slices.Equal(rule.ProviderFields, []string{"requiredOperationRef", "parameters"}) ||
+		!slices.Equal(rule.DerivedTargetRefs, []string{"go.mod"}) {
+		t.Fatalf("required operation wire rule = %+v found=%t", rule, found)
+	}
+	output := runtimeCandidateOutputContractForManifest(manifest, wire)
+	if output.WireContractHash != wire.Hash || len(output.OperationContracts) != 1 ||
+		output.OperationContracts[0].RequireTargetRefs ||
+		!slices.Equal(output.OperationContracts[0].AllowedOperationFields, []string{"parameters", "requiredOperationRef"}) ||
+		len(output.OperationContracts[0].Parameters) != 1 || output.OperationContracts[0].Parameters[0].Name != "content" {
+		t.Fatalf("minimal required-operation output contract = %+v", output)
+	}
+	schema := runtimeCandidateSchemaForManifest(manifest)
+	for _, localField := range []string{"kind", "bindingRefs", "targetRefs"} {
+		if runtimeOperationSchemaHasProperty(t, schema, localField) {
+			t.Fatalf("required operation schema exposed locally-derived field %q: %s", localField, schema)
+		}
+	}
+	payload := []byte(`{"operations":[{"requiredOperationRef":"create-module","parameters":[{"name":"content","string":"module example"}]}]}`)
+	request := llmmodels.ProviderRequest{Schema: schema}
+	for _, enabled := range []bool{false, true} {
+		textConfig := responsesTextForRequest(llmmodels.ProviderCapabilities{JSONSchemaResponse: enabled}, request)
+		if enabled && (textConfig == nil || textConfig.Format == nil || !textConfig.Format.Strict) {
+			t.Fatalf("JSONSchemaResponse=true did not dispatch the minimal required-operation schema: %+v", textConfig)
+		}
+		if !enabled && textConfig != nil {
+			t.Fatalf("JSONSchemaResponse=false unexpectedly dispatched provider schema: %+v", textConfig)
+		}
+		candidate, err := runtimecontract.DecodeRuntimeCandidatePayloadWithManifest(manifest, payload)
+		if err != nil || candidate.StateChange == nil || len(candidate.StateChange.Operations) != 1 {
+			t.Fatalf("JSONSchemaResponse=%t minimal wire candidate=%+v err=%v", enabled, candidate, err)
+		}
+		operation := candidate.StateChange.Operations[0].Operation
+		if operation.Kind != runtimecontract.StepKindFileWrite || !slices.Equal(operation.TargetRefs, []string{"go.mod"}) ||
+			!slices.Equal(operation.BindingRefs, rule.DerivedBindingRefs) {
+			t.Fatalf("JSONSchemaResponse=%t locally compiled operation=%+v", enabled, operation)
+		}
+	}
+}
+
+func TestRuntimeCandidateSchemaRequiresExactlyOneSealedBindingForProofBearingKind(t *testing.T) {
+	facts := runtimecontract.RuntimeFacts{
+		DefinitionRevision: "definition-proof-binding",
+		Focus: runtimecontract.CoverageFocus{
+			ID: "focus-proof-binding", CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-1"}, TargetRefs: []string{"main.go"},
+		},
+	}
+	bindRuntimeCandidateTestFocus(t, &facts, runtimecontract.ConvergenceStateNeedStateChange, []string{runtimecontract.RuntimeBlockKindPatchApply})
+	decision := runtimecontract.RuntimeDecision{
+		State: runtimecontract.ConvergenceStateNeedStateChange, Focus: facts.Focus,
+		AuthoritySnapshot: runtimecontract.AuthoritySnapshot{DefinitionRevision: facts.DefinitionRevision},
+		RequiredOutput: runtimecontract.RequiredOutputContract{
+			AcceptedKinds: []string{runtimecontract.RuntimeBlockKindPatchApply}, AcceptedEffectScopes: []runtimecontract.RuntimeEffectScope{runtimecontract.RuntimeEffectWorkspaceDurable},
+			RequiredEffectScopes: []runtimecontract.RuntimeEffectScope{runtimecontract.RuntimeEffectWorkspaceDurable}, CoverageWorkItemIDs: facts.Focus.CoverageWorkItemIDs, TargetRefs: facts.Focus.TargetRefs,
+		},
+	}
+	manifest, err := runtimecontract.BuildRuntimeCandidateContractManifest(decision, runtimecontract.RuntimeCandidateManifestOwnerFacts{})
+	if err != nil {
+		t.Fatal(err)
 	}
 	schema := runtimeCandidateSchemaForManifest(manifest)
 	for _, want := range []string{`"bindingRefs"`, `"minItems":1`, `"maxItems":1`, `"required":["bindingRefs","kind","parameters","targetRefs"]`} {
@@ -2724,8 +2841,8 @@ func TestRuntimeCandidateSchemaRequiresExactlyOneSealedBindingForProofBearingKin
 			t.Fatalf("proof-bearing schema lost %q: %s", want, schema)
 		}
 	}
-	instruction := runtimeCandidateStructuredOutputInstruction(manifest)
-	if !strings.Contains(instruction, "requires exactly one bindingRefs value") || strings.Contains(instruction, "Optional bindingRefs") || strings.Contains(instruction, "may omit bindingRefs") {
+	instruction := runtimeCandidateStructuredOutputInstruction(manifest, runtimeCandidateWireForTest(t, manifest))
+	if !strings.Contains(instruction, "bindingRefs is required and requires exactly one value") || strings.Contains(instruction, "Optional bindingRefs") || strings.Contains(instruction, "may omit bindingRefs") {
 		t.Fatalf("proof-bearing instruction = %s", instruction)
 	}
 }
@@ -3003,7 +3120,7 @@ func TestRuntimeCandidateSchemaNarrowsFileOwnerScopeToDurableFileAndDeclaredGrou
 			t.Fatalf("scope schema admitted undeclared grounded kind %s: %s", forbidden, schema)
 		}
 	}
-	output := runtimeCandidateOutputContractForManifest(manifest)
+	output := runtimeCandidateOutputContractForTest(t, manifest)
 	if len(output.OperationContracts) != 2 || output.OperationContracts[0].Kind != runtimecontract.RuntimeBlockKindPatchApply || output.OperationContracts[1].Kind != runtimecontract.StepKindShellCommand {
 		t.Fatalf("scope operation contracts = %#v, want patch/apply and shell/command", output.OperationContracts)
 	}
@@ -3032,7 +3149,7 @@ func TestRuntimeCandidateRendererProjectsSealedTargetPolicy(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	output := runtimeCandidateOutputContractForManifest(manifest)
+	output := runtimeCandidateOutputContractForTest(t, manifest)
 	if len(output.OperationContracts) != 1 {
 		t.Fatalf("operation contracts = %#v", output.OperationContracts)
 	}
@@ -3069,7 +3186,7 @@ func TestRuntimeCandidateRendererProjectsOnlyManagedValidationRecipeIDs(t *testi
 	if err != nil {
 		t.Fatal(err)
 	}
-	output := runtimeCandidateOutputContractForManifest(manifest)
+	output := runtimeCandidateOutputContractForTest(t, manifest)
 	if len(output.OperationContracts) != 1 || !slices.Equal(output.OperationContracts[0].ValidationRecipeIDs, []string{"go-test"}) {
 		t.Fatalf("validation recipe selection projection = %#v", output.OperationContracts)
 	}
@@ -3133,7 +3250,7 @@ func TestRuntimeCandidateManifestDrivesSchemaInstructionAndRetryCorrection(t *te
 			if err != nil {
 				t.Fatal(err)
 			}
-			output := runtimeCandidateOutputContractForManifest(manifest)
+			output := runtimeCandidateOutputContractForTest(t, manifest)
 			if output.ManifestHash != manifest.Hash || output.StructuredOutputInstruction == "" {
 				t.Fatalf("output contract did not retain manifest identity: %+v", output)
 			}
@@ -3183,44 +3300,43 @@ func TestRuntimeCandidateSchemaKeepsExplicitSequenceDuringFileScopeNarrowing(t *
 		t.Fatalf("scope kinds = %v, want %v", got, want)
 	}
 	schema := runtimeCandidateSchemaForManifest(manifest)
-	if !strings.Contains(schema, `"shell/command"`) || !strings.Contains(schema, `"patch/apply"`) || !strings.Contains(schema, `"git/write"`) {
+	if !strings.Contains(schema, `"shell/command"`) || !strings.Contains(schema, `"patch/apply"`) || !strings.Contains(schema, `"initialize-repository"`) {
 		t.Fatalf("scope sequence schema = %s", schema)
+	}
+	wire, err := runtimecontract.BuildRuntimeCandidateWireContract(manifest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rule, found := runtimecontract.RuntimeCandidateWireRuleForRequiredOperation(wire, "initialize-repository")
+	if !found || rule.Kind != runtimecontract.StepKindGitWrite || rule.VariantID != "init" {
+		t.Fatalf("scope required wire rule = %+v found=%t", rule, found)
 	}
 }
 
 func TestRuntimeCandidateSchemaBindsEachRequiredOperationToItsExactProspectiveTarget(t *testing.T) {
-	policy, found := runtimecontract.RuntimeConvergenceEffectPolicyFor(runtimecontract.ConvergenceStateNeedStateChange)
-	if !found {
-		t.Fatal("missing state-change effect policy")
-	}
-	manifest := runtimecontract.RuntimeCandidateContractManifest{
-		State:             runtimecontract.ConvergenceStateNeedStateChange,
-		EffectPolicy:      policy,
-		MaxOperationCount: runtimecontract.RuntimeCandidateOperationMaxCount,
-		RequiredOperationSequence: []runtimecontract.RuntimeRequiredOperationVariant{
-			{RequirementID: "create-module", Kind: runtimecontract.StepKindFileWrite, TargetRef: "go.mod"},
-			{RequirementID: "create-test", Kind: runtimecontract.StepKindFileWrite, TargetRef: "workorch_test.go", DependsOnRequirementIDs: []string{"create-module"}},
+	facts := runtimecontract.RuntimeFacts{
+		DefinitionRevision: "definition-required-targets",
+		Focus: runtimecontract.CoverageFocus{
+			ID: "focus-required-targets", CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-required-targets"}, TargetRefs: []string{"go.mod", "workorch_test.go"},
 		},
-		Operations: []runtimecontract.RuntimeCandidateOperationManifest{{
-			Kind: runtimecontract.StepKindFileWrite,
-			AllowedOperationFields: []string{
-				"kind", "requiredOperationRef", "targetRefs", "parameters", "bindingRefs",
-			},
-			RequiredOperationFields: []string{"kind", "requiredOperationRef", "targetRefs", "parameters"},
-			Parameters: []runtimecontract.RuntimeOperationParameterContract{{
-				Name: "content", Type: runtimecontract.RuntimeOperationParameterTypeString, Required: true,
-			}},
-			TargetCardinality:           runtimecontract.RuntimeOperationTargetCardinalityOne,
-			RequireTargetRefs:           true,
-			RequiredOperationReferences: []string{"create-module", "create-test"},
-			Target: runtimecontract.RuntimeOperationTargetAuthorization{
-				Policy:            runtimecontract.RuntimeOperationTargetPolicyProspectiveOwnerTarget,
-				OwnerSelectorRefs: []string{"workspace-relative-new-file-target"}, ProspectiveConstraintRefs: []string{"go-test-input"},
-				ProspectiveTargetRefs: []string{"go.mod", "workorch_test.go"},
-			},
-		}},
 	}
-
+	bindRuntimeCandidateTestFocus(t, &facts, runtimecontract.ConvergenceStateNeedStateChange, []string{runtimecontract.StepKindFileWrite})
+	decision := runtimecontract.RuntimeDecision{
+		State: runtimecontract.ConvergenceStateNeedStateChange, Focus: facts.Focus,
+		AuthoritySnapshot: runtimecontract.AuthoritySnapshot{DefinitionRevision: facts.DefinitionRevision},
+		RequiredOutput: runtimecontract.RequiredOutputContract{
+			AcceptedKinds: []string{runtimecontract.StepKindFileWrite}, AcceptedEffectScopes: []runtimecontract.RuntimeEffectScope{runtimecontract.RuntimeEffectWorkspaceDurable},
+			RequiredEffectScopes: []runtimecontract.RuntimeEffectScope{runtimecontract.RuntimeEffectWorkspaceDurable}, CoverageWorkItemIDs: facts.Focus.CoverageWorkItemIDs,
+			TargetRefs: facts.Focus.TargetRefs, RequiredOperationSequence: []runtimecontract.RuntimeRequiredOperationVariant{
+				{RequirementID: "create-module", Kind: runtimecontract.StepKindFileWrite, TargetRef: "go.mod"},
+				{RequirementID: "create-test", Kind: runtimecontract.StepKindFileWrite, TargetRef: "workorch_test.go", DependsOnRequirementIDs: []string{"create-module"}},
+			},
+		},
+	}
+	manifest, err := runtimecontract.BuildRuntimeCandidateContractManifest(decision, runtimecontract.RuntimeCandidateManifestOwnerFacts{})
+	if err != nil {
+		t.Fatal(err)
+	}
 	var schema map[string]any
 	if err := json.Unmarshal([]byte(runtimeCandidateSchemaForManifest(manifest)), &schema); err != nil {
 		t.Fatal(err)
@@ -3231,26 +3347,35 @@ func TestRuntimeCandidateSchemaBindsEachRequiredOperationToItsExactProspectiveTa
 	if len(conditions) != 2 {
 		t.Fatalf("required operation conditions = %d, want 2: %+v", len(conditions), conditions)
 	}
-	wantTargets := map[string]string{"create-module": "go.mod", "create-test": "workorch_test.go"}
+	wantRefs := map[string]struct{}{"create-module": {}, "create-test": {}}
 	for _, raw := range conditions {
 		condition, _ := raw.(map[string]any)
 		contains, _ := condition["contains"].(map[string]any)
 		containsProperties, _ := contains["properties"].(map[string]any)
 		refSchema, _ := containsProperties["requiredOperationRef"].(map[string]any)
 		ref, _ := refSchema["const"].(string)
-		want, found := wantTargets[ref]
+		_, found := wantRefs[ref]
 		if !found {
 			t.Fatalf("unexpected required operation schema ref %q", ref)
 		}
-		targets, _ := containsProperties["targetRefs"].(map[string]any)
-		items, _ := targets["items"].(map[string]any)
-		if targets["minItems"] != float64(1) && targets["minItems"] != 1 || targets["maxItems"] != float64(1) && targets["maxItems"] != 1 || items["const"] != want || !runtimeSchemaStringArrayContains(contains["required"], "targetRefs") {
-			t.Fatalf("required operation %q target schema = %+v, want exact singleton %q", ref, targets, want)
+		if _, exposed := containsProperties["targetRefs"]; exposed || runtimeSchemaStringArrayContains(contains["required"], "targetRefs") {
+			t.Fatalf("required operation %q exposed locally-derived targetRefs: %+v", ref, contains)
 		}
-		delete(wantTargets, ref)
+		delete(wantRefs, ref)
 	}
-	if len(wantTargets) != 0 {
-		t.Fatalf("missing required operation target schemas: %+v", wantTargets)
+	if len(wantRefs) != 0 {
+		t.Fatalf("missing required operation schemas: %+v", wantRefs)
+	}
+	wire, err := runtimecontract.BuildRuntimeCandidateWireContract(manifest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantTargets := map[string]string{"create-module": "go.mod", "create-test": "workorch_test.go"}
+	for ref, target := range wantTargets {
+		rule, found := runtimecontract.RuntimeCandidateWireRuleForRequiredOperation(wire, ref)
+		if !found || !slices.Equal(rule.DerivedTargetRefs, []string{target}) || containsString(rule.ProviderFields, "targetRefs") {
+			t.Fatalf("required operation %q wire rule = %+v, want locally-derived target %q", ref, rule, target)
+		}
 	}
 }
 
@@ -3494,7 +3619,7 @@ func TestRuntimeCandidateSchemaRestrictsVariantsToSealedAuthority(t *testing.T) 
 		t.Fatalf("commit schema did not retain only commit rule including forbidden pathspecs: %s", commitSchema)
 	}
 
-	sequenceSchema := runtimeCandidateSchemaForDecision(t, runtimecontract.RuntimeDecision{
+	sequenceManifest := runtimeCandidateManifestForSchema(t, runtimecontract.RuntimeDecision{
 		State: runtimecontract.ConvergenceStateNeedStateChange,
 		RequiredOutput: runtimecontract.RequiredOutputContract{
 			AcceptedKinds: []string{runtimecontract.StepKindGitWrite},
@@ -3508,9 +3633,32 @@ func TestRuntimeCandidateSchemaRestrictsVariantsToSealedAuthority(t *testing.T) 
 			},
 		},
 	}, nil)
+	sequenceOutput := runtimeCandidateOutputContractForTest(t, sequenceManifest)
+	sequenceSchema := string(sequenceOutput.Schema)
 	for _, variant := range []string{"init", "add", "commit"} {
-		if !strings.Contains(sequenceSchema, `"const":"`+variant+`"`) {
-			t.Fatalf("required sequence schema lost variant %q: %s", variant, sequenceSchema)
+		if strings.Contains(sequenceSchema, `"const":"`+variant+`"`) {
+			t.Fatalf("required sequence schema exposed locally-derived variant %q: %s", variant, sequenceSchema)
+		}
+	}
+	wantVariants := map[string]string{"repo-init": "init", "stage-changes": "add", "create-commit": "commit"}
+	for _, rule := range sequenceOutput.WireRules {
+		if want, found := wantVariants[rule.RequiredOperationRef]; found {
+			if rule.CompiledVariantID != want || rule.CompiledKind != runtimecontract.StepKindGitWrite {
+				t.Fatalf("required sequence wire rule = %+v, want variant %q", rule, want)
+			}
+			delete(wantVariants, rule.RequiredOperationRef)
+		}
+	}
+	if len(wantVariants) != 0 {
+		t.Fatalf("required sequence wire rules lost variants: %+v", wantVariants)
+	}
+	if len(sequenceOutput.OperationContracts) != 1 || len(sequenceOutput.OperationContracts[0].AllowedVariantIDs) != 0 ||
+		len(sequenceOutput.OperationContracts[0].Variants) != 0 {
+		t.Fatalf("required sequence output contract exposed locally-derived variants: %+v", sequenceOutput.OperationContracts)
+	}
+	for _, parameter := range sequenceOutput.OperationContracts[0].Parameters {
+		if parameter.Name == "operation" {
+			t.Fatalf("required sequence output contract exposed locally-derived discriminator: %+v", sequenceOutput.OperationContracts[0])
 		}
 	}
 

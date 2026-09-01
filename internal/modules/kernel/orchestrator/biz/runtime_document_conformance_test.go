@@ -20,6 +20,7 @@ func TestRuntimeCompletedCandidateDocumentShapeUsesClosedClassification(t *testi
 		{name: "number", document: `1`, shape: runtimecontract.RuntimeCandidateDocumentShapeNonObjectJSONValue, rejected: true},
 		{name: "multiple", document: `{} {}`, shape: runtimecontract.RuntimeCandidateDocumentShapeMultipleJSONValues, rejected: true},
 		{name: "trailing prose", document: `{} prose`, shape: runtimecontract.RuntimeCandidateDocumentShapeTrailingContent, rejected: true},
+		{name: "root closed before operation fields", document: `{"operations":[]},"parameters":[]}`, shape: runtimecontract.RuntimeCandidateDocumentShapeTrailingOperationFields, rejected: true},
 	}
 	for _, testCase := range tests {
 		t.Run(testCase.name, func(t *testing.T) {

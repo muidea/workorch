@@ -4687,7 +4687,9 @@ fi
 # SM-2/SM-3 must turn every target in the sealed prospective binding into one
 # exact required operation. A candidate missing any target requirement, using
 # another target, or trying to bind several targets to one requirement fails
-# before dispatch; the provider schema carries the same exact singleton fence.
+# before dispatch. The provider selects the sealed requiredOperationRef only;
+# the manifest-derived wire compiler supplies its exact singleton target and the
+# closed provider schema rejects an attempted targetRefs echo.
 prospective_required_sequence="$(sed -n '/^func requiredStateChangeOperationSequence(/,/^}/p' internal/modules/kernel/orchestrator/biz/runtime/reducer.go)"
 for marker in \
 	'for _, binding := range facts.Focus.Normalized().CoverageEvidenceBindings' \
@@ -4710,8 +4712,14 @@ if ! grep -q -F -- 'requirement.TargetRef != ""' <<<"$required_operation_binding
 fi
 required_operation_schema="$(sed -n '/^func runtimeCandidateSchemaForManifest(/,/^}/p' internal/modules/blocks/llm/biz/runtime_candidate_schema.go)"
 if ! grep -q -F -- 'for _, requirement := range manifest.RequiredOperationSequence' <<<"$required_operation_schema" ||
-	! grep -q -F -- '"items": map[string]any{"const": requirement.TargetRef}' <<<"$required_operation_schema"; then
-	echo "boundary contract violation: provider candidate schema lost exact per-target required operations" >&2
+	! grep -q -F -- '"requiredOperationRef": map[string]any{"const": requirement.RequirementID}' <<<"$required_operation_schema"; then
+	echo "boundary contract violation: provider candidate schema lost exact required-operation slot selectors" >&2
+	exit 1
+fi
+required_operation_wire="$(sed -n '/^func runtimeCandidateRequiredWireRule(/,/^}/p' internal/pkg/workorchruntimecontract/runtime_candidate_wire_contract.go)"
+if ! grep -q -F -- 'if strings.TrimSpace(requirement.TargetRef) != ""' <<<"$required_operation_wire" ||
+	! grep -q -F -- 'rule.DerivedTargetRefs = []string{strings.TrimSpace(requirement.TargetRef)}' <<<"$required_operation_wire"; then
+	echo "boundary contract violation: required-operation wire compiler lost exact locally-derived target binding" >&2
 	exit 1
 fi
 if ! grep -q -F -- 'TestRequiredStateChangeOperationSequenceSealsCompleteProspectiveAllOfTargets' internal/modules/kernel/orchestrator/biz/runtime/reducer_test.go ||
@@ -4738,8 +4746,9 @@ for marker in \
 	fi
 done
 if ! grep -q -F -- 'TestRequiredOperationSequenceValidationFailsClosed' internal/pkg/workorchruntimecontract/runtime_operation_contract_test.go ||
-	! grep -q -F -- 'TestRuntimeCandidateSchemaBindsEachRequiredOperationToItsExactProspectiveTarget' internal/modules/blocks/llm/biz/runtime_candidate_provider_test.go; then
-	echo "boundary contract violation: RequiredOperationSequence graph or exact provider-schema regression is missing" >&2
+	! grep -q -F -- 'TestRuntimeCandidateSchemaBindsEachRequiredOperationToItsExactProspectiveTarget' internal/modules/blocks/llm/biz/runtime_candidate_provider_test.go ||
+	! grep -q -F -- 'TestRuntimeCandidateProviderWireRejectsNullContainersAndFixedFieldEcho' internal/pkg/workorchruntimecontract/runtime_candidate_wire_contract_test.go; then
+	echo "boundary contract violation: RequiredOperationSequence graph, local target derivation, or fixed-field rejection regression is missing" >&2
 	exit 1
 fi
 

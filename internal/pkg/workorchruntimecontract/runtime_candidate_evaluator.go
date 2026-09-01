@@ -52,12 +52,13 @@ const (
 )
 
 const (
-	RuntimeCandidateDocumentShapeEmpty              = "empty_document"
-	RuntimeCandidateDocumentShapeInvalid            = "invalid_provider_output"
-	RuntimeCandidateDocumentShapeTrailingContent    = "trailing_content"
-	RuntimeCandidateDocumentShapeMultipleJSONValues = "multiple_json_values"
-	RuntimeCandidateDocumentShapeNonObjectJSONValue = "non_object_json_value"
-	RuntimeCandidateDocumentShapeConformant         = "single_manifest_conformant_json_object"
+	RuntimeCandidateDocumentShapeEmpty                   = "empty_document"
+	RuntimeCandidateDocumentShapeInvalid                 = "invalid_provider_output"
+	RuntimeCandidateDocumentShapeTrailingContent         = "trailing_content"
+	RuntimeCandidateDocumentShapeTrailingOperationFields = "trailing_operation_fields"
+	RuntimeCandidateDocumentShapeMultipleJSONValues      = "multiple_json_values"
+	RuntimeCandidateDocumentShapeNonObjectJSONValue      = "non_object_json_value"
+	RuntimeCandidateDocumentShapeConformant              = "single_manifest_conformant_json_object"
 )
 
 // RuntimeCandidateCorrectionWitness is the bounded proof carried by a
@@ -123,6 +124,7 @@ func (w RuntimeCandidateCorrectionWitness) Validate() error {
 		case RuntimeCandidateDocumentShapeEmpty,
 			RuntimeCandidateDocumentShapeInvalid,
 			RuntimeCandidateDocumentShapeTrailingContent,
+			RuntimeCandidateDocumentShapeTrailingOperationFields,
 			RuntimeCandidateDocumentShapeMultipleJSONValues,
 			RuntimeCandidateDocumentShapeNonObjectJSONValue:
 		default:

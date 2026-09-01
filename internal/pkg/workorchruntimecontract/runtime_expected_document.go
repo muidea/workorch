@@ -15,11 +15,15 @@ const RuntimeExpectedDocumentSchemaCurrent = "workorch.runtime_expected_document
 // authority document expected from every physical provider call. Recovery may
 // change only the physical call identity; it cannot change this value.
 type RuntimeExpectedDocumentContract struct {
-	SchemaVersion            string
-	Hash                     string
-	DocumentKind             RuntimeProviderDocumentKind
-	PlanStep                 RuntimeSemanticPlanStep
-	ManifestHash             string
+	SchemaVersion string
+	Hash          string
+	DocumentKind  RuntimeProviderDocumentKind
+	PlanStep      RuntimeSemanticPlanStep
+	ManifestHash  string
+	// WireContractHash binds an operations document to the exact
+	// manifest-derived provider proposal surface. Semantic-plan documents use
+	// their independent semantic schema and must leave this field empty.
+	WireContractHash         string
 	DefinitionSeedHash       string
 	LogicalRequestID         string
 	CorrectionAttempt        int
@@ -38,6 +42,7 @@ func (c RuntimeExpectedDocumentContract) Normalized() RuntimeExpectedDocumentCon
 	c.DocumentKind = RuntimeProviderDocumentKind(strings.TrimSpace(string(c.DocumentKind)))
 	c.PlanStep = RuntimeSemanticPlanStep(strings.TrimSpace(string(c.PlanStep)))
 	c.ManifestHash = strings.TrimSpace(c.ManifestHash)
+	c.WireContractHash = strings.TrimSpace(c.WireContractHash)
 	c.DefinitionSeedHash = strings.TrimSpace(c.DefinitionSeedHash)
 	c.LogicalRequestID = strings.TrimSpace(c.LogicalRequestID)
 	c.StablePrefixHash = strings.TrimSpace(c.StablePrefixHash)
@@ -67,11 +72,11 @@ func (c RuntimeExpectedDocumentContract) Validate() error {
 	}
 	switch c.DocumentKind {
 	case RuntimeProviderDocumentOperations:
-		if c.PlanStep != "" || c.DefinitionSeedHash != "" || c.BatchID != "" || c.BatchSequence != 0 || len(c.BatchCoverageWorkItemIDs) != 0 || c.CoverageOrderHash != "" {
+		if c.WireContractHash == "" || c.PlanStep != "" || c.DefinitionSeedHash != "" || c.BatchID != "" || c.BatchSequence != 0 || len(c.BatchCoverageWorkItemIDs) != 0 || c.CoverageOrderHash != "" {
 			return common.ErrInvalidArgument
 		}
 	case RuntimeProviderDocumentSemanticPlan:
-		if c.DefinitionSeedHash == "" {
+		if c.WireContractHash != "" || c.DefinitionSeedHash == "" {
 			return common.ErrInvalidArgument
 		}
 		switch c.PlanStep {
@@ -109,6 +114,7 @@ func StableRuntimeExpectedDocumentHash(contract RuntimeExpectedDocumentContract)
 	writeHashString(h, string(contract.DocumentKind))
 	writeHashString(h, string(contract.PlanStep))
 	writeHashString(h, contract.ManifestHash)
+	writeHashString(h, contract.WireContractHash)
 	writeHashString(h, contract.DefinitionSeedHash)
 	writeHashString(h, contract.LogicalRequestID)
 	writeHashString(h, fmt.Sprintf("%d", contract.CorrectionAttempt))

@@ -1,0 +1,529 @@
+package workorchruntimecontract
+
+import (
+	"crypto/sha256"
+	"encoding/hex"
+	"fmt"
+	"reflect"
+	"sort"
+	"strings"
+)
+
+// RuntimeCandidateWireContractRevision identifies the manifest-derived
+// provider proposal surface. The manifest remains the semantic authority; this
+// projection only separates values the provider must choose from values SM-3
+// can compile locally without ambiguity.
+const RuntimeCandidateWireContractRevision = "runtime-candidate-wire-contract/v1"
+
+// RuntimeCandidateWireOperationRule is one closed provider operation shape.
+// Required-operation rules are selected by RequiredOperationRef and omit every
+// field already fixed by that manifest slot. Auxiliary rules are selected by
+// Kind and retain the provider-selectable operation vocabulary.
+type RuntimeCandidateWireOperationRule struct {
+	RequiredOperationRef           string
+	Kind                           string
+	VariantID                      string
+	ProviderFields                 []string
+	RequiredProviderFields         []string
+	ProviderParameterNames         []string
+	RequiredProviderParameterNames []string
+	RequiredNonEmptyParameterNames []string
+	RequireOneOfProviderParameters []string
+	DynamicParameterPrefixes       []string
+	AllowedBindingRefs             []string
+	DerivedBindingRefs             []string
+	DerivedTargetRefs              []string
+	DerivedParameters              []OperationParameter
+}
+
+func (r RuntimeCandidateWireOperationRule) Normalized() RuntimeCandidateWireOperationRule {
+	r.RequiredOperationRef = strings.TrimSpace(r.RequiredOperationRef)
+	r.Kind = CanonicalRuntimeBlockKind(r.Kind)
+	r.VariantID = strings.TrimSpace(r.VariantID)
+	r.ProviderFields = runtimeCandidateWireFields(r.ProviderFields)
+	r.RequiredProviderFields = runtimeCandidateWireFields(r.RequiredProviderFields)
+	r.ProviderParameterNames = normalizeStrings(r.ProviderParameterNames)
+	r.RequiredProviderParameterNames = normalizeStrings(r.RequiredProviderParameterNames)
+	r.RequiredNonEmptyParameterNames = normalizeStrings(r.RequiredNonEmptyParameterNames)
+	r.RequireOneOfProviderParameters = normalizeStrings(r.RequireOneOfProviderParameters)
+	r.DynamicParameterPrefixes = normalizeStrings(r.DynamicParameterPrefixes)
+	r.AllowedBindingRefs = normalizeStrings(r.AllowedBindingRefs)
+	r.DerivedBindingRefs = normalizeStrings(r.DerivedBindingRefs)
+	r.DerivedTargetRefs = normalizeStrings(r.DerivedTargetRefs)
+	parameters := make([]OperationParameter, 0, len(r.DerivedParameters))
+	for _, parameter := range r.DerivedParameters {
+		parameter = normalizeRuntimeCandidateWireParameter(parameter)
+		if parameter.Name != "" {
+			parameters = append(parameters, parameter)
+		}
+	}
+	sort.Slice(parameters, func(i, j int) bool { return parameters[i].Name < parameters[j].Name })
+	r.DerivedParameters = parameters
+	return r
+}
+
+func (r RuntimeCandidateWireOperationRule) Clone() RuntimeCandidateWireOperationRule {
+	r = r.Normalized()
+	r.ProviderFields = append([]string(nil), r.ProviderFields...)
+	r.RequiredProviderFields = append([]string(nil), r.RequiredProviderFields...)
+	r.ProviderParameterNames = append([]string(nil), r.ProviderParameterNames...)
+	r.RequiredProviderParameterNames = append([]string(nil), r.RequiredProviderParameterNames...)
+	r.RequiredNonEmptyParameterNames = append([]string(nil), r.RequiredNonEmptyParameterNames...)
+	r.RequireOneOfProviderParameters = append([]string(nil), r.RequireOneOfProviderParameters...)
+	r.DynamicParameterPrefixes = append([]string(nil), r.DynamicParameterPrefixes...)
+	r.AllowedBindingRefs = append([]string(nil), r.AllowedBindingRefs...)
+	r.DerivedBindingRefs = append([]string(nil), r.DerivedBindingRefs...)
+	r.DerivedTargetRefs = append([]string(nil), r.DerivedTargetRefs...)
+	r.DerivedParameters = cloneRuntimeOperationParameters(r.DerivedParameters)
+	return r
+}
+
+func (r RuntimeCandidateWireOperationRule) RequiredSlot() bool {
+	return strings.TrimSpace(r.RequiredOperationRef) != ""
+}
+
+func (r RuntimeCandidateWireOperationRule) DerivedParameterNames() []string {
+	names := make([]string, 0, len(r.DerivedParameters))
+	for _, parameter := range r.Normalized().DerivedParameters {
+		names = append(names, parameter.Name)
+	}
+	return normalizeStrings(names)
+}
+
+// RuntimeCandidateWireContract is the single pure proposal-wire projection
+// consumed by schema rendering, prompt rendering, strict decoding and fixture
+// encoding. It contains no request/session state and cannot select retry,
+// terminal or dispatch.
+type RuntimeCandidateWireContract struct {
+	Revision               string
+	Hash                   string
+	ManifestHash           string
+	State                  ConvergenceState
+	MaxOperationCount      int
+	RequiredTopLevelFields []string
+	AllowedTopLevelFields  []string
+	OperationRules         []RuntimeCandidateWireOperationRule
+}
+
+func (c RuntimeCandidateWireContract) Normalized() RuntimeCandidateWireContract {
+	c.Revision = strings.TrimSpace(c.Revision)
+	c.Hash = strings.TrimSpace(c.Hash)
+	c.ManifestHash = strings.TrimSpace(c.ManifestHash)
+	c.State = ConvergenceState(strings.TrimSpace(string(c.State)))
+	c.RequiredTopLevelFields = normalizeStrings(c.RequiredTopLevelFields)
+	c.AllowedTopLevelFields = normalizeStrings(c.AllowedTopLevelFields)
+	rules := make([]RuntimeCandidateWireOperationRule, 0, len(c.OperationRules))
+	for _, rule := range c.OperationRules {
+		rules = append(rules, rule.Normalized())
+	}
+	c.OperationRules = rules
+	return c
+}
+
+func (c RuntimeCandidateWireContract) Clone() RuntimeCandidateWireContract {
+	c = c.Normalized()
+	c.RequiredTopLevelFields = append([]string(nil), c.RequiredTopLevelFields...)
+	c.AllowedTopLevelFields = append([]string(nil), c.AllowedTopLevelFields...)
+	rules := make([]RuntimeCandidateWireOperationRule, 0, len(c.OperationRules))
+	for _, rule := range c.OperationRules {
+		rules = append(rules, rule.Clone())
+	}
+	c.OperationRules = rules
+	return c
+}
+
+func (c RuntimeCandidateWireContract) Validate(manifest RuntimeCandidateContractManifest) error {
+	manifest = manifest.Normalized()
+	if err := ValidateRuntimeCandidateContractManifestRawCanonical(manifest); err != nil {
+		return fmt.Errorf("runtime candidate wire manifest: %w", err)
+	}
+	c = c.Normalized()
+	if c.Revision != RuntimeCandidateWireContractRevision || c.Hash == "" || c.ManifestHash != manifest.Hash ||
+		c.State != manifest.State || c.MaxOperationCount != manifest.MaxOperationCount ||
+		c.Hash != StableRuntimeCandidateWireContractHash(c) {
+		return fmt.Errorf("runtime candidate wire contract is invalid")
+	}
+	expected, err := BuildRuntimeCandidateWireContract(manifest)
+	if err != nil {
+		return err
+	}
+	if !reflect.DeepEqual(c, expected) {
+		return fmt.Errorf("runtime candidate wire contract does not match sealed manifest")
+	}
+	return nil
+}
+
+// BuildRuntimeCandidateWireContract deterministically compiles the provider
+// proposal surface from one sealed manifest. Fixed-field omission is a wire
+// rule, not post-hoc repair: the strict decoder rejects provider echoes and
+// then adds the sealed values before the ordinary manifest evaluator runs.
+func BuildRuntimeCandidateWireContract(manifest RuntimeCandidateContractManifest) (RuntimeCandidateWireContract, error) {
+	if err := ValidateRuntimeCandidateContractManifestRawCanonical(manifest); err != nil {
+		return RuntimeCandidateWireContract{}, fmt.Errorf("runtime candidate wire manifest: %w", err)
+	}
+	manifest = manifest.Normalized()
+	contract := RuntimeCandidateWireContract{
+		Revision:               RuntimeCandidateWireContractRevision,
+		ManifestHash:           manifest.Hash,
+		State:                  manifest.State,
+		MaxOperationCount:      manifest.MaxOperationCount,
+		RequiredTopLevelFields: append([]string(nil), manifest.RequiredTopLevelFields...),
+		AllowedTopLevelFields:  append([]string(nil), manifest.AllowedTopLevelFields...),
+	}
+	if manifest.State != ConvergenceStateNeedStateChange && manifest.State != ConvergenceStateNeedValidation {
+		contract = contract.Normalized()
+		contract.Hash = StableRuntimeCandidateWireContractHash(contract)
+		return contract, nil
+	}
+
+	requiredKinds := make(map[string]struct{}, len(manifest.RequiredOperationSequence))
+	for _, requirement := range manifest.RequiredOperationSequence {
+		operation, found := runtimeCandidateWireOperationManifest(manifest, requirement.Kind)
+		if !found {
+			return RuntimeCandidateWireContract{}, fmt.Errorf("required operation %q has no manifest operation", requirement.RequirementID)
+		}
+		rule, err := runtimeCandidateRequiredWireRule(operation, requirement)
+		if err != nil {
+			return RuntimeCandidateWireContract{}, err
+		}
+		contract.OperationRules = append(contract.OperationRules, rule)
+		requiredKinds[operation.Kind] = struct{}{}
+	}
+	for _, operation := range manifest.Operations {
+		operation = operation.Normalized()
+		if _, required := requiredKinds[operation.Kind]; required {
+			continue
+		}
+		contract.OperationRules = append(contract.OperationRules, runtimeCandidateAuxiliaryWireRule(operation))
+	}
+	contract = contract.Normalized()
+	contract.Hash = StableRuntimeCandidateWireContractHash(contract)
+	return contract, nil
+}
+
+func runtimeCandidateRequiredWireRule(operation RuntimeCandidateOperationManifest, requirement RuntimeRequiredOperationVariant) (RuntimeCandidateWireOperationRule, error) {
+	operation = operation.Normalized()
+	normalizedRequirements := normalizeRequiredOperationVariants([]RuntimeRequiredOperationVariant{requirement})
+	if len(normalizedRequirements) != 1 {
+		return RuntimeCandidateWireOperationRule{}, fmt.Errorf("required operation rule is empty")
+	}
+	requirement = normalizedRequirements[0]
+	rule := RuntimeCandidateWireOperationRule{
+		RequiredOperationRef:     requirement.RequirementID,
+		Kind:                     operation.Kind,
+		VariantID:                requirement.VariantID,
+		ProviderFields:           []string{"requiredOperationRef"},
+		RequiredProviderFields:   []string{"requiredOperationRef"},
+		DynamicParameterPrefixes: append([]string(nil), operation.DynamicParameterPrefixes...),
+	}
+	variant := RuntimeOperationVariantContract{}
+	if requirement.VariantID != "" {
+		var found bool
+		variant, found = runtimeCandidateWireVariant(operation.Variants, requirement.VariantID)
+		if !found {
+			return RuntimeCandidateWireOperationRule{}, fmt.Errorf("required operation %q has no sealed variant %q", requirement.RequirementID, requirement.VariantID)
+		}
+	}
+	derivedNames := make(map[string]struct{}, len(variant.Discriminators))
+	for _, discriminator := range variant.Discriminators {
+		parameter, found := runtimeCandidateWireParameter(operation.Parameters, discriminator.Name)
+		if !found || parameter.Type != RuntimeOperationParameterTypeString || strings.TrimSpace(discriminator.EqualsString) == "" {
+			return RuntimeCandidateWireOperationRule{}, fmt.Errorf("required operation %q has non-derivable variant discriminator %q", requirement.RequirementID, discriminator.Name)
+		}
+		value := strings.TrimSpace(discriminator.EqualsString)
+		rule.DerivedParameters = append(rule.DerivedParameters, OperationParameter{Name: parameter.Name, String: &value})
+		derivedNames[parameter.Name] = struct{}{}
+	}
+
+	for _, parameter := range operation.Parameters {
+		if _, derived := derivedNames[parameter.Name]; derived {
+			continue
+		}
+		if runtimeCandidateWireContains(variant.ForbiddenParameters, parameter.Name) {
+			continue
+		}
+		rule.ProviderParameterNames = append(rule.ProviderParameterNames, parameter.Name)
+		if parameter.Required || runtimeCandidateWireContains(variant.RequiredParameters, parameter.Name) || runtimeCandidateWireContains(variant.RequiredNonEmpty, parameter.Name) {
+			rule.RequiredProviderParameterNames = append(rule.RequiredProviderParameterNames, parameter.Name)
+		}
+		if runtimeCandidateWireContains(variant.RequiredNonEmpty, parameter.Name) {
+			rule.RequiredNonEmptyParameterNames = append(rule.RequiredNonEmptyParameterNames, parameter.Name)
+		}
+	}
+	if len(operation.RequireOneOfParameters) != 0 {
+		derivedSatisfies := false
+		for _, name := range operation.RequireOneOfParameters {
+			if _, found := derivedNames[name]; found {
+				derivedSatisfies = true
+				break
+			}
+		}
+		if !derivedSatisfies {
+			for _, name := range operation.RequireOneOfParameters {
+				if _, derived := derivedNames[name]; !derived {
+					rule.RequireOneOfProviderParameters = append(rule.RequireOneOfProviderParameters, name)
+				}
+			}
+		}
+	}
+	if len(rule.ProviderParameterNames) != 0 || operation.AllowsDynamicParameters {
+		rule.ProviderFields = append(rule.ProviderFields, "parameters")
+		if len(rule.RequiredProviderParameterNames) != 0 || len(rule.RequireOneOfProviderParameters) != 0 {
+			rule.RequiredProviderFields = append(rule.RequiredProviderFields, "parameters")
+		}
+	}
+
+	authorization, found := runtimeCandidateWireBindingAuthorization(operation.BindingAuthorizations, requirement.RequirementID, requirement.VariantID)
+	if !found {
+		return RuntimeCandidateWireOperationRule{}, fmt.Errorf("required operation %q has no binding authorization", requirement.RequirementID)
+	}
+	rule.AllowedBindingRefs = append([]string(nil), authorization.AllowedBindingRefs...)
+	switch len(authorization.AllowedBindingRefs) {
+	case 0:
+	case 1:
+		rule.DerivedBindingRefs = append([]string(nil), authorization.AllowedBindingRefs...)
+	default:
+		rule.ProviderFields = append(rule.ProviderFields, "bindingRefs")
+		rule.RequiredProviderFields = append(rule.RequiredProviderFields, "bindingRefs")
+	}
+
+	if strings.TrimSpace(requirement.TargetRef) != "" {
+		rule.DerivedTargetRefs = []string{strings.TrimSpace(requirement.TargetRef)}
+	} else if operation.RequireTargetRefs && operation.TargetCardinality == RuntimeOperationTargetCardinalityOne {
+		allowedTargets := operation.Target.AllowedTargetRefs()
+		if len(allowedTargets) == 1 {
+			rule.DerivedTargetRefs = append([]string(nil), allowedTargets...)
+		}
+	}
+	if len(rule.DerivedTargetRefs) == 0 && runtimeCandidateWireContains(operation.AllowedOperationFields, "targetRefs") && runtimeCandidateWireTargetSelectable(operation) {
+		rule.ProviderFields = append(rule.ProviderFields, "targetRefs")
+		if operation.RequireTargetRefs {
+			rule.RequiredProviderFields = append(rule.RequiredProviderFields, "targetRefs")
+		}
+	}
+	return rule.Normalized(), nil
+}
+
+func runtimeCandidateAuxiliaryWireRule(operation RuntimeCandidateOperationManifest) RuntimeCandidateWireOperationRule {
+	operation = operation.Normalized()
+	rule := RuntimeCandidateWireOperationRule{
+		Kind:                           operation.Kind,
+		ProviderFields:                 append([]string(nil), operation.AllowedOperationFields...),
+		RequiredProviderFields:         append([]string(nil), operation.RequiredOperationFields...),
+		DynamicParameterPrefixes:       append([]string(nil), operation.DynamicParameterPrefixes...),
+		AllowedBindingRefs:             runtimeCandidateWireBindingRefs(operation.BindingAuthorizations),
+		RequireOneOfProviderParameters: append([]string(nil), operation.RequireOneOfParameters...),
+	}
+	if !operation.RequireTargetRefs && !runtimeCandidateWireTargetSelectable(operation) {
+		rule.ProviderFields = runtimeCandidateWireWithoutField(rule.ProviderFields, "targetRefs")
+		rule.RequiredProviderFields = runtimeCandidateWireWithoutField(rule.RequiredProviderFields, "targetRefs")
+	}
+	for _, parameter := range operation.Parameters {
+		rule.ProviderParameterNames = append(rule.ProviderParameterNames, parameter.Name)
+		if parameter.Required {
+			rule.RequiredProviderParameterNames = append(rule.RequiredProviderParameterNames, parameter.Name)
+		}
+	}
+	return rule.Normalized()
+}
+
+func runtimeCandidateWireTargetSelectable(operation RuntimeCandidateOperationManifest) bool {
+	target := operation.Target.Normalized()
+	if len(target.AllowedTargetRefs()) != 0 {
+		return true
+	}
+	return target.Policy == RuntimeOperationTargetPolicyExistingOwnerScope && len(target.OwnerSelectorRefs) != 0
+}
+
+func runtimeCandidateWireWithoutField(values []string, field string) []string {
+	ret := make([]string, 0, len(values))
+	for _, value := range values {
+		if strings.TrimSpace(value) != strings.TrimSpace(field) {
+			ret = append(ret, value)
+		}
+	}
+	return ret
+}
+
+func RuntimeCandidateWireRuleForRequiredOperation(contract RuntimeCandidateWireContract, requiredOperationRef string) (RuntimeCandidateWireOperationRule, bool) {
+	requiredOperationRef = strings.TrimSpace(requiredOperationRef)
+	for _, rule := range contract.Normalized().OperationRules {
+		if rule.RequiredOperationRef == requiredOperationRef {
+			return rule.Clone(), true
+		}
+	}
+	return RuntimeCandidateWireOperationRule{}, false
+}
+
+func RuntimeCandidateWireRuleForAuxiliaryKind(contract RuntimeCandidateWireContract, kind string) (RuntimeCandidateWireOperationRule, bool) {
+	kind = CanonicalRuntimeBlockKind(kind)
+	for _, rule := range contract.Normalized().OperationRules {
+		if rule.RequiredOperationRef == "" && rule.Kind == kind {
+			return rule.Clone(), true
+		}
+	}
+	return RuntimeCandidateWireOperationRule{}, false
+}
+
+func StableRuntimeCandidateWireContractHash(contract RuntimeCandidateWireContract) string {
+	contract = contract.Normalized()
+	h := sha256.New()
+	writeHashString(h, RuntimeCandidateWireContractRevision)
+	writeHashString(h, contract.ManifestHash)
+	writeHashString(h, string(contract.State))
+	writeHashString(h, fmt.Sprintf("%d", contract.MaxOperationCount))
+	for _, value := range contract.RequiredTopLevelFields {
+		writeHashString(h, value)
+	}
+	for _, value := range contract.AllowedTopLevelFields {
+		writeHashString(h, value)
+	}
+	for index, rule := range contract.OperationRules {
+		rule = rule.Normalized()
+		writeHashString(h, fmt.Sprintf("rule/%d", index))
+		writeHashString(h, rule.RequiredOperationRef)
+		writeHashString(h, rule.Kind)
+		writeHashString(h, rule.VariantID)
+		for _, values := range [][]string{
+			rule.ProviderFields, rule.RequiredProviderFields, rule.ProviderParameterNames,
+			rule.RequiredProviderParameterNames, rule.RequiredNonEmptyParameterNames, rule.RequireOneOfProviderParameters,
+			rule.DynamicParameterPrefixes, rule.AllowedBindingRefs, rule.DerivedBindingRefs, rule.DerivedTargetRefs,
+		} {
+			writeHashString(h, "list")
+			for _, value := range values {
+				writeHashString(h, value)
+			}
+		}
+		for _, parameter := range rule.DerivedParameters {
+			writeHashString(h, parameter.Name)
+			writeRuntimeCandidateWireParameterHash(h, parameter)
+		}
+	}
+	return "runtime-candidate-wire-" + hex.EncodeToString(h.Sum(nil))[:20]
+}
+
+func runtimeCandidateWireFields(values []string) []string {
+	set := make(map[string]struct{}, len(values))
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value != "" {
+			set[value] = struct{}{}
+		}
+	}
+	order := []string{"requiredOperationRef", "kind", "bindingRefs", "targetRefs", "parameters"}
+	ret := make([]string, 0, len(set))
+	for _, value := range order {
+		if _, found := set[value]; found {
+			ret = append(ret, value)
+			delete(set, value)
+		}
+	}
+	remainder := make([]string, 0, len(set))
+	for value := range set {
+		remainder = append(remainder, value)
+	}
+	sort.Strings(remainder)
+	return append(ret, remainder...)
+}
+
+func runtimeCandidateWireOperationManifest(manifest RuntimeCandidateContractManifest, kind string) (RuntimeCandidateOperationManifest, bool) {
+	kind = CanonicalRuntimeBlockKind(kind)
+	for _, operation := range manifest.Operations {
+		if operation.Kind == kind {
+			return operation.Normalized(), true
+		}
+	}
+	return RuntimeCandidateOperationManifest{}, false
+}
+
+func runtimeCandidateWireVariant(values []RuntimeOperationVariantContract, variantID string) (RuntimeOperationVariantContract, bool) {
+	variantID = strings.TrimSpace(variantID)
+	for _, variant := range values {
+		if variant.ID == variantID {
+			return cloneRuntimeOperationVariantContract(variant), true
+		}
+	}
+	return RuntimeOperationVariantContract{}, false
+}
+
+func runtimeCandidateWireParameter(values []RuntimeOperationParameterContract, name string) (RuntimeOperationParameterContract, bool) {
+	name = strings.TrimSpace(name)
+	for _, parameter := range values {
+		if parameter.Name == name {
+			return parameter, true
+		}
+	}
+	return RuntimeOperationParameterContract{}, false
+}
+
+func runtimeCandidateWireBindingAuthorization(values []RuntimeOperationBindingAuthorization, requiredOperationRef, variantID string) (RuntimeOperationBindingAuthorization, bool) {
+	requiredOperationRef = strings.TrimSpace(requiredOperationRef)
+	variantID = strings.TrimSpace(variantID)
+	for _, authorization := range values {
+		authorization = authorization.Normalized()
+		if authorization.RequiredOperationRef == requiredOperationRef && authorization.VariantID == variantID {
+			return authorization, true
+		}
+	}
+	return RuntimeOperationBindingAuthorization{}, false
+}
+
+func runtimeCandidateWireBindingRefs(values []RuntimeOperationBindingAuthorization) []string {
+	ret := make([]string, 0)
+	for _, authorization := range values {
+		ret = append(ret, authorization.AllowedBindingRefs...)
+	}
+	return normalizeStrings(ret)
+}
+
+func runtimeCandidateWireContains(values []string, wanted string) bool {
+	wanted = strings.TrimSpace(wanted)
+	for _, value := range values {
+		if strings.TrimSpace(value) == wanted {
+			return true
+		}
+	}
+	return false
+}
+
+func cloneRuntimeOperationParameters(values []OperationParameter) []OperationParameter {
+	ret := make([]OperationParameter, len(values))
+	for index, value := range values {
+		ret[index] = value
+		ret[index].StringList = append([]string(nil), value.StringList...)
+	}
+	return ret
+}
+
+func normalizeRuntimeCandidateWireParameter(value OperationParameter) OperationParameter {
+	value.Name = strings.TrimSpace(value.Name)
+	if value.String != nil {
+		normalized := strings.TrimSpace(*value.String)
+		value.String = &normalized
+	}
+	value.StringList = normalizeOperationParameterStringList(value.Name, value.StringList)
+	return value
+}
+
+func writeRuntimeCandidateWireParameterHash(h interface{ Write([]byte) (int, error) }, value OperationParameter) {
+	value = normalizeRuntimeCandidateWireParameter(value)
+	writeHashString(h, value.Name)
+	switch {
+	case value.String != nil:
+		writeHashString(h, "string")
+		writeHashString(h, *value.String)
+	case value.Integer != nil:
+		writeHashString(h, "integer")
+		writeHashString(h, fmt.Sprintf("%d", *value.Integer))
+	case value.Boolean != nil:
+		writeHashString(h, "boolean")
+		writeHashString(h, fmt.Sprintf("%t", *value.Boolean))
+	case value.StringList != nil:
+		writeHashString(h, "string_list")
+		for _, item := range value.StringList {
+			writeHashString(h, item)
+		}
+	default:
+		writeHashString(h, "missing")
+	}
+}

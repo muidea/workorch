@@ -92,10 +92,20 @@ func runtimeTestOperationsExpectedDocument(aggregate RuntimeAggregate, manifestH
 	if maxRecoveryAttempts <= 0 {
 		maxRecoveryAttempts = 1
 	}
+	// Session-only fixtures may use an opaque manifest identity. Whenever the
+	// aggregate can compile the real current manifest, bind the exact production
+	// wire hash so later attempt/manifest persistence exercises the same fence.
+	wireContractHash := "runtime-test-wire/" + manifestHash
+	if manifest, err := BuildRuntimeCandidateContractManifestForAggregate(aggregate); err == nil && manifest.Hash == manifestHash {
+		if wire, wireErr := runtimecontract.BuildRuntimeCandidateWireContract(manifest); wireErr == nil {
+			wireContractHash = wire.Hash
+		}
+	}
 	return runtimecontract.RuntimeExpectedDocumentContract{
 		SchemaVersion:       runtimecontract.RuntimeExpectedDocumentSchemaCurrent,
 		DocumentKind:        runtimecontract.RuntimeProviderDocumentOperations,
 		ManifestHash:        manifestHash,
+		WireContractHash:    wireContractHash,
 		CorrectionAttempt:   correctionAttempt,
 		MaxOutputTokens:     maxOutputTokens,
 		MaxRecoveryAttempts: maxRecoveryAttempts,

@@ -45,7 +45,18 @@ func runtimeTestControllerEnsureCandidateRequest(controller *runtime.RuntimeCont
 	if correctionHash != "" {
 		correctionAttempt = 1
 	}
-	expected := runtimeOperationsExpectedDocument(aggregate, manifestHash, correctionAttempt)
+	manifest, err := runtime.BuildRuntimeCandidateContractManifestForAggregate(aggregate)
+	if err != nil {
+		return runtime.RuntimeAggregate{}, runtimecontract.RuntimeCandidateRequestSession{}, err
+	}
+	expected, err := runtimeOperationsExpectedDocument(aggregate, manifest, correctionAttempt)
+	if err != nil {
+		return runtime.RuntimeAggregate{}, runtimecontract.RuntimeCandidateRequestSession{}, err
+	}
+	// A few stale-identity tests deliberately ensure an opaque manifest hash.
+	// Keep the current authority's real wire hash while changing only the
+	// identity dimension those tests exercise.
+	expected.ManifestHash = manifestHash
 	if expected.MaxOutputTokens <= 0 {
 		expected.MaxOutputTokens = 8192
 	}

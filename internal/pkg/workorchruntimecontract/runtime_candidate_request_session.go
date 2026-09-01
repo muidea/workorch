@@ -210,6 +210,10 @@ func (s RuntimeCandidateRequestSession) Validate() error {
 			s.CandidateManifest.Hash != StableRuntimeCandidateContractManifestHash(*s.CandidateManifest) {
 			return fmt.Errorf("runtime candidate request session has invalid persisted operations manifest")
 		}
+		wire, err := BuildRuntimeCandidateWireContract(*s.CandidateManifest)
+		if err != nil || s.ExpectedDocument == nil || s.ExpectedDocument.WireContractHash != wire.Hash {
+			return fmt.Errorf("runtime candidate request session wire contract does not match persisted operations manifest")
+		}
 	}
 	if s.LastDocumentFraming != nil {
 		if s.ExpectedDocument == nil {

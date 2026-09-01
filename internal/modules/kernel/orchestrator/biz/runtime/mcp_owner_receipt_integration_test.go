@@ -362,6 +362,11 @@ func TestMCPOwnerObservedFailureTargetBindsThroughEventHubAndFileSnapshot(t *tes
 		LogicalRequestID: requestIdentity.LogicalRequestID, StablePrefixHash: stablePrefix,
 		MaxOutputTokens: candidateContext.Resources.ProviderCeiling.EffectiveMaxOutputTokens, MaxRecoveryAttempts: 1,
 	}
+	wire, err := runtimecontract.BuildRuntimeCandidateWireContract(manifest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	expectedDocument.WireContractHash = wire.Hash
 	expectedDocument.Hash = runtimecontract.StableRuntimeExpectedDocumentHash(expectedDocument)
 	requestResult := hub.Send(magicevent.NewEventWithContext(
 		llmevents.TopicRequestRuntimeCandidate, runtimecontract.RuntimeModuleOrchestrator, runtimecontract.RuntimeModuleLLM,
@@ -1534,6 +1539,11 @@ func requestAndSealObservedCandidate(t *testing.T, ctx context.Context, hub magi
 		LogicalRequestID: requestIdentity.LogicalRequestID, StablePrefixHash: prefix,
 		MaxOutputTokens: candidateContext.Resources.ProviderCeiling.EffectiveMaxOutputTokens, MaxRecoveryAttempts: 1,
 	}
+	wire, err := runtimecontract.BuildRuntimeCandidateWireContract(manifest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	expectedDocument.WireContractHash = wire.Hash
 	expectedDocument.Hash = runtimecontract.StableRuntimeExpectedDocumentHash(expectedDocument)
 	result := hub.Send(magicevent.NewEventWithContext(llmevents.TopicRequestRuntimeCandidate, runtimecontract.RuntimeModuleOrchestrator, runtimecontract.RuntimeModuleLLM, magicevent.NewHeader(), ctx, llmevents.RequestRuntimeCandidateCommand{DocumentKind: runtimecontract.RuntimeProviderDocumentOperations, WorkspaceID: aggregate.Facts.WorkspaceID, RunID: aggregate.Facts.RunID, RequestIdentity: requestIdentity, ExpectedDocument: &expectedDocument, Decision: aggregate.Decision, Transaction: aggregate.Decision.AuthorityTransaction(), StablePrefixHash: prefix, CandidateManifest: manifest, DefinitionContext: aggregate.Definition, CandidateContext: candidateContext}))
 	data, requestErr := result.Get()

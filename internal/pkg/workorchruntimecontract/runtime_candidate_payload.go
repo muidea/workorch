@@ -211,18 +211,27 @@ func EncodeRuntimeCandidatePayloadWithManifest(manifest RuntimeCandidateContract
 	if err := ValidateRuntimeCandidateAgainstManifest(manifest, canonicalCandidate); err != nil {
 		return nil, err
 	}
-	var payload any
+	var (
+		payload any
+		err     error
+	)
 	switch manifest.State {
 	case ConvergenceStateNeedStateChange:
 		if canonicalCandidate.StateChange == nil {
 			return nil, fmt.Errorf("state-change candidate is missing its wire payload")
 		}
-		payload = runtimeCandidateOperationPayloadForCandidate(canonicalCandidate.StateChange.Operations, nil)
+		payload, err = runtimeCandidateProviderWirePayloadForCandidate(manifest, canonicalCandidate.StateChange.Operations, nil)
+		if err != nil {
+			return nil, err
+		}
 	case ConvergenceStateNeedValidation:
 		if canonicalCandidate.Validation == nil {
 			return nil, fmt.Errorf("validation candidate is missing its wire payload")
 		}
-		payload = runtimeCandidateOperationPayloadForCandidate(nil, canonicalCandidate.Validation.Operations)
+		payload, err = runtimeCandidateProviderWirePayloadForCandidate(manifest, nil, canonicalCandidate.Validation.Operations)
+		if err != nil {
+			return nil, err
+		}
 	case ConvergenceStateNeedAssessment:
 		if candidate.Assessment == nil {
 			return nil, fmt.Errorf("assessment candidate is missing its wire payload")
@@ -253,6 +262,76 @@ func EncodeRuntimeCandidatePayloadWithManifest(manifest RuntimeCandidateContract
 		return nil, fmt.Errorf("canonical candidate payload changed candidate semantics")
 	}
 	return document, nil
+}
+
+// runtimeCandidateProviderWireOperation keeps parameters last in the canonical
+// fixture and prompt example layout. JSON object order is not semantic, but
+// this stable render prevents the schema map's alphabetical order from
+// becoming accidental model guidance.
+type runtimeCandidateProviderWireOperation struct {
+	RequiredOperationRef string                      `json:"requiredOperationRef,omitempty"`
+	Kind                 string                      `json:"kind,omitempty"`
+	BindingRefs          []string                    `json:"bindingRefs,omitempty"`
+	TargetRefs           []string                    `json:"targetRefs,omitempty"`
+	Parameters           []runtimeCandidateParameter `json:"parameters,omitempty"`
+}
+
+type runtimeCandidateProviderWirePayload struct {
+	Operations []runtimeCandidateProviderWireOperation `json:"operations"`
+}
+
+func runtimeCandidateProviderWirePayloadForCandidate(manifest RuntimeCandidateContractManifest, stateChanges []StateChangingOperation, validations []ValidationOperation) (runtimeCandidateProviderWirePayload, error) {
+	wire, err := BuildRuntimeCandidateWireContract(manifest)
+	if err != nil {
+		return runtimeCandidateProviderWirePayload{}, err
+	}
+	operations := make([]RuntimeOperation, 0, len(stateChanges)+len(validations))
+	for _, operation := range stateChanges {
+		operations = append(operations, operation.Operation.Normalized())
+	}
+	for _, operation := range validations {
+		operations = append(operations, operation.Operation.Normalized())
+	}
+	payload := runtimeCandidateProviderWirePayload{Operations: make([]runtimeCandidateProviderWireOperation, 0, len(operations))}
+	for _, operation := range operations {
+		var rule RuntimeCandidateWireOperationRule
+		var found bool
+		if operation.RequiredOperationRef != "" {
+			rule, found = RuntimeCandidateWireRuleForRequiredOperation(wire, operation.RequiredOperationRef)
+		} else {
+			rule, found = RuntimeCandidateWireRuleForAuxiliaryKind(wire, operation.Kind)
+		}
+		if !found || rule.Kind != operation.Kind {
+			return runtimeCandidateProviderWirePayload{}, fmt.Errorf("candidate operation has no exact provider wire rule")
+		}
+		value := runtimeCandidateProviderWireOperation{}
+		if runtimeCandidateWireContains(rule.ProviderFields, "requiredOperationRef") {
+			value.RequiredOperationRef = operation.RequiredOperationRef
+		}
+		if runtimeCandidateWireContains(rule.ProviderFields, "kind") {
+			value.Kind = operation.Kind
+		}
+		if runtimeCandidateWireContains(rule.ProviderFields, "bindingRefs") {
+			value.BindingRefs = append([]string(nil), operation.BindingRefs...)
+		}
+		if runtimeCandidateWireContains(rule.ProviderFields, "targetRefs") {
+			value.TargetRefs = append([]string(nil), operation.TargetRefs...)
+		}
+		if runtimeCandidateWireContains(rule.ProviderFields, "parameters") {
+			derived := make(map[string]struct{}, len(rule.DerivedParameters))
+			for _, parameter := range rule.DerivedParameters {
+				derived[parameter.Name] = struct{}{}
+			}
+			for _, parameter := range operation.Parameters {
+				if _, fixed := derived[parameter.Name]; fixed {
+					continue
+				}
+				value.Parameters = append(value.Parameters, runtimeCandidateWireParameterPayload(parameter))
+			}
+		}
+		payload.Operations = append(payload.Operations, value)
+	}
+	return payload, nil
 }
 
 func runtimeCandidateOperationPayloadForCandidate(stateChanges []StateChangingOperation, validations []ValidationOperation) runtimeCandidateOperationPayload {

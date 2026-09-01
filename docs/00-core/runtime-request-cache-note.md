@@ -4,7 +4,7 @@ Status: normative
 
 Type: core-contract-index
 
-Last Verified: 2026-08-27
+Last Verified: 2026-08-31
 
 ## Purpose
 
@@ -25,6 +25,9 @@ focused contract；本页不复制字段级正文。
 - `DocumentKind` 必须显式为 `semantic_plan | operations`；两类字段互斥，但复用同一 request session、完整文档恢复、cache plan 与 audit。
 - provider-facing token 值只有 LLM owner 的 sealed `ProviderCeiling` 一个权威；submission 前任何不一致均零 physical call。
 - attempt 0 与 same-contract attempt 1 复用同一 C0～C3、authority transaction、manifest 与 `stablePrefixHash`。
+- operations C3 的 output contract 必须携带从 sealed manifest 纯编译的 exact `wireContractHash`、canonical
+  wire layout 和 per-slot rules。attempt 1/restart 只能重算同一 hash；wire 规则漂移属于请求身份缺陷，不是
+  provider correction input，且不得通过改写 C4 绕过。
 - operations attempt 1 的 C4 必须携带 attempt 0 persisted directive 的 provider-safe detached correction input：manifest、
   objectives 与 concrete document-shape/schema/semantic witness；failure 与该 input 的 normalized identity 进入 correction/request-session hash，
   persisted `Disposition`/`TerminalCode` 不跨 owner。LLM 只渲染该 detached fact，不能重新选择 alternative。缺失、漂移或

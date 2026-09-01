@@ -126,7 +126,7 @@ func (m *Biz) requestAndSealRuntimeCandidate(
 		requestSessionPersisted := runtimeCurrentOperationsCandidateRequestSessionPersisted(
 			aggregate,
 			stablePrefixHash,
-			manifest.Hash,
+			manifest,
 			correctionHash,
 			candidateAttempt,
 		)
@@ -226,7 +226,10 @@ func (m *Biz) requestRuntimeCandidateDocument(
 		return runtime.RuntimeAggregate{}, runtimecontract.RuntimeCandidate{}, false, err
 	}
 	correctionHash := correctionInput.StableRequestCorrectionHash(correctionObservation)
-	expected := runtimeOperationsExpectedDocument(aggregate, manifest.Hash, candidateAttempt)
+	expected, err := runtimeOperationsExpectedDocument(aggregate, manifest, candidateAttempt)
+	if err != nil {
+		return runtime.RuntimeAggregate{}, runtimecontract.RuntimeCandidate{}, false, err
+	}
 	ensured, session, err := m.runtimeEnsureCandidateRequestWithExpected(ctx, aggregate, runtimecontract.RuntimeProviderDocumentOperations, stablePrefixHash, manifest.Hash, correctionHash, expected)
 	if err != nil {
 		return runtime.RuntimeAggregate{}, runtimecontract.RuntimeCandidate{}, false, err
@@ -422,8 +425,12 @@ func (m *Biz) handleRuntimeCandidateDocumentOutcome(ctx context.Context, aggrega
 	return m.admitRuntimeCompletedCandidateDocument(ctx, completed, manifest, session.LogicalRequestID, candidateAttempt)
 }
 
-func runtimeOperationsExpectedDocument(aggregate runtime.RuntimeAggregate, manifestHash string, correctionAttempt int) runtimecontract.RuntimeExpectedDocumentContract {
+func runtimeOperationsExpectedDocument(aggregate runtime.RuntimeAggregate, manifest runtimecontract.RuntimeCandidateContractManifest, correctionAttempt int) (runtimecontract.RuntimeExpectedDocumentContract, error) {
 	execution := aggregate.Facts.Activation.ExecutionContract.Normalized()
+	wire, err := runtimecontract.BuildRuntimeCandidateWireContract(manifest)
+	if err != nil {
+		return runtimecontract.RuntimeExpectedDocumentContract{}, fmt.Errorf("compile runtime candidate wire contract: %w", err)
+	}
 	maxOutputTokens := 0
 	if aggregate.Facts.Resources.ProviderCeiling != nil {
 		maxOutputTokens = aggregate.Facts.Resources.ProviderCeiling.EffectiveMaxOutputTokens
@@ -435,9 +442,9 @@ func runtimeOperationsExpectedDocument(aggregate runtime.RuntimeAggregate, manif
 	return runtimecontract.RuntimeExpectedDocumentContract{
 		SchemaVersion: runtimecontract.RuntimeExpectedDocumentSchemaCurrent,
 		DocumentKind:  runtimecontract.RuntimeProviderDocumentOperations,
-		ManifestHash:  manifestHash, CorrectionAttempt: correctionAttempt,
+		ManifestHash:  manifest.Hash, WireContractHash: wire.Hash, CorrectionAttempt: correctionAttempt,
 		MaxOutputTokens: maxOutputTokens, MaxRecoveryAttempts: maxRecoveryAttempts,
-	}
+	}, nil
 }
 
 // admitRuntimeCompletedCandidateDocument is the strict local admission boundary
@@ -541,11 +548,13 @@ func runtimeCandidateRequestSession(aggregate runtime.RuntimeAggregate, logicalR
 func runtimeCurrentOperationsCandidateRequestSessionPersisted(
 	aggregate runtime.RuntimeAggregate,
 	stablePrefixHash string,
-	manifestHash string,
+	manifest runtimecontract.RuntimeCandidateContractManifest,
 	correctionHash string,
 	candidateAttempt int,
 ) bool {
 	transaction := aggregate.Decision.AuthorityTransaction()
+	manifest = manifest.Normalized()
+	manifestHash := manifest.Hash
 	logicalRequestID := runtimecontract.StableRuntimeCandidateRequestSessionID(
 		runtimecontract.RuntimeProviderDocumentOperations,
 		aggregate.Facts.WorkspaceID,
@@ -560,7 +569,11 @@ func runtimeCurrentOperationsCandidateRequestSessionPersisted(
 		return false
 	}
 	persistedExpected := session.ExpectedDocument.Normalized()
-	currentExpected := runtimeOperationsExpectedDocument(aggregate, strings.TrimSpace(manifestHash), candidateAttempt).Normalized()
+	currentExpectedValue, err := runtimeOperationsExpectedDocument(aggregate, manifest, candidateAttempt)
+	if err != nil {
+		return false
+	}
+	currentExpected := currentExpectedValue.Normalized()
 	currentExpected.DocumentKind = runtimecontract.RuntimeProviderDocumentOperations
 	currentExpected.LogicalRequestID = logicalRequestID
 	currentExpected.StablePrefixHash = strings.TrimSpace(stablePrefixHash)
@@ -935,11 +948,12 @@ func runtimeCandidateDocumentConformanceFailure(shape string) runtimecontract.Ru
 // first complete JSON value. Empty/non-JSON framing remains an LLM-owner fact;
 // this pure SM-3 helper never reclassifies those raw outcomes.
 func runtimeCompletedCandidateDocumentShape(document []byte) (string, bool) {
-	decoder := json.NewDecoder(strings.NewReader(string(document)))
+	decoder := json.NewDecoder(bytes.NewReader(document))
 	var first json.RawMessage
 	if err := decoder.Decode(&first); err != nil {
 		return "", false
 	}
+	firstEnd := decoder.InputOffset()
 	root := bytes.TrimSpace(first)
 	if len(root) == 0 || root[0] != '{' {
 		return runtimecontract.RuntimeCandidateDocumentShapeNonObjectJSONValue, true
@@ -952,8 +966,30 @@ func runtimeCompletedCandidateDocumentShape(document []byte) (string, bool) {
 	case errors.Is(err, io.EOF):
 		return "", false
 	default:
+		if runtimeCandidateTrailingOperationFields(document, firstEnd) {
+			return runtimecontract.RuntimeCandidateDocumentShapeTrailingOperationFields, true
+		}
 		return runtimecontract.RuntimeCandidateDocumentShapeTrailingContent, true
 	}
+}
+
+func runtimeCandidateTrailingOperationFields(document []byte, firstEnd int64) bool {
+	if firstEnd < 0 || firstEnd >= int64(len(document)) {
+		return false
+	}
+	tail := bytes.TrimSpace(document[firstEnd:])
+	if len(tail) == 0 || tail[0] != ',' {
+		return false
+	}
+	for _, field := range [][]byte{
+		[]byte(`"requiredOperationRef"`), []byte(`"kind"`), []byte(`"bindingRefs"`),
+		[]byte(`"targetRefs"`), []byte(`"parameters"`),
+	} {
+		if bytes.Contains(tail, field) {
+			return true
+		}
+	}
+	return false
 }
 
 func (m *Biz) requestAndSealRuntimeCandidateWithRetry(

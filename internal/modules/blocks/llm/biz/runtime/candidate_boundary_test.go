@@ -769,9 +769,13 @@ func candidateRequest(t *testing.T, state runtimecontract.ConvergenceState) llmm
 		DefinitionContext: runtimecontract.RuntimeDefinitionContext{StartupInputHash: "startup-input-test", Revision: "definition-1", GoalID: "goal-1", GoalDefinition: "goal", DoDID: "dod-1", DoDDefinition: "dod", CapabilityContract: []string{"patch/apply", "validation/managed_session"}},
 		CandidateManifest: manifest, CandidateContext: context,
 	}
+	wire, err := runtimecontract.BuildRuntimeCandidateWireContract(manifest)
+	if err != nil {
+		t.Fatal(err)
+	}
 	expected := runtimecontract.RuntimeExpectedDocumentContract{
 		SchemaVersion: runtimecontract.RuntimeExpectedDocumentSchemaCurrent,
-		DocumentKind:  request.DocumentKind, ManifestHash: manifest.Hash,
+		DocumentKind:  request.DocumentKind, ManifestHash: manifest.Hash, WireContractHash: wire.Hash,
 		LogicalRequestID: request.RequestIdentity.LogicalRequestID, StablePrefixHash: request.StablePrefixHash,
 		MaxOutputTokens: context.Resources.ProviderCeiling.EffectiveMaxOutputTokens, MaxRecoveryAttempts: 2,
 	}

@@ -94,13 +94,13 @@ func TestDecodeRuntimeCandidatePayloadWithManifestReportsTypedDynamicDiagnostics
 		},
 		{
 			name: "invalid required operation reference", manifest: gitManifest,
-			payload: `{"operations":[{"kind":"git/write","requiredOperationRef":"unknown","bindingRefs":["binding/test/cwi-1"],"parameters":[{"name":"operation","string":"commit"},{"name":"message","string":"commit"}]}]}`,
+			payload: `{"operations":[{"requiredOperationRef":"unknown","parameters":[{"name":"message","string":"commit"}]}]}`,
 			path:    "$.operations[0].requiredOperationRef", actual: "unknown", allowed: "commit",
 		},
 		{
-			name: "sealed variant mismatch", manifest: gitManifest,
-			payload: `{"operations":[{"kind":"git/write","requiredOperationRef":"stage","bindingRefs":["binding/test/cwi-1"],"parameters":[{"name":"operation","string":"status"}]}]}`,
-			path:    "$.operations[0].parameters", actual: "unmatched_variant", allowed: "add",
+			name: "fixed variant discriminator echo", manifest: gitManifest,
+			payload: `{"operations":[{"requiredOperationRef":"stage","parameters":[{"name":"operation","string":"status"}]}]}`,
+			path:    "$.operations[0].parameters[0].name", actual: "locally_derived_parameter_operation", allowed: "pathspecs",
 		},
 		{
 			name: "trailing json", manifest: patchManifest,
@@ -342,8 +342,8 @@ func TestDecodeRuntimeCandidatePayloadWithManifestDerivesOperationAuthority(t *t
 		},
 	})
 	candidate, err := DecodeRuntimeCandidatePayloadWithManifest(manifest, []byte(`{"operations":[
-		{"kind":"git/write","requiredOperationRef":"stage","bindingRefs":["binding/test/cwi-1"],"parameters":[{"name":"operation","string":"add"},{"name":"pathspecs","stringList":["."]}]},
-		{"kind":"git/write","requiredOperationRef":"commit","bindingRefs":["binding/test/cwi-1"],"parameters":[{"name":"operation","string":"commit"},{"name":"message","string":"commit"}]}
+		{"requiredOperationRef":"stage","parameters":[{"name":"pathspecs","stringList":["."]}]},
+		{"requiredOperationRef":"commit","parameters":[{"name":"message","string":"commit"}]}
 	]}`))
 	if err != nil || candidate.StateChange == nil || len(candidate.StateChange.Operations) != 2 {
 		t.Fatalf("candidate=%+v err=%v", candidate, err)
@@ -414,8 +414,8 @@ func TestRuntimeCandidateOperationAuthorityIsManifestDerivedAndRestartStable(t *
 			},
 		},
 	})
-	stage := `{"kind":"git/write","requiredOperationRef":"stage","bindingRefs":["binding/test/cwi-1"],"parameters":[{"name":"operation","string":"add"},{"name":"pathspecs","stringList":["."]}]}`
-	commit := `{"kind":"git/write","requiredOperationRef":"commit","bindingRefs":["binding/test/cwi-1"],"parameters":[{"name":"operation","string":"commit"},{"name":"message","string":"commit"}]}`
+	stage := `{"requiredOperationRef":"stage","parameters":[{"name":"pathspecs","stringList":["."]}]}`
+	commit := `{"requiredOperationRef":"commit","parameters":[{"name":"message","string":"commit"}]}`
 	decode := func(document string) RuntimeCandidate {
 		t.Helper()
 		candidate, err := DecodeRuntimeCandidatePayloadWithManifest(manifest, []byte(document))

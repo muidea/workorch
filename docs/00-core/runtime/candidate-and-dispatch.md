@@ -4,7 +4,7 @@ Status: normative
 
 Type: core-contract-part
 
-Last Verified: 2026-08-29
+Last Verified: 2026-08-31
 
 ## 规范化候选合同
 
@@ -32,6 +32,19 @@ proposal 唯一映射到 sealed authorization 与 normalized required-sequence s
 execution-semantic key。Orchestrator 只从 manifest hash 与上述 manifest-owned slot/key 确定性派生 operation ID，并从
 required-sequence dependency refs 派生 dependency edges。wire 数组顺序或下标不授予 identity/dependency authority；ambiguous、
 missing、duplicate 或越界 slot/key 只形成 typed rejection，零 feasibility side effect、seal 或 dispatch。
+
+SM-3 还必须从已封存 manifest 纯编译一份 `RuntimeCandidateWireContract`。每个 required-sequence slot
+只由 `requiredOperationRef` 选中；kind、已唯一确定的 variant discriminator、singleton binding/target 与固定
+parameter 都由本地 compiler 派生，provider 必须省略。provider 只输出仍需真实选择的字段；回显本地派生
+字段、`null` container、未知字段或提前闭合 root 后继续输出 operation 字段，均是 typed document rejection，
+不做本地补全、删除或 JSON repair。schema、instruction、strict compiler、fixture encoder 必须消费同一份
+wire contract，禁止各自重新推导字段。
+
+wire contract 的 deterministic hash 必须绑定 operations `RuntimeExpectedDocumentContract`、request-session manifest
+identity 与 candidate attempt 前封存的 exact `CandidateManifest`。未进入 attempt 的 prepared/recovery session 在 restart
+时从 current sealed authority 重编译并与 persisted identity exact-match；已进入 attempt 后则还必须从 session 的
+exact manifest body 重算。首次请求、attempt 1、duplicate 和 fresh restart 的 hash 必须相同；无法编译、
+hash 缺失或漂移必须在 provider/feasibility/effect 前 fail-closed。
 
 目标策略只允许三种，禁止为 live 症状增加第四种临时分支：
 

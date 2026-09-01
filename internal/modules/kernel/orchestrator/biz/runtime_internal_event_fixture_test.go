@@ -47,7 +47,18 @@ func (o *Biz) EnsureRuntimeCandidateRequestSession(ctx context.Context, workspac
 	if correctionHash != "" {
 		attempt = 1
 	}
-	expected := runtimeOperationsExpectedDocument(aggregate, manifestHash, attempt)
+	manifest, err := runtime.BuildRuntimeCandidateContractManifestForAggregate(aggregate)
+	if err != nil {
+		return runtime.RuntimeAggregate{}, runtimecontract.RuntimeCandidateRequestSession{}, err
+	}
+	expected, err := runtimeOperationsExpectedDocument(aggregate, manifest, attempt)
+	if err != nil {
+		return runtime.RuntimeAggregate{}, runtimecontract.RuntimeCandidateRequestSession{}, err
+	}
+	// Stale-identity fixtures may intentionally supply an opaque manifest hash;
+	// the real current wire hash remains sealed so the test changes one identity
+	// dimension at a time.
+	expected.ManifestHash = manifestHash
 	if expected.MaxOutputTokens <= 0 {
 		expected.MaxOutputTokens = 8192
 	}

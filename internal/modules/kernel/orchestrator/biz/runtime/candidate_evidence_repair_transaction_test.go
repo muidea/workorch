@@ -442,6 +442,11 @@ func TestConfirmedRepairCommitmentFreshLoadRejectsDeletionAndCoordinatedTamper(t
 				if session.ExpectedDocument != nil {
 					expected := session.ExpectedDocument.Clone()
 					expected.ManifestHash = manifest.Hash
+					wire, err := runtimecontract.BuildRuntimeCandidateWireContract(manifest)
+					if err != nil {
+						t.Fatal(err)
+					}
+					expected.WireContractHash = wire.Hash
 					expected.LogicalRequestID = session.LogicalRequestID
 					expected.Hash = runtimecontract.StableRuntimeExpectedDocumentHash(expected)
 					session.ExpectedDocument = &expected

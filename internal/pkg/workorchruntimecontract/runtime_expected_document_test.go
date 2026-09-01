@@ -9,12 +9,27 @@ import (
 func TestRuntimeExpectedDocumentContractValidatesOperationsAndSemanticBatch(t *testing.T) {
 	operations := RuntimeExpectedDocumentContract{
 		SchemaVersion: RuntimeExpectedDocumentSchemaCurrent, DocumentKind: RuntimeProviderDocumentOperations,
-		ManifestHash: "manifest-1", LogicalRequestID: "request-1", StablePrefixHash: "prefix-1",
+		ManifestHash: "manifest-1", WireContractHash: "wire-1", LogicalRequestID: "request-1", StablePrefixHash: "prefix-1",
 		MaxOutputTokens: 8192, MaxRecoveryAttempts: 3,
 	}
 	operations.Hash = StableRuntimeExpectedDocumentHash(operations)
 	if err := operations.Validate(); err != nil {
 		t.Fatalf("operations contract: %v", err)
+	}
+	wireDrift := operations
+	wireDrift.WireContractHash = "wire-2"
+	if StableRuntimeExpectedDocumentHash(wireDrift) == operations.Hash {
+		t.Fatal("operations expected-document hash lost wire-contract identity")
+	}
+	wireDrift.Hash = StableRuntimeExpectedDocumentHash(wireDrift)
+	if err := wireDrift.Validate(); err != nil {
+		t.Fatalf("operations contract with a separately sealed wire identity: %v", err)
+	}
+	missingWire := operations
+	missingWire.WireContractHash = ""
+	missingWire.Hash = StableRuntimeExpectedDocumentHash(missingWire)
+	if err := missingWire.Validate(); err == nil {
+		t.Fatal("operations contract accepted a missing wire-contract identity")
 	}
 	batch := RuntimeExpectedDocumentContract{
 		SchemaVersion: RuntimeExpectedDocumentSchemaCurrent, DocumentKind: RuntimeProviderDocumentSemanticPlan, PlanStep: RuntimeSemanticPlanStepProofBatch,
@@ -25,6 +40,12 @@ func TestRuntimeExpectedDocumentContractValidatesOperationsAndSemanticBatch(t *t
 	batch.Hash = StableRuntimeExpectedDocumentHash(batch)
 	if err := batch.Validate(); err != nil {
 		t.Fatalf("semantic batch contract: %v", err)
+	}
+	semanticWithWire := batch
+	semanticWithWire.WireContractHash = "wire-1"
+	semanticWithWire.Hash = StableRuntimeExpectedDocumentHash(semanticWithWire)
+	if err := semanticWithWire.Validate(); err == nil {
+		t.Fatal("semantic-plan contract accepted operations wire identity")
 	}
 	firstBatch := batch
 	firstBatch.BatchSequence = 0

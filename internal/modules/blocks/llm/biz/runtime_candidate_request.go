@@ -34,6 +34,17 @@ func runtimeOperationsProviderRequest(request llmmodels.RuntimeCandidateRequest)
 	if err := runtimecontract.ValidateRuntimeCandidateContractManifestForSealedDecision(manifest, request.Decision); err != nil {
 		return llmmodels.ProviderRequest{}, fmt.Errorf("runtime candidate contract manifest: %w", err)
 	}
+	wire, err := runtimecontract.BuildRuntimeCandidateWireContract(manifest)
+	if err != nil {
+		return llmmodels.ProviderRequest{}, fmt.Errorf("runtime candidate wire contract: %w", err)
+	}
+	// The EventHub owner boundary validates that every production request carries
+	// the sealed ExpectedDocument. Keep this pure renderer usable by focused
+	// contract tests, while still refusing drift whenever the identity is
+	// present. The renderer must not become a second request-session owner.
+	if request.ExpectedDocument != nil && request.ExpectedDocument.Normalized().WireContractHash != wire.Hash {
+		return llmmodels.ProviderRequest{}, fmt.Errorf("runtime candidate expected document wire contract mismatch")
+	}
 	if err := validateRuntimeCandidateManifestSupportingFacts(manifest, candidateContext.Resources); err != nil {
 		return llmmodels.ProviderRequest{}, fmt.Errorf("runtime candidate manifest supporting facts: %w", err)
 	}
@@ -86,7 +97,7 @@ func runtimeOperationsProviderRequest(request llmmodels.RuntimeCandidateRequest)
 	}{
 		request.Decision,
 		request.Transaction,
-		runtimeCandidateOutputContractForManifest(manifest),
+		runtimeCandidateOutputContractForManifest(manifest, wire),
 		runtimeCandidateAuthorityContextProjection(candidateContext, manifest),
 	})
 	if err != nil {

@@ -88,6 +88,51 @@ func TestRuntimeCandidateRequestSessionIDIsRunScoped(t *testing.T) {
 	}
 }
 
+func TestRuntimeCandidateRequestSessionBindsPersistedManifestWireContract(t *testing.T) {
+	manifest := mustRuntimeCandidatePayloadManifest(t, RuntimeDecision{
+		State: ConvergenceStateNeedStateChange,
+		RequiredOutput: RequiredOutputContract{
+			AcceptedKinds:        []string{StepKindFileWrite},
+			AcceptedEffectScopes: []RuntimeEffectScope{RuntimeEffectWorkspaceDurable},
+			RequiredEffectScopes: []RuntimeEffectScope{RuntimeEffectWorkspaceDurable},
+			CoverageWorkItemIDs:  []common.CoverageWorkItemID{"cwi-session-wire"},
+			TargetRefs:           []string{"go.mod"},
+			RequiredOperationSequence: []RuntimeRequiredOperationVariant{{
+				RequirementID: "create-module", Kind: StepKindFileWrite, TargetRef: "go.mod",
+			}},
+		},
+	})
+	wire, err := BuildRuntimeCandidateWireContract(manifest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	expected := RuntimeExpectedDocumentContract{
+		SchemaVersion:    RuntimeExpectedDocumentSchemaCurrent,
+		DocumentKind:     RuntimeProviderDocumentOperations,
+		ManifestHash:     manifest.Hash,
+		WireContractHash: wire.Hash,
+		LogicalRequestID: "logical-wire-1", StablePrefixHash: "prefix-wire-1",
+		MaxOutputTokens: 4096, MaxRecoveryAttempts: 1,
+	}
+	expected.Hash = StableRuntimeExpectedDocumentHash(expected)
+	session := RuntimeCandidateRequestSession{
+		LogicalRequestID: expected.LogicalRequestID, DocumentKind: expected.DocumentKind,
+		ExpectedDocument: &expected, Transaction: AuthorityTransaction{AuthoritySnapshotID: "authority-wire-1"},
+		StablePrefixHash: expected.StablePrefixHash, ManifestHash: manifest.Hash, CandidateManifest: &manifest,
+		State: RuntimeCandidateRequestSessionPrepared, NextSequence: 1,
+	}
+	if err := session.Validate(); err != nil {
+		t.Fatalf("valid manifest-bound request session: %v", err)
+	}
+
+	drifted := session.Clone()
+	drifted.ExpectedDocument.WireContractHash = "runtime-candidate-wire-drifted"
+	drifted.ExpectedDocument.Hash = StableRuntimeExpectedDocumentHash(*drifted.ExpectedDocument)
+	if err := drifted.Validate(); err == nil {
+		t.Fatal("request session accepted a wire hash that did not derive from its persisted manifest")
+	}
+}
+
 func TestRuntimeCandidateRequestOutcomeRequiresClosedIdentity(t *testing.T) {
 	valid := []RuntimeCandidateRequestOutcome{
 		{},
@@ -116,7 +161,7 @@ func TestRuntimeCandidateRequestOutcomeRequiresClosedIdentity(t *testing.T) {
 func TestRuntimeCandidateRequestSessionRecoveryExhaustedRequiresExactIncompleteFraming(t *testing.T) {
 	expected := RuntimeExpectedDocumentContract{
 		SchemaVersion: RuntimeExpectedDocumentSchemaCurrent, DocumentKind: RuntimeProviderDocumentOperations,
-		ManifestHash: "manifest-1", LogicalRequestID: "logical-1", StablePrefixHash: "prefix-1",
+		ManifestHash: "manifest-1", WireContractHash: "wire-1", LogicalRequestID: "logical-1", StablePrefixHash: "prefix-1",
 		MaxOutputTokens: 1024, MaxRecoveryAttempts: 1,
 	}
 	expected.Hash = StableRuntimeExpectedDocumentHash(expected)
