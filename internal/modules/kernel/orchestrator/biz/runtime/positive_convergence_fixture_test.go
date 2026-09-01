@@ -513,8 +513,10 @@ func TestPositiveConvergenceFixture_RepairableAssessmentPersistsAcrossController
 	if err != nil {
 		t.Fatal(err)
 	}
-	if partial.Decision.State == runtimecontract.ConvergenceStateComplete || partial.Decision.State == runtimecontract.ConvergenceStateFailed {
-		t.Fatalf("repairable assessment terminalized: decision=%+v terminal=%+v failure=%+v repair=%+v", partial.Decision, partial.Decision.Terminal, partial.Facts.Failure, partial.Facts.Repair)
+	if partial.Decision.State != runtimecontract.ConvergenceStateFailed || partial.Decision.Terminal == nil ||
+		partial.Decision.Terminal.Code != "target_grounding_unresolved" ||
+		!TargetGroundingTerminalSemanticReDrivePending(partial) {
+		t.Fatalf("repairable assessment lost its provisional semantic re-drive: decision=%+v terminal=%+v failure=%+v repair=%+v", partial.Decision, partial.Decision.Terminal, partial.Facts.Failure, partial.Facts.Repair)
 	}
 	if len(partial.Facts.Assessments) == 0 ||
 		partial.Facts.Assessments[len(partial.Facts.Assessments)-1].Disposition != runtimecontract.AssessmentDispositionRepairableGap {

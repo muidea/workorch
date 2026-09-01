@@ -337,8 +337,7 @@ func candidateRequestSessionActionAllowed(aggregate RuntimeAggregate, documentKi
 		// semantic-plan request. If an execution-locked binding still makes
 		// operation authority usable, the terminal is already authoritative.
 		if isTerminalConvergenceState(aggregate.Decision.State) {
-			if aggregate.Decision.Terminal == nil || aggregate.Decision.Terminal.Code != "target_grounding_unresolved" ||
-				CurrentFocusTargetSelectionConfirmsUnresolved(aggregate.Facts) || SemanticOperationAuthorityReady(aggregate) {
+			if !TargetGroundingTerminalSemanticReDrivePending(aggregate) {
 				return fmt.Errorf("%w: current runtime authority does not accept a candidate request", common.ErrConflict)
 			}
 		}

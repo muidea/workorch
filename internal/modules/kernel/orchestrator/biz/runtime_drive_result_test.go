@@ -16,7 +16,10 @@ func TestRuntimeTerminalDeliveryWaitsForCurrentSemanticAuthority(t *testing.T) {
 			Focus: runtimecontract.CoverageFocus{ID: "semantic-pending/cwi-2", CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-2"}},
 			Coverage: []runtimecontract.RuntimeCoverageItemFact{{
 				ID: "cwi-2", State: runtimecontract.RuntimeCoverageItemStateOpen,
-				CWIConvergenceState: runtimecontract.RuntimeCWIConvergenceStatePlanning,
+				CWIConvergenceState: runtimecontract.RuntimeCWIConvergenceStateReopened,
+				ReopenLineage: []runtimecontract.RuntimeCWIReopenLineage{{
+					Reason: "assessment_owner_fact_acquisition_settled",
+				}},
 			}},
 		},
 		Decision: runtimecontract.RuntimeDecision{
@@ -26,6 +29,9 @@ func TestRuntimeTerminalDeliveryWaitsForCurrentSemanticAuthority(t *testing.T) {
 			},
 		},
 		SemanticPlanning: runtimecontract.RuntimeSemanticPlanningLedger{Phase: runtimecontract.RuntimeSemanticPlanningRequired},
+	}
+	if !runtime.RuntimeCWISemanticRebindingPending(aggregate.Facts) {
+		t.Fatal("owner-fact successor was not recognized as pending semantic rebinding")
 	}
 	if runtimeTerminalDeliveryReady(aggregate) {
 		t.Fatal("binding-free reducer terminal escaped before semantic re-seal")

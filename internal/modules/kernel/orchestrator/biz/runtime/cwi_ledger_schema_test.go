@@ -169,6 +169,15 @@ func TestValidationFailureRepairSemanticRebindingClearsExecutionAuthorityThrough
 		projected.DefinitionFocuses[0].ValidationFailureRepairConvergence.ID != convergence.ID {
 		t.Fatalf("semantic rebinding changed immutable Definition/Profile declaration: focus=%+v definitions=%+v", got, projected.DefinitionFocuses)
 	}
+	if err := validateRuntimeCWISemanticRebindingFocusProjections(projected); err != nil {
+		t.Fatalf("target-free semantic rebinding projection failed owner invariant: %v", err)
+	}
+	leaked := projected
+	leaked.Focus = runtimeCWIPendingFocus(focus, "cwi-1")
+	if err := validateRuntimeCWISemanticRebindingFocusProjections(leaked); err == nil ||
+		!strings.Contains(err.Error(), "retains predecessor execution authority") {
+		t.Fatalf("semantic rebinding owner invariant accepted predecessor authority: %v", err)
+	}
 }
 
 func TestSemanticCWISealRejectsReactivationOfReopenedBinding(t *testing.T) {

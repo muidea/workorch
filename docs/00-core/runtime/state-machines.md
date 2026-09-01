@@ -4,7 +4,7 @@ Status: normative
 
 Type: core-contract-part
 
-Last Verified: 2026-08-31
+Last Verified: 2026-09-01
 
 ## 四个协调状态机
 
@@ -247,7 +247,11 @@ current manifest 临时补全 scope；没有 matching sealed fallback 时按 typ
   `MaxAcquisitionAttempts=1`，reobserve 后仍缺失即以 `owner_fact_convergence_exhausted` fail-closed。reobserve 已满足时，
   `assessment_observed` private event 在同一 CAS 中保留 acquisition audit/anti-replay fact、保持 CWI open、写入
   `assessment_owner_fact_acquisition_settled` reopen lineage并退休 generation；successor semantic generation 必须恢复原
-  terminal evidence obligation，不能继承 acquisition credit。duplicate/restart 不重复
+  terminal evidence obligation，不能继承 acquisition credit。重开投影必须清空 predecessor generation 的 exact target、
+  prospective target、selector、accepted operation/variant、validation recipe/check 权威；create-only target 已由 File effect
+  实现后，不能再次发布旧 prospective selector 并把 File owner 的 `unsupported` 误作 terminal Definition fact。该
+  binding-free projection 允许 reducer 暂存 provisional `target_grounding_unresolved`，但 SM-3 semantic request admission、
+  SM-4 delivery 与 fresh-load bootstrap identity 必须消费同一个 semantic-re-drive classification。duplicate/restart 不重复
   reopen、request、effect 或预算扣减。重开 CWI 固定返回 `semantic-pending/<cwi>`；当新的 current-focus acquisition 与
   上一 generation 已退休 prerequisite 使用同一 canonical ID 时，SM-2 必须在排入 pending 前原子移出该 retired ID 及其
   旧 observation，且不得复用旧 observation。无关 retired lineage 必须保留，审计由 CWI reopen lineage 与 semantic

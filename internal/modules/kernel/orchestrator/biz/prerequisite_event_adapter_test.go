@@ -142,6 +142,28 @@ func TestAcquireRuntimeTargetSelectionPrerequisiteUsesTypedEventHubContract(t *t
 		len(creation.Observation.Dependencies) != 1 || creation.Observation.Dependencies[0].Domain != runtimecontract.RuntimeResourceWorkspaceTree || creation.Observation.Dependencies[0].Revision != creation.Selection.ObservedRevision {
 		t.Fatalf("empty workspace creation selection = %+v", creation)
 	}
+	createOnlyWorkspace := t.TempDir()
+	createOnlyCommand := fileevents.AcquireRuntimeTargetSelectionCommand{
+		WorkspaceID: "ws-selection", RunID: "run-selection", AuthoritySnapshotID: "authority-owner-fact",
+		PrerequisiteID: "target_selection:owner-fact-before-create", WorkspaceDeliverableDirectory: createOnlyWorkspace,
+		TargetRole: "validation-input", TargetSelectorRef: "workspace-relative-new-file-target",
+		TargetSelectorOwnerRef: runtimecontract.RuntimeModuleFile, TargetSelectorSubjectRef: "workspace_deliverable",
+		ProspectiveTargetRef: "runtime-owner-fact-validation_test.go", MaxItems: 4,
+	}
+	beforeCreate, err := AcquireRuntimeTargetSelectionPrerequisite(ctx, hub, createOnlyCommand)
+	if err != nil || beforeCreate.Selection.Disposition != runtimecontract.RuntimeTargetSelectionCreate {
+		t.Fatalf("owner-fact create-only selection before effect = %+v err=%v", beforeCreate, err)
+	}
+	if err := os.WriteFile(filepath.Join(createOnlyWorkspace, createOnlyCommand.ProspectiveTargetRef), []byte("package validation\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	createOnlyCommand.PrerequisiteID = "target_selection:owner-fact-after-create"
+	afterCreate, err := AcquireRuntimeTargetSelectionPrerequisite(ctx, hub, createOnlyCommand)
+	if err != nil || afterCreate.Selection.Disposition != runtimecontract.RuntimeTargetSelectionUnsupported ||
+		afterCreate.Selection.ProspectiveTargetRef != createOnlyCommand.ProspectiveTargetRef ||
+		len(afterCreate.Selection.TargetRefs) != 0 || afterCreate.Observation.ObservationID == "" {
+		t.Fatalf("owner-fact create-only selection after effect = %+v err=%v", afterCreate, err)
+	}
 	unsupported, err := AcquireRuntimeTargetSelectionPrerequisite(ctx, hub, fileevents.AcquireRuntimeTargetSelectionCommand{
 		WorkspaceID: "ws-selection", RunID: "run-selection", AuthoritySnapshotID: "authority-1",
 		PrerequisiteID: "target_selection:blocks/file:deliverable:profile/free_form_selector:::0", WorkspaceDeliverableDirectory: workspace,

@@ -207,7 +207,12 @@ func reopenRuntimeCWIForOwnerFactAssessment(aggregate *RuntimeAggregate, assessm
 	item.CWIConvergenceState = runtimecontract.RuntimeCWIConvergenceStateReopened
 	item.State = runtimecontract.RuntimeCoverageItemStateOpen
 
-	updated, err := replaceRuntimeCWIFocusProjection(facts, []common.CoverageWorkItemID{coverageID})
+	// The predecessor focus describes the bounded owner-fact acquisition, not
+	// the terminal Definition proof that the reopened CWI must now establish.
+	// Return through the target/operation-free semantic-rebinding projection so
+	// the acquisition's prospective selector cannot be reacquired after its
+	// create-only target has become an existing File-owner resource.
+	updated, err := replaceRuntimeCWIFocusProjectionForSemanticRebinding(facts, []common.CoverageWorkItemID{coverageID})
 	if err != nil {
 		return false, err
 	}

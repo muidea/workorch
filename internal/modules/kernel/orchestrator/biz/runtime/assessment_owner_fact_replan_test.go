@@ -37,8 +37,10 @@ func TestCommitAssessmentReopensCurrentCWIWhenOwnerFactIsSoleGap(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if progressed.Decision.State == runtimecontract.ConvergenceStateComplete || progressed.Decision.State == runtimecontract.ConvergenceStateFailed {
-		t.Fatalf("owner-fact repair closed or failed before its bounded semantic replan: %+v", progressed.Decision)
+	if progressed.Decision.State != runtimecontract.ConvergenceStateFailed || progressed.Decision.Terminal == nil ||
+		progressed.Decision.Terminal.Code != "target_grounding_unresolved" ||
+		!TargetGroundingTerminalSemanticReDrivePending(progressed) {
+		t.Fatalf("owner-fact repair did not retain a provisional semantic re-drive terminal: %+v", progressed.Decision)
 	}
 	if progressed.SemanticPlanning.Phase != runtimecontract.RuntimeSemanticPlanningRequired || len(progressed.SemanticPlanning.History) != 1 {
 		t.Fatalf("owner-fact gap did not retire exactly one semantic generation: %+v", progressed.SemanticPlanning)
@@ -49,6 +51,9 @@ func TestCommitAssessmentReopensCurrentCWIWhenOwnerFactIsSoleGap(t *testing.T) {
 	}
 	if progressed.Facts.Focus.ID != "semantic-pending/cwi-v2" || len(progressed.Facts.Focus.CoverageEvidenceBindings) != 0 {
 		t.Fatalf("reopened CWI focus projection = %+v", progressed.Facts.Focus)
+	}
+	if !runtimeCWISemanticRebindingExecutionAuthorityEmpty(progressed.Facts.Focus) {
+		t.Fatalf("reopened owner-fact CWI retained predecessor execution authority: %+v", progressed.Facts.Focus)
 	}
 	item := progressed.Facts.Coverage[0]
 	if item.State != runtimecontract.RuntimeCoverageItemStateOpen || item.CWIConvergenceState != runtimecontract.RuntimeCWIConvergenceStateReopened || item.CurrentBindingRef != nil || len(item.ReopenLineage) != 1 {
@@ -70,6 +75,11 @@ func TestCommitAssessmentReopensCurrentCWIWhenOwnerFactIsSoleGap(t *testing.T) {
 	}
 	if err := progressed.Validate(); err != nil {
 		t.Fatalf("replanned aggregate is invalid: %v", err)
+	}
+	leaked := progressed.Facts
+	leaked.Focus.TargetRole = "retired-owner-fact-target"
+	if err := validateRuntimeCWISemanticRebindingFocusProjections(leaked); err == nil {
+		t.Fatal("owner-fact semantic rebinding invariant accepted predecessor target authority")
 	}
 
 	// The new binding has a new semantic identity, but the same operation shape
@@ -143,8 +153,9 @@ func TestCommitAssessmentSettlesAcquisitionBeforeTerminalDefinitionProof(t *test
 	if err != nil {
 		t.Fatal(err)
 	}
-	if progressed.Decision.State == runtimecontract.ConvergenceStateComplete || progressed.Decision.State == runtimecontract.ConvergenceStateFailed {
-		t.Fatalf("acquisition incorrectly selected a terminal Run state: %+v", progressed.Decision)
+	if progressed.Decision.State != runtimecontract.ConvergenceStateFailed || progressed.Decision.Terminal == nil ||
+		progressed.Decision.Terminal.Code != "target_grounding_unresolved" {
+		t.Fatalf("acquisition successor did not retain the bounded provisional grounding view: %+v", progressed.Decision)
 	}
 	if progressed.SemanticPlanning.Phase != runtimecontract.RuntimeSemanticPlanningRequired || len(progressed.SemanticPlanning.History) != 1 {
 		t.Fatalf("acquisition did not require one fresh terminal-proof generation: %+v", progressed.SemanticPlanning)
@@ -155,6 +166,17 @@ func TestCommitAssessmentSettlesAcquisitionBeforeTerminalDefinitionProof(t *test
 	}
 	if item.ReopenLineage[0].Reason != runtimeCWIReopenReasonOwnerFactAcquisitionSettled || progressed.Facts.Focus.ID != "semantic-pending/cwi-v2" {
 		t.Fatalf("acquisition successor lineage = %+v focus=%+v", item.ReopenLineage, progressed.Facts.Focus)
+	}
+	if !runtimeCWISemanticRebindingExecutionAuthorityEmpty(progressed.Facts.Focus) {
+		t.Fatalf("acquisition successor retained predecessor target/operation authority: %+v", progressed.Facts.Focus)
+	}
+	for _, prerequisite := range progressed.Facts.Prerequisites.Pending {
+		if prerequisite.Kind == runtimecontract.PrerequisiteKindTargetSelection {
+			t.Fatalf("acquisition successor reacquired the retired prospective target selector: %+v", prerequisite)
+		}
+	}
+	if err := candidateRequestSessionActionAllowed(progressed, runtimecontract.RuntimeProviderDocumentSemanticPlan); err != nil {
+		t.Fatalf("provisional grounding view did not admit the successor semantic request: %v", err)
 	}
 	if progressed.DefinitionClarification != nil || progressed.Decision.State == runtimecontract.ConvergenceStateNeedGovernance {
 		t.Fatalf("declared acquisition opened a Definition clarification: %+v", progressed.DefinitionClarification)
@@ -273,14 +295,26 @@ func TestAssessmentObservedUsesRetiredAcquisitionPurposeAfterReceiptResourceChan
 	}
 	progressed := result.Aggregate
 	item := progressed.Facts.Coverage[0]
-	if progressed.Decision.State == runtimecontract.ConvergenceStateComplete || progressed.Decision.State == runtimecontract.ConvergenceStateFailed ||
-		item.State != runtimecontract.RuntimeCoverageItemStateOpen || item.CWIConvergenceState != runtimecontract.RuntimeCWIConvergenceStateReopened ||
+	if progressed.Decision.State != runtimecontract.ConvergenceStateFailed || progressed.Decision.Terminal == nil ||
+		progressed.Decision.Terminal.Code != "target_grounding_unresolved" || item.State != runtimecontract.RuntimeCoverageItemStateOpen ||
+		item.CWIConvergenceState != runtimecontract.RuntimeCWIConvergenceStateReopened ||
 		item.CurrentBindingRef != nil || len(item.ReopenLineage) != 1 || item.ReopenLineage[0].Reason != runtimeCWIReopenReasonOwnerFactAcquisitionSettled {
 		t.Fatalf("retired acquisition state_change closed terminal CWI instead of reopening it: decision=%+v item=%+v", progressed.Decision, item)
 	}
 	if progressed.Facts.Focus.ID != "semantic-pending/cwi-v2" || len(progressed.Facts.Repair.NoProgressOperationShapes) != 1 ||
 		progressed.Facts.Repair.NoProgressOperationShapes[0].FailureCode != runtimeCWIReopenReasonOwnerFactAcquisitionSettled {
 		t.Fatalf("terminal validation successor or acquisition anti-replay lineage was not restored: focus=%+v repair=%+v", progressed.Facts.Focus, progressed.Facts.Repair)
+	}
+	for _, prerequisite := range progressed.Facts.Prerequisites.Pending {
+		if prerequisite.Kind == runtimecontract.PrerequisiteKindTargetSelection {
+			t.Fatalf("owner-fact successor reacquired the retired prospective target selector: focus=%+v prerequisite=%+v", progressed.Facts.Focus, prerequisite)
+		}
+	}
+	if !runtimeCWISemanticRebindingExecutionAuthorityEmpty(progressed.Facts.Focus) {
+		t.Fatalf("retired acquisition successor retained predecessor target/operation authority: %+v", progressed.Facts.Focus)
+	}
+	if err := candidateRequestSessionActionAllowed(progressed, runtimecontract.RuntimeProviderDocumentSemanticPlan); err != nil {
+		t.Fatalf("retired acquisition successor did not admit semantic re-drive: %v", err)
 	}
 	successor, err := runtimecontract.CompileRuntimeSemanticPlanManifestForCoverage(
 		progressed.Facts.WorkspaceID,
@@ -670,8 +704,7 @@ func prepareTerminalValidationOwnerFactAcquisitionAssessment(t *testing.T, retir
 				selection := runtimecontract.RuntimeTargetSelection{
 					PrerequisiteID: prerequisite.ID, OwnerModuleID: prerequisite.OwnerModuleID, TargetRole: prerequisite.SubjectRef,
 					SelectorRef: prerequisite.TargetSelectorRef, SelectorOwnerRef: prerequisite.TargetSelectorOwnerRef, SelectorSubjectRef: prerequisite.TargetSelectorSubjectRef,
-					SelectorCandidateRefs: append([]string(nil), prerequisite.TargetSelectorCandidateRefs...), Disposition: runtimecontract.RuntimeTargetSelectionSelected,
-					TargetRefs: []string{prerequisite.ProspectiveTargetRef}, CandidateTargetRefs: []string{prerequisite.ProspectiveTargetRef}, CandidateCount: 1,
+					SelectorCandidateRefs: append([]string(nil), prerequisite.TargetSelectorCandidateRefs...), Disposition: runtimecontract.RuntimeTargetSelectionUnsupported,
 					ProspectiveTargetRef: prerequisite.ProspectiveTargetRef, ObservedRevision: "workspace-tree-owner-fact-acquisition-v2",
 				}
 				selection.SnapshotID = runtimecontract.StableRuntimeTargetSelectionSnapshotID(selection)

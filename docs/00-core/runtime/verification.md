@@ -499,7 +499,9 @@ Cross-owner regression必须证明 concrete receiving-owner Command/Result、wor
 - owner-fact acquisition 的 accepted receipt/assessment 只结算当前前置 transaction。reobserve missing 必须按 actual operation
   耗尽 one-shot budget；reobserve ready 必须在 `assessment_observed` 单一 CAS 中保留 audit/attempt lineage、保持 CWI open、
   重开并退休 generation，successor manifest 恢复原 terminal proof。两者都不得直接产生 terminal credit 或 ticket，fresh
-  reload 不重复 CAS/effect/request；
+  reload 不重复 CAS/effect/request。prospective File effect 后必须用真实 File EventHub owner 验证旧 create-only selector 对
+  已存在 target 返回 `unsupported`；SM-2 重开不得重发该 selector，pending focus 必须清除 predecessor execution authority，
+  SM-3 request、SM-4 terminal fence 与 restart identity 必须对同一 provisional terminal 得到一致分类；
 - candidate/accepted/rejected/stale-or-superseded由receipt judgement、diagnostic和binding/freshness lineage纯派生；
 - evidence只绑定实际依赖的owner revision/snapshot/fence set/hash；无关owner mutation不扩大stale范围；
 - successful closeout包含Definition/Run lineage、逐CWI coverage、accepted evidence、assessment、deliverable/artifact、

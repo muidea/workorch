@@ -215,6 +215,104 @@ func runtimeCWISemanticRebindingPendingFocus(source runtimecontract.CoverageFocu
 	return value.Normalized()
 }
 
+func runtimeCWISemanticRebindingExecutionAuthorityEmpty(focus runtimecontract.CoverageFocus) bool {
+	focus = focus.Normalized()
+	return len(focus.TargetRefs) == 0 && len(focus.ProspectiveTargetRefs) == 0 && focus.TargetRole == "" &&
+		len(focus.TargetDiscoverySources) == 0 && focus.TargetSelectorRef == "" && focus.TargetSelectorOwnerRef == "" &&
+		focus.TargetSelectorSubjectRef == "" && len(focus.TargetSelectorCandidateRefs) == 0 && len(focus.AcceptedStepKinds) == 0 &&
+		len(focus.AcceptedOperationVariants) == 0 && focus.ValidationRecipeID == "" && len(focus.RequiredCheckRefs) == 0
+}
+
+func runtimeCWIReopenRequiresSemanticRebinding(reason string) bool {
+	switch strings.TrimSpace(reason) {
+	case runtimeCWIReopenReasonOwnerFactPostcondition,
+		runtimeCWIReopenReasonOwnerFactAcquisitionSettled,
+		runtimeCWIReopenReasonValidationFailureRepairRequired,
+		runtimeCWIReopenReasonValidationFailureRepairSettled:
+		return true
+	default:
+		return false
+	}
+}
+
+// RuntimeCWISemanticRebindingPending reports the owner-local CWI lineage whose
+// successor semantic transaction must win over provisional SM-4 target-
+// grounding delivery. The aggregate invariant separately requires the pending
+// focus to be execution-authority-free; keeping lineage classification
+// independent makes delivery fail closed even for an invalid in-memory value.
+func RuntimeCWISemanticRebindingPending(facts runtimecontract.RuntimeFacts) bool {
+	facts = facts.Normalized()
+	focus := facts.Focus.Normalized()
+	if len(focus.CoverageWorkItemIDs) != 1 || focus.ID != "semantic-pending/"+string(focus.CoverageWorkItemIDs[0]) {
+		return false
+	}
+	coverageID := focus.CoverageWorkItemIDs[0]
+	for _, item := range facts.Coverage {
+		if item.ID != coverageID || item.CWIConvergenceState != runtimecontract.RuntimeCWIConvergenceStateReopened ||
+			item.CurrentBindingRef != nil || len(item.ReopenLineage) == 0 {
+			continue
+		}
+		return runtimeCWIReopenRequiresSemanticRebinding(item.ReopenLineage[len(item.ReopenLineage)-1].Reason)
+	}
+	return false
+}
+
+// TargetGroundingTerminalSemanticReDrivePending is the canonical owner-local
+// classification shared by SM-3 request admission, SM-4 delivery, and restart
+// bootstrap identity. A reducer may persist target_grounding_unresolved while
+// its binding-free semantic successor is still pending; that projection is not
+// a final Runtime terminal until exact current owner selection proves it or
+// the semantic transaction itself reaches a final state. A semantic-rebinding
+// successor is stricter: predecessor selection is never current authority.
+func TargetGroundingTerminalSemanticReDrivePending(aggregate RuntimeAggregate) bool {
+	if aggregate.Decision.State != runtimecontract.ConvergenceStateFailed || aggregate.Decision.Terminal == nil ||
+		aggregate.Decision.Terminal.Code != "target_grounding_unresolved" ||
+		aggregate.SemanticPlanning.Phase == runtimecontract.RuntimeSemanticPlanningFailed {
+		return false
+	}
+	if RuntimeCWIBindingRetirementPending(aggregate) {
+		return true
+	}
+	semanticReady := SemanticOperationAuthorityReady(aggregate)
+	if RuntimeCWISemanticRebindingPending(aggregate.Facts) && !semanticReady {
+		return true
+	}
+	return !CurrentFocusTargetSelectionConfirmsUnresolved(aggregate.Facts) && !semanticReady
+}
+
+// validateRuntimeCWISemanticRebindingFocusProjections prevents a persisted
+// reopened CWI from retaining execution authority that belonged to its
+// retired generation. The reopen reason is Orchestrator-private authority;
+// the shared Runtime contract therefore validates the generic CWI shape while
+// this owner-local invariant validates the exact semantic-rebinding reasons.
+func validateRuntimeCWISemanticRebindingFocusProjections(facts runtimecontract.RuntimeFacts) error {
+	focuses := append(append([]runtimecontract.CoverageFocus{facts.Focus}, facts.RemainingFocuses...), facts.CompletedFocuses...)
+	byCoverage := make(map[common.CoverageWorkItemID]runtimecontract.CoverageFocus, len(focuses))
+	for _, focus := range focuses {
+		focus = focus.Normalized()
+		for _, coverageID := range focus.CoverageWorkItemIDs {
+			byCoverage[coverageID] = focus
+		}
+	}
+	for _, item := range facts.Coverage {
+		if item.CWIConvergenceState != runtimecontract.RuntimeCWIConvergenceStateReopened || len(item.ReopenLineage) == 0 {
+			continue
+		}
+		reason := item.ReopenLineage[len(item.ReopenLineage)-1].Normalized().Reason
+		if !runtimeCWIReopenRequiresSemanticRebinding(reason) {
+			continue
+		}
+		focus, found := byCoverage[item.ID]
+		if !found || focus.ID != "semantic-pending/"+string(item.ID) {
+			return fmt.Errorf("runtime CWI %q semantic rebinding has no canonical pending focus", item.ID)
+		}
+		if !runtimeCWISemanticRebindingExecutionAuthorityEmpty(focus) {
+			return fmt.Errorf("runtime CWI %q semantic rebinding retains predecessor execution authority", item.ID)
+		}
+	}
+	return nil
+}
+
 func runtimeCWIWithCoverage(focus runtimecontract.CoverageFocus, coverageIDs []common.CoverageWorkItemID) runtimecontract.CoverageFocus {
 	allowed := make(map[common.CoverageWorkItemID]struct{}, len(coverageIDs))
 	for _, coverageID := range coverageIDs {

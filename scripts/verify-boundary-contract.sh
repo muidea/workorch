@@ -1983,13 +1983,20 @@ fi
 runtime_drive_transition_shape="$(sed -n '/^func (m \*Biz) driveOneRuntimeTransition(/,/^}/p' internal/modules/kernel/orchestrator/biz/runtime_drive.go)"
 runtime_finish_transition_shape="$(sed -n '/^func finishRuntimeConvergenceTransition(/,/^}/p' internal/modules/kernel/orchestrator/biz/runtime_drive.go)"
 runtime_startup_recovery_shape="$(sed -n '/^func (m \*Biz) recoverRuntimeStartup(/,/^}/p' internal/modules/kernel/orchestrator/biz/owner.go)"
+runtime_target_terminal_classifier="$(sed -n '/^func TargetGroundingTerminalSemanticReDrivePending(/,/^}/p' internal/modules/kernel/orchestrator/biz/runtime/cwi_ledger.go)"
 if ! grep -q -F -- 'runtimeTerminalDeliveryReady(aggregate)' <<<"$runtime_drive_transition_shape" ||
 	! grep -q -F -- 'runtimeTerminalDeliveryReady(aggregate)' <<<"$runtime_finish_transition_shape" ||
 	! grep -q -F -- 'runtimeTerminalDeliveryReady(aggregate)' <<<"$runtime_startup_recovery_shape" ||
-	! grep -q -F -- 'aggregate.Decision.Terminal.Code != "target_grounding_unresolved"' internal/modules/kernel/orchestrator/biz/runtime_drive.go ||
-	! grep -q -F -- 'aggregate.Decision.Terminal.Code != "target_grounding_unresolved"' internal/modules/kernel/orchestrator/biz/runtime/candidate_request_session.go ||
+	! grep -q -F -- 'aggregate.Decision.Terminal.Code != "target_grounding_unresolved"' <<<"$runtime_target_terminal_classifier" ||
+	! grep -q -F -- 'RuntimeCWISemanticRebindingPending(aggregate.Facts)' <<<"$runtime_target_terminal_classifier" ||
+	! grep -q -F -- 'TargetGroundingTerminalSemanticReDrivePending(aggregate)' internal/modules/kernel/orchestrator/biz/runtime_drive.go ||
+	! grep -q -F -- 'TargetGroundingTerminalSemanticReDrivePending(aggregate)' internal/modules/kernel/orchestrator/biz/runtime/candidate_request_session.go ||
+	! grep -q -F -- 'TargetGroundingTerminalSemanticReDrivePending(existing)' internal/modules/kernel/orchestrator/biz/runtime/controller.go ||
+	! grep -q -F -- 'replaceRuntimeCWIFocusProjectionForSemanticRebinding(facts' internal/modules/kernel/orchestrator/biz/runtime/assessment_owner_fact_replan.go ||
 	! grep -q -F -- 'TestRuntimeTerminalDeliveryWaitsForCurrentSemanticAuthority' internal/modules/kernel/orchestrator/biz/runtime_drive_result_test.go ||
-	! grep -q -F -- 'TestSemanticRequestMayReplaceOnlyBindingFreeProvisionalTerminal' internal/modules/kernel/orchestrator/biz/runtime/candidate_request_session_test.go; then
+	! grep -q -F -- 'TestSemanticRequestMayReplaceOnlyBindingFreeProvisionalTerminal' internal/modules/kernel/orchestrator/biz/runtime/candidate_request_session_test.go ||
+	! grep -q -F -- 'TestAssessmentObservedUsesRetiredAcquisitionPurposeAfterReceiptResourceChange' internal/modules/kernel/orchestrator/biz/runtime/assessment_owner_fact_replan_test.go ||
+	! grep -q -F -- 'TestAcquireRuntimeTargetSelectionPrerequisiteUsesTypedEventHubContract' internal/modules/kernel/orchestrator/biz/prerequisite_event_adapter_test.go; then
 	echo "boundary contract violation: target-grounding provisional terminal can bypass current semantic authority, or another sealed terminal can be reopened" >&2
 	exit 1
 fi

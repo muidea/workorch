@@ -142,6 +142,9 @@ func validateRuntimeAggregateSM2Authority(a RuntimeAggregate) error {
 	if err := runtimecontract.ValidateRuntimeStateCWILedger(a.Facts, a.Reconciliation); err != nil {
 		return err
 	}
+	if err := validateRuntimeCWISemanticRebindingFocusProjections(a.Facts); err != nil {
+		return err
+	}
 	var active *runtimecontract.RuntimeDispatchRecord
 	if a.ActiveDispatch != nil {
 		value := sealedDispatchToRuntimeRecord(*a.ActiveDispatch)

@@ -4,7 +4,7 @@ Status: active
 
 Type: capability-block-contract
 
-Last Verified: 2026-08-30
+Last Verified: 2026-09-01
 
 ## 功能范围与边界
 
@@ -38,6 +38,8 @@ operation identity 与 execution scope，handler 不能从自由文本重建 ope
 - path 必须是 canonical workspace-relative regular-file target；absolute path、`..` escape、symlink escape、binary edit、
   ambiguous replace、stale base hash 和越界 inventory 均 fail-closed、零 effect。
 - preview、catalog、selection、manifest、feasibility、repair confirmation 与 reconciliation 都是只读事实，不得创建目录/文件。
+- `workspace-relative-new-file-target` 是 create-only selector：prospective path 缺失时返回 `create`；File effect 后相同 path
+  已存在时必须返回 `unsupported`，不能把它重解释为普通 existing-target `selected`。
 - workspace manifest/revision 对 deliverable topology/content 变化敏感；admissibility/target snapshot 漂移返回 typed stale，
   不自行刷新 authority。
 - state-changing effect 返回 exact before/after revision 和 bounded evidence。execution key 已有 committed receipt 时返回 replay
@@ -49,7 +51,7 @@ operation identity 与 execution scope，handler 不能从自由文本重建 ope
 | 维度 | 可执行证据 | 覆盖结论 |
 | --- | --- | --- |
 | normal list/read/write/edit/preview/apply | [`module_test.go`](module_test.go)、[`biz/file_runtime_adapter_test.go`](biz/file_runtime_adapter_test.go) | 覆盖 |
-| typed contract / sealed identity | [`pkg/events/operation_test.go`](pkg/events/operation_test.go) | 15 topic inventory、payload/scope binding 覆盖 |
+| typed contract / sealed identity | [`pkg/events/operation_test.go`](pkg/events/operation_test.go)、`kernel/orchestrator/biz/prerequisite_event_adapter_test.go::TestAcquireRuntimeTargetSelectionPrerequisiteUsesTypedEventHubContract` | 15 topic inventory、payload/scope binding、create-only selector effect 前 `create`/effect 后 `unsupported` 覆盖 |
 | exact source | `TestFileRuntimeOwnerCommandsRejectUntrustedSources`、`TestFileWorkspaceManifestAllowsGitOwnerSource`、`TestFileModuleRejectsDriftedSealedOperationBeforeEffect` | 9 个 read topic 的 producer matrix 与 execute wrong-source 覆盖 |
 | path/binary/symlink/ambiguous negative | `TestRuntimeAdapterRejectsPathEscape`、`TestRuntimeAdapterRejectsSymlinkEscape`、`TestRuntimeAdapterEditRejectsBinaryFile`、`TestRuntimeAdapterEditRejectsAmbiguousMatch` | 覆盖拒绝且零 effect |
 | stale/freshness / manifest revision | `TestRuntimeAdapterProbeRejectsStaleAdmissibilitySnapshotWithoutMutation`、`TestRuntimeAdapterProbeReportsTypedStaleAfterExternalWorkspaceMutation`、`TestRuntimeAdapterEditRejectsBaseHashMismatch`、`TestAcquireWorkspaceManifestRevisionTracksContent` | 覆盖 |
