@@ -43,6 +43,7 @@ func TestEmbeddedSoftwareDevTemplateDoDItemsCoverScopeEvidenceAndRisk(t *testing
 		t.Fatalf("software-dev runtimeRepair context hint = %+v, want map", item.ContextHints["runtimeRepair"])
 	}
 	assertStringListContains(t, runtimeRepair["prerequisiteManifestTargetPatterns"].([]any), "go.mod")
+	assertStringListContains(t, runtimeRepair["prerequisiteManifestTargetPatterns"].([]any), "go.sum")
 	assertStringListContains(t, runtimeRepair["prerequisiteManifestTargetPatterns"].([]any), "package.json")
 	versionControl, ok := item.ContextHints["versionControl"].(map[string]any)
 	if !ok {
@@ -942,6 +943,7 @@ func assertSoftwareDevAcceptanceDimensions(t *testing.T, hints map[string]any) {
 					}
 					assertStringListContains(t, repair["triggerDiagnosticClasses"].([]any), "implementation_gap_detected")
 					assertStringListContains(t, repair["triggerDiagnosticClasses"].([]any), "validation_build_failed")
+					assertStringListContains(t, repair["triggerDiagnosticClasses"].([]any), "validation_dependency_mismatch")
 					assertStringListContains(t, repair["triggerDiagnosticClasses"].([]any), "validation_test_failed")
 					assertStringListContains(t, repair["repairOperationKinds"].([]any), "file/write")
 					assertStringListContains(t, repair["repairOperationKinds"].([]any), "patch/apply")

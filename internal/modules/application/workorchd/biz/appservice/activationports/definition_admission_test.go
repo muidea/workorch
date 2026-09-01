@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	magicevent "github.com/muidea/magicCommon/event"
+	activationcore "github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/activationcore"
 	definitionadmission "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/definitionadmission"
 	workspaceevents "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/events"
 	workspacemodel "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/models"
@@ -70,9 +71,38 @@ func TestBuiltinSoftwareDevProfilePassesDefinitionAdmissionBeforeRun(t *testing.
 		!parsedRepair.RequireFreshValidation || parsedRepair.MaxAttempts != 2 {
 		t.Fatalf("builtin software-dev repair convergence was not parsed into the admission candidate: %+v", parsedRepair)
 	}
+	if !parsedRepair.MatchesTrigger(runtimecontract.RuntimeModuleShell, runtimecontract.RuntimeBlockKindManagedValidationSession, runtimecontract.ValidationDiagnosticDependencyMismatch) {
+		t.Fatalf("builtin software-dev repair convergence does not admit the Shell dependency-contract diagnostic: %+v", parsedRepair)
+	}
 	result, err := definitionadmission.Compile(candidate)
 	if err != nil || result.Disposition != workspacemodel.DefinitionAdmissionAdmittedAllOf {
 		t.Fatalf("builtin software-dev admission = %+v err=%v", result, err)
+	}
+	executionContract := runtimeExecutionContract(builtin.ContextHints.Map())
+	executionContract.ProfileContracts = runtimecontract.NormalizeRuntimeProfileContracts(candidate.RuntimeProfileContracts)
+	bootstrap, err := activationcore.RuntimeBootstrap(goal, dod, "definition-builtin-r1", "startup-input-builtin-r1", nil, runtimecontract.RuntimeActivationContext{
+		ProviderSelection: runtimecontract.ProviderInferenceSelection{Target: runtimecontract.ProviderModelTarget{ProviderID: "test-provider", ModelID: "test-model"}},
+		ExecutionContract: executionContract,
+	})
+	if err != nil {
+		t.Fatalf("compile admitted builtin software-dev bootstrap: %v", err)
+	}
+	compiledRepairFound := false
+	for _, focus := range bootstrap.DefinitionFocuses {
+		if focus.AssessmentScope != "dodItem" || focus.ValidationFailureRepairConvergence == nil {
+			continue
+		}
+		compiledRepairFound = focus.ValidationFailureRepairConvergence.MatchesTrigger(
+			runtimecontract.RuntimeModuleShell,
+			runtimecontract.RuntimeBlockKindManagedValidationSession,
+			runtimecontract.ValidationDiagnosticDependencyMismatch,
+		)
+		if compiledRepairFound {
+			break
+		}
+	}
+	if !compiledRepairFound {
+		t.Fatalf("admitted software-dev bootstrap lost dependency-contract repair convergence: %+v", bootstrap.DefinitionFocuses)
 	}
 }
 

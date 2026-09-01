@@ -27,7 +27,8 @@ and converges through the same neutral Runtime owner model. It must not make leg
 - DoD validation preparation seals the exact prospective-satisfaction contract ref; missing/extra/drifted ref or use on a
   non-prospective policy fails pre-seal and creates no Run/provider/capability work;
 - each repair-enabled DoD requirement seals one validation-failure convergence, never an alternative list: exact Shell trigger
-  and diagnostic classes, File state-change owner/kinds, separate declaration/operation selectors, prospective policy, fresh
+  and diagnostic classes (including `validation_dependency_mismatch` for the declared dependency-contract repair surface), File
+  state-change owner/kinds, separate declaration/operation selectors, prospective policy, fresh
   validation requirement and bounded cycles. Unknown diagnostics, cross-owner kinds, non-state-change evidence, incomplete
   selectors, disabled fresh validation or an out-of-range bound fail pre-seal and create no Run/provider/capability work;
 - `source_change` uses the broad `workspace_delivery_change` role; wildcard DoD terminal validation and its repair surface retain
